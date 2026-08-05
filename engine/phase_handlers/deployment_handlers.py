@@ -477,11 +477,28 @@ def erode_pool_by_block_offsets(
     if not offsets:
         return {(int(c), int(r)) for c, r in pool_set}
 
-    anchors_xz = [(x, z) for x, _y, z in (offset_to_cube(int(c), int(r)) for c, r in pool_set)]
-    ax_min = min(x for x, _ in anchors_xz)
-    ax_max = max(x for x, _ in anchors_xz)
-    az_min = min(z for _, z in anchors_xz)
-    az_max = max(z for _, z in anchors_xz)
+    # Bornes des ancres en UNE passe. La liste intermédiaire des ~60 000 couples n'avait aucun
+    # autre lecteur que ces quatre extrema, et quatre `min`/`max` la reparcouraient : 27,9 ms
+    # contre 6,7 ms ici, par appel d'érosion — et cette fonction est appelée une fois par niveau.
+    # `pool_set` est non vide (garde ci-dessus) : la 1re ancre amorce les quatre bornes, pas de
+    # sentinelle ni de branche par itération.
+    _pool_iter = iter(pool_set)
+    _c0, _r0 = next(_pool_iter)
+    _x0, _y0, _z0 = offset_to_cube(int(_c0), int(_r0))
+    ax_min = ax_max = _x0
+    az_min = az_max = _z0
+    for c, r in _pool_iter:
+        x, _y, z = offset_to_cube(int(c), int(r))
+        # `elif` légitime : `ax_min <= ax_max`, donc une ancre sous le min ne peut pas dépasser
+        # le max. Même raisonnement sur z.
+        if x < ax_min:
+            ax_min = x
+        elif x > ax_max:
+            ax_max = x
+        if z < az_min:
+            az_min = z
+        elif z > az_max:
+            az_max = z
     # La grille couvre TOUTES les cases lisibles : l'ancre la plus extrême translatée par l'offset
     # le plus extrême. Elle n'est PAS bornée à la boîte de `allowed` — une ancre en dehors de
     # celle-ci reste une ancre valide dès lors que l'objet, lui, retombe dans `allowed` (offsets
@@ -606,11 +623,6 @@ def deployment_build_model_destinations_pool(
     # d'occupation l'était encore), et fait vivre la même condition à quatre endroits.
     _upper_reachable = level >= 1 and _can_climb and bool(floor_hexes)
     _levels = (0, level) if _upper_reachable else (0,)
-    # Occupation des unités déployées PAR NIVEAU effectif possible d'une candidate — plus d'union
-    # tous-niveaux (bug : une fig à l'étage bloquait le sol dessous).
-    occ_by_level: Dict[int, Set[Tuple[int, int]]] = {
-        lv: _deployed_occupied_positions(game_state, squad_id, level=lv) for lv in _levels
-    }
 
     # Positions provisoires + niveau EFFECTIF des AUTRES figs de l'escouade (collision intra-squad,
     # même dérivation par position que le preview). provisional_plan override les positions des
@@ -664,14 +676,24 @@ def deployment_build_model_destinations_pool(
     # Mesuré sur l'aire d'arrivée Deep Strike : 1,6 s de `any` par case avant ce filtrage.
     # Les coordonnées du pool sont déjà normalisées `(int, int)` par `_deploy_pool_set` : la
     # soustraction d'ensembles fait donc le même travail que la comprehension qui les recastait.
+    #
+    # Les murs sont retirés UNE FOIS, hors de la boucle : ils ne dépendent pas du niveau, alors que
+    # l'occupation et les sœurs en dépendent. Les refaire par niveau réallouait un ensemble de
+    # ~60 000 tuples pour rien — mesuré 12,7 ms par appel à `level >= 1`. Associativité de la
+    # différence : `(pool − occ − sœurs − lc) − murs == (pool − murs) − occ − sœurs − lc`.
+    # L'occupation déployée est lue ICI, à son unique consommateur, et non pré-calculée dans un
+    # dict par niveau : c'est ce producteur-là qui s'était désynchronisé des niveaux réellement
+    # atteignables. Il ne peut plus, il itère `_levels`.
+    pool_free = pool_set - wall_hexes
     kept_by_level: Dict[int, Set[Tuple[int, int]]] = {}
     for lv in _levels:
-        allowed = pool_set - occ_by_level[lv] - same_squad_by_level.get(lv, set())
+        # Occupation des unités déployées AU NIVEAU EFFECTIF de la candidate — plus d'union
+        # tous-niveaux (bug : une fig à l'étage bloquait le sol dessous).
+        allowed = pool_free - _deployed_occupied_positions(game_state, squad_id, level=lv)
+        allowed -= same_squad_by_level.get(lv, set())
         if lv == 0 and _low_clear and not _m_round:
-            allowed = allowed - _low_clear
-        kept_by_level[lv] = erode_pool_by_block_offsets(
-            pool_set, fp_offsets, allowed=allowed - wall_hexes
-        )
+            allowed -= _low_clear
+        kept_by_level[lv] = erode_pool_by_block_offsets(pool_set, fp_offsets, allowed=allowed)
     # Le niveau effectif d'une candidate n'est PAS connu d'avance : il vaut le niveau de vue si
     # l'empreinte tient entièrement sur le plancher (§13.06 euclidien), sinon le sol.
     #
