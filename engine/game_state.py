@@ -3912,18 +3912,36 @@ def expire_faction_abilities_for_player(game_state: Dict[str, Any], player: int)
 
     `waaagh_called` n'est PAS remis à False : il porte le « once per battle », pas la durée.
 
-    Purge AUSSI une désignation restée en attente pour ce joueur. Elle ne devrait pas exister —
-    08.04 la repose juste après — mais si un tour précédent s'est terminé sans qu'elle soit
-    jouée (siège sans décideur, partie rechargée), la laisser vivre ferait poser la nouvelle
-    par-dessus l'ancienne : `pending_oath_selection` serait alors vraie sans que personne ne
-    sache de quel tour elle date, et la phase resterait arrêtée sur un choix périmé.
+    Purge AUSSI les décisions de 08.04 restées en attente pour ce joueur — LES DEUX, et c'est
+    le point important. Elles ne devraient pas exister (08.04 les repose juste après), mais si
+    un tour précédent s'est terminé sans qu'elles soient jouées (siège sans décideur, partie
+    rechargée), les laisser vivre est fatal de deux façons distinctes :
+
+      - `pending_oath_selection` : la nouvelle désignation se poserait par-dessus l'ancienne,
+        et la phase resterait arrêtée sur un choix dont personne ne sait de quel tour il date ;
+      - `pending_agent_decision` de type `waaagh_call` : `set_pending_agent_decision` LÈVE quand
+        une décision est déjà en attente. La phase de commandement ne se contenterait pas de
+        rester bloquée, elle CRASHERAIT — et c'est le jumeau que la première version de cette
+        purge avait oublié (`/code-review` du 2026-08-05, finding 3).
+
+    Une décision d'un AUTRE type (`rule_choice`) n'est pas touchée : elle n'appartient pas à
+    08.04, elle a son propre cycle de vie (`pending_rule_choice_queue`).
     """
+    from engine.agent_decision import clear_pending_agent_decision, read_pending_agent_decision
+
     player_int = int(player)
     _player_flag_map(game_state, "waaagh_active")[player_int] = False
     _player_flag_map(game_state, "oath_target")[player_int] = None
     pending_oath = game_state.get("pending_oath_selection")  # get allowed : None = aucune
     if pending_oath is not None and int(pending_oath) == player_int:
         game_state["pending_oath_selection"] = None
+    pending_decision = read_pending_agent_decision(game_state)
+    if (
+        pending_decision is not None
+        and str(require_key(pending_decision, "type")) == "waaagh_call"
+        and int(require_key(pending_decision, "player")) == player_int
+    ):
+        clear_pending_agent_decision(game_state)
 
 
 def oath_wound_bonus_applies(game_state: Dict[str, Any], player: int) -> bool:

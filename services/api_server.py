@@ -38,7 +38,7 @@ from main import load_config
 from shared.data_validation import require_key
 from engine.combat_utils import resolve_dice_value, set_unit_coordinates
 from engine.phase_handlers.shared_utils import build_units_cache, rebuild_choice_timing_index, _is_character_role
-from engine.phase_handlers import movement_handlers, deployment_handlers
+from engine.phase_handlers import command_handlers, movement_handlers, deployment_handlers
 from engine.hex_utils import expand_wall_group_to_hex_list
 from services.endless_duty_runtime import (
     ED_MODE_CODE,
@@ -2564,10 +2564,18 @@ def start_game():
                 if engine.start_command_phase().get("phase_complete"):  # get allowed
                     movement_handlers.movement_phase_start(gs)
                 break
-        gs["current_player"] = 2
-        gs["turn"] = 1
-        if engine.start_command_phase().get("phase_complete"):  # get allowed
-            movement_handlers.movement_phase_start(gs)
+        # BASCULE VERS LE JOUEUR 2 — sous condition, et ce n'est pas une precaution.
+        # Le `break` ci-dessus sort de la boucle mais tombe ICI : sans garde, la phase de
+        # commandement qui vient de s'arreter sur une decision du joueur 1 est immediatement
+        # ecrasee. La decision reste posee sans que personne ne puisse y repondre (on joue
+        # desormais le tour de 2), l'overlay bloque le plateau — et si les DEUX armees portent
+        # une capacite de faction, la seconde pose LEVE dans `set_pending_agent_decision`,
+        # donc un 500 sur `/api/game/start`.
+        if not command_handlers.faction_decision_is_pending(gs):
+            gs["current_player"] = 2
+            gs["turn"] = 1
+            if engine.start_command_phase().get("phase_complete"):  # get allowed
+                movement_handlers.movement_phase_start(gs)
 
     # Snapshots temporels : réinitialiser l'historique et capturer + auto-sauver l'état de départ (PvP).
     _SNAPSHOT_STORE.reset()

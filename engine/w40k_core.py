@@ -3964,6 +3964,17 @@ class W40KEngine(gym.Env):
         if action.get("action") == "select_rule_choice":
             return self._handle_select_rule_choice_action(action)
 
+        # Capacités de faction (chantier 03) — MÊME rang, et c'est le chemin de l'UI PvP.
+        # `_process_squad_action` les routait déjà pour le gym ; ici passe TOUT ce que le
+        # frontend envoie (`execute_semantic_action`). Sans ces deux lignes, l'action tombait
+        # dans `_process_command_phase` → `command_handlers.execute_action`, qui l'ignore et rend
+        # `command_phase_end()` : le clic sautait à la phase de mouvement sans rien appliquer, et
+        # la désignation restait posée — donc l'overlay bloquait le plateau pour de bon.
+        if action.get("action") == "agent_decision":
+            return self._handle_agent_decision_action(action)
+        if action.get("action") == "select_oath_target":
+            return self._handle_select_oath_target_action(action)
+
         # TEST/DEBUG : force un battle-shock roll (01.07) sur une unité, hors séquence de jeu.
         # Permet de tester le Desperate Escape (09.07) en rendant une unité battle-shocked à la demande.
         if action.get("action") == "force_battle_shock":

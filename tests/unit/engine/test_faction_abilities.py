@@ -952,7 +952,13 @@ def test_le_cycle_pvp_complet_s_arrete_puis_repart(tmp_path) -> None:
     )
 
     cible = next(str(u["id"]) for u in gs["units"] if int(u["player"]) == 2)
-    ok, out = engine._process_squad_action({"action": "select_oath_target", "unitId": cible})
+    # `execute_semantic_action` — LE point d'entrée du frontend (`/api/game/action` y aboutit),
+    # et PAS `_process_squad_action`, qui est celui du gym. La première version de ce test
+    # exerçait le second : elle passait au vert sur un chemin que le widget n'emprunte jamais,
+    # pendant que le vrai tombait dans `_process_command_phase` et sautait à la phase de
+    # mouvement sans rien appliquer. « Code testé mais jamais appelé » — dans le test censé
+    # fermer ce motif-là (`/code-review` du 2026-08-05, finding 1).
+    ok, out = engine.execute_semantic_action({"action": "select_oath_target", "unitId": cible})
 
     assert ok, "l'action que le widget envoie n'est pas routee par le moteur"
     assert gs["oath_target"][1] == cible
@@ -960,3 +966,70 @@ def test_le_cycle_pvp_complet_s_arrete_puis_repart(tmp_path) -> None:
     assert out.get("phase_complete") is True, (
         "la phase ne repart pas : la partie resterait bloquee apres la designation"
     )
+
+
+def test_le_waaagh_passe_aussi_par_le_chemin_de_l_ui() -> None:
+    """JUMEAU du cycle PvP, côté Waaagh! : `execute_semantic_action` doit router `agent_decision`.
+
+    Les deux actions ont été ajoutées ensemble et oubliées ensemble sur le chemin humain. Tester
+    la seule désignation d'Oath laisserait la moitié orke retomber dans
+    `_process_command_phase`, qui ignore l'action et rend `command_phase_end()` : le clic
+    sauterait à la phase de mouvement sans que le Waaagh! soit appelé.
+    """
+    gs = _command_state(1, p1_faction=ORKS, p2_faction=ASTARTES)
+    engine = _engine(gs)
+    gs["player_types"] = {"1": "human", "2": "human"}
+    engine.gym_training_mode = True  # le siège ne doit pas être tranché par la politique interne
+    command_handlers.command_step_command_abilities(gs)
+    assert read_pending_agent_decision(gs) is not None
+
+    ok, _out = engine.execute_semantic_action({"action": "agent_decision", "option_index": 0})
+
+    assert ok, "`agent_decision` n'est pas routee sur le chemin du frontend"
+    assert waaagh_is_active(gs, 1) is True
+    assert read_pending_agent_decision(gs) is None
+
+
+def test_l_expiration_purge_aussi_un_waaagh_reste_en_attente() -> None:
+    """FINDING 3 : le jumeau oublié. Une décision `waaagh_call` survivante FAIT CRASHER 08.04.
+
+    `set_pending_agent_decision` lève quand une décision est déjà en attente : la phase de
+    commandement suivante ne resterait pas bloquée, elle planterait. Le cas visé est celui que
+    la docstring de l'expiration revendique — siège sans décideur, partie rechargée.
+    """
+    gs = _command_state(1, p1_faction=ORKS, p2_faction=ASTARTES)
+    command_handlers.command_step_command_abilities(gs)
+    assert read_pending_agent_decision(gs) is not None
+
+    # Le tour du joueur 1 revient sans que la décision ait été jouée.
+    expire_faction_abilities_for_player(gs, 2)
+    assert read_pending_agent_decision(gs) is not None, "expirer 2 ne touche pas la decision de 1"
+    expire_faction_abilities_for_player(gs, 1)
+    assert read_pending_agent_decision(gs) is None
+
+    # Et 08.04 peut la reposer au lieu de lever.
+    command_handlers.command_step_command_abilities(gs)
+    assert read_pending_agent_decision(gs) is not None
+
+
+def test_le_demarrage_pvp_ne_bascule_pas_sur_une_decision_en_attente() -> None:
+    """FINDING 2 : `/api/game/start` écrasait la phase arrêtée en forçant le joueur 2.
+
+    Le contrôle porte sur la SOURCE : le second `start_command_phase()` du bloc d'auto-déploiement
+    doit être gardé par `faction_decision_is_pending`. Monter un vrai serveur Flask pour ce seul
+    fait coûterait bien plus que ce qu'il rapporte, et le défaut est structurel — c'est la
+    ligne qui manque, pas un cas de jeu particulier.
+    """
+    import inspect
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parents[3] / "services" / "api_server.py").read_text(
+        encoding="utf-8"
+    )
+    bascule = source.index('gs["current_player"] = 2')
+    garde = source.rindex("faction_decision_is_pending", 0, bascule)
+    assert bascule - garde < 800, (
+        "la bascule vers le joueur 2 n'est plus gardee par `faction_decision_is_pending` : "
+        "une decision du joueur 1 serait orphelinee au demarrage de la partie"
+    )
+    _ = inspect
