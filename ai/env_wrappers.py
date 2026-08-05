@@ -616,6 +616,19 @@ class BotControlledEnv(gym.Wrapper):
             ):
                 # Command phase: no eligible units but zone intent actions are valid.
                 # Current player owns the decision.
+                #
+                # ⚠️ CE SITE NE CONSULTE PAS `_PLAYER_CHOICE_MECHANISMS`, et c'est correct
+                # AUJOURD'HUI par deux propriétés qui ne sont écrites nulle part ailleurs — deux
+                # revues successives ont dû les re-dériver, d'où cette note :
+                #   1. une désignation d'Oath n'existe qu'en phase `command` (posée par
+                #      `command_handlers`), donc elle tombe forcément dans cette branche ;
+                #   2. elle est toujours posée SUR `current_player` — le propriétaire rendu ici est
+                #      donc bien le sien, même si le masque n'ouvre alors que les `OATH_SLOTS` et
+                #      aucune action de zone, contrairement à ce que dit le commentaire ci-dessus.
+                # Un TROISIÈME mécanisme de choix qui ne serait pas détenu par `current_player`, ou
+                # qui vivrait hors phase `command`, casserait ce raisonnement en silence :
+                # `decision_owner` vaudrait `None` et l'appelant forcerait un `ACTION_WAIT` hors
+                # masque. Ajouter alors la lecture de la table ici, comme aux quatre autres sites.
                 current_player = int(require_key(self.engine.game_state, "current_player"))
                 return MaskDecision(current_player, action_mask, eligible_units)
             return MaskDecision(None, action_mask, eligible_units)

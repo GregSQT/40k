@@ -511,6 +511,14 @@ def erode_pool_by_block_offsets_multi(
         whole_pool = {(int(c), int(r)) for c, r in pool_set}
         return [set(whole_pool) if res is None else res for res in results]
 
+    if all(res is not None for res in results):
+        # TOUS les ensembles acceptables sont vides : plus rien à éroder. La version à un seul
+        # argument sortait ici, AVANT de toucher au pool ; sans cette garde, la passe de bornes
+        # ci-dessous parcourrait les ~66 000 ancres pour rien. Rare (il faut que la zone entière
+        # soit bloquée) mais gratuit à éviter, et ça garde les deux versions équivalentes jusque
+        # dans leurs sorties anticipées.
+        return [res for res in results if res is not None]
+
     # ---- Travail qui ne dépend QUE du pool et des offsets : fait UNE fois ---------------------
     # Bornes des ancres en UNE passe. La liste intermédiaire des ~60 000 couples n'avait aucun
     # autre lecteur que quatre extrema, et quatre `min`/`max` la reparcouraient (27,9 ms contre
