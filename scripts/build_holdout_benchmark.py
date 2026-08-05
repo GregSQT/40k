@@ -116,6 +116,10 @@ def _build_scenarios(
         # board_ref résout le board hors dossier 'scenario/'. Zéro clé legacy.
         scenario_payload = {
             "deployment_type": "active",
+            # Clause de detachement d'Oath of Moment : champ OBLIGATOIRE des qu'une armee
+            # ADEPTUS ASTARTES est en jeu (`game_state.uses_codex_detachment` leve sinon).
+            # Sans lui, une regeneration effacerait la cle des scenario_bot-NN.json commites.
+            "uses_codex_detachment": {"1": True, "2": True},
             "scale": scale,
             "agent_roster_seed": None,
             "agent_roster_ref": f"{split}/{agent_roster.name}",

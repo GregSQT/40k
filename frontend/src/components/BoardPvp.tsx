@@ -4536,12 +4536,12 @@ export default function Board({
   }, [
     phase,
     mode,
+    isDeploymentMove,
     selectedUnitId,
     boardConfig,
     gameState?.units_cache,
     current_player,
     deployPlan?.placed,
-    isDeploymentMove,
   ]);
 
   // Déploiement — suivi du bloc (mode following) : le bloc entier suit le curseur en continu.
@@ -10943,7 +10943,8 @@ export default function Board({
       const ds = gameState.deployment_state;
       let deployPool: Set<string> | null = null;
       if (ds) {
-        const poolRaw = ds.deployment_pools?.[String(ds.current_deployer)];
+        // Zones à la RACINE du game_state : elles ne dépendent pas de la phase (cf. DeploymentPools).
+        const poolRaw = gameState.deployment_pools?.[String(ds.current_deployer)];
         if (poolRaw && Array.isArray(poolRaw)) {
           deployPool = new Set<string>();
           for (const entry of poolRaw) {

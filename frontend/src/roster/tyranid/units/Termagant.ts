@@ -38,6 +38,9 @@ export class Termagant extends SwarmRangeSwarm {
     { keywordId: "termagant" },
   ];
 
+  // FACTION KEYWORDS
+  static FACTION_KEYWORDS = [{ keywordId: "TYRANIDS" }];
+
   static ICON = "/icons/Termagant.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = 11; // Size of the base

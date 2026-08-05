@@ -329,7 +329,13 @@ def test_squads_stay_coherent_on_the_real_scenario(board_x1) -> None:
         engine.reset(seed=seed)
         state = engine.game_state
         assert state["deployment_mode_schedule_mode"] == "fixed", f"seed {seed}: mode non imposé"
-        cells = [(m["col"], m["row"]) for m in state["models_cache"].values()]
+        # Les figurines HORS TABLE (réserves 20.01, tirage `training_random`) partagent toutes la
+        # sentinelle (-1,-1) : les compter ferait voir une superposition là où il n'y a
+        # simplement pas de position. Le relayout mesuré ici ne concerne que les figurines posées.
+        cells = [
+            (m["col"], m["row"]) for m in state["models_cache"].values() if int(m["col"]) >= 0
+        ]
+        assert cells, f"seed {seed}: aucune figurine posée — le relayout n'est pas observé"
         assert len(cells) == len(set(cells)), f"seed {seed}: figurines superposées"
         incoherent = [
             sid for sid in state["squad_models"] if not validate_squad_coherency(state, str(sid))

@@ -1,4 +1,5 @@
 {
+  "uses_codex_detachment": { "1": true, "2": true },
   "_comment": "Validation convergence melee (FIGHT_RESOLVER_CONVERGENCE.md 7.2) : cible = unite ATTACHEE. Bodyguard Intercessor (T4/Sv3/Inv7) + Captain (Power Weapon, Bolter) attache (T4/Sv3/Inv7, role leader). Appariement LEGAL 19.01 (CaptainPowerWeaponBolter.CAN_LEAD couvre 'intercessor squad'). Verifie wound vs plus haute T bodyguard=T4 (19.02) et save par figurine allouee. NB : aucun appariement legal du roster n'a leader-T != bodyguard-T (les captains menant une intercessor squad sont T4 comme elle), la discrimination leader-T vs bodyguard-T de 19.02 est verrouillee par un test moteur dedie, pas par ce fixture.",
   "primary_objectives": [
     "objectives_control"

@@ -5279,6 +5279,7 @@ def _hex_legal_for_charge(
     squad_id: str,
     model_entry: Dict[str, Any],
     non_target_enemy_entries: List[Dict[str, Any]],
+    occupied_by_others: Set[Tuple[int, int]],
 ) -> bool:
     """Cellule valide pour le placement d une figurine en cours de charge :
        - dans le plateau
@@ -5294,13 +5295,13 @@ def _hex_legal_for_charge(
     cell = (col, row)
     if wall_hexes and cell in wall_hexes:
         return False
-    # Collision : autres escouades (sauf nous-meme)
-    # Cache absent : un `{}` de repli vidait l'énumération de collision, donc toute cellule
-    # devenait libre — un verdict inventé, sans bruit.
-    units_cache = require_key(game_state, "units_cache")
-    for _sid, entry in entries_on_battlefield(units_cache, exclude_id=squad_id):
-        if cell in entry_footprint(entry):
-            return False
+    # Collision : autres escouades (sauf nous-meme). `occupied_by_others` est l'UNION des
+    # empreintes, un PARAMÈTRE construit une fois par l'appelant — même raison que
+    # `non_target_enemy_entries` ci-dessous : la réénumérer par cellule reconstruisait
+    # l'empreinte de chaque escouade du plateau pour répondre « occupée ? ». Strictement
+    # équivalent : `cell ∈ union(empreintes)` ⟺ `∃ empreinte, cell ∈ empreinte`.
+    if cell in occupied_by_others:
+        return False
     # ER des escouades non-cibles (bord-a-bord) : la figurine candidate ne doit pas
     # finir dans l ER d un ennemi NON-cible.
     # ``non_target_enemy_entries`` est un PARAMÈTRE, pas une énumération locale : cette fonction
@@ -5394,7 +5395,10 @@ def charge_build_valid_plan(
         return None
     models_cache = require_key(game_state, "models_cache")
     squad_models = require_key(game_state, "squad_models")
-    units_cache = game_state.get("units_cache", {})  # get allowed
+    # `require_key` et non un `.get(..., {})` : `charge_check_eligibility`, appelée juste au-dessus,
+    # exige déjà la clé — le repli était mort, et il aurait vidé l'union de collision construite
+    # plus bas, donc rendu TOUTE cellule libre sans le moindre bruit.
+    units_cache = require_key(game_state, "units_cache")
     mids = [m for m in squad_models.get(squad_id, []) if m in models_cache]  # get allowed
     if not mids:
         return None
@@ -5431,6 +5435,10 @@ def charge_build_valid_plan(
     # réénumérait à chaque cellule de BFS. `_enemy_squad_ids` n'énumère que des ids lus dans
     # `units_cache`, donc une absence est une désynchronisation (d'où le `require`), pas un
     # ennemi disparu.
+    # Union des cases occupées par les AUTRES escouades, résolue une seule fois : invariante sur
+    # tout le plan (`units_cache` n'est pas muté entre ici et la fin des BFS ; les cellules
+    # réservées par le plan en cours sont suivies à part, par `occupied_after`).
+    _occupied_by_others = build_occupied_positions_set(game_state, exclude_unit_id=str(squad_id))
     _declared_targets = {str(t) for t in target_squad_ids}
     _non_target_enemies = [
         require_unit_from_cache(esid, game_state, "charge_build_valid_plan/enemy")
@@ -5546,7 +5554,9 @@ def charge_build_valid_plan(
             d_orig = calculate_hex_distance(orig_col, orig_row, nc, nr)
             if min(calculate_hex_distance(nc, nr, tc, tr) for tc, tr in target_positions) >= orig_dist_to_tgt:
                 continue
-            if not _hex_legal_for_charge(nc, nr, game_state, squad_id, m, _non_target_enemies):
+            if not _hex_legal_for_charge(
+                nc, nr, game_state, squad_id, m, _non_target_enemies, _occupied_by_others
+            ):
                 continue
             synth = _synth_model_entry(game_state, str(squad_id), m, nc, nr)
             if not any(unit_entries_within_engagement_zone(synth, te, ez) for te in target_entries):
@@ -5591,7 +5601,10 @@ def charge_build_valid_plan(
                         # un mur.
                         if not _reachable(nc, nr):
                             continue
-                        if not _hex_legal_for_charge(nc, nr, game_state, squad_id, m, _non_target_enemies):
+                        if not _hex_legal_for_charge(
+                            nc, nr, game_state, squad_id, m, _non_target_enemies,
+                            _occupied_by_others,
+                        ):
                             continue
                         cand_d = calculate_hex_distance(nc, nr, tc, tr)
                         if cand_d >= orig_dist_to_tgt:
@@ -7744,9 +7757,20 @@ def _build_alloc_groups(game_state: Dict[str, Any], target_sid: str) -> List[Dic
     """Groupes d allocation 40k (05.03) : 1 par CHARACTER, 1 par triplet (W,Sv,InSv)
     pour le reste. Non-characters d abord (ordre de decouverte), puis characters.
     group_id = index de creation (stable)."""
+    from engine.game_state import effective_invul_save  # import paresseux : cycle, cf. plus haut
+
     models_cache = require_key(game_state, "models_cache")
     squad_models = require_key(game_state, "squad_models")
     alive = [m for m in squad_models.get(target_sid, []) if m in models_cache]  # get allowed
+    # Waaagh! (chantier 03) : `InSv` affiche au defenseur DOIT etre celui que
+    # `_resolve_one_manual_wound` comparera. Les afficher differents ferait choisir une
+    # allocation sur une sauvegarde qui n existe pas.
+    _target_unit = get_unit_by_id(game_state, str(target_sid))
+
+    def _insv(entry: Dict[str, Any]) -> int:
+        raw = int(require_key(entry, "INVUL_SAVE"))
+        return raw if _target_unit is None else effective_invul_save(game_state, _target_unit, raw)
+
     non_char: Dict[tuple, List[str]] = {}
     non_char_order: List[tuple] = []
     char_models: List[str] = []
@@ -7757,7 +7781,7 @@ def _build_alloc_groups(game_state: Dict[str, Any], target_sid: str) -> List[Dic
             continue
         # `INVUL_SAVE` est TOUJOURS porte par la figurine : « pas de sauvegarde invulnerable »
         # s ecrit 7 DANS LA DONNEE (179/179 datasheets), ce n est pas un defaut de lecture.
-        key = (int(e["HP_MAX"]), int(e["ARMOR_SAVE"]), int(require_key(e, "INVUL_SAVE")))
+        key = (int(e["HP_MAX"]), int(e["ARMOR_SAVE"]), _insv(e))
         if key not in non_char:
             non_char[key] = []
             non_char_order.append(key)
@@ -7780,7 +7804,7 @@ def _build_alloc_groups(game_state: Dict[str, Any], target_sid: str) -> List[Dic
             "group_id": len(groups), "is_character": True, "role": e.get("role"),
             "unit_type": e.get("unitType"),  # get allowed
             "W": int(e["HP_MAX"]), "Sv": int(e["ARMOR_SAVE"]),
-            "InSv": int(require_key(e, "INVUL_SAVE")),
+            "InSv": _insv(e),
             "model_ids": [m],
         })
     return groups
@@ -8154,16 +8178,42 @@ def _manual_roll_intent(
                 ap = ap - 1
     # Conforme 19.02 : seuil de blessure vs plus haute T bodyguard (depend de l arme via strength).
     wth = wound_threshold(strength, _target_highest_bodyguard_toughness(game_state, target_sid))
+    # Import PARESSEUX : `engine.game_state` importe ce module au niveau module (is_unit_alive,
+    # compute_unit_rules_in_effect). L importer ici en tete creerait un cycle.
+    from engine.game_state import (
+        effective_invul_save, oath_wound_roll_bonus, unit_is_oath_target_of,
+    )
+
+    target_unit = get_unit_by_id(game_state, str(target_sid))
+    # Oath of Moment (chantier 03) : « add 1 to the Wound roll » contre la cible designee.
+    # JUMEAU EXACT du site de melee (`fight_handlers._manual_roll_fight_intent`), y compris la
+    # modelisation par abaissement du seuil et le plancher a 2 — cf. le commentaire la-bas.
+    # `unit_is_oath_target_of` UNE fois : la relance de touche et le +1 Wound posent la MÊME
+    # question (« cette attaque vise ma cible d'Oath ? »), et elle etait evaluee deux fois par
+    # intent avec les memes arguments. Le +1 Wound y ajoute seulement la clause de detachement.
+    _is_oath_target = attacker_unit is not None and unit_is_oath_target_of(
+        game_state, attacker_unit, str(target_sid)
+    )
+    _oath_wound_bonus = (
+        oath_wound_roll_bonus(game_state, attacker_unit, str(target_sid))
+        if _is_oath_target and attacker_unit is not None else 0
+    )
+    if _oath_wound_bonus:
+        wth = max(2, wth - _oath_wound_bonus)
     first_alive = models_cache[alive0[0]]
     display_wth = wth
     display_save_th = save_threshold(
-        int(first_alive["ARMOR_SAVE"]), int(require_key(first_alive, "INVUL_SAVE")), ap
+        int(first_alive["ARMOR_SAVE"]),
+        # Waaagh! : la cible peut avoir une invulnerable 5+ absente de sa datasheet. Le seuil
+        # d AFFICHAGE doit dire ce que la resolution appliquera (`_resolve_one_manual_wound`).
+        effective_invul_save(game_state, target_unit, int(require_key(first_alive, "INVUL_SAVE")))
+        if target_unit is not None else int(require_key(first_alive, "INVUL_SAVE")),
+        ap,
     )
     weapon_name = weapon.get("display_name", weapon.get("NAME", weapon.get("name", "")))  # get allowed
     # Rerolls to-wound au TIR (abilities UNITE, constantes pour l intent) — miroir exact du
     # fight (_manual_roll_fight_intent) : reroll_1_towound = reroll d un dé de blessure = 1 ;
     # reroll_towound_target_on_objective = reroll de tout échec si la cible est sur objectif.
-    target_unit = get_unit_by_id(game_state, str(target_sid))
     reroll_wound1 = attacker_unit is not None and _unit_has_rule_effect(attacker_unit, "reroll_1_towound")
     reroll_wound_obj = (
         attacker_unit is not None
@@ -8186,7 +8236,16 @@ def _manual_roll_intent(
         wound_target=wth,
         save_threshold_value=display_save_th,
         profile=build_weapon_attack_profile(weapon, target_unit),
-        rerolls=RerollProfile(wound_1=reroll_wound1, wound_any_fail=reroll_wound_obj),
+        rerolls=RerollProfile(
+            # Oath of Moment : « You can re-roll the Hit roll » contre la cible designee.
+            # JUMEAU du site de melee — c est le motif d echec n°1 du depot : une relance
+            # cablee au tir seulement ferait de la mitraille orke un cas particulier silencieux.
+            # « You can re-roll the Hit roll » : INCONDITIONNELLE des que la cible est la bonne
+            # — ni le detachement ni les sous-factions ne la touchent, contrairement au +1 Wound.
+            hit_any_fail=_is_oath_target,
+            wound_1=reroll_wound1,
+            wound_any_fail=reroll_wound_obj,
+        ),
         roll_d6=lambda: random.randint(1, 6),
     )
     # Nom de l ABILITE qui a ouvert chaque relance de blessure. Le socle rend la CAUSE
@@ -8198,8 +8257,20 @@ def _manual_roll_intent(
         "wound_1": "reroll_1_towound" if reroll_wound1 else None,
         "wound_any_fail": "reroll_towound_target_on_objective" if reroll_wound_obj else None,
     }
+    # JUMEAU cote TOUCHE : meme forme, meme raison. `hitRerollCause` est CONSOMMEE ici et
+    # remplacee par le nom d affichage, exactement comme `woundRerollCause` juste en dessous.
+    _hit_ability_by_cause: Dict[str, Optional[str]] = {}
     _ability_by_cause: Dict[str, Optional[str]] = {}
     for _rec in rolled["shot_records"]:
+        _hit_cause = _rec.pop("hitRerollCause", None)  # get allowed
+        if _hit_cause:
+            if _hit_cause not in _hit_ability_by_cause:
+                _hit_ability_by_cause[_hit_cause] = resolve_hit_reroll_ability(
+                    attacker_unit, _hit_cause
+                )
+            _hit_ability = _hit_ability_by_cause[_hit_cause]
+            if _hit_ability:
+                _rec["hitAbility"] = str(_hit_ability)
         _cause = _rec.pop("woundRerollCause", None)  # get allowed
         if not _cause or attacker_unit is None:
             continue
@@ -8297,7 +8368,17 @@ def _resolve_one_manual_wound(game_state: Dict[str, Any], alloc: Dict[str, Any],
     ap = int(g["ap"])
     dmg_raw = g["dmg_raw"]
     rec = pw["rec"]
-    save_th = save_threshold(int(m["ARMOR_SAVE"]), int(require_key(m, "INVUL_SAVE")), ap)
+    from engine.game_state import effective_invul_save  # import paresseux : cycle, cf. plus haut
+
+    # Waaagh! (chantier 03) : « models from your army with this ability have a 5+ invulnerable
+    # save ». C est ICI que la sauvegarde est reellement comparee — le seuil d affichage calcule
+    # au jet ne decide de rien. Le proprietaire de la FIGURINE allouee est l autorite : c est lui
+    # dont le Waaagh! peut etre actif, pas l attaquant.
+    _def_unit = get_unit_by_id(game_state, str(require_key(m, "squad_id")))
+    _invul = int(require_key(m, "INVUL_SAVE"))
+    if _def_unit is not None:
+        _invul = effective_invul_save(game_state, _def_unit, _invul)
+    save_th = save_threshold(int(m["ARMOR_SAVE"]), _invul, ap)
     rec["saveTarget"] = save_th
     # DEVASTATING_WOUNDS (weapon_rules.json) : « No saving throw can be made against a critical
     # wound. » Le flag est pose au jet (blessure critique = 6 non modifie). On SAUTE la
@@ -9293,7 +9374,10 @@ def _assign_cells_toward_enemies(
     Retour : {model_id: (col, row)} pour TOUTES les figurines de ``mids``. Aucune ecriture.
     """
     models_cache = require_key(game_state, "models_cache")
-    units_cache = game_state.get("units_cache", {})  # get allowed
+    # `require_key` et non un `.get(..., {})` : la fonction indexe `units_cache[str(squad_id)]`
+    # plus bas, donc une absence lève de toute façon — mais elle aurait d'abord vidé l'union de
+    # collision ci-dessous, rendant TOUTE cellule libre le temps du calcul.
+    units_cache = require_key(game_state, "units_cache")
     board_cols = require_key(game_state, "board_cols")
     board_rows = require_key(game_state, "board_rows")
     wall_hexes = game_state.get("wall_hexes", set())
@@ -9303,6 +9387,12 @@ def _assign_cells_toward_enemies(
         mid: (int(models_cache[mid]["col"]), int(models_cache[mid]["row"])) for mid in mids
     }
 
+    # JUMEAU de `charge_build_valid_plan` : union des empreintes des AUTRES escouades, résolue une
+    # fois. `_cell_base_legal` est appelée par cellule dans les deux balayages ci-dessous et le
+    # cache n'est pas muté entre-temps (« Aucune ecriture », cf. docstring) ; la réénumérer par
+    # cellule reconstruisait l'empreinte de chaque escouade du plateau pour dire « occupée ? ».
+    occupied_by_others = build_occupied_positions_set(game_state, exclude_unit_id=str(squad_id))
+
     def _cell_base_legal(col: int, row: int) -> bool:
         """Legalite INDEPENDANTE du plan : plateau, murs, autres escouades."""
         if col < 0 or row < 0 or col >= board_cols or row >= board_rows:
@@ -9310,10 +9400,7 @@ def _assign_cells_toward_enemies(
         cell = (col, row)
         if wall_hexes and cell in wall_hexes:
             return False
-        for _sid, entry in entries_on_battlefield(units_cache, exclude_id=squad_id):
-            if cell in entry_footprint(entry):
-                return False
-        return True
+        return cell not in occupied_by_others
 
     # 1. 12.03 WHILE MOVING : « Models in base-contact with one or more enemy models cannot be
     #    moved ». Ces figurines restent, et leur cellule est definitivement occupee.
@@ -9642,6 +9729,8 @@ def _extra_attacks_weapon_indices(attacker: Dict[str, Any]) -> List[int]:
 def _select_fight_weapon_indices_for_fig(
     attacker: Dict[str, Any], target_t: int, target_sv: int, target_invul: int,
     target_unit: Optional[Dict[str, Any]] = None,
+    *,
+    melee_bonus: int = 0,
 ) -> List[int]:
     """Armes de melee SELECTIONNEES par une figurine (Select Weapons step, 04.01).
 
@@ -9664,6 +9753,7 @@ def _select_fight_weapon_indices_for_fig(
     main = _auto_select_cc_weapon_for_fig(
         attacker, target_t, target_sv, target_invul, target_unit,
         excluded_indices=frozenset(extra),
+        melee_bonus=melee_bonus,
     )
     # « if possible » : une figurine qui n a QUE des armes EXTRA ATTACKS n en ajoute pas d autre.
     return ([main] if main is not None else []) + extra
@@ -9673,6 +9763,8 @@ def _auto_select_cc_weapon_for_fig(
     attacker: Dict[str, Any], target_t: int, target_sv: int, target_invul: int,
     target_unit: Optional[Dict[str, Any]] = None,
     excluded_indices: frozenset = frozenset(),
+    *,
+    melee_bonus: int = 0,
 ) -> Optional[int]:
     """Choisit l arme de melee maximisant l esperance de degats, REGLES D ARME COMPRISES.
 
@@ -9705,12 +9797,15 @@ def _auto_select_cc_weapon_for_fig(
         # n existent nulle part dans la donnee, et les defauts 4/4/0 etaient des valeurs de jeu
         # plausibles : une arme mal formee marquait un score credible au lieu de lever.
         ws = int(require_key(w, "ATK"))
-        s = int(require_key(w, "STR"))
+        # `melee_bonus` = +1 S / +1 A du Waaagh! (0 hors Waaagh!). Applique aux MEMES
+        # caracteristiques que la resolution (`_manual_roll_fight_intent`) : Force et nombre
+        # d attaques. `ATK` est le seuil de touche dans la convention du projet, il ne bouge pas.
+        s = int(require_key(w, "STR")) + int(melee_bonus)
         ap = int(require_key(w, "AP"))
         # Aucun repli silencieux : une valeur de DMG non resoluble est une donnee d arme
         # invalide, elle doit lever (l ancien try/except la remplacait par 1.0 en silence).
         dmg = float(expected_dice_value(require_key(w, "DMG"), "auto_select_cc_dmg"))
-        n_attacks = float(expected_dice_value(require_key(w, "NB"), "auto_select_cc_nb"))
+        n_attacks = float(expected_dice_value(require_key(w, "NB"), "auto_select_cc_nb")) + int(melee_bonus)
         profile = build_weapon_attack_profile(w, target_unit)
         score = n_attacks * expected_damage_per_attack(
             profile,
@@ -9760,9 +9855,26 @@ def squad_declare_fight(
     # Caracteristiques defensives de la cible, lues sur une figurine REELLE du models_cache :
     # les 179 datasheets portent T / ARMOR_SAVE / INVUL_SAVE. Les defauts 4/7/7 decrivaient
     # une figurine moyenne sans sauvegarde — plausible, donc invisible en cas de donnee absente.
+    from engine.game_state import effective_invul_save, waaagh_melee_bonus  # cycle : cf. plus haut
+
+    target_unit_for_select = get_unit_by_id(game_state, str(target_squad_id))
     target_t = int(require_key(t_sample, "T"))
     target_sv = int(require_key(t_sample, "ARMOR_SAVE"))
+    # Waaagh! de la CIBLE : elle peut avoir une invulnerable 5+ absente de sa datasheet. Le
+    # choix d arme se fait donc contre la sauvegarde REELLE — sinon l heuristique prefererait
+    # une arme a forte penetration contre une invulnerable que l AP n entame pas.
     target_invul = int(require_key(t_sample, "INVUL_SAVE"))
+    if target_unit_for_select is not None:
+        target_invul = effective_invul_save(game_state, target_unit_for_select, target_invul)
+    # Waaagh! de l ATTAQUANT : +1 S et +1 A sur TOUTES ses armes de melee. Le bonus entre dans le
+    # SCORE, pas seulement dans la resolution : `expected_damage_per_attack` doit modeliser
+    # l arme telle qu elle sera jouee, sinon le choix d arme est fait sur des caracteristiques
+    # que le moteur n appliquera pas (§9.2.3 : une seule definition de l esperance de degats).
+    attacker_unit_for_select = get_unit_by_id(game_state, str(attacker_squad_id))
+    melee_bonus = (
+        0 if attacker_unit_for_select is None
+        else waaagh_melee_bonus(game_state, attacker_unit_for_select)
+    )
 
     fighting = get_fighting_models(game_state, attacker_squad_id, target_squad_id)
     intents: List[Dict[str, Any]] = game_state["pending_squad_fight_intents"][attacker_squad_id]
@@ -9773,7 +9885,8 @@ def squad_declare_fight(
         # Select Weapons step (04.01) : arme principale + TOUTES les armes [EXTRA ATTACKS]
         # (24.11). Un intent par arme selectionnee -> une figurine peut produire 2 intents.
         selected_indices = _select_fight_weapon_indices_for_fig(
-            m, target_t, target_sv, target_invul, get_unit_by_id(game_state, str(target_squad_id))
+            m, target_t, target_sv, target_invul, target_unit_for_select,
+            melee_bonus=melee_bonus,
         )
         if not selected_indices:
             continue
@@ -10943,3 +11056,38 @@ def end_of_turn_coherency_removal(
         destroy_model(game_state, target_mid, reason="coherency_removal")
         removed.append(target_mid)
     return removed
+
+
+def resolve_hit_reroll_ability(
+    attacker_unit: Optional[Dict[str, Any]], cause: Optional[str]
+) -> Optional[str]:
+    """Nom d AFFICHAGE de la capacite qui a ouvert une relance de TOUCHE, ou None.
+
+    JUMEAU du bloc `woundAbility` des deux rollers, extrait en fonction parce qu il a deux
+    appelants (tir et melee) : le laisser inline aurait produit deux copies, et c est
+    exactement ainsi que le tir et la melee divergent dans ce depot.
+
+    Deux causes possibles, rendues par `attack_sequence.roll_attack_pool` :
+      - `hit_1`        : capacite de DATASHEET (`reroll_1_tohit_fight`) -> nom de la regle SOURCE ;
+      - `hit_any_fail` : Oath of Moment, capacite de FACTION -> aucune regle d unite a
+        interroger, d ou la constante `OATH_ABILITY_DISPLAY_NAME`.
+
+    Sans ce nom, `step.log` n affiche rien : le log dirait que la relance etait POSSIBLE,
+    jamais qu elle a EU LIEU — et l analyzer ne peut pas compter l usage d une capacite qu il
+    ne voit pas.
+    """
+    from engine.game_state import OATH_ABILITY_DISPLAY_NAME
+
+    if not cause or attacker_unit is None:
+        return None
+    if cause == "hit_any_fail":
+        return OATH_ABILITY_DISPLAY_NAME
+    if cause == "hit_1":
+        return get_source_unit_rule_display_name_for_effect(
+            attacker_unit, "reroll_1_tohit_fight"
+        )
+    raise ValueError(
+        f"resolve_hit_reroll_ability: cause de relance de touche inconnue {cause!r}. "
+        f"Toute cause produite par `roll_attack_pool` doit etre nommee ici, sinon la relance "
+        f"disparait du log."
+    )

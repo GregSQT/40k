@@ -34,6 +34,9 @@ export class WingedTyranidPrime extends TroopMeleeTroop {
     { keywordId: "winged tyranid prime" },
   ];
 
+  // FACTION KEYWORDS
+  static FACTION_KEYWORDS = [{ keywordId: "TYRANIDS" }];
+
   // ICON
   static ICON = "/icons/WingedTyranidPrime.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

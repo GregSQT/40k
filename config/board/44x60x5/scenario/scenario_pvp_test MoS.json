@@ -1,4 +1,5 @@
 {
+  "uses_codex_detachment": { "1": true, "2": true },
   "scale": "500pts",
   "primary_objectives": ["objectives_control"],
   "wall_ref": "walls-mc1.json",

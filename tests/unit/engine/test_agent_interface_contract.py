@@ -95,6 +95,8 @@ from engine.macro_intents import (
     FIGHT_SLOT_BASE,
     FIGHT_SLOT_COUNT,
     MAX_OBJECTIVES,
+    OATH_SLOT_BASE,
+    OATH_SLOT_COUNT,
     MOVE_CELL_BASE,
     MOVE_CELL_COUNT,
     SHOOT_SLOT_BASE,
@@ -503,11 +505,21 @@ def test_choice_action_without_pending_decision_raises(phase_state):
 
 
 def test_choice_slot_count_matches_the_action_space_tail(phase_state):
-    """Le dernier `CHOICE` est la DERNIÈRE action de l'espace : au-delà, le décodeur lève."""
+    """Ce qui suit le dernier `CHOICE` est le bloc d'Oath, et rien d'autre.
+
+    Le test affirmait auparavant que `CHOICE_BASE + CHOICE_COUNT` était HORS de l'espace : c'était
+    vrai avant que le chantier 01 ne déclare `OATH_SLOTS`, et cela restait vert par accident —
+    ces ids tombaient dans la branche « action non gérée ». Ils ont désormais un décodage propre
+    (chantier 03), donc le contrat à verrouiller est celui-ci : l'id juste après les `CHOICE` est
+    le premier slot d'Oath, et la VRAIE queue de l'espace est `TOTAL_ACTION_SIZE`.
+    """
     decoder, game_state, squad_id = phase_state("fight")
-    with pytest.raises(ValueError, match="non gérée"):
+    assert CHOICE_BASE + CHOICE_COUNT == OATH_SLOT_BASE
+    assert OATH_SLOT_BASE + OATH_SLOT_COUNT == TOTAL_ACTION_SIZE
+    # Hors d'une désignation d'Oath en attente, le slot LÈVE — le masque ne l'ouvre pas.
+    with pytest.raises(ValueError, match="sans designation"):
         decoder.convert_squad_action(
-            CHOICE_BASE + CHOICE_COUNT,
+            OATH_SLOT_BASE,
             game_state,
             eligible_units=_eligible(game_state, squad_id),
         )

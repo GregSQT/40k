@@ -53,6 +53,44 @@ export function StrategicReserveButton({
 }
 
 /**
+ * Annule la MISE EN PLACE en cours (déploiement ou arrivée 20.04) et rend l'escouade à son état
+ * d'avant : rien n'est écrit côté moteur, donc elle reste à poser et peut être reprise
+ * immédiatement — après en avoir placé une autre, par exemple.
+ *
+ * Occupe l'emplacement du bouton `Strategic Reserve`, qu'il remplace dès que l'escouade est
+ * posée : à ce moment-là le dépôt en réserves n'a plus de sens (l'escouade est sur le plateau,
+ * en provisoire), et c'est se dédire qui en a un.
+ */
+export function ResetPlacementButton({ onReset }: { onReset: () => void }): ReactElement {
+  return (
+    <button
+      type="button"
+      data-testid="placement-reset"
+      onClick={(e: MouseEvent<HTMLButtonElement>) => {
+        // La ligne entière sélectionne : sans cet arrêt, l'annulation serait suivie d'une
+        // re-sélection de l'escouade qu'on vient justement de reposer.
+        e.stopPropagation();
+        onReset();
+      }}
+      style={{
+        flex: "0 0 auto",
+        background: "var(--ui-gray-cancel)",
+        color: "#fff",
+        border: "1px solid rgba(0, 0, 0, 0.35)",
+        borderRadius: "4px",
+        fontSize: "11px",
+        fontWeight: 700,
+        padding: "3px 8px",
+        whiteSpace: "nowrap",
+        cursor: "pointer",
+      }}
+    >
+      Reset
+    </button>
+  );
+}
+
+/**
  * 20.01/20.04 — le conteneur des escouades TENUES EN RÉSERVES d'un joueur.
  *
  * Rendu SOUS la table de statut de son joueur, à toutes les phases : c'est la seule vue des
@@ -79,6 +117,8 @@ export function StrategicReservesContainer({
   borderColor,
   onSelectReserveUnit,
   canSelectReserveUnit,
+  placingUnitId = null,
+  onCancelPlacement,
   phase,
   haloGlow,
 }: {
@@ -92,6 +132,9 @@ export function StrategicReservesContainer({
   /** 20.04 — les escouades listées sont-elles cliquables pour demander leur aire d'arrivée ? */
   canSelectReserveUnit: boolean;
   onSelectReserveUnit?: (unitId: UnitId) => void;
+  /** 20.04 — escouade dont l'ARRIVÉE est en cours de placement : sa ligne porte le `Reset`. */
+  placingUnitId?: UnitId | null;
+  onCancelPlacement?: () => void;
   /** Phase courante : décide de l'AFFICHAGE du conteneur vide (cf. corps). */
   phase: string | undefined;
   /** Halo vert de « cible active », partagé avec les lignes d'unités (`HALO_GLOW`). */
@@ -146,6 +189,13 @@ export function StrategicReservesContainer({
                 onClick={() => onSelectReserveUnit?.(unit.id)}
                 borderColor={borderColor}
                 haloGlow={haloGlow}
+                trailing={
+                  placingUnitId !== null &&
+                  String(placingUnitId) === String(unit.id) &&
+                  onCancelPlacement ? (
+                    <ResetPlacementButton onReset={onCancelPlacement} />
+                  ) : undefined
+                }
               />
             </div>
           ))}

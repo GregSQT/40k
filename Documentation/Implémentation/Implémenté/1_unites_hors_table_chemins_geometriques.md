@@ -203,32 +203,109 @@ Deux leçons de méthode, payées comptant :
   combat n'étaient atteints par aucune graine ; c'est la mutualisation qui les a rendus testables,
   pas un test plus malin.
 
-## Ce qui attend encore
+## Activation des variantes — FAIT le 2026-08-05
 
-Le chantier 04c a livré 6 variantes de rosters avec réserves stratégiques, rangées dans des
-sous-dossiers `variants/` :
+Les 4 variantes `training/` sont **dans le tirage** : sorties de `variants/` (le glob de
+`training_random` n'est pas récursif) et les 2 refs adverses ajoutées à `opponent_roster_ref`.
+Mesuré sur 60 resets du scénario réel : **4 rosters distincts par camp**, contre 2 avant.
 
-- `config/agents/ArmageddonAgent/rosters/500pts/training/variants/`
-- `config/agents/ArmageddonAgent/rosters/500pts/holdout_regular/variants/`
-- `config/agents/_p2_rosters/500pts/training/variants/`
+L'activation n'était **pas** un changement de config. Elle a ouvert un trou moteur qui rendait le
+vrai run impossible, et deux tests qui ne mesuraient plus ce qu'ils annonçaient.
 
-Elles sont **hors du tirage** : le glob de `training_random` (`engine/game_state.py`,
-`_resolve_roster_ref`) n'est pas récursif. Le blocage technique est levé ; l'activation reste une
-**décision utilisateur** :
+### Le trou : les zones de déploiement étaient enfermées dans une phase
 
-1. déplacer les 4 variantes `training/` d'un cran vers le haut (hors de `variants/`) ;
-2. ajouter les 2 refs adverses à `opponent_roster_ref` dans
-   `config/agents/ArmageddonAgent/scenarios/training/scenario_training_armageddon.json` ;
-3. pour le holdout, créer les scénarios correspondants (`scenario_bot-05..08`) — ses rosters sont
-   référencés **explicitement**, il n'y a pas de tirage. ⚠️ Ça double le coût d'évaluation et
-   change la composition du holdout.
+`game_state["deployment_state"]` n'est écrit **que** si un joueur déploie en `active`. Il portait
+`deployment_pools`, or deux lecteurs en ont besoin **hors** phase de déploiement :
+`ObservationBuilder.squad_grid_anchor` (ancre d'une escouade hors table) et
+`_opponent_deployment_zone_cells` (clause 20.04 « pas dans la zone adverse avant le 3e round »).
+En mode `fixed`, une unité en réserves 20.01 est hors table **dès le reset** : les deux levaient
+`Required key 'deployment_state'`, et le reset entier avec.
 
-Tant que rien n'est activé, la ventilation `bot_eval/roster/*` livrée par 04c ne publiera jamais
-de courbe « avec réserves ».
+Ce n'était pas un cas de test : les 7 profils d'entraînement tirent `fixed` dans **20 à 70 %** des
+épisodes (`active_ratio` 0.3 → 0.8).
+
+Correction : les zones sont une donnée de **scénario**, publiées à la racine
+(`game_state["deployment_pools"]`) dans **tous** les modes ; `deployment_state` ne garde que la
+comptabilité mutable de la phase. Les 8 lecteurs sont repointés sur la source unique, frontend
+compris (`DeploymentPools` sort de `DeploymentState` dans `types/game.ts`).
+
+Vérification : en mode `fixed`, sur 8 graines, **13 unités en réserves sur 13 arrivent** (tours 2
+et 3, positions variées sur la bande de bord) — le chemin 20.04 est réellement exécuté, pas
+seulement « sans levée ».
+
+### Deux tests qui certifiaient un critère qu'ils n'exerçaient plus
+
+- **Mapping de slots faux depuis toujours, révélé maintenant.** Trois tests de
+  `test_deployment_observation_contract.py` reconstruisaient les lignes alliées de l'obs **sans**
+  le filtre « sur le champ de bataille » que l'obs applique. Tant que les unités non posées se
+  triaient APRÈS les posées, le préfixe coïncidait par chance. Une unité en réserves reste hors
+  table tout l'épisode, sort en tête du tri, et tout le mapping se décale : liste du test
+  `['1','2','4','5']` contre liste de l'obs `['2']`. Le test lisait la position de l'unité 2
+  (posée, col=215) en croyant lire celle de l'unité 1 (hors table) — d'où un `col_rel = 90.0`
+  attribué à une unité sans position. **Il n'y avait aucun défaut d'observation** : `col_rel` est
+  gardé par `deployed_on_turn` depuis §0.40 point 4. Le helper `_obs_ally_rows` porte désormais le
+  contrat de l'obs en un point.
+- **Un test qui appelait hors du chemin qu'il annonce.** `get_fighting_models` documente son
+  contrat chez l'**appelant** : son unique appelant de production ne le sollicite que sur une
+  escouade dont il a vérifié `on_battlefield`.
+  `test_get_fighting_models_does_not_raise_on_the_observation_path` l'appelait sur **toutes** les
+  escouades — un surensemble du chemin d'observation. Il restait vert seulement tant qu'aucune
+  unité n'était hors table hors déploiement. Le filtre de production y est maintenant appliqué,
+  et le test **exige** d'avoir rencontré au moins une escouade hors table (sinon il ne prouve
+  rien sur ce cas).
+
+Trois autres oracles de test mesuraient une géométrie sur des unités hors table
+(`test_board_downscale` comptait la sentinelle comme une superposition,
+`test_squad_obs_objective_geometry` comparait deux origines différentes,
+`test_deployed_units_still_report_engagement_after_deployment` réimplémentait une énumération sans
+filtre au lieu d'appeler `enemy_entries_on_battlefield`).
+
+### Ce qui reste une décision utilisateur
+
+Le **holdout** (`scenario_bot-01..04`) n'est pas touché : ses rosters sont référencés
+**explicitement**, il n'y a pas de tirage. Couvrir les variantes demanderait 4 scénarios de plus
+(`scenario_bot-05..08`), donc le double d'évaluations à chaque point de mesure **et** une rupture
+de série — les courbes d'avant/après cesseraient d'être comparables.
+
+Deux faits VÉRIFIÉS le 2026-08-05, à connaître avant de chiffrer ce chantier — ils ne se
+devinent pas et coûtent cher à re-dériver :
+
+1. **Les rosters adverses à réserves du holdout N'EXISTENT PAS.** Seules les deux variantes
+   *agent* ont été livrées par 04c (`rosters/500pts/holdout_regular/variants/`) ; côté
+   `_p2_rosters`, les variantes ne couvrent que `training/`. Or un bot ne DÉCIDE jamais une mise
+   en réserves — c'est un choix de LISTE (cf. la docstring de
+   `TacticalBot.select_placement_action`, `ai/evaluation_bots.py`). Sans ces deux fichiers, le
+   holdout ne peut mesurer que « l'agent utilise ses réserves », jamais « l'agent encaisse une
+   arrivée ». Le travail est donc de 4 scénarios **plus 2 rosters à créer**.
+2. **La rupture de série est STRUCTURELLE, pas un choix.** Les scénarios du holdout sont ramassés
+   par `glob("scenario_*.json")` (`ai/training_utils.py`, collecte par dossier) : tout fichier
+   déposé dans `holdout_regular/` entre automatiquement dans l'évaluation, donc dans le score
+   combiné et dans le seuil de gating. Il n'existe aucun moyen d'« ajouter à côté » sans toucher
+   à l'agrégation. Trois issues, à trancher AVANT de créer quoi que ce soit : déposer les
+   scénarios à réserves dans le split `holdout_hard/` (déjà reconnu, énuméré séparément) ;
+   restreindre explicitement le score de référence aux 4 scénarios d'origine ; ou assumer la
+   rupture et re-baseliner en la datant.
+
+⚠️ `TacticalBot` sait faire arriver ses réserves (sa politique de pose couvre le déploiement
+initial ET l'ingress 20.04), mais au « premier slot ouvert », donc de façon DÉTERMINISTE. Un
+holdout à réserves mesurerait l'agent face à une arrivée prévisible — acceptable pour un mètre
+étalon gelé, mais ce n'est pas une mesure de robustesse face à une arrivée variée.
+
+Second arbitrage, indépendant du coût : l'agent passe de 2 à 4 rosters par camp, ce qui élargit la
+distribution d'entraînement alors que la stratégie actée est une **spécialisation sur 2 rosters**
+pour la démo.
 
 ## Ne pas oublier
 
 `tests/unit/engine/test_strategic_reserves_20.py` est pointé sur une fixture à rosters pinnés
-(`scenarios/training/reserves_20_fixture.json`) pour être indépendant du contenu du dossier
-`training/`. Ne pas le repointer sur `scenario_training_armageddon.json` en activant les
-variantes : 16 de ses tests supposent que toutes les unités démarrent posées.
+(`scenarios/training/reserves_20_fixture.json`). Depuis l'activation, ce pin n'est plus une
+précaution : c'est ce qui tient le fichier debout — 16 de ses tests supposent que toutes les
+unités démarrent posées. Même chose pour `test_bot_ingress_reserves.py`, repointé sur cette même
+fixture : il mesure la **décision** du bot de mettre en réserves, il lui faut donc une liste qui
+n'en déclare aucune.
+
+`_filter_training_roster_candidates` (`engine/game_state.py`) ne filtre rien aujourd'hui :
+`roster_pool_schedule.enabled` est `false` sur les 7 profils — vérifié par la mesure du tirage
+(4/4), pas seulement par lecture du JSON. À signaler si on l'active un jour : sa regex
+`(elite|swarm|troop)_(\d+)$` écarterait **tous** les rosters Armageddon actuels, y compris les 2
+d'origine, et lèverait « zero eligible training rosters ».

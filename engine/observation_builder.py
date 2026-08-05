@@ -129,14 +129,12 @@ _ABILITY_OBS_IDS: Optional[Dict[str, int]] = None
 _STATUS_OBS_IDS: Optional[Dict[str, int]] = None
 
 
-def _unit_statuses_in_effect(
-    unit: Dict[str, Any], ctx: Dict[str, Any], *, is_ally: bool
-) -> List[int]:
+def _unit_statuses_in_effect(unit: Dict[str, Any], ctx: Dict[str, Any]) -> List[int]:
     """`obs_id` des STATUTS en vigueur sur cette unite (`config/unit_statuses.json`).
 
     ⚠️ C'EST ICI que les chantiers suivants posent leur statut, et nulle part ailleurs :
       - 02 : `battle_shock` — 08.03, etat d'unite (`unit["battle_shocked"]`) — POSE ;
-      - 03 : `oath_target` — l'unite ENNEMIE designee par l'Oath adverse (d'ou `is_ally`) ;
+      - 03 : `oath_target` — l'unite designee par un Oath, le mien comme celui de l'adversaire ;
       - 06 : `suppressed` — capacites Armageddon.
     Le retour part ensuite dans `_fill_id_slots`, qui applique le tri, le padding et les gardes
     de domaine et de debordement. Poser un statut AILLEURS (un bit de `UNIT_BIN_FIELDS`, une
@@ -146,11 +144,19 @@ def _unit_statuses_in_effect(
     `battle_shock` est ecrit pour TOUTE unite, alliee comme ennemie : c'est une information
     publique (l'OC de l'unite est a '-' pour tout le monde, 01.07/02.02), et la cacher a l'agent
     lui ferait croire qu'un objectif tenu par une escouade ennemie choquee lui echappe encore.
-    Les deux autres statuts restent absents tant que leurs chantiers (03, 06) ne les posent pas.
+    `suppressed` reste absent tant que le chantier 06 ne le pose pas.
+
+    `oath_target` est ecrit pour les DEUX camps, et c'est le point important : sur une entite
+    ENNEMIE il signale MA cible designee (mes attaques contre elle relancent la touche) ; sur une
+    entite ALLIEE il signale que l'ADVERSAIRE l'a designee (elle va encaisser des relances). Ne
+    poser que le premier cas rendrait l'Oath adverse invisible dans mon observation, alors qu'il
+    change directement ce que je dois proteger. D'ou la lecture des deux tables par joueur.
     """
     statuses: List[int] = []
     if require_key(unit, "battle_shocked"):
         statuses.append(require_key(unit_status_obs_ids(), "battle_shock"))
+    if str(require_key(unit, "id")) in ctx["oath_target_ids"]:
+        statuses.append(require_key(unit_status_obs_ids(), "oath_target"))
     return statuses
 
 
@@ -1119,8 +1125,24 @@ class ObservationBuilder:
                 f"[OBS] escouade {squad_id} : {len(types)} types de figurines pour "
                 f"{self.K_MODEL_TYPES} slots — les moins prioritaires ne sont pas observes.",
             )
+        # Waaagh! (chantier 03) : « models from your army with this ability have a 5+ invulnerable
+        # save ». La sauvegarde EFFECTIVE, pas celle de la datasheet — c'est elle que la
+        # résolution appliquera, et rien d'autre dans l'observation ne permettrait de la déduire
+        # (aucune feature ne dit « cette entité est orke », et les slots de capacité ne portent
+        # pas les effets de faction, par construction). Le facteur est uniforme sur l'unité :
+        # il ne change donc ni le regroupement par type ni leur ordre, calculés au-dessus.
+        from engine.game_state import WAAAGH_INVUL_SAVE, waaagh_applies_to_unit
+
+        # Le prédicat est évalué UNE fois pour l'entité, pas par type de figurine : il ne dépend
+        # que de l'unité, et cette boucle tourne jusqu'à `K_MODEL_TYPES` fois — pour 28 entités,
+        # à CHAQUE step gym. Seul l'octroi lui-même reste dans la boucle, car il dépend de
+        # l'invulnérable propre à chaque type (une 4+ existante est conservée).
+        entity_unit = get_unit_by_id(str(squad_id), game_state)
+        waaagh_invul = entity_unit is not None and waaagh_applies_to_unit(game_state, entity_unit)
         for t_idx in range(min(self.K_MODEL_TYPES, len(types))):
             (role, hp_max, toughness, save, invul), count = types[t_idx]
+            if waaagh_invul:
+                invul = min(int(invul), WAAAGH_INVUL_SAVE)
             cont[t_idx] = (
                 float(hp_max), float(toughness), float(save), float(invul), float(count)
             )
@@ -1273,7 +1295,11 @@ class ObservationBuilder:
         _c("hp_max", require_key(unit, "HP_MAX"))
         _c("toughness", require_key(unit, "T"))
         _c("armor_save", require_key(unit, "ARMOR_SAVE"))
-        _c("invul_save", require_key(unit, "INVUL_SAVE"))
+        # Sauvegarde invulnérable EFFECTIVE — jumeau de `_encode_entity_model_types` : le Waaagh!
+        # accorde une 5+ que la datasheet ne porte pas, et c'est celle-là que le moteur applique.
+        from engine.game_state import effective_invul_save
+
+        _c("invul_save", effective_invul_save(game_state, unit, require_key(unit, "INVUL_SAVE")))
         # Distance PARCOURUE ce tour, en subhex GÉODÉSIQUES (le coût réel du chemin, pas l'écart
         # départ↔arrivée). Le max porte la clause 3 de [HEAVY] 24.16, la somme dit si toute
         # l'escouade a bougé ou une seule figurine.
@@ -1326,7 +1352,7 @@ class ObservationBuilder:
             squad_id=squad_id,
         )
         status_ids = _fill_id_slots(
-            _unit_statuses_in_effect(unit, ctx, is_ally=is_ally),
+            _unit_statuses_in_effect(unit, ctx),
             UNIT_STATUS_SLOTS,
             registry=unit_status_obs_ids(),
             kind="statuts",
@@ -1574,6 +1600,35 @@ class ObservationBuilder:
             g_bin[global_bin_index(f"objective_dir_cos_{i}")] = obj_cos[i]
             g_bin[global_bin_index(f"objective_dir_sin_{i}")] = obj_sin[i]
 
+        # === CAPACITÉS DE FACTION (chantier 03) ===
+        # Waaagh! et Oath sont des faits d'ARMÉE, pas d'unité — d'où leur place ici. Les quatre
+        # bits du Waaagh! sont émis pour les DEUX camps : sa durée enjambe le tour adverse, donc
+        # un Waaagh! ennemi actif pendant mon tour est une information dont j'ai besoin
+        # MAINTENANT (l'armée d'en face a une invulnérable 5+ et +1 S/A en mêlée).
+        from engine.game_state import waaagh_is_active, waaagh_is_available, oath_target_id
+
+        enemy_player = 2 if int(active_player) == 1 else 1
+        g_bin[global_bin_index("my_waaagh_available")] = (
+            1.0 if waaagh_is_available(game_state, active_player) else 0.0
+        )
+        g_bin[global_bin_index("my_waaagh_active")] = (
+            1.0 if waaagh_is_active(game_state, active_player) else 0.0
+        )
+        g_bin[global_bin_index("enemy_waaagh_available")] = (
+            1.0 if waaagh_is_available(game_state, enemy_player) else 0.0
+        )
+        g_bin[global_bin_index("enemy_waaagh_active")] = (
+            1.0 if waaagh_is_active(game_state, enemy_player) else 0.0
+        )
+        # Oath : QUE la désignation existe. QUI est désigné est porté par le statut `oath_target`
+        # de l'entité concernée (`_unit_statuses_in_effect`), donc avec l'unité qu'il qualifie.
+        g_bin[global_bin_index("my_oath_target_selected")] = (
+            1.0 if oath_target_id(game_state, active_player) is not None else 0.0
+        )
+        g_bin[global_bin_index("enemy_oath_target_selected")] = (
+            1.0 if oath_target_id(game_state, enemy_player) is not None else 0.0
+        )
+
         # === DÉCISION AGENT EN ATTENTE (V11 §9.3 P2) ===
         self._encode_pending_decision(game_state, obs, active_player)
         # §0.40 point 3 — ce que chaque slot 4-8 poserait réellement. Après le contexte global :
@@ -1739,6 +1794,7 @@ class ObservationBuilder:
         # doivent décrire le même ensemble de cibles, sinon l'agent verrait « frappable » ce que
         # le masque interdit. Sert aussi de garde au comptage par-figurine ci-dessous.
         from engine.phase_handlers.fight_handlers import _fight_build_valid_target_pool
+        from engine.game_state import oath_target_id
 
         fight_target_pool = {
             str(t) for t in _fight_build_valid_target_pool(game_state, active_unit)
@@ -1761,6 +1817,15 @@ class ObservationBuilder:
             # n'est jamais écrite), et le bit `deploy_not_on_board` de la ligne 0 la porte.
             "active_not_deployed": active_not_deployed,
             "current_turn": current_turn,
+            # Cibles d'Oath of Moment des DEUX joueurs (chantier 03), résolues UNE fois pour les
+            # 28 entités. L'ensemble, et non l'id du seul Oath de l'observateur : une entité
+            # ALLIÉE désignée par l'Oath adverse doit porter le statut elle aussi, sinon la menace
+            # que l'adversaire vient d'annoncer serait invisible dans mon observation.
+            "oath_target_ids": frozenset(
+                target for target in (
+                    oath_target_id(game_state, 1), oath_target_id(game_state, 2),
+                ) if target is not None
+            ),
             "engaged_squads": engaged_squads,
             "moved_by_model": require_key(game_state, "moved_distance_by_model"),
             "ranged_metric": _ranged_distance_metric(game_state),
@@ -1843,7 +1908,7 @@ class ObservationBuilder:
         position, et centrer sur (-1,-1) sortait la fenetre du plateau : murs, allies, ennemis,
         objectifs et couvert etaient tous vides ou tronques a l'instant precis ou l'agent choisit
         son point d'entree dans la partie. On l'ancre donc sur sa ZONE DE DEPLOIEMENT, lue telle
-        quelle dans `deployment_state["deployment_pools"]` — la MEME collection d'hexes que celle
+        quelle dans `game_state["deployment_pools"]` — la MEME collection d'hexes que celle
         ou le decodeur choisit l'hexe (`_get_valid_deployment_hexes`). Aucune geometrie n'est
         recalculee ici, et la GEOMETRIE de la grille (`engine.spatial_grid`) est inchangee : seul
         le point d'ancrage bouge.
@@ -1877,8 +1942,7 @@ class ObservationBuilder:
         if player in anchors:
             return anchors[player]
 
-        deployment_state = require_key(game_state, "deployment_state")
-        deployment_pools = require_key(deployment_state, "deployment_pools")
+        deployment_pools = require_key(game_state, "deployment_pools")
         pool = deployment_pools.get(player, deployment_pools.get(str(player)))
         if not pool:
             raise KeyError(

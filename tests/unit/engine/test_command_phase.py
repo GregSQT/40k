@@ -16,7 +16,7 @@ from engine.phase_handlers.shared_utils import build_units_cache
 from engine.observation_builder import ObservationBuilder
 from engine.w40k_core import W40KEngine
 from engine.reward_calculator import RewardCalculator
-from tests._state_invariants import unit_invariants
+from tests._state_invariants import turn_state_invariants, unit_invariants
 from tests.unit.engine._config_helpers import build_engine_config
 
 
@@ -40,6 +40,7 @@ def _cmd_unit(uid: int, player: int, col: int, row: int) -> Dict[str, Any]:
 def _make_cmd_gs() -> Dict[str, Any]:
     units = [_cmd_unit(1, 1, 3, 3), _cmd_unit(2, 2, 10, 10)]
     gs: Dict[str, Any] = {
+        **turn_state_invariants(),
         "turn": 1,
         "current_player": 1,
         # 08.02 : les CP sont un etat de PARTIE, pose au reset du moteur. Une doublure sans
@@ -164,16 +165,26 @@ class TestCommandPhaseHandlerIsolation:
         command_handlers.command_phase_start(gs)
         assert gs["units_fought"] == set()
 
-    def test_return_signals_phase_complete(self):
-        """cmd_iso_complete : valeur de retour a phase_complete=True."""
-        gs = _make_cmd_gs()
-        result = command_handlers.command_phase_start(gs)
-        assert result.get("phase_complete") is True
+    def test_start_ne_tranche_plus_la_suite(self):
+        """cmd_iso_complete : `command_phase_start` FAIT les 5 étapes, elle ne tranche pas.
 
-    def test_return_signals_next_phase_move(self):
-        """cmd_iso_next : valeur de retour a next_phase='move'."""
+        Elle rendait `command_phase_resume` avant le chantier 03 ; depuis que 08.04 peut poser
+        une décision, c'est `W40KEngine.start_command_phase` qui enchaîne (résolution des sièges
+        sans masque, PUIS `resume`). La lui faire rendre obligeait l'appelant à la rejouer, donc
+        à garder un garde pour ne pas exécuter `command_phase_end` deux fois.
+        """
         gs = _make_cmd_gs()
-        result = command_handlers.command_phase_start(gs)
+        assert command_handlers.command_phase_start(gs) is None
+
+    def test_resume_signals_phase_complete_and_next_phase(self):
+        """cmd_iso_next : c'est `command_phase_resume` qui rend la transition.
+
+        Hors tour d'agent (pas de gym, pas de free steps), elle clôt la phase et annonce le move.
+        """
+        gs = _make_cmd_gs()
+        command_handlers.command_phase_start(gs)
+        result = command_handlers.command_phase_resume(gs)
+        assert result.get("phase_complete") is True
         assert result.get("next_phase") == "move"
 
 

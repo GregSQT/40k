@@ -464,7 +464,7 @@ def test_build_units_from_scenario_army_folds_attached_characters() -> None:
 
     army_path = (
         Path(__file__).resolve().parents[3]
-        / "config/board/44x60x5/scenario/scenario_pvp.json"
+        / "config/board/44x60x5/scenario/scenario_attached_unit_test.json"
     )
     army_cfg = json.loads(army_path.read_text())
     raw_units = army_cfg["units"]

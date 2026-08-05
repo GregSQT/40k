@@ -5,7 +5,8 @@ deployment_handlers.py - Deployment Phase Implementation (Test mode)
 Footprint-aware: validates entire unit footprint (multi-hex bases) during deployment.
 """
 
-from typing import AbstractSet, Dict, Any, Tuple, List, Optional, Set
+import math
+from typing import AbstractSet, Dict, Any, Iterable, Sequence, Tuple, List, Optional, Set
 from shared.data_validation import require_key
 from engine.game_utils import get_unit_by_id
 from engine.combat_utils import set_unit_coordinates
@@ -141,8 +142,7 @@ def _deploy_pool_set(
         if isinstance(pool_override, frozenset):
             return pool_override
         return {(int(c), int(r)) for c, r in pool_override}
-    deployment_state = require_key(game_state, "deployment_state")
-    deployment_pools = require_key(deployment_state, "deployment_pools")
+    deployment_pools = require_key(game_state, "deployment_pools")
     pool = _get_deployment_pool(deployment_pools, int(player))
     return {(int(c), int(r)) for c, r in pool}
 
@@ -160,7 +160,7 @@ def placement_pool_for_squad(
     édite à l'écran est ainsi contraint par la MÊME aire que celle qui validera son commit.
 
     Rendre ``None`` plutôt que la zone de déploiement garde `_deploy_pool_set` seul propriétaire
-    de la lecture de `deployment_state`, qui n'existe pas forcément hors phase de déploiement.
+    de la lecture des zones : un seul site à repointer le jour où leur stockage change.
     """
     from engine.phase_handlers.movement_handlers import (
         ingress_setup_pool,
@@ -437,6 +437,181 @@ def generate_compact_formation(
     return placed
 
 
+def erode_pool_by_block_offsets(
+    pool_set: AbstractSet[Tuple[int, int]],
+    offsets: Iterable[Tuple[int, int, int]],
+    *,
+    allowed: Optional[AbstractSet[Tuple[int, int]]] = None,
+) -> Set[Tuple[int, int]]:
+    """Ancres du pool dont TOUTES les cases ``ancre + offset`` sont acceptables. Érosion 03.02.
+
+    C'est LA question de toute mise en place : « l'objet, translaté ici, tient-il entièrement dans
+    ce qui est permis ? » — posée pour l'empreinte d'UNE figurine comme pour l'empreinte combinée
+    d'un BLOC. Un seul code y répond, sinon les deux réponses divergent le jour où l'une des deux
+    est corrigée.
+
+    ``allowed`` : ensemble des cases acceptables pour les cases translatées, quand il diffère du
+    pool des ancres (empreinte d'une figurine : les ancres candidates sont dans la zone, mais les
+    cases acceptables en excluent en plus les murs et les positions occupées). Par défaut, le pool
+    lui-même — cas du suivi de bloc.
+
+    POURQUOI VECTORISÉ : écrit en deux boucles Python imbriquées, ce test coûte |pool| × |offsets|
+    appartenances. Mesuré sur ce dépôt : 0,43 s sur une zone de déploiement (16 104 cases) mais
+    2,3 s sur l'aire d'arrivée d'une unité Deep Strike (59 050 cases, 20.04) — à chaque clic.
+    Une translation en coordonnées CUBE est une translation constante en (x, z) (l'axe y est
+    redondant, x + y + z = 0), donc l'ensemble acceptable devient une grille booléenne et chaque
+    offset un simple DÉCALAGE de cette grille : l'érosion est le ET logique des décalages.
+    Le résultat est IDENTIQUE au test case-par-case — c'est la même condition, écrite en une fois
+    (verrouillé par les tests d'oracle naïf de `test_strategic_reserves_20.py`).
+
+    Un seul ``allowed`` : passe-plat vers `erode_pool_by_block_offsets_multi`, qui porte le calcul.
+    Les appelants qui érodent le MÊME pool avec plusieurs ensembles acceptables (le pool de mise en
+    place, un par niveau) doivent appeler la variante multi directement — voir son en-tête.
+    """
+    return erode_pool_by_block_offsets_multi(pool_set, offsets, (allowed,))[0]
+
+
+def erode_pool_by_block_offsets_multi(
+    pool_set: AbstractSet[Tuple[int, int]],
+    offsets: Iterable[Tuple[int, int, int]],
+    allowed_sets: Sequence[Optional[AbstractSet[Tuple[int, int]]]],
+) -> List[Set[Tuple[int, int]]]:
+    """Érosion 03.02 du MÊME pool par PLUSIEURS ensembles de cases acceptables, en une passe.
+
+    POURQUOI CETTE VARIANTE EXISTE. Le pool de mise en place érode le même pool une fois par
+    NIVEAU (sol, étage) : mêmes ancres, mêmes offsets, seul l'ensemble acceptable change. Or deux
+    blocs du calcul ne dépendent QUE du pool et des offsets — les bornes des ancres et le
+    remappage de sortie, soit deux parcours complets de ~60 000 ancres avec conversion en cube.
+    Les refaire par niveau coûtait 59,8 ms par appel à `level >= 1`, ~22 % du temps de
+    `deployment_build_model_destinations_pool`.
+
+    Rend une liste PARALLÈLE à ``allowed_sets`` : ``resultat[i]`` est l'érosion par
+    ``allowed_sets[i]``. Un ``None`` y vaut « le pool lui-même » (cas du suivi de bloc), exactement
+    comme le paramètre ``allowed`` de la fonction à un seul ensemble.
+    """
+    import numpy as np
+
+    from engine.hex_utils import offset_to_cube
+
+    if not pool_set:
+        return [set() for _ in allowed_sets]
+    offsets = list(offsets)
+
+    # Les cas dégénérés se tranchent PAR ENSEMBLE, dans l'ordre de la version à un seul argument :
+    # un ensemble acceptable vide rend l'ensemble vide, même quand il n'y a aucun offset.
+    resolved: List[AbstractSet[Tuple[int, int]]] = []
+    results: List[Optional[Set[Tuple[int, int]]]] = []
+    for entry in allowed_sets:
+        allowed_set = pool_set if entry is None else entry
+        resolved.append(allowed_set)
+        results.append(set() if not allowed_set else None)
+
+    if not offsets:
+        # Aucun offset : toute ancre convient, quel que soit l'ensemble acceptable non vide.
+        whole_pool = {(int(c), int(r)) for c, r in pool_set}
+        return [set(whole_pool) if res is None else res for res in results]
+
+    if all(res is not None for res in results):
+        # TOUS les ensembles acceptables sont vides : plus rien à éroder. La version à un seul
+        # argument sortait ici, AVANT de toucher au pool ; sans cette garde, la passe de bornes
+        # ci-dessous parcourrait les ~66 000 ancres pour rien. Rare (il faut que la zone entière
+        # soit bloquée) mais gratuit à éviter, et ça garde les deux versions équivalentes jusque
+        # dans leurs sorties anticipées.
+        return [res for res in results if res is not None]
+
+    # ---- Travail qui ne dépend QUE du pool et des offsets : fait UNE fois ---------------------
+    # Bornes des ancres en UNE passe. La liste intermédiaire des ~60 000 couples n'avait aucun
+    # autre lecteur que quatre extrema, et quatre `min`/`max` la reparcouraient (27,9 ms contre
+    # 6,7 ms). `pool_set` est non vide (garde ci-dessus) : la 1re ancre amorce les quatre bornes.
+    #
+    # L'index de grille de chaque ancre n'est MÉMORISÉ QUE s'il servira plus d'une fois. Le
+    # matérialiser systématiquement coûtait 45 ms de plus sur le cas à UN SEUL ensemble — le plus
+    # fréquent, le déploiement au sol — pour n'en économiser que 15 sur le cas à deux. MESURÉ,
+    # après avoir cru l'inverse : une liste de 66 000 tuples n'est pas gratuite face à une boucle
+    # qui streame.
+    reuse_anchors = sum(1 for res in results if res is None) > 1
+    anchors: List[Tuple[Tuple[int, int], int, int]] = []
+    _pool_iter = iter(pool_set)
+    _c0, _r0 = next(_pool_iter)
+    _x0, _y0, _z0 = offset_to_cube(int(_c0), int(_r0))
+    ax_min = ax_max = _x0
+    az_min = az_max = _z0
+    if reuse_anchors:
+        anchors.append(((int(_c0), int(_r0)), _x0, _z0))
+    for c, r in _pool_iter:
+        x, _y, z = offset_to_cube(int(c), int(r))
+        if reuse_anchors:
+            anchors.append(((int(c), int(r)), x, z))
+        # `elif` légitime : `ax_min <= ax_max`, donc une ancre sous le min ne peut pas dépasser
+        # le max. Même raisonnement sur z.
+        if x < ax_min:
+            ax_min = x
+        elif x > ax_max:
+            ax_max = x
+        if z < az_min:
+            az_min = z
+        elif z > az_max:
+            az_max = z
+    # La grille couvre TOUTES les cases lisibles : l'ancre la plus extrême translatée par l'offset
+    # le plus extrême. Elle n'est PAS bornée à la boîte de `allowed` — une ancre en dehors de
+    # celle-ci reste une ancre valide dès lors que l'objet, lui, retombe dans `allowed` (offsets
+    # qui ne contiennent pas l'origine). Une case non marquée y vaut « non acceptable », ce qui
+    # est la bonne réponse, tandis qu'écarter ces ancres d'avance en perdait.
+    ox_min = min(ox for ox, _oy, _oz in offsets)
+    ox_max = max(ox for ox, _oy, _oz in offsets)
+    oz_min = min(oz for _ox, _oy, oz in offsets)
+    oz_max = max(oz for _ox, _oy, oz in offsets)
+    gx_min, gx_max = ax_min + ox_min, ax_max + ox_max
+    gz_min, gz_max = az_min + oz_min, az_max + oz_max
+    core_w = ax_max - ax_min + 1
+    core_h = az_max - az_min + 1
+    unique_offsets = set(offsets)
+
+    # ---- Travail propre à CHAQUE ensemble acceptable ------------------------------------------
+    for index, allowed_set in enumerate(resolved):
+        if results[index] is not None:
+            continue
+        grid = np.zeros((gx_max - gx_min + 1, gz_max - gz_min + 1), dtype=bool)
+        marked_x = []
+        marked_z = []
+        for c, r in allowed_set:
+            x, _y, z = offset_to_cube(int(c), int(r))
+            if gx_min <= x <= gx_max and gz_min <= z <= gz_max:
+                marked_x.append(x - gx_min)
+                marked_z.append(z - gz_min)
+        if not marked_x:
+            results[index] = set()
+            continue
+        grid[np.fromiter(marked_x, dtype=np.int64), np.fromiter(marked_z, dtype=np.int64)] = True
+
+        keep = np.ones((core_w, core_h), dtype=bool)
+        emptied = False
+        for ox, _oy, oz in unique_offsets:
+            sx = ax_min + ox - gx_min
+            sz = az_min + oz - gz_min
+            keep &= grid[sx : sx + core_w, sz : sz + core_h]
+            if not keep.any():
+                emptied = True
+                break
+        if emptied:
+            results[index] = set()
+            continue
+
+        out: Set[Tuple[int, int]] = set()
+        if anchors:
+            for cell, x, z in anchors:
+                if keep[x - ax_min, z - az_min]:
+                    out.add(cell)
+        else:
+            for cc, rr in pool_set:
+                x, _y, z = offset_to_cube(int(cc), int(rr))
+                if keep[x - ax_min, z - az_min]:
+                    out.add((int(cc), int(rr)))
+        results[index] = out
+
+    return [res if res is not None else set() for res in results]
+
+
 def deployment_build_model_destinations_pool(
     game_state: Dict[str, Any],
     model_id: str,
@@ -468,8 +643,6 @@ def deployment_build_model_destinations_pool(
     squad_id = str(require_key(model, "squad_id"))
     player = int(require_key(model, "player"))
     pool_set = _deploy_pool_set(game_state, player, placement_pool_for_squad(game_state, squad_id))
-    board_cols = require_key(game_state, "board_cols")
-    board_rows = require_key(game_state, "board_rows")
     wall_hexes = game_state.get("wall_hexes", set())  # get allowed
     level = int(level or 0)
     terrain_areas = require_key(game_state, "terrain_areas")
@@ -516,13 +689,12 @@ def deployment_build_model_destinations_pool(
     # sol sous le bord (eff=level contourne _low_clear, ajouté au seul niveau 0). Non-montante → eff force 0.
     from engine.game_state import unit_can_occupy_upper_floor
     _can_climb = unit_can_occupy_upper_floor(require_key(unit, "UNIT_KEYWORDS"))
-    # Occupation des unités déployées PAR NIVEAU effectif possible d'une candidate (sol, et étage
-    # vue si >= 1) — plus d'union tous-niveaux (bug : une fig à l'étage bloquait le sol dessous).
-    occ_by_level: Dict[int, Set[Tuple[int, int]]] = {
-        0: _deployed_occupied_positions(game_state, squad_id, level=0)
-    }
-    if level >= 1:
-        occ_by_level[level] = _deployed_occupied_positions(game_state, squad_id, level=level)
+    # LES NIVEAUX où une candidate peut être taguée. Une seule expression les définit, et tout ce
+    # qui suit s'y adosse : occupation, cases acceptables, érosion, résolution par candidate. Poser
+    # la question à chaque consommateur laisse toujours l'un d'eux derrière (le producteur
+    # d'occupation l'était encore), et fait vivre la même condition à quatre endroits.
+    _upper_reachable = level >= 1 and _can_climb and bool(floor_hexes)
+    _levels = (0, level) if _upper_reachable else (0,)
 
     # Positions provisoires + niveau EFFECTIF des AUTRES figs de l'escouade (collision intra-squad,
     # même dérivation par position que le preview). provisional_plan override les positions des
@@ -569,47 +741,74 @@ def deployment_build_model_destinations_pool(
     for (fc, fr) in _model_footprint(game_state, model, int(ref_c), int(ref_r)):
         fx, fy, fz = offset_to_cube(int(fc), int(fr))
         fp_offsets.append((fx - rcx, fy - rcy, fz - rcz))
-    pool_cube = {offset_to_cube(int(c), int(r)) for (c, r) in pool_set}
-    wall_cube = {offset_to_cube(int(c), int(r)) for (c, r) in wall_hexes}
-    floor_cube = {offset_to_cube(int(c), int(r)) for (c, r) in floor_hexes}
-    blocked_cube_by_level: Dict[int, Set[Tuple[int, int, int]]] = {
-        lv: {
-            offset_to_cube(int(c), int(r))
-            for (c, r) in (occ_by_level[lv] | same_squad_by_level.get(lv, set()))
+    # Filtrage par ÉROSION (même primitive que le suivi de bloc) au lieu d'un `any` par case :
+    # « l'empreinte translatée tient-elle entièrement dans les cases acceptables ? ». Les cases
+    # acceptables sont la zone MOINS les murs et les positions occupées — et elles dépendent du
+    # niveau EFFECTIF de la candidate, d'où une érosion par niveau ATTEIGNABLE (cf. `_levels`).
+    # Mesuré sur l'aire d'arrivée Deep Strike : 1,6 s de `any` par case avant ce filtrage.
+    # Les coordonnées du pool sont déjà normalisées `(int, int)` par `_deploy_pool_set` : la
+    # soustraction d'ensembles fait donc le même travail que la comprehension qui les recastait.
+    #
+    # Les murs sont retirés UNE FOIS, hors de la boucle : ils ne dépendent pas du niveau, alors que
+    # l'occupation et les sœurs en dépendent. Les refaire par niveau réallouait un ensemble de
+    # ~60 000 tuples pour rien — mesuré 12,7 ms par appel à `level >= 1`. Associativité de la
+    # différence : `(pool − occ − sœurs − lc) − murs == (pool − murs) − occ − sœurs − lc`.
+    # L'occupation déployée est lue ICI, à son unique consommateur, et non pré-calculée dans un
+    # dict par niveau : c'est ce producteur-là qui s'était désynchronisé des niveaux réellement
+    # atteignables. Il ne peut plus, il itère `_levels`.
+    pool_free = pool_set - wall_hexes
+    allowed_by_level: List[Optional[AbstractSet[Tuple[int, int]]]] = []
+    for lv in _levels:
+        # Occupation des unités déployées AU NIVEAU EFFECTIF de la candidate — plus d'union
+        # tous-niveaux (bug : une fig à l'étage bloquait le sol dessous).
+        allowed = pool_free - _deployed_occupied_positions(game_state, squad_id, level=lv)
+        allowed -= same_squad_by_level.get(lv, set())
+        if lv == 0 and _low_clear and not _m_round:
+            allowed -= _low_clear
+        allowed_by_level.append(allowed)
+    # UNE seule érosion pour les deux niveaux : mêmes ancres, mêmes offsets, seul l'ensemble
+    # acceptable change. Deux appels séparés refaisaient les bornes d'ancres et le remappage de
+    # sortie — deux parcours complets du pool, 59,8 ms par appel à `level >= 1`.
+    kept_by_level: Dict[int, Set[Tuple[int, int]]] = dict(
+        zip(_levels, erode_pool_by_block_offsets_multi(pool_set, fp_offsets, allowed_by_level))
+    )
+    # Le niveau effectif d'une candidate n'est PAS connu d'avance : il vaut le niveau de vue si
+    # l'empreinte tient entièrement sur le plancher (§13.06 euclidien), sinon le sol.
+    #
+    # « L'empreinte touche-t-elle le plancher ? » se répondait en translatant l'empreinte sous
+    # CHAQUE case du pool — 19 tuples par case pour 59 050 cases, alors que 2 582 ancres (4,4 %)
+    # touchent réellement. On DILATE donc le plancher une fois par la forme de l'empreinte : la
+    # question devient une appartenance. Même ensemble d'ancres touchantes, mesuré 0,448 s → 0,032 s.
+    touching_floor: Set[Tuple[int, int]] = set()
+    if _upper_reachable:
+        from engine.hex_utils import cube_to_offset
+
+        touching_floor = {
+            cube_to_offset(fx - ox, fy - oy, fz - oz)
+            for (fx, fy, fz) in (offset_to_cube(int(c), int(r)) for c, r in floor_hexes)
+            for (ox, oy, oz) in fp_offsets
         }
-        for lv in occ_by_level
-    }
-    # Clairance verticale SOL (niveau 0) — miroir move. Base RONDE : PAS de blocage empreinte hex ici
-    # (le move n'en a pas), la clairance disque↔hexunion est appliquée par candidate plus bas. Base
-    # non-ronde : blocage empreinte hex (comme le move non-rond, empreinte discrète orientée).
-    if _low_clear and not _m_round:
-        blocked_cube_by_level[0] |= {offset_to_cube(int(c), int(r)) for (c, r) in _low_clear}
     destinations: List[Tuple[int, int]] = []
     eff_by_dest: Dict[Tuple[int, int], int] = {}
-    for (cc, rr) in pool_set:
-        bx, by, bz = offset_to_cube(int(cc), int(rr))
-        cells = [(bx + ox, by + oy, bz + oz) for (ox, oy, oz) in fp_offsets]
-        if any(cell not in pool_cube or cell in wall_cube for cell in cells):
-            continue
-        # Niveau effectif : étage vue si l'empreinte tient entièrement sur le plancher (euclidien §8.1),
-        # sinon sol. La clairance d'étage bas au SOL est la clairance disque du move (voir plus bas).
+    ground_kept = kept_by_level[0]
+    upper_kept = kept_by_level[level] if _upper_reachable else set()
+    for cell in pool_set:
         eff = 0
-        if level >= 1 and _can_climb and floor_cube and any(cell in floor_cube for cell in cells):
-            if footprint_within_floor(
-                int(cc), int(rr), _m_shape, _m_base, _m_orient, floor_hexes, floor_polys
-            ):
-                eff = level
-        if any(cell in blocked_cube_by_level.get(eff, blocked_cube_by_level[0]) for cell in cells):
+        if cell in touching_floor and footprint_within_floor(
+            cell[0], cell[1], _m_shape, _m_base, _m_orient, floor_hexes, floor_polys
+        ):
+            eff = level
+        if cell not in (upper_kept if eff else ground_kept):
             continue
         # Clairance verticale base RONDE au SOL — MIROIR EXACT du move : le disque du socle ne doit
         # chevaucher aucun hex _low_clear (clairance capsule stationnaire, obstacle = hexunion des étages
         # trop bas, rayon = socle). Identique au champ géodésique du move → deploy et move au même endroit.
         if eff == 0 and _lc_index:
-            _dcx, _dcy = _hex_center(int(cc), int(rr))
+            _dcx, _dcy = _hex_center(cell[0], cell[1])
             if disc_overlaps_indexed_hexes(_dcx, _dcy, _m_radius, _lc_index, _lc_bucket):
                 continue
-        destinations.append((int(cc), int(rr)))
-        eff_by_dest[(int(cc), int(rr))] = eff
+        destinations.append(cell)
+        eff_by_dest[cell] = eff
 
     # Miroir EXACT du move (movement_build_model_destinations_pool) : le blocage par cases hex
     # ci-dessus sous-estime le disque (~16% de recouvrement à 5 sous-hex passe entre les cases).
@@ -618,31 +817,69 @@ def deployment_build_model_destinations_pool(
     # cohérents. Tangence tolérée. Sœurs d'un autre étage : pas de gêne.
     from engine.hex_utils import Socle, footprints_overlap
 
-    m_shape = require_key(model, "BASE_SHAPE")
-    m_base = require_key(model, "BASE_SIZE")
-    m_orient = int(model.get("orientation", 0))  # get allowed
-    sibling_socles_by_level: Dict[int, List["Socle"]] = {}
+    # BORNE DE PORTÉE, exacte : deux socles ne peuvent se chevaucher que si la distance entre leurs
+    # centres est inférieure à la somme de leurs EXTENSIONS (rayon pour un socle rond ; pour une
+    # empreinte hex, la case la plus éloignée du centre plus le circumrayon d'un hex, puisqu'un
+    # chevauchement exige de partager une case ou de mordre un hex). Au-delà, la réponse est non
+    # sans calcul. Ce n'est donc PAS une approximation : le test euclidien reste seul juge à
+    # l'intérieur de la borne, il n'est simplement plus appelé là où il ne peut que répondre non.
+    # Mesuré : 256 374 appels sur une aire d'arrivée Deep Strike.
+    def _extent(shape: str, base_size: Any, col: int, row: int, fp: Any) -> float:
+        if shape == "round":
+            return round_base_radius_norm(base_size)
+        cx, cy = _hex_center(int(col), int(row))
+        reach = 0.0
+        for (fc, fr) in (fp or ()):
+            hx, hy = _hex_center(int(fc), int(fr))
+            reach = max(reach, math.hypot(hx - cx, hy - cy))
+        return reach + _HEX_CIRCUMRADIUS
+
+    # L'extension est calculée ICI, où la FORME et la TAILLE de la sœur sont sous la main : les
+    # relire sur le `Socle` construit demanderait de connaître sa sous-classe concrète (la classe
+    # abstraite ne déclare pas `base_size`).
+    sibling_reach_by_level: Dict[int, List[Tuple["Socle", float, float, float]]] = {}
     for sibling, sc, sr, sib_eff in sibling_states:
         s_shape = require_key(sibling, "BASE_SHAPE")
         s_base = require_key(sibling, "BASE_SIZE")
         s_fp = None if s_shape == "round" else _model_footprint(game_state, sibling, sc, sr)
-        sibling_socles_by_level.setdefault(sib_eff, []).append(
-            Socle(shape=s_shape, base_size=s_base, col=sc, row=sr, fp=s_fp)
+        s_cx, s_cy = _hex_center(int(sc), int(sr))
+        sibling_reach_by_level.setdefault(sib_eff, []).append(
+            (
+                Socle(shape=s_shape, base_size=s_base, col=sc, row=sr, fp=s_fp),
+                s_cx,
+                s_cy,
+                _extent(s_shape, s_base, sc, sr, s_fp),
+            )
         )
-    if sibling_socles_by_level:
+    if sibling_reach_by_level:
+        m_reach_round = round_base_radius_norm(_m_base) if _m_round else None
+
         filtered: List[Tuple[int, int]] = []
         for (dc, dr) in destinations:
-            same_level_socles = sibling_socles_by_level.get(eff_by_dest[(dc, dr)], [])
-            if not same_level_socles:
+            near = sibling_reach_by_level.get(eff_by_dest[(dc, dr)], [])
+            if not near:
                 filtered.append((dc, dr))
                 continue
-            m_fp = None if m_shape == "round" else compute_candidate_footprint(
-                dc, dr,
-                {"BASE_SHAPE": m_shape, "BASE_SIZE": m_base, "orientation": m_orient},
-                game_state,
-            )
-            m_socle = Socle(shape=m_shape, base_size=m_base, col=dc, row=dr, fp=m_fp)
-            if not any(footprints_overlap(m_socle, s) for s in same_level_socles):
+            mx, my = _hex_center(int(dc), int(dr))
+            m_fp = None
+            m_reach = m_reach_round
+            candidates = []
+            for sc_socle, sx, sy, s_reach in near:
+                if m_reach is None:
+                    # Socle non rond : son extension dépend de son empreinte, qu'il faut calculer.
+                    m_fp = compute_candidate_footprint(
+                        dc, dr,
+                        {"BASE_SHAPE": _m_shape, "BASE_SIZE": _m_base, "orientation": _m_orient},
+                        game_state,
+                    )
+                    m_reach = _extent(_m_shape, _m_base, dc, dr, m_fp)
+                if math.hypot(sx - mx, sy - my) <= m_reach + s_reach:
+                    candidates.append(sc_socle)
+            if not candidates:
+                filtered.append((dc, dr))
+                continue
+            m_socle = Socle(shape=_m_shape, base_size=_m_base, col=dc, row=dr, fp=m_fp)
+            if not any(footprints_overlap(m_socle, s) for s in candidates):
                 filtered.append((dc, dr))
         destinations = filtered
     # Destinations avec niveau EFFECTIF par case (miroir move_model_destinations : [col,row,level]) →
@@ -696,19 +933,10 @@ def deployment_build_squad_destinations_pool(
         x, y, z = offset_to_cube(int(cc), int(rr))
         offsets.append((x - rx, y - ry, z - rz))
 
-    # pool en CUBE → test d'appartenance direct, sans cube_to_offset dans la boucle interne.
-    pool_cube = {offset_to_cube(int(c), int(r)) for (c, r) in pool_set}
-    destinations: List[Tuple[int, int]] = []
-    for (cc, rr) in pool_set:
-        bx, by, bz = offset_to_cube(int(cc), int(rr))
-        ok = True
-        for (ox, oy, oz) in offsets:
-            if (bx + ox, by + oy, bz + oz) not in pool_cube:
-                ok = False
-                break
-        if ok:
-            destinations.append((int(cc), int(rr)))
-    return {"destinations": destinations}
+    # Le bloc entier translaté doit rester dans le pool : c'est l'érosion 03.02, la MÊME que
+    # pour l'empreinte d'une figurine, donc le même code.
+    kept = erode_pool_by_block_offsets(pool_set, offsets)
+    return {"destinations": [(int(c), int(r)) for (c, r) in pool_set if (int(c), int(r)) in kept]}
 
 
 def _normalize_plan_entry(e: Tuple[Any, ...]) -> Tuple[str, int, int, int]:
@@ -1384,7 +1612,7 @@ def execute_deployment_action(game_state: Dict[str, Any], action: Dict[str, Any]
     if int(unit_player) != int(current_deployer):
         return False, {"error": "unit_not_current_deployer", "unitId": unit_id, "current_deployer": current_deployer}
 
-    deployment_pools = require_key(deployment_state, "deployment_pools")
+    deployment_pools = require_key(game_state, "deployment_pools")
     pool = _get_deployment_pool(deployment_pools, int(current_deployer))
     pool_set = {(int(col), int(row)) for col, row in pool}
 

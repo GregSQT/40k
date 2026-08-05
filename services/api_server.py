@@ -2535,7 +2535,7 @@ def start_game():
             if unit_id in p2_positions_from_scenario:
                 dest = p2_positions_from_scenario[unit_id]
             if dest is None:
-                pools = dep_state.get("deployment_pools", {})
+                pools = gs.get("deployment_pools", {})
                 hex_pool = pools.get(deployer, pools.get(str(deployer), []))
                 if not hex_pool:
                     break
@@ -2558,13 +2558,24 @@ def start_game():
             if not ok:
                 break
             if res.get("phase_complete"):
-                command_handlers.command_phase_start(gs)
-                movement_handlers.movement_phase_start(gs)
+                # `engine.start_command_phase()` et pas le handler nu : 08.04 peut poser une
+                # decision de capacite de faction, et seul le moteur sait qui pilote le siege.
+                # Le retour est RESPECTE — enchainer sur le mouvement perdrait la decision.
+                if engine.start_command_phase().get("phase_complete"):  # get allowed
+                    movement_handlers.movement_phase_start(gs)
                 break
-        gs["current_player"] = 2
-        gs["turn"] = 1
-        command_handlers.command_phase_start(gs)
-        movement_handlers.movement_phase_start(gs)
+        # BASCULE VERS LE JOUEUR 2 — sous condition, et ce n'est pas une precaution.
+        # Le `break` ci-dessus sort de la boucle mais tombe ICI : sans garde, la phase de
+        # commandement qui vient de s'arreter sur une decision du joueur 1 est immediatement
+        # ecrasee. La decision reste posee sans que personne ne puisse y repondre (on joue
+        # desormais le tour de 2), l'overlay bloque le plateau — et si les DEUX armees portent
+        # une capacite de faction, la seconde pose LEVE dans `set_pending_agent_decision`,
+        # donc un 500 sur `/api/game/start`.
+        if not command_handlers.faction_decision_is_pending(gs):
+            gs["current_player"] = 2
+            gs["turn"] = 1
+            if engine.start_command_phase().get("phase_complete"):  # get allowed
+                movement_handlers.movement_phase_start(gs)
 
     # Snapshots temporels : réinitialiser l'historique et capturer + auto-sauver l'état de départ (PvP).
     _SNAPSHOT_STORE.reset()

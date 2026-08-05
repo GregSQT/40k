@@ -103,11 +103,19 @@ export interface UnitKeyword {
   keywordId: string;
 }
 
+/** Zones de déploiement, par joueur. Donnée de SCÉNARIO : le backend les publie à la racine du
+ * game_state quel que soit le mode de mise en place, alors que `DeploymentState` n'existe qu'en
+ * déploiement `active`. Elles vivaient dans `DeploymentState` jusqu'à ce qu'une unité en réserves
+ * 20.01 en ait besoin hors phase de déploiement. */
+export type DeploymentPools = Record<
+  string,
+  Array<[number, number] | { col: number; row: number }>
+>;
+
 export interface DeploymentState {
   current_deployer: PlayerId;
   deployable_units: Record<string, UnitId[]>;
   deployed_units: UnitId[];
-  deployment_pools: Record<string, Array<[number, number] | { col: number; row: number }>>;
   deployment_complete: boolean;
 }
 
@@ -383,6 +391,7 @@ export interface GameState {
   player_types?: Record<string, "human" | "ai">;
   deployment_type?: "random" | "fixed" | "active";
   deployment_state?: DeploymentState;
+  deployment_pools?: DeploymentPools;
   active_movement_unit?: string; // Active unit ID in movement phase
   /** Ancres BFS valides (une par destination d’empreinte) — affichage disques, pas union hex-par-hex. */
   valid_move_destinations_pool?: Array<[number, number]>;

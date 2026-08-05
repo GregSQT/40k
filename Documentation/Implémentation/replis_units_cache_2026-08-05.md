@@ -457,7 +457,7 @@ appelants**, ou au minimum les compter séparément. Fonction, test et libellé 
 
 **Correctif de comptage** : la Forme A ne comptait donc que **6 sites vivants**, pas 7.
 
-### 8.4 — Plomberie frontend rendue visiblement morte (SIGNALÉ, non traité)
+### 8.4 — Plomberie frontend V10 morte (PARTIELLEMENT TRAITÉE — lot à part ouvert)
 
 Deux clés de `game_state` n'ont plus **aucun écrivain** côté moteur :
 `fight_pile_in_footprint_zone` et `_fight_v11_pile_in_dests`. Leur seul producteur était
@@ -481,10 +481,21 @@ La leçon est la même que celle du §8 : « plus d'écrivain » ne se conclut p
 fonctionnalité est perdue » sans avoir cherché si un AUTRE chemin la sert. Constater la mort d'un
 symbole n'est pas constater la mort d'une fonctionnalité.
 
-**Rien n'est donc cassé, ni par ce lot ni avant lui.** Ce qui reste est du ménage : la branche V10
-du frontend (~30 lignes), les deux clés, leur typage dans `types/game.ts`, et
-`_fight_v11_clear_pile_in_preview` devenue un no-op. Les quatre points partent ensemble ou pas du
-tout. Décision utilisateur — ce n'est pas urgent.
+**Rien n'est donc cassé, ni par ce lot ni avant lui.**
+
+**SUITE DONNÉE (2026-08-05)** — un lot dédié a été ouvert, et le périmètre réel s'est révélé
+**bien plus large** que les « 4 points » annoncés ici : 3 clés mortes (pas 2), 2 branches TS
+(pile-in ET consolidation), et surtout **2 modes UI devenus inatteignables**
+(`pileInPreview` / `consolidationPreview`) dont dépendent ~26 sites de lecture, 2 handlers et des
+props threadées dans `BoardPvp.tsx` (12 223 lignes).
+
+Déjà fait et **MERGÉ dans `main`** (fusion `b8c5e0ef`) : le moteur
+(`_fight_v11_clear_pile_in_preview` + ses 4 appels) et les 2 branches V10 du hook. Vérifié
+pyright/pytest/tsc sur l'arbre fusionné ; **pas** par un essai PvP. Le reste de la chaîne morte
+(2 modes inatteignables, ~26 sites, handlers, props) est TOUJOURS dans `main` — lot A ouvert.
+
+Le détail exploitable — chaîne morte tracée, découpage, pièges d'outillage — est dans
+[`A_faire/menage_v10_pile_in_et_perf_charge_2026-08-05.md`](A_faire/menage_v10_pile_in_et_perf_charge_2026-08-05.md).
 
 **FAIT (2026-08-05, branche `menage_v10_frontend`).** Les quatre points sont partis ensemble, en
 deux commits. Commit `7b5871dc` : `_fight_v11_clear_pile_in_preview` + ses 4 appels, et les deux
@@ -526,7 +537,10 @@ dans la même fonction, la boucle de collision
 ordre de grandeur que ce qui vient d'être corrigé, et **antérieur à ce lot** (le `.get()` d'origine
 ne le rendait pas moins cher). Le corriger proprement demande de précalculer l'union des hexes
 occupés en un `set` avant les BFS — une transformation sémantique, pas un hissage, sur un chemin
-chaud qui mérite une mesure avant/après. **À traiter comme un sujet en soi.**
+chaud qui mérite une mesure avant/après. **À traiter comme un sujet en soi** — lot ouvert, worktree `perf_collision_charge`, protocole de
+mesure et benchmark dans
+[`A_faire/menage_v10_pile_in_et_perf_charge_2026-08-05.md`](A_faire/menage_v10_pile_in_et_perf_charge_2026-08-05.md)
+(lot B). **Rien n'a encore été mesuré ni corrigé.**
 
 **Le contrat de `is_unit_alive` est désormais écrit dans son docstring** (`shared_utils.py`) :
 « un `True` PROUVE la présence dans `units_cache` ». C'est ce qui autorise les sites en aval à

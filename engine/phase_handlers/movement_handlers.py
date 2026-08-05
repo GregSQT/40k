@@ -5007,21 +5007,24 @@ def _ingress_enemy_clearance_forbidden(
 def _opponent_deployment_zone_cells(game_state: Dict[str, Any], player: int) -> Set[Tuple[int, int]]:
     """Cases de la zone de déploiement ADVERSE (20.04, clause « before the Third Battle Round »).
 
-    Lue dans ``deployment_state["deployment_pools"]``, la MÊME collection que celle où le
-    déploiement pose les unités. Son absence est une erreur explicite : un scénario qui déclare
-    des réserves sans zones de déploiement rend la clause invérifiable, et l'ignorer
-    autoriserait un placement illégal en silence.
+    Lue dans ``game_state["deployment_pools"]``, la MÊME collection que celle où le déploiement
+    pose les unités. Son absence est une erreur explicite : un scénario qui déclare des réserves
+    sans zones de déploiement rend la clause invérifiable, et l'ignorer autoriserait un placement
+    illégal en silence.
+
+    Les zones sont publiées par le reset QUEL QUE SOIT le mode de mise en place. Cette fonction
+    lisait auparavant ``deployment_state``, qui n'existe qu'en mode `active` : en mode `fixed`,
+    une unité en réserves 20.01 rendait la clause — et le reset entier — impossible à évaluer.
     """
-    deployment_state = game_state.get("deployment_state")  # get allowed (scénario sans zones)
-    if deployment_state is None:
-        raise KeyError(
-            "ingress move (20.04) : aucune 'deployment_state' dans le game_state — la clause "
-            "« aucune figurine dans la zone de déploiement adverse avant le 3e round » ne peut "
-            "pas être vérifiée."
-        )
     from engine.phase_handlers.deployment_handlers import _get_deployment_pool
 
-    deployment_pools = require_key(deployment_state, "deployment_pools")
+    deployment_pools = game_state.get("deployment_pools")  # get allowed (scénario sans zones)
+    if deployment_pools is None:
+        raise KeyError(
+            "ingress move (20.04) : aucune zone de déploiement ('deployment_pools') dans le "
+            "game_state — la clause « aucune figurine dans la zone de déploiement adverse avant "
+            "le 3e round » ne peut pas être vérifiée."
+        )
     opponent = 2 if int(player) == 1 else 1
     # `_get_deployment_pool` porte déjà la convention de clé (int ou str) et son erreur
     # explicite : la recopier ici en aurait fait la 4e version dans le dépôt.

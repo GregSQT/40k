@@ -31,6 +31,9 @@ export class VonRyanLeaper extends TroopMeleeTroop {
     { keywordId: "von ryan leapers" },
   ];
 
+  // FACTION KEYWORDS
+  static FACTION_KEYWORDS = [{ keywordId: "TYRANIDS" }];
+
   // ICON
   static ICON = "/icons/VonRyanLeaper.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

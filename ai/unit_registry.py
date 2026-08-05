@@ -412,13 +412,42 @@ class UnitRegistry:
         else:
             properties["UNIT_KEYWORDS"] = []
 
+        # Pattern 1c : FACTION_KEYWORDS — JUMEAU EXACT de UNIT_KEYWORDS ci-dessus, et il doit le
+        # rester. Il tombait auparavant dans le Pattern 2 générique, qui rendait une liste de
+        # STRINGS (`["ORKS"]`) là où UNIT_KEYWORDS rend des dicts : deux formes pour une même
+        # nature de donnée, et tout lecteur devait porter les deux. C'est la faction d'armée que
+        # lisent Waaagh! (ORKS) et Oath of Moment (ADEPTUS ASTARTES), 19.03 comprise.
+        faction_keywords_match = re.search(
+            r'static\s+FACTION_KEYWORDS(?:\s*:\s*[^=]+)?\s*=\s*\[([\s\S]*?)\]\s*;',
+            content,
+            re.MULTILINE
+        )
+        if faction_keywords_match:
+            faction_block = faction_keywords_match.group(1).strip()
+            faction_keywords = []
+            faction_objects = re.findall(r'\{([\s\S]*?)\}', faction_block) if faction_block else []
+            for keyword_object in faction_objects:
+                keyword_id_match = re.search(r'keywordId\s*:\s*' + TS_QUOTED_STRING, keyword_object)
+                if not keyword_id_match:
+                    raise ValueError("FACTION_KEYWORDS must contain objects with keywordId")
+                keyword_id = keyword_id_match.group(2)
+                if not keyword_id or not keyword_id.strip():
+                    raise ValueError("FACTION_KEYWORDS keywordId cannot be empty")
+                faction_keywords.append({"keywordId": keyword_id})
+            properties["FACTION_KEYWORDS"] = faction_keywords
+        else:
+            properties["FACTION_KEYWORDS"] = []
+
         # Pattern 2: Static properties simples (HP_MAX, MOVE, etc.)
         static_pattern = r'static\s+([A-Z_]+)\s*=\s*([^;]+);'
         matches = re.findall(static_pattern, content)
-        
+
         for prop_name, prop_value in matches:
-            # Skip RNG_WEAPONS/CC_WEAPONS, UNIT_RULES, UNIT_KEYWORDS (handled separately)
-            if prop_name in ["RNG_WEAPONS", "CC_WEAPONS", "UNIT_RULES", "UNIT_KEYWORDS"]:
+            # Skip RNG_WEAPONS/CC_WEAPONS, UNIT_RULES, UNIT_KEYWORDS, FACTION_KEYWORDS
+            # (handled separately above)
+            if prop_name in [
+                "RNG_WEAPONS", "CC_WEAPONS", "UNIT_RULES", "UNIT_KEYWORDS", "FACTION_KEYWORDS",
+            ]:
                 continue
             
             # Clean up the value

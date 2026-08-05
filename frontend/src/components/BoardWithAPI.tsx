@@ -37,7 +37,11 @@ import { HelperPanel } from "./HelperPanel";
 import { SettingsMenu } from "./SettingsMenu";
 import SharedLayout from "./SharedLayout";
 import SnapshotRewind, { type SnapshotJump } from "./SnapshotRewind";
-import { StrategicReserveButton, StrategicReservesContainer } from "./StrategicReservesContainer";
+import {
+  ResetPlacementButton,
+  StrategicReserveButton,
+  StrategicReservesContainer,
+} from "./StrategicReservesContainer";
 import TooltipWrapper from "./TooltipWrapper";
 import { TurnPhaseTracker } from "./TurnPhaseTracker";
 import { type RosterRowUnitsCache, rosterRowBorderColor, UnitRosterRow } from "./UnitRosterRow";
@@ -1872,8 +1876,25 @@ export const BoardWithAPI: React.FC = () => {
                         tooltipSuffix={isCurrentDeployer ? "" : " (inactive this turn)"}
                         borderColor={rosterRowBorderColor(player)}
                         haloGlow={HALO_GLOW}
-                        trailing={
-                          isSelected ? (
+                        trailing={(() => {
+                          if (!isSelected) return undefined;
+                          // Escouade posée EN PROVISOIRE : l'emplacement passe au `Reset`. Le
+                          // moteur, lui, accepterait toujours la mise en réserves (le plan est
+                          // purement client, l'escouade est encore dans `deployable_units`) — le
+                          // dépôt n'est donc pas devenu illégal, il devient inatteignable sans
+                          // repasser par Reset. Choix d'interface assumé : UN seul bouton à cet
+                          // endroit, celui du geste le plus probable une fois l'escouade posée.
+                          if (apiProps.deployPlan?.placed) {
+                            return (
+                              <ResetPlacementButton
+                                onReset={() => {
+                                  setDeploymentTooltip(null);
+                                  apiProps.onCancelDeploy?.();
+                                }}
+                              />
+                            );
+                          }
+                          return (
                             <StrategicReserveButton
                               canDrop={canDrop}
                               onDrop={() => {
@@ -1884,8 +1905,8 @@ export const BoardWithAPI: React.FC = () => {
                                 apiProps.onDeployToStrategicReserves(unit.id);
                               }}
                             />
-                          ) : undefined
-                        }
+                          );
+                        })()}
                       />
                     );
                   })}
@@ -1901,6 +1922,25 @@ export const BoardWithAPI: React.FC = () => {
   const unitsById = new Map(
     (apiProps.gameState?.units ?? []).map((unit) => [String(unit.id), unit])
   );
+  // ── Capacités de faction (chantier 03) — 08.04 ───────────────────────────────────────────
+  // Le moteur ARRÊTE la phase de commandement sur ces deux décisions, exactement comme sur un
+  // choix de règle. Sans ces deux panneaux, la partie PvP ne repart pas : la désignation d'Oath
+  // n'est pas optionnelle (« select one unit from your opponent's army »).
+  const waaaghDecision = (() => {
+    const pending = apiProps.gameState?.pending_agent_decision ?? null;
+    return pending && pending.type === "waaagh_call" ? pending : null;
+  })();
+  const oathSelectionPlayer = apiProps.gameState?.pending_oath_selection ?? null;
+  // Les cibles légales : les MÊMES que celles du moteur (`oath_selectable_enemy_ids`) — unités
+  // adverses encore vivantes. Une liste plus large ferait proposer une désignation que
+  // `set_oath_target` refuserait.
+  const oathTargets =
+    oathSelectionPlayer === null
+      ? []
+      : (apiProps.gameState?.units ?? []).filter(
+          (unit) => unit.player !== oathSelectionPlayer && (unit.HP_CUR ?? 0) > 0
+        );
+
   const getRulePromptUnitLabel = (prompt: RuleChoicePrompt): string => {
     const unit = unitsById.get(prompt.unit_id);
     if (!unit) {
@@ -2039,6 +2079,12 @@ export const BoardWithAPI: React.FC = () => {
             currentPlayer: apiProps.gameState?.current_player,
           })}
           onSelectReserveUnit={apiProps.onSelectReserveUnitForIngress}
+          placingUnitId={
+            apiProps.deployPlan?.ingress && apiProps.deployPlan.placed
+              ? apiProps.deployPlan.unitId
+              : null
+          }
+          onCancelPlacement={apiProps.onCancelDeploy}
           phase={apiProps.gameState?.phase}
         />
       </ErrorBoundary>
@@ -2085,6 +2131,12 @@ export const BoardWithAPI: React.FC = () => {
             currentPlayer: apiProps.gameState?.current_player,
           })}
           onSelectReserveUnit={apiProps.onSelectReserveUnitForIngress}
+          placingUnitId={
+            apiProps.deployPlan?.ingress && apiProps.deployPlan.placed
+              ? apiProps.deployPlan.unitId
+              : null
+          }
+          onCancelPlacement={apiProps.onCancelDeploy}
           phase={apiProps.gameState?.phase}
         />
       </ErrorBoundary>
@@ -3798,6 +3850,75 @@ export const BoardWithAPI: React.FC = () => {
           </div>,
           document.body
         )}
+      {waaaghDecision && (
+        <div className="rule-choice-overlay">
+          <div className="deployment-panel__picker deployment-panel__picker--rule-choice">
+            <div className="deployment-panel__picker-title">Waaagh! — once per battle</div>
+            <div className="deployment-panel__picker-content deployment-panel__picker-content--rule-choice">
+              <div className="deployment-panel__picker-list deployment-panel__picker-list--rule-choice">
+                <div className="rule-choice-group">
+                  <div className="rule-choice-group__row">
+                    <div className="rule-choice-group__options-col">
+                      <div className="rule-choice-group__options">
+                        {/* L'INDEX est ce que le moteur attend, pas le libellé : l'ordre des
+                            candidats est contractuel (0 = appeler, 1 = passer). */}
+                        {waaaghDecision.options.map((option, optionIndex) => (
+                          <button
+                            key={option.label}
+                            type="button"
+                            className="deployment-panel__picker-item rule-choice-group__option"
+                            onClick={() => {
+                              void apiProps.onCallWaaagh(optionIndex);
+                            }}
+                          >
+                            {option.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div className="deployment-panel__picker-tooltip deployment-panel__picker-tooltip--rule-choice">
+                Jusqu'au début de votre prochaine phase de commandement : charge après Advance, +1
+                Force et +1 Attaques en mêlée, sauvegarde invulnérable 5+.
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {oathSelectionPlayer !== null && (
+        <div className="rule-choice-overlay">
+          <div className="deployment-panel__picker deployment-panel__picker--rule-choice">
+            <div className="deployment-panel__picker-title">
+              {`Oath of Moment — player ${oathSelectionPlayer} must select a target`}
+            </div>
+            <div className="deployment-panel__picker-content deployment-panel__picker-content--rule-choice">
+              <div className="deployment-panel__picker-list deployment-panel__picker-list--rule-choice">
+                {/* AUCUN bouton « aucune cible » : la règle dit « select one unit », et le
+                    masque moteur n'en ouvre pas non plus. Ajouter une sortie ici ferait diverger
+                    l'UI du moteur, qui refuserait l'action. */}
+                {oathTargets.map((unit) => (
+                  <button
+                    key={String(unit.id)}
+                    type="button"
+                    className="deployment-panel__picker-item"
+                    onClick={() => {
+                      void apiProps.onSelectOathTarget(unit.id);
+                    }}
+                  >
+                    {`${unit.DISPLAY_NAME ?? unit.unitType ?? unit.name ?? "Unit"} #${unit.id}`}
+                  </button>
+                ))}
+              </div>
+              <div className="deployment-panel__picker-tooltip deployment-panel__picker-tooltip--rule-choice">
+                Vos attaques contre cette unité relancent le jet de touche, et gagnent +1 au jet de
+                blessure si votre armée joue un détachement Codex sans sous-faction.
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       {activeRuleChoicePrompt && (
         <div className="rule-choice-overlay">
           <div

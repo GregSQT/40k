@@ -50,6 +50,8 @@ from engine.macro_intents import (
     DEPLOY_SLOTS,
     TOTAL_ACTION_SIZE,
     MAX_OBJECTIVES,
+    OATH_SLOT_BASE,
+    OATH_SLOTS,
     decode_agent_decision_action,
     is_agent_decision_action,
     is_zone_intent_action,
@@ -315,6 +317,24 @@ class ActionDecoder:
                 mask[CHOICE_BASE + option_index] = True
             return mask, []
 
+        # DÉSIGNATION D'OATH OF MOMENT (chantier 03) — même exclusivité que ci-dessus, pour la
+        # même raison : le moteur est arrêté au début de la phase de commandement sur un choix
+        # de joueur. Elle est en revanche NON OPTIONNELLE (« select one unit from your opponent's
+        # army ») : aucun slot « aucune cible », aucun WAIT, aucun zone intent tant qu'elle n'est
+        # pas jouée. Fermer la sortie est le seul moyen d'imposer une règle qui n'offre pas de
+        # choix de ne pas choisir.
+        oath_selection_slots = self.oath_selection_slots(game_state)
+        if oath_selection_slots is not None:
+            if not oath_selection_slots:
+                raise ValueError(
+                    "Oath of Moment : designation en attente mais aucun slot ouvert — le masque "
+                    "serait tout-faux, donc injouable. `command_step_command_abilities` ne pose "
+                    "la designation que s'il existe une unite ennemie vivante."
+                )
+            for action_int in oath_selection_slots:
+                mask[action_int] = True
+            return mask, []
+
         eligible_units = self._get_eligible_units_for_current_phase(game_state)
         current_phase = game_state["phase"]
 
@@ -422,6 +442,41 @@ class ActionDecoder:
                 mask[i] = True
 
         return mask, eligible_units
+
+    def oath_selection_slots(
+        self, game_state: Dict[str, Any]
+    ) -> Optional[Dict[int, str]]:
+        """`{action_int -> id d'escouade ennemie}` des `OATH_SLOTS` ouverts, ou None si aucune
+        désignation d'Oath n'est en attente.
+
+        SOURCE UNIQUE partagée par le masque, le décodage et la politique du bot — c'est ce qui
+        rend tout slot ouvert exécutable, et interdit qu'un slot masqué désigne une escouade
+        différente de celle que le décodeur en tirerait.
+
+        INVARIANT D1. Le slot *i* est indexé sur `get_enemy_slot_mapping`, EXACTEMENT le même
+        mapping que les slots de tir, de charge et de mêlée — donc la même ligne *i* du tenseur
+        ennemi de l'observation. Les désolidariser ferait pointer l'action `OATH_SLOT_i` et la
+        ligne *i* observée sur deux escouades différentes sans que rien ne lève : l'agent
+        désignerait une cible en croyant en désigner une autre.
+
+        Un slot dont l'escouade est morte ou absente du mapping reste FERMÉ : `set_oath_target`
+        refuserait la désignation, et un masque qui l'ouvrirait produirait une action invalide.
+        """
+        pending_player = game_state.get("pending_oath_selection")  # get allowed : None = aucune
+        if pending_player is None:
+            return None
+        from engine.phase_handlers.command_handlers import oath_selectable_enemy_ids
+        from engine.phase_handlers.shared_utils import get_enemy_slot_mapping
+
+        player_int = int(pending_player)
+        selectable = set(oath_selectable_enemy_ids(game_state, player_int))
+        enemy_slot_ids = get_enemy_slot_mapping(game_state, player_int)
+        slots: Dict[int, str] = {}
+        for slot_index, squad_id in enumerate(enemy_slot_ids):
+            if squad_id is None or str(squad_id) not in selectable:
+                continue
+            slots[OATH_SLOT_BASE + slot_index] = str(squad_id)
+        return slots
 
     def get_deployment_active_unit(self, game_state: Dict[str, Any]) -> Dict[str, Any]:
         """L'unité sur laquelle porte la décision de déploiement — SOURCE UNIQUE obs ↔ masque.
@@ -694,6 +749,27 @@ class ActionDecoder:
                 )
             return {"action": "agent_decision", "option_index": option_index}
 
+        # Désignation d'Oath of Moment : prime sur la phase pour la MÊME raison que les CHOICE.
+        # La cible est relue dans la source unique du masque, jamais recalculée ici — c'est ce
+        # qui garantit que le slot joué désigne l'escouade que le masque avait ouverte.
+        if action_int in OATH_SLOTS:
+            oath_slots = self.oath_selection_slots(game_state)
+            if oath_slots is None:
+                raise ValueError(
+                    f"convert_squad_action: action OATH_SLOT {action_int} sans designation "
+                    "d'Oath en attente — le masque n'aurait pas du l'autoriser"
+                )
+            if action_int not in oath_slots:
+                raise ValueError(
+                    f"convert_squad_action: slot d'Oath {action_int} FERME "
+                    f"(ouverts : {sorted(oath_slots)}) — action hors masque"
+                )
+            return {
+                "action": "select_oath_target",
+                "player": int(require_key(game_state, "pending_oath_selection")),
+                "unitId": oath_slots[action_int],
+            }
+
         # Zone intents (26-40) : command uniquement
         if is_zone_intent_action(action_int):
             if current_phase != "command":
@@ -907,8 +983,7 @@ class ActionDecoder:
         if current_deployer in self._deployment_pool_cache:
             return self._deployment_pool_cache[current_deployer]
 
-        deployment_state = require_key(game_state, "deployment_state")
-        deployment_pools = require_key(deployment_state, "deployment_pools")
+        deployment_pools = require_key(game_state, "deployment_pools")
         pool = deployment_pools.get(current_deployer, deployment_pools.get(str(current_deployer)))
         if pool is None:
             raise KeyError(f"deployment_pools missing player {current_deployer}")
@@ -1159,8 +1234,7 @@ class ActionDecoder:
         if enemy_deployed:
             return enemy_deployed
 
-        deployment_state = require_key(game_state, "deployment_state")
-        deployment_pools = require_key(deployment_state, "deployment_pools")
+        deployment_pools = require_key(game_state, "deployment_pools")
         if enemy_player in deployment_pools:
             enemy_pool = deployment_pools[enemy_player]
         elif str(enemy_player) in deployment_pools:
@@ -1182,8 +1256,7 @@ class ActionDecoder:
     ) -> List[tuple[int, int]]:
         """Get enemy deployment pool hexes (stable reference for potential LoS)."""
         enemy_player = 2 if int(current_deployer) == 1 else 1
-        deployment_state = require_key(game_state, "deployment_state")
-        deployment_pools = require_key(deployment_state, "deployment_pools")
+        deployment_pools = require_key(game_state, "deployment_pools")
         if enemy_player in deployment_pools:
             enemy_pool = deployment_pools[enemy_player]
         elif str(enemy_player) in deployment_pools:

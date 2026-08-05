@@ -489,10 +489,24 @@ def get_agent_scenario_file(config, agent_key, training_config_name, scenario_ov
         )
 
     # No valid scenario found
+    #
+    # Le message nomme AUSSI les trois mots-clés de rotation. Sans eux il est trompeur : il
+    # décrit un problème de NOMMAGE DE FICHIER alors que la cause la plus fréquente est un
+    # `--scenario <mot inconnu>`, qui fait retomber l'appelant sur la voie « scénario unique »
+    # au lieu de la rotation. Diagnostic vécu le 2026-08-05 : `--scenario training` a été lu
+    # comme « les scénarios du dossier training/ », et l'erreur a fait conclure à un scénario
+    # d'agent mal nommé — alors que `--scenario bot` fonctionnait.
+    scenario_dirs = ", ".join(os.path.basename(d) or d for d in search_dirs)
     raise FileNotFoundError(
-        f"No scenario file found for agent '{agent_key}' with phase '{training_config_name}'. "
-        f"Supported naming is: 'scenario_{training_config_name}.json', "
-        f"'scenario_{training_config_name}-*.json', or '{training_config_name}_scenario_*.json'."
+        f"No scenario file found for agent '{agent_key}' with phase '{training_config_name}'"
+        + (f" (searched in: {scenario_dirs})" if scenario_dirs else "")
+        + ".\n"
+        f"  - Pour faire tourner TOUS les scenarios d'entrainement de l'agent, `--scenario` "
+        f"attend un des mots-cles de ROTATION : 'bot', 'self' ou 'all' "
+        f"(les dossiers holdout_* en sont exclus : ce sont les jeux de test).\n"
+        f"  - Pour UN scenario precis, `--scenario` attend son nom ou son chemin, avec l'un de "
+        f"ces nommages : 'scenario_<nom>.json', 'scenario_{training_config_name}.json', "
+        f"'scenario_{training_config_name}-*.json', ou '{training_config_name}_scenario_*.json'."
     )
 
 

@@ -47,3 +47,61 @@ def test_terrain_zone_random_deployment_gets_pool():
     eng = _load(str(BANK_DIR / "scenario_training_armageddon.json"))
     pools = eng.config.get("deployment_pools")
     assert isinstance(pools, dict) and sorted(pools.keys()) == [1, 2]
+
+
+def _pinned_mode_pools(eng, active_ratio: float):
+    """Rejoue un reset avec le mode de mise en place ÉPINGLÉ, rend (mode, zones par joueur)."""
+    assert eng.training_config is not None
+    eng.training_config = dict(eng.training_config)
+    eng.training_config["deployment_mode_schedule"] = {
+        "enabled": True,
+        "training_only": False,
+        "active_ratio_start": active_ratio,
+        "active_ratio_end": active_ratio,
+        "schedule": "linear",
+        "freeze_after_progress": 1.0,
+    }
+    eng.reset(seed=0)
+    gs = eng.game_state
+    pools = gs["deployment_pools"]
+    return str(gs["deployment_mode_schedule_mode"]), {
+        p: {(int(c), int(r)) for c, r in pools.get(p, pools.get(str(p)))} for p in (1, 2)
+    }
+
+
+def test_deployment_zones_are_identical_in_fixed_and_active_mode():
+    """Les zones ne dépendent PAS du mode de mise en place — et ne contiennent aucun mur.
+
+    VERROU DU DÉFAUT MESURÉ LE 2026-08-05. La soustraction des murs
+    (``engine/game_state.py``) n'était faite que si un joueur déployait en `random`/`active`.
+    Sans effet tant que les zones ne servaient qu'à la phase de déploiement ; mais depuis que le
+    reset les publie hors phase (``game_state["deployment_pools"]``), deux lecteurs les consomment
+    en mode `fixed` : ``squad_grid_anchor``, dont l'ancre est le BARYCENTRE du pool, et la clause
+    20.04 sur la zone adverse. Mesuré avant correctif : 0 mur en `active`, 149 et 151 en `fixed`
+    — la même unité sur le même plateau recevait un centrage de grille différent selon le tirage.
+
+    Le test compare les DEUX modes plutôt que de compter les murs d'un seul : c'est l'identité
+    qui est le contrat, le comptage n'en est qu'un symptôme.
+    """
+    eng = _load(str(BANK_DIR / "scenario_training_armageddon.json"))
+    walls = {(int(c), int(r)) for c, r in eng.game_state["wall_hexes"]}
+    assert walls, "scénario sans mur : ce test ne prouverait rien (vert vacant)"
+
+    mode_active, pools_active = _pinned_mode_pools(eng, 1.0)
+    mode_fixed, pools_fixed = _pinned_mode_pools(eng, 0.0)
+    assert mode_active == "active" and mode_fixed == "fixed", (
+        f"modes non imposés : actif={mode_active!r}, fixe={mode_fixed!r}"
+    )
+
+    for player in (1, 2):
+        assert pools_fixed[player], f"joueur {player} : zone vide en mode fixed"
+        assert pools_fixed[player] == pools_active[player], (
+            f"joueur {player} : la zone de déploiement dépend du mode de mise en place "
+            f"({len(pools_fixed[player])} hexes en fixed contre "
+            f"{len(pools_active[player])} en active) — même plateau, même scénario"
+        )
+        intruders = pools_fixed[player] & walls
+        assert not intruders, (
+            f"joueur {player} : {len(intruders)} hexes de MUR dans la zone de déploiement — "
+            "un mur n'est une case de déploiement légale dans aucun mode"
+        )

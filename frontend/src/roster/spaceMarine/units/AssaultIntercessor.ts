@@ -51,6 +51,9 @@ export class AssaultIntercessor extends TroopMeleeSwarm {
     { keywordId: "ASSAULT INTERCESSOR SQUAD" },
   ];
 
+  // FACTION KEYWORDS
+  static FACTION_KEYWORDS = [{ keywordId: "ADEPTUS ASTARTES" }];
+
   static ICON = "/icons/AssaultIntercessor.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = 13; // Size of the base

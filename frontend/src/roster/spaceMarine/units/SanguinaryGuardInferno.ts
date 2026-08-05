@@ -32,6 +32,9 @@ export class SanguinaryGuardInferno extends TroopMeleeTroop {
     { keywordId: "sanguinary guard" },
   ];
 
+  // FACTION KEYWORDS
+  static FACTION_KEYWORDS = [{ keywordId: "ADEPTUS ASTARTES" }, { keywordId: "BLOOD ANGELS" }];
+
   static ICON = "/icons/SanguinaryGuardInferno.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = 16; // Size of the base

@@ -92,6 +92,65 @@ meme convention pour les STATUTS (`battle_shock`, `oath_target`, `suppressed`), 
 seconde table d'embedding. Les deux domaines sont independants : un `obs_id` de capacite et un
 `obs_id` de statut peuvent porter la meme valeur.
 
+## 2 bis) Capacites de FACTION — Waaagh! et Oath of Moment
+
+Elles ne passent NI par `config/unit_rules.json`, NI par `static UNIT_RULES`, et c'est
+deliberе : une capacite de faction s'applique uniformement a toutes les unites de l'armee qui
+la portent. L'inscrire par unite reviendrait a repeter les memes ids sur 28 entites, a faire
+deborder `UNIT_ABILITY_SLOTS`, et a n'apporter aucune information — le reseau reconstitue
+l'effet a partir de « cette unite est orke » et de « Waaagh! actif », deux faits GLOBAUX.
+
+**Ou vit quoi**
+
+| | Fichier |
+|---|---|
+| Le mot-cle porteur | `static FACTION_KEYWORDS` de la datasheet (`ORKS`, `ADEPTUS ASTARTES`) |
+| L'etat de partie | `game_state["waaagh_called" / "waaagh_active" / "oath_target"]` (`engine/game_state.py`) |
+| La decision | 08.04, `command_handlers.command_step_command_abilities` |
+| Les predicats d'application | `engine/game_state.py` (`waaagh_applies_to_unit`, `effective_invul_save`, `oath_hit_reroll_applies`, `oath_wound_roll_bonus`, `unit_can_charge_after_advance`) |
+| L'observation | 6 drapeaux de `GLOBAL_BIN_FIELDS` + le statut `oath_target` (`config/unit_statuses.json`) |
+
+**`FACTION_KEYWORDS`** suit exactement la convention de `UNIT_KEYWORDS` : une liste d'objets
+`{ keywordId: "..." }`, exigee par `_build_enhanced_unit`, et unie sur l'escouade par la regle
+19.03 (un character attache fait entrer sa sous-faction dans l'armee).
+
+**Waaagh! (ORKS)** — decision binaire, UNE fois par partie, au debut de MA phase de commandement.
+Elle passe par le mecanisme generique de decision agent (`pending_agent_decision`, type
+`waaagh_call`, actions `CHOICE_0` = appeler / `CHOICE_1` = passer). L'ordre des candidats est
+CONTRACTUEL : c'est lui qui porte le sens, les deux candidats ayant un `effect_ids` vide (aucun
+roster n'accorde les effets du Waaagh!, ils viennent de la faction). Effets, sur les seules
+unites PORTANT le mot-cle : charge apres Advance, +1 Force et +1 Attaques aux armes de melee,
+sauvegarde invulnerable 5+ (un OCTROI : une 4+ existante est conservee).
+
+**Oath of Moment (ADEPTUS ASTARTES)** — designation d'une escouade ennemie, CHAQUE tour, et
+NON OPTIONNELLE. Ses candidats sont des entites deja observees : elle se parametre donc en
+DIMENSION D'ACTION + pointeur (`OATH_SLOTS`, `macro_intents`) et non en `CHOICE_k`. Le slot *i*
+indexe le MEME `get_enemy_slot_mapping` que le tir, la charge et la melee — donc la MEME ligne
+du tenseur ennemi (invariant D1). Effets contre la cible designee, pour les seules unites
+portant le mot-cle : relance de TOUT jet de touche rate (`hit_any_fail`), et +1 au jet de
+blessure si la clause de detachement est remplie.
+
+**La clause de detachement** a deux moities. « votre armee ne contient pas d'unite BLOOD ANGELS
+/ DARK ANGELS / DEATHWATCH / SPACE WOLVES » est un balayage REEL de l'armee (mots-cles de
+faction, unites mortes comprises : la regle parle de la LISTE d'armee). « vous utilisez un
+Detachement Codex: Space Marines » n'a aucun equivalent dans le moteur : c'est un champ
+OBLIGATOIRE de la config de scenario / d'armee, `uses_codex_detachment` (bool, ou dict par
+joueur). Absent alors qu'une armee ADEPTUS ASTARTES est en jeu -> ERREUR EXPLICITE, jamais de
+valeur par defaut : la deviner ferait apparaitre ou disparaitre un +1 au jet de blessure sans
+que personne ne l'ait decide.
+
+**Duree** — les deux capacites durent « until the start of your next Command phase ». Le
+nettoyage a donc lieu a l'ouverture de la phase de commandement suivante DU MEME JOUEUR
+(`expire_faction_abilities_for_player`), et surtout PAS en fin de tour : les deux effets
+doivent enjamber le tour adverse.
+
+**Sieges** — la decision est posee pour les deux camps, quel que soit le pilote. En gym, le
+siege repond par le MASQUE (agent comme bot). Hors gym, un siege IA est tranche par
+`W40KEngine._select_ai_waaagh_call` / `_select_ai_oath_target`. Un siege HUMAIN recoit la
+decision dans `game_state` (`pending_agent_decision` / `pending_oath_selection`) et la resout
+par les actions `agent_decision` (option 0/1) ou `select_oath_target` (`unitId`) — l'API les
+route deja ; il ne reste que les widgets React a brancher dessus.
+
 ## 3) Structure de `UNIT_RULES` dans une unite
 
 Exemple:

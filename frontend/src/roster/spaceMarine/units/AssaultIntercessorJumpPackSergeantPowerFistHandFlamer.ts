@@ -45,6 +45,9 @@ export class AssaultIntercessorJumpPackSergeantPowerFistHandFlamer extends Troop
     { keywordId: "ASSAULT INTERCESSORS WITH JUMP PACKS" },
   ];
 
+  // FACTION KEYWORDS
+  static FACTION_KEYWORDS = [{ keywordId: "ADEPTUS ASTARTES" }];
+
   static ICON = "/icons/AssaultIntercessorJumpPackSergeantPowerFistHandFlamer.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = 13; // Size of the base

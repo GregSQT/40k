@@ -34,6 +34,9 @@ export class WolfGuardTerminatorAssaultCannon extends EliteMeleeElite {
     { keywordId: "wolf guard terminator squad" },
   ];
 
+  // FACTION KEYWORDS
+  static FACTION_KEYWORDS = [{ keywordId: "ADEPTUS ASTARTES" }, { keywordId: "SPACE WOLVES" }];
+
   static ICON = "/icons/WolfGuardTerminatorAssaultCannon.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = 16; // Size of the base

@@ -319,9 +319,11 @@ export interface APIGameState {
     current_deployer: number;
     deployable_units: Record<string, string[]>;
     deployed_units: string[];
-    deployment_pools: Record<string, Array<[number, number] | { col: number; row: number }>>;
     deployment_complete: boolean;
   };
+  /** Zones de déploiement — à la RACINE du game_state, publiées quel que soit le mode de mise en
+   * place (elles ne dépendent pas de l'existence d'une phase de déploiement). */
+  deployment_pools?: Record<string, Array<[number, number] | { col: number; row: number }>>;
   victory_points?: Record<string, number>;
   command_points?: Record<string, number>;
   /** Réserves stratégiques (20.01/20.04) : ratio par joueur, dépôts autorisés, round de destruction. */
@@ -336,7 +338,31 @@ export interface APIGameState {
   winner?: number | null;
   pending_rule_choice_queue?: RuleChoicePrompt[];
   active_rule_choice_prompt?: RuleChoicePrompt | null;
+  /**
+   * Capacités de faction (chantier 03), 08.04 — le moteur ARRÊTE la phase de commandement
+   * dessus, exactement comme sur un `active_rule_choice_prompt`.
+   *
+   * `pending_agent_decision` de type `waaagh_call` : décision binaire, jouée par
+   * `agent_decision` + `option_index` (0 = appeler, 1 = passer — l'ordre est contractuel).
+   * `pending_oath_selection` : n° du joueur qui DOIT désigner une unité ennemie, jouée par
+   * `select_oath_target` + `unitId`. Non optionnelle : tant qu'elle n'est pas jouée, la phase
+   * n'avance pas — c'est la règle (« select one unit from your opponent's army »), pas un bug.
+   */
+  pending_agent_decision?: PendingAgentDecision | null;
+  pending_oath_selection?: number | null;
+  oath_target?: Record<string, string | null>;
+  waaagh_active?: Record<string, boolean>;
+  waaagh_called?: Record<string, boolean>;
 }
+
+/** Décision d'ARMÉE posée par 08.04. `unit_id` identifie le point de choix (`player_<n>`),
+ *  pas une escouade : une capacité de faction n'appartient à aucune datasheet. */
+export type PendingAgentDecision = {
+  type: string;
+  player: number;
+  unit_id: string;
+  options: Array<{ label: string }>;
+};
 
 /** Cache dernier payload ``move_preview_footprint_mask_loops`` + hash pour omission JSON (POST /action). */
 const _movePreviewMaskLoopsTransport = {
@@ -3000,7 +3026,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           // Fight phase : pile-in PAR-FIGURINE (mode fin type charge). La réponse d'activate_unit
           // (et des refresh suivants) porte ``pile_in_model_move:true`` → on entre/maintient le mode
           // et on applique le plan_state. Doit précéder la réinitialisation paresseuse
-          // (fight_subphase pile_in sans plan de figurine).
+          // (fight_subphase pile_in sans unité active).
           else if (data.game_state?.phase === "fight" && data.result?.pile_in_model_move === true) {
             const uid = parseInt(
               String(data.result.unitId ?? data.game_state.active_fight_unit),
@@ -5499,7 +5525,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       throw new Error("[DEPLOY] deployment_state absent du game_state");
     }
     const deployer = ds.current_deployer;
-    const poolRaw = ds.deployment_pools?.[String(deployer)];
+    const poolRaw = gameState?.deployment_pools?.[String(deployer)];
     if (!poolRaw || !Array.isArray(poolRaw)) {
       throw new Error(`[DEPLOY] deployment_pools manquant pour le déployeur ${deployer}`);
     }
@@ -5512,7 +5538,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       }
     }
     return set;
-  }, [gameState?.deployment_state]);
+  }, [gameState?.deployment_state, gameState?.deployment_pools]);
 
   /** Dry-run du plan de déploiement → maj voile rouge / cohésion / can_validate. */
   const refreshDeployPlanValidity = useCallback(
@@ -6047,6 +6073,24 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         player: prompt.player,
         selectedRuleId: selectedDisplayRuleId,
       });
+    },
+    [executeAction]
+  );
+
+  // ── Capacités de faction (chantier 03) — 08.04 ────────────────────────────────────────────
+  // Deux mécanismes distincts côté moteur, deux actions distinctes ici. Ils ne se factorisent
+  // pas : le Waaagh! désigne un CANDIDAT par son index (l'ordre est contractuel), l'Oath désigne
+  // une ESCOUADE par son id. Les fondre derrière une action commune reperdrait cette différence.
+  const handleCallWaaagh = useCallback(
+    async (optionIndex: number) => {
+      await executeAction({ action: "agent_decision", option_index: optionIndex });
+    },
+    [executeAction]
+  );
+
+  const handleSelectOathTarget = useCallback(
+    async (targetUnitId: string | number) => {
+      await executeAction({ action: "select_oath_target", unitId: String(targetUnitId) });
     },
     [executeAction]
   );
@@ -7703,7 +7747,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       current_deployer: currentDeployer,
       deployable_units: deployableUnits,
       deployed_units: deployedUnits,
-      deployment_pools: gameState.deployment_state.deployment_pools,
       deployment_complete: gameState.deployment_state.deployment_complete,
     };
   }, [gameState?.deployment_state]);
@@ -7746,6 +7789,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       player_types: gameState.player_types,
       deployment_type: gameState.deployment_type,
       deployment_state: memoizedDeploymentState,
+      // Zones de déploiement : donnée de scénario, à la racine (elles survivent à la phase).
+      deployment_pools: gameState.deployment_pools,
       // 20.01/20.04 : ratio, dépôts autorisés et round de destruction — tous calculés par le
       // moteur, transportés tels quels jusqu'au conteneur de réserves.
       strategic_reserves: gameState.strategic_reserves,
@@ -7785,6 +7830,14 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       winner: gameState.winner,
       pending_rule_choice_queue: gameState.pending_rule_choice_queue,
       active_rule_choice_prompt: gameState.active_rule_choice_prompt,
+      // Capacités de faction (chantier 03) : la phase de commandement s'ARRÊTE dessus, donc
+      // l'UI doit les voir — sans ces deux champs, le joueur PvP verrait la partie ne plus
+      // avancer sans savoir pourquoi.
+      pending_agent_decision: gameState.pending_agent_decision,
+      pending_oath_selection: gameState.pending_oath_selection,
+      // Lus pour l'affichage : quelle unité est sous Oath, quel camp a un Waaagh! actif.
+      oath_target: gameState.oath_target,
+      waaagh_active: gameState.waaagh_active,
     };
   }, [
     gameState,
@@ -8034,6 +8087,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       ...blinkBoardPropsIdle,
       ruleChoicePrompt: null,
       onSelectRuleChoice: async (_prompt: RuleChoicePrompt, _selectedDisplayRuleId: string) => {},
+      onCallWaaagh: async (_optionIndex: number) => {},
+      onSelectOathTarget: async (_targetUnitId: string | number) => {},
       // blinkState removed - blinking is handled locally in UnitRenderer
       fightSubPhase: null,
       executeAITurn: async () => {},
@@ -8476,6 +8531,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     ...blinkBoardPropsReady,
     ruleChoicePrompt,
     onSelectRuleChoice: handleSelectRuleChoice,
+    // Capacités de faction (chantier 03) : l'état vient du `game_state` (déjà sérialisé par
+    // l'API), les deux actions partent d'ici.
+    onCallWaaagh: handleCallWaaagh,
+    onSelectOathTarget: handleSelectOathTarget,
     // blinkState removed - blinking is handled locally in UnitRenderer
     // Export charge roll info for failed charge display
     chargingUnitId: failedChargeRoll

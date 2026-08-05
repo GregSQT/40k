@@ -12,7 +12,11 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { StrategicReservesPlayerSummary, Unit } from "../types/game";
-import { StrategicReserveButton, StrategicReservesContainer } from "./StrategicReservesContainer";
+import {
+  ResetPlacementButton,
+  StrategicReserveButton,
+  StrategicReservesContainer,
+} from "./StrategicReservesContainer";
 import { UnitRosterRow } from "./UnitRosterRow";
 import { UnitStatusTable } from "./UnitStatusTable";
 
@@ -169,6 +173,61 @@ describe("UnitRosterRow", () => {
     );
     fireEvent.click(screen.getByTestId("roster-row-points-7"));
     expect(onClick).not.toHaveBeenCalled();
+  });
+});
+
+describe("ResetPlacementButton", () => {
+  it("annule la mise en place au clic, sans consommer le geste", () => {
+    const onReset = vi.fn();
+    render(<ResetPlacementButton onReset={onReset} />);
+    fireEvent.click(screen.getByTestId("placement-reset"));
+    expect(onReset).toHaveBeenCalledTimes(1);
+  });
+
+  it("n'est PAS désactivé — se dédire reste toujours possible", () => {
+    render(<ResetPlacementButton onReset={() => {}} />);
+    expect((screen.getByTestId("placement-reset") as HTMLButtonElement).disabled).toBe(false);
+  });
+});
+
+describe("StrategicReservesContainer — Reset d'une arrivée", () => {
+  it("porte le Reset sur la ligne de l'escouade en cours de placement, et sur elle seule", () => {
+    const onCancel = vi.fn();
+    render(
+      <StrategicReservesContainer
+        {...CONTAINER_PROPS}
+        reserveUnits={[reserveUnit(7), reserveUnit(9)]}
+        summary={SUMMARY}
+        canSelectReserveUnit={true}
+        placingUnitId={7}
+        onCancelPlacement={onCancel}
+      />
+    );
+    const rows = screen.getAllByTestId(/^strategic-reserves-unit-/);
+    expect(rows).toHaveLength(2);
+    // Une seule ligne porte le bouton : celle dont l'arrivée est en cours.
+    expect(screen.getAllByTestId("placement-reset")).toHaveLength(1);
+    expect(
+      screen
+        .getByTestId("strategic-reserves-unit-7")
+        .querySelector("[data-testid='placement-reset']")
+    ).toBeTruthy();
+    fireEvent.click(screen.getByTestId("placement-reset"));
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it("ne porte aucun Reset quand aucune arrivée n'est en cours", () => {
+    render(
+      <StrategicReservesContainer
+        {...CONTAINER_PROPS}
+        reserveUnits={[reserveUnit(7)]}
+        summary={SUMMARY}
+        canSelectReserveUnit={true}
+        placingUnitId={null}
+        onCancelPlacement={() => {}}
+      />
+    );
+    expect(screen.queryByTestId("placement-reset")).toBeNull();
   });
 });
 
