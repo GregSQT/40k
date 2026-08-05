@@ -6,7 +6,7 @@ Footprint-aware: validates entire unit footprint (multi-hex bases) during deploy
 """
 
 import math
-from typing import AbstractSet, Dict, Any, Iterable, Tuple, List, Optional, Set
+from typing import AbstractSet, Dict, Any, Iterable, Sequence, Tuple, List, Optional, Set
 from shared.data_validation import require_key
 from engine.game_utils import get_unit_by_id
 from engine.combat_utils import set_unit_coordinates
@@ -463,32 +463,77 @@ def erode_pool_by_block_offsets(
     offset un simple DÉCALAGE de cette grille : l'érosion est le ET logique des décalages.
     Le résultat est IDENTIQUE au test case-par-case — c'est la même condition, écrite en une fois
     (verrouillé par les tests d'oracle naïf de `test_strategic_reserves_20.py`).
+
+    Un seul ``allowed`` : passe-plat vers `erode_pool_by_block_offsets_multi`, qui porte le calcul.
+    Les appelants qui érodent le MÊME pool avec plusieurs ensembles acceptables (le pool de mise en
+    place, un par niveau) doivent appeler la variante multi directement — voir son en-tête.
+    """
+    return erode_pool_by_block_offsets_multi(pool_set, offsets, (allowed,))[0]
+
+
+def erode_pool_by_block_offsets_multi(
+    pool_set: AbstractSet[Tuple[int, int]],
+    offsets: Iterable[Tuple[int, int, int]],
+    allowed_sets: Sequence[Optional[AbstractSet[Tuple[int, int]]]],
+) -> List[Set[Tuple[int, int]]]:
+    """Érosion 03.02 du MÊME pool par PLUSIEURS ensembles de cases acceptables, en une passe.
+
+    POURQUOI CETTE VARIANTE EXISTE. Le pool de mise en place érode le même pool une fois par
+    NIVEAU (sol, étage) : mêmes ancres, mêmes offsets, seul l'ensemble acceptable change. Or deux
+    blocs du calcul ne dépendent QUE du pool et des offsets — les bornes des ancres et le
+    remappage de sortie, soit deux parcours complets de ~60 000 ancres avec conversion en cube.
+    Les refaire par niveau coûtait 59,8 ms par appel à `level >= 1`, ~22 % du temps de
+    `deployment_build_model_destinations_pool`.
+
+    Rend une liste PARALLÈLE à ``allowed_sets`` : ``resultat[i]`` est l'érosion par
+    ``allowed_sets[i]``. Un ``None`` y vaut « le pool lui-même » (cas du suivi de bloc), exactement
+    comme le paramètre ``allowed`` de la fonction à un seul ensemble.
     """
     import numpy as np
 
     from engine.hex_utils import offset_to_cube
 
     if not pool_set:
-        return set()
-    allowed_set = pool_set if allowed is None else allowed
-    if not allowed_set:
-        return set()
+        return [set() for _ in allowed_sets]
     offsets = list(offsets)
-    if not offsets:
-        return {(int(c), int(r)) for c, r in pool_set}
 
+    # Les cas dégénérés se tranchent PAR ENSEMBLE, dans l'ordre de la version à un seul argument :
+    # un ensemble acceptable vide rend l'ensemble vide, même quand il n'y a aucun offset.
+    resolved: List[AbstractSet[Tuple[int, int]]] = []
+    results: List[Optional[Set[Tuple[int, int]]]] = []
+    for entry in allowed_sets:
+        allowed_set = pool_set if entry is None else entry
+        resolved.append(allowed_set)
+        results.append(set() if not allowed_set else None)
+
+    if not offsets:
+        # Aucun offset : toute ancre convient, quel que soit l'ensemble acceptable non vide.
+        whole_pool = {(int(c), int(r)) for c, r in pool_set}
+        return [set(whole_pool) if res is None else res for res in results]
+
+    # ---- Travail qui ne dépend QUE du pool et des offsets : fait UNE fois ---------------------
     # Bornes des ancres en UNE passe. La liste intermédiaire des ~60 000 couples n'avait aucun
-    # autre lecteur que ces quatre extrema, et quatre `min`/`max` la reparcouraient : 27,9 ms
-    # contre 6,7 ms ici, par appel d'érosion — et cette fonction est appelée une fois par niveau.
-    # `pool_set` est non vide (garde ci-dessus) : la 1re ancre amorce les quatre bornes, pas de
-    # sentinelle ni de branche par itération.
+    # autre lecteur que quatre extrema, et quatre `min`/`max` la reparcouraient (27,9 ms contre
+    # 6,7 ms). `pool_set` est non vide (garde ci-dessus) : la 1re ancre amorce les quatre bornes.
+    #
+    # L'index de grille de chaque ancre n'est MÉMORISÉ QUE s'il servira plus d'une fois. Le
+    # matérialiser systématiquement coûtait 45 ms de plus sur le cas à UN SEUL ensemble — le plus
+    # fréquent, le déploiement au sol — pour n'en économiser que 15 sur le cas à deux. MESURÉ,
+    # après avoir cru l'inverse : une liste de 66 000 tuples n'est pas gratuite face à une boucle
+    # qui streame.
+    reuse_anchors = sum(1 for res in results if res is None) > 1
+    anchors: List[Tuple[Tuple[int, int], int, int]] = []
     _pool_iter = iter(pool_set)
     _c0, _r0 = next(_pool_iter)
     _x0, _y0, _z0 = offset_to_cube(int(_c0), int(_r0))
     ax_min = ax_max = _x0
     az_min = az_max = _z0
+    if reuse_anchors:
+        anchors.append(((int(_c0), int(_r0)), _x0, _z0))
     for c, r in _pool_iter:
         x, _y, z = offset_to_cube(int(c), int(r))
+        if reuse_anchors:
+            anchors.append(((int(c), int(r)), x, z))
         # `elif` légitime : `ax_min <= ax_max`, donc une ancre sous le min ne peut pas dépasser
         # le max. Même raisonnement sur z.
         if x < ax_min:
@@ -510,34 +555,53 @@ def erode_pool_by_block_offsets(
     oz_max = max(oz for _ox, _oy, oz in offsets)
     gx_min, gx_max = ax_min + ox_min, ax_max + ox_max
     gz_min, gz_max = az_min + oz_min, az_max + oz_max
-    grid = np.zeros((gx_max - gx_min + 1, gz_max - gz_min + 1), dtype=bool)
-    marked_x = []
-    marked_z = []
-    for c, r in allowed_set:
-        x, _y, z = offset_to_cube(int(c), int(r))
-        if gx_min <= x <= gx_max and gz_min <= z <= gz_max:
-            marked_x.append(x - gx_min)
-            marked_z.append(z - gz_min)
-    if not marked_x:
-        return set()
-    grid[np.fromiter(marked_x, dtype=np.int64), np.fromiter(marked_z, dtype=np.int64)] = True
-
     core_w = ax_max - ax_min + 1
     core_h = az_max - az_min + 1
-    keep = np.ones((core_w, core_h), dtype=bool)
-    for ox, _oy, oz in set(offsets):
-        sx = ax_min + ox - gx_min
-        sz = az_min + oz - gz_min
-        keep &= grid[sx : sx + core_w, sz : sz + core_h]
-        if not keep.any():
-            return set()
+    unique_offsets = set(offsets)
 
-    out: Set[Tuple[int, int]] = set()
-    for (cc, rr) in pool_set:
-        x, _y, z = offset_to_cube(int(cc), int(rr))
-        if keep[x - ax_min, z - az_min]:
-            out.add((int(cc), int(rr)))
-    return out
+    # ---- Travail propre à CHAQUE ensemble acceptable ------------------------------------------
+    for index, allowed_set in enumerate(resolved):
+        if results[index] is not None:
+            continue
+        grid = np.zeros((gx_max - gx_min + 1, gz_max - gz_min + 1), dtype=bool)
+        marked_x = []
+        marked_z = []
+        for c, r in allowed_set:
+            x, _y, z = offset_to_cube(int(c), int(r))
+            if gx_min <= x <= gx_max and gz_min <= z <= gz_max:
+                marked_x.append(x - gx_min)
+                marked_z.append(z - gz_min)
+        if not marked_x:
+            results[index] = set()
+            continue
+        grid[np.fromiter(marked_x, dtype=np.int64), np.fromiter(marked_z, dtype=np.int64)] = True
+
+        keep = np.ones((core_w, core_h), dtype=bool)
+        emptied = False
+        for ox, _oy, oz in unique_offsets:
+            sx = ax_min + ox - gx_min
+            sz = az_min + oz - gz_min
+            keep &= grid[sx : sx + core_w, sz : sz + core_h]
+            if not keep.any():
+                emptied = True
+                break
+        if emptied:
+            results[index] = set()
+            continue
+
+        out: Set[Tuple[int, int]] = set()
+        if anchors:
+            for cell, x, z in anchors:
+                if keep[x - ax_min, z - az_min]:
+                    out.add(cell)
+        else:
+            for cc, rr in pool_set:
+                x, _y, z = offset_to_cube(int(cc), int(rr))
+                if keep[x - ax_min, z - az_min]:
+                    out.add((int(cc), int(rr)))
+        results[index] = out
+
+    return [res if res is not None else set() for res in results]
 
 
 def deployment_build_model_destinations_pool(
@@ -685,7 +749,7 @@ def deployment_build_model_destinations_pool(
     # dict par niveau : c'est ce producteur-là qui s'était désynchronisé des niveaux réellement
     # atteignables. Il ne peut plus, il itère `_levels`.
     pool_free = pool_set - wall_hexes
-    kept_by_level: Dict[int, Set[Tuple[int, int]]] = {}
+    allowed_by_level: List[Optional[AbstractSet[Tuple[int, int]]]] = []
     for lv in _levels:
         # Occupation des unités déployées AU NIVEAU EFFECTIF de la candidate — plus d'union
         # tous-niveaux (bug : une fig à l'étage bloquait le sol dessous).
@@ -693,7 +757,13 @@ def deployment_build_model_destinations_pool(
         allowed -= same_squad_by_level.get(lv, set())
         if lv == 0 and _low_clear and not _m_round:
             allowed -= _low_clear
-        kept_by_level[lv] = erode_pool_by_block_offsets(pool_set, fp_offsets, allowed=allowed)
+        allowed_by_level.append(allowed)
+    # UNE seule érosion pour les deux niveaux : mêmes ancres, mêmes offsets, seul l'ensemble
+    # acceptable change. Deux appels séparés refaisaient les bornes d'ancres et le remappage de
+    # sortie — deux parcours complets du pool, 59,8 ms par appel à `level >= 1`.
+    kept_by_level: Dict[int, Set[Tuple[int, int]]] = dict(
+        zip(_levels, erode_pool_by_block_offsets_multi(pool_set, fp_offsets, allowed_by_level))
+    )
     # Le niveau effectif d'une candidate n'est PAS connu d'avance : il vaut le niveau de vue si
     # l'empreinte tient entièrement sur le plancher (§13.06 euclidien), sinon le sol.
     #
