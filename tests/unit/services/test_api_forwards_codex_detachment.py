@@ -101,6 +101,50 @@ def test_changer_de_roster_remplace_la_clause_du_seul_joueur_concerne(monkeypatc
     )
 
 
+def test_un_etat_restitue_ramene_la_clause_du_roster_qu_il_ramene(monkeypatch) -> None:
+    """Snapshot / « charger le début de partie » : la clause suit le roster restitué.
+
+    `config` est déclaré STATIQUE par `game_snapshots._GS_STATIC_KEYS` (jamais capturé, ré-attaché
+    depuis l'engine vivant). C'est exact tant que rien ne l'écrit en partie — or le choix de roster
+    en déploiement, lui, l'écrit. Mesuré avant correction : capture (4 unités, clause `True`) →
+    changement de roster (13 unités, clause `False`) → restauration → 4 unités mais clause restée
+    `False`, soit le roster du scénario jouant avec le +1 au jet de blessure de l'armée abandonnée.
+    """
+    import services.api_server as api
+    from services.game_snapshots import apply_live_state, capture_live_state
+
+    api.initialize_engine(api._default_board_scenario_path("scenario_pvp.json"))
+    engine = api.engine
+    engine.reset()
+    capture = capture_live_state(engine)
+    unites_du_scenario = len(engine.game_state["units"])
+    assert uses_codex_detachment(engine.game_state, 1) is True, "état de départ non discriminant"
+
+    real_loader = api._load_army_file
+    monkeypatch.setattr(
+        api,
+        "_load_army_file",
+        lambda name: {**copy.deepcopy(real_loader(name)), "uses_codex_detachment": False},
+    )
+    ok, result = api._execute_change_roster_action(
+        engine, {"army_file": "v10_tyranids.json", "player": 1}
+    )
+    assert ok, f"change_roster refusé : {result}"
+    assert uses_codex_detachment(engine.game_state, 1) is False
+    assert len(engine.game_state["units"]) != unites_du_scenario, (
+        "le roster échangé ne se distingue pas de celui du scénario : rien à observer"
+    )
+
+    apply_live_state(engine, capture)
+
+    assert len(engine.game_state["units"]) == unites_du_scenario, "unités non restituées"
+    assert uses_codex_detachment(engine.game_state, 1) is True, (
+        "le roster du scénario est revenu avec la clause de l'armée abandonnée"
+    )
+    # Un seul objet config : `engine.config` et `game_state["config"]` ne doivent pas diverger.
+    assert engine.config is engine.game_state["config"]
+
+
 def _fake_armies_dir(tmp_path: pathlib.Path, payload: dict) -> pathlib.Path:
     """Un dossier `config/armies` de substitution portant UN fichier d'armée."""
     armies = tmp_path / "config" / "armies"

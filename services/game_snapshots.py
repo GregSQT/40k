@@ -19,6 +19,8 @@ import hashlib
 import json
 from typing import Any, Dict, List, Optional, Tuple
 
+from shared.data_validation import require_key
+
 # Ordre canonique des phases dans un tour de joueur (pour l'ordre chronologique / purge).
 PHASE_ORDER: Tuple[str, ...] = ("deployment", "command", "move", "shoot", "charge", "fight")
 
@@ -188,7 +190,20 @@ def capture_live_state(engine: Any) -> Dict[str, Any]:
         if not isinstance(v, _ENGINE_PLAIN_TYPES):
             continue
         engine_attrs[k] = copy.deepcopy(v)
-    return {"game_state": gs_copy, "engine_attrs": engine_attrs}
+    # Clause de détachement d'Oath : elle vit dans `config`, donc dans les clés STATIQUES, et
+    # c'est juste — elle appartient au roster et ne change pas d'un tour à l'autre. Elle change
+    # pourtant EN AMONT de la partie, quand un joueur choisit un autre roster en déploiement
+    # (`api_server._execute_change_roster_action`). Un état capturé avant ce choix décrit donc
+    # l'armée d'AVANT : le restituer sans sa clause rendrait le roster du scénario avec le +1 au
+    # jet de blessure de l'armée abandonnée. Capturée à part, et non sortie de `config` : la
+    # donnée reste celle du roster, elle n'est pas de l'état de jeu.
+    return {
+        "game_state": gs_copy,
+        "engine_attrs": engine_attrs,
+        "uses_codex_detachment": copy.deepcopy(
+            require_key(gs, "config").get("uses_codex_detachment")  # get allowed : None = scénario muet
+        ),
+    }
 
 
 # --- Empreinte de scénario : les clés statiques dont dépend l'état capturé -----------------
@@ -255,6 +270,14 @@ def rebuild_game_state(engine: Any, captured: Dict[str, Any]) -> Dict[str, Any]:
 def apply_live_state(engine: Any, captured: Dict[str, Any]) -> None:
     """Remplace l'état vivant de l'engine par un état capturé (clés statiques ré-attachées depuis le live)."""
     engine.game_state = rebuild_game_state(engine, captured)
+    if "uses_codex_detachment" in captured:  # absent des pickles d'avant le 2026-08-06
+        # Écrit DANS l'objet config vivant, jamais dans une copie : `engine.config` et
+        # `game_state["config"]` sont le MÊME dict, et deux copies de contenu égal se
+        # désynchroniseraient au premier écrivain suivant. `rebuild_game_state` (mode 'view'),
+        # lui, ne touche à rien : un aperçu n'attaque pas, donc ne lit jamais cette clause.
+        require_key(engine.game_state, "config")["uses_codex_detachment"] = copy.deepcopy(
+            captured["uses_codex_detachment"]
+        )
     for k, v in copy.deepcopy(captured["engine_attrs"]).items():
         setattr(engine, k, v)
     _sync_derived_engine_attrs(engine)
