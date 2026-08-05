@@ -554,8 +554,6 @@ def deployment_build_model_destinations_pool(
     squad_id = str(require_key(model, "squad_id"))
     player = int(require_key(model, "player"))
     pool_set = _deploy_pool_set(game_state, player, placement_pool_for_squad(game_state, squad_id))
-    board_cols = require_key(game_state, "board_cols")
-    board_rows = require_key(game_state, "board_rows")
     wall_hexes = game_state.get("wall_hexes", set())  # get allowed
     level = int(level or 0)
     terrain_areas = require_key(game_state, "terrain_areas")
@@ -602,13 +600,17 @@ def deployment_build_model_destinations_pool(
     # sol sous le bord (eff=level contourne _low_clear, ajouté au seul niveau 0). Non-montante → eff force 0.
     from engine.game_state import unit_can_occupy_upper_floor
     _can_climb = unit_can_occupy_upper_floor(require_key(unit, "UNIT_KEYWORDS"))
-    # Occupation des unités déployées PAR NIVEAU effectif possible d'une candidate (sol, et étage
-    # vue si >= 1) — plus d'union tous-niveaux (bug : une fig à l'étage bloquait le sol dessous).
+    # LES NIVEAUX où une candidate peut être taguée. Une seule expression les définit, et tout ce
+    # qui suit s'y adosse : occupation, cases acceptables, érosion, résolution par candidate. Poser
+    # la question à chaque consommateur laisse toujours l'un d'eux derrière (le producteur
+    # d'occupation l'était encore), et fait vivre la même condition à quatre endroits.
+    _upper_reachable = level >= 1 and _can_climb and bool(floor_hexes)
+    _levels = (0, level) if _upper_reachable else (0,)
+    # Occupation des unités déployées PAR NIVEAU effectif possible d'une candidate — plus d'union
+    # tous-niveaux (bug : une fig à l'étage bloquait le sol dessous).
     occ_by_level: Dict[int, Set[Tuple[int, int]]] = {
-        0: _deployed_occupied_positions(game_state, squad_id, level=0)
+        lv: _deployed_occupied_positions(game_state, squad_id, level=lv) for lv in _levels
     }
-    if level >= 1:
-        occ_by_level[level] = _deployed_occupied_positions(game_state, squad_id, level=level)
 
     # Positions provisoires + niveau EFFECTIF des AUTRES figs de l'escouade (collision intra-squad,
     # même dérivation par position que le preview). provisional_plan override les positions des
@@ -655,59 +657,54 @@ def deployment_build_model_destinations_pool(
     for (fc, fr) in _model_footprint(game_state, model, int(ref_c), int(ref_r)):
         fx, fy, fz = offset_to_cube(int(fc), int(fr))
         fp_offsets.append((fx - rcx, fy - rcy, fz - rcz))
-    # Seul le plancher reste lu en CUBE : il sert à savoir si l'empreinte TOUCHE l'étage avant de
-    # payer `footprint_within_floor`. Les ensembles pool/murs/occupation ne sont plus consultés
-    # case par case — c'est l'érosion ci-dessous qui les porte, en coordonnées d'offset.
-    floor_cube = {offset_to_cube(int(c), int(r)) for (c, r) in floor_hexes}
     # Filtrage par ÉROSION (même primitive que le suivi de bloc) au lieu d'un `any` par case :
     # « l'empreinte translatée tient-elle entièrement dans les cases acceptables ? ». Les cases
     # acceptables sont la zone MOINS les murs et les positions occupées — et elles dépendent du
-    # niveau EFFECTIF de la candidate, d'où une érosion PAR NIVEAU possible (au plus deux : le sol
-    # et le niveau de vue). Mesuré sur l'aire d'arrivée Deep Strike : 1,6 s de `any` par case.
-    # Le niveau de VUE n'est traité que si une candidate peut réellement y être taguée : unité
-    # capable de monter (§13.06) ET plancher présent. Sinon `eff` vaut 0 partout et TOUT ce qui
-    # concerne ce niveau — l'ensemble des cases acceptables comme son érosion, deux parcours du
-    # pool entier, mesurés 0,147 s chacun sur une aire de 60 000 cases — n'aurait aucun lecteur.
-    # La garde est donc posée AVANT le premier des deux, pas entre les deux.
-    _upper_reachable = level >= 1 and _can_climb and bool(floor_cube)
+    # niveau EFFECTIF de la candidate, d'où une érosion par niveau ATTEIGNABLE (cf. `_levels`).
+    # Mesuré sur l'aire d'arrivée Deep Strike : 1,6 s de `any` par case avant ce filtrage.
+    # Les coordonnées du pool sont déjà normalisées `(int, int)` par `_deploy_pool_set` : la
+    # soustraction d'ensembles fait donc le même travail que la comprehension qui les recastait.
     kept_by_level: Dict[int, Set[Tuple[int, int]]] = {}
-    for lv in occ_by_level:
-        if lv != 0 and not _upper_reachable:
-            continue
-        blocked_offsets = occ_by_level[lv] | same_squad_by_level.get(lv, set())
-        allowed = {
-            (int(c), int(r))
-            for (c, r) in pool_set
-            if (int(c), int(r)) not in wall_hexes and (int(c), int(r)) not in blocked_offsets
-        }
+    for lv in _levels:
+        allowed = pool_set - occ_by_level[lv] - same_squad_by_level.get(lv, set())
         if lv == 0 and _low_clear and not _m_round:
-            allowed -= {(int(c), int(r)) for (c, r) in _low_clear}
-        kept_by_level[lv] = erode_pool_by_block_offsets(pool_set, fp_offsets, allowed=allowed)
+            allowed = allowed - _low_clear
+        kept_by_level[lv] = erode_pool_by_block_offsets(
+            pool_set, fp_offsets, allowed=allowed - wall_hexes
+        )
     # Le niveau effectif d'une candidate n'est PAS connu d'avance : il vaut le niveau de vue si
-    # l'empreinte tient entièrement sur le plancher (§13.06 euclidien), sinon le sol. On ne le
-    # résout donc que sur les candidates qui touchent le plancher — exactement la garde d'origine,
-    # et un no-op complet en vue sol (`floor_cube` vide).
+    # l'empreinte tient entièrement sur le plancher (§13.06 euclidien), sinon le sol.
+    #
+    # « L'empreinte touche-t-elle le plancher ? » se répondait en translatant l'empreinte sous
+    # CHAQUE case du pool — 19 tuples par case pour 59 050 cases, alors que 2 582 ancres (4,4 %)
+    # touchent réellement. On DILATE donc le plancher une fois par la forme de l'empreinte : la
+    # question devient une appartenance. Même ensemble d'ancres touchantes, mesuré 0,448 s → 0,032 s.
+    touching_floor: Set[Tuple[int, int]] = set()
+    if _upper_reachable:
+        from engine.hex_utils import cube_to_offset
+
+        touching_floor = {
+            cube_to_offset(fx - ox, fy - oy, fz - oz)
+            for (fx, fy, fz) in (offset_to_cube(int(c), int(r)) for c, r in floor_hexes)
+            for (ox, oy, oz) in fp_offsets
+        }
     destinations: List[Tuple[int, int]] = []
     eff_by_dest: Dict[Tuple[int, int], int] = {}
     ground_kept = kept_by_level[0]
-    upper_kept = kept_by_level.get(level, set()) if _upper_reachable else set()
-    for (cc, rr) in pool_set:
-        cell = (int(cc), int(rr))
+    upper_kept = kept_by_level[level] if _upper_reachable else set()
+    for cell in pool_set:
         eff = 0
-        if _upper_reachable:
-            bx, by, bz = offset_to_cube(int(cc), int(rr))
-            cells = [(bx + ox, by + oy, bz + oz) for (ox, oy, oz) in fp_offsets]
-            if any(c in floor_cube for c in cells) and footprint_within_floor(
-                int(cc), int(rr), _m_shape, _m_base, _m_orient, floor_hexes, floor_polys
-            ):
-                eff = level
-        if cell not in (upper_kept if eff == level and eff != 0 else ground_kept):
+        if cell in touching_floor and footprint_within_floor(
+            cell[0], cell[1], _m_shape, _m_base, _m_orient, floor_hexes, floor_polys
+        ):
+            eff = level
+        if cell not in (upper_kept if eff else ground_kept):
             continue
         # Clairance verticale base RONDE au SOL — MIROIR EXACT du move : le disque du socle ne doit
         # chevaucher aucun hex _low_clear (clairance capsule stationnaire, obstacle = hexunion des étages
         # trop bas, rayon = socle). Identique au champ géodésique du move → deploy et move au même endroit.
         if eff == 0 and _lc_index:
-            _dcx, _dcy = _hex_center(int(cc), int(rr))
+            _dcx, _dcy = _hex_center(cell[0], cell[1])
             if disc_overlaps_indexed_hexes(_dcx, _dcy, _m_radius, _lc_index, _lc_bucket):
                 continue
         destinations.append(cell)
@@ -720,9 +717,6 @@ def deployment_build_model_destinations_pool(
     # cohérents. Tangence tolérée. Sœurs d'un autre étage : pas de gêne.
     from engine.hex_utils import Socle, footprints_overlap
 
-    m_shape = require_key(model, "BASE_SHAPE")
-    m_base = require_key(model, "BASE_SIZE")
-    m_orient = int(model.get("orientation", 0))  # get allowed
     # BORNE DE PORTÉE, exacte : deux socles ne peuvent se chevaucher que si la distance entre leurs
     # centres est inférieure à la somme de leurs EXTENSIONS (rayon pour un socle rond ; pour une
     # empreinte hex, la case la plus éloignée du centre plus le circumrayon d'un hex, puisqu'un
@@ -758,7 +752,7 @@ def deployment_build_model_destinations_pool(
             )
         )
     if sibling_reach_by_level:
-        m_reach_round = round_base_radius_norm(m_base) if m_shape == "round" else None
+        m_reach_round = round_base_radius_norm(_m_base) if _m_round else None
 
         filtered: List[Tuple[int, int]] = []
         for (dc, dr) in destinations:
@@ -775,16 +769,16 @@ def deployment_build_model_destinations_pool(
                     # Socle non rond : son extension dépend de son empreinte, qu'il faut calculer.
                     m_fp = compute_candidate_footprint(
                         dc, dr,
-                        {"BASE_SHAPE": m_shape, "BASE_SIZE": m_base, "orientation": m_orient},
+                        {"BASE_SHAPE": _m_shape, "BASE_SIZE": _m_base, "orientation": _m_orient},
                         game_state,
                     )
-                    m_reach = _extent(m_shape, m_base, dc, dr, m_fp)
+                    m_reach = _extent(_m_shape, _m_base, dc, dr, m_fp)
                 if math.hypot(sx - mx, sy - my) <= m_reach + s_reach:
                     candidates.append(sc_socle)
             if not candidates:
                 filtered.append((dc, dr))
                 continue
-            m_socle = Socle(shape=m_shape, base_size=m_base, col=dc, row=dr, fp=m_fp)
+            m_socle = Socle(shape=_m_shape, base_size=_m_base, col=dc, row=dr, fp=m_fp)
             if not any(footprints_overlap(m_socle, s) for s in candidates):
                 filtered.append((dc, dr))
         destinations = filtered
