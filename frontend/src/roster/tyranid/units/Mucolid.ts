@@ -30,6 +30,9 @@ export class Mucolid extends EliteMeleeElite {
     { keywordId: "mucolid" },
   ];
 
+  // FACTION KEYWORDS
+  static FACTION_KEYWORDS = [{ keywordId: "TYRANIDS" }];
+
   static ICON = "/icons/Mucolid.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = 16; // Size of the base

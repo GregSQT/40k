@@ -30,6 +30,9 @@ export class HiveGuardShockcannon extends TroopRangeElite {
     { keywordId: "hiveguard" },
   ];
 
+  // FACTION KEYWORDS
+  static FACTION_KEYWORDS = [{ keywordId: "TYRANIDS" }];
+
   static ICON = "/icons/HiveGuardShockcannon.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = 20; // Size of the base

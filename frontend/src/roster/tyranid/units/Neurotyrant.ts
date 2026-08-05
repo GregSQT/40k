@@ -34,6 +34,9 @@ export class Neurotyrant extends EliteMeleeElite {
     { keywordId: "neurotyrant" },
   ];
 
+  // FACTION KEYWORDS
+  static FACTION_KEYWORDS = [{ keywordId: "TYRANIDS" }];
+
   static ICON = "/icons/Neurotyrant.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = 20; // Size of the base

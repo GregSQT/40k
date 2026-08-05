@@ -55,6 +55,15 @@ class RerollProfile:
     qu une fois (PDF 01 Core, Re-rolls) : ce module ne relance jamais deux fois le meme de."""
 
     hit_1: bool = False
+    #: « You can re-roll the Hit roll » (Oath of Moment) — relance de TOUT jet de touche raté,
+    #: pas seulement des 1. Jumeau exact de `wound_any_fail` côté blessure, et construit sur le
+    #: même patron : relance des ÉCHECS seulement, un seul dé de relance, priorité explicite
+    #: entre les causes, `hitRerollCause` au record.
+    #:
+    #: Relancer une touche RÉUSSIE pour chercher un critique serait perdant (on échangerait une
+    #: touche acquise contre P(touche)), et la règle dit « re-roll the Hit roll » dans le cadre
+    #: 01 Core « Re-rolls », qui ne s'applique qu'à un jet dont on veut changer le résultat.
+    hit_any_fail: bool = False
     wound_1: bool = False
     wound_any_fail: bool = False
     save_1: bool = False
@@ -266,6 +275,10 @@ def roll_attack_pool(
 
     for _ in range(int(n_attacks)):
         attacks += 1
+        # Declaree AVANT la branche [TORRENT] : une arme a touche automatique ne jette aucun de,
+        # donc ne relance rien, et le record de touche plus bas lit cette variable dans les DEUX
+        # branches. La laisser dans la seule branche « avec jet » la rendait non liee sur TORRENT.
+        hit_reroll_cause: Optional[str] = None
         if profile.torrent:
             # [TORRENT] 24.37 : l attaque touche automatiquement. Aucun de n est jete (donc
             # aucune touche critique : un auto-hit n est pas un « unmodified 6 »).
@@ -273,14 +286,34 @@ def roll_attack_pool(
             is_critical_hit = False
         else:
             hit_roll = roll_d6()
-            if hit_roll == NATURAL_FAIL_ROLL and rerolls.hit_1:
-                hit_roll = roll_d6()
             is_critical_hit = hit_roll >= profile.crit_hit_on
+            hit_success = is_critical_hit or (
+                hit_roll != NATURAL_FAIL_ROLL and hit_roll >= hit_target
+            )
+            # Un seul reroll par de (01 Core, Re-rolls) : `hit_1` relance les seuls 1,
+            # `hit_any_fail` (Oath of Moment) relance TOUT echec. Meme forme que la blessure
+            # ci-dessous, priorite explicite comprise — sans quoi la cause enregistree ne serait
+            # pas celle qui a ouvert la relance.
+            if not hit_success and (
+                (hit_roll == NATURAL_FAIL_ROLL and rerolls.hit_1) or rerolls.hit_any_fail
+            ):
+                hit_reroll_cause = (
+                    "hit_1" if (hit_roll == NATURAL_FAIL_ROLL and rerolls.hit_1)
+                    else "hit_any_fail"
+                )
+                hit_roll = roll_d6()
+                is_critical_hit = hit_roll >= profile.crit_hit_on
+                hit_success = is_critical_hit or (
+                    hit_roll != NATURAL_FAIL_ROLL and hit_roll >= hit_target
+                )
             # 05.01 : 1 non modifie = echec ; critique = touche quoi qu il arrive.
-            if not is_critical_hit and (hit_roll == NATURAL_FAIL_ROLL or hit_roll < hit_target):
-                shot_records.append({
+            if not hit_success:
+                miss_rec: Dict[str, Any] = {
                     "attackRoll": hit_roll, "hitResult": "MISS", "hitTarget": hit_target,
-                })
+                }
+                if hit_reroll_cause is not None:
+                    miss_rec["hitRerollCause"] = hit_reroll_cause
+                shot_records.append(miss_rec)
                 continue
 
         # [SUSTAINED HITS X] 24.36 : une touche critique produit X touches ADDITIONNELLES.
@@ -302,6 +335,12 @@ def roll_attack_pool(
                 base_rec["sustainedHit"] = True
             if critical_hit_here:
                 base_rec["criticalHit"] = True
+            # Cause de la relance de touche, quand il y en a eu une. Sur la touche RÉELLE
+            # seulement : une touche [SUSTAINED HITS] n'a pas de jet, donc pas de relance.
+            # Sans cette trace, le log dit que la relance était POSSIBLE, jamais qu'elle a EU
+            # LIEU — et l'analyzer ne peut pas distinguer les deux (jumeau de `woundRerollCause`).
+            if hit_reroll_cause is not None and not sustained_hit:
+                base_rec["hitRerollCause"] = hit_reroll_cause
 
             auto_wound = (
                 profile.lethal_hits and critical_hit_here

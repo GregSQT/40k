@@ -37,6 +37,9 @@ export class DreadnoughtRedemptor extends EliteRangeElite {
     { keywordId: "redemptor dreadnought" },
   ];
 
+  // FACTION KEYWORDS
+  static FACTION_KEYWORDS = [{ keywordId: "ADEPTUS ASTARTES" }];
+
   static ICON = "/icons/DreadnoughtRedemptorHeavyOnslaughtGatlingCannonHeavyFlamer.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = 35; // Size of the base

@@ -98,6 +98,14 @@ def turn_state_invariants() -> Dict[str, Any]:
         "reactive_macro_order_current_window": [],
         "reactive_decision_mode": "auto",
         "reactive_decision_payload": {},
+        # Capacites de faction (chantier 03), posees par `initial_faction_ability_state()` a
+        # l'init ET au reset. Lues en `require_key` par l'observation (les 6 drapeaux de
+        # `global_bin`) et par 08.04 : une fixture qui les omet fait lever la construction de
+        # l'observation. `waaagh_called` porte le « once per battle », `waaagh_active` la duree.
+        "waaagh_called": {1: False, 2: False},
+        "waaagh_active": {1: False, 2: False},
+        "oath_target": {1: None, 2: None},
+        "pending_oath_selection": None,
     }
 
 
@@ -159,4 +167,10 @@ def unit_invariants() -> Dict[str, Any]:
         "reserves_arrival_round": 2,
         "reserves_edge_distance_inches": 6,
         "reserves_enemy_clearance_inches": 8,
+        # Mots-cles de FACTION (chantier 03) : « If your Army Faction is ORKS / ADEPTUS
+        # ASTARTES ». Poses par les DEUX constructeurs et lus en `require_key`
+        # (`unit_faction_keywords`). Vide = aucune faction declaree, donc aucune capacite de
+        # faction — c'est l'etat neutre, celui que veut une fixture qui ne teste pas Waaagh!
+        # ni Oath. Une fixture qui les teste ecrase cette liste.
+        "FACTION_KEYWORDS": [],
     }

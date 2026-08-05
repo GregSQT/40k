@@ -31,6 +31,9 @@ export class Biovore extends EliteRangeTroop {
     { keywordId: "biovore" },
   ];
 
+  // FACTION KEYWORDS
+  static FACTION_KEYWORDS = [{ keywordId: "TYRANIDS" }];
+
   static ICON = "/icons/Biovore.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = 32; // Size of the base

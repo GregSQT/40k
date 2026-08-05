@@ -382,10 +382,20 @@ def self_model_bin_index(field: str) -> int:
 # ---------------------------------------------------------------------------
 
 #: Types de points de décision exposés à l'agent, ordre FIGÉ du one-hot de contexte.
-#: Une seule entrée aujourd'hui (`rule_choice`, le pilote P3 point 0) ; les tranches P3
-#: suivantes (cible de mêlée, allocation de pertes…) s'ajoutent ICI, jamais en dupliquant le
-#: mécanisme. Ajouter un type change `DECISION_CTX_BIN_SIZE`, donc `obs_size` : retrain `--new`.
-AGENT_DECISION_TYPE_IDS: Tuple[str, ...] = ("rule_choice",)
+#: `rule_choice` est le pilote P3 point 0 ; `waaagh_call` est la décision binaire d'appel du
+#: Waaagh! (chantier 03). Les tranches suivantes (allocation de pertes…) s'ajoutent ICI, jamais
+#: en dupliquant le mécanisme. Ajouter un type change `DECISION_CTX_BIN_SIZE`, donc `obs_size` :
+#: retrain `--new`.
+#:
+#: ⚠️ `waaagh_call` est le premier type dont les DEUX candidats portent un `effect_ids` VIDE, et
+#: c'est voulu : `DECISION_GRANTABLE_EFFECT_IDS` est dérivé des `grantsRuleIds` des rosters
+#: (verrouillé par test de contrat), or aucun roster n'accorde les effets du Waaagh! — ils
+#: viennent de la faction, pas d'une datasheet. Les deux candidats sont donc décrits par le même
+#: vecteur nul, et ce qui les distingue est le couple (type de décision, INDEX) : `CHOICE_0`
+#: appelle, `CHOICE_1` passe, ordre CONTRACTUEL et stable. C'est suffisant ici et seulement ici,
+#: parce que l'ensemble des candidats est FIXE — contrairement à `rule_choice`, où il varie
+#: d'une unité à l'autre et où l'index seul ne voudrait rien dire.
+AGENT_DECISION_TYPE_IDS: Tuple[str, ...] = ("rule_choice", "waaagh_call")
 
 #: Nombre MAXIMAL de candidats exposés à l'agent — le K de `CHOICE_0..K-1`
 #: (`macro_intents.CHOICE_SLOTS`). Il vaut 6, l'alignement retenu par §9.3 sur les 6 slots
@@ -604,6 +614,28 @@ GLOBAL_BIN_FIELDS: Tuple[str, ...] = (
     "objective_dir_cos_2", "objective_dir_sin_2",
     "objective_dir_cos_3", "objective_dir_sin_3",
     "objective_dir_cos_4", "objective_dir_sin_4",
+    # ---------------------------------------------------------------------------------------
+    # CAPACITÉS DE FACTION (chantier 03) — Waaagh! et Oath of Moment
+    # ---------------------------------------------------------------------------------------
+    # Elles sont GLOBALES par construction : une capacité de faction s'applique uniformément à
+    # toutes les unités de l'armée qui la portent. Les inscrire par unité répéterait les mêmes
+    # ids sur 28 entités, ferait déborder `UNIT_ABILITY_SLOTS` et n'apporterait rien — le réseau
+    # reconstitue l'effet à partir de « cette unité est orke » (ses ids de capacité) et de
+    # « Waaagh! actif », qui est ici.
+    #
+    # QUATRE bits pour le Waaagh!, pas deux. Sa durée court « until the start of your next
+    # Command phase » : elle ENJAMBE le tour adverse. Un Waaagh! ennemi actif pendant MON tour
+    # change ce que je dois faire (l'armée d'en face a une invulnérable 5+ et +1 S/A en mêlée) ;
+    # un Waaagh! ennemi encore DISPONIBLE change ce que je dois craindre au tour suivant. Les
+    # deux faits sont distincts et aucun ne se déduit de l'autre.
+    "my_waaagh_available", "my_waaagh_active",
+    "enemy_waaagh_available", "enemy_waaagh_active",
+    # Oath : DEUX bits seulement, parce que l'identité de la cible n'est pas ici — elle est
+    # portée par le statut `oath_target` de l'entité visée (`enemies_status_ids` /
+    # `allies_status_ids`), donc là où le réseau la lit avec l'unité qu'elle qualifie. Ces deux
+    # bits ne disent que « une désignation est en vigueur », ce qu'aucun slot d'entité ne dirait
+    # si toutes les cibles possibles étaient hors des K slots observés.
+    "my_oath_target_selected", "enemy_oath_target_selected",
 )
 GLOBAL_CONT_SIZE = len(GLOBAL_CONT_FIELDS)
 GLOBAL_BIN_SIZE = len(GLOBAL_BIN_FIELDS)

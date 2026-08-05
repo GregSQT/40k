@@ -605,6 +605,9 @@ class StepLogger:
             target_coords_str = f"({target_coords[0]},{target_coords[1]})" if target_coords else ""
             target_label = f"Unit {target_id}{target_coords_str}"
             wound_ability_display_name = details.get("wound_ability_display_name")
+            # JUMEAU du precedent, cote TOUCHE (chantier 03) : nom de la capacite qui a ouvert
+            # la relance du jet de touche, quand elle a EFFECTIVEMENT eu lieu.
+            hit_ability_display_name = details.get("hit_ability_display_name")
             ap_modifier_ability_display_name = details.get("ap_modifier_ability_display_name")
             
             shot_tags = []
@@ -638,6 +641,10 @@ class StepLogger:
             # l analyzer (plafond de tirs, usage de regle) et le replay.
             if bool(details.get("sustained_hit", False)):
                 hit_rule_suffix += " [SUSTAINED HITS]"
+            # Relance de touche EFFECTUEE : meme forme de token que les autres capacites, sur
+            # le jet qu elle a modifie. C est ce que l analyzer et le frontend cherchent.
+            if isinstance(hit_ability_display_name, str) and hit_ability_display_name.strip():
+                hit_rule_suffix += f" [{hit_ability_display_name.strip().upper()}]"
             if hit_rule_modifier in ("HEAVY", "COVER") and isinstance(hit_target_base, int):
                 hit_target_display = f"{hit_target_base}+->{hit_target}+"
             else:
@@ -844,6 +851,8 @@ class StepLogger:
             # variables `save_cover_applied` / `save_target_base` de cette branche etaient
             # mortes deux fois — regle inapplicable ET plus aucun producteur (V11 §0hist.38).
             wound_ability_display_name = details.get("wound_ability_display_name")
+            # JUMEAU du tir, cote TOUCHE (chantier 03) : Oath of Moment relance en melee aussi.
+            hit_ability_display_name = details.get("hit_ability_display_name")
             
             # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Include weapon name
             weapon_name = details.get("weapon_name")
@@ -862,6 +871,8 @@ class StepLogger:
             # `sustainedHit` arrive ici. Sans le token, `fight_over_cc_nb` les compte comme des
             # attaques — le faux positif exactement symétrique de celui du tir.
             _sustained_seg = " [SUSTAINED HITS]" if details.get("sustained_hit") else ""
+            if isinstance(hit_ability_display_name, str) and hit_ability_display_name.strip():
+                _sustained_seg += f" [{hit_ability_display_name.strip().upper()}]"
             detail_parts = [f"Hit {hit_roll}({hit_target}+){_sustained_seg}"]
             
             # Only show wound if hit succeeded

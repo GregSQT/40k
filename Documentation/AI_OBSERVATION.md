@@ -570,9 +570,17 @@ une alliée au contact venait d'une édition antérieure de 40K, 2026-08-04)
 règle 08.02, les CP appartiennent au joueur, pas à une unité. Ces deux emplacements auraient dû
 être déclarés par le chantier 01, seul autorisé à bouger `obs_size` ; l'oubli est réparé là, sans
 retrain supplémentaire puisque le chantier 01 en imposait déjà un, 2026-08-04)
-→ **20718** (chantier 02 : le registre du bloc `decision_options_bin` est DÉCOUPLÉ du vocabulaire
+→ 20718 (chantier 02 : le registre du bloc `decision_options_bin` est DÉCOUPLÉ du vocabulaire
 observé — 36 scalaires qui ne pouvaient jamais valoir 1 disparaissent, et allonger le vocabulaire
-coûte désormais 0. `cp_gain_on_objective` y entre à ce titre pour 0 scalaire, 2026-08-04).
+coûte désormais 0. `cp_gain_on_objective` y entre à ce titre pour 0 scalaire, 2026-08-04)
+→ **20725** (chantier 03 : les emplacements des CAPACITÉS DE FACTION, que le chantier 01 annonçait
+dans `global_bin` — « voir chantier 03 » — sans les déclarer. Six drapeaux de `GLOBAL_BIN_FIELDS`
+(`my`/`enemy_waaagh_available`, `my`/`enemy_waaagh_active`, `my`/`enemy_oath_target_selected`) et
+une entrée de plus dans `AGENT_DECISION_TYPE_IDS` (`waaagh_call`, +1 bit de `decision_ctx_bin`).
+Même oubli et même réparation que les deux scalaires de CP du chantier 02, sans retrain
+supplémentaire : les `.zip` existants datent d'avant le gel du 2026-08-04. QUATRE bits pour le
+Waaagh! et non deux, parce que sa durée enjambe le tour adverse ; l'identité de la cible d'Oath
+n'est PAS ici mais dans le statut `oath_target` de l'entité visée, pour 0 scalaire, 2026-08-05).
 **Toute évolution du schéma change cette valeur et rend les
 `.zip` existants incompatibles : le retrain `--new` est obligatoire.**
 

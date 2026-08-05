@@ -1,4 +1,5 @@
 {
+  "uses_codex_detachment": { "1": true, "2": true },
   "deployment_zone": "hammer",
   "deployment_type": "active",
   "wall_ref": "walls-11.json",

@@ -30,6 +30,9 @@ export class Carnifex extends EliteMeleeElite {
     { keywordId: "carnifex" },
   ];
 
+  // FACTION KEYWORDS
+  static FACTION_KEYWORDS = [{ keywordId: "TYRANIDS" }];
+
   static ICON = "/icons/Carnifex.webp"; // Path relative to public folder
   static BASE_SHAPE = "oval"; // Shape of the base
   /** Diamètres sur la grille micro-hex (engine/hex_utils ``compute_occupied_hexes``), pas des mm. */

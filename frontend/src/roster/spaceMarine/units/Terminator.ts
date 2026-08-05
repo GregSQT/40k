@@ -31,6 +31,9 @@ export class Terminator extends EliteMeleeElite {
     { keywordId: "terminator squad" },
   ];
 
+  // FACTION KEYWORDS
+  static FACTION_KEYWORDS = [{ keywordId: "ADEPTUS ASTARTES" }];
+
   static ICON = "/icons/TerminatorPowerFist.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = 16; // Size of the base

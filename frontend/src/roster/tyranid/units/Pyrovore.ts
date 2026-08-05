@@ -31,6 +31,9 @@ export class Pyrovore extends EliteRangeTroop {
     { keywordId: "pyrovore" },
   ];
 
+  // FACTION KEYWORDS
+  static FACTION_KEYWORDS = [{ keywordId: "TYRANIDS" }];
+
   static ICON = "/icons/Pyrovore.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = 32; // Size of the base

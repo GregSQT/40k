@@ -61,7 +61,9 @@ from engine.action_decoder import (
 )
 from engine.debug_trace import CH_STEP, trace
 from engine.reward_calculator import RewardCalculator
-from engine.game_state import GameStateManager, initial_command_points
+from engine.game_state import (
+    GameStateManager, initial_command_points, initial_faction_ability_state,
+)
 from engine.macro_intents import (
     ACTION_FAMILIES,
     INTENT_INVADE,
@@ -450,7 +452,15 @@ class W40KEngine(gym.Env):
                 "deployment_type": scenario_deployment_type,
                 "deployment_type_by_player": scenario_deployment_type_by_player,
                 "deployment_zone": scenario_deployment_zone,
-                "deployment_pools": scenario_deployment_pools
+                "deployment_pools": scenario_deployment_pools,
+                # Oath of Moment (chantier 03) : « If you are using a Codex: Space Marines
+                # Detachment ». Aucun systeme de detachement n'existe dans le moteur, la valeur
+                # est donc une DONNEE DE SCENARIO, comme la zone de deploiement juste au-dessus.
+                # `.get` et non `require_key` : la cle n'a de sens que si une armee ADEPTUS
+                # ASTARTES est en jeu. Son absence ne leve pas ICI mais au moment ou le +1 Wound
+                # en depend (`game_state.uses_codex_detachment`) — la ou le message peut dire
+                # de quelle armee il s'agit, plutot que de bloquer tous les scenarios orks.
+                "uses_codex_detachment": scenario_result.get("uses_codex_detachment"),
             }
             self._scenario_loaded_for_controlled_player = int(require_key(self.config, "controlled_player"))
         else:
@@ -644,6 +654,8 @@ class W40KEngine(gym.Env):
             # Points de commandement des deux joueurs (08.02). Meme cycle de vie que
             # `victory_points` : pose a l'init ET remis a la dotation de depart au reset.
             "command_points": initial_command_points(get_config_loader().get_game_config()),
+            # Capacites de faction (chantier 03) — meme cycle de vie que `command_points`.
+            **initial_faction_ability_state(),
             "primary_objective": self._scenario_primary_objective,
             # Marqueurs « etape deja resolue » : registre `_once_claims`, cree paresseusement
             # et purge au reset — plus declares ici (POURQUOI : `engine.game_utils`).
@@ -1492,6 +1504,11 @@ class W40KEngine(gym.Env):
             "pending_rule_choice_queue": [],
             "active_rule_choice_prompt": None,
             "pending_agent_decision": None,
+            # ── CAPACITÉS DE FACTION (chantier 03) — purge d'épisode ──
+            # Waaagh! est « once per battle » : sans cette remise à zéro, un agent qui l'a appelé
+            # à l'épisode N ne pourrait plus jamais l'appeler. Même famille de marqueur que les
+            # trois clés ci-dessus, même mode de défaillance.
+            **initial_faction_ability_state(),
         })
         self._configure_deployment_random_mix_for_episode()
         self.game_state["deployment_type"] = self.config.get("deployment_type")
@@ -1743,7 +1760,7 @@ class W40KEngine(gym.Env):
                 self.game_state["deployment_state"]["current_deployer"] = 2
             if not deployable_units[1] and not deployable_units[2]:
                 self.game_state["deployment_state"]["deployment_complete"] = True
-                cmd_result = command_handlers.command_phase_start(self.game_state)
+                cmd_result = self._start_command_phase()
                 if not (cmd_result and cmd_result.get("phase_complete") is False):
                     movement_handlers.movement_phase_start(self.game_state)
             else:
@@ -1752,7 +1769,7 @@ class W40KEngine(gym.Env):
             # Initialize command phase for game start using handler delegation
             # Phase 2: if command_phase_start returns phase_complete=False (free steps active),
             # stay in command phase — agent will issue zone intent actions first.
-            cmd_result = command_handlers.command_phase_start(self.game_state)
+            cmd_result = self._start_command_phase()
             if not (cmd_result and cmd_result.get("phase_complete") is False):
                 movement_handlers.movement_phase_start(self.game_state)
         self.episode_tactical_data = _empty_episode_tactical_data()
@@ -3400,6 +3417,29 @@ class W40KEngine(gym.Env):
         decision_type = require_key(decision, "type")
         selected_option = options[option_index]
 
+        if decision_type == "waaagh_call":
+            # Waaagh! (chantier 03) : décision d'ARMÉE, sans file de prompts ni unité. L'ordre des
+            # candidats est CONTRACTUEL — c'est lui, et non un `effect_ids`, qui porte le sens
+            # (cf. AGENT_DECISION_TYPE_IDS) : le payload le rend explicite côté moteur.
+            called = bool(require_key(require_key(selected_option, "payload"), "call"))
+            decision_player = int(require_key(decision, "player"))
+            # `apply_waaagh_call_decision` efface la decision elle-meme (ecrivain unique).
+            command_handlers.apply_waaagh_call_decision(
+                self.game_state, decision_player, called
+            )
+            return True, self._resume_command_phase_after_faction_decision(
+                {
+                    "action": "agent_decision",
+                    "waiting_for_player": False,
+                    "decision_type": decision_type,
+                    "unitId": require_key(decision, "unit_id"),
+                    "player": decision_player,
+                    "option_index": option_index,
+                    "waaaghCalled": called,
+                    "success": True,
+                }
+            )
+
         if decision_type != "rule_choice":
             raise NotImplementedError(
                 f"agent_decision: type '{decision_type}' declare mais sans application moteur. "
@@ -3444,6 +3484,173 @@ class W40KEngine(gym.Env):
             "selectedRuleId": selected_display_rule_id,
             "success": True,
         }
+
+    # ── Capacités de faction (chantier 03) : Waaagh! et Oath of Moment ─────────────────────
+    #
+    # Les décisions sont POSÉES par `command_handlers.command_step_command_abilities` (08.04) et
+    # RÉSOLUES ici, parce que c'est ici que vit la seule chose que le handler ne connaît pas :
+    # qui pilote un siège. Trois cas, exactement les mêmes que pour les choix de règle :
+    #   - gym            → le siège passe par le MASQUE (agent ou bot), le moteur rend la main ;
+    #   - humain (PvP)   → `waiting_for_player`, résolu par une action explicite de l'API ;
+    #   - IA hors gym    → tranché immédiatement par la politique ci-dessous.
+
+    def _start_command_phase(self) -> Dict[str, Any]:
+        """Ouvre la phase de commandement — POINT D'ENTRÉE UNIQUE du moteur.
+
+        `command_phase_start` seule ne suffit plus depuis que 08.04 peut poser une décision : un
+        siège piloté par une IA hors gym n'a personne pour y répondre, et la phase resterait
+        arrêtée. Router les quatre appels par ici évite qu'un des quatre oublie la résolution —
+        c'est exactement le motif « corrigé d'un côté, pas de l'autre » du dépôt.
+        """
+        result = command_handlers.command_phase_start(self.game_state)
+        if not command_handlers.faction_decision_is_pending(self.game_state):
+            return result
+        self._resolve_faction_decisions_for_ai_seats()
+        return command_handlers.command_phase_resume(self.game_state)
+
+    def _resume_command_phase_after_faction_decision(
+        self, result: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Complète le résultat d'une décision de 08.04 par la suite de la phase.
+
+        Sans cela, une phase de commandement arrêtée sur une décision ne repartirait jamais : le
+        tour d'un joueur bot se terminerait sur un masque vide, et le moteur ne passerait pas au
+        move. `command_phase_resume` est idempotente — c'est ce qui permet de la rappeler ici
+        après CHAQUE décision, y compris quand une seconde vient d'être posée.
+        """
+        self._resolve_faction_decisions_for_ai_seats()
+        resume = command_handlers.command_phase_resume(self.game_state)
+        result.update(resume)
+        return result
+
+    def _resolve_faction_decisions_for_ai_seats(self) -> None:
+        """Tranche les décisions de 08.04 des sièges qui ne répondent ni par le masque ni par l'UI.
+
+        Boucle : appliquer le Waaagh! peut poser l'Oath juste derrière (une armée qui porterait
+        les deux mots-clés de faction). Le compteur borne l'enchaînement — deux décisions par
+        phase au maximum, une troisième signalerait un état incohérent plutôt qu'un cas de jeu.
+        """
+        for _ in range(3):
+            if not command_handlers.faction_decision_is_pending(self.game_state):
+                return
+            decision = read_pending_agent_decision(self.game_state)
+            if decision is not None and str(require_key(decision, "type")) == "waaagh_call":
+                player = int(require_key(decision, "player"))
+                if self.gym_training_mode or self._is_player_human(player):
+                    return
+                called = self._select_ai_waaagh_call(player)
+                command_handlers.apply_waaagh_call_decision(self.game_state, player, called)
+                continue
+            pending_oath = self.game_state.get("pending_oath_selection")  # get allowed
+            if pending_oath is None:
+                return
+            player = int(pending_oath)
+            if self.gym_training_mode or self._is_player_human(player):
+                return
+            command_handlers.apply_oath_selection(
+                self.game_state, player, self._select_ai_oath_target(player)
+            )
+        raise RuntimeError(
+            "08.04 : plus de deux decisions de capacite de faction enchainees pour un meme "
+            "joueur — l'etat de decision ne se vide pas."
+        )
+
+    def _select_ai_waaagh_call(self, player: int) -> bool:
+        """Politique du siège IA hors gym pour « appeler ou non le Waaagh! ».
+
+        Appelle dès qu'au moins une unité orke est à portée de charge : le Waaagh! est une
+        décision de TEMPO, et son rendement (+1 S/A en mêlée, charge après Advance) est nul tant
+        que rien ne peut atteindre l'adversaire. Ce n'est pas une valeur par défaut mais une
+        politique explicite, du même ordre que `_select_ai_rule_choice_option` — le gym, lui, ne
+        passe jamais ici : l'agent apprend ce tempo, c'est tout l'intérêt de la décision.
+        """
+        from engine.game_state import unit_has_waaagh_ability
+        from engine.phase_handlers.shared_utils import (
+            _ranged_squad_edge_distance, is_unit_alive,
+        )
+        from engine.phase_handlers.shooting_handlers import _ranged_distance_metric
+        from engine.combat_utils import socle_from_cache_entry
+
+        units_cache = require_key(self.game_state, "units_cache")
+        metric = _ranged_distance_metric(self.game_state)
+        # 11.02 : la charge est un 2D6, donc 12" au maximum. Mesure en subhex, comme tout le
+        # reste du moteur (`inches_to_subhex`, config de plateau).
+        charge_reach = float(require_key(self.config, "inches_to_subhex")) * 12.0
+        enemies = [
+            str(require_key(u, "id")) for u in require_key(self.game_state, "units")
+            if int(require_key(u, "player")) != int(player)
+            and is_unit_alive(str(require_key(u, "id")), self.game_state)
+        ]
+        if not enemies:
+            return False
+        for unit in require_key(self.game_state, "units"):
+            if int(require_key(unit, "player")) != int(player):
+                continue
+            squad_id = str(require_key(unit, "id"))
+            if not is_unit_alive(squad_id, self.game_state) or squad_id not in units_cache:
+                continue
+            if not unit_has_waaagh_ability(unit):
+                continue
+            socle = socle_from_cache_entry(units_cache[squad_id])
+            for enemy_id in enemies:
+                if enemy_id not in units_cache:
+                    continue
+                distance = _ranged_squad_edge_distance(
+                    self.game_state, squad_id, enemy_id, metric=metric, attacker_socle=socle
+                )
+                if distance <= charge_reach:
+                    return True
+        return False
+
+    def _select_ai_oath_target(self, player: int) -> str:
+        """Politique du siège IA hors gym pour la cible d'Oath : l'ennemi vivant le plus coûteux.
+
+        « select ONE unit » est obligatoire : cette fonction ne peut pas rendre « aucune », et
+        elle lève si le pool est vide — un état que `command_step_command_abilities` ne produit
+        pas (il ne pose la désignation que s'il existe une cible).
+        """
+        candidates = command_handlers.oath_selectable_enemy_ids(self.game_state, int(player))
+        if not candidates:
+            raise RuntimeError(
+                f"_select_ai_oath_target: aucune unite ennemie vivante pour le joueur {player} — "
+                f"la designation n'aurait pas du etre posee."
+            )
+        units_by_id = {str(require_key(u, "id")): u for u in require_key(self.game_state, "units")}
+        return max(
+            candidates,
+            key=lambda uid: (int(require_key(units_by_id[uid], "VALUE")), uid),
+        )
+
+    def _handle_select_oath_target_action(
+        self, action: Dict[str, Any]
+    ) -> Tuple[bool, Dict[str, Any]]:
+        """Applique la désignation d'Oath — chemin COMMUN au gym (slot décodé) et au PvP (UI).
+
+        Le décodeur produit exactement ce dict pour un `OATH_SLOT_i` ; l'API PvP l'émet tel
+        quel. Une seule application, donc une seule règle : c'est ce qui empêche le PvP et le gym
+        de diverger sur une capacité (motif « jumeau » du dépôt).
+        """
+        pending = self.game_state.get("pending_oath_selection")  # get allowed : None = aucune
+        if pending is None:
+            return False, {"error": "no_pending_oath_selection"}
+        player = int(pending)
+        if "player" in action and int(action["player"]) != player:
+            return False, {
+                "error": "oath_wrong_player",
+                "expected_player": player,
+                "received_player": int(action["player"]),
+            }
+        target_unit_id = str(require_key(action, "unitId"))
+        command_handlers.apply_oath_selection(self.game_state, player, target_unit_id)
+        return True, self._resume_command_phase_after_faction_decision(
+            {
+                "action": "select_oath_target",
+                "waiting_for_player": False,
+                "player": player,
+                "unitId": target_unit_id,
+                "success": True,
+            }
+        )
 
     def _select_ai_rule_choice_option(self, prompt: Dict[str, Any]) -> str:
         """
@@ -3992,7 +4199,7 @@ class W40KEngine(gym.Env):
             if next_phase == "deployment":
                 phase_init_result = deployment_handlers.deployment_phase_start(self.game_state)
             elif next_phase == "command":
-                phase_init_result = command_handlers.command_phase_start(self.game_state)
+                phase_init_result = self._start_command_phase()
                 self._clear_turn_scoped_rule_choices()
             elif next_phase == "shoot":
                 phase_init_result = shooting_handlers.shooting_phase_start(self.game_state)
@@ -4633,6 +4840,10 @@ class W40KEngine(gym.Env):
         # Nom de l abilite d unite qui a ouvert la relance de blessure, quand elle a
         # EFFECTIVEMENT eu lieu (le socle trace la cause, `_manual_roll_intent` la nomme).
         "woundAbility": "wound_ability_display_name",
+        # JUMEAU cote TOUCHE (chantier 03) : `hit_1` (capacite de datasheet) ou `hit_any_fail`
+        # (Oath of Moment). Sans cette entree, le champ n atteint jamais step.log et l analyzer
+        # ne peut pas distinguer une relance POSSIBLE d une relance EFFECTUEE.
+        "hitAbility": "hit_ability_display_name",
         # [SUSTAINED HITS X] 24.36 : touche ADDITIONNELLE nee d une touche critique — pas une
         # attaque, donc aucun jet de touche (`attackRoll=None`, rendu « Hit None(3+) »). Sans
         # ce marqueur, l analyzer ne peut ni la distinguer d une ligne malformee, ni la sortir
@@ -5170,6 +5381,12 @@ class W40KEngine(gym.Env):
         # en attente, et c'est elle qui débloque le moteur.
         if semantic.get("action") == "agent_decision":
             return self._handle_agent_decision_action(semantic)
+
+        # Désignation d'Oath of Moment (chantier 03) : même rang que les deux ci-dessus — la
+        # phase de commandement est arrêtée dessus, aucune action de phase n'a de sens tant
+        # qu'elle n'est pas jouée.
+        if semantic.get("action") == "select_oath_target":
+            return self._handle_select_oath_target_action(semantic)
 
         active_prompt = self.game_state.get("active_rule_choice_prompt")
         if active_prompt is not None:
@@ -5796,7 +6013,7 @@ class W40KEngine(gym.Env):
             if next_phase == "deployment":
                 phase_init_result = deployment_handlers.deployment_phase_start(self.game_state)
             elif next_phase == "command":
-                phase_init_result = command_handlers.command_phase_start(self.game_state)
+                phase_init_result = self._start_command_phase()
                 self._clear_turn_scoped_rule_choices()
             elif next_phase == "shoot":
                 phase_init_result = shooting_handlers.shooting_phase_start(self.game_state)
@@ -6499,13 +6716,36 @@ class W40KEngine(gym.Env):
         if pending_decision is not None:
             decision_unit_id = str(require_key(pending_decision, "unit_id"))
             units_cache = require_key(self.game_state, "units_cache")
-            if decision_unit_id not in units_cache:
+            if decision_unit_id in units_cache:
+                # Aucun masque construit sur ce chemin : l'observateur est l'unite de la decision.
+                return _build_for_squad(decision_unit_id), None
+            # Decision d'ARMEE (chantier 03 : `waaagh_call`) : elle ne porte sur AUCUNE unite,
+            # son `unit_id` identifie le point de choix (`player_<n>`) et non une escouade. Ce
+            # que le candidat accorde est global — les quatre drapeaux Waaagh! de `global_bin` —
+            # donc n'importe laquelle de MES escouades vivantes est un repere egocentrique
+            # valable. La premiere du joueur decideur, pour que le choix soit reproductible.
+            #
+            # Le controle strict reste entier pour les autres types : une decision `rule_choice`
+            # dont l'unite a disparu decrit un etat incoherent, et doit toujours lever.
+            if str(require_key(pending_decision, "type")) != "waaagh_call":
                 raise KeyError(
                     f"_build_observation: unite {decision_unit_id} de la decision en attente "
                     "absente de units_cache — la decision survit a son unite."
                 )
-            # Aucun masque construit sur ce chemin : l'observateur est l'unite de la decision.
-            return _build_for_squad(decision_unit_id), None
+            decision_player = int(require_key(pending_decision, "player"))
+            observer_id = next(
+                (
+                    str(sid) for sid, entry in units_cache.items()
+                    if int(require_key(entry, "player")) == decision_player
+                ),
+                None,
+            )
+            if observer_id is None:
+                raise KeyError(
+                    f"_build_observation: decision 'waaagh_call' du joueur {decision_player} "
+                    "alors qu'il n'a plus aucune escouade — 08.04 n'aurait pas du la poser."
+                )
+            return _build_for_squad(observer_id), None
 
         if self.game_state.get("phase") == "deployment":
             # §0.40 point 1 : l'obs decrit l'unite SUR LAQUELLE LE MASQUE AGIT, jamais une autre.
@@ -6738,6 +6978,10 @@ class W40KEngine(gym.Env):
         self.config["deployment_type_by_player"] = scenario_deployment_type_by_player
         self.config["deployment_zone"] = scenario_deployment_zone
         self.config["deployment_pools"] = scenario_deployment_pools
+        # JUMEAU de la pose initiale (cf. le bloc de config du constructeur) : la rotation de
+        # scénario change d'armée, donc la clause de détachement d'Oath doit suivre. Sans cette
+        # ligne, un scénario chargé en second garderait la valeur du précédent.
+        self.config["uses_codex_detachment"] = scenario_result.get("uses_codex_detachment")
         self._scenario_primary_objective = primary_objective_config
         self._scenario_roster_info = scenario_roster_info
         # Taille de bataille (points) du nouveau scénario — plafond des réserves 20.01. Doit

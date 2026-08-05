@@ -668,7 +668,21 @@ def test_squad_obs_size_target_matches_the_schema():
     pouvaient jamais valoir 1, et 6 de plus à chaque capacité ajoutée à l'observation. D'où
     20754 -> 20718, et surtout : allonger le vocabulaire observé ne bouge PLUS `obs_size`, ce
     que le gel du chantier 01 promettait sans le tenir.
-    C'est le DERNIER changement d'`obs_size` de la séquence : les chantiers 03 à 06 n'utilisent
+
+    Le chantier 03 (2026-08-05) a trouvé le MÊME oubli que le chantier 02, et deux fois : le
+    chantier 01 annonce que les capacités de FACTION vont dans `global_bin` (« voir chantier
+    03 ») mais n'y a déclaré aucun emplacement, et il n'a pas non plus déclaré le type de
+    décision du Waaagh!. Réparé ici : 6 drapeaux de `GLOBAL_BIN_FIELDS`
+    (`my`/`enemy_waaagh_available`, `my`/`enemy_waaagh_active`,
+    `my`/`enemy_oath_target_selected`) et une entrée de plus dans `AGENT_DECISION_TYPE_IDS`
+    (`waaagh_call`, +1 bit de `decision_ctx_bin`), d'où 20718 -> 20725. Le retrain `--new` reste
+    UNIQUE : les `.zip` existants datent d'avant le gel du 2026-08-04 et étaient déjà invalidés.
+
+    QUATRE bits pour le Waaagh! et non deux : sa durée court « until the start of your next
+    Command phase », donc elle enjambe le tour adverse. L'identité de la cible d'Oath, elle,
+    n'est PAS ici : elle est portée par le statut `oath_target` de l'entité visée — coût zéro.
+
+    C'est le DERNIER changement d'`obs_size` de la séquence : les chantiers 04 à 06 n'utilisent
     que des dimensions déjà déclarées.
 
     Ce verrou valait 20768 tant que le point 3 restait ouvert : les quatre autres points ne
@@ -681,7 +695,7 @@ def test_squad_obs_size_target_matches_the_schema():
         DEPLOY_CAND_BIN_SIZE, DEPLOY_CAND_CONT_SIZE, N_DEPLOY_SLOTS,
     )
 
-    assert ObservationBuilder.SQUAD_OBS_SIZE_TARGET == 20718
+    assert ObservationBuilder.SQUAD_OBS_SIZE_TARGET == 20725
     assert N_DEPLOY_SLOTS * (DEPLOY_CAND_CONT_SIZE + DEPLOY_CAND_BIN_SIZE) == 60, (
         "le bloc candidat de déploiement a changé de taille : mettre à jour `obs_size` dans les "
         "5 profils de la config d'agent, et l'historique d'AI_OBSERVATION.md"

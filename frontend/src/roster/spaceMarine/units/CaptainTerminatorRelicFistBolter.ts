@@ -38,6 +38,9 @@ export class CaptainTerminatorRelicFistBolter extends LeaderEliteMeleeElite {
     { keywordId: "captain terminator" },
   ];
 
+  // FACTION KEYWORDS
+  static FACTION_KEYWORDS = [{ keywordId: "ADEPTUS ASTARTES" }];
+
   static ICON = "/icons/CaptainTerminatorRelicFistBolter.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = 20; // Size of the base

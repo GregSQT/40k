@@ -28,7 +28,10 @@ from engine.combat_utils import (
     resolve_dice_value,
     set_unit_coordinates,
 )
-from engine.game_state import GameStateManager, objective_hex_zones
+from engine.game_state import (
+    GameStateManager, effective_invul_save, oath_hit_reroll_applies, oath_wound_roll_bonus,
+    objective_hex_zones, waaagh_melee_bonus,
+)
 from engine.hex_utils import cube_to_offset, offset_to_cube
 # Etages 13.06 — remontes au NIVEAU MODULE : `_fight_effective_level_at` et
 # `_fight_rigid_model_placements` sont appeles par CELLULE CANDIDATE dans les boucles de pool
@@ -4572,17 +4575,48 @@ def _manual_roll_fight_intent(
     alive0 = [m for m in game_state["squad_models"].get(target_sid, []) if m in models_cache]  # get allowed
     if not alive0:
         return None
+    # Attaquant (escouade) resolu ICI et non plus bas : le Waaagh! (chantier 03) modifie les
+    # CARACTERISTIQUES de l arme (« add 1 to the Strength and Attacks characteristics of melee
+    # weapons equipped by models from your army with this ability »), donc AVANT le seuil de
+    # blessure et avant la taille du pool d attaques — pas au moment des relances.
+    attacker_unit = get_unit_by_id(game_state, str(attacker["squad_id"]))
+    _waaagh_bonus = 0 if attacker_unit is None else waaagh_melee_bonus(game_state, attacker_unit)
+    strength += _waaagh_bonus
+    n_attacks += _waaagh_bonus
     wth = _calculate_wound_target(strength, _target_highest_bodyguard_toughness(game_state, target_sid))
+    # Oath of Moment : « add 1 to the Wound roll » contre la cible designee. Modelise en
+    # ABAISSANT le seuil, comme le couvert modelise son -1 BS en relevant le seuil de touche.
+    # C est exactement equivalent ici : la blessure CRITIQUE reste sur un 6 NON MODIFIE
+    # (`profile.crit_wound_on`, teste sur le de brut) et le 1 non modifie echoue toujours
+    # (05.02) — les deux sont testes sur le de, pas sur le seuil. Plancher a 2 : aucun
+    # modificateur ne fait reussir un 1.
+    _oath_wound_bonus = (
+        0 if attacker_unit is None
+        else oath_wound_roll_bonus(game_state, attacker_unit, target_sid)
+    )
+    if _oath_wound_bonus:
+        wth = max(2, wth - _oath_wound_bonus)
     first_alive = models_cache[alive0[0]]
     display_wth = wth
     display_save_th = save_threshold(
-        int(first_alive["ARMOR_SAVE"]), int(require_key(first_alive, "INVUL_SAVE")), ap
+        int(first_alive["ARMOR_SAVE"]),
+        # Waaagh! (chantier 03) : la cible peut avoir une invulnerable 5+ qu elle n a pas sur sa
+        # datasheet. Le seuil d AFFICHAGE doit dire la meme chose que celui applique a la
+        # figurine allouee (`_resolve_one_manual_wound`), sinon le log annonce une save que la
+        # resolution ne fait pas.
+        effective_invul_save(game_state, target, int(require_key(first_alive, "INVUL_SAVE"))),
+        ap,
     )
     weapon_name = weapon.get("display_name", weapon.get("NAME", weapon.get("name", "")))  # get allowed
     # Conditions de reroll (constantes pour cet intent : abilities UNITE, pas figurine).
-    # `attacker` est une figurine (models_cache) ; les UNIT_RULES sont sur l unite.
-    attacker_unit = get_unit_by_id(game_state, str(attacker["squad_id"]))
+    # `attacker_unit` est resolu plus haut (les caracteristiques d arme en dependent).
     reroll_hit1 = attacker_unit is not None and _unit_has_rule(attacker_unit, "reroll_1_tohit_fight")
+    # Oath of Moment : « You can re-roll the Hit roll » contre la cible designee. Jumeau EXACT
+    # du site de tir (`shared_utils._manual_roll_intent`) — c est la moitie de la capacite qui
+    # ne depend ni du detachement ni des sous-factions.
+    reroll_hit_any = attacker_unit is not None and oath_hit_reroll_applies(
+        game_state, attacker_unit, target_sid
+    )
     reroll_wound1 = attacker_unit is not None and _unit_has_rule(attacker_unit, "reroll_1_towound")
     reroll_wound_obj = (
         attacker_unit is not None
@@ -4606,11 +4640,28 @@ def _manual_roll_fight_intent(
         save_threshold_value=display_save_th,
         profile=build_weapon_attack_profile(weapon, target),
         rerolls=RerollProfile(
-            hit_1=reroll_hit1, wound_1=reroll_wound1,
+            hit_1=reroll_hit1, hit_any_fail=reroll_hit_any, wound_1=reroll_wound1,
             wound_any_fail=reroll_wound_obj, save_1=reroll_save1,
         ),
         roll_d6=lambda: random.randint(1, 6),
     )
+    # Nom de l ABILITE qui a ouvert chaque relance de TOUCHE — JUMEAU EXACT du site de tir
+    # (`shared_utils._manual_roll_intent`), meme helper, meme consommation de la cause. Sans
+    # lui, `step.log` dit que la relance etait POSSIBLE, jamais qu elle a EU LIEU.
+    from engine.phase_handlers.shared_utils import resolve_hit_reroll_ability
+
+    _hit_ability_by_cause: Dict[str, Optional[str]] = {}
+    for _rec in rolled["shot_records"]:
+        _hit_cause = _rec.pop("hitRerollCause", None)  # get allowed
+        if not _hit_cause:
+            continue
+        if _hit_cause not in _hit_ability_by_cause:
+            _hit_ability_by_cause[_hit_cause] = resolve_hit_reroll_ability(
+                attacker_unit, _hit_cause
+            )
+        _hit_ability = _hit_ability_by_cause[_hit_cause]
+        if _hit_ability:
+            _rec["hitAbility"] = str(_hit_ability)
     return {
         "attacker_mid": attacker_mid, "attacker": attacker, "target_sid": target_sid,
         "weapon_name": weapon_name, "bs": ws, "ap": ap, "dmg_raw": dmg_raw,

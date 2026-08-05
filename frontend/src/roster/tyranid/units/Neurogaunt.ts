@@ -35,6 +35,9 @@ export class Neurogaunt extends SwarmMeleeSwarm {
     { keywordId: "neurogaunt" },
   ];
 
+  // FACTION KEYWORDS
+  static FACTION_KEYWORDS = [{ keywordId: "TYRANIDS" }];
+
   // ICON
   static ICON = "/icons/Neurogaunt.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

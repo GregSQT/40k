@@ -16,7 +16,7 @@ from engine.phase_handlers.shared_utils import build_units_cache
 from engine.observation_builder import ObservationBuilder
 from engine.w40k_core import W40KEngine
 from engine.reward_calculator import RewardCalculator
-from tests._state_invariants import unit_invariants
+from tests._state_invariants import turn_state_invariants, unit_invariants
 from tests.unit.engine._config_helpers import build_engine_config
 
 
@@ -40,6 +40,7 @@ def _cmd_unit(uid: int, player: int, col: int, row: int) -> Dict[str, Any]:
 def _make_cmd_gs() -> Dict[str, Any]:
     units = [_cmd_unit(1, 1, 3, 3), _cmd_unit(2, 2, 10, 10)]
     gs: Dict[str, Any] = {
+        **turn_state_invariants(),
         "turn": 1,
         "current_player": 1,
         # 08.02 : les CP sont un etat de PARTIE, pose au reset du moteur. Une doublure sans
