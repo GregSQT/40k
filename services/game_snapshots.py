@@ -218,7 +218,7 @@ def scenario_fingerprint(engine: Any) -> Dict[str, Any]:
     digest = hashlib.sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
-    return {"digest": digest, "scenario_file": getattr(engine, "_current_scenario_file", None)}
+    return {"digest": digest, "scenario_file": engine._current_scenario_file}
 
 
 def _sync_derived_engine_attrs(engine: Any) -> None:

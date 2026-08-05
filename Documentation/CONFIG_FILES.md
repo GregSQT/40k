@@ -301,7 +301,9 @@ profils : `Documentation/AI_TRAINING.md`. Verrou :
 
 ## Scenario Files
 
-**Location**: `/config/scenario_{scenario_name}.json` (racine de `config/`, ex. `config/scenario_pvp_squad5.json`, `config/scenario_endless_duty.json`)
+**Location**: `config/board/<board>/scenario/scenario_{scenario_name}.json` (ex. `config/board/44x60x5/scenario/scenario_pvp.json`, `.../scenario_pve.json`)
+
+Le dossier n'est pas décoratif : le loader y résout `wall_ref` et `terrain_ref`, et refuse un scénario qui n'est ni sous `config/board/<board>/scenario/` ni porteur d'une clé `board_ref`. Les copies restées à la racine de `config/` sont d'un format antérieur (clé `objectives` en dur, remplacée par les zones de terrain marquées `"objective": true`) : elles ne chargent plus.
 
 **Purpose**: Define game scenarios with unit placements, objectives, and terrain. Les scénarios référencent les rosters via `agent_roster_ref` / `opponent_roster_ref`.
 

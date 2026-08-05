@@ -1673,6 +1673,98 @@ def get_agents_from_scenario(scenario_file: str, unit_registry) -> set:
     
     return agent_keys
 
+def _build_scenario_engine_config(scenario_file: str):
+    """`(config, unit_registry, config_loader, agent_keys)` pour construire le moteur.
+
+    POINT UNIQUE de traduction « résultat du loader → config d'entrée du moteur ». PvP
+    (`initialize_engine`) et PvE (`initialize_test_engine`) en avaient chacun une copie
+    byte-identique de 68 lignes : les 10 extractions de `scenario_result`, la résolution des
+    objectifs primaires, et le dict lui-même. C'est le motif qui a fait perdre `points_limit` et
+    `roster_info` en chemin — pas parce qu'ils étaient difficiles à transmettre, mais parce que
+    les transmettre demandait de le faire deux fois. Ce qui diverge légitimement entre les deux
+    appelants (message d'absence de fichier, configs d'agents, `forced_agent_key`) reste chez eux.
+    """
+    from ai.unit_registry import UnitRegistry
+    from config_loader import get_config_loader, require_engine_game_config_sections
+    from engine.game_state import GameStateManager
+
+    unit_registry = UnitRegistry()
+    config_loader = get_config_loader()
+    board_config = config_loader.get_board_config()
+    game_config = config_loader.get_game_config()
+
+    scenario_manager = GameStateManager({"board": board_config}, unit_registry)
+    scenario_result = scenario_manager.load_units_from_scenario(scenario_file, unit_registry)
+    scenario_primary_objective_ids = scenario_result.get("primary_objectives")
+    scenario_primary_objective_id = scenario_result.get("primary_objective")
+
+    if scenario_primary_objective_ids is not None:
+        if not isinstance(scenario_primary_objective_ids, list):
+            raise TypeError("primary_objectives must be a list of objective IDs")
+        if not scenario_primary_objective_ids:
+            raise ValueError("primary_objectives list cannot be empty")
+        primary_objective_config = [
+            config_loader.load_primary_objective_config(obj_id)
+            for obj_id in scenario_primary_objective_ids
+        ]
+    elif scenario_primary_objective_id is not None:
+        primary_objective_config = config_loader.load_primary_objective_config(
+            scenario_primary_objective_id
+        )
+    else:
+        primary_objective_config = None
+
+    config = {
+        "board": board_config,
+        **require_engine_game_config_sections(game_config),
+        "units": require_key(scenario_result, "units"),
+        "primary_objective": primary_objective_config,
+        "scenario_wall_hexes": scenario_result.get("wall_hexes"),
+        "scenario_dense_wall_hexes": scenario_result.get("dense_wall_hexes"),
+        "scenario_objectives": scenario_result.get("objectives"),
+        "scenario_terrain_areas": scenario_result.get("terrain_areas"),
+        # Taille de bataille (20.01) et rosters : PRODUITS par le loader ci-dessus, donc ils se
+        # transmettent comme les autres champs de scénario. Les omettre faisait rendre cap=0 à
+        # `strategic_reserves_usage` — aucune mise en réserve possible en partie, même quand le
+        # scénario déclare sa `scale`. Aujourd'hui ce sont les scénarios d'agents (chemin
+        # PvE/test) qui la déclarent ; aucun `scenario_pvp*.json` n'en a encore, et pour ceux-là
+        # `None` reste la valeur juste : règle invérifiable, donc fermée.
+        "points_limit": scenario_result.get("points_limit"),
+        "roster_info": scenario_result.get("roster_info"),
+        "deployment_type": scenario_result.get("deployment_type"),
+        "deployment_type_by_player": scenario_result.get("deployment_type_by_player"),
+        "deployment_zone": scenario_result.get("deployment_zone"),
+        "deployment_pools": scenario_result.get("deployment_pools"),
+    }
+
+    agent_keys = get_agents_from_scenario(scenario_file, unit_registry)
+    if not agent_keys:
+        raise ValueError("No agents found in scenario")
+    return config, unit_registry, config_loader, agent_keys
+
+
+def _default_board_scenario_path(scenario_name: str) -> str:
+    """Chemin du scénario `scenario_name` dans le dossier de board par défaut.
+
+    UN seul endroit résout « quel dossier de board porte les scénarios » : PvP et PvE partaient
+    du même besoin et n'en avaient pas la même réponse — le PvE pointait encore la copie
+    `config/scenario_pve.json` d'avant la migration des scénarios sous
+    `config/board/<board>/scenario/`, restée au format à clé `objectives` et donc refusée par le
+    loader. Le mode PvE ne démarrait plus.
+    """
+    from config_loader import get_config_loader as _gcl
+
+    _cfg = _gcl().load_config("config", force_reload=False)
+    # Pas de littéral de repli : "x5" ne désigne plus aucune entrée des deux tables.
+    board_path = require_key(require_key(_cfg, "defaults"), "test_board")
+    if board_path not in TEST_SCENARIO_BOARD_MAP:
+        raise ValueError(
+            f"config.json defaults.test_board = {board_path!r} : attendu l'un de "
+            f"{sorted(TEST_SCENARIO_BOARD_MAP)}"
+        )
+    return os.path.join("config", TEST_SCENARIO_BOARD_MAP[board_path], "scenario", scenario_name)
+
+
 def initialize_engine(scenario_file: Optional[str] = None):
     """Initialize the W40K engine for PvP mode with configurable scenario."""
     global engine
@@ -1685,16 +1777,7 @@ def initialize_engine(scenario_file: Optional[str] = None):
         
         # Define scenario file path for PvP mode (default if not provided)
         if scenario_file is None:
-            from config_loader import get_config_loader as _gcl
-            _cfg = _gcl().load_config("config", force_reload=False)
-            # Pas de littéral de repli : "x5" ne désigne plus aucune entrée des deux tables.
-            board_path = require_key(require_key(_cfg, "defaults"), "test_board")
-            if board_path not in TEST_SCENARIO_BOARD_MAP:
-                raise ValueError(
-                    f"config.json defaults.test_board = {board_path!r} : attendu l'un de "
-                    f"{sorted(TEST_SCENARIO_BOARD_MAP)}"
-                )
-            scenario_file = os.path.join("config", TEST_SCENARIO_BOARD_MAP[board_path], "scenario", "scenario_pvp.json")
+            scenario_file = _default_board_scenario_path("scenario_pvp.json")
         elif not isinstance(scenario_file, str):
             raise ValueError(f"scenario_file must be a string if provided (got {type(scenario_file).__name__})")
 
@@ -1706,65 +1789,9 @@ def initialize_engine(scenario_file: Optional[str] = None):
                 f"Training scenarios are in config/agents/<agent>/scenarios/"
             )
 
-        # Initialize unit registry
-        from ai.unit_registry import UnitRegistry
-        unit_registry = UnitRegistry()
-        
-        # Load agent-specific configs based on scenario units
-        from config_loader import get_config_loader, require_engine_game_config_sections
-        config_loader = get_config_loader()
-        board_config = config_loader.get_board_config()
-        game_config = config_loader.get_game_config()
-        
-        from engine.game_state import GameStateManager
-        scenario_manager = GameStateManager({"board": board_config}, unit_registry)
-        scenario_result = scenario_manager.load_units_from_scenario(scenario_file, unit_registry)
-        scenario_units = require_key(scenario_result, "units")
-        scenario_primary_objective_ids = scenario_result.get("primary_objectives")
-        scenario_primary_objective_id = scenario_result.get("primary_objective")
-        scenario_wall_hexes = scenario_result.get("wall_hexes")
-        scenario_dense_wall_hexes = scenario_result.get("dense_wall_hexes")
-        scenario_objectives = scenario_result.get("objectives")
-        scenario_deployment_type = scenario_result.get("deployment_type")
-        scenario_deployment_type_by_player = scenario_result.get("deployment_type_by_player")
-        scenario_deployment_zone = scenario_result.get("deployment_zone")
-        scenario_deployment_pools = scenario_result.get("deployment_pools")
-        
-        if scenario_primary_objective_ids is not None:
-            if not isinstance(scenario_primary_objective_ids, list):
-                raise TypeError("primary_objectives must be a list of objective IDs")
-            if not scenario_primary_objective_ids:
-                raise ValueError("primary_objectives list cannot be empty")
-            primary_objective_config = [
-                config_loader.load_primary_objective_config(obj_id)
-                for obj_id in scenario_primary_objective_ids
-            ]
-        elif scenario_primary_objective_id is not None:
-            primary_objective_config = config_loader.load_primary_objective_config(
-                scenario_primary_objective_id
-            )
-        else:
-            primary_objective_config = None
-        
-        config = {
-            "board": board_config,
-            **require_engine_game_config_sections(game_config),
-            "units": scenario_units,
-            "primary_objective": primary_objective_config,
-            "scenario_wall_hexes": scenario_wall_hexes,
-            "scenario_dense_wall_hexes": scenario_dense_wall_hexes,
-            "scenario_objectives": scenario_objectives,
-            "scenario_terrain_areas": scenario_result.get("terrain_areas"),
-            "deployment_type": scenario_deployment_type,
-            "deployment_type_by_player": scenario_deployment_type_by_player,
-            "deployment_zone": scenario_deployment_zone,
-            "deployment_pools": scenario_deployment_pools,
-        }
-        
-        # Determine which agents are in the scenario
-        agent_keys = get_agents_from_scenario(scenario_file, unit_registry)
-        if not agent_keys:
-            raise ValueError("No agents found in scenario")
+        config, unit_registry, config_loader, agent_keys = _build_scenario_engine_config(
+            scenario_file
+        )
         
         
         # For PvP mode, we need configs for all agents
@@ -1862,7 +1889,7 @@ def initialize_test_engine(scenario_file: Optional[str] = None, forced_agent_key
         
         # Define scenario file path for PvE mode (default if not provided)
         if scenario_file is None:
-            scenario_file = os.path.join("config", "scenario_pve.json")
+            scenario_file = _default_board_scenario_path("scenario_pve.json")
         elif not isinstance(scenario_file, str):
             raise ValueError(f"scenario_file must be a string if provided (got {type(scenario_file).__name__})")
 
@@ -1871,67 +1898,12 @@ def initialize_test_engine(scenario_file: Optional[str] = None, forced_agent_key
             raise FileNotFoundError(
                 f"PvE scenario file not found: {scenario_file}\n"
                 f"This file is required for PvE mode.\n"
-                f"Create it from config/scenario_pve.json or another scenario."
+                f"Create it in config/board/<board>/scenario/ (le loader y résout wall_ref/terrain_ref)."
             )
 
-        # Initialize unit registry
-        from ai.unit_registry import UnitRegistry
-        unit_registry = UnitRegistry()
-        
-        from config_loader import get_config_loader, require_engine_game_config_sections
-        config_loader = get_config_loader()
-        board_config = config_loader.get_board_config()
-        game_config = config_loader.get_game_config()
-        
-        from engine.game_state import GameStateManager
-        scenario_manager = GameStateManager({"board": board_config}, unit_registry)
-        scenario_result = scenario_manager.load_units_from_scenario(scenario_file, unit_registry)
-        scenario_units = require_key(scenario_result, "units")
-        scenario_primary_objective_ids = scenario_result.get("primary_objectives")
-        scenario_primary_objective_id = scenario_result.get("primary_objective")
-        scenario_wall_hexes = scenario_result.get("wall_hexes")
-        scenario_dense_wall_hexes = scenario_result.get("dense_wall_hexes")
-        scenario_objectives = scenario_result.get("objectives")
-        scenario_deployment_type = scenario_result.get("deployment_type")
-        scenario_deployment_type_by_player = scenario_result.get("deployment_type_by_player")
-        scenario_deployment_zone = scenario_result.get("deployment_zone")
-        scenario_deployment_pools = scenario_result.get("deployment_pools")
-        
-        if scenario_primary_objective_ids is not None:
-            if not isinstance(scenario_primary_objective_ids, list):
-                raise TypeError("primary_objectives must be a list of objective IDs")
-            if not scenario_primary_objective_ids:
-                raise ValueError("primary_objectives list cannot be empty")
-            primary_objective_config = [
-                config_loader.load_primary_objective_config(obj_id)
-                for obj_id in scenario_primary_objective_ids
-            ]
-        elif scenario_primary_objective_id is not None:
-            primary_objective_config = config_loader.load_primary_objective_config(
-                scenario_primary_objective_id
-            )
-        else:
-            primary_objective_config = None
-        
-        config = {
-            "board": board_config,
-            **require_engine_game_config_sections(game_config),
-            "units": scenario_units,
-            "primary_objective": primary_objective_config,
-            "scenario_wall_hexes": scenario_wall_hexes,
-            "scenario_dense_wall_hexes": scenario_dense_wall_hexes,
-            "scenario_objectives": scenario_objectives,
-            "scenario_terrain_areas": scenario_result.get("terrain_areas"),
-            "deployment_type": scenario_deployment_type,
-            "deployment_type_by_player": scenario_deployment_type_by_player,
-            "deployment_zone": scenario_deployment_zone,
-            "deployment_pools": scenario_deployment_pools,
-        }
-        
-        # Determine which agents are in the scenario
-        agent_keys = get_agents_from_scenario(scenario_file, unit_registry)
-        if not agent_keys:
-            raise ValueError("No agents found in scenario")
+        config, unit_registry, config_loader, agent_keys = _build_scenario_engine_config(
+            scenario_file
+        )
         
         
         # For PvE mode, load configs for all agents by default.
@@ -2382,6 +2354,10 @@ def start_game():
         elif requested_mode == "pvp":
             initialize_engine(scenario_file=scenario_file)
         elif requested_mode == "pve":
+            # Le `scenario_file` du client est TRANSMIS, comme en "pvp" : l'écraser rendait 200
+            # sur une partie qui n'est pas celle demandée, donc un board client désynchronisé et
+            # muet. Sans clé, `initialize_test_engine` résout le défaut du dossier de board ; un
+            # chemin hérité pointant la copie racine supprimée échoue explicitement.
             initialize_test_engine(
                 scenario_file=scenario_file,
                 forced_agent_key=_configured_agent_key(),

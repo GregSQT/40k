@@ -469,16 +469,21 @@ class W40KEngine(gym.Env):
 
             # CRITICAL: Extract rewards_config from config dict for module initialization
             self.rewards_config = config["rewards_config"] if "rewards_config" in config else {}
+            # Faux en dur, même quand `roster_info` porte `agent_ref_randomized` : ce drapeau ne
+            # sert qu'à REDEMANDER un scénario au reset (tirage de roster entre deux épisodes
+            # d'entraînement). Une partie API/PvP ne rejoue pas d'épisode ; le dériver ici
+            # ouvrirait un rechargement de scénario en cours de partie, pas une rotation.
             self._scenario_has_random_agent_roster = False
-            # Chemin API/PvP : le scénario n'arrive pas par le loader, aucun roster n'est déclaré.
-            # `None` est la valeur MÉTIER de « pas de roster » (cf. ai/bot_evaluation.py), pas un
-            # défaut anti-erreur : l'attribut existe ainsi sur les DEUX branches de construction,
+            # Chemin API/PvP : le scénario est chargé par l'APPELANT (services/api_server.py),
+            # qui reforwarde ici le produit du loader. `None` quand la clé est absente = valeur
+            # MÉTIER (« ce scénario ne déclare ni roster ni `scale` »), et non un défaut
+            # anti-erreur : c'est déjà la sémantique posée par le loader lui-même
+            # (engine/game_state.py). Les poser ICI, sur les DEUX branches de construction, est
             # ce qui autorise l'accès direct partout au lieu d'un getattr par point de lecture.
-            self._scenario_roster_info = None
-            # Idem : ce chemin ne passe pas par le loader de scénario, donc aucune taille de
-            # bataille n'en vient. `None` = pas de plafond de réserves dérivable ici (20.01) —
-            # c'est déjà la valeur qu'obtenait la lecture, elle est simplement posée à sa source.
-            self._scenario_points_limit = None
+            self._scenario_roster_info = self.config.get("roster_info")
+            # Taille de bataille en points : plafond des réserves stratégiques 20.01. Absente =
+            # règle invérifiable, donc aucun dépôt en réserves (cf. strategic_reserves_usage).
+            self._scenario_points_limit = self.config.get("points_limit")
             self._scenario_loaded_for_controlled_player = int(require_key(self.config, "controlled_player"))
             
             # CRITICAL: Extract training_config from config dict for observation_params access
@@ -928,7 +933,7 @@ class W40KEngine(gym.Env):
 
     def _is_training_scenario_context(self) -> bool:
         """Return True when current scenario belongs to training split."""
-        current_path = getattr(self, "_current_scenario_file", None)
+        current_path = self._current_scenario_file
         if not isinstance(current_path, str) or not current_path.strip():
             return False
         normalized = current_path.replace("\\", "/")
@@ -1719,7 +1724,7 @@ class W40KEngine(gym.Env):
             scenario_name = self.config.get("name")
             if not scenario_name or scenario_name == "Unknown Scenario":
                 # Extract from filename: AgentName_scenario_phase1-bot3.json -> phase1-bot3
-                if hasattr(self, '_current_scenario_file') and self._current_scenario_file:
+                if self._current_scenario_file:
                     filename = os.path.basename(self._current_scenario_file)
                     # Match pattern: *_scenario_*.json
                     import re
@@ -1744,7 +1749,7 @@ class W40KEngine(gym.Env):
             raw_walls = self._scenario_wall_hexes if self._scenario_wall_hexes is not None else []
             walls = [{"col": normalize_coordinates(w[0], w[1])[0], "row": normalize_coordinates(w[0], w[1])[1]} for w in raw_walls] if raw_walls else []
             # Use _scenario_objectives (set during scenario loading)
-            objectives = self._scenario_objectives if hasattr(self, '_scenario_objectives') else None
+            objectives = self._scenario_objectives
             
             # Single source of truth: episode_units from units_cache (col, row, player); unitType from units
             uc = require_key(self.game_state, "units_cache")

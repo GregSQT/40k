@@ -1141,9 +1141,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           requestPayload.scenario_file = "config/scenario_pvp_test.json";
         } else if (isPvETestMode) {
           requestPayload.scenario_file = "config/scenario_pve_test.json";
-        } else if (isPvEMode) {
-          requestPayload.scenario_file = "config/scenario_pve.json";
         }
+        // Mode PvE : aucun `scenario_file` envoyé, comme en PvP. Le backend résout le scénario
+        // dans le dossier de board courant ; le client n'a pas à connaître cette arborescence.
         if (isPvPTestMode || isPvETestMode) {
           const boardParam = new URLSearchParams(window.location.search).get("board") ?? "x5_44x60";
           requestPayload.board_path = boardParam;
@@ -1249,7 +1249,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       const requestPayload = {
         pve_mode: true,
         mode_code: "pve",
-        scenario_file: "config/scenario_pve.json",
       };
       const response = await apiFetch(`${API_BASE}/game/start`, {
         method: "POST",

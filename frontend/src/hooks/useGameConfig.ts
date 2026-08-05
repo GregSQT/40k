@@ -310,7 +310,7 @@ export const useGameConfig = (options?: {
         };
         const scenarioMap: Record<string, string> = {
           endless_duty: "config/scenario_endless_duty.json",
-          pve: "config/scenario_pve.json",
+          pve: "config/board/44x60x5/scenario/scenario_pve.json",
         };
         const scenarioFile =
           scenarioFileOverride ??
