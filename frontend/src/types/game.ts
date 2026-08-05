@@ -10,9 +10,7 @@ export type GameMode =
   | "targetPreview"
   | "chargePreview"
   | "advancePreview"
-  | "pileInPreview"
   | "pileInModelMove"
-  | "consolidationPreview"
   | "consolidationModelMove";
 // V11 (PDF 12) : sous-phases fight = pile_in -> fight -> consolidate.
 export type FightSubPhase = "pile_in" | "fight" | "consolidate" | null;
@@ -399,14 +397,6 @@ export interface GameState {
   /** Empreinte serveur ; le client la renvoie en ``move_preview_mask_loops_client_hash`` pour omettre les boucles si inchangé. */
   move_preview_footprint_mask_loops_hash?: string;
   move_preview_footprint_mask_loops_unchanged?: boolean;
-  /** Phase fight : union des hexes occupés par l'empreinte pour chaque ancre pile in valide (comme move_preview_footprint_zone). */
-  fight_pile_in_footprint_zone?: Array<[number, number]>;
-  /** Obsolète : le moteur n’envoie plus les boucles ; l’UI dérive le masque depuis ``fight_pile_in_footprint_zone``. */
-  fight_pile_in_footprint_mask_loops?: Array<Array<[number, number]>>;
-  /** Consolidation après attaques : union des empreintes valides (moteur). */
-  fight_consolidation_footprint_zone?: Array<[number, number]>;
-  /** Obsolète : le moteur n’envoie plus les boucles ; l’UI dérive le masque depuis ``fight_consolidation_footprint_zone``. */
-  fight_consolidation_footprint_mask_loops?: Array<Array<[number, number]>>;
   active_shooting_unit?: string; // Active unit ID in shooting phase
   active_charge_unit?: string; // Active unit ID in charge phase
   victory_points?: Record<string, number>;

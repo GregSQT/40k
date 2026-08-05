@@ -310,10 +310,6 @@ export interface APIGameState {
   move_preview_footprint_mask_loops?: unknown;
   move_preview_footprint_mask_loops_hash?: string;
   move_preview_footprint_mask_loops_unchanged?: boolean;
-  fight_pile_in_footprint_zone?: Array<[number, number]>;
-  fight_pile_in_footprint_mask_loops?: Array<Array<[number, number]>>;
-  fight_consolidation_footprint_zone?: Array<[number, number]>;
-  fight_consolidation_footprint_mask_loops?: Array<Array<[number, number]>>;
   active_shooting_unit?: string;
   active_fight_unit?: string;
   pve_mode?: boolean;
@@ -566,9 +562,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     | "chargePreview"
     | "chargeModelMove"
     | "advancePreview"
-    | "pileInPreview"
     | "pileInModelMove"
-    | "consolidationPreview"
     | "consolidationModelMove"
     | "deploymentMove"
     // 20.04 — arrivée de réserves : l'aire légale est affichée, le clic suivant pose l'escouade.
@@ -882,10 +876,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   });
   fightTargetUiRef.current = { mode, attackPreview };
   const [chargeDestinations, setChargeDestinations] = useState<Array<{ col: number; row: number }>>(
-    []
-  );
-  /** Fight phase : ancres valides pour pile in (moteur) */
-  const [pileInDestinations, setPileInDestinations] = useState<Array<{ col: number; row: number }>>(
     []
   );
   /** Union des hexes d'empreinte finales (moteur) — affichage violet autour de la cible, pas seulement les ancres. */
@@ -1638,7 +1628,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     clearChargePoolRefs();
     setPendingChargeRollDisplay(null);
     setChargePreviewTargetId(null);
-    setPileInDestinations([]);
     setAdvanceDestinations([]);
     setPostShootMoveDestinations([]);
     setAdvancingUnitId(null);
@@ -1664,7 +1653,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       clearChargePoolRefs();
       setPendingChargeRollDisplay(null);
       setChargePreviewTargetId(null);
-      setPileInDestinations([]);
       setAdvanceDestinations([]);
       setPostShootMoveDestinations([]);
       setAdvancingUnitId(null);
@@ -1709,7 +1697,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       return { unitIds: [], blinkTimer: null, attackerId: null };
     });
     setAttackPreview(null);
-    setPileInDestinations([]);
     moveDestPoolRef.current = new Set();
     footprintZoneRef.current = new Set();
     footprintMaskLoopsRef.current = null;
@@ -3012,15 +2999,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           }
           // Fight phase : pile-in PAR-FIGURINE (mode fin type charge). La réponse d'activate_unit
           // (et des refresh suivants) porte ``pile_in_model_move:true`` → on entre/maintient le mode
-          // et on applique le plan_state. Doit précéder les branches V10 (waiting_for_pile_in) et
-          // la réinitialisation paresseuse (fight_subphase pile_in sans waiting).
+          // et on applique le plan_state. Doit précéder la réinitialisation paresseuse
+          // (fight_subphase pile_in sans plan de figurine).
           else if (data.game_state?.phase === "fight" && data.result?.pile_in_model_move === true) {
             const uid = parseInt(
               String(data.result.unitId ?? data.game_state.active_fight_unit),
               10
             );
-            // Purge des artefacts du pile-in rigide V10 (disques + empreinte) pour éviter un rendu fantôme.
-            setPileInDestinations([]);
             moveDestPoolRef.current = new Set();
             footprintZoneRef.current = new Set();
             footprintMaskLoopsRef.current = null;
@@ -3039,7 +3024,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               String(data.result.unitId ?? data.game_state.active_fight_unit),
               10
             );
-            setPileInDestinations([]);
             moveDestPoolRef.current = new Set();
             footprintZoneRef.current = new Set();
             footprintMaskLoopsRef.current = null;
@@ -3060,7 +3044,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             setConsolidationMovePlan(null);
             consolidationModelPoolRef.current = new Set();
             consolidationModelMaskLoopsRef.current = null;
-            setPileInDestinations([]);
             moveDestPoolRef.current = new Set();
             footprintZoneRef.current = new Set();
             footprintMaskLoopsRef.current = null;
@@ -3075,7 +3058,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             data.game_state?.phase === "fight" &&
             data.game_state?.fight_subphase === "pile_in"
           ) {
-            setPileInDestinations([]);
             moveDestPoolRef.current = new Set();
             footprintZoneRef.current = new Set();
             footprintMaskLoopsRef.current = null;
@@ -3095,7 +3077,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             consolidationModelPoolRef.current = new Set();
             consolidationModelMaskLoopsRef.current = null;
             setConsolidationNewFoes([]);
-            setPileInDestinations([]);
             moveDestPoolRef.current = new Set();
             footprintZoneRef.current = new Set();
             footprintMaskLoopsRef.current = null;
@@ -3141,7 +3122,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               return true;
             })()
           ) {
-            setPileInDestinations([]);
             if (targetPreview?.blinkTimer) {
               clearInterval(targetPreview.blinkTimer);
             }
@@ -3197,7 +3177,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             data.result.valid_targets.length === 0 &&
             !data.result.activation_ended
           ) {
-            setPileInDestinations([]);
             if (targetPreview?.blinkTimer) {
               clearInterval(targetPreview.blinkTimer);
             }
@@ -5811,9 +5790,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       const outcome = readEngineActionOutcome(data);
       if (outcome.kind === "noop") return;
       if (outcome.kind === "refused") {
-        setError(
-          `${plan.ingress ? "Ingress" : "Deploy"} refused: ${outcome.message}`
-        );
+        setError(`${plan.ingress ? "Ingress" : "Deploy"} refused: ${outcome.message}`);
         return;
       }
       deployPoolRef.current = new Set();
@@ -6321,32 +6298,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     },
     [executeAction]
   );
-
-  const handlePileInMove = useCallback(
-    async (unitId: number, destCol: number, destRow: number) => {
-      const isConsolidation = mode === "consolidationPreview";
-      await executeAction({
-        action: isConsolidation ? "consolidation" : "pile_in",
-        unitId: String(unitId),
-        destCol,
-        destRow,
-      });
-    },
-    [executeAction, mode]
-  );
-
-  const handleSkipPileIn = useCallback(async () => {
-    const uid = selectedUnitId;
-    if (uid === null) {
-      return;
-    }
-    const isConsolidation = mode === "consolidationPreview";
-    await executeAction({
-      action: isConsolidation ? "consolidation" : "pile_in",
-      unitId: String(uid),
-      skip: true,
-    });
-  }, [executeAction, selectedUnitId, mode]);
 
   // Bouton « Terminer le pile-in » : clôt l'étape pile-in groupée du joueur actif
   // (les unités non pilées sont passées) → le moteur enchaîne sur le groupe adverse
@@ -7671,24 +7622,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     return undefined;
   }, [gameState?.phase, mode, pendingPreviewAction, postShootMoveDestinations]);
 
-  const pileInCellsOverride = useMemo(() => {
-    if (gameState?.phase === "fight" && mode === "pileInPreview") {
-      if (pileInDestinations.length > 0) {
-        return pileInDestinations;
-      }
-    }
-    if (gameState?.phase === "fight" && mode === "consolidationPreview") {
-      if (pileInDestinations.length > 0) {
-        return pileInDestinations;
-      }
-    }
-    return undefined;
-  }, [gameState?.phase, mode, pileInDestinations]);
-
-  const combinedAvailableCellsOverride = useMemo(() => {
-    return pileInCellsOverride ?? moveSelectionCellsOverride;
-  }, [pileInCellsOverride, moveSelectionCellsOverride]);
-
   // Memoize isBlinkingActive to prevent re-renders when only blinkState toggles
   const isBlinkingActiveMemo = useMemo(() => {
     return blinkingUnits.blinkTimer !== null;
@@ -7837,10 +7770,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       move_preview_footprint_mask_loops: (
         gameState as { move_preview_footprint_mask_loops?: unknown }
       ).move_preview_footprint_mask_loops,
-      fight_pile_in_footprint_zone: gameState.fight_pile_in_footprint_zone,
-      fight_pile_in_footprint_mask_loops: gameState.fight_pile_in_footprint_mask_loops,
-      fight_consolidation_footprint_zone: gameState.fight_consolidation_footprint_zone,
-      fight_consolidation_footprint_mask_loops: gameState.fight_consolidation_footprint_mask_loops,
       active_shooting_unit: gameState.active_shooting_unit,
       active_fight_unit: gameState.active_fight_unit,
       units_cache: gameState.units_cache,
@@ -8058,8 +7987,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       onStartTargetPreview: () => {},
       onFightAttack: () => {},
       onFightPhaseRightClick: async () => {},
-      onPileInMove: async () => {},
-      onSkipPileIn: async () => {},
       onCharge: () => {},
       onActivateCharge: () => {},
       onMoveCharger: () => {},
@@ -8501,8 +8428,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     onStartTargetPreview: handleStartTargetPreview,
     onFightAttack: handleFightAttack,
     onFightPhaseRightClick: handleRightClick,
-    onPileInMove: handlePileInMove,
-    onSkipPileIn: handleSkipPileIn,
     onEndPileIn: handleEndPileIn,
     onSkipFight: handleSkipFight,
     onCharge: emptyCallback,
@@ -8546,7 +8471,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     onToggleBattleShockTestMode: handleToggleBattleShockTestMode,
     chargedTestMode,
     onToggleChargedTestMode: handleToggleChargedTestMode,
-    availableCellsOverride: combinedAvailableCellsOverride,
+    availableCellsOverride: moveSelectionCellsOverride,
     // Export blinking state for HP bar components
     ...blinkBoardPropsReady,
     ruleChoicePrompt,

@@ -35,7 +35,6 @@
   ],
 
   "fight.pile_in.select": "Cliquez sur une unité pour l'activer et effectuer son mouvement de pile-in.",
-  "fight.pile_in.pileInPreview": "Choisissez la destination du pile-in : chaque figurine doit se rapprocher de l'ennemi le plus proche.",
   "fight.pile_in.pileInModelMove": "Déplacez chaque figurine du pile-in, une par une.",
 
   "fight.fight.select": "Cliquez sur une unité pour l'activer et combattre.",
@@ -43,6 +42,5 @@
   "fight.fight.targetPreview": "Confirmez l'attaque sur cette cible, ou sélectionnez-en une autre.",
 
   "fight.consolidate.select": "Cliquez sur une unité pour l'activer et effectuer sa consolidation.",
-  "fight.consolidate.consolidationPreview": "Choisissez la destination de consolidation.",
   "fight.consolidate.consolidationModelMove": "Déplacez chaque figurine de la consolidation, une par une."
 }
