@@ -2,6 +2,17 @@
 
 **Chantier OUVERT, rien de livré.** Inventaire, pas rapport de travail.
 
+🔴 **CHIFFRES RECALÉS le 2026-08-05 sur `main` fusionné (`e672683a`).** Le premier relevé avait été
+fait DANS le worktree du lot `units_cache`, donc sur un arbre qui ignorait à la fois les avancées
+de `main` (réserves 20.01, registre `_once_claims` — ~2 783 lignes) et les 38 suppressions de code
+mort de ce lot. Écarts constatés : 198 appels (et non 186), 78 déjà bruyants (et non 82), **56
+replis** (et non 59), 64 à lire (et non 45). **Leçon : un inventaire relevé dans un worktree se
+périme au merge — le re-mesurer avant d'ouvrir le chantier, jamais le reprendre tel quel.**
+
+**Vérifié le 2026-08-05, rien n'a été fait entre-temps** : `require_unit_by_id` n'existe nulle part
+(`grep -rn "require_unit_by_id"` → 0 hit) et les QUATRE implémentations de `get_unit_by_id` sont
+toujours en place, ordres d'arguments contradictoires compris.
+
 **Origine** : signalé en clôture du lot `units_cache`
 ([`replis_units_cache_2026-08-05.md`](replis_units_cache_2026-08-05.md) §7). Un site y est resté
 non traité — `_shoot_engagement_blocks_target`, `shooter_unit is None → return False` — parce qu'il
@@ -43,7 +54,7 @@ porte depuis le 2026-07-20 (V11 §0.19.2) le raisonnement complet et le `raise` 
 > en silence — si toutes les cibles manquaient, la fonction renvoyait `valid_targets[0]` sans avoir
 > scoré quoi que ce soit.
 
-Ce commentaire est le modèle du verdict attendu sur les 59 sites ci-dessous.
+Ce commentaire est le modèle du verdict attendu sur les 56 sites ci-dessous.
 
 ---
 
@@ -80,106 +91,70 @@ seule signature — et laquelle. Le reste du lot en dépend.
 
 ---
 
-## 3. Inventaire — 186 appels, 59 replis
+## 3. Inventaire — 198 appels, 56 replis
 
 Relevé à l'AST : tout appel `get_unit_by_id(` / `_get_unit_by_id(` dans `engine/`, `ai/`,
 `services/`, classé par ce qui suit dans les 4 lignes. **Dénominateur brut publié exprès** (leçon
 §4.1 de la campagne : un contrôle qui ne regarde rien répond « tout va bien »).
 
-| Catégorie | N |
+| Catégorie | N (recalé sur `e672683a`) |
 |---|---|
-| **déjà bruyants** (`raise` dans les 4 lignes) | **82** |
-| **replis** (Formes B et C ci-dessous) | **59** |
-| **sans repli détecté dans la fenêtre** — à LIRE, forme D | **45** |
+| **déjà bruyants** (`raise` dans les 4 lignes) | **78** |
+| **replis** (Formes B et C ci-dessous) | **56** |
+| **sans repli détecté dans la fenêtre** — à LIRE, forme D | **64** |
 | `# get allowed` | 0 |
-| **total** | **186** |
+| **total** | **198** |
 
-Le ratio 82/186 déjà bruyants est le fait marquant : **ce dépôt a déjà tranché ce contrat, à 44 %.**
+Le ratio 78/198 déjà bruyants est le fait marquant : **ce dépôt a déjà tranché ce contrat, à 39 %.**
 Le travail est de finir une conversion commencée, pas d'imposer une règle nouvelle. C'est l'argument
 le plus solide du lot, et il est vérifiable en une commande.
 
-### Forme B — `if x is None: return <valeur>` — 48 sites
+### Forme B — `if x is None: return <valeur>` — 46 sites
 
 Le refus est explicite mais **muet sur sa cause** : l'appelant ne distingue pas « pas de cible » de
-« index désynchronisé ».
-
-**Sous-forme B1 — `return` nu (3)** — les plus insidieuses : la fonction rend `None`/rien et
-l'appelant continue.
-
-| Site | Fonction |
-|---|---|
-| `shooting_handlers.py:1192` | `build_unit_los_cache` |
-| `shooting_handlers.py:1876` | `_rebuild_los_cache_for_unit` |
-| `services/api_server.py:916` | `_attach_shoot_visible_cells` |
-
-**Sous-forme B2 — `return <valeur>` (45)**
+« index désynchronisé ». Relevé sur `e672683a`, hors `tests/`.
 
 | Fichier | Fonctions (ligne) |
 |---|---|
-| `charge_handlers.py` (13) | `_charge_footprint_union_for_anchors` (312), `execute_action` (1219), `charge_model_plan_state` (2464), `charge_build_valid_targets` (2651), `charge_unit_execution_loop` (2786), `charge_build_valid_destinations_pool` (3338, 3364, 3376), `charge_target_selection_handler` (4058), `charge_autoplace_plan` (4692), `charge_set_fly_mode_handler` (5365), `charge_commit_move_plan_handler` (5437), `charge_destination_selection_handler` (5605) |
-| `movement_handlers.py` (11) | `squad_descent_penalty_subhex` (394), `execute_action` (926), `movement_set_advance_mode_handler` (1044), `movement_set_fly_mode_handler` (1081), `movement_unit_execution_loop` (1161), `movement_build_valid_destinations_pool` (2630), `movement_build_model_destinations_pool` (3491), `movement_commit_move_plan_handler` (4181), `movement_click_handler` (4341, 4349), `movement_destination_selection_handler` (4385) |
-| `shooting_handlers.py` (8) | `preview_hidden_models_from_position` (1090), `preview_hidden_models_from_model_positions` (1150), `preview_shoot_valid_targets_from_position` (1410, 1469), `_should_auto_activate_next_shooting_unit` (2106), `shooting_unit_activation_start` (2398), `execute_action` (5653) |
-| `fight_handlers.py` (5) | `_fight_pile_in_build_model_pool` (3197), `pile_in_autoplace_plan` (3758), `consolidate_autoplace_plan` (4309), `_fight_consolidation_build_model_pool` (4522), `_manual_roll_fight_intent` (5432) |
-| `shared_utils.py` (5) | `unit_is_on_battlefield` (1293), `unit_is_in_strategic_reserves` (1305), `_shoot_engagement_blocks_target` (6011) ⬅ **le site d'origine**, `resolve_squad_shooting_type` (7035), `squad_model_shootable_weapon_indices` (7112) |
-| `w40k_core.py` (2) | `_handle_hazard_confirm` (3592), `_process_squad_manual_shoot` (4237) |
-| `action_decoder.py` (1) | `_get_eligible_units_for_current_phase` (511) |
-| `reward_calculator.py` (1) | `_calculate_on_objective_reward` (1258) |
+| `engine/phase_handlers/charge_handlers.py` (13) | _charge_footprint_union_for_anchors (312), charge_autoplace_plan (4640), charge_build_valid_destinations_pool (3286), charge_build_valid_destinations_pool (3312), charge_build_valid_destinations_pool (3324), charge_build_valid_targets (2632), charge_commit_move_plan_handler (5385), charge_destination_selection_handler (5553), charge_model_plan_state (2445), charge_set_fly_mode_handler (5313), charge_target_selection_handler (4006), charge_unit_execution_loop (2767), execute_action (1200) |
+| `engine/phase_handlers/fight_handlers.py` (5) | _fight_consolidation_build_model_pool (3620), _fight_pile_in_build_model_pool (2319), _manual_roll_fight_intent (4533), consolidate_autoplace_plan (3435), pile_in_autoplace_plan (2884) |
+| `engine/phase_handlers/movement_handlers.py` (11) | execute_action (931), movement_build_model_destinations_pool (3502), movement_build_valid_destinations_pool (2641), movement_click_handler (4352), movement_click_handler (4360), movement_commit_move_plan_handler (4192), movement_destination_selection_handler (4396), movement_set_advance_mode_handler (1055), movement_set_fly_mode_handler (1092), movement_unit_execution_loop (1172), squad_descent_penalty_subhex (398) |
+| `engine/phase_handlers/shared_utils.py` (5) | _shoot_engagement_blocks_target (5991), resolve_squad_shooting_type (7015), squad_model_shootable_weapon_indices (7092), unit_is_in_strategic_reserves (1311), unit_is_on_battlefield (1299) |
+| `engine/phase_handlers/shooting_handlers.py` (8) | _should_auto_activate_next_shooting_unit (1935), build_unit_los_cache (1159), execute_action (5271), preview_hidden_models_from_model_positions (1117), preview_hidden_models_from_position (1057), preview_shoot_valid_targets_from_position (1334), preview_shoot_valid_targets_from_position (1393), shooting_unit_activation_start (2227) |
+| `engine/reward_calculator.py` (1) | _calculate_on_objective_reward (1256) |
+| `engine/w40k_core.py` (2) | _handle_hazard_confirm (3585), _process_squad_manual_shoot (4230) |
+| `services/api_server.py` (1) | _attach_shoot_visible_cells (951) |
 
-⚠️ **`unit_is_on_battlefield` et `unit_is_in_strategic_reserves` (shared_utils 1289/1299) sont à
-traiter EN PREMIER dans cette forme**, et pour une raison lue dans le code, pas supposée :
+⚠️ **`unit_is_on_battlefield` (1299) et `unit_is_in_strategic_reserves` (1311) restent à traiter EN
+PREMIER** dans cette forme, pour la raison lue dans le code et rappelée ci-dessous : les deux
+rendent `False` sur le même id inconnu — « ni sur la table, ni en réserves » — et le docstring de
+la première justifie un contrat `units_cache` que la ligne en dessous n'applique pas (elle lit
+`unit_by_id`). Le repli ET sa justification sont à reprendre.
 
-- Les deux rendent `False` sur `None`. Un même id inconnu est donc **à la fois** « pas sur la
-  table » et « pas en réserves » — deux réponses qui ne peuvent pas être vraies ensemble (20.01 :
-  une unité est l'un ou l'autre).
-- 🔴 Le docstring de `unit_is_on_battlefield` dit : *« Une unité absente de `units_cache` est morte,
-  donc pas sur le champ de bataille »*. **Le code n'interroge pas `units_cache`** : il appelle
-  `get_unit_by_id`, donc `unit_by_id`, où l'absence ne veut PAS dire morte. Le commentaire justifie
-  un contrat que la ligne en dessous n'applique pas. C'est le repli et sa justification qui sont
-  tous les deux à reprendre — ne pas se contenter de convertir l'appel.
-
-**Reachabilité, à borner honnêtement** : ces deux `False` ne peuvent pas tomber sur une unité morte
-(les morts restent dans `unit_by_id`), seulement sur un id réellement inconnu. Le scénario est donc
-une contradiction logique PROUVÉE, mais son déclenchement en production reste à établir par les
-appelants. Ne pas l'annoncer comme un bug observé.
-
-### Forme C — `if x is None: continue` — 11 sites (dont 1 dans du CODE MORT → 10 à traiter)
+### Forme C — `if x is None: continue` — 10 sites
 
 **Pire que B** : l'élément disparaît de l'énumération sans trace.
 
-| Site | Fonction |
+| Fichier | Fonctions (ligne) |
 |---|---|
-| ~~`fight_handlers.py:1503`~~ | ~~`_ai_select_consolidation_destination`~~ — **CODE MORT** (0 référence AST, cf. `replis_units_cache_2026-08-05.md` §8). Ne pas corriger, ne pas tester. |
-| `shared_utils.py:9189` | `squad_fight_activation_order` |
-| `shared_utils.py:9787` | `squad_declare_fight` |
-| `shooting_handlers.py:706` | `weapon_availability_check` |
-| `shooting_handlers.py:1056` | `compute_hidden_statuses` |
-| `shooting_handlers.py:1259` | `build_unit_los_cache` |
-| `shooting_handlers.py:1623` | `build_visible_cells_by_target` |
-| `shooting_handlers.py:1670` | `build_hidden_too_far_by_unit_id` |
-| `shooting_handlers.py:1775` | `build_hidden_detection_info_by_unit_id` |
-| `shooting_handlers.py:2138` | `_unit_has_firable_target` |
-| `w40k_core.py:3155` | `_enqueue_rule_choice_candidates` |
+| `engine/phase_handlers/shared_utils.py` (2) | squad_declare_fight (9776), squad_fight_activation_order (9169) |
+| `engine/phase_handlers/shooting_handlers.py` (7) | _unit_has_firable_target (1967), build_hidden_detection_info_by_unit_id (1698), build_hidden_too_far_by_unit_id (1594), build_unit_los_cache (1226), build_visible_cells_by_target (1547), compute_hidden_statuses (1023), weapon_availability_check (673) |
+| `engine/w40k_core.py` (1) | _enqueue_rule_choice_candidates (3146) |
 
-⚠️ **`squad_fight_activation_order` (9189) est le site le plus grave de la liste**, et c'est
-vérifié : la boucle est `for sid, entry in entries_on_battlefield(units_cache)`, donc **chaque `sid`
-sort de `units_cache`** — un manque dans `unit_by_id` est par construction une désynchronisation
-d'index. Le `continue` retire alors l'escouade du dict `eligible`, c'est-à-dire **une activation de
-combat qui ne se produit pas**. Ce n'est pas un verdict géométrique faux, c'est un tour de jeu
-perdu. C'est aussi *exactement* la condition pour laquelle `_ai_select_fight_target`
-(`fight_handlers.py:1602`) lève déjà : le contrat est écrit, il n'est pas appliqué ici.
-À instruire en premier, à verrouiller par un test qui COMPTE les activations.
+⚠️ **`squad_fight_activation_order` (9169) reste le site le plus grave**, et c'est vérifié : sa
+boucle est `for sid, entry in entries_on_battlefield(units_cache)`, donc chaque `sid` sort du
+cache — un manque dans `unit_by_id` est par construction une désynchronisation d'index. Le
+`continue` retire l'escouade du dict `eligible`, c'est-à-dire **une activation de combat qui ne se
+produit pas**. C'est exactement la condition pour laquelle `_ai_select_fight_target` lève déjà :
+le contrat est écrit, il n'est pas appliqué ici. À verrouiller par un test qui COMPTE les
+activations.
 
-Note relevée en passant, même fonction (`shared_utils.py:9199`) :
-`int(units_cache.get(sid, {}).get("player", -1))  # get allowed` — un `player = -1` de repli, du
-même genre que les trois corrigés au lot `units_cache`. Hors périmètre de ce document (c'est
-`units_cache`, pas `unit_by_id`) : signalé, pas classé.
+✅ **Deux sites de la Forme C ont DISPARU depuis le premier relevé** :
+`_ai_select_consolidation_destination` et `build_hidden_*` volet tireur — le premier était du code
+mort supprimé par le lot `units_cache` (cf. son §8), les autres ont changé de forme. Ne pas
+chercher à les retrouver.
 
-Note : 4 de ces 11 (`build_hidden_too_far_by_unit_id`, `build_hidden_detection_info_by_unit_id`,
-`_unit_has_firable_target`, plus `compute_hidden_statuses`) sont dans des fonctions dont le volet
-`units_cache` vient d'être traité par le lot précédent — leur contrat d'appelant est donc **déjà
-établi et écrit dans le code**. Commencer par elles : le coût d'investigation y est nul.
-
-### Forme D — 45 appels sans repli dans la fenêtre — à LIRE
+### Forme D — 64 appels sans repli dans la fenêtre — à LIRE
 
 Aucune hypothèse posée. Ce sont les appels dont les 4 lignes suivantes ne contiennent ni `raise` ni
 garde `is None`. Deux possibilités, indiscernables sans lecture :
@@ -240,15 +215,22 @@ EOF
 | Tranche | Contenu | Charge |
 |---|---|---|
 | **T0** | **Unifier les 4 implémentations en une** + écrire le jumeau bruyant `require_unit_by_id`. Décision de signature à l'utilisateur. Rien d'autre. | ½ session |
-| **T1** | Forme C, 11 sites, en commençant par `squad_fight_activation_order` (activation perdue) et les 4 dont le contrat est déjà écrit par le lot `units_cache`. | 1 session |
-| **T2** | Forme B, 48 sites, en commençant par `unit_is_on_battlefield` / `unit_is_in_strategic_reserves` (deux réponses contradictoires sur le même id). `charge_handlers` (13) et `movement_handlers` (11) dominent : les prendre par fichier. | 2 sessions |
-| **T3** | Forme D, 45 appels. Lecture d'abord, classement ensuite. | 1 session |
+| **T1** | Forme C, 10 sites, en commençant par `squad_fight_activation_order` (activation perdue). | 1 session |
+| **T2** | Forme B, 46 sites, en commençant par `unit_is_on_battlefield` / `unit_is_in_strategic_reserves` (deux réponses contradictoires sur le même id). `charge_handlers` (13) et `movement_handlers` (11) dominent : les prendre par fichier. | 2 sessions |
+| **T3** | Forme D, 64 appels. Lecture d'abord, classement ensuite. | 1 session |
 
 Repère de coût mesuré : le lot `units_cache` a traité 47 sites sur 5 fichiers en une session, tests
 et mutations compris — mais avec l'outil déjà livré et un contrat déjà établi par un lot antérieur.
 Ici T0 n'existait pas. **Ne pas prendre les 59 en bloc.**
 
 **Ne PAS faire** : un balayage mécanique forme par forme sans contrat d'appelant.
+
+🔴 **AVANT LE PREMIER SITE, deux gestes que le lot `units_cache` a payé cher pour apprendre** :
+1. **Re-mesurer l'inventaire** (les chiffres ci-dessus datent de `e672683a` et se périmeront) ;
+2. **Passer le balayage de code mort** — ce lot a corrigé, puis TESTÉ, trois fonctions sans
+   appelant, dont une que seul son propre test neuf faisait paraître vivante. Un détecteur de code
+   mort doit énumérer par parcours disque (pas `git ls-files`, qui ignore le non-suivi) et exclure
+   `tests/` du décompte des appelants.
 
 ---
 

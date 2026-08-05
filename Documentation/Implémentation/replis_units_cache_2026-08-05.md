@@ -467,13 +467,24 @@ clés n'étaient déjà plus alimentées : la suppression rend la panne visible,
 Conséquences, à arbitrer hors de ce lot :
 - `_fight_v11_clear_pile_in_preview` (`fight_handlers.py`, 4 appelants) ne fait plus que `pop`
   deux clés que personne n'écrit — un no-op ;
-- le frontend LIT `fight_pile_in_footprint_zone` pour dessiner le masque d'aperçu du pile-in
-  (`frontend/src/hooks/useEngineAPI.ts:3038` et `:7653`, typé dans `types/game.ts:379`). Ce voile
-  ne peut donc plus s'afficher.
+- le frontend lit `fight_pile_in_footprint_zone` — mais **uniquement dans sa branche V10**
+  (`useEngineAPI.ts`, sous `data.result?.waiting_for_pile_in && data.result?.valid_pile_in_destinations`),
+  clés que le moteur ne produit plus non plus.
 
-**Ce n'est pas une régression de ce lot**, mais c'est une fonctionnalité PvP annoncée par le type
-frontend et jamais servie. Soit l'aperçu doit être re-câblé sur le chemin V11 vivant, soit les
-trois points (fonction no-op, clés, branches TS) partent ensemble. Décision utilisateur.
+🔴 **CORRECTION d'une affirmation trop rapide de la première rédaction de ce §.** Il y était écrit
+que « ce voile ne peut donc plus s'afficher ». **C'est FAUX, et vérifié** : l'aperçu du pile-in
+PvP passe par le chemin **V11 par-figurine**, `pile_in_model_move: True`
+(`fight_handlers.py`, produit et vivant) + `plan_state`, que le frontend traite dans une branche
+qui PRÉCÈDE explicitement les branches V10 (son propre commentaire le dit). L'aperçu fonctionne.
+
+La leçon est la même que celle du §8 : « plus d'écrivain » ne se conclut pas en « la
+fonctionnalité est perdue » sans avoir cherché si un AUTRE chemin la sert. Constater la mort d'un
+symbole n'est pas constater la mort d'une fonctionnalité.
+
+**Rien n'est donc cassé, ni par ce lot ni avant lui.** Ce qui reste est du ménage : la branche V10
+du frontend (~30 lignes), les deux clés, leur typage dans `types/game.ts`, et
+`_fight_v11_clear_pile_in_preview` devenue un no-op. Les quatre points partent ensemble ou pas du
+tout. Décision utilisateur — ce n'est pas urgent.
 
 
 ---

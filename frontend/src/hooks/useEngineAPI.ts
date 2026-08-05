@@ -5891,11 +5891,24 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       // 20.04 — une ARRIVÉE n'est pas un déploiement : `deploy_commit` poserait les figurines
       // sans marquer l'escouade arrivée, sans le verrou « aucun autre mouvement » et sans
       // terminer l'activation — elle pourrait rebouger dans le même tour.
-      await executeAction({
+      const data = await executeAction({
         action: plan.ingress ? "ingress_commit" : "deploy_commit",
         unitId: String(plan.unitId),
         plan: planArr,
       });
+      // `executeAction` NE LÈVE PAS sur un refus moteur : sans cette lecture, un plan refusé
+      // effaçait le plan et l'aire d'arrivée sans un mot, l'escouade restant en réserves — le
+      // joueur n'avait plus rien à l'écran pour l'en faire sortir. Le refus est atteignable :
+      // `canValidate` vient du dernier preview, et les positions changent AVANT que le preview
+      // suivant ne réponde.
+      const outcome = readEngineActionOutcome(data);
+      if (outcome.kind === "noop") return;
+      if (outcome.kind === "refused") {
+        setError(
+          `${plan.ingress ? "Ingress" : "Deploy"} refused: ${outcome.message}`
+        );
+        return;
+      }
       deployPoolRef.current = new Set();
       ingressMaskLoopsRef.current = null;
       ingressUnitIdRef.current = null;

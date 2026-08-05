@@ -4428,10 +4428,14 @@ export default function Board({
 
     const onDoubleClick = (e: MouseEvent) => {
       if (e.button !== 0) return;
-      // Déploiement : double-clic sur une escouade posée (plan provisoire) → active le suivi du
-      // bloc (squad move). Pas de recherche units_cache (l'escouade n'y est pas avant le commit).
-      if (phase === "deployment") {
-        if (mode === "deploymentMove" && deployPlan?.placed) {
+      // Mise en place par-figurine (déploiement OU arrivée de réserves 20.04) : double-clic sur
+      // l'escouade posée → suivi du bloc. Gardé par le MODE, jamais par la phase : le plan est le
+      // même objet des deux côtés, et une arrivée s'édite en phase de MOUVEMENT. Gardé par la
+      // phase, ce double-clic tombait dans le routage du move et activait une unité amie voisine,
+      // abandonnant le plan d'arrivée en cours.
+      // Pas de recherche units_cache (l'escouade n'y est pas avant le commit).
+      if (isDeploymentMove) {
+        if (deployPlan?.placed) {
           e.preventDefault();
           // Préempte la sélection per-fig différée du 1er clic → pas de flash de LoS.
           if (deploySelectTimerRef.current !== null) {
