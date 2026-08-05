@@ -295,12 +295,13 @@ class TestDeploymentHexSelection:
         gs = _build_gs(units, "deployment")
         gs["objectives"] = [{"hexes": [(12, 10)]}]
         gs["terrain_areas"] = []  # aucun terrain : seule la géométrie du pool décide du flanc
+        # Zones à la RACINE : donnée de scénario, indépendante de la phase de déploiement.
+        gs["deployment_pools"] = {
+            1: [(0, 13), (4, 13), (8, 13), (16, 13), (24, 13)],
+            2: [(0, 0), (4, 0), (8, 0), (16, 0), (24, 0)],
+        }
         gs["deployment_state"] = {
             "current_deployer": 1,
-            "deployment_pools": {
-                1: [(0, 13), (4, 13), (8, 13), (16, 13), (24, 13)],
-                2: [(0, 0), (4, 0), (8, 0), (16, 0), (24, 0)],
-            },
             "deployable_units": {1: ["1"], 2: ["2"]},
             "deployed_units": set(),
         }

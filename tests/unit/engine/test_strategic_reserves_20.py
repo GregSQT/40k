@@ -29,9 +29,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 # `scenario_training_armageddon.json`, utilisé auparavant, tire son roster au sort
 # (`agent_roster_ref: "training_random"`, glob du dossier). Le jour où une variante à réserves
 # entre dans ce dossier, 16 tests de ce fichier tombent — mesuré au chantier 04c, qui les y a
-# mis puis les a ressortis dans un sous-dossier `variants/` (le glob n'est pas récursif). Ces
-# variantes ne sont donc PAS dans le tirage aujourd'hui : ce pin ne corrige pas un défaut actif,
-# il rend ce fichier indépendant d'un contenu de dossier qui a vocation à changer.
+# mis puis les a ressortis dans un sous-dossier `variants/` (le glob n'est pas récursif).
+# Depuis l'activation des variantes (elles sont REVENUES dans `training/`, donc dans le tirage),
+# ce pin n'est plus une précaution : il est ce qui tient ce fichier debout. Ne pas le repointer
+# sur le scénario d'entraînement.
 SCENARIO = (
     PROJECT_ROOT / "config" / "agents" / "ArmageddonAgent" / "scenarios" / "training"
     / "reserves_20_fixture.json"

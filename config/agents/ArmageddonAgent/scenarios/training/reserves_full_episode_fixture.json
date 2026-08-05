@@ -1,10 +1,10 @@
 {
   "uses_codex_detachment": { "1": true, "2": true },
-  "_comment": "Fixture de tests/unit/engine/test_reserves_full_episode.py. Rosters a reserves DECLAREES des DEUX cotes (variantes du chantier 04c, referencees EXPLICITEMENT) : le critere de sortie du chantier « reserves : tous les chemins hors table » est qu'un roster a reserves traverse un episode complet, cote agent ET cote adversaire, sans qu'aucun chemin ne mesure une geometrie depuis la sentinelle (-1,-1). Nom volontairement SANS le motif 'scenario_' : l'enumeration de ai/training_utils.py ne cherche que 'scenario_*.json' et '*_scenario_*.json', donc ce fichier n'entre dans aucune rotation d'entrainement — c'est aussi pourquoi les variantes vivent dans un sous-dossier 'variants/' que le glob non recursif de training_random ne voit pas.",
+  "_comment": "Fixture de tests/unit/engine/test_reserves_full_episode.py. Rosters a reserves DECLAREES des DEUX cotes, referencees EXPLICITEMENT : le critere de sortie du chantier « reserves : tous les chemins hors table » est qu'un roster a reserves traverse un episode complet, cote agent ET cote adversaire, sans qu'aucun chemin ne mesure une geometrie depuis la sentinelle (-1,-1). Les refs restent EXPLICITES meme depuis que les variantes sont dans le tirage de 'training_random' : ce fichier doit exercer les reserves a CHAQUE graine, pas une fois sur deux. Nom volontairement SANS le motif 'scenario_' : l'enumeration de ai/training_utils.py ne cherche que 'scenario_*.json' et '*_scenario_*.json', donc ce fichier n'entre dans aucune rotation d'entrainement.",
   "deployment_type": "active",
   "scale": "500pts",
-  "agent_roster_ref": "training/variants/agent_training_roster_space_marines_reserves.json",
-  "opponent_roster_ref": "training/variants/opponent_training_roster_space_marines_reserves.json",
+  "agent_roster_ref": "training/agent_training_roster_space_marines_reserves.json",
+  "opponent_roster_ref": "training/opponent_training_roster_space_marines_reserves.json",
   "primary_objectives": [
     "objectives_control"
   ],

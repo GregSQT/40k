@@ -556,7 +556,12 @@ def test_bot_deployment_never_reserves_on_the_real_path(monkeypatch) -> None:
 
     monkeypatch.setattr(BotControlledEnv, "_get_bot_action", spy)
 
-    scenario = "config/agents/ArmageddonAgent/scenarios/training/scenario_training_armageddon.json"
+    # Rosters PINNÉS et SANS réserves déclarées : ce test mesure la DÉCISION du bot (met-il des
+    # unités en réserves de lui-même ?), il lui faut donc une liste qui n'en déclare aucune.
+    # `scenario_training_armageddon.json` tire son roster au sort et le tirage contient désormais
+    # des variantes à réserves : la liste du bot en portait une fois sur deux, et le test ne
+    # pouvait plus distinguer la déclaration de liste de la décision du bot.
+    scenario = "config/agents/ArmageddonAgent/scenarios/training/reserves_20_fixture.json"
     env = _create_eval_env(
         bot_name="tactical",
         bot_type="tactical",

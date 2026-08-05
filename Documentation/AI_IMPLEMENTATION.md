@@ -507,7 +507,8 @@ Each handler module implements complete phase logic:
 
 **deployment_handlers.py** (phase déploiement actif, implémentée):
 - Quand `deployment_type == "active"` dans le scénario, le match démarre en `phase = "deployment"`.
-- **État** : `game_state["deployment_state"]` contient `current_deployer`, `deployable_units_by_player`, `deployed_units`, `deployment_pools_by_player`, `deployment_complete`. Unités non placées : `col = -1`, `row = -1`.
+- **État** : `game_state["deployment_state"]` contient `current_deployer`, `deployable_units_by_player`, `deployed_units`, `deployment_complete` — la comptabilité **mutable** de la phase, écrite seulement quand un joueur déploie en `active`. Unités non placées : `col = -1`, `row = -1`.
+- **Zones** : `game_state["deployment_pools"]`, à la **racine** et publiées **quel que soit le mode de mise en place** (`active`, `fixed`, `random`). C'est une donnée de **scénario**, pas d'une phase : la clause 20.04 « aucune figurine dans la zone adverse avant le 3e round » et l'ancre de grille d'une unité hors table en ont besoin hors déploiement. Les enfermer dans `deployment_state` faisait lever le reset en mode `fixed` dès qu'une unité était en réserves 20.01.
 - **Action** : `deploy_unit { unitId, col, row }` — validation stricte (hex dans zone, non mur, non occupé), puis mise à jour position et ajout à `deployed_units`.
 - **Ordre** : déploiement alterné P1 puis P2 (ou un joueur seul jusqu’à épuisement si l’autre n’a plus d’unités à déployer). Fin de phase quand toutes les unités sont placées → transition vers phase suivante (command ou move).
 - **Sources** : `config/board_config.json`, `config/deployment/hammer.json`, scénario (units, deployment_zone, deployment_type). Action mask strict pour le RL ; pas de fallback ni placement automatique.

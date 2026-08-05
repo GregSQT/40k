@@ -142,8 +142,7 @@ def _deploy_pool_set(
         if isinstance(pool_override, frozenset):
             return pool_override
         return {(int(c), int(r)) for c, r in pool_override}
-    deployment_state = require_key(game_state, "deployment_state")
-    deployment_pools = require_key(deployment_state, "deployment_pools")
+    deployment_pools = require_key(game_state, "deployment_pools")
     pool = _get_deployment_pool(deployment_pools, int(player))
     return {(int(c), int(r)) for c, r in pool}
 
@@ -161,7 +160,7 @@ def placement_pool_for_squad(
     édite à l'écran est ainsi contraint par la MÊME aire que celle qui validera son commit.
 
     Rendre ``None`` plutôt que la zone de déploiement garde `_deploy_pool_set` seul propriétaire
-    de la lecture de `deployment_state`, qui n'existe pas forcément hors phase de déploiement.
+    de la lecture des zones : un seul site à repointer le jour où leur stockage change.
     """
     from engine.phase_handlers.movement_handlers import (
         ingress_setup_pool,
@@ -1527,7 +1526,7 @@ def execute_deployment_action(game_state: Dict[str, Any], action: Dict[str, Any]
     if int(unit_player) != int(current_deployer):
         return False, {"error": "unit_not_current_deployer", "unitId": unit_id, "current_deployer": current_deployer}
 
-    deployment_pools = require_key(deployment_state, "deployment_pools")
+    deployment_pools = require_key(game_state, "deployment_pools")
     pool = _get_deployment_pool(deployment_pools, int(current_deployer))
     pool_set = {(int(col), int(row)) for col, row in pool}
 

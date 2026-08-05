@@ -4281,7 +4281,8 @@ feraient (3). Les cinq sont corrigés.
   au lieu de rendre une obs nulle.
 - **point 2 ✅** (`2893bbcb`) — la grille égocentrique était centrée sur la sentinelle `(-1,-1)`,
   donc sur une autre région du plateau (0 % de la zone du joueur 1 visible). Elle est ancrée sur la
-  **zone de déploiement** lue dans `deployment_state["deployment_pools"]`, géométrie
+  **zone de déploiement** lue dans `game_state["deployment_pools"]` (déplacée hors de
+  `deployment_state` le 2026-08-05 : les zones existent dans tous les modes), géométrie
   `engine/spatial_grid` **inchangée** (seul l'ancrage bouge). 96 %/78 % de la zone visible après.
 - **point 4 ✅** (`6cc4585a`, trouvé en vérifiant le correctif du point 2) — le **vecteur** mesurait
   lui aussi depuis la sentinelle. L'agent voyait l'objectif 0 à **38,3** — le plus proche — alors

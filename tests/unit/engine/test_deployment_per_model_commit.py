@@ -160,7 +160,7 @@ def test_build_validated_plan_is_read_only_and_deterministic():
     eng = _load(seed=0)
     gs = eng.game_state
     squad_id = str(gs["deployment_state"]["deployable_units"][1][0])
-    anchor = gs["deployment_state"]["deployment_pools"][1][0]
+    anchor = gs["deployment_pools"][1][0]
     col, row = int(anchor[0]), int(anchor[1])
 
     before = {
@@ -196,7 +196,7 @@ def test_build_validated_plan_never_returns_an_illegal_plan():
     eng = _load(seed=0)
     gs = eng.game_state
     squad_id = str(gs["deployment_state"]["deployable_units"][1][0])
-    pool = [(int(c), int(r)) for c, r in gs["deployment_state"]["deployment_pools"][1]]
+    pool = [(int(c), int(r)) for c, r in gs["deployment_pools"][1]]
     assert pool, "fixture invalide : zone de déploiement vide"
 
     checked = 0
@@ -277,7 +277,7 @@ def test_memoized_plan_is_invalidated_by_a_stale_stamp():
     eng = _load(seed=0)
     gs = eng.game_state
     squad_id = str(gs["deployment_state"]["deployable_units"][1][0])
-    anchor = gs["deployment_state"]["deployment_pools"][1][0]
+    anchor = gs["deployment_pools"][1][0]
     col, row = int(anchor[0]), int(anchor[1])
 
     plan = build_validated_deployment_plan(gs, squad_id, col, row)
@@ -314,7 +314,7 @@ def test_anchor_is_a_suggestion_not_a_constraint():
     eng = _load(seed=0)
     gs = eng.game_state
     squad_id = str(gs["deployment_state"]["deployable_units"][1][0])
-    pool = {(int(c), int(r)) for c, r in gs["deployment_state"]["deployment_pools"][1]}
+    pool = {(int(c), int(r)) for c, r in gs["deployment_pools"][1]}
 
     outside = (0, 0)
     assert outside not in pool, "fixture invalide : (0,0) appartient à la zone de déploiement"

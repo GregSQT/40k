@@ -323,9 +323,11 @@ export interface APIGameState {
     current_deployer: number;
     deployable_units: Record<string, string[]>;
     deployed_units: string[];
-    deployment_pools: Record<string, Array<[number, number] | { col: number; row: number }>>;
     deployment_complete: boolean;
   };
+  /** Zones de déploiement — à la RACINE du game_state, publiées quel que soit le mode de mise en
+   * place (elles ne dépendent pas de l'existence d'une phase de déploiement). */
+  deployment_pools?: Record<string, Array<[number, number] | { col: number; row: number }>>;
   victory_points?: Record<string, number>;
   command_points?: Record<string, number>;
   /** Réserves stratégiques (20.01/20.04) : ratio par joueur, dépôts autorisés, round de destruction. */
@@ -5613,7 +5615,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       throw new Error("[DEPLOY] deployment_state absent du game_state");
     }
     const deployer = ds.current_deployer;
-    const poolRaw = ds.deployment_pools?.[String(deployer)];
+    const poolRaw = gameState?.deployment_pools?.[String(deployer)];
     if (!poolRaw || !Array.isArray(poolRaw)) {
       throw new Error(`[DEPLOY] deployment_pools manquant pour le déployeur ${deployer}`);
     }
@@ -5626,7 +5628,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       }
     }
     return set;
-  }, [gameState?.deployment_state]);
+  }, [gameState?.deployment_state, gameState?.deployment_pools]);
 
   /** Dry-run du plan de déploiement → maj voile rouge / cohésion / can_validate. */
   const refreshDeployPlanValidity = useCallback(
@@ -7861,7 +7863,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       current_deployer: currentDeployer,
       deployable_units: deployableUnits,
       deployed_units: deployedUnits,
-      deployment_pools: gameState.deployment_state.deployment_pools,
       deployment_complete: gameState.deployment_state.deployment_complete,
     };
   }, [gameState?.deployment_state]);
@@ -7904,6 +7905,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       player_types: gameState.player_types,
       deployment_type: gameState.deployment_type,
       deployment_state: memoizedDeploymentState,
+      // Zones de déploiement : donnée de scénario, à la racine (elles survivent à la phase).
+      deployment_pools: gameState.deployment_pools,
       // 20.01/20.04 : ratio, dépôts autorisés et round de destruction — tous calculés par le
       // moteur, transportés tels quels jusqu'au conteneur de réserves.
       strategic_reserves: gameState.strategic_reserves,

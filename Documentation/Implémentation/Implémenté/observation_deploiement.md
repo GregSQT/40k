@@ -69,7 +69,7 @@ l'ancre bidon. L'agent ne voyait pas le terrain où il allait se poser.
 **Ce que le code fait maintenant** : `ObservationBuilder.squad_grid_anchor(game_state, squad_id)`
 (statique, publique donc testable) rend l'ancre de la grille. Escouade posée → son `col/row`,
 inchangé. Escouade **pas encore posée** → un hex de sa **zone de déploiement**, lue telle quelle
-dans `deployment_state["deployment_pools"]` — la MÊME collection d'hexes que celle où le décodeur
+dans `game_state["deployment_pools"]` — la MÊME collection d'hexes que celle où le décodeur
 choisit l'hexe (`_get_valid_deployment_hexes`), donc aucune géométrie recalculée. L'ancre est l'hex
 du pool le plus proche du barycentre (calculé en coordonnées de rendu `_hex_center`, pas en
 `(col,row)` brut : la grille hexagonale décale d'une demi-ligne une colonne sur deux), ce qui la

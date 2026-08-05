@@ -2535,7 +2535,7 @@ def start_game():
             if unit_id in p2_positions_from_scenario:
                 dest = p2_positions_from_scenario[unit_id]
             if dest is None:
-                pools = dep_state.get("deployment_pools", {})
+                pools = gs.get("deployment_pools", {})
                 hex_pool = pools.get(deployer, pools.get(str(deployer), []))
                 if not hex_pool:
                     break
