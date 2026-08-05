@@ -2,6 +2,7 @@ import atexit
 import os
 import random
 import shutil
+import sys
 import tempfile
 
 # AVANT tout import de `services.api_server` : ce module appelle `initialize_auth_db()` à
@@ -28,16 +29,20 @@ if _auth_db_path is None or _xdist_worker is not None:
 import numpy as np
 import pytest
 
-try:
-    import torch
-except ImportError:  # pragma: no cover
-    torch = None
-
 
 @pytest.fixture(autouse=True)
 def deterministic_seed() -> None:
     seed = 12345
     random.seed(seed)
     np.random.seed(seed)
+    # `torch` est semé s'il est DÉJÀ chargé, jamais importé pour l'occasion : cet import coûte
+    # 4,9 s (mesuré) que CHAQUE worker xdist payait au démarrage — sur `tests/integration/pvp/`,
+    # où aucun test ne touche au RL, c'étaient 4,9 s x 6 workers intégralement perdus.
+    # Aucun test n'y perd sa graine : pytest importe TOUS les modules de test à la collecte,
+    # donc avant le premier setup de fixture — un fichier qui importe torch au niveau module
+    # (`tests/unit/ai/test_pointer_head.py`, `test_entity_encoder_extractor.py`) l'a déjà mis
+    # dans `sys.modules` quand cette ligne s'exécute. Seul un `import torch` dans le CORPS d'un
+    # test arriverait trop tard : grep vérifié, aucun test de ce dépôt ne le fait.
+    torch = sys.modules.get("torch")
     if torch is not None:
         torch.manual_seed(seed)

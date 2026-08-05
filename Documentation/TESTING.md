@@ -10,6 +10,9 @@ pytest tests/unit/ -q -n 8 --dist worksteal
 # Python — engine uniquement
 pytest tests/unit/engine/ -q -n 8 --dist worksteal
 
+# Python — intégration PvP (partie réelle pilotée par l'API Flask, in-process)
+pytest tests/integration/pvp/ -q -n 6 --dist load
+
 # Frontend (depuis frontend/)
 npx vitest run
 ```
@@ -31,6 +34,35 @@ Mesure sur les 18 fichiers les plus lourds, même machine (8 cœurs) :
 | `-n 12 --dist worksteal` | 1 min 40 | 5 min 42 |
 
 `-n 12` ne paie pas : la machine a 8 cœurs, l'oversubscription coûte plus qu'elle ne comble.
+
+### Pourquoi `--dist load` sur l'intégration PvP, et pas `loadfile` (mesuré 2026-08-05)
+
+Stratégie INVERSE de celle des unitaires, pour une raison de forme de la suite : `tests/integration/pvp/`
+ne compte que **7 fichiers pour 57 tests**, et `test_shoot.py` pèse à lui seul **5 min 30 en série**
+(trois tests de contrat de ciblage à 116 s, 81 s et 70 s). `--dist loadfile` colle un fichier entier sur
+un worker : ce fichier-là devient le plancher de toute la suite, quel que soit `-n`. `--dist load`
+répartit test par test et fait tomber le plancher au test le plus lourd (116 s).
+
+| Commande | Mur |
+|---|---|
+| série (`-n 0`) | 17 min 07 |
+| `-n 6 --dist loadfile` | 5 min 09 |
+| `-n 6 --dist load` | **3 min 31** |
+| `-n 12 --dist load` | 3 min 52 (`user` 25 min contre 17 : contention) |
+
+C'est sûr ici : aucune fixture `scope="module"`/`"session"` dans le répertoire, et `api_isolated`
+remet `api_server.engine = None` après chaque test — deux tests du même fichier n'ont donc aucun
+état partagé à se transmettre.
+
+### Le démarrage d'un worker (mesuré 2026-08-05)
+
+Un worker xdist paie **8 à 12 s avant le premier test** — pour beaucoup de fichiers c'est plus que
+les tests eux-mêmes (`test_engine_step.py` : 10,9 s de mur pour 0,2 s de tests). L'import de `torch`
+en pesait 4,9 s à lui seul, et `tests/conftest.py` le payait dans CHAQUE worker pour un simple
+`manual_seed` ; il est désormais semé depuis `sys.modules` sans être importé (verrouillé par
+`tests/unit/ai/test_conftest_torch_seed.py`). Côté `tests/unit/` le gain est nul — la collecte
+importe de toute façon `tests/unit/ai/test_pointer_head.py`, qui importe `torch` au niveau module —
+mais côté PvP, où personne ne touche au RL, les 4,9 s par worker sont récupérés.
 
 ### Les deux tests les plus lourds
 

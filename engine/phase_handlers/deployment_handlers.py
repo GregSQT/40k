@@ -664,8 +664,16 @@ def deployment_build_model_destinations_pool(
     # acceptables sont la zone MOINS les murs et les positions occupées — et elles dépendent du
     # niveau EFFECTIF de la candidate, d'où une érosion PAR NIVEAU possible (au plus deux : le sol
     # et le niveau de vue). Mesuré sur l'aire d'arrivée Deep Strike : 1,6 s de `any` par case.
-    allowed_by_level: Dict[int, Set[Tuple[int, int]]] = {}
+    # Le niveau de VUE n'est traité que si une candidate peut réellement y être taguée : unité
+    # capable de monter (§13.06) ET plancher présent. Sinon `eff` vaut 0 partout et TOUT ce qui
+    # concerne ce niveau — l'ensemble des cases acceptables comme son érosion, deux parcours du
+    # pool entier, mesurés 0,147 s chacun sur une aire de 60 000 cases — n'aurait aucun lecteur.
+    # La garde est donc posée AVANT le premier des deux, pas entre les deux.
+    _upper_reachable = level >= 1 and _can_climb and bool(floor_cube)
+    kept_by_level: Dict[int, Set[Tuple[int, int]]] = {}
     for lv in occ_by_level:
+        if lv != 0 and not _upper_reachable:
+            continue
         blocked_offsets = occ_by_level[lv] | same_squad_by_level.get(lv, set())
         allowed = {
             (int(c), int(r))
@@ -674,17 +682,7 @@ def deployment_build_model_destinations_pool(
         }
         if lv == 0 and _low_clear and not _m_round:
             allowed -= {(int(c), int(r)) for (c, r) in _low_clear}
-        allowed_by_level[lv] = allowed
-    # L'érosion du niveau de VUE ne sert que si une candidate peut réellement y être taguée :
-    # unité capable de monter (§13.06) ET plancher présent. Sinon `eff` vaut 0 partout et cette
-    # seconde passe — même coût que la première, mesurée 0,147 s sur une aire de 60 000 cases —
-    # n'aurait aucun lecteur.
-    _upper_reachable = level >= 1 and _can_climb and bool(floor_cube)
-    kept_by_level: Dict[int, Set[Tuple[int, int]]] = {
-        lv: erode_pool_by_block_offsets(pool_set, fp_offsets, allowed=allowed_by_level[lv])
-        for lv in allowed_by_level
-        if lv == 0 or _upper_reachable
-    }
+        kept_by_level[lv] = erode_pool_by_block_offsets(pool_set, fp_offsets, allowed=allowed)
     # Le niveau effectif d'une candidate n'est PAS connu d'avance : il vaut le niveau de vue si
     # l'empreinte tient entièrement sur le plancher (§13.06 euclidien), sinon le sol. On ne le
     # résout donc que sur les candidates qui touchent le plancher — exactement la garde d'origine,
@@ -786,12 +784,6 @@ def deployment_build_model_destinations_pool(
             if not candidates:
                 filtered.append((dc, dr))
                 continue
-            if m_fp is None and m_shape != "round":
-                m_fp = compute_candidate_footprint(
-                    dc, dr,
-                    {"BASE_SHAPE": m_shape, "BASE_SIZE": m_base, "orientation": m_orient},
-                    game_state,
-                )
             m_socle = Socle(shape=m_shape, base_size=m_base, col=dc, row=dr, fp=m_fp)
             if not any(footprints_overlap(m_socle, s) for s in candidates):
                 filtered.append((dc, dr))
