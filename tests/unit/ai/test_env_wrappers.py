@@ -901,3 +901,112 @@ def test_step_clears_deferral_even_when_the_engine_raises() -> None:
     with pytest.raises(RuntimeError, match="boom moteur"):
         wrapper.step(mi.ACTION_WAIT)
     assert engine.defer_observation is False
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Désignation d'Oath of Moment (chantier 03) — JUMEAU des décisions ci-dessus
+#
+# Le moteur s'arrête dessus comme sur un `pending_agent_decision`, mais par un AUTRE mécanisme
+# (dimension d'action + pointeur, `OATH_SLOTS`). Les quatre replis « pool vide -> ACTION_WAIT »
+# de `env_wrappers` ne testaient que le premier mécanisme : le second les faisait tous rendre
+# une action HORS MASQUE, et le décodeur levait. Mesuré le 2026-08-05 sur un vrai run :
+# « convert_squad_action: aucune unité eligible en phase 'move' pour action 1024 ».
+#
+# La désignation n'est PAS optionnelle (« select one unit from your opponent's army ») : le
+# masque n'ouvre donc aucun WAIT, ce qui rend le repli fatal au lieu de simplement inutile.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _oath_mask() -> list:
+    """Masque d'une désignation d'Oath : DEUX slots ouverts, et RIEN d'autre.
+
+    `ACTION_WAIT` reste fermé — c'est l'invariant qui rend les replis fatals, et l'écrire ici
+    fait échouer le test si le masque de production s'assouplissait un jour.
+    """
+    mask = [False] * mi.TOTAL_ACTION_SIZE
+    mask[mi.OATH_SLOT_BASE] = True
+    mask[mi.OATH_SLOT_BASE + 3] = True
+    return mask
+
+
+def test_le_predicat_de_pause_couvre_les_deux_mecanismes_de_choix() -> None:
+    """`engine_is_paused_on_player_choice` : décision agent OU désignation d'Oath.
+
+    Un seul point de lecture pour les quatre replis. Le vérifier ici évite qu'un troisième
+    mécanisme n'ait à être ajouté quatre fois — c'est exactement ainsi que l'Oath a été oublié.
+    """
+    from ai.env_wrappers import engine_is_paused_on_player_choice
+
+    assert engine_is_paused_on_player_choice(
+        {"pending_agent_decision": None, "pending_oath_selection": None}
+    ) is False
+    assert engine_is_paused_on_player_choice(
+        {"pending_agent_decision": _decision_state(player=1), "pending_oath_selection": None}
+    ) is True
+    assert engine_is_paused_on_player_choice(
+        {"pending_agent_decision": None, "pending_oath_selection": 2}
+    ) is True
+
+
+def test_bot_joue_un_slot_d_oath_au_lieu_d_un_wait_hors_masque() -> None:
+    """`BotControlledEnv._get_bot_action` doit DÉSIGNER, pas retomber sur `ACTION_WAIT`.
+
+    Le pool éligible est vide pendant la désignation : sans la branche Oath, le repli
+    « pool vide -> WAIT » rend 1024, que le masque n'ouvre pas.
+    """
+    decoder = _DummyActionDecoder(mask=_oath_mask(), eligible=[], normalized_action=None)
+    engine = _DummyEngine(decoder=decoder)
+    engine.game_state["pending_agent_decision"] = None
+    engine.game_state["pending_oath_selection"] = 2
+    wrapper = BotControlledEnv(engine, bot=_DummyBot(), agent_seat_mode="p1")
+
+    action = wrapper._get_bot_action()
+
+    assert action != mi.ACTION_WAIT, "un WAIT hors masque a été rendu : le décodeur lèverait"
+    assert action in (mi.OATH_SLOT_BASE, mi.OATH_SLOT_BASE + 3)
+
+
+def test_self_play_sans_modele_joue_un_slot_d_oath() -> None:
+    """Jumeau dans `SelfPlayWrapper` sans `frozen_model` — même défaut, même correction."""
+    decoder = _DummyActionDecoder(mask=_oath_mask(), eligible=[], normalized_action=None)
+    engine = _DummyEngine(decoder=decoder)
+    engine.game_state["pending_agent_decision"] = None
+    engine.game_state["pending_oath_selection"] = 2
+    wrapper = SelfPlayWrapper(engine, frozen_model=None, allow_random_opponent=True)
+
+    action = wrapper._get_frozen_model_action()
+
+    assert action != mi.ACTION_WAIT
+    assert action in (mi.OATH_SLOT_BASE, mi.OATH_SLOT_BASE + 3)
+
+
+def test_self_play_avec_modele_est_interroge_pendant_une_designation_d_oath() -> None:
+    """Avec `frozen_model`, le modèle doit être INTERROGÉ : le repli sortait avant `predict`."""
+    decoder = _DummyActionDecoder(mask=_oath_mask(), eligible=[], normalized_action=None)
+    engine = _DummyEngine(decoder=decoder)
+    engine.game_state["pending_agent_decision"] = None
+    engine.game_state["pending_oath_selection"] = 2
+    model = _StubFrozenModel(action=mi.OATH_SLOT_BASE + 3)
+    wrapper = SelfPlayWrapper(engine, frozen_model=cast(Any, model))
+
+    action = wrapper._get_frozen_model_action()
+
+    assert model.received_masks, "le modèle n'a pas été interrogé : un WAIT hors masque a été rendu"
+    assert action == mi.OATH_SLOT_BASE + 3
+
+
+def test_bot_env_self_play_opponent_est_interroge_pendant_une_designation_d_oath() -> None:
+    """Quatrieme site : `BotControlledEnv._get_self_play_opponent_action`."""
+    decoder = _DummyActionDecoder(mask=_oath_mask(), eligible=[], normalized_action=None)
+    engine = _DummyEngine(decoder=decoder)
+    engine.game_state["pending_agent_decision"] = None
+    engine.game_state["pending_oath_selection"] = 2
+    model = _StubFrozenModel(action=mi.OATH_SLOT_BASE)
+    wrapper = BotControlledEnv(engine, bot=_DummyBot(), agent_seat_mode="p1")
+    wrapper._frozen_model = cast(Any, model)
+    wrapper._self_play_deterministic = True
+
+    action = wrapper._get_self_play_opponent_action()
+
+    assert model.received_masks, "le modèle n'a pas été interrogé : un WAIT hors masque a été rendu"
+    assert action == mi.OATH_SLOT_BASE

@@ -40,6 +40,28 @@ PLAYER_ONE_ID = 1
 PLAYER_TWO_ID = 2
 
 
+def engine_is_paused_on_player_choice(game_state: Dict[str, Any]) -> bool:
+    """True quand le moteur est ARRÊTÉ sur un point de choix joueur, donc que `ACTION_WAIT` est
+    HORS MASQUE.
+
+    C'est le prédicat des quatre replis « pool vide -> WAIT » de ce module. Le pool d'unités
+    éligibles est vide dans cet état — non pas parce que la phase est finie, mais parce que le
+    moteur attend une réponse — et sortir sur `ACTION_WAIT` rend alors une action que le masque
+    n'ouvre pas : `convert_squad_action` lève, et le choix est perdu.
+
+    DEUX mécanismes, et le second est arrivé APRÈS les replis :
+      - `pending_agent_decision` (V11 §9.3 P2) : candidats joués par `CHOICE_i` ;
+      - `pending_oath_selection` (chantier 03) : cible jouée par `OATH_SLOT_i`, désignation NON
+        OPTIONNELLE — le masque n'ouvre donc ni WAIT ni zone intent.
+
+    Écrit ICI et pas répété sur place : les quatre sites testaient le premier seul, et le second
+    les aurait tous fait lever un par un. Un troisième mécanisme n'aura qu'une ligne à ajouter.
+    """
+    if read_pending_agent_decision(game_state) is not None:
+        return True
+    return game_state.get("pending_oath_selection") is not None  # get allowed : None = aucune
+
+
 class MaskDecision(NamedTuple):
     """Qui decide, et le masque SUR LEQUEL cette reponse a ete etablie.
 
@@ -882,7 +904,7 @@ class BotControlledEnv(gym.Wrapper):
         # — la decision est alors perdue sans trace. On laisse donc passer jusqu'a
         # `predict(action_masks=...)`, ou le modele choisit un `CHOICE_i`. Jumeau de la branche
         # de `_get_bot_action` et de celle de `SelfPlayWrapper._get_frozen_model_action`.
-        if not eligible_units and read_pending_agent_decision(self.engine.game_state) is None:
+        if not eligible_units and not engine_is_paused_on_player_choice(self.engine.game_state):
             return mi.ACTION_WAIT
         # La liste des actions legales n'etait construite que pour tester sa vacuite : le modele
         # recoit le masque tel quel.
@@ -1510,6 +1532,20 @@ class BotControlledEnv(gym.Wrapper):
                     "autorisee par le masque."
                 )
             return int(random.choice(choice_actions))
+        # DÉSIGNATION D'OATH OF MOMENT (chantier 03) — JUMEAU de la décision agent ci-dessus, et
+        # il doit être traité AVANT le `not eligible_units` : la désignation ferme la phase de
+        # commandement (elle n'est PAS optionnelle, « select one unit from your opponent's
+        # army »), donc le masque n'y ouvre AUCUN `ACTION_WAIT`. Sans cette branche, le repli
+        # « pool vide -> WAIT » ci-dessous renvoie une action HORS MASQUE et le décodeur lève.
+        # Le bot la joue par tirage, comme tout choix qu'il ne modélise pas.
+        if game_state.get("pending_oath_selection") is not None:  # get allowed : None = aucune
+            oath_actions = [index for index in mi.OATH_SLOTS if bool(action_mask[index])]
+            if not oath_actions:
+                raise RuntimeError(
+                    "BotControlledEnv: designation d'Oath en attente sans aucun slot autorise "
+                    "par le masque."
+                )
+            return int(random.choice(oath_actions))
         if not eligible_units:
             # Pool empty -> advance phase via WAIT/invalid action handling
             return mi.ACTION_WAIT
@@ -1881,6 +1917,16 @@ class SelfPlayWrapper(gym.Wrapper):
                         "autorisee par le masque."
                     )
                 return int(random.choice(choice_actions))
+            # JUMEAU Oath (chantier 03) : même raison, même forme — la désignation est
+            # obligatoire, donc `ACTION_WAIT` est hors masque et le repli ci-dessous lèverait.
+            if self.engine.game_state.get("pending_oath_selection") is not None:  # get allowed
+                oath_actions = [index for index in mi.OATH_SLOTS if bool(action_mask[index])]
+                if not oath_actions:
+                    raise RuntimeError(
+                        "SelfPlayWrapper: designation d'Oath en attente sans aucun slot autorise "
+                        "par le masque."
+                    )
+                return int(random.choice(oath_actions))
             if not eligible_units:
                 # Pool empty -> advance phase via WAIT/invalid action handling
                 return mi.ACTION_WAIT
@@ -1910,7 +1956,7 @@ class SelfPlayWrapper(gym.Wrapper):
         # Decision agent en attente : pool vide par construction, et `ACTION_WAIT` est hors masque.
         # Cette branche sortait ici sans jamais atteindre `predict` — c'est la moitie du cas §9.3 P2
         # que la branche sans modele traitait deja, et que son commentaire declarait a tort tenue.
-        if not eligible_units and read_pending_agent_decision(self.engine.game_state) is None:
+        if not eligible_units and not engine_is_paused_on_player_choice(self.engine.game_state):
             # Pool empty -> advance phase via WAIT/invalid action handling
             return mi.ACTION_WAIT
         # Jumeau de `_get_self_play_opponent_action` : rien ne touche l'etat entre le masque et
