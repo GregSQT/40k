@@ -201,10 +201,11 @@ def test_erosion_primitive_handles_offsets_that_exclude_the_anchor():
     pool = {(c, r) for c in range(0, 12) for r in range(0, 12)}
     allowed = {(c, r) for c in range(6, 12) for r in range(0, 12)}
     # Objet décalé de +4 colonnes : son ancre est à gauche de `allowed`, l'objet à droite.
-    ref = offset_to_cube(0, 0)
-    offsets = [
-        tuple(a - b for a, b in zip(offset_to_cube(4 + dc, 0), ref)) for dc in range(0, 2)
-    ]
+    ref_x, ref_y, ref_z = offset_to_cube(0, 0)
+    offsets: list[Tuple[int, int, int]] = []
+    for dc in range(0, 2):
+        cx, cy, cz = offset_to_cube(4 + dc, 0)
+        offsets.append((cx - ref_x, cy - ref_y, cz - ref_z))
     assert (0, 0, 0) not in offsets, "ce test perd son objet si l'origine est dans les offsets"
 
     allowed_cube = {offset_to_cube(c, r) for c, r in allowed}

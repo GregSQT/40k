@@ -100,11 +100,15 @@ OnceClaimFamily = Literal[
 def once_claimed(game_state: Dict[str, Any], family: OnceClaimFamily, key: Any) -> bool:
     """True si `key` a deja ete reclamee dans `family` durant cet episode.
 
-    `.get` et non `require_key` : le registre naît a la PREMIERE reclamation. « Absent »
-    signifie « rien n'a encore ete resolu », un etat de jeu valide (debut d'episode), pas
-    une donnee manquante — meme lecture que `_objective_control_last_boundary`.
+    Garde sur l'ABSENCE et non `require_key` : le registre naît a la PREMIERE reclamation.
+    « Cle absente » signifie « rien n'a encore ete resolu », un etat de jeu valide (debut
+    d'episode ou apres le `pop` de reset), pas une donnee manquante — meme lecture que
+    `_objective_control_last_boundary`. Une valeur `None` explicite, elle, n'est produite
+    nulle part et leve.
     """
-    return key in game_state.get(ONCE_CLAIMS_KEY, {}).get(family, ())
+    if ONCE_CLAIMS_KEY not in game_state:
+        return False
+    return key in game_state[ONCE_CLAIMS_KEY].get(family, ())
 
 
 def once_claim(game_state: Dict[str, Any], family: OnceClaimFamily, key: Any) -> None:

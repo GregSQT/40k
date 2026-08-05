@@ -1517,7 +1517,9 @@ def test_squad_destinations_erosion_matches_the_naive_definition():
     gs2["current_player"] = 1
     gs2["phase"] = "move"
     sid2 = _reserve_squad(eng2, deep_strike=True)
-    area = sorted(placement_pool_for_squad(gs2, sid2))
+    arrival_area = placement_pool_for_squad(gs2, sid2)
+    assert arrival_area is not None, "escouade en réserves : l'aire d'arrivée 20.04 doit exister"
+    area = sorted(arrival_area)
     assert len(area) > 10000, "aire d'arrivée trop petite — test sans portée"
     a2 = area[len(area) // 2]
     mids2 = gs2["squad_models"][sid2]
