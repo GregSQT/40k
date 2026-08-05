@@ -267,6 +267,30 @@ Le **holdout** (`scenario_bot-01..04`) n'est pas touché : ses rosters sont réf
 (`scenario_bot-05..08`), donc le double d'évaluations à chaque point de mesure **et** une rupture
 de série — les courbes d'avant/après cesseraient d'être comparables.
 
+Deux faits VÉRIFIÉS le 2026-08-05, à connaître avant de chiffrer ce chantier — ils ne se
+devinent pas et coûtent cher à re-dériver :
+
+1. **Les rosters adverses à réserves du holdout N'EXISTENT PAS.** Seules les deux variantes
+   *agent* ont été livrées par 04c (`rosters/500pts/holdout_regular/variants/`) ; côté
+   `_p2_rosters`, les variantes ne couvrent que `training/`. Or un bot ne DÉCIDE jamais une mise
+   en réserves — c'est un choix de LISTE (cf. la docstring de
+   `TacticalBot.select_placement_action`, `ai/evaluation_bots.py`). Sans ces deux fichiers, le
+   holdout ne peut mesurer que « l'agent utilise ses réserves », jamais « l'agent encaisse une
+   arrivée ». Le travail est donc de 4 scénarios **plus 2 rosters à créer**.
+2. **La rupture de série est STRUCTURELLE, pas un choix.** Les scénarios du holdout sont ramassés
+   par `glob("scenario_*.json")` (`ai/training_utils.py`, collecte par dossier) : tout fichier
+   déposé dans `holdout_regular/` entre automatiquement dans l'évaluation, donc dans le score
+   combiné et dans le seuil de gating. Il n'existe aucun moyen d'« ajouter à côté » sans toucher
+   à l'agrégation. Trois issues, à trancher AVANT de créer quoi que ce soit : déposer les
+   scénarios à réserves dans le split `holdout_hard/` (déjà reconnu, énuméré séparément) ;
+   restreindre explicitement le score de référence aux 4 scénarios d'origine ; ou assumer la
+   rupture et re-baseliner en la datant.
+
+⚠️ `TacticalBot` sait faire arriver ses réserves (sa politique de pose couvre le déploiement
+initial ET l'ingress 20.04), mais au « premier slot ouvert », donc de façon DÉTERMINISTE. Un
+holdout à réserves mesurerait l'agent face à une arrivée prévisible — acceptable pour un mètre
+étalon gelé, mais ce n'est pas une mesure de robustesse face à une arrivée variée.
+
 Second arbitrage, indépendant du coût : l'agent passe de 2 à 4 rosters par camp, ce qui élargit la
 distribution d'entraînement alors que la stratégie actée est une **spécialisation sur 2 rosters**
 pour la démo.
