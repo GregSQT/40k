@@ -1,4 +1,5 @@
 {
+  "scale": "500pts",
   "primary_objectives": ["objectives_control"],
   "wall_ref": "walls-mc1.json",
   "terrain_ref": "terrain-floors-test.json",

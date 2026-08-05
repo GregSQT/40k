@@ -1,3 +1,4 @@
+import json
 import sqlite3
 from typing import Any, Dict, Optional, Tuple, cast
 
@@ -567,6 +568,78 @@ def test_strategic_reserves_summary_closes_the_rule_without_battle_size() -> Non
     summary = api_server._strategic_reserves_summary({"points_limit": None, "units": []})
     assert summary["1"]["cap_points"] == 0
     assert summary["2"]["cap_points"] == 0
+
+
+def test_every_pvp_scenario_declares_a_battle_size() -> None:
+    """20.01 : sans `scale`, le plafond vaut 0 et AUCUN depot n'est jamais possible en PvP.
+
+    Ce n'est pas une redite de `..._closes_the_rule_without_battle_size` (qui verrouille la
+    FERMETURE quand la taille est inconnue) : ici on verrouille que les scenarios REELLEMENT
+    joues en PvP la declarent. Sans ce verrou, la mise en reserves est cablee de bout en bout
+    mais le bouton reste desactive pour toujours -- l'etat mesure avant ce chantier.
+    """
+    from pathlib import Path
+
+    from engine.game_state import battle_points_limit
+
+    project_root = Path(__file__).resolve().parents[3]
+    scenarios = sorted(
+        (project_root / "config" / "board").glob("*/scenario/scenario_pvp*.json")
+    )
+    # VERT VACANT : un glob qui ne rend rien passerait ce test sans rien regarder.
+    assert len(scenarios) >= 2, scenarios
+    for path in scenarios:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        assert "scale" in data, f"{path.name} ne declare pas de taille de bataille (20.01)"
+        assert battle_points_limit(data["scale"], path.name) > 0
+
+
+def test_pvp_deployment_scenario_offers_units_to_the_reserves_container() -> None:
+    """Le scenario du mode PvP (deploiement ACTIF) rend le depot 20.01 REELLEMENT atteignable.
+
+    La chaine complete : `scale` du scenario -> `points_limit` -> plafond de 50 % -> unites
+    acceptees. C'est le maillon qui manquait : plafond 0, donc `placeable_unit_ids` vide, donc
+    conteneur inerte quoi que fasse le joueur.
+    """
+    from pathlib import Path
+
+    from config_loader import get_config_loader
+    from engine.game_state import GameStateManager
+
+    project_root = Path(__file__).resolve().parents[3]
+    scenario_file = (
+        project_root / "config" / "board" / "44x60x5" / "scenario" / "scenario_pvp.json"
+    )
+    config_loader = get_config_loader()
+    unit_registry = UnitRegistry()
+    manager = GameStateManager({"board": config_loader.get_board_config()}, unit_registry)
+    loaded = manager.load_units_from_scenario(str(scenario_file), unit_registry)
+
+    # Deploiement ACTIF : c'est la seule situation ou 20.01 se joue (rien n'est encore pose).
+    assert loaded["deployment_type"] == "active"
+    points_limit = loaded["points_limit"]
+    assert points_limit is not None, "scenario_pvp.json ne declare pas de 'scale' (20.01)"
+
+    units = loaded["units"]
+    game_state: Dict[str, Any] = {
+        "points_limit": points_limit,
+        "units": units,
+        "deployment_state": {
+            "deployable_units": {
+                player: [str(u["id"]) for u in units if int(u["player"]) == player]
+                for player in (1, 2)
+            }
+        },
+        "unit_by_id": {str(u["id"]): u for u in units},
+    }
+    summary = api_server._strategic_reserves_summary(game_state)
+    for player in ("1", "2"):
+        # VERT VACANT : sans ceci, un pool de deployables vide ferait passer le test.
+        assert game_state["deployment_state"]["deployable_units"][int(player)], player
+        assert summary[player]["cap_points"] > 0, player
+        assert summary[player]["placeable_unit_ids"], (
+            f"joueur {player} : aucune unite acceptable en reserves"
+        )
 
 
 def test_maybe_precompute_ingress_pools_is_a_noop_outside_move_phase() -> None:
