@@ -1,4 +1,5 @@
 {
+  "uses_codex_detachment": { "1": true, "2": true },
   "primary_objectives": ["objectives_control"],
   "wall_ref": "walls-11.json",
   "objectives_ref": "objectives-51.json",

@@ -33,6 +33,9 @@ export class Zoanthrope extends TroopRangeElite {
     { keywordId: "zoanthrope" },
   ];
 
+  // FACTION KEYWORDS
+  static FACTION_KEYWORDS = [{ keywordId: "TYRANIDS" }];
+
   static ICON = "/icons/Zoanthrope.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = 16; // Size of the base

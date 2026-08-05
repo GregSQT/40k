@@ -1,4 +1,5 @@
 {
+  "uses_codex_detachment": { "1": true, "2": true },
   "_comment": "Fixture de tests/unit/engine/test_strategic_reserves_20.py. Rosters PINNES, et sans reserves declarees : ces tests mettent eux-memes les unites en reserves (`_force_into_reserves`) et supposent donc que TOUTES demarrent posees. Ils utilisaient scenario_training_armageddon.json, dont `agent_roster_ref` vaut 'training_random' : depuis que le dossier contient des variantes a reserves (chantier 04c), ce tirage rendait le fichier non deterministe — 16 tests tombaient une fois sur deux sur une liste ou l'unite 1 est deja hors table. Nom volontairement SANS le motif 'scenario_' : l'enumeration de ai/training_utils.py ne cherche que 'scenario_*.json' et '*_scenario_*.json', donc ce fichier n'entre dans aucune rotation.",
   "deployment_type": "active",
   "scale": "500pts",

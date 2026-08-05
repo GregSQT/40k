@@ -12,6 +12,9 @@ from typing import Dict, List, Tuple, Set, Optional, Any
 from shared.data_validation import require_key
 from engine.game_state import (
     CORE_CP_GAIN_PER_COMMAND_PHASE, GameStateManager, gain_command_points,
+    OATH_FACTION_KEYWORD, WAAAGH_FACTION_KEYWORD,
+    army_faction_keywords, call_waaagh, expire_faction_abilities_for_player,
+    set_oath_target, waaagh_is_available,
 )
 
 
@@ -63,19 +66,6 @@ def command_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     state_manager = GameStateManager(require_key(game_state, "config"))
     state_manager.apply_primary_objective_scoring(game_state, "command")
 
-    # Phase 2: Initialize zone intent free steps
-    # Only for the controlled agent player during gym training
-    gym_training_mode = game_state.get("gym_training_mode", False)
-    current_player = game_state.get("current_player")
-    config = game_state["config"]
-    controlled_player = config.get("controlled_player")
-
-    is_agent_turn = (
-        gym_training_mode
-        and controlled_player is not None
-        and current_player == controlled_player
-    )
-
     # Populate unit_zone_assignments for ALL alive units (both players)
     from engine.phase_handlers.shared_utils import is_unit_alive
     assignments = {}
@@ -89,18 +79,54 @@ def command_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
         assignments[str(unit["id"])] = zone_idx
     game_state["unit_zone_assignments"] = assignments
 
-    if is_agent_turn:
-        # Reset zone_intent_free_steps_remaining to MAX_OBJECTIVES.
-        # Cette valeur PLEINE est aussi le signal qu'aucun intent n'a encore ete joue ce tour :
-        # `W40KEngine._process_command_phase` s'en sert pour solder la declaration du tour
-        # precedent exactement une fois (cf. `settle_pending_zone_intent_declaration`).
-        game_state["zone_intent_free_steps_remaining"] = MAX_OBJECTIVES
+    return command_phase_resume(game_state)
 
+
+def command_phase_resume(game_state: Dict[str, Any]) -> Dict[str, Any]:
+    """Suite de la phase de commandement, une fois 08.04 posé — ou une fois ses décisions jouées.
+
+    SCINDÉ de `command_phase_start` parce que la phase a désormais un point d'ARRÊT : les
+    capacités « at the start of your Command phase » (Waaagh!, Oath of Moment) sont des décisions
+    de joueur, et le moteur doit rendre la main dessus exactement comme il le fait sur un
+    `waiting_for_player` PvP. Le décideur (agent via le masque, bot, ou humain) rappelle ensuite
+    cette fonction, qui reprend là où la phase s'était interrompue.
+
+    IDEMPOTENTE : rejouée après chaque décision. Elle ne fait que (re)poser le compteur de free
+    steps et trancher entre « rester en command » et « passer au move ». Aucun intent ne peut
+    avoir été joué entre-temps — le masque est EXCLUSIF tant qu'une décision est en attente.
+    """
+    from engine.macro_intents import MAX_OBJECTIVES
+
+    gym_training_mode = game_state.get("gym_training_mode", False)
+    current_player = game_state.get("current_player")
+    config = game_state["config"]
+    controlled_player = config.get("controlled_player")
+
+    is_agent_turn = (
+        gym_training_mode
+        and controlled_player is not None
+        and current_player == controlled_player
+    )
+
+    # Reset zone_intent_free_steps_remaining to MAX_OBJECTIVES.
+    # Cette valeur PLEINE est aussi le signal qu'aucun intent n'a encore ete joue ce tour :
+    # `W40KEngine._process_command_phase` s'en sert pour solder la declaration du tour
+    # precedent exactement une fois (cf. `settle_pending_zone_intent_declaration`).
+    # Posée AVANT le test de décision en attente : le masque de la phase de commandement la lit
+    # sans défaut, y compris sur le step où la décision est jouée.
+    game_state["zone_intent_free_steps_remaining"] = MAX_OBJECTIVES if is_agent_turn else 0
+
+    # 08.04 non soldé : le moteur reste en phase de commandement et n'avance PAS. Sans cet arrêt,
+    # la phase enchaînerait sur le move et la décision serait perdue — l'agent n'appellerait
+    # jamais son Waaagh!, la capacité serait du code mort.
+    if faction_decision_is_pending(game_state):
+        return {"phase_complete": False, "phase": "command"}
+
+    if is_agent_turn:
         # Stay in command phase — agent will issue zone intent actions
         return {"phase_complete": False, "phase": "command"}
 
     # Bot player or non-training: skip free steps, auto-advance to move
-    game_state["zone_intent_free_steps_remaining"] = 0
     return command_phase_end(game_state)
 
 
@@ -202,11 +228,146 @@ def command_step_battle_shock(game_state: Dict[str, Any]) -> None:
 def command_step_command_abilities(game_state: Dict[str, Any]) -> None:
     """08.04 COMMAND ABILITIES — capacités qui se déclenchent « in your Command phase ».
 
-    Point d'accrochage nommé, sans effet aujourd'hui : les capacités concernées (Grot Orderly,
-    Waaagh!, Oath of Moment) appartiennent aux chantiers 03 et 06. Elles se brancheront ICI,
-    entre le battle-shock et la fin de phase, comme le PDF les ordonne.
+    Portent ICI les deux capacités de faction (chantier 03) : Waaagh! (ORKS) et Oath of Moment
+    (ADEPTUS ASTARTES). Les deux sont déclarées « at the start of your Command phase » et durent
+    « until the start of your next Command phase » — c'est la MÊME étape qui les éteint et qui
+    les repose, pour le joueur ACTIF seulement.
+
+    ORDRE, et il n'est pas indifférent :
+      1. EXTINCTION de ce que le joueur actif avait posé au tour précédent. Elle a lieu ici et
+         PAS en fin de tour : les deux effets doivent survivre au tour adverse.
+      2. Waaagh! — décision binaire, une seule fois par partie.
+      3. Oath — désignation d'une unité ennemie, obligatoire, chaque tour.
+
+    Le moteur ne tranche rien : il POSE la décision et `command_phase_resume` rend la main.
+    (Grot Orderly et les autres capacités « in your command phase » viendront au chantier 06.)
     """
+    current_player = int(require_key(game_state, "current_player"))
+
+    # 1. « Until the start of your NEXT Command phase » — la borne est ici.
+    expire_faction_abilities_for_player(game_state, current_player)
+
+    # 2. Waaagh! — « once per battle, at the start of your Command phase, YOU CAN call a Waaagh! ».
+    #    « You can » : c'est optionnel, d'où deux candidats. L'ordre est CONTRACTUEL (§9.6) et
+    #    c'est lui qui distingue les deux (cf. AGENT_DECISION_TYPE_IDS) : 0 = appeler, 1 = passer.
+    if (
+        WAAAGH_FACTION_KEYWORD in army_faction_keywords(game_state, current_player)
+        and waaagh_is_available(game_state, current_player)
+    ):
+        from engine.agent_decision import set_pending_agent_decision
+
+        set_pending_agent_decision(
+            game_state,
+            decision_type="waaagh_call",
+            player=current_player,
+            # La décision n'appartient à aucune unité : c'est une capacité d'ARMÉE. Le champ est
+            # exigé par le mécanisme générique (il identifie le point de choix côté PvP), d'où un
+            # identifiant de joueur explicite plutôt qu'une unité arbitrairement choisie, qui
+            # aurait laissé croire que le Waaagh! est une capacité de datasheet.
+            unit_id=f"player_{current_player}",
+            options=[
+                {"label": "Call the Waaagh!", "effect_ids": (), "payload": {"call": True}},
+                {"label": "Do not call the Waaagh!", "effect_ids": (), "payload": {"call": False}},
+            ],
+        )
+        # Une seule décision à la fois : le moteur rend la main maintenant. L'Oath ci-dessous ne
+        # peut de toute façon pas concerner le même joueur (aucune armée n'est ORKS et ADEPTUS
+        # ASTARTES à la fois), mais l'ordre reste explicite plutôt qu'implicitement sûr.
+        return None
+
+    # 3. Oath of Moment — « select one unit from your opponent's army ». NON OPTIONNEL : pas de
+    #    candidat « aucune cible ». S'il n'existe aucune unité ennemie vivante, il n'y a rien à
+    #    désigner et la clause est sans objet (elle ne peut alors bénéficier à personne).
+    if OATH_FACTION_KEYWORD in army_faction_keywords(game_state, current_player):
+        if oath_selectable_enemy_ids(game_state, current_player):
+            game_state["pending_oath_selection"] = current_player
     return None
+
+
+def oath_selectable_enemy_ids(game_state: Dict[str, Any], player: int) -> List[str]:
+    """Unités ennemies VIVANTES désignables par l'Oath of Moment de `player`.
+
+    SOURCE UNIQUE de la désignation : le masque d'action l'utilise pour ouvrir les `OATH_SLOTS`,
+    le décodeur pour traduire le slot joué, la politique bot pour choisir. Trois lecteurs, une
+    définition — sans quoi le masque pourrait ouvrir un slot que le décodeur refuserait.
+    """
+    from engine.phase_handlers.shared_utils import is_unit_alive
+
+    player_int = int(player)
+    return [
+        str(require_key(unit, "id"))
+        for unit in require_key(game_state, "units")
+        if int(require_key(unit, "player")) != player_int
+        and is_unit_alive(str(require_key(unit, "id")), game_state)
+    ]
+
+
+def faction_decision_is_pending(game_state: Dict[str, Any]) -> bool:
+    """True tant qu'une décision de 08.04 attend son décideur (Waaagh! ou Oath).
+
+    Les deux mécanismes sont volontairement distincts : le Waaagh! est un choix binaire dont les
+    candidats ne sont PAS des entités observées (`pending_agent_decision` + `CHOICE_i`), l'Oath
+    désigne littéralement une escouade ennemie et se paramètre donc en DIMENSION D'ACTION +
+    pointeur (`OATH_SLOTS`), conformément à `macro_intents`. Ce prédicat est ce qui les réunit
+    pour le seul consommateur qui n'a pas à connaître la différence : l'arrêt de la phase.
+    """
+    from engine.agent_decision import read_pending_agent_decision
+
+    if game_state.get("pending_oath_selection") is not None:  # get allowed : None = aucune
+        return True
+    decision = read_pending_agent_decision(game_state)
+    return decision is not None and str(require_key(decision, "type")) == "waaagh_call"
+
+
+def apply_waaagh_call_decision(game_state: Dict[str, Any], player: int, called: bool) -> None:
+    """Applique le candidat choisi pour `waaagh_call`, puis enchaîne sur l'Oath si nécessaire.
+
+    EFFACE la décision en attente elle-même : c'est le pendant exact d'`apply_oath_selection`,
+    et l'oublier laisserait le moteur arrêté sur une décision déjà jouée. Le faire ICI plutôt
+    que chez l'appelant donne UN seul endroit où la séquence « appliquer puis effacer » existe —
+    elle a trois appelants (gym, siège IA, PvP).
+
+    « Passer » n'est PAS un non-événement à ignorer : ne pas appeler ne consomme pas le
+    « once per battle », donc `waaagh_called` reste à False et la décision se represente au tour
+    suivant. C'est exactement ce qui fait du Waaagh! une décision de TEMPO.
+    """
+    from engine.agent_decision import clear_pending_agent_decision, read_pending_agent_decision
+
+    pending = read_pending_agent_decision(game_state)
+    if pending is None or str(require_key(pending, "type")) != "waaagh_call":
+        raise RuntimeError(
+            "apply_waaagh_call_decision: aucune decision 'waaagh_call' en attente — le masque "
+            "n'aurait pas du ouvrir d'action CHOICE."
+        )
+    if int(require_key(pending, "player")) != int(player):
+        raise RuntimeError(
+            f"apply_waaagh_call_decision: la decision en attente appartient au joueur "
+            f"{pending['player']}, pas a {player}."
+        )
+    clear_pending_agent_decision(game_state)
+    if called:
+        call_waaagh(game_state, int(player))
+    # Un joueur ORKS n'est pas ADEPTUS ASTARTES : cet appel ne pose rien dans les rosters
+    # actuels. Il est là parce que la règle ne l'interdit pas — une armée qui porterait les deux
+    # mots-clés déclarerait les deux capacités, et l'ordre de 08.04 doit rester le même.
+    if OATH_FACTION_KEYWORD in army_faction_keywords(game_state, int(player)):
+        if oath_selectable_enemy_ids(game_state, int(player)):
+            game_state["pending_oath_selection"] = int(player)
+
+
+def apply_oath_selection(game_state: Dict[str, Any], player: int, target_unit_id: str) -> None:
+    """Applique la désignation d'Oath of Moment (écrivain unique : `set_oath_target`)."""
+    if game_state.get("pending_oath_selection") is None:  # get allowed : None = aucune
+        raise RuntimeError(
+            "apply_oath_selection: aucune designation d'Oath n'est en attente — le masque "
+            "n'aurait pas du ouvrir de slot d'Oath."
+        )
+    if int(require_key(game_state, "pending_oath_selection")) != int(player):
+        raise RuntimeError(
+            f"apply_oath_selection: la designation en attente appartient au joueur "
+            f"{game_state['pending_oath_selection']}, pas a {player}."
+        )
+    set_oath_target(game_state, int(player), str(target_unit_id))
 
 
 def command_build_activation_pool(game_state: Dict[str, Any]) -> None:

@@ -37,6 +37,9 @@ export class Hormagaunt extends SwarmMeleeSwarm {
     { keywordId: "hormagaunt" },
   ];
 
+  // FACTION KEYWORDS
+  static FACTION_KEYWORDS = [{ keywordId: "TYRANIDS" }];
+
   // ICON
   static ICON = "/icons/Hormagaunt.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

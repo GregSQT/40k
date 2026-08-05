@@ -35,6 +35,9 @@ export class DeathCompanyJumpPackEviscerator extends TroopMeleeTroop {
     { keywordId: "death company with jump packs" },
   ];
 
+  // FACTION KEYWORDS
+  static FACTION_KEYWORDS = [{ keywordId: "ADEPTUS ASTARTES" }];
+
   static ICON = "/icons/DeathCompanyJumpPackEviscerator.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = 13; // Size of the base

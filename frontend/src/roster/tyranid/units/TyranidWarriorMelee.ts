@@ -53,6 +53,9 @@ export class TyranidWarriorMelee extends TroopMeleeTroop {
     { keywordId: "tyranid warrior with melee bio-weapon" },
   ];
 
+  // FACTION KEYWORDS
+  static FACTION_KEYWORDS = [{ keywordId: "TYRANIDS" }];
+
   // ICON
   static ICON = "/icons/TyranidWarriorMelee.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base

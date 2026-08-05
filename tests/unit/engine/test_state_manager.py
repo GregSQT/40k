@@ -26,7 +26,9 @@ _FULL_UNIT_CFG: Dict[str, Any] = {
     "HP_CUR": 3, "HP_MAX": 3, "MOVE": 6, "T": 4,
     "ARMOR_SAVE": 4, "INVUL_SAVE": 0,
     "RNG_WEAPONS": [], "CC_WEAPONS": [],
-    "UNIT_RULES": [], "UNIT_KEYWORDS": [],
+    # `FACTION_KEYWORDS` : exigé par `_build_enhanced_unit` (la datasheet le porte toujours,
+    # même vide), donc une config d'entrée complète le déclare — comme `UNIT_KEYWORDS`.
+    "UNIT_RULES": [], "UNIT_KEYWORDS": [], "FACTION_KEYWORDS": [],
     "LD": 7, "OC": 1, "VALUE": 100, "ICON": "t",
     "ICON_SCALE": 1.0, "ILLUSTRATION_RATIO": 1.0,
     "BASE_SHAPE": "round", "BASE_SIZE": 1, "MODEL_HEIGHT": 2.5,

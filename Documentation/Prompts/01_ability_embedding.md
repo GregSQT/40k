@@ -158,11 +158,30 @@ Ce chantier est **le seul** de la séquence autorisé à changer `obs_size` ou
 `TOTAL_ACTION_SIZE`. Après lui, les deux sont figés : les chantiers 02 à 06 n'utilisent que
 des dimensions déjà déclarées ici. C'est ce qui garantit **un seul retrain** en fin de séquence.
 
-**Valeur gelée : `obs_size = 20718`** (2026-08-04). Historique du même jour, tout entier
+**Valeur gelée : `obs_size = 20725`** (amendée le 2026-08-05, cf. ci-dessous ; 20718 au 2026-08-04). Historique du même jour, tout entier
 absorbé par le retrain unique : `20780` → `20752` (les 13 bits `rule_*` remplacés par 8+4 slots
 d'ids) → `20754` (les deux scalaires de CP que le chantier 02 attendait, oubliés ici) → `20718`
 (découplage du registre de décision, ci-dessus). Le gel porte désormais ce qu'il promettait :
 une capacité observée de plus coûte **zéro** scalaire, verrou à l'appui.
+
+**Amendement du 2026-08-05 — les emplacements des capacités de faction, oubliés ici.** La section
+« Ce qui ne va PAS dans l'ensemble par unité » ci-dessus conclut que les capacités de faction vont
+dans `global_bin` et renvoie au chantier 03 — mais ce chantier-ci n'y a déclaré aucun emplacement,
+ni le type de décision qu'exige l'appel du Waaagh!. C'est le même oubli que les deux scalaires de
+CP du chantier 02, et il est réparé de la même façon : le chantier 03 pose les sept emplacements
+manquants, `20718 → 20725`, et le retrain `--new` reste **unique** (les `.zip` existants datent
+d'avant le gel du 2026-08-04). Détail :
+
+| Emplacement | Registre | Coût |
+|---|---|---|
+| `my`/`enemy_waaagh_available`, `my`/`enemy_waaagh_active` | `GLOBAL_BIN_FIELDS` | 4 |
+| `my`/`enemy_oath_target_selected` | `GLOBAL_BIN_FIELDS` | 2 |
+| `waaagh_call` | `AGENT_DECISION_TYPE_IDS` (→ `decision_ctx_bin`) | 1 |
+
+Quatre bits pour le Waaagh! et non deux : sa durée court *« until the start of your next Command
+phase »*, donc elle enjambe le tour adverse. L'identité de la cible d'Oath n'est PAS dans
+`global_bin` — elle est portée par le statut `oath_target` de l'entité visée, déjà déclaré ici,
+pour **zéro** scalaire.
 
 D'où l'inclusion, ici et pas en 03, des slots d'action d'Oath of Moment (ci-dessous).
 

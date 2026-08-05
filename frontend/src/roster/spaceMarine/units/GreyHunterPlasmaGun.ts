@@ -49,6 +49,9 @@ export class GreyHunterPlasmaGun extends TroopRangeElite {
     { keywordId: "grey hunters" },
   ];
 
+  // FACTION KEYWORDS
+  static FACTION_KEYWORDS = [{ keywordId: "ADEPTUS ASTARTES" }];
+
   static ICON = "/icons/GreyHunterPlasmaGun.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = 13; // Size of the base

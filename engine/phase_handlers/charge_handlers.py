@@ -19,6 +19,7 @@ from shared.data_validation import require_key, require_present
 from engine.spatial_relations import get_engagement_zone_vertical
 from engine.utils.weapon_helpers import melee_weapons, ranged_weapons
 from engine.action_log_utils import append_action_log
+from engine.game_state import unit_can_charge_after_advance, waaagh_applies_to_unit
 from engine.hex_utils import hex_distance as _hex_distance
 from engine.game_utils import add_console_log, safe_print, add_debug_file_log
 from engine.combat_utils import (
@@ -1076,8 +1077,11 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
             continue
 
         # ADVANCE_IMPLEMENTATION: Units that advanced cannot charge
+        # DEUX sources d'exemption depuis le chantier 03 : la capacité de datasheet ET un Waaagh!
+        # actif (« units from your army with this ability are eligible to declare a charge in a
+        # turn in which they Advanced »). `unit_can_charge_after_advance` les porte toutes deux.
         if unit_id_str in units_advanced:
-            if not _unit_has_rule(unit, "charge_after_advance"):
+            if not unit_can_charge_after_advance(game_state, unit):
                 continue  # Advanced units cannot charge without rule
 
         # "Has valid charge target?"
@@ -5725,11 +5729,24 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
             )
         charge_rule_marker = f" [{source_rule_display_name}]"
         charge_ability_display_name = source_rule_display_name
-    elif str(unit["id"]) in require_key(game_state, "units_advanced") and _unit_has_rule(unit, "charge_after_advance"):
-        source_rule_display_name = _get_source_unit_rule_display_name_for_effect(unit, "charge_after_advance")
-        if source_rule_display_name is None:
+    elif str(unit["id"]) in require_key(game_state, "units_advanced"):
+        # Nom de la capacité qui a permis la charge. DEUX sources possibles, dans l'ordre où la
+        # règle les rend disponibles : la capacité de datasheet, sinon le Waaagh!. Le nom
+        # d'affichage compte : l'analyzer l'agrège par capacité (`special_rule_usage`), et un
+        # Waaagh! attribué à « Assault » fausserait la mesure d'usage des deux.
+        if _unit_has_rule(unit, "charge_after_advance"):
+            source_rule_display_name = _get_source_unit_rule_display_name_for_effect(unit, "charge_after_advance")
+            if source_rule_display_name is None:
+                raise ValueError(
+                    f"Unit {unit['id']} charged after advance without source unit rule"
+                )
+        elif waaagh_applies_to_unit(game_state, unit):
+            source_rule_display_name = "Waaagh!"
+        else:
             raise ValueError(
-                f"Unit {unit['id']} charged after advance without source unit rule"
+                f"Unit {unit['id']} charged after advance without any enabling rule "
+                f"(ni `charge_after_advance`, ni Waaagh! actif) — l'eligibilite et le log "
+                f"auraient diverge."
             )
         charge_rule_marker = f" [{source_rule_display_name}]"
         charge_ability_display_name = source_rule_display_name

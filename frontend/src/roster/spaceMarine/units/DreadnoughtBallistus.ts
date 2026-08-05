@@ -37,6 +37,9 @@ export class DreadnoughtBallistus extends EliteRangeElite {
     { keywordId: "ballistus dreadnought" },
   ];
 
+  // FACTION KEYWORDS
+  static FACTION_KEYWORDS = [{ keywordId: "ADEPTUS ASTARTES" }];
+
   static ICON = "/icons/DreadnoughtBallistus.webp"; // Path relative to public folder
   static BASE_SHAPE = "round"; // Shape of the base
   static BASE_SIZE = 35; // Size of the base
