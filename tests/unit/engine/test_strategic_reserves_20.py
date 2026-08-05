@@ -1174,3 +1174,127 @@ def entry_is_on_battlefield_for(gs: Dict[str, Any], unit_id: str) -> bool:
     from engine.phase_handlers.shared_utils import entry_is_on_battlefield
 
     return entry_is_on_battlefield(gs["units_cache"][str(unit_id)])
+
+
+# ---------------------------------------------------------------------------
+# Portes de PHASE de l'interface PvP (chantier 04b)
+#
+# L'UI n'offre le dépôt qu'au déploiement et le retrait qu'au mouvement. Un bouton masqué n'est
+# PAS une règle : ces verrous vérifient que le moteur ferme aussi, par le chemin exact que le
+# client emprunte (`execute_semantic_action`).
+#
+# Les assertions portent sur l'EFFET, pas sur le booléen de retour : la phase de commandement
+# renvoie `True` pour n'importe quelle action (`command_handlers.execute_action` se contente de
+# terminer la phase). Un test qui lirait ce booléen croirait à un dépôt qui n'a pas eu lieu.
+# ---------------------------------------------------------------------------
+
+
+def test_strategic_reserves_deposit_is_refused_outside_the_deployment_phase():
+    """20.01 — « instead of setting up » : hors déploiement, il n'y a plus rien à remplacer."""
+    eng = _engine()
+    _drive_deployment(eng)
+    gs = eng.game_state
+    squad_id = next(sid for sid, e in gs["units_cache"].items() if int(e["player"]) == 1)
+
+    def _rearm_deployment() -> None:
+        gs["phase"] = "deployment"
+        gs["current_player"] = 1
+        gs["deployment_state"]["deployment_complete"] = False
+        gs["deployment_state"]["current_deployer"] = 1
+        gs["deployment_state"]["deployable_units"][1] = [squad_id]
+        _unit(gs, squad_id)["deployed_on_turn"] = None
+        _unit(gs, squad_id)["in_strategic_reserves"] = False
+
+    # VERT VACANT : le dépôt ABOUTIT dans sa phase. Sans ce contrôle, les refus ci-dessous
+    # passeraient même si l'action n'existait pas du tout.
+    _rearm_deployment()
+    eng.execute_semantic_action({"action": "deploy_strategic_reserves", "unitId": squad_id})
+    assert _unit(gs, squad_id)["in_strategic_reserves"] is True, (
+        "le dépôt doit aboutir DANS la phase de déploiement"
+    )
+
+    for phase in ("command", "move", "shoot", "charge", "fight"):
+        _rearm_deployment()
+        gs["phase"] = phase
+        eng.execute_semantic_action({"action": "deploy_strategic_reserves", "unitId": squad_id})
+        assert _unit(gs, squad_id)["in_strategic_reserves"] is False, (
+            f"20.01 : une unité a été mise en réserves depuis la phase {phase}"
+        )
+
+
+def test_ingress_move_is_refused_outside_the_movement_phase():
+    """20.04 — « in your Movement phase » : l'arrivée n'existe que là."""
+    eng = _engine()
+    _drive_deployment(eng)
+    gs = eng.game_state
+    gs["turn"] = 2
+    gs["current_player"] = 1
+    squad_id = _reserve_squad(eng, deep_strike=False)
+
+    candidates = eng.action_decoder.ingress_slot_candidates(gs, squad_id)
+    assert candidates, "aucun candidat d'ingress — test sans portée (VERT VACANT)"
+    slot = candidates[sorted(candidates)[0]]
+    dest_col, dest_row = int(slot["hex"][0]), int(slot["hex"][1])
+    ingress = {
+        "action": "ingress_move", "unitId": squad_id,
+        "destCol": dest_col, "destRow": dest_row,
+    }
+
+    for phase in ("command", "shoot", "charge", "fight"):
+        gs["phase"] = phase
+        eng.execute_semantic_action(dict(ingress))
+        assert _unit(gs, squad_id)["deployed_on_turn"] is None, (
+            f"20.04 : l'escouade a été POSÉE depuis la phase {phase}"
+        )
+        assert _unit(gs, squad_id)["in_strategic_reserves"] is True
+
+    # Contrôle inverse, MÊME action et MÊME destination : elle aboutit en phase de mouvement.
+    from engine.phase_handlers.movement_handlers import movement_phase_start
+
+    gs["phase"] = "move"
+    gs["current_player"] = 1
+    # Les phases traversées ci-dessus ont pu faire avancer le round (cascade de fin de phase) :
+    # on le repose à 2 pour que l'arrivée reste comparable à celles des autres tests.
+    gs["turn"] = 2
+    movement_phase_start(gs)
+    ok_move, res_move = eng.execute_semantic_action(dict(ingress))
+    assert ok_move, f"l'arrivée doit aboutir en phase de mouvement (retour : {res_move})"
+    assert _unit(gs, squad_id)["in_strategic_reserves"] is False
+    assert _unit(gs, squad_id)["deployed_on_turn"] == 2
+
+
+def test_ingress_preview_loops_leave_the_shared_preview_channel_untouched():
+    """Le CALCUL des contours d'arrivée n'écrit pas dans le canal d'aperçu du mouvement.
+
+    `set_ingress_preview_loops` PUBLIE la bande dans ``move_preview_footprint_mask_loops`` ;
+    `ingress_preview_loops` la RETOURNE sans rien écrire. L'API sert l'aperçu d'arrivée en lecture
+    pure (aucune resérialisation de l'état), elle doit donc emprunter la seconde : une bande
+    laissée dans le canal repartirait dans toutes les réponses suivantes et le client la peindrait
+    comme un aperçu de mouvement — y compris après que le joueur a annulé son arrivée.
+    """
+    from engine.phase_handlers.movement_handlers import ingress_preview_loops
+
+    eng = _engine()
+    _drive_deployment(eng)
+    gs = eng.game_state
+    gs["turn"] = 2
+    gs["current_player"] = 1
+    squad_id = _reserve_squad(eng, deep_strike=False)
+
+    # Aperçu de MOUVEMENT déjà affiché : c'est lui qui doit survivre intact.
+    sentinel = [[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]]
+    gs["move_preview_footprint_mask_loops"] = sentinel
+
+    loops = ingress_preview_loops(gs, squad_id)
+    assert loops, "VERT VACANT : le calcul doit rendre de vrais contours"
+    assert gs["move_preview_footprint_mask_loops"] is sentinel, (
+        "la bande d'arrivée a écrasé l'aperçu de mouvement du joueur"
+    )
+
+    # Et quand AUCUN aperçu n'était affiché, la clé doit rester absente : la réintroduire
+    # rallumerait le calque de contour côté client.
+    del gs["move_preview_footprint_mask_loops"]
+    ingress_preview_loops(gs, squad_id)
+    assert "move_preview_footprint_mask_loops" not in gs, (
+        "la bande d'arrivée est restée dans le canal d'aperçu partagé"
+    )

@@ -4,6 +4,7 @@ from typing import Any, Dict, Optional, Tuple, cast
 import pytest
 
 from ai.unit_registry import UnitRegistry
+from engine.phase_handlers import movement_handlers
 from services import api_server
 from shared.data_validation import require_present
 
@@ -505,8 +506,56 @@ def test_strategic_reserves_summary_reports_points_per_player() -> None:
         ],
     }
     summary = api_server._strategic_reserves_summary(game_state)
-    assert summary["1"] == {"used_points": 120, "cap_points": 250}
-    assert summary["2"] == {"used_points": 60, "cap_points": 250}
+    assert summary["1"]["used_points"] == 120
+    assert summary["1"]["cap_points"] == 250
+    assert summary["2"]["used_points"] == 60
+    assert summary["2"]["cap_points"] == 250
+    # 20.04 — le round de destruction est LU du moteur : le popup « dernier tour » du client s'y
+    # accroche au lieu de recoder « 3 ».
+    assert summary["last_round"] == movement_handlers.STRATEGIC_RESERVES_LAST_ROUND
+
+
+def test_strategic_reserves_summary_only_offers_units_the_engine_would_accept() -> None:
+    """`placeable_unit_ids` = ce que `deployment_place_in_strategic_reserves` accepterait.
+
+    BORNE du plafond (20.01) : avec 120 pts déjà engagés sur un plafond de 250, une unité de
+    130 pts tient encore (130 <= 130) et une de 131 ne tient plus. Une FORTIFICATION ne tient
+    JAMAIS, quelle que soit la place restante — c'est ce test-là que le client ne peut pas faire.
+    """
+    game_state = {
+        "points_limit": 500,
+        "units": [
+            {
+                "id": "1", "player": 1, "VALUE": 120, "in_strategic_reserves": True,
+                "deployed_on_turn": None, "UNIT_KEYWORDS": [],
+            },
+            {
+                "id": "2", "player": 1, "VALUE": 130, "in_strategic_reserves": False,
+                "deployed_on_turn": None, "UNIT_KEYWORDS": [],
+            },
+            {
+                "id": "3", "player": 1, "VALUE": 131, "in_strategic_reserves": False,
+                "deployed_on_turn": None, "UNIT_KEYWORDS": [],
+            },
+            {
+                "id": "4", "player": 1, "VALUE": 10, "in_strategic_reserves": False,
+                "deployed_on_turn": None,
+                "UNIT_KEYWORDS": [{"keywordId": "Fortification"}],
+            },
+        ],
+        "deployment_state": {"deployable_units": {1: ["2", "3", "4"], 2: []}},
+    }
+    game_state["unit_by_id"] = {u["id"]: u for u in game_state["units"]}
+    summary = api_server._strategic_reserves_summary(game_state)
+    assert summary["1"]["placeable_unit_ids"] == ["2"]
+    assert summary["2"]["placeable_unit_ids"] == []
+
+
+def test_strategic_reserves_summary_offers_nothing_once_deployment_is_over() -> None:
+    """Hors déploiement il n'y a plus rien à mettre en réserves : la liste est vide, pas absente."""
+    summary = api_server._strategic_reserves_summary({"points_limit": 500, "units": []})
+    assert summary["1"]["placeable_unit_ids"] == []
+    assert summary["2"]["placeable_unit_ids"] == []
 
 
 def test_strategic_reserves_summary_closes_the_rule_without_battle_size() -> None:

@@ -65,7 +65,7 @@ import {
 } from "../utils/losPreviewHelpers";
 import { syncMoveDestinationPoolRefs } from "../utils/movePoolRefsSync";
 import { normalizeMaskLoopsFromApi } from "../utils/movePreviewFootprintMaskLoops";
-import { pointInAnyMaskLoop } from "../utils/pointInPolygon";
+import { pointInAnyMaskLoop, pointInMaskLoopsEvenOdd } from "../utils/pointInPolygon";
 import {
   getNonRoundBasePixelLayout,
   getNonRoundIconRadius,
@@ -519,7 +519,9 @@ type Mode =
   | "pileInModelMove"
   | "consolidationPreview"
   | "consolidationModelMove"
-  | "deploymentMove";
+  | "deploymentMove"
+  // 20.04 — l'aire d'arrivée d'une escouade en réserves est affichée ; le clic suivant la pose.
+  | "ingressPlacement";
 
 /** État du mode mesure (règle dans la barre). */
 export type MeasureModeState =
@@ -659,6 +661,14 @@ type BoardProps = {
   onFreezeSquadDeploy?: () => void;
   onCommitDeploy?: () => void | Promise<void>;
   onCancelDeploy?: () => void;
+  /** 20.04 — contours (monde) de l'aire d'arrivée de l'escouade en réserves sélectionnée, servis
+   *  par ``ingress_preview``. Même canal et même rendu que l'aperçu de mouvement : l'aire ne
+   *  transite jamais case par case (jusqu'à 57 000 cases pour un Deep Strike). */
+  ingressMaskLoopsRef?: React.RefObject<number[][] | null>;
+  /** 20.04 — pose de l'escouade en réserves à (col,row). Le moteur bâtit et valide le plan. */
+  onIngressPlace?: (col: number, row: number) => void | Promise<void>;
+  /** Sort du mode d'arrivée sans rien écrire (clic droit / Échap). */
+  onCancelIngress?: () => void;
   /** Étage courant (multi-niveaux), remonté depuis BoardWithAPI. Optionnel : fallback état interne
    *  pour les autres call sites (BoardReplay) où le déploiement à l'étage n'est pas piloté. */
   currentLevel?: number;
@@ -1233,6 +1243,9 @@ export default function Board({
   onSquadMoveDeploy,
   onStartSquadFollowDeploy,
   onFreezeSquadDeploy,
+  ingressMaskLoopsRef,
+  onIngressPlace,
+  onCancelIngress,
   chargeMovePlan = null,
   chargeModelPoolRef,
   chargeModelMaskLoopsRef,
@@ -4863,6 +4876,104 @@ export default function Board({
     document.addEventListener("pointerdown", onPointerDown, true);
     return () => document.removeEventListener("pointerdown", onPointerDown, true);
   }, [phase, measureMode.kind, boardConfig]);
+
+  // 20.04 — pose d'une arrivée de réserves : clic gauche DANS l'aire affichée = poser l'escouade,
+  // clic droit = annuler.
+  //
+  // Deux gardes, parce que cette pose est IRRÉVERSIBLE (elle consomme l'activation de l'escouade,
+  // contrairement au plan provisoire du déploiement qu'un Annuler défait) :
+  //
+  //   1. clic ≠ glissé — au-delà du zoom par défaut, un pointerdown gauche démarre le PAN du
+  //      plateau ; poser dès le pointerdown ferait atterrir l'escouade là où le joueur a
+  //      simplement saisi la carte, typiquement près du bord, c'est-à-dire en pleine bande
+  //      d'arrivée. On pose au pointerup, et seulement si le pointeur n'a pas bougé ;
+  //   2. le point doit tomber dans la surface RÉELLEMENT PEINTE, trous compris — les bulles
+  //      d'exclusion de 9" autour des ennemis sont des boucles imbriquées, donc des trous. Ce
+  //      n'est pas rejouer la règle : ce contour est celui que le moteur a calculé
+  //      (`ingress_preview`) et qu'on affiche. Ce qu'il ne dit pas (murs, figurines, cohésion,
+  //      par figurine) reste tranché par le moteur à la pose.
+  //
+  // Le mode MESURE est exclu comme dans tous les autres handlers de pointeur de ce fichier : son
+  // écouteur est en phase de capture sur le MÊME nœud, or `stopPropagation` n'arrête pas les
+  // écouteurs du même nœud — et il n'écoute pas `pointerup` du tout. Sans cette garde, prendre
+  // une mesure au-dessus de la bande d'arrivée poserait l'escouade.
+  useEffect(() => {
+    if (mode !== "ingressPlacement") return;
+    if (measureMode.kind !== "off") return;
+    if (!boardConfig) return;
+    const canvas = canvasContainerRef.current?.querySelector("canvas");
+    if (!canvas) return;
+    const app = appRef.current;
+    if (!app) return;
+
+    /** Contour d'arrivée dans le repère du RENDU : `boardConfig.hex_radius` porte déjà
+     *  ``display_scale``, alors que les boucles arrivent du moteur en coordonnées monde. */
+    const displayScale =
+      (boardConfig.display as { display_scale?: number } | undefined)?.display_scale ?? 1;
+    const rawLoops = ingressMaskLoopsRef?.current ?? null;
+    const loops =
+      rawLoops && displayScale !== 1
+        ? rawLoops.map((loop) => loop.map((v) => v * displayScale))
+        : rawLoops;
+
+    const toRendererPixels = (e: PointerEvent): { px: number; py: number } => {
+      const rect = canvas.getBoundingClientRect();
+      return {
+        px: (e.clientX - rect.left) * (app.renderer.width / app.renderer.resolution / rect.width),
+        py: (e.clientY - rect.top) * (app.renderer.height / app.renderer.resolution / rect.height),
+      };
+    };
+
+    /** Tolérance du « clic immobile », en pixels écran. Au-delà, le geste est un pan. */
+    const CLICK_DRAG_TOLERANCE_PX = 4;
+    let downAt: { pointerId: number; clientX: number; clientY: number } | null = null;
+
+    const onIngressPointerDown = (e: PointerEvent) => {
+      if (e.button === 2) {
+        e.preventDefault();
+        onCancelIngress?.();
+        return;
+      }
+      if (e.button !== 0) return;
+      downAt = { pointerId: e.pointerId, clientX: e.clientX, clientY: e.clientY };
+    };
+
+    const onIngressPointerUp = (e: PointerEvent) => {
+      const start = downAt;
+      downAt = null;
+      if (!start || start.pointerId !== e.pointerId || e.button !== 0) return;
+      const moved = Math.hypot(e.clientX - start.clientX, e.clientY - start.clientY);
+      if (moved > CLICK_DRAG_TOLERANCE_PX) return;
+      const { px, py } = toRendererPixels(e);
+      // Contour disponible → on filtre dessus. Absent (topologie non exploitable côté serveur, cf.
+      // `handleSelectReserveUnitForIngress`) → aucune aire n'est dessinée, donc rien à filtrer :
+      // le clic part et le moteur tranche. Refuser le clic ici rendrait l'escouade injouable.
+      if (loops && loops.length > 0 && !pointInMaskLoopsEvenOdd(px, py, loops)) return;
+      const { col, row } = pixelToHex(
+        px,
+        py,
+        boardConfig.hex_radius,
+        boardConfig.margin,
+        boardConfig.cols,
+        boardConfig.rows
+      );
+      void onIngressPlace?.(col, row);
+    };
+
+    canvas.addEventListener("pointerdown", onIngressPointerDown);
+    canvas.addEventListener("pointerup", onIngressPointerUp);
+    return () => {
+      canvas.removeEventListener("pointerdown", onIngressPointerDown);
+      canvas.removeEventListener("pointerup", onIngressPointerUp);
+    };
+  }, [
+    mode,
+    measureMode.kind,
+    boardConfig,
+    onIngressPlace,
+    onCancelIngress,
+    ingressMaskLoopsRef?.current,
+  ]);
 
   // squad.md brique 3 : en mode plan par-figurine, un clic gauche sur une fig de l'escouade
   // la selectionne (resout model_id depuis les positions provisoires du plan) → onSelectModelForMove.
@@ -9330,7 +9441,12 @@ export default function Board({
     /** Pile-in / consolidation : masque uniquement depuis ``footprintZonePoolRef`` (union hex → polygone lissé côté client, comme move sans ``move_preview_footprint_mask_loops``). */
     const activeFootprintMaskLoops = (() => {
       let raw: number[][] | null;
-      if (mode === "perModelMove") {
+      if (mode === "ingressPlacement") {
+        // 20.04 — l'aire d'arrivée ne vit PAS dans le game_state : ``ingress_preview`` est en
+        // lecture pure et rend ses contours dans sa réponse. Ils sont donc lus sur leur ref, pas
+        // sur ``move_preview_footprint_mask_loops`` (qui décrirait encore le move précédent).
+        raw = ingressMaskLoopsRef?.current ?? null;
+      } else if (mode === "perModelMove") {
         raw = squadMovePlan?.activeModelId ? (squadMoveModelMaskLoopsRef?.current ?? null) : null;
       } else {
         raw =
@@ -11183,6 +11299,10 @@ export default function Board({
     gameState,
     footprintZoneRef?.current,
     footprintMaskLoopsRef,
+    // 20.04 : la ref est remplie AVANT le passage en ``ingressPlacement``, mais son contenu change
+    // d'une escouade à l'autre sans que ``mode`` bouge — sans ``.current`` ici, la 2e sélection
+    // réafficherait l'aire de la 1re.
+    ingressMaskLoopsRef?.current,
     effectivePhase,
     effectiveBlinkingUnitsWithMovePreview,
     chargeFootprintZoneRef?.current,

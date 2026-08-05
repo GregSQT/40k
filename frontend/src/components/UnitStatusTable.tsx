@@ -12,8 +12,24 @@ import {
 } from "react";
 import unitRules from "../../../config/unit_rules.json";
 import weaponRules from "../../../config/weapon_rules.json";
-import type { DeploymentState, Unit, UnitId, UnitRule, Weapon } from "../types/game";
+import type {
+  DeploymentState,
+  StrategicReservesPlayerSummary,
+  Unit,
+  UnitId,
+  UnitRule,
+  Weapon,
+} from "../types/game";
+import {
+  canDropUnitIntoReserves,
+  canSelectReserveUnitForIngress,
+  formatStrategicReservesRatio,
+  selectReserveUnits,
+} from "../utils/strategicReservesUi";
 import TooltipWrapper from "./TooltipWrapper";
+
+/** Contour ORANGE du conteneur de réserves — le distingue des lignes d'unités normales. */
+const RESERVES_BORDER_COLOR = "#ff8c00";
 
 const UNIT_RULE_DESCRIPTIONS: Record<string, string> = {
   charge_after_advance: "Allows a unit to charge in the same turn it advanced.",
@@ -617,6 +633,109 @@ function MultiProfileUnitRow({
   );
 }
 
+/**
+ * 20.01/20.04 — dernière ligne du tableau d'un joueur : les escouades TENUES EN RÉSERVES.
+ *
+ * Public des deux côtés (« place them to one side » : les réserves sont déclarées ouvertement),
+ * mais interactif seulement pour son propriétaire, et seulement quand la phase l'autorise :
+ *   - phase de déploiement : cliquer le conteneur y DÉPOSE l'unité sélectionnée (20.01) ;
+ *   - phase de mouvement : cliquer une escouade du conteneur demande son aire d'arrivée (20.04).
+ *
+ * Le ratio « 120/250 » est LU (`strategic_reserves` du moteur) ; il n'est jamais recalculé ici —
+ * l'afficher autrement que le calcul qui refuse un dépôt, c'est afficher un mensonge.
+ */
+function StrategicReservesContainer({
+  reserveUnits,
+  summary,
+  canDropSelectedUnit,
+  onDropSelectedUnit,
+  onSelectReserveUnit,
+  canSelectReserveUnit,
+}: {
+  reserveUnits: Unit[];
+  summary: StrategicReservesPlayerSummary | null;
+  canDropSelectedUnit: boolean;
+  onDropSelectedUnit: () => void;
+  onSelectReserveUnit: (unitId: UnitId) => void;
+  canSelectReserveUnit: boolean;
+}): ReactElement {
+  const ratio = formatStrategicReservesRatio(summary);
+  return (
+    <div
+      data-testid="strategic-reserves-container"
+      style={{
+        marginTop: "4px",
+        border: `2px solid ${RESERVES_BORDER_COLOR}`,
+        borderRadius: "4px",
+        backgroundColor: "#1b1b1b",
+        padding: "4px 6px",
+        boxShadow: canDropSelectedUnit ? HALO_GLOW : undefined,
+      }}
+    >
+      {/* L'espace vide du conteneur (titre + ratio) EST la cible de dépôt : c'est un vrai bouton,
+          pas un div cliquable — les escouades listées dessous en sont déjà, et imbriquer des
+          boutons serait du HTML invalide. */}
+      <button
+        type="button"
+        data-testid="strategic-reserves-drop"
+        disabled={!canDropSelectedUnit}
+        onClick={onDropSelectedUnit}
+        style={{
+          display: "flex",
+          width: "100%",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: "8px",
+          background: "transparent",
+          border: "none",
+          padding: 0,
+          color: RESERVES_BORDER_COLOR,
+          fontWeight: "bold",
+          fontSize: "12px",
+          cursor: canDropSelectedUnit ? "pointer" : "default",
+        }}
+      >
+        <span>STRATEGIC RESERVES</span>
+        {/* Ratio 20.01 (plafond de 50 %), LU du moteur — jamais recalculé ici. */}
+        <span data-testid="strategic-reserves-ratio">{ratio}</span>
+      </button>
+      {reserveUnits.length > 0 && (
+        <div style={{ marginTop: "3px" }}>
+          {reserveUnits.map((unit) => {
+            const unitName = unit.DISPLAY_NAME || unit.name || unit.type || `Unit ${unit.id}`;
+            return (
+              <button
+                key={unit.id}
+                type="button"
+                data-testid={`strategic-reserves-unit-${unit.id}`}
+                disabled={!canSelectReserveUnit}
+                onClick={() => onSelectReserveUnit(unit.id)}
+                style={{
+                  display: "block",
+                  width: "100%",
+                  textAlign: "left",
+                  background: "#222",
+                  border: "1px solid #333",
+                  borderRadius: "3px",
+                  color: "inherit",
+                  fontSize: "12px",
+                  padding: "3px 6px",
+                  marginBottom: "2px",
+                  cursor: canSelectReserveUnit ? "pointer" : "default",
+                }}
+              >
+                <span style={{ fontWeight: "bold", marginRight: "6px" }}>{unit.id}</span>
+                {unitName}
+                <span style={{ float: "right", opacity: 0.8 }}>{unit.VALUE ?? "-"} pts</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface UnitStatusTableProps {
   units: Unit[];
   player: 1 | 2;
@@ -645,6 +764,15 @@ interface UnitStatusTableProps {
   /** Inspection par-figurine (survol/clic plateau) : profil du modèle à afficher dans sa
    * ligne d'unité dépliée. modelId = ``<unitId>#<idx>`` ; idx indexe ``unit.models``. */
   inspectedModel?: { unitId: string; modelId: string } | null;
+  /** 20.01 — résumé MOTEUR des réserves de ce joueur : ratio affiché + dépôts que le moteur
+   * accepterait. Absent tant qu'aucune partie n'est chargée. */
+  strategicReserves?: StrategicReservesPlayerSummary | null;
+  /** Joueur dont c'est le tour : le retrait (20.04) n'est offert qu'à lui. */
+  currentPlayer?: number;
+  /** 20.01 — dépose l'unité sélectionnée en réserves (phase de déploiement uniquement). */
+  onDropUnitToReserves?: (unitId: UnitId) => void;
+  /** 20.04 — demande l'aire d'arrivée d'une escouade du conteneur (phase de mouvement uniquement). */
+  onSelectReserveUnit?: (unitId: UnitId) => void;
 }
 
 interface UnitRowProps {
@@ -1463,6 +1591,11 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
     onCollapseChange,
     detailPreviewUnitId = null,
     inspectedModel = null,
+    phase,
+    strategicReserves = null,
+    currentPlayer,
+    onDropUnitToReserves,
+    onSelectReserveUnit,
   }) => {
     // Collapse/expand state for entire table
     const [isCollapsed, setIsCollapsed] = useState(true);
@@ -1571,9 +1704,19 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
     const effectiveCollapsed =
       isDetailPreviewInThisTable || isInspectInThisTable ? false : isCollapsed;
 
+    // 20.01 — les escouades EN RÉSERVES quittent la liste normale : elles ne sont plus des unités
+    // du champ de bataille, elles vivent dans le conteneur de la dernière ligne. Les laisser aux
+    // deux endroits ferait croire qu'elles sont jouables comme les autres. Le tri se fait en UN
+    // seul endroit : deux prédicats miroirs (`=== true` / `!== true`) laisseraient une unité
+    // apparaître deux fois ou nulle part le jour où l'un des deux bouge.
+    const reserveUnits = useMemo(() => selectReserveUnits(units, player), [units, player]);
+
     // Filter units for this player and exclude dead units ; preview plateau : unité ciblée en tête de liste
     const playerUnits = useMemo(() => {
-      const filtered = units.filter((unit) => unit.player === player && unit.HP_CUR > 0);
+      const inReserves = new Set(reserveUnits);
+      const filtered = units.filter(
+        (unit) => unit.player === player && unit.HP_CUR > 0 && !inReserves.has(unit)
+      );
       if (detailPreviewUnitId === null) {
         return filtered;
       }
@@ -1584,7 +1727,7 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
       const previewUnit = filtered[previewIndex];
       const rest = filtered.filter((_, i) => i !== previewIndex);
       return [previewUnit, ...rest];
-    }, [units, player, detailPreviewUnitId]);
+    }, [units, player, detailPreviewUnitId, reserveUnits]);
 
     useEffect(() => {
       const targetUnitInThisTable =
@@ -1679,7 +1822,16 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
       );
     };
 
-    if (playerUnits.length === 0) {
+    // 20.01 — une armée dont TOUT est en réserves n'a plus d'unité sur le champ de bataille mais
+    // n'est pas éliminée : le conteneur doit rester affiché, sinon le joueur n'a plus aucun moyen
+    // de faire arriver ses escouades.
+    // Porte de dépôt (20.01) : calculée AVANT le rendu, car elle décide aussi de l'affichage du
+    // conteneur quand la table est repliée.
+    const canDropSelectedUnitIntoReserves =
+      onDropUnitToReserves !== undefined &&
+      canDropUnitIntoReserves({ phase, selectedUnitId, summary: strategicReserves });
+
+    if (playerUnits.length === 0 && reserveUnits.length === 0) {
       return (
         <div className="unit-status-table-container">
           <div className="unit-status-table-empty">
@@ -1933,6 +2085,30 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
                 />
               );
             })}
+
+          {/* 20.01/20.04 — conteneur de réserves, DERNIÈRE ligne du tableau du joueur.
+              Il survit au REPLI de la table dès qu'il porte quelque chose ou qu'un dépôt est
+              possible : replier une table est un geste d'encombrement, pas un renoncement à
+              jouer, et la table est repliée PAR DÉFAUT — le conteneur serait invisible au moment
+              même où le joueur en a besoin (une armée entièrement en réserves n'aurait alors plus
+              aucun moyen d'arriver). */}
+          {(!effectiveCollapsed || reserveUnits.length > 0 || canDropSelectedUnitIntoReserves) && (
+            <StrategicReservesContainer
+              reserveUnits={reserveUnits}
+              summary={strategicReserves}
+              // Les deux portes (phase + acceptation moteur) vivent dans `strategicReservesUi`,
+              // où elles sont verrouillées par test — le composant ne fait que les appliquer.
+              canDropSelectedUnit={canDropSelectedUnitIntoReserves}
+              onDropSelectedUnit={() => {
+                if (selectedUnitId !== null) onDropUnitToReserves?.(selectedUnitId);
+              }}
+              canSelectReserveUnit={
+                onSelectReserveUnit !== undefined &&
+                canSelectReserveUnitForIngress({ phase, tablePlayer: player, currentPlayer })
+              }
+              onSelectReserveUnit={(unitId) => onSelectReserveUnit?.(unitId)}
+            />
+          )}
         </div>
       </div>
     );

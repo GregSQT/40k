@@ -2151,6 +2151,10 @@ export const BoardWithAPI: React.FC = () => {
           phase={apiProps.gameState?.phase}
           deploymentType={apiProps.gameState?.deployment_type}
           deploymentState={apiProps.gameState?.deployment_state as DeploymentState | undefined}
+          strategicReserves={apiProps.gameState?.strategic_reserves?.["1"] ?? null}
+          currentPlayer={apiProps.gameState?.current_player}
+          onDropUnitToReserves={apiProps.onDeployToStrategicReserves}
+          onSelectReserveUnit={apiProps.onSelectReserveUnitForIngress}
         />
       </ErrorBoundary>
 
@@ -2178,6 +2182,10 @@ export const BoardWithAPI: React.FC = () => {
           phase={apiProps.gameState?.phase}
           deploymentType={apiProps.gameState?.deployment_type}
           deploymentState={apiProps.gameState?.deployment_state as DeploymentState | undefined}
+          strategicReserves={apiProps.gameState?.strategic_reserves?.["2"] ?? null}
+          currentPlayer={apiProps.gameState?.current_player}
+          onDropUnitToReserves={apiProps.onDeployToStrategicReserves}
+          onSelectReserveUnit={apiProps.onSelectReserveUnitForIngress}
         />
       </ErrorBoundary>
     </>
@@ -3707,6 +3715,66 @@ export const BoardWithAPI: React.FC = () => {
           </div>
         </div>
       )}
+      {/* 20.04 — aucune arrivée possible pour l'escouade choisie. Le DIRE : sans ce popup, le
+          joueur cliquerait sur le plateau sans effet et sans savoir pourquoi. La raison vient du
+          moteur (`ingress_preview`), elle n'est pas devinée ici. */}
+      {apiProps.ingressBlocked && (
+        <div className="deployment-panel__picker-backdrop">
+          <div className="deployment-panel__picker">
+            <div className="deployment-panel__picker-title">Strategic reserves</div>
+            <div className="deployment-panel__picker-content" style={{ display: "block" }}>
+              <div className="deployment-panel__picker-tooltip">
+                {apiProps.ingressBlocked.reason === "not_yet_arriving"
+                  ? `Unit ${apiProps.ingressBlocked.unitId} cannot arrive yet (rule 20.03): its arrival battle round has not been reached.`
+                  : `Unit ${apiProps.ingressBlocked.unitId} has no legal arrival area this round (rule 20.04): every hex within 6" of a battlefield edge is either within 9" of an enemy unit or inside the opponent's deployment zone.`}
+              </div>
+            </div>
+            <div className="deployment-panel__picker-actions">
+              <button
+                type="button"
+                className="deployment-panel__picker-close"
+                onClick={apiProps.onDismissIngressBlocked}
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* 20.04 — dernier round : les réserves encore hors table seront détruites à sa fin. Posé au
+          début du tour du joueur CONCERNÉ seulement (le hook filtre sur current_player). */}
+      {apiProps.reservesLastRoundWarning && (
+        <div className="deployment-panel__picker-backdrop">
+          <div className="deployment-panel__picker">
+            <div className="deployment-panel__picker-title">
+              {`Last round for reserves - Player ${apiProps.reservesLastRoundWarning.player}`}
+            </div>
+            <div className="deployment-panel__picker-content" style={{ display: "block" }}>
+              <div className="deployment-panel__picker-tooltip">
+                {(() => {
+                  const ids = apiProps.reservesLastRoundWarning?.unitIds ?? [];
+                  const names = ids.map((id) => {
+                    const u = apiProps.gameState?.units?.find((x) => String(x.id) === String(id)) as
+                      | { DISPLAY_NAME?: string; unitType?: string }
+                      | undefined;
+                    return `${id} - ${u?.DISPLAY_NAME ?? u?.unitType ?? "unit"}`;
+                  });
+                  return `These units are still in strategic reserves and will be DESTROYED at the end of this battle round (rule 20.04) unless they make an ingress move:\n${names.join("\n")}`;
+                })()}
+              </div>
+            </div>
+            <div className="deployment-panel__picker-actions">
+              <button
+                type="button"
+                className="deployment-panel__picker-close"
+                onClick={apiProps.onDismissReservesLastRoundWarning}
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {rosterPickerPlayer !== null &&
         createPortal(
           <div
@@ -4168,6 +4236,9 @@ export const BoardWithAPI: React.FC = () => {
             onSquadMoveDeploy={isGameOver ? () => {} : apiProps.onSquadMoveDeploy}
             onStartSquadFollowDeploy={isGameOver ? () => {} : apiProps.onStartSquadFollowDeploy}
             onFreezeSquadDeploy={isGameOver ? () => {} : apiProps.onFreezeSquadDeploy}
+            ingressMaskLoopsRef={apiProps.ingressMaskLoopsRef}
+            onIngressPlace={isGameOver ? async () => {} : apiProps.onIngressPlace}
+            onCancelIngress={isGameOver ? () => {} : apiProps.onCancelIngress}
             chargeMovePlan={apiProps.chargeMovePlan}
             chargeModelPoolRef={apiProps.chargeModelPoolRef}
             chargeModelDistancesRef={apiProps.chargeModelDistancesRef}
