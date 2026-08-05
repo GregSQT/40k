@@ -3675,7 +3675,7 @@ def sum_objective_control_oc_multi(
 #: Mot-clé de faction qui porte Waaagh! (« If your Army Faction is ORKS »).
 WAAAGH_FACTION_KEYWORD = "ORKS"
 #: Mot-clé de faction qui porte Oath of Moment (« If your Army Faction is ADEPTUS ASTARTES »).
-OATH_FACTION_KEYWORD = "ADEPTUS ASTARTES"
+OATH_FACTION_KEYWORD = "ADEPTUS_ASTARTES"
 #: Sauvegarde invulnérable accordée par un Waaagh! actif (« have a 5+ invulnerable save »).
 WAAAGH_INVUL_SAVE = 5
 #: « Add 1 to the Strength and Attacks characteristics of melee weapons » — un seul et même
@@ -3694,22 +3694,31 @@ OATH_ABILITY_DISPLAY_NAME = "Oath of Moment"
 #: more units from those factions' Munitorum Field Manual sections »). Les deux moitiés de la
 #: phrase désignent le même ensemble d'unités dans ce moteur : une unité d'une de ces sections
 #: porte le keyword correspondant. Balayage réel de l'armée, pas une option de config.
+#:
+#: ⚠️ Écrits dans la forme NORMALISÉE (`_normalize_keyword`), pas dans l'orthographe des
+#: datasheets : c'est à cette forme que les mots-clés lus sont comparés.
 OATH_EXCLUDING_KEYWORDS = frozenset({
-    "BLOOD ANGELS", "DARK ANGELS", "DEATHWATCH", "SPACE WOLVES",
+    "BLOOD_ANGELS", "DARK_ANGELS", "DEATHWATCH", "SPACE_WOLVES",
 })
 
 
 def _normalize_keyword(raw: Any) -> str:
-    """Un keyword sous sa forme comparable : MAJUSCULES, espaces internes réduits.
+    """Un keyword sous sa forme comparable : MAJUSCULES, espaces et tirets en `_`.
 
     Les datasheets écrivent « ADEPTUS ASTARTES » et « adeptus astartes » indifféremment, et les
     entrées sont tantôt des dicts `{"keywordId": ...}` (UNIT_KEYWORDS / FACTION_KEYWORDS après
-    `ai/unit_registry`), tantôt des chaînes nues (fixtures de test). Une seule normalisation pour
-    tous les lecteurs : sans elle, la comparaison dépendrait de l'orthographe de la datasheet.
+    `ai/unit_registry`), tantôt des chaînes nues (fixtures de test).
+
+    ⚠️ La forme rendue est EXACTEMENT celle d'`attack_sequence.unit_keywords_upper` — jusqu'au
+    remplacement des tirets. Ce n'est pas un détail : les deux lecteurs interrogent le MÊME
+    champ (`FACTION_KEYWORDS`), l'un pour [ANTI-X] 24.03, l'autre pour les capacités de faction.
+    Deux normalisations concurrentes donnaient deux jeux de jetons non comparables — une
+    datasheet écrivant « BLOOD-ANGELS » aurait déclenché [ANTI] et pas la clause d'Oath, sans
+    que rien ne lève. Toute constante de mot-clé s'écrit donc dans CETTE forme.
     """
     if isinstance(raw, dict):
         raw = require_key(raw, "keywordId")
-    return " ".join(str(raw).strip().upper().split())
+    return "_".join(str(raw).strip().upper().replace("-", " ").split())
 
 
 def unit_faction_keywords(unit: Dict[str, Any]) -> frozenset:
@@ -3879,13 +3888,12 @@ def set_oath_target(game_state: Dict[str, Any], player: int, unit_id: str) -> No
     """
     player_int = int(player)
     target_id = str(unit_id)
+    from engine.game_utils import get_unit_by_id
     from engine.phase_handlers.shared_utils import is_unit_alive
 
-    target_unit = None
-    for unit in require_key(game_state, "units"):
-        if str(require_key(unit, "id")) == target_id:
-            target_unit = unit
-            break
+    # `get_unit_by_id` et pas une boucle : l'index `unit_by_id` est la convention du dépôt pour
+    # « id -> unité » (O(1), même normalisation `str`). Le jour où sa clé change, ce site suit.
+    target_unit = get_unit_by_id(target_id, game_state)
     if target_unit is None:
         raise KeyError(f"set_oath_target: unite {target_id!r} introuvable")
     if int(require_key(target_unit, "player")) == player_int:
@@ -3928,6 +3936,7 @@ def expire_faction_abilities_for_player(game_state: Dict[str, Any], player: int)
     08.04, elle a son propre cycle de vie (`pending_rule_choice_queue`).
     """
     from engine.agent_decision import clear_pending_agent_decision, read_pending_agent_decision
+    from engine.phase_handlers.command_handlers import COMMAND_PHASE_DECISION_TYPES
 
     player_int = int(player)
     _player_flag_map(game_state, "waaagh_active")[player_int] = False
@@ -3938,7 +3947,7 @@ def expire_faction_abilities_for_player(game_state: Dict[str, Any], player: int)
     pending_decision = read_pending_agent_decision(game_state)
     if (
         pending_decision is not None
-        and str(require_key(pending_decision, "type")) == "waaagh_call"
+        and str(require_key(pending_decision, "type")) in COMMAND_PHASE_DECISION_TYPES
         and int(require_key(pending_decision, "player")) == player_int
     ):
         clear_pending_agent_decision(game_state)
@@ -3956,10 +3965,15 @@ def oath_wound_bonus_applies(game_state: Dict[str, Any], player: int) -> bool:
        DEATHWATCH or SPACE WOLVES keywords » → balayage RÉEL de l'armée, ici et maintenant.
 
     La relance de touche, elle, ne dépend d'AUCUNE des deux : elle s'applique toujours.
+
+    ORDRE DES DEUX MOITIÉS : le détachement d'abord. C'est un lookup de config (~0,3 µs) là où
+    le balayage de l'armée en coûte ~24 (toutes les unités, tous leurs mots-clés) — et ce
+    prédicat est évalué par INTENT D'ATTAQUE contre la cible d'Oath. Dès que le détachement est
+    à False, le balayage n'a pas lieu.
     """
-    if OATH_EXCLUDING_KEYWORDS & army_keywords(game_state, player):
+    if not uses_codex_detachment(game_state, int(player)):
         return False
-    return uses_codex_detachment(game_state, int(player))
+    return not (OATH_EXCLUDING_KEYWORDS & army_keywords(game_state, player))
 
 
 def uses_codex_detachment(game_state: Dict[str, Any], player: int) -> bool:
@@ -3979,21 +3993,21 @@ def uses_codex_detachment(game_state: Dict[str, Any], player: int) -> bool:
             "Codex: Space Marines Detachment »). Declarer le champ dans la config d'armee / de "
             "scenario — aucune valeur par defaut n'est admise, elle changerait les jets."
         )
-    if isinstance(by_player, bool):
-        # Forme SCALAIRE : une seule armée déclarée (config/armies/<x>.json chargée telle quelle).
-        return by_player
+    # UNE seule forme acceptée : le dict par joueur. Une forme scalaire avait été prévue « au
+    # cas où » — aucun des 24 fichiers qui déclarent la clé ne la produit, et accepter deux
+    # formats pour une donnée qui décide d'un +1 au jet de blessure double les chemins à tester
+    # sans rien couvrir. Les clés JSON sont des chaînes, d'où la lecture par `str`.
     if not isinstance(by_player, dict):
         raise TypeError(
-            f"config['uses_codex_detachment'] doit etre un bool ou un dict par joueur, "
-            f"recu {type(by_player).__name__}"
+            f"config['uses_codex_detachment'] doit etre un dict par joueur "
+            f"(ex. {{\"1\": true, \"2\": true}}), recu {type(by_player).__name__}"
         )
-    for key in (player_int, str(player_int)):
-        if key in by_player:
-            return bool(by_player[key])
-    raise KeyError(
-        f"config['uses_codex_detachment'] n'a pas d'entree pour le joueur {player_int} : "
-        f"{by_player!r}"
-    )
+    if str(player_int) not in by_player:
+        raise KeyError(
+            f"config['uses_codex_detachment'] n'a pas d'entree pour le joueur {player_int} : "
+            f"{by_player!r}"
+        )
+    return bool(by_player[str(player_int)])
 
 
 # --- Application des effets : QUI est concerné par quoi, à cet instant -----------------------
@@ -4010,10 +4024,19 @@ def waaagh_applies_to_unit(game_state: Dict[str, Any], unit: Dict[str, Any]) -> 
 
     Les DEUX conditions, toujours : « the Waaagh! is active for your army AND units from your
     army WITH THIS ABILITY ». Une unité non-ORKS d'une armée orke ne gagne rien.
+
+    SORTIE ANTICIPÉE « aucun Waaagh! nulle part ». Ce prédicat est évalué par BLESSURE
+    (`_resolve_one_manual_wound`), par figurine de la cible (`_build_alloc_groups`) et par entité
+    observée à CHAQUE step gym ; `unit_has_waaagh_ability` y CONSTRUIT un frozenset normalisé,
+    alors que dans toute partie sans Orks — et dans tous les tours d'une partie orke avant
+    l'appel — la réponse est « non ». Mesuré : 0,85 µs sans la sortie, 0,33 µs avec.
+    Le test porte sur la table ENTIÈRE et non sur le camp de l'unité : il répond donc sans lire
+    `unit["player"]`, ce qui garde le prédicat utilisable là où le camp n'est pas la question.
     """
-    return unit_has_waaagh_ability(unit) and waaagh_is_active(
-        game_state, int(require_key(unit, "player"))
-    )
+    active = _player_flag_map(game_state, "waaagh_active")
+    if not any(active.values()):
+        return False
+    return unit_has_waaagh_ability(unit) and bool(active[int(require_key(unit, "player"))])
 
 
 def effective_invul_save(
@@ -4053,23 +4076,18 @@ def unit_is_oath_target_of(
     target » : les deux moitiés. Tester la seule désignation ferait bénéficier de la relance une
     unité alliée d'une autre faction ; tester la seule capacité la ferait s'appliquer à toutes
     les cibles.
+
+    MÊME SORTIE ANTICIPÉE que `waaagh_applies_to_unit`, et pour la même raison : sans aucune
+    désignation en cours — toute partie sans Adeptus Astartes, et chaque tour avant 08.04 — la
+    construction du frozenset de l'attaquant serait perdue, par INTENT D'ATTAQUE.
     """
-    if not unit_has_oath_ability(attacker_unit):
+    targets = _player_flag_map(game_state, "oath_target")
+    if not any(target is not None for target in targets.values()):
         return False
     attacker_player = int(require_key(attacker_unit, "player"))
-    return oath_target_id(game_state, attacker_player) == str(target_unit_id)
-
-
-def oath_hit_reroll_applies(
-    game_state: Dict[str, Any], attacker_unit: Dict[str, Any], target_unit_id: str
-) -> bool:
-    """« You can re-roll the Hit roll » — INCONDITIONNELLE dès que la cible est la bonne.
-
-    Contrairement au +1 Wound, elle ne dépend NI du détachement NI des sous-factions : c'est la
-    moitié de la capacité que la clause conditionnelle ne touche pas. Les confondre supprimerait
-    la relance dans une armée BLOOD ANGELS, ce que la règle ne dit pas.
-    """
-    return unit_is_oath_target_of(game_state, attacker_unit, target_unit_id)
+    if oath_target_id(game_state, attacker_player) != str(target_unit_id):
+        return False
+    return unit_has_oath_ability(attacker_unit)
 
 
 def oath_wound_roll_bonus(

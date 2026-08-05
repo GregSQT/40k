@@ -29,8 +29,8 @@ from engine.combat_utils import (
     set_unit_coordinates,
 )
 from engine.game_state import (
-    GameStateManager, effective_invul_save, oath_hit_reroll_applies, oath_wound_roll_bonus,
-    objective_hex_zones, waaagh_melee_bonus,
+    GameStateManager, effective_invul_save, oath_wound_roll_bonus,
+    objective_hex_zones, unit_is_oath_target_of, waaagh_melee_bonus,
 )
 from engine.hex_utils import cube_to_offset, offset_to_cube
 # Etages 13.06 — remontes au NIVEAU MODULE : `_fight_effective_level_at` et
@@ -4584,9 +4584,14 @@ def _manual_roll_fight_intent(
     # (`profile.crit_wound_on`, teste sur le de brut) et le 1 non modifie echoue toujours
     # (05.02) — les deux sont testes sur le de, pas sur le seuil. Plancher a 2 : aucun
     # modificateur ne fait reussir un 1.
+    # JUMEAU du tir : `unit_is_oath_target_of` UNE fois pour les deux effets d Oath (relance de
+    # touche et +1 Wound posent la meme question), au lieu de deux evaluations par intent.
+    _is_oath_target = attacker_unit is not None and unit_is_oath_target_of(
+        game_state, attacker_unit, target_sid
+    )
     _oath_wound_bonus = (
-        0 if attacker_unit is None
-        else oath_wound_roll_bonus(game_state, attacker_unit, target_sid)
+        oath_wound_roll_bonus(game_state, attacker_unit, target_sid)
+        if _is_oath_target and attacker_unit is not None else 0
     )
     if _oath_wound_bonus:
         wth = max(2, wth - _oath_wound_bonus)
@@ -4608,9 +4613,7 @@ def _manual_roll_fight_intent(
     # Oath of Moment : « You can re-roll the Hit roll » contre la cible designee. Jumeau EXACT
     # du site de tir (`shared_utils._manual_roll_intent`) — c est la moitie de la capacite qui
     # ne depend ni du detachement ni des sous-factions.
-    reroll_hit_any = attacker_unit is not None and oath_hit_reroll_applies(
-        game_state, attacker_unit, target_sid
-    )
+    reroll_hit_any = _is_oath_target
     reroll_wound1 = attacker_unit is not None and _unit_has_rule(attacker_unit, "reroll_1_towound")
     reroll_wound_obj = (
         attacker_unit is not None

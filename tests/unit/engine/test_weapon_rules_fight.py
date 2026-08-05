@@ -10,6 +10,7 @@ import random
 
 import pytest
 
+from tests._state_invariants import turn_state_invariants
 from tests.unit.engine._roll_helpers import roll_fight_intent
 
 
@@ -30,13 +31,20 @@ def _game_state(weapon_rules, *, target_keywords=()):
     target_model = {"id": "T1", "squad_id": "2", "player": 1, "T": 4, "HP_CUR": 2, "HP_MAX": 2,
                     "ARMOR_SAVE": 3, "INVUL_SAVE": 7, "role": None, "unitType": "Grunt"}
     gs = {
+        # Socle d'etat de tour : le moteur pose TOUJOURS ces cles (dont l'etat des capacites de
+        # faction, lu par la resolution de melee). Une doublure qui les omet decrit un
+        # game_state impossible en production — cf. la docstring de `tests/_state_invariants`.
+        **turn_state_invariants(),
         "models_cache": {"A1": attacker, "T1": target_model},
         "squad_models": {"1": ["A1"], "2": ["T1"]},
         "squad_cache": {"1": {"model_count_at_start": 1}, "2": {"model_count_at_start": 1}},
         "units_cache": {"1": {"VALUE": 10.0, "player": 0}, "2": {"VALUE": 10.0, "player": 1}},
+        # `player` sur les DEUX : aucun constructeur du moteur ne produit une unite sans camp
+        # (`create_unit` l'exige), et les capacites de faction le lisent — une doublure qui
+        # l'omet decrit une unite impossible. Meme doctrine que `tests/_state_invariants.py`.
         "unit_by_id": {
-            "1": {"id": "1", "UNIT_RULES": [], "UNIT_KEYWORDS": []},
-            "2": {"id": "2", "UNIT_RULES": [],
+            "1": {"id": "1", "player": 0, "UNIT_RULES": [], "UNIT_KEYWORDS": []},
+            "2": {"id": "2", "player": 1, "UNIT_RULES": [],
                   "UNIT_KEYWORDS": [{"keywordId": k} for k in target_keywords]},
         },
         "objectives": [],

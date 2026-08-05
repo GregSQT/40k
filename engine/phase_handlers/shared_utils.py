@@ -8181,16 +8181,22 @@ def _manual_roll_intent(
     # Import PARESSEUX : `engine.game_state` importe ce module au niveau module (is_unit_alive,
     # compute_unit_rules_in_effect). L importer ici en tete creerait un cycle.
     from engine.game_state import (
-        effective_invul_save, oath_hit_reroll_applies, oath_wound_roll_bonus,
+        effective_invul_save, oath_wound_roll_bonus, unit_is_oath_target_of,
     )
 
     target_unit = get_unit_by_id(game_state, str(target_sid))
     # Oath of Moment (chantier 03) : « add 1 to the Wound roll » contre la cible designee.
     # JUMEAU EXACT du site de melee (`fight_handlers._manual_roll_fight_intent`), y compris la
     # modelisation par abaissement du seuil et le plancher a 2 — cf. le commentaire la-bas.
+    # `unit_is_oath_target_of` UNE fois : la relance de touche et le +1 Wound posent la MÊME
+    # question (« cette attaque vise ma cible d'Oath ? »), et elle etait evaluee deux fois par
+    # intent avec les memes arguments. Le +1 Wound y ajoute seulement la clause de detachement.
+    _is_oath_target = attacker_unit is not None and unit_is_oath_target_of(
+        game_state, attacker_unit, str(target_sid)
+    )
     _oath_wound_bonus = (
-        0 if attacker_unit is None
-        else oath_wound_roll_bonus(game_state, attacker_unit, str(target_sid))
+        oath_wound_roll_bonus(game_state, attacker_unit, str(target_sid))
+        if _is_oath_target and attacker_unit is not None else 0
     )
     if _oath_wound_bonus:
         wth = max(2, wth - _oath_wound_bonus)
@@ -8234,10 +8240,9 @@ def _manual_roll_intent(
             # Oath of Moment : « You can re-roll the Hit roll » contre la cible designee.
             # JUMEAU du site de melee — c est le motif d echec n°1 du depot : une relance
             # cablee au tir seulement ferait de la mitraille orke un cas particulier silencieux.
-            hit_any_fail=(
-                attacker_unit is not None
-                and oath_hit_reroll_applies(game_state, attacker_unit, str(target_sid))
-            ),
+            # « You can re-roll the Hit roll » : INCONDITIONNELLE des que la cible est la bonne
+            # — ni le detachement ni les sous-factions ne la touchent, contrairement au +1 Wound.
+            hit_any_fail=_is_oath_target,
             wound_1=reroll_wound1,
             wound_any_fail=reroll_wound_obj,
         ),

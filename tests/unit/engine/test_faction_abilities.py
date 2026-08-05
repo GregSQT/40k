@@ -34,9 +34,9 @@ from engine.game_state import (
     effective_invul_save,
     expire_faction_abilities_for_player,
     initial_faction_ability_state,
-    oath_hit_reroll_applies,
     oath_wound_roll_bonus,
     set_oath_target,
+    unit_is_oath_target_of,
     unit_can_charge_after_advance,
     waaagh_applies_to_unit,
     waaagh_is_active,
@@ -118,7 +118,9 @@ def _shoot_state(
     defender_armor=6,
     defender_invul=7,
     extra_enemy=False,
-    uses_codex_detachment: "bool | dict | None" = True,
+    # DICT par joueur, la seule forme acceptee — comme les 24 fichiers de config qui la
+    # declarent. `None` sert au verrou « champ absent -> leve ».
+    uses_codex_detachment: "dict | None" = None,
     attacker_extra_units=(),
 ):
     """Un tireur (escouade '1', joueur 1) contre une cible (escouade '2', joueur 2).
@@ -159,7 +161,10 @@ def _shoot_state(
         extra_id = f"9{index}"
         units.append(_unit(extra_id, 1, extra_faction))
 
-    config = {"uses_codex_detachment": uses_codex_detachment} if uses_codex_detachment is not None else {}
+    config = (
+        {} if uses_codex_detachment == {}
+        else {"uses_codex_detachment": uses_codex_detachment or {"1": True, "2": True}}
+    )
     gs = {
         **turn_state_invariants(),
         "gym_training_mode": True,
@@ -206,7 +211,7 @@ def _fight_state(*, attacker_faction, defender_faction, weapon_str=4, weapon_nb=
     units = [_unit("1", 1, attacker_faction), _unit("2", 2, defender_faction, ARMOR_SAVE=6)]
     gs = {
         **turn_state_invariants(),
-        "config": {"uses_codex_detachment": True},
+        "config": {"uses_codex_detachment": {"1": True, "2": True}},
         "models_cache": {"A1": attacker, "T1": target_model},
         "squad_models": {"1": ["A1"], "2": ["T1"]},
         "squad_cache": {"1": {"model_count_at_start": 1}, "2": {"model_count_at_start": 1}},
@@ -228,7 +233,7 @@ def _command_state(current_player, *, p1_faction, p2_faction, alive=("1", "2")):
         "turn": 1,
         "phase": "command",
         "current_player": current_player,
-        "config": {"uses_codex_detachment": True, "gym_training_mode": True},
+        "config": {"uses_codex_detachment": {"1": True, "2": True}, "gym_training_mode": True},
         "gym_training_mode": True,
         "units": units,
         "unit_by_id": {str(u["id"]): u for u in units},
@@ -653,7 +658,7 @@ def test_oath_ne_s_applique_pas_a_un_attaquant_sans_la_capacite():
     gs["oath_target"][1] = "2"
     attaquant = gs["unit_by_id"]["1"]
 
-    assert oath_hit_reroll_applies(gs, attaquant, "2") is False
+    assert unit_is_oath_target_of(gs, attaquant, "2") is False
     assert oath_wound_roll_bonus(gs, attaquant, "2") == 0
 
 
@@ -680,7 +685,7 @@ def test_verrou_clause_detachement_une_sous_faction_supprime_le_plus_un_wound(so
     attaquant = gs["unit_by_id"]["1"]
 
     assert oath_wound_roll_bonus(gs, attaquant, "2") == 0
-    assert oath_hit_reroll_applies(gs, attaquant, "2") is True
+    assert unit_is_oath_target_of(gs, attaquant, "2") is True
 
 
 def test_le_plus_un_wound_tient_sans_sous_faction():
@@ -698,7 +703,7 @@ def test_verrou_champ_de_config_absent_leve():
     personne ne l'ait décidé — c'est exactement ce qu'un fallback masquerait.
     """
     gs = _shoot_state(attacker_faction=ASTARTES, defender_faction=ORKS,
-                      uses_codex_detachment=None)
+                      uses_codex_detachment={})
     set_oath_target(gs, 1, "2")
 
     with pytest.raises(KeyError, match="uses_codex_detachment"):
@@ -832,7 +837,7 @@ def test_la_clause_d_exclusion_lit_les_deux_tables_de_mots_cles() -> None:
     set_oath_target(gs, 1, "2")
 
     assert oath_wound_roll_bonus(gs, gs["unit_by_id"]["1"], "2") == 0
-    assert oath_hit_reroll_applies(gs, gs["unit_by_id"]["1"], "2") is True
+    assert unit_is_oath_target_of(gs, gs["unit_by_id"]["1"], "2") is True
 
 
 def test_le_roster_declare_reellement_des_sous_factions() -> None:
@@ -845,14 +850,18 @@ def test_le_roster_declare_reellement_des_sous_factions() -> None:
     """
     from ai.unit_registry import UnitRegistry
 
+    from engine.game_state import OATH_FACTION_KEYWORD, _normalize_keyword
+
     registry = UnitRegistry()
     declares = set()
     for unit_type in ("GreyHunter", "DeathCompanyMarineEviscerator",
                       "DeathwingTerminatorPlasmaCannon"):
+        # Par `_normalize_keyword`, pas par un `.upper()` maison : le test doit comparer dans la
+        # MÊME forme que le moteur, sinon il verrouille une orthographe au lieu d'un fait.
         for entry in registry.get_unit_data(unit_type)["FACTION_KEYWORDS"]:
-            declares.add(str(entry["keywordId"]).strip().upper())
+            declares.add(_normalize_keyword(entry))
 
-    assert "ADEPTUS ASTARTES" in declares, "la faction d'armee doit rester declaree"
+    assert OATH_FACTION_KEYWORD in declares, "la faction d'armee doit rester declaree"
     assert declares & OATH_EXCLUDING_KEYWORDS, (
         "aucune sous-faction declaree : la clause d'exclusion d'Oath ne peut rien exclure"
     )
@@ -938,7 +947,7 @@ def test_le_cycle_pvp_complet_s_arrete_puis_repart(tmp_path) -> None:
     gs = engine.game_state
     gs["player_types"] = {"1": "human", "2": "human"}
     engine.current_mode_code = "pvp"
-    engine.config["uses_codex_detachment"] = True
+    engine.config["uses_codex_detachment"] = {"1": True, "2": True}
     gs["current_player"] = 1
     gs["phase"] = "command"
 
