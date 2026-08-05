@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from shared.data_validation import require_key
 from engine.combat_utils import calculate_hex_distance, resolve_dice_value
 from engine.phase_handlers.shared_utils import build_units_cache, rebuild_choice_timing_index
-from engine.phase_handlers import command_handlers, movement_handlers
+from engine.phase_handlers import movement_handlers
 
 
 ED_MODE_CODE = "endless_duty"
@@ -113,7 +113,7 @@ def initialize_endless_duty_state(
 
     # Spawn wave 1 enemies immediately.
     spawn_result = spawn_next_wave_for_current_index(engine_instance)
-    _start_initial_wave_turn_context(gs)
+    _start_initial_wave_turn_context(engine_instance, gs)
     _append_ed_log(gs, {"type": "endless_wave_start", "wave_index": 1, "details": spawn_result})
     return state
 
@@ -265,7 +265,7 @@ def commit_inter_wave_requisition(engine_instance: Any, action: Dict[str, Any]) 
 
     # Start next wave.
     spawn_result = spawn_next_wave_for_current_index(engine_instance)
-    _start_next_wave_turn_context(gs)
+    _start_next_wave_turn_context(engine_instance, gs)
     _append_ed_log(
         gs,
         {
@@ -868,18 +868,23 @@ def _slot_profile_to_unit_type(slot_name: str, profile_name: str) -> str:
     raise ValueError(f"Unknown Endless Duty slot: {slot_name}")
 
 
-def _start_next_wave_turn_context(gs: Dict[str, Any]) -> None:
+def _start_next_wave_turn_context(engine_instance: Any, gs: Dict[str, Any]) -> None:
     gs["turn"] = int(require_key(gs, "turn")) + 1
     gs["current_player"] = 1
     gs["phase"] = "command"
     gs["turn_limit_reached"] = False
     gs["game_over"] = False
     gs["winner"] = None
-    command_handlers.command_phase_start(gs)
-    movement_handlers.movement_phase_start(gs)
+    # `engine.start_command_phase()` et pas le handler nu : 08.04 peut poser une decision de
+    # capacite de faction (Waaagh! / Oath), et seul le moteur sait qui pilote le siege. Le
+    # retour est RESPECTE — enchainer sur le mouvement perdrait la decision, et le P1 d'Endless
+    # Duty est un Intercessor, donc ADEPTUS ASTARTES : la designation d'Oath tombe des le 1er tour.
+    cmd_result = engine_instance.start_command_phase()
+    if cmd_result.get("phase_complete"):  # get allowed : absent == phase non close
+        movement_handlers.movement_phase_start(gs)
 
 
-def _start_initial_wave_turn_context(gs: Dict[str, Any]) -> None:
+def _start_initial_wave_turn_context(engine_instance: Any, gs: Dict[str, Any]) -> None:
     """Initialize run at P1 command phase (no deployment / no auto-move)."""
     gs["current_player"] = 1
     gs["phase"] = "command"
@@ -888,7 +893,10 @@ def _start_initial_wave_turn_context(gs: Dict[str, Any]) -> None:
     gs["winner"] = None
     if "deployment_state" in gs and isinstance(gs["deployment_state"], dict):
         gs["deployment_state"]["deployment_complete"] = True
-    command_result = command_handlers.command_phase_start(gs)
+    # JUMEAU de `_start_next_wave_turn_context` : le moteur, pas le handler nu. Ce site
+    # respectait deja `phase_transition`, mais il court-circuitait la resolution des decisions
+    # de 08.04 — un siege IA n'aurait eu personne pour y repondre.
+    command_result = engine_instance.start_command_phase()
     command_pool = gs.get("command_activation_pool", [])
     has_command_actions = isinstance(command_pool, list) and len(command_pool) > 0
     # If command phase has no actionable content, start move phase immediately.

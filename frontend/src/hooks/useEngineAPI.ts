@@ -342,7 +342,31 @@ export interface APIGameState {
   winner?: number | null;
   pending_rule_choice_queue?: RuleChoicePrompt[];
   active_rule_choice_prompt?: RuleChoicePrompt | null;
+  /**
+   * Capacités de faction (chantier 03), 08.04 — le moteur ARRÊTE la phase de commandement
+   * dessus, exactement comme sur un `active_rule_choice_prompt`.
+   *
+   * `pending_agent_decision` de type `waaagh_call` : décision binaire, jouée par
+   * `agent_decision` + `option_index` (0 = appeler, 1 = passer — l'ordre est contractuel).
+   * `pending_oath_selection` : n° du joueur qui DOIT désigner une unité ennemie, jouée par
+   * `select_oath_target` + `unitId`. Non optionnelle : tant qu'elle n'est pas jouée, la phase
+   * n'avance pas — c'est la règle (« select one unit from your opponent's army »), pas un bug.
+   */
+  pending_agent_decision?: PendingAgentDecision | null;
+  pending_oath_selection?: number | null;
+  oath_target?: Record<string, string | null>;
+  waaagh_active?: Record<string, boolean>;
+  waaagh_called?: Record<string, boolean>;
 }
+
+/** Décision d'ARMÉE posée par 08.04. `unit_id` identifie le point de choix (`player_<n>`),
+ *  pas une escouade : une capacité de faction n'appartient à aucune datasheet. */
+export type PendingAgentDecision = {
+  type: string;
+  player: number;
+  unit_id: string;
+  options: Array<{ label: string }>;
+};
 
 /** Cache dernier payload ``move_preview_footprint_mask_loops`` + hash pour omission JSON (POST /action). */
 const _movePreviewMaskLoopsTransport = {
@@ -6074,6 +6098,24 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     [executeAction]
   );
 
+  // ── Capacités de faction (chantier 03) — 08.04 ────────────────────────────────────────────
+  // Deux mécanismes distincts côté moteur, deux actions distinctes ici. Ils ne se factorisent
+  // pas : le Waaagh! désigne un CANDIDAT par son index (l'ordre est contractuel), l'Oath désigne
+  // une ESCOUADE par son id. Les fondre derrière une action commune reperdrait cette différence.
+  const handleCallWaaagh = useCallback(
+    async (optionIndex: number) => {
+      await executeAction({ action: "agent_decision", option_index: optionIndex });
+    },
+    [executeAction]
+  );
+
+  const handleSelectOathTarget = useCallback(
+    async (targetUnitId: string | number) => {
+      await executeAction({ action: "select_oath_target", unitId: String(targetUnitId) });
+    },
+    [executeAction]
+  );
+
   const confirmMoveInFlightRef = useRef(false);
   const handleConfirmMove = useCallback(async () => {
     if (confirmMoveInFlightRef.current) {
@@ -7857,6 +7899,14 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       winner: gameState.winner,
       pending_rule_choice_queue: gameState.pending_rule_choice_queue,
       active_rule_choice_prompt: gameState.active_rule_choice_prompt,
+      // Capacités de faction (chantier 03) : la phase de commandement s'ARRÊTE dessus, donc
+      // l'UI doit les voir — sans ces deux champs, le joueur PvP verrait la partie ne plus
+      // avancer sans savoir pourquoi.
+      pending_agent_decision: gameState.pending_agent_decision,
+      pending_oath_selection: gameState.pending_oath_selection,
+      // Lus pour l'affichage : quelle unité est sous Oath, quel camp a un Waaagh! actif.
+      oath_target: gameState.oath_target,
+      waaagh_active: gameState.waaagh_active,
     };
   }, [
     gameState,
@@ -8108,6 +8158,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       ...blinkBoardPropsIdle,
       ruleChoicePrompt: null,
       onSelectRuleChoice: async (_prompt: RuleChoicePrompt, _selectedDisplayRuleId: string) => {},
+      onCallWaaagh: async (_optionIndex: number) => {},
+      onSelectOathTarget: async (_targetUnitId: string | number) => {},
       // blinkState removed - blinking is handled locally in UnitRenderer
       fightSubPhase: null,
       executeAITurn: async () => {},
@@ -8552,6 +8604,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     ...blinkBoardPropsReady,
     ruleChoicePrompt,
     onSelectRuleChoice: handleSelectRuleChoice,
+    // Capacités de faction (chantier 03) : l'état vient du `game_state` (déjà sérialisé par
+    // l'API), les deux actions partent d'ici.
+    onCallWaaagh: handleCallWaaagh,
+    onSelectOathTarget: handleSelectOathTarget,
     // blinkState removed - blinking is handled locally in UnitRenderer
     // Export charge roll info for failed charge display
     chargingUnitId: failedChargeRoll

@@ -1776,7 +1776,7 @@ class W40KEngine(gym.Env):
                 self.game_state["deployment_state"]["current_deployer"] = 2
             if not deployable_units[1] and not deployable_units[2]:
                 self.game_state["deployment_state"]["deployment_complete"] = True
-                cmd_result = self._start_command_phase()
+                cmd_result = self.start_command_phase()
                 if not (cmd_result and cmd_result.get("phase_complete") is False):
                     movement_handlers.movement_phase_start(self.game_state)
             else:
@@ -1785,7 +1785,7 @@ class W40KEngine(gym.Env):
             # Initialize command phase for game start using handler delegation
             # Phase 2: if command_phase_start returns phase_complete=False (free steps active),
             # stay in command phase — agent will issue zone intent actions first.
-            cmd_result = self._start_command_phase()
+            cmd_result = self.start_command_phase()
             if not (cmd_result and cmd_result.get("phase_complete") is False):
                 movement_handlers.movement_phase_start(self.game_state)
         self.episode_tactical_data = _empty_episode_tactical_data()
@@ -3510,16 +3510,29 @@ class W40KEngine(gym.Env):
     #   - humain (PvP)   → `waiting_for_player`, résolu par une action explicite de l'API ;
     #   - IA hors gym    → tranché immédiatement par la politique ci-dessous.
 
-    def _start_command_phase(self) -> Dict[str, Any]:
-        """Ouvre la phase de commandement — POINT D'ENTRÉE UNIQUE du moteur.
+    def start_command_phase(self) -> Dict[str, Any]:
+        """Ouvre la phase de commandement — POINT D'ENTRÉE UNIQUE, moteur ET services.
 
         `command_phase_start` seule ne suffit plus depuis que 08.04 peut poser une décision : un
         siège piloté par une IA hors gym n'a personne pour y répondre, et la phase resterait
-        arrêtée. Router les quatre appels par ici évite qu'un des quatre oublie la résolution —
-        c'est exactement le motif « corrigé d'un côté, pas de l'autre » du dépôt.
+        arrêtée. Router les appels par ici évite qu'un seul oublie la résolution — c'est
+        exactement le motif « corrigé d'un côté, pas de l'autre » du dépôt.
+
+        PUBLIQUE, et c'est le correctif du finding 2 de la review du 2026-08-05 : quatre
+        appelants HORS moteur (`services/endless_duty_runtime`, `services/api_server`)
+        appelaient le handler directement, jetaient son retour et enchaînaient sur la phase de
+        mouvement. Une désignation d'Oath y restait posée pour tout le run — et Endless Duty
+        commence justement avec un Intercessor, donc ADEPTUS ASTARTES.
+
+        ⚠️ Le retour DOIT être respecté : `phase_complete` faux signifie que la phase attend une
+        réponse, et enchaîner sur le mouvement la perd.
         """
         result = command_handlers.command_phase_start(self.game_state)
-        if not command_handlers.faction_decision_is_pending(self.game_state):
+        # Borne au joueur ACTIF : une decision restee en attente pour l'ADVERSAIRE n'a pas a
+        # etre resolue pendant ce tour-ci, et surtout pas a arreter cette phase (cf. la garde
+        # de propriete de `faction_decision_is_pending`).
+        current_player = int(require_key(self.game_state, "current_player"))
+        if not command_handlers.faction_decision_is_pending(self.game_state, current_player):
             return result
         self._resolve_faction_decisions_for_ai_seats()
         return command_handlers.command_phase_resume(self.game_state)
@@ -3546,8 +3559,9 @@ class W40KEngine(gym.Env):
         les deux mots-clés de faction). Le compteur borne l'enchaînement — deux décisions par
         phase au maximum, une troisième signalerait un état incohérent plutôt qu'un cas de jeu.
         """
+        current_player = int(require_key(self.game_state, "current_player"))
         for _ in range(3):
-            if not command_handlers.faction_decision_is_pending(self.game_state):
+            if not command_handlers.faction_decision_is_pending(self.game_state, current_player):
                 return
             decision = read_pending_agent_decision(self.game_state)
             if decision is not None and str(require_key(decision, "type")) == "waaagh_call":
@@ -4215,7 +4229,7 @@ class W40KEngine(gym.Env):
             if next_phase == "deployment":
                 phase_init_result = deployment_handlers.deployment_phase_start(self.game_state)
             elif next_phase == "command":
-                phase_init_result = self._start_command_phase()
+                phase_init_result = self.start_command_phase()
                 self._clear_turn_scoped_rule_choices()
             elif next_phase == "shoot":
                 phase_init_result = shooting_handlers.shooting_phase_start(self.game_state)
@@ -6029,7 +6043,7 @@ class W40KEngine(gym.Env):
             if next_phase == "deployment":
                 phase_init_result = deployment_handlers.deployment_phase_start(self.game_state)
             elif next_phase == "command":
-                phase_init_result = self._start_command_phase()
+                phase_init_result = self.start_command_phase()
                 self._clear_turn_scoped_rule_choices()
             elif next_phase == "shoot":
                 phase_init_result = shooting_handlers.shooting_phase_start(self.game_state)

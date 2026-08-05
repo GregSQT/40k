@@ -3747,17 +3747,45 @@ def unit_has_oath_ability(unit: Dict[str, Any]) -> bool:
     return OATH_FACTION_KEYWORD in unit_faction_keywords(unit)
 
 
-def army_faction_keywords(game_state: Dict[str, Any], player: int) -> frozenset:
-    """Mots-clés de faction présents dans l'armée d'un joueur — unités MORTES comprises.
+def army_keywords(game_state: Dict[str, Any], player: int) -> frozenset:
+    """TOUS les mots-clés présents dans l'armée d'un joueur — faction ET unité, morts compris.
 
-    Union et non intersection : la question posée par les deux capacités est « mon armée
-    contient-elle X ? » (`Army Faction`, puis la clause d'exclusion d'Oath), jamais « toutes mes
-    unités sont-elles X ? ».
+    LES DEUX TABLES, et ce n'est pas une précaution. La règle écrit « units with the BLOOD
+    ANGELS, DARK ANGELS, DEATHWATCH or SPACE WOLVES KEYWORDS » sans dire dans quelle catégorie
+    ils vivent — et ce dépôt les répartit entre `FACTION_KEYWORDS` (la faction) et
+    `UNIT_KEYWORDS` (le reste). N'interroger que la première rendait la clause d'exclusion
+    d'Oath structurellement MORTE : aucune datasheet ne pouvait la déclencher, quel que soit le
+    roster (`/code-review` du 2026-08-05, finding 1). Un mot-clé déclaré du « mauvais » côté ne
+    doit pas décider silencieusement d'un +1 au jet de blessure.
+
+    Union et non intersection : la question posée est « mon armée contient-elle X ? », jamais
+    « toutes mes unités sont-elles X ? ».
 
     Les unités détruites comptent : « your army does not INCLUDE one or more units with the
     BLOOD ANGELS […] keywords » décrit la LISTE D'ARMÉE, pas ce qui reste sur la table. Faire
     dépendre le +1 Wound de la survie d'un détachement le rendrait intermittent en cours de
     partie, ce que la règle ne dit nulle part.
+    """
+    player_int = int(player)
+    keywords: set = set()
+    for unit in require_key(game_state, "units"):
+        if int(require_key(unit, "player")) != player_int:
+            continue
+        keywords |= unit_faction_keywords(unit)
+        keywords |= {
+            _normalize_keyword(entry)
+            for entry in unit.get("UNIT_KEYWORDS", ())  # get allowed : absence == aucun keyword
+        }
+    return frozenset(keywords)
+
+
+def army_faction_keywords(game_state: Dict[str, Any], player: int) -> frozenset:
+    """Mots-clés de FACTION seuls — « If your Army Faction is ORKS / ADEPTUS ASTARTES ».
+
+    Distinct d'`army_keywords` ci-dessus : cette question-ci porte sur la FACTION D'ARMÉE, une
+    notion qui a sa table dédiée. Les confondre ferait qu'une unité au mot-clé d'unité
+    « orks » — il en existe (`BOYZ`, `SPEED FREEKS`) — déclencherait Waaagh! dans une armée qui
+    n'est pas orke.
     """
     player_int = int(player)
     keywords: set = set()
@@ -3883,10 +3911,19 @@ def expire_faction_abilities_for_player(game_state: Dict[str, Any], player: int)
     d'Oath reste désignée pendant que l'adversaire joue).
 
     `waaagh_called` n'est PAS remis à False : il porte le « once per battle », pas la durée.
+
+    Purge AUSSI une désignation restée en attente pour ce joueur. Elle ne devrait pas exister —
+    08.04 la repose juste après — mais si un tour précédent s'est terminé sans qu'elle soit
+    jouée (siège sans décideur, partie rechargée), la laisser vivre ferait poser la nouvelle
+    par-dessus l'ancienne : `pending_oath_selection` serait alors vraie sans que personne ne
+    sache de quel tour elle date, et la phase resterait arrêtée sur un choix périmé.
     """
     player_int = int(player)
     _player_flag_map(game_state, "waaagh_active")[player_int] = False
     _player_flag_map(game_state, "oath_target")[player_int] = None
+    pending_oath = game_state.get("pending_oath_selection")  # get allowed : None = aucune
+    if pending_oath is not None and int(pending_oath) == player_int:
+        game_state["pending_oath_selection"] = None
 
 
 def oath_wound_bonus_applies(game_state: Dict[str, Any], player: int) -> bool:
@@ -3902,7 +3939,7 @@ def oath_wound_bonus_applies(game_state: Dict[str, Any], player: int) -> bool:
 
     La relance de touche, elle, ne dépend d'AUCUNE des deux : elle s'applique toujours.
     """
-    if OATH_EXCLUDING_KEYWORDS & army_faction_keywords(game_state, player):
+    if OATH_EXCLUDING_KEYWORDS & army_keywords(game_state, player):
         return False
     return uses_codex_detachment(game_state, int(player))
 

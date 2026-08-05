@@ -38,7 +38,7 @@ from main import load_config
 from shared.data_validation import require_key
 from engine.combat_utils import resolve_dice_value, set_unit_coordinates
 from engine.phase_handlers.shared_utils import build_units_cache, rebuild_choice_timing_index, _is_character_role
-from engine.phase_handlers import command_handlers, movement_handlers, deployment_handlers
+from engine.phase_handlers import movement_handlers, deployment_handlers
 from engine.hex_utils import expand_wall_group_to_hex_list
 from services.endless_duty_runtime import (
     ED_MODE_CODE,
@@ -2558,13 +2558,16 @@ def start_game():
             if not ok:
                 break
             if res.get("phase_complete"):
-                command_handlers.command_phase_start(gs)
-                movement_handlers.movement_phase_start(gs)
+                # `engine.start_command_phase()` et pas le handler nu : 08.04 peut poser une
+                # decision de capacite de faction, et seul le moteur sait qui pilote le siege.
+                # Le retour est RESPECTE — enchainer sur le mouvement perdrait la decision.
+                if engine.start_command_phase().get("phase_complete"):  # get allowed
+                    movement_handlers.movement_phase_start(gs)
                 break
         gs["current_player"] = 2
         gs["turn"] = 1
-        command_handlers.command_phase_start(gs)
-        movement_handlers.movement_phase_start(gs)
+        if engine.start_command_phase().get("phase_complete"):  # get allowed
+            movement_handlers.movement_phase_start(gs)
 
     # Snapshots temporels : réinitialiser l'historique et capturer + auto-sauver l'état de départ (PvP).
     _SNAPSHOT_STORE.reset()

@@ -119,7 +119,10 @@ def command_phase_resume(game_state: Dict[str, Any]) -> Dict[str, Any]:
     # 08.04 non soldé : le moteur reste en phase de commandement et n'avance PAS. Sans cet arrêt,
     # la phase enchaînerait sur le move et la décision serait perdue — l'agent n'appellerait
     # jamais son Waaagh!, la capacité serait du code mort.
-    if faction_decision_is_pending(game_state):
+    # `current_player` et pas « n'importe qui » : la phase de commandement appartient au joueur
+    # actif, et lui seul peut répondre. Arrêter sa phase sur une décision de l'ADVERSAIRE la
+    # bloquerait définitivement — rien dans son tour ne peut la résoudre.
+    if faction_decision_is_pending(game_state, current_player):
         return {"phase_complete": False, "phase": "command"}
 
     if is_agent_turn:
@@ -302,7 +305,7 @@ def oath_selectable_enemy_ids(game_state: Dict[str, Any], player: int) -> List[s
     ]
 
 
-def faction_decision_is_pending(game_state: Dict[str, Any]) -> bool:
+def faction_decision_is_pending(game_state: Dict[str, Any], player: Optional[int] = None) -> bool:
     """True tant qu'une décision de 08.04 attend son décideur (Waaagh! ou Oath).
 
     Les deux mécanismes sont volontairement distincts : le Waaagh! est un choix binaire dont les
@@ -310,13 +313,25 @@ def faction_decision_is_pending(game_state: Dict[str, Any]) -> bool:
     désigne littéralement une escouade ennemie et se paramètre donc en DIMENSION D'ACTION +
     pointeur (`OATH_SLOTS`), conformément à `macro_intents`. Ce prédicat est ce qui les réunit
     pour le seul consommateur qui n'a pas à connaître la différence : l'arrêt de la phase.
+
+    ⚠️ `player` N'EST PAS UN CONFORT. Une décision APPARTIENT à un joueur : 08.04 ne la pose que
+    pour le joueur ACTIF, et seul lui peut y répondre. Sans ce filtre, une décision que le joueur
+    1 n'a pas jouée arrête AUSSI la phase de commandement du joueur 2 — et comme rien dans le
+    tour de 2 ne peut la résoudre, la partie ne repart jamais. Le défaut n'est pas théorique :
+    il suffit qu'un siège reste sans réponse un tour (`/code-review` du 2026-08-05, finding 3).
+
+    `player=None` répond « une décision est-elle en attente, pour n'importe qui ? » — c'est la
+    question des lecteurs qui n'agissent pas sur la phase (diagnostic, sérialisation).
     """
     from engine.agent_decision import read_pending_agent_decision
 
-    if game_state.get("pending_oath_selection") is not None:  # get allowed : None = aucune
+    pending_oath = game_state.get("pending_oath_selection")  # get allowed : None = aucune
+    if pending_oath is not None and (player is None or int(pending_oath) == int(player)):
         return True
     decision = read_pending_agent_decision(game_state)
-    return decision is not None and str(require_key(decision, "type")) == "waaagh_call"
+    if decision is None or str(require_key(decision, "type")) != "waaagh_call":
+        return False
+    return player is None or int(require_key(decision, "player")) == int(player)
 
 
 def apply_waaagh_call_decision(game_state: Dict[str, Any], player: int, called: bool) -> None:

@@ -249,6 +249,10 @@ def _command_state(current_player, *, p1_faction, p2_faction, alive=("1", "2")):
         # Posé par `command_phase_resume` en production ; la fixture appelle 08.04 en isolation,
         # et le masque de la phase de commandement le lit sans défaut.
         "zone_intent_free_steps_remaining": 0,
+        # Lu par `command_phase_end` (trace de transition) — posé par `command_build_activation_pool`
+        # en production, que la fixture court-circuite en appelant 08.04 seul.
+        "command_activation_pool": [],
+        "episode_number": 1,
     }
     return gs
 
@@ -800,4 +804,159 @@ def test_la_relance_de_touche_atteint_step_log():
     assert source.count("hit_ability_display_name.strip().upper()") == 2, (
         "le champ doit etre RENDU par les DEUX formateurs (tir ET melee) — le cabler d'un seul "
         "cote est le motif d'echec n°1 du depot"
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 8. Les quatre défauts de la review du 2026-08-05
+#
+# Aucun n'était visible depuis le gym : ils vivent tous là où le gym ne passe pas — la clause
+# d'exclusion (aucun roster ne pouvait la déclencher), les appelants hors moteur, et la
+# propriété d'une décision entre deux joueurs.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_la_clause_d_exclusion_lit_les_deux_tables_de_mots_cles() -> None:
+    """FINDING 1 : la clause interrogeait `FACTION_KEYWORDS` SEULE, donc elle était morte.
+
+    La règle écrit « units with the BLOOD ANGELS […] KEYWORDS » sans dire de quelle table il
+    s'agit, et ce dépôt les répartit entre les deux. Le test pose le mot-clé dans `UNIT_KEYWORDS`
+    — le côté que l'ancienne implémentation ne regardait PAS — et exige que le +1 tombe quand
+    même. La contre-épreuve `FACTION_KEYWORDS` est le test paramétré plus haut.
+    """
+    gs = _shoot_state(attacker_faction=ASTARTES, defender_faction=ORKS)
+    intrus = _unit("90", 1, ASTARTES)
+    intrus["UNIT_KEYWORDS"] = [{"keywordId": "SPACE WOLVES"}]
+    gs["units"].append(intrus)
+    gs["unit_by_id"]["90"] = intrus
+    set_oath_target(gs, 1, "2")
+
+    assert oath_wound_roll_bonus(gs, gs["unit_by_id"]["1"], "2") == 0
+    assert oath_hit_reroll_applies(gs, gs["unit_by_id"]["1"], "2") is True
+
+
+def test_le_roster_declare_reellement_des_sous_factions() -> None:
+    """VERT VACANT : la clause peut être correcte et ne servir à rien si RIEN ne la déclenche.
+
+    C'est exactement l'état livré le 2026-08-05 : aucune des 89 datasheets Space Marines ne
+    portait de sous-faction, donc `oath_wound_bonus_applies` se réduisait à la config. Ce test
+    lit les VRAIES datasheets par `UnitRegistry` — pas une fixture — et échoue si les quatre
+    mots-clés redeviennent introuvables.
+    """
+    from ai.unit_registry import UnitRegistry
+
+    registry = UnitRegistry()
+    declares = set()
+    for unit_type in ("GreyHunter", "DeathCompanyMarineEviscerator",
+                      "DeathwingTerminatorPlasmaCannon"):
+        for entry in registry.get_unit_data(unit_type)["FACTION_KEYWORDS"]:
+            declares.add(str(entry["keywordId"]).strip().upper())
+
+    assert "ADEPTUS ASTARTES" in declares, "la faction d'armee doit rester declaree"
+    assert declares & OATH_EXCLUDING_KEYWORDS, (
+        "aucune sous-faction declaree : la clause d'exclusion d'Oath ne peut rien exclure"
+    )
+
+
+def test_une_decision_d_un_joueur_ne_bloque_pas_la_phase_de_l_autre() -> None:
+    """FINDING 3 : le prédicat ignorait le joueur, donc la partie se figeait définitivement.
+
+    Une désignation restée en attente pour le joueur 1 faisait rendre `phase_complete: False` à
+    la phase de commandement du joueur 2 — et rien dans le tour de 2 ne peut la résoudre.
+    """
+    gs = _command_state(1, p1_faction=ASTARTES, p2_faction=ORKS)
+    command_handlers.command_step_command_abilities(gs)
+    assert gs["pending_oath_selection"] == 1
+
+    # Le tour passe au joueur 2 SANS que 1 ait répondu (siège sans décideur).
+    gs["current_player"] = 2
+    assert command_handlers.faction_decision_is_pending(gs, 2) is False
+    assert command_handlers.faction_decision_is_pending(gs, 1) is True
+    resume = command_handlers.command_phase_resume(gs)
+    assert resume["phase_complete"] is True, (
+        "la phase du joueur 2 est arretee par une decision qui ne lui appartient pas"
+    )
+
+
+def test_l_expiration_purge_une_designation_restee_en_attente() -> None:
+    """FINDING 3, seconde moitié : sans purge, la clé survit et 08.04 en repose une par-dessus."""
+    gs = _command_state(1, p1_faction=ASTARTES, p2_faction=ORKS)
+    command_handlers.command_step_command_abilities(gs)
+    assert gs["pending_oath_selection"] == 1
+
+    expire_faction_abilities_for_player(gs, 2)
+    assert gs["pending_oath_selection"] == 1, "expirer le joueur 2 ne touche pas la cle du joueur 1"
+    expire_faction_abilities_for_player(gs, 1)
+    assert gs["pending_oath_selection"] is None
+
+
+def test_aucun_appelant_hors_moteur_n_appelle_le_handler_nu() -> None:
+    """FINDING 2 : quatre appelants jetaient le retour et enchaînaient sur la phase de mouvement.
+
+    Le contrôle porte sur la SOURCE et non sur un scénario, parce que le défaut est structurel :
+    n'importe quel nouvel appelant qui court-circuiterait `W40KEngine.start_command_phase`
+    reproduirait le même trou, et un test de comportement ne couvrirait que les appelants
+    d'aujourd'hui. Endless Duty commence avec un Intercessor (ADEPTUS ASTARTES) : la désignation
+    d'Oath y restait posée pour tout le run.
+    """
+    from pathlib import Path
+
+    racine = Path(__file__).resolve().parents[3]
+    fautifs = []
+    for chemin in sorted((racine / "services").rglob("*.py")):
+        if "command_handlers.command_phase_start" in chemin.read_text(encoding="utf-8"):
+            fautifs.append(chemin.name)
+    assert fautifs == [], (
+        f"{fautifs} appelle(nt) le handler nu : 08.04 peut poser une decision, et seul "
+        f"`W40KEngine.start_command_phase` sait qui pilote le siege et resout"
+    )
+
+
+def test_le_cycle_pvp_complet_s_arrete_puis_repart(tmp_path) -> None:
+    """FINDING 4 : le PvP doit S'ARRÊTER sur la désignation, puis REPARTIR sur l'action de l'UI.
+
+    Le seul test de ce fichier qui monte un `W40KEngine` RÉEL sur un scénario réel, hors gym,
+    avec deux sièges humains — c'est-à-dire le mode PvP. Les fixtures des tests précédents
+    appellent 08.04 en isolation : elles ne prouvent ni que la phase s'arrête pour de vrai, ni
+    qu'elle repart.
+
+    Les deux moitiés comptent. « S'arrête » sans « repart » est un blocage de partie ; « repart »
+    sans « s'arrête » est une capacité qui ne s'applique jamais. Le défaut mesuré le 2026-08-05
+    était le second, et il n'était visible ni en gym ni dans les tests d'isolation.
+    """
+    from ai.unit_registry import UnitRegistry
+    from engine.w40k_core import W40KEngine
+
+    scenario = "config/board/44x60x5/scenario/scenario_attached_unit_test.json"
+    engine = W40KEngine(
+        config=None, rewards_config="ArmageddonAgent", training_config_name="x1",
+        controlled_agent="ArmageddonAgent", active_agents=["ArmageddonAgent"],
+        scenario_file=scenario, unit_registry=UnitRegistry(),
+        quiet=True, gym_training_mode=False, training_n_envs=1,
+    )
+    engine.reset()
+    gs = engine.game_state
+    gs["player_types"] = {"1": "human", "2": "human"}
+    engine.current_mode_code = "pvp"
+    engine.config["uses_codex_detachment"] = True
+    gs["current_player"] = 1
+    gs["phase"] = "command"
+
+    result = engine.start_command_phase()
+
+    assert gs["pending_oath_selection"] == 1, (
+        "aucune designation posee : l'armee du scenario doit etre ADEPTUS ASTARTES"
+    )
+    assert result.get("phase_complete") is not True, (
+        "la phase a enchaine sur le mouvement : la designation est perdue (finding 2)"
+    )
+
+    cible = next(str(u["id"]) for u in gs["units"] if int(u["player"]) == 2)
+    ok, out = engine._process_squad_action({"action": "select_oath_target", "unitId": cible})
+
+    assert ok, "l'action que le widget envoie n'est pas routee par le moteur"
+    assert gs["oath_target"][1] == cible
+    assert gs["pending_oath_selection"] is None
+    assert out.get("phase_complete") is True, (
+        "la phase ne repart pas : la partie resterait bloquee apres la designation"
     )

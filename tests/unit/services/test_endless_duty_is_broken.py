@@ -41,15 +41,22 @@ def registry() -> UnitRegistry:
 
 
 def test_obstacle_5_ed_datasheets_miss_keys_the_engine_requires(registry: UnitRegistry) -> None:
-    """Obstacle 5 — DONNÉE : les 18 fiches endlessDuty n'ont ni ILLUSTRATION_RATIO ni FACTION_KEYWORDS.
+    """Obstacle 5 — DONNÉE : les 18 fiches endlessDuty n'ont pas d'ILLUSTRATION_RATIO.
 
-    `_build_unit_from_registry` exige ILLUSTRATION_RATIO : l'initialisation du mode meurt sur la
-    première unité du slot « leader ».
+    `_build_unit_from_registry` l'exige : l'initialisation du mode meurt sur la première unité
+    du slot « leader ».
+
+    ⚠️ `FACTION_KEYWORDS` faisait partie de l'obstacle jusqu'au chantier 03 (2026-08-05). Il
+    n'en fait plus partie, et ce n'est PAS la donnée qui a changé : le parseur pose désormais la
+    clé sur TOUTE fiche, à `[]` quand la datasheet ne la déclare pas — même convention que
+    `UNIT_KEYWORDS`. La clé existe donc, vide. La conséquence métier reste entière et elle est
+    vérifiée ci-dessous : une fiche sans mot-clé de faction n'appartient à aucune faction, donc
+    aucune capacité de faction (Waaagh!, Oath of Moment) ne la vise.
     """
     still_missing: Dict[str, List[str]] = {}
     for unit_type in _ED_UNIT_TYPES:
         keys = set(registry.get_unit_data(unit_type))
-        absent = sorted({"ILLUSTRATION_RATIO", "FACTION_KEYWORDS"} - keys)
+        absent = sorted({"ILLUSTRATION_RATIO"} - keys)
         if absent:
             still_missing[unit_type] = absent
 
@@ -59,8 +66,14 @@ def test_obstacle_5_ed_datasheets_miss_keys_the_engine_requires(registry: UnitRe
         f"{_DOC} et ce test."
     )
     assert all(
-        absent == ["FACTION_KEYWORDS", "ILLUSTRATION_RATIO"] for absent in still_missing.values()
+        absent == ["ILLUSTRATION_RATIO"] for absent in still_missing.values()
     ), f"La nature des clés manquantes a changé : {still_missing!r}. Mettre à jour {_DOC}."
+    # La clé de faction est là, mais VIDE : ces fiches restent hors de toute capacité de faction.
+    # Sans cette seconde moitié, compléter la donnée un jour passerait inaperçu ici.
+    assert all(
+        registry.get_unit_data(unit_type)["FACTION_KEYWORDS"] == []
+        for unit_type in _ED_UNIT_TYPES
+    ), f"Une fiche endlessDuty declare desormais une faction : mettre a jour {_DOC} et ce test."
 
 
 def test_obstacle_5b_melee_terminator_also_misses_its_ranged_loadout(registry: UnitRegistry) -> None:
