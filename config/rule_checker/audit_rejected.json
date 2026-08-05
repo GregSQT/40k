@@ -180,6 +180,11 @@
     "reason": "RULES_STATUS missing"
   },
   {
+    "unit_type": "ApothecaryBiologis",
+    "file": "frontend/src/roster/spaceMarine/units/ApothecaryBiologis.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
     "unit_type": "AssaultTerminator",
     "file": "frontend/src/roster/spaceMarine/units/AssaultTerminator.ts",
     "reason": "RULES_STATUS missing"
@@ -195,13 +200,68 @@
     "reason": "RULES_STATUS missing"
   },
   {
-    "unit_type": "CaptainGravis",
-    "file": "frontend/src/roster/spaceMarine/units/CaptainGravis.ts",
+    "unit_type": "CaptainCloseCombatBolter",
+    "file": "frontend/src/roster/spaceMarine/units/CaptainCloseCombatBolter.ts",
     "reason": "RULES_STATUS missing"
   },
   {
-    "unit_type": "DeathCompanyMarineEviscerator",
-    "file": "frontend/src/roster/spaceMarine/units/DeathCompanyEviscerator.ts",
+    "unit_type": "CaptainGravisBladeBoltstorm",
+    "file": "frontend/src/roster/spaceMarine/units/CaptainGravisBladeBoltstorm.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "CaptainGravisChainSwordBoltstorm",
+    "file": "frontend/src/roster/spaceMarine/units/CaptainGravisChainSwordBoltstorm.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "CaptainGravisFistBoltstorm",
+    "file": "frontend/src/roster/spaceMarine/units/CaptainGravisFistBoltstorm.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "CaptainGravisPowerWeaponBoltRifle",
+    "file": "frontend/src/roster/spaceMarine/units/CaptainGravisPowerWeaponBoltRifle.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "CaptainPowerFistBolter",
+    "file": "frontend/src/roster/spaceMarine/units/CaptainPowerFistBolter.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "CaptainPowerFistNeoVolkite",
+    "file": "frontend/src/roster/spaceMarine/units/CaptainPowerFistNeoVolkite.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "CaptainPowerFistPistol",
+    "file": "frontend/src/roster/spaceMarine/units/CaptainPowerFistPistol.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "CaptainPowerFistPlasmaPistol",
+    "file": "frontend/src/roster/spaceMarine/units/CaptainPowerFistPlasmaPistol.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "CaptainPowerWeaponNeoVolkite",
+    "file": "frontend/src/roster/spaceMarine/units/CaptainPowerWeaponNeoVolkite.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "CaptainPowerWeaponPistol",
+    "file": "frontend/src/roster/spaceMarine/units/CaptainPowerWeaponPistol.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "CaptainPowerWeaponPlasmaPistol",
+    "file": "frontend/src/roster/spaceMarine/units/CaptainPowerWeaponPlasmaPistol.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "CaptainStormShield",
+    "file": "frontend/src/roster/spaceMarine/units/CaptainStormShield.ts",
     "reason": "RULES_STATUS missing"
   },
   {
@@ -217,6 +277,26 @@
   {
     "unit_type": "DeathwingTerminatorPlasmaCannon",
     "file": "frontend/src/roster/spaceMarine/units/DeathwingTerminatorPlasmaCannon.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "DreadnoughtBallistus",
+    "file": "frontend/src/roster/spaceMarine/units/DreadnoughtBallistus.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "DreadnoughtRedemptor",
+    "file": "frontend/src/roster/spaceMarine/units/DreadnoughtRedemptor.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "EradicatorHeavyBolter",
+    "file": "frontend/src/roster/spaceMarine/units/EradicatorHeavyBolter.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "EradicatorHeavyBolterSergeant",
+    "file": "frontend/src/roster/spaceMarine/units/EradicatorHeavyBolterSergeant.ts",
     "reason": "RULES_STATUS missing"
   },
   {
@@ -285,6 +365,11 @@
     "reason": "RULES_STATUS missing"
   },
   {
+    "unit_type": "LieutenantCombiWeapon",
+    "file": "frontend/src/roster/spaceMarine/units/LieutenantCombiWeapon.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
     "unit_type": "SanguinaryGuardAngelus",
     "file": "frontend/src/roster/spaceMarine/units/SanguinaryGuardAngelus.ts",
     "reason": "RULES_STATUS missing"
@@ -335,8 +420,33 @@
     "reason": "RULES_STATUS missing"
   },
   {
+    "unit_type": "ThunderWolfCavalry",
+    "file": "frontend/src/roster/spaceMarine/units/ThunderWolfCavalry.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "ThunderWolfCavalryPlasma",
+    "file": "frontend/src/roster/spaceMarine/units/ThunderWolfCavalryPlasma.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
     "unit_type": "WolfGuardTerminator",
     "file": "frontend/src/roster/spaceMarine/units/WolfGuardTerminator.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "WolfGuardTerminatorAssaultCannon",
+    "file": "frontend/src/roster/spaceMarine/units/WolfGuardTerminatorAssaultCannon.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "WolfGuardTerminatorPackLeader",
+    "file": "frontend/src/roster/spaceMarine/units/WolfGuardTerminatorPackLeader.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "Barbgaunt",
+    "file": "frontend/src/roster/tyranid/units/Barbgaunt.ts",
     "reason": "RULES_STATUS missing"
   },
   {
@@ -370,6 +480,21 @@
     "reason": "RULES_STATUS missing"
   },
   {
+    "unit_type": "Mucolid",
+    "file": "frontend/src/roster/tyranid/units/Mucolid.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "Neurotyrant",
+    "file": "frontend/src/roster/tyranid/units/Neurotyrant.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "Psychophage",
+    "file": "frontend/src/roster/tyranid/units/Psychophage.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
     "unit_type": "Pyrovore",
     "file": "frontend/src/roster/tyranid/units/Pyrovore.ts",
     "reason": "RULES_STATUS missing"
@@ -377,6 +502,11 @@
   {
     "unit_type": "RipperSwarm",
     "file": "frontend/src/roster/tyranid/units/RipperSwarm.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "ScreamerKiller",
+    "file": "frontend/src/roster/tyranid/units/ScreamerKiller.ts",
     "reason": "RULES_STATUS missing"
   },
   {
@@ -397,6 +527,16 @@
   {
     "unit_type": "TyrantGuardScytingTalon",
     "file": "frontend/src/roster/tyranid/units/TyrantGuardScytingTalon.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "VonRyanLeaper",
+    "file": "frontend/src/roster/tyranid/units/VonRyanLeaper.ts",
+    "reason": "RULES_STATUS missing"
+  },
+  {
+    "unit_type": "WingedTyranidPrime",
+    "file": "frontend/src/roster/tyranid/units/WingedTyranidPrime.ts",
     "reason": "RULES_STATUS missing"
   },
   {

@@ -1,29 +1,34 @@
 {
-  "deployment_zone": "hammer",
   "deployment_type": "active",
+  "uses_codex_detachment": {
+    "1": true,
+    "2": true
+  },
   "scale": "100pts",
-  "wall_ref": "walls-01.json",
-  "primary_objectives": ["objectives_control"],
-  "objectives_ref": "objectives-01.json",
+  "primary_objectives": [
+    "objectives_control"
+  ],
+  "board_ref": "44x60x5",
+  "terrain_ref": "terrain-mc1.json",
   "units": [
     {
       "id": 1,
-      "unit_type": "BloodClaw",
+      "unit_type": "Ancient",
       "player": 1
     },
     {
       "id": 2,
-      "unit_type": "BloodClaw",
+      "unit_type": "Ancient",
       "player": 1
     },
     {
       "id": 101,
-      "unit_type": "AssaultIntercessorSergeant",
+      "unit_type": "GreyHunterPlasmaGun",
       "player": 2
     },
     {
       "id": 102,
-      "unit_type": "AssaultIntercessorSergeant",
+      "unit_type": "GreyHunterPlasmaGun",
       "player": 2
     }
   ]
