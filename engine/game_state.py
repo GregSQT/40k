@@ -727,10 +727,22 @@ class GameStateManager:
                 deployment_type_by_player[player_id] in ("random", "active")
                 for player_id in (1, 2)
             ):
+                # `wall_hexes` EXIGÉ quand un joueur pose réellement des figurines depuis la zone :
+                # sans murs déclarés, le tirage random/actif poserait dans le décor.
                 if not wall_hex_set:
                     raise KeyError(
                         f"Scenario file {scenario_file} missing required 'wall_hexes' for random/active deployment"
                     )
+            # Soustraction INCONDITIONNELLE : un hex de mur n'est une case de déploiement légale
+            # dans AUCUN mode. Elle était réservée à random/active tant que les zones ne servaient
+            # qu'à la phase de déploiement. Depuis que le reset les publie hors phase
+            # (`game_state["deployment_pools"]`), deux lecteurs les consomment en mode `fixed` :
+            # `squad_grid_anchor`, dont l'ancre est le BARYCENTRE du pool, et la clause 20.04 sur
+            # la zone adverse. Mesuré sur le scénario d'entraînement avant ce correctif : 0 mur
+            # dans les zones en `active`, 149 et 151 en `fixed` — la même unité sur le même
+            # plateau recevait donc un centrage de grille différent selon le tirage fixed↔active.
+            # `wall_hex_set` vide (scénario sans décor) → soustraction neutre, pas de repli masqué.
+            if deploy_pools:
                 deploy_pools = {
                     1: deploy_pools[1] - wall_hex_set,
                     2: deploy_pools[2] - wall_hex_set,
