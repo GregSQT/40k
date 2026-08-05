@@ -47,7 +47,10 @@ from engine.phase_handlers.shared_utils import (
 
 # Import shared utilities FIRST (no circular dependencies)
 from engine.episode_schedule import episodes_per_env
-from engine.game_utils import get_unit_by_id, turn_limit_reached, get_effective_turn_limit
+from engine.game_utils import (
+    ONCE_CLAIMS_KEY, get_unit_by_id, once_claim, once_claimed, turn_limit_reached,
+    get_effective_turn_limit,
+)
 
 # Import NEW extracted modules
 from engine.observation_builder import ObservationBuilder
@@ -628,13 +631,8 @@ class W40KEngine(gym.Env):
             # `victory_points` : pose a l'init ET remis a la dotation de depart au reset.
             "command_points": initial_command_points(get_config_loader().get_game_config()),
             "primary_objective": self._scenario_primary_objective,
-            "primary_objective_scored_turns": set(),
-            # Etapes « debut de phase de mouvement » deja resolues, en (tour, joueur). POURQUOI :
-            # docstring de `movement_step_cp_gain_on_objective`. Purge d'episode obligatoire,
-            # comme les marqueurs de scoring voisins.
-            "cp_gain_on_objective_resolved": set(),
-            "objective_rewarded_turns": set(),
-            "coherency_penalized_turns": set(),
+            # Marqueurs « etape deja resolue » : registre `_once_claims`, cree paresseusement
+            # et purge au reset — plus declares ici (POURQUOI : `engine.game_utils`).
             "controlled_objective_samples_scoring_turns": [],
             "opponent_objective_samples_scoring_turns": [],
             # Mode tire par `deployment_mode_schedule` pour l'episode ("active"|"fixed"), None
@@ -1370,6 +1368,16 @@ class W40KEngine(gym.Env):
         # nouvel episode (memes controleurs vides et memes VP a 0), et le replay demarrerait sans
         # aucune donnee de controle.
         self.game_state.pop(self.OBJECTIVE_CONTROL_LOGGED_KEY, None)
+        # POINT DE PURGE UNIQUE de toutes les etapes « resolues une fois par (tour, joueur) » :
+        # scoring du primaire, recompense d'objectif, penalite de coherency, cp_gain_on_objective,
+        # evenements de choix de regle (cf. `engine.game_utils.once_claim`). Leurs cles sont
+        # indexees sur le tour, donc elles se REPETENT d'un episode a l'autre : sans cette ligne,
+        # chacune de ces etapes serait consideree resolue des l'episode 2 et ne se declencherait
+        # plus jamais, en silence — MESURE sur `_choice_timing_fired_events` avant que la purge
+        # existe, 3 episodes enchaines : 16 decisions, puis 2, puis 0.
+        # Verrous : tests/unit/engine/test_once_claims_registry.py et
+        # tests/unit/engine/test_agent_decision_mechanism.py::test_the_choice_mechanism_survives_the_first_episode.
+        self.game_state.pop(ONCE_CLAIMS_KEY, None)
 
         # Reset episode-level metric accumulators
         self.episode_reward_accumulator = 0.0
@@ -1407,13 +1415,8 @@ class W40KEngine(gym.Env):
             # precedent (`reset` fait un `update()` de game_state, pas une recreation).
             "command_points": initial_command_points(get_config_loader().get_game_config()),
             "primary_objective": self._scenario_primary_objective,
-            "primary_objective_scored_turns": set(),
-            # Etapes « debut de phase de mouvement » deja resolues, en (tour, joueur). POURQUOI :
-            # docstring de `movement_step_cp_gain_on_objective`. Purge d'episode obligatoire,
-            # comme les marqueurs de scoring voisins.
-            "cp_gain_on_objective_resolved": set(),
-            "objective_rewarded_turns": set(),
-            "coherency_penalized_turns": set(),
+            # Marqueurs « etape deja resolue » : purges par le `pop("_once_claims")` du bloc
+            # ci-dessus, plus declares ici (cf. `engine.game_utils`).
             "controlled_objective_samples_scoring_turns": [],
             "opponent_objective_samples_scoring_turns": [],
             "zone_intents": [INTENT_INVADE] * MAX_OBJECTIVES,
@@ -1466,16 +1469,9 @@ class W40KEngine(gym.Env):
             "_pile_in_toCol": None,
             "_pile_in_toRow": None,
             # ── État des CHOIX DE RÈGLE / DÉCISIONS AGENT — purge d'épisode (V11 §9.3 P2) ──
-            # ⚠️ `_choice_timing_fired_events` est le point dur. Ses clés sont
-            # `(trigger, tour, phase, joueur, unité, règle)` — SANS le numéro d'épisode. Sans
-            # purge, un événement tiré au tour 1 de l'épisode 1 fait passer pour « déjà tiré »
-            # le même événement au tour 1 de l'épisode 2, et le prompt n'est plus JAMAIS émis.
-            # MESURÉ avant correction, 3 épisodes consécutifs dans le même moteur :
-            # 16 décisions, puis 2, puis 0. Le mécanisme de décision serait donc resté inerte
-            # après le premier épisode d'un run — « code testé mais jamais appelé », le motif
-            # que ce document existe pour interdire. Un smoke à un seul épisode ne peut pas le
-            # voir : c'est la mesure sur épisodes ENCHAÎNÉS qui l'a montré.
-            "_choice_timing_fired_events": set(),
+            # `_choice_timing_fired_events` a rejoint le registre `_once_claims` (purgé par le
+            # `pop` du bloc ci-dessus) : c'est la MÊME famille de marqueur que les quatre
+            # autres, et c'est ici que son mode de défaillance a été observé pour de vrai.
             # Une décision ou un prompt encore en attente appartient à la partie qui vient de
             # finir : les laisser vivre ferait démarrer l'épisode suivant bloqué sur un choix
             # portant sur une unité qui n'existe plus.
@@ -1906,9 +1902,10 @@ class W40KEngine(gym.Env):
         (96,5 reconstructions identiques par episode). Sa validite jusqu'au ``return`` a ete
         auditee : entre la derniere construction et la sortie ne tournent que ``calculate_reward``,
         des compteurs et la fabrication d'``info``, et RIEN de ce que ``calculate_reward`` ecrit
-        dans ``game_state`` (``last_reward_breakdown``, ``_pile_in_toCol/Row``) n'est lu par la
-        construction du masque — verifie par grep sur ``action_decoder``, ``phase_handlers`` et
-        ``spatial_grid``. ``_pending_zone_shaping`` est poppe ici, pas par le calcul de recompense.
+        dans ``game_state`` (``last_reward_breakdown``, ``_pile_in_toCol/Row``, et les familles
+        ``objective_rewarded_turns`` / ``coherency_penalized_turns`` du registre
+        ``_once_claims``) n'est lu par la construction du masque — verifie par grep sur
+        ``action_decoder``, ``phase_handlers`` et ``spatial_grid``. ``_pending_zone_shaping`` est poppe ici, pas par le calcul de recompense.
         """
         # Reste None sur tout chemin qui ne construit aucune observation : l'appelant reconstruit
         # alors le masque lui-meme. Jamais un couple perime — c'est l'inverse du defaut a eviter.
@@ -2966,8 +2963,6 @@ class W40KEngine(gym.Env):
             self.game_state["pending_rule_choice_queue"] = []
         if "active_rule_choice_prompt" not in self.game_state:
             self.game_state["active_rule_choice_prompt"] = None
-        if "_choice_timing_fired_events" not in self.game_state:
-            self.game_state["_choice_timing_fired_events"] = set()
 
     def _get_unit_rule_registry(self) -> Dict[str, Dict[str, Any]]:
         """Return config/unit_rules.json registry."""
@@ -3046,10 +3041,6 @@ class W40KEngine(gym.Env):
         current_turn = int(require_key(self.game_state, "turn"))
         current_player = int(require_key(self.game_state, "current_player"))
         owner_event_player = current_player if event_player is None else int(event_player)
-        fired_events = require_key(self.game_state, "_choice_timing_fired_events")
-        if not isinstance(fired_events, set):
-            raise TypeError("_choice_timing_fired_events must be a set")
-
         registry = self._get_unit_rule_registry()
         queue = require_key(self.game_state, "pending_rule_choice_queue")
         if not isinstance(queue, list):
@@ -3123,9 +3114,11 @@ class W40KEngine(gym.Env):
                 f"{trigger}|{current_turn}|{event_phase or '-'}|{owner_event_player}|"
                 f"{unit_id}|{rule_id}"
             )
-            if event_key in fired_events:
+            # RÉSERVE AVANT D'AGIR, comme `cp_gain_on_objective_resolved` : ce qui suit
+            # empile un prompt, le rejouer en empilerait deux.
+            if once_claimed(self.game_state, "_choice_timing_fired_events", event_key):
                 continue
-            fired_events.add(event_key)
+            once_claim(self.game_state, "_choice_timing_fired_events", event_key)
 
             options: List[Dict[str, str]] = []
             for granted_display_rule_id_raw in grants_rule_ids:

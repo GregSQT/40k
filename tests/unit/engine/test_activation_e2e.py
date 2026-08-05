@@ -158,8 +158,6 @@ def _make_shoot_gs(attacker: Dict, target: Dict) -> Dict[str, Any]:
         # 08.02 : etat de PARTIE pose au reset du moteur, comme les VP juste au-dessus.
         "command_points": {1: 0, 2: 0},
         "primary_objective": None,
-        "primary_objective_scored_turns": set(),
-        "objective_rewarded_turns": set(),
         "objective_controllers": {},
         "objectives": [{"id": "obj1", "name": "Alpha", "hexes": [[5, 5]]}],
         "pending_shooting_phase_init": False,

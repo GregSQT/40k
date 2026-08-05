@@ -3073,10 +3073,11 @@ class GameStateManager:
         if scoring_phase != expected_phase:
             return
 
+        from engine.game_utils import once_claim, once_claimed
+
         objective_id = require_key(primary_objective, "id")
-        scored_turns = require_key(game_state, "primary_objective_scored_turns")
         score_key = (objective_id, current_turn, current_player_int)
-        if score_key in scored_turns:
+        if once_claimed(game_state, "primary_objective_scored_turns", score_key):
             return
 
         counts = self._calculate_primary_objective_control_counts(game_state, primary_objective)
@@ -3090,7 +3091,7 @@ class GameStateManager:
         if current_player_int not in victory_points:
             raise KeyError(f"victory_points missing player {current_player_int}")
         victory_points[current_player_int] += total_points
-        scored_turns.add(score_key)
+        once_claim(game_state, "primary_objective_scored_turns", score_key)
         self._sample_objectives_held(game_state, counts, current_player_int, opponent_player)
 
     def _sample_objectives_held(

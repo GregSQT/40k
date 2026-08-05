@@ -12,7 +12,7 @@ from engine.macro_intents import (
 )
 from engine.combat_utils import expected_dice_value
 from engine.phase_handlers.shared_utils import is_unit_alive
-from engine.game_utils import get_unit_by_id
+from engine.game_utils import get_unit_by_id, once_claim, once_claimed
 from engine.game_state import (
     iter_living_model_footprints,
     objective_hex_sets,
@@ -887,9 +887,8 @@ class RewardCalculator:
         if int(require_key(game_state, "current_player")) != controlled_player:
             return 0.0
         current_turn = require_key(game_state, "turn")
-        penalized = require_key(game_state, "coherency_penalized_turns")
         key = (current_turn, controlled_player)
-        if key in penalized:
+        if once_claimed(game_state, "coherency_penalized_turns", key):
             return 0.0
         acting_unit = self._get_controlled_player_unit(game_state)
         if not acting_unit:
@@ -905,7 +904,7 @@ class RewardCalculator:
             sc = require_key(squad_cache, str(sid))
             if not bool(require_key(sc, "is_coherent")):
                 incoherent_count += 1
-        penalized.add(key)
+        once_claim(game_state, "coherency_penalized_turns", key)
         return -incoherent_w * incoherent_count
 
     def _calculate_objective_reward_per_turn(self, game_state: Dict[str, Any], result: Dict[str, Any]) -> float:
@@ -955,9 +954,8 @@ class RewardCalculator:
         if current_turn < start_turn:
             return 0.0
 
-        objective_rewarded_turns = require_key(game_state, "objective_rewarded_turns")
         reward_key = (current_turn, controlled_player)
-        if reward_key in objective_rewarded_turns:
+        if once_claimed(game_state, "objective_rewarded_turns", reward_key):
             return 0.0
 
         acting_unit = self._get_controlled_player_unit(game_state)
@@ -1002,7 +1000,7 @@ class RewardCalculator:
             scoring_cfg, controlled_objectives, opponent_objectives
         )
 
-        objective_rewarded_turns.add(reward_key)
+        once_claim(game_state, "objective_rewarded_turns", reward_key)
 
         return total_reward
 

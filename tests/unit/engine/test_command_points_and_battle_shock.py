@@ -305,11 +305,7 @@ def _oc_gs(units: List[Dict[str, Any]]) -> Dict[str, Any]:
         "action_log_seq": 0,
         "console_logs": [],
         "primary_objective": None,
-        "primary_objective_scored_turns": set(),
-        "objective_rewarded_turns": set(),
         "objective_controllers": {},
-        # Marqueur d'étape « début de phase de mouvement » déjà résolue (posé au reset moteur).
-        "cp_gain_on_objective_resolved": set(),
         "objectives": [{"id": 1, "name": "Alpha", "hexes": [[5, 5]]}],
         "board_cols": 15,
         "board_rows": 13,

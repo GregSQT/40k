@@ -99,8 +99,6 @@ def _game_state(
         "game_over": False,
         "primary_objective": PRIMARY_OBJECTIVE,
         "objective_controllers": _objective_controllers(mine, theirs, controlled_player),
-        "objective_rewarded_turns": set(),
-        "coherency_penalized_turns": set(),
         "units": units,
         # Index exige par get_unit_by_id (construit au reset dans le moteur).
         "unit_by_id": {str(unit["id"]): unit for unit in units},

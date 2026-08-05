@@ -122,8 +122,6 @@ def _make_gs(
         # 08.02 : etat de PARTIE pose au reset du moteur, comme les VP juste au-dessus.
         "command_points": {1: 0, 2: 0},
         "primary_objective": primary_objective,
-        "primary_objective_scored_turns": set(),
-        "objective_rewarded_turns": set(),
         "objective_controllers": {},
         "objectives": objectives,
         "board_cols": 15,
