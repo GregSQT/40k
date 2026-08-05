@@ -4,7 +4,9 @@
   "agent_roster_ref": "training_random",
   "opponent_roster_ref": [
     "training/opponent_training_roster_space_marines.json",
-    "training/opponent_training_roster_orks.json"
+    "training/opponent_training_roster_orks.json",
+    "training/opponent_training_roster_space_marines_reserves.json",
+    "training/opponent_training_roster_orks_reserves.json"
   ],
   "primary_objectives": [
     "objectives_control"

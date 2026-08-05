@@ -1675,12 +1675,26 @@ class W40KEngine(gym.Env):
             p1_type = deployment_type_by_player.get(1, deployment_type_by_player.get("1", deployment_type))
             p2_type = deployment_type_by_player.get(2, deployment_type_by_player.get("2", deployment_type))
             effective_deployment_type_by_player = {1: p1_type, 2: p2_type}
+        # ZONES DE DEPLOIEMENT — donnee de SCENARIO, publiee QUEL QUE SOIT le mode de mise en
+        # place. Elles ont longtemps vecu dans `deployment_state`, lui-meme ecrit uniquement quand
+        # un joueur deploie en `active`. Or deux lecteurs en ont besoin HORS phase de deploiement :
+        # la clause « aucune figurine dans la zone adverse avant le 3e round » de l'ingress 20.04
+        # (`_opponent_deployment_zone_cells`) et l'ancre de grille d'une escouade hors table
+        # (`squad_grid_anchor`). En mode `fixed`, une unite en reserves 20.01 est hors table DES LE
+        # RESET : les deux levaient « Required key 'deployment_state' », et le reset entier avec.
+        # La ZONE ne depend pas du mode de mise en place ; seule la PHASE en depend.
+        scenario_deployment_pools = self.config.get("deployment_pools")
+        if scenario_deployment_pools is None:
+            # Scenario sans zones declarees : on RETIRE la cle plutot que d'en laisser une perimee
+            # d'un episode precedent. Les lecteurs levent alors explicitement (require_key).
+            self.game_state.pop("deployment_pools", None)
+        else:
+            self.game_state["deployment_pools"] = scenario_deployment_pools
         if any(
             effective_deployment_type_by_player[player_id] == "active"
             for player_id in (1, 2)
         ):
-            deployment_pools = self.config.get("deployment_pools")
-            if deployment_pools is None:
+            if scenario_deployment_pools is None:
                 raise KeyError("deployment_pools is required for active deployment")
             deployable_units = {1: [], 2: []}
             for unit in self.game_state["units"]:
@@ -1732,11 +1746,13 @@ class W40KEngine(gym.Env):
             self.game_state["deployment_type"] = deployment_type
             self.game_state["deployment_type_by_player"] = effective_deployment_type_by_player
             self.game_state["deployment_zone"] = self.config.get("deployment_zone")
+            # `deployment_pools` N'EST PLUS ici : les zones sont publiees plus haut dans
+            # `game_state["deployment_pools"]`, source UNIQUE valable dans tous les modes.
+            # `deployment_state` ne porte plus que la comptabilite MUTABLE de la phase.
             self.game_state["deployment_state"] = {
                 "current_deployer": 1,
                 "deployable_units": deployable_units,
                 "deployed_units": set(),
-                "deployment_pools": deployment_pools,
                 "deployment_complete": False
             }
             if not deployable_units[1] and deployable_units[2]:

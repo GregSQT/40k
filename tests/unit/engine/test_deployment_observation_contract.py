@@ -71,6 +71,46 @@ def _first_deploy_action(mask) -> int:
     return actions[0]
 
 
+def _is_on_battlefield(gs, sid: str) -> bool:
+    """Prédicat MOTEUR de « sur le champ de bataille » : ``deployed_on_turn is not None``.
+
+    Même source que `ObservationBuilder` (`on_battlefield`) et que `entry_is_on_battlefield`.
+    """
+    unit = next(u for u in gs["units"] if str(u["id"]) == str(sid))
+    return unit["deployed_on_turn"] is not None
+
+
+def _obs_ally_rows(gs, active_squad_id: str, active_player: int, k_ally_slots: int = 8):
+    """Les lignes ALLIÉES de l'obs, DANS L'ORDRE QUE L'OBS ÉCRIT.
+
+    POURQUOI CE HELPER EXISTE. Trois tests de ce fichier reconstruisaient ces lignes depuis
+    `units_cache` SANS le filtre « sur le champ de bataille » que l'obs applique
+    (`friendly_sids`, observation_builder). Tant que les unités non posées se trouvaient trier
+    APRÈS les posées, le préfixe coïncidait et les tests lisaient la bonne ligne — par chance.
+    Une unité en RÉSERVES 20.01 reste hors table tout l'épisode : elle sort en tête du tri, tout
+    le mapping se décale d'un cran, et les tests lisaient la ligne d'une AUTRE escouade. Mesuré
+    le 2026-08-05 : liste du test ['1','2','4','5'] contre liste de l'obs ['2'] — le slot 1,
+    attribué à l'unité 1 (hors table), portait en fait la position de l'unité 2 (posée, col=215),
+    d'où un `col_rel = 90.0` attribué à une unité sans position.
+
+    Une entité hors table N'A PAS de ligne alliée : l'information qu'elle existe passe par les
+    slots ENNEMIS (eux non filtrés) et par le bit `deploy_not_on_board`.
+    """
+    others = sorted(
+        (
+            s
+            for s, e in gs["units_cache"].items()
+            if int(e["player"]) == active_player
+            and s != active_squad_id
+            and _is_on_battlefield(gs, s)
+        ),
+        key=str,
+    )
+    return [(0, str(active_squad_id))] + [
+        (i + 1, str(s)) for i, s in enumerate(others[: k_ally_slots - 1])
+    ]
+
+
 # ============================================================================
 # POINT 1 — contrat obs ↔ masque
 # ============================================================================
@@ -189,7 +229,7 @@ def test_deployment_grid_shows_the_terrain_where_the_unit_will_be_placed():
         # L'ancre doit être DANS la zone de déploiement du joueur (une zone concave a un
         # barycentre potentiellement hors zone — on ancre sur l'hex du pool le plus proche).
         player = int(entry["player"])
-        pools = gs["deployment_state"]["deployment_pools"]
+        pools = gs["deployment_pools"]
         pool = pools.get(player, pools.get(str(player)))
         pool_set = {(int(h[0]), int(h[1])) for h in pool}
         assert (anchor_col, anchor_row) in pool_set, (
@@ -257,8 +297,18 @@ def test_grid_anchor_unchanged_for_a_deployed_squad():
         eng.step(_first_deploy_action(mask))
         steps += 1
 
-    checked = 0
+    checked = off_table = 0
     for uid, entry in gs["units_cache"].items():
+        # Une unité en RÉSERVES 20.01 est encore hors table à la fin du déploiement : son ancre
+        # est celle de sa ZONE (§0.40 point 2), pas sa sentinelle. Ce test porte sur les
+        # escouades POSÉES — c'est son titre. Le cas hors table est vérifié juste après.
+        if not _is_on_battlefield(gs, uid):
+            off_table += 1
+            assert eng.obs_builder.squad_grid_anchor(gs, uid) != (-1, -1), (
+                f"escouade {uid} hors table : la grille est centrée sur la sentinelle, donc hors "
+                "plateau — l'agent n'y voit ni mur, ni objectif, ni ennemi"
+            )
+            continue
         assert eng.obs_builder.squad_grid_anchor(gs, uid) == (
             int(entry["col"]),
             int(entry["row"]),
@@ -351,12 +401,7 @@ def test_relative_positions_are_measured_from_the_zone_and_null_for_unplaced_uni
     active_player = int(gs["units_cache"][uid]["player"])
     from engine.phase_handlers.shared_utils import get_enemy_slot_mapping
 
-    rows = [("allies_cont", 0, uid)]
-    others = sorted(
-        (s for s, e in gs["units_cache"].items() if int(e["player"]) == active_player and s != uid),
-        key=str,
-    )
-    rows += [("allies_cont", i + 1, s) for i, s in enumerate(others[:7])]
+    rows = [("allies_cont", slot, sid) for slot, sid in _obs_ally_rows(gs, uid, active_player)]
     # Les slots ennemis vides portent None : ils sont laissés à zéro par contrat (bit `present`),
     # ce n'est pas ce que ce test mesure.
     rows += [
@@ -405,8 +450,10 @@ def test_self_models_have_no_position_before_placement():
 def test_measurement_origin_is_the_centroid_once_deployed():
     """Non-régression : une fois le déploiement fini, l'origine redevient le CENTROÏDE.
 
-    Le correctif du point 4 ne doit toucher que les escouades non posées — hors déploiement,
-    aucune unité vivante n'en est là (les réserves 20 ne sont pas modélisées).
+    Le correctif du point 4 ne doit toucher que les escouades non posées. « Hors déploiement,
+    aucune unité vivante n'en est là » N'EST PLUS VRAI : une unité en réserves 20.01 reste hors
+    table jusqu'à son ingress 20.04, et son centroïde est la sentinelle. Le test prend donc une
+    escouade RÉELLEMENT posée — c'est le cas qu'il annonce mesurer.
     """
     import engine.observation_entities as oe
 
@@ -419,7 +466,11 @@ def test_measurement_origin_is_the_centroid_once_deployed():
         eng.step(_first_deploy_action(mask))
         steps += 1
 
-    uid = next(iter(gs["units_cache"]))
+    uid = next(
+        (sid for sid in gs["units_cache"] if _is_on_battlefield(gs, sid)),
+        None,
+    )
+    assert uid is not None, "aucune escouade posée après le déploiement — test sans valeur"
     sq = gs["squad_cache"][uid]
     obs = eng.obs_builder.build_squad_observation(gs, uid)
     seen = np.array(
@@ -477,13 +528,7 @@ def test_unplaced_units_assert_no_geometric_relation():
         active_player = int(gs["units_cache"][uid]["player"])
         obs = eng.obs_builder.build_squad_observation(gs, uid)
 
-        rows = [("allies", 0, uid)]
-        others = sorted(
-            (s for s, e in gs["units_cache"].items()
-             if int(e["player"]) == active_player and s != uid),
-            key=str,
-        )
-        rows += [("allies", i + 1, s) for i, s in enumerate(others[:7])]
+        rows = [("allies", slot, sid) for slot, sid in _obs_ally_rows(gs, uid, active_player)]
         rows += [
             ("enemies", i, str(s))
             for i, s in enumerate(get_enemy_slot_mapping(gs, active_player)[:20])
@@ -624,11 +669,18 @@ def test_deployed_units_still_report_engagement_after_deployment():
         eng.step(_first_deploy_action(mask))
         steps += 1
 
-    # Toutes les unités sont posées : le calcul d'engagement de l'obs doit être celui de la
-    # primitive moteur, escouade par escouade.
+    # Le calcul d'engagement de l'obs doit être celui de la primitive moteur, escouade par
+    # escouade. « Toutes les unités sont posées » N'EST PLUS VRAI : une unité en réserves 20.01
+    # est encore hors table ici. L'oracle prend donc une escouade POSÉE et énumère ses ennemis
+    # avec `enemy_entries_on_battlefield` — l'énumération FILTRÉE du moteur, celle que le message
+    # d'erreur de `require_entry_on_battlefield` désigne. Le réimplémenter sans filtre faisait
+    # mesurer une géométrie depuis la sentinelle, ce que la primitive refuse (à raison).
+    from engine.spatial_relations import enemy_entries_on_battlefield
+
     ez = get_engagement_zone(gs)
     uc = gs["units_cache"]
-    uid = next(iter(uc))
+    uid = next((sid for sid in uc if _is_on_battlefield(gs, sid)), None)
+    assert uid is not None, "aucune escouade posée après le déploiement — test sans valeur"
     active_player = int(uc[uid]["player"])
     obs = eng.obs_builder.build_squad_observation(gs, uid)
     # Métrique NON épinglée, des deux côtés : c'est tout l'objet du verrou. Ce test figeait
@@ -636,8 +688,7 @@ def test_deployed_units_still_report_engagement_after_deployment():
     # de la détecter (à x5 le moteur résout en euclidien). Laisser la primitive résoudre.
     expected = any(
         unit_entries_within_engagement_zone(uc[uid], e, ez)
-        for sid, e in uc.items()
-        if int(e["player"]) != active_player
+        for _sid, e in enemy_entries_on_battlefield(uc, active_player)
     )
     got = bool(obs["allies_bin"][0][oe.unit_bin_index("engaged")])
     assert got == expected, (

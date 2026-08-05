@@ -83,12 +83,27 @@ def test_get_fighting_models_does_not_raise_on_the_observation_path():
 
     from engine.phase_handlers.shared_utils import get_fighting_models
 
+    from engine.game_utils import get_unit_by_id
+
     eng = _load()
     gs = eng.game_state
     calls = 0
+    skipped_off_table = 0
     steps = 0
     while steps < 220:
         for sid in list(gs["units_cache"].keys()):
+            # LE CHEMIN D'OBSERVATION, PAS UN SURENSEMBLE. `get_fighting_models` documente son
+            # contrat chez l'APPELANT (shared_utils) : son unique appelant de production
+            # (`observation_builder`, §0.40 point 5) ne l'appelle que sur une escouade dont il a
+            # vérifié `on_battlefield`. Une escouade HORS TABLE est à la sentinelle (-1,-1) et la
+            # primitive d'engagement REFUSE de la mesurer — à raison, c'est un garde-fou voulu.
+            # Ce test appelait sans le filtre : il exerçait un chemin que la production ne prend
+            # pas, et restait vert seulement tant qu'aucune unité n'était hors table hors
+            # déploiement. Une unité en réserves 20.01 l'est tout l'épisode.
+            unit = get_unit_by_id(str(sid), gs)
+            if unit is None or unit["deployed_on_turn"] is None:
+                skipped_off_table += 1
+                continue
             # Aucun `pytest.raises` : c'est l'ABSENCE de levée qui est affirmée. Une exception
             # ici fait échouer le test avec sa propre trace, ce qui est exactement le signal
             # voulu — on saurait quelle précondition manque.
@@ -102,6 +117,13 @@ def test_get_fighting_models_does_not_raise_on_the_observation_path():
         steps += 1
 
     assert calls >= 400, f"trop peu d'appels exercés ({calls}) pour conclure"
+    # VERT VACANT : si le filtre ne sautait jamais rien, ce test ne dirait rien du cas hors
+    # table. Le scénario d'entraînement tire des rosters à réserves ET traverse une phase de
+    # déploiement : les deux produisent des escouades hors table.
+    assert skipped_off_table > 0, (
+        "aucune escouade hors table rencontrée : le filtre du chemin d'observation n'est pas "
+        "exercé, ce test ne prouve rien sur ce cas"
+    )
 
 
 def test_a_failure_of_get_fighting_models_now_propagates(monkeypatch):

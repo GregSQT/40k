@@ -101,7 +101,16 @@ def test_matches_an_independent_scalar_oracle():
     gs = env.game_state
     objectives = gs["objectives"]
 
+    checked = 0
     for sid in list(gs["units_cache"].keys()):
+        # L'oracle mesure depuis le CENTROÏDE de l'escouade. Une escouade HORS TABLE (réserves
+        # 20.01, ou en attente de déploiement) n'a pas de centroïde : le sien est la sentinelle
+        # (-1,-1), alors que l'obs mesure depuis l'ancre de sa ZONE (§0.40 point 2). Comparer les
+        # deux ne mesurerait pas un écart de calcul mais deux origines différentes, l'une des
+        # deux étant hors plateau. Le cas « pas de position » a son propre verrou
+        # (test_deployment_observation_contract).
+        if int(gs["units_cache"][sid]["col"]) < 0:
+            continue
         obs = env.obs_builder.build_squad_observation(gs, sid)
         sq = gs["squad_cache"][sid]
         entry = gs["units_cache"][sid]
@@ -115,6 +124,9 @@ def test_matches_an_independent_scalar_oracle():
             assert got_d == float(np.float32(exp_d)), f"{sid}/obj{i}: distance {got_d} != {exp_d}"
             assert abs(got_c - exp_c) < 1e-5, f"{sid}/obj{i}: cos {got_c} != {exp_c}"
             assert abs(got_s - exp_s) < 1e-5, f"{sid}/obj{i}: sin {got_s} != {exp_s}"
+            checked += 1
+
+    assert checked > 0, "aucune escouade posée confrontée à l'oracle — test sans valeur"
 
 
 def test_direction_is_a_unit_vector_or_exactly_zero():

@@ -907,8 +907,7 @@ class ActionDecoder:
         if current_deployer in self._deployment_pool_cache:
             return self._deployment_pool_cache[current_deployer]
 
-        deployment_state = require_key(game_state, "deployment_state")
-        deployment_pools = require_key(deployment_state, "deployment_pools")
+        deployment_pools = require_key(game_state, "deployment_pools")
         pool = deployment_pools.get(current_deployer, deployment_pools.get(str(current_deployer)))
         if pool is None:
             raise KeyError(f"deployment_pools missing player {current_deployer}")
@@ -1159,8 +1158,7 @@ class ActionDecoder:
         if enemy_deployed:
             return enemy_deployed
 
-        deployment_state = require_key(game_state, "deployment_state")
-        deployment_pools = require_key(deployment_state, "deployment_pools")
+        deployment_pools = require_key(game_state, "deployment_pools")
         if enemy_player in deployment_pools:
             enemy_pool = deployment_pools[enemy_player]
         elif str(enemy_player) in deployment_pools:
@@ -1182,8 +1180,7 @@ class ActionDecoder:
     ) -> List[tuple[int, int]]:
         """Get enemy deployment pool hexes (stable reference for potential LoS)."""
         enemy_player = 2 if int(current_deployer) == 1 else 1
-        deployment_state = require_key(game_state, "deployment_state")
-        deployment_pools = require_key(deployment_state, "deployment_pools")
+        deployment_pools = require_key(game_state, "deployment_pools")
         if enemy_player in deployment_pools:
             enemy_pool = deployment_pools[enemy_player]
         elif str(enemy_player) in deployment_pools:

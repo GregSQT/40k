@@ -1843,7 +1843,7 @@ class ObservationBuilder:
         position, et centrer sur (-1,-1) sortait la fenetre du plateau : murs, allies, ennemis,
         objectifs et couvert etaient tous vides ou tronques a l'instant precis ou l'agent choisit
         son point d'entree dans la partie. On l'ancre donc sur sa ZONE DE DEPLOIEMENT, lue telle
-        quelle dans `deployment_state["deployment_pools"]` — la MEME collection d'hexes que celle
+        quelle dans `game_state["deployment_pools"]` — la MEME collection d'hexes que celle
         ou le decodeur choisit l'hexe (`_get_valid_deployment_hexes`). Aucune geometrie n'est
         recalculee ici, et la GEOMETRIE de la grille (`engine.spatial_grid`) est inchangee : seul
         le point d'ancrage bouge.
@@ -1877,8 +1877,7 @@ class ObservationBuilder:
         if player in anchors:
             return anchors[player]
 
-        deployment_state = require_key(game_state, "deployment_state")
-        deployment_pools = require_key(deployment_state, "deployment_pools")
+        deployment_pools = require_key(game_state, "deployment_pools")
         pool = deployment_pools.get(player, deployment_pools.get(str(player)))
         if not pool:
             raise KeyError(
