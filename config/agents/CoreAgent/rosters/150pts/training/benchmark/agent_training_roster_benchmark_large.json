@@ -1,5 +1,6 @@
 {
   "roster_id": "agent_training_roster_benchmark_large",
+  "army_faction": "ADEPTUS ASTARTES",
   "composition": [
     { "unit_type": "DreadnoughtBallistus", "count": 1 },
     { "unit_type": "DreadnoughtRedemptor", "count": 1 },

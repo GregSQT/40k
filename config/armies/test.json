@@ -1,5 +1,6 @@
 {
   "uses_codex_detachment": true,
+  "army_faction": "ADEPTUS ASTARTES",
   "faction": "spaceMarine",
   "display_name": "Test - Space Marines",
   "description": "Test",

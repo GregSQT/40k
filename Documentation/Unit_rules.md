@@ -105,6 +105,7 @@ l'effet a partir de « cette unite est orke » et de « Waaagh! actif », deux f
 | | Fichier |
 |---|---|
 | Le mot-cle porteur | `static FACTION_KEYWORDS` de la datasheet (`ORKS`, `ADEPTUS ASTARTES`) |
+| La Faction d'Armee | DECLAREE : `army_faction` (scenario/roster/fichier d'armee), lue par `game_state.army_faction` |
 | L'etat de partie | `game_state["waaagh_called" / "waaagh_active" / "oath_target"]` (`engine/game_state.py`) |
 | La decision | 08.04, `command_handlers.command_step_command_abilities` |
 | Les predicats d'application | `engine/game_state.py` (`waaagh_applies_to_unit`, `effective_invul_save`, `oath_hit_reroll_applies`, `oath_wound_roll_bonus`, `unit_can_charge_after_advance`) |
@@ -113,6 +114,31 @@ l'effet a partir de « cette unite est orke » et de « Waaagh! actif », deux f
 **`FACTION_KEYWORDS`** suit exactement la convention de `UNIT_KEYWORDS` : une liste d'objets
 `{ keywordId: "..." }`, exigee par `_build_enhanced_unit`, et unie sur l'escouade par la regle
 19.03 (un character attache fait entrer sa sous-faction dans l'armee).
+
+**FACTION D'ARMEE — declaree, jamais deduite.** « If your Army Faction is ORKS / ADEPTUS
+ASTARTES » porte sur la faction DECLAREE de la liste, pas sur la presence du mot-cle quelque
+part dans l'armee. Les deux tests different des qu'une figurine invitee est presente : le camp
+tyranide de `scenario_pvp_test.json` contient deux `WolfGuardTerminator` (ADEPTUS ASTARTES), et
+tant que la faction etait calculee comme l'UNION des `FACTION_KEYWORDS` du camp, ce joueur se
+voyait reclamer une designation d'Oath of Moment a chaque tour. La declaration vit donc dans la
+donnee, sous trois formes selon le fichier qui decrit l'armee :
+
+| Fichier | Forme | Exemple |
+|---|---|---|
+| Scenario a `units` | dict par joueur | `"army_faction": {"1": "ADEPTUS ASTARTES", "2": "TYRANIDS"}` |
+| Roster compact (`config/agents/**`) | scalaire | `"army_faction": "ORKS"` |
+| Fichier d'armee (`config/armies/*.json`) | scalaire | `"army_faction": "TYRANIDS"` |
+
+Un scenario a `agent_roster_ref` n'en declare PAS : sa faction vient du roster effectivement
+tire (`training_random` en change a chaque episode), et une declaration de scenario decrirait
+l'armee d'un autre episode. `change_roster` propage de meme la faction du fichier d'armee au
+joueur qui la charge, comme il propage deja `uses_codex_detachment`.
+
+Champ ABSENT = erreur explicite (`game_state.army_faction` leve), jamais une deduction de
+secours : deviner ferait apparaitre ou disparaitre une capacite d'armee entiere. Une faction
+declaree que PERSONNE ne porte leve aussi — c'est la faute de frappe qui eteindrait l'Oath en
+silence. Verrous : `tests/unit/engine/test_faction_abilities.py` (moteur) et
+`tests/unit/engine/test_army_faction_declaration.py` (donnee).
 
 **Waaagh! (ORKS)** — decision binaire, UNE fois par partie, au debut de MA phase de commandement.
 Elle passe par le mecanisme generique de decision agent (`pending_agent_decision`, type

@@ -1,5 +1,6 @@
 {
   "roster_id": "agent_training_roster_orks_reserves",
+  "army_faction": "ORKS",
   "composition": [
     {
       "unit_type": "Boyz",

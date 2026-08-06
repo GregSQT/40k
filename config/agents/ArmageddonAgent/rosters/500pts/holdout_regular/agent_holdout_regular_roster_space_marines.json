@@ -1,5 +1,6 @@
 {
   "roster_id": "agent_holdout_regular_roster_space_marines",
+  "army_faction": "ADEPTUS ASTARTES",
   "composition": [
     {
       "unit_type": "VanguardVeteranSquadJumpPack",

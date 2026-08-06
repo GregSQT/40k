@@ -190,7 +190,8 @@ def capture_live_state(engine: Any) -> Dict[str, Any]:
         if not isinstance(v, _ENGINE_PLAIN_TYPES):
             continue
         engine_attrs[k] = copy.deepcopy(v)
-    # Clause de détachement d'Oath : elle vit dans `config`, donc dans les clés STATIQUES, et
+    # Clause de détachement d'Oath et Faction d'Armée : elles vivent dans `config`, donc dans les
+    # clés STATIQUES, et
     # c'est juste — elle appartient au roster et ne change pas d'un tour à l'autre. Elle change
     # pourtant EN AMONT de la partie, quand un joueur choisit un autre roster en déploiement
     # (`api_server._execute_change_roster_action`). Un état capturé avant ce choix décrit donc
@@ -202,6 +203,9 @@ def capture_live_state(engine: Any) -> Dict[str, Any]:
         "engine_attrs": engine_attrs,
         "uses_codex_detachment": copy.deepcopy(
             require_key(gs, "config").get("uses_codex_detachment")  # get allowed : None = scénario muet
+        ),
+        "army_faction": copy.deepcopy(
+            require_key(gs, "config").get("army_faction")  # get allowed : None = scénario muet
         ),
     }
 
@@ -270,13 +274,15 @@ def rebuild_game_state(engine: Any, captured: Dict[str, Any]) -> Dict[str, Any]:
 def apply_live_state(engine: Any, captured: Dict[str, Any]) -> None:
     """Remplace l'état vivant de l'engine par un état capturé (clés statiques ré-attachées depuis le live)."""
     engine.game_state = rebuild_game_state(engine, captured)
-    if "uses_codex_detachment" in captured:  # absent des pickles d'avant le 2026-08-06
+    for _roster_key in ("uses_codex_detachment", "army_faction"):  # absents des vieux pickles
         # Écrit DANS l'objet config vivant, jamais dans une copie : `engine.config` et
         # `game_state["config"]` sont le MÊME dict, et deux copies de contenu égal se
         # désynchroniseraient au premier écrivain suivant. `rebuild_game_state` (mode 'view'),
         # lui, ne touche à rien : un aperçu n'attaque pas, donc ne lit jamais cette clause.
-        require_key(engine.game_state, "config")["uses_codex_detachment"] = copy.deepcopy(
-            captured["uses_codex_detachment"]
+        if _roster_key not in captured:
+            continue
+        require_key(engine.game_state, "config")[_roster_key] = copy.deepcopy(
+            captured[_roster_key]
         )
     for k, v in copy.deepcopy(captured["engine_attrs"]).items():
         setattr(engine, k, v)

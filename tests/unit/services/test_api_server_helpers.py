@@ -420,6 +420,7 @@ def test_load_army_file_and_list_armies_from_temp_config(
           "display_name": "SM Army",
           "description": "Desc",
           "uses_codex_detachment": true,
+          "army_faction": "ADEPTUS ASTARTES",
           "units": [{"unit_type": "Intercessor", "count": 2}]
         }
         """,

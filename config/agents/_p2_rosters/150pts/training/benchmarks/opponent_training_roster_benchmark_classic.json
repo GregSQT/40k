@@ -1,5 +1,6 @@
 {
   "roster_id": "opponent_training_roster_benchmark_classic",
+  "army_faction": "TYRANIDS",
   "composition": [
     { "unit_type": "Genestealer", "count": 1 },
     { "unit_type": "Hormagaunt", "count": 1 },
