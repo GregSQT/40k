@@ -19,7 +19,7 @@ import {
 import { useGameConfig } from "../hooks/useGameConfig";
 import { useGameLog } from "../hooks/useGameLog";
 import type { GamePhase, GameState, PlayerId, TargetPreview, Unit } from "../types";
-import type { DeploymentState } from "../types/game";
+import type { DeploymentState, UnitId } from "../types/game";
 import {
   canDropUnitIntoReserves,
   canSelectReserveUnitForIngress,
@@ -724,6 +724,19 @@ export const BoardWithAPI: React.FC = () => {
   const [ruleChoicePopupPosition, setRuleChoicePopupPosition] = useState({ x: 140, y: 120 });
   const [isDraggingRuleChoicePopup, setIsDraggingRuleChoicePopup] = useState(false);
   const ruleChoiceDragOffsetRef = useRef({ x: 0, y: 0 });
+  // Oath of Moment (08.04) — deux temps : (1) popup de règle, fermé par OK, qui ARME la
+  // désignation ; (2) clic sur une unité ennemie du plateau, éventuellement confirmé par un
+  // second popup. Les deux sont déplaçables comme le popup de choix de règle.
+  const [oathRuleAcknowledged, setOathRuleAcknowledged] = useState(false);
+  const [oathPendingTargetId, setOathPendingTargetId] = useState<number | null>(null);
+  /** Case « ne plus afficher » du popup de confirmation, appliquée seulement à la validation. */
+  const [oathDontAskAgain, setOathDontAskAgain] = useState(false);
+  const [oathRulePopupPosition, setOathRulePopupPosition] = useState({ x: 140, y: 120 });
+  const [isDraggingOathRulePopup, setIsDraggingOathRulePopup] = useState(false);
+  const oathRuleDragOffsetRef = useRef({ x: 0, y: 0 });
+  const [oathConfirmPopupPosition, setOathConfirmPopupPosition] = useState({ x: 200, y: 200 });
+  const [isDraggingOathConfirmPopup, setIsDraggingOathConfirmPopup] = useState(false);
+  const oathConfirmDragOffsetRef = useRef({ x: 0, y: 0 });
   const [rosterPickerPosition, setRosterPickerPosition] = useState({ x: 140, y: 80 });
   const [isDraggingRosterPicker, setIsDraggingRosterPicker] = useState(false);
   const rosterPickerDragOffsetRef = useRef({ x: 0, y: 0 });
@@ -1085,6 +1098,73 @@ export const BoardWithAPI: React.FC = () => {
     };
   }, [isDraggingRosterPicker]);
 
+  // Déplacement des deux popups d'Oath — même mécanique que le popup de choix de règle.
+  useEffect(() => {
+    if (!isDraggingOathRulePopup) {
+      return;
+    }
+    const onMouseMove = (event: MouseEvent) => {
+      setOathRulePopupPosition({
+        x: event.clientX - oathRuleDragOffsetRef.current.x,
+        y: event.clientY - oathRuleDragOffsetRef.current.y,
+      });
+    };
+    const onMouseUp = () => {
+      setIsDraggingOathRulePopup(false);
+    };
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+  }, [isDraggingOathRulePopup]);
+
+  useEffect(() => {
+    if (!isDraggingOathConfirmPopup) {
+      return;
+    }
+    const onMouseMove = (event: MouseEvent) => {
+      setOathConfirmPopupPosition({
+        x: event.clientX - oathConfirmDragOffsetRef.current.x,
+        y: event.clientY - oathConfirmDragOffsetRef.current.y,
+      });
+    };
+    const onMouseUp = () => {
+      setIsDraggingOathConfirmPopup(false);
+    };
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+  }, [isDraggingOathConfirmPopup]);
+
+  // Une nouvelle désignation (ou sa disparition) remet le cycle à zéro : le popup de règle
+  // revient à CHAQUE phase de commandement, et aucune cible cliquée ne survit au tour.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: réinitialisation sur le cycle de désignation
+  useEffect(() => {
+    setOathRuleAcknowledged(false);
+    setOathPendingTargetId(null);
+    setOathDontAskAgain(false);
+  }, [apiProps.gameState?.pending_oath_selection]);
+
+  // Échap = annuler la cible cliquée (retour à la sélection), jumeau du bouton Cancel.
+  useEffect(() => {
+    if (oathPendingTargetId === null) {
+      return;
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOathPendingTargetId(null);
+        setOathDontAskAgain(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [oathPendingTargetId]);
+
   useEffect(() => {
     if (isGameOver) {
       setShowGameOverPopup(true);
@@ -1210,6 +1290,7 @@ export const BoardWithAPI: React.FC = () => {
     const replayContainerEnabledStr = localStorage.getItem("replayContainerEnabled");
     const autoSaveEnabledStr = localStorage.getItem("autoSaveEnabled");
     const autoSaveGranularityStr = localStorage.getItem("autoSaveGranularity");
+    const confirmOathTargetStr = localStorage.getItem("confirmOathTarget");
     return {
       showAdvanceWarning:
         canUseAdvanceWarning && (showAdvanceWarningStr ? JSON.parse(showAdvanceWarningStr) : true),
@@ -1244,6 +1325,9 @@ export const BoardWithAPI: React.FC = () => {
       autoSaveGranularity: (autoSaveGranularityStr === "turn" ? "turn" : "phase") as
         | "phase"
         | "turn",
+      // Oath of Moment : popup de confirmation après le clic sur la cible. Décoché par le joueur
+      // depuis le popup lui-même (« ne plus afficher ») ou depuis le menu Réglages.
+      confirmOathTarget: confirmOathTargetStr ? JSON.parse(confirmOathTargetStr) : true,
     };
   });
 
@@ -1353,6 +1437,11 @@ export const BoardWithAPI: React.FC = () => {
     }
     setSettings((prev) => ({ ...prev, autoSelectWeapon: value }));
     localStorage.setItem("autoSelectWeapon", JSON.stringify(value));
+  };
+
+  const handleToggleConfirmOathTarget = (value: boolean) => {
+    setSettings((prev) => ({ ...prev, confirmOathTarget: value }));
+    localStorage.setItem("confirmOathTarget", JSON.stringify(value));
   };
 
   const handleToggleHpBarPerModel = (value: boolean) => {
@@ -1941,6 +2030,75 @@ export const BoardWithAPI: React.FC = () => {
           (unit) => unit.player !== oathSelectionPlayer && (unit.HP_CUR ?? 0) > 0
         );
 
+  /** Cible cliquée en attente de confirmation — l'unité, pour l'afficher dans le popup. */
+  const oathPendingTargetUnit =
+    oathPendingTargetId === null ? null : (unitsById.get(String(oathPendingTargetId)) ?? null);
+
+  // Clic sur une unité ennemie (plateau ou table de statut) pendant la désignation armée.
+  const handleOathTargetPick = (unitId: number) => {
+    if (!settings.confirmOathTarget) {
+      void apiProps.onSelectOathTarget(unitId);
+      return;
+    }
+    setOathDontAskAgain(false);
+    setOathPendingTargetId(unitId);
+  };
+
+  const handleOathConfirm = () => {
+    if (oathPendingTargetId === null) {
+      throw new Error("handleOathConfirm called without a pending oath target");
+    }
+    if (oathDontAskAgain) {
+      handleToggleConfirmOathTarget(false);
+    }
+    const targetId = oathPendingTargetId;
+    setOathPendingTargetId(null);
+    void apiProps.onSelectOathTarget(targetId);
+  };
+
+  const handleOathCancelPick = () => {
+    setOathPendingTargetId(null);
+    setOathDontAskAgain(false);
+  };
+
+  const onOathRuleTitleMouseDown = (event: React.MouseEvent<HTMLButtonElement>) => {
+    oathRuleDragOffsetRef.current = {
+      x: event.clientX - oathRulePopupPosition.x,
+      y: event.clientY - oathRulePopupPosition.y,
+    };
+    setIsDraggingOathRulePopup(true);
+  };
+
+  const onOathConfirmTitleMouseDown = (event: React.MouseEvent<HTMLButtonElement>) => {
+    oathConfirmDragOffsetRef.current = {
+      x: event.clientX - oathConfirmPopupPosition.x,
+      y: event.clientY - oathConfirmPopupPosition.y,
+    };
+    setIsDraggingOathConfirmPopup(true);
+  };
+
+  /** Désignation ARMÉE : popup de règle validé, aucune cible en attente de confirmation. */
+  const oathBoardSelection =
+    oathSelectionPlayer !== null && oathRuleAcknowledged && oathPendingTargetId === null
+      ? {
+          targetUnitIds: oathTargets.map((unit) => Number(unit.id)),
+          onPickTarget: handleOathTargetPick,
+        }
+      : null;
+
+  /** Sélection depuis les tables de statut. Pendant une désignation d'Oath, la table suit la même
+   *  règle que le plateau : seules les unités ennemies légales répondent, rien d'autre. */
+  const handleStatusTableSelectUnit = (unitId: UnitId) => {
+    if (oathSelectionPlayer !== null) {
+      if (oathBoardSelection?.targetUnitIds.includes(Number(unitId))) {
+        oathBoardSelection.onPickTarget(Number(unitId));
+      }
+      return;
+    }
+    apiProps.onSelectUnit(unitId);
+    setClickedUnitId(null);
+  };
+
   const getRulePromptUnitLabel = (prompt: RuleChoicePrompt): string => {
     const unit = unitsById.get(prompt.unit_id);
     if (!unit) {
@@ -2046,10 +2204,7 @@ export const BoardWithAPI: React.FC = () => {
           selectedUnitId={highlightedRuleChoiceUnitId ?? apiProps.selectedUnitId ?? null}
           guidedFocusUnitId={activeRuleChoicePrompt ? highlightedRuleChoiceUnitId : null}
           clickedUnitId={clickedUnitId}
-          onSelectUnit={(unitId) => {
-            apiProps.onSelectUnit(unitId);
-            setClickedUnitId(null);
-          }}
+          onSelectUnit={handleStatusTableSelectUnit}
           gameMode={gameMode}
           victoryPoints={getVictoryPointsForPlayer(1)}
           commandPoints={getCommandPointsForPlayer(1)}
@@ -2098,10 +2253,7 @@ export const BoardWithAPI: React.FC = () => {
           selectedUnitId={highlightedRuleChoiceUnitId ?? apiProps.selectedUnitId ?? null}
           guidedFocusUnitId={activeRuleChoicePrompt ? highlightedRuleChoiceUnitId : null}
           clickedUnitId={clickedUnitId}
-          onSelectUnit={(unitId) => {
-            apiProps.onSelectUnit(unitId);
-            setClickedUnitId(null);
-          }}
+          onSelectUnit={handleStatusTableSelectUnit}
           gameMode={gameMode}
           victoryPoints={getVictoryPointsForPlayer(2)}
           commandPoints={getCommandPointsForPlayer(2)}
@@ -3887,34 +4039,90 @@ export const BoardWithAPI: React.FC = () => {
           </div>
         </div>
       )}
-      {oathSelectionPlayer !== null && (
+      {/* Oath of Moment, temps 1 : la règle, puis OK. Tant que ce popup est là, la désignation
+          n'est pas armée — aucun clic plateau ne désigne. */}
+      {oathSelectionPlayer !== null && !oathRuleAcknowledged && (
         <div className="rule-choice-overlay">
-          <div className="deployment-panel__picker deployment-panel__picker--rule-choice">
-            <div className="deployment-panel__picker-title">
-              {`Oath of Moment — player ${oathSelectionPlayer} must select a target`}
+          <div
+            className="deployment-panel__picker deployment-panel__picker--draggable deployment-panel__picker--oath"
+            style={{
+              left: `${oathRulePopupPosition.x}px`,
+              top: `${oathRulePopupPosition.y}px`,
+            }}
+          >
+            <button
+              type="button"
+              className="deployment-panel__picker-title deployment-panel__picker-title--draggable"
+              onMouseDown={onOathRuleTitleMouseDown}
+            >
+              {`Oath of Moment — joueur ${oathSelectionPlayer}${isDraggingOathRulePopup ? " (drag...)" : ""}`}
+            </button>
+            <div className="deployment-panel__picker-content deployment-panel__picker-content--oath">
+              <div className="deployment-panel__picker-tooltip">
+                {
+                  "Au début de votre phase de commandement, désignez une unité de l'armée adverse : elle est la cible de l'Oath of Moment jusqu'au début de votre prochaine phase de commandement.\n\nVos attaques contre cette unité relancent le jet de touche, et gagnent +1 au jet de blessure si votre armée joue un détachement Codex sans sous-faction.\n\nAprès OK, cliquez sur l'unité ennemie à désigner (sur le plateau ou dans la table de statut). C'est la seule sélection possible tant que la désignation n'est pas faite."
+                }
+              </div>
             </div>
-            <div className="deployment-panel__picker-content deployment-panel__picker-content--rule-choice">
-              <div className="deployment-panel__picker-list deployment-panel__picker-list--rule-choice">
-                {/* AUCUN bouton « aucune cible » : la règle dit « select one unit », et le
-                    masque moteur n'en ouvre pas non plus. Ajouter une sortie ici ferait diverger
-                    l'UI du moteur, qui refuserait l'action. */}
-                {oathTargets.map((unit) => (
-                  <button
-                    key={String(unit.id)}
-                    type="button"
-                    className="deployment-panel__picker-item"
-                    onClick={() => {
-                      void apiProps.onSelectOathTarget(unit.id);
-                    }}
-                  >
-                    {`${unit.DISPLAY_NAME ?? unit.unitType ?? unit.name ?? "Unit"} #${unit.id}`}
-                  </button>
-                ))}
+            <div className="deployment-panel__picker-actions">
+              <button
+                type="button"
+                className="deployment-panel__picker-close"
+                onClick={() => setOathRuleAcknowledged(true)}
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Temps 2 : confirmation de la cible cliquée. AUCUN bouton « aucune cible » — la règle dit
+          « select one unit », et le masque moteur n'en ouvre pas non plus : Cancel renvoie au clic,
+          il ne saute pas la désignation. */}
+      {oathPendingTargetUnit !== null && (
+        <div className="rule-choice-overlay">
+          <div
+            className="deployment-panel__picker deployment-panel__picker--draggable deployment-panel__picker--oath"
+            style={{
+              left: `${oathConfirmPopupPosition.x}px`,
+              top: `${oathConfirmPopupPosition.y}px`,
+            }}
+          >
+            <button
+              type="button"
+              className="deployment-panel__picker-title deployment-panel__picker-title--draggable"
+              onMouseDown={onOathConfirmTitleMouseDown}
+            >
+              {`Oath of Moment — confirmer la cible${isDraggingOathConfirmPopup ? " (drag...)" : ""}`}
+            </button>
+            <div className="deployment-panel__picker-content deployment-panel__picker-content--oath">
+              <div className="deployment-panel__picker-tooltip">
+                {`Désigner ${oathPendingTargetUnit.DISPLAY_NAME ?? oathPendingTargetUnit.unitType ?? oathPendingTargetUnit.name ?? "Unit"} #${oathPendingTargetUnit.id} comme cible de l'Oath of Moment ?`}
               </div>
-              <div className="deployment-panel__picker-tooltip deployment-panel__picker-tooltip--rule-choice">
-                Vos attaques contre cette unité relancent le jet de touche, et gagnent +1 au jet de
-                blessure si votre armée joue un détachement Codex sans sous-faction.
-              </div>
+            </div>
+            <label className="oath-confirm__dont-ask">
+              <input
+                type="checkbox"
+                checked={oathDontAskAgain}
+                onChange={(event) => setOathDontAskAgain(event.target.checked)}
+              />
+              <span>Ne plus afficher cette confirmation</span>
+            </label>
+            <div className="deployment-panel__picker-actions deployment-panel__picker-actions--oath">
+              <button
+                type="button"
+                className="deployment-panel__picker-close"
+                onClick={handleOathCancelPick}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="deployment-panel__picker-close"
+                onClick={handleOathConfirm}
+              >
+                Valider
+              </button>
             </div>
           </div>
         </div>
@@ -4223,6 +4431,10 @@ export const BoardWithAPI: React.FC = () => {
             blinkVersion={engineApiBlink.blinkVersion}
             onSelectUnit={
               isGameOver ||
+              // Désignation d'Oath en cours : le seul clic qui compte est celui de la désignation
+              // (écouteur canvas dédié). Laisser passer une sélection ordinaire ferait activer une
+              // unité amie alors que le moteur attend la désignation.
+              oathSelectionPlayer !== null ||
               (isRosterSetupMode &&
                 apiProps.gameState?.phase === "deployment" &&
                 apiProps.gameState?.deployment_type === "active" &&
@@ -4230,6 +4442,7 @@ export const BoardWithAPI: React.FC = () => {
                 ? () => {}
                 : apiProps.onSelectUnit
             }
+            oathTargetSelection={oathBoardSelection}
             battleShockTestMode={settings.battleShockTestEnabled && apiProps.battleShockTestMode}
             onForceBattleShock={apiProps.onForceBattleShock}
             chargedTestMode={settings.battleShockTestEnabled && apiProps.chargedTestMode}
@@ -5557,6 +5770,8 @@ export const BoardWithAPI: React.FC = () => {
         autoSelectWeapon={settings.autoSelectWeapon}
         canToggleAutoSelectWeapon={canUseAutoWeaponSelection}
         onToggleAutoSelectWeapon={handleToggleAutoSelectWeapon}
+        confirmOathTarget={settings.confirmOathTarget}
+        onToggleConfirmOathTarget={handleToggleConfirmOathTarget}
         hpBarPerModel={settings.hpBarPerModel}
         onToggleHpBarPerModel={handleToggleHpBarPerModel}
         hpBarBlinkEnlarged={settings.hpBarBlinkEnlarged}
