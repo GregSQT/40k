@@ -614,7 +614,15 @@ export const GameLog: React.FC<GameLogProps> = ({
                                     key={shot.shotNumber}
                                     className="game-log-entry__shot-detail-row"
                                   >
-                                    {parts.join(" | ")}
+                                    {/* Même rendu que la ligne de résumé : les tokens `[OATH OF
+                                        MOMENT]` posés ici par `ruleToken` ont la MÊME forme que
+                                        ceux du message moteur, donc ils doivent avoir la même
+                                        bulle d'aide. Sans description trouvée, le token est rendu
+                                        tel quel — aucun texte perdu. */}
+                                    {renderMessageWithRuleDescriptions(
+                                      parts.join(" | "),
+                                      event.ruleHintByLabel
+                                    )}
                                   </div>
                                 );
                               })}

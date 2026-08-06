@@ -29,7 +29,7 @@ from engine.combat_utils import (
     set_unit_coordinates,
 )
 from engine.game_state import (
-    GameStateManager, OATH_ABILITY_DISPLAY_NAME, effective_invul_save, oath_wound_roll_bonus,
+    GameStateManager, effective_invul_save, oath_wound_roll_bonus,
     objective_hex_zones, unit_is_oath_target_of, waaagh_melee_bonus,
 )
 from engine.hex_utils import cube_to_offset, offset_to_cube
@@ -4647,6 +4647,7 @@ def _manual_roll_fight_intent(
     # lui, `step.log` dit que la relance etait POSSIBLE, jamais qu elle a EU LIEU.
     from engine.phase_handlers.shared_utils import (
         resolve_hit_reroll_ability, resolve_wound_reroll_ability,
+        stamp_wound_bonus_ability,
     )
 
     _hit_ability_by_cause: Dict[str, Optional[str]] = {}
@@ -4676,17 +4677,8 @@ def _manual_roll_fight_intent(
         _wound_ability = _wound_ability_by_cause[_wound_cause]
         if _wound_ability:
             _rec["woundAbility"] = str(_wound_ability)
-    # +1 au jet de blessure d Oath : c est un MODIFICATEUR, pas une relance — il n a donc aucune
-    # cause dans le roller. Sans ce marqueur le seuil affiche est meilleur sans que rien ne dise
-    # pourquoi. JUMEAU du site de tir. Champ distinct de `woundAbility` (relance) : les deux
-    # peuvent jouer sur la meme attaque.
-    if _oath_wound_bonus:
-        for _rec in rolled["shot_records"]:
-            # JUMEAU du tir : seules les attaques ayant JETE un de de blessure portent le +1
-            # (touche ratee ou auto-wound [LETHAL HITS] -> `strengthRoll` None).
-            if _rec.get("strengthRoll") is None:  # get allowed : cle absente = touche ratee
-                continue
-            _rec["woundBonusAbility"] = OATH_ABILITY_DISPLAY_NAME
+    # +1 au jet de blessure d Oath. Meme helper que le tir (cf. `stamp_wound_bonus_ability`).
+    stamp_wound_bonus_ability(rolled["shot_records"], _oath_wound_bonus)
     return {
         "attacker_mid": attacker_mid, "attacker": attacker, "target_sid": target_sid,
         "weapon_name": weapon_name, "bs": ws, "ap": ap, "dmg_raw": dmg_raw,

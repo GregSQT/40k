@@ -11,7 +11,7 @@ Extracted from ai/train.py during refactoring (2025-01-21)
 import time
 import builtins
 import json
-from typing import Optional
+from typing import Any, Optional
 
 from shared.data_validation import require_key
 
@@ -33,6 +33,22 @@ def _rerolled_token(details, field_name: str) -> str:
     if not isinstance(initial, int):
         return ""
     return f" [REROLLED:{initial}]"
+
+
+def _ability_token(display_name: Any) -> str:
+    """`` [NOM DE CAPACITE]`` quand le nom d affichage est renseigne, chaine vide sinon.
+
+    Meme forme que `_rerolled_token`, et extrait pour la meme raison : le triplet
+    `isinstance / strip / upper` etait ecrit a l identique sur les DEUX formateurs (SHOT et
+    FOUGHT), c est-a-dire sur la paire ou ce depot diverge. Le frontend (`GameLog.tsx`) accroche
+    le tooltip de la regle sur cette forme, l analyzer y compte l usage.
+
+    Ne couvre PAS les sites ou le nom est OBLIGATOIRE (reactive_move, move_after_shooting,
+    charge_impact) : ceux-la levent avant de formater, l absence y est une erreur, pas un vide.
+    """
+    if not isinstance(display_name, str) or not display_name.strip():
+        return ""
+    return f" [{display_name.strip().upper()}]"
 
 class StepLogger:
     """
@@ -661,27 +677,19 @@ class StepLogger:
                 hit_rule_suffix += " [SUSTAINED HITS]"
             # Relance de touche EFFECTUEE : meme forme de token que les autres capacites, sur
             # le jet qu elle a modifie. C est ce que l analyzer et le frontend cherchent.
-            if isinstance(hit_ability_display_name, str) and hit_ability_display_name.strip():
-                hit_rule_suffix += f" [{hit_ability_display_name.strip().upper()}]"
+            hit_rule_suffix += _ability_token(hit_ability_display_name)
             if hit_rule_modifier in ("HEAVY", "COVER") and isinstance(hit_target_base, int):
                 hit_target_display = f"{hit_target_base}+->{hit_target}+"
             else:
                 hit_target_display = f"{hit_target}+"
             detail_parts = [f"Hit {hit_roll}({hit_target_display}){hit_rule_suffix}"]
             if hit_result == "HIT":
-                wound_suffix = ""
-                if isinstance(wound_ability_display_name, str) and wound_ability_display_name.strip():
-                    wound_suffix = f" [{wound_ability_display_name.strip().upper()}]"
+                wound_suffix = _ability_token(wound_ability_display_name)
                 # MODIFICATEUR de blessure (+1 d Oath) : le seuil affiche est deja net, donc sans
                 # ce token step.log montrait un `Wound x(3+)` ameliore sans cause visible — alors
                 # que la relance de TOUCHE, elle, etait nommee. Champ distinct de la relance : les
                 # deux peuvent apparaitre sur la meme attaque.
-                wound_bonus_ability_display_name = details.get("wound_bonus_ability_display_name")
-                if (
-                    isinstance(wound_bonus_ability_display_name, str)
-                    and wound_bonus_ability_display_name.strip()
-                ):
-                    wound_suffix += f" [{wound_bonus_ability_display_name.strip().upper()}]"
+                wound_suffix += _ability_token(details.get("wound_bonus_ability_display_name"))
                 wound_suffix += _rerolled_token(details, "wound_roll_initial")
                 detail_parts.append(
                     f"Wound {wound_roll}({wound_target}+){wound_suffix}"
@@ -698,11 +706,7 @@ class StepLogger:
                         # mort de tir et n avait plus aucun producteur (V11 §0hist.38).
                         save_part = f"Save {save_roll}({save_target}+)"
                         save_part += _rerolled_token(details, "save_roll_initial")
-                        if (
-                            isinstance(ap_modifier_ability_display_name, str)
-                            and ap_modifier_ability_display_name.strip()
-                        ):
-                            save_part += f" [{ap_modifier_ability_display_name.strip().upper()}]"
+                        save_part += _ability_token(ap_modifier_ability_display_name)
                         detail_parts.append(save_part)
                         if save_result == "FAIL":
                             detail_parts.append(f"Dmg:{damage}HP")
@@ -761,12 +765,7 @@ class StepLogger:
                     target_label = f"Unit {target_id}{target_coords_str}"
                     # Include charge roll (2d6) if available
                     charge_roll = details.get("charge_roll")
-                    ability_display_name = details.get("ability_display_name")
-                    ability_suffix = (
-                        f" [{ability_display_name.strip().upper()}]"
-                        if isinstance(ability_display_name, str) and ability_display_name.strip()
-                        else ""
-                    )
+                    ability_suffix = _ability_token(details.get("ability_display_name"))
                     # 21.03 : vol DÉCLARÉ pour cette charge. Le moteur en retranche 2" au budget
                     # (`_charge_budget_subhex`) et autorise la traversée — sans le marqueur ici,
                     # l'analyzer juge la charge avec un budget faux et des murs qui ne
@@ -901,26 +900,16 @@ class StepLogger:
             # `sustainedHit` arrive ici. Sans le token, `fight_over_cc_nb` les compte comme des
             # attaques — le faux positif exactement symétrique de celui du tir.
             _sustained_seg = " [SUSTAINED HITS]" if details.get("sustained_hit") else ""
-            if isinstance(hit_ability_display_name, str) and hit_ability_display_name.strip():
-                _sustained_seg += f" [{hit_ability_display_name.strip().upper()}]"
+            _sustained_seg += _ability_token(hit_ability_display_name)
             # JUMEAU du tir : le de d avant relance (cf. `_rerolled_token`).
             _sustained_seg += _rerolled_token(details, "hit_roll_initial")
             detail_parts = [f"Hit {hit_roll}({hit_target}+){_sustained_seg}"]
             
             # Only show wound if hit succeeded
             if hit_result == "HIT":
-                wound_suffix = (
-                    f" [{wound_ability_display_name.strip().upper()}]"
-                    if isinstance(wound_ability_display_name, str) and wound_ability_display_name.strip()
-                    else ""
-                )
+                wound_suffix = _ability_token(wound_ability_display_name)
                 # JUMEAU du tir : modificateur +1 d Oath, distinct de la relance (cf. la-bas).
-                wound_bonus_ability_display_name = details.get("wound_bonus_ability_display_name")
-                if (
-                    isinstance(wound_bonus_ability_display_name, str)
-                    and wound_bonus_ability_display_name.strip()
-                ):
-                    wound_suffix += f" [{wound_bonus_ability_display_name.strip().upper()}]"
+                wound_suffix += _ability_token(details.get("wound_bonus_ability_display_name"))
                 wound_suffix += _rerolled_token(details, "wound_roll_initial")
                 detail_parts.append(f"Wound {wound_roll}({wound_target}+){wound_suffix}")
 

@@ -1032,8 +1032,9 @@ def test_la_relance_de_touche_atteint_step_log():
     )
     source = inspect.getsource(StepLogger)
     # Le RENDU, pas la lecture : compter les occurrences du nom laisserait passer un formateur
-    # qui lit le champ sans jamais l'afficher — un « vert vacant » de manuel.
-    assert source.count("hit_ability_display_name.strip().upper()") == 2, (
+    # qui lit le champ sans jamais l'afficher — un « vert vacant » de manuel. Le rendu passe par
+    # `_ability_token`, seul producteur du token ` [NOM]` dans les deux formateurs.
+    assert source.count("_ability_token(hit_ability_display_name)") == 2, (
         "le champ doit etre RENDU par les DEUX formateurs (tir ET melee) — le cabler d'un seul "
         "cote est le motif d'echec n°1 du depot"
     )

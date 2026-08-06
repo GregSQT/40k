@@ -8193,7 +8193,7 @@ def _manual_roll_intent(
     # Import PARESSEUX : `engine.game_state` importe ce module au niveau module (is_unit_alive,
     # compute_unit_rules_in_effect). L importer ici en tete creerait un cycle.
     from engine.game_state import (
-        OATH_ABILITY_DISPLAY_NAME, effective_invul_save, oath_wound_roll_bonus,
+        effective_invul_save, oath_wound_roll_bonus,
         unit_is_oath_target_of,
     )
 
@@ -8291,19 +8291,8 @@ def _manual_roll_intent(
         _ability = _ability_by_cause[_cause]
         if _ability:
             _rec["woundAbility"] = str(_ability)
-    # +1 au jet de blessure d Oath : c est un MODIFICATEUR, pas une relance — il n a donc aucune
-    # cause dans le roller. Sans ce marqueur le seuil affiche est meilleur sans que rien ne dise
-    # pourquoi. JUMEAU du site de melee. Champ distinct de `woundAbility` (relance) : les deux
-    # peuvent jouer sur la meme attaque.
-    if _oath_wound_bonus:
-        for _rec in rolled["shot_records"]:
-            # SEULEMENT les attaques qui ont JETE un de de blessure. Une touche ratee n en jette
-            # aucun, et [LETHAL HITS] 24.23 blesse automatiquement (`strengthRoll` a None) :
-            # attribuer un +1 a un de jamais lance ferait dire au log « Wound None(4+)
-            # [OATH OF MOMENT] ». Le modificateur n a modifie que ce qui a ete jete.
-            if _rec.get("strengthRoll") is None:  # get allowed : cle absente = touche ratee
-                continue
-            _rec["woundBonusAbility"] = OATH_ABILITY_DISPLAY_NAME
+    # +1 au jet de blessure d Oath. Meme helper que la melee (cf. `stamp_wound_bonus_ability`).
+    stamp_wound_bonus_ability(rolled["shot_records"], _oath_wound_bonus)
 
     return {
         "attacker_mid": attacker_mid, "attacker": attacker, "target_sid": target_sid,
@@ -11165,3 +11154,36 @@ def resolve_wound_reroll_ability(
         f"Toute cause produite par `roll_attack_pool` doit etre nommee ici, sinon la relance "
         f"disparait du log."
     )
+
+
+def stamp_wound_bonus_ability(
+    shot_records: List[Dict[str, Any]], oath_wound_bonus: int
+) -> None:
+    """Pose `woundBonusAbility` sur les records qui ont JETE un de de blessure. En place.
+
+    `oath_wound_bonus` est le MODIFICATEUR rendu par `oath_wound_roll_bonus` (0 = pas de
+    designation Oath sur cette cible), pas un booleen : le marqueur ne se pose que s il est
+    non nul.
+
+    Le +1 au jet de blessure d Oath est un MODIFICATEUR, pas une relance : il n a donc aucune
+    cause dans `roll_attack_pool`, et sans ce marqueur le seuil affiche est meilleur sans que
+    rien ne dise pourquoi. Champ distinct de `woundAbility` (relance) : les deux peuvent jouer
+    sur la meme attaque.
+
+    Extrait pour la meme raison que les deux `resolve_*_reroll_ability` ci-dessus : deux
+    appelants (tir et melee), et l inline est exactement la forme sous laquelle les deux
+    chemins divergent dans ce depot.
+
+    SEULEMENT les attaques qui ont jete un de de blessure : une touche ratee n en jette aucun,
+    et [LETHAL HITS] 24.23 blesse automatiquement (`strengthRoll` a None). Attribuer un +1 a un
+    de jamais lance ferait dire au log « Wound None(4+) [OATH OF MOMENT] » — le modificateur n a
+    modifie que ce qui a ete jete.
+    """
+    if not oath_wound_bonus:
+        return
+    from engine.game_state import OATH_ABILITY_DISPLAY_NAME
+
+    for record in shot_records:
+        if record.get("strengthRoll") is None:  # get allowed : cle absente = touche ratee
+            continue
+        record["woundBonusAbility"] = OATH_ABILITY_DISPLAY_NAME
