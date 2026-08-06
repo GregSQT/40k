@@ -73,11 +73,11 @@ import {
   getSquareCornerRadiusPx,
 } from "../utils/unitBaseDisplay";
 import {
-  buildWaaaghCracks,
-  drawWaaaghCracks,
-  setWaaaghCracksPulse,
+  buildWaaaghFangs,
+  drawWaaaghFangs,
+  setWaaaghFangsPulse,
   WAAAGH_CRACKS_SEED,
-  type WaaaghCracksGeometry,
+  type WaaaghFangsGeometry,
 } from "../utils/waaaghBorder";
 import { ensureWasmLoaded, isWasmReady } from "../utils/wasmLos";
 import { getMaxRangedRange } from "../utils/weaponHelpers";
@@ -1460,11 +1460,11 @@ export default function Board({
   const blinkTargetRingOverlayRef = useRef<PIXI.Graphics | null>(null);
   /** Réticule ambre 08.04 sur les figs des unités désignées par un Oath of Moment (les DEUX camps). */
   const oathTargetOverlayRef = useRef<PIXI.Graphics | null>(null);
-  /** Failles du Waaagh! — un `Container` : chaque couche×groupe de pulsation est un `Graphics`
+  /** Gueule du Waaagh! — un `Container` : chaque couche×groupe de pulsation est un `Graphics`
    *  distinct, animé par son `alpha`. Persistant (HOOK 3 le remet sur le stage, cf. `saved*`). */
-  const waaaghCracksOverlayRef = useRef<PIXI.Container | null>(null);
+  const waaaghFangsOverlayRef = useRef<PIXI.Container | null>(null);
   /** Géométrie mémorisée avec la clé des dimensions qui l'a produite. */
-  const waaaghCracksGeometryRef = useRef<{ key: string; geometry: WaaaghCracksGeometry } | null>(
+  const waaaghFangsGeometryRef = useRef<{ key: string; geometry: WaaaghFangsGeometry } | null>(
     null
   );
   /** Halos de cohésion (charge/pile-in/consolidation) redessinés au survol — suivent la fig active. */
@@ -9774,7 +9774,7 @@ export default function Board({
       const savedShootOverlay = shootSubgroupOverlayRef.current;
       const savedOathOverlay = oathTargetOverlayRef.current;
       const savedRangeRingsOverlay = rangeRingsOverlayRef.current;
-      const savedWaaaghCracksOverlay = waaaghCracksOverlayRef.current;
+      const savedWaaaghFangsOverlay = waaaghFangsOverlayRef.current;
       if (savedStatic?.parent) app.stage.removeChild(savedStatic);
       if (savedWalls?.parent) app.stage.removeChild(savedWalls);
       if (savedUi?.parent) app.stage.removeChild(savedUi);
@@ -9792,7 +9792,7 @@ export default function Board({
       if (savedShootOverlay?.parent) app.stage.removeChild(savedShootOverlay);
       if (savedOathOverlay?.parent) app.stage.removeChild(savedOathOverlay);
       if (savedRangeRingsOverlay?.parent) app.stage.removeChild(savedRangeRingsOverlay);
-      if (savedWaaaghCracksOverlay?.parent) app.stage.removeChild(savedWaaaghCracksOverlay);
+      if (savedWaaaghFangsOverlay?.parent) app.stage.removeChild(savedWaaaghFangsOverlay);
       if (
         canReuseExistingHighlightsThroughDestroy &&
         highlightsLayerRef.current?.parent === app.stage
@@ -9903,11 +9903,11 @@ export default function Board({
         savedRangeRingsOverlay.zIndex = 2640;
         app.stage.addChild(savedRangeRingsOverlay);
       }
-      if (savedWaaaghCracksOverlay && !savedWaaaghCracksOverlay.destroyed) {
+      if (savedWaaaghFangsOverlay && !savedWaaaghFangsOverlay.destroyed) {
         // 130 : même étage que les murs — décor de plateau, au-dessus des surbrillances (120),
         // sous les figurines (2000).
-        savedWaaaghCracksOverlay.zIndex = 130;
-        app.stage.addChild(savedWaaaghCracksOverlay);
+        savedWaaaghFangsOverlay.zIndex = 130;
+        app.stage.addChild(savedWaaaghFangsOverlay);
       }
 
       // Nettoyer pastilles cible / jet de charge seulement quand on reconstruit les unités.
@@ -11525,8 +11525,8 @@ export default function Board({
     squadUnplacedUnionVersion,
   ]);
 
-  // Waaagh! (08.04) : tant que la capacité est en vigueur, le pourtour du plateau est ouvert de
-  // failles vertes dont la lumière respire. La durée est celle du MOTEUR (`waaagh_active`), donc
+  // Waaagh! (08.04) : tant que la capacité est en vigueur, une gueule verte mord le plateau sur
+  // tout son pourtour — des crocs qui pointent vers l'intérieur, dont la lueur respire. La durée est celle du MOTEUR (`waaagh_active`), donc
   // l'effet couvre aussi le tour adverse — c'est exactement pendant ce tour-là que l'adversaire
   // subit l'invu 5+ et le +1 F/A en mêlée.
   //
@@ -11534,7 +11534,7 @@ export default function Board({
   // CSS resterait collé au viewport et se décollerait du plateau au premier pan.
   //
   // La géométrie est construite ET gravée une seule fois par jeu de dimensions ; le ticker ne
-  // touche ensuite que l'`alpha` des calques (`setWaaaghCracksPulse`). Regraver par frame
+  // touche ensuite que l'`alpha` des calques (`setWaaaghFangsPulse`). Regraver par frame
   // re-triangulerait plusieurs centaines de polygones, et régénérer la forme la ferait grouiller.
   //
   // Overlay PERSISTANT dans une ref, comme le réticule Oath : HOOK 3 vide `app.stage` et détruit
@@ -11550,16 +11550,16 @@ export default function Board({
   useEffect(() => {
     const app = appRef.current;
     if (!app || !boardConfig) return;
-    let overlay = waaaghCracksOverlayRef.current;
+    let overlay = waaaghFangsOverlayRef.current;
     if (!overlay || overlay.destroyed) {
       overlay = new PIXI.Container();
       overlay.eventMode = "none";
-      waaaghCracksOverlayRef.current = overlay;
+      waaaghFangsOverlayRef.current = overlay;
       // Une nouvelle enveloppe est vide : la gravure précédente est perdue avec elle.
-      waaaghCracksGeometryRef.current = null;
+      waaaghFangsGeometryRef.current = null;
     }
-    // Au-dessus des surbrillances d'hex (120) et sous les unités (2000) : les failles sont un
-    // décor de plateau, elles ne doivent pas passer par-dessus les figurines du bord.
+    // Au-dessus des surbrillances d'hex (120) et sous les unités (2000) : la gueule est un décor
+    // de plateau, elle ne doit pas passer par-dessus les figurines du bord.
     overlay.zIndex = 130;
     if (overlay.parent !== app.stage) app.stage.addChild(overlay);
     overlay.visible = waaaghActive && !hideIndicators;
@@ -11569,28 +11569,28 @@ export default function Board({
     const HEX_WIDTH_W = 1.5 * HEX_RADIUS_W;
     const HEX_HEIGHT_W = Math.sqrt(3) * HEX_RADIUS_W;
     const MARGIN_W = boardConfig.margin;
-    // Mêmes totaux que la grille dessinée par BoardDisplay : les failles longent le bord RÉEL.
+    // Mêmes totaux que la grille dessinée par BoardDisplay : les crocs sont ancrés au bord RÉEL.
     const boardWidth = boardConfig.cols * HEX_WIDTH_W + HEX_WIDTH_W / 2 + 2 * MARGIN_W;
     const boardHeight = boardConfig.rows * HEX_HEIGHT_W + HEX_HEIGHT_W / 2 + 2 * MARGIN_W;
     const geometryKey = `${boardWidth}|${boardHeight}|${HEX_RADIUS_W}`;
-    if (waaaghCracksGeometryRef.current?.key !== geometryKey) {
-      const geometry = buildWaaaghCracks({
+    if (waaaghFangsGeometryRef.current?.key !== geometryKey) {
+      const geometry = buildWaaaghFangs({
         boardWidth,
         boardHeight,
         hexRadius: HEX_RADIUS_W,
         seed: WAAAGH_CRACKS_SEED,
       });
-      waaaghCracksGeometryRef.current = { key: geometryKey, geometry };
-      drawWaaaghCracks(overlay, geometry);
+      waaaghFangsGeometryRef.current = { key: geometryKey, geometry };
+      drawWaaaghFangs(overlay, geometry);
     }
-    const { geometry } = waaaghCracksGeometryRef.current;
+    const { geometry } = waaaghFangsGeometryRef.current;
 
     /** Mise à jour des alphas au plus toutes les 50 ms : la respiration reste continue à l'œil. */
     const PULSE_INTERVAL_MS = 50;
     let elapsedMs = 0;
     let sincePulseMs = PULSE_INTERVAL_MS;
     const tick = () => {
-      const target = waaaghCracksOverlayRef.current;
+      const target = waaaghFangsOverlayRef.current;
       // Lu dans la ref à chaque frame, jamais capturé : si l'overlay a été détruit malgré la
       // ré-attache de HOOK 3, ce tick ne touche plus rien au lieu d'écrire dans un objet mort.
       if (!target || target.destroyed) return;
@@ -11598,10 +11598,10 @@ export default function Board({
       sincePulseMs += app.ticker.deltaMS;
       if (sincePulseMs < PULSE_INTERVAL_MS) return;
       sincePulseMs = 0;
-      setWaaaghCracksPulse(target, geometry, elapsedMs);
+      setWaaaghFangsPulse(target, geometry, elapsedMs);
     };
     // Premier réglage immédiat : sans lui, les calques restent à l'alpha 1 de leur gravure.
-    setWaaaghCracksPulse(overlay, geometry, 0);
+    setWaaaghFangsPulse(overlay, geometry, 0);
     app.ticker.add(tick);
     return () => {
       app.ticker.remove(tick);
@@ -11612,12 +11612,12 @@ export default function Board({
   // ci-dessus : l'effet principal ne le détruit jamais, il le réutilise).
   useEffect(
     () => () => {
-      const o = waaaghCracksOverlayRef.current;
+      const o = waaaghFangsOverlayRef.current;
       if (o && !o.destroyed) {
         o.destroy({ children: true });
       }
-      waaaghCracksOverlayRef.current = null;
-      waaaghCracksGeometryRef.current = null;
+      waaaghFangsOverlayRef.current = null;
+      waaaghFangsGeometryRef.current = null;
     },
     []
   );

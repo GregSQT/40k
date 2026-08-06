@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildWaaaghCracks,
+  buildWaaaghFangs,
   PULSE_GROUP_COUNT,
   WAAAGH_CRACKS_SEED,
-  type WaaaghCracksGeometry,
+  type WaaaghFangsGeometry,
 } from "./waaaghBorder";
 
 /** Plateau 44x60 au hex_radius de production (cf. config/board/44x60x5). */
@@ -23,10 +23,10 @@ const params = {
 };
 
 /**
- * Les propriétés de sûreté du tracé sont vérifiées sur un ÉVENTAIL de graines et de dimensions,
- * jamais sur la seule graine de production : chaque plateau consomme un nombre différent de
- * tirages, donc produit un tirage effectif différent. Une propriété vraie pour
- * `WAAAGH_CRACKS_SEED` sur le 44x60 et fausse ailleurs est un défaut qui attend son plateau.
+ * Les propriétés de sûreté sont vérifiées sur un ÉVENTAIL de graines et de dimensions, jamais sur
+ * la seule graine de production : chaque plateau consomme un nombre différent de tirages, donc
+ * produit un tirage effectif différent. Une propriété vraie pour `WAAAGH_CRACKS_SEED` sur le
+ * 44x60 et fausse ailleurs est un défaut qui attend son plateau.
  */
 const GEOMETRY_CASES = (() => {
   const boards = [
@@ -44,12 +44,10 @@ const GEOMETRY_CASES = (() => {
   return cases;
 })();
 
-/** Tous les polygones de la géométrie, toutes couches et tous groupes confondus. */
-function allPolygons(geometry: WaaaghCracksGeometry): number[][] {
+function allPolygons(geometry: WaaaghFangsGeometry): number[][] {
   return geometry.groups.flatMap((group) => group.polygonsByLayer.flat());
 }
 
-/** Les points d'un polygone plat `[x0, y0, x1, y1, …]`. */
 function pointsOf(polygon: number[]): Array<{ x: number; y: number }> {
   const points: Array<{ x: number; y: number }> = [];
   for (let i = 0; i < polygon.length; i += 2) {
@@ -58,118 +56,110 @@ function pointsOf(polygon: number[]): Array<{ x: number; y: number }> {
   return points;
 }
 
-describe("buildWaaaghCracks", () => {
+/** Distance signée au bord le plus proche : positive vers l'intérieur du plateau. */
+function depthInside(
+  point: { x: number; y: number },
+  board: { boardWidth: number; boardHeight: number }
+): number {
+  return Math.min(point.x, board.boardWidth - point.x, point.y, board.boardHeight - point.y);
+}
+
+describe("buildWaaaghFangs", () => {
   it("est déterministe : même graine et mêmes dimensions → géométrie identique", () => {
-    // La géométrie est gravée une fois puis animée par alpha. Si elle variait d'un appel à
-    // l'autre, toute reconstruction (zoom, remontage) redistribuerait les failles sous les yeux
-    // du joueur.
-    expect(buildWaaaghCracks(params)).toEqual(buildWaaaghCracks(params));
+    // La denture est gravée une fois puis animée par alpha. Si elle variait d'un appel à l'autre,
+    // toute reconstruction (zoom, remontage) redistribuerait les crocs sous les yeux du joueur.
+    expect(buildWaaaghFangs(params)).toEqual(buildWaaaghFangs(params));
   });
 
-  it("ne trace jamais hors du plateau, halo de la couche la plus large compris", () => {
+  it("ancre les crocs sur le bord et les fait pointer vers l'intérieur", () => {
+    // La forme entière tient dans cette propriété : une base SUR le bord, une pointe DANS le
+    // plateau. Des crocs flottants ou tournés vers l'extérieur ne dessineraient pas une gueule.
     for (const geometryCase of GEOMETRY_CASES) {
-      const geometry = buildWaaaghCracks(geometryCase);
-      // VERT VACANT : une géométrie vide passerait la boucle sans rien regarder.
-      expect(geometry.crackCount).toBeGreaterThan(10);
-      // Bbox de TOUS les points, puis quatre assertions : un `expect` par coordonnée sur des
-      // centaines de milliers de points fait expirer le test sans rien vérifier de plus.
-      let minX = Number.POSITIVE_INFINITY;
-      let maxX = Number.NEGATIVE_INFINITY;
-      let minY = Number.POSITIVE_INFINITY;
-      let maxY = Number.NEGATIVE_INFINITY;
+      const geometry = buildWaaaghFangs(geometryCase);
+      expect(geometry.fangCount).toBeGreaterThan(20);
       for (const polygon of allPolygons(geometry)) {
-        for (let i = 0; i < polygon.length; i += 2) {
-          if (polygon[i] < minX) minX = polygon[i];
-          if (polygon[i] > maxX) maxX = polygon[i];
-          if (polygon[i + 1] < minY) minY = polygon[i + 1];
-          if (polygon[i + 1] > maxY) maxY = polygon[i + 1];
+        const depths = pointsOf(polygon).map((point) => depthInside(point, geometryCase));
+        // Base au contact du bord : au moins un point à la profondeur zéro, à la dilatation de
+        // la couche près (le halo déborde vers l'extérieur, c'est voulu).
+        expect(Math.min(...depths)).toBeLessThanOrEqual(geometry.maxOutwardBleed + 1e-9);
+        // Pointe franchement à l'intérieur : un croc a une hauteur.
+        expect(Math.max(...depths)).toBeGreaterThan(geometryCase.hexRadius);
+      }
+    }
+  });
+
+  it("borne le débordement hors plateau par la dilatation annoncée", () => {
+    // `maxOutwardBleed` est ce que la couche la plus large mord au-delà du bord. S'il était
+    // dépassé, la lueur baverait sur le cadre sans que rien ne le signale.
+    for (const geometryCase of GEOMETRY_CASES) {
+      const geometry = buildWaaaghFangs(geometryCase);
+      // Un `expect` par point ferait expirer le test sans rien vérifier de plus : on agrège le
+      // pire débordement des centaines de milliers de points, puis on l'assertionne une fois.
+      let worst = Number.POSITIVE_INFINITY;
+      for (const polygon of allPolygons(geometry)) {
+        for (const point of pointsOf(polygon)) {
+          const depth = depthInside(point, geometryCase);
+          if (depth < worst) worst = depth;
         }
       }
-      expect(minX).toBeGreaterThanOrEqual(0);
-      expect(maxX).toBeLessThanOrEqual(geometryCase.boardWidth);
-      expect(minY).toBeGreaterThanOrEqual(0);
-      expect(maxY).toBeLessThanOrEqual(geometryCase.boardHeight);
+      expect(worst).toBeGreaterThanOrEqual(-geometry.maxOutwardBleed - 1e-6);
     }
   });
 
-  it("effile chaque faille : les deux rives se rejoignent aux pointes", () => {
-    // C'est LE défaut visuel corrigé par cette version : une demi-largeur constante donne un
-    // ruban d'épaisseur uniforme, que l'œil lit comme une corde et non comme une cassure.
-    for (const geometryCase of GEOMETRY_CASES.slice(0, 10)) {
-      const geometry = buildWaaaghCracks(geometryCase);
-      const polygons = allPolygons(geometry);
-      expect(polygons.length).toBeGreaterThan(0);
-      for (const polygon of polygons) {
+  it("fait le tour complet : les quatre bords sont dentés, sans trou", () => {
+    const geometry = buildWaaaghFangs(params);
+    // Centre de chaque croc (couche du corps, la 3e), classé par bord d'appartenance.
+    const bases = {
+      top: [] as number[],
+      bottom: [] as number[],
+      left: [] as number[],
+      right: [] as number[],
+    };
+    for (const group of geometry.groups) {
+      for (const polygon of group.polygonsByLayer[2]) {
         const points = pointsOf(polygon);
-        const half = points.length / 2;
-        // Rive gauche = première moitié dans le sens du squelette, rive droite = seconde moitié
-        // en sens inverse. Les deux extrémités du squelette sont donc les points qui se font face
-        // au début et au milieu du contour.
-        const startGap = Math.hypot(
-          points[0].x - points[points.length - 1].x,
-          points[0].y - points[points.length - 1].y
+        const anchor = points.reduce((best, point) =>
+          depthInside(point, params) < depthInside(best, params) ? point : best
         );
-        const endGap = Math.hypot(
-          points[half - 1].x - points[half].x,
-          points[half - 1].y - points[half].y
-        );
-        expect(startGap).toBeLessThan(1e-9);
-        expect(endGap).toBeLessThan(1e-9);
+        const distances = [anchor.y, BOARD_HEIGHT - anchor.y, anchor.x, BOARD_WIDTH - anchor.x];
+        const nearest = distances.indexOf(Math.min(...distances));
+        if (nearest === 0) bases.top.push(anchor.x);
+        else if (nearest === 1) bases.bottom.push(anchor.x);
+        else if (nearest === 2) bases.left.push(anchor.y);
+        else bases.right.push(anchor.y);
       }
     }
-  });
-
-  it("garde chaque faille locale : aucune ne fait le tour d'un bord", () => {
-    // Une faille est un accident local. La version précédente traçait un anneau continu tout
-    // autour du plateau — c'est ce qui la faisait lire comme un liseré posé sur le bord.
-    for (const geometryCase of GEOMETRY_CASES.slice(0, 10)) {
-      const geometry = buildWaaaghCracks(geometryCase);
-      const maxExtent = Math.max(geometryCase.boardWidth, geometryCase.boardHeight) / 3;
-      for (const polygon of allPolygons(geometry)) {
-        const points = pointsOf(polygon);
-        const xs = points.map((point) => point.x);
-        const ys = points.map((point) => point.y);
-        expect(Math.max(...xs) - Math.min(...xs)).toBeLessThan(maxExtent);
-        expect(Math.max(...ys) - Math.min(...ys)).toBeLessThan(maxExtent);
+    // Aucun bord vide, et aucun intervalle béant : le plus grand écart entre deux crocs voisins
+    // reste de l'ordre du pas nominal. Sans ce contrôle, une denture ne couvrant qu'un demi-bord
+    // passerait pour complète.
+    const maxGap = HEX_RADIUS * 5 * 2.5;
+    for (const [edge, positions] of Object.entries(bases)) {
+      expect(positions.length, `bord ${edge} sans crocs`).toBeGreaterThan(10);
+      const sorted = [...positions].sort((a, b) => a - b);
+      const span = edge === "top" || edge === "bottom" ? BOARD_WIDTH : BOARD_HEIGHT;
+      let previous = 0;
+      for (const position of [...sorted, span]) {
+        expect(position - previous, `trou sur le bord ${edge}`).toBeLessThan(maxGap);
+        previous = position;
       }
     }
-  });
-
-  it("répartit les failles sur les quatre bords", () => {
-    // Un générateur qui n'aurait traité qu'un bord passerait toutes les autres assertions.
-    const geometry = buildWaaaghCracks(params);
-    const near = (value: number, edge: number) => Math.abs(value - edge) <= HEX_RADIUS * 20;
-    const centers = allPolygons(geometry).map((polygon) => {
-      const points = pointsOf(polygon);
-      const sum = points.reduce((acc, point) => ({ x: acc.x + point.x, y: acc.y + point.y }), {
-        x: 0,
-        y: 0,
-      });
-      return { x: sum.x / points.length, y: sum.y / points.length };
-    });
-    expect(centers.some((c) => near(c.y, 0))).toBe(true);
-    expect(centers.some((c) => near(c.y, BOARD_HEIGHT))).toBe(true);
-    expect(centers.some((c) => near(c.x, 0))).toBe(true);
-    expect(centers.some((c) => near(c.x, BOARD_WIDTH))).toBe(true);
   });
 
   it("désynchronise les groupes de pulsation et les remplit tous", () => {
-    // Une phase unique ferait battre tout le pourtour d'un bloc — l'effet guirlande.
-    const geometry = buildWaaaghCracks(params);
+    // Une phase unique ferait battre toute la gueule d'un bloc — l'effet guirlande.
+    const geometry = buildWaaaghFangs(params);
     expect(geometry.groups).toHaveLength(PULSE_GROUP_COUNT);
-    const phases = geometry.groups.map((group) => group.phase);
-    expect(new Set(phases).size).toBe(PULSE_GROUP_COUNT);
+    expect(new Set(geometry.groups.map((group) => group.phase)).size).toBe(PULSE_GROUP_COUNT);
     for (const group of geometry.groups) {
       expect(group.polygonsByLayer.every((layer) => layer.length > 0)).toBe(true);
     }
   });
 
   it("refuse un plateau trop petit ou des dimensions non renseignées", () => {
-    expect(() => buildWaaaghCracks({ ...params, boardWidth: 0 })).toThrow(/dimensions invalides/);
-    expect(() => buildWaaaghCracks({ ...params, hexRadius: 0 })).toThrow(/dimensions invalides/);
-    // Bande de failles impossible : mieux vaut lever que rendre un pourtour vide sans raison.
+    expect(() => buildWaaaghFangs({ ...params, boardWidth: 0 })).toThrow(/dimensions invalides/);
+    expect(() => buildWaaaghFangs({ ...params, hexRadius: 0 })).toThrow(/dimensions invalides/);
     expect(() =>
-      buildWaaaghCracks({ ...params, boardWidth: 40, boardHeight: 40, hexRadius: 8 })
-    ).toThrow(/trop petit/);
+      buildWaaaghFangs({ ...params, boardWidth: 50, boardHeight: 50, hexRadius: 8 })
+    ).toThrow(/trop court/);
   });
 });
