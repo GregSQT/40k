@@ -86,10 +86,13 @@ test_a_floor_destination_is_validated_by_the_climb_field_not_the_2d_bfs` pesait 
 le plus lourd de toute la suite, et il n'était pas documenté ici. Il évaluait
 `_charge_model_pos_is_closer` sur les **629** cases du champ climb (mesuré : 630 appels, 101,9 s sur
 113,7) alors qu'il n'assertait que « au moins une est légale », puis opposait deux budgets sur UNE
-seule case. Sortie au premier accepté (qui est le rang 0 du tri, donc la même case qu'avant) :
-**160,5 s → 0,44 s**, assertions inchangées. Contre-épreuve : en faisant décider le BFS 2D à la place
-du champ climb (`charge_handlers`, garde `dest_level >= 1`), le test redevient ROUGE sur son message
-propre — le verrou tient après l'allègement.
+seule case. Sortie au premier accepté, dans un ordre déterministe — coût de montée croissant puis
+`(col, row)` depuis `e76280d0`, qui trie la moins chère en tête donc la plus susceptible d'être
+acceptée d'emblée. Elle l'est : **2 appels** à `_charge_model_pos_is_closer` au lieu de 630 (mesuré,
+verdicts `[True, False]` — la candidate puis le contre-test à budget serré). **160,5 s → 0,4 s**,
+assertions inchangées. Contre-épreuve : en faisant décider le BFS 2D à la place du champ climb
+(`charge_handlers`, garde `dest_level >= 1`), le test redevient ROUGE sur son message propre — le
+verrou tient après l'allègement.
 
 **Idem pour `test_obs_fighting_models_no_fallback::test_a_failure_of_get_fighting_models_now_propagates`
 (2026-08-06) : 49,3 s → 0,20 s.** Son helper `_play_until` demandait de traverser
