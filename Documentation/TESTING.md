@@ -71,7 +71,7 @@ Ce sont eux qui fixent le plancher du mur : aucun découpage xdist ne peut fract
 | Test | Ce qu'il vérifie | Coût (`call`) |
 |---|---|---|
 | `test_reserves_full_episode` (9 tests dans le top 25) | épisodes complets avec roster à réserves | ~241 s cumulés, dont **83,7 s** pour `test_the_seed_sample_really_exercises_the_measuring_phases` |
-| `test_obs_fighting_models_no_fallback` (2 tests) | `get_fighting_models` sur le chemin d'observation | 51,3 s + 49,3 s |
+| `test_obs_fighting_models_no_fallback::test_get_fighting_models_does_not_raise_on_the_observation_path` | idem sur une partie réelle, 119 steps | 51,3 s — **coût légitime, cf. plus bas** |
 | `test_move_mask_is_executable` (×3 seeds) | invariant « masque ⊆ exécutable » sur de vraies parties, 400 steps | 40 à 46 s / seed |
 
 Ne pas alléger `test_move_mask_is_executable` en réduisant `MAX_STEPS` ou le nombre de seeds : à ce
@@ -90,6 +90,25 @@ seule case. Sortie au premier accepté (qui est le rang 0 du tri, donc la même 
 **160,5 s → 0,44 s**, assertions inchangées. Contre-épreuve : en faisant décider le BFS 2D à la place
 du champ climb (`charge_handlers`, garde `dest_level >= 1`), le test redevient ROUGE sur son message
 propre — le verrou tient après l'allègement.
+
+**Idem pour `test_obs_fighting_models_no_fallback::test_a_failure_of_get_fighting_models_now_propagates`
+(2026-08-06) : 49,3 s → 0,20 s.** Son helper `_play_until` demandait de traverser
+`{"deployment", "command", "move"}` et se contentait d'un `break` en cas d'échec. Or la phase
+`deployment` n'apparaît JAMAIS sur `scenario_training_armageddon` (unités pré-placées, mesuré) :
+l'helper jouait donc l'ÉPISODE ENTIER, 119 steps, avant de rendre la main sur épuisement des actions
+légales. Un repli silencieux, et il masquait un vrai défaut : le test choisissait son escouade par
+`next(iter(units_cache))`, or au tour 1 cette première clé est justement l'escouade **en réserves**
+(mesuré : 1 hors table sur 10, et c'est elle). Le site d'observation était donc court-circuité par sa
+garde `on_battlefield` — le test ne passait que parce que les 119 steps parasites laissaient à cette
+escouade le temps d'arriver (`deployed_on_turn=2`). Vert pour la mauvaise raison. L'helper lève
+désormais, et l'escouade est choisie parmi celles réellement posées.
+
+**Le premier test du même fichier, lui, garde ses 119 steps** : la charge n'est atteinte qu'au
+step 46 et la phase de fight au step 59, alors que son seuil `calls >= 400` tombe dès le step 42.
+Tronquer sur le seuil lui retirerait la phase de combat, c'est-à-dire son sujet. Vérifié que
+l'extraction du prédicat `_is_on_battlefield` ne change rien à ce qu'il exerce : 119 steps,
+1 177 appels, 23 escouades filtrées — identiques avant/après, 0 divergence entre l'ancien
+prédicat inline et le nouveau.
 
 ---
 
