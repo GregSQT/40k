@@ -19,6 +19,8 @@ interface SettingsMenuProps {
   autoSelectWeapon: boolean;
   canToggleAutoSelectWeapon: boolean;
   onToggleAutoSelectWeapon: (value: boolean) => void;
+  confirmOathTarget?: boolean;
+  onToggleConfirmOathTarget?: (value: boolean) => void;
   hpBarPerModel?: boolean;
   onToggleHpBarPerModel?: (value: boolean) => void;
   hpBarBlinkEnlarged?: boolean;
@@ -155,6 +157,8 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
   autoSelectWeapon,
   canToggleAutoSelectWeapon,
   onToggleAutoSelectWeapon,
+  confirmOathTarget = true,
+  onToggleConfirmOathTarget,
   hpBarPerModel = false,
   onToggleHpBarPerModel,
   hpBarBlinkEnlarged = false,
@@ -201,6 +205,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
     showDebugLoS: boolean;
     shootPoolFastMode: boolean;
     autoSelectWeapon: boolean;
+    confirmOathTarget: boolean;
     hpBarPerModel: boolean;
     hpBarBlinkEnlarged: boolean;
     showWoundProbability: boolean;
@@ -220,6 +225,7 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
     showDebugLoS,
     shootPoolFastMode,
     autoSelectWeapon,
+    confirmOathTarget,
     hpBarPerModel,
     hpBarBlinkEnlarged,
     showWoundProbability,
@@ -252,6 +258,8 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
       if (onToggleShootPoolFastMode && shootPoolFastMode !== s.shootPoolFastMode)
         onToggleShootPoolFastMode(s.shootPoolFastMode);
       if (autoSelectWeapon !== s.autoSelectWeapon) onToggleAutoSelectWeapon(s.autoSelectWeapon);
+      if (onToggleConfirmOathTarget && confirmOathTarget !== s.confirmOathTarget)
+        onToggleConfirmOathTarget(s.confirmOathTarget);
       if (onToggleHpBarPerModel && hpBarPerModel !== s.hpBarPerModel)
         onToggleHpBarPerModel(s.hpBarPerModel);
       if (onToggleHpBarBlinkEnlarged && hpBarBlinkEnlarged !== s.hpBarBlinkEnlarged)
@@ -412,14 +420,24 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
             )}
           </CollapsibleSection>
 
-          {canToggleAutoSelectWeapon && (
+          {(canToggleAutoSelectWeapon || onToggleConfirmOathTarget) && (
             <CollapsibleSection title="Gameplay">
-              <ToggleRow
-                checked={autoSelectWeapon}
-                onChange={onToggleAutoSelectWeapon}
-                label="Sélection automatique d'arme"
-                description="Désactiver pour choisir manuellement l'arme à utiliser pour chaque tir."
-              />
+              {canToggleAutoSelectWeapon && (
+                <ToggleRow
+                  checked={autoSelectWeapon}
+                  onChange={onToggleAutoSelectWeapon}
+                  label="Sélection automatique d'arme"
+                  description="Désactiver pour choisir manuellement l'arme à utiliser pour chaque tir."
+                />
+              )}
+              {onToggleConfirmOathTarget && (
+                <ToggleRow
+                  checked={confirmOathTarget}
+                  onChange={onToggleConfirmOathTarget}
+                  label="Confirmer la cible d'Oath of Moment"
+                  description="Affiche un popup de confirmation après le clic sur l'unité ennemie désignée au début de la phase de commandement."
+                />
+              )}
             </CollapsibleSection>
           )}
 

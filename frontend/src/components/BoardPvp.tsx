@@ -65,6 +65,7 @@ import {
 } from "../utils/losPreviewHelpers";
 import { syncMoveDestinationPoolRefs } from "../utils/movePoolRefsSync";
 import { normalizeMaskLoopsFromApi } from "../utils/movePreviewFootprintMaskLoops";
+import { type OathUnitsCache, pickOathTargetAtHex } from "../utils/oathTargetSelection";
 import { pointInAnyMaskLoop, pointInMaskLoopsEvenOdd } from "../utils/pointInPolygon";
 import {
   getNonRoundBasePixelLayout,
@@ -590,6 +591,16 @@ type BoardProps = {
   isBlinkingActive?: boolean;
   blinkVersion?: number;
   blinkState?: boolean;
+  /**
+   * Oath of Moment (08.04) — désignation ARMÉE par `BoardWithAPI` (popup de règle validé). Tant
+   * qu'elle est posée, un clic gauche sur une des `targetUnitIds` la désigne, et RIEN d'autre ne
+   * répond sur le plateau. La légalité des cibles n'est PAS rejouée ici : elle vient du même
+   * filtre que le moteur (`oath_selectable_enemy_ids`), côté BoardWithAPI.
+   */
+  oathTargetSelection?: {
+    targetUnitIds: number[];
+    onPickTarget: (unitId: number) => void;
+  } | null;
   onSelectUnit: (id: number | string | null) => void;
   onSkipUnit?: (unitId: number | string) => void;
   onSkipShoot?: (unitId: number | string) => void;
@@ -1215,6 +1226,7 @@ export default function Board({
   blinkingLosOverviewUnitId,
   isBlinkingActive,
   blinkVersion,
+  oathTargetSelection = null,
   onSelectUnit,
   onSkipUnit,
   onStartMovePreview,
@@ -4964,6 +4976,83 @@ export default function Board({
     onCancelIngress,
     ingressMaskLoopsRef?.current,
   ]);
+
+  // Oath of Moment (08.04) : désignation de la cible par clic sur le PLATEAU. Écouteur canvas
+  // plutôt que handler PIXI par unité, parce qu'en phase de commandement les icônes ennemies
+  // n'ont volontairement aucun handler de clic (UnitRenderer : ennemi + rien de sélectionné).
+  //
+  // Deux gardes reprises de la pose d'arrivée de réserves : le clic doit être IMMOBILE (un
+  // pointerdown gauche démarre le pan du plateau), et le mode MESURE est exclu — son écouteur est
+  // en capture sur le même nœud, `stopPropagation` ne l'arrêterait pas.
+  //
+  // Le hit-test porte sur les FIGURINES (`occupied_hexes_by_model`), pas sur l'ancre d'escouade :
+  // c'est ce qui est dessiné, donc ce que le joueur vise.
+  //
+  // Refs plutôt que dépendances d'effet pour la désignation et le cache d'unités : un re-render
+  // du parent entre le pointerdown et le pointerup recréerait l'écouteur et perdrait `downAt`,
+  // donc le clic. Seul l'ARMEMENT (booléen) fait poser ou retirer l'écouteur.
+  const oathTargetSelectionRef = useRef(oathTargetSelection);
+  oathTargetSelectionRef.current = oathTargetSelection;
+  const oathSelectionArmed = oathTargetSelection !== null;
+  const oathUnitsCacheRef = useRef(gameState?.units_cache);
+  oathUnitsCacheRef.current = gameState?.units_cache;
+  useEffect(() => {
+    if (!oathSelectionArmed) return;
+    if (measureMode.kind !== "off") return;
+    if (!boardConfig) return;
+    const canvas = canvasContainerRef.current?.querySelector("canvas");
+    if (!canvas) return;
+    const app = appRef.current;
+    if (!app) return;
+
+    const CLICK_DRAG_TOLERANCE_PX = 4;
+    let downAt: { pointerId: number; clientX: number; clientY: number } | null = null;
+
+    const onOathPointerDown = (e: PointerEvent) => {
+      if (e.button !== 0) return;
+      downAt = { pointerId: e.pointerId, clientX: e.clientX, clientY: e.clientY };
+    };
+
+    const onOathPointerUp = (e: PointerEvent) => {
+      const start = downAt;
+      downAt = null;
+      if (!start || start.pointerId !== e.pointerId || e.button !== 0) return;
+      if (
+        Math.hypot(e.clientX - start.clientX, e.clientY - start.clientY) > CLICK_DRAG_TOLERANCE_PX
+      )
+        return;
+      const rect = canvas.getBoundingClientRect();
+      const px =
+        (e.clientX - rect.left) * (app.renderer.width / app.renderer.resolution / rect.width);
+      const py =
+        (e.clientY - rect.top) * (app.renderer.height / app.renderer.resolution / rect.height);
+      const { col, row } = pixelToHex(
+        px,
+        py,
+        boardConfig.hex_radius,
+        boardConfig.margin,
+        boardConfig.cols,
+        boardConfig.rows
+      );
+      const selection = oathTargetSelectionRef.current;
+      if (!selection) return;
+      const pickedUnitId = pickOathTargetAtHex({
+        col,
+        row,
+        targetUnitIds: selection.targetUnitIds,
+        unitsCache: oathUnitsCacheRef.current as OathUnitsCache | undefined,
+      });
+      if (pickedUnitId === null) return;
+      selection.onPickTarget(pickedUnitId);
+    };
+
+    canvas.addEventListener("pointerdown", onOathPointerDown);
+    canvas.addEventListener("pointerup", onOathPointerUp);
+    return () => {
+      canvas.removeEventListener("pointerdown", onOathPointerDown);
+      canvas.removeEventListener("pointerup", onOathPointerUp);
+    };
+  }, [oathSelectionArmed, measureMode.kind, boardConfig]);
 
   // squad.md brique 3 : en mode plan par-figurine, un clic gauche sur une fig de l'escouade
   // la selectionne (resout model_id depuis les positions provisoires du plan) → onSelectModelForMove.

@@ -1209,6 +1209,36 @@ body {
   width: min(900px, 95vw);
 }
 
+/* Popups Oath of Moment (règle + confirmation) : même châssis que le popup de choix de règle,
+   mais une seule colonne de texte et une largeur de boîte de dialogue. */
+.deployment-panel__picker--oath {
+  width: min(560px, 92vw);
+}
+
+.deployment-panel__picker-content--oath {
+  grid-template-columns: 1fr;
+}
+
+.oath-confirm__dont-ask {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: 13px;
+  color: var(--tooltip-text-color);
+  cursor: pointer;
+}
+
+.oath-confirm__dont-ask input {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+.deployment-panel__picker-actions--oath {
+  gap: 8px;
+}
+
 .deployment-panel__picker-title {
   font-size: 15px;
   font-weight: 700;
