@@ -97,6 +97,19 @@ describe("GameLog — tokens de relance", () => {
       })
     ).toBeTruthy();
   });
+
+  it("expose la bulle d'aide d'OATH OF MOMENT, capacité de FACTION", () => {
+    // Oath n'est portée par aucune datasheet : sans entrée dédiée au registre des règles, son
+    // token restait du texte nu, seul token du log à ne pas exposer sa règle au survol.
+    render(<GameLog events={[shootEvent({ hitAbility: "Oath of Moment" })]} />);
+    expandFirstEntry();
+    const tag = screen.getByRole("button", {
+      name: "Afficher la description de la regle OATH OF MOMENT",
+    });
+    fireEvent.mouseEnter(tag);
+    // La description AFFICHÉE doit être celle du registre, pas une chaîne vide rendue en bulle.
+    expect(document.body.textContent).toContain("Oath of Moment target");
+  });
 });
 
 describe("GameLog — jets relancés", () => {

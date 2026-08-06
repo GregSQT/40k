@@ -126,6 +126,11 @@
     "id": "target_priority",
     "description": "This unit can shoot and charge in a turn in which it fell back."
   },
+  "oath_of_moment": {
+    "id": "oath_of_moment",
+    "name": "Oath of Moment",
+    "description": "Faction ability (08.04). At the start of your Command phase, select one unit from your opponent's army: it is your Oath of Moment target until the start of your next Command phase. Each time a model with this ability makes an attack that targets it, you can re-roll the Hit roll; and if you are using a Codex: Space Marines Detachment and your army includes no BLOOD ANGELS, DARK ANGELS, DEATHWATCH or SPACE WOLVES unit, add 1 to the Wound roll."
+  },
   "targeted_intercession": {
     "id": "targeted_intercession",
     "description": "Assault Interecessor : When this unit makes an attack, it can reroll rolls of 1 for the wound rolls. If the target is on an objective, it can reroll the wound rolls."
