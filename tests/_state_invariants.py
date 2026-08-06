@@ -102,6 +102,9 @@ def turn_state_invariants() -> Dict[str, Any]:
         # l'init ET au reset. Lues en `require_key` par l'observation (les 6 drapeaux de
         # `global_bin`) et par 08.04 : une fixture qui les omet fait lever la construction de
         # l'observation. `waaagh_called` porte le « once per battle », `waaagh_active` la duree.
+        # Depuis le 2026-08-06 l'observation lit AUSSI la clause du +1 Wound d'Oath (bits
+        # `*_oath_wound_bonus_active`) : une fixture qui declare une armee ADEPTUS ASTARTES
+        # doit porter `uses_codex_detachment` dans sa CONFIG, comme tout scenario de production.
         "waaagh_called": {1: False, 2: False},
         "waaagh_active": {1: False, 2: False},
         "oath_target": {1: None, 2: None},

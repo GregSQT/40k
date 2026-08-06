@@ -76,6 +76,9 @@ def _load(units: List[Dict[str, Any]], *, player_2_faction: str = "ORKS"):
         "primary_objectives": ["objectives_control"],
         "wall_ref": "walls-none.json",
         "army_faction": {"1": "ADEPTUS ASTARTES", "2": player_2_faction},
+        # Corollaire OBLIGATOIRE d'une armée ADEPTUS ASTARTES (cf. `uses_codex_detachment`) :
+        # l'observation lit la clause du +1 Wound d'Oath à chaque construction.
+        "uses_codex_detachment": {"1": True, "2": True},
         "units": units,
     }
     with tempfile.TemporaryDirectory() as td:

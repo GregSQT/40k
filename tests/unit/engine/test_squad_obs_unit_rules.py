@@ -80,6 +80,10 @@ def _load(units: List[Dict[str, Any]]) -> W40KEngine:
         # et refuse de la déduire des unités. ADEPTUS ASTARTES est la faction RÉELLE des datasheets
         # de ce fichier (Intercessor, AssaultIntercessor, Captain*).
         "army_faction": {"1": "ADEPTUS ASTARTES", "2": "ADEPTUS ASTARTES"},
+        # Corollaire OBLIGATOIRE d'une armée ADEPTUS ASTARTES : la clause du +1 Wound d'Oath
+        # en dépend, et la construction de l'observation la lit désormais (bits
+        # `*_oath_wound_bonus_active`). Un scénario de production le déclare toujours.
+        "uses_codex_detachment": {"1": True, "2": True},
         "units": units,
     }
     with tempfile.TemporaryDirectory() as td:

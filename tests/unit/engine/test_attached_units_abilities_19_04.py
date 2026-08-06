@@ -34,6 +34,9 @@ def _scenario(units: List[Dict[str, Any]]) -> Dict[str, Any]:
         # Cf. `test_attached_units_legality_19_01._scenario` : 08.04 exige la Faction d'Armée
         # DÉCLARÉE, et ADEPTUS ASTARTES est celle des datasheets de ce fichier.
         "army_faction": {"1": "ADEPTUS ASTARTES", "2": "ADEPTUS ASTARTES"},
+        # Corollaire OBLIGATOIRE d'une armée ADEPTUS ASTARTES : la clause du +1 Wound d'Oath
+        # en dépend, et l'observation la lit à chaque construction.
+        "uses_codex_detachment": {"1": True, "2": True},
         "units": units,
     }
 

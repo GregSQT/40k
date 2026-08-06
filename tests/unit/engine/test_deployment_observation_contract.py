@@ -733,6 +733,14 @@ def test_squad_obs_size_target_matches_the_schema():
     Command phase », donc elle enjambe le tour adverse. L'identité de la cible d'Oath, elle,
     n'est PAS ici : elle est portée par le statut `oath_target` de l'entité visée — coût zéro.
 
+    Le chantier 03 (2026-08-06) ajoute enfin `my_oath_wound_bonus_active` /
+    `enemy_oath_wound_bonus_active`, d'où 20725 -> 20727. Les deux bits précédents disent qu'une
+    désignation est EN VIGUEUR, jamais quelle règle elle ouvre : le +1 au jet de blessure est
+    subordonné au détachement Codex ET à l'absence d'unité BLOOD ANGELS / DARK ANGELS /
+    DEATHWATCH / SPACE WOLVES, là où la relance de touche ne dépend d'aucune des deux moitiés.
+    Cette clause dépend du ROSTER, qu'aucune autre feature ne porte — les mots-clés de
+    sous-faction des unités ALLIÉES ne sont pas observés, et la clause compte les unités MORTES.
+
     C'est le DERNIER changement d'`obs_size` de la séquence : les chantiers 04 à 06 n'utilisent
     que des dimensions déjà déclarées.
 
@@ -746,7 +754,7 @@ def test_squad_obs_size_target_matches_the_schema():
         DEPLOY_CAND_BIN_SIZE, DEPLOY_CAND_CONT_SIZE, N_DEPLOY_SLOTS,
     )
 
-    assert ObservationBuilder.SQUAD_OBS_SIZE_TARGET == 20725
+    assert ObservationBuilder.SQUAD_OBS_SIZE_TARGET == 20727
     assert N_DEPLOY_SLOTS * (DEPLOY_CAND_CONT_SIZE + DEPLOY_CAND_BIN_SIZE) == 60, (
         "le bloc candidat de déploiement a changé de taille : mettre à jour `obs_size` dans les "
         "5 profils de la config d'agent, et l'historique d'AI_OBSERVATION.md"

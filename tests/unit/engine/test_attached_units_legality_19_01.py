@@ -36,6 +36,9 @@ def _scenario(units: list) -> dict:
         # Captain*, vérifiée au registre) — la garde anti-coquille d'`army_faction` rejetterait
         # toute autre valeur.
         "army_faction": {"1": "ADEPTUS ASTARTES", "2": "ADEPTUS ASTARTES"},
+        # Corollaire OBLIGATOIRE d'une armée ADEPTUS ASTARTES : la clause du +1 Wound d'Oath
+        # en dépend, et l'observation la lit à chaque construction.
+        "uses_codex_detachment": {"1": True, "2": True},
         "units": units,
     }
 

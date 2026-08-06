@@ -43,6 +43,48 @@ def battle_points_limit(scale: Any, context: str) -> int:
     return limit
 
 
+def _require_codex_detachment_when_astartes(
+    army_faction_by_player: Any,
+    uses_codex_detachment: Any,
+    scenario_file: str,
+    *,
+    roster_sourced: bool,
+) -> None:
+    """AU CHARGEMENT : une armée ADEPTUS ASTARTES exige `uses_codex_detachment`.
+
+    POURQUOI ICI, ET PAS AU SEUL POINT DE LECTURE. Les deux données n'ont pas la même source :
+    `army_faction` vient du ROSTER quand le scénario en tire un (`training_random` en change à
+    chaque épisode), tandis qu'`uses_codex_detachment` ne vient QUE du scénario. Les 16 fichiers
+    de roster de `config/agents/**` déclarent leur `army_faction` sans porter la clause — un
+    scénario à rosters qui l'oublierait ne serait donc trahi qu'au premier appel, et depuis le
+    2026-08-06 ce premier appel est la construction de l'OBSERVATION (bits
+    `*_oath_wound_bonus_active`) : le run entier partirait avant de casser.
+
+    Ce n'est pas un doublon du `require_key` d'`uses_codex_detachment` : celui-là protège le
+    POINT DE LECTURE (fixtures et états construits en mémoire compris), celui-ci protège le
+    CHARGEMENT, avec le nom du fichier fautif — la seule information qui permette de corriger.
+    Aucune valeur par défaut n'est posée ni ici ni là : elle changerait les jets.
+    """
+    if not isinstance(army_faction_by_player, dict):
+        return
+    if not any(
+        _normalize_keyword(faction) == OATH_FACTION_KEYWORD
+        for faction in army_faction_by_player.values()
+    ):
+        return
+    if uses_codex_detachment is not None:
+        return
+    origine = "le roster tiré par ce scénario" if roster_sourced else "ce scénario"
+    raise KeyError(
+        f"{scenario_file}: {origine} déclare une armée ADEPTUS ASTARTES "
+        f"({army_faction_by_player!r}) mais 'uses_codex_detachment' est absent du SCÉNARIO. "
+        f"Le +1 au jet de blessure d'Oath of Moment en dépend (« If you are using a Codex: "
+        f"Space Marines Detachment »), et l'observation le lit à chaque construction. Déclarer "
+        f"le champ dans le scénario, par joueur — aucune valeur par défaut n'est admise, elle "
+        f"changerait les jets."
+    )
+
+
 def _default_reserves_parameters() -> Dict[str, Any]:
     """Les trois paramètres de 20.03/20.04, à leur valeur GÉNÉRIQUE, posés sur chaque unité.
 
@@ -990,6 +1032,28 @@ class GameStateManager:
                     for player, pool in deploy_pools.items()
                 }
 
+            scenario_uses_codex_detachment = (
+                scenario_data.get("uses_codex_detachment")  # get allowed
+                if isinstance(scenario_data, dict) else None
+            )
+            scenario_army_faction = (
+                {
+                    str(require_key(scenario_roster_info, "agent_player")):
+                        require_key(scenario_roster_info, "agent_army_faction"),
+                    str(require_key(scenario_roster_info, "opponent_player")):
+                        require_key(scenario_roster_info, "opponent_army_faction"),
+                }
+                if scenario_roster_info is not None
+                else (
+                    scenario_data.get("army_faction")  # get allowed
+                    if isinstance(scenario_data, dict) else None
+                )
+            )
+            _require_codex_detachment_when_astartes(
+                scenario_army_faction, scenario_uses_codex_detachment, str(scenario_file),
+                roster_sourced=scenario_roster_info is not None,
+            )
+
             # Return dict with units and optional terrain
             return {
                 "units": enhanced_units,
@@ -1019,10 +1083,7 @@ class GameStateManager:
                 # que pour une armée ADEPTUS ASTARTES, et c'est le consommateur du +1 Wound qui
                 # lève si elle manque alors qu'elle est nécessaire (aucun défaut ici, aucun
                 # blocage des scénarios qui n'en ont pas besoin).
-                "uses_codex_detachment": (
-                    scenario_data.get("uses_codex_detachment")  # get allowed
-                    if isinstance(scenario_data, dict) else None
-                ),
+                "uses_codex_detachment": scenario_uses_codex_detachment,
                 # Faction d'Armée DÉCLARÉE par joueur (« If your Army Faction is … »). Jumeau
                 # exact de la clé ci-dessus : donnée d'armée que le moteur ne peut pas déduire
                 # de ce qui est sur la table, transmise telle quelle. C'est `army_faction` qui
@@ -1032,19 +1093,7 @@ class GameStateManager:
                 # ses listes au sort à chaque épisode (`training_random`), donc seule la liste
                 # chargée sait quelle est sa faction. Une déclaration de scénario décrirait
                 # l'armée d'un autre épisode.
-                "army_faction": (
-                    {
-                        str(require_key(scenario_roster_info, "agent_player")):
-                            require_key(scenario_roster_info, "agent_army_faction"),
-                        str(require_key(scenario_roster_info, "opponent_player")):
-                            require_key(scenario_roster_info, "opponent_army_faction"),
-                    }
-                    if scenario_roster_info is not None
-                    else (
-                        scenario_data.get("army_faction")  # get allowed
-                        if isinstance(scenario_data, dict) else None
-                    )
-                ),
+                "army_faction": scenario_army_faction,
             }
 
     def _fold_attached_characters(self, basic_units: List[Dict[str, Any]], unit_registry: Any) -> List[Dict[str, Any]]:
@@ -3799,6 +3848,21 @@ def unit_has_oath_ability(game_state: Dict[str, Any], unit: Dict[str, Any]) -> b
     if OATH_FACTION_KEYWORD not in unit_faction_keywords(unit):
         return False
     return army_faction(game_state, int(require_key(unit, "player"))) == OATH_FACTION_KEYWORD
+
+
+def army_has_oath_ability(game_state: Dict[str, Any], player: int) -> bool:
+    """L'armée de ce joueur a-t-elle l'Oath of Moment — « If your Army Faction is ADEPTUS ASTARTES ».
+
+    La Faction d'ARMÉE déclarée, jamais la présence du mot-clé quelque part dans le roster
+    (cf. `army_faction`). Extrait en fonction parce qu'il a désormais DEUX appelants — l'armement
+    de la désignation (`command_handlers.arm_oath_selection`) et l'observation — et que les deux
+    doivent répondre la même chose : un bit d'obs qui dirait « pas d'Oath » là où le moteur
+    arrête la phase pour en demander un serait une observation fausse.
+
+    C'est aussi la GARDE d'appel d'`oath_wound_bonus_applies`, qui LÈVE si
+    `uses_codex_detachment` manque — champ légitimement absent d'une partie sans Astartes.
+    """
+    return army_faction(game_state, int(player)) == OATH_FACTION_KEYWORD
 
 
 def army_keywords(game_state: Dict[str, Any], player: int) -> frozenset:

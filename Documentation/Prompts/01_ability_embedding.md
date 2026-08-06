@@ -158,7 +158,7 @@ Ce chantier est **le seul** de la séquence autorisé à changer `obs_size` ou
 `TOTAL_ACTION_SIZE`. Après lui, les deux sont figés : les chantiers 02 à 06 n'utilisent que
 des dimensions déjà déclarées ici. C'est ce qui garantit **un seul retrain** en fin de séquence.
 
-**Valeur gelée : `obs_size = 20725`** (amendée le 2026-08-05, cf. ci-dessous ; 20718 au 2026-08-04). Historique du même jour, tout entier
+**Valeur gelée : `obs_size = 20727`** (amendée le 2026-08-06, cf. ci-dessous ; 20725 au 2026-08-05, 20718 au 2026-08-04). Historique du même jour, tout entier
 absorbé par le retrain unique : `20780` → `20752` (les 13 bits `rule_*` remplacés par 8+4 slots
 d'ids) → `20754` (les deux scalaires de CP que le chantier 02 attendait, oubliés ici) → `20718`
 (découplage du registre de décision, ci-dessus). Le gel porte désormais ce qu'il promettait :
@@ -177,11 +177,21 @@ d'avant le gel du 2026-08-04). Détail :
 | `my`/`enemy_waaagh_available`, `my`/`enemy_waaagh_active` | `GLOBAL_BIN_FIELDS` | 4 |
 | `my`/`enemy_oath_target_selected` | `GLOBAL_BIN_FIELDS` | 2 |
 | `waaagh_call` | `AGENT_DECISION_TYPE_IDS` (→ `decision_ctx_bin`) | 1 |
+| `my`/`enemy_oath_wound_bonus_active` (2026-08-06) | `GLOBAL_BIN_FIELDS` | 2 |
 
 Quatre bits pour le Waaagh! et non deux : sa durée court *« until the start of your next Command
 phase »*, donc elle enjambe le tour adverse. L'identité de la cible d'Oath n'est PAS dans
 `global_bin` — elle est portée par le statut `oath_target` de l'entité visée, déjà déclaré ici,
 pour **zéro** scalaire.
+
+**Amendement du 2026-08-06 — la clause conditionnelle du +1 Wound.** `20725 → 20727`. Les deux
+bits `*_oath_target_selected` disent qu'une désignation est en vigueur, jamais quelle RÈGLE elle
+ouvre : le +1 au jet de blessure est subordonné au détachement Codex ET à l'absence d'unité BLOOD
+ANGELS / DARK ANGELS / DEATHWATCH / SPACE WOLVES, là où la relance de touche ne dépend d'aucune des
+deux moitiés. Cette clause dépend du ROSTER, qu'aucune autre feature ne porte — les mots-clés de
+sous-faction des unités ALLIÉES ne sont pas observés, et la clause compte les unités MORTES. Sans
+ces bits, deux parties identiques à l'écran n'ont pas la même règle d'attaque et la politique de
+désignation n'est pas séparable.
 
 D'où l'inclusion, ici et pas en 03, des slots d'action d'Oath of Moment (ci-dessous).
 

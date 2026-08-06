@@ -177,3 +177,45 @@ def test_the_rule_checker_run_key_follows_its_payload() -> None:
     # Contre-epreuve integree : la cle doit rester STABLE a payload inchange, sinon elle
     # regenererait 2401 fichiers a chaque appel et ne serait plus un cache du tout.
     assert key() == before, "`_run_key` n'est pas deterministe"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Le trou que ces deux verrous ne couvraient pas : les scenarios A ROSTERS
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_un_scenario_a_rosters_astartes_sans_la_cle_leve_AU_CHARGEMENT() -> None:
+    """Les deux donnees n'ont pas la meme source, et c'est la faille.
+
+    `army_faction` vient du ROSTER tire (un scenario `training_random` en change a chaque
+    episode) ; `uses_codex_detachment` ne vient QUE du scenario. Les rosters de
+    `config/agents/**` declarent tous leur faction sans porter la clause : un scenario a rosters
+    qui l'oublierait n'etait trahi qu'au PREMIER APPEL — depuis le 2026-08-06, la construction de
+    l'observation, donc apres le demarrage du run.
+
+    Le controle de chargement nomme le fichier fautif, seule information qui permette de corriger.
+    """
+    from engine.game_state import _require_codex_detachment_when_astartes
+
+    with pytest.raises(KeyError, match="uses_codex_detachment"):
+        _require_codex_detachment_when_astartes(
+            {"1": "ADEPTUS ASTARTES", "2": "ORKS"}, None, "scenario_demo.json",
+            roster_sourced=True,
+        )
+
+
+def test_le_controle_de_chargement_ne_gene_aucune_partie_sans_astartes() -> None:
+    """DISCRIMINATION : sans armee ADEPTUS ASTARTES, l'absence de la cle est LEGITIME.
+
+    Sans ce cas, le controle precedent serait satisfait par une exigence posee sur tout le monde
+    — ce qui bloquerait les scenarios ORKS/TYRANIDS qui n'ont aucune raison de la porter.
+    """
+    from engine.game_state import _require_codex_detachment_when_astartes
+
+    _require_codex_detachment_when_astartes(
+        {"1": "ORKS", "2": "TYRANIDS"}, None, "scenario_demo.json", roster_sourced=False,
+    )
+    # Et une armee ASTARTES QUI declare la cle passe, evidemment.
+    _require_codex_detachment_when_astartes(
+        {"1": "ADEPTUS ASTARTES", "2": "ORKS"}, {"1": True, "2": True}, "scenario_demo.json",
+        roster_sourced=False,
+    )

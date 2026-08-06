@@ -35,7 +35,12 @@ def _load(scenario_file: str):
     return eng
 
 
-@pytest.mark.parametrize("scen", ["scenario_pvp_test.json", "scenario_pvp_test_fight.json"])
+# `scenario_pvp_test_fight.json` a été supprimé le 2026-08-06 avec les autres variantes PvP ;
+# `..._sm_tyranids.json` reprend son rôle ici — le grand roster à placement fixe, en regard du
+# petit `scenario_pvp_test.json`. Les deux couvrent bien deux tailles de scénario.
+@pytest.mark.parametrize(
+    "scen", ["scenario_pvp_test.json", "scenario_pvp_test_sm_tyranids.json"]
+)
 def test_pvp_fixed_placement_terrain_zones_loads(scen):
     """PvP : placement fixe hors zone terrain → chargement OK (neutralité, pas de durcissement)."""
     eng = _load(str(BOARD_SCEN_DIR / scen))

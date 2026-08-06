@@ -597,14 +597,24 @@ retrain supplémentaire puisque le chantier 01 en imposait déjà un, 2026-08-04
 → 20718 (chantier 02 : le registre du bloc `decision_options_bin` est DÉCOUPLÉ du vocabulaire
 observé — 36 scalaires qui ne pouvaient jamais valoir 1 disparaissent, et allonger le vocabulaire
 coûte désormais 0. `cp_gain_on_objective` y entre à ce titre pour 0 scalaire, 2026-08-04)
-→ **20725** (chantier 03 : les emplacements des CAPACITÉS DE FACTION, que le chantier 01 annonçait
+→ 20725 (chantier 03 : les emplacements des CAPACITÉS DE FACTION, que le chantier 01 annonçait
 dans `global_bin` — « voir chantier 03 » — sans les déclarer. Six drapeaux de `GLOBAL_BIN_FIELDS`
 (`my`/`enemy_waaagh_available`, `my`/`enemy_waaagh_active`, `my`/`enemy_oath_target_selected`) et
 une entrée de plus dans `AGENT_DECISION_TYPE_IDS` (`waaagh_call`, +1 bit de `decision_ctx_bin`).
 Même oubli et même réparation que les deux scalaires de CP du chantier 02, sans retrain
 supplémentaire : les `.zip` existants datent d'avant le gel du 2026-08-04. QUATRE bits pour le
 Waaagh! et non deux, parce que sa durée enjambe le tour adverse ; l'identité de la cible d'Oath
-n'est PAS ici mais dans le statut `oath_target` de l'entité visée, pour 0 scalaire, 2026-08-05).
+n'est PAS ici mais dans le statut `oath_target` de l'entité visée, pour 0 scalaire, 2026-08-05)
+→ **20727** (chantier 03 : `my_oath_wound_bonus_active` / `enemy_oath_wound_bonus_active`. La
+clause CONDITIONNELLE du +1 au jet de blessure d'Oath — détachement Codex ET aucune unité BLOOD
+ANGELS / DARK ANGELS / DEATHWATCH / SPACE WOLVES — dépend du ROSTER, que l'agent ne construit pas
+et qu'AUCUNE autre feature ne porte : les mots-clés de sous-faction des unités ALLIÉES ne sont pas
+observés, et la clause compte les unités MORTES. Un bit distinct de `*_oath_target_selected` parce
+que la relance de touche, elle, ne dépend d'aucune des deux moitiés : sans lui, l'agent ne peut pas
+distinguer un Oath « faible » d'un Oath « fort », alors que le +1 rend une cible coriace nettement
+plus rentable à DÉSIGNER (6+ → 5+ double les blessures, 3+ → 2+ ne les augmente que d'un cinquième)
+— et la désignation est précisément ce qu'il joue par `OATH_SLOT_i`. Côté ennemi pour la raison du
+Waaagh! : ce que l'adversaire blesse mieux change ce que je protège, 2026-08-06).
 **Toute évolution du schéma change cette valeur et rend les
 `.zip` existants incompatibles : le retrain `--new` est obligatoire.**
 

@@ -12,8 +12,8 @@ from typing import Dict, List, Tuple, Set, Optional, Any
 from shared.data_validation import require_key
 from engine.game_state import (
     CORE_CP_GAIN_PER_COMMAND_PHASE, GameStateManager, gain_command_points,
-    OATH_FACTION_KEYWORD, WAAAGH_FACTION_KEYWORD,
-    army_faction, call_waaagh, expire_faction_abilities_for_player,
+    WAAAGH_FACTION_KEYWORD,
+    army_faction, army_has_oath_ability, call_waaagh, expire_faction_abilities_for_player,
     set_oath_target, waaagh_is_available,
 )
 
@@ -300,7 +300,7 @@ def arm_oath_selection(game_state: Dict[str, Any], player: int) -> None:
     il n'y a rien à désigner et la clause est sans objet — elle ne pourrait bénéficier à personne.
     """
     player_int = int(player)
-    if army_faction(game_state, player_int) != OATH_FACTION_KEYWORD:
+    if not army_has_oath_ability(game_state, player_int):
         return
     if oath_selectable_enemy_ids(game_state, player_int):
         game_state["pending_oath_selection"] = player_int

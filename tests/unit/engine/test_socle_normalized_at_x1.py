@@ -74,6 +74,9 @@ def _engine(tmp_path, mover_type: str, mover: tuple, enemy: tuple):
         "terrain_ref": "terrain-mc1.json",
         # Joueur 1 = le mover (faction variable, cf. `_MOVER_FACTION`), joueur 2 = Intercessor.
         "army_faction": {"1": _MOVER_FACTION[mover_type], "2": "ADEPTUS ASTARTES"},
+        # Corollaire OBLIGATOIRE d'une armée ADEPTUS ASTARTES (joueur 2 ici) : la clause du +1
+        # Wound d'Oath en dépend, et l'observation la lit à chaque construction.
+        "uses_codex_detachment": {"1": True, "2": True},
         "units": [
             {"id": "1", "player": 1, "unit_type": mover_type, "col": mover[0], "row": mover[1]},
             {"id": "2", "player": 2, "unit_type": "Intercessor", "col": enemy[0], "row": enemy[1]},

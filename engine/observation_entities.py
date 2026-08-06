@@ -636,6 +636,23 @@ GLOBAL_BIN_FIELDS: Tuple[str, ...] = (
     # bits ne disent que « une désignation est en vigueur », ce qu'aucun slot d'entité ne dirait
     # si toutes les cibles possibles étaient hors des K slots observés.
     "my_oath_target_selected", "enemy_oath_target_selected",
+    # Clause CONDITIONNELLE du +1 au jet de blessure d'Oath : « If you are using a Codex: Space
+    # Marines Detachment and your army does not include one or more units with the BLOOD ANGELS,
+    # DARK ANGELS, DEATHWATCH or SPACE WOLVES keywords ». La relance de touche, elle, ne dépend
+    # d'aucune des deux moitiés — d'où un bit distinct de `*_oath_target_selected`.
+    #
+    # POURQUOI DANS L'OBS. La clause dépend du ROSTER, que l'agent ne construit pas et ne peut
+    # déduire d'aucune autre feature : les mots-clés de sous-faction des unités ALLIÉES ne sont
+    # pas observés, et l'armée compte les unités MORTES. Sans ce bit, deux parties identiques à
+    # l'écran n'ont pas la même règle, et l'agent ne peut pas distinguer « Oath faible » (relance
+    # seule) d'« Oath fort » (relance + 1). Le gain du +1 est d'autant plus grand que la cible est
+    # coriace (6+ -> 5+ double les blessures, 3+ -> 2+ ne les augmente que d'un cinquième) : les
+    # deux régimes n'ont donc pas la même politique de DÉSIGNATION, et c'est ce choix-là que
+    # l'agent joue par `OATH_SLOT_i`.
+    #
+    # Côté ENNEMI pour la même raison que le Waaagh! : savoir que l'adversaire blesse mieux ma
+    # cible désignée change ce que je dois protéger. Aucun des deux ne se déduit de l'autre.
+    "my_oath_wound_bonus_active", "enemy_oath_wound_bonus_active",
 )
 GLOBAL_CONT_SIZE = len(GLOBAL_CONT_FIELDS)
 GLOBAL_BIN_SIZE = len(GLOBAL_BIN_FIELDS)

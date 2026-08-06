@@ -1605,7 +1605,10 @@ class ObservationBuilder:
         # bits du Waaagh! sont émis pour les DEUX camps : sa durée enjambe le tour adverse, donc
         # un Waaagh! ennemi actif pendant mon tour est une information dont j'ai besoin
         # MAINTENANT (l'armée d'en face a une invulnérable 5+ et +1 S/A en mêlée).
-        from engine.game_state import waaagh_is_active, waaagh_is_available, oath_target_id
+        from engine.game_state import (
+            army_has_oath_ability, oath_target_id, oath_wound_bonus_applies,
+            waaagh_is_active, waaagh_is_available,
+        )
 
         enemy_player = 2 if int(active_player) == 1 else 1
         g_bin[global_bin_index("my_waaagh_available")] = (
@@ -1627,6 +1630,21 @@ class ObservationBuilder:
         )
         g_bin[global_bin_index("enemy_oath_target_selected")] = (
             1.0 if oath_target_id(game_state, enemy_player) is not None else 0.0
+        )
+        # Clause du +1 Wound. `army_has_oath_ability` est la GARDE, pas une optimisation :
+        # `oath_wound_bonus_applies` LÈVE si `uses_codex_detachment` manque, et ce champ est
+        # légitimement absent d'une partie sans ADEPTUS ASTARTES.
+        g_bin[global_bin_index("my_oath_wound_bonus_active")] = (
+            1.0
+            if army_has_oath_ability(game_state, active_player)
+            and oath_wound_bonus_applies(game_state, active_player)
+            else 0.0
+        )
+        g_bin[global_bin_index("enemy_oath_wound_bonus_active")] = (
+            1.0
+            if army_has_oath_ability(game_state, enemy_player)
+            and oath_wound_bonus_applies(game_state, enemy_player)
+            else 0.0
         )
 
         # === DÉCISION AGENT EN ATTENTE (V11 §9.3 P2) ===
