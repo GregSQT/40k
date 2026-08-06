@@ -75,6 +75,7 @@ import {
 import {
   buildWaaaghCracks,
   drawWaaaghCracks,
+  setWaaaghCracksPulse,
   WAAAGH_CRACKS_SEED,
   type WaaaghCracksGeometry,
 } from "../utils/waaaghBorder";
@@ -1459,8 +1460,9 @@ export default function Board({
   const blinkTargetRingOverlayRef = useRef<PIXI.Graphics | null>(null);
   /** Réticule ambre 08.04 sur les figs des unités désignées par un Oath of Moment (les DEUX camps). */
   const oathTargetOverlayRef = useRef<PIXI.Graphics | null>(null);
-  /** Pourtour fissuré du Waaagh!— persistant (HOOK 3 le remet sur le stage, cf. `saved*`). */
-  const waaaghCracksOverlayRef = useRef<PIXI.Graphics | null>(null);
+  /** Failles du Waaagh! — un `Container` : chaque couche×groupe de pulsation est un `Graphics`
+   *  distinct, animé par son `alpha`. Persistant (HOOK 3 le remet sur le stage, cf. `saved*`). */
+  const waaaghCracksOverlayRef = useRef<PIXI.Container | null>(null);
   /** Géométrie mémorisée avec la clé des dimensions qui l'a produite. */
   const waaaghCracksGeometryRef = useRef<{ key: string; geometry: WaaaghCracksGeometry } | null>(
     null
@@ -11523,16 +11525,17 @@ export default function Board({
     squadUnplacedUnionVersion,
   ]);
 
-  // Waaagh! (08.04) : tant que la capacité est en vigueur, tout le pourtour du plateau est
-  // fissuré de vert, et la lueur dans les fissures respire. La durée est celle du MOTEUR
-  // (`waaagh_active`), donc l'effet couvre aussi le tour adverse — c'est exactement pendant ce
-  // tour-là que l'adversaire subit l'invu 5+ et le +1 F/A en mêlée.
+  // Waaagh! (08.04) : tant que la capacité est en vigueur, le pourtour du plateau est ouvert de
+  // failles vertes dont la lumière respire. La durée est celle du MOTEUR (`waaagh_active`), donc
+  // l'effet couvre aussi le tour adverse — c'est exactement pendant ce tour-là que l'adversaire
+  // subit l'invu 5+ et le +1 F/A en mêlée.
   //
   // Overlay PIXI et pas un halo CSS sur le canvas : le stage se déplace et se zoome, un décor
   // CSS resterait collé au viewport et se décollerait du plateau au premier pan.
   //
-  // La GÉOMÉTRIE n'est reconstruite que si les dimensions du plateau changent ; seul l'alpha
-  // varie au ticker. Régénérer les fissures par frame les ferait grouiller.
+  // La géométrie est construite ET gravée une seule fois par jeu de dimensions ; le ticker ne
+  // touche ensuite que l'`alpha` des calques (`setWaaaghCracksPulse`). Regraver par frame
+  // re-triangulerait plusieurs centaines de polygones, et régénérer la forme la ferait grouiller.
   //
   // Overlay PERSISTANT dans une ref, comme le réticule Oath : HOOK 3 vide `app.stage` et détruit
   // tout ce qu'il n'a pas explicitement mis de côté. Le pourtour est donc capturé et ré-attaché
@@ -11549,61 +11552,56 @@ export default function Board({
     if (!app || !boardConfig) return;
     let overlay = waaaghCracksOverlayRef.current;
     if (!overlay || overlay.destroyed) {
-      overlay = new PIXI.Graphics();
+      overlay = new PIXI.Container();
       overlay.eventMode = "none";
       waaaghCracksOverlayRef.current = overlay;
+      // Une nouvelle enveloppe est vide : la gravure précédente est perdue avec elle.
+      waaaghCracksGeometryRef.current = null;
     }
-    // Au-dessus des surbrillances d'hex (120) et sous les unités (2000) : la fissure est un
-    // décor de plateau, elle ne doit pas passer par-dessus les figurines du bord.
+    // Au-dessus des surbrillances d'hex (120) et sous les unités (2000) : les failles sont un
+    // décor de plateau, elles ne doivent pas passer par-dessus les figurines du bord.
     overlay.zIndex = 130;
     if (overlay.parent !== app.stage) app.stage.addChild(overlay);
     overlay.visible = waaaghActive && !hideIndicators;
-    if (!waaaghActive) {
-      overlay.clear();
-      return;
-    }
+    if (!waaaghActive) return;
 
     const HEX_RADIUS_W = boardConfig.hex_radius;
     const HEX_WIDTH_W = 1.5 * HEX_RADIUS_W;
     const HEX_HEIGHT_W = Math.sqrt(3) * HEX_RADIUS_W;
     const MARGIN_W = boardConfig.margin;
-    // Mêmes totaux que la grille dessinée par BoardDisplay : la fissure longe le bord RÉEL.
+    // Mêmes totaux que la grille dessinée par BoardDisplay : les failles longent le bord RÉEL.
     const boardWidth = boardConfig.cols * HEX_WIDTH_W + HEX_WIDTH_W / 2 + 2 * MARGIN_W;
     const boardHeight = boardConfig.rows * HEX_HEIGHT_W + HEX_HEIGHT_W / 2 + 2 * MARGIN_W;
     const geometryKey = `${boardWidth}|${boardHeight}|${HEX_RADIUS_W}`;
     if (waaaghCracksGeometryRef.current?.key !== geometryKey) {
-      waaaghCracksGeometryRef.current = {
-        key: geometryKey,
-        geometry: buildWaaaghCracks({
-          boardWidth,
-          boardHeight,
-          hexRadius: HEX_RADIUS_W,
-          seed: WAAAGH_CRACKS_SEED,
-        }),
-      };
+      const geometry = buildWaaaghCracks({
+        boardWidth,
+        boardHeight,
+        hexRadius: HEX_RADIUS_W,
+        seed: WAAAGH_CRACKS_SEED,
+      });
+      waaaghCracksGeometryRef.current = { key: geometryKey, geometry };
+      drawWaaaghCracks(overlay, geometry);
     }
     const { geometry } = waaaghCracksGeometryRef.current;
 
-    /** Période de la pulsation, en ms — une respiration lente, pas un clignotant. */
-    const PULSE_PERIOD_MS = 2200;
-    /** Redessin au plus tous les 60 ms : la pulsation reste fluide sans 3 passes par frame. */
-    const REDRAW_INTERVAL_MS = 60;
+    /** Mise à jour des alphas au plus toutes les 50 ms : la respiration reste continue à l'œil. */
+    const PULSE_INTERVAL_MS = 50;
     let elapsedMs = 0;
-    let sinceRedrawMs = REDRAW_INTERVAL_MS;
+    let sincePulseMs = PULSE_INTERVAL_MS;
     const tick = () => {
       const target = waaaghCracksOverlayRef.current;
       // Lu dans la ref à chaque frame, jamais capturé : si l'overlay a été détruit malgré la
-      // ré-attache de HOOK 3, ce tick ne dessine plus rien au lieu d'écrire dans un objet mort.
+      // ré-attache de HOOK 3, ce tick ne touche plus rien au lieu d'écrire dans un objet mort.
       if (!target || target.destroyed) return;
       elapsedMs += app.ticker.deltaMS;
-      sinceRedrawMs += app.ticker.deltaMS;
-      if (sinceRedrawMs < REDRAW_INTERVAL_MS) return;
-      sinceRedrawMs = 0;
-      const pulse = 0.5 + 0.5 * Math.sin((elapsedMs / PULSE_PERIOD_MS) * 2 * Math.PI);
-      drawWaaaghCracks(target, geometry, { hexRadius: HEX_RADIUS_W, pulse });
+      sincePulseMs += app.ticker.deltaMS;
+      if (sincePulseMs < PULSE_INTERVAL_MS) return;
+      sincePulseMs = 0;
+      setWaaaghCracksPulse(target, geometry, elapsedMs);
     };
-    // Premier tracé immédiat : sans lui, le pourtour n'apparaît qu'à la frame suivante.
-    drawWaaaghCracks(overlay, geometry, { hexRadius: HEX_RADIUS_W, pulse: 0.5 });
+    // Premier réglage immédiat : sans lui, les calques restent à l'alpha 1 de leur gravure.
+    setWaaaghCracksPulse(overlay, geometry, 0);
     app.ticker.add(tick);
     return () => {
       app.ticker.remove(tick);
@@ -11616,8 +11614,7 @@ export default function Board({
     () => () => {
       const o = waaaghCracksOverlayRef.current;
       if (o && !o.destroyed) {
-        o.clear();
-        o.destroy();
+        o.destroy({ children: true });
       }
       waaaghCracksOverlayRef.current = null;
       waaaghCracksGeometryRef.current = null;
