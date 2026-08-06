@@ -8,7 +8,6 @@ Contains:
 - make_training_env: Create training environment with proper configuration
 - get_agent_scenario_file: Get scenario file path for agent-specific training
 - get_scenario_list_for_phase: Get all available scenarios for a training phase
-- ensure_scenario: Ensure scenario file exists for agent
 
 Extracted from ai/train.py during refactoring (2025-01-21)
 """
@@ -34,7 +33,6 @@ __all__ = [
     'get_agent_scenario_file',
     'get_scenario_list_for_phase',
     'describe_expected_bot_self_scenario_files',
-    'ensure_scenario'
 ]
 
 
@@ -508,14 +506,3 @@ def get_agent_scenario_file(config, agent_key, training_config_name, scenario_ov
         f"ces nommages : 'scenario_<nom>.json', 'scenario_{training_config_name}.json', "
         f"'scenario_{training_config_name}-*.json', ou '{training_config_name}_scenario_*.json'."
     )
-
-
-def ensure_scenario():
-    """Ensure scenario.json exists."""
-    # Get project root (parent of ai/ directory)
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.dirname(script_dir)
-
-    scenario_path = os.path.join(project_root, "config", "scenario.json")
-    if not os.path.exists(scenario_path):
-        raise FileNotFoundError(f"Missing required scenario.json file: {scenario_path}. AI_INSTRUCTIONS.md: No fallbacks allowed - scenario file must exist.")

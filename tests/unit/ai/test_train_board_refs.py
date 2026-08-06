@@ -102,11 +102,3 @@ def test_require_training_config_phase_present_ok():
 
     # Ne lève pas, ne charge pas la config.
     train._require_training_config_phase(_Cfg(), "CoreAgent", "x1_debug")
-
-
-def test_require_training_config_phase_no_agent_ok():
-    class _Cfg:
-        def load_agent_training_config(self, agent_key, phase):
-            raise AssertionError("must not load config without agent")
-
-    train._require_training_config_phase(_Cfg(), None, None)

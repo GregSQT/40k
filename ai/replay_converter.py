@@ -153,9 +153,6 @@ def generate_steplog_and_replay(config, args):
         bot_scenario_file = resolve_agent_bot_scenario(config, args.agent)
         print(f"Using bot scenario: {os.path.basename(bot_scenario_file)}")
 
-        # Test-only mode requires agent parameter
-        if not args.agent:
-            raise ValueError("--agent parameter required for test-only mode")
         # La duree de bataille vient de game_rules.max_turns (source unique). L'ancien
         # override temporaire, qui recopiait 'max_turns_per_episode' du training config
         # dans game_rules le temps de construire l'env, n'a plus d'objet.

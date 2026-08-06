@@ -1,9 +1,9 @@
 """`n_steps` est un TOTAL par update : tout chemin vectorise DOIT le diviser par `n_envs`.
 
-Bug d'origine, mesure a l'appui. Trois fonctions de `ai/train.py` construisent un
-`SubprocVecEnv` de `n_envs` environnements — `create_model`, `create_multi_agent_model`,
-`train_with_scenario_rotation` — mais une seule divisait `n_steps`. Un run mono-scenario
-(`--scenario X --new`), qui passe par `create_model`, allouait donc un buffer de
+Bug d'origine, mesure a l'appui. Trois fonctions de `ai/train.py` construisaient alors un
+`SubprocVecEnv` de `n_envs` environnements — `create_model` (depuis supprimee : mode generique
+sans --agent), `create_multi_agent_model`, `train_with_scenario_rotation` — mais une seule
+divisait `n_steps`. Un run mono-scenario (`--scenario X --new`) allouait donc un buffer de
 `8192 x 48 = 393 216` transitions au lieu de 8160, soit **44 Go** rien que pour les
 observations (30 044 flottants par obs, config x1).
 

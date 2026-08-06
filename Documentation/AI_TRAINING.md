@@ -128,7 +128,7 @@
 
 ### Run Training
 ```bash
-# From project root (--agent obligatoire pour entraînement ciblé)
+# From project root (--agent obligatoire : argparse refuse la commande sans lui)
 python ai/train.py --agent <agent_key> --training-config default --rewards-config <agent_key> --scenario bot   # Entraînement standard (P1)
 python ai/train.py --agent <agent_key> --scenario bot --new --param agent_seat_mode p2                         # Entraînement en P2
 python ai/train.py --agent <agent_key> --scenario bot --new --param agent_seat_mode random                     # Entraînement seat aléatoire
@@ -189,7 +189,7 @@ Cette section décrit comment le training est structuré (qui appelle quoi). Pou
   a été **supprimé** le 2026-07-19 avec `ai/multi_agent_trainer.py` : legacy pré-squad qui chargeait
   les modèles en `DQN.load` alors que tous les `.zip` sont MaskablePPO. Cf. V11_agent_rework §0.8.
 - **Arguments essentiels** :
-  - `--agent <agent_key>` : agent à entraîner (obligatoire pour training ciblé). Détermine le dossier de config et le chemin du modèle.
+  - `--agent <agent_key>` : agent à entraîner (**obligatoire**, et non vide : il n'existe plus de mode générique sans agent). Détermine le dossier de config et le chemin du modèle.
   - `--training-config <name>` : clé du bloc dans `*_training_config.json` (ex. `default`, `debug`).
   - `--rewards-config <name>` : en pratique le même que `--agent` ou un alias ; utilisé comme `rewards_config_name` et pour charger `*_rewards_config.json`.
   - `--scenario <name>` : scénario ou mode (`bot`, `default`, `phase1`, etc.). Avec `bot`, l’adversaire est un mix configurable de 5 bots (Random, Greedy, Defensive, Control, Adaptive).
@@ -415,7 +415,7 @@ python ai/train.py --agent CoreAgent --eval --param agent_seat_mode p2 --test-ep
 ## 🧭 MACRO TRAINING — SUPPRIMÉ
 
 **Il n'y a plus d'agent macro. `--agent MacroController` n'existe plus, et `--macro-eval-mode`
-non plus.** L'intention de zone est portée par l'agent micro unifié (`create_model`), qui est
+non plus.** L'intention de zone est portée par l'agent micro unifié (`create_multi_agent_model`), qui est
 le seul agent entraîné.
 
 Cette section décrivait le mode macro comme « implémenté aujourd'hui » : c'était faux depuis le

@@ -253,24 +253,3 @@ def test_get_agent_scenario_file_raises_when_no_file_found(tmp_path: Path) -> No
         training_utils.get_agent_scenario_file(config, "AgentX", "phase9")
 
 
-def test_ensure_scenario_raises_when_missing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    fake_file = tmp_path / "ai" / "training_utils.py"
-    fake_file.parent.mkdir(parents=True, exist_ok=True)
-    fake_file.write_text("# stub", encoding="utf-8")
-    monkeypatch.setattr(training_utils, "__file__", str(fake_file))
-
-    with pytest.raises(FileNotFoundError, match=r"Missing required scenario.json file"):
-        training_utils.ensure_scenario()
-
-
-def test_ensure_scenario_passes_when_file_exists(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    fake_file = tmp_path / "ai" / "training_utils.py"
-    scenario = tmp_path / "config" / "scenario.json"
-    fake_file.parent.mkdir(parents=True, exist_ok=True)
-    scenario.parent.mkdir(parents=True, exist_ok=True)
-    fake_file.write_text("# stub", encoding="utf-8")
-    scenario.write_text("{}", encoding="utf-8")
-    monkeypatch.setattr(training_utils, "__file__", str(fake_file))
-
-    # no exception expected
-    training_utils.ensure_scenario()

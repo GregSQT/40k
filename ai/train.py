@@ -731,14 +731,11 @@ def apply_rollout_n_steps(model_params: Dict[str, Any], n_envs: int, observation
                           log=print) -> int:
     """Convertit `model_params["n_steps"]` (TOTAL par update) en pas PAR ENV, et borne le buffer.
 
-    POINT DE PASSAGE UNIQUE. La division vivait dans le seul `train_with_scenario_rotation`,
-    alors que `create_model` et `create_multi_agent_model` construisent AUSSI un
-    `SubprocVecEnv` de `n_envs`. Un run mono-scenario (`--scenario X --new`) passait donc par
-    `create_model` avec `n_steps: 8192` BRUT sur 48 envs : `MaskablePPO` allouait
-    8192 x 48 = 393 216 transitions, soit 44 Go rien que pour les observations
-    (30 044 flottants par obs). MESURE sur le run fautif : VmSize 139,7 Go, RSS montant de
-    2,4 Go/min a mesure que les pages du buffer etaient touchees, mort de la VM WSL avant la
-    fin. Jumeau classique : correction appliquee a un chemin sur trois.
+    POINT DE PASSAGE UNIQUE : tout chemin qui construit un `SubprocVecEnv` de `n_envs` passe
+    par ici. La division a vecu un temps dans le seul `train_with_scenario_rotation`, et un
+    chemin oublie a alloue `8192 x 48 = 393 216` transitions, soit 44 Go rien que pour les
+    observations, jusqu'a tuer la VM WSL. Mesures et verrous :
+    `tests/unit/ai/test_rollout_buffer_sizing.py`.
 
     Le total journalise est celui REELLEMENT obtenu (`effective * n_envs`), jamais le total
     demande : `//` tronque, donc 8192 sur 48 envs ne donne pas 8192 mais 8160. Annoncer le
@@ -851,13 +848,14 @@ def _resolve_n_envs_for_step_logging(n_envs: int, log=print) -> int:
     V11 T6 — root cause d'un no-op SILENCIEUX : `--step` n'a qu'un objet, journaliser les
     actions dans step.log (consomme par `ai/analyzer.py`). Or le StepLogger n'est branche
     QUE sur la branche mono-env (`if step_logger: base_env.step_logger = step_logger`) ;
-    les trois branches vectorisees construisent leurs envs avec `step_logger_enabled=False`.
+    les branches vectorisees construisent leurs envs avec `step_logger_enabled=False`.
     Avec `n_envs > 1` (48 dans x1_debug), le run annoncait "Step logging enabled" puis
     n'ecrivait jamais la moindre entree — step.log reduit a son en-tete.
 
-    Meme traitement que `--replay`/`--convert-steplog`, qui forcent deja un env unique :
+    Meme traitement que `--replay`, qui construit deja son env unique
+    (`ai/replay_converter.py`, `training_n_envs=1`) :
     on force ET on le DIT (pas de no-op silencieux, pas de promesse non tenue).
-    Le controle `n_envs > 0` vit ici parce que c'est le SEUL passage obligatoire des trois
+    Le controle `n_envs > 0` vit ici parce que c'est le SEUL passage obligatoire des
     lectures de `training_config["n_envs"]`. Il vivait auparavant dans
     `ai/bot_evaluation.evaluate_against_bots`, ou il n'etait atteint qu'au premier marqueur
     d'evaluation — donc apres des minutes d'entrainement — et ou il ne servait plus qu'a
@@ -879,10 +877,11 @@ def _resolve_n_envs_for_step_logging(n_envs: int, log=print) -> int:
 def _require_training_config_phase(config, agent_key, training_config_name) -> None:
     """Enforce an explicit --training-config (R1): no silent 'default' alias.
 
-    Raises ValueError listing the available phases when an agent is selected but no
-    training-config phase was provided.
+    Raises ValueError listing the available phases when no training-config phase was
+    provided. La garde `agent_key and ...` qui encadrait ce controle est tombee avec le mode
+    sans agent : `--agent` est desormais exige par argparse, et non vide.
     """
-    if agent_key and training_config_name is None:
+    if training_config_name is None:
         full_cfg = config.load_agent_training_config(agent_key, None)
         available_phases = [k for k in full_cfg.keys() if not str(k).startswith("_")]
         raise ValueError(
@@ -1293,10 +1292,10 @@ def prepare_run_artifacts(
     n_envs: int,
     log_fn=print,
 ) -> Tuple[str, int, int]:
-    """Prologue commun des TROIS chemins d'entrainement : ou ecrit ce run, et d'ou il repart.
+    """Prologue commun des chemins d'entrainement : ou ecrit ce run, et d'ou il repart.
 
-    Rend `(model_path, episode_offset, episode_start_index)`. Ce prologue etait recopie sur les
-    trois chemins, avec des divergences deja constatees : un `os.makedirs` place dans le `if
+    Rend `(model_path, episode_offset, episode_start_index)`. Ce prologue etait recopie sur
+    chaque chemin, avec des divergences deja constatees : un `os.makedirs` place dans le `if
     new_model` (donc jamais execute sur un `--append`), un `os.makedirs` en triple exemplaire,
     et l'annonce de reprise conditionnee tantot par `append_training`, tantot par l'offset.
 
@@ -1350,11 +1349,9 @@ from ai.training_utils import (
     benchmark_device_speed,
     setup_imports,
     make_training_env,
-
     get_agent_scenario_file,
     get_scenario_list_for_phase,
     describe_expected_bot_self_scenario_files,
-    ensure_scenario
 )
 from ai.vec_normalize_utils import (
     save_vec_normalize,
@@ -1804,8 +1801,8 @@ def _apply_vec_normalize(env, model_path_for_vn, vec_norm_cfg, new_model, n_envs
     le charger planterait sur le shape check de set_venv des que l'obs space a change
     (ex: passage Box(108) -> Dict), sans raison metier.
 
-    Retourne l'env enveloppe. Factorise les 3 sites identiques (create_model,
-    create_multi_agent_model, rotation de scenario).
+    Retourne l'env enveloppe. Factorise les 2 sites identiques (create_multi_agent_model,
+    rotation de scenario).
     """
     if n_envs == 1:
         env = DummyVecEnv([cast(Any, lambda: env)])
@@ -1900,358 +1897,19 @@ def _resolve_device_for_obs(observation_space, device_mode, gpu_available, total
     return device, use_gpu, obs_size
 
 
-def create_model(config, training_config_name, rewards_config_name, new_model, append_training, args):
-    """Create or load PPO model with configuration following AI_INSTRUCTIONS.md."""
-    
-    # Import metrics tracker for training monitoring
-    from metrics_tracker import W40KMetricsTracker
-    
-    # Check GPU availability
-    gpu_available = check_gpu_availability()
-    
-    # Load training configuration from config files (not script parameters)
-    training_config = config.load_training_config(training_config_name)
-    model_params = _model_params_with_ent_coef_frozen(training_config["model_params"])
-
-    # Import environment
-    W40KEngine, register_environment = setup_imports()
-    
-    # Register environment
-    register_environment()
-    
-    # Create environment with specified rewards config
-    # ensure scenario.json exists in config/
-    cfg = get_config_loader()
-    scenario_file = os.path.join(cfg.config_dir, "scenario.json")
-    if not os.path.isfile(scenario_file):
-        raise FileNotFoundError(f"Missing scenario.json in config/: {scenario_file}")
-    # Load unit registry for environment creation
-    from ai.unit_registry import UnitRegistry
-    unit_registry = UnitRegistry()
-    
-    # CRITICAL FIX: Auto-detect controlled_agent from scenario's Player 0 units
-    controlled_agent_key = None
-    try:
-        with open(scenario_file, 'r') as f:
-            scenario_data = json.load(f)
-    
-        # Get first Player 0 unit to determine agent type
-        units = require_key(scenario_data, "units")
-        player_0_units = [u for u in units if require_key(u, "player") == 0]
-        if player_0_units:
-            first_unit_type = require_key(player_0_units[0], "unit_type")
-            if first_unit_type:
-                base_agent_key = unit_registry.get_model_key(first_unit_type)
-                
-                # CRITICAL FIX: Use rewards_config_name directly as controlled_agent_key
-                # rewards_config.json has keys like "SpaceMarine_Infantry_Troop_RangedSwarm_phase1"
-                # The rewards_config_name parameter already contains the full key
-                if rewards_config_name not in ["default", "test"]:
-                    controlled_agent_key = rewards_config_name
-                    print(f"ℹ️  Auto-detected base agent: {base_agent_key}")
-                    print(f"✅ Using phase-specific rewards: {controlled_agent_key}")
-                else:
-                    controlled_agent_key = base_agent_key
-                    print(f"ℹ️  Auto-detected controlled_agent: {controlled_agent_key}")
-                
-    except Exception as e:
-        print(f"⚠️  Failed to auto-detect controlled_agent: {e}")
-        raise ValueError(f"Cannot proceed without controlled_agent - auto-detection failed: {e}")
-    
-    # ✓ CHANGE 3: Check if vectorization is enabled in config
-    n_envs = require_key(training_config, "n_envs")
-    
-    # ✓ CHANGE 3: Special handling for replay/steplog modes (must be single env)
-    if args.replay or args.convert_steplog:
-        n_envs = 1  # Force single environment for replay generation
-        print("ℹ️  Replay mode: Using single environment (vectorization disabled)")
-    else:
-        n_envs = _resolve_n_envs_for_step_logging(n_envs)
-
-    training_config = resolve_run_budget(training_config, n_envs)
-
-    # V11 §10.4 : meme construction d'adversaires que les chemins rotation et agent.
-    opponents = build_training_opponents(
-        training_config,
-        "bot_training" in training_config,
-        training_config["total_episodes"] if "total_episodes" in training_config else None,
-        print,
-    )
-
-    # `opponent_mix` exige qu'un snapshot du modele soit REPUBLIE pendant le run : seul
-    # `train_with_scenario_rotation` le fait (`_publish_self_play_snapshot`). Ici, le premier
-    # tirage de self-play lirait un fichier absent — ou pire, un snapshot fige d'un run precedent,
-    # adversaire immobile pour tout l'entrainement. Erreur explicite plutot que les deux.
-    # Valide AVANT `prepare_run_artifacts` : ce refus est une erreur de configuration, il ne doit
-    # pas laisser derriere lui un `--new` qui a deja mis le modele precedent de cote.
-    if self_play_is_enabled(opponents["opponent_mix_config"]):
-        raise ValueError(
-            "opponent_mix.enabled=True n'est supporte que par le chemin de rotation de scenarios "
-            "(seul `train_with_scenario_rotation` republie le snapshot de self-play). Lancer "
-            "l'entrainement par ce chemin, ou desactiver opponent_mix."
-        )
-
-    model_path, _episode_offset, episode_start_index = prepare_run_artifacts(
-        config.get_models_root(), controlled_agent_key, new_model, append_training, n_envs
-    )
-
-    base_env = None
-    if n_envs > 1:
-        # ✓ CHANGE 3: Create vectorized environments for parallel training
-        print(f"🚀 Creating {n_envs} parallel environments for accelerated training...")
-
-        # Disable step logger for vectorized training (avoid file conflicts)
-        vec_envs = register_vec_env(SubprocVecEnv([
-            make_training_env(
-                rank=i,
-                scenario_file=scenario_file,
-                rewards_config_name=rewards_config_name,
-                training_config_name=training_config_name,
-                controlled_agent_key=controlled_agent_key,
-                unit_registry=unit_registry,
-                step_logger_enabled=False,  # Disabled for parallel envs
-                debug_mode=args.debug,
-                use_bots=opponents["use_bots"],
-                training_bots=opponents["training_bots"],
-                agent_seat_mode=opponents["agent_seat_mode"],
-                global_seed=opponents["agent_seat_seed"],
-                opponent_mix_config=opponents["opponent_mix_config"],
-                n_envs=n_envs,
-                episode_start_index=episode_start_index,
-            )
-            for i in range(n_envs)
-        ]))
-        
-        env = vec_envs
-        print(f"✅ Vectorized training environment created with {n_envs} parallel processes")
-        
-    else:
-        # ✓ CHANGE 3: Single environment (original behavior)
-        base_env = W40KEngine(
-            rewards_config=rewards_config_name,
-            training_config_name=training_config_name,
-            controlled_agent=controlled_agent_key,  # Use auto-detected agent
-            active_agents=None,
-            scenario_file=scenario_file,
-            unit_registry=unit_registry,
-            quiet=True,
-            gym_training_mode=True,
-            debug_mode=args.debug,
-            training_n_envs=n_envs,
-            training_episode_start_index=episode_start_index,
-        )
-        
-        # Connect step logger after environment creation - compliant engine compatibility
-        if step_logger:
-            # Connect StepLogger directly to compliant W40KEngine
-            base_env.step_logger = step_logger
-            print("✅ StepLogger connected to compliant W40KEngine")
-        
-        # Wrap environment with ActionMasker for MaskablePPO compatibility
-        def mask_fn(env):
-            return env.get_action_mask()
-        
-        masked_env = ActionMasker(base_env, mask_fn)
-
-        if opponents["use_bots"]:
-            # V11 §10.4 : bots ponderes de bot_training, comme le chemin rotation.
-            bot_env = BotControlledEnv(
-                masked_env,
-                bots=opponents["training_bots"],
-                unit_registry=unit_registry,
-                agent_seat_mode=require_present(opponents["agent_seat_mode"], "agent_seat_mode"),
-                global_seed=opponents["agent_seat_seed"],
-                **build_self_play_kwargs(opponents["opponent_mix_config"]),
-            )
-            env = Monitor(bot_env)
-        else:
-            # Pas de bot_training : self-play. frozen_model=None est refuse par
-            # SelfPlayWrapper (V11 §10.4).
-            selfplay_env = SelfPlayWrapper(masked_env, frozen_model=None, update_frequency=100)
-            env = Monitor(selfplay_env)
-
-    # VecNormalize: observations and rewards normalization (optional, configurable)
-    vec_norm_cfg = training_config.get("vec_normalize", {})  # get allowed: optional config
-    vec_normalize_enabled = vec_norm_cfg.get("enabled", False)
-    if vec_normalize_enabled:
-        env = _apply_vec_normalize(env, model_path, vec_norm_cfg, new_model, n_envs, print)
-
-    # Check if action masking is available (works for both vectorized and single env)
-    if n_envs == 1:
-        if hasattr(base_env, 'get_action_mask'):
-            print("✅ Action masking enabled - AI will only see valid actions")
-        else:
-            print("⚠️ Action masking not available")
-    
-    # Check if action masking is available
-    if hasattr(base_env, 'get_action_mask'):
-        print("✅ Action masking enabled - AI will only see valid actions")
-    else:
-        print("⚠️ Action masking not available")
-    
-    print(f"📝 Using agent-specific model path: {model_path}")
-
-    # Set device for model creation
-    # PPO optimization: MlpPolicy performs BETTER on CPU (proven by benchmarks)
-    # GPU only beneficial for CNN policies or networks with >2000 hidden units
-    policy_kwargs = require_key(model_params, "policy_kwargs")
-    net_arch = require_key(policy_kwargs, "net_arch")
-    total_params = sum(net_arch) if isinstance(net_arch, list) else 512
-
-    # BENCHMARK RESULTS: CPU 311 it/s vs GPU 282 it/s (10% faster on CPU)
-    # Use GPU only for very large networks (>2000 hidden units)
-    # Obs Dict (pipeline squad spatial) : CNN -> GPU, extracteur injecte (le benchmark MlpPolicy
-    # ne s'applique plus). Obs Box legacy : logique historique inchangee.
-    if _is_dict_obs_space(env.observation_space):
-        _inject_spatial_extractor(model_params)
-    cache_key = (
-        require_present(controlled_agent_key, "controlled_agent_key"),
-        training_config_name,
-        rewards_config_name,
-    )
-    device, use_gpu, obs_size = _resolve_device_for_obs(
-        env.observation_space, args.mode if args else None, gpu_available, total_params,
-        net_arch=net_arch, cache_key=cache_key,
-    )
-
-    model_params["device"] = device
-    model_params["verbose"] = 0  # Disable verbose logging
-    # n_steps est un TOTAL par update : sans cette conversion, un run mono-scenario allouait
-    # n_steps x n_envs transitions (8192 x 48 = 44 Go d'observations).
-    apply_rollout_n_steps(model_params, n_envs, env.observation_space)
-
-    if use_gpu:
-        print(f"🖥️  Using GPU for PPO")
-    elif gpu_available:
-        print(f"ℹ️  Using CPU for PPO (10% faster than GPU for MlpPolicy with {obs_size} features)")
-        print(f"ℹ️  Benchmark: CPU 311 it/s vs GPU 282 it/s")
-    
-    # Determine whether to create new model or load existing
-    specific_log_dir = ""
-    if new_model or not os.path.exists(model_path):
-        print(f"🆕 Creating new model on {device.upper()}...")
-        print("✅ Using MaskablePPO with action masking for tactical combat")
-
-        # Use specific log directory for continuous TensorBoard graphs across runs
-        tb_log_name = f"{training_config_name}_{controlled_agent_key}"
-        specific_log_dir = os.path.join(model_params["tensorboard_log"], tb_log_name)
-        os.makedirs(specific_log_dir, exist_ok=True)
-
-        # Update model_params to use specific directory
-        model_params_copy = model_params.copy()
-        model_params_copy["tensorboard_log"] = specific_log_dir
-        if "learning_rate" in model_params_copy and isinstance(model_params_copy["learning_rate"], dict):
-            model_params_copy["learning_rate"] = _make_constant_lr_schedule(model_params_copy["learning_rate"])
-
-        model = MaskablePPO(env=env, **model_params_copy)
-        # Properly suppress rollout console output
-        if hasattr(model, '_logger') and model._logger:
-            original_info = model._logger.info
-            def filtered_info(*args):
-                msg = args[0] if args else ""
-                if not any(x in str(msg) for x in ['rollout/', 'exploration_rate']):
-                    original_info(*args)
-            model._logger.info = filtered_info
-    elif append_training:
-        print(f"📁 Loading existing model for continued training: {model_path}")
-        try:
-            model = MaskablePPO.load(model_path, env=env, device=device)
-            # Update any model parameters that might have changed
-            model.tensorboard_log = model_params["tensorboard_log"]
-            model.verbose = model_params["verbose"]
-
-            # CURRICULUM LEARNING: Apply new phase hyperparameters to loaded model
-            # This allows Phase 2 to use different learning rates, entropy, etc. than Phase 1
-            # while preserving the neural network weights learned in Phase 1
-            if "learning_rate" in model_params:
-                model.learning_rate = _make_constant_lr_schedule(model_params["learning_rate"])
-            if "ent_coef" in model_params:
-                model.ent_coef = model_params["ent_coef"]
-            if "clip_range" in model_params:
-                # Convert to callable schedule function (required by PPO)
-                model.clip_range = get_schedule_fn(model_params["clip_range"])
-            if "gamma" in model_params:
-                model.gamma = model_params["gamma"]
-            if "gae_lambda" in model_params:
-                model.gae_lambda = model_params["gae_lambda"]
-            if "n_steps" in model_params:
-                model.n_steps = model_params["n_steps"]
-                recreate_rollout_buffer(model)
-            if "batch_size" in model_params:
-                model.batch_size = model_params["batch_size"]
-            if "n_epochs" in model_params:
-                model.n_epochs = model_params["n_epochs"]
-            if "vf_coef" in model_params:
-                model.vf_coef = model_params["vf_coef"]
-            if "max_grad_norm" in model_params:
-                model.max_grad_norm = model_params["max_grad_norm"]
-
-            print(f"✅ Applied new phase hyperparameters: lr={model.learning_rate}, ent={model.ent_coef}, clip={model.clip_range}")
-
-            # CRITICAL FIX: Reinitialize logger after loading from checkpoint
-            # This ensures PPO training metrics (policy_loss, value_loss, etc.) are logged correctly
-            # Without this, model.logger.name_to_value remains empty/stale from the checkpoint
-            from stable_baselines3.common.logger import configure
-
-            # Use specific log directory to ensure continuous TensorBoard graphs across runs
-            # Format: ./tensorboard/{config_name}_{controlled_agent_key}/{run_name}
-            # This prevents creating new timestamped subdirectories on each script run
-            tb_log_name = f"{training_config_name}_{controlled_agent_key}"
-            specific_log_dir = os.path.join(model.tensorboard_log, tb_log_name)
-
-            # Create directory if it doesn't exist
-            os.makedirs(specific_log_dir, exist_ok=True)
-
-            new_logger = configure(specific_log_dir, ["tensorboard"])
-            model.set_logger(new_logger)
-            print(f"✅ Logger reinitialized for continuous TensorBoard: {specific_log_dir}")
-        except Exception as e:
-            print(f"⚠️ Failed to load model: {e}")
-            print("🆕 Creating new model instead...")
-            # Use same specific directory as above
-            model_params_copy = model_params.copy()
-            model_params_copy["tensorboard_log"] = specific_log_dir
-            if "learning_rate" in model_params_copy and isinstance(model_params_copy["learning_rate"], dict):
-                model_params_copy["learning_rate"] = _make_constant_lr_schedule(model_params_copy["learning_rate"])
-            model = MaskablePPO(env=env, **model_params_copy)
-    else:
-        print(f"📁 Loading existing model: {model_path}")
-        try:
-            model = MaskablePPO.load(model_path, env=env, device=device)
-        except Exception as e:
-            print(f"⚠️ Failed to load model: {e}")
-            print("🆕 Creating new model instead...")
-            # Need to create specific directory here too
-            tb_log_name = f"{training_config_name}_{controlled_agent_key}"
-            specific_log_dir = os.path.join(model_params["tensorboard_log"], tb_log_name)
-            os.makedirs(specific_log_dir, exist_ok=True)
-            model_params_copy = model_params.copy()
-            model_params_copy["tensorboard_log"] = specific_log_dir
-            if "learning_rate" in model_params_copy and isinstance(model_params_copy["learning_rate"], dict):
-                model_params_copy["learning_rate"] = _make_constant_lr_schedule(model_params_copy["learning_rate"])
-            model = MaskablePPO(env=env, **model_params_copy)
-
-    _apply_torch_compile(model)
-    return model, env, training_config, model_path, _episode_offset
-
-def create_multi_agent_model(config, training_config_name="default", rewards_config_name="default",
-                            agent_key=None, new_model=False, append_training=False, scenario_override=None,
+def create_multi_agent_model(config, training_config_name, rewards_config_name, agent_key: str,
+                            new_model=False, append_training=False, scenario_override=None,
                             debug_mode=False, device_mode: Optional[str] = None):
     """Create or load PPO model for specific agent with configuration following AI_INSTRUCTIONS.md."""
-    
+
     # Check GPU availability
     gpu_available = check_gpu_availability()
-    
-    # Load training configuration - agent-specific REQUIRED when agent_key provided
-    if agent_key:
-        # CRITICAL: NO FALLBACK - agent-specific config MUST exist
-        training_config = config.load_agent_training_config(agent_key, training_config_name)
-        print(f"✅ Loaded agent-specific training config: config/agents/{agent_key}/{agent_key}_training_config.json [{training_config_name}]")
-        agent_specific_mode = True
-    else:
-        # No agent specified, use global config
-        training_config = config.load_training_config(training_config_name)
-        agent_specific_mode = False
+
+    # CRITICAL: NO FALLBACK - agent-specific config MUST exist. La branche « pas d'agent »
+    # tombait sur `config.load_training_config`, un stub deprecie qui leve sans condition :
+    # elle n'a jamais pu aboutir, et le mode qui l'alimentait n'existe plus.
+    training_config = config.load_agent_training_config(agent_key, training_config_name)
+    print(f"✅ Loaded agent-specific training config: config/agents/{agent_key}/{agent_key}_training_config.json [{training_config_name}]")
 
     model_params = _model_params_with_ent_coef_frozen(training_config["model_params"])
 
@@ -2265,7 +1923,7 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
     cfg = get_config_loader()
     
     # Get scenario file (agent-specific or global)
-    scenario_file = get_agent_scenario_file(cfg, agent_key if agent_specific_mode else None, training_config_name, scenario_override)
+    scenario_file = get_agent_scenario_file(cfg, agent_key, training_config_name, scenario_override)
     print(f"✅ Using scenario: {scenario_file}")
 
     # V11 §10.4 : l'adversaire vient de la CONFIG (bot_training), plus du nom du fichier
@@ -2311,7 +1969,8 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
     # `train_with_scenario_rotation` le fait (`_publish_self_play_snapshot`). Ici, le premier
     # tirage de self-play lirait un fichier absent — ou pire, un snapshot fige d'un run precedent,
     # adversaire immobile pour tout l'entrainement. Erreur explicite plutot que les deux.
-    # Valide AVANT `prepare_run_artifacts` : cf. le jumeau dans `create_model`.
+    # Valide AVANT `prepare_run_artifacts` : ce refus est une erreur de configuration, il ne
+    # doit pas laisser derriere lui un `--new` qui a deja mis le modele precedent de cote.
     if self_play_is_enabled(opponents["opponent_mix_config"]):
         raise ValueError(
             "opponent_mix.enabled=True n'est supporte que par le chemin de rotation de scenarios "
@@ -2426,7 +2085,8 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
     )
 
     model_params["device"] = device
-    # Jumeau de create_model : meme conversion TOTAL -> par env, meme garde-fou de taille.
+    # Jumeau de train_with_scenario_rotation : meme conversion TOTAL -> par env, meme garde-fou
+    # de taille.
     apply_rollout_n_steps(model_params, n_envs, env.observation_space)
 
     if use_gpu:
@@ -2555,8 +2215,8 @@ def create_multi_agent_model(config, training_config_name="default", rewards_con
 # ne lisait les chemins macro_controller_config_* de config/config.json. La documentation
 # qui presentait ce mode comme "implemente aujourd'hui" (Documentation/AI_TRAINING.md) a ete
 # corrigee dans le meme mouvement.
-# Phase 2 : l'agent micro unifie (create_model) porte l'intention de zone. Il n'y a pas de
-# remplacant a chercher, il n'y a plus qu'un seul agent.
+# Phase 2 : l'agent micro unifie (create_multi_agent_model) porte l'intention de zone.
+# Il n'y a pas de remplacant a chercher, il n'y a plus qu'un seul agent.
 
 
 def resolve_turn_step_limit(
@@ -2653,12 +2313,12 @@ def print_truncation_summary(metrics_tracker: Any, log_fn=print) -> None:
 def resume_episode_offset(model_path: str, append_training: bool) -> int:
     """Episodes deja joues par le modele qu'on reprend ; 0 pour un run neuf.
 
-    Un seul point de lecture pour les trois chemins d'entrainement : sans lui, un `--append`
+    Un seul point de lecture pour tous les chemins d'entrainement : sans lui, un `--append`
     relance la rampe de deploiement depuis `active_ratio_start` et repart d'un compte d'episodes
     nul. Il ne pilote PAS learning_rate ni ent_coef, rampes de REGIME propres a chaque run
     (cf. ai/run_state.py).
 
-    `--append` SANS modele existant n'est pas une reprise : les trois chemins creent alors un
+    `--append` SANS modele existant n'est pas une reprise : les chemins creent alors un
     modele neuf (`if new_model or not os.path.exists(model_path)`). Exiger un etat de run ferait
     echouer le premier entrainement d'un agent, avec un message qui accuse le mauvais coupable.
     """
@@ -2680,7 +2340,7 @@ def resolve_run_budget(training_config: Dict[str, Any], n_envs: int,
     Cf. engine/episode_schedule.py.
 
     `total_episodes=None` laisse la valeur du profil : les chemins qui n'ont pas de longueur de run
-    propre (`create_model`) n'en ont pas d'autre.
+    propre (`create_multi_agent_model`) n'en ont pas d'autre.
     """
     resolved = {**training_config, "n_envs": require_positive_int(n_envs, "n_envs")}
     budget = total_episodes_override if total_episodes_override is not None else total_episodes
@@ -4169,14 +3829,33 @@ def train_model(model, training_config, callbacks, model_path, training_config_n
         print_truncation_summary(metrics_tracker)
         close_training_env(model.get_env(), "fin d'entraînement")
 
-def test_trained_model(model, num_episodes, training_config_name="default", agent_key=None, rewards_config_name="default", debug_mode=False):
-    """Test the trained model."""
-    
+def test_trained_model(model, num_episodes, training_config_name, agent_key, rewards_config_name, debug_mode=False):
+    """Test the trained model.
+
+    Le scenario est resolu depuis l'agent et la phase, par le MEME appel que le chemin de
+    rotation qui vient d'entrainer le modele. Il etait code en dur sur `config/scenario.json`,
+    fichier absent du depot : `--test-episodes > 0` mourait au fond de
+    `_load_units_from_scenario`, sans qu'aucune ligne ne nomme l'exigence.
+
+    Les valeurs par defaut des parametres sont retirees dans le meme mouvement : un
+    `agent_key=None` evaluait le modele avec `controlled_agent=None` et les recompenses
+    "default", en silence — c'est ce que faisait le troisieme site d'appel.
+    """
+
     W40KEngine, _ = setup_imports()
     # Load scenario and unit registry for testing
     from ai.unit_registry import UnitRegistry
-    cfg = get_config_loader()
-    scenario_file = os.path.join(cfg.config_dir, "scenario.json")
+    config = get_config_loader()
+    scenario_list = get_scenario_list_for_phase(
+        config, agent_key, training_config_name, scenario_type="bot"
+    )
+    if not scenario_list:
+        raise FileNotFoundError(
+            f"Aucun scenario bot pour {agent_key} (phase {training_config_name}) sous "
+            f"config/agents/{agent_key}/scenarios/ : impossible d'evaluer le modele. "
+            f"{describe_expected_bot_self_scenario_files(False)}"
+        )
+    scenario_file = scenario_list[0]
     unit_registry = UnitRegistry()
     
     env = W40KEngine(
@@ -4228,13 +3907,26 @@ def test_trained_model(model, num_episodes, training_config_name="default", agen
     env.close()
     return win_rate, avg_reward
 
+
+def _non_empty_agent(value: str) -> str:
+    """Refuse `--agent ""` des l'analyse des arguments.
+
+    `required=True` n'exige que la PRESENCE du drapeau. Une chaine vide traversait argparse
+    puis desamorcait les gardes ecrites en `if agent_key:` (`_require_training_config_phase`
+    notamment, qui aurait laisse passer un --training-config absent).
+    """
+    if not value.strip():
+        raise argparse.ArgumentTypeError("--agent ne peut pas etre vide")
+    return value
+
+
 def main():
     """Main training function following AI_INSTRUCTIONS.md exactly."""
     parser = argparse.ArgumentParser(description="Train W40K AI (see Documentation/AI_TURN.md and AI_IMPLEMENTATION.md)")
     parser.add_argument("--training-config", default=None,
                        help="Training config phase name (required, no silent default; e.g. x1, x1_debug)")
     parser.add_argument("--rewards-config", default=None,
-                       help="Rewards config (default: same as --agent when agent set, else 'default')")
+                       help="Rewards config (default: same as --agent)")
     parser.add_argument("--new", action="store_true", 
                        help="Force creation of new model")
     parser.add_argument("--append", action="store_true",
@@ -4244,13 +3936,18 @@ def main():
                             "ai/models/<agent>/ppo_checkpoint_640000_steps.zip). Le checkpoint et "
                             "ses stats VecNormalize sont installes au chemin canonique du modele "
                             "(l'ancien est ecarte, pas ecrase) puis --append est active.")
-    parser.add_argument("--test-only", action="store_true", 
+    parser.add_argument("--test-only", "--eval", action="store_true",
                        help="Only test existing model, don't train")
-    parser.add_argument("--eval", action="store_true",
-                       help="Alias for --test-only")
     parser.add_argument("--test-episodes", type=int, default=0, 
                        help="Number of episodes for testing")
-    parser.add_argument("--agent", type=str, default=None,
+    # OBLIGATOIRE : le mode « generique » sans agent n'existe plus (il ne savait pas resoudre
+    # l'agent controle). Tous les modes survivants resolvent leur config, leur scenario ou leur
+    # modele depuis --agent. Refuser ici, a l'analyse des arguments, plutot qu'apres la
+    # construction du StepLogger et la resynchronisation des configs frontend (`node
+    # scripts/copy-configs.js`), qui sont des effets de bord payes pour rien.
+    # `required` ne garantit que la PRESENCE : `--agent ""` passerait, et la chaine vide
+    # desamorce silencieusement les gardes ecrites en `if agent_key:`. D'ou le validateur.
+    parser.add_argument("--agent", type=_non_empty_agent, required=True,
                        help="Train specific agent (e.g., 'SpaceMarine_Ranged')")
     parser.add_argument("--total-episodes", type=int, default=None,
                        help="Total episodes for training (overrides config file value)")
@@ -4288,7 +3985,6 @@ def main():
     from config_loader import BOARD_DIR_BY_INCHES_TO_SUBHEX
     if args.resolution is not None:
         os.environ["W40K_BOARD_PATH"] = BOARD_DIR_BY_INCHES_TO_SUBHEX[args.resolution]
-    args.test_only = args.test_only or args.eval
 
     # `--new` cree un modele neuf, `--append` continue l'existant : c'est l'un OU l'autre. Rien
     # dans argparse ne les rend exclusifs, et le code choisissait `--new` en silence — une
@@ -4304,12 +4000,12 @@ def main():
             raise ValueError("--resume-from et --new sont exclusifs (--new repartirait de zero)")
         args.append = True
 
-    # Default rewards-config to agent when agent is set (simplifies: --agent X implies rewards X)
+    # Default rewards-config to agent (simplifies: --agent X implies rewards X)
     if args.rewards_config is None:
-        args.rewards_config = args.agent if args.agent else "default"
+        args.rewards_config = args.agent
 
     # Apply --param overrides to config loader (affects all subsequent config loads)
-    if getattr(args, "param", None):
+    if args.param:
         config = get_config_loader()
         _original_load = config.load_agent_training_config
 
@@ -4340,11 +4036,11 @@ def main():
         print(f"Resolution: x{args.resolution} ({BOARD_DIR_BY_INCHES_TO_SUBHEX[args.resolution]})")
     if args.mode:
         print(f"Device mode: {args.mode}")
-    if getattr(args, "param", None):
+    if args.param:
         print(f"Param overrides: {args.param}")
-    if hasattr(args, 'convert_steplog') and args.convert_steplog:
+    if args.convert_steplog:
         print(f"Convert steplog: {args.convert_steplog}")
-    if hasattr(args, 'replay') and args.replay:
+    if args.replay:
         print(f"Replay generation: {args.replay}")
         if args.model:
             print(f"Model file: {args.model}")
@@ -4362,13 +4058,9 @@ def main():
         config = get_config_loader()
         if args.resume_from:
             _promote_checkpoint_for_resume(args.resume_from, args.agent, config)
-        if args.step and not args.agent:
-            raise ValueError("--step requires --agent to read step_log_buffer_size from agent training config")
         _require_training_config_phase(config, args.agent, args.training_config)
-        step_log_buffer_size: Optional[int] = None
-        if args.agent:
-            tc = config.load_agent_training_config(args.agent, args.training_config)
-            step_log_buffer_size = int(require_key(tc, "step_log_buffer_size"))
+        tc = config.load_agent_training_config(args.agent, args.training_config)
+        step_log_buffer_size = int(require_key(tc, "step_log_buffer_size"))
         # Initialize global step logger based on --step argument
         global step_logger
         step_logger = StepLogger(
@@ -4384,10 +4076,6 @@ def main():
                          cwd=project_root, check=True, capture_output=True, text=True, encoding='utf-8', errors='ignore')
         except subprocess.CalledProcessError as e:
             raise RuntimeError(f"Config sync failed: {e}")
-        
-        # Ensure scenario exists ONLY for generic training (no agent specified)
-        if not args.agent:
-            ensure_scenario()
         
         # Convert existing steplog mode
         if args.convert_steplog:
@@ -4408,9 +4096,6 @@ def main():
 
         # Test-only mode - check BEFORE training
         if args.test_only:
-            if not args.agent:
-                raise ValueError("--agent parameter required for --test-only mode")
-
             # La branche --test-only --agent MacroController a ete retiree ici : elle
             # appelait _build_macro_eval_env, qui levait NotImplementedError sans condition.
             # Voir la trace au-dessus de resolve_turn_step_limit.
@@ -4476,8 +4161,10 @@ def main():
                 scenario_file = holdout_scenarios[0]
                 print(f"📋 Using holdout scenario: {os.path.basename(scenario_file)}")
             
-            # CRITICAL FIX: Use rewards_config for controlled_agent (includes phase suffix)
-            effective_agent_key = args.rewards_config if args.rewards_config else args.agent
+            # CRITICAL FIX: Use rewards_config for controlled_agent (includes phase suffix).
+            # `args.rewards_config` retombe sur `args.agent` des la lecture des arguments, donc
+            # il est toujours renseigne ici — le repli qui vivait sur cette ligne etait mort.
+            effective_agent_key = args.rewards_config
 
             base_env = W40KEngine(
                 rewards_config=args.rewards_config,
@@ -4668,7 +4355,7 @@ def main():
             return 0
 
         # Single agent training mode
-        elif args.agent:
+        else:
             # La branche d'entrainement --agent MacroController a ete retiree ici : elle
             # appelait create_macro_controller_model, qui levait NotImplementedError sans
             # condition, sous un cast qui l'habillait en quadruplet. Ses deux gardes
@@ -4801,44 +4488,13 @@ def main():
             if success:
                 # Only test if episodes > 0
                 if args.test_episodes > 0:
-                    test_trained_model(model, args.test_episodes, args.training_config, debug_mode=args.debug)
+                    test_trained_model(model, args.test_episodes, args.training_config, args.agent, args.rewards_config, debug_mode=args.debug)
                 else:
                     print("📊 Skipping testing (--test-episodes 0)")
                 return 0
             else:
                 return 1
         
-        else:
-            # Generic training mode
-            # Create/load model
-            model, env, training_config, model_path, _resume_offset = create_model(
-            config, 
-            args.training_config,
-            args.rewards_config, 
-            args.new, 
-            args.append,
-            args
-        )
-        
-        # Setup callbacks (`_resume_offset` vient de `create_model`, cf. ci-dessus)
-        callbacks = setup_callbacks(config, model_path, training_config, args.training_config,
-                                    rewards_config_name=args.rewards_config,
-                                    global_episode_offset=_resume_offset)
-        
-        # Train model
-        success = train_model(model, training_config, callbacks, model_path, args.training_config, args.rewards_config, controlled_agent=args.agent, episode_offset=_resume_offset)
-        
-        if success:
-            # Only test if episodes > 0
-            if args.test_episodes > 0:
-                test_trained_model(model, args.test_episodes, args.training_config, args.agent, args.rewards_config, debug_mode=args.debug)
-            else:
-                print("📊 Skipping testing (--test-episodes 0)")
-            
-            return 0
-        else:
-            return 1
-            
     except Exception as e:
         print(f"💥 Fatal error: {e}")
         import traceback

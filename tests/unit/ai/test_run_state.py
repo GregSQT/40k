@@ -157,7 +157,7 @@ def test_train_model_seeds_its_tracker_with_the_resume_offset(monkeypatch) -> No
 
 
 def test_append_without_a_model_is_not_a_resume(tmp_path) -> None:
-    """`--append` sur un agent sans modèle : les trois chemins créent un modèle NEUF.
+    """`--append` sur un agent sans modèle : les chemins d'entraînement créent un modèle NEUF.
 
     Exiger un état de run ici ferait échouer le premier entraînement d'un agent, avec un message
     qui accuse le mauvais coupable.
@@ -274,7 +274,7 @@ def test_a_new_run_never_inherits_the_previous_offset(tmp_path) -> None:
     `active_ratio_end`, pour des poids initialisés au hasard.
 
     Le prologue est joué directement : c'est lui qui porte la règle, pas l'ordre de deux appels
-    dans les trois chemins d'entraînement (un ordre ne se vérifie pas, il se re-casse au refactor
+    dans les chemins d'entraînement (un ordre ne se vérifie pas, il se re-casse au refactor
     suivant). L'archivage du run précédent est vérifié dans la foulée — même appel, même contrat.
     """
     from ai.train import prepare_run_artifacts
@@ -351,13 +351,13 @@ def test_the_prologue_creates_the_model_directory_on_every_path(tmp_path) -> Non
 
 
 @pytest.mark.parametrize(
-    "func_name", ["create_model", "create_multi_agent_model", "train_with_scenario_rotation"]
+    "func_name", ["create_multi_agent_model", "train_with_scenario_rotation"]
 )
-def test_the_three_training_paths_share_the_prologue(func_name: str) -> None:
-    """Aucun des trois chemins ne rejoue le prologue à la main.
+def test_the_training_paths_share_the_prologue(func_name: str) -> None:
+    """Aucun des chemins d'entraînement ne rejoue le prologue à la main.
 
     Vérifié sur la source, comme `test_the_start_index_reaches_the_engine_and_not_the_self_play_wrapper` :
-    les jouer demanderait un `config/scenario.json` généré et la construction réelle du modèle.
+    les jouer demanderait un scénario d'agent matérialisé et la construction réelle du modèle.
     Ce prologue avait déjà divergé trois fois (un `makedirs` jamais joué en `--append`, un
     `makedirs` en triple exemplaire, une annonce de reprise conditionnée différemment).
     """

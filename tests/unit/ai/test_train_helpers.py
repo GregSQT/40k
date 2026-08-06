@@ -362,3 +362,53 @@ def test_apply_vec_normalize_resume_names_the_legacy_pkl(tmp_path: Path) -> None
         train._apply_vec_normalize(
             object(), str(tmp_path / "model_X.zip"), {}, False, 2, lambda _m: None
         )
+
+
+def _train_source_tree():
+    import ast
+    import inspect
+
+    return ast.parse(inspect.getsource(train))
+
+
+def test_the_final_eval_resolves_its_scenario_from_the_agent() -> None:
+    """`test_trained_model` chargeait `config/scenario.json`, un fichier absent du depot.
+
+    `--test-episodes > 0` mourait donc au fond de `_load_units_from_scenario`, apres
+    l'entrainement complet, sans qu'aucune ligne ne nomme l'exigence. La suppression du mode
+    generique a emporte le dernier garde-fou qui la nommait encore (`ensure_scenario`).
+    """
+    import ast
+    import inspect
+
+    func = ast.parse(inspect.getsource(train.test_trained_model)).body[0]
+    assert isinstance(func, ast.FunctionDef)
+    body = func.body[1:] if ast.get_docstring(func) else func.body  # la docstring CITE le bug
+    code = "\n".join(ast.unparse(stmt) for stmt in body)
+    assert "scenario.json" not in code, (
+        "test_trained_model code en dur un scenario au lieu de le resoudre depuis l'agent"
+    )
+    assert "get_scenario_list_for_phase(" in code
+
+
+def test_every_final_eval_call_site_passes_the_agent_and_its_rewards() -> None:
+    """Les sites d'appel avaient DIVERGE : deux passaient `args.agent`/`args.rewards_config`,
+    le troisieme ni l'un ni l'autre — le modele etait evalue avec `controlled_agent=None` et
+    les recompenses "default", en silence. Motif jumeau du depot a l'etat pur.
+    """
+    import ast
+
+    calls = [
+        node for node in ast.walk(_train_source_tree())
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "test_trained_model"
+    ]
+    assert calls, "aucun site d'appel trouve : le controle ne regarderait rien"
+    for call in calls:
+        passed = [ast.unparse(a) for a in call.args] + [
+            f"{kw.arg}={ast.unparse(kw.value)}" for kw in call.keywords
+        ]
+        rendered = ", ".join(passed)
+        assert "args.agent" in rendered, f"site d'appel sans agent : {rendered}"
+        assert "args.rewards_config" in rendered, f"site d'appel sans rewards : {rendered}"
