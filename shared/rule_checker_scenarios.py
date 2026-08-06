@@ -31,7 +31,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, Iterator, List, Tuple
 
 from shared.data_validation import require_key
 
@@ -207,13 +207,53 @@ def resolve_params(project_root: Path) -> GenerationParams:
     )
 
 
-def _run_key(selected_units: List[str], params: GenerationParams) -> str:
+def _matchups(selected_units: List[str]) -> Iterator[Tuple[str, str]]:
+    """Les couples (p1, p2) du jeu, dans l'ordre où `generate` les numérote.
+
+    SOURCE UNIQUE, et c'est tout l'intérêt : `_run_key` hache ce que `generate` écrit. Deux
+    énumérations recopiées divergeraient un jour — la clé décrirait alors un jeu que personne ne
+    produit, et le cache redeviendrait aveugle exactement comme il l'était.
+    """
+    return ((p1, p2) for p1 in selected_units for p2 in selected_units)
+
+
+def _payloads(selected_units: List[str], params: GenerationParams) -> List[Dict[str, Any]]:
+    """Les payloads de TOUS les matchups, dans l'ordre de `_matchups`."""
+    return [
+        build_scenario_payload(p1, p2, params.scale, params.board_ref, params.terrain_ref)
+        for p1, p2 in _matchups(selected_units)
+    ]
+
+
+def _run_key(
+    selected_units: List[str], params: GenerationParams, payloads: List[Dict[str, Any]]
+) -> str:
     """Nom du dossier d'un jeu de scénarios : ce dont son contenu dépend ENTIÈREMENT.
 
     Deux jeux différents ne se marchent donc jamais dessus, et un jeu identique se reconnaît sans
     être réécrit. C'est ce qui remplace la purge : RIEN n'est supprimé, donc rien ne peut
     disparaître sous un training rule-checker en cours (le moteur rouvre le fichier de scénario à
     chaque épisode), ni laisser un dossier vide si la sélection échoue à mi-chemin.
+
+    LES PAYLOADS EUX-MÊMES EN FONT PARTIE, et l'oublier a coûté une panne. La clé ne hachait que
+    les ENTRÉES (unités, échelle, plateau, terrain) ; or le contenu dépend aussi de ce que
+    `build_scenario_payload` en FAIT. Le jour où ce payload a gagné `army_faction` (Faction d'Armée
+    déclarée, 08.04), les 2401 fichiers déjà sur le disque sont restés en place — même clé, même
+    nombre, donc `generate` les a rendus tels quels. L'entraînement rule-checker levait alors
+    « config['army_faction'] est absent » à l'ouverture de la phase de commandement, juste après le
+    déploiement : mesuré, pas déduit.
+
+    TOUS les matchups, pas un témoin. Un seul payload miroir (`units[0]` des deux côtés) laissait
+    un angle mort exact : `army_faction` se dérive PAR CAMP du `FACTION_KEYWORDS` de la datasheet,
+    donc changer celui d'une unité non-première réécrivait 2703 fichiers sur 2704 sans bouger la
+    clé — la panne d'origine, à un cas près. Le repli complet n'a pas d'angle mort par
+    construction : il hache ce qui est écrit.
+
+    LES PAYLOADS SONT REÇUS, PAS RECALCULÉS. Mesuré sur les 49 types de juillet 2026, soit 2401
+    matchups : 14 ms pour les fabriquer, 21 ms pour les sérialiser et les hacher. Les refabriquer
+    ici les paierait DEUX fois à chaque génération. `generate` les construit une fois, hache
+    ceux-là, puis écrit exactement ceux-là — c'est aussi ce qui interdit à la clé de décrire autre
+    chose que le contenu du dossier.
     """
     digest = hashlib.sha256(
         json.dumps(
@@ -222,6 +262,7 @@ def _run_key(selected_units: List[str], params: GenerationParams) -> str:
                 "scale": params.scale,
                 "board_ref": params.board_ref,
                 "terrain_ref": params.terrain_ref,
+                "payloads": payloads,
             },
             sort_keys=True,
         ).encode("utf-8")
@@ -237,8 +278,10 @@ def generate(
 ) -> List[str]:
     """Écrit (si besoin) un jeu de scénarios + son manifeste, et rend les chemins.
 
-    Rien n'est jamais supprimé : un jeu déjà complet est RENDU TEL QUEL. Les jeux devenus inutiles
-    restent sur le disque, inertes et ignorés par git ; `rm -rf config/rule_checker` les balaie.
+    Rien n'est jamais supprimé : un jeu de SCÉNARIOS déjà complet est RENDU TEL QUEL. Les jeux
+    devenus inutiles restent sur le disque, inertes et ignorés par git ; `rm -rf
+    config/rule_checker` les balaie. Le manifeste, l'audit et `params.json`, eux, sont réécrits à
+    CHAQUE appel : ils décrivent l'appel, pas les scénarios (cf. le commentaire à leur écriture).
     """
     from ai.unit_registry import UnitRegistry
 
@@ -253,30 +296,30 @@ def generate(
     if missing_in_registry:
         raise KeyError(f"Selected unit_type not found in UnitRegistry: {missing_in_registry}")
 
-    run_dir = output_dir(root) / "scenarios" / _run_key(selected_units, params)
-    expected_count = len(selected_units) ** 2
-    existing = sorted(run_dir.glob("scenario_rule_checker_bot-*.json"))
-    if len(existing) == expected_count:
-        return [str(p) for p in existing]
-
+    # UNE seule construction des payloads : la clé hache CEUX-LÀ et la boucle écrit CEUX-LÀ, donc
+    # le nom du dossier décrit exactement les fichiers qui s'y trouvent.
+    payloads = _payloads(selected_units, params)
+    run_dir = output_dir(root) / "scenarios" / _run_key(selected_units, params, payloads)
     run_dir.mkdir(parents=True, exist_ok=True)
-    scenario_paths: List[str] = []
-    for index, (p1_unit, p2_unit) in enumerate(
-        ((p1, p2) for p1 in selected_units for p2 in selected_units), start=1
-    ):
-        scenario_path = run_dir / f"scenario_rule_checker_bot-{index:04d}.json"
-        scenario_path.write_text(
-            json.dumps(
-                build_scenario_payload(
-                    p1_unit, p2_unit, params.scale, params.board_ref, params.terrain_ref
-                ),
-                indent=2,
-                ensure_ascii=False,
-            ),
-            encoding="utf-8",
-        )
-        scenario_paths.append(str(scenario_path))
 
+    existing = sorted(run_dir.glob("scenario_rule_checker_bot-*.json"))
+    if len(existing) == len(payloads):
+        scenario_paths = [str(p) for p in existing]
+    else:
+        scenario_paths = []
+        for index, payload in enumerate(payloads, start=1):
+            scenario_path = run_dir / f"scenario_rule_checker_bot-{index:04d}.json"
+            scenario_path.write_text(
+                json.dumps(payload, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            scenario_paths.append(str(scenario_path))
+
+    # HORS CACHE, TOUJOURS RÉÉCRITS. Manifeste, audit et paramètres décrivent la sélection et le
+    # lancement, pas les scénarios : les mettre dans la clé ferait réécrire 2401 fichiers
+    # identiques parce qu'une ligne de rejet a changé, et les sauter sur cache-hit les laisserait
+    # périmés. Mesuré : générer 100pts, puis 500pts, puis 100pts rendait le dossier 100pts sans
+    # réécrire `params.json`, et `ai/train.py --rule-checker` reprenait alors 500pts en silence.
     manifest = {
         "mode": "rule_checker",
         "agent": agent_key,

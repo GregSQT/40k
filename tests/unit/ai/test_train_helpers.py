@@ -255,6 +255,60 @@ def test_rule_checker_keeps_the_parameters_of_the_last_explicit_generation(
     assert payload["terrain_ref"] == "terrain-train-02.json"
 
 
+def test_rule_checker_cache_hit_still_refreshes_manifest_audit_and_params(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Un jeu de scenarios reconnu ne dispense PAS de reecrire ce qui decrit l'appel.
+
+    Deux pannes silencieuses tenaient dans le meme retour anticipe. (1) `params.json` : generer
+    100pts, puis 500pts, puis 100pts rendait le dossier 100pts sans le reecrire, donc il annoncait
+    encore 500pts et `train.py --rule-checker` entrainait sur l'autre plateau. (2) manifeste et
+    audit : ils derivent de `select_units`, dont les DETAILS bougent sans changer la liste des
+    types retenus (une regle qui passe de 2 a 1 sur une fiche qui en garde une autre) — meme cle,
+    meme nombre de fichiers, donc des artefacts perimes rendus tels quels.
+    """
+    from shared import rule_checker_scenarios
+
+    detail_v1 = {"unit_type": "Intercessor", "file": "f.ts", "implemented_rules": ["A", "B"]}
+    rejet_v1 = [{"unit_type": "Boyz", "file": "b.ts", "reason": "RULES_STATUS missing"}]
+    monkeypatch.setattr(
+        rule_checker_scenarios, "select_units",
+        lambda root: (["Intercessor"], [detail_v1], rejet_v1),
+    )
+    cible = rule_checker_scenarios.generate(tmp_path, agent_key="CoreAgent")
+    horodatage = Path(cible[0]).stat().st_mtime_ns
+
+    rule_checker_scenarios.generate(
+        tmp_path, agent_key="CoreAgent",
+        params=rule_checker_scenarios.GenerationParams(
+            scale="500pts", board_ref="44x60x10", terrain_ref="terrain-train-02.json"
+        ),
+    )
+
+    detail_v2 = {"unit_type": "Intercessor", "file": "f.ts", "implemented_rules": ["A"]}
+    rejet_v2 = [{"unit_type": "Boyz", "file": "b.ts", "reason": "RULES_STATUS has no value == 2"}]
+    monkeypatch.setattr(
+        rule_checker_scenarios, "select_units",
+        lambda root: (["Intercessor"], [detail_v2], rejet_v2),
+    )
+    retour = rule_checker_scenarios.generate(tmp_path, agent_key="CoreAgent")
+
+    assert retour == cible, "meme selection + memes parametres doivent rendre le meme jeu"
+    assert Path(cible[0]).stat().st_mtime_ns == horodatage, "jeu identique reecrit inutilement"
+
+    dossier = Path(cible[0]).parent
+    params_ecrits = json.loads(
+        (tmp_path / "config" / "rule_checker" / "params.json").read_text(encoding="utf-8")
+    )
+    assert params_ecrits["scale"] == rule_checker_scenarios.DEFAULT_SCALE, (
+        "`params.json` reste sur la generation intermediaire : le training reprendra 500pts"
+    )
+    manifeste = json.loads((dossier / "manifest.json").read_text(encoding="utf-8"))
+    assert manifeste["selected_details"] == [detail_v2], "manifeste perime sur cache-hit"
+    audit = json.loads((dossier / "audit_rejected.json").read_text(encoding="utf-8"))
+    assert audit == rejet_v2, "audit des rejetes perime sur cache-hit"
+
+
 def test_build_agent_model_path_and_progress_width(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         train,

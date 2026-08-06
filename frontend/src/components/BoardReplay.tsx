@@ -957,6 +957,16 @@ export const BoardReplay: React.FC = () => {
                   saveSuccess:
                     saveRoll !== undefined && saveTarget > 0 ? saveRoll >= saveTarget : false,
                   damageDealt: damage,
+                  // Capacités nommées : mêmes champs que le PvP reçoit du moteur, extraits ici
+                  // des tokens de la ligne par le parseur. Sans eux, le détail déplié du replay
+                  // reste muet là où le PvP affiche « [OATH OF MOMENT] ».
+                  hitAbility: action.hit_ability,
+                  woundAbility: action.wound_ability,
+                  woundBonusAbility: action.wound_bonus_ability,
+                  // Dé d'origine d'un jet relancé : le détail affiche « 1->3 », comme en PvP.
+                  attackRollInitial: action.hit_roll_initial,
+                  strengthRollInitial: action.wound_roll_initial,
+                  saveRollInitial: action.save_roll_initial,
                 },
               ]
             : undefined;
@@ -1082,6 +1092,13 @@ export const BoardReplay: React.FC = () => {
                       ? action.save_roll >= action.save_target
                       : false,
                   damageDealt: action.damage || 0,
+                  // JUMEAU du tir ci-dessus : la mêlée nomme les mêmes capacités.
+                  hitAbility: action.hit_ability,
+                  woundAbility: action.wound_ability,
+                  woundBonusAbility: action.wound_bonus_ability,
+                  attackRollInitial: action.hit_roll_initial,
+                  strengthRollInitial: action.wound_roll_initial,
+                  saveRollInitial: action.save_roll_initial,
                 },
               ]
             : undefined;

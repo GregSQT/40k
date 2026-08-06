@@ -463,3 +463,36 @@ def test_l_analyzer_atteste_l_usage_de_sustained_hits(monkeypatch, tmp_path):
 
     usage = {k: v for k, v in stats["weapon_rule_usage"].items() if k[0] == "SUSTAINED_HITS"}
     assert usage and any(sum(v.values()) > 0 for v in usage.values()), stats["weapon_rule_usage"]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# [REROLLED:n] — le dé AVANT relance, jusqu'à step.log
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_le_de_d_origine_d_une_relance_atteint_step_log(monkeypatch, tmp_path):
+    """Maillon complet `_SHOT_RECORD_FIELD_MAP` -> StepLogger.
+
+    Le nom de la capacité dit que la relance était POSSIBLE ; seul le dé d'origine dit qu'elle a
+    EU LIEU et ce qu'elle a changé. Sans l'entrée dans le field map, `Wound 6(4+)` est
+    indiscernable d'un 6 direct — alors que le combat log PvP affiche déjà « (1->6) ».
+
+    La forme `Wound N(T+)` reste intacte : l'analyzer et le parseur de replay la lisent par
+    regex, d'où un token PARAMÉTRÉ accolé au segment (même forme que `[RAPID FIRE:2]`).
+    """
+    gs, raw_log = _engine_shoot_log(
+        monkeypatch, [], [4, 1, 6, 2],  # touche 4, blessure 1 (echec) -> relance 6, sauvegarde 2
+        unit_rules=({"ruleId": "reroll_1_towound", "displayName": "Targeted Intercession"},),
+    )
+    line = _step_log_line(tmp_path, gs, raw_log)
+
+    assert "Wound 6(4+)" in line, f"la forme lue par l'analyzer ne doit pas bouger : {line}"
+    assert "[REROLLED:1]" in line, f"le de d'origine doit etre lisible : {line}"
+    assert "[TARGETED INTERCESSION]" in line, line
+
+
+def test_sans_relance_aucun_token_rerolled(monkeypatch, tmp_path):
+    """Contre-épreuve : un jet réussi du premier coup ne porte aucun dé d'origine."""
+    gs, raw_log = _engine_shoot_log(monkeypatch, [], [4, 6, 2])
+    line = _step_log_line(tmp_path, gs, raw_log)
+
+    assert "REROLLED" not in line, line

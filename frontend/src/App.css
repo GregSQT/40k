@@ -1215,7 +1215,20 @@ body {
   width: min(560px, 92vw);
 }
 
-.deployment-panel__picker-content--oath {
+/* La confirmation ne porte qu'une phrase : boîte plus étroite et tooltip sans hauteur plancher. */
+.deployment-panel__picker--oath-confirm {
+  width: min(400px, 88vw);
+  padding: 10px;
+}
+
+.deployment-panel__picker--oath-confirm .deployment-panel__picker-tooltip {
+  min-height: 0;
+}
+
+/* Déclaré AVANT `.deployment-panel__picker-content` (3 colonnes) : à spécificité égale la règle
+   de base gagnait et le texte se retrouvait coincé dans la 1re colonne (140px). D'où le
+   sélecteur descendant, plus spécifique. */
+.deployment-panel__picker--oath .deployment-panel__picker-content--oath {
   grid-template-columns: 1fr;
 }
 
@@ -1237,6 +1250,14 @@ body {
 
 .deployment-panel__picker-actions--oath {
   gap: 8px;
+}
+
+/* `--draggable` remet le fond du titre à transparent : les popups Oath rétablissent le bandeau
+   vert du titre standard. */
+.deployment-panel__picker--oath .deployment-panel__picker-title--draggable {
+  background: rgba(76, 175, 80, 0.35);
+  padding: 4px 8px;
+  border-radius: 4px;
 }
 
 .deployment-panel__picker-title {
@@ -1450,6 +1471,24 @@ body {
 
 .deployment-panel__picker-close:hover {
   background: #4b5563;
+}
+
+.deployment-panel__picker-close--cancel {
+  background: var(--ui-gray-cancel);
+  border-color: #9ca3af;
+}
+
+.deployment-panel__picker-close--cancel:hover {
+  background: #9ca3af;
+}
+
+.deployment-panel__picker-close--validate {
+  background: var(--ui-green-validate);
+  border-color: var(--ui-green-border);
+}
+
+.deployment-panel__picker-close--validate:hover {
+  background: #15803d;
 }
 
 .deployment-panel__type-group {

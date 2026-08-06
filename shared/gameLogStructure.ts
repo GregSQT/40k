@@ -85,8 +85,14 @@ export interface TrainingLogEntry extends BaseLogEntry {
  */
 export interface ShootDetail {
   shotNumber: number;
-  attackRoll?: number;
-  strengthRoll?: number;
+  /**
+   * `null` quand l'attaque n'a JETÉ aucun dé : [TORRENT] 24.37 et les touches additionnelles de
+   * [SUSTAINED HITS] 24.36 côté touche, [LETHAL HITS] 24.23 côté blessure. Le moteur envoie bien
+   * `null`, pas l'absence de clé (`attack_sequence.py`) — un type `number` seul mentait, et
+   * laissait passer un affichage « (null) ».
+   */
+  attackRoll?: number | null;
+  strengthRoll?: number | null;
   hitResult: "HIT" | "MISS";
   strengthResult: "SUCCESS" | "FAILED";
   hitTarget?: number;
@@ -101,6 +107,26 @@ export interface ShootDetail {
   targetUnitType?: string;
   targetCol?: number;
   targetRow?: number;
+  /**
+   * Nom d'affichage de la capacité qui a ouvert une relance EFFECTUÉE : « Oath of Moment »,
+   * « Targeted Intercession »… Posé par le moteur sur chaque record, via `resolve_hit_reroll_ability`
+   * côté touche et `resolve_wound_reroll_ability` côté blessure — les deux traducteurs sont
+   * partagés par le tir ET la mêlée, et transmis au navigateur dans `shootDetails`.
+   */
+  hitAbility?: string;
+  woundAbility?: string;
+  /**
+   * +1 au jet de blessure d'Oath of Moment : un MODIFICATEUR, pas une relance (le seuil est déjà
+   * net dans `woundTarget`). Champ distinct de `woundAbility` — les deux peuvent jouer ensemble.
+   */
+  woundBonusAbility?: string;
+  /**
+   * Jet AVANT relance, présent uniquement quand une relance a EU LIEU. Le champ courant
+   * (`attackRoll`…) porte toujours le jet FINAL : le log affiche « initial->final ».
+   */
+  attackRollInitial?: number;
+  strengthRollInitial?: number;
+  saveRollInitial?: number;
 }
 
 /**

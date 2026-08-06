@@ -86,6 +86,10 @@ def _weapon_group() -> Dict[str, Any]:
         # docstring et faisait lever l'émission, qui les lit en accès direct à juste titre.
         "heavy_applied": False,
         "rapid_fire_applied": 0,
+        # Oath of Moment (08.04) : posées sur TOUS les groupes par la même construction, pour la
+        # même raison — l'émission les lit en accès direct (`RR` / token du +1 de blessure).
+        "oath_hit_reroll": False,
+        "oath_wound_bonus": 0,
     }
 
 

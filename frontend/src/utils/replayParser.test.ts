@@ -293,6 +293,182 @@ describe("replayParser", () => {
     expect(control?.command_points).toBeUndefined();
   });
 
+  // Les capacités nommées vivaient UNIQUEMENT dans le texte de la ligne : le replay affichait le
+  // message brut mais son détail déplié ne pouvait rien en dire, alors que le PvP les reçoit du
+  // moteur dans `shootDetails`. Le parseur les extrait donc des tokens accolés à chaque jet.
+  it("extrait les capacités de relance et le +1 d'Oath d'une ligne de TIR", () => {
+    const text = [
+      "=== EPISODE 1 START ===",
+      "Scenario: demo",
+      "Bot: RandomBot",
+      `Rules: ${VALID_RULES_JSON}`,
+      "[12:00:00] Board: cols=10 rows=10 inches_to_subhex=1 hex_radius=2.78 margin=1",
+      "Unit 1 (Intercessor) P1: Starting position (0, 0), HP_MAX=5",
+      "Unit 2 (Termagant) P2: Starting position (2, 0), HP_MAX=4",
+      "[12:00:00] T1 P1 DEPLOYMENT : Unit 1(-1,-1) DEPLOYED from (-1,-1) to (0,0)",
+      "[12:00:01] T1 P2 DEPLOYMENT : Unit 2(-1,-1) DEPLOYED from (-1,-1) to (1,0)",
+      "[12:00:02] T1 P1 SHOOT : Unit 1(0,0) SHOT [Bolt Rifle] Unit 2(1,0)" +
+        " - Hit 4(3+) [COVER] [OATH OF MOMENT]" +
+        " - Wound 6(3+) [TARGETED INTERCESSION] [OATH OF MOMENT]" +
+        " - Save 2(3+) - Dmg:1HP",
+      "EPISODE END: Winner=1, Method=elimination",
+    ].join("\n");
+
+    const shoot = parse_log_file_from_text(text).episodes[0].actions.find(
+      (a) => (a as { type?: string }).type === "shoot"
+    ) as { hit_ability?: string; wound_ability?: string; wound_bonus_ability?: string };
+    // [COVER] est un modificateur de seuil, pas une capacité : il ne doit pas être pris pour un nom.
+    expect(shoot.hit_ability).toBe("OATH OF MOMENT");
+    // Côté blessure les deux coexistent : la relance, puis le +1 (qui n'est PAS une relance).
+    expect(shoot.wound_ability).toBe("TARGETED INTERCESSION");
+    expect(shoot.wound_bonus_ability).toBe("OATH OF MOMENT");
+  });
+
+  it("extrait les capacités d'une ligne de MÊLÉE (jumeau du tir)", () => {
+    const text = [
+      "=== EPISODE 1 START ===",
+      "Scenario: demo",
+      "Bot: RandomBot",
+      `Rules: ${VALID_RULES_JSON}`,
+      "[12:00:00] Board: cols=10 rows=10 inches_to_subhex=1 hex_radius=2.78 margin=1",
+      "Unit 1 (Intercessor) P1: Starting position (0, 0), HP_MAX=5",
+      "Unit 2 (Termagant) P2: Starting position (2, 0), HP_MAX=4",
+      "[12:00:00] T1 P1 DEPLOYMENT : Unit 1(-1,-1) DEPLOYED from (-1,-1) to (0,0)",
+      "[12:00:01] T1 P2 DEPLOYMENT : Unit 2(-1,-1) DEPLOYED from (-1,-1) to (1,0)",
+      "[12:00:02] T1 P1 FIGHT : Unit 1(0,0) FOUGHT Unit 2(1,0) with [Chainsword]" +
+        " - Hit 4(3+) [SUSTAINED HITS] [OATH OF MOMENT]" +
+        " - Wound 4(4+) [TARGETED INTERCESSION]" +
+        " - Save 2(3+) - Dmg:1HP [FIGHT_SUBPHASE:fight] [SUCCESS]",
+      "EPISODE END: Winner=1, Method=elimination",
+    ].join("\n");
+
+    const fight = parse_log_file_from_text(text).episodes[0].actions.find(
+      (a) => (a as { type?: string }).type === "fight"
+    ) as { hit_ability?: string; wound_ability?: string; wound_bonus_ability?: string };
+    expect(fight.hit_ability).toBe("OATH OF MOMENT");
+    expect(fight.wound_ability).toBe("TARGETED INTERCESSION");
+    expect(fight.wound_bonus_ability).toBeUndefined();
+  });
+
+  // `[REROLLED:n]` porte le dé d'AVANT relance : sans lui le replay ne montrait que le second
+  // dé, là où le combat log PvP affiche « 1->6 » pour la même attaque.
+  it("extrait le dé d'origine d'un jet relancé, sans le prendre pour une capacité", () => {
+    const text = [
+      "=== EPISODE 1 START ===",
+      "Scenario: demo",
+      "Bot: RandomBot",
+      `Rules: ${VALID_RULES_JSON}`,
+      "[12:00:00] Board: cols=10 rows=10 inches_to_subhex=1 hex_radius=2.78 margin=1",
+      "Unit 1 (Intercessor) P1: Starting position (0, 0), HP_MAX=5",
+      "Unit 2 (Termagant) P2: Starting position (2, 0), HP_MAX=4",
+      "[12:00:00] T1 P1 DEPLOYMENT : Unit 1(-1,-1) DEPLOYED from (-1,-1) to (0,0)",
+      "[12:00:01] T1 P2 DEPLOYMENT : Unit 2(-1,-1) DEPLOYED from (-1,-1) to (1,0)",
+      "[12:00:02] T1 P1 SHOOT : Unit 1(0,0) SHOT [Bolt Rifle] Unit 2(1,0)" +
+        " - Hit 3(3+) [OATH OF MOMENT] [REROLLED:1]" +
+        " - Wound 6(4+) [TARGETED INTERCESSION] [REROLLED:2]" +
+        " - Save 4(3+) [REROLLED:1] - Dmg:1HP",
+      "EPISODE END: Winner=1, Method=elimination",
+    ].join("\n");
+
+    const shoot = parse_log_file_from_text(text).episodes[0].actions.find(
+      (a) => (a as { type?: string }).type === "shoot"
+    ) as {
+      hit_roll?: number;
+      hit_roll_initial?: number;
+      wound_roll_initial?: number;
+      save_roll_initial?: number;
+      hit_ability?: string;
+      wound_ability?: string;
+    };
+    expect(shoot.hit_roll).toBe(3);
+    expect(shoot.hit_roll_initial).toBe(1);
+    expect(shoot.wound_roll_initial).toBe(2);
+    expect(shoot.save_roll_initial).toBe(1);
+    // `[REROLLED:n]` n'est pas un nom de capacité : il ne doit pas en chasser un vrai.
+    expect(shoot.hit_ability).toBe("OATH OF MOMENT");
+    expect(shoot.wound_ability).toBe("TARGETED INTERCESSION");
+  });
+
+  it("ne prend aucun token de règle d'arme pour une capacité", () => {
+    const text = [
+      "=== EPISODE 1 START ===",
+      "Scenario: demo",
+      "Bot: RandomBot",
+      `Rules: ${VALID_RULES_JSON}`,
+      "[12:00:00] Board: cols=10 rows=10 inches_to_subhex=1 hex_radius=2.78 margin=1",
+      "Unit 1 (Intercessor) P1: Starting position (0, 0), HP_MAX=5",
+      "Unit 2 (Termagant) P2: Starting position (2, 0), HP_MAX=4",
+      "[12:00:00] T1 P1 DEPLOYMENT : Unit 1(-1,-1) DEPLOYED from (-1,-1) to (0,0)",
+      "[12:00:01] T1 P2 DEPLOYMENT : Unit 2(-1,-1) DEPLOYED from (-1,-1) to (1,0)",
+      "[12:00:02] T1 P1 SHOOT : Unit 1(0,0) SHOT [RAPID FIRE:2] [Bolt Rifle] Unit 2(1,0)" +
+        " - Hit 4(4+->3+) [HEAVY] - Wound 5(4+) - Save 2(3+) - Dmg:1HP",
+      "EPISODE END: Winner=1, Method=elimination",
+    ].join("\n");
+
+    const shoot = parse_log_file_from_text(text).episodes[0].actions.find(
+      (a) => (a as { type?: string }).type === "shoot"
+    ) as { hit_ability?: string; wound_ability?: string };
+    expect(shoot.hit_ability).toBeUndefined();
+    expect(shoot.wound_ability).toBeUndefined();
+  });
+
+  // VERROU borne DROITE. Les fixtures ci-dessus finissent toutes par `Dmg:1HP`, qui protège le
+  // dernier jet de la queue de ligne. Un jet RATÉ termine la ligne : la métadonnée (récompense,
+  // figurines, sous-phase, issue) lui est alors collée sans séparateur ` - `, et se retrouvait
+  // dans son segment. Mesuré sur un vrai `step.log` : `wound_ability = "R:+0.0"` en tir, et
+  // `hit_ability = "FIGHT_SUBPHASE:fight"` sur CHAQUE attaque de mêlée ratée.
+  it("ne prend pas la métadonnée de fin de ligne pour une capacité", () => {
+    const text = [
+      "=== EPISODE 1 START ===",
+      "Scenario: demo",
+      "Bot: RandomBot",
+      `Rules: ${VALID_RULES_JSON}`,
+      "[12:00:00] Board: cols=10 rows=10 inches_to_subhex=1 hex_radius=2.78 margin=1",
+      "Unit 1 (Intercessor) P1: Starting position (0, 0), HP_MAX=5",
+      "Unit 2 (Termagant) P2: Starting position (2, 0), HP_MAX=4",
+      "[12:00:00] T1 P1 DEPLOYMENT : Unit 1(-1,-1) DEPLOYED from (-1,-1) to (0,0)",
+      "[12:00:01] T1 P2 DEPLOYMENT : Unit 2(-1,-1) DEPLOYED from (-1,-1) to (1,0)",
+      // Blessure ratée : la ligne s'arrête là, la métadonnée suit (forme réelle du step.log).
+      "[12:00:02] T1 P1 SHOOT : Unit 1(0,0) SHOT [Bolt Rifle] Unit 2(1,0)" +
+        " - Hit 5(3+) - Wound 1(4+) [R:+0.0] [MODELS: 1#0@(0,0)] [SHOOTER_MODELS: 1#0] [SUCCESS]",
+      "EPISODE END: Winner=1, Method=elimination",
+    ].join("\n");
+
+    const shoot = parse_log_file_from_text(text).episodes[0].actions.find(
+      (a) => (a as { type?: string }).type === "shoot"
+    ) as { hit_ability?: string; wound_ability?: string; wound_bonus_ability?: string };
+
+    expect(shoot.wound_ability).toBeUndefined();
+    expect(shoot.wound_bonus_ability).toBeUndefined();
+    expect(shoot.hit_ability).toBeUndefined();
+  });
+
+  it("ne prend pas [FIGHT_SUBPHASE] pour une capacité sur une attaque de mêlée ratée", () => {
+    const text = [
+      "=== EPISODE 1 START ===",
+      "Scenario: demo",
+      "Bot: RandomBot",
+      `Rules: ${VALID_RULES_JSON}`,
+      "[12:00:00] Board: cols=10 rows=10 inches_to_subhex=1 hex_radius=2.78 margin=1",
+      "Unit 1 (Intercessor) P1: Starting position (0, 0), HP_MAX=5",
+      "Unit 2 (Termagant) P2: Starting position (2, 0), HP_MAX=4",
+      "[12:00:00] T1 P1 DEPLOYMENT : Unit 1(-1,-1) DEPLOYED from (-1,-1) to (0,0)",
+      "[12:00:01] T1 P2 DEPLOYMENT : Unit 2(-1,-1) DEPLOYED from (-1,-1) to (1,0)",
+      // Touche ratée en mêlée : `[FIGHT_SUBPHASE:...]` est OBLIGATOIRE (le parser lève sans lui),
+      // donc ce cas est celui de toutes les attaques ratées de tous les replays de combat.
+      "[12:00:02] T1 P1 FIGHT : Unit 1(0,0) FOUGHT Unit 2(1,0) with [Chainsword]" +
+        " - Hit 2(3+) [R:+0.0] [FIGHT_SUBPHASE:fight]",
+      "EPISODE END: Winner=1, Method=elimination",
+    ].join("\n");
+
+    const fight = parse_log_file_from_text(text).episodes[0].actions.find(
+      (a) => (a as { type?: string }).type === "fight"
+    ) as { hit_ability?: string; hit_roll_initial?: number };
+
+    expect(fight.hit_ability).toBeUndefined();
+    expect(fight.hit_roll_initial).toBeUndefined();
+  });
+
   it("lève sur une zone OBJECTIVE CONTROL malformée", () => {
     const text = [
       ...CONTROL_LOG_HEAD,

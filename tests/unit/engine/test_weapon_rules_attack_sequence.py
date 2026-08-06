@@ -187,6 +187,54 @@ def test_sans_twin_linked_pas_de_relance():
     assert out["counts"]["wounds"] == 0
 
 
+# ------------------------------------------------------------------- VERROUS jets AVANT relance
+# Le combat log affiche « initial->final ». Sans le de d'origine, une relance est indiscernable
+# d un jet direct : un 2 relance en 5 s affiche « (5) », comme un 5 du premier coup. Le jumeau
+# `attackRollInitial` est verrouille cote touche (test_faction_abilities.py, relance d Oath) ;
+# ces deux-ci fermaient un trou : ils n etaient tenus par AUCUN test Python, seulement par le
+# rendu du navigateur. Les supprimer du moteur laissait pytest, pyright et biome verts.
+
+def test_verrou_le_jet_de_blessure_avant_relance_est_conserve():
+    """`strengthRollInitial` : la relance TWIN-LINKED garde le de d origine."""
+    profile = WeaponAttackProfile(twin_linked=True)
+    out = _roll([4, 2, 5, 4], profile=profile, wound=4)  # touche, blessure 2 ratee, relance 5, save
+
+    rec = out["shot_records"][0]
+    assert rec["strengthRoll"] == 5, "le champ courant porte le jet FINAL"
+    assert rec["strengthRollInitial"] == 2, "le jet d origine doit rester lisible"
+    assert rec["woundRerollCause"] == "twin_linked"
+
+
+def test_verrou_pas_de_jet_initial_sans_relance_de_blessure():
+    """Contre-epreuve : sans relance, la clef est ABSENTE — jamais posee a None."""
+    rec = _roll([4, 5, 4], wound=4)["shot_records"][0]
+
+    assert rec["strengthRoll"] == 5
+    assert "strengthRollInitial" not in rec
+    assert "woundRerollCause" not in rec
+
+
+def test_verrou_le_jet_de_sauvegarde_avant_relance_est_conserve():
+    """`saveRollInitial` : `save_1` relance le 1 de sauvegarde, le de d origine est garde.
+
+    Seule jambe SANS enum de cause (un unique declencheur), donc ce champ est le seul temoin
+    de la relance : le retirer rend la relance de sauvegarde totalement muette dans le log.
+    """
+    out = _roll([4, 5, 1, 4], rerolls=RerollProfile(save_1=True), save_th=3)
+
+    rec = out["shot_records"][0]
+    assert rec["saveRoll"] == 4, "le champ courant porte le jet FINAL"
+    assert rec["saveRollInitial"] == 1, "le 1 relance doit rester lisible"
+
+
+def test_verrou_pas_de_jet_initial_sans_relance_de_sauvegarde():
+    """Contre-epreuve : `save_1` arme mais aucun 1 jete -> aucune relance, clef absente."""
+    rec = _roll([4, 5, 4], rerolls=RerollProfile(save_1=True), save_th=3)["shot_records"][0]
+
+    assert rec["saveRoll"] == 4
+    assert "saveRollInitial" not in rec
+
+
 # --------------------------------------------------------------------------------------- ANTI
 
 def test_anti_abaisse_le_seuil_de_blessure_critique_si_keyword_present():

@@ -4945,6 +4945,15 @@ class W40KEngine(gym.Env):
         # (Oath of Moment). Sans cette entree, le champ n atteint jamais step.log et l analyzer
         # ne peut pas distinguer une relance POSSIBLE d une relance EFFECTUEE.
         "hitAbility": "hit_ability_display_name",
+        # MODIFICATEUR de blessure (+1 d Oath), pas une relance : sans cette entree le seuil
+        # ameliore atteint step.log sans sa cause, alors que la relance de touche y est nommee.
+        "woundBonusAbility": "wound_bonus_ability_display_name",
+        # Jets AVANT relance. Sans ces trois entrees, step.log rend `Hit 3(3+) [OATH OF MOMENT]`,
+        # indiscernable d une touche directe : le nom de la capacite dit que la relance ETAIT
+        # POSSIBLE, le de d origine est le seul a dire qu elle a EU LIEU (et ce qu elle a change).
+        "attackRollInitial": "hit_roll_initial",
+        "strengthRollInitial": "wound_roll_initial",
+        "saveRollInitial": "save_roll_initial",
         # [SUSTAINED HITS X] 24.36 : touche ADDITIONNELLE nee d une touche critique — pas une
         # attaque, donc aucun jet de touche (`attackRoll=None`, rendu « Hit None(3+) »). Sans
         # ce marqueur, l analyzer ne peut ni la distinguer d une ligne malformee, ni la sortir

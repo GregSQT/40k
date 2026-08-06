@@ -434,8 +434,8 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
                 <ToggleRow
                   checked={confirmOathTarget}
                   onChange={onToggleConfirmOathTarget}
-                  label="Confirmer la cible d'Oath of Moment"
-                  description="Affiche un popup de confirmation après le clic sur l'unité ennemie désignée au début de la phase de commandement."
+                  label="Confirm Oath of Moment target"
+                  description="Shows a confirmation popup after clicking the enemy unit designated at the start of the Command phase."
                 />
               )}
             </CollapsibleSection>

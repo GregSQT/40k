@@ -19,7 +19,7 @@ l allocation.
 """
 
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from shared.data_validation import require_key
 from engine.utils.weapon_helpers import weapon_has_rule, weapon_rule_parameter
@@ -248,6 +248,18 @@ def expected_damage_per_attack(
     return (p_crit_hit * ev_on_crit_hit + p_normal_hit * ev_wound) * float(damage)
 
 
+def _evaluate_roll(roll: int, crit_on: int, target: int) -> Tuple[bool, bool]:
+    """Verdict d'UN de : `(critique, reussite)`. 05.01 — un 1 non modifie echoue toujours,
+    un critique reussit toujours.
+
+    Ecrit quatre fois a l'identique dans `roll_attack_pool` (touche et blessure, avant et apres
+    relance) : c'est la forme ou les deux blocs de relance divergeaient le plus facilement du
+    jet initial qu'ils recalculent.
+    """
+    is_critical = roll >= crit_on
+    return is_critical, is_critical or (roll != NATURAL_FAIL_ROLL and roll >= target)
+
+
 def roll_attack_pool(
     *,
     n_attacks: int,
@@ -279,6 +291,13 @@ def roll_attack_pool(
         # donc ne relance rien, et le record de touche plus bas lit cette variable dans les DEUX
         # branches. La laisser dans la seule branche « avec jet » la rendait non liee sur TORRENT.
         hit_reroll_cause: Optional[str] = None
+        # Borne pour l'analyse statique, PAS pour la lecture : contrairement a
+        # `hit_reroll_cause` (lu ligne ~350 dans la branche TORRENT), celui-ci n'est lu que sous
+        # le garde de cause. INVARIANT tenu par construction et valable pour les trois des :
+        # une cause de relance n'est jamais posee sans que le de d'origine le soit dans la meme
+        # foulee, donc `*RollInitial` n'est jamais emis a None — la clef est absente ou entiere,
+        # jamais `null` (cf. `shared/gameLogStructure.ts`, ou elle est `number?`).
+        hit_roll_initial: Optional[int] = None
         if profile.torrent:
             # [TORRENT] 24.37 : l attaque touche automatiquement. Aucun de n est jete (donc
             # aucune touche critique : un auto-hit n est pas un « unmodified 6 »).
@@ -286,9 +305,8 @@ def roll_attack_pool(
             is_critical_hit = False
         else:
             hit_roll = roll_d6()
-            is_critical_hit = hit_roll >= profile.crit_hit_on
-            hit_success = is_critical_hit or (
-                hit_roll != NATURAL_FAIL_ROLL and hit_roll >= hit_target
+            is_critical_hit, hit_success = _evaluate_roll(
+                hit_roll, profile.crit_hit_on, hit_target
             )
             # Un seul reroll par de (01 Core, Re-rolls) : `hit_1` relance les seuls 1,
             # `hit_any_fail` (Oath of Moment) relance TOUT echec. Meme forme que la blessure
@@ -301,10 +319,12 @@ def roll_attack_pool(
                     "hit_1" if (hit_roll == NATURAL_FAIL_ROLL and rerolls.hit_1)
                     else "hit_any_fail"
                 )
+                # Jet AVANT relance, conserve : sans lui le log ne peut afficher que le second de
+                # (« Hit 3 » sur un 1 relance), et le joueur ne voit pas ce que la relance a change.
+                hit_roll_initial = hit_roll
                 hit_roll = roll_d6()
-                is_critical_hit = hit_roll >= profile.crit_hit_on
-                hit_success = is_critical_hit or (
-                    hit_roll != NATURAL_FAIL_ROLL and hit_roll >= hit_target
+                is_critical_hit, hit_success = _evaluate_roll(
+                    hit_roll, profile.crit_hit_on, hit_target
                 )
             # 05.01 : 1 non modifie = echec ; critique = touche quoi qu il arrive.
             if not hit_success:
@@ -313,6 +333,7 @@ def roll_attack_pool(
                 }
                 if hit_reroll_cause is not None:
                     miss_rec["hitRerollCause"] = hit_reroll_cause
+                    miss_rec["attackRollInitial"] = hit_roll_initial
                 shot_records.append(miss_rec)
                 continue
 
@@ -341,6 +362,7 @@ def roll_attack_pool(
             # LIEU — et l'analyzer ne peut pas distinguer les deux (jumeau de `woundRerollCause`).
             if hit_reroll_cause is not None and not sustained_hit:
                 base_rec["hitRerollCause"] = hit_reroll_cause
+                base_rec["attackRollInitial"] = hit_roll_initial
 
             auto_wound = (
                 profile.lethal_hits and critical_hit_here
@@ -351,6 +373,7 @@ def roll_attack_pool(
             # tire le nom d abilite affiche dans le log — sans cette trace, il sait seulement
             # que la relance etait POSSIBLE, jamais qu elle a EU LIEU. Cf. V11 §0hist.38.
             wound_reroll_cause: Optional[str] = None
+            wound_roll_initial: Optional[int] = None
             if auto_wound:
                 # [LETHAL HITS] 24.23 : blessure automatique, AUCUN jet de blessure -> aucune
                 # blessure critique possible (donc pas de DEVASTATING sur cette attaque).
@@ -359,9 +382,8 @@ def roll_attack_pool(
                 is_critical_wound = False
             else:
                 wound_roll = roll_d6()
-                is_critical_wound = wound_roll >= profile.crit_wound_on
-                wound_success = is_critical_wound or (
-                    wound_roll != NATURAL_FAIL_ROLL and wound_roll >= wound_target
+                is_critical_wound, wound_success = _evaluate_roll(
+                    wound_roll, profile.crit_wound_on, wound_target
                 )
                 # Un seul reroll par de : abilites d unite OU [TWIN-LINKED] 24.38, jamais les
                 # deux. TWIN-LINKED relance les ECHECS seulement (relancer une blessure reussie
@@ -380,14 +402,15 @@ def roll_attack_pool(
                         wound_reroll_cause = "wound_any_fail"
                     else:
                         wound_reroll_cause = "twin_linked"
+                    wound_roll_initial = wound_roll
                     wound_roll = roll_d6()
-                    is_critical_wound = wound_roll >= profile.crit_wound_on
-                    wound_success = is_critical_wound or (
-                        wound_roll != NATURAL_FAIL_ROLL and wound_roll >= wound_target
+                    is_critical_wound, wound_success = _evaluate_roll(
+                        wound_roll, profile.crit_wound_on, wound_target
                     )
 
             if wound_reroll_cause is not None:
                 base_rec["woundRerollCause"] = wound_reroll_cause
+                base_rec["strengthRollInitial"] = wound_roll_initial
 
             if not wound_success:
                 base_rec.update({
@@ -409,9 +432,15 @@ def roll_attack_pool(
             # blessure mortelle), ce que le controle de conformite de l analyzer classe en
             # `devastating_wounds_incorrect`. Cf. V11 §0hist.38.
             save_roll: Optional[int] = None
+            save_roll_initial: Optional[int] = None
             if not devastating:
                 save_roll = roll_d6()
                 if save_roll == NATURAL_FAIL_ROLL and rerolls.save_1:
+                    # Vaut TOUJOURS NATURAL_FAIL_ROLL — `save_1` ne relance que les 1, la ou la
+                    # touche et la blessure relancent aussi des echecs quelconques. Conserve
+                    # quand meme : la sauvegarde est la seule jambe SANS enum de cause (il n'y a
+                    # qu'un declencheur), donc ce champ est le seul temoin de la relance.
+                    save_roll_initial = save_roll
                     save_roll = roll_d6()
             base_rec.update({
                 "strengthRoll": wound_roll, "strengthResult": "SUCCESS",
@@ -419,6 +448,8 @@ def roll_attack_pool(
             })
             if not devastating:
                 base_rec["saveRoll"] = save_roll
+                if save_roll_initial is not None:
+                    base_rec["saveRollInitial"] = save_roll_initial
             if auto_wound:
                 base_rec["lethalHit"] = True
             if is_critical_wound:

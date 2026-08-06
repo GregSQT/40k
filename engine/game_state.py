@@ -4081,9 +4081,9 @@ def oath_wound_bonus_applies(game_state: Dict[str, Any], player: int) -> bool:
 def uses_codex_detachment(game_state: Dict[str, Any], player: int) -> bool:
     """Moitié « Codex: Space Marines Detachment » de la clause, lue dans la config d'armée.
 
-    Champ OBLIGATOIRE dès qu'un joueur a une armée ADEPTUS ASTARTES : son absence lève. C'est le
-    contraire d'un fallback — la valeur n'est pas devinable, et la deviner ferait apparaître ou
-    disparaître un +1 au jet de blessure sans que personne ne l'ait décidé.
+    Champ OBLIGATOIRE dès qu'un joueur a une armée ADEPTUS ASTARTES : son absence lève. La
+    valeur n'est pas devinable, et la deviner ferait apparaître ou disparaître un +1 au jet de
+    blessure sans que personne ne l'ait décidé.
     """
     player_int = int(player)
     config = require_key(game_state, "config")

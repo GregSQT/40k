@@ -13,6 +13,19 @@ import { AdvancedIcon, ChargedIcon, FellBackIcon, MovedIcon } from "./UnitStatus
 
 const RULE_TOKEN_REGEX = /\[([^\]]+)\]/g;
 
+/** Token de règle en MAJUSCULES, forme reconnue par `RULE_TOKEN_REGEX` — donc rendue avec sa
+ *  bulle d'aide comme les tokens de la ligne de résumé. Même casse que step.log. */
+const ruleToken = (name?: string): string => (name ? ` [${name.toUpperCase()}]` : "");
+
+/** Jet de dé : « final » seul, ou « initial->final » quand le dé a été relancé.
+ *
+ *  `== null` et pas `=== undefined` : une attaque sans jet ([TORRENT], touche [SUSTAINED HITS],
+ *  blessure [LETHAL HITS]) arrive avec `null`, qui s'affichait « (null) ». */
+const rollWithReroll = (final?: number | null, initial?: number | null): string => {
+  if (final == null) return "";
+  return initial == null ? ` (${final})` : ` (${initial}->${final})`;
+};
+
 const normalizeRuleLookupKey = (value: string): string => {
   return value
     .trim()
@@ -566,18 +579,21 @@ export const GameLog: React.FC<GameLogProps> = ({
                                 if (event.weaponName) parts.push(event.weaponName);
                                 const targetType = shot.targetUnitType ?? event.targetUnitType;
                                 if (targetType) parts.push(targetType);
+                                // Capacités nommées par le moteur sur chaque record : relance
+                                // EFFECTUÉE (`hitAbility` / `woundAbility`) et MODIFICATEUR de
+                                // blessure (`woundBonusAbility`, le +1 d'Oath).
                                 parts.push(
-                                  `Tir: ${shot.hitResult === "HIT" ? "✓" : "✗"}${shot.attackRoll !== undefined ? ` (${shot.attackRoll})` : ""}`
+                                  `Tir: ${shot.hitResult === "HIT" ? "✓" : "✗"}${rollWithReroll(shot.attackRoll, shot.attackRollInitial)}${ruleToken(shot.hitAbility)}`
                                 );
                                 if (shot.hitResult === "HIT") {
                                   parts.push(
-                                    `Bless: ${shot.strengthResult === "SUCCESS" ? "✓" : "✗"}${shot.strengthRoll !== undefined ? ` (${shot.strengthRoll})` : ""}`
+                                    `Bless: ${shot.strengthResult === "SUCCESS" ? "✓" : "✗"}${rollWithReroll(shot.strengthRoll, shot.strengthRollInitial)}${ruleToken(shot.woundAbility)}${ruleToken(shot.woundBonusAbility)}`
                                   );
                                 }
                                 if (shot.strengthResult === "SUCCESS") {
                                   if (shot.saveRoll !== undefined) {
                                     parts.push(
-                                      `Svg: ${shot.saveSuccess ? "✓" : "✗"} (${shot.saveRoll})`
+                                      `Svg: ${shot.saveSuccess ? "✓" : "✗"}${rollWithReroll(shot.saveRoll, shot.saveRollInitial)}`
                                     );
                                   }
                                   if (!shot.saveSuccess && shot.damageDealt !== undefined) {

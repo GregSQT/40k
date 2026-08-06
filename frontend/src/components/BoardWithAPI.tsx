@@ -4055,22 +4055,22 @@ export const BoardWithAPI: React.FC = () => {
               className="deployment-panel__picker-title deployment-panel__picker-title--draggable"
               onMouseDown={onOathRuleTitleMouseDown}
             >
-              {`Oath of Moment — joueur ${oathSelectionPlayer}${isDraggingOathRulePopup ? " (drag...)" : ""}`}
+              {`Oath of Moment — player ${oathSelectionPlayer}${isDraggingOathRulePopup ? " (drag...)" : ""}`}
             </button>
             <div className="deployment-panel__picker-content deployment-panel__picker-content--oath">
               <div className="deployment-panel__picker-tooltip">
                 {
-                  "Au début de votre phase de commandement, désignez une unité de l'armée adverse : elle est la cible de l'Oath of Moment jusqu'au début de votre prochaine phase de commandement.\n\nVos attaques contre cette unité relancent le jet de touche, et gagnent +1 au jet de blessure si votre armée joue un détachement Codex sans sous-faction.\n\nAprès OK, cliquez sur l'unité ennemie à désigner (sur le plateau ou dans la table de statut). C'est la seule sélection possible tant que la désignation n'est pas faite."
+                  "At the start of your Command phase, select one unit from the opposing army: it is the target of the Oath of Moment until the start of your next Command phase.\n\nYour attacks against that unit can re-roll the Hit roll, and add 1 to the Wound roll if your army is using a Codex detachment with no sub-faction.\n\nAfter Select, click the enemy unit to designate (on the board or in the status table). It is the only selection available until the designation is made."
                 }
               </div>
             </div>
             <div className="deployment-panel__picker-actions">
               <button
                 type="button"
-                className="deployment-panel__picker-close"
+                className="deployment-panel__picker-close deployment-panel__picker-close--validate"
                 onClick={() => setOathRuleAcknowledged(true)}
               >
-                OK
+                Select
               </button>
             </div>
           </div>
@@ -4082,7 +4082,7 @@ export const BoardWithAPI: React.FC = () => {
       {oathPendingTargetUnit !== null && (
         <div className="rule-choice-overlay">
           <div
-            className="deployment-panel__picker deployment-panel__picker--draggable deployment-panel__picker--oath"
+            className="deployment-panel__picker deployment-panel__picker--draggable deployment-panel__picker--oath deployment-panel__picker--oath-confirm"
             style={{
               left: `${oathConfirmPopupPosition.x}px`,
               top: `${oathConfirmPopupPosition.y}px`,
@@ -4093,11 +4093,11 @@ export const BoardWithAPI: React.FC = () => {
               className="deployment-panel__picker-title deployment-panel__picker-title--draggable"
               onMouseDown={onOathConfirmTitleMouseDown}
             >
-              {`Oath of Moment — confirmer la cible${isDraggingOathConfirmPopup ? " (drag...)" : ""}`}
+              {`Oath of Moment — confirm target${isDraggingOathConfirmPopup ? " (drag...)" : ""}`}
             </button>
             <div className="deployment-panel__picker-content deployment-panel__picker-content--oath">
               <div className="deployment-panel__picker-tooltip">
-                {`Désigner ${oathPendingTargetUnit.DISPLAY_NAME ?? oathPendingTargetUnit.unitType ?? oathPendingTargetUnit.name ?? "Unit"} #${oathPendingTargetUnit.id} comme cible de l'Oath of Moment ?`}
+                {`Select ${oathPendingTargetUnit.DISPLAY_NAME ?? oathPendingTargetUnit.unitType ?? oathPendingTargetUnit.name ?? "Unit"} #${oathPendingTargetUnit.id} as the target of the Oath of Moment?`}
               </div>
             </div>
             <label className="oath-confirm__dont-ask">
@@ -4106,22 +4106,22 @@ export const BoardWithAPI: React.FC = () => {
                 checked={oathDontAskAgain}
                 onChange={(event) => setOathDontAskAgain(event.target.checked)}
               />
-              <span>Ne plus afficher cette confirmation</span>
+              <span>Don't show this confirmation again</span>
             </label>
             <div className="deployment-panel__picker-actions deployment-panel__picker-actions--oath">
               <button
                 type="button"
-                className="deployment-panel__picker-close"
+                className="deployment-panel__picker-close deployment-panel__picker-close--cancel"
                 onClick={handleOathCancelPick}
               >
                 Cancel
               </button>
               <button
                 type="button"
-                className="deployment-panel__picker-close"
+                className="deployment-panel__picker-close deployment-panel__picker-close--validate"
                 onClick={handleOathConfirm}
               >
-                Valider
+                Confirm
               </button>
             </div>
           </div>

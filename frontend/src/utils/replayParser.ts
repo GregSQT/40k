@@ -41,6 +41,24 @@ export interface ReplayAction {
   hit_result?: string;
   wound_result?: string;
   save_result?: string;
+  /**
+   * Capacités nommées par le moteur sur le jet qu'elles ont modifié : relance EFFECTUÉE côté
+   * touche / blessure, et MODIFICATEUR de blessure (le +1 d'Oath of Moment, qui n'est pas une
+   * relance). Extraites des tokens `[...]` de la ligne, comme le PvP les reçoit dans
+   * `shootDetails` — sans elles, le détail déplié du replay était muet là où le PvP nommait
+   * la capacité.
+   */
+  hit_ability?: string;
+  wound_ability?: string;
+  wound_bonus_ability?: string;
+  /**
+   * Dé d'ORIGINE d'un jet relancé (token `[REROLLED:n]`), absent sinon. Le champ courant
+   * (`hit_roll`…) porte le jet FINAL : le détail du replay affiche « initial->final », comme le
+   * PvP le fait depuis `attackRollInitial` & co.
+   */
+  hit_roll_initial?: number;
+  wound_roll_initial?: number;
+  save_roll_initial?: number;
   // Weapon info
   weapon_name?: string;
   // Fight phase metadata (AI_TURN.md compliance)
@@ -94,6 +112,136 @@ interface PrimaryObjectiveRule {
 
 interface ReplayRules {
   primary_objective: PrimaryObjectiveRule | PrimaryObjectiveRule[] | null;
+}
+
+/**
+ * Tokens que le StepLogger pose sur un jet SANS qu'ils nomment une capacité d'unité : règles
+ * d'arme et modificateurs de seuil, déjà rendus ailleurs. Tout AUTRE token accolé à un jet est
+ * le nom d'affichage d'une capacité (« OATH OF MOMENT », « TARGETED INTERCESSION »…).
+ *
+ * Ne contient QUE des tokens réellement adjacents à un jet : `[DEVASTATING WOUNDS]` est écrit
+ * comme segment autonome (`Save [DEVASTATING WOUNDS]`, sans parenthèses donc hors segment) et
+ * `[RAPID FIRE:n]` vit dans les tags de tir, avant la cible. Vérifié sur `step.log` : zéro
+ * occurrence de l'un ou l'autre dans un segment de jet. Les lister ici les ferait passer pour
+ * un recensement des tokens du formateur, ce qu'ils ne sont pas.
+ */
+const NON_ABILITY_ROLL_TOKENS = new Set(["HEAVY", "COVER", "SUSTAINED HITS"]);
+
+/**
+ * Tokens de l'ENVELOPPE de ligne, écrits après le dernier segment de jet et SANS séparateur
+ * ` - ` : ils sont donc collés au dernier jet et terminent son segment.
+ *
+ * C'est la borne DROITE qui manquait. Sans elle, un jet en fin de ligne (tout raté : la ligne
+ * s'arrête au jet manqué) avalait toute la queue, et le premier token venu passait pour un nom
+ * de capacité — mesuré sur `step.log` : `wound_ability = "R:+0.0"`, et en mêlée
+ * `hit_ability = "FIGHT_SUBPHASE:fight"` sur chaque attaque ratée.
+ *
+ * Jeu FERMÉ, contrairement au denylist ci-dessus : c'est l'enveloppe du log (récompense,
+ * figurines, issue), pas les règles du jeu — elle ne grossit pas quand une règle est ajoutée.
+ */
+const LINE_METADATA_TOKEN =
+  /^(?:R:|MODELS:|SHOOTER_MODELS:|TARGET_MODELS:|FIGHT_SUBPHASE:|SUCCESS$|FAILURE$|HAZARDOUS$)/;
+
+/** `[REROLLED:1]` — le dé AVANT relance, posé par le StepLogger sur le segment du jet. */
+const REROLLED_TOKEN = /^REROLLED:(\d+)$/;
+
+const OATH_ABILITY_TOKEN = "OATH OF MOMENT";
+
+type RollKeyword = "Hit" | "Wound" | "Save";
+
+/**
+ * Segment d'un jet : le mot-clé, la valeur, le seuil entre parenthèses, puis la suite de tokens
+ * qui lui sont accolés. Construites UNE fois — le jeu de mots-clés est fermé, et ces motifs
+ * étaient recompilés cinq fois par ligne, sur des dizaines de milliers de lignes par replay.
+ */
+const ROLL_SEGMENT: Record<RollKeyword, RegExp> = {
+  Hit: /Hit\s+\S+\([^)]*\)((?:\s*\[[^\]]+\])*)/,
+  Wound: /Wound\s+\S+\([^)]*\)((?:\s*\[[^\]]+\])*)/,
+  Save: /Save\s+\S+\([^)]*\)((?:\s*\[[^\]]+\])*)/,
+};
+
+/**
+ * Tokens `[...]` accolés à un jet donné (`Hit 4(3+) [A] [B]`), bruts.
+ *
+ * Bornés des DEUX côtés : à gauche par le mot-clé du jet (la ligne porte d'autres tokens
+ * ailleurs — nom d'arme, tags de tir — qui ne disent rien de CE jet), à droite par le premier
+ * token d'enveloppe de ligne (cf. `LINE_METADATA_TOKEN`), qui n'est séparé du dernier jet par
+ * aucun ` - ` et se retrouvait donc dans son segment.
+ */
+function tokensForRoll(line: string, rollKeyword: RollKeyword): string[] {
+  const segment = line.match(ROLL_SEGMENT[rollKeyword]);
+  if (!segment?.[1]) {
+    return [];
+  }
+  const tokens: string[] = [];
+  for (const match of segment[1].matchAll(/\[([^\]]+)\]/g)) {
+    const token = match[1].trim();
+    if (LINE_METADATA_TOKEN.test(token)) {
+      break;
+    }
+    tokens.push(token);
+  }
+  return tokens;
+}
+
+/** Les seuls tokens d'un jet qui NOMMENT une capacité d'unité. */
+function abilityTokensForRoll(tokens: string[]): string[] {
+  return tokens.filter(
+    (token) => !NON_ABILITY_ROLL_TOKENS.has(token) && !REROLLED_TOKEN.test(token)
+  );
+}
+
+/** Dé d'origine d'un jet relancé, ou `undefined` si le jet n'a pas été relancé. */
+function rerolledInitial(tokens: string[]): number | undefined {
+  for (const token of tokens) {
+    const match = token.match(REROLLED_TOKEN);
+    if (match) {
+      return parseInt(match[1], 10);
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Pose sur l'action ce que les tokens disent de chaque jet : capacités nommées (relance de
+ * touche / de blessure, +1 de blessure) et dé d'ORIGINE d'un jet relancé.
+ *
+ * Côté BLESSURE, deux capacités peuvent coexister : le StepLogger écrit d'abord la relance, puis
+ * le modificateur. Le seul modificateur nommé du moteur étant le +1 d'Oath — qui n'ouvre jamais
+ * de relance de blessure —, le token `OATH OF MOMENT` identifie sans ambiguïté le second.
+ */
+function assignRollAnnotations(action: ReplayAction, line: string): void {
+  // Un seul balayage par jet : capacités et `[REROLLED:n]` sortent de la MÊME liste de tokens.
+  const hitTokens = tokensForRoll(line, "Hit");
+  const woundTokens = tokensForRoll(line, "Wound");
+  const saveTokens = tokensForRoll(line, "Save");
+
+  // Une seule capacité par jet de touche, par construction du formateur.
+  const [hitAbility] = abilityTokensForRoll(hitTokens);
+  if (hitAbility) {
+    action.hit_ability = hitAbility;
+  }
+  for (const token of abilityTokensForRoll(woundTokens)) {
+    if (token === OATH_ABILITY_TOKEN) {
+      action.wound_bonus_ability = token;
+    } else {
+      action.wound_ability = token;
+    }
+  }
+  // Clé ABSENTE quand le jet n'a pas été relancé, jamais posée à `undefined` : même contrat que
+  // les capacités juste au-dessus, et que les champs du moteur côté PvP.
+  const hitInitial = rerolledInitial(hitTokens);
+  if (hitInitial !== undefined) {
+    action.hit_roll_initial = hitInitial;
+  }
+  const woundInitial = rerolledInitial(woundTokens);
+  if (woundInitial !== undefined) {
+    action.wound_roll_initial = woundInitial;
+  }
+  const saveInitial = rerolledInitial(saveTokens);
+  if (saveInitial !== undefined) {
+    action.save_roll_initial = saveInitial;
+  }
 }
 
 const validateReplayRules = (rules: ReplayRules, episodeNumber: number): void => {
@@ -812,6 +960,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
             action.wound_target = parseInt(woundMatch[2], 10);
             action.wound_result = "WOUND";
           }
+          assignRollAnnotations(action, trimmed);
           if (saveMatch) {
             action.save_roll = parseInt(saveMatch[1], 10);
             action.save_target = parseInt(saveMatch[2], 10);
@@ -1126,6 +1275,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
         action.wound_target = parseInt(woundMatch[2], 10);
         action.wound_result = "WOUND";
       }
+      assignRollAnnotations(action, trimmed);
       if (saveMatch) {
         action.save_roll = parseInt(saveMatch[1], 10);
         action.save_target = parseInt(saveMatch[2], 10);

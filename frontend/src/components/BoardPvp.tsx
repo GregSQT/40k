@@ -1442,6 +1442,8 @@ export default function Board({
   const chargeModelVeilOverlayRef = useRef<PIXI.Graphics | null>(null);
   const shootSubgroupOverlayRef = useRef<PIXI.Graphics | null>(null);
   const blinkTargetRingOverlayRef = useRef<PIXI.Graphics | null>(null);
+  /** Réticule ambre 08.04 sur les figs des unités désignées par un Oath of Moment (les DEUX camps). */
+  const oathTargetOverlayRef = useRef<PIXI.Graphics | null>(null);
   /** Halos de cohésion (charge/pile-in/consolidation) redessinés au survol — suivent la fig active. */
   const cohesionHaloOverlayRef = useRef<PIXI.Graphics | null>(null);
   /** Cercles de portée autour de la fig activée (préservé au redraw, comme les autres overlays). */
@@ -5966,6 +5968,93 @@ export default function Board({
     []
   );
 
+  // Oath of Moment (08.04) : réticule AMBRE incliné à 45° sur chaque figurine des unités
+  // désignées — celle du joueur ET celle de l'adversaire (la désignation est publique).
+  // Géométrie choisie pour NE PAS se superposer au réticule de visée rouge, qui porte un cercle
+  // + 4 traits CARDINAUX au même rayon de référence : ici pas de cercle et 4 traits DIAGONAUX,
+  // plus loin du socle. Marque persistante (tout le tour) → overlay persistant, aucun ticker.
+  useEffect(() => {
+    const app = appRef.current;
+    if (!app) return;
+    let overlay = oathTargetOverlayRef.current;
+    if (!overlay || overlay.destroyed) {
+      overlay = new PIXI.Graphics();
+      overlay.zIndex = 2704; // juste sous le réticule de visée (2705)
+      overlay.eventMode = "none";
+      app.stage.addChild(overlay);
+      oathTargetOverlayRef.current = overlay;
+    }
+    overlay.visible = !hideIndicators;
+    overlay.clear();
+    const state = gameState as unknown as {
+      oath_target?: Record<string, string | null>;
+      units_cache?: Record<string, { occupied_hexes_by_model?: Record<string, [number, number]> }>;
+    } | null;
+    const oathTargets = state?.oath_target;
+    if (oathTargets && boardConfig) {
+      const HEX_RADIUS_H = boardConfig.hex_radius;
+      const HEX_WIDTH_H = 1.5 * HEX_RADIUS_H;
+      const HEX_HEIGHT_H = Math.sqrt(3) * HEX_RADIUS_H;
+      const MARGIN_H = boardConfig.margin;
+      const lineW = Math.max(3, HEX_RADIUS_H * 0.38);
+      // Un id par joueur, mais les deux camps peuvent viser la même unité : dédoublonné.
+      const targetIds = new Set(
+        Object.values(oathTargets).filter((id): id is string => id !== null && id !== undefined)
+      );
+      for (const targetId of targetIds) {
+        const unit = units.find((u) => String(u.id) === String(targetId));
+        // Unité détruite : le moteur purge la désignation, mais un état intermédiaire ne doit
+        // pas dessiner dans le vide.
+        if (!unit) continue;
+        const byModel = state?.units_cache?.[String(targetId)]?.occupied_hexes_by_model;
+        if (!byModel) continue;
+        const baseSz = resolveBaseSizeForUnitDisplay(unit);
+        const modelR = baseSz > 1 ? (baseSz * 1.5 * HEX_RADIUS_H) / 2 : HEX_RADIUS_H * 0.7;
+        const refR = modelR * 1.15; // même rayon de référence que le réticule de visée
+        const tickIn = refR * 1.18; // hors du cercle rouge (refR) ; l'écart aux traits est angulaire
+        const tickOut = refR * 1.42;
+        const capHalf = (tickOut - tickIn) * 1.0; // demi-barre du T, posée à l'extrémité EXTERNE
+        overlay.lineStyle(lineW, 0xffa000, 1);
+        for (const pos of Object.values(byModel)) {
+          const cx = pos[0] * HEX_WIDTH_H + HEX_WIDTH_H / 2 + MARGIN_H;
+          const cy =
+            pos[1] * HEX_HEIGHT_H + ((pos[0] % 2) * HEX_HEIGHT_H) / 2 + HEX_HEIGHT_H / 2 + MARGIN_H;
+          for (const angle of [45, 135, 225, 315]) {
+            const rad = (angle * Math.PI) / 180;
+            const ux = Math.cos(rad);
+            const uy = Math.sin(rad);
+            // Tige radiale…
+            overlay.moveTo(cx + ux * tickIn, cy + uy * tickIn);
+            overlay.lineTo(cx + ux * tickOut, cy + uy * tickOut);
+            // …puis la barre du T, perpendiculaire, à l'extrémité externe de la tige.
+            const px = -uy;
+            const py = ux;
+            overlay.moveTo(cx + ux * tickOut - px * capHalf, cy + uy * tickOut - py * capHalf);
+            overlay.lineTo(cx + ux * tickOut + px * capHalf, cy + uy * tickOut + py * capHalf);
+          }
+        }
+      }
+    }
+    try {
+      app.render();
+    } catch {
+      /* contexte non prêt : ignoré, le prochain rendu rattrapera */
+    }
+  }, [gameState, units, boardConfig, hideIndicators]);
+
+  // Détruit l'overlay Oath uniquement au démontage du composant.
+  useEffect(
+    () => () => {
+      const o = oathTargetOverlayRef.current;
+      if (o && !o.destroyed) {
+        o.clear();
+        o.destroy();
+      }
+      oathTargetOverlayRef.current = null;
+    },
+    []
+  );
+
   // Slice G : voile violet sur les figurines ÉLIGIBLES du chargeur en chargeModelMove (phase
   // courante). La fig active a un anneau plus marqué ; sa zone de landing est dessinée ailleurs.
   // L'utilisateur choisit une fig voilée → sa zone apparaît, puis il la pose.
@@ -9660,6 +9749,7 @@ export default function Board({
       const savedChargeVeilOverlay = chargeModelVeilOverlayRef.current;
       const savedBlinkRingOverlay = blinkTargetRingOverlayRef.current;
       const savedShootOverlay = shootSubgroupOverlayRef.current;
+      const savedOathOverlay = oathTargetOverlayRef.current;
       const savedRangeRingsOverlay = rangeRingsOverlayRef.current;
       if (savedStatic?.parent) app.stage.removeChild(savedStatic);
       if (savedWalls?.parent) app.stage.removeChild(savedWalls);
@@ -9676,6 +9766,7 @@ export default function Board({
       if (savedChargeVeilOverlay?.parent) app.stage.removeChild(savedChargeVeilOverlay);
       if (savedBlinkRingOverlay?.parent) app.stage.removeChild(savedBlinkRingOverlay);
       if (savedShootOverlay?.parent) app.stage.removeChild(savedShootOverlay);
+      if (savedOathOverlay?.parent) app.stage.removeChild(savedOathOverlay);
       if (savedRangeRingsOverlay?.parent) app.stage.removeChild(savedRangeRingsOverlay);
       if (
         canReuseExistingHighlightsThroughDestroy &&
@@ -9778,6 +9869,10 @@ export default function Board({
       if (savedShootOverlay && !savedShootOverlay.destroyed) {
         savedShootOverlay.zIndex = 2705;
         app.stage.addChild(savedShootOverlay);
+      }
+      if (savedOathOverlay && !savedOathOverlay.destroyed) {
+        savedOathOverlay.zIndex = 2704;
+        app.stage.addChild(savedOathOverlay);
       }
       if (savedRangeRingsOverlay && !savedRangeRingsOverlay.destroyed) {
         savedRangeRingsOverlay.zIndex = 2640;

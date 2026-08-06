@@ -29,7 +29,7 @@ from engine.combat_utils import (
     set_unit_coordinates,
 )
 from engine.game_state import (
-    GameStateManager, effective_invul_save, oath_wound_roll_bonus,
+    GameStateManager, OATH_ABILITY_DISPLAY_NAME, effective_invul_save, oath_wound_roll_bonus,
     objective_hex_zones, unit_is_oath_target_of, waaagh_melee_bonus,
 )
 from engine.hex_utils import cube_to_offset, offset_to_cube
@@ -4645,20 +4645,48 @@ def _manual_roll_fight_intent(
     # Nom de l ABILITE qui a ouvert chaque relance de TOUCHE — JUMEAU EXACT du site de tir
     # (`shared_utils._manual_roll_intent`), meme helper, meme consommation de la cause. Sans
     # lui, `step.log` dit que la relance etait POSSIBLE, jamais qu elle a EU LIEU.
-    from engine.phase_handlers.shared_utils import resolve_hit_reroll_ability
+    from engine.phase_handlers.shared_utils import (
+        resolve_hit_reroll_ability, resolve_wound_reroll_ability,
+    )
 
     _hit_ability_by_cause: Dict[str, Optional[str]] = {}
+    _wound_ability_by_cause: Dict[str, Optional[str]] = {}
     for _rec in rolled["shot_records"]:
         _hit_cause = _rec.pop("hitRerollCause", None)  # get allowed
-        if not _hit_cause:
+        if _hit_cause:
+            if _hit_cause not in _hit_ability_by_cause:
+                _hit_ability_by_cause[_hit_cause] = resolve_hit_reroll_ability(
+                    attacker_unit, _hit_cause
+                )
+            _hit_ability = _hit_ability_by_cause[_hit_cause]
+            if _hit_ability:
+                _rec["hitAbility"] = str(_hit_ability)
+        # Cote BLESSURE : la melee posait bien `wound_1` / `wound_any_fail` dans le roller mais
+        # ne consommait JAMAIS la cause — la relance restait invisible dans tous les logs, alors
+        # que le tir la nommait. Meme helper que le tir, donc plus de divergence possible.
+        _wound_cause = _rec.pop("woundRerollCause", None)  # get allowed
+        if not _wound_cause or attacker_unit is None:
             continue
-        if _hit_cause not in _hit_ability_by_cause:
-            _hit_ability_by_cause[_hit_cause] = resolve_hit_reroll_ability(
-                attacker_unit, _hit_cause
+        if _wound_cause not in _wound_ability_by_cause:
+            _wound_ability_by_cause[_wound_cause] = resolve_wound_reroll_ability(
+                attacker_unit, _wound_cause,
+                reroll_1_towound=reroll_wound1,
+                reroll_towound_on_objective=reroll_wound_obj,
             )
-        _hit_ability = _hit_ability_by_cause[_hit_cause]
-        if _hit_ability:
-            _rec["hitAbility"] = str(_hit_ability)
+        _wound_ability = _wound_ability_by_cause[_wound_cause]
+        if _wound_ability:
+            _rec["woundAbility"] = str(_wound_ability)
+    # +1 au jet de blessure d Oath : c est un MODIFICATEUR, pas une relance — il n a donc aucune
+    # cause dans le roller. Sans ce marqueur le seuil affiche est meilleur sans que rien ne dise
+    # pourquoi. JUMEAU du site de tir. Champ distinct de `woundAbility` (relance) : les deux
+    # peuvent jouer sur la meme attaque.
+    if _oath_wound_bonus:
+        for _rec in rolled["shot_records"]:
+            # JUMEAU du tir : seules les attaques ayant JETE un de de blessure portent le +1
+            # (touche ratee ou auto-wound [LETHAL HITS] -> `strengthRoll` None).
+            if _rec.get("strengthRoll") is None:  # get allowed : cle absente = touche ratee
+                continue
+            _rec["woundBonusAbility"] = OATH_ABILITY_DISPLAY_NAME
     return {
         "attacker_mid": attacker_mid, "attacker": attacker, "target_sid": target_sid,
         "weapon_name": weapon_name, "bs": ws, "ap": ap, "dmg_raw": dmg_raw,
@@ -4679,6 +4707,10 @@ def _manual_roll_fight_intent(
         # cle de groupe, en melee comme au tir.
         "weapon_rules": weapon_rule_signature(weapon),
         "display_wth": display_wth, "display_save_th": display_save_th,
+        # Oath dans la ligne de synthese — JUMEAU du roller de tir (meme cles, meme raison).
+        "oath_hit_reroll": bool(_is_oath_target),
+        # Booleen, comme le tir : la magnitude est deja absorbee dans `wth` ci-dessus.
+        "oath_wound_bonus": bool(_oath_wound_bonus),
         "shot_records": rolled["shot_records"], "pending_wounds": rolled["pending_wounds"],
         "counts": rolled["counts"],
     }

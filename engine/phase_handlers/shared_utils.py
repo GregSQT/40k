@@ -7622,18 +7622,30 @@ def _emit_squad_shoot_log(game_state: Dict[str, Any], g: Dict[str, Any], ctx: Ma
     # Cover (13.08, ranged-only) : si la cible avait le couvert, afficher la degradation
     # du seuil de touche (ex 3+->4+) + token [COVER] (tooltip regle cote frontend).
     # Absent au combat -> branche standard.
-    if g.get("cover"):
-        hit_part = f"Hit:{g['bs_base']}+->{g['bs']}+[COVER]"
-    else:
-        hit_part = f"Hit:{g['bs']}+"
+    _cover = bool(g.get("cover"))  # get allowed : absent au combat (regle ranged-only)
+    hit_part = f"Hit:{g['bs_base']}+->{g['bs']}+" if _cover else f"Hit:{g['bs']}+"
+    # Oath of Moment (08.04) dans la ligne de synthese. `RR` = relance, accolee au seuil et POSEE
+    # AVANT les tokens de regle, pour que ceux-ci restent en fin de segment — c'est cette
+    # position que le parser de replay et le rendu du log supposent tous deux.
+    # Le `Wound:` est deja le seuil NET (le +1 est applique en amont par abaissement du seuil) :
+    # le token dit seulement d ou vient l amelioration.
+    from engine.game_state import OATH_ABILITY_DISPLAY_NAME
+
+    _oath_token = f"[{OATH_ABILITY_DISPLAY_NAME.upper()}]"
+    if require_key(g, "oath_hit_reroll"):
+        hit_part = f"{hit_part}RR {_oath_token}"
     # [HEAVY] 24.16 : token affiche quand le +1 au jet de touche a ete APPLIQUE (pas seulement
     # declare par l arme). Le frontend y accroche automatiquement le tooltip de la regle
     # (weapon_rules.json), comme pour [COVER] / [HAZARD].
-    if g.get("heavy_applied"):
-        hit_part = f"{hit_part} [HEAVY]"
+    for _token, _applies in (("[COVER]", _cover), ("[HEAVY]", g.get("heavy_applied"))):
+        if _applies:
+            hit_part = f"{hit_part} {_token}"
+    wound_part = f"Wound:{g['display_wth']}+"
+    if require_key(g, "oath_wound_bonus"):
+        wound_part = f"{wound_part} {_oath_token}"
     attack_log = (
         f"Shots:{g['attacks']} - "
-        f"{hit_part} Wound:{g['display_wth']}+ Save:{g['display_save_th']}+ - "
+        f"{hit_part} {wound_part} Save:{g['display_save_th']}+ - "
         f"HP lost:{g['damage']} Killed:{g['kills']}"
     )
     # Label toujours enrichi : type + coords. Le frontend masque type et/ou coords
@@ -8181,7 +8193,8 @@ def _manual_roll_intent(
     # Import PARESSEUX : `engine.game_state` importe ce module au niveau module (is_unit_alive,
     # compute_unit_rules_in_effect). L importer ici en tete creerait un cycle.
     from engine.game_state import (
-        effective_invul_save, oath_wound_roll_bonus, unit_is_oath_target_of,
+        OATH_ABILITY_DISPLAY_NAME, effective_invul_save, oath_wound_roll_bonus,
+        unit_is_oath_target_of,
     )
 
     target_unit = get_unit_by_id(game_state, str(target_sid))
@@ -8248,17 +8261,12 @@ def _manual_roll_intent(
         ),
         roll_d6=lambda: random.randint(1, 6),
     )
-    # Nom de l ABILITE qui a ouvert chaque relance de blessure. Le socle rend la CAUSE
-    # (`wound_1` / `wound_any_fail` / `twin_linked`) ; seules les deux premieres sont des
-    # abilites d unite, et leur nom d affichage est celui de la REGLE SOURCE qui accorde
-    # l effet (ex. « Targeted Intercession » pour l effet `reroll_1_towound`). `twin_linked`
-    # est une regle d ARME, deja identifiee par ailleurs : aucun nom d abilite.
-    _effect_by_cause = {
-        "wound_1": "reroll_1_towound" if reroll_wound1 else None,
-        "wound_any_fail": "reroll_towound_target_on_objective" if reroll_wound_obj else None,
-    }
-    # JUMEAU cote TOUCHE : meme forme, meme raison. `hitRerollCause` est CONSOMMEE ici et
-    # remplacee par le nom d affichage, exactement comme `woundRerollCause` juste en dessous.
+    # Noms des ABILITES qui ont ouvert chaque relance. Le socle rend la CAUSE, les deux
+    # `resolve_*_reroll_ability` la traduisent — memes helpers que la melee, pour que les deux
+    # chemins ne puissent pas diverger. Resolution memoisee sur l intent, et PARESSEUSE : on ne
+    # lit le nom d affichage que si une relance a REELLEMENT eu lieu
+    # (`get_source_unit_rule_display_name_for_effect` exige un `displayName` non vide sur la
+    # regle source — inutile de l exiger d une unite dont aucune relance n a joue).
     _hit_ability_by_cause: Dict[str, Optional[str]] = {}
     _ability_by_cause: Dict[str, Optional[str]] = {}
     for _rec in rolled["shot_records"]:
@@ -8275,18 +8283,27 @@ def _manual_roll_intent(
         if not _cause or attacker_unit is None:
             continue
         if _cause not in _ability_by_cause:
-            # Resolution PARESSEUSE, et memoisee sur l intent : on ne lit le nom d affichage
-            # que si une relance a REELLEMENT eu lieu. `get_source_unit_rule_display_name_for_effect`
-            # exige un `displayName` non vide sur la regle source (contrat deja porteur ailleurs
-            # en production) — inutile de l exiger d une unite dont aucune relance n a joue.
-            _effect = _effect_by_cause.get(_cause)  # get allowed
-            _ability_by_cause[_cause] = (
-                get_source_unit_rule_display_name_for_effect(attacker_unit, _effect)
-                if _effect else None
+            _ability_by_cause[_cause] = resolve_wound_reroll_ability(
+                attacker_unit, _cause,
+                reroll_1_towound=reroll_wound1,
+                reroll_towound_on_objective=reroll_wound_obj,
             )
         _ability = _ability_by_cause[_cause]
         if _ability:
             _rec["woundAbility"] = str(_ability)
+    # +1 au jet de blessure d Oath : c est un MODIFICATEUR, pas une relance — il n a donc aucune
+    # cause dans le roller. Sans ce marqueur le seuil affiche est meilleur sans que rien ne dise
+    # pourquoi. JUMEAU du site de melee. Champ distinct de `woundAbility` (relance) : les deux
+    # peuvent jouer sur la meme attaque.
+    if _oath_wound_bonus:
+        for _rec in rolled["shot_records"]:
+            # SEULEMENT les attaques qui ont JETE un de de blessure. Une touche ratee n en jette
+            # aucun, et [LETHAL HITS] 24.23 blesse automatiquement (`strengthRoll` a None) :
+            # attribuer un +1 a un de jamais lance ferait dire au log « Wound None(4+)
+            # [OATH OF MOMENT] ». Le modificateur n a modifie que ce qui a ete jete.
+            if _rec.get("strengthRoll") is None:  # get allowed : cle absente = touche ratee
+                continue
+            _rec["woundBonusAbility"] = OATH_ABILITY_DISPLAY_NAME
 
     return {
         "attacker_mid": attacker_mid, "attacker": attacker, "target_sid": target_sid,
@@ -8303,6 +8320,14 @@ def _manual_roll_intent(
         "precision": _weapon_precision,
         "precision_range": int(require_key(weapon, "RNG")) if _weapon_precision else None,
         "display_wth": display_wth, "display_save_th": display_save_th,
+        # Oath of Moment dans la LIGNE DE SYNTHESE (`Hit:3+RR [OATH OF MOMENT] Wound:3+ [...]`) :
+        # les deux effets sont constants sur un groupe (meme attaquant, meme cible), et le detail
+        # par tir ne suffit pas — la relance peut n avoir joue sur aucune attaque du groupe alors
+        # que la capacite, elle, etait bien en vigueur. JUMEAU du roller de melee.
+        "oath_hit_reroll": bool(_is_oath_target),
+        # BOOLEEN : la magnitude du +1 est consommee en amont (`wth - _oath_wound_bonus`),
+        # le log ne demande que « est-ce que ca a joue ». Jumeau exact de `oath_hit_reroll`.
+        "oath_wound_bonus": bool(_oath_wound_bonus),
         "shot_records": rolled["shot_records"], "pending_wounds": rolled["pending_wounds"],
         "counts": rolled["counts"],
     }
@@ -8848,6 +8873,9 @@ def _build_manual_allocation(
                 "precision": require_key(r, "precision"),
                 "precision_range": require_key(r, "precision_range"),
                 "display_wth": r["display_wth"], "display_save_th": r["display_save_th"],
+                # Constants sur le groupe : meme attaquant, meme cible (tous deux dans `gkey`).
+                "oath_hit_reroll": bool(require_key(r, "oath_hit_reroll")),
+                "oath_wound_bonus": bool(require_key(r, "oath_wound_bonus")),
                 # Joueur proprietaire du tireur : toute figurine du models_cache le porte.
                 # Le defaut `0` en faisait un log attribue au joueur 0 (et `is_ai_action`
                 # calcule dessus), sans qu aucun consommateur puisse le distinguer d un vrai.
@@ -11088,6 +11116,52 @@ def resolve_hit_reroll_ability(
         )
     raise ValueError(
         f"resolve_hit_reroll_ability: cause de relance de touche inconnue {cause!r}. "
+        f"Toute cause produite par `roll_attack_pool` doit etre nommee ici, sinon la relance "
+        f"disparait du log."
+    )
+
+
+def resolve_wound_reroll_ability(
+    attacker_unit: Optional[Dict[str, Any]],
+    cause: Optional[str],
+    *,
+    reroll_1_towound: bool,
+    reroll_towound_on_objective: bool,
+) -> Optional[str]:
+    """Nom d AFFICHAGE de la capacite qui a ouvert une relance de BLESSURE, ou None.
+
+    MIROIR EXACT de `resolve_hit_reroll_ability`, et extrait pour la meme raison : deux
+    appelants (tir et melee). Le bloc vivait inline dans le seul roller de TIR — la melee
+    consommait bien `hitRerollCause` mais laissait `woundRerollCause` sur le record, si bien
+    qu une relance de blessure en melee n atteignait aucun log. C est le motif d echec n°1 du
+    depot, exactement celui que cette extraction empeche de reapparaitre.
+
+    Trois causes possibles, rendues par `attack_sequence.roll_attack_pool` :
+      - `wound_1`         : capacite d unite `reroll_1_towound` -> nom de la regle SOURCE ;
+      - `wound_any_fail`  : capacite d unite `reroll_towound_target_on_objective` -> idem ;
+      - `twin_linked`     : regle d ARME 24.38, deja identifiee par ailleurs -> aucun nom.
+
+    Les deux booleens disent laquelle des deux capacites d unite etait OUVERTE sur cet intent :
+    la cause seule ne suffit pas a nommer l effet source.
+    """
+    if not cause or attacker_unit is None:
+        return None
+    if cause == "twin_linked":
+        return None
+    if cause == "wound_1":
+        return (
+            get_source_unit_rule_display_name_for_effect(attacker_unit, "reroll_1_towound")
+            if reroll_1_towound else None
+        )
+    if cause == "wound_any_fail":
+        return (
+            get_source_unit_rule_display_name_for_effect(
+                attacker_unit, "reroll_towound_target_on_objective"
+            )
+            if reroll_towound_on_objective else None
+        )
+    raise ValueError(
+        f"resolve_wound_reroll_ability: cause de relance de blessure inconnue {cause!r}. "
         f"Toute cause produite par `roll_attack_pool` doit etre nommee ici, sinon la relance "
         f"disparait du log."
     )

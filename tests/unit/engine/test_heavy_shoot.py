@@ -163,6 +163,9 @@ def test_le_log_de_tir_affiche_le_token_heavy(monkeypatch):
             "target_col": 9, "target_row": 9, "attacks": 1, "damage": 0, "kills": 0,
             "bs": r["bs"], "display_wth": r["display_wth"], "display_save_th": r["display_save_th"],
             "heavy_applied": r["heavy_applied"], "shooter_mids": ["A1"], "shots": [],
+            # Oath (08.04) : l emission exige les deux clefs, le vrai groupement les copie de
+            # l intent — les relire ici garde la fixture alignee sur le producteur.
+            "oath_hit_reroll": r["oath_hit_reroll"], "oath_wound_bonus": r["oath_wound_bonus"],
             "player": 0,
         }
         _emit_squad_shoot_log(gs, group, SHOOT_CTX)

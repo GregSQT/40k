@@ -122,6 +122,9 @@ def _shoot_state(
     defender_armor=6,
     defender_invul=7,
     extra_enemy=False,
+    # Règles d'ARME du tireur (24) : `[LETHAL HITS]` fait blesser AUTOMATIQUEMENT, donc sans
+    # jet de blessure — le seul moyen de construire un record à `strengthRoll` None.
+    weapon_rules=(),
     # DICT par joueur, la seule forme acceptee — comme les 24 fichiers de config qui la
     # declarent. `None` sert au verrou « champ absent -> leve ».
     uses_codex_detachment: "dict | None" = None,
@@ -140,7 +143,7 @@ def _shoot_state(
     """
     weapon = {
         "ATK": 4, "STR": 4, "AP": 0, "DMG": 1, "NB": 1, "RNG": 24,
-        "WEAPON_RULES": [], "display_name": "Bolt Rifle",
+        "WEAPON_RULES": list(weapon_rules), "display_name": "Bolt Rifle",
     }
     attacker_model = {
         "id": "A1", "squad_id": "1", "player": 1, "T": 4, "SHOOT_LEFT": 1,
@@ -715,6 +718,109 @@ def test_oath_ne_s_applique_pas_a_un_attaquant_sans_la_capacite():
 
     assert unit_is_oath_target_of(gs, attaquant, "2") is False
     assert oath_wound_roll_bonus(gs, attaquant, "2") == 0
+
+
+def test_verrou_le_jet_initial_survit_a_la_relance(monkeypatch):
+    """VERROU LOG : le dé AVANT relance est conservé (`attackRollInitial`).
+
+    Sans lui, le combat log ne peut afficher que le SECOND dé : un 1 relancé en 3 s'affiche
+    « Tir: ✓ (3) », indiscernable d'un 3 direct. Le champ courant reste le jet FINAL.
+    """
+    # BS 4+ : le 1 rate, la relance 5 touche — le record est donc celui d'une TOUCHE
+    # (`base_rec`), pas celui d'un raté. Sans ce contrôle, le test verrouillerait l'autre branche.
+    seq = _seq(monkeypatch, [1, 5, 4, 6])
+    gs = _shoot_state(attacker_faction=ASTARTES, defender_faction=ORKS)
+    set_oath_target(gs, 1, "2")
+    build_manual_shoot_allocation(gs, "1")
+
+    rec = _records(gs)[0]
+    assert rec["hitResult"] == "HIT"
+    assert seq == [], "la relance a bien consomme un de de plus"
+    assert rec["attackRoll"] == 5, "le champ courant porte le jet FINAL"
+    assert rec["attackRollInitial"] == 1, "le jet d'origine doit rester lisible"
+
+    # Contre-épreuve, branche RATÉ (`miss_rec`) : la relance échoue aussi, les deux dés restent.
+    seq = _seq(monkeypatch, [1, 2])
+    gs = _shoot_state(attacker_faction=ASTARTES, defender_faction=ORKS)
+    set_oath_target(gs, 1, "2")
+    build_manual_shoot_allocation(gs, "1")
+
+    rate = _records(gs)[0]
+    assert rate["hitResult"] == "MISS"
+    assert seq == []
+    assert rate["attackRoll"] == 2
+    assert rate["attackRollInitial"] == 1
+
+
+def test_verrou_le_plus_un_wound_est_nomme_sur_le_record(monkeypatch):
+    """VERROU LOG : le +1 est un MODIFICATEUR, pas une relance — sans marqueur dédié, le seuil
+    amélioré atteignait les deux journaux sans sa cause. Champ distinct de `woundAbility`."""
+    _seq(monkeypatch, [4, 4, 6])
+    gs = _shoot_state(attacker_faction=ASTARTES, defender_faction=ORKS)
+    build_manual_shoot_allocation(gs, "1")
+    assert "woundBonusAbility" not in _records(gs)[0], "aucune designation : aucun token"
+
+    _seq(monkeypatch, [4, 4, 6])
+    gs = _shoot_state(attacker_faction=ASTARTES, defender_faction=ORKS)
+    set_oath_target(gs, 1, "2")
+    build_manual_shoot_allocation(gs, "1")
+    assert _records(gs)[0]["woundBonusAbility"] == "Oath of Moment"
+
+
+def test_verrou_le_plus_un_wound_n_est_pas_attribue_a_un_de_jamais_jete(monkeypatch):
+    """VERROU : [LETHAL HITS] 24.23 blesse AUTOMATIQUEMENT — aucun jet de blessure.
+
+    Marquer ce record ferait afficher « Wound None(3+) [OATH OF MOMENT] » : un +1 attribué à un
+    dé qui n'a jamais été lancé. Même chose pour une touche RATÉE, qui n'atteint pas la blessure.
+    """
+    # 6 = touche CRITIQUE -> auto-blessure (aucun de de blessure), puis sauvegarde.
+    seq = _seq(monkeypatch, [6, 2])
+    gs = _shoot_state(
+        attacker_faction=ASTARTES, defender_faction=ORKS, weapon_rules=("LETHAL_HITS",)
+    )
+    set_oath_target(gs, 1, "2")
+    build_manual_shoot_allocation(gs, "1")
+
+    rec = _records(gs)[0]
+    assert rec["lethalHit"] is True, "l'auto-blessure a bien joue"
+    assert rec["strengthRoll"] is None, "aucun de de blessure n'a ete jete"
+    assert seq == []
+    assert "woundBonusAbility" not in rec
+
+    # Contre-épreuve TOUCHE RATÉE : la relance d'Oath echoue, on n'atteint jamais la blessure.
+    seq = _seq(monkeypatch, [1, 2])
+    gs = _shoot_state(attacker_faction=ASTARTES, defender_faction=ORKS)
+    set_oath_target(gs, 1, "2")
+    build_manual_shoot_allocation(gs, "1")
+
+    rate = _records(gs)[0]
+    assert rate["hitResult"] == "MISS"
+    assert seq == []
+    assert "woundBonusAbility" not in rate
+
+
+def test_verrou_la_ligne_de_synthese_porte_rr_et_les_deux_tokens(monkeypatch):
+    """VERROU LOG DE SYNTHÈSE : `Hit:X+RR [OATH OF MOMENT] Wound:Y+ [OATH OF MOMENT]`.
+
+    La ligne de synthèse est le seul endroit qui dit que la capacité était EN VIGUEUR sur le
+    groupe — le détail par tir, lui, ne montre la relance que sur les attaques où elle a joué.
+    """
+    _seq(monkeypatch, [4, 4, 6])
+    gs = _shoot_state(attacker_faction=ASTARTES, defender_faction=ORKS)
+    build_manual_shoot_allocation(gs, "1")
+    sans_oath = [log["message"] for log in gs["action_logs"] if log.get("type") == "shoot"][0]
+    assert "RR" not in sans_oath, sans_oath
+    assert "[OATH OF MOMENT]" not in sans_oath, sans_oath
+    assert "Wound:4+" in sans_oath, sans_oath
+
+    _seq(monkeypatch, [4, 4, 6])
+    gs = _shoot_state(attacker_faction=ASTARTES, defender_faction=ORKS)
+    set_oath_target(gs, 1, "2")
+    build_manual_shoot_allocation(gs, "1")
+    avec_oath = [log["message"] for log in gs["action_logs"] if log.get("type") == "shoot"][0]
+    assert "RR [OATH OF MOMENT]" in avec_oath, avec_oath
+    # Seuil NET (4+ -> 3+) suivi du token : le log dit la valeur appliquée ET sa cause.
+    assert "Wound:3+ [OATH OF MOMENT]" in avec_oath, avec_oath
 
 
 # ─────────────────────────────────────────────────────────────────────────────

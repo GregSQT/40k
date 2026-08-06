@@ -17,6 +17,23 @@ from shared.data_validation import require_key
 
 __all__ = ['StepLogger']
 
+
+def _rerolled_token(details, field_name: str) -> str:
+    """`` [REROLLED:1]`` quand le jet a ete RELANCE, chaine vide sinon.
+
+    POURQUOI un token et pas `Hit 1->3(3+)` : l analyzer (`ai/analyzer_phases/shoot_handler.py`)
+    et le parseur de replay (`frontend/src/utils/replayParser.ts`) lisent tous deux la forme
+    `Hit N(T+)` par expression reguliere. Un token PARAMETRE accole au segment — meme forme que
+    `[RAPID FIRE:2]` — porte le de d origine sans toucher a ce que ces deux consommateurs lisent.
+
+    Sans lui, le nom de la capacite dit que la relance etait POSSIBLE ; seul le de d origine dit
+    qu elle a EU LIEU, et ce qu elle a change.
+    """
+    initial = details.get(field_name)
+    if not isinstance(initial, int):
+        return ""
+    return f" [REROLLED:{initial}]"
+
 class StepLogger:
     """
     Step-by-step action logger for training debugging.
@@ -636,6 +653,7 @@ class StepLogger:
             hit_rule_suffix = (
                 f" [{hit_rule_modifier}]" if hit_rule_modifier in ("HEAVY", "COVER") else ""
             )
+            hit_rule_suffix += _rerolled_token(details, "hit_roll_initial")
             # [SUSTAINED HITS] 24.36 : touche additionnelle d une touche critique. Elle n a pas
             # de jet (`Hit None(...)`) : le marqueur est la SEULE trace exploitable par
             # l analyzer (plafond de tirs, usage de regle) et le replay.
@@ -654,6 +672,17 @@ class StepLogger:
                 wound_suffix = ""
                 if isinstance(wound_ability_display_name, str) and wound_ability_display_name.strip():
                     wound_suffix = f" [{wound_ability_display_name.strip().upper()}]"
+                # MODIFICATEUR de blessure (+1 d Oath) : le seuil affiche est deja net, donc sans
+                # ce token step.log montrait un `Wound x(3+)` ameliore sans cause visible — alors
+                # que la relance de TOUCHE, elle, etait nommee. Champ distinct de la relance : les
+                # deux peuvent apparaitre sur la meme attaque.
+                wound_bonus_ability_display_name = details.get("wound_bonus_ability_display_name")
+                if (
+                    isinstance(wound_bonus_ability_display_name, str)
+                    and wound_bonus_ability_display_name.strip()
+                ):
+                    wound_suffix += f" [{wound_bonus_ability_display_name.strip().upper()}]"
+                wound_suffix += _rerolled_token(details, "wound_roll_initial")
                 detail_parts.append(
                     f"Wound {wound_roll}({wound_target}+){wound_suffix}"
                 )
@@ -668,6 +697,7 @@ class StepLogger:
                         # `save_cover_applied` / `save_target_base` portait le modele du code
                         # mort de tir et n avait plus aucun producteur (V11 §0hist.38).
                         save_part = f"Save {save_roll}({save_target}+)"
+                        save_part += _rerolled_token(details, "save_roll_initial")
                         if (
                             isinstance(ap_modifier_ability_display_name, str)
                             and ap_modifier_ability_display_name.strip()
@@ -873,6 +903,8 @@ class StepLogger:
             _sustained_seg = " [SUSTAINED HITS]" if details.get("sustained_hit") else ""
             if isinstance(hit_ability_display_name, str) and hit_ability_display_name.strip():
                 _sustained_seg += f" [{hit_ability_display_name.strip().upper()}]"
+            # JUMEAU du tir : le de d avant relance (cf. `_rerolled_token`).
+            _sustained_seg += _rerolled_token(details, "hit_roll_initial")
             detail_parts = [f"Hit {hit_roll}({hit_target}+){_sustained_seg}"]
             
             # Only show wound if hit succeeded
@@ -882,11 +914,22 @@ class StepLogger:
                     if isinstance(wound_ability_display_name, str) and wound_ability_display_name.strip()
                     else ""
                 )
+                # JUMEAU du tir : modificateur +1 d Oath, distinct de la relance (cf. la-bas).
+                wound_bonus_ability_display_name = details.get("wound_bonus_ability_display_name")
+                if (
+                    isinstance(wound_bonus_ability_display_name, str)
+                    and wound_bonus_ability_display_name.strip()
+                ):
+                    wound_suffix += f" [{wound_bonus_ability_display_name.strip().upper()}]"
+                wound_suffix += _rerolled_token(details, "wound_roll_initial")
                 detail_parts.append(f"Wound {wound_roll}({wound_target}+){wound_suffix}")
-                
-                # Only show save if wound succeeded  
+
+                # Only show save if wound succeeded
                 if wound_result in ("WOUND", "SUCCESS"):
-                    detail_parts.append(f"Save {save_roll}({save_target}+)")
+                    detail_parts.append(
+                        f"Save {save_roll}({save_target}+)"
+                        + _rerolled_token(details, "save_roll_initial")
+                    )
                     
                     # Show damage if save failed (even if damage is 0, it should be logged)
                     if save_result == "FAIL":
