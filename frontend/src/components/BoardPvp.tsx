@@ -72,6 +72,12 @@ import {
   getNonRoundIconRadius,
   getSquareCornerRadiusPx,
 } from "../utils/unitBaseDisplay";
+import {
+  buildWaaaghCracks,
+  drawWaaaghCracks,
+  WAAAGH_CRACKS_SEED,
+  type WaaaghCracksGeometry,
+} from "../utils/waaaghBorder";
 import { ensureWasmLoaded, isWasmReady } from "../utils/wasmLos";
 import { getMaxRangedRange } from "../utils/weaponHelpers";
 import {
@@ -601,6 +607,14 @@ type BoardProps = {
     targetUnitIds: number[];
     onPickTarget: (unitId: number) => void;
   } | null;
+  /**
+   * Waaagh! (08.04) — vrai tant que la capacité est EN VIGUEUR pour un joueur, c'est-à-dire
+   * jusqu'au début de sa prochaine phase de commandement : le tour adverse est donc COMPRIS,
+   * et c'est voulu (l'adversaire subit +1 F/A en mêlée et une invu 5+ pendant son propre tour).
+   * Un seul drapeau et pas un par camp : seuls les ORKS ont cette capacité, il n'y a rien à
+   * distinguer. Le rendu est un pourtour fissuré vert (`utils/waaaghBorder`).
+   */
+  waaaghActive?: boolean;
   onSelectUnit: (id: number | string | null) => void;
   onSkipUnit?: (unitId: number | string) => void;
   onSkipShoot?: (unitId: number | string) => void;
@@ -1227,6 +1241,7 @@ export default function Board({
   isBlinkingActive,
   blinkVersion,
   oathTargetSelection = null,
+  waaaghActive = false,
   onSelectUnit,
   onSkipUnit,
   onStartMovePreview,
@@ -1444,6 +1459,12 @@ export default function Board({
   const blinkTargetRingOverlayRef = useRef<PIXI.Graphics | null>(null);
   /** Réticule ambre 08.04 sur les figs des unités désignées par un Oath of Moment (les DEUX camps). */
   const oathTargetOverlayRef = useRef<PIXI.Graphics | null>(null);
+  /** Pourtour fissuré du Waaagh!— persistant (HOOK 3 le remet sur le stage, cf. `saved*`). */
+  const waaaghCracksOverlayRef = useRef<PIXI.Graphics | null>(null);
+  /** Géométrie mémorisée avec la clé des dimensions qui l'a produite. */
+  const waaaghCracksGeometryRef = useRef<{ key: string; geometry: WaaaghCracksGeometry } | null>(
+    null
+  );
   /** Halos de cohésion (charge/pile-in/consolidation) redessinés au survol — suivent la fig active. */
   const cohesionHaloOverlayRef = useRef<PIXI.Graphics | null>(null);
   /** Cercles de portée autour de la fig activée (préservé au redraw, comme les autres overlays). */
@@ -9751,6 +9772,7 @@ export default function Board({
       const savedShootOverlay = shootSubgroupOverlayRef.current;
       const savedOathOverlay = oathTargetOverlayRef.current;
       const savedRangeRingsOverlay = rangeRingsOverlayRef.current;
+      const savedWaaaghCracksOverlay = waaaghCracksOverlayRef.current;
       if (savedStatic?.parent) app.stage.removeChild(savedStatic);
       if (savedWalls?.parent) app.stage.removeChild(savedWalls);
       if (savedUi?.parent) app.stage.removeChild(savedUi);
@@ -9768,6 +9790,7 @@ export default function Board({
       if (savedShootOverlay?.parent) app.stage.removeChild(savedShootOverlay);
       if (savedOathOverlay?.parent) app.stage.removeChild(savedOathOverlay);
       if (savedRangeRingsOverlay?.parent) app.stage.removeChild(savedRangeRingsOverlay);
+      if (savedWaaaghCracksOverlay?.parent) app.stage.removeChild(savedWaaaghCracksOverlay);
       if (
         canReuseExistingHighlightsThroughDestroy &&
         highlightsLayerRef.current?.parent === app.stage
@@ -9877,6 +9900,12 @@ export default function Board({
       if (savedRangeRingsOverlay && !savedRangeRingsOverlay.destroyed) {
         savedRangeRingsOverlay.zIndex = 2640;
         app.stage.addChild(savedRangeRingsOverlay);
+      }
+      if (savedWaaaghCracksOverlay && !savedWaaaghCracksOverlay.destroyed) {
+        // 130 : même étage que les murs — décor de plateau, au-dessus des surbrillances (120),
+        // sous les figurines (2000).
+        savedWaaaghCracksOverlay.zIndex = 130;
+        app.stage.addChild(savedWaaaghCracksOverlay);
       }
 
       // Nettoyer pastilles cible / jet de charge seulement quand on reconstruit les unités.
@@ -11493,6 +11522,108 @@ export default function Board({
     pileInModelPoolRef,
     squadUnplacedUnionVersion,
   ]);
+
+  // Waaagh! (08.04) : tant que la capacité est en vigueur, tout le pourtour du plateau est
+  // fissuré de vert, et la lueur dans les fissures respire. La durée est celle du MOTEUR
+  // (`waaagh_active`), donc l'effet couvre aussi le tour adverse — c'est exactement pendant ce
+  // tour-là que l'adversaire subit l'invu 5+ et le +1 F/A en mêlée.
+  //
+  // Overlay PIXI et pas un halo CSS sur le canvas : le stage se déplace et se zoome, un décor
+  // CSS resterait collé au viewport et se décollerait du plateau au premier pan.
+  //
+  // La GÉOMÉTRIE n'est reconstruite que si les dimensions du plateau changent ; seul l'alpha
+  // varie au ticker. Régénérer les fissures par frame les ferait grouiller.
+  //
+  // Overlay PERSISTANT dans une ref, comme le réticule Oath : HOOK 3 vide `app.stage` et détruit
+  // tout ce qu'il n'a pas explicitement mis de côté. Le pourtour est donc capturé et ré-attaché
+  // avec les autres `saved*` — un overlay simplement `addChild` disparaissait à la première
+  // action suivant l'appel du Waaagh!, sans rien pour le recréer.
+  //
+  // DÉCLARÉ ICI, après HOOK 3, et c'est structurel : React exécute les effets dans leur ordre de
+  // déclaration, or l'app PIXI naît dans HOOK 3. Plus haut dans le fichier, cet effet sortait sur
+  // `!appRef.current` au montage — et quand le plateau se monte alors que le Waaagh! est DÉJÀ
+  // actif (rechargement de page, chargement d'une sauvegarde, rewind), `waaaghActive` ne rebouge
+  // plus ensuite : le pourtour n'apparaissait jamais.
+  useEffect(() => {
+    const app = appRef.current;
+    if (!app || !boardConfig) return;
+    let overlay = waaaghCracksOverlayRef.current;
+    if (!overlay || overlay.destroyed) {
+      overlay = new PIXI.Graphics();
+      overlay.eventMode = "none";
+      waaaghCracksOverlayRef.current = overlay;
+    }
+    // Au-dessus des surbrillances d'hex (120) et sous les unités (2000) : la fissure est un
+    // décor de plateau, elle ne doit pas passer par-dessus les figurines du bord.
+    overlay.zIndex = 130;
+    if (overlay.parent !== app.stage) app.stage.addChild(overlay);
+    overlay.visible = waaaghActive && !hideIndicators;
+    if (!waaaghActive) {
+      overlay.clear();
+      return;
+    }
+
+    const HEX_RADIUS_W = boardConfig.hex_radius;
+    const HEX_WIDTH_W = 1.5 * HEX_RADIUS_W;
+    const HEX_HEIGHT_W = Math.sqrt(3) * HEX_RADIUS_W;
+    const MARGIN_W = boardConfig.margin;
+    // Mêmes totaux que la grille dessinée par BoardDisplay : la fissure longe le bord RÉEL.
+    const boardWidth = boardConfig.cols * HEX_WIDTH_W + HEX_WIDTH_W / 2 + 2 * MARGIN_W;
+    const boardHeight = boardConfig.rows * HEX_HEIGHT_W + HEX_HEIGHT_W / 2 + 2 * MARGIN_W;
+    const geometryKey = `${boardWidth}|${boardHeight}|${HEX_RADIUS_W}`;
+    if (waaaghCracksGeometryRef.current?.key !== geometryKey) {
+      waaaghCracksGeometryRef.current = {
+        key: geometryKey,
+        geometry: buildWaaaghCracks({
+          boardWidth,
+          boardHeight,
+          hexRadius: HEX_RADIUS_W,
+          seed: WAAAGH_CRACKS_SEED,
+        }),
+      };
+    }
+    const { geometry } = waaaghCracksGeometryRef.current;
+
+    /** Période de la pulsation, en ms — une respiration lente, pas un clignotant. */
+    const PULSE_PERIOD_MS = 2200;
+    /** Redessin au plus tous les 60 ms : la pulsation reste fluide sans 3 passes par frame. */
+    const REDRAW_INTERVAL_MS = 60;
+    let elapsedMs = 0;
+    let sinceRedrawMs = REDRAW_INTERVAL_MS;
+    const tick = () => {
+      const target = waaaghCracksOverlayRef.current;
+      // Lu dans la ref à chaque frame, jamais capturé : si l'overlay a été détruit malgré la
+      // ré-attache de HOOK 3, ce tick ne dessine plus rien au lieu d'écrire dans un objet mort.
+      if (!target || target.destroyed) return;
+      elapsedMs += app.ticker.deltaMS;
+      sinceRedrawMs += app.ticker.deltaMS;
+      if (sinceRedrawMs < REDRAW_INTERVAL_MS) return;
+      sinceRedrawMs = 0;
+      const pulse = 0.5 + 0.5 * Math.sin((elapsedMs / PULSE_PERIOD_MS) * 2 * Math.PI);
+      drawWaaaghCracks(target, geometry, { hexRadius: HEX_RADIUS_W, pulse });
+    };
+    // Premier tracé immédiat : sans lui, le pourtour n'apparaît qu'à la frame suivante.
+    drawWaaaghCracks(overlay, geometry, { hexRadius: HEX_RADIUS_W, pulse: 0.5 });
+    app.ticker.add(tick);
+    return () => {
+      app.ticker.remove(tick);
+    };
+  }, [waaaghActive, boardConfig, hideIndicators]);
+
+  // Détruit l'overlay Waaagh! uniquement au démontage du composant (jumeau de l'overlay Oath
+  // ci-dessus : l'effet principal ne le détruit jamais, il le réutilise).
+  useEffect(
+    () => () => {
+      const o = waaaghCracksOverlayRef.current;
+      if (o && !o.destroyed) {
+        o.clear();
+        o.destroy();
+      }
+      waaaghCracksOverlayRef.current = null;
+      waaaghCracksGeometryRef.current = null;
+    },
+    []
+  );
 
   // weapons_for_target pour UNE cible (profils éligibles + m/x). Read-only backend.
   const fetchWeaponsForTarget = async (
