@@ -45,6 +45,65 @@ def build_game_rules(**overrides: Any) -> Dict[str, Any]:
     return rules
 
 
+#: Faction d'Armée NEUTRE des tests, à l'unité : le mot-clé que les fixtures posent dans leurs
+#: `FACTION_KEYWORDS`.
+#:
+#: Ce n'est PAS une valeur de repli anti-erreur. `army_faction` (`engine/game_state.py`) exige une
+#: DÉCLARATION et refuse de la deviner depuis les unités présentes — c'est le défaut corrigé le
+#: 2026-08-06. Une fixture qui construit sa config en mémoire ne passe par aucun fichier de
+#: scénario ni par aucun roster : elle doit donc porter cette déclaration elle-même, et c'est
+#: exactement ce que fait un roster de production (`"army_faction"` en tête de fichier).
+#:
+#: POURQUOI TYRANIDS. Les unités de fixture sont des `TestUnit` génériques, sans identité de
+#: faction. Leur coller ADEPTUS ASTARTES leur en inventerait une ET armerait l'Oath of Moment à
+#: chaque phase de commandement dans 45 fichiers qui ne l'ont pas demandé — un déplacement de
+#: comportement, pas une correction. TYRANIDS est la seule des trois factions du dépôt à ne porter
+#: AUCUNE capacité de commandement (ni Waaagh! ni Oath), donc 08.04 se comporte pour ces fixtures
+#: comme pour une armée sans capacité de faction : leur état d'avant.
+#:
+#: CE N'EST PAS UN VERT VACANT. 08.04 reste exercé pour de vrai ailleurs : `build_armageddon_engine`
+#: joue le scénario RÉEL (rosters `..._space_marines.json`, `ADEPTUS ASTARTES` des deux côtés, Oath
+#: armé), et `test_faction_abilities` / `test_army_faction_declaration` déclarent leur propre
+#: faction — `config` gagne sur ce socle (cf. `merged.update(config)`).
+NEUTRAL_TEST_FACTION = "TYRANIDS"
+
+#: La même chose sous la forme attendue par `config["army_faction"]` : un mot-clé PAR JOUEUR.
+#: `build_engine_config` la pose d'office ; les fixtures qui bâtissent un `game_state` LITTÉRAL,
+#: sans passer par ce helper, la déclarent elles-mêmes sous le nom `NEUTRAL_TEST_ARMY_FACTION`.
+DEFAULT_TEST_ARMY_FACTION: Dict[str, str] = {
+    "1": NEUTRAL_TEST_FACTION,
+    "2": NEUTRAL_TEST_FACTION,
+}
+
+#: Alias de lecture pour ces fixtures à `game_state` littéral. Même valeur, même raison — un seul
+#: endroit à changer si la faction neutre des tests change.
+NEUTRAL_TEST_ARMY_FACTION = DEFAULT_TEST_ARMY_FACTION
+
+
+def _declare_faction_on_units(config: Dict[str, Any], by_player: Dict[str, str]) -> None:
+    """Appose sur les unités du test le mot-clé de la Faction d'Armée déclarée pour leur joueur.
+
+    LA GARDE QU'ON SATISFAIT. `army_faction` refuse une faction que PERSONNE ne porte
+    (« declare X, mais aucune unite du joueur N ne porte ce mot-cle ») : c'est sa garde
+    anti-coquille, et elle est juste — une déclaration qu'aucune unité ne confirme est une faute de
+    frappe. Un roster de production n'a pas ce problème : il déclare sa faction ET ses unités la
+    portent. Une config de test en mémoire doit donc être cohérente de la même façon.
+
+    Poser le mot-clé n'est PAS deviner la faction : le sens de lecture est l'inverse de celui qui
+    a produit le défaut. Le moteur déduisait la déclaration des unités ; ici la déclaration est
+    première et les unités s'y conforment, exactement comme dans un fichier de roster.
+
+    Une unité qui déclare DÉJÀ ses `FACTION_KEYWORDS` est laissée intacte : le test l'a voulue
+    ainsi (unité invitée d'une autre faction, cas 19.03), et l'écraser détruirait ce qu'il mesure.
+    """
+    for unit in config.get("units", ()):  # get allowed : une config sans `units` n'a rien à faire
+        if "FACTION_KEYWORDS" in unit:
+            continue
+        declared = by_player.get(str(unit["player"]))
+        if declared is not None:
+            unit["FACTION_KEYWORDS"] = [declared]
+
+
 def build_engine_config(config: Dict[str, Any]) -> Dict[str, Any]:
     """Config de moteur de test : le CONTRAT de production, surcharge par ce que le test déclare.
 
@@ -65,7 +124,12 @@ def build_engine_config(config: Dict[str, Any]) -> Dict[str, Any]:
     qu'aucun contrôle n'était jamais établi.
     """
     merged = require_engine_game_config_sections(_read_game_config())
+    # Déclaration de scénario, posée AVANT l'override : cf. `DEFAULT_TEST_ARMY_FACTION`.
+    merged["army_faction"] = dict(DEFAULT_TEST_ARMY_FACTION)
     merged.update(config)
+    # APRÈS l'override : les unités doivent se conformer à la déclaration RETENUE, celle du test
+    # quand il en pose une, pas au socle qu'elle vient de remplacer.
+    _declare_faction_on_units(merged, merged["army_faction"])
     return merged
 
 

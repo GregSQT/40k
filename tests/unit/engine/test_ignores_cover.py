@@ -13,6 +13,7 @@ import pytest
 
 from engine.phase_handlers import shooting_handlers
 from engine.phase_handlers.shared_utils import _cover_worsened_bs, _manual_roll_intent
+from engine.game_state import initial_faction_ability_state
 
 
 def _minimal_shoot_game_state(weapon_rules):
@@ -27,6 +28,11 @@ def _minimal_shoot_game_state(weapon_rules):
         "ARMOR_SAVE": 3, "INVUL_SAVE": 7, "role": None, "unitType": "Grunt",
     }
     game_state = {
+        # Etat de depart des capacites de faction, par le constructeur canonique du moteur
+        # (`w40k_core` l'appelle a l'init ET au reset). La resolution d'une attaque lit
+        # `oath_target` / `waaagh_active` en `require_key` : un game_state litteral qui les
+        # omet decrit une partie impossible.
+        **initial_faction_ability_state(),
         "models_cache": {"A1": attacker, "T1": target},
         "squad_models": {"2": ["T1"]},
         "units_cache": {"2": {"VALUE": 10.0, "player": 1}},

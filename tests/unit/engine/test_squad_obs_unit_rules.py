@@ -76,6 +76,10 @@ def _load(units: List[Dict[str, Any]]) -> W40KEngine:
         "board_ref": "44x60x5",
         "primary_objectives": ["objectives_control"],
         "wall_ref": "walls-none.json",
+        # Faction d'Armée DÉCLARÉE des deux camps : 08.04 la demande à chaque phase de commandement
+        # et refuse de la déduire des unités. ADEPTUS ASTARTES est la faction RÉELLE des datasheets
+        # de ce fichier (Intercessor, AssaultIntercessor, Captain*).
+        "army_faction": {"1": "ADEPTUS ASTARTES", "2": "ADEPTUS ASTARTES"},
         "units": units,
     }
     with tempfile.TemporaryDirectory() as td:

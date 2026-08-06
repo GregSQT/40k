@@ -428,14 +428,18 @@ class TestCapturedModeMatchesRealShape:
     donc avec la VRAIE fonction, sans rien inventer."""
 
     def test_mode_is_read_from_a_genuinely_captured_state(self):
-        engine = SimpleNamespace(game_state={"current_mode_code": "pvp", "turn": 1})
+        # `config` : `capture_live_state` l'exige en `require_key` depuis qu'elle capture à part
+        # `uses_codex_detachment` et `army_faction` (données de ROSTER, pas d'état de jeu). Vide
+        # ici — c'est le cas « scénario muet » que ces deux lectures gèrent nommément, et ce test
+        # ne porte que sur l'emplacement du mode dans l'enveloppe.
+        engine = SimpleNamespace(game_state={"current_mode_code": "pvp", "turn": 1, "config": {}})
         captured = capture_live_state(engine)
         # Garde-fou sur la forme elle-même : le mode n'est PAS à la racine.
         assert "current_mode_code" not in captured
         assert api_server._captured_mode(captured) == "pvp"
 
     def test_captured_state_without_mode_reads_as_none(self):
-        engine = SimpleNamespace(game_state={"turn": 1})
+        engine = SimpleNamespace(game_state={"turn": 1, "config": {}})  # cf. commentaire ci-dessus
         assert api_server._captured_mode(capture_live_state(engine)) is None
 
 

@@ -20,6 +20,7 @@ Discrimination verrouillee : effet UNIQUEMENT si (regle presente) ET (cible = pl
 import random
 
 from engine.phase_handlers import shooting_handlers
+from engine.game_state import initial_faction_ability_state
 from tests.unit.engine._roll_helpers import roll_shoot_intent
 
 
@@ -57,6 +58,11 @@ def _game_state(unit_rules):
                 "INVUL_SAVE": 7, "role": None, "unitType": "Grunt", "player": 1}
 
     game_state = {
+        # Etat de depart des capacites de faction, par le constructeur canonique du moteur
+        # (`w40k_core` l'appelle a l'init ET au reset). La resolution d'une attaque lit
+        # `oath_target` / `waaagh_active` en `require_key` : un game_state litteral qui les
+        # omet decrit une partie impossible.
+        **initial_faction_ability_state(),
         "models_cache": {"A1": attacker, "T2": _target_model("T2"), "T3": _target_model("T3")},
         "squad_models": {"2": ["T2"], "3": ["T3"]},
         "squad_cache": {"2": {"model_count_at_start": 1}, "3": {"model_count_at_start": 1}},

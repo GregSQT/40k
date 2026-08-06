@@ -23,6 +23,9 @@ def _scenario(units: list) -> dict:
         "board_ref": "44x60x5",
         "primary_objectives": ["objectives_control"],
         "wall_ref": "walls-none.json",
+        # Cf. `test_attached_units_legality_19_01._scenario` : 08.04 exige la Faction d'Armée
+        # DÉCLARÉE, et ADEPTUS ASTARTES est celle des datasheets de ce fichier.
+        "army_faction": {"1": "ADEPTUS ASTARTES", "2": "ADEPTUS ASTARTES"},
         "units": units,
     }
 

@@ -30,6 +30,12 @@ def _scenario(units: list) -> dict:
         "board_ref": "44x60x5",
         "primary_objectives": ["objectives_control"],
         "wall_ref": "walls-none.json",
+        # Faction d'Armée DÉCLARÉE des deux camps, comme tout scénario de production : 08.04 la
+        # demande à chaque phase de commandement et refuse de la déduire des unités présentes.
+        # ADEPTUS ASTARTES est la faction RÉELLE des datasheets de ce fichier (Intercessor,
+        # Captain*, vérifiée au registre) — la garde anti-coquille d'`army_faction` rejetterait
+        # toute autre valeur.
+        "army_faction": {"1": "ADEPTUS ASTARTES", "2": "ADEPTUS ASTARTES"},
         "units": units,
     }
 

@@ -17,7 +17,9 @@ from engine.observation_builder import ObservationBuilder
 from engine.w40k_core import W40KEngine
 from engine.reward_calculator import RewardCalculator
 from tests._state_invariants import turn_state_invariants, unit_invariants
-from tests.unit.engine._config_helpers import build_engine_config
+from tests.unit.engine._config_helpers import (
+    NEUTRAL_TEST_ARMY_FACTION, NEUTRAL_TEST_FACTION, build_engine_config,
+)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -25,7 +27,11 @@ from tests.unit.engine._config_helpers import build_engine_config
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _cmd_unit(uid: int, player: int, col: int, row: int) -> Dict[str, Any]:
-    return {**unit_invariants(), "id": uid, "player": player, "col": col, "row": row,
+    return {**unit_invariants(),
+            # Confirme la Faction d'Armée déclarée par `_make_cmd_gs` : `army_faction` refuse une
+            # faction que personne ne porte. Un roster de production tient la même cohérence.
+            "FACTION_KEYWORDS": [NEUTRAL_TEST_FACTION],
+            "id": uid, "player": player, "col": col, "row": row,
             "HP_CUR": 3, "HP_MAX": 3, "VALUE": 100, "OC": 1,
             # Meme exigence que `battle_shocked` ci-dessous : depuis le chantier 02 le Ld est
             # recopie PAR FIGURINE dans models_cache (01.06, meilleur Ld d'une unite attachee),
@@ -52,6 +58,12 @@ def _make_cmd_gs() -> Dict[str, Any]:
         "config": {
             "game_rules": {"engagement_zone": 1, "engagement_zone_vertical": 5, "max_base_size_hex": 35},
             "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
+            # Faction d'Armée DÉCLARÉE des deux camps : 08.04 la demande à chaque phase de
+            # commandement et refuse de la déduire des unités. Neutre (aucune capacité de
+            # commandement) — c'est le déroulé nu de la phase que ce fichier mesure, pas Waaagh!
+            # ni Oath. `_cmd_unit` pose le mot-clé correspondant, sans quoi la garde anti-coquille
+            # d'`army_faction` lèverait.
+            "army_faction": dict(NEUTRAL_TEST_ARMY_FACTION),
         },
         "units": units,
         "unit_by_id": {str(u["id"]): u for u in units},

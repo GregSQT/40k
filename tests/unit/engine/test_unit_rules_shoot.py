@@ -19,6 +19,7 @@ jet de touche ni celui de sauvegarde.
 import random
 
 from engine.phase_handlers import shooting_handlers
+from engine.game_state import initial_faction_ability_state
 from tests.unit.engine._roll_helpers import roll_shoot_intent
 
 
@@ -55,6 +56,11 @@ def _game_state(unit_rules, weapon_rules=(), *, target_col=9, target_row=9, armo
                     "col": target_col, "row": target_row, "level": 0,
                     "BASE_SHAPE": "round", "BASE_SIZE": 1}
     game_state = {
+        # Etat de depart des capacites de faction, par le constructeur canonique du moteur
+        # (`w40k_core` l'appelle a l'init ET au reset). La resolution d'une attaque lit
+        # `oath_target` / `waaagh_active` en `require_key` : un game_state litteral qui les
+        # omet decrit une partie impossible.
+        **initial_faction_ability_state(),
         "models_cache": {"A1": attacker, "T1": target_model},
         "squad_models": {"1": ["A1"], "2": ["T1"]},
         "squad_cache": {"2": {"model_count_at_start": 1}},

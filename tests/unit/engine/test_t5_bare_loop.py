@@ -29,6 +29,12 @@ _SCENARIO = {
     "board_ref": "44x60x5",
     "terrain_ref": "terrain-train-01.json",
     "deployment_type": "fixed",
+    # Faction d'Armée DÉCLARÉE des deux camps : 08.04 la demande à chaque phase de commandement et
+    # refuse de la déduire des unités. TYRANIDS est la faction RÉELLE des datasheets ci-dessous
+    # (ScreamerKiller, Termagant, Carnifex) — la garde anti-coquille d'`army_faction` rejetterait
+    # toute autre valeur. Aucune capacité de commandement n'y est attachée : la boucle nue que ce
+    # fichier mesure reste nue.
+    "army_faction": {"1": "TYRANIDS", "2": "TYRANIDS"},
     "units": [
         {"id": "1", "player": 1, "unit_type": "ScreamerKiller", "col": 60, "row": 200},
         {"id": "2", "player": 2, "unit_type": "Termagant", "col": 60, "row": 214},

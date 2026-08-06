@@ -55,7 +55,19 @@ from tests.unit.engine._config_helpers import build_engine_config
 # Chargement RÉEL (repli 19.04 compris)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _load(units: List[Dict[str, Any]]):
+def _load(units: List[Dict[str, Any]], *, player_2_faction: str = "ORKS"):
+    """Charge un scénario par le vrai chemin moteur.
+
+    ``player_2_faction`` : Faction d'Armée DÉCLARÉE du joueur 2. 08.04 l'exige à chaque phase de
+    commandement et refuse de la déduire des unités présentes, donc elle se déclare ici comme dans
+    un scénario de production. Le joueur 1 est ``_ENEMY`` (Intercessor) dans tous les appels, d'où
+    sa valeur fixe. ORKS est la faction du joueur 2 dans neuf appels sur dix (Boyz / Warboss) ; le
+    dixième (Captain + Intercessors, exemple littéral du PDF 25) passe ADEPTUS ASTARTES.
+
+    Ce paramètre n'est pas un repli anti-erreur : une valeur incohérente avec les unités ne passe
+    pas en silence, la garde anti-coquille d'``army_faction`` lève (« declare X, mais aucune unite
+    du joueur N ne porte ce mot-cle »).
+    """
     from ai.unit_registry import UnitRegistry
     from engine.w40k_core import W40KEngine
 
@@ -63,6 +75,7 @@ def _load(units: List[Dict[str, Any]]):
         "board_ref": "44x60x5",
         "primary_objectives": ["objectives_control"],
         "wall_ref": "walls-none.json",
+        "army_faction": {"1": "ADEPTUS ASTARTES", "2": player_2_faction},
         "units": units,
     }
     with tempfile.TemporaryDirectory() as td:
@@ -267,7 +280,7 @@ def test_la_force_de_depart_dune_unite_attachee_compte_le_character():
         {"id": 102, "unit_type": "CaptainPowerWeaponBolter", "player": 2,
          "attached_squad": 101, "col": 17, "row": 10},
         _ENEMY,
-    ])
+    ], player_2_faction="ADEPTUS ASTARTES")  # seul appel où le joueur 2 n'est pas orke
     gs = eng.game_state
     assert int(gs["squad_cache"]["101"]["model_count_at_start"]) == 6
 

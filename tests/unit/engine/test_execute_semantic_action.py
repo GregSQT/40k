@@ -15,7 +15,9 @@ import pytest
 from engine.w40k_core import W40KEngine
 from engine.phase_handlers.shared_utils import build_units_cache, build_enemy_adjacent_hexes
 
-from _config_helpers import build_move_rules
+from _config_helpers import (
+    NEUTRAL_TEST_ARMY_FACTION, NEUTRAL_TEST_FACTION, build_move_rules,
+)
 from tests._state_invariants import turn_state_invariants, unit_invariants
 
 
@@ -39,11 +41,19 @@ def _base_config() -> Dict[str, Any]:
         "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
         "gym_training_mode": False,
         "pve_mode": False,
+        # Faction d'Armée DÉCLARÉE des deux camps : 08.04 la demande à chaque phase de commandement
+        # et refuse de la déduire des unités. Neutre (aucune capacité de commandement) pour que les
+        # actions sémantiques mesurées ici restent celles qu'elles mesuraient. `_unit` pose le
+        # mot-clé correspondant, sans quoi la garde anti-coquille d'`army_faction` lèverait.
+        "army_faction": dict(NEUTRAL_TEST_ARMY_FACTION),
     }
 
 
 def _unit(uid: str, player: int, col: int, row: int, hp: int = 3) -> Dict[str, Any]:
     return {**unit_invariants(),
+        # Confirme la Faction d'Armée déclarée par `_base_config` : `army_faction` refuse une
+        # faction que personne ne porte. Un roster de production tient la même cohérence.
+        "FACTION_KEYWORDS": [NEUTRAL_TEST_FACTION],
         "id": uid,
         "player": player,
         "col": col,

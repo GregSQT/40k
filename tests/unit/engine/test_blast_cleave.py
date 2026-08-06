@@ -16,6 +16,7 @@ import pytest
 from shared.data_validation import ConfigurationError
 
 from engine.phase_handlers import shooting_handlers
+from engine.game_state import initial_faction_ability_state
 from tests.unit.engine._roll_helpers import roll_fight_intent, roll_shoot_intent
 
 
@@ -38,6 +39,11 @@ def _shoot_state(weapon_rules, *, target_size):
               "WEAPON_RULES": list(weapon_rules), "display_name": "Launcher"}
     attacker = {"id": "A1", "squad_id": "1", "T": 4, "player": 0, "RNG_WEAPONS": [weapon]}
     gs = {
+        # Etat de depart des capacites de faction, par le constructeur canonique du moteur
+        # (`w40k_core` l'appelle a l'init ET au reset). La resolution d'une attaque lit
+        # `oath_target` / `waaagh_active` en `require_key` : un game_state litteral qui les
+        # omet decrit une partie impossible.
+        **initial_faction_ability_state(),
         "models_cache": {"A1": attacker, "T1": {"id": "T1", "T": 4, "HP_CUR": 2, "HP_MAX": 2,
                                                 "ARMOR_SAVE": 3, "INVUL_SAVE": 7, "role": None,
                                                 "unitType": "Grunt", "player": 1}},
@@ -91,6 +97,7 @@ def _fight_state(weapon_rules, *, target_size, extra_intents=()):
     intent = {"model_id": "A1", "target_unit_id": "2", "weapon_index": 0,
               "n_attacks_resolved": 1, "target_squad_size_at_declaration": target_size}
     gs = {
+        **initial_faction_ability_state(),
         "models_cache": {"A1": attacker, "T1": target_model},
         "squad_models": {"1": ["A1"], "2": ["T1"]},
         "squad_cache": {"1": {"model_count_at_start": 1}, "2": {"model_count_at_start": target_size}},

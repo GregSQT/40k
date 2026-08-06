@@ -29,6 +29,7 @@ import random
 import pytest
 
 from engine.phase_handlers import shared_utils, shooting_handlers
+from engine.game_state import initial_faction_ability_state
 from engine.phase_handlers.shared_utils import (
     _resolve_intent_nb,
     build_manual_shoot_allocation,
@@ -66,6 +67,11 @@ def _game_state(weapon):
         "gym_training_mode": True,
         "turn": 1, "phase": "shoot",
         "action_logs": [], "action_log_seq": 0,
+        # Etat de depart des capacites de faction, par le constructeur canonique du moteur
+        # (`w40k_core` l'appelle a l'init ET au reset). La resolution d'une attaque lit
+        # `oath_target` / `waaagh_active` en `require_key` : un game_state litteral qui les
+        # omet decrit une partie impossible.
+        **initial_faction_ability_state(),
         "models_cache": {"A1": attacker, "T1": target},
         "squad_models": {"1": ["A1"], "2": ["T1"]},
         "squad_cache": {"1": {"model_count_at_start": 1}, "2": {"model_count_at_start": 1}},
@@ -182,6 +188,7 @@ def _fight_state(weapons):
     """Etat minimal accepte par `squad_declare_fight` (jumeau de test_extra_attacks_fight)."""
     fig = {"id": "A1", "squad_id": "1", "player": 0, "T": 4, "CC_WEAPONS": list(weapons)}
     return {
+        **initial_faction_ability_state(),
         "models_cache": {"A1": fig,
                          "T1": {"id": "T1", "T": 4, "ARMOR_SAVE": 3, "INVUL_SAVE": 7}},
         "squad_models": {"1": ["A1"], "2": ["T1"]},

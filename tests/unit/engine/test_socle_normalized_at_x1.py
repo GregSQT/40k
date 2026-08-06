@@ -25,6 +25,18 @@ import pytest
 # Socles non-ronds présents dans les rosters d'entraînement (BASE_SIZE = paire).
 NON_ROUND_UNITS = ("WarTrakk", "Carnifex", "LandSpeederOnslaughtGatlingCannon")
 
+#: Faction d'Armée DÉCLARÉE du joueur 1 pour chacun de ces movers. 08.04 l'exige à chaque phase de
+#: commandement et refuse de la déduire des unités présentes, or le mover CHANGE de faction à
+#: chaque paramètre : une déclaration fixe serait fausse pour deux cas sur trois, et la garde
+#: anti-coquille d'`army_faction` le dirait. Recopiée à la main depuis les datasheets, jamais lue
+#: au registre : la lire ferait suivre la déclaration en silence le jour où une datasheet change
+#: de faction, c'est-à-dire exactement la déduction que le moteur refuse.
+_MOVER_FACTION = {
+    "WarTrakk": "ORKS",
+    "Carnifex": "TYRANIDS",
+    "LandSpeederOnslaughtGatlingCannon": "ADEPTUS ASTARTES",
+}
+
 
 @pytest.fixture
 def board_x1() -> Iterator[None]:
@@ -60,6 +72,8 @@ def _engine(tmp_path, mover_type: str, mover: tuple, enemy: tuple):
         "primary_objectives": ["objectives_control"],
         "board_ref": "44x60x5",
         "terrain_ref": "terrain-mc1.json",
+        # Joueur 1 = le mover (faction variable, cf. `_MOVER_FACTION`), joueur 2 = Intercessor.
+        "army_faction": {"1": _MOVER_FACTION[mover_type], "2": "ADEPTUS ASTARTES"},
         "units": [
             {"id": "1", "player": 1, "unit_type": mover_type, "col": mover[0], "row": mover[1]},
             {"id": "2", "player": 2, "unit_type": "Intercessor", "col": enemy[0], "row": enemy[1]},
