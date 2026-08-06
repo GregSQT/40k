@@ -3829,95 +3829,162 @@ def train_model(model, training_config, callbacks, model_path, training_config_n
         print_truncation_summary(metrics_tracker)
         close_training_env(model.get_env(), "fin d'entraînement")
 
-def test_trained_model(model, num_episodes, training_config_name, agent_key, rewards_config_name, debug_mode=False):
+def resolve_final_eval_scenarios(config, agent_key, training_config_name):
+    """Scenario de l'evaluation post-entrainement (`--test-episodes N`) : HOLDOUT, jamais moins.
+
+    Deux raisons de ne pas laisser cette resolution a `test_trained_model` :
+
+    1. QUOI. Le pool d'ENTRAINEMENT (`bot`/`self`) mesurerait le win-rate sur les scenarios qui
+       viennent de servir a entrainer — un chiffre "Test Results" qui ne dit rien de la
+       generalisation. Le chemin `--test-only` refuse deja explicitement `--scenario bot` et
+       impose le holdout : c'est le meme jumeau, il tient la meme regle. Cela retire du meme
+       coup la dependance au mode d'entrainement (`bot` code en dur cassait `--scenario self`).
+    2. QUAND. Appelee AVANT l'entrainement (cf. `main`), l'absence de holdout est refusee en
+       quelques millisecondes. Resolue au moment de l'eval, elle levait APRES un entrainement
+       reussi, et `main()` sortait en code 1 sur un run de plusieurs heures.
+
+    Rend la liste COMPLETE, pas un element. `get_scenario_list_for_phase` rend un
+    `sorted(set(...))` de chemins complets ou `holdout_hard` trie AVANT `holdout_regular` :
+    un `[0]` nu n'evaluait qu'un scenario sur les quatre, et basculait silencieusement du
+    regular vers le hard le jour ou un agent gagne un dossier `holdout_hard/` — le win-rate
+    aurait baisse sans aucun changement de code, et la lecture evidente aurait ete
+    « regression du modele ». Le choix du sous-ensemble ne peut pas etre un accident
+    alphabetique : on les joue TOUS, et le detail par scenario est imprime.
+    """
+    holdout_scenarios = get_scenario_list_for_phase(
+        config, agent_key, training_config_name, scenario_type="holdout"
+    )
+    if not holdout_scenarios:
+        raise FileNotFoundError(
+            f"L'evaluation exige un scenario de holdout pour '{agent_key}' "
+            f"(phase '{training_config_name}') : aucun trouve sous "
+            f"config/agents/{agent_key}/scenarios/holdout_regular|holdout_hard/. "
+            f"L'evaluation ne se mesure pas sur les scenarios d'entrainement."
+        )
+    return holdout_scenarios
+
+
+def test_trained_model(model, num_episodes, training_config_name, rewards_config_name,
+                       scenario_files, debug_mode=False):
     """Test the trained model.
 
-    Le scenario est resolu depuis l'agent et la phase, par le MEME appel que le chemin de
-    rotation qui vient d'entrainer le modele. Il etait code en dur sur `config/scenario.json`,
-    fichier absent du depot : `--test-episodes > 0` mourait au fond de
-    `_load_units_from_scenario`, sans qu'aucune ligne ne nomme l'exigence.
+    `scenario_files` est RESOLU PAR L'APPELANT (`resolve_final_eval_scenarios`, joue avant
+    l'entrainement). Cette fonction chargeait `config/scenario.json`, un fichier absent du
+    depot : `--test-episodes > 0` mourait au fond de `_load_units_from_scenario`, sans
+    qu'aucune ligne ne nomme l'exigence.
 
-    Les valeurs par defaut des parametres sont retirees dans le meme mouvement : un
-    `agent_key=None` evaluait le modele avec `controlled_agent=None` et les recompenses
-    "default", en silence — c'est ce que faisait le troisieme site d'appel.
+    TOUS les scenarios de holdout sont joues, les episodes repartis entre eux : n'en mesurer
+    qu'un rendait un chiffre dependant du tri alphabetique des dossiers. Le detail par scenario
+    est imprime — une moyenne globale cache un holdout ou le modele s'effondre.
+
+    `controlled_agent` est la cle de RECOMPENSES, pas `--agent` : c'est elle qui porte le
+    suffixe de phase, et c'est ce que passent les deux jumeaux (`train_model` et l'eval
+    `--test-only`). Sur un `--agent A --rewards-config B`, l'ancienne version calculait
+    l'« Average Reward » final sous la table de A alors que l'entrainement l'avait optimisee
+    sous celle de B — deux chiffres incomparables sous le meme libelle.
     """
+    if num_episodes <= 0:
+        raise ValueError("num_episodes must be positive - no default episodes allowed")
+    if not scenario_files:
+        raise ValueError("scenario_files est vide : rien a evaluer")
 
     W40KEngine, _ = setup_imports()
-    # Load scenario and unit registry for testing
+    # Load unit registry for testing
     from ai.unit_registry import UnitRegistry
-    config = get_config_loader()
-    scenario_list = get_scenario_list_for_phase(
-        config, agent_key, training_config_name, scenario_type="bot"
-    )
-    if not scenario_list:
-        raise FileNotFoundError(
-            f"Aucun scenario bot pour {agent_key} (phase {training_config_name}) sous "
-            f"config/agents/{agent_key}/scenarios/ : impossible d'evaluer le modele. "
-            f"{describe_expected_bot_self_scenario_files(False)}"
-        )
-    scenario_file = scenario_list[0]
     unit_registry = UnitRegistry()
-    
-    env = W40KEngine(
-        rewards_config=rewards_config_name,
-        training_config_name=training_config_name,
-        controlled_agent=agent_key,
-        active_agents=None,
-        scenario_file=scenario_file,
-        unit_registry=unit_registry,
-        quiet=True,
-        training_n_envs=1,  # test_trained_model : UN environnement, joue en serie
-        debug_mode=debug_mode
-    )
+
+    # Repartition round-robin : le reste va aux PREMIERS scenarios, aucun episode perdu.
+    per_scenario = [num_episodes // len(scenario_files)] * len(scenario_files)
+    for i in range(num_episodes % len(scenario_files)):
+        per_scenario[i] += 1
+
     wins = 0
     total_rewards = []
-    
-    for episode in range(num_episodes):
-        obs, info = env.reset()
-        episode_reward = 0
-        done = False
-        step_count = 0
-        
-        while not done and step_count < 1000:  # Prevent infinite loops
-            # Standard PPO doesn't support action masking
-            action, _ = model.predict(obs, deterministic=True)
-            
-            obs, reward, terminated, truncated, info = env.step(action)
-            episode_reward += reward
-            done = terminated or truncated
-            step_count += 1
-        
-        total_rewards.append(episode_reward)
+    per_scenario_results = []
 
-        # CRITICAL FIX: Learning agent is Player 0, not Player 1!
-        if require_key(info, 'winner') == 0:  # AI (Player 0) won
-            wins += 1
-    
-    if num_episodes <= 0:
-            raise ValueError("num_episodes must be positive - no default episodes allowed")
-    
+    for scenario_file, episodes_here in zip(scenario_files, per_scenario):
+        if episodes_here == 0:
+            print(f"⏭️  {os.path.basename(scenario_file)} : 0 episode "
+                  f"(--test-episodes {num_episodes} < {len(scenario_files)} scenarios de holdout)")
+            continue
+        print(f"📋 Holdout {os.path.basename(scenario_file)} : {episodes_here} episode(s)")
+        env = W40KEngine(
+            rewards_config=rewards_config_name,
+            training_config_name=training_config_name,
+            controlled_agent=rewards_config_name,
+            active_agents=None,
+            scenario_file=scenario_file,
+            unit_registry=unit_registry,
+            quiet=True,
+            training_n_envs=1,  # test_trained_model : UN environnement, joue en serie
+            debug_mode=debug_mode
+        )
+        scenario_wins = 0
+        try:
+            for _episode in range(episodes_here):
+                obs, info = env.reset()
+                episode_reward = 0
+                done = False
+                step_count = 0
+
+                while not done and step_count < 1000:  # Prevent infinite loops
+                    # Standard PPO doesn't support action masking
+                    action, _ = model.predict(obs, deterministic=True)
+
+                    obs, reward, terminated, truncated, info = env.step(action)
+                    episode_reward += reward
+                    done = terminated or truncated
+                    step_count += 1
+
+                total_rewards.append(episode_reward)
+
+                # CRITICAL FIX: Learning agent is Player 0, not Player 1!
+                if require_key(info, 'winner') == 0:  # AI (Player 0) won
+                    scenario_wins += 1
+        finally:
+            env.close()
+        wins += scenario_wins
+        per_scenario_results.append(
+            (os.path.basename(scenario_file), scenario_wins, episodes_here)
+        )
+
     win_rate = wins / num_episodes
     avg_reward = sum(total_rewards) / len(total_rewards)
-    
-    print(f"\n📊 Test Results:")
+
+    print(f"\n📊 Test Results (holdout, {len(per_scenario_results)} scenario(s)):")
+    for name, scenario_wins, episodes_here in per_scenario_results:
+        print(f"   {name}: {scenario_wins / episodes_here:.1%} ({scenario_wins}/{episodes_here})")
     print(f"   Win Rate: {win_rate:.1%} ({wins}/{num_episodes})")
     print(f"   Average Reward: {avg_reward:.2f}")
     print(f"   Reward Range: {min(total_rewards):.2f} to {max(total_rewards):.2f}")
-    
-    env.close()
+
     return win_rate, avg_reward
 
 
-def _non_empty_agent(value: str) -> str:
-    """Refuse `--agent ""` des l'analyse des arguments.
+def _non_empty_key(flag: str):
+    """Valide une cle d'agent passee en argument : ni vide, ni entouree d'espaces.
 
     `required=True` n'exige que la PRESENCE du drapeau. Une chaine vide traversait argparse
     puis desamorcait les gardes ecrites en `if agent_key:` (`_require_training_config_phase`
     notamment, qui aurait laisse passer un --training-config absent).
+
+    La valeur rendue est NETTOYEE, pas la brute : `" CoreAgent"` se propageait tel quel dans
+    `config/agents/ CoreAgent/` et `ai/models/ CoreAgent/`, l'espace inclus dans le chemin.
+
+    Applique aux DEUX drapeaux qui nomment un dossier de config : `--agent` et
+    `--rewards-config`. Ne le poser que sur le premier laissait la porte grande ouverte —
+    `--rewards-config " CoreAgent"` atteint exactement les memes chemins.
     """
-    if not value.strip():
-        raise argparse.ArgumentTypeError("--agent ne peut pas etre vide")
-    return value
+    def _parse(value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise argparse.ArgumentTypeError(f"{flag} ne peut pas etre vide")
+        return stripped
+
+    return _parse
+
+
+_non_empty_agent = _non_empty_key("--agent")
 
 
 def main():
@@ -3925,7 +3992,7 @@ def main():
     parser = argparse.ArgumentParser(description="Train W40K AI (see Documentation/AI_TURN.md and AI_IMPLEMENTATION.md)")
     parser.add_argument("--training-config", default=None,
                        help="Training config phase name (required, no silent default; e.g. x1, x1_debug)")
-    parser.add_argument("--rewards-config", default=None,
+    parser.add_argument("--rewards-config", default=None, type=_non_empty_key("--rewards-config"),
                        help="Rewards config (default: same as --agent)")
     parser.add_argument("--new", action="store_true", 
                        help="Force creation of new model")
@@ -4147,18 +4214,13 @@ def main():
                         "--scenario bot is not allowed in --test-only mode. "
                         "Use holdout scenarios for evaluation."
                     )
-                holdout_scenarios = get_scenario_list_for_phase(
-                    cfg,
-                    args.agent,
-                    args.training_config,
-                    scenario_type="holdout",
-                )
-                if not holdout_scenarios:
-                    raise FileNotFoundError(
-                        f"No holdout scenarios found for agent '{args.agent}' "
-                        f"and phase '{args.training_config}'"
-                    )
-                scenario_file = holdout_scenarios[0]
+                # MEME resolveur que l'eval post-entrainement : meme split retenu, meme message
+                # quand le dossier manque. Ce bloc l'open-codait, avec son propre `[0]` et son
+                # propre libelle — deux reponses differentes a « quel holdout ? » selon qu'on
+                # arrive par --test-only ou par --test-episodes.
+                # `[0]` assume ici : ce scenario n'AMORCE que l'env, la mesure du holdout est
+                # faite plus bas par `scenario_pool="holdout"`, qui balaye le pool entier.
+                scenario_file = resolve_final_eval_scenarios(cfg, args.agent, args.training_config)[0]
                 print(f"📋 Using holdout scenario: {os.path.basename(scenario_file)}")
             
             # CRITICAL FIX: Use rewards_config for controlled_agent (includes phase suffix).
@@ -4362,6 +4424,16 @@ def main():
             # (--rule-checker interdit, --scenario self/bot interdits) tombent avec elle.
             # Voir la trace au-dessus de resolve_turn_step_limit.
 
+            # Position PRISE EN TENAILLE (le pourquoi du « avant l'entrainement » est dans la
+            # docstring du resolveur) : APRES `--convert-steplog`, `--replay` et `--test-only`,
+            # qui retournent sans jamais evaluer post-entrainement — et dont deux contournent le
+            # holdout par construction (`--test-only --rule-checker`, `--test-only --scenario
+            # foo.json`). Resoudre plus haut leur imposerait un dossier qu'ils ne demandent pas.
+            final_eval_scenarios = (
+                resolve_final_eval_scenarios(config, args.agent, args.training_config)
+                if args.test_episodes > 0 else None
+            )
+
             if args.rule_checker:
                 scenario_list = _load_rule_checker_scenarios(project_root, args.agent)
                 print(f"🧪 Rule-checker mode: {len(scenario_list)} scenario(s) generes dans config/rule_checker/")
@@ -4398,8 +4470,8 @@ def main():
                         model,
                         args.test_episodes,
                         args.training_config,
-                        args.agent,
                         args.rewards_config,
+                        require_present(final_eval_scenarios, "final_eval_scenarios"),
                         debug_mode=args.debug
                     )
                 close_training_env(env, "fin de run")
@@ -4455,7 +4527,7 @@ def main():
                 )
 
                 if success and args.test_episodes > 0:
-                    test_trained_model(model, args.test_episodes, args.training_config, args.agent, args.rewards_config, debug_mode=args.debug)
+                    test_trained_model(model, args.test_episodes, args.training_config, args.rewards_config, require_present(final_eval_scenarios, "final_eval_scenarios"), debug_mode=args.debug)
 
                 close_training_env(env, "fin de run")
                 return 0 if success else 1
@@ -4488,7 +4560,7 @@ def main():
             if success:
                 # Only test if episodes > 0
                 if args.test_episodes > 0:
-                    test_trained_model(model, args.test_episodes, args.training_config, args.agent, args.rewards_config, debug_mode=args.debug)
+                    test_trained_model(model, args.test_episodes, args.training_config, args.rewards_config, require_present(final_eval_scenarios, "final_eval_scenarios"), debug_mode=args.debug)
                 else:
                     print("📊 Skipping testing (--test-episodes 0)")
                 return 0

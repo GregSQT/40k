@@ -371,30 +371,95 @@ def _train_source_tree():
     return ast.parse(inspect.getsource(train))
 
 
-def test_the_final_eval_resolves_its_scenario_from_the_agent() -> None:
-    """`test_trained_model` chargeait `config/scenario.json`, un fichier absent du depot.
-
-    `--test-episodes > 0` mourait donc au fond de `_load_units_from_scenario`, apres
-    l'entrainement complet, sans qu'aucune ligne ne nomme l'exigence. La suppression du mode
-    generique a emporte le dernier garde-fou qui la nommait encore (`ensure_scenario`).
-    """
+def _function_code(func) -> str:
+    """Source d'une fonction SANS sa docstring : celles de ce module citent les bugs verrouilles,
+    un scan naif du texte brut se satisferait de la citation."""
     import ast
     import inspect
 
-    func = ast.parse(inspect.getsource(train.test_trained_model)).body[0]
-    assert isinstance(func, ast.FunctionDef)
-    body = func.body[1:] if ast.get_docstring(func) else func.body  # la docstring CITE le bug
-    code = "\n".join(ast.unparse(stmt) for stmt in body)
-    assert "scenario.json" not in code, (
-        "test_trained_model code en dur un scenario au lieu de le resoudre depuis l'agent"
+    node = ast.parse(inspect.getsource(func)).body[0]
+    assert isinstance(node, ast.FunctionDef)
+    body = node.body[1:] if ast.get_docstring(node) else node.body
+    return "\n".join(ast.unparse(stmt) for stmt in body)
+
+
+def test_the_final_eval_is_measured_on_the_holdout() -> None:
+    """Le win-rate « Test Results » ne se mesure pas sur les scenarios d'ENTRAINEMENT.
+
+    `test_trained_model` a d'abord charge `config/scenario.json` (absent du depot), puis
+    `scenario_type="bot"` — le pool qui venait de servir a entrainer, et qui cassait en prime
+    un run `--scenario self`. Le chemin `--test-only` refuse deja `--scenario bot` et impose
+    le holdout : meme regle des deux cotes.
+    """
+    code = _function_code(train.resolve_final_eval_scenarios)
+    assert 'scenario_type="holdout"' in code or "scenario_type='holdout'" in code, (
+        "l'eval post-entrainement doit resoudre un scenario de HOLDOUT"
     )
-    assert "get_scenario_list_for_phase(" in code
+    for pool in ('"bot"', "'bot'", '"self"', "'self'"):
+        assert pool not in code, f"pool d'entrainement {pool} dans le resolveur d'eval"
+
+    # `test_trained_model` ne resout plus rien : le scenario lui est donne.
+    evaluated = _function_code(train.test_trained_model)
+    assert "get_scenario_list_for_phase(" not in evaluated
+    assert "scenario.json" not in evaluated
 
 
-def test_every_final_eval_call_site_passes_the_agent_and_its_rewards() -> None:
-    """Les sites d'appel avaient DIVERGE : deux passaient `args.agent`/`args.rewards_config`,
-    le troisieme ni l'un ni l'autre — le modele etait evalue avec `controlled_agent=None` et
-    les recompenses "default", en silence. Motif jumeau du depot a l'etat pur.
+def test_the_final_eval_scenario_is_resolved_between_the_early_returns_and_the_training() -> None:
+    """La resolution du holdout est prise en TENAILLE, et les deux bornes comptent.
+
+    TROP TARD (a l'heure de l'eval) : un holdout manquant levait APRES un entrainement reussi,
+    `main()` sortait en code 1 — des heures perdues pour un dossier absent.
+
+    TROP TOT (en tete de `main`) : elle s'appliquait aussi a `--convert-steplog`, `--replay` et
+    `--test-only`, qui retournent avant tout entrainement et n'utilisent jamais
+    `final_eval_scenarios`. Deux d'entre eux contournent le holdout par construction
+    (`--test-only --rule-checker`, `--test-only --scenario foo.json`) : exiger un dossier
+    holdout les cassait, alors qu'ils marchaient avant.
+    """
+    main_code = _function_code(train.main)
+
+    # L'ancre est l'AFFECTATION, pas l'appel : `--test-only` appelle le meme resolveur plus
+    # haut (resolveur unique, cf. test_the_two_holdout_paths_share_one_resolver), donc
+    # chercher `resolve_final_eval_scenarios(` trouverait CE site-la et mesurerait un ordre faux.
+    assert "final_eval_scenarios = " in main_code, (
+        "main() doit resoudre le scenario d'eval en amont"
+    )
+    resolution = main_code.index("final_eval_scenarios = ")
+
+    def _position(marker: str) -> int:
+        assert marker in main_code, (
+            f"marqueur '{marker}' absent de main() : le test ne verrouille plus rien "
+            f"(renomme ? deplace ?)"
+        )
+        return main_code.index(marker)
+
+    # Borne BASSE : apres chaque branche a retour anticipe. `--test-only` compris — c'est celle
+    # que la docstring nomme et que rien ne verifiait : remonter la resolution au-dessus d'elle
+    # laissait ce test VERT tout en cassant exactement ce qu'il pretend proteger.
+    for early_return in (
+        "convert_steplog_to_replay(",
+        "generate_steplog_and_replay(",
+        "if args.test_only:",
+    ):
+        assert _position(early_return) < resolution, (
+            f"{early_return} est evalue APRES la resolution du holdout : ce chemin n'en veut pas"
+        )
+
+    # Borne HAUTE : avant le premier episode d'entrainement.
+    for training_entry in ("train_with_scenario_rotation(", "create_multi_agent_model("):
+        assert _position(training_entry) > resolution, (
+            f"{training_entry} demarre avant la resolution du scenario d'eval"
+        )
+
+
+def test_every_final_eval_call_site_passes_the_rewards_key_and_the_scenarios() -> None:
+    """Les sites d'appel avaient DIVERGE : deux passaient la cle de recompenses, le troisieme
+    ni elle ni l'agent — le modele etait evalue avec `controlled_agent=None` et les recompenses
+    "default", en silence. Motif jumeau du depot a l'etat pur.
+
+    `--agent` n'est PLUS passe : la cle qui compte est celle des recompenses (elle porte le
+    suffixe de phase), et c'est celle qu'utilisent les deux jumeaux `train_model` et l'eval
+    `--test-only`.
     """
     import ast
 
@@ -410,5 +475,179 @@ def test_every_final_eval_call_site_passes_the_agent_and_its_rewards() -> None:
             f"{kw.arg}={ast.unparse(kw.value)}" for kw in call.keywords
         ]
         rendered = ", ".join(passed)
-        assert "args.agent" in rendered, f"site d'appel sans agent : {rendered}"
+        assert "args.agent" not in rendered, (
+            f"site d'appel qui passe encore --agent comme cle d'eval : {rendered}"
+        )
         assert "args.rewards_config" in rendered, f"site d'appel sans rewards : {rendered}"
+        assert "final_eval_scenarios" in rendered, f"site d'appel sans scenario : {rendered}"
+
+
+def _agent_scenarios_tree(tmp_path: Path, agent: str, **splits: bool) -> SimpleNamespace:
+    """Arborescence `config/agents/<agent>/scenarios/<split>/` avec un scenario par split demande."""
+    scenarios = tmp_path / "agents" / agent / "scenarios"
+    for split, wanted in splits.items():
+        if not wanted:
+            continue
+        directory = scenarios / split
+        directory.mkdir(parents=True, exist_ok=True)
+        # Nommage EXPLICITE `<dossier>_scenario_<phase>.json` : c'est le motif que
+        # `_gather_scenario_files_in_dir` reconnait pour ces dossiers. Un nom quelconque ne
+        # serait ramasse que par le glob de repli, et le test verrouillerait ce repli.
+        (directory / f"{split}_scenario_x1.json").write_text("{}", encoding="utf-8")
+    return SimpleNamespace(config_dir=str(tmp_path))
+
+
+def test_the_final_eval_keeps_every_holdout_scenario(tmp_path: Path) -> None:
+    """AUCUN scenario de holdout n'est ecarte, et le choix ne depend pas du tri des dossiers.
+
+    `get_scenario_list_for_phase` rend `sorted(set(...))` sur des chemins complets, et
+    `holdout_hard` trie AVANT `holdout_regular`. Un `[0]` nu ne mesurait qu'un scenario sur
+    quatre, et basculait du regular vers le hard le jour ou l'agent gagnait un dossier
+    `holdout_hard/` : le win-rate baissait sans aucun changement de code, et se lisait comme
+    une regression du modele.
+    """
+    config = _agent_scenarios_tree(tmp_path, "AgentX", holdout_regular=True, holdout_hard=True)
+
+    resolved = train.resolve_final_eval_scenarios(config, "AgentX", "x1")
+
+    assert len(resolved) == 2, f"un split a ete ecarte : {resolved}"
+    assert any("holdout_regular" in path for path in resolved)
+    assert any("holdout_hard" in path for path in resolved)
+
+
+def test_the_final_eval_accepts_hard_alone(tmp_path: Path) -> None:
+    """`holdout_hard` seul reste un holdout : le mesurer vaut mieux que refuser d'evaluer."""
+    config = _agent_scenarios_tree(tmp_path, "AgentX", holdout_hard=True)
+
+    resolved = train.resolve_final_eval_scenarios(config, "AgentX", "x1")
+
+    assert len(resolved) == 1 and "holdout_hard" in resolved[0]
+
+
+def test_the_final_eval_refuses_to_run_without_any_holdout(tmp_path: Path) -> None:
+    """Le fail-fast lui-meme : sans dossier holdout, l'erreur tombe AVANT l'entrainement.
+
+    C'est la moitie de la valeur du deplacement dans `main()` — un run de plusieurs heures ne
+    doit pas se terminer en code 1 sur un dossier absent.
+    """
+    config = _agent_scenarios_tree(tmp_path, "AgentX", training=True)
+
+    with pytest.raises(FileNotFoundError, match="holdout_regular"):
+        train.resolve_final_eval_scenarios(config, "AgentX", "x1")
+
+
+def test_the_two_holdout_paths_share_one_resolver() -> None:
+    """`--test-only` et `--test-episodes` repondent la MEME chose a « quel holdout ? ».
+
+    Le bloc `--test-only` open-codait sa propre resolution : meme appel, meme `[0]`, mais son
+    propre message d'erreur — deux reponses selon la porte d'entree, et le `[0]` nu du split
+    dur reproduit a deux endroits.
+    """
+    main_code = _function_code(train.main)
+    assert main_code.count("resolve_final_eval_scenarios(") >= 2, (
+        "le bloc --test-only doit passer par le resolveur commun"
+    )
+    assert "scenario_type='holdout'" not in main_code and 'scenario_type="holdout"' not in main_code, (
+        "main() resout encore un holdout a la main au lieu d'appeler le resolveur"
+    )
+
+
+def test_the_agent_argument_is_stripped_not_just_checked() -> None:
+    """`--agent " CoreAgent"` : la validation regardait `value.strip()` mais rendait `value`.
+
+    L'espace se propageait dans `config/agents/ CoreAgent/` et `ai/models/ CoreAgent/` — deux
+    chemins qui n'existent pas, ou pire, deux dossiers crees a cote des vrais.
+    """
+    import argparse
+
+    assert train._non_empty_agent("  CoreAgent  ") == "CoreAgent"
+    for blank in ("", "   ", "\t"):
+        with pytest.raises(argparse.ArgumentTypeError, match="ne peut pas etre vide"):
+            train._non_empty_agent(blank)
+
+
+def test_the_final_eval_uses_the_rewards_key_as_controlled_agent() -> None:
+    """`controlled_agent` de l'eval finale = cle de RECOMPENSES, comme ses deux jumeaux.
+
+    `train_model` et l'eval `--test-only` passent tous deux `args.rewards_config` (elle porte
+    le suffixe de phase). L'eval post-entrainement passait `--agent` : sur un
+    `--agent A --rewards-config B`, l'« Average Reward » final etait calcule sous la table de A
+    alors que l'entrainement l'avait optimisee sous celle de B. Deux chiffres incomparables
+    sous le meme libelle.
+    """
+    code = _function_code(train.test_trained_model)
+    assert "controlled_agent=rewards_config_name" in code, (
+        "l'eval finale doit prendre la cle de recompenses comme agent controle"
+    )
+    assert "agent_key" not in code, "l'eval finale ne doit plus connaitre --agent"
+
+
+def test_the_final_eval_spends_its_episodes_on_every_holdout_scenario() -> None:
+    """Les episodes sont REPARTIS sur tous les scenarios rendus, pas verses au premier.
+
+    Verifie sur le comportement, pas sur le texte : un faux moteur compte les `reset()` par
+    scenario. Avec 5 episodes sur 2 scenarios, on attend 3 + 2 — et zero episode perdu.
+    """
+    resets: list[str] = []
+
+    class _FakeEnv:
+        def __init__(self, **kwargs):
+            self._scenario = kwargs["scenario_file"]
+            assert kwargs["controlled_agent"] == "RewardsKey"
+
+        def reset(self):
+            resets.append(self._scenario)
+            return object(), {"winner": 0}
+
+        def step(self, _action):
+            return object(), 1.0, True, False, {"winner": 0}
+
+        def close(self):
+            pass
+
+    class _FakeModel:
+        @staticmethod
+        def predict(_obs, deterministic=True):
+            _ = deterministic
+            return 0, None
+
+    import ai.train as train_mod
+
+    original_setup, original_registry = train_mod.setup_imports, None
+    train_mod.setup_imports = lambda: (_FakeEnv, None)
+    import ai.unit_registry as unit_registry_mod
+    original_registry = unit_registry_mod.UnitRegistry
+    unit_registry_mod.UnitRegistry = lambda: object()
+    try:
+        win_rate, _avg = train_mod.test_trained_model(
+            _FakeModel(), 5, "x1", "RewardsKey", ["/h/a.json", "/h/b.json"],
+        )
+    finally:
+        train_mod.setup_imports = original_setup
+        unit_registry_mod.UnitRegistry = original_registry
+
+    assert len(resets) == 5, f"episodes perdus ou dupliques : {resets}"
+    assert resets.count("/h/a.json") == 3 and resets.count("/h/b.json") == 2, resets
+    assert win_rate == 1.0
+
+
+def test_both_config_key_arguments_are_stripped() -> None:
+    """JUMEAU : `--agent` ET `--rewards-config` nomment un dossier `config/agents/<cle>/`.
+
+    Ne nettoyer que le premier laissait `--rewards-config " CoreAgent"` atteindre exactement
+    les memes chemins — la faille que le strip etait cense fermer.
+    """
+    import argparse
+
+    for flag in ("--agent", "--rewards-config"):
+        parse = train._non_empty_key(flag)
+        assert parse("  CoreAgent  ") == "CoreAgent", flag
+        for blank in ("", "   ", "\t"):
+            with pytest.raises(argparse.ArgumentTypeError, match="ne peut pas etre vide"):
+                parse(blank)
+
+    parser_source = _function_code(train.main)
+    rewards_decl = parser_source[parser_source.index("'--rewards-config'"):][:400]
+    assert "_non_empty_key" in rewards_decl, (
+        "--rewards-config declare sans validateur : le jumeau de --agent est reste ouvert"
+    )

@@ -194,6 +194,7 @@ Cette section décrit comment le training est structuré (qui appelle quoi). Pou
   - `--rewards-config <name>` : en pratique le même que `--agent` ou un alias ; utilisé comme `rewards_config_name` et pour charger `*_rewards_config.json`.
   - `--scenario <name>` : scénario ou mode (`bot`, `default`, `phase1`, etc.). Avec `bot`, l’adversaire est un mix configurable de 5 bots (Random, Greedy, Defensive, Control, Adaptive).
 - **Options utiles** : `--step` (écrit `step.log`), `--test-only` (pas d’apprentissage, évaluation uniquement), `--eval` (alias de `--test-only`), `--test-episodes N`, `--append` (reprendre un modèle existant), `--resume-from <checkpoint.zip>`
+- **Ce que mesure `--test-episodes N`** : le win-rate sur le **holdout**, jamais sur les scénarios d'entraînement — `holdout_regular` en priorité, `holdout_hard` seulement à défaut. Le scénario est résolu **avant** le premier épisode d'entraînement : un agent sans dossier `config/agents/<agent>/scenarios/holdout_regular|holdout_hard/` fait échouer la commande immédiatement, au lieu de perdre le run et de sortir en code 1 des heures plus tard.
 (reprendre depuis un checkpoint périodique), `--new-model` (partir de zéro).
 
 ### Chargement de la config
