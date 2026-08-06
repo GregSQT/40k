@@ -80,6 +80,9 @@ describe("GameLog — tokens de relance", () => {
   it("n'affiche AUCUN token quand aucune relance n'a eu lieu", () => {
     render(<GameLog events={[shootEvent({})]} />);
     expandFirstEntry();
+    // ANCRE POSITIVE d'abord : sans elle, une ligne qui ne rend RIEN satisfait le `not.toContain`
+    // et ce test vert affirmerait le contraire de la vérité.
+    expect(shotRowText()).toContain("Tir: ✓ (4)");
     expect(shotRowText()).not.toContain("[");
   });
 
@@ -137,6 +140,9 @@ describe("GameLog — jets relancés", () => {
   it("n'affiche aucun dé de blessure sur [LETHAL HITS] (blessure automatique)", () => {
     render(<GameLog events={[shootEvent({ strengthRoll: null })]} />);
     expandFirstEntry();
+    // ANCRE POSITIVE : le segment Bless doit EXISTER, sans son dé. Sans cette ligne, un rendu
+    // qui sauterait entièrement la blessure passerait pour un succès.
+    expect(shotRowText()).toContain("Bless: ✓");
     expect(shotRowText()).not.toContain("null");
   });
 

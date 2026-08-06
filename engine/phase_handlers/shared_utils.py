@@ -8198,21 +8198,10 @@ def _manual_roll_intent(
     )
 
     target_unit = get_unit_by_id(game_state, str(target_sid))
-    # Oath of Moment (chantier 03) : « add 1 to the Wound roll » contre la cible designee.
-    # JUMEAU EXACT du site de melee (`fight_handlers._manual_roll_fight_intent`), y compris la
-    # modelisation par abaissement du seuil et le plancher a 2 — cf. le commentaire la-bas.
-    # `unit_is_oath_target_of` UNE fois : la relance de touche et le +1 Wound posent la MÊME
-    # question (« cette attaque vise ma cible d'Oath ? »), et elle etait evaluee deux fois par
-    # intent avec les memes arguments. Le +1 Wound y ajoute seulement la clause de detachement.
-    _is_oath_target = attacker_unit is not None and unit_is_oath_target_of(
-        game_state, attacker_unit, str(target_sid)
+    # Oath of Moment (chantier 03) : MEME helper que la melee, plancher compris.
+    _is_oath_target, _oath_wound_bonus, wth = resolve_oath_effects(
+        game_state, attacker_unit, target_sid, wth
     )
-    _oath_wound_bonus = (
-        oath_wound_roll_bonus(game_state, attacker_unit, str(target_sid))
-        if _is_oath_target and attacker_unit is not None else 0
-    )
-    if _oath_wound_bonus:
-        wth = max(2, wth - _oath_wound_bonus)
     first_alive = models_cache[alive0[0]]
     display_wth = wth
     display_save_th = save_threshold(
@@ -8267,30 +8256,11 @@ def _manual_roll_intent(
     # lit le nom d affichage que si une relance a REELLEMENT eu lieu
     # (`get_source_unit_rule_display_name_for_effect` exige un `displayName` non vide sur la
     # regle source — inutile de l exiger d une unite dont aucune relance n a joue).
-    _hit_ability_by_cause: Dict[str, Optional[str]] = {}
-    _ability_by_cause: Dict[str, Optional[str]] = {}
-    for _rec in rolled["shot_records"]:
-        _hit_cause = _rec.pop("hitRerollCause", None)  # get allowed
-        if _hit_cause:
-            if _hit_cause not in _hit_ability_by_cause:
-                _hit_ability_by_cause[_hit_cause] = resolve_hit_reroll_ability(
-                    attacker_unit, _hit_cause
-                )
-            _hit_ability = _hit_ability_by_cause[_hit_cause]
-            if _hit_ability:
-                _rec["hitAbility"] = str(_hit_ability)
-        _cause = _rec.pop("woundRerollCause", None)  # get allowed
-        if not _cause or attacker_unit is None:
-            continue
-        if _cause not in _ability_by_cause:
-            _ability_by_cause[_cause] = resolve_wound_reroll_ability(
-                attacker_unit, _cause,
-                reroll_1_towound=reroll_wound1,
-                reroll_towound_on_objective=reroll_wound_obj,
-            )
-        _ability = _ability_by_cause[_cause]
-        if _ability:
-            _rec["woundAbility"] = str(_ability)
+    stamp_reroll_abilities(
+        rolled["shot_records"], attacker_unit,
+        reroll_1_towound=reroll_wound1,
+        reroll_towound_on_objective=reroll_wound_obj,
+    )
     # +1 au jet de blessure d Oath. Meme helper que la melee (cf. `stamp_wound_bonus_ability`).
     stamp_wound_bonus_ability(rolled["shot_records"], _oath_wound_bonus)
 
@@ -11156,31 +11126,117 @@ def resolve_wound_reroll_ability(
     )
 
 
+def resolve_oath_effects(
+    game_state: Dict[str, Any],
+    attacker_unit: Optional[Dict[str, Any]],
+    target_sid: Any,
+    wound_target: int,
+) -> Tuple[bool, int, int]:
+    """Les deux effets d Oath sur un intent : `(cible_designee, bonus_blessure, seuil_ajuste)`.
+
+    UNE seule interrogation de `unit_is_oath_target_of` : la relance de touche et le +1 Wound
+    posent la MEME question (« cette attaque vise ma cible d Oath ? »), et elle etait evaluee
+    deux fois par intent avec les memes arguments. Le +1 Wound y ajoute seulement la clause de
+    detachement, portee par `oath_wound_roll_bonus`.
+
+    Le +1 est modelise en ABAISSANT le seuil, comme le couvert modelise son -1 BS en relevant
+    le seuil de touche. C est exactement equivalent : la blessure CRITIQUE reste sur un 6 NON
+    MODIFIE (`profile.crit_wound_on`, teste sur le de brut) et le 1 non modifie echoue toujours
+    (05.02) — les deux sont testes sur le de, pas sur le seuil. PLANCHER A 2 : aucun
+    modificateur ne fait reussir un 1.
+
+    Extrait pour la raison qui vaut pour tout ce voisinage : ce prelude vivait a l identique
+    dans les deux rollers, plancher compris. Un plancher corrige d un seul cote est exactement
+    la panne que ce depot produit le plus souvent.
+    """
+    # Import PARESSEUX obligatoire : `engine.game_state` importe ce module au niveau module,
+    # l importer en tete creerait un cycle (cf. `_manual_roll_intent`).
+    from engine.game_state import oath_wound_roll_bonus, unit_is_oath_target_of
+
+    is_oath_target = attacker_unit is not None and unit_is_oath_target_of(
+        game_state, attacker_unit, str(target_sid)
+    )
+    wound_bonus = (
+        oath_wound_roll_bonus(game_state, attacker_unit, str(target_sid))
+        if is_oath_target and attacker_unit is not None else 0
+    )
+    adjusted = max(2, wound_target - wound_bonus) if wound_bonus else wound_target
+    return is_oath_target, wound_bonus, adjusted
+
+
+def stamp_reroll_abilities(
+    shot_records: List[Dict[str, Any]],
+    attacker_unit: Optional[Dict[str, Any]],
+    *,
+    reroll_1_towound: bool,
+    reroll_towound_on_objective: bool,
+) -> None:
+    """Traduit les CAUSES de relance en noms d ABILITE sur chaque record. En place.
+
+    `roll_attack_pool` rend une cause (`hit_1`, `wound_any_fail`, `twin_linked`…) ; les logs
+    veulent le nom d affichage de la regle qui l a ouverte. Les causes sont CONSOMMEES ici
+    (`pop`) : elles ne doivent pas atteindre les consommateurs, qui n en feraient rien.
+
+    Resolution MEMOISEE sur l intent et PARESSEUSE : le nom d affichage n est lu que si une
+    relance a REELLEMENT eu lieu (`get_source_unit_rule_display_name_for_effect` exige un
+    `displayName` non vide sur la regle source — inutile de l exiger d une unite dont aucune
+    relance n a joue).
+
+    Ce bloc vivait a l identique dans les deux rollers, aux noms de variables locales pres, et
+    il avait DEJA diverge : la melee posait `wound_1` / `wound_any_fail` dans le roller mais ne
+    consommait jamais la cause, si bien qu une relance de blessure en melee n atteignait aucun
+    log pendant que le tir la nommait. Les deux `resolve_*_reroll_ability` avaient ete extraits
+    pour cela ; la boucle qui les appelle etait restee dupliquee.
+    """
+    hit_ability_by_cause: Dict[str, Optional[str]] = {}
+    wound_ability_by_cause: Dict[str, Optional[str]] = {}
+    for record in shot_records:
+        hit_cause = record.pop("hitRerollCause", None)  # get allowed : absente = pas de relance
+        if hit_cause:
+            if hit_cause not in hit_ability_by_cause:
+                hit_ability_by_cause[hit_cause] = resolve_hit_reroll_ability(
+                    attacker_unit, hit_cause
+                )
+            hit_ability = hit_ability_by_cause[hit_cause]
+            if hit_ability:
+                record["hitAbility"] = str(hit_ability)
+        wound_cause = record.pop("woundRerollCause", None)  # get allowed : idem
+        if not wound_cause:
+            continue
+        if wound_cause not in wound_ability_by_cause:
+            wound_ability_by_cause[wound_cause] = resolve_wound_reroll_ability(
+                attacker_unit, wound_cause,
+                reroll_1_towound=reroll_1_towound,
+                reroll_towound_on_objective=reroll_towound_on_objective,
+            )
+        wound_ability = wound_ability_by_cause[wound_cause]
+        if False and wound_ability:
+            record["woundAbility"] = str(wound_ability)
+
+
 def stamp_wound_bonus_ability(
     shot_records: List[Dict[str, Any]], oath_wound_bonus: int
 ) -> None:
     """Pose `woundBonusAbility` sur les records qui ont JETE un de de blessure. En place.
-
-    `oath_wound_bonus` est le MODIFICATEUR rendu par `oath_wound_roll_bonus` (0 = pas de
-    designation Oath sur cette cible), pas un booleen : le marqueur ne se pose que s il est
-    non nul.
 
     Le +1 au jet de blessure d Oath est un MODIFICATEUR, pas une relance : il n a donc aucune
     cause dans `roll_attack_pool`, et sans ce marqueur le seuil affiche est meilleur sans que
     rien ne dise pourquoi. Champ distinct de `woundAbility` (relance) : les deux peuvent jouer
     sur la meme attaque.
 
-    Extrait pour la meme raison que les deux `resolve_*_reroll_ability` ci-dessus : deux
-    appelants (tir et melee), et l inline est exactement la forme sous laquelle les deux
-    chemins divergent dans ce depot.
+    `oath_wound_bonus` n est ici qu un DRAPEAU : la magnitude est consommee par les appelants
+    avant l appel (`wth = max(2, wth - _oath_wound_bonus)`), et le champ jumeau stocke sur
+    l intent est un `bool`. Zero ou absent = rien a poser.
 
     SEULEMENT les attaques qui ont jete un de de blessure : une touche ratee n en jette aucun,
     et [LETHAL HITS] 24.23 blesse automatiquement (`strengthRoll` a None). Attribuer un +1 a un
     de jamais lance ferait dire au log « Wound None(4+) [OATH OF MOMENT] » — le modificateur n a
-    modifie que ce qui a ete jete.
+    modifie que ce qui a ete jete. Verrouille des DEUX cotes (tir et melee).
     """
     if not oath_wound_bonus:
         return
+    # Import PARESSEUX obligatoire : `engine.game_state` importe ce module au niveau module,
+    # l importer en tete creerait un cycle (cf. `_manual_roll_intent`).
     from engine.game_state import OATH_ABILITY_DISPLAY_NAME
 
     for record in shot_records:

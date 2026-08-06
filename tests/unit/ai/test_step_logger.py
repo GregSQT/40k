@@ -417,3 +417,47 @@ def test_un_stock_de_cp_absent_leve(tmp_path: Path) -> None:
     logger = StepLogger(output_file=str(output_file), enabled=True, buffer_size=1)
     with pytest.raises(ConfigurationError):
         logger.log_objective_control_snapshot(1, _objectives(), {}, {1: 0, 2: 0}, {1: 0})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# `_ability_token` — le contrat de FORME du token de capacité
+#
+# Le seul contrôle qui le mentionnait (`test_faction_abilities`) compte des occurrences dans
+# `inspect.getsource(StepLogger)` : il verrouille l'ORTHOGRAPHE des sites d'appel, pas le
+# comportement de la fonction. La preuve : ce contrôle a dû être réécrit par le commit qui a
+# extrait l'helper. Un test qu'il faut réécrire à chaque refactor de ce qu'il garde ne le garde
+# pas. `_ability_token` pouvait rendre `"[]"` ou ` [NONE]` sur un nom vide sans rien rougir.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_ability_token_rend_le_vide_sur_un_nom_absent_ou_blanc() -> None:
+    """Absence de capacité = AUCUN token, pas un token vide.
+
+    Un ` []` traverserait `RULE_TOKEN_REGEX` côté frontend (`[^\\]]+` ne matche pas le vide,
+    mais ` [ ]` oui) et serait compté comme un usage de règle par l'analyzer.
+    """
+    from ai.step_logger import _ability_token
+
+    for absent in (None, "", "   ", "\t", 0, False, []):
+        assert _ability_token(absent) == "", repr(absent)
+
+
+def test_ability_token_normalise_en_majuscules_sans_espaces_parasites() -> None:
+    """MAJUSCULES et `strip` : c'est la forme que le frontend et l'analyzer cherchent."""
+    from ai.step_logger import _ability_token
+
+    assert _ability_token("Oath of Moment") == " [OATH OF MOMENT]"
+    assert _ability_token("  Targeted Intercession  ") == " [TARGETED INTERCESSION]"
+
+
+def test_ability_token_commence_par_une_espace() -> None:
+    """L'espace de tête est PORTEUSE : le token est concaténé juste après `Wound 4(3+)`.
+
+    Sans elle le log écrit `Wound 4(3+)[OATH OF MOMENT]`, que le tokenizer de segment du
+    replay (`replayParser.ts`, `\\s*\\[`) accepte encore, mais que la ligne de synthèse et la
+    lecture humaine collent. C'est le genre de détail qu'un `.strip()` bien intentionné retire.
+    """
+    from ai.step_logger import _ability_token
+
+    token = _ability_token("Oath of Moment")
+    assert token.startswith(" "), repr(token)
+    assert token == f" [{token.strip()[1:-1]}]"

@@ -496,3 +496,94 @@ def test_sans_relance_aucun_token_rerolled(monkeypatch, tmp_path):
     line = _step_log_line(tmp_path, gs, raw_log)
 
     assert "REROLLED" not in line, line
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Formateur FOUGHT — le jumeau mêlée, qu'AUCUN test n'exécutait
+#
+# Les tokens ci-dessus sont produits par la branche `action_type == "shoot"` du StepLogger. La
+# branche `"combat"` en écrit sa propre copie, segment par segment, et rien ne la faisait tourner :
+# seule une inspection du SOURCE (`count(...) == 2`) attestait qu'elle appelait les mêmes helpers.
+# Un test qui lit du code ne voit pas ce que le code PRODUIT — il reste vert sur un helper cassé.
+#
+# PÉRIMÈTRE BORNÉ, à ne pas surinterpréter : ces tests exercent le record moteur, le vrai
+# `_SHOT_RECORD_FIELD_MAP` et le vrai formateur FOUGHT. Le record vient d'un tir, pas d'un combat
+# joué — c'est légitime ici parce que les deux phases partagent `roll_attack_pool` (donc la forme
+# du record) et `_build_shot_details` (donc la traduction). Ce que ces tests NE couvrent pas :
+# l'enchaînement propre à la phase de combat qui mène au `log_action`.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _step_log_fight_line(tmp_path, gs, raw_log):
+    """Écrit UNE ligne `FOUGHT` avec le VRAI StepLogger, et la relit.
+
+    Jumeau de `_step_log_lines`, à trois différences près : `action_type="combat"` (c'est ce qui
+    choisit la branche du formateur), le `fight_state` que cette branche EXIGE (contrat replay :
+    `[FIGHT_SUBPHASE:fight]`, posé en production par `_pre_action_fight_state`), et le filtre sur
+    le verbe produit."""
+    from ai.step_logger import StepLogger
+
+    shots = raw_log["shootDetails"]
+    assert shots, "le log ne porte aucun jet"
+    bridge = _Bridge(gs)
+
+    out = tmp_path / "fight_line.log"
+    logger = StepLogger(output_file=str(out), enabled=True, buffer_size=1)
+    logger.episode_number = 1
+    logger.log_action(
+        unit_id=raw_log["shooterId"], action_type="combat", phase="fight",
+        player=1, success=True, step_increment=True,
+        action_details=bridge._build_shot_details(
+            raw_log, shots[0], 1, {"fight_subphase": "fight"}
+        ),
+    )
+    logger._flush_buffer()
+    lines = [l for l in out.read_text().splitlines() if " FOUGHT " in l]
+    assert len(lines) == 1, (
+        "le StepLogger n'a pas produit de ligne FOUGHT — `log_action` avale ses exceptions, un "
+        f"champ requis manque probablement dans le mapping ({len(lines)} ligne(s))"
+    )
+    return lines[0]
+
+
+def test_la_melee_nomme_la_relance_de_blessure_et_son_de_d_origine(monkeypatch, tmp_path):
+    """Côté BLESSURE, la ligne de mêlée porte les mêmes deux tokens que celle de tir.
+
+    C'est le motif d'échec n°1 du dépôt : le tir affichait la capacité et le dé d'origine, la
+    mêlée pouvait cesser de le faire sans qu'aucun test ne rougisse."""
+    gs, raw_log = _engine_shoot_log(
+        monkeypatch, [], [4, 1, 6, 2],  # touche 4, blessure 1 (échec) -> relance 6, sauvegarde 2
+        unit_rules=(TARGETED_INTERCESSION,),
+    )
+    line = _step_log_fight_line(tmp_path, gs, raw_log)
+
+    assert "Wound 6(4+)" in line, f"la forme lue par l'analyzer ne doit pas bouger : {line}"
+    assert "[REROLLED:1]" in line, f"le dé d'origine doit être lisible : {line}"
+    assert "[TARGETED INTERCESSION]" in line, line
+
+
+def test_la_melee_nomme_la_relance_de_touche(monkeypatch, tmp_path):
+    """Côté TOUCHE, jumeau du précédent — c'est ce que l'inspection de source gardait.
+
+    `hitAbility` est posé sur le record par les deux rollers (Oath of Moment relance en mêlée
+    aussi, cf. `test_faction_abilities`) : on le pose ici sur le record du moteur pour que le
+    VRAI field map le traduise et que le VRAI formateur le rende."""
+    gs, raw_log = _engine_shoot_log(monkeypatch, [], [1, 4, 6, 2])
+    raw_log["shootDetails"][0]["hitAbility"] = "Oath of Moment"
+    raw_log["shootDetails"][0]["attackRollInitial"] = 1
+    line = _step_log_fight_line(tmp_path, gs, raw_log)
+
+    assert "[OATH OF MOMENT]" in line, line
+    assert "[REROLLED:1]" in line, f"le dé d'origine de la touche doit être lisible : {line}"
+
+
+def test_la_melee_ne_pose_aucun_token_sans_relance(monkeypatch, tmp_path):
+    """Contre-épreuve : sans capacité ni relance, la ligne de mêlée ne porte aucun de ces tokens.
+
+    Sans elle, un formateur qui écrirait les tokens INCONDITIONNELLEMENT passerait les deux
+    tests ci-dessus."""
+    gs, raw_log = _engine_shoot_log(monkeypatch, [], [4, 6, 2])
+    line = _step_log_fight_line(tmp_path, gs, raw_log)
+
+    assert "Wound 6(4+)" in line, f"la ligne doit bien décrire l'attaque : {line}"
+    assert "REROLLED" not in line, line
+    assert "OATH" not in line, line

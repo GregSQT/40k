@@ -160,3 +160,53 @@ def test_verrou_la_melee_annonce_oath_a_la_ligne_de_synthese(monkeypatch):
     avec_oath = roll_fight_intent(gs, intent)
     assert avec_oath["oath_hit_reroll"] is True
     assert avec_oath["oath_wound_bonus"] is True
+
+
+def test_verrou_le_plus_un_oath_est_pose_sur_les_records_de_melee(monkeypatch):
+    """JUMEAU du tir : `woundBonusAbility` doit atteindre les records de MELEE.
+
+    Le tir est verrouille (`test_faction_abilities`), la melee ne l'etait pas : supprimer
+    l'appel a `stamp_wound_bonus_ability` dans `_manual_roll_fight_intent` laissait toute la
+    suite verte. La docstring de l'helper nomme pourtant ce risque de divergence comme sa
+    raison d'exister — l'extraction le retire aujourd'hui, seul un test le garde retire.
+    """
+    from engine.game_state import set_oath_target
+    from tests.unit.engine.test_faction_abilities import ASTARTES, ORKS, _fight_state
+
+    _seq(monkeypatch, [4, 4, 6])
+    gs, intent = _fight_state(attacker_faction=ASTARTES, defender_faction=ORKS)
+    set_oath_target(gs, 1, "2")
+    rec = roll_fight_intent(gs, intent)["shot_records"][0]
+
+    assert rec["strengthRoll"] is not None, "un de de blessure a bien ete jete"
+    assert rec["woundBonusAbility"] == "Oath of Moment"
+
+    # Contre-epreuve SANS designation Oath : aucun marqueur.
+    _seq(monkeypatch, [4, 4, 6])
+    gs, intent = _fight_state(attacker_faction=ASTARTES, defender_faction=ORKS)
+    sans = roll_fight_intent(gs, intent)["shot_records"][0]
+    assert "woundBonusAbility" not in sans
+
+
+def test_verrou_le_plus_un_oath_ne_marque_pas_un_de_jamais_jete_en_melee(monkeypatch):
+    """JUMEAU du tir : [LETHAL HITS] 24.23 blesse AUTOMATIQUEMENT, donc sans jet.
+
+    Marquer ce record ferait ecrire « Wound None(4+) [OATH OF MOMENT] » : un +1 attribue a un
+    de jamais lance. C'est la seule regle du corps de `stamp_wound_bonus_ability`, et elle
+    n'etait exercee que du cote tir.
+    """
+    from engine.game_state import set_oath_target
+    from tests.unit.engine.test_faction_abilities import ASTARTES, ORKS, _fight_state
+
+    # 6 = touche CRITIQUE -> auto-blessure (aucun de de blessure), puis sauvegarde.
+    seq = _seq(monkeypatch, [6, 2])
+    gs, intent = _fight_state(
+        attacker_faction=ASTARTES, defender_faction=ORKS, weapon_rules=("LETHAL_HITS",)
+    )
+    set_oath_target(gs, 1, "2")
+    rec = roll_fight_intent(gs, intent)["shot_records"][0]
+
+    assert rec["lethalHit"] is True, "l'auto-blessure a bien joue"
+    assert rec["strengthRoll"] is None, "aucun de de blessure n'a ete jete"
+    assert seq == []
+    assert "woundBonusAbility" not in rec

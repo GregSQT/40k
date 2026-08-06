@@ -342,3 +342,36 @@ def test_the_footprint_follows_the_per_model_orientation_not_the_squad_one():
     assert attendu != par_escouade, "orientation sans effet sur ce socle : le controle serait vacant"
 
     assert list(iter_living_model_footprints(gs, "2")) == [attendu]
+
+
+def test_verrou_la_relance_de_blessure_au_tir_est_nommee_sur_le_record(monkeypatch):
+    """JUMEAU du fichier melee : `wound_1` -> `woundAbility` sur le record de TIR.
+
+    Ce fichier verrouillait la MECANIQUE (des jetes, resultats) mais jamais le NOM. Le cote
+    melee, lui, l'asserte depuis qu'il a ete repare — l'asymetrie classique : le chemin cassé
+    gagne un test, le chemin qui marchait n'en a jamais eu. Or les deux passent desormais par
+    le meme `stamp_reroll_abilities` : neutraliser sa branche blessure ne rougissait QUE la
+    melee.
+    """
+    seq = _seq_randint(monkeypatch, [4, 1, 5, 2])  # hit, wound=1 (echec), reroll=5 (succes), save
+    gs, intent = _game_state([_TARGETED_INTERCESSION])
+
+    rec = roll_shoot_intent(gs, intent)["shot_records"][0]
+
+    assert rec["strengthRoll"] == 5, "la relance a bien joue"
+    assert rec["woundAbility"] == "TARGETED INTERCESSION"
+    # La CAUSE est consommee : elle ne doit pas atteindre les consommateurs du record.
+    assert "woundRerollCause" not in rec
+    assert seq == []
+
+
+def test_verrou_pas_de_nom_de_relance_au_tir_sans_relance(monkeypatch):
+    """Contre-epreuve : sans relance, aucun nom — la cle est ABSENTE, pas vide."""
+    seq = _seq_randint(monkeypatch, [4, 5, 2])  # hit, wound=5 (succes direct), save
+    gs, intent = _game_state([_TARGETED_INTERCESSION])
+
+    rec = roll_shoot_intent(gs, intent)["shot_records"][0]
+
+    assert rec["strengthRoll"] == 5
+    assert "woundAbility" not in rec
+    assert seq == []

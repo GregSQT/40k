@@ -21,7 +21,6 @@ Tous les tests CONSTRUISENT leur état : aucun n'espère un tirage, un ordre d'a
 l'absence d'une configuration.
 """
 
-import inspect
 import random
 
 import pytest
@@ -224,10 +223,16 @@ def _records(gs):
     return out
 
 
-def _fight_state(*, attacker_faction, defender_faction, weapon_str=4, weapon_nb=1):
-    """Un attaquant (escouade '1', joueur 1) au contact d'une cible (escouade '2', joueur 2)."""
+def _fight_state(
+    *, attacker_faction, defender_faction, weapon_str=4, weapon_nb=1, weapon_rules=(),
+):
+    """Un attaquant (escouade '1', joueur 1) au contact d'une cible (escouade '2', joueur 2).
+
+    `weapon_rules` : JUMEAU de `_shoot_state`. `[LETHAL HITS]` fait blesser AUTOMATIQUEMENT,
+    donc sans jet — le seul moyen de construire un record de mêlée à `strengthRoll` None.
+    """
     weapon = {"ATK": 3, "STR": weapon_str, "AP": 0, "DMG": 1, "NB": weapon_nb,
-              "WEAPON_RULES": [], "display_name": "Choppa"}
+              "WEAPON_RULES": list(weapon_rules), "display_name": "Choppa"}
     attacker = {"id": "A1", "squad_id": "1", "player": 1, "T": 4, "CC_WEAPONS": [weapon]}
     target_model = {"id": "T1", "squad_id": "2", "player": 2, "T": 4, "HP_CUR": 5, "HP_MAX": 5,
                     "ARMOR_SAVE": 6, "INVUL_SAVE": 7, "role": None, "unitType": "Grunt"}
@@ -1022,21 +1027,20 @@ def test_la_relance_de_touche_atteint_step_log():
     LISTE BLANCHE, et le formateur du `StepLogger` ne rend que les champs qu'il connaît. Une
     trace posée au record mais absente de l'un des deux maillons n'existe pas pour l'analyzer —
     c'est exactement le défaut que ce chantier devait éviter (« relance possible » vs
-    « relance effectuée »). Les trois maillons sont donc vérifiés ensemble.
+    « relance effectuée »).
+
+    Ce test garde le MAILLON DE MAPPING. Le RENDU, lui, n'est plus attesté ici : il l'était par
+    un `inspect.getsource(StepLogger).count(...)`, qui ne voyait plus rien depuis que le token
+    est produit par `_ability_token`, une fonction de niveau module. Un test qui lit du code ne
+    voit pas ce que le code produit — il reste vert sur un helper cassé. Les deux formateurs
+    sont désormais EXÉCUTÉS par `tests/unit/ai/test_step_log_weapon_rule_tokens.py`
+    (`test_la_melee_nomme_la_relance_de_touche` pour la mêlée, longtemps le seul côté non
+    couvert).
     """
-    from ai.step_logger import StepLogger
     from engine.w40k_core import W40KEngine as _Engine
 
     assert _Engine._SHOT_RECORD_FIELD_MAP["hitAbility"] == "hit_ability_display_name", (
         "sans cette entree, `hitAbility` n'atteint jamais step.log"
-    )
-    source = inspect.getsource(StepLogger)
-    # Le RENDU, pas la lecture : compter les occurrences du nom laisserait passer un formateur
-    # qui lit le champ sans jamais l'afficher — un « vert vacant » de manuel. Le rendu passe par
-    # `_ability_token`, seul producteur du token ` [NOM]` dans les deux formateurs.
-    assert source.count("_ability_token(hit_ability_display_name)") == 2, (
-        "le champ doit etre RENDU par les DEUX formateurs (tir ET melee) — le cabler d'un seul "
-        "cote est le motif d'echec n°1 du depot"
     )
 
 
@@ -1376,4 +1380,3 @@ def test_verrou_la_phase_de_commandement_refuse_les_verbes_hors_vocabulaire() ->
     gs["zone_intent_free_steps_remaining"] = 0
     ok, out = engine._process_command_phase({"action": "skip"})
     assert ok and out["phase_complete"] is True
-    _ = inspect

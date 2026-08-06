@@ -14,8 +14,16 @@ import { AdvancedIcon, ChargedIcon, FellBackIcon, MovedIcon } from "./UnitStatus
 const RULE_TOKEN_REGEX = /\[([^\]]+)\]/g;
 
 /** Token de règle en MAJUSCULES, forme reconnue par `RULE_TOKEN_REGEX` — donc rendue avec sa
- *  bulle d'aide comme les tokens de la ligne de résumé. Même casse que step.log. */
-const ruleToken = (name?: string): string => (name ? ` [${name.toUpperCase()}]` : "");
+ *  bulle d'aide comme les tokens de la ligne de résumé.
+ *
+ *  MÊME CONTRAT que `_ability_token` (`ai/step_logger.py`), qui est la définition canonique de
+ *  cette forme : `trim` puis MAJUSCULES, et chaîne vide sur un nom blanc. Sans le `trim`, un nom
+ *  fait d'espaces rendait ` [ ]` ici et `""` dans step.log — un token vide que
+ *  `RULE_TOKEN_REGEX` matche pourtant. */
+const ruleToken = (name?: string): string => {
+  const trimmed = name?.trim();
+  return trimmed ? ` [${trimmed.toUpperCase()}]` : "";
+};
 
 /** Jet de dé : « final » seul, ou « initial->final » quand le dé a été relancé.
  *

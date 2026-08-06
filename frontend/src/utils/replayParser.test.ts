@@ -389,6 +389,44 @@ describe("replayParser", () => {
     expect(shoot.wound_ability).toBe("TARGETED INTERCESSION");
   });
 
+  // VERROU du discriminateur PAR NOM. Le segment Wound porte deux capacités possibles écrites
+  // avec la MÊME syntaxe : la relance (`woundAbility`) puis le modificateur (`woundBonusAbility`).
+  // Séparer par la POSITION est tentant — l'émetteur écrit toujours relance puis bonus — mais
+  // c'est faux dès qu'il n'y a qu'un token, et c'est le cas le PLUS FRÉQUENT : Oath ne pose que
+  // `hit_any_fail`, il ne relance jamais la blessure. Un token unique `[OATH OF MOMENT]` est donc
+  // toujours un bonus, jamais une relance.
+  it("classe un token de blessure SEUL par son nom, pas par sa position", () => {
+    const shootLine = (woundTokens: string) =>
+      [
+        "=== EPISODE 1 START ===",
+        "Scenario: demo",
+        "Bot: RandomBot",
+        `Rules: ${VALID_RULES_JSON}`,
+        "[12:00:00] Board: cols=10 rows=10 inches_to_subhex=1 hex_radius=2.78 margin=1",
+        "Unit 1 (Intercessor) P1: Starting position (0, 0), HP_MAX=5",
+        "Unit 2 (Termagant) P2: Starting position (2, 0), HP_MAX=4",
+        "[12:00:00] T1 P1 DEPLOYMENT : Unit 1(-1,-1) DEPLOYED from (-1,-1) to (0,0)",
+        "[12:00:01] T1 P2 DEPLOYMENT : Unit 2(-1,-1) DEPLOYED from (-1,-1) to (1,0)",
+        "[12:00:02] T1 P1 SHOOT : Unit 1(0,0) SHOT [Bolt Rifle] Unit 2(1,0)" +
+          ` - Hit 4(3+) - Wound 5(3+)${woundTokens} - Save 2(3+) - Dmg:1HP`,
+        "EPISODE END: Winner=1, Method=elimination",
+      ].join("\n");
+    const parse = (line: string) =>
+      parse_log_file_from_text(line).episodes[0].actions.find(
+        (a) => (a as { type?: string }).type === "shoot"
+      ) as { wound_ability?: string; wound_bonus_ability?: string };
+
+    // Le +1 d'Oath SEUL : c'est un modificateur. La position (1er token) dirait « relance ».
+    const bonusSeul = parse(shootLine(" [OATH OF MOMENT]"));
+    expect(bonusSeul.wound_bonus_ability).toBe("OATH OF MOMENT");
+    expect(bonusSeul.wound_ability).toBeUndefined();
+
+    // Une relance SEULE, au même rang : c'est bien une relance.
+    const relanceSeule = parse(shootLine(" [TARGETED INTERCESSION]"));
+    expect(relanceSeule.wound_ability).toBe("TARGETED INTERCESSION");
+    expect(relanceSeule.wound_bonus_ability).toBeUndefined();
+  });
+
   it("ne prend aucun token de règle d'arme pour une capacité", () => {
     const text = [
       "=== EPISODE 1 START ===",

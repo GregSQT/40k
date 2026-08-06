@@ -40,6 +40,11 @@ from engine.hex_utils import cube_to_offset, offset_to_cube
 # `engine.phase_handlers`.
 from engine.terrain_utils import resolve_model_floor_level, resolved_floor_height_at
 from .shared_utils import (
+    # Traducteurs de causes de relance et marqueurs de capacite, PARTAGES avec le roller de tir :
+    # les inliner est la forme exacte sous laquelle ces deux chemins ont deja diverge.
+    resolve_oath_effects,
+    stamp_reroll_abilities,
+    stamp_wound_bonus_ability,
     enemy_entries_on_battlefield,
     entries_on_battlefield,
     entry_footprint,
@@ -4578,23 +4583,11 @@ def _manual_roll_fight_intent(
     strength += _waaagh_bonus
     n_attacks += _waaagh_bonus
     wth = _calculate_wound_target(strength, _target_highest_bodyguard_toughness(game_state, target_sid))
-    # Oath of Moment : « add 1 to the Wound roll » contre la cible designee. Modelise en
-    # ABAISSANT le seuil, comme le couvert modelise son -1 BS en relevant le seuil de touche.
-    # C est exactement equivalent ici : la blessure CRITIQUE reste sur un 6 NON MODIFIE
-    # (`profile.crit_wound_on`, teste sur le de brut) et le 1 non modifie echoue toujours
-    # (05.02) — les deux sont testes sur le de, pas sur le seuil. Plancher a 2 : aucun
-    # modificateur ne fait reussir un 1.
-    # JUMEAU du tir : `unit_is_oath_target_of` UNE fois pour les deux effets d Oath (relance de
-    # touche et +1 Wound posent la meme question), au lieu de deux evaluations par intent.
-    _is_oath_target = attacker_unit is not None and unit_is_oath_target_of(
-        game_state, attacker_unit, target_sid
+    # Oath of Moment : MEME helper que le tir (modelisation par abaissement du seuil, plancher
+    # a 2, et une seule interrogation de `unit_is_oath_target_of` pour les deux effets).
+    _is_oath_target, _oath_wound_bonus, wth = resolve_oath_effects(
+        game_state, attacker_unit, target_sid, wth
     )
-    _oath_wound_bonus = (
-        oath_wound_roll_bonus(game_state, attacker_unit, target_sid)
-        if _is_oath_target and attacker_unit is not None else 0
-    )
-    if _oath_wound_bonus:
-        wth = max(2, wth - _oath_wound_bonus)
     first_alive = models_cache[alive0[0]]
     display_wth = wth
     display_save_th = save_threshold(
@@ -4642,41 +4635,14 @@ def _manual_roll_fight_intent(
         ),
         roll_d6=lambda: random.randint(1, 6),
     )
-    # Nom de l ABILITE qui a ouvert chaque relance de TOUCHE — JUMEAU EXACT du site de tir
-    # (`shared_utils._manual_roll_intent`), meme helper, meme consommation de la cause. Sans
-    # lui, `step.log` dit que la relance etait POSSIBLE, jamais qu elle a EU LIEU.
-    from engine.phase_handlers.shared_utils import (
-        resolve_hit_reroll_ability, resolve_wound_reroll_ability,
-        stamp_wound_bonus_ability,
+    # Noms des ABILITES qui ont ouvert les relances — MEME helper que le tir, donc plus de
+    # divergence possible. Sans lui, `step.log` dit que la relance etait POSSIBLE, jamais
+    # qu elle a EU LIEU.
+    stamp_reroll_abilities(
+        rolled["shot_records"], attacker_unit,
+        reroll_1_towound=reroll_wound1,
+        reroll_towound_on_objective=reroll_wound_obj,
     )
-
-    _hit_ability_by_cause: Dict[str, Optional[str]] = {}
-    _wound_ability_by_cause: Dict[str, Optional[str]] = {}
-    for _rec in rolled["shot_records"]:
-        _hit_cause = _rec.pop("hitRerollCause", None)  # get allowed
-        if _hit_cause:
-            if _hit_cause not in _hit_ability_by_cause:
-                _hit_ability_by_cause[_hit_cause] = resolve_hit_reroll_ability(
-                    attacker_unit, _hit_cause
-                )
-            _hit_ability = _hit_ability_by_cause[_hit_cause]
-            if _hit_ability:
-                _rec["hitAbility"] = str(_hit_ability)
-        # Cote BLESSURE : la melee posait bien `wound_1` / `wound_any_fail` dans le roller mais
-        # ne consommait JAMAIS la cause — la relance restait invisible dans tous les logs, alors
-        # que le tir la nommait. Meme helper que le tir, donc plus de divergence possible.
-        _wound_cause = _rec.pop("woundRerollCause", None)  # get allowed
-        if not _wound_cause or attacker_unit is None:
-            continue
-        if _wound_cause not in _wound_ability_by_cause:
-            _wound_ability_by_cause[_wound_cause] = resolve_wound_reroll_ability(
-                attacker_unit, _wound_cause,
-                reroll_1_towound=reroll_wound1,
-                reroll_towound_on_objective=reroll_wound_obj,
-            )
-        _wound_ability = _wound_ability_by_cause[_wound_cause]
-        if _wound_ability:
-            _rec["woundAbility"] = str(_wound_ability)
     # +1 au jet de blessure d Oath. Meme helper que le tir (cf. `stamp_wound_bonus_ability`).
     stamp_wound_bonus_ability(rolled["shot_records"], _oath_wound_bonus)
     return {
