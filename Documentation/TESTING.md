@@ -64,20 +64,32 @@ en pesait 4,9 s à lui seul, et `tests/conftest.py` le payait dans CHAQUE worker
 importe de toute façon `tests/unit/ai/test_pointer_head.py`, qui importe `torch` au niveau module —
 mais côté PvP, où personne ne touche au RL, les 4,9 s par worker sont récupérés.
 
-### Les deux tests les plus lourds
+### Les tests les plus lourds (relevé 2026-08-06, `--durations=25`)
 
-Ils dominent le mur de la suite : ce sont eux qui fixent le plancher, aucun découpage xdist ne peut
-les fractionner.
+Ce sont eux qui fixent le plancher du mur : aucun découpage xdist ne peut fractionner un test.
 
-| Test | Ce qu'il vérifie | Coût |
+| Test | Ce qu'il vérifie | Coût (`call`) |
 |---|---|---|
-| `test_move_mask_is_executable` (×3 seeds) | invariant « masque ⊆ exécutable » sur de vraies parties, 400 steps | ~36 s / seed |
-| `test_deployment_clearance_parity::test_deployment_mask_mirrors_commit_overlap_predicate` | parité masque/commit du déploiement | ~20 s |
+| `test_reserves_full_episode` (9 tests dans le top 25) | épisodes complets avec roster à réserves | ~241 s cumulés, dont **83,7 s** pour `test_the_seed_sample_really_exercises_the_measuring_phases` |
+| `test_obs_fighting_models_no_fallback` (2 tests) | `get_fighting_models` sur le chemin d'observation | 51,3 s + 49,3 s |
+| `test_move_mask_is_executable` (×3 seeds) | invariant « masque ⊆ exécutable » sur de vraies parties, 400 steps | 40 à 46 s / seed |
 
-Ils étaient respectivement à **687 s** et **31 s** avant l'optimisation du 2026-07-26
-(cf. `Implémentation/V11_move_build_acceleration.md` §3.2). Ne pas les alléger en réduisant
-`MAX_STEPS` ou le nombre de seeds : à ce coût-là, la couverture d'invariant vaut plus que les
-secondes gagnées.
+Ne pas alléger `test_move_mask_is_executable` en réduisant `MAX_STEPS` ou le nombre de seeds : à ce
+coût-là, la couverture d'invariant vaut plus que les secondes gagnées. Il était à **687 s** avant
+l'optimisation du 2026-07-26 (cf. `Implémentation/V11_move_build_acceleration.md` §3.2).
+
+`test_deployment_clearance_parity::test_deployment_mask_mirrors_commit_overlap_predicate`, cité ici
+jusqu'au 2026-08-06 comme 2ᵉ plus lourd à ~20 s, est sorti du top 25.
+
+**Ce qui a été retiré du plancher (2026-08-06)** : `test_charge3d_floors_integration::
+test_a_floor_destination_is_validated_by_the_climb_field_not_the_2d_bfs` pesait **160,5 s** — le test
+le plus lourd de toute la suite, et il n'était pas documenté ici. Il évaluait
+`_charge_model_pos_is_closer` sur les **629** cases du champ climb (mesuré : 630 appels, 101,9 s sur
+113,7) alors qu'il n'assertait que « au moins une est légale », puis opposait deux budgets sur UNE
+seule case. Sortie au premier accepté (qui est le rang 0 du tri, donc la même case qu'avant) :
+**160,5 s → 0,44 s**, assertions inchangées. Contre-épreuve : en faisant décider le BFS 2D à la place
+du champ climb (`charge_handlers`, garde `dest_level >= 1`), le test redevient ROUGE sur son message
+propre — le verrou tient après l'allègement.
 
 ---
 

@@ -267,13 +267,20 @@ def test_a_floor_destination_is_validated_by_the_climb_field_not_the_2d_bfs(setu
     was_gym = gs["gym_training_mode"]
     gs["gym_training_mode"] = False
     try:
-        accepted = [
-            cell for cell in sorted(reachable)
-            if _charge_model_pos_is_closer(
-                gs, clb_u, clb_mid, cell[0], cell[1], [setup["tgt_uid"]], big, {}, dest_level=1,
-            )
-        ]
-        assert accepted, (
+        # PREMIÈRE case acceptée, pas toutes : ce test oppose DEUX budgets sur UNE case (le budget
+        # est « la SEULE variable », cf. docstring), et n'assertait déjà que « au moins une ».
+        # Balayer les 629 cases du champ climb coûtait 124 s pour une information que la première
+        # porte entièrement — c'était le test le plus lourd de toute la suite unitaire (160 s).
+        # `sorted` reste indispensable : il rend le choix déterministe, donc la case reprise plus
+        # bas est toujours la même d'un run à l'autre.
+        accepted = next(
+            (cell for cell in sorted(reachable)
+             if _charge_model_pos_is_closer(
+                 gs, clb_u, clb_mid, cell[0], cell[1], [setup["tgt_uid"]], big, {}, dest_level=1,
+             )),
+            None,
+        )
+        assert accepted is not None, (
             "aucune case d'étage atteignable n'est jugée légale : la branche climb ne valide rien"
         )
         # Budget sous le coût de montée (§13.06, étage L1 = 3") : la MÊME case devient illégale.
@@ -283,7 +290,7 @@ def test_a_floor_destination_is_validated_by_the_climb_field_not_the_2d_bfs(setu
             (ground_start[0], ground_start[1]), tiny, 1, ground_obs, ta,
         ), "prémisse : sous 3\" de montée, le champ climb doit être vide"
         assert _charge_model_pos_is_closer(
-            gs, clb_u, clb_mid, accepted[0][0], accepted[0][1],
+            gs, clb_u, clb_mid, accepted[0], accepted[1],
             [setup["tgt_uid"]], tiny, {}, dest_level=1,
         ) is False, (
             "une destination d'étage reste légale sous le coût de montée : le BFS 2D a décidé "
