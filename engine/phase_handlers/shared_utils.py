@@ -11210,7 +11210,7 @@ def stamp_reroll_abilities(
                 reroll_towound_on_objective=reroll_towound_on_objective,
             )
         wound_ability = wound_ability_by_cause[wound_cause]
-        if False and wound_ability:
+        if wound_ability:
             record["woundAbility"] = str(wound_ability)
 
 
