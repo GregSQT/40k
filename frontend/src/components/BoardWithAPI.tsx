@@ -734,6 +734,9 @@ export const BoardWithAPI: React.FC = () => {
   const [oathRulePopupPosition, setOathRulePopupPosition] = useState({ x: 140, y: 120 });
   const [isDraggingOathRulePopup, setIsDraggingOathRulePopup] = useState(false);
   const oathRuleDragOffsetRef = useRef({ x: 0, y: 0 });
+  const [waaaghPopupPosition, setWaaaghPopupPosition] = useState({ x: 140, y: 120 });
+  const [isDraggingWaaaghPopup, setIsDraggingWaaaghPopup] = useState(false);
+  const waaaghDragOffsetRef = useRef({ x: 0, y: 0 });
   const [oathConfirmPopupPosition, setOathConfirmPopupPosition] = useState({ x: 200, y: 200 });
   const [isDraggingOathConfirmPopup, setIsDraggingOathConfirmPopup] = useState(false);
   const oathConfirmDragOffsetRef = useRef({ x: 0, y: 0 });
@@ -1119,6 +1122,28 @@ export const BoardWithAPI: React.FC = () => {
       window.removeEventListener("mouseup", onMouseUp);
     };
   }, [isDraggingOathRulePopup]);
+
+  // Popup du Waaagh! — même mécanique de déplacement que les deux popups d'Oath.
+  useEffect(() => {
+    if (!isDraggingWaaaghPopup) {
+      return;
+    }
+    const onMouseMove = (event: MouseEvent) => {
+      setWaaaghPopupPosition({
+        x: event.clientX - waaaghDragOffsetRef.current.x,
+        y: event.clientY - waaaghDragOffsetRef.current.y,
+      });
+    };
+    const onMouseUp = () => {
+      setIsDraggingWaaaghPopup(false);
+    };
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+  }, [isDraggingWaaaghPopup]);
 
   useEffect(() => {
     if (!isDraggingOathConfirmPopup) {
@@ -2030,6 +2055,29 @@ export const BoardWithAPI: React.FC = () => {
           (unit) => unit.player !== oathSelectionPlayer && (unit.HP_CUR ?? 0) > 0
         );
 
+  // Waaagh! EN VIGUEUR (08.04) : le plateau se fissure de vert tant que le drapeau moteur tient,
+  // c'est-à-dire jusqu'au début de la prochaine phase de commandement de l'Ork — tour adverse
+  // COMPRIS. Un seul booléen : seuls les ORKS ont la capacité, les deux camps voient le même
+  // plateau, il n'y a pas de camp à distinguer.
+  // Le champ est posé par `initial_faction_ability_state` sur TOUT game_state et relu en
+  // `require_key` par le moteur : son absence est un état corrompu, et c'est le MOTEUR qui la
+  // signale (une sauvegarde antérieure au chantier 03 lève dès la première phase de commandement).
+  // L'UI ne redouble pas cette garde par un `throw` : le corps de `BoardWithAPI` n'est sous aucune
+  // ErrorBoundary (cf. Routes.tsx), lever ici remplacerait le message du moteur par un écran
+  // blanc. Trace console explicite, et pas de décor — jamais un « false » muet.
+  const waaaghActive = (() => {
+    if (!apiProps.gameState) return false;
+    const flags = apiProps.gameState.waaagh_active;
+    if (flags === undefined) {
+      console.error(
+        "game_state.waaagh_active absent — etat des capacites de faction (08.04) incomplet ; " +
+          "le pourtour du Waaagh! ne peut pas etre affiche."
+      );
+      return false;
+    }
+    return Object.values(flags).some(Boolean);
+  })();
+
   /** Cible cliquée en attente de confirmation — l'unité, pour l'afficher dans le popup. */
   const oathPendingTargetUnit =
     oathPendingTargetId === null ? null : (unitsById.get(String(oathPendingTargetId)) ?? null);
@@ -2067,6 +2115,14 @@ export const BoardWithAPI: React.FC = () => {
       y: event.clientY - oathRulePopupPosition.y,
     };
     setIsDraggingOathRulePopup(true);
+  };
+
+  const onWaaaghTitleMouseDown = (event: React.MouseEvent<HTMLButtonElement>) => {
+    waaaghDragOffsetRef.current = {
+      x: event.clientX - waaaghPopupPosition.x,
+      y: event.clientY - waaaghPopupPosition.y,
+    };
+    setIsDraggingWaaaghPopup(true);
   };
 
   const onOathConfirmTitleMouseDown = (event: React.MouseEvent<HTMLButtonElement>) => {
@@ -4002,39 +4058,51 @@ export const BoardWithAPI: React.FC = () => {
           </div>,
           document.body
         )}
+      {/* Waaagh! : même forme que les popups d'Oath — la règle, puis deux boutons. L'INDEX est ce
+          que le moteur attend, pas le libellé : l'ordre des candidats est contractuel
+          (0 = appeler, 1 = passer, cf. `command_step_command_abilities`). */}
       {waaaghDecision && (
         <div className="rule-choice-overlay">
-          <div className="deployment-panel__picker deployment-panel__picker--rule-choice">
-            <div className="deployment-panel__picker-title">Waaagh! — once per battle</div>
-            <div className="deployment-panel__picker-content deployment-panel__picker-content--rule-choice">
-              <div className="deployment-panel__picker-list deployment-panel__picker-list--rule-choice">
-                <div className="rule-choice-group">
-                  <div className="rule-choice-group__row">
-                    <div className="rule-choice-group__options-col">
-                      <div className="rule-choice-group__options">
-                        {/* L'INDEX est ce que le moteur attend, pas le libellé : l'ordre des
-                            candidats est contractuel (0 = appeler, 1 = passer). */}
-                        {waaaghDecision.options.map((option, optionIndex) => (
-                          <button
-                            key={option.label}
-                            type="button"
-                            className="deployment-panel__picker-item rule-choice-group__option"
-                            onClick={() => {
-                              void apiProps.onCallWaaagh(optionIndex);
-                            }}
-                          >
-                            {option.label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                </div>
+          <div
+            className="deployment-panel__picker deployment-panel__picker--draggable deployment-panel__picker--oath"
+            style={{
+              left: `${waaaghPopupPosition.x}px`,
+              top: `${waaaghPopupPosition.y}px`,
+            }}
+          >
+            <button
+              type="button"
+              className="deployment-panel__picker-title deployment-panel__picker-title--draggable"
+              onMouseDown={onWaaaghTitleMouseDown}
+            >
+              {`Waaagh! — player ${waaaghDecision.player}${isDraggingWaaaghPopup ? " (drag...)" : ""}`}
+            </button>
+            <div className="deployment-panel__picker-content deployment-panel__picker-content--oath">
+              <div className="deployment-panel__picker-tooltip">
+                {
+                  "If your Army Faction is ORKS, once per battle, at the start of your Command phase, you can call a Waaagh!. If you do, until the start of your next Command phase, the Waaagh! is active for your army and:\n\n- Units from your army with this ability are eligible to declare a charge in a turn in which they Advanced.\n- Add 1 to the Strength and Attacks characteristics of melee weapons equipped by models from your army with this ability.\n- Models from your army with this ability have a 5+ invulnerable save."
+                }
               </div>
-              <div className="deployment-panel__picker-tooltip deployment-panel__picker-tooltip--rule-choice">
-                Jusqu'au début de votre prochaine phase de commandement : charge après Advance, +1
-                Force et +1 Attaques en mêlée, sauvegarde invulnérable 5+.
-              </div>
+            </div>
+            <div className="deployment-panel__picker-actions deployment-panel__picker-actions--oath">
+              <button
+                type="button"
+                className="deployment-panel__picker-close deployment-panel__picker-close--cancel"
+                onClick={() => {
+                  void apiProps.onCallWaaagh(1);
+                }}
+              >
+                Skip
+              </button>
+              <button
+                type="button"
+                className="deployment-panel__picker-close deployment-panel__picker-close--validate"
+                onClick={() => {
+                  void apiProps.onCallWaaagh(0);
+                }}
+              >
+                Call the Waaagh!
+              </button>
             </div>
           </div>
         </div>
@@ -4443,6 +4511,7 @@ export const BoardWithAPI: React.FC = () => {
                 : apiProps.onSelectUnit
             }
             oathTargetSelection={oathBoardSelection}
+            waaaghActive={waaaghActive}
             battleShockTestMode={settings.battleShockTestEnabled && apiProps.battleShockTestMode}
             onForceBattleShock={apiProps.onForceBattleShock}
             chargedTestMode={settings.battleShockTestEnabled && apiProps.chargedTestMode}
