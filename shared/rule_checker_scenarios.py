@@ -114,6 +114,33 @@ def select_units(project_root: Path) -> Tuple[List[str], List[Dict[str, Any]], L
     return selected_sorted, selected_details, rejected_rows
 
 
+#: Registre de datasheets, construit UNE fois : `build_scenario_payload` est appelé une fois par
+#: couple de types (2704 en juillet 2026), et le registre reparse tous les rosters TypeScript.
+_UNIT_REGISTRY: Any = None
+
+
+def army_faction_of(unit_type: str) -> str:
+    """Faction d'Armée d'un matchup rule-checker : celle de la datasheet qui compose le camp.
+
+    Chaque camp est fait d'UN seul type d'unité, donc la question n'a qu'une réponse. Lue dans le
+    registre plutôt que reparsée ici : `ai/unit_registry` est le seul parseur des rosters
+    TypeScript du dépôt, et un second divergerait le jour où une datasheet change de forme.
+    """
+    global _UNIT_REGISTRY
+    if _UNIT_REGISTRY is None:
+        from ai.unit_registry import UnitRegistry
+
+        _UNIT_REGISTRY = UnitRegistry()
+    keywords = require_key(_UNIT_REGISTRY.get_unit_data(unit_type), "FACTION_KEYWORDS")
+    if not keywords:
+        raise ValueError(
+            f"La datasheet {unit_type!r} ne declare aucun FACTION_KEYWORDS : impossible d'en "
+            f"deduire une Faction d'Armee pour le scenario rule-checker."
+        )
+    first = keywords[0]
+    return str(first["keywordId"] if isinstance(first, dict) else first)
+
+
 def build_scenario_payload(
     p1_unit: str, p2_unit: str, scale: str, board_ref: str, terrain_ref: str
 ) -> Dict[str, Any]:
@@ -128,6 +155,9 @@ def build_scenario_payload(
         # ASTARTES est en jeu (`game_state.uses_codex_detachment` leve sinon), et ces scenarios
         # croisent tous les rosters, marines compris.
         "uses_codex_detachment": {"1": True, "2": True},
+        # Faction d'Armee de chaque camp : un camp = un seul type d'unite, donc la faction de sa
+        # datasheet. Champ OBLIGATOIRE — 08.04 le lit a chaque phase de commandement.
+        "army_faction": {"1": army_faction_of(p1_unit), "2": army_faction_of(p2_unit)},
         "scale": scale,
         "primary_objectives": ["objectives_control"],
         "board_ref": board_ref,

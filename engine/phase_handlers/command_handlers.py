@@ -13,7 +13,7 @@ from shared.data_validation import require_key
 from engine.game_state import (
     CORE_CP_GAIN_PER_COMMAND_PHASE, GameStateManager, gain_command_points,
     OATH_FACTION_KEYWORD, WAAAGH_FACTION_KEYWORD,
-    army_faction_keywords, call_waaagh, expire_faction_abilities_for_player,
+    army_faction, call_waaagh, expire_faction_abilities_for_player,
     set_oath_target, waaagh_is_available,
 )
 
@@ -258,7 +258,7 @@ def command_step_command_abilities(game_state: Dict[str, Any]) -> None:
     #    « You can » : c'est optionnel, d'où deux candidats. L'ordre est CONTRACTUEL (§9.6) et
     #    c'est lui qui distingue les deux (cf. AGENT_DECISION_TYPE_IDS) : 0 = appeler, 1 = passer.
     if (
-        WAAAGH_FACTION_KEYWORD in army_faction_keywords(game_state, current_player)
+        army_faction(game_state, current_player) == WAAAGH_FACTION_KEYWORD
         and waaagh_is_available(game_state, current_player)
     ):
         from engine.agent_decision import set_pending_agent_decision
@@ -278,8 +278,8 @@ def command_step_command_abilities(game_state: Dict[str, Any]) -> None:
             ],
         )
         # Une seule décision à la fois : le moteur rend la main maintenant. L'Oath ci-dessous ne
-        # peut de toute façon pas concerner le même joueur (aucune armée n'est ORKS et ADEPTUS
-        # ASTARTES à la fois), mais l'ordre reste explicite plutôt qu'implicitement sûr.
+        # peut pas concerner le même joueur — la Faction d'Armée est UNE déclaration
+        # (`army_faction`), et elle vaut ORKS ici.
         return None
 
     # 3. Oath of Moment — « select one unit from your opponent's army ». NON OPTIONNEL : pas de
@@ -292,15 +292,15 @@ def command_step_command_abilities(game_state: Dict[str, Any]) -> None:
 def arm_oath_selection(game_state: Dict[str, Any], player: int) -> None:
     """Pose la désignation d'Oath si `player` la doit — ÉCRIVAIN UNIQUE de l'armement.
 
-    Deux appelants : 08.04 lui-même, et la résolution du Waaagh! (une armée qui porterait les
-    deux mots-clés de faction enchaînerait les deux décisions). Le bloc était recopié aux deux
-    endroits ; le jour où la condition d'armement change, un seul site à corriger.
+    « If your Army Faction is ADEPTUS ASTARTES » : la Faction d'Armée DÉCLARÉE, et non la
+    présence du mot-clé quelque part dans le roster. Une armée TYRANIDS qui invite un
+    `WolfGuardTerminator` n'a pas d'Oath of Moment — c'est ce que ce test-ci garantit.
 
     « Select one unit from your opponent's army » : s'il n'existe aucune unité ennemie vivante,
     il n'y a rien à désigner et la clause est sans objet — elle ne pourrait bénéficier à personne.
     """
     player_int = int(player)
-    if OATH_FACTION_KEYWORD not in army_faction_keywords(game_state, player_int):
+    if army_faction(game_state, player_int) != OATH_FACTION_KEYWORD:
         return
     if oath_selectable_enemy_ids(game_state, player_int):
         game_state["pending_oath_selection"] = player_int
@@ -370,7 +370,12 @@ def faction_decision_is_pending(game_state: Dict[str, Any], player: Optional[int
 
 
 def apply_waaagh_call_decision(game_state: Dict[str, Any], player: int, called: bool) -> None:
-    """Applique le candidat choisi pour `waaagh_call`, puis enchaîne sur l'Oath si nécessaire.
+    """Applique le candidat choisi pour `waaagh_call`.
+
+    N'enchaîne sur RIEN : la Faction d'Armée est désormais une déclaration UNIQUE
+    (`army_faction`), donc le joueur qui vient de décider de son Waaagh! est ORKS et ne peut pas
+    être ADEPTUS ASTARTES. L'appel à `arm_oath_selection` qui suivait ici couvrait une armée
+    portant les deux mots-clés — un état que le modèle de données ne produit plus.
 
     EFFACE la décision en attente elle-même : c'est le pendant exact d'`apply_oath_selection`,
     et l'oublier laisserait le moteur arrêté sur une décision déjà jouée. Le faire ICI plutôt
@@ -397,10 +402,6 @@ def apply_waaagh_call_decision(game_state: Dict[str, Any], player: int, called: 
     clear_pending_agent_decision(game_state)
     if called:
         call_waaagh(game_state, int(player))
-    # Un joueur ORKS n'est pas ADEPTUS ASTARTES : cet appel ne pose rien dans les rosters
-    # actuels. Il est là parce que la règle ne l'interdit pas — une armée qui porterait les deux
-    # mots-clés déclarerait les deux capacités, et l'ordre de 08.04 doit rester le même.
-    arm_oath_selection(game_state, player)
 
 
 def apply_oath_selection(game_state: Dict[str, Any], player: int, target_unit_id: str) -> None:

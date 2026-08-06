@@ -1776,6 +1776,11 @@ def _build_scenario_engine_config(scenario_file: str):
         # forwarding, la clé déclarée dans le JSON reste inerte en PvP/PvE et le premier jet de
         # blessure d'un marine sous Oath lève (`game_state.uses_codex_detachment`).
         "uses_codex_detachment": scenario_result.get("uses_codex_detachment"),
+        # Faction d'Armée déclarée par joueur — même chemin, même raison que la clause ci-dessus :
+        # ce constructeur passe la config à `W40KEngine(config=…)`, qui ne relit aucun scénario.
+        # Sans ce forwarding, la clé déclarée dans le JSON reste inerte en PvP/PvE et 08.04 lève
+        # dès la première phase de commandement (`game_state.army_faction`).
+        "army_faction": scenario_result.get("army_faction"),
     }
 
     agent_keys = get_agents_from_scenario(scenario_file, unit_registry)
@@ -3368,6 +3373,17 @@ def _load_army_file(army_file: str) -> Dict[str, Any]:
             f"Army file {army_file} uses_codex_detachment must be a boolean (the list either uses "
             f"a Codex: Space Marines Detachment or it does not), got {detachment!r}"
         )
+    # Faction d'Armee (« If your Army Faction is … ») : JUMEAU de la clause ci-dessus — scalaire
+    # (une liste declare UNE faction), validee au chargement pour la meme raison, et propagee au
+    # joueur qui charge cette liste. Distincte de `faction` juste au-dessus, qui nomme le DOSSIER
+    # de roster (`spaceMarine`, `tyranid`) et sert a l'UI : les deux ne se confondent pas, un
+    # dossier de roster n'est pas un mot-cle de faction de datasheet.
+    army_faction_declared = require_key(army_cfg, "army_faction")
+    if not isinstance(army_faction_declared, str) or not army_faction_declared.strip():
+        raise TypeError(
+            f"Army file {army_file} army_faction must be a non-empty faction keyword "
+            f"(e.g. \"ADEPTUS ASTARTES\"), got {army_faction_declared!r}"
+        )
     units = require_key(army_cfg, "units")
     if not isinstance(units, list) or not units:
         raise ValueError(f"Army file {army_file} must contain a non-empty units array")
@@ -3649,6 +3665,22 @@ def _execute_change_roster_action(engine_instance: W40KEngine, action: Dict[str,
             f"recu {type(by_player).__name__}"
         )
     by_player[str(target_deployer)] = army_detachment
+
+    # Faction d'Armee : MEME propagation, meme portee (ce joueur seulement). Sans elle, un joueur
+    # qui remplace son roster ADEPTUS ASTARTES par une liste tyranide continuerait a se voir
+    # demander une designation d'Oath of Moment a chaque tour — la faction du scenario, pas celle
+    # de la liste qu'il joue.
+    army_faction_declared = require_key(army_cfg, "army_faction")  # forme validée au chargement
+    faction_by_player = engine_config.get("army_faction")  # get allowed : None = scenario muet
+    if faction_by_player is None:
+        faction_by_player = {}
+        engine_config["army_faction"] = faction_by_player
+    elif not isinstance(faction_by_player, dict):
+        raise TypeError(
+            "config['army_faction'] doit etre un dict par joueur, "
+            f"recu {type(faction_by_player).__name__}"
+        )
+    faction_by_player[str(target_deployer)] = army_faction_declared
 
     # Rebuild reward config mappings using engine centralized logic.
     # This preserves mono-agent (single-policy) behavior by mapping all model keys

@@ -36,6 +36,7 @@ from engine.game_state import (
     initial_faction_ability_state,
     oath_wound_roll_bonus,
     set_oath_target,
+    unit_has_oath_ability,
     unit_is_oath_target_of,
     unit_can_charge_after_advance,
     waaagh_applies_to_unit,
@@ -55,6 +56,9 @@ from tests.unit.engine._roll_helpers import roll_fight_intent
 
 ORKS = [{"keywordId": "ORKS"}]
 ASTARTES = [{"keywordId": "ADEPTUS ASTARTES"}]
+#: Une faction qui ne porte AUCUNE des deux capacités : c'est elle qui rend visible la
+#: différence entre « la Faction d'Armée est déclarée » et « le mot-clé est présent quelque part ».
+TYRANIDS = [{"keywordId": "TYRANIDS"}]
 
 
 def _seq(monkeypatch, rolls):
@@ -122,6 +126,11 @@ def _shoot_state(
     # declarent. `None` sert au verrou « champ absent -> leve ».
     uses_codex_detachment: "dict | None" = None,
     attacker_extra_units=(),
+    defender_extra_units=(),
+    # Faction d'Armée DÉCLARÉE, quand elle DIVERGE des mots-clés de l'unité testée : c'est le
+    # cas « une unité sans la capacité dans une armée qui l'a », que la déduction d'avant ne
+    # savait pas exprimer. Par défaut, elle suit la datasheet des unités construites.
+    declared_factions: "dict | None" = None,
 ):
     """Un tireur (escouade '1', joueur 1) contre une cible (escouade '2', joueur 2).
 
@@ -161,10 +170,21 @@ def _shoot_state(
         extra_id = f"9{index}"
         units.append(_unit(extra_id, 1, extra_faction))
 
-    config = (
-        {} if uses_codex_detachment == {}
-        else {"uses_codex_detachment": uses_codex_detachment or {"1": True, "2": True}}
-    )
+    for index, extra_faction in enumerate(defender_extra_units):
+        units.append(_unit(f"8{index}", 2, extra_faction))
+
+    # `army_faction` est TOUJOURS déclarée, y compris quand la fixture retire la clause de
+    # détachement : sans elle, aucune attaque n'atteint le +1 Wound (l'attaquant n'aurait pas
+    # la capacité), et le verrou « clause de détachement absente → lève » testerait autre chose
+    # que ce qu'il annonce.
+    config = {
+        "army_faction": declared_factions or {
+            "1": _declared_faction(attacker_faction),
+            "2": _declared_faction(defender_faction),
+        }
+    }
+    if uses_codex_detachment != {}:
+        config["uses_codex_detachment"] = uses_codex_detachment or {"1": True, "2": True}
     gs = {
         **turn_state_invariants(),
         "gym_training_mode": True,
@@ -211,7 +231,13 @@ def _fight_state(*, attacker_faction, defender_faction, weapon_str=4, weapon_nb=
     units = [_unit("1", 1, attacker_faction), _unit("2", 2, defender_faction, ARMOR_SAVE=6)]
     gs = {
         **turn_state_invariants(),
-        "config": {"uses_codex_detachment": {"1": True, "2": True}},
+        "config": {
+            "uses_codex_detachment": {"1": True, "2": True},
+            "army_faction": {
+                "1": _declared_faction(attacker_faction),
+                "2": _declared_faction(defender_faction),
+            },
+        },
         "models_cache": {"A1": attacker, "T1": target_model},
         "squad_models": {"1": ["A1"], "2": ["T1"]},
         "squad_cache": {"1": {"model_count_at_start": 1}, "2": {"model_count_at_start": 1}},
@@ -225,6 +251,17 @@ def _fight_state(*, attacker_faction, defender_faction, weapon_str=4, weapon_nb=
     return gs, intent
 
 
+def _declared_faction(faction_keywords):
+    """Le mot-clé qu'une liste DÉCLARE comme Faction d'Armée : le premier de sa datasheet.
+
+    Les fixtures décrivent une armée par les `FACTION_KEYWORDS` de son unité ; la config, elle,
+    porte une déclaration SCALAIRE. La conversion vit ici et pas dans le moteur — c'est
+    exactement la déduction que `army_faction` refuse de faire.
+    """
+    first = faction_keywords[0]
+    return str(first["keywordId"] if isinstance(first, dict) else first)
+
+
 def _command_state(current_player, *, p1_faction, p2_faction, alive=("1", "2")):
     """Un état minimal pour jouer 08.04 : deux joueurs, une escouade chacun."""
     units = [_unit("1", 1, p1_faction), _unit("2", 2, p2_faction)]
@@ -233,7 +270,18 @@ def _command_state(current_player, *, p1_faction, p2_faction, alive=("1", "2")):
         "turn": 1,
         "phase": "command",
         "current_player": current_player,
-        "config": {"uses_codex_detachment": {"1": True, "2": True}, "gym_training_mode": True},
+        # `army_faction` est DÉCLARÉE, jamais déduite des unités présentes : c'est tout l'objet
+        # du champ (une armée peut inviter une unité d'une autre faction sans changer de Faction
+        # d'Armée). La fixture la déclare donc d'après les mêmes paramètres que les unités —
+        # les cas où les deux DIVERGENT ont leurs tests dédiés.
+        "config": {
+            "uses_codex_detachment": {"1": True, "2": True},
+            "army_faction": {
+                "1": _declared_faction(p1_faction),
+                "2": _declared_faction(p2_faction),
+            },
+            "gym_training_mode": True,
+        },
         "gym_training_mode": True,
         "units": units,
         "unit_by_id": {str(u["id"]): u for u in units},
@@ -547,7 +595,14 @@ def test_le_waaagh_ne_degrade_jamais_une_invulnerable_deja_meilleure():
 
 def test_le_waaagh_ne_touche_pas_les_unites_sans_la_capacite():
     """« units from your army WITH THIS ABILITY » : une unité non-ORKS de l'armée orke n'a rien."""
-    gs = _shoot_state(attacker_faction=ASTARTES, defender_faction=[])
+    # L'armee du joueur 2 est ORKS : elle DECLARE la faction et contient une unite qui la porte.
+    # L'unite testee, elle, n'a aucun mot-cle de faction — c'est l'invitee qui ne gagne rien.
+    gs = _shoot_state(
+        attacker_faction=ASTARTES,
+        defender_faction=[],
+        defender_extra_units=(ORKS,),
+        declared_factions={"1": "ADEPTUS ASTARTES", "2": "ORKS"},
+    )
     call_waaagh(gs, 2)
     sans_capacite = gs["unit_by_id"]["2"]
 
@@ -708,6 +763,72 @@ def test_verrou_champ_de_config_absent_leve():
 
     with pytest.raises(KeyError, match="uses_codex_detachment"):
         oath_wound_roll_bonus(gs, gs["unit_by_id"]["1"], "2")
+
+
+def test_verrou_faction_d_armee_une_unite_invitee_ne_donne_pas_la_capacite():
+    """VERROU : « If your Army Faction is … » se lit dans la DÉCLARATION, pas dans le roster.
+
+    Le défaut réel : le camp tyranide de `scenario_pvp_test.json` invite deux
+    `WolfGuardTerminator` (ADEPTUS ASTARTES), et la Faction d'Armée était calculée comme l'UNION
+    des mots-clés des unités présentes. Résultat mesuré : une désignation d'Oath of Moment
+    réclamée au joueur tyranide à CHAQUE tour, popup compris.
+
+    Les deux moitiés sont verrouillées ensemble parce qu'elles sont la même phrase de règle :
+    l'armée n'a pas la capacité (rien n'est armé), et l'unité invitée ne l'a pas non plus
+    (aucune relance de touche).
+    """
+    gs = _command_state(2, p1_faction=ASTARTES, p2_faction=TYRANIDS)
+    # Un `WolfGuardTerminator` invité chez les tyranides : le mot-clé est là, la Faction
+    # d'Armée déclarée reste TYRANIDS.
+    invitee = _unit("21", 2, ASTARTES)
+    gs["units"].append(invitee)
+    gs["unit_by_id"]["21"] = invitee
+
+    command_handlers.command_step_command_abilities(gs)
+
+    assert gs["pending_oath_selection"] is None
+    assert unit_has_oath_ability(gs, invitee) is False
+
+
+def test_verrou_faction_d_armee_le_meme_roster_declare_astartes_arme_bien_l_oath():
+    """CONTRE-ÉPREUVE du verrou ci-dessus : sans elle, « rien ne s'arme jamais » passerait aussi.
+
+    Même état, même unité invitée — seule la DÉCLARATION change. C'est donc bien elle qui décide.
+    """
+    gs = _command_state(2, p1_faction=TYRANIDS, p2_faction=ASTARTES)
+    porteuse = _unit("21", 2, ASTARTES)
+    gs["units"].append(porteuse)
+    gs["unit_by_id"]["21"] = porteuse
+
+    command_handlers.command_step_command_abilities(gs)
+
+    assert gs["pending_oath_selection"] == 2
+    assert unit_has_oath_ability(gs, porteuse) is True
+
+
+def test_verrou_faction_d_armee_declaree_absente_leve():
+    """VERROU CONFIG, jumeau d'`uses_codex_detachment` : pas de déduction de secours.
+
+    Deviner la Faction d'Armée ferait apparaître ou disparaître une capacité d'armée entière.
+    """
+    gs = _command_state(1, p1_faction=ASTARTES, p2_faction=TYRANIDS)
+    del gs["config"]["army_faction"]
+
+    with pytest.raises(KeyError, match="army_faction"):
+        command_handlers.command_step_command_abilities(gs)
+
+
+def test_verrou_faction_d_armee_declaree_que_personne_ne_porte_leve():
+    """VERROU COQUILLE : une faction déclarée qu'aucune unité ne porte est une faute de frappe.
+
+    Sans cette garde, « ADPETUS ASTARTES » éteindrait l'Oath of Moment de toute une partie en
+    silence — l'échec inverse de celui qu'on corrige, et tout aussi invisible.
+    """
+    gs = _command_state(1, p1_faction=ASTARTES, p2_faction=TYRANIDS)
+    gs["config"]["army_faction"]["1"] = "ADPETUS ASTARTES"
+
+    with pytest.raises(ValueError, match="ADPETUS ASTARTES"):
+        command_handlers.command_step_command_abilities(gs)
 
 
 def test_champ_de_config_par_joueur():

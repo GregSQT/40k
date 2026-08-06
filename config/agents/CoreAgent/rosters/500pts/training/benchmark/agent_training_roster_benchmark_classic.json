@@ -1,5 +1,6 @@
 {
   "roster_id": "agent_training_roster_benchmark_classic",
+  "army_faction": "ADEPTUS ASTARTES",
   "composition": [
     { "unit_type": "Intercessor", "count": 1 },
     { "unit_type": "Hellblaster", "count": 1 },

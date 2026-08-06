@@ -1023,6 +1023,28 @@ class GameStateManager:
                     scenario_data.get("uses_codex_detachment")  # get allowed
                     if isinstance(scenario_data, dict) else None
                 ),
+                # Faction d'Armée DÉCLARÉE par joueur (« If your Army Faction is … »). Jumeau
+                # exact de la clé ci-dessus : donnée d'armée que le moteur ne peut pas déduire
+                # de ce qui est sur la table, transmise telle quelle. C'est `army_faction` qui
+                # lève si elle manque au moment où une capacité de faction la demande.
+                #
+                # DEUX sources, et la priorité n'est pas un confort : un scénario à rosters tire
+                # ses listes au sort à chaque épisode (`training_random`), donc seule la liste
+                # chargée sait quelle est sa faction. Une déclaration de scénario décrirait
+                # l'armée d'un autre épisode.
+                "army_faction": (
+                    {
+                        str(require_key(scenario_roster_info, "agent_player")):
+                            require_key(scenario_roster_info, "agent_army_faction"),
+                        str(require_key(scenario_roster_info, "opponent_player")):
+                            require_key(scenario_roster_info, "opponent_army_faction"),
+                    }
+                    if scenario_roster_info is not None
+                    else (
+                        scenario_data.get("army_faction")  # get allowed
+                        if isinstance(scenario_data, dict) else None
+                    )
+                ),
             }
 
     def _fold_attached_characters(self, basic_units: List[Dict[str, Any]], unit_registry: Any) -> List[Dict[str, Any]]:
@@ -1622,6 +1644,10 @@ class GameStateManager:
             "agent_ref_randomized": agent_ref_randomized,
             "agent_player": controlled_player,
             "opponent_player": opponent_player,
+            # Faction d'Armée de chaque camp, telle que déclarée par la liste effectivement
+            # chargée pour CET épisode — c'est ce que 08.04 lira (`config['army_faction']`).
+            "agent_army_faction": str(require_key(agent_roster_data, "army_faction")),
+            "opponent_army_faction": str(require_key(opponent_roster_data, "army_faction")),
         }
         return agent_units + opponent_units, roster_info
 
@@ -2537,6 +2563,16 @@ class GameStateManager:
                 f"{roster_label} roster file {roster_path} must be JSON object, got {type(roster_data).__name__}"
             )
         require_key(roster_data, "roster_id")
+        # Faction d'Armée (08.04) : elle appartient à la LISTE, pas au scénario. Un scénario
+        # d'entraînement tire ses rosters au sort à chaque épisode (`agent_roster_ref:
+        # "training_random"`) : une déclaration au niveau du scénario décrirait donc l'armée
+        # d'un autre épisode. Exigée ici, à la lecture du fichier qui la porte.
+        army_faction_declared = require_key(roster_data, "army_faction")
+        if not isinstance(army_faction_declared, str) or not army_faction_declared.strip():
+            raise ValueError(
+                f"{roster_label} roster {roster_path} must define 'army_faction' as a non-empty "
+                f"faction keyword (e.g. \"ORKS\"), got {army_faction_declared!r}"
+            )
         composition = require_key(roster_data, "composition")
         if not isinstance(composition, list) or not composition:
             raise ValueError(f"{roster_label} roster {roster_path} must define non-empty 'composition' list")
@@ -3739,21 +3775,30 @@ def unit_faction_keywords(unit: Dict[str, Any]) -> frozenset:
     )
 
 
-def unit_has_waaagh_ability(unit: Dict[str, Any]) -> bool:
+def unit_has_waaagh_ability(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
     """« Units from your army WITH THIS ABILITY » — Waaagh! est porté par le keyword ORKS.
 
-    Le prédicat est par UNITÉ et non par armée : une unité non-ORKS incluse dans une armée orke
-    (alliée, invitée) ne gagne ni la charge après Advance, ni le +1 S/A, ni l'invulnérable.
+    DEUX conditions, et la première est la Faction d'Armée. La capacité est écrite « If your Army
+    Faction is ORKS » : elle n'existe pas du tout dans une armée qui n'est pas orke, donc une
+    unité ORKS invitée dans une armée d'une autre faction ne la porte pas non plus. Le prédicat
+    reste ensuite par UNITÉ : dans une armée orke, une unité non-ORKS (alliée, invitée) ne gagne
+    ni la charge après Advance, ni le +1 S/A, ni l'invulnérable.
     """
-    return WAAAGH_FACTION_KEYWORD in unit_faction_keywords(unit)
+    if WAAAGH_FACTION_KEYWORD not in unit_faction_keywords(unit):
+        return False
+    return army_faction(game_state, int(require_key(unit, "player"))) == WAAAGH_FACTION_KEYWORD
 
 
-def unit_has_oath_ability(unit: Dict[str, Any]) -> bool:
+def unit_has_oath_ability(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
     """« Each time A MODEL WITH THIS ABILITY makes an attack » — porté par ADEPTUS ASTARTES.
 
-    Jumeau exact de `unit_has_waaagh_ability` : même nature de prédicat, même granularité.
+    Jumeau exact de `unit_has_waaagh_ability` : même nature de prédicat, même granularité, même
+    subordination à la Faction d'Armée. C'est ce qui empêche le `WolfGuardTerminator` invité dans
+    une armée TYRANIDS de relancer ses jets de touche — son armée n'a pas d'Oath of Moment.
     """
-    return OATH_FACTION_KEYWORD in unit_faction_keywords(unit)
+    if OATH_FACTION_KEYWORD not in unit_faction_keywords(unit):
+        return False
+    return army_faction(game_state, int(require_key(unit, "player"))) == OATH_FACTION_KEYWORD
 
 
 def army_keywords(game_state: Dict[str, Any], player: int) -> frozenset:
@@ -3788,21 +3833,78 @@ def army_keywords(game_state: Dict[str, Any], player: int) -> frozenset:
     return frozenset(keywords)
 
 
-def army_faction_keywords(game_state: Dict[str, Any], player: int) -> frozenset:
-    """Mots-clés de FACTION seuls — « If your Army Faction is ORKS / ADEPTUS ASTARTES ».
+def army_faction(game_state: Dict[str, Any], player: int) -> str:
+    """Faction d'ARMÉE DÉCLARÉE de ce joueur — « If your Army Faction is ORKS / ADEPTUS ASTARTES ».
 
-    Distinct d'`army_keywords` ci-dessus : cette question-ci porte sur la FACTION D'ARMÉE, une
-    notion qui a sa table dédiée. Les confondre ferait qu'une unité au mot-clé d'unité
-    « orks » — il en existe (`BOYZ`, `SPEED FREEKS`) — déclencherait Waaagh! dans une armée qui
-    n'est pas orke.
+    La Faction d'Armée est UNE déclaration de la liste (« Army Faction: Tyranids » en tête de
+    roster), pas un mot-clé présent quelque part dans l'armée. Cette fonction lisait auparavant
+    l'UNION des `FACTION_KEYWORDS` de toutes les unités du joueur, ce qui est un test différent
+    et FAUX dès qu'une figurine invitée est présente : le roster tyranide de
+    `scenario_pvp_test.json` contient deux `WolfGuardTerminator` (ADEPTUS ASTARTES), et son
+    joueur se voyait donc demander une désignation d'Oath of Moment à chaque tour — mesuré sur
+    4 tours avant correction. Le jumeau valait pour Waaagh! : une unité ORKS invitée aurait fait
+    appeler le Waaagh! par une armée qui n'est pas orke.
+
+    Déclarée et jamais devinée, pour la même raison qu'`uses_codex_detachment` juste en dessous :
+    la valeur n'est pas dérivable de ce qui est sur la table (une armée peut inviter des unités
+    d'une autre faction sans changer de Faction d'Armée), et la deviner ferait apparaître ou
+    disparaître une capacité d'armée entière sans que personne ne l'ait décidé.
+
+    Rendue NORMALISÉE (`_normalize_keyword`) : la config écrit « ADEPTUS ASTARTES » comme les
+    datasheets, les constantes du module s'écrivent `ADEPTUS_ASTARTES`, et une seule des deux
+    formes doit exister au moment de la comparaison.
     """
     player_int = int(player)
-    keywords: set = set()
-    for unit in require_key(game_state, "units"):
-        if int(require_key(unit, "player")) != player_int:
-            continue
-        keywords |= unit_faction_keywords(unit)
-    return frozenset(keywords)
+    config = require_key(game_state, "config")
+    by_player = config.get("army_faction")  # get allowed : absence = clé à exiger ci-dessous
+    if by_player is None:
+        raise KeyError(
+            "config['army_faction'] est absent : les capacites de faction (Waaagh!, Oath of "
+            "Moment) demandent la Faction d'Armee DECLAREE de chaque joueur (« If your Army "
+            "Faction is … »). Declarer le champ dans la config d'armee / de scenario, par ex. "
+            "{\"1\": \"ADEPTUS ASTARTES\", \"2\": \"TYRANIDS\"} — aucune valeur par defaut n'est "
+            "admise, et la deduire des unites presentes est ce qui a produit le defaut corrige ici."
+        )
+    # UNE seule forme acceptée — le dict par joueur — exactement comme `uses_codex_detachment` :
+    # un scénario décrit DEUX armées, et une forme scalaire ferait jouer les deux camps sous la
+    # même Faction d'Armée. Les clés JSON sont des chaînes, d'où la lecture par `str`.
+    if not isinstance(by_player, dict):
+        raise TypeError(
+            f"config['army_faction'] doit etre un dict par joueur "
+            f"(ex. {{\"1\": \"ADEPTUS ASTARTES\", \"2\": \"TYRANIDS\"}}), "
+            f"recu {type(by_player).__name__}"
+        )
+    if str(player_int) not in by_player:
+        raise KeyError(
+            f"config['army_faction'] n'a pas d'entree pour le joueur {player_int} : {by_player!r}"
+        )
+    declared = by_player[str(player_int)]
+    if not isinstance(declared, str) or not declared.strip():
+        raise TypeError(
+            f"config['army_faction'][{str(player_int)!r}] doit etre un mot-cle de faction non "
+            f"vide, recu {declared!r} ({type(declared).__name__})"
+        )
+    normalized = _normalize_keyword(declared)
+    # GARDE ANTI-COQUILLE. Une faction déclarée que PERSONNE ne porte ne peut pas être la Faction
+    # d'Armée de ce joueur : c'est une faute de frappe ou un fichier d'armée mal recopié. Sans
+    # cette garde, « ADPETUS ASTARTES » éteindrait l'Oath of Moment de toute une partie en
+    # silence — l'échec exactement inverse de celui qu'on corrige, et tout aussi invisible.
+    #
+    # Elle ne se prononce QUE si le joueur a des unités. Une armée VIDE n'infirme rien : c'est
+    # l'état normal d'un camp anéanti, et celui du camp adverse d'Endless Duty entre deux vagues
+    # (les unités sont créées à la volée). Lever là serait une panne inventée, pas une coquille.
+    player_units = [
+        unit for unit in require_key(game_state, "units")
+        if int(require_key(unit, "player")) == player_int
+    ]
+    if player_units and not any(
+        normalized in unit_faction_keywords(unit) for unit in player_units
+    ):
+        raise ValueError(
+            f"config['army_faction'][{str(player_int)!r}] declare {declared!r}, mais aucune unite "
+            f"du joueur {player_int} ne porte ce mot-cle de faction."
+        )
+    return normalized
 
 
 def initial_faction_ability_state() -> Dict[str, Any]:
@@ -4045,7 +4147,9 @@ def waaagh_applies_to_unit(game_state: Dict[str, Any], unit: Dict[str, Any]) -> 
     active = _player_flag_map(game_state, "waaagh_active")
     if not any(active.values()):
         return False
-    return unit_has_waaagh_ability(unit) and bool(active[int(require_key(unit, "player"))])
+    return unit_has_waaagh_ability(game_state, unit) and bool(
+        active[int(require_key(unit, "player"))]
+    )
 
 
 def effective_invul_save(
@@ -4096,7 +4200,7 @@ def unit_is_oath_target_of(
     attacker_player = int(require_key(attacker_unit, "player"))
     if oath_target_id(game_state, attacker_player) != str(target_unit_id):
         return False
-    return unit_has_oath_ability(attacker_unit)
+    return unit_has_oath_ability(game_state, attacker_unit)
 
 
 def oath_wound_roll_bonus(

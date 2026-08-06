@@ -1,5 +1,6 @@
 {
   "roster_id": "agent_training_roster_benchmark_fly",
+  "army_faction": "ADEPTUS ASTARTES",
   "composition": [
     { "unit_type": "AssaultIntercessorJumpPack", "count": 1 },
     { "unit_type": "InceptorBolter", "count": 1 },

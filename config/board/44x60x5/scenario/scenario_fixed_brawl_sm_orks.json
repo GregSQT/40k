@@ -1,5 +1,6 @@
 {
   "uses_codex_detachment": { "1": true, "2": true },
+  "army_faction": {"1": "ADEPTUS ASTARTES", "2": "ORKS"},
   "primary_objectives": [
     "objectives_control"
   ],

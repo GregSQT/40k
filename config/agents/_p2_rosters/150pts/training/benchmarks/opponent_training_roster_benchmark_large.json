@@ -1,5 +1,6 @@
 {
   "roster_id": "opponent_training_roster_benchmark_large",
+  "army_faction": "TYRANIDS",
   "composition": [
     { "unit_type": "ScreamerKiller", "count": 1 },
     { "unit_type": "Carnifex", "count": 1 },

@@ -461,6 +461,10 @@ class W40KEngine(gym.Env):
                 # en depend (`game_state.uses_codex_detachment`) — la ou le message peut dire
                 # de quelle armee il s'agit, plutot que de bloquer tous les scenarios orks.
                 "uses_codex_detachment": scenario_result.get("uses_codex_detachment"),
+                # Faction d'Armee DECLAREE par joueur, meme nature et meme regime que la cle
+                # ci-dessus : une donnee de scenario que le moteur ne deduit pas. Son absence
+                # leve dans `game_state.army_faction`, au moment ou 08.04 la demande.
+                "army_faction": scenario_result.get("army_faction"),
             }
             self._scenario_loaded_for_controlled_player = int(require_key(self.config, "controlled_player"))
         else:
@@ -3670,7 +3674,7 @@ class W40KEngine(gym.Env):
             if int(require_key(entry, "player")) != int(player):
                 continue
             unit = self._get_unit_by_id(squad_id)
-            if unit is None or not unit_has_waaagh_ability(unit):
+            if unit is None or not unit_has_waaagh_ability(self.game_state, unit):
                 continue
             socle = socle_from_cache_entry(entry)
             # Socles des DEUX camps précalculés : `_ranged_squad_edge_distance` reconstruisait
@@ -7102,6 +7106,8 @@ class W40KEngine(gym.Env):
         # scénario change d'armée, donc la clause de détachement d'Oath doit suivre. Sans cette
         # ligne, un scénario chargé en second garderait la valeur du précédent.
         self.config["uses_codex_detachment"] = scenario_result.get("uses_codex_detachment")
+        # Meme JUMEAU pour la Faction d'Armee : la rotation change d'armee, donc de faction.
+        self.config["army_faction"] = scenario_result.get("army_faction")
         self._scenario_primary_objective = primary_objective_config
         self._scenario_roster_info = scenario_roster_info
         # Taille de bataille (points) du nouveau scénario — plafond des réserves 20.01. Doit

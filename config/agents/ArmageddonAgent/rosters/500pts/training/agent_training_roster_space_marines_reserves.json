@@ -1,5 +1,6 @@
 {
   "roster_id": "agent_training_roster_space_marines_reserves",
+  "army_faction": "ADEPTUS ASTARTES",
   "composition": [
     {
       "unit_type": "VanguardVeteranSquadJumpPack",

@@ -38,6 +38,9 @@ MELEE_SCENARIO = {
     # Inerte ici (roster 100 % Tyranids) mais declare comme dans tout scenario : la clause de
     # detachement d'Oath of Moment est OBLIGATOIRE des qu'une armee ADEPTUS ASTARTES entre.
     "uses_codex_detachment": {"1": True, "2": True},
+    # Faction d'Armee des deux camps : ce scenario est 100 % Tyranids des deux cotes. Champ
+    # OBLIGATOIRE — 08.04 le lit a chaque phase de commandement, quelle que soit la faction.
+    "army_faction": {"1": "TYRANIDS", "2": "TYRANIDS"},
     "board_ref": "44x60x5",
     "terrain_ref": "terrain-train-01.json",
     "deployment_type": "fixed",
