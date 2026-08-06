@@ -75,3 +75,18 @@ def test_default_terrain_supplies_objectives_and_deployment_zones():
     )
     assert any(area.get("objective") for area in terrain["terrain"]), "aucune aire objective:true"
     assert terrain["deployment_zones"], "aucune deployment_zones dans le terrain"
+
+
+def test_cli_generation_defaults_match_the_shared_module(module):
+    """Le script et `train.py --rule-checker` fabriquent le MEME artefact.
+
+    Les defauts vivent en deux endroits — le parseur ici, les constantes du module partage la-bas.
+    Deux valeurs differentes produiraient deux plateaux selon le point d'entree, sans que rien ne
+    le signale : le scenario porte le board, pas le lanceur.
+    """
+    from shared import rule_checker_scenarios
+
+    parser = module._build_arg_parser()
+    assert parser.get_default("board_ref") == rule_checker_scenarios.DEFAULT_BOARD_REF
+    assert parser.get_default("terrain_ref") == rule_checker_scenarios.DEFAULT_TERRAIN_REF
+    assert parser.get_default("scale") == rule_checker_scenarios.DEFAULT_SCALE

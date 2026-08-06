@@ -5,6 +5,7 @@ ai/train.py - Main training script following AI_INSTRUCTIONS.md exactly
 """
 
 import os
+import pathlib
 import sys
 import io
 import argparse
@@ -1177,54 +1178,32 @@ def _apply_wall_ref_weighting(
     return weighted_scenario_list
 
 
-def _load_rule_checker_scenarios(project_root_path: str) -> List[str]:
+def _load_rule_checker_scenarios(project_root_path: str, agent_key: str) -> List[str]:
+    """Regenere les scenarios rule-checker et rend leurs chemins.
+
+    GENERES A CHAQUE LANCEMENT, jamais lus d'un depot : leur nombre est le CARRE du nombre de
+    types d'unites a regle implementee (18 types -> 324 fichiers en mars 2026, 52 -> 2704), et ils
+    derivent entierement des `RULES_STATUS` des rosters. Les versionner faisait pourrir des
+    milliers d'artefacts derives, devenus illisibles par le moteur sans que rien ne le dise. Le
+    dossier produit est ignore par git.
     """
-    Load rule-checker scenario paths from config/rule_checker/manifest.json.
-    Strict mode: raises if the manifest or scenario list is missing or invalid.
-    """
-    manifest_path = os.path.join(project_root_path, "config", "rule_checker", "manifest.json")
-    if not os.path.isfile(manifest_path):
-        raise FileNotFoundError(
-            f"--rule-checker requires manifest file: {manifest_path}. "
-            "Generate it first with: python scripts/roster_matchup_stats.py --agent <AGENT> --rule-checker"
-        )
-    with open(manifest_path, "r", encoding="utf-8") as f:
-        manifest = json.load(f)
-    if not isinstance(manifest, dict):
-        raise TypeError(
-            f"Rule-checker manifest must be JSON object (got {type(manifest).__name__})"
-        )
-    raw_paths = require_key(manifest, "scenario_paths")
-    if not isinstance(raw_paths, list):
-        raise TypeError(
-            f"rule_checker manifest key 'scenario_paths' must be list (got {type(raw_paths).__name__})"
-        )
-    if len(raw_paths) == 0:
-        raise ValueError("rule_checker manifest contains no scenarios")
+    from shared import rule_checker_scenarios
 
-    resolved_paths: List[str] = []
-    missing_paths: List[str] = []
-    for raw_path in raw_paths:
-        if not isinstance(raw_path, str) or not raw_path.strip():
-            raise ValueError(f"Invalid scenario path in rule_checker manifest: {raw_path!r}")
-        scenario_path = raw_path.strip()
-        if not os.path.isabs(scenario_path):
-            scenario_path = os.path.join(project_root_path, scenario_path)
-        if not os.path.isfile(scenario_path):
-            missing_paths.append(scenario_path)
-            continue
-        resolved_paths.append(scenario_path)
-
-    if missing_paths:
-        raise FileNotFoundError(
-            "rule_checker manifest references missing scenarios. "
-            f"First missing files: {missing_paths[:5]}"
-        )
-
-    deduped = sorted(set(resolved_paths))
-    if len(deduped) == 0:
-        raise ValueError("rule_checker scenario list is empty after validation")
-    return deduped
+    # Les trois controles qui vivaient ici (fichiers presents, doublons, liste vide) validaient un
+    # MANIFESTE versionne, qui pouvait mentir. Ils n'ont plus d'objet face a un generateur : il
+    # vient d'ecrire ces fichiers et rend leurs chemins, `write_text` leve si l'ecriture echoue,
+    # les noms sont uniques par `enumerate`, et `select_units` leve deja quand la selection est
+    # vide. Les garder faisait 2704 `os.path.isfile` sur ce qu'on venait d'ecrire.
+    root = pathlib.Path(project_root_path)
+    # Les parametres de la DERNIERE generation, jamais des defauts en dur : sinon un jeu produit a
+    # 500pts par scripts/roster_matchup_stats.py serait double d'un jeu 100pts, et l'entrainement
+    # tournerait sur un autre plateau que celui demande, sans un mot.
+    params = rule_checker_scenarios.resolve_params(root)
+    print(
+        f"🧪 Rule-checker: {params.scale} / {params.board_ref} / {params.terrain_ref} "
+        "(parametres de la derniere generation)"
+    )
+    return sorted(rule_checker_scenarios.generate(root, agent_key=agent_key, params=params))
 
 
 # Multi-agent orchestration imports
@@ -4292,7 +4271,7 @@ def main():
     parser.add_argument("--mode", type=str, default=None,
                        help="Force training device: CPU or GPU (case-insensitive). If omitted, auto-selects based on network size and GPU availability.")
     parser.add_argument("--rule-checker", action="store_true",
-                       help="Train only on scenarios listed in config/rule_checker/manifest.json (no implicit scenario list).")
+                       help="Train only on rule-checker scenarios, REGENERES au lancement dans config/rule_checker/ depuis les RULES_STATUS des rosters (no implicit scenario list).")
     parser.add_argument("--debug", action="store_true",
                        help="Enable debug console output (verbose logging)")
     parser.add_argument("--param", action="append", nargs=2, metavar=("KEY", "VALUE"),
@@ -4459,10 +4438,10 @@ def main():
             # fixed) via --eval --step. Voir evaluate_against_bots(materialize_eval_refs).
             explicit_scenario_raw = False
             if args.rule_checker:
-                eval_scenario_list_override = _load_rule_checker_scenarios(project_root)
+                eval_scenario_list_override = _load_rule_checker_scenarios(project_root, args.agent)
                 scenario_file = eval_scenario_list_override[0]
                 print(
-                    f"📋 Rule-checker test-only mode: {len(eval_scenario_list_override)} scenario(s) from manifest"
+                    f"📋 Rule-checker test-only mode: {len(eval_scenario_list_override)} scenario(s) generes"
                 )
                 print(f"📋 Using first rule-checker scenario for env init: {os.path.basename(scenario_file)}")
             elif args.scenario and args.scenario.endswith(".json"):
@@ -4697,8 +4676,8 @@ def main():
             # Voir la trace au-dessus de resolve_turn_step_limit.
 
             if args.rule_checker:
-                scenario_list = _load_rule_checker_scenarios(project_root)
-                print(f"🧪 Rule-checker mode: {len(scenario_list)} scenario(s) from config/rule_checker/manifest.json")
+                scenario_list = _load_rule_checker_scenarios(project_root, args.agent)
+                print(f"🧪 Rule-checker mode: {len(scenario_list)} scenario(s) generes dans config/rule_checker/")
                 for scenario_path in scenario_list:
                     print(f"   - {os.path.basename(scenario_path)}")
 

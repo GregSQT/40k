@@ -153,18 +153,106 @@ def test_normalize_and_training_hard_weights() -> None:
     assert weighted.count("scenario_alpha.json") >= 2
 
 
-def test_load_rule_checker_scenarios(tmp_path: Path) -> None:
-    manifest_dir = tmp_path / "config" / "rule_checker"
-    manifest_dir.mkdir(parents=True, exist_ok=True)
-    s1 = tmp_path / "s1.json"
-    s2 = tmp_path / "s2.json"
-    s1.write_text("{}", encoding="utf-8")
-    s2.write_text("{}", encoding="utf-8")
-    (manifest_dir / "manifest.json").write_text(
-        json.dumps({"scenario_paths": [str(s1), str(s2)]}), encoding="utf-8"
+def test_load_rule_checker_scenarios_generates_instead_of_reading_a_committed_manifest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`--rule-checker` FABRIQUE ses scenarios ; il ne lit plus un dossier versionne.
+
+    Les artefacts etaient commites et ont pourri : ils portaient encore `objectives_ref`, refuse
+    par le moteur, longtemps apres la correction du generateur. La selection est doublee (2 types)
+    pour que le test construise son echantillon au lieu de balayer les rosters reels.
+    """
+    from shared import rule_checker_scenarios
+
+    monkeypatch.setattr(
+        rule_checker_scenarios, "select_units",
+        lambda root: (["Intercessor", "Termagant"], [], []),
     )
-    loaded = train._load_rule_checker_scenarios(str(tmp_path))
-    assert loaded == sorted([str(s1), str(s2)])
+    loaded = train._load_rule_checker_scenarios(str(tmp_path), "CoreAgent")
+
+    # 2 types -> 2x2 matchups : le carre est la raison pour laquelle ils ne sont plus versionnes.
+    assert len(loaded) == 4
+    for path in loaded:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+        assert payload["board_ref"] == rule_checker_scenarios.DEFAULT_BOARD_REF
+        assert payload["uses_codex_detachment"] == {"1": True, "2": True}
+        assert "objectives_ref" not in payload, "cle legacy refusee par le moteur"
+
+    manifeste = json.loads((Path(loaded[0]).parent / "manifest.json").read_text(encoding="utf-8"))
+    assert manifeste["scenario_count"] == 4
+    assert manifeste["agent"] == "CoreAgent"
+
+
+def test_rule_checker_regeneration_destroys_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regenerer pendant qu'un training rule-checker tourne ne doit RIEN effacer.
+
+    Le moteur rouvre le fichier de scenario a chaque episode : supprimer les fichiers du run
+    precedent tuait le run en cours en `FileNotFoundError`. Ici la selection RETRECIT — le cas qui
+    laissait des orphelins et justifiait la purge — et les fichiers d'avant doivent survivre.
+    """
+    from shared import rule_checker_scenarios
+
+    monkeypatch.setattr(
+        rule_checker_scenarios, "select_units",
+        lambda root: (["Intercessor", "Termagant", "Hormagaunt"], [], []),
+    )
+    avant = train._load_rule_checker_scenarios(str(tmp_path), "CoreAgent")
+    assert len(avant) == 9
+
+    monkeypatch.setattr(
+        rule_checker_scenarios, "select_units", lambda root: (["Intercessor"], [], [])
+    )
+    apres = train._load_rule_checker_scenarios(str(tmp_path), "CoreAgent")
+    assert len(apres) == 1
+    assert set(avant).isdisjoint(apres), "les deux jeux doivent vivre dans des dossiers distincts"
+    for path in avant:
+        assert Path(path).is_file(), f"fichier detruit sous un lecteur potentiel : {path}"
+
+
+def test_rule_checker_reuses_an_identical_set_without_rewriting_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Meme selection + memes parametres = meme jeu : reconnu, rendu tel quel."""
+    from shared import rule_checker_scenarios
+
+    monkeypatch.setattr(
+        rule_checker_scenarios, "select_units", lambda root: (["Intercessor"], [], [])
+    )
+    premier = train._load_rule_checker_scenarios(str(tmp_path), "CoreAgent")
+    horodatage = Path(premier[0]).stat().st_mtime_ns
+    second = train._load_rule_checker_scenarios(str(tmp_path), "CoreAgent")
+
+    assert second == premier
+    assert Path(premier[0]).stat().st_mtime_ns == horodatage, "jeu identique reecrit inutilement"
+
+
+def test_rule_checker_keeps_the_parameters_of_the_last_explicit_generation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`train.py` ne reimpose pas ses defauts sur un jeu genere a d'autres parametres.
+
+    Sans cela : generation a 500pts par le script, puis `--rule-checker` reecrit tout au board par
+    defaut et l'entrainement tourne sur un autre plateau, sans un mot.
+    """
+    from shared import rule_checker_scenarios
+
+    monkeypatch.setattr(
+        rule_checker_scenarios, "select_units", lambda root: (["Intercessor"], [], [])
+    )
+    rule_checker_scenarios.generate(
+        tmp_path, agent_key="CoreAgent",
+        params=rule_checker_scenarios.GenerationParams(
+            scale="500pts", board_ref="44x60x10", terrain_ref="terrain-train-02.json"
+        ),
+    )
+
+    repris = train._load_rule_checker_scenarios(str(tmp_path), "CoreAgent")
+    payload = json.loads(Path(repris[0]).read_text(encoding="utf-8"))
+    assert payload["scale"] == "500pts"
+    assert payload["board_ref"] == "44x60x10"
+    assert payload["terrain_ref"] == "terrain-train-02.json"
 
 
 def test_build_agent_model_path_and_progress_width(monkeypatch: pytest.MonkeyPatch) -> None:

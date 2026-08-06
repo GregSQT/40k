@@ -29,6 +29,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 #: scenario : il est present dans les trois, et absent de tout autre dict de ces fichiers.
 SCENARIO_WRITERS = (
     "scripts/roster_matchup_stats.py",
+    "shared/rule_checker_scenarios.py",
     "scripts/build_holdout_benchmark.py",
     "scripts/smoke_t5_bare.py",
 )

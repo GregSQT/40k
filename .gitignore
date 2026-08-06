@@ -226,3 +226,8 @@ frontend/src/roster/pdf/
 .claude/worktrees/
 
 frontend/wasm-los/target/
+
+# Scenarios rule-checker : artefacts DERIVES des RULES_STATUS des rosters, regeneres a chaque
+# `--rule-checker` (leur nombre est le carre du nombre de types retenus). Cf.
+# shared/rule_checker_scenarios.py.
+config/rule_checker/

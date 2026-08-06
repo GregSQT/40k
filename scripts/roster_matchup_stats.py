@@ -350,172 +350,30 @@ def _build_scenario_template(scale: str, board_ref: str, terrain_ref: str) -> Di
     }
 
 
-def _extract_rule_checker_units() -> Tuple[List[str], List[Dict[str, Any]], List[Dict[str, Any]]]:
-    """
-    Return unit_type names where RULES_STATUS has at least one entry == 2.
-
-    Returns:
-      - selected unit_type list
-      - selected details rows
-      - rejected audit rows
-    """
-    units_root = PROJECT_ROOT / "frontend" / "src" / "roster"
-    if not units_root.exists():
-        raise FileNotFoundError(f"Units directory not found: {units_root}")
-
-    selected_units: List[str] = []
-    selected_details: List[Dict[str, Any]] = []
-    rejected_rows: List[Dict[str, Any]] = []
-    class_pattern = re.compile(r"export\s+class\s+(\w+)")
-    rules_status_pattern = re.compile(
-        r"static\s+RULES_STATUS(?:\s*:\s*[^=]+)?\s*=\s*\{([\s\S]*?)\};",
-        re.MULTILINE,
-    )
-    rules_status_entry_pattern = re.compile(r"([A-Za-z0-9_]+)\s*:\s*([0-9]+)")
-
-    for ts_file in sorted(units_root.glob("**/units/*.ts")):
-        content = ts_file.read_text(encoding="utf-8")
-        class_match = class_pattern.search(content)
-        unit_type = class_match.group(1) if class_match else ts_file.stem
-        status_match = rules_status_pattern.search(content)
-        rel_path = str(ts_file.relative_to(PROJECT_ROOT)).replace("\\", "/")
-
-        if status_match is None:
-            rejected_rows.append(
-                {
-                    "unit_type": unit_type,
-                    "file": rel_path,
-                    "reason": "RULES_STATUS missing",
-                }
-            )
-            continue
-
-        status_block = status_match.group(1)
-        entries = rules_status_entry_pattern.findall(status_block)
-        if len(entries) == 0:
-            rejected_rows.append(
-                {
-                    "unit_type": unit_type,
-                    "file": rel_path,
-                    "reason": "RULES_STATUS empty or unparsable",
-                }
-            )
-            continue
-
-        implemented_rule_keys = sorted(
-            [rule_key for rule_key, raw_value in entries if int(raw_value) == 2]
-        )
-        if len(implemented_rule_keys) > 0:
-            selected_units.append(unit_type)
-            selected_details.append(
-                {
-                    "unit_type": unit_type,
-                    "file": rel_path,
-                    "implemented_rules": implemented_rule_keys,
-                }
-            )
-        else:
-            rejected_rows.append(
-                {
-                    "unit_type": unit_type,
-                    "file": rel_path,
-                    "reason": "RULES_STATUS has no value == 2",
-                }
-            )
-
-    selected_sorted = sorted(set(selected_units))
-    if not selected_sorted:
-        raise ValueError(
-            "No unit found with at least one RULES_STATUS entry == 2 in frontend/src/roster/**/units/*.ts"
-        )
-    return selected_sorted, selected_details, rejected_rows
-
-
 def _generate_rule_checker_artifacts(
     agent_key: str, scale: str, board_ref: str, terrain_ref: str
 ) -> None:
+    """Genere les artefacts rule-checker et rend compte a l'ecran.
+
+    La FABRICATION vit dans `shared/rule_checker_scenarios.py`, partagee avec
+    `ai/train.py --rule-checker` qui les regenere au lancement : deux fabricants du meme
+    artefact divergeraient, et c'est deja arrive (les fichiers commites portaient encore
+    `objectives_ref`, refuse par le moteur, longtemps apres la correction du generateur).
     """
-    Generate dedicated rule-checker scenarios + manifest in config/rule_checker.
-    """
-    from ai.unit_registry import UnitRegistry
+    from shared import rule_checker_scenarios
 
-    output_dir = PROJECT_ROOT / "config" / "rule_checker"
-    scenarios_dir = output_dir / "scenarios"
-    scenarios_dir.mkdir(parents=True, exist_ok=True)
-
-    selected_units, selected_details, rejected_rows = _extract_rule_checker_units()
-    unit_registry = UnitRegistry()
-
-    # Validate unit types exist in runtime registry.
-    missing_in_registry = [u for u in selected_units if u not in unit_registry.units]
-    if missing_in_registry:
-        raise KeyError(
-            f"Selected unit_type not found in UnitRegistry: {missing_in_registry}"
-        )
-
-    scenario_paths: List[str] = []
-    scenario_index = 1
-    for p1_unit in selected_units:
-        for p2_unit in selected_units:
-            scenario_name = f"scenario_rule_checker_bot-{scenario_index:03d}.json"
-            scenario_path = scenarios_dir / scenario_name
-            # Meme contrat V11 que _build_scenario_template : murs + objectifs + zones de
-            # deploiement viennent du terrain_ref. Les anciennes refs (walls-01.json /
-            # objectives-01.json) n'existent nulle part sous config/board/, et
-            # `objectives_ref` est rejetee par le moteur
-            # (`GameStateManager.load_units_from_scenario`).
-            scenario_payload = {
-                "deployment_type": "active",
-                # Clause de detachement d'Oath of Moment : champ OBLIGATOIRE des qu'une armee
-                # ADEPTUS ASTARTES est en jeu (`game_state.uses_codex_detachment` leve sinon), et
-                # ces scenarios croisent tous les rosters, marines compris.
-                "uses_codex_detachment": {"1": True, "2": True},
-                "scale": scale,
-                "primary_objectives": ["objectives_control"],
-                "board_ref": board_ref,
-                "terrain_ref": terrain_ref,
-                "units": [
-                    {"id": 1, "unit_type": p1_unit, "player": 1},
-                    {"id": 2, "unit_type": p1_unit, "player": 1},
-                    {"id": 101, "unit_type": p2_unit, "player": 2},
-                    {"id": 102, "unit_type": p2_unit, "player": 2},
-                ],
-            }
-            scenario_path.write_text(
-                json.dumps(scenario_payload, indent=2, ensure_ascii=False),
-                encoding="utf-8",
-            )
-            scenario_paths.append(str(scenario_path))
-            scenario_index += 1
-
-    manifest = {
-        "mode": "rule_checker",
-        "agent": agent_key,
-        "scale": scale,
-        "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "rule_filter": {
-            "mode": "any_rule_status_equals",
-            "required_value": 2,
-        },
-        "selected_unit_types": selected_units,
-        "selected_details": selected_details,
-        "scenario_count": len(scenario_paths),
-        "scenario_paths": scenario_paths,
-    }
-    manifest_path = output_dir / "manifest.json"
-    manifest_path.write_text(
-        json.dumps(manifest, indent=2, ensure_ascii=False),
-        encoding="utf-8",
+    scenario_paths = rule_checker_scenarios.generate(
+        PROJECT_ROOT,
+        agent_key=agent_key,
+        params=rule_checker_scenarios.GenerationParams(
+            scale=scale, board_ref=board_ref, terrain_ref=terrain_ref
+        ),
     )
-    rejected_path = output_dir / "audit_rejected.json"
-    rejected_path.write_text(
-        json.dumps(rejected_rows, indent=2, ensure_ascii=False),
-        encoding="utf-8",
-    )
+    run_dir = Path(scenario_paths[0]).parent
     print(f"✅ Rule-checker scenarios generated: {len(scenario_paths)}")
-    print(f"📁 Output dir: {output_dir}")
-    print(f"🧾 Manifest: {manifest_path}")
-    print(f"🧾 Rejected audit: {rejected_path}")
+    print(f"📁 Output dir: {run_dir}")
+    print(f"🧾 Manifest: {run_dir / 'manifest.json'}")
+    print(f"🧾 Rejected audit: {run_dir / 'audit_rejected.json'}")
 
 
 def _run_single_episode(
