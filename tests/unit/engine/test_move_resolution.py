@@ -120,11 +120,15 @@ class TestMovementBFSResolution:
         3 subhexes EFFECTIFS que l'unité au sol — sans quoi on ne comparerait pas la traversée mais
         deux budgets différents. (Avant la conformité 21.03, l'unité IA traversait avec MOVE=3 sans
         rien payer : c'est précisément le défaut corrigé.)
+
+        Depuis `L6` la déclaration est un CHOIX, y compris pour le siège d'entraînement : elle est
+        donc posée explicitement ici, comme n'importe quel autre état de départ du test.
         """
         wall_ring = {(5, 9), (6, 10), (6, 11), (5, 11), (4, 11), (4, 10)}
 
         units_fly = [_unit(1, 1, 5, 10, move=5, fly=True)]
         gs_fly = _make_game_state(units_fly, wall_hexes=wall_ring)
+        gs_fly["units_took_to_skies"] = {"1"}
         result_fly = movement_build_valid_destinations_pool(gs_fly, "1")
 
         units_ground = [_unit(2, 1, 5, 10, move=3, fly=False)]

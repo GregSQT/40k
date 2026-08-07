@@ -383,7 +383,8 @@ def self_model_bin_index(field: str) -> int:
 
 #: Types de points de décision exposés à l'agent, ordre FIGÉ du one-hot de contexte.
 #: `rule_choice` est le pilote P3 point 0 ; `waaagh_call` est la décision binaire d'appel du
-#: Waaagh! (chantier 03). Les tranches suivantes (allocation de pertes…) s'ajoutent ICI, jamais
+#: Waaagh! (chantier 03) ; `fly_declaration` est la déclaration « take to the skies » 21.03
+#: (élément `L6`). Les tranches suivantes (allocation de pertes…) s'ajoutent ICI, jamais
 #: en dupliquant le mécanisme.
 #:
 #: ✅ Ajouter un type ne change plus `obs_size` : le one-hot fait `AGENT_DECISION_TYPE_SLOTS`
@@ -399,7 +400,13 @@ def self_model_bin_index(field: str) -> int:
 #: appelle, `CHOICE_1` passe, ordre CONTRACTUEL et stable. C'est suffisant ici et seulement ici,
 #: parce que l'ensemble des candidats est FIXE — contrairement à `rule_choice`, où il varie
 #: d'une unité à l'autre et où l'index seul ne voudrait rien dire.
-AGENT_DECISION_TYPE_IDS: Tuple[str, ...] = ("rule_choice", "waaagh_call")
+#:
+#: ⚠️ `fly_declaration` (`L6`) est dans le MÊME cas que `waaagh_call` et pour la même raison :
+#: « take to the skies » n'est accordé par aucune datasheet — c'est le mot-clé FLY qui l'ouvre,
+#: et 21.03 qui en fixe le prix. Ses deux candidats portent donc un `effect_ids` VIDE, et ce qui
+#: les distingue est le couple (type, INDEX) : `CHOICE_0` déclare le vol, `CHOICE_1` y renonce.
+#: Ensemble de candidats FIXE, ordre CONTRACTUEL — même justification que ci-dessus.
+AGENT_DECISION_TYPE_IDS: Tuple[str, ...] = ("rule_choice", "waaagh_call", "fly_declaration")
 
 #: Nombre MAXIMAL de candidats exposés à l'agent — le K de `CHOICE_0..K-1`
 #: (`macro_intents.CHOICE_SLOTS`). Il vaut 6, l'alignement retenu par §9.3 sur les 6 slots

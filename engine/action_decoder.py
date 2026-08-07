@@ -58,6 +58,9 @@ from engine.macro_intents import (
     decode_zone_intent_action,
 )
 from engine.agent_decision import read_pending_agent_decision
+# 21.03 « take to the skies » (V11 §0.48 `L6`) : le point de choix s'ouvre AVANT le pool, puisque
+# la declaration en change le budget et la traversee. Importe ici, module de la table de phase.
+from engine.phase_handlers.movement_handlers import arm_fly_declaration_decision
 
 # Game phases - single source of truth for phase count
 GAME_PHASES = ["deployment", "command", "move", "shoot", "charge", "fight"]
@@ -300,6 +303,18 @@ class ActionDecoder:
     # couche plus haut, dans `validate_action_against_mask`.
     # ─────────────────────────────────────────────────────────────────────────────────────────
 
+    def _agent_decision_mask(self, decision: Dict[str, Any]) -> np.ndarray:
+        """Masque d'une `pending_agent_decision` : ses `CHOICE_i`, et rien d'autre.
+
+        UN seul constructeur pour les deux sites qui rendent ce masque — la décision déjà en
+        attente à l'entrée, et celle que l'armement de la déclaration de vol vient de poser. Deux
+        copies auraient pu diverger sans que rien ne lève (même longueur de masque).
+        """
+        mask = np.zeros(self.total_action_size, dtype=bool)
+        for option_index in range(len(require_key(decision, "options"))):
+            mask[CHOICE_BASE + option_index] = True
+        return mask
+
     def get_squad_action_mask_and_eligible_units(
         self, game_state: Dict[str, Any]
     ) -> Tuple[np.ndarray, List[Dict[str, Any]]]:
@@ -318,9 +333,7 @@ class ActionDecoder:
         # éligibles est vide : l'activation en cours reprendra APRÈS la décision.
         pending_decision = read_pending_agent_decision(game_state)
         if pending_decision is not None:
-            for option_index in range(len(require_key(pending_decision, "options"))):
-                mask[CHOICE_BASE + option_index] = True
-            return mask, []
+            return self._agent_decision_mask(pending_decision), []
 
         # DÉSIGNATION D'OATH OF MOMENT (chantier 03) — même exclusivité que ci-dessus, pour la
         # même raison : le moteur est arrêté au début de la phase de commandement sur un choix
@@ -415,6 +428,26 @@ class ActionDecoder:
                 mask[action_int] = True
             mask[SQUAD_ACTION_WAIT] = True
             return mask, eligible_units
+
+        # TAKE TO THE SKIES (21.03, V11 §0.48 élément `L6`) — POINT DE CHOIX, posé ICI et pas
+        # ailleurs : la déclaration change le budget (-2") ET la traversée, donc le POOL que les
+        # lignes suivantes construisent. La poser après serait la poser trop tard ; la trancher
+        # par une constante moteur (ce que faisait §0.49 point 5) revenait à décider à la place de
+        # l'agent. C'est le moment exact où le moteur choisissait — c'est donc là que le choix
+        # s'ouvre. Le siège humain n'y passe jamais (il a le toggle de l'UI, cf.
+        # `fly_declaration_decision_is_due`), et l'escouade en réserves non plus : son ingress
+        # move (20.04) est une mise en place, traitée juste au-dessus.
+        #
+        # Le moteur REND LA MAIN comme le fait 08.04 pour le Waaagh! : masque exclusivement
+        # `CHOICE_*`, pool vide, l'activation reprendra au step suivant avec la déclaration écrite.
+        if arm_fly_declaration_decision(game_state, squad_id):
+            armed_decision = read_pending_agent_decision(game_state)
+            if armed_decision is None:
+                raise RuntimeError(
+                    "arm_fly_declaration_decision a rendu True sans poser de decision — "
+                    "le masque n'aurait aucune action a ouvrir."
+                )
+            return self._agent_decision_mask(armed_decision), []
 
         advance_roll: Optional[int] = None
         move_cell_map = None

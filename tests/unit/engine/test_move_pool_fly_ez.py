@@ -101,9 +101,11 @@ def _make_engine() -> W40KEngine:
         eng = W40KEngine(config=build_engine_config(config))
     eng.reset()
     eng.game_state["phase"] = "move"
-    # Unité pilotée par le modèle : `took_to_the_skies` déclare alors le vol systématiquement
-    # (politique moteur 21.03), donc le pool emprunte bien le chemin FLY — celui qu'on teste.
     eng.game_state["gym_training_mode"] = True
+    # 21.03 : la traversée est la contrepartie d'une DÉCLARATION, y compris pour le siège piloté
+    # par le modèle depuis `L6` (`fly_declaration`). On la pose donc explicitement, sans quoi le
+    # pool emprunterait le chemin AU SOL et le test n'exercerait pas ce qu'il annonce.
+    eng.game_state["units_took_to_skies"] = {"1"}
     build_enemy_adjacent_hexes(eng.game_state, 1)
     build_enemy_adjacent_hexes(eng.game_state, 2)
     return eng
