@@ -905,3 +905,106 @@ def test_the_choice_mechanism_survives_the_first_episode():
     assert emitted == [True, True, True], (
         f"le prompt n'est pas ré-émis à chaque épisode : {emitted}"
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# `consume_pending_agent_decision` — le préambule COMMUN à tout `apply_*_decision`
+#
+# Il est arrivé avec la mutualisation (2026-08-07) et n'avait aucun test qui le nomme : ses
+# trois contrôles et son effacement n'étaient couverts qu'indirectement, type par type. Ce qui
+# suit les verrouille UNE fois, là où ils vivent — les futurs types en héritent.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _decision_state(**overrides: Any) -> Dict[str, Any]:
+    """`game_state` réduit au strict nécessaire : le mécanisme ne lit que la décision."""
+    state: Dict[str, Any] = {"pending_agent_decision": None}
+    state.update(overrides)
+    return state
+
+
+def _pose(game_state: Dict[str, Any], *, decision_type: str = "waaagh_call",
+          player: int = 1, unit_id: str = "player_1") -> Dict[str, Any]:
+    return set_pending_agent_decision(
+        game_state,
+        decision_type=decision_type,
+        player=player,
+        unit_id=unit_id,
+        options=[
+            {"label": "Oui", "effect_ids": (), "declines": False, "payload": {"call": True}},
+            {"label": "Non", "effect_ids": (), "declines": True, "payload": {"call": False}},
+        ],
+    )
+
+
+def test_consume_returns_the_decision_and_clears_it():
+    """Le contrat central : rendre la décision ET l'effacer, en un seul geste.
+
+    Rendre sans effacer laisserait le moteur ARRÊTÉ sur une décision déjà jouée — le masque ne
+    rouvrirait que des `CHOICE_i` et la partie ne repartirait jamais. C'est précisément pour
+    qu'aucun `apply_*` ne puisse oublier l'effacement que la séquence vit ici.
+    """
+    from engine.agent_decision import consume_pending_agent_decision
+
+    gs = _decision_state()
+    posee = _pose(gs)
+
+    rendue = consume_pending_agent_decision(gs, decision_type="waaagh_call")
+
+    assert rendue == posee
+    assert read_pending_agent_decision(gs) is None
+
+
+def test_consume_refuses_when_no_decision_is_pending():
+    """Aucune décision en attente = le masque n'aurait pas dû ouvrir de `CHOICE`. Incohérence
+    d'état, jamais un cas de jeu : erreur explicite, aucun repli silencieux."""
+    from engine.agent_decision import consume_pending_agent_decision
+
+    with pytest.raises(RuntimeError, match="aucune decision 'waaagh_call' en attente"):
+        consume_pending_agent_decision(_decision_state(), decision_type="waaagh_call")
+
+
+def test_consume_refuses_a_decision_of_another_type():
+    """Appliquer un type sur la décision d'un AUTRE type écrirait l'effet du mauvais point de
+    choix — et l'effacerait, donc l'agent perdrait la question qu'on lui avait posée."""
+    from engine.agent_decision import consume_pending_agent_decision
+
+    gs = _decision_state()
+    _pose(gs, decision_type="fly_declaration", unit_id="1")
+
+    with pytest.raises(RuntimeError, match="aucune decision 'waaagh_call' en attente"):
+        consume_pending_agent_decision(gs, decision_type="waaagh_call")
+    assert read_pending_agent_decision(gs) is not None, "décision effacée par un refus"
+
+
+def test_consume_refuses_the_wrong_owner():
+    """Une décision APPARTIENT à un siège : l'appliquer au nom d'un autre écrirait l'effet sur le
+    mauvais joueur (un Waaagh! appelé pour l'adversaire) ou la mauvaise escouade."""
+    from engine.agent_decision import consume_pending_agent_decision
+
+    gs = _decision_state()
+    _pose(gs, player=1)
+    with pytest.raises(RuntimeError, match="appartient au joueur 1, pas a 2"):
+        consume_pending_agent_decision(gs, decision_type="waaagh_call", player=2)
+
+    gs2 = _decision_state()
+    _pose(gs2, decision_type="fly_declaration", unit_id="1")
+    with pytest.raises(RuntimeError, match="porte sur l'unite 1, pas sur 2"):
+        consume_pending_agent_decision(gs2, decision_type="fly_declaration", unit_id="2")
+
+    assert read_pending_agent_decision(gs) is not None
+    assert read_pending_agent_decision(gs2) is not None
+
+
+def test_consume_accepts_the_right_owner():
+    """Témoin ACTIF des deux refus ci-dessus : sans lui, ils passeraient aussi si le contrôle
+    refusait tout le monde."""
+    from engine.agent_decision import consume_pending_agent_decision
+
+    gs = _decision_state()
+    _pose(gs, decision_type="fly_declaration", player=2, unit_id="7")
+
+    consume_pending_agent_decision(
+        gs, decision_type="fly_declaration", player=2, unit_id="7"
+    )
+    assert read_pending_agent_decision(gs) is None

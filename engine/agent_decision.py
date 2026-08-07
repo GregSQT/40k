@@ -178,6 +178,60 @@ def clear_pending_agent_decision(game_state: Dict[str, Any]) -> None:
     game_state[PENDING_DECISION_KEY] = None
 
 
+def consume_pending_agent_decision(
+    game_state: Dict[str, Any],
+    *,
+    decision_type: str,
+    player: Optional[int] = None,
+    unit_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Préambule COMMUN à tout `apply_*_decision` : vérifie, EFFACE, et rend la décision.
+
+    Trois contrôles, puis l'effacement — la séquence que chaque type rejouait à la main :
+      1. une décision est en attente et elle est bien du type que l'appelant applique. Sinon le
+         masque n'aurait pas dû ouvrir d'action `CHOICE` : c'est une incohérence, pas un cas ;
+      2. `player` / `unit_id`, quand l'appelant les fournit — une décision APPARTIENT à un siège,
+         et l'appliquer au nom d'un autre écrirait l'effet sur le mauvais joueur ou la mauvaise
+         escouade. Chaque type fournit ce qui l'identifie : le Waaagh! est une décision d'ARMÉE
+         (`player`, aucune unité), la déclaration de vol une décision d'ESCOUADE (`unit_id`) ;
+      3. l'effacement. Le faire ICI donne UN seul endroit où « appliquer puis effacer » existe :
+         l'oublier laisserait le moteur arrêté sur une décision déjà jouée.
+
+    ⚠️ Ce socle existe parce que les copies avaient DÉJÀ divergé : `waaagh_call` contrôlait le
+    joueur et jamais l'unité, `fly_declaration` l'unité et jamais le joueur. Un 3e type aurait
+    apporté un 3e sous-ensemble de gardes.
+
+    ⚠️ RÈGLE D'APPEL, sans laquelle ces contrôles ne contrôlent RIEN : `player` et `unit_id`
+    doivent venir d'une source INDÉPENDANTE de la décision — l'état (`current_player`), le pool
+    d'activation, l'identité du siège appelant. Les relire dans la décision pour les repasser ici
+    compare la décision à elle-même : le contrôle ne peut alors jamais se déclencher, tout en
+    ayant l'apparence d'une garde. C'est exactement l'état dans lequel les deux appelants ont été
+    trouvés (audit du 2026-08-07), et l'omettre coûte plus cher que de ne pas contrôler du tout —
+    un « vert vacant » se lit comme un feu vert. Un argument qui n'a AUCUNE source indépendante
+    (l'entité sur laquelle on écrit, par exemple) reste légitime : il barre les autres appelants,
+    présents et futurs. Ce qui est interdit, c'est de le croire actif là où il ne l'est pas.
+    """
+    decision = read_pending_agent_decision(game_state)
+    if decision is None or str(require_key(decision, "type")) != str(decision_type):
+        raise RuntimeError(
+            f"consume_pending_agent_decision: aucune decision '{decision_type}' en attente "
+            f"(en attente : {None if decision is None else decision['type']!r}) — le masque "
+            "n'aurait pas du ouvrir d'action CHOICE."
+        )
+    if player is not None and int(require_key(decision, "player")) != int(player):
+        raise RuntimeError(
+            f"consume_pending_agent_decision: la decision '{decision_type}' appartient au joueur "
+            f"{decision['player']}, pas a {player}."
+        )
+    if unit_id is not None and str(require_key(decision, "unit_id")) != str(unit_id):
+        raise RuntimeError(
+            f"consume_pending_agent_decision: la decision '{decision_type}' porte sur l'unite "
+            f"{decision['unit_id']}, pas sur {unit_id}."
+        )
+    clear_pending_agent_decision(game_state)
+    return decision
+
+
 def initialize_agent_decision_state(game_state: Dict[str, Any]) -> None:
     """Pose la clé à None si elle manque (init d'épisode). N'écrase jamais une décision vive."""
     if PENDING_DECISION_KEY not in game_state:

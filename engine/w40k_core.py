@@ -1470,8 +1470,10 @@ class W40KEngine(gym.Env):
             "units_attacked": set(),
             "units_advanced": set(),
             "advance_rolls": {},
-            "units_took_to_skies": set(),
-            "units_took_to_skies_charge": set(),
+            # 21.03 `L6` : declarations de vol, et « la question a ete posee » (distinct — un refus
+            # laisse le set de declaration vide et doit malgre tout laisser une trace). Cles
+            # DERIVEES de `_TAKE_TO_THE_SKIES_BY_PHASE`, comme au reset de tour.
+            **movement_handlers.fly_declaration_reset_state(),
             "units_reacted_this_enemy_turn": set(),
             "reaction_window_active": False,
             "_unit_move_version": 0,
@@ -3445,7 +3447,12 @@ class W40KEngine(gym.Env):
             # candidats est CONTRACTUEL — c'est lui, et non un `effect_ids`, qui porte le sens
             # (cf. AGENT_DECISION_TYPE_IDS) : le payload le rend explicite côté moteur.
             called = bool(require_key(require_key(selected_option, "payload"), "call"))
-            decision_player = int(require_key(decision, "player"))
+            # Le joueur passé au vérificateur vient de l'ÉTAT, jamais de la décision. Le lire dans
+            # la décision pour le lui repasser comparait la décision à elle-même : un contrôle
+            # qui ne pouvait pas se déclencher (« vert vacant »). Lu ici, il refuse une décision
+            # qui a survécu au tour de son propriétaire — le seul siège qui puisse y répondre.
+            # Mesuré sur 3 épisodes : 31 décisions, 0 dont le joueur diffère de `current_player`.
+            decision_player = int(require_key(self.game_state, "current_player"))
             # `apply_waaagh_call_decision` efface la decision elle-meme (ecrivain unique).
             command_handlers.apply_waaagh_call_decision(
                 self.game_state, decision_player, called
@@ -3462,6 +3469,29 @@ class W40KEngine(gym.Env):
                     "success": True,
                 }
             )
+
+        if decision_type == "fly_declaration":
+            # 21.03 « take to the skies » (V11 §0.48 `L6`) : décision d'ESCOUADE, par mouvement,
+            # sans file de prompts. Comme pour le Waaagh!, c'est l'ORDRE des candidats qui porte
+            # le sens (aucun `effect_ids`) et le payload qui le rend explicite côté moteur.
+            declared = bool(require_key(require_key(selected_option, "payload"), "declare"))
+            decision_squad_id = str(require_key(decision, "unit_id"))
+            # `apply_fly_declaration_decision` efface la decision elle-meme (ecrivain unique).
+            movement_handlers.apply_fly_declaration_decision(
+                self.game_state, decision_squad_id, declared
+            )
+            # Aucune reprise de phase a enchainer : l'activation reprend d'elle-meme au step
+            # suivant, le masque etant reconstruit sur la declaration desormais ecrite.
+            return True, {
+                "action": "agent_decision",
+                "waiting_for_player": False,
+                "decision_type": decision_type,
+                "unitId": decision_squad_id,
+                "player": int(require_key(decision, "player")),
+                "option_index": option_index,
+                "tookToSkies": declared,
+                "success": True,
+            }
 
         if decision_type != "rule_choice":
             raise NotImplementedError(
@@ -6781,6 +6811,50 @@ class W40KEngine(gym.Env):
             tensor=tensor, mask_and_eligible=mask_and_eligible
         )[0]
 
+    def _observer_squad_for_pending_decision(self, decision: Dict[str, Any]) -> str:
+        """Escouade DEPUIS LAQUELLE observer une décision en attente — RÈGLE UNIQUE.
+
+        §0.40 point 1 : l'observation décrit l'unité SUR LAQUELLE porte le choix, jamais une
+        autre — la prendre ailleurs décrirait un contexte étranger à la question posée.
+
+        Cette règle a DEUX consommateurs dans `_build_observation_and_mask`, et ils ne peuvent
+        pas fusionner : le premier voit les décisions déjà posées à l'entrée (`waaagh_call`,
+        `rule_choice`), le second celles que la construction du masque vient d'ARMER
+        (`fly_declaration`, V11 §0.48 `L6`) — le pool d'éligibles est alors vide et la branche
+        d'entrée ne les avait pas vues. Écrite deux fois, elle divergerait en silence : les deux
+        copies rendraient une escouade, simplement pas la même.
+
+        Cas d'ARMÉE (`waaagh_call`) : la décision ne porte sur AUCUNE unité, son `unit_id`
+        identifie le point de choix (`player_<n>`). Ce que le candidat accorde est global — les
+        drapeaux Waaagh! de `global_bin` — donc n'importe laquelle de MES escouades vivantes est
+        un repère égocentrique valable ; la première du joueur décideur, pour que le choix soit
+        reproductible. Le contrôle strict reste entier pour les autres types : une décision dont
+        l'unité a disparu décrit un état incohérent, et doit lever.
+        """
+        decision_unit_id = str(require_key(decision, "unit_id"))
+        units_cache = require_key(self.game_state, "units_cache")
+        if decision_unit_id in units_cache:
+            return decision_unit_id
+        if str(require_key(decision, "type")) != "waaagh_call":
+            raise KeyError(
+                f"_build_observation: unite {decision_unit_id} de la decision en attente "
+                "absente de units_cache — la decision survit a son unite."
+            )
+        decision_player = int(require_key(decision, "player"))
+        observer_id = next(
+            (
+                str(sid) for sid, entry in units_cache.items()
+                if int(require_key(entry, "player")) == decision_player
+            ),
+            None,
+        )
+        if observer_id is None:
+            raise KeyError(
+                f"_build_observation: decision 'waaagh_call' du joueur {decision_player} "
+                "alors qu'il n'a plus aucune escouade — 08.04 n'aurait pas du la poser."
+            )
+        return observer_id
+
     def _build_observation_and_mask(
         self,
         tensor: bool = True,
@@ -6864,38 +6938,10 @@ class W40KEngine(gym.Env):
         # contexte étranger au choix demandé (le défaut §0.40 point 1, à ne pas reproduire ici).
         pending_decision = read_pending_agent_decision(self.game_state)
         if pending_decision is not None:
-            decision_unit_id = str(require_key(pending_decision, "unit_id"))
-            units_cache = require_key(self.game_state, "units_cache")
-            if decision_unit_id in units_cache:
-                # Aucun masque construit sur ce chemin : l'observateur est l'unite de la decision.
-                return _build_for_squad(decision_unit_id), None
-            # Decision d'ARMEE (chantier 03 : `waaagh_call`) : elle ne porte sur AUCUNE unite,
-            # son `unit_id` identifie le point de choix (`player_<n>`) et non une escouade. Ce
-            # que le candidat accorde est global — les quatre drapeaux Waaagh! de `global_bin` —
-            # donc n'importe laquelle de MES escouades vivantes est un repere egocentrique
-            # valable. La premiere du joueur decideur, pour que le choix soit reproductible.
-            #
-            # Le controle strict reste entier pour les autres types : une decision `rule_choice`
-            # dont l'unite a disparu decrit un etat incoherent, et doit toujours lever.
-            if str(require_key(pending_decision, "type")) != "waaagh_call":
-                raise KeyError(
-                    f"_build_observation: unite {decision_unit_id} de la decision en attente "
-                    "absente de units_cache — la decision survit a son unite."
-                )
-            decision_player = int(require_key(pending_decision, "player"))
-            observer_id = next(
-                (
-                    str(sid) for sid, entry in units_cache.items()
-                    if int(require_key(entry, "player")) == decision_player
-                ),
-                None,
-            )
-            if observer_id is None:
-                raise KeyError(
-                    f"_build_observation: decision 'waaagh_call' du joueur {decision_player} "
-                    "alors qu'il n'a plus aucune escouade — 08.04 n'aurait pas du la poser."
-                )
-            return _build_for_squad(observer_id), None
+            # Aucun masque construit sur ce chemin : l'observateur est l'unite de la decision.
+            return _build_for_squad(
+                self._observer_squad_for_pending_decision(pending_decision)
+            ), None
 
         if self.game_state.get("phase") == "deployment":
             # §0.40 point 1 : l'obs decrit l'unite SUR LAQUELLE LE MASQUE AGIT, jamais une autre.
@@ -6943,8 +6989,16 @@ class W40KEngine(gym.Env):
         # Active squad = 1er eligible (convention 1 unit = 1 squad).
         # Si eligible_units vide mais mask any (cas degenere),
         # prendre 1ere unite vivante du player courant.
+        # Décision ARMÉE PAR la construction du masque ci-dessus (déclaration de vol 21.03,
+        # V11 §0.48 `L6`) : elle n'existait pas au contrôle d'entrée de cette fonction, donc la
+        # branche du haut ne l'a pas vue. Même règle, MÊME code
+        # (`_observer_squad_for_pending_decision`) — sinon l'agent décrirait une escouade et
+        # déclarerait pour une autre (le défaut §0.40 point 1).
+        armed_decision = read_pending_agent_decision(self.game_state)
         if eligible_units:
             active_squad_id = str(eligible_units[0]["id"])
+        elif armed_decision is not None:
+            active_squad_id = self._observer_squad_for_pending_decision(armed_decision)
         else:
             uc = self.game_state.get("units_cache", {})  # get allowed
             current_player = int(self.game_state.get("current_player", 1))

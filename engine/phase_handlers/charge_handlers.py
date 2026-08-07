@@ -3300,8 +3300,10 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
     # Take to the skies (21.03) : vol actif en charge → traversée murs + figs. En éligibilité
     # (early_exit) toute unité FLY est généreusement traitée comme volante — 21.03 laisse le joueur
     # libre de déclarer à chaque charge, donc la charge doit être PROPOSÉE si une cible est
-    # atteignable par les airs. Sur le mouvement réel, seulement si le vol est déclaré pour ce
-    # mouvement ; pour une unité pilotée par le modèle, c'est `took_to_the_skies` qui tranche.
+    # atteignable par les airs. Sur le mouvement réel, seulement si le vol est DÉCLARÉ pour ce
+    # mouvement : `took_to_the_skies` lit cette déclaration et rien d'autre, pour tous les sièges
+    # (V11 §0.48 `L6` — le point de choix `fly_declaration` est posé avant ce pool, il n'y a plus
+    # de politique moteur qui tranche à la place du joueur piloté par le modèle).
     _fly = _charge_fly_active(game_state, unit, unit_id, for_eligibility=early_exit_if_valid)
 
     units_cache = require_key(game_state, "units_cache")

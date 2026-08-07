@@ -10718,8 +10718,8 @@ def build_squad_move_cell_map(
     #   - bloc de CETTE escouade (figs vivantes col/row/level) → forme rigide + coût de descente ;
     #   - régime de budget : `advance_roll`, déclaration « take to the skies » (malus TTS) lue par
     #     le MÊME prédicat que le budget — `took_to_the_skies` sous sa garde de phase, jamais le set
-    #     `units_took_to_skies` en direct, qui raterait la déclaration dérivée des unités pilotées
-    #     par le modèle (cf. la construction de `_fp_key` ci-dessous) ;
+    #     `units_took_to_skies` en direct, qui ferait varier la clé hors des phases où 21.03
+    #     s'applique (cf. la construction de `_fp_key` ci-dessous) ;
     #     battle-shock de l'escouade (Desperate Escape traverse les ennemis) ; `phase` (le cache
     #     enemy_adjacent est par-phase, stable intra-phase). Les murs et les toggles sont statiques.
     # O(unités + figs) par appel — négligeable devant le BFS géodésique qu'il évite sur un hit.
@@ -10751,9 +10751,8 @@ def build_squad_move_cell_map(
 
     _fp_key = (
         advance_roll,
-        # MÊME expression que le budget (garde de phase incluse) : lire directement le set raterait
-        # la déclaration DÉRIVÉE des unités pilotées par le modèle, et omettre la garde ferait
-        # varier la clé là où le budget, lui, ne varie pas.
+        # MÊME expression que le budget (garde de phase incluse) : omettre la garde ferait varier
+        # la clé hors des phases que 21.03 couvre, là où le budget, lui, ne varie pas.
         bool(
             _tts_phase_fp(game_state, charge=False)
             and _tts_fp(game_state, _unit_obj_fp, str(squad_id), charge=False)

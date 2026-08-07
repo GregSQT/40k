@@ -55,6 +55,8 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
+from engine.phase_handlers.movement_handlers import fly_declaration_reset_state
+
 
 def turn_state_invariants() -> Dict[str, Any]:
     """Retourne les invariants d'état de tour, aux valeurs exactes d'un ``game_state`` post-reset.
@@ -88,8 +90,14 @@ def turn_state_invariants() -> Dict[str, Any]:
         "units_fought": set(),
         "units_advanced": set(),
         "advance_rolls": {},
-        "units_took_to_skies": set(),
-        "units_took_to_skies_charge": set(),
+        # 21.03 `L6` — déclarations de vol ET traces « la question a été posée » (distinct : un
+        # refus laisse la déclaration vide et doit malgré tout laisser une trace). DÉRIVÉES de
+        # `_TAKE_TO_THE_SKIES_BY_PHASE`, exactement comme les deux sites de reset du moteur
+        # (`command_step_start_of_phase`, `W40KEngine.reset`) : une phase ajoutée à la table
+        # arrive ici toute seule. Réénumérées à la main, elles manqueraient au socle sans que
+        # rien ne lève — les fixtures liraient alors ces sets en `.get(clé, set())`, donc
+        # « personne n'a jamais été interrogé », et resteraient VERTES sur un état inexistant.
+        **fly_declaration_reset_state(),
         "units_reacted_this_enemy_turn": set(),
         "reaction_window_active": False,
         "last_move_event_id": 0,

@@ -72,8 +72,32 @@ def _engine(keywords: List[Dict[str, str]]) -> W40KEngine:
     return eng
 
 
+def _declare_flight(eng: W40KEngine, squad_id: str = "1") -> None:
+    """Joue la DÉCLARATION 21.03 par le chemin de production (`L6`), si elle est due.
+
+    Depuis `L6` le vol n'est plus une politique moteur : l'escouade volante doit répondre
+    `CHOICE_0` avant de bouger. On joue donc la MÊME séquence que la production —
+    `arm_fly_declaration_decision` (ce que fait le masque), puis le décodage de `CHOICE_0` et son
+    application par le moteur — plutôt qu'une écriture directe dans `units_took_to_skies`, qui
+    court-circuiterait exactement ce que ce fichier prétend observer : le chemin réel.
+    Une escouade sans FLY n'est jamais interrogée : rien à jouer.
+
+    (Le masque lui-même est verrouillé par `test_fly_declaration_decision.py` ; ici les fixtures
+    posent la phase à la main et n'ont donc pas de pool d'activation à offrir au masque.)
+    """
+    from engine.macro_intents import CHOICE_BASE
+    from engine.phase_handlers.movement_handlers import arm_fly_declaration_decision
+
+    if arm_fly_declaration_decision(eng.game_state, squad_id) is None:
+        return
+    semantic = eng.action_decoder.convert_squad_action(CHOICE_BASE, eng.game_state)
+    ok, _ = eng._process_squad_action(semantic)
+    assert ok, "la déclaration de vol a échoué"
+
+
 def _move_log(eng: W40KEngine, dest_col: int, dest_row: int) -> Dict[str, Any]:
     """Joue un move squad par le chemin de PRODUCTION et rend son action_log."""
+    _declare_flight(eng)
     before = len(eng.game_state.get("action_logs", []))
     ok, _ = eng._process_squad_action(
         {"action": "squad_normal_move", "squad_id": "1", "destCol": dest_col, "destRow": dest_row}
@@ -95,7 +119,7 @@ def _move_log(eng: W40KEngine, dest_col: int, dest_row: int) -> Dict[str, Any]:
     ],
 )
 def test_gym_move_carries_the_fly_flag(keywords: List[Dict[str, str]], expected: bool) -> None:
-    """L'escouade volante pilotee par le modele declare le vol (21.03) -> le log le porte."""
+    """L'escouade volante qui DÉCLARE le vol (21.03, `CHOICE_0` de `L6`) -> le log le porte."""
     eng = _engine(keywords)
     entry = _move_log(eng, 24, 20)
     assert entry["is_fly_move"] is expected, entry
@@ -149,6 +173,7 @@ def test_gym_charge_carries_the_fly_flag(keywords: List[Dict[str, str]], expecte
     classe de faux positifs que le correctif du move supprime, laissee ouverte sur son jumeau.
     """
     eng = _charge_engine(keywords)
+    _declare_flight(eng)
     before = len(eng.game_state.get("action_logs", []))
     with patch("engine.phase_handlers.shared_utils.roll_charge_distance", return_value=12):
         ok, result = eng._process_squad_action(

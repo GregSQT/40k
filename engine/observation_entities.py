@@ -383,7 +383,8 @@ def self_model_bin_index(field: str) -> int:
 
 #: Types de points de décision exposés à l'agent, ordre FIGÉ du one-hot de contexte.
 #: `rule_choice` est le pilote P3 point 0 ; `waaagh_call` est la décision binaire d'appel du
-#: Waaagh! (chantier 03). Les tranches suivantes (allocation de pertes…) s'ajoutent ICI, jamais
+#: Waaagh! (chantier 03) ; `fly_declaration` est la déclaration « take to the skies » 21.03
+#: (élément `L6`). Les tranches suivantes (allocation de pertes…) s'ajoutent ICI, jamais
 #: en dupliquant le mécanisme.
 #:
 #: ✅ Ajouter un type ne change plus `obs_size` : le one-hot fait `AGENT_DECISION_TYPE_SLOTS`
@@ -403,7 +404,13 @@ def self_model_bin_index(field: str) -> int:
 #: (`pointer_policy._point`), donc délibérément agnostique à la position. Les deux lignes
 #: sortaient `[0…0, present=1]` à l'identique : logits égaux, gradients égaux, symétrie
 #: incassable — l'appel du Waaagh! était un pile-ou-face que PPO ne pouvait pas apprendre.
-AGENT_DECISION_TYPE_IDS: Tuple[str, ...] = ("rule_choice", "waaagh_call")
+#:
+#: ⚠️ `fly_declaration` (`L6`) est dans le MÊME cas, et son entrée portait la MÊME erreur (« ce
+#: qui les distingue est le couple (type, INDEX) ») : « take to the skies » n'est accordé par
+#: aucune datasheet — c'est le mot-clé FLY qui l'ouvre et 21.03 qui en fixe le prix —, donc ses
+#: deux candidats portent eux aussi un `effect_ids` VIDE. C'est `declines` qui les sépare :
+#: `CHOICE_1` renonce au vol, et le renoncement est précisément « ne rien faire ».
+AGENT_DECISION_TYPE_IDS: Tuple[str, ...] = ("rule_choice", "waaagh_call", "fly_declaration")
 
 #: Nombre MAXIMAL de candidats exposés à l'agent — le K de `CHOICE_0..K-1`
 #: (`macro_intents.CHOICE_SLOTS`). Il vaut 6, l'alignement retenu par §9.3 sur les 6 slots
@@ -467,6 +474,7 @@ DECISION_CTX_BIN_FIELDS: Tuple[str, ...] = (
 #: décrire, et en inventer une, remplie de zéros, serait une valeur par défaut sans signifiant.
 #: Les tranches P3 qui en auront besoin (distance d'une destination, dégâts attendus sur une
 #: cible) ouvriront un registre `DECISION_OPTION_CONT_FIELDS` à ce moment-là.
+#:
 #: ⚠️ `declines` n'est PAS un effet : c'est le seul champ qui décrive un candidat qui ne fait
 #: RIEN. Une décision optionnelle (« you CAN call a Waaagh! », « you CAN take to the skies »)
 #: oppose un candidat qui agit à un candidat qui passe, et le second n'accorde par construction

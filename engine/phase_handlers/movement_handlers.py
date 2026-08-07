@@ -7,7 +7,9 @@ References: AI_TURN.md Section 🏃 MOVEMENT PHASE LOGIC
 ZERO TOLERANCE for state storage or wrapper patterns
 """
 
-from typing import AbstractSet, Dict, FrozenSet, List, Tuple, Set, Optional, Any, Sequence, cast
+from typing import (
+    AbstractSet, Dict, FrozenSet, List, NamedTuple, Tuple, Set, Optional, Any, Sequence, cast
+)
 import math
 import numpy as np
 from collections import deque, OrderedDict
@@ -233,29 +235,80 @@ def _unit_has_keyword(unit: Dict[str, Any], keyword_id: str) -> bool:
     return False
 
 
-def unit_is_ai_controlled(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
+def _unit_is_ai_controlled(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
     """L'unité est-elle pilotée par le modèle (gym d'entraînement, ou joueur 2 en PvE) ?
 
-    Aucune déclaration humaine ne peut lui parvenir : c'est la politique moteur de
-    ``took_to_the_skies`` qui tranche pour elle.
+    Aucune déclaration humaine ne peut lui parvenir : c'est un point de choix d'agent
+    (``arm_fly_declaration_decision``) qui lui demande sa déclaration 21.03, là où un humain
+    utilise le toggle ``movement_set_fly_mode_handler`` / ``charge_set_fly_mode_handler``.
+
+    Privée : un seul appelant, ``_fly_declaration_due_unit``, dans ce module.
     """
     is_gym = bool(game_state.get("gym_training_mode", False))
     is_pve = bool(game_state.get("pve_mode", False)) or bool(game_state.get("is_pve_mode", False))
     return is_gym or (is_pve and int(require_key(unit, "player")) == 2)
 
 
-#: Phase moteur → (est-ce le mouvement de charge ?, set de déclarations « take to the skies »).
+class _FlyPhase(NamedTuple):
+    """Ce qu'une phase résolvant un mouvement de 21.03 met en jeu — champs NOMMÉS, jamais un
+    tuple positionnel : les deux clés sont des `str`, les permuter ne casserait rien et écrirait
+    la déclaration de move dans le set de la charge, en silence.
+
+    - ``is_charge`` : le mouvement en cours est-il celui de la phase de charge ?
+    - ``declared_key`` : set des escouades AYANT déclaré le vol pour ce mouvement.
+    - ``resolved_key`` : set de celles à qui la question a DÉJÀ été posée (voir ⚠️ ci-dessous).
+    """
+
+    is_charge: bool
+    declared_key: str
+    resolved_key: str
+
+
+#: Phase moteur → `_FlyPhase`.
 #: 21.03 énumère EXACTEMENT les mouvements couverts : « a normal, advance, fall-back or charge
 #: move ». Un pile-in ou une consolidation (12) n'y figurent pas et ne peuvent donc pas prendre les
 #: airs — d'où l'absence volontaire de clé pour ces phases (et non une valeur par défaut permissive).
 #:
-#: Table réellement CONSOMMÉE des deux côtés : le drapeau `charge` par `_fly_traversal_active`
-#: (qui en déduit le mouvement de la phase en cours) et le nom du set par `took_to_the_skies`.
-#: La corriger a donc un effet — c'est la seule description du couplage phase / mouvement / set.
-_TAKE_TO_THE_SKIES_BY_PHASE: Dict[str, Tuple[bool, str]] = {
-    "move": (False, "units_took_to_skies"),      # normal / advance / fall-back
-    "charge": (True, "units_took_to_skies_charge"),
+#: Table réellement CONSOMMÉE des trois côtés : le drapeau `charge` par `_fly_traversal_active`
+#: (qui en déduit le mouvement de la phase en cours), le set de déclaration par
+#: `took_to_the_skies`, le set de résolution par `arm_fly_declaration_decision`.
+#: La corriger a donc un effet — c'est la seule description du couplage phase / mouvement / sets.
+#:
+#: ⚠️ DEUX sets et non un : « ne pas déclarer » est un choix, et il laisse le set de déclaration
+#: VIDE — indiscernable de « la question n'a pas encore été posée ». Sans le second set, le point
+#: de choix se reposerait à chaque construction de masque et l'escouade ne pourrait plus jamais
+#: bouger. Les quatre sont remis à zéro par `fly_declaration_reset_state`, qui les DÉRIVE de cette
+#: table : ajouter une phase ici suffit, aucun site de reset à mettre à jour à la main.
+_TAKE_TO_THE_SKIES_BY_PHASE: Dict[str, _FlyPhase] = {
+    # normal / advance / fall-back
+    "move": _FlyPhase(False, "units_took_to_skies", "units_fly_declaration_resolved"),
+    "charge": _FlyPhase(True, "units_took_to_skies_charge", "units_fly_declaration_resolved_charge"),
 }
+
+
+def _fly_phase_entry(game_state: Dict[str, Any]) -> Optional[_FlyPhase]:
+    """Entrée de `_TAKE_TO_THE_SKIES_BY_PHASE` pour la phase EN COURS, ou None hors 21.03.
+
+    Lecture unique de la table depuis l'état : les 4 sites qui en dépendent posaient la même
+    expression, chacun avec son propre déballage.
+    """
+    return _TAKE_TO_THE_SKIES_BY_PHASE.get(str(game_state.get("phase", "")))  # get allowed
+
+
+def fly_declaration_reset_state() -> Dict[str, Any]:
+    """Les sets 21.03 remis à zéro en début de tour, DÉRIVÉS de la table (jamais réénumérés).
+
+    La question « prends-tu les airs ? » vaut pour le mouvement du tour : elle se repose au tour
+    suivant. Les oublier gèlerait la déclaration du tour 1 pour toute la partie (une escouade ne
+    serait plus jamais interrogée) — et l'oubli est SILENCIEUX, d'où la dérivation : les deux
+    sites de reset (`command_step_start_of_turn`, `W40KEngine.reset`) suivent la table sans
+    la recopier.
+    """
+    return {
+        key: set()
+        for entry in _TAKE_TO_THE_SKIES_BY_PHASE.values()
+        for key in (entry.declared_key, entry.resolved_key)
+    }
 
 
 def take_to_the_skies_applies_to_phase(game_state: Dict[str, Any], *, charge: bool) -> bool:
@@ -267,8 +320,8 @@ def take_to_the_skies_applies_to_phase(game_state: Dict[str, Any], *, charge: bo
     résolu et où aucune traversée n'est active. L'échelle de la grille égocentrique
     (`grid_half_extent_subhex`, appelée à chaque phase) en dépend directement.
     """
-    entry = _TAKE_TO_THE_SKIES_BY_PHASE.get(str(game_state.get("phase", "")))  # get allowed
-    return entry is not None and entry[0] is charge
+    entry = _fly_phase_entry(game_state)
+    return entry is not None and entry.is_charge is charge
 
 
 def took_to_the_skies(
@@ -281,66 +334,29 @@ def took_to_the_skies(
     dissocier laisserait rejouer le défaut d'origine — une traversée gratuite.
 
     - Sans le keyword FLY : jamais.
-    - Unité pilotée par le modèle (gym / PvE J2) : **déclare systématiquement**. Politique moteur
-      explicite — voir ci-dessous, elle a un coût chiffré et une alternative écartée.
-    - Joueur humain : uniquement si la déclaration a été posée (``movement_set_fly_mode_handler`` /
-      ``charge_set_fly_mode_handler``), dans le set propre au type de mouvement.
+    - Sinon : uniquement si la déclaration a été POSÉE pour ce mouvement, dans le set propre au
+      type de mouvement. UN seul chemin de lecture pour tous les sièges — l'humain y écrit par le
+      toggle (``movement_set_fly_mode_handler`` / ``charge_set_fly_mode_handler``), le siège
+      piloté par le modèle par le point de choix ``arm_fly_declaration_decision``, résolu par
+      ``apply_fly_declaration_decision``.
 
-    POURQUOI UNE CONSTANTE POUR L'IA, ET CE QU'ELLE COÛTE
-    -----------------------------------------------------
-    21.03 fait de la prise d'altitude une DÉCISION du joueur actif, par mouvement. L'agent n'a pas
-    de canal pour la prendre : l'exposer suppose une entrée d'observation et une action de choix,
-    donc un changement du contrat d'observation. L'arbitrage utilisateur du 2026-07-29 range ce
-    travail dans le lot de ré-entraînement et exige que le présent correctif de conformité ne casse
-    aucun contrat — il ne peut donc pas être fait ici. (Les numéros de section §0.48/§0.49 cités en
-    relecture ne sont pas vérifiables depuis ce worktree : `V11_agent_rework.md` s'y arrête à §0.45
-    et annonce « prochaine entrée libre : 0.46 ». La substance de l'arbitrage est reprise telle
-    qu'elle a été relayée, sa numérotation ne l'est pas.)
+    ⚠️ HISTORIQUE — CE QUI A DISPARU ICI (V11 §0.48 élément `L6`). Jusqu'au chantier `L6`, une
+    unité pilotée par le modèle rendait `True` INCONDITIONNELLEMENT : le canal d'observation et
+    l'action de choix n'existaient pas, et §0.49 point 5 avait tranché « déclarer toujours »
+    plutôt que de rendre le mot-clé FLY inerte. Le coût était permanent et parfois pur —
+    -2" à CHAQUE mouvement (soit -16,7 % pour les jump packs MOVE 12", -14,3 % pour les Land
+    Speeders MOVE 14", et -28,6 % sur l'espérance du jet de charge), y compris en terrain
+    découvert où la traversée n'apporte rien. C'est fini : la déclaration est redevenue ce que
+    21.03 en fait, un choix du joueur actif, par mouvement.
 
-    En attendant, la constante retenue est « déclarer toujours ». Ce n'est PAS le choix évident
-    entre deux constantes : une troisième option existe, et elle est écartée pour des raisons
-    précises, pas parce qu'elle serait hors sujet.
-
-    * « ne jamais déclarer » : le keyword FLY deviendrait inerte pour l'agent. Les cinq types
-      volants du roster d'entraînement d'ArmageddonAgent perdraient la capacité que la règle leur
-      donne, et le défaut « le vol de charge est refusé à l'IA » serait reconduit sous un autre nom.
-    * « déclarer ssi la traversée élargit strictement l'atteignable » — l'option dérivée proposée
-      en relecture. Elle resterait bien une fonction pure de l'état et ne toucherait aucun contrat.
-      Elle est écartée pour deux raisons, et non parce qu'elle serait irréalisable :
-        1. son critère n'est pas bien défini tel quel. Les deux pools ne sont pas emboîtés : voler
-           GAGNE les cellules derrière les murs et PERD la couronne extérieure (budget amputé de
-           2"). Aucun des deux ensembles ne contient l'autre en général, donc « élargit strictement »
-           ne les départage pas — il faudrait une règle de départage supplémentaire, c'est-à-dire
-           réintroduire un jugement de valeur, celui-là même que 21.03 confie au joueur ;
-        2. elle coûte un second BFS de pool par escouade volante et par construction de masque,
-           sur le chemin le plus chaud du move (le cache de pool existe précisément pour éviter ce
-           BFS), pour un gain que rien ne mesure aujourd'hui.
-      Une heuristique interne qui *ressemble* à une décision serait par ailleurs le pire état pour
-      le lot de ré-entraînement : l'agent apprendrait contre une politique que personne n'énonce.
-    * « déclarer toujours » : état de jeu toujours légal (21.03 autorise la déclaration à chaque
-      mouvement), capacité conservée et FACTURÉE au prix légal, politique énonçable en une phrase.
-
-    COÛT ASSUMÉ, chiffré sur le roster d'entraînement d'ArmageddonAgent (board 44x60x5,
-    `inches_to_subhex = 5`, donc 2" = 10 subhex) :
-      - VanguardVeteranSquadJumpPack / ...Plasma / ...Sergeant / ChaplainJumpPack, MOVE 12" :
-        12" -> 10" à chaque mouvement, soit **-16,7 %** de distance ;
-      - LandSpeederOnslaughtGatlingCannon / LandSpeederHeavyFlamer, MOVE 14" :
-        14" -> 12", soit **-14,3 %** ;
-      - en charge, le malus porte sur le jet : 2D6 d'espérance 7" -> 5", soit **-28,6 %** de
-        distance moyenne, et une chute correspondante du taux de charges réussies.
-    Ce coût est payé EN PERMANENCE, y compris en terrain découvert où prendre les airs est
-    strictement dominé — c'est exactement ce qu'une décision confiée à l'agent supprimerait.
-
-    Enfin, être une fonction PURE de l'état (et non un écrit dans un set) fait voir cette
-    déclaration à l'identique par le masque, l'observation et l'exécution : aucun risque de
-    séquencement, contrairement à une déclaration posée après la construction du pool.
+    La déclaration reste lue à l'identique par le masque, l'observation et l'exécution : elle
+    est écrite AVANT que le pool ne soit construit (le moteur rend la main sur le point de choix),
+    jamais après.
     """
     if not _unit_has_keyword(unit, "fly"):
         return False
-    if unit_is_ai_controlled(game_state, unit):
-        return True
-    _, set_key = _TAKE_TO_THE_SKIES_BY_PHASE["charge" if charge else "move"]
-    return unit_id in game_state.get(set_key, set())
+    entry = _TAKE_TO_THE_SKIES_BY_PHASE["charge" if charge else "move"]
+    return unit_id in game_state.get(entry.declared_key, set())
 
 
 def _fly_traversal_active(game_state: Dict[str, Any], unit: Dict[str, Any], unit_id: str) -> bool:
@@ -354,11 +370,161 @@ def _fly_traversal_active(game_state: Dict[str, Any], unit: Dict[str, Any], unit
     Source unique partagée par le pool d'ancre, le reachable par-figurine, le coût de descente et
     le log de move.
     """
-    entry = _TAKE_TO_THE_SKIES_BY_PHASE.get(str(game_state.get("phase", "")))  # get allowed
+    entry = _fly_phase_entry(game_state)
     if entry is None:
         return False
-    charge, _ = entry
-    return took_to_the_skies(game_state, unit, unit_id, charge=charge)
+    return took_to_the_skies(game_state, unit, unit_id, charge=entry.is_charge)
+
+
+def _fly_declaration_due_unit(
+    game_state: Dict[str, Any], squad_id: str
+) -> Optional[Dict[str, Any]]:
+    """L'escouade si la déclaration 21.03 lui est encore DUE pour le mouvement en cours, sinon None.
+
+    Rend l'UNITÉ et pas un booléen : l'armement en a besoin juste après (joueur propriétaire), et
+    la résoudre deux fois posait deux `get_unit_by_id` et deux messages d'erreur jumeaux à garder
+    synchrones, sur le chemin de construction du masque.
+
+    Quatre conditions, toutes nécessaires :
+      1. la phase résout un mouvement que 21.03 couvre (`_TAKE_TO_THE_SKIES_BY_PHASE`) ;
+      2. l'escouade a le mot-clé FLY — sinon il n'y a rien à déclarer ;
+      3. elle est pilotée par le modèle : un humain déclare par le toggle de l'UI, et lui poser
+         une `pending_agent_decision` arrêterait le PvP sur un overlay qui n'existe pas ;
+      4. elle appartient au joueur DONT C'EST LE TOUR. 21.03 confie la déclaration au « active
+         player » : poser la question à l'adversaire lui ferait déclarer un vol hors de son tour,
+         et `apply_fly_declaration_decision` refuserait ensuite la réponse (il vérifie le
+         propriétaire contre `current_player`) — le moteur resterait arrêté sur une décision que
+         personne ne peut résoudre. En production le pool d'activation est déjà celui du joueur
+         courant ; cette condition est ce qui rend l'invariant vrai PAR CONSTRUCTION plutôt que
+         par la bonne conduite des appelants ;
+      5. la question ne lui a pas DÉJÀ été posée pour ce mouvement. Sans cette 5e condition, un
+         « je ne déclare pas » (qui laisse le set de déclaration vide) serait indiscernable d'une
+         question jamais posée : le point de choix se reposerait à chaque construction de masque
+         et l'escouade ne bougerait jamais.
+    """
+    entry = _fly_phase_entry(game_state)
+    if entry is None:
+        return None
+    unit = get_unit_by_id(game_state, str(squad_id))
+    if unit is None:
+        raise KeyError(f"_fly_declaration_due_unit: escouade {squad_id} introuvable")
+    if not _unit_has_keyword(unit, "fly"):
+        return None
+    if not _unit_is_ai_controlled(game_state, unit):
+        return None
+    if int(require_key(unit, "player")) != int(require_key(game_state, "current_player")):
+        return None
+    if str(squad_id) in game_state.get(entry.resolved_key, set()):  # get allowed : absent = jamais posée
+        return None
+    return unit
+
+
+def fly_declaration_decision_is_due(game_state: Dict[str, Any], squad_id: str) -> bool:
+    """21.03 — cette escouade doit-elle encore DÉCLARER (ou non) son vol pour le mouvement en cours ?
+
+    Lecture PUBLIQUE et SANS effet de bord de la condition d'armement. Elle partage son corps
+    avec `arm_fly_declaration_decision` (`_fly_declaration_due_unit`) mais n'est pas ce que
+    l'armement appelle : lui a besoin de l'unité, pas d'un booléen. Les deux ne peuvent donc pas
+    diverger, et c'est le seul point qui compte ici.
+
+    ⚠️ Aucun appelant de PRODUCTION à ce jour — ses consommateurs sont les tests, qui doivent
+    pouvoir observer « la question est-elle due ? » sans la poser. Écrit pour que personne ne la
+    supprime en la croyant morte, ni ne la prenne pour le chemin du masque.
+    """
+    return _fly_declaration_due_unit(game_state, squad_id) is not None
+
+
+def arm_fly_declaration_decision(
+    game_state: Dict[str, Any], squad_id: str
+) -> Optional[Dict[str, Any]]:
+    """Pose le point de choix « take to the skies » (21.03) de `squad_id`, s'il est dû.
+
+    Rend la décision POSÉE, ou None si elle n'était pas due — l'appelant qui en reçoit une doit
+    rendre la main au décideur (masque exclusivement `CHOICE_*`), exactement comme 08.04 le fait
+    pour le Waaagh! (`command_step_command_abilities`). Rendre la décision plutôt qu'un booléen
+    évite à l'appelant de relire l'état pour la retrouver, et supprime l'incohérence
+    « True sans décision posée » qu'il devait sinon garder.
+
+    ORDRE CONTRACTUEL des candidats (§9.6), et c'est lui qui porte le sens puisqu'aucun des deux
+    n'accorde d'effet de datasheet : `CHOICE_0` = déclarer le vol (traversée des murs, des
+    figurines et du dénivelé, contre -2" sur la distance), `CHOICE_1` = ne pas déclarer.
+
+    L'appelant garantit que le mouvement en cours EST celui de la phase : une escouade en réserves
+    fait une mise en place (20.04 « ingress move »), pas un des quatre mouvements que 21.03
+    énumère, et le masque la traite avant d'arriver ici.
+    """
+    unit = _fly_declaration_due_unit(game_state, squad_id)
+    if unit is None:
+        return None
+    from engine.agent_decision import set_pending_agent_decision
+
+    return set_pending_agent_decision(
+        game_state,
+        decision_type="fly_declaration",
+        player=int(require_key(unit, "player")),
+        unit_id=str(squad_id),
+        options=[
+            # `effect_ids` vide des DEUX côtés : « take to the skies » n'est accordé par aucune
+            # datasheet (c'est le mot-clé FLY qui l'ouvre, 21.03 qui en fixe le prix), donc il
+            # n'appartient pas au registre des accordables. C'est `declines` — et non l'index,
+            # qui n'est écrit dans AUCUN scalaire d'observation — qui distingue les deux lignes :
+            # sans lui elles sortiraient identiques et l'agent ne pourrait pas apprendre à
+            # choisir (cf. `DECISION_OPTION_BIN_FIELDS`, défaut mesuré sur `waaagh_call`).
+            {
+                "label": "Take to the skies",
+                "effect_ids": (),
+                "declines": False,
+                "payload": {"declare": True},
+            },
+            {
+                "label": "Stay grounded",
+                "effect_ids": (),
+                "declines": True,
+                "payload": {"declare": False},
+            },
+        ],
+    )
+
+
+def apply_fly_declaration_decision(
+    game_state: Dict[str, Any], squad_id: str, declared: bool
+) -> None:
+    """Applique le candidat choisi pour `fly_declaration`, et EFFACE la décision.
+
+    Écrivain unique du couple (set de déclaration, set de résolution) pour les sièges pilotés par
+    le modèle — pendant exact d'`apply_waaagh_call_decision`, dont il partage le préambule
+    (`consume_pending_agent_decision` : vérifie le type et le propriétaire, puis efface).
+
+    « Ne pas déclarer » n'est PAS un non-événement : c'est le second candidat, et il doit laisser
+    une trace (le set de résolution), sans quoi la question se reposerait indéfiniment.
+
+    LES DEUX IDENTIFIANTS PASSÉS AU VÉRIFICATEUR N'ONT PAS LE MÊME STATUT, et c'est voulu :
+      - `player` est lu dans l'ÉTAT (`current_player`), donc INDÉPENDANT de la décision : ce
+        contrôle-là mord. Il refuse une décision qui a survécu au tour de son propriétaire —
+        seul son siège peut y répondre (mesuré : 31 décisions sur 3 épisodes, aucune dont le
+        joueur diffère de `current_player`) ;
+      - `unit_id` est l'escouade SUR LAQUELLE on écrit ; il n'existe aucune autre source pour
+        elle, donc l'unique appelant du gym le lit forcément dans la décision et le contrôle y
+        est une identité. Il n'est pas retiré pour autant : il est la seule barrière contre un
+        futur appelant qui appliquerait la déclaration à une AUTRE escouade que celle interrogée.
+    """
+    from engine.agent_decision import consume_pending_agent_decision
+
+    entry = _fly_phase_entry(game_state)
+    if entry is None:
+        raise RuntimeError(
+            f"apply_fly_declaration_decision: la phase '{game_state.get('phase')}' ne resout aucun "
+            "des mouvements que 21.03 couvre — la decision a survecu a sa phase."
+        )
+    consume_pending_agent_decision(
+        game_state,
+        decision_type="fly_declaration",
+        player=int(require_key(game_state, "current_player")),
+        unit_id=str(squad_id),
+    )
+    game_state.setdefault(entry.resolved_key, set()).add(str(squad_id))
+    if declared:
+        game_state.setdefault(entry.declared_key, set()).add(str(squad_id))
 
 
 def squad_move_pool_budget_subhex(game_state: Dict[str, Any], squad_id: str) -> int:
@@ -2763,8 +2929,8 @@ def movement_build_valid_destinations_pool(
 
     # Take to the skies (Règles 21.03) : une unité FLY ne traverse murs/figurines QUE si le vol est
     # déclaré pour le mouvement en cours. Qui déclare : le joueur humain via le handler dédié ;
-    # pour une unité pilotée par le modèle, `took_to_the_skies` tranche (politique moteur, cf. sa
-    # docstring). Logique partagée via _fly_traversal_active.
+    # le siège piloté par le modèle via le point de choix `fly_declaration` (V11 §0.48 `L6`),
+    # posé avant la construction de ce pool. Logique partagée via _fly_traversal_active.
     _fly_active = _fly_traversal_active(game_state, unit, unit_id)
 
     # Squad move rigide (destination sol) : si des figs partent de l'étage, retrancher le coût de
@@ -3600,8 +3766,8 @@ def movement_build_model_destinations_pool(
 
     # Take to the skies (Règles 21.03) : traversée FLY active seulement si le vol est déclaré pour le
     # mouvement en cours — sinon BFS sol. Vaut pour les DEUX mouvements que 21.03 couvre ici, le move
-    # et la charge : `_fly_traversal_active` lit le set de déclarations de la phase courante, et pour
-    # une unité pilotée par le modèle c'est `took_to_the_skies` qui tranche.
+    # et la charge : `_fly_traversal_active` lit le set de déclarations de la phase courante, et rien
+    # d'autre, pour tous les sièges (V11 §0.48 `L6`).
     # Pilote le reachable par-figurine ET, via lui, la validation au commit.
     has_fly = _fly_traversal_active(game_state, unit, squad_id)
 

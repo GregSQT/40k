@@ -93,7 +93,7 @@ tenues à jour et **ne doivent pas servir de référence** — les relire dans l
 | **§0.14** | Re-mesure du run — win-rate par matchup | ✅ **MESURE OBTENUE le 2026-08-03** — ⏳ **PÉRIMÉE depuis les chantiers 01/03/04** : le modèle mesuré n'est plus chargeable, cf. [§0.67](#s0.67) | — | Run de **200 000 épisodes** (2026-08-02 12 h 26 → 2026-08-03 02 h 05, 19 points d'éval, 820 k → 12,1 M steps). `eval_bots/combined_win_rate` **0,283 → max 0,837 → 0,743**. Éval rejouée le 2026-08-03 sur le snapshot ROBUSTE (`robust_0.8049`), APRÈS §0.64/§0.65 : **combined 0.8200**, `tactical` 0.89, `defensive` 0.87, `greedy` 0.84, `adaptive` 0.83, **`control` 0.82**, **`value_trade` 0.74** (le pire), **0 troncature**. Le seuil de gating `vs_control ≥ 0.50` est **franchi** — le **0.04 du run 4 est périmé**. ⚠️ 0,743 → 0,820 est un écart best-contre-final, PAS l'effet de §0.64. Détail → §0.14. |
 | **[§9](V11_phaseA.md#s9)** | Phase A' — P2 + P3-0/1/2 | 🟢 **LIVRÉS ET MERGÉS sur `main`** — restent **P3-3→8**, **P4**, **P5** | **2** | ⚠️ Aucune des quatre livraisons n'est **MESURÉE**. ⚠️ P3-0 est **inerte dans le training** (aucun roster SM/Ork ne porte de rule choice). Détail → §0.42 et §0.43 (en §0hist), et [§9](V11_phaseA.md#s9). |
 | **§0.44** | Tête pointeur de **déploiement** — les slots 4-11 n'ont pas de tête dédiée | ✅ **LIVRÉ le 2026-08-07** (élément `L1` du lot §0.48) — ⏳ **NON MESURÉ** : le lot impose un `--new`, la mesure viendra du run du lot | — | `deploy_query_net`, jumeau exact de `choice_query_net`, score les 8 slots ; ses logits **remplacent** les colonnes 4-11 de la conv 1×1 **en phase de déploiement seulement**, le routage lisant le bit `phase_deployment` de `global_bin` par échantillon. `deploy_emb` est exposé PAR SLOT en queue du vecteur de features ; le tronc n'en garde que l'agrégation (jumeau des ennemis et des candidats de décision). Ni `obs_size` ni `TOTAL_ACTION_SIZE` (**1127**) touchés — architecture seule (le 14609 → **14615** du même jour vient du drapeau `declines`, pas d'ici). Détail → §0.44. |
-| **§0.48** | Inventaire des chantiers qui cassent un contrat + **périmètre du lot de ré-entraînement** | 🟠 **OUVERT** — le lot = **`L1` + `L2` + `L6`** + **[§0.64](#s0.64)** (LoS de déploiement alignée le 2026-08-03 ; ⚠️ **n'impose PLUS de run à elle seule** — mesuré le 2026-08-03 : le modèle d'avant joue à 0.82 sur `main` d'après, cf. §0.14 — elle **voyage** avec `L1`/`L2`/`L6`) | **4** | ✅ **Le prérequis d'ordre est LEVÉ au 2026-08-02** : les quatre chantiers exigés avant la mesure de référence — rampe de déploiement (§0.46 pt 2), FLY 21.03 (§0.49), bots d'éval (§0.47 É4), 01.07 (§0.50) — sont **tous mergés**. ✅ **L'arbitrage 2 est LIVRÉ le 2026-08-07** (socle : règles d'armes en ids, types de décision et slots de déploiement pré-dimensionnés — cf. §0.67). 🟢 Le lot est **arbitré le 2026-08-07 : `L1` + `L2` + `L6` y entrent** — ✅ **`L1` LIVRÉ le 2026-08-07** ([§0.44](#s0.44)), restent `L2` et `L6`. Détail → §0.48. |
+| **§0.48** | Inventaire des chantiers qui cassent un contrat + **périmètre du lot de ré-entraînement** | 🟠 **OUVERT** — le lot = **`L1` + `L2` + `L6`** + **[§0.64](#s0.64)** (LoS de déploiement alignée le 2026-08-03 ; ⚠️ **n'impose PLUS de run à elle seule** — mesuré le 2026-08-03 : le modèle d'avant joue à 0.82 sur `main` d'après, cf. §0.14 — elle **voyage** avec `L1`/`L2`/`L6`) | **4** | ✅ **Le prérequis d'ordre est LEVÉ au 2026-08-02** : les quatre chantiers exigés avant la mesure de référence — rampe de déploiement (§0.46 pt 2), FLY 21.03 (§0.49), bots d'éval (§0.47 É4), 01.07 (§0.50) — sont **tous mergés**. ✅ **L'arbitrage 2 est LIVRÉ le 2026-08-07** (socle : règles d'armes en ids, types de décision et slots de déploiement pré-dimensionnés — cf. §0.67). 🟢 Le lot est **arbitré le 2026-08-07 : `L1` + `L2` + `L6` y entrent** — ✅ **`L1` LIVRÉ le 2026-08-07** ([§0.44](#s0.44)) et ✅ **`L6` LIVRÉ le 2026-08-07** (FLY 21.03 en décision d'agent) ; **reste `L2`**. ⚠️ `obs_size` vaut **14615** depuis le drapeau `declines` du bloc candidat de décision (14609 avant), qui voyage avec le lot. Détail → §0.48. |
 | **§0.46** | Résidus du 2026-07-29 | ✅ **CLOSE le 2026-08-03** — les trois points sont livrés | — | ✅ **SOLDÉ le 2026-08-03** (arbitrage : GARDER, sous forme optimisée). Les 4 issues du cache de déploiement deviennent des **compteurs publiés en permanence** (`perf/*`) au lieu de traces invisibles hors `--debug` ; les 37 sites passent par `engine/debug_trace.py` (canaux `W40K_TRACE`, formatage différé) ; garde verrouillée par **21 tests**, dont une **analyse AST** (fichiers découverts par leur import) qui interdit f-string, formatage anticipé et mot-clé. La passe `/simplify` du même jour y a trouvé **un bug** (`flush=True` résiduel → `TypeError` dès que le canal s'allume) et **un verrou qui mentait** (canal `train` hors garde). ⏳ Première mesure : **100 % de reconstruction** du cache de déploiement — signalé, non ouvert. Détail → §0.46. |
 | **§0.47** | Relecture T2→T5 du 2026-07-29 — 9 écarts | 🟠 **OUVERT — reste É9 (second siège + second scénario)** ; É5 et É7 ✅ corrigés le 2026-08-02 (É1, É2, É3, É4, É6 ✅ livrés **et mergés** ; **É8 est tombé**) | **6** | **É8 n'a plus d'objet** : `ai/analyzer.py` ne construit plus aucun chemin de board à la main (il lit `get_board_config()` / `get_board_size()`). **É9 était mal énoncé** : les **3 graines SONT couvertes** (`test_t5_bare_loop.py`, `for seed in (1, 2, 3)`) ; ce qui manque est le **second scénario** et les **2 sièges**. Détail → §0.47. |
 | **§0.50** | Non-conformité **01.07** — travail de suite | ✅ **CLOS le 2026-08-02** (statut corrigé le 2026-08-03 : la colonne disait encore OUVERT alors que la cellule disait SOLDÉE ; **revérifié sur `main`** — `get("battle_shocked")` hors tests **0 hit**, `computeControlCounts`/`isObjectiveScoringWindow` **0 hit** dans le front) | — | ✅ **SOLDÉE le 2026-08-02** — les deux résidus sont traités : (1) le contrat de `battle_shocked` est **tranché en lecture STRICTE**, les 7 `get(..., False)` migrés en `require_key` ; (2) la 3ᵉ lecture d'OC du frontend (journal d'événements de `BoardReplay.tsx`) diffère l'instantané moteur au lieu de recompter. Détail → §0.50. |
@@ -233,9 +233,21 @@ vérifié ROUGE en retirant la garde). Défaut trouvé et corrigé à cette occa
 tiraient leurs poses dans `DEPLOY_SLOTS` (tous les ids) au lieu des slots portant une stratégie —
 `KeyError: Missing deployment weight for action 9`. D'où `DEPLOY_STRATEGY_SLOTS`.
 
-**Prochaine action concrète** : ouvrir les worktrees `L1` (tête pointeur de déploiement), `L6`
-(FLY 21.03 en décision) et `L2` (choix de l'unité à activer), `L2` mergé en dernier — c'est lui qui
-touche l'espace d'action et met à jour le verrou d'interface É3 de §0.47. Puis le `--new` unique.
+✅ **`L6` LIVRÉ le 2026-08-07** (worktree `L6-fly-decision`) — « take to the skies » (21.03) est
+une DÉCISION D'AGENT. Le type `fly_declaration` consomme une réserve d'`AGENT_DECISION_TYPE_SLOTS` :
+**`obs_size` inchangé par `L6`** (il valait 14609 ce jour-là ; il vaut **14615** depuis le drapeau
+`declines`, arrivé avec `L1`) et **`TOTAL_ACTION_SIZE` reste 1127**. Le point de choix est posé par
+`arm_fly_declaration_decision` (`action_decoder`) **avant la construction du pool** — c'est le
+moment exact où le moteur tranchait — et couvre d'un seul site les DEUX mouvements que 21.03
+énumère (move et charge, via la garde de phase `_TAKE_TO_THE_SKIES_BY_PHASE`). La constante
+« déclare toujours » de [§0.49](#s0.49) point 5 est **supprimée**. ⚠️ Deux sets et non un :
+`units_fly_declaration_resolved{,_charge}` porte « la question a été posée », que le set de
+déclaration ne peut pas porter (un refus le laisse vide) — sans lui le choix se reposerait à chaque
+masque et l'escouade ne bougerait jamais.
+
+**Prochaine action concrète** : ouvrir les worktrees `L1` (tête pointeur de déploiement) et `L2`
+(choix de l'unité à activer), `L2` mergé en dernier — c'est lui qui touche l'espace d'action et met
+à jour le verrou d'interface É3 de §0.47. Puis le `--new` unique.
 
 <a id="s0.66"></a>
 ### 0.66 Le JOURNAL DU GYM mentait à l'analyzer, et deux règles de mouvement n'étaient pas appliquées — ✅ CORRIGÉ (2026-08-04)
@@ -974,7 +986,7 @@ ambiguïté.
 
 Deux changements de **régime** livrés le 2026-08-02, tous deux **non mesurés**. Ils ne cassent aucun
 contrat d'observation (à leur date, `obs_size` inchangé — la valeur **20828** écrite ici était
-FAUSSE, le contrat valait 20780 le 2026-08-02 ; à HEAD il vaut **14609**, cf. [§0.67](#s0.67)) :
+FAUSSE, le contrat valait 20780 le 2026-08-02 ; à HEAD il vaut **14615**, cf. [§0.67](#s0.67)) :
 ce sont des réglages de run, pas des changements d'architecture.
 
 ⏳ **Revérifié le 2026-08-07 — TOUJOURS OUVERT, à l'identique** : `ai/train.py` **lève** encore
@@ -2356,7 +2368,7 @@ ré-entraînement — c'est le critère de tri, pas l'importance du chantier.
 | **L3** | **P3-4** allocation des pertes (+ ordre de déclaration) | **OBSERVATION** au minimum | Nouveau type dans `AGENT_DECISION_TYPE_IDS` → `DECISION_CTX_BIN_SIZE` → `obs_size` ([observation_entities.py:258-262](../../engine/observation_entities.py#L258-L262)), plus ouverture du registre continu `DECISION_OPTION_CONT_FIELDS` ([:289-292](../../engine/observation_entities.py#L289-L292)). | grosse |
 | **L4** | **P3-5** pile-in / consolidation | **OBSERVATION** au minimum | Idem L3, et décision **spatiale** : [V11_phaseA.md:123-131](V11_phaseA.md#L123) **interdit** le top-K d'hex. **DÉPEND** du bug ouvert [`A_faire/bug_pile_in_bfs_clearance_mismatch.md`](A_faire/bug_pile_in_bfs_clearance_mismatch.md). | grosse |
 | **L5** | **P3-6** move-after-shooting + reactive move | **OBSERVATION** au minimum | Les **bits de règle existent déjà** ([observation_entities.py:108-109](../../engine/observation_entities.py#L108-L109)) : c'est la **DÉCISION** qui manque. | moyenne |
-| **L6** | **P3-7** FLY / Take to the skies | **OBSERVATION** seule | Deux candidats **non-entités** ⇒ `CHOICE_0/1`, `TOTAL_ACTION_SIZE` **inchangé** ; mais un type de décision de plus ⇒ `obs_size`. ⚠️ **`L6` REMPLACE une CONSTANTE DE MOTEUR déjà en place** : depuis [§0.49](#s0.49) point 5, une unité FLY pilotée par le modèle **déclare systématiquement** et paie les 2" — y compris quand c'est un pur désavantage. Tant que `L6` n'est pas livré, une part de la performance mesurée tient à un choix que l'agent ne fait pas. | petite |
+| **L6** | **P3-7** FLY / Take to the skies | ✅ **LIVRÉ le 2026-08-07** — AUCUN contrat cassé | Deux candidats **non-entités** ⇒ `CHOICE_0/1`, `TOTAL_ACTION_SIZE` inchangé (**1127**) ; le type `fly_declaration` consomme une **réserve** d'`AGENT_DECISION_TYPE_SLOTS`, donc `obs_size` inchangé (**14609**) — l'arbitrage 2 du socle a rendu ce chantier gratuit en contrat. La **CONSTANTE DE MOTEUR** de [§0.49](#s0.49) point 5 (« déclare systématiquement », -2" y compris en pur désavantage) est **supprimée** : `took_to_the_skies` ne lit plus que la déclaration, pour tous les sièges. | petite |
 | **L7** | **P3-8a** choix d'arme par l'agent | **OBSERVATION**, + espace d'action selon la voie | `K_WEAPONS_RANGED`/`K_WEAPONS_MELEE` = **10** ([observation_builder.py:209-210](../../engine/observation_builder.py#L209-L210)) dépassent `MAX_DECISION_OPTIONS = 6`. | moyenne à grosse |
 | **L8** | **P3-8b** split-fire par-figurine | **ESPACE D'ACTION** | Aujourd'hui l'**escouade entière** vise UN slot ([macro_intents.py:37](../../engine/macro_intents.py#L37)) ; le par-figurine exige un produit **figurine × arme × slot**, inexprimable dans l'espace actuel. | grosse |
 | **L9** | **P3-8c** charge multi-cibles (11.04 « one or more ») | **ESPACE D'ACTION** | Un seul `target_slot` de charge aujourd'hui ([macro_intents.py:42-43](../../engine/macro_intents.py#L42-L43)). Le PvP le fait déjà. | moyenne |
@@ -3852,8 +3864,16 @@ Land Speeder ne volaient pas** — ni traversée, ni charge FLY.
   est actif) : l'unité volante aurait ignoré le vertical **gratuitement**. Le budget passe par
   `_charge_budget_subhex`, source unique, où traversée et coût sortent de la **même** déclaration.
 
-**5. 🟢 DÉCISION ASSUMÉE — POLITIQUE MOTEUR DE LA DÉCLARATION : une unité FLY pilotée par le modèle
-DÉCLARE SYSTÉMATIQUEMENT.** (Écrite ici parce qu'elle ne figurait **nulle part** dans ce journal,
+**5. ⏳ PÉRIMÉ LE 2026-08-07 — LA CONSTANTE A ÉTÉ SUPPRIMÉE PAR `L6`** ([§0.48](#s0.48)). Ce
+point décrivait une politique moteur *temporaire*, et elle n'existe plus : `took_to_the_skies` ne
+rend plus `True` pour un siège piloté par le modèle, il lit la déclaration que l'agent a posée par
+le point de choix `fly_declaration` (`CHOICE_0` déclare, `CHOICE_1` renonce). Le coût chiffré
+ci-dessous n'est donc plus payé en permanence : il l'est quand l'agent le choisit. Conservé tel
+quel pour l'historique — c'est le texte qui a justifié la constante, et son chiffrage reste la
+mesure de ce que `L6` rend à l'agent.
+
+**5hist. 🟢 DÉCISION ASSUMÉE (2026-07-29, PÉRIMÉE) — POLITIQUE MOTEUR DE LA DÉCLARATION : une unité
+FLY pilotée par le modèle DÉCLARE SYSTÉMATIQUEMENT.** (Écrite ici parce qu'elle ne figurait **nulle part** dans ce journal,
 alors qu'elle change ce que l'agent apprend.) 21.03 fait de « prendre les airs » une **décision du
 joueur actif** ; l'agent ne peut pas encore décider — c'est le chantier **`L6`** du lot
 ([§0.48](#s0.48), P3-7), qui casse le contrat d'observation et sort donc du périmètre de ce
@@ -3869,9 +3889,9 @@ d'ArmageddonAgent (`VanguardVeteranSquadJumpPack`, `...Plasma`, `...Sergeant`, `
 `LandSpeederOnslaughtGatlingCannon`) — **y compris en terrain découvert**, où la traversée
 n'apporte rien et où le malus est donc un **pur désavantage** que l'agent ne peut pas refuser.
 Ordre de grandeur constaté par la sonde in-engine du commit `350da3cf` : `LandSpeeder…` **70 → 60**
-subhex, `VanguardVeteranSquadJumpPack` **60 → 50** (`ish = 5`). ⚠️ Cette constante devra **disparaître
-avec `L6`** : tant qu'elle tient, une part de la performance mesurée de l'agent est imputable à un
-choix qu'il n'a pas fait.
+subhex, `VanguardVeteranSquadJumpPack` **60 → 50** (`ish = 5`). ⚠️ Cette constante **a disparu avec `L6`**
+le 2026-08-07 : tant qu'elle tenait, une part de la performance mesurée de l'agent était imputable
+à un choix qu'il ne faisait pas.
 
 **Rapport au lot de ré-entraînement ([§0.48](#s0.48))** : ceci est une **non-conformité de moteur**,
 pas un changement de contrat — à ne pas confondre avec `L6` (FLY comme **décision d'agent**, P3-7),

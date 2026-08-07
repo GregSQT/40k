@@ -1498,3 +1498,25 @@ def test_verrou_la_phase_de_commandement_refuse_les_verbes_hors_vocabulaire() ->
     gs["zone_intent_free_steps_remaining"] = 0
     ok, out = engine._process_command_phase({"action": "skip"})
     assert ok and out["phase_complete"] is True
+
+
+def test_the_gym_seat_checks_the_waaagh_owner_against_the_state():
+    """Jumeau de `fly_declaration` (audit du 2026-08-07) : la branche gym de
+    `_handle_agent_decision_action` lisait le joueur DANS la décision pour le repasser au
+    vérificateur — le contrôle ne pouvait pas se déclencher. Elle lit désormais
+    `current_player`, donc une décision qui a survécu au tour de son propriétaire est REFUSÉE
+    au lieu d'appeler le Waaagh! pendant le tour adverse.
+    """
+    gs = _command_state(1, p1_faction=ORKS, p2_faction=ASTARTES)
+    command_handlers.command_step_command_abilities(gs)
+    decision = read_pending_agent_decision(gs)
+    assert decision is not None and decision["type"] == "waaagh_call"
+    assert int(decision["player"]) == 1
+
+    engine = _engine(gs)
+    gs["current_player"] = 2
+    with pytest.raises(RuntimeError, match="appartient au joueur 1, pas a 2"):
+        engine._handle_agent_decision_action({"action": "agent_decision", "option_index": 0})
+
+    assert read_pending_agent_decision(gs) is not None, "refus qui efface la décision"
+    assert gs["waaagh_active"][1] is False and gs["waaagh_called"][1] is False
