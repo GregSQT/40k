@@ -5459,7 +5459,14 @@ reproduit **sans** instrumentation, 43 occurrences sur 650 steps d'actions aléa
   par-figurine n'est donc jamais appliquée là où le pool d'ancre et `validate_move_plan`
   divergent quand même. Piste, **non vérifiée**.
 - `_euclidean_path_distance: destination … injoignable en chemin <= 90 … alors que le plan a été
-  validé. Incohérence validation/mesure.`
+  validé. Incohérence validation/mesure.` — ✅ **TRAITÉ (2026-08-07)**, après reproduction en PvP
+  sur un Advance. Cause : en métrique `euclidean`, `explain_move_plan_rejection` ne bornait la
+  figurine que par la ligne droite cube, au motif que le pool par-figurine bornait déjà — or ce
+  pool n'est construit que pour la figurine SÉLECTIONNÉE, jamais pour les sœurs translatées par le
+  move d'escouade rigide. La validation passe désormais par `model_reach_predicate` (les trois
+  géométries, la même source que la charge 11.04 et le pile-in 12.03), donc le plan impossible est
+  refusé dans l'UI au lieu de lever au commit. Verrou : moitié euclidienne de
+  `test_move_budget_geodesic.py` (2 rouges sous mutation).
 - `floor_height_at: no floor at level 1 contains cell … (figurine marquée à l'étage mais hors
   empreinte de plancher)`.
 

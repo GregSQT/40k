@@ -19,6 +19,14 @@ from typing import Iterable, Tuple
 import pytest
 
 from engine.phase_handlers.shared_utils import erode_move_pool_by_squad_block
+from tests._state_invariants import turn_state_invariants, unit_invariants
+
+# MOVE volontairement large devant l'étendue du pool (9 cellules au plus depuis l'ancre) : ce
+# module teste l'érosion par les CELLULES INTERDITES (murs, autre escouade, ER, bord de plateau).
+# L'érosion par le BUDGET DE TRAJET, qui vit dans la même fonction et s'applique aux deux
+# métriques depuis qu'elle ne s'excepte plus de l'euclidien, doit donc y être un no-op — sinon ces
+# tests mesureraient deux choses à la fois. Son propre verrou est test_move_budget_geodesic.py.
+MOVE_SUBHEX = 30
 
 
 def _game_state(
@@ -26,25 +34,45 @@ def _game_state(
     wall_hexes: Iterable[Tuple[int, int]] = (),
     enemy_er: Iterable[Tuple[int, int]] = (),
 ):
-    """game_state minimal : uniquement ce que l'érosion lit.
+    """game_state pour l'érosion : escouade "1" en ligne, ancre (10,10), sœurs (11,10) et (12,10).
 
-    Escouade "1" en ligne horizontale : ancre (10,10), sœurs (11,10) et (12,10).
+    L'unité est réellement présente (``units`` / ``unit_by_id``) : l'érosion lit le FLY et les
+    budgets de l'escouade dans les deux métriques.
     """
     models_cache = {
-        "1#0": {"col": 10, "row": 10, "level": 0, "player": 1, "squad_id": "1", "HP_CUR": 1},
-        "1#1": {"col": 11, "row": 10, "level": 0, "player": 1, "squad_id": "1", "HP_CUR": 1},
-        "1#2": {"col": 12, "row": 10, "level": 0, "player": 1, "squad_id": "1", "HP_CUR": 1},
+        "1#0": {"col": 10, "row": 10, "level": 0, "player": 1, "squad_id": "1", "HP_CUR": 1,
+                "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0},
+        "1#1": {"col": 11, "row": 10, "level": 0, "player": 1, "squad_id": "1", "HP_CUR": 1,
+                "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0},
+        "1#2": {"col": 12, "row": 10, "level": 0, "player": 1, "squad_id": "1", "HP_CUR": 1,
+                "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0},
     }
-    return {
+    unit = {**unit_invariants(),
+        "id": 1, "player": 1, "col": 10, "row": 10, "MOVE": MOVE_SUBHEX, "HP_CUR": 1,
+        "BASE_SIZE": 1, "BASE_SHAPE": "round", "UNIT_KEYWORDS": [],
+    }
+    return {**turn_state_invariants(),
         "models_cache": models_cache,
         "squad_models": {"1": ["1#0", "1#1", "1#2"]},
-        "units_cache": {"1": {"col": 10, "row": 10, "player": 1, "occupied_hexes": set()}},
+        "units_cache": {"1": {"col": 10, "row": 10, "player": 1, "occupied_hexes": set(),
+                              "BASE_SHAPE": "round", "BASE_SIZE": 1}},
+        "units": [unit],
+        "unit_by_id": {"1": unit},
         "board_cols": 44,
         "board_rows": 60,
         "wall_hexes": set(wall_hexes),
         "enemy_adjacent_hexes_player_1": set(enemy_er),
         # Empreintes mono-hex : engagement_zone <= 1 (cf. _compute_unit_occupied_hexes).
-        "config": {"game_rules": {"engagement_zone": 1}},
+        "config": {
+            "game_rules": {"engagement_zone": 1},
+            "move": {"can_move_through_enemy_engagement_zone": True,
+                     "can_move_through_enemy_model": False,
+                     "can_move_through_friendly_model": True},
+        },
+        "phase": "move",
+        "inches_to_subhex": 1,
+        "units_took_to_skies": set(),
+        "terrain_areas": [],
     }
 
 
@@ -66,6 +94,7 @@ def _with_other_squad(gs, cells):
     gs["squad_models"]["2"] = mids
     gs["units_cache"]["2"] = {
         "col": cells[0][0], "row": cells[0][1], "player": 2, "occupied_hexes": set(cells),
+        "BASE_SHAPE": "round", "BASE_SIZE": 1,
     }
     return gs
 

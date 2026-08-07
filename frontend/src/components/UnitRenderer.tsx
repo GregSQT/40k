@@ -102,6 +102,42 @@ function getCircularIconTexture(
 }
 
 /**
+ * Retire l'initiale de repli quand le portrait finit par charger. AU NIVEAU MODULE pour la même
+ * raison que ``makeCircularIconApplier`` : cette closure survit dans ``iconLoadQueue``.
+ */
+function destroyPendingInitial(initial: PIXI.Text): void {
+  initial.destroy();
+}
+
+/**
+ * Fabrique le callback d'installation de la texture circulaire, AU NIVEAU MODULE et non dans
+ * ``renderUnitIcon``.
+ *
+ * Ce n'est pas une préférence de style. Les moteurs JS allouent UN objet Context par portée,
+ * partagé par toutes les closures qui y naissent : une closure écrite dans ``renderUnitIcon``
+ * retiendrait donc aussi ce que ses sœurs capturent — ``onConfirmMove`` et le clone
+ * par-figurine ``unit``. Or celle-ci survit dans ``iconLoadQueue`` tant que l'icône ne charge
+ * pas, c'est-à-dire pour toujours quand l'asset manque. Née ici, son contexte se limite aux
+ * quatre paramètres ci-dessous.
+ */
+function makeCircularIconApplier(
+  texture: PIXI.Texture,
+  iconPath: string,
+  renderer: PIXI.IRenderer,
+  iconDiameter: number
+): (sprite: PIXI.Sprite) => void {
+  return (pending) => {
+    const circular = getCircularIconTexture(texture, iconPath, renderer);
+    if (!circular) return;
+    pending.texture = circular;
+    // La taille est ré-appliquée APRÈS l'échange de texture : PIXI la recalcule depuis la
+    // nouvelle texture, ce qui écraserait le dimensionnement fait au rendu synchrone.
+    pending.width = iconDiameter;
+    pending.height = iconDiameter;
+  };
+}
+
+/**
  * Profil visuel d'une figurine dans une escouade hétérogène (override de l'unité
  * parente). Valeurs déjà prêtes à l'affichage (BASE_SIZE transformé subhex côté backend).
  */
@@ -1279,30 +1315,35 @@ export class UnitRenderer {
     } = this.props;
 
     if (unit.ICON) {
+      // Use red border icon for Player 2 units
+      const iconPath = unit.player === 2 ? unit.ICON.replace(".webp", "_red.webp") : unit.ICON;
+
+      // Get or create texture (PIXI.Texture.from uses cache if available)
+      // This ensures textures are reused from cache, preventing black flashing
+      const texture = PIXI.Texture.from(
+        iconPath,
+        isPreview ? { resourceOptions: { crossorigin: "anonymous" } } : undefined
+      );
+
+      // ``ICON`` est TOUJOURS renseigné côté moteur (require_key), mais l'asset peut manquer sur
+      // le disque : ``PIXI.Texture.from`` ne lève alors RIEN (le 404 est asynchrone) et le sprite
+      // reste vide. Tant que la texture n'est pas ``valid``, on pose donc l'initiale du type SOUS
+      // le sprite (même zIndex, insérée avant lui), puis on la RETIRE au chargement plutôt que de
+      // la laisser recouverte : un sprite à alpha < 1 (ghost de move 0.42, ghost de niveau 0.3,
+      // just-killed 0.4, cible non tirable 0.5, preview d'attaque 0.8) la laisserait transparaître.
+      // Asset absent → ``valid`` reste false et ``loaded`` ne part jamais : l'initiale reste, c'est
+      // le comportement voulu. Volontairement SANS écouteur ``error`` ni cache d'échecs : un
+      // écouteur par figurine et par rendu s'accumulerait sur la BaseTexture partagée (fuite) et
+      // redessinerait, au moment du 404, une initiale à chaque position capturée depuis.
+      // Le dessin est HORS du ``try`` À DESSEIN : ``drawUnitInitial`` peut lever (``getUnitInitial``
+      // sur un profil sans type) et cette erreur doit remonter TELLE QUELLE ; dans le ``try``, elle
+      // serait avalée puis rejouée depuis le ``catch``, où le second jet n'est plus rattrapable.
+      const initialText = texture.baseTexture.valid ? null : this.drawUnitInitial(iconZIndex);
+      if (initialText) {
+        enqueueForIconLoad(iconPath, texture.baseTexture, initialText, destroyPendingInitial);
+      }
+
       try {
-        // Use red border icon for Player 2 units
-        const iconPath = unit.player === 2 ? unit.ICON.replace(".webp", "_red.webp") : unit.ICON;
-
-        // Get or create texture (PIXI.Texture.from uses cache if available)
-        // This ensures textures are reused from cache, preventing black flashing
-        const texture = PIXI.Texture.from(
-          iconPath,
-          isPreview ? { resourceOptions: { crossorigin: "anonymous" } } : undefined
-        );
-
-        // ``ICON`` est TOUJOURS renseigné côté moteur (require_key), mais l'asset peut manquer sur
-        // le disque : ``PIXI.Texture.from`` ne lève alors RIEN (le 404 est asynchrone) et le sprite
-        // reste vide. Tant que la texture n'est pas ``valid``, on pose donc l'initiale du type SOUS
-        // le sprite (même zIndex, insérée avant lui). Illustration présente → elle est recouverte dès
-        // le chargement, et les rendus suivants (texture en cache, ``valid``) ne la dessinent plus.
-        // Asset absent → ``valid`` reste false pour toujours, l'initiale reste visible.
-        // Volontairement SANS écouteur ``error`` ni cache d'échecs : un écouteur par figurine et par
-        // rendu s'accumulerait sur la BaseTexture partagée (fuite) et redessinerait, au moment du
-        // 404, une initiale à chaque position capturée depuis (initiales fantômes).
-        if (!texture.baseTexture.valid) {
-          this.drawUnitInitial(iconZIndex);
-        }
-
         const nonRoundIconR = getNonRoundIconRadius(unit, HEX_RADIUS);
         // Source unique : ratio partagé (cf. getIconDiameterRatio), × HEX_RADIUS.
         const iconDiameter = getIconDiameterRatio(unit, ICON_SCALE) * HEX_RADIUS;
@@ -1314,23 +1355,20 @@ export class UnitRenderer {
         // Base ronde : rogner l'illustration carrée en disque (rayon = rayon de collision) via la
         // texture circulaire mutualisée → les coins ne débordent plus sur les voisines tangentes.
         if (nonRoundIconR == null) {
-          // Renderer capturé en local : la closure ci-dessous survit dans ``iconLoadQueue`` tant que
-          // l'icône ne charge pas ; passer par ``this`` y retiendrait tout ``UnitRendererProps``
-          // (modelCenters, modelMetas, callbacks) d'un rendu périmé.
           const renderer = this.props.app.renderer;
           const circular = getCircularIconTexture(texture, iconPath, renderer);
           if (circular) {
             sprite.texture = circular;
           } else {
             // UN écouteur par icône, pas un par rendu : cf. la fuite documentée dans
-            // ``iconLoadQueue`` (asset absent → ``loaded`` ne part jamais → rien ne se retire).
-            enqueueForIconLoad(iconPath, texture.baseTexture, sprite, () => {
-              const t = getCircularIconTexture(texture, iconPath, renderer);
-              if (!t) return;
-              sprite.texture = t;
-              sprite.width = iconDiameter;
-              sprite.height = iconDiameter;
-            });
+            // ``iconLoadQueue``. Sprite en ARGUMENT et callback fabriqué au niveau module :
+            // cf. ``makeCircularIconApplier``.
+            enqueueForIconLoad(
+              iconPath,
+              texture.baseTexture,
+              sprite,
+              makeCircularIconApplier(texture, iconPath, renderer, iconDiameter)
+            );
           }
         }
 
@@ -1420,27 +1458,35 @@ export class UnitRenderer {
         }
         this.target.addChild(sprite);
       } catch {
-        this.drawUnitInitial(iconZIndex);
+        // L'initiale déjà posée sous le sprite (texture pas encore ``valid``) TIENT LIEU de repli :
+        // la redessiner superposerait deux ``PIXI.Text`` au même point, aux alphas cumulés.
+        if (!initialText) this.drawUnitInitial(iconZIndex);
       }
     } else {
       this.drawUnitInitial(iconZIndex);
     }
   }
 
-  /** Initiale du type d'unité en lieu et place du portrait. */
-  private drawUnitInitial(iconZIndex: number): void {
+  /** Initiale du type d'unité en lieu et place du portrait. Renvoie le texte posé, pour que
+   * l'appelant puisse le retirer si le portrait finit par charger. */
+  private drawUnitInitial(iconZIndex: number): PIXI.Text {
     const { unit, centerX, centerY, HEX_RADIUS, ICON_SCALE } = this.props;
 
     interface UnitWithFlags extends Unit {
       isJustKilled?: boolean;
       isGhost?: boolean;
+      isLevelGhost?: boolean;
     }
     const unitWithFlags = unit as UnitWithFlags;
 
-    // Ghost unit styling
+    // Ghost unit styling — mêmes teintes que le portrait qu'elle remplace (cf. renderUnitIcon) :
+    // le ghost de NIVEAU est gris franc, le ghost de move garde la teinte move.
     let textColor = 0xffffff;
     let textAlpha = 1.0;
-    if (unitWithFlags.isGhost) {
+    if (unitWithFlags.isLevelGhost) {
+      textColor = 0x888888;
+      textAlpha = 0.3;
+    } else if (unitWithFlags.isGhost) {
       textColor = this.getCSSColor("--icon-move-color");
       textAlpha = 0.65;
     }
@@ -1466,6 +1512,7 @@ export class UnitRenderer {
     unitText.alpha = textAlpha;
     unitText.zIndex = iconZIndex;
     this.target.addChild(unitText);
+    return unitText;
   }
 
   /**

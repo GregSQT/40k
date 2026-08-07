@@ -175,8 +175,9 @@ def test_consolidation_still_works_without_the_wall() -> None:
 # `distance_metric.move` vaut `euclidean` dans la config reelle : c'est le mode de TOUT le PvP et
 # du bot PvE. Les tests ci-dessus tournent en `hex` (donc `geodesic`) ; sans ce bloc, la moitie
 # euclidienne du predicat reste non couverte — et elle a d'abord ete livree INERTE, retombant sur
-# la ligne droite. La justification empruntee au move (« deja borne par le pool par-figurine ») ne
-# vaut que pour le move : la charge et le pile-in n'ont aucun pool, c'est leur raison d'etre ici.
+# la ligne droite. La justification empruntee au move (« deja borne par le pool par-figurine »)
+# n'etait meme pas vraie pour le move (le pool ne couvre pas les soeurs du squad move rigide) : il
+# passe desormais par le meme predicat, cf. test_move_budget_geodesic.py (moitie euclidienne).
 
 def _euclidean() -> Any:
     return patch(

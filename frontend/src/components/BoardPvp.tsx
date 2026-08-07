@@ -67,6 +67,7 @@ import {
 import { syncMoveDestinationPoolRefs } from "../utils/movePoolRefsSync";
 import { normalizeMaskLoopsFromApi } from "../utils/movePreviewFootprintMaskLoops";
 import { type OathUnitsCache, pickOathTargetAtHex } from "../utils/oathTargetSelection";
+import { destroyLayerChild } from "../utils/pixiTeardown";
 import { pointInAnyMaskLoop, pointInMaskLoopsEvenOdd } from "../utils/pointInPolygon";
 import {
   getNonRoundBasePixelLayout,
@@ -9820,9 +9821,7 @@ export default function Board({
       for (const child of toDestroy) {
         if (child === savedHighlightsThroughDestroy) continue;
         if (child === savedFloorContourThroughDestroy) continue;
-        if (child.destroy) {
-          child.destroy({ children: true, texture: false, baseTexture: false });
-        }
+        destroyLayerChild(child);
       }
 
       // If units changed, clear the units layer so it gets rebuilt
@@ -9830,9 +9829,7 @@ export default function Board({
         const unitChildren = [...savedUnitsLayer.children];
         savedUnitsLayer.removeChildren();
         for (const child of unitChildren) {
-          if (child.destroy) {
-            child.destroy({ children: true, texture: false, baseTexture: false });
-          }
+          destroyLayerChild(child);
         }
       }
 
@@ -10001,7 +9998,19 @@ export default function Board({
     // Vider UNIQUEMENT quand on reconstruit les unités (unitsChanged) : le redraw du ghost est dans
     // la boucle gardée par `if (unitsChanged)`. Vider à chaque render (même sans rebuild) laisse le
     // layer vide sur les renders où unitsChanged=false → le ghost disparaît/réapparaît = clignotement.
-    if (unitsChanged) movePreviewGhostLayerRef.current.removeChildren();
+    // DÉTRUIRE, pas seulement détacher (même traitement que le layer d'unités plus haut) : les
+    // sprites du ghost sont inscrits dans ``iconLoadQueue`` tant que leur icône n'a pas chargé, et
+    // cette file ne purge que sur ``sprite.destroyed``. Détachés sans destruction, ils y resteraient
+    // à vie et la file grossirait à chaque rebuild — la fuite serait déplacée, pas fermée.
+    // Textures d'icône conservées (mutualisées par chemin), textures de texte libérées : cf.
+    // ``destroyLayerChild``.
+    if (unitsChanged) {
+      const ghostChildren = [...movePreviewGhostLayerRef.current.children];
+      movePreviewGhostLayerRef.current.removeChildren();
+      for (const child of ghostChildren) {
+        destroyLayerChild(child);
+      }
+    }
     const movePreviewGhostLayer = movePreviewGhostLayerRef.current;
 
     const chargeMaxDistance = gameConfig?.charge?.charge_max_distance;

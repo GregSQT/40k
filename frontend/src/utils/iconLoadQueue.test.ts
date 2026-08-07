@@ -11,6 +11,7 @@ function makeSource(): IconLoadSource & { listeners: Array<() => void>; fire: ()
   const listeners: Array<() => void> = [];
   return {
     listeners,
+    valid: false,
     once(_event: "loaded", handler: () => void) {
       listeners.push(handler);
       return this;
@@ -41,20 +42,71 @@ describe("enqueueForIconLoad", () => {
     expect(source.listeners.length).toBe(1);
   });
 
-  it("ne retient pas les sprites détruits par les redraws précédents", () => {
+  it("passe le sprite en ARGUMENT (contrat qui permet à l'appelant de ne pas le capturer)", () => {
     const source = makeSource();
-    const icon = "purge-des-detruits.png";
+    const icon = "sprite-en-argument.png";
+    const sprite = makeSprite();
+    let received: DestroyableSprite | null = null;
 
-    const survivor = makeSprite();
-    enqueueForIconLoad(icon, source, survivor, () => {});
-    for (let redraw = 0; redraw < 200; redraw++) {
-      const dead = makeSprite();
-      enqueueForIconLoad(icon, source, dead, () => {});
-      dead.destroyed = true; // le redraw suivant détruit le sprite du précédent
+    enqueueForIconLoad(icon, source, sprite, (pending) => {
+      received = pending;
+    });
+    source.fire();
+
+    // Sans cet argument, l'appelant devrait fermer sur ``sprite`` — la file le retiendrait en
+    // référence forte et les ``WeakRef`` ne serviraient plus à rien.
+    expect(received).toBe(sprite);
+  });
+
+  it("applique un sprite DÉTACHÉ mais non détruit (removeChildren du layer de ghosts)", () => {
+    const source = makeSource();
+    const icon = "detache-non-detruit.png";
+    const applied: string[] = [];
+
+    // ``removeChildren()`` détache sans détruire : ``destroyed`` reste faux. Le sprite reste
+    // donc légitimement servi s'il est encore joignable — c'est le ramasse-miettes, et non une
+    // purge sur ``destroyed``, qui borne la file dans ce cas.
+    const detached = makeSprite();
+    enqueueForIconLoad(icon, source, detached, () => applied.push("detache"));
+    source.fire();
+
+    expect(applied).toEqual(["detache"]);
+  });
+
+  it("garde une file BORNÉE malgré les redraws, et la borne ne dépend pas de leur nombre", () => {
+    // La purge est amortie (elle ne repasse que quand la file a doublé) : la file n'est donc
+    // pas minimale à tout instant. Ce qui ferme la fuite n'est pas sa taille exacte, c'est
+    // qu'elle ne CROISSE PAS avec le nombre de rendus — d'où la comparaison des deux volumes.
+    function queueAfter(redraws: number, icon: string): number {
+      const source = makeSource();
+      for (let redraw = 0; redraw < redraws; redraw++) {
+        const dead = makeSprite();
+        enqueueForIconLoad(icon, source, dead, () => {});
+        dead.destroyed = true; // le redraw suivant détruit le sprite du précédent
+      }
+      return pendingIconQueueSize(icon);
     }
 
-    // Le dernier inscrit n'a pas encore été détruit : le survivant initial + lui.
-    expect(pendingIconQueueSize(icon)).toBe(2);
+    const after200 = queueAfter(200, "borne-200.png");
+    const after2000 = queueAfter(2000, "borne-2000.png");
+
+    // Pas d'égalité stricte : la taille dépend de l'endroit du cycle de doublement où l'on
+    // s'arrête. Ce qui doit tenir, c'est la BORNE — sans purge, ce serait 200 puis 2000.
+    expect(after200).toBeLessThan(64);
+    expect(after2000).toBeLessThan(64);
+  });
+
+  it("ne fait RIEN sur une source déjà chargée (loaded ne repartirait jamais)", () => {
+    const source = makeSource();
+    source.valid = true;
+    const icon = "deja-chargee.png";
+
+    enqueueForIconLoad(icon, source, makeSprite(), () => {});
+
+    // Sans ce garde-fou, l'entrée resterait à vie : c'est le cas d'une texture valide dont le
+    // diamètre est nul, où le rognage circulaire échoue sans qu'aucun chargement soit à venir.
+    expect(source.listeners.length).toBe(0);
+    expect(pendingIconQueueSize(icon)).toBe(0);
   });
 
   it("applique chaque sprite en attente au chargement, avec SON propre effet", () => {

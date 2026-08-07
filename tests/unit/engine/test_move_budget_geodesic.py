@@ -17,6 +17,9 @@ le check géodésique rejette.
 """
 
 from typing import Any, Dict, Iterable, List, Tuple
+from unittest.mock import patch
+
+import pytest
 
 from engine.phase_handlers.shared_utils import (
     build_rigid_plan,
@@ -24,6 +27,7 @@ from engine.phase_handlers.shared_utils import (
     calculate_hex_distance,
     erode_move_pool_by_squad_block,
     explain_move_plan_rejection,
+    move_plan_path_distances,
 )
 from tests._state_invariants import turn_state_invariants, unit_invariants
 
@@ -144,7 +148,7 @@ def test_straight_line_within_budget_but_path_exceeds_is_rejected():
     reason = explain_move_plan_rejection(
         plan, gs, {"budget_per_model": BUDGET, "require_coherency": False}
     )
-    assert reason is not None and "injoignable en chemin" in reason, reason
+    assert reason is not None and "injoignable en trajet" in reason, reason
 
 
 def test_same_plan_without_wall_is_accepted():
@@ -192,6 +196,115 @@ def test_erosion_and_validation_agree_on_every_pool_cell():
             plan, gs, {"budget_per_model": BUDGET, "require_coherency": False}
         )
         assert reason is None, f"ancre {(cc, rr)} conservée mais rejetée : {reason}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MÉTRIQUE EUCLIDIENNE (PvP) — l'autre moitié de l'invariant
+# ─────────────────────────────────────────────────────────────────────────────
+
+# `distance_metric.move` vaut `euclidean` dans la config réelle : c'est le mode de TOUT le PvP.
+# Les tests ci-dessus tournent en `hex` (donc `geodesic`). En euclidien, la validation ne bornait
+# QUE par la ligne droite cube, au motif que le pool par-figurine
+# (`movement_build_model_destinations_pool`) bornait déjà — or ce pool n'est construit que pour la
+# figurine SÉLECTIONNÉE, jamais pour les sœurs translatées par le move d'escouade rigide. Une sœur
+# posée derrière un obstacle passait donc la validation ET le voile rouge du preview, puis
+# `commit_move` levait « injoignable en chemin … Incohérence validation/mesure » (RuntimeError
+# non rattrapable, plan déjà accepté par l'UI).
+
+
+def _euclidean() -> Any:
+    return patch(
+        "engine.phase_handlers.movement_handlers._move_distance_metric", return_value="euclidean"
+    )
+
+
+def test_euclidean_straight_line_within_budget_but_path_exceeds_is_rejected():
+    """PvP : sœur à vol d'oiseau <= budget, trajet any-angle > budget → REJET (plus de crash)."""
+    with _euclidean():
+        gs = _gs(WALL)
+        sc, sr = _sister_dest(gs)
+        # Garantit qu'on exerce bien le bug : le check ligne-droite historique AURAIT accepté.
+        assert calculate_hex_distance(10, 10, sc, sr) <= BUDGET
+        plan = _rigid_plan(ANCHOR_DEST[0], ANCHOR_DEST[1], gs)
+        reason = explain_move_plan_rejection(
+            plan, gs, {"budget_per_model": BUDGET, "require_coherency": False}
+        )
+        assert reason is not None and "injoignable en trajet" in reason, reason
+
+
+def test_euclidean_same_plan_without_wall_is_accepted():
+    """Contre-épreuve : le refus vient bien du mur, pas de la métrique euclidienne."""
+    with _euclidean():
+        gs = _gs(set())
+        plan = _rigid_plan(ANCHOR_DEST[0], ANCHOR_DEST[1], gs)
+        reason = explain_move_plan_rejection(
+            plan, gs, {"budget_per_model": BUDGET, "require_coherency": False}
+        )
+        assert reason is None, reason
+
+
+def test_euclidean_validation_and_measure_agree_on_the_same_plan():
+    """L'invariant lui-même : ce que la validation ACCEPTE, la mesure du commit sait le MESURER.
+
+    Le plan rigide sur mur est exactement celui qui levait au commit. On vérifie les deux côtés
+    sur le MÊME plan : la validation le refuse, et la mesure (qui, elle, n'a jamais menti)
+    confirme l'injoignabilité en levant. Tant que les deux côtés s'accordent, le refus arrive
+    dans l'UI (voile rouge) au lieu d'une RuntimeError après acceptation.
+    """
+    with _euclidean():
+        gs = _gs(WALL)
+        plan = _rigid_plan(ANCHOR_DEST[0], ANCHOR_DEST[1], gs)
+        assert explain_move_plan_rejection(
+            plan, gs, {"budget_per_model": BUDGET, "require_coherency": False}
+        ) is not None
+        with pytest.raises(RuntimeError, match="Incoherence validation/mesure"):
+            move_plan_path_distances(plan, gs, "normal")
+
+        gs_open = _gs(set())
+        plan_open = _rigid_plan(ANCHOR_DEST[0], ANCHOR_DEST[1], gs_open)
+        assert explain_move_plan_rejection(
+            plan_open, gs_open, {"budget_per_model": BUDGET, "require_coherency": False}
+        ) is None
+        assert move_plan_path_distances(plan_open, gs_open, "normal"), "mesure vide"
+
+
+def test_euclidean_erosion_and_validation_agree_on_every_pool_cell():
+    """JUMEAU de `test_erosion_and_validation_agree_on_every_pool_cell`, côté euclidien.
+
+    L'érosion excluait la métrique euclidienne (« traité comme cube-exact »), ce qui n'était vrai
+    que tant que la validation s'accordait le même raccourci ligne droite. La validation bornant
+    maintenant le TRAJET, une ancre conservée dont une sœur est injoignable ferait lever
+    `execute_squad_move` (« incohérence masque/exécution », ValueError qui tue le run).
+    """
+    with _euclidean():
+        gs = _gs(WALL)
+        pool = {(c, 10): float(BUDGET) for c in range(4, 12)}
+        kept = erode_move_pool_by_squad_block(gs, "1", dict(pool))
+        for (cc, rr) in kept:
+            plan = _rigid_plan(cc, rr, gs)
+            reason = explain_move_plan_rejection(
+                plan, gs, {"budget_per_model": BUDGET, "require_coherency": False}
+            )
+            assert reason is None, f"ancre {(cc, rr)} conservée mais rejetée : {reason}"
+        # VERT VACANT : une érosion qui viderait tout satisferait la boucle ci-dessus sans rien
+        # prouver. L'ancre (7,10) est celle dont la sœur ne passe pas ; les ancres dégagées, elles,
+        # DOIVENT survivre.
+        assert ANCHOR_DEST not in kept, "l'ancre dont la sœur est injoignable doit être érodée"
+        assert (5, 10) in kept, "sur-érosion : l'ancre d'origine est trivialement légale"
+
+
+def test_euclidean_erosion_drops_anchor_whose_sister_path_exceeds_budget():
+    """Jumeau euclidien de `test_erosion_drops_anchor_whose_sister_path_exceeds_budget` : c'est
+    bien le MUR qui retire l'ancre (7,10), pas un sur-filtrage de la métrique."""
+    pool = {(c, 10): float(BUDGET) for c in range(5, 12)}
+    with _euclidean():
+        kept_wall = erode_move_pool_by_squad_block(_gs(WALL), "1", dict(pool))
+        kept_open = erode_move_pool_by_squad_block(_gs(set()), "1", dict(pool))
+    assert ANCHOR_DEST not in kept_wall, (
+        "ancre conservée alors que la sœur ne peut pas l'atteindre en trajet any-angle — le masque "
+        "l'offrirait puis execute_squad_move lèverait « incohérence masque/exécution »"
+    )
+    assert ANCHOR_DEST in kept_open, "sur-filtrage : sans mur cette ancre est parfaitement légale"
 
 
 def _gym_state_for_cellmap() -> Dict[str, Any]:
