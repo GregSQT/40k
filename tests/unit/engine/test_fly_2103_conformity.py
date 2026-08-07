@@ -552,7 +552,7 @@ def test_in_engine_armageddon_flying_units_fly_and_pay_for_it():
 
             # 2. CHOICE_1 (« ne pas déclarer ») : toujours au sol, et budget PLEIN.
             gs["phase"] = "move"
-            assert arm_fly_declaration_decision(gs, uid) is True, utype
+            assert arm_fly_declaration_decision(gs, uid) is not None, utype
             apply_fly_declaration_decision(gs, uid, False)
             assert took_to_the_skies(gs, unit, uid, charge=False) is False, utype
             assert get_squad_move_budget(uid, gs, "normal") == int(unit["MOVE"]), utype
@@ -561,7 +561,7 @@ def test_in_engine_armageddon_flying_units_fly_and_pay_for_it():
 
             # 3. CHOICE_0 (« déclarer ») en CHARGE — jumeau, set dédié : traversée ET 2".
             gs["phase"] = "charge"
-            assert arm_fly_declaration_decision(gs, uid) is True, utype
+            assert arm_fly_declaration_decision(gs, uid) is not None, utype
             apply_fly_declaration_decision(gs, uid, True)
             assert took_to_the_skies(gs, unit, uid, charge=True) is True, utype
             assert _charge_fly_active(gs, unit, uid) is True, utype

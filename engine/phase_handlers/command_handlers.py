@@ -169,14 +169,13 @@ def command_step_start_of_phase(game_state: Dict[str, Any]) -> None:
     game_state["units_attacked"] = set()
     game_state["units_advanced"] = set()
     game_state["advance_rolls"] = {}
-    game_state["units_took_to_skies"] = set()
-    game_state["units_took_to_skies_charge"] = set()
-    # 21.03 `L6` — MÊME cycle de vie que les deux déclarations ci-dessus, et il n'y en a pas
-    # d'autre possible : la question « prends-tu les airs ? » vaut pour le mouvement du tour, donc
-    # elle se repose au tour suivant. Les oublier ici gèlerait la déclaration du tour 1 pour
-    # toute la partie (une escouade ne serait plus jamais interrogée).
-    game_state["units_fly_declaration_resolved"] = set()
-    game_state["units_fly_declaration_resolved_charge"] = set()
+    # 21.03 `L6` — déclarations de vol ET traces « la question a été posée », les deux ayant le
+    # MÊME cycle de vie (la question vaut pour le mouvement du tour, elle se repose au tour
+    # suivant). Les clés sont DÉRIVÉES de `_TAKE_TO_THE_SKIES_BY_PHASE` : les réénumérer ici
+    # ferait de tout ajout de phase un oubli silencieux (une escouade plus jamais interrogée).
+    from engine.phase_handlers.movement_handlers import fly_declaration_reset_state
+
+    game_state.update(fly_declaration_reset_state())
     game_state["units_reacted_this_enemy_turn"] = set()
 
     game_state["reactive_macro_order_current_window"] = []
@@ -383,29 +382,21 @@ def apply_waaagh_call_decision(game_state: Dict[str, Any], player: int, called: 
     être ADEPTUS ASTARTES. L'appel à `arm_oath_selection` qui suivait ici couvrait une armée
     portant les deux mots-clés — un état que le modèle de données ne produit plus.
 
-    EFFACE la décision en attente elle-même : c'est le pendant exact d'`apply_oath_selection`,
-    et l'oublier laisserait le moteur arrêté sur une décision déjà jouée. Le faire ICI plutôt
-    que chez l'appelant donne UN seul endroit où la séquence « appliquer puis effacer » existe —
-    elle a trois appelants (gym, siège IA, PvP).
+    EFFACE la décision en attente elle-même, par le préambule commun à tout `apply_*_decision`
+    (`consume_pending_agent_decision` : vérifie le type et le propriétaire, puis efface) : c'est
+    le pendant exact d'`apply_oath_selection`, et l'oublier laisserait le moteur arrêté sur une
+    décision déjà jouée. Le faire ICI plutôt que chez l'appelant donne UN seul endroit où la
+    séquence « appliquer puis effacer » existe — elle a trois appelants (gym, siège IA, PvP).
 
     « Passer » n'est PAS un non-événement à ignorer : ne pas appeler ne consomme pas le
     « once per battle », donc `waaagh_called` reste à False et la décision se represente au tour
     suivant. C'est exactement ce qui fait du Waaagh! une décision de TEMPO.
     """
-    from engine.agent_decision import clear_pending_agent_decision, read_pending_agent_decision
+    from engine.agent_decision import consume_pending_agent_decision
 
-    pending = read_pending_agent_decision(game_state)
-    if pending is None or str(require_key(pending, "type")) != "waaagh_call":
-        raise RuntimeError(
-            "apply_waaagh_call_decision: aucune decision 'waaagh_call' en attente — le masque "
-            "n'aurait pas du ouvrir d'action CHOICE."
-        )
-    if int(require_key(pending, "player")) != int(player):
-        raise RuntimeError(
-            f"apply_waaagh_call_decision: la decision en attente appartient au joueur "
-            f"{pending['player']}, pas a {player}."
-        )
-    clear_pending_agent_decision(game_state)
+    consume_pending_agent_decision(
+        game_state, decision_type="waaagh_call", player=int(player)
+    )
     if called:
         call_waaagh(game_state, int(player))
 

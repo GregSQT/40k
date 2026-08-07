@@ -440,13 +440,8 @@ class ActionDecoder:
         #
         # Le moteur REND LA MAIN comme le fait 08.04 pour le Waaagh! : masque exclusivement
         # `CHOICE_*`, pool vide, l'activation reprendra au step suivant avec la déclaration écrite.
-        if arm_fly_declaration_decision(game_state, squad_id):
-            armed_decision = read_pending_agent_decision(game_state)
-            if armed_decision is None:
-                raise RuntimeError(
-                    "arm_fly_declaration_decision a rendu True sans poser de decision — "
-                    "le masque n'aurait aucune action a ouvrir."
-                )
+        armed_decision = arm_fly_declaration_decision(game_state, squad_id)
+        if armed_decision is not None:
             return self._agent_decision_mask(armed_decision), []
 
         advance_roll: Optional[int] = None

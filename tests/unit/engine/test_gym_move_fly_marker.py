@@ -88,7 +88,7 @@ def _declare_flight(eng: W40KEngine, squad_id: str = "1") -> None:
     from engine.macro_intents import CHOICE_BASE
     from engine.phase_handlers.movement_handlers import arm_fly_declaration_decision
 
-    if not arm_fly_declaration_decision(eng.game_state, squad_id):
+    if arm_fly_declaration_decision(eng.game_state, squad_id) is None:
         return
     semantic = eng.action_decoder.convert_squad_action(CHOICE_BASE, eng.game_state)
     ok, _ = eng._process_squad_action(semantic)

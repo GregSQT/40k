@@ -14,6 +14,7 @@ chaque mouvement, y compris en terrain découvert où la traversée n'apporte ri
 from __future__ import annotations
 
 from typing import Any, Dict, List
+from unittest.mock import patch
 
 import pytest
 
@@ -54,7 +55,7 @@ def _gs(
     """`game_state` minimal : une escouade FLY d'une figurine, un ennemi hors de portée.
 
     Le siège est choisi par `gym` / `pve` — ce sont EXACTEMENT les deux drapeaux que lit
-    `unit_is_ai_controlled`, donc les deux seuls sièges à qui le point de choix s'ouvre.
+    `_unit_is_ai_controlled`, donc les deux seuls sièges à qui le point de choix s'ouvre.
     """
     keywords = [{"keywordId": "FLY"}] if fly else []
     flyer: Dict[str, Any] = {**unit_invariants(),
@@ -134,7 +135,7 @@ def test_a_flying_squad_piloted_by_the_model_is_asked_in_both_covered_phases(pha
     dans les DEUX phases, et pas seulement en mouvement (le jumeau oublié historique)."""
     gs = _gs(phase=phase)
     assert fly_declaration_decision_is_due(gs, "1") is True
-    assert arm_fly_declaration_decision(gs, "1") is True
+    assert arm_fly_declaration_decision(gs, "1") is not None
     decision = read_pending_agent_decision(gs)
     assert decision is not None
     assert decision["type"] == "fly_declaration"
@@ -150,7 +151,7 @@ def test_no_question_outside_the_moves_2103_covers(phase):
     surtout aucun step gaspillé à poser une question sans objet."""
     gs = _gs(phase=phase)
     assert fly_declaration_decision_is_due(gs, "1") is False
-    assert arm_fly_declaration_decision(gs, "1") is False
+    assert arm_fly_declaration_decision(gs, "1") is None
     assert read_pending_agent_decision(gs) is None
 
 
@@ -158,7 +159,7 @@ def test_no_question_without_the_fly_keyword():
     """Sans FLY, 21.03 ne s'applique pas : poser le choix offrirait une option illégale."""
     gs = _gs(fly=False)
     assert fly_declaration_decision_is_due(gs, "1") is False
-    assert arm_fly_declaration_decision(gs, "1") is False
+    assert arm_fly_declaration_decision(gs, "1") is None
 
 
 def test_a_human_seat_is_never_asked_it_has_the_ui_toggle():
@@ -167,7 +168,7 @@ def test_a_human_seat_is_never_asked_it_has_the_ui_toggle():
     donc sur une partie qui ne repart jamais."""
     gs = _gs(gym=False, pve=False)
     assert fly_declaration_decision_is_due(gs, "1") is False
-    assert arm_fly_declaration_decision(gs, "1") is False
+    assert arm_fly_declaration_decision(gs, "1") is None
 
 
 def test_the_pve_ai_seat_is_asked_it_answers_with_the_same_policy_as_the_gym():
@@ -210,7 +211,7 @@ def test_refusing_leaves_a_trace_otherwise_the_question_loops_forever():
 
     assert gs["units_took_to_skies"] == set()
     assert fly_declaration_decision_is_due(gs, "1") is False
-    assert arm_fly_declaration_decision(gs, "1") is False
+    assert arm_fly_declaration_decision(gs, "1") is None
 
 
 def test_the_two_phases_are_asked_separately():
@@ -357,7 +358,7 @@ def test_the_engine_routes_the_choice_action_to_the_declaration(option_index, ex
 
     gs = engine.game_state
     gs["phase"] = "move"
-    assert arm_fly_declaration_decision(gs, flyer_id) is True
+    assert arm_fly_declaration_decision(gs, flyer_id) is not None
 
     semantic = engine.action_decoder.convert_squad_action(CHOICE_BASE + option_index, gs)
     assert semantic == {"action": "agent_decision", "option_index": option_index}
@@ -370,3 +371,66 @@ def test_the_engine_routes_the_choice_action_to_the_declaration(option_index, ex
     assert read_pending_agent_decision(gs) is None
     assert (flyer_id in gs["units_took_to_skies"]) is expected
     assert fly_declaration_decision_is_due(gs, flyer_id) is False
+
+
+def test_the_observation_describes_the_squad_the_choice_is_about():
+    """L'observation servie AVEC le masque de la décision doit décrire l'escouade CONCERNÉE.
+
+    Cas propre à `L6` : la décision est armée PAR la construction du masque, à l'intérieur de
+    `_build_observation_and_mask` — le contrôle d'entrée de cette fonction ne l'avait donc pas
+    vue, et le pool d'éligibles qu'elle reçoit est alors VIDE. Sans la branche dédiée,
+    l'observateur retombait sur « la première escouade vivante du joueur courant » : l'agent
+    aurait décrit une escouade et déclaré le vol pour une autre (§0.40 point 1).
+
+    Le moteur est CONDUIT jusqu'à ce moment (aucun état posé à la main : un `game_state` bricolé
+    n'aurait prouvé que lui-même), et on observe l'ARGUMENT réellement passé au constructeur
+    d'observation — c'est le squad_id qui est en cause, et lui seul.
+    """
+    import numpy as np
+
+    from ai.unit_registry import UnitRegistry
+    from engine.observation_builder import ObservationBuilder
+    from engine.w40k_core import W40KEngine
+
+    engine = W40KEngine(
+        rewards_config="default",
+        training_config_name="x1",
+        controlled_agent="ArmageddonAgent",
+        active_agents=None,
+        scenario_file=_ARMAGEDDON_TRAINING_SCENARIO,
+        unit_registry=UnitRegistry(),
+        quiet=True,
+        gym_training_mode=True,
+        training_n_envs=1,
+    )
+    engine.reset()
+
+    real_build = ObservationBuilder.build_squad_observation
+    observed: List[str] = []
+
+    def _spy(self, game_state, squad_id):
+        observed.append(str(squad_id))
+        return real_build(self, game_state, squad_id)
+
+    decision = None
+    with patch.object(ObservationBuilder, "build_squad_observation", _spy):
+        for _ in range(400):
+            decision = read_pending_agent_decision(engine.game_state)
+            if decision is not None and decision["type"] == "fly_declaration":
+                break
+            mask = engine.get_action_mask()
+            legal = [i for i, opened in enumerate(np.asarray(mask, dtype=bool)) if opened]
+            assert legal, f"masque vide en phase {engine.game_state['phase']}"
+            # Premier coup légal : on ne cherche pas à bien jouer, seulement à atteindre le
+            # premier point de choix de vol que la partie produit d'elle-même.
+            _obs, _r, terminated, truncated, _info = engine.step(legal[0])
+            assert not (terminated or truncated), "épisode terminé avant toute unité volante"
+
+    assert decision is not None and decision["type"] == "fly_declaration", (
+        "SONDE MUETTE : aucune déclaration de vol atteinte en 400 steps"
+    )
+    assert observed, "SONDE MUETTE : aucune observation construite"
+    assert observed[-1] == str(decision["unit_id"]), (
+        f"dernière observation construite pour {observed[-1]}, alors que la décision en attente "
+        f"porte sur {decision['unit_id']}"
+    )
