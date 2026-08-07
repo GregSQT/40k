@@ -92,8 +92,8 @@ tenues à jour et **ne doivent pas servir de référence** — les relire dans l
 | **§0.55** | Le **holdout d'évaluation** `TacticalBot` est DANS l'enveloppe d'entraînement — effet plafond | ✅ **LIVRÉ le 2026-08-04 — le mètre est GELÉ** | **1** (avant toute mesure de référence) | `tactical` gelé à **`w_objective 2.0`** (mesuré sur **x1**) : l'agent passe de **0.89 à 0.72** contre lui, et le bot de **dernier (0.357) à premier (0.636)** sur 6. `combined` inchangé à 0.8200 — le holdout pèse 0.0, c'est le contrôle que son statut est intact. ✅ Croisement `bot_eval/faction/<faction>/vs_<bot>` publié (méthode dédiée, dérivé du tally unique). 🔴 **Deux des trois leviers de la spec n'avaient aucune prise** : `w_enemy` est INERTE pour ce bot (mesuré + verrou), et le pas `0.5 → 0.8` tombait dans la partie morte d'une réponse en MARCHE. 🔴 **Piège à retenir : `--training-config` ne choisit PAS le plateau** (`config.json` → x5 ; les évals de référence passent `--resolution 1`) — une campagne entière a été jetée pour ça, et en x5 le diagnostic s'inversait. Détail → §0.55. |
 | **§0.14** | Re-mesure du run — win-rate par matchup | ✅ **MESURE OBTENUE le 2026-08-03** — ⏳ **PÉRIMÉE depuis les chantiers 01/03/04** : le modèle mesuré n'est plus chargeable, cf. [§0.67](#s0.67) | — | Run de **200 000 épisodes** (2026-08-02 12 h 26 → 2026-08-03 02 h 05, 19 points d'éval, 820 k → 12,1 M steps). `eval_bots/combined_win_rate` **0,283 → max 0,837 → 0,743**. Éval rejouée le 2026-08-03 sur le snapshot ROBUSTE (`robust_0.8049`), APRÈS §0.64/§0.65 : **combined 0.8200**, `tactical` 0.89, `defensive` 0.87, `greedy` 0.84, `adaptive` 0.83, **`control` 0.82**, **`value_trade` 0.74** (le pire), **0 troncature**. Le seuil de gating `vs_control ≥ 0.50` est **franchi** — le **0.04 du run 4 est périmé**. ⚠️ 0,743 → 0,820 est un écart best-contre-final, PAS l'effet de §0.64. Détail → §0.14. |
 | **[§9](V11_phaseA.md#s9)** | Phase A' — P2 + P3-0/1/2 | 🟢 **LIVRÉS ET MERGÉS sur `main`** — restent **P3-3→8**, **P4**, **P5** | **2** | ⚠️ Aucune des quatre livraisons n'est **MESURÉE**. ⚠️ P3-0 est **inerte dans le training** (aucun roster SM/Ork ne porte de rule choice). Détail → §0.42 et §0.43 (en §0hist), et [§9](V11_phaseA.md#s9). |
-| **§0.44** | Tête pointeur de **déploiement** — les slots 4-8 n'ont pas de tête dédiée | 🟠 **OUVERT** — reporté après la mesure de référence (arbitrage utilisateur du 2026-07-29) | **3** | Les ids 4-8 tombent dans la plage des cellules de move (`MOVE_CELL_BASE = 0`) : leurs logits sortent de la **conv 1×1** (`_move_logits`), pas d'une tête dédiée ; `deploy_emb` n'atteint le calcul que par le **conditionnement du tronc**. Ajouter un `deploy_query_net`, jumeau de `choice_query_net` — ce qui oblige à lire la phase dans la policy. Élément `L1` du lot §0.48 ; `L11` (`N_DEPLOY_SLOTS`) à trancher **avant**. Détail → §0.44. |
-| **§0.48** | Inventaire des chantiers qui cassent un contrat + **périmètre du lot de ré-entraînement** | 🟠 **OUVERT** — le lot = **`L1` + `L2` + `L6`** + **[§0.64](#s0.64)** (LoS de déploiement alignée le 2026-08-03 ; ⚠️ **n'impose PLUS de run à elle seule** — mesuré le 2026-08-03 : le modèle d'avant joue à 0.82 sur `main` d'après, cf. §0.14 — elle **voyage** avec `L1`/`L2`/`L6`) | **4** | ✅ **Le prérequis d'ordre est LEVÉ au 2026-08-02** : les quatre chantiers exigés avant la mesure de référence — rampe de déploiement (§0.46 pt 2), FLY 21.03 (§0.49), bots d'éval (§0.47 É4), 01.07 (§0.50) — sont **tous mergés**. ✅ **L'arbitrage 2 est LIVRÉ le 2026-08-07** (socle : règles d'armes en ids, types de décision et slots de déploiement pré-dimensionnés — cf. §0.67). 🟢 Le lot est **arbitré le 2026-08-07 : `L1` + `L2` + `L6` y entrent**. Détail → §0.48. |
+| **§0.44** | Tête pointeur de **déploiement** — les slots 4-11 n'ont pas de tête dédiée | ✅ **LIVRÉ le 2026-08-07** (élément `L1` du lot §0.48) — ⏳ **NON MESURÉ** : le lot impose un `--new`, la mesure viendra du run du lot | — | `deploy_query_net`, jumeau exact de `choice_query_net`, score les 8 slots ; ses logits **remplacent** les colonnes 4-11 de la conv 1×1 **en phase de déploiement seulement**, le routage lisant le bit `phase_deployment` de `global_bin` par échantillon. `deploy_emb` est exposé PAR SLOT en queue du vecteur de features ; le tronc n'en garde que l'agrégation (jumeau des ennemis et des candidats de décision). Ni `obs_size` ni `TOTAL_ACTION_SIZE` (**1127**) touchés — architecture seule (le 14609 → **14615** du même jour vient du drapeau `declines`, pas d'ici). Détail → §0.44. |
+| **§0.48** | Inventaire des chantiers qui cassent un contrat + **périmètre du lot de ré-entraînement** | 🟠 **OUVERT** — le lot = **`L1` + `L2` + `L6`** + **[§0.64](#s0.64)** (LoS de déploiement alignée le 2026-08-03 ; ⚠️ **n'impose PLUS de run à elle seule** — mesuré le 2026-08-03 : le modèle d'avant joue à 0.82 sur `main` d'après, cf. §0.14 — elle **voyage** avec `L1`/`L2`/`L6`) | **4** | ✅ **Le prérequis d'ordre est LEVÉ au 2026-08-02** : les quatre chantiers exigés avant la mesure de référence — rampe de déploiement (§0.46 pt 2), FLY 21.03 (§0.49), bots d'éval (§0.47 É4), 01.07 (§0.50) — sont **tous mergés**. ✅ **L'arbitrage 2 est LIVRÉ le 2026-08-07** (socle : règles d'armes en ids, types de décision et slots de déploiement pré-dimensionnés — cf. §0.67). 🟢 Le lot est **arbitré le 2026-08-07 : `L1` + `L2` + `L6` y entrent** — ✅ **`L1` LIVRÉ le 2026-08-07** ([§0.44](#s0.44)), restent `L2` et `L6`. Détail → §0.48. |
 | **§0.46** | Résidus du 2026-07-29 | ✅ **CLOSE le 2026-08-03** — les trois points sont livrés | — | ✅ **SOLDÉ le 2026-08-03** (arbitrage : GARDER, sous forme optimisée). Les 4 issues du cache de déploiement deviennent des **compteurs publiés en permanence** (`perf/*`) au lieu de traces invisibles hors `--debug` ; les 37 sites passent par `engine/debug_trace.py` (canaux `W40K_TRACE`, formatage différé) ; garde verrouillée par **21 tests**, dont une **analyse AST** (fichiers découverts par leur import) qui interdit f-string, formatage anticipé et mot-clé. La passe `/simplify` du même jour y a trouvé **un bug** (`flush=True` résiduel → `TypeError` dès que le canal s'allume) et **un verrou qui mentait** (canal `train` hors garde). ⏳ Première mesure : **100 % de reconstruction** du cache de déploiement — signalé, non ouvert. Détail → §0.46. |
 | **§0.47** | Relecture T2→T5 du 2026-07-29 — 9 écarts | 🟠 **OUVERT — reste É9 (second siège + second scénario)** ; É5 et É7 ✅ corrigés le 2026-08-02 (É1, É2, É3, É4, É6 ✅ livrés **et mergés** ; **É8 est tombé**) | **6** | **É8 n'a plus d'objet** : `ai/analyzer.py` ne construit plus aucun chemin de board à la main (il lit `get_board_config()` / `get_board_size()`). **É9 était mal énoncé** : les **3 graines SONT couvertes** (`test_t5_bare_loop.py`, `for seed in (1, 2, 3)`) ; ce qui manque est le **second scénario** et les **2 sièges**. Détail → §0.47. |
 | **§0.50** | Non-conformité **01.07** — travail de suite | ✅ **CLOS le 2026-08-02** (statut corrigé le 2026-08-03 : la colonne disait encore OUVERT alors que la cellule disait SOLDÉE ; **revérifié sur `main`** — `get("battle_shocked")` hors tests **0 hit**, `computeControlCounts`/`isObjectiveScoringWindow` **0 hit** dans le front) | — | ✅ **SOLDÉE le 2026-08-02** — les deux résidus sont traités : (1) le contrat de `battle_shocked` est **tranché en lecture STRICTE**, les 7 `get(..., False)` migrés en `require_key` ; (2) la 3ᵉ lecture d'OC du frontend (journal d'événements de `BoardReplay.tsx`) diffère l'instantané moteur au lieu de recompter. Détail → §0.50. |
@@ -103,17 +103,20 @@ tenues à jour et **ne doivent pas servir de référence** — les relire dans l
 ✅ **Contrôle de conformité du 2026-08-07** (vérification par lecture + exécution, PAS une
 livraison — aucune ligne de code touchée ; il REMPLACE le contrôle du 2026-08-02, dont les
 chiffres de contrat sont périmés) :
-- `obs_size` : `ObservationBuilder.SQUAD_OBS_SIZE_TARGET` = **14609** (20727 avant le socle du
-  2026-08-07, cf. §0.67), et les **7** profils de
-  `config/agents/ArmageddonAgent/ArmageddonAgent_training_config.json` portent **14609**
+- `obs_size` : `ObservationBuilder.SQUAD_OBS_SIZE_TARGET` = **14615** (14609 avant le drapeau
+  `declines` du bloc candidat de décision, 20727 avant le socle du 2026-08-07, cf. §0.67), et les
+  **7** profils de
+  `config/agents/ArmageddonAgent/ArmageddonAgent_training_config.json` portent **14615**
   (`x1`, `x1_long`, `x1_selfplay`, `x1_debug`, `x5_new`, `x5_append`, `x5_debug`).
-- `squad_obs_shapes()` : **26** clés ; `sum(prod(shape))` grille exclue = **14609**, égale à
+- `squad_obs_shapes()` : **26** clés ; `sum(prod(shape))` grille exclue = **14615**, égale à
   `SQUAD_OBS_SIZE_TARGET` (exécuté).
 - `macro_intents.TOTAL_ACTION_SIZE` = **1127** (dont `OATH_SLOT_BASE` 1107, 20 slots) ;
   `DEPLOY_SLOTS` = ids **4..8** ; `spatial_grid.GRID_CHANNELS` = **9** ;
   `MOVE_CELL_BASE` = 0 / `MOVE_CELL_COUNT` = 1024.
 - `pointer_policy` porte **5** requêtes : `query_net`, `charge_query_net`, `fight_query_net`,
   `choice_query_net`, `oath_query_net`. **Toujours aucun `deploy_query_net`** (§0.44 confirmée).
+  ⏳ **PÉRIMÉ LE JOUR MÊME par la livraison de `L1`** (2026-08-07, plus tard dans la journée) :
+  elles sont **6**, `deploy_query_net` existe — cf. §0.44.
 - Les slots d'Oath sont **consommés** (chantier 03) : `action_decoder` les décode
   (`OATH_SLOTS`, `OATH_SLOT_BASE`) et `env_wrappers` les câble à `pending_oath_selection` — la
   mention « aucun consommateur avant le chantier 03 » de §0.48 est périmée.
@@ -130,7 +133,10 @@ chiffres de contrat sont périmés) :
   présents ; `action_decoder` décode bien `target_slot` pour la charge et la mêlée (§0.41, §0.43).
 - **§0.44 TOUJOURS CONFIRMÉE dans le code** : `deploy_emb` sort de `deploy_cand_encoder` et n'entre
   QUE dans le tronc (concat) — aucune tête ne le lit ; les logits des ids **4-8** viennent bien de
-  `_move_logits` (conv 1×1). Aucun `deploy_query_net`.
+  `_move_logits` (conv 1×1). Aucun `deploy_query_net`. ⏳ **PÉRIMÉ le 2026-08-07 par `L1`** :
+  `deploy_emb` est désormais exposé PAR SLOT en queue du vecteur de features
+  (`deploy_embeddings_slice`) et le tronc n'en voit plus que l'agrégation ; les ids **4-11**
+  sortent de `deploy_query_net` en phase de déploiement.
 - **§0.40** : les 5 points sont dans le code vif (`get_deployment_active_unit` qui lève,
   `squad_grid_anchor`, filtre `on_battlefield`, `open_deploy_slot_count` partagé,
   `deployment_slot_candidates`, purge du cache).
@@ -1638,12 +1644,48 @@ l'utilisateur** : le holdout est de nouveau mesurable comme critère, il n'est p
 adopté comme tel.
 
 <a id="s0.44"></a>
-### 0.44 Tête pointeur de déploiement — les slots 4-8 n'ont pas de tête dédiée — 🟠 OUVERT, REPORTÉ APRÈS LE RUN 4 (2026-07-29)
+### 0.44 Tête pointeur de déploiement — les slots 4-11 n'avaient pas de tête dédiée — ✅ LIVRÉ le 2026-08-07 (élément `L1`), NON MESURÉ
 
-**En une phrase.** [§0.40](#s0.40) a donné à l'agent la **description** des 5 candidats de
-déploiement ; il lui manque encore de quoi les **comparer** proprement.
+**Ce qui est livré (2026-08-07).** `ai/pointer_policy.py` porte une **6ᵉ requête**,
+`deploy_query_net`, jumelle exacte de `choice_query_net` : les logits des ids `4-11` sont
+`q_deploy · c_i / sqrt(d)` contre les embeddings de `deploy_cand_encoder`, et ils **remplacent**
+les colonnes correspondantes de la conv 1×1 des cellules.
 
-**Le constat, vérifié dans le code.** Les ids d'action `4-8` tombent dans la plage des cellules de
+- **Exposition.** `SpatialCombinedExtractor` publie `deploy_embeddings_slice()`, ajoutée **en
+  dernier** (derrière les candidats de décision) pour ne décaler aucune borne existante. Le tronc
+  ne reçoit plus les 8 embeddings aplatis mais leur **agrégation masquée** (`2 × entity_dim`) :
+  c'est le traitement des ennemis et des candidats de décision, et l'argument qui justifiait
+  l'aplatissement (« les logits sortent d'une tête indexée par le slot ») tombe avec cette tête.
+- **Routage — le point dur.** Un même id signifie « cellule de move » ou « slot de pose » selon la
+  phase. La policy lit le bit `phase_deployment` de `global_bin`, publié par l'extracteur
+  (`deployment_phase_flag_index()`, calculé à partir de la composition réelle du tronc), et
+  bascule par `torch.where` **par échantillon** — un lot vectorisé mélange les phases, une branche
+  scalaire trancherait pour tout le lot. Hors déploiement les colonnes restent celles de la conv :
+  le bloc `deploy_cand_*` y est nul par contrat, donc router quand même donnerait 8 logits égaux
+  sur 8 cellules parfaitement jouables. Le bit ne peut valoir que 0 ou 1 (`global_bin` est hors
+  `norm_obs_keys`) et un contrôle explicite lève s'il cesse de l'être.
+- **Contrats.** `L1` ne touche **ni** `obs_size` **ni** `TOTAL_ACTION_SIZE` (**1127**) — c'est un
+  changement d'**architecture** seul. ⚠️ `obs_size` vaut néanmoins **14615** et non 14609 : le
+  drapeau `declines` du bloc candidat de décision est arrivé le MÊME jour, dans le même commit, et
+  il n'a rien à voir avec cette entrée (cf. l'historique d'`AI_OBSERVATION.md`). Les 3 slots réservés (`DEPLOY_STRATEGY_COUNT = 5` <
+  `DEPLOY_SLOT_COUNT = 8`) sont scorables mais le masque ne les ouvre jamais : leur embedding est
+  nul, leur logit aussi, et ils restent masqués — c'est le pré-dimensionnement de `L11`, pas un
+  défaut.
+- **Verrous** (`tests/unit/ai/test_pointer_head.py`, `test_entity_encoder_extractor.py`) : les
+  deux moitiés du routage (déploiement → pointeur, **et** les 5 autres phases → conv) rougissent
+  ensemble si le sens du `torch.where` est inversé ; l'alignement `4 + i ↔ candidat i` (invariant
+  D1) ; l'index du drapeau vérifié phase par phase sur le vecteur RÉEL ; le routage par
+  échantillon sur un lot mélangé ; le gradient de `deploy_query_net` exigé **non nul** (il est
+  branché par un `torch.where`, donc un `.grad` existant ne prouverait rien).
+- **Limite assumée, nommée.** L'**ingress** (mise en place depuis les réserves, 20.04, en phase de
+  MOUVEMENT) ouvre lui aussi les ids 4-11, mais `deploy_cand_*` n'y est **pas rempli** (§0.40 : le
+  bloc est conditionné à la phase `deployment`). Ces ids y restent donc sur la conv 1×1, comme
+  avant ce chantier — aucune régression, aucun gain. Le combler suppose soit un bit d'observation
+  supplémentaire (`setting_up`), soit remplir le bloc hors déploiement : les deux **changent
+  `obs_size`**, ce que le périmètre de `L1` interdit explicitement. À trancher avec le prochain
+  chantier qui casse le contrat d'observation.
+
+**Historique — le constat d'origine (2026-07-29).** Les ids d'action `4-8` tombent dans la plage des cellules de
 move (`MOVE_CELL_BASE = 0`, `MOVE_CELL_COUNT = 1024`). Leurs logits sortent donc de la **conv 1×1
 de la carte** (`_move_logits`), aux cellules `(0, 4..8)` de la fenêtre égocentrique — des cellules
 qui n'ont aucun rapport avec les hexes candidats. Aucune tête ne lit les embeddings du bloc
@@ -1651,7 +1693,7 @@ qui n'ont aucun rapport avec les hexes candidats. Aucune tête ne lit les embedd
 (`move_ctx_net`, dont la non-linéarité permet bien de réordonner les cellules entre elles, mais
 indirectement).
 
-**Ce qu'il faudrait faire.** Un `deploy_query_net`, jumeau de `choice_query_net` : le tronc émet une
+**Ce qu'il fallait faire — la conception, tenue à la lettre.** Un `deploy_query_net`, jumeau de `choice_query_net` : le tronc émet une
 requête, on la produit scalairement contre les 5 embeddings de candidats déjà calculés par
 `deploy_cand_encoder`, et ces 5 logits **remplacent** ceux des cellules `4-8`. Le point dur est là :
 un même id signifie « cellule de move » en phase move et « slot de déploiement » en déploiement, le
@@ -2309,7 +2351,7 @@ ré-entraînement — c'est le critère de tri, pas l'importance du chantier.
 
 | Réf | Chantier | Contrat cassé | Preuve | Ampleur |
 |---|---|---|---|---|
-| **L1** | [§0.44](#s0.44) tête pointeur de **déploiement** | **ARCHITECTURE** seule | `deploy_query_net` serait le jumeau de `choice_query_net` ([pointer_policy.py:211](../../ai/pointer_policy.py#L211)) ; il faut **exposer `deploy_emb` hors du tronc**, où il n'entre aujourd'hui que par concaténation ([spatial_extractor.py:293-299](../../ai/spatial_extractor.py#L293-L299), [:494-503](../../ai/spatial_extractor.py#L494-L503)) ⇒ `features_dim` ([:304-312](../../ai/spatial_extractor.py#L304-L312)) et `_split_features` changent. `obs_size` **inchangé**. | moyenne |
+| **L1** ✅ **LIVRÉ 2026-08-07** | [§0.44](#s0.44) tête pointeur de **déploiement** | **ARCHITECTURE** seule | ✅ Livré comme prévu : `deploy_query_net` jumeau de `choice_query_net`, `deploy_emb` exposé PAR SLOT en queue du vecteur (`deploy_embeddings_slice`, le tronc n'en garde que l'agrégation), routage sur `phase_deployment`. Ni `obs_size` ni `TOTAL_ACTION_SIZE` (**1127**) touchés par ce chantier — vérifié (le 14609 → 14615 du même jour vient du drapeau `declines`, pas de `L1`). ⏳ Conception d'origine ci-dessous : `deploy_query_net` serait le jumeau de `choice_query_net` ([pointer_policy.py:211](../../ai/pointer_policy.py#L211)) ; il faut **exposer `deploy_emb` hors du tronc**, où il n'entre aujourd'hui que par concaténation ([spatial_extractor.py:293-299](../../ai/spatial_extractor.py#L293-L299), [:494-503](../../ai/spatial_extractor.py#L494-L503)) ⇒ `features_dim` ([:304-312](../../ai/spatial_extractor.py#L304-L312)) et `_split_features` changent. `obs_size` **inchangé**. | moyenne |
 | **L2** | **P3-3** choix de l'unité à activer ([V11_phaseA.md:818-822](V11_phaseA.md#L818)) | **ESPACE D'ACTION + ARCHITECTURE** | Les candidats sont **mes escouades**, donc des entités observées ⇒ doctrine **slots + pointeur** ([macro_intents.py:63-66](../../engine/macro_intents.py#L63-L66)), pas `CHOICE_k` — d'autant que `SQUAD_TOP_K = 20` ([observation_builder.py:222](../../engine/observation_builder.py#L222)) dépasse `MAX_DECISION_OPTIONS = 6` et que [agent_decision.py:58](../../engine/agent_decision.py#L58) **lèverait**. Blocage structurel : les embeddings **ALLIÉS ne sont pas exposés** à la policy, ils sont **agrégés** ([spatial_extractor.py:460-468](../../ai/spatial_extractor.py#L460-L468)) et `features_dim` ([:306-311](../../ai/spatial_extractor.py#L306-L311)) ne contient que les **ennemis**. | **grosse** |
 | **L3** | **P3-4** allocation des pertes (+ ordre de déclaration) | **OBSERVATION** au minimum | Nouveau type dans `AGENT_DECISION_TYPE_IDS` → `DECISION_CTX_BIN_SIZE` → `obs_size` ([observation_entities.py:258-262](../../engine/observation_entities.py#L258-L262)), plus ouverture du registre continu `DECISION_OPTION_CONT_FIELDS` ([:289-292](../../engine/observation_entities.py#L289-L292)). | grosse |
 | **L4** | **P3-5** pile-in / consolidation | **OBSERVATION** au minimum | Idem L3, et décision **spatiale** : [V11_phaseA.md:123-131](V11_phaseA.md#L123) **interdit** le top-K d'hex. **DÉPEND** du bug ouvert [`A_faire/bug_pile_in_bfs_clearance_mismatch.md`](A_faire/bug_pile_in_bfs_clearance_mismatch.md). | grosse |
@@ -2369,7 +2411,7 @@ ré-entraînement — c'est le critère de tri, pas l'importance du chantier.
 **« Grouper » ne signifie PAS « tout faire ».** Le lot est un **périmètre choisi**, pas la totalité
 de l'inventaire ci-dessus. Motifs :
 
-- **L1** est **déjà cadré** (§0.44 en donne la conception complète).
+- **L1** est ✅ **LIVRÉ le 2026-08-07** (§0.44). Restent `L2` et `L6` avant le `--new` du lot.
 - **L2** porte le **plus gros gain stratégique annoncé** : aujourd'hui l'unité activée est
   **toujours** `eligible_units[0]` ([V11_phaseA.md:818-822](V11_phaseA.md#L818)).
 - **L6** est **petit** et ne coûte presque rien une fois le retrain payé.

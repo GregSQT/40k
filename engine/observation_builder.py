@@ -929,6 +929,8 @@ class ObservationBuilder:
         for slot, option in enumerate(options):
             for effect_id in require_key(option, "effect_ids"):
                 opts[slot, decision_option_bin_index(f"grants_{effect_id}")] = 1.0
+            if require_key(option, "declines"):
+                opts[slot, decision_option_bin_index("declines")] = 1.0
             opts[slot, decision_option_bin_index("present")] = 1.0
 
     def _encode_deployment_candidates(

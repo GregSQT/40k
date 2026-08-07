@@ -658,8 +658,8 @@ def _decision_state(player: int) -> dict:
         "player": player,
         "unit_id": "u9",
         "options": [
-            {"label": "A", "effect_ids": ("reroll_1_tohit_fight",), "payload": {}},
-            {"label": "B", "effect_ids": ("reroll_1_save_fight",), "payload": {}},
+            {"label": "A", "effect_ids": ("reroll_1_tohit_fight",), "declines": False, "payload": {}},
+            {"label": "B", "effect_ids": ("reroll_1_save_fight",), "declines": False, "payload": {}},
         ],
     }
 

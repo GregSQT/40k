@@ -194,15 +194,13 @@ mesurées depuis l'ancre de zone et **diffèrent** de celles qu'aurait produites
 le bloc est nul hors déploiement et pour une autre escouade ; et la distance hex vectorisée rend
 **exactement** `calculate_hex_distance`.
 
-⚠️ **Ce qui reste hors périmètre de ce document** (architecture de la policy, pas contrat
-d'observation) : les ids `4-8` tombent dans la plage des cellules de move (`MOVE_CELL_BASE = 0`),
-donc leurs logits sortent de la **conv 1×1 de la carte**, aux cellules `(0, 4..8)` de la fenêtre
-égocentrique — pas d'une tête dédiée. Le bloc candidat atteint cette tête par le **conditionnement
-du tronc** (`move_ctx_net`), non par un pointeur. Une tête pointeur de déploiement, jumelle de
-`choice_query_net`, est le prolongement naturel ; elle exigerait de distinguer « cellule de move »
-de « slot de déploiement » sur les mêmes ids, donc de lire la phase dans la policy. Suivi en
-[`V11_agent_rework.md`](../V11_agent_rework.md#s0.44) **§0.44**, entrée OUVERTE du tableau d'état —
-arbitré le 2026-07-29 : **reporté après le run 4**.
+✅ **Ce qui restait hors périmètre de ce document est LIVRÉ le 2026-08-07** (architecture de la
+policy, pas contrat d'observation) : les ids `4-11` tombent toujours dans la plage des cellules de
+move (`MOVE_CELL_BASE = 0`), mais leurs logits sortent désormais de `deploy_query_net`, jumelle de
+`choice_query_net`, qui score les embeddings de ce bloc — et non plus de la **conv 1×1 de la
+carte**, aux cellules `(0, 4..11)`. La policy distingue les deux familles par le bit
+`phase_deployment` de `global_bin`, seul signal qui les sépare. Détail en
+[`V11_agent_rework.md`](../V11_agent_rework.md#s0.44) **§0.44** (élément `L1` du lot §0.48).
 
 ### 4. ✅ CORRIGÉ (2026-07-29) — le vecteur mesure depuis la zone, comme la grille
 

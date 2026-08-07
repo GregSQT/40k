@@ -483,6 +483,7 @@ def test_choice_action_routes_to_that_option(phase_state, option_index):
             {
                 "label": f"option {i}",
                 "effect_ids": ("reroll_1_tohit_fight",) if i % 2 == 0 else ("reroll_1_save_fight",),
+                "declines": False,
                 "payload": {"x": i},
             }
             for i in range(CHOICE_COUNT)

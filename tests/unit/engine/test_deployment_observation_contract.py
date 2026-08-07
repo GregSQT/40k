@@ -747,8 +747,14 @@ def test_squad_obs_size_target_matches_the_schema():
     Cette clause dépend du ROSTER, qu'aucune autre feature ne porte — les mots-clés de
     sous-faction des unités ALLIÉES ne sont pas observés, et la clause compte les unités MORTES.
 
-    C'est le DERNIER changement d'`obs_size` de la séquence : les chantiers 04 à 06 n'utilisent
-    que des dimensions déjà déclarées.
+    Les chantiers 04 à 06 n'utilisent que des dimensions déjà déclarées.
+
+    Le 2026-08-07, un drapeau `declines` s'ajoute au registre de candidat de décision, d'où
+    14609 -> 14615 (1 bit x 6 slots). Ce n'est pas un enrichissement : les DEUX candidats de
+    `waaagh_call` sortaient la MÊME ligne `[0…0, present=1]` — effets de faction, donc aucun bit
+    `grants_*` de part et d'autre. Encodeur de candidat partagé et tête pointeur sans biais par
+    slot : logits égaux, gradients égaux, l'appel du Waaagh! était un pile-ou-face que PPO ne
+    pouvait pas apprendre. Le retrain `--new` du lot §0.48 l'absorbe.
 
     Ce verrou valait 20768 tant que le point 3 restait ouvert : les quatre autres points ne
     touchent QUE le contenu de l'observation de déploiement, jamais sa taille — donc aucun modèle
@@ -760,7 +766,7 @@ def test_squad_obs_size_target_matches_the_schema():
         DEPLOY_CAND_BIN_SIZE, DEPLOY_CAND_CONT_SIZE, N_DEPLOY_SLOTS,
     )
 
-    assert ObservationBuilder.SQUAD_OBS_SIZE_TARGET == 14609
+    assert ObservationBuilder.SQUAD_OBS_SIZE_TARGET == 14615
     assert N_DEPLOY_SLOTS * (DEPLOY_CAND_CONT_SIZE + DEPLOY_CAND_BIN_SIZE) == 96, (
         "le bloc candidat de déploiement a changé de taille : mettre à jour `obs_size` dans les "
         "7 profils de la config d'agent, et l'historique d'AI_OBSERVATION.md"

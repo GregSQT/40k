@@ -41,7 +41,7 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│  OBSERVATION SQUAD — Dict de TENSEURS D'ENTITÉS  (14 609 scalaires)    │
+│  OBSERVATION SQUAD — Dict de TENSEURS D'ENTITÉS  (14 615 scalaires)    │
 ├────────────────────────────────────────────────────────────────────────┤
 │  CONTEXTE GLOBAL                                                       │
 │    global_cont            (13,)                =      13               │
@@ -75,13 +75,13 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 │                                                                        │
 │  DÉCISION AGENT — candidats de CHOICE_i        MAX_DECISION_OPTIONS = 6│
 │    decision_ctx_bin       (9,)                 =       9               │
-│    decision_options_bin   (6, 8)               =      48               │
+│    decision_options_bin   (6, 9)               =      54               │
 │                                                                        │
 │  DÉPLOIEMENT — candidats des actions 4-11        N_DEPLOY_SLOTS = 8    │
 │    deploy_cand_cont       (8, 8)               =      64               │
 │    deploy_cand_bin        (8, 4)               =      32               │
 ├────────────────────────────────────────────────────────────────────────┤
-│  TOTAL vectoriel (= obs_size)                      14 609              │
+│  TOTAL vectoriel (= obs_size)                      14 615              │
 │  + grid  (9, 32, 32) = 9 216, fournie À PART (non comptée)             │
 └────────────────────────────────────────────────────────────────────────┘
 
@@ -381,7 +381,8 @@ decision_options_bin[c][ 3] = grants_reroll_1_towound                      # 0.0
 decision_options_bin[c][ 4] = grants_reroll_towound_target_on_objective    # 0.0 / 1.0
 decision_options_bin[c][ 5] = grants_shoot_after_advance                   # 0.0 / 1.0
 decision_options_bin[c][ 6] = grants_shoot_after_flee                      # 0.0 / 1.0
-decision_options_bin[c][ 7] = present                                        # 0.0 / 1.0 — masque de candidat
+decision_options_bin[c][ 7] = declines                                      # 0.0 / 1.0 — ce candidat NE FAIT RIEN
+decision_options_bin[c][ 8] = present                                        # 0.0 / 1.0 — masque de candidat
 ```
 
 **Ce registre n'est PAS le vocabulaire observé** (`UNIT_RULE_EFFECT_IDS`), et c'est délibéré
@@ -408,13 +409,26 @@ d'un autre. C'est aussi ce qui rend légitime l'encodeur **partagé** (`decision
 tête **pointeur** qui score les candidats (`ai/pointer_policy.py`) : le nombre de candidats est
 gratuit en paramètres, et ce que le réseau apprend d'un candidat vaut pour tous.
 
-**Une exception, et une seule : `waaagh_call`** (chantier 03). Ses deux candidats portent un
-`effect_ids` **vide** — `DECISION_GRANTABLE_EFFECT_IDS` est dérivé des `grantsRuleIds` des rosters,
-or les effets du Waaagh! viennent de la faction, pas d'une datasheet. Les deux candidats sont donc
-décrits par le même vecteur nul, et ce qui les distingue est le couple (type de décision, INDEX) :
-`CHOICE_0` appelle, `CHOICE_1` passe, ordre CONTRACTUEL. C'est admissible **ici et seulement ici**
-parce que l'ensemble des candidats est FIXE — contrairement à `rule_choice`, où il varie d'une
-unité à l'autre et où l'index seul ne voudrait rien dire.
+**Un candidat qui ne fait RIEN est décrit par `declines`**, le dernier drapeau du bloc avant
+`present`. `waaagh_call` (chantier 03) porte un `effect_ids` **vide** des DEUX côtés —
+`DECISION_GRANTABLE_EFFECT_IDS` est dérivé des `grantsRuleIds` des rosters, or les effets du
+Waaagh! viennent de la faction, pas d'une datasheet. Sans `declines`, les deux candidats
+sortaient la MÊME ligne `[0…0, present=1]`.
+
+> ⚠️ **Ce paragraphe disait le contraire jusqu'au 2026-08-07** : « ce qui les distingue est le
+> couple (type de décision, INDEX) ». C'était faux, et mesuré comme tel. L'index n'est écrit dans
+> AUCUN scalaire d'observation, et la tête pointeur score chaque candidat par un produit scalaire
+> nu, sans biais par slot (`pointer_policy._point`) — elle est agnostique à la position par
+> construction, c'est le paragraphe ci-dessus qui l'exige. Deux lignes égales donnaient donc des
+> logits égaux et des gradients égaux : l'appel du Waaagh! était un pile-ou-face que PPO ne
+> pouvait pas apprendre, à aucun pas d'entraînement.
+
+`declines` est **exigé** de chaque candidat, jamais déduit de `not effect_ids` : « n'accorde aucun
+effet observable » et « ne fait rien » sont deux choses différentes, et la déduction aurait marqué
+`declines` sur le candidat qui APPELLE le Waaagh!. Il vaut 0 pour les deux candidats de
+`rule_choice`, qui n'a pas d'option « ne rien faire » — c'est une information juste, pas un
+remplissage. Et il généralise à toute décision optionnelle à venir (L4 pile-in, L5 move réactif,
+L6 FLY 21.03) sans rien ajouter au schéma.
 
 **Le bloc reste nul** quand aucune décision n'est en attente, **ou** quand celle en attente
 appartient à l'autre camp : décrire à un joueur un choix qui n'est pas le sien lui ferait observer
@@ -486,14 +500,14 @@ colonnes calculées une fois pour les 5 stratégies, au lieu d'une passe scalair
 appeler 5 fois l'ancienne sélection aurait coûté **871 ms** par step. La parité de choix avec
 l'implémentation scalaire est exacte, vérifiée hexe par hexe sur 33 états × 5 stratégies.
 
-⚠️ **Ce que ce bloc ne fait PAS.** Les logits des actions `4-8` ne viennent pas d'une tête dédiée :
-ces ids tombent dans la plage des cellules de move (`MOVE_CELL_BASE = 0`), donc ils sortent de la
-conv 1×1 de la carte, aux cellules `(0, 4..8)` de la fenêtre égocentrique. Ce bloc atteint cette
-tête par le **conditionnement du tronc** (`move_ctx_net`, qui peut réordonner les cellules entre
-elles), pas par un pointeur sur les candidats. Une tête pointeur de déploiement — le jumeau de
-`choice_query_net` — est le prolongement naturel ; elle touche l'architecture de la policy, pas le
-contrat d'observation. Suivi en [`V11_agent_rework.md`](Implémentation/V11_agent_rework.md#s0.44)
-**§0.44** — arbitré le 2026-07-29 : **reporté après le run 4**.
+✅ **Ce bloc est SCORÉ par une tête dédiée depuis le 2026-08-07** (§0.44, élément `L1` du lot
+§0.48). `deploy_query_net` — le jumeau exact de `choice_query_net` — produit les logits des ids
+`4-11` par produit scalaire contre les embeddings de candidats, et ces 8 colonnes **remplacent**
+celles de la conv 1×1 des cellules. Les mêmes ids restent des **cellules de move** dans toutes les
+autres phases : le routage lit le bit `phase_deployment` de `global_bin`, par échantillon
+(`torch.where`, jamais une branche scalaire — un lot vectorisé mélange les phases). Router hors
+déploiement serait pire que ne pas router : le bloc y est nul par contrat, donc les 8 logits
+seraient égaux. `obs_size` **inchangé** — c'est un changement d'architecture, pas d'observation.
 
 ### Les blocs logiques A→E, et ce qu'ils sont devenus
 
@@ -634,8 +648,11 @@ distinguer un Oath « faible » d'un Oath « fort », alors que le +1 rend une c
 plus rentable à DÉSIGNER (6+ → 5+ double les blessures, 3+ → 2+ ne les augmente que d'un cinquième)
 — et la désignation est précisément ce qu'il joue par `OATH_SLOT_i`. Côté ennemi pour la raison du
 Waaagh! : ce que l'adversaire blesse mieux change ce que je protège, 2026-08-06).
-→ **14609** (socle du lot V11 §0.48, arbitrage 2 « réserver la place » — 2026-08-07). Trois
-changements, tous destinés à ce qu'une règle rendue vivante ne coûte PLUS de retrain :
+→ **14609** (socle du lot V11 §0.48, arbitrage 2 « réserver la place » — 2026-08-07), puis
+→ **14615** le même jour : le drapeau `declines` du bloc candidat de décision (1 bit × 6 slots),
+sans lequel les deux candidats de `waaagh_call` étaient indiscernables (cf. plus haut). Même
+retrain `--new`. Le socle, lui, tient en trois changements, tous destinés à ce qu'une règle
+rendue vivante ne coûte PLUS de retrain :
 (1) les 12 drapeaux de règles d'armes et le one-hot `[ANTI]` (17 dimensions **par profil**, donc
 560 scalaires par règle) passent aux **ids** — `−6 160` scalaires, et une règle de plus coûte 0 ;
 (2) le one-hot de TYPE de décision est pré-dimensionné à `AGENT_DECISION_TYPE_SLOTS = 8`

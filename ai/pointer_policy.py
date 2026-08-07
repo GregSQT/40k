@@ -31,6 +31,14 @@ devient STRUCTUREL (un `reshape`) au lieu d'être ré-appris par des poids dense
    pile conv peu profonde ne voit ni le tour, ni les VP, ni les objectifs hors fenêtre, ni mes
    autres escouades — rien de ce qui justifie une destination.
 
+**Déploiement (V11 §0.44, élément L1).** Les ids `4-11` sont à la fois des cellules de move et
+les slots de pose : ils tombent dans la plage des cellules (`MOVE_CELL_BASE = 0`), ce qui rend
+`TOTAL_ACTION_SIZE` insensible au nombre de slots. Le masque le sait — il n'ouvre jamais les deux
+familles dans le même état — mais la policy l'ignorait, et ces logits sortaient donc de la conv
+1x1, sur des cellules sans rapport avec les hexes candidats. `deploy_query_net` les produit
+désormais par pointeur, et le routage lit le bit `phase_deployment` de `global_bin`, PAR
+ÉCHANTILLON : un lot mélange les phases des `n_envs`.
+
 ⚠️ **ZONE À RISQUE, identifiée avant écriture** : une tête d'action custom sous `MaskablePPO`
 échoue EN SILENCE si `log_prob`, l'entropie ou le masquage sont faux — l'entraînement tourne et
 apprend mal. La conception ci-dessous minimise cette surface : on ne touche QUE la valeur des
@@ -40,7 +48,7 @@ de référence sur un cas jouet, tir ET move.
 """
 
 from functools import partial
-from typing import Any, Optional, Tuple
+from typing import Any, NamedTuple, Optional, Tuple
 
 import numpy as np
 import torch
@@ -60,6 +68,7 @@ from engine.macro_intents import (
     CHARGE_SLOT_COUNT,
     CHOICE_BASE,
     CHOICE_COUNT,
+    DEPLOY_SLOT_BASE,
     DEPLOY_SLOT_COUNT,
     FIGHT_SLOT_BASE,
     FIGHT_SLOT_COUNT,
@@ -92,11 +101,34 @@ DENSE_LOGIT_COUNT = (
 )
 
 
+class PolicyFeatures(NamedTuple):
+    """Ce que `_split_features` extrait du vecteur de l'extracteur, NOMMÉ et non positionnel.
+
+    Chaque famille pointée ajoute un tenseur ici. Les passer en arguments positionnels — ils
+    sont cinq — rendrait une permutation possible entre deux appels sans qu'aucune forme ne
+    change : les embeddings ennemis et les candidats de décision ont le même rang et, sur un
+    scénario où `K_e == K_d`, la même forme. C'est exactement la classe de faute silencieuse
+    contre laquelle tout ce fichier est écrit.
+    """
+
+    trunk: torch.Tensor
+    #: (B, K_e, d) — ennemis par slot : tir, charge, mêlée, Oath.
+    enemies: torch.Tensor
+    #: (B, C, 32, 32) — carte de move NON aplatie.
+    move_map: torch.Tensor
+    #: (B, K_d, d) — candidats de `pending_agent_decision`.
+    decision: torch.Tensor
+    #: (B, K_p, d) — candidats de déploiement, un par id 4-11.
+    deploy: torch.Tensor
+    #: (B,) — bit `phase_deployment` : 1.0 si les ids 4-11 sont des slots de pose.
+    is_deploy: torch.Tensor
+
+
 class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
     """Policy MaskablePPO dont les logits de tir viennent d'un produit scalaire sur les embeddings.
 
-    L'extracteur (`SpatialCombinedExtractor`) sort
-    `[tronc | embeddings ennemis par slot | carte de move 32x32]`. Cette policy :
+    L'extracteur (`SpatialCombinedExtractor`) sort `[tronc | embeddings ennemis par slot | carte
+    de move 32x32 | candidats de décision | candidats de déploiement]`. Cette policy :
     - n'alimente le tronc MLP qu'avec la partie `tronc` (ni les embeddings ni la carte n'y
       entrent : ils y seraient de nouveau aplatis, exactement ce que le chantier supprime) ;
     - produit les logits de tir, de charge ET de combat par `q · e_i` (trois requêtes, mêmes
@@ -126,29 +158,20 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
                 f"(recu {type(extractor).__name__}) : la tete pointeur a besoin des embeddings "
                 "ennemis par slot."
             )
-        if extractor.n_enemy_slots != SHOOT_SLOT_COUNT:
-            raise ValueError(
-                f"Desalignement observation/action : {extractor.n_enemy_slots} slots ennemis "
-                f"observes contre {SHOOT_SLOT_COUNT} actions de tir. C'est l'invariant D1."
-            )
-        if extractor.n_enemy_slots != CHARGE_SLOT_COUNT:
-            raise ValueError(
-                f"Desalignement observation/action : {extractor.n_enemy_slots} slots ennemis "
-                f"observes contre {CHARGE_SLOT_COUNT} actions de charge. C'est l'invariant D1, "
-                f"cote charge (V11 §9 P3-2)."
-            )
-        if extractor.n_enemy_slots != FIGHT_SLOT_COUNT:
-            raise ValueError(
-                f"Desalignement observation/action : {extractor.n_enemy_slots} slots ennemis "
-                f"observes contre {FIGHT_SLOT_COUNT} actions de combat. C'est l'invariant D1, "
-                f"cote melee (V11 §9 P3-1)."
-            )
-        if extractor.n_enemy_slots != OATH_SLOT_COUNT:
-            raise ValueError(
-                f"Desalignement observation/action : {extractor.n_enemy_slots} slots ennemis "
-                f"observes contre {OATH_SLOT_COUNT} actions d'Oath of Moment. C'est l'invariant "
-                f"D1, cote Oath (chantier 01)."
-            )
+        # Invariant D1, une entrée par famille pointée : autant d'actions que de slots OBSERVÉS.
+        # Écrit en table et non en cascade de `if` — c'est la liste qu'on oublie d'étendre en
+        # ajoutant une famille, et une famille non listée ici ne serait vérifiée nulle part.
+        for label, action_count in (
+            ("de tir", SHOOT_SLOT_COUNT),
+            ("de charge (V11 §9 P3-2)", CHARGE_SLOT_COUNT),
+            ("de combat (V11 §9 P3-1)", FIGHT_SLOT_COUNT),
+            ("d'Oath of Moment (chantier 01)", OATH_SLOT_COUNT),
+        ):
+            if extractor.n_enemy_slots != action_count:
+                raise ValueError(
+                    f"Desalignement observation/action : {extractor.n_enemy_slots} slots ennemis "
+                    f"observes contre {action_count} actions {label}. C'est l'invariant D1."
+                )
         if GRID_CELL_COUNT != MOVE_CELL_COUNT:
             raise ValueError(
                 f"Desalignement grille/action : {GRID_CELL_COUNT} cellules de grille contre "
@@ -190,16 +213,34 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
             )
         self.n_decision_options = extractor.n_decision_options
         # Même invariant, appliqué au déploiement (§0.40 point 3) : le bloc candidat décrit un
-        # slot par action 4-8. S'ils divergeaient, l'agent lirait la description d'un slot pour
+        # slot par action 4-11. S'ils divergeaient, l'agent lirait la description d'un slot pour
         # en jouer un autre — exactement le désalignement obs ↔ action D1.
         if extractor.n_deploy_slots != DEPLOY_SLOT_COUNT:
             raise ValueError(
                 f"Desalignement observation/action : {extractor.n_deploy_slots} candidats de "
-                f"deploiement observes contre {DEPLOY_SLOT_COUNT} slots d'action 4-8."
+                f"deploiement observes contre {DEPLOY_SLOT_COUNT} slots d'action "
+                f"{DEPLOY_SLOT_BASE}-{DEPLOY_SLOT_BASE + DEPLOY_SLOT_COUNT - 1}."
             )
+        # Recouvrement d'ids ASSUMÉ, et vérifié ici : les slots de déploiement 4-11 tombent DANS
+        # la plage des cellules de move. C'est ce qui rend `TOTAL_ACTION_SIZE` insensible au
+        # nombre de slots de pose — et ce qui oblige la policy à lire la phase pour savoir
+        # laquelle des deux têtes alimente ces colonnes (§0.44, élément L1).
+        if (
+            DEPLOY_SLOT_BASE < MOVE_CELL_BASE
+            or DEPLOY_SLOT_BASE + DEPLOY_SLOT_COUNT > MOVE_CELL_BASE + MOVE_CELL_COUNT
+        ):
+            raise ValueError(
+                f"Les slots de deploiement {DEPLOY_SLOT_BASE}.."
+                f"{DEPLOY_SLOT_BASE + DEPLOY_SLOT_COUNT - 1} ne tombent plus dans la plage des "
+                f"cellules de move [{MOVE_CELL_BASE}, {MOVE_CELL_BASE + MOVE_CELL_COUNT - 1}] : "
+                "l'assemblage des logits n'est plus un remplacement de colonnes."
+            )
+        self.n_deploy_slots = extractor.n_deploy_slots
         self.enemy_slice = extractor.enemy_embeddings_slice()
         self.move_map_slice = extractor.move_map_slice()
         self.decision_slice = extractor.decision_embeddings_slice()
+        self.deploy_slice = extractor.deploy_embeddings_slice()
+        self.deploy_phase_index = extractor.deployment_phase_flag_index()
         self.mlp_extractor = MlpExtractor(
             self.trunk_dim,
             net_arch=self.net_arch,
@@ -229,6 +270,16 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
         # ENTIER et sur toutes mes escouades, donc c'est la valeur globale de la cible qui pèse.
         # Coût : `entity_dim x latent_dim` paramètres, et zéro par slot.
         self.oath_query_net = nn.Linear(self.mlp_extractor.latent_dim_pi, self.entity_dim)
+        # Requête DISTINCTE pour les SLOTS DE DÉPLOIEMENT (§0.44, élément L1), jumelle exacte de
+        # `choice_query_net` : un candidat de pose est une entité déjà encodée
+        # (`deploy_cand_encoder`), donc il se score sur son embedding et non sur une ligne de
+        # poids indexée par le slot. C'est ce que le lien slot -> stratégie interdit d'apprendre :
+        # le masque n'ouvre que `min(DEPLOY_STRATEGY_COUNT, n_hexes)` slots, donc en fin de
+        # déploiement ce sont les stratégies d'indices BAS qui survivent — « le slot 3 va à
+        # gauche » est faux une partie du temps. Avant cette tête, ces logits sortaient de la
+        # conv 1x1 de la carte, aux cellules (0, 4..11) de la fenêtre égocentrique : des cellules
+        # sans aucun rapport avec les hexes candidats.
+        self.deploy_query_net = nn.Linear(self.mlp_extractor.latent_dim_pi, self.entity_dim)
 
         # --- Tête de move : conv 1x1 sur [colonne de la cellule | latent diffusé] -------------
         # `move_cell_net` et `move_ctx_net` sont les DEUX MOITIÉS d'une seule et même conv 1x1
@@ -277,20 +328,24 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
         self.optimizer = self.optimizer_class(self.parameters(), **optimizer_kwargs)
 
     # -- découpe du vecteur de features ------------------------------------
-    def _split_features(
-        self, obs: PyTorchObs
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        """(tronc, embeddings ennemis (B, K, d), carte de move (B, C, 32, 32),
-        embeddings de candidats de décision (B, C_dec, d)).
-
-        Contrat de `SpatialCombinedExtractor`, dont les tranches ont été lues au build.
-        """
+    def _extract(self, obs: PyTorchObs) -> torch.Tensor:
+        """Vecteur de features BRUT de l'extracteur, dont la nature partagée est vérifiée ici."""
         features = self.extract_features(obs)
         if not isinstance(features, torch.Tensor):
             raise TypeError(
                 "PointerMaskablePolicy attend un extracteur PARTAGE (un seul tenseur de "
                 "features) : deux extracteurs pi/vf produiraient deux jeux d'embeddings."
             )
+        return features
+
+    def _trunk_features(self, obs: PyTorchObs) -> torch.Tensor:
+        """La SEULE partie tronc — ni les embeddings ni la carte n'entrent dans le MLP."""
+        return self._extract(obs)[:, : self.trunk_dim]
+
+    def _split_features(self, obs: PyTorchObs) -> PolicyFeatures:
+        """Découpe le vecteur de l'extracteur — contrat de `SpatialCombinedExtractor`, dont les
+        tranches ont été lues au build (jamais recalculées ici)."""
+        features = self._extract(obs)
         batch = features.shape[0]
         trunk = features[:, : self.trunk_dim]
         embeddings = features[:, self.enemy_slice].reshape(
@@ -302,7 +357,25 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
         decision_emb = features[:, self.decision_slice].reshape(
             batch, self.n_decision_options, self.entity_dim
         )
-        return trunk, embeddings, move_map, decision_emb
+        deploy_emb = features[:, self.deploy_slice].reshape(
+            batch, self.n_deploy_slots, self.entity_dim
+        )
+        # Bit `phase_deployment` du one-hot de phase, recopié tel quel par l'extracteur. Il ne
+        # peut valoir QUE 0 ou 1 : sa clé (`global_bin`) est hors `norm_obs_keys`, précisément
+        # pour que les valeurs discrètes gardent leur sémantique. S'il cessait de l'être — une
+        # clé ajoutée à `VecNormalize`, un index décalé d'un champ — le routage des ids 4-11
+        # deviendrait arbitraire et l'agent jouerait des cellules de move pour des poses, sans
+        # que rien ne lève. Le contrôle est là pour que ça lève.
+        is_deploy = features[:, self.deploy_phase_index]
+        if not bool(torch.all((is_deploy == 0.0) | (is_deploy == 1.0))):
+            raise RuntimeError(
+                "Le drapeau `phase_deployment` lu a l'index "
+                f"{self.deploy_phase_index} du vecteur de features n'est pas binaire "
+                f"(valeurs {torch.unique(is_deploy).tolist()[:5]}) : le routage des ids "
+                f"{DEPLOY_SLOT_BASE}-{DEPLOY_SLOT_BASE + DEPLOY_SLOT_COUNT - 1} entre la tete de "
+                "deploiement et la conv de move ne repose plus sur rien."
+            )
+        return PolicyFeatures(trunk, embeddings, move_map, decision_emb, deploy_emb, is_deploy)
 
     def _move_logits(self, latent_pi: torch.Tensor, move_map: torch.Tensor) -> torch.Tensor:
         """Logits de cellule (B, 1024) — une conv 1x1 par colonne, conditionnée par le tronc.
@@ -317,51 +390,79 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
         hidden = self.move_cell_net(move_map) + self.move_ctx_net(latent_pi)[:, :, None, None]
         return self.move_out_net(torch.relu(hidden)).reshape(latent_pi.shape[0], MOVE_CELL_COUNT)
 
-    def _action_logits(
-        self,
-        latent_pi: torch.Tensor,
-        embeddings: torch.Tensor,
-        move_map: torch.Tensor,
-        decision_emb: torch.Tensor,
+    def _point(
+        self, query_net: nn.Linear, latent_pi: torch.Tensor, embeddings: torch.Tensor
     ) -> torch.Tensor:
+        """Logits d'UNE famille pointée : `(q · e_i) / sqrt(d)`, (B, K).
+
+        Mise à l'échelle 1/sqrt(d), comme une attention : sans elle la variance des logits croît
+        avec la dimension d'embedding et la politique démarre quasi déterministe. Écrite ICI une
+        seule fois — recopiée par famille, c'est l'oubli du diviseur sur une SEULE d'entre elles
+        qui passerait inaperçu : les logits restent finis, la politique devient juste quasi
+        déterministe sur cette famille-là et sur elle seule.
+
+        Les requêtes restent des modules DISTINCTS (cf. leurs déclarations) : ce qui est partagé
+        ici est la formule, pas les poids.
+        """
+        query = query_net(latent_pi).unsqueeze(1)  # (B, 1, d)
+        return (query * embeddings).sum(dim=-1) / self.entity_dim ** 0.5
+
+    def _deploy_logits(
+        self, latent_pi: torch.Tensor, move: torch.Tensor, feats: PolicyFeatures
+    ) -> torch.Tensor:
+        """Remplace, EN PHASE DE DÉPLOIEMENT SEULEMENT, les colonnes 4-11 des cellules de move.
+
+        Les ids 4-11 portent deux significations selon la phase : cellule de la grille
+        égocentrique, ou slot de pose. Le masque le sait déjà (il n'ouvre jamais les deux
+        familles dans le même état) ; la policy, elle, l'ignorait — ces logits sortaient donc de
+        la conv 1x1, sur des cellules sans rapport avec les hexes candidats (§0.44).
+
+        Le routage se fait sur le SEUL bit `phase_deployment`, et par `torch.where` — pas par une
+        branche `if` : le batch mélange des observations de phases différentes (n_envs) et une
+        branche scalaire trancherait pour tout le lot d'après un seul échantillon.
+
+        ⚠️ Hors phase de déploiement, ces colonnes DOIVENT rester celles de la conv. Le bloc
+        `deploy_cand_*` y est nul par contrat (§0.40) : router quand même donnerait 8 logits
+        rigoureusement identiques (produit scalaire contre des embeddings nuls), donc un choix
+        uniforme sur 8 cellules parfaitement jouables en phase de mouvement.
+        """
+        pointer = self._point(self.deploy_query_net, latent_pi, feats.deploy)
+        low, high = DEPLOY_SLOT_BASE, DEPLOY_SLOT_BASE + DEPLOY_SLOT_COUNT
+        slots = torch.where(
+            (feats.is_deploy > 0.5).unsqueeze(1), pointer, move[:, low:high]
+        )
+        return torch.cat([move[:, :low], slots, move[:, high:]], dim=1)
+
+    def _action_logits(self, latent_pi: torch.Tensor, feats: PolicyFeatures) -> torch.Tensor:
         """Logits complets, assemblés dans l'ordre des ids d'action.
 
-        Six têtes à poids partagés — conv 1x1 (cellules), pointeurs de tir, de charge (§9 P3-2),
+        Sept têtes à poids partagés — conv 1x1 (cellules), pointeurs de tir, de charge (§9 P3-2),
         de mêlée (§9 P3-1) et d'Oath of Moment (chantier 01 : quatre requêtes, MÊMES embeddings
-        d'ennemis) et pointeur de décision (candidats `CHOICE_i`, §9.3 P2) — et UNE tête dense
-        réduite à ses colonnes réellement lues (`DENSE_LOGIT_COUNT` = 17) : wait,
-        fight-sans-cible, 15 intents de zone.
+        d'ennemis), pointeur de décision (candidats `CHOICE_i`, §9.3 P2) et pointeur de
+        DÉPLOIEMENT (§0.44, qui écrase les colonnes 4-11 des cellules en phase de déploiement) —
+        et UNE tête dense réduite à ses colonnes réellement lues (`DENSE_LOGIT_COUNT` = 17) :
+        wait, fight-sans-cible, 15 intents de zone.
 
         ⚠️ L'assemblage suit l'ordre EXACT des ids (`macro_intents`) : 0-1023 cellules, 1024 wait,
         1025-1044 tir, 1045-1064 charge, 1065-1084 mêlée, 1085 fight-sans-cible, 1086-1100 zone,
         1101-1106 CHOICE, 1107-1126 Oath. Une permutation ici ferait jouer à l'agent une action
         autre que celle qu'il évalue, sans que rien ne lève — verrouillé par test.
         """
+        enemies = feats.enemies
         base = self.action_net(latent_pi)
-        move = self._move_logits(latent_pi, move_map)
-        # Mise à l'échelle 1/sqrt(d), comme une attention : sans elle, la variance des logits
-        # croît avec la dimension d'embedding et la politique démarre quasi déterministe.
-        scale = self.entity_dim ** 0.5
-        query = self.query_net(latent_pi).unsqueeze(1)                 # (B, 1, d)
-        pointer = (query * embeddings).sum(dim=-1) / scale              # (B, K) — tir
-        charge_query = self.charge_query_net(latent_pi).unsqueeze(1)
-        charge_pointer = (charge_query * embeddings).sum(dim=-1) / scale  # (B, K) — charge
-        fight_query = self.fight_query_net(latent_pi).unsqueeze(1)
-        fight_pointer = (fight_query * embeddings).sum(dim=-1) / scale  # (B, K) — mêlée
-        choice_query = self.choice_query_net(latent_pi).unsqueeze(1)
-        choice = (choice_query * decision_emb).sum(dim=-1) / scale      # (B, K_candidats)
-        oath_query = self.oath_query_net(latent_pi).unsqueeze(1)
-        oath_pointer = (oath_query * embeddings).sum(dim=-1) / scale    # (B, K) — Oath
+        move = self._deploy_logits(
+            latent_pi, self._move_logits(latent_pi, feats.move_map), feats
+        )
         return torch.cat(
             [
                 move,
                 base[:, :1],        # wait
-                pointer,
-                charge_pointer,
-                fight_pointer,
+                self._point(self.query_net, latent_pi, enemies),         # tir
+                self._point(self.charge_query_net, latent_pi, enemies),  # charge
+                self._point(self.fight_query_net, latent_pi, enemies),   # mêlée
                 base[:, 1:],        # fight-sans-cible, intents de zone
-                choice,
-                oath_pointer,
+                self._point(self.choice_query_net, latent_pi, feats.decision),
+                self._point(self.oath_query_net, latent_pi, enemies),    # Oath
             ],
             dim=1,
         )
@@ -369,12 +470,10 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
     def _distribution_from(
         self,
         latent_pi: torch.Tensor,
-        embeddings: torch.Tensor,
-        move_map: torch.Tensor,
-        decision_emb: torch.Tensor,
+        feats: PolicyFeatures,
         action_masks: Optional[np.ndarray],
     ) -> MaskableDistribution:
-        logits = self._action_logits(latent_pi, embeddings, move_map, decision_emb)
+        logits = self._action_logits(latent_pi, feats)
         # Garde-fou de divergence. Ne PAS s'en remettre aux contraintes de `torch.distributions` :
         # `Distribution._validate_args` vaut `__debug__`, donc toute cette validation disparaît
         # sous `python -O` (et sb3 peut l'éteindre globalement). Elle ne couvre de toute façon pas
@@ -422,12 +521,10 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
         deterministic: bool = False,
         action_masks: Optional[np.ndarray] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        trunk, embeddings, move_map, decision_emb = self._split_features(obs)
-        latent_pi, latent_vf = self.mlp_extractor(trunk)
+        feats = self._split_features(obs)
+        latent_pi, latent_vf = self.mlp_extractor(feats.trunk)
         values = self.value_net(latent_vf)
-        distribution = self._distribution_from(
-            latent_pi, embeddings, move_map, decision_emb, action_masks
-        )
+        distribution = self._distribution_from(latent_pi, feats, action_masks)
         actions = distribution.get_actions(deterministic=deterministic)
         log_prob = distribution.log_prob(actions)
         return actions, values, log_prob
@@ -435,15 +532,21 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
     def get_distribution(
         self, obs: PyTorchObs, action_masks: Optional[np.ndarray] = None
     ) -> MaskableDistribution:
-        trunk, embeddings, move_map, decision_emb = self._split_features(obs)
-        latent_pi = self.mlp_extractor.forward_actor(trunk)
-        return self._distribution_from(
-            latent_pi, embeddings, move_map, decision_emb, action_masks
-        )
+        feats = self._split_features(obs)
+        latent_pi = self.mlp_extractor.forward_actor(feats.trunk)
+        return self._distribution_from(latent_pi, feats, action_masks)
 
     def predict_values(self, obs: PyTorchObs) -> torch.Tensor:
-        trunk, _embeddings, _move_map, _decision_emb = self._split_features(obs)
-        return self.value_net(self.mlp_extractor.forward_critic(trunk))
+        """Le critique ne lit QUE le tronc : ne pas passer par `_split_features`.
+
+        Les quatre blocs pointés sont des tranches NON contiguës du vecteur de features ; les
+        `reshape` de `_split_features` en font donc des copies réelles — la seule carte de move
+        pèse `move_map_channels x 1024` par échantillon — pour des tenseurs qu'aucune tête ne
+        lirait ici. Le contrôle du drapeau `phase_deployment` reste sur le chemin ACTEUR, le
+        seul qui route sur lui.
+        """
+        features = self._trunk_features(obs)
+        return self.value_net(self.mlp_extractor.forward_critic(features))
 
     def evaluate_actions(
         self,
@@ -454,9 +557,7 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
         """⚠️ Ordre de retour SB3 : (values, log_prob, entropy) — l'inverser sabote la mise à
         jour PPO en silence (le ratio et l'avantage seraient calculés sur les mauvaises
         quantités). Verrouillé par `test_pointer_head.py`."""
-        trunk, embeddings, move_map, decision_emb = self._split_features(obs)
-        latent_pi, latent_vf = self.mlp_extractor(trunk)
-        distribution = self._distribution_from(
-            latent_pi, embeddings, move_map, decision_emb, action_masks
-        )
+        feats = self._split_features(obs)
+        latent_pi, latent_vf = self.mlp_extractor(feats.trunk)
+        distribution = self._distribution_from(latent_pi, feats, action_masks)
         return self.value_net(latent_vf), distribution.log_prob(actions), distribution.entropy()

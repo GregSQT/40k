@@ -3397,6 +3397,11 @@ class W40KEngine(gym.Env):
                     # Ce que le candidat ACCORDE, dans le vocabulaire d'observation des règles
                     # d'unité (§0.31) : c'est la seule description qui ait un sens pour l'agent.
                     "effect_ids": (str(technical_rule_id),),
+                    # `rule_choice` n'a pas de candidat « ne rien faire » : le prompt naît d'une
+                    # règle en « usage: or », chaque candidat ACCORDE quelque chose. Déclaré et
+                    # non omis — le champ est exigé, pour qu'un futur type de décision optionnel
+                    # ne puisse pas passer en silence.
+                    "declines": False,
                     "payload": {"display_rule_id": str(display_rule_id)},
                 }
             )
