@@ -389,6 +389,8 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
                 + move_map_channels * GRID_CELL_COUNT
                 + self.n_decision_options * entity_dim
                 + self.n_deploy_slots * entity_dim
+                # Escouades ALLIÉES par slot (V11 §0.48 `L2`) : lues par `activate_query_net`.
+                + self.n_ally_slots * entity_dim
             ),
         )
         self.trunk_dim = trunk_dim
@@ -572,6 +574,21 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
         start = self.decision_embeddings_slice().stop
         return slice(start, start + self.n_deploy_slots * self.entity_dim)
 
+    def ally_embeddings_slice(self) -> slice:
+        """Tranche des embeddings d'escouades ALLIÉES, PAR SLOT (V11 §0.48, élément `L2`).
+
+        Placée en DERNIER, derrière les candidats de déploiement, pour la même raison qu'eux : les
+        tranches déjà consommées gardent leurs bornes, un ajout en tête les décalerait toutes en
+        silence. C'est la tranche que lit `activate_query_net`.
+
+        Elle contient les `K_ALLY_SLOTS` lignes, **ligne 0 comprise** — contrairement au tronc, qui
+        sépare `e_own` de l'agrégation des autres. Le slot d'activation 0 désigne l'ancre du pool,
+        c'est un candidat comme les autres et c'est même le seul toujours ouvert : l'exclure ferait
+        pointer l'action `ACTIVATE_SLOT_i` sur la ligne `i+1`, décalage invisible (invariant D1).
+        """
+        start = self.deploy_embeddings_slice().stop
+        return slice(start, start + self.n_ally_slots * self.entity_dim)
+
     def deployment_phase_flag_index(self) -> int:
         """Index du bit `phase_deployment` dans le vecteur de features (§0.44, élément L1).
 
@@ -706,6 +723,12 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
                 move_map.reshape(move_map.shape[0], -1),
                 decision_emb.reshape(decision_emb.shape[0], -1),
                 deploy_emb.reshape(deploy_emb.shape[0], -1),
+                # Escouades ALLIÉES par slot (V11 §0.48 `L2`) : `activate_query_net` les score
+                # pour choisir QUI activer. Toutes les lignes, ligne 0 COMPRISE — c'est l'ancre du
+                # pool, donc un candidat d'activation comme les autres (le slot 0 est même le seul
+                # toujours ouvert). Le tronc, lui, garde `e_own` + `allies_agg` : l'agrégation y
+                # reste le CONTEXTE, exactement comme pour les ennemis et les candidats de pose.
+                ally_emb.reshape(ally_emb.shape[0], -1),
             ],
             dim=1,
         )

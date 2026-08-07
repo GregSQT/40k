@@ -829,13 +829,15 @@ Ordre par valeur tactique :
    `get_best_enemy_score_for_unit` dans `convert_squad_action` du décodeur (action_decoder
    ~L1000-1030), PAS `charge_handlers:1506` (chemin `convert_gym_action`, hors gym mais encore
    vif en PvE via pve_controller — non touché, comme prévu).
-3. ✅ **MOITIÉ MOTEUR LIVRÉE le 2026-08-07 (élément `L2` du lot, cf. [§0.48](V11_agent_rework.md#s0.48)) — moitié RÉSEAU à écrire.**
+3. ✅ **LIVRÉ le 2026-08-07 — moteur ET réseau (élément `L2` du lot, cf. [§0.48](V11_agent_rework.md#s0.48)).**
    La désignation est une **dimension d'action** (`ACTIVATE_SLOT` 1127-1138, un par ligne
    ALLIÉE de l'observation, `TOTAL_ACTION_SIZE` 1127 → 1139), sur le même patron que les slots
    de tir/charge/mêlée/Oath — **pas** des `CHOICE_k` : les candidats sont mes escouades, donc des
    entités déjà observées, et `MAX_DECISION_OPTIONS = 6` serait de toute façon dépassé par
-   `K_ALLY_SLOTS = 12`. Reste à faire : exposer les embeddings alliés PAR SLOT (ils sont
-   aujourd'hui agrégés par `_masked_mean_max`) et la tête pointeur qui les score.
+   `K_ALLY_SLOTS = 12`. Les embeddings alliés sont exposés PAR SLOT en queue du vecteur de
+   features (`ally_embeddings_slice`, ligne 0 comprise — l'ancre du pool est un candidat) et
+   scorés par `activate_query_net`, jumelle de `deploy_query_net` livrée par `L1`. Le tronc, lui,
+   garde `e_own` + l'agrégation des autres : le CONTEXTE, comme pour les ennemis.
 
    **Ce que le moteur fait désormais.** Le masque devient EXCLUSIF dès que le pool compte au
    moins deux escouades : seuls les slots d'activation sont ouverts, exactement comme pour une
@@ -888,13 +890,14 @@ Ordre par valeur tactique :
    `test_the_shooting_pin_preempts_the_choice_when_the_player_is_ai_KNOWN_DIVERGENCE`, qui
    deviendra ROUGE le jour où ce sera corrigé.
 
-   ⚠️ **La policy score ces 12 slots par des colonnes DENSES, pas par un pointeur**
-   (`ai/pointer_policy.py`, `DENSE_ACTIVATE_COUNT`). C'est la moitié réseau non livrée : le
-   pointeur exige d'exposer les embeddings ALLIÉS par slot (`_masked_mean_max` les agrège
-   aujourd'hui), donc de toucher `ai/spatial_extractor.py` — le fichier et la découpe de features
-   que `L1` modifie en parallèle. Écrit après le merge de `L1`. Sans ce minimum, la policy refusait
-   de se construire (sa garde de disposition attendait Oath en queue d'action space) et la moitié
-   moteur n'aurait pas été exécutable du tout.
+   **Livraison en DEUX temps, et l'étape intermédiaire mérite d'être dite.** La moitié moteur est
+   partie seule, avec les 12 logits produits par des colonnes DENSES d'`action_net` : le pointeur
+   exigeait `ai/spatial_extractor.py`, que `L1` réécrivait en parallèle. Ce n'était pas gratuit —
+   une colonne par slot ne partage aucun poids, donc n'apprend rien de transférable d'une escouade
+   à l'autre — mais sans ce minimum la policy refusait même de se construire (sa garde de
+   disposition attendait Oath en queue d'action space). `activate_query_net` les a remplacées
+   après le merge de `L1` ; `action_net` est redescendue de 29 à 17 colonnes, et
+   `test_action_net_has_no_dead_column` rend ce retrait vérifiable plutôt que déclaré.
 
    **Bots inchangés, volontairement** : `BotControlledEnv` joue TOUJOURS le slot 0, c'est-à-dire
    l'ancre du pool — exactement ce que le moteur activait avant `L2`. Faire choisir le bot

@@ -89,12 +89,19 @@ def test_features_layout_exposes_the_enemy_embeddings(extractor):
         extractor.n_decision_options * extractor.entity_dim
     )
 
-    # §0.44 (L1) : les candidats de DÉPLOIEMENT ferment le vecteur, derrière les candidats de
-    # décision — même raison, un ajout en tête aurait décalé les trois tranches ci-dessus.
+    # §0.44 (L1) : les candidats de DÉPLOIEMENT s'ajoutent derrière les candidats de décision —
+    # même raison, un ajout en tête aurait décalé les trois tranches ci-dessus.
     deploy = extractor.deploy_embeddings_slice()
     assert deploy.start == decision.stop
     assert (deploy.stop - deploy.start) == extractor.n_deploy_slots * extractor.entity_dim
-    assert deploy.stop == extractor.features_dim
+
+    # V11 §0.48 (L2) : les escouades ALLIÉES ferment le vecteur, derrière le déploiement. Elles
+    # portent TOUTES les lignes, ligne 0 (unité active) comprise : le slot d'activation 0 désigne
+    # l'ancre du pool, l'exclure décalerait l'action `ACTIVATE_SLOT_i` d'un cran (invariant D1).
+    allies = extractor.ally_embeddings_slice()
+    assert allies.start == deploy.stop
+    assert (allies.stop - allies.start) == extractor.n_ally_slots * extractor.entity_dim
+    assert allies.stop == extractor.features_dim
 
 
 def test_the_phase_flag_index_points_at_the_deployment_bit(extractor):

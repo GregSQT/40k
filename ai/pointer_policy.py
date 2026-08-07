@@ -89,10 +89,11 @@ MOVE_HEAD_HIDDEN = 32
 
 #: Actions produites par `action_net`, la SEULE tête dense restante : wait, fight-sans-cible et
 #: les 15 intents de zone. Tout le reste vient d'une tête à poids partagés (conv 1x1 pour les
-#: cellules, pointeurs pour les slots de tir, de charge, de mêlée et les candidats de décision).
+#: cellules, pointeurs pour les slots de tir, de charge, de mêlée, d'Oath, de déploiement, les
+#: candidats de décision et les escouades à ACTIVER).
 #: Calculé, jamais écrit en dur : ajouter une famille pointée sans le décompter ici décalerait
 #: TOUS les logits qui la suivent.
-DENSE_MID_COUNT = (
+DENSE_LOGIT_COUNT = (
     TOTAL_ACTION_SIZE
     - MOVE_CELL_COUNT
     - SHOOT_SLOT_COUNT
@@ -102,24 +103,6 @@ DENSE_MID_COUNT = (
     - OATH_SLOT_COUNT
     - ACTIVATE_SLOT_COUNT
 )
-
-#: ⚠️ PROVISOIRE — MOITIÉ RÉSEAU DE `L2` NON LIVRÉE (V11 §0.48). Les 12 slots d'ACTIVATION sont
-#: produits DENSÉMENT, une colonne d'`action_net` par slot, faute de tête pointeur.
-#:
-#: Ce n'est pas la conception retenue : la doctrine du dépôt est « slots + pointeur », précisément
-#: parce qu'une colonne dense par slot ne partage aucun poids entre les slots et n'apprend donc
-#: rien de transférable d'une escouade à l'autre. La tête pointeur exige d'exposer les embeddings
-#: ALLIÉS par slot (ils sont aujourd'hui AGRÉGÉS par `_masked_mean_max` dans
-#: `ai/spatial_extractor.py`, et `features_dim` ne contient que les ennemis) — c'est-à-dire le
-#: MÊME fichier et la MÊME découpe de features que l'élément `L1` du lot, livré en parallèle.
-#: Cette moitié est donc écrite APRÈS le merge de `L1`, et elle REMPLACERA ces colonnes denses.
-#:
-#: Ce qui est vrai dès maintenant : l'espace d'action est complet, le masque et le décodeur
-#: fonctionnent, et l'agent PEUT jouer le choix. Ce qu'il ne sait pas encore faire : le scorer en
-#: généralisant d'un slot à l'autre.
-DENSE_ACTIVATE_COUNT = ACTIVATE_SLOT_COUNT
-
-DENSE_LOGIT_COUNT = DENSE_MID_COUNT + DENSE_ACTIVATE_COUNT
 
 
 class PolicyFeatures(NamedTuple):
@@ -141,6 +124,8 @@ class PolicyFeatures(NamedTuple):
     decision: torch.Tensor
     #: (B, K_p, d) — candidats de déploiement, un par id 4-11.
     deploy: torch.Tensor
+    #: (B, K_a, d) — MES escouades par slot : quelle activer (V11 §0.48 `L2`). Ligne 0 COMPRISE.
+    allies: torch.Tensor
     #: (B,) — bit `phase_deployment` : 1.0 si les ids 4-11 sont des slots de pose.
     is_deploy: torch.Tensor
 
@@ -258,11 +243,22 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
                 f"cellules de move [{MOVE_CELL_BASE}, {MOVE_CELL_BASE + MOVE_CELL_COUNT - 1}] : "
                 "l'assemblage des logits n'est plus un remplacement de colonnes."
             )
+        # Même invariant, appliqué à l'ACTIVATION (V11 §0.48 `L2`) : une action `ACTIVATE_SLOT_i`
+        # par ligne ALLIÉE observée. Les désolidariser ferait scorer la ligne `i` pour activer
+        # l'escouade `j` — invariant D1, côté allié, et rien ne lèverait.
+        if extractor.n_ally_slots != ACTIVATE_SLOT_COUNT:
+            raise ValueError(
+                f"Desalignement observation/action : {extractor.n_ally_slots} escouades alliees "
+                f"observees contre {ACTIVATE_SLOT_COUNT} slots d'action "
+                f"{ACTIVATE_SLOT_BASE}-{ACTIVATE_SLOT_BASE + ACTIVATE_SLOT_COUNT - 1}."
+            )
         self.n_deploy_slots = extractor.n_deploy_slots
+        self.n_ally_slots = extractor.n_ally_slots
         self.enemy_slice = extractor.enemy_embeddings_slice()
         self.move_map_slice = extractor.move_map_slice()
         self.decision_slice = extractor.decision_embeddings_slice()
         self.deploy_slice = extractor.deploy_embeddings_slice()
+        self.ally_slice = extractor.ally_embeddings_slice()
         self.deploy_phase_index = extractor.deployment_phase_flag_index()
         self.mlp_extractor = MlpExtractor(
             self.trunk_dim,
@@ -303,6 +299,20 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
         # conv 1x1 de la carte, aux cellules (0, 4..11) de la fenêtre égocentrique : des cellules
         # sans aucun rapport avec les hexes candidats.
         self.deploy_query_net = nn.Linear(self.mlp_extractor.latent_dim_pi, self.entity_dim)
+        # Requête DISTINCTE pour le CHOIX DE L'ESCOUADE À ACTIVER (V11 §0.48 `L2`). Elle lit les
+        # MÊMES embeddings d'entités que le tir ou la mêlée, mais côté ALLIÉ : mes escouades sont
+        # des entités déjà encodées, donc « laquelle activer » se score sur leur embedding.
+        #
+        # Requête à part, et non `query_net` réutilisée : « quel ennemi tirer » et « laquelle de
+        # mes escouades doit jouer maintenant » n'ont ni les mêmes entrées ni le même critère —
+        # la seconde pèse ce que l'escouade peut encore faire ce tour-ci et ce que l'ordre
+        # d'activation coûte aux suivantes. Coût : `entity_dim x latent_dim` paramètres, et ZÉRO
+        # par slot — c'est ce qui rend `K_ALLY_SLOTS = 12` gratuit en capacité.
+        #
+        # Elle REMPLACE 12 colonnes denses d'`action_net` (une par slot), qui étaient la moitié
+        # réseau non livrée de `L2` : une colonne par slot ne partage aucun poids, donc n'apprend
+        # rien de transférable d'une escouade à l'autre.
+        self.activate_query_net = nn.Linear(self.mlp_extractor.latent_dim_pi, self.entity_dim)
 
         # --- Tête de move : conv 1x1 sur [colonne de la cellule | latent diffusé] -------------
         # `move_cell_net` et `move_ctx_net` sont les DEUX MOITIÉS d'une seule et même conv 1x1
@@ -383,6 +393,9 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
         deploy_emb = features[:, self.deploy_slice].reshape(
             batch, self.n_deploy_slots, self.entity_dim
         )
+        ally_emb = features[:, self.ally_slice].reshape(
+            batch, self.n_ally_slots, self.entity_dim
+        )
         # Bit `phase_deployment` du one-hot de phase, recopié tel quel par l'extracteur. Il ne
         # peut valoir QUE 0 ou 1 : sa clé (`global_bin`) est hors `norm_obs_keys`, précisément
         # pour que les valeurs discrètes gardent leur sémantique. S'il cessait de l'être — une
@@ -398,7 +411,9 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
                 f"{DEPLOY_SLOT_BASE}-{DEPLOY_SLOT_BASE + DEPLOY_SLOT_COUNT - 1} entre la tete de "
                 "deploiement et la conv de move ne repose plus sur rien."
             )
-        return PolicyFeatures(trunk, embeddings, move_map, decision_emb, deploy_emb, is_deploy)
+        return PolicyFeatures(
+            trunk, embeddings, move_map, decision_emb, deploy_emb, ally_emb, is_deploy
+        )
 
     def _move_logits(self, latent_pi: torch.Tensor, move_map: torch.Tensor) -> torch.Tensor:
         """Logits de cellule (B, 1024) — une conv 1x1 par colonne, conditionnée par le tronc.
@@ -459,20 +474,18 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
     def _action_logits(self, latent_pi: torch.Tensor, feats: PolicyFeatures) -> torch.Tensor:
         """Logits complets, assemblés dans l'ordre des ids d'action.
 
-        Sept têtes à poids partagés — conv 1x1 (cellules), pointeurs de tir, de charge (§9 P3-2),
+        Huit têtes à poids partagés — conv 1x1 (cellules), pointeurs de tir, de charge (§9 P3-2),
         de mêlée (§9 P3-1) et d'Oath of Moment (chantier 01 : quatre requêtes, MÊMES embeddings
-        d'ennemis), pointeur de décision (candidats `CHOICE_i`, §9.3 P2) et pointeur de
-        DÉPLOIEMENT (§0.44, qui écrase les colonnes 4-11 des cellules en phase de déploiement) —
-        et UNE tête dense réduite à ses colonnes réellement lues (`DENSE_MID_COUNT` = 17) : wait,
-        fight-sans-cible, 15 intents de zone, plus les colonnes d'ACTIVATION ci-dessous.
+        d'ennemis), pointeur de décision (candidats `CHOICE_i`, §9.3 P2), pointeur de
+        DÉPLOIEMENT (§0.44, qui écrase les colonnes 4-11 des cellules en phase de déploiement) et
+        pointeur d'ACTIVATION (V11 §0.48 `L2`, sur les embeddings ALLIÉS) — et UNE tête dense
+        réduite à ses colonnes réellement lues (`DENSE_LOGIT_COUNT` = 17) : wait,
+        fight-sans-cible, 15 intents de zone.
 
         ⚠️ L'assemblage suit l'ordre EXACT des ids (`macro_intents`) : 0-1023 cellules, 1024 wait,
         1025-1044 tir, 1045-1064 charge, 1065-1084 mêlée, 1085 fight-sans-cible, 1086-1100 zone,
         1101-1106 CHOICE, 1107-1126 Oath, 1127-1138 ACTIVATION. Une permutation ici ferait jouer à
         l'agent une action autre que celle qu'il évalue, sans que rien ne lève — verrouillé par test.
-
-        ⚠️ Les 12 logits d'ACTIVATION sortent de la tête DENSE, pas d'un pointeur : moitié réseau
-        de `L2` non livrée, cf. `DENSE_ACTIVATE_COUNT`.
         """
         enemies = feats.enemies
         base = self.action_net(latent_pi)
@@ -486,14 +499,11 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
                 self._point(self.query_net, latent_pi, enemies),         # tir
                 self._point(self.charge_query_net, latent_pi, enemies),  # charge
                 self._point(self.fight_query_net, latent_pi, enemies),   # mêlée
-                base[:, 1:DENSE_MID_COUNT],   # fight-sans-cible, intents de zone
+                base[:, 1:],        # fight-sans-cible, intents de zone
                 self._point(self.choice_query_net, latent_pi, feats.decision),
                 self._point(self.oath_query_net, latent_pi, enemies),    # Oath
-                # Slots d'ACTIVATION — colonnes DENSES, PROVISOIRE : cf. `DENSE_ACTIVATE_COUNT`.
-                # Elles seront remplacées par un pointeur sur les embeddings alliés. Découpées par
-                # constante et non par `base[:, 17:]` : un littéral ici décalerait silencieusement
-                # les 12 derniers logits au prochain intent dense.
-                base[:, DENSE_MID_COUNT:],
+                # Activation : MES escouades par slot (V11 §0.48 `L2`).
+                self._point(self.activate_query_net, latent_pi, feats.allies),
             ],
             dim=1,
         )

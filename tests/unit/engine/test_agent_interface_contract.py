@@ -80,6 +80,7 @@ from typing import Any, Dict, List, Tuple
 import pytest
 
 from _config_helpers import assert_deployment_phase, pin_active_deployment
+from ai.env_wrappers import engine_is_paused_on_player_choice
 from engine.action_decoder import ActionValidationError
 from engine.agent_decision import set_pending_agent_decision
 from engine.macro_intents import (
@@ -165,8 +166,13 @@ REQUIRED_PHASES = ("deployment", "command", "move", "shoot")
 #: entrée pour ne pas écraser le masque de la phase — cf. la capture dans le fixture `driven`.
 ACTIVATION_CHOICE_KEY = "activation_choice"
 
+#: Clé des AUTRES masques exclusifs de choix joueur : `pending_agent_decision` (`CHOICE_i`, dont
+#: la déclaration de vol) et `pending_oath_selection` (`OATH_SLOT_i`). Même raison que ci-dessus :
+#: ce ne sont pas des phases, et les confondre avec le masque de leur phase vide la parité.
+PLAYER_CHOICE_KEY = "player_choice"
+
 #: Régimes soumis à la parité masque↔décodeur.
-PARITY_REGIMES = REQUIRED_PHASES + (ACTIVATION_CHOICE_KEY,)
+PARITY_REGIMES = REQUIRED_PHASES + (ACTIVATION_CHOICE_KEY, PLAYER_CHOICE_KEY)
 
 
 @pytest.fixture(scope="module")
@@ -203,18 +209,25 @@ def driven() -> Dict[str, Any]:
                 break
             continue
 
-        # ⚠️ Depuis V11 §0.48 élément `L2`, la PREMIÈRE occurrence d'une phase est en général le
-        # masque EXCLUSIF du choix d'activation (une poignée d'`ACTIVATE_SLOTS`), pas le masque de
-        # la phase. Le capturer comme « le masque de move » réduisait la parité de 166 actions
-        # ouvertes à 15 — le test restait vert sur son énumération et ne confrontait plus rien.
-        # C'est la garde `test_parity_covers_the_real_phases` qui l'a signalé.
-        # Les deux régimes sont donc capturés SÉPARÉMENT, et les deux passent la parité.
-        is_activation_choice = (
-            engine.action_decoder.activation_selection_slots(game_state) is not None
-        )
-        if is_activation_choice:
-            if ACTIVATION_CHOICE_KEY not in by_phase:
-                by_phase[ACTIVATION_CHOICE_KEY] = (copy.deepcopy(game_state), mask.copy())
+        # ⚠️ UN MASQUE EXCLUSIF N'EST PAS LE MASQUE DE SA PHASE, et la première occurrence d'une
+        # phase en est souvent un. Trois mécanismes arrêtent le moteur sur un choix de joueur et
+        # n'ouvrent alors QUE leurs propres ids : `pending_agent_decision` (`CHOICE_i`, dont la
+        # déclaration de vol de `L6`), `pending_oath_selection` (`OATH_SLOT_i`) et le choix
+        # d'activation de `L2` (`ACTIVATE_SLOT_i`). Les ranger sous `by_phase[phase]` fait tomber
+        # la parité de ~166 actions ouvertes à une poignée : l'énumération reste VERTE et ne
+        # confronte plus rien. Mesuré DEUX fois — 166 → 15 en livrant `L2`, puis 111 → 17 en
+        # rebasant sur `L1`+`L6`, où un masque de décision FLY (2 actions) s'est fait passer pour
+        # le masque de move. C'est la garde de largeur de `test_parity_covers_the_real_phases` qui
+        # l'a signalé les deux fois, jamais l'énumération.
+        #
+        # Chaque régime est donc capturé SOUS SA PROPRE CLÉ, et tous passent la parité.
+        exclusive_key = None
+        if engine.action_decoder.activation_selection_slots(game_state) is not None:
+            exclusive_key = ACTIVATION_CHOICE_KEY
+        elif engine_is_paused_on_player_choice(game_state):
+            exclusive_key = PLAYER_CHOICE_KEY
+        if exclusive_key is not None:
+            by_phase.setdefault(exclusive_key, (copy.deepcopy(game_state), mask.copy()))
         elif phase not in by_phase:
             by_phase[phase] = (copy.deepcopy(game_state), mask.copy())
 
