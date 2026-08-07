@@ -74,6 +74,8 @@ from engine.macro_intents import (
     FIGHT_SLOT_COUNT,
     MOVE_CELL_BASE,
     MOVE_CELL_COUNT,
+    ACTIVATE_SLOT_BASE,
+    ACTIVATE_SLOT_COUNT,
     OATH_SLOT_BASE,
     OATH_SLOT_COUNT,
     SHOOT_SLOT_BASE,
@@ -90,7 +92,7 @@ MOVE_HEAD_HIDDEN = 32
 #: cellules, pointeurs pour les slots de tir, de charge, de mêlée et les candidats de décision).
 #: Calculé, jamais écrit en dur : ajouter une famille pointée sans le décompter ici décalerait
 #: TOUS les logits qui la suivent.
-DENSE_LOGIT_COUNT = (
+DENSE_MID_COUNT = (
     TOTAL_ACTION_SIZE
     - MOVE_CELL_COUNT
     - SHOOT_SLOT_COUNT
@@ -98,7 +100,26 @@ DENSE_LOGIT_COUNT = (
     - FIGHT_SLOT_COUNT
     - CHOICE_COUNT
     - OATH_SLOT_COUNT
+    - ACTIVATE_SLOT_COUNT
 )
+
+#: ⚠️ PROVISOIRE — MOITIÉ RÉSEAU DE `L2` NON LIVRÉE (V11 §0.48). Les 12 slots d'ACTIVATION sont
+#: produits DENSÉMENT, une colonne d'`action_net` par slot, faute de tête pointeur.
+#:
+#: Ce n'est pas la conception retenue : la doctrine du dépôt est « slots + pointeur », précisément
+#: parce qu'une colonne dense par slot ne partage aucun poids entre les slots et n'apprend donc
+#: rien de transférable d'une escouade à l'autre. La tête pointeur exige d'exposer les embeddings
+#: ALLIÉS par slot (ils sont aujourd'hui AGRÉGÉS par `_masked_mean_max` dans
+#: `ai/spatial_extractor.py`, et `features_dim` ne contient que les ennemis) — c'est-à-dire le
+#: MÊME fichier et la MÊME découpe de features que l'élément `L1` du lot, livré en parallèle.
+#: Cette moitié est donc écrite APRÈS le merge de `L1`, et elle REMPLACERA ces colonnes denses.
+#:
+#: Ce qui est vrai dès maintenant : l'espace d'action est complet, le masque et le décodeur
+#: fonctionnent, et l'agent PEUT jouer le choix. Ce qu'il ne sait pas encore faire : le scorer en
+#: généralisant d'un slot à l'autre.
+DENSE_ACTIVATE_COUNT = ACTIVATE_SLOT_COUNT
+
+DENSE_LOGIT_COUNT = DENSE_MID_COUNT + DENSE_ACTIVATE_COUNT
 
 
 class PolicyFeatures(NamedTuple):
@@ -179,23 +200,25 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
             )
         # HYPOTHÈSE D'ASSEMBLAGE de `_action_logits` — vérifiée ici, où l'erreur est explicite,
         # plutôt que subie sous forme de logits décalés : cellules en tête, `wait`, puis les
-        # slots de tir, de charge et de mêlée CONTIGUS, puis le reste dense, puis les CHOICE et
-        # enfin les slots d'Oath, qui ferment l'action space.
+        # slots de tir, de charge et de mêlée CONTIGUS, puis le reste dense, puis les CHOICE, les
+        # slots d'Oath, et enfin les slots d'ACTIVATION (V11 §0.48 `L2`), qui ferment l'espace.
         if (
             MOVE_CELL_BASE != 0
             or SHOOT_SLOT_BASE != MOVE_CELL_COUNT + 1
             or CHARGE_SLOT_BASE != SHOOT_SLOT_BASE + SHOOT_SLOT_COUNT
             or FIGHT_SLOT_BASE != CHARGE_SLOT_BASE + CHARGE_SLOT_COUNT
             or OATH_SLOT_BASE != CHOICE_BASE + CHOICE_COUNT
-            or OATH_SLOT_BASE != TOTAL_ACTION_SIZE - OATH_SLOT_COUNT
+            or ACTIVATE_SLOT_BASE != OATH_SLOT_BASE + OATH_SLOT_COUNT
+            or ACTIVATE_SLOT_BASE != TOTAL_ACTION_SIZE - ACTIVATE_SLOT_COUNT
         ):
             raise ValueError(
                 "Disposition de l'action space inattendue : l'assemblage des logits suppose "
                 f"[cellules 0..{MOVE_CELL_COUNT - 1} | wait | tir | charge | melee | dense | "
-                f"CHOICE | Oath en fin]. Recu MOVE_CELL_BASE={MOVE_CELL_BASE}, "
+                f"CHOICE | Oath | ACTIVATE en fin]. Recu MOVE_CELL_BASE={MOVE_CELL_BASE}, "
                 f"SHOOT_SLOT_BASE={SHOOT_SLOT_BASE}, CHARGE_SLOT_BASE={CHARGE_SLOT_BASE}, "
                 f"FIGHT_SLOT_BASE={FIGHT_SLOT_BASE}, CHOICE_BASE={CHOICE_BASE}, "
-                f"OATH_SLOT_BASE={OATH_SLOT_BASE}, TOTAL_ACTION_SIZE={TOTAL_ACTION_SIZE}."
+                f"OATH_SLOT_BASE={OATH_SLOT_BASE}, ACTIVATE_SLOT_BASE={ACTIVATE_SLOT_BASE}, "
+                f"TOTAL_ACTION_SIZE={TOTAL_ACTION_SIZE}."
             )
         self.trunk_dim = extractor.trunk_dim
         self.entity_dim = extractor.entity_dim
@@ -440,13 +463,16 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
         de mêlée (§9 P3-1) et d'Oath of Moment (chantier 01 : quatre requêtes, MÊMES embeddings
         d'ennemis), pointeur de décision (candidats `CHOICE_i`, §9.3 P2) et pointeur de
         DÉPLOIEMENT (§0.44, qui écrase les colonnes 4-11 des cellules en phase de déploiement) —
-        et UNE tête dense réduite à ses colonnes réellement lues (`DENSE_LOGIT_COUNT` = 17) :
-        wait, fight-sans-cible, 15 intents de zone.
+        et UNE tête dense réduite à ses colonnes réellement lues (`DENSE_MID_COUNT` = 17) : wait,
+        fight-sans-cible, 15 intents de zone, plus les colonnes d'ACTIVATION ci-dessous.
 
         ⚠️ L'assemblage suit l'ordre EXACT des ids (`macro_intents`) : 0-1023 cellules, 1024 wait,
         1025-1044 tir, 1045-1064 charge, 1065-1084 mêlée, 1085 fight-sans-cible, 1086-1100 zone,
-        1101-1106 CHOICE, 1107-1126 Oath. Une permutation ici ferait jouer à l'agent une action
-        autre que celle qu'il évalue, sans que rien ne lève — verrouillé par test.
+        1101-1106 CHOICE, 1107-1126 Oath, 1127-1138 ACTIVATION. Une permutation ici ferait jouer à
+        l'agent une action autre que celle qu'il évalue, sans que rien ne lève — verrouillé par test.
+
+        ⚠️ Les 12 logits d'ACTIVATION sortent de la tête DENSE, pas d'un pointeur : moitié réseau
+        de `L2` non livrée, cf. `DENSE_ACTIVATE_COUNT`.
         """
         enemies = feats.enemies
         base = self.action_net(latent_pi)
@@ -460,9 +486,14 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
                 self._point(self.query_net, latent_pi, enemies),         # tir
                 self._point(self.charge_query_net, latent_pi, enemies),  # charge
                 self._point(self.fight_query_net, latent_pi, enemies),   # mêlée
-                base[:, 1:],        # fight-sans-cible, intents de zone
+                base[:, 1:DENSE_MID_COUNT],   # fight-sans-cible, intents de zone
                 self._point(self.choice_query_net, latent_pi, feats.decision),
                 self._point(self.oath_query_net, latent_pi, enemies),    # Oath
+                # Slots d'ACTIVATION — colonnes DENSES, PROVISOIRE : cf. `DENSE_ACTIVATE_COUNT`.
+                # Elles seront remplacées par un pointeur sur les embeddings alliés. Découpées par
+                # constante et non par `base[:, 17:]` : un littéral ici décalerait silencieusement
+                # les 12 derniers logits au prochain intent dense.
+                base[:, DENSE_MID_COUNT:],
             ],
             dim=1,
         )

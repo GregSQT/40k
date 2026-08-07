@@ -1610,6 +1610,28 @@ class BotControlledEnv(gym.Wrapper):
         if current_phase == "shoot" and any(a in valid_actions for a in mi.SHOOT_SLOTS):
             self.shoot_opportunities += 1
 
+        # CHOIX DE L'ESCOUADE A ACTIVER (V11 §0.48 element L2) — le masque est EXCLUSIF : il
+        # n'ouvre que des `ACTIVATE_SLOTS`, donc AUCUNE des politiques de bot ci-dessous n'a
+        # d'action a proposer (`_select_bot_move_action` cherche des cellules, il n'y en a pas).
+        # Sans cette branche, le premier point de choix en phase move fait lever le bot.
+        #
+        # POLITIQUE DU BOT : le SLOT 0, toujours. Ce n'est pas un repli faute de mieux, c'est le
+        # maintien DELIBERE de la baseline : le slot 0 porte l'ancre du pool, c'est-a-dire
+        # exactement l'escouade que le moteur activait AVANT `L2` (`eligible_units[0]`). Faire
+        # choisir le bot au hasard changerait l'adversaire en meme temps que l'agent, et le
+        # delta de win-rate du lot ne mesurerait plus rien (meme lecon que §0.47 E4 sur les bots
+        # d'evaluation). Une politique d'activation pour les bots est un chantier a part entiere.
+        activation_slots = self.engine.action_decoder.activation_selection_slots(game_state)
+        if activation_slots is not None:
+            head_action = mi.ACTIVATE_SLOT_BASE
+            if head_action not in activation_slots:
+                raise RuntimeError(
+                    "BotControlledEnv: choix d'activation en attente sans slot 0 ouvert — "
+                    f"ouverts : {sorted(activation_slots)}. Le slot 0 porte l'ancre du pool, "
+                    "il est ouvert par construction."
+                )
+            return head_action
+
         if current_phase == "deployment":
             bot_choice = self._select_bot_deploy_action(game_state, valid_actions, bot=actor)
         elif current_phase == "move":

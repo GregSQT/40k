@@ -101,8 +101,11 @@ class RewardCalculator:
         # n'est pas une réponse système, et un futur tuning de cette clé rendrait les décisions
         # coûteuses ou payantes sans que personne ne l'ait décidé. Toute prime ou pénalité au
         # choix doit être un ajout DÉLIBÉRÉ, par tranche (§9.6).
+        # `select_activation` (V11 §0.48 L2) entre ici au MEME titre : choisir QUI activer est une
+        # décision, son effet se mesure dans l'activation qui suit. La récompenser reviendrait à
+        # payer l'agent pour décider, pas pour bien décider.
         if isinstance(result, dict) and result.get("action") in (
-            "agent_decision", "waiting_for_agent_decision",
+            "agent_decision", "waiting_for_agent_decision", "select_activation",
         ):
             reward_breakdown['total'] = 0.0
             game_state['last_reward_breakdown'] = reward_breakdown

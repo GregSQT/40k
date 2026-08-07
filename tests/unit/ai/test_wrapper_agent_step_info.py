@@ -45,6 +45,11 @@ class _ScriptedDecoder:
         mask[4] = True
         return mask, [{"id": "u1", "player": int(game_state["current_player"])}]
 
+    def activation_selection_slots(self, game_state, eligible_units=None):
+        """Aucun choix d'activation en attente (V11 §0.48 `L2`) — pool scripté à une unité."""
+        _ = (game_state, eligible_units)
+        return None
+
     def normalize_action_input(self, raw_action, phase, source, action_space_size):
         _ = (phase, source, action_space_size)
         return int(raw_action)

@@ -85,6 +85,8 @@ from engine.agent_decision import set_pending_agent_decision
 from engine.macro_intents import (
     ACTION_FIGHT_NO_TARGET,
     ACTION_WAIT,
+    ACTIVATE_SLOT_BASE,
+    ACTIVATE_SLOT_COUNT,
     BASE_ZONE_INTENT,
     CHARGE_SLOT_BASE,
     CHARGE_SLOT_COUNT,
@@ -158,6 +160,14 @@ DRIVE_STEPS = 400
 #: test de parité se viderait en silence — d'où la garde `test_parity_covers_the_real_phases`.
 REQUIRED_PHASES = ("deployment", "command", "move", "shoot")
 
+#: Clé du régime « choix d'activation » (V11 §0.48 `L2`) dans `driven["by_phase"]`. Ce n'est pas une
+#: phase : c'est un masque EXCLUSIF qui peut apparaître dans move/shoot/charge/fight. Il a sa propre
+#: entrée pour ne pas écraser le masque de la phase — cf. la capture dans le fixture `driven`.
+ACTIVATION_CHOICE_KEY = "activation_choice"
+
+#: Régimes soumis à la parité masque↔décodeur.
+PARITY_REGIMES = REQUIRED_PHASES + (ACTIVATION_CHOICE_KEY,)
+
 
 @pytest.fixture(scope="module")
 def driven() -> Dict[str, Any]:
@@ -176,7 +186,7 @@ def driven() -> Dict[str, Any]:
     move_pick = None
 
     for _ in range(DRIVE_STEPS):
-        if move_pick is not None and all(p in by_phase for p in REQUIRED_PHASES):
+        if move_pick is not None and all(p in by_phase for p in PARITY_REGIMES):
             break  # tout est capturé : ne pas jouer un pas de plus
 
         mask = engine.get_action_mask()
@@ -193,7 +203,19 @@ def driven() -> Dict[str, Any]:
                 break
             continue
 
-        if phase not in by_phase:
+        # ⚠️ Depuis V11 §0.48 élément `L2`, la PREMIÈRE occurrence d'une phase est en général le
+        # masque EXCLUSIF du choix d'activation (une poignée d'`ACTIVATE_SLOTS`), pas le masque de
+        # la phase. Le capturer comme « le masque de move » réduisait la parité de 166 actions
+        # ouvertes à 15 — le test restait vert sur son énumération et ne confrontait plus rien.
+        # C'est la garde `test_parity_covers_the_real_phases` qui l'a signalé.
+        # Les deux régimes sont donc capturés SÉPARÉMENT, et les deux passent la parité.
+        is_activation_choice = (
+            engine.action_decoder.activation_selection_slots(game_state) is not None
+        )
+        if is_activation_choice:
+            if ACTIVATION_CHOICE_KEY not in by_phase:
+                by_phase[ACTIVATION_CHOICE_KEY] = (copy.deepcopy(game_state), mask.copy())
+        elif phase not in by_phase:
             by_phase[phase] = (copy.deepcopy(game_state), mask.copy())
 
         if move_pick is None and phase == "move":
@@ -507,17 +529,22 @@ def test_choice_action_without_pending_decision_raises(phase_state):
 
 
 def test_choice_slot_count_matches_the_action_space_tail(phase_state):
-    """Ce qui suit le dernier `CHOICE` est le bloc d'Oath, et rien d'autre.
+    """Ce qui suit le dernier `CHOICE` est le bloc d'Oath, puis celui d'ACTIVATION, et rien d'autre.
 
     Le test affirmait auparavant que `CHOICE_BASE + CHOICE_COUNT` était HORS de l'espace : c'était
     vrai avant que le chantier 01 ne déclare `OATH_SLOTS`, et cela restait vert par accident —
     ces ids tombaient dans la branche « action non gérée ». Ils ont désormais un décodage propre
     (chantier 03), donc le contrat à verrouiller est celui-ci : l'id juste après les `CHOICE` est
     le premier slot d'Oath, et la VRAIE queue de l'espace est `TOTAL_ACTION_SIZE`.
+
+    ⚠️ La queue N'EST PLUS Oath depuis V11 §0.48 élément `L2` : les slots d'ACTIVATION la
+    ferment. Le contrat porte donc sur la CHAÎNE des trois blocs, pas sur « Oath finit tout » —
+    formulé ainsi, il aurait redemandé une réécriture au bloc suivant.
     """
     decoder, game_state, squad_id = phase_state("fight")
     assert CHOICE_BASE + CHOICE_COUNT == OATH_SLOT_BASE
-    assert OATH_SLOT_BASE + OATH_SLOT_COUNT == TOTAL_ACTION_SIZE
+    assert OATH_SLOT_BASE + OATH_SLOT_COUNT == ACTIVATE_SLOT_BASE
+    assert ACTIVATE_SLOT_BASE + ACTIVATE_SLOT_COUNT == TOTAL_ACTION_SIZE
     # Hors d'une désignation d'Oath en attente, le slot LÈVE — le masque ne l'ouvre pas.
     with pytest.raises(ValueError, match="sans designation"):
         decoder.convert_squad_action(
@@ -599,7 +626,7 @@ def test_action_outside_the_deployment_slots_raises_in_deployment(deployment_sta
 class TestMaskDecoderParity:
     def test_parity_covers_the_real_phases(self, driven):
         """Garde anti-vacuité : sans elle, la parité passerait sur zéro phase sans rien dire."""
-        missing = [p for p in REQUIRED_PHASES if p not in driven["by_phase"]]
+        missing = [p for p in PARITY_REGIMES if p not in driven["by_phase"]]
         assert not missing, (
             f"phases jamais atteintes en {DRIVE_STEPS} pas : {missing} — la parité ne les "
             f"mesure donc pas. Corriger le pilotage, pas la liste."
@@ -615,7 +642,7 @@ class TestMaskDecoderParity:
             f"quasi vide et ne prouve plus grand-chose."
         )
 
-    @pytest.mark.parametrize("phase", REQUIRED_PHASES)
+    @pytest.mark.parametrize("phase", PARITY_REGIMES)
     def test_every_masked_action_is_decodable(self, driven, phase):
         """Tout entier OUVERT par le masque se décode sans lever, dans la phase où il est ouvert."""
         decoder = driven["decoder"]

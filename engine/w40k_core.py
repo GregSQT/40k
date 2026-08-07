@@ -1407,6 +1407,12 @@ class W40KEngine(gym.Env):
         # tests/unit/engine/test_agent_decision_mechanism.py::test_the_choice_mechanism_survives_the_first_episode.
         self.game_state.pop(ONCE_CLAIMS_KEY, None)
 
+        # Choix d'escouade à activer (V11 §0.48 `L2`) : sa portée est (tour, phase, joueur), donc
+        # elle REDEVIENT valide par coïncidence à l'épisode suivant — le tour repart à 1. Un
+        # marqueur survivant supprimerait le premier choix de sa phase, en silence (vérifié :
+        # marqueur posé en fin d'épisode, encore là après `reset(seed=1)`).
+        self.game_state.pop(self.action_decoder.ACTIVATION_CHOSEN_KEY, None)
+
         # Reset episode-level metric accumulators
         self.episode_reward_accumulator = 0.0
         self.episode_length_accumulator = 0
@@ -3740,6 +3746,45 @@ class W40KEngine(gym.Env):
 
         return max(candidates, key=_value_of)
 
+    def _handle_select_activation_action(
+        self, action: Dict[str, Any]
+    ) -> Tuple[bool, Dict[str, Any]]:
+        """Enregistre l'escouade que l'agent a choisi d'activer (V11 §0.48 élément L2 / §9 P3-3).
+
+        N'active RIEN par elle-même : elle pose le marqueur que
+        `ActionDecoder._get_eligible_units_for_current_phase` lit pour remonter cette escouade en
+        tête du pool. L'activation proprement dite reste le step suivant, avec le masque et
+        l'observation de l'escouade choisie — c'est ce que la grille de move égocentrique impose
+        (`ObservationBuilder.squad_grid_anchor`) : « aller en cellule (gx,gy) » n'a pas de sens
+        tant qu'on ne sait pas qui bouge.
+
+        La légalité est revérifiée ici, contre la MÊME source que le masque : le moteur ne fait
+        jamais confiance à un `unitId` reçu, qu'il vienne du décodeur ou de l'API.
+        """
+        slots = self.action_decoder.activation_selection_slots(self.game_state)
+        if slots is None:
+            return False, {"error": "no_pending_activation_choice"}
+        unit_id = str(require_key(action, "unitId"))
+        if unit_id not in set(slots.values()):
+            return False, {
+                "error": "activation_choice_not_open",
+                "unitId": unit_id,
+                "open": sorted(set(slots.values())),
+            }
+        # Le marqueur porte SA PORTÉE (tour, phase, joueur) : sans elle, il survivrait au
+        # changement de phase — les pools sont par phase, donc l'escouade qui vient de bouger est
+        # toujours dans le pool de tir, et son marqueur y aurait supprimé le choix suivant.
+        self.game_state[self.action_decoder.ACTIVATION_CHOSEN_KEY] = {
+            "squad_id": unit_id,
+            "scope": self.action_decoder.activation_choice_scope(self.game_state),
+        }
+        return True, {
+            "action": "select_activation",
+            "unitId": unit_id,
+            "phase": require_key(self.game_state, "phase"),
+            "success": True,
+        }
+
     def _handle_select_oath_target_action(
         self, action: Dict[str, Any]
     ) -> Tuple[bool, Dict[str, Any]]:
@@ -4063,6 +4108,10 @@ class W40KEngine(gym.Env):
             return self._handle_agent_decision_action(action)
         if action.get("action") == "select_oath_target":
             return self._handle_select_oath_target_action(action)
+        # Choix de l'escouade à activer (V11 §0.48 L2) : MÊME rang — le moteur est arrêté sur un
+        # choix de joueur qui précède l'activation, aucune action de phase n'a de sens avant.
+        if action.get("action") == "select_activation":
+            return self._handle_select_activation_action(action)
 
         blocked = self._reject_action_while_faction_decision_pending(action)
         if blocked is not None:
@@ -5534,6 +5583,10 @@ class W40KEngine(gym.Env):
         # qu'elle n'est pas jouée.
         if semantic.get("action") == "select_oath_target":
             return self._handle_select_oath_target_action(semantic)
+
+        # Choix de l'escouade à activer (V11 §0.48 L2) : même rang que les trois ci-dessus.
+        if semantic.get("action") == "select_activation":
+            return self._handle_select_activation_action(semantic)
 
         blocked = self._reject_action_while_faction_decision_pending(semantic)
         if blocked is not None:

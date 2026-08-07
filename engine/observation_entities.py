@@ -535,6 +535,26 @@ def decision_option_bin_index(field: str) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Choix de l'escouade à ACTIVER (V11 §0.48 élément L2 / §9 P3-3)
+# ---------------------------------------------------------------------------
+
+#: Lignes du tenseur d'entités ALLIÉES : ligne 0 = l'escouade active, lignes 1..K-1 = mes autres
+#: escouades. Vit ICI et non dans `observation_builder` parce que `macro_intents` en DÉRIVE
+#: `ACTIVATE_SLOT_COUNT` (une action d'activation par ligne alliée) et ne peut pas importer
+#: l'observation sans cycle — ce module est une FEUILLE, c'est ce qui le rend importable des deux
+#: côtés. Les désolidariser ferait pointer le slot d'activation `i` et la ligne alliée `i` sur
+#: deux escouades différentes sans que rien ne lève : c'est l'invariant D1, côté allié.
+#:
+#: 8 → 12 : à 8, la valeur ne portait qu'une marge d'observation (« au plus 6 escouades par camp
+#: sur les rosters d'entraînement »). Depuis L2 elle porte le NOMBRE DE CANDIDATS D'ACTIVATION
+#: adressables, ce qui la met en face de formats plus grands que les rosters courants. Le
+#: sur-dimensionnement ne coûte AUCUN paramètre — les lignes passent par un encodeur PARTAGÉ
+#: (`ai/spatial_extractor.py`), mesure de V11 §0.32 — seulement des scalaires d'observation
+#: (511 par ligne) et du forward. Tout dépassement reste LOGUÉ, jamais silencieux.
+K_ALLY_SLOTS = 12
+
+
+# ---------------------------------------------------------------------------
 # Décision de DÉPLOIEMENT (V11 §0.40 point 3)
 # ---------------------------------------------------------------------------
 

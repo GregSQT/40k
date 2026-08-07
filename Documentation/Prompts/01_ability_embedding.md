@@ -158,9 +158,17 @@ Ce chantier est **le seul** de la séquence autorisé à changer `obs_size` ou
 `TOTAL_ACTION_SIZE`. Après lui, les deux sont figés : les chantiers 02 à 06 n'utilisent que
 des dimensions déjà déclarées ici. C'est ce qui garantit **un seul retrain** en fin de séquence.
 
-**Valeur gelée : `obs_size = 14615`** — socle du lot V11 §0.48 (2026-08-07 : règles d'armes en ids,
+⚠️ **LE GEL A ÉTÉ ROMPU, ET C'ÉTAIT PRÉVU.** L'élément `L2` du lot §0.48 (choix de l'escouade à
+activer, 2026-08-07) ajoute une FAMILLE D'ACTIONS entière qui n'existait sous aucune forme :
+`TOTAL_ACTION_SIZE` **1127 → 1139**, et `K_ALLY_SLOTS` 8 → 12 avec lui, donc `obs_size`
+**14615 → 16659**. Ce n'est pas un chantier « 02 à 06 » — le gel ne le couvrait pas, §0.48 l'avait
+inventorié comme cassant deux contrats. Le retrain reste UNIQUE : `L1`, `L2` et `L6` voyagent
+ensemble. Les valeurs ci-dessous sont donc l'HISTORIQUE du socle, plus l'état courant.
+
+**Valeur gelée par le socle : `obs_size = 14609`** — socle du lot V11 §0.48 (2026-08-07 : règles d'armes en ids,
 types de décision et slots de déploiement pré-dimensionnés, cf. `V11_agent_rework.md` §0.67), plus
-le drapeau `declines` du bloc candidat de décision (`14609` → `14615`, même jour, même retrain).
+le drapeau `declines` du bloc candidat de décision livré par `L1` (`14609` → `14615`, même jour,
+même retrain).
 Valeurs antérieures : `20727` (amendée le 2026-08-06, cf. ci-dessous), 20725 au 2026-08-05, 20718
 au 2026-08-04. Historique du même jour, tout entier
 absorbé par le retrain unique : `20780` → `20752` (les 13 bits `rule_*` remplacés par 8+4 slots

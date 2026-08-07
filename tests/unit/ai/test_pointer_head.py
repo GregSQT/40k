@@ -35,10 +35,12 @@ import torch
 from sb3_contrib import MaskablePPO
 from sb3_contrib.common.maskable.distributions import MaskableCategorical
 
-from ai.pointer_policy import DENSE_LOGIT_COUNT, PointerMaskablePolicy
+from ai.pointer_policy import DENSE_LOGIT_COUNT, DENSE_MID_COUNT, PointerMaskablePolicy
 from ai.spatial_extractor import SpatialCombinedExtractor
 from engine.macro_intents import (
     ACTION_WAIT,
+    ACTIVATE_SLOT_BASE,
+    ACTIVATE_SLOT_COUNT,
     CHARGE_SLOT_BASE,
     CHARGE_SLOT_COUNT,
     CHOICE_BASE,
@@ -201,9 +203,14 @@ def _manual_logits(policy, obs: Dict[str, torch.Tensor]):
             pointer,
             charge_pointer,
             fight_pointer,
-            base[:, 1:],        # fight-sans-cible, intents de zone
+            base[:, 1:DENSE_MID_COUNT],   # fight-sans-cible, intents de zone
             choice,
             oath_pointer,
+            # V11 §0.48 `L2` : slots d'ACTIVATION, colonnes DENSES en attendant la tête pointeur
+            # (`ai.pointer_policy.DENSE_ACTIVATE_COUNT`). Cette référence indépendante doit donc
+            # les produire de la même façon — quand le pointeur arrivera, c'est ICI qu'il faudra
+            # une 6e requête, et ce test rougira tant que ce sera oublié.
+            base[:, DENSE_MID_COUNT:],
         ],
         dim=1,
     )
@@ -579,15 +586,22 @@ def test_action_net_has_no_dead_column(model):
     la propriété : la taille EST celle des actions denses, et CHACUNE de ces colonnes déplace
     réellement le logit qu'elle est censée produire (une colonne morte signalerait un assemblage
     qui l'ignore).
+
+    ⚠️ Depuis V11 §0.48 `L2`, la couche porte 12 colonnes DE PLUS : les slots d'ACTIVATION, faute
+    de tête pointeur (moitié réseau non livrée, cf. `DENSE_ACTIVATE_COUNT`). Elles sont donc
+    ajoutées ici — et ce test est ce qui rendra leur RETRAIT visible quand le pointeur arrivera :
+    `DENSE_LOGIT_COUNT` retombera à `DENSE_MID_COUNT` et la liste ci-dessous devra suivre.
     """
     policy = model.policy
     policy.set_training_mode(False)
     assert policy.action_net.out_features == DENSE_LOGIT_COUNT
-    # Les ids denses, dans l'ordre : wait, puis tout ce qui suit les slots de melee
-    # (fight-sans-cible + intents de zone) jusqu'aux CHOICE.
+    # Les ids denses, dans l'ordre D'ASSEMBLAGE (pas dans l'ordre des ids) : wait, puis
+    # fight-sans-cible + intents de zone, puis — PROVISOIREMENT — les slots d'activation, qui
+    # sont assemblés en QUEUE alors que leurs ids suivent ceux d'Oath.
     dense_action_ids = (
         [ACTION_WAIT]
         + list(range(FIGHT_SLOT_BASE + FIGHT_SLOT_COUNT, CHOICE_BASE))
+        + list(range(ACTIVATE_SLOT_BASE, ACTIVATE_SLOT_BASE + ACTIVATE_SLOT_COUNT))
     )
     assert len(dense_action_ids) == DENSE_LOGIT_COUNT
     obs = _tensors(_zero_obs(batch=1))

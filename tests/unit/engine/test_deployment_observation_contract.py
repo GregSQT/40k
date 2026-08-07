@@ -747,14 +747,23 @@ def test_squad_obs_size_target_matches_the_schema():
     Cette clause dépend du ROSTER, qu'aucune autre feature ne porte — les mots-clés de
     sous-faction des unités ALLIÉES ne sont pas observés, et la clause compte les unités MORTES.
 
-    Les chantiers 04 à 06 n'utilisent que des dimensions déjà déclarées.
+    ⚠️ « DERNIER changement de la séquence » était vrai du SOCLE, pas du LOT : `L1`, `L2` et `L6`
+    étaient déjà inventoriés comme cassant les contrats (§0.48). Les deux entrées ci-dessous le
+    prouvent. Les chantiers 04 à 06 n'utilisent, eux, que des dimensions déjà déclarées.
 
-    Le 2026-08-07, un drapeau `declines` s'ajoute au registre de candidat de décision, d'où
+    `L1` (2026-08-07) — un drapeau `declines` s'ajoute au registre de candidat de décision, d'où
     14609 -> 14615 (1 bit x 6 slots). Ce n'est pas un enrichissement : les DEUX candidats de
     `waaagh_call` sortaient la MÊME ligne `[0…0, present=1]` — effets de faction, donc aucun bit
     `grants_*` de part et d'autre. Encodeur de candidat partagé et tête pointeur sans biais par
     slot : logits égaux, gradients égaux, l'appel du Waaagh! était un pile-ou-face que PPO ne
-    pouvait pas apprendre. Le retrain `--new` du lot §0.48 l'absorbe.
+    pouvait pas apprendre.
+
+    `L2` (2026-08-07) — 14615 -> 16659. `K_ALLY_SLOTS` passe de 8 à 12 (+2 044 = 4 lignes x 511)
+    parce que la constante ne borne plus une marge d'observation mais le NOMBRE DE CANDIDATS
+    D'ACTIVATION adressables : depuis `L2`, l'action `ACTIVATE_SLOT_i` désigne la ligne alliée `i`.
+    Coût en paramètres : ZÉRO (encodeur d'entités partagé, §0.32).
+
+    Le retrain `--new` du lot §0.48 absorbe les deux.
 
     Ce verrou valait 20768 tant que le point 3 restait ouvert : les quatre autres points ne
     touchent QUE le contenu de l'observation de déploiement, jamais sa taille — donc aucun modèle
@@ -766,7 +775,7 @@ def test_squad_obs_size_target_matches_the_schema():
         DEPLOY_CAND_BIN_SIZE, DEPLOY_CAND_CONT_SIZE, N_DEPLOY_SLOTS,
     )
 
-    assert ObservationBuilder.SQUAD_OBS_SIZE_TARGET == 14615
+    assert ObservationBuilder.SQUAD_OBS_SIZE_TARGET == 16659
     assert N_DEPLOY_SLOTS * (DEPLOY_CAND_CONT_SIZE + DEPLOY_CAND_BIN_SIZE) == 96, (
         "le bloc candidat de déploiement a changé de taille : mettre à jour `obs_size` dans les "
         "7 profils de la config d'agent, et l'historique d'AI_OBSERVATION.md"

@@ -50,6 +50,9 @@ def test_chaque_famille_est_atteinte_par_au_moins_un_id():
         action_family(mi.BASE_ZONE_INTENT, "move"),
         action_family(mi.CHOICE_BASE, "move"),
         action_family(mi.OATH_SLOT_BASE, "move"),
+        # V11 §0.48 `L2` — comme les CHOICE et Oath, la phase ne desambigue rien : le masque est
+        # EXCLUSIF quand le choix d'activation est pose, l'id se classe donc seul.
+        action_family(mi.ACTIVATE_SLOT_BASE, "move"),
         action_family(mi.DEPLOY_SLOT_BASE, "deployment"),
     }
     assert reached == set(ACTION_FAMILIES)

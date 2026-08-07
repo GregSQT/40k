@@ -103,14 +103,16 @@ tenues à jour et **ne doivent pas servir de référence** — les relire dans l
 ✅ **Contrôle de conformité du 2026-08-07** (vérification par lecture + exécution, PAS une
 livraison — aucune ligne de code touchée ; il REMPLACE le contrôle du 2026-08-02, dont les
 chiffres de contrat sont périmés) :
-- `obs_size` : `ObservationBuilder.SQUAD_OBS_SIZE_TARGET` = **14615** (14609 avant le drapeau
-  `declines` du bloc candidat de décision, 20727 avant le socle du 2026-08-07, cf. §0.67), et les
-  **7** profils de
-  `config/agents/ArmageddonAgent/ArmageddonAgent_training_config.json` portent **14615**
+- `obs_size` : `ObservationBuilder.SQUAD_OBS_SIZE_TARGET` = **16659** (14615 avant `L2` du
+  2026-08-07 ; 14609 avant le drapeau `declines` de `L1` ; 20727 avant le socle, cf. §0.67), et
+  les **7** profils de
+  `config/agents/ArmageddonAgent/ArmageddonAgent_training_config.json` portent **16659**
   (`x1`, `x1_long`, `x1_selfplay`, `x1_debug`, `x5_new`, `x5_append`, `x5_debug`).
-- `squad_obs_shapes()` : **26** clés ; `sum(prod(shape))` grille exclue = **14615**, égale à
-  `SQUAD_OBS_SIZE_TARGET` (exécuté).
-- `macro_intents.TOTAL_ACTION_SIZE` = **1127** (dont `OATH_SLOT_BASE` 1107, 20 slots) ;
+- `squad_obs_shapes()` : **26** clés ; `sum(prod(shape))` grille exclue = **16659**, égale à
+  `SQUAD_OBS_SIZE_TARGET` (exécuté). `allies_*` a **12** lignes depuis `L2` (`K_ALLY_SLOTS`, qui
+  vit désormais dans `observation_entities` — l'espace d'action en dérive).
+- `macro_intents.TOTAL_ACTION_SIZE` = **1139** (dont `OATH_SLOT_BASE` 1107, 20 slots, puis
+  `ACTIVATE_SLOT_BASE` 1127, 12 slots — `L2`) ;
   `DEPLOY_SLOTS` = ids **4..8** ; `spatial_grid.GRID_CHANNELS` = **9** ;
   `MOVE_CELL_BASE` = 0 / `MOVE_CELL_COUNT` = 1024.
 - `pointer_policy` porte **5** requêtes : `query_net`, `charge_query_net`, `fight_query_net`,
@@ -191,8 +193,8 @@ mutation-test.
 
 | Contrat | Valeur au moment de la mesure §0.14 | Valeur à HEAD | Cassé par |
 |---|---|---|---|
-| `obs_size` | 20780 | **14609** (20727 avant le socle du 2026-08-07) | chantier 01 (20752), chantier 04 réserves (20718), chantier 03 capacités de faction (20725), `02454a34` (20727) |
-| `TOTAL_ACTION_SIZE` | 1107 | **1127** | chantier 01 (20 slots d'Oath of Moment, consommés au chantier 03) |
+| `obs_size` | 20780 | **16653** (14609 avant `L2`, 20727 avant le socle du 2026-08-07) | chantier 01 (20752), chantier 04 réserves (20718), chantier 03 capacités de faction (20725), `02454a34` (20727), **`L2`** (`K_ALLY_SLOTS` 8 → 12, +2 044) |
+| `TOTAL_ACTION_SIZE` | 1107 | **1139** | chantier 01 (20 slots d'Oath of Moment, consommés au chantier 03), **`L2`** (12 slots d'activation) |
 | Architecture policy | 4 requêtes | **5** (`oath_query_net`) | chantier 01 |
 
 **Ce que cela invalide, factuellement** :
@@ -2149,8 +2151,46 @@ hors et en command, `SHOOT`/`CHARGE`/`FIGHT_SLOT_BASE + k`, `ACTION_FIGHT_NO_TAR
 `CHOICE_BASE + i`, les 5 `DEPLOY_SLOT_BASE`, plus 4 gardes qui doivent **lever**. Le commit rapporte
 **16 défauts réintroduits un à un** (décalages de base/offset, gardes neutralisées), chaque cas
 devenant rouge sous au moins une mutation, et l'arbre restauré propre. Aucun littéral d'action nu.
-⚠️ **Ce verrou fige l'espace d'action COURANT (1107 alors, 1127 depuis le chantier 01)** : il devra être mis à jour avec le lot
-(§0.48, dépendances).
+⚠️ ~~**Ce verrou fige l'espace d'action COURANT (1107 alors, 1127 depuis le chantier 01)** : il devra être mis à jour avec le lot
+(§0.48, dépendances).~~
+✅ **MIS À JOUR PAR `L2` LE 2026-08-07 — la conséquence annoncée est payée.** `TOTAL_ACTION_SIZE`
+**1127 → 1139** (12 slots d'activation). Trois verrous ont bougé, et **un quatrième a servi à
+autre chose que ce pour quoi il avait été écrit** :
+
+- `test_action_space_mirror.py` — la queue de l'espace n'est plus Oath mais l'ACTIVATION. Le cas
+  a été reformulé sur la **chaîne** des blocs (`CHOICE → Oath → ACTIVATE → TOTAL`) et non sur
+  « Oath ferme tout » : écrit ainsi, il redemandait une réécriture à chaque bloc ajouté.
+  Nouveau cas `test_activate_slots_mirror_the_ally_slot_mapping` — le compte de slots est
+  confronté à la cardinalité **réelle** du tenseur allié, pas seulement à sa constante.
+- `test_agent_interface_contract.py` — même reformulation en chaîne, plus la **capture séparée du
+  régime « choix d'activation »** (cf. ci-dessous), et la parité étendue à ce régime.
+- `test_deployment_observation_contract.py` — `obs_size` 14609 → **16653**.
+- 🔴 **Quatre défauts trouvés en RELECTURE, tous sur le moteur piloté, aucun attrapé par les
+  verrous ci-dessus** — ils sont corrigés et chacun a son cas, prouvé par mutation :
+  (1) le marqueur d'activation survivait au **changement de phase** (les pools sont par phase, donc
+  « sortir du pool » ne le périmait pas) — 9 des 20 premières activations à pool ≥ 2 se faisaient
+  sans choix ; le marqueur porte désormais sa **portée (tour, phase, joueur)** ;
+  (2) il survivait à **`reset()`**, et sa portée redevenait valide au tour 1 de l'épisode suivant ;
+  (3) la garde portait sur `len(eligible_units)` au lieu de `len(slots)` — une escouade en réserves
+  est éligible sans avoir de ligne alliée, d'où une décision à une seule action légale ;
+  (4) 🔴 **NON CORRIGÉ — divergence train/serve ouverte** : `active_shooting_unit` épinglé à la
+  construction du pool réduit celui-ci à une escouade et supprime le choix, ce qui ne se produit
+  qu'en **PvE** (`player_types["2"] == "ai"`) — l'agent est entraîné à choisir qui tire et privé
+  de ce choix au service. La correction tentée (déplacer l'épinglage au moment du choix) a été
+  **retirée après mesure** : la clé appartient au cycle de vie de `shooting_handlers` et est
+  consommée par l'API ; déplacée, elle devient périmée et fuit dans l'entraînement. Reprendre ce
+  cycle de vie ne se valide qu'en session PvE ⇒ **arbitrage utilisateur**. Mesuré et daté par
+  un cas qui deviendra rouge à la correction.
+  ⚠️ **Leçon commune** : le premier cas d'auto-péremption ne faisait que **simuler** la sortie du
+  pool, il restait donc vert sur (1). Un verrou qui construit une approximation de la situation ne
+  verrouille que l'approximation.
+- 🔴 **Ce que la garde anti-vacuité a attrapé, et qu'aucun de ces trois n'aurait vu.** Le masque du
+  choix d'activation est EXCLUSIF : la **première** occurrence de `move`/`shoot` est désormais ce
+  masque-là, pas celui de la phase. Le fixture de parité, qui capture la première occurrence,
+  s'est donc mis à mesurer 5 actions au lieu de 144 — **son énumération restait verte**, et seule
+  la garde de largeur (`total_open >= 50`) a signalé l'effondrement, de **166 → 15**. C'est
+  exactement le « VERT VACANT » que cette garde existait pour attraper, sur un chantier qu'elle
+  n'avait pas anticipé. Les deux régimes sont maintenant capturés séparément.
 
 #### É4 — les bots d'évaluation ne jouent pas ce qu'ils décident : `DefensiveBot` ne charge JAMAIS, et les bots « intelligents » tirent sur le mauvais slot — ✅ CONTRE-VÉRIFIÉ, ✅ CORRIGÉ (non mergé)
 
@@ -2364,7 +2404,7 @@ ré-entraînement — c'est le critère de tri, pas l'importance du chantier.
 | Réf | Chantier | Contrat cassé | Preuve | Ampleur |
 |---|---|---|---|---|
 | **L1** ✅ **LIVRÉ 2026-08-07** | [§0.44](#s0.44) tête pointeur de **déploiement** | **ARCHITECTURE** seule | ✅ Livré comme prévu : `deploy_query_net` jumeau de `choice_query_net`, `deploy_emb` exposé PAR SLOT en queue du vecteur (`deploy_embeddings_slice`, le tronc n'en garde que l'agrégation), routage sur `phase_deployment`. Ni `obs_size` ni `TOTAL_ACTION_SIZE` (**1127**) touchés par ce chantier — vérifié (le 14609 → 14615 du même jour vient du drapeau `declines`, pas de `L1`). ⏳ Conception d'origine ci-dessous : `deploy_query_net` serait le jumeau de `choice_query_net` ([pointer_policy.py:211](../../ai/pointer_policy.py#L211)) ; il faut **exposer `deploy_emb` hors du tronc**, où il n'entre aujourd'hui que par concaténation ([spatial_extractor.py:293-299](../../ai/spatial_extractor.py#L293-L299), [:494-503](../../ai/spatial_extractor.py#L494-L503)) ⇒ `features_dim` ([:304-312](../../ai/spatial_extractor.py#L304-L312)) et `_split_features` changent. `obs_size` **inchangé**. | moyenne |
-| **L2** | **P3-3** choix de l'unité à activer ([V11_phaseA.md:818-822](V11_phaseA.md#L818)) | **ESPACE D'ACTION + ARCHITECTURE** | Les candidats sont **mes escouades**, donc des entités observées ⇒ doctrine **slots + pointeur** ([macro_intents.py:63-66](../../engine/macro_intents.py#L63-L66)), pas `CHOICE_k` — d'autant que `SQUAD_TOP_K = 20` ([observation_builder.py:222](../../engine/observation_builder.py#L222)) dépasse `MAX_DECISION_OPTIONS = 6` et que [agent_decision.py:58](../../engine/agent_decision.py#L58) **lèverait**. Blocage structurel : les embeddings **ALLIÉS ne sont pas exposés** à la policy, ils sont **agrégés** ([spatial_extractor.py:460-468](../../ai/spatial_extractor.py#L460-L468)) et `features_dim` ([:306-311](../../ai/spatial_extractor.py#L306-L311)) ne contient que les **ennemis**. | **grosse** |
+| **L2** | **P3-3** choix de l'unité à activer ([V11_phaseA.md:818-822](V11_phaseA.md#L818)) | **ESPACE D'ACTION + OBSERVATION + ARCHITECTURE** | ✅ **MOITIÉ MOTEUR LIVRÉE le 2026-08-07.** `ACTIVATE_SLOT_BASE = 1127`, 12 slots ⇒ `TOTAL_ACTION_SIZE` **1127 → 1139** (c'est `L2` qui met à jour le verrou d'interface de [§0.47](#s0.47) É3, comme annoncé). `K_ALLY_SLOTS` **8 → 12** et DÉMÉNAGE dans `observation_entities` (module feuille) : l'espace d'action en dérive, donc la constante ne pouvait pas rester dans `observation_builder` sans cycle ⇒ `obs_size` **14615 → 16659** (+2 044, **0 paramètre** : encodeur d'entités partagé). Nouveau `get_ally_slot_mapping`, jumeau de `get_enemy_slot_mapping` — **l'ordre des lignes alliées devient CONTRACTUEL** (D1 côté allié), là où le code affirmait qu'il n'avait « pas de sémantique ». Le blocage annoncé ici (les embeddings alliés AGRÉGÉS, absents de `features_dim`) **reste entier : c'est la moitié RÉSEAU, non livrée** — la tête pointeur qui score les 12 slots se calque sur `deploy_query_net` que `L1` vient de livrer. | **grosse** |
 | **L3** | **P3-4** allocation des pertes (+ ordre de déclaration) | **OBSERVATION** au minimum | Nouveau type dans `AGENT_DECISION_TYPE_IDS` → `DECISION_CTX_BIN_SIZE` → `obs_size` ([observation_entities.py:258-262](../../engine/observation_entities.py#L258-L262)), plus ouverture du registre continu `DECISION_OPTION_CONT_FIELDS` ([:289-292](../../engine/observation_entities.py#L289-L292)). | grosse |
 | **L4** | **P3-5** pile-in / consolidation | **OBSERVATION** au minimum | Idem L3, et décision **spatiale** : [V11_phaseA.md:123-131](V11_phaseA.md#L123) **interdit** le top-K d'hex. **DÉPEND** du bug ouvert [`A_faire/bug_pile_in_bfs_clearance_mismatch.md`](A_faire/bug_pile_in_bfs_clearance_mismatch.md). | grosse |
 | **L5** | **P3-6** move-after-shooting + reactive move | **OBSERVATION** au minimum | Les **bits de règle existent déjà** ([observation_entities.py:108-109](../../engine/observation_entities.py#L108-L109)) : c'est la **DÉCISION** qui manque. | moyenne |

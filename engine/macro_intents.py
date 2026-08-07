@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """engine/macro_intents.py - Zone intent system Phase 2."""
 
-from engine.observation_entities import MAX_DECISION_OPTIONS
+from engine.observation_entities import K_ALLY_SLOTS, MAX_DECISION_OPTIONS
 from shared.data_validation import require_key
 
 INTENT_INVADE = 0
@@ -24,6 +24,7 @@ MAX_OBJECTIVES = 5
 #   1086-1100: zone intents (5 objectifs x 3 intentions)
 #   1101-1106: CHOICE_0..5 — candidats de `pending_agent_decision` (V11 §9.3 P2)
 #   1107-1126: oath slot 0-19 — cible d'Oath of Moment (chantier 01, consomme au chantier 03)
+#   1127-1138: activate slot 0-11 — escouade a ACTIVER (V11 §0.48 L2), un par ligne alliee
 
 # --- Named squad-action ids (single source of truth for ai/). --------------
 # Miroir EXACT de engine/phase_handlers/shared_utils.py (SQUAD_ACTION_*), qui reste la source
@@ -92,7 +93,22 @@ CHOICE_COUNT = MAX_DECISION_OPTIONS                            # 6
 # qu'une phase autorise).
 OATH_SLOT_BASE = CHOICE_BASE + CHOICE_COUNT                    # 1107
 OATH_SLOT_COUNT = SHOOT_SLOT_COUNT                             # 20 -> 1107-1126
-TOTAL_ACTION_SIZE = OATH_SLOT_BASE + OATH_SLOT_COUNT           # 1127
+# V11 §0.48 element L2 / §9 P3-3 — CHOIX DE L'ESCOUADE A ACTIVER. Jusqu'ici l'unite activee etait
+# TOUJOURS `eligible_units[0]` : l'ORDRE d'activation, c'est-a-dire la premiere decision de chaque
+# phase, echappait entierement a l'agent.
+#
+# Les candidats sont MES escouades, donc des ENTITES DEJA OBSERVEES : la decision se parametre en
+# DIMENSION D'ACTION + tete pointeur, jamais en `CHOICE_k` (cf. l'avertissement de CHOICE_BASE).
+# `MAX_DECISION_OPTIONS = 6` serait de toute facon depasse par `K_ALLY_SLOTS = 12`, et
+# `agent_decision.set_pending_agent_decision` leverait.
+#
+# `ACTIVATE_SLOT_COUNT` est DERIVE de `K_ALLY_SLOTS` — le nombre de lignes du tenseur ALLIE de
+# l'observation — pour la MEME raison que les slots de tir/charge/melee/Oath derivent de
+# `SHOOT_SLOT_COUNT` : le slot `i` designe la ligne `i`. Les desolidariser ferait pointer l'action
+# et l'observation sur deux escouades differentes sans que rien ne leve (invariant D1, cote allie).
+ACTIVATE_SLOT_BASE = OATH_SLOT_BASE + OATH_SLOT_COUNT          # 1127
+ACTIVATE_SLOT_COUNT = K_ALLY_SLOTS                             # 12 -> 1127-1138
+TOTAL_ACTION_SIZE = ACTIVATE_SLOT_BASE + ACTIVATE_SLOT_COUNT   # 1139
 
 MOVE_CELLS = range(MOVE_CELL_BASE, MOVE_CELL_BASE + MOVE_CELL_COUNT)                # 0-1023
 SHOOT_SLOTS = range(SHOOT_SLOT_BASE, SHOOT_SLOT_BASE + SHOOT_SLOT_COUNT)            # 1025-1044
@@ -106,6 +122,7 @@ DEPLOY_SLOTS = range(DEPLOY_SLOT_BASE, DEPLOY_SLOT_BASE + DEPLOY_SLOT_COUNT)    
 DEPLOY_STRATEGY_SLOTS = range(DEPLOY_SLOT_BASE, DEPLOY_SLOT_BASE + DEPLOY_STRATEGY_COUNT)  # 4-8
 CHOICE_SLOTS = range(CHOICE_BASE, CHOICE_BASE + CHOICE_COUNT)                       # 1101-1106
 OATH_SLOTS = range(OATH_SLOT_BASE, OATH_SLOT_BASE + OATH_SLOT_COUNT)                # 1107-1126
+ACTIVATE_SLOTS = range(ACTIVATE_SLOT_BASE, ACTIVATE_SLOT_BASE + ACTIVATE_SLOT_COUNT)  # 1127-1138
 
 
 def get_objective_center(obj: dict) -> tuple:
@@ -217,6 +234,7 @@ def get_objective_control(zone_idx: int, game_state: dict) -> float:
 ACTION_FAMILIES = (
     "deploy_slot", "move_cell", "wait", "shoot_slot", "charge_slot",
     "fight_slot", "fight_no_target", "zone_intent", "choice", "oath_slot",
+    "activate_slot",
 )
 
 
@@ -249,6 +267,12 @@ def action_family(action_int: int, phase: str, *, setting_up: bool = False) -> s
     # seraient comptes comme des intentions de zone sans que rien ne leve.
     if a in OATH_SLOTS:
         return "oath_slot"
+    # Slots d'activation : meme rang que les CHOICE et Oath, et pour la meme raison — le masque
+    # est EXCLUSIF quand le choix est pose, donc l'id ne depend pas de la phase. Les tester ici
+    # et non plus bas : sans cette branche ils tomberaient dans le `return "zone_intent"` final,
+    # qui est un fourre-tout, et seraient comptes comme des intentions de zone sans que rien ne leve.
+    if a in ACTIVATE_SLOTS:
+        return "activate_slot"
     if phase == "deployment":
         if a in DEPLOY_SLOTS:
             return "deploy_slot"
