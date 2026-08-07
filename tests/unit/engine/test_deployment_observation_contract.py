@@ -733,6 +733,12 @@ def test_squad_obs_size_target_matches_the_schema():
     Command phase », donc elle enjambe le tour adverse. L'identité de la cible d'Oath, elle,
     n'est PAS ici : elle est portée par le statut `oath_target` de l'entité visée — coût zéro.
 
+    Socle du lot V11 §0.48 (2026-08-07) : 20727 -> 14609. Les règles booléennes d'armes passent
+    des drapeaux positionnels aux ids (17 dimensions par profil remplacées par 6 slots, soit
+    -6 160 scalaires), le one-hot de type de décision est pré-dimensionné à 8 colonnes (+6), et
+    `N_DEPLOY_SLOTS` passe de 5 à 8 slots dont 3 RÉSERVÉS (+36). Objectif : plus aucune règle,
+    aucun type de décision et aucune stratégie de déploiement ne coûtera de retrain.
+
     Le chantier 03 (2026-08-06) ajoute enfin `my_oath_wound_bonus_active` /
     `enemy_oath_wound_bonus_active`, d'où 20725 -> 20727. Les deux bits précédents disent qu'une
     désignation est EN VIGUEUR, jamais quelle règle elle ouvre : le +1 au jet de blessure est
@@ -754,8 +760,8 @@ def test_squad_obs_size_target_matches_the_schema():
         DEPLOY_CAND_BIN_SIZE, DEPLOY_CAND_CONT_SIZE, N_DEPLOY_SLOTS,
     )
 
-    assert ObservationBuilder.SQUAD_OBS_SIZE_TARGET == 20727
-    assert N_DEPLOY_SLOTS * (DEPLOY_CAND_CONT_SIZE + DEPLOY_CAND_BIN_SIZE) == 60, (
+    assert ObservationBuilder.SQUAD_OBS_SIZE_TARGET == 14609
+    assert N_DEPLOY_SLOTS * (DEPLOY_CAND_CONT_SIZE + DEPLOY_CAND_BIN_SIZE) == 96, (
         "le bloc candidat de déploiement a changé de taille : mettre à jour `obs_size` dans les "
-        "5 profils de la config d'agent, et l'historique d'AI_OBSERVATION.md"
+        "7 profils de la config d'agent, et l'historique d'AI_OBSERVATION.md"
     )

@@ -1,4 +1,4 @@
-"""V11 §9.2.5 — l'observation squad expose les PROFILS D'ARMES et les BITS DE RÈGLES.
+"""V11 §9.2.5 — l'observation squad expose les PROFILS D'ARMES et leurs RÈGLES (ids).
 
 Trou fermé ici : depuis le 2026-07-26 toutes les règles d'armes du PDF 24 sont résolues dans le
 chemin vif (tir ET mêlée), mais le vecteur squad (199-d) n'en contenait **aucune trace** — ni
@@ -23,13 +23,14 @@ from unittest.mock import patch
 
 import pytest
 
-from engine.observation_builder import ObservationBuilder
+from engine.observation_builder import ObservationBuilder, weapon_rule_obs_ids
 from engine.observation_weapon_profiles import (
-    ANTI_KEYWORDS,
     PROFILE_BIN_SIZE,
     PROFILE_CONT_SIZE,
     PROFILE_STAT_CONT,
     WEAPON_RULE_BITS,
+    WEAPON_RULE_ID_SLOTS,
+    WEAPON_RULE_OBS_VOCABULARY,
     WEAPON_RULE_PARAMS,
     collect_weapon_profiles,
     profile_identity,
@@ -40,7 +41,6 @@ from tests.unit.engine._config_helpers import build_engine_config
 # Offsets DANS un profil (cf. observation_weapon_profiles, layout documenté).
 P_NB, P_ATK, P_STR, P_AP, P_DMG, P_RNG, P_CARRIERS = range(PROFILE_STAT_CONT)
 P_ANTI_Y = PROFILE_STAT_CONT + len(WEAPON_RULE_PARAMS)
-B_ANTI_ONEHOT = len(WEAPON_RULE_BITS)
 B_MASK = PROFILE_BIN_SIZE - 1
 
 
@@ -49,8 +49,10 @@ def _param_index(rule_id: str) -> int:
     return PROFILE_STAT_CONT + names.index(rule_id)
 
 
-def _bit_index(rule_id: str) -> int:
-    return WEAPON_RULE_BITS.index(rule_id)
+def _rule_names(ids_row: Any) -> set:
+    """Noms des règles écrites dans les slots d'ids d'un profil (0 = slot vide)."""
+    by_id = {obs_id: name for name, obs_id in weapon_rule_obs_ids().items()}
+    return {by_id[int(v)] for v in ids_row if int(v) != 0}
 
 
 def _weapon(**over: Any) -> Dict[str, Any]:
@@ -135,6 +137,12 @@ def _self_profile(engine: W40KEngine, slot: int) -> Tuple[Any, Any]:
     obs = engine.obs_builder.build_squad_observation(engine.game_state, "1")
     # Sous-registre « armes » de l'unite ACTIVE = ligne 0 des allies.
     return (obs["allies_wpn_cont"][0][slot], obs["allies_wpn_bin"][0][slot])
+
+
+def _self_rules(engine: W40KEngine, slot: int) -> set:
+    """Règles observées du slot de profil `slot` de MON escouade, par leur NOM."""
+    obs = engine.obs_builder.build_squad_observation(engine.game_state, "1")
+    return _rule_names(obs["allies_wpn_rule_ids"][0][slot])
 
 
 def _melee_slot_index(slot_in_melee: int = 0) -> int:
@@ -247,16 +255,56 @@ def test_empty_profile_slot_is_zero_padded_with_mask_off():
 # ---------------------------------------------------------------- règles
 
 
-def test_boolean_rule_bit_is_set():
-    """Une règle booléenne résolue dans le vif allume son bit."""
+def test_boolean_rule_writes_its_obs_id():
+    """Une règle booléenne résolue dans le vif écrit son `obs_id` dans un slot du profil."""
     eng = _make_engine([
         _unit_cfg(1, 1, [(20, 20)],
                   rng_weapons=[_weapon(WEAPON_RULES=["DEVASTATING_WOUNDS"])]),
         _unit_cfg(2, 2, [(60, 20)]),
     ])
-    _, binv = _self_profile(eng, 0)
-    assert binv[_bit_index("DEVASTATING_WOUNDS")] == pytest.approx(1.0)
-    assert binv[_bit_index("TORRENT")] == pytest.approx(0.0)
+    assert _self_rules(eng, 0) == {"DEVASTATING_WOUNDS"}
+
+
+def test_rule_ids_are_sorted_and_zero_padded():
+    """Ensemble d'ids, pas de positions : trié croissant, paddé à 0 (contrat `_fill_id_slots`)."""
+    eng = _make_engine([
+        _unit_cfg(1, 1, [(20, 20)],
+                  rng_weapons=[_weapon(WEAPON_RULES=["TORRENT", "LETHAL_HITS", "HEAVY"])]),
+        _unit_cfg(2, 2, [(60, 20)]),
+    ])
+    obs = eng.obs_builder.build_squad_observation(eng.game_state, "1")
+    row = [int(v) for v in obs["allies_wpn_rule_ids"][0][0]]
+    assert len(row) == WEAPON_RULE_ID_SLOTS
+    written = [v for v in row if v != 0]
+    assert written == sorted(written)
+    assert row[len(written):] == [0] * (WEAPON_RULE_ID_SLOTS - len(written))
+    assert _rule_names(row) == {"TORRENT", "LETHAL_HITS", "HEAVY"}
+
+
+def test_empty_profile_slot_writes_no_rule_id():
+    """Un slot de profil vide n'écrit AUCUN id : le padding ne doit pas devenir une règle."""
+    eng = _make_engine([
+        _unit_cfg(1, 1, [(20, 20)]),
+        _unit_cfg(2, 2, [(60, 20)]),
+    ])
+    assert _self_rules(eng, 1) == set()
+
+
+def test_more_rules_than_slots_raises_never_truncates():
+    """Débordement = ERREUR. Une règle tronquée serait subie sans être perçue (§0.30)."""
+    too_many = [name for name in WEAPON_RULE_BITS[: WEAPON_RULE_ID_SLOTS + 1]]
+    with pytest.raises(ValueError, match="regles d'arme"):
+        _make_engine([
+            _unit_cfg(1, 1, [(20, 20)], rng_weapons=[_weapon(WEAPON_RULES=too_many)]),
+            _unit_cfg(2, 2, [(60, 20)]),
+        ])
+
+
+def test_every_observed_rule_has_a_unique_obs_id():
+    """Le vocabulaire observé est ENTIÈREMENT couvert par le registre, sans collision."""
+    registry = weapon_rule_obs_ids()
+    assert set(registry) == set(WEAPON_RULE_OBS_VOCABULARY)
+    assert len(set(registry.values())) == len(registry)
 
 
 @pytest.mark.parametrize("rule_id,declared,expected", [
@@ -282,11 +330,9 @@ def test_anti_rule_exposes_threshold_and_target_keyword():
         _unit_cfg(1, 1, [(20, 20)], rng_weapons=[_weapon(WEAPON_RULES=["ANTI_VEHICLE:2"])]),
         _unit_cfg(2, 2, [(60, 20)]),
     ])
-    cont, binv = _self_profile(eng, 0)
+    cont, _ = _self_profile(eng, 0)
     assert cont[P_ANTI_Y] == pytest.approx(2.0)
-    onehot = list(binv[B_ANTI_ONEHOT:B_ANTI_ONEHOT + len(ANTI_KEYWORDS)])
-    assert sum(onehot) == pytest.approx(1.0)
-    assert onehot[ANTI_KEYWORDS.index("VEHICLE")] == pytest.approx(1.0)
+    assert _self_rules(eng, 0) == {"ANTI_VEHICLE"}
 
 
 def test_anti_rules_do_not_stack_best_threshold_wins():
@@ -296,17 +342,19 @@ def test_anti_rules_do_not_stack_best_threshold_wins():
                   rng_weapons=[_weapon(WEAPON_RULES=["ANTI_INFANTRY:4", "ANTI_VEHICLE:2"])]),
         _unit_cfg(2, 2, [(60, 20)]),
     ])
-    cont, binv = _self_profile(eng, 0)
+    cont, _ = _self_profile(eng, 0)
     assert cont[P_ANTI_Y] == pytest.approx(2.0)
-    onehot = list(binv[B_ANTI_ONEHOT:B_ANTI_ONEHOT + len(ANTI_KEYWORDS)])
-    assert onehot[ANTI_KEYWORDS.index("VEHICLE")] == pytest.approx(1.0)
-    assert onehot[ANTI_KEYWORDS.index("INFANTRY")] == pytest.approx(0.0)
+    # Une SEULE identité de règle [ANTI] est écrite : celle du meilleur seuil.
+    assert _self_rules(eng, 0) == {"ANTI_VEHICLE"}
 
 
 def test_indirect_fire_is_deliberately_absent():
     """[INDIRECT FIRE] 24.19 n'est PAS résolue par le moteur : l'exposer serait du bruit."""
     assert "INDIRECT_FIRE" not in WEAPON_RULE_BITS
     assert "INDIRECT_FIRE" not in {name for name, _ in WEAPON_RULE_PARAMS}
+    # Et donc aucun `obs_id` : le registre la déclare, l'observation l'ignore. La rendre vivante
+    # se fera en lui donnant un id — sans toucher `obs_size`, c'est tout l'objet des slots.
+    assert "INDIRECT_FIRE" not in weapon_rule_obs_ids()
 
 
 # ---------------------------------------------------------------- ennemis
@@ -321,10 +369,11 @@ def test_enemy_slots_expose_the_same_profile_fields():
                                        WEAPON_RULES=["TWIN_LINKED"])]),
     ])
     cont, binv = _enemy_profile(eng, 0, 0)
+    obs = eng.obs_builder.build_squad_observation(eng.game_state, "1")
     assert cont[P_NB] == pytest.approx(3.0)
     assert cont[P_STR] == pytest.approx(6.0)
     assert cont[P_CARRIERS] == pytest.approx(2.0)
-    assert binv[_bit_index("TWIN_LINKED")] == pytest.approx(1.0)
+    assert _rule_names(obs["enemies_wpn_rule_ids"][0][0]) == {"TWIN_LINKED"}
     assert binv[B_MASK] == pytest.approx(1.0)
 
 

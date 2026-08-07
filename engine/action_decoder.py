@@ -46,8 +46,8 @@ from engine.macro_intents import (
     BASE_ZONE_INTENT,
     CHOICE_BASE,
     DEPLOY_SLOT_BASE,
-    DEPLOY_SLOT_COUNT,
     DEPLOY_SLOTS,
+    DEPLOY_STRATEGY_COUNT,
     TOTAL_ACTION_SIZE,
     MAX_OBJECTIVES,
     OATH_SLOT_BASE,
@@ -78,15 +78,20 @@ INGRESS_SLOT_CANDIDATES_CACHE_KEY = "_ingress_slot_candidates"
 def open_deploy_slot_count(num_valid_hexes: int) -> int:
     """Nombre de slots de déploiement OUVERTS pour ce nombre d'hexes valides.
 
-    SOURCE UNIQUE de la question « quels slots 4-8 sont jouables ». Le masque l'appelle pour
-    ouvrir ses bits, le constructeur de candidats pour savoir combien de stratégies évaluer, et
-    l'observation en hérite par le second. Écrite en trois `min(5, n)` littéraux, cette règle
+    SOURCE UNIQUE de la question « quels slots de déploiement sont jouables ». Le masque l'appelle
+    pour ouvrir ses bits, le constructeur de candidats pour savoir combien de stratégies évaluer,
+    et l'observation en hérite par le second. Écrite en trois `min(5, n)` littéraux, cette règle
     aurait pu dériver d'un site à l'autre — et l'observation aurait alors décrit comme jouable
     un slot que le masque ferme (ou l'inverse), exactement le désalignement obs ↔ action D1.
+
+    La borne est `DEPLOY_STRATEGY_COUNT` (stratégies DÉFINIES) et non `DEPLOY_SLOT_COUNT` (slots
+    décrits) : les slots réservés au-delà des stratégies existantes ne s'ouvrent jamais. C'est
+    cette borne, et elle seule, qui rend le pré-dimensionnement de `N_DEPLOY_SLOTS` sûr — sans
+    elle, l'agent pourrait jouer un slot dont `_deployment_slot_order` ne sait rien.
     """
     if num_valid_hexes < 0:
         raise ValueError(f"num_valid_hexes negatif: {num_valid_hexes}")
-    return min(DEPLOY_SLOT_COUNT, int(num_valid_hexes))
+    return min(DEPLOY_STRATEGY_COUNT, int(num_valid_hexes))
 
 class ActionValidationError(ValueError):
     """Raised when an action fails strict normalization or mask validation."""
@@ -792,9 +797,19 @@ class ActionDecoder:
             # 20.01 — mise en réserves au lieu du déploiement (cf. masque).
             if action_int == SQUAD_ACTION_WAIT:
                 return {"action": "deploy_strategic_reserves", "unitId": selected_unit_id}
-            if action_int not in [4, 5, 6, 7, 8]:
+            if action_int not in DEPLOY_SLOTS:
                 raise ValueError(
                     f"convert_squad_action: action {action_int} invalide en phase deployment"
+                )
+            # Slot RESERVE (au-dela des strategies definies) : le masque ne l'ouvre jamais
+            # (`open_deploy_slot_count`), donc l'agent ne peut pas l'atteindre. S'il arrive ici,
+            # c'est un appel hors masque — l'erreur doit le dire, pas inventer une strategie.
+            if action_int - DEPLOY_SLOT_BASE >= DEPLOY_STRATEGY_COUNT:
+                raise ValueError(
+                    f"convert_squad_action: slot de deploiement {action_int} RESERVE "
+                    f"({DEPLOY_STRATEGY_COUNT} strategies definies, ids "
+                    f"{DEPLOY_SLOT_BASE}..{DEPLOY_SLOT_BASE + DEPLOY_STRATEGY_COUNT - 1}). "
+                    f"Le masque ne l'ouvre jamais : cet appel contourne le masque."
                 )
             current_deployer = self._get_current_deployer(game_state)
             valid_hexes = self._get_valid_deployment_hexes(

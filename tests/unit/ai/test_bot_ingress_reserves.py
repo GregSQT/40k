@@ -76,7 +76,7 @@ def test_no_bot_ever_puts_a_unit_in_strategic_reserves(bot_cls) -> None:
     `select_action_with_state` : c'est lui qui porte desormais l'invariant, et c'est le chemin
     reellement joue en entrainement. Un bot n'a plus l'occasion de se tromper.
     """
-    valid_actions = list(mi.DEPLOY_SLOTS) + [WAIT_ACTION]
+    valid_actions = list(mi.DEPLOY_STRATEGY_SLOTS) + [WAIT_ACTION]
     wrapper = _bare_wrapper()
     bot = _bot(bot_cls)
     chosen = {
@@ -86,7 +86,7 @@ def test_no_bot_ever_puts_a_unit_in_strategic_reserves(bot_cls) -> None:
     assert WAIT_ACTION not in chosen, (
         f"{bot_cls.__name__} met une unite en reserves stratégiques de sa propre initiative"
     )
-    assert chosen <= set(mi.DEPLOY_SLOTS)
+    assert chosen <= set(mi.DEPLOY_STRATEGY_SLOTS)
 
 
 def test_wrapper_never_offers_wait_at_deployment() -> None:
@@ -178,7 +178,7 @@ def test_tactical_bot_placement_is_frozen_on_the_first_open_slot() -> None:
     # pas le comportement sous exploration (couvert par le test de non-mise-en-reserves).
     bot = TacticalBot(randomness=0.0)
     state = _deployment_state()
-    assert {bot.select_placement_action(list(mi.DEPLOY_SLOTS), state) for _ in range(50)} == {
+    assert {bot.select_placement_action(list(mi.DEPLOY_STRATEGY_SLOTS), state) for _ in range(50)} == {
         mi.DEPLOY_SLOT_BASE
     }
     later_slots = [mi.DEPLOY_SLOT_BASE + 2, mi.DEPLOY_SLOT_BASE + 4]
@@ -193,7 +193,7 @@ def test_weighted_bots_spread_their_placement_over_the_open_slots() -> None:
     """
     bot = GreedyBot(randomness=0.0)
     state = _deployment_state()
-    chosen = {bot.select_placement_action(list(mi.DEPLOY_SLOTS), state) for _ in range(300)}
+    chosen = {bot.select_placement_action(list(mi.DEPLOY_STRATEGY_SLOTS), state) for _ in range(300)}
     assert len(chosen) >= 3, f"politique degeneree : {chosen}"
 
 

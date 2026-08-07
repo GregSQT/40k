@@ -384,8 +384,12 @@ def self_model_bin_index(field: str) -> int:
 #: Types de points de décision exposés à l'agent, ordre FIGÉ du one-hot de contexte.
 #: `rule_choice` est le pilote P3 point 0 ; `waaagh_call` est la décision binaire d'appel du
 #: Waaagh! (chantier 03). Les tranches suivantes (allocation de pertes…) s'ajoutent ICI, jamais
-#: en dupliquant le mécanisme. Ajouter un type change `DECISION_CTX_BIN_SIZE`, donc `obs_size` :
-#: retrain `--new`.
+#: en dupliquant le mécanisme.
+#:
+#: ✅ Ajouter un type ne change plus `obs_size` : le one-hot fait `AGENT_DECISION_TYPE_SLOTS`
+#: colonnes, PRÉ-DIMENSIONNÉES (cf. plus bas). C'est l'arbitrage 2 de V11 §0.48 appliqué ici —
+#: L3 (allocation de pertes), L4 (pile-in), L5 (move réactif), L6 (FLY 21.03), L7 (choix d'arme)
+#: et L10 (placement de charge) ouvrent chacun un type, et aucun ne coûtera de retrain.
 #:
 #: ⚠️ `waaagh_call` est le premier type dont les DEUX candidats portent un `effect_ids` VIDE, et
 #: c'est voulu : `DECISION_GRANTABLE_EFFECT_IDS` est dérivé des `grantsRuleIds` des rosters
@@ -409,8 +413,33 @@ MAX_DECISION_OPTIONS = 6
 #: le masque du bloc entier, et l'unique bit qui distingue « pas de décision » de « décision de
 #: type 0 ». Le nombre de candidats n'y figure pas : il est porté, candidat par candidat, par le
 #: masque `present` du registre ci-dessous.
-DECISION_CTX_BIN_FIELDS: Tuple[str, ...] = ("decision_pending",) + tuple(
-    f"decision_type_{decision_type}" for decision_type in AGENT_DECISION_TYPE_IDS
+#: Nombre de colonnes du one-hot de TYPE de décision. Pré-dimensionné, jamais ajusté au nombre de
+#: types déclarés : c'est ce qui rend l'ouverture d'un type gratuite en `obs_size`, exactement
+#: comme `OBS_ID_VOCAB_SIZE` la rend gratuite pour une capacité. Les colonnes en trop restent à
+#: zéro et ne reçoivent aucun gradient.
+#:
+#: 8 et non 6 : les six tranches P3 restantes ouvrent chacune un type, et le lot §0.48 ne doit
+#: pas se retrouver à un type près. Coût du pré-dimensionnement : 6 scalaires par observation.
+#: Dépasser ce nombre LÈVE ci-dessous — jamais de troncature, un type non observé serait une
+#: décision que l'agent prend sans savoir laquelle on lui demande.
+AGENT_DECISION_TYPE_SLOTS = 8
+
+if len(AGENT_DECISION_TYPE_IDS) > AGENT_DECISION_TYPE_SLOTS:
+    raise ValueError(
+        f"{len(AGENT_DECISION_TYPE_IDS)} types de décision déclarés pour "
+        f"{AGENT_DECISION_TYPE_SLOTS} colonnes de one-hot (AGENT_DECISION_TYPE_SLOTS). "
+        f"Augmenter la constante — ce qui change obs_size et impose un retrain `--new`."
+    )
+
+#: Les types DÉCLARÉS gardent leur nom de champ (`decision_type_<id>`) et donc leur index : un
+#: type ajouté s'insère APRÈS eux et ne déplace que des colonnes réservées, encore vides.
+DECISION_CTX_BIN_FIELDS: Tuple[str, ...] = (
+    ("decision_pending",)
+    + tuple(f"decision_type_{decision_type}" for decision_type in AGENT_DECISION_TYPE_IDS)
+    + tuple(
+        f"decision_type_reserved_{i}"
+        for i in range(AGENT_DECISION_TYPE_SLOTS - len(AGENT_DECISION_TYPE_IDS))
+    )
 )
 
 #: Un CANDIDAT de décision, MÊME schéma pour tous les types (comme une unité, cf. §3.3) : c'est
@@ -476,10 +505,21 @@ def decision_option_bin_index(field: str) -> int:
 # ---------------------------------------------------------------------------
 
 #: Nombre de slots de déploiement décrits. DOIT valoir `macro_intents.DEPLOY_SLOT_COUNT` (une
-#: action 4-8 par slot) — verrouillé par test de contrat, comme `N_OBJECTIVE_SLOTS` ↔
-#: `MAX_OBJECTIVES`. La constante est recopiée ici et non importée parce que ce module est une
-#: FEUILLE (cf. `OBS_PHASE_IDS`).
-N_DEPLOY_SLOTS = 5
+#: action `DEPLOY_SLOT_BASE + i` par slot) — verrouillé par test de contrat, comme
+#: `N_OBJECTIVE_SLOTS` ↔ `MAX_OBJECTIVES`. La constante est recopiée ici et non importée parce
+#: que ce module est une FEUILLE (cf. `OBS_PHASE_IDS`).
+#:
+#: 8 slots pour 5 STRATÉGIES définies (`macro_intents.DEPLOY_STRATEGY_COUNT`) : c'est
+#: l'arbitrage 2 de V11 §0.48 appliqué au déploiement (élément `L11` de son inventaire). Les
+#: 3 slots en trop sont RÉSERVÉS — le masque ne les ouvre jamais (`open_deploy_slot_count` borne
+#: au nombre de stratégies), leur ligne d'observation reste nulle, et leur id d'action tombe dans
+#: la plage des cellules de move, donc `TOTAL_ACTION_SIZE` ne bouge pas. Définir une 6ᵉ stratégie
+#: se fera alors en incrémentant `DEPLOY_STRATEGY_COUNT`, sans toucher `obs_size` ni retrain.
+#:
+#: ⚠️ Réserver ici a un sens que réserver un bit de règle n'a pas : un slot de déploiement est une
+#: ACTION. Le pré-dimensionnement ne vaut donc que parce que le masque garde la borne — sans elle,
+#: l'agent pourrait jouer un slot sans stratégie derrière.
+N_DEPLOY_SLOTS = 8
 
 #: Ce que le slot `i` (action `DEPLOY_SLOT_BASE + i`) POSERAIT s'il était joué.
 #:

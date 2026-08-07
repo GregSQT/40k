@@ -206,6 +206,13 @@ def test_ally_and_enemy_share_the_same_reading(engine):
     # … et les profils d'armes aussi, encodés par le MÊME encodeur avec le MÊME K.
     assert obs_mine["allies_wpn_cont"][0].tolist() == obs_theirs["enemies_wpn_cont"][slot].tolist()
     assert obs_mine["allies_wpn_bin"][0].tolist() == obs_theirs["enemies_wpn_bin"][slot].tolist()
+    # … règles d'armes comprises : elles sont un ENSEMBLE d'ids lu par la MÊME table d'embedding
+    # des deux côtés. Une asymétrie ici ferait apprendre « mon [ANTI] » et « son [ANTI] » comme
+    # deux choses différentes.
+    assert (
+        obs_mine["allies_wpn_rule_ids"][0].tolist()
+        == obs_theirs["enemies_wpn_rule_ids"][slot].tolist()
+    )
 
 
 def test_enemy_weapon_profiles_are_no_longer_truncated():

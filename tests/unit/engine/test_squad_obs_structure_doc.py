@@ -36,7 +36,11 @@ from engine.observation_entities import (
     UNIT_CONT_FIELDS,
 )
 from engine.observation_entities import MAX_DECISION_OPTIONS
-from engine.observation_weapon_profiles import ANTI_KEYWORDS, WEAPON_RULE_BITS, WEAPON_RULE_PARAMS
+from engine.observation_weapon_profiles import (
+    ANTI_RULE_IDS,
+    WEAPON_RULE_BITS,
+    WEAPON_RULE_PARAMS,
+)
 
 DOC = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))),
@@ -126,7 +130,7 @@ def test_weapon_profile_rules_are_documented():
     text = _doc()
     missing = [b for b in WEAPON_RULE_BITS if b not in text]
     missing += [p for p, _ in WEAPON_RULE_PARAMS if p not in text]
-    missing += [k for k in ANTI_KEYWORDS if k not in text]
+    missing += [r for r in ANTI_RULE_IDS if r not in text]
     assert not missing, "regles d'armes absentes de la doc : " + ", ".join(missing)
 
 

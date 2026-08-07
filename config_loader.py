@@ -635,6 +635,26 @@ class ConfigLoader:
         _validate_obs_ids(statuses, "config/unit_statuses.json")
         return statuses
 
+    def load_weapon_rules_config(self) -> Dict[str, Any]:
+        """Registre des REGLES D'ARMES (`config/weapon_rules.json`), valide strictement.
+
+        Troisieme registre a `obs_id`, apres les capacites et les statuts, et TROISIEME
+        `EmbeddingBag` : un id de regle d'arme vit dans son propre espace, il peut donc porter la
+        meme valeur qu'un id de capacite sans ambiguite.
+
+        Toutes les entrees ne portent PAS d'`obs_id`, et c'est la regle du registre, pas un
+        oubli : les regles PARAMETREES (RAPID_FIRE X, SUSTAINED_HITS X, MELTA X, CLEAVE X,
+        BLAST X) sont decrites par leur VALEUR dans le bloc continu du profil — un id en plus n'y
+        ajouterait rien — et INDIRECT_FIRE n'est pas implementee (un id pour elle serait du bruit
+        pur, cf. `observation_weapon_profiles`). `_validate_obs_ids` ignore ces entrees ; c'est
+        `observation_builder.weapon_rule_obs_ids` qui exige un id pour le vocabulaire OBSERVE.
+        """
+        rules = self.load_config("weapon_rules", force_reload=False)
+
+        _validate_registry_entries(rules, "weapon_rules.json", "Weapon rule")
+        _validate_obs_ids(rules, "config/weapon_rules.json")
+        return rules
+
     def load_agent_scenario(self, agent_key: str, scenario_name: str) -> Dict[str, Any]:
         """Load agent-specific scenario file.
         

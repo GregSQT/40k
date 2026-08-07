@@ -55,7 +55,10 @@ WEAPON_RULE_PARAMS: Tuple[Tuple[str, int], ...] = (
     ("BLAST", 1),
 )
 
-# Règles BOOLÉENNES résolues dans le vif → un drapeau chacune (clé "_bin", jamais normalisée).
+# Règles BOOLÉENNES résolues dans le vif. Ce ne sont plus des DRAPEAUX POSITIONNELS mais un
+# ENSEMBLE d'`obs_id` (cf. `WEAPON_RULE_ID_SLOTS` ci-dessous, qui porte le pourquoi). Ce tuple
+# reste la liste du VOCABULAIRE observé — il dit quelles règles ont un id,
+# `config/weapon_rules.json` dit lequel.
 WEAPON_RULE_BITS: Tuple[str, ...] = (
     "DEVASTATING_WOUNDS",
     "LETHAL_HITS",
@@ -71,18 +74,34 @@ WEAPON_RULE_BITS: Tuple[str, ...] = (
     "ASSAULT",
 )
 
-# Keywords ciblés par [ANTI-X Y+] — source unique : le résolveur de la règle.
-ANTI_KEYWORDS: Tuple[str, ...] = tuple(
-    rule_id[len(ANTI_RULE_PREFIX):] for rule_id in ANTI_RULE_IDS
-)
+# Vocabulaire OBSERVÉ sous forme d'ids : les règles booléennes, plus l'IDENTITÉ de la règle
+# [ANTI-X] portée (son seuil Y+ reste continu — c'est une valeur, pas une catégorie). Les règles
+# PARAMÉTRÉES n'y sont pas : leur présence se lit sur leur dimension continue, un id ferait
+# doublon.
+WEAPON_RULE_OBS_VOCABULARY: Tuple[str, ...] = WEAPON_RULE_BITS + ANTI_RULE_IDS
+
+# Slots d'ids par profil d'arme — LE point de bascule du chantier (V11 §0.48, arbitrage 2).
+# POURQUOI des ids et plus des bits : un drapeau de règle coûtait 560 scalaires d'observation
+# (28 entités × 20 profils), et il en coûtait 560 de plus à CHAQUE règle rendue vivante — la
+# conformité aux règles et l'objectif « un seul retrain » se contredisaient directement. Un id
+# ne coûte rien de plus qu'un slot déjà réservé, et le vocabulaire (`OBS_ID_VOCAB_SIZE`) est
+# pré-dimensionné : rendre [INDIRECT FIRE] vivante ne touchera ni `obs_size` ni les poids.
+#
+# MESURÉ sur les 4 armureries (161 datasheets, 231 armes) : au
+# plus 4 règles déclarées par arme, paramétrées comprises — donc au plus 4 ids. 6 laisse la même
+# marge que les 8 slots de capacités d'unité face à leur maximum mesuré.
+# ⚠️ Débordement = ERREUR (`observation_builder._fill_id_slots`), jamais troncature : une règle
+# tronquée serait une règle que l'agent subit sans la percevoir.
+WEAPON_RULE_ID_SLOTS = 6
 
 # Layout d'UN profil (l'ordre ci-dessous EST l'ordre d'émission).
-#   cont : NB, ATK, STR, AP, DMG, portée, porteurs vivants, puis les paramètres de règles,
-#          puis le seuil Y+ de [ANTI-X] (0 = aucune règle ANTI).
-#   bin  : les drapeaux de règles, le one-hot du keyword ANTI, puis le mask du slot.
+#   cont     : NB, ATK, STR, AP, DMG, portée, porteurs vivants, puis les paramètres de règles,
+#              puis le seuil Y+ de [ANTI-X] (0 = aucune règle ANTI).
+#   bin      : le mask du slot, et lui seul.
+#   rule_ids : l'ensemble des `obs_id` de règles du profil, trié et paddé à 0.
 PROFILE_STAT_CONT = 7
 PROFILE_CONT_SIZE = PROFILE_STAT_CONT + len(WEAPON_RULE_PARAMS) + 1
-PROFILE_BIN_SIZE = len(WEAPON_RULE_BITS) + len(ANTI_KEYWORDS) + 1
+PROFILE_BIN_SIZE = 1
 
 # Clés d'accès aux listes d'armes, par registre.
 RANGED_KEY = "RNG_WEAPONS"
@@ -181,17 +200,24 @@ def collect_weapon_profiles(
 def encode_weapon_profile(
     cont: List[float],
     binv: List[float],
+    rule_names: List[List[str]],
     weapon: Optional[Dict[str, Any]],
     carriers: int,
 ) -> None:
-    """Émet UN profil (ou un slot vide, tout à zéro avec mask=0) dans les deux vecteurs.
+    """Émet UN profil (ou un slot vide, tout à zéro avec mask=0) dans les trois vecteurs.
 
     Les valeurs de dés (`NB`/`DMG` = "D3", "D6"…) passent par `expected_dice_value` : c'est la
     conversion déterministe déjà utilisée par le moteur, pas une estimation.
+
+    `rule_names` reçoit UNE liste par slot : les NOMS des règles observées, jamais leurs ids. La
+    traduction en `obs_id` et le remplissage des slots appartiennent à `observation_builder`
+    (`_fill_id_slots`), seul écrivain d'ensembles d'ids — c'est lui qui porte le tri, le padding
+    et les gardes de domaine et de débordement, pour les capacités comme pour les armes.
     """
     if weapon is None:
         cont.extend([0.0] * PROFILE_CONT_SIZE)
         binv.extend([0.0] * PROFILE_BIN_SIZE)
+        rule_names.append([])
         return
 
     cont.append(expected_dice_value(require_key(weapon, "NB"), "obs_profile_nb"))
@@ -215,11 +241,14 @@ def encode_weapon_profile(
     anti_threshold, anti_keyword = anti_rule_of(weapon)
     cont.append(float(anti_threshold))
 
-    for rule_id in WEAPON_RULE_BITS:
-        binv.append(1.0 if weapon_has_rule(weapon, rule_id) else 0.0)
-    for keyword in ANTI_KEYWORDS:
-        binv.append(1.0 if keyword == anti_keyword else 0.0)
-    binv.append(1.0)  # slot occupé
+    binv.append(1.0)  # slot occupé — seul drapeau positionnel restant du profil
+
+    names = [rule_id for rule_id in WEAPON_RULE_BITS if weapon_has_rule(weapon, rule_id)]
+    if anti_keyword is not None:
+        # 24.02 : plusieurs [ANTI] ne se cumulent pas — `anti_rule_of` a déjà retenu le MEILLEUR
+        # seuil, et c'est cette règle-là, une seule, dont l'identité est observée.
+        names.append(ANTI_RULE_PREFIX + anti_keyword)
+    rule_names.append(names)
 
 
 def weapon_rule_parameter_or_nude(
@@ -282,6 +311,7 @@ def anti_rule_of(weapon: Dict[str, Any]) -> Tuple[int, Optional[str]]:
 def encode_squad_weapon_profiles(
     cont: List[float],
     binv: List[float],
+    rule_names: List[List[str]],
     models: Sequence[Dict[str, Any]],
     k_ranged: int,
     k_melee: int,
@@ -298,7 +328,7 @@ def encode_squad_weapon_profiles(
             on_truncation(weapons_key, len(profiles), k_slots)
         for slot in range(k_slots):
             if slot >= len(profiles):
-                encode_weapon_profile(cont, binv, None, 0)
+                encode_weapon_profile(cont, binv, rule_names, None, 0)
                 continue
             weapon, carriers = profiles[slot]
-            encode_weapon_profile(cont, binv, weapon, carriers)
+            encode_weapon_profile(cont, binv, rule_names, weapon, carriers)

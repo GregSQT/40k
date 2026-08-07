@@ -92,6 +92,7 @@ from engine.macro_intents import (
     CHOICE_COUNT,
     DEPLOY_SLOT_BASE,
     DEPLOY_SLOT_COUNT,
+    DEPLOY_STRATEGY_COUNT,
     FIGHT_SLOT_BASE,
     FIGHT_SLOT_COUNT,
     MAX_OBJECTIVES,
@@ -533,7 +534,7 @@ def test_choice_slot_count_matches_the_action_space_tail(phase_state):
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("slot", list(range(DEPLOY_SLOT_COUNT)))
+@pytest.mark.parametrize("slot", list(range(DEPLOY_STRATEGY_COUNT)))
 def test_deploy_slot_routes_to_the_hex_of_that_strategy(deployment_state, slot):
     """`DEPLOY_SLOT_BASE + s` → l'hex que la stratégie `s` choisit, pas celui d'une voisine.
 
@@ -556,6 +557,21 @@ def test_deploy_slot_routes_to_the_hex_of_that_strategy(deployment_state, slot):
         current_deployer=deployer,
         valid_hexes=valid_hexes,
     )
+
+
+@pytest.mark.parametrize("slot", list(range(DEPLOY_STRATEGY_COUNT, DEPLOY_SLOT_COUNT)))
+def test_reserved_deploy_slot_is_refused_never_reinterpreted(deployment_state, slot):
+    """Les slots RÉSERVÉS (au-delà des stratégies définies) lèvent, ils ne se rabattent pas.
+
+    Ils existent pour que l'ajout d'une 6ᵉ stratégie ne coûte pas de retrain (V11 §0.48,
+    arbitrage 2). Le masque ne les ouvre jamais (`open_deploy_slot_count` borne à
+    `DEPLOY_STRATEGY_COUNT`) : si le décodeur en reçoit un, c'est un appel hors masque. Le
+    rabattre sur une stratégie voisine déploierait dans un hex parfaitement valide, donc
+    silencieusement faux — exactement le défaut que ce fichier verrouille pour les slots ouverts.
+    """
+    decoder, game_state = deployment_state
+    with pytest.raises(ValueError, match="RESERVE"):
+        decoder.convert_squad_action(DEPLOY_SLOT_BASE + slot, game_state)
 
 
 def test_action_outside_the_deployment_slots_raises_in_deployment(deployment_state):

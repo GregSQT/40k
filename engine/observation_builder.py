@@ -4,7 +4,7 @@ observation_builder.py - Builds observations from game state
 """
 
 import numpy as np
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any, Optional, Sequence, Tuple
 from shared.data_validation import require_key
 from engine.combat_utils import (
     calculate_hex_distance,
@@ -32,6 +32,8 @@ from engine.weapon_damage_cache import lookup_best_weapon
 from engine.observation_weapon_profiles import (
     PROFILE_BIN_SIZE,
     PROFILE_CONT_SIZE,
+    WEAPON_RULE_ID_SLOTS,
+    WEAPON_RULE_OBS_VOCABULARY,
     encode_squad_weapon_profiles,
 )
 from engine.agent_decision import read_pending_agent_decision
@@ -73,12 +75,40 @@ from engine.observation_entities import (
 )
 
 
+def _obs_ids_for_vocabulary(
+    registry: Dict[str, Any],
+    vocabulary: Sequence[str],
+    *,
+    kind: str,
+    vocabulary_constant: str,
+    config_path: str,
+    slot_kind: str,
+) -> Dict[str, int]:
+    """`{nom -> obs_id}` restreint au VOCABULAIRE OBSERVÉ d'un registre à ids.
+
+    UN SEUL lecteur pour les capacités d'unité ET les règles d'arme : le registre est la SOURCE
+    des ids, le vocabulaire dit lesquels sont observés. Une entrée du vocabulaire sans `obs_id`
+    LÈVE — sans id, elle serait écrite nulle part et l'agent subirait la règle sans la percevoir,
+    le trou que le chantier ferme. Deux lecteurs jumeaux auraient divergé sur cette garde.
+    """
+    mapping: Dict[str, int] = {}
+    for rule_id in vocabulary:
+        if rule_id not in registry:
+            raise KeyError(
+                f"{kind} '{rule_id}' ({vocabulary_constant}) absent de {config_path}."
+            )
+        entry = registry[rule_id]
+        if "obs_id" not in entry:
+            raise KeyError(
+                f"{kind} '{rule_id}' sans 'obs_id' dans {config_path} : il ne pourrait etre "
+                f"ecrit dans aucun slot {slot_kind} de l'observation."
+            )
+        mapping[rule_id] = int(entry["obs_id"])
+    return mapping
+
+
 def unit_ability_obs_ids() -> Dict[str, int]:
     """`{effet observable -> obs_id}` pour les 13 effets de `UNIT_RULE_EFFECT_IDS`.
-
-    Le registre `config/unit_rules.json` est la SOURCE des ids ; ce module ne fait que restreindre
-    au VOCABULAIRE OBSERVÉ. Un effet observable sans `obs_id` lève : sans id, il serait écrit
-    nulle part et l'agent subirait la règle sans la percevoir — le trou que le chantier ferme.
 
     Mémoïsé sur le loader (il cache déjà le JSON) : appelé pour chacune des 28 entités à chaque
     step.
@@ -87,22 +117,14 @@ def unit_ability_obs_ids() -> Dict[str, int]:
     if _ABILITY_OBS_IDS is None:
         from config_loader import get_config_loader
 
-        registry = get_config_loader().load_unit_rules_config()
-        mapping: Dict[str, int] = {}
-        for rule_id in UNIT_RULE_EFFECT_IDS:
-            if rule_id not in registry:
-                raise KeyError(
-                    f"Effet observable '{rule_id}' (UNIT_RULE_EFFECT_IDS) absent de "
-                    f"config/unit_rules.json."
-                )
-            entry = registry[rule_id]
-            if "obs_id" not in entry:
-                raise KeyError(
-                    f"Effet observable '{rule_id}' sans 'obs_id' dans config/unit_rules.json : "
-                    f"il ne pourrait etre ecrit dans aucun slot de capacite de l'observation."
-                )
-            mapping[rule_id] = int(entry["obs_id"])
-        _ABILITY_OBS_IDS = mapping
+        _ABILITY_OBS_IDS = _obs_ids_for_vocabulary(
+            get_config_loader().load_unit_rules_config(),
+            UNIT_RULE_EFFECT_IDS,
+            kind="Effet observable",
+            vocabulary_constant="UNIT_RULE_EFFECT_IDS",
+            config_path="config/unit_rules.json",
+            slot_kind="de capacite",
+        )
     return _ABILITY_OBS_IDS
 
 
@@ -125,8 +147,36 @@ def unit_status_obs_ids() -> Dict[str, int]:
     return _STATUS_OBS_IDS
 
 
+def weapon_rule_obs_ids() -> Dict[str, int]:
+    """`{regle d'arme observee -> obs_id}` du registre `config/weapon_rules.json`.
+
+    TROISIEME registre a ids, apres les capacites et les statuts, et TROISIEME table
+    d'embedding : un id de regle d'arme vit dans son propre espace.
+
+    Restreint au VOCABULAIRE OBSERVE (`WEAPON_RULE_OBS_VOCABULARY`) : le registre contient aussi
+    les regles PARAMETREES (decrites par leur valeur continue) et [INDIRECT FIRE] (non
+    implementee), qui n'ont pas d'id.
+
+    Memoise : appele pour chacun des 20 profils de chacune des 28 entites, a chaque step froid.
+    """
+    global _WEAPON_RULE_OBS_IDS
+    if _WEAPON_RULE_OBS_IDS is None:
+        from config_loader import get_config_loader
+
+        _WEAPON_RULE_OBS_IDS = _obs_ids_for_vocabulary(
+            get_config_loader().load_weapon_rules_config(),
+            WEAPON_RULE_OBS_VOCABULARY,
+            kind="Regle d'arme observee",
+            vocabulary_constant="WEAPON_RULE_OBS_VOCABULARY",
+            config_path="config/weapon_rules.json",
+            slot_kind="de regle d'arme",
+        )
+    return _WEAPON_RULE_OBS_IDS
+
+
 _ABILITY_OBS_IDS: Optional[Dict[str, int]] = None
 _STATUS_OBS_IDS: Optional[Dict[str, int]] = None
+_WEAPON_RULE_OBS_IDS: Optional[Dict[str, int]] = None
 
 
 def _unit_statuses_in_effect(unit: Dict[str, Any], ctx: Dict[str, Any]) -> List[int]:
@@ -172,8 +222,13 @@ def _fill_id_slots(
     """Ecrit un ENSEMBLE d'`obs_id` dans `n_slots` : trie croissant, padde a 0, et LEVE au moindre
     ecart.
 
-    UN SEUL ecrivain pour les capacites ET les statuts. Les chantiers 02, 03 et 06, qui poseront
-    les statuts, heritent donc du tri, du padding et des deux gardes ci-dessous sans les reecrire :
+    `slots_constant` est nomme QUALIFIE (`module.CONSTANTE`) : les constantes de slots ne vivent
+    pas toutes dans le meme module (`observation_entities` pour les unites,
+    `observation_weapon_profiles` pour les armes) et le message de debordement doit envoyer au bon
+    fichier.
+
+    UN SEUL ecrivain pour les capacites, les statuts ET les regles d'arme. Les chantiers 02, 03 et
+    06, qui poseront les statuts, heritent donc du tri, du padding et des gardes sans les reecrire :
     deux ecrivains jumeaux auraient diverge sur le premier des deux, et c'est le motif d'echec n°1
     de ce depot.
 
@@ -187,7 +242,9 @@ def _fill_id_slots(
     GARDE DE DEBORDEMENT — ERREUR, jamais troncature : tronquer ferait subir a l'agent des regles
     qu'il ne percoit pas, exactement le trou que V11 §0.30 avait ferme.
 
-    ⚠️ CHEMIN CHAUD : appele 2 fois pour CHACUNE des 28 entites, a chaque step. Rien qui ne serve
+    ⚠️ CHEMIN CHAUD : appele 2 fois pour CHACUNE des 28 entites a CHAQUE step (capacites et
+    statuts) — les 20 appels de regles d'arme par entite, eux, sont derriere le cache de profils,
+    donc froids (une fois par composition d'escouade). Rien qui ne serve
     qu'aux messages d'erreur ne doit etre calcule sur le chemin nominal — d'ou l'inversion
     `obs_id -> nom` construite DANS les branches d'erreur et non avant elles (mesure : 0,8 µs par
     appel, soit ~44 µs par step, pour une table jamais lue quand tout va bien).
@@ -210,8 +267,7 @@ def _fill_id_slots(
             f"Escouade {squad_id} : {len(ordered)} {kind} en vigueur pour {n_slots} slots "
             f"d'observation. En exces (les moins prioritaires du tri croissant) : "
             f"{[by_obs_id.get(i, '?') for i in ordered[n_slots:]]}. Augmenter {slots_constant} "
-            f"(engine/observation_entities.py) — ce qui change obs_size et impose un retrain "
-            f"`--new`."
+            f"— ce qui change obs_size et impose un retrain `--new`."
         )
     slots = np.zeros(n_slots, dtype=np.float32)
     slots[: len(ordered)] = ordered
@@ -325,7 +381,10 @@ class ObservationBuilder:
     #                                                       normalisés. Le slot k n'a aucune
     #                                                       sémantique propre (cf. `_fill_id_slots`)
     #   allies_wpn_cont    (K_ALLY_SLOTS, K_WEAPONS, PROFILE_CONT_SIZE)
-    #   allies_wpn_bin     (K_ALLY_SLOTS, K_WEAPONS, PROFILE_BIN_SIZE)
+    #   allies_wpn_bin     (K_ALLY_SLOTS, K_WEAPONS, PROFILE_BIN_SIZE)   mask du slot, et lui seul
+    #   allies_wpn_rule_ids (K_ALLY_SLOTS, K_WEAPONS, WEAPON_RULE_ID_SLOTS)  ENSEMBLE d'`obs_id`
+    #                                                       de règles d'arme, même convention que
+    #                                                       les capacités (3ᵉ table d'embedding)
     #   allies_types_cont  (K_ALLY_SLOTS, K_MODEL_TYPES, MODEL_TYPE_CONT_SIZE)
     #   allies_types_bin   (K_ALLY_SLOTS, K_MODEL_TYPES, MODEL_TYPE_BIN_SIZE)
     #   enemies_*          idem avec K_ENEMY_SLOTS         ⚠ ordre = get_enemy_slot_mapping
@@ -397,7 +456,10 @@ class ObservationBuilder:
             # là où les bits `rule_*` en coûtaient 13 ET grossissaient à chaque capacité ajoutée.
             + UNIT_ABILITY_SLOTS
             + UNIT_STATUS_SLOTS
-            + K_WEAPONS * (PROFILE_CONT_SIZE + PROFILE_BIN_SIZE)
+            # Profils d'armes : le bloc DOMINANT de l'observation. Chaque profil porte ses
+            # continus, son seul drapeau de mask, et l'ENSEMBLE des ids de ses règles — cf.
+            # `WEAPON_RULE_ID_SLOTS`, qui porte le pourquoi du passage des drapeaux aux ids.
+            + K_WEAPONS * (PROFILE_CONT_SIZE + PROFILE_BIN_SIZE + WEAPON_RULE_ID_SLOTS)
             + K_MODEL_TYPES * (MODEL_TYPE_CONT_SIZE + MODEL_TYPE_BIN_SIZE)
         )
         + SQUAD_TOP_K * (SELF_MODEL_CONT_SIZE + SELF_MODEL_BIN_SIZE)
@@ -428,6 +490,9 @@ class ObservationBuilder:
             "allies_status_ids": (cls.K_ALLY_SLOTS, UNIT_STATUS_SLOTS),
             "allies_wpn_cont": (cls.K_ALLY_SLOTS, cls.K_WEAPONS, PROFILE_CONT_SIZE),
             "allies_wpn_bin": (cls.K_ALLY_SLOTS, cls.K_WEAPONS, PROFILE_BIN_SIZE),
+            # Ensemble d'ids de REGLES par profil d'arme — troisieme table d'embedding, meme
+            # patron que les capacites et les statuts.
+            "allies_wpn_rule_ids": (cls.K_ALLY_SLOTS, cls.K_WEAPONS, WEAPON_RULE_ID_SLOTS),
             "allies_types_cont": (cls.K_ALLY_SLOTS, cls.K_MODEL_TYPES, MODEL_TYPE_CONT_SIZE),
             "allies_types_bin": (cls.K_ALLY_SLOTS, cls.K_MODEL_TYPES, MODEL_TYPE_BIN_SIZE),
             "enemies_cont": (cls.K_ENEMY_SLOTS, UNIT_CONT_SIZE),
@@ -436,6 +501,7 @@ class ObservationBuilder:
             "enemies_status_ids": (cls.K_ENEMY_SLOTS, UNIT_STATUS_SLOTS),
             "enemies_wpn_cont": (cls.K_ENEMY_SLOTS, cls.K_WEAPONS, PROFILE_CONT_SIZE),
             "enemies_wpn_bin": (cls.K_ENEMY_SLOTS, cls.K_WEAPONS, PROFILE_BIN_SIZE),
+            "enemies_wpn_rule_ids": (cls.K_ENEMY_SLOTS, cls.K_WEAPONS, WEAPON_RULE_ID_SLOTS),
             "enemies_types_cont": (cls.K_ENEMY_SLOTS, cls.K_MODEL_TYPES, MODEL_TYPE_CONT_SIZE),
             "enemies_types_bin": (cls.K_ENEMY_SLOTS, cls.K_MODEL_TYPES, MODEL_TYPE_BIN_SIZE),
             "self_models_cont": (cls.SQUAD_TOP_K, SELF_MODEL_CONT_SIZE),
@@ -1043,8 +1109,8 @@ class ObservationBuilder:
         squad_id: str,
         models: List[Dict[str, Any]],
         alive_mids: List[str],
-    ) -> Tuple[np.ndarray, np.ndarray]:
-        """Sous-tenseurs (K_WEAPONS, PROFILE_*_SIZE) des profils d'armes d'une unité.
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Sous-tenseurs (K_WEAPONS, …) des profils d'armes d'une unité : continus, mask, ids.
 
         MÊME encodeur et MÊME K pour une unité amie et une unité ennemie (§3.3 : « une arme est
         une arme des deux côtés »). Avant T-D, les slots ennemis n'exposaient que 2 profils de
@@ -1072,30 +1138,48 @@ class ObservationBuilder:
         if hit is None:
             cont: List[float] = []
             binv: List[float] = []
+            rule_names: List[List[str]] = []
             # Les dépassements sont COLLECTÉS au calcul froid, pas logués directement : c'est
             # la rediffusion ci-dessous qui les émet, pour que froid et chaud tracent pareil.
             truncations: List[Tuple[str, int, int]] = []
             encode_squad_weapon_profiles(
                 cont,
                 binv,
+                rule_names,
                 models,
                 self.K_WEAPONS_RANGED,
                 self.K_WEAPONS_MELEE,
                 on_truncation=lambda key, n, k: truncations.append((key, n, k)),
             )
+            registry = weapon_rule_obs_ids()
+            rule_ids = np.zeros((self.K_WEAPONS, WEAPON_RULE_ID_SLOTS), dtype=np.float32)
+            for slot, names in enumerate(rule_names):
+                if not names:
+                    continue  # slot vide ou arme sans regle : la ligne est deja a zero (= padding)
+                rule_ids[slot] = _fill_id_slots(
+                    [require_key(registry, name) for name in names],
+                    WEAPON_RULE_ID_SLOTS,
+                    registry=registry,
+                    kind="regles d'arme",
+                    slots_constant="observation_weapon_profiles.WEAPON_RULE_ID_SLOTS",
+                    squad_id=squad_id,
+                )
             # Une escouade ne traverse qu'un nombre borné de compositions (une par perte), et
             # le cache meurt avec l'épisode : pas d'éviction à prévoir.
             hit = (
                 np.asarray(cont, dtype=np.float32).reshape(self.K_WEAPONS, PROFILE_CONT_SIZE),
                 np.asarray(binv, dtype=np.float32).reshape(self.K_WEAPONS, PROFILE_BIN_SIZE),
+                rule_ids,
                 tuple(truncations),
             )
             cache[cache_key] = hit
 
-        log_truncation = self._weapon_truncation_logger(game_state, squad_id)
-        for weapons_key, n_profiles, k_slots in hit[2]:
-            log_truncation(weapons_key, n_profiles, k_slots)
-        return hit[0], hit[1]
+        wpn_cont, wpn_bin, wpn_rule_ids, truncated = hit
+        if truncated:
+            log_truncation = self._weapon_truncation_logger(game_state, squad_id)
+            for weapons_key, n_profiles, k_slots in truncated:
+                log_truncation(weapons_key, n_profiles, k_slots)
+        return wpn_cont, wpn_bin, wpn_rule_ids
 
     def _encode_entity_model_types(
         self,
@@ -1161,12 +1245,12 @@ class ObservationBuilder:
         is_active: bool,
     ) -> Tuple[
         np.ndarray, np.ndarray, np.ndarray, np.ndarray,
-        np.ndarray, np.ndarray, np.ndarray, np.ndarray,
+        np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray,
     ]:
         """Encode UNE unité selon le schéma unifié (`observation_entities`).
 
-        Retourne (cont, bin, ability_ids, status_ids, armes_cont, armes_bin, types_cont,
-        types_bin). Les features
+        Retourne (cont, bin, ability_ids, status_ids, armes_cont, armes_bin, armes_rule_ids,
+        types_cont, types_bin). Les features
         marquées « unité ACTIVE uniquement » dans le schéma restent à zéro pour les autres
         entités : leur masque est le bit `is_active` (§3.3).
         """
@@ -1348,7 +1432,7 @@ class ObservationBuilder:
             UNIT_ABILITY_SLOTS,
             registry=ability_obs_ids,
             kind="capacites",
-            slots_constant="UNIT_ABILITY_SLOTS",
+            slots_constant="observation_entities.UNIT_ABILITY_SLOTS",
             squad_id=squad_id,
         )
         status_ids = _fill_id_slots(
@@ -1356,7 +1440,7 @@ class ObservationBuilder:
             UNIT_STATUS_SLOTS,
             registry=unit_status_obs_ids(),
             kind="statuts",
-            slots_constant="UNIT_STATUS_SLOTS",
+            slots_constant="observation_entities.UNIT_STATUS_SLOTS",
             squad_id=squad_id,
         )
 
@@ -1463,13 +1547,15 @@ class ObservationBuilder:
             _c("n_fight_eligible", ctx["n_fight_eligible"])
             _c("n_in_enemy_ez", ctx["n_in_enemy_ez"])
 
-        wpn_cont, wpn_bin = self._encode_entity_weapons(game_state, squad_id, models, alive_mids)
+        wpn_cont, wpn_bin, wpn_rule_ids = self._encode_entity_weapons(
+            game_state, squad_id, models, alive_mids
+        )
         types_cont, types_bin = self._encode_entity_model_types(
             game_state, squad_id, alive_mids, models_cache
         )
         return (
             cont, binv, ability_ids, status_ids,
-            wpn_cont, wpn_bin, types_cont, types_bin,
+            wpn_cont, wpn_bin, wpn_rule_ids, types_cont, types_bin,
         )
 
     def build_squad_observation(
@@ -1869,7 +1955,7 @@ class ObservationBuilder:
         def _write_entity(prefix: str, row: int, sid: str, *, is_ally: bool, is_active: bool) -> None:
             (
                 e_cont, e_bin, e_ability_ids, e_status_ids,
-                e_wpn_cont, e_wpn_bin, e_types_cont, e_types_bin,
+                e_wpn_cont, e_wpn_bin, e_wpn_rule_ids, e_types_cont, e_types_bin,
             ) = self._encode_unit_entity(
                 game_state, sid, ctx, is_ally=is_ally, is_active=is_active
             )
@@ -1879,6 +1965,7 @@ class ObservationBuilder:
             obs[f"{prefix}_status_ids"][row] = e_status_ids
             obs[f"{prefix}_wpn_cont"][row] = e_wpn_cont
             obs[f"{prefix}_wpn_bin"][row] = e_wpn_bin
+            obs[f"{prefix}_wpn_rule_ids"][row] = e_wpn_rule_ids
             obs[f"{prefix}_types_cont"][row] = e_types_cont
             obs[f"{prefix}_types_bin"][row] = e_types_bin
 

@@ -1,111 +1,156 @@
 {
   "ANTI_FLY": {
+    "id": "ANTI_FLY",
     "name": "Anti-Fly",
+    "obs_id": 1,
     "description": "An unmodified Wound roll of X+ against a target with the fly keyword scores a Critical Wound.",
     "has_parameter": true
   },
   "ANTI_INFANTRY": {
+    "id": "ANTI_INFANTRY",
     "name": "Anti-Infantry",
+    "obs_id": 2,
     "description": "An unmodified Wound roll of X+ against a target with the infantry keyword scores a Critical Wound.",
     "has_parameter": true
   },
-  "ANTI_VEHICLE": {
-    "name": "Anti-Vehicle",
-    "description": "An unmodified Wound roll of X+ against a target with the vehicle keyword scores a Critical Wound.",
+  "ANTI_MONSTER": {
+    "id": "ANTI_MONSTER",
+    "name": "Anti-Monster",
+    "obs_id": 3,
+    "description": "An unmodified Wound roll of X+ against a target with the monster keyword scores a Critical Wound.",
     "has_parameter": true
   },
   "ANTI_PSYKER": {
+    "id": "ANTI_PSYKER",
     "name": "Anti-Psyker",
+    "obs_id": 4,
     "description": "An unmodified Wound roll of X+ against a target with the psyker keyword scores a Critical Wound.",
     "has_parameter": true
   },
+  "ANTI_VEHICLE": {
+    "id": "ANTI_VEHICLE",
+    "name": "Anti-Vehicle",
+    "obs_id": 5,
+    "description": "An unmodified Wound roll of X+ against a target with the vehicle keyword scores a Critical Wound.",
+    "has_parameter": true
+  },
   "ASSAULT": {
+    "id": "ASSAULT",
     "name": "Assault",
+    "obs_id": 6,
     "description": "Units containing one or more models with this weapon can shoot using assault shooting (they can shoot after Advancing).",
     "has_parameter": false
   },
   "BLAST": {
+    "id": "BLAST",
     "name": "Blast",
     "description": "Each time you gather attack dice for this weapon, add one additional attack dice for every five models that were in the target unit in the Select Targets step (rounding down); a Blast X weapon adds X dice per five models.",
     "has_parameter": false
   },
   "CLEAVE": {
+    "id": "CLEAVE",
     "name": "Cleave",
     "description": "Each time you gather attack dice for this weapon, if you only selected one target for all of that weapon's attacks, add X additional attack dice for every five models that were in the target unit in the Select Targets step (rounding down).",
     "has_parameter": true
   },
+  "CLOSE_QUARTERS": {
+    "id": "CLOSE_QUARTERS",
+    "name": "Close-quarters",
+    "obs_id": 7,
+    "description": "Units containing one or more models with a [CLOSE-QUARTERS] weapon can shoot using close-quarters shooting (10.06). When using another shooting type, for each model in that unit (excluding MONSTER/VEHICLE models), you can only select one of the following to make attacks with: one or more of its [CLOSE-QUARTERS] weapons, or one or more of its other ranged weapons. Formerly named [PISTOL]: 24.27 states both are identical for all rules purposes.",
+    "has_parameter": false
+  },
   "DEVASTATING_WOUNDS": {
+    "id": "DEVASTATING_WOUNDS",
     "name": "Devastating Wounds",
+    "obs_id": 8,
     "description": "Each time an attack made with this weapon results in a critical wound, the attack sequence ends and the target suffers a number of mortal wounds equal to the weapon's Damage characteristic, inflicted after any normal damage. Those mortal wounds can damage at most one model per critical wound.",
     "has_parameter": false
   },
   "EXTRA_ATTACKS": {
+    "id": "EXTRA_ATTACKS",
     "name": "Extra Attacks",
+    "obs_id": 9,
     "description": "The bearer can attack with this weapon in addition to any other weapons it can make attacks with.",
     "has_parameter": false
   },
   "HAZARDOUS": {
+    "id": "HAZARDOUS",
     "name": "Hazardous",
+    "obs_id": 10,
     "description": "Each time a unit is selected to shoot or to fight, after it has resolved all of its attacks, make one hazard roll (one D6) per Hazardous weapon selected: on a 1-2 that unit suffers 1 mortal wound, or 3 mortal wounds if every model in the unit is a Monster or Vehicle.",
     "has_parameter": false
   },
   "HEAVY": {
+    "id": "HEAVY",
     "name": "Heavy",
+    "obs_id": 11,
     "description": "Add 1 to the Hit roll in your Shooting phase if the attacking unit is unengaged, was not set up on the battlefield this turn, and no model in it moved more than 3\" this turn.",
     "has_parameter": false
   },
   "IGNORES_COVER": {
+    "id": "IGNORES_COVER",
     "name": "Ignores Cover",
+    "obs_id": 12,
     "description": "The target cannot have the Benefit of Cover against an attack made with this weapon.",
     "has_parameter": false
   },
   "INDIRECT_FIRE": {
+    "id": "INDIRECT_FIRE",
     "name": "Indirect Fire",
     "description": "A line of sight on the target is not required to attack with this weapon.",
     "has_parameter": false
   },
   "LETHAL_HITS": {
+    "id": "LETHAL_HITS",
     "name": "Lethal Hits",
+    "obs_id": 13,
     "description": "Each time an attack made with this weapon results in a critical hit, you can choose for that attack to automatically wound the target (no wound roll is made, so it cannot be a critical wound).",
     "has_parameter": false
   },
   "MELTA": {
+    "id": "MELTA",
     "name": "Melta",
     "description": "Increase the Damage by X when targeting units within half range.",
     "has_parameter": true
   },
-  "CLOSE_QUARTERS": {
-    "name": "Close-quarters",
-    "description": "Units containing one or more models with a [CLOSE-QUARTERS] weapon can shoot using close-quarters shooting (10.06). When using another shooting type, for each model in that unit (excluding MONSTER/VEHICLE models), you can only select one of the following to make attacks with: one or more of its [CLOSE-QUARTERS] weapons, or one or more of its other ranged weapons. Formerly named [PISTOL]: 24.27 states both are identical for all rules purposes.",
-    "has_parameter": false
-  },
   "PRECISION": {
+    "id": "PRECISION",
     "name": "Precision",
+    "obs_id": 14,
     "description": "While resolving attacks made with this weapon, at the start of the Allocation Order step, if the target unit contains one or more CHARACTER models visible to one or more attacking models, the attacking player can make one such CHARACTER's allocation group the current allocation group.",
     "has_parameter": false
   },
   "PSYCHIC": {
+    "id": "PSYCHIC",
     "name": "Psychic",
+    "obs_id": 15,
     "description": "Each time an attack is made with this weapon, you can ignore any or all modifiers to that attack's BS/WS characteristic and to the hit roll. Attacks made with this weapon are psychic attacks.",
     "has_parameter": false
   },
   "RAPID_FIRE": {
+    "id": "RAPID_FIRE",
     "name": "Rapid Fire",
     "description": "Increase this weapon's Attacks by X when target unit is within half range.",
     "has_parameter": true
   },
   "SUSTAINED_HITS": {
+    "id": "SUSTAINED_HITS",
     "name": "Sustained Hits",
     "description": "Each time an attack made with this weapon results in a critical hit, that attack scores X additional hits on the target.",
     "has_parameter": true
   },
   "TORRENT": {
+    "id": "TORRENT",
     "name": "Torrent",
+    "obs_id": 16,
     "description": "Each time an attack is made with such a weapon, that attack automatically hits the target.",
     "has_parameter": false
   },
   "TWIN_LINKED": {
+    "id": "TWIN_LINKED",
     "name": "Twin Linked",
+    "obs_id": 17,
     "description": "Each time an attack is made with this weapon, you can re-roll the wound roll.",
     "has_parameter": false
   }

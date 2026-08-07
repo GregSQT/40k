@@ -158,7 +158,10 @@ Ce chantier est **le seul** de la séquence autorisé à changer `obs_size` ou
 `TOTAL_ACTION_SIZE`. Après lui, les deux sont figés : les chantiers 02 à 06 n'utilisent que
 des dimensions déjà déclarées ici. C'est ce qui garantit **un seul retrain** en fin de séquence.
 
-**Valeur gelée : `obs_size = 20727`** (amendée le 2026-08-06, cf. ci-dessous ; 20725 au 2026-08-05, 20718 au 2026-08-04). Historique du même jour, tout entier
+**Valeur gelée : `obs_size = 14609`** — socle du lot V11 §0.48 (2026-08-07 : règles d'armes en ids,
+types de décision et slots de déploiement pré-dimensionnés, cf. `V11_agent_rework.md` §0.67).
+Valeurs antérieures : `20727` (amendée le 2026-08-06, cf. ci-dessous), 20725 au 2026-08-05, 20718
+au 2026-08-04. Historique du même jour, tout entier
 absorbé par le retrain unique : `20780` → `20752` (les 13 bits `rule_*` remplacés par 8+4 slots
 d'ids) → `20754` (les deux scalaires de CP que le chantier 02 attendait, oubliés ici) → `20718`
 (découplage du registre de décision, ci-dessus). Le gel porte désormais ce qu'il promettait :

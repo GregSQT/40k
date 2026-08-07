@@ -344,8 +344,8 @@ def test_the_declared_observation_space_bounds_the_id_keys():
     assert isinstance(obs_space, gym_spaces.Dict), "obs Dict attendue (une Box n'a pas de cles)"
     id_keys = [k for k in obs_space.spaces if k.endswith("_ids")]
     assert sorted(id_keys) == [
-        "allies_ability_ids", "allies_status_ids",
-        "enemies_ability_ids", "enemies_status_ids",
+        "allies_ability_ids", "allies_status_ids", "allies_wpn_rule_ids",
+        "enemies_ability_ids", "enemies_status_ids", "enemies_wpn_rule_ids",
     ]
     for key in id_keys:
         space = obs_space.spaces[key]

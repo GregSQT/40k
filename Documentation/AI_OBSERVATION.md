@@ -28,7 +28,7 @@ lecture, jamais une copie de chiffres qui dériverait.
 | `global_cont` / `global_bin` | (13,) / (35,) | ce qui n'appartient à aucune unité : tour, pas d'épisode, points de mission des deux camps, **points de commandement des deux camps (08.02)**, force d'usure, **distance à chacun des 5 objectifs** ; mon tour, **phase en one-hot de 6 bits**, contrôle + présence des 5 objectifs, **direction (cos/sin) vers chacun d'eux**, **capacités de faction des deux camps (Waaagh! disponible/actif, désignation Oath en vigueur, clause du +1 Wound d'Oath ouverte — chantier 03)**. Ces distances/directions — comme les `col_rel`/`row_rel` des entités — sont mesurées depuis le **centroïde de l'escouade active**, ou depuis l'**ancre de sa zone de déploiement** tant qu'elle n'est pas posée (même repère que la grille, V11 §0.40 point 4). Une entité pas encore posée n'a **aucune** position relative ni **aucune relation géométrique** : `col_rel`/`row_rel`, `edge_distance`, `engaged`, `los_can_see`, `cover_vs_observer`, `n_fight_eligible`, `n_in_enemy_ez`, `n_models_engaging` sont nuls — règle 03.04, l'engagement range est une aire **du champ de bataille** (V11 §0.40 point 5) — et le bit `deploy_not_on_board` le dit. `coherent` fait exception : 03.03 ne teste la cohérence que « if that unit is on the battlefield » |
 | `allies_cont` / `allies_bin` | (8, 19) / (8, 20) | **ligne 0 = l'unité ACTIVE**, lignes suivantes = mes autres escouades. Les drapeaux incluent, pour les ennemis seulement, `los_can_see`, `cover_vs_observer` et `charge_reachable_max_roll` |
 | `allies_ability_ids` / `allies_status_ids` | (8, 8) / (8, 4) | **capacités et statuts EN VIGUEUR (19.04), en IDENTIFIANTS ENTIERS et non en bits** : `obs_id` des registres [`config/unit_rules.json`](../config/unit_rules.json) et [`config/unit_statuses.json`](../config/unit_statuses.json), **triés croissants**, paddés à `0`. Deux `nn.EmbeddingBag(128, 16, mode="sum", padding_idx=0)` en font une **lecture de ligne** : aucun one-hot n'est matérialisé, donc la longueur du vecteur est **indépendante du nombre de capacités existantes** — ajouter une capacité, un statut ou une faction entière ne change ni `obs_size`, ni le nombre de paramètres du réseau, donc n'impose **aucun retrain**. Débordement (> 8 capacités) → **erreur**, jamais troncature |
-| `allies_wpn_cont` / `_bin` | (8, 20, 13) / (8, 20, 18) | profils d'armes par unité — **10 de tir puis 10 de mêlée**, avec porteurs vivants et bits/params de règles |
+| `allies_wpn_cont` / `_bin` / `_rule_ids` | (8, 20, 13) / (8, 20, 1) / (8, 20, 6) | profils d'armes par unité — **10 de tir puis 10 de mêlée**, avec porteurs vivants, params de règles, et les règles booléennes en **ids** (3ᵉ `EmbeddingBag`, cf. `*_wpn_rule_ids`) |
 | `allies_types_cont` / `_bin` | (8, 6, 5) / (8, 6, 5) | types de figurines : profil défensif, rôle d'allocation (règle 19), effectif du type |
 | `enemies_*` | idem avec **20 slots** | **ordre CONTRACTUEL = slots d'action de tir** (`get_enemy_slot_mapping`) |
 | `self_models_cont` / `_bin` | (20, 2) / (20, 3) | ce qui est irréductiblement individuel : position relative, éligibilité au combat, engagement, **bit de présence** |
@@ -41,7 +41,7 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│  OBSERVATION SQUAD — Dict de TENSEURS D'ENTITÉS  (20 727 scalaires)    │
+│  OBSERVATION SQUAD — Dict de TENSEURS D'ENTITÉS  (14 609 scalaires)    │
 ├────────────────────────────────────────────────────────────────────────┤
 │  CONTEXTE GLOBAL                                                       │
 │    global_cont            (13,)                =      13               │
@@ -53,7 +53,8 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 │    allies_ability_ids     (8, 8)               =      64               │
 │    allies_status_ids      (8, 4)               =      32               │
 │    allies_wpn_cont        (8, 20, 13)          =   2 080               │
-│    allies_wpn_bin         (8, 20, 18)          =   2 880               │
+│    allies_wpn_bin         (8, 20, 1)           =     160               │
+│    allies_wpn_rule_ids    (8, 20, 6)           =     960               │
 │    allies_types_cont      (8, 6, 5)            =     240               │
 │    allies_types_bin       (8, 6, 5)            =     240               │
 │                                                                        │
@@ -63,7 +64,8 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 │    enemies_ability_ids    (20, 8)              =     160               │
 │    enemies_status_ids     (20, 4)              =      80               │
 │    enemies_wpn_cont       (20, 20, 13)         =   5 200               │
-│    enemies_wpn_bin        (20, 20, 18)         =   7 200               │
+│    enemies_wpn_bin        (20, 20, 1)          =     400               │
+│    enemies_wpn_rule_ids   (20, 20, 6)          =   2 400               │
 │    enemies_types_cont     (20, 6, 5)           =     600               │
 │    enemies_types_bin      (20, 6, 5)           =     600               │
 │                                                                        │
@@ -72,20 +74,20 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 │    self_models_bin        (20, 3)              =      60               │
 │                                                                        │
 │  DÉCISION AGENT — candidats de CHOICE_i        MAX_DECISION_OPTIONS = 6│
-│    decision_ctx_bin       (3,)                 =       3               │
+│    decision_ctx_bin       (9,)                 =       9               │
 │    decision_options_bin   (6, 8)               =      48               │
 │                                                                        │
-│  DÉPLOIEMENT — candidats des actions 4-8         N_DEPLOY_SLOTS = 5    │
-│    deploy_cand_cont       (5, 8)               =      40               │
-│    deploy_cand_bin        (5, 4)               =      20               │
+│  DÉPLOIEMENT — candidats des actions 4-11        N_DEPLOY_SLOTS = 8    │
+│    deploy_cand_cont       (8, 8)               =      64               │
+│    deploy_cand_bin        (8, 4)               =      32               │
 ├────────────────────────────────────────────────────────────────────────┤
-│  TOTAL vectoriel (= obs_size)                      20 727              │
+│  TOTAL vectoriel (= obs_size)                      14 609              │
 │  + grid  (9, 32, 32) = 9 216, fournie À PART (non comptée)             │
 └────────────────────────────────────────────────────────────────────────┘
 
-Coût d'UNE entité = 19 + 20 (unité) + 8 + 4 (capacités/statuts) + 20 × (13 + 18) (armes)
-   + 6 × (5 + 5) (types) = 731
-   → le bloc ARMES fait 86 % du vecteur. C'est le seul bloc mémoïsé.
+Coût d'UNE entité = 19 + 20 (unité) + 8 + 4 (capacités/statuts) + 20 × (13 + 1 + 6) (armes)
+   + 6 × (5 + 5) (types) = 511
+   → le bloc ARMES fait 78 % du vecteur. C'est le seul bloc mémoïsé.
 ```
 
 ### Section Breakdown
@@ -285,28 +287,33 @@ zero information, alors que le reseau les reconstitue depuis deux informations G
 [s][w][12]    = anti_threshold                         # brut (Y+ de [ANTI-X], 0 = aucune)
 ```
 
-#### `*_wpn_bin[s][w]` — un profil d'arme, 18 drapeaux  ·  jamais normalise
+#### `*_wpn_bin[s][w]` — un profil d'arme, 1 drapeau  ·  jamais normalise
 
 ```python
-[s][w][0]     = rule_DEVASTATING_WOUNDS                # 0.0 / 1.0
-[s][w][1]     = rule_LETHAL_HITS                       # 0.0 / 1.0
-[s][w][2]     = rule_TORRENT                           # 0.0 / 1.0
-[s][w][3]     = rule_TWIN_LINKED                       # 0.0 / 1.0
-[s][w][4]     = rule_EXTRA_ATTACKS                     # 0.0 / 1.0
-[s][w][5]     = rule_PRECISION                         # 0.0 / 1.0
-[s][w][6]     = rule_PSYCHIC                           # 0.0 / 1.0
-[s][w][7]     = rule_HAZARDOUS                         # 0.0 / 1.0
-[s][w][8]     = rule_HEAVY                             # 0.0 / 1.0
-[s][w][9]     = rule_IGNORES_COVER                     # 0.0 / 1.0
-[s][w][10]    = rule_CLOSE_QUARTERS                    # 0.0 / 1.0
-[s][w][11]    = rule_ASSAULT                           # 0.0 / 1.0
-[s][w][12]    = anti_INFANTRY                          # 0.0 / 1.0 — one-hot du keyword cible par [ANTI-X]
-[s][w][13]    = anti_VEHICLE                           # 0.0 / 1.0 — one-hot du keyword cible par [ANTI-X]
-[s][w][14]    = anti_FLY                               # 0.0 / 1.0 — one-hot du keyword cible par [ANTI-X]
-[s][w][15]    = anti_PSYKER                            # 0.0 / 1.0 — one-hot du keyword cible par [ANTI-X]
-[s][w][16]    = anti_MONSTER                           # 0.0 / 1.0 — one-hot du keyword cible par [ANTI-X]
-[s][w][17]    = mask                                   # 0.0 / 1.0 — 0 = slot d'arme vide
+[s][w][0]     = mask                                   # 0.0 / 1.0 — 0 = slot d'arme vide
 ```
+
+#### `*_wpn_rule_ids[s][w]` — les REGLES d'un profil, 6 slots d'ids  ·  jamais normalise
+
+Meme convention que `*_ability_ids` : des `obs_id` du registre
+[`config/weapon_rules.json`](../config/weapon_rules.json), **tries croissants**, paddes a `0`, lus
+par une **troisieme** `nn.EmbeddingBag(128, 16, mode="sum", padding_idx=0)`. Le slot k n'a aucune
+semantique propre — c'est un ENSEMBLE, pas des positions.
+
+Vocabulaire ecrit ici : les 12 regles booleennes (`WEAPON_RULE_BITS` : `DEVASTATING_WOUNDS`,
+`LETHAL_HITS`, `TORRENT`, `TWIN_LINKED`, `EXTRA_ATTACKS`, `PRECISION`, `PSYCHIC`, `HAZARDOUS`,
+`HEAVY`, `IGNORES_COVER`, `CLOSE_QUARTERS`, `ASSAULT`) et l'IDENTITE de la regle `[ANTI-X]` portee
+(`ANTI_INFANTRY`, `ANTI_VEHICLE`, `ANTI_FLY`, `ANTI_PSYKER`, `ANTI_MONSTER` — une seule, celle du
+MEILLEUR seuil, 24.02). Son seuil Y+ reste continu (`*_wpn_cont[s][w][12]`) : c'est une valeur, pas
+une categorie. Les regles PARAMETREES (`RAPID_FIRE`, `SUSTAINED_HITS`, `MELTA`, `CLEAVE`, `BLAST`)
+n'ont pas d'id — leur presence se lit sur leur dimension continue.
+
+Pourquoi des ids ici (V11 §0.48, arbitrage 2) : un drapeau positionnel coutait **560 scalaires**
+(28 entites x 20 profils), et une regle de plus en coutait 560 de plus — la conformite aux regles
+et l'objectif « un seul retrain » se contredisaient. Le vocabulaire est PRE-DIMENSIONNE
+(`OBS_ID_VOCAB_SIZE = 128`) : rendre `[INDIRECT FIRE]` vivante se fera en lui donnant un `obs_id`,
+sans toucher `obs_size` ni les poids du reseau. Debordement (> 6 regles sur une arme) → **erreur**,
+jamais troncature ; maximum MESURE sur les 4 armureries = 4.
 
 #### `*_types_cont[s][t]` — un type de figurine, 5 continues  ·  EntityRunningNorm
 
@@ -360,6 +367,12 @@ candidat** que les actions `CHOICE_0..5` (`macro_intents.CHOICE_SLOTS`) désigne
 decision_ctx_bin[0]      = decision_pending                  # 0.0 / 1.0 — masque du bloc entier
 decision_ctx_bin[1]      = decision_type_rule_choice         # 0.0 / 1.0 — one-hot du type
 decision_ctx_bin[2]      = decision_type_waaagh_call         # 0.0 / 1.0 — appel du Waaagh! (chantier 03)
+decision_ctx_bin[3]      = decision_type_reserved_0          # colonnes RÉSERVÉES : le one-hot fait
+decision_ctx_bin[4]      = decision_type_reserved_1          # AGENT_DECISION_TYPE_SLOTS = 8 colonnes,
+decision_ctx_bin[5]      = decision_type_reserved_2          # pré-dimensionnées. Ouvrir un type de
+decision_ctx_bin[6]      = decision_type_reserved_3          # décision (allocation de pertes, pile-in,
+decision_ctx_bin[7]      = decision_type_reserved_4          # move réactif, FLY, choix d'arme…) consomme
+decision_ctx_bin[8]      = decision_type_reserved_5          # une réserve : obs_size NE BOUGE PAS.
 
 decision_options_bin[c][ 0] = grants_charge_after_flee                     # 0.0 / 1.0
 decision_options_bin[c][ 1] = grants_reroll_1_save_fight                   # 0.0 / 1.0
@@ -611,7 +624,7 @@ Même oubli et même réparation que les deux scalaires de CP du chantier 02, sa
 supplémentaire : les `.zip` existants datent d'avant le gel du 2026-08-04. QUATRE bits pour le
 Waaagh! et non deux, parce que sa durée enjambe le tour adverse ; l'identité de la cible d'Oath
 n'est PAS ici mais dans le statut `oath_target` de l'entité visée, pour 0 scalaire, 2026-08-05)
-→ **20727** (chantier 03 : `my_oath_wound_bonus_active` / `enemy_oath_wound_bonus_active`. La
+→ 20727 (chantier 03 : `my_oath_wound_bonus_active` / `enemy_oath_wound_bonus_active`. La
 clause CONDITIONNELLE du +1 au jet de blessure d'Oath — détachement Codex ET aucune unité BLOOD
 ANGELS / DARK ANGELS / DEATHWATCH / SPACE WOLVES — dépend du ROSTER, que l'agent ne construit pas
 et qu'AUCUNE autre feature ne porte : les mots-clés de sous-faction des unités ALLIÉES ne sont pas
@@ -621,6 +634,14 @@ distinguer un Oath « faible » d'un Oath « fort », alors que le +1 rend une c
 plus rentable à DÉSIGNER (6+ → 5+ double les blessures, 3+ → 2+ ne les augmente que d'un cinquième)
 — et la désignation est précisément ce qu'il joue par `OATH_SLOT_i`. Côté ennemi pour la raison du
 Waaagh! : ce que l'adversaire blesse mieux change ce que je protège, 2026-08-06).
+→ **14609** (socle du lot V11 §0.48, arbitrage 2 « réserver la place » — 2026-08-07). Trois
+changements, tous destinés à ce qu'une règle rendue vivante ne coûte PLUS de retrain :
+(1) les 12 drapeaux de règles d'armes et le one-hot `[ANTI]` (17 dimensions **par profil**, donc
+560 scalaires par règle) passent aux **ids** — `−6 160` scalaires, et une règle de plus coûte 0 ;
+(2) le one-hot de TYPE de décision est pré-dimensionné à `AGENT_DECISION_TYPE_SLOTS = 8`
+(`+6`), de quoi ouvrir les six tranches P3 restantes sans y revenir ; (3) `N_DEPLOY_SLOTS`
+passe de 5 à **8** (`+36`), les 3 slots en trop étant RÉSERVÉS — le masque les garde fermés tant
+que `DEPLOY_STRATEGY_COUNT` vaut 5.
 **Toute évolution du schéma change cette valeur et rend les
 `.zip` existants incompatibles : le retrain `--new` est obligatoire.**
 

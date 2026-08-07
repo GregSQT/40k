@@ -152,6 +152,27 @@ def _mlp(sizes: Sequence[int]) -> nn.Sequential:
     return nn.Sequential(*layers)
 
 
+def _id_bag() -> nn.EmbeddingBag:
+    """UNE table d'ids d'observation. Les hyperparamètres — et l'invariant de `padding_idx`
+    documenté au site d'appel — sont écrits ICI une fois, pas recopiés par vocabulaire."""
+    return nn.EmbeddingBag(
+        OBS_ID_VOCAB_SIZE, ABILITY_EMBED_DIM, mode="sum", padding_idx=OBS_ID_PADDING
+    )
+
+
+def _pool_ids(table: nn.EmbeddingBag, ids: torch.Tensor) -> torch.Tensor:
+    """Poole un ENSEMBLE d'ids par entrée : (…, slots) → (…, ABILITY_EMBED_DIM).
+
+    Agnostique au rang : le « sac » est la DERNIÈRE dimension, tout ce qui précède est un lot
+    (une entité pour les capacités, un profil d'arme pour les règles). Les ids transitent en
+    float32 (l'observation est homogène) et sont reconvertis ici — `EmbeddingBag` exige des
+    entiers, et `int32` suffit au vocabulaire tout en évitant le doublement de mémoire d'`int64`
+    (mesuré : ~15 % du coût du lookup sur GPU, ~30 % sur CPU).
+    """
+    *lead, slots = ids.shape
+    return table(ids.reshape(-1, slots).int()).reshape(*lead, ABILITY_EMBED_DIM)
+
+
 def positional_channels() -> torch.Tensor:
     """Canaux positionnels FIXES de la grille égocentrique : (1, 3, GRID_SIZE, GRID_SIZE).
 
@@ -236,7 +257,7 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
             expected_keys += [
                 f"{family}_cont", f"{family}_bin",
                 f"{family}_ability_ids", f"{family}_status_ids",
-                f"{family}_wpn_cont", f"{family}_wpn_bin",
+                f"{family}_wpn_cont", f"{family}_wpn_bin", f"{family}_wpn_rule_ids",
                 f"{family}_types_cont", f"{family}_types_bin",
             ]
         for key in expected_keys:
@@ -263,7 +284,7 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
         # un encodeur commun n'aurait pas de sens (§3.3).
         for suffix in (
             "cont", "bin", "ability_ids", "status_ids",
-            "wpn_cont", "wpn_bin", "types_cont", "types_bin",
+            "wpn_cont", "wpn_bin", "wpn_rule_ids", "types_cont", "types_bin",
         ):
             ally_shape = _shape(f"allies_{suffix}")[1:]
             enemy_shape = _shape(f"enemies_{suffix}")[1:]
@@ -276,8 +297,6 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
 
         self.n_ally_slots, self.unit_cont_dim = _shape("allies_cont")
         self.unit_bin_dim = _shape("allies_bin")[1]
-        self.n_ability_slots = _shape("allies_ability_ids")[1]
-        self.n_status_slots = _shape("allies_status_ids")[1]
         self.n_enemy_slots = _shape("enemies_cont")[0]
         _, self.n_weapons, self.weapon_cont_dim = _shape("allies_wpn_cont")
         self.weapon_bin_dim = _shape("allies_wpn_bin")[2]
@@ -379,7 +398,12 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
 
         # --- Encodeurs PARTAGÉS (un seul module, appliqué aux deux camps) ---
         self.weapon_encoder = _mlp(
-            [self.weapon_cont_dim + self.weapon_bin_dim, weapon_dim, weapon_dim]
+            [
+                # + ABILITY_EMBED_DIM : les règles du profil, poolées depuis leurs ids
+                self.weapon_cont_dim + self.weapon_bin_dim + ABILITY_EMBED_DIM,
+                weapon_dim,
+                weapon_dim,
+            ]
         )
         self.type_encoder = _mlp([self.type_cont_dim + self.type_bin_dim, type_dim])
         self.self_model_encoder = _mlp(
@@ -413,12 +437,13 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
         # decay, chargement partiel, ajustement manuel) ferait alors du padding une capacité
         # fantôme ajoutée à chaque slot libre, silencieusement. Vérifié par test : la
         # perturbation qui laisse `EmbeddingBag` correcte casse la variante `Embedding`.
-        self.ability_embedding = nn.EmbeddingBag(
-            OBS_ID_VOCAB_SIZE, ABILITY_EMBED_DIM, mode="sum", padding_idx=OBS_ID_PADDING
-        )
-        self.status_embedding = nn.EmbeddingBag(
-            OBS_ID_VOCAB_SIZE, ABILITY_EMBED_DIM, mode="sum", padding_idx=OBS_ID_PADDING
-        )
+        self.ability_embedding = _id_bag()
+        self.status_embedding = _id_bag()
+        # TROISIEME table, meme patron : les REGLES D'ARME d'un profil. Distincte des deux autres
+        # pour la meme raison qu'elles le sont entre elles — [DEVASTATING WOUNDS] (une regle
+        # d'arme) et « Feel No Pain » (une capacite d'unite) ne vivent pas dans le meme espace, et
+        # un pooling commun les additionnerait.
+        self.weapon_rule_embedding = _id_bag()
         self.unit_encoder = _mlp(
             [
                 self.unit_cont_dim
@@ -482,7 +507,13 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
         wpn_cont = obs[f"{family}_wpn_cont"]
         wpn_bin = obs[f"{family}_wpn_bin"]
         wpn_mask = wpn_bin[..., -1]  # dernier drapeau de profil = slot occupé
-        wpn_in = torch.cat([self.weapon_norm(wpn_cont, wpn_mask), wpn_bin], dim=-1)
+        # Règles du profil : un « sac » d'ids PAR PROFIL, et non par entité comme les capacités.
+        # Un slot vide vaut `padding_idx` et ne contribue rien ; un profil vide n'a que des slots
+        # vides, donc un embedding nul — cohérent avec son mask.
+        wpn_rule_emb = _pool_ids(self.weapon_rule_embedding, obs[f"{family}_wpn_rule_ids"])
+        wpn_in = torch.cat(
+            [self.weapon_norm(wpn_cont, wpn_mask), wpn_bin, wpn_rule_emb], dim=-1
+        )
         wpn_emb = self.weapon_encoder(wpn_in)
         wpn_agg = _masked_mean_max(
             wpn_emb.reshape(b * k, wpn_emb.shape[2], wpn_emb.shape[3]),
@@ -499,16 +530,10 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
             typ_mask.reshape(b * k, typ_mask.shape[2]),
         ).reshape(b, k, -1)
 
-        # Capacités et statuts : lecture de ligne, jamais de one-hot matérialisé. Les ids
-        # transitent en float32 (l'observation est homogène) et sont reconvertis en index ici —
-        # `EmbeddingBag` exige des entiers. Le `reshape` (B*K, slots) est ce qu'attend la table :
-        # un « sac » par entité.
-        ability_emb = self.ability_embedding(
-            obs[f"{family}_ability_ids"].reshape(b * k, self.n_ability_slots).long()
-        ).reshape(b, k, ABILITY_EMBED_DIM)
-        status_emb = self.status_embedding(
-            obs[f"{family}_status_ids"].reshape(b * k, self.n_status_slots).long()
-        ).reshape(b, k, ABILITY_EMBED_DIM)
+        # Capacités et statuts : lecture de ligne, jamais de one-hot matérialisé — un « sac »
+        # par entité (cf. `_pool_ids`).
+        ability_emb = _pool_ids(self.ability_embedding, obs[f"{family}_ability_ids"])
+        status_emb = _pool_ids(self.status_embedding, obs[f"{family}_status_ids"])
 
         unit_in = torch.cat(
             [

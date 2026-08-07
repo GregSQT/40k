@@ -50,7 +50,10 @@ from engine import macro_intents as mi
 from engine.utils.weapon_helpers import get_max_ranged_damage, get_max_melee_damage
 
 # Espace d'action squad (source unique : engine/macro_intents.py). Aucun littéral nu.
-DEPLOYMENT_ACTIONS = list(mi.DEPLOY_SLOTS)   # 4-8 (slots de déploiement)
+DEPLOYMENT_ACTIONS = list(mi.DEPLOY_STRATEGY_SLOTS)   # 4-8 (slots PORTANT une strategie)
+# ⚠️ `DEPLOY_STRATEGY_SLOTS` et non `DEPLOY_SLOTS` : ce dernier inclut les slots RESERVES
+# (V11 §0.48 arbitrage 2), que le masque n'ouvre jamais et pour lesquels ces tables de poids
+# n'ont donc aucune entree — les prendre ici levait `Missing deployment weight for action 9`.
 WAIT_ACTION = mi.ACTION_WAIT                 # 1024 (au-dessus des cellules de move 0-1023)
 
 

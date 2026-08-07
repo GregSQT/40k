@@ -93,7 +93,7 @@ tenues à jour et **ne doivent pas servir de référence** — les relire dans l
 | **§0.14** | Re-mesure du run — win-rate par matchup | ✅ **MESURE OBTENUE le 2026-08-03** — ⏳ **PÉRIMÉE depuis les chantiers 01/03/04** : le modèle mesuré n'est plus chargeable, cf. [§0.67](#s0.67) | — | Run de **200 000 épisodes** (2026-08-02 12 h 26 → 2026-08-03 02 h 05, 19 points d'éval, 820 k → 12,1 M steps). `eval_bots/combined_win_rate` **0,283 → max 0,837 → 0,743**. Éval rejouée le 2026-08-03 sur le snapshot ROBUSTE (`robust_0.8049`), APRÈS §0.64/§0.65 : **combined 0.8200**, `tactical` 0.89, `defensive` 0.87, `greedy` 0.84, `adaptive` 0.83, **`control` 0.82**, **`value_trade` 0.74** (le pire), **0 troncature**. Le seuil de gating `vs_control ≥ 0.50` est **franchi** — le **0.04 du run 4 est périmé**. ⚠️ 0,743 → 0,820 est un écart best-contre-final, PAS l'effet de §0.64. Détail → §0.14. |
 | **[§9](V11_phaseA.md#s9)** | Phase A' — P2 + P3-0/1/2 | 🟢 **LIVRÉS ET MERGÉS sur `main`** — restent **P3-3→8**, **P4**, **P5** | **2** | ⚠️ Aucune des quatre livraisons n'est **MESURÉE**. ⚠️ P3-0 est **inerte dans le training** (aucun roster SM/Ork ne porte de rule choice). Détail → §0.42 et §0.43 (en §0hist), et [§9](V11_phaseA.md#s9). |
 | **§0.44** | Tête pointeur de **déploiement** — les slots 4-8 n'ont pas de tête dédiée | 🟠 **OUVERT** — reporté après la mesure de référence (arbitrage utilisateur du 2026-07-29) | **3** | Les ids 4-8 tombent dans la plage des cellules de move (`MOVE_CELL_BASE = 0`) : leurs logits sortent de la **conv 1×1** (`_move_logits`), pas d'une tête dédiée ; `deploy_emb` n'atteint le calcul que par le **conditionnement du tronc**. Ajouter un `deploy_query_net`, jumeau de `choice_query_net` — ce qui oblige à lire la phase dans la policy. Élément `L1` du lot §0.48 ; `L11` (`N_DEPLOY_SLOTS`) à trancher **avant**. Détail → §0.44. |
-| **§0.48** | Inventaire des chantiers qui cassent un contrat + **périmètre du lot de ré-entraînement** | 🟠 **OUVERT** — le lot = **`L1` + `L2` + `L6`** + **[§0.64](#s0.64)** (LoS de déploiement alignée le 2026-08-03 ; ⚠️ **n'impose PLUS de run à elle seule** — mesuré le 2026-08-03 : le modèle d'avant joue à 0.82 sur `main` d'après, cf. §0.14 — elle **voyage** avec `L1`/`L2`/`L6`) | **4** | ✅ **Le prérequis d'ordre est LEVÉ au 2026-08-02** : les quatre chantiers exigés avant la mesure de référence — rampe de déploiement (§0.46 pt 2), FLY 21.03 (§0.49), bots d'éval (§0.47 É4), 01.07 (§0.50) — sont **tous mergés**. Reste l'arbitrage 2 (réserver la place des règles pas encore implémentées, toute règle rendue vivante changeant `obs_size`). Détail → §0.48. |
+| **§0.48** | Inventaire des chantiers qui cassent un contrat + **périmètre du lot de ré-entraînement** | 🟠 **OUVERT** — le lot = **`L1` + `L2` + `L6`** + **[§0.64](#s0.64)** (LoS de déploiement alignée le 2026-08-03 ; ⚠️ **n'impose PLUS de run à elle seule** — mesuré le 2026-08-03 : le modèle d'avant joue à 0.82 sur `main` d'après, cf. §0.14 — elle **voyage** avec `L1`/`L2`/`L6`) | **4** | ✅ **Le prérequis d'ordre est LEVÉ au 2026-08-02** : les quatre chantiers exigés avant la mesure de référence — rampe de déploiement (§0.46 pt 2), FLY 21.03 (§0.49), bots d'éval (§0.47 É4), 01.07 (§0.50) — sont **tous mergés**. ✅ **L'arbitrage 2 est LIVRÉ le 2026-08-07** (socle : règles d'armes en ids, types de décision et slots de déploiement pré-dimensionnés — cf. §0.67). 🟢 Le lot est **arbitré le 2026-08-07 : `L1` + `L2` + `L6` y entrent**. Détail → §0.48. |
 | **§0.46** | Résidus du 2026-07-29 | ✅ **CLOSE le 2026-08-03** — les trois points sont livrés | — | ✅ **SOLDÉ le 2026-08-03** (arbitrage : GARDER, sous forme optimisée). Les 4 issues du cache de déploiement deviennent des **compteurs publiés en permanence** (`perf/*`) au lieu de traces invisibles hors `--debug` ; les 37 sites passent par `engine/debug_trace.py` (canaux `W40K_TRACE`, formatage différé) ; garde verrouillée par **21 tests**, dont une **analyse AST** (fichiers découverts par leur import) qui interdit f-string, formatage anticipé et mot-clé. La passe `/simplify` du même jour y a trouvé **un bug** (`flush=True` résiduel → `TypeError` dès que le canal s'allume) et **un verrou qui mentait** (canal `train` hors garde). ⏳ Première mesure : **100 % de reconstruction** du cache de déploiement — signalé, non ouvert. Détail → §0.46. |
 | **§0.47** | Relecture T2→T5 du 2026-07-29 — 9 écarts | 🟠 **OUVERT — reste É9 (second siège + second scénario)** ; É5 et É7 ✅ corrigés le 2026-08-02 (É1, É2, É3, É4, É6 ✅ livrés **et mergés** ; **É8 est tombé**) | **6** | **É8 n'a plus d'objet** : `ai/analyzer.py` ne construit plus aucun chemin de board à la main (il lit `get_board_config()` / `get_board_size()`). **É9 était mal énoncé** : les **3 graines SONT couvertes** (`test_t5_bare_loop.py`, `for seed in (1, 2, 3)`) ; ce qui manque est le **second scénario** et les **2 sièges**. Détail → §0.47. |
 | **§0.50** | Non-conformité **01.07** — travail de suite | ✅ **CLOS le 2026-08-02** (statut corrigé le 2026-08-03 : la colonne disait encore OUVERT alors que la cellule disait SOLDÉE ; **revérifié sur `main`** — `get("battle_shocked")` hors tests **0 hit**, `computeControlCounts`/`isObjectiveScoringWindow` **0 hit** dans le front) | — | ✅ **SOLDÉE le 2026-08-02** — les deux résidus sont traités : (1) le contrat de `battle_shocked` est **tranché en lecture STRICTE**, les 7 `get(..., False)` migrés en `require_key` ; (2) la 3ᵉ lecture d'OC du frontend (journal d'événements de `BoardReplay.tsx`) diffère l'instantané moteur au lieu de recompter. Détail → §0.50. |
@@ -103,10 +103,11 @@ tenues à jour et **ne doivent pas servir de référence** — les relire dans l
 ✅ **Contrôle de conformité du 2026-08-07** (vérification par lecture + exécution, PAS une
 livraison — aucune ligne de code touchée ; il REMPLACE le contrôle du 2026-08-02, dont les
 chiffres de contrat sont périmés) :
-- `obs_size` : `ObservationBuilder.SQUAD_OBS_SIZE_TARGET` = **20727**, et les **7** profils de
-  `config/agents/ArmageddonAgent/ArmageddonAgent_training_config.json` portent **20727**
+- `obs_size` : `ObservationBuilder.SQUAD_OBS_SIZE_TARGET` = **14609** (20727 avant le socle du
+  2026-08-07, cf. §0.67), et les **7** profils de
+  `config/agents/ArmageddonAgent/ArmageddonAgent_training_config.json` portent **14609**
   (`x1`, `x1_long`, `x1_selfplay`, `x1_debug`, `x5_new`, `x5_append`, `x5_debug`).
-- `squad_obs_shapes()` : **24** clés ; `sum(prod(shape))` grille exclue = **20727**, égale à
+- `squad_obs_shapes()` : **26** clés ; `sum(prod(shape))` grille exclue = **14609**, égale à
   `SQUAD_OBS_SIZE_TARGET` (exécuté).
 - `macro_intents.TOTAL_ACTION_SIZE` = **1127** (dont `OATH_SLOT_BASE` 1107, 20 slots) ;
   `DEPLOY_SLOTS` = ids **4..8** ; `spatial_grid.GRID_CHANNELS` = **9** ;
@@ -184,7 +185,7 @@ mutation-test.
 
 | Contrat | Valeur au moment de la mesure §0.14 | Valeur à HEAD | Cassé par |
 |---|---|---|---|
-| `obs_size` | 20780 | **20727** | chantier 01 (20752), chantier 04 réserves (20718), chantier 03 capacités de faction (20725), `02454a34` (20727) |
+| `obs_size` | 20780 | **14609** (20727 avant le socle du 2026-08-07) | chantier 01 (20752), chantier 04 réserves (20718), chantier 03 capacités de faction (20725), `02454a34` (20727) |
 | `TOTAL_ACTION_SIZE` | 1107 | **1127** | chantier 01 (20 slots d'Oath of Moment, consommés au chantier 03) |
 | Architecture policy | 4 requêtes | **5** (`oath_query_net`) | chantier 01 |
 
@@ -201,8 +202,34 @@ mutation-test.
   son sens, mais son échéance est maintenant **le prochain run, quel qu'il soit** : tout ce qui
   doit voyager avec lui doit être livré **avant** ce run, sans quoi il faudra en payer un second.
 
-**Prochaine action concrète** : arbitrer si `L1`/`L2`/`L6` (et l'arbitrage 2 de §0.48, réserver la
-place des règles pas encore vivantes) entrent dans ce run — puis lancer le `--new`.
+🟢 **ARBITRAGE UTILISATEUR DU 2026-08-07 : `L1` + `L2` + `L6` + l'arbitrage 2 ENTRENT dans ce
+run.** Plan retenu : un **socle** d'abord (les dimensions, seules), puis `L1`, `L6` et `L2` en
+worktrees parallèles, puis un `--new` unique.
+
+✅ **SOCLE LIVRÉ le 2026-08-07** — il ne contient que des DIMENSIONS, aucune tête, aucune décision
+(pré-câbler la queue de features sans tête qui la lise aurait été de la plomberie morte, §0bis) :
+
+| Ce qui est gelé | Avant | Après | Effet |
+|---|---|---|---|
+| Règles booléennes d'armes | 12 drapeaux + one-hot `[ANTI]` de 5, **par profil** | **6 slots d'`obs_id`** (3ᵉ `EmbeddingBag`, registre `config/weapon_rules.json`) | −6 160 scalaires ; une règle d'arme de plus coûte **0** |
+| One-hot de type de décision | 2 colonnes (= types déclarés) | **`AGENT_DECISION_TYPE_SLOTS = 8`** | +6 scalaires ; L3/L4/L5/**L6**/L7/L10 ouvrent leur type sans retrain |
+| Slots de déploiement (`L11`) | 5 décrits = 5 stratégies | **8 décrits**, `DEPLOY_STRATEGY_COUNT = 5` jouables | +36 scalaires ; une 6ᵉ stratégie = une constante, sans retrain |
+
+**`obs_size` 20727 → 14609** (−29,5 %) et **`TOTAL_ACTION_SIZE` inchangé à 1127** (les ids 4-11
+tombent dans la plage des cellules de move). Le bloc « armes » passe de **84 % à 78 %** de
+l'observation.
+
+⚠️ **Ce que le pré-dimensionnement d'un slot d'ACTION exige, et qu'un bit de règle n'exige pas** :
+un slot de déploiement réservé est un id jouable. Sa sûreté tient à **une** borne —
+`open_deploy_slot_count` plafonne à `DEPLOY_STRATEGY_COUNT` — et le décodeur **lève** si un id
+réservé lui arrive quand même (verrou : `test_reserved_deploy_slot_is_refused_never_reinterpreted`,
+vérifié ROUGE en retirant la garde). Défaut trouvé et corrigé à cette occasion : les bots d'éval
+tiraient leurs poses dans `DEPLOY_SLOTS` (tous les ids) au lieu des slots portant une stratégie —
+`KeyError: Missing deployment weight for action 9`. D'où `DEPLOY_STRATEGY_SLOTS`.
+
+**Prochaine action concrète** : ouvrir les worktrees `L1` (tête pointeur de déploiement), `L6`
+(FLY 21.03 en décision) et `L2` (choix de l'unité à activer), `L2` mergé en dernier — c'est lui qui
+touche l'espace d'action et met à jour le verrou d'interface É3 de §0.47. Puis le `--new` unique.
 
 <a id="s0.66"></a>
 ### 0.66 Le JOURNAL DU GYM mentait à l'analyzer, et deux règles de mouvement n'étaient pas appliquées — ✅ CORRIGÉ (2026-08-04)
@@ -941,7 +968,7 @@ ambiguïté.
 
 Deux changements de **régime** livrés le 2026-08-02, tous deux **non mesurés**. Ils ne cassent aucun
 contrat d'observation (à leur date, `obs_size` inchangé — la valeur **20828** écrite ici était
-FAUSSE, le contrat valait 20780 le 2026-08-02 ; à HEAD il vaut **20727**, cf. [§0.67](#s0.67)) :
+FAUSSE, le contrat valait 20780 le 2026-08-02 ; à HEAD il vaut **14609**, cf. [§0.67](#s0.67)) :
 ce sont des réglages de run, pas des changements d'architecture.
 
 ⏳ **Revérifié le 2026-08-07 — TOUJOURS OUVERT, à l'identique** : `ai/train.py` **lève** encore
@@ -2315,8 +2342,8 @@ ré-entraînement — c'est le critère de tri, pas l'importance du chantier.
 
 #### Dépendances — elles commandent l'ordre
 
-- **L11 doit être tranché AVANT d'écrire L1** : `N_DEPLOY_SLOTS` dimensionne les embeddings que la
-  tête `deploy_query_net` scorerait.
+- ~~**L11 doit être tranché AVANT d'écrire L1**~~ ✅ **TRANCHÉ le 2026-08-07** : `N_DEPLOY_SLOTS = 8`
+  (5 stratégies jouables, 3 slots réservés). `deploy_query_net` se dimensionne donc sur **8**.
 - **L2 doit précéder ou accompagner L4 / L5 / L10** : toutes touchent le **pool d'activation** et
   l'**ordre des candidats**.
 - **L4 dépend du bug pile-in BFS** (HORS LOT, mais doit **précéder**).
@@ -2362,6 +2389,17 @@ l'objectif « 100 % conforme aux règles » et l'objectif « un seul ré-entraî
 
 **DÉCISION : réserver dès le lot la place des règles pas encore implémentées**, **inactives**
 jusqu'à leur implémentation, pour que les ajouter ne coûte **plus** de retrain.
+
+✅ **LIVRÉ le 2026-08-07 (socle, cf. [§0.67](#s0.67))**, et pas sous la forme envisagée ici : la
+mesure a écarté « réserver des bits ». Un drapeau de règle d'arme coûte **560 scalaires**
+(28 entités × 20 profils), donc réserver douze bits en aurait coûté **6 720** — un tiers de
+l'observation d'alors, à porter pour toujours. Le patron d'`obs_id` du chantier 01 a été appliqué
+aux règles d'armes à la place : l'observation **maigrit** de 6 160 scalaires et une règle future
+coûte 0. Restait vrai et traité au même endroit : les TYPES DE DÉCISION
+(`AGENT_DECISION_TYPE_SLOTS = 8`) et les SLOTS DE DÉPLOIEMENT (`L11` : 8 décrits, 5 jouables).
+⚠️ Ce qui n'est PAS réservé et ne peut pas l'être à ce prix : les règles d'armes **paramétrées**
+(chacune porte une valeur continue par profil, donc une dimension). Une règle paramétrée nouvelle
+coûtera encore un `obs_size`.
 ⏳ Un **inventaire des règles manquantes** (PDF de [`Documentation/40k_rules/`](../40k_rules)
 confrontés au vocabulaire observé) est **en cours de constitution en parallèle** — son contenu
 n'est **pas préjugé** ici, aucun chiffre n'en est supposé tant qu'il n'est pas rendu.

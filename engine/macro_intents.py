@@ -56,7 +56,18 @@ FIGHT_SLOT_COUNT = SHOOT_SLOT_COUNT                 # 20 -> 1065-1084
 # slot i » ambigu (frapper i, ou ne frapper personne ?).
 ACTION_FIGHT_NO_TARGET = FIGHT_SLOT_BASE + FIGHT_SLOT_COUNT   # 1085
 DEPLOY_SLOT_BASE = 4
-DEPLOY_SLOT_COUNT = 5       # deployment strategy slots 0-4 -> 4-8
+# Slots de deploiement DECRITS par l'observation et adressables par une action : 8 -> ids 4-11.
+# Ils tombent dans la plage des cellules de move (`MOVE_CELL_BASE = 0`), donc `TOTAL_ACTION_SIZE`
+# ne bouge pas ; l'invariant est `DEPLOY_SLOT_COUNT == observation_entities.N_DEPLOY_SLOTS`
+# (verrouille par test).
+DEPLOY_SLOT_COUNT = 8       # deployment slots 0-7 -> 4-11
+# Nombre de STRATEGIES de deploiement reellement definies (`_deployment_slot_order`). C'est LUI
+# que le masque borne (`action_decoder.open_deploy_slot_count`) : les slots au-dela sont
+# RESERVES et ne s'ouvrent jamais. Separer les deux constantes est ce qui rend l'ajout d'une
+# strategie gratuit en `obs_size` (V11 §0.48, arbitrage 2 / element L11) : une strategie de plus
+# = cette constante +1, aucune forme d'observation touchee, aucun retrain.
+# ⚠️ `DEPLOY_STRATEGY_COUNT <= DEPLOY_SLOT_COUNT` — l'inverse ouvrirait une action sans strategie.
+DEPLOY_STRATEGY_COUNT = 5
 
 BASE_ZONE_INTENT = ACTION_FIGHT_NO_TARGET + 1                  # 1086
 # Decision agent generique (V11 §9.3 P2) : K actions `CHOICE_i` qui designent le candidat i de
@@ -87,7 +98,12 @@ MOVE_CELLS = range(MOVE_CELL_BASE, MOVE_CELL_BASE + MOVE_CELL_COUNT)            
 SHOOT_SLOTS = range(SHOOT_SLOT_BASE, SHOOT_SLOT_BASE + SHOOT_SLOT_COUNT)            # 1025-1044
 CHARGE_SLOTS = range(CHARGE_SLOT_BASE, CHARGE_SLOT_BASE + CHARGE_SLOT_COUNT)        # 1045-1064
 FIGHT_SLOTS = range(FIGHT_SLOT_BASE, FIGHT_SLOT_BASE + FIGHT_SLOT_COUNT)            # 1065-1084
-DEPLOY_SLOTS = range(DEPLOY_SLOT_BASE, DEPLOY_SLOT_BASE + DEPLOY_SLOT_COUNT)        # 4-8
+DEPLOY_SLOTS = range(DEPLOY_SLOT_BASE, DEPLOY_SLOT_BASE + DEPLOY_SLOT_COUNT)        # 4-11
+# Slots reellement JOUABLES : ceux qui portent une strategie definie. `DEPLOY_SLOTS` decrit ce que
+# l'observation expose et ce que le decodeur reconnait comme un id de deploiement ; c'est CELUI-CI
+# qu'il faut prendre des qu'on enumere « les poses possibles » (poids des bots, tirages, tests).
+# Confondre les deux, c'est proposer une action que le masque n'ouvre jamais.
+DEPLOY_STRATEGY_SLOTS = range(DEPLOY_SLOT_BASE, DEPLOY_SLOT_BASE + DEPLOY_STRATEGY_COUNT)  # 4-8
 CHOICE_SLOTS = range(CHOICE_BASE, CHOICE_BASE + CHOICE_COUNT)                       # 1101-1106
 OATH_SLOTS = range(OATH_SLOT_BASE, OATH_SLOT_BASE + OATH_SLOT_COUNT)                # 1107-1126
 

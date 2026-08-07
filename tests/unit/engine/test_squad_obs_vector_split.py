@@ -129,7 +129,8 @@ def test_enemy_slot_count_mirrors_the_action_space(engine):
 def test_unit_schema_is_shared_by_both_sides(engine):
     """Ami et ennemi portent le MEME schema : c'est ce qui rend l'encodeur partage legitime."""
     shapes = ObservationBuilder.squad_obs_shapes()
-    for suffix in ("cont", "bin", "wpn_cont", "wpn_bin", "types_cont", "types_bin"):
+    for suffix in ("cont", "bin", "ability_ids", "status_ids",
+                   "wpn_cont", "wpn_bin", "wpn_rule_ids", "types_cont", "types_bin"):
         assert shapes[f"allies_{suffix}"][1:] == shapes[f"enemies_{suffix}"][1:], suffix
 
 
