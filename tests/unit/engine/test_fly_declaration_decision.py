@@ -434,3 +434,56 @@ def test_the_observation_describes_the_squad_the_choice_is_about():
         f"dernière observation construite pour {observed[-1]}, alors que la décision en attente "
         f"porte sur {decision['unit_id']}"
     )
+
+
+def test_the_owner_check_actually_bites_it_reads_the_state_not_the_decision():
+    """LE POINT de l'audit du 2026-08-07 : ce contrôle-là doit pouvoir SE DÉCLENCHER.
+
+    Tel qu'il était écrit, l'unique appelant du gym relisait le propriétaire DANS la décision
+    avant de le repasser au vérificateur : le contrôle comparait la décision à elle-même et ne
+    pouvait jamais refuser quoi que ce soit, tout en ayant l'apparence d'une garde (« vert
+    vacant », cf. T4). Il lit désormais `current_player`, source INDÉPENDANTE.
+
+    Ce qu'il attrape : une décision qui a survécu au tour de son propriétaire. Seul son siège
+    peut y répondre ; appliquée pendant le tour adverse, elle écrirait la déclaration de vol
+    d'un joueur pendant que l'autre joue.
+    """
+    gs = _gs()
+    arm_fly_declaration_decision(gs, "1")
+    assert int(gs["current_player"]) == 1, "pré-condition : la décision appartient au joueur 1"
+
+    gs["current_player"] = 2
+    with pytest.raises(RuntimeError, match="appartient au joueur 1, pas a 2"):
+        apply_fly_declaration_decision(gs, "1", True)
+
+    # Rien n'a été écrit, et la décision SURVIT : un refus n'est pas une résolution.
+    assert gs["units_took_to_skies"] == set()
+    assert read_pending_agent_decision(gs) is not None
+
+    # Témoin actif : rendue au bon tour, la même décision passe.
+    gs["current_player"] = 1
+    apply_fly_declaration_decision(gs, "1", True)
+    assert gs["units_took_to_skies"] == {"1"}
+
+
+def test_the_enemy_is_never_asked_during_your_turn():
+    """21.03 confie la déclaration au « ACTIVE player ».
+
+    Contrepartie EXACTE du contrôle d'`apply_fly_declaration_decision` : si l'armement pouvait
+    interroger l'adversaire, la réponse serait ensuite REFUSÉE par le vérificateur de
+    propriétaire, et le moteur resterait arrêté sur une décision que personne ne peut résoudre —
+    masque réduit aux `CHOICE_i`, partie bloquée. Les deux bouts doivent donc s'accorder par
+    construction, pas par la bonne conduite du pool d'activation.
+    """
+    gs = _gs()
+    gs["unit_by_id"]["1"]["player"] = 2
+    gs["units"][0]["player"] = 2
+    assert int(gs["current_player"]) == 1
+
+    assert fly_declaration_decision_is_due(gs, "1") is False
+    assert arm_fly_declaration_decision(gs, "1") is None
+    assert read_pending_agent_decision(gs) is None
+
+    # Témoin actif : à SON tour, la même escouade est bien interrogée.
+    gs["current_player"] = 2
+    assert fly_declaration_decision_is_due(gs, "1") is True

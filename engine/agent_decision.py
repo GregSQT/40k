@@ -176,6 +176,16 @@ def consume_pending_agent_decision(
     ⚠️ Ce socle existe parce que les copies avaient DÉJÀ divergé : `waaagh_call` contrôlait le
     joueur et jamais l'unité, `fly_declaration` l'unité et jamais le joueur. Un 3e type aurait
     apporté un 3e sous-ensemble de gardes.
+
+    ⚠️ RÈGLE D'APPEL, sans laquelle ces contrôles ne contrôlent RIEN : `player` et `unit_id`
+    doivent venir d'une source INDÉPENDANTE de la décision — l'état (`current_player`), le pool
+    d'activation, l'identité du siège appelant. Les relire dans la décision pour les repasser ici
+    compare la décision à elle-même : le contrôle ne peut alors jamais se déclencher, tout en
+    ayant l'apparence d'une garde. C'est exactement l'état dans lequel les deux appelants ont été
+    trouvés (audit du 2026-08-07), et l'omettre coûte plus cher que de ne pas contrôler du tout —
+    un « vert vacant » se lit comme un feu vert. Un argument qui n'a AUCUNE source indépendante
+    (l'entité sur laquelle on écrit, par exemple) reste légitime : il barre les autres appelants,
+    présents et futurs. Ce qui est interdit, c'est de le croire actif là où il ne l'est pas.
     """
     decision = read_pending_agent_decision(game_state)
     if decision is None or str(require_key(decision, "type")) != str(decision_type):

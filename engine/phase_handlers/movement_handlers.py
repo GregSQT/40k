@@ -390,7 +390,14 @@ def _fly_declaration_due_unit(
       2. l'escouade a le mot-clé FLY — sinon il n'y a rien à déclarer ;
       3. elle est pilotée par le modèle : un humain déclare par le toggle de l'UI, et lui poser
          une `pending_agent_decision` arrêterait le PvP sur un overlay qui n'existe pas ;
-      4. la question ne lui a pas DÉJÀ été posée pour ce mouvement. Sans cette 4e condition, un
+      4. elle appartient au joueur DONT C'EST LE TOUR. 21.03 confie la déclaration au « active
+         player » : poser la question à l'adversaire lui ferait déclarer un vol hors de son tour,
+         et `apply_fly_declaration_decision` refuserait ensuite la réponse (il vérifie le
+         propriétaire contre `current_player`) — le moteur resterait arrêté sur une décision que
+         personne ne peut résoudre. En production le pool d'activation est déjà celui du joueur
+         courant ; cette condition est ce qui rend l'invariant vrai PAR CONSTRUCTION plutôt que
+         par la bonne conduite des appelants ;
+      5. la question ne lui a pas DÉJÀ été posée pour ce mouvement. Sans cette 5e condition, un
          « je ne déclare pas » (qui laisse le set de déclaration vide) serait indiscernable d'une
          question jamais posée : le point de choix se reposerait à chaque construction de masque
          et l'escouade ne bougerait jamais.
@@ -404,6 +411,8 @@ def _fly_declaration_due_unit(
     if not _unit_has_keyword(unit, "fly"):
         return None
     if not _unit_is_ai_controlled(game_state, unit):
+        return None
+    if int(require_key(unit, "player")) != int(require_key(game_state, "current_player")):
         return None
     if str(squad_id) in game_state.get(entry.resolved_key, set()):  # get allowed : absent = jamais posée
         return None
@@ -472,6 +481,16 @@ def apply_fly_declaration_decision(
 
     « Ne pas déclarer » n'est PAS un non-événement : c'est le second candidat, et il doit laisser
     une trace (le set de résolution), sans quoi la question se reposerait indéfiniment.
+
+    LES DEUX IDENTIFIANTS PASSÉS AU VÉRIFICATEUR N'ONT PAS LE MÊME STATUT, et c'est voulu :
+      - `player` est lu dans l'ÉTAT (`current_player`), donc INDÉPENDANT de la décision : ce
+        contrôle-là mord. Il refuse une décision qui a survécu au tour de son propriétaire —
+        seul son siège peut y répondre (mesuré : 31 décisions sur 3 épisodes, aucune dont le
+        joueur diffère de `current_player`) ;
+      - `unit_id` est l'escouade SUR LAQUELLE on écrit ; il n'existe aucune autre source pour
+        elle, donc l'unique appelant du gym le lit forcément dans la décision et le contrôle y
+        est une identité. Il n'est pas retiré pour autant : il est la seule barrière contre un
+        futur appelant qui appliquerait la déclaration à une AUTRE escouade que celle interrogée.
     """
     from engine.agent_decision import consume_pending_agent_decision
 
@@ -482,7 +501,10 @@ def apply_fly_declaration_decision(
             "des mouvements que 21.03 couvre — la decision a survecu a sa phase."
         )
     consume_pending_agent_decision(
-        game_state, decision_type="fly_declaration", unit_id=str(squad_id)
+        game_state,
+        decision_type="fly_declaration",
+        player=int(require_key(game_state, "current_player")),
+        unit_id=str(squad_id),
     )
     game_state.setdefault(entry.resolved_key, set()).add(str(squad_id))
     if declared:

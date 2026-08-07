@@ -3442,7 +3442,12 @@ class W40KEngine(gym.Env):
             # candidats est CONTRACTUEL — c'est lui, et non un `effect_ids`, qui porte le sens
             # (cf. AGENT_DECISION_TYPE_IDS) : le payload le rend explicite côté moteur.
             called = bool(require_key(require_key(selected_option, "payload"), "call"))
-            decision_player = int(require_key(decision, "player"))
+            # Le joueur passé au vérificateur vient de l'ÉTAT, jamais de la décision. Le lire dans
+            # la décision pour le lui repasser comparait la décision à elle-même : un contrôle
+            # qui ne pouvait pas se déclencher (« vert vacant »). Lu ici, il refuse une décision
+            # qui a survécu au tour de son propriétaire — le seul siège qui puisse y répondre.
+            # Mesuré sur 3 épisodes : 31 décisions, 0 dont le joueur diffère de `current_player`.
+            decision_player = int(require_key(self.game_state, "current_player"))
             # `apply_waaagh_call_decision` efface la decision elle-meme (ecrivain unique).
             command_handlers.apply_waaagh_call_decision(
                 self.game_state, decision_player, called
