@@ -23,6 +23,10 @@ from engine.phase_handlers.shared_utils import (
     get_fighting_models,
     # D1 : ordre des slots ennemis IDENTIQUE a l action tir/charge (source unique)
     get_enemy_slot_mapping,
+    # D1 cote allie (V11 §0.48 element L2) : ordre des lignes alliees IDENTIQUE a l action
+    # d activation. `deployed_friendly_squad_ids` est le predicat que les deux partagent.
+    get_ally_slot_mapping,
+    deployed_friendly_squad_ids,
     # V11 §9 P3-2 : support du choix de cible de charge. L'oracle moteur, jamais une
     # reimplementation — c'est celui qu'execute le commit `squad_charge`.
     CHARGE_MAX_ROLL,
@@ -55,6 +59,7 @@ from engine.observation_entities import (
     deploy_cand_cont_index,
     GLOBAL_BIN_SIZE,
     GLOBAL_CONT_SIZE,
+    K_ALLY_SLOTS as _ENTITY_K_ALLY_SLOTS,
     MODEL_TYPE_BIN_SIZE,
     MODEL_TYPE_CONT_SIZE,
     OBS_PHASE_IDS,
@@ -391,11 +396,14 @@ class ObservationBuilder:
     #   self_models_cont   (SQUAD_TOP_K, SELF_MODEL_CONT_SIZE)
     #   self_models_bin    (SQUAD_TOP_K, SELF_MODEL_BIN_SIZE)
     #
-    # ⚠️ L'ORDRE DES SLOTS ENNEMIS EST CONTRACTUEL (invariant D1, cf. V11_audit_observation.md
-    # §8) : `enemies_*[i]` décrit l'ennemi que désigne l'action de tir de slot `i`. Les alliés,
-    # eux, sont AGRÉGÉS par le réseau (aucune action ne les désigne) : leur ordre n'a donc pas
-    # de sémantique — c'est précisément ce qui débloque le bloc E, resté en attente tant que
-    # l'observation était plate (il aurait fallu inventer un ordre de slots, §11).
+    # ⚠️ L'ORDRE DES SLOTS EST CONTRACTUEL DES DEUX CÔTÉS (invariant D1, cf.
+    # V11_audit_observation.md §8) : `enemies_*[i]` décrit l'ennemi que désigne l'action de tir
+    # de slot `i`, et depuis V11 §0.48 élément L2 `allies_*[i]` décrit l'escouade que désigne
+    # l'action `ACTIVATE_SLOT_i`. Les deux mappings sont des SOURCES UNIQUES partagées avec le
+    # masque et le décodeur (`get_enemy_slot_mapping` / `get_ally_slot_mapping`).
+    # ⚠️ Le commentaire d'avant L2 affirmait ici que l'ordre des alliés n'avait « pas de
+    # sémantique » parce qu'ils étaient seulement AGRÉGÉS par le réseau. C'est faux depuis que
+    # l'agent choisit qui activer : un slot d'action ne peut pas s'indexer sur un ordre libre.
     #
     # NORMALISATION (V11 §9.5, maintenue) : les grandeurs continues restent BRUTES (aucune
     # division fixe : une division est une seconde normalisation, saturante et non
@@ -408,9 +416,12 @@ class ObservationBuilder:
 
     # --- Cardinalités (source unique ; le miroir avec l'espace d'action est verrouillé par
     # --- tests/unit/engine/test_entity_obs_contract.py) ---
-    #: Unité active (ligne 0) + escouades alliées. Mesuré sur les rosters réels : au plus
-    #: 6 escouades par camp ; K=8 laisse de la marge. Tout dépassement est LOGUÉ.
-    K_ALLY_SLOTS = 8
+    #: Unité active (ligne 0) + escouades alliées. La valeur vit dans `observation_entities`
+    #: (module FEUILLE) et non ici : `macro_intents.ACTIVATE_SLOT_COUNT` en DÉRIVE — une action
+    #: d'activation par ligne alliée (V11 §0.48 élément L2) — et ne peut pas importer
+    #: l'observation sans cycle. L'aliasing ci-dessous garde le point d'accès `cls.K_ALLY_SLOTS`
+    #: des ~30 sites existants sans en faire une SECONDE source. Tout dépassement est LOGUÉ.
+    K_ALLY_SLOTS = _ENTITY_K_ALLY_SLOTS
     #: DOIT valoir SQUAD_ACTION_SHOOT_SLOT_COUNT (une action de tir par slot ennemi).
     #: 5 -> 20 en T-E : a 5 slots, 9 resets sur 10 laissaient au moins une escouade ennemie
     #: hors de l'observation ET hors de portee d'action (§1.1, mesure).
@@ -1778,14 +1789,9 @@ class ObservationBuilder:
                 raise KeyError(f"Unit {sid} missing from game_state['units'] for observation")
             on_battlefield[str(sid)] = require_key(sid_unit, "deployed_on_turn") is not None
 
-        friendly_sids = sorted(
-            (
-                sid
-                for sid, e in units_cache.items()
-                if int(e["player"]) == active_player and on_battlefield[str(sid)]
-            ),
-            key=str,
-        )
+        # MEME predicat que le mapping de slots d'activation (`get_ally_slot_mapping`) : le
+        # recopier ici ferait diverger « ce que le reseau voit » de « ce que l'action designe ».
+        friendly_sids = deployed_friendly_squad_ids(game_state, active_player)
         engaged_squads: set = set()
         active_relevant_enemies: List[Dict[str, Any]] = []
         # Les entrees de `units_cache` ne portent pas leur identifiant : on retrouve le sid par
@@ -1971,22 +1977,16 @@ class ObservationBuilder:
             obs[f"{prefix}_types_cont"][row] = e_types_cont
             obs[f"{prefix}_types_bin"][row] = e_types_bin
 
-        # === ENTITÉS AMIES — ligne 0 = l'unité ACTIVE (contrat, cf. en-tête de section) ===
-        # Les autres alliées sont AGRÉGÉES par le réseau : leur ordre n'a pas de sémantique,
-        # il est seulement DÉTERMINISTE (tri par identifiant) pour ne pas permuter d'un step à
-        # l'autre.
-        _write_entity("allies", 0, active_squad_id, is_ally=True, is_active=True)
-        other_allies = [sid for sid in friendly_sids if sid != active_squad_id]
-        if len(other_allies) > self.K_ALLY_SLOTS - 1:
-            from engine.game_utils import add_debug_file_log
-
-            add_debug_file_log(
-                game_state,
-                f"[OBS] joueur {active_player} : {len(other_allies) + 1} escouades alliees pour "
-                f"{self.K_ALLY_SLOTS} slots — les dernieres ne sont pas observees.",
-            )
-        for row, sid in enumerate(other_allies[: self.K_ALLY_SLOTS - 1], start=1):
-            _write_entity("allies", row, sid, is_ally=True, is_active=False)
+        # === ENTITÉS AMIES — l'ordre des slots EST celui de l'action d'activation (invariant D1)
+        # Ligne 0 = l'unité ACTIVE (contrat, cf. en-tête de section). Depuis V11 §0.48 élément L2,
+        # les lignes suivantes ne sont plus un simple tri déterministe sans sémantique : la ligne
+        # `i` est l'escouade que l'action `ACTIVATE_SLOT_i` activerait. Le mapping vient donc de
+        # la SOURCE UNIQUE partagée avec le masque et le décodeur, exactement comme les ennemis.
+        ally_slot_ids = get_ally_slot_mapping(game_state, active_player, active_squad_id)
+        for row, asid in enumerate(ally_slot_ids):
+            if asid is None:
+                continue  # slot vide : ligne de zéros, le bit `present` porte l'information
+            _write_entity("allies", row, str(asid), is_ally=True, is_active=(row == 0))
 
         # === ENTITÉS ENNEMIES — l'ordre des slots EST celui de l'action de tir (invariant D1) ===
         # Source unique partagée avec le masque (build_squad_action_mask) et l'exécution

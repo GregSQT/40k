@@ -28,6 +28,16 @@ class _DummyActionDecoder:
         _ = game_state
         return self._mask, self._eligible
 
+    def activation_selection_slots(self, game_state, eligible_units=None):
+        """Aucun choix d'activation en attente (V11 §0.48 `L2`).
+
+        Ces doubles pilotent un masque SCRIPTÉ : le pool y est posé à la main, il n'y a donc pas
+        d'ordre d'activation à choisir. `None` est la réponse exacte du décodeur réel dans ce
+        cas — pas une neutralisation de commodité.
+        """
+        _ = (game_state, eligible_units)
+        return None
+
     def normalize_action_input(self, raw_action, phase, source, action_space_size):
         _ = (phase, source, action_space_size)
         return int(raw_action) if self._normalized_action is None else self._normalized_action

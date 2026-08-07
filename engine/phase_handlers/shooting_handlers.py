@@ -1929,6 +1929,24 @@ def _should_auto_activate_next_shooting_unit(
 ) -> bool:
     """
     Auto-activate next unit only when that unit is AI-controlled.
+
+    ⚠️ **DIVERGENCE TRAIN/SERVE CONNUE ET NON CORRIGÉE (V11 §0.48 `L2`).** Épingler
+    `active_shooting_unit` sur `pool[0]` réduit le pool à cette seule escouade
+    (`ActionDecoder._raw_eligible_units_for_current_phase`), donc supprime le choix d'activation
+    de `L2` : l'agent tire avec la tête du pool, celle que le moteur désignait avant.
+
+    Or `player_types["2"] == "ai"` n'est vrai qu'en **PvE**. En entraînement les deux joueurs sont
+    `"human"` : l'épinglage n'arrive jamais et le choix est bien posé. Au service PvE il arrive
+    toujours et le choix disparaît — l'agent est entraîné à choisir qui tire, et privé de ce choix
+    là où il joue pour de vrai.
+
+    POURQUOI CE N'EST PAS CORRIGÉ ICI : `active_shooting_unit` appartient au CYCLE DE VIE de ce
+    module (posé à la construction du pool, effacé par elle et par les fins d'activation PvP) et
+    il est CONSOMMÉ par l'API (`services/api_server.py`) pour dire au front qui tire. Le déplacer
+    au moment du choix le sort de ce cycle : mesuré, il devient périmé
+    (`active_shooting_unit 4 is not in shoot_activation_pool=['2','3','5']`) et il fuit dans
+    l'entraînement, où il n'existait pas. Le corriger demande de reprendre le cycle de vie de
+    l'activation de tir PvE, ce qui ne se valide qu'en session PvE — arbitrage utilisateur.
     """
     if not pool:
         return False

@@ -829,11 +829,90 @@ Ordre par valeur tactique :
    `get_best_enemy_score_for_unit` dans `convert_squad_action` du décodeur (action_decoder
    ~L1000-1030), PAS `charge_handlers:1506` (chemin `convert_gym_action`, hors gym mais encore
    vif en PvE via pve_controller — non touché, comme prévu).
-3. **Choix de l'unité à activer** par phase — `eligible_units[0]` a 9 occurrences dans
-   action_decoder ; les sites DÉCISIFS du flux vif sont dans `convert_squad_action`
-   (~L837, L876), les autres sont dans la construction du masque ; le plus gros gain
-   stratégique. Contrainte règles : l'ordre en fight reste borné par Fights First
-   (11.04/12.04) et les pools alternés — le choix agent se fait DANS le pool légal courant.
+3. ✅ **LIVRÉ le 2026-08-07 — moteur ET réseau (élément `L2` du lot, cf. [§0.48](V11_agent_rework.md#s0.48)).**
+   La désignation est une **dimension d'action** (`ACTIVATE_SLOT` 1127-1138, un par ligne
+   ALLIÉE de l'observation, `TOTAL_ACTION_SIZE` 1127 → 1139), sur le même patron que les slots
+   de tir/charge/mêlée/Oath — **pas** des `CHOICE_k` : les candidats sont mes escouades, donc des
+   entités déjà observées, et `MAX_DECISION_OPTIONS = 6` serait de toute façon dépassé par
+   `K_ALLY_SLOTS = 12`. Les embeddings alliés sont exposés PAR SLOT en queue du vecteur de
+   features (`ally_embeddings_slice`, ligne 0 comprise — l'ancre du pool est un candidat) et
+   scorés par `activate_query_net`, jumelle de `deploy_query_net` livrée par `L1`. Le tronc, lui,
+   garde `e_own` + l'agrégation des autres : le CONTEXTE, comme pour les ennemis.
+
+   **Ce que le moteur fait désormais.** Le masque devient EXCLUSIF dès que le pool compte au
+   moins deux escouades : seuls les slots d'activation sont ouverts, exactement comme pour une
+   décision en attente ou une désignation d'Oath. Le slot joué pose un marqueur, et
+   `ActionDecoder._get_eligible_units_for_current_phase` — **le seul point** où le choix prend
+   effet — remonte l'escouade désignée en tête. Les ~9 sites `eligible_units[0]` n'ont PAS été
+   touchés un par un : ils lisent tous ce pool, les corriger séparément les aurait fait diverger
+   au premier oublié.
+
+   **Deux steps, et ce n'est pas un choix de conception.** La grille de move est ÉGOCENTRIQUE
+   (`ObservationBuilder.squad_grid_anchor`) : « aller en cellule (gx,gy) » n'a aucun sens tant
+   qu'on ne sait pas qui bouge. Fusionner « qui » et « quoi » dans un seul id est donc
+   impossible, pas seulement inélégant. Le step de choix consomme un step gym et rapporte **0**
+   — même doctrine que `agent_decision` : récompenser le choix paierait l'agent pour décider,
+   pas pour bien décider.
+
+   **09.03 — le jet d'Advance n'est PAS révélé avant la sélection.** Le masque doit préparer la
+   carte de cellules de l'ancre dès le step de choix (la grille égocentrique de l'observation la
+   relit, sans repli). Cette préparation se fait au budget de mouvement NORMAL tant que le choix
+   est en attente : tirer le jet là l'aurait montré à l'agent — via les cellules Advance de la
+   grille — pour une escouade pas encore sélectionnée, et pour la seule ancre du pool. Le jet est
+   tiré au step suivant, pour l'escouade réellement désignée. Verrouillé par test, prouvé par
+   mutation.
+
+   **Portée du marqueur : (tour, phase, joueur, escouade), les quatre.** Il est honoré tant que
+   l'escouade est encore dans le pool ET que l'activation est la même. La seconde moitié n'est pas
+   une précaution : les pools sont PAR PHASE, donc une escouade qui a fini de bouger est toujours
+   dans le pool de tir. ⚠️ Une première version ne testait que la présence dans le pool et
+   affirmait à tort que « le changement de phase l'en sort » — mesuré : **9 des 20 premières
+   activations à pool ≥ 2 se faisaient sans qu'aucun choix ne soit proposé**, forcées sur
+   l'escouade précédente. Le tour et le joueur ferment le même trou d'un cran plus haut.
+   Seul `reset()` purge le marqueur, parce que la portée redevient valide par coïncidence à
+   l'épisode suivant (le tour repart à 1).
+
+   **La garde porte sur les SLOTS OUVERTS, pas sur la taille du pool.** Les deux comptes
+   diffèrent : une escouade en réserves stratégiques est éligible en mouvement (ingress 20.04)
+   mais n'a pas de ligne alliée, donc pas de slot. `len(eligible_units) >= 2` posait alors une
+   décision à une seule action légale — un step gym brûlé, et l'escouade en réserves inadressable.
+
+   🔴 **DIVERGENCE TRAIN/SERVE OUVERTE — l'épinglage `active_shooting_unit` préempte le choix en
+   PvE.** Posé à la construction du pool de tir, il réduit celui-ci à une escouade et supprime
+   donc la décision. Or `player_types["2"] == "ai"` n'est vrai qu'en **PvE** : en entraînement le
+   choix est bien posé, au service il disparaît — l'agent est entraîné à choisir qui tire et privé
+   de ce choix là où il joue pour de vrai. **Non corrigé dans `L2`** : cette clé appartient au
+   cycle de vie de `shooting_handlers` et est consommée par l'API pour dire au front qui tire ;
+   déplacée au moment du choix, elle devient périmée (mesuré :
+   `active_shooting_unit 4 is not in shoot_activation_pool=['2','3','5']`) et fuit dans
+   l'entraînement, où elle n'existait pas. La reprise propre du cycle de vie de l'activation de
+   tir PvE ne se valide qu'en session PvE. Mesuré et daté par
+   `test_the_shooting_pin_preempts_the_choice_when_the_player_is_ai_KNOWN_DIVERGENCE`, qui
+   deviendra ROUGE le jour où ce sera corrigé.
+
+   **Livraison en DEUX temps, et l'étape intermédiaire mérite d'être dite.** La moitié moteur est
+   partie seule, avec les 12 logits produits par des colonnes DENSES d'`action_net` : le pointeur
+   exigeait `ai/spatial_extractor.py`, que `L1` réécrivait en parallèle. Ce n'était pas gratuit —
+   une colonne par slot ne partage aucun poids, donc n'apprend rien de transférable d'une escouade
+   à l'autre — mais sans ce minimum la policy refusait même de se construire (sa garde de
+   disposition attendait Oath en queue d'action space). `activate_query_net` les a remplacées
+   après le merge de `L1` ; `action_net` est redescendue de 29 à 17 colonnes, et
+   `test_action_net_has_no_dead_column` rend ce retrait vérifiable plutôt que déclaré.
+
+   **Bots inchangés, volontairement** : `BotControlledEnv` joue TOUJOURS le slot 0, c'est-à-dire
+   l'ancre du pool — exactement ce que le moteur activait avant `L2`. Faire choisir le bot
+   changerait l'adversaire en même temps que l'agent et le delta de win-rate du lot ne mesurerait
+   plus rien (leçon §0.47 É4).
+
+   Historique du site, conservé : `eligible_units[0]` avait 9 occurrences dans `action_decoder` ;
+   les sites DÉCISIFS du flux vif étaient dans `convert_squad_action` (~L837, L876), les autres
+   dans la construction du masque ; le plus gros gain stratégique annoncé du lot.
+   Contrainte règles, toujours valable : l'ordre en fight reste borné par Fights First
+   (11.04/12.04) et les pools alternés — le choix agent se fait DANS le pool légal courant, et
+   c'est le pool lui-même qui le garantit puisque le marqueur ne fait que le RÉORDONNER.
+   ⚠️ Le DÉPLOIEMENT est hors périmètre : ses candidats ne sont pas encore sur le champ de
+   bataille, donc ils n'ont pas de ligne d'observation alliée — un slot d'activation y désignerait
+   une ligne vide. L'ordre de pose reste celui du pool ; c'est une autre décision.
 4. **Allocation des pertes défenseur** — remplace `_select_allocation_model`
    (shared_utils ~5643) ; candidats = figurines éligibles 05.03/06.02 ; inclut l'allocation
    hazard ET l'ordre de déclaration des groupes (`declare_order`, décision défenseur 05.03,

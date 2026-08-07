@@ -21,7 +21,15 @@ import pytest
 from _config_helpers import build_move_rules
 from engine.action_decoder import ActionDecoder
 from engine.agent_decision import read_pending_agent_decision
-from engine.macro_intents import CHOICE_BASE, MOVE_CELLS, TOTAL_ACTION_SIZE
+from engine.macro_intents import (
+    ACTIVATE_SLOT_BASE,
+    ACTIVATE_SLOT_COUNT,
+    CHOICE_BASE,
+    CHOICE_COUNT,
+    MOVE_CELLS,
+    TOTAL_ACTION_SIZE,
+)
+from engine.observation_entities import MAX_DECISION_OPTIONS
 from engine.observation_entities import (
     AGENT_DECISION_TYPE_IDS,
     AGENT_DECISION_TYPE_SLOTS,
@@ -127,7 +135,14 @@ def test_opening_the_type_consumes_a_reserve_and_leaves_obs_size_untouched():
     # contexte garde sa taille (assertion ci-dessus). Recopier la valeur ici la ferait rougir à
     # chaque chantier voisin, pour un défaut qui n'est pas le sien.
     assert DECISION_CTX_BIN_SIZE == 1 + AGENT_DECISION_TYPE_SLOTS
-    assert TOTAL_ACTION_SIZE == 1127
+    # ⚠️ MÊME RAISONNEMENT POUR L'ESPACE D'ACTION, et il manquait : la valeur `1127` était recopiée
+    # ici, exactement le défaut que le commentaire ci-dessus décrit pour `obs_size`. `L2` l'a fait
+    # passer à 1139 (12 slots d'activation) et ce cas a rougi pour un défaut qui n'est pas le sien.
+    # Ce que `L6` doit prouver est qu'il n'y contribue PAS : ses deux candidats sont des
+    # non-entités, donc des `CHOICE_0/1` déjà déclarés — aucun id nouveau. C'est ce qu'affirme la
+    # ligne ci-dessous, sans dépendre de ce que les chantiers voisins ajoutent en queue.
+    assert TOTAL_ACTION_SIZE == ACTIVATE_SLOT_BASE + ACTIVATE_SLOT_COUNT
+    assert CHOICE_COUNT == MAX_DECISION_OPTIONS
 
 
 # ─────────────────────────────────────────────────────────────────────────────

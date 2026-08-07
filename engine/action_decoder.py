@@ -22,6 +22,7 @@ from engine.phase_handlers.shared_utils import (
     compute_candidate_footprint,
     build_squad_action_mask,
     get_enemy_slot_mapping,
+    get_ally_slot_mapping,
     roll_advance_for_squad,
     # Refonte spatiale du move : action = cellule de la grille egocentrique. Constantes importees,
     # jamais de litteral nu : le plan d'actions a change (WAIT 18 -> 1024, etc.).
@@ -43,6 +44,8 @@ from engine.phase_handlers.shared_utils import (
     store_squad_move_cell_map,
 )
 from engine.macro_intents import (
+    ACTIVATE_SLOT_BASE,
+    ACTIVATE_SLOTS,
     BASE_ZONE_INTENT,
     CHOICE_BASE,
     DEPLOY_SLOT_BASE,
@@ -414,20 +417,15 @@ class ActionDecoder:
         our_player = int(require_key(cache_entry, "player"))
         enemy_slot_ids = get_enemy_slot_mapping(game_state, our_player)
 
-        # INGRESS MOVE (20.04) — l'escouade active est en réserves : elle n'a aucune cellule de
-        # move (elle n'est pas sur le plateau), elle a des candidats de MISE EN PLACE. Le masque
-        # ouvre donc les mêmes slots 4-8 que le déploiement, dont c'est le jumeau, plus WAIT pour
-        # RENONCER (rester en réserves ce tour-ci est un choix légal — jusqu'à la fin du 3e
-        # round, où 20.04 la détruit). Les deux familles ne peuvent pas se confondre : une
-        # escouade en réserves n'a pas de cellule jouable, une escouade posée n'a pas de
-        # candidat d'ingress.
         from engine.phase_handlers.shared_utils import unit_is_in_strategic_reserves
 
-        if current_phase == "move" and unit_is_in_strategic_reserves(game_state, squad_id):
-            for action_int in self.ingress_slot_candidates(game_state, squad_id):
-                mask[action_int] = True
-            mask[SQUAD_ACTION_WAIT] = True
-            return mask, eligible_units
+        squad_in_reserves = current_phase == "move" and unit_is_in_strategic_reserves(
+            game_state, squad_id
+        )
+
+        # Le choix d'activation est résolu ICI, avant la préparation du mouvement, parce qu'il en
+        # change le contenu (cf. le jet d'Advance ci-dessous) ; il n'est JOUÉ qu'après elle.
+        activation_slots = self.activation_selection_slots(game_state, eligible_units)
 
         # TAKE TO THE SKIES (21.03, V11 §0.48 élément `L6`) — POINT DE CHOIX, posé ICI et pas
         # ailleurs : la déclaration change le budget (-2") ET la traversée, donc le POOL que les
@@ -446,11 +444,19 @@ class ActionDecoder:
 
         advance_roll: Optional[int] = None
         move_cell_map = None
-        if current_phase == "move":
-            squad_advance_rolls = game_state.setdefault("_squad_advance_rolls", {})
-            if squad_id not in squad_advance_rolls:
-                squad_advance_rolls[squad_id] = roll_advance_for_squad(squad_id, game_state)
-            advance_roll = squad_advance_rolls[squad_id]
+        if current_phase == "move" and not squad_in_reserves:
+            # 09.03 — le jet d'Advance se fait quand l'unité est SÉLECTIONNÉE pour se déplacer.
+            # Tant que le choix d'activation est en attente, aucune escouade ne l'est : le jet
+            # n'est donc PAS tiré, et la carte de cellules est construite au budget de mouvement
+            # normal. Le tirer ici l'aurait RÉVÉLÉ à l'agent (il alimente les cellules Advance de
+            # la grille égocentrique) avant qu'il ne choisisse qui activer — un jet montré pour
+            # une escouade pas encore sélectionnée, et seulement pour l'ancre du pool.
+            # La carte est quand même construite : `build_squad_grid` la relit sans repli.
+            if activation_slots is None:
+                squad_advance_rolls = game_state.setdefault("_squad_advance_rolls", {})
+                if squad_id not in squad_advance_rolls:
+                    squad_advance_rolls[squad_id] = roll_advance_for_squad(squad_id, game_state)
+                advance_roll = squad_advance_rolls[squad_id]
 
             # Refonte spatiale : la carte cellule -> (destination, cout) est construite UNE fois
             # ici, sert a masquer, puis est memoisee pour que `convert_squad_action` execute
@@ -466,6 +472,40 @@ class ActionDecoder:
                 advance_roll if squad_advance_or_fall_back_allowed(game_state, squad_id) else None,
             )
             store_squad_move_cell_map(game_state, squad_id, move_cell_map)
+
+        # CHOIX DE L'ESCOUADE A ACTIVER (V11 §0.48 element L2 / §9 P3-3) — meme exclusivite que les
+        # branches `pending_agent_decision` et Oath ci-dessus, et pour la meme raison : le moteur
+        # est arrete sur un choix de joueur qui PRECEDE l'activation, donc aucune action
+        # d'activation n'a encore de sens. Aucune sortie « ne pas choisir » : il faut bien activer
+        # quelqu'un, et le slot 0 est toujours ouvert (cf. `activation_selection_slots`), donc le
+        # masque n'est jamais tout-faux.
+        #
+        # ⚠️ Le choix est RESOLU plus haut (avant la preparation du mouvement, dont il change le
+        # contenu) mais n'est JOUE qu'ICI, apres elle, et ce n'est pas cosmetique : l'observation
+        # rendue AVEC ce masque contient la grille egocentrique de l'ancre, que `build_squad_grid`
+        # remplit en relisant la carte de cellules memoisee ci-dessus (`read_squad_move_cell_map`
+        # LEVE si elle manque, sans repli). Un retour anticipe faisait planter la construction de
+        # l'observation au premier point de choix en phase move.
+        # L'escouade en RESERVES est le cas symetrique : elle n'a pas de carte, et `build_squad_grid`
+        # ne lui en demande pas — la branche d'ingress ci-dessous reste donc atteignable apres le
+        # choix, et le choix reste offert quand l'ancre est en reserves.
+        if activation_slots is not None:
+            for action_int in activation_slots:
+                mask[action_int] = True
+            return mask, eligible_units
+
+        # INGRESS MOVE (20.04) — l'escouade active est en réserves : elle n'a aucune cellule de
+        # move (elle n'est pas sur le plateau), elle a des candidats de MISE EN PLACE. Le masque
+        # ouvre donc les mêmes slots 4-8 que le déploiement, dont c'est le jumeau, plus WAIT pour
+        # RENONCER (rester en réserves ce tour-ci est un choix légal — jusqu'à la fin du 3e
+        # round, où 20.04 la détruit). Les deux familles ne peuvent pas se confondre : une
+        # escouade en réserves n'a pas de cellule jouable, une escouade posée n'a pas de
+        # candidat d'ingress.
+        if squad_in_reserves:
+            for action_int in self.ingress_slot_candidates(game_state, squad_id):
+                mask[action_int] = True
+            mask[SQUAD_ACTION_WAIT] = True
+            return mask, eligible_units
 
         squad_mask = build_squad_action_mask(
             game_state, squad_id, enemy_slot_ids, advance_roll, move_cell_map=move_cell_map
@@ -511,6 +551,118 @@ class ActionDecoder:
             slots[OATH_SLOT_BASE + slot_index] = str(squad_id)
         return slots
 
+    #: Phases qui activent les escouades une par une, donc les seules ou « qui joue maintenant ? »
+    #: est une question. Le DEPLOIEMENT en est structurellement exclu : ses candidats ne sont pas
+    #: encore sur le champ de bataille, donc ils n'ont pas de ligne d'observation alliee
+    #: (`deployed_friendly_squad_ids`) — un slot d'activation y designerait une ligne vide, c'est
+    #: a dire un choix a l'aveugle. L'ordre de pose reste celui du pool ; c'est une AUTRE decision.
+    ACTIVATION_CHOICE_PHASES = ("move", "shoot", "charge", "fight")
+
+    #: Escouade que l'agent a designee pour l'activation en cours. Cle unique de l'etat de L2.
+    ACTIVATION_CHOSEN_KEY = "activation_chosen_squad"
+
+    def activation_selection_slots(
+        self,
+        game_state: Dict[str, Any],
+        eligible_units: Optional[List[Dict[str, Any]]] = None,
+    ) -> Optional[Dict[int, str]]:
+        """`{action_int -> id d'escouade}` des `ACTIVATE_SLOTS` ouverts, ou None si aucun choix
+        d'activation n'est en attente.
+
+        SOURCE UNIQUE partagée par le masque et le décodage — c'est ce qui rend tout slot ouvert
+        exécutable, et interdit qu'un slot masqué désigne une escouade différente de celle que le
+        décodeur en tirerait.
+
+        INVARIANT D1, CÔTÉ ALLIÉ. Le slot *i* est indexé sur `get_ally_slot_mapping`, donc sur la
+        ligne *i* du tenseur ALLIÉ de l'observation. L'ancre du mapping est `eligible_units[0]`,
+        exactement l'escouade dont `W40KEngine._build_observation_and_mask` fait la ligne 0 : c'est
+        pour cela que cette branche du masque rend le pool `eligible_units` et NON `[]` comme les
+        `CHOICE_i` et les slots d'Oath. Rendre `[]` ici décrocherait l'observation du mapping.
+
+        QUAND LE CHOIX EST POSÉ. Une seule fois par activation, et seulement s'il y a un VRAI
+        choix — c'est-à-dire au moins DEUX SLOTS OUVERTS, pas au moins deux escouades éligibles.
+        Les deux comptes diffèrent : une escouade en réserves stratégiques est éligible en phase
+        de mouvement (ingress 20.04) mais n'a pas de ligne alliée, donc pas de slot. Un pool de
+        deux dont l'une est en réserves n'offrait qu'une action légale — un step gym brûlé pour
+        aucune information, et l'escouade en réserves inadressable (mesuré : tour 2, move, P1).
+
+        PORTÉE DU MARQUEUR — (tour, phase, joueur, escouade), les quatre.
+        Le marqueur est honoré tant que l'escouade désignée est encore dans le pool ET que
+        l'activation est la MÊME. La seconde moitié n'est pas une précaution : les pools sont
+        PAR PHASE, donc une escouade qui a fini de bouger reste dans le pool de tir. Sans la
+        portée, son marqueur de la phase move survivait à la phase de tir et y supprimait le
+        choix — mesuré : 9 des 20 premières activations (tour, phase, joueur) à pool ≥ 2 se
+        faisaient sans qu'aucun choix ne soit proposé, forcées sur l'escouade précédente. Le tour
+        et le joueur closent le même trou d'un cran plus haut (même phase, tour suivant ; même
+        phase, joueur suivant).
+
+        Un marqueur périmé n'est PAS effacé, il est ignoré : « désignée pour cette activation-ci »
+        cesse simplement d'avoir un sens. Seul `reset()` le purge, parce qu'un état d'épisode qui
+        survit à l'épisode est un autre problème — le tour repart à 1 et la clé redeviendrait
+        valide par coïncidence.
+        """
+        phase = require_key(game_state, "phase")
+        if phase not in self.ACTIVATION_CHOICE_PHASES:
+            return None
+        if eligible_units is None:
+            eligible_units = self._get_eligible_units_for_current_phase(game_state)
+        if not eligible_units:
+            return None
+        eligible_ids = {str(require_key(u, "id")) for u in eligible_units}
+        chosen = self.current_activation_choice(game_state)
+        if chosen is not None and chosen in eligible_ids:
+            return None  # l'activation désignée est en cours
+
+        anchor_id = str(require_key(eligible_units[0], "id"))
+        units_cache = require_key(game_state, "units_cache")
+        anchor_entry = units_cache.get(anchor_id)
+        if anchor_entry is None:
+            raise KeyError(f"Squad {anchor_id} missing from units_cache")
+        our_player = int(require_key(anchor_entry, "player"))
+        ally_slot_ids = get_ally_slot_mapping(game_state, our_player, anchor_id)
+        slots: Dict[int, str] = {}
+        for slot_index, squad_id in enumerate(ally_slot_ids):
+            if squad_id is None or str(squad_id) not in eligible_ids:
+                continue
+            slots[ACTIVATE_SLOT_BASE + slot_index] = str(squad_id)
+        if ACTIVATE_SLOT_BASE not in slots:
+            raise ValueError(
+                f"activation_selection_slots: l'ancre {anchor_id} n'a pas de slot alors qu'elle "
+                "est la tête du pool — le mapping allié a décroché du pool. Le slot 0 porte "
+                "l'ancre par construction (`get_ally_slot_mapping` la met en ligne 0)."
+            )
+        if len(slots) < 2:
+            # Un seul slot ouvert : le choix est déjà fait, poser la décision coûterait un step
+            # pour aucune information. Cf. la docstring — ce n'est PAS `len(eligible_units) < 2`.
+            return None
+        return slots
+
+    def activation_choice_scope(self, game_state: Dict[str, Any]) -> Tuple[int, str, int]:
+        """(tour, phase, joueur) — l'activation à laquelle un marqueur de choix appartient.
+
+        Recopiée nulle part : le marqueur la STOCKE et `current_activation_choice` la compare.
+        """
+        return (
+            int(require_key(game_state, "turn")),
+            str(require_key(game_state, "phase")),
+            int(require_key(game_state, "current_player")),
+        )
+
+    def current_activation_choice(self, game_state: Dict[str, Any]) -> Optional[str]:
+        """Escouade désignée POUR L'ACTIVATION COURANTE, ou None si le marqueur est absent/périmé.
+
+        SOURCE UNIQUE de la lecture du marqueur — `activation_selection_slots` et
+        `_get_eligible_units_for_current_phase` passent toutes deux par ici, sans quoi l'une
+        pourrait juger valide un marqueur que l'autre juge périmé, et le masque désignerait une
+        escouade que le pool ne remonterait pas.
+        """
+        marker = game_state.get(self.ACTIVATION_CHOSEN_KEY)  # get allowed : None = aucun choix
+        if marker is None:
+            return None
+        if tuple(require_key(marker, "scope")) != self.activation_choice_scope(game_state):
+            return None  # marqueur d'une AUTRE activation : périmé, jamais réutilisé
+        return str(require_key(marker, "squad_id"))
+
     def get_deployment_active_unit(self, game_state: Dict[str, Any]) -> Dict[str, Any]:
         """L'unité sur laquelle porte la décision de déploiement — SOURCE UNIQUE obs ↔ masque.
 
@@ -540,10 +692,40 @@ class ActionDecoder:
         return eligible[0]
 
     def _get_eligible_units_for_current_phase(self, game_state: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Pool d'activation de la phase, l'escouade DÉSIGNÉE PAR L'AGENT en tête.
+
+        UNIQUE point où le choix de L2 (V11 §0.48) prend effet. Tout le moteur active
+        `eligible_units[0]` — le masque, le décodeur, l'observation, les bots d'évaluation : c'est
+        exactement ce qui rendait l'ordre d'activation inaccessible à l'agent, et c'est donc ici,
+        et nulle part ailleurs, qu'il faut le rendre. Remplacer les ~9 sites `eligible_units[0]`
+        un par un les aurait fait diverger au premier oublié.
+
+        Le marqueur est ignoré dès que l'escouade n'est plus dans le pool : cf.
+        `activation_selection_slots`, « pourquoi aucun site de purge ».
+        """
+        eligible = self._raw_eligible_units_for_current_phase(game_state)
+        if require_key(game_state, "phase") not in self.ACTIVATION_CHOICE_PHASES:
+            return eligible
+        chosen_id = self.current_activation_choice(game_state)
+        if chosen_id is None:
+            return eligible
+        for index, unit in enumerate(eligible):
+            if str(require_key(unit, "id")) == chosen_id:
+                # Rotation EN PLACE : `_raw_...` construit une liste neuve à chaque appel, jamais
+                # partagée avec le pool de `game_state` (ce sont des ids qui y vivent).
+                eligible.insert(0, eligible.pop(index))
+                return eligible
+        return eligible
+
+    def _raw_eligible_units_for_current_phase(self, game_state: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Get eligible units for current phase using handler's authoritative pools.
-        
+
         CRITICAL: Filter out dead units when reading from pools.
         Units can die between pool construction and pool usage, so we must filter here.
+
+        ⚠️ ORDRE BRUT DU POOL — n'appeler que depuis `_get_eligible_units_for_current_phase`, qui
+        y applique le choix d'activation de l'agent. Un appelant qui court-circuite ce passage
+        annulerait L2 en silence : il activerait la tête du pool, pas l'escouade désignée.
         """
         current_phase = game_state["phase"]
 
@@ -802,6 +984,24 @@ class ActionDecoder:
                 "player": int(require_key(game_state, "pending_oath_selection")),
                 "unitId": oath_slots[action_int],
             }
+
+        # Choix de l'escouade à activer : prime sur la phase pour la MÊME raison que les CHOICE
+        # et Oath — le moteur est arrêté sur un choix de joueur qui précède l'activation. La
+        # cible est relue dans la source unique du masque, jamais recalculée ici : c'est ce qui
+        # garantit que le slot joué désigne l'escouade que le masque avait ouverte.
+        if action_int in ACTIVATE_SLOTS:
+            activation_slots = self.activation_selection_slots(game_state, eligible_units)
+            if activation_slots is None:
+                raise ValueError(
+                    f"convert_squad_action: action ACTIVATE_SLOT {action_int} sans choix "
+                    "d'activation en attente — le masque n'aurait pas du l'autoriser"
+                )
+            if action_int not in activation_slots:
+                raise ValueError(
+                    f"convert_squad_action: slot d'activation {action_int} FERME "
+                    f"(ouverts : {sorted(activation_slots)}) — action hors masque"
+                )
+            return {"action": "select_activation", "unitId": activation_slots[action_int]}
 
         # Zone intents (26-40) : command uniquement
         if is_zone_intent_action(action_int):

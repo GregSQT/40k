@@ -41,22 +41,22 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│  OBSERVATION SQUAD — Dict de TENSEURS D'ENTITÉS  (14 615 scalaires)    │
+│  OBSERVATION SQUAD — Dict de TENSEURS D'ENTITÉS  (16 659 scalaires)    │
 ├────────────────────────────────────────────────────────────────────────┤
 │  CONTEXTE GLOBAL                                                       │
 │    global_cont            (13,)                =      13               │
 │    global_bin             (35,)                =      35               │
 │                                                                        │
-│  MES ESCOUADES — ligne 0 = l'unité ACTIVE          K_ALLY_SLOTS = 8    │
-│    allies_cont            (8, 19)              =     152               │
-│    allies_bin             (8, 20)              =     160               │
-│    allies_ability_ids     (8, 8)               =      64               │
-│    allies_status_ids      (8, 4)               =      32               │
-│    allies_wpn_cont        (8, 20, 13)          =   2 080               │
-│    allies_wpn_bin         (8, 20, 1)           =     160               │
-│    allies_wpn_rule_ids    (8, 20, 6)           =     960               │
-│    allies_types_cont      (8, 6, 5)            =     240               │
-│    allies_types_bin       (8, 6, 5)            =     240               │
+│  MES ESCOUADES — ordre = slots d'activation       K_ALLY_SLOTS = 12    │
+│    allies_cont            (12, 19)             =     228               │
+│    allies_bin             (12, 20)             =     240               │
+│    allies_ability_ids     (12, 8)              =      96               │
+│    allies_status_ids      (12, 4)              =      48               │
+│    allies_wpn_cont        (12, 20, 13)         =   3 120               │
+│    allies_wpn_bin         (12, 20, 1)          =     240               │
+│    allies_wpn_rule_ids    (12, 20, 6)          =   1 440               │
+│    allies_types_cont      (12, 6, 5)           =     360               │
+│    allies_types_bin       (12, 6, 5)           =     360               │
 │                                                                        │
 │  ESCOUADES ENNEMIES — ordre = slots d'action     K_ENEMY_SLOTS = 20    │
 │    enemies_cont           (20, 19)             =     380               │
@@ -81,7 +81,7 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 │    deploy_cand_cont       (8, 8)               =      64               │
 │    deploy_cand_bin        (8, 4)               =      32               │
 ├────────────────────────────────────────────────────────────────────────┤
-│  TOTAL vectoriel (= obs_size)                      14 615              │
+│  TOTAL vectoriel (= obs_size)                      16 659              │
 │  + grid  (9, 32, 32) = 9 216, fournie À PART (non comptée)             │
 └────────────────────────────────────────────────────────────────────────┘
 
@@ -660,6 +660,13 @@ rendue vivante ne coûte PLUS de retrain :
 (`+6`), de quoi ouvrir les six tranches P3 restantes sans y revenir ; (3) `N_DEPLOY_SLOTS`
 passe de 5 à **8** (`+36`), les 3 slots en trop étant RÉSERVÉS — le masque les garde fermés tant
 que `DEPLOY_STRATEGY_COUNT` vaut 5.
+→ **16653** (V11 §0.48 élément `L2` — le choix de l'escouade à ACTIVER, 2026-08-07).
+`K_ALLY_SLOTS` passe de 8 à **12** (`+2 044` = 4 lignes × 511). La valeur ne porte plus une marge
+d'observation (« au plus 6 escouades par camp sur les rosters d'entraînement ») mais le **nombre de
+candidats d'activation adressables** : depuis `L2`, l'action `ACTIVATE_SLOT_i` désigne la ligne
+alliée `i`, donc l'ordre des lignes alliées devient CONTRACTUEL (invariant D1, côté allié) et leur
+nombre borne ce que l'agent peut choisir. Le sur-dimensionnement ne coûte **aucun paramètre** —
+les lignes passent par un encodeur PARTAGÉ (mesure §0.32) — seulement ces scalaires et du forward.
 **Toute évolution du schéma change cette valeur et rend les
 `.zip` existants incompatibles : le retrain `--new` est obligatoire.**
 

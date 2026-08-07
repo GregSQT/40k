@@ -39,6 +39,9 @@ from engine.action_log_utils import append_action_log
 # `spatial_grid` ne depend que de `hex_utils` -> import direct sans cycle (il importe
 # `get_squad_move_budget` en local dans sa seule fonction qui en a besoin).
 from engine.spatial_grid import GRID_CELL_COUNT
+# `observation_entities` est une FEUILLE (aucun import moteur) : l'importer au niveau module ne
+# cree pas de cycle. `K_ALLY_SLOTS` y vit parce que l'espace d'action en derive (V11 §0.48 L2).
+from engine.observation_entities import K_ALLY_SLOTS
 # Primitives « hors table » : définies dans la couche BASSE (`spatial_relations` ne dépend que de
 # `hex_utils`) parce que les primitives de MESURE en dépendent elles-mêmes. Ré-exportées ici, où
 # une trentaine d'appelants importent déjà `entry_is_on_battlefield` — même symbole, pas un jumeau.
@@ -10189,6 +10192,15 @@ SQUAD_ACTION_SIZE = SQUAD_ACTION_FIGHT_NO_TARGET + 1  # 1086
 # (`macro_intents.TOTAL_ACTION_SIZE`), comme les zone intents et les CHOICE_i — le miroir est
 # verrouille par `tests/unit/engine/test_action_space_mirror.py`.
 SQUAD_ACTION_OATH_SLOT_COUNT = SQUAD_ACTION_SHOOT_SLOT_COUNT  # 20
+# V11 §0.48 element L2 : le CHOIX DE L'ESCOUADE A ACTIVER est une dimension d'action, sur le
+# mapping de slots ALLIES (`get_ally_slot_mapping`, invariant D1 cote allie). Le compte est DERIVE
+# de `K_ALLY_SLOTS` — le nombre de lignes du tenseur allie — comme les slots ennemis derivent du
+# compte de slots de tir.
+#
+# ⚠️ Meme reserve que pour Oath : ces ids ne sont PAS dans `SQUAD_ACTION_SIZE`. Le choix d'activer
+# precede l'activation, il n'est donc pas une micro-action d'activation et `build_squad_action_mask`
+# ne le produit jamais. Miroir verrouille par `tests/unit/engine/test_action_space_mirror.py`.
+SQUAD_ACTION_ACTIVATE_SLOT_COUNT = K_ALLY_SLOTS  # 12
 
 
 def _squad_is_in_enemy_er(game_state: Dict[str, Any], squad_id: str) -> bool:
@@ -11137,6 +11149,74 @@ def get_enemy_slot_mapping(
     units_cache = game_state.get("units_cache", {})  # get allowed
     raw = game_state[cache_key]
     return [sid if (sid is not None and sid in units_cache) else None for sid in raw]
+
+
+def deployed_friendly_squad_ids(game_state: Dict[str, Any], our_player: int) -> List[str]:
+    """Escouades de `our_player` PRESENTES sur le champ de bataille, triees par identifiant.
+
+    SOURCE UNIQUE du peuplement des lignes alliees de l'observation ET du mapping de slots
+    d'activation (`get_ally_slot_mapping`). Deux derivations du meme predicat divergeraient en
+    silence — c'est le motif JUMEAU du depot.
+
+    Le filtre « sur le champ de bataille » (`entry_is_on_battlefield`, jumelle exacte de
+    `deployed_on_turn is not None` cote unite) n'est pas un confort :
+    03.04 definit l'engagement range comme une aire DU CHAMP DE BATAILLE, et toutes les unites
+    non posees partagent la sentinelle (-1,-1). Sans lui, leurs empreintes se recouvrent et la
+    primitive d'engagement les declare mutuellement engagees (mesure §0.40 point 5 : `engaged=1`,
+    `n_in_enemy_ez=6` sur une escouade absente de la table).
+    """
+    units_cache = require_key(game_state, "units_cache")
+    player_int = int(our_player)
+    result: List[str] = []
+    for sid, entry in units_cache.items():
+        if int(require_key(entry, "player")) != player_int:
+            continue
+        if not entry_is_on_battlefield(entry):
+            continue
+        result.append(str(sid))
+    result.sort(key=str)
+    return result
+
+
+def get_ally_slot_mapping(
+    game_state: Dict[str, Any], our_player: int, active_squad_id: str
+) -> List[Optional[str]]:
+    """Mapping slot -> escouade ALLIEE. Source UNIQUE de l'obs, du masque et du decodeur.
+
+    Jumeau de `get_enemy_slot_mapping`, et pour la meme raison : depuis V11 §0.48 element L2,
+    l'action `ACTIVATE_SLOT_i` designe l'escouade a activer, donc la ligne `i` du tenseur
+    ALLIE. Les desolidariser ferait pointer l'action et l'observation sur deux escouades
+    differentes sans que rien ne leve — invariant D1, cote allie.
+
+    LIGNE 0 = l'escouade ACTIVE. C'est un contrat de l'observation, pas une convention de tri :
+    l'encodeur lit ce slot comme « moi ». Le mapping ne peut donc pas etre un cache persistant
+    comme celui des ennemis — il DEPEND de l'escouade active, et se recalcule a chaque appel.
+
+    Rangs 1..K-1 : les autres escouades presentes, par identifiant. L'ordre par IDENTIFIANT (et
+    non par ordre du pool d'activation) est ce qui rend le slot STABLE d'un step a l'autre a
+    active constante : un pool se vide au fil des activations, donc s'en servir ferait permuter
+    les slots sans qu'aucune escouade n'ait bouge. Ce que D1 demande, c'est UN ordre partage et
+    deterministe ; la stabilite tranche entre les candidats.
+
+    Une escouade PAS ENCORE POSEE (reserves strategiques 20.01/20.04) n'a pas de slot : elle
+    n'a pas de ligne d'observation (cf. `deployed_friendly_squad_ids`), et un slot d'action sans
+    ligne observee serait un choix a l'aveugle. Elle reste activable quand elle devient la tete
+    du pool, qui occupe le slot 0 quoi qu'il arrive.
+    """
+    active_sid = str(active_squad_id)
+    others = [sid for sid in deployed_friendly_squad_ids(game_state, our_player) if sid != active_sid]
+    if len(others) > K_ALLY_SLOTS - 1:
+        from engine.game_utils import add_debug_file_log
+
+        add_debug_file_log(
+            game_state,
+            f"[SLOTS] joueur {int(our_player)} : {len(others) + 1} escouades alliees pour "
+            f"{K_ALLY_SLOTS} slots — les dernieres ne sont ni observees ni activables.",
+        )
+    slots: List[Optional[str]] = [active_sid]
+    slots.extend(others[: K_ALLY_SLOTS - 1])
+    slots.extend([None] * (K_ALLY_SLOTS - len(slots)))
+    return slots
 
 
 def end_of_turn_regain_coherency_all_squads(

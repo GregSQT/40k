@@ -39,6 +39,8 @@ from ai.pointer_policy import DENSE_LOGIT_COUNT, PointerMaskablePolicy
 from ai.spatial_extractor import SpatialCombinedExtractor
 from engine.macro_intents import (
     ACTION_WAIT,
+    ACTIVATE_SLOT_BASE,
+    ACTIVATE_SLOT_COUNT,
     CHARGE_SLOT_BASE,
     CHARGE_SLOT_COUNT,
     CHOICE_BASE,
@@ -189,6 +191,10 @@ def _manual_logits(policy, obs: Dict[str, torch.Tensor]):
     deploy = torch.einsum(
         "bd,bkd->bk", policy.deploy_query_net(latent_pi), feats.deploy
     ) / scale
+    # V11 §0.48 `L2` : septieme requete, embeddings ALLIES -> logits d'ACTIVATION.
+    activate_pointer = torch.einsum(
+        "bd,bkd->bk", policy.activate_query_net(latent_pi), feats.allies
+    ) / scale
     gate = (feats.is_deploy > 0.5).unsqueeze(1)
     low, high = DEPLOY_SLOT_BASE, DEPLOY_SLOT_BASE + DEPLOY_SLOT_COUNT
     move = torch.cat(
@@ -204,6 +210,8 @@ def _manual_logits(policy, obs: Dict[str, torch.Tensor]):
             base[:, 1:],        # fight-sans-cible, intents de zone
             choice,
             oath_pointer,
+            activate_pointer,   # V11 §0.48 `L2`
+
         ],
         dim=1,
     )
@@ -579,11 +587,15 @@ def test_action_net_has_no_dead_column(model):
     la propriété : la taille EST celle des actions denses, et CHACUNE de ces colonnes déplace
     réellement le logit qu'elle est censée produire (une colonne morte signalerait un assemblage
     qui l'ignore).
+
+    ⚠️ Historique utile : `L2` a d'abord porté ses 12 slots d'ACTIVATION ICI, en colonnes denses,
+    faute de tête pointeur. `activate_query_net` les a remplacées et la couche est redescendue à
+    17 — ce cas est ce qui rend ce retrait VÉRIFIABLE plutôt que déclaré.
     """
     policy = model.policy
     policy.set_training_mode(False)
     assert policy.action_net.out_features == DENSE_LOGIT_COUNT
-    # Les ids denses, dans l'ordre : wait, puis tout ce qui suit les slots de melee
+    # Les ids denses, dans l'ordre : wait, puis tout ce qui suit les slots de mêlée
     # (fight-sans-cible + intents de zone) jusqu'aux CHOICE.
     dense_action_ids = (
         [ACTION_WAIT]
@@ -885,6 +897,93 @@ def test_deploy_head_costs_nothing_per_slot(model):
         for parameter in module.parameters():
             assert DEPLOY_SLOT_COUNT not in tuple(parameter.shape), (
                 "un parametre de la tete de deploiement est dimensionne par le nombre de slots"
+            )
+
+
+# ======================================================================================
+# V11 §0.48 `L2` — tête pointeur d'ACTIVATION : quelle escouade ALLIÉE activer
+# ======================================================================================
+
+
+def test_activate_logits_come_from_the_ally_pointer(model):
+    """Les logits `ACTIVATE_SLOT_i` SONT `q_act · a_i / sqrt(d)`, pas des colonnes denses.
+
+    Même raison que le tir, la charge et la mêlée, côté ALLIÉ : le candidat est une entité déjà
+    encodée, donc le slot se score sur son embedding — un slot de plus coûte alors zéro paramètre.
+    `L2` a d'abord livré ces logits en colonnes DENSES d'`action_net` (moitié réseau différée) ;
+    ce cas est ce qui rend le remplacement vérifiable.
+    """
+    policy = model.policy
+    policy.set_training_mode(False)
+    obs = _tensors(_zero_obs(batch=1))
+    with torch.no_grad():
+        feats = policy._split_features(obs)
+        latent_pi = policy.mlp_extractor.forward_actor(feats.trunk)
+        produced = policy._action_logits(latent_pi, feats)
+        expected = torch.einsum(
+            "bd,bkd->bk", policy.activate_query_net(latent_pi), feats.allies
+        ) / (policy.entity_dim ** 0.5)
+    low = ACTIVATE_SLOT_BASE
+    assert torch.allclose(
+        produced[:, low:low + ACTIVATE_SLOT_COUNT], expected, atol=1e-6
+    )
+
+
+def test_activate_pointer_reads_the_ally_row_zero_too(model):
+    """La ligne 0 (unité ACTIVE) est un CANDIDAT, pas seulement du contexte de tronc.
+
+    Le slot d'activation 0 désigne l'ancre du pool — le seul toujours ouvert. Si l'extracteur
+    n'exposait que les lignes 1..K-1, l'action `ACTIVATE_SLOT_i` pointerait la ligne `i+1` : un
+    décalage d'un cran, invisible, qui ferait activer B en croyant activer A (invariant D1).
+    """
+    policy = model.policy
+    policy.set_training_mode(False)
+    obs = _tensors(_zero_obs(batch=1))
+    with torch.no_grad():
+        feats = policy._split_features(obs)
+    assert feats.allies.shape[1] == ACTIVATE_SLOT_COUNT
+    # `_zero_obs` ne pose `present` QUE sur la ligne 0 : son embedding est donc le seul non nul.
+    # Si la tranche démarrait à la ligne 1, ce bloc serait entièrement nul.
+    assert feats.allies[0, 0].abs().sum() > 0, (
+        "la ligne alliee 0 est absente de la tranche lue par la tete d'activation"
+    )
+
+
+def test_activate_query_is_distinct_from_the_other_pointers(model):
+    """Requête PROPRE à l'activation : perturber `activate_query_net` ne bouge QUE ces slots."""
+    policy = model.policy
+    policy.set_training_mode(False)
+    assert policy.activate_query_net is not policy.query_net
+    assert policy.activate_query_net is not policy.deploy_query_net
+    assert policy.activate_query_net is not policy.choice_query_net
+    obs = _tensors(_zero_obs(batch=1))
+    with torch.no_grad():
+        feats = policy._split_features(obs)
+        latent_pi = policy.mlp_extractor.forward_actor(feats.trunk)
+        before = policy._action_logits(latent_pi, feats)
+        policy.activate_query_net.bias.add_(1.0)
+        after = policy._action_logits(latent_pi, feats)
+        policy.activate_query_net.bias.sub_(1.0)
+    changed = torch.nonzero((after - before).abs()[0] > 1e-6).flatten().tolist()
+    # Seule la ligne 0 est `present` dans `_zero_obs` : les autres ont un embedding nul, donc un
+    # produit scalaire nul quoi qu'il arrive à la requête.
+    assert changed == [ACTIVATE_SLOT_BASE], (
+        f"la requete d'activation deplace {changed[:5]} — attendu le seul slot OUVERT"
+    )
+
+
+def test_activate_head_costs_nothing_per_slot(model):
+    """Le nombre de slots d'activation est GRATUIT en paramètres.
+
+    C'est ce qui rend `K_ALLY_SLOTS = 12` sans coût de capacité : la valeur a été portée de 8 à 12
+    pour couvrir des formats plus grands que les rosters courants, et cette gratuité est
+    exactement la justification donnée (V11 §0.48 `L2`). Si elle tombait, l'arbitrage tomberait.
+    """
+    policy = model.policy
+    for module in (policy.activate_query_net, policy.features_extractor.unit_encoder):
+        for parameter in module.parameters():
+            assert ACTIVATE_SLOT_COUNT not in tuple(parameter.shape), (
+                "un parametre de la tete d'activation est dimensionne par le nombre de slots"
             )
 
 
