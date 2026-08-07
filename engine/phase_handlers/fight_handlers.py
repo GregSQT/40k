@@ -29,7 +29,7 @@ from engine.combat_utils import (
     set_unit_coordinates,
 )
 from engine.game_state import (
-    GameStateManager, effective_invul_save, oath_wound_roll_bonus,
+    GameStateManager,
     objective_hex_zones, unit_is_oath_target_of, waaagh_melee_bonus,
 )
 from engine.hex_utils import cube_to_offset, offset_to_cube
@@ -73,7 +73,7 @@ from .shared_utils import (
     apply_manual_shoot_allocation,
     manual_allocation_waiting_payload,
     _target_highest_bodyguard_toughness,
-    save_threshold,
+    display_save_threshold_with_waaagh,
     get_fighting_models,
     squad_fight_unit_activation_start,
     squad_fight_restart_activation,
@@ -4590,14 +4590,10 @@ def _manual_roll_fight_intent(
     )
     first_alive = models_cache[alive0[0]]
     display_wth = wth
-    display_save_th = save_threshold(
-        int(first_alive["ARMOR_SAVE"]),
-        # Waaagh! (chantier 03) : la cible peut avoir une invulnerable 5+ qu elle n a pas sur sa
-        # datasheet. Le seuil d AFFICHAGE doit dire la meme chose que celui applique a la
-        # figurine allouee (`_resolve_one_manual_wound`), sinon le log annonce une save que la
-        # resolution ne fait pas.
-        effective_invul_save(game_state, target, int(require_key(first_alive, "INVUL_SAVE"))),
-        ap,
+    # Seuil affiche + Waaagh! de la CIBLE (invulnerable 5+ octroyee) : helper partage avec le
+    # tir, la sauvegarde octroyee s opposant aux deux types d attaques.
+    display_save_th, _waaagh_target_invul = display_save_threshold_with_waaagh(
+        game_state, target, first_alive, ap
     )
     weapon_name = weapon.get("display_name", weapon.get("NAME", weapon.get("name", "")))  # get allowed
     # Conditions de reroll (constantes pour cet intent : abilities UNITE, pas figurine).
@@ -4669,6 +4665,14 @@ def _manual_roll_fight_intent(
         "oath_hit_reroll": bool(_is_oath_target),
         # Booleen, comme le tir : la magnitude est deja absorbee dans `wth` ci-dessus.
         "oath_wound_bonus": bool(_oath_wound_bonus),
+        # Waaagh! de l ATTAQUANT dans la ligne de synthese. UN seul drapeau pour les deux
+        # caracteristiques : la regle accorde +1 Force et +1 Attaque d un seul tenant
+        # (`waaagh_melee_bonus`), et en faire deux booleens laisserait croire qu un site peut
+        # appliquer l une sans l autre. La magnitude est deja absorbee (`strength` et
+        # `n_attacks` ci-dessus) : le log ne demande que « est-ce que ca a joue ».
+        "waaagh_melee_bonus": bool(_waaagh_bonus),
+        # Waaagh! de la CIBLE : sauvegarde invulnerable octroyee ET reellement meilleure.
+        "waaagh_target_invul": _waaagh_target_invul,
         "shot_records": rolled["shot_records"], "pending_wounds": rolled["pending_wounds"],
         "counts": rolled["counts"],
     }

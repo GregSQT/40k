@@ -60,6 +60,25 @@ def test_parse_moves_charges_advances_attacks_from_step() -> None:
     assert {a["phase"] for a in attacks} == {"shoot", "fight"}
 
 
+def test_une_charge_avec_marqueur_de_capacite_est_bien_trouvee() -> None:
+    """VERROU : `step_logger` écrit sur la ligne de charge le nom de la capacité qui l'a
+    autorisée (`[ASSAULT]`, `[WAAAGH!]`) puis `[FLY]` (21.03). Le motif n'acceptait AUCUN
+    marqueur : ces charges n'étaient pas trouvées, donc le déplacement qu'elles causent passait
+    pour une action CACHÉE — et les positions comparées ensuite étaient périmées.
+
+    Ancre positive (les charges sont TROUVÉES) et les deux formes du marqueur, seule ou doublée.
+    """
+    step_log = """
+[t] E1 T1 P1 CHARGE : Unit 3(3,3) CHARGED [WAAAGH!] Unit 9(4,4) from (3,3) to (4,3)
+[t] E1 T1 P1 CHARGE : Unit 4(5,5) CHARGED [ASSAULT] [FLY] Unit 9(4,4) from (5,5) to (5,4)
+"""
+    episode_map = {i: 1 for i, _ in enumerate(step_log.split("\n"), 1)}
+    charges = haf.parse_charges_from_step(step_log, episode_map)
+
+    assert len(charges) == 2, charges
+    assert {c["unit_id"] for c in charges} == {"3", "4"}
+
+
 def test_check_unlogged_moves_groups_intermediate_changes() -> None:
     position_changes = [
         {"episode": 1, "turn": 1, "unit_id": "u1", "phase": "move", "from": (1, 1), "to": (2, 1), "type": "MOVE", "line": "a"},

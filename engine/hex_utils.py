@@ -1328,6 +1328,35 @@ _FOOTPRINT_OFFSETS_CACHE: Dict[
 ] = {}
 
 
+def base_size_cache_key(base_size: Any) -> Any:
+    """Rend un ``BASE_SIZE`` HACHABLE, utilisable tel quel dans une clé de cache.
+
+    ``BASE_SIZE`` est un SCALAIRE pour ``round``/``square`` mais une PAIRE
+    ``[grand axe, petit axe]`` pour ``oval`` (invariant du socle, cf. ``require_base_size``) :
+    une liste n'est pas hachable, donc toute mémoïsation clefée sur un socle lève
+    ``TypeError: unhashable type: 'list'`` sur un socle oval. Le tuple garde l'identité
+    discriminante (deux ovales de tailles différentes n'ont pas la même clé).
+
+    SOURCE UNIQUE : cinq caches du moteur clefaient sur un socle, chacun avec sa copie de ce
+    test — et l'une d'elles avait déjà dérivé (``isinstance(..., list)`` seul).
+    """
+    return tuple(base_size) if isinstance(base_size, (list, tuple)) else base_size
+
+
+def socle_is_single_hex(base_shape: str, base_size: "int | Sequence[int]") -> bool:
+    """Le socle tient-il dans UNE case, donc son empreinte est-elle son ancre ?
+
+    SOURCE UNIQUE du prédicat : répondre « oui » à tort fait sauter l'expansion de l'empreinte,
+    et tous les contrôles qui en dépendent (mur, chevauchement d'escouades, collision
+    intra-escouade, EZ) ne regardent alors plus qu'un hex sur les dizaines que couvre le socle.
+
+    Un socle NON ROND est toujours multi-hex : son ``BASE_SIZE`` est une PAIRE, si bien que le
+    prédicat naïf ``not isinstance(base_size, int)`` — écrit deux fois dans le move — le classait
+    à tort mono-hex. C'est la forme, pas le type de la taille, qui tranche.
+    """
+    return base_shape == "round" and (not isinstance(base_size, int) or base_size <= 1)
+
+
 def precompute_footprint_offsets(
     base_shape: str,
     base_size: "int | Sequence[int]",
@@ -1358,8 +1387,7 @@ def precompute_footprint_offsets(
     est immuable (tuples), donc partageable entre appelants sans copie ni risque
     de mutation. Aucune invalidation nécessaire.
     """
-    size_key = tuple(base_size) if isinstance(base_size, (list, tuple)) else base_size
-    cache_key = (base_shape, size_key, orientation)
+    cache_key = (base_shape, base_size_cache_key(base_size), orientation)
     cached = _FOOTPRINT_OFFSETS_CACHE.get(cache_key)
     if cached is not None:
         return cached

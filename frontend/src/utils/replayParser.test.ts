@@ -26,6 +26,31 @@ describe("replayParser", () => {
     expect(parsed.episodes[0].states.length).toBeGreaterThan(0);
   });
 
+  // VERROU : la ligne de charge porte jusqu'a DEUX marqueurs — la capacite qui l'a autorisee
+  // (`[ASSAULT]`, `[WAAAGH!]`) puis `[FLY]` (21.03). Le motif n'en acceptait qu'UN : la charge
+  // disparaissait du replay, sans erreur, l'unite restant a sa position de depart.
+  it("parse une charge portant DEUX marqueurs de regle", () => {
+    const text = [
+      "=== EPISODE 1 START ===",
+      "Scenario: demo",
+      "Bot: RandomBot",
+      `Rules: ${VALID_RULES_JSON}`,
+      "[12:00:00] Board: cols=10 rows=10 inches_to_subhex=1 hex_radius=2.78 margin=1",
+      "Unit 1 (Intercessor) P1: Starting position (0, 0), HP_MAX=5",
+      "Unit 2 (Termagant) P2: Starting position (4, 0), HP_MAX=4",
+      "[12:00:00] T1 P1 DEPLOYMENT : Unit 1(-1,-1) DEPLOYED from (-1,-1) to (0,0)",
+      "[12:00:01] T1 P1 CHARGE : Unit 1(3,0) CHARGED [WAAAGH!] [FLY] Unit 2(4,0) from (0,0) to (3,0) [Roll:7]",
+      "EPISODE END: Winner=1, Method=elimination",
+    ].join("\n");
+
+    const parsed = parse_log_file_from_text(text);
+    const charge = parsed.episodes[0].actions.find((a) => a.type === "charge");
+    expect(charge).toBeDefined();
+    expect(charge?.target_id).toBe(2);
+    expect(charge?.to).toEqual({ col: 3, row: 0 });
+    expect(charge?.charge_roll).toBe(7);
+  });
+
   // Le journal ne porte ni terrain, ni icones, ni zones de deploiement : le replay les relit dans
   // la config du scenario JOUE, qu'il ne connait que par cette ligne. Sans elle il affiche le
   // terrain du scenario par defaut, alors qu'un entrainement en tire un different par episode.

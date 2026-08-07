@@ -188,6 +188,8 @@ def _rolled(weapon: Dict[str, Any], *, rapid_fire_applied: int, target_sid: str)
         # Oath (08.04) : le groupement copie ces deux clés de l'intent — un roller stub qui ne
         # les rend pas n'est plus fidèle au producteur.
         "oath_hit_reroll": False, "oath_wound_bonus": 0,
+        # Waaagh! (08.04) : jumeau des deux clés ci-dessus, exigées par le groupement.
+        "waaagh_melee_bonus": False, "waaagh_target_invul": False,
         "shot_records": [], "pending_wounds": [],
         "counts": {"attacks": 1, "hits": 0, "wounds": 0},
     }

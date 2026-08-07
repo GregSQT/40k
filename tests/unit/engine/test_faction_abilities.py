@@ -47,6 +47,7 @@ from engine.phase_handlers.shared_utils import (
     build_manual_shoot_allocation,
     get_enemy_slot_mapping,
 )
+from engine.phase_handlers.fight_handlers import build_manual_fight_allocation
 from engine.phase_handlers import shooting_handlers
 from engine.w40k_core import W40KEngine
 from tests._state_invariants import turn_state_invariants, unit_invariants
@@ -233,9 +234,16 @@ def _fight_state(
     """
     weapon = {"ATK": 3, "STR": weapon_str, "AP": 0, "DMG": 1, "NB": weapon_nb,
               "WEAPON_RULES": list(weapon_rules), "display_name": "Choppa"}
-    attacker = {"id": "A1", "squad_id": "1", "player": 1, "T": 4, "CC_WEAPONS": [weapon]}
+    # `col`/`row` sur les DEUX figurines : l'allocation des pertes mesure la distance à
+    # l'ennemi le plus proche (`_precompute_nearest_enemy_dist`), donc la fixture doit poser
+    # des positions — le jet seul s'en passait, l'émission du log non.
+    attacker = {"id": "A1", "squad_id": "1", "player": 1, "T": 4, "CC_WEAPONS": [weapon],
+                "ATTACK_LEFT": 1, "HP_CUR": 3, "HP_MAX": 3, "ARMOR_SAVE": 6, "INVUL_SAVE": 7,
+                "role": None, "unitType": "Boy", "points_per_hp": 5.0, "VALUE": 10.0,
+                "col": 0, "row": 0}
     target_model = {"id": "T1", "squad_id": "2", "player": 2, "T": 4, "HP_CUR": 5, "HP_MAX": 5,
-                    "ARMOR_SAVE": 6, "INVUL_SAVE": 7, "role": None, "unitType": "Grunt"}
+                    "ARMOR_SAVE": 6, "INVUL_SAVE": 7, "role": None, "unitType": "Grunt",
+                    "points_per_hp": 5.0, "VALUE": 10.0, "col": 1, "row": 0}
     units = [_unit("1", 1, attacker_faction), _unit("2", 2, defender_faction, ARMOR_SAVE=6)]
     gs = {
         **turn_state_invariants(),
@@ -256,6 +264,14 @@ def _fight_state(
     }
     intent = {"model_id": "A1", "target_unit_id": "2", "weapon_index": 0,
               "n_attacks_resolved": weapon_nb}
+    # Journal de partie : les tests d'effets lisent le RÉSULTAT du jet, ceux de LOG lisent la
+    # ligne émise en fin d'allocation. Les deux clés sont posées ici pour que la fixture soit
+    # utilisable par `build_manual_fight_allocation`, qui journalise.
+    gs["action_logs"] = []
+    gs["action_log_seq"] = 0
+    gs["turn"] = 1
+    gs["phase"] = "fight"
+    gs["gym_training_mode"] = True
     return gs, intent
 
 
@@ -636,6 +652,103 @@ def test_verrou_waaagh_melee_plus_un_en_force_et_en_attaques(monkeypatch):
     result = roll_fight_intent(gs, intent)
     assert result["counts"]["attacks"] == 2, "+1 a la caracteristique d'Attaques"
     assert result["shot_records"][0]["woundTarget"] == 3, "+1 a la caracteristique de Force"
+    assert seq == []
+
+
+def _last_attack_message(gs):
+    """Ligne de synthèse émise en fin d'allocation (tir ou mêlée) : `Shots: - Hit: Wound: Save:`."""
+    for log in reversed(gs["action_logs"]):
+        if isinstance(log, dict) and log.get("type") in ("shoot", "combat"):
+            return str(log["message"])
+    raise AssertionError("aucune ligne d'attaque emise")
+
+
+def test_verrou_log_waaagh_melee_les_tokens_disent_d_ou_vient_l_ecart(monkeypatch):
+    """VERROU LOG : `Shots:` (+1 A) et `Wound:` (+1 F) portent `[WAAAGH!]`, pas `Save:`.
+
+    Les valeurs affichées sont NETTES (2 attaques, blessure à 3+) : sans le token, la ligne ne
+    dit pas d'où vient l'écart avec la datasheet. Le token est en MAJUSCULES comme
+    `[OATH OF MOMENT]` — c'est cette forme que le frontend normalise pour retrouver la
+    description de la règle (`config/unit_rules.json`, entrée `waaagh`).
+
+    La cible est ASTARTES : son `Save:` ne doit RIEN porter, sinon le token de l'attaquant et
+    celui du défenseur seraient indiscernables.
+    """
+    seq = _seq(monkeypatch, [3, 3, 6, 3, 3, 6])  # 2 attaques (le +1 A en ajoute une)
+    gs, intent = _fight_state(attacker_faction=ORKS, defender_faction=ASTARTES)
+    call_waaagh(gs, 1)
+    gs["pending_squad_fight_intents"] = {"1": [intent]}
+
+    build_manual_fight_allocation(gs, "1")
+    msg = _last_attack_message(gs)
+
+    assert "Shots:2 [WAAAGH!]" in msg, msg
+    assert "Wound:3+ [WAAAGH!]" in msg, msg
+    assert "Save:6+ [WAAAGH!]" not in msg, "le Save: parle du defenseur, qui n'a pas de Waaagh!"
+    assert seq == []
+
+
+def test_verrou_log_waaagh_absent_sans_waaagh_en_melee(monkeypatch):
+    """CONTRE-ÉPREUVE du verrou précédent : mêmes unités, capacité non appelée → aucun token."""
+    # Sans le +1 F, la blessure se joue à 4+ : le 3 ÉCHOUE et aucun dé de sauvegarde n'est
+    # tiré. C'est précisément ce que le test précédent mesure en creux.
+    seq = _seq(monkeypatch, [3, 3])
+    gs, intent = _fight_state(attacker_faction=ORKS, defender_faction=ASTARTES)
+    gs["pending_squad_fight_intents"] = {"1": [intent]}
+
+    build_manual_fight_allocation(gs, "1")
+    msg = _last_attack_message(gs)
+
+    assert "Shots:1 -" in msg, msg
+    assert "Wound:4+" in msg, msg
+    assert "WAAAGH" not in msg, msg
+    assert seq == []
+
+
+def test_verrou_log_waaagh_invulnerable_octroyee_marque_le_segment_save(monkeypatch):
+    """VERROU LOG : `Save:` porte `[WAAAGH!]` quand l'invulnérable 5+ AMÉLIORE le seuil.
+
+    Cible orke sans invulnérable (7) et armure 6+ : le seuil passe de 6 à 5. Le token est du
+    côté DÉFENSEUR — c'est son Waaagh! qui joue, l'attaquant est ASTARTES.
+    """
+    seq = _seq(monkeypatch, [4, 4, 5])
+    gs = _shoot_state(attacker_faction=ASTARTES, defender_faction=ORKS, defender_armor=6)
+    call_waaagh(gs, 2)
+
+    build_manual_shoot_allocation(gs, "1")
+    msg = _last_attack_message(gs)
+
+    assert "Save:5+ [WAAAGH!]" in msg, msg
+    assert "Shots:1 [WAAAGH!]" not in msg, "le +1 A/+1 F ne touche que les armes de melee"
+    assert seq == []
+
+
+def test_le_log_ne_marque_pas_une_invulnerable_qui_n_ameliore_rien(monkeypatch):
+    """CONTRE-ÉPREUVE : rien à annoncer quand le seuil affiché ne bouge pas.
+
+    Deux cas, tous deux Waaagh! ACTIF chez le défenseur :
+      - invulnérable 4+ déjà meilleure que la 5+ octroyée (l'octroi ne dégrade pas) ;
+      - armure 3+ déjà meilleure que la 5+ octroyée contre AP 0.
+    Sans le critère « le SEUIL affiché s'améliore », le token apparaîtrait dans les deux cas et
+    annoncerait une amélioration qui n'a pas eu lieu.
+    """
+    seq = _seq(monkeypatch, [4, 4, 5])
+    gs = _shoot_state(attacker_faction=ASTARTES, defender_faction=ORKS,
+                      defender_armor=6, defender_invul=4)
+    call_waaagh(gs, 2)
+    build_manual_shoot_allocation(gs, "1")
+    msg = _last_attack_message(gs)
+    assert "Save:4+" in msg, msg
+    assert "WAAAGH" not in msg, msg
+    assert seq == []
+
+    seq = _seq(monkeypatch, [4, 4, 5])
+    gs = _shoot_state(attacker_faction=ASTARTES, defender_faction=ORKS, defender_armor=3)
+    call_waaagh(gs, 2)
+    build_manual_shoot_allocation(gs, "1")
+    msg = _last_attack_message(gs)
+    assert "Save:3+" in msg, msg
+    assert "WAAAGH" not in msg, msg
     assert seq == []
 
 

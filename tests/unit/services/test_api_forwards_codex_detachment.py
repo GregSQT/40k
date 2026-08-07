@@ -69,6 +69,7 @@ def test_changer_de_roster_remplace_la_clause_du_seul_joueur_concerne(monkeypatc
 
     api.initialize_engine(api._default_board_scenario_path("scenario_pvp.json"))
     engine = api.engine
+    assert engine is not None, "initialize_engine n'a pas installé le moteur global"
     engine.reset()
     game_state = engine.game_state
     # La phase de déploiement est la seule où `change_roster` est recevable : sans elle le test
@@ -115,6 +116,7 @@ def test_un_etat_restitue_ramene_la_clause_du_roster_qu_il_ramene(monkeypatch) -
 
     api.initialize_engine(api._default_board_scenario_path("scenario_pvp.json"))
     engine = api.engine
+    assert engine is not None, "initialize_engine n'a pas installé le moteur global"
     engine.reset()
     capture = capture_live_state(engine)
     unites_du_scenario = len(engine.game_state["units"])
@@ -194,6 +196,7 @@ def test_un_fichier_d_armee_invalide_ne_laisse_pas_la_partie_a_moitie_echangee(
 
     api.initialize_engine(api._default_board_scenario_path("scenario_pvp.json"))
     engine = api.engine
+    assert engine is not None, "initialize_engine n'a pas installé le moteur global"
     engine.reset()
     game_state = engine.game_state
     avant = [str(u["id"]) for u in game_state["units"]]

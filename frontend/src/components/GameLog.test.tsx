@@ -110,6 +110,29 @@ describe("GameLog — tokens de relance", () => {
     // La description AFFICHÉE doit être celle du registre, pas une chaîne vide rendue en bulle.
     expect(document.body.textContent).toContain("Oath of Moment target");
   });
+
+  it("expose la bulle d'aide de [WAAAGH!], capacité de FACTION elle aussi", () => {
+    // JUMEAU du test ci-dessus. Le moteur pose `[WAAAGH!]` sur la ligne de synthèse (`Shots:`,
+    // `Wound:`, `Save:`) et sur la charge après Advance ; le `!` fait partie de la clé, donc une
+    // entrée nommée « Waaagh » sans lui ne serait jamais trouvée.
+    render(
+      <GameLog
+        events={[
+          {
+            ...shootEvent({}),
+            message:
+              "Unit 1 FOUGHT at Unit 2 - Shots:2 [WAAAGH!] - Hit:3+ Wound:3+ [WAAAGH!] Save:5+ [WAAAGH!] - HP lost:1 Killed:0",
+          } as GameLogEvent,
+        ]}
+      />
+    );
+    const tags = screen.getAllByRole("button", {
+      name: "Afficher la description de la regle WAAAGH!",
+    });
+    expect(tags.length).toBe(3);
+    fireEvent.mouseEnter(tags[0]);
+    expect(document.body.textContent).toContain("5+ invulnerable save");
+  });
 });
 
 describe("GameLog — jets relancés", () => {

@@ -4,6 +4,7 @@ from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
 
 from engine.hex_utils import (
     _hex_center,
+    base_size_cache_key,
     compute_occupied_hexes,
     engagement_minimum_clearance_norm,
     euclidean_edge_clearance_round_round,
@@ -235,8 +236,7 @@ def _single_base_hex_count(
     base_shape: str, base_size: Any, orientation: int, col_parity: int
 ) -> int:
     """Memoized number of hexes occupied by one base of the given geometry."""
-    size_key = tuple(base_size) if isinstance(base_size, (list, tuple)) else base_size
-    key = (base_shape, size_key, orientation, col_parity)
+    key = (base_shape, base_size_cache_key(base_size), orientation, col_parity)
     cached = _SINGLE_BASE_HEX_COUNT_CACHE.get(key)
     if cached is None:
         # col_parity as the reference column preserves odd-q parity; row 0 is arbitrary

@@ -16,12 +16,13 @@ mais le seul trajet légal contourne le mur (> 3 pas). Le check ligne-droite his
 le check géodésique rejette.
 """
 
-from typing import Any, Dict, Iterable, List, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 from unittest.mock import patch
 
 import pytest
 
 from engine.phase_handlers.shared_utils import (
+    _squad_is_in_enemy_er,
     build_rigid_plan,
     build_squad_move_cell_map,
     calculate_hex_distance,
@@ -102,6 +103,9 @@ def _add_other_squad(gs: Dict[str, Any], cells) -> None:
     gs["units_cache"]["2"] = {
         "col": cells[0][0], "row": cells[0][1], "player": 2,
         "occupied_hexes": set(cells), "BASE_SHAPE": "round", "BASE_SIZE": 1,
+        # Centres PAR FIGURINE : c'est ce que lit la mesure d'engagement euclidienne
+        # (`socle_from_cache_entry`) ; sans eux elle retombe sur la seule ancre de l'escouade.
+        "occupied_hexes_by_model": {mid: cell for mid, cell in zip(mids, cells)},
     }
 
 
@@ -305,6 +309,164 @@ def test_euclidean_erosion_drops_anchor_whose_sister_path_exceeds_budget():
         "l'offrirait puis execute_squad_move lèverait « incohérence masque/exécution »"
     )
     assert ANCHOR_DEST in kept_open, "sur-filtrage : sans mur cette ancre est parfaitement légale"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EXEMPTIONS DU TRAJET — ce que le pool autorise, la validation doit l'autoriser
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_desperate_escape_crosses_enemy_models():
+    """Desperate Escape (09.07) : une escouade battle-shocked qui fuit TRAVERSE les ennemis.
+
+    Le pool par-figurine retire les ennemis de ses obstacles dans ce cas
+    (`movement_build_model_destinations_pool`, `not (desperate_escape or thru_enemy)`). La borne de
+    trajet de la validation lit le MÊME set (`build_move_transit_blocked`) : sans l'exemption, elle
+    refuse en voile rouge une destination que le pool vient d'offrir — et le masque gym lève
+    « incohérence masque/exécution ».
+    """
+    ENEMY_LINE = [(11, r) for r in range(6, 15)]
+
+    def _state(*, shocked: bool) -> Dict[str, Any]:
+        gs = _gs(set())
+        _add_other_squad(gs, ENEMY_LINE)
+        gs["unit_by_id"]["1"]["battle_shocked"] = shocked
+        # L'engagement se mesure sur les EMPREINTES (unit_within_engagement_zone_footprints) :
+        # sans les hexes occupés, l'escouade n'est engagée avec personne et 09.07 ne s'applique pas.
+        gs["units_cache"]["1"]["occupied_hexes"] = {(5, 10), (10, 10)}
+        gs["units_cache"]["1"]["occupied_hexes_by_model"] = {"1#0": (5, 10), "1#1": (10, 10)}
+        return gs
+
+    plan = _rigid_plan(ANCHOR_DEST[0], ANCHOR_DEST[1], _state(shocked=False))
+    # Non shocked : les figurines ennemies bloquent le trajet, la sœur ne passe pas (contrôle).
+    assert explain_move_plan_rejection(
+        plan, _state(shocked=False), {"budget_per_model": BUDGET, "require_coherency": False}
+    ) is not None, "sans Desperate Escape, la ligne ennemie DOIT bloquer (sinon le test ne prouve rien)"
+    # Battle-shocked ET dans l'ER ennemie : 09.07 autorise la traversée.
+    gs_de = _state(shocked=True)
+    assert _squad_is_in_enemy_er(gs_de, "1"), "fixture : l'escouade doit être engagée pour que 09.07 s'applique"
+    assert explain_move_plan_rejection(
+        plan, gs_de, {"budget_per_model": BUDGET, "require_coherency": False}
+    ) is None, "Desperate Escape (09.07) : la traversée des figurines ennemies est autorisée"
+
+
+def test_desperate_escape_does_not_leak_into_pile_in():
+    """09.07 est un mode du FALL-BACK MOVE : l'exemption ne vaut QUE dans la phase de mouvement.
+
+    Le même prédicat de transit borne le pile-in et la consolidation (12.03), et une escouade qui
+    pile-in est TOUJOURS dans l'ER ennemie. Sans garde de phase, toute escouade battle-shocked
+    traverserait les figurines ennemies en phase de combat — 12.03 ne le permet nulle part.
+    """
+    from engine.phase_handlers.shared_utils import build_move_transit_blocked
+
+    ENEMY_LINE = {(11, r) for r in range(6, 15)}
+    gs = _gs(set())
+    _add_other_squad(gs, sorted(ENEMY_LINE))
+    gs["unit_by_id"]["1"]["battle_shocked"] = True
+    gs["units_cache"]["1"]["occupied_hexes"] = {(5, 10), (10, 10)}
+    gs["units_cache"]["1"]["occupied_hexes_by_model"] = {"1#0": (5, 10), "1#1": (10, 10)}
+
+    gs["phase"] = "move"
+    assert not (build_move_transit_blocked(gs, "1", 1, 0) & ENEMY_LINE), (
+        "phase de mouvement + battle-shocked + engagée = fall-back Desperate Escape (09.07)"
+    )
+    gs["phase"] = "fight"
+    assert build_move_transit_blocked(gs, "1", 1, 0) & ENEMY_LINE == ENEMY_LINE, (
+        "12.03 (pile-in / consolidation) n'a AUCUNE exemption de traversée : les ennemis bloquent"
+    )
+
+
+def test_transit_cache_invalidates_when_battle_shock_flips():
+    """`battle_shocked` bascule SANS qu'une figurine bouge (01.07 / force_battle_shock).
+
+    Le transit est mémoïsé par un fingerprint d'état : s'il ignore ce drapeau, la validation
+    continue de lire le transit d'AVANT le test de commandement pendant que le pool par-figurine,
+    lui, recalcule — la divergence masque/exécution que ce cache existe pour ne pas créer.
+    """
+    from engine.phase_handlers.shared_utils import build_move_transit_blocked
+
+    ENEMY_LINE = {(11, r) for r in range(6, 15)}
+    gs = _gs(set())
+    _add_other_squad(gs, sorted(ENEMY_LINE))
+    gs["units_cache"]["1"]["occupied_hexes"] = {(5, 10), (10, 10)}
+    gs["units_cache"]["1"]["occupied_hexes_by_model"] = {"1#0": (5, 10), "1#1": (10, 10)}
+
+    gs["unit_by_id"]["1"]["battle_shocked"] = False
+    assert build_move_transit_blocked(gs, "1", 1, 0) & ENEMY_LINE == ENEMY_LINE  # chauffe le cache
+    gs["unit_by_id"]["1"]["battle_shocked"] = True  # aucune figurine n'a bougé
+    assert not (build_move_transit_blocked(gs, "1", 1, 0) & ENEMY_LINE), (
+        "transit périmé servi après le test de commandement (fingerprint aveugle à battle_shocked)"
+    )
+
+
+# Socle OVAL : l'empreinte orientée décide du passage. Couloir vertical de 3 colonnes (9,10,11)
+# dans un mur horizontal — l'ovale « debout » (orientation 3, 3 colonnes de large) passe, l'ovale
+# « couché » (orientation 0, 5 colonnes) ne passe pas. Géométrie vérifiée dans les deux sens
+# ci-dessous : sans ça, un test qui ne discriminerait rien afficherait « tout va bien ».
+OVAL_WALL = {(c, 25) for c in range(0, 44) if c not in (9, 10, 11)}
+OVAL_BUDGET = 20
+
+
+def _oval_state(committed_orientation: int) -> Dict[str, Any]:
+    unit = {**unit_invariants(),
+        "id": 1, "player": 1, "col": 10, "row": 20, "MOVE": OVAL_BUDGET, "HP_CUR": 1,
+        "BASE_SIZE": [6, 3], "BASE_SHAPE": "oval", "UNIT_KEYWORDS": [],
+    }
+    return {**turn_state_invariants(),
+        "models_cache": {
+            "1#0": {"col": 10, "row": 20, "level": 0, "player": 1, "squad_id": "1", "HP_CUR": 1,
+                    "BASE_SHAPE": "oval", "BASE_SIZE": [6, 3],
+                    "orientation": committed_orientation},
+        },
+        "squad_models": {"1": ["1#0"]},
+        "units_cache": {"1": {"col": 10, "row": 20, "player": 1, "occupied_hexes": set(),
+                              "BASE_SHAPE": "oval", "BASE_SIZE": [6, 3]}},
+        "units": [unit],
+        "unit_by_id": {"1": unit},
+        "board_cols": 44, "board_rows": 60,
+        "wall_hexes": set(OVAL_WALL),
+        "enemy_adjacent_hexes_player_1": set(),
+        "config": {
+            "game_rules": {"engagement_zone": 1},
+            "move": {"can_move_through_enemy_engagement_zone": True,
+                     "can_move_through_enemy_model": False,
+                     "can_move_through_friendly_model": True},
+        },
+        "phase": "move",
+        # x5 : à x1 la géométrie est hex quoi qu'en dise la métrique (geometry_is_hex), et un socle
+        # oval y est normalisé en round/1 — l'orientation n'aurait alors aucun effet.
+        "inches_to_subhex": 5,
+        "units_took_to_skies": set(),
+        "terrain_areas": [],
+    }
+
+
+def _oval_verdict(committed: int, planned: Optional[int]) -> Optional[str]:
+    entry = ("1#0", 10, 30, 0) if planned is None else ("1#0", 10, 30, 0, planned)
+    with _euclidean():
+        return explain_move_plan_rejection(
+            [entry], _oval_state(committed),
+            {"budget_per_model": OVAL_BUDGET, "require_coherency": False},
+        )
+
+
+def test_oval_reach_follows_the_planned_orientation_not_the_committed_one():
+    """Pivot molette non committé : la validation borne le trajet à l'orientation du PLAN.
+
+    Le pool par-figurine construit son champ avec l'orientation EN COURS (`mover_orient`) ; la
+    validation lisait celle de `models_cache`. Un socle non rond pivoté pour enfiler un passage
+    étroit voyait donc sa case refusée par le voile rouge alors que le pool venait de l'offrir.
+    """
+    # La géométrie discrimine réellement (anti « vert vacant ») : même socle, même destination,
+    # seule l'orientation change le verdict.
+    assert _oval_verdict(committed=3, planned=0) is not None, "ovale couché : le couloir est trop étroit"
+    assert _oval_verdict(committed=0, planned=3) is None, "ovale debout : le couloir passe"
+    # Et l'orientation du plan prime bien sur celle du models_cache, dans les deux sens.
+    assert _oval_verdict(committed=0, planned=0) is not None
+    assert _oval_verdict(committed=3, planned=3) is None
+    # Orientation absente du plan (None = inchangée) → celle de la figurine, comme avant.
+    assert _oval_verdict(committed=3, planned=None) is None
+    assert _oval_verdict(committed=0, planned=None) is not None
 
 
 def _gym_state_for_cellmap() -> Dict[str, Any]:

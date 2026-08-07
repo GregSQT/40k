@@ -947,7 +947,10 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         action_type = 'advance'
                         if handle_advance(state, config, line, action_desc, action_unit_id, player, turn, phase):
                             continue
-                elif re.search(r"CHARGED(?:\s+(?:\([A-Za-z0-9_ ]+\)|\[[A-Za-z0-9_ ]+\]))*\s+Unit", action_desc) or "FAILED CHARGE" in action_desc:
+                # `[^\]]+` : cf. `analyzer_phases/charge_handler.py` — un nom de capacité peut
+                # porter un `!` (`[WAAAGH!]`), et une classe énumérée faisait tomber la ligne
+                # dans le `else` (action non classée) au lieu de la brancher sur la charge.
+                elif re.search(r"CHARGED(?:\s+(?:\([^)]+\)|\[[^\]]+\]))*\s+Unit", action_desc) or "FAILED CHARGE" in action_desc:
                         action_type = 'charge'
                         handle_charge(state, config, line, action_desc, action_unit_id, player, turn, phase)
                 elif (

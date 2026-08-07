@@ -449,6 +449,61 @@ class TestCommitMovePlanHandler:
             "un plan refusé a quand même déplacé une figurine"
         )
 
+    def test_a_charge_after_advance_names_the_waaagh_in_the_log(self):
+        """VERROU LOG : une charge après Advance permise par le Waaagh! le NOMME (08.04).
+
+        C'est le chemin PvP — `commit_charge_plan`, le seul que le frontend emprunte — et il
+        n'écrivait aucun marqueur de capacité : seul le jumeau `charge_destination_selection_handler`
+        (chemin IA) en posait un. Le joueur voyait une charge après avance sans savoir ce qui
+        l'avait autorisée, et `step.log` non plus (`ability_display_name` absent des détails).
+
+        Token en MAJUSCULES comme `[OATH OF MOMENT]` : c'est cette forme que le frontend
+        normalise pour retrouver la description de la règle (`config/unit_rules.json`).
+        """
+        from engine.game_state import call_waaagh, initial_faction_ability_state
+
+        gs = self._ready()
+        # L'unité est ORKS dans une armée ORKS déclarée : sans les DEUX, la capacité n'existe pas.
+        gs["unit_by_id"]["1"]["FACTION_KEYWORDS"] = [{"keywordId": "ORKS"}]
+        gs["config"]["army_faction"] = {"1": "ORKS", "2": "TYRANIDS"}
+        gs.update(initial_faction_ability_state())
+        call_waaagh(gs, 1)
+        gs["units_advanced"].add("1")
+
+        ok, res = ch.charge_commit_move_plan_handler(
+            gs, "1", {"plan": [["1#0", 15, 10, 0], ["1#1", 15, 11, 0]]}
+        )
+
+        assert ok is True, f"plan légal refusé : {res}"
+        entry = next(e for e in reversed(gs["action_logs"]) if e["type"] == "charge")
+        assert "CHARGED [WAAAGH!]" in entry["message"], entry["message"]
+        assert entry["ability_display_name"] == "Waaagh!", (
+            "step_logger réécrit la ligne et ne lit le token que dans ce champ"
+        )
+
+    def test_an_unexplainable_charge_after_advance_leaves_the_state_untouched(self):
+        """VERROU ORDRE : le prédicat d'éligibilité est lu AVANT toute mutation.
+
+        `_charge_enabling_ability` LÈVE quand une unité a avancé sans qu'aucune capacité ne
+        rende la charge légale (ni `charge_after_advance`, ni Waaagh! actif) — c'est le garde-fou
+        qui empêche l'éligibilité et le log de diverger. Lu APRÈS `commit_move`, sa levée
+        laissait les figurines posées à destination et `units_charged` marqué, sans ligne de log,
+        sans impact de charge et sans fin d'activation : une partie dans un état impossible à
+        rejouer. Le test observe donc l'ÉTAT après la levée, pas seulement la levée.
+        """
+        gs = self._ready()
+        gs["units_advanced"].add("1")  # aucune règle, aucun Waaagh! : rien ne justifie la charge
+
+        with pytest.raises(ValueError, match="without any enabling rule"):
+            ch.charge_commit_move_plan_handler(
+                gs, "1", {"plan": [["1#0", 15, 10, 0], ["1#1", 15, 11, 0]]}
+            )
+
+        assert (gs["models_cache"]["1#0"]["col"], gs["models_cache"]["1#0"]["row"]) == (10, 10), (
+            "figurine déplacée alors que le commit a levé"
+        )
+        assert "1" not in gs["units_charged"], "unité marquée comme ayant chargé sans log de charge"
+
     def test_a_complete_and_legal_plan_commits(self):
         """Contrôle positif : sans lui, les six refus ci-dessus seraient satisfaits par une
         fonction qui refuse TOUT.

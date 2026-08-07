@@ -247,26 +247,49 @@ def parse_steplog_file(steplog_path):
         content = f.read()
     
     lines = content.strip().split('\n')
-    
-    # Skip header lines (everything before first action)
-    action_lines = []
-    in_actions = False
-    
-    for line in lines:
-        if line.startswith('[') and '] T' in line:
-            in_actions = True
-        if in_actions:
-            action_lines.append(line)
-    
+
+    # UN replay = UNE partie. `generate_steplog_and_replay` ecrit les N episodes de
+    # `--test-episodes` dans le MEME steplog et les tours repartent a T1 a chaque episode :
+    # tout convertir empilait plusieurs parties dans un seul `combat_log` (une unite y saute
+    # d'un coup a sa position de depart de l'episode suivant, et `total_turns` devient le max
+    # sur toutes les parties au lieu de la duree de celle qu'on rejoue).
+    #
+    # Le decoupage se fait sur le DELIMITEUR que `step_logger` ecrit pour ca
+    # (`=== EPISODE n START ===`, step_logger.py:300), comme le font deja
+    # `services/replay_parser.py` et `frontend/src/utils/replayParser.ts`. Filtrer plutot sur le
+    # prefixe `E<n>` des lignes d'action ne PEUT PAS segmenter : `step_logger` ecrit les
+    # transitions de phase sans ce prefixe (`[ts] T1 P1 MOVE phase Start`, step_logger.py:1006),
+    # donc les changements de phase de TOUS les episodes seraient restes dans le replay.
+    # De meme, `=== ACTIONS START ===` (step_logger.py:404) delimite l'en-tete : le reniflage
+    # « premiere ligne qui ressemble a une action » s'allumait sur `[ts] T1 OBJECTIVE CONTROL:`.
+    episode_starts = [i for i, line in enumerate(lines) if '=== EPISODE ' in line]
+    if episode_starts:
+        _first, _next = episode_starts[0], episode_starts[1:]
+        episode_lines = lines[_first:_next[0]] if _next else lines[_first:]
+        if _next:
+            print(f"   ⚠️  {len(episode_starts)} episodes dans ce steplog — seul le premier est "
+                  f"converti (un replay decrit une partie). {len(_next)} ecarte(s).")
+    else:
+        # Steplog sans delimiteur : un seul episode par fichier (ancien format).
+        episode_lines = lines
+
+    try:
+        _actions_start = next(i for i, line in enumerate(episode_lines) if '=== ACTIONS START ===' in line)
+        action_lines = episode_lines[_actions_start + 1:]
+    except StopIteration:
+        action_lines = episode_lines
+
     # Parse action entries
     actions = []
     max_turn = 1
     units_positions = {}
-    
-    # Regex patterns for parsing
-    action_pattern = r'\[([^\]]+)\] T(\d+) P(\d+) (\w+) : (.+?) \[(SUCCESS|FAILED)\](?: \[STEP: (YES|NO)\])?'
-    phase_pattern = r'\[([^\]]+)\] T(\d+) P(\d+) (\w+) phase Start'
-    
+
+    # Regex patterns for parsing. `(?:E\d+ )?` : le prefixe d'episode est present sur les lignes
+    # d'action et absent des transitions de phase — les deux formes doivent matcher, comme le
+    # fait deja `ai/hidden_action_finder.py`.
+    action_pattern = r'\[([^\]]+)\] (?:E\d+ )?T(\d+) P(\d+) (\w+) : (.+?) \[(SUCCESS|FAILED)\](?: \[STEP: (YES|NO)\])?'
+    phase_pattern = r'\[([^\]]+)\] (?:E\d+ )?T(\d+) P(\d+) (\w+) phase Start'
+
     for line in action_lines:
         # Try to match action pattern
         action_match = re.match(action_pattern, line)
@@ -291,35 +314,26 @@ def parse_steplog_file(steplog_path):
                 # Update unit positions from ALL actions (move, shoot, combat, charge, wait)
                 unit_id = action_data.get('unitId')
                 if unit_id:
-                    # Try to extract position from action message if available
-                    position_extracted = False
-                    
-                    if action_data['type'] == 'move' and 'startHex' in action_data and 'endHex' in action_data:
-                        # Parse coordinates from "(col, row)" format
-                        import re
-                        end_match = re.match(r'\((\d+),\s*(\d+)\)', action_data['endHex'])
-                        if end_match:
-                            end_col, end_row = end_match.groups()
-                            units_positions[unit_id] = {
-                                'col': int(end_col),
-                                'row': int(end_row),
-                                'last_seen_turn': int(turn)
-                            }
-                            position_extracted = True
-                    
-                    # For non-move actions, try to extract position from message format
-                    if not position_extracted and 'message' in action_data:
-                        import re
-                        # Look for "Unit X(col, row)" pattern in any message
-                        pos_match = re.search(r'Unit \d+\((\d+), (\d+)\)', action_data['message'])
-                        if pos_match:
-                            col, row = pos_match.groups()
-                            units_positions[unit_id] = {
-                                'col': int(col),
-                                'row': int(row),
-                                'last_seen_turn': int(turn)
-                            }
-                            position_extracted = True
+                    # Aiguillage sur la DONNEE (`endHex` present), pas sur le type d'action : les
+                    # deplacements portent desormais le vocabulaire du replay (move / advance /
+                    # flee / reactive_move / deploy), et un test `type == 'move'` aurait fait
+                    # retomber une avance ou un repli sur la position de DEPART lue dans le
+                    # libelle — l'unite serait restee la ou elle etait avant de bouger.
+                    end_hex = action_data.get('endHex')
+                    pos_match = re.match(r'\((\d+),\s*(\d+)\)', end_hex) if end_hex else None
+                    if pos_match is None and 'message' in action_data:
+                        # Action sans deplacement : la position est celle du libelle. `\s*` :
+                        # `step_logger` ecrit `Unit 3(5,48)` SANS espace ; exiger l'espace ne
+                        # trouvait jamais la position, et l'unite restait au point ou le scenario
+                        # l'avait deposee.
+                        pos_match = re.search(r'Unit \d+\((\d+),\s*(\d+)\)', action_data['message'])
+                    if pos_match:
+                        col, row = pos_match.groups()
+                        units_positions[unit_id] = {
+                            'col': int(col),
+                            'row': int(row),
+                            'last_seen_turn': int(turn)
+                        }
         
         # Try to match phase change pattern  
         phase_match = re.match(phase_pattern, line)
@@ -346,85 +360,108 @@ def parse_steplog_file(steplog_path):
         'units_positions': units_positions
     }
 
+# ── Grammaire des lignes d'action de `ai/step_logger.py` ─────────────────────────────────────
+# Marqueurs optionnels ecrits entre le verbe et la suite : nom de la capacite qui a autorise
+# l'action (`[ASSAULT]`, `[WAAAGH!]`) puis `[FLY]` (21.03). `[^\]]+` et non une classe enumeree —
+# un nom de capacite n'est pas un identifiant — comme `ai/hidden_action_finder.py`.
+_ABILITY = r'(?:\s+\[[^\]]+\])*'
+# `\s*` apres la virgule : `step_logger` ecrit `(5,48)` SANS espace.
+_POS = r'\((\d+),\s*(\d+)\)'
+_UNIT = r'Unit (\d+)\([^)]+\)'
+
+# TABLE des formes reconnues, essayees DANS L'ORDRE. Chaque entree : (regex, type d'action,
+# extracteur des champs propres a la forme). Les cinq branches `if/elif` qu'elle remplace
+# repetaient le meme corps `details.update(...)`, et la derniere (`WAIT`) etait restee sur un
+# test de sous-chaine — precisement la forme qui rendait invisibles les lignes `SHOT [ASSAULT]`.
+# Ajouter un verbe = ajouter une ligne ici.
+#
+# ORDRE SIGNIFIANT sur les verbes de mouvement : les formes longues d'abord, sinon `MOVED`
+# mordrait le debut de `MOVED AFTER SHOOTING`. Le `type` reprend le VOCABULAIRE deja rendu par
+# le frontend (`replayParser.ts` : move / advance / flee / reactive_move / deploy) plutot qu'un
+# champ maison : c'est celui-la que le renderer sait lire.
+_MOVE_TYPES = (
+    ('REACTIVE MOVED', 'reactive_move'),
+    ('MOVED AFTER SHOOTING', 'move'),
+    ('MOVED', 'move'),
+    ('ADVANCED', 'advance'),
+    ('FLED', 'flee'),
+    ('DEPLOYED', 'deploy'),
+)
+
+
+def _move_fields(match):
+    """`Unit N(c,r) <VERBE> [marqueurs] from (c,r) to (c,r)` — depart et arrivee."""
+    _uid, start_col, start_row, end_col, end_row = match.groups()
+    return {'startHex': f"({start_col}, {start_row})", 'endHex': f"({end_col}, {end_row})"}
+
+
+def _destination_fields(match):
+    """`Unit N(c,r) <VERBE> to (c,r)` — forme SANS depart (step_logger.py:454 et :514).
+
+    Elle etait perdue : seule la forme `from ... to ...` etait reconnue, donc un move logge par
+    ce chemin ne mettait pas la position a jour et tout ce qui suivait etait rejoue contre un
+    fantome. Pas de `startHex` a inventer — l'appelant retombe sur `Unit N(c,r)` pour la position.
+    """
+    _uid, end_col, end_row = match.groups()
+    return {'endHex': f"({end_col}, {end_row})"}
+
+
+def _target_fields(match):
+    """`Unit N(c,r) <VERBE> [marqueurs] Unit M` — cible."""
+    _uid, target_id = match.groups()
+    return {'targetUnitId': int(target_id)}
+
+
+def _no_fields(_match):
+    return {}
+
+
+def _build_action_grammar():
+    """Construit la table (regex compilee, type, extracteur). Appelee UNE fois a l'import."""
+    grammar = []
+    for verb, action_type in _MOVE_TYPES:
+        grammar.append((
+            re.compile(r'Unit (\d+)\([^)]+\) ' + verb + _ABILITY + r' from ' + _POS + r' to ' + _POS),
+            action_type, _move_fields,
+        ))
+    for verb, action_type in _MOVE_TYPES:
+        grammar.append((
+            re.compile(r'Unit (\d+)\([^)]+\) ' + verb + _ABILITY + r' to ' + _POS),
+            action_type, _destination_fields,
+        ))
+    for verb, action_type in (('SHOT', 'shoot'), ('FOUGHT', 'combat'), ('CHARGED', 'charge')):
+        grammar.append((
+            re.compile(_UNIT + r' ' + verb + _ABILITY + r'\s+Unit (\d+)'),
+            action_type, _target_fields,
+        ))
+    grammar.append((re.compile(_UNIT + r' WAIT'), 'wait', _no_fields))
+    return tuple(grammar)
+
+
+_ACTION_GRAMMAR = _build_action_grammar()
+
+
 def parse_action_message(message, context):
     """Parse action message and extract details."""
-    import re
-    
-    action_type = None
     details = {
         'turnNumber': context['turn'],
         'phase': context['phase'],
         'player': context['player'],
         'timestamp': context['timestamp']
     }
-    
-    # Parse different action types based on message content
-    if "MOVED from" in message:
-        # Unit X(col, row) MOVED from (start_col, start_row) to (end_col, end_row)
-        move_match = re.match(r'Unit (\d+)\((\d+), (\d+)\) MOVED from \((\d+), (\d+)\) to \((\d+), (\d+)\)', message)
-        if move_match:
-            unit_id, _, _, start_col, start_row, end_col, end_row = move_match.groups()
-            action_type = 'move'
-            details.update({
-                'type': action_type,
-                'message': message,
-                'unitId': int(unit_id),
-                'startHex': f"({start_col}, {start_row})",
-                'endHex': f"({end_col}, {end_row})"
-            })
-    
-    elif "SHOT Unit" in message:
-        # Unit X(col, row) SHOT Unit Y - details...
-        shoot_match = re.match(r'Unit (\d+)\([^)]+\) SHOT(?: \[[^\]]+\])*\s+Unit (\d+)', message)
-        if shoot_match:
-            unit_id, target_id = shoot_match.groups()
-            action_type = 'shoot'
-            details.update({
-                'type': action_type,
-                'message': message,
-                'unitId': int(unit_id),
-                'targetUnitId': int(target_id)
-            })
-    
-    elif "FOUGHT" in message:
-        # Unit X(col, row) FOUGHT Unit Y - details...
-        combat_match = re.match(r'Unit (\d+)\([^)]+\) FOUGHT Unit (\d+)', message)
-        if combat_match:
-            unit_id, target_id = combat_match.groups()
-            action_type = 'combat'
-            details.update({
-                'type': action_type,
-                'message': message,
-                'unitId': int(unit_id),
-                'targetUnitId': int(target_id)
-            })
-    
-    elif "CHARGED" in message:
-        # Unit X(col, row) CHARGED Unit Y from (start) to (end)
-        charge_match = re.match(r'Unit (\d+)\([^)]+\) CHARGED Unit (\d+)', message)
-        if charge_match:
-            unit_id, target_id = charge_match.groups()
-            action_type = 'charge'
-            details.update({
-                'type': action_type,
-                'message': message,
-                'unitId': int(unit_id),
-                'targetUnitId': int(target_id)
-            })
-    
-    elif "WAIT" in message:
-        # Unit X(col, row) WAIT
-        wait_match = re.match(r'Unit (\d+)\([^)]+\) WAIT', message)
-        if wait_match:
-            unit_id = wait_match.groups()[0]
-            action_type = 'wait'
-            details.update({
-                'type': action_type,
-                'message': message,
-                'unitId': int(unit_id)
-            })
-    
-    return details if action_type else None
+
+    for pattern, action_type, extract in _ACTION_GRAMMAR:
+        match = pattern.match(message)
+        if match is None:
+            continue
+        details.update({
+            'type': action_type,
+            'message': message,
+            'unitId': int(match.group(1)),
+            **extract(match),
+        })
+        return details
+    return None
 
 def calculate_episode_reward_from_actions(actions, winner):
     """Calculate episode reward from action log and winner."""
@@ -514,21 +551,19 @@ def convert_to_replay_format(steplog_data, scenario_file):
         except ValueError as e:
             raise ValueError(f"Failed to get unit data for '{scenario_unit['unit_type']}': {e}")
         
-        # Get final position from steplog tracking or use initial position
-        if unit_id in steplog_data['units_positions']:
-            final_col = steplog_data['units_positions'][unit_id]['col']
-            final_row = steplog_data['units_positions'][unit_id]['row']
-        else:
-            final_col = scenario_unit['col']
-            final_row = scenario_unit['row']
-        
-        # Build complete unit data with FINAL positions from steplog tracking
+        # Position de DEPART = celle du scenario. Ce bloc lisait `units_positions`, c'est-a-dire
+        # la DERNIERE position vue dans le steplog : `initial_state` decrivait alors le plateau de
+        # FIN de partie pour les unites ayant agi, et celui de depart pour les autres — un etat
+        # initial qui n'a jamais existe. Le frontend rejoue `combat_log` PAR-DESSUS cet etat, donc
+        # chaque deplacement y etait applique une seconde fois, depuis son arrivee.
+        # Le code etait inatteignable avant la correction du parser (`units_positions` restait
+        # vide, donc le `raise` ci-dessus partait systematiquement) : premiere execution reelle.
         unit_data = {
             'id': unit_id,
             'unit_type': scenario_unit['unit_type'],
             'player': require_key(scenario_unit, 'player'),
-            'col': final_col,  # Use FINAL position from steplog tracking
-            'row': final_row   # Use FINAL position from steplog tracking
+            'col': scenario_unit['col'],
+            'row': scenario_unit['row'],
         }
         
         # Copy all unit statistics from registry (preserves UPPERCASE field names)

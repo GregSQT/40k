@@ -3760,6 +3760,15 @@ def sum_objective_control_oc_multi(
 WAAAGH_FACTION_KEYWORD = "ORKS"
 #: Mot-clé de faction qui porte Oath of Moment (« If your Army Faction is ADEPTUS ASTARTES »).
 OATH_FACTION_KEYWORD = "ADEPTUS_ASTARTES"
+#: Capacités de FACTION (08.04) : id de règle de `config/unit_rules.json` → mot-clé de faction
+#: qui la porte. Ces capacités ne figurent dans AUCUN `UNIT_RULES` de datasheet — c'est le
+#: keyword qui les donne (`unit_has_waaagh_ability`, `unit_has_oath_ability`). Tout lecteur qui
+#: valide un usage de règle contre les règles de datasheet (analyzer §1.7, `rule_to_units`) doit
+#: les retrouver ici, sinon il compte comme faute un usage parfaitement légal.
+FACTION_ABILITY_KEYWORD_BY_RULE_ID = {
+    "waaagh": WAAAGH_FACTION_KEYWORD,
+    "oath_of_moment": OATH_FACTION_KEYWORD,
+}
 #: Sauvegarde invulnérable accordée par un Waaagh! actif (« have a 5+ invulnerable save »).
 WAAAGH_INVUL_SAVE = 5
 #: « Add 1 to the Strength and Attacks characteristics of melee weapons » — un seul et même
@@ -3772,6 +3781,11 @@ OATH_WOUND_ROLL_BONUS = 1
 #: cherchent, et deux copies dériveraient. Une capacité de FACTION n'a pas de `displayName` de
 #: datasheet à interroger — elle n'appartient à aucune règle d'unité.
 OATH_ABILITY_DISPLAY_NAME = "Oath of Moment"
+#: JUMEAU du nom ci-dessus, pour Waaagh!. Même raison d'être ici : c'est la clé que le frontend
+#: normalise pour retrouver la description de la règle (`config/unit_rules.json`, entrée
+#: `waaagh`), et l'orthographe — le `!` compris — doit être unique. Elle était écrite en dur
+#: dans le log de charge, hors de portée des autres sites d'effet.
+WAAAGH_ABILITY_DISPLAY_NAME = "Waaagh!"
 
 #: Sous-factions qui ANNULENT le +1 Wound d'Oath of Moment (« your army does not include one or
 #: more units with the BLOOD ANGELS, DARK ANGELS, DEATHWATCH or SPACE WOLVES keywords, or one or

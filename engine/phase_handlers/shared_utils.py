@@ -33,6 +33,8 @@ MovePlanEntry = Union[
     Tuple[str, int, int, int, Optional[int]],
 ]
 MovePlan = Sequence[MovePlanEntry]
+
+
 from engine.action_log_utils import append_action_log
 # `spatial_grid` ne depend que de `hex_utils` -> import direct sans cycle (il importe
 # `get_squad_move_budget` en local dans sa seule fonction qui en a besoin).
@@ -77,6 +79,47 @@ FIGHT = "FIGHT"
 FLED = "FLED"
 ADVANCE = "ADVANCE"
 NOT_REMOVED = "NOT_REMOVED"
+
+
+def plan_entry_level(entry: Sequence[Any]) -> int:
+    """Étage VISÉ par la figurine — 4e élément, TOUJOURS présent (frontière de décodage).
+
+    Le déduire du ``models_cache`` validerait un move vers l'étage contre l'occupation du sol.
+    """
+    return int(entry[3])
+
+
+def plan_entry_orientation(entry: Sequence[Any]) -> Optional[int]:
+    """Orientation de socle VISÉE — 5e élément, OPTIONNEL (``None`` = inchangée).
+
+    SOURCE UNIQUE de la lecture du 5e élément : le pool par-figurine, la validation du plan et
+    le commit doivent lire la MÊME orientation provisoire (un passage étroit ne s'ouvre que
+    dans une orientation, sur socle non rond), et une entrée à 4 éléments reste légitime.
+    """
+    return int(entry[4]) if len(entry) >= 5 and entry[4] is not None else None
+
+
+def plan_entry_model_orientation(entry: Sequence[Any], model: Dict[str, Any]) -> int:
+    """Orientation EFFECTIVE d'une figurine pour ce plan — 5e élément, sinon celle du cache.
+
+    SOURCE UNIQUE de la RÉSOLUTION du ``None`` rendu par `plan_entry_orientation`. Le pool, la
+    validation, la mesure du trajet et le commit doivent tous trancher « orientation visée ou
+    orientation courante » de la MÊME façon : quatre copies de cette règle, c'est le motif de
+    divergence de miroir habituel — un socle non rond validé pivoté puis mesuré non pivoté.
+    ``models_cache`` pose toujours ``orientation`` (`build_models_cache`), donc son absence est
+    un cache corrompu et lève.
+    """
+    _ori = plan_entry_orientation(entry)
+    return _ori if _ori is not None else int(require_key(model, "orientation"))
+
+
+def plan_entry_model(entry: Sequence[Any], model: Dict[str, Any]) -> Dict[str, Any]:
+    """La figurine telle que ce plan la VISE : même entrée de cache, orientation résolue.
+
+    Forme attendue par tout ce qui reconstruit une empreinte orientée (champ any-angle,
+    empreinte de cohérence). Copie superficielle : le cache n'est jamais muté par une lecture.
+    """
+    return {**model, "orientation": plan_entry_model_orientation(entry, model)}
 
 
 @dataclass(frozen=True)
@@ -3687,7 +3730,12 @@ def _move_spatial_cache(game_state: Dict[str, Any]) -> Dict[str, Any]:
       - position ET niveau de CHAQUE figurine vivante (occupation amie/ennemie, transit) ;
       - phase (le cache `enemy_adjacent` est par-phase) ;
       - contenu des zones d'engagement ennemies (elles derivent des positions, mais le chemin
-        d'override reactif les reecrit hors de ce derive — on les lit donc directement).
+        d'override reactif les reecrit hors de ce derive — on les lit donc directement) ;
+      - drapeau `battle_shocked` de chaque escouade : l'exemption Desperate Escape (09.07) retire
+        les figurines ennemies du transit, et ce drapeau bascule SANS qu'une figurine bouge
+        (`force_battle_shock`, test de commandement 01.07). Sans lui, le transit memoise restait
+        celui d'avant le test pendant que le pool par-figurine, lui, recalcule — soit exactement
+        la divergence masque/execution que ce cache existe pour ne pas creer.
     Les murs et les toggles de traversee sont statiques : hors fingerprint.
 
     Tout changement de fingerprint jette le cache entier — il ne grossit donc pas au fil de la
@@ -3706,6 +3754,17 @@ def _move_spatial_cache(game_state: Dict[str, Any]) -> Dict[str, Any]:
             for _mid, _m in models_cache.items()
         ))),
         ez_fp,
+        # `get` : l'absence du drapeau n'est PAS masquee ici — le seul lecteur du transit
+        # (`build_move_transit_blocked`) le lit en `require_key` et leve. Un fingerprint qui
+        # leverait rendrait tout le cache tributaire d'unites hors perimetre du move.
+        # Seul l'ENSEMBLE des unites shockees discrimine le transit : un frozenset s'en tient a
+        # celles-la (vide au cas courant) la ou un tuple trie payait un tri de toutes les unites
+        # a chaque entree du cache — plusieurs dizaines de fois par preview.
+        hash(frozenset(
+            str(_u.get("id", ""))  # get allowed
+            for _u in game_state.get("units", [])  # get allowed (etat non initialise = pas d'unite)
+            if _u.get("battle_shocked", False)  # get allowed
+        )),
     )
     holder = game_state.get("_move_spatial_cache")  # get allowed (absent au 1er appel)
     if holder is None or holder["fp"] != fp:
@@ -3793,8 +3852,9 @@ def build_move_transit_blocked(
     Miroir EXACT des obstacles de pas du pool d'ancre sol
     (``movement_build_valid_destinations_pool``, chemin ``is_single_hex`` hex) : murs TOUJOURS,
     puis figs ennemies / amies / bande d'EZ ennemie selon les toggles ``config["move"]``
-    (``_get_move_traversal_rules``). Défauts du jeu : ennemis bloquent, amies traversables,
-    bande d'EZ traversable — donc en pratique ``murs ∪ ennemis``.
+    (``_get_move_traversal_rules``) et l'exemption Desperate Escape (09.07). Défauts du jeu :
+    ennemis bloquent, amies traversables, bande d'EZ traversable — donc en pratique
+    ``murs ∪ ennemis``, et ``murs`` seuls pour une escouade battle-shocked qui fuit.
 
     C'est la définition de trajet légal (règle 03, distance de CHEMIN) partagée par les DEUX
     côtés de l'invariant « masque ⊆ exécutable » sur le budget : l'érosion du pool
@@ -3814,8 +3874,24 @@ def build_move_transit_blocked(
         return _hit
 
     thru_ez, thru_enemy, thru_friendly = _get_move_traversal_rules(game_state)
+    # Desperate Escape : mode du FALL-BACK MOVE (09.07) — « WHILE MOVING : each model that is
+    # moved can be moved through enemy models ». Miroir exact du pool par-figurine
+    # (`movement_build_model_destinations_pool`, `not (desperate_escape or thru_*)`) : ce set est
+    # devenu la borne de trajet de la VALIDATION, donc l'oublier ferait refuser en voile rouge les
+    # destinations que le pool offre — et lever « incohérence masque/exécution » au gym.
+    #
+    # GARDE DE PHASE, et elle est la règle, pas une précaution : 09.07 ne parle que du fall-back
+    # move. Ce prédicat borne AUSSI le pile-in et la consolidation (12.03, via
+    # `model_reach_predicate`), or une escouade qui pile-in est TOUJOURS dans l'ER ennemie — sans
+    # la garde, toute escouade battle-shocked traversait les figurines ennemies en phase de combat.
+    # Dans la phase de mouvement, `engagée` implique fall-back (09.05/09.06 exigent `unengaged`),
+    # donc le prédicat partagé ci-dessous SUFFIT à caractériser le mode.
+    desperate_escape = (
+        str(game_state.get("phase", "")) == "move"  # get allowed (phase absente = non initialisé)
+        and squad_is_battle_shocked_in_enemy_er(game_state, str(squad_id))
+    )
     transit: Set[Tuple[int, int]] = set(game_state.get("wall_hexes", set()))  # get allowed
-    if not thru_enemy:
+    if not (desperate_escape or thru_enemy):
         transit |= build_enemy_occupied_positions_set(
             game_state, current_player=int(player), level=int(level)
         )
@@ -3828,7 +3904,7 @@ def build_move_transit_blocked(
             game_state, current_player=int(player), level=int(level)
         )
         transit |= friendly
-    if not thru_ez:
+    if not (desperate_escape or thru_ez):
         transit |= require_key(game_state, f"enemy_adjacent_hexes_player_{int(player)}")
     _cache[_ck] = transit
     return transit
@@ -3915,8 +3991,7 @@ def _parse_plan_entry(
     level = int(seq[3])
     if level < 0:
         raise ValueError(f"{action_name}: étage négatif dans {entry!r} (level >= 0 requis)")
-    orientation = int(seq[4]) if len(seq) >= 5 and seq[4] is not None else None
-    return (str(seq[0]), int(seq[1]), int(seq[2]), level, orientation)
+    return (str(seq[0]), int(seq[1]), int(seq[2]), level, plan_entry_orientation(seq))
 
 
 def parse_model_plan(raw_plan: Any, *, action_name: str) -> List[Tuple[str, int, int, int]]:
@@ -4172,7 +4247,9 @@ def _euclidean_move_field_for_model(
     FLY declare (21.03) traverse murs et figurines : le champ n'a alors aucun obstacle, ce qui
     redonne exactement la ligne droite — pas besoin d'un cas particulier.
     """
-    from engine.hex_utils import ENGAGEMENT_NORM_HEX_WIDTH, precompute_footprint_offsets
+    from engine.hex_utils import (
+        ENGAGEMENT_NORM_HEX_WIDTH, base_size_cache_key, precompute_footprint_offsets,
+    )
     from engine.phase_handlers.geodesic_move import _euclidean_move_field
     from engine.phase_handlers.movement_handlers import _fly_traversal_active
 
@@ -4182,10 +4259,21 @@ def _euclidean_move_field_for_model(
     # chaque construction d'observation en phase de charge — reconstruisait un Dijkstra any-angle
     # par figurine et par appel. Meme fingerprint d'etat, donc meme fraicheur.
     _cache = _move_spatial_cache(game_state)["eucl"]
+    base_shape = str(require_key(model, "BASE_SHAPE"))
+    base_size = require_key(model, "BASE_SIZE")
+    # Un socle ROND n'a pas d'empreinte orientee : `_euclidean_move_field` le traite en clairance
+    # continue et JETTE les offsets (cf. sa docstring). Garder l'orientation dans la cle ferait
+    # reconstruire un Dijkstra any-angle complet — des centaines de ms sur un budget de move — a
+    # chaque cran de pivot molette, pour un champ bit a bit identique. Meme idiome que le pool
+    # (`movement_build_model_destinations_pool`), qui saute deja `precompute_footprint_offsets`.
+    _is_round = base_shape == "round"
+    orientation = 0 if _is_round else int(model.get("orientation", 0))  # get allowed (defaut face nord, cf. pool)
     _ckey = (
-        str(squad_id), int(player), start, int(level), int(bound),
-        str(require_key(model, "BASE_SHAPE")), require_key(model, "BASE_SIZE"),
-        int(model.get("orientation", 0)),  # get allowed (defaut face nord, cf. pool)
+        str(squad_id), int(player), start, int(level), int(bound), base_shape,
+        # Socle oval -> BASE_SIZE est une liste, donc non hachable : `base_size_cache_key` est la
+        # source unique de cette normalisation (cf. sa docstring).
+        base_size_cache_key(base_size),
+        orientation,
     )
     _hit = _cache.get(_ckey)
     if _hit is not None:
@@ -4195,10 +4283,10 @@ def _euclidean_move_field_for_model(
     if not (unit is not None and _fly_traversal_active(game_state, unit, str(squad_id))):
         obstacles = set(build_move_transit_blocked(game_state, str(squad_id), int(player), int(level)))
     obstacles.discard(start)
-    base_shape = str(require_key(model, "BASE_SHAPE"))
-    base_size = require_key(model, "BASE_SIZE")
-    orientation = int(model.get("orientation", 0))  # get allowed (defaut face nord, cf. pool)
-    off_even, off_odd = precompute_footprint_offsets(base_shape, base_size, orientation)
+    off_even: Tuple[Tuple[int, int], ...] = ()
+    off_odd: Tuple[Tuple[int, int], ...] = ()
+    if not _is_round:
+        off_even, off_odd = precompute_footprint_offsets(base_shape, base_size, orientation)
     field = _euclidean_move_field(
         start, base_shape, base_size, off_even, off_odd, obstacles,
         int(require_key(game_state, "board_cols")),
@@ -4374,8 +4462,15 @@ def move_plan_path_distances(
             # avec la MEME primitive any-angle que le pool par-figurine
             # (`_euclidean_move_field`), sans quoi un contournement de mur serait sous-compte et
             # [HEAVY] 24.16 deviendrait LAXISTE en PvP.
+            # Orientation VISÉE par le plan, miroir exact de la validation
+            # (`explain_move_plan_rejection`) : la mesure tourne AVANT `update_model_position`,
+            # donc `models_cache` porte encore l'ANCIENNE orientation. Sur socle non rond
+            # (oval : LandSpeeder, WarTrakk) le champ dilate les obstacles par l'empreinte
+            # orientée, et le goulot que le pivot vient d'ouvrir se refermerait ici : le plan
+            # validé ressortirait « injoignable » de sa propre mesure.
             distances[mid] = _euclidean_path_distance(
-                game_state, squad_id, player, model, (n_col, n_row), _path_level, bound
+                game_state, squad_id, player, plan_entry_model(entry, model),
+                (n_col, n_row), _path_level, bound,
             )
             continue
         field = geodesic_field_for_origin(
@@ -4440,17 +4535,11 @@ def explain_move_plan_rejection(
     squad_id = str(first_model["squad_id"])
     player = int(first_model["player"])
 
-    def _target_level(entry: Sequence[Any]) -> int:
-        """Niveau (étages) VISÉ par la fig dans ce plan — 4e élément, TOUJOURS présent (frontière
-        de décodage). Le déduire du models_cache validait un move vers l'étage contre l'occupation
-        du sol (bug superposition inter-niveaux)."""
-        return int(entry[3])
-
     # SOURCE UNIQUE du predicat de cellule, partagee avec l'erosion du pool de move
     # (`erode_move_pool_by_squad_block`) : dupliquer ce check rouvrirait la classe de bug
     # « masque/execution » que l'erosion elimine (decision de design n°2).
     blocked_by_level = build_move_blocked_cells_by_level(
-        game_state, squad_id, player, {_target_level(entry) for entry in plan}, c
+        game_state, squad_id, player, {plan_entry_level(entry) for entry in plan}, c
     )
 
     # Budget en distance de TRAJET (règle 03) : le trajet contourne murs et figurines, donc la
@@ -4481,7 +4570,7 @@ def explain_move_plan_rejection(
         if nc < 0 or nr < 0 or nc >= board_cols or nr >= board_rows:
             return f"figurine {mid} hors plateau en ({nc},{nr})"
         cell = (nc, nr)
-        level = _target_level(entry)
+        level = plan_entry_level(entry)
         for label, blocked_set in blocked_by_level[level]:
             if cell in blocked_set:
                 return (
@@ -4496,8 +4585,14 @@ def explain_move_plan_rejection(
             )
         new_cells.add(occupied)
         if c["budget_per_model"] is not None:
-            _model = plan_models[mid]
             budget = int(c["budget_per_model"])
+            # Orientation VISÉE par le plan (pivot molette non committé) : en métrique euclidienne
+            # le champ any-angle dilate les obstacles par l'empreinte ORIENTÉE, et c'est cette
+            # orientation-là que le pool par-figurine a utilisée pour offrir la case
+            # (`movement_build_model_destinations_pool`, `mover_orient`). Lire celle de
+            # `models_cache` refuserait en voile rouge la case que le pool vient d'offrir à un socle
+            # pivoté — sur socle non rond, un passage étroit ne s'ouvre QUE dans une orientation.
+            _model = plan_entry_model(entry, plan_models[mid])
             # Transit du niveau CIBLE, pas du niveau d'origine : une figurine qui descend
             # (squad move rigide, destination sol) chemine parmi les obstacles du SOL, et
             # c'est ce meme niveau que le pool d'ancre du masque a utilise. Origine == cible
@@ -5686,9 +5781,10 @@ def commit_move(
     try:
         for entry in plan:
             mid, nc, nr = str(entry[0]), int(entry[1]), int(entry[2])
-            lvl = int(entry[3])
-            ori = int(entry[4]) if len(entry) >= 5 and entry[4] is not None else None
-            update_model_position(game_state, mid, nc, nr, level=lvl, orientation=ori)
+            update_model_position(
+                game_state, mid, nc, nr,
+                level=plan_entry_level(entry), orientation=plan_entry_orientation(entry),
+            )
         if move_type == "advance":
             game_state.setdefault("units_advanced", set()).add(squad_id)
         elif move_type == "fall_back":
@@ -7492,6 +7588,37 @@ def save_threshold(armor_save: int, invul_save: int, ap: int) -> int:
     return effective_armor
 
 
+def display_save_threshold_with_waaagh(
+    game_state: Dict[str, Any],
+    target_unit: Optional[Dict[str, Any]],
+    first_alive: Dict[str, Any],
+    ap: int,
+) -> Tuple[int, bool]:
+    """Seuil de sauvegarde AFFICHE dans la ligne de synthese, et « le Waaagh! l a ameliore ».
+
+    SOURCE UNIQUE des deux rollers manuels (`_manual_roll_intent` au tir,
+    `_manual_roll_fight_intent` en melee) : la sauvegarde invulnerable 5+ octroyee par le
+    Waaagh! (08.04) s oppose a TOUTES les attaques, donc les deux phases doivent afficher le
+    meme seuil ET poser le token sur le meme critere.
+
+    Le seuil affiche doit dire ce que la resolution appliquera (`_resolve_one_manual_wound`) :
+    il part de l invulnerable EFFECTIVE, pas de celle de la datasheet. Le drapeau, lui, compare
+    les SEUILS et non les invulnerables : une figurine deja mieux servie par son armure (3+
+    contre AP 0) ou par une invulnerable 4+ ne gagne rien, et annoncer le Waaagh! sur un `Save:`
+    inchange dirait une amelioration qui n a pas eu lieu.
+    """
+    from engine.game_state import effective_invul_save  # import paresseux : cycle, cf. plus haut
+
+    armor = int(first_alive["ARMOR_SAVE"])
+    base_invul = int(require_key(first_alive, "INVUL_SAVE"))
+    effective_invul = (
+        base_invul if target_unit is None
+        else effective_invul_save(game_state, target_unit, base_invul)
+    )
+    display_save_th = save_threshold(armor, effective_invul, ap)
+    return display_save_th, display_save_th < save_threshold(armor, base_invul, ap)
+
+
 def _blast_extra_dice_per_five(weapon: Dict[str, Any]) -> Optional[int]:
     """[BLAST] 24.05 : nombre de des additionnels par tranche de 5 figurines cibles.
 
@@ -7611,9 +7738,16 @@ def _emit_squad_shoot_log(game_state: Dict[str, Any], g: Dict[str, Any], ctx: Ma
     # position que le parser de replay et le rendu du log supposent tous deux.
     # Le `Wound:` est deja le seuil NET (le +1 est applique en amont par abaissement du seuil) :
     # le token dit seulement d ou vient l amelioration.
-    from engine.game_state import OATH_ABILITY_DISPLAY_NAME
+    from engine.game_state import OATH_ABILITY_DISPLAY_NAME, WAAAGH_ABILITY_DISPLAY_NAME
 
     _oath_token = f"[{OATH_ABILITY_DISPLAY_NAME.upper()}]"
+    # Waaagh! (08.04) : MEME grammaire de token que celui d Oath, donc meme bulle d aide cote
+    # frontend (entree `waaagh` de `config/unit_rules.json`, retrouvee par normalisation du
+    # libelle). Trois effets, trois segments : le nombre d attaques (+1 A), le seuil de blessure
+    # (+1 F) et le seuil de sauvegarde (invulnerable 5+ octroyee a la CIBLE). Les valeurs
+    # affichees sont deja NETTES : sans ce token, rien ne dit d ou vient l ecart.
+    _waaagh_token = f"[{WAAAGH_ABILITY_DISPLAY_NAME.upper()}]"
+    _waaagh_melee = require_key(g, "waaagh_melee_bonus")
     if require_key(g, "oath_hit_reroll"):
         hit_part = f"{hit_part}RR {_oath_token}"
     # [HEAVY] 24.16 : token affiche quand le +1 au jet de touche a ete APPLIQUE (pas seulement
@@ -7625,9 +7759,21 @@ def _emit_squad_shoot_log(game_state: Dict[str, Any], g: Dict[str, Any], ctx: Ma
     wound_part = f"Wound:{g['display_wth']}+"
     if require_key(g, "oath_wound_bonus"):
         wound_part = f"{wound_part} {_oath_token}"
+    # +1 Force : le seuil de blessure affiche est deja celui de la Force augmentee.
+    if _waaagh_melee:
+        wound_part = f"{wound_part} {_waaagh_token}"
+    # +1 Attaque : le compte d attaques du groupe inclut deja l attaque supplementaire.
+    shots_part = f"Shots:{g['attacks']}"
+    if _waaagh_melee:
+        shots_part = f"{shots_part} {_waaagh_token}"
+    save_part = f"Save:{g['display_save_th']}+"
+    # Invulnerable 5+ de la CIBLE : posee sur le segment de sauvegarde, cote defenseur, et non
+    # sur les deux precedents qui parlent de l attaquant.
+    if require_key(g, "waaagh_target_invul"):
+        save_part = f"{save_part} {_waaagh_token}"
     attack_log = (
-        f"Shots:{g['attacks']} - "
-        f"{hit_part} {wound_part} Save:{g['display_save_th']}+ - "
+        f"{shots_part} - "
+        f"{hit_part} {wound_part} {save_part} - "
         f"HP lost:{g['damage']} Killed:{g['kills']}"
     )
     # Label toujours enrichi : type + coords. Le frontend masque type et/ou coords
@@ -8172,13 +8318,6 @@ def _manual_roll_intent(
                 ap = ap - 1
     # Conforme 19.02 : seuil de blessure vs plus haute T bodyguard (depend de l arme via strength).
     wth = wound_threshold(strength, _target_highest_bodyguard_toughness(game_state, target_sid))
-    # Import PARESSEUX : `engine.game_state` importe ce module au niveau module (is_unit_alive,
-    # compute_unit_rules_in_effect). L importer ici en tete creerait un cycle.
-    from engine.game_state import (
-        effective_invul_save, oath_wound_roll_bonus,
-        unit_is_oath_target_of,
-    )
-
     target_unit = get_unit_by_id(game_state, str(target_sid))
     # Oath of Moment (chantier 03) : MEME helper que la melee, plancher compris.
     _is_oath_target, _oath_wound_bonus, wth = resolve_oath_effects(
@@ -8186,13 +8325,10 @@ def _manual_roll_intent(
     )
     first_alive = models_cache[alive0[0]]
     display_wth = wth
-    display_save_th = save_threshold(
-        int(first_alive["ARMOR_SAVE"]),
-        # Waaagh! : la cible peut avoir une invulnerable 5+ absente de sa datasheet. Le seuil
-        # d AFFICHAGE doit dire ce que la resolution appliquera (`_resolve_one_manual_wound`).
-        effective_invul_save(game_state, target_unit, int(require_key(first_alive, "INVUL_SAVE")))
-        if target_unit is not None else int(require_key(first_alive, "INVUL_SAVE")),
-        ap,
+    # Seuil affiche + Waaagh! de la CIBLE : helper partage avec la melee. Le +1 F / +1 A, lui,
+    # ne touche QUE les armes de melee (08.04) : il n a pas de jumeau au tir.
+    display_save_th, _waaagh_target_invul = display_save_threshold_with_waaagh(
+        game_state, target_unit, first_alive, ap
     )
     weapon_name = weapon.get("display_name", weapon.get("NAME", weapon.get("name", "")))  # get allowed
     # Rerolls to-wound au TIR (abilities UNITE, constantes pour l intent) — miroir exact du
@@ -8269,6 +8405,15 @@ def _manual_roll_intent(
         # BOOLEEN : la magnitude du +1 est consommee en amont (`wth - _oath_wound_bonus`),
         # le log ne demande que « est-ce que ca a joue ». Jumeau exact de `oath_hit_reroll`.
         "oath_wound_bonus": bool(_oath_wound_bonus),
+        # Waaagh! : le +1 Force / +1 Attaque ne porte QUE sur les armes de melee (08.04), donc
+        # toujours faux ici. La cle est ECRITE et non omise : la construction de groupe l exige
+        # (`require_key`), et un producteur qui l oublierait leverait au lieu de retomber en
+        # silence sur « pas de Waaagh! » — c est le tir qui doit affirmer que la regle ne
+        # s applique pas, pas le lecteur qui le devine.
+        "waaagh_melee_bonus": False,
+        # Waaagh! de la CIBLE, lui, joue aussi au tir : la sauvegarde invulnerable 5+ octroyee
+        # s oppose a toutes les attaques, pas seulement a la melee.
+        "waaagh_target_invul": _waaagh_target_invul,
         "shot_records": rolled["shot_records"], "pending_wounds": rolled["pending_wounds"],
         "counts": rolled["counts"],
     }
@@ -8817,6 +8962,11 @@ def _build_manual_allocation(
                 # Constants sur le groupe : meme attaquant, meme cible (tous deux dans `gkey`).
                 "oath_hit_reroll": bool(require_key(r, "oath_hit_reroll")),
                 "oath_wound_bonus": bool(require_key(r, "oath_wound_bonus")),
+                # Waaagh! (08.04) : constants sur le groupe pour la MEME raison que les deux
+                # drapeaux d Oath ci-dessus — le bonus de melee depend de l attaquant, la
+                # sauvegarde octroyee de la cible, et les deux sont dans `gkey`.
+                "waaagh_melee_bonus": bool(require_key(r, "waaagh_melee_bonus")),
+                "waaagh_target_invul": bool(require_key(r, "waaagh_target_invul")),
                 # Joueur proprietaire du tireur : toute figurine du models_cache le porte.
                 # Le defaut `0` en faisait un log attribue au joueur 0 (et `is_ai_action`
                 # calcule dessus), sans qu aucun consommateur puisse le distinguer d un vrai.
@@ -10059,6 +10209,27 @@ def _squad_is_in_enemy_er(game_state: Dict[str, Any], squad_id: str) -> bool:
     ez = get_engagement_zone(game_state)
     stub = {"id": str(squad_id), "player": int(require_key(entry, "player"))}
     return unit_within_engagement_zone_footprints(game_state, stub, ez, max_distance=ez)
+
+
+def squad_is_battle_shocked_in_enemy_er(game_state: Dict[str, Any], squad_id: str) -> bool:
+    """Escouade battle-shocked ET engagée : les deux conditions d'un Desperate Escape (09.07).
+
+    SOURCE UNIQUE du prédicat, partagée par le pool par-figurine
+    (``movement_build_model_destinations_pool``) et par la borne de trajet de la validation
+    (``build_move_transit_blocked``) — les deux côtés de l'invariant « masque ⊆ exécutable ».
+    Le dupliquer rouvrirait la classe de bug masque/exécution que ces deux fonctions ferment.
+
+    NE contient PAS la garde de phase : 09.07 ne parle que du fall-back move, mais tous les
+    appelants ne sont pas dans la même position pour le savoir. C'est à l'appelant qui borne
+    aussi le pile-in/consolidation (12.03) de la poser. Escouade absente (morte, non déployée)
+    -> ``False``, contrat du masque.
+    """
+    unit = get_unit_by_id(game_state, str(squad_id))
+    return (
+        unit is not None
+        and bool(require_key(unit, "battle_shocked"))
+        and _squad_is_in_enemy_er(game_state, str(squad_id))
+    )
 
 
 def squad_advance_or_fall_back_allowed(game_state: Dict[str, Any], squad_id: str) -> bool:

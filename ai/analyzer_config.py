@@ -16,6 +16,7 @@ if project_root not in sys.path:
 
 from shared.data_validation import require_key
 from engine.utils.weapon_helpers import weapon_rule_parameter
+from engine.game_state import FACTION_ABILITY_KEYWORD_BY_RULE_ID, unit_faction_keywords
 
 # Échelle subhex/pouce du run en cours d'analyse, lue dans l'entête `Board:` du step.log.
 #
@@ -166,6 +167,9 @@ def load_analyzer_config() -> AnalyzerConfig:
     unit_is_monster_or_vehicle_by_type: Dict[str, bool] = {}
     unit_socle_by_type: Dict[str, Any] = {}
     unit_choice_effect_to_source_rules: Dict[str, Dict[str, Set[str]]] = {}
+    # Mots-clés de FACTION par type d'unité, sous la forme NORMALISÉE du moteur : c'est eux qui
+    # portent les capacités de faction, absentes des `UNIT_RULES` (cf. plus bas).
+    unit_faction_keywords_by_type: Dict[str, frozenset] = {}
     display_rule_name_to_ids: Dict[str, Set[str]] = {}
 
     for display_rule_id, rule_cfg in all_unit_rules_config.items():
@@ -186,6 +190,7 @@ def load_analyzer_config() -> AnalyzerConfig:
             for keyword_entry in unit_keywords
         }
         unit_is_fly_by_type[unit_type] = "fly" in keyword_ids_lower
+        unit_faction_keywords_by_type[unit_type] = unit_faction_keywords(unit_data)
         # 10.06 / 17.03 : les MONSTER/VEHICLE tirent engagés avec TOUTES leurs armes et peuvent
         # être pris pour cible alors qu'ils sont engagés. Sans ce drapeau, chaque tir d'un
         # LandSpeeder au contact remontait « tir invalide » + « cible engagée ».
@@ -309,6 +314,18 @@ def load_analyzer_config() -> AnalyzerConfig:
     for ut, rules in unit_rules_by_type.items():
         for rid in rules:
             rule_to_units.setdefault(rid, set()).add(ut)
+
+    # Capacités de FACTION (08.04 : Waaagh!, Oath of Moment). Elles ne sont dans aucun
+    # `UNIT_RULES` — c'est le mot-clé de faction qui les porte, exactement comme le moteur les
+    # attribue (`unit_has_waaagh_ability`). Sans ce complément, `rule_to_units` ne les connaît
+    # pas et §1.7 compte chaque usage relevé comme `invalid` : la ligne passe au rouge sur toute
+    # partie orke où une escouade charge après avoir avancé — un coup légal.
+    for _rule_id, _faction_keyword in FACTION_ABILITY_KEYWORD_BY_RULE_ID.items():
+        _carriers = {
+            ut for ut, kws in unit_faction_keywords_by_type.items() if _faction_keyword in kws
+        }
+        if _carriers:
+            rule_to_units.setdefault(_rule_id, set()).update(_carriers)
 
     weapon_rule_to_weapons: Dict[str, Set[str]] = {}
     for unit_type, weapons_list in unit_weapons_cache.items():

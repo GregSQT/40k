@@ -282,10 +282,15 @@ def parse_charges_from_step(step_log: str, episode_map: Dict[int, int]) -> List[
     Now supports both old format (without E{episode}) and new format (with E{episode})
     """
     charges = []
+    # `CHARGED` peut porter des marqueurs — nom de la capacité qui a autorisé la charge
+    # (`[ASSAULT]`, `[WAAAGH!]`) et `[FLY]` (21.03) — écrits par `step_logger`. Sans le groupe
+    # optionnel, ces charges n'étaient PAS trouvées : elles ne bougeaient plus l'unité, et les
+    # actions cachées se mesuraient contre des positions périmées.
+    _ability = r'(?:\s+\[[^\]]+\])*'
     # Pattern with episode (new format)
-    pattern_with_ep = r'\[([^\]]+)\] E(\d+) T(\d+) P(\d+) CHARGE : Unit (\d+)\((\d+),(\d+)\) CHARGED Unit \d+\([^\)]+\) from \((\d+),(\d+)\) to \((\d+),(\d+)\)'
+    pattern_with_ep = r'\[([^\]]+)\] E(\d+) T(\d+) P(\d+) CHARGE : Unit (\d+)\((\d+),(\d+)\) CHARGED' + _ability + r' Unit \d+\([^\)]+\) from \((\d+),(\d+)\) to \((\d+),(\d+)\)'
     # Pattern without episode (old format)
-    pattern_old = r'\[([^\]]+)\] T(\d+) P(\d+) CHARGE : Unit (\d+)\((\d+),(\d+)\) CHARGED Unit \d+\([^\)]+\) from \((\d+),(\d+)\) to \((\d+),(\d+)\)'
+    pattern_old = r'\[([^\]]+)\] T(\d+) P(\d+) CHARGE : Unit (\d+)\((\d+),(\d+)\) CHARGED' + _ability + r' Unit \d+\([^\)]+\) from \((\d+),(\d+)\) to \((\d+),(\d+)\)'
     
     for line_num, line in enumerate(step_log.split('\n'), 1):
         # Try with episode first (new format)

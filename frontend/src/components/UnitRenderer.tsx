@@ -1339,9 +1339,6 @@ export class UnitRenderer {
       // sur un profil sans type) et cette erreur doit remonter TELLE QUELLE ; dans le ``try``, elle
       // serait avalée puis rejouée depuis le ``catch``, où le second jet n'est plus rattrapable.
       const initialText = texture.baseTexture.valid ? null : this.drawUnitInitial(iconZIndex);
-      if (initialText) {
-        enqueueForIconLoad(iconPath, texture.baseTexture, initialText, destroyPendingInitial);
-      }
 
       try {
         const nonRoundIconR = getNonRoundIconRadius(unit, HEX_RADIUS);
@@ -1457,6 +1454,14 @@ export class UnitRenderer {
           this.target.addChild(iconMask);
         }
         this.target.addChild(sprite);
+
+        // Inscription APRÈS l'ajout du sprite, jamais avant. Si le ``try`` lève, l'initiale
+        // TIENT LIEU de repli (cf. le ``catch``) : une inscription déjà posée la détruirait au
+        // chargement du portrait, et la figurine finirait sans portrait NI initiale — un sprite
+        // jamais ajouté à la scène ne recouvre rien.
+        if (initialText) {
+          enqueueForIconLoad(iconPath, texture.baseTexture, initialText, destroyPendingInitial);
+        }
       } catch {
         // L'initiale déjà posée sous le sprite (texture pas encore ``valid``) TIENT LIEU de repli :
         // la redessiner superposerait deux ``PIXI.Text`` au même point, aux alphas cumulés.

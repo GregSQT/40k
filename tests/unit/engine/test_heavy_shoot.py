@@ -166,6 +166,9 @@ def test_le_log_de_tir_affiche_le_token_heavy(monkeypatch):
             # Oath (08.04) : l emission exige les deux clefs, le vrai groupement les copie de
             # l intent — les relire ici garde la fixture alignee sur le producteur.
             "oath_hit_reroll": r["oath_hit_reroll"], "oath_wound_bonus": r["oath_wound_bonus"],
+            # Waaagh! (08.04) : mêmes clés exigées par l'émission, mêmes copies depuis l'intent.
+            "waaagh_melee_bonus": r["waaagh_melee_bonus"],
+            "waaagh_target_invul": r["waaagh_target_invul"],
             "player": 0,
         }
         _emit_squad_shoot_log(gs, group, SHOOT_CTX)

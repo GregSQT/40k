@@ -131,6 +131,11 @@
     "name": "Oath of Moment",
     "description": "Faction ability (08.04). At the start of your Command phase, select one unit from your opponent's army: it is your Oath of Moment target until the start of your next Command phase. Each time a model with this ability makes an attack that targets it, you can re-roll the Hit roll; and if you are using a Codex: Space Marines Detachment and your army includes no BLOOD ANGELS, DARK ANGELS, DEATHWATCH or SPACE WOLVES unit, add 1 to the Wound roll."
   },
+  "waaagh": {
+    "id": "waaagh",
+    "name": "Waaagh!",
+    "description": "Faction ability (08.04). If your Army Faction is ORKS, once per battle, at the start of your Command phase, you can call a Waaagh!. If you do, until the start of your next Command phase, the Waaagh! is active for your army and: units from your army with this ability are eligible to declare a charge in a turn in which they Advanced; add 1 to the Strength and Attacks characteristics of melee weapons equipped by models from your army with this ability; models from your army with this ability have a 5+ invulnerable save."
+  },
   "targeted_intercession": {
     "id": "targeted_intercession",
     "description": "Assault Interecessor : When this unit makes an attack, it can reroll rolls of 1 for the wound rolls. If the target is on an objective, it can reroll the wound rolls."

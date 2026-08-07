@@ -1049,7 +1049,10 @@ export function parse_log_file_from_text(text: string): ReplayData {
     }
 
     const chargeMatch = trimmed.match(
-      /\[([^\]]+)\] (?:E\d+\s+)?(T\d+) P(\d+) CHARGE : Unit (\d+)\((\d+),(\d+)\) (CHARGED(?: \[[^\]]+\])? Unit|WAIT|FAILED CHARGE to unit|FAILED charge to unit)/
+      // `*` et non `?` sur le marqueur : la ligne de charge en porte jusqu'à DEUX — le nom de la
+      // capacité qui l'a autorisée (`[ASSAULT]`, `[WAAAGH!]`) puis `[FLY]` (21.03). Avec `?`,
+      // une charge volante d'une unité sous Waaagh! ne matchait plus et disparaissait du replay.
+      /\[([^\]]+)\] (?:E\d+\s+)?(T\d+) P(\d+) CHARGE : Unit (\d+)\((\d+),(\d+)\) (CHARGED(?: \[[^\]]+\])* Unit|WAIT|FAILED CHARGE to unit|FAILED charge to unit)/
     );
     if (chargeMatch) {
       const timestamp = chargeMatch[1];
@@ -1063,7 +1066,10 @@ export function parse_log_file_from_text(text: string): ReplayData {
 
       if (actionType.startsWith("CHARGED")) {
         // Parse target unit and positions
-        const targetMatch = trimmed.match(/CHARGED(?: \[[^\]]+\])? Unit (\d+)\((\d+),(\d+)\)/);
+        // Même quantificateur que la reconnaissance de la ligne juste au-dessus : les deux
+        // doivent accepter exactement les mêmes formes, sinon la ligne est reconnue puis sa
+        // cible introuvable — la charge tombait en silence.
+        const targetMatch = trimmed.match(/CHARGED(?: \[[^\]]+\])* Unit (\d+)\((\d+),(\d+)\)/);
         const fromMatch = trimmed.match(/from \((\d+),(\d+)\)/);
         const toMatch = trimmed.match(/to \((\d+),(\d+)\)/);
         // Parse actual charge roll (2d6) if available: [Roll:X]

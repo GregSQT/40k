@@ -804,12 +804,12 @@ Règles:
     },
 
     "observation_params": {
-      // SEULE clé de la section : recopie de ObservationBuilder.SQUAD_OBS_SIZE_TARGET (20752 au
-      // 2026-08-04 — VALEUR À RELIRE dans le code, jamais à recopier d'ici). Un écart lève à
+      // SEULE clé de la section : recopie de ObservationBuilder.SQUAD_OBS_SIZE_TARGET (20727 au
+      // 2026-08-07 — VALEUR À RELIRE dans le code, jamais à recopier d'ici). Un écart lève à
       // l'init du moteur. perception_radius / max_nearby_units / max_valid_targets ont été
       // SUPPRIMÉS le 2026-07-28 avec le pipeline mono-figurine : l'étendue perçue est celle de
       // la grille égocentrique (engine/spatial_grid.py).
-      "obs_size": 20752
+      "obs_size": 20727
     },
     
     "model_params": {

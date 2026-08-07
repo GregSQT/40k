@@ -36,9 +36,9 @@ from .shared_utils import (
     get_squad_move_budget, validate_move_plan, _validate_plan_coherency, commit_move,
     get_coherency_subhex, get_cohesion_max_subhex, get_min_neighbors,
     coherency_violation_flags,
-    _compute_unit_occupied_hexes, _squad_is_in_enemy_er,
+    _compute_unit_occupied_hexes, _squad_is_in_enemy_er, squad_is_battle_shocked_in_enemy_er,
     roll_advance_for_squad, unit_is_in_strategic_reserves,
-    MovePlan, parse_model_plan_with_orientation,
+    MovePlan, parse_model_plan_with_orientation, plan_entry_level, plan_entry_model_orientation,
 )
 from engine.hex_utils import (
     _hex_center,
@@ -52,6 +52,7 @@ from engine.hex_utils import (
     require_base_size,
     require_scalar_base_size,
     round_base_radius_norm,
+    socle_is_single_hex,
 )
 from engine.phase_handlers.geodesic_move import _euclidean_move_field, reachable_multilevel_field
 # Bascule UNIQUE de la résolution (`inches_to_subhex <= 1` → géométrie hex). Alias court : ce
@@ -3605,11 +3606,9 @@ def movement_build_model_destinations_pool(
     has_fly = _fly_traversal_active(game_state, unit, squad_id)
 
     # Desperate Escape : unité battle-shocked tentant un fall-back depuis l'ER ennemie.
-    # Les figurines peuvent traverser les positions ennemies (règle 09.07).
-    desperate_escape = (
-        require_key(unit, "battle_shocked")
-        and _squad_is_in_enemy_er(game_state, squad_id)
-    )
+    # Les figurines peuvent traverser les positions ennemies (règle 09.07). MÊME prédicat que la
+    # borne de trajet de la validation (`build_move_transit_blocked`) : ce pool en est le miroir.
+    desperate_escape = squad_is_battle_shocked_in_enemy_er(game_state, squad_id)
 
     # Zone d'engagement ennemie au niveau ANCRE.
     # ez > 1 (Board ×N) : géométrie euclidienne par-mover, source unique partagée avec le path IA
@@ -3757,11 +3756,7 @@ def movement_build_model_destinations_pool(
     base_size = unit["BASE_SIZE"]
     base_shape = unit["BASE_SHAPE"]
     orientation = mover_orient  # orient EN COURS du mover (pivot molette non committé)
-    # Non-rond (oval/square) → toujours multi-hex (base_size liste) : sans le garde de forme,
-    # ``not isinstance(base_size, int)`` le classait à tort en single-hex → empreinte non expansée.
-    is_single_hex = base_shape == "round" and (
-        base_size == 1 or not isinstance(base_size, int) or base_size <= 1
-    )  # get allowed
+    is_single_hex = socle_is_single_hex(base_shape, base_size)
     if is_single_hex:
         _off_even: Tuple[Tuple[int, int], ...] = ((0, 0),)
         _off_odd: Tuple[Tuple[int, int], ...] = ((0, 0),)
@@ -3978,28 +3973,26 @@ def movement_preview_move_plan(
     from engine.terrain_utils import resolve_model_floor_level
     _mc_norm = require_key(game_state, "models_cache")
     terrain_areas = require_key(game_state, "terrain_areas")
-    norm: List[Tuple[str, int, int, int]] = []
-    # Orientation PROVISOIRE par-fig (liste parallèle à ``norm``, même index) : 5ᵉ champ du plan
-    # si fourni (pivot molette non committé), sinon l'orientation courante de la fig. Alimente le
-    # footprint orienté par-fig ci-dessous ET le niveau de plancher (resolve_model_floor_level).
-    orientations: List[int] = []
+    # Entrées NORMALISÉES : niveau EFFECTIF (13.06) et orientation RÉSOLUE (5ᵉ champ du plan si
+    # le pivot molette est en cours, sinon celle de la fig). Une seule liste, pas de listes
+    # parallèles ré-jointes par indice : c'est la forme qu'attendent le footprint orienté
+    # par-fig, `resolve_model_floor_level` et `validate_move_plan` en aval.
+    norm: List[Tuple[str, int, int, int, int]] = []
     for e in plan:
         _mid = str(e[0])
         _m_norm = _mc_norm[_mid]
-        _ori = int(e[4]) if len(e) >= 5 and e[4] is not None else int(_m_norm.get("orientation", 0))  # get allowed (défaut = orient courante fig)
-        _lvl_req = int(e[3])
+        _ori = plan_entry_model_orientation(e, _m_norm)
+        _lvl_req = plan_entry_level(e)
         _lvl_eff = resolve_model_floor_level(
             int(e[1]), int(e[2]),
             require_key(_m_norm, "BASE_SHAPE"), require_key(_m_norm, "BASE_SIZE"),
             _ori, _lvl_req, terrain_areas,
         )
-        norm.append((_mid, int(e[1]), int(e[2]), _lvl_eff))
-        orientations.append(_ori)
+        norm.append((_mid, int(e[1]), int(e[2]), _lvl_eff, _ori))
 
     # Cohesion 03.03 par fig : deleguee a coherency_violation_flags (source UNIQUE partagee avec le
     # commit), qui respecte game_rules.cohesion_distance_mode (euclidean | footprint).
-    positions: List[Tuple[int, int]] = [(nc, nr) for _, nc, nr, _lv in norm]
-    n = len(positions)
+    n = len(norm)
 
     # Calcul des empreintes par fig
     from engine.hex_utils import precompute_footprint_offsets as _pfo
@@ -4007,21 +4000,24 @@ def movement_preview_move_plan(
     unit_entry = units_cache.get(str(squad_id), {})  # get allowed
     base_shape = require_key(unit_entry, "BASE_SHAPE")  # get allowed
     base_size = require_key(unit_entry, "BASE_SIZE")
-    is_single_hex = not isinstance(base_size, int) or base_size <= 1  # get allowed
+    # Prédicat PARTAGÉ avec le pool (`movement_build_model_destinations_pool`) : sans le garde de
+    # forme, un socle oval passait pour mono-hex et `fp_wall` / `fp_other` / `fp_intra` / l'EZ ne
+    # regardaient que son ancre — un socle de 23 hexes se validait par-dessus une escouade amie.
+    is_single_hex = socle_is_single_hex(base_shape, base_size)
     if is_single_hex:
-        footprints: List[Set[Tuple[int, int]]] = [{pos} for pos in positions]
+        footprints: List[Set[Tuple[int, int]]] = [{(nc, nr)} for _, nc, nr, _lv, _o in norm]
     else:
-        # Empreinte PAR FIGURINE : offsets calculés avec l'orientation provisoire de CHAQUE fig
-        # (orientations[idx]). ``_pfo`` est mémoïsé par (shape, size, orient) → pas de surcoût.
+        # Empreinte PAR FIGURINE : offsets calculés avec l'orientation résolue de CHAQUE fig.
+        # ``_pfo`` est mémoïsé par (shape, size, orient) → pas de surcoût.
         footprints = []
-        for idx, (col, row) in enumerate(positions):
-            _off_even, _off_odd = _pfo(base_shape, base_size, orientations[idx])
+        for _mid_fp, col, row, _lv_fp, ori in norm:
+            _off_even, _off_odd = _pfo(base_shape, base_size, ori)
             offs = _off_even if (col & 1) == 0 else _off_odd
             footprints.append({(col + dc, row + dr) for dc, dr in offs})
 
     _mc_coh = require_key(game_state, "models_cache")
     cohesion_models = [
-        {**_mc_coh[str(mid)], "col": nc, "row": nr} for mid, nc, nr, _lv in norm
+        {**_mc_coh[str(mid)], "col": nc, "row": nr} for mid, nc, nr, _lv, _o in norm
     ]
     cohesion_red = coherency_violation_flags(cohesion_models, game_state)
 
@@ -4030,7 +4026,7 @@ def movement_preview_move_plan(
     # murs verticaux prolongés gérés par wall_hexes, cf. stage.md). Calcul unique par niveau du plan.
     other_occ_by_level: Dict[int, Set[Tuple[int, int]]] = {
         lv: build_occupied_positions_set(game_state, exclude_unit_id=str(squad_id), level=lv)
-        for lv in {lv for _, _, _, lv in norm}
+        for lv in {lv for _, _, _, lv, _o in norm}
     }
 
     # Collision intra-escouade : clearance EUCLIDIENNE par-figurine (≠ intersection de
@@ -4041,11 +4037,10 @@ def movement_preview_move_plan(
     from engine.hex_utils import Socle, footprints_overlap
     _models_cache_intra = require_key(game_state, "models_cache")
     intra_socles: List["Socle"] = []
-    for idx, ((mid, nc, nr, _lv), fp_par) in enumerate(zip(norm, footprints)):
+    for (mid, nc, nr, _lv, _ori_fig), fp_par in zip(norm, footprints):
         m = require_key(_models_cache_intra, str(mid))
         m_shape = require_key(m, "BASE_SHAPE")
         m_base = require_key(m, "BASE_SIZE")
-        _ori_fig = orientations[idx]
         if m_shape == base_shape and m_base == base_size:
             m_fp = fp_par
         else:
@@ -4058,12 +4053,13 @@ def movement_preview_move_plan(
             Socle(shape=m_shape, base_size=m_base, col=int(nc), row=int(nr), fp=m_fp, orientation=_ori_fig)
         )
 
-    levels = [lv for _, _, _, lv in norm]
     per_model: Dict[str, bool] = {}
-    for idx, (mid, nc, nr, lv) in enumerate(norm):
-        base_valid = validate_move_plan(
-            [(str(mid), int(nc), int(nr), lv)], game_state, c_individual
-        )
+    for idx, (mid, nc, nr, lv, _ori_v) in enumerate(norm):
+        # L'entrée normalisée part TELLE QUELLE, orientation comprise : la validation borne le
+        # trajet par le champ any-angle, dont les obstacles sont dilatés par l'empreinte ORIENTÉE.
+        # La laisser tomber ici faisait valider le socle à son orientation COMMITTÉE pendant que le
+        # pool l'offrait à son orientation pivotée — voile rouge sur une case parfaitement légale.
+        base_valid = validate_move_plan([norm[idx]], game_state, c_individual)
         fp = footprints[idx]
         fp_wall = bool(wall_hexes_set and fp & wall_hexes_set)
         _other_lv = other_occ_by_level.get(lv, set())
@@ -4072,7 +4068,7 @@ def movement_preview_move_plan(
         fp_intra = any(
             footprints_overlap(intra_socles[idx], intra_socles[j])
             for j in range(n)
-            if j != idx and levels[j] == lv
+            if j != idx and norm[j][3] == lv
         )
         # Niveau (étages) : plus de voile rouge « débordement » — ``lv`` est déjà le niveau EFFECTIF
         # (resolve_model_floor_level ci-dessus a ramené au sol toute fig dont l'empreinte déborde du
@@ -4180,9 +4176,15 @@ def movement_commit_move_plan_handler(
     _resolved_plan: List[Tuple[str, int, int, int, Optional[int]]] = []
     for _mid_c, _nc_c, _nr_c, _lv_c, _ori_c in plan:
         _m_c = models_cache[_mid_c]
+        # Orientation du PLAN, pas celle encore committée : le preview a validé l'étage avec
+        # l'orientation visée (`movement_preview_move_plan`), et c'est elle que `commit_move`
+        # posera juste après. La lire sur `models_cache` faisait tenir l'empreinte d'un socle
+        # pivoté sur le plancher au preview puis retomber au sol au commit — le pivot était
+        # appliqué quand même, donc la figurine finissait pivotée à l'étage 0.
         _eff_c = _rmfl_commit(
             _nc_c, _nr_c, require_key(_m_c, "BASE_SHAPE"), require_key(_m_c, "BASE_SIZE"),
-            int(_m_c.get("orientation", 0)), int(_lv_c), _ta_commit,  # get allowed (défaut 0 = face nord)
+            plan_entry_model_orientation((_mid_c, _nc_c, _nr_c, _lv_c, _ori_c), _m_c),
+            int(_lv_c), _ta_commit,
         )
         _resolved_plan.append((_mid_c, _nc_c, _nr_c, _eff_c, _ori_c))
     plan = _resolved_plan

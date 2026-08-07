@@ -96,7 +96,7 @@
       "id": 1009, "unit_type": "Intercessor", "player": 1, "col": 145, "row": 230,
       "models": [
         { "col": 145, "row": 230, "level": 1 },
-        { "col": 154, "row": 221, "level": 1 },
+        { "col": 149, "row": 219, "level": 1 },
         { "col": 145, "row": 222 }
       ]
     },
@@ -112,7 +112,7 @@
     { "id": 108, "unit_type": "VonRyanLeaper",        "player": 2, "col": 25,   "row": 132 },
     { "id": 109, "unit_type": "Termagant",            "player": 2, "col": 79,   "row": 148 },
     { "id": 118, "unit_type": "Termagant",            "player": 2, "col": 203,   "row": 106 },
-    { "id": 119, "unit_type": "Termagant",            "player": 2, "col": 154,   "row": 226,  "level": 1 },
+    { "id": 119, "unit_type": "Termagant",            "player": 2, "col": 149,   "row": 226,  "level": 1 },
     { "id": 120, "unit_type": "Termagant",            "player": 2, "col": 53,   "row": 67 },
     { "id": 121, "unit_type": "Termagant",            "player": 2, "col": 53,   "row": 60 },
     { "id": 122, "unit_type": "Termagant",            "player": 2, "col": 210,   "row": 35 },

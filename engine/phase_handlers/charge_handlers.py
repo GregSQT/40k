@@ -19,7 +19,11 @@ from shared.data_validation import require_key, require_present
 from engine.spatial_relations import get_engagement_zone_vertical
 from engine.utils.weapon_helpers import melee_weapons, ranged_weapons
 from engine.action_log_utils import append_action_log
-from engine.game_state import unit_can_charge_after_advance, waaagh_applies_to_unit
+from engine.game_state import (
+    WAAAGH_ABILITY_DISPLAY_NAME,
+    unit_can_charge_after_advance,
+    waaagh_applies_to_unit,
+)
 from engine.hex_utils import hex_distance as _hex_distance
 from engine.game_utils import add_console_log, safe_print, add_debug_file_log
 from engine.combat_utils import (
@@ -195,7 +199,9 @@ def _charge_offsets_for_base(
     from .shared_utils import get_engagement_zone
 
     cache: Dict[Any, FootprintOffsetPair] = game_state.setdefault("_charge_fp_offset_by_base_cache", {})
-    key = (shape, tuple(base_size) if isinstance(base_size, (list, tuple)) else base_size, int(orientation))
+    from engine.hex_utils import base_size_cache_key
+
+    key = (shape, base_size_cache_key(base_size), int(orientation))
     if key in cache:
         return cache[key]
     from engine.spatial_relations import geometry_is_hex
@@ -5371,6 +5377,53 @@ def charge_set_fly_mode_handler(game_state: Dict[str, Any], unit_id: str, action
     }
 
 
+def _charge_enabling_ability(
+    game_state: Dict[str, Any], unit: Dict[str, Any]
+) -> Tuple[Optional[str], str]:
+    """Capacité qui a rendu CETTE charge légale, et le marqueur de log correspondant.
+
+    Deux chemins committent une charge — le plan par-figurine du PvP
+    (`charge_commit_move_plan_handler`) et la sélection de destination
+    (`charge_destination_selection_handler`) — et ils doivent nommer la MÊME capacité : le
+    marqueur porte la bulle d'aide côté frontend (`config/unit_rules.json`) et le nom
+    d'affichage est ce que l'analyzer agrège (`special_rule_usage`). Le PvP n'écrivait aucun
+    marqueur : une charge après avance autorisée par le Waaagh! ne laissait aucune trace.
+
+    Rend `(nom d'affichage, marqueur)`, ou `(None, "")` quand la charge n'a demandé aucune
+    capacité (ni repli ni avance dans le tour).
+    """
+    unit_id_str = str(unit["id"])
+    if unit_id_str in require_key(game_state, "units_fled") and _unit_has_rule(unit, "charge_after_flee"):
+        display_name = _get_source_unit_rule_display_name_for_effect(unit, "charge_after_flee")
+        if display_name is None:
+            raise ValueError(f"Unit {unit['id']} charged after flee without source unit rule")
+        return display_name, f" [{display_name}]"
+    if unit_id_str in require_key(game_state, "units_advanced"):
+        # Nom de la capacité qui a permis la charge. DEUX sources possibles, dans l'ordre où la
+        # règle les rend disponibles : la capacité de datasheet, sinon le Waaagh!. Le nom
+        # d'affichage compte : l'analyzer l'agrège par capacité (`special_rule_usage`), et un
+        # Waaagh! attribué à « Assault » fausserait la mesure d'usage des deux.
+        if _unit_has_rule(unit, "charge_after_advance"):
+            display_name = _get_source_unit_rule_display_name_for_effect(unit, "charge_after_advance")
+            if display_name is None:
+                raise ValueError(f"Unit {unit['id']} charged after advance without source unit rule")
+            return display_name, f" [{display_name}]"
+        if waaagh_applies_to_unit(game_state, unit):
+            # Capacité de FACTION : token en MAJUSCULES, comme `[OATH OF MOMENT]` dans la ligne
+            # de synthèse de tir/mêlée. Le nom d'affichage rendu garde sa casse : c'est lui que
+            # l'analyzer agrège.
+            return (
+                WAAAGH_ABILITY_DISPLAY_NAME,
+                f" [{WAAAGH_ABILITY_DISPLAY_NAME.upper()}]",
+            )
+        raise ValueError(
+            f"Unit {unit['id']} charged after advance without any enabling rule "
+            f"(ni `charge_after_advance`, ni Waaagh! actif) — l'eligibilite et le log "
+            f"auraient diverge."
+        )
+    return None, ""
+
+
 def charge_commit_move_plan_handler(
     game_state: Dict[str, Any], unit_id: str, action: Dict[str, Any]
 ) -> Tuple[bool, Dict[str, Any]]:
@@ -5432,6 +5485,13 @@ def charge_commit_move_plan_handler(
     from .shared_utils import commit_move, set_unit_coordinates
     from .movement_handlers import _invalidate_all_destination_pools_after_movement
 
+    # AVANT toute mutation : ce prédicat LÈVE quand l'éligibilité et le log divergeraient, et il
+    # lit `units_advanced`/`units_fled` que `commit_move` ne touche pas. Appelé après le commit,
+    # sa levée laissait les figurines posées et `units_charged` marqué, sans log, sans impact de
+    # charge, sans fin d'activation — un état de partie invalide. Le chemin de sélection de
+    # destination et le jumeau gym le lisent tous deux avant de bouger quoi que ce soit.
+    charge_ability_display_name, charge_rule_marker = _charge_enabling_ability(game_state, unit)
+
     commit_move(plan, game_state, "charge")  # pose per-modèle + units_charged.add
 
     entry = require_key(game_state, "units_cache").get(unit_id)
@@ -5453,8 +5513,11 @@ def charge_commit_move_plan_handler(
     # du pathfinding : il jugeait la charge avec un budget faux et des murs qui ne s'appliquent
     # pas. Miroir exact de `MOVED [FLY]` / `ADVANCED [FLY]`.
     _fly_seg = " [FLY]" if _charge_fly_declared(game_state, unit, str(unit["id"])) else ""
+    # Capacité qui a rendu la charge légale (repli, avance de datasheet, Waaagh!) : résolue AVANT
+    # le commit (cf. plus haut), MÊME source que le chemin de sélection de destination.
     charge_message = (
-        f"Unit {unit['id']}{_ut_seg} ({orig_col}, {orig_row}) CHARGED{_fly_seg} Units {target_ids} "
+        f"Unit {unit['id']}{_ut_seg} ({orig_col}, {orig_row}) CHARGED{charge_rule_marker}{_fly_seg} "
+        f"Units {target_ids} "
         f"from ({orig_col}, {orig_row}) to ({dest_col}, {dest_row}) [Roll:{charge_roll}]"
     )
     move_details = []
@@ -5488,6 +5551,10 @@ def charge_commit_move_plan_handler(
             # texte du `message`, qui fait apparaitre `[FLY]` dans step.log (le formateur
             # reecrit integralement la ligne de charge).
             "is_fly_move": _fly_seg == " [FLY]",
+            # JUMEAU de `is_fly_move` juste au-dessus, et du chemin de sélection de destination :
+            # `step_logger` réécrit la ligne de charge et n'y met le token de capacité que
+            # depuis CE champ. Le marqueur posé sur `message` ne sert qu'au log de partie.
+            "ability_display_name": charge_ability_display_name,
             "timestamp": "server_time",
             "is_ai_action": unit["player"] == 1,
             "moveDetails": move_details,
@@ -5719,37 +5786,7 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
     current_turn = require_key(game_state, "turn")
 
     target_col, target_row = require_unit_position(target_id, game_state)
-    charge_rule_marker = ""
-    charge_ability_display_name = None
-    if str(unit["id"]) in require_key(game_state, "units_fled") and _unit_has_rule(unit, "charge_after_flee"):
-        source_rule_display_name = _get_source_unit_rule_display_name_for_effect(unit, "charge_after_flee")
-        if source_rule_display_name is None:
-            raise ValueError(
-                f"Unit {unit['id']} charged after flee without source unit rule"
-            )
-        charge_rule_marker = f" [{source_rule_display_name}]"
-        charge_ability_display_name = source_rule_display_name
-    elif str(unit["id"]) in require_key(game_state, "units_advanced"):
-        # Nom de la capacité qui a permis la charge. DEUX sources possibles, dans l'ordre où la
-        # règle les rend disponibles : la capacité de datasheet, sinon le Waaagh!. Le nom
-        # d'affichage compte : l'analyzer l'agrège par capacité (`special_rule_usage`), et un
-        # Waaagh! attribué à « Assault » fausserait la mesure d'usage des deux.
-        if _unit_has_rule(unit, "charge_after_advance"):
-            source_rule_display_name = _get_source_unit_rule_display_name_for_effect(unit, "charge_after_advance")
-            if source_rule_display_name is None:
-                raise ValueError(
-                    f"Unit {unit['id']} charged after advance without source unit rule"
-                )
-        elif waaagh_applies_to_unit(game_state, unit):
-            source_rule_display_name = "Waaagh!"
-        else:
-            raise ValueError(
-                f"Unit {unit['id']} charged after advance without any enabling rule "
-                f"(ni `charge_after_advance`, ni Waaagh! actif) — l'eligibilite et le log "
-                f"auraient diverge."
-            )
-        charge_rule_marker = f" [{source_rule_display_name}]"
-        charge_ability_display_name = source_rule_display_name
+    charge_ability_display_name, charge_rule_marker = _charge_enabling_ability(game_state, unit)
     _ut_seg = f" {unit['unitType']}" if unit.get("unitType") else ""
     _tt_unit = next((u for u in game_state["units"] if str(u["id"]) == str(target_id)), None)
     _tt_seg = f" {_tt_unit['unitType']}" if _tt_unit and _tt_unit.get("unitType") else ""

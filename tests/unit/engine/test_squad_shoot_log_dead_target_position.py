@@ -90,6 +90,10 @@ def _weapon_group() -> Dict[str, Any]:
         # même raison — l'émission les lit en accès direct (`RR` / token du +1 de blessure).
         "oath_hit_reroll": False,
         "oath_wound_bonus": 0,
+        # Waaagh! (08.04) : même construction, même lecture en accès direct par l'émission
+        # (tokens sur `Shots:`, `Wound:` et `Save:`).
+        "waaagh_melee_bonus": False,
+        "waaagh_target_invul": False,
     }
 
 

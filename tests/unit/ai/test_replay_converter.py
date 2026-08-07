@@ -42,6 +42,183 @@ def test_parse_action_message_handles_move_shoot_combat_charge_wait() -> None:
     assert replay_converter.parse_action_message("unknown message", ctx) is None
 
 
+def test_parse_action_message_accepts_the_real_step_logger_format() -> None:
+    """Le parser doit lire ce que `ai/step_logger.py` ECRIT, pas une variante d'il y a deux formats.
+
+    Trois ecarts mesures, chacun suffisant a rendre la ligne invisible :
+      - marqueurs de capacite entre le verbe et la suite (`[WAAAGH!]` 24.xx, `[FLY]` 21.03) ;
+      - coordonnees SANS espace apres la virgule (`(5,48)`) — c'est la forme reellement ecrite ;
+      - aiguillage litteral (`"SHOT Unit" in message`) qui excluait les lignes a marqueur AVANT
+        meme d'atteindre la regex, laquelle les tolerait deja.
+    """
+    ctx = {"turn": 1, "phase": "charge", "player": 1, "timestamp": "t"}
+    _parse = replay_converter.parse_action_message
+
+    for line in (
+        "Unit 5(4,4) CHARGED [WAAAGH!] Unit 6 from (0,0) to (3,0)",
+        "Unit 5(4,4) CHARGED [WAAAGH!] [FLY] Unit 6 from (0,0) to (3,0)",
+    ):
+        charge = require_present(_parse(line, ctx), "charge")
+        assert charge["type"] == "charge" and charge["targetUnitId"] == 6, line
+
+    shoot = require_present(_parse("Unit 1(1,1) SHOT [ASSAULT] Unit 2 with [Bolter]", ctx), "shoot")
+    assert shoot["targetUnitId"] == 2
+
+    # Coordonnees collees + `[FLY]` : la forme exacte de `step_logger` sur un move volant.
+    move = require_present(_parse("Unit 3(5,48) MOVED [FLY] from (3,58) to (5,48)[R:+0.0]", ctx), "move")
+    assert move["startHex"] == "(3, 58)" and move["endHex"] == "(5, 48)"
+
+
+def test_parse_steplog_file_reads_the_episode_numbered_format(tmp_path: Path) -> None:
+    """`E<n>` precede `T<n>` dans le format courant : sans lui, ZERO action n'etait convertie.
+
+    La detection du debut des actions cherchait `"] T"` litteral, jamais present quand le
+    numero d'episode s'intercale — le fichier entier etait alors traite comme de l'en-tete.
+    """
+    steplog = tmp_path / "step.log"
+    steplog.write_text(
+        "\n".join(
+            [
+                "=== STEP-BY-STEP ACTION LOG ===",
+                "[18:03:59] E1 T1 P1 MOVE : Unit 3(5,48) MOVED from (3,58) to (5,48)"
+                "[R:+0.0] [MODELS: 3#0@(5,48)] [SUCCESS]",
+                "[18:04:04] E1 T5 P2 CHARGE : Unit 103(19,28) CHARGED [WAAAGH!] Unit 1(19,29) "
+                "from (22,27) to (19,28) [Roll: 7] [R:+0.0] [SUCCESS]",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    parsed = replay_converter.parse_steplog_file(str(steplog))
+    assert [a["type"] for a in parsed["actions"]] == ["move", "charge"]
+    assert parsed["max_turn"] == 5
+    # La position doit etre relue depuis la ligne : `Unit 3(5,48)` n'a pas d'espace non plus.
+    assert parsed["units_positions"][3] == {"col": 5, "row": 48, "last_seen_turn": 1}
+
+
+def test_toute_la_famille_move_est_parsee_pas_seulement_moved() -> None:
+    """`step_logger` ecrit plusieurs verbes sur la meme forme ; seul `MOVED` etait reconnu.
+
+    Une escouade qui ne fait qu'avancer ou se replier ne produisait aucune entree de replay ET
+    aucune mise a jour de position : tout ce qui suivait etait rejoue contre un fantome.
+    L'ordre de la table compte — `MOVED` mordrait le debut de `MOVED AFTER SHOOTING`.
+
+    Le `type` reprend le vocabulaire deja rendu par le frontend (`replayParser.ts`) : un replay
+    qui confond un repli avec un move normal perd l'information, et un champ maison ne serait lu
+    par personne.
+    """
+    ctx = {"turn": 1, "phase": "move", "player": 1, "timestamp": "t"}
+    attendu = {
+        "Unit 1(1,1) MOVED from (0,0) to (3,0)": "move",
+        "Unit 1(1,1) ADVANCED [FLY] from (0,0) to (3,0) [Roll: 4] [Strategy: aggressive]": "advance",
+        "Unit 1(1,1) FLED from (0,0) to (3,0)": "flee",
+        "Unit 1(1,1) REACTIVE MOVED [FIRE OVERWATCH] from (0,0) to (3,0) [Roll: 5]"
+        " - trigger: Unit 2->(1,1)": "reactive_move",
+        "Unit 1(1,1) MOVED AFTER SHOOTING [ASSAULT] from (0,0) to (3,0)": "move",
+        "Unit 1(1,1) DEPLOYED from (0,0) to (3,0)": "deploy",
+        # Forme SANS depart (step_logger.py:454 et :514) : elle etait perdue elle aussi.
+        "Unit 1(1,1) MOVED to (3,0)": "move",
+        "Unit 1(1,1) FLED to (3,0)": "flee",
+    }
+    for ligne, type_attendu in attendu.items():
+        parsed = require_present(replay_converter.parse_action_message(ligne, ctx), type_attendu)
+        assert parsed["type"] == type_attendu, ligne
+        assert parsed["endHex"] == "(3, 0)", ligne
+
+
+def test_un_seul_episode_est_converti(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """Un replay decrit UNE partie. Les N episodes de `--test-episodes` vont dans le MEME
+    steplog et les tours repartent a T1 : les concatener empilait plusieurs parties dans un
+    seul `combat_log`, avec des positions qui sautent et un `total_turns` pris sur le max.
+
+    La segmentation lit le DELIMITEUR `=== EPISODE n START ===` que `step_logger` ecrit pour ca.
+    Filtrer sur le prefixe `E<n>` des lignes d'action ne peut pas segmenter : les transitions de
+    phase sont ecrites SANS ce prefixe (step_logger.py:1006), donc la ligne `phase Start` de E2
+    ci-dessous serait restee dans le replay du premier episode.
+    """
+    steplog = tmp_path / "step.log"
+    steplog.write_text(
+        "\n".join(
+            [
+                "=== STEP-BY-STEP ACTION LOG ===",
+                "[18:03:58] T1 OBJECTIVE CONTROL: aucun",
+                "[18:03:59] === EPISODE 1 START ===",
+                "[18:03:59] === ACTIONS START ===",
+                "[18:03:59] E1 T1 P1 MOVE : Unit 3(5,48) MOVED from (3,58) to (5,48) [SUCCESS]",
+                "[18:04:00] E1 T2 P1 MOVE : Unit 3(4,49) MOVED from (5,48) to (4,49) [SUCCESS]",
+                # Episode suivant : meme unite, repartie de sa case de deploiement, tour remis a 1.
+                "[18:04:20] === EPISODE 2 START ===",
+                "[18:04:20] === ACTIONS START ===",
+                "[18:04:20] T1 P1 MOVE phase Start",
+                "[18:04:20] E2 T1 P1 MOVE : Unit 3(3,58) MOVED from (3,58) to (7,50) [SUCCESS]",
+                "[18:04:25] E2 T9 P1 MOVE : Unit 3(7,50) MOVED from (7,50) to (9,44) [SUCCESS]",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    parsed = replay_converter.parse_steplog_file(str(steplog))
+
+    assert len(parsed["actions"]) == 2, (
+        "seules les deux actions de l'episode 1 doivent entrer dans le replay — y compris la "
+        "transition de phase de E2, qui n'a pas de prefixe d'episode a filtrer"
+    )
+    assert not any(a.get("type") == "phase_change" for a in parsed["actions"])
+    assert parsed["max_turn"] == 2, (
+        "T9 vient de E2 : le compte de tours doit decrire la partie rejouee, pas le maximum "
+        "sur toutes les parties du steplog"
+    )
+    assert parsed["units_positions"][3] == {"col": 4, "row": 49, "last_seen_turn": 2}
+    # Rien n'est avale en silence (CLAUDE.md : pas de troncature muette).
+    assert "1 ecarte(s)" in capsys.readouterr().out
+
+
+def test_initial_state_porte_les_positions_de_depart(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`initial_state` decrivait le plateau de FIN : il etait bati sur `units_positions`, la
+    DERNIERE position vue. Le frontend rejoue `combat_log` PAR-DESSUS cet etat, donc chaque
+    deplacement y etait applique une seconde fois, depuis son point d'arrivee.
+
+    Le bloc etait inatteignable avant la correction du parser (`units_positions` restait vide,
+    donc le `raise` partait toujours) : c'est la correction qui l'a mis en service.
+    """
+    scenario_file = tmp_path / "scenario.json"
+    scenario_file.write_text(
+        json.dumps({"units": [
+            {"id": 1, "unit_type": "Intercessor", "player": 1, "col": 1, "row": 1},
+            {"id": 2, "unit_type": "Termagant", "player": 2, "col": 2, "row": 1},
+        ]}),
+        encoding="utf-8",
+    )
+
+    class DummyRegistry:
+        def get_unit_data(self, unit_type):
+            _ = unit_type
+            return {"HP_MAX": 2, "MOVE": 6}
+
+    class DummyConfig:
+        config_dir = str(tmp_path)
+
+        @staticmethod
+        def get_board_size():
+            return (20, 20)
+
+    monkeypatch.setattr("ai.unit_registry.UnitRegistry", DummyRegistry)
+    monkeypatch.setattr("ai.replay_converter.get_config_loader", lambda: DummyConfig())
+
+    # L'unite 1 a fini en (9, 9) ; l'unite 2 n'a jamais bouge.
+    steplog_data = {
+        "actions": [{"type": "move", "unitId": 1}],
+        "max_turn": 3,
+        "units_positions": {1: {"col": 9, "row": 9}},
+    }
+    replay = replay_converter.convert_to_replay_format(steplog_data, str(scenario_file))
+    par_id = {u["id"]: (u["col"], u["row"]) for u in replay["initial_state"]["units"]}
+    assert par_id == {1: (1, 1), 2: (2, 1)}, (
+        "l'etat initial doit etre celui du scenario ; melanger la position finale de l'unite "
+        "qui a agi avec la position de depart de l'autre decrit un plateau qui n'a jamais existe"
+    )
+
+
 def test_calculate_episode_reward_from_actions_bounds_efficiency_bonus() -> None:
     actions = [{"type": "move"}] * 200
     reward = replay_converter.calculate_episode_reward_from_actions(actions, winner=0)

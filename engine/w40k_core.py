@@ -5475,6 +5475,10 @@ class W40KEngine(gym.Env):
         # 21.03 « take to the skies » — consomme par le move squad ET par la charge squad :
         # les deux emettent un action_log qui doit porter `is_fly_move`.
         from engine.phase_handlers.movement_handlers import _fly_traversal_active as _fta
+        # Capacité qui rend une charge après Advance légale (datasheet ou Waaagh!) : MÊME source
+        # que les deux chemins de commit de `charge_handlers`, pour que `step.log` nomme la même
+        # capacité ici que là-bas (l'analyzer agrège son usage).
+        from engine.phase_handlers.charge_handlers import _charge_enabling_ability
 
         if self.game_state.get("game_over", False):
             return False, {"error": "game_over", "winner": self.game_state.get("winner")}
@@ -5930,6 +5934,11 @@ class W40KEngine(gym.Env):
                 # pas `[FLY]` et l'analyzer juge la charge avec un budget 2" trop large ET des
                 # murs qui ne s'appliquent pas. Le formateur du StepLogger le lit deja.
                 _charge_is_fly = _fta(self.game_state, unit, str(squad_id))
+                # JUMEAU du commit PvP : le nom de la capacité qui a autorisé la charge (repli,
+                # Assault, Waaagh!) est lu AVANT le commit — `commit_move` ne touche pas
+                # `units_advanced`, mais l'ordre reste celui du chemin PvP pour que les deux
+                # lisent le même état.
+                _charge_ability, _charge_rule_marker = _charge_enabling_ability(self.game_state, unit)
                 commit_move(plan, self.game_state, "charge")
                 end_result = end_activation(self.game_state, unit, ACTION, 1, CHARGE, CHARGE, 0)
                 _dest_uc = self.game_state.get("units_cache", {}).get(str(squad_id), {})  # get allowed
@@ -5938,7 +5947,8 @@ class W40KEngine(gym.Env):
                     {
                         "type": "charge",
                         "message": (
-                            f"Unit {squad_id} CHARGED Unit {target_squad_id} - Roll:{charge_roll}"
+                            f"Unit {squad_id} CHARGED{_charge_rule_marker} "
+                            f"Unit {target_squad_id} - Roll:{charge_roll}"
                         ),
                         "turn": require_key(self.game_state, "turn"),
                         "phase": "charge",
@@ -5953,6 +5963,10 @@ class W40KEngine(gym.Env):
                         "targetCol": _charge_target[0] if _charge_target else None,
                         "targetRow": _charge_target[1] if _charge_target else None,
                         "is_fly_move": _charge_is_fly,
+                        # JUMEAU de `is_fly_move` : `step_logger` réécrit la ligne de charge et
+                        # n'y pose le token de capacité que depuis ce champ. Sans lui, une charge
+                        # après Advance permise par le Waaagh! n'était nommée nulle part côté IA.
+                        "ability_display_name": _charge_ability,
                         "timestamp": "server_time",
                         "reward": 0.0,
                     },

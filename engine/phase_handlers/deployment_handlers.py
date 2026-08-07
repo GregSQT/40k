@@ -225,9 +225,11 @@ def _footprint_offsets_for(
     (forme, taille, orientation), jamais de l'état de jeu — les recalculer par appel de
     ``generate_compact_formation`` rejetterait le travail à chaque formation.
     """
+    from engine.hex_utils import base_size_cache_key
+
     key = (
         base_shape,
-        tuple(base_size) if isinstance(base_size, list) else base_size,
+        base_size_cache_key(base_size),
         int(orientation),
         int(engagement_zone) <= 1,
     )

@@ -48,6 +48,63 @@ def _charge_line(dest: str, roll: int, models: str, token: str = "") -> str:
     )
 
 
+def _advance_line(dest: str, models: str) -> str:
+    return (
+        f"[10:00:02] E1 T1 P1 MOVE : Unit 1({dest[1:-1]}) ADVANCED from (50,50) to {dest} "
+        f"[Roll: 3] [Strategy: aggressive] [R:+0.0] [MODELS: {models}] [SUCCESS]\n"
+    )
+
+
+def test_verrou_le_marqueur_waaagh_ne_rend_pas_la_charge_invisible(tmp_path):
+    """VERROU PARSING : `[WAAAGH!]` porte un `!`, que la classe `[A-Za-z0-9_ ]` refusait.
+
+    Une charge sous Waaagh! ne matchait plus AUCUN des deux motifs de charge (branchement dans
+    `analyzer_core`, mesures dans `charge_handler`) : elle n'était ni comptée ni contrôlée, et la
+    position de l'unité restait figée sur un fantôme pour tout le reste de l'épisode. Le
+    symptôme est un SILENCE, donc l'ancre est positive : la charge doit être VUE (`total`).
+
+    Deux marqueurs cumulés, la forme la plus large que le moteur produise.
+    """
+    body = _charge_line("(70,50)", 7, "1#0@(70,50)", token=" [WAAAGH!] [FLY]")
+    log = tmp_path / "charge_waaagh.log"
+    log.write_text(_log(body, scale=5))
+    stats = an.parse_step_log(str(log))
+
+    assert stats["charge_invalid"][1]["total"] == 1, "charge invisible pour l'analyzer"
+    assert stats["charge_invalid"][1]["distance_over_roll"] == 0
+
+
+def test_verrou_une_charge_apres_advance_sous_waaagh_n_est_pas_une_faute(tmp_path):
+    """VERROU RÈGLE : le Waaagh! autorise la charge après Advance (08.04) et ne vit dans AUCUN
+    `unit_rules` — c'est une capacité de FACTION. Le seul témoin dans le journal est le marqueur.
+
+    Sans sa lecture, l'Intercessor de la fixture (aucune capacité `charge_after_advance`) fait
+    remonter une faute `charge_invalid.advanced` sur un coup parfaitement légal. La
+    CONTRE-ÉPREUVE, sans marqueur, doit au contraire compter la faute : sinon ce test passerait
+    aussi avec un contrôle désactivé.
+    """
+    body = _advance_line("(55,50)", "1#0@(55,50)") + _charge_line(
+        "(70,50)", 7, "1#0@(70,50)", token=" [WAAAGH!]"
+    )
+    log = tmp_path / "charge_waaagh_advance.log"
+    log.write_text(_log(body, scale=5))
+    stats = an.parse_step_log(str(log))
+
+    assert stats["charge_invalid"][1]["total"] == 1, "premisse : la charge doit etre vue"
+    assert stats["charge_invalid"][1]["advanced"] == 0, "faute inventee sur une charge legale"
+    assert stats["special_rule_usage"][("waaagh", "Intercessor")][1] == 1
+
+    # Contre-épreuve : même charge, marqueur retiré → la faute est bien signalée.
+    body_sans = _advance_line("(55,50)", "1#0@(55,50)") + _charge_line(
+        "(70,50)", 7, "1#0@(70,50)"
+    )
+    log_sans = tmp_path / "charge_sans_waaagh.log"
+    log_sans.write_text(_log(body_sans, scale=5))
+    stats_sans = an.parse_step_log(str(log_sans))
+
+    assert stats_sans["charge_invalid"][1]["advanced"] == 1
+
+
 def test_le_jet_de_charge_est_converti_a_l_echelle_du_run(tmp_path):
     """Le jet 2D6 est en POUCES, la distance en subhex : à x5 un jet de 7 vaut 35 subhex.
     Sans conversion, ce déplacement de 20 subhex depassait « 7 » et toute charge etait fautive."""

@@ -46,7 +46,7 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 >
 > **Conventions de tenue de ce document — les respecter en le mettant à jour :**
 > - **Un numéro d'entrée est attribué à vie.** Une entrée résolue descend en §0hist en gardant
->   son numéro ; un numéro n'est jamais réattribué. Prochaine entrée libre : `0.67` (`0.66` le 2026-08-04, `0.63`–`0.65` le 2026-08-03, `0.57`–`0.60` le 2026-08-02, `0.18`–`0.21` le 2026-07-20, `0.22` le 2026-07-21, `0.23`–`0.28` le 2026-07-22, `0.29` le 2026-07-22, `0.30` le 2026-07-26, `0.31` le 2026-07-27, `0.32`–`0.43` le 2026-07-28, `0.44`–`0.52` le 2026-07-29, `0.53`–`0.54` le 2026-07-30, `0.55`–`0.56` le 2026-08-02).
+>   son numéro ; un numéro n'est jamais réattribué. Prochaine entrée libre : `0.68` (`0.67` le 2026-08-07, `0.66` le 2026-08-04, `0.63`–`0.65` le 2026-08-03, `0.57`–`0.60` le 2026-08-02, `0.18`–`0.21` le 2026-07-20, `0.22` le 2026-07-21, `0.23`–`0.28` le 2026-07-22, `0.29` le 2026-07-22, `0.30` le 2026-07-26, `0.31` le 2026-07-27, `0.32`–`0.43` le 2026-07-28, `0.44`–`0.52` le 2026-07-29, `0.53`–`0.54` le 2026-07-30, `0.55`–`0.56` le 2026-08-02).
 > - **Un contenu d'état vit à UN seul endroit.** Une entrée à moitié résolue est **scindée** :
 >   la part résolue reste sous son numéro en §0hist, la part ouverte prend un numéro neuf ici,
 >   et les deux se renvoient l'une à l'autre. Seuls les avertissements et leçons sont dupliqués
@@ -77,6 +77,7 @@ tenues à jour et **ne doivent pas servir de référence** — les relire dans l
 
 | # | Entrée | Statut | Ordre | Prochaine action concrète |
 |---|---|---|---|---|
+| **§0.67** | Les **chantiers 01/03/04** (capacités, Oath of Moment, réserves) ont cassé les contrats d'observation ET d'action depuis le 2026-08-04 | 🔴 **OUVERT — aucun modèle courant, aucune mesure courante** | **1** (avant toute mesure) | Vérifié dans le code le 2026-08-07 : `obs_size` **20727** (20780 → 20752 → 20718 → 20725 → 20727) et `TOTAL_ACTION_SIZE` **1127**. Le dernier modèle (`ArmageddonAgent_12345_robust_0.8049.zip`, contrat 20780/1107) est **inchargeable** ⇒ le **0.82 de §0.14 ne décrit plus le code courant**, et le lot `L1`+`L2`+`L6` de §0.48 n'est plus ce qui *déclenche* le `--new` : il est **déjà dû**. Détail → §0.67. |
 | **§0.66** | Le **journal du gym mentait à l'analyzer**, et deux règles de mouvement n'étaient pas appliquées | ✅ **CORRIGÉ le 2026-08-04** — ⚠️ **deux correctifs CHANGENT le jeu** | **1** | Fermeture de §0.62 par le bas : sur un run de **600 épisodes**, l'analyzer rendait **2353 erreurs**. **1014** venaient d'un `[FLY]` qu'AUCUN émetteur du gym n'écrivait (l'analyzer pathfindait les escouades volantes au sol), **898** d'armes aux règles différentes fusionnées dans un même lot 04.03, **144** d'un contrôle close-quarters qui mesurait une adjacence d'ancre là où 10.06 exige l'engagement. **2353 → 1204 mesuré.** Mais **71 erreurs étaient VRAIES** : la charge (11.04) et le pile-in/consolidation (12.03/12.08) bornaient à vol d'oiseau et ne validaient que la case d'arrivée — les escouades **traversaient les murs**. Et 122 violations d'alternance venaient d'une charge **ratée** comptée comme un charge move (Fights First indu). Détail → §0.66. |
 | **§0.62** | L'**analyzer** mesurait à une autre échelle et avec d'autres règles que le run — et trois déplacements n'étaient pas contrôlés | ✅ **CORRIGÉ le 2026-08-03** — une conséquence à assumer | **1** | 206 erreurs → **0** sur un log de référence de 6 épisodes. L'échelle venait du `board_config` COURANT, pas de l'entête du log : un run x1 relu avec un `config.json` en x5 mesurait tout ×5 — il **fabriquait** des erreurs (132 faux « shoot at engaged enemy ») **et en masquait** (portées, budgets jamais dépassés). Même défaut, silencieux celui-là, sur `engagement_zone`, `distance_metric` et les toggles `move` : désormais journalisés en entête `Run rules:`. Charge, pile-in/consolidation et move réactif n'avaient **aucun** contrôle conforme (jet non converti, mesure d'ancre, pas de pathfinding). **Conséquence : aucun verdict d'analyzer antérieur ne vaut**, et deux correctifs MOTEUR changent le jeu (move réactif). Détail → §0.62. |
 | **§0.61** | Le garde **anti-runaway** était MUET, et son compteur d'épisodes divergeait | ✅ **CORRIGÉ le 2026-08-03** | **1** | Une troncature signale une BOUCLE dans le moteur, pas une fin de partie — or son diagnostic n'existait que dans le `print` d'un worker (noyé à `n_envs=48`) et le compteur persisté ne la comptait pas, alors que le run s'arrête dessus. Nouveau scalaire `00_critical/t_truncated_episodes`, diagnostic complet en `truncations.jsonl`, bilan imprimé en fin de run. Détail → §0.61. |
@@ -89,7 +90,7 @@ tenues à jour et **ne doivent pas servir de référence** — les relire dans l
 | **§0.57** | Les rampes par-épisode du moteur avançaient **`n_envs` fois trop lentement** | ✅ **CORRIGÉ le 2026-08-02** — reste une conséquence à assumer | **1** | Le compteur d'épisodes du moteur est LOCAL à un worker ; il était divisé par le total GLOBAL. À `n_envs=48`, la rampe de déploiement est restée collée à `active_ratio_start` sur TOUS les runs vectorisés (mesuré : `s_deploy_active_share` 0.3040 pour 0.496 attendus). Même défaut sur `deployment_random_mix`. **Conséquence : aucune mesure passée n'a été produite avec la rampe annoncée** — §0.29 et §0.46 pt 2 sont amendés. Détail → §0.57. |
 | **§0.56** | Instrumentation : usage par **famille d'action**, et **classement bot-contre-bot** | ✅ **LIVRÉ le 2026-08-02** — reste à s'en servir | **2** | Deux angles morts fermés, aucun ne coûte de ré-entraînement. (1) `actions/share_<famille>` publie la part de chaque DÉCISION dans ce que l'agent joue : une dimension jamais choisie ou toujours choisie est cassée quel que soit le win-rate — c'est ce qui rend un lot de tranches P3 diagnosticable **en un seul run**. (2) `scripts/bot_ranking.py` fait s'affronter les bots **sans agent** : sans lui, juger un bot exigeait un modèle entraîné, donc une mesure circulaire — et §0.55 était irréalisable. Détail → §0.56. |
 | **§0.55** | Le **holdout d'évaluation** `TacticalBot` est DANS l'enveloppe d'entraînement — effet plafond | ✅ **LIVRÉ le 2026-08-04 — le mètre est GELÉ** | **1** (avant toute mesure de référence) | `tactical` gelé à **`w_objective 2.0`** (mesuré sur **x1**) : l'agent passe de **0.89 à 0.72** contre lui, et le bot de **dernier (0.357) à premier (0.636)** sur 6. `combined` inchangé à 0.8200 — le holdout pèse 0.0, c'est le contrôle que son statut est intact. ✅ Croisement `bot_eval/faction/<faction>/vs_<bot>` publié (méthode dédiée, dérivé du tally unique). 🔴 **Deux des trois leviers de la spec n'avaient aucune prise** : `w_enemy` est INERTE pour ce bot (mesuré + verrou), et le pas `0.5 → 0.8` tombait dans la partie morte d'une réponse en MARCHE. 🔴 **Piège à retenir : `--training-config` ne choisit PAS le plateau** (`config.json` → x5 ; les évals de référence passent `--resolution 1`) — une campagne entière a été jetée pour ça, et en x5 le diagnostic s'inversait. Détail → §0.55. |
-| **§0.14** | Re-mesure du run — win-rate par matchup | ✅ **MESURE OBTENUE le 2026-08-03** | — | Run de **200 000 épisodes** (2026-08-02 12 h 26 → 2026-08-03 02 h 05, 19 points d'éval, 820 k → 12,1 M steps). `eval_bots/combined_win_rate` **0,283 → max 0,837 → 0,743**. Éval rejouée le 2026-08-03 sur le snapshot ROBUSTE (`robust_0.8049`), APRÈS §0.64/§0.65 : **combined 0.8200**, `tactical` 0.89, `defensive` 0.87, `greedy` 0.84, `adaptive` 0.83, **`control` 0.82**, **`value_trade` 0.74** (le pire), **0 troncature**. Le seuil de gating `vs_control ≥ 0.50` est **franchi** — le **0.04 du run 4 est périmé**. ⚠️ 0,743 → 0,820 est un écart best-contre-final, PAS l'effet de §0.64. Détail → §0.14. |
+| **§0.14** | Re-mesure du run — win-rate par matchup | ✅ **MESURE OBTENUE le 2026-08-03** — ⏳ **PÉRIMÉE depuis les chantiers 01/03/04** : le modèle mesuré n'est plus chargeable, cf. [§0.67](#s0.67) | — | Run de **200 000 épisodes** (2026-08-02 12 h 26 → 2026-08-03 02 h 05, 19 points d'éval, 820 k → 12,1 M steps). `eval_bots/combined_win_rate` **0,283 → max 0,837 → 0,743**. Éval rejouée le 2026-08-03 sur le snapshot ROBUSTE (`robust_0.8049`), APRÈS §0.64/§0.65 : **combined 0.8200**, `tactical` 0.89, `defensive` 0.87, `greedy` 0.84, `adaptive` 0.83, **`control` 0.82**, **`value_trade` 0.74** (le pire), **0 troncature**. Le seuil de gating `vs_control ≥ 0.50` est **franchi** — le **0.04 du run 4 est périmé**. ⚠️ 0,743 → 0,820 est un écart best-contre-final, PAS l'effet de §0.64. Détail → §0.14. |
 | **[§9](V11_phaseA.md#s9)** | Phase A' — P2 + P3-0/1/2 | 🟢 **LIVRÉS ET MERGÉS sur `main`** — restent **P3-3→8**, **P4**, **P5** | **2** | ⚠️ Aucune des quatre livraisons n'est **MESURÉE**. ⚠️ P3-0 est **inerte dans le training** (aucun roster SM/Ork ne porte de rule choice). Détail → §0.42 et §0.43 (en §0hist), et [§9](V11_phaseA.md#s9). |
 | **§0.44** | Tête pointeur de **déploiement** — les slots 4-8 n'ont pas de tête dédiée | 🟠 **OUVERT** — reporté après la mesure de référence (arbitrage utilisateur du 2026-07-29) | **3** | Les ids 4-8 tombent dans la plage des cellules de move (`MOVE_CELL_BASE = 0`) : leurs logits sortent de la **conv 1×1** (`_move_logits`), pas d'une tête dédiée ; `deploy_emb` n'atteint le calcul que par le **conditionnement du tronc**. Ajouter un `deploy_query_net`, jumeau de `choice_query_net` — ce qui oblige à lire la phase dans la policy. Élément `L1` du lot §0.48 ; `L11` (`N_DEPLOY_SLOTS`) à trancher **avant**. Détail → §0.44. |
 | **§0.48** | Inventaire des chantiers qui cassent un contrat + **périmètre du lot de ré-entraînement** | 🟠 **OUVERT** — le lot = **`L1` + `L2` + `L6`** + **[§0.64](#s0.64)** (LoS de déploiement alignée le 2026-08-03 ; ⚠️ **n'impose PLUS de run à elle seule** — mesuré le 2026-08-03 : le modèle d'avant joue à 0.82 sur `main` d'après, cf. §0.14 — elle **voyage** avec `L1`/`L2`/`L6`) | **4** | ✅ **Le prérequis d'ordre est LEVÉ au 2026-08-02** : les quatre chantiers exigés avant la mesure de référence — rampe de déploiement (§0.46 pt 2), FLY 21.03 (§0.49), bots d'éval (§0.47 É4), 01.07 (§0.50) — sont **tous mergés**. Reste l'arbitrage 2 (réserver la place des règles pas encore implémentées, toute règle rendue vivante changeant `obs_size`). Détail → §0.48. |
@@ -99,13 +100,29 @@ tenues à jour et **ne doivent pas servir de référence** — les relire dans l
 | **§0.53** | Refonte du panel de bots — les adversaires ignoraient la condition de victoire | 🟢 **LIVRÉ ET MERGÉ** — plus aucun chantier ouvert (arbitrage du 2026-08-02) | — (à lire avant d'interpréter tout win-rate) | 🟢 **ARBITRAGE UTILISATEUR DU 2026-08-02 — (a) et (b) SONT SANS OBJET JUSQU'À LA DÉMO MÉTIER** : le travail porte sur **2 rosters seulement**, donc ni les matrices de matchups par roster ni le recalibrage des seuils de gate ne sont d'actualité. **Ne pas les re-signaler comme des chantiers ouverts.** Reste vrai et à retenir : (c) **aucun win-rate antérieur au 2026-07-30 n'est comparable** à un win-rate postérieur. ⏳ Le panel a **encore évolué depuis** : un **cinquième bot `ValueTradeBot`** a été ajouté, `bot_eval_weights` = `control` 0.40 / `value_trade`, `adaptive`, `greedy`, `defensive` 0.15 / `tactical` 0. Détail → §0.53 (en §0hist). |
 | **§0.19** | Revérifier T1→T5 et la section 9 ligne à ligne | ⏳ **PARTIEL** | continu | T1 soldé (§0.19.1→§0.19.3) ; section 9 auditée le 2026-07-24 (→ [§9.0](V11_phaseA.md#s9.0)) ; **T2→T5 relus le 2026-07-29** — les écarts vivent en **[§0.47](#s0.47)**, pas ici. Reste ouvert : les ✅ de T2→T5 ne sont revérifiés que **par LECTURE** (aucune exécution), et la conformité littérale de T2 est indécidable. ⚠️ Sa **section** est restée en §0hist pour ne pas casser ses sous-ancres `§0.19.1`→`§0.19.3`. |
 
-✅ **Contrôle de conformité du 2026-08-02** (vérification par lecture, PAS une livraison —
-aucune ligne de code touchée) :
-- `obs_size` : `ObservationBuilder.SQUAD_OBS_SIZE_TARGET` = **20780**, et les **7** profils de
-  `config/agents/ArmageddonAgent/ArmageddonAgent_training_config.json` portent **20780**
-  (`x1_long` **et `x1_selfplay`** ajoutés depuis la relecture du 2026-07-29 ; cf. §0.59).
-- `macro_intents.TOTAL_ACTION_SIZE` = **1107** ; `DEPLOY_SLOTS` = ids **4..8** ;
-  `spatial_grid.GRID_CHANNELS` = **9** ; `MOVE_CELL_BASE` = 0 / `MOVE_CELL_COUNT` = 1024.
+✅ **Contrôle de conformité du 2026-08-07** (vérification par lecture + exécution, PAS une
+livraison — aucune ligne de code touchée ; il REMPLACE le contrôle du 2026-08-02, dont les
+chiffres de contrat sont périmés) :
+- `obs_size` : `ObservationBuilder.SQUAD_OBS_SIZE_TARGET` = **20727**, et les **7** profils de
+  `config/agents/ArmageddonAgent/ArmageddonAgent_training_config.json` portent **20727**
+  (`x1`, `x1_long`, `x1_selfplay`, `x1_debug`, `x5_new`, `x5_append`, `x5_debug`).
+- `squad_obs_shapes()` : **24** clés ; `sum(prod(shape))` grille exclue = **20727**, égale à
+  `SQUAD_OBS_SIZE_TARGET` (exécuté).
+- `macro_intents.TOTAL_ACTION_SIZE` = **1127** (dont `OATH_SLOT_BASE` 1107, 20 slots) ;
+  `DEPLOY_SLOTS` = ids **4..8** ; `spatial_grid.GRID_CHANNELS` = **9** ;
+  `MOVE_CELL_BASE` = 0 / `MOVE_CELL_COUNT` = 1024.
+- `pointer_policy` porte **5** requêtes : `query_net`, `charge_query_net`, `fight_query_net`,
+  `choice_query_net`, `oath_query_net`. **Toujours aucun `deploy_query_net`** (§0.44 confirmée).
+- Les slots d'Oath sont **consommés** (chantier 03) : `action_decoder` les décode
+  (`OATH_SLOTS`, `OATH_SLOT_BASE`) et `env_wrappers` les câble à `pending_oath_selection` — la
+  mention « aucun consommateur avant le chantier 03 » de §0.48 est périmée.
+- Livraisons ✅ des entrées ci-dessous **revérifiées présentes dans le code** : `ai/run_state.py`
+  (§0.58), `ai/truncation_log.py` + `t_truncated_episodes` (§0.61), `Run rules:` dans
+  `ai/step_logger.py`/`ai/analyzer*` (§0.62), `DEPLOYMENT_LOS_MODEL_VERSION` (§0.64),
+  `batch_hex_line_steps`/`batch_ground_hex_can_see` (§0.65), `validate_bot_eval_worker_params`
+  (§0.60), `actions/share_` + `scripts/bot_ranking.py` (§0.56), `bot_eval/faction/` et
+  `tactical.w_objective = 2.0` gelé (§0.55), `ValueTradeBot` + poids `control 0.40` /
+  `value_trade`, `adaptive`, `greedy`, `defensive` 0.15 / `tactical` 0.0 (§0.53).
 - `raw_action_int % len(options)` : **absent du code vif** (ne subsiste que dans des commentaires
   historiques) — conforme à §0.42.
 - `pointer_policy` : `query_net`, `charge_query_net`, `fight_query_net`, `choice_query_net`
@@ -121,11 +138,11 @@ aucune ligne de code touchée) :
 - ✅ **Somme des formes VÉRIFIÉE PAR EXÉCUTION le 2026-08-02** (elle était jusque-là la seule
   ligne déduite par lecture) : `sum(prod(shape))` sur les **20** clés de `squad_obs_shapes()`,
   grille exclue, = **20780** — égale à `SQUAD_OBS_SIZE_TARGET`.
-- ⏳ **Périmé depuis le 2026-08-04 (chantier 01)** — ce contrôle reste vrai À SA DATE, il ne
-  décrit plus l'état courant : `obs_size` **20752** (les 13 bits `rule_<effet>` sont devenus
-  8 slots d'ids de capacité + 4 d'ids de statut), `TOTAL_ACTION_SIZE` **1127** (+ 20 slots
-  d'Oath of Moment), **24** clés dans `squad_obs_shapes()`, et `pointer_policy` porte une
-  cinquième requête (`oath_query_net`).
+- ⏳ **Historique du contrat** (chaque valeur a été l'état courant à sa date) : **20780**
+  (2026-08-02) → **20752** (chantier 01, les 13 bits `rule_<effet>` devenus 8 slots d'ids de
+  capacité + 4 d'ids de statut) → **20718** (chantier 04, réserves) → **20725** (chantier 03,
+  capacités de faction) → **20727** (commit `02454a34`, 2026-08-06). `TOTAL_ACTION_SIZE`
+  1107 → **1127** au chantier 01. Conséquence en **§0.67**.
 - ⚠️ **Non revérifié le 2026-08-02** : les suites de tests (la vérification large appartient à
   l'utilisateur).
 
@@ -159,6 +176,33 @@ jour 2026-07-29** : la section 9 a été auditée le 2026-07-24 ([§9.0](V11_pha
 **T2→T5 ont été relus le 2026-07-29 — 9 écarts, verdicts et réserves en [§0.47](#s0.47)** ; cette
 relecture s'est faite **par lecture seule, sans aucune exécution**, elle ne vaut donc pas
 mutation-test.
+
+<a id="s0.67"></a>
+### 0.67 Les chantiers 01/03/04 ont cassé les DEUX contrats — plus aucun modèle ni aucune mesure ne décrit le code courant — 🔴 OUVERT (2026-08-07)
+
+**Constat, vérifié sur le code le 2026-08-07** (aucune ligne touchée) :
+
+| Contrat | Valeur au moment de la mesure §0.14 | Valeur à HEAD | Cassé par |
+|---|---|---|---|
+| `obs_size` | 20780 | **20727** | chantier 01 (20752), chantier 04 réserves (20718), chantier 03 capacités de faction (20725), `02454a34` (20727) |
+| `TOTAL_ACTION_SIZE` | 1107 | **1127** | chantier 01 (20 slots d'Oath of Moment, consommés au chantier 03) |
+| Architecture policy | 4 requêtes | **5** (`oath_query_net`) | chantier 01 |
+
+**Ce que cela invalide, factuellement** :
+- `ai/models/ArmageddonAgent/ArmageddonAgent_12345_robust_0.8049.zip` (et tous les autres) porte
+  le contrat 20780/1107 : il est **inchargeable** par le code courant. Le dernier artefact du
+  dossier date du **2026-08-03** ; le seul run postérieur est un `x1_debug` du 2026-08-05
+  (`tensorboard/x1_debug_ArmageddonAgent`).
+- Donc **le `combined 0.82` de [§0.14](#s0.14) ne mesure plus le code courant** — ni le gel du
+  mètre de [§0.55](#s0.55), acquis le 2026-08-04 sur ce même modèle. La première mesure de
+  RÉFÉRENCE reste à produire, et elle le sera nécessairement par un `--new`.
+- **[§0.48](#s0.48) change de nature** : le lot `L1`+`L2`+`L6` n'est plus ce qui *déclenche* le
+  ré-entraînement (il est déjà dû). L'arbitrage « un seul ré-entraînement pour tout le lot » garde
+  son sens, mais son échéance est maintenant **le prochain run, quel qu'il soit** : tout ce qui
+  doit voyager avec lui doit être livré **avant** ce run, sans quoi il faudra en payer un second.
+
+**Prochaine action concrète** : arbitrer si `L1`/`L2`/`L6` (et l'arbitrage 2 de §0.48, réserver la
+place des règles pas encore vivantes) entrent dans ce run — puis lancer le `--new`.
 
 <a id="s0.66"></a>
 ### 0.66 Le JOURNAL DU GYM mentait à l'analyzer, et deux règles de mouvement n'étaient pas appliquées — ✅ CORRIGÉ (2026-08-04)
@@ -896,8 +940,13 @@ ambiguïté.
 ### 0.59 Régime d'entraînement en DEUX PHASES — `decay_fraction` et le profil `x1_selfplay` — 🟠 OUVERT (livré, JAMAIS EXÉCUTÉ) (2026-08-02)
 
 Deux changements de **régime** livrés le 2026-08-02, tous deux **non mesurés**. Ils ne cassent aucun
-contrat d'observation (`obs_size` inchangé à 20828) : ce sont des réglages de run, pas des
-changements d'architecture.
+contrat d'observation (à leur date, `obs_size` inchangé — la valeur **20828** écrite ici était
+FAUSSE, le contrat valait 20780 le 2026-08-02 ; à HEAD il vaut **20727**, cf. [§0.67](#s0.67)) :
+ce sont des réglages de run, pas des changements d'architecture.
+
+⏳ **Revérifié le 2026-08-07 — TOUJOURS OUVERT, à l'identique** : `ai/train.py` **lève** encore
+hors du chemin de rotation de scénarios (`self_play_is_enabled` → `raise`), et
+`ai/models/ArmageddonAgent/selfplay_snapshot.zip` **n'existe pas**. Aucune phase 2 n'a tourné.
 
 **1. `decay_fraction` — les rampes s'achèvent AVANT la fin du run.** `ramp_episode_span` /
 `schedule_progress` (`ai/training_callbacks.py`) font qu'une rampe se déroule intégralement sur

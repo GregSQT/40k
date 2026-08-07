@@ -94,7 +94,7 @@ seconde table d'embedding. Les deux domaines sont independants : un `obs_id` de 
 
 ## 2 bis) Capacites de FACTION — Waaagh! et Oath of Moment
 
-Elles ne passent NI par `config/unit_rules.json`, NI par `static UNIT_RULES`, et c'est
+Elles ne s'ACCORDENT NI par `config/unit_rules.json`, NI par `static UNIT_RULES`, et c'est
 deliberе : une capacite de faction s'applique uniformement a toutes les unites de l'armee qui
 la portent. L'inscrire par unite reviendrait a repeter les memes ids sur 28 entites, a faire
 deborder `UNIT_ABILITY_SLOTS`, et a n'apporter aucune information — le reseau reconstitue
@@ -110,6 +110,23 @@ l'effet a partir de « cette unite est orke » et de « Waaagh! actif », deux f
 | La decision | 08.04, `command_handlers.command_step_command_abilities` |
 | Les predicats d'application | `engine/game_state.py` (`waaagh_applies_to_unit`, `effective_invul_save`, `oath_hit_reroll_applies`, `oath_wound_roll_bonus`, `unit_can_charge_after_advance`) |
 | L'observation | 6 drapeaux de `GLOBAL_BIN_FIELDS` + le statut `oath_target` (`config/unit_statuses.json`) |
+| Le nom affiche | `OATH_ABILITY_DISPLAY_NAME` / `WAAAGH_ABILITY_DISPLAY_NAME` (`engine/game_state.py`) |
+| La DESCRIPTION du log | entrees `oath_of_moment` / `waaagh` de `config/unit_rules.json` |
+
+**Les deux entrees de `config/unit_rules.json` n'accordent RIEN.** Elles ne portent qu'un `name`
+et une `description` : c'est le registre que le Game Log interroge pour accrocher une bulle
+d'aide a un token `[...]` (`GameLog.tsx`, lookup par nom NORMALISE — majuscules, `!` compris).
+Aucune datasheet ne les reference, et le moteur ne les lit jamais.
+
+**Les tokens du log** — chaque effet qui modifie une valeur AFFICHEE nomme sa capacite, sinon la
+ligne montre un ecart sans en donner la cause (les valeurs sont nettes) :
+
+| Token | Ou | Ce qu'il annonce |
+|---|---|---|
+| `[OATH OF MOMENT]` | `Hit:X+RR` / `Wound:X+` | relance de touche, +1 au jet de blessure |
+| `[WAAAGH!]` | `Shots:N` / `Wound:X+` | +1 Attaque, +1 Force (melee seulement) |
+| `[WAAAGH!]` | `Save:X+` | invulnerable 5+ octroyee a la CIBLE, et seulement si elle AMELIORE le seuil affiche |
+| `[WAAAGH!]` | `CHARGED [...]` | charge apres Advance autorisee par le Waaagh! (a defaut d'une capacite de datasheet) |
 
 **`FACTION_KEYWORDS`** suit exactement la convention de `UNIT_KEYWORDS` : une liste d'objets
 `{ keywordId: "..." }`, exigee par `_build_enhanced_unit`, et unie sur l'escouade par la regle

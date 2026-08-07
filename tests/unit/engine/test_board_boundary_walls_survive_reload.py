@@ -48,7 +48,7 @@ def _make_env() -> W40KEngine:
     )
 
 
-def _expected_phantoms(game_state: dict) -> set[tuple[int, int]]:
+def _expected_phantoms(game_state: dict) -> frozenset[tuple[int, int]]:
     """Les demi-cases attendues, et la preuve que l'echantillon n'est pas vide (VERT VACANT)."""
     cols = int(game_state["board_cols"])
     rows = int(game_state["board_rows"])

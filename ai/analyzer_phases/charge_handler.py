@@ -42,8 +42,14 @@ def handle_charge(
     # `*` et non `?` : la ligne peut porter DEUX marqueurs — le nom de la règle qui a permis la
     # charge, ET `[FLY]` (21.03). Avec `?`, la charge d'une unité volante bénéficiant d'une
     # relance n'était plus reconnue du tout, donc plus contrôlée. Même piège que sur le move.
+    #
+    # `[^\]]+` et non une classe de caractères énumérée : un nom de capacité n'est pas un
+    # identifiant. `[WAAAGH!]` (capacité de faction) porte un `!`, qui sortait de
+    # `[A-Za-z0-9_ ]` — la ligne devenait INVISIBLE pour l'analyzer, donc aucune charge comptée,
+    # aucun contrôle `charge_invalid`, et la position de l'unité figée sur un fantôme. Le
+    # marqueur de tir (`SHOT`) utilise déjà cette forme : c'est celle-ci qui est la référence.
     charge_match = re.search(
-        r'Unit (\d+)\s*\((\d+),\s*(\d+)\)\s+CHARGED(?:\s+(?:\([A-Za-z0-9_ ]+\)|\[[A-Za-z0-9_ ]+\]))*\s+Unit (\d+)(?:\s*\((\d+),\s*(\d+)\))?\s+from \((\d+),\s*(\d+)\)\s+to \((\d+),\s*(\d+)\)',
+        r'Unit (\d+)\s*\((\d+),\s*(\d+)\)\s+CHARGED(?:\s+(?:\([^)]+\)|\[[^\]]+\]))*\s+Unit (\d+)(?:\s*\((\d+),\s*(\d+)\))?\s+from \((\d+),\s*(\d+)\)\s+to \((\d+),\s*(\d+)\)',
         action_desc
     )
     if charge_match:
@@ -58,7 +64,17 @@ def handle_charge(
         if charge_unit_id in state.units_advanced:
             charge_unit_type = require_key(state.unit_types, charge_unit_id)
             unit_rules = require_key(config.unit_rules_by_type, charge_unit_type)
-            if "charge_after_advance" in unit_rules:
+            # Waaagh! (08.04) : DEUXIÈME source d'éligibilité à la charge après Advance, à côté
+            # de la capacité de datasheet — et elle ne vit dans AUCUN `unit_rules` (capacité de
+            # FACTION, cf. Documentation/Unit_rules.md). Le seul témoin dans le journal est le
+            # marqueur que le moteur écrit sur la ligne. Sans cette lecture, toute charge orke
+            # après avance remonte en `charge_invalid.advanced` : une faute inventée, sur un
+            # coup parfaitement légal.
+            _waaagh_charge = re.search(r'\[WAAAGH!\]', action_desc, re.IGNORECASE) is not None
+            if _waaagh_charge:
+                key = ("waaagh", charge_unit_type)
+                stats['special_rule_usage'][key][player] += 1
+            elif "charge_after_advance" in unit_rules:
                 key = ("charge_after_advance", charge_unit_type)
                 stats['special_rule_usage'][key][player] += 1
             else:
