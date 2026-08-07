@@ -541,6 +541,11 @@ def test_in_engine_armageddon_flying_units_fly_and_pay_for_it():
                 continue
             uid = str(unit["id"])
             utype = str(unit["unitType"])
+            # 21.03 confie la déclaration au « ACTIVE player » : chaque escouade est donc
+            # interrogée pendant SON tour. La sonde balaie les volants des DEUX camps — sans
+            # cette ligne, elle demanderait au joueur 2 de déclarer pendant le tour du joueur 1,
+            # un état que le pool d'activation ne produit jamais.
+            gs["current_player"] = int(unit["player"])
 
             # 1. AVANT toute déclaration : rien n'est acquis. C'est ce que `L6` change — le
             #    keyword FLY n'emporte plus la traversée, il ouvre seulement le choix.
