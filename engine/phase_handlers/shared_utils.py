@@ -893,6 +893,27 @@ def _build_models_for_unit(
     squad_models[unit_id] = model_ids
 
 
+def _visual_meta(source: Dict[str, Any], role: Any) -> Dict[str, Any]:
+    """Profil visuel exposé au frontend, lu indifféremment d'une unité ou d'une entrée de
+    ``models_cache`` (mêmes noms de clés). DÉFINITION UNIQUE : ``build_units_cache`` compare
+    la meta d'unité à celle de chaque figurine pour détecter l'hétérogénéité — deux littéraux
+    divergents rendraient toutes les escouades hétérogènes sans lever la moindre erreur.
+
+    ``role`` est passé à part : dérivé des UNIT_RULES côté unité, déjà calculé côté figurine.
+    ``unit_type`` alimente l'initiale affichée à défaut d'illustration (une figurine hétérogène
+    — personnage attaché, sergent — ne doit pas hériter de l'initiale de l'escouade).
+    """
+    return {
+        "DISPLAY_NAME": source.get("DISPLAY_NAME"),
+        "unit_type": source.get("unitType"),
+        "ICON": source.get("ICON"),
+        "ICON_SCALE": source.get("ICON_SCALE"),
+        "BASE_SHAPE": source.get("BASE_SHAPE"),
+        "BASE_SIZE": source.get("BASE_SIZE"),
+        "role": role,
+    }
+
+
 def build_units_cache(game_state: Dict[str, Any]) -> None:
     """
     Build units_cache from game_state["units"].
@@ -1052,25 +1073,9 @@ def build_units_cache(game_state: Dict[str, Any]) -> None:
         # au frontend uniquement pour les escouades hétérogènes (au moins une
         # figurine dont le profil visuel diffère de l'unité parente, ex.
         # Sergeant / personnage attaché). Sinon le frontend retombe sur l'unité.
-        unit_meta = {
-            "DISPLAY_NAME": unit.get("DISPLAY_NAME"),
-            "ICON": unit.get("ICON"),
-            "ICON_SCALE": unit.get("ICON_SCALE"),
-            "BASE_SHAPE": unit.get("BASE_SHAPE"),
-            "BASE_SIZE": unit.get("BASE_SIZE"),
-            # role de la figurine (leader/support/sergeant/special_weapon/None) :
-            # exposé au frontend pour le tri d'affichage du menu de déploiement.
-            "role": _derive_model_role(require_key(unit, "UNIT_RULES")),
-        }
+        unit_meta = _visual_meta(unit, _derive_model_role(require_key(unit, "UNIT_RULES")))
         models_meta = {
-            mid: {
-                "DISPLAY_NAME": models_cache[mid]["DISPLAY_NAME"],
-                "ICON": models_cache[mid]["ICON"],
-                "ICON_SCALE": models_cache[mid]["ICON_SCALE"],
-                "BASE_SHAPE": models_cache[mid]["BASE_SHAPE"],
-                "BASE_SIZE": models_cache[mid]["BASE_SIZE"],
-                "role": models_cache[mid]["role"],
-            }
+            mid: _visual_meta(models_cache[mid], models_cache[mid]["role"])
             for mid in squad_models.get(unit_id, [])  # get allowed
             if mid in models_cache
         }

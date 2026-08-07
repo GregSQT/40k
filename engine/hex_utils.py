@@ -10,10 +10,12 @@ All functions are O(1) per call unless documented otherwise.
 
 import heapq
 import math
+from functools import lru_cache
 from typing import (
     Any,
     Callable,
     Dict,
+    FrozenSet,
     Iterator,
     List,
     Literal,
@@ -268,6 +270,36 @@ def dilate_hex_set_unbounded(
 def is_in_bounds(col: int, row: int, cols: int, rows: int) -> bool:
     """Check if (col, row) is within [0, cols) × [0, rows)."""
     return 0 <= col < cols and 0 <= row < rows
+
+
+def is_phantom_bottom_hex(col: int, row: int, rows: int) -> bool:
+    """Vrai si (col, row) est une demi-case fantôme du bord bas du plateau.
+
+    En offset odd-q (§2.2), les colonnes impaires sont décalées d'une demi-ligne vers
+    le bas : leur dernière case déborde sous le bord du plateau et n'existe donc pas.
+    Elle est dans les bornes de `is_in_bounds` mais n'est pas jouable.
+
+    Prédicat O(1) sans allocation : à privilégier dans les chemins chauds.
+    Pour l'ensemble complet — à unir aux murs — voir `phantom_bottom_hexes`.
+    """
+    return row == rows - 1 and col % 2 == 1
+
+
+@lru_cache(maxsize=8)
+def phantom_bottom_hexes(cols: int, rows: int) -> FrozenSet[Tuple[int, int]]:
+    """Ensemble des demi-cases fantômes du bord bas (cf. `is_phantom_bottom_hex`).
+
+    SOURCE UNIQUE : tout code qui construit ou reconstruit `game_state["wall_hexes"]`
+    doit unir cet ensemble aux murs du scénario, sinon les figurines peuvent être
+    déployées sur des cases inexistantes et les tirs les traversent.
+
+    Mémoïsé et immuable : l'analyzer le réunit aux murs à CHAQUE contrôle de LoS
+    (une fois par tir de chaque ligne du step.log), le plateau ne changeant jamais
+    de taille en cours de run.
+    """
+    return frozenset(
+        (col, rows - 1) for col in range(cols) if is_phantom_bottom_hex(col, rows - 1, rows)
+    )
 
 
 # ---------------------------------------------------------------------------

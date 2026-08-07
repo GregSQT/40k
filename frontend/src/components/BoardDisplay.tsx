@@ -2,6 +2,7 @@
 
 import * as PIXI from "pixi.js-legacy";
 import type React from "react";
+import { boardWorldSize } from "../utils/hexFootprint";
 import {
   type HexUnionMaskLayout,
   tryBuildHexUnionMaskPolygons,
@@ -2115,8 +2116,12 @@ export const drawBoard = (
     highlightContainer.name = "highlights";
     /** Au-dessus de l’overlay LoS survol (BoardPvp, zIndex ~40), sous les unités (2000) et la ligne/icône de prévisualisation (~848–900). */
     highlightContainer.zIndex = 120;
-    const TOTAL_WIDTH = BOARD_COLS * HEX_HORIZ_SPACING + HEX_WIDTH / 2 + 2 * MARGIN;
-    const TOTAL_HEIGHT = BOARD_ROWS * HEX_VERT_SPACING + HEX_VERT_SPACING / 2 + 2 * MARGIN;
+    const { width: TOTAL_WIDTH, height: TOTAL_HEIGHT } = boardWorldSize(
+      BOARD_COLS,
+      BOARD_ROWS,
+      HEX_RADIUS,
+      MARGIN
+    );
     const backgroundImagePath = boardConfig.display?.background_image?.trim();
     const backgroundImageAlpha =
       typeof boardConfig.display?.background_image_alpha === "number"

@@ -26,6 +26,7 @@ import {
   resolveBaseSizeForUnitDisplay,
 } from "../utils/hexFootprint";
 import { drawDetectionNumberBadgeBackground, drawHiddenEyeBadge } from "../utils/hiddenBadgeDraw";
+import { enqueueForIconLoad } from "../utils/iconLoadQueue";
 import {
   drawBattleShockBadge,
   drawMoveStatusBadge,
@@ -38,6 +39,7 @@ import {
   getNonRoundBasePixelLayout,
   getNonRoundIconRadius,
   getSquareCornerRadiusPx,
+  getUnitInitial,
   getUnitTokenTopExtentY,
 } from "../utils/unitBaseDisplay";
 import {
@@ -71,7 +73,7 @@ const circularIconTextureCache = new Map<string, PIXI.Texture>();
 
 /**
  * Renvoie la texture circulaire en cache pour ``iconPath`` ; ``null`` si la texture source
- * n'est pas encore chargée (l'appelant réessaie via ``baseTexture.once('loaded')``).
+ * n'est pas encore chargée (l'appelant réessaie via ``enqueueForIconLoad``).
  */
 function getCircularIconTexture(
   source: PIXI.Texture,
@@ -105,6 +107,9 @@ function getCircularIconTexture(
  */
 export interface ModelVisualMeta {
   DISPLAY_NAME?: string;
+  /** Type PROPRE à la figurine (personnage attaché, sergent) : source de l'initiale affichée
+   * à défaut d'illustration. Absent → l'initiale retomberait sur le type de l'escouade. */
+  unit_type?: string;
   ICON?: string;
   ICON_SCALE?: number;
   BASE_SHAPE?: "round" | "oval" | "square";
@@ -1285,6 +1290,19 @@ export class UnitRenderer {
           isPreview ? { resourceOptions: { crossorigin: "anonymous" } } : undefined
         );
 
+        // ``ICON`` est TOUJOURS renseigné côté moteur (require_key), mais l'asset peut manquer sur
+        // le disque : ``PIXI.Texture.from`` ne lève alors RIEN (le 404 est asynchrone) et le sprite
+        // reste vide. Tant que la texture n'est pas ``valid``, on pose donc l'initiale du type SOUS
+        // le sprite (même zIndex, insérée avant lui). Illustration présente → elle est recouverte dès
+        // le chargement, et les rendus suivants (texture en cache, ``valid``) ne la dessinent plus.
+        // Asset absent → ``valid`` reste false pour toujours, l'initiale reste visible.
+        // Volontairement SANS écouteur ``error`` ni cache d'échecs : un écouteur par figurine et par
+        // rendu s'accumulerait sur la BaseTexture partagée (fuite) et redessinerait, au moment du
+        // 404, une initiale à chaque position capturée depuis (initiales fantômes).
+        if (!texture.baseTexture.valid) {
+          this.drawUnitInitial(iconZIndex);
+        }
+
         const nonRoundIconR = getNonRoundIconRadius(unit, HEX_RADIUS);
         // Source unique : ratio partagé (cf. getIconDiameterRatio), × HEX_RADIUS.
         const iconDiameter = getIconDiameterRatio(unit, ICON_SCALE) * HEX_RADIUS;
@@ -1296,18 +1314,22 @@ export class UnitRenderer {
         // Base ronde : rogner l'illustration carrée en disque (rayon = rayon de collision) via la
         // texture circulaire mutualisée → les coins ne débordent plus sur les voisines tangentes.
         if (nonRoundIconR == null) {
-          const circular = getCircularIconTexture(texture, iconPath, this.props.app.renderer);
+          // Renderer capturé en local : la closure ci-dessous survit dans ``iconLoadQueue`` tant que
+          // l'icône ne charge pas ; passer par ``this`` y retiendrait tout ``UnitRendererProps``
+          // (modelCenters, modelMetas, callbacks) d'un rendu périmé.
+          const renderer = this.props.app.renderer;
+          const circular = getCircularIconTexture(texture, iconPath, renderer);
           if (circular) {
             sprite.texture = circular;
           } else {
-            texture.baseTexture.once("loaded", () => {
-              if (sprite.destroyed) return;
-              const t = getCircularIconTexture(texture, iconPath, this.props.app.renderer);
-              if (t) {
-                sprite.texture = t;
-                sprite.width = iconDiameter;
-                sprite.height = iconDiameter;
-              }
+            // UN écouteur par icône, pas un par rendu : cf. la fuite documentée dans
+            // ``iconLoadQueue`` (asset absent → ``loaded`` ne part jamais → rien ne se retire).
+            enqueueForIconLoad(iconPath, texture.baseTexture, sprite, () => {
+              const t = getCircularIconTexture(texture, iconPath, renderer);
+              if (!t) return;
+              sprite.texture = t;
+              sprite.width = iconDiameter;
+              sprite.height = iconDiameter;
             });
           }
         }
@@ -1398,15 +1420,16 @@ export class UnitRenderer {
         }
         this.target.addChild(sprite);
       } catch {
-        this.renderTextFallback(iconZIndex);
+        this.drawUnitInitial(iconZIndex);
       }
     } else {
-      this.renderTextFallback(iconZIndex);
+      this.drawUnitInitial(iconZIndex);
     }
   }
 
-  private renderTextFallback(iconZIndex: number): void {
-    const { unit, centerX, centerY } = this.props;
+  /** Initiale du type d'unité en lieu et place du portrait. */
+  private drawUnitInitial(iconZIndex: number): void {
+    const { unit, centerX, centerY, HEX_RADIUS, ICON_SCALE } = this.props;
 
     interface UnitWithFlags extends Unit {
       isJustKilled?: boolean;
@@ -1428,8 +1451,12 @@ export class UnitRenderer {
       textAlpha = 0.5;
     }
 
-    const unitText = new PIXI.Text(unit.DISPLAY_NAME || unit.name || `U${unit.id}`, {
-      fontSize: this.props.UNIT_TEXT_SIZE,
+    // Dimensionnement sur le SOCLE (BASE_SIZE) et non sur une taille pixel fixe : getIconDiameterRatio
+    // donne le diamètre exact qu'aurait eu le portrait dans ce socle (rond, ovale ou carré),
+    // UNIT_TEXT_SIZE en est le ratio.
+    const iconDiameter = getIconDiameterRatio(unit, ICON_SCALE) * HEX_RADIUS;
+    const unitText = new PIXI.Text(getUnitInitial(unit), {
+      fontSize: iconDiameter * this.props.UNIT_TEXT_SIZE,
       fill: textColor,
       align: "center",
       fontWeight: "bold",

@@ -497,6 +497,28 @@ export function minHexDistanceBetweenUnitFootprintsLive(
 // --- Pixel ↔ Hex conversion ---
 
 /**
+ * Dimensions TOTALES du plateau en pixels monde, marges comprises — l'étendue effectivement
+ * dessinée par la grille hex (`hexToPixel` + une demi-colonne / demi-rangée de débord).
+ *
+ * Source unique : tout ce qui doit s'ancrer sur le BORD du plateau (fond, hitArea, décor de
+ * pourtour) lit cette fonction. Recopier la formule ailleurs la laisse dériver en silence — le
+ * décor s'ancre alors sur un bord fantôme, et un test qui recalcule la même formule ne le voit pas.
+ */
+export function boardWorldSize(
+  cols: number,
+  rows: number,
+  hexRadius: number,
+  margin: number
+): { width: number; height: number } {
+  const hexWidth = 1.5 * hexRadius;
+  const hexHeight = Math.sqrt(3) * hexRadius;
+  return {
+    width: cols * hexWidth + hexWidth / 2 + 2 * margin,
+    height: rows * hexHeight + hexHeight / 2 + 2 * margin,
+  };
+}
+
+/**
  * Convert hex grid coordinates to pixel coordinates.
  * Uses the same formula as BoardPvp.tsx rendering.
  */

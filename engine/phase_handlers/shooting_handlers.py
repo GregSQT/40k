@@ -4612,7 +4612,7 @@ def _update_unit_los_preview_data(
             terrain_hex_set.add((int(_h[0]), int(_h[1])))
 
     sc, sr = int(shooter_col), int(shooter_row)
-    from engine.hex_utils import Socle
+    from engine.hex_utils import Socle, is_phantom_bottom_hex
     from engine.combat_utils import ranged_edge_distance_to_cell
     _preview_metric = _ranged_distance_metric(game_state)
     _preview_socle = Socle(
@@ -4625,7 +4625,7 @@ def _update_unit_los_preview_data(
 
     for col in range(board_cols):
         for row in range(board_rows):
-            if row == board_rows - 1 and (col % 2) == 1:
+            if is_phantom_bottom_hex(col, row, board_rows):
                 continue
             distance = ranged_edge_distance_to_cell(_preview_socle, sc, sr, col, row, _preview_metric)
             if distance <= 0 or distance > max_range:

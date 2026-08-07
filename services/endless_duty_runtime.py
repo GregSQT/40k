@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from shared.data_validation import require_key
 from engine.combat_utils import calculate_hex_distance, resolve_dice_value
+from engine.hex_utils import is_in_bounds, is_phantom_bottom_hex
 from engine.phase_handlers.shared_utils import build_units_cache, rebuild_choice_timing_index
 from engine.phase_handlers import movement_handlers
 
@@ -975,7 +976,7 @@ def _random_edge_hex(cols: int, rows: int, candidate_edges: List[str]) -> Tuple[
     if edge == "south":
         col = random.randint(0, cols - 1)
         row = rows - 1
-        if row >= 0 and (col % 2 == 1):
+        if is_phantom_bottom_hex(col, row, rows):
             row = max(0, row - 1)
         return col, row
     if edge == "east":
@@ -986,11 +987,7 @@ def _random_edge_hex(cols: int, rows: int, candidate_edges: List[str]) -> Tuple[
 
 
 def _is_valid_board_hex(col: int, row: int, cols: int, rows: int) -> bool:
-    if col < 0 or col >= cols or row < 0 or row >= rows:
-        return False
-    if row == rows - 1 and (col % 2 == 1):
-        return False
-    return True
+    return is_in_bounds(col, row, cols, rows) and not is_phantom_bottom_hex(col, row, rows)
 
 
 def _load_allowed_profiles_by_slot() -> Dict[str, List[str]]:

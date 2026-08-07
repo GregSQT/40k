@@ -44,7 +44,12 @@ from engine.phase_handlers.shared_utils import (
 )
 from engine.w40k_core import W40KEngine
 
-from _config_helpers import build_engine_config, build_move_rules
+from _config_helpers import (
+    NEUTRAL_TEST_ARMY_FACTION,
+    NEUTRAL_TEST_FACTION,
+    build_engine_config,
+    build_move_rules,
+)
 from tests._state_invariants import turn_state_invariants, unit_invariants
 
 #: Le SEUL choix de règle du jeu aujourd'hui (Tyranid Warrior mêlée) : `adrenalised_onslaught`
@@ -78,6 +83,8 @@ def _config() -> Dict[str, Any]:
         "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
         "gym_training_mode": True,
         "pve_mode": False,
+        # Config LITTERALE : elle porte sa declaration elle-meme (cf. NEUTRAL_TEST_ARMY_FACTION).
+        "army_faction": dict(NEUTRAL_TEST_ARMY_FACTION),
         "observation_params": {"obs_size": ObservationBuilder.SQUAD_OBS_SIZE_TARGET},
     }
 
@@ -91,6 +98,9 @@ def _unit(uid: int, player: int, col: int, row: int, rules: List[Dict[str, Any]]
         "HP_CUR": 3,
         "HP_MAX": 3,
         "VALUE": 100,
+        # L'autre moitie de la declaration de `_config()` : la garde anti-coquille d'
+        # `army_faction` refuse une faction que personne ne porte (cf. NEUTRAL_TEST_FACTION).
+        "FACTION_KEYWORDS": [NEUTRAL_TEST_FACTION],
         "OC": 1,
         "BASE_SIZE": 1,
         "MODEL_HEIGHT": 2.5,

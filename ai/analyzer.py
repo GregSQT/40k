@@ -453,13 +453,9 @@ def _get_los_wall_hexes(wall_hexes: Set[Tuple[int, int]]) -> Set[Tuple[int, int]
     Matches engine/w40k_core.py for LoS consistency.
     """
     from config_loader import get_config_loader
+    from engine.hex_utils import phantom_bottom_hexes
     cols, rows = get_config_loader().get_board_size()
-    result = set(wall_hexes)
-    bottom_row = rows - 1
-    for col in range(cols):
-        if col % 2 == 1:
-            result.add((col, bottom_row))
-    return result
+    return set(wall_hexes) | phantom_bottom_hexes(cols, rows)
 
 
 def has_line_of_sight(shooter_col: int, shooter_row: int, target_col: int, target_row: int, wall_hexes: Set[Tuple[int, int]]) -> bool:

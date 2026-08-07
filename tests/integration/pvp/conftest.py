@@ -38,6 +38,15 @@ _TEST_PERMISSIONS = {
     "options": {},
 }
 
+# Fixture FIGÉE de la suite, et la raison pour laquelle on démarre en mode "pvp" et non
+# "pvp_test" : le mode "pvp_test" impose `scenario_pvp_test.json` (api_server.py, branche
+# `requested_mode == "pvp_test"`), qui est le bac à sable jouable de l'utilisateur. Il a été
+# remplacé (roster SM/Orks à 150 sous-hex d'écart, aucun contact en 5 tours) et la suite entière
+# est tombée : plus d'ids attendus, jamais de phase de charge, `fight_subphase` toujours None.
+# Le mode "pvp" TRANSMET le `scenario_file` du client — c'est le chemin de production, aucun
+# aménagement de test — donc la suite porte son propre décor et ne suit plus les réglages de jeu.
+INTEGRATION_SCENARIO = "config/board/44x60x5/scenario/scenario_pvp_integration.json"
+
 
 class ActionRejected(RuntimeError):
     """Le backend a refusé l'action (``success: False`` ou HTTP != 200)."""
@@ -67,10 +76,17 @@ class GameClient:
 
     # -- transport --------------------------------------------------------- #
 
-    def start(self, mode_code: str = "pvp_test", board_path: Optional[str] = None) -> Dict[str, Any]:
+    def start(
+        self,
+        mode_code: str = "pvp",
+        board_path: Optional[str] = None,
+        scenario_file: Optional[str] = INTEGRATION_SCENARIO,
+    ) -> Dict[str, Any]:
         payload: Dict[str, Any] = {"mode_code": mode_code}
         if board_path is not None:
             payload["board_path"] = board_path
+        if scenario_file is not None:
+            payload["scenario_file"] = scenario_file
         response = self._client.post("/api/game/start", json=payload)
         body = response.get_json()
         if response.status_code != 200 or not body.get("success"):
@@ -263,10 +279,10 @@ def api_isolated(monkeypatch):
 
 @pytest.fixture
 def game(api_isolated):
-    """Partie ``pvp_test`` démarrée, invariants transversaux armés, rendue en phase de MOUVEMENT.
+    """Partie ``INTEGRATION_SCENARIO`` démarrée, invariants armés, rendue en phase de MOUVEMENT.
 
     ``/start`` rend la main en phase de COMMANDEMENT depuis le chantier des capacités de faction :
-    08.04 y arrête le moteur sur la désignation d'Oath of Moment (le roster de ``pvp_test`` est
+    08.04 y arrête le moteur sur la désignation d'Oath of Moment (le camp 1 de la fixture est
     ADEPTUS ASTARTES), et cet arrêt est opposable — toute autre action y est refusée
     (``faction_decision_pending``). La fixture joue donc ce que le front joue : la désignation,
     puis la sortie de phase. Les tests qui mesurent le mouvement, le tir, la charge ou la mêlée
@@ -279,7 +295,7 @@ def game(api_isolated):
 
     with app.test_client() as flask_client:
         client = GameClient(flask_client, check=assert_state_invariants)
-        client.start("pvp_test")
+        client.start()
         client.drain_to("move")
         yield client
 
@@ -293,5 +309,5 @@ def game_unchecked(api_isolated):
     """
     with app.test_client() as flask_client:
         client = GameClient(flask_client)
-        client.start("pvp_test")
+        client.start()
         yield client

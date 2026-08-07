@@ -22,6 +22,7 @@ from shared.data_validation import (
     require_present,
 )
 from engine.combat_utils import calculate_hex_distance, normalize_coordinates, resolve_dice_value, set_unit_coordinates
+from engine.hex_utils import phantom_bottom_hexes
 from engine.weapon_damage_cache import load_weapon_damage_table, stamp_weapon_keys, build_best_weapon_cache
 from engine.utils.weapon_helpers import melee_weapons, ranged_weapons
 
@@ -628,11 +629,8 @@ class W40KEngine(gym.Env):
         base_dense_wall_hexes = (
             set(map(tuple, self._scenario_dense_wall_hexes or []))
         )
-        bottom_row = board_rows - 1
-        for col in range(board_cols):
-            if col % 2 == 1:
-                base_wall_hexes.add((col, bottom_row))
-        
+        base_wall_hexes |= phantom_bottom_hexes(board_cols, board_rows)
+
         from engine.combat_utils import GYM_DISTANCE_METRIC_KEY, gym_distance_metric_override
         from config_loader import get_config_loader
 
@@ -7151,7 +7149,14 @@ class W40KEngine(gym.Env):
 
         # Update wall_hexes and objectives in game_state if present
         if "wall_hexes" in self.game_state:
-            self.game_state["wall_hexes"] = set(normalized_wall_hexes)
+            # JUMEAU de la pose initiale (constructeur) : les demi-cases fantômes du bord
+            # bas ne viennent PAS du scénario, donc réécrire le set avec les seuls murs
+            # normalisés les perdrait. La rotation de scénario ne change pas le plateau,
+            # d'où les dimensions relues dans game_state.
+            self.game_state["wall_hexes"] = set(normalized_wall_hexes) | phantom_bottom_hexes(
+                require_key(self.game_state, "board_cols"),
+                require_key(self.game_state, "board_rows"),
+            )
         self.game_state["dense_wall_hexes"] = set(normalized_dense_wall_hexes)
         if "objectives" in self.game_state:
             self.game_state["objectives"] = self._scenario_objectives

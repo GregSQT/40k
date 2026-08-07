@@ -18,67 +18,67 @@
       "id": 101,
       "unit_type": "Boyz",
       "player": 1,
-      "col": 40,
+      "col": 44,
       "row": 55,
       "models": [
         {
           "unit_type": "Boyz",
+          "col": 44,
+          "row": 55
+        },
+        {
+          "unit_type": "Boyz",
           "col": 40,
-          "row": 55
-        },
-        {
-          "unit_type": "Boyz",
-          "col": 36,
           "row": 63
         },
         {
           "unit_type": "Boyz",
-          "col": 44,
+          "col": 48,
           "row": 63
         },
         {
           "unit_type": "Boyz",
-          "col": 49,
+          "col": 53,
           "row": 55
         },
         {
           "unit_type": "Boyz",
-          "col": 44,
+          "col": 48,
           "row": 47
         },
         {
           "unit_type": "Boyz",
-          "col": 36,
+          "col": 40,
           "row": 47
         },
         {
           "unit_type": "Boyz",
-          "col": 31,
+          "col": 35,
           "row": 55
         },
         {
           "unit_type": "Boyz",
-          "col": 31,
+          "col": 35,
           "row": 71
         },
         {
           "unit_type": "Boyz",
-          "col": 40,
+          "col": 44,
           "row": 71
         },
         {
           "unit_type": "BoyzNobKombi",
-          "col": 49,
+          "col": 53,
           "row": 71
         },
         {
           "unit_type": "Warboss",
-          "col": 54,
+          "col": 58,
           "row": 47
         },
         {
           "unit_type": "PainBoy",
-          "col": 54,
+          "col": 58,
           "row": 63
         }
       ]
@@ -87,68 +87,68 @@
       "id": 102,
       "unit_type": "Boyz",
       "player": 1,
-      "col": 108,
-      "row": 55,
+      "col": 110,
+      "row": 57,
       "models": [
         {
           "unit_type": "Boyz",
-          "col": 108,
-          "row": 55
+          "col": 110,
+          "row": 57
         },
         {
           "unit_type": "Boyz",
-          "col": 104,
-          "row": 63
+          "col": 106,
+          "row": 65
         },
         {
           "unit_type": "Boyz",
-          "col": 112,
-          "row": 63
+          "col": 114,
+          "row": 65
         },
         {
           "unit_type": "Boyz",
-          "col": 117,
-          "row": 55
+          "col": 119,
+          "row": 57
         },
         {
           "unit_type": "Boyz",
-          "col": 112,
-          "row": 47
+          "col": 114,
+          "row": 49
         },
         {
           "unit_type": "Boyz",
-          "col": 104,
-          "row": 47
+          "col": 106,
+          "row": 49
         },
         {
           "unit_type": "Boyz",
-          "col": 99,
-          "row": 55
+          "col": 101,
+          "row": 57
         },
         {
           "unit_type": "Boyz",
-          "col": 108,
-          "row": 71
+          "col": 110,
+          "row": 73
         },
         {
           "unit_type": "Boyz",
-          "col": 122,
-          "row": 63
+          "col": 124,
+          "row": 65
         },
         {
           "unit_type": "BoyzNobKombi",
-          "col": 126,
-          "row": 55
+          "col": 128,
+          "row": 57
         },
         {
           "unit_type": "Bigboss",
-          "col": 122,
-          "row": 47
+          "col": 124,
+          "row": 49
         },
         {
           "unit_type": "BannerNob",
-          "col": 117,
-          "row": 39
+          "col": 119,
+          "row": 41
         }
       ]
     },
@@ -157,57 +157,57 @@
       "unit_type": "Gretchin",
       "player": 1,
       "col": 176,
-      "row": 55,
+      "row": 59,
       "models": [
         {
           "unit_type": "Gretchin",
           "col": 176,
-          "row": 55
+          "row": 59
         },
         {
           "unit_type": "Gretchin",
           "col": 172,
-          "row": 63
+          "row": 67
         },
         {
           "unit_type": "Gretchin",
           "col": 180,
-          "row": 63
+          "row": 67
         },
         {
           "unit_type": "Gretchin",
           "col": 185,
-          "row": 55
+          "row": 59
         },
         {
           "unit_type": "Gretchin",
           "col": 172,
-          "row": 47
+          "row": 51
         },
         {
           "unit_type": "Gretchin",
           "col": 167,
-          "row": 55
+          "row": 59
         },
         {
           "unit_type": "Gretchin",
-          "col": 167,
-          "row": 71
+          "col": 166,
+          "row": 73
         },
         {
           "unit_type": "Gretchin",
           "col": 176,
-          "row": 71
+          "row": 75
         },
         {
           "unit_type": "Gretchin",
           "col": 185,
-          "row": 71
+          "row": 75
         },
         {
           "unit_type": "Gretchin",
           "col": 190,
-          "row": 63
+          "row": 67
         }
       ]
     },
@@ -215,15 +215,15 @@
       "id": 104,
       "unit_type": "WeirdBoy",
       "player": 1,
-      "col": 36,
+      "col": 37,
       "row": 85
     },
     {
       "id": 105,
       "unit_type": "WarTrakk",
       "player": 1,
-      "col": 74,
-      "row": 77
+      "col": 79,
+      "row": 75
     },
     {
       "id": 106,
@@ -261,13 +261,13 @@
         },
         {
           "unit_type": "VanguardVeteranSquadJumpPackPlasma",
-          "col": 44,
-          "row": 202
+          "col": 43,
+          "row": 200
         },
         {
           "unit_type": "ChaplainJumpPack",
           "col": 36,
-          "row": 202
+          "row": 200
         }
       ]
     },
@@ -307,37 +307,37 @@
       "unit_type": "Intercessor",
       "player": 2,
       "col": 142,
-      "row": 210,
+      "row": 207,
       "models": [
         {
           "unit_type": "Intercessor",
           "col": 142,
-          "row": 210
+          "row": 207
         },
         {
           "unit_type": "Intercessor",
-          "col": 138,
-          "row": 218
+          "col": 137,
+          "row": 213
         },
         {
           "unit_type": "Intercessor",
-          "col": 146,
-          "row": 218
+          "col": 145,
+          "row": 213
         },
         {
           "unit_type": "IntercessorGrenadeLauncher",
           "col": 151,
-          "row": 210
+          "row": 207
         },
         {
           "unit_type": "IntercessorSergeant",
           "col": 146,
-          "row": 202
+          "row": 199
         },
         {
           "unit_type": "Librarian",
           "col": 138,
-          "row": 202
+          "row": 199
         }
       ]
     },
@@ -345,43 +345,43 @@
       "id": 205,
       "unit_type": "Intercessor",
       "player": 2,
-      "col": 176,
-      "row": 210,
+      "col": 175,
+      "row": 214,
       "models": [
         {
           "unit_type": "Intercessor",
-          "col": 176,
-          "row": 210
+          "col": 175,
+          "row": 214
         },
         {
           "unit_type": "Intercessor",
           "col": 172,
-          "row": 218
+          "row": 221
         },
         {
           "unit_type": "Intercessor",
           "col": 180,
-          "row": 218
+          "row": 221
         },
         {
           "unit_type": "IntercessorGrenadeLauncher",
           "col": 185,
-          "row": 210
+          "row": 213
         },
         {
           "unit_type": "IntercessorSergeant",
           "col": 180,
-          "row": 202
+          "row": 205
         },
         {
           "unit_type": "CaptainRelicShield",
-          "col": 172,
-          "row": 202
+          "col": 171,
+          "row": 203
         },
         {
           "unit_type": "Ancient",
-          "col": 167,
-          "row": 210
+          "col": 166,
+          "row": 215
         }
       ]
     }

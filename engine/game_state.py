@@ -17,7 +17,8 @@ from engine.phase_handlers.shared_utils import (
     is_unit_alive, _derive_model_role, compute_unit_rules_in_effect, strip_role_rules,
 )
 from engine.hex_utils import (
-    expand_wall_group_to_hex_list, polygon_to_hex_list, require_base_size,
+    expand_wall_group_to_hex_list, is_in_bounds, is_phantom_bottom_hex,
+    polygon_to_hex_list, require_base_size,
 )
 
 # Plafond des réserves stratégiques (20.01) : « the combined points value of all of your
@@ -653,11 +654,9 @@ class GameStateManager:
                 raise ValueError(f"Invalid board dimensions: cols={board_cols}, rows={board_rows}")
 
             def _is_valid_deploy_hex(col: int, row: int) -> bool:
-                if col < 0 or col >= board_cols or row < 0 or row >= board_rows:
-                    return False
-                if row == board_rows - 1 and (col % 2) == 1:
-                    return False
-                return True
+                return is_in_bounds(col, row, board_cols, board_rows) and not is_phantom_bottom_hex(
+                    col, row, board_rows
+                )
 
             deploy_pools = {}
             if resolved_deployment_zones is not None:

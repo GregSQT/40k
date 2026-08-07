@@ -35,6 +35,7 @@ import {
 import { setupBoardClickHandler } from "../utils/boardClickHandler";
 import { areUnitsAdjacent, cubeDistance, offsetToCube } from "../utils/gameHelpers";
 import {
+  boardWorldSize,
   buildOccupiedSet,
   computeOccupiedHexes,
   getContestedObjectives,
@@ -75,8 +76,7 @@ import {
 import {
   buildWaaaghFangs,
   drawWaaaghFangs,
-  setWaaaghFangsPulse,
-  WAAAGH_CRACKS_SEED,
+  startWaaaghFangsPulse,
   type WaaaghFangsGeometry,
 } from "../utils/waaaghBorder";
 import { ensureWasmLoaded, isWasmReady } from "../utils/wasmLos";
@@ -613,7 +613,7 @@ type BoardProps = {
    * jusqu'au début de sa prochaine phase de commandement : le tour adverse est donc COMPRIS,
    * et c'est voulu (l'adversaire subit +1 F/A en mêlée et une invu 5+ pendant son propre tour).
    * Un seul drapeau et pas un par camp : seuls les ORKS ont cette capacité, il n'y a rien à
-   * distinguer. Le rendu est un pourtour fissuré vert (`utils/waaaghBorder`).
+   * distinguer. Le rendu est une gueule verte à crocs sur le pourtour (`utils/waaaghBorder`).
    */
   waaaghActive?: boolean;
   onSelectUnit: (id: number | string | null) => void;
@@ -11563,49 +11563,29 @@ export default function Board({
     overlay.zIndex = 130;
     if (overlay.parent !== app.stage) app.stage.addChild(overlay);
     overlay.visible = waaaghActive && !hideIndicators;
-    if (!waaaghActive) return;
+    // Rien à animer si l'overlay n'est pas rendu : le renderer saute un container invisible, mais
+    // le ticker, lui, continuerait à écrire des alphas à 20 Hz dans le vide.
+    if (!waaaghActive || hideIndicators) return;
 
-    const HEX_RADIUS_W = boardConfig.hex_radius;
-    const HEX_WIDTH_W = 1.5 * HEX_RADIUS_W;
-    const HEX_HEIGHT_W = Math.sqrt(3) * HEX_RADIUS_W;
-    const MARGIN_W = boardConfig.margin;
+    const hexRadius = boardConfig.hex_radius;
     // Mêmes totaux que la grille dessinée par BoardDisplay : les crocs sont ancrés au bord RÉEL.
-    const boardWidth = boardConfig.cols * HEX_WIDTH_W + HEX_WIDTH_W / 2 + 2 * MARGIN_W;
-    const boardHeight = boardConfig.rows * HEX_HEIGHT_W + HEX_HEIGHT_W / 2 + 2 * MARGIN_W;
-    const geometryKey = `${boardWidth}|${boardHeight}|${HEX_RADIUS_W}`;
+    const { width: boardWidth, height: boardHeight } = boardWorldSize(
+      boardConfig.cols,
+      boardConfig.rows,
+      hexRadius,
+      boardConfig.margin
+    );
+    const geometryKey = `${boardWidth}|${boardHeight}|${hexRadius}`;
     if (waaaghFangsGeometryRef.current?.key !== geometryKey) {
-      const geometry = buildWaaaghFangs({
-        boardWidth,
-        boardHeight,
-        hexRadius: HEX_RADIUS_W,
-        seed: WAAAGH_CRACKS_SEED,
-      });
+      const geometry = buildWaaaghFangs({ boardWidth, boardHeight, hexRadius });
       waaaghFangsGeometryRef.current = { key: geometryKey, geometry };
       drawWaaaghFangs(overlay, geometry);
     }
     const { geometry } = waaaghFangsGeometryRef.current;
-
-    /** Mise à jour des alphas au plus toutes les 50 ms : la respiration reste continue à l'œil. */
-    const PULSE_INTERVAL_MS = 50;
-    let elapsedMs = 0;
-    let sincePulseMs = PULSE_INTERVAL_MS;
-    const tick = () => {
-      const target = waaaghFangsOverlayRef.current;
-      // Lu dans la ref à chaque frame, jamais capturé : si l'overlay a été détruit malgré la
-      // ré-attache de HOOK 3, ce tick ne touche plus rien au lieu d'écrire dans un objet mort.
-      if (!target || target.destroyed) return;
-      elapsedMs += app.ticker.deltaMS;
-      sincePulseMs += app.ticker.deltaMS;
-      if (sincePulseMs < PULSE_INTERVAL_MS) return;
-      sincePulseMs = 0;
-      setWaaaghFangsPulse(target, geometry, elapsedMs);
-    };
-    // Premier réglage immédiat : sans lui, les calques restent à l'alpha 1 de leur gravure.
-    setWaaaghFangsPulse(overlay, geometry, 0);
-    app.ticker.add(tick);
-    return () => {
-      app.ticker.remove(tick);
-    };
+    // Premier réglage dès la frame suivante : sans lui, les calques resteraient à l'alpha 1 de
+    // leur gravure. Le ticker n'est pas nourri d'une closure de ce composant — cf.
+    // `startWaaaghFangsPulse` : il ne retient que la ref de l'overlay et la géométrie.
+    return startWaaaghFangsPulse(app.ticker, waaaghFangsOverlayRef, geometry);
   }, [waaaghActive, boardConfig, hideIndicators]);
 
   // Détruit l'overlay Waaagh! uniquement au démontage du composant (jumeau de l'overlay Oath

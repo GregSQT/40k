@@ -20,11 +20,11 @@ class TestStartState:
         assert_state_invariants(game_unchecked.state, "start")
 
     def test_start_is_command_phase_stopped_on_the_oath_designation(self, game_unchecked):
-        """t2_start_command : pvp_test démarre en phase command, ARRÊTÉE sur l'Oath (08.04).
+        """t2_start_command : la partie démarre en phase command, ARRÊTÉE sur l'Oath (08.04).
 
         Ce n'était pas le contrat jusqu'au chantier des capacités de faction : la phase de
         commandement enchaînait sur le mouvement et ``/start`` rendait ``move``. Elle s'arrête
-        désormais sur une décision de joueur, et le roster de ``pvp_test`` est ADEPTUS ASTARTES —
+        désormais sur une décision de joueur, et le camp 1 de la fixture est ADEPTUS ASTARTES —
         la désignation d'Oath n'est pas optionnelle (« select one unit from your opponent's
         army »), donc l'arrêt est certain, pas dépendant d'un tirage.
         """

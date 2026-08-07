@@ -19,6 +19,7 @@ from typing import Any, Dict, List
 
 import pytest
 
+from _config_helpers import NEUTRAL_TEST_ARMY_FACTION, NEUTRAL_TEST_FACTION
 from engine.phase_handlers.shared_utils import build_units_cache
 from shared.data_validation import ConfigurationError
 from engine.reward_calculator import RewardCalculator
@@ -39,6 +40,9 @@ def _unit(uid: int, value: int, hp_max: int, models: List[Dict[str, Any]] | None
         "HP_CUR": hp_max,
         "HP_MAX": hp_max,
         "VALUE": value,
+        # L'autre moitie de la declaration `army_faction` de la config : la garde anti-coquille
+        # refuse une faction que personne ne porte (cf. NEUTRAL_TEST_FACTION).
+        "FACTION_KEYWORDS": [NEUTRAL_TEST_FACTION],
         "OC": 1,
         "T": 4,
         "ARMOR_SAVE": 3,
@@ -261,6 +265,9 @@ class TestObservationEnemySquadValue:
             "config": {
                 "game_rules": {**_GAME_RULES, "max_base_size_hex": 35},
                 "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
+                # Config LITTERALE : elle porte sa declaration elle-meme (cf.
+                # NEUTRAL_TEST_ARMY_FACTION).
+                "army_faction": dict(NEUTRAL_TEST_ARMY_FACTION),
             },
             "board_cols": 40,
             "board_rows": 40,

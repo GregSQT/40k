@@ -155,3 +155,21 @@ export function getIconDiameterRatio(unit: Unit, iconScaleFallback: number): num
   }
   return unit.ICON_SCALE || iconScaleFallback;
 }
+
+/**
+ * Initiale affichée à la place du portrait quand l'illustration est absente ou introuvable.
+ * ``unit`` est le profil PAR FIGURINE (la boucle ``modelCenters`` d'UnitRenderer substitue le
+ * modèle à l'escouade) : le ``unit_type`` d'une figurine spéciale prime donc sur celui de l'unité.
+ * Lève si aucun type n'est disponible — pas de repli silencieux sur le nom, qui masquerait un
+ * profil incomplet.
+ */
+export function getUnitInitial(unit: Unit): string {
+  const unitType =
+    (unit as unknown as { unit_type?: string }).unit_type ?? unit.type ?? unit.unitType;
+  if (!unitType || unitType.trim() === "") {
+    throw new Error(
+      `getUnitInitial: unit ${String(unit.id)} has no usable icon and no unit_type/type to derive its initial from`
+    );
+  }
+  return unitType.trim().charAt(0).toUpperCase();
+}

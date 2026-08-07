@@ -25,7 +25,7 @@ lecture, jamais une copie de chiffres qui dériverait.
 
 | Clé | Forme | Contenu |
 |---|---|---|
-| `global_cont` / `global_bin` | (13,) / (33,) | ce qui n'appartient à aucune unité : tour, pas d'épisode, points de mission des deux camps, **points de commandement des deux camps (08.02)**, force d'usure, **distance à chacun des 5 objectifs** ; mon tour, **phase en one-hot de 6 bits**, contrôle + présence des 5 objectifs, **direction (cos/sin) vers chacun d'eux**, **capacités de faction des deux camps (Waaagh! disponible/actif, désignation Oath en vigueur — chantier 03)**. Ces distances/directions — comme les `col_rel`/`row_rel` des entités — sont mesurées depuis le **centroïde de l'escouade active**, ou depuis l'**ancre de sa zone de déploiement** tant qu'elle n'est pas posée (même repère que la grille, V11 §0.40 point 4). Une entité pas encore posée n'a **aucune** position relative ni **aucune relation géométrique** : `col_rel`/`row_rel`, `edge_distance`, `engaged`, `los_can_see`, `cover_vs_observer`, `n_fight_eligible`, `n_in_enemy_ez`, `n_models_engaging` sont nuls — règle 03.04, l'engagement range est une aire **du champ de bataille** (V11 §0.40 point 5) — et le bit `deploy_not_on_board` le dit. `coherent` fait exception : 03.03 ne teste la cohérence que « if that unit is on the battlefield » |
+| `global_cont` / `global_bin` | (13,) / (35,) | ce qui n'appartient à aucune unité : tour, pas d'épisode, points de mission des deux camps, **points de commandement des deux camps (08.02)**, force d'usure, **distance à chacun des 5 objectifs** ; mon tour, **phase en one-hot de 6 bits**, contrôle + présence des 5 objectifs, **direction (cos/sin) vers chacun d'eux**, **capacités de faction des deux camps (Waaagh! disponible/actif, désignation Oath en vigueur, clause du +1 Wound d'Oath ouverte — chantier 03)**. Ces distances/directions — comme les `col_rel`/`row_rel` des entités — sont mesurées depuis le **centroïde de l'escouade active**, ou depuis l'**ancre de sa zone de déploiement** tant qu'elle n'est pas posée (même repère que la grille, V11 §0.40 point 4). Une entité pas encore posée n'a **aucune** position relative ni **aucune relation géométrique** : `col_rel`/`row_rel`, `edge_distance`, `engaged`, `los_can_see`, `cover_vs_observer`, `n_fight_eligible`, `n_in_enemy_ez`, `n_models_engaging` sont nuls — règle 03.04, l'engagement range est une aire **du champ de bataille** (V11 §0.40 point 5) — et le bit `deploy_not_on_board` le dit. `coherent` fait exception : 03.03 ne teste la cohérence que « if that unit is on the battlefield » |
 | `allies_cont` / `allies_bin` | (8, 19) / (8, 20) | **ligne 0 = l'unité ACTIVE**, lignes suivantes = mes autres escouades. Les drapeaux incluent, pour les ennemis seulement, `los_can_see`, `cover_vs_observer` et `charge_reachable_max_roll` |
 | `allies_ability_ids` / `allies_status_ids` | (8, 8) / (8, 4) | **capacités et statuts EN VIGUEUR (19.04), en IDENTIFIANTS ENTIERS et non en bits** : `obs_id` des registres [`config/unit_rules.json`](../config/unit_rules.json) et [`config/unit_statuses.json`](../config/unit_statuses.json), **triés croissants**, paddés à `0`. Deux `nn.EmbeddingBag(128, 16, mode="sum", padding_idx=0)` en font une **lecture de ligne** : aucun one-hot n'est matérialisé, donc la longueur du vecteur est **indépendante du nombre de capacités existantes** — ajouter une capacité, un statut ou une faction entière ne change ni `obs_size`, ni le nombre de paramètres du réseau, donc n'impose **aucun retrain**. Débordement (> 8 capacités) → **erreur**, jamais troncature |
 | `allies_wpn_cont` / `_bin` | (8, 20, 13) / (8, 20, 18) | profils d'armes par unité — **10 de tir puis 10 de mêlée**, avec porteurs vivants et bits/params de règles |
@@ -41,11 +41,11 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│  OBSERVATION SQUAD — Dict de TENSEURS D'ENTITÉS  (20 725 scalaires)    │
+│  OBSERVATION SQUAD — Dict de TENSEURS D'ENTITÉS  (20 727 scalaires)    │
 ├────────────────────────────────────────────────────────────────────────┤
 │  CONTEXTE GLOBAL                                                       │
 │    global_cont            (13,)                =      13               │
-│    global_bin             (33,)                =      33               │
+│    global_bin             (35,)                =      35               │
 │                                                                        │
 │  MES ESCOUADES — ligne 0 = l'unité ACTIVE          K_ALLY_SLOTS = 8    │
 │    allies_cont            (8, 19)              =     152               │
@@ -79,7 +79,7 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 │    deploy_cand_cont       (5, 8)               =      40               │
 │    deploy_cand_bin        (5, 4)               =      20               │
 ├────────────────────────────────────────────────────────────────────────┤
-│  TOTAL vectoriel (= obs_size)                      20 725              │
+│  TOTAL vectoriel (= obs_size)                      20 727              │
 │  + grid  (9, 32, 32) = 9 216, fournie À PART (non comptée)             │
 └────────────────────────────────────────────────────────────────────────┘
 
@@ -158,16 +158,22 @@ global_bin[29]     = enemy_waaagh_available                 # 0.0 / 1.0 — l'ad
 global_bin[30]     = enemy_waaagh_active                    # 0.0 / 1.0 — Waaagh! adverse en vigueur (enjambe mon tour)
 global_bin[31]     = my_oath_target_selected                # 0.0 / 1.0 — une designation Oath est en vigueur pour moi
 global_bin[32]     = enemy_oath_target_selected             # 0.0 / 1.0 — idem cote adverse
+global_bin[33]     = my_oath_wound_bonus_active             # 0.0 / 1.0 — clause du +1 Wound d'Oath ouverte pour MON armee
+global_bin[34]     = enemy_oath_wound_bonus_active          # 0.0 / 1.0 — idem cote adverse
 ```
 
-Les six derniers bits sont les **capacites de FACTION** (chantier 03) : globales par construction,
+Les huit derniers bits sont les **capacites de FACTION** (chantier 03) : globales par construction,
 une capacite de faction s'appliquant uniformement a toutes les unites de l'armee qui la porte.
 **Quatre** bits pour le Waaagh! et non deux : sa duree court « until the start of your next Command
 phase », donc elle enjambe le tour adverse — un Waaagh! ennemi *actif* change ce que je dois faire,
 un Waaagh! ennemi encore *disponible* change ce que je dois craindre, et aucun des deux ne se deduit
-de l'autre. Pour Oath, seul le fait qu'une designation soit en vigueur figure ici : l'identite de la
-cible est portee par le statut `oath_target` de l'entite visee (`enemies_status_ids` /
-`allies_status_ids`), donc la ou le reseau la lit avec l'unite qu'elle qualifie.
+de l'autre. Pour Oath, quatre bits egalement, et pour deux raisons distinctes. La designation
+(`*_oath_target_selected`) ne dit QUE qu'un choix est en vigueur : l'identite de la cible est portee
+par le statut `oath_target` de l'entite visee (`enemies_status_ids` / `allies_status_ids`), donc la
+ou le reseau la lit avec l'unite qu'elle qualifie, pour 0 scalaire ici. La clause du +1 au jet de
+blessure (`*_oath_wound_bonus_active`) est un bit SEPARE parce qu'elle ne se deduit pas de la
+designation : elle depend du ROSTER (detachement Codex, et aucune unite BLOOD ANGELS / DARK ANGELS /
+DEATHWATCH / SPACE WOLVES — unites MORTES comprises), donnee qu'aucune autre feature ne porte.
 
 La phase est un **one-hot de 6 bits** depuis le 2026-07-28 (V11 §0.32 T-J). L'encodage ordinal
 précédent (0 / .25 / .5 / .75 / 1) donnait la **même** valeur `0.0` à `deployment` et à `command`,

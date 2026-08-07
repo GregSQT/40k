@@ -54,6 +54,32 @@ C'est sûr ici : aucune fixture `scope="module"`/`"session"` dans le répertoire
 remet `api_server.engine = None` après chaque test — deux tests du même fichier n'ont donc aucun
 état partagé à se transmettre.
 
+### La suite d'intégration PvP a son décor à elle, et il est FIGÉ
+
+`tests/integration/pvp/` démarre en mode `"pvp"` avec un `scenario_file` explicite —
+`config/board/44x60x5/scenario/scenario_pvp_integration.json` (`conftest.INTEGRATION_SCENARIO`),
+qui porte lui-même `terrain-integration.json` et ses murs en `wall_hexes` inline. Ce n'est pas un
+aménagement de test : la route `/api/game/start` transmet déjà le `scenario_file` du client en
+mode `"pvp"`, c'est le chemin de production.
+
+Pourquoi pas le mode `"pvp_test"`, qui serait plus direct : il **impose**
+`scenario_pvp_test.json`, le bac à sable jouable. Le 2026-08-06 (commit `training`, 02454a34) ce
+fichier a été remplacé par un roster SM/Orks dont les deux armées sont à ~150 sous-hex l'une de
+l'autre et **ne se rencontrent jamais en 5 tours** : les 59 tests sont passés à 32 rouges d'un
+coup — ids attendus absents, `drain_to("charge")` inatteignable, `fight_subphase` à `None` du
+début à la fin, et cinq assertions « aucun X dans ce scénario » (unité engagée, cible à couvert,
+unité cachée hors portée). Le décor figé reprend exactement le contenu d'avant ce commit.
+
+Corollaire : **ne pas retoucher `scenario_pvp_integration.json` ni `terrain-integration.json`
+pour jouer.** Ces positions SONT ce que la suite mesure. Les bacs à sable jouables restent
+`scenario_pvp_test.json` et `scenario_pvp_test_sm_tyranids.json`.
+
+Les murs sont inline plutôt qu'en `wall_ref` pour une raison qui n'a rien à voir avec les tests :
+un `walls-*.json` de plus dans `config/board/44x60x5/walls/` entrerait dans le tirage aléatoire
+du training (`game_state._load_shared_walls_from_ref` sur `wall_ref: "random"`,
+`ai/train._list_available_board_refs`). Le dossier `terrain/` n'est lu que par référence
+explicite, d'où la copie dédiée.
+
 ### Le démarrage d'un worker (mesuré 2026-08-05)
 
 Un worker xdist paie **8 à 12 s avant le premier test** — pour beaucoup de fichiers c'est plus que
