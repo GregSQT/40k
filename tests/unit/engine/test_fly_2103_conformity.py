@@ -35,6 +35,9 @@ from _config_helpers import build_move_rules
 from engine.phase_handlers.movement_handlers import (
     _fly_traversal_active,
     _unit_has_keyword,
+    apply_fly_declaration_decision,
+    arm_fly_declaration_decision,
+    fly_declaration_decision_is_due,
     movement_build_valid_destinations_pool,
     took_to_the_skies,
 )
@@ -225,19 +228,19 @@ def test_traversal_and_the_two_inch_cost_are_never_dissociated(gym, declared):
     déclaration. Le défaut d'origine les avait dissociés en entraînement — le gym traversait
     toujours, sans jamais figurer dans `units_took_to_skies`, donc sans jamais payer.
 
-    En entraînement l'unité déclare systématiquement (politique moteur explicite en attendant
-    que la décision soit offerte à l'agent) ; ce qui est verrouillé ici, c'est qu'elle PAIE.
+    Depuis `L6`, le siège d'entraînement n'a plus de politique moteur : il DÉCLARE PAR UNE ACTION
+    (`fly_declaration`), donc `gym` ne change plus rien à cette lecture — c'est exactement ce que
+    la paramétrisation croisée vérifie ici.
     """
     move = 10
     gs = _fly_gs(move=move, gym=gym, declared=declared, walls=False)
     unit = gs["unit_by_id"]["1"]
 
     airborne = took_to_the_skies(gs, unit, "1", charge=False)
+    assert airborne is declared, "la déclaration est le SEUL état lu, quel que soit le siège"
     assert _fly_traversal_active(gs, unit, "1") is airborne
     expected_budget = move - 2 if airborne else move
     assert get_squad_move_budget("1", gs, "normal") == expected_budget
-    if gym:
-        assert airborne is True, "une unité FLY pilotée par le modèle déclare (politique moteur)"
 
 
 def test_without_declaration_a_cell_behind_a_wall_is_unreachable():
@@ -259,13 +262,15 @@ def test_with_declaration_the_wall_is_crossed_and_the_budget_paid_for_it():
 
 
 def test_training_flight_crosses_the_wall_and_pays_for_it():
-    """En ENTRAÎNEMENT (chemin de l'agent) : la traversée existe toujours, et elle est facturée."""
-    gs = _fly_gs(move=5, gym=True, declared=False)
+    """En ENTRAÎNEMENT (chemin de l'agent), la déclaration produit EXACTEMENT le même effet qu'en
+    PvP : traversée d'un côté, 2" de l'autre. Depuis `L6` elle vient d'une action de l'agent
+    (`fly_declaration`), plus d'une constante moteur — d'où `declared=True` explicite ici."""
+    gs = _fly_gs(move=5, gym=True, declared=True)
     assert movement_build_valid_destinations_pool(gs, "1") != []
     assert get_squad_move_budget("1", gs, "normal") == 5 - 2
 
     # Témoin sol : la même unité SANS le keyword est murée — c'est bien le vol qui franchit.
-    grounded = _fly_gs(move=5, gym=True, declared=False)
+    grounded = _fly_gs(move=5, gym=True, declared=True)
     grounded["unit_by_id"]["1"]["UNIT_KEYWORDS"] = []
     assert movement_build_valid_destinations_pool(grounded, "1") == []
 
@@ -293,7 +298,7 @@ def test_move_eligibility_is_bounded_by_the_real_budget_not_the_raw_move_stat():
         and (c, r) != _START
     }
 
-    gs = _fly_gs(move=move, gym=True, declared=False, wall_override=walled)
+    gs = _fly_gs(move=move, gym=True, declared=True, wall_override=walled)
     pool = movement_build_valid_destinations_pool(gs, "1")
     assert pool == [], "pré-condition : le budget réel (3) ne sort pas du mur"
     assert "1" not in get_eligible_units(gs), (
@@ -304,7 +309,7 @@ def test_move_eligibility_is_bounded_by_the_real_budget_not_the_raw_move_stat():
     # Témoin actif : avec 2" de plus, le budget réel franchit le mur et l'unité redevient
     # éligible. Sans ce témoin, l'assertion ci-dessus passerait aussi si `get_eligible_units`
     # ne rendait jamais personne.
-    gs_ok = _fly_gs(move=move + 2, gym=True, declared=False, wall_override=walled)
+    gs_ok = _fly_gs(move=move + 2, gym=True, declared=True, wall_override=walled)
     assert movement_build_valid_destinations_pool(gs_ok, "1") != []
     assert "1" in get_eligible_units(gs_ok)
 
@@ -347,8 +352,17 @@ def test_the_two_inch_malus_does_not_shrink_the_budget_outside_the_move_phase(ph
     off_move = _fly_gs(move=move, gym=True, declared=True, walls=False, phase=phase)
     assert get_squad_move_budget("1", in_move, "normal") == move - 2
     assert get_squad_move_budget("1", off_move, "normal") == move
-    # Le malus et la traversée répondent à la même garde de phase.
-    assert _fly_traversal_active(off_move, off_move["unit_by_id"]["1"], "1") is (phase == "charge")
+    # Le malus et la traversée répondent à la même garde de phase — et au MÊME set : la
+    # déclaration de MOVE n'accorde rien hors de la phase de mouvement, pas même en charge, qui
+    # a son set dédié (cf. `test_a_move_declaration_does_not_grant_traversal_during_the_charge_phase`).
+    assert _fly_traversal_active(off_move, off_move["unit_by_id"]["1"], "1") is False
+    if phase == "charge":
+        # Témoin actif : c'est bien la déclaration de CHARGE qui ouvre la traversée ici — sans
+        # lui, l'assertion ci-dessus passerait aussi si plus rien ne volait jamais.
+        off_move["units_took_to_skies_charge"] = {"1"}
+        assert _fly_traversal_active(off_move, off_move["unit_by_id"]["1"], "1") is True
+        # Et le budget de MOVE reste plein : le malus de charge ne s'y applique pas.
+        assert get_squad_move_budget("1", off_move, "normal") == move
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -360,7 +374,9 @@ _CHARGE_ENEMY = (14, 20)  # 4 hexes → le B2B le plus proche est à 3 hexes de 
 _FLOOR_HEIGHT_INCHES = 3.0
 
 
-def _charge_gs(*, fly: bool, level: int = 0, gym: bool = True) -> Dict[str, Any]:
+def _charge_gs(
+    *, fly: bool, level: int = 0, gym: bool = True, declared: bool = False
+) -> Dict[str, Any]:
     """`game_state` minimal pour `charge_build_valid_plan` — le chemin d'exécution de l'agent
     (`w40k_core.squad_charge`). `inches_to_subhex = 1`, plancher de niveau 1 haut de 3"."""
     # Casse MAJUSCULE : celle du vrai roster d'ArmageddonAgent.
@@ -411,7 +427,7 @@ def _charge_gs(*, fly: bool, level: int = 0, gym: bool = True) -> Dict[str, Any]
         "gym_training_mode": gym,
         "inches_to_subhex": 1,
         "units_took_to_skies": set(),
-        "units_took_to_skies_charge": set(),
+        "units_took_to_skies_charge": {"1"} if declared else set(),
         "units_advanced": set(),
         "units_fled": set(),
         "current_player": 1,
@@ -425,13 +441,15 @@ def _charge_gs(*, fly: bool, level: int = 0, gym: bool = True) -> Dict[str, Any]
 def test_ai_flying_unit_can_take_to_the_skies_on_a_charge():
     """21.03 : « Each time a FLYING unit is selected to make a normal, advance, fall-back or
     CHARGE move [...] the active player can declare that it will take to the skies. » Le vol de
-    charge était refusé à toute unité pilotée par le modèle."""
+    charge était refusé à toute unité pilotée par le modèle ; il lui est ouvert DÈS LORS qu'elle
+    l'a déclaré (`L6` : `CHOICE_0` de `fly_declaration`)."""
     from engine.phase_handlers.charge_handlers import _charge_fly_active
 
-    gs = _charge_gs(fly=True)
+    gs = _charge_gs(fly=True, declared=True)
     assert _charge_fly_active(gs, gs["unit_by_id"]["1"], "1") is True
 
-    grounded = _charge_gs(fly=False)
+    # Sans le keyword, la déclaration ne donne rien : c'est FLY qui ouvre 21.03.
+    grounded = _charge_gs(fly=False, declared=True)
     assert _charge_fly_active(grounded, grounded["unit_by_id"]["1"], "1") is False
 
 
@@ -442,8 +460,8 @@ def test_ai_charge_flight_pays_the_two_inches_on_the_execution_path():
     # Trajet requis jusqu'à l'ENGAGEMENT : 2 subhex (03.04 — l'ER est une zone de 2", pas la
     # cellule voisine du centre ennemi ; à `inches_to_subhex = 1` elle porte donc à 2 subhex).
     assert charge_build_valid_plan(_charge_gs(fly=False), "1", ["2"], 2) is not None
-    assert charge_build_valid_plan(_charge_gs(fly=True), "1", ["2"], 2) is None
-    assert charge_build_valid_plan(_charge_gs(fly=True), "1", ["2"], 4) is not None
+    assert charge_build_valid_plan(_charge_gs(fly=True, declared=True), "1", ["2"], 2) is None
+    assert charge_build_valid_plan(_charge_gs(fly=True, declared=True), "1", ["2"], 4) is not None
 
 
 def test_ai_charge_flight_ignores_vertical_distance_but_still_pays():
@@ -453,9 +471,9 @@ def test_ai_charge_flight_ignores_vertical_distance_but_still_pays():
     # Au sol : jet 4 → budget 4 - 3 = 1 < 2 → impossible.
     assert charge_build_valid_plan(_charge_gs(fly=False, level=1), "1", ["2"], 4) is None
     # En vol : jet 4 → budget 4 - 2 (skies) - 0 (vertical ignoré) = 2 → possible.
-    assert charge_build_valid_plan(_charge_gs(fly=True, level=1), "1", ["2"], 4) is not None
+    assert charge_build_valid_plan(_charge_gs(fly=True, level=1, declared=True), "1", ["2"], 4) is not None
     # Mais le vol ne rend pas la charge gratuite : jet 3 → budget 1 < 2.
-    assert charge_build_valid_plan(_charge_gs(fly=True, level=1), "1", ["2"], 3) is None
+    assert charge_build_valid_plan(_charge_gs(fly=True, level=1, declared=True), "1", ["2"], 3) is None
 
 
 def test_human_charge_flight_still_requires_an_explicit_declaration():
@@ -481,6 +499,12 @@ def test_in_engine_armageddon_flying_units_fly_and_pay_for_it():
     """Sur le VRAI chemin : un `W40KEngine` construit sur le scénario d'entraînement
     d'ArmageddonAgent, avec `gym_training_mode=True` — exactement ce que passe
     `ai/training_utils.py`. Aucune reconstruction hors moteur.
+
+    Depuis `L6` la déclaration n'est plus une constante : la sonde passe donc par le POINT DE
+    CHOIX réel (`arm_fly_declaration_decision` + `apply_fly_declaration_decision`), et vérifie
+    les DEUX candidats — `CHOICE_0` fait voler et facture, `CHOICE_1` laisse l'unité au sol au
+    prix plein. C'est ce couple qui prouve que le choix EXISTE, là où l'ancienne sonde ne
+    pouvait constater qu'une politique.
 
     La sonde ÉCHOUE si elle n'a rien vu : « aucune violation » ne peut pas vouloir dire « la
     sonde n'a rien regardé ». Le scénario tire son roster au sort (`training_random`) parmi
@@ -518,16 +542,35 @@ def test_in_engine_armageddon_flying_units_fly_and_pay_for_it():
             uid = str(unit["id"])
             utype = str(unit["unitType"])
 
-            # 1. Reconnue volante → la déclaration 21.03 est active, en move ET en charge.
+            # 1. AVANT toute déclaration : rien n'est acquis. C'est ce que `L6` change — le
+            #    keyword FLY n'emporte plus la traversée, il ouvre seulement le choix.
             for phase, charge in (("move", False), ("charge", True)):
                 gs["phase"] = phase
-                assert took_to_the_skies(gs, unit, uid, charge=charge) is True, f"{utype}/{phase}"
-                assert _fly_traversal_active(gs, unit, uid) is True, f"{utype}/{phase}"
-            gs["phase"] = "charge"
-            assert _charge_fly_active(gs, unit, uid) is True, utype
+                assert took_to_the_skies(gs, unit, uid, charge=charge) is False, f"{utype}/{phase}"
+                assert _fly_traversal_active(gs, unit, uid) is False, f"{utype}/{phase}"
+                assert fly_declaration_decision_is_due(gs, uid) is True, f"{utype}/{phase}"
 
-            # 2. Et elle PAIE : 2 POUCES convertis par `inches_to_subhex`.
+            # 2. CHOICE_1 (« ne pas déclarer ») : toujours au sol, et budget PLEIN.
             gs["phase"] = "move"
+            assert arm_fly_declaration_decision(gs, uid) is True, utype
+            apply_fly_declaration_decision(gs, uid, False)
+            assert took_to_the_skies(gs, unit, uid, charge=False) is False, utype
+            assert get_squad_move_budget(uid, gs, "normal") == int(unit["MOVE"]), utype
+            # La question est CONSOMMÉE : elle ne se repose pas au masque suivant.
+            assert fly_declaration_decision_is_due(gs, uid) is False, utype
+
+            # 3. CHOICE_0 (« déclarer ») en CHARGE — jumeau, set dédié : traversée ET 2".
+            gs["phase"] = "charge"
+            assert arm_fly_declaration_decision(gs, uid) is True, utype
+            apply_fly_declaration_decision(gs, uid, True)
+            assert took_to_the_skies(gs, unit, uid, charge=True) is True, utype
+            assert _charge_fly_active(gs, unit, uid) is True, utype
+            # Le set du move est resté vide : les deux déclarations sont disjointes.
+            assert uid not in gs["units_took_to_skies"], utype
+
+            # 4. Et déclarer PAIE : 2 POUCES convertis par `inches_to_subhex`.
+            gs["phase"] = "move"
+            gs["units_took_to_skies"].add(uid)
             budget = get_squad_move_budget(uid, gs, "normal")
             assert budget == max(0, int(unit["MOVE"]) - 2 * ish), utype
             flying_seen[utype] = (int(unit["MOVE"]), budget)

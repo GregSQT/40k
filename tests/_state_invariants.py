@@ -90,6 +90,9 @@ def turn_state_invariants() -> Dict[str, Any]:
         "advance_rolls": {},
         "units_took_to_skies": set(),
         "units_took_to_skies_charge": set(),
+        # 21.03 `L6` : « la question a ete posee » (distinct de « le vol est declare »).
+        "units_fly_declaration_resolved": set(),
+        "units_fly_declaration_resolved_charge": set(),
         "units_reacted_this_enemy_turn": set(),
         "reaction_window_active": False,
         "last_move_event_id": 0,

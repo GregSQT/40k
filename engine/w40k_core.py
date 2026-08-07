@@ -1472,6 +1472,10 @@ class W40KEngine(gym.Env):
             "advance_rolls": {},
             "units_took_to_skies": set(),
             "units_took_to_skies_charge": set(),
+            # 21.03 `L6` : « la question a ete posee », distinct de « le vol est declare » — un
+            # refus laisse le set ci-dessus vide et doit malgre tout laisser une trace.
+            "units_fly_declaration_resolved": set(),
+            "units_fly_declaration_resolved_charge": set(),
             "units_reacted_this_enemy_turn": set(),
             "reaction_window_active": False,
             "_unit_move_version": 0,
@@ -3457,6 +3461,29 @@ class W40KEngine(gym.Env):
                     "success": True,
                 }
             )
+
+        if decision_type == "fly_declaration":
+            # 21.03 « take to the skies » (V11 §0.48 `L6`) : décision d'ESCOUADE, par mouvement,
+            # sans file de prompts. Comme pour le Waaagh!, c'est l'ORDRE des candidats qui porte
+            # le sens (aucun `effect_ids`) et le payload qui le rend explicite côté moteur.
+            declared = bool(require_key(require_key(selected_option, "payload"), "declare"))
+            decision_squad_id = str(require_key(decision, "unit_id"))
+            # `apply_fly_declaration_decision` efface la decision elle-meme (ecrivain unique).
+            movement_handlers.apply_fly_declaration_decision(
+                self.game_state, decision_squad_id, declared
+            )
+            # Aucune reprise de phase a enchainer : l'activation reprend d'elle-meme au step
+            # suivant, le masque etant reconstruit sur la declaration desormais ecrite.
+            return True, {
+                "action": "agent_decision",
+                "waiting_for_player": False,
+                "decision_type": decision_type,
+                "unitId": decision_squad_id,
+                "player": int(require_key(decision, "player")),
+                "option_index": option_index,
+                "tookToSkies": declared,
+                "success": True,
+            }
 
         if decision_type != "rule_choice":
             raise NotImplementedError(
@@ -6938,8 +6965,16 @@ class W40KEngine(gym.Env):
         # Active squad = 1er eligible (convention 1 unit = 1 squad).
         # Si eligible_units vide mais mask any (cas degenere),
         # prendre 1ere unite vivante du player courant.
+        # Décision ARMÉE PAR la construction du masque ci-dessus (déclaration de vol 21.03,
+        # V11 §0.48 `L6`) : elle n'existait pas au contrôle d'entrée de cette fonction, donc la
+        # branche du haut ne l'a pas vue. MÊME règle qu'elle — l'observateur est l'unité sur
+        # laquelle porte la décision — sinon l'agent décrirait une escouade et déclarerait pour
+        # une autre (le défaut §0.40 point 1).
+        armed_decision = read_pending_agent_decision(self.game_state)
         if eligible_units:
             active_squad_id = str(eligible_units[0]["id"])
+        elif armed_decision is not None:
+            active_squad_id = str(require_key(armed_decision, "unit_id"))
         else:
             uc = self.game_state.get("units_cache", {})  # get allowed
             current_player = int(self.game_state.get("current_player", 1))

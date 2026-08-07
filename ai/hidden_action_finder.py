@@ -198,8 +198,9 @@ def parse_moves_from_step(step_log: str, episode_map: Dict[int, int]) -> List[Di
     """
     moves = []
     # Token OPTIONNEL entre le verbe et `from` : le moteur écrit `MOVED [FLY] from` / `FLED
-    # [FLY] from` dès qu'une escouade a déclaré « take to the skies » (21.03) — et l'IA le
-    # déclare systématiquement pour toute unité FLY. Sans l'accepter, ces déplacements ne sont
+    # [FLY] from` dès qu'une escouade a déclaré « take to the skies » (21.03) — l'agent le
+    # déclare quand il le choisit (décision `fly_declaration`, V11 §0.48 `L6`), donc le token est
+    # OPTIONNEL par nature et ne peut pas être présumé. Sans l'accepter, ces déplacements ne sont
     # pas parsés du tout, donc comptés « faits mais NON LOGUÉS » : un roster à jump packs
     # faisait sortir ce script en erreur sur des mouvements parfaitement journalisés.
     _TOKEN = r'(?:\s+\[[^\]]+\])?'

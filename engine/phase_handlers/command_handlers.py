@@ -171,6 +171,12 @@ def command_step_start_of_phase(game_state: Dict[str, Any]) -> None:
     game_state["advance_rolls"] = {}
     game_state["units_took_to_skies"] = set()
     game_state["units_took_to_skies_charge"] = set()
+    # 21.03 `L6` — MÊME cycle de vie que les deux déclarations ci-dessus, et il n'y en a pas
+    # d'autre possible : la question « prends-tu les airs ? » vaut pour le mouvement du tour, donc
+    # elle se repose au tour suivant. Les oublier ici gèlerait la déclaration du tour 1 pour
+    # toute la partie (une escouade ne serait plus jamais interrogée).
+    game_state["units_fly_declaration_resolved"] = set()
+    game_state["units_fly_declaration_resolved_charge"] = set()
     game_state["units_reacted_this_enemy_turn"] = set()
 
     game_state["reactive_macro_order_current_window"] = []

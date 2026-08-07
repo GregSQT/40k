@@ -166,8 +166,13 @@ def test_same_plan_without_wall_is_accepted():
 
 
 def test_fly_squad_uses_straight_line_even_with_wall():
-    """FLY (traversée libre 21.03) : le budget reste à vol d'oiseau, le mur n'ajoute rien."""
+    """FLY (traversée libre 21.03) : le budget reste à vol d'oiseau, le mur n'ajoute rien.
+
+    La traversée est la contrepartie d'une DÉCLARATION (`L6` : depuis que l'agent choisit, aucun
+    siège ne l'obtient sans l'avoir déclarée) — d'où le set posé ici.
+    """
     gs = _gs(WALL, fly=True)
+    gs["units_took_to_skies"] = {"1"}
     plan = _rigid_plan(ANCHOR_DEST[0], ANCHOR_DEST[1], gs)
     # allow_walls pour que la sœur puisse finir sur/au-delà du mur (FLY franchit) : on isole le budget.
     reason = explain_move_plan_rejection(
