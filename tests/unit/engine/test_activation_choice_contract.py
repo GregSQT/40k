@@ -34,7 +34,7 @@ from engine.macro_intents import (
     action_family,
 )
 from engine.observation_entities import K_ALLY_SLOTS, unit_cont_index
-from engine.phase_handlers.shared_utils import get_ally_slot_mapping
+from engine.phase_handlers.shared_utils import SQUAD_ACTION_WAIT, get_ally_slot_mapping
 
 SCENARIO = "config/agents/ArmageddonAgent/scenarios/training/scenario_training_armageddon.json"
 
@@ -520,6 +520,109 @@ def test_the_shooting_pin_preempts_the_choice_when_the_player_is_ai_KNOWN_DIVERG
     assert slots is None, (
         "un choix d'activation est désormais posé malgré l'épinglage : la divergence "
         "train/serve est corrigée — remplacer ce cas par le contrat souhaité."
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ORDRE DES SORTIES DU MASQUE — deux RÈGLES, pas une préférence de rédaction
+#
+# `L2` a inséré sa sortie au milieu de celles de `L6` (déclaration de vol 21.03) et de l'ingress
+# (20.04). L'ordre relatif des trois porte deux règles de jeu, et un simple déplacement les casse
+# sans que rien ne lève. Les deux cas ci-dessous les verrouillent.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _fly_gs(**kwargs):
+    """État minimal à escouade FLY — réutilise le constructeur du contrat 21.03.
+
+    Importé plutôt que recopié : un second constructeur divergerait du premier au premier champ
+    ajouté, et ces cas ne prouveraient plus rien sur le vrai prédicat de 21.03.
+    """
+    from tests.unit.engine.test_fly_declaration_decision import _gs
+
+    return _gs(**kwargs)
+
+
+def test_a_squad_in_strategic_reserves_is_never_asked_to_declare_flight():
+    """20.04 vs 21.03 — l'ingress move n'est PAS un des mouvements que 21.03 couvre.
+
+    21.03 ouvre « take to the skies » quand une unité FLYING est sélectionnée pour un mouvement
+    Normal / Advance / Fall Back / Charge. Une escouade en RÉSERVES fait une MISE EN PLACE : elle
+    n'est pas sur le champ de bataille, elle n'exécute aucun de ces quatre mouvements.
+
+    Le défaut que ce cas ferme : `arm_fly_declaration_decision` documente explicitement que
+    l'appelant garantit cette précondition et ne la revérifie pas
+    (`movement_handlers._fly_declaration_due_unit`). En déplaçant la sortie d'ingress SOUS
+    l'appel, `L2` a cassé cette garantie — l'escouade en réserves se voyait poser la question, et
+    la déclaration s'écrit pour la PHASE (`declared_key`/`resolved_key`) : elle aurait payé les
+    -2" sur un mouvement qu'elle ne fait pas.
+    """
+    from engine.action_decoder import ActionDecoder
+    from engine.agent_decision import read_pending_agent_decision
+
+    game_state = _fly_gs(phase="move")
+    # L'escouade FLY passe en réserves stratégiques : elle reste dans le pool de mouvement
+    # (20.04 lui donne un ingress move), mais elle n'est pas sur la table. Le drapeau lu par
+    # `unit_is_in_strategic_reserves` est `in_strategic_reserves` — c'est LUI que le masque
+    # consulte, pas `deployed_on_turn`.
+    game_state["unit_by_id"]["1"]["in_strategic_reserves"] = True
+    # Zones de pose : `ingress_slot_candidates` en a besoin pour la clause « aucune figurine dans
+    # la zone adverse avant le 3e round » (20.04) et LÈVE si elles manquent, sans repli.
+    game_state["deployment_pools"] = {
+        1: [(c, 5) for c in range(8, 14)],
+        2: [(c, 55) for c in range(8, 14)],
+    }
+    # Le scoring des slots d'ingress note les candidats par distance aux objectifs et LÈVE s'il
+    # n'y en a aucun : la liste doit être non vide, pas seulement présente.
+    game_state["objectives"] = [{"id": "obj1", "center": (22, 30), "hexes": [(22, 30)]}]
+    game_state["terrain_areas"] = []
+
+    decoder = ActionDecoder(game_state["config"])
+    mask, eligible = decoder.get_squad_action_mask_and_eligible_units(game_state)
+
+    assert read_pending_agent_decision(game_state) is None, (
+        "une escouade en réserves s'est vu poser la déclaration de vol 21.03 : son ingress move "
+        "(20.04) n'est pas un des mouvements que la règle couvre"
+    )
+    # Et elle a bien reçu le masque d'INGRESS, pas un masque de décision.
+    assert [u["id"] for u in eligible] == [1]
+    assert bool(mask[SQUAD_ACTION_WAIT]), "le masque d'ingress doit ouvrir WAIT (renoncer)"
+
+
+def test_the_flight_declaration_is_asked_after_the_activation_choice_not_before():
+    """21.03 est posée à l'escouade DÉSIGNÉE, jamais à la tête du pool.
+
+    La déclaration s'écrit pour la phase et `resolved_key` interdit de la reposer. La poser avant
+    le choix d'activation l'engagerait pour la tête du pool ; si l'agent active ensuite une AUTRE
+    escouade, la première reste avec un vol déclaré — donc -2" et traversée — pour un mouvement
+    qu'elle n'a pas encore été sélectionnée pour faire.
+    """
+    from engine.action_decoder import ActionDecoder
+    from engine.agent_decision import read_pending_agent_decision
+
+    game_state = _fly_gs(phase="move")
+    # Deuxième escouade FLY du même joueur, pour que le pool en compte DEUX et que le choix
+    # d'activation se pose réellement. Sans elle, ce cas ne regarderait rien.
+    second = copy.deepcopy(game_state["unit_by_id"]["1"])
+    second["id"] = 3
+    second["col"] = game_state["unit_by_id"]["1"]["col"] + 4
+    game_state["units"].append(second)
+    game_state["unit_by_id"]["3"] = second
+    game_state["move_activation_pool"] = ["1", "3"]
+    from engine.phase_handlers.shared_utils import build_units_cache
+
+    build_units_cache(game_state)
+
+    decoder = ActionDecoder(game_state["config"])
+    slots = decoder.activation_selection_slots(game_state)
+    assert slots is not None and len(slots) >= 2, (
+        f"pas de choix d'activation posé (slots={slots}) : ce cas ne regarde rien"
+    )
+
+    decoder.get_squad_action_mask_and_eligible_units(game_state)
+    assert read_pending_agent_decision(game_state) is None, (
+        "la déclaration de vol a été posée AVANT que l'agent ait choisi qui activer : elle "
+        "engage la tête du pool pour un mouvement qu'elle ne fera peut-être pas"
     )
 
 

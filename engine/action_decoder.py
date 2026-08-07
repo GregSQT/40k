@@ -8,7 +8,7 @@ import hashlib
 import os
 import pickle
 import time
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any, Optional, Set, Tuple
 from shared.data_validation import require_key
 from engine.debug_trace import CH_DEPLOY_CACHE, channel_enabled, trace
 from engine.game_utils import get_unit_by_id
@@ -23,6 +23,7 @@ from engine.phase_handlers.shared_utils import (
     build_squad_action_mask,
     get_enemy_slot_mapping,
     get_ally_slot_mapping,
+    require_unit_from_cache,
     roll_advance_for_squad,
     # Refonte spatiale du move : action = cellule de la grille egocentrique. Constantes importees,
     # jamais de litteral nu : le plan d'actions a change (WAIT 18 -> 1024, etc.).
@@ -423,18 +424,75 @@ class ActionDecoder:
             game_state, squad_id
         )
 
-        # Le choix d'activation est résolu ICI, avant la préparation du mouvement, parce qu'il en
-        # change le contenu (cf. le jet d'Advance ci-dessous) ; il n'est JOUÉ qu'après elle.
-        activation_slots = self.activation_selection_slots(game_state, eligible_units)
+        # ═══ ORDRE DES QUATRE SORTIES — il porte deux RÈGLES, pas un style de rédaction ═══
+        #
+        # 1. CHOIX D'ACTIVATION (`L2`) : personne n'est encore SÉLECTIONNÉ, donc rien de ce qui
+        #    dépend de la sélection ne doit être fait — ni le jet d'Advance (09.03), ni la
+        #    déclaration de vol (21.03). Les deux se feront pour l'escouade réellement désignée.
+        # 2. INGRESS (20.04) : une escouade en réserves fait une MISE EN PLACE, pas un des quatre
+        #    mouvements que 21.03 énumère. Elle sort AVANT la déclaration de vol.
+        # 3. DÉCLARATION DE VOL (`L6`) : l'escouade est désignée ET sur le plateau, la question a
+        #    un sens. Elle change le budget (-2") et la traversée, donc elle précède la carte.
+        # 4. Carte de cellules + masque d'activation ordinaire.
+        #
+        # ⚠️ Déplacer ces sorties les unes par rapport aux autres est un défaut de RÈGLE, pas de
+        # lisibilité. Les deux ordres qui comptent sont verrouillés par
+        # `test_activation_choice_contract.py`.
 
-        # TAKE TO THE SKIES (21.03, V11 §0.48 élément `L6`) — POINT DE CHOIX, posé ICI et pas
-        # ailleurs : la déclaration change le budget (-2") ET la traversée, donc le POOL que les
-        # lignes suivantes construisent. La poser après serait la poser trop tard ; la trancher
-        # par une constante moteur (ce que faisait §0.49 point 5) revenait à décider à la place de
-        # l'agent. C'est le moment exact où le moteur choisissait — c'est donc là que le choix
-        # s'ouvre. Le siège humain n'y passe jamais (il a le toggle de l'UI, cf.
-        # `fly_declaration_decision_is_due`), et l'escouade en réserves non plus : son ingress
-        # move (20.04) est une mise en place, traitée juste au-dessus.
+        # ─── 1. CHOIX DE L'ESCOUADE À ACTIVER (V11 §0.48 élément `L2` / §9 P3-3) ───
+        # Même exclusivité que les branches `pending_agent_decision` et Oath plus haut, et pour la
+        # même raison : le moteur est arrêté sur un choix de joueur qui PRÉCÈDE l'activation.
+        # Aucune sortie « ne pas choisir » : il faut bien activer quelqu'un, et le slot 0 est
+        # toujours ouvert (cf. `activation_selection_slots`), donc le masque n'est jamais tout-faux.
+        activation_slots = self.activation_selection_slots(game_state, eligible_units)
+        if activation_slots is not None:
+            # L'observation rendue AVEC ce masque contient la grille égocentrique de l'ancre, que
+            # `build_squad_grid` remplit en relisant la carte mémoïsée ici — `read_squad_move_cell_map`
+            # LÈVE si elle manque, sans repli. Elle est donc construite, mais au budget NORMAL :
+            # 09.03 fait le jet d'Advance quand l'unité est SÉLECTIONNÉE, or personne ne l'est
+            # encore. Le tirer ici le montrerait à l'agent — il alimente les cellules Advance de la
+            # grille — avant qu'il ne choisisse, et pour la seule ancre du pool.
+            # Cette carte est TRANSITOIRE : le step suivant la reconstruit pour l'escouade
+            # désignée, avec son jet et sa déclaration de vol.
+            if current_phase == "move" and not squad_in_reserves:
+                store_squad_move_cell_map(
+                    game_state, squad_id, build_squad_move_cell_map(game_state, squad_id, None)
+                )
+            for action_int in activation_slots:
+                mask[action_int] = True
+            return mask, eligible_units
+
+        # ─── 2. INGRESS MOVE (20.04) ───
+        # L'escouade active est en réserves : elle n'a aucune cellule de move (elle n'est pas sur
+        # le plateau), elle a des candidats de MISE EN PLACE. Le masque ouvre donc les mêmes slots
+        # 4-8 que le déploiement, dont c'est le jumeau, plus WAIT pour RENONCER (rester en réserves
+        # ce tour-ci est un choix légal — jusqu'à la fin du 3e round, où 20.04 la détruit). Les
+        # deux familles ne peuvent pas se confondre : une escouade en réserves n'a pas de cellule
+        # jouable, une escouade posée n'a pas de candidat d'ingress.
+        #
+        # ⚠️ AVANT la déclaration de vol, et c'est une RÈGLE : 21.03 ouvre « take to the skies »
+        # pour un mouvement Normal / Advance / Fall Back / Charge, pas pour une mise en place.
+        # Sortir après ferait déclarer le vol à une escouade HORS TABLE, et la déclaration s'écrit
+        # pour la PHASE (`declared_key`/`resolved_key`) : elle lui coûterait -2" sur un mouvement
+        # qu'elle ne fait pas. `arm_fly_declaration_decision` documente cette précondition et ne la
+        # revérifie pas — c'est ICI qu'elle est tenue.
+        if squad_in_reserves:
+            for action_int in self.ingress_slot_candidates(game_state, squad_id):
+                mask[action_int] = True
+            mask[SQUAD_ACTION_WAIT] = True
+            return mask, eligible_units
+
+        # ─── 3. TAKE TO THE SKIES (21.03, V11 §0.48 élément `L6`) ───
+        # POINT DE CHOIX, posé ICI et pas ailleurs : la déclaration change le budget (-2") ET la
+        # traversée, donc le POOL que les lignes suivantes construisent. La poser après serait la
+        # poser trop tard ; la trancher par une constante moteur (ce que faisait §0.49 point 5)
+        # revenait à décider à la place de l'agent. Le siège humain n'y passe jamais (il a le
+        # toggle de l'UI, cf. `fly_declaration_decision_is_due`).
+        #
+        # ⚠️ APRÈS le choix d'activation : `squad_id` est alors l'escouade que l'agent a DÉSIGNÉE,
+        # et non la tête du pool. Poser la déclaration avant l'aurait engagée pour la tête, et
+        # `resolved_key` interdit de la reposer — l'agent aurait activé une AUTRE escouade en
+        # laissant la première avec un vol déclaré pour un mouvement qu'elle ne fait pas.
         #
         # Le moteur REND LA MAIN comme le fait 08.04 pour le Waaagh! : masque exclusivement
         # `CHOICE_*`, pool vide, l'activation reprendra au step suivant avec la déclaration écrite.
@@ -442,21 +500,14 @@ class ActionDecoder:
         if armed_decision is not None:
             return self._agent_decision_mask(armed_decision), []
 
+        # ─── 4. Carte de cellules + masque d'activation ordinaire ───
         advance_roll: Optional[int] = None
         move_cell_map = None
-        if current_phase == "move" and not squad_in_reserves:
-            # 09.03 — le jet d'Advance se fait quand l'unité est SÉLECTIONNÉE pour se déplacer.
-            # Tant que le choix d'activation est en attente, aucune escouade ne l'est : le jet
-            # n'est donc PAS tiré, et la carte de cellules est construite au budget de mouvement
-            # normal. Le tirer ici l'aurait RÉVÉLÉ à l'agent (il alimente les cellules Advance de
-            # la grille égocentrique) avant qu'il ne choisisse qui activer — un jet montré pour
-            # une escouade pas encore sélectionnée, et seulement pour l'ancre du pool.
-            # La carte est quand même construite : `build_squad_grid` la relit sans repli.
-            if activation_slots is None:
-                squad_advance_rolls = game_state.setdefault("_squad_advance_rolls", {})
-                if squad_id not in squad_advance_rolls:
-                    squad_advance_rolls[squad_id] = roll_advance_for_squad(squad_id, game_state)
-                advance_roll = squad_advance_rolls[squad_id]
+        if current_phase == "move":
+            squad_advance_rolls = game_state.setdefault("_squad_advance_rolls", {})
+            if squad_id not in squad_advance_rolls:
+                squad_advance_rolls[squad_id] = roll_advance_for_squad(squad_id, game_state)
+            advance_roll = squad_advance_rolls[squad_id]
 
             # Refonte spatiale : la carte cellule -> (destination, cout) est construite UNE fois
             # ici, sert a masquer, puis est memoisee pour que `convert_squad_action` execute
@@ -472,40 +523,6 @@ class ActionDecoder:
                 advance_roll if squad_advance_or_fall_back_allowed(game_state, squad_id) else None,
             )
             store_squad_move_cell_map(game_state, squad_id, move_cell_map)
-
-        # CHOIX DE L'ESCOUADE A ACTIVER (V11 §0.48 element L2 / §9 P3-3) — meme exclusivite que les
-        # branches `pending_agent_decision` et Oath ci-dessus, et pour la meme raison : le moteur
-        # est arrete sur un choix de joueur qui PRECEDE l'activation, donc aucune action
-        # d'activation n'a encore de sens. Aucune sortie « ne pas choisir » : il faut bien activer
-        # quelqu'un, et le slot 0 est toujours ouvert (cf. `activation_selection_slots`), donc le
-        # masque n'est jamais tout-faux.
-        #
-        # ⚠️ Le choix est RESOLU plus haut (avant la preparation du mouvement, dont il change le
-        # contenu) mais n'est JOUE qu'ICI, apres elle, et ce n'est pas cosmetique : l'observation
-        # rendue AVEC ce masque contient la grille egocentrique de l'ancre, que `build_squad_grid`
-        # remplit en relisant la carte de cellules memoisee ci-dessus (`read_squad_move_cell_map`
-        # LEVE si elle manque, sans repli). Un retour anticipe faisait planter la construction de
-        # l'observation au premier point de choix en phase move.
-        # L'escouade en RESERVES est le cas symetrique : elle n'a pas de carte, et `build_squad_grid`
-        # ne lui en demande pas — la branche d'ingress ci-dessous reste donc atteignable apres le
-        # choix, et le choix reste offert quand l'ancre est en reserves.
-        if activation_slots is not None:
-            for action_int in activation_slots:
-                mask[action_int] = True
-            return mask, eligible_units
-
-        # INGRESS MOVE (20.04) — l'escouade active est en réserves : elle n'a aucune cellule de
-        # move (elle n'est pas sur le plateau), elle a des candidats de MISE EN PLACE. Le masque
-        # ouvre donc les mêmes slots 4-8 que le déploiement, dont c'est le jumeau, plus WAIT pour
-        # RENONCER (rester en réserves ce tour-ci est un choix légal — jusqu'à la fin du 3e
-        # round, où 20.04 la détruit). Les deux familles ne peuvent pas se confondre : une
-        # escouade en réserves n'a pas de cellule jouable, une escouade posée n'a pas de
-        # candidat d'ingress.
-        if squad_in_reserves:
-            for action_int in self.ingress_slot_candidates(game_state, squad_id):
-                mask[action_int] = True
-            mask[SQUAD_ACTION_WAIT] = True
-            return mask, eligible_units
 
         squad_mask = build_squad_action_mask(
             game_state, squad_id, enemy_slot_ids, advance_roll, move_cell_map=move_cell_map
@@ -544,12 +561,51 @@ class ActionDecoder:
         player_int = int(pending_player)
         selectable = set(oath_selectable_enemy_ids(game_state, player_int))
         enemy_slot_ids = get_enemy_slot_mapping(game_state, player_int)
-        slots: Dict[int, str] = {}
-        for slot_index, squad_id in enumerate(enemy_slot_ids):
-            if squad_id is None or str(squad_id) not in selectable:
-                continue
-            slots[OATH_SLOT_BASE + slot_index] = str(squad_id)
-        return slots
+        return self._slots_from_mapping(enemy_slot_ids, OATH_SLOT_BASE, selectable)
+
+    @staticmethod
+    def _slots_from_mapping(
+        slot_ids: List[Optional[str]], base: int, allowed_ids: Set[str]
+    ) -> Dict[int, str]:
+        """`{base + i -> escouade}` pour les lignes *i* du mapping qui portent une escouade
+        autorisée. MATÉRIALISATION UNIQUE de l'invariant D1 : slot *i* = ligne *i* observée.
+
+        Partagée par l'Oath (mapping ennemi) et l'activation (mapping allié) parce que les deux
+        familles pointent le MÊME contrat. Deux boucles jumelles laisseraient une correction sur
+        l'une (normalisation d'id, traitement d'un slot mort) ne pas atteindre l'autre.
+        """
+        return {
+            base + slot_index: str(squad_id)
+            for slot_index, squad_id in enumerate(slot_ids)
+            if squad_id is not None and str(squad_id) in allowed_ids
+        }
+
+    @staticmethod
+    def _resolve_slot_target(
+        action_int: int, slots: Optional[Dict[int, str]], family: str, pending: str
+    ) -> str:
+        """Escouade désignée par un slot pointé, ou LÈVE si le masque n'aurait pas dû l'ouvrir.
+
+        Jumeau exact pour l'Oath et l'activation : dans les deux cas la cible est RELUE dans la
+        source unique du masque, jamais recalculée au décodage — c'est ce qui garantit que le slot
+        joué désigne l'escouade que le masque avait ouverte. Les deux `raise` sont ici et pas
+        recopiés par famille : un libellé qui dérive rend la panne plus dure à reconnaître.
+
+        `family` nomme le bloc d'ids (`OATH_SLOT`), `pending` ce qui manque en amont
+        (« designation d'Oath ») : les deux sont ce qui rend le message localisable, donc ils
+        restent portés par l'appelant plutôt que dérivés l'un de l'autre.
+        """
+        if slots is None:
+            raise ValueError(
+                f"convert_squad_action: action {family} {action_int} sans {pending} en attente "
+                "— le masque n'aurait pas du l'autoriser"
+            )
+        if action_int not in slots:
+            raise ValueError(
+                f"convert_squad_action: slot {family} {action_int} FERME "
+                f"(ouverts : {sorted(slots)}) — action hors masque"
+            )
+        return slots[action_int]
 
     #: Phases qui activent les escouades une par une, donc les seules ou « qui joue maintenant ? »
     #: est une question. Le DEPLOIEMENT en est structurellement exclu : ses candidats ne sont pas
@@ -614,17 +670,10 @@ class ActionDecoder:
             return None  # l'activation désignée est en cours
 
         anchor_id = str(require_key(eligible_units[0], "id"))
-        units_cache = require_key(game_state, "units_cache")
-        anchor_entry = units_cache.get(anchor_id)
-        if anchor_entry is None:
-            raise KeyError(f"Squad {anchor_id} missing from units_cache")
+        anchor_entry = require_unit_from_cache(anchor_id, game_state, "activation_selection_slots")
         our_player = int(require_key(anchor_entry, "player"))
         ally_slot_ids = get_ally_slot_mapping(game_state, our_player, anchor_id)
-        slots: Dict[int, str] = {}
-        for slot_index, squad_id in enumerate(ally_slot_ids):
-            if squad_id is None or str(squad_id) not in eligible_ids:
-                continue
-            slots[ACTIVATE_SLOT_BASE + slot_index] = str(squad_id)
+        slots = self._slots_from_mapping(ally_slot_ids, ACTIVATE_SLOT_BASE, eligible_ids)
         if ACTIVATE_SLOT_BASE not in slots:
             raise ValueError(
                 f"activation_selection_slots: l'ancre {anchor_id} n'a pas de slot alors qu'elle "
@@ -968,21 +1017,19 @@ class ActionDecoder:
         # La cible est relue dans la source unique du masque, jamais recalculée ici — c'est ce
         # qui garantit que le slot joué désigne l'escouade que le masque avait ouverte.
         if action_int in OATH_SLOTS:
-            oath_slots = self.oath_selection_slots(game_state)
-            if oath_slots is None:
-                raise ValueError(
-                    f"convert_squad_action: action OATH_SLOT {action_int} sans designation "
-                    "d'Oath en attente — le masque n'aurait pas du l'autoriser"
-                )
-            if action_int not in oath_slots:
-                raise ValueError(
-                    f"convert_squad_action: slot d'Oath {action_int} FERME "
-                    f"(ouverts : {sorted(oath_slots)}) — action hors masque"
-                )
+            # Cible résolue AVANT de lire `pending_oath_selection` : sans désignation en attente
+            # celui-ci vaut None, et l'ordre inverse rendrait un TypeError opaque au lieu du
+            # ValueError « le masque n'aurait pas du l'autoriser ».
+            oath_target = self._resolve_slot_target(
+                action_int,
+                self.oath_selection_slots(game_state),
+                "OATH_SLOT",
+                "designation d'Oath",
+            )
             return {
                 "action": "select_oath_target",
                 "player": int(require_key(game_state, "pending_oath_selection")),
-                "unitId": oath_slots[action_int],
+                "unitId": oath_target,
             }
 
         # Choix de l'escouade à activer : prime sur la phase pour la MÊME raison que les CHOICE
@@ -990,18 +1037,15 @@ class ActionDecoder:
         # cible est relue dans la source unique du masque, jamais recalculée ici : c'est ce qui
         # garantit que le slot joué désigne l'escouade que le masque avait ouverte.
         if action_int in ACTIVATE_SLOTS:
-            activation_slots = self.activation_selection_slots(game_state, eligible_units)
-            if activation_slots is None:
-                raise ValueError(
-                    f"convert_squad_action: action ACTIVATE_SLOT {action_int} sans choix "
-                    "d'activation en attente — le masque n'aurait pas du l'autoriser"
-                )
-            if action_int not in activation_slots:
-                raise ValueError(
-                    f"convert_squad_action: slot d'activation {action_int} FERME "
-                    f"(ouverts : {sorted(activation_slots)}) — action hors masque"
-                )
-            return {"action": "select_activation", "unitId": activation_slots[action_int]}
+            return {
+                "action": "select_activation",
+                "unitId": self._resolve_slot_target(
+                    action_int,
+                    self.activation_selection_slots(game_state, eligible_units),
+                    "ACTIVATE_SLOT",
+                    "choix d'activation",
+                ),
+            }
 
         # Zone intents (26-40) : command uniquement
         if is_zone_intent_action(action_int):

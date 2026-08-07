@@ -862,6 +862,23 @@ Ordre par valeur tactique :
    tiré au step suivant, pour l'escouade réellement désignée. Verrouillé par test, prouvé par
    mutation.
 
+   🔴 **L'ORDRE DES SORTIES DU MASQUE PORTE DEUX RÈGLES, et `L2` les avait cassées en s'insérant
+   au milieu de celles de `L6`.** Trouvé en relecture, corrigé après le merge. L'ordre est
+   désormais : **choix d'activation → ingress (20.04) → déclaration de vol (21.03) → carte**.
+   - *Ingress avant vol.* 21.03 ouvre « take to the skies » pour un mouvement Normal / Advance /
+     Fall Back / Charge, jamais pour une MISE EN PLACE. `arm_fly_declaration_decision` documente
+     explicitement que l'appelant garantit cette précondition et **ne la revérifie pas** — en
+     déplaçant le retour d'ingress SOUS l'appel, `L2` avait cassé la garantie : une escouade FLY
+     en réserves se voyait poser la question, et la déclaration s'écrit pour la PHASE
+     (`declared_key`/`resolved_key`), donc elle payait les -2" sur un mouvement qu'elle ne fait pas.
+   - *Vol après le choix d'activation.* Posée avant, la déclaration engageait la TÊTE DU POOL ;
+     `resolved_key` interdisant de la reposer, l'agent pouvait ensuite activer une autre escouade
+     en laissant la première avec un vol déclaré pour un mouvement qu'elle n'avait pas encore été
+     sélectionnée pour faire.
+
+   Les deux ont leur cas dans `test_activation_choice_contract.py`, et la mutation qui rétablit
+   l'ordre d'origine les rend rouges tous les deux.
+
    **Portée du marqueur : (tour, phase, joueur, escouade), les quatre.** Il est honoré tant que
    l'escouade est encore dans le pool ET que l'activation est la même. La seconde moitié n'est pas
    une précaution : les pools sont PAR PHASE, donc une escouade qui a fini de bouger est toujours
