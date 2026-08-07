@@ -400,7 +400,7 @@ def _fly_declaration_due_unit(
         return None
     unit = get_unit_by_id(game_state, str(squad_id))
     if unit is None:
-        raise KeyError(f"fly_declaration_decision_is_due: escouade {squad_id} introuvable")
+        raise KeyError(f"_fly_declaration_due_unit: escouade {squad_id} introuvable")
     if not _unit_has_keyword(unit, "fly"):
         return None
     if not _unit_is_ai_controlled(game_state, unit):
@@ -413,8 +413,14 @@ def _fly_declaration_due_unit(
 def fly_declaration_decision_is_due(game_state: Dict[str, Any], squad_id: str) -> bool:
     """21.03 — cette escouade doit-elle encore DÉCLARER (ou non) son vol pour le mouvement en cours ?
 
-    Prédicat SANS effet de bord, source unique de la condition d'armement : `arm_...` s'en sert
-    pour poser le point de choix, les tests pour l'observer sans muter l'état.
+    Lecture PUBLIQUE et SANS effet de bord de la condition d'armement. Elle partage son corps
+    avec `arm_fly_declaration_decision` (`_fly_declaration_due_unit`) mais n'est pas ce que
+    l'armement appelle : lui a besoin de l'unité, pas d'un booléen. Les deux ne peuvent donc pas
+    diverger, et c'est le seul point qui compte ici.
+
+    ⚠️ Aucun appelant de PRODUCTION à ce jour — ses consommateurs sont les tests, qui doivent
+    pouvoir observer « la question est-elle due ? » sans la poser. Écrit pour que personne ne la
+    supprime en la croyant morte, ni ne la prenne pour le chemin du masque.
     """
     return _fly_declaration_due_unit(game_state, squad_id) is not None
 
