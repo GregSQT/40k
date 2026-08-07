@@ -260,8 +260,10 @@ def command_step_command_abilities(game_state: Dict[str, Any]) -> None:
     expire_faction_abilities_for_player(game_state, current_player)
 
     # 2. Waaagh! — « once per battle, at the start of your Command phase, YOU CAN call a Waaagh! ».
-    #    « You can » : c'est optionnel, d'où deux candidats. L'ordre est CONTRACTUEL (§9.6) et
-    #    c'est lui qui distingue les deux (cf. AGENT_DECISION_TYPE_IDS) : 0 = appeler, 1 = passer.
+    #    « You can » : c'est optionnel, d'où deux candidats. L'ordre reste CONTRACTUEL (§9.6)
+    #    pour le moteur — 0 = appeler, 1 = passer —, mais ce n'est PAS lui qui les distingue POUR
+    #    L'AGENT : l'index n'est écrit dans aucun scalaire d'observation. C'est `declines` qui
+    #    porte la différence (cf. DECISION_OPTION_BIN_FIELDS).
     if (
         army_faction(game_state, current_player) == WAAAGH_FACTION_KEYWORD
         and waaagh_is_available(game_state, current_player)
@@ -278,8 +280,22 @@ def command_step_command_abilities(game_state: Dict[str, Any]) -> None:
             # aurait laissé croire que le Waaagh! est une capacité de datasheet.
             unit_id=f"player_{current_player}",
             options=[
-                {"label": "Call the Waaagh!", "effect_ids": (), "payload": {"call": True}},
-                {"label": "Do not call the Waaagh!", "effect_ids": (), "payload": {"call": False}},
+                # `effect_ids` vide des DEUX côtés : les effets du Waaagh! viennent de la faction,
+                # pas d'un `grantsRuleIds` de datasheet, donc ils n'appartiennent pas au registre
+                # des accordables. L'agent les voit ailleurs (`my_waaagh_active`, et la 5+
+                # invulnérable repliée dans l'invul de chaque unité).
+                {
+                    "label": "Call the Waaagh!",
+                    "effect_ids": (),
+                    "declines": False,
+                    "payload": {"call": True},
+                },
+                {
+                    "label": "Do not call the Waaagh!",
+                    "effect_ids": (),
+                    "declines": True,
+                    "payload": {"call": False},
+                },
             ],
         )
         # Une seule décision à la fois : le moteur rend la main maintenant. L'Oath ci-dessous ne

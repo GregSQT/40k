@@ -61,6 +61,7 @@ from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from engine.observation_entities import (
     OBS_ID_PADDING,
     OBS_ID_VOCAB_SIZE,
+    global_bin_index,
     self_model_bin_index,
     unit_bin_index,
 )
@@ -68,6 +69,14 @@ from engine.spatial_grid import GRID_CELL_COUNT, GRID_CHANNELS, GRID_SIZE
 
 #: Familles d'unités partageant le MÊME schéma et le MÊME encodeur.
 _UNIT_FAMILIES = ("allies", "enemies")
+
+#: Suffixes du schéma d'unité. Écrits UNE fois : ils servent à la fois à exiger les clés dans
+#: l'espace d'observation et à vérifier que les deux camps ont bien les mêmes dimensions. Les
+#: recopier laisserait une clé exigée mais jamais comparée — donc un schéma divergent qui passe.
+_UNIT_SUFFIXES = (
+    "cont", "bin", "ability_ids", "status_ids",
+    "wpn_cont", "wpn_bin", "wpn_rule_ids", "types_cont", "types_bin",
+)
 
 #: Largeur des embeddings de capacité et de statut (chantier 01). Deux tables de
 #: `OBS_ID_VOCAB_SIZE x ABILITY_EMBED_DIM`, PRÉ-DIMENSIONNÉES : c'est ce pré-dimensionnement qui
@@ -109,13 +118,18 @@ class EntityRunningNorm(nn.Module):
 
     @torch.no_grad()
     def _update(self, flat: torch.Tensor, weights: torch.Tensor) -> None:
-        """Mise à jour parallèle (Chan et al.) sur les seules entités valides."""
+        """Mise à jour parallèle (Chan et al.) sur les seules entités valides.
+
+        Le lot VIDE n'est pas court-circuité par un `if` : lire `weights.sum()` côté hôte
+        forcerait une synchronisation device->hôte à CHAQUE appel (8 par forward, à chaque
+        minibatch de `train()`), pour un cas qui se neutralise tout seul. Avec le dénominateur
+        borné, `batch_count = 0` donne `batch_mean = 0`, `batch_var = 0` et un poids de mélange
+        `batch_count / tot` nul : moyenne, variance et compte ressortent inchangés à l'identique.
+        """
         batch_count = weights.sum()
-        if float(batch_count) < 1.0:
-            return
         w = weights.unsqueeze(-1)
-        batch_mean = (flat * w).sum(dim=0) / batch_count
-        batch_var = (((flat - batch_mean) ** 2) * w).sum(dim=0) / batch_count
+        batch_mean = (flat * w).sum(dim=0) / batch_count.clamp(min=1.0)
+        batch_var = (((flat - batch_mean) ** 2) * w).sum(dim=0) / batch_count.clamp(min=1.0)
         delta = batch_mean - self.running_mean
         tot = self.count + batch_count
         new_mean = self.running_mean + delta * batch_count / tot
@@ -133,15 +147,19 @@ class EntityRunningNorm(nn.Module):
         (les clés "_bin" sont discrètes). Le prendre comme une pondération quelconque rendrait
         le compte d'entités — donc le dénominateur des statistiques — arbitraire.
         """
-        flat = x.reshape(-1, x.shape[-1])
-        weights = (mask.reshape(-1) > 0).to(flat.dtype)
+        keep = mask > 0
+        # `flat`/`weights` ne servent QU'À l'estimation : les construire hors du `if` allouerait
+        # deux tenseurs par appel sur le chemin d'inférence, où les statistiques sont figées
+        # (les rollouts SB3 tournent en `training_mode=False`).
         if self.training:
-            self._update(flat.detach(), weights.detach())
+            self._update(
+                x.reshape(-1, x.shape[-1]).detach(), keep.reshape(-1).to(x.dtype).detach()
+            )
         normed = (x - self.running_mean) / torch.sqrt(self.running_var + self.epsilon)
         normed = torch.clamp(normed, -self.clip, self.clip)
         # Une entité absente ne doit PAS acquérir une valeur non nulle par recentrage : son
         # embedding serait alors indistinguable d'une entité réelle avant même le masquage.
-        return normed * (mask > 0).to(normed.dtype).unsqueeze(-1)
+        return normed * keep.to(normed.dtype).unsqueeze(-1)
 
 
 def _mlp(sizes: Sequence[int]) -> nn.Sequential:
@@ -201,14 +219,44 @@ def _masked_mean_max(emb: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
     `emb` : (B, K, D) ; `mask` : (B, K). Un ensemble vide donne zéro (et non NaN, ni le max de
     valeurs de padding — d'où le `-inf` sur les entités absentes avant le max).
     """
-    present = (mask > 0).to(emb.dtype)
-    m = present.unsqueeze(-1)
+    keep = mask > 0
+    present = keep.to(emb.dtype)
     count = present.sum(dim=1, keepdim=True).clamp(min=1.0)
-    mean = (emb * m).sum(dim=1) / count
-    neg_inf = torch.finfo(emb.dtype).min
-    maxed = torch.where(m.bool(), emb, torch.full_like(emb, neg_inf)).max(dim=1).values
-    maxed = torch.where((present > 0).any(dim=1, keepdim=True), maxed, torch.zeros_like(maxed))
-    return torch.cat([mean, maxed], dim=1)
+    mean = (emb * present.unsqueeze(-1)).sum(dim=1) / count
+    # `masked_fill` et non `torch.where(..., full_like(...))` : ce dernier matérialise un tenseur
+    # de `-inf` de la TAILLE de `emb` (jusqu'à ~10 Mo sur la branche armes) juste pour le lire.
+    maxed = emb.masked_fill(~keep.unsqueeze(-1), torch.finfo(emb.dtype).min).max(dim=1).values
+    return torch.cat([mean, maxed.masked_fill(~keep.any(dim=1, keepdim=True), 0.0)], dim=1)
+
+
+def _encode_masked(
+    encoder: nn.Module, mask: torch.Tensor, *parts: torch.Tensor
+) -> torch.Tensor:
+    """Encode `cat(parts)` puis ANNULE les entités absentes : (B, K, …) -> (B, K, D).
+
+    La remise à zéro est la moitié qu'on oublie en recopiant ce motif. Sans elle un slot vide
+    sort le BIAIS de l'encodeur — un vecteur constant non nul, donc indistinguable d'une entité
+    réelle pour les têtes pointeur qui lisent ces embeddings slot par slot.
+    """
+    return encoder(torch.cat(parts, dim=-1)) * (mask > 0).to(mask.dtype).unsqueeze(-1)
+
+
+def _aggregate_subentities(
+    encoder: nn.Module, sub_in: torch.Tensor, mask: torch.Tensor
+) -> torch.Tensor:
+    """Encode puis AGRÈGE un rang de sous-entités par unité : (B, K, S, F) -> (B, K, 2·D).
+
+    `_masked_mean_max` raisonne sur (lot, ensemble, D) : les deux premières dimensions sont
+    aplaties le temps de l'agrégation, puis restaurées. Écrit une fois — cette gymnastique de
+    `reshape` est exactement ce qui se recopie de travers d'un rang de sous-entités à l'autre,
+    et un axe échangé y donnerait des formes valides pour des agrégations fausses.
+    """
+    emb = encoder(sub_in)
+    b, k = emb.shape[0], emb.shape[1]
+    return _masked_mean_max(
+        emb.reshape(b * k, emb.shape[2], emb.shape[3]),
+        mask.reshape(b * k, mask.shape[2]),
+    ).reshape(b, k, -1)
 
 
 class SpatialCombinedExtractor(BaseFeaturesExtractor):
@@ -218,7 +266,9 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
 
         [ trunk_features (self.trunk_dim)
         | embeddings ennemis PAR SLOT (K_e × entity_dim)          -> tête pointeur de TIR (T-E)
-        | carte de move NON aplatie (move_map_channels × 32 × 32) -> tête 1x1 de MOVE (T-G) ]
+        | carte de move NON aplatie (move_map_channels × 32 × 32) -> tête 1x1 de MOVE (T-G)
+        | embeddings de CANDIDATS de décision (K_d × entity_dim)  -> tête pointeur CHOICE (§9.3)
+        | embeddings de SLOTS de déploiement (K_p × entity_dim)   -> tête pointeur DEPLOY (§0.44) ]
 
     `cnn_features` : dimension de la sortie CNN. OBLIGATOIRE, sans défaut — la valeur vient de
     la config JSON de l'agent (`model_params.policy_kwargs.features_extractor_kwargs`).
@@ -254,12 +304,7 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
             "deploy_cand_cont", "deploy_cand_bin",
         ]
         for family in _UNIT_FAMILIES:
-            expected_keys += [
-                f"{family}_cont", f"{family}_bin",
-                f"{family}_ability_ids", f"{family}_status_ids",
-                f"{family}_wpn_cont", f"{family}_wpn_bin", f"{family}_wpn_rule_ids",
-                f"{family}_types_cont", f"{family}_types_bin",
-            ]
+            expected_keys += [f"{family}_{suffix}" for suffix in _UNIT_SUFFIXES]
         for key in expected_keys:
             if key not in observation_space.spaces:
                 raise KeyError(
@@ -282,10 +327,7 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
 
         # Le schéma d'unité est UNIFIÉ : allié et ennemi partagent leurs dimensions, sans quoi
         # un encodeur commun n'aurait pas de sens (§3.3).
-        for suffix in (
-            "cont", "bin", "ability_ids", "status_ids",
-            "wpn_cont", "wpn_bin", "wpn_rule_ids", "types_cont", "types_bin",
-        ):
+        for suffix in _UNIT_SUFFIXES:
             ally_shape = _shape(f"allies_{suffix}")[1:]
             enemy_shape = _shape(f"enemies_{suffix}")[1:]
             if ally_shape != enemy_shape:
@@ -326,13 +368,15 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
             # partent directement à la tête pointeur — cf. `decision_embeddings_slice`).
             + self.decision_ctx_dim
             + 2 * entity_dim
-            # Candidats de déploiement (§0.40 point 3), APLATIS par slot et non agrégés : les
-            # logits des actions 4-8 sortent de la tête DENSE, une colonne par slot, donc le
-            # tronc doit garder l'identité du slot. L'encodeur, lui, est PARTAGÉ : ce que le
-            # réseau apprend d'un candidat (« exposé à 4 ennemis, loin de tout objectif ») sert
-            # aux cinq — c'est exactement l'argument §3.3, appliqué à un bloc que le pointeur ne
-            # lit pas.
-            + self.n_deploy_slots * entity_dim
+            # Candidats de déploiement (§0.40 point 3) : AGRÉGÉS, exactement comme les ennemis et
+            # les candidats de décision — le tronc n'en a plus besoin que comme CONTEXTE (« mes
+            # poses possibles sont-elles toutes exposées ? », pour la valeur de l'état). Ils y
+            # étaient aplatis par slot tant que les logits 4-11 sortaient d'une tête indexée par
+            # la cellule ; depuis §0.44 (L1) ils sortent de `deploy_query_net`, qui lit les
+            # embeddings PAR SLOT en queue du vecteur (`deploy_embeddings_slice`). Garder
+            # l'identité du slot ici la ferait ré-apprendre par des poids denses, ce que la tête
+            # pointeur supprime précisément.
+            + 2 * entity_dim
         )
         # La carte de move sort du réseau AVEC ses canaux positionnels : la tête 1x1 doit les
         # voir directement, pas seulement à travers la pile conv.
@@ -344,11 +388,21 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
                 + self.n_enemy_slots * entity_dim
                 + move_map_channels * GRID_CELL_COUNT
                 + self.n_decision_options * entity_dim
+                + self.n_deploy_slots * entity_dim
             ),
         )
         self.trunk_dim = trunk_dim
+        # Index ABSOLU du bit `phase_deployment` dans le vecteur de features (§0.44 / L1). Il
+        # tombe dans la partie tronc, où `global_bin` est recopié TEL QUEL : la clé est hors
+        # `norm_obs_keys` (ai/train._vec_norm_obs_keys), donc le bit y vaut exactement 0.0 ou 1.0.
+        # C'est LUI qui dit à la policy si les ids 4-11 sont des slots de déploiement ou des
+        # cellules de move — les deux familles partagent ces ids et seule la phase les sépare.
+        # Calculé ici, à côté de la composition du tronc, et JAMAIS recopié dans la policy : un
+        # décalage d'un champ y ferait router sur `is_my_turn` sans que rien ne lève.
+        self._deploy_phase_index = (
+            cnn_features + _shape("global_cont")[0] + global_bin_index("phase_deployment")
+        )
         self.entity_dim = entity_dim
-        self.map_channels = map_channels
         self.move_map_channels = move_map_channels
 
         # --- CNN : un STEM commun à pleine résolution, puis deux branches (V11 §0.32 T-G) ---
@@ -443,6 +497,17 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
         # pour la meme raison qu'elles le sont entre elles — [DEVASTATING WOUNDS] (une regle
         # d'arme) et « Feel No Pain » (une capacite d'unite) ne vivent pas dans le meme espace, et
         # un pooling commun les additionnerait.
+        #
+        # ⚠️ COUT RESEAU, et non seulement cout d'observation : ce sac-la est poole PAR PROFIL,
+        # donc sur K_WEAPONS fois plus de lignes que les capacites, qui le sont par entite.
+        # MESURE (B=512, 4 threads CPU, allies + ennemis) : 217 ms par forward pour les regles
+        # d'arme contre 37 ms pour capacites + statuts reunis. C'est paye a chaque passe PPO, et
+        # le docstring du cache de profils (`observation_builder._encode_entity_weapons`) ne
+        # couvre QUE le cote observation (froid, derriere le cache) — il ne dit rien de celui-ci.
+        # La variante `nn.Embedding(...).sum(dim=-2)` est mesuree a 102 ms (2,1x) sur le meme
+        # banc ; elle est ecartee ICI pour EXACTEMENT la raison ecrite ci-dessus pour les
+        # capacites — elle ne porte pas l'invariant de `padding_idx` —, la penalite etant
+        # simplement multipliee par les 20 slots d'arme.
         self.weapon_rule_embedding = _id_bag()
         self.unit_encoder = _mlp(
             [
@@ -497,56 +562,75 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
         start = self.move_map_slice().stop
         return slice(start, start + self.n_decision_options * self.entity_dim)
 
+    def deploy_embeddings_slice(self) -> slice:
+        """Tranche des embeddings de CANDIDATS DE DÉPLOIEMENT, PAR SLOT (§0.44, élément L1).
+
+        Placée en DERNIER, derrière les candidats de décision, pour la même raison qu'eux : les
+        tranches déjà consommées par les têtes de tir, de move et de décision gardent leurs
+        bornes. C'est la tranche que lit `deploy_query_net`.
+        """
+        start = self.decision_embeddings_slice().stop
+        return slice(start, start + self.n_deploy_slots * self.entity_dim)
+
+    def deployment_phase_flag_index(self) -> int:
+        """Index du bit `phase_deployment` dans le vecteur de features (§0.44, élément L1).
+
+        La policy le lit pour router les ids 4-11 vers la tête de déploiement plutôt que vers la
+        conv 1x1 des cellules de move. Contrat, comme les tranches : il est CALCULÉ à partir de
+        la composition réelle du tronc, jamais réécrit côté policy.
+        """
+        return self._deploy_phase_index
+
     def _encode_units(self, obs: Dict[str, torch.Tensor], family: str) -> torch.Tensor:
         """Embeddings (B, K, entity_dim) d'une famille d'unités, encodeurs PARTAGÉS."""
         unit_cont = obs[f"{family}_cont"]
         unit_bin = obs[f"{family}_bin"]
         present = unit_bin[..., _UNIT_PRESENT_IDX]  # lu du schéma (dernier champ, §0.37)
-        b, k = unit_cont.shape[0], unit_cont.shape[1]
 
-        wpn_cont = obs[f"{family}_wpn_cont"]
         wpn_bin = obs[f"{family}_wpn_bin"]
         wpn_mask = wpn_bin[..., -1]  # dernier drapeau de profil = slot occupé
         # Règles du profil : un « sac » d'ids PAR PROFIL, et non par entité comme les capacités.
         # Un slot vide vaut `padding_idx` et ne contribue rien ; un profil vide n'a que des slots
         # vides, donc un embedding nul — cohérent avec son mask.
         wpn_rule_emb = _pool_ids(self.weapon_rule_embedding, obs[f"{family}_wpn_rule_ids"])
-        wpn_in = torch.cat(
-            [self.weapon_norm(wpn_cont, wpn_mask), wpn_bin, wpn_rule_emb], dim=-1
+        wpn_agg = _aggregate_subentities(
+            self.weapon_encoder,
+            torch.cat(
+                [
+                    self.weapon_norm(obs[f"{family}_wpn_cont"], wpn_mask),
+                    wpn_bin,
+                    wpn_rule_emb,
+                ],
+                dim=-1,
+            ),
+            wpn_mask,
         )
-        wpn_emb = self.weapon_encoder(wpn_in)
-        wpn_agg = _masked_mean_max(
-            wpn_emb.reshape(b * k, wpn_emb.shape[2], wpn_emb.shape[3]),
-            wpn_mask.reshape(b * k, wpn_mask.shape[2]),
-        ).reshape(b, k, -1)
 
-        typ_cont = obs[f"{family}_types_cont"]
         typ_bin = obs[f"{family}_types_bin"]
         typ_mask = typ_bin[..., -1]  # MODEL_TYPE_BIN_FIELDS[-1] == "present"
-        typ_in = torch.cat([self.type_norm(typ_cont, typ_mask), typ_bin], dim=-1)
-        typ_emb = self.type_encoder(typ_in)
-        typ_agg = _masked_mean_max(
-            typ_emb.reshape(b * k, typ_emb.shape[2], typ_emb.shape[3]),
-            typ_mask.reshape(b * k, typ_mask.shape[2]),
-        ).reshape(b, k, -1)
+        typ_agg = _aggregate_subentities(
+            self.type_encoder,
+            torch.cat(
+                [self.type_norm(obs[f"{family}_types_cont"], typ_mask), typ_bin], dim=-1
+            ),
+            typ_mask,
+        )
 
         # Capacités et statuts : lecture de ligne, jamais de one-hot matérialisé — un « sac »
         # par entité (cf. `_pool_ids`).
         ability_emb = _pool_ids(self.ability_embedding, obs[f"{family}_ability_ids"])
         status_emb = _pool_ids(self.status_embedding, obs[f"{family}_status_ids"])
 
-        unit_in = torch.cat(
-            [
-                self.unit_norm(unit_cont, present),
-                unit_bin,
-                ability_emb,
-                status_emb,
-                wpn_agg,
-                typ_agg,
-            ],
-            dim=-1,
+        return _encode_masked(
+            self.unit_encoder,
+            present,
+            self.unit_norm(unit_cont, present),
+            unit_bin,
+            ability_emb,
+            status_emb,
+            wpn_agg,
+            typ_agg,
         )
-        return self.unit_encoder(unit_in) * (present > 0).to(unit_in.dtype).unsqueeze(-1)
 
     def forward(self, observations: Dict[str, torch.Tensor]) -> torch.Tensor:
         grid = observations["grid"]
@@ -582,9 +666,7 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
         # jamais déduit de la ligne — un candidat sans effet observé aurait une ligne nulle.
         decision_options = observations["decision_options_bin"]
         decision_mask = decision_options[..., -1]
-        decision_emb = self.decision_encoder(decision_options) * (
-            decision_mask > 0
-        ).to(decision_options.dtype).unsqueeze(-1)
+        decision_emb = _encode_masked(self.decision_encoder, decision_mask, decision_options)
         decision_agg = _masked_mean_max(decision_emb, decision_mask)
 
         # Candidats de déploiement : masque LU sur le bit `present` (dernier champ), jamais
@@ -592,16 +674,15 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
         # plausible. Hors phase de déploiement le bloc entier est nul, `present` compris.
         deploy_cand_bin = observations["deploy_cand_bin"]
         deploy_mask = deploy_cand_bin[..., -1]
-        deploy_in = torch.cat(
-            [
-                self.deploy_cand_norm(observations["deploy_cand_cont"], deploy_mask),
-                deploy_cand_bin,
-            ],
-            dim=-1,
+        deploy_emb = _encode_masked(
+            self.deploy_cand_encoder,
+            deploy_mask,
+            self.deploy_cand_norm(observations["deploy_cand_cont"], deploy_mask),
+            deploy_cand_bin,
         )
-        deploy_emb = self.deploy_cand_encoder(deploy_in) * (deploy_mask > 0).to(
-            deploy_in.dtype
-        ).unsqueeze(-1)
+        # Le tronc n'en voit que l'AGRÉGATION (contexte) ; les embeddings PAR SLOT partent en
+        # queue du vecteur, à la tête pointeur de déploiement — même partage que les ennemis.
+        deploy_agg = _masked_mean_max(deploy_emb, deploy_mask)
 
         trunk = torch.cat(
             [
@@ -614,7 +695,7 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
                 sm_agg,
                 observations["decision_ctx_bin"],
                 decision_agg,
-                deploy_emb.reshape(deploy_emb.shape[0], -1),
+                deploy_agg,
             ],
             dim=1,
         )
@@ -624,6 +705,7 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
                 enemy_emb.reshape(enemy_emb.shape[0], -1),
                 move_map.reshape(move_map.shape[0], -1),
                 decision_emb.reshape(decision_emb.shape[0], -1),
+                deploy_emb.reshape(deploy_emb.shape[0], -1),
             ],
             dim=1,
         )

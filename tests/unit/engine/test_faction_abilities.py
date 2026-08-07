@@ -350,9 +350,14 @@ def test_le_waaagh_est_propose_au_joueur_orke_et_a_deux_candidats():
     assert decision["type"] == "waaagh_call"
     assert decision["player"] == 1
     assert len(decision["options"]) == 2
-    # L'ORDRE est contractuel : c'est lui, et non un `effect_ids`, qui porte le sens.
+    # L'ORDRE est contractuel POUR LE MOTEUR.
     assert decision["options"][0]["payload"]["call"] is True
     assert decision["options"][1]["payload"]["call"] is False
+    # Mais l'ordre n'est PAS ce qui distingue les candidats pour l'AGENT : l'index n'est écrit
+    # dans aucun scalaire d'observation. `declines` l'est, et c'est le seul champ qui sépare
+    # les deux lignes — les `effect_ids` sont vides des deux côtés (effets de faction).
+    assert decision["options"][0]["declines"] is False
+    assert decision["options"][1]["declines"] is True
 
 
 def test_le_waaagh_n_est_pas_propose_a_une_armee_non_orke():

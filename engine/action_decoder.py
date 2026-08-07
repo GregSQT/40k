@@ -2199,15 +2199,20 @@ class ActionDecoder:
         """
         Select deployment hex using tactical criteria driven by deployment action.
 
-        Action mapping:
+        Action mapping (les 5 stratégies DÉFINIES, `DEPLOY_STRATEGY_SLOTS`) :
         - 4: aggressive front
         - 5: objective pressure
         - 6: safe/cohesion
         - 7: left flank
         - 8: right flank
 
-        LECTURE de `deployment_slot_candidates` : le choix y est fait, une fois pour les 5 slots,
-        et l'observation lit le MÊME dictionnaire (§0.40 point 3).
+        La garde ci-dessous admet toute la plage `DEPLOY_SLOTS` (4-11) et non ces 5 seuls ids :
+        un slot 9-11 est un id d'action VALIDE mais sans stratégie, et c'est le contrôle de slot
+        FERMÉ qui le rejette — avec le nombre d'hexes en cause, pas un « action invalide » muet.
+
+        LECTURE de `deployment_slot_candidates` : le choix y est fait, une fois pour les
+        `DEPLOY_STRATEGY_COUNT` slots ouverts, et l'observation lit le MÊME dictionnaire
+        (§0.40 point 3).
         """
         if action_int not in list(DEPLOY_SLOTS):
             raise ValueError(f"Invalid deployment action: {action_int}")

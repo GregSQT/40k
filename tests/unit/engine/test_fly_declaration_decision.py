@@ -26,6 +26,7 @@ from engine.observation_entities import (
     AGENT_DECISION_TYPE_IDS,
     AGENT_DECISION_TYPE_SLOTS,
     DECISION_CTX_BIN_FIELDS,
+    DECISION_CTX_BIN_SIZE,
 )
 from engine.phase_handlers.movement_handlers import (
     apply_fly_declaration_decision,
@@ -113,14 +114,19 @@ def test_opening_the_type_consumes_a_reserve_and_leaves_obs_size_untouched():
     Sans cette vérification, `L6` casserait le contrat d'observation qu'il est justement censé
     ne pas toucher — et le lot de ré-entraînement changerait de nature en silence.
     """
-    from engine.observation_builder import ObservationBuilder
-
     assert "fly_declaration" in AGENT_DECISION_TYPE_IDS
     # 1 bit `decision_pending` + exactement SLOTS colonnes de type, réserves comprises.
     assert len(DECISION_CTX_BIN_FIELDS) == 1 + AGENT_DECISION_TYPE_SLOTS
     assert len(AGENT_DECISION_TYPE_IDS) <= AGENT_DECISION_TYPE_SLOTS
-    # `obs_size` et l'espace d'action sont les deux contraintes NOMMÉES du chantier.
-    assert ObservationBuilder.SQUAD_OBS_SIZE_TARGET == 14609
+    # `obs_size` et l'espace d'action sont les deux contraintes NOMMÉES du chantier. La VALEUR
+    # d'`obs_size` n'est PAS réaffirmée ici : elle est verrouillée à un seul endroit
+    # (`test_deployment_observation_contract.test_squad_obs_size_target_matches_the_schema`), et
+    # un autre chantier a le droit de la changer — le drapeau `declines` du bloc candidat de
+    # décision l'a fait passer à 14615 le 2026-08-07. Ce que CE test doit prouver, c'est que
+    # `L6` n'y contribue pour rien : ouvrir un type consomme une RÉSERVE, donc le bloc de
+    # contexte garde sa taille (assertion ci-dessus). Recopier la valeur ici la ferait rougir à
+    # chaque chantier voisin, pour un défaut qui n'est pas le sien.
+    assert DECISION_CTX_BIN_SIZE == 1 + AGENT_DECISION_TYPE_SLOTS
     assert TOTAL_ACTION_SIZE == 1127
 
 

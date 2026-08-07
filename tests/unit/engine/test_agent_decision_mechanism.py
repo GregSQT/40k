@@ -204,8 +204,10 @@ def _engine(gs: Dict[str, Any], gym_training_mode: bool = True) -> W40KEngine:
 
 def _two_options() -> List[Dict[str, Any]]:
     return [
-        {"label": "A", "effect_ids": ("reroll_1_tohit_fight",), "payload": {"display_rule_id": "a"}},
-        {"label": "B", "effect_ids": ("reroll_1_save_fight",), "payload": {"display_rule_id": "b"}},
+        {"label": "A", "effect_ids": ("reroll_1_tohit_fight",), "declines": False,
+         "payload": {"display_rule_id": "a"}},
+        {"label": "B", "effect_ids": ("reroll_1_save_fight",), "declines": False,
+         "payload": {"display_rule_id": "b"}},
     ]
 
 
@@ -233,7 +235,7 @@ def test_more_candidates_than_choice_actions_raises():
     """AUCUNE troncature (§9.0bis réserve 2) : un top-K silencieux exclurait l'optimum."""
     gs = _game_state([_unit(1, 1, 5, 10, [])])
     too_many = [
-        {"label": f"opt{i}", "effect_ids": ("reroll_1_towound",), "payload": {}}
+        {"label": f"opt{i}", "effect_ids": ("reroll_1_towound",), "declines": False, "payload": {}}
         for i in range(MAX_DECISION_OPTIONS + 1)
     ]
     with pytest.raises(ValueError, match="intentions scorees"):
@@ -412,6 +414,85 @@ def test_observation_describes_the_type_and_every_candidate():
     # Le masque `present` porte le NOMBRE de candidats.
     present = options[:, decision_option_bin_index("present")]
     assert list(present) == [1.0, 1.0] + [0.0] * (MAX_DECISION_OPTIONS - 2)
+
+
+def test_deux_candidats_presents_ne_sortent_jamais_la_meme_ligne():
+    """VERROU du défaut mesuré le 2026-08-07 : `waaagh_call` était un pile-ou-face inapprenable.
+
+    Ses deux candidats portaient un `effect_ids` VIDE — les effets du Waaagh! viennent de la
+    faction, pas d'un `grantsRuleIds` de datasheet — donc l'observation sortait deux fois la
+    ligne `[0…0, present=1]`. L'encodeur de candidat est PARTAGÉ et `pointer_policy._point` est
+    un produit scalaire nu, sans biais par slot : lignes égales ⇒ logits égaux ⇒ gradients
+    égaux. La symétrie ne pouvait pas se briser, à aucun pas d'entraînement.
+
+    Le test reproduit la FORME exacte de ce couple (deux candidats sans effet accordable, l'un
+    qui agit, l'autre qui passe) et vérifie que les lignes diffèrent. Sans `declines`, il est
+    ROUGE — vérifié en retirant le champ du registre.
+    """
+    gs = _game_state([_unit(1, 1, 5, 10, []), _unit(2, 2, 15, 10, [])])
+    engine = _engine(gs)
+    # Forme du Waaagh! : aucun effet ACCORDABLE de part et d'autre, seul le sens diffère.
+    _push(
+        gs,
+        options=[
+            {"label": "Agir", "effect_ids": (), "declines": False, "payload": {"call": True}},
+            {"label": "Passer", "effect_ids": (), "declines": True, "payload": {"call": False}},
+        ],
+    )
+    options = engine.obs_builder.build_squad_observation(gs, "1")["decision_options_bin"]
+
+    present = options[:, decision_option_bin_index("present")]
+    lignes = [tuple(options[slot]) for slot in range(len(present)) if present[slot] == 1.0]
+    assert len(lignes) == 2, "l'échantillon doit contenir DEUX candidats décrits, pas zéro"
+    assert lignes[0] != lignes[1], (
+        "les deux candidats sortent la MÊME ligne d'observation : l'agent ne peut pas les "
+        "distinguer, et la tête pointeur leur donnera des logits égaux à vie"
+    )
+    assert options[0, decision_option_bin_index("declines")] == 0.0
+    assert options[1, decision_option_bin_index("declines")] == 1.0
+
+
+def test_rule_choice_ne_declare_aucun_candidat_qui_passe():
+    """`declines` dit la vérité, il ne remplit pas une colonne : ce choix n'a pas d'option nulle."""
+    gs = _game_state([_unit(1, 1, 5, 10, []), _unit(2, 2, 15, 10, [])])
+    engine = _engine(gs)
+    _push(gs)
+    options = engine.obs_builder.build_squad_observation(gs, "1")["decision_options_bin"]
+    assert options[:, decision_option_bin_index("declines")].sum() == 0.0
+
+
+def test_un_candidat_qui_passe_et_qui_accorde_un_effet_leve():
+    """« Ne rien faire » et « accorder un effet » s'excluent — l'incohérence n'est pas absorbée."""
+    gs = _game_state([_unit(1, 1, 5, 10, [])])
+    options = _two_options()
+    options[0]["declines"] = True
+    with pytest.raises(ValueError, match="n'accorde rien"):
+        _push(gs, options=options)
+
+
+def test_deux_candidats_qui_passent_levent():
+    """Deux façons de ne rien faire sont indiscernables pour l'agent : c'est un seul candidat."""
+    gs = _game_state([_unit(1, 1, 5, 10, [])])
+    with pytest.raises(ValueError, match="indiscernables"):
+        _push(
+            gs,
+            options=[
+                {"label": "A", "effect_ids": (), "declines": True, "payload": {}},
+                {"label": "B", "effect_ids": (), "declines": True, "payload": {}},
+            ],
+        )
+
+
+def test_declines_est_exige_jamais_deduit():
+    """Pas de valeur par défaut : `not effect_ids` aurait marqué `declines` sur les DEUX
+    candidats du Waaagh!, donc aussi sur celui qui l'APPELLE — l'inverse exact du sens."""
+    gs = _game_state([_unit(1, 1, 5, 10, [])])
+    from shared.data_validation import ConfigurationError
+
+    options = _two_options()
+    del options[0]["declines"]
+    with pytest.raises(ConfigurationError, match="declines"):
+        _push(gs, options=options)
 
 
 def test_observation_of_the_other_camp_stays_empty():
@@ -850,8 +931,8 @@ def _pose(game_state: Dict[str, Any], *, decision_type: str = "waaagh_call",
         player=player,
         unit_id=unit_id,
         options=[
-            {"label": "Oui", "effect_ids": (), "payload": {"call": True}},
-            {"label": "Non", "effect_ids": (), "payload": {"call": False}},
+            {"label": "Oui", "effect_ids": (), "declines": False, "payload": {"call": True}},
+            {"label": "Non", "effect_ids": (), "declines": True, "payload": {"call": False}},
         ],
     )
 

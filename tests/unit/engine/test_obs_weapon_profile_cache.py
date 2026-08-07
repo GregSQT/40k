@@ -149,8 +149,15 @@ def test_poisoned_entry_does_not_survive_a_reset():
             gs, sid, [gs["models_cache"][m] for m in alive], list(alive)
         )[1]
     )
-    # Meme forme que les entrees reelles : (cont, bin, troncatures rejouees).
-    gs[WEAPON_PROFILE_CACHE_KEY][(sid, alive)] = (poison_cont, poison_bin, ())
+    poison_rule_ids = np.zeros_like(
+        env.obs_builder._encode_entity_weapons(
+            gs, sid, [gs["models_cache"][m] for m in alive], list(alive)
+        )[2]
+    )
+    # Meme ARITE que les entrees reelles : (cont, bin, ids de regles, troncatures rejouees).
+    # Un n-uplet plus court ferait echouer le depaquetage de `_encode_entity_weapons` AVANT
+    # l'assertion — le test planterait au lieu de constater la regression qu'il verrouille.
+    gs[WEAPON_PROFILE_CACHE_KEY][(sid, alive)] = (poison_cont, poison_bin, poison_rule_ids, ())
 
     env.reset()
     served = gs.get(WEAPON_PROFILE_CACHE_KEY, {}).get((sid, alive))

@@ -392,20 +392,24 @@ def self_model_bin_index(field: str) -> int:
 #: L3 (allocation de pertes), L4 (pile-in), L5 (move réactif), L6 (FLY 21.03), L7 (choix d'arme)
 #: et L10 (placement de charge) ouvrent chacun un type, et aucun ne coûtera de retrain.
 #:
-#: ⚠️ `waaagh_call` est le premier type dont les DEUX candidats portent un `effect_ids` VIDE, et
-#: c'est voulu : `DECISION_GRANTABLE_EFFECT_IDS` est dérivé des `grantsRuleIds` des rosters
-#: (verrouillé par test de contrat), or aucun roster n'accorde les effets du Waaagh! — ils
-#: viennent de la faction, pas d'une datasheet. Les deux candidats sont donc décrits par le même
-#: vecteur nul, et ce qui les distingue est le couple (type de décision, INDEX) : `CHOICE_0`
-#: appelle, `CHOICE_1` passe, ordre CONTRACTUEL et stable. C'est suffisant ici et seulement ici,
-#: parce que l'ensemble des candidats est FIXE — contrairement à `rule_choice`, où il varie
-#: d'une unité à l'autre et où l'index seul ne voudrait rien dire.
+#: ⚠️ `waaagh_call` est le premier type dont les DEUX candidats portent un `effect_ids` VIDE :
+#: `DECISION_GRANTABLE_EFFECT_IDS` est dérivé des `grantsRuleIds` des rosters (verrouillé par
+#: test de contrat), or aucun roster n'accorde les effets du Waaagh! — ils viennent de la
+#: faction, pas d'une datasheet. Ce qui les distingue est le drapeau `declines` du bloc candidat
+#: (`DECISION_OPTION_BIN_FIELDS`), et surtout PAS leur index.
 #:
-#: ⚠️ `fly_declaration` (`L6`) est dans le MÊME cas que `waaagh_call` et pour la même raison :
-#: « take to the skies » n'est accordé par aucune datasheet — c'est le mot-clé FLY qui l'ouvre,
-#: et 21.03 qui en fixe le prix. Ses deux candidats portent donc un `effect_ids` VIDE, et ce qui
-#: les distingue est le couple (type, INDEX) : `CHOICE_0` déclare le vol, `CHOICE_1` y renonce.
-#: Ensemble de candidats FIXE, ordre CONTRACTUEL — même justification que ci-dessus.
+#: Ce fut écrit ici le contraire — « ce qui les distingue est le couple (type, INDEX) » — et
+#: c'était FAUX, mesuré : l'index n'est écrit dans AUCUN scalaire d'observation, et la tête
+#: pointeur score chaque candidat par un produit scalaire nu, sans biais par slot
+#: (`pointer_policy._point`), donc délibérément agnostique à la position. Les deux lignes
+#: sortaient `[0…0, present=1]` à l'identique : logits égaux, gradients égaux, symétrie
+#: incassable — l'appel du Waaagh! était un pile-ou-face que PPO ne pouvait pas apprendre.
+#:
+#: ⚠️ `fly_declaration` (`L6`) est dans le MÊME cas, et son entrée portait la MÊME erreur (« ce
+#: qui les distingue est le couple (type, INDEX) ») : « take to the skies » n'est accordé par
+#: aucune datasheet — c'est le mot-clé FLY qui l'ouvre et 21.03 qui en fixe le prix —, donc ses
+#: deux candidats portent eux aussi un `effect_ids` VIDE. C'est `declines` qui les sépare :
+#: `CHOICE_1` renonce au vol, et le renoncement est précisément « ne rien faire ».
 AGENT_DECISION_TYPE_IDS: Tuple[str, ...] = ("rule_choice", "waaagh_call", "fly_declaration")
 
 #: Nombre MAXIMAL de candidats exposés à l'agent — le K de `CHOICE_0..K-1`
@@ -470,9 +474,32 @@ DECISION_CTX_BIN_FIELDS: Tuple[str, ...] = (
 #: décrire, et en inventer une, remplie de zéros, serait une valeur par défaut sans signifiant.
 #: Les tranches P3 qui en auront besoin (distance d'une destination, dégâts attendus sur une
 #: cible) ouvriront un registre `DECISION_OPTION_CONT_FIELDS` à ce moment-là.
+#:
+#: ⚠️ `declines` n'est PAS un effet : c'est le seul champ qui décrive un candidat qui ne fait
+#: RIEN. Une décision optionnelle (« you CAN call a Waaagh! », « you CAN take to the skies »)
+#: oppose un candidat qui agit à un candidat qui passe, et le second n'accorde par construction
+#: aucun effet — sans ce bit il est décrit par le vecteur nul, donc indiscernable de tout autre
+#: candidat sans effet accordable. C'est exactement ce qui rendait `waaagh_call` inapprenable.
+#:
+#: POURQUOI PAS les effets. Les effets du Waaagh! sont DÉJÀ observés ailleurs, et mieux :
+#: `my_waaagh_active` / `enemy_waaagh_active` (`GLOBAL_BIN_FIELDS`) portent son état d'armée, et
+#: la 5+ invulnérable est déjà repliée dans l'invulnérable observée de chaque unité
+#: (`ObservationBuilder`). Les redécrire par candidat aurait dupliqué cette information, fait
+#: entrer des effets de FACTION dans un vocabulaire de règles d'UNITÉ, et coûté 3 bits × 6 slots
+#: au lieu d'un seul — pour dire moins.
+#:
+#: POURQUOI PAS l'index du candidat. Il ne serait lisible qu'en donnant une sémantique de
+#: position aux slots, ce que l'encodeur de candidat PARTAGÉ et la tête pointeur refusent par
+#: construction (§9.3 P2) — et à raison : l'option 0 d'un prompt n'a rien à voir avec l'option 0
+#: d'un autre. `declines` porte le sens lui-même, donc il généralise à toute décision optionnelle
+#: (L4 pile-in, L5 move réactif, L6 FLY 21.03) sans rien ajouter.
+#:
+#: Il vaut 0 pour les DEUX candidats de `rule_choice` : ce choix-là n'a pas d'option « ne rien
+#: faire », et c'est une information juste, pas un remplissage.
 DECISION_OPTION_BIN_FIELDS: Tuple[str, ...] = tuple(
     f"grants_{rule_id}" for rule_id in DECISION_GRANTABLE_EFFECT_IDS
 ) + (
+    "declines",  # ce candidat n'applique AUCUN effet : il passe (cf. bloc ci-dessus)
     "present",  # masque de candidat (0 = slot vide) — DERNIER, convention uniforme §0.37
 )
 

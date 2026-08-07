@@ -464,8 +464,24 @@ def arm_fly_declaration_decision(
         player=int(require_key(unit, "player")),
         unit_id=str(squad_id),
         options=[
-            {"label": "Take to the skies", "effect_ids": (), "payload": {"declare": True}},
-            {"label": "Stay grounded", "effect_ids": (), "payload": {"declare": False}},
+            # `effect_ids` vide des DEUX côtés : « take to the skies » n'est accordé par aucune
+            # datasheet (c'est le mot-clé FLY qui l'ouvre, 21.03 qui en fixe le prix), donc il
+            # n'appartient pas au registre des accordables. C'est `declines` — et non l'index,
+            # qui n'est écrit dans AUCUN scalaire d'observation — qui distingue les deux lignes :
+            # sans lui elles sortiraient identiques et l'agent ne pourrait pas apprendre à
+            # choisir (cf. `DECISION_OPTION_BIN_FIELDS`, défaut mesuré sur `waaagh_call`).
+            {
+                "label": "Take to the skies",
+                "effect_ids": (),
+                "declines": False,
+                "payload": {"declare": True},
+            },
+            {
+                "label": "Stay grounded",
+                "effect_ids": (),
+                "declines": True,
+                "payload": {"declare": False},
+            },
         ],
     )
 

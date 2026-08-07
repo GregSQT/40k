@@ -32,27 +32,24 @@ from ai.spatial_extractor import (
     SpatialCombinedExtractor,
     positional_channels,
 )
-from engine.observation_builder import ObservationBuilder
-from engine.observation_entities import unit_bin_index
+from engine.observation_entities import (
+    OBS_PHASE_IDS,
+    deploy_cand_bin_index,
+    global_bin_index,
+    unit_bin_index,
+)
 from engine.spatial_grid import (
     GRID_CELL_COUNT,
     GRID_CHANNELS,
     GRID_SIZE,
     cell_center_px,
 )
+from tests.unit.ai.conftest import squad_obs_space
 
 _UNIT_PRESENT = unit_bin_index("present")
 
 
-def _space() -> gym.spaces.Dict:
-    spaces = {}
-    for key, shape in ObservationBuilder.squad_obs_shapes().items():
-        low, high = (-1.0, 1.0) if key.endswith("_bin") else (-np.inf, np.inf)
-        spaces[key] = gym.spaces.Box(low=low, high=high, shape=shape, dtype=np.float32)
-    spaces["grid"] = gym.spaces.Box(
-        low=0.0, high=1.0, shape=(GRID_CHANNELS, GRID_SIZE, GRID_SIZE), dtype=np.float32
-    )
-    return gym.spaces.Dict(spaces)
+_space = squad_obs_space
 
 
 def _zero_batch(space: gym.spaces.Dict, batch: int = 2) -> Dict[str, torch.Tensor]:
@@ -91,7 +88,35 @@ def test_features_layout_exposes_the_enemy_embeddings(extractor):
     assert (decision.stop - decision.start) == (
         extractor.n_decision_options * extractor.entity_dim
     )
-    assert decision.stop == extractor.features_dim
+
+    # §0.44 (L1) : les candidats de DÉPLOIEMENT ferment le vecteur, derrière les candidats de
+    # décision — même raison, un ajout en tête aurait décalé les trois tranches ci-dessus.
+    deploy = extractor.deploy_embeddings_slice()
+    assert deploy.start == decision.stop
+    assert (deploy.stop - deploy.start) == extractor.n_deploy_slots * extractor.entity_dim
+    assert deploy.stop == extractor.features_dim
+
+
+def test_the_phase_flag_index_points_at_the_deployment_bit(extractor):
+    """§0.44 (L1) — l'index publié désigne bien `phase_deployment`, et lui seul.
+
+    C'est le contrat de routage de `ai/pointer_policy.py` : les ids 4-11 sont des slots de pose
+    ou des cellules de move selon ce SEUL bit. Un index décalé d'un champ (`is_my_turn` d'un
+    côté, `phase_command` de l'autre) ne change aucune forme et ne lève rien — il ferait
+    simplement jouer la mauvaise tête. On le vérifie donc phase par phase, sur le vecteur de
+    features RÉEL, jamais en recalculant l'offset (ce serait la même formule des deux côtés).
+    """
+    index = extractor.deployment_phase_flag_index()
+    assert index < extractor.trunk_dim, "le drapeau doit vivre dans la partie tronc"
+    for phase in OBS_PHASE_IDS:
+        obs = _zero_batch(_space(), batch=1)
+        obs["global_bin"][:, global_bin_index(f"phase_{phase}")] = 1.0
+        obs["global_bin"][:, global_bin_index("is_my_turn")] = 1.0
+        with torch.no_grad():
+            flag = float(extractor(obs)[0, index])
+        assert flag == pytest.approx(1.0 if phase == "deployment" else 0.0), (
+            f"phase {phase} : drapeau lu {flag}"
+        )
 
 
 def test_forward_shape_and_finiteness(extractor):
@@ -140,6 +165,42 @@ def test_the_same_weapon_encoder_serves_both_sides(extractor):
         "l'encodeur ennemi n'a PAS bouge : les deux camps n'utilisent pas le meme module"
     )
     assert torch.allclose(ally_after, enemy_after, atol=1e-6)
+
+
+def test_deploy_embeddings_are_per_slot_and_a_closed_slot_stays_nul(extractor):
+    """§0.44 (L1) — la tranche de queue porte UN embedding par slot, aligné sur l'action.
+
+    C'est ce que `deploy_query_net` score. Deux propriétés, et il faut les deux : perturber le
+    candidat `i` ne doit bouger QUE le bloc `i` (sinon la tête pointeur scorerait un mélange), et
+    un slot FERMÉ doit rester exactement nul (sinon un slot que le masque n'ouvre jamais
+    porterait un embedding plausible — un candidat fantôme).
+    """
+    # Statistiques GELÉES : `deploy_cand_norm` est partagée par tous les slots (c'est ce qui
+    # légitime l'encodeur commun), donc en mode entraînement perturber le candidat 1 déplacerait
+    # aussi la moyenne glissante, donc le candidat 0 — et la localité serait inobservable.
+    extractor.eval()
+    obs = _zero_batch(_space(), batch=1)
+    obs["allies_bin"][:, 0, _UNIT_PRESENT] = 1.0
+    obs["deploy_cand_bin"][:, :2, deploy_cand_bin_index("present")] = 1.0
+    sl = extractor.deploy_embeddings_slice()
+    with torch.no_grad():
+        emb = extractor(obs)[:, sl].reshape(1, extractor.n_deploy_slots, extractor.entity_dim)
+        perturbed_obs = {k: v.clone() for k, v in obs.items()}
+        perturbed_obs["deploy_cand_cont"][:, 1, 0] += 3.0
+        perturbed = extractor(perturbed_obs)[:, sl].reshape(
+            1, extractor.n_deploy_slots, extractor.entity_dim
+        )
+    assert float(emb[0, 0].abs().sum()) > 0.0, "le slot ouvert 0 a un embedding NUL"
+    for slot in range(2, extractor.n_deploy_slots):
+        assert float(emb[0, slot].abs().sum()) == 0.0, (
+            f"le slot FERME {slot} porte un embedding non nul"
+        )
+    moved = [
+        slot
+        for slot in range(extractor.n_deploy_slots)
+        if float((perturbed[0, slot] - emb[0, slot]).abs().max()) > 1e-6
+    ]
+    assert moved == [1], f"blocs deplaces par le candidat 1 : {moved}"
 
 
 def test_unit_encoder_is_a_single_module(extractor):

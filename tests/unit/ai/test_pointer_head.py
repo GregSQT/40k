@@ -35,62 +35,75 @@ import torch
 from sb3_contrib import MaskablePPO
 from sb3_contrib.common.maskable.distributions import MaskableCategorical
 
-from ai.pointer_policy import PointerMaskablePolicy
+from ai.pointer_policy import DENSE_LOGIT_COUNT, PointerMaskablePolicy
 from ai.spatial_extractor import SpatialCombinedExtractor
-from ai.pointer_policy import DENSE_LOGIT_COUNT
 from engine.macro_intents import (
     ACTION_WAIT,
     CHARGE_SLOT_BASE,
     CHARGE_SLOT_COUNT,
     CHOICE_BASE,
     CHOICE_COUNT,
+    DEPLOY_SLOT_BASE,
+    DEPLOY_SLOT_COUNT,
     MOVE_CELL_BASE,
     MOVE_CELL_COUNT,
     OATH_SLOT_BASE,
-    OATH_SLOT_COUNT,
     FIGHT_SLOT_BASE,
     FIGHT_SLOT_COUNT,
     SHOOT_SLOT_BASE,
     SHOOT_SLOT_COUNT,
     TOTAL_ACTION_SIZE,
 )
-from engine.observation_builder import ObservationBuilder
-from engine.spatial_grid import GRID_CHANNELS, GRID_SIZE, cell_index
-
-from engine.observation_entities import decision_option_bin_index, unit_bin_index
+from engine.observation_entities import (
+    decision_option_bin_index,
+    deploy_cand_bin_index,
+    deploy_cand_cont_index,
+    global_bin_index,
+    unit_bin_index,
+)
+from engine.spatial_grid import GRID_SIZE, cell_from_index, cell_index
+from tests.unit.ai.conftest import squad_obs_space
 
 _UNIT_PRESENT = unit_bin_index("present")
 _OPTION_PRESENT = decision_option_bin_index("present")
+_CAND_PRESENT = deploy_cand_bin_index("present")
 
 
-def _space() -> gym.spaces.Dict:
-    spaces = {}
-    for key, shape in ObservationBuilder.squad_obs_shapes().items():
-        low, high = (-1.0, 1.0) if key.endswith("_bin") else (-np.inf, np.inf)
-        spaces[key] = gym.spaces.Box(low=low, high=high, shape=shape, dtype=np.float32)
-    spaces["grid"] = gym.spaces.Box(
-        low=0.0, high=1.0, shape=(GRID_CHANNELS, GRID_SIZE, GRID_SIZE), dtype=np.float32
-    )
-    return gym.spaces.Dict(spaces)
+_space = squad_obs_space
 
 
 class _ToyEnv(gym.Env):
-    """Env jouet : l'espace d'observation réel, des transitions sans contenu."""
+    """Env jouet : l'espace d'observation réel, des transitions sans contenu.
+
+    Les steps ALTERNENT phase de mouvement et phase de déploiement. Sans cette alternance, le
+    rollout ne contiendrait que des observations d'une seule phase et la moitié du routage des
+    ids 4-11 ne serait jamais parcourue : `deploy_query_net` recevrait un gradient NUL (il est
+    dans le graphe par `torch.where`, donc `.grad` existerait quand même — un vert vacant).
+    Alternance DÉTERMINISTE, jamais tirée au sort : un test doit construire l'état qu'il observe.
+    """
 
     observation_space = _space()
     action_space = gym.spaces.Discrete(TOTAL_ACTION_SIZE)
 
+    def __init__(self):
+        super().__init__()
+        self._steps = 0
+
+    def _obs(self) -> Dict[str, np.ndarray]:
+        self._steps += 1
+        return _deploy_obs(1) if self._steps % 2 else _zero_obs(1)
+
     def reset(self, *, seed=None, options=None):
-        return _zero_obs(1), {}
+        return self._obs(), {}
 
     def step(self, action):
-        return _zero_obs(1), 0.0, False, False, {}
+        return self._obs(), 0.0, False, False, {}
 
     def action_masks(self):
         return np.ones(TOTAL_ACTION_SIZE, dtype=bool)
 
 
-def _zero_obs(batch: int = 2) -> Dict[str, np.ndarray]:
+def _zero_obs(batch: int = 2, phase: str = "move") -> Dict[str, np.ndarray]:
     obs: Dict[str, np.ndarray] = {}
     for key, sp in _space().spaces.items():
         shape = sp.shape
@@ -103,6 +116,26 @@ def _zero_obs(batch: int = 2) -> Dict[str, np.ndarray]:
     obs["decision_options_bin"][:, :2, _OPTION_PRESENT] = 1.0
     obs["decision_options_bin"][:, 0, 0] = 1.0
     obs["decision_options_bin"][:, 1, 1] = 1.0
+    # La phase est un ONE-HOT (§0.32 T-J) : une observation sans aucun bit posé n'existe pas dans
+    # le moteur, et c'est ELLE qui décide si les ids 4-11 sont des cellules ou des slots de pose.
+    obs["global_bin"][:, global_bin_index(f"phase_{phase}")] = 1.0
+    return obs
+
+
+def _deploy_obs(batch: int = 2) -> Dict[str, np.ndarray]:
+    """Observation de PHASE DE DÉPLOIEMENT, avec trois slots de pose ouverts.
+
+    Le bloc `deploy_cand_*` n'est rempli QUE dans cette phase (§0.40) et `present` y vaut
+    exactement les slots que le masque ouvre : trois ici, les cinq autres restent des lignes de
+    zéros, donc des embeddings nuls.
+    """
+    obs = _zero_obs(batch, phase="deployment")
+    obs["deploy_cand_bin"][:, :3, _CAND_PRESENT] = 1.0
+    obs["deploy_cand_bin"][:, 0, deploy_cand_bin_index("on_objective")] = 1.0
+    obs["deploy_cand_bin"][:, 1, deploy_cand_bin_index("in_cover")] = 1.0
+    for slot in range(3):
+        obs["deploy_cand_cont"][:, slot, deploy_cand_cont_index("enemy_distance")] = 4.0 + slot
+        obs["deploy_cand_cont"][:, slot, deploy_cand_cont_index("col_rel")] = 1.0 - slot
     return obs
 
 
@@ -124,9 +157,14 @@ def model() -> MaskablePPO:
 
 
 def _manual_logits(policy, obs: Dict[str, torch.Tensor]):
-    """Recalcul indépendant : (logits attendus, logits du pointeur seul, latent_pi)."""
-    trunk, embeddings, move_map, decision_emb = policy._split_features(obs)
-    latent_pi = policy.mlp_extractor.forward_actor(trunk)
+    """Recalcul indépendant : (logits attendus, latent_pi).
+
+    Volontairement écrit en `einsum` plutôt qu'en réutilisant `policy._point` : une référence qui
+    appelle le code testé ne vérifie plus rien.
+    """
+    feats = policy._split_features(obs)
+    embeddings, decision_emb = feats.enemies, feats.decision
+    latent_pi = policy.mlp_extractor.forward_actor(feats.trunk)
     base = policy.action_net(latent_pi)
     scale = policy.entity_dim ** 0.5
     query = policy.query_net(latent_pi)
@@ -145,7 +183,17 @@ def _manual_logits(policy, obs: Dict[str, torch.Tensor]):
     oath_pointer = torch.einsum(
         "bd,bkd->bk", policy.oath_query_net(latent_pi), embeddings
     ) / scale
-    move = policy._move_logits(latent_pi, move_map)
+    move = policy._move_logits(latent_pi, feats.move_map)
+    # §0.44 — en phase de déploiement, et LÀ SEULEMENT, les colonnes 4-11 des cellules sont
+    # remplacées par le produit scalaire contre les candidats de pose.
+    deploy = torch.einsum(
+        "bd,bkd->bk", policy.deploy_query_net(latent_pi), feats.deploy
+    ) / scale
+    gate = (feats.is_deploy > 0.5).unsqueeze(1)
+    low, high = DEPLOY_SLOT_BASE, DEPLOY_SLOT_BASE + DEPLOY_SLOT_COUNT
+    move = torch.cat(
+        [move[:, :low], torch.where(gate, deploy, move[:, low:high]), move[:, high:]], dim=1
+    )
     expected = torch.cat(
         [
             move,
@@ -159,7 +207,7 @@ def _manual_logits(policy, obs: Dict[str, torch.Tensor]):
         ],
         dim=1,
     )
-    return expected, pointer, latent_pi
+    return expected, latent_pi
 
 
 def test_shoot_logits_come_from_the_dot_product(model):
@@ -168,10 +216,10 @@ def test_shoot_logits_come_from_the_dot_product(model):
     policy.set_training_mode(False)
     obs = _tensors(_zero_obs())
     with torch.no_grad():
-        expected, _pointer, latent_pi = _manual_logits(policy, obs)
-        trunk, embeddings, move_map, decision_emb = policy._split_features(obs)
+        expected, latent_pi = _manual_logits(policy, obs)
+        feats = policy._split_features(obs)
         produced = policy._action_logits(
-            policy.mlp_extractor.forward_actor(trunk), embeddings, move_map, decision_emb
+            policy.mlp_extractor.forward_actor(feats.trunk), feats
         )
     assert torch.allclose(produced, expected, atol=1e-6)
     # L'action `wait`, entre le move et le tir, vient bien de la PREMIERE colonne dense.
@@ -190,9 +238,10 @@ def test_pointer_matches_a_dense_reference_head(model):
     policy.set_training_mode(False)
     obs = _tensors(_zero_obs(batch=1))
     with torch.no_grad():
-        trunk, embeddings, move_map, decision_emb = policy._split_features(obs)
-        latent_pi = policy.mlp_extractor.forward_actor(trunk)
-        pointer = policy._action_logits(latent_pi, embeddings, move_map, decision_emb)[
+        feats = policy._split_features(obs)
+        embeddings = feats.enemies
+        latent_pi = policy.mlp_extractor.forward_actor(feats.trunk)
+        pointer = policy._action_logits(latent_pi, feats)[
             :, SHOOT_SLOT_BASE:SHOOT_SLOT_BASE + SHOOT_SLOT_COUNT
         ]
 
@@ -209,7 +258,7 @@ def test_pointer_matches_a_dense_reference_head(model):
     # … et les grandeurs que PPO consomme sont identiques des deux côtés.
     masks = np.ones((1, TOTAL_ACTION_SIZE), dtype=bool)
     with torch.no_grad():
-        full = policy._action_logits(latent_pi, embeddings, move_map, decision_emb)
+        full = policy._action_logits(latent_pi, feats)
         reference = torch.cat(
             [
                 full[:, :SHOOT_SLOT_BASE],
@@ -218,9 +267,7 @@ def test_pointer_matches_a_dense_reference_head(model):
             ],
             dim=1,
         )
-        dist_pointer = policy._distribution_from(
-            latent_pi, embeddings, move_map, decision_emb, masks
-        )
+        dist_pointer = policy._distribution_from(latent_pi, feats, masks)
         ref_dist = MaskableCategorical(logits=reference, masks=masks)
         actions = torch.arange(TOTAL_ACTION_SIZE)
         for a in (0, SHOOT_SLOT_BASE, SHOOT_SLOT_BASE + 2, TOTAL_ACTION_SIZE - 1):
@@ -262,12 +309,13 @@ def test_pointer_logit_is_slot_local(model):
     policy.set_training_mode(False)
     obs = _tensors(_zero_obs(batch=1))
     with torch.no_grad():
-        trunk, embeddings, move_map, decision_emb = policy._split_features(obs)
-        latent_pi = policy.mlp_extractor.forward_actor(trunk)
-        before = policy._action_logits(latent_pi, embeddings, move_map, decision_emb)
+        feats = policy._split_features(obs)
+        embeddings = feats.enemies
+        latent_pi = policy.mlp_extractor.forward_actor(feats.trunk)
+        before = policy._action_logits(latent_pi, feats)
         perturbed = embeddings.clone()
         perturbed[:, 1] += 1.0
-        after = policy._action_logits(latent_pi, perturbed, move_map, decision_emb)
+        after = policy._action_logits(latent_pi, feats._replace(enemies=perturbed))
     diff = (after - before).abs()[0]
     changed = torch.nonzero(diff > 1e-6).flatten().tolist()
     # Le slot 1 pilote QUATRE logits depuis le chantier 01 : « tirer sur lui », « le charger »,
@@ -329,6 +377,15 @@ def test_learning_step_runs_end_to_end(model):
         assert grad is not None and torch.isfinite(grad).all(), (
             f"{name} ne recoit PAS de gradient : la tete de move n'est pas dans le graphe"
         )
+    # §0.44 — la tête de déploiement, elle, exige un gradient NON NUL : elle est branchée par un
+    # `torch.where`, donc `.grad` existe (à zéro) même si aucune observation de déploiement n'est
+    # passée. C'est le rollout alterné de `_ToyEnv` qui rend ce contrôle non vacant.
+    deploy_grad = model.policy.deploy_query_net.weight.grad
+    assert deploy_grad is not None and torch.isfinite(deploy_grad).all()
+    assert float(deploy_grad.abs().sum()) > 0.0, (
+        "la requete de DEPLOIEMENT recoit un gradient NUL : ses logits ne sont selectionnes "
+        "dans aucun etat du rollout (§0.44)"
+    )
 
 
 # ======================================================================================
@@ -336,7 +393,7 @@ def test_learning_step_runs_end_to_end(model):
 # ======================================================================================
 
 
-def _grid_spike_move_logits(policy, gx: int, gy: int, channel: int = 0):
+def _grid_spike_move_logits(policy, gx: int, gy: int):
     """Logits de cellule avant / après un pic dans la cellule (gx,gy) de la GRILLE.
 
     Le latent du tronc est FIXÉ à celui de l'observation de référence : la branche aplatie du
@@ -346,13 +403,13 @@ def _grid_spike_move_logits(policy, gx: int, gy: int, channel: int = 0):
     """
     obs = _tensors(_zero_obs(1))
     spiked = {k: v.clone() for k, v in obs.items()}
-    spiked["grid"][:, channel, gy, gx] = 1.0     # indexation [canal, gy, gx] du builder
+    spiked["grid"][:, 0, gy, gx] = 1.0     # indexation [canal, gy, gx] du builder
     with torch.no_grad():
-        trunk, _emb, move_map, _dec = policy._split_features(obs)
-        _trunk, _emb2, spiked_map, _dec2 = policy._split_features(spiked)
-        latent_pi = policy.mlp_extractor.forward_actor(trunk)
+        feats = policy._split_features(obs)
+        spiked_map = policy._split_features(spiked).move_map
+        latent_pi = policy.mlp_extractor.forward_actor(feats.trunk)
         return (
-            policy._move_logits(latent_pi, move_map),
+            policy._move_logits(latent_pi, feats.move_map),
             policy._move_logits(latent_pi, spiked_map),
         )
 
@@ -374,12 +431,13 @@ def test_move_logit_is_cell_local(model):
     obs = _tensors(_zero_obs(batch=1))
     gx, gy = 5, 20
     with torch.no_grad():
-        trunk, embeddings, move_map, decision_emb = policy._split_features(obs)
-        latent_pi = policy.mlp_extractor.forward_actor(trunk)
-        before = policy._action_logits(latent_pi, embeddings, move_map, decision_emb)
+        feats = policy._split_features(obs)
+        move_map = feats.move_map
+        latent_pi = policy.mlp_extractor.forward_actor(feats.trunk)
+        before = policy._action_logits(latent_pi, feats)
         perturbed = move_map.clone()
         perturbed[:, :, gy, gx] += 5.0
-        after = policy._action_logits(latent_pi, embeddings, perturbed, decision_emb)
+        after = policy._action_logits(latent_pi, feats._replace(move_map=perturbed))
     diff = (after - before).abs()[0]
     changed = torch.nonzero(diff > 1e-6).flatten().tolist()
     assert changed == [MOVE_CELL_BASE + cell_index(gx, gy)], (
@@ -405,8 +463,11 @@ def test_grid_spike_stays_inside_the_receptive_field_of_its_cell(model):
     assert moved, "le pic dans la grille n'a bouge AUCUN logit de cellule : la carte est morte"
     assert cell_index(gx, gy) in moved, "la cellule du pic elle-meme n'a pas bouge"
     for idx in moved:
-        assert abs(idx % GRID_SIZE - gx) <= 2 and abs(idx // GRID_SIZE - gy) <= 2, (
-            f"la cellule {idx} = ({idx % GRID_SIZE},{idx // GRID_SIZE}) a bouge alors qu'elle est "
+        # Décomposition inverse par `cell_from_index`, le JUMEAU de `cell_index` utilisé ci-dessus :
+        # la réécrire à la main ici testerait l'arithmétique du test, pas celle du moteur.
+        cx, cy = cell_from_index(idx)
+        assert abs(cx - gx) <= 2 and abs(cy - gy) <= 2, (
+            f"la cellule {idx} = ({cx},{cy}) a bouge alors qu'elle est "
             f"hors du champ receptif 5x5 de ({gx},{gy}) : geometrie desalignee"
         )
 
@@ -423,8 +484,9 @@ def test_move_head_matches_the_naive_broadcast_reference(model):
     policy.set_training_mode(False)
     obs = _tensors(_zero_obs(batch=2))
     with torch.no_grad():
-        trunk, _embeddings, move_map, _decision_emb = policy._split_features(obs)
-        latent_pi = policy.mlp_extractor.forward_actor(trunk)
+        feats = policy._split_features(obs)
+        move_map = feats.move_map
+        latent_pi = policy.mlp_extractor.forward_actor(feats.trunk)
         produced = policy._move_logits(latent_pi, move_map)
 
         # Forme naïve : broadcast explicite du latent, concaténation, UNE seule conv 1x1.
@@ -467,8 +529,9 @@ def test_trunk_context_reorders_the_cells_it_is_not_a_uniform_shift(model):
     policy.set_training_mode(False)
     obs = _tensors(_zero_obs(batch=1))
     with torch.no_grad():
-        trunk, _embeddings, move_map, _decision_emb = policy._split_features(obs)
-        latent_pi = policy.mlp_extractor.forward_actor(trunk)
+        feats = policy._split_features(obs)
+        move_map = feats.move_map
+        latent_pi = policy.mlp_extractor.forward_actor(feats.trunk)
         # Une carte NON dégénérée : sinon toutes les cellules sont identiques et aucune tête,
         # même correcte, ne pourrait les réordonner.
         varied = move_map + torch.randn_like(move_map)
@@ -529,15 +592,15 @@ def test_action_net_has_no_dead_column(model):
     assert len(dense_action_ids) == DENSE_LOGIT_COUNT
     obs = _tensors(_zero_obs(batch=1))
     with torch.no_grad():
-        trunk, embeddings, move_map, decision_emb = policy._split_features(obs)
-        latent_pi = policy.mlp_extractor.forward_actor(trunk)
+        feats = policy._split_features(obs)
+        latent_pi = policy.mlp_extractor.forward_actor(feats.trunk)
     # Logits BRUTS : ceux de la distribution sont renormalisés, donc TOUS bougent des qu'un seul
     # change — la localité y serait invisible.
     for column, action_id in enumerate(dense_action_ids):
         with torch.no_grad():
-            before = policy._action_logits(latent_pi, embeddings, move_map, decision_emb)
+            before = policy._action_logits(latent_pi, feats)
             policy.action_net.bias[column].add_(10.0)
-            after = policy._action_logits(latent_pi, embeddings, move_map, decision_emb)
+            after = policy._action_logits(latent_pi, feats)
             policy.action_net.bias[column].sub_(10.0)
         moved = torch.nonzero((after - before).abs()[0] > 1e-6).flatten().tolist()
         assert moved == [action_id], (
@@ -561,9 +624,10 @@ def test_charge_logits_come_from_the_charge_pointer(model):
     policy.set_training_mode(False)
     obs = _tensors(_zero_obs(batch=1))
     with torch.no_grad():
-        trunk, embeddings, move_map, decision_emb = policy._split_features(obs)
-        latent_pi = policy.mlp_extractor.forward_actor(trunk)
-        produced = policy._action_logits(latent_pi, embeddings, move_map, decision_emb)
+        feats = policy._split_features(obs)
+        embeddings = feats.enemies
+        latent_pi = policy.mlp_extractor.forward_actor(feats.trunk)
+        produced = policy._action_logits(latent_pi, feats)
         expected = torch.einsum(
             "bd,bkd->bk", policy.charge_query_net(latent_pi), embeddings
         ) / (policy.entity_dim ** 0.5)
@@ -585,11 +649,11 @@ def test_charge_query_is_distinct_from_shoot_and_fight(model):
     assert policy.charge_query_net is not policy.fight_query_net
     obs = _tensors(_zero_obs(batch=1))
     with torch.no_grad():
-        trunk, embeddings, move_map, decision_emb = policy._split_features(obs)
-        latent_pi = policy.mlp_extractor.forward_actor(trunk)
-        before = policy._action_logits(latent_pi, embeddings, move_map, decision_emb)
+        feats = policy._split_features(obs)
+        latent_pi = policy.mlp_extractor.forward_actor(feats.trunk)
+        before = policy._action_logits(latent_pi, feats)
         policy.charge_query_net.bias.add_(1.0)
-        after = policy._action_logits(latent_pi, embeddings, move_map, decision_emb)
+        after = policy._action_logits(latent_pi, feats)
         policy.charge_query_net.bias.sub_(1.0)
     changed = torch.nonzero((after - before).abs()[0] > 1e-6).flatten().tolist()
     # Seuls les slots dont l'embedding est non nul bougent (un slot vide est masqué à zéro par
@@ -625,9 +689,10 @@ def test_choice_logits_come_from_the_decision_pointer(model):
     policy.set_training_mode(False)
     obs = _tensors(_zero_obs(batch=1))
     with torch.no_grad():
-        trunk, embeddings, move_map, decision_emb = policy._split_features(obs)
-        latent_pi = policy.mlp_extractor.forward_actor(trunk)
-        produced = policy._action_logits(latent_pi, embeddings, move_map, decision_emb)
+        feats = policy._split_features(obs)
+        decision_emb = feats.decision
+        latent_pi = policy.mlp_extractor.forward_actor(feats.trunk)
+        produced = policy._action_logits(latent_pi, feats)
         expected = torch.einsum(
             "bd,bkd->bk", policy.choice_query_net(latent_pi), decision_emb
         ) / (policy.entity_dim ** 0.5)
@@ -647,12 +712,13 @@ def test_choice_logit_is_candidate_local(model):
     policy.set_training_mode(False)
     obs = _tensors(_zero_obs(batch=1))
     with torch.no_grad():
-        trunk, embeddings, move_map, decision_emb = policy._split_features(obs)
-        latent_pi = policy.mlp_extractor.forward_actor(trunk)
-        before = policy._action_logits(latent_pi, embeddings, move_map, decision_emb)
+        feats = policy._split_features(obs)
+        decision_emb = feats.decision
+        latent_pi = policy.mlp_extractor.forward_actor(feats.trunk)
+        before = policy._action_logits(latent_pi, feats)
         perturbed = decision_emb.clone()
         perturbed[:, 1] += 1.0
-        after = policy._action_logits(latent_pi, embeddings, move_map, perturbed)
+        after = policy._action_logits(latent_pi, feats._replace(decision=perturbed))
     changed = torch.nonzero((after - before).abs()[0] > 1e-6).flatten().tolist()
     assert changed == [CHOICE_BASE + 1], f"logits deplaces : {changed[:5]}"
 
@@ -665,6 +731,176 @@ def test_choice_head_costs_nothing_per_candidate(model):
             assert CHOICE_COUNT not in tuple(parameter.shape), (
                 "un parametre de la tete de decision est dimensionne par le nombre de candidats"
             )
+
+
+# ======================================================================================
+# L1 / §0.44 — tête pointeur de DÉPLOIEMENT : les ids 4-11 selon la phase
+# ======================================================================================
+#
+# Le point dur du chantier n'est pas le produit scalaire (c'est le jumeau de `choice_query_net`),
+# c'est le ROUTAGE : les mêmes ids sont des cellules de move et des slots de pose, et seule la
+# phase les sépare. Les deux tests qui suivent sont les deux moitiés d'un même verrou — inverser
+# le sens du `torch.where` de `_deploy_logits` les fait rougir TOUS LES DEUX.
+
+_DEPLOY_IDS = slice(DEPLOY_SLOT_BASE, DEPLOY_SLOT_BASE + DEPLOY_SLOT_COUNT)
+
+
+def _deploy_pointer_reference(policy, feats, latent_pi) -> torch.Tensor:
+    """`q_deploy · c_i / sqrt(d)`, recalculé hors de la policy."""
+    return torch.einsum(
+        "bd,bkd->bk", policy.deploy_query_net(latent_pi), feats.deploy
+    ) / (policy.entity_dim ** 0.5)
+
+
+def test_deploy_logits_come_from_the_deploy_pointer_in_deployment_phase(model):
+    """En phase de déploiement, les ids 4-11 SONT `q_deploy · c_i / sqrt(d)`.
+
+    Avant §0.44 ils sortaient de la conv 1x1 de la carte, aux cellules (0, 4..11) de la fenêtre
+    égocentrique — des cellules sans aucun rapport avec les hexes candidats.
+    """
+    policy = model.policy
+    policy.set_training_mode(False)
+    obs = _tensors(_deploy_obs(batch=1))
+    with torch.no_grad():
+        feats = policy._split_features(obs)
+        latent_pi = policy.mlp_extractor.forward_actor(feats.trunk)
+        produced = policy._action_logits(latent_pi, feats)
+        expected = _deploy_pointer_reference(policy, feats, latent_pi)
+        move = policy._move_logits(latent_pi, feats.move_map)
+    assert torch.allclose(produced[:, _DEPLOY_IDS], expected, atol=1e-6)
+    # … et ce n'est PAS ce que la conv aurait produit : sans cet écart, le test passerait aussi
+    # avec un routage inerte (les deux têtes rendraient la même chose par hasard numérique).
+    assert not torch.allclose(produced[:, _DEPLOY_IDS], move[:, _DEPLOY_IDS], atol=1e-4)
+    # Les 1016 AUTRES cellules restent celles de la conv : le remplacement est borné aux 8 ids.
+    assert torch.allclose(produced[:, :DEPLOY_SLOT_BASE], move[:, :DEPLOY_SLOT_BASE], atol=1e-6)
+    assert torch.allclose(
+        produced[:, DEPLOY_SLOT_BASE + DEPLOY_SLOT_COUNT:MOVE_CELL_COUNT],
+        move[:, DEPLOY_SLOT_BASE + DEPLOY_SLOT_COUNT:],
+        atol=1e-6,
+    )
+
+
+@pytest.mark.parametrize("phase", ["move", "command", "shoot", "charge", "fight"])
+def test_outside_deployment_the_same_ids_stay_move_cells(model, phase):
+    """⚠️ MOITIÉ INVERSE DU VERROU. Hors déploiement, les ids 4-11 restent des CELLULES.
+
+    Router hors phase de déploiement serait pire que ne pas router du tout : le bloc
+    `deploy_cand_*` est nul par contrat hors de cette phase, donc le produit scalaire rendrait
+    8 logits rigoureusement égaux — un choix uniforme sur 8 cellules parfaitement jouables.
+
+    `command` est là pour l'alignement de l'INDEX du drapeau : c'est le bit VOISIN de
+    `phase_deployment` dans `global_bin`. Un index décalé d'un cran routerait ici (le décalage
+    dans l'autre sens, lui, est attrapé par le test de phase de déploiement ci-dessus).
+    """
+    policy = model.policy
+    policy.set_training_mode(False)
+    obs = _tensors(_zero_obs(batch=1, phase=phase))
+    with torch.no_grad():
+        feats = policy._split_features(obs)
+        latent_pi = policy.mlp_extractor.forward_actor(feats.trunk)
+        produced = policy._action_logits(latent_pi, feats)
+        move = policy._move_logits(latent_pi, feats.move_map)
+    assert torch.allclose(produced[:, :MOVE_CELL_COUNT], move, atol=1e-6), (
+        f"en phase {phase}, les logits de cellule ne sont plus ceux de la conv 1x1"
+    )
+
+
+def test_the_phase_flag_routes_per_sample_not_per_batch(model):
+    """Un lot MÉLANGE les phases (n_envs) : le routage doit être par ÉCHANTILLON.
+
+    Une branche `if` scalaire — la forme naturelle si on lisait la phase comme un booléen —
+    trancherait pour tout le lot d'après le premier échantillon. En rollout vectorisé, la moitié
+    des environnements jouerait alors la mauvaise tête, sans que rien ne lève.
+    """
+    policy = model.policy
+    policy.set_training_mode(False)
+    mixed = {
+        key: torch.cat([value, _tensors(_zero_obs(1, phase="move"))[key]], dim=0)
+        for key, value in _tensors(_deploy_obs(1)).items()
+    }
+    with torch.no_grad():
+        feats = policy._split_features(mixed)
+        latent_pi = policy.mlp_extractor.forward_actor(feats.trunk)
+        produced = policy._action_logits(latent_pi, feats)
+        pointer = _deploy_pointer_reference(policy, feats, latent_pi)
+        move = policy._move_logits(latent_pi, feats.move_map)
+    assert torch.allclose(produced[0, _DEPLOY_IDS], pointer[0], atol=1e-6)
+    assert torch.allclose(produced[1, _DEPLOY_IDS], move[1, _DEPLOY_IDS], atol=1e-6)
+
+
+def test_deploy_logit_is_candidate_local(model):
+    """⚠️ TEST D'ALIGNEMENT `DEPLOY_SLOT_BASE + i` <-> candidat `i` (invariant D1).
+
+    `deploy_cand_*[i]` décrit l'hexe que pose l'action `4 + i` : une permutation ici ferait poser
+    l'escouade à un endroit autre que celui que l'agent a évalué, sans que rien ne lève.
+    """
+    policy = model.policy
+    policy.set_training_mode(False)
+    obs = _tensors(_deploy_obs(batch=1))
+    with torch.no_grad():
+        feats = policy._split_features(obs)
+        latent_pi = policy.mlp_extractor.forward_actor(feats.trunk)
+        before = policy._action_logits(latent_pi, feats)
+        perturbed = feats.deploy.clone()
+        perturbed[:, 1] += 1.0
+        after = policy._action_logits(latent_pi, feats._replace(deploy=perturbed))
+    changed = torch.nonzero((after - before).abs()[0] > 1e-6).flatten().tolist()
+    assert changed == [DEPLOY_SLOT_BASE + 1], f"logits deplaces : {changed[:5]}"
+
+
+def test_deploy_query_is_distinct_from_the_other_pointers(model):
+    """Requête PROPRE au déploiement : « où poser » n'est pas « quelle option choisir ».
+
+    Contre-épreuve structurelle : perturber `deploy_query_net` ne doit toucher QUE les ids 4-11,
+    et seulement les slots dont le candidat est OUVERT (un slot fermé a un embedding nul, donc un
+    produit scalaire nul quoi qu'il arrive à la requête).
+    """
+    policy = model.policy
+    policy.set_training_mode(False)
+    assert policy.deploy_query_net is not policy.choice_query_net
+    assert policy.deploy_query_net is not policy.query_net
+    obs = _tensors(_deploy_obs(batch=1))
+    with torch.no_grad():
+        feats = policy._split_features(obs)
+        latent_pi = policy.mlp_extractor.forward_actor(feats.trunk)
+        before = policy._action_logits(latent_pi, feats)
+        policy.deploy_query_net.bias.add_(1.0)
+        after = policy._action_logits(latent_pi, feats)
+        policy.deploy_query_net.bias.sub_(1.0)
+    changed = torch.nonzero((after - before).abs()[0] > 1e-6).flatten().tolist()
+    assert changed == [DEPLOY_SLOT_BASE, DEPLOY_SLOT_BASE + 1, DEPLOY_SLOT_BASE + 2], (
+        f"la requete de deploiement deplace {changed[:5]} — attendu les 3 slots OUVERTS"
+    )
+
+
+def test_deploy_head_costs_nothing_per_slot(model):
+    """Le nombre de slots de pose est GRATUIT en paramètres.
+
+    C'est ce qui rend le pré-dimensionnement `DEPLOY_SLOT_COUNT = 8` pour
+    `DEPLOY_STRATEGY_COUNT = 5` stratégies réellement sans coût : ouvrir une 6ᵉ stratégie
+    n'ajoutera ni paramètre, ni retrain.
+    """
+    policy = model.policy
+    for module in (policy.deploy_query_net, policy.features_extractor.deploy_cand_encoder):
+        for parameter in module.parameters():
+            assert DEPLOY_SLOT_COUNT not in tuple(parameter.shape), (
+                "un parametre de la tete de deploiement est dimensionne par le nombre de slots"
+            )
+
+
+def test_a_non_binary_phase_flag_raises(model):
+    """Le drapeau de phase doit rester 0/1 : normalisé, il ferait router au hasard.
+
+    `global_bin` est hors `norm_obs_keys` (ai/train._vec_norm_obs_keys) précisément pour ça. Si
+    cette exclusion tombait, le routage des ids 4-11 ne reposerait plus sur rien — et le seul
+    symptôme serait un agent qui déploie mal.
+    """
+    policy = model.policy
+    policy.set_training_mode(False)
+    obs = _tensors(_deploy_obs(batch=1))
+    obs["global_bin"][:, global_bin_index("phase_deployment")] = 0.7
+    with pytest.raises(RuntimeError, match="phase_deployment"):
+        policy._split_features(obs)
 
 
 def test_pointer_requires_the_entity_extractor():
@@ -743,7 +979,7 @@ def test_masking_at_construction_accepts_logits_the_two_step_form_rejects(model,
 
     policy = model.policy
     monkeypatch.setattr(policy, "_action_logits", lambda *_args, **_kwargs: logits)
-    inner = policy._distribution_from(None, None, None, None, masks).distribution
+    inner = policy._distribution_from(None, None, masks).distribution
 
     reference = MaskableCategorical(logits=logits, masks=masks)
     reference_logits: torch.Tensor = torch.as_tensor(reference.logits)
@@ -772,4 +1008,4 @@ def test_non_finite_logits_raise_instead_of_poisoning_ppo(model, monkeypatch):
 
     monkeypatch.setattr(model.policy, "_action_logits", lambda *_args, **_kwargs: logits)
     with pytest.raises(RuntimeError, match="Non-finite action logits"):
-        model.policy._distribution_from(None, None, None, None, unmasked)
+        model.policy._distribution_from(None, None, unmasked)

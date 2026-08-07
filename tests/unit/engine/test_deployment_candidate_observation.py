@@ -49,7 +49,7 @@ SCENARIO = (
 )
 
 
-def _load(seed: int = 0):
+def _load():
     from ai.unit_registry import UnitRegistry
     from engine.w40k_core import W40KEngine
 
@@ -62,13 +62,47 @@ def _load(seed: int = 0):
     # graine et la géométrie sont inchangés : seul le tirage du MODE est forcé à la valeur que
     # ce fichier a toujours supposée. POURQUOI dans `_config_helpers.pin_active_deployment`.
     pin_active_deployment(eng)
-    eng.reset(seed=seed)
+    eng.reset(seed=0)
     assert_deployment_phase(eng)  # sinon ce fichier ne teste rien
     return eng
 
 
 def _open_slots(mask) -> list[int]:
     return [a for a in range(DEPLOY_SLOT_BASE, DEPLOY_SLOT_BASE + DEPLOY_SLOT_COUNT) if mask[a]]
+
+
+#: Borne de sécurité du pilotage : un déploiement réel tient en quelques dizaines de poses.
+_MAX_DEPLOY_STEPS = 1000
+
+
+def _deployment_steps(eng, *, limit: int | None = None):
+    """Pilote le déploiement et rend `(step, mask, eligible)` AVANT chaque pose.
+
+    Le pilotage était recopié dans chaque test — même boucle, même borne, même action jouée (le
+    premier slot ouvert) — et deux copies avaient perdu l'assertion de fin, donc seraient restées
+    vertes sur un déploiement bloqué. Ici la borne LÈVE au lieu de rendre la main : un test qui
+    parcourt le déploiement ne peut plus s'arrêter à mi-chemin en silence.
+
+    `limit` est un ÉCHANTILLONNAGE volontaire — les tests qui recalculent tout un bloc par slot
+    n'ont pas besoin d'aller au bout — et lui seul autorise une sortie avant la fin.
+
+    L'observation n'est PAS rendue : les tests qui pilotent seulement jusqu'à la fin ne doivent
+    pas payer sa construction. Ceux qui la veulent appellent `eng._build_observation()` pendant
+    le yield, donc avant la pose.
+    """
+    gs = eng.game_state
+    dec = eng.action_decoder
+    steps = 0
+    while gs.get("phase") == "deployment":
+        if limit is not None and steps >= limit:
+            return
+        assert steps < _MAX_DEPLOY_STEPS, (
+            f"déploiement non terminé après {steps} steps (deadlock)"
+        )
+        mask, eligible = dec.get_squad_action_mask_and_eligible_units(gs)
+        yield steps, mask, eligible
+        eng.step(_open_slots(mask)[0])
+        steps += 1
 
 
 # ============================================================================
@@ -111,9 +145,7 @@ def test_each_open_slot_describes_the_hex_its_own_action_would_deploy():
     dec = eng.action_decoder
 
     checked = 0
-    steps = 0
-    while gs.get("phase") == "deployment" and steps < 1000:
-        mask, eligible = dec.get_squad_action_mask_and_eligible_units(gs)
+    for steps, mask, eligible in _deployment_steps(eng):
         uid = str(eligible[0]["id"])
         obs = eng._build_observation()
         anchor_col, anchor_row = eng.obs_builder.squad_grid_anchor(gs, uid)
@@ -122,11 +154,15 @@ def test_each_open_slot_describes_the_hex_its_own_action_would_deploy():
         deployer = dec._get_current_deployer(gs)
         valid_hexes = dec._get_valid_deployment_hexes(gs, deployer, uid)
 
+        # Purge : le décodeur doit RECALCULER son choix, sinon ce test comparerait le bloc
+        # candidat à la mémo que `_build_observation()` vient elle-même de remplir. UNE fois par
+        # step et non par slot : le cache porte la LISTE de candidats, commune aux cinq
+        # stratégies et clée sur (unité, déployeur, snapshot) — le premier slot la recalcule donc
+        # entièrement depuis le `game_state`, et les suivants relisent ce recalcul-là, pas la mémo
+        # de l'observation. Purger par slot retriait les ~14 000 hexes de la zone cinq fois.
+        gs.pop(DEPLOY_SLOT_CANDIDATES_CACHE_KEY, None)
         for action_int in _open_slots(mask):
             slot = action_int - DEPLOY_SLOT_BASE
-            # Purge : le décodeur doit RECALCULER son choix, sinon ce test comparerait le bloc
-            # candidat à la mémo que l'observation vient elle-même de remplir.
-            gs.pop(DEPLOY_SLOT_CANDIDATES_CACHE_KEY, None)
             col, row = dec._select_deployment_hex_for_action(
                 action_int, uid, gs, deployer, valid_hexes
             )
@@ -145,10 +181,6 @@ def test_each_open_slot_describes_the_hex_its_own_action_would_deploy():
             )
             checked += 1
 
-        eng.step(_open_slots(mask)[0])
-        steps += 1
-
-    assert gs.get("phase") != "deployment", "déploiement non terminé (deadlock)"
     assert checked >= 20, f"trop peu de slots vérifiés ({checked})"
 
 
@@ -215,9 +247,7 @@ def test_candidate_features_match_the_state_they_claim_to_describe():
     }
 
     checked = 0
-    steps = 0
-    while gs.get("phase") == "deployment" and steps < 12:
-        mask, eligible = dec.get_squad_action_mask_and_eligible_units(gs)
+    for steps, _mask, eligible in _deployment_steps(eng, limit=12):
         uid = str(eligible[0]["id"])
         obs = eng._build_observation()
         deployer = dec._get_current_deployer(gs)
@@ -247,9 +277,6 @@ def test_candidate_features_match_the_state_they_claim_to_describe():
             )
             checked += 1
 
-        eng.step(_open_slots(mask)[0])
-        steps += 1
-
     assert checked >= 20, f"trop peu de candidats vérifiés ({checked})"
 
 
@@ -265,10 +292,7 @@ def test_ally_distance_carries_its_own_mask():
 
     seen_without = False
     seen_with = False
-    steps = 0
-    while gs.get("phase") == "deployment" and steps < 1000:
-        mask, eligible = dec.get_squad_action_mask_and_eligible_units(gs)
-        uid = str(eligible[0]["id"])
+    for steps, mask, _eligible in _deployment_steps(eng):
         obs = eng._build_observation()
         deployer = dec._get_current_deployer(gs)
         allies_on_board = any(
@@ -284,8 +308,6 @@ def test_ally_distance_carries_its_own_mask():
             )
         seen_without = seen_without or not allies_on_board
         seen_with = seen_with or allies_on_board
-        eng.step(_open_slots(mask)[0])
-        steps += 1
 
     assert seen_without and seen_with, (
         "le déploiement doit traverser les DEUX états (aucun allié posé, puis au moins un) — "
@@ -301,12 +323,8 @@ def test_ally_distance_carries_its_own_mask():
 def test_present_bits_are_exactly_the_slots_the_mask_opens():
     """Les slots décrits comme PRÉSENTS sont EXACTEMENT ceux que le masque ouvre."""
     eng = _load()
-    gs = eng.game_state
-    dec = eng.action_decoder
 
-    steps = 0
-    while gs.get("phase") == "deployment" and steps < 1000:
-        mask, _ = dec.get_squad_action_mask_and_eligible_units(gs)
+    for steps, mask, _eligible in _deployment_steps(eng):
         obs = eng._build_observation()
         present = {
             DEPLOY_SLOT_BASE + slot
@@ -317,10 +335,6 @@ def test_present_bits_are_exactly_the_slots_the_mask_opens():
             f"step {steps} : l'observation déclare présents {sorted(present)} alors que le "
             f"masque ouvre {_open_slots(mask)}"
         )
-        eng.step(_open_slots(mask)[0])
-        steps += 1
-
-    assert gs.get("phase") != "deployment", "déploiement non terminé (deadlock)"
 
 
 def test_a_closed_slot_is_absent_not_a_plausible_candidate(monkeypatch):
@@ -379,14 +393,9 @@ def test_the_block_is_null_outside_the_deployment_phase():
     """
     eng = _load()
     gs = eng.game_state
-    dec = eng.action_decoder
 
-    steps = 0
-    while gs.get("phase") == "deployment" and steps < 1000:
-        mask, _ = dec.get_squad_action_mask_and_eligible_units(gs)
-        eng.step(_open_slots(mask)[0])
-        steps += 1
-    assert gs.get("phase") != "deployment", "déploiement non terminé (deadlock)"
+    for _steps, _mask, _eligible in _deployment_steps(eng):
+        pass
 
     for sid in list(gs["units_cache"].keys())[:4]:
         obs = eng.obs_builder.build_squad_observation(gs, str(sid))
@@ -514,3 +523,57 @@ def test_the_vectorised_hex_distance_is_the_engine_one():
 
     with pytest.raises(ValueError, match="Reference hex list cannot be empty"):
         ActionDecoder._nearest_hex_distance_vec(cols, rows, [])
+
+
+# ============================================================================
+# CHEMIN DE PRODUCTION — le routage de la tête de déploiement (V11 §0.44, L1)
+# ============================================================================
+
+
+def test_the_real_deployment_observation_raises_the_routing_flag():
+    """Le bit qui bascule les ids 4-11 vers la tête de pose est POSÉ par le vrai moteur.
+
+    Les tests de la tête (`tests/unit/ai/test_pointer_head.py`) construisent l'observation à la
+    main : ils prouvent le routage, pas que la production l'atteint. Ici on lit le drapeau à
+    l'index que l'extracteur PUBLIE, sur une observation issue d'un vrai épisode — en phase de
+    déploiement il vaut 1, et il retombe à 0 dès qu'on en sort (sans quoi l'agent scorerait des
+    candidats nuls à la place de cellules de move parfaitement jouables).
+    """
+    import gymnasium as gym
+    import torch
+
+    from ai.spatial_extractor import SpatialCombinedExtractor
+    from engine.observation_builder import ObservationBuilder
+    from engine.spatial_grid import GRID_CHANNELS, GRID_SIZE
+
+    spaces: dict[str, gym.spaces.Space] = {
+        key: gym.spaces.Box(low=-np.inf, high=np.inf, shape=shape, dtype=np.float32)
+        for key, shape in ObservationBuilder.squad_obs_shapes().items()
+    }
+    spaces["grid"] = gym.spaces.Box(
+        low=0.0, high=1.0, shape=(GRID_CHANNELS, GRID_SIZE, GRID_SIZE), dtype=np.float32
+    )
+    extractor = SpatialCombinedExtractor(gym.spaces.Dict(spaces), cnn_features=8)
+    extractor.eval()
+    index = extractor.deployment_phase_flag_index()
+
+    def _flag(observation) -> float:
+        batched = {
+            key: torch.as_tensor(value, dtype=torch.float32).unsqueeze(0)
+            for key, value in observation.items()
+        }
+        with torch.no_grad():
+            return float(extractor(batched)[0, index])
+
+    eng = _load()
+    gs = eng.game_state
+    assert _flag(eng._build_observation()) == 1.0, (
+        "phase de déploiement réelle : le drapeau de routage est à 0, les slots 4-11 seraient "
+        "scorés par la conv des cellules de move"
+    )
+
+    for _steps, _mask, _eligible in _deployment_steps(eng):
+        pass
+    assert _flag(eng._build_observation()) == 0.0, (
+        f"phase {gs.get('phase')} : le drapeau de routage est resté à 1"
+    )

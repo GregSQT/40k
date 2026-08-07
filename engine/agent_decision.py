@@ -90,12 +90,36 @@ def _validate_options(decision_type: str, options: Sequence[Dict[str, Any]]) -> 
                     f"candidat lui accorde : ajouter l'effet au registre des accordables "
                     f"(obs_size change -> retrain --new) plutot que de le decrire par un zero."
                 )
+        # `declines` est EXIGÉ, jamais déduit de `not effect_ids` : « n'accorde aucun effet
+        # observable » et « ne fait rien » sont deux choses différentes — un candidat peut très
+        # bien agir par un effet hors du registre des accordables (c'est le cas des DEUX
+        # candidats du Waaagh!, dont les effets sont de faction). Le déduire aurait marqué
+        # `declines` sur celui qui APPELLE le Waaagh!, soit l'inverse exact du sens.
+        declines = require_key(option, "declines")
+        if not isinstance(declines, bool):
+            raise TypeError(
+                f"pending_agent_decision: 'declines' du candidat {index} doit etre un booleen, "
+                f"recu {type(declines).__name__}. C'est le seul champ qui distingue un candidat "
+                f"qui PASSE d'un candidat qui agit sans accorder d'effet observable."
+            )
+        if declines and effect_ids:
+            raise ValueError(
+                f"pending_agent_decision: candidat {index} declare `declines` ET accorde "
+                f"{tuple(effect_ids)}. Un candidat qui passe n'accorde rien."
+            )
         normalized.append(
             {
                 "label": label.strip(),
                 "effect_ids": tuple(str(effect_id) for effect_id in effect_ids),
+                "declines": declines,
                 "payload": require_key(option, "payload"),
             }
+        )
+    if sum(1 for option in normalized if option["declines"]) > 1:
+        raise ValueError(
+            f"pending_agent_decision: {sum(1 for o in normalized if o['declines'])} candidats "
+            f"declarent `declines` pour la decision '{decision_type}'. Deux facons de ne rien "
+            f"faire sont indiscernables pour l'agent — c'est un seul candidat."
         )
     return normalized
 
