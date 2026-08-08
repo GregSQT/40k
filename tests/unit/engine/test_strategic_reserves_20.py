@@ -954,7 +954,7 @@ def test_unarrived_reserves_are_destroyed_at_the_end_of_round_3():
 
     assert is_unit_alive(squad_id, gs), "l'unité doit être vivante avant la règle"
     destroyed = destroy_unarrived_strategic_reserves(gs)
-    assert squad_id in destroyed
+    assert squad_id in [str(u["id"]) for u in destroyed]
     assert not is_unit_alive(squad_id, gs), (
         "une unité restée en réserves à la fin du 3e round est DÉTRUITE (20.04)"
     )
@@ -974,7 +974,7 @@ def test_repositioned_unit_survives_the_end_of_round_3():
     gs["turn"] = 3
 
     destroyed = destroy_unarrived_strategic_reserves(gs)
-    assert squad_id not in destroyed
+    assert squad_id not in [str(u["id"]) for u in destroyed]
     assert is_unit_alive(squad_id, gs), "une unité repositionnée survit (20.04, exception)"
 
 

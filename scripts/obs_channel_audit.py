@@ -157,17 +157,6 @@ def _to_fields(key: str, arr: np.ndarray) -> np.ndarray:
     return moved.reshape(moved.shape[0], -1).astype(np.float64)
 
 
-def _as_dict_obs(observation: object) -> Dict[str, np.ndarray]:
-    """L'espace d'observation du moteur est un `Dict` ; la signature gym de `reset`/`step` est
-    plus large (ndarray | dict | None). Recevoir autre chose est un BUG moteur : on le fait
-    remonter au lieu de le rattraper."""
-    if not isinstance(observation, dict):
-        raise TypeError(
-            f"Observation attendue en Dict[str, ndarray], reçue {type(observation).__name__}"
-        )
-    return observation
-
-
 def collect(stats: Dict[str, FieldStats], keep: List[Dict[str, np.ndarray]],
             scenario: str, seed: int) -> dict:
     from ai.unit_registry import UnitRegistry
@@ -204,7 +193,7 @@ def collect(stats: Dict[str, FieldStats], keep: List[Dict[str, np.ndarray]],
             if j < GRAD_BATCH:
                 keep[int(j)] = {k: np.array(v, copy=True) for k, v in observation.items()}
 
-    absorb(_as_dict_obs(obs))
+    absorb(obs)
     while steps < MAX_STEPS_PER_EPISODE:
         gs = eng.game_state
         if gs.get("game_over"):
@@ -216,7 +205,14 @@ def collect(stats: Dict[str, FieldStats], keep: List[Dict[str, np.ndarray]],
         action = int(rng.choice(np.flatnonzero(mask)))
         obs, _r, term, trunc, _i = eng.step(action)
         steps += 1
-        absorb(_as_dict_obs(obs))
+        # `step` ne rend `None` que sous `defer_observation`, que cet audit ne demande jamais :
+        # un `None` ici signifierait que l'observation mesurée n'est pas celle du moteur.
+        if obs is None:
+            raise RuntimeError(
+                f"observation reportée (defer_observation) au step {steps} — "
+                f"l'audit ne peut pas mesurer un canal qu'il n'a pas reçu"
+            )
+        absorb(obs)
         if term or trunc:
             break
     return {"steps": steps, "phases": dict(phases)}
@@ -329,7 +325,7 @@ def gradient_pass(keep: List[Dict[str, np.ndarray]]):
         # entités réelles est proche d'une constante : leur 0 de padding tombe alors à des
         # dizaines de σ de la moyenne, alors que `EntityRunningNorm` les annule de toute façon.
         present = batch[mask_key][..., -1] > 0
-        if not bool(present.any()):
+        if not present.any():
             sat[norm_key] = None
             continue
         x = batch[norm_key][present]

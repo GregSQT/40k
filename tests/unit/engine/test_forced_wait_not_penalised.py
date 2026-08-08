@@ -233,3 +233,67 @@ def test_flag_does_not_leak_to_the_next_step():
     engine.step(ACTIVATE_SLOT_BASE)
     engine.step(SQUAD_ACTION_WAIT)
     assert "_wait_was_forced" not in engine.game_state
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 5. L'episode se termine PENDANT la chaine : le bilan d'episode remonte quand meme
+#
+# Le trou reel de la premiere version : `TERMINAL_INFO_KEYS` omettait `tactical_data`,
+# `deployment_mode` et `episode`. Un episode termine pendant une chaine auto-jouee rendait donc
+# `terminated=True` SANS son bilan, et `ai/training_callbacks._handle_episode_end` les exige par
+# `require_key` — le run mourait dessus, mais seulement sur les episodes qui finissent en chaine.
+#
+# La situation est CONSTRUITE, pas tiree d'une graine : `_check_game_over` est arme pour rendre
+# True au premier appel evalue A L'INTERIEUR de la chaine (`_forced_wait_depth > 0`). C'est le
+# meme mecanisme qu'en production — la limite de tours —, pose a l'instant precis qui compte, et
+# la sonde PROUVE ou elle a tire au lieu de l'esperer.
+# ─────────────────────────────────────────────────────────────────────────────
+
+class _EndGameInsideChain:
+    """Fait finir la partie au premier `_check_game_over` evalue dans la chaine auto-jouee.
+
+    Pose `turn_limit_reached` comme le vrai `_check_game_over` : c'est ce drapeau que
+    `_determine_winner_with_method` lit pour nommer la methode de victoire, et le moteur LEVE si
+    elle vaut None sous `terminated=True`.
+    """
+
+    def __init__(self, engine: W40KEngine) -> None:
+        self.engine = engine
+        self.fired_at_depth: int | None = None
+
+    def __call__(self) -> bool:
+        if self.fired_at_depth is None and self.engine._forced_wait_depth > 0:
+            self.fired_at_depth = int(self.engine._forced_wait_depth)
+            self.engine.game_state["turn_limit_reached"] = True
+        return self.fired_at_depth is not None
+
+
+#: Le bilan d'episode que l'entrainement EXIGE (`require_key`) : `ai/training_callbacks`
+#: (`_handle_episode_end`) pour les trois premieres, `ai/metrics_tracker.log_episode` pour
+#: `deployment_mode`. Les lister ici plutot que d'importer `TERMINAL_INFO_KEYS` est volontaire :
+#: un test qui relit la constante qu'il verrouille ne verrouille rien.
+_EPISODE_SUMMARY_KEYS = ("episode", "tactical_data", "deployment_mode", "win_method")
+
+
+def test_episode_ending_inside_the_chain_still_reports_its_summary():
+    engine = _make_engine(ENEMY_FAR, ally_positions=(ALLY, ALLY_2))
+    ender = _EndGameInsideChain(engine)
+    with patch.object(engine, "_check_game_over", ender):
+        _obs, _r, terminated, truncated, info = engine.step(ACTIVATE_SLOT_BASE)
+
+    # Premisses : la chaine a bien tourne, et c'est bien DEDANS que la partie s'est finie.
+    assert ender.fired_at_depth is not None, (
+        "aucune attente forcee auto-jouee : le test ne verifie rien (vert vacant)"
+    )
+    assert terminated and not truncated
+
+    missing = [key for key in _EPISODE_SUMMARY_KEYS if key not in info]
+    assert not missing, (
+        f"bilan d'episode perdu : {missing} absentes de l'info rendu a l'appelant. "
+        "L'episode s'est termine pendant une chaine d'attentes forcees et "
+        "`_drain_forced_waits` n'a pas remonte ces cles du dernier step de la chaine."
+    )
+    assert info["winner"] is not None
+    # ET l'info reste celui de l'action de l'AGENT : le drain FUSIONNE, il ne remplace pas.
+    assert info["action"] != "squad_wait"
+    assert info["acting_player"] == 1

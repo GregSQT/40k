@@ -12,7 +12,7 @@ import json
 import random
 import gymnasium as gym
 import numpy as np
-from typing import Dict, List, Literal, Tuple, Set, Optional, Any, Union, overload
+from typing import Dict, List, Literal, Tuple, Set, Optional, Any, overload
 
 # Import shared utilities
 from shared.data_validation import (
@@ -64,8 +64,24 @@ FORCED_WAIT_CHAIN_LIMIT = 64
 #: Quand `step_with_mask` auto-joue des attentes forcees, l'`info` rendu reste celui de l'action de
 #: L'AGENT (cf. `ai/env_wrappers.AGENT_STEP_INFO_KEYS`, preleve apres le retour du moteur) et seules
 #: ces cles-ci sont reprises du dernier step de la chaine.
+#:
+#: ENUMERATION VERIFIEE, et non declarative : le bloc de terminaison de `step_with_mask` pose ses
+#: cles dans un dict dedie (`terminal_info`) et LEVE si ce dict porte une cle absente d'ici. La
+#: premiere version de cette liste omettait `tactical_data` et `deployment_mode` — deux cles
+#: EXIGEES (`require_key`) par `ai/training_callbacks._handle_episode_end` et
+#: `ai/metrics_tracker.log_episode` : un episode qui se terminait PENDANT une chaine auto-jouee les
+#: perdait, et le run mourait dessus. Allonger la liste ne suffisait pas : c'est l'oubli
+#: d'enumeration qui devait cesser d'etre silencieux. Il echoue desormais au premier episode
+#: termine, donc dans n'importe quel test d'episode complet.
 TERMINAL_INFO_KEYS = (
-    "winner", "win_method", "episode", "turn_limit_exceeded",
+    "winner", "win_method", "episode",
+    # Bilan d'episode lu par l'entrainement. `tactical_data` porte TOUT
+    # `episode_tactical_data` (compteurs de combat, VP, reserves, ventilation de recompense) ;
+    # `deployment_mode` ventile les courbes par mode de la rampe de deploiement.
+    "tactical_data", "deployment_mode",
+    # Pose par la sortie anticipee « limite de tours atteinte », qui construit son `info` a la
+    # main et ne passe donc pas par le garde de `terminal_info`.
+    "turn_limit_exceeded",
     # Troncature : posees ENSEMBLE avec `truncated = True`. Les omettre rendrait un `truncated`
     # sans son motif des que la troncature tombe pendant une chaine auto-jouee, et
     # `ai/training_callbacks` lit `truncation_debug`.
@@ -244,7 +260,7 @@ def repo_relative_scenario_path(scenario_file: Optional[str]) -> Optional[str]:
     return relative.replace(os.sep, "/")
 
 
-def destroy_unarrived_strategic_reserves(game_state: Dict[str, Any]) -> List[str]:
+def destroy_unarrived_strategic_reserves(game_state: Dict[str, Any]) -> List[Dict[str, Any]]:
     """20.04 — fin du 3e round de bataille : les réserves qui ne sont pas arrivées sont DÉTRUITES.
 
     « At the end of the third battle round, unless otherwise stated, all strategic reserves
@@ -260,7 +276,9 @@ def destroy_unarrived_strategic_reserves(game_state: Dict[str, Any]) -> List[str
         deviendra effective avec le chantier transports.
 
     C'est une RÈGLE DE JEU : elle se journalise comme un événement normal (console log +
-    `destroy_model` avec sa raison propre), jamais comme une erreur. Retourne les ids détruits.
+    `destroy_model` avec sa raison propre), jamais comme une erreur. Retourne les UNITÉS détruites
+    (et non leurs seuls ids) : l'appelant a besoin de leur `player`, et les re-résoudre par id
+    l'obligerait à rattraper un `None` que cette boucle sait déjà impossible.
 
     Appelée par le SEUL point où un round de bataille s'achève (fin de la phase de combat du
     joueur 2, `fight_handlers._fight_v11_phase_complete`), AVANT l'incrément de tour et avant le
@@ -270,7 +288,7 @@ def destroy_unarrived_strategic_reserves(game_state: Dict[str, Any]) -> List[str
     from engine.game_utils import add_console_log
     from engine.phase_handlers.shared_utils import destroy_model
 
-    destroyed: List[str] = []
+    destroyed: List[Dict[str, Any]] = []
     for unit in list(require_key(game_state, "units")):
         unit_id = str(require_key(unit, "id"))
         if not unit.get("in_strategic_reserves", False):  # get allowed (champ optionnel, cf. loader)
@@ -284,7 +302,7 @@ def destroy_unarrived_strategic_reserves(game_state: Dict[str, Any]) -> List[str
         for model_id in list(squad_models.get(str(unit_id), [])):  # get allowed
             if model_id in models_cache:
                 destroy_model(game_state, model_id, "strategic_reserves_timeout")
-        destroyed.append(unit_id)
+        destroyed.append(unit)
         add_console_log(
             game_state,
             f"STRATEGIC RESERVES (20.04): unit {unit_id} never made an ingress move by the end "
@@ -1357,7 +1375,7 @@ class W40KEngine(gym.Env):
     # GYM INTERFACE - KEEP THESE CORE METHODS
     # ============================================================================
     
-    def reset(self, *, seed: Optional[int] = None, options: Optional[Dict[str, Any]] = None) -> Tuple[Union[np.ndarray, Dict[str, np.ndarray]], Dict[str, Any]]:
+    def reset(self, *, seed: Optional[int] = None, options: Optional[Dict[str, Any]] = None) -> Tuple[Dict[str, np.ndarray], Dict[str, Any]]:
         """Reset game state for new episode - gym.Env interface."""
 
         # Call parent reset for gym compliance
@@ -2033,7 +2051,7 @@ class W40KEngine(gym.Env):
 
     def step(
         self, action: int
-    ) -> Tuple[Optional[Union[np.ndarray, Dict[str, np.ndarray]]], float, bool, bool, Dict[str, Any]]:
+    ) -> Tuple[Optional[Dict[str, np.ndarray]], float, bool, bool, Dict[str, Any]]:
         """Interface gym.Env — 5-uplet fixe. L'implementation est ``step_with_mask``.
 
         Le 5-uplet de gym n'a pas de place pour le masque, et gym.Wrapper.step ne transmet que
@@ -2136,7 +2154,7 @@ class W40KEngine(gym.Env):
         action: int,
         mask_and_eligible: Optional[Tuple[np.ndarray, List[Dict[str, Any]]]] = None,
     ) -> Tuple[
-        Optional[Union[np.ndarray, Dict[str, np.ndarray]]],
+        Optional[Dict[str, np.ndarray]],
         float,
         bool,
         bool,
@@ -2629,6 +2647,16 @@ class W40KEngine(gym.Env):
             totals['objective'] += zone_shaping_paid
             totals['objective_positive'] += max(0.0, zone_shaping_paid)
 
+        # Cles de FIN D'EPISODE, tenues a part de l'`info` d'action. Deux raisons, et la seconde
+        # est celle qui a coute : (1) elles sont les seules que `_drain_forced_waits` reprend du
+        # dernier step de la chaine auto-jouee, (2) les tenir dans un dict dedie rend
+        # l'enumeration de `TERMINAL_INFO_KEYS` VERIFIABLE — le garde juste avant le drain leve si
+        # une cle posee ici n'y figure pas. Sans ce dict, la frontiere « cle d'action / cle
+        # terminale » n'existait que dans une liste ecrite a la main, a cote de 500 lignes qui
+        # ecrivent dans `info` : c'est exactement comme ca que `tactical_data` et
+        # `deployment_mode` ont manque a l'appel.
+        terminal_info: Dict[str, Any] = {}
+
         # Add winner info when game ends
         if terminated:
             winner, win_method = self._determine_winner_with_method()
@@ -2639,11 +2667,11 @@ class W40KEngine(gym.Env):
                     f"win_method is None but terminated=True. Winner={winner}, Turn={self.game_state.get('turn')}"
                 )
             
-            info["winner"] = winner
-            info["win_method"] = win_method
-            
+            terminal_info["winner"] = winner
+            terminal_info["win_method"] = win_method
+
             # CRITICAL: Populate info["episode"] for Stable-Baselines3 MetricsCollectionCallback
-            info["episode"] = {
+            terminal_info["episode"] = {
                 "r": float(self.episode_reward_accumulator),
                 "l": int(self.episode_length_accumulator),
                 "t": int(self.episode_length_accumulator),
@@ -3003,7 +3031,7 @@ class W40KEngine(gym.Env):
             )
 
             # Add tactical data to info
-            info["tactical_data"] = self.episode_tactical_data.copy()
+            terminal_info["tactical_data"] = self.episode_tactical_data.copy()
 
             # Mode de déploiement de CET épisode ("active" | "fixed" | None), pour que les
             # courbes puissent être ventilées par mode. Sans cette ventilation, la rampe
@@ -3011,7 +3039,7 @@ class W40KEngine(gym.Env):
             # une métrique agrégée mélange alors deux tâches de difficulté différente dans des
             # proportions qui changent à chaque épisode, et son plateau ne distingue plus un
             # agent qui stagne d'un agent qui progresse sur une tâche qui durcit.
-            info["deployment_mode"] = self.game_state["deployment_mode_schedule_mode"]
+            terminal_info["deployment_mode"] = self.game_state["deployment_mode_schedule_mode"]
             
             # Log episode end with final stats and win method
             if hasattr(self, 'step_logger') and self.step_logger and self.step_logger.enabled:
@@ -3133,13 +3161,13 @@ class W40KEngine(gym.Env):
             from engine.game_utils import add_debug_log
             add_debug_log(self.game_state, f"[MAX_STEPS LIMIT REACHED] {error_msg}")
             truncated = True
-            info["truncation_reason"] = "episode_steps_limit"
+            terminal_info["truncation_reason"] = "episode_steps_limit"
             # Le diagnostic TRAVERSE le VecEnv. Sans ca il n'existait que dans le `print` du
             # worker — noye dans la console a n_envs=48, perdu au scroll — et dans
             # `add_debug_log`, muet hors `debug_mode` et de toute facon local a ce process.
             # Une troncature signale une BOUCLE dans le moteur : ce qu'il faut, c'est de quoi
             # la reproduire. Cf. le lecteur dans ai/training_callbacks.py.
-            info["truncation_debug"] = {
+            terminal_info["truncation_debug"] = {
                 "episode": episode,
                 "turn": turn,
                 "phase": phase,
@@ -3157,8 +3185,22 @@ class W40KEngine(gym.Env):
                 "shoot_debug": shoot_debug,
                 "last_action_debug": self.game_state.get("_last_action_debug"),
             }
-            info["winner"] = -1  # draw so eval does not skew win rate
-            info["win_method"] = "step_limit"
+            terminal_info["winner"] = -1  # draw so eval does not skew win rate
+            terminal_info["win_method"] = "step_limit"
+
+        # GARDE D'ENUMERATION — la frontiere « cle d'action / cle terminale » a UNE source, et
+        # c'est la construction ci-dessus, pas la liste. Une cle de fin d'episode ajoutee sans
+        # etre declaree ferait perdre cette cle a tout episode qui se termine pendant une chaine
+        # d'attentes forcees, chez le seul appelant qui l'exige (`ai/training_callbacks`) et
+        # seulement une fois sur N episodes : elle echoue ici, immediatement et partout.
+        unlisted = tuple(key for key in terminal_info if key not in TERMINAL_INFO_KEYS)
+        if unlisted:
+            raise RuntimeError(
+                f"Cles de fin d'episode absentes de TERMINAL_INFO_KEYS : {unlisted}. "
+                f"Les declarer, sinon `_drain_forced_waits` ne les remontera pas quand l'episode "
+                f"se termine pendant une chaine d'attentes forcees auto-jouees."
+            )
+        info.update(terminal_info)
 
         # Auto-jeu des attentes forcees : cf. `_drain_forced_waits`. Applique AUX DEUX sorties
         # non terminales de cette fonction, sinon il s'appliquerait « selon le chemin emprunte ».

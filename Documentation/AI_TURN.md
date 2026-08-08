@@ -1193,8 +1193,17 @@ lui-même et enchaîne, au lieu de rendre la main pour une question à une seule
 - **Le step reste un step du moteur** : `episode_steps`, `action_family_counts`, le StepLogger et
   le garde anti-runaway (`_episode_step_calls`) le comptent comme les autres, parce que le rejeu
   passe par `step_with_mask` lui-même et non par un chemin d'exécution parallèle.
-- **Borne** : `FORCED_WAIT_CHAIN_LIMIT` (256) n'est pas un réglage de jeu mais un détecteur de
+- **Borne** : `FORCED_WAIT_CHAIN_LIMIT` (64) n'est pas un réglage de jeu mais un détecteur de
   boucle — la chaîne se draine seule, chaque attente retirant une escouade de son pool.
+- **`info` reste celui de l'action de l'APPELANT**, sauf les clés de FIN D'ÉPISODE
+  (`TERMINAL_INFO_KEYS` : `winner`, `win_method`, `episode`, `tactical_data`, `deployment_mode`,
+  `turn_limit_exceeded`, `truncation_reason`, `truncation_debug`), reprises du dernier step de la
+  chaîne. Les deux sens comptent : écraser `info` en bloc ferait disparaître la dernière action
+  réelle de chaque phase (`ai/env_wrappers.AGENT_STEP_INFO_KEYS` est prélevé APRÈS le retour du
+  moteur), et NE rien reprendre fait perdre son bilan à tout épisode qui se termine pendant une
+  chaîne — `ai/training_callbacks._handle_episode_end` exige `tactical_data` et `deployment_mode`
+  par `require_key`, et le run meurt dessus. Cette énumération n'est pas déclarative : le bloc de
+  terminaison pose ses clés dans un dict dédié et `step_with_mask` LÈVE si l'une n'y figure pas.
 - **PvP et bots ne sont pas concernés** : le drapeau `_wait_was_forced` n'existe que sur le chemin
   gym, et son absence conserve exactement le comportement antérieur.
 

@@ -2030,19 +2030,14 @@ def _fight_v11_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
     if current_player == 2 and int(require_key(game_state, "turn")) == STRATEGIC_RESERVES_LAST_ROUND:
         from engine.w40k_core import destroy_unarrived_strategic_reserves
 
-        destroyed_ids = destroy_unarrived_strategic_reserves(game_state)
-        if destroyed_ids:
+        destroyed_units = destroy_unarrived_strategic_reserves(game_state)
+        if destroyed_units:
             from engine.game_utils import get_controlled_player
             controlled = get_controlled_player(game_state)
-            agent_destroyed = 0
-            for uid in destroyed_ids:
-                destroyed_unit = get_unit_by_id(game_state, str(uid))
-                if destroyed_unit is None:
-                    raise ValueError(
-                        f"Unité de réserve détruite introuvable dans game_state: unit_id={uid}"
-                    )
-                if int(require_key(destroyed_unit, "player")) == controlled:
-                    agent_destroyed += 1
+            agent_destroyed = sum(
+                1 for unit in destroyed_units
+                if int(require_key(unit, "player")) == controlled
+            )
             if agent_destroyed:
                 game_state["_reserves_destroyed_turn3"] = (
                     require_key(game_state, "_reserves_destroyed_turn3") + agent_destroyed
