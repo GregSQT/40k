@@ -29,72 +29,6 @@ import pytest
 # Fix 1 — sort DEVASTATING_WOUNDS (ligne 9175)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _gs_devastating(monkeypatch, n_attacks: int):
-    """Game-state minimal pour n_attacks résolutions avec arme DEVASTATING_WOUNDS."""
-    from engine.phase_handlers import shooting_handlers
-    from engine.phase_handlers.shared_utils import build_manual_shoot_allocation
-    from tests._state_invariants import turn_state_invariants
-
-    SHOOTER = (50, 50)
-    TARGET = (80, 50)
-
-    weapon = {"ATK": 3, "STR": 4, "AP": -1, "DMG": 1, "NB": 2, "RNG": 120,
-              "WEAPON_RULES": ["DEVASTATING_WOUNDS"], "display_name": "DW Gun"}
-    attacker = {"id": "1#0", "squad_id": "1", "player": 0, "T": 4, "SHOOT_LEFT": 1,
-                "col": SHOOTER[0], "row": SHOOTER[1], "RNG_WEAPONS": [weapon]}
-    target_m = {"id": "101#0", "squad_id": "101", "player": 1, "T": 4,
-                "HP_CUR": 9, "HP_MAX": 9, "ARMOR_SAVE": 2, "INVUL_SAVE": 7,
-                "role": None, "unitType": "AssaultIntercessor", "points_per_hp": 5.0,
-                "VALUE": 10.0, "col": TARGET[0], "row": TARGET[1]}
-    uc_entry = {"BASE_SHAPE": "round", "BASE_SIZE": 6, "col": 50, "row": 50,
-                "occupied_hexes": set(), "VALUE": 10.0, "player": 0}
-
-    gs: Dict[str, Any] = {
-        **turn_state_invariants(),
-        "gym_training_mode": True,
-        "turn": 1, "phase": "shoot",
-        "action_logs": [], "action_log_seq": 0,
-        "models_cache": {"1#0": attacker, "101#0": target_m},
-        "squad_models": {"1": ["1#0"], "101": ["101#0"]},
-        "squad_cache": {"1": {"model_count_at_start": 1}, "101": {"model_count_at_start": 1}},
-        "units_cache": {
-            "1": {**uc_entry, "col": SHOOTER[0], "row": SHOOTER[1], "player": 0,
-                  "occupied_hexes_by_model": {"1#0": SHOOTER},
-                  "floor_height_by_model": {"1#0": 0.0}},
-            "101": {**uc_entry, "col": TARGET[0], "row": TARGET[1], "player": 1,
-                    "occupied_hexes_by_model": {"101#0": TARGET},
-                    "floor_height_by_model": {"101#0": 0.0}},
-        },
-        "units": [{"id": "1", "player": 0, "unitType": "SternguardVeteranBoltRifle"},
-                  {"id": "101", "player": 1, "unitType": "AssaultIntercessor"}],
-        "unit_by_id": {"1": {"id": "1", "UNIT_RULES": [], "deployed_on_turn": 0},
-                       "101": {"id": "101", "UNIT_RULES": [], "deployed_on_turn": 0}},
-        "objectives": [],
-        "inches_to_subhex": 5,
-        "moved_distance_by_model": {"1#0": 0.0},
-        "pending_squad_shoot_intents": {
-            "1": [{"model_id": "1#0", "target_unit_id": "101", "weapon_index": 0,
-                   "n_attacks_resolved": n_attacks}]
-        },
-    }
-
-    # n_attacks hits crit (roll 6 sur blessure) → tous DEVASTATING, save_roll=None
-    rolls = [4, 6] * n_attacks
-    seq = list(rolls)
-
-    def fake_randint(a, b):
-        assert seq, "sequence RNG épuisée"
-        return seq.pop(0)
-
-    monkeypatch.setattr(random, "randint", fake_randint)
-    monkeypatch.setattr(shooting_handlers, "compute_unit_los", lambda gs, s, t: {"cover": False})
-    monkeypatch.setattr(shooting_handlers, "_get_unit_by_id", lambda gs, sid: {"id": sid})
-    monkeypatch.setattr(shooting_handlers, "_is_adjacent_to_enemy_within_cc_range", lambda gs, u: False)
-
-    build_manual_shoot_allocation(gs, "1")
-    return gs
-
-
 class TestDevastatingWoundsSortOrder:
     """Vérifie que les blessures DEVASTATING sont résolues APRÈS les blessures normales (24.10).
 
@@ -186,9 +120,13 @@ class TestDevastatingWoundsSortOrder:
                        "n_attacks_resolved": 2}]
             },
         }
-        rolls = [4, 6, 4, 4, 2]
-        seq = list(rolls)
-        monkeypatch.setattr(random, "randint", lambda a, b: seq.pop(0))
+        seq = [4, 6, 4, 4, 2]
+
+        def fake_randint(a: int, b: int) -> int:
+            assert seq, "sequence RNG épuisée — rolls prévus : [4, 6, 4, 4, 2]"
+            return seq.pop(0)
+
+        monkeypatch.setattr(random, "randint", fake_randint)
         monkeypatch.setattr(shooting_handlers, "compute_unit_los", lambda gs, s, t: {"cover": False})
         monkeypatch.setattr(shooting_handlers, "_get_unit_by_id", lambda gs, sid: {"id": sid})
         monkeypatch.setattr(shooting_handlers, "_is_adjacent_to_enemy_within_cc_range", lambda gs, u: False)
@@ -196,7 +134,8 @@ class TestDevastatingWoundsSortOrder:
         build_manual_shoot_allocation(gs, "1")
 
         alloc = gs.get("pending_shoot_allocation")
-        assert alloc, "allocation non créée (mode human-defender devrait laisser la structure)"
+        assert alloc, "allocation non créée — mode human-defender devrait laisser la structure"
+        assert alloc["batches"], "batches vides — au moins un batch attendu"
         pool = alloc["batches"][0]["pool"]
         # Invariant 24.10 : blessures mortelles (devastating=True) APRÈS blessures normales
         devastating_indices = [i for i, pw in enumerate(pool) if pw.get("devastating")]
