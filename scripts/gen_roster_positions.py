@@ -28,6 +28,7 @@ Garanties du placement :
 import json
 import math
 import os
+import pathlib
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -44,19 +45,35 @@ COH = 10.0
 #: Banque de scénarios dont les `terrain_ref` composent l'union des murs (cf. l'en-tête).
 SCENARIO_BANK = "config/agents/ArmageddonAgent/scenarios/training"
 
-#: Rosters à (re)générer. Les variantes `_reserves` portent les MÊMES compositions plus un drapeau
-#: `strategic_reserves` par entrée : les omettre laissait quatre rosters de production sur des
-#: positions jamais recalculées — même défaut, une famille plus loin.
-ROSTERS = [
-    "config/agents/ArmageddonAgent/rosters/500pts/training/agent_training_roster_space_marines.json",
-    "config/agents/ArmageddonAgent/rosters/500pts/training/agent_training_roster_space_marines_reserves.json",
-    "config/agents/ArmageddonAgent/rosters/500pts/training/agent_training_roster_orks.json",
-    "config/agents/ArmageddonAgent/rosters/500pts/training/agent_training_roster_orks_reserves.json",
-    "config/agents/_p2_rosters/500pts/training/opponent_training_roster_space_marines.json",
-    "config/agents/_p2_rosters/500pts/training/opponent_training_roster_space_marines_reserves.json",
-    "config/agents/_p2_rosters/500pts/training/opponent_training_roster_orks.json",
-    "config/agents/_p2_rosters/500pts/training/opponent_training_roster_orks_reserves.json",
-]
+#: Dossiers de rosters d'entraînement et motif de nom, par camp — le MÊME critère que le tirage
+#: `training_random` du moteur (`engine/game_state.py`, `base_dir.glob(pattern)` hors `_kpis` /
+#: `_matchups`). Les fichiers sont DÉCOUVERTS et jamais listés : le consommateur, lui, découvre à
+#: l'exécution, donc un roster déposé dans ces dossiers est immédiatement tiré au sort par
+#: l'entraînement — listé ici à la main, il serait tiré sans avoir jamais reçu de positions, et
+#: rejouerait le `Unit N footprint cell (c,r) on wall hex` en plein run.
+ROSTER_DIRS = (
+    ("config/agents/ArmageddonAgent/rosters/500pts/training", "agent_training_roster*.json"),
+    ("config/agents/_p2_rosters/500pts/training", "opponent_training_roster*.json"),
+)
+
+
+def training_rosters():
+    """Chemins des rosters d'entraînement à (re)générer, dans un ordre déterministe."""
+    found = []
+    for rel_dir, pattern in ROSTER_DIRS:
+        base = pathlib.Path(ROOT) / rel_dir
+        if not base.is_dir():
+            raise SystemExit(f"dossier de rosters absent : {base}")
+        found += [
+            str(p.relative_to(ROOT))
+            for p in sorted(base.glob(pattern), key=lambda p: p.name)
+            if "_kpis" not in p.name and "_matchups" not in p.name
+        ]
+    if not found:
+        raise SystemExit(f"aucun roster trouvé sous {[d for d, _ in ROSTER_DIRS]}")
+    return found
+
+
 # centres candidats d'escouade par bande (espacés pour que les amas ne se télescopent pas)
 TOP_CENTERS = [(c, r) for r in range(55, 100, 22) for c in range(40, 190, 34)]
 BOT_CENTERS = [(c, r) for r in range(210, 256, 22) for c in range(40, 190, 34)]
@@ -231,7 +248,7 @@ def main():
     ur = UnitRegistry()
     walls = union_walls_of_bank(W40KEngine, ur)
 
-    for path in ROSTERS:
+    for path in training_rosters():
         full = os.path.join(ROOT, path)
         d = json.load(open(full))
         top = Placer(ur, walls, TOP_CENTERS)

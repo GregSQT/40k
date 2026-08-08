@@ -22,20 +22,67 @@ jamais collecté par la suite.
 from __future__ import annotations
 
 import glob
+import json
 import os
 
 import pytest
 
+from _config_helpers import bank_training_scenarios
 from engine.phase_handlers.shared_utils import validate_squad_coherency
 from shared.data_validation import require_key
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 BANK = os.path.join(PROJECT_ROOT, "config/agents/ArmageddonAgent/scenarios/training")
 #: Scénarios de training « pleins » (roster tiré au sort), un par terrain de la banque.
-TEMPLATES = sorted(glob.glob(os.path.join(BANK, "scenario_training_armageddon*.json")))
+TEMPLATES = bank_training_scenarios()
 #: Fixtures à réserves déclarées des deux côtés, un fichier par terrain.
 RESERVES_FIXTURES = sorted(glob.glob(os.path.join(BANK, "reserves_full_episode_fixture*.json")))
 MIDLINE = 150  # séparation top/bottom du board 220x300
+
+
+def _roster_positions():
+    """(roster, unit_type, col, row) de CHAQUE figurine posée par les rosters d'entraînement.
+
+    Source : le même glob que le tirage `training_random` du moteur, réexporté par
+    `scripts/gen_roster_positions.training_rosters()` — pas une liste recopiée, sinon un roster
+    ajouté au dossier serait tiré par l'entraînement et jamais éprouvé ici.
+    """
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "gen_roster_positions", os.path.join(PROJECT_ROOT, "scripts", "gen_roster_positions.py")
+    )
+    assert spec is not None and spec.loader is not None
+    gen = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(gen)
+
+    out = []
+    for rel in gen.training_rosters():
+        with open(os.path.join(PROJECT_ROOT, rel), encoding="utf-8") as handle:
+            data = json.load(handle)
+        for comp in require_key(data, "composition"):
+            models = comp["models"] if "models" in comp else [comp]  # get allowed : unité mono
+            for model in models:
+                unit_type = model["unit_type"] if "unit_type" in model else comp["unit_type"]
+                for band in ("top", "bottom"):
+                    pos = require_key(model, band)
+                    out.append((rel, unit_type, int(pos["col"]), int(pos["row"])))
+    assert out, "aucune position de roster lue — le test ne prouverait rien"
+    return out
+
+
+def _terrain_walls(scenario: str) -> set:
+    """Hexes de mur du terrain d'un scénario, LUS PAR LE MOTEUR (`wall_hexes`).
+
+    Le moteur est la même source que celle qui refuse un footprint au chargement : une expansion
+    maison des fichiers de terrain serait libre de diverger de la validation qu'on prétend
+    anticiper.
+    """
+    env = _make_env(0.0, scenario)
+    env.reset(seed=0)
+    walls = {(int(c), int(r)) for c, r in env.game_state["wall_hexes"]}
+    assert walls, f"{scenario} : aucun mur lu — terrain vide, le test ne prouverait rien"
+    return walls
 
 
 def _make_env(active_ratio: float, scenario: str):
@@ -64,6 +111,47 @@ def _make_env(active_ratio: float, scenario: str):
         "freeze_after_progress": 1.0,
     }
     return env
+
+
+@pytest.mark.parametrize("scenario", TEMPLATES, ids=os.path.basename)
+def test_no_roster_position_stands_on_a_wall(scenario: str):
+    """CHAQUE figurine de CHAQUE roster est hors des murs de CHAQUE terrain de la banque.
+
+    VERROU DU DÉFAUT DU 2026-08-08 — et il est EXHAUSTIF, là où les tests d'épisode ci-dessous ne
+    sont qu'un ÉCHANTILLON : ceux-ci tirent le roster au sort (`training_random`, sans graine),
+    donc pour une paire (roster, terrain) donnée la probabilité de ne jamais la tirer en 8
+    épisodes vaut (3/4)^8 ≈ 10 %. Un défaut de position avait donc une chance sur dix de passer,
+    et son échec aurait été intermittent — donc classé « flaky » plutôt que corrigé.
+
+    Or la propriété est STATIQUE : positions du roster × murs du terrain. Elle se vérifie par
+    produit COMPLET sans jouer un seul épisode, ce que fait ce test — la règle maison « un test
+    doit CONSTRUIRE la situation qu'il observe, jamais l'espérer d'une graine aléatoire ».
+    """
+    from ai.unit_registry import UnitRegistry
+    from engine.hex_utils import compute_occupied_hexes
+
+    walls = _terrain_walls(scenario)
+    registry = UnitRegistry()
+    offenders = []
+    for roster, unit_type, col, row in _roster_positions():
+        data = registry.get_unit_data(unit_type)
+        # MÊME conversion d'échelle de socle que le générateur (`gen_roster_positions.base_of`) :
+        # les positions sont écrites en subhex x5, les `BASE_SIZE` en dixièmes de pouce.
+        raw = require_key(data, "BASE_SIZE")
+        size = ([max(1, round(s * 5 / 10)) for s in raw] if isinstance(raw, list)
+                else max(1, round(raw * 5 / 10)))
+        fp = compute_occupied_hexes(col, row, require_key(data, "BASE_SHAPE"), size, 0)
+        hit = set(fp) & walls
+        if hit:
+            offenders.append(
+                f"{os.path.basename(roster)} {unit_type} ({col},{row}) -> {sorted(hit)[:3]}"
+            )
+    assert not offenders, (
+        f"{len(offenders)} position(s) de roster sur un mur de {os.path.basename(scenario)} : "
+        + " | ".join(offenders[:5])
+        + " — relancer `python3 scripts/gen_roster_positions.py`, qui calcule l'union des murs "
+        "de toute la banque"
+    )
 
 
 @pytest.mark.parametrize("scenario", TEMPLATES, ids=os.path.basename)
