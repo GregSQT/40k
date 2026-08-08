@@ -1,5 +1,11 @@
 # V11 — Encodeur d'entités partagé + tête pointeur (et les trous qu'il ferme)
 
+> **ARCHIVÉ le 2026-08-08** — déplacé de la racine `Implémentation/` vers `Implémenté/`. Les huit
+> tranches T-A→T-H sont livrées ET vérifiées dans le code ce jour (`ai/pointer_policy.py` porte
+> 7 requêtes de pointeur, `ai/spatial_extractor.py` et `engine/observation_entities.py` portent
+> l'architecture par entités). Ce document garde sa valeur de **conception et de journal** ; il
+> n'est plus un plan à exécuter, et **ses chiffres de dimensionnement sont datés** (cf. §0).
+
 Ouvert le **2026-07-26**. Chantier issu d'une seule question de l'utilisateur — « tout est optimal
 et documenté ? » — posée après la livraison de §9.2.5 (observation des règles d'armes). La
 vérification a trouvé **six trous** (un septième, §1.9, est apparu pendant l'exécution), dont un qui rend une unité ennemie invisible et intirable dans
@@ -9,9 +15,9 @@ la majorité des épisodes.
 les numéros de ligne sont indicatifs. Re-localiser par grep avant d'éditer.
 
 > **Documents liés**
-> - [`V11_agent_rework.md`](V11_agent_rework.md) — §9.2.5 (observation des règles, livré), §9.2.7
+> - [`V11_agent_rework.md`](../V11_agent_rework.md) — §9.2.5 (observation des règles, livré), §9.2.7
 >   (trou 10.05/10.06), §9.3 (P2, mécanisme générique de décision), §9.0bis (critère du *regret*).
-> - [`V11_audit_observation.md`](Implémenté/V11_audit_observation.md) — §7 (découpe structurée du vecteur),
+> - [`V11_audit_observation.md`](V11_audit_observation.md) — §7 (découpe structurée du vecteur),
 >   §9.9 (raisonner en ensembles), §11 (reste à faire). Ce document **exécute** le « Niveau 1/2 »
 >   que §7.3 laissait en réserve.
 
@@ -32,7 +38,14 @@ les numéros de ligne sont indicatifs. Re-localiser par grep avant d'éditer.
 | **audit** | Passe « tout est optimal et documenté ? » — 6 écarts trouvés, tous corrigés | ✅ **FAIT (2026-07-26)**, cf. journal |
 | **T-H** | Complétude de l'obs : géométrie des objectifs + règles d'unité (+ cache des profils d'armes) | ✅ **FAIT (2026-07-27)**, cf. `V11_agent_rework.md` §0.31 |
 
-⚠️ **`obs_size` courant : 20626** (20166 → 20181 objectifs → 20545 règles d'unité → 20601 couvert/visibilité par slot ennemi, 2026-07-27 → **20626** bit `present` par figurine + phase en one-hot, §0.32 T-H/T-J, 2026-07-28).
+⚠️ **`obs_size` courant : 16659** (vérifié par exécution de `ObservationBuilder.SQUAD_OBS_SIZE_TARGET`
+le 2026-08-08). La valeur **20626** que portait cette ligne était celle du 2026-07-28, dernier jour
+de ce chantier ; elle a été périmée par des chantiers POSTÉRIEURS, extérieurs à ce document :
+20780 → 20752 (chantier 01) → 20718 (chantier 04) → 20725 (chantier 03) → 20727 → **14609**
+(socle du 2026-08-07, règles d'armes en ids) → 14615 (drapeau `declines`, `L1`) → **16659**
+(`L2`, `K_ALLY_SLOTS` 8 → 12). L'historique tenu à jour vit dans
+[`V11_agent_rework.md`](../V11_agent_rework.md) §0 — **ne jamais citer un `obs_size` depuis ce
+document-ci**, le relire dans le code.
 Les tailles citées dans le journal ci-dessous sont celles du jour de leur tranche : elles
 documentent une progression, elles ne décrivent pas l'état actuel.
 
@@ -400,7 +413,7 @@ aujourd'hui une violation de règle.
    éligible **pour cette arme** — la portée diffère d'une arme à l'autre). La structure d'intents
    du moteur le permet déjà (`declare_attack_weapon`).
 3. **Mêlée** — `_auto_select_cc_weapon_for_fig` devient **conscient des règles** : l'espérance de
-   dégâts doit passer par le socle de résolution ([`attack_sequence.py`](../../engine/phase_handlers/attack_sequence.py)),
+   dégâts doit passer par le socle de résolution ([`attack_sequence.py`](../../../engine/phase_handlers/attack_sequence.py)),
    pas par un calcul parallèle. Une 5ᵉ implémentation d'espérance de dégâts est **interdite** (cf.
    `V11_audit_observation.md` §8, « ne pas coder de 5ᵉ logique inline »). Retirer au passage le
    `try/except` de repli sur `DMG`.
@@ -610,7 +623,7 @@ implémentée à ce stade.
 
 **Ce qui a été fait**
 
-- **Nouveau schéma UNIFIÉ d'entité** — [`engine/observation_entities.py`](../../engine/observation_entities.py) :
+- **Nouveau schéma UNIFIÉ d'entité** — [`engine/observation_entities.py`](../../../engine/observation_entities.py) :
   une unité amie et une unité ennemie portent EXACTEMENT les mêmes features (19 continues +
   17 drapeaux), plus trois sous-registres (armes, types de figurines, et pour l'unité active ses
   figurines). Les features propres à l'unité observée (compteurs d'engagement, drapeaux de
@@ -624,7 +637,7 @@ implémentée à ce stade.
   c'est ce qui débloque le **bloc E**, en attente depuis `V11_audit_observation.md` §11 (au
   format plat il aurait fallu inventer un ordre de slots qu'aucune action ne consomme ; une
   agrégation est invariante par permutation, la question disparaît).
-- **Extracteur à encodeurs PARTAGÉS** — [`ai/spatial_extractor.py`](../../ai/spatial_extractor.py) :
+- **Extracteur à encodeurs PARTAGÉS** — [`ai/spatial_extractor.py`](../../../ai/spatial_extractor.py) :
   un seul `weapon_encoder`, un seul `unit_encoder`, un seul `type_encoder`, appliqués aux DEUX
   camps ; agrégation masquée (moyenne ⊕ max) pour tout ce qu'aucune action ne désigne ; les
   **embeddings ennemis par slot sont conservés** et exposés en fin de vecteur de features via
@@ -688,7 +701,7 @@ ancre de fonction.
   escouades mortes sont **rendus**, et toute escouade vivante sans slot en reçoit un, par menace
   décroissante. Un slot occupé par une escouade VIVANTE ne bouge jamais — c'est ce dont
   l'invariant D1 a besoin. Tout dépassement de K est **logué**.
-- **Tête pointeur** — [`ai/pointer_policy.py`](../../ai/pointer_policy.py) : les logits de tir
+- **Tête pointeur** — [`ai/pointer_policy.py`](../../../ai/pointer_policy.py) : les logits de tir
   sont `q · e_i / sqrt(d)` sur les embeddings d'ennemis produits par l'extracteur. Le tronc MLP
   ne reçoit QUE la partie tronc des features (ré-aplatir les embeddings annulerait le gain), et
   **tout le reste est laissé à SB3** : distribution `MaskableCategorical`, masquage, `log_prob`,
@@ -851,7 +864,7 @@ marqueur de convention ; aucun accesseur de layout supprimé n'est encore réfé
 | `AI_TRAINING.md` (bandeau « référence unique ») | `obs_size` **108**, espace d'action **41**, layout « 16 global + 6 figurines × 7 + 5 slots ennemis × 9 », source = `CoreAgent_training_config.json` | 20 166 / 1 062 / tenseurs d'entités ; ce fichier de config **n'existe plus** |
 | `AI_IMPLEMENTATION.md` | « Action Space (**12 actions**) : 0-3 move, 4-8 shoot, 9 charge… » et obs `shape (150,)` | 1 062 actions ; obs = Dict de tenseurs |
 | `V11_audit_observation.md` §1 / §1.1 | « aujourd'hui **199**, scindé `vec_cont` (119) / `vec_bin` (80) », « **5 slots** ennemis » | contrat remplacé deux fois depuis |
-| `A_faire/move_action_space_spatial_rework.md` §4.5 | « l'action space vaut **désormais 1047** » | 1 062 depuis T-E |
+| `Implémenté/move_action_space_spatial_rework.md` §4.5 | « l'action space vaut **désormais 1047** » | 1 062 depuis T-E |
 | `Weapon_rules.md` | exemple de config `obs_size: 313` sans date | valeur **calculée**, jamais choisie à la main |
 
 Les bandeaux de `AI_TRAINING` et `AI_IMPLEMENTATION` étaient déjà faux **avant** ce chantier

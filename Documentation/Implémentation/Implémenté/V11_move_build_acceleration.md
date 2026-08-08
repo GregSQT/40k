@@ -1,5 +1,14 @@
 # V11 §0.22 — Accélération du noyau de `_build_multi_hex_vectorized` (move pool)
 
+> **ARCHIVÉ DANS `Implémenté/` LE 2026-08-08.** Il vivait à la racine `Implémentation/`, réservée
+> aux chantiers EN COURS, alors qu'il est clos depuis le 2026-07-21. Ses trois tâches résiduelles
+> (§5) restent **ouvertes et lisibles ici** — même régime que
+> [`campagne_typage_et_replis_2026-07-29.md`](campagne_typage_et_replis_2026-07-29.md), archivé
+> avec ses résidus nommés. État revérifié dans le code ce jour : **T1 ouvert** (aucun helper
+> module-level, les 5 copies du motif slice-OR sont toujours des closures locales), **T2 ouvert**
+> (`numba` toujours absent des deux `requirements*.txt` et importé nulle part), **T3 dépassé par
+> §0.63/§0.64/§0.65** (cf. l'encadré de §5).
+
 > **Chantier perf CLOS** (décision (B) STOP, utilisateur, 2026-07-21 — §3). Ce document est
 > **réduit à sa valeur résiduelle le 2026-07-28** : le cadrage de leviers d'origine (~460 lignes de
 > plan, tous tranchés depuis) a été supprimé. Ce qui subsiste : le périmètre de validité (§1), le
@@ -7,7 +16,7 @@
 > rouvrir (§4), les tâches encore ouvertes (§5), les mesures d'archive (§6).
 >
 > Ancres `fichier:ligne` vérifiées le **2026-07-28** ; re-grep avant d'éditer.
-> Amont : [`Implémenté/V11_move_pool_optimization.md`](Implémenté/V11_move_pool_optimization.md)
+> Amont : [`V11_move_pool_optimization.md`](V11_move_pool_optimization.md)
 > (cadrage, clos). Entrée de suivi : `V11_agent_rework.md §0.22` (barrée, résolue).
 
 ---
@@ -20,18 +29,18 @@ Toutes les mesures de ce document ont été prises sur `config/board/44x60x5` = 
 🔴 **Sur `config/board/44x60x1` (44×60, `inches_to_subhex: 1`), la fonction objet de ce document
 n'est JAMAIS APPELÉE.** Démontré par le code (2026-07-28), pas estimé :
 
-1. `_scale_socle` ([game_state.py:28-52](../../engine/game_state.py#L28)) — **autorité unique du
-   scaling `BASE_SIZE`** (commentaire d'autorité [:185](../../engine/game_state.py#L185), appliqué
-   en [:1030](../../engine/game_state.py#L1030)) — retourne `("round", 1)` **inconditionnellement**
+1. `_scale_socle` ([game_state.py:28-52](../../../engine/game_state.py#L28)) — **autorité unique du
+   scaling `BASE_SIZE`** (commentaire d'autorité [:185](../../../engine/game_state.py#L185), appliqué
+   en [:1030](../../../engine/game_state.py#L1030)) — retourne `("round", 1)` **inconditionnellement**
    dès `inches_to_subhex <= 1` : « à `inches_to_subhex == 1`, une figurine tient dans UNE case —
    c'est la définition même de cette résolution ». Donc à x1, `base_size == 1` pour **toute** figurine.
 2. `is_single_hex = (ez <= 1 or base_size == 1)`
-   ([movement_handlers.py:2710](../../engine/phase_handlers/movement_handlers.py#L2710)) est donc
+   ([movement_handlers.py:2710](../../../engine/phase_handlers/movement_handlers.py#L2710)) est donc
    toujours vrai à x1 — et doublement, puisque `engagement_zone × inches_to_subhex = 1` ⟹ `ez == 1`.
-   Idem FLY : `_fly_single_hex` ([:2512](../../engine/phase_handlers/movement_handlers.py#L2512)).
+   Idem FLY : `_fly_single_hex` ([:2512](../../../engine/phase_handlers/movement_handlers.py#L2512)).
 3. `_build_multi_hex_vectorized` n'est appelée que sous `not is_single_hex`
-   ([:2852](../../engine/phase_handlers/movement_handlers.py#L2852)) et `not _fly_single_hex`
-   ([:2530](../../engine/phase_handlers/movement_handlers.py#L2530)).
+   ([:2852](../../../engine/phase_handlers/movement_handlers.py#L2852)) et `not _fly_single_hex`
+   ([:2530](../../../engine/phase_handlers/movement_handlers.py#L2530)).
 
 ⟹ Le profil `x1` du curriculum (celui du run en cours, cf. `V11_agent_rework.md §0.33`) passe par le
 chemin **mono-hex**. Ni les chiffres ni les leviers ci-dessous ne s'y appliquent ; ils redeviennent
@@ -66,16 +75,16 @@ Filet en place, à laisser vert pour toute modification du noyau :
 | `scripts/profile_move_pool.py` | re-bench avant/après (seul script de mesure survivant) |
 
 ⚠️ **`out_costs` est l'invariant le plus délicat** : c'est le coût **géodésique** (distance de chemin,
-docstring [l.1598-1604](../../engine/phase_handlers/movement_handlers.py#L1598)) qui décide normal vs
+docstring [l.1598-1604](../../../engine/phase_handlers/movement_handlers.py#L1598)) qui décide normal vs
 advance côté gym. Le BFS FIFO garantit que la 1ʳᵉ visite d'une case est sa distance minimale — toute
 réécriture doit préserver cet ordre exact, sinon le type de move diverge silencieusement.
 
 ⚠️ **`scipy.ndimage` est interdit ici** : segfauts constatés, cf. le commentaire du code
-[l.1655](../../engine/phase_handlers/movement_handlers.py#L1655). C'est aussi la raison qui a fait
+[l.1655](../../../engine/phase_handlers/movement_handlers.py#L1655). C'est aussi la raison qui a fait
 écarter `numba` (§4).
 
 Non-régression PvP : le PvP standard prend le chemin **euclidean**
-(`_euclidean_ground_anchor_multihex`, [l.2834](../../engine/phase_handlers/movement_handlers.py#L2834)),
+(`_euclidean_ground_anchor_multihex`, [l.2834](../../../engine/phase_handlers/movement_handlers.py#L2834)),
 donc `_build_multi_hex_vectorized` est **hors** du chemin PvP par défaut — le risque PvP est
 structurellement faible, mais `scripts/pvp_smoke_test.py` reste le garde-fou.
 
@@ -86,19 +95,19 @@ structurellement faible, mais `scripts/pvp_smoke_test.py` reste le garde-fou.
 ### 3.1 Build du pool (2026-07-21, commits `ff2293e0`, `6f268d38`)
 
 - **L1 — mémoïsation de `precompute_footprint_offsets`**
-  ([hex_utils.py:1376](../../engine/hex_utils.py#L1376)) : dict module-level
+  ([hex_utils.py:1376](../../../engine/hex_utils.py#L1376)) : dict module-level
   `_FOOTPRINT_OFFSETS_CACHE` clé `(base_shape, base_size normalisé tuple, orientation)`. Géométrie
   pure/déterministe, sortie immuable, aucune invalidation (contrairement aux caches dépendant des
   murs). Même pattern que `_SINGLE_BASE_HEX_COUNT_CACHE`
-  ([spatial_relations.py:72](../../engine/spatial_relations.py#L72)). Piège traité : `base_size` peut
+  ([spatial_relations.py:72](../../../engine/spatial_relations.py#L72)). Piège traité : `base_size` peut
   être une **liste** `[major, minor]` (socles ovales) — non hashable → normalisation en tuple pour la
   clé. Verrouillé par `TestPrecomputeFootprintOffsetsMemoization` (5 tests).
 - **L_bbox — dilatations fenêtrées sur la bbox `move_range`** : toutes les dilatations slice-OR de
   `_build_multi_hex_vectorized` (`_dilate_by_kernel` → `bad_dest`/`bad_traverse`/`eng_bad` ez==1 ;
   `_spread_by_kernel` → footprint) sont bornées à `start ± (move_range + max|offset|)` sur le chemin
   **ground**. Helper `_ground_move_bbox_window`
-  ([l.1523](../../engine/phase_handlers/movement_handlers.py#L1523)), param additif `_bbox_window`
-  ([l.1582](../../engine/phase_handlers/movement_handlers.py#L1582)). **Variante retenue (b)** :
+  ([l.1523](../../../engine/phase_handlers/movement_handlers.py#L1523)), param additif `_bbox_window`
+  ([l.1582](../../../engine/phase_handlers/movement_handlers.py#L1582)). **Variante retenue (b)** :
   tableaux plein-board conservés, seuls les **indices de slice** bornés → aucun remapping de
   coordonnées, parité `col & 1` absolue préservée, pur NumPy. **FLY exclu** (disque, étendue row
   ~1,5×move_range).
@@ -115,18 +124,18 @@ sur `test_move_mask_is_executable`) a montré un gisement bien plus gros que le 
 428**, dont **352 s de BFS géodésique** et **94,7 M appels** à `get_hex_neighbors`. Cause : le prédicat
 reconstruisait à **chaque cellule candidate** des ensembles qui ne dépendent pas de la destination.
 
-- **L_neighbors** — `get_hex_neighbors` ([combat_utils.py:145](../../engine/combat_utils.py#L145)),
+- **L_neighbors** — `get_hex_neighbors` ([combat_utils.py:145](../../../engine/combat_utils.py#L145)),
   fonction pure de deux entiers, mémoïsée dans `_HEX_NEIGHBORS_CACHE` (borné par le plateau, aucune
   invalidation). C'est la boucle interne de **tous** les BFS du moteur. Renvoie un **tuple immuable**
   et non une liste : le résultat étant partagé, une liste exposerait le cache à une mutation (55 sites
   d'appel vérifiés, aucun ne mute).
-- **L1b** — `compute_occupied_hexes` ([hex_utils.py:1241](../../engine/hex_utils.py#L1241)) **traduit**
+- **L1b** — `compute_occupied_hexes` ([hex_utils.py:1241](../../../engine/hex_utils.py#L1241)) **traduit**
   les offsets déjà mémoïsés au lieu de rebalayer un carré avec trigonométrie par cellule. Le balayage
-  brut survit sous `_compute_occupied_hexes_raw` ([:1276](../../engine/hex_utils.py#L1276)), appelé par
+  brut survit sous `_compute_occupied_hexes_raw` ([:1276](../../../engine/hex_utils.py#L1276)), appelé par
   le précalcul **et par les tests comme oracle**. ⚠️ L'oracle de la classe de test L1 a dû être
   **repointé** sur le brut — laissé sur `compute_occupied_hexes`, il serait devenu tautologique.
 - **L_movecache** — `_move_spatial_cache`
-  ([shared_utils.py:3485](../../engine/phase_handlers/shared_utils.py#L3485)) mémoïse cellules
+  ([shared_utils.py:3485](../../../engine/phase_handlers/shared_utils.py#L3485)) mémoïse cellules
   interdites, ensemble de transit et champs géodésiques au niveau de l'**état**. Clé = **fingerprint LU
   de l'état réel** (position ET niveau de chaque figurine, phase, zones d'engagement ennemies),
   **jamais un compteur de version** : c'est exactement le piège de la régression masque⊆exécutable
@@ -184,11 +193,11 @@ Aucun helper partagé n'existe. Les copies vivantes :
 
 | # | Emplacement | Fenêtrée ? |
 |---|---|---|
-| 1 | `_dilate_by_kernel`/`_spread_by_kernel` de `_build_multi_hex_vectorized` [l.1648-1730](../../engine/phase_handlers/movement_handlers.py#L1648) | ✅ param `bbox` |
-| 2 | closures branche **hex** de `_compute_mover_ez_forbidden_mask` [l.1430-1466](../../engine/phase_handlers/movement_handlers.py#L1430) | ❌ |
-| 3 | inline euclidien de `_euclidean_mover_ez_forbidden_mask` [l.1361-1369](../../engine/phase_handlers/movement_handlers.py#L1361) | ❌ |
-| 4 | dilatation `ez == 1` [l.1787-1791](../../engine/phase_handlers/movement_handlers.py#L1787) | ✅ passe `_bbox` |
-| 5 | `_spread`/`_dilate` de [`fight_handlers.py:463-480`](../../engine/phase_handlers/fight_handlers.py#L463) | ✅ **par coords locales `(c0, r0)`** |
+| 1 | `_dilate_by_kernel`/`_spread_by_kernel` de `_build_multi_hex_vectorized` [l.1648-1730](../../../engine/phase_handlers/movement_handlers.py#L1648) | ✅ param `bbox` |
+| 2 | closures branche **hex** de `_compute_mover_ez_forbidden_mask` [l.1430-1466](../../../engine/phase_handlers/movement_handlers.py#L1430) | ❌ |
+| 3 | inline euclidien de `_euclidean_mover_ez_forbidden_mask` [l.1361-1369](../../../engine/phase_handlers/movement_handlers.py#L1361) | ❌ |
+| 4 | dilatation `ez == 1` [l.1787-1791](../../../engine/phase_handlers/movement_handlers.py#L1787) | ✅ passe `_bbox` |
+| 5 | `_spread`/`_dilate` de [`fight_handlers.py:463-480`](../../../engine/phase_handlers/fight_handlers.py#L463) | ✅ **par coords locales `(c0, r0)`** |
 
 **C'est de la dette de duplication, pas de la perf** : 5 implémentations du même calcul de bornes, dont
 deux fenêtrées par des mécanismes **différents** (param `bbox` vs remapping local — c'est-à-dire les
@@ -206,12 +215,32 @@ impact nul aujourd'hui, mais c'est une **dépendance fantôme** de l'environneme
 acceptables — l'épingler (pour garder le levier de repli disponible), ou acter par écrit qu'il n'est
 pas une dépendance du projet. L'état actuel n'est ni l'un ni l'autre.
 
-### T3 — Pôle « scoring de déploiement » : MESURÉ, JAMAIS TRAITÉ.
+### T3 — Pôle « scoring de déploiement » : MESURÉ, ~~JAMAIS TRAITÉ~~ — **PARTIELLEMENT TRAITÉ DEPUIS, par d'autres chantiers**.
+
+🔴 **Mise à jour du 2026-08-08 — le constat ci-dessous date du 2026-07-28 et a été dépassé sans que
+ce document soit repris.** Trois chantiers d'août ont travaillé ce pôle, tous documentés dans
+[`V11_agent_rework.md`](../V11_agent_rework.md) :
+- **§0.63** (2026-08-03) : le cache de scoring **ne servait jamais** — 100 % de reconstruction.
+  Corrigé (sur-ensemble stable, un cache par joueur, delta généralisé à N poses) : reconstruction
+  **100 % → 20 %**, phase de déploiement **2,01 → 1,46 s**.
+- **§0.64** (2026-08-03) : la LoS du scoring était une **autre implémentation** que la règle
+  (607 désaccords sur 16 104 hexes) — alignée sur `compute_unit_los`, coût 1,46 → 2,85 s.
+- **§0.65** (2026-08-03) : ce coût **rendu et davantage** par la vectorisation
+  (`batch_hex_line_steps`, `batch_ground_hex_can_see`) : phase de déploiement **3,58 → 1,33 s**,
+  part LoS **1,58 → 0,09 s**, à l'ISO-VALEUR prouvée.
+
+Ce qui reste vrai : `_get_valid_deployment_hexes` et `_build_deployment_scoring_cache` existent
+toujours (vérifié le 2026-08-08) et **aucune mesure de profil n'a été refaite depuis** — les
+chiffres ci-dessous (18,8 s / 8,8 s, 835 k `score_for_hex`) sont **périmés** et ne doivent pas
+servir de référence. Re-profiler avant de rouvrir quoi que ce soit ici.
+
+Constat d'origine, conservé pour mémoire :
+
 
 Après les gains §3.2, le test de déploiement le plus lourd (20,2 s) est dominé par
-`_get_valid_deployment_hexes` ([action_decoder.py:1013](../../engine/action_decoder.py#L1013), 18,8 s
+`_get_valid_deployment_hexes` ([action_decoder.py:1013](../../../engine/action_decoder.py#L1013), 18,8 s
 cumulés / 98 appels) et `_build_deployment_scoring_cache`
-([:1487](../../engine/action_decoder.py#L1487), 8,8 s / 66 appels) — 835 k appels à `score_for_hex`,
+([:1487](../../../engine/action_decoder.py#L1487), 8,8 s / 66 appels) — 835 k appels à `score_for_hex`,
 8,4 M à `calculate_hex_distance`. **Vérifié 2026-07-28 : les deux fonctions sont inchangées, et leurs
 caches internes (`_deployment_pool_cache`, `_get_or_build_deployment_scoring_cache`) datent de mai,
 donc antérieurs à la mesure — ils n'y répondent pas.** ⚠️ Ce n'est **pas** une mémoïsation neutre comme
@@ -231,7 +260,7 @@ produites (`measure_move_pool_reach_obstacles.py`, `measure_move_pool_occupied.p
 
 | Socle | build/appel | Postes dominants |
 |---|---|---|
-| rond base 6 (45 % des appels réels) | 4,8 ms | `_build…` **self** ~66 % (boucle BFS `deque` [l.1863-1884](../../engine/phase_handlers/movement_handlers.py#L1863)) ; `_dilate` 12 % ; deque 8 % ; `_spread` 6 % |
+| rond base 6 (45 % des appels réels) | 4,8 ms | `_build…` **self** ~66 % (boucle BFS `deque` [l.1863-1884](../../../engine/phase_handlers/movement_handlers.py#L1863)) ; `_dilate` 12 % ; deque 8 % ; `_spread` 6 % |
 | ovale `[20,14]` (17,7 %) | 17,6 ms | `_dilate` ~35 % ; `_build…` self ~22 % ; `_spread` ~17 % ; `precompute` non mémoïsé ~17 % |
 
 **Cardinalités mesurées** (scénario stress ez=10) :
@@ -251,5 +280,5 @@ bornes). Sur round 3, le hotspot est le **corps** de `_build_multi_hex_vectorize
 plein-board `col_parity_mask`/`_dist_arr`/`ravel(order='F')`/`np.where`) → le levier serait de fenêtrer
 le corps lui-même (variante (a), écartée par prudence en L_bbox). À ez=10,
 `_euclidean_mover_ez_forbidden_mask`
-([l.1270](../../engine/phase_handlers/movement_handlers.py#L1270)) grimpe à ~40 % pour l'ovale : le
+([l.1270](../../../engine/phase_handlers/movement_handlers.py#L1270)) grimpe à ~40 % pour l'ovale : le
 hotspot dépend de l'ez.

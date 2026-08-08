@@ -41,7 +41,7 @@ def _unit(uid: int, player: int, positions: List[Tuple[int, int]], value: int) -
     Ce test reste légitime — il verrouille la logique de `value_at_start` de
     `_replace_units_for_player`, pas la construction d'unité. Le vrai état du mode est mesuré et
     verrouillé par `test_endless_duty_is_broken.py`, et documenté dans
-    `Documentation/Implémentation/A_faire/Endless_duty.md`.
+    `Documentation/Implémentation/A_faire/Endless_duty_etat_mesure.md`.
     """
     return {**unit_invariants(),
         "id": uid, "player": player, "col": positions[0][0], "row": positions[0][1],

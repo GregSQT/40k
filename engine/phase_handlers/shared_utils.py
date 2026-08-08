@@ -132,7 +132,7 @@ class ManualAllocCtx:
 
     Mutualise UNIQUEMENT la couche allocation des pertes (groupes, ordre, selection
     de figurine, save check, application des degats). La resolution des jets reste
-    specifique a chaque phase (cf. Documentation/refactor_attack_shoot_fight1.md).
+    specifique a chaque phase (cf. Documentation/Implémentation/Implémenté/refactor_attack_shoot_fight1.md).
     """
     alloc_key: str            # cle game_state de l allocation pending
     declare_order_action: str # action des payloads de declaration d ordre
@@ -3061,7 +3061,7 @@ def maybe_resolve_reactive_move(
 # ============================================================================
 # DISTANCE PRIMITIVES — Engagement Range, Base-to-Base, Coherency
 # ============================================================================
-# Reference: Documentation/TODO/squad.md §"Definition des distances en hex-grid"
+# Reference: Documentation/Implémentation/Implémenté/squad.md §"Definition des distances en hex-grid"
 # Toutes les distances sont en subhexes. `inches_to_subhex` est l echelle du
 # scenario (x5: 5 subhexes par pouce, x10: 10 subhexes par pouce).
 

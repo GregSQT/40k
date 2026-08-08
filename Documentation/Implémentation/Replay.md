@@ -358,11 +358,11 @@ et l'échec ne survit pas au changement d'unité.
 | # | Chantier | État | Prochaine action |
 |---|---|---|---|
 | A | Cercle vert en **phase fight** | **fait — validé unit + tsc ; visuel browser à confirmer** | Confirmer le cercle vert en fight dans un replay (§4.A) |
-| B | Purge legacy pools V10 du `game_state` | **fait moteur (2026-07-23)** ; résidu front `useEngineAPI` | Nettoyer l'auto-play PvP quand validable en live (§4.B) |
+| B | Purge legacy pools V10 du `game_state` | **fait moteur (2026-07-23)** ; **résidu front TOUJOURS PRÉSENT — revérifié le 2026-08-08** : `useEngineAPI.ts` porte encore les branches `fightSubphase === "charging"/"alternating_*"/"cleanup_*"` et les champs `*_alternating_activation_pool` de son interface locale | Nettoyer l'auto-play PvP quand validable en live (§4.B) |
 | C | `pile_in` / `consolidation` classés en **phase `move`** | **fait (2026-07-23)** | — |
 | — | Replay per-figurine (segments MODELS/TARGET_MODELS) | **fait** (commits `81e56c35`, `4ea850c3`) | — |
 | — | Détail par-figurine (bouton +) move/advance/charge/reactive | **fait** (`4ea850c3`) | — |
-| D | Contrôle d'objectif & VP lus du moteur (fin du recalcul navigateur) | **fait (2026-07-29)** — unit + vitest + tsc + run réel ; visuel browser à confirmer | Confirmer VP et coloration des zones dans un replay (§4.D) ; **jumeau restant** : `ai/analyzer_core.py` recalcule encore à l'ancre |
+| D | Contrôle d'objectif & VP lus du moteur (fin du recalcul navigateur) | **fait (2026-07-29)** — unit + vitest + tsc + run réel ; visuel browser à confirmer | Confirmer VP et coloration des zones dans un replay (§4.D). ~~**jumeau restant** : `ai/analyzer_core.py` recalcule encore à l'ancre~~ — **PÉRIMÉ, le jumeau est traité** (§4.D dernier bloc) : revérifié le 2026-08-08, `analyzer_core` ne reconstruit plus rien, il lit la ligne `OBJECTIVE CONTROL:` |
 
 ### 4.A — Cercle vert fight ✅ FAIT (2026-07-23)
 **Décision produit (finale).** En replay fight, le cercle vert cible **UNIQUEMENT l'unité activée**

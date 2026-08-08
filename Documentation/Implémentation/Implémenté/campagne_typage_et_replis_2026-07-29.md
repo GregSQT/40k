@@ -10,7 +10,7 @@ Sa valeur résiduelle est **§1** (le typage n'est presque jamais le défaut, se
 et **§4** (leçons de méthode : vert vacant, jumeau, preuve par provenance) — c'est ce qui resert.
 
 ➡️ **Le seul chantier qu'il a engendré et qui reste ouvert** a désormais son propre document :
-[`../replis_units_cache_2026-08-05.md`](../replis_units_cache_2026-08-05.md) — 42 replis silencieux
+[`replis_units_cache_2026-08-05.md`](replis_units_cache_2026-08-05.md) — 42 replis silencieux
 sur `units_cache` dans move/fight/shoot, inventoriés par site. Il ne rouvre pas celui-ci.
 
 **Périmètre de commits** : `bb3a788f` (14 h 38) → `d061f21b` (16 h 57), soit **38 commits hors
@@ -235,7 +235,7 @@ en commentaire** (`ai/pointer_policy.py:254`) ⇒ **9 sourdines réelles**, tout
   paramètre est déjà `str`) et **105 gardées sans exception** (la conversion EST la normalisation
   qui produit la valeur typée depuis un JSON non typé).
 - `5466dbea` — mode **Endless Duty** : mesuré par exécution réelle, **jamais démarrable** (7
-  obstacles), consigné dans [`A_faire/Endless_duty.md`](../A_faire/Endless_duty.md) + un signet
+  obstacles), consigné dans [`A_faire/Endless_duty_etat_mesure.md`](../A_faire/Endless_duty_etat_mesure.md) + un signet
   exécutable. **Aucun correctif livré** — l'état est documenté et instrumenté, pas réparé.
 
 ---
@@ -485,7 +485,7 @@ par la factorisation, pas contourné.
   comme le §3.3 d'origine l'avait déjà acté pour cette surface.
 - **Jumeau HORS `charge_handlers` — NON traité, chiffré** : le même inventaire AST sur les modules
   miroirs rend **64 lookups `units_cache`**, dont **42 sans `raise` ni marqueur `# get allowed`**
-  (inventaire par site et découpage : [`../replis_units_cache_2026-08-05.md`](../replis_units_cache_2026-08-05.md)) :
+  (inventaire par site et découpage : [`replis_units_cache_2026-08-05.md`](replis_units_cache_2026-08-05.md)) :
   `shared_utils` 23/18, `fight_handlers` 21/13, `shooting_handlers` 16/10, `movement_handlers` 3/2,
   `deployment_handlers` 1/0. C'est un **lot à part entière**, pas un reliquat : chaque site demande
   son contrat d'appelant (le lot charge a montré qu'un site sur quatre est déjà correct et qu'un

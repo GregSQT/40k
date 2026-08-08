@@ -11,7 +11,7 @@
 >
 > **État réel du code (sources vives)** :
 > - [`AI_OBSERVATION.md`](../../AI_OBSERVATION.md) — le contrat d'observation actuel ;
-> - [`V11_entity_encoder_pointer.md`](../V11_entity_encoder_pointer.md) — l'architecture livrée ;
+> - [`V11_entity_encoder_pointer.md`](V11_entity_encoder_pointer.md) — l'architecture livrée ;
 > - `engine/observation_entities.py` — le schéma, seule source du layout.
 >
 > Repères vérifiés au 2026-07-28, à confronter aux chiffres du corps du texte : `obs_size` =
@@ -95,7 +95,7 @@ objectif viser.** L'observation doit nourrir ces choix-là.
 >
 > Lecture d'ensemble : [`AI_OBSERVATION.md`](../../AI_OBSERVATION.md) — il ne décrit QUE le
 > pipeline actuel depuis le 2026-07-28 ; le vecteur plat est archivé dans
-> [`AI_OBSERVATION_Legacy.md`](../../AI_OBSERVATION_Legacy.md). Journal et mesures :
+> [`AI_OBSERVATION_Legacy.md`](../../Old/AI_OBSERVATION_Legacy.md). Journal et mesures :
 > `V11_entity_encoder_pointer.md` §6.
 >
 > Le reste de ce §1 et les §2-§6 décrivent l'état **d'avant la refonte** : ils constituent
@@ -969,7 +969,7 @@ move. Canal « menace ennemie » différé.
 - **Plafonds** : les slots ennemis passent de 5 à **20** (tête pointeur : un slot ne coûte plus
   de paramètres), les profils d'armes à **10 par registre des deux côtés**, et les types de
   figurines existent aussi côté ennemi. Tout dépassement résiduel est **logué**.
-- Détail, mesures et verrous → [`V11_entity_encoder_pointer.md`](../V11_entity_encoder_pointer.md) §6.
+- Détail, mesures et verrous → [`V11_entity_encoder_pointer.md`](V11_entity_encoder_pointer.md) §6.
 
 ### ✅ FAIT le 2026-07-26 — les 3 points débloqués par la fin du portage des capacités
 
@@ -1013,7 +1013,7 @@ move. Canal « menace ennemie » différé.
      moment de l'implémentation, avec le bloc figurines.
 
 > 🔴 **MAJ 2026-07-26 — l'architecture est OUVERTE, avec son chantier dédié :**
-> [`V11_entity_encoder_pointer.md`](../V11_entity_encoder_pointer.md). Décisions actées : encodeur
+> [`V11_entity_encoder_pointer.md`](V11_entity_encoder_pointer.md). Décisions actées : encodeur
 > d'entité **partagé** (unités ET armes, amies ET ennemies), **agrégation seulement pour ce
 > qu'aucune action ne désigne** (alliés, armes, types de figurines), **embeddings par slot +
 > tête pointeur** pour les ennemis (une action les désigne — c'est l'invariant D1), **K=20

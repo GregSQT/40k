@@ -21,7 +21,7 @@ périme au merge — le re-mesurer avant d'ouvrir le chantier, jamais le reprend
 toujours en place, ordres d'arguments contradictoires compris.
 
 **Origine** : signalé en clôture du lot `units_cache`
-([`replis_units_cache_2026-08-05.md`](replis_units_cache_2026-08-05.md) §7). Un site y est resté
+([`replis_units_cache_2026-08-05.md`](../Implémenté/replis_units_cache_2026-08-05.md) §7). Un site y est resté
 non traité — `_shoot_engagement_blocks_target`, `shooter_unit is None → return False` — parce qu'il
 lit `units`, pas `units_cache`. Le grep qui a suivi a montré que ce n'était pas un site isolé.
 
@@ -53,7 +53,7 @@ utilisateur ou d'un champ optionnel. C'est exactement la leçon §3.2 de la camp
 s'annule pas parce que le contrat est plus net.
 
 **Précédent DÉJÀ ÉCRIT dans le dépôt**, à réutiliser tel quel comme argument :
-`_ai_select_fight_target` ([`fight_handlers.py:1602`](../../engine/phase_handlers/fight_handlers.py))
+`_ai_select_fight_target` ([`fight_handlers.py:1602`](../../../engine/phase_handlers/fight_handlers.py))
 porte depuis le 2026-07-20 (V11 §0.19.2) le raisonnement complet et le `raise` correspondant :
 
 > Le pool vient de `units_cache` : une cible qui y figure mais manque de `unit_by_id` est une
@@ -79,10 +79,10 @@ l'ordre des arguments INVERSÉ.**
 
 | Implémentation | Signature | `str()` sur l'id ? |
 |---|---|---|
-| [`engine/combat_utils.py:95`](../../engine/combat_utils.py) | `get_unit_by_id(game_state, unit_id)` | **non**, et le docstring dit que la coercition serait un défaut |
-| [`engine/game_utils.py:51`](../../engine/game_utils.py) | `get_unit_by_id(unit_id, game_state)` | oui |
-| [`shooting_handlers.py:6058`](../../engine/phase_handlers/shooting_handlers.py) | `_get_unit_by_id(game_state, unit_id)` | oui |
-| [`w40k_core.py:6213`](../../engine/w40k_core.py) | `self._get_unit_by_id(unit_id)` | délègue à `game_utils` |
+| [`engine/combat_utils.py:95`](../../../engine/combat_utils.py) | `get_unit_by_id(game_state, unit_id)` | **non**, et le docstring dit que la coercition serait un défaut |
+| [`engine/game_utils.py:51`](../../../engine/game_utils.py) | `get_unit_by_id(unit_id, game_state)` | oui |
+| [`shooting_handlers.py:6058`](../../../engine/phase_handlers/shooting_handlers.py) | `_get_unit_by_id(game_state, unit_id)` | oui |
+| [`w40k_core.py:6213`](../../../engine/w40k_core.py) | `self._get_unit_by_id(unit_id)` | délègue à `game_utils` |
 
 Les trois premières font *exactement* la même chose : `require_key(game_state, "unit_by_id").get(...)`.
 Deux positions de `str()` divergentes, deux ordres d'arguments contradictoires.

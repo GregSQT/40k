@@ -1,7 +1,7 @@
 """Desynchronisation `units` / `units_cache` : la geometrie LEVE au lieu d'inventer une empreinte.
 
 Ce que ce fichier verrouille (tranche T1 de
-`Documentation/Implementation/replis_units_cache_2026-08-05.md`, « Forme A ») : sept lectures de
+`Documentation/Implémentation/Implémenté/replis_units_cache_2026-08-05.md`, « Forme A ») : sept lectures de
 `units_cache` repondaient a l'absence par `entry_footprint(x) if x else {(col, row)}`, c'est-a-dire
 en mesurant l'unite sur son ANCRE SEULE. Rien ne crashait ; l'adjacence de melee, la zone
 d'engagement du move et la ligne de vue de tir rendaient simplement un verdict calcule sur une

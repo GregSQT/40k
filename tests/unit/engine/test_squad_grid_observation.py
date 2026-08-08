@@ -1,6 +1,6 @@
 """Rasterisation de la grille egocentrique (ObservationBuilder.build_squad_grid).
 
-Spec : Documentation/Implementation/A_faire/move_action_space_spatial_rework.md §7 T1.
+Spec : Documentation/Implémentation/Implémenté/move_action_space_spatial_rework.md §7 T1.
 Corrige le defaut §4.1 : l'obs squad 108-d ne contenait AUCUN terrain.
 """
 

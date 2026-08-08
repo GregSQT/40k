@@ -18,7 +18,7 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 > `EntityRunningNorm`), **les 5 caches et leur condition d'invalidation**, et l'historique
 > d'`obs_size`.
 > Le pipeline **mono-figurine legacy** (vecteur plat d'offsets `obs[N]`, features calculées) est
-> archivé à part : [`AI_OBSERVATION_Legacy.md`](../AI_OBSERVATION_Legacy.md). Aucun agent ne
+> archivé à part : [`AI_OBSERVATION_Legacy.md`](../Old/AI_OBSERVATION_Legacy.md). Aucun agent ne
 > l'utilise.
 >
 > **Source unique du contrat** (la doc en donne la lecture, jamais une copie de chiffres) :
@@ -26,7 +26,7 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 > l'en-tête « OBSERVATION SQUAD — TENSEURS D'ENTITÉS » de
 > [`engine/observation_builder.py`](../../engine/observation_builder.py) pour le layout.
 >
-> **Conception et journal** : [`V11_entity_encoder_pointer.md`](V11_entity_encoder_pointer.md)
+> **Conception et journal** : [`V11_entity_encoder_pointer.md`](Implémenté/V11_entity_encoder_pointer.md)
 > (encodeur partagé, tête pointeur, cardinalités) · [`V11_audit_observation.md`](Implémenté/V11_audit_observation.md)
 > (audit d'origine) · **[§9.2.5](V11_phaseA.md#s9.2.5)** et **§0.31** de ce document (ce qui est observé, et pourquoi).
 >
@@ -92,7 +92,7 @@ tenues à jour et **ne doivent pas servir de référence** — les relire dans l
 | **§0.56** | Instrumentation : usage par **famille d'action**, et **classement bot-contre-bot** | ✅ **LIVRÉ le 2026-08-02** — reste à s'en servir | **2** | Deux angles morts fermés, aucun ne coûte de ré-entraînement. (1) `actions/share_<famille>` publie la part de chaque DÉCISION dans ce que l'agent joue : une dimension jamais choisie ou toujours choisie est cassée quel que soit le win-rate — c'est ce qui rend un lot de tranches P3 diagnosticable **en un seul run**. (2) `scripts/bot_ranking.py` fait s'affronter les bots **sans agent** : sans lui, juger un bot exigeait un modèle entraîné, donc une mesure circulaire — et §0.55 était irréalisable. Détail → §0.56. |
 | **§0.55** | Le **holdout d'évaluation** `TacticalBot` est DANS l'enveloppe d'entraînement — effet plafond | ✅ **LIVRÉ le 2026-08-04 — le mètre est GELÉ** | **1** (avant toute mesure de référence) | `tactical` gelé à **`w_objective 2.0`** (mesuré sur **x1**) : l'agent passe de **0.89 à 0.72** contre lui, et le bot de **dernier (0.357) à premier (0.636)** sur 6. `combined` inchangé à 0.8200 — le holdout pèse 0.0, c'est le contrôle que son statut est intact. ✅ Croisement `bot_eval/faction/<faction>/vs_<bot>` publié (méthode dédiée, dérivé du tally unique). 🔴 **Deux des trois leviers de la spec n'avaient aucune prise** : `w_enemy` est INERTE pour ce bot (mesuré + verrou), et le pas `0.5 → 0.8` tombait dans la partie morte d'une réponse en MARCHE. 🔴 **Piège à retenir : `--training-config` ne choisit PAS le plateau** (`config.json` → x5 ; les évals de référence passent `--resolution 1`) — une campagne entière a été jetée pour ça, et en x5 le diagnostic s'inversait. Détail → §0.55. |
 | **§0.14** | Re-mesure du run — win-rate par matchup | ✅ **MESURE OBTENUE le 2026-08-03** — ⏳ **PÉRIMÉE depuis les chantiers 01/03/04** : le modèle mesuré n'est plus chargeable, cf. [§0.67](#s0.67) | — | Run de **200 000 épisodes** (2026-08-02 12 h 26 → 2026-08-03 02 h 05, 19 points d'éval, 820 k → 12,1 M steps). `eval_bots/combined_win_rate` **0,283 → max 0,837 → 0,743**. Éval rejouée le 2026-08-03 sur le snapshot ROBUSTE (`robust_0.8049`), APRÈS §0.64/§0.65 : **combined 0.8200**, `tactical` 0.89, `defensive` 0.87, `greedy` 0.84, `adaptive` 0.83, **`control` 0.82**, **`value_trade` 0.74** (le pire), **0 troncature**. Le seuil de gating `vs_control ≥ 0.50` est **franchi** — le **0.04 du run 4 est périmé**. ⚠️ 0,743 → 0,820 est un écart best-contre-final, PAS l'effet de §0.64. Détail → §0.14. |
-| **[§9](V11_phaseA.md#s9)** | Phase A' — P2 + P3-0/1/2 | 🟢 **LIVRÉS ET MERGÉS sur `main`** — restent **P3-3→8**, **P4**, **P5** | **2** | ⚠️ Aucune des quatre livraisons n'est **MESURÉE**. ⚠️ P3-0 est **inerte dans le training** (aucun roster SM/Ork ne porte de rule choice). Détail → §0.42 et §0.43 (en §0hist), et [§9](V11_phaseA.md#s9). |
+| **[§9](V11_phaseA.md#s9)** | Phase A' — P2 + P3-0/1/2/**3** | 🟢 **LIVRÉS ET MERGÉS sur `main`** — restent **P3-4→8**, **P4**, **P5** | **2** | ⚠️ **P3-3 (désignation de l'unité à activer) est livré et mergé le 2026-08-07** (élément `L2`, `ACTIVATE_SLOT` 1127-1138, `activate_query_net`) — cette cellule le comptait encore comme restant, corrigé le 2026-08-08. ⚠️ Aucune des cinq livraisons n'est **MESURÉE**. ⚠️ P3-0 est **inerte dans le training** (aucun roster SM/Ork ne porte de rule choice). Détail → §0.42 et §0.43 (en §0hist), et [§9](V11_phaseA.md#s9). |
 | **§0.44** | Tête pointeur de **déploiement** — les slots 4-11 n'avaient pas de tête dédiée | ✅ **LIVRÉ ET MERGÉ le 2026-08-07** (`91cc70d1`, élément `L1` du lot §0.48) — ⏳ **NON MESURÉ** : la mesure viendra du run du lot | — | `deploy_query_net`, jumeau exact de `choice_query_net`, score les 8 slots ; ses logits **remplacent** les colonnes 4-11 de la conv 1×1 **en phase de déploiement seulement**, le routage lisant le bit `phase_deployment` de `global_bin` par échantillon. `deploy_emb` est exposé PAR SLOT en queue du vecteur de features ; le tronc n'en garde que l'agrégation (jumeau des ennemis et des candidats de décision). Ni `obs_size` ni `TOTAL_ACTION_SIZE` (**1127** ce jour-là ; **1139** depuis `L2`) touchés **par `L1`** — architecture seule (le 14609 → **14615** du même jour vient du drapeau `declines`, pas d'ici). Détail → §0.44. |
 | **§0.48** | Inventaire des chantiers qui cassent un contrat + **périmètre du lot de ré-entraînement** | 🟠 **OUVERT** — le lot = **`L1` + `L2` + `L6`** + **[§0.64](#s0.64)** (LoS de déploiement alignée le 2026-08-03 ; ⚠️ **n'impose PLUS de run à elle seule** — mesuré le 2026-08-03 : le modèle d'avant joue à 0.82 sur `main` d'après, cf. §0.14 — elle **voyage** avec `L1`/`L2`/`L6`) | **4** | ✅ **Le prérequis d'ordre est LEVÉ au 2026-08-02** : les quatre chantiers exigés avant la mesure de référence — rampe de déploiement (§0.46 pt 2), FLY 21.03 (§0.49), bots d'éval (§0.47 É4), 01.07 (§0.50) — sont **tous mergés**. ✅ **L'arbitrage 2 est LIVRÉ le 2026-08-07** (socle : règles d'armes en ids, types de décision et slots de déploiement pré-dimensionnés — cf. §0.67). 🟢 **Le lot est COMPLET le 2026-08-07** : `L1` ([§0.44](#s0.44)), `L6` (FLY 21.03 en décision d'agent) et `L2` (choix de l'unité à activer) sont **livrés et mergés**. ⚠️ `obs_size` vaut **16659** et `TOTAL_ACTION_SIZE` **1139** (vérifié par exécution le 2026-08-08). **Il ne reste que le `--new` unique et sa mesure.** Détail → §0.48. |
 | **§0.46** | Résidus du 2026-07-29 | ✅ **CLOSE le 2026-08-03** — les trois points sont livrés | — | ✅ **SOLDÉ le 2026-08-03** (arbitrage : GARDER, sous forme optimisée). Les 4 issues du cache de déploiement deviennent des **compteurs publiés en permanence** (`perf/*`) au lieu de traces invisibles hors `--debug` ; les 37 sites passent par `engine/debug_trace.py` (canaux `W40K_TRACE`, formatage différé) ; garde verrouillée par **21 tests**, dont une **analyse AST** (fichiers découverts par leur import) qui interdit f-string, formatage anticipé et mot-clé. La passe `/simplify` du même jour y a trouvé **un bug** (`flush=True` résiduel → `TypeError` dès que le canal s'allume) et **un verrou qui mentait** (canal `train` hors garde). ⏳ Première mesure : **100 % de reconstruction** du cache de déploiement — signalé, non ouvert. Détail → §0.46. |
@@ -2858,7 +2858,7 @@ lecture parallèle, celle du frontend signalée plus haut.
 > interprétable exige toujours un run long à `total_episodes` réel (10-30k), aujourd'hui coûteux
 > en temps (~36 h) — c'était précisément la cible du chantier §0.22, cadrage archivé
 > [`Implémenté/V11_move_pool_optimization.md`](Implémenté/V11_move_pool_optimization.md) (**clos**),
-> suite vivante [`V11_move_build_acceleration.md`](V11_move_build_acceleration.md).
+> suite vivante [`V11_move_build_acceleration.md`](Implémenté/V11_move_build_acceleration.md).
 > §0.15 étant tranché, ce win-rate mesurera la robustesse à l'**adversaire**.
 
 **Run de re-mesure du 2026-07-20 — commande exacte :**
@@ -3705,10 +3705,10 @@ AVANT d'y lancer un entraînement.
 | [`V11_tranches.md`](V11_tranches.md) | **[§1](V11_tranches.md#s1) → [§8](V11_tranches.md#s8)** — objectif, l'ANCRE, état des lieux, ruptures R1→R8, décisions de design, tranches T1→T7 + Phase B, critères d'acceptation, smoke tests, tests de non-régression | **vivant** (T6-h/T6-g ouverts, cf. [§0.0](#s0.0)) |
 | [`V11_phaseA.md`](V11_phaseA.md) | **[§9](V11_phaseA.md#s9)** — Phase A' : parité de résolution des règles (P1) puis mécanisme de décision agent (P2→P5) | **vivant** |
 | [`V11_eval_strategy.md`](V11_eval_strategy.md) | **[§10](V11_eval_strategy.md#s10)** — stratégie d'entraînement et d'évaluation, rosters, holdout, win-rate par roster | **vivant** |
-| [`V11_entity_encoder_pointer.md`](V11_entity_encoder_pointer.md) | Encodeur d'entités partagé + tête pointeur, cardinalités de l'observation, les 7 trous qu'il ferme | **vivant** |
+| [`Implémenté/V11_entity_encoder_pointer.md`](Implémenté/V11_entity_encoder_pointer.md) | Encodeur d'entités partagé + tête pointeur, cardinalités de l'observation, les 7 trous qu'il ferme | **clos** (T-A→T-H livrées) — **archivé le 2026-08-08** ; ⚠️ ses chiffres de dimensionnement sont datés, l'`obs_size` courant se lit ici en §0 |
 | [`Implémenté/observation_deploiement.md`](Implémenté/observation_deploiement.md) | Observation de la phase de déploiement — les 5 défauts et leurs correctifs (extrait de `V11_audit_observation.md` §11) | **clos** (2026-07-29, §0.40 — archive) |
 | [`Replay.md`](Replay.md) | Replay : pipeline & contrat du `step.log`, registre des chantiers replay | **vivant** (outillage) |
-| [`V11_move_build_acceleration.md`](V11_move_build_acceleration.md) | Perf du noyau `_build_multi_hex_vectorized` : périmètre, filet de validation, livré (L1 + L_bbox), impasses mesurées | **clos** (décision (B) STOP, 2026-07-21) |
+| [`V11_move_build_acceleration.md`](Implémenté/V11_move_build_acceleration.md) | Perf du noyau `_build_multi_hex_vectorized` : périmètre, filet de validation, livré (L1 + L_bbox), impasses mesurées | **clos** (décision (B) STOP, 2026-07-21) |
 | [`Implémenté/V11_move_pool_optimization.md`](Implémenté/V11_move_pool_optimization.md) | Cadrage d'origine du chantier move pool (§0.22) | **clos** — archive, ne plus s'y fier pour l'état du code |
 
 ## 0hist. Historique résolu
@@ -4134,7 +4134,7 @@ dédié (`scripts/ab_sweep_nenvs.py`, 37 runs appariés) a depuis retenu **48** 
 rollout réel de 8 160.
 
 ⚠️ **Piège de lecture conservé** : le « 14,49 Go, sous la limite de 19,33 Go » de
-[`move_action_space_spatial_rework.md`](A_faire/move_action_space_spatial_rework.md) §8.3 ne compte
+[`move_action_space_spatial_rework.md`](Implémenté/move_action_space_spatial_rework.md) §8.3 ne compte
 **que la grille**. Il était juste quand l'obs vectorielle faisait 108 floats ; il est périmé depuis
 §0.30, pour une raison qui n'est pas celle de §0.32.
 
@@ -5370,7 +5370,7 @@ de `self.action_net(latent_pi)`, un `Linear(320 → 1062)` (net_arch `[320, 320]
 détruite avant d'atteindre la tête**.
 
 **Pourquoi c'est le point n°1.** C'est le raisonnement de
-[`V11_entity_encoder_pointer.md`](V11_entity_encoder_pointer.md) §1.8 mot pour mot — « chaque
+[`V11_entity_encoder_pointer.md`](Implémenté/V11_entity_encoder_pointer.md) §1.8 mot pour mot — « chaque
 slot possède sa propre ligne de poids et n'apprend RIEN des autres » — mais appliqué à **1024
 actions au lieu de 20** :
 
@@ -5383,7 +5383,7 @@ actions au lieu de 20** :
   sont plus longs, donc cette sample-complexity se paie plein pot.
 
 ⚠️ **Ne pas confondre avec la « tête spatiale » de
-[`A_faire/move_action_space_spatial_rework.md`](A_faire/move_action_space_spatial_rework.md)
+[`Implémenté/move_action_space_spatial_rework.md`](Implémenté/move_action_space_spatial_rework.md)
 §6.2** : ce document appelle « tête spatiale » le fait que **l'action désigne une cellule**, pas
 une tête convolutive. La policy y est spécifiée `MultiInputPolicy` + « extracteur CNN pour la
 grille » — ce qui est bien ce qui est implémenté. Le manque n'est pas une régression : il n'a
@@ -5554,7 +5554,7 @@ sortie). Mutation : la déduction remise en place fait rougir le test d'extracte
 différences de coordonnées **offset brutes**, alors que tout le reste de l'obs travaille dans la
 projection `_hex_center` : la grille égocentrique, qui l'a choisie **explicitement** pour éviter
 l'anisotropie de parité ([`spatial_grid.py`](../../engine/spatial_grid.py), « rasterisation
-GÉOMÉTRIQUE §10.9 » — [§10.9 de `move_action_space_spatial_rework.md`](A_faire/move_action_space_spatial_rework.md)),
+GÉOMÉTRIQUE §10.9 » — [§10.9 de `move_action_space_spatial_rework.md`](Implémenté/move_action_space_spatial_rework.md)),
 et les directions d'objectif de §0.31. En offset, un même déplacement
 euclidien donne des `(Δcol, Δrow)` différents selon la parité de la ligne.
 
@@ -5905,7 +5905,7 @@ observation + LoS + cover.
 
 > **Entrée sans corps dans ce document — c'est voulu, et c'est signalé ici depuis le 2026-07-28.**
 > §0.30 n'a jamais eu de section `### 0.30` : son contenu vit dans
-> **[`V11_entity_encoder_pointer.md`](V11_entity_encoder_pointer.md)**, qui en est la source de
+> **[`V11_entity_encoder_pointer.md`](Implémenté/V11_entity_encoder_pointer.md)**, qui en est la source de
 > vérité (tranches T-A→T-F, mesures, journal). Ce stub existe pour que les ~10 renvois `§0.30` du
 > présent document mènent quelque part — avant l'épuration, ils ne reposaient que sur une ligne du
 > tableau d'état, supprimée avec lui.
@@ -6107,7 +6107,7 @@ que l'éval s'accélère réellement, sinon (3) devient nécessaire.
 > numba-dense sont **caducs** ; numba n'est en jeu que pour le reliquat BFS des petits socles, **à
 > bencher d'abord contre un wavefront bbox-NumPy**. Le « chantier cache » décrit plus bas est **réfuté
 > (0 %)** et le cProfile 60×80 ci-dessous est remplacé par le profil 220×300.
-> **➜ Source de vérité désormais : [`V11_move_build_acceleration.md`](V11_move_build_acceleration.md)
+> **➜ Source de vérité désormais : [`V11_move_build_acceleration.md`](Implémenté/V11_move_build_acceleration.md)
 > (`V11_move_build_acceleration.md` : §2 profil réel, §2bis mesures + verdict, §8 ordre L1→L_bbox→re-bench→BFS).**
 
 **Constat chiffré (bench x5 du 2026-07-21, `perf_timing_bench_x5.log.score.json`).**
@@ -6155,7 +6155,7 @@ que « le gain de performance ne se fasse pas au détriment du métier et du PvP
 garde-fou d'équivalence stricte, exigences cache/invalidation/tests, non-régression PvP, plan par
 étapes, Definition of Done) est **cadré dans un document dédié** :
 ➜ garde-fous/cadrage **[`V11_move_pool_optimization.md`](Implémenté/V11_move_pool_optimization.md)** (archivé, clos) ; **mesures +
-plan d'implémentation à jour [`V11_move_build_acceleration.md`](V11_move_build_acceleration.md)**. Code
+plan d'implémentation à jour [`V11_move_build_acceleration.md`](Implémenté/V11_move_build_acceleration.md)**. Code
 toujours **non commencé** (aucune ligne de `_build_multi_hex_vectorized` modifiée) ; cardinalités
 mesurées, levier tranché (bbox NumPy). ~~Prochaine action : L1 → L_bbox (cf. §8 de `V11_move_build_acceleration.md`).~~
 **L1 + L_bbox faits le 2026-07-21** (cf. `V11_move_build_acceleration.md §3.1`). L1 :

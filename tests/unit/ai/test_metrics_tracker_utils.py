@@ -536,6 +536,11 @@ def test_log_episode_end_and_tactical_metrics_runtime_paths() -> None:
             # f_obj_rewards vaut `objective_reward_factor x VP marques` : la courbe se lit sur
             # les VP de l'episode au lieu de rejouer la formule du versement.
             "victory_points_controlled_episode": 20.0,
+            # Meme invariant pour les reserves strategiques (20.01/20.04) : le moteur les
+            # recopie TOUJOURS a la terminaison, la lecture est stricte.
+            "reserves_placed_agent": 2,
+            "reserves_deployed_agent": 1,
+            "reserves_destroyed_turn3": 1,
         }
     )
     keys = [k for k, _, _ in _dw(t).scalars]

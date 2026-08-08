@@ -1,6 +1,6 @@
 """T5 — contacts par figurine : bord-à-bord brut → zone d'engagement (règle 03.04).
 
-Refonte V11 (Documentation/Implementation/V11_audit_observation.md §9.2) : le drapeau
+Refonte V11 (Documentation/Implémentation/Implémenté/V11_audit_observation.md §9.2) : le drapeau
 par figurine « au contact d'un ennemi » était calculé par `calculate_hex_distance(...) == BASE_TO_BASE_SUBHEX`, c'est-à-dire une distance
 d'ANCRE à ANCRE égale à 1 subhex. Ils passent à la primitive d'engagement du moteur
 (`unit_entries_within_engagement_zone` sur des entrées synthétiques par figurine, exactement

@@ -593,10 +593,10 @@ Le **micro-MCTS** sur masque complet reste **option expérimentale** (souvent P4
 
 | Document | Usage |
 |----------|--------|
-| [Documentation/AI_OBSERVATION.md](AI_OBSERVATION.md) | Macro intent, structure d’observation. |
-| [Documentation/AI_TRAINING.md](AI_TRAINING.md) | Pipeline PPO, `opponent_mix`, seat-aware, eval, callbacks. |
-| [Documentation/AI_TURN.md](AI_TURN.md) | Phases légales — quand placer les points de décision. |
-| [Documentation/AI_IMPLEMENTATION.md](AI_IMPLEMENTATION.md) | Handlers — effets de bord des transitions. |
+| [Documentation/AI_OBSERVATION.md](../../../AI_OBSERVATION.md) | Macro intent, structure d’observation. |
+| [Documentation/AI_TRAINING.md](../../../AI_TRAINING.md) | Pipeline PPO, `opponent_mix`, seat-aware, eval, callbacks. |
+| [Documentation/AI_TURN.md](../../../AI_TURN.md) | Phases légales — quand placer les points de décision. |
+| [Documentation/AI_IMPLEMENTATION.md](../../../AI_IMPLEMENTATION.md) | Handlers — effets de bord des transitions. |
 | `config/agents/CoreAgent/CoreAgent_training_config.json` | Config effective agents. |
 | `ai/train.py` | Chargement `opponent_mix`, construction env. |
 
