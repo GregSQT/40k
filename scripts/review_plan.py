@@ -81,9 +81,9 @@ MIN_REVIEW_LINES = 200
 # du classement, pas une decoration.
 SPLIT_THRESHOLD = 2000
 
-BACKLOG_JSON = Path("Documentation/review_backlog.json")
-BACKLOG_MD = Path("Documentation/review_backlog.md")
-ARBITRAGES_MD = Path("Documentation/review_arbitrages.md")
+BACKLOG_JSON = Path("Documentation/Review/review_backlog.json")
+BACKLOG_MD = Path("Documentation/Review/review_backlog.md")
+ARBITRAGES_MD = Path("Documentation/Review/review_arbitrages.md")
 
 STATES = ("todo", "doing", "done")
 

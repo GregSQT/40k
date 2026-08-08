@@ -3,7 +3,7 @@
 **Statut :** **seule référence normative** ×10 — géométrie **B**, LoS, pathfinding, occupation, RL, migration.  
 **Dernière mise à jour :** 2026-04-14  
 **Archives remplacées :** `Boardx10-11` … `Boardx10-33`, ancien contenu de `Boardx10.md` (→ **§19**).  
-**[Boardx10.md](Boardx10.md) :** redirect non normatif.  
+**`Boardx10.md` :** stub de redirection, **supprimé le 2026-04-14** (`e32776ea`) — ce document est la seule référence.  
 **Contraintes projet :** erreurs explicites, pas de fallback silencieux ([`.cursorrules`](../../.cursorrules)).
 
 **Lecture :** sauf mention **« legacy »**, les règles décrivent la **cible Board ×10** (socles multi-cellules sur micro-grille). Le dépôt peut implémenter un sous-ensemble ; l'alignement code est **hors scope**.
@@ -25,7 +25,6 @@ Stratégie cible : **(a)** validation moteur en **sous-hex** — affichage pouce
 | Document | Rôle |
 |----------|------|
 | **Boardx10-final.md (ce fichier)** | **Seule source de vérité** ×10 : géométrie **B**, `COLS×ROWS`, LoS, pathfinding, empreintes, **§9.0** (`game_rules` cibles), RL, perf, **§19** (checklist fichiers). |
-| **[Boardx10.md](Boardx10.md)** | **Non normatif** : redirect. |
 
 Toute règle nouvelle reste alignée avec **`Documentation/AI_TURN.md`** et **`Documentation/AI_IMPLEMENTATION.md`**.
 

@@ -110,11 +110,23 @@ en racine ou en backlog, 1 backlog jamais commencé occupait la racine.)*
 
 ---
 
-## Divers
+## Hors documentation technique
 
-- **[Memoire/](Memoire/)** : mémoire académique RNCP/CDA (livrables de certification, hors périmètre technique).
-- **_Pitch_GW.md**, **GITHUB_PROFILE_README.md** : marketing / vision.
-- **40k_rules/** : PDF des règles officielles 40K — **source de vérité**.
+*Rangement du 2026-08-08 : la racine mêlait la doc du code et des artefacts qui n'en sont pas
+(pitch, profil GitHub, état d'une campagne de review). Ils ont chacun leur dossier.*
+
+- **[40k_rules/](40k_rules/)** : PDF des règles officielles 40K — **source de vérité** des règles.
+- **[Review/](Review/)** : état de la campagne de code review — `review_backlog.json` (source de
+  vérité, écrite par `scripts/review_plan.py`, ne pas éditer à la main), son rendu `.md`,
+  `review_arbitrages.md` (append-only) et le guide `REVIEW_CAMPAGNE.md`. Ce n'est pas de la
+  documentation : c'est l'état d'un outil.
+- **[Various/](Various/)** : pilotage et communication — `Roadmap.md`, `conformite_regles.md`,
+  et le matériel de présentation (`Pitch_GW.md`, `Pitch_GW_Onepager.md`, `_Pitch_GW.md`,
+  `GITHUB_PROFILE_README.md`, les pitchs `.odp`/`.pdf`).
+- **[Memoire/](Memoire/)** : mémoire académique RNCP/CDA (livrables de certification).
+- **[Old/](Old/)** : documents qui ne décrivent plus le code courant.
+- **[sql/](sql/)** : `create_first_admin.sql`, script d'amorçage de la base d'auth (cf.
+  `USER_ACCESS_CONTROL.md`).
 
 ---
 

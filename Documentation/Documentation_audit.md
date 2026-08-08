@@ -56,7 +56,7 @@ Les PDF `40k_rules/` (source de vérité officielle) ne sont pas audités : gard
 ## 6. Hors périmètre technique (ne pas toucher)
 
 - `Memoire/` : mémoire académique RNCP/CDA (livrables de certification).
-- `_Pitch_GW.md`, `GITHUB_PROFILE_README.md` : marketing/vision.
+- `Various/_Pitch_GW.md`, `Various/Pitch_GW.md`, `Various/Pitch_GW_Onepager.md`, `Various/GITHUB_PROFILE_README.md` : marketing/vision (déplacés en `Various/` le 2026-08-08).
 
 ## Points d'attention
 

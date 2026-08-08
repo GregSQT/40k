@@ -740,12 +740,23 @@ class W40KMetricsTracker:
             )
 
     def log_tactical_metrics(self, tactical_data: Dict[str, Any]):
-        """Log tactical performance metrics - combat effectiveness and decision quality"""
-        
+        """Log tactical performance metrics - combat effectiveness and decision quality.
+
+        TOUTES les cles lues ici sont EXIGEES (`require_key`), jamais gardees par un
+        `if <cle> in tactical_data`. Une telle garde ne distingue pas « le moteur ne remplit
+        plus cette cle » de « il n'y avait rien a mesurer » : elle eteint la courbe en silence,
+        exactement le defaut qui a tenu deux tags muets pendant 50 000 episodes (voir l'en-tete
+        de tests/unit/ai/test_metrics_single_writer.py). Le contrat moteur -> tracker est verifie
+        sur un episode REEL par tests/unit/engine/test_reserves_metrics.py.
+        Les gardes qui restent sont METIER (`> 0`, liste vide) : elles disent qu'il n'y a rien a
+        tracer, pas que la donnee manque.
+        """
+
         # GAME TACTICAL: Shooting accuracy - Hit rate
-        if 'shots_fired' in tactical_data and tactical_data['shots_fired'] > 0:
+        shots_fired = require_key(tactical_data, 'shots_fired')
+        if shots_fired > 0:
             hits = require_key(tactical_data, 'hits')
-            accuracy = hits / tactical_data['shots_fired']
+            accuracy = hits / shots_fired
             self.writer.add_scalar('game_tactical/shooting_accuracy', accuracy, self.episode_count)
         
         # GAME DETAILED: Damage dealt - Offensive power
@@ -795,22 +806,21 @@ class W40KMetricsTracker:
             self._emit_ratio(tag, hist_key, numerator, denominator)
 
         # Kill breakdown by phase (from engine action_logs via tactical_data — reliable, per-episode per-env)
-        if 'shoot_kills' in tactical_data and 'melee_kills' in tactical_data:
-            shoot_kills = int(tactical_data['shoot_kills'])
-            melee_kills = int(tactical_data['melee_kills'])
-            self._emit_game('02_combat/g_shoot_model_kills', 'shoot_kills', shoot_kills)
-            self._emit_game('02_combat/h_melee_model_kills', 'melee_kills', melee_kills)
-            kill_rewards_ep = (shoot_kills + melee_kills) * self.reward_kill_target
-            self._emit_game('02_combat/b_kill_rewards', 'kill_rewards', kill_rewards_ep)
+        shoot_kills = int(require_key(tactical_data, 'shoot_kills'))
+        melee_kills = int(require_key(tactical_data, 'melee_kills'))
+        self._emit_game('02_combat/g_shoot_model_kills', 'shoot_kills', shoot_kills)
+        self._emit_game('02_combat/h_melee_model_kills', 'melee_kills', melee_kills)
+        kill_rewards_ep = (shoot_kills + melee_kills) * self.reward_kill_target
+        self._emit_game('02_combat/b_kill_rewards', 'kill_rewards', kill_rewards_ep)
 
-            # VALUE des figurines tuees, ventilee par phase : g_/h_ comptent des tetes, i_/j_
-            # comptent ce qu'elles valaient. Les deux ensemble separent l'agent qui fauche des
-            # figurines a 4 points de celui qui abat le monstre a 120 — un seul des deux
-            # chiffres ne le dit pas.
-            shoot_value = float(require_key(tactical_data, 'shoot_value_killed'))
-            melee_value = float(require_key(tactical_data, 'melee_value_killed'))
-            self._emit_game('02_combat/i_shoot_value_killed', 'shoot_value_killed', shoot_value)
-            self._emit_game('02_combat/j_melee_value_killed', 'melee_value_killed', melee_value)
+        # VALUE des figurines tuees, ventilee par phase : g_/h_ comptent des tetes, i_/j_
+        # comptent ce qu'elles valaient. Les deux ensemble separent l'agent qui fauche des
+        # figurines a 4 points de celui qui abat le monstre a 120 — un seul des deux
+        # chiffres ne le dit pas.
+        shoot_value = float(require_key(tactical_data, 'shoot_value_killed'))
+        melee_value = float(require_key(tactical_data, 'melee_value_killed'))
+        self._emit_game('02_combat/i_shoot_value_killed', 'shoot_value_killed', shoot_value)
+        self._emit_game('02_combat/j_melee_value_killed', 'melee_value_killed', melee_value)
 
         # CHARGES — le volume tente et le taux de reussite, POUR LES DEUX CAMPS.
         #
@@ -973,9 +983,8 @@ class W40KMetricsTracker:
         self._emit_windowed('perf/c_deploy_cache_lookups', lookups_hist)
 
         # 0_GAME: VP differential and objective samples
-        if 'victory_points_diff_controlled_minus_opponent' in tactical_data:
-            vp_diff = float(require_key(tactical_data, 'victory_points_diff_controlled_minus_opponent'))
-            self._emit_game('01_VP/a_vp_diff', 'vp_diff', vp_diff)
+        vp_diff = float(require_key(tactical_data, 'victory_points_diff_controlled_minus_opponent'))
+        self._emit_game('01_VP/a_vp_diff', 'vp_diff', vp_diff)
 
         # Objectifs tenus : echantillonnes par tour marque cote moteur
         # (GameStateManager._sample_objectives_held). Cles EXIGEES, jamais `.get()` : le garde
@@ -1006,75 +1015,72 @@ class W40KMetricsTracker:
             )
             self._emit_game('01_VP/f_obj_rewards', 'obj_rewards', obj_rewards_ep)
 
-        if 'victory_points_opponent_episode' in tactical_data:
-            self._emit_game(
-                '01_VP/c_vp_bot',
-                'vp_bot',
-                float(tactical_data['victory_points_opponent_episode']),
-            )
+        self._emit_game(
+            '01_VP/c_vp_bot',
+            'vp_bot',
+            float(require_key(tactical_data, 'victory_points_opponent_episode')),
+        )
 
         # FORCING METRICS: Exposure of units with configured UNIT_RULES.
-        has_forcing_fields = 'forced_unit_episode_has_controlled' in tactical_data
-        if has_forcing_fields:
-            forced_episode_has_controlled = int(require_key(tactical_data, 'forced_unit_episode_has_controlled'))
-            forced_unit_instances_controlled = int(require_key(tactical_data, 'forced_unit_instances_controlled'))
-            forced_unit_counts_controlled = require_key(tactical_data, 'forced_unit_counts_controlled')
-            if not isinstance(forced_unit_counts_controlled, dict):
-                raise TypeError(
-                    "tactical_data['forced_unit_counts_controlled'] must be a dict "
-                    f"(got {type(forced_unit_counts_controlled).__name__})"
-                )
-
-            self.forcing_tracking['episodes_total'] += 1
-            self.forcing_tracking['forced_unit_instances_total'] += forced_unit_instances_controlled
-            if forced_episode_has_controlled not in (0, 1):
-                raise ValueError(
-                    f"forced_unit_episode_has_controlled must be 0 or 1 "
-                    f"(got {forced_episode_has_controlled})"
-                )
-            self.forcing_tracking['episodes_with_forced_unit'] += forced_episode_has_controlled
-
-            episodes_total = int(self.forcing_tracking['episodes_total'])
-            episodes_with_forced = int(self.forcing_tracking['episodes_with_forced_unit'])
-            forcing_ratio = episodes_with_forced / episodes_total
-            mean_instances = float(self.forcing_tracking['forced_unit_instances_total']) / float(episodes_total)
-
-            self.writer.add_scalar('forcing/episodes_with_forced_unit_ratio', forcing_ratio, self.episode_count)
-            self.writer.add_scalar('forcing/forced_unit_instances_mean', mean_instances, self.episode_count)
-            self.writer.add_scalar(
-                'forcing/episodes_with_forced_unit',
-                float(episodes_with_forced),
-                self.episode_count
+        forced_episode_has_controlled = int(require_key(tactical_data, 'forced_unit_episode_has_controlled'))
+        forced_unit_instances_controlled = int(require_key(tactical_data, 'forced_unit_instances_controlled'))
+        forced_unit_counts_controlled = require_key(tactical_data, 'forced_unit_counts_controlled')
+        if not isinstance(forced_unit_counts_controlled, dict):
+            raise TypeError(
+                "tactical_data['forced_unit_counts_controlled'] must be a dict "
+                f"(got {type(forced_unit_counts_controlled).__name__})"
             )
 
-            for unit_name, raw_count in forced_unit_counts_controlled.items():
-                unit_count = int(raw_count)
-                if unit_count <= 0:
-                    raise ValueError(
-                        f"forced_unit_counts_controlled['{unit_name}'] must be > 0 (got {unit_count})"
-                    )
-                per_unit_episode_counts = require_key(self.forcing_tracking, 'per_unit_episode_counts')
-                per_unit_instance_counts = require_key(self.forcing_tracking, 'per_unit_instance_counts')
-                if unit_name not in per_unit_episode_counts:
-                    per_unit_episode_counts[unit_name] = 0
-                if unit_name not in per_unit_instance_counts:
-                    per_unit_instance_counts[unit_name] = 0
-                per_unit_episode_counts[unit_name] = int(per_unit_episode_counts[unit_name]) + 1
-                per_unit_instance_counts[unit_name] = int(per_unit_instance_counts[unit_name]) + unit_count
+        self.forcing_tracking['episodes_total'] += 1
+        self.forcing_tracking['forced_unit_instances_total'] += forced_unit_instances_controlled
+        if forced_episode_has_controlled not in (0, 1):
+            raise ValueError(
+                f"forced_unit_episode_has_controlled must be 0 or 1 "
+                f"(got {forced_episode_has_controlled})"
+            )
+        self.forcing_tracking['episodes_with_forced_unit'] += forced_episode_has_controlled
 
-                unit_slug = self._metric_slug(unit_name)
-                unit_episode_ratio = per_unit_episode_counts[unit_name] / episodes_total
-                unit_instance_mean = per_unit_instance_counts[unit_name] / episodes_total
-                self.writer.add_scalar(
-                    f'forcing/unit_episode_exposure/{unit_slug}',
-                    unit_episode_ratio,
-                    self.episode_count
+        episodes_total = int(self.forcing_tracking['episodes_total'])
+        episodes_with_forced = int(self.forcing_tracking['episodes_with_forced_unit'])
+        forcing_ratio = episodes_with_forced / episodes_total
+        mean_instances = float(self.forcing_tracking['forced_unit_instances_total']) / float(episodes_total)
+
+        self.writer.add_scalar('forcing/episodes_with_forced_unit_ratio', forcing_ratio, self.episode_count)
+        self.writer.add_scalar('forcing/forced_unit_instances_mean', mean_instances, self.episode_count)
+        self.writer.add_scalar(
+            'forcing/episodes_with_forced_unit',
+            float(episodes_with_forced),
+            self.episode_count
+        )
+
+        for unit_name, raw_count in forced_unit_counts_controlled.items():
+            unit_count = int(raw_count)
+            if unit_count <= 0:
+                raise ValueError(
+                    f"forced_unit_counts_controlled['{unit_name}'] must be > 0 (got {unit_count})"
                 )
-                self.writer.add_scalar(
-                    f'forcing/unit_instance_mean/{unit_slug}',
-                    unit_instance_mean,
-                    self.episode_count
-                )
+            per_unit_episode_counts = require_key(self.forcing_tracking, 'per_unit_episode_counts')
+            per_unit_instance_counts = require_key(self.forcing_tracking, 'per_unit_instance_counts')
+            if unit_name not in per_unit_episode_counts:
+                per_unit_episode_counts[unit_name] = 0
+            if unit_name not in per_unit_instance_counts:
+                per_unit_instance_counts[unit_name] = 0
+            per_unit_episode_counts[unit_name] = int(per_unit_episode_counts[unit_name]) + 1
+            per_unit_instance_counts[unit_name] = int(per_unit_instance_counts[unit_name]) + unit_count
+
+            unit_slug = self._metric_slug(unit_name)
+            unit_episode_ratio = per_unit_episode_counts[unit_name] / episodes_total
+            unit_instance_mean = per_unit_instance_counts[unit_name] / episodes_total
+            self.writer.add_scalar(
+                f'forcing/unit_episode_exposure/{unit_slug}',
+                unit_episode_ratio,
+                self.episode_count
+            )
+            self.writer.add_scalar(
+                f'forcing/unit_instance_mean/{unit_slug}',
+                unit_instance_mean,
+                self.episode_count
+            )
     
         # Réserves stratégiques (20.01/20.04) — clés garanties par _empty_episode_tactical_data().
         self.writer.add_scalar('reserves/placed_agent', float(require_key(tactical_data, 'reserves_placed_agent')), self.episode_count)

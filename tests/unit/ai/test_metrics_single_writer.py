@@ -26,8 +26,8 @@ from typing import Any, Dict, List, Tuple
 import pytest
 
 from ai.metrics_tracker import W40KMetricsTracker
-from engine.action_decoder import ActionDecoder
 from engine.macro_intents import ACTION_FAMILIES
+from tests.unit.ai.conftest import tactical_data
 
 
 class _RecordingWriter:
@@ -50,44 +50,8 @@ class _RecordingWriter:
 
 
 def _tactical(**overrides: Any) -> Dict[str, Any]:
-    """``tactical_data`` complet d'un episode, tel que le moteur l'emet a la terminaison."""
-    data: Dict[str, Any] = {
-        "shots_fired": 10, "hits": 6,
-        "damage_dealt": 12, "damage_received": 7,
-        "units_lost": 2, "units_killed": 3, "total_enemy_units": 4, "total_ally_units": 5,
-        "shoot_kills": 2, "melee_kills": 1,
-        "shoot_value_killed": 200.0, "melee_value_killed": 100.0,
-        "charge_attempts": 4, "charge_successes": 3,
-        "charge_attempts_opponent": 2, "charge_successes_opponent": 1,
-        "move_actions": 9, "move_flees": 1, "move_waits": 3,
-        "shoot_activations": 5, "shoot_waits": 2,
-        "enemy_value_destroyed": 300.0, "ally_value_lost": 200.0,
-        "total_ally_value": 1000.0, "total_enemy_value": 900.0,
-        "initial_ally_models": 12, "initial_enemy_models": 15,
-        "models_lost": 5, "models_killed": 6,
-        "valid_actions": 40, "invalid_actions": 5,
-        # Invariant : le moteur initialise TOUJOURS cette ventilation dans
-        # `episode_tactical_data` (V11 §0.56), et `log_tactical_metrics` la lit en strict.
-        "action_family_counts": {name: 0 for name in ACTION_FAMILIES},
-        # Meme invariant pour les issues du cache de scoring du deploiement (V11 §0.46 axe A) :
-        # le moteur les recopie TOUJOURS a la terminaison, la lecture est stricte.
-        "deployment_cache_counts": ActionDecoder.empty_deployment_cache_counts(),
-        "victory_points_diff_controlled_minus_opponent": 5.0,
-        "victory_points_opponent_episode": 27.0,
-        "victory_points_controlled_episode": 32.0,
-        "controlled_objective_samples": [2.0, 1.0, 2.0, 2.0],
-        "opponent_objective_samples": [1.0, 2.0, 1.0, 1.0],
-        "forced_unit_episode_has_controlled": 0,
-        "forced_unit_instances_controlled": 0,
-        "forced_unit_counts_controlled": {},
-        # Meme invariant pour les reserves strategiques (20.01/20.04) : le moteur les recopie
-        # TOUJOURS a la terminaison (w40k_core._empty_episode_tactical_data), lecture stricte.
-        "reserves_placed_agent": 2,
-        "reserves_deployed_agent": 1,
-        "reserves_destroyed_turn3": 1,
-    }
-    data.update(overrides)
-    return data
+    """`tactical_data` complet d'un episode — fabrique partagee, voir `conftest.tactical_data`."""
+    return tactical_data(**overrides)
 
 
 def _tracker(tmp_path: Any, window: int = 1) -> Tuple[W40KMetricsTracker, _RecordingWriter]:
@@ -293,23 +257,47 @@ def test_a_missing_objective_samples_key_raises(tmp_path: Any) -> None:
         tracker.log_tactical_metrics(tactical)
 
 
-def test_each_reserves_curve_carries_its_own_engine_counter(tmp_path: Any) -> None:
-    """Les trois courbes reserves/* sortent, chacune avec SON compteur moteur (20.01/20.04).
+def test_each_reserves_curve_carries_its_own_tactical_key(tmp_path: Any) -> None:
+    """Les trois courbes reserves/* sortent, chacune appariee a SA cle (20.01/20.04).
 
     Sans ce controle, les trois cles du fixture n'assertaient rien : remplacer les trois
     `add_scalar('reserves/...')` par `pass` laissait ce fichier vert, et les courbes muettes.
-    Les trois valeurs sont VOLONTAIREMENT distinctes — deux d'entre elles egales rendraient un
-    echange de tags invisible.
+    Ce controle porte sur l'appariement tag <-> cle cote tracker ; que le MOTEUR alimente bien
+    ces compteurs est verifie a part (tests/unit/engine/test_reserves_metrics.py).
     """
     tracker, recording = _tracker(tmp_path)
-    _episode(tracker, _tactical(
-        reserves_placed_agent=5, reserves_deployed_agent=3, reserves_destroyed_turn3=1,
-    ))
+    _episode(tracker, _tactical())
 
     by_key = {key: value for key, value, _step in recording.scalars}
     assert by_key["reserves/placed_agent"] == pytest.approx(5.0)
     assert by_key["reserves/deployed_agent"] == pytest.approx(3.0)
     assert by_key["reserves/destroyed_turn3"] == pytest.approx(1.0)
+
+
+def test_the_guarded_curves_are_on_the_open_side_of_their_guard(tmp_path: Any) -> None:
+    """Les courbes gardees par un compteur non nul SORTENT sur la fixture partagee.
+
+    `actions/share_*` est garde par `if family_total > 0`, et les deux `perf/*_rate` par un
+    denominateur de consultations non nul. Tant que la fixture laissait ces compteurs a zero,
+    les trois familles restaient du cote SILENCIEUX de leur garde : supprimer leurs
+    `add_scalar` n'aurait fait rougir aucun test. Ce controle est ce qui rend les valeurs non
+    nulles de `conftest.tactical_data` obligatoires — les remettre a zero le rend ROUGE.
+    """
+    tracker, recording = _tracker(tmp_path)
+    _episode(tracker, _tactical())
+
+    keys = {key for key, _value, _step in recording.scalars}
+    for family in ACTION_FAMILIES:
+        assert f"actions/share_{family}" in keys, f"actions/share_{family} muette"
+    assert "perf/a_deploy_cache_full_build_rate" in keys
+    assert "perf/b_deploy_cache_wasted_rate" in keys
+
+    # Les parts d'action forment une distribution : elles somment a 1.
+    shares = sum(
+        value for key, value, _step in recording.scalars
+        if key.startswith("actions/share_")
+    )
+    assert shares == pytest.approx(1.0)
 
 
 def test_an_empty_sample_list_stays_silent_without_raising(tmp_path: Any) -> None:

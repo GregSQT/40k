@@ -20,6 +20,8 @@
 - [Why Metrics Matter](#why-metrics-matter)
 - [Core Metrics Explained](#core-metrics-explained)
   - [Unit-Rule Forcing Metrics](#unit-rule-forcing-metrics)
+  - [Réserves stratégiques (`reserves/`)](#réserves-stratégiques-reserves)
+  - [Contrat `tactical_data` — aucune courbe muette](#contrat-tactical_data--aucune-courbe-muette-en-silence)
   - [Training Metrics (PPO Internals)](#training-metrics-ppo-internals)
   - [Critical Metrics Quick Reference](#-critical-metrics-quick-reference) ⭐ **START HERE**
     - [00_critical/ Dashboard](#-start-here-00_critical-dashboard) ⭐⭐ **PRIMARY DASHBOARD**
@@ -327,6 +329,47 @@ To monitor whether forcing improves or degrades robustness:
   - forcing is likely too aggressive or too narrow; rebalance roster/scenario diversity.
 - Exposure concentrated on only 1-2 units:
   - forcing is not distributed; adjust scenario/roster generation to cover more forced units.
+
+---
+
+## Réserves stratégiques (`reserves/`)
+
+Usage des réserves (règles 20.01 / 20.04) par l'agent, un point par épisode.
+
+- `reserves/placed_agent`
+  - Unités que l'agent a mises en réserve au déploiement. **0 et plat** sur un scénario sans
+    réserve déclarée : ce n'est pas une panne, c'est le scénario.
+- `reserves/deployed_agent`
+  - Unités effectivement arrivées depuis la réserve. Toujours `<= placed_agent`.
+- `reserves/destroyed_turn3`
+  - Unités détruites par la règle 20.04 (encore en réserve à la fin du tour 3), **tous joueurs**.
+    Monte quand l'agent place en réserve sans jamais faire arriver ses unités — un placement
+    subi, pas une tactique.
+
+Lire les trois ENSEMBLE : `placed` seul ne dit pas si la réserve a servi, et `deployed` seul ne
+dit pas ce qu'elle a coûté. `placed` élevé avec `deployed` bas et `destroyed_turn3` qui monte
+est la signature d'une réserve gaspillée.
+
+---
+
+## Contrat `tactical_data` — aucune courbe muette en silence
+
+`W40KMetricsTracker.log_tactical_metrics` lit **toutes** ses clés en `require_key`. Il n'y a
+aucune lecture optionnelle : pas de `if <clé> in tactical_data`, pas de `.get()`, pas de valeur
+par défaut. Une clé absente **lève**, elle n'éteint pas la courbe.
+
+C'est le même principe que la config (« jamais de repli silencieux ») et il vient d'un défaut
+mesuré : une garde `if <clé> in ...` ne distingue pas « le moteur ne remplit plus cette clé »
+de « il n'y avait rien à mesurer ». Deux tags sont ainsi restés muets pendant 50 000 épisodes
+sans que rien ne le signale.
+
+Les gardes qui subsistent sont **métier** (`> 0`, liste vide) : elles disent qu'il n'y a rien à
+tracer sur cet épisode, pas que la donnée manque.
+
+Le contrat est vérifié en exécution, pas décrit : `tests/unit/engine/test_reserves_metrics.py::
+test_the_engine_feeds_every_key_the_tracker_reads` fait traverser le `tactical_data` d'un
+épisode RÉEL à `log_tactical_metrics`. Aucune liste de clés exigées n'est maintenue à la main —
+la source de vérité est le code du tracker, qui ne peut pas dériver de lui-même.
 
 ---
 

@@ -16,8 +16,7 @@ from ai.metrics_tracker import (
 )
 from ai.truncation_log import TruncationLog
 from config_loader import get_config_loader
-from engine.action_decoder import ActionDecoder
-from engine.macro_intents import ACTION_FAMILIES
+from tests.unit.ai.conftest import tactical_data
 
 # Agent de reference de ces tests : il porte le training config lu ci-dessous ET la config de
 # rewards que `__init__` charge dans le verrou `test_stub_matches_the_attributes_of_a_real_tracker`.
@@ -489,60 +488,14 @@ def test_log_episode_end_and_tactical_metrics_runtime_paths() -> None:
     assert _dw(t).flushed == 1
     assert t.seat_aware["episodes_agent_p1"] == 1
 
-    t.log_tactical_metrics(
-        {
-            "shots_fired": 4,
-            "hits": 2,
-            "total_enemy_units": 2,
-            "units_killed": 1,
-            "damage_dealt": 3,
-            "damage_received": 1,
-            "units_lost": 1,
-            "total_ally_units": 2,
-            "enemy_value_destroyed": 8.0,
-            "ally_value_lost": 4.0,
-            "total_ally_value": 20.0,
-            "total_enemy_value": 16.0,
-            "initial_ally_models": 4,
-            "initial_enemy_models": 4,
-            "models_lost": 1,
-            "models_killed": 2,
-            "charge_attempts": 2,
-            "charge_successes": 1,
-            "charge_attempts_opponent": 1,
-            "charge_successes_opponent": 1,
-            "move_actions": 4,
-            "move_flees": 1,
-            "move_waits": 1,
-            "shoot_activations": 2,
-            "shoot_waits": 1,
-            "valid_actions": 8,
-            "invalid_actions": 2,
-            "wait_actions": 1,
-            # Invariant : le moteur initialise TOUJOURS cette ventilation dans
-            # `episode_tactical_data` (V11 §0.56), et `log_tactical_metrics` la lit en strict.
-            "action_family_counts": {name: 0 for name in ACTION_FAMILIES},
-            # Meme invariant pour les issues du cache de scoring du deploiement (§0.46 axe A).
-            "deployment_cache_counts": ActionDecoder.empty_deployment_cache_counts(),
-            "forced_unit_episode_has_controlled": 1,
-            "forced_unit_instances_controlled": 2,
-            "forced_unit_counts_controlled": {"My Unit": 2},
-            "victory_points_diff_controlled_minus_opponent": 1.0,
-            # Cles EXIGEES depuis que les objectifs tenus sont echantillonnes cote moteur
-            # (voir tests/unit/engine/test_objective_held_samples.py) : leur absence est un
-            # etat corrompu, plus une courbe silencieusement muette.
-            "controlled_objective_samples": [2.0, 1.0],
-            "opponent_objective_samples": [1.0, 1.0],
-            # f_obj_rewards vaut `objective_reward_factor x VP marques` : la courbe se lit sur
-            # les VP de l'episode au lieu de rejouer la formule du versement.
-            "victory_points_controlled_episode": 20.0,
-            # Meme invariant pour les reserves strategiques (20.01/20.04) : le moteur les
-            # recopie TOUJOURS a la terminaison, la lecture est stricte.
-            "reserves_placed_agent": 2,
-            "reserves_deployed_agent": 1,
-            "reserves_destroyed_turn3": 1,
-        }
-    )
+    # Fabrique PARTAGEE (tests/unit/ai/conftest.py) : `log_tactical_metrics` lit toutes ses
+    # cles en STRICT, donc toute fixture ecrite a la main doit les porter TOUTES. Trois copies
+    # manuelles ont casse une par une a chaque cle ajoutee au tracker — il n'en reste qu'une.
+    t.log_tactical_metrics(tactical_data(
+        forced_unit_episode_has_controlled=1,
+        forced_unit_instances_controlled=2,
+        forced_unit_counts_controlled={"My Unit": 2},
+    ))
     keys = [k for k, _, _ in _dw(t).scalars]
     assert "game_tactical/shooting_accuracy" in keys
     assert "01_VP/e_objectives_held" in keys
@@ -613,46 +566,7 @@ def test_log_episode_end_rejects_invalid_controlled_player() -> None:
 
 def test_log_tactical_metrics_forcing_validation_errors() -> None:
     t = _tracker_stub()
-    base = {
-        "shots_fired": 1,
-        "hits": 1,
-        "total_enemy_units": 1,
-        "units_killed": 1,
-        "damage_dealt": 1,
-        "damage_received": 1,
-        "units_lost": 1,
-        "total_ally_units": 1,
-        "enemy_value_destroyed": 1.0,
-        "ally_value_lost": 1.0,
-        "total_ally_value": 10.0,
-        "total_enemy_value": 10.0,
-        "initial_ally_models": 1,
-        "initial_enemy_models": 1,
-        "models_lost": 0,
-        "models_killed": 0,
-        "charge_attempts": 1,
-        "charge_successes": 0,
-        "charge_attempts_opponent": 0,
-        "charge_successes_opponent": 0,
-        "move_actions": 1,
-        "move_flees": 0,
-        "move_waits": 0,
-        "shoot_activations": 1,
-        "shoot_waits": 0,
-        "valid_actions": 1,
-        "invalid_actions": 0,
-        "wait_actions": 0,
-        # Invariant : le moteur initialise TOUJOURS cette ventilation dans
-        # `episode_tactical_data` (V11 §0.56), et `log_tactical_metrics` la lit en strict.
-        "action_family_counts": {name: 0 for name in ACTION_FAMILIES},
-        # Meme invariant pour les issues du cache de scoring du deploiement (§0.46 axe A).
-        "deployment_cache_counts": ActionDecoder.empty_deployment_cache_counts(),
-        "victory_points_diff_controlled_minus_opponent": 0.0,
-        "controlled_objective_samples": [1.0],
-        "opponent_objective_samples": [1.0],
-        "victory_points_controlled_episode": 5.0,
-    }
-
+    base = tactical_data()
     with pytest.raises(TypeError, match=r"forced_unit_counts_controlled.*dict"):
         t.log_tactical_metrics(
             {

@@ -1437,8 +1437,7 @@ Overall 4.7x training speedup (66 → 311 it/s). Debug config (50 episodes) runs
 1. [AI_TURN.md](AI_TURN.md) - Core game rules and turn sequence
 2. [AI_TRAINING.md](AI_TRAINING.md) - PPO training integration
 3. [AI_OBSERVATION.md](AI_OBSERVATION.md) - Egocentric observation system
-4. [AI_TARGET_SELECTION.md](AI_TARGET_SELECTION.md) - Target selection and prioritization
-5. [Weapon_rules.md](Weapon_rules.md) - Weapons system technical documentation
+4. [Weapon_rules.md](Weapon_rules.md) - Weapons system technical documentation
 
 ---
 

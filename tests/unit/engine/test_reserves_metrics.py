@@ -18,6 +18,12 @@ STRUCTURE DES TESTS
 
 4. VERROU — on met le défaut (absence des clés), on vérifie que les tests deviennent
    ROUGES, puis on rétablit — prouvant que les tests ne sont pas vacants.
+
+5. CONTRAT MOTEUR → TRACKER — le tactical_data d'un épisode réel traverse le vrai
+   `log_tactical_metrics` sans lever (il lit 44 clés en `require_key`), et les trois
+   courbes `reserves/*` portent bien les compteurs du moteur. C'est ici, et nulle part
+   ailleurs, que les deux jambes du contrat se rejoignent : les tests de
+   `tests/unit/ai/` partent tous de fixtures écrites à la main.
 """
 
 from __future__ import annotations
@@ -37,6 +43,7 @@ ARMAGEDDON_SCENARIOS = (
 
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from ai.metrics_tracker import W40KMetricsTracker  # noqa: E402
 from ai.unit_registry import UnitRegistry  # noqa: E402
 from engine.phase_handlers.shared_utils import SQUAD_ACTION_WAIT  # noqa: E402
 from engine.w40k_core import W40KEngine  # noqa: E402
@@ -82,6 +89,21 @@ def _play(scenario_file: str, seed: int) -> Dict[str, Any]:
     return info["tactical_data"]
 
 
+# Épisodes mémoïsés par graine. Chaque `_play` rejoue une partie entière (plusieurs secondes) et
+# les tests ci-dessous relisent tous le MÊME épisode par graine : sans ce cache, le fichier en
+# rejouait sept. Contrat de partage, identique à `test_episode_charge_counters._cached_play` :
+# les appelants traitent le dict rendu en LECTURE SEULE — un test qui le mute contaminerait les
+# suivants. Ceux d'ici ne font que lire.
+_EPISODES: Dict[int, Dict[str, Any]] = {}
+
+
+def _cached_play(seed: int) -> Dict[str, Any]:
+    """`_play` mémoïsé sur la graine, pour le fixture à réserves."""
+    if seed not in _EPISODES:
+        _EPISODES[seed] = _play(_FIXTURE_RESERVES, seed)
+    return _EPISODES[seed]
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # 1. Existence des clés — toujours présentes
 # ──────────────────────────────────────────────────────────────────────────────
@@ -89,7 +111,7 @@ def _play(scenario_file: str, seed: int) -> Dict[str, Any]:
 @pytest.mark.parametrize("seed", _SEEDS)
 def test_reserves_metric_keys_always_present(seed: int) -> None:
     """Les trois clés existent dans tactical_data, même sur l'épisode reserves_fixture1."""
-    td = _play(_FIXTURE_RESERVES, seed)
+    td = _cached_play(seed)
     assert "reserves_placed_agent" in td, "clé reserves_placed_agent absente de tactical_data"
     assert "reserves_deployed_agent" in td, "clé reserves_deployed_agent absente de tactical_data"
     assert "reserves_destroyed_turn3" in td, "clé reserves_destroyed_turn3 absente de tactical_data"
@@ -107,7 +129,7 @@ def test_reserves_placed_agent_is_positive_on_reserves_fixture() -> None:
     """
     positive_found = False
     for seed in _SEEDS:
-        td = _play(_FIXTURE_RESERVES, seed)
+        td = _cached_play(seed)
         if int(td["reserves_placed_agent"]) > 0:
             positive_found = True
             break
@@ -124,7 +146,7 @@ def test_reserves_placed_agent_is_positive_on_reserves_fixture() -> None:
 @pytest.mark.parametrize("seed", _SEEDS)
 def test_reserves_coherence(seed: int) -> None:
     """Invariants de cohérence entre les trois compteurs."""
-    td = _play(_FIXTURE_RESERVES, seed)
+    td = _cached_play(seed)
     placed = int(td["reserves_placed_agent"])
     deployed = int(td["reserves_deployed_agent"])
     destroyed = int(td["reserves_destroyed_turn3"])
@@ -140,3 +162,109 @@ def test_reserves_coherence(seed: int) -> None:
         f"deployed ({deployed}) + destroyed ({destroyed}) > placed ({placed}) — "
         "des unités comptées deux fois ou une unité déplacée hors réserve sans être comptée"
     )
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 5. Contrat moteur → tracker — les deux jambes se rejoignent
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _recorded_scalars(tactical: Dict[str, Any], tmp_path: Any) -> Dict[str, float]:
+    """Passe `tactical` au VRAI `log_tactical_metrics` et rend les scalaires écrits."""
+    tracker = W40KMetricsTracker(
+        "ArmageddonAgent", log_dir=str(tmp_path), show_banner=False,
+        perf_window=1, perf_window_fast=1,
+    )
+    written: Dict[str, float] = {}
+
+    class _Writer:
+        def add_scalar(self, key: str, value: float, step: int, /) -> None:
+            written[key] = value
+
+        def add_custom_scalars(self, layout: Dict[str, Any], /) -> None:
+            pass
+
+        def flush(self) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    # `__init__` a ouvert un vrai SummaryWriter (fichier d'événements + thread d'écriture) dont
+    # ce test n'a que faire : on le ferme AVANT de le remplacer par la doublure, sinon chaque
+    # appel laisse derrière lui un descripteur et un thread vivants.
+    tracker.writer.close()
+    tracker.writer = _Writer()
+    tracker.episode_count = 1
+    tracker.log_tactical_metrics(tactical)
+    return written
+
+
+def test_the_engine_feeds_every_key_the_tracker_reads(tmp_path: Any) -> None:
+    """Le tactical_data d'un épisode RÉEL traverse `log_tactical_metrics` sans lever.
+
+    C'est le contrat moteur → tracker, EXÉCUTÉ au lieu d'être décrit. `log_tactical_metrics`
+    lit 44 clés en `require_key` : jusqu'ici, rien ne garantissait que le moteur les fournisse
+    toutes, et une clé manquante ne se découvrait qu'en cours d'entraînement. Les fixtures de
+    `tests/unit/ai/` sont écrites à la main et ne prouvent rien de ce côté-là — elles vérifient
+    ce que le tracker FAIT de ses clés, pas que le moteur les LUI donne.
+
+    Ce contrôle remplace toute liste de clés exigées maintenue à la main : la source de vérité
+    est le code du tracker lui-même, et il ne peut pas dériver de lui-même.
+
+    DEUX clés ne sont lues que derrière une garde MÉTIER, et sortiraient donc de la couverture
+    sans que rien ne le signale si l'épisode changeait de forme :
+      - `hits`, sous `if shots_fired > 0` ;
+      - `victory_points_controlled_episode`, sous `if samples and opp_samples`.
+    Les assertions ci-dessous exigent que ces deux gardes soient OUVERTES sur l'épisode observé.
+    Elles ne testent pas le moteur : elles refusent que ce contrôle rétrécisse en silence. Si
+    l'une devient rouge, c'est l'épisode de référence qu'il faut choisir autrement — pas
+    l'assertion qu'il faut retirer.
+    """
+    tactical = _cached_play(_SEEDS[0])
+
+    assert int(tactical["shots_fired"]) > 0, (
+        "aucun tir sur cet épisode : `hits` n'est plus lu, la couverture a fondu sans rougir"
+    )
+    assert tactical["controlled_objective_samples"] and tactical["opponent_objective_samples"], (
+        "aucun échantillon d'objectif : `victory_points_controlled_episode` n'est plus lu"
+    )
+
+    _recorded_scalars(tactical, tmp_path)
+
+
+def test_the_reserves_curves_carry_the_engine_counters(tmp_path: Any) -> None:
+    """Les trois courbes `reserves/*` portent les compteurs du MOTEUR, pas des valeurs saisies.
+
+    Sans ce contrôle, le contrat avait deux jambes qui ne se rejoignaient nulle part : les
+    tests ci-dessus vérifient les compteurs sans jamais toucher le tracker, et
+    `tests/unit/ai/test_metrics_single_writer.py` vérifie l'appariement tag ↔ clé sur des
+    valeurs écrites à la main. Si le moteur cessait d'alimenter `_reserves_placed_agent`, la
+    courbe passait à 0 constant sans qu'aucun des deux ne rougisse.
+
+    CE QUE CE TEST DISCRIMINE, ET CE QU'IL NE DISCRIMINE PAS. Mesuré sur les trois graines du
+    fixture : `placed=1, deployed=1, destroyed=0`. La graine est CHERCHÉE et non figée, comme
+    dans `test_reserves_placed_agent_is_positive_on_reserves_fixture` : la positivité par
+    graine n'est pas garantie, et figer la première rendrait ce test rouge pour une dérive du
+    tirage plutôt que pour le défaut qu'il surveille. Donc
+      - `placed` non nul : la valeur écrite ne peut pas être un 0 constant — c'est le cas qui
+        justifie ce test, et il est réellement observé ;
+      - `placed == deployed` : un ÉCHANGE de ces deux tags passerait ici. Il est attrapé par
+        `test_metrics_single_writer.py::test_each_reserves_curve_carries_its_own_tactical_key`,
+        dont la fixture porte trois valeurs distinctes (5/3/1) ;
+      - `destroyed == 0` : l'égalité sur ce tag ne mesure rien sur ce fixture. Elle est écrite
+        pour la forme du contrat, PAS comptée comme une couverture — d'où l'assertion de
+        volume ci-dessous, qui refuse un épisode où les trois compteurs seraient nuls.
+    """
+    seed = next(
+        (s for s in _SEEDS if int(_cached_play(s)["reserves_placed_agent"]) > 0), None
+    )
+    assert seed is not None, (
+        "aucune graine ne place de réserve — les trois égalités compareraient 0 à 0"
+    )
+    tactical = _cached_play(seed)
+
+    written = _recorded_scalars(tactical, tmp_path)
+
+    assert written["reserves/placed_agent"] == float(tactical["reserves_placed_agent"])
+    assert written["reserves/deployed_agent"] == float(tactical["reserves_deployed_agent"])
+    assert written["reserves/destroyed_turn3"] == float(tactical["reserves_destroyed_turn3"])
