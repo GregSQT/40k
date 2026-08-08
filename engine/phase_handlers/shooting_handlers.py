@@ -930,20 +930,16 @@ def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
             f"total_heavy_s={_t_pool1 - _t_reset0:.6f} eligible_count={len(eligible_units)}"
         )
 
+    # `active_shooting_unit` désigne l'escouade dont l'activation de tir est EN COURS — jamais
+    # celle que le moteur activerait ensuite. Le montage du pool n'active rien : il n'écrit donc
+    # pas la clé, il ne fait que la purger d'une phase précédente (V11 §0.48 L2).
+    if "active_shooting_unit" in game_state:
+        del game_state["active_shooting_unit"]
+
     # If no eligible units, end phase immediately (align with MOVE phase)
     if not eligible_units:
-        if "active_shooting_unit" in game_state:
-            del game_state["active_shooting_unit"]
         return shooting_phase_end(game_state)
-    
-    # Auto-activate next unit only for AI-controlled players.
-    cfg = require_key(game_state, "config")
-    if not _should_auto_activate_next_shooting_unit(game_state, cfg, eligible_units):
-        if "active_shooting_unit" in game_state:
-            del game_state["active_shooting_unit"]
-    else:
-        game_state["active_shooting_unit"] = eligible_units[0]
-    
+
     # Silent pool building - no console logs during normal operation
     if "console_logs" not in game_state:
         game_state["console_logs"] = []
@@ -1906,54 +1902,6 @@ def shooting_build_activation_pool(game_state: Dict[str, Any]) -> List[str]:
     add_debug_file_log(game_state, f"[POOL BUILD] E{episode} T{turn} shoot shoot_activation_pool={shoot_activation_pool}")
     
     return game_state["shoot_activation_pool"]
-
-def _is_ai_controlled_shooting_unit(
-    game_state: Dict[str, Any], unit: Dict[str, Any], config: Dict[str, Any]
-) -> bool:
-    """
-    Determine whether the active shooting unit is AI-controlled.
-
-    Source of truth is game_state.player_types.
-    """
-    player_types = require_key(game_state, "player_types")
-    if not isinstance(player_types, dict):
-        raise TypeError(f"game_state['player_types'] must be a dict, got {type(player_types).__name__}")
-    unit_player = str(require_key(unit, "player"))
-    if unit_player not in player_types:
-        raise KeyError(f"Missing player_types entry for player {unit_player}")
-    return player_types[unit_player] == "ai"
-
-
-def _should_auto_activate_next_shooting_unit(
-    game_state: Dict[str, Any], config: Dict[str, Any], pool: List[str]
-) -> bool:
-    """
-    Auto-activate next unit only when that unit is AI-controlled.
-
-    ⚠️ **DIVERGENCE TRAIN/SERVE CONNUE ET NON CORRIGÉE (V11 §0.48 `L2`).** Épingler
-    `active_shooting_unit` sur `pool[0]` réduit le pool à cette seule escouade
-    (`ActionDecoder._raw_eligible_units_for_current_phase`), donc supprime le choix d'activation
-    de `L2` : l'agent tire avec la tête du pool, celle que le moteur désignait avant.
-
-    Or `player_types["2"] == "ai"` n'est vrai qu'en **PvE**. En entraînement les deux joueurs sont
-    `"human"` : l'épinglage n'arrive jamais et le choix est bien posé. Au service PvE il arrive
-    toujours et le choix disparaît — l'agent est entraîné à choisir qui tire, et privé de ce choix
-    là où il joue pour de vrai.
-
-    POURQUOI CE N'EST PAS CORRIGÉ ICI : `active_shooting_unit` appartient au CYCLE DE VIE de ce
-    module (posé à la construction du pool, effacé par elle et par les fins d'activation PvP) et
-    il est CONSOMMÉ par l'API (`services/api_server.py`) pour dire au front qui tire. Le déplacer
-    au moment du choix le sort de ce cycle : mesuré, il devient périmé
-    (`active_shooting_unit 4 is not in shoot_activation_pool=['2','3','5']`) et il fuit dans
-    l'entraînement, où il n'existait pas. Le corriger demande de reprendre le cycle de vie de
-    l'activation de tir PvE, ce qui ne se valide qu'en session PvE — arbitrage utilisateur.
-    """
-    if not pool:
-        return False
-    next_unit = _get_unit_by_id(game_state, pool[0])
-    if not next_unit:
-        return False
-    return _is_ai_controlled_shooting_unit(game_state, next_unit, config)
 
 def _unit_has_firable_target(game_state: Dict[str, Any], unit: Dict[str, Any],
                              is_adjacent: bool, max_range: int) -> bool:
@@ -5118,17 +5066,9 @@ def _handle_shooting_end_activation(game_state: Dict[str, Any], unit: Dict[str, 
     # Call end_activation (exactly like MOVE phase)
     result = end_activation(game_state, unit, arg1, arg2, arg3, arg4, arg5)
     
-    # Auto-select next unit only for AI-controlled player.
-    pool = require_key(game_state, "shoot_activation_pool")
-    auto_selected_next_unit = False
-    if pool:
-        cfg = require_key(game_state, "config")
-        if _should_auto_activate_next_shooting_unit(game_state, cfg, pool):
-            game_state["active_shooting_unit"] = pool[0]
-            auto_selected_next_unit = True
-        elif "active_shooting_unit" in game_state:
-            del game_state["active_shooting_unit"]
-    
+    # Aucune auto-activation de la suivante : le successeur est choisi par l'agent
+    # (V11 §0.48 L2, `ACTIVATE_SLOT`) ou cliqué par le joueur.
+
     # CRITICAL: Pool empty detection is handled in execute_action (like MOVE phase)
     # This prevents double call to _shooting_phase_complete (once here, once in _process_shooting_phase)
     # execute_action checks pool empty BEFORE processing action, so phase_complete is handled there
@@ -5153,7 +5093,7 @@ def _handle_shooting_end_activation(game_state: Dict[str, Any], unit: Dict[str, 
     })
     # Backend is source of truth: when activation really ends and no next unit is auto-activated,
     # explicitly instruct frontend to return to neutral select state.
-    if arg5 == 1 and not auto_selected_next_unit and "active_shooting_unit" not in game_state:
+    if arg5 == 1 and "active_shooting_unit" not in game_state:
         result["reset_mode"] = "select"
         result["clear_selected_unit"] = True
     # Align with fight phase: ensure waiting_for_player is explicit for shoot logging

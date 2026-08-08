@@ -466,60 +466,126 @@ def test_the_marker_does_not_survive_reset():
     )
 
 
-def test_the_shooting_pin_preempts_the_choice_when_the_player_is_ai_KNOWN_DIVERGENCE():
-    """⚠️ MESURE D'UNE DIVERGENCE TRAIN/SERVE CONNUE ET NON CORRIGÉE — pas un contrat souhaité.
+# ─────────────────────────────────────────────────────────────────────────────
+# TRAIN/SERVE — le choix de tir doit être le MÊME quand le joueur est piloté par l'IA
+#
+# `active_shooting_unit` était épinglé sur la tête du pool à la CONSTRUCTION de celui-ci, donc
+# avant tout choix : le pool se réduisait à une escouade (`_raw_eligible_units_for_current_phase`)
+# et la décision `ACTIVATE_SLOT` disparaissait. Or `player_types[...] == "ai"` n'est vrai qu'en
+# PvE : en entraînement les deux joueurs sont "human", l'épinglage n'arrivait jamais et le choix
+# était bien posé. L'agent était donc entraîné à choisir qui tire et privé de ce choix au service.
+# Cette clé n'était en outre JAMAIS libérée sur le chemin d'activation de l'agent, si bien que la
+# 2e activation de tir de l'IA levait `active_shooting_unit X is not in shoot_activation_pool`.
+# Les deux cas ci-dessous verrouillent le contrat qui remplace tout ça : la clé désigne une
+# activation de tir EN COURS, et l'activation de l'agent étant ATOMIQUE, elle n'est jamais posée
+# sur ce chemin — donc jamais périmée, et le pool reste entier devant le choix.
+# ─────────────────────────────────────────────────────────────────────────────
 
-    `active_shooting_unit`, épinglé à la construction du pool de tir, réduit celui-ci à UNE
-    escouade (`_raw_eligible_units_for_current_phase`), donc supprime le choix d'activation de
-    `L2`. Or `player_types["2"] == "ai"` n'est vrai qu'en **PvE** : en entraînement les deux
-    joueurs sont `"human"`, l'épinglage n'arrive jamais et le choix EST posé. L'agent est donc
-    entraîné à choisir qui tire et privé de ce choix au service.
 
-    Ce cas existe pour deux raisons, et aucune n'est « documenter une dette » :
-    1. la divergence n'était visible d'AUCUN test — ils tournent tous en mode entraînement ;
-    2. il DEVIENDRA ROUGE le jour où le cycle de vie de l'activation de tir PvE sera repris,
-       ce qui est exactement le signal attendu.
+def _drive_and_record_shooting(engine, *, max_steps: int = DRIVE_STEPS):
+    """Joue le moteur et relève, à chaque pas de phase de tir, ce que le DÉCODEUR voit.
 
-    Pourquoi ce n'est pas corrigé dans `L2` : `active_shooting_unit` appartient au cycle de vie de
-    `shooting_handlers` et est consommé par l'API pour dire au front qui tire. Le déplacer au
-    moment du choix le rend périmé et le fait fuir dans l'entraînement — mesuré. Le reprendre
-    proprement ne se valide qu'en session PvE.
+    Rien n'est fabriqué : c'est l'état de production, lu juste avant que le masque ne soit
+    consommé. Une exception moteur n'est pas rattrapée — c'était précisément le symptôme
+    (`ValueError` avalé par `execute_ai_turn` en PvE).
     """
-    engine = _new_engine()
-    # Bascule du joueur 2 en "ai", comme le fait `pve_mode`, sans reconstruire un moteur PvE
-    # complet (le scénario d'entraînement n'en est pas un).
-    engine.game_state["player_types"] = {"1": "ai", "2": "ai"}
-
     rng = random.Random(0)
-    measured = None
-    for _ in range(DRIVE_STEPS):
-        mask = engine.get_action_mask()
+    records = []
+    for _ in range(max_steps):
         game_state = engine.game_state
+        if game_state["phase"] == "shoot":
+            decoder = engine.action_decoder
+            # Appelé pour son EFFET : c'est ce contrôle qui lève sur une clé périmée. Sa valeur
+            # n'est pas relevée — les deux cas ci-dessous s'appuient sur le pool, pas sur elle.
+            decoder._raw_eligible_units_for_current_phase(game_state)
+            records.append(
+                {
+                    "turn": int(game_state["turn"]),
+                    "player": int(game_state["current_player"]),
+                    "pool": [str(uid) for uid in game_state["shoot_activation_pool"]],
+                    "active": game_state.get("active_shooting_unit"),
+                    "has_choice": decoder.activation_selection_slots(game_state) is not None,
+                }
+            )
+        mask = engine.get_action_mask()
         valid = [i for i, v in enumerate(mask) if v]
-        if not valid:
-            _o, _r, term, trunc, _i = engine.step(0)
-            if term or trunc:
-                break
-            continue
-        if game_state["phase"] == "shoot" and game_state.get("active_shooting_unit") is not None:
-            raw = engine.action_decoder._raw_eligible_units_for_current_phase(game_state)
-            measured = (len(raw), engine.action_decoder.activation_selection_slots(game_state))
-            break
-        _o, _r, term, trunc, _i = engine.step(rng.choice(valid))
+        _o, _r, term, trunc, _i = engine.step(rng.choice(valid) if valid else 0)
         if term or trunc:
             break
+    return records
 
-    assert measured is not None, (
-        "aucune phase de tir épinglée atteinte en mode 'ai' — ce test ne mesure rien"
+
+@pytest.fixture(scope="module")
+def shooting_records_in_ai_mode():
+    """UN seul pilotage partagé par les deux cas — miroir de la fixture `choice_point`.
+
+    Les deux cas posent deux questions sur la MÊME trajectoire ; la rejouer coûtait un second
+    drive de 400 pas (~28 s) pour un relevé identique au bit près. La liste est lue seule.
+    Bascule des deux joueurs en `"ai"`, comme le fait `pve_mode` pour le joueur 2, sans
+    reconstruire un moteur PvE complet (le scénario d'entraînement n'en est pas un).
+    """
+    engine = _new_engine()
+    engine.game_state["player_types"] = {"1": "ai", "2": "ai"}
+    records = _drive_and_record_shooting(engine)
+    assert records, "aucune phase de tir atteinte en mode 'ai' — les deux cas ne mesurent rien"
+    return records
+
+
+def test_the_shooting_choice_is_posed_when_the_player_is_ai(shooting_records_in_ai_mode):
+    """Le choix d'activation de tir existe AUSSI quand le joueur est piloté par l'IA (PvE).
+
+    C'est le contrat train/serve : la phase de tir d'un joueur `"ai"` doit poser exactement les
+    mêmes décisions qu'en entraînement. Le verrou porte sur les deux moitiés du défaut d'origine :
+    le pool brut n'est jamais réduit à une escouade par la clé, et un choix EST réellement posé.
+    """
+    records = shooting_records_in_ai_mode
+    pinned = [r for r in records if r["active"] is not None]
+    assert not pinned, (
+        "le décodeur voit `active_shooting_unit` posée hors d'une activation en cours "
+        f"({pinned[0]}) : le pool est réduit à cette escouade et le choix disparaît"
     )
-    pool_size, slots = measured
-    assert pool_size == 1, (
-        f"l'épinglage ne réduit plus le pool à une escouade (il en laisse {pool_size}) : "
-        "la divergence a peut-être été corrigée — mettre ce cas à jour."
+    with_pool = [r for r in records if len(r["pool"]) >= 2]
+    assert with_pool, (
+        "aucune phase de tir à pool ≥ 2 atteinte en mode 'ai' — le cas suivant serait VERT "
+        "SANS RIEN REGARDER"
     )
-    assert slots is None, (
-        "un choix d'activation est désormais posé malgré l'épinglage : la divergence "
-        "train/serve est corrigée — remplacer ce cas par le contrat souhaité."
+    assert any(r["has_choice"] for r in with_pool), (
+        "aucun choix d'activation posé en mode 'ai' alors que le pool comptait au moins deux "
+        "escouades : la divergence train/serve est de retour"
+    )
+
+
+def test_the_ai_chains_several_shooting_activations_in_one_phase(shooting_records_in_ai_mode):
+    """L'IA enchaîne plusieurs activations dans une même phase de tir, en mode `"ai"`.
+
+    Ce que ce cas attrape : une `active_shooting_unit` PÉRIMÉE. Elle était épinglée sur la tête du
+    pool au montage de celui-ci et jamais libérée sur le chemin de l'agent ; à la 2e activation
+    elle ne désignait plus une escouade du pool et `_raw_eligible_units_for_current_phase` levait
+    `active_shooting_unit X is not in shoot_activation_pool`. En PvE ce `ValueError` était avalé
+    par `execute_ai_turn`, donc le symptôme visible était « l'IA ne tire qu'une escouade par
+    phase ».
+
+    Le premier garde-fou est donc l'exception NON rattrapée dans `_drive_and_record_shooting`.
+    L'assertion ci-dessous en est le second : elle compte les escouades réellement SORTIES du pool
+    dans une même phase, et non des tailles de pool distinctes — une taille change au moindre
+    `end_activation`, y compris sur un WAIT, et rendrait ce cas vert sans qu'aucune activation ne
+    se soit enchaînée.
+    """
+    records = shooting_records_in_ai_mode
+    # Une phase de tir = (tour, joueur). Son pool ne fait que DÉCROÎTRE (rien ne s'y ajoute en
+    # cours de phase), donc les escouades sorties = premier relevé moins le dernier ; chaque
+    # sortie est une activation menée à son terme.
+    bounds: Dict[Tuple[int, int], List[set]] = {}
+    for record in records:
+        key = (record["turn"], record["player"])
+        pool = set(record["pool"])
+        bounds.setdefault(key, [pool, pool])[1] = pool
+    departed = {key: first - last for key, (first, last) in bounds.items()}
+    chained = {key: sorted(gone) for key, gone in departed.items() if len(gone) >= 2}
+    assert chained, (
+        "aucune phase de tir n'a enchaîné deux activations en mode 'ai' : `active_shooting_unit` "
+        "reste périmée après la première, et le décodeur lève à la suivante "
+        f"(escouades sorties du pool, par phase : { {k: sorted(v) for k, v in departed.items()} })"
     )
 
 

@@ -5887,6 +5887,10 @@ class W40KEngine(gym.Env):
             eligible_slots = [sid for sid in enemy_slots if sid is not None]
 
             squad_shooting_unit_activation_start(self.game_state, squad_id)
+            # `active_shooting_unit` n'est volontairement PAS posée ici (V11 §0.48 L2) : cette clé
+            # désigne une activation de tir EN COURS, or celle de l'agent est ATOMIQUE — aucun
+            # lecteur entre la pose et le retrait, et toute sortie par exception la laisserait
+            # périmée. Le front lit le tireur dans `result.unitId` (fourni par `end_activation`).
             squad_declare_shoot(self.game_state, squad_id, target_squad_id, eligible_slots)
             squad_lock_shoot(self.game_state, squad_id)
             # Convergence §8 : resolution tir via le moteur d allocation par-figurine

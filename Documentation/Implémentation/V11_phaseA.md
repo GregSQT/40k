@@ -894,18 +894,36 @@ Ordre par valeur tactique :
    mais n'a pas de ligne alliée, donc pas de slot. `len(eligible_units) >= 2` posait alors une
    décision à une seule action légale — un step gym brûlé, et l'escouade en réserves inadressable.
 
-   🔴 **DIVERGENCE TRAIN/SERVE OUVERTE — l'épinglage `active_shooting_unit` préempte le choix en
-   PvE.** Posé à la construction du pool de tir, il réduit celui-ci à une escouade et supprime
-   donc la décision. Or `player_types["2"] == "ai"` n'est vrai qu'en **PvE** : en entraînement le
-   choix est bien posé, au service il disparaît — l'agent est entraîné à choisir qui tire et privé
-   de ce choix là où il joue pour de vrai. **Non corrigé dans `L2`** : cette clé appartient au
-   cycle de vie de `shooting_handlers` et est consommée par l'API pour dire au front qui tire ;
-   déplacée au moment du choix, elle devient périmée (mesuré :
-   `active_shooting_unit 4 is not in shoot_activation_pool=['2','3','5']`) et fuit dans
-   l'entraînement, où elle n'existait pas. La reprise propre du cycle de vie de l'activation de
-   tir PvE ne se valide qu'en session PvE. Mesuré et daté par
-   `test_the_shooting_pin_preempts_the_choice_when_the_player_is_ai_KNOWN_DIVERGENCE`, qui
-   deviendra ROUGE le jour où ce sera corrigé.
+   ✅ **DIVERGENCE TRAIN/SERVE FERMÉE LE 2026-08-08 — l'épinglage suit désormais le choix.**
+   `active_shooting_unit` était posé à la CONSTRUCTION du pool de tir, donc avant toute décision :
+   il réduisait le pool à une escouade (`_raw_eligible_units_for_current_phase`) et supprimait
+   `ACTIVATE_SLOT`. Comme `player_types[...] == "ai"` n'est vrai qu'en **PvE**, le choix était posé
+   en entraînement et absent au service. La reprise a établi UNE sémantique : *la clé désigne une
+   activation de tir EN COURS*, donc elle est posée par un début d'activation et retirée par sa
+   fin, jamais par le montage d'un pool. Les deux épinglages « tête du pool » sont supprimés
+   (montage du pool ET `_handle_shooting_end_activation`, ce dernier étant leur jumeau exact),
+   et avec eux `_should_auto_activate_next_shooting_unit` puis `_is_ai_controlled_shooting_unit`,
+   devenus sans appelant. **`squad_shoot` n'écrit pas la clé** : l'activation de l'agent est
+   ATOMIQUE (déclaration, résolution, fin d'activation dans le même appel), donc une écriture
+   n'aurait aucun lecteur entre sa pose et son retrait, et toute sortie par exception la
+   laisserait périmée. Le front lit le tireur dans `result.unitId`, que `end_activation` fournit
+   toujours et que tous ses sites préfèrent déjà à cette clé. Le PvP humain garde son cycle
+   intact (`squad_shoot_activate` la pose, `squad_shoot_cancel` / `squad_shoot_validate` /
+   `_finish_manual_shoot_after_allocation` la retirent). Aucun contrat touché : `obs_size` et
+   `TOTAL_ACTION_SIZE` ne bougent pas, **aucun ré-entraînement**.
+
+   ⚠️ **La reprise a découvert un SECOND défaut, plus grave et antérieur à `L2`** : le chemin
+   d'activation de l'agent ne libérait JAMAIS cette clé (aucun effaceur dans la branche
+   `squad_shoot` de `_handle_squad_pipeline_action` — tous les effaceurs de `w40k_core`
+   appartiennent au flux PvP humain). La 2ᵉ activation de tir de l'IA levait donc
+   `active_shooting_unit X is not in shoot_activation_pool`, avalé par le `except Exception` de
+   `execute_ai_turn` et ressorti en `{"error": "ai_decision_failed"}` : **en PvE l'IA ne tirait
+   qu'une escouade par phase**. Mesuré en pilotant le moteur (400 pas, seed 0) sur les trois
+   configurations de `player_types` ; après correction, `human/ai` et `ai/ai` rendent exactement
+   la même trace que `human/human`. Verrouillé par
+   `test_the_shooting_choice_is_posed_when_the_player_is_ai` et
+   `test_the_ai_chains_several_shooting_activations_in_one_phase`, qui remplacent le cas
+   `..._KNOWN_DIVERGENCE` et virent au rouge dès que l'un des deux défauts est remis.
 
    **Livraison en DEUX temps, et l'étape intermédiaire mérite d'être dite.** La moitié moteur est
    partie seule, avec les 12 logits produits par des colonnes DENSES d'`action_net` : le pointeur

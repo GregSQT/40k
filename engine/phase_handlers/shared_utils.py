@@ -177,7 +177,9 @@ def is_programmatic_owner(game_state: Dict[str, Any], player: Any) -> bool:
     Aucun repli silencieux : player_types manquant hors gym = bug -> erreur explicite.
 
     ⚠️ N est branche QUE sur les decisions d ALLOCATION/resolution (05.03/05.04, hazard
-    manuel), jamais sur les mecanismes d auto-activation type active_shooting_unit (cf. R4)."""
+    manuel), jamais sur le CHOIX de l escouade a activer (cf. R4). Ce choix appartient a l agent
+    depuis V11 §0.48 L2 (`ACTIVATE_SLOT`) ; les auto-activations qui le precedaient — dont
+    `active_shooting_unit` epingle sur la tete du pool — sont supprimees depuis le 2026-08-08."""
     if game_state.get("gym_training_mode"):
         return True
     player_types = require_key(game_state, "player_types")

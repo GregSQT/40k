@@ -311,8 +311,10 @@ humain. Il y a en réalité **QUATRE prédicats divergents** :
 - `_is_ai_controlled_fight_unit` (fight_handlers, def ~L97) — player_types only ; utilisée par
   `_fight_auto_defender` (def ~L5705) → `auto_decider` de **FIGHT_CTX** (~L5715-5728) et par
   les 4 décisions `defender_human` du flux fight (~L5425, L5450, L6150, L6184) ;
-- `_is_ai_controlled_shooting_unit` (shooting_handlers, def ~L2144) — player_types only, pilote
-  l'auto-activation `active_shooting_unit` (cf. ⚠️ ci-dessous : ne PAS la rendre vraie en gym).
+- ~~`_is_ai_controlled_shooting_unit`~~ (shooting_handlers) — player_types only ; pilotait
+  l'auto-activation `active_shooting_unit` (cf. ⚠️ ci-dessous). **Supprimé le 2026-08-08 avec
+  l'auto-activation elle-même** : plus aucun appelant. La matrice R4 reste couverte par
+  `is_programmatic_owner` / `is_programmatic_defender` et `_is_ai_controlled_fight_unit`.
 **La mêlée crashe de la même façon que le tir** (vérifié par lecture) : `squad_fight` →
 `build_manual_fight_allocation` non `done` → `RuntimeError "squad_fight: allocation combat non
 terminee en auto"` ([w40k_core.py:5026-5031](../../engine/w40k_core.py#L5026-L5031)), garde jumelle dans fight_handlers
@@ -328,6 +330,11 @@ smoke avec pertes en mêlée garanties).
 (`active_shooting_unit`, [shooting_handlers.py:1082-1086](../../engine/phase_handlers/shooting_handlers.py#L1082-L1086)) qui reste alors périmé après
 l'activation et fait exploser le décodeur (`active_shooting_unit X is not in
 shoot_activation_pool`, [action_decoder.py:418-423](../../engine/action_decoder.py#L418-L423)) — vérifié par exécution.
+✅ **CE MODE D'ÉCHEC EST FERMÉ LE 2026-08-08** : l'auto-activation « tête du pool » n'existe plus
+(ni au montage du pool, ni en fin d'activation), et `squad_shoot` libère la clé à la fin de
+l'activation. Basculer `player_types` sur `"ai"` ne fait donc plus exploser le décodeur — mesuré
+sur les trois configurations. L'avertissement reste ici pour l'historique du diagnostic R4 ; il ne
+décrit plus le code. Cf. [V11_phaseA.md §9 P3-3](V11_phaseA.md#s9).
 
 ### R5 — Wrappers et bots sur l'ANCIEN layout d'actions (BLOQUANT runtime)
 **Repro** (pile complète `BotControlledEnv(ActionMasker(W40KEngine))` + GreedyBot) :
@@ -406,8 +413,10 @@ Vérifié par lecture concordante :
   avant d'activer des terrains à étages en training.
 
 ### Notes non bloquantes (à traiter en T6)
-- `active_shooting_unit` : cycle de vie sain uniquement pour le flux PvP/PvE ; ne pas l'activer
-  en gym (cf. R4 ⚠️).
+- ✅ **RÉSOLU le 2026-08-08** — `active_shooting_unit` : le cycle de vie est désormais le même
+  partout (la clé désigne l'activation de tir EN COURS, posée par son début, retirée par sa fin).
+  Elle reste absente du gym parce que `player_types` y vaut `human/human`, non parce que le
+  chemin serait malsain. Cf. [V11_phaseA.md §9 P3-3](V11_phaseA.md#s9).
 - `ai/target_selector.py` : orphelin (importé seulement par son test unitaire).
 - Docs périmées : AI_OBSERVATION.md décrit 357 floats, AI_TRAINING.md 355 — aucun ne décrit le
   pipeline squad 108 actif ; `justification` de la config dit 31 au lieu de 41. Les snapshots
@@ -424,10 +433,12 @@ Vérifié par lecture concordante :
    machine (auto-résolution)" doit exister en UN seul endroit, consultable depuis game_state
    (le flag `gym_training_mode` y est déjà copié, [w40k_core.py:491](../../engine/w40k_core.py#L491)/1011). Les QUATRE prédicats
    recensés en R4 (`W40KEngine._is_player_human`, `_target_defender_is_ai`,
-   `_is_ai_controlled_fight_unit`, `_is_ai_controlled_shooting_unit`) doivent s'appuyer dessus.
-   Interdit de dupliquer le check. ⚠️ La bascule gym ne doit s'appliquer qu'aux décisions
-   d'ALLOCATION/résolution, pas aux mécanismes d'auto-activation type `active_shooting_unit`
-   (cf. ⚠️ R4) : auditer chaque site d'appel avant de brancher le prédicat unique.
+   `_is_ai_controlled_fight_unit`, ~~`_is_ai_controlled_shooting_unit`~~ — supprimé le
+   2026-08-08 avec l'auto-activation de tir, il n'en reste donc que TROIS) doivent s'appuyer
+   dessus. Interdit de dupliquer le check. ⚠️ La bascule gym ne doit s'appliquer qu'aux décisions
+   d'ALLOCATION/résolution, jamais au CHOIX de l'escouade à activer, qui appartient à l'agent
+   depuis V11 §0.48 `L2` (cf. ⚠️ R4) : auditer chaque site d'appel avant de brancher le prédicat
+   unique.
 3. **Plus aucun ID d'action littéral dans ai/** : importer les constantes depuis
    `engine/macro_intents.py`. État réel : **AUCUNE constante d'action n'existe** — le mapping
    n'est qu'en commentaire (L9-18) ; seuls `INTENT_*`, `MAX_OBJECTIVES`, `BASE_ZONE_INTENT`,
@@ -535,8 +546,9 @@ Reste : validation PvP manuelle rapide (non-régression) côté utilisateur.
    - chemins `squad_shoot_validate` ([w40k_core.py:4685](../../engine/w40k_core.py#L4685)) et prompts rule-choice
      ([w40k_core.py:2527](../../engine/w40k_core.py#L2527)) — déjà sur `_is_player_human`, vérifier qu'ils basculent sur le
      prédicat unique sans changement de comportement PvP.
-   Ne PAS toucher `player_types`. Ne PAS brancher `_is_ai_controlled_shooting_unit`
-   (auto-activation) sur la bascule gym (cf. ⚠️ R4).
+   Ne PAS toucher `player_types`. ~~Ne PAS brancher `_is_ai_controlled_shooting_unit`
+   (auto-activation) sur la bascule gym (cf. ⚠️ R4)~~ — sans objet depuis le 2026-08-08 :
+   l'auto-activation de tir et son prédicat n'existent plus.
    Ajouter au smoke test T1 un scénario garantissant des **pertes en mêlée** (le chemin
    FIGHT_CTX n'a jamais été exercé en gym, cf. R4).
 3. Vérification de non-régression PvP : `python3 -m pytest tests/ -x -q` (suite existante,
@@ -1654,8 +1666,10 @@ Fichier proposé : `tests/unit/engine/test_agent_interface_contract.py`.
   (gym_training_mode True/False) × (player_types human/ai) ; allocation tir auto en gym ;
   **allocation fight auto en gym avec pertes réellement allouées** (le chemin FIGHT_CTX,
   jamais exercé avant T1) ; les 4 sites `defender_human` du flux fight ; en PvP humain,
-  l'allocation reste manuelle (miroir) ; `_is_ai_controlled_shooting_unit` NON branché sur
-  gym (test négatif : pas d'auto-activation `active_shooting_unit` en gym).
+  l'allocation reste manuelle (miroir) ; ~~`_is_ai_controlled_shooting_unit` NON branché sur
+  gym (test négatif : pas d'auto-activation `active_shooting_unit` en gym)~~ — **sans objet
+  depuis le 2026-08-08** : l'auto-activation de tir et son prédicat sont supprimés, le risque
+  est structurellement impossible et non simplement non testé.
 
 **T2** :
 - Tests 8.2 ci-dessus.

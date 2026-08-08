@@ -2173,14 +2173,18 @@ autre chose que ce pour quoi il avait été écrit** :
   (2) il survivait à **`reset()`**, et sa portée redevenait valide au tour 1 de l'épisode suivant ;
   (3) la garde portait sur `len(eligible_units)` au lieu de `len(slots)` — une escouade en réserves
   est éligible sans avoir de ligne alliée, d'où une décision à une seule action légale ;
-  (4) 🔴 **NON CORRIGÉ — divergence train/serve ouverte** : `active_shooting_unit` épinglé à la
-  construction du pool réduit celui-ci à une escouade et supprime le choix, ce qui ne se produit
-  qu'en **PvE** (`player_types["2"] == "ai"`) — l'agent est entraîné à choisir qui tire et privé
-  de ce choix au service. La correction tentée (déplacer l'épinglage au moment du choix) a été
-  **retirée après mesure** : la clé appartient au cycle de vie de `shooting_handlers` et est
-  consommée par l'API ; déplacée, elle devient périmée et fuit dans l'entraînement. Reprendre ce
-  cycle de vie ne se valide qu'en session PvE ⇒ **arbitrage utilisateur**. Mesuré et daté par
-  un cas qui deviendra rouge à la correction.
+  (4) ✅ **CORRIGÉ LE 2026-08-08 — divergence train/serve fermée** : `active_shooting_unit`
+  épinglé à la construction du pool réduisait celui-ci à une escouade et supprimait le choix, ce
+  qui ne se produisait qu'en **PvE** (`player_types["2"] == "ai"`). La clé suit désormais
+  l'activation au lieu de la précéder — *elle désigne une activation de tir en cours* : les deux
+  épinglages « tête du pool » sont supprimés, et `squad_shoot` ne l'écrit pas (l'activation de
+  l'agent est atomique, donc une écriture n'aurait aucun lecteur et fuirait sur exception ; le
+  front lit `result.unitId`). Elle reste donc absente de l'entraînement comme du chemin agent :
+  aucun contrat touché, aucun ré-entraînement. La reprise a mis au jour un
+  SECOND défaut, antérieur à `L2` : cette clé n'était jamais libérée sur le chemin de l'agent,
+  donc la 2ᵉ activation de tir de l'IA levait `active_shooting_unit X is not in
+  shoot_activation_pool` — avalé par `execute_ai_turn`, l'IA ne tirait qu'une escouade par phase
+  en PvE. Détail et mesure → [V11_phaseA.md §9 P3-3](V11_phaseA.md#s9).
   ⚠️ **Leçon commune** : le premier cas d'auto-péremption ne faisait que **simuler** la sortie du
   pool, il restait donc vert sur (1). Un verrou qui construit une approximation de la situation ne
   verrouille que l'approximation.

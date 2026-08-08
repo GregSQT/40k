@@ -806,6 +806,11 @@ class ActionDecoder:
                     eligible.append(unit)
             return eligible
         elif current_phase == "shoot":
+            # ⚠️ La réduction du pool à `active_shooting_unit`, plus bas, est propre au TIR : ni
+            # `move`, ni `charge`, ni `fight` ne la font, alors qu'ils ont la même clé. Elle est
+            # légitime — une activation de tir EN COURS ne laisse pas le choix d'en démarrer une
+            # autre — mais depuis V11 §0.48 L2 elle n'est plus atteignable que par le flux PvP
+            # HUMAIN : l'activation de l'agent est atomique et n'écrit jamais cette clé.
             # AI_TURN.md COMPLIANCE: Use handler's authoritative activation pool
             # STEP 2: UNIT_ACTIVABLE_CHECK - Pick one unit from shoot_activation_pool
             # No filtering by SHOOT_LEFT or can_advance - pool is built once at phase start

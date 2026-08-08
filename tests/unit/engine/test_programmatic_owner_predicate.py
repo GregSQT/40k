@@ -14,9 +14,9 @@ Contrat couvert ([shared_utils.py:97-124](../../engine/phase_handlers/shared_uti
 - **aucun repli silencieux** : `player_types` manquant hors gym, ou joueur absent de la table,
   est un bug → erreur explicite.
 
-⚠️ Le test négatif sur `_is_ai_controlled_shooting_unit` est le verrou anti-récidive du ⚠️ R4 :
-l'auto-activation ne doit JAMAIS basculer sur le prédicat gym, sous peine de faire jouer des
-unités toutes seules en entraînement.
+⚠️ Le cas négatif que §8.3 exigeait sur `_is_ai_controlled_shooting_unit` n'a plus d'objet :
+l'auto-activation de tir et son prédicat sont supprimés depuis le 2026-08-08 (V11 §0.48 `L2` —
+l'agent choisit lui-même quelle escouade activer). Voir la note en fin de fichier.
 """
 
 from __future__ import annotations
@@ -132,18 +132,7 @@ def test_defender_missing_units_cache_raises():
         is_programmatic_defender({"gym_training_mode": True}, "10")
 
 
-# ── Test NÉGATIF : l'auto-activation ne bascule PAS sur le prédicat gym ────────
-
-def test_shooting_auto_activation_is_not_gym_aware():
-    """⚠️ R4 : `_is_ai_controlled_shooting_unit` lit `player_types`, JAMAIS le flag gym.
-
-    Le brancher sur la bascule gym ferait auto-activer les unités du joueur entraîné pendant
-    l'entraînement. Ce test rougit si quelqu'un « harmonise » les deux prédicats.
-    """
-    from engine.phase_handlers.shooting_handlers import _is_ai_controlled_shooting_unit
-
-    gs = {"gym_training_mode": True, "player_types": {"1": "human", "2": "human"}}
-    unit = {"player": 1}
-    assert _is_ai_controlled_shooting_unit(gs, unit, {}) is False, (
-        "l'auto-activation de tir est devenue gym-aware — cf. ⚠️ R4"
-    )
+# ⚠️ R4, cas négatif sur `_is_ai_controlled_shooting_unit` : SUPPRIMÉ avec l'auto-activation de
+# tir elle-même (2026-08-08, V11 §0.48 L2). Le risque qu'il gardait — auto-activer les unités du
+# joueur entraîné — est devenu structurellement impossible, et non simplement non testé. R4 reste
+# verrouillé sur les prédicats vivants : ceux ci-dessus et `_is_ai_controlled_fight_unit`.
