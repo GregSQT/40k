@@ -53,7 +53,7 @@ def _engine(seed, scenario):
         rewards_config="ArmageddonAgent",
         training_config_name="x1_debug",
         controlled_agent="ArmageddonAgent",
-        scenario_file=SCENARIO,
+        scenario_file=scenario,
         unit_registry=UnitRegistry(),
         quiet=True,
         gym_training_mode=True,
@@ -141,9 +141,13 @@ def board(request):
             os.environ["W40K_BOARD_PATH"] = previous
 
 
-@pytest.mark.parametrize("seed", [0, 1, 2])
-def test_every_masked_move_cell_is_executable(seed, board):
-    eng = _engine(seed)
+@pytest.mark.parametrize(
+    "seed,scenario",
+    [(0, SCENARIO_MC1), (1, SCENARIO_MC2), (2, SCENARIO_MC1)],
+    ids=["seed0-mc1", "seed1-mc2", "seed2-mc1"],
+)
+def test_every_masked_move_cell_is_executable(seed, scenario, board):
+    eng = _engine(seed, scenario)
     rng = random.Random(seed)
     failures = []
     cells_checked = 0

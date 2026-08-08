@@ -42,11 +42,31 @@ from engine.observation_entities import (
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-SCENARIO = (
-    PROJECT_ROOT
-    / "config" / "agents" / "ArmageddonAgent" / "scenarios" / "training"
-    / "scenario_training_armageddon1.json"
+_BANK = (
+    PROJECT_ROOT / "config" / "agents" / "ArmageddonAgent" / "scenarios" / "training"
 )
+#: Les DEUX terrains de la banque. Ce fichier vérifie que chaque slot de pose DÉCRIT l'hexe que
+#: son action poserait, et les features de ce descriptif — distance aux objectifs, couvert,
+#: exposition LoS — sont lues sur le TERRAIN. Un seul terrain ne prouve donc rien du second : le
+#: 2026-08-08, des positions valides sur mc1 tombaient sur un mur de mc2 sans qu'un test bouge.
+SCENARIOS = [_BANK / "scenario_training_armageddon1.json",
+             _BANK / "scenario_training_armageddon2.json"]
+#: Terrain courant, posé par la fixture `terrain` ci-dessous. Les tests appellent `_load()` sans
+#: argument : passer le scénario par un global évite d'ajouter le paramètre aux 12 signatures,
+#: pour un fichier où AUCUN test n'est spécifique à un terrain.
+SCENARIO = SCENARIOS[0]
+
+
+@pytest.fixture(autouse=True, params=SCENARIOS, ids=["mc1", "mc2"])
+def terrain(request):
+    """Rejoue CHAQUE test du fichier sur les deux terrains de la banque."""
+    global SCENARIO
+    previous = SCENARIO
+    SCENARIO = request.param
+    try:
+        yield request.param
+    finally:
+        SCENARIO = previous
 
 
 def _load():
