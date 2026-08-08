@@ -129,11 +129,84 @@ class TestDevastatingWoundsSortOrder:
         assert result[1]["save_roll"] == 5
         assert result[2]["devastating"] is True
 
-    def test_plusieurs_devastating_stables(self, monkeypatch):
-        """2 hits DEVASTATING dans le même lot → le moteur les résout sans crash."""
-        gs = _gs_devastating(monkeypatch, n_attacks=2)
-        shoot_logs = [l for l in gs["action_logs"] if l.get("type") == "shoot"]
-        assert shoot_logs, "le moteur doit émettre un log de tir"
+    def test_sort_production_devastating_apres_normaux(self, monkeypatch):
+        """Vérifie le tri RÉEL ligne 9175 (pas _pool_order) : blessures DEVASTATING après normales.
+
+        Mode human-defender : le batch est conservé dans game_state pendant le choix du modèle,
+        ce qui permet d'inspecter pool trié AVANT résolution. Sans ce mode, l'auto-résolution
+        gym vide le batch avant que le test puisse l'observer.
+
+        Rolls [4, 6, 4, 4, 2] :
+          attack 1 : hit=4, wound_crit=6 → DEVASTATING (save_roll=None)
+          attack 2 : hit=4, wound=4 (normal, STR4 vs T4 → 4+), save=2 → fail (AP-1 → 3+ effectif)
+        Pool résultant avant tri : [{devastating=True,save_roll=None},{devastating=False,save_roll=2}]
+        Pool après tri ligne 9175 : [{devastating=False,save_roll=2},{devastating=True,save_roll=None}]
+        """
+        from engine.phase_handlers import shooting_handlers
+        from engine.phase_handlers.shared_utils import build_manual_shoot_allocation
+        from tests._state_invariants import turn_state_invariants
+
+        SHOOTER = (50, 50)
+        TARGET = (80, 50)
+        weapon = {"ATK": 3, "STR": 4, "AP": -1, "DMG": 1, "NB": 2, "RNG": 120,
+                  "WEAPON_RULES": ["DEVASTATING_WOUNDS"], "display_name": "DW Gun"}
+        attacker = {"id": "1#0", "squad_id": "1", "player": 0, "T": 4, "SHOOT_LEFT": 1,
+                    "col": SHOOTER[0], "row": SHOOTER[1], "RNG_WEAPONS": [weapon]}
+        target_m = {"id": "101#0", "squad_id": "101", "player": 1, "T": 4,
+                    "HP_CUR": 9, "HP_MAX": 9, "ARMOR_SAVE": 2, "INVUL_SAVE": 7,
+                    "role": None, "unitType": "AssaultIntercessor", "points_per_hp": 5.0,
+                    "VALUE": 10.0, "col": TARGET[0], "row": TARGET[1]}
+        uc_entry = {"BASE_SHAPE": "round", "BASE_SIZE": 6, "occupied_hexes": set(), "VALUE": 10.0}
+        gs: Dict[str, Any] = {
+            **turn_state_invariants(),
+            # pas de gym_training_mode → defender player 1 est "human"
+            "player_types": {"0": "ai", "1": "human"},
+            "turn": 1, "phase": "shoot",
+            "action_logs": [], "action_log_seq": 0,
+            "models_cache": {"1#0": attacker, "101#0": target_m},
+            "squad_models": {"1": ["1#0"], "101": ["101#0"]},
+            "squad_cache": {"1": {"model_count_at_start": 1}, "101": {"model_count_at_start": 1}},
+            "units_cache": {
+                "1": {**uc_entry, "col": SHOOTER[0], "row": SHOOTER[1], "player": 0,
+                      "occupied_hexes_by_model": {"1#0": SHOOTER},
+                      "floor_height_by_model": {"1#0": 0.0}},
+                "101": {**uc_entry, "col": TARGET[0], "row": TARGET[1], "player": 1,
+                        "occupied_hexes_by_model": {"101#0": TARGET},
+                        "floor_height_by_model": {"101#0": 0.0}},
+            },
+            "units": [{"id": "1", "player": 0, "unitType": "SternguardVeteranBoltRifle"},
+                      {"id": "101", "player": 1, "unitType": "AssaultIntercessor"}],
+            "unit_by_id": {"1": {"id": "1", "UNIT_RULES": [], "deployed_on_turn": 0},
+                           "101": {"id": "101", "UNIT_RULES": [], "deployed_on_turn": 0}},
+            "objectives": [],
+            "inches_to_subhex": 5,
+            "moved_distance_by_model": {"1#0": 0.0},
+            "pending_squad_shoot_intents": {
+                "1": [{"model_id": "1#0", "target_unit_id": "101", "weapon_index": 0,
+                       "n_attacks_resolved": 2}]
+            },
+        }
+        rolls = [4, 6, 4, 4, 2]
+        seq = list(rolls)
+        monkeypatch.setattr(random, "randint", lambda a, b: seq.pop(0))
+        monkeypatch.setattr(shooting_handlers, "compute_unit_los", lambda gs, s, t: {"cover": False})
+        monkeypatch.setattr(shooting_handlers, "_get_unit_by_id", lambda gs, sid: {"id": sid})
+        monkeypatch.setattr(shooting_handlers, "_is_adjacent_to_enemy_within_cc_range", lambda gs, u: False)
+
+        build_manual_shoot_allocation(gs, "1")
+
+        alloc = gs.get("pending_shoot_allocation")
+        assert alloc, "allocation non créée (mode human-defender devrait laisser la structure)"
+        pool = alloc["batches"][0]["pool"]
+        # Invariant 24.10 : blessures mortelles (devastating=True) APRÈS blessures normales
+        devastating_indices = [i for i, pw in enumerate(pool) if pw.get("devastating")]
+        normal_indices = [i for i, pw in enumerate(pool) if not pw.get("devastating")]
+        assert normal_indices and devastating_indices, (
+            f"le pool devrait contenir 1 normal + 1 devastating : {pool}"
+        )
+        assert max(normal_indices) < min(devastating_indices), (
+            f"les blessures DEVASTATING doivent être en fin de pool (24.10) : {pool}"
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -268,3 +341,66 @@ class TestAttackerModelCanReachSquadUsesModelBase:
         gs["units_cache"]["101"]["occupied_hexes"] = {(100, 0)}
         result = _attacker_model_can_reach_squad(gs, attacker, 0, 0, "101", 5)
         assert result is False
+
+    def test_model_height_lu_depuis_base_unit_pas_tm_quand_cible_elevee(self, monkeypatch):
+        """Couvre la branche 3D LoS (line 6150) : MODEL_HEIGHT lu depuis base_unit, pas tm.
+
+        Verrou : si on remplace `require_key(base_unit, 'MODEL_HEIGHT')` par
+        `require_key(tm, 'MODEL_HEIGHT')` (ligne 6155), ce test lève KeyError car
+        tm (models_cache) ne porte pas MODEL_HEIGHT — c'est un attribut squad (units_cache).
+
+        Configuration : cible à level=1 (étage), tireur au sol (level=0). La branche
+        `if shooter_level >= 1 or target_level >= 1` devient True, exécutant ligne 6155.
+        """
+        from engine.phase_handlers import shooting_handlers
+        from engine.phase_handlers.shared_utils import _attacker_model_can_reach_squad
+
+        monkeypatch.setattr(
+            shooting_handlers, "_compute_visibility_with_obscuring",
+            lambda *a, **kw: (1, 1, None),
+        )
+        monkeypatch.setattr(
+            shooting_handlers, "_ranged_distance_metric",
+            lambda gs: "euclidean",
+        )
+        monkeypatch.setattr(
+            shooting_handlers, "_fig_z_and_occluder",
+            lambda gs, level, hexes, mh: (mh, None),
+        )
+
+        # tm n'a pas MODEL_HEIGHT : les models_cache ne le portent jamais (c'est squad-level).
+        # Si le code lit tm["MODEL_HEIGHT"] (bug), KeyError. S'il lit base_unit (correct), OK.
+        tm = {
+            "id": "101#0", "squad_id": "101", "player": 1,
+            "col": 5, "row": 0, "level": 1,          # ← à l'étage : active la branche 3D
+            "BASE_SHAPE": "round", "BASE_SIZE": 6,
+            "orientation": 0,
+            # PAS de MODEL_HEIGHT ici — c'est un attribut squad, pas par-figurine
+        }
+        attacker = {
+            "id": "1#0", "squad_id": "1", "player": 0,
+            "col": 0, "row": 0, "level": 0,
+            "BASE_SHAPE": "round", "BASE_SIZE": 6,
+            "orientation": 0,
+        }
+        base_unit_no_shape: Dict[str, Any] = {
+            "player": 1,
+            "occupied_hexes": {(5, 0)},
+            "MODEL_HEIGHT": 3.0,  # lu par require_key(base_unit, "MODEL_HEIGHT") ligne 6155
+            # PAS de BASE_SHAPE/BASE_SIZE → verrou fix 3 (utilise tm, pas base_unit)
+        }
+        gs: Dict[str, Any] = {
+            "config": {"game_rules": {"detection_range": 200, "metric": "euclidean"}},
+            "inches_to_subhex": 5,
+            "models_cache": {"1#0": attacker, "101#0": tm},
+            "squad_models": {"1": ["1#0"], "101": ["101#0"]},
+            "units_cache": {
+                "1": {"player": 0, "occupied_hexes": {(0, 0)},
+                      "BASE_SHAPE": "round", "BASE_SIZE": 6,
+                      "MODEL_HEIGHT": 2.0},   # lu ligne 6153 (shooter au sol, cible élevée)
+                "101": base_unit_no_shape,
+            },
+            "units": [{"id": "1", "player": 0}, {"id": "101", "player": 1}],
+        }
+        result = _attacker_model_can_reach_squad(gs, attacker, 0, 0, "101", 50)
+        assert result is True
