@@ -536,11 +536,7 @@ class RewardCalculator:
 
         elif action_type == "wait":
             # FIXED: Wait means agent chose not to act when action was available
-            current_phase = require_key(game_state, "phase")
-            if current_phase == "move":
-                wait_reward = self.calculate_reward_from_config(acting_unit, {"type": "move_wait"}, success, game_state)
-            else:
-                wait_reward = self.calculate_reward_from_config(acting_unit, {"type": "wait"}, success, game_state)
+            wait_reward = self._wait_reward(acting_unit, success, game_state)
             reward_breakdown['base_actions'] = wait_reward
             reward_breakdown['penalties'] = wait_reward
             # on_objective_bonus for pile-in without targets (_pile_in_toCol/Row set in game_state)
@@ -663,11 +659,7 @@ class RewardCalculator:
             return advance_reward
 
         elif action_type == "squad_wait":
-            current_phase = require_key(game_state, "phase")
-            if current_phase == "move":
-                wait_reward = self.calculate_reward_from_config(acting_unit, {"type": "move_wait"}, success, game_state)
-            else:
-                wait_reward = self.calculate_reward_from_config(acting_unit, {"type": "wait"}, success, game_state)
+            wait_reward = self._wait_reward(acting_unit, success, game_state)
             reward_breakdown['base_actions'] = wait_reward
             reward_breakdown['penalties'] = wait_reward
             wait_reward += objective_turn_reward
@@ -718,6 +710,36 @@ class RewardCalculator:
         # NO FALLBACK - Raise error to identify missing action types
         raise ValueError(f"Unhandled action type '{action_type}' in _calculate_reward. Result: {result}")
     
+    def _wait_reward(self, acting_unit: Dict[str, Any], success: bool, game_state: Dict[str, Any]) -> float:
+        """Recompense d'une fin d'activation — SOURCE UNIQUE des branches `wait` et `squad_wait`.
+
+        Les deux branches sont des JUMEAUX exacts : `squad_wait` est le nom porte par le chemin gym
+        (pipeline escouade), `wait` celui du chemin historique. La regle etait ecrite deux fois, et
+        c'est ainsi que le premier correctif d'attente forcee a atterri dans la branche que le gym
+        n'emprunte pas — corrige, puis mesure : le penalty tombait toujours.
+
+        ATTENTE FORCEE. Le masque d'entree n'ouvrait QUE `wait` : l'agent n'a rien choisi, le
+        moteur l'a active puis ne lui a laisse aucune action. `base_actions.wait` sanctionne la
+        passivite CHOISIE (« tu pouvais tirer ou avancer, tu n'as rien fait ») ; l'appliquer a une
+        non-decision ajoute au signal un terme que l'agent ne peut pas eviter. Mesure sur le
+        scenario d'entrainement Armageddon : 31,8 attentes forcees par episode (-3,18), dont 28 en
+        phase de tir — le pool de tir retient toute unite ARMEE sans exiger qu'elle ait une CIBLE
+        (`shoot_pool_require_los_target` est a False par defaut, le pool exact coutant ~1,5 s par
+        transition).
+
+        `pop` et non `get` : le drapeau vaut pour CE step (pose par `W40KEngine.step_with_mask`),
+        jamais pour le suivant (`step_with_mask` purge la cle puis la repose). Il est ABSENT hors chemin
+        gym (PvP, bots) : le defaut `False` y conserve exactement le comportement d'avant.
+
+        Phase `move` : `move_wait` vaut deja 0.0 en dur (cf. `calculate_reward_from_config`), la
+        distinction est conservee telle quelle et n'est pas absorbee par le drapeau.
+        """
+        if bool(game_state.pop("_wait_was_forced", False)):
+            return 0.0
+        if require_key(game_state, "phase") == "move":
+            return self.calculate_reward_from_config(acting_unit, {"type": "move_wait"}, success, game_state)
+        return self.calculate_reward_from_config(acting_unit, {"type": "wait"}, success, game_state)
+
     def calculate_reward_from_config(self, acting_unit: Dict[str, Any], action: Dict[str, Any], success: bool, game_state: Dict[str, Any]) -> float:
         """Exact reproduction of gym40k.py reward calculation."""
         unit_rewards = self._get_unit_reward_config(acting_unit)
