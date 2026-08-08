@@ -123,6 +123,24 @@ class TestBuildValidTargets:
         assert "close" not in ids, "un ennemi déjà engagé est proposé comme cible de charge (11.02)"
         assert "far" in ids, "l'ennemi lointain a disparu : le filtre écarte trop"
 
+    def test_an_enemy_beyond_the_maximum_distance_is_not_declarable(self):
+        """11.04 BEFORE MOVING : « within the MAXIMUM DISTANCE of your unit », pas « atteignable ».
+
+        L'ennemi est a 5 hexes et l'engagement range en vaut 1 : une destination a 4 hexes
+        l'engage donc, et le moteur ne bornait QUE ce trajet — il proposait la cible des le jet
+        de 4, soit une portee de declaration de jet + zone d'engagement. Le jet de 5, lui, doit
+        bien la proposer : sans cette seconde assertion, le refus serait aussi bien celui d'une
+        cible hors de portee tout court.
+        """
+        gs = _make_gs([_unit("1", 1, [(10, 10)]), _unit("2", 2, [(15, 10)])])
+        assert _footprint_distance(gs, "1", "2") == 5, "premisse : la cible est a 5 hexes"
+
+        assert not ch.charge_build_valid_targets(gs, "1", max_distance=4), (
+            "cible declarable avec un jet trop court (11.04 MAXIMUM DISTANCE ignoree)"
+        )
+        gs["_unit_move_version"] += 1  # le pool est memoise par (unite, version, distance max)
+        assert {t["id"] for t in ch.charge_build_valid_targets(gs, "1", max_distance=5)} == {"2"}
+
     def test_the_target_cache_follows_the_move_version(self):
         """Le mémo est indexé sur ``_unit_move_version`` : une figurine qui bouge le périme.
 
@@ -291,6 +309,41 @@ class TestPreviewMovePlan:
         assert out["engaged_all"] is False
         assert out["can_validate"] is False
 
+    def test_taking_to_the_skies_makes_an_out_of_range_target_unvalidatable(self):
+        """11.04 BEFORE MOVING revérifié au CHECK, pas seulement à l'offre de cibles.
+
+        Le vol (21.03) retire 2" à la distance maximale APRÈS que la cible a été déclarée : la
+        cible passe hors de portée de déclaration alors que la destination, elle, reste dans le
+        budget. Le plan restait validable et se committait — la borne n'existait que sur la liste
+        de cibles PROPOSÉE. Cible à 5 hexes, jet 6 : 6 au sol (déclarable, trajet 4), 4 en vol
+        (indéclarable, trajet 4 toujours payable).
+        """
+        charger = _unit("1", 1, [(10, 10)])
+        charger["UNIT_KEYWORDS"] = [{"keywordId": "FLY"}]
+        gs = _make_gs([charger, _unit("2", 2, [(15, 10)])])
+        gs["charge_roll_values"]["1"] = 6
+        gs["charge_target_selections"]["1"] = ["2"]
+        plan = [("1#0", 14, 10, 0)]
+
+        before = ch.charge_preview_move_plan(gs, "1", plan, ["2"])
+        assert before["can_validate"] is True, "prémisse : le plan est validable AVANT le vol"
+
+        ok, state = ch.charge_set_fly_mode_handler(gs, "1", {"plan": [["1#0", 14, 10, 0]]})
+
+        assert ok is True and state["took_to_skies"] is True
+        assert state["can_validate"] is False
+        assert state["missing_targets"] == ["2"]
+        # La figurine reste légale isolément : le refus vient de la DÉCLARATION (la cible n'est
+        # plus à portée du jet), pas d'un budget devenu trop court.
+        assert state["per_model"] == {"1#0": True}
+        # Et le commit refuse, sur le même verdict — c'est lui que le trou laissait passer.
+        committed, res = ch.charge_commit_move_plan_handler(
+            gs, "1", {"plan": [["1#0", 14, 10, 0]]}
+        )
+        assert committed is False
+        assert res["error"] == "invalid_charge_plan"
+        assert res["missing_targets"] == ["2"]
+
     def test_a_plan_without_a_stored_roll_validates_nothing(self):
         """Sans jet enregistré, il n'y a pas de budget : le Check ne peut RIEN valider. Aucune
         valeur de repli n'est inventée (un budget par défaut autoriserait des plans illégaux).
@@ -317,6 +370,34 @@ class TestTargetSelectionHandler:
 
         assert ok is False
         assert res["error"] == "missing_target"
+
+    def test_a_target_beyond_the_maximum_distance_fails_the_charge(self):
+        """11.04 BEFORE MOVING à la DÉCLARATION : un `targetIds` hors du jet n'est pas déclarable.
+
+        Le client n'est pas tenu de ne poster que des cibles offertes, et une sélection faite
+        avant une bascule Take to the skies (21.03) devient hors de portée. Ici le vol est
+        déclaré avant la sélection : jet 6 → distance maximale 4, cible à 5 hexes. La charge est
+        RÉSOLUE en échec (11.02 étape 3), l'unité est consommée — pas de sélection stockée.
+        """
+        charger = _unit("1", 1, [(10, 10)])
+        charger["UNIT_KEYWORDS"] = [{"keywordId": "FLY"}]
+        gs = _make_gs([charger, _unit("2", 2, [(15, 10)])])
+        _activated(gs, "1", 6)
+        gs["units_took_to_skies_charge"].add("1")
+
+        ok, res = ch.charge_target_selection_handler(gs, "1", {"targetIds": ["2"]})
+
+        assert ok is True
+        assert res["action"] == "charge_fail"
+        assert res["charge_failed"] is True
+        assert not gs["charge_target_selections"], "une cible indéclarable a été stockée"
+
+        # Contre-épreuve : SANS le vol, le même jet déclare la même cible et ouvre le pool.
+        gs2 = _make_gs([_unit("1", 1, [(10, 10)]), _unit("2", 2, [(15, 10)])])
+        _activated(gs2, "1", 6)
+        ok2, res2 = ch.charge_target_selection_handler(gs2, "1", {"targetIds": ["2"]})
+        assert ok2 is True and res2["action"] == "charge_target_selected"
+        assert gs2["valid_charge_destinations_pool"], "prémisse : le pool doit être non vide"
 
     def test_the_declared_target_list_is_stored_verbatim(self):
         """11.04 BEFORE MOVING autorise « one or more enemy units » : la liste déclarée doit

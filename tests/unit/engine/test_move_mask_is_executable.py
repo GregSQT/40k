@@ -56,6 +56,43 @@ def _engine(seed):
     return eng
 
 
+def _live_map_squad(engine):
+    """Escouade dont la carte de cellules est CONSTRUITE À CE STEP, ou None si aucune.
+
+    `game_state[MOVE_CELL_MAP_CACHE_KEY]` n'est PAS l'état du masque courant : c'est un dépôt
+    par escouade, purgé seulement à la fin d'une activation (`clear_squad_move_cell_map`).
+    Depuis le choix d'activation (V11 §0.48 `L2`), la branche de choix y stocke la carte de la
+    TÊTE du pool à chaque step de choix ; si l'agent désigne une AUTRE escouade, celle-ci bouge
+    et la carte de la tête reste derrière, exacte au moment où elle a été construite et périmée
+    ensuite. Mesuré (seed 1, board x5) : step 156 carte de 101 stockée à un step de choix, 104
+    activée et déplacée sur le bloc de 101, step 160 la carte de 101 est encore là.
+
+    Le moteur ne lit JAMAIS cette carte-là : le décodeur reconstruit celle de l'escouade traitée
+    (le fingerprint de `build_squad_move_cell_map` voit le déplacement des autres), et le canal de
+    coût de l'observation ne relit la carte que sous les mêmes gardes que celles reproduites ici.
+    Parcourir tout le dépôt reviendrait donc à valider un masque que personne n'a produit.
+
+    Gardes — les MÊMES que celles du décodeur et de l'observation, dans le même ordre :
+      - décision d'agent en attente : le masque n'expose que les `CHOICE_i`, aucune carte n'est
+        construite (c'est exactement l'état du step 160 ci-dessus) ;
+      - escouade en réserves (20.01) : son activation de move est un ingress (20.04), pas un
+        déplacement — aucune carte non plus.
+    """
+    from engine.agent_decision import read_pending_agent_decision
+    from engine.phase_handlers.shared_utils import unit_is_in_strategic_reserves
+
+    game_state = engine.game_state
+    if read_pending_agent_decision(game_state) is not None:
+        return None
+    eligible = engine.action_decoder._get_eligible_units_for_current_phase(game_state)
+    if not eligible:
+        return None
+    squad_id = str(eligible[0]["id"])
+    if unit_is_in_strategic_reserves(game_state, squad_id):
+        return None
+    return squad_id
+
+
 def _budget_for(game_state, squad_id, cost):
     """Budget EXACT appliqué par `execute_squad_move` pour cette cellule.
 
@@ -109,13 +146,12 @@ def test_every_masked_move_cell_is_executable(seed, board):
         mask = eng.get_action_mask()
         gs = eng.game_state
 
-        if gs.get("phase") == "move":
-            move_steps += 1
-            for sid, stored in (gs.get(MOVE_CELL_MAP_CACHE_KEY) or {}).items():
-                cell_map = stored.get("map") if isinstance(stored, dict) else stored
-                if not isinstance(cell_map, dict):
-                    continue
-                squad_id = str(sid)
+        squad_id = _live_map_squad(eng) if gs.get("phase") == "move" else None
+        if squad_id is not None:
+            stored = (gs.get(MOVE_CELL_MAP_CACHE_KEY) or {}).get(squad_id)
+            cell_map = stored.get("map") if isinstance(stored, dict) else stored
+            if isinstance(cell_map, dict):
+                move_steps += 1
                 for (cell, cost) in cell_map.values():
                     budget = _budget_for(gs, squad_id, cost)
                     if budget is None:

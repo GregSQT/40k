@@ -46,7 +46,7 @@ from .shared_utils import (
     is_placement_valid_with_clearance, candidate_overlaps_any_unit,
     _synth_model_entry,
     enemy_entries_on_battlefield, entries_on_battlefield, entry_footprint, entry_is_on_battlefield,
-    roll_charge_distance, unit_can_reroll_charge,
+    roll_charge_distance, unit_can_reroll_charge, charge_target_within_max_distance,
     MovePlan, parse_model_plan, parse_model_plan_as_map, SQUAD_RIGID_MOVE_DESTINATION_LEVEL,
 )
 
@@ -2660,17 +2660,6 @@ def charge_build_valid_targets(game_state: Dict[str, Any], unit_id: str, max_dis
     effective_max = int(max_distance) if max_distance is not None else CHARGE_MAX_DISTANCE
     valid_targets = []
 
-    # Build all hexes reachable via BFS within max charge distance (jet en roll-first, sinon 12").
-    # Aucune capture d'exception : un échec BFS est un bug (root cause), pas « pas de cible » —
-    # laisser remonter explicitement (pas de fallback masquant qui renverrait []).
-    reachable_hexes = charge_build_valid_destinations_pool(game_state, unit_id, effective_max)
-
-    if not reachable_hexes:
-        _bvt_cache[_bvt_key] = []
-        return []  # No reachable hexes
-
-    _t_after_bfs = time.perf_counter() if _perf else None
-
     # Get all enemies - CRITICAL: is_unit_alive so dead units never enter pool
     units_cache = require_key(game_state, "units_cache")
     unit_player = int(unit["player"]) if unit["player"] is not None else None
@@ -2684,23 +2673,53 @@ def charge_build_valid_targets(game_state: Dict[str, Any], unit_id: str, max_dis
 
     engagement_zone = int(get_engagement_zone(game_state))
 
-    fp_offset_pair = _charge_prepare_footprint_offsets(unit, game_state)
-
     unit_id_str = str(unit["id"])
     unit_entry = require_key(units_cache, unit_id_str)
-    occupied_positions = build_occupied_positions_set(game_state, exclude_unit_id=unit_id_str)
 
+    # Filtre des cibles AVANT le BFS : il ne dépend que des entrées-cache, et sans lui on payait
+    # un disque de charge complet (puis la boucle de géométrie) même quand aucun ennemi n'est
+    # déclarable. Le pool BFS n'est mis en cache que pour la déclaration à 12" sans cible.
     enemy_index: List[Tuple[Any, Dict[str, Any], Set[Tuple[int, int]]]] = []
+    _out_of_range: List[str] = []
     for enemy_id in enemies:
         enemy_entry = units_cache.get(str(enemy_id))
         if enemy_entry is None:
             raise KeyError(f"Enemy {enemy_id} not in units_cache (dead or absent)")
+        # 11.04 BEFORE MOVING « within the maximum distance of your unit » — meme borne que le
+        # chemin gym (`charge_build_valid_plan`), lue dans la MEME fonction. Ici aussi la seule
+        # borne etait « une destination du pool BFS engage cet ennemi », donc une portee de
+        # jet + ez au lieu du jet. `effective_max` = le jet en roll-first PvP, les 12" de
+        # declaration sinon.
+        # Teste EN PREMIER : c'est le refus le plus fréquent, et les deux appels reconstruisent
+        # l'empreinte 3D du chargeur pour chaque ennemi.
+        if not charge_target_within_max_distance(unit_entry, enemy_entry, effective_max):
+            _out_of_range.append(
+                f"unit_{enemy_id}(col={enemy_entry['col']},row={enemy_entry['row']})"
+                f" out_of_max_distance={effective_max}"
+            )
+            continue
         # unit_entry / enemy_entry = vraies entrées (données verticales déjà présentes) → 3D direct.
         if unit_entries_within_engagement_zone(unit_entry, enemy_entry, engagement_zone):
             continue
-        ec, er = int(enemy_entry["col"]), int(enemy_entry["row"])
-        enemy_fp = entry_footprint(enemy_entry)
-        enemy_index.append((enemy_id, enemy_entry, enemy_fp))
+        enemy_index.append((enemy_id, enemy_entry, entry_footprint(enemy_entry)))
+
+    if not enemy_index:
+        _bvt_cache[_bvt_key] = []
+        return []
+
+    # Build all hexes reachable via BFS within max charge distance (jet en roll-first, sinon 12").
+    # Aucune capture d'exception : un échec BFS est un bug (root cause), pas « pas de cible » —
+    # laisser remonter explicitement (pas de fallback masquant qui renverrait []).
+    reachable_hexes = charge_build_valid_destinations_pool(game_state, unit_id, effective_max)
+
+    if not reachable_hexes:
+        _bvt_cache[_bvt_key] = []
+        return []  # No reachable hexes
+
+    _t_after_bfs = time.perf_counter() if _perf else None
+
+    fp_offset_pair = _charge_prepare_footprint_offsets(unit, game_state)
+    occupied_positions = build_occupied_positions_set(game_state, exclude_unit_id=unit_id_str)
 
     per_enemy_has_geom: Dict[Any, bool] = {eid: False for eid, _, _ in enemy_index}
     per_enemy_non_occ: Dict[Any, bool] = {eid: False for eid, _, _ in enemy_index}
@@ -2734,7 +2753,7 @@ def charge_build_valid_targets(game_state: Dict[str, Any], unit_id: str, max_dis
 
     # DEBUG LOG — charge target diagnostic
     _valid_ids = [str(t["id"]) for t in valid_targets]
-    _excluded = []
+    _excluded = list(_out_of_range)
     for eid, eentry, _ in enemy_index:
         if str(eid) not in _valid_ids:
             _excluded.append(
@@ -4064,9 +4083,25 @@ def charge_target_selection_handler(game_state: Dict[str, Any], unit_id: str, ac
     target_entries: List[Dict[str, Any]] = []
     valid_pool: List[Tuple[int, int]] = []
     _targets_ok = True
+    _charger_cache_entry = require_unit_from_cache(
+        unit_id, game_state, "charge_target_selection_handler"
+    )
     for _tid in target_ids:
         _te = get_unit_by_id(game_state, _tid)
         if not _te or _te["player"] == unit["player"] or not is_unit_alive(str(_te["id"]), game_state):
+            _targets_ok = False
+            break
+        # 11.04 BEFORE MOVING : la cible DECLAREE doit être dans la distance maximale du jet
+        # (moins les 2" du vol, 21.03). Le contrôle vit ici et pas seulement dans l'offre
+        # (`charge_build_valid_targets`) : la sélection stockée peut avoir été faite AVANT une
+        # bascule Take to the skies, qui retire 2" et rend la cible indéclarable — et rien
+        # n'oblige le client à ne poster que des `targetIds` offerts. Cible hors distance → pool
+        # vide → branche `charge_fail` ci-dessous, comme un jet trop court : c'est le même refus.
+        if not charge_target_within_max_distance(
+            _charger_cache_entry,
+            require_unit_from_cache(str(_te["id"]), game_state, "charge_target_selection_handler"),
+            int(charge_roll_subhex),
+        ):
             _targets_ok = False
             break
         target_entries.append(_te)
@@ -4563,8 +4598,17 @@ def charge_preview_move_plan(
     # une cible absente d'`units_cache` faisait sortir une désynchronisation d'état sous le même
     # message, donc invisible : le joueur lisait « cible non engagée » sur un état corrompu.
     missing: List[str] = []
+    _charger_entry = require_unit_from_cache(squad_id, game_state, "charge_preview_move_plan")
     for tid in (str(t) for t in target_ids):
         tentry = require_unit_from_cache(tid, game_state, "charge_preview_move_plan")
+        # 11.04 BEFORE MOVING, revérifié au moment de VALIDER : la sélection stockée a pu être
+        # faite avant une bascule Take to the skies (21.03), qui retire 2" à la distance maximale
+        # et peut rendre la cible indéclarable. Sans ce contrôle, le plan restait validable et se
+        # committait sur une cible que le jet n'atteignait plus. C'est le même refus métier que
+        # « cible non engagée » — l'unité ne peut pas charger celle-ci — d'où `missing`.
+        if not charge_target_within_max_distance(_charger_entry, tentry, roll_subhex):
+            missing.append(tid)
+            continue
         engaged = False
         for idx, (mid, c, r, lv) in enumerate(norm):
             # 3b : synth au niveau RÉEL de la fig (sol ou étage) → engagement 3D correct en montant.

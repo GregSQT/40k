@@ -371,11 +371,15 @@ def test_the_two_inch_malus_does_not_shrink_the_budget_outside_the_move_phase(ph
 
 _CHARGE_START = (10, 20)
 _CHARGE_ENEMY = (14, 20)  # 4 hexes → le B2B le plus proche est à 3 hexes de trajet
-_FLOOR_HEIGHT_INCHES = 3.0
+#: Plancher HAUT expres : la descente (13.06) doit coûter STRICTEMENT plus que les 2" du vol,
+#: sinon les deux effets de 21.03 se compensent et le test ne les distingue plus. A 3", le jet
+#: minimal était le même au sol et en vol — l'assertion « le vertical est ignoré » était vacante.
+_FLOOR_HEIGHT_INCHES = 6.0
 
 
 def _charge_gs(
-    *, fly: bool, level: int = 0, gym: bool = True, declared: bool = False
+    *, fly: bool, level: int = 0, gym: bool = True, declared: bool = False,
+    floor_height: float = _FLOOR_HEIGHT_INCHES,
 ) -> Dict[str, Any]:
     """`game_state` minimal pour `charge_build_valid_plan` — le chemin d'exécution de l'agent
     (`w40k_core.squad_charge`). `inches_to_subhex = 1`, plancher de niveau 1 haut de 3"."""
@@ -432,7 +436,7 @@ def _charge_gs(
         "units_fled": set(),
         "current_player": 1,
         "terrain_areas": [
-            {"floors": [{"level": 1, "height_inches": _FLOOR_HEIGHT_INCHES,
+            {"floors": [{"level": 1, "height_inches": floor_height,
                          "hexes": floor_hexes}]},
         ],
     }
@@ -457,23 +461,61 @@ def test_ai_charge_flight_pays_the_two_inches_on_the_execution_path():
     """Sur `charge_build_valid_plan` — la fonction qu'exécute `squad_charge`, donc l'agent — le
     vol de charge coûte 2" comme n'importe quelle prise d'altitude. Un jet qui suffit au sol ne
     suffit plus en vol ; il faut 2" de plus."""
-    # Trajet requis jusqu'à l'ENGAGEMENT : 2 subhex (03.04 — l'ER est une zone de 2", pas la
-    # cellule voisine du centre ennemi ; à `inches_to_subhex = 1` elle porte donc à 2 subhex).
-    assert charge_build_valid_plan(_charge_gs(fly=False), "1", ["2"], 2) is not None
-    assert charge_build_valid_plan(_charge_gs(fly=True, declared=True), "1", ["2"], 2) is None
-    assert charge_build_valid_plan(_charge_gs(fly=True, declared=True), "1", ["2"], 4) is not None
+    # 21.03 « Subtract 2" from the maximum distance » — et 11.04 MAXIMUM DISTANCE = le jet, qui
+    # borne AUSSI la déclaration de cible (« within the maximum distance of your unit »). L'ennemi
+    # est à 3 subhex bord à bord : jet minimal 3 au sol, 5 en vol. Le trajet, lui, ne coûte que 2
+    # subhex (03.04 — l'ER est une zone, pas la cellule voisine du centre ennemi), donc c'est bien
+    # la distance maximale qui tranche, et l'écart entre les deux jets minimaux vaut exactement 2.
+    assert charge_build_valid_plan(_charge_gs(fly=False), "1", ["2"], 3) is not None
+    assert charge_build_valid_plan(_charge_gs(fly=True, declared=True), "1", ["2"], 3) is None
+    assert charge_build_valid_plan(_charge_gs(fly=True, declared=True), "1", ["2"], 5) is not None
 
 
 def test_ai_charge_flight_ignores_vertical_distance_but_still_pays():
     """Depuis un étage : le vol supprime le coût de descente (« Ignore all vertical distance »)
     et facture 2". Les deux effets sortent de la MÊME déclaration."""
-    # Descente = 3 subhex (plancher de niveau 1 haut de 3"), trajet jusqu'à l'engagement = 2.
-    # Au sol : jet 4 → budget 4 - 3 = 1 < 2 → impossible.
-    assert charge_build_valid_plan(_charge_gs(fly=False, level=1), "1", ["2"], 4) is None
-    # En vol : jet 4 → budget 4 - 2 (skies) - 0 (vertical ignoré) = 2 → possible.
-    assert charge_build_valid_plan(_charge_gs(fly=True, level=1, declared=True), "1", ["2"], 4) is not None
-    # Mais le vol ne rend pas la charge gratuite : jet 3 → budget 1 < 2.
-    assert charge_build_valid_plan(_charge_gs(fly=True, level=1, declared=True), "1", ["2"], 3) is None
+    # Descente = 6 subhex (plancher de niveau 1), trajet horizontal jusqu'à l'engagement = 2.
+    # Au sol : jet 5 → la cible est déclarable (3 subhex) mais le budget vaut 5 - 6 → 0.
+    assert charge_build_valid_plan(_charge_gs(fly=False, level=1), "1", ["2"], 5) is None
+    # En vol, MÊME jet : distance max 5 - 2 (skies) = 3, la cible reste déclarable, et le budget
+    # vaut 3 - 0 (vertical ignoré) = 3 ≥ 2 → possible. Seul le vertical ignoré fait la différence.
+    assert charge_build_valid_plan(_charge_gs(fly=True, level=1, declared=True), "1", ["2"], 5) is not None
+    # Mais le vol ne rend pas la charge gratuite : jet 4 → distance max 2 < 3, la cible n'est plus
+    # déclarable (11.04). Les 2" sont bien retranchés.
+    assert charge_build_valid_plan(_charge_gs(fly=True, level=1, declared=True), "1", ["2"], 4) is None
+
+
+def test_the_charge_declaration_range_carries_no_vertical_gate():
+    """11.04 mesure une PORTEE, pas un engagement : le gate vertical de 03.04 (5") n'y entre pas.
+
+    La borne « cible dans la distance maximale » s'est d'abord appuyee sur
+    `unit_entries_within_engagement_zone`, qui applique AUSSI la separation verticale de l'ER.
+    Une cible parfaitement a portee horizontale devenait alors indeclarable au seul motif que le
+    chargeur est perche haut — une condition que la regle n'attache pas a la portee de charge. Le
+    vertical se paie sur le TRAJET (13.06), et le vol l'ignore (21.03).
+
+    Plancher a 10" : les tranches verticales sont separees de 7,5" (> 5"), donc le gate refuserait.
+    """
+    from engine.spatial_relations import unit_entries_within_engagement_zone
+
+    gs = _charge_gs(fly=True, level=1, declared=True, floor_height=10.0)
+    charger, target = gs["units_cache"]["1"], gs["units_cache"]["2"]
+    # Couche verticale par-figurine, telle que `build_units_cache` l'ecrit : sans elle les
+    # entrees se mesurent A PLAT et le gate 03.04 ne s'appliquerait meme pas — le test observerait
+    # alors le vide (cf. `entry_has_vertical_data`).
+    charger.update({
+        "occupied_hexes_by_model": {"1#0": _CHARGE_START},
+        "floor_height_by_model": {"1#0": 10.0}, "MODEL_HEIGHT": 2.5,
+    })
+    target.update({
+        "occupied_hexes_by_model": {"2#0": _CHARGE_ENEMY},
+        "floor_height_by_model": {"2#0": 0.0}, "MODEL_HEIGHT": 2.5,
+    })
+    # Premisse : a cette hauteur, la primitive d'ENGAGEMENT refuse la paire quelle que soit la
+    # distance horizontale — c'est ce refus-la qui ne doit pas borner la declaration.
+    assert not unit_entries_within_engagement_zone(charger, target, 3)
+    # Jet 5 en vol : distance max 5 - 2 = 3, la cible est a 3 subhex, le vertical est ignore.
+    assert charge_build_valid_plan(gs, "1", ["2"], 5) is not None
 
 
 def test_human_charge_flight_still_requires_an_explicit_declaration():

@@ -5429,6 +5429,50 @@ def _model_footprint_radius(
     return max(calculate_hex_distance(col, row, fc, fr) for fc, fr in fp)
 
 
+def charge_target_within_max_distance(
+    charger_entry: Dict[str, Any],
+    target_entry: Dict[str, Any],
+    max_distance: int,
+) -> bool:
+    """11.04 BEFORE MOVING : la cible est-elle DANS LA DISTANCE MAXIMALE du chargeur ?
+
+    « Select one or more enemy units that are within 12" of your unit AND WITHIN THE MAXIMUM
+    DISTANCE of your unit » — la distance maximale etant le jet (11.04 MAXIMUM DISTANCE), moins
+    2" si le vol est declare (21.03 « subtract 2" from the maximum distance »). SOURCE UNIQUE de
+    cette borne : le pool gym (`charge_build_valid_plan`), l'offre PvP
+    (`charge_build_valid_targets`), la declaration PvP et la validation du plan la lisent ici.
+
+    C'est une question de PORTEE, pas d'engagement : mesure bord-a-bord par `ranged_in_range`,
+    la primitive du tir, et NON `unit_entries_within_engagement_zone`. Les deux rendent le meme
+    verdict horizontal (le facteur 1,5 de la norme est le meme des deux cotes), mais la primitive
+    d'engagement ajoute le gate VERTICAL de 03.04 (5") : une cible a 3 subhex a l'aplomb d'un
+    plancher haut serait sortie de la portee de charge au nom d'une regle qui ne parle que
+    d'engagement. Le vertical, pour la charge, se paie sur le TRAJET (13.06, cf. le budget de
+    `charge_build_valid_plan`), il ne rétrécit pas la portee de declaration.
+
+    Metrique resolue par `engagement_distance_metric()` SANS `game_state`, comme les ~60 autres
+    call-sites de production : les controles d'engagement qui encadrent cette borne (l'ER de
+    `charge_build_valid_plan`, celui de `charge_build_valid_targets`) la resolvent ainsi, et deux
+    mesures de la meme charge dans deux metriques differentes est precisement la divergence que
+    le selecteur unique existe pour empecher.
+
+    HORS TABLE = pas une cible (11.02 « on the battlefield ») : reserves 20.01 ou unite pas encore
+    posee ne sont a AUCUNE distance, et leurs figurines portent la sentinelle (-1,-1) — les
+    mesurer rendrait une distance inventee.
+    """
+    from engine.combat_utils import ranged_in_range, socle_from_cache_entry
+    from engine.spatial_relations import engagement_distance_metric, entry_is_on_battlefield
+
+    if not entry_is_on_battlefield(charger_entry) or not entry_is_on_battlefield(target_entry):
+        return False
+    return ranged_in_range(
+        socle_from_cache_entry(charger_entry),
+        socle_from_cache_entry(target_entry),
+        int(max_distance),
+        engagement_distance_metric(),
+    )
+
+
 def charge_build_valid_plan(
     game_state: Dict[str, Any],
     squad_id: str,
@@ -5491,8 +5535,11 @@ def charge_build_valid_plan(
     # ligne ici laissait le chemin d'exécution de l'agent (`squad_charge`) ignorer le malus, alors
     # que `squad_descent_penalty_subhex` lui accordait déjà l'ignore vertical du vol — soit
     # exactement le défaut « traversée gratuite », rejoué en phase de charge.
-    budget = max(0, _charge_budget_subhex(game_state, squad_id, int(charge_roll))
-                 - squad_descent_penalty_subhex(game_state, squad_id))
+    # `max_distance` (11.04 MAXIMUM DISTANCE = le jet, moins 2" si le vol est declare) et `budget`
+    # (ce que la figurine peut PARCOURIR) sont deux quantites distinctes : la descente 13.06 se
+    # paie sur le trajet, elle ne rapetisse pas la portee de declaration des cibles.
+    max_distance = _charge_budget_subhex(game_state, squad_id, int(charge_roll))
+    budget = max(0, max_distance - squad_descent_penalty_subhex(game_state, squad_id))
     if budget <= 0:
         return None
 
@@ -5508,23 +5555,8 @@ def charge_build_valid_plan(
     # Résolu UNE fois pour tout le plan et passé à `_hex_legal_for_charge`, qui est appelée par
     # cellule dans les deux BFS ci-dessous. `charge_check_eligibility` a déjà prouvé l'escouade
     # présente dans le cache.
-    _charger_player = int(require_key(
-        require_unit_from_cache(str(squad_id), game_state, "charge_build_valid_plan"), "player"
-    ))
-    # Ennemis NON-ciblés, résolus une seule fois pour tout le plan : `_hex_legal_for_charge` les
-    # réénumérait à chaque cellule de BFS. `_enemy_squad_ids` n'énumère que des ids lus dans
-    # `units_cache`, donc une absence est une désynchronisation (d'où le `require`), pas un
-    # ennemi disparu.
-    # Union des cases occupées par les AUTRES escouades, résolue une seule fois : invariante sur
-    # tout le plan (`units_cache` n'est pas muté entre ici et la fin des BFS ; les cellules
-    # réservées par le plan en cours sont suivies à part, par `occupied_after`).
-    _occupied_by_others = build_occupied_positions_set(game_state, exclude_unit_id=str(squad_id))
-    _declared_targets = {str(t) for t in target_squad_ids}
-    _non_target_enemies = [
-        require_unit_from_cache(esid, game_state, "charge_build_valid_plan/enemy")
-        for esid in _enemy_squad_ids(game_state, _charger_player)
-        if esid not in _declared_targets
-    ]
+    _charger_entry = require_unit_from_cache(str(squad_id), game_state, "charge_build_valid_plan")
+    _charger_player = int(require_key(_charger_entry, "player"))
     # `charge_check_eligibility` (appelée en tête) a DÉJÀ refusé toute cible absente du cache ET
     # toute cible hors table. Le filtre + le contrôle de longueur qui suivaient étaient donc morts,
     # et ils rangeaient une désynchronisation sous le même « plan invalide » que la destruction —
@@ -5540,7 +5572,42 @@ def charge_build_valid_plan(
     # charge est possible sur cet ennemi, et la reponse est non.
     if any(not entry_is_on_battlefield(te) for _tid, te in target_entries_by_id):
         return None
+    # 11.04 BEFORE MOVING : « select one or more enemy units that are within 12" of your unit AND
+    # WITHIN THE MAXIMUM DISTANCE of your unit ». Cette condition MANQUAIT : seule la seconde
+    # moitie de la regle etait implementee (« existe-t-il une destination dans le budget d'ou l'on
+    # finit engage ? »). Comme finir engage veut dire « a ez », le moteur acceptait toute cible a
+    # jet + ez, soit une portee de charge DOUBLEE (mesure : jet de 2, cible a ~4" bord-a-bord,
+    # plan valide). Corollaire de l'encart FAILED CHARGES du PDF 11 — « a result of 2 (a double 1)
+    # is never sufficient, as a unit cannot be within engagement range (2") when it attempts a
+    # charge » — qui n'etait donc pas vrai ici.
+    #
+    # Mesure bord-a-bord (`charge_target_within_max_distance`) et non `calculate_hex_distance`
+    # centre-a-centre : c'est ce qui rend le raisonnement du PDF exact. Pas engage <=> hors de
+    # `ez` bord-a-bord <=> hors de la portee d'un jet de 2 (= ez). Avec deux metriques
+    # differentes, les deux bornes ne se recouperaient plus.
+    if any(
+        not charge_target_within_max_distance(_charger_entry, te, max_distance)
+        for _tid, te in target_entries_by_id
+    ):
+        return None
     target_entries = [te for _tid, te in target_entries_by_id]
+
+    # Résolus APRÈS les refus ci-dessus : ces deux constructions balayent tout `units_cache`, et
+    # ce chemin est chaud (l'observation interroge la fonction pour chaque cible candidate).
+    # Ennemis NON-ciblés, résolus une seule fois pour tout le plan : `_hex_legal_for_charge` les
+    # réénumérait à chaque cellule de BFS. `_enemy_squad_ids` n'énumère que des ids lus dans
+    # `units_cache`, donc une absence est une désynchronisation (d'où le `require`), pas un
+    # ennemi disparu.
+    # Union des cases occupées par les AUTRES escouades, résolue une seule fois : invariante sur
+    # tout le plan (`units_cache` n'est pas muté entre ici et la fin des BFS ; les cellules
+    # réservées par le plan en cours sont suivies à part, par `occupied_after`).
+    _occupied_by_others = build_occupied_positions_set(game_state, exclude_unit_id=str(squad_id))
+    _declared_targets = {str(t) for t in target_squad_ids}
+    _non_target_enemies = [
+        require_unit_from_cache(esid, game_state, "charge_build_valid_plan/enemy")
+        for esid in _enemy_squad_ids(game_state, _charger_player)
+        if esid not in _declared_targets
+    ]
 
     # Portee d'engagement en distance CENTRE-A-CENTRE : borne superieure par inegalite
     # triangulaire hexagonale (ez borde-a-bord + les deux demi-socles). Surensemble : chaque
@@ -5588,7 +5655,6 @@ def charge_build_valid_plan(
     plan: List[Tuple[str, int, int, int]] = []
     occupied_after: Set[Tuple[int, int]] = set()  # cellules deja reservees par ce plan
 
-    _charge_player = int(require_key(units_cache[str(squad_id)], "player"))
     # Sélecteur de métrique de la CHARGE, pas celui du move : cf. `move_plan_distance_mode`.
     from engine.phase_handlers.charge_handlers import _charge_distance_metric
     _charge_metric = _charge_distance_metric(game_state)
@@ -5617,7 +5683,7 @@ def charge_build_valid_plan(
         # le budget dans ses trois geometries — il remplace donc, et ne double pas, le
         # `calculate_hex_distance(origine, cellule) <= budget` qui filtrait les candidats.
         _reachable = model_reach_predicate(
-            game_state, str(squad_id), _charge_player, m, budget,
+            game_state, str(squad_id), _charger_player, m, budget,
             SQUAD_RIGID_MOVE_DESTINATION_LEVEL, metric=_charge_metric,
         )
 

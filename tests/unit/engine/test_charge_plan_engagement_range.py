@@ -7,7 +7,9 @@ Deux defauts fermes ici, tous deux dans `charge_build_valid_plan` — la fonctio
    figurine cible. A `inches_to_subhex = 5` un voisin est a 0,2" quand l'engagement range en
    vaut 2 (03.04) : le plan exigeait ~1,8" de trajet de plus que la regle. Mesure sur le modele
    du 2026-08-01 : **0 charge reussie sur 23 declarations**, alors que l'agent choisissait la
-   charge 70 % des fois ou le masque la proposait.
+   charge 70 % des fois ou le masque la proposait. Pire sur un socle large, ce que la fixture
+   reproduit desormais : les voisins du centre sont A L'INTERIEUR du socle cible, donc occupes,
+   donc AUCUNE destination n'existait, quel que soit le jet.
 
 2. **Validation finale**. Elle exigeait que TOUTES les figurines finissent engagees. 11.04
    AFTER MOVING dit « **your unit** must be engaged with all of the charge targets » et 03.04
@@ -20,29 +22,45 @@ qui ne peuvent pas engager doivent SUIVRE (le plan avance chacune au plus loin d
 sans quoi la coherency (03.03) rejette le plan et l'escouade nombreuse ne charge jamais.
 
 Geometrie : `inches_to_subhex = 5` (l'echelle d'entrainement), `engagement_zone = 10` subhex
-= 2". Cible a 45 subhex = 9" : le trajet vers l'ENGAGEMENT vaut 35 subhex (jet 7), celui vers
-la cellule voisine du centre en valait 44 (jet 9).
+= 2". Cible a 45 subhex de CENTRE a centre, sur un socle de 11 subhex (2,2", un socle de
+monstre) : 40 subhex bord a bord, et un trajet de 30 subhex pour venir a l'engagement.
+
+La borne de declaration 11.04 (« within the maximum distance of your unit ») se lit donc
+directement sur ces trois nombres : un jet de 8 (40 subhex) couvre la distance BORD A BORD et
+la charge est declarable ; un jet de 7 (35) ne la couvre pas — et ce, bien que le trajet de 30
+tienne largement dans son budget. C'est exactement ce qui manquait au moteur jusqu'au
+2026-08-08 : il ne bornait que le TRAJET, donc acceptait toute cible a jet + ez, soit une
+portee de charge doublee.
 """
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import pytest
 
+from engine.hex_utils import compute_occupied_hexes
 from engine.phase_handlers.shared_utils import (
+    _synth_model_entry,
     calculate_hex_distance,
     charge_build_valid_plan,
     get_engagement_zone,
 )
+from engine.spatial_relations import unit_entries_within_engagement_zone
 from tests._state_invariants import turn_state_invariants, unit_invariants
 
 ISH = 5
 CHARGER_COL = 100
 CHARGER_ROW = 84
 TARGET = (145, 84)
-#: Jet qui couvre le trajet vers l'engagement (45 - 10 = 35 subhex) et pas le trajet vers la
-#: cellule voisine du centre ennemi (44 subhex).
-ROLL_REACHES_ENGAGEMENT = 7
-ROLL_TOO_SHORT = 6
+#: Socle de la cible, en subhex (2,2" a ISH = 5). Large expres : les voisins hexagonaux du
+#: centre ennemi tombent alors DANS le socle, donc la lecture « destination = voisin du centre »
+#: ne rend aucune cellule legale, quand la lecture ZONE D'ENGAGEMENT en rend un arc entier.
+TARGET_BASE_SIZE = 11
+#: Jet qui couvre la distance BORD A BORD (40 subhex) : la cible est declarable (11.04) et le
+#: trajet vers l'engagement (30 subhex) tient dans le budget.
+ROLL_REACHES_ENGAGEMENT = 8
+#: Jet dont le budget (35) couvre le TRAJET (30) mais PAS la distance bord a bord (40) : la
+#: cible n'est pas selectionnable, la charge echoue. Verrou de la borne 11.04.
+ROLL_TOO_SHORT = 7
 
 
 def _gs(
@@ -63,8 +81,12 @@ def _gs(
     }
     unit2 = {**unit_invariants(),
         "id": 2, "player": 2, "col": TARGET[0], "row": TARGET[1], "MOVE": 6,
-        "HP_CUR": 1, "BASE_SIZE": 1, "BASE_SHAPE": "round", "UNIT_KEYWORDS": [], "level": 0,
+        "HP_CUR": 1, "BASE_SIZE": TARGET_BASE_SIZE, "BASE_SHAPE": "round",
+        "UNIT_KEYWORDS": [], "level": 0,
     }
+    target_footprint = set(
+        compute_occupied_hexes(TARGET[0], TARGET[1], "round", TARGET_BASE_SIZE, 0)
+    )
     models_cache: Dict[str, Any] = {}
     for i, (col, row) in enumerate(charger_positions):
         models_cache[f"1#{i}"] = {
@@ -73,7 +95,7 @@ def _gs(
         }
     models_cache["2#0"] = {
         "col": TARGET[0], "row": TARGET[1], "level": 0, "player": 2, "squad_id": "2",
-        "HP_CUR": 1, "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0,
+        "HP_CUR": 1, "BASE_SHAPE": "round", "BASE_SIZE": TARGET_BASE_SIZE, "orientation": 0,
     }
     units = [unit1, unit2]
     squad_models = {
@@ -84,7 +106,8 @@ def _gs(
         "1": {"col": charger_positions[0][0], "row": charger_positions[0][1], "player": 1,
               "occupied_hexes": set(charger_positions), "BASE_SHAPE": "round", "BASE_SIZE": 1},
         "2": {"col": TARGET[0], "row": TARGET[1], "player": 2,
-              "occupied_hexes": {TARGET}, "BASE_SHAPE": "round", "BASE_SIZE": 1},
+              "occupied_hexes": target_footprint, "BASE_SHAPE": "round",
+              "BASE_SIZE": TARGET_BASE_SIZE},
     }
     if bystander_cells:
         # Escouade tierce AMIE : la collision physique porte sur TOUTES les escouades, cible ou
@@ -143,17 +166,71 @@ def _plan_positions(plan: List[Tuple[str, int, int, int]]) -> Dict[str, Tuple[in
     return {mid: (col, row) for mid, col, row, _lvl in plan}
 
 
-def test_fixture_target_is_out_of_neighbour_reach_but_within_engagement_reach():
-    """La fixture DOIT etre dans la fenetre qui separe les deux regles, sinon elle ne prouve rien.
+def _engaging_cells(gs: Dict[str, Any], roll: int) -> Set[Tuple[int, int]]:
+    """TOUTES les cellules d'ou la figurine `1#0` finit engagee avec la cible, dans le budget.
 
-    Trajet vers l'engagement = 35 subhex (jet 7 x 5 = 35) ; trajet vers la cellule voisine du
-    centre ennemi = 44. Un jet de 7 tranche donc entre les deux lectures.
+    Enumeration exhaustive du rectangle atteignable, et non une liste ecrite a la main : depuis
+    que la borne 11.04 s'applique, le budget depasse TOUJOURS le trajet requis d'au moins un
+    engagement range — l'ensemble engageant est un arc de deux cents cellules, pas les sept d'un
+    anneau serre. Les deux verrous de collision plus bas s'en servent comme premisse : boucher
+    autre chose que la totalite ne prouverait rien.
+
+    Mesure independante du plan : `unit_entries_within_engagement_zone` (le contrat 03.04) et une
+    distance de grille, pas le predicat de trajet que `charge_build_valid_plan` utilise.
+    """
+    budget = roll * ISH
+    model = gs["models_cache"]["1#0"]
+    return {
+        (col, row)
+        for col in range(CHARGER_COL, TARGET[0] + 1)
+        for row in range(CHARGER_ROW - budget, CHARGER_ROW + budget + 1)
+        if calculate_hex_distance(CHARGER_COL, CHARGER_ROW, col, row) <= budget
+        and unit_entries_within_engagement_zone(
+            _synth_model_entry(gs, "1", model, col, row),
+            gs["units_cache"]["2"],
+            get_engagement_zone(gs),
+        )
+    }
+
+
+def test_fixture_neighbours_of_the_target_centre_are_inside_its_base():
+    """Premisse du defaut n°1 : les voisins du centre ennemi sont DANS le socle, donc occupes.
+
+    Sans cela, la lecture « destination = voisin du centre » rendrait des cellules legales et le
+    fichier ne distinguerait plus les deux lectures : a socle d'un subhex, toute cible
+    declarable (11.04) laisse aussi un voisin de son centre a portee.
     """
     gs = _gs([CHARGER_COL])
     assert get_engagement_zone(gs) == 10
     assert calculate_hex_distance(CHARGER_COL, CHARGER_ROW, *TARGET) == 45
-    assert ROLL_REACHES_ENGAGEMENT * ISH == 35
-    assert 35 < 44  # le voisin du centre reste hors de portee de ce jet
+    footprint = gs["units_cache"]["2"]["occupied_hexes"]
+    neighbours = {
+        (col, row)
+        for col in range(TARGET[0] - 1, TARGET[0] + 2)
+        for row in range(TARGET[1] - 1, TARGET[1] + 2)
+        if calculate_hex_distance(TARGET[0], TARGET[1], col, row) == 1
+    }
+    assert neighbours, "enumeration cassee : aucun voisin"
+    assert neighbours <= footprint
+
+
+def test_fixture_separates_the_declaration_bound_from_the_travel_bound():
+    """Premisse de la borne 11.04 : les deux jets encadrent la distance BORD A BORD.
+
+    `ROLL_TOO_SHORT` est le jet qui rend les deux bornes distinguables : son budget couvre le
+    trajet vers l'engagement mais pas la distance a la cible. Si la fixture perdait cet ecart,
+    `test_single_model_charge_still_fails_when_the_roll_is_short` ne testerait plus rien.
+    """
+    gs = _gs([CHARGER_COL])
+    charger, target = gs["units_cache"]["1"], gs["units_cache"]["2"]
+    assert unit_entries_within_engagement_zone(charger, target, ROLL_REACHES_ENGAGEMENT * ISH)
+    assert not unit_entries_within_engagement_zone(charger, target, ROLL_TOO_SHORT * ISH)
+    # Le trajet, lui, tient dans le budget du jet trop court : c'est bien la borne de
+    # DECLARATION qui tranche ici, pas une cible hors d'atteinte.
+    assert min(
+        calculate_hex_distance(CHARGER_COL, CHARGER_ROW, col, row)
+        for col, row in _engaging_cells(gs, ROLL_REACHES_ENGAGEMENT)
+    ) <= ROLL_TOO_SHORT * ISH
 
 
 def test_single_model_charge_reaches_engagement_range():
@@ -166,11 +243,53 @@ def test_single_model_charge_reaches_engagement_range():
 
 
 def test_single_model_charge_still_fails_when_the_roll_is_short():
-    """Contre-epreuve : la correction n'ouvre pas la charge a n'importe quel jet.
+    """11.04 BEFORE MOVING : une cible hors de la DISTANCE MAXIMALE n'est pas selectionnable.
 
-    Jet 6 → budget 30 < 35 : la cible reste hors d'atteinte, meme a l'engagement range.
+    Jet 7 → budget 35 : il couvre le trajet vers l'engagement (30 subhex) mais pas la distance
+    bord a bord a la cible (40). La charge doit echouer sur la borne de DECLARATION, alors meme
+    que la destination serait atteignable — c'est precisement ce que le moteur ignorait, et ce
+    qui lui donnait une portee de charge de jet + engagement range.
     """
     assert charge_build_valid_plan(_gs([CHARGER_COL]), "1", ["2"], ROLL_TOO_SHORT) is None
+
+
+def test_a_roll_of_two_can_never_produce_a_plan():
+    """Encart FAILED CHARGES (PDF 11) : « a result of 2 (a double 1) is never sufficient ».
+
+    Le raisonnement du livre : une unite qui declare une charge n'est jamais engagee, elle est
+    donc a PLUS de 2" — soit plus que la distance maximale d'un jet de 2. La cible est ici posee
+    juste hors de l'engagement range, le cas le plus favorable qui soit ; le plan doit quand
+    meme etre refuse. Verrou de la borne, independant des distances de la fixture.
+    """
+    gs = _gs([CHARGER_COL])
+    ez = get_engagement_zone(gs)
+    charger = gs["units_cache"]["1"]
+    # Cible ramenee AU PLUS PRES du chargeur, juste au-dela de l'ER : une unite engagee ne
+    # declare pas de charge (11.02), donc c'est le cas le plus favorable possible. Balayage
+    # depuis le chargeur vers la cible, premiere colonne NON engagee retenue — l'ordre inverse
+    # rendrait la position d'origine et le test ne mesurerait plus rien.
+    for col in range(CHARGER_COL + 1, TARGET[0] + 1):
+        moved = {
+            **gs["units_cache"]["2"], "col": col,
+            "occupied_hexes": set(
+                compute_occupied_hexes(col, TARGET[1], "round", TARGET_BASE_SIZE, 0)
+            ),
+        }
+        if unit_entries_within_engagement_zone(charger, moved, ez):
+            continue
+        for entry in (gs["units_cache"]["2"], gs["models_cache"]["2#0"], gs["unit_by_id"]["2"]):
+            entry["col"] = col
+        gs["units_cache"]["2"]["occupied_hexes"] = set(
+            compute_occupied_hexes(col, TARGET[1], "round", TARGET_BASE_SIZE, 0)
+        )
+        break
+    else:
+        raise AssertionError("fixture cassee : aucune position hors ER trouvee")
+    assert not unit_entries_within_engagement_zone(charger, gs["units_cache"]["2"], ez)
+    assert charge_build_valid_plan(gs, "1", ["2"], 2) is None
+    # Contre-epreuve, sans quoi le refus ci-dessus serait celui d'une cible simplement trop loin :
+    # a UN subhex de plus de distance maximale, la meme charge passe.
+    assert charge_build_valid_plan(gs, "1", ["2"], 3) is not None
 
 
 def test_squad_charges_when_a_single_model_can_engage():
@@ -262,37 +381,6 @@ def test_the_engagement_disc_is_empty_for_a_negative_radius() -> None:
 
     assert list(_hex_cells_within_radius(100, 84, -1)) == []
 
-#: Les SEULES cellules d'ou une figurine partie de (CHARGER_COL, CHARGER_ROW) peut finir engagee
-#: avec la cible pour ROLL_REACHES_ENGAGEMENT (budget 35 subhex) : enumeration exhaustive du
-#: rectangle atteignable, verifiee par `test_fixture_engaging_cells_are_exhaustive`.
-ENGAGING_CELLS = [(135, r) for r in range(81, 88)]
-
-
-def test_fixture_engaging_cells_are_exhaustive() -> None:
-    """Premisse des deux verrous suivants : ENGAGING_CELLS est bien TOUT ce qui engage.
-
-    Sans cette enumeration, boucher ces sept cases prouverait seulement qu'on a bouche sept
-    cases parmi d'autres — le plan pourrait aboutir ailleurs et le verrou serait vide.
-    """
-    from engine.phase_handlers.shared_utils import _synth_model_entry
-    from engine.spatial_relations import unit_entries_within_engagement_zone
-
-    gs = _gs([CHARGER_COL])
-    ez = get_engagement_zone(gs)
-    budget = ROLL_REACHES_ENGAGEMENT * ISH
-    model = gs["models_cache"]["1#0"]
-    found = {
-        (col, row)
-        for col in range(CHARGER_COL, TARGET[0] + 1)
-        for row in range(CHARGER_ROW - budget, CHARGER_ROW + budget + 1)
-        if calculate_hex_distance(CHARGER_COL, CHARGER_ROW, col, row) <= budget
-        and unit_entries_within_engagement_zone(
-            _synth_model_entry(gs, "1", model, col, row), gs["units_cache"]["2"], ez
-        )
-    }
-    assert found == set(ENGAGING_CELLS)
-
-
 def test_a_third_squad_forbids_the_cell_it_occupies() -> None:
     """Collision physique : la case occupee par une escouade tierce n'est pas une destination.
 
@@ -309,7 +397,7 @@ def test_a_third_squad_forbids_the_cell_it_occupies() -> None:
     assert blocked is not None, "boucher UNE case ne doit pas annuler la charge"
     _mid2, col2, row2, _lvl2 = blocked[0]
     assert (col2, row2) != (picked_col, picked_row)
-    assert (col2, row2) in set(ENGAGING_CELLS)
+    assert (col2, row2) in _engaging_cells(_gs([CHARGER_COL]), ROLL_REACHES_ENGAGEMENT)
 
 
 def test_a_third_squad_covering_every_engaging_cell_cancels_the_charge() -> None:
@@ -320,6 +408,7 @@ def test_a_third_squad_covering_every_engaging_cell_cancels_the_charge() -> None
     assert charge_build_valid_plan(
         _gs([CHARGER_COL]), "1", ["2"], ROLL_REACHES_ENGAGEMENT
     ) is not None
+    engaging = sorted(_engaging_cells(_gs([CHARGER_COL]), ROLL_REACHES_ENGAGEMENT))
     assert charge_build_valid_plan(
-        _gs([CHARGER_COL], ENGAGING_CELLS), "1", ["2"], ROLL_REACHES_ENGAGEMENT
+        _gs([CHARGER_COL], engaging), "1", ["2"], ROLL_REACHES_ENGAGEMENT
     ) is None

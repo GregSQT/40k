@@ -56,17 +56,29 @@ ENTRAÎNEMENT IA :
 - Pas de tests automatisés — validation via --step + analyzer.py + replay
 
 TESTS — QUI LANCE QUOI (NON NÉGOCIABLE) :
-- La VÉRIFICATION LARGE appartient à l'utilisateur. Il la lance lui-même, avec SA commande :
-  `python3 -m pytest tests/unit/ -q -n 8 --dist worksteal ; pyright ; p ai/hidden_action_finder.py ;
-   p scripts/check_ai_rules.py ; npx biome check frontend/src ;
+- La VÉRIFICATION LARGE appartient à l'utilisateur. Sa commande de référence :
+  `python3 -m pytest tests/unit/ -q -n 8 --dist worksteal ;
+   python3 -m pytest tests/integration/pvp/ -q -n 6 --dist load ; pyright ;
+   p ai/hidden_action_finder.py ; p scripts/check_ai_rules.py ; npx biome check frontend/src ;
    (cd frontend && npx tsc --noEmit -p tsconfig.app.json)`
-- UN AGENT NE LANCE JAMAIS LA SUITE COMPLÈTE. Ni `pytest tests/unit/`, ni `pytest tests/`,
+- PAR DÉFAUT, UN AGENT NE LA LANCE JAMAIS. Ni `pytest tests/unit/`, ni `pytest tests/`,
   ni `pytest` nu, sous aucune forme (y compris derrière un `source .venv/... &&`).
   Un hook la REFUSE (.claude/hooks/deny-full-test-suite.sh) — inutile de contourner.
-- Ce qu'un agent DOIT faire : lancer les FICHIERS de test ciblés qu'il vient d'écrire ou de
-  toucher (`pytest tests/unit/engine/test_xxx.py`), aussi souvent qu'il veut.
-- Si une validation large semble nécessaire, LE DIRE à l'utilisateur et s'arrêter là. Ne jamais
-  annoncer « suite verte » sans l'avoir réellement obtenue de lui.
+- DÉLÉGATION PONCTUELLE — seule exception. L'utilisateur peut confier cette vérification à
+  l'agent, et seulement ainsi :
+  * l'autorisation doit être EXPLICITE et porter sur les tests, dans le PROMPT COURANT ;
+  * elle vaut pour ce prompt SEUL. Elle ne se reconduit pas au prompt suivant, ne se déduit
+    d'aucun contexte, d'aucun mode (AGENT/AUTO/NUIT), d'aucune tâche « qui aurait besoin » de
+    la suite, ni d'une autorisation donnée plus tôt dans la même session ;
+  * elle se retire en ne la redonnant pas. Aucune formule de retrait n'est nécessaire ;
+  * en cas de doute sur l'existence de l'autorisation : elle n'existe pas. DEMANDER.
+  Quand — et seulement quand — elle est donnée, l'agent ajoute en FIN de ligne de commande le
+  marqueur `# VERIF-LARGE-AUTORISEE`, qui ouvre la porte de sortie du hook. Ajouter ce marqueur
+  sans autorisation du prompt courant est une faute grave, au même titre qu'un contournement.
+- Ce qu'un agent DOIT faire dans tous les cas : lancer les FICHIERS de test ciblés qu'il vient
+  d'écrire ou de toucher (`pytest tests/unit/engine/test_xxx.py`), aussi souvent qu'il veut.
+- Sans autorisation, si une validation large semble nécessaire : LE DIRE à l'utilisateur et
+  s'arrêter là. Ne jamais annoncer « suite verte » sans l'avoir réellement obtenue.
 - Outils de conformité (documentés dans Documentation/Code_Compliance/) : `scripts/check_ai_rules.py`
   et `ai/hidden_action_finder.py` font partie de la vérification de l'utilisateur, pas de la tienne.
 
@@ -247,7 +259,11 @@ conclusion, il ne s'y ajoute pas. Ne jamais y répéter ce qui vient d'être dit
   pure lecture, doc seule, discussion). Lister les chemins RÉELLEMENT modifiés dans CETTE tâche,
   jamais l'ensemble du working tree — copiables tels quels, sans reformulation. `/code-review`
   d'abord (bugs), `/simplify` ensuite (conception sur du code déjà correct). Ces deux commandes
-  appartiennent à l'utilisateur : ne JAMAIS les lancer soi-même, seulement les écrire.
+  appartiennent à l'utilisateur : PAR DÉFAUT, ne JAMAIS les lancer soi-même, seulement les écrire.
+  Même régime de délégation ponctuelle que la vérification large ci-dessus : l'agent ne les
+  exécute que si le PROMPT COURANT l'y autorise explicitement, l'autorisation ne vaut que pour
+  ce prompt, ne se déduit d'aucun contexte et se retire en ne la redonnant pas. En cas de doute,
+  elle n'existe pas : écrire la ligne RELIRE et s'arrêter là.
 
 T3. INVESTIGATION AUTONOME — PRIME SUR LES RÈGLES ASK 1 ET 5
 - Si l'utilisateur demande explicitement d'investiguer un problème, d'analyser une erreur, ou de trouver la root cause :
