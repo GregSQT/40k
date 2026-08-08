@@ -27,7 +27,7 @@ import pytest
 
 from engine.phase_handlers.shared_utils import explain_move_plan_rejection
 
-SCENARIO = "config/agents/ArmageddonAgent/scenarios/training/scenario_training_armageddon.json"
+SCENARIO = "config/agents/ArmageddonAgent/scenarios/training/scenario_training_armageddon1.json"
 
 # Contraintes neutralisées : on isole le SEUL prédicat de collision intra-plan.
 _ISOLATE_COLLISION = {

@@ -49,7 +49,7 @@ def test_pvp_fixed_placement_terrain_zones_loads(scen):
 
 def test_terrain_zone_random_deployment_gets_pool():
     """Banque : deployment_type random + zones terrain → pool peuplé, reset sans erreur."""
-    eng = _load(str(BANK_DIR / "scenario_training_armageddon.json"))
+    eng = _load(str(BANK_DIR / "scenario_training_armageddon1.json"))
     pools = eng.config.get("deployment_pools")
     assert isinstance(pools, dict) and sorted(pools.keys()) == [1, 2]
 
@@ -88,7 +88,7 @@ def test_deployment_zones_are_identical_in_fixed_and_active_mode():
     Le test compare les DEUX modes plutôt que de compter les murs d'un seul : c'est l'identité
     qui est le contrat, le comptage n'en est qu'un symptôme.
     """
-    eng = _load(str(BANK_DIR / "scenario_training_armageddon.json"))
+    eng = _load(str(BANK_DIR / "scenario_training_armageddon1.json"))
     walls = {(int(c), int(r)) for c, r in eng.game_state["wall_hexes"]}
     assert walls, "scénario sans mur : ce test ne prouverait rien (vert vacant)"
 

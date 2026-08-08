@@ -31,7 +31,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 # Rosters a reserves DECLAREES des deux cotes (agent ET adversaire) — cf. l'en-tete de la fixture.
 SCENARIO = (
     PROJECT_ROOT / "config" / "agents" / "ArmageddonAgent" / "scenarios" / "training"
-    / "reserves_full_episode_fixture.json"
+    / "reserves_full_episode_fixture1.json"
 )
 
 SENTINEL_COL = -1

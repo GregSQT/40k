@@ -55,7 +55,7 @@ PROJECT_ROOT = os.path.dirname(
 )
 TEMPLATE = os.path.join(
     PROJECT_ROOT,
-    "config/agents/ArmageddonAgent/scenarios/training/scenario_training_armageddon.json",
+    "config/agents/ArmageddonAgent/scenarios/training/scenario_training_armageddon1.json",
 )
 
 # Memes fixtures que test_attached_units_abilities_19_04 : `AssaultIntercessor` porte

@@ -157,7 +157,7 @@ ACTIVE_DEPLOYMENT_SCENARIO = (
 #: Scénario d'ENTRAÎNEMENT réel, le pendant de `ACTIVE_DEPLOYMENT_SCENARIO` pour les tests qui
 #: veulent la config et l'état du chemin gym plutôt qu'une phase de déploiement active.
 TRAINING_SCENARIO = (
-    "config/agents/ArmageddonAgent/scenarios/training/scenario_training_armageddon.json"
+    "config/agents/ArmageddonAgent/scenarios/training/scenario_training_armageddon1.json"
 )
 
 

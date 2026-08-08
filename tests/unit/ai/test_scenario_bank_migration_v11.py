@@ -140,7 +140,7 @@ def test_bank_scenario_has_no_legacy_and_valid_refs(scen):
 # ── Échantillon chargé de bout en bout (moteur + reset) ─────────────────────────
 
 _SAMPLE = [
-    "training/scenario_training_armageddon.json",   # training_random + opponent_roster_ref liste
+    "training/scenario_training_armageddon1.json",   # training_random + opponent_roster_ref liste
     "holdout_regular/scenario_bot-01.json",         # roster explicite holdout, matchup SM vs SM
     "holdout_regular/scenario_bot-02.json",         # matchup mixte SM vs Ork
 ]

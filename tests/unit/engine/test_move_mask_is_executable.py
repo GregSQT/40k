@@ -34,7 +34,7 @@ from engine.phase_handlers.shared_utils import (
     validate_move_plan,
 )
 
-SCENARIO = "config/agents/ArmageddonAgent/scenarios/training/scenario_training_armageddon.json"
+SCENARIO = "config/agents/ArmageddonAgent/scenarios/training/scenario_training_armageddon1.json"
 MAX_STEPS = 400
 
 

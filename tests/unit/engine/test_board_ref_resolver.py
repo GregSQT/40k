@@ -24,7 +24,7 @@ PVP_SCEN = str(BOARD_DIR / "scenario" / "scenario_pvp_test.json")
 # Scénario banque par-agent (hors dossier 'scenario/')
 BANK_SCEN = str(
     PROJECT_ROOT / "config" / "agents" / "ArmageddonAgent" / "scenarios" / "training"
-    / "scenario_training_armageddon.json"
+    / "scenario_training_armageddon1.json"
 )
 
 

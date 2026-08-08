@@ -112,7 +112,7 @@ from engine.phase_handlers.shared_utils import (
     store_squad_move_cell_map,
 )
 
-SCENARIO = "config/agents/ArmageddonAgent/scenarios/training/scenario_training_armageddon.json"
+SCENARIO = "config/agents/ArmageddonAgent/scenarios/training/scenario_training_armageddon1.json"
 
 #: Les trois seules intentions de mouvement d'escouade. Le TYPE n'est pas une dimension d'action
 #: (§6.2) : il est inféré du coût géodésique de la cellule, donc le verrou porte sur la famille
