@@ -450,6 +450,19 @@ describe("replayParser", () => {
     const relanceSeule = parse(shootLine(" [TARGETED INTERCESSION]"));
     expect(relanceSeule.wound_ability).toBe("TARGETED INTERCESSION");
     expect(relanceSeule.wound_bonus_ability).toBeUndefined();
+
+    // [TWIN-LINKED] 24.38 ouvre elle aussi une relance de blessure, mais c'est une règle
+    // d'ARME : elle a son propre champ. Sans ce classement, elle atterrissait dans
+    // `wound_ability`, où l'analyzer et le rendu comptent des capacités d'UNITÉ — la confusion
+    // exacte que le moteur défait en lui donnant `woundRerollRule`.
+    const regleArme = parse(shootLine(" [TWIN-LINKED] [REROLLED:1]")) as {
+      wound_ability?: string;
+      wound_reroll_rule?: string;
+      wound_roll_initial?: number;
+    };
+    expect(regleArme.wound_reroll_rule).toBe("TWIN-LINKED");
+    expect(regleArme.wound_ability).toBeUndefined();
+    expect(regleArme.wound_roll_initial).toBe(1);
   });
 
   it("ne prend aucun token de règle d'arme pour une capacité", () => {

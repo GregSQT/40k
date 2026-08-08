@@ -169,6 +169,16 @@ def test_le_log_de_tir_affiche_le_token_heavy(monkeypatch):
             # Waaagh! (08.04) : mêmes clés exigées par l'émission, mêmes copies depuis l'intent.
             "waaagh_melee_bonus": r["waaagh_melee_bonus"],
             "waaagh_target_invul": r["waaagh_target_invul"],
+            # Arme + profil de regles : le vrai regroupement les garde par reference et c est
+            # l emission qui en tire les tokens — dont [HEAVY], que ce test observe.
+            "weapon": r["weapon"], "attack_profile": r["attack_profile"],
+            "dmg_bonus": r["dmg_bonus"],
+            # [PRECISION] : pose a l allocation, absente ici (aucun groupe CHARACTER).
+            "precision_applied": False,
+            # Des additionnels [BLAST]/[CLEAVE] : accumules sur le groupe par le vrai
+            # regroupement (ici une seule figurine, donc la valeur de l intent).
+            "extra_dice_by_rule": r["extra_dice_by_rule"],
+            "point_blank_malus": r["point_blank_malus"],
             "player": 0,
         }
         _emit_squad_shoot_log(gs, group, SHOOT_CTX)

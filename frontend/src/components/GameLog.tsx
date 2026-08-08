@@ -25,6 +25,13 @@ const ruleToken = (name?: string): string => {
   return trimmed ? ` [${trimmed.toUpperCase()}]` : "";
 };
 
+/** Token d'une règle d'arme dont le moteur ne pose qu'un DRAPEAU sur le tir (`autoHit`,
+ *  `sustainedHit`…), le nom restant côté affichage. Passe par `ruleToken` : la forme du token
+ *  est ce que `RULE_TOKEN_REGEX` reconnaît pour accrocher la bulle d'aide, elle ne doit avoir
+ *  qu'une seule définition. */
+const flagToken = (applies: boolean | undefined, ruleName: string): string =>
+  applies ? ruleToken(ruleName) : "";
+
 /** Jet de dé : « final » seul, ou « initial->final » quand le dé a été relancé.
  *
  *  `== null` et pas `=== undefined` : une attaque sans jet ([TORRENT], touche [SUSTAINED HITS],
@@ -290,6 +297,30 @@ export const GameLog: React.FC<GameLogProps> = ({
     );
     setRuleDescription(descriptions, "MW", "Direct damages, no save roll.", false);
     setRuleDescription(descriptions, "COVER", "-1 BS for the shooter against this target.", false);
+    // 10.06 : règle de PHASE, donc absente de weapon_rules.json — comme COVER juste au-dessus,
+    // sa bulle d'aide est écrite ici.
+    setRuleDescription(
+      descriptions,
+      "POINT-BLANK",
+      "Close-quarters shooting (10.06): each time a MONSTER or VEHICLE model shoots, subtract 1 from the hit roll unless the attack is made with a [CLOSE-QUARTERS] weapon against a unit its own unit is engaged with.",
+      false
+    );
+    // 05.01 / 05.02 : les deux critiques ne sont pas des règles d'ARME (donc absents de
+    // `weapon_rules.json`) mais ce sont eux qui déclenchent [SUSTAINED HITS], [LETHAL HITS] et
+    // [DEVASTATING WOUNDS] dans le détail par tir — sans bulle d'aide, le lecteur voit le token
+    // sans savoir ce qu'il conditionne.
+    setRuleDescription(
+      descriptions,
+      "CRITICAL HIT",
+      "Attack sequence (05.01): an unmodified Hit roll of 6 always hits and is a Critical Hit — it triggers [SUSTAINED HITS] and [LETHAL HITS].",
+      false
+    );
+    setRuleDescription(
+      descriptions,
+      "CRITICAL WOUND",
+      "Attack sequence (05.02): an unmodified Wound roll of 6 — or of the [ANTI-X Y+] threshold — always wounds and is a Critical Wound, which triggers [DEVASTATING WOUNDS].",
+      false
+    );
     setRuleDescription(
       descriptions,
       "HAZARD",
@@ -587,15 +618,33 @@ export const GameLog: React.FC<GameLogProps> = ({
                                 if (event.weaponName) parts.push(event.weaponName);
                                 const targetType = shot.targetUnitType ?? event.targetUnitType;
                                 if (targetType) parts.push(targetType);
-                                // Capacités nommées par le moteur sur chaque record : relance
-                                // EFFECTUÉE (`hitAbility` / `woundAbility`) et MODIFICATEUR de
-                                // blessure (`woundBonusAbility`, le +1 d'Oath).
+                                // Deux sources de tokens sur un même segment, et une seule
+                                // grammaire (`ruleToken`) : les CAPACITÉS d'unité nommées par le
+                                // moteur (`hitAbility` / `woundAbility` = relance EFFECTUÉE,
+                                // `woundBonusAbility` = le +1 d'Oath) et les RÈGLES D'ARME ayant
+                                // joué sur CE dé. Le groupe, lui, est décrit par les tokens de la
+                                // ligne de synthèse — ici on dit quel dé a déclenché quoi.
                                 parts.push(
-                                  `Tir: ${shot.hitResult === "HIT" ? "✓" : "✗"}${rollWithReroll(shot.attackRoll, shot.attackRollInitial)}${ruleToken(shot.hitAbility)}`
+                                  [
+                                    `Tir: ${shot.hitResult === "HIT" ? "✓" : "✗"}`,
+                                    rollWithReroll(shot.attackRoll, shot.attackRollInitial),
+                                    ruleToken(shot.hitAbility),
+                                    flagToken(shot.autoHit, "TORRENT"),
+                                    flagToken(shot.sustainedHit, "SUSTAINED HITS"),
+                                    flagToken(shot.criticalHit, "CRITICAL HIT"),
+                                  ].join("")
                                 );
                                 if (shot.hitResult === "HIT") {
                                   parts.push(
-                                    `Bless: ${shot.strengthResult === "SUCCESS" ? "✓" : "✗"}${rollWithReroll(shot.strengthRoll, shot.strengthRollInitial)}${ruleToken(shot.woundAbility)}${ruleToken(shot.woundBonusAbility)}`
+                                    [
+                                      `Bless: ${shot.strengthResult === "SUCCESS" ? "✓" : "✗"}`,
+                                      rollWithReroll(shot.strengthRoll, shot.strengthRollInitial),
+                                      ruleToken(shot.woundAbility),
+                                      ruleToken(shot.woundRerollRule),
+                                      ruleToken(shot.woundBonusAbility),
+                                      flagToken(shot.lethalHit, "LETHAL HITS"),
+                                      flagToken(shot.criticalWound, "CRITICAL WOUND"),
+                                    ].join("")
                                   );
                                 }
                                 if (shot.strengthResult === "SUCCESS") {
@@ -603,6 +652,10 @@ export const GameLog: React.FC<GameLogProps> = ({
                                     parts.push(
                                       `Svg: ${shot.saveSuccess ? "✓" : "✗"}${rollWithReroll(shot.saveRoll, shot.saveRollInitial)}`
                                     );
+                                  } else if (shot.devastating) {
+                                    // 24.10 : « no saving throw can be made ». Sans ce segment, la
+                                    // sauvegarde disparaissait de la ligne sans explication.
+                                    parts.push(`Svg: aucune${ruleToken("DEVASTATING WOUNDS")}`);
                                   }
                                   if (!shot.saveSuccess && shot.damageDealt !== undefined) {
                                     parts.push(`Dmg: ${shot.damageDealt}`);

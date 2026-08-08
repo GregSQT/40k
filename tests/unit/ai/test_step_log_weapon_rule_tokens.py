@@ -587,3 +587,42 @@ def test_la_melee_ne_pose_aucun_token_sans_relance(monkeypatch, tmp_path):
     assert "Wound 6(4+)" in line, f"la ligne doit bien décrire l'attaque : {line}"
     assert "REROLLED" not in line, line
     assert "OATH" not in line, line
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# [TWIN-LINKED] 24.38 — règle d'ARME relanceuse, jumeau des capacités d'unité ci-dessus
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_la_relance_twin_linked_est_nommee_dans_step_log(monkeypatch, tmp_path):
+    """Blessure ratée relancée par [TWIN-LINKED] → step.log nomme la RÈGLE.
+
+    `woundAbility` ne nomme que les capacités d'UNITÉ (`resolve_wound_reroll_ability` rend
+    None sur la cause `twin_linked`, la règle venant de l'arme) : sans champ dédié, step.log
+    montrait `Wound 5(4+) [REROLLED:1]` — un dé relancé sans cause, alors que la relance d'une
+    capacité, elle, est nommée. C'est l'asymétrie exacte que le Game Log PvP a fermée, et cette
+    chaîne-ci (moteur → field map → formateur) doit la fermer aussi."""
+    gs, raw_log = _engine_shoot_log(monkeypatch, ["TWIN_LINKED"], [3, 1, 5, 2])
+    line = _step_log_line(tmp_path, gs, raw_log)
+
+    assert "[REROLLED:1]" in line, f"le dé d'origine doit être lisible : {line}"
+    assert "[TWIN-LINKED]" in line, line
+
+
+def test_sans_relance_twin_linked_ne_dit_rien(monkeypatch, tmp_path):
+    """Discrimination : l'arme EST [TWIN-LINKED] mais la blessure passe du premier coup — rien
+    n'a été relancé. Un token posé sur la présence de la règle annoncerait une relance qui n'a
+    pas eu lieu."""
+    gs, raw_log = _engine_shoot_log(monkeypatch, ["TWIN_LINKED"], [3, 5, 2])
+    line = _step_log_line(tmp_path, gs, raw_log)
+
+    assert "REROLLED" not in line, line
+    assert "TWIN" not in line, line
+
+
+def test_la_melee_nomme_aussi_la_relance_twin_linked(monkeypatch, tmp_path):
+    """JUMEAU mêlée : `roll_attack_pool` est partagé, donc la cause `twin_linked` arrive
+    identique — le formateur FOUGHT doit la rendre comme le formateur SHOT."""
+    gs, raw_log = _engine_shoot_log(monkeypatch, ["TWIN_LINKED"], [3, 1, 5, 2])
+    line = _step_log_fight_line(tmp_path, gs, raw_log)
+
+    assert "[TWIN-LINKED]" in line, line

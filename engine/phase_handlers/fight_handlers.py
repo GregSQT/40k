@@ -4568,11 +4568,15 @@ def _manual_roll_fight_intent(
     # down). » Jumeau melee de [BLAST] 24.05, avec la clause « une seule cible » en plus.
     from engine.utils.weapon_helpers import weapon_rule_parameter_or
     _cleave_x = weapon_rule_parameter_or(weapon, "CLEAVE", 1)
+    _cleave_extra_dice = 0
     if _cleave_x is not None and _weapon_attacks_single_target(
         game_state, str(attacker["squad_id"]), attacker_mid, weapon_index, target_sid
     ):
         _tgt_size = int(require_key(intent, "target_squad_size_at_declaration"))
-        n_attacks += _cleave_x * (_tgt_size // 5)
+        # Des REELLEMENT ajoutes : 0 si la cible compte moins de 5 figurines, ou si les
+        # attaques de l arme sont reparties sur plusieurs cibles. Jumeau de [BLAST] au tir.
+        _cleave_extra_dice = _cleave_x * (_tgt_size // 5)
+        n_attacks += _cleave_extra_dice
     if n_attacks <= 0:
         return None
     ws = int(weapon["ATK"])
@@ -4630,12 +4634,13 @@ def _manual_roll_fight_intent(
         RerollProfile, build_weapon_attack_profile, roll_attack_pool,
     )
     from engine.utils.weapon_helpers import weapon_has_rule, weapon_rule_signature
+    _attack_profile = build_weapon_attack_profile(weapon, target)
     rolled = roll_attack_pool(
         n_attacks=int(n_attacks),
         hit_target=ws,
         wound_target=wth,
         save_threshold_value=display_save_th,
-        profile=build_weapon_attack_profile(weapon, target),
+        profile=_attack_profile,
         rerolls=RerollProfile(
             hit_1=reroll_hit1, hit_any_fail=reroll_hit_any, wound_1=reroll_wound1,
             wound_any_fail=reroll_wound_obj, save_1=reroll_save1,
@@ -4663,6 +4668,21 @@ def _manual_roll_fight_intent(
         # (06.01 : aucun terrain ne s interpose a distance d engagement).
         "precision": weapon_has_rule(weapon, "PRECISION"),
         "precision_range": None,
+        # Arme et regles resolues vs CETTE cible — JUMEAU exact du roller de tir. Le log en tire
+        # ses tokens a l emission, via le MEME `weapon_rule_log_tokens`, pour qu une regle ne
+        # puisse pas etre nommee d un cote et muette de l autre.
+        "weapon": weapon,
+        "attack_profile": _attack_profile,
+        # 10.06 est une regle de la phase de TIR : elle n a pas de jumeau en melee. La cle est
+        # ECRITE et non omise, comme `rapid_fire_applied` ci-dessous et pour la meme raison —
+        # c est au producteur d affirmer que la regle ne s applique pas, pas au lecteur de le
+        # deviner par un defaut.
+        "point_blank_malus": False,
+        # [CLEAVE] 24.06 : des ajoutes par CETTE figurine — la clause « une seule cible » se
+        # juge par figurine, deux porteuses de la meme arme peuvent donc differer. Accumules
+        # sur le groupe, jumeau de [BLAST]/[RAPID FIRE] au tir. [RAPID FIRE] n existe pas en
+        # melee, la table est donc reduite a la seule regle additive de la phase.
+        "extra_dice_by_rule": {"CLEAVE": _cleave_extra_dice} if _cleave_extra_dice > 0 else {},
         # [RAPID FIRE] 24.30 n'existe qu'au TIR : la melee emet 0, elle ne l'omet pas. La cle de
         # groupe partagee peut ainsi l'exiger (`require_key`) au lieu de retomber sur un defaut
         # silencieux — un producteur qui oublierait le champ leverait, comme l'exige T1.

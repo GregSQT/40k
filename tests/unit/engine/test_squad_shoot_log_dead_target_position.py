@@ -23,6 +23,7 @@ from typing import Any, Dict
 
 import pytest
 
+from engine.phase_handlers.attack_sequence import WeaponAttackProfile
 from engine.phase_handlers.shared_utils import SHOOT_CTX, _emit_squad_shoot_log
 from tests._state_invariants import turn_state_invariants
 
@@ -94,6 +95,16 @@ def _weapon_group() -> Dict[str, Any]:
         # (tokens sur `Shots:`, `Wound:` et `Save:`).
         "waaagh_melee_bonus": False,
         "waaagh_target_invul": False,
+        # Arme + profil de règles, gardés par référence par le vrai regroupement : l'émission en
+        # tire les tokens de règles. Le Bolt Rifle du stub n'en déclare aucune, donc aucun token
+        # — état parfaitement produit par le moteur. Les omettre ferait lever l'émission.
+        "weapon": {"display_name": "Bolt Rifle", "WEAPON_RULES": []},
+        "attack_profile": WeaponAttackProfile(),
+        "extra_dice_by_rule": {},
+        "point_blank_malus": False,
+        "dmg_bonus": 0,
+        # [PRECISION] 24.28 : posé à l'Allocation Order step, jamais à la déclaration de l'arme.
+        "precision_applied": False,
     }
 
 

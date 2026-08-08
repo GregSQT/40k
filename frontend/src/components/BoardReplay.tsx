@@ -963,6 +963,14 @@ export const BoardReplay: React.FC = () => {
                   hitAbility: action.hit_ability,
                   woundAbility: action.wound_ability,
                   woundBonusAbility: action.wound_bonus_ability,
+                  // Règles d'ARME par-dé. Le replay n'en voit que ce que `step.log` écrit ET
+                  // que le parseur atteint : la relance [TWIN-LINKED] et la sauvegarde sautée de
+                  // [DEVASTATING WOUNDS]. [SUSTAINED HITS] et [TORRENT] produisent `Hit None(T+)`,
+                  // que `hitMatch` ne reconnaît pas — la ligne n'a alors AUCUN détail déplié, donc
+                  // aucun champ à remplir. Les critiques et [LETHAL HITS] ne sont écrits nulle
+                  // part dans step.log. Voir le rapport de parité de Documentation/Weapon_rules.md.
+                  woundRerollRule: action.wound_reroll_rule,
+                  devastating: action.devastating_wounds_applied,
                   // Dé d'origine d'un jet relancé : le détail affiche « 1->3 », comme en PvP.
                   attackRollInitial: action.hit_roll_initial,
                   strengthRollInitial: action.wound_roll_initial,
@@ -1092,10 +1100,16 @@ export const BoardReplay: React.FC = () => {
                       ? action.save_roll >= action.save_target
                       : false,
                   damageDealt: action.damage || 0,
-                  // JUMEAU du tir ci-dessus : la mêlée nomme les mêmes capacités.
+                  // JUMEAU du tir ci-dessus : la mêlée nomme les mêmes capacités et les mêmes
+                  // règles d'arme par-dé (le socle de résolution est partagé).
                   hitAbility: action.hit_ability,
                   woundAbility: action.wound_ability,
                   woundBonusAbility: action.wound_bonus_ability,
+                  // [DEVASTATING WOUNDS] n'est PAS repris ici : en mêlée `step.log` écrit
+                  // `Save None(T+)` au lieu du segment `Save [DEVASTATING WOUNDS]` du tir, que le
+                  // parseur cherche — le champ serait mort. C'est aussi la cause d'un défaut
+                  // PRÉEXISTANT du replay mêlée, documenté dans Documentation/Weapon_rules.md.
+                  woundRerollRule: action.wound_reroll_rule,
                   attackRollInitial: action.hit_roll_initial,
                   strengthRollInitial: action.wound_roll_initial,
                   saveRollInitial: action.save_roll_initial,

@@ -51,6 +51,9 @@ export interface ReplayAction {
   hit_ability?: string;
   wound_ability?: string;
   wound_bonus_ability?: string;
+  /** Règle d'ARME ayant ouvert la relance de blessure ([TWIN-LINKED] 24.38), jamais une
+   *  capacité d'unité — champ distinct de `wound_ability`, comme côté moteur. */
+  wound_reroll_rule?: string;
   /**
    * Dé d'ORIGINE d'un jet relancé (token `[REROLLED:n]`), absent sinon. Le champ courant
    * (`hit_roll`…) porte le jet FINAL : le détail du replay affiche « initial->final », comme le
@@ -125,7 +128,21 @@ interface ReplayRules {
  * occurrence de l'un ou l'autre dans un segment de jet. Les lister ici les ferait passer pour
  * un recensement des tokens du formateur, ce qu'ils ne sont pas.
  */
-const NON_ABILITY_ROLL_TOKENS = new Set(["HEAVY", "COVER", "SUSTAINED HITS"]);
+/** [TWIN-LINKED] 24.38 — règle d'ARME qui ouvre une relance de blessure (cf. ci-dessous). */
+const TWIN_LINKED_TOKEN = "TWIN-LINKED";
+/** [SUSTAINED HITS] 24.36 — touche additionnelle, accolée au segment `Hit`. */
+const SUSTAINED_HITS_TOKEN = "SUSTAINED HITS";
+
+const NON_ABILITY_ROLL_TOKENS = new Set([
+  "HEAVY",
+  "COVER",
+  SUSTAINED_HITS_TOKEN,
+  // [TWIN-LINKED] 24.38 : elle ouvre bien une relance de blessure, mais c'est une règle
+  // d'ARME — la ranger dans `wound_ability` referait exactement la confusion que le moteur
+  // vient de défaire en lui donnant son propre champ (`woundRerollRule`). Elle a le sien ici
+  // aussi : `wound_reroll_rule`.
+  TWIN_LINKED_TOKEN,
+]);
 
 /**
  * Tokens de l'ENVELOPPE de ligne, écrits après le dernier segment de jet et SANS séparateur
@@ -227,6 +244,12 @@ function assignRollAnnotations(action: ReplayAction, line: string): void {
     } else {
       action.wound_ability = token;
     }
+  }
+  // Règle d'ARME relanceuse, hors du jeu des capacités ci-dessus (elle est dans
+  // `NON_ABILITY_ROLL_TOKENS`) : elle a son propre champ, comme côté moteur. `roll_attack_pool`
+  // ne retient qu'UNE cause de relance par dé, donc les deux ne coexistent jamais.
+  if (woundTokens.includes(TWIN_LINKED_TOKEN)) {
+    action.wound_reroll_rule = TWIN_LINKED_TOKEN;
   }
   // Clé ABSENTE quand le jet n'a pas été relancé, jamais posée à `undefined` : même contrat que
   // les capacités juste au-dessus, et que les champs du moteur côté PvP.

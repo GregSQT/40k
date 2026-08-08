@@ -5053,6 +5053,10 @@ class W40KEngine(gym.Env):
         # Nom de l abilite d unite qui a ouvert la relance de blessure, quand elle a
         # EFFECTIVEMENT eu lieu (le socle trace la cause, `_manual_roll_intent` la nomme).
         "woundAbility": "wound_ability_display_name",
+        # Regle d ARME ayant ouvert la relance de blessure ([TWIN-LINKED] 24.38). Sans cette
+        # entree, le champ n atteint que le Game Log PvP : step.log, le replay et l analyzer
+        # voient un de relance sans cause, alors qu ils nomment celle des capacites d unite.
+        "woundRerollRule": "wound_reroll_rule_name",
         # JUMEAU cote TOUCHE (chantier 03) : `hit_1` (capacite de datasheet) ou `hit_any_fail`
         # (Oath of Moment). Sans cette entree, le champ n atteint jamais step.log et l analyzer
         # ne peut pas distinguer une relance POSSIBLE d une relance EFFECTUEE.

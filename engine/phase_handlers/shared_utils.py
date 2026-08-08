@@ -11,6 +11,7 @@ import inspect
 
 if TYPE_CHECKING:
     from engine.hex_utils import Socle
+    from engine.phase_handlers.attack_sequence import WeaponAttackProfile
 
 from shared.data_validation import require_key
 from engine.utils.weapon_helpers import (
@@ -7832,6 +7833,140 @@ def _select_allocation_model(
     return min(enumerate(alive), key=_key)[1]
 
 
+# Segments de la ligne de synthese d une attaque, dans l ordre d emission. Chaque regle d arme
+# est accrochee au segment qu elle MODIFIE : c est la seule accroche qui reste lisible quand
+# plusieurs regles jouent ensemble (une liste de tokens en fin de ligne ne dirait pas laquelle
+# explique le seuil, laquelle explique le nombre de des).
+RULE_TOKEN_SEGMENTS: Tuple[str, ...] = ("shots", "hit", "wound", "save", "damage")
+
+# Regles qui AJOUTENT des des au pool d attaques, dans l ordre d affichage sur `Shots:`. Elles
+# partagent une propriete que n a aucune autre regle du log : leur effet se compte PAR FIGURINE
+# (chaque porteuse ajoute les siens), alors que le token vit sur le GROUPE. Elles sont donc les
+# seules a etre accumulees plutot que lues sur un profil constant.
+# Le libelle EST celui du token — c est aussi la cle de `extra_dice_by_rule`, pour qu il n existe
+# pas deux orthographes d une meme regle entre le producteur et l afficheur.
+ADDITIVE_RULE_ORDER: Tuple[str, ...] = ("RAPID FIRE", "BLAST", "CLEAVE")
+
+
+def weapon_rule_log_tokens(
+    profile: "WeaponAttackProfile",
+    *,
+    weapon: Dict[str, Any],
+    extra_dice_by_rule: Mapping[str, int],
+    dmg_bonus: int,
+    cover: bool,
+    heavy_applied: bool,
+    precision_applied: bool,
+    wound_target: int,
+    save_threshold: int,
+) -> Dict[str, List[str]]:
+    """Tokens `[REGLE]` d un GROUPE d attaques (04.03), ranges par segment de la ligne de log.
+
+    SOCLE UNIQUE, a deux titres : tir ET melee (les deux chemins d emission l appellent, aucun
+    ne construit de token chez lui — c est le motif d echec n°1 du depot), et TOUTES les regles
+    d arme de la ligne, y compris [HEAVY] 24.16 et les des additionnels de [BLAST] 24.05 /
+    [CLEAVE] 24.06. Seul [COVER] 13.08 reste pose par l appelant : ce n est pas une regle d arme.
+
+    Appele UNE fois par groupe, a l emission (`_emit_squad_shoot_log`), et non par intent : les
+    valeurs dont il depend sont toutes portees par le groupe, ou elles ont deja ete rendues
+    constantes (`gkey`) ou accumulees (`extra_dice_by_rule`).
+
+    Regle d emission : un token n apparait que si la regle a EFFECTIVEMENT joue, pas si l arme
+    la declare. D ou les valeurs APPLIQUEES en parametres (`extra_dice_by_rule`, `dmg_bonus`,
+    `heavy_applied`) plutot que les parametres declares : une arme [RAPID FIRE 2] hors
+    demi-portee n ajoute rien, elle ne doit rien dire.
+
+    UNE SEULE GRAMMAIRE pour les regles qui grossissent le pool d attaques : `[REGLE:n]` ou `n`
+    est le nombre de DES QUE CETTE REGLE A AJOUTES au `Shots:` auquel le token est accole —
+    jamais le parametre X declare par l arme. Les trois ([RAPID FIRE] 24.30, [BLAST] 24.05,
+    [CLEAVE] 24.06) ajoutent leurs des PAR FIGURINE : `[RAPID FIRE:1]` a cote de `Shots:4` pour
+    deux porteuses etait faux de la meme facon que l etait `[BLAST:1]`, et l etait d autant plus
+    qu il cotoyait un `[BLAST:n]` deja corrige, avec la meme syntaxe et un sens different.
+
+    Deux exceptions ASSUMEES, et pour la meme raison — leur effet n est pas mesurable a
+    posteriori sur ce groupe :
+      - [IGNORES COVER] 24.18 : le couvert n est meme pas calcule (court-circuit de
+        `_cover_worsened_bs`), donc « la cible aurait-elle eu le couvert ? » est inconnu. Le
+        token dit ce qui est vrai et verifiable : cette attaque ignore le couvert.
+      - [EXTRA ATTACKS] 24.11 : l arme est resolue EN PLUS des autres, son effet est l existence
+        meme du groupe.
+
+    `profile` est le `WeaponAttackProfile` construit par le roller : les regles de la boucle
+    touche/blessure ne sont PAS re-resolues ici, elles sont lues la ou elles ont ete decidees
+    (notamment `anti_keyword`, dont le choix d instance releve de 24.02).
+
+    `extra_dice_by_rule` est le total ACCUMULE du groupe par regle additive — la seule donnee du
+    lot qui varie d une figurine a l autre, d ou l accumulation dans `_build_manual_allocation`.
+    """
+    # Import local : `attack_sequence` n a aucun cycle avec ce module, mais il n est charge que
+    # par les chemins d attaque — l importer au niveau module le mettrait sur le chemin de tous
+    # les autres consommateurs de `shared_utils`.
+    from engine.phase_handlers.attack_sequence import lethal_hits_auto_wound_is_better
+
+    tokens: Dict[str, List[str]] = {segment: [] for segment in RULE_TOKEN_SEGMENTS}
+
+    for rule_label in ADDITIVE_RULE_ORDER:
+        added = int(extra_dice_by_rule.get(rule_label, 0))  # get allowed : regle non declaree
+        if added > 0:
+            tokens["shots"].append(f"[{rule_label}:{added}]")
+    if weapon_has_rule(weapon, "EXTRA_ATTACKS"):
+        tokens["shots"].append("[EXTRA ATTACKS]")
+
+    if heavy_applied:
+        tokens["hit"].append("[HEAVY]")
+
+    if profile.torrent:
+        tokens["hit"].append("[TORRENT]")
+    if profile.sustained_hits:
+        tokens["hit"].append(f"[SUSTAINED HITS:{profile.sustained_hits}]")
+    if weapon_has_rule(weapon, "IGNORES_COVER"):
+        tokens["hit"].append("[IGNORES COVER]")
+    # [PSYCHIC] 24.29 : le token ne se justifie QUE si un modificateur a ete ignore. Sans
+    # couvert, la regle n a rien neutralise — l afficher ferait croire a un effet.
+    if cover and weapon_has_rule(weapon, "PSYCHIC"):
+        tokens["hit"].append("[PSYCHIC]")
+
+    if profile.anti_keyword is not None:
+        # Seuil AFFICHE = `crit_wound_on`, c est-a-dire le seuil de blessure critique reellement
+        # en vigueur (le Y+ de l arme, borne a 6 par 05.02 : rien n est plus critique qu un 6).
+        # C est le seuil qui a JOUE qu on nomme, pas le texte de l arme — meme contrat que les
+        # autres tokens.
+        tokens["wound"].append(
+            f"[ANTI-{profile.anti_keyword}:{profile.crit_wound_on}+]"
+        )
+    # [LETHAL HITS] 24.23 dit « you CAN choose for that attack to automatically wound » : le
+    # moteur tranche par esperance de degats, et il DECLINE l auto-blessure quand elle est
+    # perdante (typiquement une arme [LETHAL HITS] + [DEVASTATING WOUNDS], ou l auto-blessure
+    # interdirait la blessure critique). Le choix ne depend que du profil et des deux seuils —
+    # tous constants sur le groupe — donc il est le meme pour toutes les attaques du groupe.
+    # MEME predicat que `roll_attack_pool` : sans lui, la ligne de synthese annoncait une regle
+    # qu aucun detail par tir ne confirmait jamais.
+    if profile.lethal_hits and lethal_hits_auto_wound_is_better(
+        profile, int(wound_target), int(save_threshold)
+    ):
+        tokens["wound"].append("[LETHAL HITS]")
+    if profile.twin_linked:
+        tokens["wound"].append("[TWIN-LINKED]")
+
+    if profile.devastating:
+        tokens["save"].append("[DEVASTATING WOUNDS]")
+
+    if dmg_bonus > 0:
+        tokens["damage"].append(f"[MELTA:{dmg_bonus}]")
+    # [PRECISION] 24.28 : `precision_applied` — pose a l Allocation Order step — et non la
+    # declaration de l arme. Contre une cible sans CHARACTER visible, la regle n a impose aucun
+    # groupe : elle n a rien fait, elle ne dit rien.
+    if precision_applied:
+        tokens["damage"].append("[PRECISION]")
+
+    return tokens
+
+
+def _segment_with_tokens(segment: str, tokens: Sequence[str]) -> str:
+    """Accole les tokens de regle a un segment de la ligne de synthese (`Shots:12 [BLAST:2]`)."""
+    return segment if not tokens else f"{segment} {' '.join(tokens)}"
+
+
 def _emit_squad_shoot_log(game_state: Dict[str, Any], g: Dict[str, Any], ctx: ManualAllocCtx) -> None:
     """Emet 1 action_log de tir pour un groupe (arme, cible).
 
@@ -7880,32 +8015,59 @@ def _emit_squad_shoot_log(game_state: Dict[str, Any], g: Dict[str, Any], ctx: Ma
     _waaagh_melee = require_key(g, "waaagh_melee_bonus")
     if require_key(g, "oath_hit_reroll"):
         hit_part = f"{hit_part}RR {_oath_token}"
-    # [HEAVY] 24.16 : token affiche quand le +1 au jet de touche a ete APPLIQUE (pas seulement
-    # declare par l arme). Le frontend y accroche automatiquement le tooltip de la regle
-    # (weapon_rules.json), comme pour [COVER] / [HAZARD].
-    for _token, _applies in (("[COVER]", _cover), ("[HEAVY]", g.get("heavy_applied"))):
-        if _applies:
-            hit_part = f"{hit_part} {_token}"
+    # [COVER] 13.08 : pose ici et non dans `weapon_rule_log_tokens` — ce n est pas une regle
+    # d ARME (aucune entree dans weapon_rules.json), c est une propriete de la cible. [HEAVY],
+    # lui, EST une regle d arme : il passe par le socle, comme les douze autres.
+    if _cover:
+        hit_part = f"{hit_part} [COVER]"
+    # 10.06, volet MONSTER/VEHICLE : « unless that attack is made with a [CLOSE-QUARTERS] weapon
+    # AND targets a unit your unit is engaged with, subtract 1 from the hit roll ». Pose ici et
+    # non dans le socle, pour la MEME raison que [COVER] : c est une regle de PHASE (10.06), pas
+    # une regle d arme — elle n a pas d entree dans weapon_rules.json.
+    if require_key(g, "point_blank_malus"):
+        hit_part = f"{hit_part} [POINT-BLANK]"
+    # Tokens de REGLES D ARME du groupe, ranges par segment. Construits ICI, une seule fois par
+    # groupe : toutes leurs sources sont portees par `g` (les rollers ne les fabriquent plus par
+    # intent, ou 9 dicts sur 10 finissaient jetes).
+    _rule_tokens = weapon_rule_log_tokens(
+        require_key(g, "attack_profile"),
+        weapon=require_key(g, "weapon"),
+        extra_dice_by_rule=require_key(g, "extra_dice_by_rule"),
+        dmg_bonus=int(require_key(g, "dmg_bonus")),
+        cover=_cover,
+        heavy_applied=bool(require_key(g, "heavy_applied")),
+        precision_applied=bool(require_key(g, "precision_applied")),
+        # Les deux seuils PASSES au socle de resolution (`roll_attack_pool`) pour ce groupe :
+        # [LETHAL HITS] s en sert pour rejouer le meme arbitrage que lui.
+        wound_target=int(require_key(g, "display_wth")),
+        save_threshold=int(require_key(g, "display_save_th")),
+    )
+    hit_part = _segment_with_tokens(hit_part, _rule_tokens["hit"])
     wound_part = f"Wound:{g['display_wth']}+"
     if require_key(g, "oath_wound_bonus"):
         wound_part = f"{wound_part} {_oath_token}"
     # +1 Force : le seuil de blessure affiche est deja celui de la Force augmentee.
     if _waaagh_melee:
         wound_part = f"{wound_part} {_waaagh_token}"
+    wound_part = _segment_with_tokens(wound_part, _rule_tokens["wound"])
     # +1 Attaque : le compte d attaques du groupe inclut deja l attaque supplementaire.
     shots_part = f"Shots:{g['attacks']}"
     if _waaagh_melee:
         shots_part = f"{shots_part} {_waaagh_token}"
+    shots_part = _segment_with_tokens(shots_part, _rule_tokens["shots"])
     save_part = f"Save:{g['display_save_th']}+"
     # Invulnerable 5+ de la CIBLE : posee sur le segment de sauvegarde, cote defenseur, et non
     # sur les deux precedents qui parlent de l attaquant.
     if require_key(g, "waaagh_target_invul"):
         save_part = f"{save_part} {_waaagh_token}"
-    attack_log = (
-        f"{shots_part} - "
-        f"{hit_part} {wound_part} {save_part} - "
-        f"HP lost:{g['damage']} Killed:{g['kills']}"
+    save_part = _segment_with_tokens(save_part, _rule_tokens["save"])
+    # Segment des degats : [MELTA:X] (bonus de D) et [PRECISION] (qui encaisse). Les tokens
+    # arrivent en FIN de ligne, apres `Killed:` — position qu aucun consommateur n analyse
+    # (l analyzer et le replay lisent `step.log`, pas ce message).
+    damage_part = _segment_with_tokens(
+        f"HP lost:{g['damage']} Killed:{g['kills']}", _rule_tokens["damage"]
     )
+    attack_log = f"{shots_part} - {hit_part} {wound_part} {save_part} - {damage_part}"
     # Label toujours enrichi : type + coords. Le frontend masque type et/ou coords
     # selon les 2 options du Game Log (regex sur "Unit <id> <type> (col,row)").
     atk_type_seg = f" {atk_unit_type_g}" if atk_unit_type_g else ""
@@ -8325,9 +8487,13 @@ def _manual_roll_intent(
     # [BLAST] 24.05 : des additionnels selon la taille de la cible AU SELECT TARGETS STEP
     # (d ou la taille capturee a la declaration, et non la taille courante).
     _blast_x = _blast_extra_dice_per_five(weapon)
+    _blast_extra_dice = 0
     if _blast_x is not None:
         tgt_size = int(intent.get("target_squad_size_at_declaration", 0))  # get allowed
-        n_attacks += _blast_x * (tgt_size // 5)
+        # Des REELLEMENT ajoutes (0 sur une cible de moins de 5 figurines) : c est ce nombre,
+        # et non le X declare, que le log affiche.
+        _blast_extra_dice = _blast_x * (tgt_size // 5)
+        n_attacks += _blast_extra_dice
     # RAPID_FIRE X (config/weapon_rules.json ; PDF 24.30) : « Increase this weapon's Attacks
     # by X when target unit is within half range. » Ajoute X des a la constitution du pool
     # d attaques (comme BLAST), avant tout jet. Demi-portee = RNG/2 (RNG deja en subhexes).
@@ -8480,12 +8646,13 @@ def _manual_roll_intent(
     from engine.phase_handlers.attack_sequence import (
         RerollProfile, build_weapon_attack_profile, roll_attack_pool,
     )
+    _attack_profile = build_weapon_attack_profile(weapon, target_unit)
     rolled = roll_attack_pool(
         n_attacks=int(n_attacks),
         hit_target=bs,
         wound_target=wth,
         save_threshold_value=display_save_th,
-        profile=build_weapon_attack_profile(weapon, target_unit),
+        profile=_attack_profile,
         rerolls=RerollProfile(
             # Oath of Moment : « You can re-roll the Hit roll » contre la cible designee.
             # JUMEAU du site de melee — c est le motif d echec n°1 du depot : une relance
@@ -8524,6 +8691,26 @@ def _manual_roll_intent(
         # 04.03 IDENTICAL ATTACKS, seconde moitie de la definition : « affected by the same
         # applicable abilities and rules ». Entre dans la cle de groupe.
         "weapon_rules": weapon_rule_signature(weapon),
+        # Tokens de regles d arme de la ligne de log. Constants sur le groupe par CONSTRUCTION :
+        # chacune de leurs sources est dans `gkey` (signature de regles, `dmg_bonus`,
+        # `rapid_fire_applied`, cible — donc la taille declaree qui pilote [BLAST] et les
+        # keywords qui pilotent [ANTI]) ou dans `bs` (couvert, qui conditionne [PSYCHIC]).
+        # Arme et regles resolues vs CETTE cible : le groupe les garde par REFERENCE et le log
+        # en tire ses tokens a l emission (`weapon_rule_log_tokens`), une fois pour le groupe.
+        "weapon": weapon,
+        "attack_profile": _attack_profile,
+        # 10.06, volet MONSTER/VEHICLE : -1 au jet de touche. Ce drapeau etait calcule et
+        # JAMAIS lu — il ne restait donc plus qu un seul modificateur du seuil affiche sans
+        # cause visible, alors que [HEAVY] et [COVER] avaient la leur.
+        "point_blank_malus": _cq_malus_applied,
+        # Des ajoutes par CETTE figurine, par regle : [BLAST] 24.05 (une tranche de 5 par
+        # porteuse) et [RAPID FIRE] 24.30 (X par porteuse a demi-portee). Accumules sur le
+        # groupe a l etage au-dessus — c est le total qui s affiche a cote de `Shots:`.
+        "extra_dice_by_rule": {
+            label: count
+            for label, count in (("BLAST", _blast_extra_dice), ("RAPID FIRE", _rapid_fire_applied))
+            if count > 0
+        },
         "precision": _weapon_precision,
         "precision_range": int(require_key(weapon, "RNG")) if _weapon_precision else None,
         "display_wth": display_wth, "display_save_th": display_save_th,
@@ -8872,6 +9059,11 @@ def _apply_precision_allocation_override(
     batch["declared_order"] = [chosen["group_id"]] + order
     batch["current_group_index"] = 0
     batch["current_model_id"] = None
+    # La regle a REELLEMENT joue : c est ici, et nulle part ailleurs, qu on le sait. Les trois
+    # `return` ci-dessus sont autant de cas ou l arme declare [PRECISION] sans qu aucun groupe
+    # CHARACTER visible n existe — le log ne doit alors pas la nommer. Le drapeau est pose sur le
+    # GROUPE (et non sur le batch) parce que c est le groupe que l emission du log lit.
+    group["precision_applied"] = True
 
 
 def _precision_group_is_visible(
@@ -9097,8 +9289,26 @@ def _build_manual_allocation(
                 # regles differentes y tombaient ensemble et le groupe ne retenait que la valeur
                 # de la PREMIERE. Absente en melee.
                 "rapid_fire_applied": int(require_key(r, "rapid_fire_applied")),
+                # Arme + regles resolues vs la cible, gardees par REFERENCE : le log construit
+                # ses tokens a l emission (`weapon_rule_log_tokens`), une fois par groupe. Les
+                # deux sont constants sur le groupe — la signature de regles et la cible sont
+                # dans `gkey`, et le profil ne depend que de ces deux-la.
+                "weapon": require_key(r, "weapon"),
+                "attack_profile": require_key(r, "attack_profile"),
+                # 10.06 MONSTER/VEHICLE : propriete de la FIGURINE attaquante et de la cible,
+                # toutes deux figees pour l activation — constante sur le groupe comme `bs`,
+                # dont elle explique justement une part.
+                "point_blank_malus": bool(require_key(r, "point_blank_malus")),
+                # Des additionnels par regle ([RAPID FIRE]/[BLAST]/[CLEAVE]) : la SEULE donnee du
+                # lot qui varie par figurine — elle s accumule donc plus bas, comme `attacks`.
+                "extra_dice_by_rule": {},
                 "precision": require_key(r, "precision"),
                 "precision_range": require_key(r, "precision_range"),
+                # [PRECISION] 24.28 : l arme la DECLARE (`precision`) ; savoir si elle a JOUE
+                # demande d attendre l Allocation Order step, ou `_apply_precision_allocation_override`
+                # pose ce drapeau s il a effectivement impose un groupe CHARACTER. Le log lit
+                # celui-ci, jamais la declaration.
+                "precision_applied": False,
                 "display_wth": r["display_wth"], "display_save_th": r["display_save_th"],
                 # Constants sur le groupe : meme attaquant, meme cible (tous deux dans `gkey`).
                 "oath_hit_reroll": bool(require_key(r, "oath_hit_reroll")),
@@ -9130,6 +9340,13 @@ def _build_manual_allocation(
             g["weapon_names"].append(weapon_name)
             g["weapon_name"] = " / ".join(g["weapon_names"])
         g["attacks"] += counts["attacks"]
+        # Des additionnels : accumules PAR REGLE, exactement comme `attacks` dont ils sont une
+        # part. Un compteur par regle et non un total unique — sans quoi deux regles additives
+        # sur la meme arme ([RAPID FIRE] + [BLAST]) se confondraient en un seul nombre.
+        for _rule_label, _added in require_key(r, "extra_dice_by_rule").items():
+            g["extra_dice_by_rule"][_rule_label] = (
+                g["extra_dice_by_rule"].get(_rule_label, 0) + int(_added)  # get allowed
+            )
         g["shots"].extend(r["shot_records"])
         if attacker_mid not in g["shooter_mids"]:
             g["shooter_mids"].append(attacker_mid)
@@ -11607,6 +11824,14 @@ def stamp_reroll_abilities(
                 record["hitAbility"] = str(hit_ability)
         wound_cause = record.pop("woundRerollCause", None)  # get allowed : idem
         if not wound_cause:
+            continue
+        if wound_cause == "twin_linked":
+            # [TWIN-LINKED] 24.38 : la relance vient de l ARME, pas d une capacite d unite —
+            # `resolve_wound_reroll_ability` rend donc None, et le jet relance s affichait
+            # « 2->5 » sans que rien ne dise ce qui l avait ouvert (alors qu une relance de
+            # capacite, elle, est nommee). Champ DISTINCT de `woundAbility`, qui est par
+            # contrat le nom d une capacite d unite.
+            record["woundRerollRule"] = "TWIN-LINKED"
             continue
         if wound_cause not in wound_ability_by_cause:
             wound_ability_by_cause[wound_cause] = resolve_wound_reroll_ability(

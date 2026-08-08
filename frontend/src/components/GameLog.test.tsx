@@ -189,3 +189,87 @@ describe("GameLog — jets relancés", () => {
     expect(shotRowText()).not.toContain("->");
   });
 });
+
+/**
+ * Règles d'ARME ayant joué sur UN dé. Le moteur ne pose que des drapeaux booléens sur le record
+ * (`autoHit`, `sustainedHit`, `criticalHit`, `lethalHit`, `criticalWound`, `devastating`) plus la
+ * cause de relance d'arme (`woundRerollRule`) : c'est l'affichage qui les nomme. Ces données
+ * voyageaient déjà jusqu'au navigateur sans jamais être rendues — un dé [TORRENT] était
+ * indiscernable d'un jet, et une blessure [DEVASTATING WOUNDS] faisait simplement disparaître la
+ * sauvegarde de la ligne, sans dire pourquoi.
+ */
+describe("GameLog — règles d'arme par dé", () => {
+  it("nomme la touche automatique de [TORRENT]", () => {
+    render(<GameLog events={[shootEvent({ attackRoll: null, autoHit: true })]} />);
+    expandFirstEntry();
+    expect(shotRowText()).toContain("[TORRENT]");
+  });
+
+  it("nomme la touche additionnelle de [SUSTAINED HITS] et le critique qui l'a produite", () => {
+    render(
+      <GameLog events={[shootEvent({ attackRoll: 6, criticalHit: true, sustainedHit: true })]} />
+    );
+    expandFirstEntry();
+    expect(shotRowText()).toContain("[CRITICAL HIT]");
+    expect(shotRowText()).toContain("[SUSTAINED HITS]");
+  });
+
+  it("nomme la blessure automatique de [LETHAL HITS]", () => {
+    render(<GameLog events={[shootEvent({ strengthRoll: null, lethalHit: true })]} />);
+    expandFirstEntry();
+    expect(shotRowText()).toContain("[LETHAL HITS]");
+  });
+
+  it("nomme la relance d'arme [TWIN-LINKED], distincte d'une capacité d'unité", () => {
+    render(
+      <GameLog
+        events={[
+          shootEvent({ strengthRoll: 5, strengthRollInitial: 1, woundRerollRule: "TWIN-LINKED" }),
+        ]}
+      />
+    );
+    expandFirstEntry();
+    expect(shotRowText()).toContain("(1->5)");
+    expect(shotRowText()).toContain("[TWIN-LINKED]");
+  });
+
+  it("explique la sauvegarde absente d'une blessure [DEVASTATING WOUNDS]", () => {
+    // 24.10 : « no saving throw can be made » — le moteur n'écrit AUCUN `saveRoll`. Sans ce
+    // segment, la ligne passait de « Bless: ✓ » à « Dmg: 2 » sans rien dire de la sauvegarde.
+    render(
+      <GameLog
+        events={[
+          shootEvent({
+            strengthRoll: 6,
+            criticalWound: true,
+            devastating: true,
+            damageDealt: 2,
+          }),
+        ]}
+      />
+    );
+    expandFirstEntry();
+    expect(shotRowText()).toContain("[CRITICAL WOUND]");
+    expect(shotRowText()).toContain("Svg: aucune [DEVASTATING WOUNDS]");
+    expect(shotRowText()).toContain("Dmg: 2");
+  });
+
+  it("ne nomme aucune règle sur une attaque ordinaire", () => {
+    // Sans elle, un rendu qui écrirait les tokens INCONDITIONNELLEMENT passerait les cinq
+    // tests ci-dessus.
+    render(<GameLog events={[shootEvent({ attackRoll: 4, strengthRoll: 5, saveRoll: 2 })]} />);
+    expandFirstEntry();
+    const row = shotRowText();
+    for (const token of [
+      "TORRENT",
+      "SUSTAINED HITS",
+      "CRITICAL HIT",
+      "LETHAL HITS",
+      "CRITICAL WOUND",
+      "TWIN-LINKED",
+      "DEVASTATING WOUNDS",
+    ]) {
+      expect(row).not.toContain(token);
+    }
+  });
+});

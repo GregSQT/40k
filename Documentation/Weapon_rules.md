@@ -474,6 +474,74 @@ interface Unit {
 - Display weapon rules as badges
 - Rule mentions in combat logs can display description tooltips
 
+### Weapon rule tokens in the PvP Game Log
+
+A rule token is emitted **only when the rule actually played on that attack**, never because the
+weapon declares it. A `[MELTA]` weapon out of half range, a `[BLAST]` weapon against four models,
+an `[ANTI-INFANTRY]` weapon shooting a vehicle, a `[PRECISION]` weapon facing a unit with no
+visible CHARACTER, or a `[LETHAL HITS]` weapon whose auto-wound the engine declined (24.23 says
+"you **can** choose") all print nothing. Two rules are the deliberate exception, because their
+effect is not measurable after the fact: `[IGNORES COVER]` (cover is never even computed) and
+`[EXTRA ATTACKS]` (its effect is the existence of the group).
+
+Two levels, because a rule either describes the whole weapon group (04.03) or one specific die:
+
+| Level | Source | Placement | Tokens |
+|---|---|---|---|
+| Group (summary line) | `shared_utils.weapon_rule_log_tokens`, one socle for shooting **and** melee, called once per group at log emission | the segment the rule modifies | `Shots:` → `[RAPID FIRE:n]` `[BLAST:n]` `[CLEAVE:n]` `[EXTRA ATTACKS]` · `Hit:` → `[HEAVY]` `[COVER]` `[POINT-BLANK]` `[TORRENT]` `[SUSTAINED HITS:X]` `[IGNORES COVER]` `[PSYCHIC]` · `Wound:` → `[ANTI-<KEYWORD>:Y+]` `[LETHAL HITS]` `[TWIN-LINKED]` · `Save:` → `[DEVASTATING WOUNDS]` · `HP lost:` → `[MELTA:X]` `[PRECISION]` |
+| Per shot (expanded detail) | flags set by `attack_sequence.roll_attack_pool` on each shot record | the leg of that die | `Tir:` → `[TORRENT]` `[SUSTAINED HITS]` `[CRITICAL HIT]` · `Bless:` → `[TWIN-LINKED]` `[LETHAL HITS]` `[CRITICAL WOUND]` · `Svg:` → `[DEVASTATING WOUNDS]` (no save roll is made, 24.10) |
+
+**`[RAPID FIRE:n]` / `[BLAST:n]` / `[CLEAVE:n]` are counted, not copied.** `n` is always the
+number of dice **that rule added to the `Shots:` the token hangs off** — never the `X` the weapon
+declares. Every other token is constant over a weapon group (04.03) because its source is part of
+the group key; these three are not, because they all add dice **per firing model**: `[RAPID FIRE]`
+X per carrier within half range, `[BLAST]` one bracket of five per carrier, and `[CLEAVE]`'s "only
+one target for all of that weapon's attacks" clause is judged per model, so two carriers of the
+same weapon can differ. `_build_manual_allocation` therefore **accumulates** `extra_dice_by_rule`
+across the group's intents, exactly like `attacks`, and the socle renders each total.
+
+(`step.log` is different and stays so: its `[RAPID FIRE:X]` carries the declared **parameter**,
+because the analyzer uses it to raise the per-squad shot cap.)
+
+Everything else the socle needs (`weapon`, the resolved `WeaponAttackProfile`, `heavy_applied`,
+`cover`, `rapid_fire_applied`, `dmg_bonus`) is already carried by the weapon group, which is why
+tokens are built **once at emission** rather than per intent.
+
+Two tokens on the `Hit:` segment are **not** weapon rules and are therefore emitted by the log
+itself rather than by the socle, with a description hard-coded in `GameLog.tsx`: `[COVER]` (13.08)
+and `[POINT-BLANK]` (10.06 — the −1 to hit a MONSTER/VEHICLE model suffers unless it shoots a
+[CLOSE-QUARTERS] weapon at a unit it is engaged with). Together with `[HEAVY]`, they mean every
+modifier to the displayed hit threshold now names its cause.
+
+**Replay parity — partial, and here is exactly where it stops.** `BoardReplay` maps the per-shot
+fields it can actually obtain, which is fewer than `step.log` appears to offer:
+
+| Rule | Shooting replay | Melee replay | Why |
+|---|---|---|---|
+| `[TWIN-LINKED]` | ✅ | ✅ | token on the `Wound` segment, parsed on both branches |
+| `[DEVASTATING WOUNDS]` | ✅ | ❌ | shooting writes `Save [DEVASTATING WOUNDS]`; **melee writes `Save None(T+)`** (`step_logger.py`, FOUGHT formatter) and the fight branch has no `saveSkipped` match |
+| `[SUSTAINED HITS]`, `[TORRENT]` | ❌ | ❌ | both produce `Hit None(T+)`; `hitMatch` (`Hit\s+(\d+)\(`) does not match, so the line yields **no expanded detail at all** — there is no field to fill |
+| `[CRITICAL HIT]`, `[CRITICAL WOUND]`, `[LETHAL HITS]` | ❌ | ❌ | never written to `step.log` in any form |
+
+⚠️ The melee row above is not only a display gap: `Save None(T+)` fails `saveMatch`, so
+`wound_result` is inferred as `"FAIL"` and the whole save/damage section vanishes — a melee
+`[DEVASTATING WOUNDS]` hit renders as `Bless: ✗ (6)` in the replay while the target really lost
+its wounds. This defect predates the Game Log work and is **not fixed** by it: closing it means
+reworking how `step.log` writes rollless legs and how the parser reads them, which changes the
+input format the analyzer consumes.
+
+`[HAZARDOUS]` has its own log line (`[HAZARD] roll …`) with per-model mortal wound details.
+`[INDIRECT FIRE]` is never printed: it is a shooting type (10.07) that the engine does not
+implement, so no attack can be affected by it.
+
+Tooltips are resolved from `config/weapon_rules.json` by normalised name, parameters included
+(`[SUSTAINED HITS:2]` finds `SUSTAINED_HITS`). `[CRITICAL HIT]` / `[CRITICAL WOUND]` are not
+weapon rules (05.01 / 05.02) and carry a hard-coded description in `GameLog.tsx`.
+
+Notice that this is the **PvP** log. `step.log` (training) is built separately by
+`ai/step_logger.py` from a whitelist of shot keys, and the analyzer's regexes read that file —
+adding a token here does not change either.
+
 ---
 
 ## CONFIGURATION
@@ -486,28 +554,64 @@ interface Unit {
 ```json
 {
   "RULE_NAME": {
+    "id": "RULE_NAME",
     "name": "Display Name",
     "description": "Short description (use X for parameter)",
-    "has_parameter": true|false
+    "has_parameter": true|false,
+    "obs_id": 1
   }
 }
 ```
 
-**Example**:
+| Field | Required | Enforced by | Role |
+|---|---|---|---|
+| `id` | no | nothing | present on every entry, where it repeats the JSON key. No consumer reads it: the registry, the parser and the Game Log all key on the entry name. (`unit_rules.json` is the one that genuinely needs an `id`.) |
+| `name` | yes | `WeaponRulesRegistry._validate_rule_definition` (fail-fast at load) | display name, and the tooltip lookup key in the Game Log |
+| `description` | yes | idem | tooltip text; `X` is substituted with the parameter |
+| `has_parameter` | yes | idem | `RULE:X` is then mandatory, and forbidden otherwise |
+| `obs_id` | **for observed boolean rules only** | `observation_builder._obs_ids_for_vocabulary` (raises) | the id the agent actually sees |
+
+**`obs_id` — which rules carry one, and why the others must not**
+
+The observation encodes a weapon profile's rules as a **set of ids** (6 slots per profile), not
+as one flag per rule: a flag cost 560 observation scalars per rule, so making a rule live
+contradicted the "one retrain" goal. Ids are drawn from a pre-sized vocabulary, so giving an
+unimplemented rule its id later costs neither `obs_size` nor weights.
+
+- **Boolean rules resolved in the live path have an `obs_id`** — the 12 of
+  `observation_weapon_profiles.WEAPON_RULE_BITS`, plus the 5 `ANTI_*` (ids 1–17 today).
+  `_obs_ids_for_vocabulary` **raises** if one of them lacks the field: a rule the agent suffers
+  without perceiving it is exactly the failure this guard exists for.
+- **Parameterised rules have none, deliberately**: `RAPID_FIRE`, `SUSTAINED_HITS`, `MELTA`,
+  `CLEAVE`, `BLAST` are exposed as a **continuous dimension carrying the value** — an id would
+  duplicate what the value already says. The `ANTI_*` are the exception that proves the split:
+  their `Y+` threshold is continuous *and* their keyword is an id, because the threshold is
+  meaningless without knowing which keyword it targets.
+- **`INDIRECT_FIRE` has none** because it is not implemented (see the Game Log section above).
+  Keeping the entry — and *not* giving it an id — is the deliberate state: the day it becomes
+  live it only needs its id, with no observation resize and no retrain.
+
+**Example** (verbatim from `config/weapon_rules.json`):
 ```json
 {
   "RAPID_FIRE": {
+    "id": "RAPID_FIRE",
     "name": "Rapid Fire",
-    "description": "Make X additional attacks when target within half range",
+    "description": "Increase this weapon's Attacks by X when target unit is within half range.",
     "has_parameter": true
   },
   "ASSAULT": {
+    "id": "ASSAULT",
     "name": "Assault",
-    "description": "No penalty when shooting after advancing or falling back",
+    "obs_id": 6,
+    "description": "Units containing one or more models with this weapon can shoot using assault shooting (they can shoot after Advancing).",
     "has_parameter": false
   }
 }
 ```
+
+⚠️ The PDFs of `Documentation/40k_rules/` are the source of truth; where this config disagrees
+with a PDF, the PDF wins (user ruling, 2026-07-26).
 
 ### Training Config
 

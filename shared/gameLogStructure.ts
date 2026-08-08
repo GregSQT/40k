@@ -127,6 +127,29 @@ export interface ShootDetail {
   attackRollInitial?: number;
   strengthRollInitial?: number;
   saveRollInitial?: number;
+  /**
+   * Nom de la RÈGLE D'ARME qui a ouvert la relance de blessure — aujourd'hui [TWIN-LINKED]
+   * 24.38, la seule règle relanceuse. Champ distinct de `woundAbility`, réservé par contrat aux
+   * capacités d'UNITÉ (`stamp_reroll_abilities`) : sans lui, une relance d'arme s'affichait
+   * « 2->5 » sans cause, là où une relance de capacité était nommée.
+   */
+  woundRerollRule?: string;
+  // Règles d'arme ayant joué sur CETTE attaque précise, posées par
+  // `attack_sequence.roll_attack_pool`. Elles complètent les tokens de la ligne de synthèse, qui
+  // valent pour tout le groupe (04.03) : la ligne dit « cette arme a [SUSTAINED HITS:2] », le
+  // détail par tir dit quel dé les a effectivement déclenchées.
+  /** [TORRENT] 24.37 : touche automatique, aucun dé jeté. */
+  autoHit?: boolean;
+  /** Touche additionnelle produite par [SUSTAINED HITS] 24.36 (ni jet, ni critique possible). */
+  sustainedHit?: boolean;
+  /** 05.01 : jet de touche non modifié >= seuil critique. */
+  criticalHit?: boolean;
+  /** [LETHAL HITS] 24.23 : blessure automatique, aucun jet de blessure. */
+  lethalHit?: boolean;
+  /** 05.02 : jet de blessure non modifié critique (seuil abaissé par [ANTI-X] le cas échéant). */
+  criticalWound?: boolean;
+  /** [DEVASTATING WOUNDS] 24.10 : blessure critique -> mortelle, AUCUNE sauvegarde n'est jetée. */
+  devastating?: boolean;
 }
 
 /**

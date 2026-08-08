@@ -685,6 +685,11 @@ class StepLogger:
             detail_parts = [f"Hit {hit_roll}({hit_target_display}){hit_rule_suffix}"]
             if hit_result == "HIT":
                 wound_suffix = _ability_token(wound_ability_display_name)
+                # Regle d ARME ayant ouvert la relance ([TWIN-LINKED] 24.38) : `wound_ability`
+                # ne nomme que les capacites d UNITE, si bien qu une relance d arme laissait
+                # `Wound 5(4+) [REROLLED:1]` sans aucune cause — l asymetrie exacte que le
+                # Game Log PvP vient de fermer, et qui vaut ici aussi.
+                wound_suffix += _ability_token(details.get("wound_reroll_rule_name"))
                 # MODIFICATEUR de blessure (+1 d Oath) : le seuil affiche est deja net, donc sans
                 # ce token step.log montrait un `Wound x(3+)` ameliore sans cause visible — alors
                 # que la relance de TOUCHE, elle, etait nommee. Champ distinct de la relance : les
@@ -908,7 +913,9 @@ class StepLogger:
             # Only show wound if hit succeeded
             if hit_result == "HIT":
                 wound_suffix = _ability_token(wound_ability_display_name)
-                # JUMEAU du tir : modificateur +1 d Oath, distinct de la relance (cf. la-bas).
+                # JUMEAU du tir : regle d ARME relanceuse ([TWIN-LINKED]), puis modificateur +1
+                # d Oath, tous deux distincts de la relance de capacite (cf. la-bas).
+                wound_suffix += _ability_token(details.get("wound_reroll_rule_name"))
                 wound_suffix += _ability_token(details.get("wound_bonus_ability_display_name"))
                 wound_suffix += _rerolled_token(details, "wound_roll_initial")
                 detail_parts.append(f"Wound {wound_roll}({wound_target}+){wound_suffix}")

@@ -47,6 +47,12 @@ class WeaponAttackProfile:
     devastating: bool = False
     twin_linked: bool = False
     torrent: bool = False
+    #: KEYWORD de l instance de [ANTI-X Y+] 24.03 qui s applique REELLEMENT a cette cible
+    #: (None si l arme n en porte pas, ou si la cible n a aucun des keywords vises). Le seuil
+    #: est deja dans `crit_wound_on` ; ce champ ne sert qu a NOMMER la regle dans le log —
+    #: sans lui, le seuil de blessure critique change sans que rien ne dise pourquoi. Il est
+    #: pose ici, et non recalcule par le log, pour qu il n existe qu UNE resolution de [ANTI].
+    anti_keyword: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -95,14 +101,20 @@ def unit_keywords_upper(unit: Optional[Dict[str, Any]]) -> frozenset:
     return frozenset(out)
 
 
-def _anti_crit_wound_threshold(weapon: Dict[str, Any], target_keywords: frozenset) -> Optional[int]:
-    """Seuil de blessure critique impose par [ANTI-X Y+] 24.03, ou None si non applicable.
+def _anti_crit_wound_threshold(
+    weapon: Dict[str, Any], target_keywords: frozenset
+) -> Optional[Tuple[int, str]]:
+    """Seuil de blessure critique impose par [ANTI-X Y+] 24.03 ET son keyword, ou None.
 
     24.02 (Duplicated abilities) : plusieurs [ANTI] sur la meme arme ne se cumulent pas ; le
     joueur choisit l instance qui s applique. Choix optimal et deterministe retenu : le seuil
     le PLUS BAS parmi les instances dont le keyword X est porte par la cible.
+
+    Le KEYWORD est rendu avec le seuil (et non deduit ailleurs) parce que le log doit nommer
+    l instance retenue : une arme [ANTI-INFANTRY 4+][ANTI-VEHICLE 2+] tirant sur un vehicule
+    n a qu UNE regle applicable, et c est cette boucle-ci qui sait laquelle.
     """
-    best: Optional[int] = None
+    best: Optional[Tuple[int, str]] = None
     for rule_id in ANTI_RULE_IDS:
         if not weapon_has_rule(weapon, rule_id):
             continue
@@ -112,7 +124,8 @@ def _anti_crit_wound_threshold(weapon: Dict[str, Any], target_keywords: frozense
         threshold = weapon_rule_parameter(weapon, rule_id)
         if threshold is None:
             raise ValueError(f"[ANTI] rule {rule_id!r} sans parametre Y+ sur l arme {weapon!r}")
-        best = threshold if best is None else min(best, threshold)
+        if best is None or threshold < best[0]:
+            best = (threshold, keyword)
     return best
 
 
@@ -121,7 +134,10 @@ def build_weapon_attack_profile(
 ) -> WeaponAttackProfile:
     """Profil de regles d arme pour un intent (arme fixee, unite cible fixee)."""
     anti = _anti_crit_wound_threshold(weapon, unit_keywords_upper(target_unit))
-    crit_wound_on = NATURAL_CRITICAL_WOUND_ROLL if anti is None else min(NATURAL_CRITICAL_WOUND_ROLL, anti)
+    crit_wound_on = (
+        NATURAL_CRITICAL_WOUND_ROLL if anti is None
+        else min(NATURAL_CRITICAL_WOUND_ROLL, anti[0])
+    )
     sustained = 0
     if weapon_has_rule(weapon, "SUSTAINED_HITS"):
         value = weapon_rule_parameter(weapon, "SUSTAINED_HITS")
@@ -136,6 +152,7 @@ def build_weapon_attack_profile(
         devastating=weapon_has_rule(weapon, "DEVASTATING_WOUNDS"),
         twin_linked=weapon_has_rule(weapon, "TWIN_LINKED"),
         torrent=weapon_has_rule(weapon, "TORRENT"),
+        anti_keyword=None if anti is None else anti[1],
     )
 
 

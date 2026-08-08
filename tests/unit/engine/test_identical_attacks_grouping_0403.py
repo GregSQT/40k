@@ -22,6 +22,7 @@ from typing import Any, Dict, FrozenSet, List, Set, Tuple
 
 import pytest
 
+from engine.phase_handlers.attack_sequence import build_weapon_attack_profile
 from engine.utils.weapon_helpers import weapon_rule_signature
 
 
@@ -64,7 +65,7 @@ def _gkey(weapon: Dict[str, Any], *, rapid_fire_applied: int, target_sid: str) -
     `dmg_bonus`, `display_wth`, `display_save_th` et `target_sid` sont donc identiques par
     construction. Ce qui reste pour les departager, c'est exactement ce que 04.03 exige.
     """
-    return (5, 0, 1, 0, "4+", "5+", weapon_rule_signature(weapon), rapid_fire_applied, target_sid)
+    return (5, 0, 1, 0, 4, 5, weapon_rule_signature(weapon), rapid_fire_applied, target_sid)
 
 
 SHOOTA = _weapon("Shoota", ["RAPID_FIRE:1"])
@@ -181,9 +182,21 @@ def _rolled(weapon: Dict[str, Any], *, rapid_fire_applied: int, target_sid: str)
     return {
         "target_sid": target_sid, "weapon_name": weapon["display_name"],
         "bs": 5, "ap": 0, "dmg_raw": 1, "dmg_bonus": 0,
-        "display_wth": "4+", "display_save_th": "5+",
+        # Seuils ENTIERS, comme les rends le vrai roller (`wound_threshold` /
+        # `display_save_threshold_with_waaagh`) : l emission les relit pour rejouer l arbitrage
+        # de [LETHAL HITS], un stub qui rendrait « 4+ » ne serait plus fidele au producteur.
+        "display_wth": 4, "display_save_th": 5,
         "weapon_rules": weapon_rule_signature(weapon),
         "rapid_fire_applied": rapid_fire_applied,
+        # Arme + profil de regles gardes par REFERENCE : c est l emission qui en tire le token
+        # `[RAPID FIRE:X]`, celui-la meme que le regroupement rendait ambigu avant 04.03.
+        "weapon": weapon,
+        "attack_profile": build_weapon_attack_profile(weapon, None),
+        # Aucune de ces trois armes ne porte [BLAST] ; [RAPID FIRE] n ajoute des des que si la
+        # cible est a demi-portee, ce que ce stub ne modelise pas -> table vide.
+        "extra_dice_by_rule": {},
+        # 10.06 : aucun MONSTER/VEHICLE dans ce scenario.
+        "point_blank_malus": False,
         "precision": False, "precision_range": None, "heavy_applied": False,
         # Oath (08.04) : le groupement copie ces deux clés de l'intent — un roller stub qui ne
         # les rend pas n'est plus fidèle au producteur.
