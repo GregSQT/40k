@@ -515,48 +515,119 @@ def _drive_and_record_shooting(engine, *, max_steps: int = DRIVE_STEPS):
     return records
 
 
-@pytest.fixture(scope="module")
-def shooting_records_in_ai_mode():
-    """UN seul pilotage partagé par les deux cas — miroir de la fixture `choice_point`.
+#: Joueur piloté par le modèle en PvE. `_build_player_types` (api_server) rend
+#: `{"1": "human", "2": "ai"}` : c'est le joueur 2, et lui seul, qui déclenchait l'épinglage.
+AI_PLAYER = 2
 
-    Les deux cas posent deux questions sur la MÊME trajectoire ; la rejouer coûtait un second
-    drive de 400 pas (~28 s) pour un relevé identique au bit près. La liste est lue seule.
-    Bascule des deux joueurs en `"ai"`, comme le fait `pve_mode` pour le joueur 2, sans
-    reconstruire un moteur PvE complet (le scénario d'entraînement n'en est pas un).
+
+@pytest.fixture(scope="module")
+def shooting_records_in_pve_mode():
+    """UN seul pilotage partagé par les cas PvE — miroir de la fixture `choice_point`.
+
+    La table `player_types` est celle que `_build_player_types` monte réellement en PvE
+    (`{"1": "human", "2": "ai"}`), pas un `ai/ai` de convenance : c'est le joueur 2 seul qui
+    déclenchait l'épinglage, et le poser des deux côtés effacerait la seule asymétrie qui compte.
+    `pve_mode` est levé comme le fait `/api/game/new`, pour que les gardes qui le lisent voient
+    la même configuration qu'au service.
+
+    Ce que ce montage NE couvre pas, et que seule une session navigateur couvre : l'inférence de
+    la politique (`pve_controller`, qui exige un modèle chargé) et la sérialisation API. Le défaut
+    corrigé était dans le moteur, en aval de la politique — c'est ce moteur-là qui est piloté ici,
+    par le même `_process_squad_action` qu'appelle `execute_ai_turn`.
+
+    Les cas posent plusieurs questions sur la MÊME trajectoire ; la rejouer coûtait un drive de
+    400 pas (~28 s) par cas pour un relevé identique au bit près. La liste est lue seule.
     """
     engine = _new_engine()
-    engine.game_state["player_types"] = {"1": "ai", "2": "ai"}
+    engine.game_state["player_types"] = {"1": "human", "2": "ai"}
+    engine.is_pve_mode = True
+    engine.config["pve_mode"] = True
     records = _drive_and_record_shooting(engine)
-    assert records, "aucune phase de tir atteinte en mode 'ai' — les deux cas ne mesurent rien"
+    ai_records = [r for r in records if r["player"] == AI_PLAYER]
+    assert ai_records, (
+        f"aucune phase de tir du joueur {AI_PLAYER} (le seul piloté par l'IA) atteinte — les cas "
+        "PvE seraient VERTS SANS RIEN REGARDER, ou verts sur les seules phases du joueur humain"
+    )
     return records
 
 
-def test_the_shooting_choice_is_posed_when_the_player_is_ai(shooting_records_in_ai_mode):
-    """Le choix d'activation de tir existe AUSSI quand le joueur est piloté par l'IA (PvE).
+def test_the_shooting_choice_is_posed_when_the_player_is_ai(shooting_records_in_pve_mode):
+    """Le choix d'activation de tir existe AUSSI pour le joueur piloté par l'IA (PvE).
 
-    C'est le contrat train/serve : la phase de tir d'un joueur `"ai"` doit poser exactement les
+    C'est le contrat train/serve : la phase de tir du joueur `"ai"` doit poser exactement les
     mêmes décisions qu'en entraînement. Le verrou porte sur les deux moitiés du défaut d'origine :
     le pool brut n'est jamais réduit à une escouade par la clé, et un choix EST réellement posé.
+
+    Toutes les assertions sont bornées au joueur `"ai"` — sur l'ensemble des relevés elles
+    passeraient sur les seules phases du joueur humain, qui n'ont jamais été touchées.
     """
-    records = shooting_records_in_ai_mode
-    pinned = [r for r in records if r["active"] is not None]
+    ai_records = [r for r in shooting_records_in_pve_mode if r["player"] == AI_PLAYER]
+    pinned = [r for r in ai_records if r["active"] is not None]
     assert not pinned, (
         "le décodeur voit `active_shooting_unit` posée hors d'une activation en cours "
         f"({pinned[0]}) : le pool est réduit à cette escouade et le choix disparaît"
     )
-    with_pool = [r for r in records if len(r["pool"]) >= 2]
+    with_pool = [r for r in ai_records if len(r["pool"]) >= 2]
     assert with_pool, (
-        "aucune phase de tir à pool ≥ 2 atteinte en mode 'ai' — le cas suivant serait VERT "
-        "SANS RIEN REGARDER"
+        f"aucune phase de tir à pool ≥ 2 pour le joueur {AI_PLAYER} — l'assertion suivante serait "
+        "VERTE SANS RIEN REGARDER"
     )
     assert any(r["has_choice"] for r in with_pool), (
-        "aucun choix d'activation posé en mode 'ai' alors que le pool comptait au moins deux "
-        "escouades : la divergence train/serve est de retour"
+        f"aucun choix d'activation posé pour le joueur {AI_PLAYER} alors que son pool comptait au "
+        "moins deux escouades : la divergence train/serve est de retour"
     )
 
 
-def test_the_ai_chains_several_shooting_activations_in_one_phase(shooting_records_in_ai_mode):
-    """L'IA enchaîne plusieurs activations dans une même phase de tir, en mode `"ai"`.
+def test_the_end_of_a_shooting_activation_never_designates_the_next_one():
+    """`_handle_shooting_end_activation` n'écrit JAMAIS `active_shooting_unit`, même joueur `"ai"`.
+
+    C'est le JUMEAU de l'épinglage au montage du pool : il reposait `pool[0]` après chaque fin
+    d'activation, sous le même prédicat. Le pilotage aléatoire ne l'atteint pas — c'est le chemin
+    par-unité (`execute_action`), vivant pour le flux PvP humain (advance, move-after-shooting)
+    mais que l'agent n'emprunte pas, et dont le prédicat était toujours faux en PvP humain. Ce
+    cas l'atteint donc en l'APPELANT, sur un état de production piloté jusqu'à une phase de tir à
+    pool ≥ 2 — pas sur un `game_state` fabriqué. Sans lui, la suppression du jumeau ne reposerait
+    que sur l'identité de motif.
+    """
+    from engine.phase_handlers.shared_utils import PASS, SHOOTING
+    from engine.phase_handlers.shooting_handlers import _handle_shooting_end_activation
+
+    engine = _new_engine()
+    rng = random.Random(0)
+    reached = None
+    for _ in range(DRIVE_STEPS):
+        game_state = engine.game_state
+        if game_state["phase"] == "shoot" and len(game_state["shoot_activation_pool"]) >= 2:
+            reached = game_state
+            break
+        mask = engine.get_action_mask()
+        valid = [i for i, v in enumerate(mask) if v]
+        _o, _r, term, trunc, _i = engine.step(rng.choice(valid) if valid else 0)
+        if term or trunc:
+            break
+
+    assert reached is not None, (
+        "aucune phase de tir à pool ≥ 2 atteinte — ce cas serait VERT SANS RIEN REGARDER"
+    )
+    # Bascule en "ai" : c'est la SEULE condition sous laquelle l'ancien épinglage écrivait.
+    reached["player_types"] = {"1": "ai", "2": "ai"}
+    pool_before = [str(uid) for uid in reached["shoot_activation_pool"]]
+    unit = engine.action_decoder._raw_eligible_units_for_current_phase(reached)[0]
+
+    _handle_shooting_end_activation(reached, unit, PASS, 1, PASS, SHOOTING, 1, action_type="skip")
+
+    assert len(reached["shoot_activation_pool"]) == len(pool_before) - 1, (
+        "l'activation n'a pas réellement pris fin — le cas n'observe pas ce qu'il annonce"
+    )
+    assert "active_shooting_unit" not in reached, (
+        "la fin d'activation a désigné l'escouade suivante "
+        f"({reached['active_shooting_unit']!r}) : le choix `ACTIVATE_SLOT` de l'agent est préempté "
+        "sur le chemin par-unité, exactement comme il l'était au montage du pool"
+    )
+
+
+def test_the_ai_chains_several_shooting_activations_in_one_phase(shooting_records_in_pve_mode):
+    """L'IA enchaîne plusieurs activations dans une même phase de tir, en configuration PvE.
 
     Ce que ce cas attrape : une `active_shooting_unit` PÉRIMÉE. Elle était épinglée sur la tête du
     pool au montage de celui-ci et jamais libérée sur le chemin de l'agent ; à la 2e activation
@@ -571,7 +642,9 @@ def test_the_ai_chains_several_shooting_activations_in_one_phase(shooting_record
     `end_activation`, y compris sur un WAIT, et rendrait ce cas vert sans qu'aucune activation ne
     se soit enchaînée.
     """
-    records = shooting_records_in_ai_mode
+    # Borné au joueur `"ai"` : c'est le seul dont l'épinglage périmait la clé. Compté sur tous les
+    # joueurs, ce cas passerait sur les phases du joueur humain, jamais touchées par le défaut.
+    records = [r for r in shooting_records_in_pve_mode if r["player"] == AI_PLAYER]
     # Une phase de tir = (tour, joueur). Son pool ne fait que DÉCROÎTRE (rien ne s'y ajoute en
     # cours de phase), donc les escouades sorties = premier relevé moins le dernier ; chaque
     # sortie est une activation menée à son terme.

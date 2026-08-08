@@ -920,10 +920,19 @@ Ordre par valeur tactique :
    `execute_ai_turn` et ressorti en `{"error": "ai_decision_failed"}` : **en PvE l'IA ne tirait
    qu'une escouade par phase**. Mesuré en pilotant le moteur (400 pas, seed 0) sur les trois
    configurations de `player_types` ; après correction, `human/ai` et `ai/ai` rendent exactement
-   la même trace que `human/human`. Verrouillé par
-   `test_the_shooting_choice_is_posed_when_the_player_is_ai` et
-   `test_the_ai_chains_several_shooting_activations_in_one_phase`, qui remplacent le cas
-   `..._KNOWN_DIVERGENCE` et virent au rouge dès que l'un des deux défauts est remis.
+   la même trace que `human/human`. Verrouillé par TROIS cas qui remplacent
+   `..._KNOWN_DIVERGENCE`, chacun rouge à la remise du défaut qu'il garde :
+   `test_the_shooting_choice_is_posed_when_the_player_is_ai` (le choix est posé) et
+   `test_the_ai_chains_several_shooting_activations_in_one_phase` (la clé n'est jamais périmée)
+   tournent sur la table RÉELLE du PvE — `{"1": "human", "2": "ai"}` plus `pve_mode` — et bornent
+   toutes leurs assertions au joueur 2, seul concerné : comptées sur les deux joueurs, elles
+   passeraient sur les phases du joueur humain, que le défaut n'a jamais touchées.
+   `test_the_end_of_a_shooting_activation_never_designates_the_next_one` garde le JUMEAU, que le
+   pilotage n'atteint pas — c'est le chemin par-unité, vivant pour le PvP humain — en appelant
+   `_handle_shooting_end_activation` sur un état piloté.
+   ⚠️ Deux choses restent hors de portée d'un test unitaire et ne sont couvertes que par une
+   session navigateur : l'inférence de la politique (`pve_controller` exige un modèle chargé) et
+   la sérialisation API. Le défaut corrigé était en aval de la politique, dans le moteur.
 
    **Livraison en DEUX temps, et l'étape intermédiaire mérite d'être dite.** La moitié moteur est
    partie seule, avec les 12 logits produits par des colonnes DENSES d'`action_net` : le pointeur
