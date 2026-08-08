@@ -122,6 +122,7 @@ UNIT_RULE_EFFECT_IDS: Tuple[str, ...] = (
     "reroll_1_save_fight",
     "reroll_1_tohit_fight",
     "reroll_1_towound",
+    "feel_no_pain",
     "reroll_charge",
     "reroll_towound_target_on_objective",
     "shoot_after_advance",

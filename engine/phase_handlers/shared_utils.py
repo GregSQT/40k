@@ -2346,6 +2346,58 @@ def get_source_unit_rule_display_name_for_effect(
     return _get_source_unit_rule_display_name_for_effect(unit, effect_rule_id)
 
 
+def _get_feel_no_pain_threshold(unit: Dict[str, Any]) -> Optional[int]:
+    """Retourne le seuil X du Feel No Pain X+ de l'unité, ou None si absente (24.12).
+
+    Le seuil est stocké dans UNIT_RULES[i].rule_args.threshold (entier 2-6).
+    Lève si la règle est présente mais mal configurée — pas de repli silencieux.
+    """
+    if not _unit_has_rule_effect(unit, "feel_no_pain"):
+        return None
+    source_rule_id = get_source_unit_rule_id_for_effect(unit, "feel_no_pain")
+    if source_rule_id is None:
+        return None
+    unit_rules = require_key(unit, "UNIT_RULES")
+    for rule_entry in unit_rules:
+        if str(require_key(rule_entry, "ruleId")) != str(source_rule_id):
+            continue
+        rule_args = rule_entry.get("rule_args")
+        if not isinstance(rule_args, dict):
+            raise ValueError(
+                f"Rule '{source_rule_id}' on unit {require_key(unit, 'id')} "
+                f"must define rule_args for feel_no_pain"
+            )
+        raw = rule_args.get("threshold")
+        if not isinstance(raw, int):
+            raise TypeError(
+                f"Rule '{source_rule_id}' argument 'threshold' must be int, "
+                f"got {type(raw).__name__} for unit {require_key(unit, 'id')}"
+            )
+        if not 2 <= raw <= 6:
+            raise ValueError(
+                f"Feel No Pain threshold must be 2-6, got {raw} "
+                f"for unit {require_key(unit, 'id')}"
+            )
+        return raw
+    raise ValueError(
+        f"Source rule '{source_rule_id}' not found in UNIT_RULES "
+        f"for unit {require_key(unit, 'id')}"
+    )
+
+
+def _roll_feel_no_pain(n_wounds: int, threshold: int) -> int:
+    """Retourne les blessures subies après jets Feel No Pain X+ (24.12).
+
+    Pour chaque blessure, jet D6 >= threshold → blessure ignorée.
+    """
+    import random
+    remaining = 0
+    for _ in range(n_wounds):
+        if random.randint(1, 6) < threshold:
+            remaining += 1
+    return remaining
+
+
 #: Rayon de declenchement de `reactive_move`, EN POUCES (cf. config/unit_rules.json).
 _REACTIVE_TRIGGER_RANGE_INCHES = 9
 
@@ -4825,6 +4877,13 @@ def allocate_mortal_wounds(
                 "(utiliser build_manual_hazard_allocation pour le défenseur humain)"
             )
         target = eligibles[0]
+        # Feel No Pain (24.12) : jet D6 par blessure mortelle avant application.
+        _fnp_unit = get_unit_by_id(game_state, str(models_cache[target]["squad_id"]))
+        if _fnp_unit is not None:
+            _fnp_th = _get_feel_no_pain_threshold(_fnp_unit)
+            if _fnp_th is not None and _roll_feel_no_pain(1, _fnp_th) == 0:
+                remaining -= 1
+                continue
         new_hp = int(models_cache[target]["HP_CUR"]) - 1
         # Jumeau AUTO de `_resolve_one_hazard_wound` : meme record, meme exigence. La position
         # est capturee AVANT destroy (intention metier) mais REQUISE (elle part dans
@@ -8603,6 +8662,17 @@ def _resolve_one_manual_wound(game_state: Dict[str, Any], alloc: Dict[str, Any],
         return
     hp_before = int(m["HP_CUR"])
     dmg_dealt = min(int(dmg), hp_before)
+    # Feel No Pain (24.12) : jet D6 par HP perdu ; sur threshold+, la blessure est ignorée.
+    _def_squad_fnp = get_unit_by_id(game_state, str(batch["target_sid"]))
+    if _def_squad_fnp is not None:
+        _fnp_th = _get_feel_no_pain_threshold(_def_squad_fnp)
+        if _fnp_th is not None:
+            dmg_dealt = _roll_feel_no_pain(dmg_dealt, _fnp_th)
+    if dmg_dealt <= 0:
+        rec["damageDealt"] = 0
+        rec["targetDied"] = False
+        batch["pool_index"] += 1
+        return
     new_hp = hp_before - dmg_dealt
     destroyed = new_hp <= 0
     points_per_hp = float(require_key(m, "points_per_hp"))
@@ -9152,6 +9222,13 @@ def _resolve_one_hazard_wound(
     # `hazardDetails` du log, donc l analyse et le replay).
     col = int(require_key(m, "col"))
     row = int(require_key(m, "row"))
+    # Feel No Pain (24.12) : MW = blessure sans sauvegarde, mais FNP reste applicable.
+    _fnp_unit = get_unit_by_id(game_state, str(require_key(m, "squad_id")))
+    if _fnp_unit is not None:
+        _fnp_th = _get_feel_no_pain_threshold(_fnp_unit)
+        if _fnp_th is not None and _roll_feel_no_pain(1, _fnp_th) == 0:
+            batch["pool_index"] += 1
+            return
     hp_before = int(m["HP_CUR"])
     new_hp = hp_before - 1
     destroyed = new_hp <= 0

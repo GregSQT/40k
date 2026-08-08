@@ -176,5 +176,13 @@
     "id": "sergeant",
     "name": "Sergeant",
     "description": "Role marker: this model is the squad leader (sergeant / pack leader)."
+  },
+  "feel_no_pain": {
+    "id": "feel_no_pain",
+    "obs_id": 15,
+    "name": "Feel No Pain",
+    "has_parameter": true,
+    "parameter_name": "threshold",
+    "description": "CORE (24.12): each time a model with this ability would lose a wound, roll one D6: on a threshold+, that wound is not lost. Stored as rule_args.threshold (int 2-6)."
   }
 }
