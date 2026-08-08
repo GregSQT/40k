@@ -232,6 +232,32 @@ le code était mort **deux fois** — layout disparu ET condition jamais vraie �
 sans rapport (`L2`, qui ajoute un `phase` à une info) qui l'a réveillé, en rollout, sur le run le
 plus cher du projet. Le signal qui aurait dû alerter existait : **la courbe n'avait aucun point**.
 
+<a id="s0.69"></a>
+### 0.69 Le choix d'ARME en mêlée n'existe pas côté agent — 📋 PRÉVU, non commencé (2026-08-08)
+
+**Constat, vérifié sur le code.** En mêlée, l'agent choisit sa **cible** et rien d'autre. L'action
+`FIGHT_SLOT_BASE + slot_i` porte `target_slot` (`action_decoder.py`), le moteur le résout contre le
+pool 12.05 (`w40k_core.py`, `squad_fight`), puis `squad_declare_fight`
+(`shared_utils.py`) **auto-sélectionne l'arme CC de chaque figurine** par dégâts attendus contre le
+T/Sv de la cible. Les seuls types de décision déclarés sont `rule_choice`, `waaagh_call` et
+`fly_declaration` (`observation_entities.py`) : aucun n'est une arme.
+
+**Pourquoi ça mérite d'exister.** L'agent désigne UNE escouade cible par activation, et 04.02 exige
+que la cible soit engagée avec **la figurine** qui porte l'arme : une escouade coincée entre deux
+ennemis perd les attaques des figurines qui ne touchent que l'autre. Le choix fin (cible par
+figurine, ou arme par figurine) est donc un vrai levier tactique, pas un raffinement cosmétique.
+
+**Ce que ça coûte, et c'est moins qu'il n'y paraît.** Le moteur sait déjà le faire : les wrappers
+PvP `squad_declare_fight_model`, `squad_declare_fight_weapon` et `squad_declare_fight_weapon_qty`
+(`fight_handlers.py`) existent, en jumeaux exacts des `squad_shoot_*`. Ce qui manque n'est pas la
+mécanique de combat, c'est son EXPOSITION dans l'espace d'action et l'observation (les profils
+d'armes y sont déjà, cf. §0.27).
+
+**Contrainte tenue par le lot « attente forcée » du 2026-08-08** (cf. AI_TURN.md, STEP 7) :
+l'auto-jeu du moteur ne porte QUE sur `wait`, jamais sur `fight_slot`. Un combat à cible unique
+reste donc une décision de l'agent, et cette porte reste ouverte sans rien à défaire — c'est un
+choix délibéré, pris alors que l'auto-jouer aurait économisé 3,4 steps par épisode (1,7 %).
+
 <a id="s0.67"></a>
 ### 0.67 Les chantiers 01/03/04 ont cassé les DEUX contrats — plus aucun modèle ni aucune mesure ne décrit le code courant — 🔴 OUVERT (2026-08-07)
 
