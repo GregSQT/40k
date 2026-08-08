@@ -46,7 +46,7 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 >
 > **Conventions de tenue de ce document — les respecter en le mettant à jour :**
 > - **Un numéro d'entrée est attribué à vie.** Une entrée résolue descend en §0hist en gardant
->   son numéro ; un numéro n'est jamais réattribué. Prochaine entrée libre : `0.68` (`0.67` le 2026-08-07, `0.66` le 2026-08-04, `0.63`–`0.65` le 2026-08-03, `0.57`–`0.60` le 2026-08-02, `0.18`–`0.21` le 2026-07-20, `0.22` le 2026-07-21, `0.23`–`0.28` le 2026-07-22, `0.29` le 2026-07-22, `0.30` le 2026-07-26, `0.31` le 2026-07-27, `0.32`–`0.43` le 2026-07-28, `0.44`–`0.52` le 2026-07-29, `0.53`–`0.54` le 2026-07-30, `0.55`–`0.56` le 2026-08-02).
+>   son numéro ; un numéro n'est jamais réattribué. Prochaine entrée libre : `0.69` (`0.68` le 2026-08-08, `0.67` le 2026-08-07, `0.66` le 2026-08-04, `0.63`–`0.65` le 2026-08-03, `0.57`–`0.60` le 2026-08-02, `0.18`–`0.21` le 2026-07-20, `0.22` le 2026-07-21, `0.23`–`0.28` le 2026-07-22, `0.29` le 2026-07-22, `0.30` le 2026-07-26, `0.31` le 2026-07-27, `0.32`–`0.43` le 2026-07-28, `0.44`–`0.52` le 2026-07-29, `0.53`–`0.54` le 2026-07-30, `0.55`–`0.56` le 2026-08-02).
 > - **Un contenu d'état vit à UN seul endroit.** Une entrée à moitié résolue est **scindée** :
 >   la part résolue reste sous son numéro en §0hist, la part ouverte prend un numéro neuf ici,
 >   et les deux se renvoient l'une à l'autre. Seuls les avertissements et leçons sont dupliqués
@@ -77,6 +77,7 @@ tenues à jour et **ne doivent pas servir de référence** — les relire dans l
 
 | # | Entrée | Statut | Ordre | Prochaine action concrète |
 |---|---|---|---|---|
+| **§0.68** | Le premier `--new` du lot est **mort en rollout** : une instrumentation qui lisait l'observation PLATE, morte depuis la migration aux entités, réveillée par `L2` | ✅ **CORRIGÉ le 2026-08-08** (suppression) | **1** (le run repart) | `TypeError: Unsupported observation batch type: dict`. Le bloc `obs/<phase>_*` de `MetricsCollectionCallback` lisait le bloc « valid target » du vecteur plat mono-figurine (`obs[273:313]`), supprimé le 2026-07-28. Il n'était **pas atteint** jusqu'ici : aucune action d'agent ne portait de `phase` dans `('shoot','fight','charge')` — **mesuré**, 600 pas pilotés. `select_activation` (`L2`) est la première, et elle a tué le run. **Aucun run n'a jamais émis un seul de ces scalaires** (`obs/shoot` absent de tous les fichiers d'events). Détail → §0.68. |
 | **§0.67** | Les **chantiers 01/03/04** puis le **lot `L1`+`L2`+`L6`** ont cassé les contrats d'observation ET d'action | 🔴 **OUVERT — aucun modèle courant, aucune mesure courante ; le lot est COMPLET, il ne manque que le run** | **1** (avant toute mesure) | Vérifié par exécution le 2026-08-08 : `obs_size` **16659**, `TOTAL_ACTION_SIZE` **1139**, **7** requêtes de pointeur. Tous les modèles du dossier (le plus récent : `ArmageddonAgent_12345_robust_0.8049.zip`, contrat 20780/1107) sont **inchargeables** ⇒ le **0.82 de §0.14 ne décrit plus le code courant**. ✅ `L1` (`91cc70d1`), `L2` (`b8be3f8e`) et `L6` (`7b4ace51`) sont **mergés sur `main`**, plus 3 correctifs post-merge de `L2` (2026-08-08). **Prochaine action : le `--new` unique, puis la mesure de référence.** Détail → §0.67. |
 | **§0.66** | Le **journal du gym mentait à l'analyzer**, et deux règles de mouvement n'étaient pas appliquées | ✅ **CORRIGÉ le 2026-08-04** — ⚠️ **deux correctifs CHANGENT le jeu** | **1** | Fermeture de §0.62 par le bas : sur un run de **600 épisodes**, l'analyzer rendait **2353 erreurs**. **1014** venaient d'un `[FLY]` qu'AUCUN émetteur du gym n'écrivait (l'analyzer pathfindait les escouades volantes au sol), **898** d'armes aux règles différentes fusionnées dans un même lot 04.03, **144** d'un contrôle close-quarters qui mesurait une adjacence d'ancre là où 10.06 exige l'engagement. **2353 → 1204 mesuré.** Mais **71 erreurs étaient VRAIES** : la charge (11.04) et le pile-in/consolidation (12.03/12.08) bornaient à vol d'oiseau et ne validaient que la case d'arrivée — les escouades **traversaient les murs**. Et 122 violations d'alternance venaient d'une charge **ratée** comptée comme un charge move (Fights First indu). Détail → §0.66. |
 | **§0.62** | L'**analyzer** mesurait à une autre échelle et avec d'autres règles que le run — et trois déplacements n'étaient pas contrôlés | ✅ **CORRIGÉ le 2026-08-03** — une conséquence à assumer | **1** | 206 erreurs → **0** sur un log de référence de 6 épisodes. L'échelle venait du `board_config` COURANT, pas de l'entête du log : un run x1 relu avec un `config.json` en x5 mesurait tout ×5 — il **fabriquait** des erreurs (132 faux « shoot at engaged enemy ») **et en masquait** (portées, budgets jamais dépassés). Même défaut, silencieux celui-là, sur `engagement_zone`, `distance_metric` et les toggles `move` : désormais journalisés en entête `Run rules:`. Charge, pile-in/consolidation et move réactif n'avaient **aucun** contrôle conforme (jet non converti, mesure d'ancre, pas de pathfinding). **Conséquence : aucun verdict d'analyzer antérieur ne vaut**, et deux correctifs MOTEUR changent le jeu (move réactif). Détail → §0.62. |
@@ -184,6 +185,52 @@ jour 2026-07-29** : la section 9 a été auditée le 2026-07-24 ([§9.0](V11_pha
 **T2→T5 ont été relus le 2026-07-29 — 9 écarts, verdicts et réserves en [§0.47](#s0.47)** ; cette
 relecture s'est faite **par lecture seule, sans aucune exécution**, elle ne vaut donc pas
 mutation-test.
+
+<a id="s0.68"></a>
+### 0.68 Le premier run du lot est mort sur une instrumentation morte depuis la migration aux entités — ✅ CORRIGÉ (2026-08-08)
+
+**Symptôme.** Le `--new` du lot ([§0.67](#s0.67)) s'arrête en rollout sur
+`TypeError: Unsupported observation batch type for metrics extraction: dict`
+(`ai/training_callbacks.py`, `MetricsCollectionCallback._on_step`).
+
+**Cause, mesurée.** Le bloc fautif alimentait trois courbes par phase
+(`obs/<phase>_best_kill_probability`, `_danger_to_me`, `_valid_target_count`) en relisant le
+**bloc « valid target » du vecteur PLAT mono-figurine** — 5 slots × 8 features en `obs[273:313]`.
+Ce layout a disparu le 2026-07-28 avec la migration aux tenseurs d'entités : l'observation est un
+`Dict`, l'extracteur n'avait plus rien à lire.
+
+Ce qui l'a rendu visible seulement maintenant est la partie instructive. La branche est gardée par
+`info['phase'] ∈ ('shoot','fight','charge')` sous `is_controlled_action`, et **aucune action
+d'agent ne posait de `phase`** : mesuré sur 600 pas pilotés, `squad_shoot`, `squad_fight` et
+`squad_charge` rendent `phase=None` ; la seule action d'agent qui en posait une,
+`select_oath_target` (chantier 01), tombe sur `"command"`, hors du trio. `select_activation`
+(`L2`, `_handle_select_activation_action` renvoie `game_state["phase"]`) est **la première action
+d'agent à porter `"shoot"`** — 40 occurrences sur 600 pas, d'où la mort immédiate du run.
+
+**Preuve que rien n'est perdu** : `obs/shoot` est **absent de tous** les fichiers d'events
+TensorBoard (200k, x1_debug) — ces courbes n'ont jamais eu un seul point. Le test qui les
+« verrouillait » (`test_observation_metrics_per_env.py`) **monkeypatchait l'extracteur** : il n'a
+jamais regardé le layout (vert vacant, §0bis).
+
+🟢 **Arbitrage : SUPPRESSION.** Ces trois grandeurs étaient des features **pré-calculées à la
+main** du pipeline legacy ; les rebâtir supposerait de ré-implémenter le scoring heuristique que
+la migration a justement retiré, pour tracer une courbe que personne n'a jamais vue. Ce qu'elles
+avaient d'utile est déjà couvert en amont : `actions/share_<famille>` ([§0.56](#s0.56)) pour
+« l'agent joue-t-il cette dimension », la participation par phase ([§0.60](#s0.60)) côté moteur,
+et « avait-il des cibles » se compte sur le **masque**, pas sur l'observation. Supprimés : le bloc
+de `_on_step`, `_extract_valid_target_metrics_from_obs`, `_get_observation_batch_from_locals`,
+`OBSERVATION_PHASES`, l'accumulateur par-env et son flush, `log_observation_phase_metrics` et ses
+12 tags, et le test qui les mockait.
+
+**Verrou** : `tests/unit/ai/test_callback_ignores_observation_batch.py` — le cas exact
+(observation `Dict` + action d'agent en phase de tir) plus deux cas anti-récidive (aucun lecteur
+d'observation dans le callback, aucun émetteur `obs/*` dans le tracker). **Les trois rougissent**
+avec les fichiers d'avant restaurés, vérifié.
+
+📌 **Leçon (→ §0bis)** : une garde qui rend un chemin INATTEIGNABLE le fait passer pour sain. Ici
+le code était mort **deux fois** — layout disparu ET condition jamais vraie — et c'est un chantier
+sans rapport (`L2`, qui ajoute un `phase` à une info) qui l'a réveillé, en rollout, sur le run le
+plus cher du projet. Le signal qui aurait dû alerter existait : **la courbe n'avait aucun point**.
 
 <a id="s0.67"></a>
 ### 0.67 Les chantiers 01/03/04 ont cassé les DEUX contrats — plus aucun modèle ni aucune mesure ne décrit le code courant — 🔴 OUVERT (2026-08-07)
@@ -2914,6 +2961,20 @@ drainage vers `step.log` — ils ne peuvent donc structurellement pas l'alimente
 
 Un test qui part du milieu de la chaîne ne prouve rien sur ses extrémités. Pour un contrat de
 journal, le verrou doit partir de **l'action de production** et finir sur **la ligne écrite**.
+
+### Une COURBE SANS AUCUN POINT est un défaut, pas un creux de données (§0.68, 2026-08-08)
+
+Trois métriques `obs/<phase>_*` lisaient un layout d'observation supprimé neuf jours plus tôt. Le
+code n'a pas planté pour autant : sa garde (`info['phase'] ∈ ('shoot','fight','charge')`) n'était
+**jamais vraie**, aucune action d'agent ne posant de `phase`. Mort deux fois — layout disparu ET
+condition inatteignable — il est resté en place jusqu'à ce qu'un chantier sans rapport (`L2`)
+ajoute un `phase` à son `info` et le réveille **en rollout**, sur le run le plus cher du projet.
+
+Le signal existait et n'a été lu par personne : **la courbe n'avait aucun point dans aucun run**.
+Un `grep -ac "<tag>"` sur les fichiers d'events répond en une seconde. À faire pour toute
+instrumentation qu'on croit acquise, et systématiquement après une refonte du format qu'elle lit.
+Corollaire : un test qui **mocke l'extracteur** qu'il prétend couvrir (c'était le cas ici) est un
+vert vacant — il atteste du câblage, jamais de la donnée.
 
 ### Un « ✅ SAIN » prononcé sur UNE règle ne dit rien des règles SATELLITES qui la modifient (§0.50, 2026-07-29)
 

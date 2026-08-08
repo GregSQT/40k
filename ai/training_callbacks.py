@@ -675,53 +675,13 @@ class MetricsCollectionCallback(BaseCallback):
         # Add immediate reward ratio history for smoothing
         self.immediate_reward_ratio_history = []
         self.max_reward_ratio_history = 50  # Keep last 50 episodes
-        
-        # Metriques d'observation par phase, UN accumulateur PAR ENVIRONNEMENT — meme raison
-        # que la ventilation de recompense : un dictionnaire unique melangeait les 48 parties
-        # et etait vide par celle qui finissait la premiere.
-        self.episode_observation_phase_data_by_env: Dict[int, Dict[str, Dict[str, List[float]]]] = {}
 
-    def _get_observation_batch_from_locals(self):
-        """Get current observation batch from callback locals."""
-        if not hasattr(self, 'locals'):
-            return None
-        if 'new_obs' in self.locals:
-            return self.locals['new_obs']
-        if 'obs' in self.locals:
-            return self.locals['obs']
-        return None
+        # Les metriques d'observation par phase (`obs/<phase>_*`) occupaient cette place. Ne pas
+        # les rebatir sur ce chemin : leur garde de phase rend un lecteur d'observation
+        # REACHABLE en revue alors qu'il ne l'etait pas en rollout — c'est ainsi qu'un extracteur
+        # mort depuis la migration aux entites a survecu jusqu'a faire lever un run. Ce qu'elles
+        # avaient d'utile se compte cote MOTEUR, sur le masque. Cf. V11_agent_rework.md §0.68.
 
-    def _extract_valid_target_metrics_from_obs(self, obs_vector: np.ndarray) -> Dict[str, List[float]]:
-        """
-        Extract valid-target metrics from observation vector.
-        Valid target block: 5 slots × 8 features at [273:313].
-        """
-        if obs_vector.ndim != 1:
-            raise ValueError(f"Expected 1D observation vector, got shape={obs_vector.shape}")
-        if obs_vector.shape[0] < 313:
-            raise ValueError(f"Observation size too small for valid target block: size={obs_vector.shape[0]}")
-
-        base_idx = 273
-        slot_size = 8
-        max_slots = 5
-        kill_values: List[float] = []
-        danger_values: List[float] = []
-        valid_count = 0
-
-        for slot_idx in range(max_slots):
-            slot_base = base_idx + (slot_idx * slot_size)
-            is_valid = float(obs_vector[slot_base + 0])
-            if is_valid > 0.5:
-                valid_count += 1
-                kill_values.append(float(obs_vector[slot_base + 2]))
-                danger_values.append(float(obs_vector[slot_base + 3]))
-
-        return {
-            'best_kill_probability': kill_values,
-            'danger_to_me': danger_values,
-            'valid_target_count': [float(valid_count)],
-        }
-    
     _PPO_KEYS = frozenset({
         'train/policy_gradient_loss', 'train/value_loss', 'train/entropy_loss',
         'train/clip_fraction', 'train/approx_kl', 'train/explained_variance',
@@ -923,7 +883,6 @@ class MetricsCollectionCallback(BaseCallback):
     
     def _on_step(self) -> bool:
         """Collect step-level data including actions, damage, and unit changes"""
-        obs_batch = self._get_observation_batch_from_locals()
         # `self.episode_reward += rewards[0]` et `self.episode_length += 1` occupaient cette
         # place. Aucun lecteur : la recompense et la longueur d'episode logguees viennent de
         # `info["episode"]` ("r" et "l", poses par le Monitor de CHAQUE env), pas d'eux. Ils
@@ -934,41 +893,6 @@ class MetricsCollectionCallback(BaseCallback):
             # Process info dict for action tracking
             if 'infos' in self.locals:
                 for idx, info in enumerate(self.locals['infos']):
-                    is_controlled_action = bool(info.get('is_controlled_action', False))
-                    phase_name = info.get('phase')
-                    if (
-                        is_controlled_action
-                        and isinstance(phase_name, str)
-                        and phase_name in self.OBSERVATION_PHASES
-                        and obs_batch is not None
-                    ):
-                        if isinstance(obs_batch, np.ndarray) and obs_batch.ndim == 2:
-                            if idx >= obs_batch.shape[0]:
-                                raise IndexError(
-                                    f"Observation batch index out of range: idx={idx}, shape={obs_batch.shape}"
-                                )
-                            obs_vector = obs_batch[idx]
-                        elif isinstance(obs_batch, np.ndarray) and obs_batch.ndim == 1:
-                            obs_vector = obs_batch
-                        elif isinstance(obs_batch, list):
-                            if idx >= len(obs_batch):
-                                raise IndexError(
-                                    f"Observation batch index out of range: idx={idx}, len={len(obs_batch)}"
-                                )
-                            obs_vector = np.asarray(obs_batch[idx], dtype=np.float32)
-                        else:
-                            raise TypeError(
-                                f"Unsupported observation batch type for metrics extraction: {type(obs_batch).__name__}"
-                            )
-
-                        extracted = self._extract_valid_target_metrics_from_obs(np.asarray(obs_vector))
-                        phase_data = self.episode_observation_phase_data_by_env.setdefault(
-                            idx, self._empty_observation_phase_data()
-                        )[phase_name]
-                        phase_data['best_kill_probability'].extend(extracted['best_kill_probability'])
-                        phase_data['danger_to_me'].extend(extracted['danger_to_me'])
-                        phase_data['valid_target_count'].extend(extracted['valid_target_count'])
-
                     # Le comptage de `valid_actions` / `invalid_actions` / `total_actions` /
                     # `wait_actions` occupait cette place, depuis `info['success']` et
                     # `info['action']`. Il ne servait a rien : le MOTEUR compte les memes
@@ -982,7 +906,11 @@ class MetricsCollectionCallback(BaseCallback):
                     # `_metrics_tracker` n'etait arme qu'a n_envs==1, donc `--step` comptait
                     # double). Les deux cles sont posees ensemble par la branche zone_intent de
                     # w40k_core : leur absence est un defaut de cablage, pas un cas nominal.
-                    if is_controlled_action and info.get('action') == 'zone_intent' and self.metrics_tracker is not None:
+                    if (
+                        info.get('action') == 'zone_intent'
+                        and bool(info.get('is_controlled_action', False))
+                        and self.metrics_tracker is not None
+                    ):
                         self.metrics_tracker.log_zone_intent_step(
                             int(require_key(info, 'intent_value')),
                             float(require_key(info, 'zone_control')),
@@ -1023,7 +951,7 @@ class MetricsCollectionCallback(BaseCallback):
                     if info.get("TimeLimit.truncated"):
                         self._handle_truncated_episode(info, idx)
                     elif 'episode' in info:
-                        self._handle_episode_end(info, idx)
+                        self._handle_episode_end(info)
 
         # Le suivi periodique des Q-values (train/q_value_mean_smooth, toutes les 100 etapes)
         # occupait cette place. Meme raison que son jumeau d'EpisodeBasedEvalCallback (classe
@@ -1059,38 +987,6 @@ class MetricsCollectionCallback(BaseCallback):
         
         return True
     
-    #: Phases dont l'observation est instrumentee (cf. log_observation_phase_metrics).
-    OBSERVATION_PHASES = ('shoot', 'fight', 'charge')
-
-    @classmethod
-    def _empty_observation_phase_data(cls) -> Dict[str, Dict[str, List[float]]]:
-        """Accumulateur d'observation vide, une entree par phase instrumentee."""
-        return {
-            phase: {'best_kill_probability': [], 'danger_to_me': [], 'valid_target_count': []}
-            for phase in cls.OBSERVATION_PHASES
-        }
-
-    def _flush_observation_phase_data(self, env_index: int) -> None:
-        """Publie les metriques d'observation de l'episode qui finit, et de LUI SEUL.
-
-        Les 47 autres environnements sont au milieu de leur propre episode : ni leur contenu
-        ni leur remise a zero ne les concerne.
-        """
-        phase_data = self.episode_observation_phase_data_by_env.get(int(env_index))  # get allowed
-        if phase_data is None:
-            # Cet environnement n'a encore produit aucune observation instrumentee : il n'y a
-            # pas d'accumulateur. Un episode instrumente mais sans cible valide publie bien ses
-            # listes vides, que le tracker sait ne pas transformer en courbe.
-            return
-        self.metrics_tracker.log_observation_phase_metrics(phase_data)
-        self._reset_observation_phase_data(env_index)
-
-    def _reset_observation_phase_data(self, env_index: int) -> None:
-        """Repart d'un accumulateur vide pour CET environnement. Seul proprietaire du geste."""
-        self.episode_observation_phase_data_by_env[int(env_index)] = (
-            self._empty_observation_phase_data()
-        )
-
     def _handle_truncated_episode(self, info, env_index: int) -> None:
         """Episode coupe : compte, trace, et repart proprement.
 
@@ -1104,11 +1000,8 @@ class MetricsCollectionCallback(BaseCallback):
         payload["env_index"] = env_index
         payload["num_timesteps"] = self.model.num_timesteps
         self.metrics_tracker.log_truncated_episode(require_key(info, 'truncation_reason'), payload)
-        # L'accumulateur porte les donnees d'un episode qui n'aboutira pas : jete, pas publie.
-        # Le publier ferait entrer dans les courbes un episode que le moteur declare boucle.
-        self._reset_observation_phase_data(env_index)
 
-    def _handle_episode_end(self, info, env_index: int):
+    def _handle_episode_end(self, info):
         """Handle episode completion and log metrics."""
         self.episode_count += 1
 
@@ -1188,8 +1081,7 @@ class MetricsCollectionCallback(BaseCallback):
         # Log to metrics tracker (KEEP for state tracking)
         self.metrics_tracker.log_episode_end(episode_data)
         self.metrics_tracker.log_tactical_metrics(self.episode_tactical_data)
-        self._flush_observation_phase_data(env_index)
-        
+
         # CRITICAL FIX: Write game_critical metrics directly to model.logger
         # This ensures metrics appear in same TensorBoard directory as train/ metrics
         if hasattr(self.model, 'logger') and self.model.logger:

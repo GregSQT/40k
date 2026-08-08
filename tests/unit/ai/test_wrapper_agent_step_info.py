@@ -8,8 +8,14 @@ aucune. Les consommateurs lisent pourtant `phase`, `success` et `charge_succeede
 decrivant l'agent, puisqu'elles cotoient `is_controlled_action` :
 
   * `obs/*_best_kill_probability` et ses voisines rangeaient l'echantillon sous la phase du BOT
-    (une charge de l'agent comptee en `shoot` si le bot tirait ensuite) ;
-  * `combat/c_charge_successes` comptait les charges reussies du BOT, sous le drapeau de l'agent.
+    (une charge de l'agent comptee en `shoot` si le bot tirait ensuite) — ces courbes ont depuis
+    ete SUPPRIMEES (elles lisaient le vecteur plat mono-figurine, cf. `ai/training_callbacks.py`) ;
+  * `combat/c_charge_successes` comptait les charges reussies du BOT, sous le drapeau de l'agent
+    — depuis comptee cote moteur sur `action_logs`.
+
+Les deux consommateurs d'origine sont donc partis, mais le report reste la GARANTIE que `phase`,
+`success` et `charge_succeeded` decrivent bien l'agent : sans lui, le prochain lecteur retomberait
+dans le meme trou sans le savoir.
 
 Ces cles sont OPTIONNELLES par nature — le moteur ne les pose que quand elles s'appliquent —
 donc leur absence porte autant d'information que leur valeur : le report doit les REMPLACER en
