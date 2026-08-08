@@ -4657,6 +4657,17 @@ def _manual_roll_fight_intent(
     )
     # +1 au jet de blessure d Oath. Meme helper que le tir (cf. `stamp_wound_bonus_ability`).
     stamp_wound_bonus_ability(rolled["shot_records"], _oath_wound_bonus)
+    # WAAAGH! : « add 1 to the Strength and Attacks characteristics of melee weapons ». Les deux
+    # moities sont appliquees plus haut (`strength += _waaagh_bonus`, `n_attacks += _waaagh_bonus`)
+    # mais RIEN ne le disait dans step.log — ni token, ni compteur. Consequence mesuree sur le run
+    # de 600 episodes : un WarTrakk (Choppa NB=5) portait 6 attaques, l analyzer plafonnait a 5 et
+    # remontait « Attacks over CC_NB » ; et la section « 1.7 Special rules usage » affichait 0
+    # utilisation de `waaagh` — un vert vacant, sur une capacite qui avait bel et bien tire.
+    # Le drapeau est pose par ATTAQUE et non par ligne d unite : c est la granularite du record,
+    # donc la seule qui ne puisse pas se desynchroniser du jet qu elle decrit.
+    if _waaagh_bonus:
+        for _rec in rolled["shot_records"]:
+            _rec["waaaghMelee"] = True
     return {
         "attacker_mid": attacker_mid, "attacker": attacker, "target_sid": target_sid,
         "weapon_name": weapon_name, "bs": ws, "ap": ap, "dmg_raw": dmg_raw,

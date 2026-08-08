@@ -12,6 +12,55 @@ if TYPE_CHECKING:
     from ai.analyzer_config import AnalyzerConfig
 
 
+def _cc_cap_for_line(
+    state: "AnalyzerState",
+    config: "AnalyzerConfig",
+    action_desc: str,
+    fighter_id: str,
+    fighter_unit_type: str,
+    weapon_display_name: str,
+    cc_nb_squad_type: int,
+    n_fighter_models: int,
+) -> int:
+    """Plafond d'attaques de CETTE ligne, calculé PAR FIGURINE quand le journal le permet.
+
+    Deux données rendent le calcul juste, et elles n'existaient pas avant ce lot :
+      - `[MODEL_TYPES:]` (entête d'épisode) donne la DATASHEET de chaque socle. Sans elle, le NB
+        vient du type d'escouade — faux dès qu'un personnage est rattaché (règle 19) ou qu'un
+        sergent porte une autre arme. Cinq armes s'appellent « Close Combat Weapon », de NB 2 à 6.
+      - `[SHOOTER_MODELS:]` nomme les socles qui ont RÉELLEMENT frappé sur cette ligne. Le pool
+        se compte sur eux, pas sur l'effectif entier.
+      - `[WAAAGH!]` (24, capacité de faction ORKS) ajoute 1 aux Attaques de chaque arme de mêlée.
+        Le moteur l'appliquait sans le dire : un WarTrakk (Choppa NB=5) portait 6 attaques.
+
+    REPLI EXPLICITE sur l'ancien calcul (`NB du type d'escouade × effectif`) quand le journal ne
+    porte pas ces segments — un journal antérieur au format reste analysable, avec la précision
+    qu'il permet et pas davantage. Ce n'est pas un défaut masqué : c'est la même mesure qu'avant,
+    sur une donnée qui n'a pas changé.
+    """
+    from ai.analyzer_perfig import resolve_weapon_value
+
+    waaagh_bonus = 1 if re.search(r'\[WAAAGH!?\]', action_desc, re.IGNORECASE) else 0
+
+    shooters_match = re.search(r'\[SHOOTER_MODELS: ([^\]]+)\]', action_desc)
+    shooters = shooters_match.group(1).split() if shooters_match else []
+    if not shooters or not state.model_types:
+        return (cc_nb_squad_type + waaagh_bonus) * n_fighter_models
+
+    total = 0
+    for mid in shooters:
+        model_type = state.model_types.get(mid, fighter_unit_type)  # get allowed
+        limits = config.unit_attack_limits.get(model_type)  # get allowed : type hors registre
+        nb = None
+        if limits is not None:
+            nb = resolve_weapon_value(
+                weapon_display_name, require_key(limits, "cc_nb_by_weapon"),
+                config.cc_nb_by_weapon_global,
+            )
+        total += (nb if nb is not None else cc_nb_squad_type) + waaagh_bonus
+    return total
+
+
 def handle_fight(
     state: "AnalyzerState",
     config: "AnalyzerConfig",
@@ -35,8 +84,14 @@ def handle_fight(
     stats = state.stats
     state.units_fought.add(unit_id)
 
+    # Token(s) de capacité OPTIONNELS entre le verbe et la cible — même grammaire que `CHARGED`
+    # (`[WAAAGH!]`, `[FLY]`, …) et que `replay_converter._ABILITY`. Sans cette tolérance, une
+    # ligne portant `[WAAAGH!]` n'était reconnue par AUCUN contrôle de combat : ni plafond
+    # d'attaques, ni alternance, ni cible morte — elle disparaissait, en silence. C'est le motif
+    # de panne qui avait déjà coûté 3 lignes de move non parsées (cf. `move_line_re`).
     fight_match = re.search(
-        r'Unit (\d+)\((\d+),\s*(\d+)\) (?:ATTACKED|FOUGHT) Unit (\d+)\((\d+),\s*(\d+)\)',
+        r'Unit (\d+)\((\d+),\s*(\d+)\) (?:ATTACKED|FOUGHT)(?:\s+\[[^\]]+\])*'
+        r'\s+Unit (\d+)\((\d+),\s*(\d+)\)',
         action_desc
     )
     if fight_match:
@@ -128,7 +183,18 @@ def handle_fight(
                         or state.unit_models_alive.get(fighter_id, 0)  # get allowed
                         or 1
                     )
-                    cc_nb = cc_nb_single * n_fighter_models
+                    # PLAFOND PAR FIGURINE, pas par escouade. Une escouade n'est pas homogène :
+                    # la règle 19 y replie un personnage COMME figurine, et le roster y met
+                    # sergents et armes spéciales. Cinq armes distinctes s'appellent « Close
+                    # Combat Weapon », de NB 2 à 6 : le nom d'affichage ne tranche pas, seul le
+                    # type de la FIGURINE le fait ([MODEL_TYPES:] de l'entête d'épisode).
+                    # Mesuré sur le run du 2026-08-08, ce plafond d'escouade produisait 20 fausses
+                    # « Attacks over CC_NB » : 5 attaques d'un Ancient rattaché (NB=5) plafonnées
+                    # au NB=3 de l'Intercessor porteur, 20 attaques de 10 Gretchin plafonnées à 10.
+                    cc_nb = _cc_cap_for_line(
+                        state, config, action_desc, fighter_id, fighter_unit_type,
+                        weapon_display_name, cc_nb_single, n_fighter_models,
+                    )
                     seq_key = (state.fight_phase_seq_id, fighter_id, weapon_display_name)
                     if (state.last_fight_fighter_id != fighter_id or
                             state.last_fight_weapon != weapon_display_name):

@@ -93,6 +93,9 @@ def test_log_episode_start_writes_units_and_metadata(tmp_path: Path) -> None:
             "agent_roster_ref": "space_marines",
             "opponent_roster_ref": "tyranids",
             "scale": 2000,
+            # Siège de l'agent : EXIGÉ dans l'entête (`controlled_player_mode` accepte p2 et
+            # random). Sans lui, tout lecteur du journal suppose « agent == P1 ».
+            "agent_player": 1,
         },
         board_config={
             "cols": 15, "rows": 13, "hex_radius": 1.0,
