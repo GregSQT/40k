@@ -1175,10 +1175,57 @@ STEP : EMPTY_TARGET_HANDLING
 
 ```javascript
 STEP : WAIT_ACTION
-├── AI: Agent chooses wait
+├── AI: Agent chooses wait          ← seulement si le masque ouvrait AUTRE CHOSE que `wait`
+├── AI: sinon, le MOTEUR joue le wait lui-même (attente FORCÉE, cf. ci-dessous)
 ├── Human: Player chooses wait
 └── end_activation(WAIT, 1, 0, SHOOTING, 1, 1) → UNIT_ACTIVABLE_CHECK
 ```
+
+**ATTENTE FORCÉE — chemin gym uniquement** (`W40KEngine.step_with_mask`)
+
+Quand le masque n'ouvre QUE `wait`, l'agent n'a rien à décider : le moteur joue l'attente
+lui-même et enchaîne, au lieu de rendre la main pour une question à une seule réponse.
+
+- **Récompense = 0** pour la part `base_actions.wait` (`RewardCalculator._wait_reward`, source
+  unique des branches `wait` et `squad_wait`). La pénalité de −0,1 sanctionne la passivité
+  CHOISIE ; l'appliquer à une non-décision ajoute au signal un terme que l'agent ne peut pas
+  éviter. La récompense d'objectif éventuelle, elle, est conservée et cumulée.
+- **Le step reste un step du moteur** : `episode_steps`, `action_family_counts`, le StepLogger et
+  le garde anti-runaway (`_episode_step_calls`) le comptent comme les autres, parce que le rejeu
+  passe par `step_with_mask` lui-même et non par un chemin d'exécution parallèle.
+- **Borne** : `FORCED_WAIT_CHAIN_LIMIT` (64) n'est pas un réglage de jeu mais un détecteur de
+  boucle — la chaîne se draine seule, chaque attente retirant une escouade de son pool.
+- **`info` reste celui de l'action de l'APPELANT**, sauf les clés de FIN D'ÉPISODE
+  (`TERMINAL_INFO_KEYS` : `winner`, `win_method`, `episode`, `tactical_data`, `deployment_mode`,
+  `turn_limit_exceeded`, `truncation_reason`, `truncation_debug`), reprises du dernier step de la
+  chaîne. Les deux sens comptent : écraser `info` en bloc ferait disparaître la dernière action
+  réelle de chaque phase (`ai/env_wrappers.AGENT_STEP_INFO_KEYS` est prélevé APRÈS le retour du
+  moteur), et NE rien reprendre fait perdre son bilan à tout épisode qui se termine pendant une
+  chaîne — `ai/training_callbacks._handle_episode_end` exige `tactical_data` et `deployment_mode`
+  par `require_key`, et le run meurt dessus. Cette énumération n'est pas déclarative : le bloc de
+  terminaison pose ses clés dans un dict dédié et `step_with_mask` LÈVE si l'une n'y figure pas.
+- **PvP et bots ne sont pas concernés** : le drapeau `_wait_was_forced` n'existe que sur le chemin
+  gym, et son absence conserve exactement le comportement antérieur.
+
+Mesure ayant motivé le changement (scénario d'entraînement Armageddon, politique neuve) : 31,8
+attentes forcées par épisode, soit −3,18 de pénalité inévitable et ~16 % des steps. 28 des 31,8
+sont en phase de tir — le pool de tir retient toute unité ARMÉE sans exiger qu'elle ait une CIBLE
+(`shoot_pool_require_los_target` à `False` par défaut, le pool exact coûtant ~1,5 s par
+transition). **Ce changement déplace les récompenses : il exige un ré-entraînement.**
+
+Ce qui devient incomparable d'avant à après, et ce qui ne l'est PAS — le message du commit
+`de19a6bb` se trompe sur ce point, cette ligne fait foi :
+
+- **Incomparables** : les courbes de récompense (`ep_rew_mean`, les cinq `reward/*_total`,
+  `reward/objective_share`). À jeu identique, un épisode gagne désormais jusqu'à +3,18.
+- **Comparables, aucun recalibrage à faire** : le gate et le score robuste. Les quatre seuils
+  (`model_gating_min_combined`, `min_worst_bot`, `min_worst_scenario_combined`, `min_vs_control`)
+  comparent des TAUX DE VICTOIRE dans [0,1] (`ai/training_callbacks.py`, `_evaluate_model_gate`),
+  et `robust_base` dérive de `combined_win_rate`, pas de la récompense. Un taux de victoire compte
+  des parties gagnées : il ne bouge pas parce qu'une attente forcée cesse de coûter −0,1.
+  `best_robust_score` repart de `-inf` à chaque run, il n'y a donc aucun état à effacer.
+
+Verrou : `tests/unit/engine/test_forced_wait_not_penalised.py`.
 
 ### STEP 7: END_ACTIVATION
 

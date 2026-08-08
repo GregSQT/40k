@@ -440,7 +440,7 @@ def test_bot_ingress_end_to_end() -> None:
 
     from ai.bot_evaluation import _create_eval_env
 
-    scenario = "config/agents/ArmageddonAgent/scenarios/training/reserves_ingress_fixture.json"
+    scenario = "config/agents/ArmageddonAgent/scenarios/training/reserves_ingress_fixture1.json"
     env = _create_eval_env(
         bot_name="greedy",
         bot_type="greedy",
@@ -558,10 +558,10 @@ def test_bot_deployment_never_reserves_on_the_real_path(monkeypatch) -> None:
 
     # Rosters PINNÉS et SANS réserves déclarées : ce test mesure la DÉCISION du bot (met-il des
     # unités en réserves de lui-même ?), il lui faut donc une liste qui n'en déclare aucune.
-    # `scenario_training_armageddon.json` tire son roster au sort et le tirage contient désormais
+    # `scenario_training_armageddon1.json` tire son roster au sort et le tirage contient désormais
     # des variantes à réserves : la liste du bot en portait une fois sur deux, et le test ne
     # pouvait plus distinguer la déclaration de liste de la décision du bot.
-    scenario = "config/agents/ArmageddonAgent/scenarios/training/reserves_20_fixture.json"
+    scenario = "config/agents/ArmageddonAgent/scenarios/training/reserves_20_fixture1.json"
     env = _create_eval_env(
         bot_name="tactical",
         bot_type="tactical",

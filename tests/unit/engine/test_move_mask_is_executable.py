@@ -26,6 +26,7 @@ import random
 
 import pytest
 
+from _config_helpers import bank_training_scenarios
 from engine.phase_handlers.shared_utils import (
     MOVE_CELL_MAP_CACHE_KEY,
     build_rigid_plan,
@@ -34,11 +35,16 @@ from engine.phase_handlers.shared_utils import (
     validate_move_plan,
 )
 
-SCENARIO = "config/agents/ArmageddonAgent/scenarios/training/scenario_training_armageddon.json"
+#: TOUS les terrains de la banque. L'objet de ce test — cellules atteignables, murs, érosion du
+#: bloc — est entièrement GÉOMÉTRIQUE : un terrain de plus n'y est pas une répétition mais un jeu
+#: d'obstacles de plus. Ils sont APPARIÉS aux graines plutôt que croisés avec elles (cf. la
+#: paramétrisation du test) : le croisement doublerait un test déjà en 2 plateaux × 3 graines
+#: × 400 steps, pour une redondance que la variété des trajectoires apporte déjà.
+SCENARIOS = bank_training_scenarios()
 MAX_STEPS = 400
 
 
-def _engine(seed):
+def _engine(seed, scenario):
     from ai.unit_registry import UnitRegistry
     from engine.w40k_core import W40KEngine
 
@@ -46,7 +52,7 @@ def _engine(seed):
         rewards_config="ArmageddonAgent",
         training_config_name="x1_debug",
         controlled_agent="ArmageddonAgent",
-        scenario_file=SCENARIO,
+        scenario_file=scenario,
         unit_registry=UnitRegistry(),
         quiet=True,
         gym_training_mode=True,
@@ -134,9 +140,15 @@ def board(request):
             os.environ["W40K_BOARD_PATH"] = previous
 
 
-@pytest.mark.parametrize("seed", [0, 1, 2])
-def test_every_masked_move_cell_is_executable(seed, board):
-    eng = _engine(seed)
+# Une graine par terrain, en boucle sur la banque : trois cas, chaque terrain couvert, et un
+# terrain ajouté à la banque entre dans la rotation sans rééditer cette liste.
+@pytest.mark.parametrize(
+    "seed,scenario",
+    [(seed, SCENARIOS[seed % len(SCENARIOS)]) for seed in (0, 1, 2)],
+    ids=lambda v: os.path.basename(v) if isinstance(v, str) else f"seed{v}",
+)
+def test_every_masked_move_cell_is_executable(seed, scenario, board):
+    eng = _engine(seed, scenario)
     rng = random.Random(seed)
     failures = []
     cells_checked = 0

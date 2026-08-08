@@ -19,7 +19,7 @@ from engine.game_state import GameStateManager
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 BANK_SCEN = str(
     PROJECT_ROOT / "config" / "agents" / "ArmageddonAgent" / "scenarios" / "training"
-    / "scenario_training_armageddon.json"
+    / "scenario_training_armageddon1.json"
 )
 
 

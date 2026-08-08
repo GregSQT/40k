@@ -21,12 +21,17 @@ candidat plausible — d'où le test de parité obs ↔ masque, y compris sous t
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import numpy as np
 import pytest
 
-from _config_helpers import assert_deployment_phase, pin_active_deployment
+from _config_helpers import (
+    assert_deployment_phase,
+    bank_training_scenarios,
+    pin_active_deployment,
+)
 from engine.action_decoder import (
     DEPLOY_SLOT_CANDIDATES_CACHE_KEY,
     open_deploy_slot_count,
@@ -42,11 +47,26 @@ from engine.observation_entities import (
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-SCENARIO = (
-    PROJECT_ROOT
-    / "config" / "agents" / "ArmageddonAgent" / "scenarios" / "training"
-    / "scenario_training_armageddon.json"
-)
+#: TOUS les terrains de la banque. Ce fichier vérifie que chaque slot de pose DÉCRIT l'hexe que
+#: son action poserait, et les features de ce descriptif — distance aux objectifs, couvert,
+#: exposition LoS — sont lues sur le TERRAIN. Un seul terrain ne prouve donc rien des autres : le
+#: 2026-08-08, des positions valides sur mc1 tombaient sur un mur de mc2 sans qu'un test bouge.
+SCENARIOS = bank_training_scenarios()
+#: Terrain courant, réécrit par la fixture `terrain` ci-dessous. Les tests appellent `_load()`
+#: sans argument : passer le scénario par un attribut de module évite d'ajouter le paramètre aux
+#: 12 signatures, pour un fichier où AUCUN test n'est spécifique à un terrain.
+SCENARIO = SCENARIOS[0]
+
+
+@pytest.fixture(autouse=True, params=SCENARIOS, ids=os.path.basename)
+def terrain(request, monkeypatch):
+    """Rejoue CHAQUE test du fichier sur tous les terrains de la banque.
+
+    `monkeypatch` et non un `global` + `try/finally` maison : la restauration devient l'affaire
+    de pytest, y compris si le test lève.
+    """
+    monkeypatch.setattr(f"{__name__}.SCENARIO", request.param)
+    return request.param
 
 
 def _load():

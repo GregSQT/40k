@@ -6120,9 +6120,9 @@ def _attacker_model_can_reach_squad(
         tc = int(tm["col"])
         tr = int(tm["row"])
         target_level = int(tm.get("level", 0))  # get allowed (champ optionnel, défaut sol)
-        footprint = list(_compute_unit_occupied_hexes(tc, tr, base_unit, game_state))
+        footprint = list(_compute_unit_occupied_hexes(tc, tr, tm, game_state))
         target_socle = Socle(
-            base_unit["BASE_SHAPE"], base_unit["BASE_SIZE"], tc, tr,
+            tm["BASE_SHAPE"], tm["BASE_SIZE"], tc, tr,
             set(footprint), [(tc, tr)],
         )
         edge = ranged_edge_distance(
@@ -6266,7 +6266,7 @@ def _advance_blocks_weapon(
     qui vont avec), et 10.04 ne restreint aucune arme. Verifier ici le type de tir complet
     dupliquerait 10.06 au lieu de le partager.
     """
-    if squad_id not in require_key(game_state, "units_advanced"):
+    if squad_id not in game_state.get("units_advanced", set()):
         return False
     from engine.phase_handlers.shooting_handlers import (
         _can_unit_shoot_after_advance_with_weapon,
@@ -9389,7 +9389,7 @@ def _build_manual_allocation(
             # les blessures MORTELLES (crit sans save) sont infligees « after resolving any
             # normal damage » -> triees en fin de lot (cle devastating False<True) tout en
             # gardant l ordre save croissant a l interieur de chaque categorie.
-            pool_sorted = sorted(pool, key=lambda pw: (bool(pw.get("devastating")), pw["save_roll"]))
+            pool_sorted = sorted(pool, key=lambda pw: (bool(pw.get("devastating")), pw.get("save_roll") or 0))
             batches.append({
                 "target_sid": tsid,
                 "weapon_group_idx": gidx,

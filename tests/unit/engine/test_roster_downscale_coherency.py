@@ -22,7 +22,7 @@ from typing import Iterator, List
 
 import pytest
 
-SCENARIO = "config/agents/ArmageddonAgent/scenarios/training/scenario_training_armageddon.json"
+SCENARIO = "config/agents/ArmageddonAgent/scenarios/training/scenario_training_armageddon1.json"
 
 
 @pytest.fixture

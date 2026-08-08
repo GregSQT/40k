@@ -37,7 +37,7 @@ import pytest
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SCENARIO = (
     PROJECT_ROOT / "config" / "agents" / "ArmageddonAgent" / "scenarios" / "training"
-    / "reserves_20_fixture.json"
+    / "reserves_20_fixture1.json"
 )
 
 

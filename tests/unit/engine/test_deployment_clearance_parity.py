@@ -95,13 +95,13 @@ def _drive_deployment_clustered(eng, *, assert_parity: bool):
 @pytest.mark.parametrize("seed", [0, 1, 2])
 def test_active_deployment_completes_without_unplaceable_hex(seed):
     """Déploiement `active` en clustering forcé → se termine, zéro `deploy_footprint_occupied`."""
-    eng = _load(str(BANK_DIR / "scenario_training_armageddon.json"), seed=seed)
+    eng = _load(str(BANK_DIR / "scenario_training_armageddon1.json"), seed=seed)
     assert eng.game_state.get("phase") == "deployment", "le scénario doit démarrer en déploiement actif"
     _drive_deployment_clustered(eng, assert_parity=False)
 
 
 def test_deployment_mask_mirrors_commit_overlap_predicate():
     """Chaque hex offert par le masque de déploiement est accepté par le prédicat du commit."""
-    eng = _load(str(BANK_DIR / "scenario_training_armageddon.json"), seed=0)
+    eng = _load(str(BANK_DIR / "scenario_training_armageddon1.json"), seed=0)
     checked = _drive_deployment_clustered(eng, assert_parity=True)
     assert checked > 0, "aucun hex vérifié — le test n'a pas exercé la phase de déploiement"

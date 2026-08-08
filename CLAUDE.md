@@ -264,6 +264,13 @@ conclusion, il ne s'y ajoute pas. Ne jamais y répéter ce qui vient d'être dit
   exécute que si le PROMPT COURANT l'y autorise explicitement, l'autorisation ne vaut que pour
   ce prompt, ne se déduit d'aucun contexte et se retire en ne la redonnant pas. En cas de doute,
   elle n'existe pas : écrire la ligne RELIRE et s'arrêter là.
+- RELIRE, CHEMINS : relatifs quand le travail a été fait dans le dépôt principal, ABSOLUS DANS LE
+  WORKTREE quand il y a été fait — jamais relatifs dans ce cas :
+      RELIRE : /code-review /home/greg/40k/.claude/worktrees/<nom>/engine/xxx.py
+               /simplify /home/greg/40k/.claude/worktrees/<nom>/engine/xxx.py
+  Un chemin relatif désigne le fichier du dépôt PRINCIPAL, qui porte le même nom sans porter la
+  modification : la review relit alors un chantier étranger sans que rien ne le signale (mesuré le
+  2026-08-08 — un verdict entier, findings compris, rendu sur le mauvais code).
 
 T3. INVESTIGATION AUTONOME — PRIME SUR LES RÈGLES ASK 1 ET 5
 - Si l'utilisateur demande explicitement d'investiguer un problème, d'analyser une erreur, ou de trouver la root cause :

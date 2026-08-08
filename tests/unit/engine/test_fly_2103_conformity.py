@@ -533,7 +533,7 @@ def test_human_charge_flight_still_requires_an_explicit_declaration():
 # ─────────────────────────────────────────────────────────────────────────────
 
 _ARMAGEDDON_TRAINING_SCENARIO = (
-    "config/agents/ArmageddonAgent/scenarios/training/scenario_training_armageddon.json"
+    "config/agents/ArmageddonAgent/scenarios/training/scenario_training_armageddon1.json"
 )
 
 

@@ -31,7 +31,11 @@ LEGACY_KEYS = ("objectives", "objectives_ref", "objective_hexes", "deployment_zo
 # (Phase A « pas d'étages ») ; la banque porte donc désormais les 8 étages de mc1.
 # ⚠️ Ce script de migration T4 cycle encore sur les 3 terrains plats : le RELANCER repointerait
 # la banque dessus et casserait ce test — il est one-shot et déjà passé.
-TRAIN_TERRAINS = {"terrain-mc1.json"}
+#: Terrains d'entrainement declares par la banque. `terrain-mc2` est entre le 2026-08-08
+#: avec `scenario_training_armageddon2.json` : un scenario de training tire son roster au
+#: sort, donc TOUT terrain listé ici doit accepter les positions fixes des rosters
+#: (`scripts/gen_roster_positions.py` calcule leur union de murs).
+TRAIN_TERRAINS = {"terrain-mc1.json", "terrain-mc2.json"}
 
 
 def _load_migration_module():
@@ -117,10 +121,11 @@ def test_normalize_roster_ref_fixes_bare_benchmark_name():
 # ── Invariant statique sur les 61 scénarios migrés ──────────────────────────────
 
 def test_bank_has_expected_count():
-    # Banque ArmageddonAgent (2026-07-19) : 1 scenario training + 4 holdout_regular = les
-    # 4 matchups SM/Ork. L'ancienne banque CoreAgent (61 scenarios) a ete retiree ; ce test
-    # garde desormais la banque VIVANTE contre une perte accidentelle de scenario.
-    assert len(_bank_scenarios()) == 5
+    # Banque ArmageddonAgent : 2 scenarios training (un par terrain, mc1 et mc2 — le second
+    # ajoute le 2026-08-08) + 4 holdout_regular = les 4 matchups SM/Ork. L'ancienne banque
+    # CoreAgent (61 scenarios) a ete retiree ; ce test garde la banque VIVANTE contre une perte
+    # accidentelle de scenario.
+    assert len(_bank_scenarios()) == 6
 
 
 @pytest.mark.parametrize("scen", _bank_scenarios(), ids=lambda p: str(p.relative_to(SCEN_ROOT)))
@@ -140,7 +145,11 @@ def test_bank_scenario_has_no_legacy_and_valid_refs(scen):
 # ── Échantillon chargé de bout en bout (moteur + reset) ─────────────────────────
 
 _SAMPLE = [
-    "training/scenario_training_armageddon.json",   # training_random + opponent_roster_ref liste
+    # Les DEUX scenarios de training : ils ne different que par leur terrain, et c'est
+    # precisement ce que le chargement de bout en bout doit couvrir (les positions fixes des
+    # rosters doivent etre valides sur les deux — defaut mesure le 2026-08-08).
+    "training/scenario_training_armageddon1.json",   # training_random + opponent_roster_ref liste
+    "training/scenario_training_armageddon2.json",   # meme scenario, terrain-mc2
     "holdout_regular/scenario_bot-01.json",         # roster explicite holdout, matchup SM vs SM
     "holdout_regular/scenario_bot-02.json",         # matchup mixte SM vs Ork
 ]

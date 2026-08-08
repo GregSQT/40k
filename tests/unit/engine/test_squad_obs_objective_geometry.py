@@ -25,7 +25,9 @@ import math
 import os
 
 import numpy as np
+import pytest
 
+from _config_helpers import bank_training_scenarios
 from ai.unit_registry import UnitRegistry
 from engine.hex_utils import _hex_center
 from engine.observation_builder import ObservationBuilder
@@ -37,14 +39,26 @@ from engine.spatial_grid import (
 )
 from engine.w40k_core import W40KEngine
 
-PROJECT_ROOT = os.path.dirname(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-)
-TEMPLATE = os.path.join(
-    PROJECT_ROOT,
-    "config/agents/ArmageddonAgent/scenarios/training/scenario_training_armageddon.json",
-)
+#: TOUS les terrains de la banque. Ce fichier mesure la distance et la DIRECTION de l'escouade
+#: vers chaque objectif : les objectifs sont des zones du TERRAIN, donc changer de terrain change
+#: la géométrie mesurée — ce n'est pas une répétition.
+TEMPLATES = bank_training_scenarios()
+#: Terrain courant, réécrit par la fixture `terrain`. Passé par un attribut de module plutôt qu'en
+#: paramètre : aucun test du fichier n'est spécifique à un terrain, et `_make_env()` est appelée
+#: sans argument par tous.
+TEMPLATE = TEMPLATES[0]
 HEX_STEP = math.sqrt(3.0)
+
+
+@pytest.fixture(autouse=True, params=TEMPLATES, ids=os.path.basename)
+def terrain(request, monkeypatch):
+    """Rejoue CHAQUE test du fichier sur tous les terrains de la banque.
+
+    `monkeypatch` et non un `global` + `try/finally` maison : la restauration devient l'affaire
+    de pytest, y compris si le test lève.
+    """
+    monkeypatch.setattr(f"{__name__}.TEMPLATE", request.param)
+    return request.param
 
 
 def _make_env() -> W40KEngine:

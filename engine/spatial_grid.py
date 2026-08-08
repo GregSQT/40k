@@ -77,6 +77,21 @@ GRID_CH_SELF = 7
 # ici) : une cellule a cout 0 est soit hors pool, soit l origine meme de l escouade.
 GRID_CH_MOVE_COST = 8
 
+#: Nom de chaque canal, DANS L ORDRE de ses index. Jumeau des `*_FIELDS` de
+#: `observation_entities.py` : tout outil qui RAPPORTE un canal par son nom (l audit
+#: `scripts/obs_channel_audit.py`, un futur diagnostic) doit lire cette liste et non recopier la
+#: sienne — un canal INSERE au milieu decalerait alors tous les libelles d une copie sans qu aucun
+#: controle bouge, et l outil enverrait corriger un canal sain.
+GRID_CHANNEL_NAMES = (
+    "wall", "ally", "enemy", "ez", "objective", "level", "cover", "self", "move_cost",
+)
+
+if len(GRID_CHANNEL_NAMES) != GRID_CHANNELS:
+    raise ValueError(
+        f"{len(GRID_CHANNEL_NAMES)} noms de canaux pour GRID_CHANNELS={GRID_CHANNELS} : "
+        "un canal a ete ajoute sans son nom."
+    )
+
 # Valeur du canal `GRID_CH_MOVE_COST` au budget de move NORMAL (`M`) — la frontiere normal/advance.
 #
 # POURQUOI un seuil CONSTANT plutot qu une simple division par la demi-etendue. La grille passe

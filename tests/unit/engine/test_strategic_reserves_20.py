@@ -26,7 +26,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 # réserves (`_force_into_reserves`, qui applique 20.02 et EXIGE une unité posée) : ils supposent
 # donc que toutes les unités démarrent SUR LA TABLE.
 #
-# `scenario_training_armageddon.json`, utilisé auparavant, tire son roster au sort
+# `scenario_training_armageddon1.json`, utilisé auparavant, tire son roster au sort
 # (`agent_roster_ref: "training_random"`, glob du dossier). Le jour où une variante à réserves
 # entre dans ce dossier, 16 tests de ce fichier tombent — mesuré au chantier 04c, qui les y a
 # mis puis les a ressortis dans un sous-dossier `variants/` (le glob n'est pas récursif).
@@ -35,7 +35,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 # sur le scénario d'entraînement.
 SCENARIO = (
     PROJECT_ROOT / "config" / "agents" / "ArmageddonAgent" / "scenarios" / "training"
-    / "reserves_20_fixture.json"
+    / "reserves_20_fixture1.json"
 )
 
 UNDEPLOYED = (-1, -1)
@@ -954,7 +954,7 @@ def test_unarrived_reserves_are_destroyed_at_the_end_of_round_3():
 
     assert is_unit_alive(squad_id, gs), "l'unité doit être vivante avant la règle"
     destroyed = destroy_unarrived_strategic_reserves(gs)
-    assert squad_id in destroyed
+    assert squad_id in [str(u["id"]) for u in destroyed]
     assert not is_unit_alive(squad_id, gs), (
         "une unité restée en réserves à la fin du 3e round est DÉTRUITE (20.04)"
     )
@@ -974,7 +974,7 @@ def test_repositioned_unit_survives_the_end_of_round_3():
     gs["turn"] = 3
 
     destroyed = destroy_unarrived_strategic_reserves(gs)
-    assert squad_id not in destroyed
+    assert squad_id not in [str(u["id"]) for u in destroyed]
     assert is_unit_alive(squad_id, gs), "une unité repositionnée survit (20.04, exception)"
 
 

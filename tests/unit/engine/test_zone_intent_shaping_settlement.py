@@ -200,7 +200,7 @@ from unittest.mock import patch  # noqa: E402
 
 import numpy as np  # noqa: E402
 
-from engine.macro_intents import BASE_ZONE_INTENT, is_zone_intent_action  # noqa: E402
+from engine.macro_intents import decode_zone_intent_action, is_zone_intent_action  # noqa: E402
 from engine.phase_handlers.shared_utils import SQUAD_ACTION_WAIT  # noqa: E402
 from engine.w40k_core import W40KEngine  # noqa: E402
 
@@ -233,30 +233,61 @@ def _play_declaring_defend(engine: W40KEngine, max_steps: int = 2000) -> List[Di
     Declare DEFEND sur toutes les zones puis ATTEND — personne ne bouge, donc le controle acquis
     au deploiement est conserve et les intentions DEFEND sont effectivement realisees.
 
-    Rend un journal (turn, phase, action, reward) par step.
+    UNE ZONE DIFFERENTE PAR FREE STEP. Prendre bêtement la premiere action DEFEND legale
+    redeclarait les MAX_OBJECTIVES free steps sur la zone 0 : les autres zones gardaient l'intent
+    par defaut (INVADE), le solde valait 0.2 (DEFEND tenu) - 0.1 (INVADE sur zone deja possedee)
+    = 0.1, et ce 0.1 se lisait comme « le bonus DEFEND » alors qu'il etait une difference de deux
+    termes contraires. Le harnais ne declarait donc pas ce que son nom annonce, et le montant que
+    les tests ci-dessous observent ne se deduisait d'aucune intention.
+
+    Rend un journal par step GYM. `_pending_zone_shaping` est lu AVANT et APRES le step : depuis
+    `_drain_forced_waits`, un step gym recouvre plusieurs steps moteur et `reward` les CUMULE
+    (cf. la docstring de `W40KEngine.step_with_mask`), donc le reward rendu n'est plus la
+    recompense de l'action nommee par `info["action"]`. Le solde reporte est le seul terme qui
+    peut y entrer sans venir de l'action elle-meme, et son NIVEAU ne dirait rien : il est pose au
+    premier free step du tour (`_process_command_phase`) et reste en attente jusqu'a ce qu'un step
+    non-zone_intent le poppe, donc les free steps intermediaires le voient sans y toucher.
     """
     journal: List[Dict[str, Any]] = []
+    declaration_key: Any = None
+    declared_zones: set[int] = set()
     with patch.object(RewardCalculator, "calculate_reward", lambda self, *a, **kw: 0.0):
         for _ in range(max_steps):
             mask = engine.get_action_mask()
             legal = [int(a) for a in np.flatnonzero(mask)]
-            defend_actions = [
-                a for a in legal
-                if is_zone_intent_action(a) and (a - BASE_ZONE_INTENT) % 3 == INTENT_DEFEND
-            ]
+            key = (engine.game_state["turn"], int(engine.game_state["current_player"]))
+            if key != declaration_key:
+                declaration_key, declared_zones = key, set()
+            defend_actions = {
+                decode_zone_intent_action(a)[0]: a
+                for a in legal
+                if is_zone_intent_action(a) and decode_zone_intent_action(a)[1] == INTENT_DEFEND
+            }
+            undeclared = sorted(set(defend_actions) - declared_zones)
             if defend_actions:
-                action = defend_actions[0]
+                # Une fois toutes les zones couvertes, on REDECLARE au lieu de sortir : les free
+                # steps restants doivent etre consommes jusqu'a
+                # `zone_intent_free_steps_remaining == 0`, sinon le masque de sortie n'est jamais
+                # reduit a `wait`, le moteur ne draine rien, et le cumul que ces tests observent
+                # n'existe pas. Redeclarer DEFEND sur une zone deja DEFEND ne change aucun intent.
+                zone = undeclared[0] if undeclared else max(defend_actions)
+                declared_zones.add(zone)
+                action = defend_actions[zone]
             elif mask[SQUAD_ACTION_WAIT]:
                 action = SQUAD_ACTION_WAIT
             else:
                 action = legal[0] if legal else SQUAD_ACTION_WAIT
             turn_before = engine.game_state["turn"]
+            pending_before = float(engine.game_state["_pending_zone_shaping"])
             _obs, reward, terminated, truncated, info = engine.step(int(action))
             journal.append({
                 "turn": turn_before,
                 "action": info.get("action"),
                 "acting_player": info.get("acting_player"),
                 "reward": float(reward),
+                "pending_before": pending_before,
+                "pending_after": float(engine.game_state["_pending_zone_shaping"]),
+                "terminal": bool(terminated or truncated),
             })
             if terminated or truncated:
                 break
@@ -306,10 +337,53 @@ def test_the_declaration_is_eventually_settled() -> None:
 
 
 def test_a_free_step_itself_is_never_rewarded() -> None:
-    """Les actions zone_intent restent a reward 0.0 : le solde passe par une action tactique."""
+    """Un free step ne produit AUCUNE recompense de son propre chef.
+
+    OBSERVATOIRE. Ce test lisait le reward du step gym et l'attribuait a `info["action"]`. Ce
+    raccourci est mort avec `_drain_forced_waits` : le dernier `zone_intent` d'un tour met
+    `zone_intent_free_steps_remaining` a 0, donc le masque de sortie n'ouvre plus que `wait`, et le
+    moteur joue lui-meme cette attente DANS le step de l'agent en cumulant son reward. C'est cette
+    attente auto-jouee — pas le free step — qui poppe `_pending_zone_shaping` (le pop est dans la
+    branche NON-zone_intent de `step_with_mask`). Mesure sur ce harnais : 3 steps gym `zone_intent`
+    a 0.4 (= 2 x DEFEND_HELD, les deux zones tenues et declarees DEFEND), dont le step moteur
+    `zone_intent` valait 0.0 et le step moteur draine 0.4.
+
+    `info["reward_breakdown"]` ayant ete supprime du moteur, la recompense d'UN step moteur n'est
+    plus observable de l'exterieur. On decompose donc le cumul par son seul autre terme possible
+    ici : `_pending_zone_shaping` (`calculate_reward` est neutralise a 0.0, donc rien d'autre ne
+    peut entrer dans le total). Un free step n'a droit qu'au solde deja EN ATTENTE a son entree et
+    que ce step VIDE — ni au solde que sa propre command phase vient de calculer (l'ancien defaut
+    du moteur : il n'etait alors pas encore en attente), ni a celui qu'il laisse en attente.
+    """
     journal = _play_declaring_defend(_engine())
-    zone_intent_rewards = {e["reward"] for e in journal if e["action"] == "zone_intent"}
-    assert zone_intent_rewards <= {0.0}, f"free step recompense: {zone_intent_rewards}"
+    # Le solde TERMINAL est un versement distinct (`settle_pending_zone_intent_declaration` a la
+    # terminaison), verrouille par `test_no_declaration_survives_the_end_of_the_episode` : il ne
+    # transite pas par `_pending_zone_shaping` et n'est donc pas decomposable ici.
+    free_steps = [e for e in journal if e["action"] == "zone_intent" and not e["terminal"]]
+    assert free_steps, "aucun free step joue : le test ne mesurerait rien"
+
+    def _drained(entry: Dict[str, Any]) -> float:
+        """Solde en attente que ce step a VIDE — 0.0 s'il n'a rien vide.
+
+        `pending_after == 0.0` est le seul marqueur du pop (`step_with_mask` remet la cle a 0.0,
+        il ne la decremente pas), et il ne se confond avec aucun autre cas : un step qui POSE un
+        solde le laisse non nul, un step qui le traverse sans y toucher aussi. Aucune comparaison
+        de SIGNE ici : un solde negatif (INVADE declare sur ses propres zones) se draine
+        exactement comme un positif, et un solde nul ne se pose meme pas.
+        """
+        return entry["pending_before"] if entry["pending_after"] == 0.0 else 0.0
+
+    # Un free step vaut EXACTEMENT ce qu'il a vide du solde en attente, donc 0.0 partout sauf sur
+    # celui dont l'attente auto-jouee le vide. Payer un solde que le step vient de CALCULER (ce
+    # que faisait le moteur avant le report) rougit : ce solde-la n'etait pas encore en attente.
+    surplus = [e for e in free_steps if e["reward"] != pytest.approx(_drained(e))]
+    assert not surplus, f"free step recompense au-dela du solde en attente qu'il vide: {surplus}"
+
+    # NON VACANT : au moins un free step vide reellement un solde. Sans ce controle, un moteur qui
+    # ne verserait plus rien du tout passerait l'assertion ci-dessus les yeux fermes.
+    assert any(_drained(e) != 0.0 for e in free_steps), (
+        "aucun solde en attente vide par un free step : la decomposition n'est pas exercee"
+    )
 
 
 def test_no_declaration_survives_the_end_of_the_episode() -> None:

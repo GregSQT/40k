@@ -12,7 +12,7 @@ import json
 import random
 import gymnasium as gym
 import numpy as np
-from typing import Dict, List, Literal, Tuple, Set, Optional, Any, Union, overload
+from typing import Dict, List, Literal, Tuple, Set, Optional, Any, overload
 
 # Import shared utilities
 from shared.data_validation import (
@@ -35,6 +35,11 @@ from engine.phase_handlers.shared_utils import (
     rebuild_choice_timing_index,
     is_unit_alive,
     require_unit_position,
+    # Id d'action, importe de shared_utils et non de macro_intents (`ACTION_WAIT`, meme valeur) :
+    # c'est CE symbole que le constructeur de masque pose (`mask[SQUAD_ACTION_WAIT] = 1`), et le
+    # drapeau d'attente forcee compare une action AU MASQUE. Les deux constantes sont definies
+    # independamment dans les deux modules ; lire celle du masque interdit qu'elles divergent ici.
+    SQUAD_ACTION_WAIT,
     ACTION,
     WAIT,
     NO,
@@ -45,6 +50,64 @@ from engine.phase_handlers.shared_utils import (
     FIGHT,
     FLED,
 )
+
+#: Borne de la chaine d'attentes forcees auto-jouees d'affilee (cf. `step_with_mask`). Ce n'est PAS
+#: un reglage de jeu : la chaine se draine seule, chaque attente retirant une escouade de son pool.
+#: La depasser signale donc une boucle, et le moteur LEVE au lieu de rendre un episode fige.
+#: Elle borne AUSSI la pile : l'auto-jeu est re-entrant, donc une chaine de N vaut N frames de
+#: `step_with_mask`, methode qui appelle elle-meme profond dans les handlers. 64 laisse une marge
+#: confortable sous la limite de recursion de Python tout en depassant tres largement le reel — le
+#: scenario d'entrainement compte 31,8 attentes forcees par EPISODE ENTIER, pas par chaine.
+FORCED_WAIT_CHAIN_LIMIT = 64
+
+#: Les seules cles d'`info` qui decrivent la FIN D'EPISODE et non l'action qui vient d'etre jouee.
+#: Quand `step_with_mask` auto-joue des attentes forcees, l'`info` rendu reste celui de l'action de
+#: L'AGENT (cf. `ai/env_wrappers.AGENT_STEP_INFO_KEYS`, preleve apres le retour du moteur) et seules
+#: ces cles-ci sont reprises du dernier step de la chaine.
+#:
+#: ENUMERATION VERIFIEE, et non declarative : le bloc de terminaison de `step_with_mask` pose ses
+#: cles dans un dict dedie (`terminal_info`) et LEVE si ce dict porte une cle absente d'ici. La
+#: premiere version de cette liste omettait `tactical_data` et `deployment_mode` — deux cles
+#: EXIGEES (`require_key`) par `ai/training_callbacks._handle_episode_end` et
+#: `ai/metrics_tracker.log_episode` : un episode qui se terminait PENDANT une chaine auto-jouee les
+#: perdait, et le run mourait dessus. Allonger la liste ne suffisait pas : c'est l'oubli
+#: d'enumeration qui devait cesser d'etre silencieux. Il echoue desormais au premier episode
+#: termine, donc dans n'importe quel test d'episode complet.
+TERMINAL_INFO_KEYS = (
+    "winner", "win_method", "episode",
+    # Bilan d'episode lu par l'entrainement. `tactical_data` porte TOUT
+    # `episode_tactical_data` (compteurs de combat, VP, reserves, ventilation de recompense) ;
+    # `deployment_mode` ventile les courbes par mode de la rampe de deploiement.
+    "tactical_data", "deployment_mode",
+    # Pose par la sortie anticipee « limite de tours atteinte », qui construit son `info` a la
+    # main et ne passe donc pas par le garde de `terminal_info`.
+    "turn_limit_exceeded",
+    # Troncature : posees ENSEMBLE avec `truncated = True`. Les omettre rendrait un `truncated`
+    # sans son motif des que la troncature tombe pendant une chaine auto-jouee, et
+    # `ai/training_callbacks` lit `truncation_debug`.
+    "truncation_reason", "truncation_debug",
+)
+
+
+def _mask_only_opens_wait(mask: Any) -> bool:
+    """« Le masque ne laisse que `wait` » — SOURCE UNIQUE du predicat d'attente forcee.
+
+    Nomme parce que le lot le pose a DEUX endroits : a l'entree de `step_with_mask` (l'action de
+    l'agent est-elle une attente contrainte ? -> pas de penalite) et a sa sortie (l'etat rendu
+    laisse-t-il un choix ? -> le moteur enchaine lui-meme). Deux formulations libres du meme test
+    auraient a rester en phase pour que recompense et auto-jeu parlent de la meme chose.
+
+    MEME POLITIQUE, autre etage, que `ActionDecoder.activation_selection_slots` (« un seul slot
+    ouvert : poser la decision couterait un step pour aucune information ») : celle-la elide la
+    QUESTION dans le masque, celle-ci joue la REPONSE quand la question ne se pose plus.
+
+    Chemin le plus chaud du moteur, d'ou les deux choix de forme, mesures sur un masque booleen de
+    1139 entrees : le bit `wait` est teste AVANT le comptage (39 ns, et il elimine la quasi-totalite
+    des etats sans toucher au reste du tableau), et le comptage est `np.count_nonzero` (297 ns) et
+    non `.sum()` (1264 ns). Pas d'`asarray` : `ActionDecoder` rend deja un `ndarray` booleen, le
+    convertir serait un no-op defensif paye a chaque step.
+    """
+    return bool(mask[SQUAD_ACTION_WAIT]) and int(np.count_nonzero(mask)) == 1
 
 # Import shared utilities FIRST (no circular dependencies)
 from engine.episode_schedule import episodes_per_env
@@ -197,7 +260,7 @@ def repo_relative_scenario_path(scenario_file: Optional[str]) -> Optional[str]:
     return relative.replace(os.sep, "/")
 
 
-def destroy_unarrived_strategic_reserves(game_state: Dict[str, Any]) -> List[str]:
+def destroy_unarrived_strategic_reserves(game_state: Dict[str, Any]) -> List[Dict[str, Any]]:
     """20.04 — fin du 3e round de bataille : les réserves qui ne sont pas arrivées sont DÉTRUITES.
 
     « At the end of the third battle round, unless otherwise stated, all strategic reserves
@@ -213,7 +276,9 @@ def destroy_unarrived_strategic_reserves(game_state: Dict[str, Any]) -> List[str
         deviendra effective avec le chantier transports.
 
     C'est une RÈGLE DE JEU : elle se journalise comme un événement normal (console log +
-    `destroy_model` avec sa raison propre), jamais comme une erreur. Retourne les ids détruits.
+    `destroy_model` avec sa raison propre), jamais comme une erreur. Retourne les UNITÉS détruites
+    (et non leurs seuls ids) : l'appelant a besoin de leur `player`, et les re-résoudre par id
+    l'obligerait à rattraper un `None` que cette boucle sait déjà impossible.
 
     Appelée par le SEUL point où un round de bataille s'achève (fin de la phase de combat du
     joueur 2, `fight_handlers._fight_v11_phase_complete`), AVANT l'incrément de tour et avant le
@@ -223,7 +288,7 @@ def destroy_unarrived_strategic_reserves(game_state: Dict[str, Any]) -> List[str
     from engine.game_utils import add_console_log
     from engine.phase_handlers.shared_utils import destroy_model
 
-    destroyed: List[str] = []
+    destroyed: List[Dict[str, Any]] = []
     for unit in list(require_key(game_state, "units")):
         unit_id = str(require_key(unit, "id"))
         if not unit.get("in_strategic_reserves", False):  # get allowed (champ optionnel, cf. loader)
@@ -237,7 +302,7 @@ def destroy_unarrived_strategic_reserves(game_state: Dict[str, Any]) -> List[str
         for model_id in list(squad_models.get(str(unit_id), [])):  # get allowed
             if model_id in models_cache:
                 destroy_model(game_state, model_id, "strategic_reserves_timeout")
-        destroyed.append(unit_id)
+        destroyed.append(unit)
         add_console_log(
             game_state,
             f"STRATEGIC RESERVES (20.04): unit {unit_id} never made an ingress move by the end "
@@ -1310,7 +1375,7 @@ class W40KEngine(gym.Env):
     # GYM INTERFACE - KEEP THESE CORE METHODS
     # ============================================================================
     
-    def reset(self, *, seed: Optional[int] = None, options: Optional[Dict[str, Any]] = None) -> Tuple[Union[np.ndarray, Dict[str, np.ndarray]], Dict[str, Any]]:
+    def reset(self, *, seed: Optional[int] = None, options: Optional[Dict[str, Any]] = None) -> Tuple[Dict[str, np.ndarray], Dict[str, Any]]:
         """Reset game state for new episode - gym.Env interface."""
 
         # Call parent reset for gym compliance
@@ -1546,6 +1611,10 @@ class W40KEngine(gym.Env):
             f"Scenario has {len(objectives)} objectives but MAX_OBJECTIVES={MAX_OBJECTIVES}."
         )
         self._episode_step_calls = 0  # Safety: reset for runaway truncation check in step()
+        # Profondeur de la chaine d'attentes forcees auto-jouees (cf. `step_with_mask`). Initialise
+        # ici, comme le compteur ci-dessus : un `getattr` avec defaut au site chaud cacherait
+        # l'attribut au typage et paierait le defaut a chaque chaine.
+        self._forced_wait_depth = 0
         # (`_step_calls_since_increment` vivait ici : il n'alimentait que le `step_calls_since_last`
         #  des `log_action` du bloc step_logger de `_process_semantic_action`, supprime le
         #  2026-07-29 — voir la pierre tombale dans cette methode. Plus aucun lecteur.)
@@ -1982,7 +2051,7 @@ class W40KEngine(gym.Env):
 
     def step(
         self, action: int
-    ) -> Tuple[Optional[Union[np.ndarray, Dict[str, np.ndarray]]], float, bool, bool, Dict[str, Any]]:
+    ) -> Tuple[Optional[Dict[str, np.ndarray]], float, bool, bool, Dict[str, Any]]:
         """Interface gym.Env — 5-uplet fixe. L'implementation est ``step_with_mask``.
 
         Le 5-uplet de gym n'a pas de place pour le masque, et gym.Wrapper.step ne transmet que
@@ -1994,12 +2063,98 @@ class W40KEngine(gym.Env):
         observation, reward, terminated, truncated, info, _mask = self.step_with_mask(action)
         return observation, reward, terminated, truncated, info
 
+    def _drain_forced_waits(
+        self,
+        observation: Any,
+        reward: float,
+        terminated: bool,
+        truncated: bool,
+        info: Dict[str, Any],
+        out_mask: Optional[Tuple[np.ndarray, List[Dict[str, Any]]]],
+        actor: int,
+    ) -> Tuple[Any, float, bool, bool, Dict[str, Any], Optional[Tuple[np.ndarray, List[Dict[str, Any]]]]]:
+        """Joue les attentes que le masque IMPOSE, au lieu de rendre la main pour rien.
+
+        Si l'etat de sortie n'ouvre que `wait`, rendre la main a l'agent revient a lui poser une
+        question a une seule reponse : un aller-retour complet moteur <-> politique (forward du
+        reseau compris) pour zero information. Volume mesure : cf. `RewardCalculator._wait_reward`.
+
+        APPELEE AUX DEUX SORTIES NON TERMINALES de `step_with_mask` — le retour final ET celui de
+        la transition de phase automatique (pool vide). Accrochee a une seule, l'economie se serait
+        appliquee « selon le chemin emprunte », ce qui est pire qu'une economie absente : le nombre
+        de steps d'un episode dependrait d'un detail d'implementation.
+
+        RE-ENTRANTE PAR CONCEPTION : on rejoue par `step_with_mask` lui-meme, jamais par un chemin
+        d'execution parallele. Le log (`_flush_squad_action_logs_to_step_logger`), les compteurs
+        (`episode_steps`, `action_family_counts`) et le garde anti-runaway (`_episode_step_calls`)
+        restent donc EXACTEMENT ceux d'un step joue par l'agent : un `wait` auto-joue est un vrai
+        step du moteur, et s'il ne se comptait pas comme tel, la calibration du plafond de tour
+        (figurines x actions x marge) ne voudrait plus rien dire et le replay divergerait.
+
+        `actor` BORNE LA CHAINE AU JOUEUR QUI VIENT D'AGIR. Sans lui, une chaine franchissant la
+        frontiere de tour ferait jouer par le moteur les attentes de L'ADVERSAIRE a l'interieur du
+        step de l'agent, et `info` rendrait son `acting_player` / `is_controlled_action`.
+        Atteignable : `command_phase_start` pose `zone_intent_free_steps_remaining = 0` sur un tour
+        non-agent, ce qui reduit a `wait` le masque de commandement du bot.
+
+        CUMUL DE LA RECOMPENSE, et ce n'est pas cosmetique : la branche `squad_wait` ajoute
+        `objective_turn_reward` APRES la penalite, donc une attente forcee peut porter une
+        recompense d'objectif non nulle meme si sa part `base_actions` vaut 0. La perdre
+        deplacerait silencieusement du reward hors du retour d'episode.
+        """
+        if terminated or truncated:
+            return observation, reward, terminated, truncated, info, out_mask
+        if int(require_key(self.game_state, "current_player")) != actor:
+            return observation, reward, terminated, truncated, info, out_mask
+        if out_mask is None:
+            # Masque de sortie non construit : on ne draine pas, et on ne le RECONSTRUIT pas. Les
+            # trois seuls etats concernes (`_build_observation_and_mask`) sont une decision d'agent
+            # en attente — masque reduit aux `CHOICE_i` —, la phase de deploiement — au moins un
+            # slot de pose ouvert, `wait` n'y etant jamais seul —, et `game_over`. Aucun ne peut
+            # produire un masque reduit a `wait` : la reponse du test est connue d'avance, la payer
+            # serait un build de masque complet par step de deploiement, et ce serait en prime une
+            # seconde route vers l'etat de sortie, a cote de la source unique observation+masque.
+            return observation, reward, terminated, truncated, info, out_mask
+        if not _mask_only_opens_wait(out_mask[0]):
+            return observation, reward, terminated, truncated, info, out_mask
+
+        self._forced_wait_depth += 1
+        try:
+            if self._forced_wait_depth > FORCED_WAIT_CHAIN_LIMIT:
+                # LEVE au lieu de rendre un etat plausible : la chaine se draine d'elle-meme
+                # (chaque attente retire une escouade de son pool), donc la depasser n'est pas un
+                # cas de jeu mais une boucle — et un episode fige et silencieux couterait des
+                # heures avant d'etre remarque.
+                raise RuntimeError(
+                    f"Chaine d'attentes forcees > {FORCED_WAIT_CHAIN_LIMIT} sans qu'aucune action "
+                    f"ne s'ouvre (tour {self.game_state.get('turn')}, phase "
+                    f"{self.game_state.get('phase')}) : le masque est bloque sur `wait`."
+                )
+            observation, chain_reward, terminated, truncated, chain_info, out_mask = self.step_with_mask(
+                SQUAD_ACTION_WAIT, mask_and_eligible=out_mask
+            )
+            reward += chain_reward
+            # `info` DECRIT L'ACTION DE L'APPELANT, il ne doit pas devenir celle de l'attente que le
+            # moteur s'est jouee a lui-meme : `ai/env_wrappers.AGENT_STEP_INFO_KEYS` (action,
+            # success, phase, intent_value, zone_control, charge_succeeded, is_controlled_action)
+            # est preleve APRES le retour du moteur. L'ecraser ferait disparaitre la DERNIERE action
+            # reelle de chaque phase — dont le `zone_intent` qui, en mettant
+            # `zone_intent_free_steps_remaining` a 0, produit justement un masque reduit a `wait`.
+            # Seules les cles de FIN D'EPISODE sont reprises de la chaine : elles decrivent l'etat
+            # final, pas l'action.
+            for key in TERMINAL_INFO_KEYS:
+                if key in chain_info:
+                    info[key] = chain_info[key]
+        finally:
+            self._forced_wait_depth -= 1
+        return observation, reward, terminated, truncated, info, out_mask
+
     def step_with_mask(
         self,
         action: int,
         mask_and_eligible: Optional[Tuple[np.ndarray, List[Dict[str, Any]]]] = None,
     ) -> Tuple[
-        Optional[Union[np.ndarray, Dict[str, np.ndarray]]],
+        Optional[Dict[str, np.ndarray]],
         float,
         bool,
         bool,
@@ -2032,6 +2187,12 @@ class W40KEngine(gym.Env):
         ``objective_rewarded_turns`` / ``coherency_penalized_turns`` du registre
         ``_once_claims``) n'est lu par la construction du masque — verifie par grep sur
         ``action_decoder``, ``phase_handlers`` et ``spatial_grid``. ``_pending_zone_shaping`` est poppe ici, pas par le calcul de recompense.
+
+        ATTENTES FORCEES — les deux sorties non terminales passent par ``_drain_forced_waits`` : un
+        etat qui n'ouvre que ``wait`` est joue par le moteur au lieu d'etre rendu a l'agent. Un step
+        d'agent peut donc recouvrir plusieurs steps de moteur ; ``reward`` les cumule, et ``info``
+        reste celui de l'action de l'APPELANT (seules les cles de ``TERMINAL_INFO_KEYS`` viennent du
+        dernier step de la chaine).
         """
         # Reste None sur tout chemin qui ne construit aucune observation : l'appelant reconstruit
         # alors le masque lui-meme. Jamais un couple perime — c'est l'inverse du defaut a eviter.
@@ -2098,6 +2259,15 @@ class W40KEngine(gym.Env):
             self._verify_supplied_mask(action_mask, eligible_units, "W40KEngine.step_with_mask")
         else:
             action_mask, eligible_units = self.action_decoder.get_squad_action_mask_and_eligible_units(self.game_state)
+        # ATTENTE FORCEE : le masque d'ENTREE n'ouvrait que `wait`, l'agent n'a donc rien choisi.
+        # Le pourquoi et la mesure sont dans `RewardCalculator._wait_reward`, qui lit ce drapeau.
+        # Le canal est `game_state` et non le payload `result` parce que le fait est connu ICI,
+        # avant que l'action ne soit jouee, alors que `result` n'existe qu'apres elle.
+        # PURGE PUIS POSE : la cle ne doit exister que pour le step courant, et ce chemin compte
+        # des sorties anticipees qui rendent sans passer par `calculate_reward`.
+        self.game_state.pop("_wait_was_forced", None)
+        if int(action) == SQUAD_ACTION_WAIT and _mask_only_opens_wait(action_mask):
+            self.game_state["_wait_was_forced"] = True
         if self.debug_mode:
             from engine.game_utils import add_debug_file_log
             episode = self.game_state.get("episode_number", "?")
@@ -2115,6 +2285,10 @@ class W40KEngine(gym.Env):
         if not eligible_units and not action_mask.any():
             # No eligible units and no valid actions - trigger phase transition
             current_phase = self.game_state["phase"]
+            # Joueur AVANT la transition : `advance_phase` peut rendre la main a l'adversaire, et
+            # l'auto-jeu des attentes forcees ne doit jamais se poursuivre pour lui (cf.
+            # `_drain_forced_waits`). Capture ici, comparee apres.
+            player_before_advance = int(require_key(self.game_state, "current_player"))
             advance_action = {"action": "advance_phase", "from": current_phase, "reason": "pool_empty"}
             advance_success, result = self._process_squad_action(advance_action)
             if not advance_success:
@@ -2149,7 +2323,13 @@ class W40KEngine(gym.Env):
                     objective_control = self.state_manager.calculate_objective_control(self.game_state)
                     self.step_logger.log_episode_end(self.game_state["episode_steps"], winner, win_method, objective_control)
             
-            return observation, 0.0, terminated, False, info, out_mask
+            # Sortie NON TERMINALE quand la transition de phase n'a pas fini la partie : elle doit
+            # drainer les attentes forcees comme le retour final, sinon l'economie dependrait du
+            # chemin emprunte. L'acteur de reference est celui d'AVANT la transition — la chaine ne
+            # doit pas se poursuivre pour l'adversaire si la phase a change de joueur.
+            return self._drain_forced_waits(
+                observation, 0.0, terminated, False, info, out_mask, player_before_advance
+            )
 
         if self._should_force_random_deployment_action(action_mask):
             valid_action_indices = [int(i) for i, value in enumerate(action_mask) if bool(value)]
@@ -2467,6 +2647,16 @@ class W40KEngine(gym.Env):
             totals['objective'] += zone_shaping_paid
             totals['objective_positive'] += max(0.0, zone_shaping_paid)
 
+        # Cles de FIN D'EPISODE, tenues a part de l'`info` d'action. Deux raisons, et la seconde
+        # est celle qui a coute : (1) elles sont les seules que `_drain_forced_waits` reprend du
+        # dernier step de la chaine auto-jouee, (2) les tenir dans un dict dedie rend
+        # l'enumeration de `TERMINAL_INFO_KEYS` VERIFIABLE — le garde juste avant le drain leve si
+        # une cle posee ici n'y figure pas. Sans ce dict, la frontiere « cle d'action / cle
+        # terminale » n'existait que dans une liste ecrite a la main, a cote de 500 lignes qui
+        # ecrivent dans `info` : c'est exactement comme ca que `tactical_data` et
+        # `deployment_mode` ont manque a l'appel.
+        terminal_info: Dict[str, Any] = {}
+
         # Add winner info when game ends
         if terminated:
             winner, win_method = self._determine_winner_with_method()
@@ -2477,11 +2667,11 @@ class W40KEngine(gym.Env):
                     f"win_method is None but terminated=True. Winner={winner}, Turn={self.game_state.get('turn')}"
                 )
             
-            info["winner"] = winner
-            info["win_method"] = win_method
-            
+            terminal_info["winner"] = winner
+            terminal_info["win_method"] = win_method
+
             # CRITICAL: Populate info["episode"] for Stable-Baselines3 MetricsCollectionCallback
-            info["episode"] = {
+            terminal_info["episode"] = {
                 "r": float(self.episode_reward_accumulator),
                 "l": int(self.episode_length_accumulator),
                 "t": int(self.episode_length_accumulator),
@@ -2841,7 +3031,7 @@ class W40KEngine(gym.Env):
             )
 
             # Add tactical data to info
-            info["tactical_data"] = self.episode_tactical_data.copy()
+            terminal_info["tactical_data"] = self.episode_tactical_data.copy()
 
             # Mode de déploiement de CET épisode ("active" | "fixed" | None), pour que les
             # courbes puissent être ventilées par mode. Sans cette ventilation, la rampe
@@ -2849,7 +3039,7 @@ class W40KEngine(gym.Env):
             # une métrique agrégée mélange alors deux tâches de difficulté différente dans des
             # proportions qui changent à chaque épisode, et son plateau ne distingue plus un
             # agent qui stagne d'un agent qui progresse sur une tâche qui durcit.
-            info["deployment_mode"] = self.game_state["deployment_mode_schedule_mode"]
+            terminal_info["deployment_mode"] = self.game_state["deployment_mode_schedule_mode"]
             
             # Log episode end with final stats and win method
             if hasattr(self, 'step_logger') and self.step_logger and self.step_logger.enabled:
@@ -2971,13 +3161,13 @@ class W40KEngine(gym.Env):
             from engine.game_utils import add_debug_log
             add_debug_log(self.game_state, f"[MAX_STEPS LIMIT REACHED] {error_msg}")
             truncated = True
-            info["truncation_reason"] = "episode_steps_limit"
+            terminal_info["truncation_reason"] = "episode_steps_limit"
             # Le diagnostic TRAVERSE le VecEnv. Sans ca il n'existait que dans le `print` du
             # worker — noye dans la console a n_envs=48, perdu au scroll — et dans
             # `add_debug_log`, muet hors `debug_mode` et de toute facon local a ce process.
             # Une troncature signale une BOUCLE dans le moteur : ce qu'il faut, c'est de quoi
             # la reproduire. Cf. le lecteur dans ai/training_callbacks.py.
-            info["truncation_debug"] = {
+            terminal_info["truncation_debug"] = {
                 "episode": episode,
                 "turn": turn,
                 "phase": phase,
@@ -2995,9 +3185,28 @@ class W40KEngine(gym.Env):
                 "shoot_debug": shoot_debug,
                 "last_action_debug": self.game_state.get("_last_action_debug"),
             }
-            info["winner"] = -1  # draw so eval does not skew win rate
-            info["win_method"] = "step_limit"
-            
+            terminal_info["winner"] = -1  # draw so eval does not skew win rate
+            terminal_info["win_method"] = "step_limit"
+
+        # GARDE D'ENUMERATION — la frontiere « cle d'action / cle terminale » a UNE source, et
+        # c'est la construction ci-dessus, pas la liste. Une cle de fin d'episode ajoutee sans
+        # etre declaree ferait perdre cette cle a tout episode qui se termine pendant une chaine
+        # d'attentes forcees, chez le seul appelant qui l'exige (`ai/training_callbacks`) et
+        # seulement une fois sur N episodes : elle echoue ici, immediatement et partout.
+        unlisted = tuple(key for key in terminal_info if key not in TERMINAL_INFO_KEYS)
+        if unlisted:
+            raise RuntimeError(
+                f"Cles de fin d'episode absentes de TERMINAL_INFO_KEYS : {unlisted}. "
+                f"Les declarer, sinon `_drain_forced_waits` ne les remontera pas quand l'episode "
+                f"se termine pendant une chaine d'attentes forcees auto-jouees."
+            )
+        info.update(terminal_info)
+
+        # Auto-jeu des attentes forcees : cf. `_drain_forced_waits`. Applique AUX DEUX sorties
+        # non terminales de cette fonction, sinon il s'appliquerait « selon le chemin emprunte ».
+        (observation, reward, terminated, truncated, info, out_mask) = self._drain_forced_waits(
+            observation, reward, terminated, truncated, info, out_mask, pre_action_player
+        )
         return observation, reward, terminated, truncated, info, out_mask
     
     

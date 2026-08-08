@@ -333,7 +333,7 @@ def test_after_the_answer_the_mask_serves_the_move_pool_of_that_answer(declared)
 # ─────────────────────────────────────────────────────────────────────────────
 
 _ARMAGEDDON_TRAINING_SCENARIO = (
-    "config/agents/ArmageddonAgent/scenarios/training/scenario_training_armageddon.json"
+    "config/agents/ArmageddonAgent/scenarios/training/scenario_training_armageddon1.json"
 )
 
 
