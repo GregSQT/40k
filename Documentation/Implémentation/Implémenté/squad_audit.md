@@ -23,7 +23,7 @@ Décomposition :
 | obs[4] | hp_cur normalized |
 | obs[5] | units_moved flag |
 | obs[6] | units_shot flag |
-| obs[7] | units_attacked flag |
+| obs[7] | units_fought flag |
 | obs[8] | units_advanced flag |
 | obs[9] | alive_friendlies normalized |
 | obs[10] | alive_enemies normalized |
@@ -96,7 +96,6 @@ game_state["units_fled"]      = set()  # L40 ← confirmé
 game_state["units_shot"]      = set()  # L41
 game_state["units_charged"]   = set()  # L42
 game_state["units_fought"]    = set()  # L43
-game_state["units_attacked"]  = set()  # L44
 game_state["units_advanced"]  = set()  # L45 ← confirmé
 ```
 

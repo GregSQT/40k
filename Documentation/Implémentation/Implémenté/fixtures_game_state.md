@@ -36,7 +36,7 @@ Balayage de `tests/` : tout dict littéral portant `units` + `phase` (ou `units`
 |---|---|
 | `advance_rolls`, `units_shot_previous_turn` | **62** (toutes) |
 | `units_took_to_skies_charge` | 59 |
-| `last_move_cause`, `last_move_event_id`, `reactive_mode`, `reactive_decision_mode`, `units_attacked`, `units_took_to_skies` | 56 |
+| `last_move_cause`, `last_move_event_id`, `reactive_mode`, `reactive_decision_mode`, `units_took_to_skies` | 56 |
 | `reaction_window_active`, `reactive_decision_payload`, `reactive_macro_order_current_window`, `units_reacted_this_enemy_turn` | 55 |
 | `units_shot` | 52 |
 | `units_cannot_charge` | 50 |
@@ -106,7 +106,7 @@ trous nets, tous fermés, chacun prouvé rouge avant d'être rétabli.
 | Trou | Mesure | Verrou posé | Mutation qui le rougit |
 |---|---|---|---|
 | **13.09 Hidden, membre « ni au tour précédent »** — `units_shot_previous_turn` absente des 62 fixtures, lue par 3 `.get` de `shooting_handlers` ; seul le drapeau d'observation était couvert (`test_squad_obs_terrain_flags.py:200`), pas le moteur de tir ni le preview | 1 site | `tests/unit/engine/test_hidden_1309_previous_turn.py` (3 tests : statut réel, preview, contre-épreuve) | la fixture omet la clé → `hidden` reste `True` : le demi-13.09 silencieux |
-| **Les 5 bits d'état de tour de l'observation** (`moved`, `shot`, `fought`, `advanced`, `fled`) : aucun n'était vérifié allumé — une permutation du mapping bit↔clé sortait une obs fausse sans qu'une assertion bouge | `units_attacked` : 0 site | `tests/unit/engine/test_squad_obs_turn_state_bits.py` (7 tests, « ce bit et lui seul ») | (a) clé omise → bit éteint ; (b) `fought` recâblé sur `units_shot` dans le moteur → 2 tests rouges |
+| **Les 5 bits d'état de tour de l'observation** (`moved`, `shot`, `fought`, `advanced`, `fled`) : aucun n'était vérifié allumé — une permutation du mapping bit↔clé sortait une obs fausse sans qu'une assertion bouge | `units_fought` (le mapping lisait `units_attacked`, clé sans écrivain — corrigé le 2026-08-08) | `tests/unit/engine/test_squad_obs_turn_state_bits.py` (7 tests, « ce bit et lui seul ») | (a) clé omise → bit éteint ; (b) `fought` recâblé sur `units_shot` dans le moteur → 2 tests rouges |
 | **`reactive_mode="macro"`** : branche entière de `_select_reactive_unit_order` jamais exercée (0 occurrence de `"macro"` dans `tests/`), ordre et erreurs explicites compris | 0 site | `tests/unit/engine/test_reactive_move.py::TestSelectReactiveUnitOrder` (5 tests) | macro retombant sur le tri par id → 3 tests rouges |
 
 La règle 13.09 a été relue dans `Documentation/40k_rules/13 Terrain.pdf` avant d'écrire le verrou :

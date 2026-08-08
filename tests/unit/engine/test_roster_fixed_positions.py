@@ -1,12 +1,18 @@
 """Verrou : positions top/bottom dans les rosters, chemin roster réel (rotation aléatoire SM/Orks).
 
-Pilote le VRAI W40KEngine sur le template de training `scenario_training_armageddon.json`
+Pilote le VRAI W40KEngine sur CHAQUE scénario de la banque de training
 (agent_roster_ref=training_random, opponent_roster_ref=[SM,Orks], siège aléatoire) et vérifie :
   - mode 'fixed'  : AUCUN déploiement, toutes les unités placées, joueur 1 en bande HAUTE (top),
     joueur 2 en bande BASSE (bottom) — quel que soit le roster tiré et le siège ;
   - mode 'active' : phase de déploiement, unités en sentinelle (positions ignorées).
 
 Le mode est imposé via le scheduler `deployment_mode_schedule` injecté après construction.
+
+⚠️ TOUS LES SCÉNARIOS DE LA BANQUE, ET PAS UN SEUL. Les positions d'un roster servent à tout
+scénario qui le tire, quel que soit son `terrain_ref` : ne les vérifier que sur un terrain laissait
+passer des positions POSÉES SUR UN MUR de l'autre (les 4 scénarios `terrain-mc2` levaient au
+chargement en mode 'fixed'). La paramétrisation par scénario est le verrou de l'union des murs que
+`scripts/gen_roster_positions.py` calcule.
 
 Rapatrié de `scripts/roster_fixed_positions_test.py` (2026-07-26) : ce fichier vivait hors de
 `tests/` et son nom `*_test.py` ne correspondait pas à `python_files = test_*.py`, donc il n'était
@@ -15,19 +21,24 @@ jamais collecté par la suite.
 
 from __future__ import annotations
 
+import glob
 import os
+
+import pytest
 
 from engine.phase_handlers.shared_utils import validate_squad_coherency
 from shared.data_validation import require_key
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-TEMPLATE = os.path.join(
-    PROJECT_ROOT, "config/agents/ArmageddonAgent/scenarios/training/scenario_training_armageddon.json"
-)
+BANK = os.path.join(PROJECT_ROOT, "config/agents/ArmageddonAgent/scenarios/training")
+#: Scénarios de training « pleins » (roster tiré au sort), un par terrain de la banque.
+TEMPLATES = sorted(glob.glob(os.path.join(BANK, "scenario_training_armageddon*.json")))
+#: Fixtures à réserves déclarées des deux côtés, un fichier par terrain.
+RESERVES_FIXTURES = sorted(glob.glob(os.path.join(BANK, "reserves_full_episode_fixture*.json")))
 MIDLINE = 150  # séparation top/bottom du board 220x300
 
 
-def _make_env(active_ratio: float):
+def _make_env(active_ratio: float, scenario: str):
     from ai.unit_registry import UnitRegistry
     from engine.w40k_core import W40KEngine
 
@@ -35,7 +46,7 @@ def _make_env(active_ratio: float):
         rewards_config="ArmageddonAgent",
         training_config_name="x5_new",
         controlled_agent="ArmageddonAgent",
-        scenario_file=TEMPLATE,
+        scenario_file=scenario,
         unit_registry=UnitRegistry(),
         quiet=True,
         gym_training_mode=True,
@@ -55,9 +66,10 @@ def _make_env(active_ratio: float):
     return env
 
 
-def test_fixed_mode_places_players_in_their_own_band():
+@pytest.mark.parametrize("scenario", TEMPLATES, ids=os.path.basename)
+def test_fixed_mode_places_players_in_their_own_band(scenario: str):
     """Mode 'fixed' : 8 épisodes, aucun déploiement, P1 en bande haute / P2 en bande basse."""
-    env = _make_env(0.0)
+    env = _make_env(0.0, scenario)
     placed_total = 0
     reserved_total = 0
     for _ep in range(8):
@@ -105,7 +117,8 @@ def test_fixed_mode_places_players_in_their_own_band():
     # construit — pas espéré d'un tirage — par `test_fixed_mode_leaves_reserves_off_the_table`.
 
 
-def test_fixed_mode_leaves_reserves_off_the_table():
+@pytest.mark.parametrize("fixture", RESERVES_FIXTURES, ids=os.path.basename)
+def test_fixed_mode_leaves_reserves_off_the_table(fixture: str):
     """Mode 'fixed' + roster à réserves 20.01 : le reset PASSE, et la réserve reste hors table.
 
     VERROU DU DÉFAUT MESURÉ LE 2026-08-05. Les zones de déploiement ne vivaient que dans
@@ -119,15 +132,9 @@ def test_fixed_mode_leaves_reserves_off_the_table():
     Ce test CONSTRUIT le cas au lieu de l'espérer d'un tirage : il épingle la fixture à réserves
     déclarées des deux côtés et force le mode 'fixed'.
     """
-    import os as _os
-
     from ai.unit_registry import UnitRegistry
     from engine.w40k_core import W40KEngine
 
-    fixture = _os.path.join(
-        PROJECT_ROOT,
-        "config/agents/ArmageddonAgent/scenarios/training/reserves_full_episode_fixture.json",
-    )
     env = W40KEngine(
         rewards_config="ArmageddonAgent",
         training_config_name="x5_new",
@@ -172,9 +179,10 @@ def test_fixed_mode_leaves_reserves_off_the_table():
             )
 
 
-def test_active_mode_keeps_units_at_sentinel():
+@pytest.mark.parametrize("scenario", TEMPLATES, ids=os.path.basename)
+def test_active_mode_keeps_units_at_sentinel(scenario: str):
     """Mode 'active' : 3 épisodes, phase 'deployment', positions du roster ignorées."""
-    env = _make_env(1.0)
+    env = _make_env(1.0, scenario)
     for _ep in range(3):
         env.reset(seed=None)
         gs = env.game_state

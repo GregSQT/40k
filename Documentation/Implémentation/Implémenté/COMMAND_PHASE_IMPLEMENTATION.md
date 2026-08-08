@@ -45,7 +45,6 @@ game_state["units_fled"] = set()
 game_state["units_shot"] = set()
 game_state["units_charged"] = set()
 game_state["units_fought"] = set()
-game_state["units_attacked"] = set()
 game_state["units_advanced"] = set()
 ```
 

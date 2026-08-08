@@ -2,11 +2,20 @@
 """Génère (ou régénère) les emplacements `top`/`bottom` par figurine des rosters de training.
 
 Mode strict (déploiement `fixed`) : le loader exige des positions par figurine dans le roster
-(cf. `_expand_compact_roster_to_basic_units`). Ce script les calcule et réécrit les 4 rosters.
+(cf. `_expand_compact_roster_to_basic_units`). Ce script les calcule et réécrit les rosters.
+
+⚠️ MURS DE TOUS LES TERRAINS DE LA BANQUE, JAMAIS D'UN SEUL. Une position de roster est utilisée
+par TOUT scénario d'entraînement qui tire ce roster, quel que soit son `terrain_ref` ; la calculer
+contre les murs d'un seul terrain produit un roster valide sur celui-là et invalide sur les
+autres. C'est exactement ce qui est arrivé : générées contre `terrain-mc1` seul, ces positions
+faisaient LEVER au chargement les 4 scénarios `terrain-mc2` en déploiement `fixed`
+(« Unit N footprint cell (c,r) on wall hex »), donc un épisode sur deux du scheduler fixed↔active.
+Le set de murs est donc l'UNION des terrains référencés par la banque, découverte par lecture des
+scénarios — ajouter un terrain à la banque et relancer suffit désormais.
 
 Garanties du placement :
-  - **footprint réel** de chaque socle (tailles variables persos/véhicules), wall-aware (terrain-mc1),
-    aucun chevauchement (le mode `fixed` valide les footprints à la charge) ;
+  - **footprint réel** de chaque socle (tailles variables persos/véhicules), wall-aware sur l'union
+    des terrains, aucun chevauchement (le mode `fixed` valide les footprints à la charge) ;
   - **cohérence d'escouade** obtenue par un **réseau hexagonal** de pas `PITCH`=9 subhex : tout voisin
     de réseau est à 9 < 10 subhex (2\") → un amas compact garantit ≥2 voisins par figurine. NB : la
     règle moteur (game_config : `squad_min_neighbors`=1, distance bord-à-bord) n'exige qu'≥1 voisin ;
@@ -32,11 +41,21 @@ ISH = 5
 PITCH = 9  # pas du réseau hex (subhex) : < 10 (cohérence) et >= socle+1 (pas de chevauchement, base<=8)
 COH = 10.0
 
+#: Banque de scénarios dont les `terrain_ref` composent l'union des murs (cf. l'en-tête).
+SCENARIO_BANK = "config/agents/ArmageddonAgent/scenarios/training"
+
+#: Rosters à (re)générer. Les variantes `_reserves` portent les MÊMES compositions plus un drapeau
+#: `strategic_reserves` par entrée : les omettre laissait quatre rosters de production sur des
+#: positions jamais recalculées — même défaut, une famille plus loin.
 ROSTERS = [
     "config/agents/ArmageddonAgent/rosters/500pts/training/agent_training_roster_space_marines.json",
+    "config/agents/ArmageddonAgent/rosters/500pts/training/agent_training_roster_space_marines_reserves.json",
     "config/agents/ArmageddonAgent/rosters/500pts/training/agent_training_roster_orks.json",
+    "config/agents/ArmageddonAgent/rosters/500pts/training/agent_training_roster_orks_reserves.json",
     "config/agents/_p2_rosters/500pts/training/opponent_training_roster_space_marines.json",
+    "config/agents/_p2_rosters/500pts/training/opponent_training_roster_space_marines_reserves.json",
     "config/agents/_p2_rosters/500pts/training/opponent_training_roster_orks.json",
+    "config/agents/_p2_rosters/500pts/training/opponent_training_roster_orks_reserves.json",
 ]
 # centres candidats d'escouade par bande (espacés pour que les amas ne se télescopent pas)
 TOP_CENTERS = [(c, r) for r in range(55, 100, 22) for c in range(40, 190, 34)]
@@ -165,17 +184,52 @@ def coherency_ok(points, need):
     return True
 
 
+def union_walls_of_bank(W40KEngine, ur):
+    """Union des murs de TOUS les terrains référencés par la banque de scénarios d'entraînement.
+
+    Les murs sont lus par le MOTEUR (`game_state["wall_hexes"]`, un scénario chargé par terrain
+    distinct) et non par une expansion maison des fichiers de terrain : une seconde lecture serait
+    libre de diverger de celle qui valide les footprints au chargement, et le roster redeviendrait
+    invalide sans que rien ne le dise.
+
+    Un scénario par terrain DISTINCT suffit : `wall_hexes` ne dépend que de `terrain_ref` (et du
+    `board_ref`, identique dans toute la banque — vérifié ici plutôt que supposé).
+    """
+    bank = os.path.join(ROOT, SCENARIO_BANK)
+    by_terrain = {}
+    boards = set()
+    for name in sorted(os.listdir(bank)):
+        if not name.endswith(".json"):
+            continue
+        path = os.path.join(bank, name)
+        with open(path) as f:
+            data = json.load(f)
+        if "terrain_ref" not in data:
+            raise SystemExit(f"{name}: pas de terrain_ref — banque de scénarios inattendue")
+        boards.add(data.get("board_ref"))
+        by_terrain.setdefault(data["terrain_ref"], path)
+    if len(boards) != 1:
+        raise SystemExit(f"banque à plusieurs board_ref {sorted(boards)} : union de murs ambiguë")
+
+    walls = set()
+    for terrain_ref, path in sorted(by_terrain.items()):
+        env = W40KEngine(rewards_config="ArmageddonAgent", training_config_name="x5_new",
+                         controlled_agent="ArmageddonAgent", scenario_file=path, unit_registry=ur,
+                         quiet=True, gym_training_mode=True, training_n_envs=1)
+        env.reset(seed=1)
+        hexes = {(int(c), int(r)) for c, r in (env.game_state.get("wall_hexes") or set())}
+        if not hexes:
+            raise SystemExit(f"{terrain_ref}: aucun mur lu — terrain vide ou clé renommée")
+        print(f"murs {terrain_ref:24s} {len(hexes):5d} (via {os.path.basename(path)})")
+        walls |= hexes
+    print(f"union des murs : {len(walls)} hexes sur {len(by_terrain)} terrains")
+    return walls
+
+
 def main():
     W40KEngine, _ = setup_imports()
     ur = UnitRegistry()
-    # Murs = ceux du terrain réel du training (terrain-mc1, via le template roster) — pas d'un
-    # scénario ad-hoc, pour ne dépendre que de ce que le training charge vraiment.
-    tpl = os.path.join(ROOT, "config/agents/ArmageddonAgent/scenarios/training/scenario_training_armageddon.json")
-    env = W40KEngine(rewards_config="ArmageddonAgent", training_config_name="x5_new",
-                     controlled_agent="ArmageddonAgent", scenario_file=tpl, unit_registry=ur,
-                     quiet=True, gym_training_mode=True, training_n_envs=1)
-    env.reset(seed=1)
-    walls = set((int(c), int(r)) for c, r in (env.game_state.get("wall_hexes") or set()))
+    walls = union_walls_of_bank(W40KEngine, ur)
 
     for path in ROSTERS:
         full = os.path.join(ROOT, path)
