@@ -1,6 +1,6 @@
 """T3 — suppression des features calculées + réorganisation des PV / stats brutes.
 
-Refonte V11 (Documentation/Implementation/V11_audit_observation.md §9.1, §9.2, §10 B2/B3) :
+Refonte V11 (Documentation/Implémentation/Implémenté/V11_audit_observation.md §9.1, §9.2, §10 B2/B3) :
 - ❌ `obs[20]` firepower générique vs T4/Sv4 : résumé trompeur qui REMPLAÇAIT les données ;
 - ❌ `value_over_ttk` (+7) et `threat_level` (+8) par ennemi : features calculées sur UNE arme
   échantillon et UNE figurine cible, aveugles aux règles et au couvert ;

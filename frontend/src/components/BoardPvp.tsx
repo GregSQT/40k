@@ -132,7 +132,7 @@ const MOVE_PREVIEW_COVER_STATUS_DEBOUNCE_MS = 25;
  * Le débounce (trailing) DOIT rester au-dessus de l'intervalle entre deux hex d'un survol normal
  * (~160-240 ms mesurés) : sinon une requête part pour presque chaque hex traversé, donc il y en a
  * presque toujours une en vol au moment du clic → la transition move → tir attend jusqu'à 900 ms.
- * Voir Documentation/Implémentation/preview_tir_position_virtuelle.md.
+ * Voir Documentation/Implémentation/A_faire/preview_tir_position_virtuelle.md.
  */
 const MOVE_PREVIEW_SHOOT_DEBOUNCE_MS = 180;
 

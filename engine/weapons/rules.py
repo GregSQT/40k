@@ -9,7 +9,7 @@ AI_IMPLEMENTATION.md COMPLIANCE:
 - No hidden values: All rule definitions in config/weapon_rules.json
 - UPPERCASE naming: WEAPON_RULES field
 
-Design: Documentation/WEAPON_RULES_DESIGN.md
+Design: Documentation/Weapon_rules.md
 """
 
 import json

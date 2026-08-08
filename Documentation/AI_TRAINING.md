@@ -21,7 +21,7 @@
 >   encodeur), plus une grille égocentrique 9×32×32. Détail :
 >   [AI_OBSERVATION.md](AI_OBSERVATION.md) — qui ne décrit QUE le pipeline actuel depuis le
 >   2026-07-28 (le vecteur plat mono-figurine est archivé dans
->   [AI_OBSERVATION_Legacy.md](AI_OBSERVATION_Legacy.md)).
+>   [AI_OBSERVATION_Legacy.md](Old/AI_OBSERVATION_Legacy.md)).
 > - Espace d'action = 0-1023 cellules de la grille égocentrique, 1024 wait, **1025-1044 tir
 >   (20 slots ennemis)**, **1045-1064 cible de charge (20 slots ennemis, V11 §9 P3-2)**,
 >   **1065-1084 cible de mêlée (20 slots ennemis, V11 §9 P3-1)**,

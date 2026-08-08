@@ -1,8 +1,16 @@
 # Replis silencieux sur `units_cache` — move / fight / shoot — 2026-08-05
 
-**Chantier CLOS — T1, T2 et T3 livrés le 2026-08-05.** Placé à la racine de
-`Implémentation/` parce qu'il porte du travail à faire ET la preuve déjà acquise. Si tu préfères la
-convention stricte du dépôt (`A_faire/` = backlog pur), il peut y descendre tel quel.
+**Chantier CLOS — T1, T2 et T3 livrés le 2026-08-05.**
+
+> **ARCHIVÉ le 2026-08-08** — déplacé de la racine `Implémentation/` vers `Implémenté/`. Vérifié
+> ce jour dans le code avant le déplacement : les comptes d'appels de `require_unit_from_cache`
+> du §7 sont tenus (`shared_utils` 16, `fight_handlers` 10, `shooting_handlers` 10,
+> `evaluation_bots` 7, `movement_handlers` 2 ; `charge_handlers` 13, hors lot), les deux fonctions
+> déclarées supprimées en §8.1/§8.2 ont **0 hit** dans le dépôt, `build_occupied_positions_set`
+> (§9) est en place, et il reste bien les **26** lectures `units_cache.get(` **non auditées**
+> annoncées en fin de §7 — c'est le seul reste, et il est hors périmètre de ce lot.
+> Le chantier jumeau sur l'AUTRE index reste ouvert :
+> [`../replis_unit_by_id_2026-08-05.md`](../A_faire/replis_unit_by_id_2026-08-05.md).
 
 **État final** : les 40 sites de l'inventaire ont été instruits un par un, plus **7 sites jumeaux
 découverts hors inventaire** dans `ai/evaluation_bots.py` (cf. §3, encadré « Jumeau hors
@@ -10,7 +18,7 @@ périmètre »). Verrou : `tests/unit/engine/test_units_cache_desync_raises.py`,
 mutations ROUGES** vérifiées une par une. Bilan par verdict en §7.
 
 **Origine** : lot des jumeaux de la charge, clos le 2026-08-05 — voir
-[`Implémenté/campagne_typage_et_replis_2026-07-29.md`](Implémenté/campagne_typage_et_replis_2026-07-29.md)
+[`campagne_typage_et_replis_2026-07-29.md`](campagne_typage_et_replis_2026-07-29.md)
 §3.6. Ce document-ci porte le **détail par site** que §3.6 ne donne pas.
 
 **Convention d'ancrage** : l'ancre de référence est le **nom de fonction** ; les numéros de ligne
@@ -33,7 +41,7 @@ Ce n'est pas un repli métier. C'est un **verdict inventé** : l'unité est alor
 seule, donc l'adjacence de mêlée, la ligne de vue de tir et la zone d'engagement du move rendent
 « pas d'engagement » / « pas de LoS » sur une géométrie qui n'est pas la vraie — et **rien ne
 crashe**. C'est exactement le motif que `require_entry_on_battlefield`
-([`engine/spatial_relations.py`](../../engine/spatial_relations.py)) a été écrit pour rendre bruyant,
+([`engine/spatial_relations.py`](../../../engine/spatial_relations.py)) a été écrit pour rendre bruyant,
 et exactement celui que le lot charge vient de supprimer de `charge_handlers.py`.
 
 ⚠️ **Tous les 42 ne sont PAS des défauts.** Le tri fait partie du travail, il ne le précède pas —
@@ -67,7 +75,7 @@ campagne (105 des 143 `str()` de `charge_handlers` étaient la normalisation ell
 
 **Outil livré par le lot charge, à utiliser pour les 42** :
 `require_unit_from_cache(unit_id, game_state, what)`
-([`engine/phase_handlers/shared_utils.py`](../../engine/phase_handlers/shared_utils.py), jumeau
+([`engine/phase_handlers/shared_utils.py`](../../../engine/phase_handlers/shared_utils.py), jumeau
 bruyant de `get_unit_from_cache`). Il lève un `KeyError` uniforme `"{what}: unit {id} missing from
 units_cache"`. **Ne pas réécrire de `raise` à la main** : le lot charge en a écrit dix, et la revue
 a montré que la même condition levait alors trois types d'exception différents (`KeyError`,
@@ -211,7 +219,7 @@ Compréhensions filtrantes (`... for x in ... if x is not None`), gardes composi
    référence par chaîne ni réflexion, (c) aucune route d'API ni chemin frontend, (d) aucune mention
    en documentation.
 3. **Vérifier le jumeau frontend.** Sur la charge, `closestChargerHexToTargetFootprint`
-   ([`frontend/src/components/BoardPvp.tsx`](../../frontend/src/components/BoardPvp.tsx)) s'est
+   ([`frontend/src/components/BoardPvp.tsx`](../../../frontend/src/components/BoardPvp.tsx)) s'est
    révélé **sain** — c'était le backend qui divergeait. Ne pas propager un correctif sans regarder.
 4. **Prouver le verrou par mutation.** Remettre le repli, voir le test ROUGE, rétablir, le rapporter.
    Un test qui passe du premier coup n'est pas un verrou.
@@ -373,8 +381,8 @@ du diff l'a payé : deux des sites traités sont dans des fonctions **sans aucun
    éditées APRÈS la purge sans que personne ne le remarque.
 
    **Résidus traités avec elle** : le libellé `FIGHT_CONSOLIDATION_PLAN` de
-   [`engine/perf_timing.py`](../../engine/perf_timing.py) (plus émis par personne) et la chaîne
-   d'appel affirmée par [`A_faire/bug_pile_in_bfs_clearance_mismatch.md`](A_faire/bug_pile_in_bfs_clearance_mismatch.md)
+   [`engine/perf_timing.py`](../../../engine/perf_timing.py) (plus émis par personne) et la chaîne
+   d'appel affirmée par [`A_faire/bug_pile_in_bfs_clearance_mismatch.md`](../A_faire/bug_pile_in_bfs_clearance_mismatch.md)
    (`consolidate_autoplace_plan → _fight_plan_consolidation_destinations`), qui n'existe pas —
    la mesure d'impact PvP de ce document de bug (« −19 ancres ») est donc à refaire sur le chemin
    V11 réel avant de le traiter.
@@ -497,7 +505,7 @@ pyright/pytest/tsc sur l'arbre fusionné ; **pas** par un essai PvP. Le reste de
 le gym les utilise, le mort ne remontait pas au backend.
 
 Le détail exploitable — chaîne morte tracée, découpage, pièges d'outillage — est dans
-[`Implémenté/menage_v10_pile_in_et_perf_charge_2026-08-05.md`](Implémenté/menage_v10_pile_in_et_perf_charge_2026-08-05.md).
+[`menage_v10_pile_in_et_perf_charge_2026-08-05.md`](menage_v10_pile_in_et_perf_charge_2026-08-05.md).
 
 **FAIT (2026-08-05, branche `menage_v10_frontend`).** Les quatre points sont partis ensemble, en
 deux commits. Commit `7b5871dc` : `_fight_v11_clear_pile_in_preview` + ses 4 appels, et les deux
@@ -546,7 +554,7 @@ balayages de cache et 7 875 → 21 lectures d'empreinte, mais seulement −0,77 
 plan est dans le champ géodésique, cette boucle pesait 0,6 %. Le changement a été gardé pour ce
 qu'il corrige d'autre — deux `game_state.get("units_cache", {})` dont le repli rendait TOUTE
 cellule libre en silence. Détail dans
-[`Implémenté/menage_v10_pile_in_et_perf_charge_2026-08-05.md`](Implémenté/menage_v10_pile_in_et_perf_charge_2026-08-05.md)
+[`menage_v10_pile_in_et_perf_charge_2026-08-05.md`](menage_v10_pile_in_et_perf_charge_2026-08-05.md)
 (lot B).
 
 **Le contrat de `is_unit_alive` est désormais écrit dans son docstring** (`shared_utils.py`) :

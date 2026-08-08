@@ -6348,7 +6348,7 @@ class W40KEngine(gym.Env):
             # la decision « le pile-in de reference est le par-figurine du PvP ». 12.06 dit
             # « CAN make one additional pile-in move » -> optionnel, son absence ne viole rien :
             # l escouade non engagee resout un fight « a vide » (0 attaque). A implementer en
-            # par-figurine : Documentation/Implementation/A_faire/overrun.md
+            # par-figurine : Documentation/Implémentation/A_faire/overrun.md
 
             # Parite masque/commit : le masque gym derive du MEME pool 12.04 (action_decoder ->
             # fight_v11_current_pool). Un squad hors pool est une rupture, pas un cas a absorber.

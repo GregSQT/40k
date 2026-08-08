@@ -1,6 +1,6 @@
 """D1 — alignement des slots ennemis observation <-> action, et flag FALL BACK (obs[19]).
 
-Audit V11 (Documentation/Implementation/V11_audit_observation.md §5bis.2 D1) : l observation
+Audit V11 (Documentation/Implémentation/Implémenté/V11_audit_observation.md §5bis.2 D1) : l observation
 rangeait les 5 slots ennemis par ordre alphabetique de squad_id, alors que l action tir/charge
 les range par menace HP*OC (`get_enemy_slot_mapping`). Consequence : « tirer slot i » visait un
 AUTRE ennemi que celui decrit par obs-slot-i -> choix de cible brouille.

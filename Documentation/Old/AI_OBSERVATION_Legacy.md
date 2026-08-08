@@ -14,7 +14,7 @@
 > en tenseurs d'entités, masque à 41 actions, décodage par `convert_squad_action`, exécution par
 > `_process_squad_action` — le contrat exact de l'entraînement.
 >
-> **L'observation actuelle est décrite dans [`AI_OBSERVATION.md`](AI_OBSERVATION.md).**
+> **L'observation actuelle est décrite dans [`AI_OBSERVATION.md`](../AI_OBSERVATION.md).**
 >
 > ### Ce qui est PÉRIMÉ ici, et qui a déjà induit en erreur
 > - Les **offsets** `obs[314:346]`, `[ally_base + N]`, `obs[346:357]`… n'existent plus : l'obs est

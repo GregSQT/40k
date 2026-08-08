@@ -5,7 +5,7 @@ le seul sur lequel l'agent s'entraîne.
 
 > **Ce document ne décrit QUE le code actuel.** Le pipeline mono-figurine (`obs_size = 359`,
 > vecteur plat d'offsets `obs[N]`) a été déplacé dans
-> **[`AI_OBSERVATION_Legacy.md`](AI_OBSERVATION_Legacy.md)** le 2026-07-28, puis **SUPPRIMÉ du
+> **[`AI_OBSERVATION_Legacy.md`](Old/AI_OBSERVATION_Legacy.md)** le 2026-07-28, puis **SUPPRIMÉ du
 > code le même jour** : `build_observation`, `build_observation_for_unit`, leurs 33 méthodes
 > d'encodage et la constante `PHASE2_OBS_SIZE` n'existent plus. Il vivait ici sous un bandeau
 > d'avertissement, et induisait quand même en erreur à chaque lecture : ses offsets, ses
@@ -679,7 +679,7 @@ de paramètres du réseau, ni `TOTAL_ACTION_SIZE` ne bougent.
 **Les capacités d'unité** sont exposées depuis le 2026-07-27 (d'abord en 13 bits `rule_<effet>`
 dans `UNIT_BIN_FIELDS`, puis en ensembles d'identifiants depuis le chantier 01), **par entité**,
 amie ET ennemie. ⚠️ Ne pas les confondre avec les « 12 unit-rule flags »
-du layout `obs[314:346]` que décrit [`AI_OBSERVATION_Legacy.md`](AI_OBSERVATION_Legacy.md) : ceux-là
+du layout `obs[314:346]` que décrit [`AI_OBSERVATION_Legacy.md`](Old/AI_OBSERVATION_Legacy.md) : ceux-là
 appartiennent au pipeline mono-figurine et ont longtemps fait croire que le pipeline squad les
 portait déjà.
 
@@ -689,7 +689,7 @@ portait déjà.
 **§0.31** (objectifs situés, règles d'unité, couvert exact, caches) et **§0.32** (audit
 d'optimalité du 2026-07-28 : T-H/T-I/T-J livrés — masque de présence, géométrie unique, phase en
 one-hot ; **T-G, la tête de move dense, reste ouvert**) ·
-[`V11_entity_encoder_pointer.md`](Implémentation/V11_entity_encoder_pointer.md) (§1 constats
-mesurés, §3 architecture, §6 journal) · [`AI_OBSERVATION_Legacy.md`](AI_OBSERVATION_Legacy.md)
+[`V11_entity_encoder_pointer.md`](Implémentation/Implémenté/V11_entity_encoder_pointer.md) (§1 constats
+mesurés, §3 architecture, §6 journal) · [`AI_OBSERVATION_Legacy.md`](Old/AI_OBSERVATION_Legacy.md)
 (archive du pipeline mono-figurine).
 

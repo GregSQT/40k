@@ -707,7 +707,7 @@ For each weapon:
 résout désormais un **type de tir** (10.04 normal / 10.05 assault / 10.06 close-quarters) via
 `resolve_squad_shooting_type`, qui commande les armes sélectionnables. Le volet MONSTER/VEHICLE
 de 10.06 (−1 au jet, [BLAST] interdit sur unité engagée) n'existe que côté squad — divergence
-connue, cf. `Documentation/Implémentation/V11_entity_encoder_pointer.md` §1.9.
+connue, cf. `Documentation/Implémentation/Implémenté/V11_entity_encoder_pointer.md` §1.9.
 
 ├── Check arg3 (adjacent_status):
 │   ├── arg3 = 0 → No restriction (continue to next check)

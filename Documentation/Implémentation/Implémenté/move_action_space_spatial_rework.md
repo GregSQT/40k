@@ -1,5 +1,17 @@
 # Refonte de l'action space de mouvement — obs spatiale + tête spatiale
 
+> **DÉPLACÉ DE `A_faire/` VERS `Implémenté/` LE 2026-08-08.** Il était classé en backlog alors que
+> son propre statut dit T1→T5 livrés depuis le 2026-07-18. Vérifié dans le code ce jour avant le
+> déplacement : `engine/spatial_grid.py` (`GRID_CHANNELS = 9`), `MOVE_CELL_BASE = 0` /
+> `MOVE_CELL_COUNT = 1024` dans `engine/macro_intents.py`, `ObservationBuilder.squad_grid_anchor`,
+> et `ai/spatial_extractor.py`. Le T6 (retrain) qu'il attendait n'est plus un reste À LUI : il a
+> été absorbé par le `--new` unique du lot de ré-entraînement V11 (`V11_agent_rework.md` §0.48).
+>
+> ⚠️ **Ses chiffres de dimensionnement sont périmés** — l'obs qu'il décrit (`{"vec": 108,
+> "grid": (6,32,32)}`, action space 1047) a été remplacée par les tenseurs d'entités le 2026-07-26
+> puis par le socle du 2026-08-07 : `obs_size` **16659**, `TOTAL_ACTION_SIZE` **1139**,
+> `GRID_CHANNELS` **9**. Ne jamais citer une dimension depuis ce document : la lire dans le code.
+
 > **Périmètre** : la façon dont l'agent RL **choisit une destination** en phase move (`squad_normal_move`,
 > `squad_advance`, `squad_fall_back`), l'**observation** sur laquelle il fonde ce choix, et le masque
 > associé. Ne concerne PAS le PvP (chemin `execute_semantic_action`), qui n'est touché qu'au niveau des
@@ -1022,7 +1034,7 @@ obligatoire. `ai/models/**/*.zip` ne doit jamais être modifié à la main.
    ⚠️ **La liste ci-dessus est celle de la décision de 2026-07-17 ; l'état LIVRÉ est à 9 canaux.**
    V11 §9.10 a ajouté `couvert` (6 → 7), puis V11 §0.32 a ajouté `self` (T-L) et
    `coût géodésique du pool de move` (T-K) — 7 → **9**. `GRID_CHANNELS` dans
-   [`engine/spatial_grid.py`](../../../engine/spatial_grid.py) reste la **source unique** : ce
+   [`engine/spatial_grid.py`](../../../../engine/spatial_grid.py) reste la **source unique** : ce
    document ne fait que la commenter, il ne la fixe pas.
    **RAM du rollout buffer, recalculée** (float32, `n_steps=8192 × n_envs=48` = 393 216 transitions,
    la config réelle) : 32×32×9 = 9 216 floats → **14,49 Go** pour la grille, sous la limite de

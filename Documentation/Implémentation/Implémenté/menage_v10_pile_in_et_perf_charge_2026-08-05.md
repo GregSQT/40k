@@ -4,7 +4,7 @@
 fusionné par `947996c8`. Document déplacé dans `Implémenté/`.
 
 **Origine** : sortis du lot `units_cache`
-([`replis_units_cache_2026-08-05.md`](../replis_units_cache_2026-08-05.md) §8.4 et §9). Ce
+([`replis_units_cache_2026-08-05.md`](replis_units_cache_2026-08-05.md) §8.4 et §9). Ce
 document-ci porte le **détail exploitable** — chaîne morte tracée, protocole de mesure, prompts —
 que ces deux paragraphes ne donnent pas.
 

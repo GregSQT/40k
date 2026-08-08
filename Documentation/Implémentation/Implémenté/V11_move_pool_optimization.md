@@ -39,7 +39,7 @@
 > `test_oval_base_hex_pool_snapshot`), §10 (le cache de masques parité/bornes RÉFUTÉ par mesure —
 > ne pas y revenir).
 >
-> ➡️ **État réel et suite du chantier : [`V11_move_build_acceleration.md`](../V11_move_build_acceleration.md) §3 (livré) / §5 (tâches ouvertes)**
+> ➡️ **État réel et suite du chantier : [`V11_move_build_acceleration.md`](V11_move_build_acceleration.md) §3 (livré) / §5 (tâches ouvertes)**
 > (à jour au 2026-07-26 : L1b, L_neighbors, L_movecache, gains 14-19× sur le chemin du masque).
 
 > **Chantier moteur / perf dédié.** Sorti de `V11_agent_rework.md §0.22` (qui reste le pointeur).
@@ -399,7 +399,7 @@ passer à la suivante, avec la non-régression PvP en garde-fou dur.
    Ordre d'exécution révisé (L1 → L_bbox → re-bench → BFS wavefront-NumPy-vs-numba), chiffrage
    `|reach|`/board, sûreté `eng_bad` et
    distinction par-ancre/bbox détaillés dans
-   **[`V11_move_build_acceleration.md`](../V11_move_build_acceleration.md)** (§4, §6 — cadrage d'origine condensé le 2026-07-28).
+   **[`V11_move_build_acceleration.md`](V11_move_build_acceleration.md)** (§4, §6 — cadrage d'origine condensé le 2026-07-28).
    ✅ **FAIT (2026-07-21)** : L1 (`_FOOTPRINT_OFFSETS_CACHE`,
    [hex_utils.py:1370](../../../engine/hex_utils.py#L1370)) et L_bbox (`_ground_move_bbox_window` +
    `_bbox_window`, [movement_handlers.py:1523](../../../engine/phase_handlers/movement_handlers.py#L1523),
@@ -440,7 +440,7 @@ Chaque étape = une passe verrouillée par test. **Jamais « optimisation + vali
   **mesurées à 0 % de gain, RÉVERTÉES** (§10). `movement_handlers.py` **intact**.
 - 🎯 **Levier optimal tranché par mesure (2026-07-21) : la dilatation bornée à la bbox `move_range`**
   (pur NumPy, exact, inconditionnel, **sans numba**) — cf. lignes 337-349 ci-dessus et
-  [`V11_move_build_acceleration.md`](../V11_move_build_acceleration.md) §4/§6. Le facteur dominant est
+  [`V11_move_build_acceleration.md`](V11_move_build_acceleration.md) §4/§6. Le facteur dominant est
   la **surface** (board vs `reach` ≤ 16,6 %), pas la constante numba. Le BFS `deque` (Option C /
   `numba`) est **rétrogradé au reliquat conditionnel** des petits socles, à bencher d'abord contre un
   wavefront bbox-NumPy. ✅ **LIVRÉ** (L_bbox, cf. §10 étape 4).
@@ -453,7 +453,7 @@ Chaque étape = une passe verrouillée par test. **Jamais « optimisation + vali
 ⚠️ **MAJ 2026-07-22 : ce coût perf est redevenu INCONTOURNABLE.** Le fix de conformité move §0.25
 exige une **érosion géodésique par-figurine**, exactement le coût que ce chantier combattait ; il
 resurgit dans `V11_agent_rework.md` §0.27 (timeout d'éval). La réponse apportée n'est pas ici mais
-dans [`V11_move_build_acceleration.md`](../V11_move_build_acceleration.md) **§3.2** (L1b,
+dans [`V11_move_build_acceleration.md`](V11_move_build_acceleration.md) **§3.2** (L1b,
 L_neighbors, L_movecache — 2026-07-26, 14-19× sur le chemin du masque).
 
 `V11_agent_rework.md §0.22` pointe ici (entrée barrée, résolue). **Aucune action ouverte sur ce

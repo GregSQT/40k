@@ -329,5 +329,5 @@ neutralisation trop large ne puisse pas passer inaperçue.
   `TOTAL_ACTION_SIZE` reste **1107** : l'espace d'action n'est pas touché.
 - **Ce document n'a plus aucune part ouverte** : il est clos et classé dans `Implémenté/`.
 - Traité **séparément** de la refonte du vecteur de jeu (livrée, cf.
-  [`V11_entity_encoder_pointer.md`](../V11_entity_encoder_pointer.md) et
+  [`V11_entity_encoder_pointer.md`](V11_entity_encoder_pointer.md) et
   [`AI_OBSERVATION.md`](../../AI_OBSERVATION.md)).

@@ -80,6 +80,11 @@ def _tactical(**overrides: Any) -> Dict[str, Any]:
         "forced_unit_episode_has_controlled": 0,
         "forced_unit_instances_controlled": 0,
         "forced_unit_counts_controlled": {},
+        # Meme invariant pour les reserves strategiques (20.01/20.04) : le moteur les recopie
+        # TOUJOURS a la terminaison (w40k_core._empty_episode_tactical_data), lecture stricte.
+        "reserves_placed_agent": 2,
+        "reserves_deployed_agent": 1,
+        "reserves_destroyed_turn3": 1,
     }
     data.update(overrides)
     return data
@@ -286,6 +291,25 @@ def test_a_missing_objective_samples_key_raises(tmp_path: Any) -> None:
 
     with pytest.raises(Exception, match="controlled_objective_samples"):
         tracker.log_tactical_metrics(tactical)
+
+
+def test_each_reserves_curve_carries_its_own_engine_counter(tmp_path: Any) -> None:
+    """Les trois courbes reserves/* sortent, chacune avec SON compteur moteur (20.01/20.04).
+
+    Sans ce controle, les trois cles du fixture n'assertaient rien : remplacer les trois
+    `add_scalar('reserves/...')` par `pass` laissait ce fichier vert, et les courbes muettes.
+    Les trois valeurs sont VOLONTAIREMENT distinctes — deux d'entre elles egales rendraient un
+    echange de tags invisible.
+    """
+    tracker, recording = _tracker(tmp_path)
+    _episode(tracker, _tactical(
+        reserves_placed_agent=5, reserves_deployed_agent=3, reserves_destroyed_turn3=1,
+    ))
+
+    by_key = {key: value for key, value, _step in recording.scalars}
+    assert by_key["reserves/placed_agent"] == pytest.approx(5.0)
+    assert by_key["reserves/deployed_agent"] == pytest.approx(3.0)
+    assert by_key["reserves/destroyed_turn3"] == pytest.approx(1.0)
 
 
 def test_an_empty_sample_list_stays_silent_without_raising(tmp_path: Any) -> None:

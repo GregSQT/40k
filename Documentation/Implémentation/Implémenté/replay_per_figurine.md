@@ -1,5 +1,12 @@
 # Replay per-figurine
 
+> **DÉPLACÉ DE `A_faire/` VERS `Implémenté/` LE 2026-08-08.** Il était classé en backlog alors que
+> ses 4 fichiers sont cochés et que le registre de [`../Replay.md`](../Replay.md) §4 le donne
+> **fait** (commits `81e56c35`, `4ea850c3`). Vérifié dans le code ce jour : `replayParser.ts`
+> parse `[MODELS:]`, `[SHOOTER_MODELS:]` et `[TARGET_MODELS:]`. La seule réserve — la validation
+> visuelle en navigateur — est la même que celle des autres chantiers replay, et elle est suivie
+> dans `Replay.md`, pas ici.
+
 ## Objectif
 Le mode replay doit montrer **exactement** ce qui s'est passé en training/eval :
 chaque **figurine** d'une escouade individuellement, pas un seul socle par escouade.
