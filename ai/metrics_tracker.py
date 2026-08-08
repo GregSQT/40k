@@ -1076,6 +1076,15 @@ class W40KMetricsTracker:
                     self.episode_count
                 )
     
+        # Réserves stratégiques (20.01/20.04) — présentes dès lors que le champ existe.
+        if 'reserves_placed_agent' in tactical_data:
+            placed = int(require_key(tactical_data, 'reserves_placed_agent'))
+            deployed = int(require_key(tactical_data, 'reserves_deployed_agent'))
+            destroyed = int(require_key(tactical_data, 'reserves_destroyed_turn3'))
+            self.writer.add_scalar('reserves/placed_agent', float(placed), self.episode_count)
+            self.writer.add_scalar('reserves/deployed_agent', float(deployed), self.episode_count)
+            self.writer.add_scalar('reserves/destroyed_turn3', float(destroyed), self.episode_count)
+
     def log_training_step(self, step_data: Dict[str, Any]):
         """Log training step metrics - exploration rate and loss"""
         self.step_count += 1

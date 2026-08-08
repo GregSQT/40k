@@ -2030,7 +2030,11 @@ def _fight_v11_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
     if current_player == 2 and int(require_key(game_state, "turn")) == STRATEGIC_RESERVES_LAST_ROUND:
         from engine.w40k_core import destroy_unarrived_strategic_reserves
 
-        destroy_unarrived_strategic_reserves(game_state)
+        destroyed_ids = destroy_unarrived_strategic_reserves(game_state)
+        if destroyed_ids:
+            game_state["_reserves_destroyed_turn3"] = (
+                game_state.get("_reserves_destroyed_turn3", 0) + len(destroyed_ids)
+            )
 
     if current_player == 1:
         game_state["current_player"] = 2

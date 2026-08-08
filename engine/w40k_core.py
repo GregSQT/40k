@@ -140,6 +140,10 @@ def _empty_episode_tactical_data() -> Dict[str, Any]:
         # le `game_state` a la terminaison, comme `shots_fired` l'est depuis `action_logs`.
         'deployment_cache_counts': ActionDecoder.empty_deployment_cache_counts(),
         'reward_breakdown': empty_reward_breakdown_totals(),
+        # Réserves stratégiques (20.01/20.04) : usage de l'agent sur l'épisode.
+        'reserves_placed_agent': 0,    # unités mises en réserve par l'agent (joueur 1)
+        'reserves_deployed_agent': 0,  # unités arrivées depuis réserve (agent)
+        'reserves_destroyed_turn3': 0, # unités détruites par 20.04 fin de tour 3 (tous joueurs)
     }
 
 
@@ -723,6 +727,10 @@ class W40KEngine(gym.Env):
             "action_logs": [],  # CRITICAL: For metrics collection - tracks all actions per episode
             "action_log_seq": 0,  # Monotonic stamp per append_action_log (not cleared with action_logs flush)
             "log_delta": [],  # Combat log : events depuis la dernière row de timeline (drainé dans meta['log_delta'] à chaque capture). Reconstruit le Game Log au Load/rewind du replay (delta linéaire, pas de cumul par row)
+            # Réserves stratégiques — compteurs d'épisode, remis à zéro au reset.
+            "_reserves_placed_agent": 0,
+            "_reserves_deployed_agent": 0,
+            "_reserves_destroyed_turn3": 0,
 
             # PERFORMANCE: Hex-coordinate LoS cache (walls static within episode)
             "hex_los_cache": {},
@@ -1496,6 +1504,9 @@ class W40KEngine(gym.Env):
             "action_logs": [],  # CRITICAL: Reset action logs for new episode metrics
             "action_log_seq": 0,
             "log_delta": [],  # Combat log : events depuis la dernière row de timeline (voir init du game_state)
+            "_reserves_placed_agent": 0,
+            "_reserves_deployed_agent": 0,
+            "_reserves_destroyed_turn3": 0,
             "gym_training_mode": self.gym_training_mode,  # ADDED: For handler access
             "debug_mode": self.debug_mode,  # ADDED: For handler access
             "console_logs": [],  # CRITICAL: Initialize console_logs for debug logging across all episodes
@@ -1799,7 +1810,18 @@ class W40KEngine(gym.Env):
             if not (cmd_result and cmd_result.get("phase_complete") is False):
                 movement_handlers.movement_phase_start(self.game_state)
         self.episode_tactical_data = _empty_episode_tactical_data()
-        
+        # Compte initial des réserves déclarées dans le roster (strategic_reserves: true).
+        # Le hook dans deployment_place_in_strategic_reserves ajoute ensuite les unités placées
+        # manuellement pendant la phase de déploiement active. Les deux sources s'additionnent.
+        controlled_player_for_reserves = int(
+            require_key(self.game_state, "config").get("controlled_player", 1)
+        )
+        self.game_state["_reserves_placed_agent"] = sum(
+            1 for u in self.game_state.get("units", [])
+            if u.get("in_strategic_reserves", False)
+            and int(require_key(u, "player")) == controlled_player_for_reserves
+        )
+
         # Log episode start with all unit positions, walls, and objectives
         if hasattr(self, 'step_logger') and self.step_logger and self.step_logger.enabled:
             # Extract scenario name: prefer config "name", otherwise use filename pattern
@@ -2717,6 +2739,16 @@ class W40KEngine(gym.Env):
             # a zero au prochain `reset_episode_caches`, l'appelant lit celui-ci APRES.
             self.episode_tactical_data['deployment_cache_counts'] = (
                 self.action_decoder.deployment_cache_counts()
+            )
+            # Réserves stratégiques : compteurs incrémentés par les handlers via game_state.
+            self.episode_tactical_data['reserves_placed_agent'] = int(
+                require_key(self.game_state, "_reserves_placed_agent")
+            )
+            self.episode_tactical_data['reserves_deployed_agent'] = int(
+                require_key(self.game_state, "_reserves_deployed_agent")
+            )
+            self.episode_tactical_data['reserves_destroyed_turn3'] = int(
+                require_key(self.game_state, "_reserves_destroyed_turn3")
             )
 
             # VALUE attrition metrics (episode-level): destroyed enemy value and lost ally value.

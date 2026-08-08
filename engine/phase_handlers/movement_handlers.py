@@ -5576,6 +5576,8 @@ def _finalize_ingress(
     ok, result = ingress_commit_plan(game_state, squad_id, plan)
     if not ok:
         return False, result
+    if int(require_key(unit, "player")) == 1:
+        game_state["_reserves_deployed_agent"] = game_state.get("_reserves_deployed_agent", 0) + 1
     # Journal d'action : écrit ICI, donc pour les DEUX sièges. Il vivait dans la branche gym de
     # `w40k_core`, ce qui laissait une arrivée PvP invisible au replay et à l'analyzer — une
     # unité y apparaissait sur le plateau sans qu'aucune ligne ne l'explique.
