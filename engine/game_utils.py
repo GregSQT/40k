@@ -211,6 +211,11 @@ def get_effective_turn_limit(game_state: Dict[str, Any]) -> Optional[int]:
     return max_turns
 
 
+def get_controlled_player(game_state: Dict[str, Any]) -> int:
+    """Retourne le numéro du joueur contrôlé (config.controlled_player)."""
+    return int(require_key(require_key(game_state, "config"), "controlled_player"))
+
+
 def turn_limit_reached(game_state: Dict[str, Any]) -> bool:
     """True quand le tour courant depasse la duree de bataille (cf. get_effective_turn_limit)."""
     limit = get_effective_turn_limit(game_state)

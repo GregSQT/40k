@@ -284,7 +284,7 @@ export interface APIGameState {
   units_shot: string[];
   units_shot_previous_turn?: string[]; // Règle 13.09 Hidden
   units_charged: string[];
-  units_attacked: string[];
+  units_fought: string[]; // Escouades ayant combattu ce tour (12.04) — clé écrite par le moteur
   units_advanced?: string[]; // Units that have advanced this turn
   units_took_to_skies?: string[]; // Units FLY ayant déclaré le vol en phase MOVE ce tour (Règles 21.03)
   units_took_to_skies_charge?: string[]; // Units FLY ayant déclaré le vol en phase CHARGE ce tour (Règles 21.03)
@@ -7685,9 +7685,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     return gameState?.units_charged ? gameState.units_charged.map((id) => parseInt(id, 10)) : [];
   }, [gameState?.units_charged]);
 
+  // `units_fought` et NON `units_attacked` : cette dernière n'a jamais été peuplée par le moteur
+  // (créée et remise à zéro seulement), donc la liste arrivait vide à vie et aucune escouade
+  // n'était grisée après un combat. La clé vivante est celle qu'écrit la phase de combat.
   const memoizedUnitsAttacked = useMemo(() => {
-    return gameState?.units_attacked ? gameState.units_attacked.map((id) => parseInt(id, 10)) : [];
-  }, [gameState?.units_attacked]);
+    return gameState?.units_fought ? gameState.units_fought.map((id) => parseInt(id, 10)) : [];
+  }, [gameState?.units_fought]);
 
   const memoizedUnitsFled = useMemo(() => {
     return gameState?.units_fled ? gameState.units_fled.map((id) => parseInt(id, 10)) : [];

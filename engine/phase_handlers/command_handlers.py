@@ -166,7 +166,6 @@ def command_step_start_of_phase(game_state: Dict[str, Any]) -> None:
     game_state["units_shot"] = set()
     game_state["units_charged"] = set()
     game_state["units_fought"] = set()
-    game_state["units_attacked"] = set()
     game_state["units_advanced"] = set()
     game_state["advance_rolls"] = {}
     # 21.03 `L6` — déclarations de vol ET traces « la question a été posée », les deux ayant le

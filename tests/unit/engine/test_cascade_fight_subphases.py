@@ -105,7 +105,6 @@ def _make_gs(units: List[Dict[str, Any]], phase: str = "charge") -> Dict[str, An
         "units_charged": set(),
         "units_fought": set(),
         "units_cannot_charge": set(),
-        "units_attacked": set(),
         "units_reacted_this_enemy_turn": set(),
         "reaction_window_active": False,
         "_unit_move_version": 0,

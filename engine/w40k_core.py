@@ -141,9 +141,22 @@ def _empty_episode_tactical_data() -> Dict[str, Any]:
         'deployment_cache_counts': ActionDecoder.empty_deployment_cache_counts(),
         'reward_breakdown': empty_reward_breakdown_totals(),
         # Réserves stratégiques (20.01/20.04) : usage de l'agent sur l'épisode.
-        'reserves_placed_agent': 0,    # unités mises en réserve par l'agent (joueur 1)
-        'reserves_deployed_agent': 0,  # unités arrivées depuis réserve (agent)
-        'reserves_destroyed_turn3': 0, # unités détruites par 20.04 fin de tour 3 (tous joueurs)
+        'reserves_placed_agent': 0,
+        'reserves_deployed_agent': 0,
+        'reserves_destroyed_turn3': 0,
+    }
+
+
+def _reserves_game_state_defaults() -> Dict[str, int]:
+    """Compteurs de réserves dans game_state — SOURCE UNIQUE (jumeau init/reset).
+
+    Intégrer avec ** dans le dict initial ET dans game_state.update() du reset.
+    Miroir de fly_declaration_reset_state() pour les drapeaux de vol.
+    """
+    return {
+        "_reserves_placed_agent": 0,
+        "_reserves_deployed_agent": 0,
+        "_reserves_destroyed_turn3": 0,
     }
 
 
@@ -696,7 +709,6 @@ class W40KEngine(gym.Env):
             "units_shot": set(),
             "units_shot_previous_turn": set(),
             "units_charged": set(),
-            "units_attacked": set(),
             "units_reacted_this_enemy_turn": set(),
             "reaction_window_active": False,
             "_unit_move_version": 0,
@@ -727,10 +739,7 @@ class W40KEngine(gym.Env):
             "action_logs": [],  # CRITICAL: For metrics collection - tracks all actions per episode
             "action_log_seq": 0,  # Monotonic stamp per append_action_log (not cleared with action_logs flush)
             "log_delta": [],  # Combat log : events depuis la dernière row de timeline (drainé dans meta['log_delta'] à chaque capture). Reconstruit le Game Log au Load/rewind du replay (delta linéaire, pas de cumul par row)
-            # Réserves stratégiques — compteurs d'épisode, remis à zéro au reset.
-            "_reserves_placed_agent": 0,
-            "_reserves_deployed_agent": 0,
-            "_reserves_destroyed_turn3": 0,
+            **_reserves_game_state_defaults(),
 
             # PERFORMANCE: Hex-coordinate LoS cache (walls static within episode)
             "hex_los_cache": {},
@@ -1481,7 +1490,6 @@ class W40KEngine(gym.Env):
             "units_shot": set(),
             "units_shot_previous_turn": set(),
             "units_charged": set(),
-            "units_attacked": set(),
             "units_advanced": set(),
             "advance_rolls": {},
             # 21.03 `L6` : declarations de vol, et « la question a ete posee » (distinct — un refus
@@ -1504,9 +1512,7 @@ class W40KEngine(gym.Env):
             "action_logs": [],  # CRITICAL: Reset action logs for new episode metrics
             "action_log_seq": 0,
             "log_delta": [],  # Combat log : events depuis la dernière row de timeline (voir init du game_state)
-            "_reserves_placed_agent": 0,
-            "_reserves_deployed_agent": 0,
-            "_reserves_destroyed_turn3": 0,
+            **_reserves_game_state_defaults(),
             "gym_training_mode": self.gym_training_mode,  # ADDED: For handler access
             "debug_mode": self.debug_mode,  # ADDED: For handler access
             "console_logs": [],  # CRITICAL: Initialize console_logs for debug logging across all episodes
@@ -1814,10 +1820,10 @@ class W40KEngine(gym.Env):
         # Le hook dans deployment_place_in_strategic_reserves ajoute ensuite les unités placées
         # manuellement pendant la phase de déploiement active. Les deux sources s'additionnent.
         controlled_player_for_reserves = int(
-            require_key(self.game_state, "config").get("controlled_player", 1)
+            require_key(require_key(self.game_state, "config"), "controlled_player")
         )
         self.game_state["_reserves_placed_agent"] = sum(
-            1 for u in self.game_state.get("units", [])
+            1 for u in require_key(self.game_state, "units")
             if u.get("in_strategic_reserves", False)
             and int(require_key(u, "player")) == controlled_player_for_reserves
         )
@@ -6681,7 +6687,6 @@ class W40KEngine(gym.Env):
         self.game_state["units_shot"] = set()
         self.game_state["units_charged"] = set()
         self.game_state["units_fought"] = set()
-        self.game_state["units_attacked"] = set()
         self.game_state["move_activation_pool"] = []
     
     
@@ -6743,7 +6748,10 @@ class W40KEngine(gym.Env):
                 violations.append(f"Unit {unit['id']} missing UPPERCASE fields")
         
         # Check tracking sets are sets
-        tracking_fields = ["units_moved", "units_fled", "units_shot", "units_charged", "units_attacked"]
+        # `units_fought` n'est PAS de la liste : contrairement aux quatre autres, il n'est pas posé
+        # par `reset()` mais par `command_phase_start` (invariant documenté par
+        # `tests/_state_invariants.py`). L'exiger ici ferait lever sur un état pourtant valide.
+        tracking_fields = ["units_moved", "units_fled", "units_shot", "units_charged"]
         for field in tracking_fields:
             if not isinstance(self.game_state[field], set):
                 violations.append(f"{field} must be set type, got {type(self.game_state[field])}")

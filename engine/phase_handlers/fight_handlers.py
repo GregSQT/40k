@@ -2032,9 +2032,18 @@ def _fight_v11_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
 
         destroyed_ids = destroy_unarrived_strategic_reserves(game_state)
         if destroyed_ids:
-            game_state["_reserves_destroyed_turn3"] = (
-                game_state.get("_reserves_destroyed_turn3", 0) + len(destroyed_ids)
+            controlled = int(require_key(require_key(game_state, "config"), "controlled_player"))
+            id_to_player = {
+                str(require_key(u, "id")): int(require_key(u, "player"))
+                for u in require_key(game_state, "units")
+            }
+            agent_destroyed = sum(
+                1 for uid in destroyed_ids if id_to_player[str(uid)] == controlled
             )
+            if agent_destroyed:
+                game_state["_reserves_destroyed_turn3"] = (
+                    require_key(game_state, "_reserves_destroyed_turn3") + agent_destroyed
+                )
 
     if current_player == 1:
         game_state["current_player"] = 2

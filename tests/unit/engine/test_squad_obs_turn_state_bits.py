@@ -1,7 +1,7 @@
 """Les 5 bits d'état de tour de l'observation d'escouade ↔ les clés du game_state.
 
 ``moved``, ``shot``, ``fought``, ``advanced``, ``fled`` sont émis par
-``observation_builder`` depuis ``units_moved``, ``units_shot``, ``units_attacked``,
+``observation_builder`` depuis ``units_moved``, ``units_shot``, ``units_fought``,
 ``units_advanced``, ``units_fled`` — cinq ``.get(..., set())`` consécutifs. Aucun test ne les
 allumait : un mapping bit↔clé permuté (``fought`` lisant ``units_shot``, par exemple) sortait
 une observation fausse sans qu'une seule assertion bouge, et l'agent apprenait dessus.
@@ -26,7 +26,7 @@ from tests.unit.engine._config_helpers import build_engine_config
 BIT_TO_KEY = {
     "moved": "units_moved",
     "shot": "units_shot",
-    "fought": "units_attacked",
+    "fought": "units_fought",
     "advanced": "units_advanced",
     "fled": "units_fled",
 }
@@ -124,6 +124,6 @@ def test_each_key_lights_only_its_own_bit(engine: W40KEngine, bit: str, key: str
 
 def test_bits_are_per_squad_not_global(engine: W40KEngine) -> None:
     """obs_bits_scope : peupler la clé pour l'ennemi n'allume pas le bit de l'unité active."""
-    engine.game_state["units_attacked"].add("2")
+    engine.game_state["units_fought"].add("2")
 
     assert _bits(engine)["fought"] == 0.0

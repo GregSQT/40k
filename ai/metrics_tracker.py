@@ -1076,8 +1076,11 @@ class W40KMetricsTracker:
                     self.episode_count
                 )
     
-        # Réserves stratégiques (20.01/20.04) — présentes dès lors que le champ existe.
-        if 'reserves_placed_agent' in tactical_data:
+        # Réserves stratégiques (20.01/20.04) — les trois clés sont toujours posées ensemble ;
+        # la garde explicite sur les trois empêche qu'une KeyError silencieuse d'une clé manquante
+        # soit masquée par la présence de la première.
+        _res_keys = ('reserves_placed_agent', 'reserves_deployed_agent', 'reserves_destroyed_turn3')
+        if all(k in tactical_data for k in _res_keys):
             placed = int(require_key(tactical_data, 'reserves_placed_agent'))
             deployed = int(require_key(tactical_data, 'reserves_deployed_agent'))
             destroyed = int(require_key(tactical_data, 'reserves_destroyed_turn3'))

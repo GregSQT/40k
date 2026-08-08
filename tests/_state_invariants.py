@@ -86,7 +86,6 @@ def turn_state_invariants() -> Dict[str, Any]:
         "units_shot": set(),
         "units_shot_previous_turn": set(),
         "units_charged": set(),
-        "units_attacked": set(),
         "units_fought": set(),
         "units_advanced": set(),
         "advance_rolls": {},

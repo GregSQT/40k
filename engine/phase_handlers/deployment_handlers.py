@@ -1507,8 +1507,9 @@ def deployment_place_in_strategic_reserves(
         return False, {"error": "strategic_reserves_not_allowed", "unitId": squad_id}
 
     unit["in_strategic_reserves"] = True
-    if current_deployer == 1:
-        game_state["_reserves_placed_agent"] = game_state.get("_reserves_placed_agent", 0) + 1
+    controlled = int(require_key(require_key(game_state, "config"), "controlled_player"))
+    if current_deployer == controlled:
+        game_state["_reserves_placed_agent"] = require_key(game_state, "_reserves_placed_agent") + 1
     # _reserves_placed_agent est AUSSI initialisé au reset par le compte des unités pré-déclarées
     # en réserve dans le roster (strategic_reserves: true). Ce hook ne couvre que les unités
     # placées EN PLUS pendant la phase de déploiement active (20.01).

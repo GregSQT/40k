@@ -76,7 +76,6 @@ def _minimal_gs(
         "units_shot": set(),
         "units_charged": set(),
         "units_fought": set(),
-        "units_attacked": set(),
         "move_activation_pool": [],
         "shoot_activation_pool": [],
         "charge_activation_pool": [],

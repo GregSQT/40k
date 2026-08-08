@@ -1410,7 +1410,12 @@ class ObservationBuilder:
         _b("is_active", is_active)
         _b("moved", squad_id in game_state.get("units_moved", set()))      # get allowed
         _b("shot", squad_id in game_state.get("units_shot", set()))        # get allowed
-        _b("fought", squad_id in game_state.get("units_attacked", set()))  # get allowed
+        # `units_fought` et NON `units_attacked` : cette dernière était créée et remise à zéro par
+        # quatre sites, mais AUCUN écrivain ne l'a jamais peuplée depuis le passage au pipeline
+        # squad — mesuré, 0 step sur 2455. Le bit `fought` était donc éteint à vie, des deux
+        # camps. La clé vivante est celle qu'écrit la phase de combat
+        # (`fight_handlers`, `generic_handlers` arg3 = FIGHT), la même que lisent les pools 12.04.
+        _b("fought", squad_id in game_state.get("units_fought", set()))  # get allowed
         _b("advanced", squad_id in game_state.get("units_advanced", set()))  # get allowed
         _b("fled", squad_id in game_state.get("units_fled", set()))        # get allowed
         _b("coherent", bool(sq.get("is_coherent", False)))                 # get allowed
