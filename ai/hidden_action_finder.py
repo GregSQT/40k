@@ -402,8 +402,12 @@ def parse_attacks_from_step(step_log: str, episode_map: Dict[int, int]) -> List[
                     'line': line
                 })
     
-    fight_pattern_with_ep = r'\[([^\]]+)\] E(\d+) T(\d+) P(\d+) FIGHT : Unit (\d+)\((\d+),(\d+)\) FOUGHT Unit (\d+)\((\d+),(\d+)\)'
-    fight_pattern_without_ep = r'\[([^\]]+)\] T(\d+) P(\d+) FIGHT : Unit (\d+)\((\d+),(\d+)\) FOUGHT Unit (\d+)\((\d+),(\d+)\)'
+    # Token(s) de capacite OPTIONNELS entre FOUGHT et la cible (`[WAAAGH!]`, …) : meme grammaire
+    # que `CHARGED` et que `replay_converter._ABILITY`. Sans cette tolerance, toute ligne de melee
+    # portant un token echappait a ce controle de conformite — en silence, comme d'habitude.
+    _FIGHT_ABILITY = r'(?:\s+\[[^\]]+\])*'
+    fight_pattern_with_ep = r'\[([^\]]+)\] E(\d+) T(\d+) P(\d+) FIGHT : Unit (\d+)\((\d+),(\d+)\) FOUGHT' + _FIGHT_ABILITY + r'\s+Unit (\d+)\((\d+),(\d+)\)'
+    fight_pattern_without_ep = r'\[([^\]]+)\] T(\d+) P(\d+) FIGHT : Unit (\d+)\((\d+),(\d+)\) FOUGHT' + _FIGHT_ABILITY + r'\s+Unit (\d+)\((\d+),(\d+)\)'
     for line_num, line in enumerate(step_log.split('\n'), 1):
         # Try with episode first (new format)
         match = re.search(fight_pattern_with_ep, line)

@@ -47,7 +47,7 @@ python ai/analyzer.py step.log 1.6
 python ai/analyzer.py step.log --output analyzer.log
 ```
 
-Sections disponibles : `1.1`, `1.2`, `1.3`, `1.4`, `1.5`, `1.6`, `1.7`, `2.1`, `2.2`, `2.3`, `2.4`, `2.5`, `2.6`, `2.7`
+Sections disponibles : `1.1`, `1.2`, `1.3`, `1.4`, `1.5`, `1.6`, `1.7`, `2.1`, `2.2`, `2.3`, `2.4`, `2.5`, `2.6`, `2.7`, `2.8`
 
 ---
 
@@ -69,6 +69,7 @@ Sections disponibles : `1.1`, `1.2`, `1.3`, `1.4`, `1.5`, `1.6`, `1.7`, `2.1`, `
 | **2.5** | EPISODES ENDING |
 | **2.6** | SAMPLE MISSING |
 | **2.7** | CORE ISSUES |
+| **2.8** | ÉTAT RECONSTRUIT vs ÉTAT MOTEUR |
 
 ---
 
@@ -125,6 +126,48 @@ de garantie — un détour peut dépasser n'importe quelle marge fixée d'avance
 séparés d'autrefois entretenaient une fiction : celui qui affichait « distance > budget » restait
 à 0 en permanence, tout partant dans « chemin bloqué ». Ce que le contrôle établit, et tout ce
 qu'il établit : **la figurine n'a pas pu atteindre sa destination dans son budget**.
+
+---
+
+## 2.8 — État reconstruit vs état moteur (2026-08-09)
+
+Le rapport entier repose sur un état que l'analyzer **reconstruit** par accumulation
+d'événements : PV initial moins chaque `Dmg:`, position initiale plus chaque déplacement.
+Jusqu'ici, rien ne disait quand cette reconstruction dérivait — une donnée manquante se
+propageait jusqu'à la fin de l'épisode, et ressortait sous forme de compteurs bizarres qu'il
+fallait trier à la main. Trois triages successifs ont buté sur ce même motif.
+
+Le moteur écrit désormais un instantané d'état par tour (`T{tour} STATE:`, cf.
+`Documentation/Implémentation/Replay.md` §2.3quinquies). L'analyzer s'y recale — et **compte
+l'écart avant de le corriger** :
+
+```
+2.8 ETAT RECONSTRUIT vs ETAT MOTEUR
+Morts non vues par l'analyzer (fantomes)  : 0
+Unites tuees a tort par l'analyzer        : 0
+Figurines mal positionnees (deplacement non journalise) : 0
+```
+
+Les trois compteurs n'ont pas la même cause :
+- **fantômes** : une mort dont aucune ligne ne parlait (546 lignes du run du 2026-08-08 portaient
+  une sauvegarde ratée sans `Dmg:`) — c'est la source des « action sur une unité morte » ;
+- **tuées à tort** : l'inverse, une sur-attribution de dégâts ;
+- **positions** : un déplacement non journalisé (c'est ainsi que le pile-in muet se manifestait).
+
+**Une valeur non nulle invalide, pour l'épisode concerné, tout contrôle mesurant une distance ou
+une adjacence.** C'est le seul compteur du rapport qui se déclenche le jour où un NOUVEL effet
+cesse d'être journalisé, au lieu d'attendre qu'on le découvre à la main.
+
+⚠️ **1.6 couvre désormais la phase FIGHT.** Elle en était exclue (`phase in ('MOVE','SHOOT',
+'CHARGE')`) — c'est-à-dire exactement là où le défaut vit : 24 unités combattaient deux fois dans
+la même phase sur le run du 2026-08-08, sur 15 épisodes, pendant que « Double-activation : 0 »
+s'affichait en vert. Le marqueur d'activation de la phase est la ligne `CONSOLIDATED` (12.07 :
+une par unité et par phase) — les lignes `FOUGHT` sont par ATTAQUE, il y en a des dizaines.
+
+⚠️ **Les colonnes des sections d'erreurs s'appellent « Joueur 1 » / « Joueur 2 »**, plus « Agent
+(P1) » / « Bot (P2) ». L'agent ne tient pas toujours le siège P1 (`agent_seat_mode: random`) : sur
+600 épisodes, il était en P2 dans 180. Les tableaux de RÉSULTATS (win methods, VP, wins by
+scenario), eux, suivent bien l'agent — ils lisent `AGENT_PLAYER=` dans l'entête.
 
 ---
 
@@ -194,7 +237,7 @@ En fin de rapport, un résumé affiche :
 - 1.4 : Erreurs de combat
 - 1.5 : Actions dans mauvaise phase
 - 1.6 : Double-activation par phase
-- 2.1 à 2.7 : Cohérence, intégrité, etc.
+- 2.1 à 2.8 : Cohérence, intégrité, etc.
 
 ---
 

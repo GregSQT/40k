@@ -153,6 +153,56 @@ class StepLogger:
         if len(self.log_buffer) >= self.buffer_size:
             self._flush_buffer()
 
+    def log_state_snapshot(self, turn, units_state):
+        """Instantané d'ÉTAT du plateau à la fin d'un tour : socles vivants, positions, PV.
+
+        POURQUOI CETTE LIGNE EXISTE. Tout lecteur du journal (analyzer, replay) reconstruit
+        l'état par ACCUMULATION d'événements : PV initial, puis soustraction de chaque
+        `Dmg:XHP` lu ; position initiale, puis application de chaque ligne de déplacement.
+        Il n'existait AUCUN point de correction — une seule donnée manquante dérivait jusqu'à
+        la fin de l'épisode.
+
+        Ce n'est pas une hypothèse. Mesuré sur le run de 600 épisodes du 2026-08-08 :
+          - 546 lignes portent une sauvegarde ratée SANS segment `Dmg:` (la blessure est
+            écartée faute de figurine à qui l'allouer, la cible étant morte en cours de lot) :
+            l'analyzer ne voyait jamais la mort et mesurait ensuite contre un fantôme, d'où
+            76 « combat/charge/tir sur une unité morte » et 15 « Missing unit_hp on damage » ;
+          - 229 chargeurs sur 319 changent de position entre leur ligne de charge et leur ligne
+            de combat, sans aucune ligne de déplacement entre les deux.
+
+        Ce que cette ligne change : la dérive devient BORNÉE (un tour) et MESURABLE — l'écart
+        entre l'état reconstruit et celui-ci est lui-même un compteur d'erreur, qui se déclenche
+        le jour où un nouvel effet cesse d'être journalisé. C'est le seul correctif du lot qui
+        empêche le défaut de revenir au lieu de le réparer une fois.
+
+        Format : ``T{tour} STATE: <uid>[<mid>@(col,row,z<hauteur>):<pv> ...] ...``
+        Une unité SANS figurine vivante est absente de la ligne — l'absence EST la mort, et il
+        n'y a donc rien à accorder entre deux informations concurrentes.
+
+        Passe par ``log_buffer`` comme les autres lignes : une écriture directe s'intercalerait
+        avant des actions encore bufferisées, et l'instantané se retrouverait attaché au mauvais
+        point de la partie. Pas de `try/except`, pour la même raison que
+        ``log_objective_control_snapshot`` : un instantané tronqué serait pire que pas
+        d'instantané du tout, puisqu'il ferait passer une dérive pour un état constaté.
+        """
+        if not self.enabled:
+            return
+
+        timestamp = time.strftime("%H:%M:%S", time.localtime())
+        unit_entries = []
+        for unit_id, models in units_state:
+            if not models:
+                continue
+            model_parts = " ".join(
+                f"{mid}@({int(col)},{int(row)},z{float(height):g}):{int(hp)}"
+                for mid, col, row, height, hp in models
+            )
+            unit_entries.append(f"{unit_id}[{model_parts}]")
+        line = f"[{timestamp}] T{turn} STATE: {' '.join(unit_entries)}\n"
+        self.log_buffer.append(line)
+        if len(self.log_buffer) >= self.buffer_size:
+            self._flush_buffer()
+
     def log_action(self, unit_id, action_type, phase, player, success, step_increment, action_details=None):
         """Log action with step increment information using clear format.
 
@@ -328,8 +378,17 @@ class StepLogger:
                     agent_roster_ref = require_key(roster_info, "agent_roster_ref")
                     opponent_roster_ref = require_key(roster_info, "opponent_roster_ref")
                     scale = require_key(roster_info, "scale")
+                    # SIÈGE de l'agent (`controlled_player`). Sans lui, tout consommateur du
+                    # journal suppose « agent == P1 » — ce que fait `ai/analyzer.py`, qui écrit
+                    # « Agent (P1) » / « Bot (P2) » en dur. Or `controlled_player_mode` accepte
+                    # `p2` et `random` (ai/train.py) : mesuré sur un run de 600 épisodes, l'agent
+                    # occupait le siège P2 dans 180 d'entre eux, et l'analyzer y comptait ses
+                    # victoires dans la colonne du bot — 33,3 % affichés pour 45,3 % réels.
+                    # `bot_evaluation` (donc le gating) attribuait déjà juste, en lisant
+                    # `controlled_player` ; c'est le seul consommateur qui n'avait pas la donnée.
+                    agent_player = require_key(roster_info, "agent_player")
                     f.write(
-                        f"[{timestamp}] Rosters: scale={scale} "
+                        f"[{timestamp}] Rosters: scale={scale} AGENT_PLAYER={agent_player} "
                         f"AGENT={agent_roster_id} ({agent_roster_ref}) "
                         f"OPPONENT={opponent_roster_id} ({opponent_roster_ref})\n"
                     )
@@ -396,9 +455,22 @@ class StepLogger:
                     # socles des le debut. Absent/vide -> rien (mono-fig sans cache exploitable).
                     models_seg = unit.get("models_segment")  # get allowed
                     models_suffix = f" {models_seg}" if models_seg else ""
+                    # DATASHEET PAR FIGURINE. Une escouade n'est pas homogène : la règle 19
+                    # (Attached units) y replie un personnage COMME figurine, et le roster y met
+                    # sergents et armes spéciales. Le type d'ESCOUADE ne décrit donc pas chaque
+                    # socle, et tout ce qui se calcule par figurine à partir de lui est faux.
+                    # Mesuré sur le run de 600 épisodes : « Attacks over CC_NB » remontait 20
+                    # lignes, dont 5 attaques d'un Ancient rattaché (arme NB=5, ATK=2 — le journal
+                    # affiche bien `Hit x(2+)`) plafonnées au NB=3 de l'Intercessor porteur, et
+                    # 20 attaques de 10 Gretchin plafonnées à 10. Le nom d'affichage de l'arme ne
+                    # suffit pas à trancher : cinq armes distinctes s'appellent « Close Combat
+                    # Weapon », de NB 2 à 6. Seul le type de la FIGURINE le fait.
+                    types_seg = unit.get("model_types_segment")  # get allowed
+                    types_suffix = f" {types_seg}" if types_seg else ""
                     f.write(
                         f"[{timestamp}] Unit {unit['id']} ({unit_type}){display_suffix} {player_name}: "
-                        f"Starting position ({unit['col']},{unit['row']}), HP_MAX={hp_max}{base_info}{models_suffix}\n"
+                        f"Starting position ({unit['col']},{unit['row']}), HP_MAX={hp_max}{base_info}"
+                        f"{models_suffix}{types_suffix}\n"
                     )
 
                 f.write(f"[{timestamp}] === ACTIONS START ===\n")
@@ -894,10 +966,18 @@ class StepLogger:
             target_coords_str = f"({target_coords[0]},{target_coords[1]})" if target_coords else ""
             target_label = f"Unit {target_id}{target_coords_str}"
             
+            # WAAAGH! : « add 1 to the Strength and Attacks characteristics of melee weapons ».
+            # Les deux moitiés sont appliquées par le moteur, mais RIEN ne le disait ici. Mesuré
+            # sur le run de 600 épisodes : un WarTrakk (Choppa NB=5) portait 6 attaques — le
+            # plafond recalculé par l'analyzer était inférieur d'un cran et remontait « Attacks
+            # over CC_NB », pendant que « 1.7 Special rules usage » affichait 0 utilisation de
+            # `waaagh`. Le token est posé sur la LIGNE d'attaque, comme [SUSTAINED HITS] : c'est
+            # à cette granularité que le plafond se compte.
+            _waaagh_seg = " [WAAAGH!]" if details.get("waaagh_melee") else ""
             if weapon_name:
-                base_msg = f"{unit_label} FOUGHT {target_label} with [{weapon_name}]"
+                base_msg = f"{unit_label} FOUGHT{_waaagh_seg} {target_label} with [{weapon_name}]"
             else:
-                base_msg = f"{unit_label} FOUGHT {target_label}"
+                base_msg = f"{unit_label} FOUGHT{_waaagh_seg} {target_label}"
             
             # Apply truncation logic like shooting phase - stop after first failure.
             # [SUSTAINED HITS] 24.36 : JUMEAU du tir. `roll_attack_pool` est partagé, donc la

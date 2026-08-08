@@ -329,6 +329,9 @@ _LOG_HEAD = [
     "=== STEP-BY-STEP ACTION LOG ===",
     "[12:00:00] === EPISODE 1 START ===",
     "[12:00:00] Scenario: scenario_demo",
+    # Siège de l'agent : EXIGÉ dès qu'un épisode se termine sur un vainqueur — l'analyzer ne
+    # suppose plus « agent == P1 » (controlled_player_mode accepte p2 et random).
+    "[12:00:00] Rosters: scale=500pts AGENT_PLAYER=1 AGENT=a (a.json) OPPONENT=o (o.json)",
     "[12:00:00] Walls: none",
     # L'échelle du run vient de CETTE ligne, jamais du config courant : sans elle
     # `parse_step_log` refuse d'analyser (cf. parse_board_scale_from_log).

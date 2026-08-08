@@ -42,6 +42,84 @@ def move_verb_present(verb: str, action_desc: str) -> bool:
     return re.search(r'\b' + verb + r'(?:\s+\[[^\]]+\])?\s+from', action_desc) is not None
 
 
+_STATE_UNIT_RE = re.compile(r'(\d+)\[([^\]]*)\]')
+_STATE_MODEL_RE = re.compile(r'(\S+?)@\((-?\d+),(-?\d+),z(-?[\d.]+)\):(-?\d+)')
+
+
+def _apply_state_snapshot(state: AnalyzerState, payload: str) -> None:
+    """Recale l'état reconstruit sur l'instantané du moteur, APRÈS avoir compté les écarts.
+
+    Trois écarts sont comptés séparément, parce qu'ils n'ont pas la même cause :
+      - `dead_missed`   : l'analyzer croyait l'unité vivante, le moteur ne la voit plus. C'est
+                          le fantôme — une mort dont aucune ligne ne parlait.
+      - `alive_missed`  : l'inverse — l'analyzer a tué une unité que le moteur garde. C'est une
+                          sur-attribution de dégâts (ou une résurrection ratée).
+      - `pos_mismatch`  : une figurine n'est pas là où l'analyzer la croyait — un déplacement
+                          non journalisé (c'est ainsi que le pile-in muet se manifestait).
+
+    Le recalage lui-même est délibérément TOTAL : positions, altitudes, PV, effectif. Corriger à
+    moitié laisserait deux sources en désaccord dans le même état, ce qui est pire que l'une ou
+    l'autre. Ce qui n'est PAS recalé : `unit_positions` (l'ancre d'escouade), que l'instantané ne
+    porte pas — les lignes d'action la resynchronisent déjà, et l'inventer depuis une figurine
+    fabriquerait un troisième point de vue.
+    """
+    stats = state.stats
+    seen_units = set()
+    for unit_match in _STATE_UNIT_RE.finditer(payload):
+        uid = unit_match.group(1)
+        models = {}
+        heights = {}
+        hps = []
+        for m in _STATE_MODEL_RE.finditer(unit_match.group(2)):
+            mid = m.group(1)
+            models[mid] = (int(m.group(2)), int(m.group(3)))
+            heights[mid] = float(m.group(4))
+            hps.append(int(m.group(5)))
+        if not models:
+            continue
+        seen_units.add(uid)
+
+        if uid in state.unit_hp and require_key(state.unit_hp, uid) <= 0:
+            stats['state_resync']['alive_missed'] += 1
+        elif uid not in state.unit_hp:
+            stats['state_resync']['alive_missed'] += 1
+        known = state.positions_by_model.get(uid)  # get allowed : unité jamais vue par socle
+        if known:
+            for mid, pos in models.items():
+                if mid in known and known[mid] != pos:
+                    stats['state_resync']['pos_mismatch'] += 1
+
+        state.positions_by_model[uid] = dict(models)
+        state.heights_by_model[uid] = dict(heights)
+        state.unit_models_alive[uid] = len(models)
+        # `unit_hp` de l'analyzer = PV de la figurine de tête (modèle d'ancre hérité) : on lui
+        # donne le MAXIMUM des PV vivants. Prendre le minimum ferait « mourir » l'escouade dès
+        # qu'une figurine est blessée, ce que le reste du code interprète comme une unité détruite.
+        state.unit_hp[uid] = max(hps)
+        state.dead_units_current_episode.discard(uid)
+        state.models_invalidated.discard(uid)
+
+    # Unités que l'analyzer croit vivantes et que le moteur ne voit plus : c'est le fantôme.
+    from ai.analyzer_perfig import position_is_on_battlefield
+    for uid in [u for u, hp in state.unit_hp.items() if hp > 0 and u not in seen_units]:
+        known_models = state.positions_by_model.get(uid)  # get allowed
+        # HORS TABLE ≠ MORTE. Une escouade en réserves stratégiques (20.01) — ou pas encore
+        # déployée — est déclarée à l'entête avec la sentinelle `(-1,-1)` et n'a aucune entrée
+        # dans `units_cache` : son absence de l'instantané est NORMALE. La compter ferait sonner
+        # 2.8 sur toute partie à réserves, et la tuer ici la ferait « ressusciter » à son ingress
+        # move — un compteur qui crie sans raison finit ignoré, et c'est la panne dont il protège.
+        if known_models and not any(
+            position_is_on_battlefield(pos) for pos in known_models.values()
+        ):
+            continue
+        if known_models:
+            stats['state_resync']['dead_missed'] += 1
+        state.unit_hp[uid] = 0
+        state.unit_models_alive[uid] = 0
+        state.positions_by_model.pop(uid, None)
+        state.dead_units_current_episode.add(uid)
+
+
 def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
     """Execute the main parsing loop. Modifies state.stats in-place."""
     from ai.analyzer import (
@@ -131,6 +209,15 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 state.current_scenario = scenario_match.group(1).strip()
                 continue
 
+            # Siège de l'agent pour CET épisode. Aucun défaut : un journal sans `AGENT_PLAYER=`
+            # est antérieur au format, et deviner « 1 » est exactement l'erreur qu'on ferme
+            # (cf. `AnalyzerState.current_agent_player`). L'absence est traitée à l'usage, au
+            # moment d'attribuer une victoire — là où elle peut être signalée avec l'épisode.
+            agent_player_match = re.search(r'\bAGENT_PLAYER=(\d+)\b', line)
+            if agent_player_match:
+                state.current_agent_player = int(agent_player_match.group(1))
+                continue
+
             # Instantané 14.02 écrit par le MOTEUR (cf. Documentation/Implémentation/Replay.md
             # §2.3) : SOURCE DE VÉRITÉ des points de victoire et du contrôle d'objectif.
             #   [hh:mm:ss] T{tour} OBJECTIVE CONTROL: VP1=… VP2=… CP1=… CP2=… ZONES=…
@@ -153,6 +240,22 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 state.episode_victory_points[PLAYER_ONE_ID] = int(objective_control_match.group(2))
                 state.episode_victory_points[PLAYER_TWO_ID] = int(objective_control_match.group(3))
                 state.objective_control_seen = True
+                continue
+
+            # ── Instantané d'ÉTAT du moteur (une ligne par tour) : POINT DE RECALAGE ──────────
+            #   [hh:mm:ss] T{tour} STATE: <uid>[<mid>@(col,row,z<h>):<pv> ...] ...
+            # L'analyzer reconstruit l'état par ACCUMULATION (PV initial moins chaque `Dmg:`,
+            # position initiale plus chaque déplacement) et n'avait AUCUN moyen de se corriger.
+            # Mesuré sur le run du 2026-08-08 : 546 lignes portent une sauvegarde ratée SANS
+            # segment `Dmg:` (blessure écartée faute d'allocataire, la cible étant morte en cours
+            # de lot) — la mort n'était donc jamais vue, et 76 « action sur une unité morte »
+            # suivaient, mesurées contre des fantômes.
+            # L'écart entre l'état reconstruit et celui-ci est COMPTÉ avant d'être corrigé : une
+            # correction muette ferait disparaître le symptôme sans jamais signaler sa cause, et
+            # le prochain effet non journalisé passerait inaperçu.
+            state_snapshot_match = re.search(r'\bT(\d+) STATE: (.*)$', line)
+            if state_snapshot_match:
+                _apply_state_snapshot(state, state_snapshot_match.group(2))
                 continue
 
             # Parse walls
@@ -225,6 +328,15 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 if base_token_match:
                     from ai.analyzer_perfig import parse_base_token
                     state.unit_base[unit_id] = parse_base_token(base_token_match.group(0))
+                # Datasheet par figurine : écrite UNE fois, dans l'entête (la composition ne
+                # change pas en cours de partie — une figurine meurt, elle ne change pas de
+                # datasheet). Cf. `AnalyzerState.model_types`.
+                model_types_match = re.search(r'\[MODEL_TYPES: ([^\]]+)\]', line)
+                if model_types_match:
+                    for _pair in model_types_match.group(1).split():
+                        _mid, _sep, _mtype = _pair.partition("=")
+                        if _sep:
+                            state.model_types[_mid] = _mtype
                 continue
 
             # Parse unit deployment positions (authoritative start positions)
@@ -306,12 +418,32 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                     winner = int(winner_match.group(1))
                     win_method = method_match.group(1) if method_match else None
 
+                    # SIÈGE de l'agent, jamais déduit. Un journal sans `AGENT_PLAYER=` est
+                    # antérieur au format : on demande sa régénération plutôt que de supposer
+                    # « agent == P1 », qui est précisément l'erreur fermée ici (même parti que
+                    # l'instantané `OBJECTIVE CONTROL` plus bas).
+                    if state.current_agent_player is None:
+                        raise ValueError(
+                            f"Episode {state.current_episode_num} sans 'AGENT_PLAYER=' dans son "
+                            f"entête 'Rosters:'. Regenerate step.log: le siège de l'agent est lu "
+                            f"dans le journal, il n'est plus supposé être P1 "
+                            f"(controlled_player_mode accepte p2 et random)."
+                        )
+                    agent_seat = state.current_agent_player
+                    stats['agent_seat_counts'][agent_seat] += 1
+
                     if winner == PLAYER_ONE_ID:
                         stats['wins_by_scenario'][state.current_scenario]['p1'] += 1
                     elif winner == PLAYER_TWO_ID:
                         stats['wins_by_scenario'][state.current_scenario]['p2'] += 1
                     elif winner == -1:
                         stats['wins_by_scenario'][state.current_scenario]['draws'] += 1
+
+                    if winner in (PLAYER_ONE_ID, PLAYER_TWO_ID):
+                        seat_key = 'agent' if winner == agent_seat else 'bot'
+                        stats['wins_by_scenario'][state.current_scenario][seat_key] += 1
+                        if win_method and win_method in stats['win_methods_by_seat'][seat_key]:
+                            stats['win_methods_by_seat'][seat_key][win_method] += 1
 
                     if win_method:
                         if winner in stats['win_methods'] and win_method in stats['win_methods'][winner]:
@@ -340,6 +472,16 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                     stats['victory_points_values'][PLAYER_TWO_ID].append(
                         state.episode_victory_points[PLAYER_TWO_ID]
                     )
+                    # Jumeau au SIÈGE : sans lui, la ligne « P1 » du tableau des points de
+                    # victoire mélange les épisodes où l'agent tient P1 et ceux où il tient P2.
+                    if state.current_agent_player is not None:
+                        _bot_seat = PLAYER_TWO_ID if state.current_agent_player == PLAYER_ONE_ID else PLAYER_ONE_ID
+                        stats['victory_points_values_by_seat']['agent'].append(
+                            state.episode_victory_points[state.current_agent_player]
+                        )
+                        stats['victory_points_values_by_seat']['bot'].append(
+                            state.episode_victory_points[_bot_seat]
+                        )
                 elif state.objectives_declared:
                     # Journal antérieur au format : mêmes règles que le replay
                     # (`replayParser.ts`) — on ne devine pas des VP, on demande la régénération.
@@ -625,16 +767,29 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                     # la même phase ne comptait aucune double activation. Les lignes de la phase
                     # de DÉPLOIEMENT n'atteignent pas ce point (elles sont consommées plus haut).
                     is_ingress_marker = ") DEPLOYED" in action_desc_upper
+                    # 12.07 : « Each unit can make one consolidation move during this step ». La
+                    # ligne `CONSOLIDATED` marque donc la FIN d'une activation de combat, une par
+                    # unité et par phase — c'est le seul marqueur d'activation que la phase FIGHT
+                    # possède (les lignes `FOUGHT` sont par ATTAQUE, il y en a des dizaines).
+                    is_consolidation_marker = ") CONSOLIDATED " in action_desc_upper
                     is_activation_marker = (
                         is_move_marker
                         or is_ingress_marker
+                        or is_consolidation_marker
                         or " ADVANCED " in action_desc_upper
                         or " CHARGED " in action_desc_upper
                         or " FAILED CHARGE " in action_desc_upper
                         or " FLED " in action_desc_upper
                     )
                     # Double-activation should only count unit activations, not per-shot/per-attack logs.
-                    if phase in ('MOVE', 'SHOOT', 'CHARGE') and is_activation_marker:
+                    #
+                    # FIGHT était EXCLUE de cette liste — et c'est précisément la phase où le défaut
+                    # se produit. Mesuré sur le run de 600 épisodes du 2026-08-08 : 24 unités
+                    # combattent DEUX fois dans la même phase (deux consolidations, deux salves
+                    # d'attaques), réparties sur 15 épisodes, pendant que « 1.6 Double-activation
+                    # par phase : 0 » s'affichait en vert. Un contrôle qui ne regarde pas là où le
+                    # défaut vit annonce toujours « tout va bien ».
+                    if phase in ('MOVE', 'SHOOT', 'CHARGE', 'FIGHT') and is_activation_marker:
                         if player is None:
                             raise ValueError("player is required for double-activation check")
                         phase_key = (turn, phase, int(player))

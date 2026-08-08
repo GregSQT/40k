@@ -35,6 +35,10 @@ def handle_episode_start(state: "AnalyzerState", config: "AnalyzerConfig", line:
             stats['turns_distribution'][state.episode_turn] += 1
 
     state.current_episode = []
+    # Remis à None à CHAQUE épisode : `AGENT_PLAYER=` est réécrit dans chaque entête, et garder
+    # la valeur du précédent ferait attribuer les victoires au mauvais siège dès qu'un épisode
+    # perd sa ligne `Rosters:` — le défaut même qu'on ferme, en plus discret.
+    state.current_agent_player = None
     stats['total_episodes'] += 1
     state.current_episode_num = stats['total_episodes']
     state.episode_turn = 0
@@ -48,6 +52,9 @@ def handle_episode_start(state: "AnalyzerState", config: "AnalyzerConfig", line:
     state.unit_player = {}
     state.unit_positions = {}
     state.unit_types = {}
+    # Datasheet par figurine : les rosters changent d'un episode a l'autre, la garder
+    # ferait plafonner les attaques d'une figurine avec la fiche d'une autre partie.
+    state.model_types = {}
     state.unit_move = {}
     state.wall_hexes = set()
     state.positions_at_turn_start = {}

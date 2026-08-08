@@ -176,6 +176,70 @@ occasion de diverger.
 Contrat identique à celui de `Board:` : ligne absente → l'analyzer refuse d'analyser. Les
 journaux produits avant cette ligne ne sont plus analysables, et c'est voulu.
 
+### 2.3quinquies Instantané d'ÉTAT — le point de recalage (2026-08-09)
+
+```
+[hh:mm:ss] T{tour} STATE: {uid}[{mid}@({col},{row},z{hauteur}):{pv} …] {uid}[…] …
+```
+
+Une ligne par **tour**, écrite au même point de passage que `OBJECTIVE CONTROL` (le seul commun
+aux 7 sites de construction d'observation, donc le seul où chaque tour est vu exactement une
+fois). Source : `occupied_hexes_by_model` / `floor_height_by_model` de `units_cache` et `HP_CUR`
+de `models_cache` — **la même** que le segment `[MODELS:]` des lignes d'action.
+
+**Pourquoi.** Tout lecteur du journal reconstruit l'état par ACCUMULATION : PV initial moins
+chaque `Dmg:`, position initiale plus chaque déplacement. Il n'existait aucun point de
+correction, donc une donnée manquante dérivait jusqu'à la fin de l'épisode. Mesuré sur le run de
+600 épisodes du 2026-08-08 :
+
+- **546 lignes** portent une sauvegarde ratée SANS segment `Dmg:` — la blessure est écartée faute
+  de figurine à qui l'allouer (la cible est morte en cours de lot), donc la mort n'est dite nulle
+  part. Conséquence : 76 « action sur une unité morte » et 15 « Missing unit_hp on damage »,
+  tous mesurés contre des fantômes ;
+- **229 chargeurs sur 319** changent de position entre leur ligne de charge et leur ligne de
+  combat sans qu'aucune ligne ne l'explique (cf. le pile-in muet, §2.3sexies).
+
+Une unité **sans figurine vivante est absente** de la ligne : l'absence EST la mort, il n'y a
+donc aucun drapeau vivant/mort à accorder avec les positions. Une unité en réserves (20.01) est
+absente pour la même raison, et n'est pas un fantôme — le consommateur ne compte l'écart que
+s'il connaissait déjà des socles à cette unité.
+
+Côté analyzer : l'écart est **compté avant d'être corrigé** (section `2.8 État reconstruit vs
+état moteur`, trois compteurs — fantômes, unités tuées à tort, positions). Une correction muette
+ferait disparaître le symptôme sans jamais signaler sa cause, et le prochain effet non
+journalisé repasserait inaperçu.
+
+### 2.3sexies Datasheet par figurine, `PILED IN`, `[WAAAGH!]` (2026-08-09)
+
+**`[MODEL_TYPES: {mid}={UnitType} …]`** — ajouté aux lignes `Unit … Starting position …` de
+l'entête d'épisode. Une escouade n'est pas homogène : la règle 19 y replie un personnage COMME
+figurine, et le roster y met sergents et armes spéciales. Cinq armes distinctes s'appellent
+« Close Combat Weapon » (NB de 2 à 6) : le nom d'affichage ne tranche pas, seul le type de la
+FIGURINE le fait. Écrit une seule fois — une figurine meurt, elle ne change pas de datasheet.
+
+**`PILED IN`** — la ligne existait, son émetteur aussi, mais elle n'atteignait jamais le journal :
+les trois sites `advance_phase` (« pool_empty ») appelaient `_process_squad_action` **sans
+drainer** ses `action_logs`, alors que cette transition déclenche `fight_phase_start` puis tout
+le PILE IN groupé (12.02). Mesuré : **zéro** ligne `PILED IN` dans 22 Mo, pour 203
+`CONSOLIDATED` — la consolidation, elle, naît pendant `squad_fight`, donc dans la fenêtre.
+Instrumentation : plan calculé 24 fois (jamais `None`), commité 24 fois, action_log appendu
+24 fois, **drainé 0 fois**. Les trois sites passent désormais par `_advance_phase_and_drain`.
+
+**`[WAAAGH!]`** — token posé entre `FOUGHT` et la cible, même grammaire que `CHARGED`. La règle
+ajoute 1 à la Force ET aux Attaques des armes de mêlée ; le moteur appliquait les deux sans le
+dire, si bien qu'un WarTrakk (Choppa NB=5) portait 6 attaques et que le plafond recalculé par
+l'analyzer était inférieur d'un cran. ⚠️ Les lecteurs à grammaire rigide doivent tolérer le
+token : `ai/analyzer_phases/fight_handler.py` et `ai/hidden_action_finder.py` ont été alignés sur
+`replay_converter._ABILITY`. Une ligne non reconnue échappe à TOUS les contrôles de combat sans
+lever la moindre erreur.
+
+**`AGENT_PLAYER={1|2}`** — ajouté à la ligne `Rosters:`. `controlled_player_mode` accepte `p2` et
+`random` (`agent_seat_mode` du training config vaut `random`) : l'agent ne tient pas toujours le
+siège P1. Mesuré sur le run du 2026-08-08 — agent en P2 dans **180 épisodes sur 600**, et
+l'analyzer, qui écrivait « Agent (P1) » en dur, y comptait ses victoires dans la colonne du bot :
+**33,3 % affichés pour 45,3 % réels**. `bot_evaluation` (donc le gating, qui lit
+`results["control"]`) attribuait déjà juste ; l'analyzer était le seul consommateur sans la donnée.
+
 ### 2.4 Décor : ce que le journal ne porte PAS, et comment le replay le retrouve
 
 `Walls:` (hexes) et `Objectives:` sont journalisés. **Terrain, icônes, zones de déploiement et

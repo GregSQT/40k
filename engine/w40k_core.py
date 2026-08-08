@@ -1478,6 +1478,12 @@ class W40KEngine(gym.Env):
         # nouvel episode (memes controleurs vides et memes VP a 0), et le replay demarrerait sans
         # aucune donnee de controle.
         self.game_state.pop(self.OBJECTIVE_CONTROL_LOGGED_KEY, None)
+        # Jumeau exact pour l'instantane d'ETAT : la cle porte un NUMERO DE TOUR, qui se repete
+        # d'un episode a l'autre. Sans cette purge, l'episode 2 verrait « tour 1 deja ecrit » et
+        # perdrait sa premiere ligne d'etat — donc le seul point de recalage de son debut.
+        self.game_state.pop(self.STATE_SNAPSHOT_LOGGED_KEY, None)
+        # Curseur de drainage : indexe `action_logs`, remis a zero avec elle a chaque episode.
+        self.game_state.pop(self.STEP_LOG_DRAINED_KEY, None)
         # POINT DE PURGE UNIQUE de toutes les etapes « resolues une fois par (tour, joueur) » :
         # scoring du primaire, recompense d'objectif, penalite de coherency, cp_gain_on_objective,
         # evenements de choix de regle (cf. `engine.game_utils.once_claim`). Leurs cles sont
@@ -1951,6 +1957,9 @@ class W40KEngine(gym.Env):
                     # peuple au build du cache (reset), donc valable ici. Permet au replay d'afficher
                     # tous les socles des le debut, pas seulement l'ancre.
                     "models_segment": self._models_segment_for_unit(uid),
+                    # Datasheet PAR FIGURINE : une escouade n'est pas homogène (règle 19,
+                    # sergents, armes spéciales). Cf. `_model_types_segment_for_unit`.
+                    "model_types_segment": self._model_types_segment_for_unit(uid, unit_type),
                 })
             board_cols = self.game_state["board_cols"]
             board_rows = self.game_state["board_rows"]
@@ -2290,7 +2299,7 @@ class W40KEngine(gym.Env):
             # `_drain_forced_waits`). Capture ici, comparee apres.
             player_before_advance = int(require_key(self.game_state, "current_player"))
             advance_action = {"action": "advance_phase", "from": current_phase, "reason": "pool_empty"}
-            advance_success, result = self._process_squad_action(advance_action)
+            advance_success, result = self._advance_phase_and_drain(advance_action)
             if not advance_success:
                 raise RuntimeError(f"advance_phase failed: {result}")
             _step_t2_early = time.perf_counter() if _step_t0 is not None else None
@@ -2488,7 +2497,7 @@ class W40KEngine(gym.Env):
             #  masque a change, elles n'en passent aucun.)
                 current_phase = self.game_state.get("phase", "unknown")
                 advance_action = {"action": "advance_phase", "from": current_phase, "reason": "pool_empty"}
-                advance_success, advance_result = self._process_squad_action(advance_action)
+                advance_success, advance_result = self._advance_phase_and_drain(advance_action)
                 if not advance_success:
                     if (
                         isinstance(advance_result, dict)
@@ -5286,6 +5295,10 @@ class W40KEngine(gym.Env):
         # 12 lignes pour 9 attaques remontaient « shots over RNG_NB » pendant que la meme
         # regle etait affichee « NOT USED ». Miroir exact de [RAPID FIRE] ci-dessus.
         "sustainedHit": "sustained_hit",
+        # WAAAGH! (melee) : +1 en Force ET en Attaques. Sans cette entree, le drapeau pose par le
+        # roller de melee n atteint jamais step.log, et le plafond d attaques recalcule par
+        # l analyzer est inferieur d un cran a celui que le moteur a reellement applique.
+        "waaaghMelee": "waaagh_melee",
     }
 
     def _models_segment_for_unit(self, unit_id: Any, label: str = "MODELS") -> str:
@@ -5327,6 +5340,39 @@ class W40KEngine(gym.Env):
             ),
             label=label,
         )
+
+    def _model_types_segment_for_unit(self, unit_id: Any, squad_unit_type: str) -> str:
+        """Segment ``[MODEL_TYPES: <mid>=<UnitType> ...]`` — la DATASHEET de chaque figurine.
+
+        Une escouade n'est pas homogène : la règle 19 (Attached units) y replie un personnage
+        COMME figurine, et le roster y place sergents et armes spéciales. Le type d'ESCOUADE ne
+        décrit donc pas chaque socle, et tout plafond calculé par figurine à partir de lui est
+        faux — c'est ce qui produisait les faux « Attacks over CC_NB » de l'analyzer (voir le
+        commentaire du site d'écriture dans `ai/step_logger.py`).
+
+        Écrit UNE fois, dans l'entête d'épisode : la composition ne change pas en cours de partie
+        (une figurine meurt, elle ne change pas de datasheet). Les figurines sans `unit_type`
+        propre portent celui de l'escouade — explicitement, plutôt que par une règle implicite
+        que chaque lecteur devrait redécouvrir.
+        """
+        if unit_id is None:
+            return ""
+        squad_models = self.game_state.get("squad_models")  # get allowed
+        models_cache = self.game_state.get("models_cache")  # get allowed
+        if not isinstance(squad_models, dict) or not isinstance(models_cache, dict):
+            return ""
+        mids = squad_models.get(str(unit_id))  # get allowed
+        if not mids:
+            return ""
+        parts = []
+        for mid in mids:
+            model = models_cache.get(str(mid))  # get allowed : figurine déjà retirée
+            if model is None:
+                continue
+            parts.append(f"{mid}={model.get('unit_type') or squad_unit_type}")  # get allowed
+        if not parts:
+            return ""
+        return "[MODEL_TYPES: " + " ".join(parts) + "]"
 
     def _build_shot_details(
         self, raw_log: Dict[str, Any], shot: Dict[str, Any], pre_action_turn: Any,
@@ -5439,6 +5485,19 @@ class W40KEngine(gym.Env):
                 f"action_logs cursor ({pre_action_logs_len}) cannot exceed current length "
                 f"({len(action_logs)}) — action_logs must not shrink within a step"
             )
+        # ANTI-DOUBLON. Depuis que `advance_phase` draine ses propres entrées
+        # (`_advance_phase_and_drain`), deux drainages peuvent se recouvrir : celui d'une
+        # transition imbriquée et celui, plus large, du step qui l'englobe. Le curseur PERSISTANT
+        # borne le départ à ce qui n'a pas encore été écrit — sans lui, la même ligne partirait
+        # deux fois dans step.log, ce qui compterait double partout (attaques, activations,
+        # distances) sans qu'aucune erreur ne le signale.
+        # Remis à 0 quand la liste a été VIDÉE ailleurs (l'API PvP le fait après chaque réponse) :
+        # le curseur désignerait alors des entrées qui n'existent plus.
+        _drained_upto = int(self.game_state.get(self.STEP_LOG_DRAINED_KEY, 0))  # get allowed
+        if _drained_upto > len(action_logs):
+            _drained_upto = 0
+        pre_action_logs_len = max(int(pre_action_logs_len), _drained_upto)
+        self.game_state[self.STEP_LOG_DRAINED_KEY] = len(action_logs)
         # Position (index raw_log, index jet) du DERNIER jet visant chaque cible sur l'ensemble de
         # l'action : le segment [TARGET_MODELS:] n'est emis que la (retrait des socles en bloc apres
         # les attaques, cf. _build_shot_details). Le dernier ecrit gagne -> derniere arme, dernier jet.
@@ -5553,6 +5612,34 @@ class W40KEngine(gym.Env):
             "move.thru_enemy": bool(require_key(move_rules, "can_move_through_enemy_model")),
             "move.thru_friendly": bool(require_key(move_rules, "can_move_through_friendly_model")),
         }
+
+    def _advance_phase_and_drain(self, advance_action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
+        """`advance_phase` système + DRAINAGE de ses action_logs vers le StepLogger.
+
+        ⚠️ ROOT CAUSE D'UN JOURNAL MUET. Les trois sites `advance_phase` « pool_empty » appelaient
+        `_process_squad_action` SANS drainer ensuite. Or cette transition n'est pas neutre : elle
+        déclenche `fight_phase_start` puis `_fight_v11_gym_after_phase_start`, donc TOUT le PILE IN
+        groupé (12.02). Le drainage de l'action de l'agent, lui, a déjà eu lieu plus haut avec un
+        curseur antérieur ; celui du step suivant repart de la longueur COURANTE. Les entrées
+        produites entre les deux ne sont drainées par personne.
+
+        Mesuré sur un run de 600 épisodes : ZÉRO ligne `PILED IN` dans 22 Mo de journal, pour
+        203 `CONSOLIDATED` — la consolidation, elle, est produite pendant `squad_fight`, donc dans
+        la fenêtre. Instrumentation du chemin de production : `fight_pile_in_plan` appelé 24 fois,
+        jamais None ; `_gym_commit_fight_move` 24 fois ; `_append_fight_move_log` 24 fois ;
+        **drainé 0 fois**. Conséquence côté lecteurs : 229 chargeurs sur 319 changent de position
+        entre leur ligne de charge et leur ligne de combat sans qu'aucune ligne ne l'explique, et
+        le contrôle « Pile-in au-delà de 3" » de l'analyzer affichait 0 en ne regardant rien.
+
+        UN SEUL point de passage pour les trois sites : trois copies redivergeraient, et c'est
+        exactement de cette divergence que le défaut est né.
+        """
+        _pre_len = len(self.game_state.get("action_logs", []))  # get allowed
+        _pre_turn = require_key(self.game_state, "turn")
+        _pre_fight = {"fight_subphase": self.game_state.get("fight_subphase")}  # get allowed
+        success, result = self._process_squad_action(advance_action)
+        self._flush_squad_action_logs_to_step_logger(_pre_len, _pre_turn, _pre_fight)
+        return success, result
 
     def _build_step_log_details(self, raw_log: Dict[str, Any], pre_action_turn: Any) -> Dict[str, Any]:
         """Mappe un payload d'action_log moteur vers les action_details du formateur StepLogger.
@@ -7030,6 +7117,63 @@ class W40KEngine(gym.Env):
             command_points,
         )
 
+    #: Dernier tour pour lequel l'instantané d'état a été écrit (déduplication).
+    STATE_SNAPSHOT_LOGGED_KEY = "_state_snapshot_logged_turn"
+
+    #: Curseur PERSISTANT du drainage vers le StepLogger : index de la première entrée de
+    #: `action_logs` pas encore écrite. Empêche qu'un drainage imbriqué (`advance_phase`) et le
+    #: drainage englobant du step réécrivent les mêmes lignes.
+    STEP_LOG_DRAINED_KEY = "_step_log_drained_upto"
+
+    def _log_state_snapshot_if_turn_changed(self) -> None:
+        """Écrit UNE ligne d'état par tour : socles vivants, positions, hauteurs, PV.
+
+        Le raisonnement complet est dans `StepLogger.log_state_snapshot`. En deux mots : tout
+        lecteur du journal reconstruit l'état par accumulation d'événements et n'avait AUCUN
+        point de correction ; une donnée manquante dérivait jusqu'à la fin de l'épisode.
+
+        MÊME SOURCE que le segment `[MODELS:]` des lignes d'action (`occupied_hexes_by_model` /
+        `floor_height_by_model` de `units_cache`, plus `HP_CUR` de `models_cache`) : deux sources
+        parallèles finiraient par diverger, et c'est justement une divergence qu'on veut pouvoir
+        MESURER — pas en fabriquer une nouvelle.
+
+        Une figurine absente de `models_cache` est morte : elle n'apparaît pas. Une unité sans
+        figurine vivante n'apparaît pas non plus. L'absence EST la mort ; il n'y a donc aucun
+        drapeau « vivant/mort » à accorder avec les positions.
+
+        Déclenchement au CHANGEMENT DE TOUR et non à chaque frontière de phase : une ligne par
+        tour suffit à borner la dérive, et coûte ~3 000 lignes sur un run de 600 épisodes.
+        """
+        step_logger = getattr(self, "step_logger", None)
+        if step_logger is None or not step_logger.enabled:
+            return
+        turn = require_key(self.game_state, "turn")
+        # get allowed : absent au tout premier passage de l'épisode (clé purgée au reset).
+        if self.game_state.get(self.STATE_SNAPSHOT_LOGGED_KEY) == turn:
+            return
+        self.game_state[self.STATE_SNAPSHOT_LOGGED_KEY] = turn
+
+        units_cache = require_key(self.game_state, "units_cache")
+        models_cache = require_key(self.game_state, "models_cache")
+        units_state: List[Tuple[str, List[Tuple[str, int, int, float, int]]]] = []
+        for uid, entry in units_cache.items():
+            by_model = entry.get("occupied_hexes_by_model")  # get allowed
+            if not isinstance(by_model, dict) or not by_model:
+                continue
+            floors = require_key(entry, "floor_height_by_model")
+            models: List[Tuple[str, int, int, float, int]] = []
+            for mid, pos in by_model.items():
+                model = models_cache.get(str(mid))  # get allowed : figurine détruite
+                if model is None:
+                    continue
+                models.append((
+                    str(mid), int(pos[0]), int(pos[1]),
+                    float(require_key(floors, mid)), int(require_key(model, "HP_CUR")),
+                ))
+            if models:
+                units_state.append((str(uid), models))
+        step_logger.log_state_snapshot(turn, units_state)
+
     def _verify_supplied_mask(
         self,
         action_mask: np.ndarray,
@@ -7218,6 +7362,10 @@ class W40KEngine(gym.Env):
         # GameStateManager.refresh_objective_control_on_boundary (partage avec le PvP).
         self.state_manager.refresh_objective_control_on_boundary(self.game_state)
         self._log_objective_control_snapshot_if_changed()
+        # Instantané d'ÉTAT (une ligne par tour) : même point de passage, choisi pour la même
+        # raison — c'est le seul commun aux 7 sites de construction d'observation, donc le seul
+        # où l'on soit sûr de voir chaque tour exactement une fois.
+        self._log_state_snapshot_if_turn_changed()
 
         def _zero_obs():
             if not tensor:
@@ -7275,7 +7423,7 @@ class W40KEngine(gym.Env):
                 return _zero_obs(), (action_mask, eligible_units)
             current_phase = self.game_state.get("phase", "unknown")
             advance_action = {"action": "advance_phase", "from": current_phase, "reason": "pool_empty"}
-            advance_success, advance_result = self._process_squad_action(advance_action)
+            advance_success, advance_result = self._advance_phase_and_drain(advance_action)
             if not advance_success:
                 if isinstance(advance_result, dict) and advance_result.get("error") == "game_over":
                     # `_process_squad_action` a echoue APRES avoir potentiellement mute l'etat :

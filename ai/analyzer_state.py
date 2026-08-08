@@ -17,6 +17,15 @@ class AnalyzerState:
     current_episode: List = field(default_factory=list)
     current_episode_num: int = 0
     current_scenario: str = "Unknown"
+    #: Siège occupé par l'AGENT dans l'épisode courant (`AGENT_PLAYER=` de l'entête `Rosters:`).
+    #: `controlled_player_mode` accepte `p2` et `random` : supposer « agent == P1 » attribuait
+    #: les victoires de l'agent au bot dans 180 épisodes sur 600 (33,3 % affichés, 45,3 % réels).
+    current_agent_player: Optional[int] = None
+    #: Datasheet PAR FIGURINE (`[MODEL_TYPES: <mid>=<UnitType> …]` de l'entête d'épisode).
+    #: Une escouade n'est pas homogène : la règle 19 y replie un personnage COMME figurine, et
+    #: cinq armes distinctes s'appellent « Close Combat Weapon » (NB de 2 à 6). Sans cette carte,
+    #: tout plafond par figurine repose sur le type d'ESCOUADE, donc sur la mauvaise datasheet.
+    model_types: Dict[str, str] = field(default_factory=dict)
     episode_turn: int = 0
     episode_actions: int = 0
     last_turn: int = 0

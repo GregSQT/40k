@@ -811,13 +811,23 @@ def _bfs_shortest_path_length(
                 continue
             if neighbor in wall_hexes:
                 continue
-            if neighbor in occupied_positions:
+            # TRANSIT ≠ PLACEMENT. Le moteur sépare les deux (`build_move_transit_blocked` d'un
+            # côté, `is_footprint_placement_valid` de l'autre) ; cette boucle les confondait, et
+            # refusait la case d'ARRIVÉE dès qu'elle était occupée — avant même de tester si
+            # c'était la destination. Une destination occupée devenait donc injoignable à
+            # N'IMPORTE QUEL budget, et le contrôle rendait « au-delà du budget » là où le vrai
+            # fait est « chevauchement ». Mesuré sur le run du 2026-08-08 : 8 charges sur 8
+            # remontées à ce titre avaient un chemin égal à la distance à vol d'oiseau, tous
+            # budgets respectés — la case d'arrivée était simplement celle d'une figurine ennemie.
+            # Le chevauchement reste une faute : il est mesuré par le contrôle de collision
+            # (2.2), à sa place, avec son propre nom.
+            if neighbor != dest_pos and neighbor in occupied_positions:
                 continue
             # Bande d'engagement ennemie : l'appelant la fournit VIDE quand la config autorise
             # à la traverser (`can_move_through_enemy_engagement_zone`, lu par
             # `_build_move_bfs_blockers`). Le paramètre était accepté et transmis par les cinq
             # sites, mais la boucle ne le lisait pas : basculer ce toggle n'aurait rien changé.
-            if neighbor in enemy_adjacent_hexes:
+            if neighbor != dest_pos and neighbor in enemy_adjacent_hexes:
                 continue
             next_dist = current_dist + 1
             if neighbor == dest_pos:
@@ -1035,9 +1045,25 @@ def parse_step_log(filepath: str) -> Dict:
             2: {'elimination': 0, 'objectives': 0, 'value_tiebreaker': 0},
             -1: {'draw': 0}
         },
-        'wins_by_scenario': defaultdict(lambda: {'p1': 0, 'p2': 0, 'draws': 0}),
+        'wins_by_scenario': defaultdict(lambda: {'p1': 0, 'p2': 0, 'draws': 0, 'agent': 0, 'bot': 0}),
         'victory_points_by_episode': {},
         'victory_points_values': {1: [], 2: []},
+        # ── Résultats rapportés au SIÈGE de l'agent, pas au numéro de joueur ────────────────
+        # `controlled_player_mode` (ai/train.py) accepte `p1`, `p2` et `random` : l'agent ne
+        # tient pas toujours le siège P1. Les compteurs `[1]/[2]` ci-dessus restent des
+        # compteurs de SIÈGE (ils servent aux sections d'erreurs, où seul le siège a un sens) ;
+        # ceux-ci suivent l'AGENT d'un épisode à l'autre. Mesuré sur un run de 600 épisodes :
+        # agent en P2 dans 180 d'entre eux, 33,3 % de victoires affichées pour 45,3 % réelles.
+        'win_methods_by_seat': {
+            'agent': {'elimination': 0, 'objectives': 0, 'value_tiebreaker': 0},
+            'bot': {'elimination': 0, 'objectives': 0, 'value_tiebreaker': 0},
+        },
+        'victory_points_values_by_seat': {'agent': [], 'bot': []},
+        'agent_seat_counts': {1: 0, 2: 0},
+        # Écarts entre l'état RECONSTRUIT par l'analyzer et l'instantané `T{tour} STATE:` du
+        # moteur. Ce compteur est le point du chantier : il transforme une dérive silencieuse en
+        # erreur mesurée, et se déclenchera le jour où un nouvel effet cessera d'être journalisé.
+        'state_resync': {'dead_missed': 0, 'alive_missed': 0, 'pos_mismatch': 0},
         'shoot_vs_wait': {
             'shoot': 0, 'wait': 0, 'skip': 0, 'advance': 0
         },
@@ -1567,6 +1593,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         "2.5": "EPISODES ENDING",
         "2.6": "SAMPLE MISSING",
         "2.7": "CORE ISSUES",
+        "2.8": "ETAT RECONSTRUIT vs ETAT MOTEUR",
     }
 
     TABLE_LABEL_WIDTH = 38
@@ -1580,8 +1607,8 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         log_print("-" * 80)
         log_print(
             f"{title:<{TABLE_LABEL_WIDTH}} "
-            f"{'Agent (P1)':>{TABLE_VALUE_WIDTH}} "
-            f"{'Bot (P2)':>{TABLE_VALUE_WIDTH}}"
+            f"{'Joueur 1':>{TABLE_VALUE_WIDTH}} "
+            f"{'Joueur 2':>{TABLE_VALUE_WIDTH}}"
         )
         log_print("-" * 80)
 
@@ -1961,17 +1988,24 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     log_print("\n" + "=" * 80)
     log_print("📊 BOT EVALUATION RESULTS")
     log_print("=" * 80)
+    _seat_counts = require_key(stats, 'agent_seat_counts')
+    log_print(
+        f"Siège de l'agent : P1 sur {_seat_counts[1]} épisode(s), "
+        f"P2 sur {_seat_counts[2]} — les colonnes ci-dessous suivent l'AGENT, pas le numéro "
+        f"de joueur (controlled_player_mode accepte p2 et random)."
+    )
     log_print("-" * 80)
-    log_print(f"WIN METHODS {'Agent Wins (P1)':>24} {'Bot Wins (P2)':>18}")
+    log_print(f"WIN METHODS {'Agent Wins':>24} {'Bot Wins':>18}")
     log_print("-" * 80)
-    
-    p1_total = sum(stats['win_methods'][1].values())
-    p2_total = sum(stats['win_methods'][2].values())
+
+    _wm_seat = require_key(stats, 'win_methods_by_seat')
+    p1_total = sum(_wm_seat['agent'].values())
+    p2_total = sum(_wm_seat['bot'].values())
     draws = stats['win_methods'][-1]['draw']
-    
+
     for method in ['elimination', 'objectives', 'value_tiebreaker']:
-        p1_count = require_key(stats['win_methods'][1], method)
-        p2_count = require_key(stats['win_methods'][2], method)
+        p1_count = require_key(_wm_seat['agent'], method)
+        p2_count = require_key(_wm_seat['bot'], method)
         p1_pct = (p1_count / p1_total * 100) if p1_total > 0 else 0
         p2_pct = (p2_count / p2_total * 100) if p2_total > 0 else 0
         method_display = method.replace('_', ' ').title()
@@ -1989,8 +2023,8 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     log_print("\n" + "-" * 80)
     log_print("VICTORY POINTS (OBJECTIVES)")
     log_print("-" * 80)
-    vp_p1 = stats['victory_points_values'][PLAYER_ONE_ID]
-    vp_p2 = stats['victory_points_values'][PLAYER_TWO_ID]
+    vp_p1 = require_key(stats, 'victory_points_values_by_seat')['agent']
+    vp_p2 = require_key(stats, 'victory_points_values_by_seat')['bot']
     if vp_p1 and vp_p2:
         vp_p1_min = min(vp_p1)
         vp_p1_max = max(vp_p1)
@@ -1998,27 +2032,29 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         vp_p2_min = min(vp_p2)
         vp_p2_max = max(vp_p2)
         vp_p2_avg = sum(vp_p2) / len(vp_p2)
-        log_print(f"{'Player':<10} {'Min':>8} {'Avg':>8} {'Max':>8}")
-        log_print(f"{'P1':<10} {vp_p1_min:8.2f} {vp_p1_avg:8.2f} {vp_p1_max:8.2f}")
-        log_print(f"{'P2':<10} {vp_p2_min:8.2f} {vp_p2_avg:8.2f} {vp_p2_max:8.2f}")
+        log_print(f"{'Camp':<10} {'Min':>8} {'Avg':>8} {'Max':>8}")
+        log_print(f"{'Agent':<10} {vp_p1_min:8.2f} {vp_p1_avg:8.2f} {vp_p1_max:8.2f}")
+        log_print(f"{'Bot':<10} {vp_p2_min:8.2f} {vp_p2_avg:8.2f} {vp_p2_max:8.2f}")
     else:
         log_print("No victory point data recorded (check primary_objectives in scenarios).")
 
     # WINS BY SCENARIO
     if stats['wins_by_scenario']:
         log_print("-" * 80)
-        log_print(f"WINS BY SCENARIO {'Agent (P1)':>37} {'Bot (P2)':>13} {'Draws':>12}")
+        log_print(f"WINS BY SCENARIO {'Agent':>37} {'Bot':>13} {'Draws':>12}")
         log_print("-" * 80)
-        
+
         scenario_totals = []
         for scenario, wins in stats['wins_by_scenario'].items():
-            total = wins['p1'] + wins['p2'] + wins['draws']
+            total = wins['agent'] + wins['bot'] + wins['draws']
             scenario_totals.append((scenario, wins, total))
         scenario_totals.sort(key=lambda x: -x[2])
-        
+
         for scenario, wins, total in scenario_totals:
-            p1_count = wins['p1']
-            p2_count = wins['p2']
+            # Colonnes au SIÈGE de l'agent : `p1`/`p2` restent renseignés (diagnostic de siège),
+            # mais les afficher ici mélangeait les épisodes où l'agent tient P2.
+            p1_count = wins['agent']
+            p2_count = wins['bot']
             draws_count = wins['draws']
             p1_pct = (p1_count / total * 100) if total > 0 else 0
             p2_pct = (p2_count / total * 100) if total > 0 else 0
@@ -2265,8 +2301,8 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
             for player, unit_id, unit_type in death_order:
                 player_kills[player] += 1
         log_print(f"\nKills by player:")
-        log_print(f"  Agent (P1) kills: {player_kills[1]}")
-        log_print(f"  Bot (P2) kills:   {player_kills[2]}")
+        log_print(f"  Joueur 1 kills: {player_kills[1]}")
+        log_print(f"  Joueur 2 kills:   {player_kills[2]}")
     else:
         log_print("No kills recorded in any episode.")
     
@@ -2823,7 +2859,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     # DEAD UNITS INTERACTIONS
     active_debug_section = "2.1"
     log_print("\n" + "-" * 80)
-    log_print(f"{('2.1 ' + debug_sections['2.1']):<30s} {'Agent (P1)':>15s} {'Bot (P2)':>15s}")
+    log_print(f"{('2.1 ' + debug_sections['2.1']):<30s} {'Joueur 1':>15s} {'Joueur 2':>15s}")
     log_print("-" * 80)
     log_print(f"Incomplete episodes:           {incomplete_p1:6d}           {incomplete_p2:6d}")
     log_print(f"Dead unit moving:              {stats['dead_unit_moving'][1]:6d}           {stats['dead_unit_moving'][2]:6d}")
@@ -2929,7 +2965,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     # DMG ISSUES
     active_debug_section = "2.3"
     log_print("\n" + "-" * 80)
-    log_print(f"{('2.3 ' + debug_sections['2.3']):<30s} {'Agent (P1)':>15s} {'Bot (P2)':>15s}")
+    log_print(f"{('2.3 ' + debug_sections['2.3']):<30s} {'Joueur 1':>15s} {'Joueur 2':>15s}")
     log_print("-" * 80)
     dmg_missing_p1 = stats['damage_missing_unit_hp'][1]
     dmg_missing_p2 = stats['damage_missing_unit_hp'][2]
@@ -2955,7 +2991,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     # EPISODES ENDING
     active_debug_section = "2.5"
     log_print("\n" + "-" * 80)
-    log_print(f"{('2.5 ' + debug_sections['2.5']):<30s} {'Agent (P1)':>15s} {'Bot (P2)':>15s}")
+    log_print(f"{('2.5 ' + debug_sections['2.5']):<30s} {'Joueur 1':>15s} {'Joueur 2':>15s}")
     log_print("-" * 80)
     log_print(f"Incomplete episodes:         {incomplete_p1:6d}           {incomplete_p2:6d}")
     log_print(f"Episodes without win_method: {without_method_p1:6d}           {without_method_p2:6d}")
@@ -2991,6 +3027,20 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
             log_print(f"- {error_msg} (x{len(entries)})")
             for example in entries[:3]:
                 log_print(f"  Example: E{example.get('episode')} T{example.get('turn')} {example.get('phase')} : {example.get('line')}")
+
+    # ── 2.8 : ce que l'analyzer croyait, vs ce que le moteur a déclaré ──────────────────────
+    # Le compteur du chantier. Tout le reste de ce rapport repose sur un état RECONSTRUIT par
+    # accumulation d'événements ; jusqu'ici, rien ne disait quand cette reconstruction dérivait.
+    # Ces trois nombres le disent — et une divergence non nulle invalide, pour l'épisode
+    # concerné, les contrôles qui mesurent des distances ou des adjacences.
+    active_debug_section = "2.8"
+    log_print("\n" + "-" * 80)
+    log_print(f"2.8 {debug_sections['2.8']}")
+    log_print("-" * 80)
+    _resync = require_key(stats, 'state_resync')
+    log_print(f"Morts non vues par l'analyzer (fantomes)  : {_resync['dead_missed']}")
+    log_print(f"Unites tuees a tort par l'analyzer        : {_resync['alive_missed']}")
+    log_print(f"Figurines mal positionnees (deplacement non journalise) : {_resync['pos_mismatch']}")
 
     move_errors = (
         stats['wall_collisions'][1] + stats['wall_collisions'][2] +
@@ -3164,6 +3214,15 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     log_print(f"{summary_error_icon(episodes_ending_total > 0)} 2.5 Episode ending : {episodes_ending_total}")
     log_print(f"{summary_error_icon(len(missing_samples) > 0)} 2.6 Sample missing ({len(missing_samples)}/{len(sample_action_types)}) : {missing_samples_label}")
     log_print(f"{summary_error_icon(core_issues_total > 0)} 2.7 Core issue : {core_issues_total}")
+    # 2.8 : une divergence non nulle invalide, pour l'episode concerne, tout controle mesurant
+    # une distance ou une adjacence — elle est donc rendue au meme rang que les autres.
+    _resync_total = sum(require_key(stats, 'state_resync').values())
+    log_print(
+        f"{summary_error_icon(_resync_total > 0)} 2.8 Etat reconstruit vs moteur : {_resync_total} "
+        f"(fantomes={stats['state_resync']['dead_missed']}, "
+        f"tuees-a-tort={stats['state_resync']['alive_missed']}, "
+        f"positions={stats['state_resync']['pos_mismatch']})"
+    )
 
     log_print("\n" + "#" * 80 + "\n")
 
@@ -3347,6 +3406,9 @@ if __name__ == "__main__":
             dmg_issues_total +
             episodes_ending_total +
             core_issues_total +
+            # 2.8 : un ecart etat-reconstruit/etat-moteur est une erreur a part entiere —
+            # il invalide les controles de distance et d'adjacence de l'episode concerne.
+            sum(require_key(stats, 'state_resync').values()) +
             weapon_rules_invalid +
             len(missing_samples)
         )
@@ -3372,7 +3434,7 @@ if __name__ == "__main__":
             details_lines = _extract_section(
                 collected_lines,
                 "📊 BOT EVALUATION RESULTS",
-                "Bot (P2) kills:"
+                "Joueur 2 kills:"
             )
             if details_lines:
                 _print_section_lines(details_lines)
