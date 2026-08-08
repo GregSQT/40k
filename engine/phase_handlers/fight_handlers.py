@@ -2032,13 +2032,11 @@ def _fight_v11_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
 
         destroyed_ids = destroy_unarrived_strategic_reserves(game_state)
         if destroyed_ids:
-            controlled = int(require_key(require_key(game_state, "config"), "controlled_player"))
-            id_to_player = {
-                str(require_key(u, "id")): int(require_key(u, "player"))
-                for u in require_key(game_state, "units")
-            }
+            from engine.game_utils import get_controlled_player
+            controlled = get_controlled_player(game_state)
             agent_destroyed = sum(
-                1 for uid in destroyed_ids if id_to_player[str(uid)] == controlled
+                1 for uid in destroyed_ids
+                if int(require_key(get_unit_by_id(game_state, str(uid)), "player")) == controlled
             )
             if agent_destroyed:
                 game_state["_reserves_destroyed_turn3"] = (

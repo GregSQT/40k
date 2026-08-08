@@ -1076,17 +1076,10 @@ class W40KMetricsTracker:
                     self.episode_count
                 )
     
-        # Réserves stratégiques (20.01/20.04) — les trois clés sont toujours posées ensemble ;
-        # la garde explicite sur les trois empêche qu'une KeyError silencieuse d'une clé manquante
-        # soit masquée par la présence de la première.
-        _res_keys = ('reserves_placed_agent', 'reserves_deployed_agent', 'reserves_destroyed_turn3')
-        if all(k in tactical_data for k in _res_keys):
-            placed = int(require_key(tactical_data, 'reserves_placed_agent'))
-            deployed = int(require_key(tactical_data, 'reserves_deployed_agent'))
-            destroyed = int(require_key(tactical_data, 'reserves_destroyed_turn3'))
-            self.writer.add_scalar('reserves/placed_agent', float(placed), self.episode_count)
-            self.writer.add_scalar('reserves/deployed_agent', float(deployed), self.episode_count)
-            self.writer.add_scalar('reserves/destroyed_turn3', float(destroyed), self.episode_count)
+        # Réserves stratégiques (20.01/20.04) — clés garanties par _empty_episode_tactical_data().
+        self.writer.add_scalar('reserves/placed_agent', float(require_key(tactical_data, 'reserves_placed_agent')), self.episode_count)
+        self.writer.add_scalar('reserves/deployed_agent', float(require_key(tactical_data, 'reserves_deployed_agent')), self.episode_count)
+        self.writer.add_scalar('reserves/destroyed_turn3', float(require_key(tactical_data, 'reserves_destroyed_turn3')), self.episode_count)
 
     def log_training_step(self, step_data: Dict[str, Any]):
         """Log training step metrics - exploration rate and loss"""

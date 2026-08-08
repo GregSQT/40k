@@ -49,8 +49,8 @@ from engine.phase_handlers.shared_utils import (
 # Import shared utilities FIRST (no circular dependencies)
 from engine.episode_schedule import episodes_per_env
 from engine.game_utils import (
-    ONCE_CLAIMS_KEY, get_unit_by_id, once_claim, once_claimed, turn_limit_reached,
-    get_effective_turn_limit,
+    ONCE_CLAIMS_KEY, get_controlled_player, get_unit_by_id, once_claim, once_claimed,
+    turn_limit_reached, get_effective_turn_limit,
 )
 
 # Import NEW extracted modules
@@ -1819,9 +1819,7 @@ class W40KEngine(gym.Env):
         # Compte initial des réserves déclarées dans le roster (strategic_reserves: true).
         # Le hook dans deployment_place_in_strategic_reserves ajoute ensuite les unités placées
         # manuellement pendant la phase de déploiement active. Les deux sources s'additionnent.
-        controlled_player_for_reserves = int(
-            require_key(require_key(self.game_state, "config"), "controlled_player")
-        )
+        controlled_player_for_reserves = get_controlled_player(self.game_state)
         self.game_state["_reserves_placed_agent"] = sum(
             1 for u in require_key(self.game_state, "units")
             if u.get("in_strategic_reserves", False)
@@ -2747,15 +2745,9 @@ class W40KEngine(gym.Env):
                 self.action_decoder.deployment_cache_counts()
             )
             # Réserves stratégiques : compteurs incrémentés par les handlers via game_state.
-            self.episode_tactical_data['reserves_placed_agent'] = int(
-                require_key(self.game_state, "_reserves_placed_agent")
-            )
-            self.episode_tactical_data['reserves_deployed_agent'] = int(
-                require_key(self.game_state, "_reserves_deployed_agent")
-            )
-            self.episode_tactical_data['reserves_destroyed_turn3'] = int(
-                require_key(self.game_state, "_reserves_destroyed_turn3")
-            )
+            self.episode_tactical_data['reserves_placed_agent'] = require_key(self.game_state, "_reserves_placed_agent")
+            self.episode_tactical_data['reserves_deployed_agent'] = require_key(self.game_state, "_reserves_deployed_agent")
+            self.episode_tactical_data['reserves_destroyed_turn3'] = require_key(self.game_state, "_reserves_destroyed_turn3")
 
             # VALUE attrition metrics (episode-level): destroyed enemy value and lost ally value.
             #

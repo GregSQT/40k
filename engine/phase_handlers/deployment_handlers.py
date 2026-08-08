@@ -1507,8 +1507,8 @@ def deployment_place_in_strategic_reserves(
         return False, {"error": "strategic_reserves_not_allowed", "unitId": squad_id}
 
     unit["in_strategic_reserves"] = True
-    controlled = int(require_key(require_key(game_state, "config"), "controlled_player"))
-    if current_deployer == controlled:
+    from engine.game_utils import get_controlled_player
+    if current_deployer == get_controlled_player(game_state):
         game_state["_reserves_placed_agent"] = require_key(game_state, "_reserves_placed_agent") + 1
     # _reserves_placed_agent est AUSSI initialisé au reset par le compte des unités pré-déclarées
     # en réserve dans le roster (strategic_reserves: true). Ce hook ne couvre que les unités
