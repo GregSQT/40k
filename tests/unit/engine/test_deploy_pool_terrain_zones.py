@@ -13,13 +13,15 @@ Deux verrous complémentaires :
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
 
+from tests.unit.engine._config_helpers import bank_training_scenarios
+
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 BOARD_SCEN_DIR = PROJECT_ROOT / "config" / "board" / "44x60x5" / "scenario"
-BANK_DIR = PROJECT_ROOT / "config" / "agents" / "ArmageddonAgent" / "scenarios" / "training"
 
 
 def _load(scenario_file: str):
@@ -47,17 +49,12 @@ def test_pvp_fixed_placement_terrain_zones_loads(scen):
     assert eng.game_state["units"], "aucune unité chargée"
 
 
-# Les DEUX scénarios de la banque : ils ne diffèrent que par leur `terrain_ref`, donc par les
-# ZONES de déploiement d'où sort le pool. N'en éprouver qu'un ne dit rien du second terrain —
-# c'est exactement là qu'un défaut de géométrie s'est logé le 2026-08-08 (positions de roster
-# valides sur mc1, posées sur un mur sur mc2).
-BANK_SCENARIOS = ["scenario_training_armageddon1.json", "scenario_training_armageddon2.json"]
-
-
-@pytest.mark.parametrize("scen", BANK_SCENARIOS)
+# TOUS les scénarios de la banque : le pool de déploiement SORT des zones du terrain, donc chaque
+# terrain est un cas distinct — et ils sont DÉCOUVERTS, pas listés (cf. `bank_training_scenarios`).
+@pytest.mark.parametrize("scen", bank_training_scenarios(), ids=os.path.basename)
 def test_terrain_zone_random_deployment_gets_pool(scen):
     """Banque : deployment_type random + zones terrain → pool peuplé, reset sans erreur."""
-    eng = _load(str(BANK_DIR / scen))
+    eng = _load(scen)
     pools = eng.config.get("deployment_pools")
     assert isinstance(pools, dict) and sorted(pools.keys()) == [1, 2]
 
@@ -96,7 +93,7 @@ def test_deployment_zones_are_identical_in_fixed_and_active_mode():
     Le test compare les DEUX modes plutôt que de compter les murs d'un seul : c'est l'identité
     qui est le contrat, le comptage n'en est qu'un symptôme.
     """
-    eng = _load(str(BANK_DIR / BANK_SCENARIOS[0]))
+    eng = _load(bank_training_scenarios()[0])
     walls = {(int(c), int(r)) for c, r in eng.game_state["wall_hexes"]}
     assert walls, "scénario sans mur : ce test ne prouverait rien (vert vacant)"
 

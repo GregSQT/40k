@@ -26,6 +26,7 @@ import random
 
 import pytest
 
+from _config_helpers import bank_training_scenarios
 from engine.phase_handlers.shared_utils import (
     MOVE_CELL_MAP_CACHE_KEY,
     build_rigid_plan,
@@ -34,14 +35,12 @@ from engine.phase_handlers.shared_utils import (
     validate_move_plan,
 )
 
-_BANK = "config/agents/ArmageddonAgent/scenarios/training/"
-#: Les DEUX terrains de la banque. L'objet de ce test — cellules atteignables, murs, érosion du
-#: bloc — est entièrement GÉOMÉTRIQUE : un second terrain n'y est pas une répétition mais un
-#: second jeu d'obstacles. Ils sont appariés aux graines plutôt que croisés avec elles (cf. la
+#: TOUS les terrains de la banque. L'objet de ce test — cellules atteignables, murs, érosion du
+#: bloc — est entièrement GÉOMÉTRIQUE : un terrain de plus n'y est pas une répétition mais un jeu
+#: d'obstacles de plus. Ils sont APPARIÉS aux graines plutôt que croisés avec elles (cf. la
 #: paramétrisation du test) : le croisement doublerait un test déjà en 2 plateaux × 3 graines
 #: × 400 steps, pour une redondance que la variété des trajectoires apporte déjà.
-SCENARIO_MC1 = _BANK + "scenario_training_armageddon1.json"
-SCENARIO_MC2 = _BANK + "scenario_training_armageddon2.json"
+SCENARIOS = bank_training_scenarios()
 MAX_STEPS = 400
 
 
@@ -141,10 +140,12 @@ def board(request):
             os.environ["W40K_BOARD_PATH"] = previous
 
 
+# Une graine par terrain, en boucle sur la banque : trois cas, chaque terrain couvert, et un
+# terrain ajouté à la banque entre dans la rotation sans rééditer cette liste.
 @pytest.mark.parametrize(
     "seed,scenario",
-    [(0, SCENARIO_MC1), (1, SCENARIO_MC2), (2, SCENARIO_MC1)],
-    ids=["seed0-mc1", "seed1-mc2", "seed2-mc1"],
+    [(seed, SCENARIOS[seed % len(SCENARIOS)]) for seed in (0, 1, 2)],
+    ids=lambda v: os.path.basename(v) if isinstance(v, str) else f"seed{v}",
 )
 def test_every_masked_move_cell_is_executable(seed, scenario, board):
     eng = _engine(seed, scenario)

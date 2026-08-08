@@ -238,10 +238,13 @@ def test_flag_does_not_leak_to_the_next_step():
 # ─────────────────────────────────────────────────────────────────────────────
 # 5. L'episode se termine PENDANT la chaine : le bilan d'episode remonte quand meme
 #
-# Le trou reel de la premiere version : `TERMINAL_INFO_KEYS` omettait `tactical_data`,
-# `deployment_mode` et `episode`. Un episode termine pendant une chaine auto-jouee rendait donc
-# `terminated=True` SANS son bilan, et `ai/training_callbacks._handle_episode_end` les exige par
-# `require_key` — le run mourait dessus, mais seulement sur les episodes qui finissent en chaine.
+# Le trou reel de la premiere version : `TERMINAL_INFO_KEYS` portait `episode` mais omettait
+# `tactical_data` et `deployment_mode`. C'est cette combinaison qui tuait le run, et pas
+# l'absence des trois : `ai/training_callbacks` entre dans `_handle_episode_end` SUR la presence
+# d'`episode` (`elif 'episode' in info`), et cette fonction exige ensuite les deux autres par
+# `require_key`. Un episode termine pendant une chaine auto-jouee remontait donc un bilan
+# incomplet a un callback que ce meme bilan venait d'aiguiller — et seulement sur les episodes
+# qui finissent en chaine.
 #
 # La situation est CONSTRUITE, pas tiree d'une graine : `_check_game_over` est arme pour rendre
 # True au premier appel evalue A L'INTERIEUR de la chaine (`_forced_wait_depth > 0`). C'est le

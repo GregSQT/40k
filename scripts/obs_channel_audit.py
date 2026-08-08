@@ -77,6 +77,7 @@ def field_names() -> Dict[str, List[str]]:
         WEAPON_RULE_ID_SLOTS,
         WEAPON_RULE_PARAMS,
     )
+    from engine.spatial_grid import GRID_CHANNEL_NAMES
 
     # Le registre d'armes n'exporte pas de tuple de NOMS (son layout est décrit en commentaire
     # de `PROFILE_STAT_CONT`) : on le reconstruit ici depuis les constantes réelles, et on
@@ -102,9 +103,9 @@ def field_names() -> Dict[str, List[str]]:
         "decision_options_bin": list(DECISION_OPTION_BIN_FIELDS),
         "deploy_cand_cont": list(DEPLOY_CAND_CONT_FIELDS),
         "deploy_cand_bin": list(DEPLOY_CAND_BIN_FIELDS),
-        "grid": [
-            "wall", "ally", "enemy", "ez", "objective", "level", "cover", "self", "move_cost",
-        ],
+        # LUS depuis `spatial_grid`, jamais recopiés : le seul livrable de cet audit est de NOMMER
+        # le canal mort, donc un libellé décalé enverrait corriger un canal sain.
+        "grid": list(GRID_CHANNEL_NAMES),
     }
     for family in ("allies", "enemies"):
         names[f"{family}_cont"] = list(UNIT_CONT_FIELDS)
@@ -119,21 +120,51 @@ def field_names() -> Dict[str, List[str]]:
     return names
 
 
-def _field_axis(key: str) -> int:
-    """Axe des CHAMPS : 0 pour la grille (canal), dernier axe pour tout le reste."""
-    return 0 if key == "grid" else -1
+def _field_axis(key: str, *, batched: bool = False) -> int:
+    """Axe des CHAMPS : 0 pour la grille (canal), dernier axe pour tout le reste.
+
+    `batched=True` : le tenseur porte le lot en tête, ce qui décale l'axe de la grille d'un cran
+    (le dernier axe, lui, reste le dernier). Écrit ICI plutôt que re-dérivé par arithmétique au
+    site d'appel, où la table à deux cas devait être reconstituée de tête.
+    """
+    if key == "grid":
+        return 1 if batched else 0
+    return -1
+
+
+def _labels(names: Dict[str, List[str]], key: str) -> List[str]:
+    """Libellés d'une clé d'observation — LÈVE si la clé n'est pas au registre.
+
+    Aucun repli en libellés numériques : cet outil existe pour NOMMER les canaux morts, donc une
+    clé ajoutée à l'observation et oubliée ici doit faire échouer l'audit, pas sortir en `[7]`
+    dans un rapport qu'on lira comme complet.
+    """
+    if key not in names:
+        raise KeyError(
+            f"Cle d'observation '{key}' absente de `field_names()` : ajouter son registre de "
+            f"libelles. Cles connues : {sorted(names)}"
+        )
+    return names[key]
 
 
 # --------------------------------------------------------------------------- volet A
 class FieldStats:
-    """Statistiques par champ, accumulées en ligne (aucune observation n'est conservée)."""
+    """Statistiques par champ, accumulées en ligne (aucune observation n'est conservée).
 
-    def __init__(self, n_fields: int):
+    La CONSTANCE d'un champ se lit sur `lo == hi` — pas sur un ensemble de valeurs distinctes,
+    qui répondait à la même question pour 88 % du coût de `update` (mesuré : 11,7 ms l'appel
+    complet, 1,35 ms sans, × 254 champs × ~4 000 steps). L'ensemble n'est donc conservé que pour
+    la clé qui en RAPPORTE le cardinal — la grille —, et borné par `DISTINCT_CAP`.
+    """
+
+    def __init__(self, n_fields: int, *, track_distinct: bool = False):
         self.lo = np.full(n_fields, np.inf, dtype=np.float64)
         self.hi = np.full(n_fields, -np.inf, dtype=np.float64)
         self.nonzero = np.zeros(n_fields, dtype=np.int64)
         self.total = np.zeros(n_fields, dtype=np.int64)
-        self.distinct: List[set] = [set() for _ in range(n_fields)]
+        self.distinct: Optional[List[set]] = (
+            [set() for _ in range(n_fields)] if track_distinct else None
+        )
 
     def update(self, flat: np.ndarray) -> None:
         """`flat` : (n_fields, n_samples)."""
@@ -141,28 +172,63 @@ class FieldStats:
         self.hi = np.maximum(self.hi, flat.max(axis=1))
         self.nonzero += (flat != 0.0).sum(axis=1)
         self.total += flat.shape[1]
+        if self.distinct is None:
+            return
         for i, values in enumerate(self.distinct):
             if len(values) <= DISTINCT_CAP:
                 values.update(np.unique(np.round(flat[i], 6)).tolist())
 
+    def is_constant(self, i: int) -> bool:
+        """Le champ `i` n'a pris qu'une seule valeur sur tout le corpus."""
+        return bool(self.lo[i] == self.hi[i])
 
-#: Etat de l'echantillonnage de reservoir du volet B (cf. `absorb`).
-_reservoir = {"seen": 0, "rng": np.random.default_rng(20260808)}
+
+class Reservoir:
+    """Échantillon UNIFORME d'observations pour le volet B, sur tout le corpus.
+
+    Le lot doit couvrir toutes les phases, pas seulement le début du premier épisode
+    (déploiement + move) : sans cela les champs de combat sortiraient « non lus » faute d'avoir
+    été échantillonnés. Objet et non état de module : l'audit peut être rejoué dans le même
+    processus sans traîner le compteur du run précédent.
+    """
+
+    def __init__(self, capacity: int, seed: int = 20260808):
+        self.capacity = int(capacity)
+        self.rng = np.random.default_rng(seed)
+        self.seen = 0
+        self.kept: List[Dict[str, np.ndarray]] = []
+
+    def offer(self, observation: Dict[str, np.ndarray]) -> None:
+        self.seen += 1
+        if len(self.kept) < self.capacity:
+            self.kept.append(self._copy(observation))
+            return
+        j = int(self.rng.integers(0, self.seen))
+        if j < self.capacity:
+            self.kept[j] = self._copy(observation)
+
+    @staticmethod
+    def _copy(observation: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
+        return {k: np.array(v, copy=True) for k, v in observation.items()}
 
 
 def _to_fields(key: str, arr: np.ndarray) -> np.ndarray:
     """(…) -> (n_fields, n_samples), l'axe des champs ramené en tête."""
-    axis = _field_axis(key)
-    moved = np.moveaxis(arr, axis, 0)
+    moved = np.moveaxis(arr, _field_axis(key), 0)
     return moved.reshape(moved.shape[0], -1).astype(np.float64)
 
 
-def collect(stats: Dict[str, FieldStats], keep: List[Dict[str, np.ndarray]],
-            scenario: str, seed: int) -> dict:
+def make_engine(scenario: str):
+    """Moteur d'audit sur `scenario`. UN site de construction, partagé par les deux volets.
+
+    Le volet B lit `observation_space` / `action_space` sur un moteur : le construire à part
+    laisserait deux configurations libres de diverger alors que le rapport CROISE leurs résultats
+    (« déjà constant en A »).
+    """
     from ai.unit_registry import UnitRegistry
     from engine.w40k_core import W40KEngine
 
-    eng = W40KEngine(
+    return W40KEngine(
         rewards_config=AGENT,
         training_config_name=TRAINING_CONFIG,
         controlled_agent=AGENT,
@@ -172,6 +238,12 @@ def collect(stats: Dict[str, FieldStats], keep: List[Dict[str, np.ndarray]],
         gym_training_mode=True,
         training_n_envs=1,
     )
+
+
+def collect(eng, stats: Dict[str, FieldStats], reservoir: Reservoir, seed: int) -> dict:
+    """Un épisode. Le moteur est RÉUTILISÉ d'une graine à l'autre : `reset(seed=)` retire le
+    roster et refait la géométrie, alors qu'une construction coûte ~1,1 s (mesuré) — 24 pour un
+    corpus qui n'en demande qu'une par scénario."""
     obs, _info = eng.reset(seed=seed)
     rng = np.random.default_rng(seed * 7919 + 13)
     phases = defaultdict(int)
@@ -180,18 +252,11 @@ def collect(stats: Dict[str, FieldStats], keep: List[Dict[str, np.ndarray]],
     def absorb(observation: Dict[str, np.ndarray]) -> None:
         for key, arr in observation.items():
             if key not in stats:
-                stats[key] = FieldStats(arr.shape[_field_axis(key)])
+                stats[key] = FieldStats(
+                    arr.shape[_field_axis(key)], track_distinct=(key == "grid")
+                )
             stats[key].update(_to_fields(key, arr))
-        # Echantillonnage de RESERVOIR : le lot du volet B doit couvrir toutes les phases, pas
-        # seulement le debut du premier episode (deploiement + move), sans quoi les champs de
-        # combat sortiraient « non lus » faute d'avoir ete echantillonnes.
-        _reservoir["seen"] += 1
-        if len(keep) < GRAD_BATCH:
-            keep.append({k: np.array(v, copy=True) for k, v in observation.items()})
-        else:
-            j = _reservoir["rng"].integers(0, _reservoir["seen"])
-            if j < GRAD_BATCH:
-                keep[int(j)] = {k: np.array(v, copy=True) for k, v in observation.items()}
+        reservoir.offer(observation)
 
     absorb(obs)
     while steps < MAX_STEPS_PER_EPISODE:
@@ -229,33 +294,29 @@ ID_KEYS = {
 }
 
 
-def gradient_pass(keep: List[Dict[str, np.ndarray]]):
+def gradient_pass(eng, keep: List[Dict[str, np.ndarray]]):
     """Gradient de `Σ logits + Σ valeur` par rapport à chaque champ d'observation."""
     import torch
 
     from ai.pointer_policy import PointerMaskablePolicy
     from ai.spatial_extractor import SpatialCombinedExtractor
-    from ai.unit_registry import UnitRegistry
-    from engine.w40k_core import W40KEngine
+    from shared.data_validation import require_key
 
-    eng = W40KEngine(
-        rewards_config=AGENT,
-        training_config_name=TRAINING_CONFIG,
-        controlled_agent=AGENT,
-        scenario_file=str(BANK / SCENARIOS[0]),
-        unit_registry=UnitRegistry(),
-        quiet=True,
-        gym_training_mode=True,
-        training_n_envs=1,
-    )
+    # Architecture LUE dans la config de l'agent, jamais recopiée : c'est la règle que
+    # `ai/train._inject_spatial_extractor` fait respecter au training (`cnn_features` y est
+    # `require_key`, sans valeur par défaut). Recopiée ici, une config qui changerait de largeur
+    # ferait mesurer un réseau que personne n'entraîne — et rendre « canal non lu » sur une
+    # architecture fantôme.
+    model_params = require_key(require_key(eng.training_config, "model_params"), "policy_kwargs")
+    fx_kwargs = require_key(model_params, "features_extractor_kwargs")
     torch.manual_seed(0)
     policy = PointerMaskablePolicy(
         eng.observation_space,
         eng.action_space,
         lambda _progress: 3e-4,
-        net_arch=[512, 512],
+        net_arch=require_key(model_params, "net_arch"),
         features_extractor_class=SpatialCombinedExtractor,
-        features_extractor_kwargs={"cnn_features": 256},
+        features_extractor_kwargs={"cnn_features": require_key(fx_kwargs, "cnn_features")},
     )
 
     batch = {
@@ -266,10 +327,15 @@ def gradient_pass(keep: List[Dict[str, np.ndarray]]):
     # Épouser les statistiques des données AVANT de mesurer : à l'initialisation
     # (mean=0, var=1) le clip ±10σ de `EntityRunningNorm` saturerait toute feature d'échelle
     # > 10 et lui donnerait un gradient nul — faux positif.
+    #
+    # UNE passe suffit, et ce n'est pas une approximation : `EntityRunningNorm` est un
+    # accumulateur de Chan initialisé à `count=1e-4`, pas une moyenne mobile à momentum — la
+    # première passe pose déjà la moyenne et la variance EXACTES du lot. Vérifié par mesure :
+    # `unit_norm.running_mean`/`running_var` identiques à 1e-6 près après 1, 2 et 8 passes (seul
+    # `count` monte). Les 7 passes suivantes coûtaient 1,5 s pour ne rien changer.
     policy.train()
     with torch.no_grad():
-        for _ in range(8):
-            policy.extract_features(batch)
+        policy.extract_features(batch)
     policy.eval()
 
     inputs = {k: v.clone().requires_grad_(k not in ID_KEYS) for k, v in batch.items()}
@@ -287,9 +353,7 @@ def gradient_pass(keep: List[Dict[str, np.ndarray]]):
             grads[key] = np.zeros(tensor.shape[_field_axis(key)])
             continue
         g = np.abs(tensor.grad.detach().numpy())
-        axis = _field_axis(key)
-        # lot en tête : l'axe des champs de l'observation est décalé de 1 dans le tenseur
-        moved = np.moveaxis(g, axis if axis == -1 else axis + 1, 0)
+        moved = np.moveaxis(g, _field_axis(key, batched=True), 0)
         grads[key] = moved.reshape(moved.shape[0], -1).sum(axis=1)
 
     # Clés d'ids : gradient des LIGNES d'embedding correspondant aux ids observés.
@@ -341,11 +405,13 @@ def gradient_pass(keep: List[Dict[str, np.ndarray]]):
 def main() -> int:
     names = field_names()
     stats: Dict[str, FieldStats] = {}
-    keep: List[Dict[str, np.ndarray]] = []
+    reservoir = Reservoir(GRAD_BATCH)
+    engines = {}
     print("=== (A) MOTEUR — collecte ===", flush=True)
     for scenario in SCENARIOS:
+        engines[scenario] = make_engine(scenario)
         for seed in SEEDS:
-            r = collect(stats, keep, scenario, seed)
+            r = collect(engines[scenario], stats, reservoir, seed)
             print(f"  {scenario} seed={seed}: {r['steps']} steps, phases={r['phases']}",
                   flush=True)
 
@@ -353,32 +419,32 @@ def main() -> int:
     dead_any = False
     for key in sorted(stats):
         st = stats[key]
-        labels = names.get(key, [f"[{i}]" for i in range(len(st.lo))])
-        for i, values in enumerate(st.distinct):
-            if len(values) <= 1:
+        labels = _labels(names, key)
+        for i in range(len(st.lo)):
+            if st.is_constant(i):
                 dead_any = True
-                label = labels[i] if i < len(labels) else f"[{i}]"
-                print(f"  {key}.{label:<32} constant = {st.lo[i]:g}")
+                print(f"  {key}.{labels[i]:<32} constant = {st.lo[i]:g}")
     if not dead_any:
         print("  (aucun)")
 
     print("\n=== (A) grille : couverture par canal ===")
     g = stats["grid"]
-    for i, label in enumerate(names["grid"]):
+    assert g.distinct is not None  # `track_distinct=True` pour cette clé, et elle seule
+    for i, label in enumerate(_labels(names, "grid")):
         frac = g.nonzero[i] / max(1, g.total[i])
         print(f"  canal {i} {label:<10} min={g.lo[i]:<8.3g} max={g.hi[i]:<8.3g} "
               f"non nul={frac:.4%} distinct={min(len(g.distinct[i]), DISTINCT_CAP + 1)}")
 
+    keep = reservoir.kept
     print(f"\n=== (B) RÉSEAU — gradient sur {len(keep)} observations ===", flush=True)
-    grads, id_report, sat = gradient_pass(keep)
+    grads, id_report, sat = gradient_pass(engines[SCENARIOS[0]], keep)
     print("  saturation du clip par champ (>0 = information ecrasee) :")
     for key, per_field in sat.items():
         if per_field is None:
             print(f"    {key:<24} NON MESURE (0 entite presente sur le lot)")
             continue
-        labels = names.get(key, [])
-        hits = [(labels[i] if i < len(labels) else f"[{i}]", v)
-                for i, v in enumerate(per_field) if v > 0.0]
+        labels = _labels(names, key)
+        hits = [(labels[i], v) for i, v in enumerate(per_field) if v > 0.0]
         if not hits:
             print(f"    {key:<24} aucune")
             continue
@@ -388,16 +454,17 @@ def main() -> int:
     print("\n=== (B) champs à gradient EXACTEMENT nul ===")
     silent_any = False
     for key in sorted(grads):
-        labels = names.get(key, [])
-        st = stats.get(key)
+        labels = _labels(names, key)
+        st = stats[key]
         for i, value in enumerate(grads[key]):
             if value != 0.0:
                 continue
             silent_any = True
-            label = labels[i] if i < len(labels) else f"[{i}]"
-            constant = st is not None and len(st.distinct[i]) <= 1
-            note = " (déjà constant en A)" if constant else "  <-- VARIABLE mais NON LU"
-            print(f"  {key}.{label:<32} grad=0{note}")
+            note = (
+                " (déjà constant en A)" if st.is_constant(i)
+                else "  <-- VARIABLE mais NON LU"
+            )
+            print(f"  {key}.{labels[i]:<32} grad=0{note}")
     if not silent_any:
         print("  (aucun)")
 

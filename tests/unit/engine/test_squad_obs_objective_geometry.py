@@ -27,6 +27,7 @@ import os
 import numpy as np
 import pytest
 
+from _config_helpers import bank_training_scenarios
 from ai.unit_registry import UnitRegistry
 from engine.hex_utils import _hex_center
 from engine.observation_builder import ObservationBuilder
@@ -38,34 +39,26 @@ from engine.spatial_grid import (
 )
 from engine.w40k_core import W40KEngine
 
-PROJECT_ROOT = os.path.dirname(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-)
-_BANK = "config/agents/ArmageddonAgent/scenarios/training/"
-#: Les DEUX terrains de la banque. Ce fichier mesure la distance et la DIRECTION de l'escouade
+#: TOUS les terrains de la banque. Ce fichier mesure la distance et la DIRECTION de l'escouade
 #: vers chaque objectif : les objectifs sont des zones du TERRAIN, donc changer de terrain change
 #: la géométrie mesurée — ce n'est pas une répétition.
-TEMPLATES = [
-    os.path.join(PROJECT_ROOT, _BANK + "scenario_training_armageddon1.json"),
-    os.path.join(PROJECT_ROOT, _BANK + "scenario_training_armageddon2.json"),
-]
-#: Terrain courant, posé par la fixture `terrain`. Passé par un global plutôt qu'en paramètre :
-#: aucun test du fichier n'est spécifique à un terrain, et `_make_env()` est appelée sans argument
-#: par tous.
+TEMPLATES = bank_training_scenarios()
+#: Terrain courant, réécrit par la fixture `terrain`. Passé par un attribut de module plutôt qu'en
+#: paramètre : aucun test du fichier n'est spécifique à un terrain, et `_make_env()` est appelée
+#: sans argument par tous.
 TEMPLATE = TEMPLATES[0]
 HEX_STEP = math.sqrt(3.0)
 
 
-@pytest.fixture(autouse=True, params=TEMPLATES, ids=["mc1", "mc2"])
-def terrain(request):
-    """Rejoue CHAQUE test du fichier sur les deux terrains de la banque."""
-    global TEMPLATE
-    previous = TEMPLATE
-    TEMPLATE = request.param
-    try:
-        yield request.param
-    finally:
-        TEMPLATE = previous
+@pytest.fixture(autouse=True, params=TEMPLATES, ids=os.path.basename)
+def terrain(request, monkeypatch):
+    """Rejoue CHAQUE test du fichier sur tous les terrains de la banque.
+
+    `monkeypatch` et non un `global` + `try/finally` maison : la restauration devient l'affaire
+    de pytest, y compris si le test lève.
+    """
+    monkeypatch.setattr(f"{__name__}.TEMPLATE", request.param)
+    return request.param
 
 
 def _make_env() -> W40KEngine:

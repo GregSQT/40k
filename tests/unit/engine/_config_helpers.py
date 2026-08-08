@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from config_loader import require_engine_game_config_sections
 
@@ -154,8 +154,39 @@ ACTIVE_DEPLOYMENT_SCENARIO = (
 )
 
 
+#: Racine de la banque de scénarios d'entraînement.
+TRAINING_BANK = (
+    Path(__file__).resolve().parents[3]
+    / "config" / "agents" / "ArmageddonAgent" / "scenarios" / "training"
+)
+
+
+def bank_training_scenarios() -> List[str]:
+    """Les scénarios d'entraînement « pleins » de la banque — un par TERRAIN, DÉCOUVERTS.
+
+    Ils ne diffèrent que par leur `terrain_ref`. Tout test dont l'assertion lit le PLATEAU (murs,
+    zones de déploiement, objectifs, couvert) doit tourner sur tous, sans quoi il ne dit rien du
+    second terrain : le 2026-08-08, des positions de roster valides sur `terrain-mc1` tombaient
+    sur un mur de `terrain-mc2` sans qu'un seul test bouge.
+
+    DÉCOUVERTS et non listés : chaque liste littérale est un site à rééditer le jour où un
+    `terrain-mc3` arrive, et celui qu'on oublie reste vert en ne couvrant plus la banque. Le
+    motif de nom est celui du scénario de training (`scenario_training_*`), pas des fixtures
+    `reserves_*` posées à côté (nommées hors motif exprès, chantier 04c).
+    """
+    found = sorted(str(p) for p in TRAINING_BANK.glob("scenario_training_*.json"))
+    if not found:
+        raise FileNotFoundError(
+            f"Aucun scenario d'entrainement dans {TRAINING_BANK} — banque vide ou deplacee"
+        )
+    return found
+
+
 #: Scénario d'ENTRAÎNEMENT réel, le pendant de `ACTIVE_DEPLOYMENT_SCENARIO` pour les tests qui
-#: veulent la config et l'état du chemin gym plutôt qu'une phase de déploiement active.
+#: veulent la config et l'état du chemin gym plutôt qu'une phase de déploiement active. UN seul :
+#: c'est le défaut des tests dont l'assertion ne lit PAS le plateau (contrats, caches, registres),
+#: pour qui un second terrain ne serait qu'un doublement du temps d'exécution. Les autres passent
+#: par `bank_training_scenarios()`.
 TRAINING_SCENARIO = (
     "config/agents/ArmageddonAgent/scenarios/training/scenario_training_armageddon1.json"
 )
