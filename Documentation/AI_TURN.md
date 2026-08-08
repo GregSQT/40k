@@ -1204,6 +1204,18 @@ sont en phase de tir — le pool de tir retient toute unité ARMÉE sans exiger 
 (`shoot_pool_require_los_target` à `False` par défaut, le pool exact coûtant ~1,5 s par
 transition). **Ce changement déplace les récompenses : il exige un ré-entraînement.**
 
+Ce qui devient incomparable d'avant à après, et ce qui ne l'est PAS — le message du commit
+`de19a6bb` se trompe sur ce point, cette ligne fait foi :
+
+- **Incomparables** : les courbes de récompense (`ep_rew_mean`, les cinq `reward/*_total`,
+  `reward/objective_share`). À jeu identique, un épisode gagne désormais jusqu'à +3,18.
+- **Comparables, aucun recalibrage à faire** : le gate et le score robuste. Les quatre seuils
+  (`model_gating_min_combined`, `min_worst_bot`, `min_worst_scenario_combined`, `min_vs_control`)
+  comparent des TAUX DE VICTOIRE dans [0,1] (`ai/training_callbacks.py`, `_evaluate_model_gate`),
+  et `robust_base` dérive de `combined_win_rate`, pas de la récompense. Un taux de victoire compte
+  des parties gagnées : il ne bouge pas parce qu'une attente forcée cesse de coûter −0,1.
+  `best_robust_score` repart de `-inf` à chaque run, il n'y a donc aucun état à effacer.
+
 Verrou : `tests/unit/engine/test_forced_wait_not_penalised.py`.
 
 ### STEP 7: END_ACTIVATION
