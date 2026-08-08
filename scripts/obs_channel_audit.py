@@ -32,7 +32,7 @@ from __future__ import annotations
 import sys
 from collections import defaultdict
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import numpy as np
 
@@ -157,6 +157,17 @@ def _to_fields(key: str, arr: np.ndarray) -> np.ndarray:
     return moved.reshape(moved.shape[0], -1).astype(np.float64)
 
 
+def _as_dict_obs(observation: object) -> Dict[str, np.ndarray]:
+    """L'espace d'observation du moteur est un `Dict` ; la signature gym de `reset`/`step` est
+    plus large (ndarray | dict | None). Recevoir autre chose est un BUG moteur : on le fait
+    remonter au lieu de le rattraper."""
+    if not isinstance(observation, dict):
+        raise TypeError(
+            f"Observation attendue en Dict[str, ndarray], reçue {type(observation).__name__}"
+        )
+    return observation
+
+
 def collect(stats: Dict[str, FieldStats], keep: List[Dict[str, np.ndarray]],
             scenario: str, seed: int) -> dict:
     from ai.unit_registry import UnitRegistry
@@ -193,7 +204,7 @@ def collect(stats: Dict[str, FieldStats], keep: List[Dict[str, np.ndarray]],
             if j < GRAD_BATCH:
                 keep[int(j)] = {k: np.array(v, copy=True) for k, v in observation.items()}
 
-    absorb(obs)
+    absorb(_as_dict_obs(obs))
     while steps < MAX_STEPS_PER_EPISODE:
         gs = eng.game_state
         if gs.get("game_over"):
@@ -205,7 +216,7 @@ def collect(stats: Dict[str, FieldStats], keep: List[Dict[str, np.ndarray]],
         action = int(rng.choice(np.flatnonzero(mask)))
         obs, _r, term, trunc, _i = eng.step(action)
         steps += 1
-        absorb(obs)
+        absorb(_as_dict_obs(obs))
         if term or trunc:
             break
     return {"steps": steps, "phases": dict(phases)}
@@ -301,7 +312,10 @@ def gradient_pass(keep: List[Dict[str, np.ndarray]]):
         id_report[key] = (ids.tolist(), touched)
 
     # Taux de saturation du clip, pour ne pas confondre « non lu » et « écrasé par le clip ».
-    sat = {}
+    # `None` = NON MESURÉ (aucune entité présente dans le lot), à ne surtout pas confondre avec
+    # « rien ne sature » : une moyenne sur un tenseur vide rend NaN, que le filtre `v > 0.0` du
+    # rapport laisse passer pour « aucune ».
+    sat: Dict[str, Optional[np.ndarray]] = {}
     for name, norm_key, mask_key in (
         ("unit_norm", "allies_cont", "allies_bin"),
         ("weapon_norm", "allies_wpn_cont", "allies_wpn_bin"),
@@ -314,8 +328,11 @@ def gradient_pass(keep: List[Dict[str, np.ndarray]]):
         # lignes de padding ferait passer pour « saturée » toute feature dont la valeur des
         # entités réelles est proche d'une constante : leur 0 de padding tombe alors à des
         # dizaines de σ de la moyenne, alors que `EntityRunningNorm` les annule de toute façon.
-        keep = batch[mask_key][..., -1] > 0
-        x = batch[norm_key][keep]
+        present = batch[mask_key][..., -1] > 0
+        if not bool(present.any()):
+            sat[norm_key] = None
+            continue
+        x = batch[norm_key][present]
         normed = (x - norm.running_mean) / torch.sqrt(norm.running_var + norm.epsilon)
         over = (normed.abs() > norm.clip).float()
         # PAR CHAMP : un taux global ne dit pas QUELLE feature sature, or c'est elle seule qui
@@ -360,6 +377,9 @@ def main() -> int:
     grads, id_report, sat = gradient_pass(keep)
     print("  saturation du clip par champ (>0 = information ecrasee) :")
     for key, per_field in sat.items():
+        if per_field is None:
+            print(f"    {key:<24} NON MESURE (0 entite presente sur le lot)")
+            continue
         labels = names.get(key, [])
         hits = [(labels[i] if i < len(labels) else f"[{i}]", v)
                 for i, v in enumerate(per_field) if v > 0.0]

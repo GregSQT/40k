@@ -34,11 +34,18 @@ from engine.phase_handlers.shared_utils import (
     validate_move_plan,
 )
 
-SCENARIO = "config/agents/ArmageddonAgent/scenarios/training/scenario_training_armageddon1.json"
+_BANK = "config/agents/ArmageddonAgent/scenarios/training/"
+#: Les DEUX terrains de la banque. L'objet de ce test — cellules atteignables, murs, érosion du
+#: bloc — est entièrement GÉOMÉTRIQUE : un second terrain n'y est pas une répétition mais un
+#: second jeu d'obstacles. Ils sont appariés aux graines plutôt que croisés avec elles (cf. la
+#: paramétrisation du test) : le croisement doublerait un test déjà en 2 plateaux × 3 graines
+#: × 400 steps, pour une redondance que la variété des trajectoires apporte déjà.
+SCENARIO_MC1 = _BANK + "scenario_training_armageddon1.json"
+SCENARIO_MC2 = _BANK + "scenario_training_armageddon2.json"
 MAX_STEPS = 400
 
 
-def _engine(seed):
+def _engine(seed, scenario):
     from ai.unit_registry import UnitRegistry
     from engine.w40k_core import W40KEngine
 

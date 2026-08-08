@@ -2034,10 +2034,15 @@ def _fight_v11_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
         if destroyed_ids:
             from engine.game_utils import get_controlled_player
             controlled = get_controlled_player(game_state)
-            agent_destroyed = sum(
-                1 for uid in destroyed_ids
-                if int(require_key(get_unit_by_id(game_state, str(uid)), "player")) == controlled
-            )
+            agent_destroyed = 0
+            for uid in destroyed_ids:
+                destroyed_unit = get_unit_by_id(game_state, str(uid))
+                if destroyed_unit is None:
+                    raise ValueError(
+                        f"Unité de réserve détruite introuvable dans game_state: unit_id={uid}"
+                    )
+                if int(require_key(destroyed_unit, "player")) == controlled:
+                    agent_destroyed += 1
             if agent_destroyed:
                 game_state["_reserves_destroyed_turn3"] = (
                     require_key(game_state, "_reserves_destroyed_turn3") + agent_destroyed
