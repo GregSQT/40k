@@ -194,7 +194,7 @@ def _handle_move(state, config, line, action_desc, player, turn, phase, move_mat
                  get_adjacent_enemies, is_within_engine_engagement_zone,
                  _get_engagement_zone_for_analyzer, _debug_log):
     from ai.analyzer_perfig import surviving_start_models
-    from ai.analyzer import _get_inches_to_subhex_for_analyzer
+    from ai.analyzer import _get_inches_to_subhex_for_analyzer, engine_engagement_zone_offenders
 
     stats = state.stats
     move_unit_id = move_match.group(1)
@@ -567,12 +567,29 @@ def _handle_move(state, config, line, action_desc, player, turn, phase, move_mat
             if not adjacent_before:
                 stats['move_to_adjacent_enemy'][player] += 1
                 if stats['first_error_lines']['move_to_adjacent_enemy'][player] is None:
-                    adjacent_after = get_adjacent_enemies(dest_col, dest_row, state.unit_player, positions_for_adjacency_check_filtered, unit_hp_at_movement, state.unit_types, player)
+                    # MÊME mesure que le compteur juste au-dessus, avec les MÊMES arguments —
+                    # sinon le diagnostic décrit une autre situation que celle qui a déclenché.
+                    # `get_adjacent_enemies` (adjacence d'ANCRE, distance hex 1) vivait ici : à ×5
+                    # il ne rendait jamais rien, d'où le « Adjacent after move: none » imprimé sous
+                    # une erreur bien réelle.
+                    adjacent_after = engine_engagement_zone_offenders(
+                        move_unit_id, state.unit_player, positions_for_adjacency_check_filtered,
+                        unit_hp_at_movement,
+                        engagement_zone=_get_engagement_zone_for_analyzer(),
+                        position_override=(dest_col, dest_row),
+                        positions_by_model=state.positions_by_model, unit_base=state.unit_base,
+                        **state.engagement_3d_kwargs(),
+                        subject_models=state.current_line_models.get(move_unit_id),  # get allowed
+                        subject_heights=state.current_line_heights.get(move_unit_id),  # get allowed
+                    )
                     stats['first_error_lines']['move_to_adjacent_enemy'][player] = {
                         'episode': state.current_episode_num,
                         'line': line.strip(),
-                        'adjacent_before': adjacent_before,
-                        'adjacent_after': adjacent_after
+                        # `adjacent_before` n'est PAS stocké : cette branche est gardée par
+                        # `not adjacent_before`, donc la liste serait vide par construction. La
+                        # clé portait le BOOLÉEN du compteur là où le rapport itérait une liste —
+                        # un TypeError latent, protégé seulement par cette garde.
+                        'adjacent_after': adjacent_after,
                     }
 
         # RULE: Move into wall
