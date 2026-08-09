@@ -115,7 +115,7 @@ def test_case_darrivee_occupee_reste_joignable() -> None:
 def _cap(state: AnalyzerState, config, action_desc: str, n_models: int = 6) -> int:
     from ai.analyzer_phases.fight_handler import _cc_cap_for_line, _shooter_models
     return _cc_cap_for_line(
-        state, config, action_desc, "Intercessor", "Close Combat Weapon", 3, n_models,
+        state, config, action_desc, 1, "Intercessor", "Close Combat Weapon", 3, n_models,
         _shooter_models(action_desc),
     )
 
@@ -149,7 +149,10 @@ def test_waaagh_ajoute_une_attaque_par_figurine() -> None:
     st.model_types = {"105#0": "WarTrakk"}
     cfg = _Cfg({"WarTrakk": {"cc_nb_by_weapon": {"Close Combat Weapon": 5}}})
     assert _cap(st, cfg, "[SHOOTER_MODELS: 105#0]") == 5
-    assert _cap(st, cfg, "FOUGHT [WAAAGH!] ... [SHOOTER_MODELS: 105#0]") == 6
+    # Le bonus vient desormais de la ligne `EFFECTS`, plus d'un token recopie sur chaque attaque :
+    # c'est une propriete d'ARMEE, et le token ne portait aucune notion de camp.
+    st.active_effects = {1: {"waaagh_melee_atk": "+1"}}
+    assert _cap(st, cfg, "[SHOOTER_MODELS: 105#0]") == 6
 
 
 def test_repli_explicite_sur_le_type_descouade_sans_MODEL_TYPES() -> None:

@@ -240,6 +240,40 @@ l'analyzer, qui écrivait « Agent (P1) » en dur, y comptait ses victoires dans
 **33,3 % affichés pour 45,3 % réels**. `bot_evaluation` (donc le gating, qui lit
 `results["control"]`) attribuait déjà juste ; l'analyzer était le seul consommateur sans la donnée.
 
+### 2.3septies Effets de règle EN VIGUEUR (2026-08-09)
+
+```
+[hh:mm:ss] T{tour} EFFECTS: P1 oath_target=104 oath_wound=+1 | P2 waaagh=on waaagh_melee_str=+1 waaagh_melee_atk=+1 waaagh_invul=5
+```
+
+Une capacité de faction (Waaagh! 24, Oath of Moment 08.04) est vraie pour une **armée pendant un
+tour** — pas pour une attaque. Elle était pourtant recopiée en token sur chaque ligne de mêlée,
+puis re-dérivée par expression régulière chez trois lecteurs, et Oath l'était une **seconde**
+fois, indépendamment, sur les lignes de charge.
+
+Trois choses que cette ligne ferme :
+
+1. **La grammaire des lignes d'attaque cesse de bouger pour une capacité.** Poser `[WAAAGH!]`
+   entre le verbe et la cible avait cassé QUATRE grammaires de lecteurs, dont deux rattrapées par
+   un code-review — chacune échouant en silence (la ligne n'est pas rejetée, elle est *ignorée*).
+2. **Le lecteur ne ré-encode plus la règle.** Le nom seul obligeait l'analyzer à savoir que
+   « waaagh ⇒ +1 » : deux définitions d'une même règle, la seconde divergeant en silence le jour
+   où `WAAAGH_MELEE_BONUS` bouge. La ligne porte la **contribution appliquée**, exactement comme
+   `Run rules:` porte la zone d'engagement réellement utilisée. C'est une déclaration d'ÉTAT,
+   jamais un verdict : le lecteur recalcule et compare.
+3. **Le +1 Force devient attribuable.** Il n'était représenté nulle part : un seuil de blessure
+   amélioré restait inexplicable pour tout contrôle futur.
+
+⚠️ **Émise au CHANGEMENT, pas à la frontière de tour.** Le Waaagh se déclare en phase de
+commandement, donc *au milieu* du tour : une ligne écrite une fois par tour dirait « inactif » et
+ne serait jamais corrigée. Mesuré en remettant ce défaut : la déclaration devient totalement
+muette (une seule ligne, `P2 none`). Même déclencheur, et pour la même raison, que
+`log_objective_control_snapshot` — dont les VP bougent eux aussi dans les handlers.
+
+Un joueur sans effet est écrit `P{n} none` : l'absence est **dite**, et ne se confond pas avec une
+ligne tronquée. Le token `[WAAAGH!]` reste sur les lignes d'attaque comme confort de lecture — ce
+n'est plus la donnée.
+
 ### 2.4 Décor : ce que le journal ne porte PAS, et comment le replay le retrouve
 
 `Walls:` (hexes) et `Objectives:` sont journalisés. **Terrain, icônes, zones de déploiement et

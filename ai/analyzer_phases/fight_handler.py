@@ -25,6 +25,7 @@ def _cc_cap_for_line(
     state: "AnalyzerState",
     config: "AnalyzerConfig",
     action_desc: str,
+    attacker_player: int,
     fighter_unit_type: str,
     weapon_display_name: str,
     cc_nb_squad_type: int,
@@ -39,8 +40,11 @@ def _cc_cap_for_line(
         sergent porte une autre arme. Cinq armes s'appellent « Close Combat Weapon », de NB 2 à 6.
       - `[SHOOTER_MODELS:]` nomme les socles qui ont RÉELLEMENT frappé sur cette ligne. Le pool
         se compte sur eux, pas sur l'effectif entier.
-      - `[WAAAGH!]` (24, capacité de faction ORKS) ajoute 1 aux Attaques de chaque arme de mêlée.
-        Le moteur l'appliquait sans le dire : un WarTrakk (Choppa NB=5) portait 6 attaques.
+      - la ligne `T{tour} EFFECTS:` donne les capacités en vigueur AVEC leur contribution
+        chiffrée (`waaagh_melee_atk=+1`). Le bonus est LU, pas redevine : le coder ici ferait
+        vivre une seconde définition de la règle, qui divergerait en silence le jour où la
+        constante du moteur bouge. Le token `[WAAAGH!]` des lignes d'attaque reste un confort de
+        lecture — ce n'est plus la donnée.
 
     REPLI EXPLICITE sur l'ancien calcul (`NB du type d'escouade × effectif`) quand le journal ne
     porte pas ces segments — un journal antérieur au format reste analysable, avec la précision
@@ -49,9 +53,12 @@ def _cc_cap_for_line(
     """
     from ai.analyzer_perfig import resolve_weapon_value
 
-    # Token LITTÉRAL, écrit en majuscules par l'unique producteur (`step_logger`) : un test
-    # d'appartenance est exact ici, et ~20× moins cher qu'un regex insensible à la casse.
-    waaagh_bonus = 1 if "[WAAAGH!]" in action_desc else 0
+    # Bonus d'attaques LU dans la ligne d'effets, pas déduit d'un token — et surtout pas
+    # ré-encodé ici. `+1` / `1` sont tous deux acceptés : c'est le producteur qui choisit sa
+    # forme, le lecteur ne lui impose rien.
+    _effects = state.active_effects.get(int(attacker_player), {})  # get allowed : aucun effet
+    _atk = _effects.get("waaagh_melee_atk")  # get allowed
+    waaagh_bonus = int(str(_atk).lstrip("+")) if _atk is not None else 0
 
     if not shooters or not state.model_types:
         return (cc_nb_squad_type + waaagh_bonus) * n_fighter_models
@@ -198,7 +205,7 @@ def handle_fight(
                     # au NB=3 de l'Intercessor porteur, 20 attaques de 10 Gretchin plafonnées à 10.
                     _shooters = _shooter_models(action_desc)
                     cc_nb = _cc_cap_for_line(
-                        state, config, action_desc, fighter_unit_type,
+                        state, config, action_desc, attacker_player, fighter_unit_type,
                         weapon_display_name, cc_nb_single, n_fighter_models, _shooters,
                     )
                     # Le GROUPE de figurines qui frappe entre dans la clé, parce qu'il détermine

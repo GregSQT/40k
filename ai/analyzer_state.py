@@ -26,6 +26,12 @@ class AnalyzerState:
     #: cinq armes distinctes s'appellent « Close Combat Weapon » (NB de 2 à 6). Sans cette carte,
     #: tout plafond par figurine repose sur le type d'ESCOUADE, donc sur la mauvaise datasheet.
     model_types: Dict[str, str] = field(default_factory=dict)
+    #: Effets de règle EN VIGUEUR par joueur, avec leur contribution CHIFFRÉE, lus de la ligne
+    #: `T{tour} EFFECTS:` (ex. `{2: {"waaagh": "on", "waaagh_melee_atk": "+1"}}`).
+    #: Le journal porte la valeur appliquée par le moteur : sans elle, l'analyzer devrait
+    #: RÉ-ENCODER la règle (« waaagh ⇒ +1 »), donc en faire vivre une seconde définition qui
+    #: diverge en silence le jour où la première bouge.
+    active_effects: Dict[int, Dict[str, str]] = field(default_factory=dict)
     episode_turn: int = 0
     episode_actions: int = 0
     last_turn: int = 0

@@ -5,7 +5,7 @@ Utilise AnalyzerState (state) et AnalyzerConfig (config) pour tout état mutable
 
 import re
 from functools import lru_cache
-from typing import Optional
+from typing import Dict, Optional
 
 from shared.data_validation import require_key, require_present
 from engine.combat_utils import calculate_hex_distance
@@ -96,6 +96,28 @@ _STATE_UNIT_RE = re.compile(r'(\d+)\[([^\]]*)\]')
 # motif d'état qui ne matche plus fait sortir l'unité de l'instantané — donc la fait passer pour
 # morte, en silence.
 _STATE_MODEL_RE = re.compile(MODEL_TOKEN_PATTERN + r':(-?\d+)')
+
+
+
+_EFFECTS_PLAYER_RE = re.compile(r'P(\d+)\s+([^|]*)')
+
+
+def _parse_effects_snapshot(payload: str) -> "Dict[int, Dict[str, str]]":
+    """`P1 waaagh=on waaagh_melee_atk=+1 | P2 none` → `{1: {...}, 2: {}}`.
+
+    `none` est écrit par le producteur quand un joueur n'a aucun effet : l'absence est DITE, elle
+    ne se confond pas avec une ligne tronquée — et le dict vide qui en résulte remplace bien
+    l'état précédent, au lieu de le laisser traîner.
+    """
+    out: "Dict[int, Dict[str, str]]" = {}
+    for m in _EFFECTS_PLAYER_RE.finditer(payload):
+        entries: "Dict[str, str]" = {}
+        for token in m.group(2).split():
+            key, sep, value = token.partition("=")
+            if sep:
+                entries[key] = value
+        out[int(m.group(1))] = entries
+    return out
 
 
 def _apply_state_snapshot(state: AnalyzerState, payload: str) -> None:
@@ -317,6 +339,19 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
             )
             if state_snapshot_match:
                 _apply_state_snapshot(state, state_snapshot_match.group(1))
+                continue
+
+            # ── Effets de règle EN VIGUEUR (`T{tour} EFFECTS: P1 … | P2 …`) ─────────────────
+            # Une capacité d'ARMÉE (Waaagh! 24, Oath of Moment 08.04) vaut pour un joueur pendant
+            # un tour. Elle était re-dérivée par expression régulière sur CHAQUE ligne d'attaque,
+            # et son effet ré-encodé ici en dur — deux définitions d'une même règle. La ligne
+            # porte désormais la contribution appliquée par le moteur ; on la lit, on ne la
+            # redevine pas. Garde par sous-chaîne, même raison que les deux motifs ci-dessus.
+            effects_match = (
+                re.search(r'\bT\d+ EFFECTS: (.*)$', line) if ' EFFECTS: ' in line else None
+            )
+            if effects_match:
+                state.active_effects = _parse_effects_snapshot(effects_match.group(1))
                 continue
 
             # Parse walls

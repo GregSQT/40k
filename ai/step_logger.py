@@ -153,6 +153,49 @@ class StepLogger:
         if len(self.log_buffer) >= self.buffer_size:
             self._flush_buffer()
 
+    def log_effects_snapshot(self, turn, effects_by_player):
+        """Effets de règle EN VIGUEUR, par joueur — avec leur CONTRIBUTION CHIFFRÉE.
+
+        Format : ``T{tour} EFFECTS: P1 <clé>=<valeur> … | P2 <clé>=<valeur> …``
+
+        POURQUOI CETTE LIGNE. Une capacité comme Waaagh! (24) est vraie pour une ARMÉE pendant un
+        tour — pas pour une attaque. Elle était pourtant recopiée en token sur chaque ligne de
+        mêlée, puis re-dérivée par expression régulière chez trois lecteurs. Coût déjà payé :
+        poser ce token entre le verbe et la cible a cassé QUATRE grammaires de lecteurs, dont deux
+        rattrapées par un code-review. Oath of Moment posait déjà la même question et se
+        retrouvait dérivé une seconde fois, indépendamment, sur les lignes de charge.
+
+        Et surtout : le nom seul obligeait le lecteur à RÉ-ENCODER la règle (« waaagh ⇒ +1 Force
+        et +1 Attaques »). Deux définitions d'une même règle, dont l'une diverge en silence le
+        jour où l'autre bouge. La ligne porte donc la valeur appliquée, exactement comme
+        ``Run rules:`` porte la zone d'engagement réellement utilisée par le run : c'est une
+        DÉCLARATION D'ÉTAT, jamais un verdict — le lecteur recalcule et compare.
+
+        Conséquence directe : le volet **+1 Force** du Waaagh, jusqu'ici représenté nulle part,
+        devient attribuable. Un seuil de blessure amélioré cesse d'être inexplicable.
+
+        ÉMISE AU CHANGEMENT, pas à la frontière de tour. Le Waaagh se déclare en phase de
+        COMMANDEMENT, donc pendant le tour : une ligne écrite à la frontière dirait « inactif »
+        alors que la capacité s'allume ensuite. Même déclencheur, et pour la même raison, que
+        ``log_objective_control_snapshot`` (dont les VP bougent aussi dans les handlers).
+
+        ``effects_by_player`` : ``[(player, [(clé, valeur), …]), …]``. Un joueur sans aucun effet
+        est écrit ``P{n} none`` — l'absence est alors DITE, et ne se confond pas avec une ligne
+        tronquée.
+        """
+        if not self.enabled:
+            return
+
+        timestamp = time.strftime("%H:%M:%S", time.localtime())
+        parts = []
+        for player, entries in effects_by_player:
+            body = " ".join(f"{key}={value}" for key, value in entries) if entries else "none"
+            parts.append(f"P{player} {body}")
+        line = f"[{timestamp}] T{turn} EFFECTS: {' | '.join(parts)}\n"
+        self.log_buffer.append(line)
+        if len(self.log_buffer) >= self.buffer_size:
+            self._flush_buffer()
+
     def log_state_snapshot(self, turn, units_state):
         """Instantané d'ÉTAT du plateau à la fin d'un tour : socles vivants, positions, PV.
 
