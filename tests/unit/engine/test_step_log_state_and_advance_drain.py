@@ -219,15 +219,21 @@ def test_model_types_nomme_la_datasheet_de_chaque_socle() -> None:
     5 attaques d'un Ancient rattaché (arme NB=5) plafonnées au NB=3 de l'Intercessor porteur.
     Le nom d'affichage de l'arme ne peut pas trancher — cinq armes s'appellent « Close Combat
     Weapon », de NB 2 à 6.
+
+    ⚠️ Les entrées portent la clé `unitType` (camelCase), celle que le PRODUCTEUR écrit
+    (`shared_utils._build_models_cache_entry`). Ce test la construisait en `unit_type` — une
+    forme que `models_cache` ne contient jamais : il restait vert pendant que la production
+    repliait chaque figurine sur le type d'escouade. Un test qui fabrique une situation que le
+    code réel ne produit pas ne verrouille rien ; il certifie l'inverse de ce qu'il annonce.
     """
     eng = W40KEngine.__new__(W40KEngine)
     eng.game_state = {
         "squad_models": {"105": ["105#0", "105#4", "105#5", "105#6"]},
         "models_cache": {
-            "105#0": {},                              # pas de type propre -> celui de l'escouade
-            "105#4": {"unit_type": "IntercessorSergeant"},
-            "105#5": {"unit_type": "CaptainRelicShield"},
-            "105#6": {"unit_type": "Ancient"},
+            "105#0": {},                             # pas de type propre -> celui de l'escouade
+            "105#4": {"unitType": "IntercessorSergeant"},
+            "105#5": {"unitType": "CaptainRelicShield"},
+            "105#6": {"unitType": "Ancient"},
         },
     }
     seg = eng._model_types_segment_for_unit("105", "Intercessor")

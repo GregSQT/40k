@@ -5351,9 +5351,20 @@ class W40KEngine(gym.Env):
         commentaire du site d'écriture dans `ai/step_logger.py`).
 
         Écrit UNE fois, dans l'entête d'épisode : la composition ne change pas en cours de partie
-        (une figurine meurt, elle ne change pas de datasheet). Les figurines sans `unit_type`
-        propre portent celui de l'escouade — explicitement, plutôt que par une règle implicite
-        que chaque lecteur devrait redécouvrir.
+        (une figurine meurt, elle ne change pas de datasheet). Les figurines sans type propre
+        portent celui de l'escouade — explicitement, plutôt que par une règle implicite que
+        chaque lecteur devrait redécouvrir.
+
+        ⚠️ CLÉ `unitType`, camelCase — c'est celle que `models_cache` écrit
+        (`shared_utils._build_models_cache_entry`, « "unitType": spec.get("unit_type") or … » :
+        le SPEC de scénario est en snake_case, le CACHE en camelCase). Ce site lisait
+        `unit_type` : la clé n'existait pas, le repli sur le type d'escouade s'appliquait donc à
+        TOUTES les figurines, et le segment rendait exactement l'information qu'il existe pour
+        remplacer. Mesuré sur le journal du 2026-08-09 : `5#0..5#6=Intercessor` sur une escouade
+        dont deux socles frappent au Master-crafted Power Weapon et au Power Fist — deux armes
+        qu'aucun Intercessor ne porte. Le plafond « par figurine » de l'analyzer restait donc un
+        plafond par escouade sous un autre nom. Tous les autres lecteurs de `models_cache` lisent
+        déjà `unitType` ; celui-ci était le seul à diverger.
         """
         if unit_id is None:
             return ""
@@ -5369,7 +5380,7 @@ class W40KEngine(gym.Env):
             model = models_cache.get(str(mid))  # get allowed : figurine déjà retirée
             if model is None:
                 continue
-            parts.append(f"{mid}={model.get('unit_type') or squad_unit_type}")  # get allowed
+            parts.append(f"{mid}={model.get('unitType') or squad_unit_type}")  # get allowed
         if not parts:
             return ""
         return "[MODEL_TYPES: " + " ".join(parts) + "]"
