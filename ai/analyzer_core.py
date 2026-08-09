@@ -120,6 +120,27 @@ def _parse_effects_snapshot(payload: str) -> "Dict[int, Dict[str, str]]":
     return out
 
 
+
+#: Capacités de FACTION repérables dans la ligne d'effets : clé présente ⇒ capacité active.
+#: Elles ne figurent dans aucun `UNIT_RULES` de datasheet (c'est le mot-clé de faction qui les
+#: donne), donc la table `rule_to_units` de la section 1.7 ne pouvait pas les compter.
+_FACTION_ABILITY_KEYS = {"waaagh": "waaagh", "oath_target": "oath_of_moment"}
+
+
+def _count_faction_activations(state: AnalyzerState, new_effects: "Dict[int, Dict[str, str]]") -> None:
+    """Compte une ACTIVATION par passage de l'inactif à l'actif, jamais une ligne.
+
+    L'instantané d'effets se répète à chaque changement d'état du plateau : compter les lignes
+    donnerait un nombre qui dépend du nombre de changements, pas du nombre d'usages.
+    """
+    stats = state.stats
+    for player, entries in new_effects.items():
+        was = state.active_effects.get(player, {})  # get allowed : premier instantané
+        for key, rule_id in _FACTION_ABILITY_KEYS.items():
+            if key in entries and key not in was:
+                stats['faction_ability_activations'][rule_id][player] += 1
+
+
 def _apply_state_snapshot(state: AnalyzerState, payload: str) -> None:
     """Recale l'état reconstruit sur l'instantané du moteur, APRÈS avoir compté les écarts.
 
@@ -351,7 +372,9 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 re.search(r'\bT\d+ EFFECTS: (.*)$', line) if ' EFFECTS: ' in line else None
             )
             if effects_match:
-                state.active_effects = _parse_effects_snapshot(effects_match.group(1))
+                _new_effects = _parse_effects_snapshot(effects_match.group(1))
+                _count_faction_activations(state, _new_effects)
+                state.active_effects = _new_effects
                 continue
 
             # Parse walls
@@ -894,7 +917,31 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                     if phase in ('MOVE', 'SHOOT', 'CHARGE', 'FIGHT') and is_activation_marker:
                         if player is None:
                             raise ValueError("player is required for double-activation check")
-                        phase_key = (turn, phase, int(player))
+                        # CLÉ DE PHASE. Pour FIGHT, `(tour, phase, joueur)` ne DÉSIGNE PAS une
+                        # phase : un tour en contient DEUX (celle du tour de P1, celle du tour de
+                        # P2), et les unités des deux camps combattent dans chacune — c'est la
+                        # règle (12.04 : les joueurs alternent leurs sélections dans la MÊME
+                        # phase). Le `player` de la ligne est celui de l'unité qui agit, pas celui
+                        # de la phase : les deux activations légitimes d'une unité, une par phase,
+                        # tombaient donc sur la même clé et étaient comptées comme un doublon.
+                        # Mesuré : 55 unités « dupliquées » sur un run de 12 épisodes, dont zéro
+                        # vraie — `fight_phase_start` n'a JAMAIS été appelé deux fois pour une même
+                        # phase (1427 phases instrumentées, 0 doublon).
+                        # `fight_phase_seq_id` compte les ENTRÉES en phase de combat : c'est la
+                        # seule grandeur qui identifie une phase.
+                        if phase == 'FIGHT':
+                            # ⚠️ `fight_phase_seq_id` n'est incrémenté qu'APRÈS ce bloc (avec les
+                            # autres remises à zéro de frontière de phase). La PREMIÈRE ligne
+                            # d'une phase de combat verrait donc encore l'identifiant de la
+                            # précédente, et la seconde le nouveau : deux clés différentes pour
+                            # la même phase, et le vrai doublon passait inaperçu. On applique donc
+                            # ici la même détection de frontière que le bloc ci-dessous.
+                            _fight_phase_id = state.fight_phase_seq_id + (
+                                1 if phase != state.last_phase else 0
+                            )
+                            phase_key = (phase, _fight_phase_id, int(player))
+                        else:
+                            phase_key = (turn, phase, int(player))
                         seen_units = state.phase_activation_seen.setdefault(phase_key, set())
                         if actor_id in seen_units:
                             double_activation_by_phase = require_key(stats, "double_activation_by_phase")
