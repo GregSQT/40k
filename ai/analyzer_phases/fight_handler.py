@@ -160,6 +160,13 @@ def handle_fight(
         if weapon_match:
             weapon_display_name = weapon_match.group(1).strip()
             fighter_unit_type = require_key(state.unit_types, fighter_id)
+            # Seuil de blessure 05.02, JUMEAU du tir : même contrôle, même fonction, avec le
+            # +1 Force du Waaagh qui n'existe qu'ici (08.04). Cf. ai/analyzer_wound.py.
+            from ai.analyzer_wound import check_wound_threshold
+            check_wound_threshold(
+                state, config, stats, line, action_desc, player, fighter_unit_type,
+                weapon_display_name, target_id, _shooter_models(action_desc), is_melee=True,
+            )
             # RULE METRICS: Targeted Intercession granted reroll mechanics (fight)
             if re.search(r'\(TARGETED_INTERCESSION\)', action_desc, re.IGNORECASE):
                 key = ("reroll_1_towound", fighter_unit_type)

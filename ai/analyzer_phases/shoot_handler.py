@@ -217,6 +217,14 @@ def handle_shoot(
 
     if weapon_match:
         weapon_display_name = weapon_match.group(1)
+        # Seuil de blessure 05.02 : la ligne dit le seuil qu'elle a appliqué, on le recalcule
+        # depuis F et E. Cf. ai/analyzer_wound.py.
+        from ai.analyzer_phases.fight_handler import _shooter_models
+        from ai.analyzer_wound import check_wound_threshold
+        check_wound_threshold(
+            state, config, stats, line, action_desc, player, shooter_unit_type,
+            weapon_display_name, target_id, _shooter_models(action_desc), is_melee=False,
+        )
         weapon_name_lower = weapon_display_name.lower()
         weapons_info = require_key(config.unit_weapons_cache, shooter_unit_type)
         for weapon_info in weapons_info:
