@@ -707,7 +707,7 @@
       "force_random_ratio_start": 0.1,
       "force_random_ratio_end": 0.2,
       "schedule": "linear",
-      "freeze_after_progress": 0.8,
+      "freeze_after_progress": 0.7,
       "apply_to": "agent_only"
     },
     "deployment_mode_schedule": {
@@ -900,7 +900,7 @@
       "force_random_ratio_start": 0.1,
       "force_random_ratio_end": 0.2,
       "schedule": "linear",
-      "freeze_after_progress": 0.8,
+      "freeze_after_progress": 0.7,
       "apply_to": "agent_only"
     },
     "deployment_mode_schedule": {
@@ -1252,7 +1252,7 @@
       "force_random_ratio_start": 0.1,
       "force_random_ratio_end": 0.2,
       "schedule": "linear",
-      "freeze_after_progress": 0.8,
+      "freeze_after_progress": 0.7,
       "apply_to": "agent_only"
     },
     "deployment_mode_schedule": {
