@@ -81,13 +81,24 @@ def _mover(shape=MOVER[0], size=MOVER[1]):
 
 
 def _mask(models=None, mover=None):
+    """État COMPLET : le masque est mémoïsé par le fingerprint d'état partagé
+    (`_move_spatial_cache`), qui lit `models_cache`, la phase et les zones d'engagement. Une
+    fixture qui les omet ne décrit pas un état que le moteur peut produire — et le cache lève
+    plutôt que d'inventer une clé, ce qui est le comportement voulu."""
+    models = models or WITNESS_ENEMY_MODELS
     gs = {
         "config": {"game_rules": {"engagement_zone": EZ, "max_base_size_hex": 24}},
         "inches_to_subhex": 5,
+        "phase": "move",
+        "units": [],
+        "models_cache": {
+            mid: {"col": c, "row": r, "level": 0} for mid, (c, r) in models.items()
+        },
+        "enemy_adjacent_hexes_player_1": set(),
+        "enemy_adjacent_hexes_player_2": set(),
     }
     return _compute_mover_ez_forbidden_mask(
-        gs, mover or _mover(), [("5", _enemy_entry(models or WITNESS_ENEMY_MODELS))],
-        EZ, BOARD[0], BOARD[1],
+        gs, mover or _mover(), [("5", _enemy_entry(models))], EZ, BOARD[0], BOARD[1],
     )
 
 
@@ -188,3 +199,71 @@ def test_round_movers_are_untouched(euclidean):
             euclidean_edge_distance(mover, e, max_distance=THR) <= THR for e in enemy_socles
         )
         assert bool(mask[col, row]) == engaged, f"ancre ronde ({col},{row}) mal classée"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Mémoïsation : un cache qui sert un masque périmé est pire que le coût qu'il évite
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _state(models):
+    return {
+        "config": {"game_rules": {"engagement_zone": EZ, "max_base_size_hex": 24}},
+        "inches_to_subhex": 5, "phase": "move", "units": [],
+        "models_cache": {m: {"col": c, "row": r, "level": 0} for m, (c, r) in models.items()},
+        "enemy_adjacent_hexes_player_1": set(), "enemy_adjacent_hexes_player_2": set(),
+    }
+
+
+def test_mask_is_memoised_per_state(euclidean):
+    """Deux demandes identiques dans le MÊME état rendent le même objet, sans recalcul."""
+    models = dict(WITNESS_ENEMY_MODELS)
+    gs = _state(models)
+    a = _compute_mover_ez_forbidden_mask(
+        gs, _mover(), [("5", _enemy_entry(models))], EZ, BOARD[0], BOARD[1])
+    b = _compute_mover_ez_forbidden_mask(
+        gs, _mover(), [("5", _enemy_entry(models))], EZ, BOARD[0], BOARD[1])
+    assert a is b, "masque recalculé à état inchangé : la mémoïsation ne prend pas"
+
+
+def test_mask_is_recomputed_when_a_model_moves(euclidean):
+    """LE risque du cache : servir un masque d'AVANT le déplacement.
+
+    Le fingerprint d'état couvre les positions par figurine ; bouger un socle doit suffire à le
+    périmer. Sans ça, le moteur autoriserait des placements dans une EZ qui a bougé.
+    """
+    models = dict(WITNESS_ENEMY_MODELS)
+    gs = _state(models)
+    avant = _compute_mover_ez_forbidden_mask(
+        gs, _mover(), [("5", _enemy_entry(models))], EZ, BOARD[0], BOARD[1])
+    n_avant = int(avant.sum())
+    gs["models_cache"]["5#0"]["col"] -= 40      # l'ennemi s'éloigne franchement
+    models["5#0"] = (WITNESS_ENEMY_MODELS["5#0"][0] - 40, WITNESS_ENEMY_MODELS["5#0"][1])
+    apres = _compute_mover_ez_forbidden_mask(
+        gs, _mover(), [("5", _enemy_entry(models))], EZ, BOARD[0], BOARD[1])
+    assert apres is not avant and int(apres.sum()) != n_avant, (
+        "masque inchangé après déplacement d'une figurine ennemie : le cache sert une carte "
+        "périmée"
+    )
+
+
+def test_cached_mask_cannot_be_mutated(euclidean):
+    """Rendu par référence : une mutation corromprait tous les autres lecteurs."""
+    models = dict(WITNESS_ENEMY_MODELS)
+    mask = _compute_mover_ez_forbidden_mask(
+        _state(models), _mover(), [("5", _enemy_entry(models))], EZ, BOARD[0], BOARD[1])
+    with pytest.raises(ValueError):
+        mask[0, 0] = True
+
+
+def test_two_base_geometries_do_not_share_a_mask(euclidean):
+    """La clé porte la géométrie : un socle rond ne doit pas hériter du masque de l'oval."""
+    models = dict(WITNESS_ENEMY_MODELS)
+    gs = _state(models)
+    oval = _compute_mover_ez_forbidden_mask(
+        gs, _mover(), [("5", _enemy_entry(models))], EZ, BOARD[0], BOARD[1])
+    rond = _compute_mover_ez_forbidden_mask(
+        gs, _mover("round", 6), [("5", _enemy_entry(models))], EZ, BOARD[0], BOARD[1])
+    assert int(oval.sum()) > int(rond.sum()), (
+        "le socle oval, bien plus large, doit interdire plus de cases que le rond — masques "
+        "confondus par le cache"
+    )

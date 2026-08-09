@@ -3,7 +3,7 @@ shoot_handler.py — gestion des actions SHOT, WAIT, SKIP, ADVANCED dans parse_s
 """
 
 import re
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from shared.data_validation import require_key
 from engine.combat_utils import calculate_hex_distance, ranged_edge_distance, get_distance_metric
@@ -442,6 +442,12 @@ def handle_shoot(
                 }
 
     # RULE: Shoot at engaged enemy
+    #
+    # Arguments de la mesure d'engagement de la CIBLE, capturés là où elle est faite. Le
+    # diagnostic les rejoue pour NOMMER l'unité qui engage (cf. plus bas) : les reconstruire à
+    # l'endroit du compteur ferait vivre deux fois le filtre des unités mesurables, et le
+    # diagnostic pourrait décrire une autre situation que celle qui a déclenché.
+    target_engagement_args: Optional[Dict[str, Any]] = None
     if target_pos:
         if target_id not in state.unit_player:
             stats['parse_errors'].append({
@@ -466,17 +472,19 @@ def handle_shoot(
                 uid: pos for uid, pos in state.unit_positions.items()
                 if uid in state.unit_hp and uid in state.unit_player
             }
-            target_engaged = is_within_engine_engagement_zone(
-                target_id,
-                state.unit_player,
-                positions_for_engagement,
-                state.unit_hp,
-                engagement_zone=_get_engagement_zone_for_analyzer(),
-                position_override=target_pos,
-                positions_by_model=state.positions_by_model,
-                unit_base=state.unit_base,
+            target_engagement_args = {
+                "unit_player": state.unit_player,
+                "unit_positions": positions_for_engagement,
+                "unit_hp": state.unit_hp,
+                "engagement_zone": _get_engagement_zone_for_analyzer(),
+                "position_override": target_pos,
+                "positions_by_model": state.positions_by_model,
+                "unit_base": state.unit_base,
                 **state.engagement_3d_kwargs(),
-                subject_models=state.positions_by_model.get(target_id),  # get allowed
+                "subject_models": state.positions_by_model.get(target_id),  # get allowed
+            }
+            target_engaged = is_within_engine_engagement_zone(
+                target_id, **target_engagement_args
             )
     elif target_id in state.unit_positions:
         stats['parse_errors'].append({
@@ -601,7 +609,21 @@ def handle_shoot(
     ):
         stats['shoot_at_engaged_enemy'][player] += 1
         if stats['first_error_lines']['shoot_at_engaged_enemy'][player] is None:
-            stats['first_error_lines']['shoot_at_engaged_enemy'][player] = {'episode': state.current_episode_num, 'line': line.strip()}
+            # NOMME l'unité qui engage la cible, avec la mesure du compteur — jumeau du
+            # diagnostic 1.1 (cf. `engine_engagement_zone_offenders`). Sans elle, « cible
+            # engagée » n'est pas vérifiable à la lecture : il faut refaire la mesure à la main
+            # pour savoir avec QUI, et c'est ce qui a fait passer ce compteur pour un faux
+            # positif pendant tout un chantier.
+            from ai.analyzer import engine_engagement_zone_offenders
+            _offenders = (
+                engine_engagement_zone_offenders(target_id, **target_engagement_args)
+                if target_engagement_args is not None else []
+            )
+            stats['first_error_lines']['shoot_at_engaged_enemy'][player] = {
+                'episode': state.current_episode_num,
+                'line': line.strip(),
+                'adjacent_after': _offenders,
+            }
 
     # Track CLOSE_QUARTERS weapon shots
     heavy_applied_in_log = re.search(r'(?:\[\s*HEAVY\s*\]|\sHEAVY\s)', action_desc, re.IGNORECASE) is not None
