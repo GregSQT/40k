@@ -390,7 +390,10 @@ def entries_in_engagement_zone(
         from engine.combat_utils import socle_from_cache_entry
         a = socle_from_cache_entry(first_entry)
         b = socle_from_cache_entry(second_entry)
-        return euclidean_edge_distance(a, b) <= engagement_minimum_clearance_norm(engagement_zone)
+        threshold = engagement_minimum_clearance_norm(engagement_zone)
+        # `max_distance` : jumeau euclidien de l'appel `hex` ci-dessus. Ce site ne lit qu'un
+        # booléen de seuil, donc l'exactitude au-delà du seuil ne lui sert à rien.
+        return euclidean_edge_distance(a, b, max_distance=threshold) <= threshold
     raise ValueError(f"Invalid engagement metric {metric!r}, expected 'hex' or 'euclidean'")
 
 
@@ -527,7 +530,7 @@ def _entries_in_engagement_zone_3d(
             assert base_a is not None and base_b is not None  # métrique euclidienne (cf. ci-dessus)
             socle_a = base_a.with_model_centers(centers_a)
             socle_b = base_b.with_model_centers(centers_b)
-            if euclidean_edge_distance(socle_a, socle_b) <= threshold:
+            if euclidean_edge_distance(socle_a, socle_b, max_distance=threshold) <= threshold:
                 return True
     return False
 

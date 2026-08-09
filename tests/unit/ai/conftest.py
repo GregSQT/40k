@@ -48,12 +48,18 @@ def squad_obs_space() -> gym.spaces.Dict:
 def tactical_data(**overrides: Any) -> Dict[str, Any]:
     """`tactical_data` d'un episode, tel que le moteur l'emet a la terminaison.
 
-    Porte TOUTES les cles que `log_tactical_metrics` lit — elles sont toutes STRICTES, il n'y
-    a plus de lecture optionnelle. Les valeurs par defaut sont non nulles et DISTINCTES la ou
-    deux courbes voisines lisent deux cles differentes : deux defauts egaux rendraient un
-    echange de tags invisible. Que le moteur fournisse bien ces cles est verifie sur un episode
-    REEL par `test_reserves_metrics.py::test_the_engine_feeds_every_key_the_tracker_reads` :
-    cette fabrique est ECRITE A LA MAIN, elle ne prouve rien du cote moteur.
+    Porte TOUTES les cles que `log_tactical_metrics` lit (toutes strictes — voir sa docstring).
+    Les valeurs par defaut sont non nulles et DISTINCTES la ou deux courbes voisines lisent deux
+    cles differentes : deux defauts egaux rendraient un echange de tags invisible.
+
+    ECRITE A LA MAIN, et elle doit le rester. Deriver du `_empty_episode_tactical_data()` du
+    moteur ne marcherait pas, et pas seulement parce qu'il ne couvre que 19 des cles : ses cles
+    sont les ACCUMULATEURS, qui doivent preexister pour etre incrementes. Les autres sont des
+    calculs de TERMINAISON, ecrits une fois. Les pre-declarer a 0 changerait « le bloc de
+    terminaison a oublie d'ecrire cette cle » en « la courbe publie 0 » — le silence de 50 000
+    episodes, reintroduit par la porte de service. Que le moteur fournisse bien ces cles se
+    verifie sur un episode REEL :
+    `test_reserves_metrics.py::test_the_engine_feeds_every_key_the_tracker_reads`.
     """
     data: Dict[str, Any] = {
         "shots_fired": 10, "hits": 6,

@@ -1927,6 +1927,98 @@ def footprints_overlap(a: Socle, b: Socle) -> bool:
 _OVAL_EDGE_SAMPLES: int = 32
 
 
+@lru_cache(maxsize=256)
+def _oval_local_outline(
+    size_a: float, size_b: float, orientation: int
+) -> Tuple[Tuple[float, float], ...]:
+    """Contour d'un socle oval, DÉJÀ TOURNÉ, centré sur l'origine. Mémoïsé.
+
+    La clé porte l'orientation en plus de la taille : ``s.orientation`` est un entier discret
+    (six valeurs), donc la rotation est aussi cachable que la forme. Sans elle, chaque figurine
+    d'une escouade repayait ``_OVAL_EDGE_SAMPLES`` multiplications-additions pour le MÊME angle —
+    la boucle chaude des 120 656 constructions de primitives mesurées sur un drive de 200 pas.
+    Il ne reste au constructeur qu'une translation par figurine.
+    """
+    aa = (size_a / 2.0) * _FOOTPRINT_SIZE_SCALE
+    bb = (size_b / 2.0) * _FOOTPRINT_SIZE_SCALE
+    ang = orientation * _ORIENTATION_STEP_RAD
+    cos_a, sin_a = math.cos(ang), math.sin(ang)
+    return tuple(
+        (lx * cos_a - ly * sin_a, lx * sin_a + ly * cos_a)
+        for lx, ly in (
+            (aa * math.cos(2.0 * math.pi * k / _OVAL_EDGE_SAMPLES),
+             bb * math.sin(2.0 * math.pi * k / _OVAL_EDGE_SAMPLES))
+            for k in range(_OVAL_EDGE_SAMPLES)
+        )
+    )
+
+
+@lru_cache(maxsize=64)
+def _square_local_outline(size: float, orientation: int) -> Tuple[Tuple[float, float], ...]:
+    """Contour d'un socle carré, DÉJÀ TOURNÉ, centré sur l'origine. Même rôle que l'oval."""
+    half = (size / 2.0) * _FOOTPRINT_SIZE_SCALE
+    ang = orientation * _ORIENTATION_STEP_RAD
+    cos_a, sin_a = math.cos(ang), math.sin(ang)
+    return tuple(
+        (lx * cos_a - ly * sin_a, lx * sin_a + ly * cos_a)
+        for lx, ly in ((-half, -half), (half, -half), (half, half), (-half, half))
+    )
+
+
+def _socle_bounding_circles(s: Socle) -> List[Tuple[float, float, float]]:
+    """Disque englobant ``(cx, cy, r)`` de CHAQUE figurine — sans construire aucun contour.
+
+    C'est la moitié bon marché de ``_socle_edge_primitives`` : elle ne coûte qu'un
+    ``_hex_center`` par figurine, là où le contour coûte ``_OVAL_EDGE_SAMPLES`` sommets. Le rayon
+    vient de ``bounding_radius()``, LA primitive de broad-phase du fichier — la même que celle
+    dont se servent ``footprints_overlap`` et la porte de clearance de la mise en place. En
+    dériver un second (par exemple le max sur les sommets échantillonnés) donnerait aujourd'hui
+    la même valeur par coïncidence — ``_OVAL_EDGE_SAMPLES`` étant multiple de 4, deux sommets
+    tombent pile sur les axes — et divergerait silencieusement au premier changement
+    d'échantillonnage, en rendant un booléen d'engagement faux sans rien lever.
+    """
+    centers = s.model_centers if s.model_centers else [(s.col, s.row)]
+    radius = s.bounding_radius()
+    out: List[Tuple[float, float, float]] = []
+    for col, row in centers:
+        cx, cy = _hex_center(int(col), int(row))
+        out.append((cx, cy, radius))
+    return out
+
+
+def _group_bounding_circle(
+    circles: List[Tuple[float, float, float]]
+) -> Tuple[float, float, float]:
+    """Disque englobant de TOUTE l'escouade, en O(n).
+
+    Centre = barycentre des centres de figurines (pas le plus petit cercle englobant, dont le
+    calcul exact coûterait plus cher que ce qu'il fait gagner) ; rayon = le plus éloigné. Un
+    disque plus large qu'optimal reste un disque englobant : le minorant qu'il porte est plus
+    lâche, jamais faux.
+    """
+    if len(circles) == 1:
+        return circles[0]
+    cx = sum(c[0] for c in circles) / len(circles)
+    cy = sum(c[1] for c in circles) / len(circles)
+    radius = max(math.hypot(x - cx, y - cy) + r for x, y, r in circles)
+    return cx, cy, radius
+
+
+def _group_lower_bound(
+    circles_a: List[Tuple[float, float, float]],
+    circles_b: List[Tuple[float, float, float]],
+) -> float:
+    """Minorant AGRÉGÉ de la distance bord-à-bord entre deux escouades, en un seul ``hypot``.
+
+    Deux escouades dont les disques d'escouade sont séparés de plus que le seuil ne peuvent avoir
+    AUCUNE paire de figurines en portée : le produit figurine × figurine — 100 mesures pour deux
+    escouades de dix — se tranche alors d'un coup.
+    """
+    gx_a, gy_a, gr_a = _group_bounding_circle(circles_a)
+    gx_b, gy_b, gr_b = _group_bounding_circle(circles_b)
+    return math.hypot(gx_b - gx_a, gy_b - gy_a) - gr_a - gr_b
+
+
 def _socle_edge_primitives(s: Socle) -> List[Tuple]:
     """Primitives géométriques continues (repère ``_hex_center``) d'un socle, une par figurine.
 
@@ -1934,6 +2026,10 @@ def _socle_edge_primitives(s: Socle) -> List[Tuple]:
     analytique), ``('p', [(x, y), ...])`` pour oval/carré (polygone convexe orienté).
     ``model_centers`` (escouade multi-figurines) → une primitive par figurine ; sinon une
     seule primitive à l'ancre ``(col, row)``. L'orientation (oval/carré) vient de ``s.orientation``.
+
+    Coûteuse par construction (un contour de ``_OVAL_EDGE_SAMPLES`` sommets par figurine) : les
+    appelants qui n'ont besoin que d'un ordre de grandeur passent par ``_socle_bounding_circles``,
+    et ne viennent ici que pour les paires que l'élagage n'a pas tranchées.
     """
     centers = s.model_centers if s.model_centers else [(s.col, s.row)]
     prims: List[Tuple] = []
@@ -1943,30 +2039,18 @@ def _socle_edge_primitives(s: Socle) -> List[Tuple]:
             cx, cy = _hex_center(int(c), int(rr))
             prims.append(("c", cx, cy, r))
         return prims
-    ang = s.orientation * _ORIENTATION_STEP_RAD
-    cos_a, sin_a = math.cos(ang), math.sin(ang)
     if type(s) is OvalSocle:
         size = s.base_size
-        aa = (size[0] / 2.0) * _FOOTPRINT_SIZE_SCALE
-        bb = (size[1] / 2.0) * _FOOTPRINT_SIZE_SCALE
-        local = [
-            (aa * math.cos(2.0 * math.pi * k / _OVAL_EDGE_SAMPLES),
-             bb * math.sin(2.0 * math.pi * k / _OVAL_EDGE_SAMPLES))
-            for k in range(_OVAL_EDGE_SAMPLES)
-        ]
+        outline = _oval_local_outline(size[0], size[1], s.orientation)
     elif type(s) is SquareSocle:
-        half = (s.base_size / 2.0) * _FOOTPRINT_SIZE_SCALE
-        local = [(-half, -half), (half, -half), (half, half), (-half, half)]
+        outline = _square_local_outline(s.base_size, s.orientation)
     else:
         # Inatteignable via la fabrique (elle n'émet que les trois classes concrètes) ;
         # seul un `object.__new__` direct sur la classe de base y mènerait.
         raise ValueError(f"euclidean_edge_distance: socle sans forme concrète {s!r}")
     for c, rr in centers:
         cx, cy = _hex_center(int(c), int(rr))
-        prims.append(("p", [
-            (cx + lx * cos_a - ly * sin_a, cy + lx * sin_a + ly * cos_a)
-            for lx, ly in local
-        ]))
+        prims.append(("p", [(cx + lx, cy + ly) for lx, ly in outline]))
     return prims
 
 
@@ -2022,7 +2106,7 @@ def _primitive_edge_dist(pa: Tuple, pb: Tuple) -> float:
     return _poly_poly_edge_dist(pa[1], pb[1])
 
 
-def euclidean_edge_distance(a: Socle, b: Socle) -> float:
+def euclidean_edge_distance(a: Socle, b: Socle, max_distance: Optional[float] = None) -> float:
     """Distance euclidienne **bord-à-bord** entre deux socles, en unités ``_hex_center``.
 
     Équivalent euclidien de ``min_distance_between_sets`` (règle 01.04 : on mesure au
@@ -2039,6 +2123,24 @@ def euclidean_edge_distance(a: Socle, b: Socle) -> float:
     ÉCHELLE : résultat en unités ``_hex_center`` (1 subhex = ``_FOOTPRINT_SIZE_SCALE`` = 1,5).
     Pour comparer à une portée en subhexes, l'appelant convertit le seuil :
     ``distance <= rng_subhex * ENGAGEMENT_NORM_HEX_WIDTH``.
+
+    ``max_distance`` — même PROMESSE que ``min_distance_between_sets``, dont c'est le jumeau
+    euclidien : le résultat n'est garanti EXACT que tant qu'il est ``<= max_distance``. Au-delà,
+    une valeur strictement supérieure à ``max_distance`` est rendue (une borne inférieure par
+    disques englobants, pas nécessairement la distance) — suffisant pour le test de seuil que
+    font TOUS les appelants qui le passent, et pour eux seuls.
+
+    ⚠️ La SENTINELLE, elle, est l'inverse de celle du jumeau, et le copier-coller hex→euclidien
+    est le mode d'échec dominant de ce dépôt : ``min_distance_between_sets`` désactive son prune
+    avec ``max_distance=0``, cette fonction avec ``max_distance=None``. Raison : en unités-norme
+    flottantes, ``0.0`` est un seuil LÉGITIME (socles tangents), donc il ne peut pas signifier
+    « pas de seuil ». La traduction entre les deux conventions est faite une seule fois, dans
+    ``combat_utils.ranged_edge_distance``, qui sert les deux métriques.
+
+    Pourquoi ce paramètre existe : mesuré sur un drive de 200 pas du vrai moteur, cette fonction
+    pesait 13,7 s sur 37 s, dont 21 M d'appels à ``_point_segment_dist_sq`` — le produit
+    arête × arête de deux contours ovals à 32 sommets, refait pour des socles souvent très
+    éloignés. Le disque circonscrit écarte ces paires-là en O(1), sans jamais changer le verdict.
     """
     if type(a) is RoundSocle and type(b) is RoundSocle:
         # Règle 01.04 : distance au point le plus proche des socles. Pour une escouade
@@ -2047,6 +2149,15 @@ def euclidean_edge_distance(a: Socle, b: Socle) -> float:
         # = comportement historique.
         centers_a = a.model_centers if a.model_centers else [(a.col, a.row)]
         centers_b = b.model_centers if b.model_centers else [(b.col, b.row)]
+        if max_distance is not None and len(centers_a) * len(centers_b) > 1:
+            # Le raccourci d'escouade ne paie QUE s'il remplace plusieurs paires : la mesure
+            # ronde↔ronde est déjà O(1) par paire de figurines, donc pour un duel 1×1 la
+            # broad-phase serait du travail net en plus — et c'est la forme la plus fréquente
+            # du jeu. Mesuré : la poser inconditionnellement ajoutait 2,7 M d'appels de fonction
+            # sur un drive de 200 pas, pour un gain nul sur ce cas-là.
+            grouped = _group_lower_bound(_socle_bounding_circles(a), _socle_bounding_circles(b))
+            if grouped > max_distance:
+                return grouped
         base_a = a.base_size
         base_b = b.base_size
         best = math.inf
@@ -2059,12 +2170,41 @@ def euclidean_edge_distance(a: Socle, b: Socle) -> float:
                         return 0.0
         return best if best > 0.0 else 0.0
     # Au moins une base non ronde : distance bord-à-bord continue entre contours géométriques.
-    prims_a = _socle_edge_primitives(a)
-    prims_b = _socle_edge_primitives(b)
+    # Les contours ne sont PAS construits d'avance — c'est la dépense que l'élagage veut éviter.
+    circles_a = _socle_bounding_circles(a)
+    circles_b = _socle_bounding_circles(b)
+    if max_distance is not None and len(circles_a) * len(circles_b) > 1:
+        grouped = _group_lower_bound(circles_a, circles_b)
+        if grouped > max_distance:
+            return grouped
+    prims_a: Optional[List[Tuple]] = None
+    prims_b: Optional[List[Tuple]] = None
     best = math.inf
-    for pa in prims_a:
-        for pb in prims_b:
-            d = _primitive_edge_dist(pa, pb)
+    for i, (ax, ay, rad_circ_a) in enumerate(circles_a):
+        for j, (bx, by, rad_circ_b) in enumerate(circles_b):
+            # MINORANT exact : chaque contour est inclus dans son disque englobant.
+            lower = math.hypot(bx - ax, by - ay) - rad_circ_a - rad_circ_b
+            if lower >= best:
+                continue  # cette paire ne peut plus améliorer le minimum — élagage sans effet
+            if max_distance is not None and lower > max_distance:
+                # Hors seuil de façon certaine. On retient le minorant : il est lui-même
+                # > max_distance, donc tout ce que l'élagage écarte ensuite l'est aussi, et la
+                # valeur rendue reste conforme au contrat. Mélanger ainsi borne et distance dans
+                # `best` est sûr pour cette raison, et pour elle seule.
+                #
+                # Le majorant symétrique — `écart des centres - r_inscrit_a - r_inscrit_b`, qui
+                # conclurait « en portée » sans parcourir les arêtes — n'est délibérément PAS
+                # utilisé : il rendrait une valeur `<= max_distance` SUPÉRIEURE à la distance
+                # réelle, alors que le contrat (celui de `min_distance_between_sets`, dont ce
+                # paramètre est le jumeau) promet l'exactitude sous le seuil. Un appelant futur
+                # qui lirait la distance au lieu du seul booléen recevrait une mesure gonflée.
+                best = lower
+                continue
+            if prims_a is None:
+                prims_a = _socle_edge_primitives(a)
+                prims_b = _socle_edge_primitives(b)
+            assert prims_b is not None  # posé avec prims_a, jamais séparément
+            d = _primitive_edge_dist(prims_a[i], prims_b[j])
             if d < best:
                 best = d
                 if best <= 0.0:

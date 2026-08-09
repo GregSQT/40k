@@ -3,6 +3,7 @@
 combat_utils.py - Pure utility functions for combat calculations
 """
 
+import math
 import os
 from typing import Dict, List, Tuple, Any, Optional, Union
 
@@ -452,7 +453,7 @@ def socle_from_cache_entry(entry: Dict[str, Any]) -> Any:
     )
 
 
-def ranged_edge_distance(a: Any, b: Any, metric: str, max_distance: int = 0) -> float:
+def ranged_edge_distance(a: Any, b: Any, metric: str, max_distance: float = 0) -> float:
     """Distance de portée bord-à-bord, exprimée en **subhexes** (comparable direct à RNG).
 
     Point de conversion unique subhex↔norme : le facteur ``ENGAGEMENT_NORM_HEX_WIDTH``
@@ -461,9 +462,19 @@ def ranged_edge_distance(a: Any, b: Any, metric: str, max_distance: int = 0) -> 
 
     ``a``, ``b`` : ``Socle`` (engine.hex_utils).
     - ``metric == "hex"``       : ``min_distance_between_sets(fp)`` (déjà en subhexes ;
-      comportement actuel). ``max_distance`` : prune passé tel quel.
+      comportement actuel). ``max_distance`` : prune ARRONDI AU-DESSUS, la distance hex étant
+      entière. L'arrondi vit ici et non chez l'appelant : le seuil qu'il compare, lui, est un
+      flottant (``detection_range_subhex``, une portée d'arme scalée), et un cap tronqué SOUS ce
+      seuil rendrait un minorant pour une cible située entre les deux — un tir hors portée compté
+      légal, une figurine hors détection traitée comme détectable. Chaque appelant devait donc
+      poser le même ``math.ceil`` en le justifiant : l'invariant « cap >= seuil comparé »
+      appartient à la primitive, pas à ses sept sites d'appel.
     - ``metric == "euclidean"`` : ``euclidean_edge_distance(a, b)`` [unités-norme] ÷ 1,5
-      → subhexes (règle 01.04, bord-à-bord).
+      → subhexes (règle 01.04, bord-à-bord). ``max_distance`` : prune passé lui aussi, converti
+      en unités-norme par le même facteur — les deux métriques rendent donc désormais la même
+      promesse (exact tant que ``<= max_distance``, valeur supérieure au-delà). Il était
+      transmis au chemin hex et IGNORÉ par le chemin euclidien : le tir en géométrie euclidienne
+      payait le contour complet des socles pour toute cible, y compris à l'autre bout du plateau.
     """
     from engine.hex_utils import (
         min_distance_between_sets,
@@ -473,9 +484,12 @@ def ranged_edge_distance(a: Any, b: Any, metric: str, max_distance: int = 0) -> 
     if metric == "hex":
         if a.fp is None or b.fp is None:
             raise ValueError("ranged_edge_distance(hex): empreintes (fp) requises")
-        return min_distance_between_sets(a.fp, b.fp, max_distance=max_distance)
+        return min_distance_between_sets(a.fp, b.fp, max_distance=math.ceil(max_distance))
     if metric == "euclidean":
-        return euclidean_edge_distance(a, b) / ENGAGEMENT_NORM_HEX_WIDTH
+        # `max_distance == 0` : convention de `min_distance_between_sets` — pas d'élagage,
+        # distance exacte en toutes circonstances. Reprise telle quelle, c'est le même paramètre.
+        norm_cap = max_distance * ENGAGEMENT_NORM_HEX_WIDTH if max_distance > 0 else None
+        return euclidean_edge_distance(a, b, max_distance=norm_cap) / ENGAGEMENT_NORM_HEX_WIDTH
     raise ValueError(f"Invalid metric {metric!r}, expected one of {VALID_DISTANCE_METRICS}")
 
 

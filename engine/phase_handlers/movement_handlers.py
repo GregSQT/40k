@@ -5167,6 +5167,11 @@ def _ingress_enemy_clearance_forbidden(
                     if forbidden[cc, rr]:
                         continue
                     candidate = Socle(shape="round", base_size=1, col=cc, row=rr, fp=None)
+                    # Pas de `max_distance` ici, et ce n'est pas un oubli : le `gate` ci-dessus
+                    # EST déjà ce minorant (clearance + rayon englobant ennemi + rayon d'une
+                    # case), et il a servi à borner les candidates. L'élagage interne ne pourrait
+                    # donc écarter aucune case que le tampon n'ait déjà exclue — le passer serait
+                    # payer deux fois la même borne.
                     if euclidean_edge_distance(candidate, enemy_socle) <= clearance_norm:
                         forbidden[cc, rr] = True
     return forbidden

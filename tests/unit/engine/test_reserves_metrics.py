@@ -20,15 +20,13 @@ STRUCTURE DES TESTS
    ROUGES, puis on rétablit — prouvant que les tests ne sont pas vacants.
 
 5. CONTRAT MOTEUR → TRACKER — le tactical_data d'un épisode réel traverse le vrai
-   `log_tactical_metrics` sans lever (il lit 44 clés en `require_key`), et les trois
-   courbes `reserves/*` portent bien les compteurs du moteur. C'est ici, et nulle part
-   ailleurs, que les deux jambes du contrat se rejoignent : les tests de
-   `tests/unit/ai/` partent tous de fixtures écrites à la main.
+   `log_tactical_metrics` sans lever, et les trois courbes `reserves/*` portent bien les
+   compteurs du moteur. C'est ici, et nulle part ailleurs, que les deux jambes du contrat
+   se rejoignent : les tests de `tests/unit/ai/` partent tous de fixtures écrites à la main.
 """
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 from typing import Any, Dict
@@ -54,12 +52,6 @@ from engine.w40k_core import W40KEngine  # noqa: E402
 # ──────────────────────────────────────────────────────────────────────────────
 
 _FIXTURE_RESERVES = str(ARMAGEDDON_SCENARIOS / "reserves_full_episode_fixture1.json")
-_FIXTURE_BARE = str(
-    PROJECT_ROOT
-    / "scripts"
-    / "smoke_t5_bare_scenario.json"
-    # Fichier absent → saut du test (mark.skipif ci-dessous).
-)
 
 _SEEDS = (0, 1, 2)
 
@@ -89,11 +81,19 @@ def _play(scenario_file: str, seed: int) -> Dict[str, Any]:
     return info["tactical_data"]
 
 
-# Épisodes mémoïsés par graine. Chaque `_play` rejoue une partie entière (plusieurs secondes) et
-# les tests ci-dessous relisent tous le MÊME épisode par graine : sans ce cache, le fichier en
-# rejouait sept. Contrat de partage, identique à `test_episode_charge_counters._cached_play` :
-# les appelants traitent le dict rendu en LECTURE SEULE — un test qui le mute contaminerait les
-# suivants. Ceux d'ici ne font que lire.
+# Épisodes mémoïsés par graine. Chaque `_play` rejoue une partie entière (9 à 50 s selon la
+# graine) et les tests ci-dessous relisent tous le MÊME épisode par graine.
+#
+# PORTÉE RÉELLE DU GAIN, mesurée — le cache est module-scope, donc PAR PROCESSUS. En série il
+# ramène le fichier de 9 rejouages à 3 (40 s CPU). Sous `-n 8 --dist worksteal`, la commande de
+# vérification du dépôt, xdist distribue les items un par un : 8 des 9 tests rejouent leur
+# épisode dans leur propre worker (185 s CPU pour 30 s d'horloge). Ne pas lire ce cache comme
+# une garantie de coût — ce fichier reste le plus lourd de `tests/unit/engine/`.
+#
+# Contrat de partage, identique à `test_episode_charge_counters._cached_play` : les appelants
+# traitent le dict rendu en LECTURE SEULE — un test qui le mute contaminerait les suivants.
+# Ceux d'ici ne font que lire. À la différence du jumeau, ce cache ne retient PAS les moteurs
+# (mesuré : 8 Ko par entrée, aucun `W40KEngine` atteignable).
 _EPISODES: Dict[int, Dict[str, Any]] = {}
 
 
@@ -102,6 +102,17 @@ def _cached_play(seed: int) -> Dict[str, Any]:
     if seed not in _EPISODES:
         _EPISODES[seed] = _play(_FIXTURE_RESERVES, seed)
     return _EPISODES[seed]
+
+
+def _seed_with_reserves() -> int | None:
+    """Première graine où l'agent place au moins une unité en réserve, `None` si aucune.
+
+    La positivité par graine n'est pas garantie : deux tests la cherchent, et une seule
+    écriture du prédicat les suit le jour où le fixture change.
+    """
+    return next(
+        (s for s in _SEEDS if int(_cached_play(s)["reserves_placed_agent"]) > 0), None
+    )
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -127,13 +138,7 @@ def test_reserves_placed_agent_is_positive_on_reserves_fixture() -> None:
     VERROU : si la clé reste toujours à 0, ce test devient rouge — c'est le test
     « vert vacant » guard qui prouve que le compteur est réellement incrémenté.
     """
-    positive_found = False
-    for seed in _SEEDS:
-        td = _cached_play(seed)
-        if int(td["reserves_placed_agent"]) > 0:
-            positive_found = True
-            break
-    assert positive_found, (
+    assert _seed_with_reserves() is not None, (
         "reserves_placed_agent == 0 sur toutes les graines — "
         "le compteur n'est jamais incrémenté (vert vacant)"
     )
@@ -202,14 +207,17 @@ def _recorded_scalars(tactical: Dict[str, Any], tmp_path: Any) -> Dict[str, floa
 def test_the_engine_feeds_every_key_the_tracker_reads(tmp_path: Any) -> None:
     """Le tactical_data d'un épisode RÉEL traverse `log_tactical_metrics` sans lever.
 
-    C'est le contrat moteur → tracker, EXÉCUTÉ au lieu d'être décrit. `log_tactical_metrics`
-    lit 44 clés en `require_key` : jusqu'ici, rien ne garantissait que le moteur les fournisse
-    toutes, et une clé manquante ne se découvrait qu'en cours d'entraînement. Les fixtures de
-    `tests/unit/ai/` sont écrites à la main et ne prouvent rien de ce côté-là — elles vérifient
-    ce que le tracker FAIT de ses clés, pas que le moteur les LUI donne.
+    C'est le contrat moteur → tracker, EXÉCUTÉ au lieu d'être décrit (le régime de lecture
+    stricte est expliqué là où il vit, `W40KMetricsTracker.log_tactical_metrics`). Rien ne
+    garantissait que le moteur fournisse toutes les clés exigées, et une clé manquante ne se
+    découvrait qu'en cours d'entraînement. Les fixtures de `tests/unit/ai/` sont écrites à la
+    main et ne prouvent rien de ce côté-là — elles vérifient ce que le tracker FAIT de ses
+    clés, pas que le moteur les LUI donne.
 
     Ce contrôle remplace toute liste de clés exigées maintenue à la main : la source de vérité
-    est le code du tracker lui-même, et il ne peut pas dériver de lui-même.
+    est le code du tracker lui-même, et il ne peut pas dériver de lui-même. Aucun COMPTE de
+    clés n'est écrit ici non plus — un nombre recopié serait exactement la liste manuelle que
+    ce test existe pour supprimer.
 
     DEUX clés ne sont lues que derrière une garde MÉTIER, et sortiraient donc de la couverture
     sans que rien ne le signale si l'épisode changeait de forme :
@@ -241,23 +249,13 @@ def test_the_reserves_curves_carry_the_engine_counters(tmp_path: Any) -> None:
     valeurs écrites à la main. Si le moteur cessait d'alimenter `_reserves_placed_agent`, la
     courbe passait à 0 constant sans qu'aucun des deux ne rougisse.
 
-    CE QUE CE TEST DISCRIMINE, ET CE QU'IL NE DISCRIMINE PAS. Mesuré sur les trois graines du
-    fixture : `placed=1, deployed=1, destroyed=0`. La graine est CHERCHÉE et non figée, comme
-    dans `test_reserves_placed_agent_is_positive_on_reserves_fixture` : la positivité par
-    graine n'est pas garantie, et figer la première rendrait ce test rouge pour une dérive du
-    tirage plutôt que pour le défaut qu'il surveille. Donc
-      - `placed` non nul : la valeur écrite ne peut pas être un 0 constant — c'est le cas qui
-        justifie ce test, et il est réellement observé ;
-      - `placed == deployed` : un ÉCHANGE de ces deux tags passerait ici. Il est attrapé par
-        `test_metrics_single_writer.py::test_each_reserves_curve_carries_its_own_tactical_key`,
-        dont la fixture porte trois valeurs distinctes (5/3/1) ;
-      - `destroyed == 0` : l'égalité sur ce tag ne mesure rien sur ce fixture. Elle est écrite
-        pour la forme du contrat, PAS comptée comme une couverture — d'où l'assertion de
-        volume ci-dessous, qui refuse un épisode où les trois compteurs seraient nuls.
+    CE QU'IL NE DISCRIMINE PAS : sur ce fixture, `placed == deployed` et `destroyed == 0`, donc
+    ni un échange de ces deux tags ni la valeur du troisième ne se voient ici. C'est
+    `test_metrics_single_writer.py::test_each_reserves_curve_carries_its_own_tactical_key`, dont
+    la fixture porte trois valeurs distinctes, qui les attrape. La garde `placed > 0` ci-dessous
+    est ce qui empêche les trois égalités de dégénérer en 0 == 0.
     """
-    seed = next(
-        (s for s in _SEEDS if int(_cached_play(s)["reserves_placed_agent"]) > 0), None
-    )
+    seed = _seed_with_reserves()
     assert seed is not None, (
         "aucune graine ne place de réserve — les trois égalités compareraient 0 à 0"
     )

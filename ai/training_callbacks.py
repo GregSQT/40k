@@ -639,34 +639,15 @@ class MetricsCollectionCallback(BaseCallback):
         self.controlled_agent = controlled_agent  # CRITICAL FIX: Store controlled_agent for bot evaluation
         self.episode_count = 0
         
-        # Initialize episode tracking with ALL metrics
-        self.episode_tactical_data = {
-            # Combat metrics
-            'shots_fired': 0,
-            'hits': 0,
-            'total_enemy_units': 0,
-            'killed_enemies': 0,
-            
-            # NEW: Damage tracking
-            'damage_dealt': 0,
-            'damage_received': 0,
-            
-            # NEW: Unit tracking
-            'units_lost': 0,
-            'units_killed': 0,
-            'enemy_value_destroyed': 0.0,
-            'ally_value_lost': 0.0,
-            
-            # NEW: Action tracking
-            'valid_actions': 0,
-            'invalid_actions': 0,
-            'wait_actions': 0,
-            'total_actions': 0,
-            
-            # Phase tracking
-            'phases_completed': 0,
-            'total_phases': 6
-        }
+        # VIDE, et c'est le point. Ce dict etait pre-rempli a 0 sur 18 cles, ici et au reset,
+        # mot pour mot. Rien ne le lit ni ne l'incremente entre les deux : `_handle_episode_end`
+        # fait `.update(info["tactical_data"])` avec les 52 cles du moteur, qui ecrasent tout.
+        # Le pre-remplissage etait donc un filet anti-`require_key` : si le moteur cessait de
+        # produire une cle, il la servait a 0 et la courbe s'eteignait en silence au lieu de
+        # lever — exactement le defaut que la lecture stricte de `log_tactical_metrics` existe
+        # pour interdire. Trois cles (`killed_enemies`, `phases_completed`, `total_phases`)
+        # n'etaient d'ailleurs produites ni lues par personne.
+        self.episode_tactical_data: Dict[str, Any] = {}
         
         # Track initial unit state for damage/loss calculations
         self.initial_agent_units = []
@@ -1068,10 +1049,6 @@ class MetricsCollectionCallback(BaseCallback):
         # et non la presence de la cle `episode`.
         tactical_data = require_key(info, 'tactical_data')
         self.episode_tactical_data.update(tactical_data)
-        if 'total_actions' not in tactical_data:
-            valid_actions = int(require_key(tactical_data, 'valid_actions'))
-            invalid_actions = int(require_key(tactical_data, 'invalid_actions'))
-            self.episode_tactical_data['total_actions'] = valid_actions + invalid_actions
 
         victory_points_cumulative_episode = float(
             require_key(tactical_data, 'victory_points_cumulative_episode')
@@ -1219,34 +1196,8 @@ class MetricsCollectionCallback(BaseCallback):
             require_key(self.episode_tactical_data, 'reward_breakdown')
         )
 
-        # Reset episode tracking with ALL fields
-        self.episode_tactical_data = {
-            # Combat metrics
-            'shots_fired': 0,
-            'hits': 0,
-            'total_enemy_units': 0,
-            'killed_enemies': 0,
-            
-            # Damage tracking
-            'damage_dealt': 0,
-            'damage_received': 0,
-            
-            # Unit tracking
-            'units_lost': 0,
-            'units_killed': 0,
-            'enemy_value_destroyed': 0.0,
-            'ally_value_lost': 0.0,
-            
-            # Action tracking
-            'valid_actions': 0,
-            'invalid_actions': 0,
-            'wait_actions': 0,
-            'total_actions': 0,
-            
-            # Phase tracking
-            'phases_completed': 0,
-            'total_phases': 6
-        }
+        # Vide au reset comme a l'init : voir le commentaire du constructeur.
+        self.episode_tactical_data = {}
         # Les observations sont remises a zero PAR ENVIRONNEMENT au moment de leur publication
         # (voir plus haut) : les reinitialiser ici viderait aussi les 47 autres, en plein
         # milieu de leur episode.

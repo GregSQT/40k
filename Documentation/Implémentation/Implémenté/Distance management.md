@@ -414,15 +414,27 @@ appels à basculer. Sortie = une checklist par fichier.
 
 ### Étape 1 — Point de bascule unique (backend)
 Fichiers : [hex_utils.py](engine/hex_utils.py), [combat_utils.py](engine/combat_utils.py)
-- **Primitive géométrique bord-à-bord** dans `hex_utils.py` : `euclidean_edge_distance(a, b)`
-  (entrées typées `Socle`). Rond↔rond → réutilise `euclidean_edge_clearance_round_round`
-  (O(1)). Non-rond (oval/square) → min euclidien entre centres de cellules occupées,
-  réutilisant le prune de `min_distance_between_sets`. Retourne un `float` en unités-norme
-  `_hex_center`, sans arrondi. **Aucun centre-à-centre** : `calculate_euclidean_distance`
-  centre-à-centre abandonnée (règle 01.04 = mesure bord-à-bord au point le plus proche).
-  Note : le proxy cellules pour le non-rond est suffisant pour la portée (longue distance,
-  erreur ~0,1") ; un proxy continu (capsule/OBB) ne deviendrait nécessaire que si l'euclidien
-  gagnait un jour les règles courte-distance (engagement/overlap) — exclu par ce plan.
+- **Primitive géométrique bord-à-bord** dans `hex_utils.py` :
+  `euclidean_edge_distance(a, b, max_distance=None)` (entrées typées `Socle`). Rond↔rond →
+  réutilise `euclidean_edge_clearance_round_round` (O(1)). Non-rond (oval/square) → distance
+  bord-à-bord **continue** entre les contours géométriques réels (cercle analytique, polygone
+  convexe orienté ; l'oval est échantillonné à `_OVAL_EDGE_SAMPLES` = 32 sommets), et non plus
+  entre centres de cellules : le proxy cellules a été remplacé quand l'euclidien a gagné les
+  règles courte-distance, contrairement à ce que ce plan excluait à l'origine. Retourne un
+  `float` en unités-norme `_hex_center`, sans arrondi. **Aucun centre-à-centre** :
+  `calculate_euclidean_distance` centre-à-centre abandonnée (règle 01.04 = mesure bord-à-bord
+  au point le plus proche).
+- **`max_distance` (2026-08-08)** — même contrat que `min_distance_between_sets`, dont c'est le
+  jumeau euclidien : le résultat n'est garanti exact que tant qu'il est `<= max_distance` ;
+  au-delà, une valeur strictement supérieure est rendue (le minorant par disques circonscrits).
+  Les paires de socles trop éloignées sont donc écartées en O(1) au lieu de payer le produit
+  arête × arête des deux contours. Mesuré : `unit_entries_within_engagement_zone` pesait 16,8 s
+  sur 37 s de drive moteur (200 pas, board x5), 6,0 s après ; la primitive elle-même est 3,3×
+  plus rapide sur un mix véhicule↔escouade, à verdicts strictement identiques.
+  Sites qui le passent — tous des tests de seuil, aucun ne lit la distance :
+  `entries_in_engagement_zone` (2D et 3D), `_mover_ez_forbidden_mask` (mouvement), et
+  `ranged_edge_distance` côté tir, qui le transmettait déjà au chemin `hex` et l'ignorait en
+  euclidien. Verrou : `tests/unit/engine/test_euclidean_edge_distance_bounds.py`.
 - **Sélecteur de métrique par règle** dans `combat_utils.py` :
   `get_distance_metric(rule, game_config)` lit `game_config["distance_metric"][rule]`,
   **erreur explicite** si section/clé/valeur manquante ou invalide (aucun fallback).

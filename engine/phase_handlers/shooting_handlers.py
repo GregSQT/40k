@@ -4359,8 +4359,13 @@ def hidden_enemy_out_of_detection(
         model_socle = Socle(
             _bshape, _bsize, center[0], center[1], set(model_hexes), [center], _borient
         )
+        # Cap passé NON tronqué : c'est bien `base_detection_subhex` que les deux tests
+        # ci-dessous comparent, et `ranged_edge_distance` arrondit elle-même ce qu'exige sa
+        # branche hex. Un `int()` posé ici rendrait un cap plus petit que le seuil comparé, donc
+        # un minorant pour une figurine située entre les deux — hors détection, traitée comme
+        # détectable.
         dist = ranged_edge_distance(
-            shooter_socle, model_socle, metric, max_distance=int(base_detection_subhex)
+            shooter_socle, model_socle, metric, max_distance=base_detection_subhex
         )
         if dist <= base_detection_subhex - penalty:
             return False  # figurine dans la detection réduite → détectable quoi qu'il arrive

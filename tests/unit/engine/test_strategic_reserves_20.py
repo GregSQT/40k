@@ -890,12 +890,14 @@ def test_bounding_radius_encloses_a_square_base():
     radius = bounding_radius_norm("square", side)
     socle = Socle(shape="square", base_size=side, col=0, row=0, fp={(0, 0)})
     center_x, center_y = _hex_center(0, 0)
-    # Une primitive est `("p", [sommets])` pour un polygone (cf. `_socle_edge_primitives`).
+    # Une primitive polygonale est `("p", [sommets], cx, cy, r_circonscrit)` — seuls les deux
+    # premiers champs sont lus ici, et l'indexation les isole sans dépendre de la longueur du
+    # tuple (un déballage `kind, payload` cassait au jour où le rayon circonscrit y a été ajouté).
     farthest = 0.0
-    for kind, payload in _socle_edge_primitives(socle):
-        if kind != "p":
+    for primitive in _socle_edge_primitives(socle):
+        if primitive[0] != "p":
             continue
-        for px, py in payload:
+        for px, py in primitive[1]:
             farthest = max(farthest, _math.hypot(px - center_x, py - center_y))
     assert farthest > 0.0, "aucun sommet lu — test sans portée"
     assert radius + 1e-9 >= farthest, (

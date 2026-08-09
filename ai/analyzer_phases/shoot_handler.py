@@ -663,7 +663,12 @@ def handle_shoot(
                 shooter_models, state.unit_base.get(shooter_id, _DEFAULT_BASE),  # get allowed
                 target_models, state.unit_base.get(target_id, _DEFAULT_BASE),  # get allowed
                 _analyzer_ranged_metric(config),
-                max_distance=int(weapon_range),
+                # Cap NON tronqué : c'est `weapon_range` que la ligne suivante compare, et
+                # `ranged_edge_distance` arrondit elle-même pour sa branche hex. Un `int()` ici
+                # rendrait un minorant sous le seuil pour une cible située entre les deux — un
+                # tir hors portée compté légal. Jumeau du même arbitrage dans
+                # `shooting_handlers.hidden_enemy_out_of_detection`.
+                max_distance=weapon_range,
             )
             if edge_dist is not None and edge_dist > weapon_range:
                 stats['shoot_invalid'][player]['out_of_range'] += 1

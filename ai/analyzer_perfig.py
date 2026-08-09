@@ -354,7 +354,7 @@ def squads_min_ranged_distance(
     models_b: Dict[str, Tuple[int, int]],
     base_b: Base,
     metric: str,
-    max_distance: int = 0,
+    max_distance: float = 0,
 ) -> float:
     """Distance de PORTÉE minimale entre deux escouades, socle par socle (10 Shooting / 06.01).
 

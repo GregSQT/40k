@@ -1040,10 +1040,12 @@ class W40KMetricsTracker:
             )
         self.forcing_tracking['episodes_with_forced_unit'] += forced_episode_has_controlled
 
-        episodes_total = int(self.forcing_tracking['episodes_total'])
-        episodes_with_forced = int(self.forcing_tracking['episodes_with_forced_unit'])
+        # Ces trois compteurs viennent d'etre incrementes ci-dessus avec des entiers : pas de
+        # cast defensif, il masquerait un jour un compteur devenu flottant au lieu de lever.
+        episodes_total = self.forcing_tracking['episodes_total']
+        episodes_with_forced = self.forcing_tracking['episodes_with_forced_unit']
         forcing_ratio = episodes_with_forced / episodes_total
-        mean_instances = float(self.forcing_tracking['forced_unit_instances_total']) / float(episodes_total)
+        mean_instances = self.forcing_tracking['forced_unit_instances_total'] / episodes_total
 
         self.writer.add_scalar('forcing/episodes_with_forced_unit_ratio', forcing_ratio, self.episode_count)
         self.writer.add_scalar('forcing/forced_unit_instances_mean', mean_instances, self.episode_count)
@@ -1053,14 +1055,14 @@ class W40KMetricsTracker:
             self.episode_count
         )
 
+        per_unit_episode_counts = require_key(self.forcing_tracking, 'per_unit_episode_counts')
+        per_unit_instance_counts = require_key(self.forcing_tracking, 'per_unit_instance_counts')
         for unit_name, raw_count in forced_unit_counts_controlled.items():
             unit_count = int(raw_count)
             if unit_count <= 0:
                 raise ValueError(
                     f"forced_unit_counts_controlled['{unit_name}'] must be > 0 (got {unit_count})"
                 )
-            per_unit_episode_counts = require_key(self.forcing_tracking, 'per_unit_episode_counts')
-            per_unit_instance_counts = require_key(self.forcing_tracking, 'per_unit_instance_counts')
             if unit_name not in per_unit_episode_counts:
                 per_unit_episode_counts[unit_name] = 0
             if unit_name not in per_unit_instance_counts:
