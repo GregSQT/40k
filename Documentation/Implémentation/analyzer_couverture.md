@@ -1,7 +1,14 @@
 # Couverture analyzer — matrice RÈGLE → CONTRÔLE → CHAMPS step.log → STATUT
 
-> Cartographie exhaustive, produite le 2026-08-08. Document d'ENTRÉE des lots suivants :
-> il dit ce qui est vérifié, ce qui ne l'est pas, et **pourquoi**. Aucun code n'a été modifié.
+> Cartographie exhaustive, produite le 2026-08-08, **remise à jour le 2026-08-09** sur `main`
+> après les quatre lots de nuit (`52b250fc`, `1be72f3f`, `089fec52`, `21cea5a8`).
+> Document d'ENTRÉE des lots suivants : il dit ce qui est vérifié, ce qui ne l'est pas, et
+> **pourquoi**. Aucun code n'a été modifié pour le produire.
+>
+> **Ce que la mise à jour a changé** — trois lignes de journal neuves (`AGENT_PLAYER=`,
+> `T{tour} STATE:`, `T{tour} EFFECTS:`) et un segment neuf (`[MODEL_TYPES:]`) ; une section de
+> rapport neuve (§2.8) et ses 3 compteurs ; la double-activation étendue à la phase FIGHT ;
+> une **correction de ma part** sur `oath_of_moment` (§5-bis). Le reste du fond est inchangé.
 
 ## 0. Méthode et sources
 
@@ -10,8 +17,8 @@
 | `Documentation/40k_rules/*.pdf` (25 fichiers, texte intégral extrait) | 156 règles numérotées `NN.MM` |
 | `config/weapon_rules.json` | 23 règles d'armes |
 | `config/unit_rules.json` | 35 règles spéciales d'unité |
-| `ai/analyzer.py` (3407 l.) + `analyzer_core.py` + `analyzer_config.py` + `analyzer_perfig.py` + `analyzer_state.py` + `analyzer_phases/*` (9099 l. au total) | 59 contrôles vivants, 3 morts, 5 supprimés documentés |
-| `ai/step_logger.py` (1061 l.), `engine/w40k_core.py` (`_STEP_LOG_TYPE_MAP`, `_build_step_log_details`, `_build_shot_details`, `_models_segment_for_unit`, `_run_rules_for_step_log`), `engine/action_log_utils.py` | format réel de `step.log`, champ par champ, type d'action par type d'action |
+| `ai/analyzer.py` (3469 l.) + `analyzer_core.py` (1265) + `analyzer_config.py` + `analyzer_perfig.py` + `analyzer_state.py` + `analyzer_phases/*` (9287 l. au total) | 62 contrôles vivants, 3 morts, 5 supprimés documentés |
+| `ai/step_logger.py` (1186 l.), `engine/w40k_core.py` (`_STEP_LOG_TYPE_MAP`, `_build_step_log_details`, `_build_shot_details`, `_models_segment_for_unit`, `_run_rules_for_step_log`, `_log_effects_snapshot_if_changed`), `engine/action_log_utils.py` | format réel de `step.log`, champ par champ, type d'action par type d'action |
 
 ### Légende des STATUTS
 
@@ -36,7 +43,7 @@ La §5 liste les verts vacants trouvés.
 [hh:mm:ss] === EPISODE N START ===
 [hh:mm:ss] Scenario: <texte>                       (optionnel)
 [hh:mm:ss] Scenario file: <chemin relatif>          (optionnel)
-[hh:mm:ss] Rosters: scale=<n> AGENT=<id> (<ref>) OPPONENT=<id> (<ref>)   (optionnel)
+[hh:mm:ss] Rosters: scale=<n> AGENT_PLAYER=<1|2> AGENT=<id> (<ref>) OPPONENT=<id> (<ref>)  (optionnel)
 [hh:mm:ss] Opponent: <Nom>Bot                       (optionnel)
 [hh:mm:ss] Walls: (c,r);(c,r);…      |  Walls: none
 [hh:mm:ss] Objectives: <nom>:(c,r);(c,r)|<nom>:…   |  Objectives: none
@@ -45,13 +52,19 @@ La §5 liste les verts vacants trouvés.
 [hh:mm:ss] Run rules: engagement_zone_subhex=… engagement_zone_vertical_inches=…
            metric.engagement=… metric.ranged=… move.thru_ez=… move.thru_enemy=… move.thru_friendly=…
 [hh:mm:ss] Unit <id> (<unitType>) [<DISPLAY_NAME>] P<n>: Starting position (c,r), HP_MAX=<n>
-           base=<shape>/<size> [MODELS: <mid>@(c,r,z<h>) …]
+           base=<shape>/<size> [MODELS: <mid>@(c,r,z<h>) …] [MODEL_TYPES: <mid>=<UnitType> …]
 [hh:mm:ss] === ACTIONS START ===
 ```
 
 `Board:` et `Run rules:` sont **exigés** par l'analyzer (`analyzer_config.get_run_inches_to_subhex` /
 `get_run_rule` lèvent sinon) : ils figent l'échelle et les règles du run analysé, jamais celles du
-`config/` du jour.
+`config/` du jour. **`AGENT_PLAYER=` l'est aussi** depuis le 2026-08-09 (`analyzer_core.py:283`
+puis levée en fin d'épisode) : `controlled_player_mode` accepte `p2` et `random`, et supposer
+« agent == P1 » attribuait les victoires de l'agent au bot dans 30 % des épisodes.
+
+`[MODEL_TYPES:]` donne la **datasheet par figurine** : une escouade n'est pas homogène (règle 19,
+sergents, armes spéciales), et tout plafond calculé par socle à partir du type d'ESCOUADE est faux.
+C'est ce segment qui rend le plafond d'attaques de §1.4 juste (`fight_handler.py:24`).
 
 ### 1.2 Ligne d'action (`log_action`, `ai/step_logger.py:156`)
 
@@ -85,7 +98,7 @@ l'écriture directe de `rule_choice`) :
 | `charge` | `Unit N(c,r) CHARGED [<CAPACITÉ>] [FLY] Unit M(c,r) from … to … [Roll: N]` | jet 2D6 (pouces), `[FLY]`, **une seule** cible |
 | `charge_fail` | `Unit N(c,r) FAILED CHARGE to unit M(c,r) [Roll: N]` | jet |
 | `charge_impact` | `Unit N(c,r) IMPACTED [<CAPACITÉ>] Unit M(c,r) - Hit:T+:R(HIT\|FAIL) Wound:AUTO Save:NONE[MW] Dmg:NHP` | seuil, jet, MW |
-| `combat` | `Unit N(c,r) FOUGHT Unit M(c,r) with [<arme>] - Hit R(T+) [SUSTAINED HITS] [<CAPACITÉ>] [REROLLED:n] - Wound … - Save … - Dmg:NHP [FIGHT_SUBPHASE:<x>]` | idem tir + sous-phase de combat |
+| `combat` | `Unit N(c,r) FOUGHT [WAAAGH!] Unit M(c,r) with [<arme>] - Hit R(T+) [SUSTAINED HITS] [<CAPACITÉ>] [REROLLED:n] - Wound … - Save … - Dmg:NHP [FIGHT_SUBPHASE:<x>]` | idem tir + sous-phase de combat + `[WAAAGH!]` (confort de lecture — la **donnée** est dans `T{tour} EFFECTS:`) |
 | `pile_in` / `consolidation` | `Unit N(c,r) PILED IN\|CONSOLIDATED from … to …` | positions, `[MODELS:]` |
 | `wait` | `Unit N(c,r) WAIT` | — |
 | `rule_choice` | `Unit N(c,r) chose [<NOM DE RÈGLE>]` | nom d'affichage |
@@ -99,33 +112,41 @@ Conséquence directe : le contrôle §2.1 « Dead unit skipping » et tout `hand
 | Ligne | Producteur | Lue par l'analyzer ? |
 |---|---|---|
 | `[ts] T<n> P<n> <PHASE> phase Start` | `log_phase_transition` | **Non** — jamais parsée |
-| `[ts] T<n> OBJECTIVE CONTROL: VP1= VP2= CP1= CP2= ZONES=<nom>:Ctrl=…` | `log_objective_control_snapshot` | Oui (`analyzer_core.py:147`) — VP uniquement |
+| `[ts] T<n> OBJECTIVE CONTROL: VP1= VP2= CP1= CP2= ZONES=<nom>:Ctrl=…` | `log_objective_control_snapshot` | Oui — VP uniquement |
+| `[ts] T<n> STATE: <uid>[<mid>@(c,r,z<h>):<pv> …] …` | `log_state_snapshot` (`step_logger.py:199`) | **Oui** — `_apply_state_snapshot` (`analyzer_core.py:123`) : compte l'écart, PUIS recale |
+| `[ts] T<n> EFFECTS: P1 <clé>=<val> … \| P2 none` | `log_effects_snapshot` (`step_logger.py:156`) | Partiellement — `_parse_effects_snapshot` (`analyzer_core.py:105`) lit tout, mais seul `waaagh_melee_atk` est consommé |
 | `[ts] EPISODE END: Winner=, Method=, Actions=, Steps=, Total=, Duration=…s` | `log_episode_end` | Oui |
 | `[ts] OBJECTIVE CONTROL: Obj<id>:P1_OC=,P2_OC=,Ctrl=` (récap de fin) | `log_episode_end` | Non (motif distinct, non matché) |
 
+Clés émises par `T{tour} EFFECTS:` (`w40k_core.py:7189`, valeurs prises aux constantes du moteur —
+le journal dit ce qui a été appliqué, il ne le redécrit pas) : `waaagh=on`, `waaagh_melee_str=+X`,
+`waaagh_melee_atk=+X`, `waaagh_invul=<n>`, `oath_target=<unit_id>`, `oath_wound=+X`.
+**Une seule est lue** aujourd'hui : `waaagh_melee_atk`. Les cinq autres sont dans le journal et
+n'alimentent aucun contrôle — c'est le gisement le moins cher de la liste §7.
+
 ---
 
-## 2. Inventaire des contrôles analyzer (59 vivants)
+## 2. Inventaire des contrôles analyzer (62 vivants)
 
 ### §1.1 MOVEMENT ERRORS (`analyzer.py:2297`)
 
 | # | Compteur | Site | Ce qu'il regarde VRAIMENT |
 |---|---|---|---|
-| 1 | `wall_collisions` | `move_handler.py:180,580` ; `shoot_handler.py:1316` | destination d'ANCRE ∈ `wall_hexes` |
+| 1 | `wall_collisions` | `move_handler.py:180,580` ; `shoot_handler.py:1321` | destination d'ANCRE ∈ `wall_hexes` |
 | 2 | `move_to_adjacent_enemy` | `move_handler.py:568` | zone d'engagement per-figurine, socles d'ARRIVÉE + hauteurs d'arrivée |
 | 3 | `move_adjacent_before_non_flee` | `move_handler.py:545` | zone d'engagement per-figurine, socles de DÉPART (survivants) |
 | 4 | `move_distance_over_limit['move']` | `move_handler.py:431` | `_per_model_move_violation` : BFS par socle, budget `M` (−2" si `[FLY]`) |
 | 5 | `move_after_shooting_distance_over_limit` | `move_handler.py:425` | idem, budget = `rule_args.distance` × échelle |
-| 6 | `reactive_move_stats.abnormal` | `analyzer_core.py:802` | phase ∉ {MOVE,SHOOT} **ou** `calculate_hex_distance` ANCRE > jet×échelle |
-| 7 | `reactive_move_checks.to_adjacent_enemy` | `analyzer_core.py:896` | engagement, sujet mesuré à l'ANCRE (pas de `[MODELS:]` réactif) |
-| 8 | `reactive_move_checks.into_wall` | `analyzer_core.py:904` | ancre ∈ `wall_hexes` |
-| 9 | `reactive_move_checks.distance_over_roll` | `analyzer_core.py:855` | `_per_model_move_violation`, budget jet×échelle |
+| 6 | `reactive_move_stats.abnormal` | `analyzer_core.py:1061` | phase ∉ {MOVE,SHOOT} **ou** `calculate_hex_distance` ANCRE > jet×échelle |
+| 7 | `reactive_move_checks.to_adjacent_enemy` | `analyzer_core.py:1155` | engagement, sujet mesuré à l'ANCRE (pas de `[MODELS:]` réactif) |
+| 8 | `reactive_move_checks.into_wall` | `analyzer_core.py:1163` | ancre ∈ `wall_hexes` |
+| 9 | `reactive_move_checks.distance_over_roll` | `analyzer_core.py:1114` | `_per_model_move_violation`, budget jet×échelle |
 
 ### §1.2 SHOOTING ERRORS (`analyzer.py:2400`)
 
 | # | Compteur | Site | Ce qu'il regarde VRAIMENT |
 |---|---|---|---|
-| 10 | `shoot_invalid.out_of_range` | `shoot_handler.py:669` | `squads_min_ranged_distance` socle→socle, métrique `metric.ranged` du run ; **aucun verdict** si ni `[TARGET_MODELS:]` ni socles connus |
+| 10 | `shoot_invalid.out_of_range` | `shoot_handler.py:674` | `squads_min_ranged_distance` socle→socle, métrique `metric.ranged` du run, cap **non tronqué** depuis le 2026-08-09 ; **aucun verdict** si ni `[TARGET_MODELS:]` ni socles connus |
 | 11 | `shoot_invalid.engaged_non_close_quarters` / `engaged_shot_with_non_close_quarters_weapon` | `:633` | tireur engagé (per-fig) ∧ arme non-CQ ∧ non-M/V |
 | 12 | `shoot_over_rng_nb` | `:411` | compteur de séquence vs `NB × socles vivants` (+ `RAPID FIRE` si marqueur) ; `[SUSTAINED HITS]` exclu |
 | 13 | `shoot_combi_profile_conflicts` | `:327` | 2 profils d'un même `COMBI_WEAPON` dans le même tour |
@@ -133,10 +154,10 @@ Conséquence directe : le contrôle §2.1 « Dead unit skipping » et tout `hand
 | 15 | `shoot_at_friendly` | `:186` | `unit_player[cible] == unit_player[tireur]` |
 | 16 | `shoot_at_engaged_enemy` | `:594` | cible engagée (per-fig) ∧ arme non-CQ ∧ ¬exemption 17.03 ∧ ¬tireur engagé avec elle |
 | 17 | `close_quarters_shot_at_unengaged_target` | `:622` | tireur engagé non-M/V visant une unité avec laquelle il n'est PAS engagé (10.06) |
-| 18 | `advance_after_shoot` | `:1187` | `units_shot` puis `ADVANCED` |
-| 19 | `advance_twice_in_shoot_phase` | `:1178` | 2e `ADVANCED` en phase SHOOT |
-| 20 | `move_distance_over_limit['advance']` | `:1171` | BFS par socle, budget `M + D6×échelle` (−2" si `[FLY]`) |
-| 21 | `advance_from_adjacent` | `:1235` | engagement per-fig aux socles de départ |
+| 18 | `advance_after_shoot` | `:1192` | `units_shot` puis `ADVANCED` |
+| 19 | `advance_twice_in_shoot_phase` | `:1183` | 2e `ADVANCED` en phase SHOOT |
+| 20 | `move_distance_over_limit['advance']` | `:1176` | BFS par socle, budget `M + D6×échelle` (−2" si `[FLY]`) |
+| 21 | `advance_from_adjacent` | `:1240` | engagement per-fig aux socles de départ |
 
 ### §1.3 CHARGE ERRORS (`analyzer.py:2541`)
 
@@ -152,26 +173,31 @@ Conséquence directe : le contrôle §2.1 « Dead unit skipping » et tout `hand
 
 | # | Compteur | Site | Ce qu'il regarde VRAIMENT |
 |---|---|---|---|
-| 27 | `fight_friendly` | `fight_handler.py:197` | même joueur |
-| 28 | `fight_over_cc_nb` | `:149` | séquence vs `CC_NB × socles vivants` ; `[SUSTAINED HITS]` exclu |
-| 29 | `fight_alternation_violations` | `:84` | une unité ayant chargé, encore engagée et non encore activée, existait au moment où une autre a frappé |
-| 30-31 | `fight_move_invalid.pile_in` / `.consolidation` | `:330` | BFS par socle, budget `3"×échelle` |
+| 27 | `fight_friendly` | `fight_handler.py:283` | même joueur |
+| 28 | `fight_over_cc_nb` | `:235` (plafond : `_cc_cap_for_line`, `:24`) | séquence vs plafond **par figurine** depuis le 2026-08-09 : `[SHOOTER_MODELS:]` donne les socles qui ont frappé, `[MODEL_TYPES:]` la datasheet de chacun, `T{tour} EFFECTS:` le bonus `waaagh_melee_atk`. Le groupe de frappeurs entre dans la clé de séquence. Repli explicite sur `NB d'escouade × effectif` si le journal n'a pas ces segments. `[SUSTAINED HITS]` exclu |
+| 29 | `fight_alternation_violations` | `:151` | une unité ayant chargé, encore engagée et non encore activée, existait au moment où une autre a frappé |
+| 30-31 | `fight_move_invalid.pile_in` / `.consolidation` | `:416` | BFS par socle, budget `3"×échelle` |
 
 ### §1.5–§1.8
 
 | # | Contrôle | Site |
 |---|---|---|
-| 32 | `action_phase_accuracy` (move / move_after_shooting / fled / shoot / advance / charge / fight → phase attendue) | `analyzer.py:899` |
-| 33 | `double_activation_by_phase` (MOVE/SHOOT/CHARGE, marqueurs de MOUVEMENT seulement) | `analyzer_core.py:644` |
-| 34 | `double_activation_reactive_move` (2e réactif / tour / joueur) | `analyzer_core.py:767` |
-| 35 | `special_rule_usage` → colonne `Validité` : l'unité porte-t-elle la règle qu'elle a utilisée ? | `analyzer.py:2690` |
-| 36 | `rule_choice_selection_invalid` (label inconnu/ambigu, ou choix hors des sources de l'unité) | `analyzer_core.py:499,528` |
-| 37 | `rule_choice_usage.missing` (effet utilisé sans choix préalable) | `analyzer_core.py:598` |
-| 38 | `rule_choice_usage.mismatch` (effet utilisé ≠ effet choisi) | `analyzer_core.py:591` |
-| 39 | `weapon_rule_usage` → `Validité` : la paire (règle, arme) existe-t-elle dans l'armurerie ? + `NOT USED` | `analyzer.py:2760` |
+| 32 | `action_phase_accuracy` (move / move_after_shooting / fled / shoot / advance / charge / fight → phase attendue) | `analyzer.py:909` |
+| 33 | `double_activation_by_phase` — **MOVE/SHOOT/CHARGE/FIGHT** depuis le 2026-08-09 | `analyzer_core.py:901` ; marqueurs `:876-883` |
+| 34 | `double_activation_reactive_move` (2e réactif / tour / joueur) | `analyzer_core.py:1026` |
+| 35 | `special_rule_usage` → colonne `Validité` : l'unité porte-t-elle la règle qu'elle a utilisée ? | `analyzer.py` §1.7 |
+| 36 | `rule_choice_selection_invalid` (label inconnu/ambigu, ou choix hors des sources de l'unité) | `analyzer_core.py:743,772` |
+| 37 | `rule_choice_usage.missing` (effet utilisé sans choix préalable) | `analyzer_core.py` §1.7 |
+| 38 | `rule_choice_usage.mismatch` (effet utilisé ≠ effet choisi) | `analyzer_core.py` §1.7 |
+| 39 | `weapon_rule_usage` → `Validité` : la paire (règle, arme) existe-t-elle dans l'armurerie ? + `NOT USED` | `analyzer.py` §1.8 |
 | 40 | `devastating_wounds_incorrect` | `shoot_handler.py:429` |
 | 41 | marqueur `[RAPID FIRE:X]` absent de l'armurerie ou valeur ≠ armurerie → `parse_error` | `shoot_handler.py:289,300` |
 | 42 | marqueur `[SUSTAINED HITS]` sur arme sans la règle → `parse_error` | `shoot_handler.py:351` |
+
+Le marqueur d'activation de la phase FIGHT est `) CONSOLIDATED ` (`analyzer_core.py:876`) : les
+lignes `FOUGHT` sont par ATTAQUE (des dizaines par activation), la consolidation est la seule
+frontière d'activation d'une par unité et par phase (12.07). **SHOOT reste sans marqueur propre** :
+`SHOT` n'est pas dans `is_activation_marker`, donc 10.02 n'est toujours pas couvert.
 
 ### §2.1 DEAD UNITS (11 compteurs)
 
@@ -179,14 +205,14 @@ Conséquence directe : le contrôle §2.1 « Dead unit skipping » et tout `hand
 |---|---|---|
 | 43 | `dead_unit_moving` | `move_handler.py:281` |
 | 44 | `shoot_dead_unit` | `shoot_handler.py:151` |
-| 45 | `shoot_at_dead_unit` | `analyzer_core.py:410` |
-| 46 | `dead_unit_advancing` | `shoot_handler.py:1115` |
+| 45 | `shoot_at_dead_unit` | `analyzer_core.py:648` |
+| 46 | `dead_unit_advancing` | `shoot_handler.py:1120` |
 | 47 | `dead_unit_charging` | `charge_handler.py:183` |
 | 48 | `charge_dead_unit` | `charge_handler.py:251` |
-| 49 | `fight_dead_unit_attacker` | `fight_handler.py:222` |
-| 50 | `fight_dead_unit_target` | `fight_handler.py:251` |
-| 51 | `dead_unit_waiting` | `shoot_handler.py:785` |
-| 52 | `dead_unit_skipping` | `shoot_handler.py:1004` — **inatteignable** (pas de producteur `skip`) |
+| 49 | `fight_dead_unit_attacker` | `fight_handler.py:308` |
+| 50 | `fight_dead_unit_target` | `fight_handler.py:337` |
+| 51 | `dead_unit_waiting` | `shoot_handler.py:790` |
+| 52 | `dead_unit_skipping` | `shoot_handler.py:1009` — **inatteignable** (pas de producteur `skip`) |
 | 53 | `unit_revived` | `analyzer.py:352` |
 
 Tous appliquent la même exception 05 (« excess attacks lost » de la même activation, via `unit_kill_context`).
@@ -195,10 +221,28 @@ Tous appliquent la même exception 05 (« excess attacks lost » de la même act
 
 | # | Contrôle | Site |
 |---|---|---|
-| 54-56 | `position_log_mismatch` move / advance / charge (`move_start_status`, per-figurine, avec catégorie informative `anchor_absorbed`) | `analyzer_perfig.py:158` |
+| 54-56 | `position_log_mismatch` move / advance / charge (`move_start_status`, per-figurine, avec catégorie informative `anchor_absorbed`) | `analyzer_perfig.py:164` |
 | 57 | `unit_position_collisions` (2 unités vivantes sur la même ANCRE, après mouvement le même tour) | 3 sites |
 | 58 | `damage_missing_unit_hp` | `analyzer.py:269` |
-| 59 | `damage_exceeds_hp` | affiché `analyzer.py:2939` — **jamais incrémenté** |
+| 59 | `damage_exceeds_hp` | affiché `analyzer.py:2973` — **jamais incrémenté** |
+
+### §2.8 ÉTAT RECONSTRUIT vs ÉTAT MOTEUR — section neuve (2026-08-09)
+
+Le reste du rapport repose sur un état **reconstruit par accumulation** (PV initial moins chaque
+`Dmg:`, position initiale plus chaque déplacement). Rien ne disait quand cette reconstruction
+dérivait. La ligne `T{tour} STATE:` est le point de recalage : `_apply_state_snapshot`
+(`analyzer_core.py:123`) **compte l'écart avant de le corriger** — une correction muette ferait
+disparaître le symptôme sans jamais signaler sa cause.
+
+| # | Compteur | Site | Ce qu'il signifie |
+|---|---|---|---|
+| 60 | `state_resync.dead_missed` | `analyzer_core.py:190` | l'analyzer croyait l'unité vivante, le moteur ne la voit plus — le **fantôme** (une escouade hors table n'est pas comptée : réserves ≠ mort) |
+| 61 | `state_resync.alive_missed` | `analyzer_core.py:159` | l'analyzer a tué une unité que le moteur garde — sur-attribution de dégâts |
+| 62 | `state_resync.pos_mismatch` | `analyzer_core.py:164` | une figurine n'est pas là où l'analyzer la croyait — déplacement non journalisé (c'est ainsi que le pile-in muet s'est manifesté) |
+
+Affiché en §2.8 (`analyzer.py:3038`), au SUMMARY (`:3219`) et compté dans le total d'erreurs de la
+CLI (`:3411`). **Portée du verdict** : une divergence non nulle invalide, pour l'épisode concerné,
+tout contrôle mesurant une distance ou une adjacence — donc §1.1 à §1.4.
 
 ### Contrôles SUPPRIMÉS (documentés dans le code, à ne pas ré-écrire à l'identique)
 
@@ -253,7 +297,7 @@ Tous appliquent la même exception 05 (« excess attacks lost » de la même act
 |---|---|---|---|
 | 04.01 Select weapons | #39 (usage par arme) | `with [<arme>]` | **PARTIEL** — le volet 24.07 (« une figurine choisit SOIT ses CQ SOIT ses autres armes ») et 24.11 EXTRA ATTACKS ne sont pas contrôlés ; l'arme est loguée au niveau ESCOUADE, pas par figurine |
 | 04.02 Select targets (visible / à portée / non engagé ; en mêlée : engagé, ≤ A cibles) | #10 (portée), #16-#17 (engagé) | portée et engagement OK ; visibilité impossible | **PARTIEL** — volet « visible » (06.01) supprimé ; volet mêlée « engagé » supprimé ; « pas plus de cibles que A » non contrôlé (loggable) |
-| 04.03 Resolve attacks (gather dice = A) | #12, #28 | séquence de lignes, `[MODELS:]`, `[RAPID FIRE:X]`, `[SUSTAINED HITS]` | **PARTIEL** — plafond au niveau ESCOUADE et par arme, pas par figurine ; « identical attacks » et le regroupement par cible ne sont pas journalisés |
+| 04.03 Resolve attacks (gather dice = A) | #12 (tir), #28 (mêlée) | séquence de lignes, `[MODELS:]`, `[SHOOTER_MODELS:]`, `[MODEL_TYPES:]`, `T{tour} EFFECTS:`, `[RAPID FIRE:X]`, `[SUSTAINED HITS]` | **PARTIEL** — le plafond de MÊLÉE est passé **par figurine** le 2026-08-09 (datasheet du socle, frappeurs réels, bonus lu) ; celui du TIR reste au niveau ESCOUADE (`NB × socles vivants`, `shoot_handler.py:388`), donc faux dès qu'une escouade est hétérogène — c'est le jumeau non traité. « Identical attacks » et le regroupement par cible ne sont pas journalisés |
 
 ### 05 Attack sequence
 
@@ -328,12 +372,12 @@ Tous appliquent la même exception 05 (« excess attacks lost » de la même act
 | Règle | Contrôle | Champs | Statut |
 |---|---|---|---|
 | 12.01 Start of Fight phase | — | — | NON-TESTABLE-OFFLINE |
-| 12.02 Pile in (une seule par unité et par étape) | — | lignes `PILED IN` datées T/P | **ABSENT-LOGGABLE** — §1.6 ne couvre pas la phase FIGHT |
+| 12.02 Pile in (une seule par unité et par étape) | — | lignes `PILED IN` datées T/P | **ABSENT-LOGGABLE** — §1.6 couvre désormais FIGHT, mais son marqueur est `CONSOLIDATED`, pas `PILED IN` : un double pile-in n'est pas compté pour lui-même |
 | 12.03 Pile-in move (3" ; figurines au contact immobiles ; finir plus près ; rester engagé) | #30 (budget/chemin 3") | `[MODELS:]` | **PARTIEL** — les trois conditions « While/After Moving » ne sont pas contrôlées (toutes loggables depuis `[MODELS:]`) |
-| 12.04 Fight (éligibilité ; alternance ; Fights First d'abord) | #29 | `[FIGHT_SUBPHASE:<x>]` présent mais **non lu** | **PARTIEL** — #29 ne modélise que « une unité ayant chargé restait éligible » ; ni l'alternance joueur↔joueur ni la priorité Fights First |
+| 12.04 Fight (éligibilité ; alternance ; Fights First d'abord ; une activation par unité) | #29, **#33 (FIGHT)** | `[FIGHT_SUBPHASE:<x>]` présent mais **non lu** | **PARTIEL** — la double activation en phase FIGHT est désormais comptée (via `CONSOLIDATED`) ; #29 ne modélise toujours que « une unité ayant chargé restait éligible », ni l'alternance joueur↔joueur ni la priorité Fights First |
 | 12.05 Normal fight (engagé) | supprimé 2026-07-24 | position cible pré-perte non journalisable | NON-TESTABLE-OFFLINE (justifié : métrique + `[TARGET_MODELS:]` post-pertes ; un contrôle relisant le log referait le calcul du moteur → tautologie) |
 | 12.06 Overrun fight | — | `[FIGHT_SUBPHASE:<x>]` | **ABSENT-LOGGABLE** — le champ existe, l'analyzer ne le lit pas |
-| 12.07 Consolidate (une seule par unité) | — | lignes `CONSOLIDATED` | **ABSENT-LOGGABLE** |
+| 12.07 Consolidate (une seule par unité) | **#33 (FIGHT)** — `) CONSOLIDATED ` est le marqueur d'activation de la phase | lignes `CONSOLIDATED` datées T/P | **COUVERT** (2026-08-09) |
 | 12.08 Consolidation move (3" ; 3 modes mutuellement exclusifs, mandatoires) | #31 (budget/chemin 3") | `[MODELS:]`, objectifs | **PARTIEL** — le MODE choisi n'est pas loggué, donc aucune post-condition de mode n'est vérifiable |
 | 12.09 End of Fight phase | — | — | NON-TESTABLE-OFFLINE |
 
@@ -551,8 +595,8 @@ rattachées par mot-clé de faction (`analyzer_config.py:318-328`), pas par `UNI
 | `targeted_intercession_reroll_1_towound` | alias | PARTIEL |
 | `targeted_intercession_reroll_towound_target_on_objective` | alias | PARTIEL |
 | `target_priority` | — (aucun `grants_rule_ids` déclaré) | PARTIEL — si une unité la porte sans grants, §1.7 comptera ses effets `INVALID` |
-| `oath_of_moment` | §1.7 par mot-clé de faction ; tokens sur hit/wound | PARTIEL — le `+1` à la blessure n'est pas vérifié |
-| `waaagh` | §1.7 + #23 (charge après advance) | PARTIEL — `+1 S/A` et la 5++ ne sont pas vérifiés |
+| `oath_of_moment` | **aucun** | **ABSENT-LOGGABLE** — ⚠️ **correction du 2026-08-09**. La première version de ce document le donnait PARTIEL en affirmant que §1.7 comptait son usage via le mot-clé de faction. C'est faux : `FACTION_ABILITY_KEYWORD_BY_RULE_ID` ne fait qu'inscrire la **ligne** dans le tableau (colonne Validité), et `grep "oath_of_moment\|OATH OF MOMENT"` sur les six fichiers de l'analyzer rend **0 hit**. Le compteur est structurellement à 0 — 1657 tokens `[OATH OF MOMENT]` relevés dans un journal réel, zéro usage compté. La ligne `T{tour} EFFECTS:` porte maintenant `oath_target` ET `oath_wound=+X` : il ne manque que le comptage et la vérification du seuil de blessure |
+| `waaagh` | §1.7 + #23 (charge après advance) + `waaagh_melee_atk` lu par #28 | PARTIEL — le `+1 Attaques` est désormais LU dans `T{tour} EFFECTS:` et entre dans le plafond de mêlée ; `waaagh_melee_str` (+1 Force) et `waaagh_invul` (5++) sont journalisés mais **n'alimentent aucun contrôle** |
 | `deep_strike` | — | PARTIEL — cf. 24.09 |
 | `leader` | — | ABSENT-LOG-MANQUANT |
 | `support` | — | ABSENT-LOG-MANQUANT |
@@ -560,7 +604,7 @@ rattachées par mot-clé de faction (`analyzer_config.py:318-328`), pas par `UNI
 | `special_weapon` | — | NON-TESTABLE-OFFLINE (marqueur de rôle) |
 | `sergeant` | — | NON-TESTABLE-OFFLINE (marqueur de rôle) |
 
-**6 COUVERT / 20 PARTIEL / 2 ABSENT-LOGGABLE / 5 ABSENT-LOG-MANQUANT / 2 NON-TESTABLE.**
+**6 COUVERT / 19 PARTIEL / 3 ABSENT-LOGGABLE / 5 ABSENT-LOG-MANQUANT / 2 NON-TESTABLE.**
 
 ---
 
@@ -568,18 +612,20 @@ rattachées par mot-clé de faction (`analyzer_config.py:318-328`), pas par `UNI
 
 | # | Constat | Emplacement | Effet |
 |---|---|---|---|
-| V1 | `damage_exceeds_hp` n'est **jamais incrémenté** | affiché `analyzer.py:2939`, sommé `:3142` et `:3313` | La ligne « Dmg > HP_CUR (overkill) » affiche 0 en permanence et **contribue à un ✅ dans le SUMMARY** |
-| V2 | `fight_from_non_adjacent` n'est **jamais incrémenté** depuis 2026-07-24 | sommé `analyzer.py:3031` et `:3283` | Le total FIGHT ERRORS inclut un terme mort |
-| V3 | `dead_unit_skipping` / `handle_skip` sont **inatteignables** | `shoot_handler.py:969-1006` | `skip` n'a aucun producteur (`_STEP_LOG_TYPE_MAP` ne le contient pas) |
-| V4 | §1.8 usage `CLOSE_QUARTERS` mesure `calculate_hex_distance(ancre_tireur, ancre_cible) == 1` | `shoot_handler.py:700-703` | Ancre au lieu du socle **et** adjacence au lieu de la zone d'engagement — exactement le motif corrigé 80 lignes plus haut pour les contrôles d'erreur. À x5, `ez=10` : le compteur d'usage est quasi toujours à 0 |
-| V5 | `reactive_move_abnormal` mesure la distance à l'**ancre** (`calculate_hex_distance`) | `analyzer_core.py:797` | Son jumeau immédiat `distance_over_roll` (`:845`) est per-socle : deux mesures contradictoires sur la même ligne |
-| V6 | `_build_move_bfs_blockers` ignore l'exemption 17.01 (M/V traversent les figurines) | `analyzer.py:715` | Faux positifs « au-delà du budget » pour tout MONSTER/VEHICLE dont le chemin passe près d'une figurine |
-| V7 | Le BFS de mouvement ne connaît pas le **bord du plateau** | `analyzer.py:777` | Un chemin sortant du plateau est accepté (03.01) ; `Board:` porte pourtant `cols`/`rows` |
-| V8 | `devastating_wounds` suppose que **seul un 6** est critique | `shoot_handler.py:426-429` | Faux « incorrect » dès qu'une arme [ANTI-X Y+] rend critique un Y+ < 6 |
-| V9 | Le contrôle de portée ne rend **aucun verdict** quand ni `[TARGET_MODELS:]` ni les socles de la cible ne sont connus | `shoot_handler.py:662` | Choix délibéré et documenté, mais silencieux : rien ne compte les tirs non évalués |
-| V10 | `FLED` n'a **aucun** contrôle de budget ni de chemin | `move_handler.py:81-187` | Seul déplacement sur six sans `_per_model_move_violation` (09.07) |
-| V11 | La double-activation ne couvre ni SHOOT ni FIGHT | `analyzer_core.py:628-637` | `is_activation_marker` ne liste que des marqueurs de MOUVEMENT ; 10.02, 12.02, 12.07 sont hors couverture |
-| V12 | La ligne `phase Start` est produite et **jamais lue** | `step_logger.py:1003` | 07.02 (ordre des phases) reste non vérifié alors que la donnée existe |
+| V1 | `damage_exceeds_hp` n'est **jamais incrémenté** | affiché `analyzer.py:2973`, sommé `:3192` et `:3372` | La ligne « Dmg > HP_CUR (overkill) » affiche 0 en permanence et **contribue à un ✅ dans le SUMMARY**. *Toujours vrai au 2026-08-09* |
+| V2 | `fight_from_non_adjacent` n'est **jamais incrémenté** depuis 2026-07-24 | sommé `analyzer.py:3081` et `:3342` | Le total FIGHT ERRORS inclut un terme mort. *Toujours vrai* |
+| V3 | `dead_unit_skipping` / `handle_skip` sont **inatteignables** | `shoot_handler.py:974-1011` | `skip` n'a aucun producteur (`_STEP_LOG_TYPE_MAP` ne le contient pas). *Toujours vrai* |
+| V4 | §1.8 usage `CLOSE_QUARTERS` mesure `calculate_hex_distance(ancre_tireur, ancre_cible) == 1` | `shoot_handler.py:705` | Ancre au lieu du socle **et** adjacence au lieu de la zone d'engagement — exactement le motif corrigé 80 lignes plus haut pour les contrôles d'erreur. À x5, `ez=10` : le compteur d'usage est quasi toujours à 0. *Toujours vrai* |
+| V5 | `reactive_move_abnormal` mesure la distance à l'**ancre** (`calculate_hex_distance`) | `analyzer_core.py:1056` | Son jumeau immédiat `distance_over_roll` (`:1114`) est per-socle : deux mesures contradictoires sur la même ligne. *Toujours vrai* |
+| V6 | `_build_move_bfs_blockers` ignore l'exemption 17.01 (M/V traversent les figurines) | `analyzer.py:715` | Faux positifs « au-delà du budget » pour tout MONSTER/VEHICLE dont le chemin passe près d'une figurine. *Toujours vrai* |
+| V7 | Le BFS de mouvement ne connaît pas le **bord du plateau** | `analyzer.py:777` | Un chemin sortant du plateau est accepté (03.01) ; `Board:` porte pourtant `cols`/`rows`. *Toujours vrai* |
+| V8 | `devastating_wounds` suppose que **seul un 6** est critique | `shoot_handler.py:426-429` | Faux « incorrect » dès qu'une arme [ANTI-X Y+] rend critique un Y+ < 6. *Toujours vrai* |
+| V9 | Le contrôle de portée ne rend **aucun verdict** quand ni `[TARGET_MODELS:]` ni les socles de la cible ne sont connus | `shoot_handler.py:667` | Choix délibéré et documenté, mais silencieux : rien ne compte les tirs non évalués. *Toujours vrai* |
+| V10 | `FLED` n'a **aucun** contrôle de budget ni de chemin | `move_handler.py:81-187` | Seul déplacement sur six sans `_per_model_move_violation` (09.07). *Toujours vrai* |
+| ~~V11~~ | ~~La double-activation ne couvre ni SHOOT ni FIGHT~~ | `analyzer_core.py:876-891` | **PARTIELLEMENT FERMÉ le 2026-08-09** : FIGHT est entrée dans la liste des phases, avec `) CONSOLIDATED ` pour marqueur. **SHOOT reste découvert** — `SHOT` n'est pas un marqueur d'activation, donc 10.02 (« une unité ne peut être sélectionnée qu'une fois pour tirer ») n'est toujours pas contrôlé |
+| V12 | La ligne `phase Start` est produite et **jamais lue** | `step_logger.py` (`log_phase_transition`) | 07.02 (ordre des phases) reste non vérifié alors que la donnée existe. *Toujours vrai* |
+| V14 | Le plafond de tir reste **par escouade** alors que celui de mêlée est passé par figurine | `shoot_handler.py:388` | Jumeau non traité du lot du 2026-08-09 : `[MODEL_TYPES:]` et `[SHOOTER_MODELS:]` existent et sont lus côté mêlée (`fight_handler.py:24`), pas côté tir. Même cause de faux positif (escouade hétérogène, arme homonyme), même remède disponible |
+| V15 | Cinq des six clés de `T{tour} EFFECTS:` ne sont lues par personne | `analyzer_core.py:105` (parse) vs `fight_handler.py:24` (seul consommateur) | `waaagh_melee_str`, `waaagh_invul`, `oath_target`, `oath_wound` sont dans le journal et n'alimentent aucun contrôle. Le producteur a payé le coût, le lecteur n'a pas encaissé le gain |
 | V13 | `has_line_of_sight` (ancre-à-ancre, documentée comme inexacte) classe les `WAIT` en `wait_with_los` / `wait_no_los` | `shoot_handler.py:866`, `:725` | Usage assumé « métriques comportementales », mais ces métriques servent au pilotage |
 
 **Grep JUMEAU** `calculate_hex_distance|is_adjacent(` sur les 6 fichiers de l'analyzer → 4 sites de
@@ -596,9 +642,9 @@ V4 (`shoot_handler.py:700`) et V5 (`analyzer_core.py:797`). Aucun autre résidu 
 
 | Statut | Nombre | % |
 |---|---|---|
-| COUVERT | 4 | 2,6 % |
+| COUVERT | 5 | 3,2 % |
 | PARTIEL | 35 | 22,4 % |
-| ABSENT-LOGGABLE | 11 | 7,1 % |
+| ABSENT-LOGGABLE | 10 | 6,4 % |
 | ABSENT-LOG-MANQUANT | 68 | 43,6 % |
 | NON-TESTABLE-OFFLINE | 38 | 24,4 % |
 
@@ -617,7 +663,7 @@ Par famille :
 | 09 Movement phase | 7 | 1 | 3 | 0 | 1 | 2 |
 | 10 Shooting phase | 7 | 0 | 3 | 1 | 1 | 2 |
 | 11 Charge phase | 4 | 0 | 2 | 0 | 0 | 2 |
-| 12 Fight phase | 9 | 0 | 3 | 3 | 0 | 3 |
+| 12 Fight phase | 9 | 1 | 3 | 2 | 0 | 3 |
 | 13 Terrain | 11 | 0 | 1 | 0 | 0 | 10 |
 | 14 Objectives | 3 | 1 | 0 | 0 | 1 | 1 |
 | 15 Stratagems | 12 | 0 | 0 | 0 | 12 | 0 |
@@ -630,21 +676,21 @@ Par famille :
 | 22 Other rules | 5 | 0 | 1 | 0 | 3 | 1 |
 | 23 Aircraft | 4 | 0 | 0 | 0 | 4 | 0 |
 | 24 Core abilities | 38 | 0 | 10 | 0 | 27 | 1 |
-| **Total** | **156** | **4** | **35** | **11** | **68** | **38** |
+| **Total** | **156** | **5** | **35** | **10** | **68** | **38** |
 
 ### 6.2 Règles d'armes (23) et d'unité (35)
 
 | Corpus | Total | COUVERT | PARTIEL | ABS-LOGGABLE | ABS-LOG-MANQ | NON-TESTABLE |
 |---|---|---|---|---|---|---|
 | `weapon_rules.json` | 23 | 0 | 8 | 0 | 15 | 0 |
-| `unit_rules.json` | 35 | 6 | 20 | 2 | 5 | 2 |
+| `unit_rules.json` | 35 | 6 | 19 | 3 | 5 | 2 |
 
 ### 6.3 Tous corpus confondus (214 lignes)
 
 | Statut | Nombre | % |
 |---|---|---|
-| COUVERT | 10 | 4,7 % |
-| PARTIEL | 63 | 29,4 % |
+| COUVERT | 11 | 5,1 % |
+| PARTIEL | 62 | 29,0 % |
 | ABSENT-LOGGABLE | 13 | 6,1 % |
 | ABSENT-LOG-MANQUANT | 88 | 41,1 % |
 | NON-TESTABLE-OFFLINE | 40 | 18,7 % |
@@ -653,11 +699,25 @@ Par famille :
 
 | | Nombre |
 |---|---|
-| Contrôles de conformité vivants | 59 |
+| Contrôles de conformité vivants | 62 (59 + les 3 de §2.8) |
 | dont morts / inatteignables | 3 (V1, V2, V3) |
-| dont mesurant la mauvaise grandeur | 5 (V4, V5, V6, V7, V8) |
+| dont mesurant la mauvaise grandeur | 6 (V4, V5, V6, V7, V8, V14) |
 | Contrôles supprimés, documentés, à ne pas ré-écrire | 5 |
-| Sections de rapport | 15 (§1.1–§1.8, §2.1–§2.7) — dont 4 purement diagnostiques (§2.4, §2.5, §2.6, §2.7) |
+| Sections de rapport | 16 (§1.1–§1.8, §2.1–§2.8) — dont 4 purement diagnostiques (§2.4, §2.5, §2.6, §2.7) |
+
+### 6.5 Mouvement net depuis la première version (2026-08-08 → 2026-08-09)
+
+| | Avant | Après |
+|---|---|---|
+| COUVERT (tous corpus) | 10 | 11 |
+| ABSENT-LOGGABLE | 13 | 13 (12.07 fermé, `oath_of_moment` reclassé) |
+| Contrôles vivants | 59 | 62 |
+| Verts vacants ouverts | 13 | 14 (V11 partiellement fermé, V14 et V15 ouverts) |
+
+Le gain de couverture est **modeste par construction** : les quatre lots de nuit ont surtout
+supprimé des **faux positifs** (2218 → 18 erreurs sur un run) et ajouté un point de recalage
+(§2.8). Ils rendent le rapport *fiable*, pas plus *complet*. Les 88 `ABSENT-LOG-MANQUANT`
+n'ont pas bougé.
 
 **Lecture d'ensemble.** La couverture réelle se concentre sur la géométrie du mouvement et de
 l'engagement (03, 09, 11, 12 partiels, 21) et sur l'éligibilité au tir (10). Les 41 % de
@@ -674,6 +734,12 @@ l'engagement (03, 09, 11, 12 partiels, 21) et sur l'éligibilité au tir (10). L
 
 Ordonnée par nombre de règles débloquées. « Débloque » = fait passer la règle de
 `ABSENT-LOG-MANQUANT` à au moins `ABSENT-LOGGABLE`.
+
+**Déjà livré par les lots du 2026-08-09** (retiré de la liste ci-dessous) : `AGENT_PLAYER=`
+(siège de l'agent), `[MODEL_TYPES:]` (datasheet par figurine), `T{tour} STATE:` (point de recalage
+d'état) et `T{tour} EFFECTS:` (effets en vigueur avec contribution chiffrée). Ce dernier livre
+`waaagh_melee_str` (+1 Force), qui était le **volet manquant de L2** : le seuil de blessure
+modifié devient explicable, même si `S` et `T` de base restent absents.
 
 | # | Champ / ligne à ajouter | Format proposé | Débloque |
 |---|---|---|---|
@@ -706,10 +772,21 @@ Ordonnée par nombre de règles débloquées. « Débloque » = fait passer la r
 | L27 | **Relance de sauvegarde en mêlée : nom de la capacité** | `_ability_token` côté `Save` de `combat` | `reroll_1_save_fight`, `preservation_imperative` |
 | L28 | **Relance de charge : token** | `CHARGED [<CAPACITÉ>] … [REROLLED:<jet initial>]` | `reroll_charge` |
 
-**Champs déjà présents et simplement non exploités** (aucune modification du StepLogger requise) :
-`[FIGHT_SUBPHASE:<x>]` (12.06), la ligne `phase Start` (07.02), `CP1=`/`CP2=` (08.02,
-`cp_gain_on_objective`), `[MODELS:]` complet pour la cohérence (03.03), les positions pour
-`>8"` d'ingress (20.03, 20.04), `Board: cols/rows` pour le bord de plateau (V7).
+**Champs déjà présents et simplement non exploités** (aucune modification du StepLogger requise —
+c'est le gisement le moins cher) :
+
+| Champ présent | Non exploité par | Débloquerait |
+|---|---|---|
+| `T{tour} EFFECTS: oath_target`, `oath_wound=+X` | aucun contrôle | `oath_of_moment` (usage + validité du `+1` blessure), 08.04, 22.02 |
+| `T{tour} EFFECTS: waaagh_melee_str`, `waaagh_invul` | aucun contrôle | volet Force et 5++ de `waaagh` |
+| `[MODEL_TYPES:]` + `[SHOOTER_MODELS:]` côté TIR | `shoot_handler.py:388` | plafond de tir par figurine (V14) — le jumeau de ce que la mêlée vient d'obtenir |
+| `[FIGHT_SUBPHASE:<x>]` | aucun contrôle | 12.06 (overrun fight) |
+| ligne `phase Start` | aucun contrôle | 07.02 (ordre des phases) |
+| `CP1=` / `CP2=` | aucun contrôle | 08.02, `cp_gain_on_objective` |
+| `[MODELS:]` complet | aucun contrôle de cohérence | 03.03 (coherency, y compris la purge End of Turn) |
+| positions + `Board: cols/rows` | BFS (`analyzer.py:777`) | bord de plateau (V7, 03.01), `>8"` d'ingress (20.03, 20.04) |
+| `Hit R(T+)` + `hit_result` | aucun contrôle | 05.01 (cohérence jet/seuil/résultat) |
+| `[HAZARDOUS] Roll:N` + `SUFFERS X MW` | aucun contrôle | 06.03 |
 
 ---
 
@@ -724,10 +801,21 @@ d'émission `step.log` de `engine/w40k_core.py` (`_STEP_LOG_*`, `_build_step_log
 `_build_shot_details`, `_models_segment_for_unit`, `_run_rules_for_step_log`,
 `_record_rule_choice_action_log`) + `engine/action_log_utils.py`.
 
+**Mise à jour du 2026-08-09** : relecture du `git diff` complet des quatre lots sur
+`ai/analyzer*.py`, `ai/analyzer_phases/*`, `ai/step_logger.py` et `engine/w40k_core.py`
+(`_log_effects_snapshot_if_changed`), puis re-grep de tous les sites d'incrémentation cités pour
+en refixer les numéros de ligne. Les verts vacants V1–V10 et V12 ont été **re-vérifiés un par un**
+sur `main` : tous encore ouverts.
+
 **Non vérifié** :
 - Aucun `step.log` réel n'a été analysé : les statuts décrivent le CODE, pas une mesure sur un run.
   Les verts vacants V1–V3 sont prouvés par absence de site d'incrémentation (grep exhaustif) ;
-  V4–V13 par lecture du prédicat.
+  V4–V15 par lecture du prédicat. Les chiffres de run cités par les lots de nuit (2218 → 18,
+  1657 tokens Oath) proviennent de leurs rapports, je ne les ai pas reproduits.
+- Les tests ajoutés par les quatre lots n'ont pas été lus : je ne dis rien de ce qu'ils
+  verrouillent.
+- La régénération d'une référence en x1 (plateau 44×60) reste ouverte : sans elle, les compteurs
+  §1.1–§1.4 d'un run x5 ne sont pas comparables au baseline historique.
 - `ai/unit_registry.py` et le contenu des datasheets n'ont pas été relus : les statuts
   « NON-TESTABLE-OFFLINE (registre) » supposent que le registre porte bien ces champs.
 - Les chemins PvP/replay (`services/`, `frontend/`) sont hors périmètre : cette matrice ne
