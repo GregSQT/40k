@@ -1,4 +1,5 @@
 {
+  "_resolution_detail": "Le NOM d'une phase (x1_*, x5_*) ne fixe PAS la resolution du plateau : elle vient de `--resolution 1|5|10`, qui pose W40K_BOARD_PATH et prime sur paths.board (config_loader.py). Sans cet argument, le plateau est celui de config.json, quel que soit le nom de la phase. Mesure du 2026-08-09 : `--training-config x1_debug` sans `--resolution` a produit un plateau 220x300 (x5) ; le step.log etait juste (l'entete `Board:` porte inches_to_subhex et l'analyzer s'y adapte), mais les compteurs n'etaient plus comparables au run de reference en x1. Le nom decrit le jeu d'hyperparametres, rien d'autre.",
   "x1": {
     "type": "################################################### x1 — curriculum phase 1 (board 44x60x1, scale ×1) ###################################################",
     "seed": 12345,
