@@ -4790,6 +4790,22 @@ def roll_hazard_for_unit(
         "phase": require_key(game_state, "phase"),
         "unitId": int(unit_id),
         "player": int(unit.get("player", -1)),
+        # POSITION DE L'UNITÉ — sans elle, la ligne n'atteignait JAMAIS step.log. Le formateur
+        # du StepLogger exige `unit_with_coords` pour une action `hazardous`, et
+        # `_build_step_log_details` ne le construit qu'à partir de `toCol/toRow` ou de
+        # `col/row` : ce payload n'avait ni l'un ni l'autre, donc le formateur levait et
+        # `log_action` avalait l'exception (« ⚠️ Step logging error »). Mesuré sur un run de
+        # 12 épisodes : ZÉRO ligne `HAZARD` dans le journal, pour un type pourtant présent dans
+        # `_STEP_LOG_TYPE_MAP`. Les coordonnées étaient déjà calculées deux lignes plus haut
+        # pour le `message` — elles n'étaient simplement pas exposées en champs structurés.
+        "col": col,
+        "row": row,
+        # Nombre de blessures mortelles, en CHAMP et pas seulement dans `result` (« 3 MW ») :
+        # le formateur l'exige (`require_key(details, "hazardous_mortal_wounds")`) et personne
+        # ne le lui fournissait — second verrou qui faisait tomber la ligne, apres l'absence de
+        # coordonnees. Re-parser « 3 MW » cote lecteur serait une troisieme definition du meme
+        # nombre.
+        "hazardousMortalWounds": int(total_wounds),
         "result": f"{total_wounds} MW",
         "hazardDetails": details,
     }

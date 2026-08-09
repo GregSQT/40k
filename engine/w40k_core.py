@@ -5689,6 +5689,12 @@ class W40KEngine(gym.Env):
             details["unit_with_coords"] = f"{unit_id}({raw_log['col']},{raw_log['row']})"
         if from_col is not None and from_row is not None:
             details["start_pos"] = (from_col, from_row)
+        # [HAZARDOUS] 24.15 : le formateur exige ce champ, et le payload moteur le porte
+        # desormais. Sans cette traduction, la ligne leve et `log_action` avale l'exception —
+        # « ⚠️ Step logging error », journal muet, zero ligne HAZARD sur un run entier.
+        _hazard_mw = raw_log.get("hazardousMortalWounds")  # get allowed : types non-hasardeux
+        if _hazard_mw is not None:
+            details["hazardous_mortal_wounds"] = _hazard_mw
         target_col = raw_log.get("targetCol")  # get allowed
         target_row = raw_log.get("targetRow")  # get allowed
         if target_col is not None and target_row is not None:
