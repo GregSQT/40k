@@ -573,8 +573,15 @@ import hashlib
 
 _OVAL_SNAPSHOT = {
     # orientation -> (pool_len, pool_sha16, fz_len, fz_sha16)
-    0: (419, "9377c8dc50eef5d0", 1170, "9808806103a4b978"),
-    1: (449, "0b2ab46bf3d879a6", 1208, "fb5e179a6998400b"),
+    # RÉGÉNÉRÉ le 2026-08-10, changement LÉGITIME et vérifié : l'EZ d'une paire non ronde se
+    # mesure désormais sur les CONTOURS (`euclidean_edge_distance`), la définition que la phase de
+    # combat applique déjà, au lieu de la distance entre centres de cellules qui la sous-estimait
+    # d'environ une case. Le pool perd donc exactement la frange concernée — 419→417 et 449→448,
+    # STRICTEMENT un retrait (aucune cellule ajoutée), dans le seul sens possible pour un
+    # prédicat rendu plus exact. Un socle oval pouvait finir son move engagé (09.05), cf.
+    # tests/unit/engine/test_move_ez_non_round_bases.py.
+    0: (417, "a9391ad4ae6a1113", 1168, "4f6f36fa7a251bea"),
+    1: (448, "69599cbc57e519ee", 1207, "b5025f1307722465"),
 }
 
 
