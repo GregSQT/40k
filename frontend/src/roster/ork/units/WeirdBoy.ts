@@ -51,7 +51,7 @@ export class WeirdBoy extends SwarmRangeSwarm {
   static BASE_SIZE = 20; // Size of the base
   static MODEL_HEIGHT = 2.5; // Height of the model (inches). IMPORTANT: temporary indicative value
   static ICON_SCALE = 1.7; // Size of the icon
-  static ILLUSTRATION_RATIO = 135; // Illustration size ratio in percent
+  static ILLUSTRATION_RATIO = 130; // Illustration size ratio in percent
 
   constructor(name: string, startPos: [number, number]) {
     super(name, WeirdBoy.HP_MAX, startPos);

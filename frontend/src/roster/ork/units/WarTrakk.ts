@@ -45,7 +45,7 @@ export class WarTrakk extends SwarmRangeSwarm {
   static BASE_SIZE = [41, 27];
   static MODEL_HEIGHT = 4; // Height of the model (inches). IMPORTANT: temporary indicative value
   static ICON_SCALE = 2.2; // Size of the icon
-  static ILLUSTRATION_RATIO = 120; // Illustration size ratio in percent
+  static ILLUSTRATION_RATIO = 130; // Illustration size ratio in percent
 
   constructor(name: string, startPos: [number, number]) {
     super(name, WarTrakk.HP_MAX, startPos);
