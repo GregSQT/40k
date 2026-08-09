@@ -636,10 +636,7 @@ export const SharedLayout: React.FC<SharedLayoutProps> = ({
             </ErrorBoundary>
           </div>
 
-          <div
-            className="unit-status-tables"
-            style={{ paddingTop: "0px", marginTop: "0px", gap: "4px" }}
-          >
+          <div className="unit-status-tables">
             <Navigation
               onOpenSettings={onOpenSettings}
               onToggleMeasureMode={onToggleMeasureMode}

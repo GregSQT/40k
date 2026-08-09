@@ -330,16 +330,21 @@ body {
 .unit-status-tables {
   display: flex;
   flex-direction: column;
-  gap: var(--spacing-sm); /* Reduce gap from 20px to 8px */
+  /* Gouttière entre les blocs de la colonne. Variable et non valeur directe : le clip-path de
+     `.unit-illustration-preview` la relit PAR HÉRITAGE pour déborder jusqu'au bloc du dessus sans
+     le recouvrir — une seule définition, donc les deux ne peuvent pas diverger. */
+  --unit-column-gutter: var(--spacing-xs);
+  gap: var(--unit-column-gutter);
   width: 100%;
   max-width: 900px;
   margin-left: var(--spacing-lg);
-  margin-top: 60px; /* Push tables below navigation buttons */
   /* Collé en haut, plafonné à la hauteur de la fenêtre : le board scrolle, ce panneau reste en place. */
   position: sticky;
   top: 0;
   align-self: flex-start;
-  max-height: calc(100vh - 60px); /* 60px = margin-top, pour ne jamais dépasser le bas de la fenêtre */
+  /* 60px : réserve de hauteur en bas de fenêtre, pas une marge — la colonne démarre en haut de
+     `.game-area`. */
+  max-height: calc(100vh - 60px);
   /* Dernier recours sur fenêtre courte : quand même la hauteur minimale du contenu fixe ne tient
      plus, la colonne défile elle-même. En `hidden` elle amputait silencieusement son bas — les
      tables d'unités devenaient inatteignables sans aucune barre pour y accéder. */
@@ -357,7 +362,7 @@ body {
 .unit-status-tables__scroll {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--unit-column-gutter);
   flex: 1;
   min-height: 120px;
   overflow-y: auto;
@@ -367,7 +372,6 @@ body {
   .unit-status-tables {
     margin-left: 0;
     max-width: 100%;
-    margin-top: 20px; /* Reduce top margin on smaller screens */
   }
 }
 
@@ -409,10 +413,12 @@ body {
   height: 280px;
   max-width: 240px;
   overflow: visible;
-  /* Le débordement reste libre à gauche, à droite et en bas (-100vmax = « sans limite »), mais il
-     est coupé net au-dessus, à la gouttière qui sépare ce bloc des tables d'unités : au-delà,
-     l'illustration passerait PAR-DESSUS le conteneur du dessus. */
-  clip-path: inset(calc(-1 * var(--spacing-sm)) -100vmax -100vmax -100vmax);
+  /* SEUL le côté haut porte : la coupe tombe sur l'arête du bloc précédent de la colonne, à la
+     gouttière près, sinon l'illustration agrandie le recouvrirait. Les trois `-100vmax` neutralisent
+     les autres côtés (bas, et gauche/droite déjà bornés par l'`overflow-x: hidden` de la colonne).
+     Suppose que l'illustration reste le PREMIER enfant de `.game-log-with-illustration`, y compris
+     en colonne sous 900px. */
+  clip-path: inset(calc(-1 * var(--unit-column-gutter)) -100vmax -100vmax -100vmax);
   border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: var(--radius-lg);
   box-sizing: border-box;
@@ -1947,12 +1953,6 @@ body {
 }
 
 @media (max-width: 900px) {
-  .unit-status-tables {
-    margin-left: 0;
-    max-width: 100%;
-    margin-top: 20px; /* Reduce top margin on smaller screens */
-  }
-
   .game-log-with-illustration {
     flex-direction: column;
   }
