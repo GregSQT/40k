@@ -108,3 +108,27 @@ def test_une_capacite_relancee_apres_extinction_compte_une_seconde_fois(tmp_path
         "[12:00:03] T1 EFFECTS: P1 none | P2 waaagh=on waaagh_melee_atk=+1",
     ])
     assert stats["faction_ability_activations"]["waaagh"][2] == 2
+
+
+def test_le_RESUME_1_7_compte_aussi_les_capacites_de_faction(tmp_path) -> None:
+    """Corriger le tableau sans corriger le total laisse le vert vacant là où on le LIT.
+
+    La ligne de résumé sommait les seules règles de datasheet : « 1.7 Special rules usage : 0
+    utilisations ✅ » restait affiché alors que le tableau, juste au-dessus, montrait Oath of
+    Moment activé des centaines de fois.
+    """
+
+    log = tmp_path / "step.log"
+    log.write_text("\n".join(_HEAD + [
+        "[12:00:01] T1 EFFECTS: P1 none | P2 none",
+        "[12:00:02] T1 EFFECTS: P1 oath_target=101 oath_wound=+1 | P2 waaagh=on waaagh_melee_atk=+1",
+    ] + [_END]) + "\n", encoding="utf-8")
+
+    stats = an.parse_step_log(str(log))
+    lines: list = []
+    an.print_statistics(stats, output_lines=lines, emit_console=False)
+
+    summary = [l for l in lines if "1.7 Special rules usage" in l]
+    assert summary, out[-2000:]
+    assert "0 utilisations" not in summary[0], summary[0]
+    assert "2 utilisations" in summary[0], summary[0]

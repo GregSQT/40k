@@ -3157,6 +3157,15 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         counts.get(1, 0) + counts.get(2, 0)  # get allowed: optional player counts
         for counts in stats.get('special_rule_usage', defaultdict(lambda: {1: 0, 2: 0})).values()  # get allowed: optional stats
     )
+    # Les capacités de FACTION entrent dans le MÊME total. Le tableau de la section 1.7 les
+    # affiche depuis le lot précédent, mais cette ligne de résumé continuait de sommer les seules
+    # règles de datasheet : « 1.7 Special rules usage : 0 utilisations ✅ » restait affiché sur un
+    # journal où Oath of Moment s'activait 1980 fois. Corriger le tableau sans corriger le total
+    # laissait le vert vacant exactement là où on le lit — dans le résumé.
+    special_rule_usage_total += sum(
+        counts.get(1, 0) + counts.get(2, 0)  # get allowed: optional player counts
+        for counts in require_key(stats, 'faction_ability_activations').values()
+    )
     weapon_rule_usage_total = sum(
         counts.get(1, 0) + counts.get(2, 0)  # get allowed: optional player counts
         for counts in stats.get('weapon_rule_usage', defaultdict(lambda: {1: 0, 2: 0})).values()  # get allowed: optional stats
