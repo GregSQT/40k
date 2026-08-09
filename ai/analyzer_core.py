@@ -4,11 +4,13 @@ Utilise AnalyzerState (state) et AnalyzerConfig (config) pour tout état mutable
 """
 
 import re
+from functools import lru_cache
 from typing import Optional
 
 from shared.data_validation import require_key, require_present
 from engine.combat_utils import calculate_hex_distance
 
+from ai.analyzer_perfig import MODEL_TOKEN_PATTERN
 from ai.analyzer_state import AnalyzerState
 from ai.analyzer_config import AnalyzerConfig
 from ai.analyzer_phases.episode_handler import handle_episode_start
@@ -23,25 +25,31 @@ PLAYER_TWO_ID = 2
 
 
 
-# Grammaire d'une ligne de mouvement : `Unit N(c,r) VERBE [TOKEN] from (c,r) to (c,r)`.
-# UN SEUL constructeur pour les trois verbes et les cinq sites qui la lisaient. Ces copies
-# avaient déjà divergé : deux d'entre elles ignoraient le token optionnel entre le verbe et
-# `from`, si bien qu'une ligne portant `[FLY]` n'était aiguillée vers aucun handler — position
-# figée, adjacences suivantes mesurées contre un fantôme. Le prochain token n'aura qu'un
-# endroit à toucher.
-def move_line_re(verb: str, *, with_positions: bool = True) -> "re.Pattern[str]":
-    head = r'Unit (\d+)\((\d+),\s*(\d+)\)\s+' + verb + r'(?:\s+\[[^\]]+\])?\s+from'
-    if not with_positions:
-        return re.compile(head)
-    return re.compile(head + r'\s+\((\d+),\s*(\d+)\)\s+to\s+\((\d+),\s*(\d+)\)')
-
-
 #: Token(s) de capacité OPTIONNELS entre un verbe et son complément (`[WAAAGH!]`, `[FLY]`, …).
 #: MÊME fragment pour les verbes de mouvement (`move_line_re`) et d'attaque : c'est la grammaire
 #: du journal, pas celle d'un site.
 ACTION_ABILITY_TOKENS = r'(?:\s+\[[^\]]+\])*'
 
 
+# Grammaire d'une ligne de mouvement : `Unit N(c,r) VERBE [TOKEN] from (c,r) to (c,r)`.
+# UN SEUL constructeur pour les trois verbes et les cinq sites qui la lisaient. Ces copies
+# avaient déjà divergé : deux d'entre elles ignoraient le token optionnel entre le verbe et
+# `from`, si bien qu'une ligne portant `[FLY]` n'était aiguillée vers aucun handler — position
+# figée, adjacences suivantes mesurées contre un fantôme. Le prochain token n'aura qu'un
+# endroit à toucher.
+@lru_cache(maxsize=None)
+def move_line_re(verb: str, *, with_positions: bool = True) -> "re.Pattern[str]":
+    # `ACTION_ABILITY_TOKENS` et non une copie : ce site écrivait `?` (UN token au plus) là où la
+    # grammaire d'attaque écrit `*`. Une ligne de move portant deux tokens (`[FLY] [WAAAGH!]` —
+    # le second vient d'être ajouté) n'était donc aiguillée nulle part, en silence. Mémoïsé :
+    # `analyzer_core.run` appelle ces constructeurs par LIGNE, sur ~90 000 lignes.
+    head = r'Unit (\d+)\((\d+),\s*(\d+)\)\s+' + verb + ACTION_ABILITY_TOKENS + r'\s+from'
+    if not with_positions:
+        return re.compile(head)
+    return re.compile(head + r'\s+\((\d+),\s*(\d+)\)\s+to\s+\((\d+),\s*(\d+)\)')
+
+
+@lru_cache(maxsize=None)
 def attack_line_re(verbs: str = r"ATTACKED|FOUGHT", *, with_positions: bool = True) -> "re.Pattern[str]":
     """Grammaire d'une ligne d'attaque : `Unit N(c,r) VERBE [TOKEN…] Unit M(c,r)`.
 
@@ -68,7 +76,12 @@ def attack_verb_present(action_desc: str, verbs: str = r"ATTACKED|FOUGHT") -> bo
     Remplace les tests par SOUS-CHAÎNE (`"FOUGHT Unit" in action_desc`), qui cessaient de matcher
     dès qu'un token s'intercalait — sans que rien ne le signale.
     """
-    return re.search(r'\b(?:' + verbs + r')' + ACTION_ABILITY_TOKENS + r'\s+Unit \d+', action_desc) is not None
+    # Dérivé du MÊME constructeur : une troisième écriture de la grammaire dans le lot qui vient
+    # d'en unifier quatre serait le défaut rejoué. Le garde par sous-chaîne évite le scan complet
+    # sur les ~80 % de lignes qui ne sont pas des attaques.
+    if "FOUGHT" not in action_desc and "ATTACKED" not in action_desc:
+        return False
+    return attack_line_re(verbs, with_positions=False).search(action_desc) is not None
 
 
 def move_verb_present(verb: str, action_desc: str) -> bool:
@@ -78,7 +91,11 @@ def move_verb_present(verb: str, action_desc: str) -> bool:
 
 
 _STATE_UNIT_RE = re.compile(r'(\d+)\[([^\]]*)\]')
-_STATE_MODEL_RE = re.compile(r'(\S+?)@\((-?\d+),(-?\d+),z(-?[\d.]+)\):(-?\d+)')
+# Le token per-figurine de la ligne d'état = celui des segments `[MODELS:]`, suffixé des PV.
+# Dérivé de `MODEL_TOKEN_PATTERN` et non réécrit : les deux copies avaient déjà divergé, et un
+# motif d'état qui ne matche plus fait sortir l'unité de l'instantané — donc la fait passer pour
+# morte, en silence.
+_STATE_MODEL_RE = re.compile(MODEL_TOKEN_PATTERN + r':(-?\d+)')
 
 
 def _apply_state_snapshot(state: AnalyzerState, payload: str) -> None:
@@ -108,15 +125,15 @@ def _apply_state_snapshot(state: AnalyzerState, payload: str) -> None:
         for m in _STATE_MODEL_RE.finditer(unit_match.group(2)):
             mid = m.group(1)
             models[mid] = (int(m.group(2)), int(m.group(3)))
-            heights[mid] = float(m.group(4))
+            # `z` optionnel dans la grammaire partagée (journaux antérieurs au 3D) : 0.0 = sol,
+            # même convention que `parse_models_and_heights`.
+            heights[mid] = float(m.group(4)) if m.group(4) is not None else 0.0
             hps.append(int(m.group(5)))
         if not models:
             continue
         seen_units.add(uid)
 
-        if uid in state.unit_hp and require_key(state.unit_hp, uid) <= 0:
-            stats['state_resync']['alive_missed'] += 1
-        elif uid not in state.unit_hp:
+        if state.unit_hp.get(uid, 0) <= 0:  # get allowed : absente == inconnue == pas vivante
             stats['state_resync']['alive_missed'] += 1
         known = state.positions_by_model.get(uid)  # get allowed : unité jamais vue par socle
         if known:
@@ -124,8 +141,8 @@ def _apply_state_snapshot(state: AnalyzerState, payload: str) -> None:
                 if mid in known and known[mid] != pos:
                     stats['state_resync']['pos_mismatch'] += 1
 
-        state.positions_by_model[uid] = dict(models)
-        state.heights_by_model[uid] = dict(heights)
+        state.positions_by_model[uid] = models
+        state.heights_by_model[uid] = heights
         state.unit_models_alive[uid] = len(models)
         # `unit_hp` de l'analyzer = PV de la figurine de tête (modèle d'ancre hérité) : on lui
         # donne le MAXIMUM des PV vivants. Prendre le minimum ferait « mourir » l'escouade dès
@@ -248,7 +265,12 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
             # est antérieur au format, et deviner « 1 » est exactement l'erreur qu'on ferme
             # (cf. `AnalyzerState.current_agent_player`). L'absence est traitée à l'usage, au
             # moment d'attribuer une victoire — là où elle peut être signalée avec l'épisode.
-            agent_player_match = re.search(r'\bAGENT_PLAYER=(\d+)\b', line)
+            # Garde par sous-chaîne : ce motif n'existe qu'UNE fois par épisode, mais le scan
+            # tournait sur les ~90 000 lignes d'action d'un journal (mesuré : 4,3 µs le scan
+            # contre 0,085 µs le test d'appartenance).
+            agent_player_match = (
+                re.search(r'\bAGENT_PLAYER=(\d+)\b', line) if 'AGENT_PLAYER=' in line else None
+            )
             if agent_player_match:
                 state.current_agent_player = int(agent_player_match.group(1))
                 continue
@@ -288,9 +310,13 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
             # L'écart entre l'état reconstruit et celui-ci est COMPTÉ avant d'être corrigé : une
             # correction muette ferait disparaître le symptôme sans jamais signaler sa cause, et
             # le prochain effet non journalisé passerait inaperçu.
-            state_snapshot_match = re.search(r'\bT(\d+) STATE: (.*)$', line)
+            # Même garde, même raison : 60 lignes d'état pour 90 000 lignes scannées. Le tour
+            # n'est pas capturé — `_apply_state_snapshot` ne le lit pas.
+            state_snapshot_match = (
+                re.search(r'\bT\d+ STATE: (.*)$', line) if ' STATE: ' in line else None
+            )
             if state_snapshot_match:
-                _apply_state_snapshot(state, state_snapshot_match.group(2))
+                _apply_state_snapshot(state, state_snapshot_match.group(1))
                 continue
 
             # Parse walls
@@ -597,7 +623,10 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 # Grammaire PARTAGÉE (`attack_line_re`) : le test par sous-chaîne qui vivait ici
                 # cessait de matcher dès qu'un token de capacité s'intercalait — la cible gardait
                 # alors des PV fantômes et sa mort n'était jamais enregistrée.
-                target_match = attack_line_re(with_positions=False).search(action_desc)
+                target_match = (
+                    attack_line_re(with_positions=False).search(action_desc)
+                    if ("FOUGHT" in action_desc or "ATTACKED" in action_desc) else None
+                )
                 if target_match:
                     # Groupes de `attack_line_re` : 1=attaquant, 2/3=ses coordonnées, 4=cible.
                     target_id = target_match.group(4)

@@ -189,12 +189,14 @@ class StepLogger:
             return
 
         timestamp = time.strftime("%H:%M:%S", time.localtime())
+        # L'appelant (`_log_state_snapshot_if_turn_changed`) n'ajoute une unité que si elle a des
+        # figurines, et a déjà normalisé les types : ni garde ni recast ici — deux contrats
+        # possibles là où il n'y en a qu'un donneraient à croire que ce site peut être appelé
+        # autrement.
         unit_entries = []
         for unit_id, models in units_state:
-            if not models:
-                continue
             model_parts = " ".join(
-                f"{mid}@({int(col)},{int(row)},z{float(height):g}):{int(hp)}"
+                f"{mid}@({col},{row},z{height:g}):{hp}"
                 for mid, col, row, height, hp in models
             )
             unit_entries.append(f"{unit_id}[{model_parts}]")

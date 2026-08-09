@@ -127,7 +127,8 @@ def test_advance_phase_draine_ses_action_logs(tmp_path) -> None:
     gs: Dict[str, Any] = {"turn": 4, "fight_subphase": "pile_in", "action_logs": [{"type": "move"}]}
     eng = W40KEngine.__new__(W40KEngine)
     eng.game_state = gs
-    drained: List[Tuple[int, Any, Any]] = []
+    eng.step_logger = _LoggerStub()
+    drained: List[Tuple[Any, Any]] = []
 
     def _process(action):
         # Ce que fait réellement la transition : elle entre en phase de combat et y produit le
@@ -136,8 +137,8 @@ def test_advance_phase_draine_ses_action_logs(tmp_path) -> None:
         gs["action_logs"].append({"type": "pile_in", "unitId": "2"})
         return True, {"action": "advance_phase"}
 
-    def _flush(pre_len, pre_turn, pre_fight=None):
-        drained.append((pre_len, pre_turn, pre_fight))
+    def _flush(pre_turn, pre_fight=None):
+        drained.append((pre_turn, pre_fight))
 
     eng._process_squad_action = _process           # type: ignore[method-assign]
     eng._flush_squad_action_logs_to_step_logger = _flush  # type: ignore[method-assign]
@@ -146,13 +147,18 @@ def test_advance_phase_draine_ses_action_logs(tmp_path) -> None:
 
     assert success is True
     assert len(drained) == 1, drained
-    pre_len, pre_turn, pre_fight = drained[0]
-    # Le curseur est celui d'AVANT la transition : les deux entrées produites par elle tombent
-    # dans la fenêtre. Le lire APRÈS les aurait laissées hors de portée de tout drainage.
-    assert pre_len == 1, pre_len
-    assert [e["type"] for e in gs["action_logs"][pre_len:]] == ["pile_in", "pile_in"]
+    pre_turn, pre_fight = drained[0]
+    # La BORNE n'est plus un paramètre : c'est le curseur persistant, à l'intérieur du flush.
+    # Ce que le helper transporte, c'est le contexte de FORMATAGE, capturé AVANT la transition
+    # (la sous-phase change pendant).
     assert pre_turn == 4
     assert pre_fight == {"fight_subphase": "pile_in"}
+
+
+class _LoggerStub:
+    """StepLogger minimal : le helper ne construit son contexte que si quelqu'un journalise."""
+
+    enabled = True
 
 
 def test_une_entree_nest_jamais_drainee_deux_fois(tmp_path) -> None:
@@ -172,8 +178,8 @@ def test_une_entree_nest_jamais_drainee_deux_fois(tmp_path) -> None:
              "fromCol": 1, "fromRow": 1, "toCol": 2, "toRow": 2},
         ],
     }
-    eng._flush_squad_action_logs_to_step_logger(0, 2, None)   # drainage imbriqué
-    eng._flush_squad_action_logs_to_step_logger(0, 2, None)   # drainage englobant, même curseur
+    eng._flush_squad_action_logs_to_step_logger(2, None)   # drainage imbriqué
+    eng._flush_squad_action_logs_to_step_logger(2, None)   # drainage englobant
     logger._flush_buffer()
 
     lines = [l for l in (tmp_path / "step.log").read_text(encoding="utf-8").splitlines()
