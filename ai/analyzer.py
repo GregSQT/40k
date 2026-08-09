@@ -232,7 +232,8 @@ def _apply_damage_and_handle_death(
     dead_units_current_episode: Set[str],
     unit_hp: Dict[str, int],
     unit_models_alive: Dict[str, int],
-    unit_model_hp_queue: Dict[str, List[int]],
+    unit_model_hp: Dict[str, Dict[str, int]],
+    ordered_living_mids: Any,
     unit_hp_squad_max: Dict[str, int],
     unit_types: Dict[str, str],
     unit_positions: Dict[str, Tuple[int, int]],
@@ -244,10 +245,20 @@ def _apply_damage_and_handle_death(
 ) -> None:
     """Applique une blessure à la cible via l'allocation par-figurine (05 Attack sequence).
 
-    Une blessure est allouée à la figurine « front » ; si ses PV tombent ≤ 0 elle est
-    détruite et l'excès de dégâts est PERDU (jamais reporté sur la figurine suivante).
-    L'escouade n'est retirée que lorsque sa DERNIÈRE figurine est détruite. unit_hp reste
-    l'invariant d'aliveness (présent et > 0 ⟺ escouade vivante).
+    Une blessure est allouée à la figurine « front » ; si ses PV tombent ≤ 0 elle est détruite
+    et le RESTE est reporté sur la suivante. L'escouade n'est retirée que lorsque sa DERNIÈRE
+    figurine est détruite. unit_hp reste l'invariant d'aliveness (présent et > 0 ⟺ vivante).
+
+    ⚠️ L'EXCÈS N'EST PAS PERDU ICI, et c'est un correctif (2026-08-10). Ce code appliquait la
+    règle d'overkill (05 : l'excès d'une blessure qui tue est perdu) à une valeur qui l'avait
+    DÉJÀ subie : `Dmg:XHP` est le dégât **effectivement appliqué**, pas le dégât brut de l'arme.
+    MESURÉ sur le journal, 14 intervalles entre instantanés sur 14 : `somme(Dmg) == perte de PV
+    réelle`, jamais supérieure. La retrancher une seconde fois faisait SURVIVRE des escouades
+    que le moteur avait tuées — l'escouade 102 encaissait 4 PV de dégâts pour 4 PV restants et
+    restait debout, continuant d'« engager » sa cible et faisant sonner « tir sur cible
+    engagée » sur un tir parfaitement légal (section 1.2).
+
+    Le report s'arrête à la dernière figurine : au-delà, l'excès n'a plus de destinataire.
 
     `positions_by_model` — les socles connus de la cible deviennent PÉRIMÉS dès qu'elle perd une
     figurine : le log ne dit pas LAQUELLE (l'allocation est « front », pas nominative), et le
@@ -285,7 +296,13 @@ def _apply_damage_and_handle_death(
     )
     front_hp = unit_hp[target_id] - damage
     if front_hp <= 0:
-        # Figurine front détruite ; l'excès (overkill) est perdu, pas reporté (05.xx).
+        # Figurine front détruite. On retire le SOCLE NOMMÉ (premier de l'ordre 06.02) : les PV
+        # des autres restent attachés à leur figurine, donc un recalage ultérieur sur
+        # `[MODELS:]` ne peut plus les « soigner » (cf. `unit_model_hp`).
+        _reste = -front_hp  # dégât non absorbé par la figurine qui tombe (cf. docstring)
+        _living = ordered_living_mids(target_id)
+        if _living:
+            unit_model_hp.get(target_id, {}).pop(_living[0], None)
         unit_models_alive[target_id] -= 1
         if positions_by_model is not None:
             positions_by_model.pop(target_id, None)
@@ -307,20 +324,37 @@ def _apply_damage_and_handle_death(
             )
             del unit_hp[target_id]
         else:
-            # Relève : la figurine SUIVANTE devient front, à SES PV pleins — pas à ceux de la
-            # datasheet d'escouade. C'est le correctif de la sous-évaluation qui faisait mourir
-            # une escouade hétérogène six points trop tôt (cf. `unit_model_hp_queue`).
-            _queue = require_key(unit_model_hp_queue, target_id)
-            if _queue:
-                unit_hp[target_id] = _queue.pop(0)
+            # Relève : la figurine SUIVANTE devient front, avec SES PV RESTANTS — ni ceux de la
+            # datasheet d'escouade (sous-évaluation corrigée le 2026-08-09), ni des PV pleins
+            # qui la soigneraient si elle était déjà entamée (défaut corrigé le 2026-08-10).
+            _next = ordered_living_mids(target_id)
+            if _next:
+                unit_hp[target_id] = int(unit_model_hp[target_id][_next[0]])
+                if _reste > 0:
+                    # Report du reste sur la relève, par le MÊME chemin : la récursion rejoue
+                    # toute la comptabilité (mort, retrait du socle, escouade détruite) au lieu
+                    # d'en écrire une seconde version ici.
+                    _apply_damage_and_handle_death(
+                        target_id=target_id, attacker_id=attacker_id, damage=_reste,
+                        player=player, turn=turn, phase=phase, line_number=line_number,
+                        current_episode_num=current_episode_num, line_text=line_text,
+                        dead_units_current_episode=dead_units_current_episode,
+                        unit_hp=unit_hp, unit_models_alive=unit_models_alive,
+                        unit_model_hp=unit_model_hp,
+                        ordered_living_mids=ordered_living_mids,
+                        unit_hp_squad_max=unit_hp_squad_max, unit_types=unit_types,
+                        unit_positions=unit_positions, unit_deaths=unit_deaths,
+                        unit_kill_context=unit_kill_context, stats=stats,
+                        positions_by_model=positions_by_model,
+                        models_invalidated=models_invalidated,
+                    )
+                    return
             else:
-                # `unit_models_alive` dit qu'il reste une figurine mais la file est vide : la
-                # composition n'était pas connue (journal sans `[MODEL_TYPES:]`, ou effectif
-                # recalé par un instantané plus large que la file). Les PV de la figurine
-                # détruite sont la meilleure valeur DISPONIBLE, et c'est le comportement
-                # historique — le signaler plutôt que de le maquiller.
+                # `unit_models_alive` dit qu'il reste une figurine mais aucun socle n'est connu :
+                # composition absente du journal (antérieur à `[MODEL_TYPES:]`). Les PV
+                # d'escouade sont la meilleure valeur DISPONIBLE — le signaler, pas le maquiller.
                 _debug_log(
-                    f"[HP QUEUE EMPTY] E{current_episode_num} T{turn} {phase} "
+                    f"[HP PER-MODEL MISSING] E{current_episode_num} T{turn} {phase} "
                     f"target_id={target_id} models_left={unit_models_alive[target_id]}"
                 )
                 unit_hp[target_id] = require_key(unit_hp_squad_max, target_id)
@@ -331,6 +365,10 @@ def _apply_damage_and_handle_death(
             )
     else:
         unit_hp[target_id] = front_hp
+        # Le socle NOMMÉ porte la blessure : `unit_hp` n'en est que le miroir scalaire.
+        _living = ordered_living_mids(target_id)
+        if _living:
+            unit_model_hp[target_id][_living[0]] = front_hp
         stats['wounded_enemies'][player].add(target_id)
         _debug_log(
             f"[DAMAGE RESULT] E{current_episode_num} T{turn} {phase} "
@@ -2646,12 +2684,14 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     agent_shoot_engaged = stats['shoot_at_engaged_enemy'][1]
     bot_shoot_engaged = stats['shoot_at_engaged_enemy'][2]
     _table_row("Shoot at engaged enemy:", _fmt_count(agent_shoot_engaged), _fmt_count(bot_shoot_engaged))
-    if agent_shoot_engaged > 0 and stats['first_error_lines']['shoot_at_engaged_enemy'][1]:
-        first_err = stats['first_error_lines']['shoot_at_engaged_enemy'][1]
-        log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-    if bot_shoot_engaged > 0 and stats['first_error_lines']['shoot_at_engaged_enemy'][2]:
-        first_err = stats['first_error_lines']['shoot_at_engaged_enemy'][2]
-        log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    for _pl in (1, 2):
+        _n = stats['shoot_at_engaged_enemy'][_pl]
+        first_err = stats['first_error_lines']['shoot_at_engaged_enemy'][_pl]
+        if _n > 0 and first_err:
+            log_print(f"  First P{_pl} occurrence (Episode {first_err['episode']}): {first_err['line']}")
+            # NOMME l'unite qui engage la cible : jumeau du diagnostic 1.1. Sans elle, la ligne
+            # ne se verifie pas a la lecture.
+            log_print(f"    Target engaged with: {_offenders_str(first_err)}")
     _wound_threshold_rows(stats, "shoot_wound_threshold", "tir")
     agent_cq_unengaged_target = stats['close_quarters_shot_at_unengaged_target'][1]
     bot_cq_unengaged_target = stats['close_quarters_shot_at_unengaged_target'][2]

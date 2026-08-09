@@ -1754,7 +1754,6 @@ def _stamp_disc_into(
 #: ~50 % de réserve sur le pire cas observé.
 NON_ROUND_EZ_BAND_NORM = 3.0 * ENGAGEMENT_NORM_HEX_WIDTH
 
-
 def _resolve_ez_band_exactly(
     unit: Dict[str, Any],
     mover_shape: str,
@@ -1984,7 +1983,41 @@ def _compute_mover_ez_forbidden_mask(
     """
     from engine.spatial_relations import engagement_distance_metric
     if engagement_distance_metric(game_state) == "euclidean":
-        return _euclidean_mover_ez_forbidden_mask(unit, enemy_items, ez, board_cols, board_rows)
+        # MÉMOÏSÉ PAR ÉTAT. Le masque ne dépend que des positions ennemies et de la géométrie du
+        # socle posé — jamais de l'unité qui le demande. Or il est reconstruit par CHAQUE
+        # consommateur : les trois chemins de pool, plus la validation et l'érosion. Deux unités
+        # de la même datasheet, dans le même état, en recalculaient deux exemplaires identiques.
+        #
+        # La clé est le FINGERPRINT D'ÉTAT partagé (`_move_spatial_cache`), pas un compteur de
+        # version : un compteur a déjà causé une régression masque⊆exécutable (§0.18) parce
+        # qu'un chemin d'écriture de position ne le bumpait pas. Le fingerprint capture les
+        # positions ET les zones d'engagement, donc tout ce dont ce masque dépend.
+        from engine.phase_handlers.shared_utils import _move_spatial_cache
+        from engine.hex_utils import base_size_cache_key
+        _cache = _move_spatial_cache(game_state).setdefault("ez_mask", {})
+        _key = (
+            str(require_key(unit, "BASE_SHAPE")),
+            base_size_cache_key(require_key(unit, "BASE_SIZE")),
+            int(unit.get("orientation", 0)),  # get allowed (socle rond non orienté)
+            int(ez), int(board_cols), int(board_rows),
+            # Identité de la LISTE ennemie fournie : les appelants passent des sous-ensembles
+            # élagués (`_enemy_items_within_move_engagement_horizon`). Deux élagages différents
+            # au même état ne rendent PAS le même masque — les confondre offrirait des cases
+            # interdites.
+            None if enemy_items is None else tuple(sorted(str(_u) for _u, _ in enemy_items)),
+        )
+        _hit = _cache.get(_key)
+        if _hit is None:
+            _hit = _euclidean_mover_ez_forbidden_mask(
+                unit, enemy_items, ez, board_cols, board_rows
+            )
+            # NON INSCRIPTIBLE : rendu par référence, donc une mutation par un appelant
+            # corromprait le masque de tous les autres. Les quatre consommateurs actuels sont en
+            # lecture (`~mask`, `|`, `np.where`, `np.argwhere`) ; le drapeau fait LEVER le
+            # cinquième au lieu de le laisser fausser des destinations en silence.
+            _hit.flags.writeable = False
+            _cache[_key] = _hit
+        return _hit
 
     from engine.hex_utils import (
         engagement_minimum_clearance_norm,

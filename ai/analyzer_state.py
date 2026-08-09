@@ -43,8 +43,19 @@ class AnalyzerState:
     # Invariant conservé : uid présent dans unit_hp avec valeur > 0 ⟺ escouade vivante.
     unit_hp: Dict[str, int] = field(default_factory=dict)
     unit_models_alive: Dict[str, int] = field(default_factory=dict)
-    #: PV pleins des figurines qui deviendront « front » APRÈS l'actuelle, dans l'ordre où
-    #: elles encaisseront (06.02 : les non-CHARACTER d'abord, les CHARACTER en dernier).
+    #: PV RESTANTS de chaque figurine vivante, INDEXÉS PAR SOCLE : ``{uid: {mid: pv}}``.
+    #:
+    #: ⚠️ Remplace une file positionnelle de PV pleins, qui ne pouvait pas dire QUELLE figurine
+    #: portait quels PV. Conséquence mesurée : au recalage sur un segment ``[MODELS:]`` — qui
+    #: donne les socles vivants mais pas leurs PV — la relève était reconstruite à PV pleins et
+    #: SOIGNAIT les figurines entamées (`queue=[…, 1, 2, 4]` → `[…, 2, 5, 4]`). L'escouade 102 y
+    #: survivait à 4 PV de dégâts pour 4 PV restants, et le contrôle « tir sur cible engagée »
+    #: la comptait encore comme engageant sa cible. Indexer par socle supprime l'ambiguïté :
+    #: recaler, c'est ne garder que les socles listés, jamais réinventer leurs PV.
+    #:
+    #: La figurine « front » (celle qui encaisse) est IMPLICITE : la première de l'ordre 06.02
+    #: parmi les vivantes (cf. `_ordered_living_mids`). ``unit_hp[uid]`` en est le miroir scalaire,
+    #: conservé pour l'invariant d'aliveness et ses nombreux lecteurs.
     #:
     #: ⚠️ Remplace `unit_hp_max_per_model: Dict[str, int]`, qui donnait à TOUTE figurine de
     #: l'escouade le `HP_MAX` de la datasheet de tête. Une escouade hétérogène était donc
@@ -58,7 +69,7 @@ class AnalyzerState:
     #: registry. Journal sans `[MODEL_TYPES:]` (antérieur à cette clé) → file uniforme au
     #: `HP_MAX` d'escouade, c'est-à-dire exactement l'ancien comportement : donnée absente,
     #: jamais une composition supposée.
-    unit_model_hp_queue: Dict[str, List[int]] = field(default_factory=dict)
+    unit_model_hp: Dict[str, Dict[str, int]] = field(default_factory=dict)
     #: `HP_MAX` de la datasheet d'ESCOUADE (registry). Ne sert plus qu'aux figurines dont la
     #: datasheet est inconnue — journal sans `[MODEL_TYPES:]`. C'est l'ancienne valeur unique,
     #: réduite à son seul usage légitime : un défaut de donnée, pas le cas courant.
