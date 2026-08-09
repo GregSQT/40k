@@ -50,7 +50,7 @@ export class LandSpeederHeavyFlamer extends EliteRangeTroop {
   static BASE_SIZE = [41, 27];
   static MODEL_HEIGHT = 4; // Height of the model (inches). IMPORTANT: temporary indicative value
   static ICON_SCALE = 2.0; // Size of the icon
-  static ILLUSTRATION_RATIO = 100; // Illustration size ratio in percent
+  static ILLUSTRATION_RATIO = 160; // Illustration size ratio in percent
 
   constructor(name: string, startPos: [number, number]) {
     super(name, LandSpeederHeavyFlamer.HP_MAX, startPos);

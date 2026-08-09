@@ -47,7 +47,7 @@ export class VanguardVeteranSquadJumpPack extends TroopRangeSwarm {
   static BASE_SIZE = 13; // Size of the base
   static MODEL_HEIGHT = 2.5; // Height of the model (inches). IMPORTANT: temporary indicative value
   static ICON_SCALE = 1.7; // Scale of the icon
-  static ILLUSTRATION_RATIO = 95; // Illustration size ratio in percent
+  static ILLUSTRATION_RATIO = 105; // Illustration size ratio in percent
 
   constructor(name: string, startPos: [number, number]) {
     super(name, VanguardVeteranSquadJumpPack.HP_MAX, startPos);
