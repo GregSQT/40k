@@ -113,9 +113,10 @@ def test_case_darrivee_occupee_reste_joignable() -> None:
 # ── 3. Plafond d'attaques par FIGURINE ──────────────────────────────────────────────────────
 
 def _cap(state: AnalyzerState, config, action_desc: str, n_models: int = 6) -> int:
-    from ai.analyzer_phases.fight_handler import _cc_cap_for_line
+    from ai.analyzer_phases.fight_handler import _cc_cap_for_line, _shooter_models
     return _cc_cap_for_line(
         state, config, action_desc, "105", "Intercessor", "Close Combat Weapon", 3, n_models,
+        _shooter_models(action_desc),
     )
 
 

@@ -36,6 +36,41 @@ def move_line_re(verb: str, *, with_positions: bool = True) -> "re.Pattern[str]"
     return re.compile(head + r'\s+\((\d+),\s*(\d+)\)\s+to\s+\((\d+),\s*(\d+)\)')
 
 
+#: Token(s) de capacité OPTIONNELS entre un verbe et son complément (`[WAAAGH!]`, `[FLY]`, …).
+#: MÊME fragment pour les verbes de mouvement (`move_line_re`) et d'attaque : c'est la grammaire
+#: du journal, pas celle d'un site.
+ACTION_ABILITY_TOKENS = r'(?:\s+\[[^\]]+\])*'
+
+
+def attack_line_re(verbs: str = r"ATTACKED|FOUGHT", *, with_positions: bool = True) -> "re.Pattern[str]":
+    """Grammaire d'une ligne d'attaque : `Unit N(c,r) VERBE [TOKEN…] Unit M(c,r)`.
+
+    ⚠️ UN SEUL constructeur, et il existe pour une raison mesurée. Le token `[WAAAGH!]` a été
+    ajouté entre le verbe et la cible ; QUATRE lecteurs portaient cette grammaire à la main, et
+    deux seulement ont été corrigés du premier coup. Les deux oubliés étaient les plus coûteux :
+    l'aiguillage (`"FOUGHT Unit" in action_desc`) — donc AUCUN contrôle de combat n'était appelé
+    sur une ligne Waaagh — et l'application des dégâts (`'fought unit' in …lower()`) — donc la
+    cible gardait des PV fantômes et sa mort n'était jamais enregistrée, rouvrant exactement la
+    dérive que l'instantané `STATE:` venait de fermer.
+
+    Le mode d'échec est muet dans les deux cas : la ligne n'est pas rejetée, elle est ignorée.
+    Le prochain token n'aura qu'un endroit à toucher — comme pour `move_line_re`.
+    """
+    head = r'Unit (\d+)\((\d+),\s*(\d+)\)\s+(?:' + verbs + r')' + ACTION_ABILITY_TOKENS
+    if not with_positions:
+        return re.compile(head + r'\s+Unit (\d+)')
+    return re.compile(head + r'\s+Unit (\d+)\((\d+),\s*(\d+)\)')
+
+
+def attack_verb_present(action_desc: str, verbs: str = r"ATTACKED|FOUGHT") -> bool:
+    """Cette ligne porte-t-elle un verbe d'attaque suivi d'une cible ? (aiguillage)
+
+    Remplace les tests par SOUS-CHAÎNE (`"FOUGHT Unit" in action_desc`), qui cessaient de matcher
+    dès qu'un token s'intercalait — sans que rien ne le signale.
+    """
+    return re.search(r'\b(?:' + verbs + r')' + ACTION_ABILITY_TOKENS + r'\s+Unit \d+', action_desc) is not None
+
+
 def move_verb_present(verb: str, action_desc: str) -> bool:
     """Le verbe de mouvement `verb` introduit-il un `from` sur cette ligne ?
     Aiguillage : même grammaire que `move_line_re`, sans les positions."""
@@ -559,19 +594,22 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                 models_invalidated=state.models_invalidated,
                             )
 
-                if 'attacked unit' in action_desc.lower() or 'fought unit' in action_desc.lower():
-                    target_match = re.search(r'(?:ATTACKED|FOUGHT) Unit (\d+)', action_desc, re.IGNORECASE)
-                    if target_match:
-                        target_id = target_match.group(1)
-                        damage_match = re.search(r'Dmg:(\d+)HP', action_desc)
-                        if damage_match:
-                            damage = int(damage_match.group(1))
-                            _apply_damage_and_handle_death(
-                                target_id, _dmg_actor_id, damage, player, turn, phase, state.line_number, state.current_episode_num,
-                                line, state.dead_units_current_episode, state.unit_hp, state.unit_models_alive, state.unit_hp_max_per_model, state.unit_types, state.unit_positions, state.unit_deaths, state.unit_kill_context, stats,
-                                positions_by_model=state.positions_by_model,
-                                models_invalidated=state.models_invalidated,
-                            )
+                # Grammaire PARTAGÉE (`attack_line_re`) : le test par sous-chaîne qui vivait ici
+                # cessait de matcher dès qu'un token de capacité s'intercalait — la cible gardait
+                # alors des PV fantômes et sa mort n'était jamais enregistrée.
+                target_match = attack_line_re(with_positions=False).search(action_desc)
+                if target_match:
+                    # Groupes de `attack_line_re` : 1=attaquant, 2/3=ses coordonnées, 4=cible.
+                    target_id = target_match.group(4)
+                    damage_match = re.search(r'Dmg:(\d+)HP', action_desc)
+                    if damage_match:
+                        damage = int(damage_match.group(1))
+                        _apply_damage_and_handle_death(
+                            target_id, _dmg_actor_id, damage, player, turn, phase, state.line_number, state.current_episode_num,
+                            line, state.dead_units_current_episode, state.unit_hp, state.unit_models_alive, state.unit_hp_max_per_model, state.unit_types, state.unit_positions, state.unit_deaths, state.unit_kill_context, stats,
+                            positions_by_model=state.positions_by_model,
+                            models_invalidated=state.models_invalidated,
+                        )
 
                 # CHARGE IMPACT mortal wounds:
                 # "Unit X(c,r) IMPACTED [...] Unit Y(c,r) - Hit:T+:N(HIT|FAIL) Wound:AUTO Save:NONE[MW] Dmg:ZHP"
@@ -826,6 +864,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                     state.last_shoot_target_id = None
                     state.last_fight_fighter_id = None
                     state.last_fight_weapon = None
+                    state.last_fight_shooters = ()
                     state.last_turn = turn
 
                 # Track positions at start of MOVE phase for fled detection
@@ -860,6 +899,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         state.fight_phase_seq_id += 1
                         state.last_fight_fighter_id = None
                         state.last_fight_weapon = None
+                        state.last_fight_shooters = ()
                     state.last_phase = phase
 
                 state.episode_turn = max(state.episode_turn, turn)
@@ -1125,7 +1165,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         # combat, contrôlés comme les autres (budget 3", per-socle, chemin).
                         action_type = 'move'
                         handle_fight_move(state, config, line, action_desc, player, turn, phase)
-                elif "FOUGHT Unit" in action_desc:
+                elif attack_verb_present(action_desc):
                         action_type = 'fight'
                         handle_fight(state, config, line, action_desc, action_unit_id, player, turn, phase, step_marker_present, step_inc)
                 else:

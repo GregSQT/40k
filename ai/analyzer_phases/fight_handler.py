@@ -3,13 +3,19 @@ fight_handler.py — gestion des actions FIGHT dans parse_step_log.
 """
 
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Tuple
 
 from shared.data_validation import require_key
 
 if TYPE_CHECKING:
     from ai.analyzer_state import AnalyzerState
     from ai.analyzer_config import AnalyzerConfig
+
+
+def _shooter_models(action_desc: str) -> Tuple[str, ...]:
+    """Socles qui ont RÉELLEMENT frappé sur cette ligne (`[SHOOTER_MODELS:]`), ou ()."""
+    m = re.search(r'\[SHOOTER_MODELS: ([^\]]+)\]', action_desc)
+    return tuple(m.group(1).split()) if m else ()
 
 
 def _cc_cap_for_line(
@@ -21,6 +27,7 @@ def _cc_cap_for_line(
     weapon_display_name: str,
     cc_nb_squad_type: int,
     n_fighter_models: int,
+    shooters: Tuple[str, ...],
 ) -> int:
     """Plafond d'attaques de CETTE ligne, calculé PAR FIGURINE quand le journal le permet.
 
@@ -42,8 +49,6 @@ def _cc_cap_for_line(
 
     waaagh_bonus = 1 if re.search(r'\[WAAAGH!?\]', action_desc, re.IGNORECASE) else 0
 
-    shooters_match = re.search(r'\[SHOOTER_MODELS: ([^\]]+)\]', action_desc)
-    shooters = shooters_match.group(1).split() if shooters_match else []
     if not shooters or not state.model_types:
         return (cc_nb_squad_type + waaagh_bonus) * n_fighter_models
 
@@ -84,16 +89,12 @@ def handle_fight(
     stats = state.stats
     state.units_fought.add(unit_id)
 
-    # Token(s) de capacité OPTIONNELS entre le verbe et la cible — même grammaire que `CHARGED`
-    # (`[WAAAGH!]`, `[FLY]`, …) et que `replay_converter._ABILITY`. Sans cette tolérance, une
-    # ligne portant `[WAAAGH!]` n'était reconnue par AUCUN contrôle de combat : ni plafond
-    # d'attaques, ni alternance, ni cible morte — elle disparaissait, en silence. C'est le motif
-    # de panne qui avait déjà coûté 3 lignes de move non parsées (cf. `move_line_re`).
-    fight_match = re.search(
-        r'Unit (\d+)\((\d+),\s*(\d+)\) (?:ATTACKED|FOUGHT)(?:\s+\[[^\]]+\])*'
-        r'\s+Unit (\d+)\((\d+),\s*(\d+)\)',
-        action_desc
-    )
+    # Grammaire PARTAGÉE avec l'aiguillage et l'application des dégâts (`attack_line_re`) : trois
+    # copies écrites à la main avaient déjà divergé sur le token `[WAAAGH!]`. Import local :
+    # `analyzer_core` importe ce module au chargement (cycle sinon), comme les helpers ci-dessus.
+    from ai.analyzer_core import attack_line_re
+
+    fight_match = attack_line_re().search(action_desc)
     if fight_match:
         fighter_id = fight_match.group(1)
         fighter_col = int(fight_match.group(2))
@@ -191,16 +192,24 @@ def handle_fight(
                     # Mesuré sur le run du 2026-08-08, ce plafond d'escouade produisait 20 fausses
                     # « Attacks over CC_NB » : 5 attaques d'un Ancient rattaché (NB=5) plafonnées
                     # au NB=3 de l'Intercessor porteur, 20 attaques de 10 Gretchin plafonnées à 10.
+                    _shooters = _shooter_models(action_desc)
                     cc_nb = _cc_cap_for_line(
                         state, config, action_desc, fighter_id, fighter_unit_type,
-                        weapon_display_name, cc_nb_single, n_fighter_models,
+                        weapon_display_name, cc_nb_single, n_fighter_models, _shooters,
                     )
-                    seq_key = (state.fight_phase_seq_id, fighter_id, weapon_display_name)
+                    # Le GROUPE de figurines qui frappe entre dans la clé, parce qu'il détermine
+                    # le plafond. Sans lui, un compteur accumulé sur (phase, unité, arme) était
+                    # comparé au plafond du DERNIER groupe : une escouade qui répartit ses
+                    # attaques entre deux cibles voyait la somme des deux groupes opposée au
+                    # plafond d'un seul — le faux positif que ce lot devait supprimer.
+                    seq_key = (state.fight_phase_seq_id, fighter_id, weapon_display_name, _shooters)
                     if (state.last_fight_fighter_id != fighter_id or
-                            state.last_fight_weapon != weapon_display_name):
+                            state.last_fight_weapon != weapon_display_name or
+                            state.last_fight_shooters != _shooters):
                         state.fight_sequence_counts[seq_key] = 0
                     state.last_fight_fighter_id = fighter_id
                     state.last_fight_weapon = weapon_display_name
+                    state.last_fight_shooters = _shooters
                     if seq_key not in state.fight_sequence_counts:
                         state.fight_sequence_counts[seq_key] = 0
                     elif step_marker_present and step_inc:

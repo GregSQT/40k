@@ -75,6 +75,7 @@ def handle_episode_start(state: "AnalyzerState", config: "AnalyzerConfig", line:
     state.fight_sequence_counts = {}
     state.last_fight_fighter_id = None
     state.last_fight_weapon = None
+    state.last_fight_shooters = ()
     state.combi_profile_usage = {}
     state.combi_conflicts_seen = set()
     state.unit_deaths = []
