@@ -17,7 +17,7 @@ Menaces retenues :
 ### Sur le vol de code spécifiquement
 
 - **Frontend** : le code JS/WASM est **par nature envoyé à chaque visiteur** — c'est impossible à empêcher. Le build Vite est minifié et ne contient pas de source maps (vérifié : aucun `.map` dans `frontend/dist/`). L'obfuscation supplémentaire est inutile (contournable en heures). La vraie protection du frontend est **juridique** (licence, pas de repo public), pas technique.
-- **Backend + modèles IA** : c'est là qu'est la valeur (moteur de règles, agents entraînés). Ce code ne quitte jamais le serveur **sauf si** un attaquant obtient une exécution de code ou une lecture de fichiers arbitraire. Toute la stratégie consiste donc à fermer ces vecteurs — F1 et F6 sont résolus ; **F7 (écriture arbitraire + `pickle.load`) existe encore aujourd'hui** et reste le seul vecteur RCE ouvert.
+- **Backend + modèles IA** : c'est là qu'est la valeur (moteur de règles, agents entraînés). Ce code ne quitte jamais le serveur **sauf si** un attaquant obtient une exécution de code ou une lecture de fichiers arbitraire. Toute la stratégie consiste donc à fermer ces vecteurs — F1, F6, F7 et F11 sont résolus (étapes 1 et 2) : plus d'exécution de code ni d'écriture disque atteignables depuis le réseau. Ce qui reste à traiter (étapes 3 à 5) relève du vol de session et de l'exposition, pas de la prise de contrôle du serveur.
 
 ---
 
@@ -42,8 +42,8 @@ Menaces retenues :
 
 | # | Sévérité | Faille | Détail | Référence |
 |---|---|---|---|---|
-| F7 | **Critique** | Répertoire de persistance contrôlé par le client + `pickle.load` | `/api/game/snapshot/persist` accepte un `directory` arbitraire (créé via `os.makedirs`, aucune restriction) → **écriture disque n'importe où** avec les droits du process. Les snapshots sont ensuite relus via `pickle.load` → la désérialisation pickle d'un fichier influençable par un client est un **vecteur RCE classique**. L'authentification (F6) réduit l'attaquant à un testeur loggué, elle ne referme pas le vecteur. | `api_server.py:3912-3920` (directory), `api_server.py:3812` (pickle.load), `api_server.py:3803` (pickle.dump) |
-| F11 | **Haute** (était critique) | Endpoint `pick-directory` exécute `subprocess`/`powershell.exe` | `/api/game/pick-directory` lance `powershell.exe` via `subprocess` pour ouvrir un dialogue Windows. **Depuis l'étape 1 la route est derrière l'authentification** (pas de `@public_endpoint`) — plus d'accès anonyme, d'où la requalification. Reste sans aucun sens fonctionnel sur un serveur exposé : **à supprimer purement** en prod. | `api_server.py:3933` |
+| F7 | ✅ Résolu | Répertoire contrôlé par le client + `pickle.load` | Étape 2 : répertoire fixé par le serveur (`W40K_PERSIST_DIR`), `directory` de requête rejeté, pickle des snapshots supprimé, et dépickle des saves restreint à une liste blanche de classes (`_safe_loads`). | `api_server.py` (`_resolve_persist_dir`), `game_saves.py` (`_ALLOWED_CLASSES`) |
+| F11 | ✅ Résolu | Endpoint `pick-directory` exécutait `subprocess`/`powershell.exe` | Route supprimée (étape 2) ; plus aucun `subprocess` atteignable. Sélecteur natif retiré du front. | — |
 | F13 | Moyenne | Token de session en `localStorage` | Le token est stocké dans `localStorage` → volable par tout XSS (token = accès complet). Cible : cookie `HttpOnly`+`Secure`+`SameSite`. À défaut, risque à acter explicitement. | `frontend/src/auth/authStorage.ts:23,40,44` |
 | F2 | **Haute** | Sessions sans expiration | Table `sessions` : `created_at` seulement ; validation `WHERE s.token = ?` sans condition temporelle. Token volé = valide à vie. Le message "Invalid or expired session" est trompeur. | `api_server.py:1255-1259` (table), `api_server.py:1172` (validation) |
 | F8 | **Haute** | Pas de rate limiting sur le login | Brute-force des mots de passe possible à pleine vitesse depuis Internet. | `api_server.py:2223` |
@@ -67,7 +67,7 @@ Menaces retenues :
 **Recommandé, sévérité remontée.** Exposé sur Internet, le journal d'audit (avec IP) est ton seul moyen de savoir si quelqu'un brute-force le login ou abuse de l'API.
 
 ### Analyse statique et dynamique
-- **Statique : oui** — `bandit`, `pip-audit`, `npm audit` (étape 6). NB : bandit aurait signalé le `pickle.load` (F7) — preuve de son utilité.
+- **Statique : oui** — `bandit`, `pip-audit`, `npm audit` (étape 6). NB : bandit aurait signalé le `pickle.load` (F7) dès l'origine — preuve de son utilité. Il continuera de le signaler sur `game_saves.py` : le format est conservé, c'est `_safe_loads` qui neutralise le vecteur ; l'écarter demandera une justification écrite, pas un `# nosec` muet.
 - **Dynamique : devient pertinent** avec l'exposition. Un scan OWASP ZAP en mode baseline contre l'instance de test, une fois les étapes 1–5 faites. Optionnel mais peu coûteux.
 
 ### Buffer overflow / gestion mémoire
@@ -79,7 +79,7 @@ Menaces retenues :
 
 Ordre = priorité. **Les étapes 1 à 5 sont des prérequis absolus avant toute exposition Internet.**
 
-> F1 (debugger Werkzeug exposé) est **résolu** (`api_server.py:4874` : `debug=False`, `host='127.0.0.1'`). L'étape 1 initiale (F1+F7+F11) a donc été scindée : l'auth globale (F6, ex-étape 2) est passée en premier — elle a supprimé l'exposition **anonyme** de F7/F11. F7 reste néanmoins critique : un testeur loggué garde une écriture disque arbitraire et un `pickle.load`.
+> F1 (debugger Werkzeug exposé) est **résolu** (`api_server.py:4874` : `debug=False`, `host='127.0.0.1'`). L'étape 1 initiale (F1+F7+F11) a donc été scindée : l'auth globale (F6, ex-étape 2) est passée en premier — elle a supprimé l'exposition **anonyme** de F7/F11. L'étape 2 a ensuite fermé l'écriture arbitraire, supprimé `pick-directory` et restreint le dépickle des saves : F7 et F11 sont clos.
 
 ### Étape 1 — Authentification sur toutes les routes (F6, F12, F14) ✅ faite le 2026-08-02
 
@@ -109,13 +109,24 @@ Ordre = priorité. **Les étapes 1 à 5 sont des prérequis absolus avant toute 
 
 **Validation :** toute route hors liste blanche sans token → 401 ; `register` sans token → refusé ; le jeu fonctionne normalement une fois loggé (validation runtime PvP obligatoire, le `tsc` ne prouve rien ici).
 
-### Étape 2 — Fermer les vecteurs d'écriture/désérialisation arbitraires (F7, F11) 🔴 bloquant
-**Fichier :** `services/api_server.py`
-- `/api/game/snapshot/persist` (`api_server.py:3903`) : supprimer la possibilité pour le client de choisir `directory` (`:3912-3920`, `os.makedirs` sur une valeur de requête). Le répertoire de persistance devient une config **serveur** (variable d'environnement ou fichier de config), jamais une donnée de requête.
-- Remplacer `pickle` (`api_server.py:3803` dump, `:3812` load) par un format non exécutable. **Tranché : JSON.** Un chemin fixe ne suffit pas — le fichier reste écrit puis relu par le process, et tout accès disque résiduel redonne l'exécution de code. Si `GameSnapshotStore` contient des objets non sérialisables en JSON, c'est la sérialisation qui est à écrire, pas le `pickle` à conserver.
-- `/api/game/pick-directory` (F11, `api_server.py:3933`) : retrait pur de l'endpoint. Aucun `subprocess`/`powershell.exe` atteignable depuis le réseau, même authentifié. Le front doit basculer sur la config serveur du répertoire de persistance (voir point précédent).
+### Étape 2 — Fermer les vecteurs d'écriture/désérialisation arbitraires (F7, F11) ✅ faite le 2026-08-10
 
-**Validation :** requête POST avec `directory` → erreur explicite ; `pick-directory` absent/404 en prod ; snapshots toujours fonctionnels.
+**Fait (2026-08-10) — écriture arbitraire et `subprocess` fermés**
+- Répertoire de persistance = config **serveur** (`_resolve_persist_dir`, `W40K_PERSIST_DIR`, défaut `logs/`, variable vide = erreur au démarrage). `/api/game/snapshot/persist` **rejette** un `directory` reçu du client (400 explicite, pas d'ignorance silencieuse) ; `_load_save_config` ne relit plus le `directory` du fichier de config (il portait un chemin choisi par le client, le relire rouvrait le vecteur).
+- `_PERSIST_DIR_SET` supprimé : le répertoire est toujours défini, le toggle « sauvegarde sur disque » devient le seul interrupteur (saves, timeline, ancre game_start).
+- `save_config.json` écrit sous `_PERSIST_DIR` au lieu de `<repo>/logs/` en dur : sinon un déploiement pointant `W40K_PERSIST_DIR` hors du dépôt exigerait quand même un arbre de sources inscriptible. Chemin par défaut inchangé.
+- `/api/game/pick-directory` **supprimée** (F11) — plus aucun `subprocess`/`powershell.exe` atteignable. Côté front : sélecteur natif, saisie manuelle du chemin et popup obligatoire au lancement retirés ; le répertoire s'affiche en lecture seule.
+- Persistance pickle des snapshots **supprimée** : `pvp_snapshots.pkl` était écrit à chaque capture et **relu par aucun appelant** (`_load_snapshots_from_disk` était du code mort — la reprise passe par les saves). Il ne restait qu'un `pickle.dump` sans usage. Les snapshots de rewind vivent en mémoire, comme avant.
+- Tests : `tests/unit/services/test_api_persist_dir.py` (rejet du `directory`, absence de la route, `.pkl` non écrit, résolution de `W40K_PERSIST_DIR`).
+
+**Fait — désérialisation des saves : dépickle restreint**
+`services/game_saves.py` relit chaque row en `pickle` sur le chemin Load/Select/Resume. Le format est conservé, mais toute désérialisation passe désormais par `_safe_loads` : un `pickle.Unpickler` dont `find_class` n'accepte que `_ALLOWED_CLASSES`. L'exécution de code au dépickle passe obligatoirement par `find_class` (opcode REDUCE sur un gadget type `os.system`) — privé de callable, le vecteur est fermé.
+- Critère d'entrée dans la liste : constructeur de **données** uniquement (au pire un objet absurde, jamais un effet de bord). Aujourd'hui : `ParsedWeaponRule` et les trois entrées numpy (`ndarray`, `dtype`, `_reconstruct`, en double pour le renommage `numpy.core` → `numpy._core`).
+- Écarté : **codec JSON typé** — mesuré sur un vrai état, il faudrait encoder 28 257 dicts à clés tuple (`occupation_map`), 3 056 tuples, 58 sets, des clés int et 389 objets `ParsedWeaponRule`, et casser le format des saves existantes, pour une surface d'attaque déjà nulle côté réseau. Écarté aussi : **signature HMAC** — ne protège que de qui peut écrire sans pouvoir lire la clé, là où la liste blanche tient même face à un accès disque complet.
+- Limite assumée : un fichier falsifié peut toujours restituer un **état de jeu** faux (score, positions). Ce n'est pas de l'exécution de code, et cela suppose déjà un accès disque.
+- Tests : `tests/unit/services/test_game_saves_restricted_unpickle.py` (gadget `os.system` refusé, contre-épreuve prouvant qu'il s'exécuterait sans le garde, chemin `SaveStore.point`) et `tests/integration/pvp/test_save_restricted_unpickle.py` (save d'une partie **réelle** relue à travers le garde — c'est ce test qui a révélé les entrées numpy manquantes).
+
+**Validation :** requête POST avec `directory` → 400 ; `pick-directory` → 404 ; aucun `.pkl` écrit ; sauvegarde/rewind fonctionnels (runtime PvP à valider).
 
 ### Étape 3 — Durcissement des sessions (F2, F8)
 **Fichier :** `services/api_server.py`
@@ -181,7 +192,7 @@ Ordre = priorité. **Les étapes 1 à 5 sont des prérequis absolus avant toute 
 |---|---|---|---|
 | — | F1 (debugger Werkzeug) | ✅ Résolu | ≤2026-08-02 |
 | 1. Auth sur toutes les routes | F6, F12, F14 | ✅ Fait — vérifié dans le code le 2026-08-10 (31 routes, porte globale, `register` supprimée, `apiFetch`) ; runtime PvP à valider | 2026-08-02 |
-| 2. Fermer vecteurs écriture/désérialisation | F7, F11 | ⬜ À faire | — |
+| 2. Fermer vecteurs écriture/désérialisation | F7, F11 | ✅ Fait (runtime PvP validé) | 2026-08-10 |
 | 3. Durcissement sessions + rate limiting | F2, F8 | ⬜ À faire | — |
 | 4. Réduction surface d'information | F3, F10, F13 | ⬜ À faire | — |
 | 5. Infra d'exposition (WSGI + proxy + TLS) | F9 | ⬜ À faire | — |

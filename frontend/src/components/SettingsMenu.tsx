@@ -44,10 +44,9 @@ interface SettingsMenuProps {
   dynamicCoverStatus?: boolean;
   onToggleDynamicCoverStatus?: (value: boolean) => void;
   snapshotPersistEnabled?: boolean;
+  /** Répertoire de persistance fixé par le serveur (affiché en lecture seule). */
   snapshotPersistDir?: string;
-  onToggleSnapshotPersist?: (value: boolean, directory?: string) => void;
-  /** Ouvre un explorateur natif (Windows via WSL) et renvoie le chemin choisi, ou null si annulé. */
-  onPickDirectory?: () => Promise<string | null>;
+  onToggleSnapshotPersist?: (value: boolean) => void;
   replayContainerEnabled?: boolean;
   onToggleReplayContainer?: (value: boolean) => void;
   autoSaveEnabled?: boolean;
@@ -184,7 +183,6 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
   snapshotPersistEnabled = false,
   snapshotPersistDir = "logs",
   onToggleSnapshotPersist,
-  onPickDirectory,
   replayContainerEnabled = true,
   onToggleReplayContainer,
   autoSaveEnabled = false,
@@ -195,8 +193,6 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
 }) => {
   const [confirmingDeleteSaves, setConfirmingDeleteSaves] = useState(false);
   const [deletedSavesMsg, setDeletedSavesMsg] = useState<string | null>(null);
-  const [persistDirPromptOpen, setPersistDirPromptOpen] = useState(false);
-  const [persistDirInput, setPersistDirInput] = useState("");
   // Snapshot des réglages à l'ouverture du menu, pour pouvoir annuler les
   // changements (appliqués en live) en restaurant les valeurs initiales.
   type SettingsSnapshot = {
@@ -446,127 +442,10 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
               {onToggleSnapshotPersist && (
                 <ToggleRow
                   checked={snapshotPersistEnabled}
-                  onChange={(checked) => {
-                    if (!checked) {
-                      onToggleSnapshotPersist(false);
-                      return;
-                    }
-                    if (onPickDirectory) {
-                      onPickDirectory()
-                        .then((path) => {
-                          if (path) onToggleSnapshotPersist(true, path);
-                        })
-                        .catch(() => {
-                          // Fallback : saisie manuelle si le sélecteur natif échoue.
-                          setPersistDirInput(snapshotPersistDir);
-                          setPersistDirPromptOpen(true);
-                        });
-                    } else {
-                      setPersistDirInput(snapshotPersistDir);
-                      setPersistDirPromptOpen(true);
-                    }
-                  }}
+                  onChange={onToggleSnapshotPersist}
                   label="Sauvegarde des snapshots sur disque"
-                  description="Conserve l'historique des phases (rewind / visionnage) et les saves sur disque pour qu'ils survivent à un rechargement. À l'activation, choisis le répertoire de destination."
+                  description={`Conserve l'historique des phases (rewind / visionnage) et les saves sur disque pour qu'ils survivent à un rechargement. Répertoire fixé par le serveur : ${snapshotPersistDir}`}
                 />
-              )}
-              {persistDirPromptOpen && onToggleSnapshotPersist && (
-                // biome-ignore lint/a11y/noStaticElementInteractions: backdrop modal — clic fond = fermeture
-                <div
-                  role="presentation"
-                  onClick={() => setPersistDirPromptOpen(false)}
-                  onKeyDown={(e) => e.key === "Escape" && setPersistDirPromptOpen(false)}
-                  style={{
-                    position: "fixed",
-                    inset: 0,
-                    background: "rgba(0,0,0,0.55)",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    zIndex: 5000,
-                  }}
-                >
-                  {/* biome-ignore lint/a11y/noStaticElementInteractions: panneau — stopPropagation intentionnel */}
-                  <div
-                    onClick={(e) => e.stopPropagation()}
-                    onKeyDown={(e) => e.stopPropagation()}
-                    style={{
-                      background: "#1f2937",
-                      border: "1px solid #555",
-                      borderRadius: "8px",
-                      padding: "16px",
-                      minWidth: "360px",
-                      color: "#fff",
-                      boxShadow: "0 10px 30px rgba(0,0,0,0.5)",
-                    }}
-                  >
-                    <h3 style={{ marginTop: 0 }}>Répertoire de sauvegarde</h3>
-                    <p style={{ color: "#9ca3af", marginTop: 0 }}>
-                      Chemin (serveur) où écrire snapshots et saves :
-                    </p>
-                    <input
-                      type="text"
-                      value={persistDirInput}
-                      onChange={(e) => setPersistDirInput(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          onToggleSnapshotPersist(true, persistDirInput.trim() || "logs");
-                          setPersistDirPromptOpen(false);
-                        }
-                      }}
-                      placeholder="logs"
-                      style={{
-                        width: "100%",
-                        boxSizing: "border-box",
-                        padding: "8px 10px",
-                        borderRadius: "6px",
-                        border: "1px solid #4b5563",
-                        background: "#111827",
-                        color: "#fff",
-                      }}
-                    />
-                    <div
-                      style={{
-                        display: "flex",
-                        gap: "8px",
-                        justifyContent: "flex-end",
-                        marginTop: "14px",
-                      }}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => setPersistDirPromptOpen(false)}
-                        style={{
-                          background: "#374151",
-                          border: "1px solid #4b5563",
-                          borderRadius: "4px",
-                          color: "#fff",
-                          padding: "6px 12px",
-                          cursor: "pointer",
-                        }}
-                      >
-                        Annuler
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          onToggleSnapshotPersist(true, persistDirInput.trim() || "logs");
-                          setPersistDirPromptOpen(false);
-                        }}
-                        style={{
-                          background: "#059669",
-                          border: "1px solid #047857",
-                          borderRadius: "4px",
-                          color: "#fff",
-                          padding: "6px 12px",
-                          cursor: "pointer",
-                        }}
-                      >
-                        Activer
-                      </button>
-                    </div>
-                  </div>
-                </div>
               )}
               {onToggleAutoSave && (
                 <ToggleRow

@@ -29,7 +29,6 @@ CLOSED_ROUTES = [
     ("GET", "/api/game/parties"),
     ("POST", "/api/game/action"),
     ("POST", "/api/game/snapshot/persist"),
-    ("POST", "/api/game/pick-directory"),
     ("POST", "/api/replay/parse"),
 ]
 

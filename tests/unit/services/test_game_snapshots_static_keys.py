@@ -5,8 +5,8 @@ dans ``game_state["deployment_state"]["deployment_pools"]`` jusqu'à ce que le r
 la racine (``game_state["deployment_pools"]``), pour que la clause d'ingress 20.04 et l'ancre de
 grille d'une unité hors table puissent les lire hors phase de déploiement.
 
-Les snapshots PvP sont picklés sur disque (``logs/pvp_snapshots.pkl``, option gameplay) : un
-pickle capturé AVANT ce déplacement ne porte pas la clé racine. Or ``build_game_state``
+Les états PvP sont persistés sur disque par les saves (``game_saves.SaveStore``) : un état capturé
+AVANT ce déplacement ne porte pas la clé racine. Or ``build_game_state``
 reconstruit l'état à partir des **seules** clés déclarées statiques (prises de l'engine vivant)
 plus la copie mutable du snapshot. Tant que ``deployment_pools`` n'était pas déclarée statique,
 elle disparaissait donc du state reconstruit, et le premier clic de déploiement levait

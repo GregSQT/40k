@@ -562,16 +562,8 @@ export const BoardWithAPI: React.FC = () => {
   const [snapshotPersistEnabled, setSnapshotPersistEnabled] = useState(
     () => localStorage.getItem("snapshotPersistEnabled") === "true"
   );
-  const [snapshotPersistDir, setSnapshotPersistDir] = useState(
-    () => localStorage.getItem("snapshotPersistDir") ?? "logs"
-  );
-  // Le répertoire doit être choisi avant toute save (Save bloqué tant que false).
-  const [saveDirSelected, setSaveDirSelected] = useState(
-    () => localStorage.getItem("saveDirSelected") === "true"
-  );
-  // Popup au lancement d'une partie PvP sans répertoire configuré : invite à en choisir un pour que
-  // l'enregistrement/replay démarre dès le game_start (sinon rien n'est enregistré).
-  const [launchDirPromptOpen, setLaunchDirPromptOpen] = useState(false);
+  // Répertoire de persistance : lecture seule, fixé par le serveur (W40K_PERSIST_DIR).
+  const [snapshotPersistDir, setSnapshotPersistDir] = useState("logs");
   const isAiMode = (() => {
     const playerTypes = apiProps.gameState?.player_types;
     if (!playerTypes) {
@@ -1407,11 +1399,7 @@ export const BoardWithAPI: React.FC = () => {
       .fetchSaveConfig()
       .then((cfg) => {
         setSnapshotPersistEnabled(cfg.persist_enabled);
-        setSaveDirSelected(cfg.dir_set);
-        if (cfg.dir_set) setSnapshotPersistDir(cfg.directory);
-        // Répertoire obligatoire dès le start : sans répertoire, on invite à en configurer un pour
-        // que la partie soit enregistrée depuis le game_start.
-        if (!cfg.dir_set) setLaunchDirPromptOpen(true);
+        setSnapshotPersistDir(cfg.directory);
         setSettings((prev) => ({
           ...prev,
           autoSaveEnabled: cfg.autosave_enabled,
@@ -1420,26 +1408,6 @@ export const BoardWithAPI: React.FC = () => {
       })
       .catch(console.error);
   }, [isSnapshotMode, apiProps.gameState == null]);
-
-  // Popup de lancement : choisir un répertoire de save puis relancer la partie pour enregistrer
-  // depuis le game_start. Annulation du sélecteur natif → on laisse le popup ouvert.
-  const handleConfigureSaveDirAtLaunch = async () => {
-    try {
-      const path = await apiProps.pickDirectory();
-      if (!path) return;
-      await apiProps.snapshotSetPersist(true, path);
-      setSnapshotPersistEnabled(true);
-      setSnapshotPersistDir(path);
-      setSaveDirSelected(true);
-      localStorage.setItem("snapshotPersistEnabled", "true");
-      localStorage.setItem("snapshotPersistDir", path);
-      localStorage.setItem("saveDirSelected", "true");
-      setLaunchDirPromptOpen(false);
-      window.location.reload();
-    } catch (e) {
-      console.error(e);
-    }
-  };
 
   const handleToggleBattleShockTest = (value: boolean) => {
     setSettings((prev) => ({ ...prev, battleShockTestEnabled: value }));
@@ -2448,16 +2416,10 @@ export const BoardWithAPI: React.FC = () => {
           fetchTimeline={apiProps.fetchTimeline}
           onEnableRecording={async () => {
             // Même flux que l'activation du toggle "Sauvegarde des snapshots sur disque" du menu :
-            // sélecteur de répertoire natif, puis persistance + coche de l'option (états UI).
-            const path = await apiProps.pickDirectory();
-            if (!path) return false;
+            // le répertoire est celui du serveur, il n'y a plus qu'à activer la persistance.
+            await apiProps.snapshotSetPersist(true);
             setSnapshotPersistEnabled(true);
             localStorage.setItem("snapshotPersistEnabled", "true");
-            setSnapshotPersistDir(path);
-            localStorage.setItem("snapshotPersistDir", path);
-            setSaveDirSelected(true);
-            localStorage.setItem("saveDirSelected", "true");
-            await apiProps.snapshotSetPersist(true, path);
             return true;
           }}
           reloadLive={apiProps.snapshotReloadLive}
@@ -2466,72 +2428,12 @@ export const BoardWithAPI: React.FC = () => {
           createSave={apiProps.saveGameNow}
           fetchSaveList={apiProps.saveList}
           loadSave={handleLoadSave}
-          canSave={saveDirSelected}
+          canSave={snapshotPersistEnabled}
           fetchPartyList={apiProps.fetchPartyList}
           loadParty={handleLoadParty}
           confirmModifyOpen={snapshotConfirmModify}
           onCancelConfirmModify={() => setSnapshotConfirmModify(false)}
         />
-      )}
-
-      {isSnapshotMode && launchDirPromptOpen && (
-        // biome-ignore lint/a11y/noStaticElementInteractions: backdrop modal — clic fond = fermeture
-        <div
-          role="presentation"
-          onClick={() => setLaunchDirPromptOpen(false)}
-          onKeyDown={(e) => e.key === "Escape" && setLaunchDirPromptOpen(false)}
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.55)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 12000,
-          }}
-        >
-          {/* biome-ignore lint/a11y/noStaticElementInteractions: panneau — stopPropagation intentionnel */}
-          <div
-            onClick={(e) => e.stopPropagation()}
-            onKeyDown={(e) => e.stopPropagation()}
-            style={{
-              background: "#1f2937",
-              border: "1px solid #555",
-              borderRadius: "8px",
-              padding: "16px",
-              minWidth: "340px",
-              maxWidth: "440px",
-              color: "#fff",
-              boxShadow: "0 10px 30px rgba(0,0,0,0.5)",
-            }}
-          >
-            <h3 style={{ marginTop: 0 }}>Répertoire de sauvegarde</h3>
-            <p style={{ color: "#9ca3af", marginTop: 0 }}>
-              Aucun répertoire de sauvegarde n'est configuré. Choisis-en un maintenant pour que la
-              partie soit enregistrée (replay, Save, Select, Load) dès le début. Sans répertoire, la
-              partie ne sera pas enregistrée.
-            </p>
-            <div
-              style={{ display: "flex", gap: "8px", justifyContent: "flex-end", marginTop: "14px" }}
-            >
-              <button
-                type="button"
-                className="replay-btn replay-btn--nav"
-                onClick={() => setLaunchDirPromptOpen(false)}
-              >
-                Continuer sans enregistrer
-              </button>
-              <button
-                type="button"
-                className="replay-btn"
-                onClick={handleConfigureSaveDirAtLaunch}
-                style={{ background: "#059669", borderColor: "#047857", color: "#fff" }}
-              >
-                Choisir un répertoire
-              </button>
-            </div>
-          </div>
-        </div>
       )}
 
       {/* Barre d'action charge (V11 multi-cibles) : Cancel + Charger, même emplacement/style que
@@ -5855,21 +5757,12 @@ export const BoardWithAPI: React.FC = () => {
         onToggleDynamicCoverStatus={handleToggleDynamicCoverStatus}
         snapshotPersistEnabled={snapshotPersistEnabled}
         snapshotPersistDir={snapshotPersistDir}
-        onPickDirectory={isSnapshotMode ? apiProps.pickDirectory : undefined}
         onToggleSnapshotPersist={
           isSnapshotMode
-            ? (v: boolean, directory?: string) => {
+            ? (v: boolean) => {
                 setSnapshotPersistEnabled(v);
                 localStorage.setItem("snapshotPersistEnabled", JSON.stringify(v));
-                if (directory) {
-                  setSnapshotPersistDir(directory);
-                  localStorage.setItem("snapshotPersistDir", directory);
-                  setSaveDirSelected(true);
-                  localStorage.setItem("saveDirSelected", "true");
-                }
-                apiProps
-                  .snapshotSetPersist(v, directory)
-                  .catch(() => setSnapshotPersistEnabled(!v));
+                apiProps.snapshotSetPersist(v).catch(() => setSnapshotPersistEnabled(!v));
               }
             : undefined
         }

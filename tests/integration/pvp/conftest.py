@@ -270,7 +270,6 @@ def api_isolated(monkeypatch):
     # api_server charge logs/save_config.json à l'import : en usage normal la persistance
     # des snapshots et l'autosave sont actifs et écriraient sur le disque de l'utilisateur.
     monkeypatch.setattr(api_server, "_SNAPSHOT_PERSIST_ENABLED", False)
-    monkeypatch.setattr(api_server, "_PERSIST_DIR_SET", False)
     monkeypatch.setattr(api_server, "_AUTOSAVE_ENABLED", False)
     yield
     # Le moteur est une globale de module : ne pas laisser la partie d'un test au suivant.

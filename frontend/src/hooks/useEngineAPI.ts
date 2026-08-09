@@ -7909,11 +7909,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       loadParty: async () => ({ success: false }),
       setAutosaveConfig: async () => ({ success: false }),
       deleteSaves: async () => 0,
-      pickDirectory: async () => null,
       fetchSaveConfig: async () => ({
         persist_enabled: false,
         directory: "",
-        dir_set: false,
         autosave_enabled: false,
         granularity: "phase" as const,
       }),
@@ -8194,11 +8192,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     dispatchGameLogHydrate(data.game_log_history); // retour live : réhydrate le Game Log complet réel
   };
 
-  const snapshotSetPersist = async (enabled: boolean, directory?: string) => {
+  // Le répertoire de persistance est une config serveur (W40K_PERSIST_DIR) : l'envoyer serait
+  // rejeté par l'API (400).
+  const snapshotSetPersist = async (enabled: boolean) => {
     const response = await apiFetch(`${API_BASE}/game/snapshot/persist`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(directory ? { enabled, directory } : { enabled }),
+      body: JSON.stringify({ enabled }),
     });
     const data = await response.json();
     if (!data.success) throw new Error(data.error ?? "snapshot persist toggle failed");
@@ -8295,7 +8295,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const fetchSaveConfig = async (): Promise<{
     persist_enabled: boolean;
     directory: string;
-    dir_set: boolean;
     autosave_enabled: boolean;
     granularity: "phase" | "turn";
   }> => {
@@ -8303,13 +8302,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     const data = await response.json();
     if (!data.success) throw new Error(data.error ?? "save config fetch failed");
     return data;
-  };
-
-  const pickDirectory = async (): Promise<string | null> => {
-    const response = await apiFetch(`${API_BASE}/game/pick-directory`, { method: "POST" });
-    const data = await response.json();
-    if (!data.success) throw new Error(data.error ?? "directory picker failed");
-    return (data.path as string | null) ?? null;
   };
 
   const deleteSaves = async (): Promise<number> => {
@@ -8358,7 +8350,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     loadParty,
     setAutosaveConfig,
     deleteSaves,
-    pickDirectory,
     fetchSaveConfig,
     onSelectUnit: handleSelectUnit,
     onSkipUnit: handleSkipUnit,

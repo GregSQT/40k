@@ -15,10 +15,14 @@ Robustesse : append O(1) (pas de réécriture), écriture atomique pour les ré�
 (start/troncature/fork), RLock pour la concurrence (writer async vs lectures/réécritures). Lecture
 défensive STRICTE : seule une row de QUEUE incomplète (crash pendant un append) est ignorée — toute
 autre erreur de dépickle (ex. classe déplacée) REMONTE (pas de fallback masquant un bug).
+
+Sécurité : le dépickle passe par `_safe_loads` (liste blanche de classes, cf. `_ALLOWED_CLASSES`).
+Un fichier de save falsifié ne peut donc pas exécuter de code au chargement.
 """
 
 from __future__ import annotations
 
+import io
 import logging
 import os
 import pickle
@@ -156,6 +160,49 @@ def _stamp_scenario(row: Dict[str, Any], engine: Any) -> Dict[str, Any]:
     return row
 
 
+# --- Dépickle restreint (F7) ---------------------------------------------------------------
+# Un fichier de save est une donnée du DISQUE : si un tiers peut y écrire, `pickle.loads` exécute
+# ce qu'il veut (opcode REDUCE sur un gadget du type `os.system`). Or tout gadget passe forcément
+# par `find_class` : une liste blanche stricte le prive de callable et referme le vecteur, sans
+# changer le format des saves existantes.
+# Les types de base (dict, list, tuple, set, frozenset, clés non-str) ont leurs propres opcodes et
+# n'appellent PAS `find_class` — mesuré : un pickle contenant set/frozenset/dict à clés tuple
+# n'expose aucun global. Seules les CLASSES doivent donc être listées ici.
+#
+# Chaque entrée est un CONSTRUCTEUR DE DONNÉES : appelé avec des arguments contrôlés par
+# l'attaquant, il fabrique au pire un objet absurde, jamais un effet de bord (pas de fichier, pas
+# de process, pas de réseau). C'est le seul critère d'entrée dans cette liste.
+# Les entrées numpy existent en double parce que le module a été renommé (`numpy.core` →
+# `numpy._core` en 2.0) : une save écrite par l'autre version doit rester lisible.
+_ALLOWED_CLASSES = frozenset({
+    ("engine.weapons.rules", "ParsedWeaponRule"),
+    # Tableaux numpy présents dans l'état capturé (mesuré sur une partie réelle : le dépickle
+    # échouait sans ces trois entrées).
+    ("numpy", "ndarray"),
+    ("numpy", "dtype"),
+    ("numpy._core.multiarray", "_reconstruct"),
+    ("numpy.core.multiarray", "_reconstruct"),
+})
+
+
+class _RestrictedUnpickler(pickle.Unpickler):
+    """Dépickle en refusant toute classe hors liste blanche."""
+
+    def find_class(self, module: str, name: str) -> Any:
+        if (module, name) in _ALLOWED_CLASSES:
+            return super().find_class(module, name)
+        raise pickle.UnpicklingError(
+            f"classe interdite au dépickle d'une save : {module}.{name}. Si ce type est "
+            f"légitimement capturé dans l'état de jeu, ajoute-le à _ALLOWED_CLASSES "
+            f"(services/game_saves.py) après avoir vérifié qu'il ne porte aucun effet de bord."
+        )
+
+
+def _safe_loads(data: bytes) -> Any:
+    """`pickle.loads` restreint : SEUL point de désérialisation des saves."""
+    return _RestrictedUnpickler(io.BytesIO(data)).load()
+
+
 def _pack_record(row: Dict[str, Any]) -> bytes:
     """Sérialise une row en ``[len meta][meta][len state][state]``."""
     mb = pickle.dumps(row["meta"])
@@ -175,12 +222,6 @@ class SaveStore:
         self._queue: "queue.Queue[Tuple[str, Dict[str, Any]]]" = queue.Queue()
         self._writer: Optional[threading.Thread] = None
         self._writer_lock = threading.Lock()
-
-    def set_directory(self, directory: str) -> None:
-        """Change le répertoire des parties (change de dossier → plus de partie courante)."""
-        self._dir = directory
-        self._current = None
-        self._promote_target = None
 
     def current_party(self) -> Optional[str]:
         return self._current
@@ -224,12 +265,12 @@ class SaveStore:
                 mlen = self._read_len(f, size)
                 if mlen is None:
                     break
-                meta = pickle.loads(f.read(mlen))  # octets complets → une erreur ici = vraie corruption
+                meta = _safe_loads(f.read(mlen))  # octets complets → une erreur ici = vraie corruption
                 slen = self._read_len(f, size)
                 if slen is None:
                     break  # state de queue incomplet → row ignorée
                 if load_state:
-                    out.append({"meta": meta, "state": pickle.loads(f.read(slen))})
+                    out.append({"meta": meta, "state": _safe_loads(f.read(slen))})
                 else:
                     f.seek(slen, 1)  # saute le state sans le désérialiser
                     out.append(meta)
@@ -249,7 +290,7 @@ class SaveStore:
             mlen = self._read_len(f, size)
             if mlen is None:
                 raise ValueError(f"partie vide: {name}")
-            return pickle.loads(f.read(mlen))
+            return _safe_loads(f.read(mlen))
 
     def _assert_scenario_match(self, engine: Any, name: str) -> None:
         """Refuse d'appliquer un état d'une partie produite sur un AUTRE plateau que l'engine vivant.
@@ -282,12 +323,12 @@ class SaveStore:
                 mlen = self._read_len(f, size)
                 if mlen is None:
                     break
-                meta = pickle.loads(f.read(mlen))
+                meta = _safe_loads(f.read(mlen))
                 slen = self._read_len(f, size)
                 if slen is None:
                     break
                 if match(meta):
-                    return {"meta": meta, "state": pickle.loads(f.read(slen))}
+                    return {"meta": meta, "state": _safe_loads(f.read(slen))}
                 f.seek(slen, 1)
         raise KeyError("row introuvable")
 
