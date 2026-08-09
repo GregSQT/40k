@@ -409,6 +409,10 @@ body {
   height: 280px;
   max-width: 240px;
   overflow: visible;
+  /* Le débordement reste libre à gauche, à droite et en bas (-100vmax = « sans limite »), mais il
+     est coupé net au-dessus, à la gouttière qui sépare ce bloc des tables d'unités : au-delà,
+     l'illustration passerait PAR-DESSUS le conteneur du dessus. */
+  clip-path: inset(calc(-1 * var(--spacing-sm)) -100vmax -100vmax -100vmax);
   border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: var(--radius-lg);
   box-sizing: border-box;
