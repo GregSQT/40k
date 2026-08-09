@@ -26,7 +26,9 @@ def test_unit_hp_and_damage_helpers() -> None:
     }
     unit_hp = {"u1": 3, "u2": 1}
     unit_models_alive = {"u1": 1, "u2": 1}
-    unit_hp_max_per_model = {"u1": 3, "u2": 1}
+    # Relève VIDE : les deux escouades sont mono-figurine, il n'y a personne derrière.
+    unit_model_hp_queue = {"u1": [], "u2": []}
+    unit_hp_squad_max = {"u1": 3, "u2": 1}
     unit_types = {"u2": "Termagant"}
     unit_positions = {"u2": (1, 1)}
     unit_deaths = []
@@ -59,7 +61,8 @@ def test_unit_hp_and_damage_helpers() -> None:
         dead_units_current_episode=dead,
         unit_hp=unit_hp,
         unit_models_alive=unit_models_alive,
-        unit_hp_max_per_model=unit_hp_max_per_model,
+        unit_model_hp_queue=unit_model_hp_queue,
+        unit_hp_squad_max=unit_hp_squad_max,
         unit_types=unit_types,
         unit_positions=unit_positions,
         unit_deaths=unit_deaths,
@@ -81,7 +84,8 @@ def test_unit_hp_and_damage_helpers() -> None:
         dead_units_current_episode=dead,
         unit_hp=unit_hp,
         unit_models_alive=unit_models_alive,
-        unit_hp_max_per_model=unit_hp_max_per_model,
+        unit_model_hp_queue=unit_model_hp_queue,
+        unit_hp_squad_max=unit_hp_squad_max,
         unit_types=unit_types,
         unit_positions=unit_positions,
         unit_deaths=unit_deaths,

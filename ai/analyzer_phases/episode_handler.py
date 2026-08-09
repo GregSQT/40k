@@ -48,7 +48,8 @@ def handle_episode_start(state: "AnalyzerState", config: "AnalyzerConfig", line:
     stats['wounded_enemies'] = {1: set(), 2: set()}
     state.unit_hp = {}
     state.unit_models_alive = {}
-    state.unit_hp_max_per_model = {}
+    state.unit_model_hp_queue = {}
+    state.unit_hp_squad_max = {}
     state.unit_player = {}
     state.unit_positions = {}
     state.unit_types = {}

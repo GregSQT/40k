@@ -141,7 +141,87 @@ def _count_faction_activations(state: AnalyzerState, new_effects: "Dict[int, Dic
                 stats['faction_ability_activations'][rule_id][player] += 1
 
 
-def _apply_state_snapshot(state: AnalyzerState, payload: str) -> None:
+def _model_full_hp(state: AnalyzerState, config: AnalyzerConfig, mid: str, squad_hp_max: int) -> int:
+    """PV pleins de LA figurine ``mid`` — sa datasheet, pas celle de l'escouade.
+
+    ``[MODEL_TYPES:]`` absent pour ce socle (journal antérieur à cette clé d'entête) → PV de
+    l'escouade. C'est l'ancien comportement, conservé pour rester capable d'analyser les vieux
+    journaux : donnée absente, jamais une composition supposée. La datasheet inconnue du
+    registry, elle, LÈVE — c'est une incohérence log/registry, pas une donnée manquante.
+    """
+    mtype = state.model_types.get(mid)  # get allowed : cf. docstring
+    if mtype is None:
+        return int(squad_hp_max)
+    return int(require_key(require_key(config.unit_registry.units, mtype), "HP_MAX"))
+
+
+def _model_is_character(config: AnalyzerConfig, mtype: Optional[str]) -> bool:
+    """CHARACTER au sens ALLOCATION (06.02) : rôle ``support`` ou ``leader``.
+
+    Même dérivation que le moteur (``_derive_model_role`` / ``_is_character_role`` sur les
+    ``UNIT_RULES``), importée plutôt que recopiée : l'ordre d'allocation est une règle, et une
+    copie locale la figerait au jour de l'écriture.
+    """
+    if mtype is None:
+        return False
+    from engine.phase_handlers.shared_utils import _derive_model_role, _is_character_role
+
+    unit_data = require_key(config.unit_registry.units, mtype)
+    return _is_character_role(_derive_model_role(require_key(unit_data, "UNIT_RULES")))
+
+
+def _resync_hp_queue(
+    state: AnalyzerState,
+    config: AnalyzerConfig,
+    unit_id: str,
+    mids: "list[str]",
+    hp_by_mid: "Optional[Dict[str, int]]" = None,
+) -> None:
+    """Recale la RELÈVE sur l'effectif réellement vivant, sans toucher aux PV de la front.
+
+    ⚠️ POURQUOI. ``unit_models_alive`` est resynchronisé depuis le segment ``[MODELS:]`` de
+    CHAQUE ligne (source de vérité moteur de l'effectif), alors que la file, elle, ne se vidait
+    qu'aux pertes que l'analyzer attribue lui-même. Une perte vue par le log mais non attribuée
+    faisait donc diverger les deux compteurs : mesuré sur le témoin E5, ``alive=0`` alors que la
+    file portait encore ``[6, 4]`` — l'escouade était déclarée détruite avec deux figurines
+    debout. Corriger les PV par figurine sans recaler la file ne réparait donc RIEN : les deux
+    moitiés du modèle doivent suivre la même source.
+
+    ``hp_by_mid`` fourni (instantané ``T{n} STATE:``, qui porte les PV par socle) → la relève
+    prend les PV COURANTS. Absent (segment ``[MODELS:]`` d'une ligne d'action, qui ne porte que
+    les positions) → PV pleins, ce qui est exact sous le modèle d'allocation « la front encaisse
+    tout » : les figurines de relève n'ont jamais été entamées.
+
+    La front n'est PAS choisie ici : ``unit_hp`` porte son état d'endommagement en cours, et le
+    rejouer depuis une valeur pleine effacerait les dégâts déjà comptés.
+    """
+    # La première de l'ordre d'encaissement EST la front (portée par `unit_hp`) : la relève est
+    # le reste.
+    state.unit_model_hp_queue[unit_id] = _hps_in_loss_order(
+        state, config, unit_id, mids, hp_by_mid
+    )[1:]
+
+
+def _hps_in_loss_order(
+    state: AnalyzerState,
+    config: AnalyzerConfig,
+    unit_id: str,
+    mids: "list[str]",
+    hp_by_mid: "Optional[Dict[str, int]]" = None,
+) -> "list[int]":
+    """PV des figurines ``mids`` dans l'ordre 06.02 (non-CHARACTER d'abord). Cf. ``_resync_hp_queue``."""
+    if not mids:
+        return []
+    squad_hp_max = state.unit_hp_squad_max.get(unit_id, 1)  # get allowed : unité jamais vue
+    ordered = sorted(
+        mids, key=lambda mid: _model_is_character(config, state.model_types.get(mid))  # get allowed
+    )
+    if hp_by_mid is None:
+        return [_model_full_hp(state, config, mid, squad_hp_max) for mid in ordered]
+    return [int(require_key(hp_by_mid, mid)) for mid in ordered]
+
+
+def _apply_state_snapshot(state: AnalyzerState, config: AnalyzerConfig, payload: str) -> None:
     """Recale l'état reconstruit sur l'instantané du moteur, APRÈS avoir compté les écarts.
 
     Trois écarts sont comptés séparément, parce qu'ils n'ont pas la même cause :
@@ -165,9 +245,11 @@ def _apply_state_snapshot(state: AnalyzerState, payload: str) -> None:
         models = {}
         heights = {}
         hps = []
+        hp_by_mid: Dict[str, int] = {}
         for m in _STATE_MODEL_RE.finditer(unit_match.group(2)):
             mid = m.group(1)
             models[mid] = (int(m.group(2)), int(m.group(3)))
+            hp_by_mid[mid] = int(m.group(5))
             # `z` optionnel dans la grammaire partagée (journaux antérieurs au 3D) : 0.0 = sol,
             # même convention que `parse_models_and_heights`.
             heights[mid] = float(m.group(4)) if m.group(4) is not None else 0.0
@@ -191,6 +273,13 @@ def _apply_state_snapshot(state: AnalyzerState, payload: str) -> None:
         # donne le MAXIMUM des PV vivants. Prendre le minimum ferait « mourir » l'escouade dès
         # qu'une figurine est blessée, ce que le reste du code interprète comme une unité détruite.
         state.unit_hp[uid] = max(hps)
+        # La RELÈVE suit le même instantané, sinon les deux moitiés du modèle de PV décrivent des
+        # effectifs différents (cf. `_resync_hp_queue`). Elle porte les PV RÉELS du socle, et
+        # exclut la figurine déjà comptée par `unit_hp` ci-dessus — une seule occurrence, sinon
+        # la plus résistante serait comptée deux fois.
+        _ordered = _hps_in_loss_order(state, config, uid, list(models), hp_by_mid)
+        _ordered.remove(max(hps))
+        state.unit_model_hp_queue[uid] = _ordered
         state.dead_units_current_episode.discard(uid)
         state.models_invalidated.discard(uid)
 
@@ -274,13 +363,26 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                     if _uid in state.unit_player:
                         # [MODELS:] = source de vérité du nb de figurines vivantes de _uid.
                         state.unit_models_alive[_uid] = len(_models)
+                        # …donc de la RELÈVE aussi : recaler l'effectif sans recaler la file
+                        # laissait les deux dériver, et l'escouade mourait avec des PV en
+                        # attente dans la file (cf. `_resync_hp_queue`).
+                        _resync_hp_queue(state, config, _uid, list(_models))
                         # get allowed : l'absence EST le cas traite ici. On repare une
                         # incoherence connue (escouade faussement retiree de `unit_hp` alors que
                         # [MODELS:] la montre vivante) ; « absente » et « a 0 PV » demandent la
                         # meme reparation, et lever interdirait justement de la reparer.
                         if state.unit_hp.get(_uid, 0) <= 0:  # get allowed
-                            # Escouade faussement retirée : ressusciter la figurine front à PV pleins.
-                            state.unit_hp[_uid] = require_key(state.unit_hp_max_per_model, _uid)
+                            # Escouade faussement retirée : ressusciter la figurine front à PV
+                            # pleins. Ceux de la PROCHAINE figurine de la file quand elle en a
+                            # une — l'escouade a des socles vivants, donc la relève est la bonne
+                            # source. File vide (composition inconnue) → PV d'escouade.
+                            _q = state.unit_model_hp_queue.get(_uid)  # get allowed
+                            if _q:
+                                state.unit_hp[_uid] = _q.pop(0)
+                            else:
+                                state.unit_hp[_uid] = require_key(
+                                    state.unit_hp_squad_max, _uid
+                                )
                             state.dead_units_current_episode.discard(_uid)
                         # Restaurer l'ancre si elle a été purgée par la fausse mort d'ancre :
                         # les handlers la resynchronisent ensuite depuis l'ancre loguée.
@@ -359,7 +461,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 re.search(r'\bT\d+ STATE: (.*)$', line) if ' STATE: ' in line else None
             )
             if state_snapshot_match:
-                _apply_state_snapshot(state, state_snapshot_match.group(1))
+                _apply_state_snapshot(state, config, state_snapshot_match.group(1))
                 continue
 
             # ── Effets de règle EN VIGUEUR (`T{tour} EFFECTS: P1 … | P2 …`) ─────────────────
@@ -433,7 +535,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 n_models = len(deploy_models) if deploy_models else 1
                 state.unit_hp[unit_id] = hp_max
                 state.unit_models_alive[unit_id] = n_models
-                state.unit_hp_max_per_model[unit_id] = hp_max
+                state.unit_hp_squad_max[unit_id] = hp_max
 
                 state.unit_player[unit_id] = player
                 _position_cache_set(state.unit_positions, unit_id, col, row)
@@ -456,6 +558,15 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         _mid, _sep, _mtype = _pair.partition("=")
                         if _sep:
                             state.model_types[_mid] = _mtype
+                # PV PAR FIGURINE (cf. `unit_model_hp_queue`). Posés ICI et pas plus haut : ils
+                # ont besoin de `[MODEL_TYPES:]`, que la même ligne d'entête vient seulement de
+                # fournir. Le premier est la « front » courante, le reste est sa relève.
+                _hps = _hps_in_loss_order(
+                    state, config, unit_id, list(deploy_models) if deploy_models else []
+                )
+                if _hps:
+                    state.unit_hp[unit_id] = _hps[0]
+                state.unit_model_hp_queue[unit_id] = _hps[1:]
                 continue
 
             # Parse unit deployment positions (authoritative start positions)
@@ -673,7 +784,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                         stats['first_error_lines']['shoot_at_dead_unit'][player] = {'episode': state.current_episode_num, 'line': line.strip()}
                             _apply_damage_and_handle_death(
                                 target_id, _dmg_actor_id, damage, player, turn, phase, state.line_number, state.current_episode_num,
-                                line, state.dead_units_current_episode, state.unit_hp, state.unit_models_alive, state.unit_hp_max_per_model, state.unit_types, state.unit_positions, state.unit_deaths, state.unit_kill_context, stats,
+                                line, state.dead_units_current_episode, state.unit_hp, state.unit_models_alive, state.unit_model_hp_queue, state.unit_hp_squad_max, state.unit_types, state.unit_positions, state.unit_deaths, state.unit_kill_context, stats,
                                 positions_by_model=state.positions_by_model,
                                 models_invalidated=state.models_invalidated,
                             )
@@ -693,7 +804,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         damage = int(damage_match.group(1))
                         _apply_damage_and_handle_death(
                             target_id, _dmg_actor_id, damage, player, turn, phase, state.line_number, state.current_episode_num,
-                            line, state.dead_units_current_episode, state.unit_hp, state.unit_models_alive, state.unit_hp_max_per_model, state.unit_types, state.unit_positions, state.unit_deaths, state.unit_kill_context, stats,
+                            line, state.dead_units_current_episode, state.unit_hp, state.unit_models_alive, state.unit_model_hp_queue, state.unit_hp_squad_max, state.unit_types, state.unit_positions, state.unit_deaths, state.unit_kill_context, stats,
                             positions_by_model=state.positions_by_model,
                             models_invalidated=state.models_invalidated,
                         )
@@ -712,7 +823,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                     if damage > 0:
                         _apply_damage_and_handle_death(
                             target_id, _dmg_actor_id, damage, player, turn, phase, state.line_number, state.current_episode_num,
-                            line, state.dead_units_current_episode, state.unit_hp, state.unit_models_alive, state.unit_hp_max_per_model, state.unit_types, state.unit_positions, state.unit_deaths, state.unit_kill_context, stats,
+                            line, state.dead_units_current_episode, state.unit_hp, state.unit_models_alive, state.unit_model_hp_queue, state.unit_hp_squad_max, state.unit_types, state.unit_positions, state.unit_deaths, state.unit_kill_context, stats,
                                 positions_by_model=state.positions_by_model,
                                 models_invalidated=state.models_invalidated,
                         )
