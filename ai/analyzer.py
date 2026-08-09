@@ -9,7 +9,7 @@ import os
 import re
 import math
 from collections import defaultdict, Counter
-from typing import Dict, List, Tuple, Set, Optional, Any
+from typing import Dict, Iterator, List, Tuple, Set, Optional, Any
 
 # Add project root to Python path for imports
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -544,6 +544,60 @@ def _analyzer_engagement_zone_vertical() -> float:
     return float(get_run_rule("engagement_zone_vertical_inches"))
 
 
+def _offenders_str(first_err: Dict[str, Any]) -> str:
+    """Rend la liste des unités engageantes d'une première occurrence, ou une raison explicite.
+
+    Une clé ABSENTE et une liste VIDE ne disent pas la même chose : la première signale un
+    producteur qui n'a pas renseigné le diagnostic (défaut de câblage), la seconde un compteur
+    qui a déclenché sans que la mesure ne retrouve d'ennemi (contradiction à investiguer). Les
+    confondre en « none » est ce qui a rendu cette ligne inutilisable pendant tout un chantier.
+    """
+    if 'adjacent_after' not in first_err:
+        return "<non renseigné par le compteur>"
+    offenders = first_err['adjacent_after']
+    if not offenders:
+        return "<aucune — le compteur et la mesure se contredisent>"
+    return ', '.join(f"Unit {uid}" for uid in offenders)
+
+
+def engine_engagement_zone_offenders(
+    unit_id: str,
+    unit_player: Dict[str, int],
+    unit_positions: Dict[str, Tuple[int, int]],
+    unit_hp: Dict[str, int],
+    engagement_zone: int,
+    position_override: Optional[Tuple[int, int]] = None,
+    positions_by_model: Optional[Dict[str, Dict[str, Tuple[int, int]]]] = None,
+    unit_base: Optional[Dict[str, Any]] = None,
+    subject_models: Optional[Dict[str, Tuple[int, int]]] = None,
+    heights_by_model: Optional[Dict[str, Dict[str, float]]] = None,
+    unit_model_height: Optional[Dict[str, float]] = None,
+    subject_heights: Optional[Dict[str, float]] = None,
+    exclude_unit_id: Optional[str] = None,
+) -> List[str]:
+    """QUELLES unités ennemies engagent ``unit_id`` — même mesure que le compteur, en nommé.
+
+    Jumeau de ``is_within_engine_engagement_zone``, qui n'est que le prédicat booléen construit
+    dessus : il n'y a donc qu'une seule implémentation de la mesure (même discipline que
+    ``validate_move_plan`` / ``explain_move_plan_rejection`` côté moteur).
+
+    ⚠️ POURQUOI CETTE FONCTION EXISTE. Le diagnostic de la section 1.1 nommait les coupables avec
+    ``get_adjacent_enemies`` — une adjacence d'ANCRE à distance hex 1 — pendant que le compteur
+    décidait avec la mesure par-figurine à ``engagement_zone``, dans la métrique du run. À ×5
+    (``ez=10``), « distance d'ancre == 1 » n'est presque jamais vrai : le rapport imprimait donc
+    « Adjacent after move: none » sous une erreur qui venait bien de se déclencher. Un diagnostic
+    qui ne peut pas nommer le coupable oblige à re-mesurer à la main à chaque occurrence.
+
+    Ordre : celui de ``unit_positions`` (ordre du journal), sans doublon — une unité engagée par
+    plusieurs de ses socles n'est nommée qu'une fois.
+    """
+    return list(_iter_engaging_enemy_ids(
+        unit_id, unit_player, unit_positions, unit_hp, engagement_zone,
+        position_override, positions_by_model, unit_base, subject_models,
+        heights_by_model, unit_model_height, subject_heights, exclude_unit_id,
+    ))
+
+
 def is_within_engine_engagement_zone(
     unit_id: str,
     unit_player: Dict[str, int],
@@ -602,12 +656,42 @@ def is_within_engine_engagement_zone(
     doit rendre un verdict 2D — juste sur un plateau plat, et c'est le cas de tous les journaux
     antérieurs aux étages.
     """
+    for _uid in _iter_engaging_enemy_ids(
+        unit_id, unit_player, unit_positions, unit_hp, engagement_zone,
+        position_override, positions_by_model, unit_base, subject_models,
+        heights_by_model, unit_model_height, subject_heights, exclude_unit_id,
+    ):
+        return True
+    return False
+
+
+def _iter_engaging_enemy_ids(
+    unit_id: str,
+    unit_player: Dict[str, int],
+    unit_positions: Dict[str, Tuple[int, int]],
+    unit_hp: Dict[str, int],
+    engagement_zone: int,
+    position_override: Optional[Tuple[int, int]],
+    positions_by_model: Optional[Dict[str, Dict[str, Tuple[int, int]]]],
+    unit_base: Optional[Dict[str, Any]],
+    subject_models: Optional[Dict[str, Tuple[int, int]]],
+    heights_by_model: Optional[Dict[str, Dict[str, float]]],
+    unit_model_height: Optional[Dict[str, float]],
+    subject_heights: Optional[Dict[str, float]],
+    exclude_unit_id: Optional[str],
+) -> Iterator[str]:
+    """MESURE UNIQUE de l'engagement côté analyzer — énumère les ennemis engageant le sujet.
+
+    Générateur : le prédicat booléen s'arrête au premier (coût inchangé), le diagnostic les
+    consomme tous. La sémantique est documentée sur ``is_within_engine_engagement_zone``, son
+    lecteur principal — ne pas la dupliquer ici.
+    """
     from engine.spatial_relations import unit_entries_within_engagement_zone
     from ai.analyzer_perfig import model_cache_entries
 
     subject_hp = _get_unit_hp_value(unit_hp, unit_id)
     if subject_hp is None or subject_hp <= 0 or unit_id not in unit_player:
-        return False
+        return
     models_by_unit = positions_by_model or {}
     bases = unit_base or {}
     subject_player = int(require_key(unit_player, unit_id))
@@ -631,7 +715,7 @@ def is_within_engine_engagement_zone(
         heights=subject_heights, model_height=model_heights.get(unit_id),  # get allowed
     )
     if not subject_entries:
-        return False
+        return
 
     metric = _analyzer_engagement_metric()
     # Seuil vertical lu PARESSEUSEMENT, à la première paire qui porte réellement des altitudes :
@@ -647,6 +731,10 @@ def is_within_engine_engagement_zone(
         hp_value = _get_unit_hp_value(unit_hp, uid)
         if hp_value is None or hp_value <= 0:
             continue
+        # `_engaged` : une unité engagée par PLUSIEURS de ses socles n'est nommée qu'une fois, et
+        # on sort de ses deux boucles imbriquées dès le premier socle qui touche — le prédicat
+        # booléen garde ainsi exactement son coût d'avant (il s'arrête au premier `yield`).
+        _engaged = False
         for enemy_entry in model_cache_entries(
             uid, models_by_unit.get(uid), bases, anchor, enemy_player,  # get allowed
             heights=heights_by_unit.get(uid),  # get allowed
@@ -663,8 +751,12 @@ def is_within_engine_engagement_zone(
                     subject_entry, enemy_entry, engagement_zone, metric=metric,
                     vertical_zone_inches=_vz,
                 ):
-                    return True
-    return False
+                    _engaged = True
+                    break
+            if _engaged:
+                break
+        if _engaged:
+            yield str(uid)
 
 
 def _build_enemy_adjacent_hexes(
@@ -2354,19 +2446,11 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         if agent_move_adj > 0 and stats['first_error_lines']['move_to_adjacent_enemy'][1]:
             first_err = stats['first_error_lines']['move_to_adjacent_enemy'][1]
             log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-            if 'adjacent_before' in first_err and 'adjacent_after' in first_err:
-                before_str = ', '.join([f"Unit {uid}" for uid in first_err['adjacent_before']]) if first_err['adjacent_before'] else 'none'
-                after_str = ', '.join([f"Unit {uid}" for uid in first_err['adjacent_after']]) if first_err['adjacent_after'] else 'none'
-                log_print(f"    Adjacent before move: {before_str}")
-                log_print(f"    Adjacent after move: {after_str}")
+            log_print(f"    Engaged after move: {_offenders_str(first_err)}")
         if bot_move_adj > 0 and stats['first_error_lines']['move_to_adjacent_enemy'][2]:
             first_err = stats['first_error_lines']['move_to_adjacent_enemy'][2]
             log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-            if 'adjacent_before' in first_err and 'adjacent_after' in first_err:
-                before_str = ', '.join([f"Unit {uid}" for uid in first_err['adjacent_before']]) if first_err['adjacent_before'] else 'none'
-                after_str = ', '.join([f"Unit {uid}" for uid in first_err['adjacent_after']]) if first_err['adjacent_after'] else 'none'
-                log_print(f"    Adjacent before move: {before_str}")
-                log_print(f"    Adjacent after move: {after_str}")
+            log_print(f"    Engaged after move: {_offenders_str(first_err)}")
         agent_adj_before_move = stats['move_adjacent_before_non_flee'][1]
         bot_adj_before_move = stats['move_adjacent_before_non_flee'][2]
         _table_row("Move with adjacent_before:", _fmt_count(agent_adj_before_move), _fmt_count(bot_adj_before_move))
