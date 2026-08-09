@@ -232,7 +232,8 @@ def _apply_damage_and_handle_death(
     dead_units_current_episode: Set[str],
     unit_hp: Dict[str, int],
     unit_models_alive: Dict[str, int],
-    unit_hp_max_per_model: Dict[str, int],
+    unit_model_hp_queue: Dict[str, List[int]],
+    unit_hp_squad_max: Dict[str, int],
     unit_types: Dict[str, str],
     unit_positions: Dict[str, Tuple[int, int]],
     unit_deaths: List[Tuple[int, str, str, int]],
@@ -306,8 +307,23 @@ def _apply_damage_and_handle_death(
             )
             del unit_hp[target_id]
         else:
-            # Nouvelle figurine front à PV pleins ; escouade toujours vivante.
-            unit_hp[target_id] = require_key(unit_hp_max_per_model, target_id)
+            # Relève : la figurine SUIVANTE devient front, à SES PV pleins — pas à ceux de la
+            # datasheet d'escouade. C'est le correctif de la sous-évaluation qui faisait mourir
+            # une escouade hétérogène six points trop tôt (cf. `unit_model_hp_queue`).
+            _queue = require_key(unit_model_hp_queue, target_id)
+            if _queue:
+                unit_hp[target_id] = _queue.pop(0)
+            else:
+                # `unit_models_alive` dit qu'il reste une figurine mais la file est vide : la
+                # composition n'était pas connue (journal sans `[MODEL_TYPES:]`, ou effectif
+                # recalé par un instantané plus large que la file). Les PV de la figurine
+                # détruite sont la meilleure valeur DISPONIBLE, et c'est le comportement
+                # historique — le signaler plutôt que de le maquiller.
+                _debug_log(
+                    f"[HP QUEUE EMPTY] E{current_episode_num} T{turn} {phase} "
+                    f"target_id={target_id} models_left={unit_models_alive[target_id]}"
+                )
+                unit_hp[target_id] = require_key(unit_hp_squad_max, target_id)
             stats['wounded_enemies'][player].add(target_id)
             _debug_log(
                 f"[MODEL SLAIN] E{current_episode_num} T{turn} {phase} "

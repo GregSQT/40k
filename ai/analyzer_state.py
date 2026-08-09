@@ -39,12 +39,30 @@ class AnalyzerState:
 
     # Suivi unités
     # Modèle HP par-figurine (05 Attack sequence) : unit_hp[uid] = PV de la figurine
-    # "front" en cours d'endommagement ; unit_models_alive[uid] = nb de figurines vivantes ;
-    # unit_hp_max_per_model[uid] = PV_MAX d'une figurine (registry). Invariant conservé :
-    # uid présent dans unit_hp avec valeur > 0 ⟺ escouade vivante (≥1 figurine).
+    # "front" en cours d'endommagement ; unit_models_alive[uid] = nb de figurines vivantes.
+    # Invariant conservé : uid présent dans unit_hp avec valeur > 0 ⟺ escouade vivante.
     unit_hp: Dict[str, int] = field(default_factory=dict)
     unit_models_alive: Dict[str, int] = field(default_factory=dict)
-    unit_hp_max_per_model: Dict[str, int] = field(default_factory=dict)
+    #: PV pleins des figurines qui deviendront « front » APRÈS l'actuelle, dans l'ordre où
+    #: elles encaisseront (06.02 : les non-CHARACTER d'abord, les CHARACTER en dernier).
+    #:
+    #: ⚠️ Remplace `unit_hp_max_per_model: Dict[str, int]`, qui donnait à TOUTE figurine de
+    #: l'escouade le `HP_MAX` de la datasheet de tête. Une escouade hétérogène était donc
+    #: sous-évaluée : l'Intercessor 105 (`HP_MAX=2`) porte un Captain à 6 PV et un Ancient à 4,
+    #: soit 20 PV côté moteur contre 14 côté analyzer. L'analyzer épuisait l'escouade six points
+    #: trop tôt et la déclarait détruite — c'est le compteur « unités tuées à tort » de la
+    #: section 2.8, et surtout un faux NÉGATIF pour tout contrôle qui filtre sur les unités
+    #: vivantes (l'engagement du move, entre autres).
+    #:
+    #: Source : `[MODEL_TYPES:]` de l'entête d'épisode (datasheet par socle) + `HP_MAX` du
+    #: registry. Journal sans `[MODEL_TYPES:]` (antérieur à cette clé) → file uniforme au
+    #: `HP_MAX` d'escouade, c'est-à-dire exactement l'ancien comportement : donnée absente,
+    #: jamais une composition supposée.
+    unit_model_hp_queue: Dict[str, List[int]] = field(default_factory=dict)
+    #: `HP_MAX` de la datasheet d'ESCOUADE (registry). Ne sert plus qu'aux figurines dont la
+    #: datasheet est inconnue — journal sans `[MODEL_TYPES:]`. C'est l'ancienne valeur unique,
+    #: réduite à son seul usage légitime : un défaut de donnée, pas le cas courant.
+    unit_hp_squad_max: Dict[str, int] = field(default_factory=dict)
     unit_player: Dict[str, int] = field(default_factory=dict)
     unit_positions: Dict[str, Tuple[int, int]] = field(default_factory=dict)
     unit_types: Dict[str, str] = field(default_factory=dict)
