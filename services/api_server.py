@@ -35,7 +35,7 @@ sys.path.insert(0, engine_dir)
 
 from engine.w40k_core import W40KEngine
 from main import load_config
-from shared.data_validation import require_key
+from shared.data_validation import ConfigurationError, require_key
 from engine.combat_utils import resolve_dice_value, set_unit_coordinates
 from engine.phase_handlers.shared_utils import build_units_cache, rebuild_choice_timing_index, _is_character_role
 from engine.phase_handlers import command_handlers, movement_handlers, deployment_handlers
@@ -1471,14 +1471,29 @@ _SNAPSHOT_PERSIST_ENABLED = False
 
 # Saves manuelles (un fichier plat par save) sous logs/pvp_saves/.
 from services.game_saves import SaveStore, progress_key_from_gs, progress_key_from_meta
-# Répertoire de persistance (snapshots + saves), configurable via le menu. Défaut : logs/.
-_PERSIST_DIR = os.path.join(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')), "logs")
+def _resolve_persist_dir() -> str:
+    """Répertoire de persistance (snapshots + saves) : config SERVEUR, jamais une donnée de requête.
+
+    Surchargeable par `W40K_PERSIST_DIR` ; défaut `logs/`. Variable définie mais vide = erreur au
+    démarrage (une valeur vide écrirait à la racine du process, sans que personne le voie)."""
+    raw = os.environ.get("W40K_PERSIST_DIR")
+    if raw is None:
+        return os.path.join(abs_parent, "logs")
+    directory = raw.strip()
+    if not directory:
+        raise ConfigurationError(
+            "W40K_PERSIST_DIR est définie mais vide : donner un chemin ou retirer la variable"
+        )
+    return os.path.abspath(directory)
+
+
+# Répertoire de persistance figé au démarrage. Le client ne peut plus le choisir (F7) : un
+# `directory` reçu en requête permettait `os.makedirs` + écriture disque n'importe où.
+_PERSIST_DIR = _resolve_persist_dir()
 _SAVE_STORE = SaveStore(os.path.join(_PERSIST_DIR, "pvp_saves"))
 # Arrêt propre du process : écrit les dernières rows de timeline encore en file d'attente.
 import atexit
 atexit.register(_SAVE_STORE.flush)
-# Le répertoire doit être explicitement choisi avant toute save (manuelle ou auto).
-_PERSIST_DIR_SET = False
 # Sauvegarde automatique : off par défaut ; granularité "phase" ou "turn".
 _AUTOSAVE_ENABLED = False
 _AUTOSAVE_GRANULARITY = "phase"
@@ -1497,12 +1512,12 @@ def _reset_timeline_last(engine_instance) -> None:
 
 def _timeline_capture(engine_instance) -> None:
     """Capture une row de timeline (append async) à chaque PROGRESSION réelle (activation d'unité /
-    changement de phase / de tour). Gated : uniquement si enregistrement activé + répertoire défini +
-    partie courante. La copie de l'état est synchrone (sous le lock engine) ; l'écriture est async."""
+    changement de phase / de tour). Gated : uniquement si enregistrement activé + partie courante
+    ouverte. La copie de l'état est synchrone (sous le lock engine) ; l'écriture est async."""
     global _TIMELINE_LAST_KEY
     if getattr(engine_instance, "current_mode_code", None) not in ("pvp", "pvp_test"):
         return
-    if not (_SNAPSHOT_PERSIST_ENABLED and _PERSIST_DIR_SET):
+    if not _SNAPSHOT_PERSIST_ENABLED:
         return
     party = _SAVE_STORE.current_party()
     if not party:
@@ -1540,6 +1555,38 @@ def _maybe_autosave(engine_instance, point_ts: str) -> None:
     _SAVE_STORE.add_point(engine_instance, point_ts, "", kind)
 
 
+def _engine_has_live_pvp_game() -> bool:
+    """Une partie PvP tourne-t-elle dans l'engine de process ?
+
+    `engine` est une globale posée par `start_game` : au boot, et entre deux parties, elle peut être
+    `None` ou porter un moteur sans état de jeu."""
+    return (
+        engine is not None
+        and getattr(engine, "current_mode_code", None) in ("pvp", "pvp_test")
+        and isinstance(getattr(engine, "game_state", None), dict)
+        and "turn" in engine.game_state
+    )
+
+
+def _open_save_party(engine_instance) -> None:
+    """Ouvre la partie de saves de l'engine vivant : ancre de départ, promotion si l'autosave est
+    actif, tracker de timeline réaligné.
+
+    Point UNIQUE d'ouverture : trois chemins y mènent (démarrage de partie, bascule de
+    l'enregistrement, bascule de l'autosave) et ils avaient déjà divergé — l'un réalignait
+    `_TIMELINE_LAST_KEY`, l'autre non, si bien que la 1re row réémettait la position de l'ancre."""
+    from datetime import datetime
+    now = datetime.now()
+    _SAVE_STORE.start_party(
+        engine_instance, now.strftime("%Y%m%d_%H-%M"), now.strftime("%Y%m%d-%H%M%S")
+    )
+    # Autosave actif → la partie est visible tout de suite dans Select.
+    # Autosave inactif → le working reste caché jusqu'à la 1re save manuelle (promotion différée).
+    if _AUTOSAVE_ENABLED:
+        _SAVE_STORE.promote()
+    _reset_timeline_last(engine_instance)
+
+
 def _capture_and_autosave(engine_instance, initial: bool = False) -> None:
     """Point unique de capture PvP : snapshot de début de phase (si nouvelle) + persistance + auto-save.
 
@@ -1550,26 +1597,16 @@ def _capture_and_autosave(engine_instance, initial: bool = False) -> None:
         return
     if not _SNAPSHOT_STORE.maybe_capture(engine_instance):
         return
-    if _SNAPSHOT_PERSIST_ENABLED:
-        _persist_snapshots_to_disk()
-    # Un répertoire défini suffit pour l'ancre game_start ; les points de phase/tour dépendent du toggle.
-    if not _PERSIST_DIR_SET:
+    if not _SNAPSHOT_PERSIST_ENABLED:
+        # Le toggle « sauvegarde sur disque » est le SEUL interrupteur : rien n'est écrit tant
+        # qu'il est off.
         return
-    from datetime import datetime
-    now = datetime.now()
     if initial:
-        # Ancre "game_start" créée à chaque démarrage/reset dès qu'un répertoire est défini,
-        # indépendamment de la sauvegarde automatique → toujours un point de début de partie.
+        # Ancre "game_start" à chaque démarrage/reset, indépendamment de la sauvegarde automatique
+        # → toujours un point de début de partie.
         gs = engine_instance.game_state
         _AUTOSAVE_LAST_KEY = (int(gs["turn"]), int(gs["current_player"]))
-        _SAVE_STORE.start_party(
-            engine_instance, now.strftime("%Y%m%d_%H-%M"), now.strftime("%Y%m%d-%H%M%S")
-        )
-        # Autosave actif → la partie est visible dès le start : on promeut le working immédiatement.
-        # Autosave inactif → il reste caché jusqu'à la 1re save manuelle (promotion différée).
-        if _AUTOSAVE_ENABLED:
-            _SAVE_STORE.promote()
-        _reset_timeline_last(engine_instance)
+        _open_save_party(engine_instance)
     # Les rows de progression (turn/phase/action) sont posées par _timeline_capture après chaque
     # action ; l'ancien auto-save par phase est superséd é par la timeline unifiée.
 
@@ -1577,9 +1614,12 @@ def _capture_and_autosave(engine_instance, initial: bool = False) -> None:
 # --- Persistance côté serveur de la config des saves (survit au redémarrage de l'api) ----------
 
 def _save_config_path() -> str:
-    """Fichier de config des saves (chemin fixe, indépendant du répertoire choisi)."""
-    root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-    return os.path.join(root, "logs", "save_config.json")
+    """Fichier de config des saves, dans le répertoire de persistance du serveur.
+
+    Y compris quand `W40K_PERSIST_DIR` pointe hors du dépôt : tout ce que le serveur écrit vit sous
+    la même racine, sinon le durcissement n'est appliqué qu'à moitié (l'arbre du dépôt devrait
+    rester inscriptible pour ce seul fichier). Par défaut, chemin inchangé : `logs/`."""
+    return os.path.join(_PERSIST_DIR, "save_config.json")
 
 
 def _persist_save_config() -> None:
@@ -1589,16 +1629,18 @@ def _persist_save_config() -> None:
     with open(path, "w", encoding="utf-8") as f:
         json.dump({
             "persist_enabled": _SNAPSHOT_PERSIST_ENABLED,
-            "directory": _PERSIST_DIR,
-            "dir_set": _PERSIST_DIR_SET,
             "autosave_enabled": _AUTOSAVE_ENABLED,
             "granularity": _AUTOSAVE_GRANULARITY,
         }, f, ensure_ascii=False)
 
 
 def _load_save_config() -> None:
-    """Recharge la config des saves au démarrage de l'api (avant tout /game/start)."""
-    global _SNAPSHOT_PERSIST_ENABLED, _PERSIST_DIR, _PERSIST_DIR_SET
+    """Recharge la config des saves au démarrage de l'api (avant tout /game/start).
+
+    Le répertoire n'est PAS relu d'ici : c'est une config serveur (`_resolve_persist_dir`). Un
+    fichier écrit par une version antérieure porte un `directory` choisi par le client — le relire
+    rouvrirait le vecteur qu'on ferme."""
+    global _SNAPSHOT_PERSIST_ENABLED
     global _AUTOSAVE_ENABLED, _AUTOSAVE_GRANULARITY
     import json
     path = _save_config_path()
@@ -1611,12 +1653,9 @@ def _load_save_config() -> None:
         print(f"[save_config] fichier illisible, config par défaut: {e}")
         return
     _SNAPSHOT_PERSIST_ENABLED = bool(cfg.get("persist_enabled", False))
-    _PERSIST_DIR = str(cfg.get("directory", _PERSIST_DIR))
-    _PERSIST_DIR_SET = bool(cfg.get("dir_set", False))
     _AUTOSAVE_ENABLED = bool(cfg.get("autosave_enabled", False))
     gran = str(cfg.get("granularity", "phase"))
     _AUTOSAVE_GRANULARITY = gran if gran in ("phase", "turn") else "phase"
-    _SAVE_STORE.set_directory(os.path.join(_PERSIST_DIR, "pvp_saves"))
 
 
 _load_save_config()
@@ -3790,30 +3829,8 @@ def reset_game():
         "message": "Game reset successfully",
     })
 
-def _snapshot_persist_path() -> str:
-    """Fichier de persistance des snapshots (pickle) dans le répertoire de persistance configuré."""
-    return os.path.join(_PERSIST_DIR, "pvp_snapshots.pkl")
-
-
-def _persist_snapshots_to_disk() -> None:
-    import pickle
-    path = _snapshot_persist_path()
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "wb") as f:
-        pickle.dump(_SNAPSHOT_STORE, f)
-
-
-def _load_snapshots_from_disk() -> bool:
-    import pickle
-    path = _snapshot_persist_path()
-    if not os.path.exists(path):
-        return False
-    with open(path, "rb") as f:
-        loaded = pickle.load(f)
-    if not isinstance(loaded, GameSnapshotStore):
-        raise TypeError(f"Fichier snapshot invalide: {type(loaded).__name__}")
-    _SNAPSHOT_STORE._snaps = loaded._snaps
-    return True
+# Les snapshots de rewind vivent en MÉMOIRE, pour la durée du process : aucune persistance disque.
+# La reprise après redémarrage passe par les saves (`game_saves.SaveStore`, timeline).
 
 
 @app.route('/api/game/snapshots', methods=['GET'])
@@ -3886,8 +3903,6 @@ def restore_snapshot():
     # resume : remplace l'état vivant + purge postérieur
     _SNAPSHOT_STORE.apply_resume(engine, turn, player, phase)
     _reset_timeline_last(engine)
-    if _SNAPSHOT_PERSIST_ENABLED:
-        _persist_snapshots_to_disk()
     serializable_state = _game_state_for_json(engine)
     _sync_units_hp_from_cache(serializable_state, engine.game_state)
     _attach_player_types(serializable_state, engine)
@@ -3903,65 +3918,39 @@ def restore_snapshot():
 @app.route('/api/game/snapshot/persist', methods=['POST'])
 @with_engine_state_lock
 def set_snapshot_persist():
-    """Active/désactive la persistance disque des snapshots, et — optionnellement — définit le
-    répertoire de persistance (snapshots + saves)."""
-    global _SNAPSHOT_PERSIST_ENABLED, _PERSIST_DIR, _PERSIST_DIR_SET
+    """Active/désactive la persistance disque des snapshots. Le répertoire n'est PAS négociable
+    depuis la requête : c'est une config serveur (`W40K_PERSIST_DIR`, défaut `logs/`)."""
+    global _SNAPSHOT_PERSIST_ENABLED
     data = request.json
     if not data or "enabled" not in data:
         return jsonify({"success": False, "error": "missing 'enabled'"}), 400
-    directory = data.get("directory")
-    if directory:
-        directory = str(directory)
-        try:
-            os.makedirs(directory, exist_ok=True)
-        except OSError as e:
-            return jsonify({"success": False, "error": f"répertoire invalide: {e}"}), 400
-        _PERSIST_DIR = directory
-        _SAVE_STORE.set_directory(os.path.join(directory, "pvp_saves"))
-        _PERSIST_DIR_SET = True
+    if "directory" in data:
+        # Rejet explicite plutôt qu'ignorance silencieuse : un client qui croit choisir son
+        # répertoire doit l'apprendre, pas écrire ailleurs qu'il ne pense.
+        return jsonify({
+            "success": False,
+            "error": "'directory' n'est plus accepté : répertoire fixé par le serveur (W40K_PERSIST_DIR)",
+        }), 400
+    was_enabled = _SNAPSHOT_PERSIST_ENABLED
     _SNAPSHOT_PERSIST_ENABLED = bool(data["enabled"])
-    if _SNAPSHOT_PERSIST_ENABLED:
-        _persist_snapshots_to_disk()
+    # Transition off→on avec une partie PvP déjà en cours : ouvrir la partie de saves MAINTENANT.
+    # `start_party` n'est atteint que par `_capture_and_autosave(initial=True)`, qui n'a rien fait
+    # au démarrage puisque la persistance était off — sans cette amorce, `_timeline_capture` sort
+    # sur `if not party` et la partie entière n'enregistre RIEN, pendant que l'UI affiche
+    # l'enregistrement comme actif. Même transition, même remède que `set_autosave`.
+    if (
+        _SNAPSHOT_PERSIST_ENABLED
+        and not was_enabled
+        and _SAVE_STORE.current_party() is None
+        and _engine_has_live_pvp_game()
+    ):
+        _open_save_party(engine)
     _persist_save_config()
     return api_json_response({
         "success": True,
         "persist_enabled": _SNAPSHOT_PERSIST_ENABLED,
         "directory": _PERSIST_DIR,
     })
-
-
-@app.route('/api/game/pick-directory', methods=['POST'])
-def pick_directory():
-    """Ouvre un dialogue de dossier Windows (via powershell/WSL interop) et renvoie le chemin WSL choisi.
-
-    Pas de lock engine : le dialogue est bloquant côté utilisateur, on ne veut pas geler la partie."""
-    import shutil
-    import subprocess
-    if not shutil.which("powershell.exe"):
-        return jsonify({"success": False, "error": "Sélecteur natif indisponible (powershell.exe introuvable — pas sous WSL ?)"}), 400
-    ps = (
-        "Add-Type -AssemblyName System.Windows.Forms; "
-        "$f = New-Object System.Windows.Forms.FolderBrowserDialog; "
-        "$f.Description = 'Repertoire de sauvegarde (snapshots + saves)'; "
-        "$f.ShowNewFolderButton = $true; "
-        "$o = New-Object System.Windows.Forms.Form; $o.TopMost = $true; "
-        "if ($f.ShowDialog($o) -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $f.SelectedPath }"
-    )
-    try:
-        out = subprocess.run(
-            ["powershell.exe", "-NoProfile", "-STA", "-Command", ps],
-            capture_output=True, text=True, timeout=600,
-        )
-    except subprocess.TimeoutExpired:
-        return jsonify({"success": False, "error": "Sélection annulée (délai dépassé)"}), 408
-    win_path = out.stdout.strip()
-    if not win_path:
-        return api_json_response({"success": True, "path": None})  # annulé par l'utilisateur
-    conv = subprocess.run(["wslpath", "-u", win_path], capture_output=True, text=True)
-    wsl_path = conv.stdout.strip()
-    if conv.returncode != 0 or not wsl_path:
-        return jsonify({"success": False, "error": f"conversion du chemin échouée: {win_path!r}"}), 400
-    return api_json_response({"success": True, "path": wsl_path, "windows_path": win_path})
 
 
 @app.route('/api/game/save', methods=['POST'])
@@ -3971,8 +3960,8 @@ def create_save():
     global engine
     if not engine:
         return jsonify({"success": False, "error": "Engine not initialized"}), 400
-    if not _PERSIST_DIR_SET:
-        return jsonify({"success": False, "error": "Répertoire de sauvegarde non défini"}), 400
+    if not _SNAPSHOT_PERSIST_ENABLED:
+        return jsonify({"success": False, "error": "Sauvegarde sur disque désactivée"}), 400
     from datetime import datetime
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     note = str((request.json or {}).get("note", "")) if request.is_json else ""
@@ -3996,7 +3985,7 @@ def list_timeline():
     return api_json_response({
         "success": True,
         "rows": _SAVE_STORE.list_all_rows(),
-        "recording_enabled": bool(_SNAPSHOT_PERSIST_ENABLED and _PERSIST_DIR_SET),
+        "recording_enabled": bool(_SNAPSHOT_PERSIST_ENABLED),
     })
 
 
@@ -4063,8 +4052,6 @@ def load_save():
     # Commit : nouvelle timeline de rewind à partir du point chargé (capture la phase courante).
     _SNAPSHOT_STORE.reset()
     _SNAPSHOT_STORE.maybe_capture(engine)
-    if _SNAPSHOT_PERSIST_ENABLED:
-        _persist_snapshots_to_disk()
     serializable_state = _game_state_for_json(engine)
     _sync_units_hp_from_cache(serializable_state, engine.game_state)
     _attach_player_types(serializable_state, engine)
@@ -4125,8 +4112,6 @@ def load_party():
     # Commit : nouvelle timeline de rewind à partir du game start chargé (capture la phase courante).
     _SNAPSHOT_STORE.reset()
     _SNAPSHOT_STORE.maybe_capture(engine)
-    if _SNAPSHOT_PERSIST_ENABLED:
-        _persist_snapshots_to_disk()
     serializable_state = _game_state_for_json(engine)
     _sync_units_hp_from_cache(serializable_state, engine.game_state)
     _attach_player_types(serializable_state, engine)
@@ -4145,8 +4130,7 @@ def get_save_config():
     return api_json_response({
         "success": True,
         "persist_enabled": _SNAPSHOT_PERSIST_ENABLED,
-        "directory": _PERSIST_DIR,
-        "dir_set": _PERSIST_DIR_SET,
+        "directory": _PERSIST_DIR,  # informatif : fixé par le serveur, le front l'affiche en lecture seule
         "autosave_enabled": _AUTOSAVE_ENABLED,
         "granularity": _AUTOSAVE_GRANULARITY,
     })
@@ -4172,22 +4156,15 @@ def set_autosave():
     if (
         _AUTOSAVE_ENABLED
         and not was_enabled
-        and _PERSIST_DIR_SET
-        and engine is not None
-        and getattr(engine, "current_mode_code", None) in ("pvp", "pvp_test")
-        and isinstance(getattr(engine, "game_state", None), dict)
-        and "turn" in engine.game_state
+        and _SNAPSHOT_PERSIST_ENABLED
+        and _engine_has_live_pvp_game()
     ):
-        from datetime import datetime
-        now = datetime.now()
         if _SAVE_STORE.current_party() is None:
-            _SAVE_STORE.start_party(
-                engine, now.strftime("%Y%m%d_%H-%M"), now.strftime("%Y%m%d-%H%M%S")
-            )
-            _SAVE_STORE.promote()  # autosave activé → partie rendue visible immédiatement
+            _open_save_party(engine)  # promotion incluse : l'autosave vient d'être activé
         else:
+            from datetime import datetime
             _SAVE_STORE.promote()  # rend le working visible même si le dédup autosave saute le point
-            _maybe_autosave(engine, now.strftime("%Y%m%d-%H%M%S"))
+            _maybe_autosave(engine, datetime.now().strftime("%Y%m%d-%H%M%S"))
     return api_json_response({
         "success": True,
         "enabled": _AUTOSAVE_ENABLED,
