@@ -33,7 +33,13 @@ from engine.hex_utils import compute_occupied_hexes, min_distance_between_sets
 # config du jour rend un verdict FAUX, pas un verdict absent). Le moteur, lui, l'écrit toujours.
 _MODELS_RE = re.compile(r'\[MODELS:\s*([^\]]+)\]')
 _TARGET_MODELS_RE = re.compile(r'\[TARGET_MODELS:\s*([^\]]+)\]')
-_TOKEN_RE = re.compile(r'(\S+?#\S*?)@\((-?\d+),\s*(-?\d+)(?:,\s*z(-?[\d.]+))?\)')
+#: Grammaire d'un token per-figurine `mid@(col,row[,zH])`. SOURCE UNIQUE : la ligne d'état
+#: (`T{tour} STATE:`) en dérive son propre motif au lieu d'en réécrire une variante — les
+#: deux avaient déjà divergé (mid avec/sans `#`, `z` requis/optionnel), et une divergence
+#: fait échouer le parseur d'état EN SILENCE : l'unité sort de l'instantané, donc elle est
+#: comptée morte et tuée dans l'état reconstruit — le compteur 2.8 se met alors à crier.
+MODEL_TOKEN_PATTERN = r'(\S+?#\S*?)@\((-?\d+),\s*(-?\d+)(?:,\s*z(-?[\d.]+))?\)'
+_TOKEN_RE = re.compile(MODEL_TOKEN_PATTERN)
 
 # Taille de socle telle que l'attend le moteur (`compute_occupied_hexes`) : diamètre entier pour
 # un socle rond, [major, minor] pour un ovale.

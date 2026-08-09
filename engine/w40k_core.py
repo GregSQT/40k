@@ -2411,9 +2411,6 @@ class W40KEngine(gym.Env):
         # de move ailleurs). La lire apres coup classerait l'action dans la phase suivante.
         pre_action_phase = require_key(self.game_state, "phase")
 
-        # V11 T6 : curseur des action_logs AVANT l'action, pour ne transferer au StepLogger que
-        # les entrees produites par CETTE action (cf. _flush_squad_action_logs_to_step_logger).
-        _pre_action_logs_len = len(self.game_state.get("action_logs", []))  # get allowed
         _pre_action_turn = require_key(self.game_state, "turn")
         # Etat fight AVANT l'action : le formateur "combat" exige fight_subphase (contrat replay).
         # L'action peut faire transiter la sous-phase (end_activation) — on capture donc AVANT, pour
@@ -2445,7 +2442,7 @@ class W40KEngine(gym.Env):
         # V11 T6 (T6-c) : transfere au StepLogger les action_logs produits par cette action.
         # Point d'accroche UNIQUE du chemin squad (no-op si --step absent).
         self._flush_squad_action_logs_to_step_logger(
-            _pre_action_logs_len, _pre_action_turn, _pre_action_fight_state
+            _pre_action_turn, _pre_action_fight_state
         )
         result_action = result.get("action") if isinstance(result, dict) else None
         result_error = result.get("error") if isinstance(result, dict) else None
@@ -5457,7 +5454,7 @@ class W40KEngine(gym.Env):
         return details
 
     def _flush_squad_action_logs_to_step_logger(
-        self, pre_action_logs_len: int, pre_action_turn: Any,
+        self, pre_action_turn: Any,
         pre_action_fight_state: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Transfere vers le StepLogger les action_logs produits par la derniere action squad.
@@ -5480,23 +5477,23 @@ class W40KEngine(gym.Env):
             raise TypeError(
                 f"game_state['action_logs'] must be a list, got {type(action_logs).__name__}"
             )
-        if pre_action_logs_len > len(action_logs):
-            raise ValueError(
-                f"action_logs cursor ({pre_action_logs_len}) cannot exceed current length "
-                f"({len(action_logs)}) — action_logs must not shrink within a step"
-            )
-        # ANTI-DOUBLON. Depuis que `advance_phase` draine ses propres entrées
-        # (`_advance_phase_and_drain`), deux drainages peuvent se recouvrir : celui d'une
-        # transition imbriquée et celui, plus large, du step qui l'englobe. Le curseur PERSISTANT
-        # borne le départ à ce qui n'a pas encore été écrit — sans lui, la même ligne partirait
-        # deux fois dans step.log, ce qui compterait double partout (attaques, activations,
-        # distances) sans qu'aucune erreur ne le signale.
+        # CURSEUR PERSISTANT, ET LUI SEUL. Il définit « ce qui n'a pas encore été écrit », ce qui
+        # rend ce drainage IDEMPOTENT : deux fenêtres qui se recouvrent (celle d'une transition de
+        # phase imbriquée et celle du step qui l'englobe) n'écrivent la ligne qu'une seule fois.
+        #
+        # Un paramètre `pre_action_logs_len` vivait ici en parallèle, borné par `max()` avec le
+        # curseur. Il ne pouvait rien AJOUTER — seulement retrancher : un appelant qui mesure sa
+        # longueur trop tard exclut des entrées que le curseur, lui, aurait rattrapées. C'est
+        # exactement le mode d'échec qu'on vient de payer (zéro ligne `PILED IN` dans 22 Mo de
+        # journal, et un contrôle « Pile-in au-delà de 3" » qui affichait 0 en ne regardant rien).
+        # Une borne qui ne peut que perdre des lignes n'a pas sa place à côté d'une qui n'en perd
+        # aucune.
+        #
         # Remis à 0 quand la liste a été VIDÉE ailleurs (l'API PvP le fait après chaque réponse) :
         # le curseur désignerait alors des entrées qui n'existent plus.
-        _drained_upto = int(self.game_state.get(self.STEP_LOG_DRAINED_KEY, 0))  # get allowed
-        if _drained_upto > len(action_logs):
-            _drained_upto = 0
-        pre_action_logs_len = max(int(pre_action_logs_len), _drained_upto)
+        pre_action_logs_len = int(self.game_state.get(self.STEP_LOG_DRAINED_KEY, 0))  # get allowed
+        if pre_action_logs_len > len(action_logs):
+            pre_action_logs_len = 0
         self.game_state[self.STEP_LOG_DRAINED_KEY] = len(action_logs)
         # Position (index raw_log, index jet) du DERNIER jet visant chaque cible sur l'ensemble de
         # l'action : le segment [TARGET_MODELS:] n'est emis que la (retrait des socles en bloc apres
@@ -5634,11 +5631,19 @@ class W40KEngine(gym.Env):
         UN SEUL point de passage pour les trois sites : trois copies redivergeraient, et c'est
         exactement de cette divergence que le défaut est né.
         """
-        _pre_len = len(self.game_state.get("action_logs", []))  # get allowed
-        _pre_turn = require_key(self.game_state, "turn")
-        _pre_fight = {"fight_subphase": self.game_state.get("fight_subphase")}  # get allowed
+        # Contexte de FORMATAGE seulement (le tour n'est qu'un repli de `raw_log["turn"]`, la
+        # sous-phase sert au contrat replay des lignes de combat) : la BORNE, elle, est le curseur
+        # persistant, à l'intérieur du flush. Il n'y a plus rien à mesurer ici.
+        # Construit uniquement si quelqu'un journalise : ces valeurs, dont une allocation de dict,
+        # tombaient sur le chemin d'entraînement et le PvP, où le flush sort immédiatement.
+        _logging = bool(getattr(self, "step_logger", None) and self.step_logger.enabled)
+        _pre_turn = require_key(self.game_state, "turn") if _logging else None
+        _pre_fight = (
+            {"fight_subphase": self.game_state.get("fight_subphase")} if _logging else None  # get allowed
+        )
         success, result = self._process_squad_action(advance_action)
-        self._flush_squad_action_logs_to_step_logger(_pre_len, _pre_turn, _pre_fight)
+        if _logging:
+            self._flush_squad_action_logs_to_step_logger(_pre_turn, _pre_fight)
         return success, result
 
     def _build_step_log_details(self, raw_log: Dict[str, Any], pre_action_turn: Any) -> Dict[str, Any]:

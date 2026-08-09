@@ -12,9 +12,12 @@ if TYPE_CHECKING:
     from ai.analyzer_config import AnalyzerConfig
 
 
+_SHOOTER_MODELS_RE = re.compile(r'\[SHOOTER_MODELS: ([^\]]+)\]')
+
+
 def _shooter_models(action_desc: str) -> Tuple[str, ...]:
     """Socles qui ont RÉELLEMENT frappé sur cette ligne (`[SHOOTER_MODELS:]`), ou ()."""
-    m = re.search(r'\[SHOOTER_MODELS: ([^\]]+)\]', action_desc)
+    m = _SHOOTER_MODELS_RE.search(action_desc)
     return tuple(m.group(1).split()) if m else ()
 
 
@@ -22,7 +25,6 @@ def _cc_cap_for_line(
     state: "AnalyzerState",
     config: "AnalyzerConfig",
     action_desc: str,
-    fighter_id: str,
     fighter_unit_type: str,
     weapon_display_name: str,
     cc_nb_squad_type: int,
@@ -47,7 +49,9 @@ def _cc_cap_for_line(
     """
     from ai.analyzer_perfig import resolve_weapon_value
 
-    waaagh_bonus = 1 if re.search(r'\[WAAAGH!?\]', action_desc, re.IGNORECASE) else 0
+    # Token LITTÉRAL, écrit en majuscules par l'unique producteur (`step_logger`) : un test
+    # d'appartenance est exact ici, et ~20× moins cher qu'un regex insensible à la casse.
+    waaagh_bonus = 1 if "[WAAAGH!]" in action_desc else 0
 
     if not shooters or not state.model_types:
         return (cc_nb_squad_type + waaagh_bonus) * n_fighter_models
@@ -194,7 +198,7 @@ def handle_fight(
                     # au NB=3 de l'Intercessor porteur, 20 attaques de 10 Gretchin plafonnées à 10.
                     _shooters = _shooter_models(action_desc)
                     cc_nb = _cc_cap_for_line(
-                        state, config, action_desc, fighter_id, fighter_unit_type,
+                        state, config, action_desc, fighter_unit_type,
                         weapon_display_name, cc_nb_single, n_fighter_models, _shooters,
                     )
                     # Le GROUPE de figurines qui frappe entre dans la clé, parce qu'il détermine
