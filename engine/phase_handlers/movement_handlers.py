@@ -4123,14 +4123,13 @@ def movement_preview_move_plan(
         budget = get_squad_move_budget(str(squad_id), game_state, "advance", advance_roll=_adv_roll)
     else:
         budget = get_squad_move_budget(str(squad_id), game_state, "normal")
-    ez = get_engagement_zone(game_state)
-    unit_obj = get_unit_by_id(game_state, str(squad_id))
+    # L'EZ ennemie est vérifiée par ``validate_move_plan`` lui-même, dans les DEUX métriques et
+    # par géométrie de socle (``move_enemy_ez_forbidden_cells``). Le cas spécial qui vivait ici —
+    # désactiver ``forbid_enemy_er`` sous ``ez > 1`` puis refaire le test en euclidien — existait
+    # parce que le prédicat de ``validate_move_plan`` était alors le set hex centre-à-centre,
+    # faux dès qu'un socle couvre plusieurs cases. Il est devenu le bon : le contourner ici
+    # rétablirait deux définitions de la même règle, ce que ce correctif supprime.
     c_individual = {"budget_per_model": budget, "require_coherency": False}
-    if ez > 1:
-        # Board ×N : l'EZ est vérifiée ci-dessous par la formule euclidienne par-mover
-        # (``_movement_engagement_violates``, même géométrie que le pathfinding → IA == PvP).
-        # On désactive le check legacy centre-à-centre de ``validate_move_plan``.
-        c_individual["forbid_enemy_er"] = False
     # Normalisation niveau (étages) : entrée 3-uplet ou 4-uplet ; niveau absent (None) = « garder le
     # niveau courant » de la figurine (models_cache). ``norm`` = liste de (mid, col, row, level_EFFECTIF).
     # Niveau EFFECTIF (13.06) : le niveau demandé (vue) n'est retenu que si l'empreinte tient ENTIÈREMENT
@@ -4239,19 +4238,12 @@ def movement_preview_move_plan(
         # Niveau (étages) : plus de voile rouge « débordement » — ``lv`` est déjà le niveau EFFECTIF
         # (resolve_model_floor_level ci-dessus a ramené au sol toute fig dont l'empreinte déborde du
         # plancher). Une fig « en partie sur l'étage » est donc simplement traitée au niveau 0.
-        # Board ×N : voile rouge si l'empreinte de la fig viole l'EZ ennemie (formule euclidienne
-        # par-mover, identique au pathfinding). ez <= 1 : déjà couvert par validate_move_plan.
-        ez_violation = (
-            ez > 1
-            and unit_obj is not None
-            and _movement_engagement_violates(
-                game_state, unit_obj, int(nc), int(nr), fp, units_cache,
-                None, enemy_cache_items=None, engagement_zone_ez=ez,
-            )
-        )
+        # EZ ennemie : plus de test séparé ici. ``base_valid`` la couvre désormais dans les deux
+        # métriques, avec la géométrie de socle de LA FIGURINE (models_cache) et non celle de
+        # l'escouade — un personnage attaché à socle plus grand était mesuré à la mauvaise taille.
         per_model[str(mid)] = bool(
             base_valid and not fp_wall and not fp_other and not fp_intra
-            and not cohesion_red[idx] and not ez_violation
+            and not cohesion_red[idx]
         )
 
     coherency_ok = not any(cohesion_red)

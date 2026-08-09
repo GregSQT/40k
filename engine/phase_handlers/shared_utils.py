@@ -3831,12 +3831,119 @@ def _move_spatial_cache(game_state: Dict[str, Any]) -> Dict[str, Any]:
     return holder
 
 
+#: Identite hachable d'une GEOMETRIE DE SOCLE : (forme, taille normalisee, orientation).
+#: `base_size_cache_key` est indispensable — un socle oval porte une LISTE, non hachable.
+#: Cle de regroupement des figurines partout ou les cellules interdites dependent du socle pose
+#: (`move_enemy_ez_forbidden_cells` et ses deux consommateurs).
+MoveGeomKey = Tuple[str, Any, int]
+
+
+def move_enemy_ez_forbidden_cells(
+    game_state: Dict[str, Any],
+    player: int,
+    base_shape: str,
+    base_size: Any,
+    orientation: int,
+) -> Set[Tuple[int, int]]:
+    """Cellules d'ANCRE interdites à UNE figurine par la zone d'engagement ennemie (03.04).
+
+    « Ancre » = la case où l'on pose la figurine ; l'empreinte de son socle est DÉJÀ prise en
+    compte dans le résultat. Le set dépend donc de la GÉOMÉTRIE DU SOCLE, pas seulement du camp :
+    deux figurines de socles différents n'ont pas les mêmes cases interdites face aux mêmes
+    ennemis. C'est ce que le prédicat précédent ignorait (cf. ci-dessous).
+
+    Même sémantique que ``move_anchor_violates_engagement_clearance``, la primitive que le POOL
+    d'ancre interroge déjà — d'où la métrique résolue ici plutôt que supposée :
+      - ``hex``       : ancre interdite ssi une case de l'empreinte tombe dans le set pré-dilaté
+        ``enemy_adjacent_hexes_player_N`` (branche ``metric == "hex"`` de la primitive) ;
+      - ``euclidean`` : ``_compute_mover_ez_forbidden_mask``, écart bord-à-bord continu, mesuré
+        PAR FIGURINE ennemie (``occupied_hexes_by_model``), qui est la SOURCE UNIQUE du masque
+        d'engagement du pool PvP comme du pool IA vectorisé.
+
+    ⚠️ DÉFAUT CORRIGÉ ICI (09.05/09.06/09.07, « AFTER MOVING: your unit must be unengaged »).
+    ``build_move_blocked_cells_by_level`` testait la cellule d'ancre de chaque figurine contre le
+    set hex dilaté brut, ce qui rate deux choses à la fois : le socle du MOVER (rayon non compté)
+    et la métrique réelle du plateau (euclidienne dès ×5). Le pool d'ancre, lui, filtre bien en
+    euclidien — mais pour UNE base posée à l'ancre candidate, donc les SŒURS du bloc rigide
+    n'étaient contrôlées que par le set hex. Mesuré (E3 T3, journal du 2026-08-09) : l'escouade
+    105 finit un move NORMAL avec ``105#5`` et ``105#6`` dans l'EZ de l'unité 1, et le moteur se
+    contredit dans le même tour — la validation du move accepte, puis
+    ``fight_v11_is_pile_in_eligible`` rend l'escouade éligible au pile-in par la seule branche
+    « It is engaged » (12.03), sans charge déclarée.
+
+    Le masque et l'exécution lisent tous deux ce set (via ``build_move_blocked_cells_by_level``) :
+    ils ne peuvent pas diverger. Mémoïsé par ``_move_spatial_cache`` (même contrat de
+    non-mutation : lecture pure, ne pas muter le set rendu).
+
+    NON couvert, ici comme dans le prédicat remplacé : le gate VERTICAL de l'engagement 3D
+    (03.04, 5"). Les deux formes sont 2D — le set hex dilaté l'était déjà — donc ce correctif ne
+    change rien à cette dimension. À étages, l'EZ du move reste plus restrictive que celle du
+    combat (``entries_in_engagement_zone``, elle, applique le gate) : écart préexistant, sans
+    effet tant que le move de l'IA ne monte pas.
+    """
+    from engine.hex_utils import base_size_cache_key, precompute_footprint_offsets
+    from engine.spatial_relations import engagement_distance_metric
+
+    _cache = _move_spatial_cache(game_state).setdefault("ez", {})
+    _ck = (int(player), str(base_shape), base_size_cache_key(base_size), int(orientation))
+    _hit = _cache.get(_ck)
+    if _hit is not None:
+        return _hit
+
+    metric = engagement_distance_metric(game_state)
+    board_cols = int(require_key(game_state, "board_cols"))
+    board_rows = int(require_key(game_state, "board_rows"))
+    off_even, off_odd = precompute_footprint_offsets(base_shape, base_size, int(orientation))
+    forbidden: Set[Tuple[int, int]] = set()
+
+    if metric == "hex":
+        # Ancre interdite ssi SON EMPREINTE touche le set dilaté : on remonte des cases interdites
+        # vers les ancres qui les couvrent (offsets soustraits), en respectant la parité de colonne
+        # dont dépend l'empreinte odd-q.
+        enemy_er = require_key(game_state, f"enemy_adjacent_hexes_player_{int(player)}")
+        for offs, want_even in ((off_even, True), (off_odd, False)):
+            for dc, dr in offs:
+                for ec, er in enemy_er:
+                    ac, ar = int(ec) - int(dc), int(er) - int(dr)
+                    if ((ac & 1) == 0) != want_even:
+                        continue
+                    if 0 <= ac < board_cols and 0 <= ar < board_rows:
+                        forbidden.add((ac, ar))
+    elif metric == "euclidean":
+        import numpy as np
+        from engine.phase_handlers.movement_handlers import _compute_mover_ez_forbidden_mask
+        units_cache = require_key(game_state, "units_cache")
+        # Liste ennemie EXPLICITE : `_compute_mover_ez_forbidden_mask(enemy_items=None)` rend un
+        # masque VIDE en euclidien (`enemy_items if ... else []`) — un no-op silencieux, pas une
+        # erreur. Ne jamais lui laisser dériver la liste.
+        enemy_items = list(enemy_entries_on_battlefield(units_cache, int(player)))
+        mover = {
+            "id": f"_ez_probe_p{int(player)}",
+            "BASE_SHAPE": base_shape,
+            "BASE_SIZE": base_size,
+            "orientation": int(orientation),
+        }
+        mask = _compute_mover_ez_forbidden_mask(
+            game_state, mover, enemy_items, int(get_engagement_zone(game_state)),
+            board_cols, board_rows,
+        )
+        forbidden = {(int(c), int(r)) for c, r in np.argwhere(mask)}
+    else:
+        raise ValueError(f"Invalid engagement metric {metric!r}, expected 'hex' or 'euclidean'")
+
+    _cache[_ck] = forbidden
+    return forbidden
+
+
 def build_move_blocked_cells_by_level(
     game_state: Dict[str, Any],
     squad_id: str,
     player: int,
     levels: "Any",
     constraints: Dict[str, Any],
+    base_shape: str,
+    base_size: Any,
+    orientation: int,
 ) -> Dict[int, List[Tuple[str, Set[Tuple[int, int]]]]]:
     """SOURCE UNIQUE du predicat de cellule d'un move — cellules INTERDITES, par niveau.
 
@@ -3851,7 +3958,7 @@ def build_move_blocked_cells_by_level(
       - `allow_collisions=False` : cellules occupees par les AUTRES escouades AU MEME NIVEAU
         (deux figs a des etages differents ne se chevauchent pas) ;
       - `allow_walls=False` : murs (verticaux, prolonges a tous les niveaux) ;
-      - `forbid_enemy_er=True` : zone d'engagement ennemie.
+      - `forbid_enemy_er=True` : zone d'engagement ennemie, via `move_enemy_ez_forbidden_cells`.
     NON couvertes ici car elles ne sont PAS des proprietes de cellule : `budget_per_model`
     (distance depuis l'origine de CHAQUE figurine) et `require_coherency` (positions
     relatives) — cf. `erode_move_pool_by_squad_block` pour pourquoi elles n'ont pas besoin
@@ -3867,14 +3974,23 @@ def build_move_blocked_cells_by_level(
 
     Les sets sont renvoyes PAR REFERENCE (lecture pure) : ne pas les muter. Le resultat est
     memoise par `_move_spatial_cache` (meme contrat de non-mutation, etendu aux listes).
+
+    `base_shape` / `base_size` / `orientation` : GEOMETRIE DU SOCLE des figurines concernees.
+    Elle entre ici parce que l'EZ ennemie depend du socle qu'on pose (cf.
+    `move_enemy_ez_forbidden_cells`) — murs et occupation, eux, n'en dependent pas. Un appelant
+    dont l'escouade porte plusieurs geometries (personnage attache a socle plus grand) DOIT
+    appeler une fois par geometrie : passer celle de l'ancre pour tout le monde rendrait a une
+    figurine les cases interdites d'une AUTRE, ce qui est exactement la classe de bug corrigee.
     """
     _levels_key = tuple(sorted(int(_lv) for _lv in levels))
     _cache = _move_spatial_cache(game_state)["blocked"]
+    from engine.hex_utils import base_size_cache_key
     _ck = (
         str(squad_id), int(player), _levels_key,
         bool(constraints["allow_walls"]),
         bool(constraints["forbid_enemy_er"]),
         bool(constraints["allow_collisions"]),
+        str(base_shape), base_size_cache_key(base_size), int(orientation),
     )
     _hit = _cache.get(_ck)
     if _hit is not None:
@@ -3885,7 +4001,9 @@ def build_move_blocked_cells_by_level(
     if not constraints["allow_walls"] and wall_hexes:
         static_blocked.append(("mur", wall_hexes))
     if constraints["forbid_enemy_er"]:
-        enemy_er = require_key(game_state, f"enemy_adjacent_hexes_player_{int(player)}")
+        enemy_er = move_enemy_ez_forbidden_cells(
+            game_state, int(player), base_shape, base_size, int(orientation)
+        )
         if enemy_er:
             static_blocked.append(("ER ennemie", enemy_er))
 
@@ -4596,9 +4714,23 @@ def explain_move_plan_rejection(
     # SOURCE UNIQUE du predicat de cellule, partagee avec l'erosion du pool de move
     # (`erode_move_pool_by_squad_block`) : dupliquer ce check rouvrirait la classe de bug
     # « masque/execution » que l'erosion elimine (decision de design n°2).
-    blocked_by_level = build_move_blocked_cells_by_level(
-        game_state, squad_id, player, {plan_entry_level(entry) for entry in plan}, c
-    )
+    # PAR GEOMETRIE DE SOCLE : l'EZ ennemie depend du socle pose (cf.
+    # `move_enemy_ez_forbidden_cells`). Une escouade a socles mixtes (personnage attache) a donc
+    # plusieurs jeux de cellules interdites, et chaque figurine doit etre testee contre LE SIEN.
+    # Memo local : une seule construction par geometrie presente dans le plan.
+    from engine.hex_utils import base_size_cache_key as _bsk
+    _plan_levels = {plan_entry_level(entry) for entry in plan}
+    _blocked_by_geom: Dict[Any, Dict[int, List[Tuple[str, Set[Tuple[int, int]]]]]] = {}
+
+    def _blocked_for(_shape: Any, _size: Any, _orient: int):
+        _gk = (str(_shape), _bsk(_size), int(_orient))
+        _hit = _blocked_by_geom.get(_gk)
+        if _hit is None:
+            _hit = build_move_blocked_cells_by_level(
+                game_state, squad_id, player, _plan_levels, c, _shape, _size, int(_orient)
+            )
+            _blocked_by_geom[_gk] = _hit
+        return _hit
 
     # Budget en distance de TRAJET (règle 03) : le trajet contourne murs et figurines, donc la
     # distance à vol d'oiseau le sous-estime. La borne est `model_reach_predicate`, SOURCE UNIQUE
@@ -4629,7 +4761,17 @@ def explain_move_plan_rejection(
             return f"figurine {mid} hors plateau en ({nc},{nr})"
         cell = (nc, nr)
         level = plan_entry_level(entry)
-        for label, blocked_set in blocked_by_level[level]:
+        _m_geo = models_cache.get(mid)
+        if _m_geo is None:
+            return f"figurine {mid} absente de models_cache"
+        # Orientation VISEE par le plan (pivot molette non committe) — la meme que celle avec
+        # laquelle le pool a offert la case, cf. le budget plus bas.
+        _blocked_lv = _blocked_for(
+            require_key(_m_geo, "BASE_SHAPE"),
+            require_key(_m_geo, "BASE_SIZE"),
+            plan_entry_model_orientation(entry, _m_geo),
+        )
+        for label, blocked_set in _blocked_lv[level]:
             if cell in blocked_set:
                 return (
                     f"figurine {mid} en ({nc},{nr}) niveau {level} "
@@ -10844,7 +10986,14 @@ def erode_move_pool_by_squad_block(
 
     anchor = models_cache[alive_mids[0]]
     ax, ay, az = offset_to_cube(int(anchor["col"]), int(anchor["row"]))
-    offsets_by_level: Dict[int, List[Tuple[int, int, int]]] = {}
+    # Offsets groupes par (niveau, GEOMETRIE DE SOCLE) : les cellules interdites dependent du
+    # socle pose des lors que l'EZ ennemie est mesuree bord-a-bord (cf.
+    # `move_enemy_ez_forbidden_cells`). Grouper par le seul niveau testerait le personnage
+    # attache (socle 8) contre les cases interdites d'un Intercessor (socle 6) — miroir exact du
+    # regroupement de `explain_move_plan_rejection`, sans quoi masque et execution divergent.
+    from engine.hex_utils import base_size_cache_key as _bsk
+    offsets_by_level_geom: Dict[Tuple[int, MoveGeomKey], List[Tuple[int, int, int]]] = {}
+    geom_of_key: Dict[MoveGeomKey, Tuple[str, Any, int]] = {}
     # (origine_col, origine_row, niveau, offset_cube) par figurine — pour l'érosion par budget
     # géodésique (chaque figurine part de SON origine, pas de l'ancre).
     models_geo: List[Tuple[str, int, int, int, Tuple[int, int, int]]] = []
@@ -10857,7 +11006,14 @@ def erode_move_pool_by_squad_block(
         # `build_rigid_plan` / `validate_move_plan` / du pool d'ancre (§0.34). Identique au niveau
         # d'origine pour toute escouade déjà au sol, c'est-à-dire partout ailleurs.
         lvl = SQUAD_RIGID_MOVE_DESTINATION_LEVEL
-        offsets_by_level.setdefault(lvl, []).append(off)
+        _shape = require_key(m, "BASE_SHAPE")
+        _size = require_key(m, "BASE_SIZE")
+        # Orientation COURANTE de la figurine : le bloc est translate rigidement, aucun pivot
+        # n'est en cours ici (le pivot molette est un chemin de preview, pas d'erosion).
+        _orient = int(m.get("orientation", 0))  # get allowed (socle rond non oriente)
+        _gk: MoveGeomKey = (str(_shape), _bsk(_size), _orient)
+        geom_of_key[_gk] = (_shape, _size, _orient)
+        offsets_by_level_geom.setdefault((lvl, _gk), []).append(off)
         models_geo.append((str(mid), int(m["col"]), int(m["row"]), lvl, off))
 
     board_cols = int(require_key(game_state, "board_cols"))
@@ -10870,18 +11026,20 @@ def erode_move_pool_by_squad_block(
     c = dict(DEFAULT_MOVE_CONSTRAINTS)
     if constraints:
         c.update(constraints)
-    blocked_sets_by_level = build_move_blocked_cells_by_level(
-        game_state, squad_id, player, set(offsets_by_level), c
-    )
-    # Ici — et SEULEMENT ici — l'union vaut sa copie : elle est payee une fois par niveau puis
-    # amortie sur |pool| x |figurines| tests (~2800 x 20). Cf. la docstring du helper : c'est
-    # l'arbitrage du consommateur, `validate_move_plan` fait l'inverse.
-    blocked_by_level: Dict[int, Set[Tuple[int, int]]] = {}
-    for lv, sets in blocked_sets_by_level.items():
-        merged: Set[Tuple[int, int]] = set()
-        for _label, s in sets:
-            merged |= s
-        blocked_by_level[lv] = merged
+    # Ici — et SEULEMENT ici — l'union vaut sa copie : elle est payee une fois par (niveau,
+    # geometrie) puis amortie sur |pool| x |figurines| tests (~2800 x 20). Cf. la docstring du
+    # helper : c'est l'arbitrage du consommateur, `validate_move_plan` fait l'inverse.
+    blocked_by_level_geom: Dict[Tuple[int, MoveGeomKey], Set[Tuple[int, int]]] = {}
+    for _gk, (_shape, _size, _orient) in geom_of_key.items():
+        _levels_for_geom = {lv for (lv, gk) in offsets_by_level_geom if gk == _gk}
+        _sets_by_level = build_move_blocked_cells_by_level(
+            game_state, squad_id, player, _levels_for_geom, c, _shape, _size, _orient
+        )
+        for lv, sets in _sets_by_level.items():
+            merged: Set[Tuple[int, int]] = set()
+            for _label, s in sets:
+                merged |= s
+            blocked_by_level_geom[(lv, _gk)] = merged
 
     # ── Budget en distance de CHEMIN par-figurine (bug « trajet légal > budget ») ──
     # Le pool borne le TRAJET de l'ANCRE (chemin, contournant murs) ; l'exécution translate tout
@@ -11018,8 +11176,8 @@ def erode_move_pool_by_squad_block(
     for (cc, rr), cost in costs.items():
         bx, by, bz = offset_to_cube(int(cc), int(rr))
         ok = True
-        for lv, offs in offsets_by_level.items():
-            blocked = blocked_by_level[lv]
+        for (lv, _gk), offs in offsets_by_level_geom.items():
+            blocked = blocked_by_level_geom[(lv, _gk)]
             for (ox, oy, oz) in offs:
                 ncol, nrow = cube_to_offset(bx + ox, by + oy, bz + oz)
                 if not (0 <= ncol < board_cols and 0 <= nrow < board_rows):

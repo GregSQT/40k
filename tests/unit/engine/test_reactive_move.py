@@ -454,12 +454,17 @@ class TestReactiveMoveDeplaceLesFigurines:
             gs["squad_models"]["1"] = ["1#0", "1#1"]
             # `orientation` : `build_models_cache` la pose sur TOUTE figurine, et le move la
             # lit en `require_key` (une absence = cache corrompu). Une fixture qui l'omet ne
-            # decrit pas un etat que le moteur peut produire.
+            # decrit pas un etat que le moteur peut produire. MEME RAISON pour
+            # `BASE_SHAPE`/`BASE_SIZE` (`_build_models_for_unit` les pose toujours) : depuis que
+            # l'EZ du move se mesure sur le socle POSE, `explain_move_plan_rejection` les lit
+            # pour chaque figurine du plan.
             gs["models_cache"] = {
                 "1#0": {"id": "1#0", "squad_id": "1", "player": 1, "col": 12, "row": 10,
-                        "level": 0, "HP_CUR": 1, "orientation": 0},
+                        "level": 0, "HP_CUR": 1, "orientation": 0,
+                        "BASE_SHAPE": "round", "BASE_SIZE": 1},
                 "1#1": {"id": "1#1", "squad_id": "1", "player": 1, "col": 14, "row": 10,
-                        "level": 0, "HP_CUR": 1, "orientation": 0},
+                        "level": 0, "HP_CUR": 1, "orientation": 0,
+                        "BASE_SHAPE": "round", "BASE_SIZE": 1},
             }
             gs["units_cache"]["1"]["occupied_hexes_by_model"] = {"1#0": (12, 10), "1#1": (14, 10)}
             gs["wall_hexes"] = set(walls)
@@ -513,12 +518,15 @@ class TestReactivePoolCoherency:
         gs = _make_game_state([_unit_with_reactive(1, 1, 12, 10)])
         gs["squad_models"]["1"] = ["1#0", "1#1"]
         # Deux socles très éloignés : hors coherency (`unit_model_cohesion_range` = 2).
-        # `orientation` : cf. le commentaire de la fixture jumelle ci-dessus.
+        # `orientation` / `BASE_SHAPE` / `BASE_SIZE` : cf. le commentaire de la fixture jumelle
+        # ci-dessus.
         gs["models_cache"] = {
             "1#0": {"id": "1#0", "squad_id": "1", "player": 1, "col": 12, "row": 10,
-                    "level": 0, "HP_CUR": 1, "orientation": 0},
+                    "level": 0, "HP_CUR": 1, "orientation": 0,
+                    "BASE_SHAPE": "round", "BASE_SIZE": 1},
             "1#1": {"id": "1#1", "squad_id": "1", "player": 1, "col": 20, "row": 10,
-                    "level": 0, "HP_CUR": 1, "orientation": 0},
+                    "level": 0, "HP_CUR": 1, "orientation": 0,
+                    "BASE_SHAPE": "round", "BASE_SIZE": 1},
         }
         gs["units_cache"]["1"]["occupied_hexes_by_model"] = {"1#0": (12, 10), "1#1": (20, 10)}
         for _p in (1, 2):
