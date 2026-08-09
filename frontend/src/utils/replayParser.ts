@@ -1247,8 +1247,11 @@ export function parse_log_file_from_text(text: string): ReplayData {
 
     // Parse FIGHT actions
     // Format: [timestamp] T1 P0 FIGHT : Unit 2(9,6) FOUGHT Unit 8(9,7) with [weapon] - Hit:3+:2(MISS) [SUCCESS]
+    // Token(s) de capacité OPTIONNELS entre `FOUGHT` et la cible (`[WAAAGH!]`, 24) — même
+    // grammaire que `CHARGED` côté backend (`attack_line_re`). Sans cette tolérance, une ligne
+    // de mêlée portant un token DISPARAÎT du replay : elle n'est pas rejetée, elle est ignorée.
     const fightMatch = trimmed.match(
-      /\[([^\]]+)\] (?:E\d+\s+)?(T\d+) P(\d+) FIGHT : Unit (\d+)\((\d+),(\d+)\) FOUGHT Unit (\d+)\((\d+),(\d+)\)/
+      /\[([^\]]+)\] (?:E\d+\s+)?(T\d+) P(\d+) FIGHT : Unit (\d+)\((\d+),(\d+)\) FOUGHT(?:\s+\[[^\]]+\])*\s+Unit (\d+)\((\d+),(\d+)\)/
     );
     if (fightMatch) {
       const timestamp = fightMatch[1];

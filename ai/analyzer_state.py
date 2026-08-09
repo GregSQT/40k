@@ -96,6 +96,11 @@ class AnalyzerState:
     last_shoot_target_id: Optional[str] = None
     last_fight_fighter_id: Optional[str] = None
     last_fight_weapon: Optional[str] = None
+    #: Socles ayant frappé sur la dernière ligne de combat (`[SHOOTER_MODELS:]`). Entre dans la
+    #: clé du compteur d'attaques PARCE QU'IL DÉTERMINE LE PLAFOND : sans lui, la somme de deux
+    #: groupes (une escouade répartissant ses attaques entre deux cibles) était opposée au
+    #: plafond d'un seul.
+    last_fight_shooters: Tuple[str, ...] = ()
     combi_profile_usage: Dict = field(default_factory=dict)
     combi_conflicts_seen: Set = field(default_factory=set)
 

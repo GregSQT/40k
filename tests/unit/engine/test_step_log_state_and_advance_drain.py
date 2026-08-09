@@ -255,45 +255,60 @@ def test_token_waaagh_est_emis_sur_la_ligne_de_melee(tmp_path) -> None:
     assert "FOUGHT [WAAAGH!] Unit 101(6,5) with [Choppa]" in msg, msg
 
 
-def test_la_ligne_avec_waaagh_reste_lue_par_lanalyzer() -> None:
-    """JUMEAU : poser un token entre le verbe et la cible casse tout lecteur à grammaire rigide.
+def test_la_ligne_avec_waaagh_reste_lue_par_les_quatre_consommateurs() -> None:
+    """JUMEAU — le defaut a ete commis ICI, et un code-review l'a rattrape.
 
-    C'est le motif de panne déjà payé sur le move (3 lignes non parsées suffisaient à fabriquer
-    3 fausses adjacences). Ici, une ligne non reconnue échapperait à TOUS les contrôles de combat
-    — plafond d'attaques, alternance, cible morte — sans lever la moindre erreur.
+    Poser un token entre le verbe et la cible casse tout lecteur a grammaire rigide. QUATRE
+    lecteurs portaient cette grammaire ; deux seulement avaient ete corriges. Les deux oublies
+    etaient les plus couteux, et tous deux echouaient EN SILENCE :
+      - l'aiguillage (`"FOUGHT Unit" in action_desc`) : aucun controle de combat n'etait appele
+        sur une ligne Waaagh — plafond d'attaques, alternance et recalage de position sautaient ;
+      - l'application des degats (`'fought unit' in ...lower()`) : la cible gardait des PV
+        fantomes et sa mort n'etait jamais enregistree, rouvrant la derive que l'instantane
+        `STATE:` venait de fermer.
+    Les trois lecteurs Python partagent desormais `attack_line_re` ; le quatrieme est le parseur
+    du replay (TypeScript), verrouille par son propre motif ci-dessous.
     """
+    from ai.analyzer_core import attack_line_re, attack_verb_present
+    from ai.replay_converter import _ACTION_GRAMMAR  # noqa: F401  (import = grammaire construite)
+    import ai.hidden_action_finder as haf
     import inspect
+    import pathlib as _pathlib
     import re as _re
 
-    from ai.analyzer_phases import fight_handler
-    import ai.hidden_action_finder as haf
+    line = "Unit 105(22,26) FOUGHT [WAAAGH!] Unit 1(23,26) with [Choppa] - Hit 5(3+) - Dmg:1HP"
 
-    line = "Unit 105(22,26) FOUGHT [WAAAGH!] Unit 1(23,26) with [Choppa] - Hit 5(3+)"
-    full = "[10:00:00] E1 T3 P2 FIGHT : " + line
-
-    # Les deux lecteurs portent leur motif en clair dans leur source : on l'EN EXTRAIT plutôt
-    # que d'en réécrire une copie ici, qui ne prouverait rien de ce que le code fait vraiment.
-    def _patterns(module, needle: str) -> list:
-        src = inspect.getsource(module)
-        return [m for m in _re.findall(r"r'([^']*" + needle + r"[^']*)'", src)]
-
-    assert _patterns(fight_handler, r"ATTACKED\|FOUGHT"), (
-        "motif de combat introuvable dans le handler analyzer"
-    )
-    m = _re.search(
-        r'Unit (\d+)\((\d+),\s*(\d+)\) (?:ATTACKED|FOUGHT)(?:\s+\[[^\]]+\])*'
-        r'\s+Unit (\d+)\((\d+),\s*(\d+)\)', line,
-    )
+    # 1. aiguillage
+    assert attack_verb_present(line), line
+    # 2. grammaire complete (handler de combat)
+    m = attack_line_re().search(line)
     assert m is not None and (m.group(1), m.group(4)) == ("105", "1"), line
-    # La tolérance doit être PRÉSENTE dans les deux sources, pas seulement dans ce test.
-    assert r"(?:\s+\[[^\]]+\])*" in inspect.getsource(fight_handler), (
-        "le motif de combat de l'analyzer n'accepte plus de token entre le verbe et la cible"
-    )
+    # 3. application des degats : meme grammaire, cible en groupe 4
+    m2 = attack_line_re(with_positions=False).search(line)
+    assert m2 is not None and m2.group(4) == "1", line
+    # 4. hidden_action_finder
     haf_src = inspect.getsource(haf)
     assert "_FIGHT_ABILITY" in haf_src and r"(?:\s+\[[^\]]+\])*" in haf_src, (
-        "hidden_action_finder n'accepte plus de token de capacité sur les lignes de mêlée"
+        "hidden_action_finder n'accepte plus de token de capacite sur les lignes de melee"
     )
-    assert _re.search(
-        r'\[([^\]]+)\] E(\d+) T(\d+) P(\d+) FIGHT : Unit (\d+)\((\d+),(\d+)\) FOUGHT'
-        r'(?:\s+\[[^\]]+\])*\s+Unit (\d+)\((\d+),(\d+)\)', full
-    ) is not None, full
+    # 5. parseur du replay (TypeScript) : la ligne DISPARAIT du replay sans cette tolerance.
+    ts = _pathlib.Path(__file__).resolve().parents[3] / "frontend/src/utils/replayParser.ts"
+    ts_src = ts.read_text(encoding="utf-8")
+    fight_re = [l for l in ts_src.splitlines()
+                if "FIGHT : Unit" in l and "FOUGHT" in l and not l.strip().startswith("//")]
+    assert fight_re and all(r"(?:\s+\[[^\]]+\])*" in l for l in fight_re), fight_re
+
+    # Et le SITE lui-meme n'utilise plus de test par sous-chaine.
+    from ai import analyzer_core
+    core_src = inspect.getsource(analyzer_core)
+    # On regarde les lignes EXECUTABLES (`if`/`elif`), pas les docstrings qui citent l'ancien
+    # motif pour expliquer le defaut.
+    branches = [l.strip() for l in core_src.splitlines()
+                if l.strip().startswith(("if ", "elif "))]
+    assert not [l for l in branches if '"FOUGHT Unit" in action_desc' in l], (
+        "l'aiguillage est revenu a un test par sous-chaine : une ligne a token est ignoree"
+    )
+    assert not [l for l in branches if "'fought unit' in" in l.lower()], (
+        "l'application des degats est revenue a un test par sous-chaine"
+    )
+    assert _re.search(r"attack_line_re", core_src) is not None
