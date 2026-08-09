@@ -1156,6 +1156,14 @@ def parse_step_log(filepath: str) -> Dict:
         # le reste. Un compteur commun rendait la ligne d'exemple ambiguë.
         'fight_move_invalid': {'pile_in': {1: 0, 2: 0}, 'consolidation': {1: 0, 2: 0}},
         'special_rule_usage': defaultdict(lambda: {1: 0, 2: 0}),  # (rule_id, unit_type) -> {1: count, 2: count}
+        # Capacités de FACTION (08.04) : Waaagh!, Oath of Moment. Elles ne figurent dans AUCUN
+        # `UNIT_RULES` de datasheet — c'est le mot-clé de faction qui les donne — donc la table
+        # `rule_to_units` de 1.7, bâtie sur les datasheets, ne les contient pas et ne pouvait pas
+        # les compter. Résultat : « 1.7 Special rules usage : 0 utilisations ✅ » sur un journal
+        # qui portait 1657 `[OATH OF MOMENT]`. Un contrôle qui affiche vert en ne regardant rien.
+        # Comptées ici depuis la ligne `T{tour} EFFECTS:` — une ACTIVATION par passage de
+        # l'inactif à l'actif, jamais un comptage de lignes (l'instantané se répète).
+        'faction_ability_activations': defaultdict(lambda: {1: 0, 2: 0}),
         'rule_choice_usage': defaultdict(
             lambda: {
                 'correct': {1: 0, 2: 0},
@@ -2710,6 +2718,19 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     active_debug_section = "1.7"
     log_print("\n" + "-" * 80)
     log_print(f"1.7 SPECIAL RULES USAGE                  {'Unit':<55} {'P1':>10} {'P2':>10} {'Validité':>10}")
+    log_print("-" * 80)
+    # Capacités de FACTION d'abord : elles n'ont pas d'unité porteuse (c'est le mot-clé qui les
+    # donne), donc elles n'apparaissaient dans aucune ligne du tableau ci-dessous.
+    _faction = require_key(stats, 'faction_ability_activations')
+    if _faction:
+        for _rule in sorted(_faction):
+            _c = _faction[_rule]
+            log_print(
+                f"{_rule:<40} {'(capacité de FACTION)':<55} {_c[1]:>10} {_c[2]:>10} "
+                f"{'OK' if (_c[1] or _c[2]) else 'NOT USED':>10}"
+            )
+    else:
+        log_print(f"{'(aucune capacité de faction activée)':<40}")
     log_print("-" * 80)
     special_rule_usage = stats.get('special_rule_usage', defaultdict(lambda: {1: 0, 2: 0}))
     rule_to_units = stats.get('rule_to_units', {})  # get allowed: optional stats
