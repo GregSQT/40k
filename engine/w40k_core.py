@@ -1482,6 +1482,9 @@ class W40KEngine(gym.Env):
         # d'un episode a l'autre. Sans cette purge, l'episode 2 verrait « tour 1 deja ecrit » et
         # perdrait sa premiere ligne d'etat — donc le seul point de recalage de son debut.
         self.game_state.pop(self.STATE_SNAPSHOT_LOGGED_KEY, None)
+        # Jumeau : sans la purge, l'episode 2 verrait « meme etat d'effets qu'a la fin de
+        # l'episode 1 » et n'ecrirait jamais sa ligne initiale.
+        self.game_state.pop(self.EFFECTS_SNAPSHOT_LOGGED_KEY, None)
         # Curseur de drainage : indexe `action_logs`, remis a zero avec elle a chaque episode.
         self.game_state.pop(self.STEP_LOG_DRAINED_KEY, None)
         # POINT DE PURGE UNIQUE de toutes les etapes « resolues une fois par (tour, joueur) » :
@@ -7125,6 +7128,10 @@ class W40KEngine(gym.Env):
     #: Dernier tour pour lequel l'instantané d'état a été écrit (déduplication).
     STATE_SNAPSHOT_LOGGED_KEY = "_state_snapshot_logged_turn"
 
+    #: Dernier instantané d'EFFETS écrit (déduplication : la ligne n'est réécrite qu'au
+    #: CHANGEMENT, comme l'instantané de contrôle d'objectif).
+    EFFECTS_SNAPSHOT_LOGGED_KEY = "_effects_snapshot_last_logged"
+
     #: Curseur PERSISTANT du drainage vers le StepLogger : index de la première entrée de
     #: `action_logs` pas encore écrite. Empêche qu'un drainage imbriqué (`advance_phase`) et le
     #: drainage englobant du step réécrivent les mêmes lignes.
@@ -7178,6 +7185,59 @@ class W40KEngine(gym.Env):
             if models:
                 units_state.append((str(uid), models))
         step_logger.log_state_snapshot(turn, units_state)
+
+    def _log_effects_snapshot_if_changed(self) -> None:
+        """Journalise les effets de règle EN VIGUEUR, avec leur contribution chiffrée.
+
+        Le raisonnement complet est dans `StepLogger.log_effects_snapshot`. En deux mots : une
+        capacité d'ARMÉE (Waaagh! 24, Oath of Moment 08.04) est vraie pour un joueur pendant un
+        tour ; la recopier en token sur chaque ligne d'attaque obligeait chaque lecteur à la
+        re-dériver, et à RÉ-ENCODER la règle pour en connaître l'effet.
+
+        DÉCLENCHEMENT AU CHANGEMENT, pas à la frontière de tour : le Waaagh se déclare en phase
+        de commandement, donc au milieu du tour. Même parti que
+        `_log_objective_control_snapshot_if_changed`, dont les VP bougent aussi dans les handlers.
+
+        Les VALEURS viennent des constantes du moteur (`WAAAGH_MELEE_BONUS`, `WAAAGH_INVUL_SAVE`,
+        `OATH_WOUND_ROLL_BONUS`) : le journal dit ce que le moteur a appliqué, il ne le
+        redécrit pas. Un lecteur qui coderait « waaagh ⇒ +1 » en dur ferait vivre une seconde
+        définition de la règle, qui divergerait en silence le jour où la première bouge.
+        """
+        step_logger = getattr(self, "step_logger", None)
+        if step_logger is None or not step_logger.enabled:
+            return
+        from engine.game_state import (
+            OATH_WOUND_ROLL_BONUS,
+            WAAAGH_INVUL_SAVE,
+            WAAAGH_MELEE_BONUS,
+            oath_target_id,
+            waaagh_is_active,
+        )
+
+        effects_by_player: List[Tuple[int, List[Tuple[str, Any]]]] = []
+        for player in (1, 2):
+            entries: List[Tuple[str, Any]] = []
+            if waaagh_is_active(self.game_state, player):
+                # Les deux moitiés de la règle sont écrites SÉPARÉMENT bien qu'elles partagent
+                # une constante : un lecteur qui ne s'intéresse qu'aux attaques ne doit pas avoir
+                # à savoir que la Force suit. C'est aussi ce qui rend le +1 Force attribuable —
+                # il n'était représenté nulle part.
+                entries.append(("waaagh", "on"))
+                entries.append(("waaagh_melee_str", f"+{WAAAGH_MELEE_BONUS}"))
+                entries.append(("waaagh_melee_atk", f"+{WAAAGH_MELEE_BONUS}"))
+                entries.append(("waaagh_invul", WAAAGH_INVUL_SAVE))
+            _oath = oath_target_id(self.game_state, player)
+            if _oath is not None:
+                entries.append(("oath_target", _oath))
+                entries.append(("oath_wound", f"+{OATH_WOUND_ROLL_BONUS}"))
+            effects_by_player.append((player, entries))
+
+        snapshot = tuple((p, tuple(e)) for p, e in effects_by_player)
+        # get allowed : absent au tout premier passage de l'épisode (clé purgée au reset).
+        if snapshot == self.game_state.get(self.EFFECTS_SNAPSHOT_LOGGED_KEY):
+            return
+        self.game_state[self.EFFECTS_SNAPSHOT_LOGGED_KEY] = snapshot
+        step_logger.log_effects_snapshot(require_key(self.game_state, "turn"), effects_by_player)
 
     def _verify_supplied_mask(
         self,
@@ -7371,6 +7431,9 @@ class W40KEngine(gym.Env):
         # raison — c'est le seul commun aux 7 sites de construction d'observation, donc le seul
         # où l'on soit sûr de voir chaque tour exactement une fois.
         self._log_state_snapshot_if_turn_changed()
+        # Effets en vigueur : MÊME point de passage, mais déclenché au CHANGEMENT (une capacité
+        # se déclare au milieu d'un tour, cf. `_log_effects_snapshot_if_changed`).
+        self._log_effects_snapshot_if_changed()
 
         def _zero_obs():
             if not tensor:

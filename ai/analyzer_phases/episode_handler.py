@@ -55,6 +55,8 @@ def handle_episode_start(state: "AnalyzerState", config: "AnalyzerConfig", line:
     # Datasheet par figurine : les rosters changent d'un episode a l'autre, la garder
     # ferait plafonner les attaques d'une figurine avec la fiche d'une autre partie.
     state.model_types = {}
+    # Les capacités de faction sont propres à la partie : les garder les ferait fuir.
+    state.active_effects = {}
     state.unit_move = {}
     state.wall_hexes = set()
     state.positions_at_turn_start = {}
