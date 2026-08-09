@@ -1205,6 +1205,13 @@ def parse_step_log(filepath: str) -> Dict:
         # Rule violations
         'wall_collisions': {1: 0, 2: 0},
         'move_to_adjacent_enemy': {1: 0, 2: 0},
+        # Seuil de blessure 05.02 (cf. ai/analyzer_wound.py). `_unverifiable` compte les lignes
+        # que le contrôle a refusé de juger faute de donnée : sans lui, un compteur à zéro ne
+        # distingue pas « rien à signaler » de « plus rien de regardé ».
+        'shoot_wound_threshold_mismatch': {1: 0, 2: 0},
+        'shoot_wound_threshold_unverifiable': {1: 0, 2: 0},
+        'fight_wound_threshold_mismatch': {1: 0, 2: 0},
+        'fight_wound_threshold_unverifiable': {1: 0, 2: 0},
         'dead_unit_moving': {1: 0, 2: 0},
         'charge_from_adjacent': {1: 0, 2: 0},
         'advance_from_adjacent': {1: 0, 2: 0},
@@ -1310,6 +1317,8 @@ def parse_step_log(filepath: str) -> Dict:
         'first_error_lines': {
             'wall_collisions': {1: None, 2: None},
             'move_to_adjacent_enemy': {1: None, 2: None},
+            'shoot_wound_threshold_mismatch': {1: None, 2: None},
+            'fight_wound_threshold_mismatch': {1: None, 2: None},
             'dead_unit_moving': {1: None, 2: None},
             'charge_from_adjacent': {1: None, 2: None},
             'advance_from_adjacent': {1: None, 2: None},
@@ -1740,6 +1749,27 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
 
     def _fmt_count(value: int) -> str:
         return f"{value:6d}"
+
+    def _wound_threshold_rows(stats: Dict[str, Any], key: str, label: str) -> None:
+        """Deux lignes pour le contrôle du seuil de blessure : les écarts, et les lignes non jugées.
+
+        La seconde n'est pas décorative. Un contrôle qui écarte silencieusement ce qu'il ne sait pas
+        mesurer affiche zéro et se fait oublier : c'est le « vert vacant », le défaut le plus long à
+        voir de ce dépôt. Elle rend visible ce que le contrôle NE regarde pas.
+        """
+        _table_row(
+            f"Seuil de blessure faux ({label}, 05.02):",
+            _fmt_count(stats[f'{key}_mismatch'][1]), _fmt_count(stats[f'{key}_mismatch'][2]),
+        )
+        for _pl in (1, 2):
+            _first = stats['first_error_lines'][f'{key}_mismatch'][_pl]
+            if stats[f'{key}_mismatch'][_pl] > 0 and _first:
+                log_print(f"  First P{_pl} occurrence (Episode {_first['episode']}): {_first['line']}")
+                log_print(f"    {_first['detail']}")
+        _table_row(
+            f"  ↳ lignes non verifiables ({label}):",
+            _fmt_count(stats[f'{key}_unverifiable'][1]), _fmt_count(stats[f'{key}_unverifiable'][2]),
+        )
 
     def _fmt_count_pct(value: int, total: int) -> str:
         pct = (value / total * 100.0) if total > 0 else 0.0
@@ -2622,6 +2652,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     if bot_shoot_engaged > 0 and stats['first_error_lines']['shoot_at_engaged_enemy'][2]:
         first_err = stats['first_error_lines']['shoot_at_engaged_enemy'][2]
         log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    _wound_threshold_rows(stats, "shoot_wound_threshold", "tir")
     agent_cq_unengaged_target = stats['close_quarters_shot_at_unengaged_target'][1]
     bot_cq_unengaged_target = stats['close_quarters_shot_at_unengaged_target'][2]
     _table_row(
@@ -2751,6 +2782,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     if bot_fight_over_cc > 0 and stats['first_error_lines']['fight_over_cc_nb'][2]:
         first_err = stats['first_error_lines']['fight_over_cc_nb'][2]
         log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    _wound_threshold_rows(stats, "fight_wound_threshold", "melee")
     agent_fight_alt = stats['fight_alternation_violations'][1]
     bot_fight_alt = stats['fight_alternation_violations'][2]
     _table_row("Fight alternation violations:", _fmt_count(agent_fight_alt), _fmt_count(bot_fight_alt))
@@ -3189,6 +3221,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         stats['advance_twice_in_shoot_phase'][1] + stats['advance_twice_in_shoot_phase'][2] +
         stats['move_distance_over_limit']['advance'][1] + stats['move_distance_over_limit']['advance'][2] +
         stats['advance_from_adjacent'][1] + stats['advance_from_adjacent'][2] +
+        stats['shoot_wound_threshold_mismatch'][1] + stats['shoot_wound_threshold_mismatch'][2] +
         shoot_invalid_total
     )
     charge_errors = (
@@ -3204,6 +3237,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         stats['fight_over_cc_nb'][1] + stats['fight_over_cc_nb'][2] +
         stats['fight_move_invalid']['pile_in'][1] + stats['fight_move_invalid']['pile_in'][2] +
         stats['fight_move_invalid']['consolidation'][1] + stats['fight_move_invalid']['consolidation'][2] +
+        stats['fight_wound_threshold_mismatch'][1] + stats['fight_wound_threshold_mismatch'][2] +
         fight_alternation_total
     )
     dead_unit_actions = stats.setdefault('dead_unit_actions', [])
@@ -3460,6 +3494,7 @@ if __name__ == "__main__":
             stats['advance_twice_in_shoot_phase'][1] + stats['advance_twice_in_shoot_phase'][2] +
             stats['move_distance_over_limit']['advance'][1] + stats['move_distance_over_limit']['advance'][2] +
             stats['advance_from_adjacent'][1] + stats['advance_from_adjacent'][2] +
+            stats['shoot_wound_threshold_mismatch'][1] + stats['shoot_wound_threshold_mismatch'][2] +
                 shoot_invalid_total
         )
         charge_errors = (
@@ -3474,6 +3509,7 @@ if __name__ == "__main__":
             stats['fight_over_cc_nb'][1] + stats['fight_over_cc_nb'][2] +
             stats['fight_move_invalid']['pile_in'][1] + stats['fight_move_invalid']['pile_in'][2] +
             stats['fight_move_invalid']['consolidation'][1] + stats['fight_move_invalid']['consolidation'][2] +
+            stats['fight_wound_threshold_mismatch'][1] + stats['fight_wound_threshold_mismatch'][2] +
             stats['fight_alternation_violations'][1] + stats['fight_alternation_violations'][2]
         )
         action_phase_accuracy = require_key(stats, "action_phase_accuracy")

@@ -76,6 +76,35 @@ def get_run_inches_to_subhex() -> int:
     return _run_inches_to_subhex
 
 
+def _numeric(value: Any) -> Optional[int]:
+    """Valeur entière d'une caractéristique du registre, ou ``None`` si elle est SYMBOLIQUE.
+
+    Le registre porte parfois une référence non résolue (``'LieutenantPowerFistPlasmaPistol.T'``)
+    à la place d'un entier. ``None`` dit « pas de valeur exploitable », il ne remplace aucune
+    valeur : les appelants sautent l'entrée au chargement et lèvent au moment où la donnée sert
+    vraiment, pour une unité réellement jouée.
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.strip().lstrip("-").isdigit():
+        return int(value.strip())
+    return None
+
+
+def _int_by_weapon(weapons: Any, field_name: str) -> Dict[str, int]:
+    """Carte ``display_name -> <field_name>`` des armes dont la caractéristique est numérique."""
+    out: Dict[str, int] = {}
+    for weapon in weapons:
+        if not isinstance(weapon, dict):
+            continue
+        value = _numeric(require_key(weapon, field_name))
+        if value is not None:
+            out[require_key(weapon, "display_name")] = value
+    return out
+
+
 @dataclass
 class AnalyzerConfig:
     unit_registry: Any
@@ -111,6 +140,14 @@ class AnalyzerConfig:
     sustained_hits_by_weapon_global: Dict[str, int]
     weapon_range_global: Dict[str, int]
     weapon_is_close_quarters_global: Dict[str, bool]
+    #: FORCE des armes, même structure et même raison que les cartes NB ci-dessus : le seuil de
+    #: blessure (05.02) est une fonction de (F de l'arme, E de la cible), et l'arme se résout PAR
+    #: FIGURINE — cinq armes s'appellent « Close Combat Weapon », de F 3 à 6.
+    rng_str_by_weapon_global: Dict[str, int]
+    cc_str_by_weapon_global: Dict[str, int]
+    #: ENDURANCE par datasheet. Par FIGURINE et non par escouade : 19.02 impose la plus haute E
+    #: des figurines bodyguard, jamais celle du leader rattaché.
+    unit_toughness_by_type: Dict[str, int]
 
 
 def load_analyzer_config() -> AnalyzerConfig:
@@ -170,6 +207,7 @@ def load_analyzer_config() -> AnalyzerConfig:
     # Mots-clés de FACTION par type d'unité, sous la forme NORMALISÉE du moteur : c'est eux qui
     # portent les capacités de faction, absentes des `UNIT_RULES` (cf. plus bas).
     unit_faction_keywords_by_type: Dict[str, frozenset] = {}
+    unit_toughness_by_type: Dict[str, int] = {}
     display_rule_name_to_ids: Dict[str, Set[str]] = {}
 
     for display_rule_id, rule_cfg in all_unit_rules_config.items():
@@ -226,11 +264,27 @@ def load_analyzer_config() -> AnalyzerConfig:
                     require_key(weapon, "NB"),
                     "analyzer_cc_nb",
                 )
+        # FORCE par arme (05.02) : lue au MÊME endroit et sous la même clé de nom que le NB, pour
+        # que la résolution par-figurine (`resolve_weapon_value`) marche à l'identique.
+        #
+        # ENTRÉES SYMBOLIQUES IGNORÉES ICI. Le registre porte, pour certaines datasheets, une
+        # référence non résolue (`'LieutenantPowerFistPlasmaPistol.T'`) au lieu d'un entier —
+        # même phénomène que le `BASE_SIZE` symbolique de `unit_socle_by_type`, et même
+        # traitement : les pré-calculer pour TOUT le registre ferait lever au chargement sur des
+        # unités absentes du log. L'absence se rattrape là où la donnée sert : le contrôle du
+        # seuil de blessure lève pour une unité RÉELLEMENT jouée dont la F ou l'E manque.
+        rng_str_by_weapon = _int_by_weapon(rng_weapons, "STR")
+        cc_str_by_weapon = _int_by_weapon(cc_weapons, "STR")
+        _t_raw = require_key(unit_data, "T")
+        if _numeric(_t_raw) is not None:
+            unit_toughness_by_type[unit_type] = int(_t_raw)
         unit_attack_limits[unit_type] = {
             "rng_nb_by_weapon": rng_nb_by_weapon,
             "cc_nb_by_weapon": cc_nb_by_weapon,
             "rapid_fire_by_weapon": rapid_fire_by_weapon,
             "sustained_hits_by_weapon": sustained_hits_by_weapon,
+            "rng_str_by_weapon": rng_str_by_weapon,
+            "cc_str_by_weapon": cc_str_by_weapon,
         }
         weapons_info: List[Dict] = []
         for weapon in rng_weapons:
@@ -344,7 +398,13 @@ def load_analyzer_config() -> AnalyzerConfig:
     sustained_hits_by_weapon_global: Dict[str, int] = {}
     weapon_range_global: Dict[str, int] = {}
     weapon_is_close_quarters_global: Dict[str, bool] = {}
+    rng_str_by_weapon_global: Dict[str, int] = {}
+    cc_str_by_weapon_global: Dict[str, int] = {}
     for _ut, _limits in unit_attack_limits.items():
+        for _wname, _s in _limits["rng_str_by_weapon"].items():
+            rng_str_by_weapon_global[_wname] = max(rng_str_by_weapon_global.get(_wname, 0), _s)  # get allowed : max cumulatif, 0 = neutre
+        for _wname, _s in _limits["cc_str_by_weapon"].items():
+            cc_str_by_weapon_global[_wname] = max(cc_str_by_weapon_global.get(_wname, 0), _s)  # get allowed : max cumulatif, 0 = neutre
         for _wname, _nb in _limits["rng_nb_by_weapon"].items():
             rng_nb_by_weapon_global[_wname] = max(rng_nb_by_weapon_global.get(_wname, 0), _nb)  # get allowed : max cumulatif, 0 = neutre
         for _wname, _rf in _limits["rapid_fire_by_weapon"].items():
@@ -380,6 +440,9 @@ def load_analyzer_config() -> AnalyzerConfig:
         cc_nb_by_weapon_global=cc_nb_by_weapon_global,
         rapid_fire_by_weapon_global=rapid_fire_by_weapon_global,
         sustained_hits_by_weapon_global=sustained_hits_by_weapon_global,
+        rng_str_by_weapon_global=rng_str_by_weapon_global,
+        cc_str_by_weapon_global=cc_str_by_weapon_global,
+        unit_toughness_by_type=unit_toughness_by_type,
         weapon_range_global=weapon_range_global,
         weapon_is_close_quarters_global=weapon_is_close_quarters_global,
     )
