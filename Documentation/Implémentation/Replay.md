@@ -134,13 +134,24 @@ a rendu le défaut invisible. Le contrat est désormais `require_key(game_state,
 = erreur explicite. Onze sites portaient le même motif (`charge_handlers`, `movement_handlers`,
 `fight_handlers`), tous corrigés.
 
-⚠️ **Observation non expliquée au 2026-08-04** : ce même run ne contient **aucune** ligne
-`PILED IN` pour 1521 `CONSOLIDATED`. La chaîne a pourtant été vérifiée par sonde — sur le vrai
-point d'entrée (`fight_phase_start` + `_fight_v11_gym_after_phase_start`), le gym émet bien deux
-action_logs `pile_in` et un `StepLogger` réel écrit `PILED IN from … to …`. Tout consommateur de
-`step.log` doit donc, aujourd'hui, considérer que **le pile-in peut être absent du journal** et ne
-pas s'en servir comme position de référence : le contrôle « pile-in au-delà de 3" » de l'analyzer
-est un VERT VACANT tant que ce point n'est pas tranché (cf. V11 §0.66).
+~~⚠️ **Observation non expliquée au 2026-08-04** : ce même run ne contient **aucune** ligne
+`PILED IN` pour 1521 `CONSOLIDATED`~~ — **EXPLIQUÉ ET CORRIGÉ le 2026-08-09**, cf. §2.3sexies :
+les trois sites `advance_phase` appelaient `_process_squad_action` sans **drainer** ses
+`action_logs`, or c'est cette transition qui déclenche le PILE IN groupé (12.02). La sonde du
+2026-08-04 ne mentait pas — le gym émettait bien les deux action_logs `pile_in` ; ils étaient
+jetés entre l'émission et le journal. Les trois sites passent par `_advance_phase_and_drain`.
+
+**Re-mesuré le 2026-08-10** sur un `step.log` en cours d'écriture (run vivant, instantané à
+5 026 lignes) : **6** lignes `PILED IN` pour **3** `CONSOLIDATED`, réparties sur 2 épisodes et
+3 tours (`E12 T3`, `E22 T4/T5`), toutes avec un `T` juste. Le rapport ~2:1 est celui qu'on attend :
+le pile-in groupé concerne toutes les unités engagées, la consolidation seulement celles qui ont
+combattu. Le pile-in est donc de nouveau une position de référence utilisable, et le contrôle
+« pile-in au-delà de 3" » de l'analyzer
+(`ai/analyzer_phases/fight_handler.py`, budget `3 × inches_to_subhex`) **n'est plus un VERT
+VACANT** : il voit des lignes.
+⚠️ Ce qui n'est PAS mesuré ici : son **taux de violation**. Savoir qu'un contrôle reçoit des
+données ne dit pas qu'il juge juste — il faut passer l'analyzer sur un journal **terminé** (pas
+sur celui d'un run en cours, dont le résultat n'est pas reproductible).
 
 ### 2.3ter Move réactif
 

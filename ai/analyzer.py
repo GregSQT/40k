@@ -1064,6 +1064,145 @@ def _per_model_move_violation(
     return False
 
 
+def error_totals(stats: Dict[str, Any]) -> Dict[str, int]:
+    """Totaux d'erreurs par section — LE calcul, appelé par le SUMMARY et par le total de la CLI.
+
+    Il existait en DEUX exemplaires, et ils avaient divergé en silence : le total de la CLI
+    ignorait `move_after_shooting_distance_over_limit` (§1.1) et `shoot_combi_profile_conflicts`
+    (§1.2). Effet observable : un run pouvait afficher « ❌ 1.1 Erreurs en phase de move : 3 » et
+    rendre un total d'erreurs qui n'en comptait aucune — le rapport se contredisait lui-même, et
+    c'est le total, plus court, qu'on lit en premier.
+
+    ⚠️ UN NOUVEAU COMPTEUR D'ERREUR S'AJOUTE ICI, ET NULLE PART AILLEURS. C'est la seule raison
+    d'être de cette fonction : tant que la somme vivait chez ses deux appelants, chaque compteur
+    ajouté avait une chance sur deux de n'atterrir que d'un côté. Trois l'ont vécu.
+
+    Ne fait AUCUN affichage et ne lit rien d'autre que `stats` : les deux appelants en tirent des
+    lignes de rapport très différentes, c'est leur seule divergence légitime.
+    """
+    def _pair(*path: Any) -> int:
+        """Somme P1 + P2 d'un compteur, quel que soit son niveau d'imbrication."""
+        node = stats
+        for key in path:
+            node = require_key(node, key)
+        return require_key(node, 1) + require_key(node, 2)
+
+    shoot_invalid = sum(
+        require_key(require_key(stats['shoot_invalid'], player), field)
+        for player in (1, 2)
+        for field in ('out_of_range', 'engaged_non_close_quarters')
+    )
+    buckets = {
+        # §1.1 — les six déplacements de la phase de Mouvement, plus le move réactif.
+        'move': (
+            _pair('wall_collisions')
+            + _pair('move_to_adjacent_enemy')
+            + _pair('move_adjacent_before_non_flee')
+            + _pair('move_distance_over_limit', 'move')
+            + _pair('move_after_shooting_distance_over_limit')
+            # 09.07 : le fall-back est un type de mouvement de la phase de Mouvement (09.02),
+            # ses infractions entrent donc dans le total MOVE, pas dans un total à part.
+            + _pair('move_distance_over_limit', 'flee')
+            + _pair('flee_from_unengaged')
+            + _pair('flee_still_engaged')
+            + stats['reactive_move_stats'][1]['abnormal'] + stats['reactive_move_stats'][2]['abnormal']
+            + _pair('reactive_move_checks', 'to_adjacent_enemy')
+            + _pair('reactive_move_checks', 'into_wall')
+            + _pair('reactive_move_checks', 'distance_over_roll')
+        ),
+        # §1.2 — l'advance est une action de la phase de Mouvement mais ses fautes sont comptées
+        # ici, avec le tir, parce que c'est là que le rapport les affiche.
+        'shooting': (
+            _pair('shoot_over_rng_nb')
+            + _pair('shoot_combi_profile_conflicts')
+            + _pair('shoot_after_flee')
+            + _pair('shoot_at_friendly')
+            + _pair('shoot_at_engaged_enemy')
+            + _pair('close_quarters_shot_at_unengaged_target')
+            + _pair('advance_after_shoot')
+            + _pair('advance_twice_in_shoot_phase')
+            + _pair('move_distance_over_limit', 'advance')
+            + _pair('advance_from_adjacent')
+            + _pair('shoot_hit_result_mismatch')
+            + _pair('shoot_wound_threshold_mismatch')
+            + shoot_invalid
+        ),
+        'charge': (
+            _pair('charge_from_adjacent')
+            + stats['charge_invalid'][1]['distance_over_roll'] + stats['charge_invalid'][2]['distance_over_roll']
+            + stats['charge_invalid'][1]['advanced'] + stats['charge_invalid'][2]['advanced']
+            + stats['charge_invalid'][1]['fled'] + stats['charge_invalid'][2]['fled']
+        ),
+        'fight': (
+            # `fight_from_non_adjacent` est conservé à 0 depuis 2026-07-24 (vert vacant V2) :
+            # terme mort assumé, gardé pour la rétro-compatibilité des totaux.
+            _pair('fight_from_non_adjacent')
+            + _pair('fight_friendly')
+            + _pair('fight_over_cc_nb')
+            + _pair('fight_move_invalid', 'pile_in')
+            + _pair('fight_move_invalid', 'consolidation')
+            + _pair('fight_hit_result_mismatch')
+            + _pair('fight_wound_threshold_mismatch')
+            + _pair('fight_alternation_violations')
+        ),
+        'dead_units': (
+            _pair('dead_unit_moving')
+            + _pair('shoot_dead_unit')
+            + _pair('shoot_at_dead_unit')
+            + _pair('dead_unit_advancing')
+            + _pair('dead_unit_charging')
+            + _pair('charge_dead_unit')
+            + _pair('fight_dead_unit_attacker')
+            + _pair('fight_dead_unit_target')
+            + _pair('dead_unit_waiting')
+            + _pair('dead_unit_skipping')
+            + _pair('unit_revived')
+        ),
+        'positions': (
+            stats['position_log_mismatch']['move']['mismatch']
+            + stats['position_log_mismatch']['advance']['mismatch']
+            + stats['position_log_mismatch']['charge']['mismatch']
+            + len(stats['unit_position_collisions'])
+        ),
+        # §2.3 — même motif que les buckets ci-dessus : cette somme vivait elle aussi en deux
+        # exemplaires. Ils ne divergeaient pas encore ; c'est la structure qui les y menait.
+        'damage': _pair('damage_missing_unit_hp') + _pair('damage_exceeds_hp'),
+        # ── §1.5 à §2.7 : les buckets qui manquaient au TOTAL alors que le SUMMARY les
+        # affichait en ❌. Sans eux, un run pouvait imprimer « ❌ 1.6 Double-activation par
+        # phase : 1 » PUIS « ✅ 0 erreur détectée » — deux verdicts contradictoires dans le même
+        # rapport, et c'est le second qu'on lit. Ils sont ici pour la même raison que les autres.
+        'wrong_phase': sum(
+            require_key(entry, 'wrong') for entry in require_key(stats, 'action_phase_accuracy').values()
+        ),
+        'double_activation': (
+            sum(require_key(stats, 'double_activation_by_phase').values())
+            + require_key(stats, 'double_activation_reactive_move')
+        ),
+        # §1.7 / §1.8 — « invalide » = une paire observée que le registre ne déclare pas.
+        'special_rules_invalid': sum(
+            1 for (rule_id, unit_type) in require_key(stats, 'special_rule_usage')
+            if rule_id not in stats['rule_to_units'] or unit_type not in stats['rule_to_units'][rule_id]
+        ),
+        'weapon_rules_invalid': sum(
+            1 for (rule_name, weapon_key) in require_key(stats, 'weapon_rule_usage')
+            if rule_name not in stats['weapon_rule_to_weapons']
+            or weapon_key not in stats['weapon_rule_to_weapons'][rule_name]
+        ),
+        'episodes_ending': len(stats['episodes_without_end']) + len(stats['episodes_without_method']),
+        'core_issues': len(stats['parse_errors']) + len(stats['unit_id_mismatches']),
+        'missing_samples': sum(1 for line in stats['sample_actions'].values() if not line),
+        # §2.8 — une divergence état-reconstruit/état-moteur invalide, pour l'épisode concerné,
+        # tout contrôle de distance ou d'adjacence. Elle est rendue au même rang que les autres.
+        'state_resync': sum(require_key(stats, 'state_resync').values()),
+    }
+    # LE total, et donc LA définition de « une erreur » — plus une recomposition à la main chez
+    # l'appelant. C'est la somme de TOUS les buckets ci-dessus, sans exception ni terme
+    # supplémentaire : toute ligne ❌ du SUMMARY y entre par construction, et un bucket neuf y
+    # entre sans qu'on ait à y penser. C'est précisément ce qui manquait à §1.6 et §1.7.
+    buckets['total'] = sum(buckets.values())
+    return buckets
+
+
 def _track_action_phase_accuracy(
     stats: Dict[str, Any],
     action_type: str,
@@ -1475,6 +1614,13 @@ def parse_step_log(filepath: str) -> Dict:
         },
         'unit_position_collisions': [],
         'parse_errors': [],
+        # DÉCLARÉ ICI, comme ses deux voisins, et pas créé à la volée par son premier
+        # producteur. `parse_step_log` rendait un `stats` SANS cette clé : elle n'apparaissait
+        # qu'au `setdefault` de `print_statistics`, 130 lignes avant le seul lecteur qui la
+        # lit sans garde. Tout consommateur du `stats` rendu — un test, un script — levait
+        # KeyError, et c'est ce que la garde `if … in stats` du total CLI compensait en aval
+        # au lieu de le corriger en amont. Mesuré le 2026-08-10.
+        'unit_id_mismatches': [],
         'episodes_without_end': [],
         'episodes_without_method': [],
         'episode_durations': [],  # List of (episode_num, duration_seconds) tuples
@@ -3311,7 +3457,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     log_print("\n" + "-" * 80)
     log_print(f"2.7 {debug_sections['2.7']}")
     log_print("-" * 80)
-    unit_id_mismatches = stats.setdefault('unit_id_mismatches', [])
+    unit_id_mismatches = require_key(stats, 'unit_id_mismatches')
     log_print(f"Parsing errors (Non-standard log format): {len(stats['parse_errors'])}")
     log_print(f"Unit ID mismatches (Critical Bug):        {len(unit_id_mismatches)}")
     if stats['parse_errors']:
@@ -3338,79 +3484,15 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     log_print(f"Unites tuees a tort par l'analyzer        : {_resync['alive_missed']}")
     log_print(f"Figurines mal positionnees (deplacement non journalise) : {_resync['pos_mismatch']}")
 
-    move_errors = (
-        stats['wall_collisions'][1] + stats['wall_collisions'][2] +
-        stats['move_to_adjacent_enemy'][1] + stats['move_to_adjacent_enemy'][2] +
-        stats['move_adjacent_before_non_flee'][1] + stats['move_adjacent_before_non_flee'][2] +
-        stats['move_distance_over_limit']['move'][1] + stats['move_distance_over_limit']['move'][2] +
-        stats['move_after_shooting_distance_over_limit'][1] + stats['move_after_shooting_distance_over_limit'][2] +
-        # 09.07 : le fall-back est un type de mouvement de la phase de Mouvement (09.02), ses
-        # infractions entrent donc dans le total MOVE, pas dans un total à part.
-        stats['move_distance_over_limit']['flee'][1] + stats['move_distance_over_limit']['flee'][2] +
-        stats['flee_from_unengaged'][1] + stats['flee_from_unengaged'][2] +
-        stats['flee_still_engaged'][1] + stats['flee_still_engaged'][2] +
-        stats['reactive_move_stats'][1]['abnormal'] + stats['reactive_move_stats'][2]['abnormal'] +
-        stats['reactive_move_checks']['to_adjacent_enemy'][1] + stats['reactive_move_checks']['to_adjacent_enemy'][2] +
-        stats['reactive_move_checks']['into_wall'][1] + stats['reactive_move_checks']['into_wall'][2] +
-        stats['reactive_move_checks']['distance_over_roll'][1] + stats['reactive_move_checks']['distance_over_roll'][2]
-    )
-    shoot_invalid_total = (
-        stats['shoot_invalid'][1]['out_of_range'] + stats['shoot_invalid'][1]['engaged_non_close_quarters'] +
-        stats['shoot_invalid'][2]['out_of_range'] + stats['shoot_invalid'][2]['engaged_non_close_quarters']
-    )
-    shooting_errors = (
-        stats['shoot_over_rng_nb'][1] + stats['shoot_over_rng_nb'][2] +
-        stats['shoot_combi_profile_conflicts'][1] + stats['shoot_combi_profile_conflicts'][2] +
-        stats['shoot_after_flee'][1] + stats['shoot_after_flee'][2] +
-        stats['shoot_at_friendly'][1] + stats['shoot_at_friendly'][2] +
-        stats['shoot_at_engaged_enemy'][1] + stats['shoot_at_engaged_enemy'][2] +
-        stats['close_quarters_shot_at_unengaged_target'][1] + stats['close_quarters_shot_at_unengaged_target'][2] +
-        stats['advance_after_shoot'][1] + stats['advance_after_shoot'][2] +
-        stats['advance_twice_in_shoot_phase'][1] + stats['advance_twice_in_shoot_phase'][2] +
-        stats['move_distance_over_limit']['advance'][1] + stats['move_distance_over_limit']['advance'][2] +
-        stats['advance_from_adjacent'][1] + stats['advance_from_adjacent'][2] +
-        stats['shoot_hit_result_mismatch'][1] + stats['shoot_hit_result_mismatch'][2] +
-        stats['shoot_wound_threshold_mismatch'][1] + stats['shoot_wound_threshold_mismatch'][2] +
-        shoot_invalid_total
-    )
-    charge_errors = (
-        stats['charge_from_adjacent'][1] + stats['charge_from_adjacent'][2] +
-        stats['charge_invalid'][1]['distance_over_roll'] + stats['charge_invalid'][2]['distance_over_roll'] +
-        stats['charge_invalid'][1]['advanced'] + stats['charge_invalid'][2]['advanced'] +
-        stats['charge_invalid'][1]['fled'] + stats['charge_invalid'][2]['fled']
-    )
-    fight_alternation_total = stats['fight_alternation_violations'][1] + stats['fight_alternation_violations'][2]
-    fight_errors = (
-        stats['fight_from_non_adjacent'][1] + stats['fight_from_non_adjacent'][2] +
-        stats['fight_friendly'][1] + stats['fight_friendly'][2] +
-        stats['fight_over_cc_nb'][1] + stats['fight_over_cc_nb'][2] +
-        stats['fight_move_invalid']['pile_in'][1] + stats['fight_move_invalid']['pile_in'][2] +
-        stats['fight_move_invalid']['consolidation'][1] + stats['fight_move_invalid']['consolidation'][2] +
-        stats['fight_hit_result_mismatch'][1] + stats['fight_hit_result_mismatch'][2] +
-        stats['fight_wound_threshold_mismatch'][1] + stats['fight_wound_threshold_mismatch'][2] +
-        fight_alternation_total
-    )
-    dead_unit_actions = stats.setdefault('dead_unit_actions', [])
-    dead_unit_interactions_total = (
-        stats['dead_unit_moving'][1] + stats['dead_unit_moving'][2] +
-        stats['shoot_dead_unit'][1] + stats['shoot_dead_unit'][2] +
-        stats['shoot_at_dead_unit'][1] + stats['shoot_at_dead_unit'][2] +
-        stats['dead_unit_advancing'][1] + stats['dead_unit_advancing'][2] +
-        stats['dead_unit_charging'][1] + stats['dead_unit_charging'][2] +
-        stats['charge_dead_unit'][1] + stats['charge_dead_unit'][2] +
-        stats['fight_dead_unit_attacker'][1] + stats['fight_dead_unit_attacker'][2] +
-        stats['fight_dead_unit_target'][1] + stats['fight_dead_unit_target'][2] +
-        stats['dead_unit_waiting'][1] + stats['dead_unit_waiting'][2] +
-        stats['dead_unit_skipping'][1] + stats['dead_unit_skipping'][2] +
-        stats['unit_revived'][1] + stats['unit_revived'][2]
-    )
-    unit_collisions = len(stats['unit_position_collisions'])
-    pos_mismatch_total = (
-        stats['position_log_mismatch']['move']['mismatch'] +
-        stats['position_log_mismatch']['advance']['mismatch'] +
-        stats['position_log_mismatch']['charge']['mismatch'] +
-        unit_collisions
-    )
+    # LE calcul, partagé avec le total de la CLI (`error_totals`). Les deux copies qui vivaient
+    # ici et là-bas avaient divergé sur deux compteurs : le rapport se contredisait lui-même.
+    _totals = error_totals(stats)
+    move_errors = _totals['move']
+    shooting_errors = _totals['shooting']
+    charge_errors = _totals['charge']
+    fight_errors = _totals['fight']
+    dead_unit_interactions_total = _totals['dead_units']
+    pos_mismatch_total = _totals['positions']
 
     active_debug_section = None
     log_print("\n" + "=" * 80)
@@ -3431,12 +3513,11 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     log_print(f"{summary_error_icon(shooting_errors > 0)} 1.2 Erreurs en phase de shooting : {shooting_errors}")
     log_print(f"{summary_error_icon(charge_errors > 0)} 1.3 Erreurs en phase de charge : {charge_errors}")
     log_print(f"{summary_error_icon(fight_errors > 0)} 1.4 Erreurs en phase de fight : {fight_errors}")
-    action_phase_accuracy = require_key(stats, "action_phase_accuracy")
-    wrong_phase_total = sum(require_key(action_phase_accuracy[key], "wrong") for key in action_phase_accuracy)
+    wrong_phase_total = _totals['wrong_phase']
     log_print(f"{summary_error_icon(wrong_phase_total > 0)} 1.5 Actions occuring in the wrong phase : {wrong_phase_total}")
     double_activation_by_phase = require_key(stats, "double_activation_by_phase")
     double_activation_total = sum(double_activation_by_phase.values())
-    log_print(f"{summary_error_icon(double_activation_total > 0)} 1.6 Double-activation par phase : {double_activation_total}")
+    log_print(f"{summary_error_icon(_totals['double_activation'] > 0)} 1.6 Double-activation par phase : {double_activation_total}")
     special_rule_usage_total = sum(
         counts.get(1, 0) + counts.get(2, 0)  # get allowed: optional player counts
         for counts in stats.get('special_rule_usage', defaultdict(lambda: {1: 0, 2: 0})).values()  # get allowed: optional stats
@@ -3471,14 +3552,8 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         for (rule_name, weapon_key) in expected_weapon_rule_pairs
         if _weapon_rule_usage_pair_total(weapon_rule_usage_stats, (rule_name, weapon_key)) == 0
     )
-    special_rules_invalid = sum(
-        1 for (rid, ut) in special_rule_usage_stats.keys()
-        if (rid not in rule_to_units) or (ut not in rule_to_units[rid])
-    )
-    weapon_rules_invalid = sum(
-        1 for (rname, wkey) in weapon_rule_usage_stats.keys()
-        if (rname not in weapon_rule_to_weapons) or (wkey not in weapon_rule_to_weapons[rname])
-    )
+    special_rules_invalid = _totals['special_rules_invalid']
+    weapon_rules_invalid = _totals['weapon_rules_invalid']
     log_print(f"{summary_error_icon(special_rules_invalid > 0)} 1.7 Special rules usage : {special_rule_usage_total} utilisations" + (f" ({special_rules_invalid} invalid)" if special_rules_invalid > 0 else ""))
     weapon_rules_has_warning = weapon_rule_not_used_warnings > 0
     weapon_rules_status_parts: List[str] = []
@@ -3501,11 +3576,8 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         f"{weapon_rules_icon} 1.8 Weapon rules usage : {weapon_rule_usage_total} utilisations"
         f"{weapon_rules_status_suffix}"
     )
-    dmg_issues_total = (
-        stats['damage_missing_unit_hp'][1] + stats['damage_missing_unit_hp'][2] +
-        stats['damage_exceeds_hp'][1] + stats['damage_exceeds_hp'][2]
-    )
-    core_issues_total = len(stats['parse_errors']) + len(stats['unit_id_mismatches'])
+    dmg_issues_total = _totals['damage']
+    core_issues_total = _totals['core_issues']
     log_print("-" * 80)
     log_print("INTEGRITY")
     log_print("-" * 80)
@@ -3524,7 +3596,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         log_print(f"{summary_warning_icon(actions_episode_warn)} 2.4 Episodes actions : Min: {min_length} (E{min_length_episode}) - Avg: {avg_length:.1f} - Max: {max_length} (E{max_length_episode})")
     else:
         log_print(f"{summary_warning_icon(False)} 2.4 Episodes actions : N/A")
-    episodes_ending_total = len(stats['episodes_without_end']) + len(stats['episodes_without_method'])
+    episodes_ending_total = _totals['episodes_ending']
     log_print(f"{summary_error_icon(episodes_ending_total > 0)} 2.5 Episode ending : {episodes_ending_total}")
     log_print(f"{summary_error_icon(len(missing_samples) > 0)} 2.6 Sample missing ({len(missing_samples)}/{len(sample_action_types)}) : {missing_samples_label}")
     log_print(f"{summary_error_icon(core_issues_total > 0)} 2.7 Core issue : {core_issues_total}")
@@ -3619,119 +3691,26 @@ if __name__ == "__main__":
         collected_lines: List[str] = []
         print_statistics(stats, output_f, step_timings=step_timings, predict_timings=predict_timings, get_mask_timings=get_mask_timings, console_log_write_timings=console_log_write_timings, cascade_timings=cascade_timings, step_breakdowns=step_breakdowns, between_step_timings=between_step_timings, reset_timings=reset_timings, post_step_timings=post_step_timings, pre_step_timings=pre_step_timings, wrapper_step_timings=wrapper_step_timings, after_step_increment_timings=after_step_increment_timings, debug_section_filter=debug_section_filter, output_lines=collected_lines, emit_console=emit_console)
         
-        # Calculate total errors (all error counts between MOVEMENT ERRORS and SAMPLE ACTIONS)
-        shoot_invalid_total = (
-            stats['shoot_invalid'][1]['out_of_range'] + stats['shoot_invalid'][1]['engaged_non_close_quarters'] +
-            stats['shoot_invalid'][2]['out_of_range'] + stats['shoot_invalid'][2]['engaged_non_close_quarters']
-        )
-        move_errors = (
-            stats['wall_collisions'][1] + stats['wall_collisions'][2] +
-            stats['move_to_adjacent_enemy'][1] + stats['move_to_adjacent_enemy'][2] +
-            stats['move_adjacent_before_non_flee'][1] + stats['move_adjacent_before_non_flee'][2] +
-            stats['move_distance_over_limit']['move'][1] + stats['move_distance_over_limit']['move'][2] +
-            stats['move_distance_over_limit']['flee'][1] + stats['move_distance_over_limit']['flee'][2] +
-            stats['flee_from_unengaged'][1] + stats['flee_from_unengaged'][2] +
-            stats['flee_still_engaged'][1] + stats['flee_still_engaged'][2] +
-                stats['reactive_move_stats'][1]['abnormal'] + stats['reactive_move_stats'][2]['abnormal'] +
-            stats['reactive_move_checks']['to_adjacent_enemy'][1] + stats['reactive_move_checks']['to_adjacent_enemy'][2] +
-            stats['reactive_move_checks']['into_wall'][1] + stats['reactive_move_checks']['into_wall'][2] +
-                stats['reactive_move_checks']['distance_over_roll'][1] + stats['reactive_move_checks']['distance_over_roll'][2]
-        )
-        shooting_errors = (
-            stats['shoot_over_rng_nb'][1] + stats['shoot_over_rng_nb'][2] +
-            stats['shoot_after_flee'][1] + stats['shoot_after_flee'][2] +
-            stats['shoot_at_friendly'][1] + stats['shoot_at_friendly'][2] +
-            stats['shoot_at_engaged_enemy'][1] + stats['shoot_at_engaged_enemy'][2] +
-            stats['close_quarters_shot_at_unengaged_target'][1] + stats['close_quarters_shot_at_unengaged_target'][2] +
-            stats['advance_after_shoot'][1] + stats['advance_after_shoot'][2] +
-            stats['advance_twice_in_shoot_phase'][1] + stats['advance_twice_in_shoot_phase'][2] +
-            stats['move_distance_over_limit']['advance'][1] + stats['move_distance_over_limit']['advance'][2] +
-            stats['advance_from_adjacent'][1] + stats['advance_from_adjacent'][2] +
-            stats['shoot_hit_result_mismatch'][1] + stats['shoot_hit_result_mismatch'][2] +
-        stats['shoot_wound_threshold_mismatch'][1] + stats['shoot_wound_threshold_mismatch'][2] +
-                shoot_invalid_total
-        )
-        charge_errors = (
-            stats['charge_from_adjacent'][1] + stats['charge_from_adjacent'][2] +
-            stats['charge_invalid'][1]['distance_over_roll'] + stats['charge_invalid'][2]['distance_over_roll'] +
-            stats['charge_invalid'][1]['advanced'] + stats['charge_invalid'][2]['advanced'] +
-            stats['charge_invalid'][1]['fled'] + stats['charge_invalid'][2]['fled']
-        )
-        fight_errors = (
-            stats['fight_from_non_adjacent'][1] + stats['fight_from_non_adjacent'][2] +
-            stats['fight_friendly'][1] + stats['fight_friendly'][2] +
-            stats['fight_over_cc_nb'][1] + stats['fight_over_cc_nb'][2] +
-            stats['fight_move_invalid']['pile_in'][1] + stats['fight_move_invalid']['pile_in'][2] +
-            stats['fight_move_invalid']['consolidation'][1] + stats['fight_move_invalid']['consolidation'][2] +
-            stats['fight_hit_result_mismatch'][1] + stats['fight_hit_result_mismatch'][2] +
-        stats['fight_wound_threshold_mismatch'][1] + stats['fight_wound_threshold_mismatch'][2] +
-            stats['fight_alternation_violations'][1] + stats['fight_alternation_violations'][2]
-        )
-        action_phase_accuracy = require_key(stats, "action_phase_accuracy")
-        wrong_phase_total = sum(require_key(action_phase_accuracy[key], "wrong") for key in action_phase_accuracy)
-        dead_unit_interactions_total = (
-            stats['dead_unit_moving'][1] + stats['dead_unit_moving'][2] +
-            stats['shoot_dead_unit'][1] + stats['shoot_dead_unit'][2] +
-            stats['shoot_at_dead_unit'][1] + stats['shoot_at_dead_unit'][2] +
-            stats['dead_unit_advancing'][1] + stats['dead_unit_advancing'][2] +
-            stats['dead_unit_charging'][1] + stats['dead_unit_charging'][2] +
-            stats['charge_dead_unit'][1] + stats['charge_dead_unit'][2] +
-            stats['fight_dead_unit_attacker'][1] + stats['fight_dead_unit_attacker'][2] +
-            stats['fight_dead_unit_target'][1] + stats['fight_dead_unit_target'][2] +
-            stats['dead_unit_waiting'][1] + stats['dead_unit_waiting'][2] +
-            stats['dead_unit_skipping'][1] + stats['dead_unit_skipping'][2] +
-            stats['unit_revived'][1] + stats['unit_revived'][2]
-        )
-        pos_mismatch_total = (
-            stats['position_log_mismatch']['move']['mismatch'] +
-            stats['position_log_mismatch']['advance']['mismatch'] +
-            stats['position_log_mismatch']['charge']['mismatch'] +
-            len(stats['unit_position_collisions'])
-        )
-        dmg_issues_total = (
-            stats['damage_missing_unit_hp'][1] + stats['damage_missing_unit_hp'][2] +
-            stats['damage_exceeds_hp'][1] + stats['damage_exceeds_hp'][2]
-        )
-        episodes_ending_total = len(stats['episodes_without_end']) + len(stats['episodes_without_method'])
-        unit_id_mismatch_total = len(stats['unit_id_mismatches']) if 'unit_id_mismatches' in stats else 0
-        core_issues_total = len(stats['parse_errors']) + unit_id_mismatch_total
+        # Total d'erreurs : LE calcul, celui-là même dont le SUMMARY imprimé au-dessus tire ses
+        # lignes ❌ (`error_totals`). Une seconde copie vivait ici : elle ignorait deux compteurs
+        # de phase (V16), puis la double-activation §1.6 et les règles invalides §1.7 — un run
+        # pouvait donc imprimer « ❌ 1.6 … : 1 » suivi de « ✅ Aucune erreur détectée ». Le total
+        # est désormais la somme de TOUS les buckets, donc de toutes les lignes ❌ par
+        # construction : un bucket neuf y entre sans qu'on ait à y penser.
+        total_errors = error_totals(stats)['total']
+
+        # Les WARNINGS ne sont pas des erreurs : une paire (règle, arme) déclarée par l'armurerie
+        # et jamais observée signale un roster ou un scénario qui n'exerce pas la règle, pas une
+        # faute de jeu. Elle reste donc hors du total ci-dessus.
         weapon_rule_to_weapons = require_key(stats, 'weapon_rule_to_weapons')
         weapon_rule_usage = require_key(stats, 'weapon_rule_usage')
-        unit_types_seen = set(require_key(stats, "unit_types_seen"))
-        unit_type_suffixes = tuple(f" ({unit_type})" for unit_type in unit_types_seen)
-        expected_weapon_rule_pairs = {
-            (rname, wkey)
-            for rname, wkeys in weapon_rule_to_weapons.items()
-            for wkey in wkeys
-            if unit_type_suffixes and wkey.endswith(unit_type_suffixes)
-        }
+        unit_type_suffixes = tuple(f" ({unit_type})" for unit_type in require_key(stats, "unit_types_seen"))
         weapon_rule_not_used_warnings = sum(
             1
-            for (rname, wkey) in expected_weapon_rule_pairs
-            if _weapon_rule_usage_pair_total(weapon_rule_usage, (rname, wkey)) == 0
-        )
-        weapon_rules_invalid = sum(
-            1 for (rname, wkey) in weapon_rule_usage.keys()
-            if (rname not in weapon_rule_to_weapons) or (wkey not in weapon_rule_to_weapons[rname])
-        )
-        sample_action_types = ['move', 'shoot', 'advance', 'charge', 'fight']
-        missing_samples = [action for action in sample_action_types if not stats['sample_actions'][action]]
-        total_errors = (
-            move_errors +
-            shooting_errors +
-            charge_errors +
-            fight_errors +
-            wrong_phase_total +
-            dead_unit_interactions_total +
-            pos_mismatch_total +
-            dmg_issues_total +
-            episodes_ending_total +
-            core_issues_total +
-            # 2.8 : un ecart etat-reconstruit/etat-moteur est une erreur a part entiere —
-            # il invalide les controles de distance et d'adjacence de l'episode concerne.
-            sum(require_key(stats, 'state_resync').values()) +
-            weapon_rules_invalid +
-            len(missing_samples)
+            for rule_name, weapon_keys in weapon_rule_to_weapons.items()
+            for weapon_key in weapon_keys
+            if unit_type_suffixes and weapon_key.endswith(unit_type_suffixes)
+            and _weapon_rule_usage_pair_total(weapon_rule_usage, (rule_name, weapon_key)) == 0
         )
         total_warnings = weapon_rule_not_used_warnings
 

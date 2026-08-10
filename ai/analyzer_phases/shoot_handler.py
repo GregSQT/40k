@@ -258,8 +258,6 @@ def handle_shoot(
             unit_is_space_marine = 'intercessor' in shooter_unit_type.lower() or 'captain' in shooter_unit_type.lower() or 'spacemarine' in shooter_unit_type.lower()
             unit_is_tyranid = 'tyranid' in shooter_unit_type.lower() or 'genestealer' in shooter_unit_type.lower() or 'hormagaunt' in shooter_unit_type.lower() or 'termagant' in shooter_unit_type.lower()
             if (weapon_is_tyranid and unit_is_space_marine) or (weapon_is_space_marine and unit_is_tyranid):
-                if 'unit_id_mismatches' not in stats:
-                    stats['unit_id_mismatches'] = []
                 stats['unit_id_mismatches'].append({
                     'episode': state.current_episode_num,
                     'turn': turn,

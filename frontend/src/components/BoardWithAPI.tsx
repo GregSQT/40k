@@ -5726,12 +5726,10 @@ export const BoardWithAPI: React.FC = () => {
       <SettingsMenu
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
+        // `logoutSession` révoque côté serveur puis émet la fin de session ; c'est
+        // `SessionExpiryWatcher` (Routes.tsx) qui redirige, comme pour une session expirée.
         onLogout={() => {
-          // La révocation serveur est attendue avant la redirection : recharger la page
-          // pendant la requête l'annulerait, et la session resterait vivante côté serveur.
-          void logoutSession().then(() => {
-            window.location.href = "/auth";
-          });
+          void logoutSession();
         }}
         showAdvanceWarning={settings.showAdvanceWarning}
         canToggleAdvanceWarning={canUseAdvanceWarning}

@@ -1189,7 +1189,7 @@ def _get_authenticated_user_or_response():
         row = connection.execute(
             """
             SELECT u.id AS user_id, u.login AS login, p.id AS profile_id, p.code AS profile_code,
-                   s.expires_at AS expires_at
+                   s.expires_at AS expires_at, s.token AS token
             FROM sessions s
             JOIN users u ON u.id = s.user_id
             JOIN profiles p ON p.id = u.profile_id
@@ -1393,6 +1393,13 @@ def initialize_auth_db() -> None:
 
             CREATE INDEX IF NOT EXISTS idx_login_attempts_lookup
                 ON login_attempts (login, ip, attempted_at);
+
+            -- Index SÉPARÉ pour la purge : `WHERE attempted_at <= ?` ne peut pas se servir
+            -- de l'index ci-dessus, dont `attempted_at` n'est pas la colonne de tête. Sans
+            -- lui, chaque échec de login balaie toute la table — mesuré à l'EXPLAIN QUERY
+            -- PLAN (`SCAN login_attempts`) — et le fait sous verrou exclusif sur `users.db`.
+            CREATE INDEX IF NOT EXISTS idx_login_attempts_purge
+                ON login_attempts (attempted_at);
             """
             + _SESSIONS_TABLE_SQL
         )
@@ -2360,6 +2367,10 @@ def require_authenticated_session():
         raise RuntimeError("_get_authenticated_user_or_response returned no user and no error")
     # Évite aux vues un second aller-retour SQLite pour le même token (cf. `g.auth_user`).
     g.auth_user = user_row
+    # Le token lui-même, pour les vues qui agissent SUR la session (`logout_user`) : le
+    # re-parser depuis le header rejouerait un travail déjà fait et créerait un chemin
+    # d'exception hors de la porte, sur une donnée que la porte détient déjà.
+    g.auth_token = user_row["token"]
 
     if request.endpoint in _MODE_CHANGING_ENDPOINTS or request.endpoint in _MODE_AGNOSTIC_ENDPOINTS:
         return None
@@ -2423,7 +2434,9 @@ def login_user():
         # PBKDF2 à 200 000 itérations qui coûte cher, le laisser s'exécuter offrirait en prime
         # un déni de service au brute-force.
         if _count_recent_login_failures(cursor, normalized_login, client_ip, now) >= LOGIN_ATTEMPT_MAX_FAILURES:
-            connection.commit()
+            # Pas de `commit()` : seul un SELECT a été exécuté et `sqlite3` n'ouvre pas de
+            # transaction dessus. En écrire un laisserait croire que le rejet persiste
+            # quelque chose — le blocage ne s'auto-prolonge pas, il expire avec la fenêtre.
             return jsonify({
                 "success": False,
                 "error": (
@@ -2441,12 +2454,10 @@ def login_user():
             """,
             (normalized_login,),
         ).fetchone()
-        if user_row is None:
-            _record_login_failure(cursor, normalized_login, client_ip, now)
-            connection.commit()
-            return jsonify({"success": False, "error": "Invalid credentials"}), 401
-
-        if not _verify_password(password, user_row["password_hash"]):
+        # Utilisateur inconnu et mot de passe faux sont un SEUL cas : même comptage, même
+        # réponse, même message — les distinguer dirait à un attaquant quels logins existent.
+        # Le court-circuit du `or` garantit que `_verify_password` n'est pas appelé sur None.
+        if user_row is None or not _verify_password(password, user_row["password_hash"]):
             _record_login_failure(cursor, normalized_login, client_ip, now)
             connection.commit()
             return jsonify({"success": False, "error": "Invalid credentials"}), 401
@@ -2493,7 +2504,9 @@ def logout_user():
     le seul cas où le DELETE ne retire rien est une double déconnexion. L'état visé — la
     session n'existe plus — est atteint dans les deux cas.
     """
-    token = _extract_bearer_token()
+    # Token porté par la porte (`g.auth_token`), comme `current_user` lit `g.auth_user` :
+    # le re-parser ici rejouerait le travail de la porte sur une donnée qu'elle détient.
+    token = g.auth_token
     connection = _get_auth_db_connection()
     try:
         connection.execute("DELETE FROM sessions WHERE token = ?", (token,))

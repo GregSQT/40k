@@ -9,7 +9,10 @@
 > même commit) — trois verts vacants traités : **V10** (09.07, le fall-back n'avait AUCUN
 > contrôle → §1.1 #65-#67), **V14** (le plafond de tir passe par figurine, et le calcul est
 > désormais mutualisé avec la mêlée) et **05.01** (verdict de touche, module neuf
-> `ai/analyzer_hit.py` → §1.10). Contrôles vivants **64 → 69**.
+> `ai/analyzer_hit.py` → §1.10). Un **quatrième défaut a été trouvé en livrant** : les totaux
+> d'erreurs existaient en deux exemplaires divergents (**V16**, fermé), et un **cinquième** en
+> instruisant celui-là : une clé de `stats` absente de sa propre structure plus un compteur
+> mort (**V17**, fermé). Contrôles vivants **64 → 69**.
 >
 > **Ce que la mise à jour du 2026-08-10 a changé** — un MODULE neuf (`ai/analyzer_wound.py`) et
 > ses 4 compteurs, qui ferment 05.02 côté tir ET mêlée (§1.9) ; deux **corrections de ma part**,
@@ -210,7 +213,7 @@ prises aux constantes du moteur — le journal dit ce qui a été appliqué, il 
 
 **Vert vacant V10 fermé le 2026-08-10.** Le fall-back était le SEUL des six déplacements sans
 aucun contrôle de budget ni de chemin : `_handle_fled` ne regardait que la collision d'ancre et
-le mur d'arrivée. Les trois compteurs entrent dans le total MOVE (`analyzer.py:3308` et `:3592`)
+le mur d'arrivée. Les trois compteurs entrent dans le total MOVE (`analyzer.error_totals:1067`)
 — un compteur hors de tout total est aussi silencieux qu'un compteur jamais incrémenté (c'est V1
 pris par l'autre bout). Verrou : `tests/unit/ai/test_analyzer_fall_back_move.py`, 6 tests, dont
 la prémisse géométrique et l'assertion sur la ligne RENDUE du SUMMARY.
@@ -324,8 +327,8 @@ Deux pièges nommés dans le code, tous deux mesurés :
   donc sur le roster complet (`[MODEL_TYPES:]`, jamais effacé), exact tant qu'un bodyguard vit, et
   l'effectif (`unit_models_alive`) détecte le seul cas ambigu.
 
-Les deux compteurs `_mismatch` entrent dans les totaux SHOOTING (`analyzer.py:3373`) et FIGHT
-(`:3390`) : un écart est une ERREUR, pas un diagnostic.
+Les deux compteurs `_mismatch` entrent dans les totaux SHOOTING et FIGHT
+(`analyzer.error_totals:1067`) : un écart est une ERREUR, pas un diagnostic.
 
 ### §1.10 VERDICT DE TOUCHE — section neuve (2026-08-10, `ai/analyzer_hit.py`, 108 l.)
 
@@ -355,8 +358,8 @@ Deux points de méthode, tous deux repris de verts vacants connus :
   `Hit None(None+)` et la regex ne la reconnaît pas. **Ce n'est pas une exception codée dans le
   contrôle** — c'est le journal qui ne présente pas de dé.
 
-Affiché par `_hit_result_rows` (`analyzer.py:1861`, appelé `:2796` et `:2927`), sommé dans les
-totaux SHOOTING (`:3372`) et FIGHT (`:3389`). Verrou :
+Affiché par `_hit_result_rows` (`analyzer.py:1955`), sommé dans les totaux SHOOTING et FIGHT
+(`analyzer.error_totals:1067`). Verrou :
 `tests/unit/ai/test_analyzer_hit_result.py`, 14 tests (table cas par cas, ancrage des constantes
 moteur, seuil effectif vs base, et bout-en-bout dans les deux phases).
 
@@ -412,8 +415,9 @@ disparaître le symptôme sans jamais signaler sa cause.
 | 61 | `state_resync.alive_missed` | `analyzer_core.py:280` | l'analyzer a tué une unité que le moteur garde — sur-attribution de dégâts |
 | 62 | `state_resync.pos_mismatch` | `analyzer_core.py:285` | une figurine n'est pas là où l'analyzer la croyait — déplacement non journalisé (c'est ainsi que le pile-in muet s'est manifesté) |
 
-Affiché en §2.8 (`analyzer.py:3246`), au SUMMARY (`:3440`) et compté dans le total d'erreurs de la
-CLI (`:3632`). **Portée du verdict** : une divergence non nulle invalide, pour l'épisode concerné,
+Affiché en §2.8, au SUMMARY et compté dans le total d'erreurs de la CLI (`analyzer.py:3718`).
+Il est l'un des rares termes du total à ne PAS passer par `error_totals` : il ne se range dans
+aucune phase, c'est un verdict sur l'ensemble de l'épisode. **Portée du verdict** : une divergence non nulle invalide, pour l'épisode concerné,
 tout contrôle mesurant une distance ou une adjacence — donc §1.1 à §1.4.
 
 ### Contrôles SUPPRIMÉS (documentés dans le code, à ne pas ré-écrire à l'identique)
@@ -812,6 +816,8 @@ par absence prouvée de site d'incrémentation.
 | ~~V11~~ | « PARTIELLEMENT FERMÉ le 2026-08-09 : FIGHT est entrée dans la liste des phases, 24 unités combattent deux fois » | **La moitié FIGHT était un FAUX POSITIF, et il venait de ce document.** La clé de phase confondait les deux phases de combat d'un tour ; corrigée par `c1487fcb` (`analyzer_core.py:1042-1052`). Zéro vrai doublon sur 12 épisodes après correction. **Le volet SHOOT, lui, reste OUVERT** : `SHOT` n'est pas dans `is_activation_marker` (`:1010-1018`), donc 10.02 n'est pas contrôlé |
 | ~~V10~~ | « `FLED` n'a AUCUN contrôle de budget ni de chemin — seul déplacement sur six sans `_per_model_move_violation` » | **FERMÉ le 2026-08-10.** Les trois volets géométriques de 09.07 sont contrôlés (#65-#67, `move_handler.py:81`) et entrent dans le total MOVE. Reste hors de portée, faute de donnée : le MODE de fall-back (§7 L11) — d'où `force_thru_enemy` |
 | ~~V14~~ | « Le plafond de tir reste par escouade alors que celui de mêlée est par figurine » | **FERMÉ le 2026-08-10**, et par mutualisation plutôt que par copie : `analyzer_perfig.per_model_attack_cap` (`:262`) est désormais LE calcul des deux côtés, `[SHOOTER_MODELS:]` a quitté `fight_handler` pour `analyzer_perfig` (`:251`), et le X de `[RAPID FIRE]` suit la même résolution par figurine. Écrire un second exemplaire côté tir aurait rouvert le défaut à la première divergence |
+| **V16** | *(trouvé et fermé le 2026-08-10, en livrant V10)* — les totaux d'erreurs existaient en DEUX exemplaires, celui du SUMMARY et celui de la CLI | **FERMÉ.** Ils avaient divergé en silence sur deux compteurs : `move_after_shooting_distance_over_limit` (§1.1) et `shoot_combi_profile_conflicts` (§1.2) manquaient au total CLI. Effet observable : un run pouvait afficher « ❌ 1.1 Erreurs en phase de move : 2 » et rendre un total d'erreurs qui n'en comptait aucune — et c'est le total, plus court, qu'on lit en premier. Un seul calcul désormais (`analyzer.error_totals:1067`), avec un verrou qui pose 1 dans CHAQUE compteur l'un après l'autre et vérifie que sa somme bouge (`tests/unit/ai/test_analyzer_error_totals.py`, 48 tests) |
+| **V17** | *(trouvé et fermé le 2026-08-10, en instruisant V16)* — `unit_id_mismatches` n'était PAS dans la structure `stats` ; `dead_unit_actions` n'avait ni producteur ni lecteur | **FERMÉ.** Mesuré : `'unit_id_mismatches' in parse_step_log(...)` rendait **False** — la clé n'apparaissait qu'au `setdefault` de `print_statistics`, 130 lignes avant le seul lecteur qui la lit sans garde. D'où trois lecteurs à trois niveaux de défensive et deux idiomes de création. Tout consommateur du `stats` rendu levait `KeyError`. La clé est déclarée avec ses voisines (`analyzer.py:1591`), les deux créations paresseuses ont disparu, la garde `if … in stats` du total CLI aussi. `dead_unit_actions` était du code mort pur (créé, affecté à une locale, jamais relu — 1 seul hit au grep) : supprimé. Même famille que V1/V2/V3 |
 | ~~V15~~ | « Cinq des six clés de `T{tour} EFFECTS:` ne sont lues par personne » | **Réduit à DEUX.** `waaagh_melee_str` alimente §1.9 (`analyzer_wound.py:208`), `waaagh` et `oath_target` alimentent le compteur d'activations §1.7 (`analyzer_core.py:127,141`), `waaagh_melee_atk` alimentait déjà #28. **Restent inexploitées : `waaagh_invul` et `oath_wound`** (grep → 0 hit) |
 
 **Grep JUMEAU** (2026-08-10) `calculate_hex_distance|is_adjacent(` sur les 7 fichiers de
@@ -897,6 +903,8 @@ Par famille :
 |---|---|
 | Contrôles de conformité vivants | 69 (59 + les 3 de §2.8 + les 2 de §1.9 + les 3 de 09.07 + les 2 de §1.10) |
 | dont morts / inatteignables | 3 (V1, V2, V3) |
+| Sommes d'erreurs dupliquées | 0 — un seul `error_totals` (`analyzer.py:1067`) depuis V16 |
+| Clés de `stats` créées à la volée | 0 depuis V17 — toutes déclarées dans la structure |
 | dont mesurant la mauvaise grandeur | 5 (V4, V5, V6, V7, V8) — V14 fermé le 2026-08-10 |
 | Contrôles supprimés, documentés, à ne pas ré-écrire | 5 |
 | Sections de rapport | 18 (§1.1–§1.10, §2.1–§2.8) — dont 4 purement diagnostiques (§2.4, §2.5, §2.6, §2.7) |
@@ -908,7 +916,7 @@ Par famille :
 | COUVERT (tous corpus) | 10 | 11 | 12 | **13** |
 | ABSENT-LOGGABLE | 13 | 13 | 12 | **11** |
 | Contrôles vivants | 59 | 62 | 64 | **69** |
-| Verts vacants ouverts | 13 | 14 | 13 | **11** (V10 et V14 fermés) |
+| Verts vacants ouverts | 13 | 14 | 13 | **11** (V10 et V14 fermés ; V16 et V17 trouvés et fermés le jour même) |
 | Fichiers de l'analyzer | 6 | 6 | 7 | **8** (`analyzer_wound.py`, `analyzer_hit.py`) |
 
 Le gain de couverture reste **modeste par construction**. Les quatre lots du 2026-08-09 avaient
@@ -1074,6 +1082,8 @@ pas un verrou :
 | les 3 termes de fall-back retirés du total MOVE | le SUMMARY affiche « ✅ 1.1 Erreurs en phase de move : 0 » là où il doit afficher 2 |
 | plafond de tir remis au niveau escouade | 2 faux positifs sur 4 tirs LÉGAUX, et le vrai dépassement compté 4 au lieu de 2 |
 | `check_hit_result` court-circuité après son compteur `_checked` | 3 tests tombent ; celui qui ne vérifie que « 0 faute » reste vert — c'est précisément pourquoi il porte aussi une assertion sur `_checked` |
+| les 2 compteurs perdus retirés d'`error_totals` (V16) | les 2 cas paramétrés correspondants tombent, et EUX SEULS : le test désigne le compteur fautif par son nom |
+| `'unit_id_mismatches'` retiré de la structure `stats` (V17) | 2 tests tombent ; et le producteur de `shoot_handler` lève `KeyError` sur le vrai chemin — ce qui prouve que la déclaration structurelle le porte réellement |
 
 **Greps JUMEAU de la livraison**, tous rapportés y compris vides :
 - `Hit\s|'Hit ` sur les 8 fichiers de l'analyzer → **0 hit** hors `analyzer_hit.py` : aucun autre
@@ -1086,8 +1096,8 @@ pas un verrou :
 - `_shooter_models` → 0 hit après bascule ; l'import privé croisé `shoot_handler` →
   `fight_handler._shooter_models` a disparu avec lui.
 
-**Tests exécutés** : les 20 fichiers `tests/unit/ai/test_analyzer_*.py` et
-`test_step_log_weapon_rule_tokens.py`, **211 tests, tous verts**. Ce n'est PAS la vérification
+**Tests exécutés** : les 21 fichiers `tests/unit/ai/test_analyzer_*.py` et
+`test_step_log_weapon_rule_tokens.py`, **264 tests, tous verts**. Ce n'est PAS la vérification
 large du dépôt (suite complète, `pyright`, `check_ai_rules.py`, `biome`, `tsc`) : elle appartient
 à l'utilisateur et n'a pas été lancée. Aucun verdict n'est rendu ici sur les tests d'`engine/`
 ni sur l'intégration PvP.

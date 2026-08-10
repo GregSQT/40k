@@ -32,6 +32,8 @@ CE QUI EST DÉLIBÉRÉMENT ÉCARTÉ, et pourquoi ce n'est pas un trou :
   - le seuil IMPRIMÉ est déjà l'effectif (`base+->eff+` sous [HEAVY] / [COVER]) : les
     modificateurs de ce moteur dégradent le SEUIL, jamais le jet, donc le jet reste non modifié
     au sens du PDF et la comparaison est directe.
+  - une blessure AUTOMATIQUE ([LETHAL HITS] 24.23) reste une touche réussie : son segment
+    `Wound None(4+)` doit être reconnu comme tel. Cf. `WOUND_SEGMENT_PRESENT_RE`.
 
 Les deux compteurs de lignes RÉELLEMENT jugées (`*_hit_result_checked`) sont là pour la même
 raison que les `*_wound_threshold_unverifiable` : un compteur d'erreurs à zéro parce qu'il ne
@@ -56,9 +58,17 @@ HIT_SEGMENT_RE = re.compile(
 )
 
 #: Le segment qui atteste la RÉUSSITE : le formateur ne l'écrit que sous `hit_result == "HIT"`.
-#: `Wound 4` sans parenthèse (blessure automatique, [LETHAL HITS] 24.23) compte aussi — c'est
-#: bien une touche qui a réussi, seule sa blessure est acquise.
-WOUND_SEGMENT_PRESENT_RE = re.compile(r"\bWound\s+\d+")
+#:
+#: ⚠️ LE JET PEUT ÊTRE `None`, ET LE SEGMENT RESTE UN SEGMENT. `[LETHAL HITS]` 24.23 blesse
+#: automatiquement : le moteur pose `wound_roll = None` (`attack_sequence.py:396`) et le
+#: formateur écrit sans condition `Wound {wound_roll}({wound_target}+)`
+#: (`step_logger.py:816`) — soit `Wound None(4+)`. Une regex exigeant des chiffres après
+#: `Wound` ne le reconnaît pas et déclare l'attaque MANQUÉE : chaque touche critique d'une arme
+#: [LETHAL HITS] était alors comptée en faute. Aucun roster du projet ne porte la règle
+#: aujourd'hui, mais elle est implémentée dans le moteur et déclarée dans `weapon_rules.json` :
+#: le défaut était armé, pas absent. On reconnaît donc la GRAMMAIRE du segment
+#: (`Wound <jet|None>(<seuil>+)`), jamais la valeur du jet.
+WOUND_SEGMENT_PRESENT_RE = re.compile(r"\bWound\s+(?:\d+|None)\(\d+\+\)")
 
 
 def parse_hit_roll_and_target(action_desc: str) -> Optional[Tuple[int, int]]:

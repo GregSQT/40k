@@ -48,6 +48,11 @@ const rejectSession = (): Response => {
  * L'effacement local a lieu même si l'appel serveur échoue : l'utilisateur a demandé à
  * partir, le laisser connecté sur un poste qu'il quitte serait pire que de laisser une
  * session vivante côté serveur. L'échec est remonté en console, pas masqué.
+ *
+ * La sortie passe par `rejectSession()`, le canal UNIQUE du module : déconnexion volontaire
+ * et session rejetée par le serveur aboutissent au même endroit. Effacer le storage sans
+ * émettre l'événement obligerait chaque appelant à rediriger lui-même, et il existerait deux
+ * chemins « fin de session → écran de login » à garder synchronisés.
  */
 export const logoutSession = async (): Promise<void> => {
   try {
@@ -58,7 +63,7 @@ export const logoutSession = async (): Promise<void> => {
   } catch (error) {
     console.error("Logout serveur injoignable : session non révoquée", error);
   } finally {
-    clearAuthSession();
+    rejectSession();
   }
 };
 

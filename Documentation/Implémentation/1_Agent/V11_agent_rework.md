@@ -547,13 +547,18 @@ pile-in).
    (`#SquadID#ModelID`) sur les lignes de dégâts **et** une ligne de destruction d'escouade.
    🟢 Arbitrage utilisateur du 2026-08-04 : à traiter avec le choix de la figurine tuée par
    l'agent (`L3`), dont c'est le prérequis — pas un doublon.
-2. **Aucune ligne `PILED IN` dans 24 Mo de journal**, pour 1521 `CONSOLIDATED`. L'hypothèse
-   « l'émetteur manque » est **RÉFUTÉE par sonde** : sur le vrai point d'entrée
-   (`fight_phase_start` + `_fight_v11_gym_after_phase_start`), le gym émet bien deux action_logs
-   `pile_in` et un `StepLogger` réel écrit `PILED IN from … to …`. L'absence sur le run réel n'est
-   donc **pas expliquée**. Mesure décisive = relancer un run `--step` (impossible depuis le
-   worktree : `ai/models/` n'y est pas). Voir aussi le bug ouvert
-   `A_faire/pile_in_overrun_par_figurine.md`.
+2. ~~**Aucune ligne `PILED IN` dans 24 Mo de journal**, pour 1521 `CONSOLIDATED`~~ — **RÉSOLU le
+   2026-08-09.** La sonde avait raison de disculper l'émetteur : le gym produisait bien les deux
+   action_logs `pile_in`. Ils étaient **jetés après émission** — les trois sites `advance_phase`
+   appelaient `_process_squad_action` sans **drainer** ses `action_logs`, or c'est cette transition
+   qui déclenche `fight_phase_start` puis tout le PILE IN groupé (12.02). Instrumenté à l'époque :
+   plan calculé 24 fois, commité 24 fois, action_log appendu 24 fois, **drainé 0 fois**. Les trois
+   sites passent par `_advance_phase_and_drain` (`engine/w40k_core.py`).
+   **Re-mesuré le 2026-08-10** sur un run vivant : 6 `PILED IN` pour 3 `CONSOLIDATED`, sur 3 tours
+   distincts. Détail et bornes de cette mesure → [`Replay.md`](../Replay.md) §2.3.
+   Leçon : « l'émetteur émet » ne prouve rien sur ce qui **atteint** le journal — c'est le motif
+   « code testé mais jamais appelé » de CLAUDE.md T4, déplacé d'un cran vers l'aval.
+   Voir aussi le bug ouvert `A_faire/pile_in_overrun_par_figurine.md`.
 
 #### Leçon de méthode — le miroir, rejoué TROIS fois dans le même lot
 
