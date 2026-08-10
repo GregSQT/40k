@@ -17,25 +17,36 @@
     "PÉRIMÈTRE ACTUEL : §1.1 seulement. Les entrées PROUVABLES d'abord — celles dont un contrôle",
     "vivant mesure la règle, et dont l'applicabilité se dérive du journal sans être écrite à la",
     "main. Les règles conditionnelles (transports, aéronefs, stratagèmes, réserves) viendront avec",
-    "les champs de journal qui les rendront décidables, pas avant."
+    "les champs de journal qui les rendront décidables, pas avant.",
+    "",
+    "APPLICABILITÉ — les trois formes que `rule_is_applicable` implémente. Elles étaient décrites",
+    "ici dans une clé `applicability_kinds` que PERSONNE ne lisait, et qui en déclarait une",
+    "quatrième (`roster_keyword`) sur laquelle le code lève : une table tenue à la main à côté du",
+    "code qui décide, c'est-à-dire le défaut même que ce fichier ferme. La description vit",
+    "désormais dans la docstring de `rule_is_applicable`, seul endroit où elle est vérifiable.",
+    "  - always              : vraie dans toute partie.",
+    "  - action_seen         : vraie si le journal porte au moins une action du type nommé.",
+    "  - unit_rule_in_roster : vraie si un type d'unité VU porte la règle d'unité nommée."
   ],
-
-  "applicability_kinds": {
-    "always": "Vraie dans toute partie : la règle s'applique dès qu'une bataille est jouée.",
-    "action_seen": "Vraie si le journal porte au moins une action du type nommé (`action`).",
-    "unit_rule_in_roster": "Vraie si au moins un type d'unité VU dans le journal porte la règle d'unité nommée (`rule_id`), d'après le registre. C'est la même dérivation que §1.7 : hors roster, la règle ne pouvait pas servir.",
-    "roster_keyword": "RÉSERVÉ — pas encore utilisé : aucune règle de §1.1 ne dépend d'un mot-clé."
-  },
-
   "rules": [
     {
       "id": "03.01",
       "source": "03 Moving",
       "label": "Moving units — trajet, murs, figurines, bord du plateau",
       "section": "1.1",
-      "applicability": {"kind": "action_seen", "action": "move"},
-      "controls": [["wall_collisions"]],
-      "co_verified_by": ["09.05", "09.07"],
+      "applicability": {
+        "kind": "action_seen",
+        "action": "move"
+      },
+      "controls": [
+        [
+          "wall_collisions"
+        ]
+      ],
+      "co_verified_by": [
+        "09.05",
+        "09.07"
+      ],
       "co_verified_note": "Le TRAJET (chemin réel, murs, figurines, bord du plateau) est mesuré à l'intérieur des contrôles de budget des types de déplacement : `_per_model_move_violation` rend UN verdict pour « hors budget OU chemin impossible », les deux étant indissociables à coût raisonnable. Le compteur listé ici ne porte donc que la destination sur un mur ; le reste de 03.01 est attesté par 09.05 et 09.07.",
       "status": "PARTIEL",
       "status_note": "La ROTATION (03.01, « rotating a model does not count towards the distance ») n'est pas journalisée : aucun contrôle ne peut l'établir."
@@ -45,8 +56,15 @@
       "source": "03 Moving",
       "label": "Coherency — 2\" d'un voisin, 9\" de toute l'escouade",
       "section": "1.1",
-      "applicability": {"kind": "action_seen", "action": "move"},
-      "controls": [["squad_coherency_violations"]],
+      "applicability": {
+        "kind": "action_seen",
+        "action": "move"
+      },
+      "controls": [
+        [
+          "squad_coherency_violations"
+        ]
+      ],
       "status": "PARTIEL",
       "status_note": "Le volet HORIZONTAL est mesuré à la mise en place et à la fin de chaque déplacement. Non couverts : le volet VERTICAL (5\") et la purge de fin de tour (« Regaining coherency »)."
     },
@@ -55,11 +73,21 @@
       "source": "09 Movement phase",
       "label": "Normal move — distance M, part désengagé, finit désengagé",
       "section": "1.1",
-      "applicability": {"kind": "action_seen", "action": "move"},
+      "applicability": {
+        "kind": "action_seen",
+        "action": "move"
+      },
       "controls": [
-        ["move_distance_over_limit", "move"],
-        ["move_adjacent_before_non_flee"],
-        ["move_to_adjacent_enemy"]
+        [
+          "move_distance_over_limit",
+          "move"
+        ],
+        [
+          "move_adjacent_before_non_flee"
+        ],
+        [
+          "move_to_adjacent_enemy"
+        ]
       ],
       "status": "COUVERT",
       "status_note": "Les trois volets de la règle ont chacun leur compteur : MAXIMUM DISTANCE, ELIGIBLE IF (part désengagé) et AFTER MOVING (finit désengagé)."
@@ -69,11 +97,21 @@
       "source": "09 Movement phase",
       "label": "Fall-back move — distance M, part engagé, finit désengagé",
       "section": "1.1",
-      "applicability": {"kind": "action_seen", "action": "fled"},
+      "applicability": {
+        "kind": "action_seen",
+        "action": "fled"
+      },
       "controls": [
-        ["move_distance_over_limit", "flee"],
-        ["flee_from_unengaged"],
-        ["flee_still_engaged"]
+        [
+          "move_distance_over_limit",
+          "flee"
+        ],
+        [
+          "flee_from_unengaged"
+        ],
+        [
+          "flee_still_engaged"
+        ]
       ],
       "status": "PARTIEL",
       "status_note": "Les trois volets géométriques sont contrôlés. Le MODE de fall-back (retraite ordonnée / Desperate Escape) n'est pas journalisé : le volet « WHILE MOVING » reste hors de portée, et les figurines ennemies sont donc laissées traversables."
@@ -83,12 +121,28 @@
       "source": "capacité de projet (hors corpus PDF)",
       "label": "Move réactif — phase autorisée, budget du D6, mur, engagement",
       "section": "1.1",
-      "applicability": {"kind": "unit_rule_in_roster", "rule_id": "reactive_move"},
+      "applicability": {
+        "kind": "unit_rule_in_roster",
+        "rule_id": "reactive_move"
+      },
       "controls": [
-        ["reactive_move_stats", "*", "abnormal"],
-        ["reactive_move_checks", "to_adjacent_enemy"],
-        ["reactive_move_checks", "into_wall"],
-        ["reactive_move_checks", "distance_over_roll"]
+        [
+          "reactive_move_stats",
+          "*",
+          "abnormal"
+        ],
+        [
+          "reactive_move_checks",
+          "to_adjacent_enemy"
+        ],
+        [
+          "reactive_move_checks",
+          "into_wall"
+        ],
+        [
+          "reactive_move_checks",
+          "distance_over_roll"
+        ]
       ],
       "status": "PARTIEL",
       "status_note": "La ligne réactive ne porte pas toujours son segment par-figurine : l'engagement y est mesuré à l'ANCRE, pas au socle."
@@ -98,8 +152,15 @@
       "source": "capacité de projet (hors corpus PDF)",
       "label": "Déplacement après tir — distance de la capacité",
       "section": "1.1",
-      "applicability": {"kind": "unit_rule_in_roster", "rule_id": "move_after_shooting"},
-      "controls": [["move_after_shooting_distance_over_limit"]],
+      "applicability": {
+        "kind": "unit_rule_in_roster",
+        "rule_id": "move_after_shooting"
+      },
+      "controls": [
+        [
+          "move_after_shooting_distance_over_limit"
+        ]
+      ],
       "status": "COUVERT"
     }
   ]

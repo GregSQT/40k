@@ -28,36 +28,31 @@ contrôle qui ne regarde rien affiche donc 0, et c'est exactement le signal rech
 
 from __future__ import annotations
 
-import json
-import os
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from shared.data_validation import require_key
 
-_CORPUS_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config", "rules_corpus.json"
-)
-
-_corpus_cache: Optional[List[Dict[str, Any]]] = None
-
-
 def load_rules_corpus() -> List[Dict[str, Any]]:
-    """Corpus de règles, lu une fois. Son absence est une rupture de contrat, pas un cas à replier :
-    sans lui, le rapport ne peut plus dire ce qu'il ne couvre pas — et c'est précisément ce
-    silence-là qu'il est censé faire disparaître."""
-    global _corpus_cache
-    if _corpus_cache is None:
-        with open(_CORPUS_PATH, "r", encoding="utf-8") as f:
-            payload = json.load(f)
-        rules = require_key(payload, "rules")
-        seen: Dict[str, int] = {}
-        for entry in rules:
-            rid = require_key(entry, "id")
-            if rid in seen:
-                raise ValueError(f"rules_corpus.json : règle {rid!r} déclarée deux fois")
-            seen[rid] = 1
-        _corpus_cache = rules
-    return _corpus_cache
+    """Corpus de règles. Son absence est une rupture de contrat, pas un cas à replier : sans lui,
+    le rapport ne peut plus dire ce qu'il ne couvre pas — et c'est précisément ce silence-là qu'il
+    est censé faire disparaître.
+
+    Lu par le `ConfigLoader` du dépôt, comme `weapon_rules.json` et `unit_rules.json`, et pas par
+    un `open()` local : celui-ci ouvrait en `utf-8` là où tout `config/` est lu en `utf-8-sig`
+    (un BOM aurait fait lever le seul fichier du répertoire à ne pas le tolérer), tenait un second
+    cache invisible du rechargement à chaud, et recalculait la racine du projet depuis `__file__`.
+    """
+    from config_loader import get_config_loader
+
+    payload = get_config_loader().load_config("rules_corpus", force_reload=False)
+    rules = require_key(payload, "rules")
+    seen: Set[str] = set()
+    for entry in rules:
+        rid = require_key(entry, "id")
+        if rid in seen:
+            raise ValueError(f"rules_corpus.json : règle {rid!r} déclarée deux fois")
+        seen.add(rid)
+    return rules
 
 
 def note_rule_usage(stats: Dict[str, Any], rule_id: str, player: int) -> None:
@@ -88,23 +83,20 @@ def new_rule_usage_counters() -> Dict[str, Dict[int, int]]:
 def _counter_value(stats: Dict[str, Any], path: List[str]) -> int:
     """Somme P1 + P2 d'un compteur désigné par son chemin dans `stats`.
 
-    Deux formes d'imbrication cohabitent dans `stats`, et les confondre lève plutôt que de rendre
-    un faux : la forme courante finit sur ``{1: n, 2: n}``, et une poignée de compteurs mettent le
-    JOUEUR EN PREMIER (``reactive_move_stats[1]['abnormal']``). Le corpus écrit alors ``"*"`` à la
-    place du joueur — le chemin dit sa forme au lieu de la laisser deviner.
+    Deux formes d'imbrication cohabitent dans `stats` : la forme courante finit sur
+    ``{1: n, 2: n}``, et une poignée de compteurs mettent le JOUEUR EN PREMIER
+    (``reactive_move_stats[1]['abnormal']``). Le corpus écrit alors ``"*"`` à la place du joueur.
+    Ce n'est pas un cas particulier mais la MÊME notion — un chemin porte un emplacement joueur,
+    implicite en queue quand il n'est pas écrit : une seule traversée les sert donc tous les deux.
     """
-    if "*" in path:
-        total = 0
-        for player in (1, 2):
-            node: Any = stats
-            for key in path:
-                node = require_key(node, player if key == "*" else key)
-            total += int(node)
-        return total
-    node = stats
-    for key in path:
-        node = require_key(node, key)
-    return int(require_key(node, 1)) + int(require_key(node, 2))
+    slots = path if "*" in path else [*path, "*"]
+    total = 0
+    for player in (1, 2):
+        node: Any = stats
+        for key in slots:
+            node = require_key(node, player if key == "*" else key)
+        total += int(node)
+    return total
 
 
 def rule_error_count(stats: Dict[str, Any], entry: Dict[str, Any]) -> int:
@@ -138,33 +130,22 @@ def rule_is_applicable(stats: Dict[str, Any], entry: Dict[str, Any]) -> Optional
     )
 
 
-#: Verdicts, du plus muet au plus parlant. L'ordre est celui du tri d'affichage : ce qui demande
-#: une action vient en premier.
-VERDICT_NEVER_EXERCISED = "JAMAIS EXERCÉE"
-VERDICT_ERRORS = "ERREURS"
-VERDICT_OK = "OK"
-VERDICT_OUT_OF_ROSTER = "HORS ROSTER"
-VERDICT_UNDECIDABLE = "INDÉCIDABLE"
-
-_VERDICT_ORDER = {
-    VERDICT_ERRORS: 0,
-    VERDICT_NEVER_EXERCISED: 1,
-    VERDICT_UNDECIDABLE: 2,
-    VERDICT_OK: 3,
-    VERDICT_OUT_OF_ROSTER: 4,
-}
+#: Verdicts DANS L'ORDRE D'AFFICHAGE : ce qui demande une action vient en premier, ce qui ne
+#: demande rien en dernier. L'ordre EST la liste — une seconde table de rangs se re-numéroterait
+#: à chaque insertion, et un verdict ajouté d'un seul côté sortirait en KeyError au tri.
+VERDICTS = ("ERREURS", "JAMAIS EXERCÉE", "INDÉCIDABLE", "OK", "HORS ROSTER")
+VERDICT_ERRORS, VERDICT_NEVER_EXERCISED, VERDICT_UNDECIDABLE, VERDICT_OK, VERDICT_OUT_OF_ROSTER = VERDICTS
 
 
 def coverage_rows(stats: Dict[str, Any], section: Optional[str] = None) -> List[Dict[str, Any]]:
     """Une ligne par règle du corpus : applicabilité, exercices, erreurs, verdict."""
     rows: List[Dict[str, Any]] = []
-    usage = require_key(stats, "rule_usage")
     for entry in load_rules_corpus():
         if section is not None and require_key(entry, "section") != section:
             continue
         rule_id = require_key(entry, "id")
         applicable = rule_is_applicable(stats, entry)
-        exercised = int(require_key(usage, rule_id)[1]) + int(require_key(usage, rule_id)[2])
+        exercised = _counter_value(stats, ["rule_usage", rule_id])
         errors = rule_error_count(stats, entry)
         if applicable is None:
             verdict = VERDICT_UNDECIDABLE
@@ -180,18 +161,17 @@ def coverage_rows(stats: Dict[str, Any], section: Optional[str] = None) -> List[
         rows.append({
             "id": rule_id,
             "label": require_key(entry, "label"),
-            "source": require_key(entry, "source"),
             "status": require_key(entry, "status"),
             "applicable": applicable,
             "exercised": exercised,
             "errors": errors,
             "verdict": verdict,
         })
-    rows.sort(key=lambda r: (_VERDICT_ORDER[r["verdict"]], r["id"]))
+    rows.sort(key=lambda r: (VERDICTS.index(r["verdict"]), r["id"]))
     return rows
 
 
-def section_error_sum(stats: Dict[str, Any], section: str) -> int:
+def _section_error_sum(stats: Dict[str, Any], section: str) -> int:
     """Somme des erreurs de toutes les règles d'une section.
 
     Elle DOIT égaler le bucket correspondant d'`error_totals`. Ce n'est pas une vérification de
@@ -210,19 +190,27 @@ def section_error_sum(stats: Dict[str, Any], section: str) -> int:
 SECTION_TO_BUCKET = {"1.1": "move"}
 
 
-def coverage_gaps(stats: Dict[str, Any]) -> List[Tuple[str, int, int]]:
+def coverage_gaps(
+    stats: Dict[str, Any], section: Optional[str] = None
+) -> List[Tuple[str, int, int]]:
     """Sections dont la somme par règle ne retombe PAS sur le bucket de la section.
 
     Rend ``(section, somme_par_règle, bucket)``. Une section absente de ce résultat est une
     section dont chaque erreur est attribuée à exactement une règle.
+
+    ``section`` borne le calcul à celle qu'on rend. Sans ce paramètre, l'appelant recevait toutes
+    les sections puis jetait les autres : le rendu de chacune resommait alors le corpus entier, et
+    « quelle section m'intéresse » vivait dans deux fichiers.
     """
     from ai.analyzer import error_totals
 
     totals = error_totals(stats)
     gaps: List[Tuple[str, int, int]] = []
-    for section, bucket in SECTION_TO_BUCKET.items():
-        by_rule = section_error_sum(stats, section)
+    for _section, bucket in SECTION_TO_BUCKET.items():
+        if section is not None and _section != section:
+            continue
+        by_rule = _section_error_sum(stats, _section)
         in_bucket = int(require_key(totals, bucket))
         if by_rule != in_bucket:
-            gaps.append((section, by_rule, in_bucket))
+            gaps.append((_section, by_rule, in_bucket))
     return gaps

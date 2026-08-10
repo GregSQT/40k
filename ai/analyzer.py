@@ -23,7 +23,7 @@ from engine.combat_utils import (
 )
 from shared.data_validation import require_key
 from ai.analyzer_perfig import position_is_on_battlefield
-from ai.analyzer_rules import new_rule_usage_counters
+from ai.analyzer_rules import coverage_gaps, coverage_rows, new_rule_usage_counters
 
 
 def _weapon_rule_usage_pair_total(weapon_rule_usage: Dict[Any, Any], pair_key: Any) -> int:
@@ -1174,8 +1174,6 @@ def _render_rule_coverage(stats: Dict[str, Any], section: str, log_print: Any) -
     signifie qu'un compteur d'erreur n'appartient à aucune règle du corpus, donc qu'une faute
     peut apparaître dans le total sans qu'aucune règle ne la porte.
     """
-    from ai.analyzer_rules import coverage_gaps, coverage_rows
-
     rows = coverage_rows(stats, section)
     if not rows:
         return
@@ -1198,9 +1196,7 @@ def _render_rule_coverage(stats: Dict[str, Any], section: str, log_print: Any) -
             "  ⚠️  Applicable(s) et jamais exercee(s) — la situation s'est presentee et aucun "
             f"controle n'a rien juge : {', '.join(r['id'] for r in _never)}"
         )
-    for _section, _by_rule, _bucket in coverage_gaps(stats):
-        if _section != section:
-            continue
+    for _section, _by_rule, _bucket in coverage_gaps(stats, section):
         log_print(
             f"  ❌ Somme par regle ({_by_rule}) != total de la section ({_bucket}) : un compteur "
             "d'erreur n'est porte par aucune regle du corpus."
