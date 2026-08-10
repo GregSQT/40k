@@ -23,6 +23,7 @@ from typing import Any, Dict, FrozenSet, List, Set, Tuple
 import pytest
 
 from engine.phase_handlers.attack_sequence import build_weapon_attack_profile
+from engine.phase_handlers.shared_utils import RULE_LABEL_RAPID_FIRE
 from engine.utils.weapon_helpers import weapon_rule_signature
 
 
@@ -58,14 +59,28 @@ def test_signature_refuses_a_non_string_entry() -> None:
 # 2. La cle de groupe — reproduite a l'IDENTIQUE du site de production
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _gkey(weapon: Dict[str, Any], *, rapid_fire_applied: int, target_sid: str) -> Tuple:
+def _gkey(
+    weapon: Dict[str, Any],
+    *,
+    rapid_fire_applied: int,
+    target_sid: str,
+    cleave_applied: int = 0,
+) -> Tuple:
     """Miroir exact de `_build_manual_allocation` (shared_utils) pour un profil brut commun.
 
     Les trois Shootas partagent ATK/AP/DMG et visent la meme cible : `bs`, `ap`, `dmg_raw`,
     `dmg_bonus`, `display_wth`, `display_save_th` et `target_sid` sont donc identiques par
     construction. Ce qui reste pour les departager, c'est exactement ce que 04.03 exige.
+
+    Les deux X APPLIQUES ([RAPID FIRE] 24.30, [CLEAVE] 24.06) sont les seules valeurs de la cle
+    qui dependent de la FIGURINE et non de l'arme declaree — d'ou leur presence ici a cote de la
+    signature. `cleave_applied` a un defaut : les armes de TIR de ce fichier ne le portent
+    jamais, et l'ecrire a chaque appel noierait ce qu'ils discriminent vraiment.
     """
-    return (5, 0, 1, 0, 4, 5, weapon_rule_signature(weapon), rapid_fire_applied, target_sid)
+    return (
+        5, 0, 1, 0, 4, 5, weapon_rule_signature(weapon),
+        rapid_fire_applied, cleave_applied, target_sid,
+    )
 
 
 SHOOTA = _weapon("Shoota", ["RAPID_FIRE:1"])
@@ -116,6 +131,24 @@ def test_different_targets_never_share_a_batch() -> None:
     assert _gkey(SHOOTA, rapid_fire_applied=1, target_sid="101") != _gkey(
         SHOOTA, rapid_fire_applied=1, target_sid="102"
     )
+
+
+def test_same_weapon_splits_when_cleave_does_not_apply_to_every_fighter() -> None:
+    """JUMEAU EXACT du cas [RAPID FIRE] ci-dessus, cote MELEE — 24.06.
+
+    « if you only selected one target for ALL of that weapon's attacks » : deux figurines de la
+    MEME escouade avec la MEME arme [CLEAVE] n'y ont pas droit pareil si l'une repartit ses
+    attaques sur deux cibles. La signature declaree est identique, seule la valeur appliquee les
+    separe — et 04.03 exige de les separer (« affected by the same APPLICABLE abilities »).
+
+    Sans ce test, [CLEAVE] pouvait rester hors de la cle sans que rien ne le signale : c'est
+    exactement l'etat du moteur jusqu'au 2026-08-10, ou le X applique de [RAPID FIRE] y etait et
+    celui de [CLEAVE] non.
+    """
+    choppa = _weapon("Big Choppa", ["CLEAVE:1"])
+    mono_cible = _gkey(choppa, rapid_fire_applied=0, cleave_applied=1, target_sid="101")
+    attaques_reparties = _gkey(choppa, rapid_fire_applied=0, cleave_applied=0, target_sid="101")
+    assert mono_cible != attaques_reparties
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -187,14 +220,17 @@ def _rolled(weapon: Dict[str, Any], *, rapid_fire_applied: int, target_sid: str)
         # de [LETHAL HITS], un stub qui rendrait « 4+ » ne serait plus fidele au producteur.
         "display_wth": 4, "display_save_th": 5,
         "weapon_rules": weapon_rule_signature(weapon),
-        "rapid_fire_applied": rapid_fire_applied,
         # Arme + profil de regles gardes par REFERENCE : c est l emission qui en tire le token
         # `[RAPID FIRE:X]`, celui-la meme que le regroupement rendait ambigu avant 04.03.
         "weapon": weapon,
         "attack_profile": build_weapon_attack_profile(weapon, None),
-        # Aucune de ces trois armes ne porte [BLAST] ; [RAPID FIRE] n ajoute des des que si la
-        # cible est a demi-portee, ce que ce stub ne modelise pas -> table vide.
-        "extra_dice_by_rule": {},
+        # Regles additives ayant joue -> leur X declare. Aucune de ces trois armes ne porte
+        # [BLAST] ; [RAPID FIRE] n'y entre que quand la cible est a demi-portee, ce que le
+        # parametre du helper modelise. C'est de LA que la cle de groupe et le step.log lisent
+        # le X applique — il n'y a pas de second champ qui le porterait.
+        "additive_rules_applied": (
+            {RULE_LABEL_RAPID_FIRE: rapid_fire_applied} if rapid_fire_applied else {}
+        ),
         # 10.06 : aucun MONSTER/VEHICLE dans ce scenario.
         "point_blank_malus": False,
         "precision": False, "precision_range": None, "heavy_applied": False,

@@ -7997,20 +7997,28 @@ def _select_allocation_model(
 # explique le seuil, laquelle explique le nombre de des).
 RULE_TOKEN_SEGMENTS: Tuple[str, ...] = ("shots", "hit", "wound", "save", "damage")
 
-# Regles qui AJOUTENT des des au pool d attaques, dans l ordre d affichage sur `Shots:`. Elles
-# partagent une propriete que n a aucune autre regle du log : leur effet se compte PAR FIGURINE
-# (chaque porteuse ajoute les siens), alors que le token vit sur le GROUPE. Elles sont donc les
-# seules a etre accumulees plutot que lues sur un profil constant.
-# Le libelle EST celui du token — c est aussi la cle de `extra_dice_by_rule`, pour qu il n existe
-# pas deux orthographes d une meme regle entre le producteur et l afficheur.
-ADDITIVE_RULE_ORDER: Tuple[str, ...] = ("RAPID FIRE", "BLAST", "CLEAVE")
+#: Libelles de token des regles qui AJOUTENT des des au pool d attaques. Nommes plutot
+#: qu ecrits en litteral parce qu ils sont la CLE de `additive_rules_applied` : ils lient les
+#: producteurs (`_manual_roll_intent` ici, `_manual_roll_fight_intent` en melee) a l afficheur,
+#: et une orthographe qui derive rendrait un token muet sans que rien ne leve.
+RULE_LABEL_RAPID_FIRE: str = "RAPID FIRE"
+RULE_LABEL_BLAST: str = "BLAST"
+RULE_LABEL_CLEAVE: str = "CLEAVE"
+
+#: Ordre d affichage sur `Shots:` des trois regles ci-dessus. Elles partagent une propriete que
+#: n a aucune autre regle du log : leur effet se compte PAR FIGURINE (chaque porteuse ajoute les
+#: siens), alors que le token vit sur le GROUPE. C est pour elles seules que le groupe doit
+#: collecter quelque chose par figurine plutot que lire un profil constant.
+ADDITIVE_RULE_ORDER: Tuple[str, ...] = (
+    RULE_LABEL_RAPID_FIRE, RULE_LABEL_BLAST, RULE_LABEL_CLEAVE,
+)
 
 
 def weapon_rule_log_tokens(
     profile: "WeaponAttackProfile",
     *,
     weapon: Dict[str, Any],
-    extra_dice_by_rule: Mapping[str, int],
+    additive_rules_applied: Mapping[str, int],
     dmg_bonus: int,
     cover: bool,
     heavy_applied: bool,
@@ -8027,19 +8035,20 @@ def weapon_rule_log_tokens(
 
     Appele UNE fois par groupe, a l emission (`_emit_squad_shoot_log`), et non par intent : les
     valeurs dont il depend sont toutes portees par le groupe, ou elles ont deja ete rendues
-    constantes (`gkey`) ou accumulees (`extra_dice_by_rule`).
+    constantes (`gkey`) ou reunies (`additive_rules_applied`).
 
     Regle d emission : un token n apparait que si la regle a EFFECTIVEMENT joue, pas si l arme
-    la declare. D ou les valeurs APPLIQUEES en parametres (`extra_dice_by_rule`, `dmg_bonus`,
+    la declare. D ou les etats APPLIQUES en parametres (`additive_rules_applied`, `dmg_bonus`,
     `heavy_applied`) plutot que les parametres declares : une arme [RAPID FIRE 2] hors
     demi-portee n ajoute rien, elle ne doit rien dire.
 
-    UNE SEULE GRAMMAIRE pour les regles qui grossissent le pool d attaques : `[REGLE:n]` ou `n`
-    est le nombre de DES QUE CETTE REGLE A AJOUTES au `Shots:` auquel le token est accole —
-    jamais le parametre X declare par l arme. Les trois ([RAPID FIRE] 24.30, [BLAST] 24.05,
-    [CLEAVE] 24.06) ajoutent leurs des PAR FIGURINE : `[RAPID FIRE:1]` a cote de `Shots:4` pour
-    deux porteuses etait faux de la meme facon que l etait `[BLAST:1]`, et l etait d autant plus
-    qu il cotoyait un `[BLAST:n]` deja corrige, avec la meme syntaxe et un sens different.
+    UNE SEULE GRAMMAIRE, sans exception : dans `[REGLE:n]`, `n` est TOUJOURS le parametre X que
+    l ARME DECLARE, jamais le nombre de des que la regle a ajoutes. Un shoota [RAPID FIRE 1] tire
+    par 10 figurines a demi-portee ecrit `Shots:30 [RAPID FIRE:1]` — 1, pas 10. C est la valeur
+    que le joueur lit sur sa datasheet, donc la seule qui se recoupe avec la source ; le total,
+    lui, reste deductible du `Shots:` voisin, qui le compte deja. Regle posee le 2026-08-10 :
+    `[RAPID FIRE:10]` en face d une datasheet qui dit 1 se lisait comme un defaut du moteur.
+    `step.log` portait deja le X declare par TIR — les deux logs disent enfin la meme chose.
 
     Deux exceptions ASSUMEES, et pour la meme raison — leur effet n est pas mesurable a
     posteriori sur ce groupe :
@@ -8053,8 +8062,12 @@ def weapon_rule_log_tokens(
     touche/blessure ne sont PAS re-resolues ici, elles sont lues la ou elles ont ete decidees
     (notamment `anti_keyword`, dont le choix d instance releve de 24.02).
 
-    `extra_dice_by_rule` est le total ACCUMULE du groupe par regle additive — la seule donnee du
-    lot qui varie d une figurine a l autre, d ou l accumulation dans `_build_manual_allocation`.
+    `additive_rules_applied` est `libelle de token -> X declare`, constant sur le groupe : les
+    deux X qui dependent de la FIGURINE ([RAPID FIRE] a demi-portee, [CLEAVE] mono-cible) sont
+    dans `gkey`, donc deux figurines qui en different ne sont jamais dans le meme groupe — c est
+    ce qu exige 04.03 (« affected by the same applicable abilities and rules »). Il est POSE PAR
+    LE PRODUCTEUR, qui a deja le X en main : le relire ici sur `weapon` creerait une seconde
+    derivation du meme fait, a reconcilier au premier desaccord.
     """
     # Import local : `attack_sequence` n a aucun cycle avec ce module, mais il n est charge que
     # par les chemins d attaque — l importer au niveau module le mettrait sur le chemin de tous
@@ -8064,9 +8077,8 @@ def weapon_rule_log_tokens(
     tokens: Dict[str, List[str]] = {segment: [] for segment in RULE_TOKEN_SEGMENTS}
 
     for rule_label in ADDITIVE_RULE_ORDER:
-        added = int(extra_dice_by_rule.get(rule_label, 0))  # get allowed : regle non declaree
-        if added > 0:
-            tokens["shots"].append(f"[{rule_label}:{added}]")
+        if rule_label in additive_rules_applied:
+            tokens["shots"].append(f"[{rule_label}:{additive_rules_applied[rule_label]}]")
     if weapon_has_rule(weapon, "EXTRA_ATTACKS"):
         tokens["shots"].append("[EXTRA ATTACKS]")
 
@@ -8190,7 +8202,7 @@ def _emit_squad_shoot_log(game_state: Dict[str, Any], g: Dict[str, Any], ctx: Ma
     _rule_tokens = weapon_rule_log_tokens(
         require_key(g, "attack_profile"),
         weapon=require_key(g, "weapon"),
-        extra_dice_by_rule=require_key(g, "extra_dice_by_rule"),
+        additive_rules_applied=require_key(g, "additive_rules_applied"),
         dmg_bonus=int(require_key(g, "dmg_bonus")),
         cover=_cover,
         heavy_applied=bool(require_key(g, "heavy_applied")),
@@ -8268,7 +8280,12 @@ def _emit_squad_shoot_log(game_state: Dict[str, Any], g: Dict[str, Any], ctx: Ma
         "bsBase": g["bs_base"] if "bs_base" in g else None,
         "heavyApplied": bool(g["heavy_applied"]),
         "cover": bool(g["cover"]) if "cover" in g else False,
-        "rapidFireApplied": int(g["rapid_fire_applied"]) if "rapid_fire_applied" in g else 0,
+        # [RAPID FIRE] 24.30 : X APPLIQUE, lu dans `additive_rules_applied` — le seul porteur du
+        # fait (cf. `gkey`). L'absence de cle vaut 0, comme pour les deux autres regles
+        # additives : la melee n'ecrit jamais cette entree, [RAPID FIRE] n'y existe pas.
+        "rapidFireApplied": int(
+            require_key(g, "additive_rules_applied").get(RULE_LABEL_RAPID_FIRE, 0)
+        ),
         "shootDetails": [{"shotNumber": i + 1, **s} for i, s in enumerate(g["shots"])],
     })
 
@@ -8494,7 +8511,10 @@ def unit_can_reroll_charge(game_state: Dict[str, Any], unit_id: str) -> bool:
     """L unite porte-t-elle `reroll_charge` (config/unit_rules.json) ?
 
     « When this unit makes a charge, it can reroll the charge roll. » Regle d UNITE (pas
-    d arme), portee par les leaders Orks (Unstoppable Valour) et par 5 characters SM.
+    d arme). Le chantier 05 l a purgee de TOUS les rosters : « Unstoppable Valour » etait un
+    placeholder INVENTE, absent des 17 datasheets Armageddon. Plus aucune datasheet du jeu ne
+    l accorde aujourd hui — ce qui ne rend pas ce code mort : de vraies datasheets 40K portent
+    cette relance, et celle qui entrera au roster la declarera.
 
     Sur une unite ATTACHEE, la regle du leader vaut pour toute l unite (19.04, implemente le
     2026-07-27, cf. V11_agent_rework.md §9.2.8) : `_unit_has_rule_effect` lit les UNIT_RULES de
@@ -8648,8 +8668,9 @@ def _manual_roll_intent(
     _blast_extra_dice = 0
     if _blast_x is not None:
         tgt_size = int(intent.get("target_squad_size_at_declaration", 0))  # get allowed
-        # Des REELLEMENT ajoutes (0 sur une cible de moins de 5 figurines) : c est ce nombre,
-        # et non le X declare, que le log affiche.
+        # Des REELLEMENT ajoutes : 0 sur une cible de moins de 5 figurines, donc c est ce nombre
+        # qui decide si la regle a JOUE — et donc si son token s affiche. La VALEUR du token, elle,
+        # est le X declare (`_blast_x`), cf. `weapon_rule_log_tokens`.
         _blast_extra_dice = _blast_x * (tgt_size // 5)
         n_attacks += _blast_extra_dice
     # RAPID_FIRE X (config/weapon_rules.json ; PDF 24.30) : « Increase this weapon's Attacks
@@ -8845,13 +8866,12 @@ def _manual_roll_intent(
         # de l arme, avec la meme primitive que le gate de tir. RNG n est exige que si l arme
         # porte la regle (seul cas ou la valeur est lue).
         "heavy_applied": _heavy_applied,
-        "rapid_fire_applied": _rapid_fire_applied,
         # 04.03 IDENTICAL ATTACKS, seconde moitie de la definition : « affected by the same
         # applicable abilities and rules ». Entre dans la cle de groupe.
         "weapon_rules": weapon_rule_signature(weapon),
         # Tokens de regles d arme de la ligne de log. Constants sur le groupe par CONSTRUCTION :
-        # chacune de leurs sources est dans `gkey` (signature de regles, `dmg_bonus`,
-        # `rapid_fire_applied`, cible — donc la taille declaree qui pilote [BLAST] et les
+        # chacune de leurs sources est dans `gkey` (signature de regles, `dmg_bonus`, le X
+        # applique de [RAPID FIRE], cible — donc la taille declaree qui pilote [BLAST] et les
         # keywords qui pilotent [ANTI]) ou dans `bs` (couvert, qui conditionne [PSYCHIC]).
         # Arme et regles resolues vs CETTE cible : le groupe les garde par REFERENCE et le log
         # en tire ses tokens a l emission (`weapon_rule_log_tokens`), une fois pour le groupe.
@@ -8861,13 +8881,18 @@ def _manual_roll_intent(
         # JAMAIS lu — il ne restait donc plus qu un seul modificateur du seuil affiche sans
         # cause visible, alors que [HEAVY] et [COVER] avaient la leur.
         "point_blank_malus": _cq_malus_applied,
-        # Des ajoutes par CETTE figurine, par regle : [BLAST] 24.05 (une tranche de 5 par
-        # porteuse) et [RAPID FIRE] 24.30 (X par porteuse a demi-portee). Accumules sur le
-        # groupe a l etage au-dessus — c est le total qui s affiche a cote de `Shots:`.
-        "extra_dice_by_rule": {
-            label: count
-            for label, count in (("BLAST", _blast_extra_dice), ("RAPID FIRE", _rapid_fire_applied))
-            if count > 0
+        # Regles additives ayant JOUE pour CETTE figurine, et leur X DECLARE : [BLAST] 24.05 (une
+        # tranche de 5 par porteuse) et [RAPID FIRE] 24.30 (X par porteuse a demi-portee). C est
+        # ce X que le token affiche (cf. `weapon_rule_log_tokens`) ; le nombre de des ajoutes,
+        # lui, est deja compte dans `attacks`. Les deux X sont deja resolus ici — les transporter
+        # evite a l afficheur de les re-deriver de son cote.
+        "additive_rules_applied": {
+            label: x
+            for label, x, applied in (
+                (RULE_LABEL_BLAST, _blast_x, _blast_extra_dice),
+                (RULE_LABEL_RAPID_FIRE, _rf_x, _rapid_fire_applied),
+            )
+            if applied > 0 and x is not None
         },
         "precision": _weapon_precision,
         "precision_range": int(require_key(weapon, "RNG")) if _weapon_precision else None,
@@ -9400,16 +9425,29 @@ def _build_manual_allocation(
         # RNG et NB n'entrent PAS dans la cle : 04.03 ne les compte pas parmi les
         # caracteristiques d'identite.
         #
-        # `rapid_fire_applied` y entre EN PLUS de la signature declaree, parce que 04.03 dit
-        # « APPLICABLE abilities and rules » : deux figurines de la meme escouade portant la
-        # MEME arme [RAPID FIRE] n'y sont pas soumises pareil si l'une est a demi-portee et
-        # l'autre non (24.30). La signature declaree ne les separe pas ; la valeur appliquee si.
-        # C'est aussi ce qui rend `rapid_fire_applied` reellement constant sur le groupe — donc
-        # le token `[RAPID FIRE:X]` du log non ambigu. Les autres regles conditionnelles sont
-        # deja representees : [HEAVY] et [COVER] par `bs`, [MELTA] par `dmg_bonus`.
+        # Les X APPLIQUES des regles additives y entrent EN PLUS de la signature declaree, parce
+        # que 04.03 dit « APPLICABLE abilities and rules » : deux figurines de la meme escouade
+        # portant la MEME arme n'y sont pas forcement soumises pareil. La signature declaree ne
+        # les separe pas ; la valeur appliquee si. Deux cas, et ce sont les deux seuls :
+        #   - [RAPID FIRE] 24.30 : « within half range » — l'une est a demi-portee, l'autre non ;
+        #   - [CLEAVE] 24.06 : « if you only selected one target for ALL of that weapon's
+        #     attacks » — l'une repartit ses attaques sur deux cibles, l'autre non.
+        # [BLAST] 24.05 n'a pas besoin d'y figurer : son X ne depend que de la taille DECLAREE de
+        # la cible, et `target_sid` est deja dans la cle.
+        # Les autres regles conditionnelles sont deja representees : [HEAVY] et [COVER] par `bs`,
+        # [MELTA] par `dmg_bonus`.
+        #
+        # C'est aussi ce qui rend ces X reellement constants sur le groupe — donc les tokens
+        # `[REGLE:X]` du log non ambigus, et le dict de groupe posable a la creation plutot
+        # qu'accumule. Lus dans `additive_rules_applied`, seul porteur du fait « cette regle
+        # additive a joue, avec ce X » : un seul champ, trois lecteurs (cette cle, les tokens, et
+        # `rapidFireApplied` du step.log). L'absence de cle vaut 0, et `require_key` garantit
+        # qu'un producteur muet leve au lieu de valoir 0.
+        _additive = require_key(r, "additive_rules_applied")
         gkey = (r["bs"], r["ap"], r["dmg_raw"], require_key(r, "dmg_bonus"),
                 r["display_wth"], r["display_save_th"], require_key(r, "weapon_rules"),
-                int(require_key(r, "rapid_fire_applied")),
+                int(_additive.get(RULE_LABEL_RAPID_FIRE, 0)),
+                int(_additive.get(RULE_LABEL_CLEAVE, 0)),
                 target_sid)
         if gkey not in group_index_by_key:
             group_index_by_key[gkey] = len(weapon_groups)
@@ -9441,12 +9479,6 @@ def _build_manual_allocation(
                 # (constante sur toute l activation), donc jamais ambigue au sein d un groupe ;
                 # `bs` est de toute facon deja dans la cle de groupe.
                 "heavy_applied": bool(r["heavy_applied"]) if "heavy_applied" in r else False,
-                # [RAPID FIRE] 24.30 : la valeur APPLIQUEE fait partie de la cle de groupe
-                # (cf. `gkey`), elle est donc constante sur le groupe par construction. Ce
-                # n'etait PAS le cas avant : la cle ignorait les regles d'arme, trois armes de
-                # regles differentes y tombaient ensemble et le groupe ne retenait que la valeur
-                # de la PREMIERE. Absente en melee.
-                "rapid_fire_applied": int(require_key(r, "rapid_fire_applied")),
                 # Arme + regles resolues vs la cible, gardees par REFERENCE : le log construit
                 # ses tokens a l emission (`weapon_rule_log_tokens`), une fois par groupe. Les
                 # deux sont constants sur le groupe — la signature de regles et la cible sont
@@ -9457,9 +9489,12 @@ def _build_manual_allocation(
                 # toutes deux figees pour l activation — constante sur le groupe comme `bs`,
                 # dont elle explique justement une part.
                 "point_blank_malus": bool(require_key(r, "point_blank_malus")),
-                # Des additionnels par regle ([RAPID FIRE]/[BLAST]/[CLEAVE]) : la SEULE donnee du
-                # lot qui varie par figurine — elle s accumule donc plus bas, comme `attacks`.
-                "extra_dice_by_rule": {},
+                # Regles additives ayant joue ([RAPID FIRE]/[BLAST]/[CLEAVE]) -> leur X declare.
+                # Constant sur le groupe par CONSTRUCTION comme tous ses voisins : les deux X qui
+                # dependent de la figurine sont dans `gkey`, celui de [BLAST] ne depend que de la
+                # cible, elle aussi dans `gkey`. Copie et non reference : le dict de l'intent ne
+                # doit pas devenir mutable a travers le groupe.
+                "additive_rules_applied": dict(_additive),
                 "precision": require_key(r, "precision"),
                 "precision_range": require_key(r, "precision_range"),
                 # [PRECISION] 24.28 : l arme la DECLARE (`precision`) ; savoir si elle a JOUE
@@ -9498,13 +9533,6 @@ def _build_manual_allocation(
             g["weapon_names"].append(weapon_name)
             g["weapon_name"] = " / ".join(g["weapon_names"])
         g["attacks"] += counts["attacks"]
-        # Des additionnels : accumules PAR REGLE, exactement comme `attacks` dont ils sont une
-        # part. Un compteur par regle et non un total unique — sans quoi deux regles additives
-        # sur la meme arme ([RAPID FIRE] + [BLAST]) se confondraient en un seul nombre.
-        for _rule_label, _added in require_key(r, "extra_dice_by_rule").items():
-            g["extra_dice_by_rule"][_rule_label] = (
-                g["extra_dice_by_rule"].get(_rule_label, 0) + int(_added)  # get allowed
-            )
         g["shots"].extend(r["shot_records"])
         if attacker_mid not in g["shooter_mids"]:
             g["shooter_mids"].append(attacker_mid)

@@ -179,17 +179,32 @@ def test_rapid_fire_dans_demi_portee_est_nomme_sur_les_des(monkeypatch):
     assert msg.index("[RAPID FIRE:1]") < msg.index("Hit:")
 
 
-def test_rapid_fire_additionne_les_des_de_TOUTES_les_porteuses(monkeypatch):
-    """JUMEAU du test [BLAST] ci-dessous, et meme piege : [RAPID FIRE X] ajoute X des PAR
-    FIGURINE a demi-portee, mais le token vit sur le GROUPE.
+def test_rapid_fire_affiche_le_X_declare_pas_les_des_ajoutes(monkeypatch):
+    """[RAPID FIRE] porte le X de la DATASHEET, quel que soit le nombre de porteuses.
 
-    Deux porteuses de [RAPID FIRE:1] -> 2 des ajoutes, donc `Shots:4` et `[RAPID FIRE:2]`.
-    Afficher le PARAMETRE X (1) a cote d un `Shots:` d escouade etait faux, et l etait d autant
-    plus qu un `[BLAST:n]` voisin, de MEME syntaxe, comptait deja des des."""
+    Deux porteuses de [RAPID FIRE:1] a demi-portee ajoutent bien 2 des (`Shots:4`), mais le
+    token dit `1` — la valeur que le joueur lit sur son profil d arme. Regle UNIFORME depuis le
+    2026-08-10 : [BLAST] et [CLEAVE] suivent la meme (cf. leurs jumeaux ci-dessous).
+
+    Verrou de non-regression : `2` etait l ancienne valeur, elle ne doit plus apparaitre.
+    """
     msg, _ = _resolve(
         monkeypatch, ["RAPID_FIRE:1"], rolls=[4, 5, 1] * 4, target_row=1, carriers=2
     )
     assert "Shots:4" in msg, msg
+    assert "[RAPID FIRE:1]" in msg, msg
+    assert "[RAPID FIRE:2]" not in msg, msg
+
+
+def test_rapid_fire_porte_un_X_superieur_a_un(monkeypatch):
+    """Discrimination : le token suit le PARAMETRE, il ne dit pas `1` par accident.
+
+    Une seule porteuse de [RAPID FIRE:2] ajoute 2 des — meme total que le cas precedent, mais
+    un token different. Sans ce cas, un token cable en dur sur `1` passerait le test ci-dessus.
+    """
+    msg, _ = _resolve(
+        monkeypatch, ["RAPID_FIRE:2"], rolls=[4, 5, 1] * 4, target_row=1
+    )
     assert "[RAPID FIRE:2]" in msg, msg
 
 
@@ -198,13 +213,24 @@ def test_rapid_fire_hors_demi_portee_ne_dit_rien(monkeypatch):
     assert "RAPID FIRE" not in msg
 
 
-def test_blast_nomme_les_des_reellement_ajoutes(monkeypatch):
-    """[BLAST] 24.05 : 1 de par tranche de 5 figurines DECLAREES. Le token porte le nombre de
-    des ajoutes (1), pas le X de la regle."""
+def test_blast_nu_affiche_le_defaut_de_la_regle(monkeypatch):
+    """[BLAST] 24.05 sous sa forme NUE vaut « 1 de par tranche de 5 » : le token dit donc `1`.
+
+    Ce `1` est le PARAMETRE par defaut de la regle (valeur metier du PDF), pas un compte de des
+    — le test suivant le prouve en changeant le nombre de porteuses sans changer le token.
+    """
     msg, _ = _resolve(
         monkeypatch, ["BLAST"], rolls=[4, 5, 1, 4, 5, 1], declared_target_size=5
     )
     assert "[BLAST:1]" in msg
+
+
+def test_blast_parametre_affiche_son_X(monkeypatch):
+    """Discrimination : la forme [BLAST 2] dit `2`, le token suit bien le parametre declare."""
+    msg, _ = _resolve(
+        monkeypatch, ["BLAST:2"], rolls=[4, 5, 1] * 4, declared_target_size=5
+    )
+    assert "[BLAST:2]" in msg, msg
 
 
 def test_blast_sous_cinq_figurines_ne_dit_rien(monkeypatch):
@@ -212,18 +238,18 @@ def test_blast_sous_cinq_figurines_ne_dit_rien(monkeypatch):
     assert "BLAST" not in msg
 
 
-def test_blast_additionne_les_des_de_TOUTES_les_porteuses(monkeypatch):
-    """[BLAST] ajoute des des PAR FIGURINE qui tire (chacune gagne sa tranche de 5), alors que
-    le token vit sur le GROUPE (04.03), qui agrege les deux porteuses.
+def test_blast_ne_compte_pas_les_porteuses(monkeypatch):
+    """JUMEAU du cas [RAPID FIRE] : le token ne bouge pas quand le nombre de porteuses change.
 
-    Deux porteuses, cible declaree a 5 -> 1 de chacune, donc `Shots:4` et `[BLAST:2]`. Le token
-    doit compter la meme chose que le `Shots:` auquel il est accole ; afficher le compte d UNE
-    figurine ferait dire au log que 1 de a ete ajoute la ou il y en a 2."""
+    Deux porteuses, cible declaree a 5 -> 1 de chacune, donc `Shots:4`. Le token reste `[BLAST:1]`,
+    le parametre de la regle. `2` etait l ancienne valeur (le cumul des des ajoutes), elle ne doit
+    plus apparaitre : c est ce qui rendait le log incoherent avec la datasheet."""
     msg, _ = _resolve(
         monkeypatch, ["BLAST"], rolls=[4, 5, 1] * 4, declared_target_size=5, carriers=2
     )
     assert "Shots:4" in msg, msg
-    assert "[BLAST:2]" in msg, msg
+    assert "[BLAST:1]" in msg, msg
+    assert "[BLAST:2]" not in msg, msg
 
 
 def test_anti_nomme_le_keyword_qui_s_applique(monkeypatch):
@@ -409,8 +435,9 @@ def test_melee_nomme_les_memes_regles(monkeypatch):
     assert shots[0]["lethalHit"] is True
 
 
-def test_melee_cleave_nomme_les_des_ajoutes(monkeypatch):
-    """[CLEAVE] 24.06 est le jumeau melee de [BLAST] : meme comptage par tranche de 5."""
+def test_melee_cleave_affiche_son_X_declare(monkeypatch):
+    """[CLEAVE] 24.06 est le jumeau melee de [BLAST] : meme comptage par tranche de 5, et meme
+    token — le X que l arme declare."""
     msg, _ = _resolve(
         monkeypatch, ["CLEAVE:2"], rolls=[4, 5, 1, 4, 5, 1, 4, 5, 1],
         melee=True, declared_target_size=5,
@@ -418,15 +445,22 @@ def test_melee_cleave_nomme_les_des_ajoutes(monkeypatch):
     assert "[CLEAVE:2]" in msg
 
 
-def test_melee_cleave_ne_compte_que_les_figurines_qui_y_ont_droit(monkeypatch):
-    """[CLEAVE] 24.06 exige que TOUTES les attaques de l arme visent UNE seule unite — la
-    clause se juge PAR FIGURINE. Deux porteuses de la meme arme : la premiere repartit ses
-    attaques sur '2' et '3' (elle n y a pas droit), la seconde ne vise que '2' (elle y a droit).
-    Le groupe de la cible '2' contient les deux, et son token doit compter le seul de de la
-    SECONDE — celle qui n a pas cree le groupe.
+def test_melee_cleave_separe_les_figurines_qui_y_ont_droit(monkeypatch):
+    """04.03 IDENTICAL ATTACKS : [CLEAVE] qui joue pour une figurine et pas l autre SEPARE les
+    lots. Les deux porteuses portent la MEME arme, mais 24.06 accorde ses des « if you only
+    selected one target for ALL of that weapon's attacks » — la premiere repartit ses attaques
+    sur '2' et '3' (pas de [CLEAVE]), la seconde ne vise que '2' (elle l a). Leurs attaques ne
+    sont donc pas « affected by the same applicable abilities and rules » : les reunir dans un
+    gather unique serait une faute de regle, et le `Shots:12` d un lot melange ne dirait a
+    personne laquelle des deux a beneficie de quoi.
 
-    Avant la correction, le groupe recopiait les tokens du PREMIER intent : selon l ordre de
-    declaration, le log affichait un token faux ou n en affichait aucun."""
+    Deux lots attendus sur la cible '2' :
+      - 1 attaque, aucun token (la porteuse qui a reparti) ;
+      - 1 attaque + 1 de [CLEAVE] (5 figurines declarees -> une tranche), token `[CLEAVE:1]`.
+
+    JUMEAU du X applique de [RAPID FIRE], deja dans `gkey` pour exactement la meme raison
+    (24.30, « within half range »). C est la symetrie que ce test verrouille : les deux seules
+    regles additives dont l application depend de la FIGURINE separent les lots."""
     _seq(monkeypatch, [4, 5, 1] * 4)
     gs = _game_state(
         ["CLEAVE:1"], melee=True, declared_target_size=5, carriers=2,
@@ -436,11 +470,16 @@ def test_melee_cleave_ne_compte_que_les_figurines_qui_y_ont_droit(monkeypatch):
     build_manual_fight_allocation(gs, "1")
 
     logs = [e for e in gs["action_logs"] if "shootDetails" in e and e["targetId"] == "2"]
-    assert len(logs) == 1, [e["message"] for e in gs["action_logs"]]
-    msg = logs[0]["message"]
-    # 1 attaque par figurine (2) + 1 de [CLEAVE] pour la seule figurine mono-cible.
-    assert "Shots:3" in msg, msg
-    assert "[CLEAVE:1]" in msg, msg
+    assert len(logs) == 2, [e["message"] for e in gs["action_logs"]]
+    messages = [e["message"] for e in logs]
+
+    avec = [m for m in messages if "[CLEAVE:1]" in m]
+    sans = [m for m in messages if "CLEAVE" not in m]
+    assert len(avec) == 1 and len(sans) == 1, messages
+    # La porteuse mono-cible : son attaque + le de de [CLEAVE].
+    assert "Shots:2" in avec[0], avec[0]
+    # Celle qui a reparti ses attaques : la sienne, et rien de plus.
+    assert "Shots:1" in sans[0], sans[0]
 
 
 def test_melee_ne_parle_jamais_de_rapid_fire_ni_de_melta(monkeypatch):
