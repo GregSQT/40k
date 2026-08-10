@@ -82,7 +82,8 @@ COUNTERS = {
         ('fight_dead_unit_attacker',),
         ('fight_dead_unit_target',),
         ('dead_unit_waiting',),
-        ('dead_unit_skipping',),
+        # `dead_unit_skipping` a quitté cette liste avec le compteur lui-même le 2026-08-10
+        # (vert vacant V3) : aucune ligne `SKIP` n'existe dans un step.log.
         ('unit_revived',),
     ],
 }

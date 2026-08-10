@@ -8,7 +8,7 @@ an AnalyzerConfig that handlers can use as a read-only context.
 import os
 import sys
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if project_root not in sys.path:
@@ -31,6 +31,12 @@ _run_inches_to_subhex: Optional[int] = None
 # l'analyse rend des verdicts faux en silence. Même emplacement, pour la même raison (module
 # chargé en un seul exemplaire).
 _run_rules: Optional[Dict[str, str]] = None
+
+# Dimensions du plateau du run ANALYSÉ, lues dans la même entête `Board:` que l'échelle. Même
+# emplacement et même raison : le BFS de mouvement doit refuser un pas HORS PLATEAU (03.01,
+# « it cannot be moved off the battlefield »), et le seul plateau qui fasse foi est celui du
+# journal relu, pas celui du `config/board/*.json` du jour.
+_run_board_dims: Optional[Tuple[int, int]] = None
 
 
 def set_run_rules(rules: Dict[str, str]) -> None:
@@ -74,6 +80,27 @@ def get_run_inches_to_subhex() -> int:
             "l'entête `Board:` du step.log avant tout contrôle géométrique."
         )
     return _run_inches_to_subhex
+
+
+def set_run_board_dims(cols: int, rows: int) -> None:
+    """Fixe les dimensions du plateau du run pour toute la passe d'analyse."""
+    global _run_board_dims
+    for name, value in (("cols", cols), ("rows", rows)):
+        if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+            raise ValueError(f"Board {name} invalide: {value!r}")
+    _run_board_dims = (cols, rows)
+
+
+def get_run_board_dims() -> Tuple[int, int]:
+    """`(cols, rows)` du plateau du run. Lève si l'entête n'a pas été lue : un BFS qui ignore le
+    bord accepte un chemin sortant du plateau (03.01), et prendre les dimensions du config
+    courant relirait un vieux journal sur un autre plateau."""
+    if _run_board_dims is None:
+        raise RuntimeError(
+            "Dimensions du plateau non fixées : set_run_board_dims() doit être appelé depuis "
+            "l'entête `Board:` du step.log avant tout contrôle de chemin."
+        )
+    return _run_board_dims
 
 
 def _numeric(value: Any) -> Optional[int]:

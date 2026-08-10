@@ -8,13 +8,12 @@ from functools import lru_cache
 from typing import Dict, Optional
 
 from shared.data_validation import require_key, require_present
-from engine.combat_utils import calculate_hex_distance
 
 from ai.analyzer_perfig import MODEL_TOKEN_PATTERN
 from ai.analyzer_state import AnalyzerState
 from ai.analyzer_config import AnalyzerConfig
 from ai.analyzer_phases.episode_handler import handle_episode_start
-from ai.analyzer_phases.shoot_handler import handle_shoot, handle_wait, handle_skip, handle_advance
+from ai.analyzer_phases.shoot_handler import handle_shoot, handle_wait, handle_advance
 from ai.analyzer_phases.charge_handler import handle_charge
 from ai.analyzer_phases.move_handler import handle_move_or_fled
 from ai.analyzer_phases.fight_handler import handle_fight, handle_fight_move
@@ -1206,13 +1205,20 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         'episode': state.current_episode_num
                     })
 
-                    reactive_abnormal = False
-                    if phase not in ("MOVE", "SHOOT"):
-                        reactive_abnormal = True
-                    if roll_value is not None:
-                        reactive_dist = calculate_hex_distance(from_col, from_row, to_col, to_row)
-                        if reactive_dist > roll_value * _get_inches_to_subhex_for_analyzer():
-                            reactive_abnormal = True
+                    # Ce compteur ne pose plus qu'UNE question : le move réactif a-t-il eu lieu
+                    # dans une phase où il n'a rien à faire ?
+                    #
+                    # Il en posait une seconde — « la distance dépasse-t-elle le D6 ? » — mesurée
+                    # d'ANCRE à ANCRE, à vol d'oiseau, sans murs ni figurines. Or son jumeau
+                    # immédiat (`distance_over_roll`, 40 lignes plus bas) pose exactement la même
+                    # question par le contrôle mutualisé `_per_model_move_violation` : par
+                    # figurine, chemin réel, budget converti. Deux mesures contradictoires de la
+                    # même grandeur sur la même ligne, et toutes deux dans le total §1.1 : une
+                    # reformation d'ancre suffisait à n'en déclencher qu'une, un vrai dépassement
+                    # en déclenchait DEUX — le rapport comptait alors 2 fautes pour 1. La mesure
+                    # d'ancre disparaît, la mesure par socle reste : c'est la même correction que
+                    # le plafond de tir (V14), et par le même moyen — mutualiser, pas recopier.
+                    reactive_abnormal = phase not in ("MOVE", "SHOOT")
 
                     if reactive_abnormal:
                         reactive_stats[reactive_player]['abnormal'] += 1
@@ -1352,8 +1358,26 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         if handle_wait(state, config, line, action_desc, action_unit_id, player, turn, phase):
                             continue
                 elif " SKIP" in action_desc:
-                        action_type = 'skip'
-                        handle_skip(state, line, action_desc, player, turn, phase)
+                        # Le moteur ne journalise AUCUN `SKIP` : `_STEP_LOG_TYPE_MAP`
+                        # (`w40k_core.py`) est une liste blanche et n'y porte pas `skip` — « type
+                        # sans formateur -> volontairement non journalisé ». Tout ce qui pendait
+                        # à cette branche était donc inatteignable, `dead_unit_skipping` compris,
+                        # et son 0 perpétuel comptait pour un ✅ (vert vacant V3, 2026-08-10).
+                        #
+                        # La branche SURVIT, mais pour DIRE que le contrat a changé au lieu de
+                        # laisser la ligne tomber en silence dans `other` : le jour où le moteur
+                        # journalisera les skips, cette ligne apparaîtra en §2.7 et il faudra
+                        # ré-écrire les contrôles, pas les deviner.
+                        action_type = 'other'
+                        stats['parse_errors'].append({
+                            'episode': state.current_episode_num,
+                            'turn': turn,
+                            'phase': phase,
+                            'line': line.strip(),
+                            'error': "ligne SKIP inattendue : le moteur ne journalise pas ce "
+                                     "type d'action (_STEP_LOG_TYPE_MAP). Les contrôles de skip "
+                                     "ont été supprimés le 2026-08-10 comme inatteignables."
+                        })
                 # Le token optionnel `[FLY]` (21.03) s'insère entre le verbe et `from` sur les
                 # trois types de move. Un aiguillage sur la chaîne littérale `"<VERBE> from"`
                 # laissait ces lignes SANS branche : l'action n'était pas traitée, la position

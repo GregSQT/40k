@@ -154,6 +154,8 @@ def test_adjacency_and_position_cache_helpers() -> None:
     from ai.analyzer_config import set_run_rules
 
     an.set_analyzer_board_scale(1)
+    # Bord du plateau (03.01) : le BFS de chemin le lit comme il lit l'échelle, et lève sans lui.
+    an.set_analyzer_board_dims(44, 60)
     set_run_rules({
         "engagement_zone_subhex": "2",
         "metric.engagement": "hex",
