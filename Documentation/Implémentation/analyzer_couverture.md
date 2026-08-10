@@ -82,8 +82,9 @@
 |---|---|
 | `Documentation/40k_rules/*.pdf` (25 fichiers, texte intégral extrait) | 156 règles numérotées `NN.MM` |
 | `config/weapon_rules.json` | 23 règles d'armes |
+| `config/rules_corpus.json` | 6 règles de §1.1 décrites en DONNÉE (applicabilité, contrôles, vérifiabilité) — lu par `ai/analyzer_rules.py` |
 | `config/unit_rules.json` | 35 règles spéciales d'unité |
-| `ai/analyzer.py` (3690 l.) + `analyzer_core.py` (1422) + `analyzer_config.py` (448) + `analyzer_perfig.py` (412) + `analyzer_state.py` (195) + `analyzer_wound.py` (251) + `analyzer_hit.py` (108) + `analyzer_phases/*` (2991) — **9686 l. au total, 7 fichiers + 5 handlers** | 69 contrôles vivants, 3 morts, 5 supprimés documentés |
+| `ai/analyzer.py` + `analyzer_core.py` + `analyzer_config.py` + `analyzer_perfig.py` + `analyzer_state.py` + `analyzer_wound.py` + `analyzer_hit.py` + **`analyzer_rules.py`** + `analyzer_phases/*` — **10 298 l. au total, 8 fichiers + 5 handlers** (mesuré le 2026-08-10) | 71 contrôles vivants, 1 mort, 7 supprimés documentés |
 | `ai/step_logger.py` (1186 l.), `engine/w40k_core.py` (`_STEP_LOG_TYPE_MAP`, `_build_step_log_details`, `_build_shot_details`, `_models_segment_for_unit`, `_run_rules_for_step_log`, `_log_effects_snapshot_if_changed`), `engine/action_log_utils.py` | format réel de `step.log`, champ par champ, type d'action par type d'action |
 
 ### Légende des STATUTS
@@ -237,7 +238,7 @@ prises aux constantes du moteur — le journal dit ce qui a été appliqué, il 
 
 ---
 
-## 2. Inventaire des contrôles analyzer (69 vivants)
+## 2. Inventaire des contrôles analyzer (71 vivants)
 
 > **Numéros de ligne re-dérivés par grep le 2026-08-10.** Aucun n'a été recopié de la version
 > précédente : les fichiers ont bougé de plusieurs centaines de lignes, et un numéro faux dans un
@@ -259,6 +260,14 @@ prises aux constantes du moteur — le journal dit ce qui a été appliqué, il 
 | 65 | `move_distance_over_limit['flee']` | `move_handler.py:206` (bloc `_check_fall_back_move`, `:81`) | **09.07 « MAXIMUM DISTANCE: your unit's M »** — BFS par socle, budget `M` (−2" si `[FLY]`), figurines ennemies TRAVERSABLES (cf. ci-dessous) |
 | 66 | `flee_from_unengaged` | `move_handler.py:156` | **09.07 « ELIGIBLE IF: your unit is engaged »** — engagement per-fig aux socles de DÉPART. Négatif exact de #3 : l'un punit le move normal parti engagé, l'autre le fall-back parti libre |
 | 67 | `flee_still_engaged` | `move_handler.py:177` | **09.07 « AFTER MOVING: your unit must be unengaged »** — engagement per-fig aux socles et hauteurs d'ARRIVÉE |
+| **68** | `squad_coherency_violations` | `analyzer_core._check_line_coherency` | **03.03** — cohérence à la mise en place et à la fin de TOUT déplacement, une faute par formation. Mesure par socle (empreinte à empreinte) ; VERDICT délégué à `_coherency_verdict` du moteur, la 1re puce étant une CONNEXITÉ et non « au moins un voisin ». Seuils lus dans l'entête `Run rules:` (`cohesion.*`). Volet vertical et purge de fin de tour NON couverts |
+| **69** | `fight_double_pile_in` | `analyzer_core` (bloc `PILED IN`) | **12.02** — un seul pile-in par unité et par étape. Ensemble SÉPARÉ de celui de la double-activation §1.6, dont le marqueur est `CONSOLIDATED` : pile-in et consolidation sont deux étapes distinctes qu'une unité fait légalement toutes les deux |
+
+**Compteurs d'EXERCICE (2026-08-10).** Les contrôles de §1.1 alimentent en plus `rule_usage`
+(`ai/analyzer_rules.py`), qui compte les OCCASIONS JUGÉES par règle — pas les lignes vues. C'est
+ce qui distingue « le contrôle n'a rien trouvé » de « le contrôle n'a rien regardé », et ce qui
+permet le verdict `JAMAIS EXERCÉE`. Ces compteurs ne sont PAS des contrôles : ils ne rendent aucun
+verdict de conformité et n'entrent dans aucun total d'erreurs.
 
 **Vert vacant V10 fermé le 2026-08-10.** Le fall-back était le SEUL des six déplacements sans
 aucun contrôle de budget ni de chemin : `_handle_fled` ne regardait que la collision d'ancre et
@@ -957,14 +966,14 @@ Par famille :
 
 | | Nombre |
 |---|---|
-| Contrôles de conformité vivants | 69 (59 + les 3 de §2.8 + les 2 de §1.9 + les 3 de 09.07 + les 2 de §1.10) |
-| dont morts / inatteignables | 3 (V1, V2, V3) |
+| Contrôles de conformité vivants | **71** (69 + `squad_coherency_violations` 03.03 + `fight_double_pile_in` 12.02, livrés le 2026-08-10) |
+| dont morts / inatteignables | **1** (V1 `damage_exceeds_hp`) — V2 et V3 ont été SUPPRIMÉS le 2026-08-10, pas réparés : ni l'un ni l'autre ne pouvait avoir de producteur |
 | Sommes d'erreurs dupliquées | 0 — un seul `error_totals` (`analyzer.py:1067`) depuis V16 |
 | Clés de `stats` créées à la volée | 0 depuis V17 — toutes déclarées dans la structure |
 | Lignes ❌ du SUMMARY absentes du total | 0 — `error_totals['total']` est la somme de tous les buckets |
-| dont mesurant la mauvaise grandeur | 5 (V4, V5, V6, V7, V8) — V14 fermé le 2026-08-10 |
-| Contrôles supprimés, documentés, à ne pas ré-écrire | 5 |
-| Sections de rapport | 18 (§1.1–§1.10, §2.1–§2.8) — dont 4 purement diagnostiques (§2.4, §2.5, §2.6, §2.7) |
+| dont mesurant la mauvaise grandeur | **2** (V4 usage close-quarters à l'ancre, V8 critique supposée à 6) — V5, V6, V7 et V14 fermés le 2026-08-10 |
+| Contrôles supprimés, documentés, à ne pas ré-écrire | **7** (+ `fight_from_non_adjacent` et `dead_unit_skipping`/`handle_skip`, 2026-08-10) |
+| Sections de rapport | 18 (§1.1–§1.10, §2.1–§2.8) — dont 4 purement diagnostiques (§2.4, §2.5, §2.6, §2.7) — **plus la table « 1.1 COUVERTURE DES REGLES »**, qui n'est pas une section d'erreurs mais le rendu du corpus |
 
 ### 6.5 Mouvement net (2026-08-08 → 2026-08-09 → 2026-08-10)
 

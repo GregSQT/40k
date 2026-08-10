@@ -876,6 +876,7 @@ différentes** — elles ne pilotent pas la même chose :
 |--------|------------------|-----------------|------------|
 | `x1` | 10 000 | 1.0 → fin du run | 1.0 → fin du run |
 | `x1_long` | 200 000 | **0.7** → 140 000 ép. | **0.4** → 80 000 ép. |
+| `x5_long` | 200 000 | **0.7** → 140 000 ép. | **0.4** → 80 000 ép. |
 | autres | — | 1.0 | 1.0 |
 
 L'**entropie** s'arrête tôt (80k) : passé ce point on veut que la politique cesse d'explorer et
@@ -892,6 +893,15 @@ longueur du run — `total_episodes` (200k), les deux `decay_fraction` et `bot_e
 l'évaluation doublerait la durée du run). `bot_eval_intermediate` reste à 100 : c'est cette
 mesure qui pilote `save_best_robust`, la dégrader dégraderait le choix du modèle sauvegardé.
 Verrou : `tests/unit/ai/test_schedule_decay_fraction.py` refuse toute autre divergence.
+
+**Le profil `x5_long`** (2026-08-10) est le même recalibrage appliqué à `x5_new` : mêmes sept
+écarts, mêmes valeurs, et le verrou ci-dessus est paramétré sur les **deux** couples
+(`x1` / `x1_long` et `x5_new` / `x5_long`). Son contenu est d'ailleurs identique à celui de
+`x1_long` — c'est attendu : le nom d'un profil ne fixe **pas** la résolution du plateau, qui vient
+de `--resolution 1|5|10` (cf. `_resolution_detail` en tête du JSON). `x5_new` est lui-même aligné
+sur `x1` depuis le 2026-08-10 (architecture 512×512, `lr` 0.002 → 0.0002, `ent_coef` end 0.01,
+seuils de gating 0.3) ; il n'en diffère plus que par `total_episodes` (1000) et `bot_eval_freq`
+(250, sans quoi un run de 1000 épisodes n'aurait aucun point de mesure intermédiaire).
 
 `checkpoint_save_freq` reste **aligné sur `x1`**, délibérément : SB3 sauvegarde tous les
 `save_freq` **appels du callback** (`callbacks.py:300`), soit un par pas du VecEnv — jamais des

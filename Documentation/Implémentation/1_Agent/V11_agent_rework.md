@@ -121,9 +121,10 @@ livraison — aucune ligne de code touchée ; il REMPLACE le contrôle du 2026-0
 chiffres d'architecture étaient périmés le jour même par `L1` puis `L2`) :
 - `obs_size` : `ObservationBuilder.SQUAD_OBS_SIZE_TARGET` = **16659** (14615 avant `L2` du
   2026-08-07 ; 14609 avant le drapeau `declines` de `L1` ; 20727 avant le socle, cf. §0.67), et
-  les **7** profils de
+  les **8** profils de
   `config/agents/ArmageddonAgent/ArmageddonAgent_training_config.json` portent **16659**
-  (`x1`, `x1_long`, `x1_selfplay`, `x1_debug`, `x5_new`, `x5_append`, `x5_debug`).
+  (`x1`, `x1_long`, `x1_selfplay`, `x1_debug`, `x5_new`, `x5_append`, `x5_long`, `x5_debug` —
+  `x5_long` ajouté le 2026-08-10).
 - `squad_obs_shapes()` : **26** clés ; `sum(prod(shape))` grille exclue = **16659**, égale à
   `SQUAD_OBS_SIZE_TARGET` (exécuté). `allies_*` a **12** lignes depuis `L2` (`K_ALLY_SLOTS`, qui
   vit désormais dans `observation_entities` — l'espace d'action en dérive).
