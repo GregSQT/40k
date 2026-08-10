@@ -19,6 +19,7 @@ Isolation exigée (aucune écriture hors de la mémoire du test) :
 from __future__ import annotations
 
 import sqlite3
+from contextlib import contextmanager
 from typing import Any, Dict, List, Optional, Tuple
 
 import pytest
@@ -27,11 +28,16 @@ import services.api_server as api_server
 from services.api_server import app
 
 # Profil de test : autorise tous les modes de jeu sans lire config/users.db.
+# Doit porter les MÊMES clés que la ligne rendue par `_get_authenticated_user_or_response` :
+# la porte d'auth les lit toutes pour peupler `g`. `token` en fait partie depuis que les vues
+# agissant sur la session (`logout_user`) le prennent dans `g` au lieu de re-parser l'en-tête.
 _TEST_AUTH_USER = {
     "user_id": 1,
     "login": "integration-tests",
     "profile_id": 1,
     "profile_code": "test",
+    "token": "integration-tests-token",
+    "expires_at": 1 << 62,
 }
 _TEST_PERMISSIONS = {
     "game_modes": ["pvp", "pvp_test", "pve", "pve_test"],
@@ -266,7 +272,18 @@ def api_isolated(monkeypatch):
     """Neutralise les effets de bord hors mémoire : users.db et persistance disque."""
     monkeypatch.setattr(api_server, "_get_authenticated_user_or_response", lambda: (_TEST_AUTH_USER, None))
     monkeypatch.setattr(api_server, "_resolve_permissions_for_profile", lambda _conn, _pid: _TEST_PERMISSIONS)
-    monkeypatch.setattr(api_server, "_get_auth_db_connection", lambda: sqlite3.connect(":memory:"))
+    # Toutes les écritures d'auth passent par ce context manager : le neutraliser suffit à
+    # garantir qu'aucun test d'intégration ne touche `config/users.db`.
+    @contextmanager
+    def _in_memory_write_cursor(immediate: bool = False):
+        connection = sqlite3.connect(":memory:")
+        connection.row_factory = sqlite3.Row
+        try:
+            yield connection.cursor()
+        finally:
+            connection.close()
+
+    monkeypatch.setattr(api_server, "auth_db_write_cursor", _in_memory_write_cursor)
     # api_server charge logs/save_config.json à l'import : en usage normal la persistance
     # des snapshots et l'autosave sont actifs et écriraient sur le disque de l'utilisateur.
     monkeypatch.setattr(api_server, "_SNAPSHOT_PERSIST_ENABLED", False)

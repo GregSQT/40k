@@ -4,6 +4,7 @@ services/api_server.py - HTTP API Server for W40K Engine
 Connects AI_TURN.md compliant engine to frontend board visualization
 """
 
+import ipaddress
 import json
 import os
 import sqlite3
@@ -89,17 +90,50 @@ AUTH_EVENT_RETENTION_SECONDS = 30 * 24 * 3600
 # développement, le nginx de `frontend/Dockerfile` en conteneur — donc sans lui `remote_addr`
 # vaut la même valeur pour tous les utilisateurs, et le rate limiting par (login, IP) dégénère
 # en (login) : cinq essais ratés suffisent alors à verrouiller le compte de n'importe qui.
-def _resolve_trusted_proxies() -> frozenset[str]:
+def _normalize_ip(raw: str) -> Optional[ipaddress._BaseAddress]:
+    """Adresse normalisée, ou `None` si ce n'en est pas une.
+
+    Normaliser est indispensable : la comparaison de CHAÎNES ferait passer `::ffff:172.18.0.5`
+    et `172.18.0.5` pour deux adresses différentes, alors que c'est la même — et Werkzeug rend
+    l'une ou l'autre selon la pile réseau. Une non-correspondance ici ne lève rien : elle fait
+    silencieusement ignorer `X-Forwarded-For`, donc elle restaure le seau partagé et le
+    verrouillage de compte que ce mécanisme existe pour empêcher.
+    """
+    try:
+        parsed = ipaddress.ip_address(raw)
+    except ValueError:
+        return None
+    mapped = getattr(parsed, "ipv4_mapped", None)
+    return mapped if mapped is not None else parsed
+
+
+def _resolve_trusted_proxies() -> frozenset:
+    """Proxys de confiance, validés AU DÉMARRAGE.
+
+    Une entrée invalide (nom d'hôte, faute de frappe) est refusée bruyamment : acceptée, elle ne
+    correspondrait jamais à `remote_addr` et le rate limiting retomberait sur l'IP du proxy sans
+    que rien ne le signale. Les noms d'hôte sont rejetés en connaissance de cause — `remote_addr`
+    est toujours une adresse, un nom ne peut pas correspondre.
+    """
     raw = os.environ.get("W40K_TRUSTED_PROXIES")
     if raw is None:
         return frozenset()
-    entries = {item.strip() for item in raw.split(",") if item.strip()}
+    entries = [item.strip() for item in raw.split(",") if item.strip()]
     if not entries:
         raise ConfigurationError(
             "W40K_TRUSTED_PROXIES est définie mais vide : donner au moins une IP ou retirer "
             "la variable"
         )
-    return frozenset(entries)
+    normalized = set()
+    for entry in entries:
+        address = _normalize_ip(entry)
+        if address is None:
+            raise ConfigurationError(
+                f"W40K_TRUSTED_PROXIES : {entry!r} n'est pas une adresse IP. Donner l'adresse "
+                f"du proxy, pas un nom d'hôte — `remote_addr` est toujours une adresse."
+            )
+        normalized.add(address)
+    return frozenset(normalized)
 
 
 TRUSTED_PROXIES = _resolve_trusted_proxies()
@@ -1339,14 +1373,17 @@ def _client_ip() -> str:
     if not remote_addr:
         raise RuntimeError("request.remote_addr absent : impossible d'identifier l'appelant")
 
-    if remote_addr not in TRUSTED_PROXIES:
+    if _normalize_ip(remote_addr) not in TRUSTED_PROXIES:
         # Connexion directe (ou proxy non déclaré) : `remote_addr` est ce qu'on a de plus sûr,
         # et tout `X-Forwarded-For` présent vient d'une source non fiable.
         return remote_addr
 
     forwarded = request.headers.get("X-Forwarded-For", "")
     for candidate in reversed([item.strip() for item in forwarded.split(",") if item.strip()]):
-        if candidate not in TRUSTED_PROXIES:
+        # Une entrée illisible (`_normalize_ip` rend None) n'est PAS de confiance : elle sort
+        # donc de la boucle comme adresse client. C'est voulu — la chaîne vient du réseau, et
+        # la sauter reviendrait à laisser un client masquer son IP en insérant du bruit.
+        if _normalize_ip(candidate) not in TRUSTED_PROXIES:
             return candidate
 
     # Requête venue d'un proxy de confiance mais sans adresse client exploitable : le proxy ne
@@ -1420,12 +1457,33 @@ def _count_login_attempts_since_success(
 
 
 def _purge_auth_events(cursor: sqlite3.Cursor, now: int) -> None:
-    """Applique la rétention du journal. Appelé au login réussi, pas à chaque échec : le
-    balayage n'a pas à peser sur le chemin qu'un attaquant contrôle."""
+    """Applique la rétention du journal.
+
+    Appelée sur TOUTE tentative de login, y compris refusée. La cantonner au login réussi
+    laissait la table croître sans borne : le seul chemin qui purgeait était celui qu'un
+    attaquant ne prend jamais. Le `DELETE` est couvert par `idx_auth_events_retention` et ne
+    retire rien en régime normal — il ne coûte qu'une descente d'index.
+    """
     cursor.execute(
         "DELETE FROM auth_events WHERE occurred_at <= ?",
         (now - AUTH_EVENT_RETENTION_SECONDS,),
     )
+
+
+def _rate_limit_already_journaled(cursor: sqlite3.Cursor, login: str, ip: str, now: int) -> bool:
+    """Un refus a-t-il déjà été journalisé pour ce couple dans la fenêtre courante ?
+
+    Sert à n'écrire `rate_limited` qu'UNE FOIS par fenêtre. Sans cela, chaque requête refusée
+    insérait une ligne — sur un chemin entièrement contrôlé par l'attaquant, et sous le verrou
+    d'écriture, donc en concurrence directe avec les logins et renouvellements de session
+    légitimes. Marteler le login devenait un moyen de ralentir tout le monde.
+    """
+    row = cursor.execute(
+        "SELECT 1 FROM auth_events WHERE login = ? AND ip = ? AND event = ? AND occurred_at > ? "
+        "LIMIT 1",
+        (login, ip, AUTH_EVENT_RATE_LIMITED, now - LOGIN_ATTEMPT_WINDOW_SECONDS),
+    ).fetchone()
+    return row is not None
 
 
 def _purge_expired_sessions(cursor: sqlite3.Cursor, now: int) -> None:
@@ -2544,20 +2602,26 @@ def login_user():
     # pourrait pas partager la transaction du comptage. Un login réussi ne l'efface pas — le
     # journal est append-only — il la rend non comptable (cf. `_count_login_attempts_since_success`).
     with auth_db_write_cursor(immediate=True) as cursor:
+        # La rétention s'applique ici, sur TOUTE tentative : c'est ce qui borne la table même
+        # quand personne ne parvient à se connecter (cf. `_purge_auth_events`).
+        _purge_auth_events(cursor, now)
         over_limit = (
             _count_login_attempts_since_success(cursor, normalized_login, client_ip, now)
             >= LOGIN_ATTEMPT_MAX_FAILURES
         )
-        _record_auth_event(
-            cursor,
-            AUTH_EVENT_RATE_LIMITED if over_limit else AUTH_EVENT_LOGIN_ATTEMPT,
-            normalized_login,
-            client_ip,
-            now,
-        )
+        if not over_limit:
+            _record_auth_event(
+                cursor, AUTH_EVENT_LOGIN_ATTEMPT, normalized_login, client_ip, now
+            )
+        elif not _rate_limit_already_journaled(cursor, normalized_login, client_ip, now):
+            # UNE seule ligne par fenêtre : le refus doit laisser une trace exploitable sans
+            # offrir à l'attaquant une écriture par requête.
+            _record_auth_event(
+                cursor, AUTH_EVENT_RATE_LIMITED, normalized_login, client_ip, now
+            )
 
     if over_limit:
-        # Enregistré en `rate_limited` et non en `login_attempt` : un refus n'est pas un essai,
+        # Journalisé en `rate_limited` et non en `login_attempt` : un refus n'est pas un essai,
         # et le compter comme tel ferait s'auto-prolonger le blocage indéfiniment.
         return jsonify({
             "success": False,
@@ -2588,8 +2652,9 @@ def login_user():
 
     access_token = secrets.token_urlsafe(48)
     with auth_db_write_cursor() as cursor:
+        # Pas de `_purge_auth_events` ici : la rétention est déjà appliquée sur toute tentative,
+        # au-dessus. La répéter ne retirerait jamais rien de plus.
         _record_auth_event(cursor, AUTH_EVENT_LOGIN_SUCCESS, normalized_login, client_ip, now)
-        _purge_auth_events(cursor, now)
         _purge_expired_sessions(cursor, now)
         cursor.execute(
             "INSERT INTO sessions (token, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
@@ -2630,8 +2695,15 @@ def logout_user():
     # le re-parser ici rejouerait le travail de la porte sur une donnée qu'elle détient.
     token = g.auth_token
     user_row = g.auth_user
+
+    # La RÉVOCATION d'abord, seule dans sa transaction. Journaliser dans la même transaction
+    # liait le sort du token à celui du journal : `_client_ip()` peut lever (proxy de confiance
+    # sans `X-Forwarded-For` exploitable), et le rollback annulait alors la révocation — le
+    # client voyait un 500 en croyant s'être déconnecté, avec un token toujours valide.
     with auth_db_write_cursor() as cursor:
         cursor.execute("DELETE FROM sessions WHERE token = ?", (token,))
+
+    with auth_db_write_cursor() as cursor:
         _record_auth_event(
             cursor, AUTH_EVENT_LOGOUT, user_row["login"], _client_ip(), int(time.time())
         )

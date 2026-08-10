@@ -307,7 +307,13 @@ class TestClientIp:
 
     @staticmethod
     def _ip_for(monkeypatch, *, trusted, remote_addr, forwarded=None):
-        monkeypatch.setattr(api_server, "TRUSTED_PROXIES", frozenset(trusted))
+        # Le jeu est construit comme en production (adresses NORMALISÉES, pas des chaînes) :
+        # un test qui poserait des chaînes testerait un mécanisme que le code n'utilise pas.
+        monkeypatch.setattr(
+            api_server,
+            "TRUSTED_PROXIES",
+            frozenset(api_server._normalize_ip(item) for item in trusted),
+        )
         headers = {"X-Forwarded-For": forwarded} if forwarded is not None else {}
         with app.test_request_context("/api/auth/login", environ_base={"REMOTE_ADDR": remote_addr},
                                       headers=headers):
@@ -342,6 +348,25 @@ class TestClientIp:
             forwarded="9.9.9.9, 203.0.113.7, 10.0.0.2",
         )
         assert got == "203.0.113.7"
+
+    def test_ipv4_mapped_proxy_is_recognised(self, monkeypatch):
+        """`::ffff:10.0.0.1` et `10.0.0.1` sont la MÊME adresse, et Werkzeug rend l'une ou
+        l'autre selon la pile réseau. Une comparaison de chaînes les distinguerait, ferait
+        ignorer `X-Forwarded-For` en silence, et restaurerait le seau partagé."""
+        got = self._ip_for(
+            monkeypatch,
+            trusted=["10.0.0.1"],
+            remote_addr="::ffff:10.0.0.1",
+            forwarded="203.0.113.7",
+        )
+        assert got == "203.0.113.7"
+
+    def test_hostname_in_config_is_rejected_at_startup(self, monkeypatch):
+        """Un nom d'hôte ne peut jamais correspondre à `remote_addr` : l'accepter donnerait une
+        configuration d'apparence correcte qui ne s'applique à rien."""
+        monkeypatch.setenv("W40K_TRUSTED_PROXIES", "nginx")
+        with pytest.raises(ConfigurationError, match="adresse IP"):
+            api_server._resolve_trusted_proxies()
 
     def test_trusted_proxy_without_usable_header_raises(self, monkeypatch):
         """Proxy de confiance qui n'a pas posé l'en-tête : erreur explicite. Se rabattre sur
@@ -402,6 +427,75 @@ class TestAuthEventsJournal:
         assert events.count("login_attempt") == api_server.LOGIN_ATTEMPT_MAX_FAILURES
         assert events.count("login_failure") == api_server.LOGIN_ATTEMPT_MAX_FAILURES
         assert events.count("rate_limited") == 1
+
+    def test_refusals_do_not_grow_the_journal(self, authenticated_api_client):
+        """Un attaquant qui martèle un compte bloqué ne doit pas faire grossir la table.
+
+        Chaque requête refusée écrivait une ligne, sur un chemin qu'il contrôle entièrement et
+        sous le verrou d'écriture — donc en concurrence directe avec les logins légitimes. Une
+        seule trace par fenêtre suffit à l'audit.
+        """
+        client = app.test_client()
+        for _ in range(api_server.LOGIN_ATTEMPT_MAX_FAILURES):
+            client.post("/api/auth/login", json={"login": "pytest_user", "password": "wrong"})
+
+        for _ in range(20):
+            assert client.post(
+                "/api/auth/login", json={"login": "pytest_user", "password": "wrong"}
+            ).status_code == 429
+
+        events = [event for event, _ in self._events()]
+        assert events.count("rate_limited") == 1, (
+            f"{events.count('rate_limited')} lignes pour 21 refus : le journal grossit avec "
+            "le martèlement"
+        )
+
+    def test_retention_applies_even_without_any_successful_login(self, authenticated_api_client):
+        """La purge doit tourner sur toute tentative. Cantonnée au login réussi, le seul chemin
+        qui bornait la table était celui qu'un attaquant ne prend jamais."""
+        connection = _connect()
+        try:
+            connection.execute(
+                "INSERT INTO auth_events (occurred_at, event, login, ip) VALUES (?, ?, ?, ?)",
+                (int(time.time()) - api_server.AUTH_EVENT_RETENTION_SECONDS - 10,
+                 "login_failure", "ancien", "1.1.1.1"),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        # UNIQUEMENT des échecs : aucun login réussi dans ce test.
+        app.test_client().post(
+            "/api/auth/login", json={"login": "pytest_user", "password": "wrong"}
+        )
+
+        assert self._events("ancien") == []
+
+    def test_logout_revokes_even_if_journaling_fails(self, authenticated_api_client):
+        """La révocation ne dépend pas de la journalisation.
+
+        Les deux partageaient une transaction : `_client_ip()` peut lever (proxy de confiance
+        sans en-tête exploitable), et le rollback annulait alors la révocation — l'utilisateur
+        voyait un 500 en croyant s'être déconnecté, avec un token toujours valide.
+        """
+        token = authenticated_api_client
+        client = app.test_client()
+
+        def exploding_ip():
+            raise RuntimeError("proxy mal configuré")
+
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(api_server, "_client_ip", exploding_ip)
+            client.post("/api/auth/logout")
+
+        connection = _connect()
+        try:
+            remaining = connection.execute(
+                "SELECT COUNT(*) FROM sessions WHERE token = ?", (token,)
+            ).fetchone()[0]
+        finally:
+            connection.close()
+        assert remaining == 0, "session non révoquée alors que l'utilisateur a demandé à partir"
 
     def test_logout_is_journaled(self, authenticated_api_client):
         app.test_client().post("/api/auth/logout")
