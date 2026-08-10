@@ -130,12 +130,14 @@ from engine.game_state import (
 )
 from engine.macro_intents import (
     ACTION_FAMILIES,
+    DEPLOY_STRATEGY_SLOTS,
     INTENT_INVADE,
     MAX_OBJECTIVES,
     action_family,
     get_nearest_objective_zone,
     get_objective_control,
     get_objective_control_for_player,
+    open_placement_slots,
 )
 from engine.agent_decision import (
     clear_pending_agent_decision,
@@ -745,7 +747,7 @@ class W40KEngine(gym.Env):
             # et purge au reset — plus declares ici (POURQUOI : `engine.game_utils`).
             "controlled_objective_samples_scoring_turns": [],
             "opponent_objective_samples_scoring_turns": [],
-            # Mode tire par `deployment_mode_schedule` pour l'episode ("active"|"fixed"), None
+            # Mode tire par `deployment_mode_schedule` pour l'episode ("active"|"auto"), None
             # hors entrainement. Pose A L'INIT et pas au seul reset : les chemins API/PvP
             # construisent le moteur puis jouent sans passer par `reset()`, et le bloc terminal
             # de `step` lit cette cle pour la publier dans `info`. Le `.update()` du reset ne la
@@ -994,10 +996,14 @@ class W40KEngine(gym.Env):
         self.episode_reward_accumulator = 0.0
         self.episode_length_accumulator = 0
         self.episode_number = int(training_episode_start_index)  # compteur d'episodes de CET env (offset de reprise inclus)
-        self._deployment_random_mix_episode_enabled = False
-        self._deployment_random_mix_ratio = 0.0
-        self._deployment_random_mix_apply_to = "agent_only"
-        
+        # Épisode `auto` de la rampe : le MOTEUR choisit les poses du joueur-agent (cf.
+        # `_configure_deployment_mode_for_episode`). Déclaré ici pour que `step` puisse le lire
+        # même avant le premier reset, sans `getattr` de complaisance.
+        self._deployment_auto_episode = False
+        # Pose ARMÉE par `auto_deployment_action` et consommée par le `step` suivant : voir cette
+        # méthode. Déclaré ici pour la même raison que la ligne au-dessus.
+        self._auto_deployment_pending_action: Optional[int] = None
+
         # Clear debug.log ONCE at the start of training, only when --debug (avoid I/O when not debugging)
         global _debug_log_cleared
         if debug_mode and not _debug_log_cleared:
@@ -1063,147 +1069,12 @@ class W40KEngine(gym.Env):
             self._episode_ramp_budget = budget
         return min(1.0, max(0.0, float(max(0, episode_index)) / float(self._episode_ramp_denominator)))
 
-    def _configure_deployment_random_mix_for_episode(self) -> None:
-        """
-        Configure per-episode deployment randomization for training only.
-
-        Config contract (training_config):
-          deployment_random_mix:
-            enabled: bool
-            training_only: bool
-            force_random_ratio_start: float in [0,1]
-            force_random_ratio_end: float in [0,1]
-            schedule: "linear"
-            freeze_after_progress: float in [0,1]
-            apply_to: "agent_only" | "both"
-        """
-        self._deployment_random_mix_episode_enabled = False
-        self._deployment_random_mix_ratio = 0.0
-        self._deployment_random_mix_apply_to = "agent_only"
-
-        if not isinstance(self.training_config, dict):
-            return
-        training_config: Dict[str, Any] = self.training_config
-        mix_cfg = training_config.get("deployment_random_mix")
-        if mix_cfg is None:
-            return
-        if not isinstance(mix_cfg, dict):
-            raise TypeError(
-                "training_config.deployment_random_mix must be an object "
-                f"(got {type(mix_cfg).__name__})"
-            )
-
-        enabled = require_key(mix_cfg, "enabled")
-        if not isinstance(enabled, bool):
-            raise TypeError(
-                "training_config.deployment_random_mix.enabled must be bool "
-                f"(got {type(enabled).__name__})"
-            )
-        if not enabled:
-            return
-
-        training_only = require_key(mix_cfg, "training_only")
-        if not isinstance(training_only, bool):
-            raise TypeError(
-                "training_config.deployment_random_mix.training_only must be bool "
-                f"(got {type(training_only).__name__})"
-            )
-        if training_only and not self._is_training_scenario_context():
-            return
-
-        ratio_start = require_key(mix_cfg, "force_random_ratio_start")
-        ratio_end = require_key(mix_cfg, "force_random_ratio_end")
-        if not isinstance(ratio_start, (int, float)):
-            raise TypeError(
-                "training_config.deployment_random_mix.force_random_ratio_start "
-                f"must be number (got {type(ratio_start).__name__})"
-            )
-        if not isinstance(ratio_end, (int, float)):
-            raise TypeError(
-                "training_config.deployment_random_mix.force_random_ratio_end "
-                f"must be number (got {type(ratio_end).__name__})"
-            )
-        ratio_start = float(ratio_start)
-        ratio_end = float(ratio_end)
-        if ratio_start < 0.0 or ratio_start > 1.0:
-            raise ValueError(
-                "training_config.deployment_random_mix.force_random_ratio_start "
-                f"must be in [0,1] (got {ratio_start})"
-            )
-        if ratio_end < 0.0 or ratio_end > 1.0:
-            raise ValueError(
-                "training_config.deployment_random_mix.force_random_ratio_end "
-                f"must be in [0,1] (got {ratio_end})"
-            )
-
-        schedule = require_key(mix_cfg, "schedule")
-        if schedule != "linear":
-            raise ValueError(
-                "training_config.deployment_random_mix.schedule must be 'linear' "
-                f"(got {schedule!r})"
-            )
-        freeze_after_progress = require_key(mix_cfg, "freeze_after_progress")
-        if not isinstance(freeze_after_progress, (int, float)):
-            raise TypeError(
-                "training_config.deployment_random_mix.freeze_after_progress must be number "
-                f"(got {type(freeze_after_progress).__name__})"
-            )
-        freeze_after_progress = float(freeze_after_progress)
-        if freeze_after_progress < 0.0 or freeze_after_progress > 1.0:
-            raise ValueError(
-                "training_config.deployment_random_mix.freeze_after_progress must be in [0,1] "
-                f"(got {freeze_after_progress})"
-            )
-
-        apply_to = require_key(mix_cfg, "apply_to")
-        if not isinstance(apply_to, str):
-            raise TypeError(
-                "training_config.deployment_random_mix.apply_to must be string "
-                f"(got {type(apply_to).__name__})"
-            )
-        apply_to = apply_to.strip()
-        if apply_to not in {"agent_only", "both"}:
-            raise ValueError(
-                "training_config.deployment_random_mix.apply_to must be one of "
-                "{'agent_only','both'} "
-                f"(got {apply_to!r})"
-            )
-
-        total_episodes = require_key(training_config, "total_episodes")
-        if not isinstance(total_episodes, int) or isinstance(total_episodes, bool):
-            raise TypeError(
-                "training_config.total_episodes must be integer "
-                f"(got {type(total_episodes).__name__})"
-            )
-        if total_episodes <= 0:
-            raise ValueError(
-                f"training_config.total_episodes must be > 0 (got {total_episodes})"
-            )
-
-        episode_number = require_key(self.game_state, "episode_number")
-        if not isinstance(episode_number, int) or isinstance(episode_number, bool):
-            raise TypeError(
-                "game_state.episode_number must be integer "
-                f"(got {type(episode_number).__name__})"
-            )
-        episode_index = max(0, int(episode_number) - 1)
-        progress = self._episode_schedule_progress(episode_index, total_episodes)
-        capped_progress = min(progress, freeze_after_progress)
-        mix_ratio = ratio_start + ((ratio_end - ratio_start) * capped_progress)
-        mix_ratio = min(1.0, max(0.0, mix_ratio))
-
-        self._deployment_random_mix_ratio = mix_ratio
-        self._deployment_random_mix_apply_to = apply_to
-        self._deployment_random_mix_episode_enabled = bool(random.random() < mix_ratio)
-        self.game_state["deployment_random_mix_ratio"] = mix_ratio
-        self.game_state["deployment_random_mix_episode_enabled"] = self._deployment_random_mix_episode_enabled
-
     def _configure_deployment_mode_for_episode(self) -> Optional[str]:
-        """Scheduler par-épisode du MODE de déploiement (fixed ↔ active), rampé sur la progression.
+        """Scheduler par-épisode du MODE de déploiement (auto ↔ active), rampé sur la progression.
 
-        Orthogonal à ``deployment_random_mix`` (qui, lui, randomise les ACTIONS d'un déploiement
-        déjà actif). Ici on choisit, par épisode, si le scénario est rejoué en placement figé
-        (``fixed``, positions du JSON) ou en phase de déploiement (``active``, positions ignorées).
+        On choisit, par épisode, QUI décide des poses : le moteur (``auto``, tirage parmi les slots
+        de pose ouverts) ou la politique (``active``). Les deux jouent une VRAIE phase de
+        déploiement — c'est la seule différence, et elle porte sur le décideur, pas sur les règles.
 
         Contrat (training_config):
           deployment_mode_schedule:
@@ -1214,7 +1085,12 @@ class W40KEngine(gym.Env):
             schedule: "linear"
             freeze_after_progress: float in [0,1]
 
-        Retourne "active" | "fixed" pour l'épisode, ou None si inactif (mode laissé au JSON).
+        Retourne "active" | "auto" pour l'épisode, ou None si inactif (mode laissé au JSON).
+
+        'auto' a remplacé 'fixed' le 2026-08-08. 'fixed' rejouait les positions par figurine
+        écrites dans les rosters, sans phase de déploiement ; elles étaient générées hors ligne
+        contre UN terrain et tombaient sur des murs dès qu'un second entrait dans la rotation.
+        'auto' joue une vraie phase de déploiement dont le MOTEUR décide les poses.
         """
         if not isinstance(self.training_config, dict):
             return None
@@ -1311,28 +1187,78 @@ class W40KEngine(gym.Env):
         p_active = ratio_start + ((ratio_end - ratio_start) * capped_progress)
         p_active = min(1.0, max(0.0, p_active))
 
-        mode = "active" if random.random() < p_active else "fixed"
+        mode = "active" if random.random() < p_active else "auto"
         self.game_state["deployment_mode_schedule_p_active"] = p_active
         self.game_state["deployment_mode_schedule_mode"] = mode
-        return mode
+        self._deployment_auto_episode = mode == "auto"
+        # `auto` charge le scenario en `active` : unites HORS TABLE, phase de deploiement jouee,
+        # zones respectees. Seul change QUI decide des poses — le moteur, pas la politique.
+        return "active" if mode == "auto" else mode
 
-    def _should_force_random_deployment_action(self, action_mask: np.ndarray) -> bool:
-        """Return True when current deployment step must use random valid action."""
-        if self.game_state.get("phase") != "deployment":
+    def _should_auto_deploy_for_agent(self, action_mask: np.ndarray) -> bool:
+        """True quand le MOTEUR doit choisir la pose a la place du joueur-agent (episode `auto`).
+
+        C'est ce qui remplace l'ancien mode `fixed` de la rampe : au lieu de rejouer des positions
+        ecrites dans le roster — hors zone de deploiement, et invalides des que le terrain change —
+        l'episode joue une VRAIE phase de deploiement dont l'agent ne decide simplement pas encore.
+
+        Strictement borne au joueur controle : l'adversaire a deja ses bots
+        (`BotControlledEnv._select_bot_deploy_action`), et deployer a sa place ici les
+        court-circuiterait en silence.
+        """
+        if not self._deployment_auto_episode:
             return False
-        if not getattr(self, "_deployment_random_mix_episode_enabled", False):
+        if self.game_state.get("phase") != "deployment":
             return False
         if not isinstance(action_mask, np.ndarray):
             raise TypeError(f"action_mask must be np.ndarray (got {type(action_mask).__name__})")
         if action_mask.size <= 0:
             return False
-
-        apply_to = getattr(self, "_deployment_random_mix_apply_to", "agent_only")
         current_player = int(require_key(self.game_state, "current_player"))
         controlled_player = int(require_key(self.config, "controlled_player"))
-        if apply_to == "agent_only" and current_player != controlled_player:
-            return False
-        return True
+        return current_player == controlled_player
+
+    def _pick_placement_action(self, action_mask: np.ndarray, context: str) -> int:
+        """Tire une POSE parmi les slots de strategie ouverts. Jamais `ACTION_WAIT`.
+
+        Source unique du filtre : `macro_intents.open_placement_slots` — la meme que celle des
+        bots. Ce que ce detour achete est concret : `ACTION_WAIT` est ouvert au deploiement et n'y
+        est PAS une attente, il met l'unite en RESERVES STRATEGIQUES (20.01). Un tirage uniforme
+        sur le masque brut envoie donc des unites en reserves au hasard, ce que personne n'a
+        demande — c'est le defaut mesure du chantier 04c, cote bots.
+        """
+        open_actions = [int(i) for i, value in enumerate(action_mask) if bool(value)]
+        placements = open_placement_slots(open_actions)
+        if not placements:
+            # Pas de repli sur `ACTION_WAIT` : ce serait mettre l'unite en reserves pour masquer
+            # un defaut moteur. Le decodeur leve « Deployment deadlock » avant d'en arriver la.
+            raise RuntimeError(
+                f"{context} : masque de deploiement sans aucun slot de pose "
+                f"{list(DEPLOY_STRATEGY_SLOTS)} ouvert (actions ouvertes : {open_actions})."
+            )
+        return int(random.choice(placements))
+
+    def auto_deployment_action(self, action_mask: np.ndarray) -> Optional[int]:
+        """La pose que le MOTEUR joue pour le joueur-agent sur cet etat, ou None s'il ne pose pas.
+
+        POINT D'ENTREE DE L'ABSORPTION. En episode `auto`, ces steps de deploiement ne sont PAS des
+        decisions de la politique : la boucle d'entrainement les joue elle-meme
+        (`BotControlledEnv._ensure_actionable_controlled_turn`) et ne les remonte jamais a
+        l'apprenant. Sans ca, SB3 rangeait dans son rollout l'action ECHANTILLONNEE et son log_prob
+        alors que `step` en executait une autre : PPO calculait son ratio sur une action jamais
+        jouee (~10 steps de deploiement par episode, sur la part `auto` de la rampe).
+
+        L'action rendue est ARMEE : le `step` qui la recoit l'execute telle quelle au lieu d'en
+        tirer une seconde. Un appelant qui ne passe pas par ici (moteur nu : tests, scripts) voit
+        toujours son action remplacee par une pose dans `step` — la ou aucun apprentissage ne se
+        fait, le remplacement est le comportement voulu.
+        """
+        if not self._should_auto_deploy_for_agent(action_mask):
+            self._auto_deployment_pending_action = None
+            return None
+        action = self._pick_placement_action(action_mask, "deployment_mode_schedule 'auto'")
+        self._auto_deployment_pending_action = action
+        return action
 
     def _build_reward_configs_for_current_units(self) -> Dict[str, Dict[str, Any]]:
         """Build reward config mapping for all units in current game state."""
@@ -1402,6 +1328,12 @@ class W40KEngine(gym.Env):
         # tantôt présente tantôt absente forcerait ses lecteurs à un `.get` — donc à confondre
         # « scheduler inactif » avec « épisode où personne n'a rien écrit ».
         self.game_state["deployment_mode_schedule_mode"] = None
+        # Même raison que la ligne au-dessus : le scheduler ne pose ce drapeau que sur son chemin
+        # actif. Sans remise à False ici, un épisode `auto` contaminerait tous les suivants — le
+        # moteur continuerait de déployer à la place d'une politique censée apprendre à le faire.
+        self._deployment_auto_episode = False
+        # Une pose armée et non consommée n'appartient qu'à l'épisode qui l'a demandée.
+        self._auto_deployment_pending_action = None
         episode_deployment_mode = self._configure_deployment_mode_for_episode()
         if episode_deployment_mode is not None:
             should_reload_scenario = True
@@ -1532,9 +1464,6 @@ class W40KEngine(gym.Env):
             "game_over": False,
             "turn_limit_reached": False,
             "winner": None,
-            "deployment_random_mix_ratio": 0.0,
-            "deployment_random_mix_episode_enabled": False,
-            "_deployment_random_mix_forced_steps": 0,
             "victory_points": {1: 0, 2: 0},
             # Remise a la dotation de depart : un episode ne peut pas heriter des CP du
             # precedent (`reset` fait un `update()` de game_state, pas une recreation).
@@ -1611,7 +1540,6 @@ class W40KEngine(gym.Env):
             # trois clés ci-dessus, même mode de défaillance.
             **initial_faction_ability_state(),
         })
-        self._configure_deployment_random_mix_for_episode()
         self.game_state["deployment_type"] = self.config.get("deployment_type")
         self.game_state["deployment_type_by_player"] = self.config.get("deployment_type_by_player")
         self.game_state["deployment_zone"] = self.config.get("deployment_zone")
@@ -2343,20 +2271,26 @@ class W40KEngine(gym.Env):
                 observation, 0.0, terminated, False, info, out_mask, player_before_advance
             )
 
-        if self._should_force_random_deployment_action(action_mask):
-            valid_action_indices = [int(i) for i, value in enumerate(action_mask) if bool(value)]
-            if len(valid_action_indices) == 0:
-                raise RuntimeError("deployment_random_mix enabled but no valid action available")
-            action = int(random.choice(valid_action_indices))
-            if "_deployment_random_mix_forced_steps" not in self.game_state:
-                self.game_state["_deployment_random_mix_forced_steps"] = 0
-            forced_steps = self.game_state["_deployment_random_mix_forced_steps"]
-            if not isinstance(forced_steps, int) or isinstance(forced_steps, bool):
-                raise TypeError(
-                    "_deployment_random_mix_forced_steps must be integer "
-                    f"(got {type(forced_steps).__name__})"
+        # Épisode `auto` : le moteur pose à la place du joueur-agent (ex-mode `fixed` de la rampe).
+        if self._should_auto_deploy_for_agent(action_mask):
+            pending = self._auto_deployment_pending_action
+            self._auto_deployment_pending_action = None
+            if pending is None:
+                # Moteur nu (tests, scripts) : personne n'a demandé la pose, on la tire ici.
+                action = self._pick_placement_action(action_mask, "deployment_mode_schedule 'auto'")
+            elif int(action) != int(pending):
+                raise RuntimeError(
+                    "deployment_mode_schedule 'auto' : pose armée par auto_deployment_action "
+                    f"({pending}) mais step a reçu {action}. L'appelant qui arme DOIT rejouer la "
+                    "pose rendue — en tirer une seconde ici ferait exécuter une action que "
+                    "l'appelant n'a pas vue."
                 )
-            self.game_state["_deployment_random_mix_forced_steps"] = forced_steps + 1
+            auto_steps = self.game_state.get("_deployment_auto_steps", 0)
+            if not isinstance(auto_steps, int) or isinstance(auto_steps, bool):
+                raise TypeError(
+                    f"_deployment_auto_steps must be integer (got {type(auto_steps).__name__})"
+                )
+            self.game_state["_deployment_auto_steps"] = auto_steps + 1
         
         # Normalize raw action once.
         if self.debug_mode:
@@ -3042,7 +2976,7 @@ class W40KEngine(gym.Env):
             # Add tactical data to info
             terminal_info["tactical_data"] = self.episode_tactical_data.copy()
 
-            # Mode de déploiement de CET épisode ("active" | "fixed" | None), pour que les
+            # Mode de déploiement de CET épisode ("active" | "auto" | None), pour que les
             # courbes puissent être ventilées par mode. Sans cette ventilation, la rampe
             # `deployment_mode_schedule` fait varier la population mesurée pendant tout le run :
             # une métrique agrégée mélange alors deux tâches de difficulté différente dans des

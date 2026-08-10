@@ -81,7 +81,7 @@ déduits. Les règles sont citées depuis `Documentation/40k_rules/`.
 `HP × OC`, et la fonction est **idempotente** — le mapping n'est jamais recalculé. `SQUAD_ACTION_
 SHOOT_SLOT_COUNT = 5`, et les actions de tir sont `slot 0..4`.
 
-**Mesure** (10 `reset()` sur `scenario_training_armageddon.json`, rosters réels) :
+**Mesure** (10 `reset()` sur `scenario_training_armageddon1.json`, rosters réels) :
 
 | Escouades (P1, P2) | Occurrences |
 |---|---|
@@ -613,7 +613,7 @@ implémentée à ce stade.
 
 **Re-vérification des constats AVANT de coder** (§0bis : ce projet a un historique de marqueurs
 ✅ faux — les trois ont été re-mesurés sur le vrai moteur, 10 `reset()` du scénario
-`scenario_training_armageddon.json`) :
+`scenario_training_armageddon1.json`) :
 
 | Constat | Mesure du 2026-07-26 (ouverture) | Re-mesure avant T-D | Verdict |
 |---|---|---|---|

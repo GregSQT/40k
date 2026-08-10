@@ -74,6 +74,33 @@ def _make_env() -> W40KEngine:
     )
 
 
+def _reset_deployed(env, **kwargs):
+    """`reset` PUIS sortie de la phase de déploiement : ce fichier observe des unités POSÉES.
+
+    Nécessaire depuis que la rampe oppose 'active' à 'auto' (2026-08-08) et non plus à 'fixed'.
+    'fixed' rejouait les positions écrites dans le roster, donc les figurines étaient sur la
+    table dès le reset ; 'auto' joue une vraie phase de déploiement, et une figurine encore hors
+    table est à la sentinelle (-1,-1). Les distances aux objectifs y sont constantes — le test
+    « la distance diminue quand l'escouade s'approche » comparait deux fois la même valeur.
+
+    Le mode n'est pas non plus laissé au tirage : le profil `x5_new` démarre à
+    `active_ratio_start` 0.3, donc l'ancien code observait des états différents d'une exécution
+    à l'autre.
+    """
+    import numpy as _np
+
+    out = env.reset(**kwargs)
+    gs = env.game_state
+    steps = 0
+    while steps < 400 and str(gs["phase"]) == "deployment":
+        legal = _np.flatnonzero(env.get_action_mask())
+        assert legal.size > 0, "plus aucune action légale en phase de déploiement"
+        env.step(int(legal[0]))
+        steps += 1
+    assert str(gs["phase"]) != "deployment", f"toujours en déploiement après {steps} steps"
+    return out
+
+
 def _oracle(objective, cx: int, cy: int):
     """(distance en subhex, cos, sin) par balayage SCALAIRE — reimplementation independante.
 
@@ -111,7 +138,7 @@ def _active_squad(gs) -> str:
 def test_matches_an_independent_scalar_oracle():
     """Distance et direction egalent l'oracle scalaire, sur toutes les escouades et objectifs."""
     env = _make_env()
-    env.reset()
+    _reset_deployed(env)
     gs = env.game_state
     objectives = gs["objectives"]
 
@@ -146,7 +173,7 @@ def test_matches_an_independent_scalar_oracle():
 def test_direction_is_a_unit_vector_or_exactly_zero():
     """Norme 1 quand l'objectif est ailleurs, 0 quand on est dessus (aucune direction inventee)."""
     env = _make_env()
-    obs, _ = env.reset()
+    obs, _ = _reset_deployed(env)
     gb = obs["global_bin"]
     gc = obs["global_cont"]
 
@@ -169,7 +196,7 @@ def test_direction_is_a_unit_vector_or_exactly_zero():
 def test_absent_slot_is_zero_and_flagged_absent():
     """Un slot sans objectif reste a zero et se lit via `objective_present_i`."""
     env = _make_env()
-    env.reset()
+    _reset_deployed(env)
     gs = env.game_state
     sid = _active_squad(gs)
 
@@ -192,7 +219,7 @@ def test_objective_outside_the_grid_window_is_still_described():
     alors que 3 actions de zone le designent.
     """
     env = _make_env()
-    env.reset()
+    _reset_deployed(env)
     gs = env.game_state
     sid = _active_squad(gs)
     obs = env.obs_builder.build_squad_observation(gs, sid)
@@ -235,7 +262,7 @@ def test_objective_outside_the_grid_window_is_still_described():
 def test_distance_decreases_when_the_squad_moves_closer():
     """La distance suit le deplacement reel de l'escouade (feature vivante, pas figee au reset)."""
     env = _make_env()
-    env.reset()
+    _reset_deployed(env)
     gs = env.game_state
     sid = _active_squad(gs)
 
@@ -267,7 +294,7 @@ def test_distance_decreases_when_the_squad_moves_closer():
 def test_objective_hex_cache_does_not_survive_a_scenario_reload():
     """Le cache d'hexes d'objectif est purge par episode : sinon on decrit l'ancien terrain."""
     env = _make_env()
-    env.reset()
+    _reset_deployed(env)
     gs = env.game_state
     sid = _active_squad(gs)
     env.obs_builder.build_squad_observation(gs, sid)
@@ -275,7 +302,7 @@ def test_objective_hex_cache_does_not_survive_a_scenario_reload():
 
     poison = [(np.array([0.0]), np.array([0.0]))] * len(gs["objectives"])
     gs[ObservationBuilder.OBJECTIVE_HEX_ARRAYS_KEY] = poison
-    env.reset()
+    _reset_deployed(env)
     assert gs.get(ObservationBuilder.OBJECTIVE_HEX_ARRAYS_KEY) is not poison, (
         "cache d'objectifs survivant au reset"
     )

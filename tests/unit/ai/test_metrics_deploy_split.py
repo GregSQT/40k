@@ -11,7 +11,7 @@ ventilation leve.
 
 CE QUI SE CASSE EN SILENCE ICI, et que chaque test cible :
   * un episode impute au MAUVAIS mode : les deux series se contaminent et l'ecart disparait ;
-  * un episode SANS mode (scheduler inactif) impute d'office a `fixed` : la serie se remplit
+  * un episode SANS mode (scheduler inactif) impute d'office a `auto` : la serie se remplit
     d'episodes qu'aucun tirage n'y a places ;
   * une courbe ventilee emise depuis `log_critical_dashboard` : elle serait decalee d'un
     episode, ce dashboard tournant AVANT `log_tactical_metrics` qui produit les valeurs.
@@ -93,20 +93,20 @@ def test_reward_and_win_are_routed_to_the_series_of_their_own_mode() -> None:
     """
     tracker, recording = _tracker("/tmp", window=1)  # noqa: S108 — SummaryWriter jamais ecrit
     _episode(tracker, mode="active", reward=10.0, won=True)
-    _episode(tracker, mode="fixed", reward=90.0, won=False)
+    _episode(tracker, mode="auto", reward=90.0, won=False)
     _episode(tracker, mode="active", reward=10.0, won=True)
 
     assert _values(recording, "00_critical/p_reward_deploy_active") == [10.0, 10.0]
-    assert _values(recording, "00_critical/p_reward_deploy_fixed") == [90.0]
+    assert _values(recording, "00_critical/p_reward_deploy_auto") == [90.0]
     assert _values(recording, "00_critical/r_win_rate_deploy_active") == [1.0, 1.0]
-    assert _values(recording, "00_critical/r_win_rate_deploy_fixed") == [0.0]
+    assert _values(recording, "00_critical/r_win_rate_deploy_auto") == [0.0]
 
 
 def test_an_episode_without_mode_feeds_no_series_at_all() -> None:
-    """Scheduler inactif -> aucune courbe ventilee, PAS un versement d'office dans `fixed`.
+    """Scheduler inactif -> aucune courbe ventilee, PAS un versement d'office dans `auto`.
 
     C'est le defaut le plus tentant : `None` signifie que le mode est laisse au JSON du
-    scenario, donc souvent fixe dans les faits. L'imputer a `fixed` remplirait la serie
+    scenario, donc souvent fixe dans les faits. L'imputer a `auto` remplirait la serie
     d'episodes qu'aucun tirage n'y a places, et l'ecart mesure entre les deux populations ne
     voudrait plus rien dire.
     """
@@ -128,7 +128,7 @@ def test_active_share_tracks_the_real_proportion_of_active_episodes() -> None:
     (`test_no_point_is_emitted_before_the_window_is_full`) qui couvre cet aspect-la.
     """
     tracker, recording = _tracker("/tmp", window=4)  # noqa: S108
-    for mode in ("active", "fixed", "active", "active"):
+    for mode in ("active", "auto", "active", "active"):
         _episode(tracker, mode=mode, reward=1.0, won=True)
 
     assert _values(recording, "00_critical/s_deploy_active_share") == [0.75]
@@ -144,11 +144,11 @@ def test_objectives_held_diff_is_ventilated_through_emit_game() -> None:
     tracker, recording = _tracker("/tmp", window=1)  # noqa: S108
     _episode(tracker, mode="active", reward=1.0, won=True)
     tracker._emit_game("01_VP/d_objectives_held_diff", "objectives_held_diff", 2.0)
-    _episode(tracker, mode="fixed", reward=1.0, won=True)
+    _episode(tracker, mode="auto", reward=1.0, won=True)
     tracker._emit_game("01_VP/d_objectives_held_diff", "objectives_held_diff", -3.0)
 
     assert _values(recording, "00_critical/q_obj_held_diff_deploy_active") == [2.0]
-    assert _values(recording, "00_critical/q_obj_held_diff_deploy_fixed") == [-3.0]
+    assert _values(recording, "00_critical/q_obj_held_diff_deploy_auto") == [-3.0]
     # La courbe agregee reste emise a l'identique : la ventilation s'ajoute, ne remplace pas.
     assert _values(recording, "01_VP/d_objectives_held_diff") == [2.0, -3.0]
 

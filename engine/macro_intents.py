@@ -238,6 +238,22 @@ ACTION_FAMILIES = (
 )
 
 
+def open_placement_slots(actions) -> list:
+    """SOURCE UNIQUE de « quelles actions ouvertes sont des POSES » (deploiement 03.02, ingress 20.04).
+
+    Filtre sur `DEPLOY_STRATEGY_SLOTS` (4-8) et non sur `DEPLOY_SLOTS` (4-11) : seuls les
+    premiers portent une strategie, cf. le commentaire de leur definition. Surtout, `ACTION_WAIT`
+    en est EXCLU — au deploiement il n'y est pas une attente, le jouer met l'unite en RESERVES
+    STRATEGIQUES (20.01). C'est une decision de LISTE, jamais un choix de pose : tout tirage qui
+    l'inclut met des unites en reserves sans que personne ne l'ait voulu (mesure du chantier
+    04c : TacticalBot, 400 deploiements sur 400 en reserves).
+
+    `actions` : itere des ids d'actions OUVERTES (masque deja traduit). Rend la sous-liste des
+    poses, dans l'ordre recu.
+    """
+    return [a for a in actions if a in DEPLOY_STRATEGY_SLOTS]
+
+
 def action_family(action_int: int, phase: str, *, setting_up: bool = False) -> str:
     """Famille de `action_int`, sachant la PHASE ou il a ete joue.
 

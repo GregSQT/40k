@@ -22,6 +22,8 @@ depasse la phase de deploiement.
 """
 from __future__ import annotations
 
+import sys
+
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -29,10 +31,18 @@ import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 # Rosters a reserves DECLAREES des deux cotes (agent ET adversaire) — cf. l'en-tete de la fixture.
+from tests.unit.engine._config_helpers import both_terrains
+
 SCENARIO = (
     PROJECT_ROOT / "config" / "agents" / "ArmageddonAgent" / "scenarios" / "training"
     / "reserves_full_episode_fixture1.json"
 )
+
+# Ce fichier est REJOUÉ SUR LES DEUX TERRAINS : ce qu'il vérifie dépend des murs, des zones de
+# déploiement ou des pièces d'objectif, et ces trois-là changent entièrement entre `terrain-mc1`
+# et `terrain-mc2`. La fixture réécrit `SCENARIO` le temps de chaque test (cf. `both_terrains`).
+_terrain = both_terrains(sys.modules[__name__])
+
 
 SENTINEL_COL = -1
 # 0-3 : echantillon de base. 16 et 18 elargissent la couverture de trajectoires (leurs parties se

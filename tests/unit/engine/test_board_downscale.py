@@ -317,7 +317,7 @@ def test_squads_stay_coherent_on_the_real_scenario(board_x1) -> None:
     # que son `active_ratio_start` est non nul, une graine peut rendre un plateau où AUCUNE
     # figurine n'est encore posée (toutes à (-1,-1)) et le test observe alors autre chose que ce
     # qu'il annonce. Le mode est donc imposé, jamais espéré d'un tirage (cf.
-    # `test_roster_fixed_positions`).
+    # `test_auto_deployment_positions`).
     assert engine.training_config is not None
     engine.training_config = dict(engine.training_config)
     engine.training_config["deployment_mode_schedule"] = {
@@ -328,7 +328,19 @@ def test_squads_stay_coherent_on_the_real_scenario(board_x1) -> None:
     for seed in range(4):
         engine.reset(seed=seed)
         state = engine.game_state
-        assert state["deployment_mode_schedule_mode"] == "fixed", f"seed {seed}: mode non imposé"
+        assert state["deployment_mode_schedule_mode"] == "auto", f"seed {seed}: mode non imposé"
+        # `auto` (ex-`fixed`) joue une VRAIE phase de déploiement : les figurines ne sont posées
+        # qu'à sa sortie, alors que les positions du roster les posaient dès le reset. Sans cette
+        # boucle, `cells` serait vide et l'assertion « aucune figurine posée » sauterait —
+        # le relayout mesuré ici ne serait plus observé du tout.
+        import numpy as _np
+
+        _steps = 0
+        while _steps < 400 and str(state["phase"]) == "deployment":
+            _legal = _np.flatnonzero(engine.get_action_mask())
+            assert _legal.size > 0, f"seed {seed}: plus aucune action légale en déploiement"
+            engine.step(int(_legal[0]))
+            _steps += 1
         # Les figurines HORS TABLE (réserves 20.01, tirage `training_random`) partagent toutes la
         # sentinelle (-1,-1) : les compter ferait voir une superposition là où il n'y a
         # simplement pas de position. Le relayout mesuré ici ne concerne que les figurines posées.

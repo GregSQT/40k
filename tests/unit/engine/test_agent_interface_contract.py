@@ -133,8 +133,8 @@ def _new_engine():
         quiet=True,
         gym_training_mode=True,
     )
-    # Déploiement actif garanti + `deployment_random_mix` à l'arrêt. Lus PAR ÉPISODE, donc
-    # l'épinglage doit précéder le `reset`. Le POURQUOI est dans `_config_helpers`.
+    # Déploiement actif garanti. Lu PAR ÉPISODE, donc l'épinglage doit précéder le `reset`.
+    # Le POURQUOI est dans `_config_helpers`.
     pin_active_deployment(engine)
     engine.reset(seed=0)
     return engine

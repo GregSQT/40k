@@ -23,15 +23,25 @@ Verrous :
 """
 from __future__ import annotations
 
+import sys
+
 from pathlib import Path
 
 import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+from tests.unit.engine._config_helpers import both_terrains
+
 SCENARIO = (
     PROJECT_ROOT / "config" / "agents" / "ArmageddonAgent" / "scenarios" / "training"
     / "scenario_training_armageddon1.json"
 )
+
+# Ce fichier est REJOUÉ SUR LES DEUX TERRAINS : ce qu'il vérifie dépend des murs, des zones de
+# déploiement ou des pièces d'objectif, et ces trois-là changent entièrement entre `terrain-mc1`
+# et `terrain-mc2`. La fixture réécrit `SCENARIO` le temps de chaque test (cf. `both_terrains`).
+_terrain = both_terrains(sys.modules[__name__])
+
 
 UNDEPLOYED = (-1, -1)
 

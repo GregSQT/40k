@@ -235,9 +235,6 @@ Décide, épisode par épisode, si la partie est rejouée en placement **fixe** 
 scénario) ou en **déploiement actif** (l'agent place lui-même ses figurines). La probabilité de
 « actif » monte linéairement de `active_ratio_start` à `active_ratio_end` sur la durée du run.
 
-À ne pas confondre avec `deployment_random_mix`, son voisin immédiat dans le fichier, qui
-randomise les **actions** d'un déploiement déjà actif.
-
 | Clé | Type | Contrainte |
 |---|---|---|
 | `enabled` | bool | — |
