@@ -1,6 +1,6 @@
 # Sécurité — Analyse et plan d'implémentation
 
-> Date : 2026-07-15 — mise à jour 2026-08-10 (étapes 1 et 2 faites : F1, F6, F7, F11, F12, F14 résolus ; ancres de ligne rafraîchies). **Reste à faire : étapes 3 à 8** (F2, F3, F4, F5, F8, F9, F10, F13).
+> Date : 2026-07-15 — mise à jour 2026-08-10 (étapes 1 et 2 faites : F1, F6, F7, F11, F12, F14 résolus ; ancres de ligne re-vérifiées ligne à ligne ; étape 5 réécrite à partir de la stack Docker existante). **Reste à faire : étapes 3 à 8** (F2, F3, F4, F5, F8, F9, F10, F13).
 > Périmètre : backend Flask (`services/api_server.py`), frontend React/Vite, base auth `config/users.db`.
 > Contexte : jeu hobby, aujourd'hui local (WSL2), **bientôt exposé sur Internet pour des tests publics**.
 
@@ -28,15 +28,15 @@ Menaces retenues :
 | Domaine | Implémentation | Référence |
 |---|---|---|
 | Hachage des mots de passe | PBKDF2-HMAC-SHA256 avec sel aléatoire 16 octets (`secrets.token_bytes`) | `api_server.py:1076` |
-| Authentification (mécanisme) | Bearer token de session (`secrets.token_urlsafe(48)`), stocké dans `sessions` (SQLite) | `api_server.py:2256`, `api_server.py:1156` |
+| Authentification (mécanisme) | Bearer token de session (`secrets.token_urlsafe(48)`), stocké dans `sessions` (SQLite) | `api_server.py:2295`, `api_server.py:1156` |
 | Autorisation (RBAC) | Tables `profiles`, `profile_game_modes`, `profile_options` ; résolution des permissions par profil | `api_server.py:1120`, `api_server.py:1217` |
 | Gestion mémoire | Python + TypeScript (mémoire managée) ; module WASM LoS en **Rust** (`frontend/wasm-los/`), memory-safe. Aucun code C/C++. | — |
-| Endpoints replay | `/api/replay/file/<filename>` **et** `/api/replay/parse` filtrent le path traversal (`..`, `/`, `\` rejetés, extension `.log` imposée) | `api_server.py:4770`, `api_server.py:4729` |
+| Endpoints replay | `/api/replay/file/<filename>` **et** `/api/replay/parse` filtrent le path traversal (`..`, `/`, `\` rejetés, extension `.log` imposée) | `api_server.py:4747`, `api_server.py:4679` |
 | Frontend build | Pas de source maps dans `dist/` | vérifié |
-| **F1 (ex-critique) — RCE via debugger Werkzeug** | **Résolu.** `app.run(host='127.0.0.1', port=5001, debug=False)` — plus de `debug=True`/`0.0.0.0`. | `api_server.py:4874` |
-| **F6 (ex-critique) — API non authentifiée** | **Résolu (étape 1).** `@app.before_request` ferme les 31 routes par défaut ; seules les vues portant `@public_endpoint` (`login_user`, `health_check`, `serve_frontend`) + les préflights `OPTIONS` sont ouvertes. RBAC appliqué dans la porte. Côté front, `apiFetch()` attache le Bearer sur tout `/api/*`. | `api_server.py:2065`, `api_server.py:2153`, `frontend/src/services/apiFetch.ts` |
+| **F1 (ex-critique) — RCE via debugger Werkzeug** | **Résolu.** `app.run(host='127.0.0.1', port=5001, debug=False)` — plus de `debug=True`/`0.0.0.0`. | `api_server.py:4851` |
+| **F6 (ex-critique) — API non authentifiée** | **Résolu (étape 1).** `@app.before_request` ferme les 30 routes par défaut ; seules les vues portant `@public_endpoint` (`health_check`, `login_user`, `serve_frontend`) + les préflights `OPTIONS` sont ouvertes. RBAC appliqué dans la porte. Côté front, `apiFetch()` attache le Bearer sur tout `/api/*`. | `api_server.py:2192` (porte), `api_server.py:2247`/`2263`/`4826` (les 3 vues publiques), `frontend/src/services/apiFetch.ts` |
 | **F12 (ex-haute) — inscription ouverte** | **Résolu (étape 1).** `/api/auth/register` **supprimée** (0 occurrence) ; comptes créés manuellement en SQL. | vérifié par grep |
-| **F14 (ex-moyenne) — filtre `replay/parse`** | **Résolu (étape 1).** Filtre aligné sur `/api/replay/file` : `.log` imposé, tout séparateur et `..` rejetés. | `api_server.py:4729-4735` |
+| **F14 (ex-moyenne) — filtre `replay/parse`** | **Résolu (étape 1).** Filtre aligné sur `/api/replay/file` : `.log` imposé, tout séparateur et `..` rejetés. | `api_server.py:4706-4712` |
 
 ### Failles identifiées
 
@@ -45,9 +45,10 @@ Menaces retenues :
 | F7 | ✅ Résolu | Répertoire contrôlé par le client + `pickle.load` | Étape 2 : répertoire fixé par le serveur (`W40K_PERSIST_DIR`), `directory` de requête rejeté, pickle des snapshots supprimé, et dépickle des saves restreint à une liste blanche de classes (`_safe_loads`). | `api_server.py` (`_resolve_persist_dir`), `game_saves.py` (`_ALLOWED_CLASSES`) |
 | F11 | ✅ Résolu | Endpoint `pick-directory` exécutait `subprocess`/`powershell.exe` | Route supprimée (étape 2) ; plus aucun `subprocess` atteignable. Sélecteur natif retiré du front. | — |
 | F13 | Moyenne | Token de session en `localStorage` | Le token est stocké dans `localStorage` → volable par tout XSS (token = accès complet). Cible : cookie `HttpOnly`+`Secure`+`SameSite`. À défaut, risque à acter explicitement. | `frontend/src/auth/authStorage.ts:23,40,44` |
-| F2 | **Haute** | Sessions sans expiration | Table `sessions` : `created_at` seulement ; validation `WHERE s.token = ?` sans condition temporelle. Token volé = valide à vie. Le message "Invalid or expired session" est trompeur. | `api_server.py:1255-1259` (table), `api_server.py:1172` (validation) |
-| F8 | **Haute** | Pas de rate limiting sur le login | Brute-force des mots de passe possible à pleine vitesse depuis Internet. | `api_server.py:2223` |
-| F9 | **Haute** | Flask dev server + pas de TLS | Le serveur de dev Werkzeug n'est pas fait pour Internet (perf, robustesse). Sans HTTPS, tokens et mots de passe passent en clair. Indépendant de F1 (déjà résolu) : même avec `debug=False`, Werkzeug reste un serveur de dev. | `api_server.py:4874` |
+| F2 | **Haute** | Sessions sans expiration | Table `sessions` : `created_at` seulement ; validation `WHERE s.token = ?` sans condition temporelle. Token volé = valide à vie. Le message "Invalid or expired session" est trompeur. | `api_server.py:1255-1259` (table), `api_server.py:1173` (validation) |
+| F8 | **Haute** | Pas de rate limiting sur le login | Brute-force des mots de passe possible à pleine vitesse depuis Internet. | `api_server.py:2264` (`login_user`) |
+| F9 | **Haute** | Flask dev server + pas de TLS | Le serveur de dev Werkzeug n'est pas fait pour Internet (perf, robustesse). Sans HTTPS, tokens et mots de passe passent en clair. Indépendant de F1 (déjà résolu) : même avec `debug=False`, Werkzeug reste un serveur de dev. Le `Dockerfile` lance ce même dev server (`CMD python services/api_server.py`) — la conteneurisation n'a rien changé à F9 (cf. étape 5). | `api_server.py:4851`, `Dockerfile` |
+| F15 | **Haute** | Backend conteneurisé injoignable + tournant en root | Constaté le 2026-08-10 : `app.run(host='127.0.0.1')` dans un conteneur n'écoute que sur le loopback **du conteneur** → ni le mapping `5001:5001` ni le `proxy_pass http://backend:5001/` de nginx ne l'atteignent. Et `docker-compose.yml` force `user: "0:0"`, ce qui annule le `USER appuser` du `Dockerfile` : le process tourne en root. | `Dockerfile`, `docker-compose.yml`, `frontend/Dockerfile` |
 | F3 | Moyenne | CORS ouvert à toutes les origines | `CORS(app, ...)` sans `origins` = `*`. | `api_server.py:1432` |
 | F10 | Moyenne | Traceback complet renvoyé au client | Le handler global d'exceptions renvoie type + message + traceback dans la réponse JSON → révèle chemins, structure du code, versions. Utile en dev, à désactiver en prod (log serveur uniquement). | `api_server.py:1438` |
 | F4 | Faible→Moyenne | Pas de journal d'audit | Aucune trace des logins réussis/échoués, IP, créations d'utilisateurs. Indispensable pour détecter une attaque en cours une fois exposé. | — |
@@ -79,7 +80,7 @@ Menaces retenues :
 
 Ordre = priorité. **Les étapes 1 à 5 sont des prérequis absolus avant toute exposition Internet.**
 
-> F1 (debugger Werkzeug exposé) est **résolu** (`api_server.py:4874` : `debug=False`, `host='127.0.0.1'`). L'étape 1 initiale (F1+F7+F11) a donc été scindée : l'auth globale (F6, ex-étape 2) est passée en premier — elle a supprimé l'exposition **anonyme** de F7/F11. L'étape 2 a ensuite fermé l'écriture arbitraire, supprimé `pick-directory` et restreint le dépickle des saves : F7 et F11 sont clos.
+> F1 (debugger Werkzeug exposé) est **résolu** (`api_server.py:4851` : `debug=False`, `host='127.0.0.1'`). L'étape 1 initiale (F1+F7+F11) a donc été scindée : l'auth globale (F6, ex-étape 2) est passée en premier — elle a supprimé l'exposition **anonyme** de F7/F11. L'étape 2 a ensuite fermé l'écriture arbitraire, supprimé `pick-directory` et restreint le dépickle des saves : F7 et F11 sont clos.
 
 ### Étape 1 — Authentification sur toutes les routes (F6, F12, F14) ✅ faite le 2026-08-02
 
@@ -138,19 +139,36 @@ Ordre = priorité. **Les étapes 1 à 5 sont des prérequis absolus avant toute 
 ### Étape 4 — Réduction de la surface d'information (F3, F10)
 **Fichier :** `services/api_server.py`
 - CORS : `origins` limité à l'URL du frontend, surchargeable par `W40K_CORS_ORIGINS` (liste séparée par virgules). Variable définie mais vide → erreur au démarrage.
-- Handler d'exceptions : traceback dans la réponse JSON **uniquement si `W40K_DEBUG=true`** ; en prod, log serveur complet + réponse générique avec un identifiant d'erreur corrélable au log.
+- Handler d'exceptions : traceback dans la réponse JSON **uniquement si un flag de debug est actif** ; en prod, log serveur complet + réponse générique avec un identifiant d'erreur corrélable au log.
+  > ⚠️ **Ne pas réutiliser `W40K_DEBUG` tel quel.** Cette variable existe déjà et pilote le **debug moteur** (`api_server.py:1940`, `api_server.py:4578`, `engine/phase_handlers/fight_handlers.py:1841`), pas le format des réponses d'erreur. `docker-compose.yml` la met déjà à `"false"` : croire que la prod est donc protégée du traceback serait **faux** — le handler (`api_server.py:1438`) renvoie `"traceback"` inconditionnellement. Soit une variable distincte (`W40K_EXPOSE_TRACEBACK`), soit un élargissement assumé et documenté de `W40K_DEBUG` aux deux usages.
 - Token de session (F13) : cible = cookie `HttpOnly`+`Secure`+`SameSite=Strict` au lieu de `localStorage` (immunise contre le vol par XSS). Chantier front + back non trivial ; si reporté, acter explicitement le risque en §5.
 
 **Validation :** fetch cross-origin bloqué ; exception en prod → pas de traceback dans la réponse, traceback présent dans le log serveur.
 
-### Étape 5 — Infrastructure d'exposition (F9)
-**Nouveaux fichiers :** config de déploiement (à définir selon l'hébergement choisi)
-- Remplacer le dev server par un serveur WSGI de production : `waitress` (simple, pur Python) ou `gunicorn`.
-- Reverse proxy devant (Caddy recommandé : HTTPS automatique via Let's Encrypt, config minimale) servant aussi le build frontend statique (`frontend/dist/`).
-- Le process Python tourne sous un utilisateur dédié sans droits d'écriture hors `logs/` (limite les dégâts de toute écriture arbitraire résiduelle).
-- Ne jamais exposer : `config/users.db`, `ai/models/`, le repo git.
+### Étape 5 — Infrastructure d'exposition (F9, F15)
 
-**Validation :** accès HTTPS fonctionnel, HTTP redirigé, port 5001 non accessible directement depuis l'extérieur.
+> ⚠️ **Ce n'est pas un chantier vierge.** Une stack Docker existe déjà dans le dépôt et n'était pas
+> décrite ici (constaté le 2026-08-10). L'étape 5 est donc un **durcissement de l'existant**, pas une
+> création. Ne pas repartir d'une feuille blanche : ce qui existe se corrige.
+
+**État réel de la stack (vérifié dans les fichiers, 2026-08-10)**
+
+| Fichier | Ce qu'il fait déjà | Écart à traiter |
+|---|---|---|
+| `Dockerfile` | Image python:3.11-slim, `requirements.runtime.txt`, `useradd appuser` + `USER appuser`, `EXPOSE 5001`, healthcheck sur `/api/health` | `CMD ["python", "services/api_server.py"]` = **dev server Werkzeug** (F9 intact) |
+| `docker-compose.yml` | backend + frontend, `restart: unless-stopped`, `users.db`/`ai/models`/`runtime` montés en volumes, `W40K_DEBUG=false` | `user: "0:0"` **annule** le `USER appuser` → root (F15) ; `ports: 5001:5001` publie le backend en clair sur l'hôte |
+| `frontend/Dockerfile` | Build Vite (`VITE_API_URL=/api`) puis nginx:1.27-alpine servant `dist/`, `proxy_pass` vers `backend:5001`, `X-Real-IP` et `X-Forwarded-For` posés | `listen 80` **seul** : aucun TLS, aucune redirection HTTP→HTTPS |
+
+**À faire**
+- Remplacer le `CMD` par un serveur WSGI de production : `waitress` (simple, pur Python) ou `gunicorn`, ajouté à `requirements.runtime.txt`. Le `app.run(...)` de `api_server.py:4851` reste le chemin de **développement local** (`host='127.0.0.1'` y est correct et doit le rester : c'est lui qui garantit qu'un lancement direct n'expose rien).
+- Faire écouter le process de production sur `0.0.0.0` **à l'intérieur du conteneur uniquement** (via le WSGI, pas en modifiant `app.run`) — sans quoi ni nginx ni le mapping de port ne l'atteignent (F15).
+- Retirer `user: "0:0"` du compose : le `USER appuser` du `Dockerfile` doit s'appliquer. Vérifier que `W40K_PERSIST_DIR` pointe alors sur un volume inscriptible par `appuser` (montage `runtime`), et que le reste de `/app` ne l'est pas.
+- Retirer le `ports: 5001:5001` du backend : seul le frontend (nginx) doit être publié. Le backend reste joignable par le réseau interne compose.
+- TLS sur nginx : certificat Let's Encrypt (companion certbot, ou bascule sur Caddy qui l'automatise), `listen 443 ssl`, redirection 80→443. La config nginx est aujourd'hui écrite en `printf` dans le `Dockerfile` — la sortir en fichier versionné avant de la complexifier.
+- Ne jamais exposer : `config/users.db`, `ai/models/`, le repo git. NB : `COPY . /app` embarque **tout le dépôt** dans l'image, `.git` compris s'il n'est pas exclu — vérifier/écrire un `.dockerignore`.
+- Une fois nginx en place, F4 (étape 7) peut lire `X-Forwarded-For` : il est déjà posé par le proxy.
+
+**Validation :** `docker compose up` → frontend en HTTPS fonctionnel, HTTP redirigé, port 5001 **non** accessible depuis l'hôte, `docker exec ... whoami` → `appuser`, healthcheck vert.
 
 ### Étape 6 — Analyse statique automatisée (F5)
 **Nouveau fichier :** `scripts/security_check.sh`
@@ -191,11 +209,11 @@ Ordre = priorité. **Les étapes 1 à 5 sont des prérequis absolus avant toute 
 | Étape | Failles | Statut | Date |
 |---|---|---|---|
 | — | F1 (debugger Werkzeug) | ✅ Résolu | ≤2026-08-02 |
-| 1. Auth sur toutes les routes | F6, F12, F14 | ✅ Fait — vérifié dans le code le 2026-08-10 (31 routes, porte globale, `register` supprimée, `apiFetch`) | 2026-08-02 |
+| 1. Auth sur toutes les routes | F6, F12, F14 | ✅ Fait — vérifié dans le code le 2026-08-10 (30 routes, porte globale, `register` supprimée, `apiFetch`) | 2026-08-02 |
 | 2. Fermer vecteurs écriture/désérialisation | F7, F11 | ✅ Fait (runtime PvP validé) | 2026-08-10 |
 | 3. Durcissement sessions + rate limiting | F2, F8 | ⬜ À faire | — |
 | 4. Réduction surface d'information | F3, F10, F13 | ⬜ À faire | — |
-| 5. Infra d'exposition (WSGI + proxy + TLS) | F9 | ⬜ À faire | — |
+| 5. Infra d'exposition (WSGI + proxy + TLS) | F9, F15 | 🟨 Partiel — stack Docker + nginx existante (non documentée jusqu'au 2026-08-10), mais dev server, root et sans TLS ; **ne pas déployer en l'état** | — |
 | 6. Analyse statique | F5 | ⬜ À faire | — |
 | 7. Journal d'audit | F4 | ⬜ À faire | — |
 | 8. Passe finale (ZAP, MFA ?, comptes) | — | ⬜ À faire | — |
