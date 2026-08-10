@@ -242,6 +242,50 @@ def test_aucune_creation_paresseuse_de_compteur():
     assert "dead_unit_actions" not in source, "code mort réintroduit"
 
 
+#: Buckets qui n'ont pas de compteur `{1:…, 2:…}` et se posent donc à la main.
+SCALAR_BUCKETS = {
+    'wrong_phase':          lambda st: st['action_phase_accuracy']['move'].update({'wrong': 1}),
+    'double_activation':    lambda st: st['double_activation_by_phase'].update({'MOVE': 1}),
+    'special_rules_invalid': lambda st: st['special_rule_usage'].__setitem__(('regle_inconnue', 'Type'), {1: 1, 2: 0}),
+    'weapon_rules_invalid': lambda st: st['weapon_rule_usage'].__setitem__(('REGLE_INCONNUE', 'Arme (Type)'), {1: 1, 2: 0}),
+    'episodes_ending':      lambda st: st['episodes_without_end'].append(1),
+    'core_issues':          lambda st: st['parse_errors'].append({'error': 'x'}),
+    'state_resync':         lambda st: st['state_resync'].update({'dead_missed': 1}),
+}
+
+
+@pytest.mark.parametrize("bucket", sorted(SCALAR_BUCKETS))
+def test_les_sections_hors_phase_entrent_aussi_dans_le_total(bucket, _empty_stats):
+    """Toute ligne ❌ du SUMMARY doit peser dans le TOTAL — c'est le second défaut trouvé.
+
+    §1.6 (double-activation) et §1.7 (règles invalides) s'affichaient en ❌ et n'entraient dans
+    aucun total : un run imprimait « ❌ 1.6 Double-activation par phase : 1 » puis
+    « ✅ Aucune erreur détectée ». Deux verdicts contradictoires dans le même rapport, et c'est
+    le second — le plus court — qu'on lit.
+    """
+    stats = _fresh_stats(_empty_stats)
+    before = an.error_totals(stats)['total']
+    SCALAR_BUCKETS[bucket](stats)
+    after = an.error_totals(stats)
+    assert after[bucket] > 0, f"le bucket '{bucket}' ne voit pas sa propre donnée"
+    assert after['total'] == before + after[bucket], (
+        f"'{bucket}' n'entre pas dans le TOTAL : {after['total']} au lieu de {before + after[bucket]}"
+    )
+
+
+def test_le_total_est_la_somme_de_tous_les_buckets(_empty_stats):
+    """Aucun terme ne s'ajoute au total hors des buckets, et aucun bucket n'en est exclu.
+
+    C'est cette propriété — et non une liste à maintenir — qui garantit qu'un bucket NEUF entre
+    dans le total sans qu'on ait à y penser.
+    """
+    stats = _fresh_stats(_empty_stats)
+    stats['wall_collisions'][1] = 3
+    stats['double_activation_by_phase']['FIGHT'] = 2
+    totals = an.error_totals(stats)
+    assert totals['total'] == sum(v for k, v in totals.items() if k != 'total')
+
+
 def test_le_summary_et_le_total_cli_lisent_le_meme_calcul():
     """La propriété qui rend la divergence impossible, vérifiée sur le CODE et non sur un run.
 
@@ -255,6 +299,10 @@ def test_le_summary_et_le_total_cli_lisent_le_meme_calcul():
     assert source.count("def error_totals(") == 1
     assert source.count("error_totals(stats)") >= 2, "un des deux sites a cessé d'appeler le calcul partagé"
     # Et surtout : plus aucune somme écrite à la main sous ces noms.
+    # Le total de la CLI ne doit plus RECOMPOSER quoi que ce soit : il lit `['total']`.
+    assert "total_errors = error_totals(stats)['total']" in source, (
+        "le total de la CLI est de nouveau recomposé à la main"
+    )
     for name in ("move_errors", "shooting_errors", "charge_errors", "fight_errors"):
         for line in source.split("\n"):
             stripped = line.strip()

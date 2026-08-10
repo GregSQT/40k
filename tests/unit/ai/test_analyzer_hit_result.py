@@ -54,6 +54,33 @@ def test_le_seuil_lu_est_leffectif_pas_le_base():
     assert parse_hit_roll_and_target("- Hit 4(3+) - Wound 5(4+)") == (4, 3)
 
 
+def test_une_blessure_automatique_reste_une_touche_reussie():
+    """[LETHAL HITS] 24.23 : `wound_roll = None` → le journal écrit `Wound None(4+)`.
+
+    C'est un segment `Wound` comme un autre, donc une touche RÉUSSIE. Une regex exigeant des
+    chiffres après `Wound` ne le reconnaissait pas et déclarait l'attaque manquée : chaque
+    touche critique d'une arme [LETHAL HITS] était comptée en faute. Aucun roster du projet ne
+    porte la règle aujourd'hui — le défaut était armé, pas absent.
+    """
+    from ai.analyzer_hit import WOUND_SEGMENT_PRESENT_RE
+
+    lethal = "- Hit 6(3+) - Wound None(4+) - Save 2(3+) - Dmg:1HP"
+    assert WOUND_SEGMENT_PRESENT_RE.search(lethal), "la blessure automatique doit compter comme touche"
+    # …et une ligne qui s'arrête après la touche reste bien un ÉCHEC.
+    assert not WOUND_SEGMENT_PRESENT_RE.search("- Hit 2(3+)")
+
+
+def test_lethal_hits_ne_declenche_aucune_faute_de_bout_en_bout(tmp_path):
+    """Le jumeau du test ci-dessus par le VRAI chemin : sans lui, la regex seule ne prouve rien."""
+    lethal = (
+        f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT Unit 101{T} with [Heavy Bolt Pistol]"
+        " - Hit 6(3+) - Wound None(4+) - Save 2(3+) - Dmg:1HP [R:+0.0] [SUCCESS]\n"
+    )
+    stats = _stats(tmp_path, lethal)
+    assert stats["shoot_hit_result_mismatch"][1] == 0, stats["first_error_lines"]["shoot_hit_result_mismatch"][1]
+    assert stats["shoot_hit_result_checked"][1] == 1, "la ligne doit bien avoir été jugée"
+
+
 def test_une_ligne_sans_jet_de_touche_nest_pas_jugee():
     """[TORRENT] 24.37 et [SUSTAINED HITS] 24.36 n'ont AUCUN jet : `Hit None(None+)`.
 

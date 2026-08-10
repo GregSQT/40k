@@ -3537,7 +3537,6 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     )
     rule_to_units = stats.get('rule_to_units', {})  # get allowed: optional stats
     weapon_rule_to_weapons = stats.get('weapon_rule_to_weapons', {})  # get allowed: optional stats
-    special_rule_usage_stats = require_key(stats, 'special_rule_usage')
     weapon_rule_usage_stats = require_key(stats, 'weapon_rule_usage')
     unit_types_seen = set(require_key(stats, "unit_types_seen"))
     unit_type_suffixes = tuple(f" ({unit_type})" for unit_type in unit_types_seen)
