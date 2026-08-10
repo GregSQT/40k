@@ -13,11 +13,10 @@ depuis les ``info`` d'un step gym cote callback. Deux defauts, un seul remplacan
    dans le moteur, sur ``action_logs``, la meme source que shoot_kills / melee_kills, ou le
    camp de chaque ligne est une donnee du journal et non une deduction sur l'ordre des steps.
 
-CE FICHIER JOUE DE VRAIS EPISODES, sur le scenario melee de ``scripts/smoke_t5_bare`` — le
-seul montage du depot ou une charge est reellement declarable (il place un Carnifex a portee
-de charge, ce dont ``test_squad_charge_target_parity`` fait deja son critere). La ventilation
-seat-aware, elle, se verrouille dans ``test_episode_combat_counters`` : son harnais en memoire
-est le seul a pouvoir instancier les DEUX sieges.
+CE FICHIER JOUE DE VRAIS EPISODES, sur le scenario melee de ``scripts/smoke_t5_bare`` dont les
+deux duels sont ECARTES (``CHARGE_SCENARIO``) : la charge y est CONSTRUITE, plus esperee d'une
+graine. La ventilation seat-aware, elle, se verrouille dans ``test_episode_combat_counters`` :
+son harnais en memoire est le seul a pouvoir instancier les DEUX sieges.
 """
 
 from __future__ import annotations
@@ -48,24 +47,66 @@ from engine.w40k_core import W40KEngine  # noqa: E402
 #: test_episode_combat_counters sur les tests qui esperent leur situation au lieu de l'exiger).
 _SEEDS = (1, 2, 3, 4, 5, 6, 7, 8)
 
+#: Ecart, en SUBHEXES, entre les deux figurines de chaque duel de `CHARGE_SCENARIO`.
+#:
+#: `MELEE_SCENARIO` colle ses duels a 14 et 22 subhexes : les deux camps se retrouvent engages
+#: sans avoir a charger, et la phase de charge n'est presque jamais exposee. Mesure sur les 8
+#: graines de `_SEEDS` : ZERO episode ou les deux camps declarent une charge, ce qui rendait
+#: vacants les tests de ventilation le jour ou 17.01 (traversee MONSTER/VEHICLE) a change les
+#: trajectoires. A 25 subhexes (5" sur un plateau x5), les deux camps demarrent HORS zone
+#: d'engagement et hors de portee d'un simple deplacement (terminer dans la zone d'engagement
+#: adverse est illegal) : le contact ne s'obtient plus que par une charge, des DEUX cotes.
+_CHARGE_GAP_SUBHEX = 25
+
+#: Le scenario melee, duels ECARTES : meme roster, memes regles, positions de depart choisies.
+#: Les lignes 0/1 et 2/3 de `MELEE_SCENARIO` sont ses deux duels (joueur 1 puis joueur 2).
+CHARGE_SCENARIO: Dict[str, Any] = {
+    **MELEE_SCENARIO,
+    "units": [
+        {**MELEE_SCENARIO["units"][0], "col": 60, "row": 200},
+        {**MELEE_SCENARIO["units"][1], "col": 60, "row": 200 + _CHARGE_GAP_SUBHEX},
+        {**MELEE_SCENARIO["units"][2], "col": 60, "row": 255},
+        {**MELEE_SCENARIO["units"][3], "col": 60, "row": 255 + _CHARGE_GAP_SUBHEX},
+    ],
+}
+
 
 @pytest.fixture(scope="module")
 def melee_scenario_file():
-    """Scenario ecrit UNE fois pour tout le module : son contenu (`MELEE_SCENARIO`) est constant.
+    """Scenario ecrit UNE fois pour tout le module : son contenu (`CHARGE_SCENARIO`) est constant.
 
     Portee module et pas fonction parce que `_cached_play` indexe ses episodes sur la seule
     graine : le chemin doit designer le meme scenario d'un test a l'autre.
     """
     with tempfile.TemporaryDirectory() as td:
         path = Path(td) / "melee.json"
-        path.write_text(json.dumps(MELEE_SCENARIO))
+        path.write_text(json.dumps(CHARGE_SCENARIO))
         yield str(path)
+
+
+def _pick_action(engine: W40KEngine, legal: Any, rng: np.random.Generator) -> int:
+    """Charge : la premiere action legale autre que `wait`. Toute autre phase : tirage au sort."""
+    if not legal.size:
+        return SQUAD_ACTION_WAIT
+    if engine.game_state["phase"] == "charge":
+        declared = [int(a) for a in legal if int(a) != SQUAD_ACTION_WAIT]
+        if declared:
+            return declared[0]
+    return int(rng.choice(legal))
 
 
 def _play(
     scenario_file: str, seed: int, inject: List[Dict[str, Any]] | None = None,
 ) -> Tuple[W40KEngine, Dict[str, Any]]:
     """Joue un episode complet en actions legales tirees au sort ; rend (moteur, tactical_data).
+
+    UNE exception au tirage : en phase de CHARGE, l'action jouee est la premiere legale qui
+    n'est pas `wait`, donc une declaration de charge. C'est le sujet meme du fichier : le tirer
+    au sort revient a esperer d'une graine ce que le test pretend observer. Le montage
+    (`CHARGE_SCENARIO`) decide de l'occasion, la politique decide seulement de la saisir —
+    meme partage que `_play_until` dans test_episode_combat_counters. Toutes les autres phases
+    restent tirees au sort : c'est d'elles que viennent les situations de deplacement et de tir
+    exigees plus bas.
 
     `inject` ajoute des lignes au journal juste apres le reset. ``action_logs`` n'est remis a
     zero QUE par ``reset()`` et n'est jamais purge en cours d'episode : ces lignes sont donc
@@ -83,7 +124,7 @@ def _play(
     info: Dict[str, Any] = {}
     for _ in range(4000):
         legal = np.flatnonzero(engine.get_action_mask())
-        action = int(rng.choice(legal)) if legal.size else SQUAD_ACTION_WAIT
+        action = _pick_action(engine, legal, rng)
         _obs, _reward, terminated, truncated, info = engine.step(action)
         if terminated or truncated:
             break

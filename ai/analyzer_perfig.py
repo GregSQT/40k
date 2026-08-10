@@ -16,7 +16,7 @@ Aucun fallback masquant une erreur : si une donnée requise manque, on lève.
 """
 
 import re
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, FrozenSet, List, Optional, Set, Tuple, Union
 
 from engine.hex_utils import compute_occupied_hexes, min_distance_between_sets
 from shared.data_validation import require_key
@@ -52,7 +52,7 @@ Base = Tuple[str, BaseSize]
 # (logs de test synthétiques) — jamais pour masquer une erreur métier.
 _DEFAULT_BASE: Base = ("round", 1)
 
-_fp_cache: Dict[Tuple[int, int, str, Union[int, Tuple[int, ...]]], frozenset] = {}
+_fp_cache: Dict[Tuple[int, int, str, Union[int, Tuple[int, ...]]], FrozenSet[Tuple[int, int]]] = {}
 
 
 def parse_base_token(token: str) -> Base:
@@ -136,7 +136,7 @@ def parse_models_heights(text: str) -> Optional[Dict[str, Dict[str, float]]]:
     return parse_models_and_heights(text)[1]
 
 
-def _model_footprint(col: int, row: int, base: Base) -> frozenset:
+def _model_footprint(col: int, row: int, base: Base) -> FrozenSet[Tuple[int, int]]:
     shape, size = base
     key = (col, row, shape, size if isinstance(size, int) else tuple(size))
     cached = _fp_cache.get(key)

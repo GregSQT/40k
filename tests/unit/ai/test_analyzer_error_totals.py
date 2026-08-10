@@ -274,6 +274,24 @@ def test_les_sections_hors_phase_entrent_aussi_dans_le_total(bucket, _empty_stat
     )
 
 
+def test_la_ligne_16_du_summary_affiche_la_grandeur_qui_entre_dans_le_total(_empty_stats):
+    """Icône et NOMBRE doivent sortir de la même grandeur, sinon la contradiction revient.
+
+    Le bucket `double_activation` compte la double-activation par phase ET le move réactif
+    (les deux ont leur ligne dans la section 1.6 détaillée). Afficher la seule somme par phase
+    imprimait « ❌ 1.6 … : 0 » sur un journal ne portant qu'un doublon réactif.
+    """
+    stats = _fresh_stats(_empty_stats)
+    stats['double_activation_reactive_move'] = 1          # réactif seul, aucune phase
+    assert an.error_totals(stats)['double_activation'] == 1
+    lines: list = []
+    an.print_statistics(stats, output_lines=lines, emit_console=False)
+    row = [l for l in lines if l.strip().startswith(("✅ 1.6", "❌ 1.6"))]
+    assert len(row) == 1, lines[-40:]
+    assert row[0].startswith("❌"), row[0]
+    assert row[0].rstrip().endswith(" 1"), row[0]
+
+
 def test_le_total_est_la_somme_de_tous_les_buckets(_empty_stats):
     """Aucun terme ne s'ajoute au total hors des buckets, et aucun bucket n'en est exclu.
 

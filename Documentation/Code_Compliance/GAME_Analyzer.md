@@ -236,7 +236,9 @@ En fin de rapport, un résumé affiche :
 - 1.3 : Erreurs de charge
 - 1.4 : Erreurs de combat
 - 1.5 : Actions dans mauvaise phase
-- 1.6 : Double-activation par phase
+- 1.6 : Double-activation (phase + réactif) — la ligne du résumé somme les doublons par phase ET
+  ceux du move réactif, c'est-à-dire exactement la grandeur qui entre dans le total d'erreurs.
+  La section 1.6 détaillée les sépare (ligne `REACTIVE`).
 - 2.1 à 2.8 : Cohérence, intégrité, etc.
 
 ---

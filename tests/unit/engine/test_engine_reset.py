@@ -106,6 +106,13 @@ def _minimal_config_with_units() -> Dict[str, Any]:
             "engagement_zone": 1,
             "engagement_zone_vertical": 5,
             "max_base_size_hex": 35,
+            # Coherency 03.03 : journalisee dans l'entete `Run rules:` de step.log au meme
+            # titre que la zone d'engagement, donc EXIGEE des qu'un moteur reset avec un
+            # StepLogger actif. Valeurs de `config/game_config.json` ; `inches_to_subhex`
+            # vaut 1 ici, elles restent donc telles quelles.
+            "unit_model_cohesion_range": 2,
+            "unit_global_cohesion_range": 9,
+            "squad_min_neighbors": 1,
         },
         "charge": {
             "charge_max_distance": 12,

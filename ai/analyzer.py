@@ -9,7 +9,7 @@ import os
 import re
 import math
 from collections import defaultdict, Counter
-from typing import Dict, Iterator, List, Tuple, Set, Optional, Any
+from typing import Dict, Iterator, List, Mapping, Tuple, Set, Optional, Any
 
 # Add project root to Python path for imports
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -1179,7 +1179,7 @@ def error_totals(stats: Dict[str, Any]) -> Dict[str, int]:
     """
     def _pair(*path: Any) -> int:
         """Somme P1 + P2 d'un compteur, quel que soit son niveau d'imbrication."""
-        node = stats
+        node: Mapping[Any, Any] = stats
         for key in path:
             node = require_key(node, key)
         return require_key(node, 1) + require_key(node, 2)
@@ -3648,9 +3648,15 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     log_print(f"{summary_error_icon(fight_errors > 0)} 1.4 Erreurs en phase de fight : {fight_errors}")
     wrong_phase_total = _totals['wrong_phase']
     log_print(f"{summary_error_icon(wrong_phase_total > 0)} 1.5 Actions occuring in the wrong phase : {wrong_phase_total}")
-    double_activation_by_phase = require_key(stats, "double_activation_by_phase")
-    double_activation_total = sum(double_activation_by_phase.values())
-    log_print(f"{summary_error_icon(_totals['double_activation'] > 0)} 1.6 Double-activation par phase : {double_activation_total}")
+    # NOMBRE et ICÔNE tirés de la MÊME grandeur — celle qui entre dans le total. Afficher ici la
+    # seule somme par phase alors que le bucket compte AUSSI le move réactif (section 1.6
+    # détaillée, ligne « REACTIVE ») rendrait « ❌ … : 0 » sur un journal ne portant qu'un
+    # doublon réactif : la contradiction que ce lot vient de fermer, réintroduite d'un cran plus
+    # bas.
+    log_print(
+        f"{summary_error_icon(_totals['double_activation'] > 0)} "
+        f"1.6 Double-activation (phase + reactif) : {_totals['double_activation']}"
+    )
     special_rule_usage_total = sum(
         counts.get(1, 0) + counts.get(2, 0)  # get allowed: optional player counts
         for counts in stats.get('special_rule_usage', defaultdict(lambda: {1: 0, 2: 0})).values()  # get allowed: optional stats

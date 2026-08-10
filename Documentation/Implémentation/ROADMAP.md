@@ -164,6 +164,24 @@ Prêts à démarrer sans décision produit :
   de données. *(Cette ligne a annoncé « 15 entrées, L1…L15 » jusqu'au 2026-08-10 : le tableau
   avait été lu jusqu'à `L15` seulement, sans en chercher la fin. Recompter, ne pas extrapoler.)*
   → [`analyzer_couverture.md`](analyzer_couverture.md) §7
+- **Corpus de règles vérifiable** (sécable, plusieurs sessions) — sortir les 214 règles du tableau
+  Markdown et en faire une DONNÉE, sur le modèle de `weapon_rules.json` / `unit_rules.json` : une
+  entrée par règle portant son applicabilité (portée par une datasheet du roster ? par une arme ?
+  par une phase jouée ?), le ou les contrôles qui la mesurent, et son état de vérifiabilité.
+  L'analyzer rend alors une section de couverture — applicable, utilisée n fois, n erreurs,
+  vérifiable ou non — avec **trois interdits par construction** : une règle applicable et JAMAIS
+  utilisée sort en ⚠️ (c'est le cas 17.01 du 2026-08-10 : le rapport affichait `✅ 1.1 : 0`
+  pendant que le moteur violait la règle à chaque déplacement de véhicule non volant, faute de
+  produire la moindre ligne fautive) ; une règle non vérifiable n'entre dans aucun ✅ ; une règle
+  hors roster ne pèse sur rien. §1.7 et §1.8 font DÉJÀ exactement ça pour les 58 règles d'unité et
+  d'armes — ce chantier généralise leur mécanisme aux 156 lignes des PDF.
+  **Ordre de découpe décidé le 2026-08-10 : les entrées PROUVABLES d'abord** — les 69 contrôles
+  vivants, plus les règles dont l'applicabilité se dérive du journal sans être écrite à la main
+  (03.01 dès qu'il y a eu un déplacement, 12.02 dès qu'il y a eu une phase de combat…). Les
+  règles conditionnelles (transports, aéronefs, stratagèmes, réserves), dont l'applicabilité
+  dépend d'options de partie qu'aucun champ ne porte, sortent en « non vérifiable » assumé plutôt
+  qu'en prédicat inventé — c'est ce qui a produit les trois lignes fausses de la matrice.
+  → [`analyzer_couverture.md`](analyzer_couverture.md) §3, §4, §5-bis
 
 Bloqués par une décision utilisateur :
 - **Replis `unit_by_id`** — T0 (signature de `require_unit_by_id`) appartient à l'utilisateur ;

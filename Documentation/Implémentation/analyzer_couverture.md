@@ -27,6 +27,24 @@
 > (`AGENT_PLAYER=`, `T{tour} STATE:`, `T{tour} EFFECTS:`) et un segment neuf (`[MODEL_TYPES:]`) ;
 > une section de rapport neuve (§2.8) et ses 3 compteurs.
 
+> ⚠️ **CE QUE CE DOCUMENT PROUVE, ET CE QU'IL N'EST QU'UNE AFFIRMATION.** Les trois matrices
+> (§3 règles PDF, §4 règles d'armes, §5-bis règles d'unité) sont tenues **À LA MAIN**, par lecture
+> des PDF et du code. Rien ne les confronte automatiquement à l'état réel du dépôt, donc elles
+> vieillissent en silence — et elles l'ont fait. Le 2026-08-10, **trois de leurs lignes étaient
+> fausses**, toutes dans le sens qui coûte le plus cher, celui qui annonce une donnée disponible
+> qui ne l'est pas : `phase Start` donnée « produite et non lue » alors que sa fonction d'écriture
+> n'a **aucun appelant** ; `[FIGHT_SUBPHASE:]` donné exploitable alors qu'il vaut `fight` sur
+> **192 lignes de combat sur 192** ; 12.06 donné ABSENT-LOGGABLE sur la foi du précédent. Les
+> trois ont été révisées, mais le mode de défaillance, lui, n'est pas corrigé : il tient à la
+> méthode.
+>
+> En attendant que le corpus devienne une **donnée exécutable** (chantier « corpus de règles
+> vérifiable », cf. [`ROADMAP.md`](ROADMAP.md)), une ligne de ces matrices est une **affirmation
+> à re-vérifier**, jamais un fait acquis. Ce qui EST prouvé dans ce document : les §5 (verts
+> vacants), §8 et les tableaux de verrous — ils citent des greps, des mesures et des tests rouges
+> reproductibles. La règle de lecture est donc : **une matrice se vérifie avant d'être citée ; un
+> verrou se cite.**
+
 ## 0. Méthode et sources
 
 | Source | Ce qui en a été tiré |
@@ -1094,6 +1112,7 @@ pas un verrou :
 | `'unit_id_mismatches'` retiré de la structure `stats` (V17) | 2 tests tombent ; et le producteur de `shoot_handler` lève `KeyError` sur le vrai chemin — ce qui prouve que la déclaration structurelle le porte réellement |
 | ancienne regex `\bWound\s+\d+` remise (LETHAL HITS) | 2 tests tombent, dont le bout-en-bout : `Wound None(4+)` redevient un « échec » et la touche critique est comptée en faute |
 | bucket `double_activation` retiré d'`error_totals` | 1 test tombe, et il NOMME le bucket manquant |
+| ligne §1.6 réaffichant la seule somme par phase | 1 test tombe : sur un journal ne portant qu'un doublon RÉACTIF, elle imprimait « ❌ 1.6 … : 0 » — icône et nombre doivent sortir de la même grandeur |
 | total de la CLI recomposé à la main (4 buckets sur 15) | le test qui relit la source le refuse — c'est ce qui interdit la reconstitution du défaut |
 
 **Greps JUMEAU de la livraison**, tous rapportés y compris vides :
@@ -1107,8 +1126,8 @@ pas un verrou :
 - `_shooter_models` → 0 hit après bascule ; l'import privé croisé `shoot_handler` →
   `fight_handler._shooter_models` a disparu avec lui.
 
-**Tests exécutés** : les 21 fichiers `tests/unit/ai/test_analyzer_*.py` et
-`test_step_log_weapon_rule_tokens.py`, **277 tests, tous verts**. Ce n'est PAS la vérification
+**Tests exécutés** : les 27 fichiers `tests/unit/ai/test_analyzer_*.py` et
+`test_step_log_weapon_rule_tokens.py`, **308 tests, tous verts**. Ce n'est PAS la vérification
 large du dépôt (suite complète, `pyright`, `check_ai_rules.py`, `biome`, `tsc`) : elle appartient
 à l'utilisateur et n'a pas été lancée. Aucun verdict n'est rendu ici sur les tests d'`engine/`
 ni sur l'intégration PvP.

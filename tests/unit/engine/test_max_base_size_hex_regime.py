@@ -16,8 +16,16 @@ donc que masquer un état de jeu malformé ou une clé retirée du JSON. Il éta
 trompeur pour la raison exposée dans la docstring de `get_max_base_size_hex` (seuil non scalé
 par `inches_to_subhex`), qui reste la version canonique de cette explication.
 
-Ce fichier verrouille les deux moitiés : la config de production porte la clé, ET les deux
-appelants de production propagent l'exigence au lieu de se replier localement.
+Ce fichier verrouille les deux moitiés : la config de production porte la clé, ET l'appelant de
+production propage l'exigence au lieu de se replier localement.
+
+APPELANT UNIQUE DEPUIS `a0bb97eb` (« acceleration move preview »). La prune du move lisait elle
+aussi la clé, pour PLAFONNER l'empreinte adverse (`min(span, max_base_size_hex)`) ; ce plafond a
+été retiré sciemment — il rétrécissait un horizon dont la docstring promet qu'il ne peut se
+tromper que par le HAUT, et élaguait donc des ennemis pertinents. La fenêtre d'observation reste
+le seul lecteur (`observation_builder._engagement_relevant_entries`), et c'est elle que le test
+d'appelant exerce. Cette section est le verrou de cette exclusivité : si un second lecteur
+réapparaît, il doit être ajouté ici.
 """
 from __future__ import annotations
 
@@ -102,12 +110,13 @@ def test_la_valeur_vient_de_la_config_et_non_dune_constante(gym_engine) -> None:
     assert get_max_base_size_hex(state) == 7
 
 
-def test_les_deux_appelants_de_production_propagent_lexigence(gym_engine) -> None:
+def test_lappelant_de_production_propage_lexigence(gym_engine) -> None:
     """Motif « code testé mais jamais appelé » : le verrou doit tenir sur le VRAI chemin.
 
-    Les deux seuls appelants — la prune du move et celle de l'observation — sont exercés sur
-    l'état réel du moteur, privé de la seule clé `max_base_size_hex`. Chacun doit remonter
-    l'erreur au lieu de se replier localement sur une borne de secours.
+    Le seul appelant — la fenêtre d'observation — est exercé sur l'état réel du moteur, privé de
+    la seule clé `max_base_size_hex` : il doit remonter l'erreur au lieu de se replier localement
+    sur une borne de secours. La prune du move, elle, ne lit plus la clé (cf. l'en-tête) et le
+    même état la traverse donc SANS erreur — c'est ce que cette exclusivité veut dire.
     """
     from engine.phase_handlers.movement_handlers import (
         _enemy_items_within_move_engagement_horizon,
@@ -118,7 +127,12 @@ def test_les_deux_appelants_de_production_propagent_lexigence(gym_engine) -> Non
     broken = _state_without(game_state, drop="max_base_size_hex")
     units_cache = broken["units_cache"]
 
-    unit = next(u for u in broken["units"] if str(u["id"]) in units_cache)
+    # Unité DÉPLOYÉE : le scénario en laisse une en réserve (col/row à -1), depuis laquelle la
+    # boucle d'ennemis de la prune ne mesurerait aucune distance réelle.
+    unit = next(
+        u for u in broken["units"]
+        if str(u["id"]) in units_cache and int(units_cache[str(u["id"])]["col"]) >= 0
+    )
     entry = units_cache[str(unit["id"])]
     mover_player = int(entry["player"])
     # L'unité de référence doit avoir au moins un adverse dans le cache, sinon la boucle
@@ -130,11 +144,16 @@ def test_les_deux_appelants_de_production_propagent_lexigence(gym_engine) -> Non
     # que du getter visé (et non du jumeau `get_engagement_zone`, qui doit passer).
     assert get_engagement_zone(broken) > 0
 
-    with pytest.raises(ConfigurationError):
+    # La prune du move traverse ses ennemis sans jamais lire la clé. Elle rend une liste (vide
+    # ou non selon l'écart des camps au déploiement) : ce qui est verrouillé ici, c'est
+    # l'ABSENCE d'erreur là où l'observation, elle, doit lever.
+    assert isinstance(
         _enemy_items_within_move_engagement_horizon(
             broken, unit, str(unit["id"]), mover_player,
             int(entry["col"]), int(entry["row"]), 6, units_cache,
-        )
+        ),
+        list,
+    )
 
     # `enemy_of_player` désigne le camp à EXCLURE (`if int(entry["player"]) == enemy_of_player:
     # continue`), donc la production y passe le camp de l'unité de référence elle-même

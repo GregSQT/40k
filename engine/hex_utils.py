@@ -12,6 +12,7 @@ import heapq
 import math
 from functools import lru_cache
 from typing import (
+    AbstractSet,
     Any,
     Callable,
     Dict,
@@ -134,7 +135,7 @@ _SMALL_SET_PRODUCT = 36
 
 
 def min_distance_between_sets(
-    set_a: Set[Tuple[int, int]], set_b: Set[Tuple[int, int]],
+    set_a: AbstractSet[Tuple[int, int]], set_b: AbstractSet[Tuple[int, int]],
     max_distance: int = 0,
 ) -> int:
     """Minimum hex distance between any cell in set_a and any cell in set_b (§3.3).

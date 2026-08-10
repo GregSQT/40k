@@ -320,12 +320,24 @@ def test_x1_long_is_x1_recalibrated_for_long_runs() -> None:
     # publiée après ~5 h 30 de run. Le détail est dans `bot_eval_task_timeout_seconds_normal`.
     assert long_cb["bot_eval_task_timeout_seconds"] == 7200
     assert ref_cb["bot_eval_task_timeout_seconds"] == 3600
-    # Tout le reste est comparé en bloc, `checkpoint_save_freq` et `bot_eval_intermediate`
-    # compris — ce n'est pas un oubli qu'ils n'aient pas leur assert dédié :
-    # — `checkpoint_save_freq` : SB3 sauvegarde tous les `save_freq` APPELS du callback
-    #   (callbacks.py:300), un par pas du VecEnv, jamais des épisodes ; le régler depuis la durée
-    #   en épisodes d'un run n'a pas de sens, le levier est `max_checkpoints`, un compte ;
-    # — `bot_eval_intermediate` : les évals intermédiaires sont du monitoring répété 20 fois, pas
-    #   la mesure ; les gonfler paierait 20 fois une précision inutile.
-    overridden = {"bot_eval_freq", "bot_eval_final", "bot_eval_task_timeout_seconds"}
+    # `bot_eval_intermediate` est un nombre d'épisodes PAR BOT payé à CHAQUE éval intermédiaire :
+    # son coût se rapporte à la durée du run, donc il en dépend au même titre que `bot_eval_freq`.
+    # x1_long : 20 évals × 100 ép./bot ≈ 20 × 13 min (commit 42326ed0) contre ~5 h 30
+    # d'entraînement — la précision du suivi est payée sur un run qui la porte. x1 : 10 000
+    # épisodes, soit ~17 min d'entraînement pour 5 évals ; à 100 ép./bot elles coûteraient
+    # ~65 min, QUATRE FOIS le run qu'elles observent. À 10, ~7 min.
+    # Ces évals alimentent aussi `save_best_robust` (train.py:3623), mais pas sur x1 :
+    # `save_best_min_episodes` y vaut ses 10 000 épisodes, donc aucune sauvegarde n'a lieu avant
+    # le tout dernier point, où il n'y a rien à départager. Le chiffre publié, lui, sort de
+    # `bot_eval_final`, verrouillé plus haut.
+    assert long_cb["bot_eval_intermediate"] == 100
+    assert ref_cb["bot_eval_intermediate"] == 10
+    # `checkpoint_save_freq`, lui, est bien comparé en bloc, et ce n'est pas un oubli : SB3
+    # sauvegarde tous les `save_freq` APPELS du callback (callbacks.py:300), un par pas du
+    # VecEnv, jamais des épisodes ; le régler depuis la durée en épisodes n'a pas de sens, le
+    # levier est `max_checkpoints`, un compte.
+    overridden = {
+        "bot_eval_freq", "bot_eval_final", "bot_eval_task_timeout_seconds",
+        "bot_eval_intermediate",
+    }
     assert _comparable(long_cb, overridden) == _comparable(ref_cb, overridden)
