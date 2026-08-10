@@ -3904,7 +3904,11 @@ def movement_build_model_destinations_pool(
             int(sibling.get("orientation", 0)), sib_req, terrain_areas,  # get allowed
         )
         same_squad_occ_by_level.setdefault(sib_eff, set()).update(
-            _compute_unit_occupied_hexes(sc, sr, unit, game_state)
+            # Socle de LA SŒUR, pas de l'escouade — les trois lignes au-dessus lisent déjà le
+            # sien pour résoudre son niveau. Avec la géométrie d'escouade, un personnage attaché
+            # à socle plus grand était SOUS-empreinté : le pool par-figurine offrait des cases
+            # qui chevauchent réellement la sœur, que le voile rouge refuse ensuite.
+            _compute_unit_occupied_hexes(sc, sr, sibling, game_state)
         )
         sibling_states.append((sibling, sc, sr, sib_eff))
 
@@ -3941,21 +3945,29 @@ def movement_build_model_destinations_pool(
     if ez > 1:
         import numpy as np
         units_cache = require_key(game_state, "units_cache")
-        _enemy_items_ez = _enemy_items_within_move_engagement_horizon(
-            game_state, unit, squad_id, player, start_col, start_row, int(budget), units_cache
-        )
         # Socle de LA FIGURINE et orientation VISÉE (pivot molette en cours), pas ceux de
-        # l'escouade. Passer `unit` ici calculait l'EZ sur l'orientation COMMITTÉE pendant que
-        # `explain_move_plan_rejection` la calcule, depuis le 2026-08-09, sur l'orientation du
-        # PLAN : le pool offrait alors une case que la validation refuse en « ER ennemie »
-        # (masque ⊄ exécutable) dès qu'un socle non rond est pivoté. La docstring de cette
-        # fonction l'exigeait déjà pour les collisions et l'empreinte ; l'EZ y échappait.
+        # l'escouade. Passer `unit` calculait l'EZ sur l'orientation COMMITTÉE et sur le socle
+        # d'ESCOUADE pendant que `explain_move_plan_rejection` la calcule, depuis le 2026-08-09,
+        # sur ceux du PLAN : le pool offrait alors une case que la validation refuse en « ER
+        # ennemie » (masque ⊄ exécutable) dès qu'un socle est pivoté ou qu'un personnage
+        # attaché porte un socle plus grand que sa datasheet d'escouade.
         _ez_mover = {
             "id": require_key(unit, "id"),
             "BASE_SHAPE": require_key(model, "BASE_SHAPE"),
             "BASE_SIZE": require_key(model, "BASE_SIZE"),
             "orientation": mover_orient,
         }
+        # …ET la PRUNE des ennemis avec le MÊME socle. Elle borne l'horizon par le rayon du
+        # mover : le calculer sur l'escouade alors que le masque mesure la figurine élaguait des
+        # ennemis encore pertinents (Boyz 13 → rayon 7, Warboss attaché 20 → rayon 10 : deux
+        # cases de trop, que le `+1` de l'horizon ne couvre pas). Le masque n'interdisait alors
+        # pas leurs ancres, et la validation — liste ennemie COMPLÈTE — refusait la case. Les
+        # deux doivent voir le même socle, sinon la prune rouvre l'incohérence que le socle
+        # par-figurine vient de fermer.
+        _enemy_items_ez = _enemy_items_within_move_engagement_horizon(
+            game_state, _ez_mover, squad_id, player, start_col, start_row,
+            int(budget), units_cache,
+        )
         _ez_mask = _compute_mover_ez_forbidden_mask(
             game_state, _ez_mover, _enemy_items_ez, ez, board_cols, board_rows
         )

@@ -315,3 +315,94 @@ def test_state_fingerprint_covers_a_pivot_in_place(euclidean):
         "masque servi depuis le cache après un pivot sur place : le fingerprint d'état ignore "
         "l'orientation, donc l'empreinte ennemie utilisée est périmée"
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# La PRUNE des ennemis doit voir le même socle que le masque
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_enemy_prune_horizon_follows_the_mover_socle():
+    """L'horizon d'élagage se borne au rayon du MOVER : mesuré sur la figurine, pas l'escouade.
+
+    Le pool par-figurine calcule l'EZ avec le socle de la FIGURINE. Si la prune, elle, se borne
+    au socle d'ESCOUADE, un personnage attaché à socle plus grand (Boyz 13 → rayon 7, Warboss
+    20 → rayon 10) fait élaguer des ennemis encore pertinents : le masque n'interdit pas leurs
+    ancres et `explain_move_plan_rejection`, qui voit TOUS les ennemis, refuse la case —
+    l'incohérence masque/exécution que le socle par-figurine vient de fermer.
+    """
+    from engine.phase_handlers.movement_handlers import (
+        _enemy_items_within_move_engagement_horizon,
+    )
+
+    escouade = {"id": "1", "BASE_SHAPE": "round", "BASE_SIZE": 6}
+    perso = {"id": "1", "BASE_SHAPE": "round", "BASE_SIZE": 20}
+    # Ennemi placé juste au-delà de l'horizon du petit socle, en deçà de celui du grand.
+    units_cache = {
+        "9": {
+            "id": "9", "player": 2, "col": 50, "row": 20, "HP_CUR": 1,
+            "BASE_SHAPE": "round", "BASE_SIZE": 6, "orientation": 0,
+            "occupied_hexes": {(50, 20)},
+        }
+    }
+    gs = {
+        "config": {"game_rules": {"engagement_zone": EZ, "max_base_size_hex": 24}},
+        "inches_to_subhex": 5,
+    }
+    petit = _enemy_items_within_move_engagement_horizon(
+        gs, escouade, "1", 1, 20, 20, 10, units_cache)
+    grand = _enemy_items_within_move_engagement_horizon(
+        gs, perso, "1", 1, 20, 20, 10, units_cache)
+    assert len(grand) > len(petit), (
+        "prémisse : l'ennemi choisi doit tomber ENTRE les deux horizons, sinon rien n'est mesuré"
+    )
+
+
+def test_the_pool_prunes_enemies_with_the_socle_it_measures_with(monkeypatch):
+    """VERROU DE CÂBLAGE : le pool doit passer le MÊME socle à la prune et au masque.
+
+    Le test précédent ne vérifie que le CONTRAT de la prune ; il reste vert si le site d'appel
+    lui repasse le socle d'escouade — c'est exactement ce qui s'est produit. Ici on observe
+    l'appel réel : les deux fonctions doivent recevoir la même géométrie, sinon la prune élague
+    des ennemis que le masque aurait interdits et l'invariant masque ⊆ exécutable retombe.
+    """
+    import engine.phase_handlers.movement_handlers as mh
+
+    vus: dict = {}
+
+    _prune_orig = mh._enemy_items_within_move_engagement_horizon
+    _mask_orig = mh._compute_mover_ez_forbidden_mask
+
+    def _prune_spy(game_state, unit, *a, **k):
+        vus["prune"] = (unit.get("BASE_SHAPE"), str(unit.get("BASE_SIZE")),
+                        unit.get("orientation"))
+        return _prune_orig(game_state, unit, *a, **k)
+
+    def _mask_spy(game_state, unit, *a, **k):
+        vus["masque"] = (unit.get("BASE_SHAPE"), str(unit.get("BASE_SIZE")),
+                         unit.get("orientation"))
+        return _mask_orig(game_state, unit, *a, **k)
+
+    monkeypatch.setattr(mh, "_enemy_items_within_move_engagement_horizon", _prune_spy)
+    monkeypatch.setattr(mh, "_compute_mover_ez_forbidden_mask", _mask_spy)
+
+    from tests.unit.engine._config_helpers import build_armageddon_engine
+
+    eng = build_armageddon_engine(seed=1)
+    gs = eng.game_state
+    mc = gs["models_cache"]
+    mid = next(m for m in mc if "#" in m)
+    model = mc[mid]
+    # Socle de la figurine RENDU DIFFÉRENT de celui de son escouade : c'est la situation du
+    # personnage attaché, et la seule où l'écart prune/masque est observable.
+    model["BASE_SHAPE"], model["BASE_SIZE"] = "round", 20
+    sid = str(model["squad_id"])
+    gs["units_cache"][sid]["BASE_SHAPE"] = "round"
+    gs["units_cache"][sid]["BASE_SIZE"] = 6
+
+    mh.movement_build_model_destinations_pool(gs, mid)
+
+    assert "prune" in vus and "masque" in vus, "le chemin ez > 1 n'a pas été emprunté"
+    assert vus["prune"] == vus["masque"], (
+        f"prune {vus['prune']} et masque {vus['masque']} ne voient pas le même socle : la prune "
+        "élaguera des ennemis que le masque aurait interdits"
+    )
