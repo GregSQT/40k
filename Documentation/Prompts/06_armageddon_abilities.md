@@ -107,8 +107,16 @@ deux entrées.
 
 ### Point d'intégration
 
-Le pipeline d'allocation de `engine/phase_handlers/shared_utils.py` (et son jumeau mêlée).
-Absent aujourd'hui : `grep -riE "feel_no_pain|fnp" engine/` → 0 hit.
+**Le mécanisme moteur EST livré** — mesuré le 2026-08-10, ce paragraphe annonçait le contraire
+(« 0 hit ») et c'était faux. `_get_feel_no_pain_threshold` / `_roll_feel_no_pain`
+(`engine/phase_handlers/shared_utils.py:2350`) sont lus par trois sites : tir, mêlée et
+blessures mortelles. La règle générique `feel_no_pain` existe au registre avec son `obs_id` et
+son paramètre `threshold` (`config/unit_rules.json`).
+
+Ce qui manque est le CÂBLAGE : `grep feel_no_pain frontend/src/roster` → **0 hit**, aucune
+datasheet ne la porte. La passe se réduit donc à déclarer la règle sur le Painboy, plus les
+deux variantes conditionnelles (Psychic Hood, Unbreakable Resolve) qui, elles, demandent un
+contexte que le seuil actuel ne porte pas.
 
 L'ordre compte : le FNP s'applique **après** que la sauvegarde a échoué et que les dégâts sont
 alloués à une figurine, blessure par blessure. Il ne remplace pas la sauvegarde.
@@ -280,6 +288,21 @@ propres tests.
 
 Les passes 1 et 2 débloquent à elles seules 12 capacités et n'exigent aucune structure d'état
 nouvelle — les faire d'abord.
+
+### Ce que le chantier 05 laisse en entrée (2026-08-10)
+
+Le placeholder `reroll_charge` / « Unstoppable Valour » est purgé de **tous** les rosters, sans
+exception ni dette. Les tests de la règle 19.04 s'ancraient dessus faute d'autre porteur ; ils
+reposent désormais sur un couple de vraies datasheets — `ChaplainJumpPack` (`deep_strike`) mené
+sur `AssaultIntercessorJumpPack` (`charge_impact`), discriminant dans les deux sens et légal au
+titre de 19.01.
+
+Conséquence pour la passe 1 : rien à solder avant de commencer. Quand **Litany of Hate**
+(`wound_roll_bonus_fight`) sera livrée sur le Chaplain, elle donnera un témoin de règle de
+leader dont l'effet est OBSERVABLE — ce que `deep_strike` n'est pas. Le seul test qui y gagnerait
+est `test_squad_obs_unit_rules.py::test_attached_squad_rule_is_observed_then_extinguished_with_its_source`,
+aujourd'hui ancré sur la source BODYGUARD. Amélioration facultative, pas une dette : l'observation
+ne distingue pas l'origine d'une règle, elle lit l'union déjà calculée.
 
 ## Périmètre
 

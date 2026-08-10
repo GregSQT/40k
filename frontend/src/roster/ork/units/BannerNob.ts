@@ -24,13 +24,10 @@ export class BannerNob extends SwarmRangeSwarm {
   static CC_WEAPONS = getWeapons(BannerNob.CC_WEAPON_CODES);
 
   // UNIT RULES
-  static UNIT_RULES = [
-    { ruleId: "reroll_charge", displayName: "Unstoppable Valour" },
-    { ruleId: "support", displayName: "Support" },
-  ];
+  static UNIT_RULES = [{ ruleId: "support", displayName: "Support" }];
 
   // RULE IMPLEMENTATION STATUS (0=NOT_IMPLEMENTED, 1=NOT_IMPLEMENTABLE_YET, 2=IMPLEMENTED)
-  static RULES_STATUS = { reroll_charge: 2, support: 0 };
+  static RULES_STATUS = { support: 2 };
 
   // CAN LEAD (bodyguard unit-name keywords this leader may attach to — rule 19.01)
   static CAN_LEAD = [

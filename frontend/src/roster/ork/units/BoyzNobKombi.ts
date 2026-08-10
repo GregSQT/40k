@@ -25,12 +25,6 @@ export class BoyzNobKombi extends SwarmRangeSwarm {
   static CC_WEAPON_CODES = ["big_choppa"];
   static CC_WEAPONS = getWeapons(BoyzNobKombi.CC_WEAPON_CODES);
 
-  // UNIT RULES
-  static UNIT_RULES = [{ ruleId: "reroll_charge", displayName: "Unstoppable Valour" }];
-
-  // RULE IMPLEMENTATION STATUS (0=NOT_IMPLEMENTED, 1=NOT_IMPLEMENTABLE_YET, 2=IMPLEMENTED)
-  static RULES_STATUS = { reroll_charge: 2 };
-
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [
     { keywordId: "INFANTRY" },

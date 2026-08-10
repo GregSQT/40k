@@ -73,9 +73,13 @@ def test_le_nom_affiche_de_thievin_scavengers_est_complet() -> None:
     rules = UnitRegistry().get_unit_data("Gretchin")["UNIT_RULES"]
     by_id = {str(rule["ruleId"]): str(rule["displayName"]) for rule in rules}
     assert by_id["cp_gain_on_objective"] == "Thievin' Scavengers"
-    # L'autre règle de la même unité n'a pas d'apostrophe : elle prouve que le correctif n'a
-    # pas changé la lecture du cas nominal.
-    assert by_id["reroll_charge"] == "Unstoppable Valour"
+    # Témoin SANS apostrophe : il prouve que le correctif n'a pas changé la lecture du cas
+    # nominal. Il vient d'une autre datasheet depuis le chantier 05 — la seconde règle de
+    # Gretchin était le placeholder « Unstoppable Valour », purgé parce qu'inventé.
+    autre = UnitRegistry().get_unit_data("AggressorBoltStorm")["UNIT_RULES"]
+    assert {str(r["ruleId"]): str(r["displayName"]) for r in autre}[
+        "closest_target_penetration"
+    ] == "Close-quarter firepower"
 
 
 def test_aucun_nom_de_regle_de_roster_nest_tronque() -> None:
