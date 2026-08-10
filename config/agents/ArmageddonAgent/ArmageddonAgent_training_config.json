@@ -187,7 +187,7 @@
   "x1_long": {
     "type": "################################################### x1_long — runs longs (board 44x60x1, scale x1) ###################################################",
     "seed": 12345,
-    "total_episodes": 200000,
+    "total_episodes": 50000,
     "total_episodes_normal": "200000 : run long ; rampe entropie achevee a 80000 (decay_fraction 0.4), rampe learning_rate a 140000 (0.7)",
     "agent_seat_mode": "random",
     "eval_episodes": 10,

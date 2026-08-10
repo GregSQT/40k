@@ -84,18 +84,23 @@ mesure, et c'est assumé (§0.14).
    🔴 **AUCUN PROFIL EXISTANT NE CONVIENT — à trancher avant d'ouvrir P3-4.**
    - Ce qui est **acquis** : le « ne PAS utiliser `x1_debug`, il porte 48 envs » de §9.6 est
      périmé. `n_steps` est un TOTAL divisé par `n_envs` en un point de passage unique depuis
-     §0.33 ⇒ le buffer ne dépend plus de `n_envs`, et les **7** profils sont à 48 envs de toute
+     §0.33 ⇒ le buffer ne dépend plus de `n_envs`, et les **8** profils sont à 48 envs de toute
      façon, `x5_debug` compris. La mémoire n'écarte plus aucun profil.
    - Ce qui **casse** — et **DEUX variables distinctes** sont en cause, que ce fichier a confondues
      dans une première correction du 2026-08-10 :
      | | `total_episodes` (durée d'ENTRAÎNEMENT) | `bot_eval_final` (parties par bot de la MESURE) |
      |---|---|---|
-     | `x1_debug` | **10** (valait 480 avant un commit du 2026-08-10) | **0** |
+     | `x1_debug` | **1000** (a valu 480, puis 10, en une seule journée du 2026-08-10) | **0** |
      | `x5_debug` | **96** | **1** |
      | `x1` | 10 000 | 100 |
-     | `x1_long` | 200 000 | 600 |
-     `total_episodes` est un total **GLOBAL** tous environnements confondus
-     (`self.episode_count += episodes_finished`, `ai/training_callbacks.py:201`), pas un par-env.
+     | `x1_long` | 50 000 (valait 200 000 avant le 2026-08-11) | 600 |
+     `total_episodes` est un total **GLOBAL** tous environnements confondus : c'est
+     `def EpisodeTerminationCallback` (`ai/training_callbacks.py`) qui porte le budget de run, et
+     son `episode_count += episodes_finished` somme les fins d'épisode de TOUS les env d'un pas.
+     ⚠️ Ne pas confondre avec `def _EpisodeRampCallback`, du même fichier, qui compte pareil mais
+     ne pilote que les rampes — c'est la classe que ce fichier a d'abord citée, à tort.
+     Ces trois valeurs sont désormais confrontées à la config par `scripts/check_doc_references.py`
+     (§5) : elles ont été fausses trois fois en vingt-quatre heures avant qu'il existe.
    - **`x1_debug` ne produit AUCUN win-rate** : `bot_eval_final = 0`, il n'y a pas d'évaluation
      finale. Ce n'est pas « trop court », c'est structurellement incapable de rendre le chiffre que
      §9.6 exige. `x5_debug` en rend un sur **1 partie par bot** (6 parties, granularité 1/6).
@@ -109,6 +114,10 @@ mesure, et c'est assumé (§0.14).
      10 000 épisodes.
      → [`1_Agent/V11_phaseA.md`](1_Agent/V11_phaseA.md) §9.6
 7. **Mesure de référence** `x1_long` — solde §0.14, §0.67, critère T6 (via §10.6) d'un coup.
+   À ce régime mesuré (4 h 01 pour 10 000 épisodes), les **50 000** épisodes du profil valent
+   ≈ **20 h** : c'est exactement le budget que le point 4 lui prête. Le profil valait 200 000
+   jusqu'au 2026-08-11 — l'estimation « ~20 h » était donc fausse d'un facteur 4 tant qu'elle
+   accompagnait l'ancienne valeur.
 8. **§0.59 — Phase 2 self-play** (`--append x1_selfplay`) — livré, JAMAIS exécuté ; le premier
    run est aussi son premier test d'intégration. → [`1_Agent/V11_agent_rework.md`](1_Agent/V11_agent_rework.md) §0.59
 
@@ -116,14 +125,28 @@ mesure, et c'est assumé (§0.14).
 
 - **06 — Capacités Armageddon** : 0/6 passes, tous prérequis (01→05) livrés et vérifiés.
   Passes 1-2 d'abord (12 capacités sans nouvelle structure d'état) ; FNP déjà câblé côté moteur.
-  ⚠️ Risque concret : `UNIT_ABILITY_SLOTS = 8` ([`engine/observation_entities.py:274`](file:///home/greg/40k/engine/observation_entities.py))
+  ⚠️ Risque concret : `UNIT_ABILITY_SLOTS = 8` ([`engine/observation_entities.py`](file:///home/greg/40k/engine/observation_entities.py))
   est une projection — si une entité dépasse 8 capacités en vigueur, le moteur lève.
+  (La constante a changé deux fois de numéro de ligne en vingt-quatre heures : 274 → 279 → 287.
+  C'est l'exemple qui a fait poser la convention « le symbole, jamais la ligne » de §5.)
   → [`A_faire/06_armageddon_abilities.md`](A_faire/06_armageddon_abilities.md)
 - Les chantiers **01→05 sont livrés** (vérifié code, 2026-08-10) et rangés en `Implémenté/` :
   [01 embedding](Implémenté/01_ability_embedding.md) · [02 CP/battle-shock](Implémenté/02_command_points.md) ·
   [03 capacités de faction](Implémenté/03_faction_abilities.md) · [04 réserves](Implémenté/04_strategic_reserves.md) ·
   [05 purge placeholders](Implémenté/05_purge_placeholders.md). Leur section CONCEPTION reste la
   référence vivante ; leur EXÉCUTION n'a plus que valeur d'historique.
+- ✅ **Volet « Observation » du chantier 04 — FERMÉ le 2026-08-11.** `deep_strike` entre au
+  vocabulaire des effets observables (`UNIT_RULE_EFFECT_IDS`, `obs_id` 16). C'est la seule
+  capacité qui ne change ni un jet ni un mouvement mais l'**aire de mise en place** d'un ingress
+  (20.04 / 24.09) : sans elle, deux escouades en réserves étaient indiscernables pour l'agent
+  alors que l'une doit arriver dans la bande de bord et l'autre peut se poser n'importe où à plus
+  de 8", zone adverse comprise. Le moteur savait déjà le faire (`unit_has_deep_strike` bascule le
+  pool) ; l'agent le subissait sans le percevoir. **Aucun retrain forcé** : `obs_size` est
+  inchangé (16659 avant comme après) et les tables d'embedding sont pré-dimensionnées à
+  `OBS_ID_VOCAB_SIZE`, donc une capacité de plus coûte zéro paramètre.
+  ⚠️ Ce chantier a été livré **sans passer par ce fichier** ; sa ligne est ajoutée après coup, le
+  2026-08-11. Il n'a pas de doc de conception : la référence est le test
+  `tests/unit/engine/test_squad_obs_unit_rules.py`.
 
 ## 3. Suspendus à un jalon explicite — ne pas commencer avant
 
@@ -166,6 +189,35 @@ Prêts à démarrer sans décision produit :
   de la carte de cellules de move est **sain** — ses 69 % de ratés viennent d'un plateau qui change
   réellement, correction tentée, gain nul, annulée.
   → [`Implémenté/perf_geometrie_cache.md`](Implémenté/perf_geometrie_cache.md)
+- ✅ **Masque de move exact sur socles non ronds — LIVRÉ le 2026-08-11.** Ce n'était pas de la
+  perf, c'était une **violation de 09.05** : le masque approximait la zone d'engagement par les
+  centres de cellules, ce qui la sous-estimait d'environ une case, et un WarTrakk (socle oval
+  20×14) pouvait finir un move normal ENGAGÉ pendant que le masque le disait libre (témoin E8 du
+  2026-08-09). Le prédicat de la règle (`euclidean_edge_distance`, contours continus) est
+  désormais appliqué tel quel : le motif d'offsets interdits par une figurine ennemie ne dépend
+  que du couple de géométries et de la parité de colonne, donc il est calculé une fois par couple
+  puis translaté (somme de Minkowski) au lieu d'être re-mesuré partout ; seules les égalités
+  flottantes sont retranchées à leur position réelle.
+  ⚠️ **Le jeu des coups légaux a changé** : tout win-rate mesuré avant le 2026-08-11 — y compris
+  celui de la base de développement de §0, entraînée le 2026-08-10 sur l'ancien masque — n'est
+  pas comparable à ceux d'après. À prendre en compte au moment d'appliquer le protocole P5 (§1
+  pt 6), qui compare précisément des win-rates de tranche en tranche.
+  Verrouillé par `tests/unit/engine/test_move_ez_non_round_bases.py` (dont le témoin E8, la
+  concordance masque ↔ règle case par case sur socles ovals ET carrés, et la non-régression du
+  couple rond↔rond qui était déjà exact). Livré sans passer par ce fichier et sans doc de
+  conception ; ligne ajoutée après coup le 2026-08-11, la référence est le test.
+- ✅ **Déploiement « auto » — positions figées supprimées — LIVRÉ le 2026-08-11.** L'alternative
+  au déploiement ACTIF (l'agent place ses figurines) n'est plus le placement FIXE lu dans le
+  scénario, mais un déploiement joué PAR LE MOTEUR : les deux modes jouent désormais une vraie
+  phase de déploiement, seul change qui décide des poses. Ça ferme l'asymétrie que la config
+  documentait comme « à corriger » — un agent entraîné en placement fixe ne se déployait jamais,
+  puis était NOTÉ sur des parties où il devait se déployer, et son score mesurait un comportement
+  jamais appris. Le générateur de positions figées et son test sont supprimés.
+  ⚠️ Même conséquence que la ligne ci-dessus sur la comparabilité des win-rates, et pour la même
+  raison : ce qui est mesuré n'est plus la même partie.
+  ⚠️ Résidu signalé, non traité (hors périmètre) : un bloc `deployment_random_mix` — le nom
+  d'avant — survit dans `tests/unit/engine/_config_helpers.py`, seul reste dans tout le dépôt.
+  Livré sans passer par ce fichier ; ligne ajoutée après coup le 2026-08-11.
 - **Perf `generate_compact_formation`** (½-1 j) — MESURER avant d'implémenter, gain non acquis
   → [`A_faire/perf_generate_compact_formation.md`](A_faire/perf_generate_compact_formation.md)
 - **gzip/Brotli** (½ j) — à faire AVEC l'étape 5 de Security (même proxy)
@@ -233,26 +285,42 @@ Lourds, à re-cadrer avant toute reprise :
 > Ne reste ici que ce qui **sert à la prochaine passe** : le contrôle des liens, et les
 > incohérences non soldées.
 
-### Contrôle réutilisable des liens
+### Le contrôle est outillé — ne plus le refaire à la main
 
-**Contrôle réutilisable — et ses trois exclusions, sans lesquelles il ne sert à rien.** Parcourir
-les liens markdown de `Documentation/Implémentation/` et vérifier que chaque cible existe, en
-écartant : (1) les `http(s)://` et **`file:///`** — les liens vers le code sont ABSOLUS par
-convention CLAUDE.md et ne sont pas des chemins relatifs ; (2) l'encodage URL (`%20` dans
-`03%20Moving.pdf`) qu'il faut décoder avant le test ; (3) les faux positifs de regex — du texte
-entre parenthèses pris pour une cible, dans `V11_tranches.md` et `V11_refactor_plan.md`.
-Un contrôle naïf rend **152 hits** dont **aucun n'est un lien mort** (143 dans `Implémenté/stage.md`,
-5 dans `Boardx10-audit.md`, tous des `file:///`) : mesuré le 2026-08-10, ne pas le reprendre pour
-une régression. À relancer après tout déplacement de doc.
+    python3 scripts/check_doc_references.py
+
+Sans argument, il passe `analyzer_couverture.md` **et ce fichier**. Il rend 0 s'il ne trouve rien,
+1 sinon, et se lance sur n'importe quel `.md` passé en argument. Quatre passes : les fichiers cités
+existent et portent les symboles cités ; les cibles de liens existent ; les **nombres recopiés**
+d'une source mécanique valent encore ce qu'ils annoncent ; aucun renvoi ne porte un numéro de
+ligne (`<fichier>.py:<ligne>`). Verrouillé par `tests/unit/scripts/test_check_doc_references.py`.
+Il ne distingue pas une citation d'une mention : écrire la forme interdite en exemple la déclenche,
+d'où la notation entre chevrons ci-dessus.
+
+**Ce qu'il ne sait pas faire, et qui est affiché plutôt que tu, à chaque exécution** : un renvoi
+sans symbole à confronter n'est pas vérifié (il est compté) ; le nombre de « contrôles analyzer
+vivants » n'a aucune énumération dans le code, donc il est déclaré non vérifiable au lieu d'être
+approché par un proxy ; et **rien ne peut prouver qu'un chantier livré a pris sa ligne ici** — un
+chantier peut n'avoir aucun document, et un nom de branche ne se retrouve pas dans un texte
+français. Le script se borne à rappeler combien de livraisons ont été mergées depuis la dernière
+écriture du document, sans verdict.
+
+**Deux pièges déjà payés, à ne pas reprendre pour des régressions.** (1) Un contrôle de liens naïf
+rend **152 hits** dont aucun n'est mort (143 dans `Implémenté/stage.md`, 5 dans `Boardx10-audit.md`,
+tous des `file:///`, qui sont ABSOLUS par convention CLAUDE.md) ; le script les résout comme tels.
+(2) Apparier fichiers et symboles **en prose** rendait 4 alertes fausses sur 4 : une phrase cite
+couramment un fichier et, plus loin, des symboles étrangers. En prose, seule l'existence est
+vérifiée ; l'appariement reste réservé aux cellules de tableau, où le renvoi est porteur.
 
 ### Incohérences factuelles restantes (non traitées, aucune ne bloque)
 
-- **`obs_size`** — la valeur vraie à HEAD est **16659**, portée par les **7** profils de la config
-  ArmageddonAgent (un `"obs_size": 16659` chacun ; ce fichier a annoncé « 3 occurrences » jusqu'au
-  2026-08-10, sans les compter). Vérifiée par exécution le 2026-08-08, recomptée le 2026-08-10.
+- **`obs_size`** — la valeur vraie à HEAD est **16659**, portée par les **8** profils de la config
+  ArmageddonAgent (un `"obs_size": 16659` chacun ; ce fichier a annoncé « 3 occurrences », puis
+  « 7 profils », sans jamais les compter — c'est le contrôle de §5 qui les compte désormais).
   ✅ `Implémenté/01_ability_embedding.md`, qui annonçait 14609/14615, est corrigé. Reste la
-  `justification` du champ dans la config, qui raconte encore la lignée 20780 → 20727 : **aucun
-  JSON de `config/` n'est touché pendant un training** (§0), à reprendre après le run.
+  `justification` du champ dans la config, qui raconte encore la lignée 20780 → 20727. **Le gel
+  est levé** (§0, run terminé) : plus rien n'interdit d'y toucher, c'est du travail restant, pas
+  une attente.
 - ~~`justification` de `bot_eval_final_normal` dit « x1 (10 000 episodes) » alors que
   `x1.total_episodes` = **50 000**.~~ → **L'INCOHÉRENCE ÉTAIT DANS CE FICHIER, pas dans la config**
   (corrigé le 2026-08-10) : `x1.total_episodes` vaut bien **10 000** ; le 50 000 est
