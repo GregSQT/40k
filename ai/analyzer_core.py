@@ -8,6 +8,7 @@ from functools import lru_cache
 from typing import Dict, Optional
 
 from shared.data_validation import require_key, require_present
+from ai.analyzer_rules import note_rule_usage
 
 from ai.analyzer_perfig import MODEL_TOKEN_PATTERN
 from ai.analyzer_state import AnalyzerState
@@ -180,9 +181,17 @@ def _check_line_coherency(state: AnalyzerState, line: str) -> None:
         offenders = squad_coherency_offenders(
             models, _unit_base(state.unit_base, unit_id), coh, coh_max, min_neighbors
         )
+        player = int(require_key(state.unit_player, unit_id))
+        # 03.03 JUGÉE — mais seulement si la règle GOUVERNE cette escouade : « a unit that
+        # contains more than one model ». Compter une escouade à un socle gonflerait le nombre
+        # d'exercices d'occasions où il n'y avait rien à juger, et masquerait le seul cas qui
+        # mérite l'alerte : un roster sans aucune escouade multi-figurines, où la cohérence n'est
+        # jamais mise à l'épreuve. Posé avant le `continue`, sinon seules les formations FAUTIVES
+        # compteraient et une section sans faute afficherait « jamais exercée ».
+        if len(models) > 1:
+            note_rule_usage(stats, "03.03", player)
         if not offenders:
             continue
-        player = int(require_key(state.unit_player, unit_id))
         stats['squad_coherency_violations'][player] += 1
         first = stats['first_error_lines']['squad_coherency_violations']
         if first[player] is None:
@@ -1301,6 +1310,9 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                     # d'ancre disparaît, la mesure par socle reste : c'est la même correction que
                     # le plafond de tir (V14), et par le même moyen — mutualiser, pas recopier.
                     reactive_abnormal = phase not in ("MOVE", "SHOOT")
+                    # Capacité de projet `reactive_move` JUGÉE : phase, budget, mur et engagement
+                    # sont mesurés sur cette ligne et les suivantes de ce bloc.
+                    note_rule_usage(stats, "PROJET.reactive_move", reactive_player)
 
                     if reactive_abnormal:
                         reactive_stats[reactive_player]['abnormal'] += 1

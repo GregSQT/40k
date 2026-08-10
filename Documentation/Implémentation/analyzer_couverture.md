@@ -38,9 +38,20 @@
 > trois ont été révisées, mais le mode de défaillance, lui, n'est pas corrigé : il tient à la
 > méthode.
 >
-> En attendant que le corpus devienne une **donnée exécutable** (chantier « corpus de règles
-> vérifiable », cf. [`ROADMAP.md`](ROADMAP.md)), une ligne de ces matrices est une **affirmation
-> à re-vérifier**, jamais un fait acquis. Ce qui EST prouvé dans ce document : les §5 (verts
+> **Première tranche livrée le 2026-08-10 : §1.1 est passée en DONNÉE** — `config/rules_corpus.json`,
+> lu par `ai/analyzer_rules.py`, rendu à chaque analyse sous « 1.1 COUVERTURE DES REGLES ». Pour
+> ces 6 règles, le document n'est plus la source : il commente une donnée que le rapport
+> confronte au journal. Trois verdicts y sont impossibles à falsifier — **HORS ROSTER** (aucune
+> unité jouée ne porte la règle), **JAMAIS EXERCÉE** (applicable, et aucun contrôle n'a rien eu à
+> juger : c'est le signal 17.01), **ERREURS**. Un invariant interdit au corpus de devenir une
+> seconde somme divergente : la somme des erreurs par règle DOIT égaler le bucket `move`
+> d'`error_totals`, sans quoi le rapport imprime l'écart (verrou :
+> `tests/unit/ai/test_analyzer_rules_corpus.py`). Mesuré sur le run du 2026-08-10 : 116 mouvements
+> normaux jugés, 193 formations jugées, 4 fall-backs, et les deux capacités de projet correctement
+> classées hors roster.
+>
+> Pour **tout le reste** — §1.2 à §2.8, et les 150 lignes de PDF non encore décrites — une ligne
+> de ces matrices reste une **affirmation à re-vérifier**, jamais un fait acquis. Ce qui EST prouvé dans ce document : les §5 (verts
 > vacants), §8 et les tableaux de verrous — ils citent des greps, des mesures et des tests rouges
 > reproductibles. La règle de lecture est donc : **une matrice se vérifie avant d'être citée ; un
 > verrou se cite.**

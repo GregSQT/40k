@@ -6,6 +6,7 @@ import re
 from typing import TYPE_CHECKING
 
 from shared.data_validation import require_key
+from ai.analyzer_rules import note_rule_usage
 
 if TYPE_CHECKING:
     from ai.analyzer_state import AnalyzerState
@@ -196,6 +197,9 @@ def _check_fall_back_move(state, line, action_desc, player, move_unit_id,
         state.unit_player, unit_hp_at_movement, move_unit_id,
         force_thru_enemy=True,
     )
+    # 09.07 JUGÉE : les trois volets (éligibilité, budget, post-condition) ont été mesurés sur
+    # cette ligne, les deux premiers au-dessus.
+    note_rule_usage(stats, "09.07", player)
     if _per_model_move_violation(
         start_models,
         state.current_line_models.get(move_unit_id),  # get allowed
@@ -562,6 +566,10 @@ def _handle_move(state, config, line, action_desc, player, turn, phase, move_mat
             move_range, move_is_fly,
             state.wall_hexes, occupied_positions, enemy_adjacent_hexes,
         )
+        if is_move_after_shooting:
+            # Capacité de projet `move_after_shooting` JUGÉE : le budget de la capacité vient
+            # d'être mesuré. Le move NORMAL de cette même branche est compté plus bas, sur 09.05.
+            note_rule_usage(stats, "PROJET.move_after_shooting", player)
         if move_over:
             if is_move_after_shooting:
                 stats['move_after_shooting_distance_over_limit'][player] += 1
@@ -705,6 +713,12 @@ def _handle_move(state, config, line, action_desc, player, turn, phase, move_mat
             subject_models=state.current_line_models.get(move_unit_id),  # get allowed
             subject_heights=state.current_line_heights.get(move_unit_id),  # get allowed
         )
+        # 09.05 vient d'être JUGÉE sur cette ligne : le budget, l'engagement de départ et celui
+        # d'arrivée ont tous trois été mesurés au-dessus. Le compteur est posé ICI et pas à
+        # l'entrée du handler — un mouvement dont la géométrie n'aurait pas pu être mesurée ne
+        # doit pas compter pour un exercice de la règle, sans quoi « jamais exercée » ne se
+        # déclencherait plus jamais.
+        note_rule_usage(stats, "09.05", player)
         if dest_adjacent:
             if not adjacent_before:
                 stats['move_to_adjacent_enemy'][player] += 1
@@ -734,6 +748,10 @@ def _handle_move(state, config, line, action_desc, player, turn, phase, move_mat
                         'adjacent_after': adjacent_after,
                     }
 
+        # 03.01 : la destination vient d'être confrontée aux murs. Le reste de la règle — chemin
+        # réel, figurines, bord du plateau — est jugé dans le contrôle de budget ci-dessus, qui
+        # rend un verdict unique ; c'est dit dans l'entrée de corpus (`co_verified_by`).
+        note_rule_usage(stats, "03.01", player)
         # RULE: Move into wall
         if (dest_col, dest_row) in state.wall_hexes:
             stats['wall_collisions'][player] += 1
