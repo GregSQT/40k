@@ -75,6 +75,168 @@ def get_engagement_zone_vertical(game_state: Optional[Dict[str, Any]] = None) ->
 #: (l'analyzer n'en testait qu'une sur trois) restait d'accord avec elle par chance.
 _VERTICAL_ENTRY_KEYS = ("occupied_hexes_by_model", "floor_height_by_model", "MODEL_HEIGHT")
 
+# ============================================================================
+# MÉMOÏSATION DE L'ENGAGEMENT PAR PAIRE (§03.04)
+# ============================================================================
+# L'engagement est une FONCTION PURE de la géométrie des deux entrées : mêmes positions, même
+# verdict. Or dans un seul step d'agent, la même paire est mesurée par le masque d'actions, par
+# les pools de destination ET par l'observation, sur un plateau qui n'a pas bougé entre les trois.
+# Profil du 2026-08-10 (évaluation x1, 12 épisodes) : `_entries_in_engagement_zone_3d` totalise
+# 96 626 appels pour 13,6 s, et `min_distance_between_sets` 331 816 appels — pour une poignée
+# d'unités réelles.
+#
+# CLÉ CONTENANT LA GÉOMÉTRIE, jamais un compteur de version. C'est le point de conception, et il
+# vient d'un défaut vécu : la 1re version du cache de `build_squad_move_cell_map` était clée sur
+# `_unit_move_version`, qu'un chemin d'écriture de position ne bumpe pas — elle servait une carte
+# périmée et produisait une divergence masque/exécution (§0.18). Ici, si une figurine bouge, la
+# clé change PAR CONSTRUCTION : il n'existe aucun chemin d'écriture capable de rendre une entrée
+# périmée sans changer sa clé. Le prix est de reconstruire la clé à chaque appel — c'est ce que la
+# mesure valide, pas une intuition.
+#
+# Conséquence : une entrée « périmée » n'existe pas, seulement des entrées DEVENUES INUTILES. Le
+# cache est donc borné par purge, pas par invalidation.
+#
+# QUI EST MÉMOÏSÉ, ET QUI NE L'EST PAS — c'est le critère de conception, pas un réglage.
+# Est mémoïsée une paire décrivant deux positions OCCUPÉES ; ne l'est pas une paire dont une
+# entrée décrit une CELLULE TESTÉE. Les boucles de candidats — pool de move, BFS de charge,
+# recherche de placement — construisent une entrée par cellule explorée : clé neuve à chaque fois,
+# jamais redemandée, et surtout elle CHASSE du cache les paires unité↔unité que le masque, les
+# pools et l'observation du même step vont redemander. Ces sites passent `memoise=False` :
+# 1 dans `move_anchor_violates_engagement_clearance`, 2 dans `shared_utils` (charge), 13 dans
+# `charge_handlers` — chacun commenté sur place. Mesuré à x5 : les laisser entrer fait tomber le
+# taux de touche de 83 % à 29 %, déclenche 110 purges et retourne le gain à **−0,83 s**.
+#
+# ⚠️ CE CRITÈRE NE SE VÉRIFIE PAS EN LISANT LE SITE D'APPEL. Il a fallu QUATRE passes pour le
+# poser correctement, et chaque rechute venait de la même illusion : croire au nom de la variable.
+# Le cas d'école est `_eng` (`charge_handlers`), qui reçoit un `synth_base` construit ~60 lignes
+# plus haut, hors de la boucle — donc « invariant » à la lecture. Il est en fait RÉÉCRIT à chaque
+# cellule candidate, ~30 lignes PLUS BAS que l'appel. Il a été classé « producteur de touches »
+# dans ce même commentaire avant qu'une review ne le rattrape.
+# La seule vérification qui tienne : ÉCHANTILLONNER les ratés en production (une pile d'appel sur
+# 50) et regarder qui apparaît. Un site qui rate systématiquement est un site à exclure.
+#
+# À l'inverse, RESTENT mémoïsées les entrées posées sur une position RÉELLE, vérifiées une par une :
+# synth par-figurine de `shared_utils`, `placed_synths` d'un plan committé, positions d'un plan
+# validé, entrées `units_cache` directes. Ce sont elles qui produisent les touches.
+#
+# GAIN MESURÉ le 2026-08-10, par comptabilité INTERNE À UN SEUL RUN — coût des clés d'un côté,
+# coût réel des mesures évitées de l'autre, le prix d'une touche étant échantillonné en la
+# recalculant une fois sur vingt plutôt que déduit du prix d'un raté :
+#   x1 (`--resolution 1`, 24 ép.) : touches 86,2 %, 1 purge, 21,0 Mo → **net +12,64 s** ;
+#   x5 (`--resolution 5`,  6 ép.) : touches 83,3 %, 3 purges, 13,7 Mo → **net  +2,42 s**.
+# Une touche coûte PLUS cher qu'un raté (42,97 µs contre 29,53 µs à x1) : les paires redemandées
+# sont les paires proches, celles dont les boucles 3D vont le plus loin. Estimer le gain sur le
+# prix moyen d'un raté le sous-estimait de 40 %.
+#
+# ⚠️ MÉTHODE — comparer deux runs au chronomètre NE MARCHE PAS ici, et c'est ce qui a d'abord fait
+# conclure (à tort) que ce cache était une perte. Les parties jouées diffèrent d'un run à l'autre,
+# donc le travail aussi : mesuré à x5, 184 s puis 279 s de temps CPU pour la MÊME configuration —
+# une variance de 50 %, largement au-dessus de l'effet cherché. Toute reprise de ce sujet doit
+# mesurer les deux moitiés du compromis DANS le même run.
+_EZ_PAIR_CACHE: Dict[Any, bool] = {}
+
+# BORNE EN POIDS, PAS EN NOMBRE D'ENTRÉES — et la différence n'est pas théorique.
+# Une clé porte deux empreintes complètes, donc son poids varie d'un facteur 60 selon la
+# résolution et la taille d'escouade. Un plafond de 50 000 ENTRÉES — la première version —
+# laissait passer **4,4 GB** à x5, et l'entraînement tourne à `n_envs: 48` processus.
+#
+# MÉTHODE DE MESURE — elle a compté deux fois ici, et deux estimations successives se sont
+# trompées avant celle-ci. `sys.getsizeof` récursif sur UNE clé isolée ne répond pas à la
+# question : il double-compte les objets partagés entre clés, ou ignore le surcoût du dict, selon
+# la façon dont on somme. La seule mesure honnête est la CROISSANCE RSS du processus en
+# remplissant le vrai dict avec 20 000 clés distinctes :
+#   x1,  1 figurine  (1 hex)      →  1,45 kB/clé → 246,8 octets par élément
+#   x1,  5 figurines (1 hex/fig)  →  3,39 kB/clé → 115,7
+#   x5,  5 figurines (19 hex/fig) → 23,97 kB/clé → 116,9
+#   x5, 10 figurines (43 hex/fig) → 89,43 kB/clé → 101,7
+#
+# Le poids est compté en ÉLÉMENTS d'empreinte (hexes + figurines), pas en octets réels : c'est un
+# `len()` sur des objets déjà construits, donc gratuit. Le rapport octets/élément n'est PAS
+# constant — les petites clés paient proportionnellement bien plus de surcoût de conteneur, et ce
+# sont justement les plus nombreuses (une figurine synthétique par modèle). On retient donc la
+# borne HAUTE mesurée, jamais la moyenne : une borne qui sous-estime ne borne rien.
+_EZ_BYTES_PER_ITEM = 250
+#: Garde-fou en NOMBRE, second verrou de la borne en poids. `_EZ_WEIGHT` est un compteur global
+#: incrémenté hors verrou ; `services/api_server.py` tourne en Flask `threaded=True`, donc deux
+#: aperçus PvP concurrents peuvent perdre un incrément et retarder la purge. L'entraînement, lui,
+#: est multi-PROCESSUS (mémoire séparée) : la course n'existe que côté serveur. Ce plafond est
+#: dimensionné sur la PLUS PETITE clé mesurée (1,45 kB) — c'est le cas où les incréments sont les
+#: plus nombreux, donc où une dérive s'accumulerait ; pour les grosses clés la borne en poids
+#: déclenche bien avant.
+_EZ_MAX_ENTRIES = 30_000
+#: ~32 Mo par processus. Dimensionné sur le VRAI jeu de travail, pas sur le pire cas : à x5 il
+#: contient une centaine de paires escouade↔escouade (les clés lourdes) et quelques centaines de
+#: paires figurine↔escouade (clés légères, une figurine chacune). Ce qui déclenche les purges est
+#: le flot de clés À USAGE UNIQUE de `move_anchor_violates_engagement_clearance` en métrique
+#: euclidienne — une clé par (cellule candidate × ennemi) — et celles-là ne touchent jamais : les
+#: purger est exactement ce qu'on veut.
+_EZ_PAIR_CACHE_MAX_BYTES = 32 * 1024 * 1024
+_EZ_WEIGHT = {"items": 0}
+def _fingerprint_weight(fp: Tuple[Any, ...]) -> int:
+    """Nombre d'éléments portés par une empreinte — proxy de son poids mémoire (cf. ci-dessus)."""
+    total = 0
+    for part in fp:
+        if isinstance(part, (frozenset, tuple)):
+            total += len(part)
+    return total
+
+#: Marqueur de clé ABSENTE dans une empreinte d'entrée. `None` ne conviendrait pas : une clé
+#: PRÉSENTE ET VIDE est un état DIFFÉRENT d'une clé absente (cf. `entry_has_vertical_data` et
+#: `_require_measurable_entry` — l'une est le cas synthétique légitime, l'autre une corruption).
+#: Les confondre dans l'empreinte ferait partager une entrée de cache à deux états distincts.
+_EZ_FP_ABSENT = "\x00absent"
+
+def _hashable(value: Any) -> Any:
+    """Rend une valeur utilisable dans une clé de cache, sans la dénaturer.
+
+    Seules les listes sont converties (en tuple) : une clé de cache doit être hashable, et une
+    liste ne l'est pas. Aucune autre transformation — tronquer ou normaliser ici ferait partager
+    une entrée de cache à deux géométries différentes, ce qui est le seul défaut que ce cache
+    puisse produire, et il serait silencieux.
+    """
+    return tuple(value) if isinstance(value, list) else value
+
+
+def _engagement_entry_fingerprint(entry: Dict[str, Any]) -> Tuple[Any, ...]:
+    """Empreinte hashable de TOUT ce que la mesure d'engagement lit dans une entrée-cache.
+
+    Exhaustivité VÉRIFIÉE champ par champ contre les trois chemins de `entries_in_engagement_zone`
+    (verrouillée par `tests/unit/engine/test_engagement_pair_cache.py`) :
+
+    - `col` / `row` — sentinelle hors table (`entry_is_on_battlefield`) et repli d'ancre de
+      `entry_footprint` ;
+    - `occupied_hexes` — chemin 2D hex, et `Socle` du chemin euclidien ;
+    - `occupied_hexes_by_model` — chemin 3D (`_vertical_classes`), centres par-figurine du `Socle`,
+      et contrôle de corruption `_require_measurable_entry` ;
+    - `floor_height_by_model` — gate vertical 3D, et même contrôle de corruption ;
+    - `MODEL_HEIGHT` — borne haute de l'intervalle vertical ;
+    - `BASE_SHAPE` / `BASE_SIZE` / `orientation` — empreinte par classe (`_class_footprint`) et `Socle`.
+
+    Un champ oublié ici = deux états de jeu différents qui partagent une entrée de cache, donc un
+    verdict d'engagement faux SANS erreur visible. C'est le seul mode d'échec de ce cache, et c'est
+    pour ça que le test énumère les champs plutôt que d'échantillonner un scénario.
+    """
+    occ = entry.get("occupied_hexes")  # get allowed (absente sur les entrées synthétiques)
+    by_model = entry.get("occupied_hexes_by_model")  # get allowed (idem)
+    floors = entry.get("floor_height_by_model")  # get allowed (idem)
+    return (
+        entry.get("col"),  # get allowed (l'absence est une entrée malformée, signalée en aval)
+        entry.get("row"),  # get allowed (idem)
+        frozenset(occ) if occ is not None else _EZ_FP_ABSENT,
+        tuple(sorted((str(m), int(c), int(r)) for m, (c, r) in by_model.items()))
+        if by_model is not None else _EZ_FP_ABSENT,
+        tuple(sorted((str(m), float(h)) for m, h in floors.items()))
+        if floors is not None else _EZ_FP_ABSENT,
+        entry.get("MODEL_HEIGHT", _EZ_FP_ABSENT),  # get allowed (absente = pas de couche verticale)
+        entry.get("BASE_SHAPE", _EZ_FP_ABSENT),  # get allowed (validée en aval par require_key)
+        # `BASE_SIZE` est un SCALAIRE pour un socle rond mais une LISTE pour un socle rectangulaire
+        # (largeur, longueur) — donc non hashable telle quelle. Le même piège est déjà documenté
+        # dans `perf_timing.perf_field`. Il ne se voit pas à x1, où tous les socles du roster sont
+        # ronds : c'est un run à x5 qui l'a levé, par un `TypeError: unhashable type: 'list'`.
+        _hashable(entry.get("BASE_SIZE", _EZ_FP_ABSENT)),  # get allowed (validée en aval)
+        int(entry.get("orientation", 0)),  # get allowed — jumeau exact du défaut de `socle_from_cache_entry`
+    )
+
 
 def entry_has_vertical_data(entry: Dict[str, Any]) -> bool:
     """L'entrée-cache porte-t-elle de quoi mesurer l'engagement VERTICAL (§03.04) ?
@@ -327,6 +489,8 @@ def entries_in_engagement_zone(
     engagement_zone: int,
     metric: str,
     vertical_zone_inches: Optional[float] = None,
+    *,
+    memoise: bool = True,
 ) -> bool:
     """Point de bascule pairwise de l'EZ (règle 03.04, bord-à-bord). Deux socles sont en zone
     d'engagement mutuelle ssi leur distance bord-à-bord ≤ ``engagement_zone`` :
@@ -367,18 +531,66 @@ def entries_in_engagement_zone(
     # peuplées de `(-1,-1)`), donc `_require_measurable_entry` la laisse passer et le chemin 3D
     # ci-dessous rend « engagée » face à toute unité réelle proche de l'origine. MESURÉ à x1/hex
     # (EZ = 2) : fantôme vs unité en `(0,0)` → True. Un verdict inventé, jamais un crash.
+    # Les quatre gardes restent HORS du cache : elles lèvent sur un état incohérent, et servir une
+    # valeur mémoïsée à leur place ferait disparaître l'erreur au lieu de la signaler.
     require_entry_on_battlefield(first_entry, "entries_in_engagement_zone")
     require_entry_on_battlefield(second_entry, "entries_in_engagement_zone")
     _require_measurable_entry(first_entry)
     _require_measurable_entry(second_entry)
-    if entry_has_vertical_data(first_entry) and entry_has_vertical_data(second_entry):
-        threshold = (
-            get_engagement_zone_vertical()
-            if vertical_zone_inches is None
-            else float(vertical_zone_inches)
+    is_3d = entry_has_vertical_data(first_entry) and entry_has_vertical_data(second_entry)
+    # Le seuil vertical entre dans la clé sous sa forme RÉSOLUE : à `None`, il vient du config, et
+    # deux configs différentes doivent donner deux entrées de cache distinctes. Il n'est résolu que
+    # sur le chemin 3D, exactement comme avant — le chemin 2D ne le lit pas.
+    threshold_v = (
+        (get_engagement_zone_vertical() if vertical_zone_inches is None
+         else float(vertical_zone_inches))
+        if is_3d else None
+    )
+    # La paire est ORDONNÉE (pas de `frozenset`) : la mesure est symétrique, mais l'exprimer dans
+    # la clé demanderait de trier deux empreintes à chaque appel — plus cher que le doublon qu'on
+    # économiserait. Un doublon coûte une entrée, jamais un verdict faux.
+    if not memoise:
+        return _entries_in_engagement_zone_uncached(
+            first_entry, second_entry, engagement_zone, metric, is_3d, threshold_v
         )
+    fp_a = _engagement_entry_fingerprint(first_entry)
+    fp_b = _engagement_entry_fingerprint(second_entry)
+    cache_key = (fp_a, fp_b, engagement_zone, metric, threshold_v)
+    cached = _EZ_PAIR_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    weight = _fingerprint_weight(fp_a) + _fingerprint_weight(fp_b)
+    if (
+        (_EZ_WEIGHT["items"] + weight) * _EZ_BYTES_PER_ITEM > _EZ_PAIR_CACHE_MAX_BYTES
+        or len(_EZ_PAIR_CACHE) >= _EZ_MAX_ENTRIES
+    ):
+        _EZ_PAIR_CACHE.clear()
+        _EZ_WEIGHT["items"] = 0
+    result = _entries_in_engagement_zone_uncached(
+        first_entry, second_entry, engagement_zone, metric, is_3d, threshold_v
+    )
+    _EZ_PAIR_CACHE[cache_key] = result
+    _EZ_WEIGHT["items"] += weight
+    return result
+
+
+def _entries_in_engagement_zone_uncached(
+    first_entry: Dict[str, Any],
+    second_entry: Dict[str, Any],
+    engagement_zone: int,
+    metric: str,
+    is_3d: bool,
+    threshold_v: Optional[float],
+) -> bool:
+    """Mesure d'engagement PROPREMENT DITE — cf. `entries_in_engagement_zone` pour la règle.
+
+    Séparée uniquement pour que la mémoïsation n'ait pas à s'intercaler dans le corps de la règle.
+    Les gardes d'état incohérent ont déjà été appliquées par l'appelant.
+    """
+    if is_3d:
+        assert threshold_v is not None  # posé par l'appelant sur ce chemin exactement
         return _entries_in_engagement_zone_3d(
-            first_entry, second_entry, engagement_zone, threshold, metric
+            first_entry, second_entry, engagement_zone, threshold_v, metric
         )
     if metric == "hex":
         first_fp = entry_footprint(first_entry)
@@ -541,6 +753,8 @@ def unit_entries_within_engagement_zone(
     engagement_zone: int,
     metric: Optional[str] = None,
     vertical_zone_inches: Optional[float] = None,
+    *,
+    memoise: bool = True,
 ) -> bool:
     """Return True when two unit cache entries are within the shared engagement contract.
 
@@ -560,7 +774,8 @@ def unit_entries_within_engagement_zone(
     if metric is None:
         metric = engagement_distance_metric()
     return entries_in_engagement_zone(
-        first_entry, second_entry, engagement_zone, metric, vertical_zone_inches
+        first_entry, second_entry, engagement_zone, metric, vertical_zone_inches,
+        memoise=memoise,
     )
 
 
@@ -655,8 +870,16 @@ def move_anchor_violates_engagement_clearance(
         )
 
     for _, cache_entry in enemy_iter:
+        # `memoise=False` : `mover_entry` décrit une CELLULE CANDIDATE, pas une unité posée. Un
+        # pool de move en construit une par cellule explorée, donc une clé de cache neuve à chaque
+        # fois, qui ne resservira jamais — mesuré à x5 : ~21 600 clés à usage unique pour un seul
+        # pool. Les mémoïser ne fait pas que gaspiller la construction de la clé, ça CHASSE du
+        # cache les paires unité↔unité qui, elles, sont redemandées par le masque, les pools et
+        # l'observation du même step. Mesuré : taux de touche 66 % → 29 %, 109 purges, et le gain
+        # net passe de +4,53 s à **−2,00 s**. Le flot de candidats est donc exclu à la source.
         if entries_in_engagement_zone(
-            mover_entry, cache_entry, engagement_zone_ez, metric, vertical_zone_inches
+            mover_entry, cache_entry, engagement_zone_ez, metric, vertical_zone_inches,
+            memoise=False,
         ):
             return True
     return False

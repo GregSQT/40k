@@ -5778,7 +5778,10 @@ def _hex_legal_for_charge(
     ez = get_engagement_zone(game_state)
     synth = _synth_model_entry(game_state, str(squad_id), model_entry, col, row)
     for enemy_entry in non_target_enemy_entries:
-        if unit_entries_within_engagement_zone(synth, enemy_entry, ez):
+        # `memoise=False` : `synth` porte une CELLULE CANDIDATE du BFS de charge, pas une
+        # position occupée. Une clé neuve par cellule testée, jamais redemandée — cf. le
+        # commentaire de `move_anchor_violates_engagement_clearance`.
+        if unit_entries_within_engagement_zone(synth, enemy_entry, ez, memoise=False):
             return False
     return True
 
@@ -6089,7 +6092,11 @@ def charge_build_valid_plan(
             ):
                 continue
             synth = _synth_model_entry(game_state, str(squad_id), m, nc, nr)
-            if not any(unit_entries_within_engagement_zone(synth, te, ez) for te in target_entries):
+            # `memoise=False` : même cellule candidate de BFS que ci-dessus.
+            if not any(
+                unit_entries_within_engagement_zone(synth, te, ez, memoise=False)
+                for te in target_entries
+            ):
                 continue
             engaged_candidates.append((d_orig, _formation_gap(nc, nr), nc, nr))
         picked: Optional[Tuple[int, int]] = None

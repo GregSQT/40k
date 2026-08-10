@@ -444,8 +444,10 @@ def _charge_anchor_within_1_of_target(
     synth = _charge_synthetic_charger_cache_entry(
         game_state, unit, int(anchor_col), int(anchor_row), candidate_fp, level=0
     )
+    # `memoise=False` : `synth` porte l'ANCRE TESTÉE, pas une position occupée (cf.
+    # `move_anchor_violates_engagement_clearance`).
     return unit_entries_within_engagement_zone(
-        synth, te, within_1_zone)
+        synth, te, within_1_zone, memoise=False)
 
 
 def _charge_pool_must_socle_a_socle_if_possible(
@@ -815,7 +817,10 @@ def _charge_reverse_goal_bfs_for_eligibility(
                 if not (candidate_fp & enemy_engagement_zone):
                     rejected_engagement_prefilter_n += 1
                     continue
-            if unit_entries_within_engagement_zone(synth, enemy_entry, engagement_zone):
+            # `memoise=False` : ancre-but candidate du BFS inverse.
+            if unit_entries_within_engagement_zone(
+                synth, enemy_entry, engagement_zone, memoise=False
+            ):
                 engages_enemy = True
         if _perf and _t_engagement0 is not None:
             goal_engagement_s += time.perf_counter() - _t_engagement0
@@ -2137,8 +2142,14 @@ def _compute_plan_context(
         def _eng(enemy_entry, e_shape, e_multi, mask, radius, cand_fp, cand_is_multi, vert_reachable):
             # Chemin euclidien (rond simple ↔ rond simple) : on conserve la fonction partagée (précis, 3D).
             if radius > 1 and synth_shape == "round" and e_shape == "round" and not cand_is_multi and not e_multi:
+                # `memoise=False` : `synth_base` N'EST PAS invariant — la boucle de classement
+                # ci-dessous le réécrit à chaque cellule candidate (col/row/empreinte/cartes
+                # par-figurine). C'est donc une clé neuve par (cellule × ennemi), du même flot que
+                # les autres boucles de candidats. Ce site avait été classé « invariant » à tort
+                # lors de la passe précédente : la mutation a lieu ~30 lignes PLUS BAS que la
+                # construction, hors du champ de vision de la lecture qui a servi à le classer.
                 return unit_entries_within_engagement_zone(
-                    synth_base, enemy_entry, radius)
+                    synth_base, enemy_entry, radius, memoise=False)
             # Chemin empreinte : intersection horizontale (masque dilaté) ET gate vertical (par-ennemi).
             return vert_reachable and bool(cand_fp & mask)
 
@@ -2255,18 +2266,21 @@ def _compute_plan_context(
                         game_state, unit_id, rep_model, cc, rr, level=int(view_level)
                     )
                     # AFTER MOVING : aucun engagement avec un ennemi NON déclaré (3D).
+                    # `memoise=False` : cellule d'étage candidate (les 3 appels ci-dessous).
                     if any(
-                        unit_entries_within_engagement_zone(synth, ne, ez)
+                        unit_entries_within_engagement_zone(synth, ne, ez, memoise=False)
                         for ne in nontarget_entries
                     ):
                         continue
                     d_min = min((dist_tgt.get(h, INF) for h in cand_fp), default=INF)
                     engaged_f = any(
-                        unit_entries_within_engagement_zone(synth, te, ez)
+                        unit_entries_within_engagement_zone(synth, te, ez, memoise=False)
                         for te in target_entries
                     )
                     within1_f = any(
-                        unit_entries_within_engagement_zone(synth, te, within_1_zone)
+                        unit_entries_within_engagement_zone(
+                            synth, te, within_1_zone, memoise=False
+                        )
                         for te in target_entries
                     )
                     reg_f[(cc, rr)] = {"fp": cand_fp, "d_min": d_min, "within_1": within1_f, "engaged": engaged_f}
@@ -2732,7 +2746,10 @@ def charge_build_valid_targets(game_state: Dict[str, Any], unit_id: str, max_dis
         for enemy_id, enemy_entry, enemy_fp in enemy_index:
             if candidate_fp & enemy_fp:
                 continue
-            if unit_entries_within_engagement_zone(synth, enemy_entry, engagement_zone):
+            # `memoise=False` : destination candidate du balayage `reachable_hexes`.
+            if unit_entries_within_engagement_zone(
+                synth, enemy_entry, engagement_zone, memoise=False
+            ):
                 per_enemy_has_geom[enemy_id] = True
                 if not blocked_by_occupation:
                     per_enemy_non_occ[enemy_id] = True
@@ -3588,7 +3605,10 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
                     if candidate_fp & enemy_fp:
                         hex_overlaps_enemy = True
                         break
-                    if unit_entries_within_engagement_zone(synth, enemy_entry, engagement_zone):
+                    # `memoise=False` : `synth` est la cellule candidate du pool de charge.
+                    if unit_entries_within_engagement_zone(
+                        synth, enemy_entry, engagement_zone, memoise=False
+                    ):
                         is_adjacent_to_enemy = True
                         if _cur_engaging is not None:
                             _cur_engaging.add(str(_eid))
@@ -3684,7 +3704,10 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
                 if candidate_fp & enemy_fp:
                     hex_overlaps_enemy = True
                     break
-                if unit_entries_within_engagement_zone(synth, enemy_entry, engagement_zone):
+                # `memoise=False` : cellule candidate du BFS de charge (branche euclidienne).
+                if unit_entries_within_engagement_zone(
+                    synth, enemy_entry, engagement_zone, memoise=False
+                ):
                     is_adjacent_to_enemy = True
                     if _cur_engaging is not None:
                         _cur_engaging.add(str(_eid))
@@ -3861,8 +3884,9 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
                     if not (candidate_fp & _bfs_enemy_eng_zones[_eid]):
                         continue
                 bfs_engagement_checks_n += 1
+                # `memoise=False` : cellule candidate du BFS de charge (branche sol).
                 if unit_entries_within_engagement_zone(
-                    synth, enemy_entry, engagement_zone):
+                    synth, enemy_entry, engagement_zone, memoise=False):
                     is_adjacent_to_enemy = True
                     if _cur_engaging is not None:
                         _cur_engaging.add(str(_eid))
@@ -4515,7 +4539,11 @@ def _charge_model_pos_is_closer(
         return False
     # 3b : synth au niveau RÉEL de la destination (engagement 3D en montant ; sol = level 0, comme 3a).
     synth = _charge_synthetic_charger_cache_entry(game_state, unit, dest[0], dest[1], cand_fp, level=int(dest_level))
-    if any(unit_entries_within_engagement_zone(synth, ne, ez) for ne in nontarget_entries):
+    # `memoise=False` : `dest` est une destination candidate.
+    if any(
+        unit_entries_within_engagement_zone(synth, ne, ez, memoise=False)
+        for ne in nontarget_entries
+    ):
         return False
     return True
 
@@ -4813,8 +4841,9 @@ def charge_autoplace_plan(
         # Synth au niveau RÉEL de la destination : l'engagement est 3D (§03.04), un ennemi non déclaré
         # deux étages plus bas n'est pas engagé par une figurine posée en hauteur.
         synth = _synth_model_entry(game_state, squad_id, models_cache[mid], int(c), int(r), level=int(level))
+        # `memoise=False` : (c, r) est une destination candidate de la recherche de placement.
         return any(
-            unit_entries_within_engagement_zone(synth, ne, ez)
+            unit_entries_within_engagement_zone(synth, ne, ez, memoise=False)
             for ne in nontarget_entries
         )
 
@@ -4924,7 +4953,8 @@ def charge_autoplace_plan(
                     return True
             return False
         # Branche euclidienne (métrique gameplay) → primitive 3D. synth porte level=0 (3a, candidat au sol).
-        return unit_entries_within_engagement_zone(synth, struct[1], ez)
+        # `memoise=False` : `synth` est le candidat au sol (3a), une clé par cellule testée.
+        return unit_entries_within_engagement_zone(synth, struct[1], ez, memoise=False)
 
     # --- Atteignabilité par fig (BFS centre-à-centre ≤ budget, amies traversables). ---
     starts = {mid: (int(models_cache[mid]["col"]), int(models_cache[mid]["row"])) for mid in alive}
