@@ -16,10 +16,9 @@ restait inexplicable pour tout contrôle futur.
 """
 from __future__ import annotations
 
-from typing import Any, Dict
-
 from ai.analyzer_core import _parse_effects_snapshot
 from ai.analyzer_state import AnalyzerState
+from tests.unit.ai.conftest import analyzer_config
 
 
 def test_les_deux_moities_du_waaagh_sont_declarees() -> None:
@@ -47,15 +46,11 @@ def test_un_joueur_sans_effet_est_dit_explicitement() -> None:
 
 # ── Le plafond d'attaques LIT le bonus, il ne le redevine pas ──────────────────────────────
 
-class _Cfg:
-    def __init__(self, limits: Dict[str, Any]) -> None:
-        self.unit_attack_limits = limits
-        self.cc_nb_by_weapon_global: Dict[str, Any] = {}
-
-
 def _cap(state: AnalyzerState, player: int, line: str) -> int:
     from ai.analyzer_phases.fight_handler import _cc_cap_for_line, _shooter_models
-    cfg = _Cfg({"WarTrakk": {"cc_nb_by_weapon": {"Choppa": 5}}})
+    cfg = analyzer_config(
+        unit_attack_limits={"WarTrakk": {"cc_nb_by_weapon": {"Choppa": 5}}},
+    )
     return _cc_cap_for_line(
         state, cfg, line, player, "WarTrakk", "Choppa", 5, 1, _shooter_models(line),
     )

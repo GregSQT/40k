@@ -24,6 +24,25 @@ import services.api_server as api_server
 
 
 @pytest.fixture(autouse=True)
+def _isolate_global_engine():
+    """Restaure la globale de module `api_server.engine` après chaque test du dossier.
+
+    `initialize_engine()` (appelée telle quelle par `test_api_forwards_codex_detachment.py`)
+    installe un moteur de PROCESS sans `current_mode_code` — l'état exact que la porte RBAC
+    refuse (`_forbidden_mode_response`). Elle survivait au test qui l'avait posée : tout test
+    suivant du MÊME worker xdist recevait 403 au lieu du code de son endpoint. Mesuré : les
+    trois tests de `test_api_persist_dir.py` verts isolément, rouges après ce fichier, et
+    `test_enabling_persist_writes_no_pickle` vert par vacance (un 403 n'écrit rien non plus).
+
+    Restauration de la VALEUR D'ORIGINE, pas mise à `None` : un test qui installe volontairement
+    son moteur doit retrouver l'état de départ du worker, quel qu'il soit.
+    """
+    original = api_server.engine
+    yield
+    api_server.engine = original
+
+
+@pytest.fixture(autouse=True)
 def authenticated_api_client(monkeypatch, tmp_path: Path):
     """Base d'auth temporaire + token de session porté par défaut par `app.test_client()`.
 

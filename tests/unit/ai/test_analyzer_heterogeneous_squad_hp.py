@@ -34,6 +34,9 @@ import pytest
 
 import ai.analyzer as an
 import ai.analyzer_core as core
+from ai.analyzer_config import AnalyzerConfig
+from ai.analyzer_state import AnalyzerState
+from tests.unit.ai.conftest import analyzer_config
 
 
 SQUAD = "105"
@@ -47,34 +50,35 @@ SQUAD_TOTAL_HP = sum(HP_BY_TYPE[t] for t in MODEL_TYPES.values())   # 20
 SQUAD_HP_MAX = 2                                                     # datasheet de TÊTE
 
 
-class _Config:
-    class _Registry:
-        units = {
-            t: {"HP_MAX": hp, "UNIT_RULES": ([{"ruleId": "leader"}] if t in CHARACTERS else [])}
-            for t, hp in HP_BY_TYPE.items()
-        }
+class _Registry:
+    """Seule table du registre que lit le recalage : PV et règles PAR DATASHEET."""
 
-    unit_registry = _Registry()
-
-
-class _State:
-    def __init__(self) -> None:
-        self.model_types: Dict[str, str] = dict(MODEL_TYPES)
-        self.unit_hp_squad_max: Dict[str, int] = {SQUAD: SQUAD_HP_MAX}
-        self.unit_model_hp: Dict[str, Dict[str, int]] = {}
-        self.unit_hp: Dict[str, int] = {}
-        self.unit_models_alive: Dict[str, int] = {}
+    units = {
+        t: {"HP_MAX": hp, "UNIT_RULES": ([{"ruleId": "leader"}] if t in CHARACTERS else [])}
+        for t, hp in HP_BY_TYPE.items()
+    }
 
 
-@pytest.fixture
-def st():
-    s = _State()
-    core._resync_living_models(s, _Config(), SQUAD, list(MODEL_TYPES))
+def _config() -> AnalyzerConfig:
+    return analyzer_config(unit_registry=_Registry())
+
+
+def _state() -> AnalyzerState:
+    s = AnalyzerState(stats={})
+    s.model_types = dict(MODEL_TYPES)
+    s.unit_hp_squad_max = {SQUAD: SQUAD_HP_MAX}
     return s
 
 
-def _hps(state) -> List[int]:
-    return [state.unit_model_hp[SQUAD][m] for m in core._ordered_living_mids(state, _Config(), SQUAD)]
+@pytest.fixture
+def st() -> AnalyzerState:
+    s = _state()
+    core._resync_living_models(s, _config(), SQUAD, list(MODEL_TYPES))
+    return s
+
+
+def _hps(state: AnalyzerState) -> List[int]:
+    return [state.unit_model_hp[SQUAD][m] for m in core._ordered_living_mids(state, _config(), SQUAD)]
 
 
 # ── 1. Les PV viennent de la datasheet de CHAQUE figurine ────────────────────────────────
@@ -98,9 +102,9 @@ def test_characters_absorb_last(st):
 
 def test_unknown_datasheet_falls_back_to_the_squad_value():
     """Journal sans `[MODEL_TYPES:]` : ancien comportement, pas une composition inventée."""
-    s = _State()
+    s = _state()
     s.model_types = {}
-    core._resync_living_models(s, _Config(), SQUAD, list(MODEL_TYPES))
+    core._resync_living_models(s, _config(), SQUAD, list(MODEL_TYPES))
     assert _hps(s) == [SQUAD_HP_MAX] * len(MODEL_TYPES)
 
 
@@ -109,7 +113,7 @@ def test_unknown_datasheet_falls_back_to_the_squad_value():
 def test_resync_preserves_known_damage(st):
     """LE défaut du 2026-08-10 : `[MODELS:]` ne porte pas les PV, donc il ne doit pas les créer."""
     st.unit_model_hp[SQUAD]["105#0"] = 1                      # figurine entamée
-    core._resync_living_models(st, _Config(), SQUAD, list(MODEL_TYPES))
+    core._resync_living_models(st, _config(), SQUAD, list(MODEL_TYPES))
     assert st.unit_model_hp[SQUAD]["105#0"] == 1, (
         "le recalage a rendu ses PV à une figurine entamée : l'escouade encaissera plus que "
         "ses PV réels et survivra à sa propre mort"
@@ -118,7 +122,7 @@ def test_resync_preserves_known_damage(st):
 
 def test_resync_drops_models_absent_from_the_segment(st):
     survivants = ["105#5", "105#6"]
-    core._resync_living_models(st, _Config(), SQUAD, survivants)
+    core._resync_living_models(st, _config(), SQUAD, survivants)
     assert set(st.unit_model_hp[SQUAD]) == set(survivants)
     assert st.unit_models_alive[SQUAD] == 2
     assert st.unit_hp[SQUAD] == 6, "la front doit être la première de l'ordre 06.02 encore vivante"
@@ -127,7 +131,7 @@ def test_resync_drops_models_absent_from_the_segment(st):
 def test_snapshot_hps_are_taken_verbatim(st):
     """Un instantané `T{n} STATE:` porte les PV RÉELS : ils s'imposent tels quels."""
     core._resync_living_models(
-        st, _Config(), SQUAD, ["105#0", "105#5"], {"105#0": 1, "105#5": 2}
+        st, _config(), SQUAD, ["105#0", "105#5"], {"105#0": 1, "105#5": 2}
     )
     assert st.unit_model_hp[SQUAD] == {"105#0": 1, "105#5": 2}
     assert st.unit_hp[SQUAD] == 1
@@ -146,7 +150,7 @@ def _damage(state, amount: int) -> None:
         line_number=1, current_episode_num=1, line_text="l",
         dead_units_current_episode=set(), unit_hp=state.unit_hp,
         unit_models_alive=state.unit_models_alive, unit_model_hp=state.unit_model_hp,
-        ordered_living_mids=lambda u: core._ordered_living_mids(state, _Config(), u),
+        ordered_living_mids=lambda u: core._ordered_living_mids(state, _config(), u),
         unit_hp_squad_max=state.unit_hp_squad_max, unit_types={SQUAD: "Trooper"},
         unit_positions={SQUAD: (1, 1)}, unit_deaths=[], unit_kill_context={}, stats=stats,
     )
@@ -176,7 +180,7 @@ def test_the_log_caps_damage_to_remaining_hp():
 
 def test_damage_carries_over_to_the_next_model(st):
     """`Dmg:` est le dégât APPLIQUÉ : 3 sur une figurine à 2 PV doit en entamer une seconde."""
-    core._resync_living_models(st, _Config(), SQUAD, ["105#0", "105#1"])  # 2 PV chacune
+    core._resync_living_models(st, _config(), SQUAD, ["105#0", "105#1"])  # 2 PV chacune
     _damage(st, 3)
     assert st.unit_models_alive[SQUAD] == 1, "la première figurine aurait dû tomber"
     assert st.unit_hp[SQUAD] == 1, (
@@ -187,7 +191,7 @@ def test_damage_carries_over_to_the_next_model(st):
 
 def test_the_witness_squad_dies_on_exactly_its_remaining_hp(st):
     """Le témoin 102 : 4 PV restants (1 + 3), 4 PV de dégâts journalisés → détruite."""
-    core._resync_living_models(st, _Config(), SQUAD, ["105#0", "105#1"], {"105#0": 1, "105#1": 3})
+    core._resync_living_models(st, _config(), SQUAD, ["105#0", "105#1"], {"105#0": 1, "105#1": 3})
     _damage(st, 2)
     _damage(st, 1)
     _damage(st, 1)
@@ -199,6 +203,6 @@ def test_the_witness_squad_dies_on_exactly_its_remaining_hp(st):
 
 def test_overkill_stops_at_the_last_model(st):
     """Au-delà de la dernière figurine, l'excès n'a plus de destinataire : pas de récursion folle."""
-    core._resync_living_models(st, _Config(), SQUAD, ["105#0"], {"105#0": 1})
+    core._resync_living_models(st, _config(), SQUAD, ["105#0"], {"105#0": 1})
     _damage(st, 99)
     assert SQUAD not in st.unit_hp

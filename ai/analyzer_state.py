@@ -3,9 +3,12 @@ AnalyzerState — état partagé entre les handlers de parse_step_log.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from ai.analyzer_perfig import Base
+
+#: cf. `AnalyzerState.phase_activation_seen`.
+PhaseActivationKey = Union[Tuple[int, str, int], Tuple[str, int, int]]
 
 
 @dataclass
@@ -152,7 +155,11 @@ class AnalyzerState:
     positions_at_move_phase_start: Dict[str, Tuple[int, int]] = field(default_factory=dict)
     last_player: Optional[int] = None
     last_phase: Optional[str] = None
-    phase_activation_seen: Dict[Tuple[int, str, int], Set[str]] = field(default_factory=dict)
+    #: Clé d'identité d'une phase pour la détection de double activation. DEUX formes, parce que
+    #: deux grandeurs différentes identifient une phase : `(tour, phase, joueur)` hors combat,
+    #: `(phase, fight_phase_seq_id, joueur)` en combat — un tour contient DEUX phases de combat
+    #: (12.04), et le joueur de la ligne est celui de l'unité qui agit, pas celui de la phase.
+    phase_activation_seen: Dict[PhaseActivationKey, Set[str]] = field(default_factory=dict)
     reactive_activation_counts: Dict[Tuple[int, int, int], Dict[str, int]] = field(default_factory=dict)
     fight_phase_seq_id: int = 0
     # Points de victoire de l'épisode : recopiés du dernier instantané moteur, jamais calculés.

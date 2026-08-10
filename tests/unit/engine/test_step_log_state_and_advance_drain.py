@@ -127,7 +127,7 @@ def test_advance_phase_draine_ses_action_logs(tmp_path) -> None:
     gs: Dict[str, Any] = {"turn": 4, "fight_subphase": "pile_in", "action_logs": [{"type": "move"}]}
     eng = W40KEngine.__new__(W40KEngine)
     eng.game_state = gs
-    eng.step_logger = _LoggerStub()
+    eng.step_logger = _logger(tmp_path)
     drained: List[Tuple[Any, Any]] = []
 
     def _process(action):
@@ -153,12 +153,6 @@ def test_advance_phase_draine_ses_action_logs(tmp_path) -> None:
     # (la sous-phase change pendant).
     assert pre_turn == 4
     assert pre_fight == {"fight_subphase": "pile_in"}
-
-
-class _LoggerStub:
-    """StepLogger minimal : le helper ne construit son contexte que si quelqu'un journalise."""
-
-    enabled = True
 
 
 def test_une_entree_nest_jamais_drainee_deux_fois(tmp_path) -> None:

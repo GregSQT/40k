@@ -129,6 +129,6 @@ def test_le_RESUME_1_7_compte_aussi_les_capacites_de_faction(tmp_path) -> None:
     an.print_statistics(stats, output_lines=lines, emit_console=False)
 
     summary = [l for l in lines if "1.7 Special rules usage" in l]
-    assert summary, out[-2000:]
+    assert summary, "\n".join(lines[-40:])
     assert "0 utilisations" not in summary[0], summary[0]
     assert "2 utilisations" in summary[0], summary[0]

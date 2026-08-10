@@ -45,7 +45,14 @@ def _engine_stub(action_logs: List[Dict[str, Any]], logger: Any) -> W40KEngine:
 
 
 def _drain(engine: W40KEngine, cursor: int = 0, fight_state: Any = None) -> None:
-    engine._flush_squad_action_logs_to_step_logger(cursor, 2, fight_state)
+    """La BORNE n'est plus un paramètre : c'est le curseur PERSISTANT de `game_state`.
+
+    Le helper le pose donc dans l'état avant d'appeler le drain, exactement comme le fait un
+    drainage précédent. Ce que la méthode reçoit, c'est le contexte de FORMATAGE (tour et
+    sous-phase de combat capturés AVANT l'action, qui les mute).
+    """
+    engine.game_state[W40KEngine.STEP_LOG_DRAINED_KEY] = cursor
+    engine._flush_squad_action_logs_to_step_logger(2, fight_state)
 
 
 def test_no_step_logger_is_noop():
@@ -75,12 +82,20 @@ def test_cursor_only_logs_new_entries():
     assert [c["unit_id"] for c in logger.calls] == ["new"]
 
 
-def test_cursor_beyond_length_raises():
-    """action_logs ne doit jamais rétrécir dans un step : erreur explicite, pas de silence."""
+def test_cursor_beyond_length_restarts_from_zero():
+    """Curseur au-delà de la liste = liste VIDÉE ailleurs (l'API PvP le fait après chaque
+    réponse) : il désigne des entrées qui n'existent plus, donc le drainage repart de 0.
+
+    C'est le SEUL cas où le curseur peut dépasser la longueur, et le laisser en l'état perdrait
+    en silence toutes les lignes de la nouvelle liste.
+    """
     logger = _FakeStepLogger()
-    eng = _engine_stub([{"type": "move"}], logger)
-    with pytest.raises(ValueError, match="cannot exceed current length"):
-        _drain(eng, cursor=5)
+    logs = [{"type": "move", "unitId": "1", "player": 1, "phase": "move", "turn": 2,
+             "fromCol": 1, "fromRow": 1, "toCol": 2, "toRow": 2, "move_type": "normal"}]
+    eng = _engine_stub(logs, logger)
+    _drain(eng, cursor=5)
+    assert [c["unit_id"] for c in logger.calls] == ["1"]
+    assert eng.game_state[W40KEngine.STEP_LOG_DRAINED_KEY] == 1
 
 
 @pytest.mark.parametrize("move_type,expected", [

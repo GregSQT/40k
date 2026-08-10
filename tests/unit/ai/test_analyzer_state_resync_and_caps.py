@@ -23,7 +23,9 @@ import pytest
 
 import ai.analyzer as an
 from ai.analyzer_core import _apply_state_snapshot
+from ai.analyzer_config import AnalyzerConfig
 from ai.analyzer_state import AnalyzerState
+from tests.unit.ai.conftest import analyzer_config
 
 
 def _state() -> AnalyzerState:
@@ -35,15 +37,16 @@ def _state() -> AnalyzerState:
     return st
 
 
-class _Config:
+class _Registry:
     """Registry VIDE, et c'est exact ici : ces fixtures ne renseignent pas ``model_types``, donc
     le recalage des PV par figurine lit les PV de l'instantané et ne consulte aucune datasheet.
     Un registry peuplé n'ajouterait rien et masquerait cette dépendance."""
 
-    class _Registry:
-        units: Dict[str, Any] = {}
+    units: Dict[str, Any] = {}
 
-    unit_registry = _Registry()
+
+def _config() -> AnalyzerConfig:
+    return analyzer_config(unit_registry=_Registry())
 
 
 # ── 1. Recalage sur l'instantané d'état ─────────────────────────────────────────────────────
@@ -55,7 +58,7 @@ def test_mort_non_vue_est_comptee_puis_corrigee() -> None:
     écartée faute d'allocataire, donc écrite sans `Dmg:`, donc jamais soustraite.
     """
     st = _state()
-    _apply_state_snapshot(st, _Config(), "1[1#0@(5,48,z0):2 1#1@(7,47,z0):1]")
+    _apply_state_snapshot(st, _config(), "1[1#0@(5,48,z0):2 1#1@(7,47,z0):1]")
 
     assert st.stats["state_resync"]["dead_missed"] == 1
     assert st.unit_hp["101"] == 0
@@ -67,7 +70,7 @@ def test_mort_non_vue_est_comptee_puis_corrigee() -> None:
 def test_deplacement_non_journalise_est_compte_puis_corrige() -> None:
     """C'est ainsi que le pile-in muet se manifestait : la figurine n'est pas là où on la croit."""
     st = _state()
-    _apply_state_snapshot(st, _Config(), "1[1#0@(9,44,z0):2 1#1@(7,47,z0):1] 101[101#5@(4,49,z0):2]")
+    _apply_state_snapshot(st, _config(), "1[1#0@(9,44,z0):2 1#1@(7,47,z0):1] 101[101#5@(4,49,z0):2]")
 
     assert st.stats["state_resync"]["pos_mismatch"] == 1
     assert st.positions_by_model["1"]["1#0"] == (9, 44)
@@ -77,7 +80,7 @@ def test_deplacement_non_journalise_est_compte_puis_corrige() -> None:
 def test_unite_tuee_a_tort_est_comptee_puis_ressuscitee() -> None:
     st = _state()
     st.unit_hp["101"] = 0
-    _apply_state_snapshot(st, _Config(), "1[1#0@(5,48,z0):2 1#1@(7,47,z0):1] 101[101#5@(4,49,z0):2]")
+    _apply_state_snapshot(st, _config(), "1[1#0@(5,48,z0):2 1#1@(7,47,z0):1] 101[101#5@(4,49,z0):2]")
 
     assert st.stats["state_resync"]["alive_missed"] == 1
     assert st.unit_hp["101"] == 2
@@ -95,7 +98,7 @@ def test_unite_jamais_deployee_nest_pas_un_fantome() -> None:
     st.unit_models_alive["7"] = 3
     # Sentinelle hors table (20.01) : c'est ainsi que l'entête déclare une escouade en réserves.
     st.positions_by_model["7"] = {"7#0": (-1, -1), "7#1": (-1, -1)}
-    _apply_state_snapshot(st, _Config(), "1[1#0@(5,48,z0):2 1#1@(7,47,z0):1] 101[101#5@(4,49,z0):2]")
+    _apply_state_snapshot(st, _config(), "1[1#0@(5,48,z0):2 1#1@(7,47,z0):1] 101[101#5@(4,49,z0):2]")
 
     assert st.stats["state_resync"]["dead_missed"] == 0
     # Et surtout : elle reste VIVANTE. La tuer ici la ferait « ressusciter » à son ingress move,
@@ -123,7 +126,7 @@ def test_case_darrivee_occupee_reste_joignable() -> None:
 
 # ── 3. Plafond d'attaques par FIGURINE ──────────────────────────────────────────────────────
 
-def _cap(state: AnalyzerState, config, action_desc: str, n_models: int = 6) -> int:
+def _cap(state: AnalyzerState, config: AnalyzerConfig, action_desc: str, n_models: int = 6) -> int:
     from ai.analyzer_phases.fight_handler import _cc_cap_for_line, _shooter_models
     return _cc_cap_for_line(
         state, config, action_desc, 1, "Intercessor", "Close Combat Weapon", 3, n_models,
@@ -131,17 +134,11 @@ def _cap(state: AnalyzerState, config, action_desc: str, n_models: int = 6) -> i
     )
 
 
-class _Cfg:
-    def __init__(self, limits):
-        self.unit_attack_limits = limits
-        self.cc_nb_by_weapon_global = {}
-
-
 def test_plafond_suit_la_datasheet_de_la_figurine_qui_frappe() -> None:
     """L'Ancient rattaché porte une arme NB=5 ; l'Intercessor porteur, NB=3."""
     st = AnalyzerState(stats={})
     st.model_types = {"105#6": "Ancient", "105#0": "Intercessor"}
-    cfg = _Cfg({
+    cfg = analyzer_config(unit_attack_limits={
         "Intercessor": {"cc_nb_by_weapon": {"Close Combat Weapon": 3}},
         "Ancient": {"cc_nb_by_weapon": {"Close Combat Weapon": 5}},
     })
@@ -158,7 +155,7 @@ def test_waaagh_ajoute_une_attaque_par_figurine() -> None:
     """
     st = AnalyzerState(stats={})
     st.model_types = {"105#0": "WarTrakk"}
-    cfg = _Cfg({"WarTrakk": {"cc_nb_by_weapon": {"Close Combat Weapon": 5}}})
+    cfg = analyzer_config(unit_attack_limits={"WarTrakk": {"cc_nb_by_weapon": {"Close Combat Weapon": 5}}})
     assert _cap(st, cfg, "[SHOOTER_MODELS: 105#0]") == 5
     # Le bonus vient desormais de la ligne `EFFECTS`, plus d'un token recopie sur chaque attaque :
     # c'est une propriete d'ARMEE, et le token ne portait aucune notion de camp.
@@ -172,5 +169,5 @@ def test_repli_explicite_sur_le_type_descouade_sans_MODEL_TYPES() -> None:
     Ce n'est pas un défaut masqué — c'est l'absence d'une donnée neuve, et le repli est écrit.
     """
     st = AnalyzerState(stats={})   # model_types vide
-    cfg = _Cfg({"Intercessor": {"cc_nb_by_weapon": {"Close Combat Weapon": 3}}})
+    cfg = analyzer_config(unit_attack_limits={"Intercessor": {"cc_nb_by_weapon": {"Close Combat Weapon": 3}}})
     assert _cap(st, cfg, "[SHOOTER_MODELS: 105#6]", n_models=6) == 18

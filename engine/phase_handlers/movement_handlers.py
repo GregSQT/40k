@@ -1997,13 +1997,10 @@ def _compute_mover_ez_forbidden_mask(
         # version : un compteur a déjà causé une régression masque⊆exécutable (§0.18) parce
         # qu'un chemin d'écriture de position ne le bumpait pas. Le fingerprint capture les
         # positions ET les zones d'engagement, donc tout ce dont ce masque dépend.
-        from engine.phase_handlers.shared_utils import _move_spatial_cache
-        from engine.hex_utils import base_size_cache_key
+        from engine.phase_handlers.shared_utils import _move_spatial_cache, move_geom_key
         _cache = _move_spatial_cache(game_state).setdefault("ez_mask", {})
         _key = (
-            str(require_key(unit, "BASE_SHAPE")),
-            base_size_cache_key(require_key(unit, "BASE_SIZE")),
-            int(unit.get("orientation", 0)),  # get allowed (socle rond non orienté)
+            move_geom_key(unit),
             int(ez), int(board_cols), int(board_rows),
             # Identité de la LISTE ennemie fournie : les appelants passent des sous-ensembles
             # élagués (`_enemy_items_within_move_engagement_horizon`). Deux élagages différents
@@ -3940,6 +3937,12 @@ def movement_build_model_destinations_pool(
     #   l'empreinte plus bas (``dest_blocked`` ne contient que la géométrie).
     # ez <= 1 (legacy) : dilatation hex pré-calculée (``enemy_adjacent_hexes``), traitée comme la
     #   géométrie (dilatée par l'empreinte dans le filtre multi-hex) — comportement inchangé.
+    # Socle de LA FIGURINE — UNE seule lecture pour tous les usages du pool (masque EZ, champ
+    # euclidien, clearance de dépôt). Ils DOIVENT voir le même socle, et trois extractions
+    # séparées ne l'imposaient pas : c'est précisément l'invariant que le socle par-figurine
+    # vient de rétablir face à la validation.
+    _mm_shape = require_key(model, "BASE_SHAPE")
+    _mm_base = require_key(model, "BASE_SIZE")
     ez = get_engagement_zone(game_state)
     thru_ez, thru_enemy, thru_friendly = _get_move_traversal_rules(game_state)
     if ez > 1:
@@ -3953,8 +3956,8 @@ def movement_build_model_destinations_pool(
         # attaché porte un socle plus grand que sa datasheet d'escouade.
         _ez_mover = {
             "id": require_key(unit, "id"),
-            "BASE_SHAPE": require_key(model, "BASE_SHAPE"),
-            "BASE_SIZE": require_key(model, "BASE_SIZE"),
+            "BASE_SHAPE": _mm_shape,
+            "BASE_SIZE": _mm_base,
             "orientation": mover_orient,
         }
         # …ET la PRUNE des ennemis avec le MÊME socle. Elle borne l'horizon par le rayon du
@@ -3995,8 +3998,6 @@ def movement_build_model_destinations_pool(
     # expansée + re-filtrée séparément plus bas. Mêmes obstacles de traversée que le BFS hex.
     # FLY (Règles 21.03) : euclidien aussi, mais champ SANS obstacle (ignore murs/figs) → le champ
     # géodésique dégénère en disque euclidien centre-à-centre (ligne droite, règle 03.01).
-    _mm_base = require_key(model, "BASE_SIZE")
-    _mm_shape = require_key(model, "BASE_SHAPE")
     _mm_use_euclidean = _move_distance_metric(game_state) == "euclidean"
     # Instrumentation perf (coût nul si W40K_PERF_TIMING désactivé) — cf. MODEL_POOL_BUILD au return.
     from engine.perf_timing import perf_timing_enabled
@@ -4204,8 +4205,6 @@ def movement_build_model_destinations_pool(
     # même primitive (footprints_overlap) que movement_preview_move_plan → pool et voile cohérents.
     # Tangence (gap≈0) tolérée. Sœurs d'un autre étage : pas de gêne.
     from engine.hex_utils import Socle, footprints_overlap
-    _mover_shape = require_key(model, "BASE_SHAPE")
-    _mover_base = require_key(model, "BASE_SIZE")
     _mover_orient = mover_orient  # orient EN COURS du mover (socle testé à chaque destination)
     sibling_socles_by_level: Dict[int, List[Socle]] = {}
     for _sib, _sc, _sr, _sib_eff in sibling_states:
@@ -4228,12 +4227,12 @@ def movement_build_model_destinations_pool(
             if not _same_level:
                 _intra_filtered.append((_dc, _dr))
                 continue
-            _m_fp = None if _mover_shape == "round" else compute_candidate_footprint(
+            _m_fp = None if _mm_shape == "round" else compute_candidate_footprint(
                 _dc, _dr,
-                {"BASE_SHAPE": _mover_shape, "BASE_SIZE": _mover_base, "orientation": _mover_orient},
+                {"BASE_SHAPE": _mm_shape, "BASE_SIZE": _mm_base, "orientation": _mover_orient},
                 game_state,
             )
-            _m_socle = Socle(shape=_mover_shape, base_size=_mover_base, col=_dc, row=_dr, fp=_m_fp)
+            _m_socle = Socle(shape=_mm_shape, base_size=_mm_base, col=_dc, row=_dr, fp=_m_fp)
             if not any(footprints_overlap(_m_socle, _s) for _s in _same_level):
                 _intra_filtered.append((_dc, _dr))
         reachable = _intra_filtered

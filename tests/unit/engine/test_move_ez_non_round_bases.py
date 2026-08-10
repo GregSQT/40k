@@ -53,6 +53,8 @@ def _socle(shape, size, col, row, orient=0):
 
 def _cell_distance(a: Socle, b: Socle) -> float:
     """Distance MINIMALE entre centres de cellules — l'approximation que le masque filtre avec."""
+    if a.fp is None or b.fp is None:
+        raise ValueError("_cell_distance mesure des EMPREINTES : un socle sans `fp` n'en a pas")
     a_centers = [_hex_center(c, r) for c, r in a.fp]
     b_centers = [_hex_center(c, r) for c, r in b.fp]
     return min(

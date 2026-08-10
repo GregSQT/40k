@@ -5650,7 +5650,7 @@ class W40KEngine(gym.Env):
         # persistant, à l'intérieur du flush. Il n'y a plus rien à mesurer ici.
         # Construit uniquement si quelqu'un journalise : ces valeurs, dont une allocation de dict,
         # tombaient sur le chemin d'entraînement et le PvP, où le flush sort immédiatement.
-        _logging = bool(getattr(self, "step_logger", None) and self.step_logger.enabled)
+        _logging = self.step_logger is not None and self.step_logger.enabled
         _pre_turn = require_key(self.game_state, "turn") if _logging else None
         _pre_fight = (
             {"fight_subphase": self.game_state.get("fight_subphase")} if _logging else None  # get allowed

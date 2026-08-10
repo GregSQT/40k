@@ -3845,6 +3845,22 @@ def _move_spatial_cache(game_state: Dict[str, Any]) -> Dict[str, Any]:
 MoveGeomKey = Tuple[str, Any, int]
 
 
+def move_geom_key(entry: Dict[str, Any]) -> MoveGeomKey:
+    """Cle de geometrie de socle d'une entree `models_cache`/`units_cache`. UN seul constructeur.
+
+    Le triplet etait re-epele a la main partout ou il sert (regroupement des figurines de
+    l'erosion, comparaison de socle, cles de cache) : un 4e composant devait alors etre ajoute
+    dans autant d'endroits, et un oubli confondait silencieusement deux geometries distinctes.
+    `orientation` absent = 0 (socle rond, non oriente).
+    """
+    from engine.hex_utils import base_size_cache_key
+    return (
+        str(require_key(entry, "BASE_SHAPE")),
+        base_size_cache_key(require_key(entry, "BASE_SIZE")),
+        int(entry.get("orientation", 0)),  # get allowed (socle rond non oriente)
+    )
+
+
 def move_enemy_ez_forbidden_cells(
     game_state: Dict[str, Any],
     player: int,
@@ -4725,12 +4741,13 @@ def explain_move_plan_rejection(
     # `move_enemy_ez_forbidden_cells`). Une escouade a socles mixtes (personnage attache) a donc
     # plusieurs jeux de cellules interdites, et chaque figurine doit etre testee contre LE SIEN.
     # Memo local : une seule construction par geometrie presente dans le plan.
-    from engine.hex_utils import base_size_cache_key as _bsk
     _plan_levels = {plan_entry_level(entry) for entry in plan}
     _blocked_by_geom: Dict[Any, Dict[int, List[Tuple[str, Set[Tuple[int, int]]]]]] = {}
 
     def _blocked_for(_shape: Any, _size: Any, _orient: int):
-        _gk = (str(_shape), _bsk(_size), int(_orient))
+        _gk = move_geom_key(
+            {"BASE_SHAPE": _shape, "BASE_SIZE": _size, "orientation": int(_orient)}
+        )
         _hit = _blocked_by_geom.get(_gk)
         if _hit is None:
             _hit = build_move_blocked_cells_by_level(
@@ -8692,12 +8709,15 @@ def _manual_roll_intent(
     # hors demi-portee) : le log de tir en tire le token `[RAPID FIRE:X]`, dont l analyzer se
     # sert pour lever le PLAFOND de tirs de l escouade (NB de base -> NB + X). Sans lui, toute
     # activation RAPID FIRE produisait de faux « shots over RNG_NB ». Cf. V11 §0hist.38.
-    _rapid_fire_applied = 0
+    # BOOLEEN, pas une copie du X : le X est deja porte par `_rf_x`, et un second porteur devrait
+    # rester egal au premier sans que rien ne l'impose. Ce qu'on doit savoir ici, c'est « la
+    # regle a-t-elle ajoute des des », exactement comme `_blast_extra_dice` cote [BLAST].
+    _rapid_fire_applied = False
     if _rf_x is not None and _target_within_half_range(
         game_state, str(attacker["squad_id"]), target_sid, weapon
     ):
         n_attacks += _rf_x
-        _rapid_fire_applied = int(_rf_x)
+        _rapid_fire_applied = True
     if n_attacks <= 0:
         return None
     # Caracteristique de tir (BS) : la clef de l armory est `ATK` (243/243 profils de tir la
@@ -8896,10 +8916,10 @@ def _manual_roll_intent(
         "additive_rules_applied": {
             label: x
             for label, x, applied in (
-                (RULE_LABEL_BLAST, _blast_x, _blast_extra_dice),
+                (RULE_LABEL_BLAST, _blast_x, _blast_extra_dice > 0),
                 (RULE_LABEL_RAPID_FIRE, _rf_x, _rapid_fire_applied),
             )
-            if applied > 0 and x is not None
+            if applied and x is not None
         },
         "precision": _weapon_precision,
         "precision_range": int(require_key(weapon, "RNG")) if _weapon_precision else None,
@@ -9435,14 +9455,19 @@ def _build_manual_allocation(
         # Les X APPLIQUES des regles additives y entrent EN PLUS de la signature declaree, parce
         # que 04.03 dit « APPLICABLE abilities and rules » : deux figurines de la meme escouade
         # portant la MEME arme n'y sont pas forcement soumises pareil. La signature declaree ne
-        # les separe pas ; la valeur appliquee si. Deux cas, et ce sont les deux seuls :
+        # les separe pas ; la valeur appliquee si. Deux cas le montrent :
         #   - [RAPID FIRE] 24.30 : « within half range » — l'une est a demi-portee, l'autre non ;
         #   - [CLEAVE] 24.06 : « if you only selected one target for ALL of that weapon's
         #     attacks » — l'une repartit ses attaques sur deux cibles, l'autre non.
-        # [BLAST] 24.05 n'a pas besoin d'y figurer : son X ne depend que de la taille DECLAREE de
-        # la cible, et `target_sid` est deja dans la cle.
         # Les autres regles conditionnelles sont deja representees : [HEAVY] et [COVER] par `bs`,
         # [MELTA] par `dmg_bonus`.
+        #
+        # Le dict ENTIER entre dans la cle, jamais une enumeration de labels : une 4e regle
+        # additive ajoutee au producteur y entrerait alors sans que rien ne leve, et deux
+        # figurines de X differents fusionneraient — le token `[REGLE:X]` redevenant ambigu, en
+        # silence. [BLAST] 24.05 y entre donc aussi, gratuitement : son X ne depend que de la
+        # taille DECLAREE de la cible, et `target_sid` est deja dans la cle, donc il ne
+        # sur-decoupe rien.
         #
         # C'est aussi ce qui rend ces X reellement constants sur le groupe — donc les tokens
         # `[REGLE:X]` du log non ambigus, et le dict de groupe posable a la creation plutot
@@ -9453,8 +9478,7 @@ def _build_manual_allocation(
         _additive = require_key(r, "additive_rules_applied")
         gkey = (r["bs"], r["ap"], r["dmg_raw"], require_key(r, "dmg_bonus"),
                 r["display_wth"], r["display_save_th"], require_key(r, "weapon_rules"),
-                int(_additive.get(RULE_LABEL_RAPID_FIRE, 0)),
-                int(_additive.get(RULE_LABEL_CLEAVE, 0)),
+                tuple(sorted(_additive.items())),
                 target_sid)
         if gkey not in group_index_by_key:
             group_index_by_key[gkey] = len(weapon_groups)
@@ -10964,20 +10988,13 @@ def _mono_model_matches_pool_socle(
     l'érosion est un no-op pour une mono-figurine et peut être sautée. Dès qu'elles diffèrent, la
     sauter offre des cellules que l'exécution refuse (cf. l'appelant).
     """
-    from engine.hex_utils import base_size_cache_key
-
     if not alive_mids:
         return True
     entry = require_key(game_state, "units_cache").get(str(squad_id))  # get allowed : hors table
     if entry is None:
         return True
     m = require_key(game_state, "models_cache")[alive_mids[0]]
-    return (
-        str(require_key(entry, "BASE_SHAPE")) == str(require_key(m, "BASE_SHAPE"))
-        and base_size_cache_key(require_key(entry, "BASE_SIZE"))
-        == base_size_cache_key(require_key(m, "BASE_SIZE"))
-        and int(entry.get("orientation", 0)) == int(m.get("orientation", 0))  # get allowed
-    )
+    return move_geom_key(entry) == move_geom_key(m)
 
 
 def erode_move_pool_by_squad_block(
@@ -11060,7 +11077,6 @@ def erode_move_pool_by_squad_block(
     # `move_enemy_ez_forbidden_cells`). Grouper par le seul niveau testerait le personnage
     # attache (socle 8) contre les cases interdites d'un Intercessor (socle 6) — miroir exact du
     # regroupement de `explain_move_plan_rejection`, sans quoi masque et execution divergent.
-    from engine.hex_utils import base_size_cache_key as _bsk
     offsets_by_level_geom: Dict[Tuple[int, MoveGeomKey], List[Tuple[int, int, int]]] = {}
     geom_of_key: Dict[MoveGeomKey, Tuple[str, Any, int]] = {}
     # (origine_col, origine_row, niveau, offset_cube) par figurine — pour l'érosion par budget
@@ -11080,7 +11096,7 @@ def erode_move_pool_by_squad_block(
         # Orientation COURANTE de la figurine : le bloc est translate rigidement, aucun pivot
         # n'est en cours ici (le pivot molette est un chemin de preview, pas d'erosion).
         _orient = int(m.get("orientation", 0))  # get allowed (socle rond non oriente)
-        _gk: MoveGeomKey = (str(_shape), _bsk(_size), _orient)
+        _gk = move_geom_key(m)
         geom_of_key[_gk] = (_shape, _size, _orient)
         offsets_by_level_geom.setdefault((lvl, _gk), []).append(off)
         models_geo.append((str(mid), int(m["col"]), int(m["row"]), lvl, off))

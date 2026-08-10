@@ -76,10 +76,18 @@ def _gkey(
     qui dependent de la FIGURINE et non de l'arme declaree — d'ou leur presence ici a cote de la
     signature. `cleave_applied` a un defaut : les armes de TIR de ce fichier ne le portent
     jamais, et l'ecrire a chaque appel noierait ce qu'ils discriminent vraiment.
+
+    X == 0 ⇒ label ABSENT du dict, comme chez le producteur : `additive_rules_applied` ne
+    retient une regle que si elle a AJOUTE des des.
     """
+    _additive = {
+        label: x
+        for label, x in (("RAPID FIRE", rapid_fire_applied), ("CLEAVE", cleave_applied))
+        if x > 0
+    }
     return (
         5, 0, 1, 0, 4, 5, weapon_rule_signature(weapon),
-        rapid_fire_applied, cleave_applied, target_sid,
+        tuple(sorted(_additive.items())), target_sid,
     )
 
 

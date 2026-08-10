@@ -31,19 +31,25 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, Optional, Tuple
 
+from ai.analyzer_core import ACTION_ABILITY_TOKENS
 from shared.data_validation import require_key
 
-#: `Wound 4(4+)` — le jet et le seuil appliqué. `Wound 4` sans parenthèse (blessure automatique,
-#: [LETHAL HITS] 24.23) ne correspond pas : il n'y a pas de seuil à vérifier.
-WOUND_SEGMENT_RE = re.compile(r"Wound\s+(\d+)\((\d+)\+\)")
-#: `Wound 4(4+) [OATH OF MOMENT]` — le +1 au JET, ATTACHÉ au segment de blessure.
+#: `Wound 4(4+) [TOKEN…]` — le jet, le seuil appliqué, et les tokens ATTACHÉS à ce segment.
+#: `Wound 4` sans parenthèse (blessure automatique, [LETHAL HITS] 24.23) ne correspond pas : il
+#: n'y a pas de seuil à vérifier. La queue de tokens est ici et non dans une seconde regex parce
+#: qu'un token appartient au segment qu'il SUIT (`RULE_TOKEN_SEGMENTS`, côté moteur) :
 #:
-#: ⚠️ Chercher le token n'importe où dans la ligne était FAUX : le même marqueur est aussi posé
+#: ⚠️ Chercher un token n'importe où dans la ligne est FAUX : `[OATH OF MOMENT]` est aussi posé
 #: sur la relance de TOUCHE (`Hit 4(3+) [REROLLED:2] [OATH OF MOMENT]`). Mesuré sur le journal :
 #: 80 occurrences pour 60 lignes, donc des lignes qui le portent deux fois. Une ligne qui ne le
 #: porte QUE côté touche (bonus de blessure nul) faisait alors abaisser le seuil attendu d'un
 #: point — un faux « seuil de blessure faux » à chaque tir de ce genre.
-WOUND_OATH_RE = re.compile(r"Wound\s+\d+\(\d+\+\)((?:\s*\[[^\]]*\])*)")
+#:
+#: `ACTION_ABILITY_TOKENS` et non une copie : c'est la grammaire du journal, pas celle de ce
+#: site (mêmes raisons que `move_line_re` / `attack_line_re`, dont les copies avaient divergé).
+WOUND_SEGMENT_RE = re.compile(
+    r"Wound\s+(\d+)\((\d+)\+\)(" + ACTION_ABILITY_TOKENS + r")"
+)
 OATH_MARKER = "[OATH OF MOMENT]"
 
 
@@ -54,9 +60,9 @@ def parse_wound_threshold(action_desc: str) -> Optional[int]:
 
 
 def wound_bonus_applies(action_desc: str) -> bool:
-    """Le +1 au jet de blessure joue-t-il sur CETTE ligne ? (cf. `WOUND_OATH_RE`)"""
-    m = WOUND_OATH_RE.search(action_desc)
-    return bool(m) and OATH_MARKER in m.group(1)
+    """Le +1 au jet de blessure joue-t-il sur CETTE ligne ? (cf. `WOUND_SEGMENT_RE`)"""
+    m = WOUND_SEGMENT_RE.search(action_desc)
+    return bool(m) and OATH_MARKER in m.group(3)
 
 
 def _effect_bonus(state: Any, player: int, key: str) -> int:
@@ -89,14 +95,6 @@ def attacker_weapon_strength(
     from ai.analyzer_perfig import resolve_weapon_value
 
     per_unit_key = "cc_str_by_weapon" if is_melee else "rng_str_by_weapon"
-    # ⚠️ AUCUNE carte GLOBALE ici, contrairement au plafond d'attaques. Les cartes globales
-    # agrègent au `max()` toutes les datasheets partageant un nom d'arme : « Close Combat
-    # Weapon » y vaut F6 parce qu'une datasheet quelconque le porte. Pour un PLAFOND c'est sûr
-    # (on ne peut que sur-autoriser) ; pour une FORCE c'est une valeur INVENTÉE, qui produirait
-    # un faux « seuil de blessure faux » au lieu d'un honnête « non vérifiable ». Arme non
-    # résolue sur la datasheet de la figurine → `None`, donc ligne écartée et COMPTÉE comme
-    # telle.
-    global_map: Dict[str, int] = {}
     candidates = shooters or (None,)
     values = set()
     for mid in candidates:
@@ -104,8 +102,15 @@ def attacker_weapon_strength(
         limits = config.unit_attack_limits.get(model_type)  # get allowed : type hors registre
         if limits is None:
             return None
+        # ⚠️ Carte GLOBALE VIDE, contrairement au plafond d'attaques. Les cartes globales
+        # agrègent au `max()` toutes les datasheets partageant un nom d'arme : « Close Combat
+        # Weapon » y vaut F6 parce qu'une datasheet quelconque le porte. Pour un PLAFOND c'est
+        # sûr (on ne peut que sur-autoriser) ; pour une FORCE c'est une valeur INVENTÉE, qui
+        # produirait un faux « seuil de blessure faux » au lieu d'un honnête « non vérifiable ».
+        # Arme non résolue sur la datasheet de la figurine → `None`, donc ligne écartée et
+        # COMPTÉE comme telle.
         value = resolve_weapon_value(
-            weapon_display_name, require_key(limits, per_unit_key), global_map
+            weapon_display_name, require_key(limits, per_unit_key), {}
         )
         if value is None:
             return None

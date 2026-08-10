@@ -21,6 +21,7 @@ from typing import Any, Dict
 import gymnasium as gym
 import numpy as np
 
+from ai.analyzer_config import AnalyzerConfig
 from engine.action_decoder import ActionDecoder
 from engine.macro_intents import ACTION_FAMILIES
 from engine.observation_builder import ObservationBuilder
@@ -102,3 +103,58 @@ def tactical_data(**overrides: Any) -> Dict[str, Any]:
     }
     data.update(overrides)
     return data
+
+
+def analyzer_config(**overrides: Any) -> AnalyzerConfig:
+    """`AnalyzerConfig` RÉEL, tables vides, pour les tests des lecteurs de journal.
+
+    Les tests construisaient chacun leur classe `_Config` portant les deux ou trois attributs
+    consultés par la fonction testée. Un canard n'est pas un contrat : le jour où un lecteur
+    consulte une quatrième table, ces stubs lèvent un `AttributeError` au lieu de rougir sur ce
+    qui a changé, et le vérificateur de types ne voit rien venir (il refusait déjà chacun de ces
+    appels). On instancie donc la vraie dataclasse, et les tables restent VIDES : une table vide
+    dit « ce test ne renseigne rien ici », ce qui est exactement ce que ces fixtures veulent dire.
+
+    `resolve_rule_id` lève : aucun de ces tests ne passe par la résolution de règles, et un
+    appel inattendu doit se voir plutôt que rendre une valeur inventée.
+    """
+    def _no_rule_resolution(*_args: Any, **_kwargs: Any) -> Any:
+        raise AssertionError(
+            "resolve_rule_id appelé sans avoir été fourni à analyzer_config(...)"
+        )
+
+    fields: Dict[str, Any] = {
+        "unit_registry": None,
+        "config_loader": None,
+        "unit_weapons_cache": {},
+        "unit_attack_limits": {},
+        "unit_combi_by_weapon": {},
+        "unit_rules_by_type": {},
+        "unit_move_after_shooting_distance_by_type": {},
+        "unit_is_fly_by_type": {},
+        "unit_is_monster_or_vehicle_by_type": {},
+        "unit_socle_by_type": {},
+        "unit_choice_effect_to_source_rules": {},
+        "display_rule_name_to_ids": {},
+        "rule_to_units": {},
+        "weapon_rule_to_weapons": {},
+        "resolve_rule_id": _no_rule_resolution,
+        # Échelle de référence du dépôt (`inches_to_subhex` de `config/board_config.json`) :
+        # aucune des fixtures qui passent par ici ne mesure de distance, mais l'échelle n'a pas
+        # de valeur neutre — la nommer vaut mieux que la laisser à zéro.
+        "inches_to_subhex": 5,
+        "rng_nb_by_weapon_global": {},
+        "cc_nb_by_weapon_global": {},
+        "rapid_fire_by_weapon_global": {},
+        "sustained_hits_by_weapon_global": {},
+        "weapon_range_global": {},
+        "weapon_is_close_quarters_global": {},
+        "rng_str_by_weapon_global": {},
+        "cc_str_by_weapon_global": {},
+        "unit_toughness_by_type": {},
+    }
+    unknown = set(overrides) - set(fields)
+    if unknown:
+        raise TypeError(f"champs inconnus d'AnalyzerConfig : {sorted(unknown)}")
+    fields.update(overrides)
+    return AnalyzerConfig(**fields)
