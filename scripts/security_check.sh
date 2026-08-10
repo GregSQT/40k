@@ -14,12 +14,24 @@
 #   npm audit : --audit-level=high (donc high + critical).
 #
 # CE QUI EST AFFICHÉ MAIS NE BLOQUE PAS :
-#   - bandit LOW/MEDIUM. En particulier `import pickle` (B403) et `pickle.load`
-#     (B301). Cas services/game_saves.py : le format pickle est CONSERVÉ, le vecteur
-#     d'exécution est fermé par `_safe_loads`, un unpickler à liste blanche de classes
-#     (Security.md étape 2 / F7). C'est la justification écrite du maintien de ce
-#     finding : aucun `# nosec` n'est posé dans le code, le finding continue
-#     d'apparaître à chaque exécution, il est seulement sous le seuil bloquant.
+#   - bandit LOW/MEDIUM. La sortie du script fait foi sur le détail — ce bloc n'est pas un
+#     inventaire, il justifie les familles qui reviennent. Aujourd'hui côté MEDIUM :
+#     B301 (pickle, ci-dessous), B108 (`/tmp` en dur dans les bancs `scripts/ab_bench*`),
+#     B310 (`urlopen` vers 127.0.0.1 dans `scripts/pvp_smoke_test.py`), B302 (`marshal` dans
+#     un script de profilage) — tous hors chemin serveur.
+#     DEUX cas pickle distincts, à ne pas confondre :
+#     * services/game_saves.py — `import pickle` (B403, LOW) et RIEN d'autre : bandit ne
+#       voit pas de `pickle.load` parce que le dépickle passe par une sous-classe
+#       `pickle.Unpickler` (`_safe_loads`, liste blanche de classes, Security.md étape 2
+#       / F7). Le format pickle est CONSERVÉ, c'est `_safe_loads` qui ferme le vecteur.
+#       B403 tire sur 5 fichiers au total ; les 4 autres sont ceux de la ligne suivante.
+#     * les 4 `pickle.load` réels (B301, MEDIUM) sont AILLEURS et ne passent PAS par
+#       `_safe_loads` : ai/bot_evaluation.py, ai/vec_normalize_utils.py,
+#       engine/action_decoder.py, engine/pve_controller.py. Ils lisent des artefacts
+#       d'ENTRAÎNEMENT écrits localement (stats VecNormalize, cache de décodeur), jamais
+#       une donnée reçue du réseau. C'est ce qui les maintient sous le seuil bloquant.
+#     Dans les deux cas : aucun `# nosec` n'est posé, les findings réapparaissent à
+#     chaque exécution, ils sont seulement sous le seuil.
 #   - pip-audit sur le venv de DÉVELOPPEMENT. Ce venv contient l'outillage local
 #     (jupyter, aider, pytest…) qui ne part pas dans l'image Docker ; le gate porte
 #     sur requirements.runtime.txt. Ce fichier n'est représentatif de l'image QUE
@@ -50,21 +62,37 @@ trap 'rm -rf "$WORK_DIR"' EXIT
 FAILURES=()
 
 # ---------------------------------------------------------------------------------
-# Périmètre = tout le Python que l'image embarque ET qui est exécutable — par le serveur
-# (`shared/`, `main.py`, `config_loader.py` sont importés par `services/api_server.py`) ou
-# par un opérateur (`scripts/`, `check/`, `spikes/`, embarqués via le `COPY . /app`).
-# SEULE exclusion, et elle est annoncée à chaque exécution : `tests/`, que `.dockerignore`
-# retire de l'image — il n'est donc pas embarqué, et le critère ci-dessus reste vrai.
-BANDIT_TARGETS=(services/ engine/ ai/ shared/ scripts/ check/ spikes/ main.py config_loader.py)
-BANDIT_EXCLUDED="tests/ (exclu de l'image par .dockerignore ; jamais exécuté par le conteneur)"
+# Périmètre = TOUT le Python du dépôt, moins une liste noire courte. C'est volontairement une
+# liste NOIRE et pas une liste blanche : une liste blanche laisse hors scan tout fichier ou
+# paquet créé plus tard (`config/__init__.py` l'était), donc un `shell=True` ajouté là passerait
+# la porte en vert. Avec une liste noire, le neuf est couvert par défaut.
+# Chaque exclusion porte sa raison, et elles sont annoncées à chaque exécution.
+BANDIT_EXCLUDES=(
+  ./tests            # exclu de l'image par .dockerignore, jamais exécuté par le conteneur
+  ./node_modules ./frontend/node_modules ./frontend/dist   # dépendances et build front (npm audit)
+  ./.venv ./.claude ./Documentation                        # hors image, hors code exécutable
+)
+# `--exclude` REMPLACE la liste par défaut de bandit, il ne s'y ajoute pas. Sans ce rappel
+# explicite, un venv nommé `venv/` (layout que .dockerignore anticipe), un `.tox/` ou un
+# `.pytest_cache/` retomberaient DANS le scan : mesuré, `bandit -r .venv/.../site-packages/pip`
+# rend 11 findings HIGH, et la porte échouerait sur du code tiers que personne n'a écrit ici.
+BANDIT_DEFAULT_EXCLUDES=(.svn CVS .bzr .hg .git __pycache__ .tox .eggs '*.egg')
+# Variantes hors liste par défaut de bandit mais courantes dans ce dépôt et chez les
+# contributeurs : venv alternatif, caches d'outillage.
+BANDIT_EXTRA_EXCLUDES=(./venv ./.pytest_cache ./.mypy_cache ./.ruff_cache)
+BANDIT_EXCLUDE_ALL=(
+  "${BANDIT_DEFAULT_EXCLUDES[@]}" "${BANDIT_EXTRA_EXCLUDES[@]}" "${BANDIT_EXCLUDES[@]}"
+)
+BANDIT_EXCLUDE_ARG="$(IFS=,; echo "${BANDIT_EXCLUDE_ALL[*]}")"
 
-echo "==> bandit — code Python (${BANDIT_TARGETS[*]})"
-echo "    hors périmètre : $BANDIT_EXCLUDED"
+echo "==> bandit — code Python (dépôt entier)"
+echo "    hors périmètre : ${BANDIT_EXCLUDES[*]}"
+echo "    + exclusions par défaut de bandit et caches d'outillage, réinjectés explicitement"
 BANDIT_JSON="$WORK_DIR/bandit.json"
 # Codes de sortie bandit : 0 = rien, 1 = findings, >1 = échec de l'outil. Ne jamais avaler
 # le >1 : un scan planté rend un rapport à 0 finding, qui se lirait comme un feu vert.
 BANDIT_SCAN_RC=0
-bandit -q -r "${BANDIT_TARGETS[@]}" -f json -o "$BANDIT_JSON" >/dev/null 2>&1 || BANDIT_SCAN_RC=$?
+bandit -q -r . --exclude "$BANDIT_EXCLUDE_ARG" -f json -o "$BANDIT_JSON" >/dev/null 2>&1 || BANDIT_SCAN_RC=$?
 [[ $BANDIT_SCAN_RC -le 1 ]] || { echo "ERROR: bandit a échoué (code $BANDIT_SCAN_RC)" >&2; exit 1; }
 [[ -s "$BANDIT_JSON" ]] || { echo "ERROR: bandit n'a produit aucun rapport" >&2; exit 1; }
 
@@ -166,9 +194,11 @@ echo "==> npm audit — frontend (seuil: high)"
 # pas pu auditer » (registre injoignable, lockfile absent). Confondre les deux, c'est afficher
 # un problème de dépendances là où il y a une panne d'outil — et l'inverse. On lit donc le
 # rapport JSON, comme pour bandit : un rapport valide décide, une absence de rapport arrête.
+# UN SEUL appel : afficher un second audit à côté de celui qui décide, c'est montrer à
+# l'opérateur un tableau qui peut diverger de la porte. Le détail lisible est rendu à partir
+# du même JSON que celui qui tranche.
 NPM_JSON="$WORK_DIR/npm-audit.json"
 (cd frontend && npm audit --audit-level=high --json) > "$NPM_JSON" 2>/dev/null || true
-(cd frontend && npm audit --audit-level=high) || true
 
 NPM_RC=0
 python3 - "$NPM_JSON" <<'PY' || NPM_RC=$?
@@ -194,6 +224,32 @@ if counts is None:
 blocking = counts.get("high", 0) + counts.get("critical", 0)
 print(f"    critical={counts.get('critical', 0)} high={counts.get('high', 0)} "
       f"moderate={counts.get('moderate', 0)} low={counts.get('low', 0)}")
+
+for name, entry in sorted(report.get("vulnerabilities", {}).items()):
+    severity = entry.get("severity", "?")
+    marker = "BLOQUANT" if severity in ("high", "critical") else "non bloquant"
+    origin = "direct" if entry.get("isDirect") else "transitif"
+    affected = entry.get("range") or "?"
+
+    fix = entry.get("fixAvailable")
+    if fix is True:
+        fix_text = "correctif: npm audit fix"
+    elif isinstance(fix, dict):
+        major = " (montée MAJEURE)" if fix.get("isSemVerMajor") else ""
+        fix_text = f"correctif: {fix.get('name')}@{fix.get('version')}{major}"
+    else:
+        fix_text = "AUCUN correctif publié"
+
+    # `via` porte soit les avis (dicts), soit les paquets intermédiaires (chaînes) : les deux
+    # disent d'où vient la vulnérabilité, c'est ce que le tableau humain de npm montrait.
+    causes = []
+    for cause in entry.get("via", []):
+        causes.append(cause.get("title", "?") if isinstance(cause, dict) else str(cause))
+
+    print(f"    [{severity:8}] {name} {affected} ({origin}) — {marker} — {fix_text}")
+    for cause in causes:
+        print(f"                 via {cause}")
+
 sys.exit(1 if blocking else 0)
 PY
 case $NPM_RC in

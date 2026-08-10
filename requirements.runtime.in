@@ -37,16 +37,20 @@ stable-baselines3==2.6.0
 sb3-contrib==2.6.0
 tqdm==4.67.1
 
+# setuptools : ligne EXPLICITE et volontaire, pas une transitive. Sur python:3.11-slim rien
+# ne le tire (`triton` 3.1.0 ne dépend que de `filelock` ; torch 2.5.1 ne le déclare que sous
+# `python_version >= "3.12"`). Sans cette ligne, l'image resterait sur le setuptools ancien de
+# son image de base — invisible pour `pip-audit -r`, donc hors du portail de sécurité.
+# Ne pas la retirer au motif qu'elle « fait doublon avec le verrou » : c'est l'inverse, c'est
+# elle qui garantit que le verrou la porte quel que soit l'interpréteur de résolution.
+setuptools==84.0.0
+
 # Retirés de l'image (mesuré le 2026-08-10, cf. Security.md étape 6) :
 # - tensorboard      : uniquement écrit pendant l'entraînement (ai/). sb3 protège son import
 #                      (`try: from torch.utils.tensorboard import SummaryWriter`), et le chemin
 #                      serveur complet a été importé + un modèle chargé sans le paquet.
-# - setuptools<82    : ce pin n'existait que parce que TensorBoard 2.20 utilise pkg_resources.
-#                      NB : sur python:3.11-slim, PLUS RIEN ne tire setuptools — `triton` 3.1.0
-#                      ne dépend que de `filelock`, et torch 2.5.1 ne le déclare que sous
-#                      `python_version >= "3.12"`. Le `setuptools==84.0.0` présent dans le
-#                      verrou y est donc VOULU, pas hérité : sans ligne explicite, l'image
-#                      resterait sur le setuptools ancien de son image de base, invisible pour
-#                      `pip-audit -r` et donc hors du portail de sécurité.
+# - setuptools<82    : la BORNE HAUTE n'existait que parce que TensorBoard 2.20 utilise
+#                      pkg_resources ; elle tombe avec TensorBoard. Le paquet lui-même reste,
+#                      épinglé explicitement plus haut (voir la raison à cette ligne).
 # - torchvision      : aucun `import torchvision` dans le dépôt, jamais chargé à l'exécution.
 # - torchaudio       : idem.

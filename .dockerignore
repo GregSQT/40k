@@ -22,10 +22,14 @@ ai/models/
 *.sqlite
 *.sqlite3
 
-# Base de comptes. Sans cette ligne, le `COPY . /app` du Dockerfile CUISAIT `config/users.db`
+# Base de comptes. Sans ces lignes, le `COPY . /app` du Dockerfile CUISAIT `config/users.db`
 # (hashes de mots de passe) dans une couche de l'image : le montage compose la masque à
 # l'exécution, mais elle reste lisible dans l'image pour qui l'obtient. Ajouté le 2026-08-10.
+# Les TROIS lignes sont nécessaires : `*.db` ne couvre que la racine du contexte (Docker utilise
+# filepath.Match, où `*` ne franchit pas un `/`), `**/*.db` couvre les sous-répertoires, et le
+# chemin explicite garantit le cas qui compte même si les deux motifs changent de sémantique.
 *.db
+**/*.db
 config/users.db
 
 # Outillage de session Claude Code : contient les worktrees, soit des copies COMPLÈTES du dépôt
