@@ -824,8 +824,10 @@ Ordre par valeur tactique :
    La cible de charge est désormais une **dimension d'action** (`CHARGE_SLOT` 1045-1064, un par
    slot ennemi), scorée par une **tête pointeur** sur les embeddings d'ennemis — même patron que
    P3-1, pas des `CHOICE_k`. Le masque n'ouvre un slot que si sa cible est déclarable (11.02) et
-   le commit refuse tout slot non déclarable. ⚠️ **Sur la branche `v11-p3-2-charge-target`,
-   PAS sur `main`.** Historique du site, conservé : le site vif était la boucle de scoring
+   le commit refuse tout slot non déclarable. ✅ **MERGÉ sur `main`** — la mention « sur la branche
+   `v11-p3-2-charge-target`, PAS sur `main` » était périmée : l'épuration du 2026-08-02 a vérifié
+   par `git merge-base --is-ancestor` que toutes ces branches étaient mergées, et elles sont
+   supprimées (corrigé ici le 2026-08-10). Historique du site, conservé : le site vif était la boucle de scoring
    `get_best_enemy_score_for_unit` dans `convert_squad_action` du décodeur (action_decoder
    ~L1000-1030), PAS `charge_handlers:1506` (chemin `convert_gym_action`, hors gym mais encore
    vif en PvE via pve_controller — non touché, comme prévu).
@@ -973,8 +975,17 @@ Ordre par valeur tactique :
    `_select_move_after_shooting_destination_for_ai`, shooting_handlers ~4961) et
    **reactive_move** (accepter/décliner + destination — protocole `decline_reactive_move`
    déjà formalisé, shared_utils ~2190).
-7. **FLY / Take to the skies** — déclaration binaire (aujourd'hui auto pour l'IA,
-   movement_handlers ~261/271).
+7. ✅ **LIVRÉ le 2026-08-07** (élément `L6` du lot, worktree `L6-fly-decision` — détail →
+   [§0.67](V11_agent_rework.md#s0.67)). **FLY / Take to the skies (21.03) est une DÉCISION
+   D'AGENT** : le type `fly_declaration` est déclaré dans `AGENT_DECISION_TYPE_IDS`
+   (`observation_entities.py`) et le point de choix est posé par `arm_fly_declaration_decision`
+   (`movement_handlers`, appelé depuis `action_decoder`) **avant la construction du pool** — le
+   moment exact où le moteur tranchait. Un seul site couvre les DEUX mouvements que 21.03 énumère
+   (move et charge, via `_TAKE_TO_THE_SKIES_BY_PHASE`) ; la constante « déclare toujours » de
+   [§0.49](V11_agent_rework.md#s0.49) point 5 est supprimée. Le type consommant une réserve
+   d'`AGENT_DECISION_TYPE_SLOTS`, **`obs_size` et `TOTAL_ACTION_SIZE` sont inchangés par `L6`**.
+   ⚠️ **NON MESURÉ**. *(Cette ligne décrivait encore « aujourd'hui auto pour l'IA,
+   movement_handlers ~261/271 » — périmé, corrigé le 2026-08-10.)*
 8. **Optionnels, à statuer utilisateur** : split-fire (en gym, l'escouade entière vise UN
    slot ; le PvP a `squad_shoot_assign` par-figurine), choix d'arme — deux régimes distincts
    en gym : RNG = `selectedRngWeaponIndex` pris tel quel (shared_utils ~4489), CC =

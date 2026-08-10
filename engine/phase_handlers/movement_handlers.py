@@ -703,8 +703,9 @@ def _invalidate_all_destination_pools_after_movement(game_state: Dict[str, Any])
     # Les mémos d'ingress (20.04) ne sont PAS vidés ici, et c'est délibéré : leur clé porte les
     # positions ENNEMIES, or cette fonction est appelée après chaque mouvement — y compris AMI,
     # qui ne peut pas les périmer. Les vider obligeait à repayer 49 ms de recalcul après chaque
-    # commit (mesuré), pour une entrée qui restait valable. Leur croissance est bornée dans
-    # `_ingress_pool_with_key`.
+    # commit (mesuré), pour une entrée qui restait valable. Leur croissance est bornée à
+    # `_INGRESS_POOL_CACHE_MAX` par leurs producteurs : `_ingress_pool_with_key` (pool),
+    # `_ingress_clearance_mask_cached` (masque des 8") et `ingress_preview_loops` (contours).
 
     # Clear charge destination pools
     if "valid_charge_destinations_pool" in game_state:

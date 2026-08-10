@@ -80,9 +80,9 @@ class _EngineStub:
     # `_build_observation_and_mask` verifie desormais le masque qu'on lui transmet (no-op hors
     # `W40K_MASK_VERIFY=2`) : le vrai moteur le fait, la doublure doit donc le porter aussi.
     _verify_supplied_mask = W40KEngine._verify_supplied_mask
-    # La transition « pool vide » passe par le helper qui DRAINE aussi les action_logs qu'elle
-    # produit : la doublure porte le vrai helper (et non `_process_squad_action` en direct),
-    # sans quoi elle testerait un chemin que le moteur n'emprunte plus.
+    # La transition « pool vide » passe par le helper de drainage : l'attribut doit exister pour
+    # que l'appel aboutisse. Que ce chemin ne soit pas court-circuite est verrouille ailleurs, par
+    # le balayage de source de tests/unit/engine/test_step_log_state_and_advance_drain.py.
     _advance_phase_and_drain = W40KEngine._advance_phase_and_drain
 
     def __init__(self, defer: bool) -> None:
@@ -94,24 +94,21 @@ class _EngineStub:
         # Aucun StepLogger : le drainage de `_advance_phase_and_drain` est alors un no-op strict,
         # ce que ce fichier veut — il mesure les mutations d'etat, pas le journal.
         self.step_logger = None
-        self.snapshot_logs = 0
-        self.state_snapshot_logs = 0
-        self.effects_snapshot_logs = 0
+        # Les TROIS instantanes du meme point de passage, dans une seule trace ORDONNEE : la
+        # doublure les nomme au lieu de les ecrire (leur contenu est verrouille par
+        # test_step_log_state_and_advance_drain.py et test_step_log_effects_snapshot.py). Une
+        # liste dit strictement plus que trois compteurs — elle porte aussi leur ordre.
+        self.snapshot_calls: List[str] = []
         self.advance_actions: List[Dict[str, Any]] = []
 
     def _log_objective_control_snapshot_if_changed(self) -> None:
-        self.snapshot_logs += 1
+        self.snapshot_calls.append("objective")
 
     def _log_state_snapshot_if_turn_changed(self) -> None:
-        # Second instantane du meme point de passage (ligne d'etat par tour) : la doublure le
-        # compte au lieu de l'ecrire, le contenu etant verrouille par
-        # tests/unit/engine/test_step_log_state_and_advance_drain.py.
-        self.state_snapshot_logs += 1
+        self.snapshot_calls.append("state")
 
     def _log_effects_snapshot_if_changed(self) -> None:
-        # Troisieme instantane du meme point de passage (effets de regle en vigueur) : meme
-        # parti que ci-dessus, le contenu est verrouille par ses propres tests.
-        self.effects_snapshot_logs += 1
+        self.snapshot_calls.append("effects")
 
     def _process_squad_action(self, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
         self.advance_actions.append(action)
@@ -123,9 +120,7 @@ def _mutations(engine: "_EngineStub") -> Dict[str, Any]:
     """Empreinte des EFFETS DE BORD — tout sauf le tenseur."""
     return {
         "boundary": engine.state_manager.boundary_calls,
-        "snapshots": engine.snapshot_logs,
-        "state_snapshots": engine.state_snapshot_logs,
-        "effects_snapshots": engine.effects_snapshot_logs,
+        "snapshots": engine.snapshot_calls,
         "advances": engine.advance_actions,
     }
 
@@ -168,9 +163,8 @@ def test_boundary_checkpoint_runs_exactly_once_per_observation() -> None:
         for _ in range(3):
             engine._step_observation()
         assert engine.state_manager.boundary_calls == 3, f"defer={defer}"
-        assert engine.snapshot_logs == 3, f"defer={defer}"
-        assert engine.state_snapshot_logs == 3, f"defer={defer}"
-        assert engine.effects_snapshot_logs == 3, f"defer={defer}"
+        # Les trois instantanes du point de passage, dans l'ordre, une fois par observation.
+        assert engine.snapshot_calls == ["objective", "state", "effects"] * 3, f"defer={defer}"
 
 
 def test_precomputed_mask_is_consumed_instead_of_rebuilt() -> None:

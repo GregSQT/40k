@@ -255,3 +255,48 @@ class TestNonRoundBase:
         success, result = _attempt_movement_to_destination(gs, units[0], 6, 10, gs["config"])
         assert success is True
         assert result.get("action") == "move"
+
+
+class TestGymNeverActivatesThroughThisHandler:
+    """`_handle_unit_activation` est le chemin PvP ; le gym résout le move par le pipeline squad.
+
+    La branche gym qui vivait dans ce handler écrasait le résultat de la boucle d'exécution par un
+    dict `unit_activated` sans champ `action` : le cas « pool vide » (skip journalisé, activation
+    déjà terminée dans le game_state) y perdait son `action: "skip"` et son `skip_reason`. Le
+    verbe n'est plus atteignable en gym (`convert_squad_action` n'émet que des actions squad) —
+    l'invariant est donc verrouillé par une erreur explicite, comme sur le jumeau tir.
+    """
+
+    def test_gym_activation_raises_instead_of_returning_a_silent_result(self):
+        from engine.phase_handlers.movement_handlers import _handle_unit_activation
+
+        units = [_unit(1, 1, 5, 10)]
+        gs = _make_game_state(units)  # gym_training_mode=True
+        try:
+            _handle_unit_activation(gs, units[0], gs["config"])
+        except RuntimeError as exc:
+            assert "squad path expected" in str(exc)
+        else:
+            raise AssertionError(
+                "activation move acceptée en gym : le pipeline squad n'est plus le seul chemin"
+            )
+
+    def test_pvp_activation_still_goes_through(self):
+        """Contre-épreuve : hors gym, le handler active normalement (le garde ne mord pas le PvP)."""
+        from engine.phase_handlers.movement_handlers import _handle_unit_activation
+
+        units = [_unit(1, 1, 5, 10)]
+        units[0]["id"] = "1"
+        gs = _make_game_state(units)
+        gs["gym_training_mode"] = False
+        gs["move_activation_pool"] = ["1"]
+        # Toggles de traversée : le pool d'activation les lit (chemin PvP complet, pas le gym).
+        gs["config"]["move"] = {
+            "can_move_through_enemy_engagement_zone": True,
+            "can_move_through_enemy_model": False,
+            "can_move_through_friendly_model": True,
+        }
+        success, result = _handle_unit_activation(gs, units[0], gs["config"])
+        assert success is True
+        assert result["unit_activated"] is True
+        assert result["waiting_for_player"] is True

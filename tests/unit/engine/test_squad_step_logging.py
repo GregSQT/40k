@@ -44,6 +44,17 @@ def _engine_stub(action_logs: List[Dict[str, Any]], logger: Any) -> W40KEngine:
     return eng
 
 
+def _move_log(**overrides: Any) -> Dict[str, Any]:
+    """Entrée d'action_log « move » COMPLÈTE : le formateur exige `move_type` et les 4 coordonnées.
+
+    Une entrée partielle ferait lever `require_key` avant l'assertion du test, qui mesurerait
+    alors la garde et non ce qu'il annonce.
+    """
+    return {"type": "move", "unitId": "1", "player": 1, "phase": "move", "turn": 2,
+            "fromCol": 1, "fromRow": 1, "toCol": 2, "toRow": 2, "move_type": "normal",
+            **overrides}
+
+
 def _drain(engine: W40KEngine, cursor: int = 0, fight_state: Any = None) -> None:
     """La BORNE n'est plus un paramètre : c'est le curseur PERSISTANT de `game_state`.
 
@@ -72,10 +83,8 @@ def test_cursor_only_logs_new_entries():
     """Le curseur isole l'action courante : les entrées antérieures ne sont pas rejouées."""
     logger = _FakeStepLogger()
     logs = [
-        {"type": "move", "unitId": "old", "player": 1, "phase": "move", "turn": 1,
-         "fromCol": 1, "fromRow": 1, "toCol": 2, "toRow": 2, "move_type": "normal"},
-        {"type": "move", "unitId": "new", "player": 1, "phase": "move", "turn": 2,
-         "fromCol": 3, "fromRow": 3, "toCol": 4, "toRow": 4, "move_type": "normal"},
+        _move_log(unitId="old", turn=1),
+        _move_log(unitId="new", fromCol=3, fromRow=3, toCol=4, toRow=4),
     ]
     eng = _engine_stub(logs, logger)
     _drain(eng, cursor=1)
@@ -91,9 +100,7 @@ def test_cursor_beyond_length_raises():
     double par l'analyzer.
     """
     logger = _FakeStepLogger()
-    logs = [{"type": "move", "unitId": "1", "player": 1, "phase": "move", "turn": 2,
-             "fromCol": 1, "fromRow": 1, "toCol": 2, "toRow": 2, "move_type": "normal"}]
-    eng = _engine_stub(logs, logger)
+    eng = _engine_stub([_move_log()], logger)
     with pytest.raises(ValueError, match="cannot exceed current length"):
         _drain(eng, cursor=5)
     assert logger.calls == [], "des lignes ont été réécrites avant le refus"
@@ -107,9 +114,7 @@ def test_cursor_beyond_length_raises():
 def test_move_type_maps_to_formatter_action_type(move_type, expected):
     """La nuance normal/advance/fall_back vit dans move_type (le moteur émet toujours "move")."""
     logger = _FakeStepLogger()
-    logs = [{"type": "move", "unitId": "1", "player": 1, "phase": "move", "turn": 2,
-             "fromCol": 1, "fromRow": 1, "toCol": 2, "toRow": 2, "move_type": move_type}]
-    eng = _engine_stub(logs, logger)
+    eng = _engine_stub([_move_log(move_type=move_type)], logger)
     _drain(eng)
     assert len(logger.calls) == 1
     assert logger.calls[0]["action_type"] == expected

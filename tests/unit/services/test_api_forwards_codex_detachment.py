@@ -21,6 +21,7 @@ import pathlib
 
 import pytest
 
+import services.api_server as api_server
 from engine.game_state import uses_codex_detachment
 from shared.data_validation import ConfigurationError
 
@@ -38,6 +39,25 @@ def _run_from_repo_root(monkeypatch):
         f"racine du depot mal calculee : {_REPO_ROOT}"
     )
     monkeypatch.chdir(_REPO_ROOT)
+
+
+@pytest.fixture(autouse=True)
+def _restore_global_engine(monkeypatch):
+    """Rend la globale de PROCESS `api_server.engine` à sa valeur d'entrée après chaque test.
+
+    Les tests ci-dessous appellent `initialize_engine()` en direct : elle installe un moteur
+    complet MAIS sans `current_mode_code`, l'état exact que la porte RBAC refuse
+    (`_forbidden_mode_response`). Sans restauration, ce moteur survit au test et tout test
+    suivant du MÊME worker xdist reçoit 403 au lieu du code de son endpoint. Mesuré : les trois
+    tests de `test_api_persist_dir.py`, verts isolément, rouges à la suite de ce fichier — dont
+    un vert par vacance (un 403 n'écrit pas de `.pkl` non plus).
+
+    La restauration est portée ICI, chez celui qui installe le moteur, et par `monkeypatch`
+    comme les 13 autres écritures de cette globale dans le dossier : une garde posée au niveau
+    du conftest laisserait croire que le dossier isole l'état de process, alors qu'`api_server`
+    porte six autres globales mutables que personne ne restaurerait.
+    """
+    monkeypatch.setattr(api_server, "engine", api_server.engine)
 
 
 @pytest.mark.parametrize("scenario_name", ["scenario_pvp.json", "scenario_pve.json"])

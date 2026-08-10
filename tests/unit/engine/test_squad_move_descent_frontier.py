@@ -26,6 +26,10 @@ from typing import Any, Dict, List, Tuple
 
 import pytest
 
+from engine.phase_handlers.movement_handlers import (
+    get_eligible_units,
+    movement_build_valid_destinations_pool,
+)
 from engine.phase_handlers.shared_utils import (
     SQUAD_RIGID_MOVE_DESTINATION_LEVEL,
     build_rigid_plan,
@@ -218,6 +222,38 @@ def test_erosion_reads_the_single_frontier_source(monkeypatch):
         gs, "1", {START: 0.0, (START[0] + 1, START[1]): 1.0}, move_budget=None
     )
     assert calls == ["1"], "l'érosion n'a pas lu la source unique de la frontière"
+
+
+# ── 1 bis. Éligibilité et pool : même budget NET ─────────────────────────────────────────
+
+
+def test_a_squad_whose_descent_eats_its_budget_is_not_eligible():
+    """L'ÉLIGIBILITÉ retranche la descente, comme le pool.
+
+    Elle bornait sa recherche sur le budget BRUT (`squad_move_pool_budget_subhex`) : une escouade
+    dont la hauteur de plancher mange tout le MOVE trouvait un voisin au sol valide et sortait
+    ÉLIGIBLE, puis se voyait servir un pool VIDE — masque ⊄ exécutable (§0.34). Les deux lisent
+    maintenant `squad_move_net_budget_subhex`.
+    """
+    gs = _gs(level=1, move=int(FLOOR_HEIGHT_INCHES))  # MOVE 3, descente 3 → budget net 0
+    assert movement_build_valid_destinations_pool(gs, "1", read_only=True) == [], (
+        "fixture sans descente bloquante : le test ne prouve rien"
+    )
+    assert get_eligible_units(gs) == []
+
+
+def test_a_descending_squad_that_can_still_move_stays_eligible():
+    """Contre-épreuve : descente PARTIELLE (3 sur 6) → pool non vide, escouade éligible.
+    Retrancher la descente ne doit pas rendre l'éligibilité plus stricte que le pool."""
+    gs = _gs(level=1)
+    assert movement_build_valid_destinations_pool(gs, "1", read_only=True)
+    assert get_eligible_units(gs) == ["1"]
+
+
+def test_a_ground_squad_is_unaffected():
+    """Zéro régression au sol : sans descente, budget net == budget brut."""
+    gs = _gs(level=0)
+    assert get_eligible_units(gs) == ["1"]
 
 
 # ── 2. Niveau de destination du plan rigide ──────────────────────────────────────────────
