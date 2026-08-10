@@ -15,9 +15,9 @@ Aujourd'hui il existe **plusieurs caches LoS** avec des stratégies d'invalidati
 
 | Cache | Clé | Invalidation | Portée |
 |---|---|---|---|
-| `_unit_los_pair_cache` | `(shooter_id, target_id)` | **Versioning global** : jeté en entier dès que `_unit_move_version` change ([shooting_handlers.py:3908-3910](../../engine/phase_handlers/shooting_handlers.py#L3908)) | LoS complète (`compute_unit_los`) — **le cache réellement utilisé** |
-| `los_cache` (global) | `(shooter_id, target_id)` | Ciblée via `_invalidate_los_cache_for_moved_unit`, **et** vidé en entier à `shooting_phase_start` ([shooting_handlers.py:1051](../../engine/phase_handlers/shooting_handlers.py#L1051)) | Mémo court terme |
-| `unit["los_cache"]` | `target_id` | Par unité, versionnée `_los_cache_version` ([shooting_handlers.py:1285](../../engine/phase_handlers/shooting_handlers.py#L1285)) | Construit à l'activation |
+| `_unit_los_pair_cache` | `(shooter_id, target_id)` | **Versioning global** : jeté en entier dès que `_unit_move_version` change ([shooting_handlers.py:3908-3910](../../../engine/phase_handlers/shooting_handlers.py#L3908)) | LoS complète (`compute_unit_los`) — **le cache réellement utilisé** |
+| `los_cache` (global) | `(shooter_id, target_id)` | Ciblée via `_invalidate_los_cache_for_moved_unit`, **et** vidé en entier à `shooting_phase_start` ([shooting_handlers.py:1051](../../../engine/phase_handlers/shooting_handlers.py#L1051)) | Mémo court terme |
+| `unit["los_cache"]` | `target_id` | Par unité, versionnée `_los_cache_version` ([shooting_handlers.py:1285](../../../engine/phase_handlers/shooting_handlers.py#L1285)) | Construit à l'activation |
 | `hex_los_cache` | `((c,r),(c,r))` | Ciblée par position | Géométrie footprint |
 | `_hex_los_state_cache` | `((c,r),(c,r))` | **Jamais** (terrain statique) | Géométrie murs |
 
@@ -47,23 +47,23 @@ Tout chemin qui change une position d'unité doit passer par le choke-point. Inv
 
 | # | Famille | Point de passage | Invalidation actuelle | État |
 |---|---|---|---|---|
-| 1 | Move / Advance / Fall back | `translate_squad_to_destination` [movement_handlers.py:1068](../../engine/phase_handlers/movement_handlers.py#L1068) + `version++` @1104 + `_invalidate…` @1103 | Ciblée (los_cache) + version | ✅ |
-| 2 | Move after shooting | [shooting_handlers.py:4584](../../engine/phase_handlers/shooting_handlers.py#L4584) + @4596/4597 | Ciblée + version | ✅ |
-| 3 | Charge | `translate_squad` [charge_handlers.py:2771](../../engine/phase_handlers/charge_handlers.py#L2771) + `version++` @2805 ; aussi `commit_move("charge")` [w40k_core.py:4949](../../engine/w40k_core.py#L4949) | **Pas** d'invalidation ciblée (marquée OBSOLETE @2794) → **version globale seule** | ⚠️ à rebrancher |
-| 4 | Pile-in | translate `_fight_apply_pile_in_move` [fight_handlers.py:883](../../engine/phase_handlers/fight_handlers.py#L883) + `_invalidate…` @941 ; `commit_move("pile_in")` @3912 | Translate : ciblée **mais AUCUN `version++`** (zéro bump dans tout fight_handlers) → pair-cache **jamais** invalidé sur ce chemin. Plan : via `commit_move` ✓ | ⚠️⚠️ **trou avéré** (chemin translate) |
-| 5 | Consolidation | `commit_move("consolidation")` [fight_handlers.py:5021](../../engine/phase_handlers/fight_handlers.py#L5021) ; **aussi** translate `_fight_apply_pile_in_move` @1553/1650 | Plan : via `commit_move` ✓ ; translate : **même trou que le pile-in** (pas de `version++`) | ⚠️⚠️ **trou avéré** (chemin translate) |
-| 6 | Reactive move | `update_units_cache_position` [shared_utils.py:2472](../../engine/phase_handlers/shared_utils.py#L2472) + `refresh_all_positional_caches_after_reactive_move` [:2027](../../engine/phase_handlers/shared_utils.py#L2182) | Vide `los_cache` global + tous `unit["los_cache"]` + `hex_los_cache` ciblé, **mais pas** `_unit_los_pair_cache` ; **aucun `version++`** dans ce chemin | ⚠️⚠️ **trou avéré** (voir constat 1) |
-| 7 | Deployment | `update_units_cache_position` [deployment_handlers.py:877](../../engine/phase_handlers/deployment_handlers.py#L877) | — (l'exposure déploiement passe des dicts coordonnées-seules à `compute_unit_los`, qui **bypassent le pair-cache** — docstring @3900) | ✅ risque réduit (bypass confirmé) |
+| 1 | Move / Advance / Fall back | `translate_squad_to_destination` [movement_handlers.py:1068](../../../engine/phase_handlers/movement_handlers.py#L1068) + `version++` @1104 + `_invalidate…` @1103 | Ciblée (los_cache) + version | ✅ |
+| 2 | Move after shooting | [shooting_handlers.py:4584](../../../engine/phase_handlers/shooting_handlers.py#L4584) + @4596/4597 | Ciblée + version | ✅ |
+| 3 | Charge | `translate_squad` [charge_handlers.py:2771](../../../engine/phase_handlers/charge_handlers.py#L2771) + `version++` @2805 ; aussi `commit_move("charge")` [w40k_core.py:4949](../../../engine/w40k_core.py#L4949) | **Pas** d'invalidation ciblée (marquée OBSOLETE @2794) → **version globale seule** | ⚠️ à rebrancher |
+| 4 | Pile-in | translate `_fight_apply_pile_in_move` [fight_handlers.py:883](../../../engine/phase_handlers/fight_handlers.py#L883) + `_invalidate…` @941 ; `commit_move("pile_in")` @3912 | Translate : ciblée **mais AUCUN `version++`** (zéro bump dans tout fight_handlers) → pair-cache **jamais** invalidé sur ce chemin. Plan : via `commit_move` ✓ | ⚠️⚠️ **trou avéré** (chemin translate) |
+| 5 | Consolidation | `commit_move("consolidation")` [fight_handlers.py:5021](../../../engine/phase_handlers/fight_handlers.py#L5021) ; **aussi** translate `_fight_apply_pile_in_move` @1553/1650 | Plan : via `commit_move` ✓ ; translate : **même trou que le pile-in** (pas de `version++`) | ⚠️⚠️ **trou avéré** (chemin translate) |
+| 6 | Reactive move | `update_units_cache_position` [shared_utils.py:2472](../../../engine/phase_handlers/shared_utils.py#L2472) + `refresh_all_positional_caches_after_reactive_move` [:2027](../../../engine/phase_handlers/shared_utils.py#L2182) | Vide `los_cache` global + tous `unit["los_cache"]` + `hex_los_cache` ciblé, **mais pas** `_unit_los_pair_cache` ; **aucun `version++`** dans ce chemin | ⚠️⚠️ **trou avéré** (voir constat 1) |
+| 7 | Deployment | `update_units_cache_position` [deployment_handlers.py:877](../../../engine/phase_handlers/deployment_handlers.py#L877) | — (l'exposure déploiement passe des dicts coordonnées-seules à `compute_unit_los`, qui **bypassent le pair-cache** — docstring @3900) | ✅ risque réduit (bypass confirmé) |
 | 8 | Ingress / Réserves stratégiques / Disembark | **Non implémenté** (confirmé : aucun writer de position hors handlers inventoriés ; hits « reserve/disembark » purement lexicaux) | — | ✅ clos (inexistant) |
 
 **Points bas niveau communs** (traversés par plusieurs familles) :
-- [`update_units_cache_position`](../../engine/phase_handlers/shared_utils.py#L1178) — pose ancre/col/row.
-- [`translate_squad_to_destination`](../../engine/phase_handlers/shared_utils.py#L2875) — translation rigide du squad (appelle `update_units_cache_position`).
-- [`update_model_position`](../../engine/phase_handlers/shared_utils.py#L2946) — déplacement figurine (appelle `update_units_cache_position`).
-- [`commit_move`](../../engine/phase_handlers/shared_utils.py#L3968) — plan-based : fait déjà `version++` @3826 + `_invalidate…` @3823.
+- [`update_units_cache_position`](../../../engine/phase_handlers/shared_utils.py#L1178) — pose ancre/col/row.
+- [`translate_squad_to_destination`](../../../engine/phase_handlers/shared_utils.py#L2875) — translation rigide du squad (appelle `update_units_cache_position`).
+- [`update_model_position`](../../../engine/phase_handlers/shared_utils.py#L2946) — déplacement figurine (appelle `update_units_cache_position`).
+- [`commit_move`](../../../engine/phase_handlers/shared_utils.py#L3968) — plan-based : fait déjà `version++` @3826 + `_invalidate…` @3823.
 
 > ⚠️ `update_units_cache_position` est aussi appelé par le **move-LoS-preview**
-> ([shooting_handlers.py:1556](../../engine/phase_handlers/shooting_handlers.py#L1556)) en lecture
+> ([shooting_handlers.py:1556](../../../engine/phase_handlers/shooting_handlers.py#L1556)) en lecture
 > seule : le choke-point doit distinguer un **commit** (invalide + réchauffe) d'un **preview**
 > (ne touche à rien).
 
@@ -76,10 +76,10 @@ Tout chemin qui change une position d'unité doit passer par le choke-point. Inv
 
 Il n'existe **pas** de chemin unique. Deux implémentations de déplacement cohabitent :
 
-- **`commit_move` (plan-based)** [shared_utils.py:3968](../../engine/phase_handlers/shared_utils.py#L3968) —
+- **`commit_move` (plan-based)** [shared_utils.py:3968](../../../engine/phase_handlers/shared_utils.py#L3968) —
   **modèle correct** : `update_model_position` par figurine → `_invalidate_los_cache_for_moved_unit`
   (ciblé, @3823) → `version++` (@3826).
-- **`translate_squad_to_destination` (direct)** [shared_utils.py:2875](../../engine/phase_handlers/shared_utils.py#L2875)
+- **`translate_squad_to_destination` (direct)** [shared_utils.py:2875](../../../engine/phase_handlers/shared_utils.py#L2875)
   + `update_units_cache_position` — le **caller** repose `version++`/invalidation à la main.
 
 **Move**, **Charge** et **Pile-in** possèdent *chacun* les deux implémentations (translate direct **et**
@@ -90,24 +90,24 @@ unique doit supprimer.
 
 | Site | Famille | `version++` | Invalidation ciblée | Pair-cache invalidé |
 |---|---|---|---|---|
-| [movement_handlers.py:1068](../../engine/phase_handlers/movement_handlers.py#L1068) (translate) + 1103/1104 | Move / Advance / Fall back | ✓ @1104 | ✓ @1103 | via version |
-| [movement_handlers.py:3127](../../engine/phase_handlers/movement_handlers.py#L3127) (`commit_move`) | Move (plan) | ✓ | ✓ | via version |
-| [shooting_handlers.py:4584](../../engine/phase_handlers/shooting_handlers.py#L4584) + 4596/4597 | Move after shooting | ✓ @4597 | ✓ @4596 | via version |
-| [charge_handlers.py:2771](../../engine/phase_handlers/charge_handlers.py#L2771) (translate) + 2805 | Charge (translate) | ✓ @2805 | **✗** (OBSOLETE @2794) | **version seule** |
-| [charge_handlers.py:5088](../../engine/phase_handlers/charge_handlers.py#L5088) (`commit_move`) + 5094 | Charge (plan) | ✓ **×2** (bump dans `commit_move` @3826 **puis** re-bump @5094 — double incrément, symptôme de la dispersion) | ✓ | via version |
-| [fight_handlers.py:883](../../engine/phase_handlers/fight_handlers.py#L883) (`_fight_apply_pile_in_move`, translate) + 941 | Pile-in **et Consolidation** (translate) — appelé @3442/3459 (pile-in auto IA) et @1553/1650 (consolidation) | **✗** (aucun `_unit_move_version += 1` dans tout fight_handlers) | ✓ @941 | **NON** ⚠️⚠️ |
-| [fight_handlers.py:3928](../../engine/phase_handlers/fight_handlers.py#L3928) / [5001](../../engine/phase_handlers/fight_handlers.py#L5021) (`commit_move`) | Pile-in / Consolidation (plan) | ✓ | ✓ | via version |
-| [shared_utils.py:2472](../../engine/phase_handlers/shared_utils.py#L2472) (`update_units_cache_position`) | **Reactive move** | **✗** | **✗** (vide `los_cache` global + tous `unit["los_cache"]`, pas le pair-cache) | **NON** ⚠️⚠️ |
-| [deployment_handlers.py:877](../../engine/phase_handlers/deployment_handlers.py#L877) / [550](../../engine/phase_handlers/deployment_handlers.py#L727) | Deployment | ✗ | ✗ | non (avant la phase de tir) |
-| [shooting_handlers.py:1556](../../engine/phase_handlers/shooting_handlers.py#L1556) (`update_units_cache_position`) | **Move-LoS-preview** | ✗ | ✗ | Sans objet : `gs` est une **deepcopy** (@1530-1537) — voir constat 4 |
-| [shared_utils.py:3031](../../engine/phase_handlers/shared_utils.py#L3031) (`destroy_model`) | Destruction figurine | ✗ | ✗ | non (voir §constats) |
+| [movement_handlers.py:1068](../../../engine/phase_handlers/movement_handlers.py#L1068) (translate) + 1103/1104 | Move / Advance / Fall back | ✓ @1104 | ✓ @1103 | via version |
+| [movement_handlers.py:3127](../../../engine/phase_handlers/movement_handlers.py#L3127) (`commit_move`) | Move (plan) | ✓ | ✓ | via version |
+| [shooting_handlers.py:4584](../../../engine/phase_handlers/shooting_handlers.py#L4584) + 4596/4597 | Move after shooting | ✓ @4597 | ✓ @4596 | via version |
+| [charge_handlers.py:2771](../../../engine/phase_handlers/charge_handlers.py#L2771) (translate) + 2805 | Charge (translate) | ✓ @2805 | **✗** (OBSOLETE @2794) | **version seule** |
+| [charge_handlers.py:5088](../../../engine/phase_handlers/charge_handlers.py#L5088) (`commit_move`) + 5094 | Charge (plan) | ✓ **×2** (bump dans `commit_move` @3826 **puis** re-bump @5094 — double incrément, symptôme de la dispersion) | ✓ | via version |
+| [fight_handlers.py:883](../../../engine/phase_handlers/fight_handlers.py#L883) (`_fight_apply_pile_in_move`, translate) + 941 | Pile-in **et Consolidation** (translate) — appelé @3442/3459 (pile-in auto IA) et @1553/1650 (consolidation) | **✗** (aucun `_unit_move_version += 1` dans tout fight_handlers) | ✓ @941 | **NON** ⚠️⚠️ |
+| [fight_handlers.py:3928](../../../engine/phase_handlers/fight_handlers.py#L3928) / [5001](../../../engine/phase_handlers/fight_handlers.py#L5021) (`commit_move`) | Pile-in / Consolidation (plan) | ✓ | ✓ | via version |
+| [shared_utils.py:2472](../../../engine/phase_handlers/shared_utils.py#L2472) (`update_units_cache_position`) | **Reactive move** | **✗** | **✗** (vide `los_cache` global + tous `unit["los_cache"]`, pas le pair-cache) | **NON** ⚠️⚠️ |
+| [deployment_handlers.py:877](../../../engine/phase_handlers/deployment_handlers.py#L877) / [550](../../../engine/phase_handlers/deployment_handlers.py#L727) | Deployment | ✗ | ✗ | non (avant la phase de tir) |
+| [shooting_handlers.py:1556](../../../engine/phase_handlers/shooting_handlers.py#L1556) (`update_units_cache_position`) | **Move-LoS-preview** | ✗ | ✗ | Sans objet : `gs` est une **deepcopy** (@1530-1537) — voir constat 4 |
+| [shared_utils.py:3031](../../../engine/phase_handlers/shared_utils.py#L3031) (`destroy_model`) | Destruction figurine | ✗ | ✗ | non (voir §constats) |
 
 ### Constats critiques
 
 1. **Reactive move — le vrai piège (⚠️ risque n°1), et le trou existe DÉJÀ.** Il déplace une unité sans
    `version++` **ni** invalidation du pair-cache. Il est déclenché **après** le mouvement principal
-   ([movement_handlers.py:3535](../../engine/phase_handlers/movement_handlers.py#L3535),
-   [shooting_handlers.py:4604](../../engine/phase_handlers/shooting_handlers.py#L4604)).
+   ([movement_handlers.py:3535](../../../engine/phase_handlers/movement_handlers.py#L3535),
+   [shooting_handlers.py:4604](../../../engine/phase_handlers/shooting_handlers.py#L4604)).
    **« Correct par accident » est faux dans le flux move_after_shooting** — l'ordre réel est :
    `_invalidate` @4596 → `version++` @4597 → `build_unit_los_cache` @4598 → `maybe_resolve_reactive_move`
    @4600. Or `build_unit_los_cache` appelle `compute_unit_los` pour chaque ennemi et **repeuple le
@@ -120,7 +120,7 @@ unique doit supprimer.
    version identique **et** clé présente) gèle un los_cache **vide** pour toute unité déjà buildée à
    cette version (bénin pour le mover qui a déjà tiré, mais fragile — à corriger au passage).
 
-2. **Charge-translate** [charge_handlers.py:2771](../../engine/phase_handlers/charge_handlers.py#L2771) :
+2. **Charge-translate** [charge_handlers.py:2771](../../../engine/phase_handlers/charge_handlers.py#L2771) :
    `version++` présent mais invalidation ciblée marquée OBSOLETE → repose sur le versioning global →
    **cassera en ciblé** si non rebranché.
 
@@ -129,21 +129,21 @@ unique doit supprimer.
    pair-cache** (docstring `compute_unit_los` @3900-3901 : « Coordinate-only dicts (e.g. deployment
    exposure) have no id and bypass the cache »).
 
-4. **Move-LoS-preview** [shooting_handlers.py:1556](../../engine/phase_handlers/shooting_handlers.py#L1556) :
+4. **Move-LoS-preview** [shooting_handlers.py:1556](../../../engine/phase_handlers/shooting_handlers.py#L1556) :
    **CLOS — `gs` EST une copie.** `gs = copy.deepcopy(game_state, _preview_share_memo)` (@1530-1537) ;
    seuls `config` et `weapon_damage_table` (lecture seule) sont partagés par référence. Le preview est
    donc sûr par construction ; `commit=False` ne sert qu'à éviter un **réchauffage inutile** (coût) dans
    la copie, pas la correction.
 
 4bis. **Pile-in / Consolidation translate — trou avéré (manqué au premier audit).**
-   `_fight_apply_pile_in_move` [fight_handlers.py:883](../../engine/phase_handlers/fight_handlers.py#L883)
+   `_fight_apply_pile_in_move` [fight_handlers.py:883](../../../engine/phase_handlers/fight_handlers.py#L883)
    fait l'invalidation ciblée (@941) mais **aucun `version++`** — fight_handlers ne contient **aucun**
    `_unit_move_version += 1`. Le pair-cache n'est donc **jamais** invalidé sur ce chemin (pile-in auto IA
    @3442/3459, consolidation @1553/1650). Fight étant la dernière phase du tour, les paires restent
    périmées pour **l'observation/reward RL** jusqu'au premier move du tour suivant. Pire que
    charge-translate (qui bumpe au moins la version globale).
 
-5. **`destroy_model`** [shared_utils.py:3031](../../engine/phase_handlers/shared_utils.py#L3031) : la mort
+5. **`destroy_model`** [shared_utils.py:3031](../../../engine/phase_handlers/shared_utils.py#L3031) : la mort
    d'une figurine réduit le footprint de son unité → les paires **où cette unité est tireur/cible** changent.
    Les unités ne bloquent **pas** la LoS d'autrui (seul le terrain le fait) → les paires *entre tierces
    unités* restent valides. Impact réel faible (visibilité binaire `can_see`), mais **les paires de l'unité
@@ -178,7 +178,7 @@ Deux options :
   chemins. Y centraliser `version++` + invalidation ciblée du pair-cache + hook de réchauffage, avec un
   paramètre `commit: bool` (True = vrai déplacement, False = preview).
   **⚠️ FAILLE (constatée dans le code) : cette fonction ne bouge que l'ANCRE.** `update_model_position`
-  ne la propage *« que si la figurine est l'ancre courante »* ([shared_utils.py:2953](../../engine/phase_handlers/shared_utils.py#L2953)).
+  ne la propage *« que si la figurine est l'ancre courante »* ([shared_utils.py:2953](../../../engine/phase_handlers/shared_utils.py#L2953)).
   Un plan `commit_move` qui déplace des figurines **sans déplacer l'ancre** (cas typique du pile-in
   par-figurine) ne traverse **jamais** ce choke-point, alors que le footprint — donc la LoS — a changé.
   Même problème pour `destroy_model` (n'y passe que si l'ancre est recalculée, alors que le footprint
@@ -193,9 +193,9 @@ Deux options :
 
 **Décision : (a′) — point bas per-model.** Tranché sur la base du code :
 
-- Il n'existe que **deux** écrivains de position : `update_model_position` [shared_utils.py:2946](../../engine/phase_handlers/shared_utils.py#L2946)
+- Il n'existe que **deux** écrivains de position : `update_model_position` [shared_utils.py:2946](../../../engine/phase_handlers/shared_utils.py#L2946)
   (par figurine — recalcule **déjà** le footprint complet à chaque appel, `_recompute_squad_occupied_hexes` @2815,
-  même hors ancre) et `update_units_cache_position` [shared_utils.py:1178](../../engine/phase_handlers/shared_utils.py#L1178)
+  même hors ancre) et `update_units_cache_position` [shared_utils.py:1178](../../../engine/phase_handlers/shared_utils.py#L1178)
   (pose l'ancre). **Tout** chemin traverse l'un des deux : plans/par-figurine (`commit_move` → `update_model_position`
   en boucle @3810), translate rigide (→ `update_units_cache_position` @2755), reactive/move_after_shooting/deployment
   (→ `update_units_cache_position` direct).
@@ -218,7 +218,7 @@ refactor = suppression des `version++`/invalidations dispersés.
 **D1 — Batch-guard : dirty-set dans `game_state`.**
 `_touch_unit_los` : si un batch est ouvert (`game_state.get("_los_batch") is not None`) → **accumule**
 `unit_id` dans le set, rien d'autre ; sinon → invalidation ciblée + `version++` **immédiats**.
-`commit_move` [shared_utils.py:3968](../../engine/phase_handlers/shared_utils.py#L3968) ouvre le batch
+`commit_move` [shared_utils.py:3968](../../../engine/phase_handlers/shared_utils.py#L3968) ouvre le batch
 avant sa boucle `update_model_position`, le ferme après → **1 seule** invalidation par unité + **1 seul**
 `version++` pour tout le plan (remplace l'invalidate+bump explicite @3823-3826). Les chemins translate
 (1 seul appel `update_units_cache_position`) n'ouvrent pas de batch → touch immédiat unique. La
@@ -226,7 +226,7 @@ déduplication par `set` rend inoffensif le double-touch (`update_model_position
 `update_units_cache_position` quand l'ancre bouge). Pas de compteur de profondeur.
 
 **D2 — `commit: bool` : NON introduit en étape 2.**
-Le move-LoS-preview [shooting_handlers.py:1556](../../engine/phase_handlers/shooting_handlers.py#L1556)
+Le move-LoS-preview [shooting_handlers.py:1556](../../../engine/phase_handlers/shooting_handlers.py#L1556)
 opère sur une **deepcopy** (constat 4) → invalider/bumper sur la copie est **sans effet** sur le vrai
 `game_state`. Distinguer `commit` n'apporte **rien à la correction**. Le flag ne sert qu'à éviter le coût
 du **réchauffage** → repoussé en étape 4, renommé `warm=False`, uniquement pour skip le recompute.
@@ -235,12 +235,12 @@ du **réchauffage** → repoussé en étape 4, renommé `warm=False`, uniquement
 **D3 — Version vs pair-cache : découplage.**
 `_unit_los_pair_cache` passe de `(ver, dict)` à un **dict pur** `{(s,t): result}`. `_touch_unit_los` en
 supprime les entrées `(s,t)` où `s == unit_id` ou `t == unit_id` (même logique que
-[`_invalidate_los_cache_for_moved_unit`](../../engine/phase_handlers/shooting_handlers.py#L1870), étendue
+[`_invalidate_los_cache_for_moved_unit`](../../../engine/phase_handlers/shooting_handlers.py#L1870), étendue
 au pair-cache). Dans `compute_unit_los` @3906-3918 : retirer le bloc `holder=(ver,{})` → lecture/écriture
 directe dans le dict. Le `version++` **centralisé** (dans `_touch_unit_los`) subsiste pour les **3 autres**
 consommateurs qui en dépendent réellement, **inchangés** : `_target_pool_cache`, `_los_cache_version`
-[shooting_handlers.py:1365](../../engine/phase_handlers/shooting_handlers.py#L1365), `enemy_pos_hash`
-[shooting_handlers.py:3050](../../engine/phase_handlers/shooting_handlers.py#L3050).
+[shooting_handlers.py:1365](../../../engine/phase_handlers/shooting_handlers.py#L1365), `enemy_pos_hash`
+[shooting_handlers.py:3050](../../../engine/phase_handlers/shooting_handlers.py#L3050).
 
 **D4 — Réchauffage : étape 4 séparée, flag off par défaut.**
 Étapes 2-3 : pair-cache **lazy** (recalcul au prochain besoin) → correction complète sans réchauffage.
@@ -252,7 +252,7 @@ consommateurs qui en dépendent réellement, **inchangés** : `_target_pool_cach
 
 Concrétise **D3**. `_unit_los_pair_cache` devient **persistant** (dict pur, plus jeté sur `version++`) ;
 seules les entrées `(s, t)` où `s == moved` ou `t == moved` sont supprimées, par `_touch_unit_los` — en
-réutilisant la logique de [`_invalidate_los_cache_for_moved_unit`](../../engine/phase_handlers/shooting_handlers.py#L1870)
+réutilisant la logique de [`_invalidate_los_cache_for_moved_unit`](../../../engine/phase_handlers/shooting_handlers.py#L1870)
 (qui traite déjà `los_cache`), étendue au pair-cache.
 
 ### 4.3 Réchauffage incrémental (optionnel, activable — flag `warm`, off par défaut)
@@ -297,13 +297,13 @@ Résultat attendu : à `shooting_build_activation_pool`, toutes les paires sont 
   par script + `--step` + replay). Deux pièces :
 
   **(1) Invariant runtime réutilisable** — ✅ implémenté : `assert_los_pair_cache_consistent(game_state)`
-  dans [`shared_utils.py`](../../engine/phase_handlers/shared_utils.py). Itère `game_state["unit_by_id"]`
+  dans [`shared_utils.py`](../../../engine/phase_handlers/shared_utils.py). Itère `game_state["unit_by_id"]`
   (dicts porteurs d'`id`, ceux réellement passés à `compute_unit_los` en jeu — **pas** `units_cache` dont
   les entrées ont `id=None`), ignore les unités absentes du `units_cache` (mortes), et compare pour chaque
   paire inter-camps `compute_unit_los` (servi) vs `_compute_unit_los_uncached` (vérité). Lève `AssertionError`
   avec `(s,t, cached, fresh, version)` à la moindre divergence ; retourne le nb de paires vérifiées.
 
-  **(2) Scénario driver** — ✅ implémenté : [`tests/unit/engine/test_los_pair_cache_invariant.py`](../../tests/unit/engine/test_los_pair_cache_invariant.py).
+  **(2) Scénario driver** — ✅ implémenté : [`tests/unit/engine/test_los_pair_cache_invariant.py`](../../../tests/unit/engine/test_los_pair_cache_invariant.py).
   Construit un vrai jeu (board **44x60x5**, murs **walls-mc1** = 1098 hexs, 31 unités placées via
   `scenario_pvp_test.json`), puis exerce **directement** chaque fonction du choke-point sur unités réelles et
   ré-assère l'invariant après chacune :
@@ -341,8 +341,8 @@ réchauffage incrémental (donc ce refactor) peut réellement résoudre.
 
 ## 8. Références code
 
-- Cache pair : [`compute_unit_los`](../../engine/phase_handlers/shooting_handlers.py#L3880) / `_unit_los_pair_cache`.
-- Invalidation ciblée existante : [`_invalidate_los_cache_for_moved_unit`](../../engine/phase_handlers/shooting_handlers.py#L1870).
-- Choke-point candidat : [`update_units_cache_position`](../../engine/phase_handlers/shared_utils.py#L1178).
-- Build pool tir : [`shooting_build_activation_pool`](../../engine/phase_handlers/shooting_handlers.py#L1924) / [`_has_valid_shooting_targets`](../../engine/phase_handlers/shooting_handlers.py#L2115).
-- Transition instrumentée : `SHOOT_PHASE_START` dans [shooting_handlers.py](../../engine/phase_handlers/shooting_handlers.py#L1067) (perf_timing.log).
+- Cache pair : [`compute_unit_los`](../../../engine/phase_handlers/shooting_handlers.py#L3880) / `_unit_los_pair_cache`.
+- Invalidation ciblée existante : [`_invalidate_los_cache_for_moved_unit`](../../../engine/phase_handlers/shooting_handlers.py#L1870).
+- Choke-point candidat : [`update_units_cache_position`](../../../engine/phase_handlers/shared_utils.py#L1178).
+- Build pool tir : [`shooting_build_activation_pool`](../../../engine/phase_handlers/shooting_handlers.py#L1924) / [`_has_valid_shooting_targets`](../../../engine/phase_handlers/shooting_handlers.py#L2115).
+- Transition instrumentée : `SHOOT_PHASE_START` dans [shooting_handlers.py](../../../engine/phase_handlers/shooting_handlers.py#L1067) (perf_timing.log).

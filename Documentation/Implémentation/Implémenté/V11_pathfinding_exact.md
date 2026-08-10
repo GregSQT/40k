@@ -16,7 +16,7 @@
 >
 > Ce document est conservé pour deux raisons : la **leçon de méthode** (§4 — vérifier qu'un
 > appelant existe AVANT de mesurer un gain) et la **spec de reconstruction**, si un bot scripté
-> réclame un jour cette primitive. Journal d'état : [`V11_agent_rework.md` §0.39](../V11_agent_rework.md#s0.39).
+> réclame un jour cette primitive. Journal d'état : [`V11_agent_rework.md` §0.39](../1_Agent/V11_agent_rework.md#s0.39).
 
 ---
 

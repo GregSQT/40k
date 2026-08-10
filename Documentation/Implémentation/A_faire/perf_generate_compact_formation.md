@@ -72,7 +72,7 @@ d'un autre scénario, exactement le genre d'erreur silencieuse que le projet pro
 - **Helper PvP partagé** : `generate_compact_formation` sert le déploiement par escouade du
   front (`deploy_generate_formation`), pas seulement le gym. Une divergence de forme déplace
   des socles à l'écran. Même raison que le revert de
-  [`bug_pile_in_bfs_clearance_mismatch.md`](bug_pile_in_bfs_clearance_mismatch.md).
+  [`pile_in_overrun_par_figurine.md`](pile_in_overrun_par_figurine.md) §6.
 - **Pas sur le chemin critique du training** : après T6-f, le déploiement coûte 1,37 s par
   épisode (contre 1,03 s pour l'ancien code, qui ne plaçait aucune figurine). Le vrai bloqueur
   du training est **T6-g / T6-h**, pas cette perf.

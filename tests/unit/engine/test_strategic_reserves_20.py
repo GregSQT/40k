@@ -1310,17 +1310,19 @@ def test_ingress_preview_loops_leave_the_shared_preview_channel_untouched():
     )
 
 
-def test_ingress_preview_loops_memo_is_bounded_like_its_two_siblings():
-    """Le mémo des CONTOURS est borné, comme le pool et le masque de clearance.
+def test_ingress_preview_loops_memo_drops_unreachable_entries():
+    """Le mémo des CONTOURS ne garde que l'empreinte ennemie COURANTE.
 
     Les trois mémos d'ingress vivent dans le game_state et ne sont volontairement pas vidés après
     chaque mouvement (`_invalidate_all_destination_pools_after_movement` : leur clé porte les
-    positions ennemies, donc un mouvement AMI ne les périme pas). Deux d'entre eux se bornent dans
-    `_ingress_pool_with_key` ; celui des contours — l'entrée la PLUS grosse — ne se bornait pas du
-    tout, et accumulait un jeu de contours par configuration ennemie traversée dans la partie.
+    positions ennemies, donc un mouvement AMI ne les périme pas). Celui des contours ne se purgeait
+    pas du tout et accumulait un jeu de contours par configuration ennemie traversée dans la partie.
+
+    Il se purge par EMPREINTE et non par une borne de taille comme ses deux frères : à 0,99 s le
+    recalcul, un `clear()` en bloc jetterait aussi les entrées encore atteignables — dont celles
+    que `precompute_ingress_pools` vient d'écrire sous l'empreinte courante.
     """
     from engine.phase_handlers.movement_handlers import (
-        _INGRESS_POOL_CACHE_MAX,
         INGRESS_LOOPS_CACHE_KEY,
         ingress_preview_loops,
     )
@@ -1329,19 +1331,41 @@ def test_ingress_preview_loops_memo_is_bounded_like_its_two_siblings():
     enemy = next(e for e in gs["units_cache"].values() if int(e["player"]) == 2)
     enemy.pop("occupied_hexes_by_model", None)  # mono-fig : l'ancre porte l'empreinte
 
-    sizes = []
-    for step in range(_INGRESS_POOL_CACHE_MAX * 2):
+    fingerprints = set()
+    for _step in range(16):
         # Chaque itération DÉPLACE l'ennemi → nouvelle empreinte → nouvelle clé de mémo.
         enemy["col"] = int(enemy["col"]) + 1
         assert ingress_preview_loops(gs, squad_id), "VERT VACANT : aucun contour calculé"
-        sizes.append(len(gs[INGRESS_LOOPS_CACHE_KEY]))
+        keys = list(gs[INGRESS_LOOPS_CACHE_KEY].keys())
+        fingerprints.update(k[2] for k in keys)
+        assert len(keys) == 1, (
+            f"une entrée d'une empreinte ennemie périmée est restée : {len(keys)} entrées"
+        )
 
-    assert max(sizes) <= _INGRESS_POOL_CACHE_MAX, (
-        f"mémo de contours non borné : tailles observées {sizes}"
+    assert len(fingerprints) == 16, (
+        "la fixture n'a pas changé l'empreinte à chaque tour — le test ne prouve rien"
     )
-    assert min(sizes[1:]) < max(sizes), (
-        f"la borne n'a jamais purgé alors que {len(sizes)} configurations ennemies ont été "
-        f"traversées — la fixture ne change pas la clé : {sizes}"
+
+
+def test_ingress_preview_loops_memo_keeps_the_entries_of_the_current_fingerprint():
+    """…et il ne jette PAS les entrées encore atteignables : deux signatures sous une même
+    empreinte coexistent. C'est ce que le réchauffage (`precompute_ingress_pools`) écrit, et ce
+    qu'un `clear()` par borne de taille aurait pu effacer avant le premier clic du joueur."""
+    from engine.phase_handlers.movement_handlers import (
+        INGRESS_LOOPS_CACHE_KEY,
+        ingress_pool_signature,
+        ingress_preview_loops,
+    )
+
+    eng, gs, squad_id = _ingress_ready_engine()
+    other_id = _reserve_squad(eng, deep_strike=True)
+    assert ingress_pool_signature(gs, squad_id) != ingress_pool_signature(gs, other_id), (
+        "les deux escouades partagent leur signature : le test ne prouve rien"
+    )
+    ingress_preview_loops(gs, squad_id)
+    ingress_preview_loops(gs, other_id)
+    assert len(gs[INGRESS_LOOPS_CACHE_KEY]) == 2, (
+        "la seconde signature a évincé la première alors que l'empreinte n'a pas changé"
     )
 
 

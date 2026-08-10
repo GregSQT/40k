@@ -1034,7 +1034,7 @@ obligatoire. `ai/models/**/*.zip` ne doit jamais être modifié à la main.
    ⚠️ **La liste ci-dessus est celle de la décision de 2026-07-17 ; l'état LIVRÉ est à 9 canaux.**
    V11 §9.10 a ajouté `couvert` (6 → 7), puis V11 §0.32 a ajouté `self` (T-L) et
    `coût géodésique du pool de move` (T-K) — 7 → **9**. `GRID_CHANNELS` dans
-   [`engine/spatial_grid.py`](../../../../engine/spatial_grid.py) reste la **source unique** : ce
+   [`engine/spatial_grid.py`](../../../engine/spatial_grid.py) reste la **source unique** : ce
    document ne fait que la commenter, il ne la fixe pas.
    **RAM du rollout buffer, recalculée** (float32, `n_steps=8192 × n_envs=48` = 393 216 transitions,
    la config réelle) : 32×32×9 = 9 216 floats → **14,49 Go** pour la grille, sous la limite de

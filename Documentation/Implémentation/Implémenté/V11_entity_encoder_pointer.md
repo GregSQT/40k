@@ -15,7 +15,7 @@ la majorité des épisodes.
 les numéros de ligne sont indicatifs. Re-localiser par grep avant d'éditer.
 
 > **Documents liés**
-> - [`V11_agent_rework.md`](../V11_agent_rework.md) — §9.2.5 (observation des règles, livré), §9.2.7
+> - [`V11_agent_rework.md`](../1_Agent/V11_agent_rework.md) — §9.2.5 (observation des règles, livré), §9.2.7
 >   (trou 10.05/10.06), §9.3 (P2, mécanisme générique de décision), §9.0bis (critère du *regret*).
 > - [`V11_audit_observation.md`](V11_audit_observation.md) — §7 (découpe structurée du vecteur),
 >   §9.9 (raisonner en ensembles), §11 (reste à faire). Ce document **exécute** le « Niveau 1/2 »
@@ -44,7 +44,7 @@ de ce chantier ; elle a été périmée par des chantiers POSTÉRIEURS, extérie
 20780 → 20752 (chantier 01) → 20718 (chantier 04) → 20725 (chantier 03) → 20727 → **14609**
 (socle du 2026-08-07, règles d'armes en ids) → 14615 (drapeau `declines`, `L1`) → **16659**
 (`L2`, `K_ALLY_SLOTS` 8 → 12). L'historique tenu à jour vit dans
-[`V11_agent_rework.md`](../V11_agent_rework.md) §0 — **ne jamais citer un `obs_size` depuis ce
+[`V11_agent_rework.md`](../1_Agent/V11_agent_rework.md) §0 — **ne jamais citer un `obs_size` depuis ce
 document-ci**, le relire dans le code.
 Les tailles citées dans le journal ci-dessous sont celles du jour de leur tranche : elles
 documentent une progression, elles ne décrivent pas l'état actuel.

@@ -3,7 +3,7 @@
 > # 🗄️ DOCUMENT CLOS — ARCHIVE DE CADRAGE (ne plus s'y fier pour l'état du code)
 >
 > **Chantier CLOS le 2026-07-21 : décision (B) STOP à L1 + L_bbox, tous deux LIVRÉS et commités**
-> (`ff2293e0`, `6f268d38`) — cf. [`V11_agent_rework.md`](../V11_agent_rework.md) §0.22 (entrée
+> (`ff2293e0`, `6f268d38`) — cf. [`V11_agent_rework.md`](../1_Agent/V11_agent_rework.md) §0.22 (entrée
 > barrée, descendue en résolues). Gain mesuré : ovale **1,49×**, round10 **1,78×**, pool
 > strictement identique.
 >

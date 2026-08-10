@@ -3,7 +3,7 @@
 > ✅ **CE DOCUMENT EST INTÉGRALEMENT CLOS.** Les cinq défauts qu'il recense sont livrés et
 > verrouillés par test. Il est archivé dans `Implémenté/` et ne porte plus aucune part ouverte ;
 > l'orchestration correspondante est descendue en §0hist de
-> [`V11_agent_rework.md`](../V11_agent_rework.md) sous son numéro §0.40.
+> [`V11_agent_rework.md`](../1_Agent/V11_agent_rework.md) sous son numéro §0.40.
 
 > **Origine** : extrait de [`V11_audit_observation.md`](V11_audit_observation.md) §11
 > (archivé le 2026-07-28). C'était le seul point **actionnable** restant de cet audit ; il est
@@ -200,7 +200,7 @@ move (`MOVE_CELL_BASE = 0`), mais leurs logits sortent désormais de `deploy_que
 `choice_query_net`, qui score les embeddings de ce bloc — et non plus de la **conv 1×1 de la
 carte**, aux cellules `(0, 4..11)`. La policy distingue les deux familles par le bit
 `phase_deployment` de `global_bin`, seul signal qui les sépare. Détail en
-[`V11_agent_rework.md`](../V11_agent_rework.md#s0.44) **§0.44** (élément `L1` du lot §0.48).
+[`V11_agent_rework.md`](../1_Agent/V11_agent_rework.md#s0.44) **§0.44** (élément `L1` du lot §0.48).
 
 ### 4. ✅ CORRIGÉ (2026-07-29) — le vecteur mesure depuis la zone, comme la grille
 

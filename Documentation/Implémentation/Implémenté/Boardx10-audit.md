@@ -195,8 +195,10 @@ ppo_checkpoint_1920000_steps.zip → pré-migration
 ### 5.2 ⚠️ AVERTISSEMENT — `board_config_Objectives.json` et `board_config_big.json` non migrés
 
 **Fichiers :**
-- [config/board_config_Objectives.json](file:///home/greg/40k/config/board_config_Objectives.json) — `cols: 25, rows: 21` (ancienne grille)
-- [config/board_config_big.json](file:///home/greg/40k/config/board_config_big.json) — `cols: 27, rows: 23` (ancienne grille)
+- `config/board_config_Objectives.json` — `cols: 25, rows: 21` (ancienne grille)
+- `config/board_config_big.json` — `cols: 27, rows: 23` (ancienne grille)
+
+**Sans objet depuis (constaté le 2026-08-10) : ces deux fichiers n'existent plus.** L'avertissement est conservé pour l'historique ; les liens ont été retirés, ils ne pointaient plus nulle part.
 
 **Impact entraînement :** Ces fichiers ne semblent **pas utilisés** dans le pipeline d'entraînement CoreAgent. Le board config est chargé via `config_loader.get_board_config()` qui pointe sur `360×312`.
 

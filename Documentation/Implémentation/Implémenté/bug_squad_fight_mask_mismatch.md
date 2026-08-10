@@ -42,7 +42,7 @@ sur seeds 1/2/3, `scripts/smoke_t5_bare.py` → `(A) OK | (B) OK`.
 
 **Non traité, documenté ailleurs** :
 - l'**overrun 12.06** (pile-in de réengagement) n'est pas implémenté côté gym — il n'existe qu'en
-  modèle par-ancre, condamné → `A_faire/overrun.md` ;
+  modèle par-ancre, condamné → `A_faire/pile_in_overrun_par_figurine.md` ;
 - le masque ignore `engaged_at_fight_step_start` (12.04 « or it was engaged at the start of this
   step ») car le gym n'entre pas dans la machine V11 — mesuré :
   `(fight_subphase='pile_in', snapshot_present=False, nb_selected_to_fight=0)`. Dette V11 T6.

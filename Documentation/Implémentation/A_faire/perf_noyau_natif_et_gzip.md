@@ -1,0 +1,109 @@
+# Perf — noyau natif BFS et compression HTTP
+
+> **Réduction (2026-08-10) de `10x/10x_acceleration.md`**, qui portait trois axes dont deux sont
+> périmés :
+> - **axe 3 « réponses allégées » : FAIT**, mesuré et documenté ailleurs — voir
+>   [`../Implémenté/10x_Move_init.md`](../Implémenté/10x_Move_init.md) §3-4 (exclusions JSON,
+>   4,1 Mo → ~0,4 Mo de payload) ;
+> - **renvois morts** : `Documentation/TODO/10x_acceleration.md` et
+>   `Documentation/TODO/ENGINE_PROFILING_OPTIMIZATION.md` — le dossier `Documentation/TODO/`
+>   n'existe plus.
+>
+> Ne restent ici que les **deux axes réellement ouverts**. Le dossier `10x/` a été supprimé
+> (son autre fichier, un chantier terminé, est passé en `Implémenté/`).
+>
+> **Principe** : mesurer avant/après (`W40K_PERF_TIMING=1`, `perf_timing.log`) ; pas de
+> contournement des règles métier, pas de fallback silencieux (CLAUDE.md T1).
+
+---
+
+## 1. Compression HTTP (gzip / Brotli) — petit, à faire avec Security étape 5
+
+**Statut** : ouvert, ~½ j. **À faire AVEC l'étape 5 de [`Security.md`](Security.md)**, qui
+installe déjà un reverse proxy (Caddy/nginx) : le gzip s'y active en une directive, alors qu'un
+middleware Flask coûterait plus cher pour un gain moindre.
+
+**Objectif** : réduire le volume des réponses JSON et le temps de transfert en conditions réelles.
+
+**Ce que ça ne fait PAS** : ça ne diminue pas `serialize_game_state_s` ni la construction de
+l'arbre Python avant encodage. En **localhost le gain peut être nul**, et le CPU de compression
+peut même ajouter quelques ms. Le bénéfice est pour l'exposition réseau, pas pour le dev local.
+
+**Implémentation** : reverse proxy, `gzip on` + `gzip_types application/json` (Brotli via module
+ou CDN). Vérifier la compatibilité avec Flask-CORS (header `Vary: Accept-Encoding`). Les
+navigateurs envoient déjà `Accept-Encoding: gzip, br` — c'est au serveur d'annoncer et compresser.
+
+**Mesure** : DevTools réseau, taille « transférée » vs « ressource » ; comparer la latence totale
+sur réseau throttlé, pas en localhost.
+
+**Fichier de référence** : `services/api_server.py` — routes `/api/game/action`, `/api/game/start`.
+
+---
+
+## 2. Noyau hors Python (BFS mouvement / empreintes) — lourd, EN PAUSE
+
+**Statut** : 🔴 **jamais commencé et déclassé.** `W40K_MOVE_POOL_NATIVE` : **0 occurrence dans le
+dépôt** (vérifié 2026-08-10). Les accélérations réelles du move pool ont été menées autrement, en
+Python, et sont closes : [`../Implémenté/V11_move_pool_optimization.md`](../Implémenté/V11_move_pool_optimization.md),
+[`../Implémenté/V11_move_build_acceleration.md`](../Implémenté/V11_move_build_acceleration.md)
+(décision **(B) STOP** du 2026-07-21, `V11_agent_rework.md` §0.22).
+
+Chantier de plusieurs semaines, **hors chemin critique** — ne pas l'ouvrir sans un profil récent
+montrant que `bfs_s` domine à nouveau.
+
+### Objectif
+
+Réduire le coût CPU de `movement_build_valid_destinations_pool`
+(`engine/phase_handlers/movement_handlers.py`) pour les unités multi-hex à grande empreinte
+(`precompute_footprint_offsets`, boucle voisins × offsets).
+
+### Prérequis de non-régression
+
+- **Mêmes entrées / mêmes sorties** que le Python : `valid_move_destinations_pool`, cohérence avec
+  `enemy_adjacent_hexes`, murs, `enemy_occupied`, traversée alliés / fin interdite sur modèle.
+- Tests de référence : scénarios figés (petit plateau + cas dread) comparant la liste **triée** de
+  destinations Python vs natif.
+- **Pas** de valeur par défaut masquant une divergence : échec explicite si mismatch.
+
+### Stratégie
+
+1. **Isoler** la logique pure derrière une signature stable :
+   `(board_cols, board_rows, start, move_range, walls, enemy_occ, enemy_adj, occupied_all,
+   offsets_even, offsets_odd, …) → list[tuple[int,int]]`.
+2. **Portage**, par ordre : Rust (`native/move_pool/`, `pyo3`/`maturin`) ; ou Cython sur le seul
+   fichier critique ; ou C + ctypes si contrainte de toolchain.
+3. **Structures contiguës** (bitset par chunk, `Vec<u32>` d'indices hex) : éviter un appel Python
+   par cellule visitée — c'est là que se joue le gain, un binding bavard l'annule.
+4. **Chemin de debug** : `W40K_MOVE_POOL_NATIVE=0` force le Python (bisect), avec log — jamais un
+   repli silencieux en production.
+
+### Points de vigilance
+
+- Parité colonnes paires/impaires (`offset odd-q`) : alignement strict avec `engine/hex_utils.py`
+  et `precompute_footprint_offsets`.
+- Unités **FLY** : branche séparée (deux chemins natifs, ou natif au sol seulement en v1).
+- **Engagement** : tests contre `_enemy_adj` identiques au moteur actuel.
+
+### Fichiers de référence
+
+- `engine/phase_handlers/movement_handlers.py` — `movement_build_valid_destinations_pool`
+- `engine/hex_utils.py` — `precompute_footprint_offsets`, `get_neighbors`
+- `engine/phase_handlers/shared_utils.py` — `build_occupied_positions_set`,
+  `build_enemy_occupied_positions_set`
+- `engine/perf_timing.py` — `W40K_PERF_TIMING=1`, `perf_timing.log`
+- Procédure de profilage réutilisable : [`../Implémenté/10x_Move_init.md`](../Implémenté/10x_Move_init.md)
+  (`scripts/profile_move_pool.py`)
+
+### Validation
+
+Égalité des pools sur N cartes × N unités en test unitaire, plus un benchmark isolant le seul
+build de pool sous `W40K_PERF_TIMING=1`.
+
+---
+
+## 3. Voisinage
+
+- [`perf_generate_compact_formation.md`](perf_generate_compact_formation.md) — même famille
+  (érosion morphologique), à mesurer avant d'implémenter.
+- [`preview_tir_position_virtuelle.md`](preview_tir_position_virtuelle.md) — même objectif de
+  latence perçue, côté tir (suppression du `deepcopy`).

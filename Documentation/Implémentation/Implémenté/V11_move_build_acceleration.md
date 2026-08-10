@@ -219,7 +219,7 @@ pas une dépendance du projet. L'état actuel n'est ni l'un ni l'autre.
 
 🔴 **Mise à jour du 2026-08-08 — le constat ci-dessous date du 2026-07-28 et a été dépassé sans que
 ce document soit repris.** Trois chantiers d'août ont travaillé ce pôle, tous documentés dans
-[`V11_agent_rework.md`](../V11_agent_rework.md) :
+[`V11_agent_rework.md`](../1_Agent/V11_agent_rework.md) :
 - **§0.63** (2026-08-03) : le cache de scoring **ne servait jamais** — 100 % de reconstruction.
   Corrigé (sur-ensemble stable, un cache par joueur, delta généralisé à N poses) : reconstruction
   **100 % → 20 %**, phase de déploiement **2,01 → 1,46 s**.

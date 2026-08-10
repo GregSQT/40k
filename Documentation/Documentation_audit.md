@@ -41,10 +41,10 @@ Les PDF `40k_rules/` (source de vérité officielle) ne sont pas audités : gard
 
 ## 4. TODO encore ouverts (non faits — à garder comme backlog)
 
-- **MCTS** : MCTS_agent_implementation.md + MCTS_bot_final.md → **aucune trace code**, ni agent d'inférence ni adversaire.
-- **PostgreSQL** : DB_migration_prompt.md + DB_migration33.md → jamais amorcé, SQLite toujours en place.
+- **MCTS** : MCTS_bot_final.md (adversaire d'entraînement + §20 bis inférence) → **aucune trace code**, ni agent d'inférence ni adversaire. `MCTS_agent_implementation.md` supprimé le 2026-08-10, absorbé en §20 bis.
+- **PostgreSQL** : DB_migration_prompt.md + DB_migration.md → jamais amorcé, SQLite toujours en place.
 - **squad.md** : PR1-4 livrées, PR4 (configs/wiring/retrain) en pause.
-- **10x_acceleration.md / 10x_Move_init.md** : partiels — JSON/payload faits, noyau natif + compression HTTP non faits.
+- **perf_noyau_natif_et_gzip.md** : noyau natif + compression HTTP non faits (axe payload FAIT → `Implémenté/10x_Move_init.md`). `10x/` supprimé le 2026-08-10.
 - **Various/Roadmap.md** : doc de pilotage daté d'aujourd'hui, points ouverts confirmés (`end_of_turn_coherency_removal` défini jamais appelé, décision IA par-figurine absente).
 
 ## 5. Références pures à garder telles quelles

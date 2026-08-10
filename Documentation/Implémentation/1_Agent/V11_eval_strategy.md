@@ -1,7 +1,17 @@
 # V11 — Stratégie d'entraînement et d'évaluation
 
+> ### 🧭 Ce fichier n'est PAS la roadmap
+>
+> **Ordre du travail, tout projet confondu : [`../ROADMAP.md`](../ROADMAP.md)** — s'y reporter
+> pour savoir par quoi commencer, ce qui est bloqué et par quoi.
+>
+> Ce document porte la **stratégie d'entraînement et d'évaluation** : panel de bots, critères, holdout, MCTS.
+> Il fait foi sur le **détail** et l'**état** de V11 ; il ne fait pas foi sur les **priorités**.
+> En cas de désaccord sur l'ordre entre ce fichier et le ROADMAP, **le ROADMAP l'emporte** — et
+> l'écart se corrige dans la même livraison (règle T2 de CLAUDE.md).
+
 > **Origine.** Section §10 extraite de [`V11_agent_rework.md`](V11_agent_rework.md) le 2026-07-28
-> (plan [`V11_refactor_plan.md`](Implémenté/V11_refactor_plan.md), étape 2). Contenu déplacé **tel quel**,
+> (plan [`V11_refactor_plan.md`](../Implémenté/V11_refactor_plan.md), étape 2). Contenu déplacé **tel quel**,
 > aucune réécriture.
 >
 > **Rôle.** Décision utilisateur du 2026-07-19 : rosters, progression d'adversaires, holdout,
@@ -257,12 +267,12 @@ moment. **En démo, l'incohérence coûte plus cher que la défaite.**
 | Document | Usage | Effet |
 |---|---|---|
 | `A_faire/MCTS/MCTS_bot_final.md` | MCTS comme **adversaire d'entraînement** (fraction d'épisodes, entre bots et self-play) | améliore l'entraînement → demande un cycle complet de plus |
-| `A_faire/MCTS/MCTS_agent_implementation.md` | MCTS **dans l'agent**, à l'inférence | corrige les coups absurdes **sans retraining** |
+| `A_faire/MCTS/MCTS_bot_final.md` §20 bis | MCTS **dans l'agent**, à l'inférence | corrige les coups absurdes **sans retraining** |
 
 Pour l'objectif démo (§10.6 volet 2), c'est le **second** qui a le meilleur rapport
 effort/résultat : c'est l'absurdité ponctuelle qui coûte cher, et une recherche à l'inférence la
 corrige directement. Contre-argument à mesurer : la **latence** en temps réel devant un public —
-`MCTS_agent_implementation.md` note lui-même « micro à chaque activation + rollouts = beaucoup
+`MCTS_bot_final.md` §20 bis note lui-même « micro à chaque activation + rollouts = beaucoup
 plus lourd » et suggère « macro + feuille value seule » comme prototype. Un MCTS macro peu
 profond, ou limité aux seules décisions critiques, suffirait probablement.
 

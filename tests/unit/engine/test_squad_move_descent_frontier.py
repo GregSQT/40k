@@ -227,24 +227,32 @@ def test_erosion_reads_the_single_frontier_source(monkeypatch):
 # ── 1 bis. Éligibilité et pool : même budget NET ─────────────────────────────────────────
 
 
-def test_a_squad_whose_descent_eats_its_budget_is_not_eligible():
-    """L'ÉLIGIBILITÉ retranche la descente, comme le pool.
+def test_a_squad_whose_descent_eats_its_normal_budget_stays_eligible_for_advance():
+    """L'ÉLIGIBILITÉ ne retranche PAS la descente — et elle ne doit pas.
 
-    Elle bornait sa recherche sur le budget BRUT (`squad_move_pool_budget_subhex`) : une escouade
-    dont la hauteur de plancher mange tout le MOVE trouvait un voisin au sol valide et sortait
-    ÉLIGIBLE, puis se voyait servir un pool VIDE — masque ⊄ exécutable (§0.34). Les deux lisent
-    maintenant `squad_move_net_budget_subhex`.
+    Le pool la retranche parce qu'il construit un régime déjà choisi ; l'éligibilité, elle,
+    PRÉCÈDE le choix. Une escouade dont la descente mange tout son budget normal a un pool normal
+    vide mais un Advance parfaitement légal — et l'Advance se déclare APRÈS activation
+    (`movement_set_advance_mode_handler`), donc seulement si l'escouade est restée dans
+    `move_activation_pool`. Aligner l'éligibilité sur le pool supprimerait ce mouvement pour toute
+    la phase : c'est la régression que ce test verrouille, dans le sens masque ⊇ exécutable.
     """
-    gs = _gs(level=1, move=int(FLOOR_HEIGHT_INCHES))  # MOVE 3, descente 3 → budget net 0
+    gs = _gs(level=1, move=int(FLOOR_HEIGHT_INCHES))  # MOVE 3, descente 3 → budget normal net 0
     assert movement_build_valid_destinations_pool(gs, "1", read_only=True) == [], (
         "fixture sans descente bloquante : le test ne prouve rien"
     )
-    assert get_eligible_units(gs) == []
+    assert get_eligible_units(gs) == ["1"]
+
+    # …et l'Advance rend bien des destinations : le pool vide ci-dessus n'est pas une impasse.
+    gs["units_advanced"] = {"1"}
+    gs["advance_rolls"] = {"1": ADVANCE_ROLL + 2}
+    assert movement_build_valid_destinations_pool(gs, "1", read_only=True), (
+        "l'Advance ne rattrape rien : la fixture ne prouve pas que l'escouade doit rester éligible"
+    )
 
 
 def test_a_descending_squad_that_can_still_move_stays_eligible():
-    """Contre-épreuve : descente PARTIELLE (3 sur 6) → pool non vide, escouade éligible.
-    Retrancher la descente ne doit pas rendre l'éligibilité plus stricte que le pool."""
+    """Descente PARTIELLE (3 sur 6) : pool normal non vide, escouade éligible."""
     gs = _gs(level=1)
     assert movement_build_valid_destinations_pool(gs, "1", read_only=True)
     assert get_eligible_units(gs) == ["1"]

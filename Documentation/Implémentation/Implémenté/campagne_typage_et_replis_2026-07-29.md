@@ -17,7 +17,7 @@ sur `units_cache` dans move/fight/shoot, inventoriés par site. Il ne rouvre pas
 merge + 19 merges = 57 commits** sur `main`. Constaté par `git log --oneline bb3a788f~1..d061f21b`.
 Le même jour, `main` a par ailleurs absorbé les six branches V11 (§0.46 → §0.51 du journal V11) —
 elles NE font PAS partie de cette campagne et sont consignées dans
-[`V11_agent_rework.md`](../V11_agent_rework.md). Total du jour : **106 commits d'avance sur
+[`V11_agent_rework.md`](../1_Agent/V11_agent_rework.md). Total du jour : **106 commits d'avance sur
 `origin/main`**.
 
 **Convention d'ancrage** (identique au journal V11) : l'ancre de référence est le **nom de
@@ -507,7 +507,7 @@ par la factorisation, pas contourné.
 ## 4. Leçons réutilisables
 
 > Formulées pour resservir. Le pendant V11 de cette section est **§0bis** de
-> [`V11_agent_rework.md`](../V11_agent_rework.md), qui reste la copie canonique des leçons V11 ; celles
+> [`V11_agent_rework.md`](../1_Agent/V11_agent_rework.md), qui reste la copie canonique des leçons V11 ; celles
 > ci-dessous appartiennent à ce chantier.
 
 ### 4.1 Le piège du **vert vacant** — un contrôle qui ne regarde rien répond « tout va bien »

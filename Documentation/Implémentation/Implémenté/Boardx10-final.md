@@ -4,7 +4,7 @@
 **Dernière mise à jour :** 2026-04-14  
 **Archives remplacées :** `Boardx10-11` … `Boardx10-33`, ancien contenu de `Boardx10.md` (→ **§19**).  
 **`Boardx10.md` :** stub de redirection, **supprimé le 2026-04-14** (`e32776ea`) — ce document est la seule référence.  
-**Contraintes projet :** erreurs explicites, pas de fallback silencieux ([`.cursorrules`](../../.cursorrules)).
+**Contraintes projet :** erreurs explicites, pas de fallback silencieux ([`.cursorrules`](../../../.cursorrules)).
 
 **Lecture :** sauf mention **« legacy »**, les règles décrivent la **cible Board ×10** (socles multi-cellules sur micro-grille). Le dépôt peut implémenter un sous-ensemble ; l'alignement code est **hors scope**.
 
@@ -608,7 +608,7 @@ Mêmes interdits : pas de matrice globale ; LoS/path bornés ; représentation c
 
 ## 16. Références internes
 
-- [`.cursorrules`](../../.cursorrules)
+- [`.cursorrules`](../../../.cursorrules)
 - ~~`scripts/los_topology_builder.py`~~ — **supprimé** (remplacé par `engine/hex_utils.py`).
 - `engine/w40k_core.py`, `engine/observation_builder.py`
 - `Documentation/LOS_TOPOLOGY.md`

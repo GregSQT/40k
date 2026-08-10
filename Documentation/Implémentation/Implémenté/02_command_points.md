@@ -1,4 +1,8 @@
 # Chantier 02 — Points de Commandement (CP) et Battle-shock
+> ✅ **LIVRÉ** (vérifié code le 2026-08-10). La **CONCEPTION** reste la référence vivante. Dette assumée et bornée : la **dépense** de CP n'a aucun consommateur (pas de stratagèmes) et *Rites of Battle* est hors périmètre, faute de déclencheur.
+>
+> **Série « chantiers capacités » (ex-`2_Various/`, dossier dissous le 2026-08-10).** Les chantiers **01 à 05 sont LIVRÉS** et rangés dans `Implémenté/` ; seul le **06** reste ouvert, dans `A_faire/`. Les renvois « chantier 0X » du texte désignent ces fichiers, qui ont gardé leur nom.
+> Ordre du travail : [`../ROADMAP.md`](../ROADMAP.md) — ce fichier n'est pas une roadmap.
 
 > **Deux cycles de vie.** **CONCEPTION** fait foi après livraison. **EXÉCUTION** est un
 > prompt consommé une fois.

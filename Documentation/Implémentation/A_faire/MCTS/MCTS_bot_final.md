@@ -614,10 +614,69 @@ Utile si priors informatifs ; **v1** peut rester sur **UCT pur** (exemple §10.2
 
 ---
 
+<a id="s20bis"></a>
+## 20 bis. Annexe B — MCTS à l'INFÉRENCE (usage distinct)
+
+> **Absorbé de `MCTS_agent_implementation.md`** le 2026-08-10, doc supprimé (orphelin : 4 de ses
+> 5 références pointaient des fichiers disparus — `Documentation/TODO/Macro_agent.md`,
+> `Documentation/MCTS_bot2.md`, `Documentation/MCTS_bot.md`, `Documentation/TODO/`).
+>
+> ⚠️ **Ne pas confondre avec le reste de ce document.** Les §1-§20 spécifient MCTS comme
+> **adversaire d'entraînement** (`opponent_mix`). Cette annexe couvre l'autre usage : MCTS **à
+> l'inférence de l'agent joueur**, pour corriger les coups absurdes **sans retraining**.
+> Arbitrage entre les deux usages : [`../../1_Agent/V11_eval_strategy.md`](../../1_Agent/V11_eval_strategy.md)
+> §10.7 — **non tranché, « à ne PAS anticiper » avant la mesure de référence**.
+
+L'`GameAdapter` (§6), l'algorithme (§8) et la politique de rollout (§9) sont **communs aux deux
+usages**. Ce qui est propre à l'inférence :
+
+### Configuration
+
+Déclaration dans `config/agents/<Agent>/<Agent>_training_config.json`, à charger aussi côté API
+(`services/api_server.py`, `config_loader.py`) :
+
+```json
+{
+  "inference": {
+    "mcts": {
+      "enabled": false,
+      "timeout_ms": 500,
+      "max_simulations": 800,
+      "c_puct": 1.5
+    }
+  }
+}
+```
+
+`enabled: false` = baseline forward **sans** arbre. `enabled: true` exige des chemins et clés
+**validés** explicitement — pas de défaut silencieux anti-erreur, et tant que le code n'est pas
+branché : erreur explicite (règle T1 de CLAUDE.md). Le JSON ne fait que **router** : il ne
+suffit pas sans chemin code réel.
+
+### Métriques propres à l'inférence
+
+Latence **p50/p95/p99** (le risque décisif en démo devant un public), simulations/s, désaccord
+argmax policy vs max visites, entropie des visites à la racine.
+
+### Protocole de sweep
+
+Baseline = **même** checkpoint sans MCTS ; MCTS = même checkpoint, grille sur `c_puct`,
+`N`/`timeout_ms` et type de feuille, **sous budget temps plafonné** ; tracer la courbe **Pareto
+qualité-latence** ; geler le checkpoint pendant un sweep. Pièges : holdout respecté, latence
+jamais ignorée, baseline équitable (même masque, même obs).
+
+### Coût
+
+« Macro + feuille value seule » = prototype nettement plus simple ; « micro à chaque activation +
+rollouts » = beaucoup plus lourd. C'est la piste citée en §10.7 pour tenir la latence.
+
+---
+
 ## 21. Historique documentaire
 
 | Version | Date | Changement |
 |---------|------|------------|
+| — | 2026-08-10 | Absorption de `MCTS_agent_implementation.md` (supprimé) en **§20 bis** : MCTS à l'inférence, périmètre distinct de l'adversaire d'entraînement. |
 | **final** | 2026-04 | **Compilation unique** : base `MCTS_bot22.md` + §3.4 VecEnv/Flask (`MCTS_bot32`) + §4.7 non-stationnarité + §16 diagnostic fusionné (`MCTS_bot12` §17) + convention macro + JSON minimal + §10.3 PUCT + §10.4 gel `require_key` ; TOC / ancres harmonisés ; prédécesseurs listés en en-tête. |
 | bot22 / bot12 / bot32 / antérieurs | 2026-04 | Archives — voir en-tête. |
 

@@ -34,7 +34,7 @@ from .shared_utils import (
     build_enemy_occupied_positions_set,
     compute_candidate_footprint,
     is_footprint_placement_valid, is_placement_valid_with_clearance,
-    get_engagement_zone, get_max_base_size_hex,
+    get_engagement_zone,
     get_squad_move_budget, validate_move_plan, _validate_plan_coherency, commit_move,
     get_coherency_subhex, get_cohesion_max_subhex, get_min_neighbors,
     coherency_violation_flags,
@@ -607,33 +607,6 @@ def squad_descent_penalty_subhex(game_state: Dict[str, Any], squad_id: str) -> i
     return max_cost
 
 
-def squad_move_net_budget_subhex(
-    game_state: Dict[str, Any], squad_id: str, *, gross_budget: Optional[int] = None
-) -> int:
-    """Budget RÉELLEMENT dépensable par le squad move rigide : borne du pool MOINS la descente.
-
-    SOURCE UNIQUE du budget net. `squad_move_pool_budget_subhex` donne la borne brute (régime
-    Advance, malus 21.03) ; `squad_descent_penalty_subhex` retranche la descente §13.06 due par la
-    figurine la plus haute. Le pool retranchait la seconde, l'ÉLIGIBILITÉ non : une escouade posée
-    sur un plancher dont la hauteur mange tout son MOVE était déclarée éligible (un voisin au sol
-    est valide) puis se voyait servir un pool VIDE au clic — masque ⊄ exécutable (§0.34), la classe
-    d'incohérence que `squad_move_pool_budget_subhex` avait déjà fermée sur le malus de vol.
-
-    ``<= 0`` = aucune destination légale : les deux appelants doivent le traiter comme tel.
-    Peut être NÉGATIF (descente strictement supérieure au budget) — la valeur n'est pas bornée à 0
-    pour que l'appelant distingue « budget nul » de « descente impayable ».
-
-    ``gross_budget`` : borne brute imposée par l'appelant (chemin gym `move_budget_override`), la
-    descente restant facturée dessus comme sur la borne calculée.
-    """
-    budget = (
-        squad_move_pool_budget_subhex(game_state, str(squad_id))
-        if gross_budget is None
-        else int(gross_budget)
-    )
-    return budget - squad_descent_penalty_subhex(game_state, str(squad_id))
-
-
 def _movement_engagement_violates(
     game_state: Dict[str, Any],
     mover: Dict[str, Any],
@@ -703,9 +676,10 @@ def _invalidate_all_destination_pools_after_movement(game_state: Dict[str, Any])
     # Les mémos d'ingress (20.04) ne sont PAS vidés ici, et c'est délibéré : leur clé porte les
     # positions ENNEMIES, or cette fonction est appelée après chaque mouvement — y compris AMI,
     # qui ne peut pas les périmer. Les vider obligeait à repayer 49 ms de recalcul après chaque
-    # commit (mesuré), pour une entrée qui restait valable. Leur croissance est bornée à
-    # `_INGRESS_POOL_CACHE_MAX` par leurs producteurs : `_ingress_pool_with_key` (pool),
-    # `_ingress_clearance_mask_cached` (masque des 8") et `ingress_preview_loops` (contours).
+    # commit (mesuré), pour une entrée qui restait valable. Leur croissance est contenue par leurs
+    # producteurs : borne `_INGRESS_POOL_CACHE_MAX` pour `_ingress_pool_with_key` (pool) et
+    # `_ingress_clearance_mask_cached` (masque des 8"), purge des empreintes devenues
+    # inatteignables pour `ingress_preview_loops` (contours, trop chers à jeter en bloc).
 
     # Clear charge destination pools
     if "valid_charge_destinations_pool" in game_state:
@@ -969,13 +943,18 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
         if move_stat <= 0:
             continue
 
-        # Borne de la recherche d'éligibilité = budget NET du move, PAS la caractéristique brute.
-        # `MOVE` et le budget diffèrent dès que l'unité prend les airs (-2", 21.03) ou qu'elle doit
-        # descendre d'un étage (§13.06) : borner sur `MOVE` déclarerait éligible une unité dont
-        # toutes les destinations légales tombent hors du budget réel, que le pool refusera ensuite
-        # — masque ⊄ exécutable (§0.34). MÊME fonction que celle dont le pool tire sa borne, malus
-        # de descente COMPRIS : les deux ne peuvent plus diverger.
-        move_range = squad_move_net_budget_subhex(game_state, str(unit_id))
+        # Borne de la recherche d'éligibilité = budget du move, PAS la caractéristique brute.
+        # `MOVE` et le budget diffèrent dès que l'unité prend les airs (-2", 21.03) : borner sur
+        # `MOVE` déclarerait éligible une unité volante dont la seule destination légale est dans
+        # la bande `(M - 2", M]`, que le pool refusera ensuite — masque ⊄ exécutable (§0.34).
+        #
+        # Le coût de DESCENTE (§13.06) n'entre PAS ici, et c'est délibéré : le pool le retranche
+        # parce qu'il construit un régime DÉJÀ CHOISI, alors que l'éligibilité précède le choix.
+        # L'Advance se déclarant APRÈS activation, et l'activation exigeant d'être dans
+        # `move_activation_pool`, retrancher la descente ici supprimerait ce mouvement légal pour
+        # toute la phase (verrou :
+        # `test_a_squad_whose_descent_eats_its_normal_budget_stays_eligible_for_advance`).
+        move_range = squad_move_pool_budget_subhex(game_state, str(unit_id))
         if move_range <= 0:
             continue
 
@@ -1137,41 +1116,19 @@ def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], a
     # Log action routing
     _log_movement_debug(game_state, "execute_action", str(unit_id), f"action={action_type}")
     
-    # Flag detection for consistent behavior
-    is_gym_training = config.get("gym_training_mode", False) or game_state.get("gym_training_mode", False)
-    
-    # Auto-activate unit if not already activated and preview not shown
-    # In gym training, ActionDecoder constructs complete movement with destCol/destRow
-    # So we should NOT return waiting_for_player=True if action already has destination
+    # Auto-activate unit if not already activated and preview not shown. Le split gym qui vivait
+    # ici est SUPPRIMÉ : `convert_squad_action` n'émet ni `move` ni `left_click`, donc ses deux
+    # branches (activation silencieuse avec destination, diagnostic `[MOVE DIAGNOSTIC]` sans)
+    # étaient inatteignables et démentaient le garde de `_handle_unit_activation`.
     if not game_state.get("active_movement_unit") and action_type in ["move", "left_click"]:
-        if is_gym_training:
-            # Gym training: Check if action already has destination (ActionDecoder constructed it)
-            if "destCol" in action and "destRow" in action:
-                # Action already has destination - execute movement directly, no waiting needed
-                # Just ensure unit is activated, then continue to movement_destination_selection_handler
-                movement_unit_activation_start(game_state, unit_id)
-                # Build valid destinations pool for validation
-                movement_build_valid_destinations_pool(game_state, unit_id)
-                # Continue to execute movement directly (fall through to movement_destination_selection_handler below)
-            else:
-                # DIAGNOSTIC: ActionDecoder should always provide destination, but it doesn't
-                # This should not happen in gym training - log for debugging
-                episode = game_state.get("episode_number", "?")
-                turn = game_state.get("turn", "?")
-                from engine.game_utils import add_console_log
-                diagnostic_msg = f"[MOVE DIAGNOSTIC] E{episode} T{turn} Unit {unit_id}: ActionDecoder did not provide destCol/destRow. action keys: {list(action.keys())}"
-                add_console_log(game_state, diagnostic_msg)
-                # No destination yet - return waiting_for_player to get destination selection
-                return _handle_unit_activation(game_state, active_unit, config)
-        else:
-            # Human players: activate but don't return, continue to normal flow
-            _handle_unit_activation(game_state, active_unit, config)
-    
+        # Human players: activate but don't return, continue to normal flow
+        _handle_unit_activation(game_state, active_unit, config)
+
     if action_type == "activate_unit":
         return _handle_unit_activation(game_state, active_unit, config)
-    
+
     elif action_type == "move":
-        # Execute movement directly (destination already in action for gym training)
+        # Execute movement directly (destination déjà dans l'action, cf. le clic PvP)
         return movement_destination_selection_handler(game_state, unit_id, action)
 
     elif action_type == "advance":
@@ -1323,14 +1280,14 @@ def movement_set_fly_mode_handler(game_state: Dict[str, Any], unit_id: str, acti
 def _handle_unit_activation(game_state: Dict[str, Any], unit: Dict[str, Any], config: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
     """AI_MOVE.md: Unit activation start + execution loop — chemin PvP UNIQUEMENT.
 
-    Le gym ne passe pas par ici : `convert_squad_action` n'émet que `squad_normal_move` /
-    `squad_advance` / `squad_fall_back` / `squad_wait` / `ingress_move`, résolus par le pipeline
-    squad (`execute_semantic_action`) sans jamais traverser `_process_movement_phase`. La branche
-    gym qui vivait ici était donc morte — et fausse : le résultat « pool vide » de la boucle
-    d'exécution (`action: "skip"` + `skip_reason`, fin d'activation déjà appliquée au game_state)
-    revient avec ``True`` et se serait fait écraser par un dict `unit_activated` sans champ
-    `action`, donc un skip jamais journalisé. Erreur explicite plutôt que résultat faux — même
-    verrou que le jumeau tir (`shooting_handlers.execute_action`, « squad path expected »).
+    Le gym ne passe pas par ici : `convert_squad_action` n'émet que des verbes squad, résolus par
+    `execute_semantic_action` sans jamais traverser `_process_movement_phase`. La branche gym qui
+    vivait ici était morte, et fausse — erreur explicite plutôt que résultat faux, comme le jumeau
+    tir (`shooting_handlers.execute_action`, « squad path expected »). Ce que sa présence coûtait
+    est verrouillé par `tests/unit/engine/test_move_execution.py::TestGymNeverActivatesThroughThisHandler`.
+
+    Portée du garde : ce handler seul. `execute_action` reste atteignable en gym par `ingress_move`
+    (`w40k_core.py`, arrivée de réserves 20.04) — le hisser au routage casserait ce chemin.
     """
     if config.get("gym_training_mode", False) or game_state.get("gym_training_mode", False):
         raise RuntimeError(
@@ -1362,8 +1319,7 @@ def movement_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
 def movement_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> Tuple[bool, Dict[str, Any]]:
     """AI_MOVE.md: Single movement execution (no loop like shooting).
 
-    Appelant UNIQUE : `_handle_unit_activation`, donc chemin PvP seul — la branche gym qui vivait
-    ici (retour `waiting_for_player=False`) est morte avec la sienne.
+    Appelant UNIQUE : `_handle_unit_activation`, donc chemin PvP seul (cf. son garde).
     """
     unit = get_unit_by_id(game_state, unit_id)
     if not unit:
@@ -2986,15 +2942,9 @@ def movement_build_valid_destinations_pool(
                 f"({move_budget_override}) pour unit {unit_id} — le moteur ne produit jamais "
                 f"un budget < 0 (get_squad_move_budget borne à max(0, ...))"
             )
-        _gross_range = int(move_budget_override)
+        move_range = int(move_budget_override)
     else:
-        _gross_range = squad_move_pool_budget_subhex(game_state, str(unit_id))
-    # Squad move rigide (destination sol) : la descente §13.06 des figs parties de l'étage se
-    # retranche du budget. MÊME fonction que l'éligibilité (`get_eligible_units`) — c'est ce qui
-    # interdit à la borne du masque et à celle du pool de diverger.
-    move_range = squad_move_net_budget_subhex(
-        game_state, str(unit_id), gross_budget=_gross_range
-    )
+        move_range = squad_move_pool_budget_subhex(game_state, str(unit_id))
     # Normalize coordinates to int - raises error if invalid
     start_col, start_row = require_unit_position(unit, game_state)
     start_pos = (start_col, start_row)
@@ -3103,22 +3053,25 @@ def movement_build_valid_destinations_pool(
     # posé avant la construction de ce pool. Logique partagée via _fly_traversal_active.
     _fly_active = _fly_traversal_active(game_state, unit, unit_id)
 
-    # Descente §13.06 : déjà retranchée de `move_range` plus haut (`squad_move_net_budget_subhex`,
-    # no-op si fly actif ou tout au sol). Il ne reste qu'à traiter le cas où elle a mangé tout le
-    # budget : le squad move est alors impossible → pool vide (aucune destination). La condition est
-    # celle du budget NET, pas un second calcul de la pénalité.
-    _descent_pen = _gross_range - move_range
-    if _descent_pen > 0 and move_range <= 0:
-        if read_only:
+    # Squad move rigide (destination sol) : si des figs partent de l'étage, retrancher le coût de
+    # descente de la plus haute (§13.06) à TOUT le squad. No-op si fly actif ou tout au sol. Si le
+    # budget ne couvre pas la descente, CE régime est impossible → pool vide (aucune destination) ;
+    # l'escouade reste éligible et peut encore déclarer un Advance, dont le budget plus large
+    # repassera ici (cf. `get_eligible_units`, qui ne retranche donc PAS la descente).
+    _descent_pen = squad_descent_penalty_subhex(game_state, unit_id)
+    if _descent_pen > 0:
+        if _descent_pen >= move_range:
+            if read_only:
+                return []
+            game_state["valid_move_destinations_pool"] = []
+            game_state["valid_move_destinations_pool_by_level"] = {0: []}
+            game_state["move_preview_footprint_span"] = _move_preview_footprint_span(unit)
+            game_state["move_preview_footprint_zone"] = set()
+            game_state["move_preview_border"] = []
+            if not game_state.get("gym_training_mode"):
+                _sync_move_preview_mask_loops(game_state, set())
             return []
-        game_state["valid_move_destinations_pool"] = []
-        game_state["valid_move_destinations_pool_by_level"] = {0: []}
-        game_state["move_preview_footprint_span"] = _move_preview_footprint_span(unit)
-        game_state["move_preview_footprint_zone"] = set()
-        game_state["move_preview_border"] = []
-        if not game_state.get("gym_training_mode"):
-            _sync_move_preview_mask_loops(game_state, set())
-        return []
+        move_range = move_range - _descent_pen
 
     # FLY units: BFS ignoring walls/occupation for traversal.
     # Only destination validation checks walls, occupation and engagement zone.
@@ -4035,18 +3988,17 @@ def movement_build_model_destinations_pool(
         _mm_cache: Dict[Tuple[str, int, int, int, int, int, bool], Dict[Tuple[int, int], float]] = game_state.setdefault(
             "_move_model_field_cache", {}
         )
-        # L'orientation du socle fait partie de la clé : l'empreinte (donc le champ atteignable et la
-        # limite du bord de board) dépend de l'orientation. Sans elle, un pivot ré-utilisait le champ
-        # de l'orientation précédente (ex. socle vertical bloqué comme s'il était horizontal).
-        # Le NIVEAU DE VUE aussi : `enemy_occupied` est construit à ce niveau (cf. plus haut) et entre
-        # dans les obstacles dès que `can_move_through_enemy_model` est faux. Sans lui, le champ
-        # mémorisé au sol était relu à l'étage (ennemis du sol traités en murs), et l'inverse laissait
-        # traverser des figurines ennemies — masque ⊄ exécutable (§0.34), le `level` étant un
-        # paramètre par requête de l'UI que rien n'invalide entre deux previews sans commit.
-        # `has_fly` enfin : redondant aujourd'hui (le -2" de 21.03 est déjà dans `budget`), mais c'est
-        # une dépendance à distance sur une valeur de règle, et le jumeau charge le porte déjà
-        # (`_charge_model_field_cache`). Coût nul, les deux caches restent alignés.
-        _mm_key: Tuple[str, int, int, int, int, int, bool] = (
+        # La clé énumère TOUT ce dont le champ dépend. `mover_orient` : l'empreinte, donc les cases
+        # atteignables. `view_level` : `enemy_occupied` est construit à ce niveau (cf. plus haut) et
+        # entre dans les obstacles tant que `can_move_through_enemy_model` est faux — et le niveau
+        # est un paramètre PAR REQUÊTE de l'UI, que rien n'invalide entre deux previews sans commit
+        # (verrou : `tests/unit/engine/test_move_model_field_cache_key.py`). `has_fly` : redondant
+        # aujourd'hui (le -2" de 21.03 est déjà dans `budget`), gardé pour ne pas faire reposer la
+        # clé sur une valeur de règle lue ailleurs — coût nul, `has_fly` ne peut pas scinder une
+        # entrée. L'invalidation, elle, N'EST PAS dans la clé : ce cache dépend du vidage explicite
+        # de `_invalidate_all_destination_pools_after_movement`, là où le jumeau charge porte
+        # `_unit_move_version` et se périme tout seul.
+        _mm_key = (
             str(model_id), start_col, start_row, int(budget), mover_orient, view_level, has_fly,
         )
         _mm_field = _mm_cache.get(_mm_key) if _mm_can_cache else None
@@ -4371,8 +4323,6 @@ def movement_preview_move_plan(
 
     # Calcul des empreintes par fig
     from engine.hex_utils import precompute_footprint_offsets as _pfo
-    units_cache = game_state.get("units_cache", {})  # get allowed
-    unit_entry = units_cache.get(str(squad_id), {})  # get allowed
     # Prédicat PARTAGÉ avec le pool (`movement_build_model_destinations_pool`) : sans le garde de
     # forme, un socle oval passait pour mono-hex et `fp_wall` / `fp_other` / `fp_intra` / l'EZ ne
     # regardaient que son ancre — un socle de 23 hexes se validait par-dessus une escouade amie.
@@ -5413,8 +5363,10 @@ INGRESS_POOL_CACHE_KEY = "_ingress_setup_pool_cache"
 INGRESS_LOOPS_CACHE_KEY = "_ingress_preview_loops_cache"
 #: Masque des 8", indexé sur (joueur, distance, positions ennemies) : indépendant de la signature.
 INGRESS_CLEARANCE_CACHE_KEY = "_ingress_clearance_mask_cache"
-#: Borne des trois mémos. Une partie ne traverse jamais des dizaines de configurations ennemies
-#: entre deux invalidations ; au-delà on repart de zéro plutôt que de laisser le dict enfler.
+#: Borne du POOL et du MASQUE. Une partie ne traverse jamais des dizaines de configurations
+#: ennemies entre deux invalidations ; au-delà on repart de zéro plutôt que de laisser le dict
+#: enfler. Le mémo des CONTOURS ne l'emploie pas : vider en bloc un poste à 0,99 s l'entrée
+#: coûterait plus que la mémoire épargnée (cf. `ingress_preview_loops`).
 _INGRESS_POOL_CACHE_MAX = 8
 
 
@@ -5450,15 +5402,17 @@ def ingress_preview_loops(game_state: Dict[str, Any], squad_id: str) -> Optional
     if cache_key in loops_cache:
         return loops_cache[cache_key]
     loops = compute_move_preview_mask_loops_world(pool, game_state)
-    # Mémo BORNÉ, comme ses deux frères (`_ingress_pool_with_key`, `_ingress_clearance_mask_cached`) :
-    # la clé porte les positions ennemies, donc une entrée périmée est déjà inaccessible et seule la
-    # croissance est en jeu — or c'est ici que les entrées sont les plus grosses (les contours, cf.
-    # docstring). Sans cette borne, la partie accumulait un jeu de contours par configuration ennemie
-    # traversée, et le commentaire de `_invalidate_all_destination_pools_after_movement` (« leur
-    # croissance est bornée ») était faux pour le troisième des trois mémos.
-    if len(loops_cache) >= _INGRESS_POOL_CACHE_MAX:
-        loops_cache.clear()
+    # Mémo purgé PAR EMPREINTE, pas par une borne de taille comme ses deux frères. Rien ne le vidait,
+    # et la partie accumulait un jeu de contours par configuration ennemie traversée. La borne des
+    # frères serait ici le mauvais outil : le contour est le poste le plus CHER à recalculer (0,99 s
+    # contre 0,04 s pour le pool) et le plus LÉGER en mémoire, et un `clear()` en bloc tomberait au
+    # milieu de `precompute_ingress_pools`, qui réchauffe N signatures sous une empreinte CONSTANTE —
+    # il effacerait des entrées insérées quelques microsecondes plus tôt, dont le seul but est
+    # d'éviter les 0,99 s au premier clic. On ne jette donc que ce qui est devenu INATTEIGNABLE :
+    # `cache_key[2]` est l'empreinte ennemie, une entrée d'une autre empreinte ne peut plus être lue.
+    loops_cache = {k: v for k, v in loops_cache.items() if k[2] == cache_key[2]}
     loops_cache[cache_key] = loops
+    game_state[INGRESS_LOOPS_CACHE_KEY] = loops_cache
     return loops
 
 

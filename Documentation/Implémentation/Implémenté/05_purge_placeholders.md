@@ -1,4 +1,10 @@
 # Chantier 05 — Purge des capacités placeholder
+> ✅ **LIVRÉ le 2026-08-10** (commits `47ed073f`, `05d830fe`). Périmètre **élargi en cours de route** au-delà de ce qu'autorisait la section EXÉCUTION (6 datasheets SM hors rosters Armageddon) — la justification est en CONCEPTION, le prompt d'EXÉCUTION la contredit littéralement : c'est la CONCEPTION qui fait foi.
+>
+> Conséquence : les orks perdent la relance de charge ⇒ **toute mesure de win-rate antérieure est invalide**.
+>
+> **Série « chantiers capacités » (ex-`2_Various/`, dossier dissous le 2026-08-10).** Les chantiers **01 à 05 sont LIVRÉS** et rangés dans `Implémenté/` ; seul le **06** reste ouvert, dans `A_faire/`. Les renvois « chantier 0X » du texte désignent ces fichiers, qui ont gardé leur nom.
+> Ordre du travail : [`../ROADMAP.md`](../ROADMAP.md) — ce fichier n'est pas une roadmap.
 
 > **Deux cycles de vie.** **CONCEPTION** fait foi après livraison. **EXÉCUTION** est un
 > prompt consommé une fois.

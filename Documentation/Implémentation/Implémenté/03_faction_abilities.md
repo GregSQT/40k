@@ -1,4 +1,8 @@
 # Chantier 03 — Capacités de faction : Waaagh! et Oath of Moment
+> ✅ **LIVRÉ** (vérifié code le 2026-08-10 : `waaagh`, `oath_of_moment`, `hit_any_fail` sur les trois sites jumeaux). La **CONCEPTION** reste la référence vivante. Dette bornée : « Détachement Codex » reste un champ de config déclaré, non déduit.
+>
+> **Série « chantiers capacités » (ex-`2_Various/`, dossier dissous le 2026-08-10).** Les chantiers **01 à 05 sont LIVRÉS** et rangés dans `Implémenté/` ; seul le **06** reste ouvert, dans `A_faire/`. Les renvois « chantier 0X » du texte désignent ces fichiers, qui ont gardé leur nom.
+> Ordre du travail : [`../ROADMAP.md`](../ROADMAP.md) — ce fichier n'est pas une roadmap.
 
 > **Deux cycles de vie.** **CONCEPTION** fait foi après livraison. **EXÉCUTION** est un
 > prompt consommé une fois.

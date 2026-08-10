@@ -1,4 +1,10 @@
 # Chantier 01 — Embedding des capacités et gel de l'observation
+> ✅ **LIVRÉ le 2026-08-04** (vérifié code le 2026-08-10). La **CONCEPTION** ci-dessous reste la référence vivante du socle obs/action ; l'**EXÉCUTION** n'a plus que valeur d'historique.
+>
+> ⚠️ Chiffres d'`obs_size` de ce fichier **périmés** (14609/14615) : la valeur à HEAD est **16659**. Voir [`../ROADMAP.md`](../ROADMAP.md) §5.
+>
+> **Série « chantiers capacités » (ex-`2_Various/`, dossier dissous le 2026-08-10).** Les chantiers **01 à 05 sont LIVRÉS** et rangés dans `Implémenté/` ; seul le **06** reste ouvert, dans `A_faire/`. Les renvois « chantier 0X » du texte désignent ces fichiers, qui ont gardé leur nom.
+> Ordre du travail : [`../ROADMAP.md`](../ROADMAP.md) — ce fichier n'est pas une roadmap.
 
 > **Deux cycles de vie dans ce fichier.** La partie **CONCEPTION** reste vraie après
 > l'implémentation et fait foi. La partie **EXÉCUTION** est un prompt consommé une fois ;

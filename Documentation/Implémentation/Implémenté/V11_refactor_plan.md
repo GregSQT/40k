@@ -8,7 +8,7 @@
 > **Statut : ✅ TERMINÉ le 2026-07-28, archivé dans `Implémenté/`.** Les 4 étapes sont exécutées
 > (commits `db75417e`, `5e93fedd`, `cb77f6a6`, `5d1f1ab6`) — détail et baselines dans les étapes
 > ci-dessous. Ce document ne sert plus qu'à retracer la méthode ; l'état vivant est dans
-> [`V11_agent_rework.md`](../V11_agent_rework.md) (section Pointeurs).
+> [`V11_agent_rework.md`](../1_Agent/V11_agent_rework.md) (section Pointeurs).
 >
 > **Décision Option A — TRANCHÉE le 2026-07-21, inchangée** : l'historique (§0hist) RESTE dans
 > l'index. On n'extrait que la spec §1→§10. L'historique EST l'inventaire du fait.
@@ -65,8 +65,8 @@ Index final attendu ≈ **4060 lignes** (855 de tête + 3200 d'historique) ; **2
 
 1. Poser une **ancre HTML explicite** juste avant chaque titre déplacé cité de l'extérieur :
    `<a id="s10.6"></a>` avant `### 10.6 …` (convention : `s` + numéro sans `§`).
-2. Recâbler les renvois entrants en lien de fichier : `§10.6` → `[§10.6](V11_eval_strategy.md#s10.6)`.
-3. Dans le sous-doc, recâbler ses renvois vers l'index : `§0.14` → `[§0.14](V11_agent_rework.md#...)`
+2. Recâbler les renvois entrants en lien de fichier : `§10.6` → `[§10.6](../1_Agent/V11_eval_strategy.md#s10.6)`.
+3. Dans le sous-doc, recâbler ses renvois vers l'index : `§0.14` → `[§0.14](../1_Agent/V11_agent_rework.md#...)`
    (les ancres `### 0.x` de l'index existent déjà, id auto-généré markdown ; si douteux, poser
    aussi une ancre HTML côté index).
 4. Les renvois INTERNES au sous-doc restent du texte `§x.y` nu.

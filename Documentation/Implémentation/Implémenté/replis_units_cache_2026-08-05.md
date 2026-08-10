@@ -382,7 +382,7 @@ du diff l'a payé : deux des sites traités sont dans des fonctions **sans aucun
 
    **Résidus traités avec elle** : le libellé `FIGHT_CONSOLIDATION_PLAN` de
    [`engine/perf_timing.py`](../../../engine/perf_timing.py) (plus émis par personne) et la chaîne
-   d'appel affirmée par [`A_faire/bug_pile_in_bfs_clearance_mismatch.md`](../A_faire/bug_pile_in_bfs_clearance_mismatch.md)
+   d'appel affirmée par [`A_faire/pile_in_overrun_par_figurine.md`](../A_faire/pile_in_overrun_par_figurine.md) §6
    (`consolidate_autoplace_plan → _fight_plan_consolidation_destinations`), qui n'existe pas —
    la mesure d'impact PvP de ce document de bug (« −19 ancres ») est donc à refaire sur le chemin
    V11 réel avant de le traiter.

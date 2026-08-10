@@ -1,6 +1,6 @@
 # Prompt implementation - Migration PostgreSQL (v1)
 
-Utilise `Documentation/DB_migration33.md` comme source de verite.
+Utilise `DB_migration.md` comme source de verite.
 
 ## Objectif
 
@@ -20,7 +20,7 @@ Migrer vers PostgreSQL comme source unique pour:
 ## Ordre d'implementation (obligatoire)
 
 1. **Migrations SQL**
-   - Creer `migrations/001_init.sql` selon schema v3.3 de `DB_migration33.md`.
+   - Creer `migrations/001_init.sql` selon schema v3.3 de `DB_migration.md`.
    - Inclure PK/FK composites, `ingestion_batch`, `run_artifact`, `episode_artifact`, indexes obligatoires.
 
 2. **Couche DB roster**

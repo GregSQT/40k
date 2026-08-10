@@ -11,7 +11,7 @@
 
 **Valeur : `N_global = 16`** (floats globaux avant les features unité active).
 
-Référence : [observation_builder.py:1115-1154](../../engine/observation_builder.py#L1115-L1154).
+Référence : [observation_builder.py:1115-1154](../../../engine/observation_builder.py#L1115-L1154).
 
 Décomposition :
 | Index | Feature |
@@ -29,7 +29,7 @@ Décomposition :
 | obs[10] | alive_enemies normalized |
 | obs[11-15] | objective_control (5 floats) |
 
-`base_idx = 16` confirmé [observation_builder.py:1159](../../engine/observation_builder.py#L1159) et [:1212](../../engine/observation_builder.py#L1212).
+`base_idx = 16` confirmé [observation_builder.py:1159](../../../engine/observation_builder.py#L1159) et [:1212](../../../engine/observation_builder.py#L1212).
 
 **Implication PR1 :** `obs_size` cible = `16 + 92 = 108` (formule spec §RL).
 
@@ -37,8 +37,8 @@ Décomposition :
 
 ## 2. Assert `obs_size == 357` — ✅
 
-Constante : `PHASE2_OBS_SIZE = 357` [observation_builder.py:39](../../engine/observation_builder.py#L39).
-Assert : [observation_builder.py:1226](../../engine/observation_builder.py#L1226) `if self.obs_size != self.PHASE2_OBS_SIZE: raise ValueError(...)`.
+Constante : `PHASE2_OBS_SIZE = 357` [observation_builder.py:39](../../../engine/observation_builder.py#L39).
+Assert : [observation_builder.py:1226](../../../engine/observation_builder.py#L1226) `if self.obs_size != self.PHASE2_OBS_SIZE: raise ValueError(...)`.
 
 Références à 357 / PHASE2_OBS_SIZE dans le repo :
 - `tests/unit/engine/test_observation_builder.py:23` (config test)
@@ -53,23 +53,23 @@ Références à 357 / PHASE2_OBS_SIZE dans le repo :
 ## 3. Call sites `units_cache[id]["col"/"row"]` — ⚠️
 
 **Accès directs trouvés (3) :**
-- [movement_handlers.py:1835](../../engine/phase_handlers/movement_handlers.py#L1835) — `movement_choose_destination_via_strategy()`
-- [charge_handlers.py:1804](../../engine/phase_handlers/charge_handlers.py#L1804) — `charge_has_valid_targets()` (precheck distance)
-- [charge_handlers.py:2401](../../engine/phase_handlers/charge_handlers.py#L2401) — `charge_choose_destination_via_strategy()`
+- [movement_handlers.py:1835](../../../engine/phase_handlers/movement_handlers.py#L1835) — `movement_choose_destination_via_strategy()`
+- [charge_handlers.py:1804](../../../engine/phase_handlers/charge_handlers.py#L1804) — `charge_has_valid_targets()` (precheck distance)
+- [charge_handlers.py:2401](../../../engine/phase_handlers/charge_handlers.py#L2401) — `charge_choose_destination_via_strategy()`
 
 **Accès indirects via helpers (`require_unit_position`, `update_units_cache_position`) — ~6 fonctions :**
-- `movement_build_valid_destinations_pool` [movement_handlers.py:1324](../../engine/phase_handlers/movement_handlers.py#L1324)
-- `charge_build_valid_destinations_pool` [charge_handlers.py:1940](../../engine/phase_handlers/charge_handlers.py#L1940)
-- `build_unit_los_cache` [shooting_handlers.py:1176](../../engine/phase_handlers/shooting_handlers.py#L1176)
-- `_units_cache_fingerprint` [shooting_handlers.py:85-98](../../engine/phase_handlers/shooting_handlers.py#L85-L98)
-- `_occupied_hexes_fingerprint` [shooting_handlers.py:70-82](../../engine/phase_handlers/shooting_handlers.py#L70-L82)
-- `valid_target_pool_build` [shooting_handlers.py:2454](../../engine/phase_handlers/shooting_handlers.py#L2454)
-- `fight_build_activation_pools` [fight_handlers.py:246](../../engine/phase_handlers/fight_handlers.py#L246)
-- `_encode_enemy_units` [observation_builder.py:1780](../../engine/observation_builder.py#L1780)
+- `movement_build_valid_destinations_pool` [movement_handlers.py:1324](../../../engine/phase_handlers/movement_handlers.py#L1324)
+- `charge_build_valid_destinations_pool` [charge_handlers.py:1940](../../../engine/phase_handlers/charge_handlers.py#L1940)
+- `build_unit_los_cache` [shooting_handlers.py:1176](../../../engine/phase_handlers/shooting_handlers.py#L1176)
+- `_units_cache_fingerprint` [shooting_handlers.py:85-98](../../../engine/phase_handlers/shooting_handlers.py#L85-L98)
+- `_occupied_hexes_fingerprint` [shooting_handlers.py:70-82](../../../engine/phase_handlers/shooting_handlers.py#L70-L82)
+- `valid_target_pool_build` [shooting_handlers.py:2454](../../../engine/phase_handlers/shooting_handlers.py#L2454)
+- `fight_build_activation_pools` [fight_handlers.py:246](../../../engine/phase_handlers/fight_handlers.py#L246)
+- `_encode_enemy_units` [observation_builder.py:1780](../../../engine/observation_builder.py#L1780)
 
 **Écarts vs spec :**
 - ⚠️ `deployment_get_valid_hexes` — nom inexistant dans le code (fonction présente sous autre nom dans `deployment_handlers.py` à confirmer en PR1).
-- ⚠️ `charge_build_eligible_units` — nom inexistant. Probable équivalent : `charge_build_valid_destinations_pool` [charge_handlers.py:1940](../../engine/phase_handlers/charge_handlers.py#L1940).
+- ⚠️ `charge_build_eligible_units` — nom inexistant. Probable équivalent : `charge_build_valid_destinations_pool` [charge_handlers.py:1940](../../../engine/phase_handlers/charge_handlers.py#L1940).
 
 **Implication PR1 (tranche 1d) :** la liste de migration de la spec est globalement correcte mais 2 noms à corriger. Auditer `deployment_handlers.py` au moment de la migration.
 
@@ -79,9 +79,9 @@ Références à 357 / PHASE2_OBS_SIZE dans le repo :
 
 **Type actuel : `Set[Tuple[int, int]]`.**
 
-Construction : `_compute_unit_occupied_hexes()` [shared_utils.py:172-196](../../engine/phase_handlers/shared_utils.py#L172-L196).
-Écriture cache : [shared_utils.py:675](../../engine/phase_handlers/shared_utils.py#L675), [fight_handlers.py:1007](../../engine/phase_handlers/fight_handlers.py#L1007).
-Lecture/normalisation : [shooting_handlers.py:70-82](../../engine/phase_handlers/shooting_handlers.py#L70-L82) (accepte set/list/tuple).
+Construction : `_compute_unit_occupied_hexes()` [shared_utils.py:172-196](../../../engine/phase_handlers/shared_utils.py#L172-L196).
+Écriture cache : [shared_utils.py:675](../../../engine/phase_handlers/shared_utils.py#L675), [fight_handlers.py:1007](../../../engine/phase_handlers/fight_handlers.py#L1007).
+Lecture/normalisation : [shooting_handlers.py:70-82](../../../engine/phase_handlers/shooting_handlers.py#L70-L82) (accepte set/list/tuple).
 
 **Implication PR1 (tranche 1d) :** migration set → `dict {model_id: (col, row)}` confirmée nécessaire. Le fingerprint actuel itère sur l'iterable — adapter pour `.values()` après migration.
 
@@ -89,7 +89,7 @@ Lecture/normalisation : [shooting_handlers.py:70-82](../../engine/phase_handlers
 
 ## 5. Reset `units_fled` / `units_advanced` — ✅
 
-[command_handlers.py:39-45](../../engine/phase_handlers/command_handlers.py#L39-L45) :
+[command_handlers.py:39-45](../../../engine/phase_handlers/command_handlers.py#L39-L45) :
 ```python
 game_state["units_moved"]     = set()  # L39
 game_state["units_fled"]      = set()  # L40 ← confirmé
@@ -176,8 +176,8 @@ Conséquences :
 - Coherency validée à l'init du scénario (`validate_squad_coherency`) ; erreur explicite si rompue (pas de fallback).
 
 **`VALUE` au niveau units_cache (runtime) :** ✅ **confirmé présent.**
-- Écrit à l'init : [game_state.py:132](../../engine/game_state.py#L132), [game_state.py:528](../../engine/game_state.py#L528).
-- Source datasheet : [ai/unit_registry.py:496](../../ai/unit_registry.py#L496) (`properties["VALUE"] = require_key(ed_override, "value")`).
+- Écrit à l'init : [game_state.py:132](../../../engine/game_state.py#L132), [game_state.py:528](../../../engine/game_state.py#L528).
+- Source datasheet : [ai/unit_registry.py:496](../../../ai/unit_registry.py#L496) (`properties["VALUE"] = require_key(ed_override, "value")`).
 - Lu via `require_key(unit, "VALUE")` dans reward_calculator, observation_builder, w40k_core, game_state.
 - **Conséquence PR1 :** `points_per_hp = units_cache[squad_id]["VALUE"] / (model_count_at_start * HP_MAX)` calculable directement, sans nouveau champ.
 
@@ -185,7 +185,7 @@ Conséquences :
 
 ## 9. TOTAL_ACTION_SIZE / BASE_ZONE_INTENT — ✅
 
-[macro_intents.py:9-10](../../engine/macro_intents.py#L9-L10) :
+[macro_intents.py:9-10](../../../engine/macro_intents.py#L9-L10) :
 ```python
 BASE_ZONE_INTENT  = 16
 TOTAL_ACTION_SIZE = BASE_ZONE_INTENT + MAX_OBJECTIVES * 3  # = 31
@@ -217,11 +217,11 @@ TOTAL_ACTION_SIZE = BASE_ZONE_INTENT + MAX_OBJECTIVES * 3  # = 31
 
 ### Tranche 1a — ✅ DONE
 - Suppression de `engine/phase_handlers/fight_handler_new_bugged.py` (+ entrée pyrightconfig.json).
-- Ajout [shared_utils.py](../../engine/phase_handlers/shared_utils.py) : `BASE_TO_BASE_SUBHEX`, `get_engagement_range_subhex`, `get_coherency_subhex`, `is_base_to_base`, `is_in_engagement_range`.
+- Ajout [shared_utils.py](../../../engine/phase_handlers/shared_utils.py) : `BASE_TO_BASE_SUBHEX`, `get_engagement_range_subhex`, `get_coherency_subhex`, `is_base_to_base`, `is_in_engagement_range`.
 - Gate : imports clean, smoke arithmétique OK (x5 et x10).
 
 ### Tranche 1b — ✅ DONE
-- `_build_models_for_unit` ajouté dans [shared_utils.py](../../engine/phase_handlers/shared_utils.py).
+- `_build_models_for_unit` ajouté dans [shared_utils.py](../../../engine/phase_handlers/shared_utils.py).
 - `build_units_cache` étendu : construit `models_cache` + `squad_models` en parallèle.
 - Helpers ajoutés : `is_model_alive`, `update_model_position`, `update_model_hp`, `destroy_model`.
 - `points_per_hp` pré-calculé par modèle (`VALUE / total_hp_pool`, supporte profils mixtes).
@@ -278,7 +278,7 @@ TOTAL_ACTION_SIZE = BASE_ZONE_INTENT + MAX_OBJECTIVES * 3  # = 31
 ## PR2 — Implémentation (2026-05-27)
 
 ### Tranche 2a — ✅ DONE
-Pipeline mutualisé multi-figurines ajouté dans [shared_utils.py](../../engine/phase_handlers/shared_utils.py) :
+Pipeline mutualisé multi-figurines ajouté dans [shared_utils.py](../../../engine/phase_handlers/shared_utils.py) :
 - `DEFAULT_MOVE_CONSTRAINTS` (budget_per_model, forbid_enemy_er, require_coherency, allow_walls, allow_collisions).
 - `build_rigid_plan(anchor_dest_col, anchor_dest_row, squad_id, game_state)` — translation rigide depuis l'ancre. Retourne `list[(model_id, col, row)]` ou `None`.
 - `validate_move_plan(plan, game_state, constraints)` — dry-run atomique. Vérifie bounds, walls, collisions inter-squads, self-collision intra-plan, ER ennemi, budget per-model, coherency.
@@ -422,7 +422,7 @@ Prêt pour PR4 (RL : observation_builder + action_decoder + retrain from scratch
 **Stratégie validée :** pipeline parallèle pour observation/action aussi. La switch irréversible (obs_size 357→108, assert l1226, configs) **reportée à 4e** (pause utilisateur).
 
 ### Tranche 4a — ✅ DONE — `build_squad_observation` (108-dim)
-- Nouvelle méthode dans [observation_builder.py](../../engine/observation_builder.py) : `ObservationBuilder.build_squad_observation(game_state, active_squad_id) -> np.ndarray(108)`.
+- Nouvelle méthode dans [observation_builder.py](../../../engine/observation_builder.py) : `ObservationBuilder.build_squad_observation(game_state, active_squad_id) -> np.ndarray(108)`.
 - Structure 108-dim per spec :
   - `[0:16]` Global context (current_player, phase, turn, steps, HP%, flags moved/shot/attacked/advanced, alive_friendlies, alive_enemies, objective_control[5]).
   - `[16:21]` Squad aggregates (nb_alive_norm, is_coherent, OC_total_norm, HP_pct, firepower_estimate).
@@ -435,7 +435,7 @@ Prêt pour PR4 (RL : observation_builder + action_decoder + retrain from scratch
 Gate : shape (108,), mono-fig + 5-fig synthétique, kill → nb_alive=0.8 ; bornes respectées.
 
 ### Tranche 4b — ✅ DONE — `build_squad_action_mask` (16-dim)
-- Nouvelle fonction dans [shared_utils.py](../../engine/phase_handlers/shared_utils.py) : `build_squad_action_mask(game_state, squad_id, enemy_slot_ids=None) -> List[int]`.
+- Nouvelle fonction dans [shared_utils.py](../../../engine/phase_handlers/shared_utils.py) : `build_squad_action_mask(game_state, squad_id, enemy_slot_ids=None) -> List[int]`.
 - 16 actions (constantes `SQUAD_ACTION_*` exportées) :
   - 0-5 : Normal move 6 directions. Masquées si en ER ennemi (locked).
   - 6 : Advance (direction depuis macro_intent). Masqué si in ER ou advanced/fled.
@@ -448,12 +448,12 @@ Gate : shape (108,), mono-fig + 5-fig synthétique, kill → nb_alive=0.8 ; born
 Gate : tests par phase (move/shoot/charge/fight) → masques cohérents avec règles W40K + flags units_*.
 
 ### Tranche 4c — ✅ DONE — Scenario multi-fig + game_state.py pass-through
-- Création [scenario_pvp_squad5.json](../../config/scenario_pvp_squad5.json) : P1 squad 5 figs Intercessor + P2 squad 3 figs Intercessor en formation compacte.
-- [game_state.py](../../engine/game_state.py) :
+- Création [scenario_pvp_squad5.json](../../../config/scenario_pvp_squad5.json) : P1 squad 5 figs Intercessor + P2 squad 3 figs Intercessor en formation compacte.
+- [game_state.py](../../../engine/game_state.py) :
   - `load_units_from_scenario` lit `unit_data["models"]` et normalise les positions.
   - `enhanced_unit["HP_CUR"] = HP_MAX * len(models)` pour multi-fig (sinon HP_CUR=HP_MAX).
   - `create_unit` propage `models` au unit dict via `result["models"] = deepcopy(config["models"])`.
-- [w40k_core.py:1029](../../engine/w40k_core.py#L1029) reset HP par épisode : adapté pour multi-fig (`HP_CUR = HP_MAX * model_count`).
+- [w40k_core.py:1029](../../../engine/w40k_core.py#L1029) reset HP par épisode : adapté pour multi-fig (`HP_CUR = HP_MAX * model_count`).
 
 Gate : scenario_pvp_squad5.json → squad 1 = 5 models avec positions correctes, coherency True, `points_per_hp = 1.8` (VALUE 18 / (5 × HP_MAX 2)), obs[4] = obs[19] = 1.0 (HP plein).
 
@@ -508,7 +508,7 @@ Décisions à prendre avant 4e :
 
 ### Tranche 4e-i — ✅ DONE — Migration `occupied_hexes` (partielle safe)
 - **Décision méthodique :** au lieu de migrer brutalement `set → dict` (risque ~30 readers cassés), AJOUT d'un champ parallèle `occupied_hexes_by_model: Dict[model_id, (col, row)]` sur `units_cache[squad_id]`. Source de vérité per-figurine, sans toucher l'existant.
-- [shared_utils.py](../../engine/phase_handlers/shared_utils.py) :
+- [shared_utils.py](../../../engine/phase_handlers/shared_utils.py) :
   - `build_units_cache` initialise `occupied_hexes_by_model` après `_build_models_for_unit`.
   - `update_model_position` synchronise l'entrée pour le model_id déplacé.
   - `destroy_model` retire l'entrée pour la fig détruite.
@@ -517,7 +517,7 @@ Décisions à prendre avant 4e :
 Gate : scenario_pvp_squad5 → squad 1 a 5 entries dans by_model, squad 2 a 3. Move + destroy synchronisés. Mono-fig soak intact.
 
 ### Tranche 4e-ii — ✅ DONE — Adapter `assert obs_size`
-- [observation_builder.py](../../engine/observation_builder.py) :
+- [observation_builder.py](../../../engine/observation_builder.py) :
   - `PHASE2_OBS_SIZE = 357` (legacy mono-fig).
   - `SQUAD_OBS_SIZE_TARGET = 108` (nouveau pipeline squad).
   - `SUPPORTED_OBS_SIZES = (357, 108)`.

@@ -12,6 +12,22 @@ CONVENTIONS IMPORTANTES :
 - Format de code : Python type hints, docstrings, respect AI_TURN.md
 - Ne jamais utiliser de fallbacks ou de workaround ou de valeur par défaut pour masquer des erreurs potentielles
 
+=== ROADMAP — QUOI FAIRE ENSUITE ===
+
+SOURCE UNIQUE DE L'ORDRE DU TRAVAIL : Documentation/Implémentation/ROADMAP.md
+→ Le LIRE avant toute question de priorité, d'état d'un chantier ou de « qu'est-ce qui reste ».
+→ Trois dossiers, trois rôles, AUCUN ne donne l'ordre du travail :
+  - 1_Agent/    : spec et état du programme V11 (détail d'une tranche, pièges de méthode)
+  - A_faire/    : backlog des chantiers ouverts (contenu d'un chantier à faire)
+  - Implémenté/ : chantiers livrés (référence de conception de ce qui est déjà fait)
+→ Arbitrage entre docs qui se contredisent : (1) le CODE fait foi sur fait/pas fait,
+  (2) la DÉCISION DATÉE la plus récente tranche l'approche, (3) sur les PRIORITÉS le ROADMAP
+  l'emporte sur tout autre doc — y compris la colonne « Ordre » de V11_agent_rework.md §0 —
+  et sur le DÉTAIL de V11 c'est l'inverse, (4) sinon → demander.
+→ Ouvrir un chantier = y ajouter sa ligne D'ABORD. Le livrer = déplacer son doc en Implémenté/
+  et mettre sa ligne à jour DANS la même livraison (règle T2 : un document rendu faux par sa
+  propre livraison est une régression).
+
 === RÈGLES 40K OFFICIELLES ===
 
 SOURCE UNIQUE DE VÉRITÉ : Documentation/40k_rules/

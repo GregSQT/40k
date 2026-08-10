@@ -102,7 +102,7 @@ Les durées **`bfs_s`**, **`mask_loops_s`**, **`total_s`** ne sont **pas** rédu
 
 | Piste | Description | Risque / effort |
 |-------|-------------|-----------------|
-| **Noyau natif BFS / pool** | Porter la boucle chaude de `movement_build_valid_destinations_pool` (Rust / Cython / C) avec structures compactes (bitsets, etc.). | **Élevé** ; tests de **parité** obligatoires (liste de destinations, règles murs / alliés / FLY). Voir `Documentation/TODO/10x_acceleration.md` §1. **Ne pas livrer** sans jeux de tests bit-à-bit sur les pools. |
+| **Noyau natif BFS / pool** | Porter la boucle chaude de `movement_build_valid_destinations_pool` (Rust / Cython / C) avec structures compactes (bitsets, etc.). | **Élevé** ; tests de **parité** obligatoires (liste de destinations, règles murs / alliés / FLY). Voir `Documentation/Implémentation/A_faire/perf_noyau_natif_et_gzip.md` §2. **Ne pas livrer** sans jeux de tests bit-à-bit sur les pools. |
 | **Mémoïsation des mask loops** | **Fait (§2.4)** — cache LRU sur **`(footprint, hr, margin)`**. Extension possible : invalider explicitement au changement de tour / scénario si un jour la géométrie plateau dépend d’autres clés. | Faible si les clés restent complètes. |
 | **Affiner `mask_loops_s` vs `bfs_s`** | Utiliser §9 (cProfile + **`MOVE_POOL_BUILD`**) pour décider si le prochain chantier est **`compute_move_preview_mask_loops_world`** ou le BFS / vectorisé multi-hex. | Faible risque si pas de changement sémantique. |
 | **Variable `W40K_MOVE_POOL_NATIVE`** | Prévue dans la doc ×10 pour forcer le chemin Python en debug — à implémenter **en même temps** qu’un module natif optionnel (pas avant). | — |
@@ -122,7 +122,7 @@ Les durées **`bfs_s`**, **`mask_loops_s`**, **`total_s`** ne sont **pas** rédu
 
 ## 7. Pistes hors périmètre « move init » mais liées
 
-- **Entraînement RL** : `Documentation/TODO/ENGINE_PROFILING_OPTIMIZATION.md` — py-spy sur `W40KEngine.step()`, observations, masques ; souvent **orthogonal** à la latence Flask d’une partie web.
+- **Entraînement RL** : py-spy sur `W40KEngine.step()`, observations, masques ; souvent **orthogonal** à la latence Flask d’une partie web. (`Documentation/TODO/ENGINE_PROFILING_OPTIMIZATION.md`, cité ici à l’origine, **n’existe plus** — le dossier `Documentation/TODO/` a disparu ; utiliser `engine/perf_timing.py` et `scripts/profile_move_pool.py`.)
 - **Autres phases** (tir, charge, fight) : lignes perf dédiées dans `engine/perf_timing.py` ; traiter au cas par cas.
 
 ---
@@ -134,8 +134,8 @@ Les durées **`bfs_s`**, **`mask_loops_s`**, **`total_s`** ne sont **pas** rédu
 | Pool move + logs perf | `engine/phase_handlers/movement_handlers.py`, `engine/perf_timing.py` |
 | Masque / boucles monde | `engine/hex_union_boundary_polygon.py` |
 | API JSON + exclusions | `services/api_server.py` (`_game_state_for_json`, `_GAME_STATE_EXCLUDE_KEYS`, `api_json_response*`) |
-| Stratégie ×10 (gzip, natif, payload) | `Documentation/TODO/10x_acceleration.md` |
-| Profilage moteur RL | `Documentation/TODO/ENGINE_PROFILING_OPTIMIZATION.md` |
+| Stratégie ×10 (gzip, natif) | `Documentation/Implémentation/A_faire/perf_noyau_natif_et_gzip.md` |
+| Profilage moteur RL | `engine/perf_timing.py` + `scripts/profile_move_pool.py` (l’ancien `Documentation/TODO/ENGINE_PROFILING_OPTIMIZATION.md` n’existe plus) |
 | Script profilage pool move (scénario stress + logs) | `scripts/profile_move_pool.py` |
 | Preview move disque + masque (Chaikin, flou RT) | `frontend/src/components/BoardDisplay.tsx`, `frontend/src/utils/polygonSmooth.ts` |
 
@@ -170,12 +170,12 @@ Le script active **`game_state["perf_timing"]`** (et **`perf_profile`** sauf `--
 
 ### 9.3 py-spy (optionnel, processus vivant)
 
-- Voir **`Documentation/TODO/ENGINE_PROFILING_OPTIMIZATION.md`** : `py-spy top` / `record` sur le PID du serveur API ou d’un worker d’entraînement.
+- `py-spy top` / `record` sur le PID du serveur API ou d’un worker d’entraînement (l’ancien `Documentation/TODO/ENGINE_PROFILING_OPTIMIZATION.md` n’existe plus).
 - Utile si le coût est **mélangé** avec d’autres phases (tir, charge) dans la même requête.
 
 ### 9.4 Suite logique après profilage
 
-1. Si **`bfs_s`** domine : suivre **`Documentation/TODO/10x_acceleration.md`** §1 (noyau natif ou Cython) **avec** tests de parité sur **`valid_move_destinations_pool`** (triés, mêmes entrées plateau).
+1. Si **`bfs_s`** domine : suivre **`Documentation/Implémentation/A_faire/perf_noyau_natif_et_gzip.md`** §2 (noyau natif ou Cython) **avec** tests de parité sur **`valid_move_destinations_pool`** (triés, mêmes entrées plateau).
 2. Si **`mask_loops_s`** domine : profiler **`compute_move_preview_mask_loops_world`** (`engine/hex_union_boundary_polygon.py`) ; le cache LRU §2.4 a déjà supprimé les recalculs identiques — gains supplémentaires = algorithme ou portions encore en Python dans la boucle d’arêtes.
 3. Ne pas activer de **fallback silencieux** entre Python et natif : échec explicite ou variable **`W40K_MOVE_POOL_NATIVE=0`** documentée quand le natif existera.
 

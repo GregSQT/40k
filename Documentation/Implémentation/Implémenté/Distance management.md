@@ -413,7 +413,7 @@ appels à basculer. Sortie = une checklist par fichier.
 - **Checkpoint** : valider la liste avant tout code.
 
 ### Étape 1 — Point de bascule unique (backend)
-Fichiers : [hex_utils.py](engine/hex_utils.py), [combat_utils.py](engine/combat_utils.py)
+Fichiers : [hex_utils.py](../../../engine/hex_utils.py), [combat_utils.py](../../../engine/combat_utils.py)
 - **Primitive géométrique bord-à-bord** dans `hex_utils.py` :
   `euclidean_edge_distance(a, b, max_distance=None)` (entrées typées `Socle`). Rond↔rond →
   réutilise `euclidean_edge_clearance_round_round` (O(1)). Non-rond (oval/square) → distance
