@@ -3808,7 +3808,14 @@ def _move_spatial_cache(game_state: Dict[str, Any]) -> Dict[str, Any]:
     fp = (
         str(game_state.get("phase", "")),  # get allowed (phase absente = etat non initialise)
         hash(tuple(sorted(
-            (str(_mid), int(_m["col"]), int(_m["row"]), int(_m.get("level", 0)))  # get allowed
+            # ORIENTATION incluse : elle change l'EMPREINTE d'un socle non rond sans changer son
+            # ancre. Un commit qui ne fait que pivoter (`update_model_position(..., orientation=)`
+            # à col/row inchangés) laissait donc ce fingerprint identique — et, pire,
+            # `update_enemy_adjacent_caches_after_unit_move` sort tôt sur `old == new`, donc
+            # `ez_fp` ne bougeait pas non plus. Tous les ensembles mémoïsés ici (cellules
+            # interdites, transit, masque EZ) servaient alors l'empreinte D'AVANT le pivot.
+            (str(_mid), int(_m["col"]), int(_m["row"]), int(_m.get("level", 0)),  # get allowed
+             int(_m.get("orientation", 0)))  # get allowed (socle rond non orienté)
             for _mid, _m in models_cache.items()
         ))),
         ez_fp,
@@ -10919,6 +10926,32 @@ def clear_squad_move_cell_map(game_state: Dict[str, Any], squad_id: str) -> None
     game_state.get(MOVE_CELL_MAP_CACHE_KEY, {}).pop(str(squad_id), None)  # get allowed
 
 
+def _mono_model_matches_pool_socle(
+    game_state: Dict[str, Any], squad_id: str, alive_mids: "List[str]"
+) -> bool:
+    """Le survivant unique porte-t-il le socle avec lequel le pool d'ancre a été construit ?
+
+    Le pool lit la géométrie dans ``units_cache[squad]`` (déclaration d'ESCOUADE) ; la validation
+    lit celle de la FIGURINE. Tant que les deux coïncident — le cas de toute escouade homogène —
+    l'érosion est un no-op pour une mono-figurine et peut être sautée. Dès qu'elles diffèrent, la
+    sauter offre des cellules que l'exécution refuse (cf. l'appelant).
+    """
+    from engine.hex_utils import base_size_cache_key
+
+    if not alive_mids:
+        return True
+    entry = require_key(game_state, "units_cache").get(str(squad_id))  # get allowed : hors table
+    if entry is None:
+        return True
+    m = require_key(game_state, "models_cache")[alive_mids[0]]
+    return (
+        str(require_key(entry, "BASE_SHAPE")) == str(require_key(m, "BASE_SHAPE"))
+        and base_size_cache_key(require_key(entry, "BASE_SIZE"))
+        == base_size_cache_key(require_key(m, "BASE_SIZE"))
+        and int(entry.get("orientation", 0)) == int(m.get("orientation", 0))  # get allowed
+    )
+
+
 def erode_move_pool_by_squad_block(
     game_state: Dict[str, Any],
     squad_id: str,
@@ -10974,7 +11007,7 @@ def erode_move_pool_by_squad_block(
     models_cache = require_key(game_state, "models_cache")
     squad_models = require_key(game_state, "squad_models")
     alive_mids = [m for m in squad_models.get(squad_id, []) if m in models_cache]  # get allowed
-    if len(alive_mids) <= 1:
+    if len(alive_mids) <= 1 and _mono_model_matches_pool_socle(game_state, squad_id, alive_mids):
         # Mono-figurine : l'ancre EST le bloc (offset nul), et son coût de pool borne déjà son
         # trajet par le budget que l'exécution appliquera — depuis §0.34 la frontière
         # normal/advance du masque est le budget EXÉCUTABLE (`squad_normal_move_frontier_subhex`,
@@ -10982,6 +11015,14 @@ def erode_move_pool_by_squad_block(
         # égalité est la CONDITION de ce court-circuit : tant qu'elle tient, l'érosion est un
         # no-op ici (test `test_mono_model_squad_descending_is_executable`). Quand elle était
         # fausse, ce `return` laissait passer la bande morte et le gym crashait.
+        #
+        # SECONDE CONDITION, ajoutée le 2026-08-10 : le socle du survivant doit être celui avec
+        # lequel le POOL a été construit. Le pool d'ancre lit la géométrie de l'ESCOUADE
+        # (`units_cache`), la validation celle de la FIGURINE depuis que l'EZ s'y mesure
+        # par-figurine. Une escouade réduite à son personnage attaché (socle plus grand) rend les
+        # deux différents : mesuré sur `scenario_training_armageddon2`, l'escouade 101 réduite à
+        # `101#5` (round/8 contre round/6 déclaré) offrait 10 cellules que `validate_move_plan`
+        # refuse en « ER ennemie » — l'invariant masque ⊆ exécutable, qui fait LEVER le gym.
         return costs
 
     anchor = models_cache[alive_mids[0]]

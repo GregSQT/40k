@@ -267,3 +267,51 @@ def test_two_base_geometries_do_not_share_a_mask(euclidean):
         "le socle oval, bien plus large, doit interdire plus de cases que le rond — masques "
         "confondus par le cache"
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# L'ORIENTATION : elle change l'empreinte sans changer l'ancre
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_the_mask_depends_on_the_mover_orientation(euclidean):
+    """Un socle oval pivoté n'interdit pas les mêmes ancres — sinon le pivot serait gratuit.
+
+    Prémisse du test suivant : si le masque ignorait l'orientation, l'écart pool/validation
+    serait invisible.
+    """
+    models = dict(WITNESS_ENEMY_MODELS)
+    gs = _state(models)
+    a = _compute_mover_ez_forbidden_mask(
+        gs, _mover(), [("5", _enemy_entry(models))], EZ, BOARD[0], BOARD[1])
+    pivote = {**_mover(), "orientation": 1}
+    b = _compute_mover_ez_forbidden_mask(
+        gs, pivote, [("5", _enemy_entry(models))], EZ, BOARD[0], BOARD[1])
+    assert int(a.sum()) != int(b.sum()), (
+        "le masque ne dépend pas de l'orientation du mover : le pivot d'un socle oval ne "
+        "changerait rien, et l'écart pool/validation ne serait pas mesurable"
+    )
+
+
+def test_state_fingerprint_covers_a_pivot_in_place(euclidean):
+    """Pivoter une figurine ENNEMIE sans la déplacer doit périmer le masque mémoïsé.
+
+    `update_model_position(..., orientation=)` autorise ce commit, et
+    `update_enemy_adjacent_caches_after_unit_move` sort tôt quand col/row sont inchangés : sans
+    l'orientation dans le fingerprint, le cache servait l'empreinte D'AVANT le pivot.
+    """
+    models = dict(WITNESS_ENEMY_MODELS)
+    gs = _state(models)
+    for mid in gs["models_cache"]:
+        gs["models_cache"][mid]["orientation"] = 0
+    gs["units_cache"] = {}
+    avant = _compute_mover_ez_forbidden_mask(
+        gs, _mover(), [("5", _enemy_entry(models))], EZ, BOARD[0], BOARD[1])
+    # Pivot SUR PLACE d'un socle ennemi : col/row inchangés, orientation changée.
+    for mid in gs["models_cache"]:
+        gs["models_cache"][mid]["orientation"] = 2
+    apres = _compute_mover_ez_forbidden_mask(
+        gs, _mover(), [("5", _enemy_entry(models))], EZ, BOARD[0], BOARD[1])
+    assert apres is not avant, (
+        "masque servi depuis le cache après un pivot sur place : le fingerprint d'état ignore "
+        "l'orientation, donc l'empreinte ennemie utilisée est périmée"
+    )

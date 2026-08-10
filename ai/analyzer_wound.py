@@ -36,7 +36,14 @@ from shared.data_validation import require_key
 #: `Wound 4(4+)` — le jet et le seuil appliqué. `Wound 4` sans parenthèse (blessure automatique,
 #: [LETHAL HITS] 24.23) ne correspond pas : il n'y a pas de seuil à vérifier.
 WOUND_SEGMENT_RE = re.compile(r"Wound\s+(\d+)\((\d+)\+\)")
-#: Marqueur du +1 au JET (pas à la Force) — cf. `stamp_wound_bonus_ability` côté moteur.
+#: `Wound 4(4+) [OATH OF MOMENT]` — le +1 au JET, ATTACHÉ au segment de blessure.
+#:
+#: ⚠️ Chercher le token n'importe où dans la ligne était FAUX : le même marqueur est aussi posé
+#: sur la relance de TOUCHE (`Hit 4(3+) [REROLLED:2] [OATH OF MOMENT]`). Mesuré sur le journal :
+#: 80 occurrences pour 60 lignes, donc des lignes qui le portent deux fois. Une ligne qui ne le
+#: porte QUE côté touche (bonus de blessure nul) faisait alors abaisser le seuil attendu d'un
+#: point — un faux « seuil de blessure faux » à chaque tir de ce genre.
+WOUND_OATH_RE = re.compile(r"Wound\s+\d+\(\d+\+\)((?:\s*\[[^\]]*\])*)")
 OATH_MARKER = "[OATH OF MOMENT]"
 
 
@@ -44,6 +51,12 @@ def parse_wound_threshold(action_desc: str) -> Optional[int]:
     """Seuil imprimé sur la ligne, ou ``None`` si elle n'en porte pas."""
     m = WOUND_SEGMENT_RE.search(action_desc)
     return int(m.group(2)) if m else None
+
+
+def wound_bonus_applies(action_desc: str) -> bool:
+    """Le +1 au jet de blessure joue-t-il sur CETTE ligne ? (cf. `WOUND_OATH_RE`)"""
+    m = WOUND_OATH_RE.search(action_desc)
+    return bool(m) and OATH_MARKER in m.group(1)
 
 
 def _effect_bonus(state: Any, player: int, key: str) -> int:
@@ -76,7 +89,14 @@ def attacker_weapon_strength(
     from ai.analyzer_perfig import resolve_weapon_value
 
     per_unit_key = "cc_str_by_weapon" if is_melee else "rng_str_by_weapon"
-    global_map = config.cc_str_by_weapon_global if is_melee else config.rng_str_by_weapon_global
+    # ⚠️ AUCUNE carte GLOBALE ici, contrairement au plafond d'attaques. Les cartes globales
+    # agrègent au `max()` toutes les datasheets partageant un nom d'arme : « Close Combat
+    # Weapon » y vaut F6 parce qu'une datasheet quelconque le porte. Pour un PLAFOND c'est sûr
+    # (on ne peut que sur-autoriser) ; pour une FORCE c'est une valeur INVENTÉE, qui produirait
+    # un faux « seuil de blessure faux » au lieu d'un honnête « non vérifiable ». Arme non
+    # résolue sur la datasheet de la figurine → `None`, donc ligne écartée et COMPTÉE comme
+    # telle.
+    global_map: Dict[str, int] = {}
     candidates = shooters or (None,)
     values = set()
     for mid in candidates:
@@ -117,8 +137,10 @@ def target_bodyguard_toughness(state: Any, config: Any, target_id: str) -> Optio
     """
     from ai.analyzer_core import _model_is_character
 
+    roster_fallback = False
     mids = list(state.positions_by_model.get(target_id, {}))  # get allowed : socles effacés
     if not mids:
+        roster_fallback = True
         roster = [m for m in state.model_types if m.startswith(f"{target_id}#")]
         if not roster:
             return None
@@ -143,6 +165,13 @@ def target_bodyguard_toughness(state: Any, config: Any, target_id: str) -> Optio
         if not _model_is_character(config, state.model_types.get(m))  # get allowed
     ]
     pool = bodyguards or mids
+    if roster_fallback and len({toughness[m] for m in pool}) > 1:
+        # Repli sur le ROSTER (socles vivants inconnus) ET bodyguards d'ENDURANCES DIFFÉRENTES :
+        # le roster contient aussi les morts, donc le `max` pourrait être celui d'une figurine
+        # déjà retirée alors que le moteur, lui, ne maxe que sur les vivantes. Indécidable avec
+        # la donnée disponible — on le dit au lieu de trancher. Bodyguards homogènes (le cas
+        # courant) → la mort d'un socle ne change pas le max, le repli reste exact.
+        return None
     return max(toughness[m] for m in pool)
 
 
@@ -174,7 +203,8 @@ def expected_wound_threshold(
         strength += _effect_bonus(state, attacker_player, "waaagh_melee_str")
     threshold = calculate_wound_target(strength, toughness)
     # Oath of Moment : +1 au JET, donc seuil abaissé, plancher 2+ (`resolve_oath_effects`).
-    if OATH_MARKER in action_desc:
+    # Le token doit suivre le segment `Wound …` — ailleurs sur la ligne, il décrit la touche.
+    if wound_bonus_applies(action_desc):
         threshold = max(2, threshold - 1)
     return threshold
 
