@@ -35,7 +35,16 @@ def _reference_direct(pool_np, off_e_np, off_o_np, even_mask_np, pool_grid, obst
 
 def _erosion(pool_np, off_e_np, off_o_np, even_mask_np, pool_grid, obstacle_grid,
              board_cols, board_rows):
-    """Implementation en place dans `engine/action_decoder.py` (memes bornes, meme ordre)."""
+    """Erosion telle que `engine/action_decoder.py` la fait : par `hex_utils.erode_by_kernel`.
+
+    Le calcul de bornes N'EST PAS recopie ici. Il l'a ete, et c'etait un piege : cette fonction
+    devenait un jumeau FIGE du code de production, si bien qu'un bug de bornes corrige dans la
+    source unique laissait ce test vert sur l'ancienne formule — exactement la classe de defaut
+    que la mutualisation des 6 copies (V11 §0.22 T1) ferme. La reference reste `_reference_direct`
+    ci-dessus, qui est un calcul INDEPENDANT (indexation directe), pas une copie.
+    """
+    from engine.hex_utils import erode_by_kernel
+
     grid_cols, grid_rows = pool_grid.shape
     in_board = np.zeros_like(pool_grid)
     in_board[:board_cols, :board_rows] = True
@@ -45,20 +54,7 @@ def _erosion(pool_np, off_e_np, off_o_np, even_mask_np, pool_grid, obstacle_grid
     for mask, off_arr in ((even_mask_np, off_e_np), (~even_mask_np, off_o_np)):
         if not np.any(mask):
             continue
-        acc = np.ones_like(ok_grid)
-        for _off in off_arr:
-            dc = int(_off[0])
-            dr = int(_off[1])
-            shifted = np.zeros_like(ok_grid)
-            c_lo = max(0, dc)
-            c_hi = grid_cols - max(0, -dc)
-            r_lo = max(0, dr)
-            r_hi = grid_rows - max(0, -dr)
-            if c_lo < c_hi and r_lo < r_hi:
-                shifted[c_lo - dc:c_hi - dc, r_lo - dr:r_hi - dr] = ok_grid[c_lo:c_hi, r_lo:r_hi]
-            acc &= shifted
-            if not acc.any():
-                break
+        acc = erode_by_kernel(ok_grid, off_arr, grid_cols, grid_rows)
         anchors = pool_np[mask]
         valid_mask[mask] = acc[anchors[:, 0], anchors[:, 1]]
     return valid_mask

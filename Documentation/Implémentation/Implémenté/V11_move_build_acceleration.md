@@ -185,11 +185,11 @@ rendrait **à re-mesurer**, pas fausses.
 
 ---
 
-## 5. Tâches ENCORE OUVERTES (vérifiées dans le code le 2026-07-28)
+## 5. Tâches ouvertes : AUCUNE (T1, T2 et T3 livrés le 2026-08-08)
 
-### T1 — Mutualiser les 5 copies du motif slice-OR. NON FAIT.
+Les trois tâches que ce §5 portait sont traitées. Ce qui suit est leur état FINAL, pas un plan.
 
-Aucun helper partagé n'existe. Les copies vivantes :
+### T1 — Mutualiser les copies du motif slice-OR. FAIT.
 
 | # | Emplacement | Fenêtrée ? |
 |---|---|---|
@@ -198,22 +198,29 @@ Aucun helper partagé n'existe. Les copies vivantes :
 | 3 | inline euclidien de `_euclidean_mover_ez_forbidden_mask` [l.1361-1369](../../../engine/phase_handlers/movement_handlers.py#L1361) | ❌ |
 | 4 | dilatation `ez == 1` [l.1787-1791](../../../engine/phase_handlers/movement_handlers.py#L1787) | ✅ passe `_bbox` |
 | 5 | `_spread`/`_dilate` de [`fight_handlers.py:463-480`](../../../engine/phase_handlers/fight_handlers.py#L463) | ✅ **par coords locales `(c0, r0)`** |
+Source unique : **`hex_utils.offset_slice_windows`**
+([hex_utils.py:1329](../../../engine/hex_utils.py#L1329)). Elle rend les deux fenêtres de slice
+`(source, destination)` d'un décalage de grille, `None` quand le décalage ne laisse aucune case
+commune (le `continue` que chaque copie écrivait).
 
-**C'est de la dette de duplication, pas de la perf** : 5 implémentations du même calcul de bornes, dont
-deux fenêtrées par des mécanismes **différents** (param `bbox` vs remapping local — c'est-à-dire les
-variantes (b) et (a) coexistant dans le repo), zéro test qui les relie. Un bug de bornes corrigé dans
-l'une ne l'est pas dans les autres. **Livrable attendu** : un helper module-level unique, les 5 sites
-qui l'appellent, un test d'équivalence randomisé (modèle `test_deployment_footprint_erosion.py`) —
-**pas** de numba, **pas** de changement de perf. Les copies (2) et (3) ne sont atteintes qu'en
-`engagement=euclidean` + `ez>1` : à confirmer par board avant d'y toucher.
+Convention **unique** : `src = dst + (dc, dr)`, c'est-à-dire une DILATATION. Une propagation est la
+même opération avec le décalage OPPOSÉ — d'où un seul calcul pour les deux sens, au lieu des deux
+jeux de bornes symétriques d'avant. Le fenêtrage est explicite : `clamp="dst"` (sortie utile connue,
+L_bbox) ou `clamp="src"` (sources non nulles connues, union d'empreintes), l'autre côté étant
+re-dérivé du décalage et jamais clampé lui aussi.
 
-### T2 — Trancher le statut de `numba`. NON FAIT.
+⚠️ **L'inventaire de 5 copies de ce document était périmé.** Relevé réel au 2026-08-08 : **six**
+copies, et pas les mêmes — `fight_handlers` n'en portait plus aucune (0 occurrence), tandis que le
+décodeur de déploiement en portait une que le document ignorait. Les six sites migrés :
 
-`numba 0.65.1` est **installé dans le venv** (`import numba` OK) mais **absent de `requirements.txt` ET
-`requirements.runtime.txt`**. Aucun code de prod ne l'importe (0 occurrence dans `engine/`, `ai/`) :
-impact nul aujourd'hui, mais c'est une **dépendance fantôme** de l'environnement. Deux issues
-acceptables — l'épingler (pour garder le levier de repli disponible), ou acter par écrit qu'il n'est
-pas une dépendance du projet. L'état actuel n'est ni l'un ni l'autre.
+| # | Site | Sens | Fenêtré |
+|---|---|---|---|
+| 1 | `_dilate_by_kernel` de `_build_multi_hex_vectorized` [movement_handlers.py:2103](../../../engine/phase_handlers/movement_handlers.py#L2103) | dilate | ✅ `clamp="dst"` |
+| 2 | `_spread_by_kernel` idem [:2134](../../../engine/phase_handlers/movement_handlers.py#L2134) | spread | ✅ `clamp="src"` |
+| 3 | `_dilate_by_kernel` de `_compute_mover_ez_forbidden_mask` [:1894](../../../engine/phase_handlers/movement_handlers.py#L1894) | dilate | ❌ |
+| 4 | `_spread_by_kernel` idem [:1912](../../../engine/phase_handlers/movement_handlers.py#L1912) | spread | ❌ |
+| 5 | inline de `_euclidean_mover_ez_forbidden_mask` [:1831](../../../engine/phase_handlers/movement_handlers.py#L1831) | dilate | ❌ |
+| 6 | érosion du pool de déploiement [action_decoder.py:1506](../../../engine/action_decoder.py#L1506) | **érode (`&`)** | ❌ |
 
 ### T3 — Pôle « scoring de déploiement » : MESURÉ, ~~JAMAIS TRAITÉ~~ — **PARTIELLEMENT TRAITÉ DEPUIS, par d'autres chantiers**.
 
@@ -247,6 +254,99 @@ donc antérieurs à la mesure — ils n'y répondent pas.** ⚠️ Ce n'est **pa
 celles de §3.2 : c'est l'heuristique de déploiement de l'IA, y toucher est un changement de
 comportement potentiel, à cadrer et bencher séparément. C'est le seul chiffrage de ce pôle dans toute
 la documentation.
+Le site 6 partage le calcul de bornes mais pas l'opérateur (érosion, pas dilatation) et travaille sur
+la grille étendue `grid_cols/grid_rows`, pas sur le plateau : c'est bien le même calcul, jamais la
+même opération. La copie « dilatation `ez == 1` » que le document comptait comme distincte était déjà
+devenue un simple APPEL de (1).
+
+**Verrou** : [`test_offset_slice_windows.py`](../../../tests/unit/engine/test_offset_slice_windows.py) —
+équivalence exhaustive contre l'indexation naïve case par case, pour les deux sens, sur 6 formes de
+grille × 81 décalages (dont ceux entièrement hors plateau), plus les deux régimes de fenêtrage
+exprimés comme des égalités vérifiables (`clamp="dst"` == plein-board masqué à la fenêtre ;
+`clamp="src"` == propagation d'une source effacée hors fenêtre). Verrou PROUVÉ : un `-dr` changé en
+`dr` dans les bornes rend 8 tests rouges. Aucun changement de perf attendu ni mesuré : les bornes
+sont le même calcul, au même endroit de la boucle.
+
+### T2 — Statut de `numba`. TRANCHÉ : ce n'est pas une dépendance du projet.
+
+Acté par écrit dans [`requirements.runtime.txt`](../../../requirements.runtime.txt) (le fichier de
+dépendances curaté ; `requirements.txt` est un `pip freeze` de l'environnement de travail, qui
+contient bien d'autres choses que ce projet). Raisons, toutes déjà mesurées en §4 : le gain visé
+portait sur la **constante** d'une opération déjà vectorisée en C, il est rendu **caduc par L_bbox**
+(qui attaque la surface), et une extension native non couverte par les tests fait courir un risque de
+**segfault sur un run long** — la raison même pour laquelle ce code a fui `scipy.ndimage`. L'épingler
+« pour garder le levier » coûterait une contrainte forte sur numpy/llvmlite au bénéfice d'un chemin de
+code qui n'existe pas (0 import dans `engine/`, `ai/`). Si le besoin revient, la décision se reprend
+là, avec A/B numba==Python et chemin Python conservé.
+
+### T3 — Pôle « scoring de déploiement ». FAIT, mais pas sur la cible annoncée.
+
+🔴 **Le chiffrage de ce document était périmé et son verdict faux.** Re-mesuré le 2026-08-08 sur le
+chemin réel du gym (`W40K_BOARD_PATH=board/44x60x5`, 3 épisodes à déploiement actif, 25 steps) :
+
+- `_build_deployment_scoring_cache` : **0,14 s / 3 appels** (le document annonçait 8,8 s / 66). Le
+  poste a été absorbé par §0.46/§0.64/§0.65 (sur-ensemble stable, LoS en batch NumPy, cache disque,
+  incrémental à N poses) — postérieurs à la mesure de 2026-07-28.
+- `score_for_hex` : **la fonction n'existe plus** (0 occurrence dans le dépôt). `calculate_hex_distance`
+  est tombée de 8,4 M appels à **2 935** (0,002 s).
+- ⚠️ Le verdict « c'est l'heuristique de déploiement, y toucher change le comportement » ne
+  s'appliquait donc **pas** au poste réellement coûteux.
+
+Le poste réel était `_get_valid_deployment_hexes` (**3,10 s sur 7,19 s** de phase de déploiement), et
+sa cause n'est pas l'heuristique mais du **recalcul à l'identique** : mesuré **121 appels pour 12
+états distincts, soit 90,1 %**, jusqu'à 15 fois la même clé. Le masque
+(`get_squad_action_mask_and_eligible_units`, 72 appels), l'observation (`deployment_slot_candidates`,
+22) et le commit (`convert_squad_action`, 24) demandent le même pool pour le même état — exactement le
+motif que §3.2 a traité côté move.
+
+**Livré** : mémoïsation par fingerprint LU de l'état,
+[`_deployment_valid_hexes_fingerprint`](../../../engine/action_decoder.py#L1348) →
+[`_get_valid_deployment_hexes`](../../../engine/action_decoder.py#L1400), cache d'instance jeté par
+`reset_episode_caches` avec le pool et les murs dont il dérive. **Aucun changement de comportement** :
+le scoring, l'ordre des stratégies et les hexes rendus sont inchangés — c'est le même calcul, fait
+une fois.
+
+La clé porte l'**empreinte** de chaque voisin posé (`entry_footprint`, donc `occupied_hexes`) et pas
+seulement son ancre : `_build_deployed_snapshot_version`, le tampon du cache de scoring d'à côté, ne
+voit que `(player, col, row)` et servirait un pool calculé contre une autre empreinte — la régression
+masque⊆exécutable §0.18, qui ne lève rien. Verrou PROUVÉ : remplacer ce hash par une constante rend
+`test_changing_only_a_neighbour_footprint_invalidates_the_cache` rouge.
+
+Elle ne porte **pas** l'identité de l'unité candidate : le calcul ne lit d'elle que
+`(BASE_SHAPE, BASE_SIZE, orientation)`, et son exclusion du filtre de clairance est déjà dans la clé
+via `neighbours`, énuméré avec `exclude_id=unit_id`. Deux unités hors table de même socle partagent
+donc l'entrée (le roster en a trois en `round 6`), tandis qu'une unité DÉJÀ POSÉE ne partage avec
+personne — elle est absente de son propre `neighbours` et présente dans celui des autres. Les deux
+propriétés sont verrouillées (`..._share_the_cache_entry`, `..._does_not_share_with_an_off_table_twin`)
+et PROUVÉES : remettre `unit_id` rend la première rouge, retirer l'`exclude_id` rend la seconde rouge.
+
+Le cache est **une seule entrée** `(fingerprint, pool)`, pas un dictionnaire. Un dictionnaire retenait
+toutes les poses déjà jouées jusqu'à la fin de l'épisode — mesuré ~9,4 Mo par environnement à x5
+(10 entrées, 131 k couples), de l'ordre du gigaoctet à 48 envs — alors qu'une seule entrée peut encore
+être servie : les trois consultations d'un step portent sur l'unité active et l'état courant, et une
+pose ne se dépose pas. Mesuré : l'entrée unique **ne coûte aucun hit** (24 calculs pour 121 appels,
+contre 22 pour 118 avec le dictionnaire).
+
+**Mesure A/B, x5, 3 épisodes de déploiement actif, `cache` contre fingerprint rendu unique à chaque
+appel — les deux variantes DANS LE MÊME PROCESSUS**, 3 répétitions, meilleur temps retenu :
+
+| | sans cache | avec cache | Facteur |
+|---|---|---|---|
+| wall de la phase de déploiement | 6,29 s | 3,72 s | **1,69×** (−41 %) |
+| calculs réels (`_deployment_clearance_filter`) | 121 | **24** | 5,0× |
+
+⚠️ **Ne pas comparer des mesures prises à des moments différents sur cette machine** : sur du code
+identique, le wall de cette même phase a varié de 5,7 s à 9,3 s selon la charge, soit plus que l'effet
+qu'on cherche à mesurer. Un premier chiffrage « 7,19 → 5,67 s (1,27×) » a été produit ainsi et il est
+FAUX — il comparait deux exécutions distantes. Seul l'A/B en un seul processus ci-dessus est valide.
+
+Retiré au passage : une variable morte `ez` (avec son import) dans `_get_valid_deployment_hexes`,
+résidu du prédicat `ez <= 1` remplacé par `geometry_is_hex` — un appel payé à chaque calcul de pool.
+
+**Ce qui domine MAINTENANT la phase de déploiement** : `build_validated_deployment_plan` (2,74 s), via
+`generate_compact_formation` → `_legal_socle` (49 361 appels). Mesuré **23 % de redondance seulement**
+(139 appels, 107 clés distinctes) : c'est du calcul utile — un plan par ancre candidate — donc **pas**
+un candidat mémoïsation. Toute reprise de ce poste devra attaquer le coût par plan, pas sa répétition.
 
 ---
 

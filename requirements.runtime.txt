@@ -63,3 +63,15 @@ typing_extensions==4.16.0
 tzdata==2026.3
 urllib3==2.7.0
 Werkzeug==3.1.8
+
+# numba N'EST PAS une dépendance de ce projet, et ne doit pas y entrer (V11 §0.22, T2 —
+# tranché le 2026-08-08). Il peut être présent dans un venv de travail (constaté : 0.65.1) sans
+# qu'aucun code de `engine/` ni `ai/` ne l'importe : 0 occurrence. Il avait été évalué comme
+# accélérateur du noyau de build du pool de déplacement, puis ÉCARTÉ pour trois raisons mesurées :
+# le gain visé portait sur la constante d'une opération déjà vectorisée en C, il a été rendu caduc
+# par le fenêtrage bbox (L_bbox, qui attaque la surface et non la constante), et une extension
+# native non couverte par les tests fait courir un risque de segfault sur un run d'entraînement
+# long — c'est exactement pour ça que ce code a déjà fui `scipy.ndimage`.
+# L'épingler pour « garder le levier disponible » coûterait une contrainte forte sur numpy/llvmlite
+# au bénéfice d'un chemin de code qui n'existe pas. Si le besoin revenait, la décision se reprend
+# ici, avec un A/B numba==Python et le chemin Python conservé.

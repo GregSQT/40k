@@ -3654,8 +3654,10 @@ Ne jamais extrapoler une durée de run depuis les premiers épisodes.
 **Ce que `x5_debug` ne produit PAS, et pourquoi il ne se lance pas seul (§0.10)**
 
 **Piège de lancement, préexistant** : `--training-config x5_debug` **seul** échoue pour cet agent
-(`No scenario file found … scenario_x5_debug.json`). ArmageddonAgent n'a que
-`scenario_training_armageddon1.json`, donc `--scenario <chemin explicite>` est **obligatoire** :
+(`No scenario file found … scenario_x5_debug.json`). ArmageddonAgent n'a que ses scénarios
+`scenario_training_armageddonN.json` (`1` = terrain mc1, `2` = terrain mc2, dédoublés le
+2026-08-08 ; aucun ne porte le nom d'un profil), donc `--scenario <chemin explicite>` est
+**obligatoire** :
 ```
 python3 ai/train.py --agent ArmageddonAgent --training-config x5_debug \
   --scenario config/agents/ArmageddonAgent/scenarios/training/scenario_training_armageddon1.json \
@@ -3708,8 +3710,8 @@ neutralisé sans le moindre message.
 🔴 **Correction du 2026-08-02** : ce document affirmait que les scénarios holdout `bot-01..04`
 « la portent, pour la reproductibilité ». **C'est faux** : les quatre portent la clé **à `null`**,
 donc le tirage y est **ACTIF**. Le seul scénario du dépôt qui la renseigne réellement est
-`scenario_training_benchmark.json` (CoreAgent, `12345`). `scenario_training_armageddon1.json` ne la
-porte pas. **À contrôler avant de conclure quoi que ce soit sur une distribution de matchups** —
+`scenario_training_benchmark.json` (CoreAgent, `12345`). Les `scenario_training_armageddonN.json` ne
+la portent pas. **À contrôler avant de conclure quoi que ce soit sur une distribution de matchups** —
 et à ne pas déduire de la seule PRÉSENCE de la clé.
 
 **Une suite de tests est une mesure GLOBALE, donc un verrou GLOBAL (§0.19.1, 2026-07-20)**
@@ -4366,7 +4368,7 @@ le scénario sous `.../scenarios/training/` (`_is_training_scenario_context`) �
 l'activer en training réel ; mettre `enabled:true` dans `x5_new`.
 
 **Emplacements DANS les rosters (mode strict sur le chemin roster réel) — ✅ LIVRÉ.** Le training
-réel ne joue pas un `units[]` figé : il passe par le **template roster** (`scenario_training_armageddon1.json`,
+réel ne joue pas un `units[]` figé : il passe par le **template roster** (`scenario_training_armageddonN.json`,
 `agent_roster_ref=training_random`, `opponent_roster_ref=[SM,Orks]`, **siège aléatoire**). Or un
 roster compact ne portait aucune coordonnée → `fixed` était interdit (`_expand_compact_roster_to_basic_units`
 levait). Solution retenue par l'utilisateur (pas de miroir) : **chaque roster déclare `top` ET `bottom`
@@ -4404,8 +4406,8 @@ figurines posées, chacune DANS la zone de déploiement de son joueur, escouades
 agent frais qui reprend :
 1. **Activer le curriculum** : `x5_new.deployment_mode_schedule.enabled = true` puis régler la rampe
    (`active_ratio_start`/`active_ratio_end`/`freeze_after_progress`, p.ex. 0.0→1.0 sur 0.8 de la
-   progression). Aucun autre câblage : le template roster réel (`scenario_training_armageddon1.json`)
-   marche tel quel, rosters déjà positionnés.
+   progression). Aucun autre câblage : les templates roster réels (`scenario_training_armageddonN.json`)
+   marchent tels quels, rosters déjà positionnés.
    > 🔴 **RELEVÉ le 2026-07-28 soir — `enabled: true` NE SUFFIT PAS, et c'est le piège exact du
    > profil `x1` aujourd'hui.** Les 3 profils qui la portent (`x1`, `x5_new`, `x5_debug` — vérifié
    > le 2026-07-28 ; `x5_append` et `x1_debug` n'ont pas la clé) déclarent `enabled: true` avec
@@ -7276,7 +7278,7 @@ l'arborescence de scénarios est différente. Elle **ne s'applique pas à Armage
 n'échoue pas : il réussit et contamine.
 
 **Le scénario d'entraînement seul couvre déjà les 4 matchups** — inutile de chercher la rotation
-ailleurs. `scenario_training_armageddon1.json` porte `agent_roster_ref: "training_random"`
+ailleurs. `scenario_training_armageddonN.json` porte `agent_roster_ref: "training_random"`
 (→ `rng.choice` sur les 2 rosters agent, [game_state.py:1187](../../../engine/game_state.py#L1187)) et
 un `opponent_roster_ref` **en liste** de 2 (→ second `rng.choice`,
 [:1200](../../../engine/game_state.py#L1200)), tirages indépendants **refaits à chaque `reset()`**.
@@ -7292,13 +7294,15 @@ et le RNG est reconstruit à chaque appel (`random.Random(seed)`,
 [:1142](../../../engine/game_state.py#L1142)). Si elle est renseignée, **le roster agent devient
 identique à tous les épisodes** — le tirage est neutralisé sans le moindre message. Voulu pour les
 scénarios holdout `bot-01..04` (qui la portent, pour la reproductibilité), mais ce serait un piège
-silencieux dans un scénario d'entraînement. `scenario_training_armageddon1.json` ne la porte pas
-(`None`) : vérifié. **À contrôler avant de conclure quoi que ce soit sur une distribution de
+silencieux dans un scénario d'entraînement. Les `scenario_training_armageddonN.json` ne la portent
+pas (`None`) : vérifié. **À contrôler avant de conclure quoi que ce soit sur une distribution de
 matchups.**
 
 **Piège de lancement, préexistant** : `--training-config x5_debug` **seul** échoue pour cet agent
-(`No scenario file found … scenario_x5_debug.json`). ArmageddonAgent n'a que
-`scenario_training_armageddon1.json`, donc `--scenario <chemin explicite>` est **obligatoire** :
+(`No scenario file found … scenario_x5_debug.json`). ArmageddonAgent n'a que ses scénarios
+`scenario_training_armageddonN.json` (`1` = terrain mc1, `2` = terrain mc2, dédoublés le
+2026-08-08 ; aucun ne porte le nom d'un profil), donc `--scenario <chemin explicite>` est
+**obligatoire** :
 ```
 python3 ai/train.py --agent ArmageddonAgent --training-config x5_debug \
   --scenario config/agents/ArmageddonAgent/scenarios/training/scenario_training_armageddon1.json \

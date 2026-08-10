@@ -25,10 +25,25 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SCEN_ROOT = PROJECT_ROOT / "config" / "agents" / "ArmageddonAgent" / "scenarios"
 ACTIVE_DIRS = ["training", "holdout_regular", "holdout_hard"]
 LEGACY_KEYS = ("objectives", "objectives_ref", "objective_hexes", "deployment_zone", "wall_ref")
-# Décision utilisateur 2026-07-19 : `terrain-train-01/02/03` sont OBSOLÈTES, toute la banque
-# (training + holdouts) tourne sur `terrain-mc1.json` jusqu'à nouvel ordre. Les terrains
-# d'entraînement étaient les versions APLATIES de mc1 générées par `migrate_scenario_bank_v11.py`
-# (Phase A « pas d'étages ») ; la banque porte donc désormais les 8 étages de mc1.
+# Décision utilisateur 2026-07-19 : `terrain-train-01/02/03` sont OBSOLÈTES, la banque tourne sur
+# les terrains `terrain-mcN.json`. Les terrains d'entraînement étaient les versions APLATIES de mc1
+# générées par `migrate_scenario_bank_v11.py` (Phase A « pas d'étages ») ; la banque porte donc
+# désormais les étages de mc1/mc2.
+#
+# Décision utilisateur 2026-08-08 : **l'entraînement tourne sur DEUX terrains**, mc1 et mc2 — le
+# commit `6a1c8181` dédouble le scénario d'entraînement en `armageddon1`/`armageddon2`, qui ne
+# diffèrent QUE par leur terrain, et la rotation `bot`/`self` les prend tous les deux (mesuré : 2
+# scénarios résolus, contre 4 pour `holdout`). Le HOLDOUT, lui, reste sur mc1 seul.
+#
+# ⚠️ POURQUOI PAR DOSSIER ET PAS UN ENSEMBLE UNIQUE. Autoriser globalement `{mc1, mc2}` laisserait
+# passer un scénario de holdout basculé sur mc2 par accident — or c'est le jeu de TEST : son terrain
+# est ce qui mesure la généralisation, et un holdout qui glisse sur un terrain d'entraînement rend
+# la mesure §10.6 silencieusement optimiste. Le contrôle est donc aussi fin que la décision.
+TERRAINS_PAR_DOSSIER = {
+    "training": {"terrain-mc1.json", "terrain-mc2.json"},
+    "holdout_regular": {"terrain-mc1.json"},
+    "holdout_hard": {"terrain-mc1.json"},
+}
 # ⚠️ Ce script de migration T4 cycle encore sur les 3 terrains plats : le RELANCER repointerait
 # la banque dessus et casserait ce test — il est one-shot et déjà passé.
 #: Terrains d'entrainement declares par la banque. `terrain-mc2` est entre le 2026-08-08
@@ -139,7 +154,16 @@ def test_bank_scenario_has_no_legacy_and_valid_refs(scen):
     assert "composition" not in data, f"{scen} est une liste, pas un scénario"
     assert not any(k in data for k in LEGACY_KEYS), f"clé legacy dans {scen}"
     assert data.get("board_ref") == "44x60x5"
-    assert data.get("terrain_ref") in TRAIN_TERRAINS
+    dossier = scen.relative_to(SCEN_ROOT).parts[0]
+    autorises = TERRAINS_PAR_DOSSIER.get(dossier)
+    assert autorises is not None, (
+        f"dossier {dossier!r} sans terrains declares : ajouter son entree a TERRAINS_PAR_DOSSIER "
+        f"(un dossier inconnu ne doit pas passer sans controle)"
+    )
+    assert data.get("terrain_ref") in autorises, (
+        f"{scen.relative_to(SCEN_ROOT)} tourne sur {data.get('terrain_ref')}, hors des terrains "
+        f"autorises pour {dossier} ({sorted(autorises)})"
+    )
 
 
 # ── Échantillon chargé de bout en bout (moteur + reset) ─────────────────────────

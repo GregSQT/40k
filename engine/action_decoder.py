@@ -135,6 +135,20 @@ class ActionDecoder:
         self._deployment_pool_cache: Dict[int, Tuple[set, List[Tuple[int, int]], np.ndarray, np.ndarray, np.ndarray]] = {}
         self._deployment_cache_counts: Dict[str, int] = self.empty_deployment_cache_counts()
         self._deployment_scoring_hexes_cache: Dict[int, List[tuple[int, int]]] = {}
+        # Pool d'ancres valides : UNE seule entrée `(fingerprint, pool)`, cf.
+        # `_deployment_valid_hexes_fingerprint`. Même contrat que `_move_spatial_cache` côté move —
+        # un fingerprint qui change JETTE l'entrée au lieu de s'empiler à côté d'elle.
+        #
+        # POURQUOI UNE SEULE, ET PAS UN DICTIONNAIRE. Ce cache sert les trois consultations d'un
+        # MÊME step (masque, observation, commit), qui portent tous sur l'unité active et l'état
+        # courant : la 2ᵉ entrée ne pourrait être servie qu'à un appelant qui reviendrait sur un
+        # état antérieur, ce qu'aucun chemin ne fait — une pose ne se dépose pas. Un dictionnaire
+        # retenait donc jusqu'à la fin de l'épisode toutes les poses déjà jouées : mesuré ~9,4 Mo
+        # par environnement à x5 (10 entrées, 131 k couples), pour un seul hit possible. À 48 envs
+        # vectorisés, c'est de l'ordre du gigaoctet gardé pour rien.
+        self._deployment_valid_hexes_cache: Optional[
+            Tuple[tuple, List[tuple[int, int]]]
+        ] = None
 
     #: Clé du cache de SCORING du déploiement, dans le `game_state` (expositions LoS par hexe,
     #: alliés par colonne, snapshot des unités posées). Il vit dans l'état de partie et non sur
@@ -192,6 +206,11 @@ class ActionDecoder:
         # Le sur-ensemble de scoring dérive du pool ET des murs, tous deux invalidés ici : il
         # doit l'être AVEC eux, sinon il survivrait à un changement de terrain.
         self._deployment_scoring_hexes_cache = {}
+        # Le pool d'ancres valides dérive du pool de déploiement ET des murs, invalidés juste
+        # au-dessus : il part avec eux. Son fingerprint ne porte QUE ce qui bouge en cours
+        # d'épisode (les empreintes posées) — un terrain changé entre deux épisodes ne s'y voit
+        # pas, donc le survivre à un `reset` servirait le pool d'un autre plateau.
+        self._deployment_valid_hexes_cache = None
         # Remis à zéro AVEC les autres caches d'épisode : un compteur qui survit à un `reset`
         # cumulerait d'un épisode à l'autre et rendrait le taux de rebuild ininterprétable —
         # sans jamais lever (§0.42).
@@ -1335,17 +1354,126 @@ class ActionDecoder:
         self._deployment_scoring_hexes_cache[int(current_deployer)] = scoring
         return scoring
 
+    def _deployment_valid_hexes_fingerprint(
+        self,
+        game_state: Dict[str, Any],
+        current_deployer: int,
+        unit_id: str,
+        unit: Dict[str, Any],
+    ) -> tuple:
+        """Fingerprint LU de tout ce dont le pool d'ancres valides dépend.
+
+        POURQUOI UN FINGERPRINT ET PAS `_build_deployed_snapshot_version` (le tampon du cache de
+        scoring, juste à côté). Celui-ci ne porte que `(player, col, row)` de l'ANCRE d'unité,
+        alors que le filtre de clairance lit l'EMPREINTE réelle des voisins
+        (`candidate_overlaps_any_unit` → `entry_footprint`, donc le champ `occupied_hexes` stocké).
+        Un chemin d'écriture qui change une empreinte sans bouger l'ancre servirait un pool
+        périmé, sans rien lever — c'est exactement la régression masque⊆exécutable §0.18, et la
+        raison pour laquelle le cache spatial du move (`_move_spatial_cache`) hache lui aussi
+        l'état LU et jamais un compteur de version.
+
+        Ce qui entre, et pourquoi :
+          - le déployeur : le pool est le SIEN (sa zone de déploiement) ;
+          - forme, taille et orientation de l'unité candidate : elles décident l'empreinte testée,
+            et c'est TOUT ce que le calcul lit d'elle (`compute_candidate_footprint` ne consulte
+            pas d'autre champ) ;
+          - par voisin POSÉ : ancre, forme, taille et hash de l'empreinte — ce que la broad-phase
+            (rayon englobant, centre) et le test exact lisent, ni plus ni moins ;
+          - le nombre de murs : même granularité que `_wall_hex_set`, dont ce pool dérive. Le
+            terrain ne bouge pas en cours d'épisode, et un changement de terrain passe par
+            `reset_episode_caches`, qui jette ce cache entier.
+
+        CE QUI N'ENTRE PAS, ET POURQUOI C'EST SÛR : l'IDENTITÉ de l'unité candidate. Deux unités de
+        même socle au même état ont le même pool, et les distinguer coûtait un recalcul complet
+        (~14 000 hexes) par unité d'un roster qui en compte trois du même socle. L'`unit_id` ne sert
+        au calcul qu'à s'exclure du filtre de clairance (`exclude_unit_id`) — et cette exclusion est
+        DÉJÀ dans la clé, par `neighbours`, qui est justement énuméré avec `exclude_id=unit_id` :
+          - candidate hors table (cas normal du déploiement) : l'exclusion ne retire rien, deux
+            unités de même socle voient le même `neighbours` — le partage est exact ;
+          - candidate DÉJÀ POSÉE (repositionnement, `deployment_recommit_plan`) : elle est absente
+            de SON `neighbours` mais présente dans celui des autres, donc les clés diffèrent
+            d'elles-mêmes. C'est ce qui interdit à un repositionnement de lire le pool d'une voisine
+            de même socle.
+        Retirer `unit_id` sans cette propriété serait faux : c'est `neighbours` qui la porte, pas la
+        chance. Verrouillé par `test_two_units_with_the_same_socle_share_the_cache_entry` et
+        `test_a_deployed_unit_does_not_share_with_an_off_table_twin`.
+        """
+        from engine.hex_utils import base_size_cache_key
+        from engine.spatial_relations import entries_on_battlefield, entry_footprint
+
+        units_cache = require_key(game_state, "units_cache")
+        neighbours = tuple(
+            (
+                uid,
+                int(require_key(entry, "col")),
+                int(require_key(entry, "row")),
+                str(require_key(entry, "BASE_SHAPE")),
+                base_size_cache_key(require_key(entry, "BASE_SIZE")),
+                hash(frozenset(entry_footprint(entry))),
+            )
+            for uid, entry in entries_on_battlefield(units_cache, exclude_id=str(unit_id))
+        )
+        return (
+            int(current_deployer),
+            str(require_key(unit, "BASE_SHAPE")),
+            base_size_cache_key(require_key(unit, "BASE_SIZE")),
+            int(require_key(unit, "orientation")),
+            neighbours,
+            len(require_key(game_state, "wall_hexes")),
+        )
+
     def _get_valid_deployment_hexes(
         self,
         game_state: Dict[str, Any],
         current_deployer: int,
         unit_id: str,
     ) -> List[tuple]:
-        """Build sorted list of currently valid deployment hexes for player."""
+        """Build sorted list of currently valid deployment hexes for player.
+
+        Mémoïsé sur `_deployment_valid_hexes_fingerprint`. Le motif est celui de §3.2 côté move :
+        les TROIS consommateurs d'un même step — le masque
+        (`get_squad_action_mask_and_eligible_units`), l'observation
+        (`deployment_slot_candidates`) et le commit (`convert_squad_action`) — demandent le même
+        pool pour le même état, et le recalculaient chacun. Mesuré sur 3 épisodes x5 : 121 appels
+        pour 12 états distincts, soit 90,1 % de recalcul à l'identique. A/B des deux variantes dans
+        un MÊME processus (le wall de cette phase varie du simple au double d'une exécution à
+        l'autre sur cette machine, donc deux mesures distantes ne se comparent pas) : 121 calculs
+        réels ramenés à 24, phase de déploiement 6,29 s → 3,72 s.
+
+        La liste est renvoyée PAR RÉFÉRENCE : ne pas la muter (même contrat que
+        `_move_spatial_cache`). Aucun des trois consommateurs ne le fait — ils la mesurent,
+        l'itèrent ou la vectorisent.
+        """
         unit = get_unit_by_id(str(unit_id), game_state)
         if unit is None:
             raise KeyError(f"Unit {unit_id} missing from game_state['units']")
 
+        fingerprint = self._deployment_valid_hexes_fingerprint(
+            game_state, current_deployer, str(unit_id), unit
+        )
+        cached = self._deployment_valid_hexes_cache
+        if cached is not None and cached[0] == fingerprint:
+            return cached[1]
+        valid = self._compute_valid_deployment_hexes(
+            game_state, current_deployer, str(unit_id), unit
+        )
+        self._deployment_valid_hexes_cache = (fingerprint, valid)
+        return valid
+
+    def _compute_valid_deployment_hexes(
+        self,
+        game_state: Dict[str, Any],
+        current_deployer: int,
+        unit_id: str,
+        unit: Dict[str, Any],
+    ) -> List[tuple]:
+        """Calcul NU du pool d'ancres valides, sans cache — appelé sur miss uniquement.
+
+        Séparé de `_get_valid_deployment_hexes` pour que « tout retour passe par le cache » soit
+        structurel : cette fonction a deux sorties (empreinte mono-hex, érosion multi-hex), et le
+        rangement était écrit à chacune. Une troisième sortie ajoutée ici ne peut plus servir un
+        pool sans le mémoïser.
+        """
         wall_hexes = self._wall_hex_set(game_state)
         board_cols = int(require_key(game_state, "board_cols"))
         board_rows = int(require_key(game_state, "board_rows"))
@@ -1354,8 +1482,6 @@ class ActionDecoder:
         )
 
         base_size = unit["BASE_SIZE"]
-        from engine.phase_handlers.shared_utils import get_engagement_zone as _get_ez
-        ez = _get_ez(game_state)
 
         # Volet DISCRET (bornes + murs + appartenance au pool) : miroir exact du commit
         # `deployment_handlers.deploy_unit` (footprint ⊆ pool, ∉ mur, dans les bornes).
@@ -1375,7 +1501,7 @@ class ActionDecoder:
             return self._deployment_clearance_filter(game_state, str(unit_id), unit, cell_valid)
 
         # Multi-hex units: vectorized numpy footprint check (bornes + murs + pool)
-        from engine.hex_utils import precompute_footprint_offsets
+        from engine.hex_utils import erode_by_kernel, precompute_footprint_offsets
         base_shape = unit["BASE_SHAPE"]
         orientation = int(unit["orientation"])
         off_e, off_o = precompute_footprint_offsets(base_shape, base_size, orientation)
@@ -1414,20 +1540,10 @@ class ActionDecoder:
         for mask, off_arr in ((even_mask_np, off_e_np), (~even_mask_np, off_o_np)):
             if not np.any(mask):
                 continue
-            acc = np.ones_like(ok_grid)
-            for _off in off_arr:
-                dc = int(_off[0])
-                dr = int(_off[1])
-                shifted = np.zeros_like(ok_grid)
-                c_lo = max(0, dc)
-                c_hi = grid_cols - max(0, -dc)
-                r_lo = max(0, dr)
-                r_hi = grid_rows - max(0, -dr)
-                if c_lo < c_hi and r_lo < r_hi:
-                    shifted[c_lo - dc:c_hi - dc, r_lo - dr:r_hi - dr] = ok_grid[c_lo:c_hi, r_lo:r_hi]
-                acc &= shifted
-                if not acc.any():
-                    break
+            # Même géométrie de décalage que les dilatations du move (`src = dst + offset`), avec
+            # l'opérateur inverse : `erode_by_kernel` est la source unique des deux. Le plateau de
+            # CE calcul est la grille ÉTENDUE (`grid_cols/grid_rows`), pas `board_cols/rows`.
+            acc = erode_by_kernel(ok_grid, off_arr, grid_cols, grid_rows)
             anchors = pool_np[mask]  # (Nk, 2)
             valid_mask[mask] = acc[anchors[:, 0], anchors[:, 1]]
 
