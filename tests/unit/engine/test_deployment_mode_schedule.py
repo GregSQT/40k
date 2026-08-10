@@ -309,13 +309,14 @@ def test_all_profiles_share_the_same_ramp() -> None:
     Le compte est figé exprès : un profil ajouté sans son bloc de déploiement est le défaut que
     ce fichier existe pour attraper, et un `len` non contraint le laisserait passer. Passé de 5
     à 6 le 2026-08-02 avec `x1_long` (runs longs), puis à 7 le même jour avec `x1_selfplay`
-    (phase 2 — self-play sur un agent déjà entraîné vs bots).
+    (phase 2 — self-play sur un agent déjà entraîné vs bots), puis à 8 le 2026-08-10 avec
+    `x5_long` (runs longs joués sur le plateau x5).
 
     ⚠️ `x1_selfplay` porte le MÊME bloc que les autres, et ce n'est pas un oubli : la rampe de
     déploiement est une COMPÉTENCE ACQUISE, elle reprend là où la phase 1 l'a laissée (V11 §0.58).
     Le bloc y décrit donc le plafond atteint, pas une rampe rejouée.
     """
-    assert len(PROFILES) == 7, f"profils attendus : 7, trouvés {sorted(PROFILES)}"
+    assert len(PROFILES) == 8, f"profils attendus : 8, trouvés {sorted(PROFILES)}"
     reference = json.dumps(PROFILES["x1"]["deployment_mode_schedule"], sort_keys=True)
     diverged = {
         name: p.get("deployment_mode_schedule")

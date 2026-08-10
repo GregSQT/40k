@@ -24,7 +24,7 @@ import pytest
 from engine.observation_builder import ObservationBuilder
 from engine.w40k_core import W40KEngine
 from tests._state_invariants import turn_state_invariants
-from tests.unit.engine._config_helpers import build_engine_config
+from tests.unit.engine._config_helpers import build_engine_config, build_game_rules
 
 
 @pytest.fixture(autouse=True)
@@ -102,18 +102,12 @@ def _minimal_config_with_units() -> Dict[str, Any]:
             "can_move_through_enemy_model": False,
             "can_move_through_friendly_model": True,
         },
-        "game_rules": {
-            "engagement_zone": 1,
-            "engagement_zone_vertical": 5,
-            "max_base_size_hex": 35,
-            # Coherency 03.03 : journalisee dans l'entete `Run rules:` de step.log au meme
-            # titre que la zone d'engagement, donc EXIGEE des qu'un moteur reset avec un
-            # StepLogger actif. Valeurs de `config/game_config.json` ; `inches_to_subhex`
-            # vaut 1 ici, elles restent donc telles quelles.
-            "unit_model_cohesion_range": 2,
-            "unit_global_cohesion_range": 9,
-            "squad_min_neighbors": 1,
-        },
+        # `game_rules` REELLES, et non trois clés recopiées : l'en-tête `Run rules:` de step.log
+        # en exige de nouvelles au fil des règles couvertes (03.03 coherency a ajouté les trois
+        # `cohesion.*`), et un littéral figé retombe rouge à chaque ajout — sans jamais rien
+        # dire sur le moteur. `engagement_zone` est la seule valeur neutralisée : les fixtures
+        # de ce fichier posent leurs unités à un hex l'une de l'autre.
+        "game_rules": build_game_rules(engagement_zone=1),
         "charge": {
             "charge_max_distance": 12,
         },

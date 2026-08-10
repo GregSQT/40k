@@ -11,7 +11,7 @@ Ce fichier vérifie les trois choses qui peuvent réellement casser :
   1. la valeur produite (rampe terminée au bon épisode, plancher tenu ensuite) ;
   2. le fait que les callbacks ÉCRIVENT bien dans le modèle (une rampe juste mais jamais appliquée
      ne règle rien — c'est le motif d'échec récurrent de ce dépôt) ;
-  3. le contrat de config : la clé est OBLIGATOIRE dans les six profils, sans défaut.
+  3. le contrat de config : la clé est OBLIGATOIRE dans les huit profils, sans défaut.
 """
 
 from __future__ import annotations
@@ -263,13 +263,20 @@ def test_every_profile_declares_decay_fraction(profile_name: str, ramp_key: str)
     assert 0.0 < float(value) <= 1.0, f"{profile_name}.{ramp_key}.decay_fraction={value}"
 
 
-def test_x1_long_is_x1_recalibrated_for_long_runs() -> None:
-    """`x1_long` ne diffère de `x1` que par ce qui dépend de la LONGUEUR du run.
+@pytest.mark.parametrize(
+    ("ref_name", "long_name"), [("x1", "x1_long"), ("x5_new", "x5_long")]
+)
+def test_x1_long_is_x1_recalibrated_for_long_runs(ref_name: str, long_name: str) -> None:
+    """Un profil `_long` ne diffère de sa référence que par ce qui dépend de la LONGUEUR du run.
 
     Toute autre divergence est une dérive : les deux profils doivent rester comparables, sinon un
     run long ne mesure plus la même chose qu'un run court.
+
+    Deux couples, et c'est la même exigence des deux côtés (T4 JUMEAU) : `x1_long` sur `x1`
+    (2026-08-02) et `x5_long` sur `x5_new` (2026-08-10). Sans le second, la paire x5 dériverait
+    en silence — c'est exactement ce que ce test empêche pour la paire x1.
     """
-    x1, x1_long = PROFILES["x1"], PROFILES["x1_long"]
+    x1, x1_long = PROFILES[ref_name], PROFILES[long_name]
     length_dependent = {
         "type",
         "total_episodes",

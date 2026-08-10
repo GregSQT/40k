@@ -13,10 +13,11 @@ depuis les ``info`` d'un step gym cote callback. Deux defauts, un seul remplacan
    dans le moteur, sur ``action_logs``, la meme source que shoot_kills / melee_kills, ou le
    camp de chaque ligne est une donnee du journal et non une deduction sur l'ordre des steps.
 
-CE FICHIER JOUE DE VRAIS EPISODES, sur le scenario melee de ``scripts/smoke_t5_bare`` dont les
-deux duels sont ECARTES (``CHARGE_SCENARIO``) : la charge y est CONSTRUITE, plus esperee d'une
-graine. La ventilation seat-aware, elle, se verrouille dans ``test_episode_combat_counters`` :
-son harnais en memoire est le seul a pouvoir instancier les DEUX sieges.
+CE FICHIER JOUE DE VRAIS EPISODES, sur le scenario melee de ``scripts/smoke_t5_bare`` — le
+seul montage du depot ou une charge est reellement declarable (il place un Carnifex a portee
+de charge, ce dont ``test_squad_charge_target_parity`` fait deja son critere). La ventilation
+seat-aware, elle, se verrouille dans ``test_episode_combat_counters`` : son harnais en memoire
+est le seul a pouvoir instancier les DEUX sieges.
 """
 
 from __future__ import annotations
@@ -47,40 +48,16 @@ from engine.w40k_core import W40KEngine  # noqa: E402
 #: test_episode_combat_counters sur les tests qui esperent leur situation au lieu de l'exiger).
 _SEEDS = (1, 2, 3, 4, 5, 6, 7, 8)
 
-#: Ecart, en SUBHEXES, entre les deux figurines de chaque duel de `CHARGE_SCENARIO`.
-#:
-#: `MELEE_SCENARIO` colle ses duels a 14 et 22 subhexes : les deux camps se retrouvent engages
-#: sans avoir a charger, et la phase de charge n'est presque jamais exposee. Mesure sur les 8
-#: graines de `_SEEDS` : ZERO episode ou les deux camps declarent une charge, ce qui rendait
-#: vacants les tests de ventilation le jour ou 17.01 (traversee MONSTER/VEHICLE) a change les
-#: trajectoires. A 25 subhexes (5" sur un plateau x5), les deux camps demarrent HORS zone
-#: d'engagement et hors de portee d'un simple deplacement (terminer dans la zone d'engagement
-#: adverse est illegal) : le contact ne s'obtient plus que par une charge, des DEUX cotes.
-_CHARGE_GAP_SUBHEX = 25
-
-#: Le scenario melee, duels ECARTES : meme roster, memes regles, positions de depart choisies.
-#: Les lignes 0/1 et 2/3 de `MELEE_SCENARIO` sont ses deux duels (joueur 1 puis joueur 2).
-CHARGE_SCENARIO: Dict[str, Any] = {
-    **MELEE_SCENARIO,
-    "units": [
-        {**MELEE_SCENARIO["units"][0], "col": 60, "row": 200},
-        {**MELEE_SCENARIO["units"][1], "col": 60, "row": 200 + _CHARGE_GAP_SUBHEX},
-        {**MELEE_SCENARIO["units"][2], "col": 60, "row": 255},
-        {**MELEE_SCENARIO["units"][3], "col": 60, "row": 255 + _CHARGE_GAP_SUBHEX},
-    ],
-}
-
-
 @pytest.fixture(scope="module")
 def melee_scenario_file():
-    """Scenario ecrit UNE fois pour tout le module : son contenu (`CHARGE_SCENARIO`) est constant.
+    """Scenario ecrit UNE fois pour tout le module : son contenu (`MELEE_SCENARIO`) est constant.
 
     Portee module et pas fonction parce que `_cached_play` indexe ses episodes sur la seule
     graine : le chemin doit designer le meme scenario d'un test a l'autre.
     """
     with tempfile.TemporaryDirectory() as td:
         path = Path(td) / "melee.json"
-        path.write_text(json.dumps(CHARGE_SCENARIO))
+        path.write_text(json.dumps(MELEE_SCENARIO))
         yield str(path)
 
 
@@ -101,12 +78,16 @@ def _play(
     """Joue un episode complet en actions legales tirees au sort ; rend (moteur, tactical_data).
 
     UNE exception au tirage : en phase de CHARGE, l'action jouee est la premiere legale qui
-    n'est pas `wait`, donc une declaration de charge. C'est le sujet meme du fichier : le tirer
-    au sort revient a esperer d'une graine ce que le test pretend observer. Le montage
-    (`CHARGE_SCENARIO`) decide de l'occasion, la politique decide seulement de la saisir —
-    meme partage que `_play_until` dans test_episode_combat_counters. Toutes les autres phases
-    restent tirees au sort : c'est d'elles que viennent les situations de deplacement et de tir
-    exigees plus bas.
+    n'est pas `wait`, donc une declaration de charge. C'est le sujet meme du fichier : tirer au
+    sort la seule action qu'il mesure revient a esperer d'une graine ce qu'il pretend observer.
+    Le scenario decide de l'occasion, la politique decide seulement de la saisir — meme partage
+    que `_play_until` dans test_episode_combat_counters. Toutes les autres phases restent tirees
+    au sort : c'est d'elles que viennent les situations de deplacement et de tir exigees plus bas.
+
+    MESURE sur les 8 graines de `_SEEDS`, apres que 17.01 (traversee MONSTER/VEHICLE) a change
+    les trajectoires : en tirage integral, AUCUN episode n'a de charge des deux camps (les tests
+    de ventilation etaient devenus vacants) ; sous cette politique, les graines 1 et 8 en ont,
+    la premiere avec 2 tentatives de l'agent contre 4 de l'adversaire.
 
     `inject` ajoute des lignes au journal juste apres le reset. ``action_logs`` n'est remis a
     zero QUE par ``reset()`` et n'est jamais purge en cours d'episode : ces lignes sont donc
@@ -314,10 +295,14 @@ def _recording_tracker(tmp_path: Any) -> Tuple[W40KMetricsTracker, _RecordingWri
 
 def test_the_four_charge_curves_are_emitted(melee_scenario_file, tmp_path) -> None:
     """Volumes bruts (m_, o_) et taux de reussite (n_, p_) sortent avec les valeurs de l'episode."""
+    # Volumes DIFFERENTS d'un camp a l'autre, sinon `m_` et `o_` pourraient etre croises sans
+    # que la moindre assertion en souffre. C'est le cas naturellement (2 contre 4 sur la
+    # premiere graine retenue), donc c'est exige et non espere.
     _engine, tactical = _episode_with(
         melee_scenario_file,
-        lambda _eng, td: td["charge_attempts"] > 0 and td["charge_attempts_opponent"] > 0,
-        "des tentatives de charge des DEUX camps",
+        lambda _eng, td: (td["charge_attempts"] > 0 and td["charge_attempts_opponent"] > 0
+                          and td["charge_attempts"] != td["charge_attempts_opponent"]),
+        "des tentatives de charge des DEUX camps, en nombres differents",
     )
 
     tracker, recording = _recording_tracker(tmp_path)
@@ -334,6 +319,20 @@ def test_the_four_charge_curves_are_emitted(melee_scenario_file, tmp_path) -> No
     assert by_key["02_combat/p_charge_success_rate_bot"] == pytest.approx(
         tactical["charge_successes_opponent"] / tactical["charge_attempts_opponent"]
     )
+
+    # Les deux TAUX, eux, tombent au meme chiffre sur tout episode jouable ici (aucune des 8
+    # graines ne donne deux taux distincts, mesure faite) : les egalites ci-dessus les
+    # laisseraient croiser. Seconde emission sur des SUCCES derives — les seuls chiffres
+    # fabriques de ce test, et seulement pour separer deux tags que l'episode ne separe pas.
+    contrasted = {**tactical,
+                  "charge_successes": tactical["charge_attempts"],
+                  "charge_successes_opponent": 0}
+    tracker, recording = _recording_tracker(tmp_path)
+    tracker.log_tactical_metrics(contrasted)
+
+    by_key = {key: value for key, value, _step in recording.scalars}
+    assert by_key["02_combat/n_charge_success_rate"] == pytest.approx(1.0)
+    assert by_key["02_combat/p_charge_success_rate_bot"] == pytest.approx(0.0)
 
 
 def test_the_success_rate_is_absent_when_nothing_was_attempted(

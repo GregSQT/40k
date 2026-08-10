@@ -122,7 +122,7 @@
       "active_ratio_end": 0.8,
       "schedule": "linear",
       "freeze_after_progress": 1.0,
-      "justification": "Rampe de deploiement : part des episodes joues en deploiement ACTIF (l'agent place lui-meme ses figurines) plutot qu'en placement FIXE (positions du scenario). Elle passe lineairement de active_ratio_start a active_ratio_end sur la duree du run (progression = episode / total_episodes), puis est gelee au-dela de freeze_after_progress. ASYMETRIE A CORRIGER, c'est la raison d'etre du reglage : la rampe ne s'applique QU'A L'ENTRAINEMENT (training_only: true, et seulement sur les scenarios du split training), alors que L'EVALUATION IMPOSE TOUJOURS une phase de deploiement. Un profil dont la rampe finit a 0.0 -- ou qui n'a pas ce bloc du tout -- entraine donc un agent qui ne se deploie JAMAIS, puis le NOTE sur des parties ou il doit se deployer : le score mesure un comportement jamais appris et n'est comparable a aucun autre profil. Les six profils portent le MEME bloc, x1 faisant reference : le verrou de test derive la reference de x1 et exige des cinq autres qu'ils l'egalent (x5_append et x1_debug n'avaient aucun bloc ; x5_new et x5_debug finissaient a 0.0 avant le 2026-07-29). Reglage courant depuis le 2026-08-02 : 0.3 -> 0.8 SANS gel (freeze_after_progress 1.0), donc active_ratio_end est bel et bien atteint en toute fin de run et c'est lui qui dit quelle part des episodes finit en deploiement actif. Le gel a mi-run (0.5, plafond effectif 0.55) est ABANDONNE le 2026-08-02, en meme temps que la correction du denominateur de la rampe (V11 §0.57) : le compteur d'episodes du moteur est LOCAL a un environnement et il etait divise par le total GLOBAL, donc a n_envs=48 la rampe n'avancait pas du tout et le gel n'avait aucun objet. 0.8 et non 1.0 : c'est le reglage historique de x1, retenu comme reference le 2026-07-29 ; la part d'episodes restee en placement fixe conserve les positions de depart du scenario comme source de variete. Toutes les cles ci-dessus sont OBLIGATOIRES (lues par require_key dans W40KEngine._configure_deployment_mode_for_episode, sans aucune valeur par defaut), et depuis le 2026-07-29 l'ABSENCE du bloc dans un profil d'entrainement leve une erreur explicite au lieu de desactiver la rampe en silence -- ce silence est precisement ce qui avait laisse deux profils diverger sans que rien ne le signale. Verrou : tests/unit/engine/test_deployment_mode_schedule.py lit CE fichier et verifie les six profils (x1_long ajoute le 2026-08-02 pour les runs longs, cf. model_params.*.decay_fraction)."
+      "justification": "Rampe de deploiement : part des episodes joues en deploiement ACTIF (l'agent place lui-meme ses figurines) plutot qu'en placement FIXE (positions du scenario). Elle passe lineairement de active_ratio_start a active_ratio_end sur la duree du run (progression = episode / total_episodes), puis est gelee au-dela de freeze_after_progress. ASYMETRIE A CORRIGER, c'est la raison d'etre du reglage : la rampe ne s'applique QU'A L'ENTRAINEMENT (training_only: true, et seulement sur les scenarios du split training), alors que L'EVALUATION IMPOSE TOUJOURS une phase de deploiement. Un profil dont la rampe finit a 0.0 -- ou qui n'a pas ce bloc du tout -- entraine donc un agent qui ne se deploie JAMAIS, puis le NOTE sur des parties ou il doit se deployer : le score mesure un comportement jamais appris et n'est comparable a aucun autre profil. Les huit profils portent le MEME bloc, x1 faisant reference : le verrou de test derive la reference de x1 et exige des cinq autres qu'ils l'egalent (x5_append et x1_debug n'avaient aucun bloc ; x5_new et x5_debug finissaient a 0.0 avant le 2026-07-29). Reglage courant depuis le 2026-08-02 : 0.3 -> 0.8 SANS gel (freeze_after_progress 1.0), donc active_ratio_end est bel et bien atteint en toute fin de run et c'est lui qui dit quelle part des episodes finit en deploiement actif. Le gel a mi-run (0.5, plafond effectif 0.55) est ABANDONNE le 2026-08-02, en meme temps que la correction du denominateur de la rampe (V11 §0.57) : le compteur d'episodes du moteur est LOCAL a un environnement et il etait divise par le total GLOBAL, donc a n_envs=48 la rampe n'avancait pas du tout et le gel n'avait aucun objet. 0.8 et non 1.0 : c'est le reglage historique de x1, retenu comme reference le 2026-07-29 ; la part d'episodes restee en placement fixe conserve les positions de depart du scenario comme source de variete. Toutes les cles ci-dessus sont OBLIGATOIRES (lues par require_key dans W40KEngine._configure_deployment_mode_for_episode, sans aucune valeur par defaut), et depuis le 2026-07-29 l'ABSENCE du bloc dans un profil d'entrainement leve une erreur explicite au lieu de desactiver la rampe en silence -- ce silence est precisement ce qui avait laisse deux profils diverger sans que rien ne le signale. Verrou : tests/unit/engine/test_deployment_mode_schedule.py lit CE fichier et verifie les huit profils (x1_long ajoute le 2026-08-02 pour les runs longs, cf. model_params.*.decay_fraction ; x1_selfplay le meme jour ; x5_long le 2026-08-10)."
     },
     "observation_params": {
       "obs_size": 16659,
@@ -317,7 +317,7 @@
       "active_ratio_end": 0.8,
       "schedule": "linear",
       "freeze_after_progress": 1.0,
-      "justification": "Rampe de deploiement : part des episodes joues en deploiement ACTIF (l'agent place lui-meme ses figurines) plutot qu'en placement FIXE (positions du scenario). Elle passe lineairement de active_ratio_start a active_ratio_end sur la duree du run (progression = episode / total_episodes), puis est gelee au-dela de freeze_after_progress. ASYMETRIE A CORRIGER, c'est la raison d'etre du reglage : la rampe ne s'applique QU'A L'ENTRAINEMENT (training_only: true, et seulement sur les scenarios du split training), alors que L'EVALUATION IMPOSE TOUJOURS une phase de deploiement. Un profil dont la rampe finit a 0.0 -- ou qui n'a pas ce bloc du tout -- entraine donc un agent qui ne se deploie JAMAIS, puis le NOTE sur des parties ou il doit se deployer : le score mesure un comportement jamais appris et n'est comparable a aucun autre profil. Les six profils portent le MEME bloc, x1 faisant reference : le verrou de test derive la reference de x1 et exige des cinq autres qu'ils l'egalent (x5_append et x1_debug n'avaient aucun bloc ; x5_new et x5_debug finissaient a 0.0 avant le 2026-07-29). Reglage courant depuis le 2026-08-02 : 0.3 -> 0.8 SANS gel (freeze_after_progress 1.0), donc active_ratio_end est bel et bien atteint en toute fin de run et c'est lui qui dit quelle part des episodes finit en deploiement actif. Le gel a mi-run (0.5, plafond effectif 0.55) est ABANDONNE le 2026-08-02, en meme temps que la correction du denominateur de la rampe (V11 §0.57) : le compteur d'episodes du moteur est LOCAL a un environnement et il etait divise par le total GLOBAL, donc a n_envs=48 la rampe n'avancait pas du tout et le gel n'avait aucun objet. 0.8 et non 1.0 : c'est le reglage historique de x1, retenu comme reference le 2026-07-29 ; la part d'episodes restee en placement fixe conserve les positions de depart du scenario comme source de variete. Toutes les cles ci-dessus sont OBLIGATOIRES (lues par require_key dans W40KEngine._configure_deployment_mode_for_episode, sans aucune valeur par defaut), et depuis le 2026-07-29 l'ABSENCE du bloc dans un profil d'entrainement leve une erreur explicite au lieu de desactiver la rampe en silence -- ce silence est precisement ce qui avait laisse deux profils diverger sans que rien ne le signale. Verrou : tests/unit/engine/test_deployment_mode_schedule.py lit CE fichier et verifie les six profils (x1_long ajoute le 2026-08-02 pour les runs longs, cf. model_params.*.decay_fraction)."
+      "justification": "Rampe de deploiement : part des episodes joues en deploiement ACTIF (l'agent place lui-meme ses figurines) plutot qu'en placement FIXE (positions du scenario). Elle passe lineairement de active_ratio_start a active_ratio_end sur la duree du run (progression = episode / total_episodes), puis est gelee au-dela de freeze_after_progress. ASYMETRIE A CORRIGER, c'est la raison d'etre du reglage : la rampe ne s'applique QU'A L'ENTRAINEMENT (training_only: true, et seulement sur les scenarios du split training), alors que L'EVALUATION IMPOSE TOUJOURS une phase de deploiement. Un profil dont la rampe finit a 0.0 -- ou qui n'a pas ce bloc du tout -- entraine donc un agent qui ne se deploie JAMAIS, puis le NOTE sur des parties ou il doit se deployer : le score mesure un comportement jamais appris et n'est comparable a aucun autre profil. Les huit profils portent le MEME bloc, x1 faisant reference : le verrou de test derive la reference de x1 et exige des cinq autres qu'ils l'egalent (x5_append et x1_debug n'avaient aucun bloc ; x5_new et x5_debug finissaient a 0.0 avant le 2026-07-29). Reglage courant depuis le 2026-08-02 : 0.3 -> 0.8 SANS gel (freeze_after_progress 1.0), donc active_ratio_end est bel et bien atteint en toute fin de run et c'est lui qui dit quelle part des episodes finit en deploiement actif. Le gel a mi-run (0.5, plafond effectif 0.55) est ABANDONNE le 2026-08-02, en meme temps que la correction du denominateur de la rampe (V11 §0.57) : le compteur d'episodes du moteur est LOCAL a un environnement et il etait divise par le total GLOBAL, donc a n_envs=48 la rampe n'avancait pas du tout et le gel n'avait aucun objet. 0.8 et non 1.0 : c'est le reglage historique de x1, retenu comme reference le 2026-07-29 ; la part d'episodes restee en placement fixe conserve les positions de depart du scenario comme source de variete. Toutes les cles ci-dessus sont OBLIGATOIRES (lues par require_key dans W40KEngine._configure_deployment_mode_for_episode, sans aucune valeur par defaut), et depuis le 2026-07-29 l'ABSENCE du bloc dans un profil d'entrainement leve une erreur explicite au lieu de desactiver la rampe en silence -- ce silence est precisement ce qui avait laisse deux profils diverger sans que rien ne le signale. Verrou : tests/unit/engine/test_deployment_mode_schedule.py lit CE fichier et verifie les huit profils (x1_long ajoute le 2026-08-02 pour les runs longs, cf. model_params.*.decay_fraction ; x1_selfplay le meme jour ; x5_long le 2026-08-10)."
     },
     "observation_params": {
       "obs_size": 16659,
@@ -514,7 +514,7 @@
       "active_ratio_end": 0.8,
       "schedule": "linear",
       "freeze_after_progress": 1.0,
-      "justification": "Rampe de deploiement : part des episodes joues en deploiement ACTIF (l'agent place lui-meme ses figurines) plutot qu'en placement FIXE (positions du scenario). Elle passe lineairement de active_ratio_start a active_ratio_end sur la duree du run (progression = episode / total_episodes), puis est gelee au-dela de freeze_after_progress. ASYMETRIE A CORRIGER, c'est la raison d'etre du reglage : la rampe ne s'applique QU'A L'ENTRAINEMENT (training_only: true, et seulement sur les scenarios du split training), alors que L'EVALUATION IMPOSE TOUJOURS une phase de deploiement. Un profil dont la rampe finit a 0.0 -- ou qui n'a pas ce bloc du tout -- entraine donc un agent qui ne se deploie JAMAIS, puis le NOTE sur des parties ou il doit se deployer : le score mesure un comportement jamais appris et n'est comparable a aucun autre profil. Les six profils portent le MEME bloc, x1 faisant reference : le verrou de test derive la reference de x1 et exige des cinq autres qu'ils l'egalent (x5_append et x1_debug n'avaient aucun bloc ; x5_new et x5_debug finissaient a 0.0 avant le 2026-07-29). Reglage courant depuis le 2026-08-02 : 0.3 -> 0.8 SANS gel (freeze_after_progress 1.0), donc active_ratio_end est bel et bien atteint en toute fin de run et c'est lui qui dit quelle part des episodes finit en deploiement actif. Le gel a mi-run (0.5, plafond effectif 0.55) est ABANDONNE le 2026-08-02, en meme temps que la correction du denominateur de la rampe (V11 §0.57) : le compteur d'episodes du moteur est LOCAL a un environnement et il etait divise par le total GLOBAL, donc a n_envs=48 la rampe n'avancait pas du tout et le gel n'avait aucun objet. 0.8 et non 1.0 : c'est le reglage historique de x1, retenu comme reference le 2026-07-29 ; la part d'episodes restee en placement fixe conserve les positions de depart du scenario comme source de variete. Toutes les cles ci-dessus sont OBLIGATOIRES (lues par require_key dans W40KEngine._configure_deployment_mode_for_episode, sans aucune valeur par defaut), et depuis le 2026-07-29 l'ABSENCE du bloc dans un profil d'entrainement leve une erreur explicite au lieu de desactiver la rampe en silence -- ce silence est precisement ce qui avait laisse deux profils diverger sans que rien ne le signale. Verrou : tests/unit/engine/test_deployment_mode_schedule.py lit CE fichier et verifie les six profils (x1_long ajoute le 2026-08-02 pour les runs longs, cf. model_params.*.decay_fraction)."
+      "justification": "Rampe de deploiement : part des episodes joues en deploiement ACTIF (l'agent place lui-meme ses figurines) plutot qu'en placement FIXE (positions du scenario). Elle passe lineairement de active_ratio_start a active_ratio_end sur la duree du run (progression = episode / total_episodes), puis est gelee au-dela de freeze_after_progress. ASYMETRIE A CORRIGER, c'est la raison d'etre du reglage : la rampe ne s'applique QU'A L'ENTRAINEMENT (training_only: true, et seulement sur les scenarios du split training), alors que L'EVALUATION IMPOSE TOUJOURS une phase de deploiement. Un profil dont la rampe finit a 0.0 -- ou qui n'a pas ce bloc du tout -- entraine donc un agent qui ne se deploie JAMAIS, puis le NOTE sur des parties ou il doit se deployer : le score mesure un comportement jamais appris et n'est comparable a aucun autre profil. Les huit profils portent le MEME bloc, x1 faisant reference : le verrou de test derive la reference de x1 et exige des cinq autres qu'ils l'egalent (x5_append et x1_debug n'avaient aucun bloc ; x5_new et x5_debug finissaient a 0.0 avant le 2026-07-29). Reglage courant depuis le 2026-08-02 : 0.3 -> 0.8 SANS gel (freeze_after_progress 1.0), donc active_ratio_end est bel et bien atteint en toute fin de run et c'est lui qui dit quelle part des episodes finit en deploiement actif. Le gel a mi-run (0.5, plafond effectif 0.55) est ABANDONNE le 2026-08-02, en meme temps que la correction du denominateur de la rampe (V11 §0.57) : le compteur d'episodes du moteur est LOCAL a un environnement et il etait divise par le total GLOBAL, donc a n_envs=48 la rampe n'avancait pas du tout et le gel n'avait aucun objet. 0.8 et non 1.0 : c'est le reglage historique de x1, retenu comme reference le 2026-07-29 ; la part d'episodes restee en placement fixe conserve les positions de depart du scenario comme source de variete. Toutes les cles ci-dessus sont OBLIGATOIRES (lues par require_key dans W40KEngine._configure_deployment_mode_for_episode, sans aucune valeur par defaut), et depuis le 2026-07-29 l'ABSENCE du bloc dans un profil d'entrainement leve une erreur explicite au lieu de desactiver la rampe en silence -- ce silence est precisement ce qui avait laisse deux profils diverger sans que rien ne le signale. Verrou : tests/unit/engine/test_deployment_mode_schedule.py lit CE fichier et verifie les huit profils (x1_long ajoute le 2026-08-02 pour les runs longs, cf. model_params.*.decay_fraction ; x1_selfplay le meme jour ; x5_long le 2026-08-10)."
     },
     "observation_params": {
       "obs_size": 16659,
@@ -717,7 +717,7 @@
       "active_ratio_end": 0.8,
       "schedule": "linear",
       "freeze_after_progress": 1.0,
-      "justification": "Rampe de deploiement : part des episodes joues en deploiement ACTIF (l'agent place lui-meme ses figurines) plutot qu'en placement FIXE (positions du scenario). Elle passe lineairement de active_ratio_start a active_ratio_end sur la duree du run (progression = episode / total_episodes), puis est gelee au-dela de freeze_after_progress. ASYMETRIE A CORRIGER, c'est la raison d'etre du reglage : la rampe ne s'applique QU'A L'ENTRAINEMENT (training_only: true, et seulement sur les scenarios du split training), alors que L'EVALUATION IMPOSE TOUJOURS une phase de deploiement. Un profil dont la rampe finit a 0.0 -- ou qui n'a pas ce bloc du tout -- entraine donc un agent qui ne se deploie JAMAIS, puis le NOTE sur des parties ou il doit se deployer : le score mesure un comportement jamais appris et n'est comparable a aucun autre profil. Les six profils portent le MEME bloc, x1 faisant reference : le verrou de test derive la reference de x1 et exige des cinq autres qu'ils l'egalent (x5_append et x1_debug n'avaient aucun bloc ; x5_new et x5_debug finissaient a 0.0 avant le 2026-07-29). Reglage courant depuis le 2026-08-02 : 0.3 -> 0.8 SANS gel (freeze_after_progress 1.0), donc active_ratio_end est bel et bien atteint en toute fin de run et c'est lui qui dit quelle part des episodes finit en deploiement actif. Le gel a mi-run (0.5, plafond effectif 0.55) est ABANDONNE le 2026-08-02, en meme temps que la correction du denominateur de la rampe (V11 §0.57) : le compteur d'episodes du moteur est LOCAL a un environnement et il etait divise par le total GLOBAL, donc a n_envs=48 la rampe n'avancait pas du tout et le gel n'avait aucun objet. 0.8 et non 1.0 : c'est le reglage historique de x1, retenu comme reference le 2026-07-29 ; la part d'episodes restee en placement fixe conserve les positions de depart du scenario comme source de variete. Toutes les cles ci-dessus sont OBLIGATOIRES (lues par require_key dans W40KEngine._configure_deployment_mode_for_episode, sans aucune valeur par defaut), et depuis le 2026-07-29 l'ABSENCE du bloc dans un profil d'entrainement leve une erreur explicite au lieu de desactiver la rampe en silence -- ce silence est precisement ce qui avait laisse deux profils diverger sans que rien ne le signale. Verrou : tests/unit/engine/test_deployment_mode_schedule.py lit CE fichier et verifie les six profils (x1_long ajoute le 2026-08-02 pour les runs longs, cf. model_params.*.decay_fraction)."
+      "justification": "Rampe de deploiement : part des episodes joues en deploiement ACTIF (l'agent place lui-meme ses figurines) plutot qu'en placement FIXE (positions du scenario). Elle passe lineairement de active_ratio_start a active_ratio_end sur la duree du run (progression = episode / total_episodes), puis est gelee au-dela de freeze_after_progress. ASYMETRIE A CORRIGER, c'est la raison d'etre du reglage : la rampe ne s'applique QU'A L'ENTRAINEMENT (training_only: true, et seulement sur les scenarios du split training), alors que L'EVALUATION IMPOSE TOUJOURS une phase de deploiement. Un profil dont la rampe finit a 0.0 -- ou qui n'a pas ce bloc du tout -- entraine donc un agent qui ne se deploie JAMAIS, puis le NOTE sur des parties ou il doit se deployer : le score mesure un comportement jamais appris et n'est comparable a aucun autre profil. Les huit profils portent le MEME bloc, x1 faisant reference : le verrou de test derive la reference de x1 et exige des cinq autres qu'ils l'egalent (x5_append et x1_debug n'avaient aucun bloc ; x5_new et x5_debug finissaient a 0.0 avant le 2026-07-29). Reglage courant depuis le 2026-08-02 : 0.3 -> 0.8 SANS gel (freeze_after_progress 1.0), donc active_ratio_end est bel et bien atteint en toute fin de run et c'est lui qui dit quelle part des episodes finit en deploiement actif. Le gel a mi-run (0.5, plafond effectif 0.55) est ABANDONNE le 2026-08-02, en meme temps que la correction du denominateur de la rampe (V11 §0.57) : le compteur d'episodes du moteur est LOCAL a un environnement et il etait divise par le total GLOBAL, donc a n_envs=48 la rampe n'avancait pas du tout et le gel n'avait aucun objet. 0.8 et non 1.0 : c'est le reglage historique de x1, retenu comme reference le 2026-07-29 ; la part d'episodes restee en placement fixe conserve les positions de depart du scenario comme source de variete. Toutes les cles ci-dessus sont OBLIGATOIRES (lues par require_key dans W40KEngine._configure_deployment_mode_for_episode, sans aucune valeur par defaut), et depuis le 2026-07-29 l'ABSENCE du bloc dans un profil d'entrainement leve une erreur explicite au lieu de desactiver la rampe en silence -- ce silence est precisement ce qui avait laisse deux profils diverger sans que rien ne le signale. Verrou : tests/unit/engine/test_deployment_mode_schedule.py lit CE fichier et verifie les huit profils (x1_long ajoute le 2026-08-02 pour les runs longs, cf. model_params.*.decay_fraction ; x1_selfplay le meme jour ; x5_long le 2026-08-10)."
     },
     "observation_params": {
       "obs_size": 16659,
@@ -792,7 +792,7 @@
   "x5_new": {
     "type": "################################################### x5 — curriculum phase 2 (board 44x60x5, scale ×5) ###################################################",
     "seed": 12345,
-    "total_episodes": 5000,
+    "total_episodes": 1000,
     "total_episodes_normal": "50000 : 0.1s/ep -> 36k ep / hour -> 100k ep / 2h30",
     "agent_seat_mode": "random",
     "eval_episodes": 10,
@@ -802,7 +802,7 @@
       "policy": "MultiInputPolicy",
       "learning_rate": {
         "initial": 0.002,
-        "final": 0.0015,
+        "final": 0.0002,
         "decay_fraction": 1.0
       },
       "n_steps": 8192,
@@ -815,7 +815,7 @@
       "normalize_advantage": true,
       "ent_coef": {
         "start": 0.1,
-        "end": 0.1,
+        "end": 0.01,
         "decay_fraction": 1.0
       },
       "vf_coef": 1.0,
@@ -824,8 +824,8 @@
       "tensorboard_log": "./tensorboard/",
       "policy_kwargs": {
         "net_arch": [
-          320,
-          320
+          512,
+          512
         ],
         "features_extractor_kwargs": {
           "cnn_features": 256
@@ -846,8 +846,9 @@
       "eval_deterministic": true,
       "eval_render": false,
       "bot_eval_freq": 250,
+      "bot_eval_freq_normal": "---------------------------------- 250 (et non 2000 comme x1, dont x5_new reprend tout le reste) : bot_eval_freq est un nombre d'EPISODES, et x5_new n'en joue que 1000. A 2000 aucune evaluation intermediaire ne se declencherait jamais -- le profil tournerait sans le moindre point de mesure, en silence. 250 en donne quatre. C'est le SEUL ecart de cadence assume avec x1 ; il decoule de total_episodes, pas d'un reglage d'apprentissage.",
       "bot_eval_use_episodes": true,
-      "bot_eval_intermediate": 50,
+      "bot_eval_intermediate": 10,
       "bot_eval_final": 100,
       "bot_eval_worker_device": "cpu",
       "bot_eval_task_timeout_seconds": 3600,
@@ -859,8 +860,8 @@
       "robust_penalty_hard": 0.0,
       "model_gating_enabled": false,
       "model_gating_min_worst_bot": 0.25,
-      "model_gating_min_worst_scenario_combined": 0.35,
-      "model_gating_min_vs_control": 0.5,
+      "model_gating_min_worst_scenario_combined": 0.3,
+      "model_gating_min_vs_control": 0.3,
       "holdout_hard_opponent_budget_modifier": 1.1,
       "bot_eval_weights": {
         "control": 0.4,
@@ -910,7 +911,202 @@
       "active_ratio_end": 0.8,
       "schedule": "linear",
       "freeze_after_progress": 1.0,
-      "justification": "Rampe de deploiement : part des episodes joues en deploiement ACTIF (l'agent place lui-meme ses figurines) plutot qu'en placement FIXE (positions du scenario). Elle passe lineairement de active_ratio_start a active_ratio_end sur la duree du run (progression = episode / total_episodes), puis est gelee au-dela de freeze_after_progress. ASYMETRIE A CORRIGER, c'est la raison d'etre du reglage : la rampe ne s'applique QU'A L'ENTRAINEMENT (training_only: true, et seulement sur les scenarios du split training), alors que L'EVALUATION IMPOSE TOUJOURS une phase de deploiement. Un profil dont la rampe finit a 0.0 -- ou qui n'a pas ce bloc du tout -- entraine donc un agent qui ne se deploie JAMAIS, puis le NOTE sur des parties ou il doit se deployer : le score mesure un comportement jamais appris et n'est comparable a aucun autre profil. Les six profils portent le MEME bloc, x1 faisant reference : le verrou de test derive la reference de x1 et exige des cinq autres qu'ils l'egalent (x5_append et x1_debug n'avaient aucun bloc ; x5_new et x5_debug finissaient a 0.0 avant le 2026-07-29). Reglage courant depuis le 2026-08-02 : 0.3 -> 0.8 SANS gel (freeze_after_progress 1.0), donc active_ratio_end est bel et bien atteint en toute fin de run et c'est lui qui dit quelle part des episodes finit en deploiement actif. Le gel a mi-run (0.5, plafond effectif 0.55) est ABANDONNE le 2026-08-02, en meme temps que la correction du denominateur de la rampe (V11 §0.57) : le compteur d'episodes du moteur est LOCAL a un environnement et il etait divise par le total GLOBAL, donc a n_envs=48 la rampe n'avancait pas du tout et le gel n'avait aucun objet. 0.8 et non 1.0 : c'est le reglage historique de x1, retenu comme reference le 2026-07-29 ; la part d'episodes restee en placement fixe conserve les positions de depart du scenario comme source de variete. Toutes les cles ci-dessus sont OBLIGATOIRES (lues par require_key dans W40KEngine._configure_deployment_mode_for_episode, sans aucune valeur par defaut), et depuis le 2026-07-29 l'ABSENCE du bloc dans un profil d'entrainement leve une erreur explicite au lieu de desactiver la rampe en silence -- ce silence est precisement ce qui avait laisse deux profils diverger sans que rien ne le signale. Verrou : tests/unit/engine/test_deployment_mode_schedule.py lit CE fichier et verifie les six profils (x1_long ajoute le 2026-08-02 pour les runs longs, cf. model_params.*.decay_fraction)."
+      "justification": "Rampe de deploiement : part des episodes joues en deploiement ACTIF (l'agent place lui-meme ses figurines) plutot qu'en placement FIXE (positions du scenario). Elle passe lineairement de active_ratio_start a active_ratio_end sur la duree du run (progression = episode / total_episodes), puis est gelee au-dela de freeze_after_progress. ASYMETRIE A CORRIGER, c'est la raison d'etre du reglage : la rampe ne s'applique QU'A L'ENTRAINEMENT (training_only: true, et seulement sur les scenarios du split training), alors que L'EVALUATION IMPOSE TOUJOURS une phase de deploiement. Un profil dont la rampe finit a 0.0 -- ou qui n'a pas ce bloc du tout -- entraine donc un agent qui ne se deploie JAMAIS, puis le NOTE sur des parties ou il doit se deployer : le score mesure un comportement jamais appris et n'est comparable a aucun autre profil. Les huit profils portent le MEME bloc, x1 faisant reference : le verrou de test derive la reference de x1 et exige des cinq autres qu'ils l'egalent (x5_append et x1_debug n'avaient aucun bloc ; x5_new et x5_debug finissaient a 0.0 avant le 2026-07-29). Reglage courant depuis le 2026-08-02 : 0.3 -> 0.8 SANS gel (freeze_after_progress 1.0), donc active_ratio_end est bel et bien atteint en toute fin de run et c'est lui qui dit quelle part des episodes finit en deploiement actif. Le gel a mi-run (0.5, plafond effectif 0.55) est ABANDONNE le 2026-08-02, en meme temps que la correction du denominateur de la rampe (V11 §0.57) : le compteur d'episodes du moteur est LOCAL a un environnement et il etait divise par le total GLOBAL, donc a n_envs=48 la rampe n'avancait pas du tout et le gel n'avait aucun objet. 0.8 et non 1.0 : c'est le reglage historique de x1, retenu comme reference le 2026-07-29 ; la part d'episodes restee en placement fixe conserve les positions de depart du scenario comme source de variete. Toutes les cles ci-dessus sont OBLIGATOIRES (lues par require_key dans W40KEngine._configure_deployment_mode_for_episode, sans aucune valeur par defaut), et depuis le 2026-07-29 l'ABSENCE du bloc dans un profil d'entrainement leve une erreur explicite au lieu de desactiver la rampe en silence -- ce silence est precisement ce qui avait laisse deux profils diverger sans que rien ne le signale. Verrou : tests/unit/engine/test_deployment_mode_schedule.py lit CE fichier et verifie les huit profils (x1_long ajoute le 2026-08-02 pour les runs longs, cf. model_params.*.decay_fraction ; x1_selfplay le meme jour ; x5_long le 2026-08-10)."
+    },
+    "observation_params": {
+      "obs_size": 16659,
+      "justification": "obs_size = nombre TOTAL de scalaires de l'observation squad (grille exclue), calcule par ObservationBuilder.SQUAD_OBS_SIZE_TARGET depuis le schema d'entites (engine/observation_entities.py) et verifie a l'init du moteur. Depuis V11 §0.30 T-D l'observation n'est plus un vecteur plat : c'est un jeu de TENSEURS D'ENTITES (global_cont/global_bin, allies_*, enemies_*, self_models_*) ou chaque unite — la mienne, mes alliees, les ennemies — porte le MEME schema et passe par le MEME encodeur, la grille 32x32x9 (GRID_CHANNELS, engine/spatial_grid.py) restant fournie a part. Depuis V11 §9 P3-1 s'y ajoute le support de la cible de melee, depuis V11 §9 P3-2 celui de la cible de charge (charge_reachable_max_roll), et depuis V11 §9.3 (P2) le bloc CONTEXTE DE DECISION (decision_ctx_bin, decision_options_bin) : quand le moteur s'arrete sur un point de choix joueur, il decrit le type de decision et CHAQUE candidat, que les actions CHOICE_0..5 designent. Depuis V11 §0.40 point 3 s'y ajoute le bloc CANDIDATS DE DEPLOIEMENT (deploy_cand_cont, deploy_cand_bin, 5 slots x 12 scalaires) : pendant la phase de deploiement, chaque slot 4-8 est decrit par l'EFFET de l'hexe que sa strategie poserait (position relative a l'ancre de zone, distances objectif/ennemi/allie, exposition LoS reelle et potentielle, etalement, objectif, couvert) et par son bit present, lu sur la MEME source que le masque (ActionDecoder.deployment_slot_candidates) ; hors deploiement le bloc est nul. Le 2026-08-04 la clause « buddy » a ete supprimee (04.02 WHILE FIGHTING : seule une figurine ENGAGEE frappe ; le relais par une alliee au contact venait d'une edition anterieure) : les champs d'observation ez_relayed_by_ally (self_models_bin) et n_relayed_ez (unit_cont) disparaissent avec elle, d'ou 20828 -> 20780. Le 2026-08-04 (chantier 01) les 13 bits rule_<id> de UNIT_BIN_FIELDS ont ete REMPLACES par deux ensembles d'IDENTIFIANTS ENTIERS par entite : allies_ability_ids / enemies_ability_ids (8 slots, capacites en vigueur 19.04) et allies_status_ids / enemies_status_ids (4 slots, statuts battle_shock / oath_target / suppressed, declares et poses par les chantiers 02, 03 et 06). Ces entiers sont des obs_id (config/unit_rules.json, config/unit_statuses.json) lus comme des lignes de deux nn.EmbeddingBag(128, 16, mode=sum, padding_idx=0) : aucun one-hot n'est materialise, ni dans l'observation ni dans le reseau. C'est ce qui rend le cout d'une capacite NUL — ajouter une capacite, un statut ou une faction entiere ne change desormais ni obs_size, ni le nombre de parametres du reseau, ni l'action space, donc n'impose aucun retrain. 13 bits x 28 entites remplaces par 12 entiers x 28 entites, d'ou 20780 -> 20752. Le 2026-08-04 (chantier 02) le contexte global recoit les DEUX compteurs de points de commandement (my_command_points / enemy_command_points, regle 08.02) : les CP appartiennent au joueur et non a une unite, ils vivent donc dans global_cont a cote des points de victoire, d'ou 20752 -> 20754. Ces deux emplacements auraient du etre declares par le chantier 01 (le seul autorise a bouger obs_size) ; ils ont ete oublies et sont poses ici, avec le meme retrain --new que le chantier 01 imposait deja. Le meme jour, le registre du bloc CANDIDAT DE DECISION a ete DECOUPLE du vocabulaire observe : `decision_options_bin` decrivait un candidat par un bit `grants_<effet>` pour CHACUN des 13 effets de UNIT_RULE_EFFECT_IDS, alors que 6 d'entre eux ne sont accordables par aucun `grantsRuleIds` de roster — 6 bits x 6 slots = 36 scalaires morts a vie, et toute capacite ajoutee a l'observation en payait 6 de plus. Le bloc est desormais bati sur DECISION_GRANTABLE_EFFECT_IDS (7 effets reellement accordables, verrouille par un test de contrat qui le recalcule depuis les rosters), d'ou 20754 -> 20718. Consequence : allonger le vocabulaire observe coute maintenant EXACTEMENT zero scalaire — c'est ce que le gel du chantier 01 promettait sans le tenir. `cp_gain_on_objective` (Thievin' Scavengers) y entre a ce titre, obs_id 14, pour zero scalaire. Toute evolution du schema change cette valeur, ce qui rend un modele existant explicitement incompatible (retrain --new). Le 2026-08-05 (chantier 03) les capacites de FACTION ont recu leurs emplacements : 6 drapeaux dans GLOBAL_BIN_FIELDS (my/enemy_waaagh_available, my/enemy_waaagh_active, my/enemy_oath_target_selected) et un type de decision de plus dans AGENT_DECISION_TYPE_IDS (waaagh_call, +1 bit de decision_ctx_bin), d'ou 20718 -> 20725. Ces sept emplacements auraient du etre declares par le chantier 01, qui annonce pourtant que les capacites de faction vont dans global_bin : ils ont ete oublies, exactement comme les deux scalaires de CP du chantier 02, et sont poses ici avec le MEME retrain --new que le chantier 01 imposait deja (les modeles existants dataient d'avant le gel du 2026-08-04). QUATRE bits pour le Waaagh! et non deux : sa duree court « until the start of your next Command phase », donc elle enjambe le tour adverse — un Waaagh! ennemi actif pendant mon tour change ce que je dois faire, un Waaagh! ennemi encore disponible change ce que je dois craindre. L'identite de la cible d'Oath n'est PAS dans global_bin : elle est portee par le statut oath_target (config/unit_statuses.json, obs_id 2) de l'entite visee, des DEUX cotes — sur une entite ennemie il signale ma cible, sur une alliee il signale celle de l'adversaire. La sauvegarde invulnerable observee (unit_cont.invul_save et le bloc des types de figurines) est desormais la valeur EFFECTIVE, Waaagh! compris : c'est celle que la resolution applique, et rien d'autre dans l'observation ne permettrait de la deduire. Cout de ces deux derniers points : zero scalaire. Le 2026-08-06 (chantier 03) deux drapeaux globaux s'ajoutent, my_oath_wound_bonus_active / enemy_oath_wound_bonus_active : la clause CONDITIONNELLE du +1 au jet de blessure d'Oath of Moment (detachement Codex ET aucune unite BLOOD ANGELS / DARK ANGELS / DEATHWATCH / SPACE WOLVES) depend du ROSTER, que l'agent ne construit pas et qu'aucune autre feature ne porte — les mots-cles de sous-faction des unites ALLIEES ne sont pas observes, et la clause compte les unites MORTES. Sans eux, deux parties identiques a l'ecran n'ont pas la meme regle d'attaque et la politique de DESIGNATION (OATH_SLOT_i) n'est pas separable : 20725 -> 20727. action_space_size N'EST PLUS configure : la taille de l'action space est DERIVEE du moteur (macro_intents.TOTAL_ACTION_SIZE). perception_radius / max_nearby_units / max_valid_targets NE SONT PLUS configures non plus : ils n'alimentaient que le pipeline mono-figurine, supprime le 2026-07-28. Ce que l'agent percoit du terrain est la grille egocentrique (engine/spatial_grid.py), dont la geometrie est partagee avec le masque et le decodeur."
+    },
+    "step_log_buffer_size": 200,
+    "vec_normalize": {
+      "enabled": true,
+      "norm_obs": true,
+      "norm_reward": true,
+      "clip_obs": 10.0,
+      "clip_reward": 10.0,
+      "gamma": 0.99
+    },
+    "vec_normalize_eval": {
+      "enabled": true,
+      "training": false,
+      "norm_reward": false
+    },
+    "bot_training": {
+      "ratios": {
+        "control": 0.35,
+        "value_trade": 0.15,
+        "adaptive": 0.15,
+        "greedy": 0.15,
+        "defensive": 0.15,
+        "random": 0.05
+      },
+      "randomness": {
+        "control": 0.05,
+        "value_trade": 0.05,
+        "adaptive": 0.05,
+        "greedy": 0.05,
+        "defensive": 0.05
+      }
+    },
+    "scenario_sampling": {
+      "eval_ref_strict": true,
+      "train_objective_count_weights": {
+        "1": 0.025,
+        "2": 0.025,
+        "3": 0.025,
+        "4": 0.025,
+        "5": 0.9
+      },
+      "eval_objective_count_weights": {
+        "5": 1.0
+      },
+      "train_wall_ref_weights": {
+        "default": 1.0
+      },
+      "eval_wall_refs": [
+        "walls-33.json",
+        "walls-mc1.json"
+      ],
+      "train_selection_mode": "uniform_within_count",
+      "eval_selection_mode": "uniform_within_count"
+    },
+    "training_hard": {
+      "enabled": false,
+      "target_episode_ratio": 0.3,
+      "max_scenario_weight": 4,
+      "scenario_names": []
+    },
+    "unit_rule_forcing": {
+      "enabled": false,
+      "target_controlled_episode_ratio": 0.2,
+      "max_scenario_weight": 6
+    }
+  },
+  "x5_long": {
+    "type": "################################################### x5_long — runs longs (board 44x60x5, scale x5) ###################################################",
+    "seed": 12345,
+    "total_episodes": 200000,
+    "total_episodes_normal": "200000 : run long ; rampe entropie achevee a 80000 (decay_fraction 0.4), rampe learning_rate a 140000 (0.7). Identique a x1_long : x5_long est le MEME jeu d'hyperparametres, joue sur le plateau x5 -- la resolution vient de --resolution 5, jamais du nom du profil (cf. _resolution_detail).",
+    "agent_seat_mode": "random",
+    "eval_episodes": 10,
+    "n_envs": 48,
+    "metrics_smoothing": null,
+    "model_params": {
+      "policy": "MultiInputPolicy",
+      "learning_rate": {
+        "initial": 0.002,
+        "final": 0.0002,
+        "decay_fraction": 0.7
+      },
+      "n_steps": 8192,
+      "batch_size": 1020,
+      "n_epochs": 3,
+      "gamma": 0.99,
+      "gae_lambda": 0.95,
+      "clip_range": 0.2,
+      "clip_range_vf": null,
+      "normalize_advantage": true,
+      "ent_coef": {
+        "start": 0.1,
+        "end": 0.01,
+        "decay_fraction": 0.4
+      },
+      "vf_coef": 1.0,
+      "max_grad_norm": 0.5,
+      "target_kl": 0.02,
+      "tensorboard_log": "./tensorboard/",
+      "policy_kwargs": {
+        "net_arch": [
+          512,
+          512
+        ],
+        "features_extractor_kwargs": {
+          "cnn_features": 256
+        }
+      },
+      "verbose": 0
+    },
+    "callback_params": {
+      "bot_eval_scenario_pool": "holdout",
+      "bot_eval_show_progress": true,
+      "bot_eval_use_subprocess": true,
+      "bot_eval_n_workers": 4,
+      "early_stopping_patience": 0,
+      "save_best_min_episodes": 10000,
+      "checkpoint_save_freq": 10000,
+      "max_checkpoints": 3,
+      "checkpoint_name_prefix": "ppo_checkpoint",
+      "eval_deterministic": true,
+      "eval_render": false,
+      "bot_eval_freq": 10000,
+      "bot_eval_freq_normal": "---------------------------------- 10000 (20 evals sur 200k ; a 5000, les 40 evals x 100 episodes couteraient ~8,5 h contre ~5,5 h d'entrainement)",
+      "bot_eval_use_episodes": true,
+      "bot_eval_intermediate": 100,
+      "bot_eval_final": 600,
+      "bot_eval_final_normal": "---------------------------------- 600 (et non 100 comme les autres profils) : x1_long est le run de MESURE, son win-rate final est le chiffre publie, donc sa PRECISION est le livrable. bot_eval_final est un nombre d'episodes PAR BOT ; a 100, l'erreur-type d'un win-rate autour de 0,5 vaut 5,0 points (IC95 ~ +/-9,8), ce qui ne permet meme pas de departager deux runs de 10 points d'ecart. A 600 elle tombe a 2,0 points (IC95 ~ +/-4,0), l'ecart-type etant divise par racine(6). Le cout est BORNE et paye une seule fois, en fin de run : ~1 h 20 (13 min les 100 ep./bot, commit 42326ed0) contre ~5 h 30 d'entrainement pour 200 000 episodes -- proportion acceptable sur un run long, inacceptable sur x1 (10 000 episodes), qui reste donc a 100. bot_eval_intermediate reste a 100 : les evaluations intermediaires sont du MONITORING repete 20 fois, pas la mesure. Verrou : tests/unit/ai/test_schedule_decay_fraction.py::test_x1_long_is_x1_recalibrated_for_long_runs.",
+      "bot_eval_worker_device": "cpu",
+      "bot_eval_task_timeout_seconds": 7200,
+      "bot_eval_task_timeout_seconds_normal": "---------------------------------- 7200 (et non 3600 comme les autres profils) : le timeout porte sur un TASK, et un task = 1 bot x 1 scenario x (bot_eval_final / nb_scenarios) episodes joues SEQUENTIELLEMENT dans un seul sous-process (bot_evaluation.py, episodes_per_scenario) ; depuis le fix du 2026-08-02 les tasks sont soumises AU FIL DE L'EAU, au plus bot_eval_n_workers a la fois, donc l'instant de soumission est bien l'instant de depart (_collect_parallel_results_with_timeouts). Avant ce fix tout partait d'un coup et le chrono courait des la soumission : c'etait une deadline GLOBALE sur toute l'eval, qui tuait les tasks des dernieres vagues avant qu'elles ne commencent. Passer bot_eval_final de 100 a 600 multiplie donc par 6 la duree d'un task de l'eval FINALE : 150 episodes par task au lieu de 25, sur les 4 scenarios du holdout. A 3600 s le budget tomberait a 24 s/episode, alors que V11 §0.14 a MESURE 17 s/episode sur des parties degenerees (cap 2000 pas x cout geodesique §0.25) : il ne resterait qu'un facteur 1,4. L'asymetrie tranche le reglage — un seul task qui deborde force-termine TOUT le pool (_collect_parallel_results_with_timeouts) et fait lever l'eval finale, soit la mesure publiee PERDUE apres ~5 h 30 d'entrainement, contre 2 h gachees une seule fois si le timeout est trop large. 7200 tolere 48 s/episode, ~2,8x le pire regime mesure, et reste un vrai garde-fou anti-worker-bloque (un episode est deja borne a max_steps_per_episode = 2000 pas, ce n'est donc jamais un hang infini). Les autres profils restent a 3600 : ils evaluent 100 episodes par bot, soit 25 par task. Verrou : tests/unit/ai/test_schedule_decay_fraction.py::test_x1_long_is_x1_recalibrated_for_long_runs.",
+      "save_best_robust": true,
+      "save_best_robust_seed": true,
+      "robust_window": 5,
+      "robust_drawdown_penalty": 0.5,
+      "robust_penalty_bot": 0.12,
+      "robust_penalty_hard": 0.0,
+      "model_gating_enabled": false,
+      "model_gating_min_worst_bot": 0.25,
+      "model_gating_min_worst_scenario_combined": 0.3,
+      "model_gating_min_vs_control": 0.3,
+      "holdout_hard_opponent_budget_modifier": 1.1,
+      "bot_eval_weights": {
+        "control": 0.4,
+        "value_trade": 0.15,
+        "adaptive": 0.15,
+        "greedy": 0.15,
+        "defensive": 0.15,
+        "tactical": 0.0
+      },
+      "bot_eval_randomness": {
+        "control": 0.05,
+        "value_trade": 0.05,
+        "adaptive": 0.05,
+        "greedy": 0.05,
+        "defensive": 0.05,
+        "tactical": 0.05
+      }
+    },
+    "roster_pool_schedule": {
+      "enabled": false,
+      "training": {
+        "start_counts": {
+          "swarm": 16,
+          "troop": 10,
+          "elite": 6
+        },
+        "end_counts": {
+          "swarm": 16,
+          "troop": 10,
+          "elite": 6
+        }
+      }
+    },
+    "deployment_random_mix": {
+      "enabled": false,
+      "training_only": true,
+      "force_random_ratio_start": 0.1,
+      "force_random_ratio_end": 0.2,
+      "schedule": "linear",
+      "freeze_after_progress": 0.7,
+      "apply_to": "agent_only"
+    },
+    "deployment_mode_schedule": {
+      "enabled": true,
+      "training_only": true,
+      "active_ratio_start": 0.3,
+      "active_ratio_end": 0.8,
+      "schedule": "linear",
+      "freeze_after_progress": 1.0,
+      "justification": "Rampe de deploiement : part des episodes joues en deploiement ACTIF (l'agent place lui-meme ses figurines) plutot qu'en placement FIXE (positions du scenario). Elle passe lineairement de active_ratio_start a active_ratio_end sur la duree du run (progression = episode / total_episodes), puis est gelee au-dela de freeze_after_progress. ASYMETRIE A CORRIGER, c'est la raison d'etre du reglage : la rampe ne s'applique QU'A L'ENTRAINEMENT (training_only: true, et seulement sur les scenarios du split training), alors que L'EVALUATION IMPOSE TOUJOURS une phase de deploiement. Un profil dont la rampe finit a 0.0 -- ou qui n'a pas ce bloc du tout -- entraine donc un agent qui ne se deploie JAMAIS, puis le NOTE sur des parties ou il doit se deployer : le score mesure un comportement jamais appris et n'est comparable a aucun autre profil. Les huit profils portent le MEME bloc, x1 faisant reference : le verrou de test derive la reference de x1 et exige des cinq autres qu'ils l'egalent (x5_append et x1_debug n'avaient aucun bloc ; x5_new et x5_debug finissaient a 0.0 avant le 2026-07-29). Reglage courant depuis le 2026-08-02 : 0.3 -> 0.8 SANS gel (freeze_after_progress 1.0), donc active_ratio_end est bel et bien atteint en toute fin de run et c'est lui qui dit quelle part des episodes finit en deploiement actif. Le gel a mi-run (0.5, plafond effectif 0.55) est ABANDONNE le 2026-08-02, en meme temps que la correction du denominateur de la rampe (V11 §0.57) : le compteur d'episodes du moteur est LOCAL a un environnement et il etait divise par le total GLOBAL, donc a n_envs=48 la rampe n'avancait pas du tout et le gel n'avait aucun objet. 0.8 et non 1.0 : c'est le reglage historique de x1, retenu comme reference le 2026-07-29 ; la part d'episodes restee en placement fixe conserve les positions de depart du scenario comme source de variete. Toutes les cles ci-dessus sont OBLIGATOIRES (lues par require_key dans W40KEngine._configure_deployment_mode_for_episode, sans aucune valeur par defaut), et depuis le 2026-07-29 l'ABSENCE du bloc dans un profil d'entrainement leve une erreur explicite au lieu de desactiver la rampe en silence -- ce silence est precisement ce qui avait laisse deux profils diverger sans que rien ne le signale. Verrou : tests/unit/engine/test_deployment_mode_schedule.py lit CE fichier et verifie les huit profils (x1_long ajoute le 2026-08-02 pour les runs longs, cf. model_params.*.decay_fraction ; x1_selfplay le meme jour ; x5_long le 2026-08-10)."
     },
     "observation_params": {
       "obs_size": 16659,
@@ -1102,7 +1298,7 @@
       "active_ratio_end": 0.8,
       "schedule": "linear",
       "freeze_after_progress": 1.0,
-      "justification": "Rampe de deploiement : part des episodes joues en deploiement ACTIF (l'agent place lui-meme ses figurines) plutot qu'en placement FIXE (positions du scenario). Elle passe lineairement de active_ratio_start a active_ratio_end sur la duree du run (progression = episode / total_episodes), puis est gelee au-dela de freeze_after_progress. ASYMETRIE A CORRIGER, c'est la raison d'etre du reglage : la rampe ne s'applique QU'A L'ENTRAINEMENT (training_only: true, et seulement sur les scenarios du split training), alors que L'EVALUATION IMPOSE TOUJOURS une phase de deploiement. Un profil dont la rampe finit a 0.0 -- ou qui n'a pas ce bloc du tout -- entraine donc un agent qui ne se deploie JAMAIS, puis le NOTE sur des parties ou il doit se deployer : le score mesure un comportement jamais appris et n'est comparable a aucun autre profil. Les six profils portent le MEME bloc, x1 faisant reference : le verrou de test derive la reference de x1 et exige des cinq autres qu'ils l'egalent (x5_append et x1_debug n'avaient aucun bloc ; x5_new et x5_debug finissaient a 0.0 avant le 2026-07-29). Reglage courant depuis le 2026-08-02 : 0.3 -> 0.8 SANS gel (freeze_after_progress 1.0), donc active_ratio_end est bel et bien atteint en toute fin de run et c'est lui qui dit quelle part des episodes finit en deploiement actif. Le gel a mi-run (0.5, plafond effectif 0.55) est ABANDONNE le 2026-08-02, en meme temps que la correction du denominateur de la rampe (V11 §0.57) : le compteur d'episodes du moteur est LOCAL a un environnement et il etait divise par le total GLOBAL, donc a n_envs=48 la rampe n'avancait pas du tout et le gel n'avait aucun objet. 0.8 et non 1.0 : c'est le reglage historique de x1, retenu comme reference le 2026-07-29 ; la part d'episodes restee en placement fixe conserve les positions de depart du scenario comme source de variete. Toutes les cles ci-dessus sont OBLIGATOIRES (lues par require_key dans W40KEngine._configure_deployment_mode_for_episode, sans aucune valeur par defaut), et depuis le 2026-07-29 l'ABSENCE du bloc dans un profil d'entrainement leve une erreur explicite au lieu de desactiver la rampe en silence -- ce silence est precisement ce qui avait laisse deux profils diverger sans que rien ne le signale. Verrou : tests/unit/engine/test_deployment_mode_schedule.py lit CE fichier et verifie les six profils (x1_long ajoute le 2026-08-02 pour les runs longs, cf. model_params.*.decay_fraction)."
+      "justification": "Rampe de deploiement : part des episodes joues en deploiement ACTIF (l'agent place lui-meme ses figurines) plutot qu'en placement FIXE (positions du scenario). Elle passe lineairement de active_ratio_start a active_ratio_end sur la duree du run (progression = episode / total_episodes), puis est gelee au-dela de freeze_after_progress. ASYMETRIE A CORRIGER, c'est la raison d'etre du reglage : la rampe ne s'applique QU'A L'ENTRAINEMENT (training_only: true, et seulement sur les scenarios du split training), alors que L'EVALUATION IMPOSE TOUJOURS une phase de deploiement. Un profil dont la rampe finit a 0.0 -- ou qui n'a pas ce bloc du tout -- entraine donc un agent qui ne se deploie JAMAIS, puis le NOTE sur des parties ou il doit se deployer : le score mesure un comportement jamais appris et n'est comparable a aucun autre profil. Les huit profils portent le MEME bloc, x1 faisant reference : le verrou de test derive la reference de x1 et exige des cinq autres qu'ils l'egalent (x5_append et x1_debug n'avaient aucun bloc ; x5_new et x5_debug finissaient a 0.0 avant le 2026-07-29). Reglage courant depuis le 2026-08-02 : 0.3 -> 0.8 SANS gel (freeze_after_progress 1.0), donc active_ratio_end est bel et bien atteint en toute fin de run et c'est lui qui dit quelle part des episodes finit en deploiement actif. Le gel a mi-run (0.5, plafond effectif 0.55) est ABANDONNE le 2026-08-02, en meme temps que la correction du denominateur de la rampe (V11 §0.57) : le compteur d'episodes du moteur est LOCAL a un environnement et il etait divise par le total GLOBAL, donc a n_envs=48 la rampe n'avancait pas du tout et le gel n'avait aucun objet. 0.8 et non 1.0 : c'est le reglage historique de x1, retenu comme reference le 2026-07-29 ; la part d'episodes restee en placement fixe conserve les positions de depart du scenario comme source de variete. Toutes les cles ci-dessus sont OBLIGATOIRES (lues par require_key dans W40KEngine._configure_deployment_mode_for_episode, sans aucune valeur par defaut), et depuis le 2026-07-29 l'ABSENCE du bloc dans un profil d'entrainement leve une erreur explicite au lieu de desactiver la rampe en silence -- ce silence est precisement ce qui avait laisse deux profils diverger sans que rien ne le signale. Verrou : tests/unit/engine/test_deployment_mode_schedule.py lit CE fichier et verifie les huit profils (x1_long ajoute le 2026-08-02 pour les runs longs, cf. model_params.*.decay_fraction ; x1_selfplay le meme jour ; x5_long le 2026-08-10)."
     },
     "observation_params": {
       "obs_size": 16659,
@@ -1262,7 +1458,7 @@
       "active_ratio_end": 0.8,
       "schedule": "linear",
       "freeze_after_progress": 1.0,
-      "justification": "Rampe de deploiement : part des episodes joues en deploiement ACTIF (l'agent place lui-meme ses figurines) plutot qu'en placement FIXE (positions du scenario). Elle passe lineairement de active_ratio_start a active_ratio_end sur la duree du run (progression = episode / total_episodes), puis est gelee au-dela de freeze_after_progress. ASYMETRIE A CORRIGER, c'est la raison d'etre du reglage : la rampe ne s'applique QU'A L'ENTRAINEMENT (training_only: true, et seulement sur les scenarios du split training), alors que L'EVALUATION IMPOSE TOUJOURS une phase de deploiement. Un profil dont la rampe finit a 0.0 -- ou qui n'a pas ce bloc du tout -- entraine donc un agent qui ne se deploie JAMAIS, puis le NOTE sur des parties ou il doit se deployer : le score mesure un comportement jamais appris et n'est comparable a aucun autre profil. Les six profils portent le MEME bloc, x1 faisant reference : le verrou de test derive la reference de x1 et exige des cinq autres qu'ils l'egalent (x5_append et x1_debug n'avaient aucun bloc ; x5_new et x5_debug finissaient a 0.0 avant le 2026-07-29). Reglage courant depuis le 2026-08-02 : 0.3 -> 0.8 SANS gel (freeze_after_progress 1.0), donc active_ratio_end est bel et bien atteint en toute fin de run et c'est lui qui dit quelle part des episodes finit en deploiement actif. Le gel a mi-run (0.5, plafond effectif 0.55) est ABANDONNE le 2026-08-02, en meme temps que la correction du denominateur de la rampe (V11 §0.57) : le compteur d'episodes du moteur est LOCAL a un environnement et il etait divise par le total GLOBAL, donc a n_envs=48 la rampe n'avancait pas du tout et le gel n'avait aucun objet. 0.8 et non 1.0 : c'est le reglage historique de x1, retenu comme reference le 2026-07-29 ; la part d'episodes restee en placement fixe conserve les positions de depart du scenario comme source de variete. Toutes les cles ci-dessus sont OBLIGATOIRES (lues par require_key dans W40KEngine._configure_deployment_mode_for_episode, sans aucune valeur par defaut), et depuis le 2026-07-29 l'ABSENCE du bloc dans un profil d'entrainement leve une erreur explicite au lieu de desactiver la rampe en silence -- ce silence est precisement ce qui avait laisse deux profils diverger sans que rien ne le signale. Verrou : tests/unit/engine/test_deployment_mode_schedule.py lit CE fichier et verifie les six profils (x1_long ajoute le 2026-08-02 pour les runs longs, cf. model_params.*.decay_fraction)."
+      "justification": "Rampe de deploiement : part des episodes joues en deploiement ACTIF (l'agent place lui-meme ses figurines) plutot qu'en placement FIXE (positions du scenario). Elle passe lineairement de active_ratio_start a active_ratio_end sur la duree du run (progression = episode / total_episodes), puis est gelee au-dela de freeze_after_progress. ASYMETRIE A CORRIGER, c'est la raison d'etre du reglage : la rampe ne s'applique QU'A L'ENTRAINEMENT (training_only: true, et seulement sur les scenarios du split training), alors que L'EVALUATION IMPOSE TOUJOURS une phase de deploiement. Un profil dont la rampe finit a 0.0 -- ou qui n'a pas ce bloc du tout -- entraine donc un agent qui ne se deploie JAMAIS, puis le NOTE sur des parties ou il doit se deployer : le score mesure un comportement jamais appris et n'est comparable a aucun autre profil. Les huit profils portent le MEME bloc, x1 faisant reference : le verrou de test derive la reference de x1 et exige des cinq autres qu'ils l'egalent (x5_append et x1_debug n'avaient aucun bloc ; x5_new et x5_debug finissaient a 0.0 avant le 2026-07-29). Reglage courant depuis le 2026-08-02 : 0.3 -> 0.8 SANS gel (freeze_after_progress 1.0), donc active_ratio_end est bel et bien atteint en toute fin de run et c'est lui qui dit quelle part des episodes finit en deploiement actif. Le gel a mi-run (0.5, plafond effectif 0.55) est ABANDONNE le 2026-08-02, en meme temps que la correction du denominateur de la rampe (V11 §0.57) : le compteur d'episodes du moteur est LOCAL a un environnement et il etait divise par le total GLOBAL, donc a n_envs=48 la rampe n'avancait pas du tout et le gel n'avait aucun objet. 0.8 et non 1.0 : c'est le reglage historique de x1, retenu comme reference le 2026-07-29 ; la part d'episodes restee en placement fixe conserve les positions de depart du scenario comme source de variete. Toutes les cles ci-dessus sont OBLIGATOIRES (lues par require_key dans W40KEngine._configure_deployment_mode_for_episode, sans aucune valeur par defaut), et depuis le 2026-07-29 l'ABSENCE du bloc dans un profil d'entrainement leve une erreur explicite au lieu de desactiver la rampe en silence -- ce silence est precisement ce qui avait laisse deux profils diverger sans que rien ne le signale. Verrou : tests/unit/engine/test_deployment_mode_schedule.py lit CE fichier et verifie les huit profils (x1_long ajoute le 2026-08-02 pour les runs longs, cf. model_params.*.decay_fraction ; x1_selfplay le meme jour ; x5_long le 2026-08-10)."
     },
     "observation_params": {
       "obs_size": 16659,

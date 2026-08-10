@@ -122,6 +122,7 @@ def test_lappelant_de_production_propage_lexigence(gym_engine) -> None:
         _enemy_items_within_move_engagement_horizon,
     )
     from engine.phase_handlers.shared_utils import get_engagement_zone
+    from engine.spatial_relations import enemy_entries_on_battlefield
 
     game_state = gym_engine.game_state
     broken = _state_without(game_state, drop="max_base_size_hex")
@@ -135,10 +136,13 @@ def test_lappelant_de_production_propage_lexigence(gym_engine) -> None:
     )
     entry = units_cache[str(unit["id"])]
     mover_player = int(entry["player"])
-    # L'unité de référence doit avoir au moins un adverse dans le cache, sinon la boucle
-    # d'entrées tournerait à vide et le verrou ne pèserait plus rien le jour où le getter
-    # descendrait dans cette boucle.
-    assert any(int(e["player"]) != mover_player for e in units_cache.values())
+    # L'unité de référence doit avoir au moins un adverse POSÉ, sinon la boucle d'entrées
+    # tournerait à vide et le verrou ne pèserait plus rien le jour où le getter descendrait
+    # dans cette boucle. Même énumération que la prune elle-même : lire le cache brut
+    # compterait les unités en réserve, que `entries_on_battlefield` écarte.
+    assert any(enemy_entries_on_battlefield(
+        units_cache, mover_player, exclude_id=str(unit["id"]),
+    ))
 
     # La section `game_rules` reste lisible : seule la clé manque, donc l'erreur ne peut venir
     # que du getter visé (et non du jumeau `get_engagement_zone`, qui doit passer).
