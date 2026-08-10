@@ -14,8 +14,7 @@
   ],
   "exclude": [
     "**/node_modules",
-    "**/__pycache__",
-    "frontend/src/roster/_HOW_TO_ADD_UNIT.py"
+    "**/__pycache__"
   ],
   "reportPrivateImportUsage": "none"
 }
