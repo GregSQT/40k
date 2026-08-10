@@ -31,13 +31,15 @@ primitive d'engagement les déclarait mutuellement engagées. Contraire à la r�
 """
 from __future__ import annotations
 
+import sys
+
 from pathlib import Path
 from typing import Any, Dict
 
 import numpy as np
 import pytest
 
-from _config_helpers import assert_deployment_phase, pin_active_deployment
+from _config_helpers import both_terrains, assert_deployment_phase, pin_active_deployment
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SCENARIO = (
@@ -45,6 +47,12 @@ SCENARIO = (
     / "config" / "agents" / "ArmageddonAgent" / "scenarios" / "training"
     / "scenario_training_armageddon1.json"
 )
+
+# Ce fichier est REJOUÉ SUR LES DEUX TERRAINS : ce qu'il vérifie dépend des murs, des zones de
+# déploiement ou des pièces d'objectif, et ces trois-là changent entièrement entre `terrain-mc1`
+# et `terrain-mc2`. La fixture réécrit `SCENARIO` le temps de chaque test (cf. `both_terrains`).
+_terrain = both_terrains(sys.modules[__name__])
+
 
 
 def _load(seed: int = 0):

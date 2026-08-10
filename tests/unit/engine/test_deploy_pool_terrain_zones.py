@@ -79,15 +79,15 @@ def _pinned_mode_pools(eng, active_ratio: float):
     }
 
 
-def test_deployment_zones_are_identical_in_fixed_and_active_mode():
+def test_deployment_zones_are_identical_in_auto_and_active_mode():
     """Les zones ne dépendent PAS du mode de mise en place — et ne contiennent aucun mur.
 
     VERROU DU DÉFAUT MESURÉ LE 2026-08-05. La soustraction des murs
     (``engine/game_state.py``) n'était faite que si un joueur déployait en `random`/`active`.
     Sans effet tant que les zones ne servaient qu'à la phase de déploiement ; mais depuis que le
     reset les publie hors phase (``game_state["deployment_pools"]``), deux lecteurs les consomment
-    en mode `fixed` : ``squad_grid_anchor``, dont l'ancre est le BARYCENTRE du pool, et la clause
-    20.04 sur la zone adverse. Mesuré avant correctif : 0 mur en `active`, 149 et 151 en `fixed`
+    en mode `auto` : ``squad_grid_anchor``, dont l'ancre est le BARYCENTRE du pool, et la clause
+    20.04 sur la zone adverse. Mesuré avant correctif : 0 mur en `active`, 149 et 151 en placement non-agent
     — la même unité sur le même plateau recevait un centrage de grille différent selon le tirage.
 
     Le test compare les DEUX modes plutôt que de compter les murs d'un seul : c'est l'identité
@@ -98,19 +98,19 @@ def test_deployment_zones_are_identical_in_fixed_and_active_mode():
     assert walls, "scénario sans mur : ce test ne prouverait rien (vert vacant)"
 
     mode_active, pools_active = _pinned_mode_pools(eng, 1.0)
-    mode_fixed, pools_fixed = _pinned_mode_pools(eng, 0.0)
-    assert mode_active == "active" and mode_fixed == "fixed", (
-        f"modes non imposés : actif={mode_active!r}, fixe={mode_fixed!r}"
+    mode_auto, pools_auto = _pinned_mode_pools(eng, 0.0)
+    assert mode_active == "active" and mode_auto == "auto", (
+        f"modes non imposés : actif={mode_active!r}, auto={mode_auto!r}"
     )
 
     for player in (1, 2):
-        assert pools_fixed[player], f"joueur {player} : zone vide en mode fixed"
-        assert pools_fixed[player] == pools_active[player], (
+        assert pools_auto[player], f"joueur {player} : zone vide en mode auto"
+        assert pools_auto[player] == pools_active[player], (
             f"joueur {player} : la zone de déploiement dépend du mode de mise en place "
-            f"({len(pools_fixed[player])} hexes en fixed contre "
+            f"({len(pools_auto[player])} hexes en auto contre "
             f"{len(pools_active[player])} en active) — même plateau, même scénario"
         )
-        intruders = pools_fixed[player] & walls
+        intruders = pools_auto[player] & walls
         assert not intruders, (
             f"joueur {player} : {len(intruders)} hexes de MUR dans la zone de déploiement — "
             "un mur n'est une case de déploiement légale dans aucun mode"

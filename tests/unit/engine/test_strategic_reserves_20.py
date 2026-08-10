@@ -16,6 +16,8 @@ Chantier 04. Les verrous portent sur les points où la règle peut être satisfa
 """
 from __future__ import annotations
 
+import sys
+
 from pathlib import Path
 from typing import Any, Dict, List, Set, Tuple
 
@@ -33,10 +35,18 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 # Depuis l'activation des variantes (elles sont REVENUES dans `training/`, donc dans le tirage),
 # ce pin n'est plus une précaution : il est ce qui tient ce fichier debout. Ne pas le repointer
 # sur le scénario d'entraînement.
+from tests.unit.engine._config_helpers import both_terrains
+
 SCENARIO = (
     PROJECT_ROOT / "config" / "agents" / "ArmageddonAgent" / "scenarios" / "training"
     / "reserves_20_fixture1.json"
 )
+
+# Ce fichier est REJOUÉ SUR LES DEUX TERRAINS : ce qu'il vérifie dépend des murs, des zones de
+# déploiement ou des pièces d'objectif, et ces trois-là changent entièrement entre `terrain-mc1`
+# et `terrain-mc2`. La fixture réécrit `SCENARIO` le temps de chaque test (cf. `both_terrains`).
+_terrain = both_terrains(sys.modules[__name__])
+
 
 UNDEPLOYED = (-1, -1)
 
@@ -326,17 +336,28 @@ def test_ingress_forbids_exactly_8_inches_and_allows_the_first_cell_beyond():
         return entries_in_engagement_zone(cell_entry, enemy, clearance, metric)
 
     # Balayage horizontal depuis l'ennemi : on cherche la 1re case que la règle AUTORISE.
+    # Les DEUX sens sont essayés, et c'est nécessaire : la position de l'ennemi dépend du terrain,
+    # et sur une carte où il est proche du bord droit le balayage sortait du plateau avant
+    # d'atteindre la frontière — le test échouait alors sur « situation mal construite » sans que
+    # la règle des 8" soit en cause. Elle est symétrique, le sens n'a aucune importance pour elle.
     boundary = None
-    for delta in range(1, 3 * clearance):
-        col = ecol + delta
-        if col >= board_cols:
-            break
-        if not _oracle(col, erow):
-            boundary = col
+    direction = 0
+    for step in (1, -1):
+        for delta in range(1, 3 * clearance):
+            col = ecol + step * delta
+            if col < 0 or col >= board_cols:
+                break
+            if not _oracle(col, erow):
+                boundary = col
+                direction = step
+                break
+        if boundary is not None:
             break
     assert boundary is not None, "frontière des 8\" introuvable — situation mal construite"
 
-    assert forbidden[boundary - 1, erow], (
+    # `boundary - direction` = la case juste AVANT la frontière, du côté de l'ennemi, quel que
+    # soit le sens de balayage retenu.
+    assert forbidden[boundary - direction, erow], (
         "la dernière case à 8\" ou moins doit être REFUSÉE (« more than 8\" », 20.04)"
     )
     assert not forbidden[boundary, erow], (

@@ -744,6 +744,24 @@ class BotControlledEnv(gym.Wrapper):
 
             if decision_owner == self.controlled_player:
                 if has_valid_actions:
+                    # DEPLOIEMENT `auto` : le MOTEUR choisit la pose, pas la politique (rampe
+                    # `deployment_mode_schedule`). Cet etat est donc absorbe ICI, comme les tours du
+                    # bot et les WAIT forces — le rendre a l'apprenant ferait entrer dans le rollout
+                    # SB3 une transition dont l'action echantillonnee et le log_prob ne sont pas
+                    # ceux qui ont ete joues, et PPO calculerait son ratio dessus.
+                    # `auto_deployment_action` ne touche pas `game_state` : la decision reste
+                    # valable pour le step qui suit (regle de `MaskDecision`).
+                    auto_action = self.engine.auto_deployment_action(decision.action_mask)
+                    if auto_action is not None:
+                        step_decision, decision = decision, None
+                        obs, reward, terminated, truncated, info, decision = self._engine_step(
+                            auto_action, step_decision
+                        )
+                        if accumulate_reward:
+                            cumulative_reward += float(reward)
+                            self.episode_reward += float(reward)
+                        self.episode_length += 1
+                        continue
                     trace(
                         CH_BOT_LOOP, debug_mode,
                         "BotControlledEnv._ensure_actionable_controlled_turn env_rank=%s iteration=%s branch=controlled-ready",
@@ -1414,15 +1432,18 @@ class BotControlledEnv(gym.Wrapper):
 
     @staticmethod
     def _open_placement_slots(valid_actions) -> list:
-        """SOURCE UNIQUE de la regle « seuls les slots 4-8 sont des poses ».
+        """Poses ouvertes pour les deux sites de mise en place (deploiement 03.02, ingress 20.04).
 
-        Les deux sites de mise en place (deploiement 03.02 et ingress move 20.04) l'appellent, et
-        c'est tout ce qu'ils partagent de la traduction masque -> pool : ce qui les separe — le
-        traitement du pool VIDE — leur reste propre, parce qu'il differe reellement (erreur au
-        deploiement, `ACTION_WAIT` a l'ingress). Ecrire ce filtre une fois par site rouvrirait le
-        defaut du chantier 04c d'un cran plus haut : deux copies qui derivent en silence.
+        Delegue a `macro_intents.open_placement_slots`, qui porte desormais la regle pour TOUS
+        ses appelants — les bots ici, et le deploiement automatique du joueur-agent cote moteur
+        (`W40KEngine.step`, mode d'episode `auto`). Le filtre vivait ici tant que les bots en
+        etaient les seuls clients ; un second client dans le moteur en aurait fait deux copies,
+        exactement le defaut du chantier 04c d'un cran plus haut.
+
+        Ce qui SEPARE les deux sites — le traitement du pool VIDE (erreur au deploiement,
+        `ACTION_WAIT` a l'ingress) — leur reste propre, parce qu'il differe reellement.
         """
-        return [a for a in valid_actions if a in mi.DEPLOY_SLOTS]
+        return mi.open_placement_slots(valid_actions)
 
     def _ask_bot_placement(self, actor, placement_actions, game_state) -> int:
         """Interroge la politique de MISE EN PLACE du bot sur un pool DEJA nettoye.

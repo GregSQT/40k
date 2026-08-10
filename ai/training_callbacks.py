@@ -1002,7 +1002,7 @@ class MetricsCollectionCallback(BaseCallback):
                 if ('winner' in info and info['winner'] is not None)
                 else None
             ),
-            # "active" | "fixed" | None (scheduler inactif). Cle EXIGEE : le moteur la pose a
+            # "active" | "auto" | None (scheduler inactif). Cle EXIGEE : le moteur la pose a
             # chaque episode termine (w40k_core, bloc `if terminated`), donc son absence est un
             # defaut de cablage, pas un episode sans mode.
             'deployment_mode': require_key(info, 'deployment_mode'),

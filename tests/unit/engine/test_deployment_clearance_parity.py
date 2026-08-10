@@ -35,11 +35,10 @@ def _load(scenario_file: str, seed: int = 0):
         rewards_config="ArmageddonAgent", training_config_name="x1_debug", controlled_agent="ArmageddonAgent",
         scenario_file=scenario_file, unit_registry=UnitRegistry(), quiet=True, gym_training_mode=True,
     )
-    # Déploiement ACTIF garanti, et `deployment_random_mix` ÉPINGLÉ À L'ARRÊT — ce second point
-    # est vital ICI : activé, le moteur remplacerait l'action choisie par `_drive_deployment_
-    # clustered` par une action aléatoire, et le « clustering forcé » n'existerait plus alors que
-    # le test resterait vert. Le scénario et la géométrie sont inchangés : la pression de
-    # clearance testée est exactement la même. POURQUOI dans `_config_helpers`.
+    # Déploiement ACTIF garanti : sans lui, `_drive_deployment_clustered` ne piloterait aucune
+    # pose et le « clustering forcé » n'existerait plus alors que le test resterait vert. Le
+    # scénario et la géométrie sont inchangés : la pression de clearance testée est exactement la
+    # même. POURQUOI dans `_config_helpers`.
     pin_active_deployment(eng)
     eng.reset(seed=seed)
     return eng

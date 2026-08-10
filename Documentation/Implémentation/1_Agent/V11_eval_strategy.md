@@ -56,7 +56,7 @@ le pipeline tourne de bout en bout sur eux (training + évaluation).
 |---|---|
 | Rosters agent (training) | `config/agents/ArmageddonAgent/rosters/500pts/training/agent_training_roster_{space_marines,orks}.json` |
 | Rosters adversaire (training) | `config/agents/_p2_rosters/500pts/training/opponent_training_roster_{space_marines,orks}.json` — le dossier `500pts` n'existait pas côté P2 |
-| Scénario d'entraînement | `config/agents/ArmageddonAgent/scenarios/training/scenario_training_armageddon.json` — `agent_roster_ref: "training_random"` (tirage 50/50, **pas de `agent_roster_seed`** : il figerait le tirage agent), `opponent_roster_ref` = liste explicite des 2 fichiers (sinon P2 tire dans tout `_p2_rosters`) |
+| Scénario d'entraînement | `config/agents/ArmageddonAgent/scenarios/training/scenario_training_armageddon1.json` — `agent_roster_ref: "training_random"` (tirage 50/50, **pas de `agent_roster_seed`** : il figerait le tirage agent), `opponent_roster_ref` = liste explicite des 2 fichiers (sinon P2 tire dans tout `_p2_rosters`) |
 | Config agent | `ArmageddonAgent_training_config.json` (copie CoreAgent, `roster_pool_schedule.enabled = false` dans les **5** phases) + `ArmageddonAgent_rewards_config.json` (clé racine renommée : le moteur indexe le fichier par nom d'agent, cf. `_build_reward_configs_for_current_units`) |
 | Holdout (rosters + scénarios) | `rosters/500pts/holdout_regular/agent_holdout_regular_roster_*.json`, `_p2_rosters/500pts/holdout_regular/opponent_holdout_regular_roster_*.json`, `scenarios/holdout_regular/scenario_bot-0{1..4}.json` (les 4 matchups) |
 

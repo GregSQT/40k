@@ -180,10 +180,12 @@ class W40KMetricsTracker:
     )
 
     #: Modes de deploiement ventiles (cf. `deployment_mode_schedule`, w40k_core).
-    DEPLOY_MODES = ('active', 'fixed')
+    #: 'auto' a remplace 'fixed' le 2026-08-08 : les deux modes jouent desormais une VRAIE
+    #: phase de deploiement, seul change QUI decide des poses (le moteur, ou la politique).
+    DEPLOY_MODES = ('active', 'auto')
 
     #: Series ventilees par mode de deploiement -> prefixe de tag 00_critical.
-    #: Le mode est SUFFIXE au tag (`..._active` / `..._fixed`) et non porte par une lettre
+    #: Le mode est SUFFIXE au tag (`..._active` / `..._auto`) et non porte par une lettre
     #: distincte : les deux courbes d'une meme mesure se trient alors cote a cote et se
     #: superposent d'un clic, ce qui est la seule lecture qui reponde a la question posee.
     #:

@@ -1,7 +1,7 @@
 """Etat de run d'un modele — combien d'episodes il a DEJA joues.
 
 POURQUOI (V11 §0.58).
-Le mode de deploiement du moteur (plus `deployment_random_mix`) est une rampe pilotee par un
+Le mode de deploiement du moteur est une rampe pilotee par un
 compteur d'episodes, et elle repartait de zero a chaque reprise (`--append`, `--resume-from`)
 parce que rien ne survivait au processus : le `.zip` ne persiste que `num_timesteps`. Consequence
 mesurable : la part d'episodes joues en deploiement actif n'atteignait jamais `active_ratio_end`,

@@ -95,6 +95,7 @@ ponctuel — mais un artefact `x5_*` postérieur au 2026-08-02 n'est pas pour au
 |---|---|---|---|---|
 | **§0.70** | Le `--new` du lot **TOURNE** — et c'est une **base de développement**, pas la mesure de référence | 🟢 **EN COURS depuis le 2026-08-10 11 h 17** ⏳ entrée périssable | **1** | `ai/train.py --agent ArmageddonAgent --training-config x1 --scenario bot --new --resolution 1` (`tensorboard/x1_ArmageddonAgent/run_20260810-111734`). Santé à 1 748 épisodes : **0 troncature**, `invalid_action_rate` **0.0**, PPO à 171 408 steps, `win_rate_overall` **0.24** en progression — le correctif [§0.68](#s0.68) tient, le run a franchi le point qui a tué le précédent. 🟢 **ARBITRAGE UTILISATEUR DU 2026-08-10 : ce run est une BASE DE DÉVELOPPEMENT** (faire JOUER l'agent), **la mesure de référence est DIFFÉRÉE** jusqu'à ce que P3-4, P3-5, P3-6, P3-8, P4 et P5 soient finis. ⚠️ **Son `combined` ne vaut PAS référence** et ne doit alimenter aucun gate. Détail → §0.70. |
 | **§0.69** | Le choix d'**ARME en mêlée** n'existe pas côté agent | 📋 **PRÉVU, non commencé** (2026-08-08) | **3** (après le lot P3) | L'agent choisit sa cible et rien d'autre ; `squad_declare_fight` auto-sélectionne l'arme CC par dégâts attendus. Les wrappers PvP existent déjà (`squad_declare_fight_weapon*`) : ce qui manque est l'EXPOSITION dans l'espace d'action, pas la mécanique. **Casse les deux contrats** ⇒ voyage avec une tranche P3. Détail → §0.69. |
+| **§0.71** | Le déploiement `auto` entrait dans le rollout PPO avec une action que le moteur avait remplacée ; `deployment_random_mix` faisait doublon | ✅ **CORRIGÉ le 2026-08-08** (absorption + suppression du doublon) | **1** (avant le run) | En mode `auto`, `W40KEngine.step` substituait sa propre pose à l'action échantillonnée : SB3 rangeait l'action et le `log_prob` de la politique pour une transition produite par une AUTRE action (~10 steps de déploiement par épisode, sur 70 % des épisodes en début de rampe). Ces steps sont désormais **absorbés** par `BotControlledEnv._ensure_actionable_controlled_turn`, comme les tours du bot et les `WAIT` forcés — l'apprenant ne les voit plus. Régression née avec `auto` : l'ancien mode `fixed` ne produisait aucune transition de déploiement. `deployment_random_mix` portait le MÊME motif et tirait ses poses par la MÊME fonction que `auto` : supprimé (code, 7 profils, doc). Détail → §0.71. |
 | **§0.68** | Le premier `--new` du lot est **mort en rollout** : une instrumentation qui lisait l'observation PLATE, morte depuis la migration aux entités, réveillée par `L2` | ✅ **CORRIGÉ le 2026-08-08** (suppression) | **1** (le run repart) | `TypeError: Unsupported observation batch type: dict`. Le bloc `obs/<phase>_*` de `MetricsCollectionCallback` lisait le bloc « valid target » du vecteur plat mono-figurine (`obs[273:313]`), supprimé le 2026-07-28. Il n'était **pas atteint** jusqu'ici : aucune action d'agent ne portait de `phase` dans `('shoot','fight','charge')` — **mesuré**, 600 pas pilotés. `select_activation` (`L2`) est la première, et elle a tué le run. **Aucun run n'a jamais émis un seul de ces scalaires** (`obs/shoot` absent de tous les fichiers d'events). Détail → §0.68. |
 | **§0.67** | Les **chantiers 01/03/04** puis le **lot `L1`+`L2`+`L6`** ont cassé les contrats d'observation ET d'action | 🟠 **OUVERT — le lot est COMPLET et son `--new` TOURNE ([§0.70](#s0.70)) ; il reste sans modèle ni mesure courants jusqu'à sa fin** | **1** (avant toute mesure) | ⚠️ **Le run en cours est une base de DÉVELOPPEMENT, il ne produit pas la mesure de référence** — arbitrage du 2026-08-10, cf. [§0.70](#s0.70). Vérifié par exécution le 2026-08-08, revérifié le 2026-08-10 : `obs_size` **16659**, `TOTAL_ACTION_SIZE` **1139**, **7** requêtes de pointeur. Tous les modèles du dossier (le plus récent : `ArmageddonAgent_12345_robust_0.8049.zip`, contrat 20780/1107) sont **inchargeables** ⇒ le **0.82 de §0.14 ne décrit plus le code courant**. ✅ `L1` (`91cc70d1`), `L2` (`b8be3f8e`) et `L6` (`7b4ace51`) sont **mergés sur `main`**, plus 3 correctifs post-merge de `L2` (2026-08-08). **Prochaine action : le `--new` unique, puis la mesure de référence.** Détail → §0.67. |
 | **§0.66** | Le **journal du gym mentait à l'analyzer**, et deux règles de mouvement n'étaient pas appliquées | ✅ **CORRIGÉ le 2026-08-04** — ⚠️ **deux correctifs CHANGENT le jeu** | **1** | Fermeture de §0.62 par le bas : sur un run de **600 épisodes**, l'analyzer rendait **2353 erreurs**. **1014** venaient d'un `[FLY]` qu'AUCUN émetteur du gym n'écrivait (l'analyzer pathfindait les escouades volantes au sol), **898** d'armes aux règles différentes fusionnées dans un même lot 04.03, **144** d'un contrôle close-quarters qui mesurait une adjacence d'ancre là où 10.06 exige l'engagement. **2353 → 1204 mesuré.** Mais **71 erreurs étaient VRAIES** : la charge (11.04) et le pile-in/consolidation (12.03/12.08) bornaient à vol d'oiseau et ne validaient que la case d'arrivée — les escouades **traversaient les murs**. Et 122 violations d'alternance venaient d'une charge **ratée** comptée comme un charge move (Fights First indu). Détail → §0.66. |
@@ -106,7 +107,7 @@ ponctuel — mais un artefact `x5_*` postérieur au 2026-08-02 n'est pas pour au
 | **§0.60** | Instrumentation du **coût** de l'entraînement — workers d'éval, temps bloquant, courbes de charge et de participation | ✅ **LIVRÉ le 2026-08-02** | **2** | Trois angles morts de COÛT, distincts des angles morts de COMPORTEMENT du §0.56. (1) Quatre clés `bot_eval_*` vivaient **hors de `callback_params`** : personne ne les lisait, `bot_eval_n_workers` retombait sur `min(n_envs, n_scenarios × n_bots)` = **24 workers**, soit **47 Go et 598 s** contre **9,6 Go et 349 s** à 4 workers — moins de workers est aussi **42 % plus rapide**, la VM passant son temps à swapper. `validate_bot_eval_worker_params` valide désormais au DÉMARRAGE. (2) `blocking_eval_seconds` ne compte plus que le temps où la boucle est RÉELLEMENT figée. (3) Six courbes moteur : charges tentées/réussies (agent et bot) et participation par phase. Détail → §0.60. |
 | **§0.59** | Régime d'entraînement en **deux phases** — `x1_selfplay` (self-play) et `decay_fraction` | 🟠 **OUVERT — livré, JAMAIS EXÉCUTÉ** | **2** | Deux changements de régime non mesurés. (1) `decay_fraction` achève les rampes lr/entropie **avant** la fin d'un run long (sans lui, un run de 200 000 épisodes garde une entropie élevée jusqu'au dernier épisode). (2) Le profil `x1_selfplay` ajoute une **phase 2** en `--append` : un snapshot figé de l'agent remplace le bot sur une part rampée **0.0 → 0.5** des épisodes. ⚠️ Aucun run de phase 2 n'a jamais tourné ; `opponent_mix.enabled` **lève** hors du chemin de rotation de scénarios. Détail → §0.59. |
 | **§0.58** | Les rampes par-épisode **redémarraient à chaque reprise** (`--append`, `--resume-from`) | ✅ **CORRIGÉ le 2026-08-02** | **1** | Rien ne persistait le nombre d'épisodes joués : la rampe de déploiement n'atteignait jamais `active_ratio_end` et le compte cumulé du modèle était écrasé par celui du seul run courant. `ai/run_state.py` persiste le compte (compté, jamais dérivé de `num_timesteps`) ; reprendre un modèle sans lui **lève** (arbitrage : pas de compatibilité ascendante). `learning_rate`, `ent_coef` et le self-play sont des rampes de **RÉGIME** : elles repartent de zéro à chaque run, et c'est l'arbitrage. Détail → §0.58. |
-| **§0.57** | Les rampes par-épisode du moteur avançaient **`n_envs` fois trop lentement** | ✅ **CORRIGÉ le 2026-08-02** — reste une conséquence à assumer | **1** | Le compteur d'épisodes du moteur est LOCAL à un worker ; il était divisé par le total GLOBAL. À `n_envs=48`, la rampe de déploiement est restée collée à `active_ratio_start` sur TOUS les runs vectorisés (mesuré : `s_deploy_active_share` 0.3040 pour 0.496 attendus). Même défaut sur `deployment_random_mix`. **Conséquence : aucune mesure passée n'a été produite avec la rampe annoncée** — §0.29 et §0.46 pt 2 sont amendés. Détail → §0.57. |
+| **§0.57** | Les rampes par-épisode du moteur avançaient **`n_envs` fois trop lentement** | ✅ **CORRIGÉ le 2026-08-02** — reste une conséquence à assumer | **1** | Le compteur d'épisodes du moteur est LOCAL à un worker ; il était divisé par le total GLOBAL. À `n_envs=48`, la rampe de déploiement est restée collée à `active_ratio_start` sur TOUS les runs vectorisés (mesuré : `s_deploy_active_share` 0.3040 pour 0.496 attendus). Même défaut sur `deployment_random_mix` (mécanisme SUPPRIMÉ le 2026-08-08, cf. §0.69). **Conséquence : aucune mesure passée n'a été produite avec la rampe annoncée** — §0.29 et §0.46 pt 2 sont amendés. Détail → §0.57. |
 | **§0.56** | Instrumentation : usage par **famille d'action**, et **classement bot-contre-bot** | ✅ **LIVRÉ le 2026-08-02** — reste à s'en servir | **2** | Deux angles morts fermés, aucun ne coûte de ré-entraînement. (1) `actions/share_<famille>` publie la part de chaque DÉCISION dans ce que l'agent joue : une dimension jamais choisie ou toujours choisie est cassée quel que soit le win-rate — c'est ce qui rend un lot de tranches P3 diagnosticable **en un seul run**. (2) `scripts/bot_ranking.py` fait s'affronter les bots **sans agent** : sans lui, juger un bot exigeait un modèle entraîné, donc une mesure circulaire — et §0.55 était irréalisable. Détail → §0.56. |
 | **§0.55** | Le **holdout d'évaluation** `TacticalBot` est DANS l'enveloppe d'entraînement — effet plafond | ✅ **LIVRÉ le 2026-08-04 — le mètre est GELÉ** | **1** (avant toute mesure de référence) | `tactical` gelé à **`w_objective 2.0`** (mesuré sur **x1**) : l'agent passe de **0.89 à 0.72** contre lui, et le bot de **dernier (0.357) à premier (0.636)** sur 6. `combined` inchangé à 0.8200 — le holdout pèse 0.0, c'est le contrôle que son statut est intact. ✅ Croisement `bot_eval/faction/<faction>/vs_<bot>` publié (méthode dédiée, dérivé du tally unique). 🔴 **Deux des trois leviers de la spec n'avaient aucune prise** : `w_enemy` est INERTE pour ce bot (mesuré + verrou), et le pas `0.5 → 0.8` tombait dans la partie morte d'une réponse en MARCHE. 🔴 **Piège à retenir : `--training-config` ne choisit PAS le plateau** (`config.json` → x5 ; les évals de référence passent `--resolution 1`) — une campagne entière a été jetée pour ça, et en x5 le diagnostic s'inversait. Détail → §0.55. |
 | **§0.14** | Re-mesure du run — win-rate par matchup | ✅ **MESURE OBTENUE le 2026-08-03** — ⏳ **PÉRIMÉE depuis les chantiers 01/03/04** : le modèle mesuré n'est plus chargeable, cf. [§0.67](#s0.67) ; ⚠️ **sa remplaçante est DIFFÉRÉE après P3-4/5/6/8, P4 et P5** ([§0.70](#s0.70)) — le projet reste donc SANS mesure de référence d'ici là, et c'est assumé | — | Run de **200 000 épisodes** (2026-08-02 12 h 26 → 2026-08-03 02 h 05, 19 points d'éval, 820 k → 12,1 M steps). `eval_bots/combined_win_rate` **0,283 → max 0,837 → 0,743**. Éval rejouée le 2026-08-03 sur le snapshot ROBUSTE (`robust_0.8049`), APRÈS §0.64/§0.65 : **combined 0.8200**, `tactical` 0.89, `defensive` 0.87, `greedy` 0.84, `adaptive` 0.83, **`control` 0.82**, **`value_trade` 0.74** (le pire), **0 troncature**. Le seuil de gating `vs_control ≥ 0.50` est **franchi** — le **0.04 du run 4 est périmé**. ⚠️ 0,743 → 0,820 est un écart best-contre-final, PAS l'effet de §0.64. Détail → §0.14. |
@@ -261,6 +262,42 @@ la mesure de référence est différée après P3-8 : la contrainte était circu
 en faveur de la base de développement — le regret est un écart **relatif** (choix branché vs
 heuristique auto), il supporte l'imprécision de 10 000 épisodes, alors que l'attente rachèterait
 un `x1_long` complet (~20 h) au premier optionnel retenu.
+<a id="s0.71"></a>
+### 0.71 Le déploiement `auto` corrompait le ratio PPO ; `deployment_random_mix` supprimé — ✅ CORRIGÉ (2026-08-08)
+
+**Symptôme (établi par lecture de la chaîne d'appels, puis verrouillé par test).** En épisode `auto`
+de la rampe `deployment_mode_schedule`, `W40KEngine.step` recevait l'action échantillonnée par la
+politique et lui **substituait** une pose tirée par le moteur (`_should_auto_deploy_for_agent` →
+`_pick_placement_action`). SB3 range dans son rollout l'action échantillonnée ET son `log_prob`,
+alors que la transition observée vient d'un autre slot : PPO calculait son ratio sur une action
+jamais exécutée. Ordre de grandeur : ~10 steps de déploiement sur ~200 par épisode, sur ~70 % des
+épisodes en début de rampe (`active_ratio_start` 0.3).
+
+**Ce n'est pas un défaut préexistant.** L'ancien mode `fixed` ne produisait AUCUNE transition de
+déploiement (positions rejouées au chargement, sans phase). La régression naît avec `auto`.
+
+**Correction.** Ces steps sont **absorbés** par `BotControlledEnv._ensure_actionable_controlled_turn`
+(`ai/env_wrappers.py`), la boucle qui fait déjà avancer la partie sans remonter les steps à
+l'apprenant — c'est ainsi que les tours du bot et les `WAIT` forcés restent invisibles pour SB3.
+Le déploiement étant la première phase, l'absorption tombe de fait pendant `reset()` : dérouler le
+déploiement dans `reset()` aurait dupliqué le même parcours. Le moteur expose
+`auto_deployment_action(mask)`, qui rend la pose et l'**arme** ; le `step` qui la reçoit l'exécute
+telle quelle et lève si l'appelant qui a armé rejoue autre chose. Un appelant du moteur nu (tests,
+scripts) voit toujours son action remplacée par une pose — là où aucun apprentissage ne se fait, le
+remplacement est le comportement voulu.
+
+**Verrou** : `tests/unit/ai/test_auto_deployment_absorbed_by_wrapper.py` — un épisode complet en
+`auto` où aucun état rendu à l'apprenant n'est un déploiement du joueur contrôlé (rouge prouvé en
+neutralisant l'absorption), le symétrique `active` (le déploiement DOIT rester la décision de
+l'agent), et le contrat de la pose armée.
+
+🟢 **Arbitrage utilisateur : `deployment_random_mix` est SUPPRIMÉ.** Ce bloc portait exactement le
+même motif de substitution (branche jumelle du même `step`) et tirait ses poses par la MÊME fonction
+`_pick_placement_action`, avec le même filtre `open_placement_slots`. Il ne se distinguait de `auto`
+que par sa rampe, et il était `enabled: false` dans les 7 profils. Supprimés : le mécanisme moteur
+(configuration par épisode, prédicat, branche de `step`, 3 clés de `game_state`), le bloc des 7
+profils, l'épinglage « à l'arrêt » de `tests/unit/engine/_config_helpers.py` (plus rien à
+neutraliser), et les mentions de doc. Les mentions historiques datées sont conservées et annotées.
 
 <a id="s0.68"></a>
 ### 0.68 Le premier run du lot est mort sur une instrumentation morte depuis la migration aux entités — ✅ CORRIGÉ (2026-08-08)
@@ -1286,7 +1323,7 @@ pas reprendre :
 |---|---|---|
 | `learning_rate`, `ent_coef` | **ce run** | c'est le RÉGIME d'entraînement, déclaré par le profil qu'on lance |
 | `opponent_mix` (self-play) | **ce run** | une introduction progressive n'a de sens que dans la phase qui l'introduit |
-| déploiement, `deployment_random_mix` | **la vie du modèle** | c'est une COMPÉTENCE acquise : la phase suivante démarre au niveau atteint |
+| déploiement | **la vie du modèle** | c'est une COMPÉTENCE acquise : la phase suivante démarre au niveau atteint |
 | compteur d'épisodes | **la vie du modèle** | axe TensorBoard, ETA, et il alimente la ligne du dessus |
 
 Concrètement : `training_episode_start_index` (converti en index PAR ENVIRONNEMENT via
@@ -1356,7 +1393,8 @@ rampes par-épisode du moteur divisaient pourtant ce compteur local par `total_e
 **global** :
 - `_configure_deployment_mode_for_episode` (mode `fixed` ↔ `active`) ;
 - `_configure_deployment_random_mix_for_episode` (randomisation des ACTIONS de déploiement) — **même
-  défaut, jumeau confirmé**.
+  défaut, jumeau confirmé**. ⚠️ Ce second mécanisme est **SUPPRIMÉ le 2026-08-08** (§0.69) : il
+  faisait doublon avec le mode `auto`, qui tire déjà ses poses au hasard par la même fonction.
 
 **Troisième site, trouvé au grep et corrigé lui aussi** :
 `BotControlledEnv._compute_self_play_ratio_for_episode` ([`ai/env_wrappers.py`](../../../ai/env_wrappers.py))
@@ -1443,7 +1481,8 @@ comme alignant entraînement et évaluation. Elle n'a **jamais** rampé sur un r
 runs `n_envs=48` ont entraîné à `active_ratio_start` constant (0.0 avant le 2026-08-01, 0.3 depuis).
 Les agents antérieurs ont donc vu **beaucoup moins de déploiement actif** qu'annoncé, alors que
 l'évaluation en impose TOUJOURS : l'asymétrie que §0.29 prétend corriger était **toujours là**. Le
-même raisonnement vaut pour `deployment_random_mix` (ratio figé à `force_random_ratio_start`).
+même raisonnement valait pour `deployment_random_mix` (ratio figé à `force_random_ratio_start`),
+mécanisme depuis SUPPRIMÉ (§0.69).
 
 <a id="s0.56"></a>
 ### 0.56 Instrumentation — usage par famille d'action + classement bot-contre-bot — ✅ LIVRÉ (2026-08-02)
@@ -3616,10 +3655,10 @@ Ne jamais extrapoler une durée de run depuis les premiers épisodes.
 
 **Piège de lancement, préexistant** : `--training-config x5_debug` **seul** échoue pour cet agent
 (`No scenario file found … scenario_x5_debug.json`). ArmageddonAgent n'a que
-`scenario_training_armageddon.json`, donc `--scenario <chemin explicite>` est **obligatoire** :
+`scenario_training_armageddon1.json`, donc `--scenario <chemin explicite>` est **obligatoire** :
 ```
 python3 ai/train.py --agent ArmageddonAgent --training-config x5_debug \
-  --scenario config/agents/ArmageddonAgent/scenarios/training/scenario_training_armageddon.json \
+  --scenario config/agents/ArmageddonAgent/scenarios/training/scenario_training_armageddon1.json \
   --new --resolution 5
 ```
 ⚠️ `x5_debug` n'est **pas** un run de quelques minutes malgré son nom : **10 000 épisodes à 48
@@ -3669,7 +3708,7 @@ neutralisé sans le moindre message.
 🔴 **Correction du 2026-08-02** : ce document affirmait que les scénarios holdout `bot-01..04`
 « la portent, pour la reproductibilité ». **C'est faux** : les quatre portent la clé **à `null`**,
 donc le tirage y est **ACTIF**. Le seul scénario du dépôt qui la renseigne réellement est
-`scenario_training_benchmark.json` (CoreAgent, `12345`). `scenario_training_armageddon.json` ne la
+`scenario_training_benchmark.json` (CoreAgent, `12345`). `scenario_training_armageddon1.json` ne la
 porte pas. **À contrôler avant de conclure quoi que ce soit sur une distribution de matchups** —
 et à ne pas déduire de la seule PRÉSENCE de la clé.
 
@@ -4055,7 +4094,7 @@ défaut masquant une donnée corrompue), `4c88ec60` (justification écrite de la
 point 5 ci-dessous).
 Verrou : `tests/unit/engine/test_fly_2103_conformity.py`, **18 tests** (compté par
 `git show <branche>:<fichier>`), dont une **sonde in-engine** sur un vrai `W40KEngine` chargé de
-`scenario_training_armageddon.json`, qui **échoue si elle ne rencontre aucune unité volante**
+`scenario_training_armageddon1.json`, qui **échoue si elle ne rencontre aucune unité volante**
 (« SONDE MUETTE »). ⚠️ **Non validée au-delà de ces tests ciblés** : la vérification large appartient
 à l'utilisateur et n'a pas été faite (§0.51).
 
@@ -4322,12 +4361,12 @@ croissante, sur un SEUL fichier rechargé dans le mode tiré (réutilise les 2 c
 **Preuve in-engine** — `python3 -m pytest tests/unit/engine/test_deployment_mode_schedule.py` : ratio 0.0→ 20/20 `fixed` ;
 ratio 1.0→ 20/20 `active` ; rampe 0→1 (60 ép.)→ part `active` croissante (1re moitié 8, 2e moitié 24),
 avec cohérence stricte mode↔phase (`fixed`→`command`, `active`→`deployment`). Le scheduler est
-**orthogonal** à `deployment_random_mix` (les deux peuvent coexister). ⚠️ `training_only:true` exige
+**orthogonal** à `deployment_random_mix` — mécanisme SUPPRIMÉ depuis le 2026-08-08 (§0.69). ⚠️ `training_only:true` exige
 le scénario sous `.../scenarios/training/` (`_is_training_scenario_context`) — le déposer là pour
 l'activer en training réel ; mettre `enabled:true` dans `x5_new`.
 
 **Emplacements DANS les rosters (mode strict sur le chemin roster réel) — ✅ LIVRÉ.** Le training
-réel ne joue pas un `units[]` figé : il passe par le **template roster** (`scenario_training_armageddon.json`,
+réel ne joue pas un `units[]` figé : il passe par le **template roster** (`scenario_training_armageddon1.json`,
 `agent_roster_ref=training_random`, `opponent_roster_ref=[SM,Orks]`, **siège aléatoire**). Or un
 roster compact ne portait aucune coordonnée → `fixed` était interdit (`_expand_compact_roster_to_basic_units`
 levait). Solution retenue par l'utilisateur (pas de miroir) : **chaque roster déclare `top` ET `bottom`
@@ -4339,32 +4378,33 @@ comme le siège est aléatoire, les deux côtés sont portés. Implémentation :
   préservé). En `fixed` : positions obligatoires (sinon erreur explicite), `count==1` requis, côté
   sélectionné par joueur. En `active` : positions ignorées (roster à double usage). Helper
   `_parse_roster_model_side` (validation stricte col/row/level).
-- Les **4 rosters** training (agent SM/Orks, opponent SM/Orks) portent désormais `top`/`bottom`,
-  produits par le **générateur committé `scripts/gen_roster_positions.py`** (reproductible) :
-  placement en **réseau hexagonal** (pas 9 subhex) par footprint réel (tailles de socle variables
-  persos/véhicules), wall-aware (terrain-mc1), sans chevauchement (le mode `fixed` valide les
-  footprints), dans les bandes haute (~rows 40-104) et basse (~196-260). **Cohérence d'escouade
-  GARANTIE** : le générateur n'accepte un centre d'escouade que si la formation est cohérente. La
-  règle moteur (03.03) exige **la CONNEXITÉ** (une seule chaîne — précision d'arbitre/FAQ) plus
-  « à 9" de CHAQUE autre figurine », mesurée en hex centre-à-centre à x1 et bord d'empreinte à x5+
-  (bascule de résolution `spatial_relations.geometry_is_hex`, 2026-07-29) ; `squad_min_neighbors`=1
-  reste un degré minimal, et `cohesion_distance_mode`="euclidean" ne vaut plus que pour x5 et
-  au-delà. Le générateur vise ≥2 centre-à-centre = borne conservatrice. **L'oracle est la fonction moteur `validate_squad_coherency`** — c'est ELLE
-  que le verrou asserte à la charge (pas une réimplémentation).
-**Preuve in-engine** — `python3 -m pytest tests/unit/engine/test_roster_fixed_positions.py` : 8 épisodes `fixed` (rosters
-+ siège tirés au hasard) → **aucun déploiement, toutes figurines placées, P1 en bande haute / P2 en
-bande basse, escouades cohérentes** ; 3 épisodes `active` → phase `deployment`, sentinelles.
-Cohérence re-vérifiée hors test : 0 figurine sous-cohérente sur 12 chargements (2 sièges × 6 rosters
-aléatoires). Régression : template `active` + rosters positionnés, scheduler off → step normal
-(deployment→move→shoot), aucun crash. Le scheduler `deployment_mode_schedule` rampe donc **strict
-(positions rosters) → déploiement appris** directement sur le vrai flux (rotation SM/Orks + siège
-aléatoires conservés). ⚠️ Si une composition de roster change, relancer `gen_roster_positions.py`.
+- **ABANDONNÉ le 2026-08-08 — les 4 rosters ne portent plus AUCUNE position.** Ils ont porté
+  `top`/`bottom` par figurine, produits par le générateur committé `scripts/gen_roster_positions.py`
+  (placement en réseau hexagonal, footprint réel, wall-aware sur `terrain-mc1`). Deux mesures ont
+  condamné ce montage quand un SECOND terrain est entré dans la rotation :
+  - sur `terrain-mc2`, 3 à 10 figurines par bande et par roster tombent sur un mur. Le loader lève
+    `ValueError ... on wall hex` : l'entraînement CRASHE dès que la rotation tire ce terrain en
+    placement fixe, soit ~70 % des épisodes en début de run (`active_ratio_start` 0.3) ;
+  - même sur `terrain-mc1`, 12 à 17 figurines sur 23-37 se posaient HORS de la zone de déploiement
+    de leur joueur — légal (le loader ne confine à la zone que la voie legacy nommée), mais l'agent
+    démarrait depuis des états qu'aucune partie réelle ne produit.
+  Le générateur et les positions sont supprimés. Le mode `fixed` de la rampe est remplacé par
+  `auto` : une VRAIE phase de déploiement, dont le moteur choisit les poses parmi les slots de
+  STRATÉGIE ouverts (`macro_intents.open_placement_slots` — jamais `ACTION_WAIT`, qui en
+  déploiement met l'unité en réserves 20.01). Les positions sont donc légales et dans les zones
+  sur n'importe quelle carte, présente ou future, sans rien à régénérer.
+  Le mode `fixed` du LOADER reste en place, inchangé, pour la neutralité PvP.
+**Preuve in-engine** — `python3 -m pytest tests/unit/engine/test_auto_deployment_positions.py`
+(ex-`test_roster_fixed_positions.py`) : sur les DEUX terrains, épisodes `auto` → toutes les
+figurines posées, chacune DANS la zone de déploiement de son joueur, escouades cohérentes
+(`validate_squad_coherency`, l'oracle moteur 03.03) ; réserves 20.01 laissées hors table ;
+épisodes `active` → phase `deployment`, sentinelles.
 
 **Suite (mécanique LIVRÉE ; reste l'USAGE + la mesure — arbitrage utilisateur / dépendances).** Un
 agent frais qui reprend :
 1. **Activer le curriculum** : `x5_new.deployment_mode_schedule.enabled = true` puis régler la rampe
    (`active_ratio_start`/`active_ratio_end`/`freeze_after_progress`, p.ex. 0.0→1.0 sur 0.8 de la
-   progression). Aucun autre câblage : le template roster réel (`scenario_training_armageddon.json`)
+   progression). Aucun autre câblage : le template roster réel (`scenario_training_armageddon1.json`)
    marche tel quel, rosters déjà positionnés.
    > 🔴 **RELEVÉ le 2026-07-28 soir — `enabled: true` NE SUFFIT PAS, et c'est le piège exact du
    > profil `x1` aujourd'hui.** Les 3 profils qui la portent (`x1`, `x5_new`, `x5_debug` — vérifié
@@ -4380,8 +4420,7 @@ agent frais qui reprend :
 3. **Mesurer l'objectif curriculum** : win-rate en régime `fixed` (strict) vs `active` au fil de la
    rampe — c'est la métrique qui valide « scénarios fixes → apprendre à se déployer ». **Rejoint
    §0.14 (win-rate)**, ✅ **débloqué le 2026-07-26** (§0.27 corrigé, [§9.2.5](V11_phaseA.md#s9.2.5) livré).
-Décisions ouvertes (utilisateur) : forme exacte de la rampe ; coexistence éventuelle avec
-`deployment_random_mix` ; siège (`agent_seat_mode`) gardé aléatoire ou figé en phase strict.
+Décisions ouvertes (utilisateur) : forme exacte de la rampe ; siège (`agent_seat_mode`) gardé aléatoire ou figé en phase strict.
 
 **Outillage : jouer/visualiser UN scénario explicite en éval (2026-07-22).** Pour observer un
 scénario précis (ex. `scenario_fixed_brawl_sm_orks.json`, placement fixed) avec le modèle courant
@@ -6463,7 +6502,7 @@ fichiers ont été **repointés sur `ArmageddonAgent`** (clé d'agent + `rewards
 
 | Fichier | Changement |
 |---|---|
-| `test_move_mask_is_executable.py`, `test_deployment_per_model_commit.py`, `test_deploy_pool_terrain_zones.py`, `test_deployment_clearance_parity.py` | scénario → `scenarios/training/scenario_training_armageddon.json` |
+| `test_move_mask_is_executable.py`, `test_deployment_per_model_commit.py`, `test_deploy_pool_terrain_zones.py`, `test_deployment_clearance_parity.py` | scénario → `scenarios/training/scenario_training_armageddon1.json` |
 | `test_squad_fight_v11_state.py`, `test_squad_fight_target_parity.py`, `test_t5_bare_loop.py` | clé d'agent seule (ils fabriquent leur scénario) |
 | `test_scenario_bank_migration_v11.py` | les tests du **script** de migration sont conservés ; la partie « banque » vise désormais la banque ArmageddonAgent (**5** scénarios : 1 training + 4 holdout, au lieu de 61) et l'échantillon chargé de bout en bout a été réécrit |
 
@@ -6477,7 +6516,7 @@ restaient VERTS parce que `_resolve_board_dir` ([game_state.py:1630](../../../en
 ne fait que **parser le chemin comme une chaîne**, sans jamais ouvrir le fichier. Les tests ne sont
 pas creux (la logique du resolver est réellement exercée) mais la fixture était **mensongère** :
 le jour où quelqu'un ajoute un `is_file()` dans le resolver, 8 tests tombent pour une mauvaise
-raison. Repointé sur `ArmageddonAgent/scenarios/training/scenario_training_armageddon.json`.
+raison. Repointé sur `ArmageddonAgent/scenarios/training/scenario_training_armageddon1.json`.
 
 ⚠️ **10 fichiers de tests contiennent encore la chaîne `CoreAgent` et sont VERTS — c'est
 normal.** Audités **un par un** (et non par échantillon — la première vérification avait manqué
@@ -7213,7 +7252,7 @@ steps).
 > `FileNotFoundError` explicite — c'est le comportement voulu, pas une régression.
 >
 > **Mesuré après fix** sur ArmageddonAgent : `bot` et `self` résolvent **1** scénario
-> (`training/scenario_training_armageddon.json`) au lieu de 5 ; `holdout` en résout toujours **4**.
+> (`training/scenario_training_armageddon1.json`) au lieu de 5 ; `holdout` en résout toujours **4**.
 > **Non-régression** : `tests/unit/ai/test_training_utils.py`, +4 tests (paramétrés `bot`/`self`) —
 > l'ancien test `..._bot_finds_holdout_when_training_empty`, qui **garantissait la contamination**,
 > est retourné en `..._bot_empty_training_dir_returns_nothing`. Mutation-testé : les 4 sont rouges
@@ -7237,7 +7276,7 @@ l'arborescence de scénarios est différente. Elle **ne s'applique pas à Armage
 n'échoue pas : il réussit et contamine.
 
 **Le scénario d'entraînement seul couvre déjà les 4 matchups** — inutile de chercher la rotation
-ailleurs. `scenario_training_armageddon.json` porte `agent_roster_ref: "training_random"`
+ailleurs. `scenario_training_armageddon1.json` porte `agent_roster_ref: "training_random"`
 (→ `rng.choice` sur les 2 rosters agent, [game_state.py:1187](../../../engine/game_state.py#L1187)) et
 un `opponent_roster_ref` **en liste** de 2 (→ second `rng.choice`,
 [:1200](../../../engine/game_state.py#L1200)), tirages indépendants **refaits à chaque `reset()`**.
@@ -7253,16 +7292,16 @@ et le RNG est reconstruit à chaque appel (`random.Random(seed)`,
 [:1142](../../../engine/game_state.py#L1142)). Si elle est renseignée, **le roster agent devient
 identique à tous les épisodes** — le tirage est neutralisé sans le moindre message. Voulu pour les
 scénarios holdout `bot-01..04` (qui la portent, pour la reproductibilité), mais ce serait un piège
-silencieux dans un scénario d'entraînement. `scenario_training_armageddon.json` ne la porte pas
+silencieux dans un scénario d'entraînement. `scenario_training_armageddon1.json` ne la porte pas
 (`None`) : vérifié. **À contrôler avant de conclure quoi que ce soit sur une distribution de
 matchups.**
 
 **Piège de lancement, préexistant** : `--training-config x5_debug` **seul** échoue pour cet agent
 (`No scenario file found … scenario_x5_debug.json`). ArmageddonAgent n'a que
-`scenario_training_armageddon.json`, donc `--scenario <chemin explicite>` est **obligatoire** :
+`scenario_training_armageddon1.json`, donc `--scenario <chemin explicite>` est **obligatoire** :
 ```
 python3 ai/train.py --agent ArmageddonAgent --training-config x5_debug \
-  --scenario config/agents/ArmageddonAgent/scenarios/training/scenario_training_armageddon.json \
+  --scenario config/agents/ArmageddonAgent/scenarios/training/scenario_training_armageddon1.json \
   --new --resolution 5
 ```
 ⚠️ `x5_debug` = **1000 épisodes** (~2h50 à 8 envs), pas un run de quelques minutes malgré son nom.

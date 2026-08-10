@@ -1,9 +1,22 @@
-"""Verrou du scheduler par-épisode fixed↔active (`deployment_mode_schedule`).
+"""Verrou du scheduler par-épisode auto↔active (`deployment_mode_schedule`).
 
 Pilote le VRAI W40KEngine sur `scenario_fixed_brawl_sm_orks.json` et vérifie :
-  - active_ratio 0.0/0.0  → tous les épisodes en 'fixed'  (pas de phase 'deployment') ;
-  - active_ratio 1.0/1.0  → tous les épisodes en 'active' (phase 'deployment') ;
+  - active_ratio 0.0/0.0  → tous les épisodes en 'auto'   (déploiement joué PAR LE MOTEUR) ;
+  - active_ratio 1.0/1.0  → tous les épisodes en 'active' (déploiement joué par la politique) ;
   - rampe 0.0→1.0         → part 'active' croissante entre 1re et 2e moitié du training.
+
+Ce que la rampe oppose a CHANGÉ le 2026-08-08, et c'est le sujet de ce fichier. Elle opposait
+'active' à 'fixed' : rejouer les positions par figurine écrites dans le roster, SANS phase de
+déploiement. Ces positions étaient générées hors ligne contre un seul terrain — elles tombaient
+sur des murs dès qu'on en ajoutait un second (mesuré : jusqu'à 10 hex de mur sous un socle sur
+`terrain-mc2`, `ValueError ... on wall hex` au chargement) et se plaçaient hors des zones de
+déploiement même sur le terrain d'origine (12 à 17 figurines sur 23-37).
+
+'auto' joue une VRAIE phase de déploiement ; seul change QUI décide des poses — le moteur, pas la
+politique. Les deux modes ont donc désormais la même phase, et c'est justement ce qui rend ce
+verrou nécessaire : leur différence n'est plus lisible dans `phase`, elle l'est dans le compteur
+`_deployment_auto_steps`. Un test qui continuerait de séparer les modes par la phase serait vert
+sans rien vérifier.
 
 Le scheduler lit `self.training_config` ; le test l'injecte après construction (`training_only:
 false` pour isoler la logique du split de chemin). Chemin gym réel, pas de reconstruction offline.
@@ -62,31 +75,195 @@ def _make_env(start: float, end: float, total_episodes: int, freeze: float = 1.0
 
 
 def _collect_modes(env, n: int) -> list[str]:
-    """Rejoue `n` épisodes et renvoie le mode tiré, en vérifiant la cohérence mode ↔ phase moteur."""
+    """Rejoue `n` épisodes et renvoie le mode tiré, en vérifiant la cohérence mode ↔ phase moteur.
+
+    Les DEUX modes ouvrent la phase de déploiement : 'auto' n'est pas un raccourci qui la saute,
+    c'est un déploiement joué. Une assertion de phase par mode ne dirait donc plus rien — elle est
+    remplacée par l'invariant commun.
+    """
     modes = []
     for _ in range(n):
         env.reset(seed=None)
         gs = env.game_state
         mode = gs["deployment_mode_schedule_mode"]
         phase = gs["phase"]
-        if mode == "fixed":
-            assert phase != "deployment", "mode 'fixed' mais phase 'deployment'"
-        else:
-            assert phase == "deployment", f"mode 'active' mais phase {phase!r}"
+        assert mode in ("auto", "active"), f"mode inattendu {mode!r}"
+        assert phase == "deployment", f"mode {mode!r} mais phase {phase!r} — les deux déploient"
         modes.append(mode)
     return modes
 
 
-def test_ratio_zero_always_fixed():
-    """Borne basse : active_ratio 0.0 → 20/20 épisodes en placement manuel."""
+def test_ratio_zero_always_auto():
+    """Borne basse : active_ratio 0.0 → 20/20 épisodes déployés par le moteur."""
     modes = _collect_modes(_make_env(0.0, 0.0, 100), 20)
-    assert set(modes) == {"fixed"}, f"ratio 0.0 devrait ne donner que 'fixed', obtenu {set(modes)}"
+    assert set(modes) == {"auto"}, f"ratio 0.0 devrait ne donner que 'auto', obtenu {set(modes)}"
 
 
 def test_ratio_one_always_active():
     """Borne haute : active_ratio 1.0 → 20/20 épisodes avec phase de déploiement."""
     modes = _collect_modes(_make_env(1.0, 1.0, 100), 20)
     assert set(modes) == {"active"}, f"ratio 1.0 devrait ne donner que 'active', obtenu {set(modes)}"
+
+
+def test_auto_mode_deploys_through_the_engine_and_never_into_reserves():
+    """CE QUI SÉPARE 'auto' de 'active' : les poses viennent du moteur, et ce sont des POSES.
+
+    Deux affirmations, indissociables. La première — le moteur a bien joué — se lit dans
+    `_deployment_auto_steps` : sans elle, un 'auto' qui ne déploierait rien laisserait les unités
+    hors table et le test précédent resterait vert (les modes et la phase seraient corrects).
+
+    La seconde tient à un piège d'espace d'action : `ACTION_WAIT` est OUVERT en phase de
+    déploiement et n'y est pas une attente — le jouer met l'unité en RÉSERVES STRATÉGIQUES
+    (20.01). Un tirage uniforme sur le masque brut envoie donc des unités en réserves sans que
+    personne l'ait demandé ; c'est le défaut mesuré côté bots au chantier 04c (TacticalBot,
+    400 déploiements sur 400 en réserves). Le moteur tire sur `open_placement_slots`, jamais sur
+    le masque brut, et c'est cette assertion qui l'exige.
+    """
+    env = _make_env(0.0, 0.0, 100)
+    env.reset(seed=7)
+    gs = env.game_state
+    assert gs["deployment_mode_schedule_mode"] == "auto"
+    controlled = int(env.config["controlled_player"])
+    # Compté AVANT que le déploiement soit joué : c'est la déclaration du roster (20.01), la seule
+    # référence contre laquelle une réserve créée en cours de déploiement se voit.
+    reserves_declared = sum(1 for u in gs["units"]
+                            if int(u["player"]) == controlled and u["in_strategic_reserves"])
+
+    import numpy as np
+
+    steps = 0
+    while steps < 400 and str(gs["phase"]) == "deployment":
+        mask = env.get_action_mask()
+        legal = np.flatnonzero(mask)
+        assert legal.size > 0, "plus aucune action légale en phase de déploiement"
+        env.step(int(legal[0]))
+        steps += 1
+    assert str(gs["phase"]) != "deployment", f"toujours en déploiement après {steps} steps"
+
+    auto_steps = gs.get("_deployment_auto_steps", 0)
+    assert auto_steps > 0, (
+        "le moteur n'a posé AUCUNE unité en mode 'auto' : le mode ne fait rien, et les "
+        "assertions de mode/phase resteraient vertes sans lui"
+    )
+
+    # Le déploiement ne CRÉE pas de réserves : seules celles déclarées par le roster en sont.
+    # Sans ce compte, un tirage qui jouerait `ACTION_WAIT` passerait inaperçu — les unités
+    # envoyées en réserves sortent des boucles de vérification par la porte du `continue`.
+    reserves_now = sum(1 for u in gs["units"]
+                       if int(u["player"]) == controlled and u["in_strategic_reserves"])
+    assert reserves_now == reserves_declared, (
+        f"{reserves_now - reserves_declared} unité(s) mise(s) en réserves PAR LE DÉPLOIEMENT "
+        f"(déclarées : {reserves_declared}). `ACTION_WAIT` a été joué comme si c'était une pose ; "
+        "en phase de déploiement il met l'unité en réserves stratégiques (20.01)."
+    )
+
+    # VERT VACANT : sans figurine posée, l'assertion « dans la zone » ne regarderait rien.
+    models_cache = gs["models_cache"]
+    squad_models = gs["squad_models"]
+    pools = {int(p): {(int(c), int(r)) for c, r in hexes}
+             for p, hexes in gs["deployment_pools"].items()}
+    placed = 0
+    for unit in gs["units"]:
+        if int(unit["player"]) != controlled or unit["in_strategic_reserves"]:
+            continue
+        for model_id in squad_models[str(unit["id"])]:
+            model = models_cache[model_id]
+            if int(model["col"]) < 0:
+                continue
+            placed += 1
+            assert (int(model["col"]), int(model["row"])) in pools[controlled], (
+                f"figurine {model_id} posée en ({model['col']},{model['row']}), hors de la zone "
+                f"de déploiement du joueur {controlled} — c'est précisément ce que les positions "
+                "pré-calculées du mode 'fixed' ne garantissaient pas"
+            )
+    assert placed > 0, "aucune figurine posée : le contrôle de zone ci-dessus ne regarde rien"
+
+
+def test_engine_placement_pick_never_returns_action_wait():
+    """Le tirage de pose ne rend JAMAIS `ACTION_WAIT`, même quand le masque l'ouvre.
+
+    Verrou DÉTERMINISTE, et c'est le point : le test d'intégration ci-dessus ne peut pas prouver
+    ça, parce qu'il faudrait espérer que `random.choice` tombe sur `ACTION_WAIT` pendant les
+    quelques poses d'un épisode. On construit donc directement le masque piégeur — `ACTION_WAIT`
+    ouvert à côté des slots de stratégie — et on épuise le tirage.
+
+    Ce qui casse si la garde saute : `ACTION_WAIT` en phase de déploiement met l'unité en RÉSERVES
+    STRATÉGIQUES (20.01). Une unité que l'agent croit sur la table joue son premier tour hors
+    table, et le reward la note sur une partie qu'elle ne joue pas.
+    """
+    import numpy as np
+
+    from engine import macro_intents as mi
+
+    env = _make_env(0.0, 0.0, 100)
+    mask = np.zeros(mi.TOTAL_ACTION_SIZE, dtype=bool)
+    mask[mi.ACTION_WAIT] = True
+    for slot in mi.DEPLOY_STRATEGY_SLOTS:
+        mask[slot] = True
+
+    picks = {env._pick_placement_action(mask, "test") for _ in range(200)}
+    assert mi.ACTION_WAIT not in picks, (
+        f"le tirage a rendu ACTION_WAIT ({mi.ACTION_WAIT}) : en déploiement ce n'est pas une "
+        "attente, c'est une mise en RÉSERVES (20.01)"
+    )
+    assert picks <= set(mi.DEPLOY_STRATEGY_SLOTS), f"ids hors slots de stratégie : {picks}"
+    # VERT VACANT : si le tirage ne rendait qu'un seul id, l'assertion ci-dessus tiendrait sans
+    # rien dire du filtre. 200 tirages sur 5 slots ouverts doivent tous les visiter.
+    assert picks == set(mi.DEPLOY_STRATEGY_SLOTS), (
+        f"tous les slots ouverts devraient être atteignables, obtenu {sorted(picks)}"
+    )
+
+
+def test_engine_placement_pick_raises_when_no_slot_is_open():
+    """Aucun slot de pose ouvert → erreur explicite, jamais un repli sur `ACTION_WAIT`.
+
+    Un repli mettrait l'unité en réserves pour masquer un défaut moteur — c'est le fallback
+    anti-erreur que ce dépôt proscrit. Le décodeur lève « Deployment deadlock » en amont ; si on
+    arrive ici, l'état est faux et doit être bruyant.
+    """
+    import numpy as np
+    import pytest as _pytest
+
+    from engine import macro_intents as mi
+
+    env = _make_env(0.0, 0.0, 100)
+    mask = np.zeros(mi.TOTAL_ACTION_SIZE, dtype=bool)
+    mask[mi.ACTION_WAIT] = True  # seul l'id piège est ouvert
+
+    with _pytest.raises(RuntimeError, match="aucun slot de pose"):
+        env._pick_placement_action(mask, "test")
+
+
+def test_every_mode_the_ramp_can_emit_is_accepted_by_the_metrics_tracker():
+    """Les modes PRODUITS par la rampe sont exactement ceux que les métriques ACCEPTENT.
+
+    Ce verrou existe parce que son absence a coûté un défaut bloquant. En renommant `fixed` en
+    `auto` (2026-08-08), `W40KMetricsTracker.DEPLOY_MODES` est resté sur `('active', 'fixed')` :
+    `info["deployment_mode"] = 'auto'` remontait au tracker, qui lève `ValueError` en fin
+    d'épisode — donc TOUT run d'entraînement mourait au premier épisode non-actif, soit ~70 % des
+    épisodes en début de rampe. Rien ne le voyait : le test des métriques vérifiait `'fixed'` de
+    son côté, le test de la rampe `'auto'` du sien, et les deux restaient verts.
+
+    Le contrat est ici, entre les deux, et il est vérifié sur les modes RÉELLEMENT tirés par le
+    moteur — pas sur une liste réécrite à la main, qui divergerait de la même façon.
+    """
+    from ai.metrics_tracker import W40KMetricsTracker
+
+    emitted = set(_collect_modes(_make_env(0.0, 0.0, 100), 5))
+    emitted |= set(_collect_modes(_make_env(1.0, 1.0, 100), 5))
+    assert emitted, "aucun mode collecté — ce test ne prouverait rien"
+    unknown = emitted - set(W40KMetricsTracker.DEPLOY_MODES)
+    assert not unknown, (
+        f"mode(s) {sorted(unknown)} produits par la rampe mais absents de "
+        f"W40KMetricsTracker.DEPLOY_MODES {W40KMetricsTracker.DEPLOY_MODES} : le tracker lèvera en fin "
+        "d'épisode et le run entier mourra"
+    )
+    # Symétrique : un mode déclaré côté métriques que la rampe ne produit plus laisse une série
+    # TensorBoard vide en permanence, qu'on lit comme « pas de données » et non comme un oubli.
+    assert set(W40KMetricsTracker.DEPLOY_MODES) == emitted, (
+        f"DEPLOY_MODES {W40KMetricsTracker.DEPLOY_MODES} et modes réellement tirés {sorted(emitted)} "
+        "ont divergé"
+    )
 
 
 def test_linear_ramp_increases_active_share():

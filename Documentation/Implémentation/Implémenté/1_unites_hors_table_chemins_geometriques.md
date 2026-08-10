@@ -298,7 +298,7 @@ pour la démo.
 ## Ne pas oublier
 
 `tests/unit/engine/test_strategic_reserves_20.py` est pointé sur une fixture à rosters pinnés
-(`scenarios/training/reserves_20_fixture.json`). Depuis l'activation, ce pin n'est plus une
+(`scenarios/training/reserves_20_fixture1.json`). Depuis l'activation, ce pin n'est plus une
 précaution : c'est ce qui tient le fichier debout — 16 de ses tests supposent que toutes les
 unités démarrent posées. Même chose pour `test_bot_ingress_reserves.py`, repointé sur cette même
 fixture : il mesure la **décision** du bot de mettre en réserves, il lui faut donc une liste qui

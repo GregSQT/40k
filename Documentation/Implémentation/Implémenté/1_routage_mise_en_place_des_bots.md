@@ -136,7 +136,7 @@ l'ingress — WAIT y **est** la mise en réserves. `_select_bot_deploy_action` l
 La proposition disait « aucun bug actif ». C'est vrai des bots pris un par un, et faux du chemin
 complet : `_get_bot_action` **est** appelé en phase de déploiement, et la protection de 04c y
 tenait à la seule branche `deployment` de chaque bot. Branche du wrapper retirée, sur
-`scenario_training_armageddon.json`, 5 épisodes, TacticalBot `randomness=0.05` :
+`scenario_training_armageddon1.json`, 5 épisodes, TacticalBot `randomness=0.05` :
 
 | | WAIT ouvert dans le masque | WAIT **joué** (mise en réserves) |
 |---|---|---|
