@@ -72,7 +72,7 @@ def _header(*, cols: int, rows: int, walls: str, units: str) -> str:
         f"[10:00:00] Board: cols={cols} rows={rows} inches_to_subhex=1 hex_radius=2.78 margin=1\n"
         "[10:00:00] Run rules: engagement_zone_subhex=2 engagement_zone_vertical_inches=5.0 "
         "metric.engagement=hex metric.ranged=euclidean move.thru_ez=True move.thru_enemy=False "
-        "move.thru_friendly=True\n"
+        "move.thru_friendly=True cohesion.model_subhex=2 cohesion.global_subhex=9 cohesion.min_neighbors=1\n"
         f"{units}"
         "[10:00:00] === ACTIONS START ===\n"
     )

@@ -162,6 +162,54 @@ def squad_footprint(
     return fp
 
 
+def squad_coherency_offenders(
+    models: Dict[str, Tuple[int, int]],
+    base: Base,
+    coherency_subhex: int,
+    global_subhex: int,
+    min_neighbors: int,
+) -> List[str]:
+    """03.03 — figurines de l'escouade EN VIOLATION de cohérence, nommées.
+
+    « A unit is in coherency while both of the following apply to every model in that unit:
+    within 2" of at least one other model in that unit ; within 9" of every other model. »
+
+    Le VERDICT n'est pas ré-écrit ici : il est délégué à `_coherency_verdict` du MOTEUR, qui
+    porte la partie délicate — la 1re puce n'est pas « au moins un voisin » mais la CONNEXITÉ de
+    toute l'escouade en une seule chaîne. Deux paquets de figurines respectant chacun les 2" à
+    l'intérieur ne sont PAS en cohérence, et une lecture naïve les accepte (le moteur a vécu
+    exactement ce défaut, cf. `_coherency_flags_footprint`). Seule la MESURE est faite ici, avec
+    les empreintes par-figurine de l'analyzer — les mêmes qui servent au BFS de mouvement.
+
+    Mesure d'empreinte à empreinte (`min_distance_between_sets`), c'est-à-dire de bord de socle
+    à bord de socle (01.04), et donc de centre à centre à x1 où une figurine tient dans une case.
+    Les trois seuils viennent de l'entête `Run rules:` du journal analysé, jamais du config du
+    jour. Le volet VERTICAL (5") n'est pas mesuré : `[MODELS:]` porte l'altitude par socle, mais
+    la cohérence verticale n'a jamais été le volet en défaut et l'ajouter sans témoin serait un
+    contrôle non éprouvé — c'est dit dans `analyzer_couverture.md`, pas passé sous silence.
+    """
+    from engine.phase_handlers.shared_utils import _coherency_verdict
+
+    ids = sorted(models)
+    n = len(ids)
+    if n <= 1:
+        # 03.03 ne s'applique qu'aux unités de plus d'une figurine (« a unit that contains more
+        # than one model »).
+        return []
+    footprints = [_model_footprint(*models[mid], base) for mid in ids]
+    neighbor = [[False] * n for _ in range(n)]
+    too_far = [False] * n
+    for i in range(n):
+        for j in range(i + 1, n):
+            d = min_distance_between_sets(footprints[i], footprints[j], max_distance=global_subhex)
+            if d <= coherency_subhex:
+                neighbor[i][j] = neighbor[j][i] = True
+            if d > global_subhex:
+                too_far[i] = too_far[j] = True
+    flags = _coherency_verdict(neighbor, too_far, min_neighbors)
+    return [ids[i] for i, bad in enumerate(flags) if bad]
+
+
 def move_start_status(
     models: Optional[Dict[str, Tuple[int, int]]],
     base: Base,

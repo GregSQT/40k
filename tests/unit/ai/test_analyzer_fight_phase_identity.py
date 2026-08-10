@@ -29,7 +29,7 @@ _HEAD = [
     "[12:00:00] Board: cols=44 rows=60 inches_to_subhex=1 hex_radius=2.78 margin=1",
     "[12:00:00] Run rules: engagement_zone_subhex=2 engagement_zone_vertical_inches=5.0 "
     "metric.engagement=hex metric.ranged=hex move.thru_ez=True move.thru_enemy=False "
-    "move.thru_friendly=True",
+    "move.thru_friendly=True cohesion.model_subhex=2 cohesion.global_subhex=9 cohesion.min_neighbors=1",
     "[12:00:00] Unit 1 (Intercessor) P1: Starting position (-1,-1), HP_MAX=2 "
     "[MODELS: 1#0@(-1,-1,z0)]",
     "[12:00:00] Unit 101 (Intercessor) P2: Starting position (-1,-1), HP_MAX=2 "

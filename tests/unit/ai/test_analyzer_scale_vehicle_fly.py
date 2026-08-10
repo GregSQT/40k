@@ -55,7 +55,7 @@ def _log(body: str, *, inches_to_subhex: int = 5, walls: str = "", board: str = 
         f"[10:00:00] Walls: {walls}\n"
         f"[10:00:00] Objectives: rect b NW:{OBJECTIVES}\n"
         f"[10:00:00] Board: {board} inches_to_subhex={inches_to_subhex} hex_radius=2.78 margin=1\n"
-        f"[10:00:00] Run rules: engagement_zone_subhex={2 * inches_to_subhex} metric.engagement=hex metric.ranged=euclidean move.thru_ez=True move.thru_enemy=False move.thru_friendly=True\n"
+        f"[10:00:00] Run rules: engagement_zone_subhex={2 * inches_to_subhex} metric.engagement=hex metric.ranged=euclidean move.thru_ez=True move.thru_enemy=False move.thru_friendly=True cohesion.model_subhex={2 * inches_to_subhex} cohesion.global_subhex={9 * inches_to_subhex} cohesion.min_neighbors=1\n"
         f"{units}"
         "[10:00:00] === ACTIONS START ===\n"
         f"{body}"

@@ -43,7 +43,7 @@ _HEADER = f"""=== STEP-BY-STEP ACTION LOG ===
 [10:00:00] Walls:
 [10:00:00] Objectives: rect b NW:{OBJECTIVES}
 [10:00:00] Board: cols=220 rows=300 inches_to_subhex=5 hex_radius=2.78 margin=1
-[10:00:00] Run rules: engagement_zone_subhex=10 engagement_zone_vertical_inches=5.0 metric.engagement=hex metric.ranged=euclidean move.thru_ez=True move.thru_enemy=False move.thru_friendly=True
+[10:00:00] Run rules: engagement_zone_subhex=10 engagement_zone_vertical_inches=5.0 metric.engagement=hex metric.ranged=euclidean move.thru_ez=True move.thru_enemy=False move.thru_friendly=True cohesion.model_subhex=10 cohesion.global_subhex=45 cohesion.min_neighbors=1
 [10:00:00] Unit 1 ({SQUAD_TYPE}) P1: Starting position {S}, HP_MAX=5 base=round/6 [MODELS: 1#0@({SHOOTER[0]},{SHOOTER[1]},z0) 1#1@({SHOOTER[0]},{SHOOTER[1] + 1},z0)] [MODEL_TYPES: 1#0={SQUAD_TYPE} 1#1={SERGEANT_TYPE}]
 [10:00:00] Unit 101 (AssaultIntercessor) P2: Starting position {T}, HP_MAX=2 base=round/6 [MODELS: 101#0@({TARGET[0]},{TARGET[1]},z0)]
 [10:00:00] === ACTIONS START ===

@@ -1206,6 +1206,10 @@ def error_totals(stats: Dict[str, Any]) -> Dict[str, int]:
             + _pair('reactive_move_checks', 'to_adjacent_enemy')
             + _pair('reactive_move_checks', 'into_wall')
             + _pair('reactive_move_checks', 'distance_over_roll')
+            # 03.03 : la cohérence se juge à la fin de TOUT déplacement, y compris le pile-in et
+            # la consolidation. Elle est comptée ici, avec les déplacements, plutôt qu'éclatée
+            # entre §1.1 et §1.4 — c'est une règle de MOUVEMENT, une seule mesure, un seul total.
+            + _pair('squad_coherency_violations')
         ),
         # §1.2 — l'advance est une action de la phase de Mouvement mais ses fautes sont comptées
         # ici, avec le tir, parce que c'est là que le rapport les affiche.
@@ -1244,6 +1248,7 @@ def error_totals(stats: Dict[str, Any]) -> Dict[str, int]:
             + _pair('fight_hit_result_mismatch')
             + _pair('fight_wound_threshold_mismatch')
             + _pair('fight_alternation_violations')
+            + _pair('fight_double_pile_in')
         ),
         'dead_units': (
             _pair('dead_unit_moving')
@@ -1482,16 +1487,17 @@ def parse_step_log(filepath: str) -> Dict:
         # moteur. Ce compteur est le point du chantier : il transforme une dérive silencieuse en
         # erreur mesurée, et se déclenchera le jour où un nouvel effet cessera d'être journalisé.
         'state_resync': {'dead_missed': 0, 'alive_missed': 0, 'pos_mismatch': 0},
-        # Le compartiment `skip` a disparu de ces deux structures le 2026-08-10 (V3) : aucune
-        # ligne `SKIP` n'existe dans un step.log — le moteur ne la journalise pas. Il tenait une
-        # ligne « Skip 0 (0.0%) » dans le tableau de comportement et entrait au DÉNOMINATEUR des
-        # pourcentages de ce tableau, où il n'ajoutait jamais rien.
+        # ⚠️ Le compartiment `skip` N'EST PAS alimenté par une ligne `SKIP` du journal — il n'en
+        # existe aucune (cf. V3). Son producteur est `handle_wait` : 10.04 rend une unité ENGAGÉE
+        # inéligible au tir normal, donc son WAIT n'est pas un choix mais un skip imposé par la
+        # règle. Retirer ce compartiment avec le reste du chantier `skip` aurait détruit cette
+        # mesure-là, qui est vivante.
         'shoot_vs_wait': {
-            'shoot': 0, 'wait': 0, 'advance': 0
+            'shoot': 0, 'wait': 0, 'skip': 0, 'advance': 0
         },
         'shoot_vs_wait_by_player': {
-            1: {'shoot': 0, 'wait': 0, 'wait_with_targets': 0, 'wait_no_targets': 0, 'advance': 0},
-            2: {'shoot': 0, 'wait': 0, 'wait_with_targets': 0, 'wait_no_targets': 0, 'advance': 0}
+            1: {'shoot': 0, 'wait': 0, 'wait_with_targets': 0, 'wait_no_targets': 0, 'skip': 0, 'advance': 0},
+            2: {'shoot': 0, 'wait': 0, 'wait_with_targets': 0, 'wait_no_targets': 0, 'skip': 0, 'advance': 0}
         },
         'advance_by_strategy': {
             1: {'aggressive': 0, 'tactical': 0, 'defensive': 0, 'objective': 0},
@@ -1549,6 +1555,8 @@ def parse_step_log(filepath: str) -> Dict:
         'shoot_combi_profile_conflicts': {1: 0, 2: 0},
         'devastating_wounds_correct': {1: 0, 2: 0},
         'devastating_wounds_incorrect': {1: 0, 2: 0},
+        # 03.03 : cohérence d'escouade à la fin de chaque déplacement et à la mise en place.
+        'squad_coherency_violations': {1: 0, 2: 0},
         'dead_unit_waiting': {1: 0, 2: 0},
         # `dead_unit_skipping` (V3) et `fight_from_non_adjacent` (V2) ont été SUPPRIMÉS le
         # 2026-08-10, et ils ne doivent pas être ré-écrits à l'identique :
@@ -1645,6 +1653,10 @@ def parse_step_log(filepath: str) -> Dict:
             'fight': {'total': 0, 'wrong': 0}
         },
         'fight_alternation_violations': {1: 0, 2: 0},
+        # 12.02 « Each unit cannot make more than one pile-in move during this step ». §1.6 ne
+        # pouvait pas le voir : son marqueur d'activation de combat est `CONSOLIDATED` (12.07),
+        # et un double pile-in ne produit aucune consolidation supplémentaire.
+        'fight_double_pile_in': {1: 0, 2: 0},
         'fight_attacks_by_unit': {1: {}, 2: {}},
         'fight_over_cc_nb_by_unit': {1: {}, 2: {}},
         # First occurrence lines for each error type (stores dict with 'episode' and 'line')
@@ -1669,6 +1681,7 @@ def parse_step_log(filepath: str) -> Dict:
             'shoot_over_rng_nb': {1: None, 2: None},
             'shoot_combi_profile_conflicts': {1: None, 2: None},
             'devastating_wounds_incorrect': {1: None, 2: None},
+            'squad_coherency_violations': {1: None, 2: None},
             'dead_unit_waiting': {1: None, 2: None},
             'charge_after_flee': {1: None, 2: None},
             'charge_dead_unit': {1: None, 2: None},
@@ -1717,6 +1730,7 @@ def parse_step_log(filepath: str) -> Dict:
                 'fight': None
             },
             'fight_alternation_violations': {1: None, 2: None},
+            'fight_double_pile_in': {1: None, 2: None},
             'position_log_mismatch': {
                 'move': None,
                 'advance': None,
@@ -2617,12 +2631,14 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     
     agent_shoot_total = (stats['shoot_vs_wait_by_player'][1]['shoot'] +
                         stats['shoot_vs_wait_by_player'][1]['wait'] +
+                        stats['shoot_vs_wait_by_player'][1]['skip'] +
                         stats['shoot_vs_wait_by_player'][1]['advance'])
     bot_shoot_total = (stats['shoot_vs_wait_by_player'][2]['shoot'] +
                       stats['shoot_vs_wait_by_player'][2]['wait'] +
+                      stats['shoot_vs_wait_by_player'][2]['skip'] +
                       stats['shoot_vs_wait_by_player'][2]['advance'])
 
-    for action in ['shoot', 'advance']:
+    for action in ['shoot', 'skip', 'advance']:
         agent_count = stats['shoot_vs_wait_by_player'][1][action]
         bot_count = stats['shoot_vs_wait_by_player'][2][action]
         agent_pct = (agent_count / agent_shoot_total * 100) if agent_shoot_total > 0 else 0
@@ -2962,6 +2978,13 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         if bot_reactive_over_roll > 0 and stats['first_error_lines']['reactive_move_distance_over_roll'][2]:
             first_err = stats['first_error_lines']['reactive_move_distance_over_roll'][2]
             log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    _coh = require_key(stats, 'squad_coherency_violations')
+    _table_row("Coherence d'escouade (03.03):", _fmt_count(_coh[1]), _fmt_count(_coh[2]))
+    for _p in (1, 2):
+        _first = stats['first_error_lines']['squad_coherency_violations'][_p]
+        if _coh[_p] > 0 and _first:
+            log_print(f"  First P{_p} occurrence (Episode {_first['episode']}): {_first['line']}")
+            log_print(f"    {_first['detail']}")
     # SHOOTING ERRORS
     active_debug_section = "1.2"
     log_print("\n" + "-" * 80)
@@ -3190,6 +3213,12 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     if bot_fight_alt > 0 and stats['first_error_lines']['fight_alternation_violations'][2]:
         first_err = stats['first_error_lines']['fight_alternation_violations'][2]
         log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    _dpi = require_key(stats, 'fight_double_pile_in')
+    _table_row("Pile-in double (12.02):", _fmt_count(_dpi[1]), _fmt_count(_dpi[2]))
+    for _p in (1, 2):
+        _first = stats['first_error_lines']['fight_double_pile_in'][_p]
+        if _dpi[_p] > 0 and _first:
+            log_print(f"  First P{_p} occurrence (Episode {_first['episode']}): {_first['line']}")
     _fm = require_key(stats, 'fight_move_invalid')
     for _kind, _label in (('pile_in', 'Pile-in au-dela de 3"'), ('consolidation', 'Conso au-dela de 3"')):
         _table_row(f"{_label}:", _fmt_count(_fm[_kind][1]), _fmt_count(_fm[_kind][2]))

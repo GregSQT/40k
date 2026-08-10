@@ -140,6 +140,59 @@ def _count_faction_activations(state: AnalyzerState, new_effects: "Dict[int, Dic
                 stats['faction_ability_activations'][rule_id][player] += 1
 
 
+#: 03.03 s'applique à la MISE EN PLACE et à la FIN DE TOUT DÉPLACEMENT (« must be set up and end
+#: any kind of move in coherency »). Ces sept verbes sont exactement les lignes qui portent une
+#: position d'arrivée par-figurine : les six déplacements de la matrice plus le déploiement. Une
+#: ligne de tir ou d'attaque porte aussi `[MODELS:]`, mais elle ne termine aucun déplacement —
+#: la contrôler ferait remonter la MÊME formation à chaque salve.
+_COHERENCY_LINE_VERBS = (
+    " MOVED ", " ADVANCED ", " FLED ", " CHARGED ", " PILED IN ", " CONSOLIDATED ", " DEPLOYED ",
+)
+
+
+def _check_line_coherency(state: AnalyzerState, line: str) -> None:
+    """03.03 Coherency — verdict sur les socles d'ARRIVÉE de cette ligne, si elle en porte.
+
+    Trou identifié de longue date (V11 T6-i) : la donnée était là — `[MODELS:]` porte toutes les
+    positions — et rien ne la lisait. Le moteur purge les figurines incohérentes en fin de tour
+    (`end_of_turn_regain_coherency_all_squads`) ; personne ne vérifiait que les formations
+    journalisées respectaient la règle À CHAQUE FIN DE DÉPLACEMENT, qui est ce que 03.03 exige.
+
+    Une ligne = au plus UNE faute par unité, même si trois de ses figurines sont hors cohérence :
+    c'est la FORMATION qui est fautive, et compter par figurine ferait dépendre la gravité de la
+    taille de l'escouade.
+    """
+    from ai.analyzer_perfig import _unit_base, squad_coherency_offenders
+    from ai.analyzer_config import get_run_rule
+
+    if not state.current_line_models:
+        return
+    upper = line.upper()
+    if not any(verb in upper for verb in _COHERENCY_LINE_VERBS):
+        return
+    coh = int(get_run_rule("cohesion.model_subhex"))
+    coh_max = int(get_run_rule("cohesion.global_subhex"))
+    min_neighbors = int(get_run_rule("cohesion.min_neighbors"))
+    stats = state.stats
+    for unit_id, models in state.current_line_models.items():
+        if unit_id not in state.unit_player:
+            continue
+        offenders = squad_coherency_offenders(
+            models, _unit_base(state.unit_base, unit_id), coh, coh_max, min_neighbors
+        )
+        if not offenders:
+            continue
+        player = int(require_key(state.unit_player, unit_id))
+        stats['squad_coherency_violations'][player] += 1
+        first = stats['first_error_lines']['squad_coherency_violations']
+        if first[player] is None:
+            first[player] = {
+                'episode': state.current_episode_num,
+                'line': line.strip(),
+                'detail': f"socles hors cohérence : {' '.join(offenders)}",
+            }
+
+
 def _model_full_hp(state: AnalyzerState, config: AnalyzerConfig, mid: str, squad_hp_max: int) -> int:
     """PV pleins de LA figurine ``mid`` — sa datasheet, pas celle de l'escouade.
 
@@ -362,6 +415,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
             _line_models, _line_heights = parse_models_and_heights(line)
             state.current_line_models = _line_models or {}
             state.current_line_heights = _line_heights or {}
+            _check_line_coherency(state, line)
             if state.current_line_models:
                 for _uid, _models in state.current_line_models.items():
                     if not _models:
@@ -1061,6 +1115,34 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                 double_activation_first[phase] = {'episode': state.current_episode_num, 'line': line.strip()}
                         else:
                             seen_units.add(actor_id)
+
+                    # 12.02, volet « Each unit cannot make more than one pile-in move during this
+                    # step ». Il lui faut sa PROPRE clé : `PILED IN` ne peut pas rejoindre
+                    # `is_activation_marker` ci-dessus, sans quoi le pile-in et la consolidation
+                    # d'une même unité — deux étapes DISTINCTES et toutes deux légales dans la
+                    # même phase (12.02 puis 12.07) — tomberaient sur le même ensemble et
+                    # compteraient un faux doublon. Même identité de phase que la double
+                    # activation (`fight_phase_seq_id`) : un tour porte DEUX phases de combat.
+                    if phase == 'FIGHT' and ") PILED IN " in action_desc_upper:
+                        if player is None:
+                            raise ValueError("player is required for the pile-in check")
+                        _pile_in_phase_id = state.fight_phase_seq_id + (
+                            1 if phase != state.last_phase else 0
+                        )
+                        _pile_in_seen = state.pile_in_seen.setdefault(
+                            (_pile_in_phase_id, int(player)), set()
+                        )
+                        if actor_id in _pile_in_seen:
+                            stats['fight_double_pile_in'][int(player)] += 1
+                            _pile_in_first = require_key(
+                                require_key(stats, "first_error_lines"), "fight_double_pile_in"
+                            )
+                            if _pile_in_first[int(player)] is None:
+                                _pile_in_first[int(player)] = {
+                                    'episode': state.current_episode_num, 'line': line.strip()
+                                }
+                        else:
+                            _pile_in_seen.add(actor_id)
 
                 # Reset markers when turn changes
                 if turn != state.last_turn:

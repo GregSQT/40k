@@ -1030,12 +1030,15 @@ def handle_wait(
     return False
 
 
-# `handle_skip` a été supprimé le 2026-08-10 (vert vacant V3). Il était inatteignable :
-# le moteur ne journalise aucune ligne `SKIP` (`_STEP_LOG_TYPE_MAP` de `w40k_core.py`
-# est une liste blanche qui ne porte pas `skip`). Il portait `dead_unit_skipping`, dont
-# le 0 perpétuel comptait pour un ✅ en §2.1, et le compartiment `skip` du tableau de
-# comportement de tir. Un `SKIP` qui apparaîtrait malgré tout est désormais signalé en
-# §2.7 par `analyzer_core`, au lieu d'être compté par un contrôle que personne n'exerce.
+# `handle_skip` a été supprimé le 2026-08-10 (vert vacant V3). Il était inatteignable : le moteur
+# ne journalise aucune ligne `SKIP` (`_STEP_LOG_TYPE_MAP` de `w40k_core.py` est une liste blanche
+# qui ne porte pas `skip`). Il portait `dead_unit_skipping`, dont le 0 perpétuel comptait pour un
+# ✅ en §2.1. Un `SKIP` qui apparaîtrait malgré tout est signalé en §2.7 par `analyzer_core`, au
+# lieu d'être compté par un contrôle que personne n'exerce.
+#
+# ⚠️ À ne PAS confondre avec le compartiment `shoot_vs_wait['skip']`, qui reste vivant : il est
+# alimenté par `handle_wait` ci-dessus, où 10.04 requalifie en skip le WAIT d'une unité ENGAGÉE
+# (inéligible au tir normal). Deux « skip » homonymes, un seul était mort.
 
 
 def handle_advance(

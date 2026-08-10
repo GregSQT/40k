@@ -22,7 +22,7 @@ _HEAD = [
     "=== STEP-BY-STEP ACTION LOG ===",
     "[12:00:00] Board: cols=220 rows=300 inches_to_subhex=5 hex_radius=2.78 margin=1",
     "[12:00:00] Run rules: engagement_zone_subhex=10 metric.engagement=hex "
-    "metric.ranged=euclidean move.thru_ez=True move.thru_enemy=False move.thru_friendly=True",
+    "metric.ranged=euclidean move.thru_ez=True move.thru_enemy=False move.thru_friendly=True cohesion.model_subhex=10 cohesion.global_subhex=45 cohesion.min_neighbors=1",
 ]
 
 
