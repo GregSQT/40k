@@ -119,14 +119,22 @@ _VERTICAL_ENTRY_KEYS = ("occupied_hexes_by_model", "floor_height_by_model", "MOD
 # synth par-figurine de `shared_utils`, `placed_synths` d'un plan committé, positions d'un plan
 # validé, entrées `units_cache` directes. Ce sont elles qui produisent les touches.
 #
-# GAIN MESURÉ le 2026-08-10, par comptabilité INTERNE À UN SEUL RUN — coût des clés d'un côté,
+# GAIN MESURÉ le 2026-08-11, par comptabilité INTERNE À UN SEUL RUN — coût des clés d'un côté,
 # coût réel des mesures évitées de l'autre, le prix d'une touche étant échantillonné en la
 # recalculant une fois sur vingt plutôt que déduit du prix d'un raté :
-#   x1 (`--resolution 1`, 24 ép.) : touches 86,2 %, 1 purge, 21,0 Mo → **net +12,64 s** ;
-#   x5 (`--resolution 5`,  6 ép.) : touches 83,3 %, 3 purges, 13,7 Mo → **net  +2,42 s**.
-# Une touche coûte PLUS cher qu'un raté (42,97 µs contre 29,53 µs à x1) : les paires redemandées
-# sont les paires proches, celles dont les boucles 3D vont le plus loin. Estimer le gain sur le
-# prix moyen d'un raté le sous-estimait de 40 %.
+#   x1 (`--resolution 1`, 24 ép.) : touches 86,2 %, 5 purges, 28,0 Mo → évité 4,62 s pour 1,20 s
+#                                   de clés, soit **net +3,42 s, ratio 3,9×** ;
+#   x5 (`--resolution 5`,  6 ép.) : touches 84,2 %, 9 purges, 23,1 Mo → évité 1,13 s pour 0,36 s,
+#                                   soit **net +0,76 s, ratio 3,1×**.
+#
+# ⚠️ LIRE LE RATIO, PAS LES SECONDES. Les secondes dépendent du modèle chargé et de la charge
+# machine : une campagne du 2026-08-10, sur le modèle précédent, donnait +12,64 s à x1 pour un
+# ratio de 3,8× — même ratio, secondes ×3,7. Le ratio évité/coût, lui, est stable d'une campagne
+# à l'autre et d'une résolution à l'autre : c'est la seule grandeur transposable.
+#
+# Une touche coûte PLUS cher qu'un raté (42,97 µs contre 29,53 µs, mesuré à x1) : les paires
+# redemandées sont les paires proches, celles dont les boucles 3D vont le plus loin. Estimer le
+# gain sur le prix moyen d'un raté le sous-estimait de 40 %.
 #
 # ⚠️ MÉTHODE — comparer deux runs au chronomètre NE MARCHE PAS ici, et c'est ce qui a d'abord fait
 # conclure (à tort) que ce cache était une perte. Les parties jouées diffèrent d'un run à l'autre,

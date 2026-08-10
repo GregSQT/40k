@@ -150,27 +150,22 @@ Prêts à démarrer sans décision produit :
   pas dans `A_faire/` (l'ancien lien de cette ligne pointait dans le vide)
 - **Tests front — reste T2b/T3a/T7 (couche A) + couches B (vitest) et C (Playwright)**
   (~10 j au total, sécable) → [`A_faire/front_test_auto.md`](A_faire/front_test_auto.md)
-- ✅ **Perf géométrie — cache d'engagement par paire — LIVRÉ le 2026-08-10.** Clé contenant la
-  géométrie (jamais un compteur de version, cf. §0.18), donc auto-invalidante. Gain net mesuré
-  **+12,64 s à x1** et **+2,42 s à x5** par comptabilité interne à un seul run, touches à 86 % / 83 %,
-  mémoire bornée en OCTETS (~32 Mo/processus, `n_envs: 48`) et non en nombre d'entrées.
-  Les 16 boucles de candidats (pool de move, BFS de charge) sont exclues du cache — les y laisser
-  retournait le gain à −0,83 s à x5. Ce point a demandé 4 passes : 1 site deviné par lecture,
-  4 trouvés par échantillonnage des ratés, 11 de plus par review, 1 dernier (un `synth_base`
-  réécrit 30 lignes plus bas que son appel, que j'avais classé « invariant »).
-  ⚠️ **Gain NON re-mesuré après les 2 dernières corrections** (16ᵉ exclusion + facteur mémoire
-  85 → 250) : un entraînement `x1 --new` tournait. Commande de re-mesure dans le doc du chantier.
-  Score d'éval inchangé (0,8500 sur 60 parties, identique à la référence d'avant chantier).
-  Verrouillé par `tests/unit/engine/test_engagement_pair_cache.py` (17 tests, dont l'énumération
-  champ par champ de l'empreinte dans les DEUX sens ; 5 mutations vérifiées rouges).
-  ⚠️ **Deux pièges de méthode consignés dans le doc, à lire avant toute reprise** : (1) comparer
-  deux runs au CHRONOMÈTRE ne marche pas — mêmes réglages, 184 s puis 279 s à x5 ; ça avait fait
-  conclure à tort que ce cache était une perte ; (2) le cache de la carte de cellules de move est
-  **sain**, ses 69 % de ratés viennent d'un plateau qui change réellement — correction tentée, gain
-  nul, annulée.
-  Acquis annexe : marqueurs perf `SQUAD_OBSERVATION` / `SQUAD_ACTION_MASK` / `SQUAD_MOVE_CELL_MAP`
-  (les compteurs ne voyaient que 6,5 % du temps avant eux).
-  → [`A_faire/perf_geometrie_cache.md`](A_faire/perf_geometrie_cache.md)
+- ~~**Perf géométrie — cache d'engagement par paire**~~ — **LIVRÉ le 2026-08-11.** Clé contenant
+  la géométrie (jamais un compteur de version, cf. §0.18), donc auto-invalidante. Gain net
+  **+3,42 s à x1** et **+0,76 s à x5**, soit un ratio évité/coût de **3,9× / 3,1×**, par
+  comptabilité interne à un seul run ; touches 86 % / 84 % ; mémoire bornée en OCTETS
+  (32 Mo/processus, `n_envs: 48`) et non en nombre d'entrées. Les 16 boucles de candidats (pool de
+  move, BFS de charge) sont exclues du cache — les y laisser retournait le gain à −0,83 s à x5.
+  Verrouillé par `tests/unit/engine/test_engagement_pair_cache.py` (18 tests ; 6 mutations
+  vérifiées rouges). Acquis annexe : marqueurs perf `SQUAD_OBSERVATION` / `SQUAD_ACTION_MASK` /
+  `SQUAD_MOVE_CELL_MAP` (les compteurs ne voyaient que 6,5 % du temps avant eux).
+  ⚠️ **Trois pièges de méthode consignés dans le doc, à lire AVANT toute reprise** : (1) comparer
+  deux runs au CHRONOMÈTRE ne marche pas (mêmes réglages, 184 s puis 279 s à x5) — ça avait fait
+  conclure à tort que ce cache était une perte ; (2) comparer les RATIOS et jamais les secondes,
+  qui ont varié d'un facteur 3,7 entre deux modèles quand le ratio bougeait de 3 % ; (3) le cache
+  de la carte de cellules de move est **sain** — ses 69 % de ratés viennent d'un plateau qui change
+  réellement, correction tentée, gain nul, annulée.
+  → [`Implémenté/perf_geometrie_cache.md`](Implémenté/perf_geometrie_cache.md)
 - **Perf `generate_compact_formation`** (½-1 j) — MESURER avant d'implémenter, gain non acquis
   → [`A_faire/perf_generate_compact_formation.md`](A_faire/perf_generate_compact_formation.md)
 - **gzip/Brotli** (½ j) — à faire AVEC l'étape 5 de Security (même proxy)

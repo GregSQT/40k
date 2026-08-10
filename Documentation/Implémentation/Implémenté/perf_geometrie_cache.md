@@ -1,8 +1,16 @@
 # Perf géométrie — supprimer le recalcul de zone d'engagement
 
-> Ouvert le **2026-08-10**. Décision : **option B** (traiter les deux sources dans un seul
-> chantier), retenue contre l'option A (ne cacher que la zone d'engagement) parce qu'elle laissait
-> volontairement en place un mécanisme de cache cassé qu'il aurait fallu rouvrir ensuite.
+> **LIVRÉ le 2026-08-11.** Ouvert le 2026-08-10. Décision d'ouverture : **option B** (traiter les
+> deux sources dans un seul chantier), retenue contre l'option A (ne cacher que la zone
+> d'engagement) parce qu'elle laissait volontairement en place un mécanisme de cache cassé qu'il
+> aurait fallu rouvrir ensuite. La suite a montré que ce mécanisme était en fait **sain** (§2bis.a) :
+> l'option B a donc coûté une demi-journée pour un résultat nul de ce côté, et c'est le second volet
+> — le cache par paire (§2bis.b) — qui porte tout le gain.
+>
+> ⚠️ **Ce document vaut surtout pour ses PIÈGES DE MÉTHODE.** Trois mesures successives ont donné
+> des verdicts contradictoires avant que la bonne méthode ne soit trouvée, et le motif de
+> l'exclusion des candidats a demandé quatre passes. Quiconque rouvre ce sujet doit lire §2bis
+> AVANT de mesurer quoi que ce soit.
 
 ## 1. Ce qui a été mesuré
 
@@ -93,10 +101,16 @@ Implémenté sur `entries_in_engagement_zone`, clé = empreinte de contenu des d
 **Gain mesuré**, par comptabilité interne à UN SEUL run (coût des clés d'un côté, coût réel des
 mesures évitées de l'autre) :
 
-| | touches | purges | mémoire | **net** |
-|---|---|---|---|---|
-| x1 (`--resolution 1`, 24 ép.) | 86,2 % | 1 | 21,0 Mo | **+12,64 s** |
-| x5 (`--resolution 5`, 6 ép.) | 83,3 % | 3 | 13,7 Mo | **+2,42 s** |
+| | touches | purges | mémoire | coût des clés | temps évité | **net** | **ratio** |
+|---|---|---|---|---|---|---|---|
+| x1 (`--resolution 1`, 24 ép.) | 86,2 % | 5 | 28,0 Mo | 1,20 s | 4,62 s | **+3,42 s** | **3,9×** |
+| x5 (`--resolution 5`, 6 ép.) | 84,2 % | 9 | 23,1 Mo | 0,36 s | 1,13 s | **+0,76 s** | **3,1×** |
+
+⚠️ **Lire le RATIO, pas les secondes.** Les secondes dépendent du modèle chargé et de la charge
+machine. La campagne du 2026-08-10, sur le modèle précédent, donnait +12,64 s à x1 — mais pour un
+ratio de 3,8×, identique. Les secondes ont varié d'un facteur 3,7 entre deux campagnes, le ratio
+évité/coût de 3 %. C'est lui la grandeur transposable, et c'est lui qu'il faut comparer si le sujet
+est rouvert.
 
 #### Deux défauts trouvés à la review, tous deux réels et corrigés
 
@@ -160,18 +174,21 @@ nom de la variable et sa distance à la boucle mentent. La seule vérification q
 l'échantillonnage des ratés en production (une pile d'appel sur 50) : un site qui rate
 systématiquement est un site à exclure.
 
-### ⚠️ Mesure finale NON REFAITE
+### Mesure finale (2026-08-11, après les deux dernières corrections)
 
-Les deux dernières corrections (16ᵉ site d'exclusion, facteur mémoire 85 → 250) sont appliquées,
-typées et couvertes par les tests, mais **le gain n'a pas été re-mesuré après elles** : un
-entraînement `x1 --new` a démarré le 2026-08-10 à 21:35 et réécrit `model_ArmageddonAgent.zip`,
-que l'évaluation charge. Mesurer pendant aurait faussé les deux runs.
+Refaite une fois l'entraînement `x1 --new` terminé, donc **sur le nouveau modèle**. Le tableau du
+§2bis.b porte ces chiffres-là. Le plafond mémoire effectif ayant été divisé par 3 (facteur 85 →
+250), les purges passent de 1 à 5 (x1) et de 3 à 9 (x5) — le cache reste largement gagnant, et il
+tient désormais sous les 32 Mo annoncés au lieu de les dépasser silencieusement.
 
-Chiffres à re-établir quand la machine est libre — ils ne peuvent que bouger, le plafond mémoire
-effectif ayant été divisé par 3 :
+Commande de re-mesure :
 
     W40K_PERF_TIMING=1 W40K_PERF_TIMING_MIN_EPISODE=1 p ai/train.py --agent ArmageddonAgent \
       --training-config x1_debug --test-only --step --resolution 1 --test-episodes 4
+
+Elle exige de réinstrumenter temporairement `entries_in_engagement_zone` (compteurs touches/ratés,
+chrono des clés, sonde d'une touche sur vingt) : l'instrumentation n'est pas laissée dans le code,
+elle coûterait sur le chemin le plus chaud du moteur.
 
 Le prix d'une touche n'est pas déduit du prix d'un raté : une touche sur vingt est **recalculée
 quand même**, uniquement pour la chronométrer. Il fallait le mesurer, parce que le résultat est
