@@ -7,7 +7,11 @@ from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from shared.data_validation import require_key
 from engine.combat_utils import calculate_hex_distance, ranged_edge_distance, get_distance_metric
-from ai.analyzer_perfig import position_is_on_battlefield
+from ai.analyzer_perfig import (
+    parse_shooter_models_segment,
+    per_model_attack_cap,
+    position_is_on_battlefield,
+)
 
 if TYPE_CHECKING:
     from ai.analyzer_state import AnalyzerState
@@ -217,13 +221,16 @@ def handle_shoot(
 
     if weapon_match:
         weapon_display_name = weapon_match.group(1)
+        # Résultat de touche 05.01 : la ligne dit le jet et le seuil, le verdict se lit à la
+        # présence du segment `Wound`. Cf. ai/analyzer_hit.py.
+        from ai.analyzer_hit import check_hit_result
+        check_hit_result(state, stats, line, action_desc, player, is_melee=False)
         # Seuil de blessure 05.02 : la ligne dit le seuil qu'elle a appliqué, on le recalcule
         # depuis F et E. Cf. ai/analyzer_wound.py.
-        from ai.analyzer_phases.fight_handler import _shooter_models
         from ai.analyzer_wound import check_wound_threshold
         check_wound_threshold(
             state, config, stats, line, action_desc, player, shooter_unit_type,
-            weapon_display_name, target_id, _shooter_models(action_desc), is_melee=False,
+            weapon_display_name, target_id, parse_shooter_models_segment(action_desc), is_melee=False,
         )
         weapon_name_lower = weapon_display_name.lower()
         weapons_info = require_key(config.unit_weapons_cache, shooter_unit_type)
@@ -386,20 +393,37 @@ def handle_shoot(
                     state.shot_sequence_counts[seq_key] += 1
                 current_shot_index = state.shot_sequence_counts[seq_key]
                 shooter_player_for_stats = require_key(state.unit_player, shooter_id)
-                # Class B (comptage per-figurine) : le plafond de tirs d'une escouade =
-                # (nb de socles vivants qui tirent) × NB par modèle. Les socles vivants sont
-                # listés dans le segment [MODELS:] de la ligne (current_line_models). Sans
-                # segment (logs anciens/synthétiques) → 1 modèle (comportement ancre legacy).
-                # Jumeau tir du calcul de fight_handler : [MODELS:] de la ligne, sinon
-                # l'effectif persistant connu, sinon 1 (borne minimale). Voir fight_handler pour
-                # le cas qui rend [MODELS:] absent.
+                # Effectif de repli quand le journal ne nomme pas les tireurs : [MODELS:] de la
+                # ligne, sinon l'effectif persistant connu, sinon 1 (borne minimale).
                 n_shooter_models = (
                     len(state.current_line_models.get(shooter_id, {}))  # get allowed
                     or state.unit_models_alive.get(shooter_id, 0)  # get allowed
                     or 1
                 )
-                rng_nb_squad = rng_nb * n_shooter_models
-                rapid_fire_value_squad = rapid_fire_value * n_shooter_models
+                # PLAFOND PAR FIGURINE (vert vacant V14). Le tir restait au niveau ESCOUADE
+                # (`NB du type d'escouade × socles vivants`) alors que la mêlée était passée par
+                # figurine : même cause de faux positif — une escouade hétérogène (règle 19,
+                # sergent, arme spéciale) où le NB du type de tête ne vaut pas celui du socle qui
+                # tire — et même remède déjà disponible. C'est le motif d'échec n°1 du dépôt : une
+                # correction faite d'un seul côté d'un miroir. Le calcul est désormais LE MÊME
+                # objet que celui de `fight_handler._cc_cap_for_line`.
+                # Aucun bonus d'attaques au tir : `waaagh_melee_atk` est explicitement de MÊLÉE
+                # (08.04), et l'appliquer ici relèverait le plafond là où rien ne le relève.
+                shooter_models = parse_shooter_models_segment(action_desc)
+                rng_nb_squad = per_model_attack_cap(
+                    shooter_models, state.model_types, shooter_unit_type, weapon_name_for_limits,
+                    config.unit_attack_limits, "rng_nb_by_weapon", config.rng_nb_by_weapon_global,
+                    rng_nb, n_shooter_models,
+                )
+                # [RAPID FIRE X] 24.30 : « increase this weapon's Attacks by X ». X est un
+                # attribut de l'ARME, donc il suit la même résolution par figurine que le NB —
+                # le compter au niveau escouade rouvrirait, sur le seul terme bonus, l'écart que
+                # la ligne ci-dessus vient de fermer.
+                rapid_fire_value_squad = per_model_attack_cap(
+                    shooter_models, state.model_types, shooter_unit_type, weapon_name_for_limits,
+                    config.unit_attack_limits, "rapid_fire_by_weapon",
+                    config.rapid_fire_by_weapon_global, rapid_fire_value, n_shooter_models,
+                )
                 # [RAPID FIRE] 24.30 — le controle per-shot « ce tir est-il LE tir bonus ? »
                 # a ete SUPPRIME le 2026-07-29 (V11 §0hist.38). Il exigeait que le marqueur
                 # n'apparaisse QUE sur les tirs d'index > NB de base : une distinction heritee

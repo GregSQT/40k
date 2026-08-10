@@ -16,9 +16,10 @@ Aucun fallback masquant une erreur : si une donnée requise manque, on lève.
 """
 
 import re
-from typing import Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from engine.hex_utils import compute_occupied_hexes, min_distance_between_sets
+from shared.data_validation import require_key
 
 # `<mid>@(<col>,<row>)` ou `<mid>@(<col>,<row>,z<hauteur>)` — mid = token sans espace contenant '#'.
 #
@@ -242,6 +243,73 @@ def resolve_weapon_value(
     if name in global_map:
         return global_map[name]
     return None
+
+
+_SHOOTER_MODELS_RE = re.compile(r'\[SHOOTER_MODELS: ([^\]]+)\]')
+
+
+def parse_shooter_models_segment(text: str) -> Tuple[str, ...]:
+    """Socles qui ont RÉELLEMENT tiré ou frappé sur cette ligne (`[SHOOTER_MODELS:]`), ou ().
+
+    Vivait en privé dans `analyzer_phases/fight_handler`, que `shoot_handler` importait par son
+    nom souligné — l'aveu que la donnée n'est pas propre à la mêlée. Elle est ici, à côté des
+    autres lecteurs de segment per-figurine (`parse_models_segment`, `parse_target_models_segment`).
+    """
+    m = _SHOOTER_MODELS_RE.search(text)
+    return tuple(m.group(1).split()) if m else ()
+
+
+def per_model_attack_cap(
+    shooters: Tuple[str, ...],
+    model_types: Dict[str, str],
+    squad_unit_type: str,
+    weapon_display_name: str,
+    unit_attack_limits: Dict[str, Any],
+    per_unit_key: str,
+    global_by_weapon: Dict[str, int],
+    squad_value: int,
+    n_models: int,
+    bonus: int = 0,
+) -> int:
+    """Plafond d'attaques d'UNE ligne, calculé PAR FIGURINE quand le journal le permet.
+
+    UN SEUL calcul pour le TIR et pour la MÊLÉE. Il a d'abord été écrit du seul côté mêlée
+    (`fight_handler._cc_cap_for_line`, 2026-08-09), et le côté tir est resté au niveau ESCOUADE
+    pendant que la doc de couverture le nommait « le jumeau non traité » (vert vacant V14). C'est
+    exactement le motif d'échec n°1 de ce dépôt : une correction faite d'un côté et pas de l'autre.
+
+    Deux données rendent le calcul juste :
+      - `[MODEL_TYPES:]` (entête d'épisode) donne la DATASHEET de chaque socle. Sans elle, le NB
+        vient du type d'escouade — faux dès qu'un personnage est rattaché (règle 19) ou qu'un
+        sergent porte une autre arme. Cinq armes s'appellent « Close Combat Weapon », de NB 2 à 6 ;
+        au tir, un pistolet de sergent dans une escouade Vanguard produit le même écart.
+      - `[SHOOTER_MODELS:]` nomme les socles qui ont RÉELLEMENT tiré / frappé sur cette ligne. Le
+        pool se compte sur eux, pas sur l'effectif entier.
+
+    `bonus` est le modificateur d'ATTAQUES en vigueur, LU par l'appelant dans `T{tour} EFFECTS:`
+    (`waaagh_melee_atk`) et jamais redeviné ici : le coder ferait vivre une seconde définition de
+    la règle, qui divergerait le jour où la constante du moteur bouge. Il s'ajoute PAR FIGURINE —
+    « add 1 to the Attacks characteristic » modifie la caractéristique, pas le total d'escouade.
+
+    REPLI EXPLICITE sur `(squad_value + bonus) × n_models` quand le journal ne porte pas ces
+    segments : un journal antérieur au format reste analysable, avec la précision qu'il permet et
+    pas davantage. Ce n'est pas un défaut masqué, c'est la même mesure qu'avant sur une donnée qui
+    n'a pas changé.
+    """
+    if not shooters or not model_types:
+        return (squad_value + bonus) * n_models
+
+    total = 0
+    for mid in shooters:
+        model_type = model_types.get(mid, squad_unit_type)  # get allowed : socle hors [MODEL_TYPES:]
+        limits = unit_attack_limits.get(model_type)  # get allowed : type hors registre
+        value = None
+        if limits is not None:
+            value = resolve_weapon_value(
+                weapon_display_name, require_key(limits, per_unit_key), global_by_weapon,
+            )
+        total += (value if value is not None else squad_value) + bonus
+    return total
 
 
 def models_for_unit(

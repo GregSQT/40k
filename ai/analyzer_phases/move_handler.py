@@ -78,6 +78,138 @@ def handle_move_or_fled(
     return False
 
 
+def _check_fall_back_move(state, line, action_desc, player, move_unit_id,
+                          start_col, start_row, dest_col, dest_row, _position_cache_set) -> None:
+    """Les trois volets de 09.07 FALL-BACK MOVE que `step.log` permet de contrôler.
+
+    Vert vacant V10 : le fall-back était le SEUL des six déplacements sans aucun contrôle de
+    budget ni de chemin — `_handle_fled` ne regardait que la collision d'ancre et le mur
+    d'arrivée. Une unité pouvait donc traverser la moitié du plateau en battant en retraite sans
+    que rien ne le remonte.
+
+    « 09 Movement phase.pdf », 09.07, mot pour mot :
+
+      MAXIMUM DISTANCE: Your unit's M characteristic.
+      ELIGIBLE IF: Your unit is engaged.
+      EFFECT: Your unit moves as described in Moving (03).
+      AFTER MOVING: ▪ Your unit must be unengaged.
+
+    Les trois se mesurent depuis `[MODELS:]`, et par les MÊMES primitives que move / advance /
+    charge — pas une quatrième copie de la géométrie (c'est ce qui avait fait diverger les quatre
+    contrôles avant leur mutualisation dans `_per_model_move_violation`).
+
+    Ce qui n'est PAS contrôlé ici, et pourquoi :
+    - le MODE (ordered retreat / desperate escape) n'est pas journalisé, donc le volet
+      « WHILE MOVING » est hors de portée : cf. `force_thru_enemy` dans
+      `analyzer._build_move_bfs_blockers`.
+    - « AFTER MOVING: not eligible to shoot / declare a charge » est déjà porté par #14
+      (`shoot_after_flee`) et #24 (`charge_invalid.fled`) ; le volet « start an action » exige
+      les lignes d'action (16.01), absentes du journal.
+    """
+    from ai.analyzer import (
+        _build_move_bfs_blockers,
+        _per_model_move_violation,
+        is_within_engine_engagement_zone,
+        _get_engagement_zone_for_analyzer,
+        _get_inches_to_subhex_for_analyzer,
+    )
+    from ai.analyzer_perfig import surviving_start_models
+
+    stats = state.stats
+    # Recale le cache sur la position de DÉPART du journal avant toute mesure — jumeau exact de
+    # `_handle_move` (`state.unit_positions` sert de base à l'instantané ci-dessous, et le mobile
+    # est déjà dans `units_moved`, donc c'est SA valeur de cache qui serait reprise).
+    if move_unit_id not in state.unit_positions or state.unit_positions[move_unit_id] != (start_col, start_row):
+        _position_cache_set(state.unit_positions, move_unit_id, start_col, start_row)
+
+    if state.positions_at_move_phase_start:
+        positions_at_movement = dict(state.positions_at_move_phase_start)
+        for uid, pos in state.unit_positions.items():
+            if uid in state.units_moved:
+                positions_at_movement[uid] = pos
+    else:
+        positions_at_movement = dict(state.unit_positions)
+    unit_hp_at_movement = dict(state.unit_hp)
+
+    start_models = surviving_start_models(
+        state.positions_by_model.get(move_unit_id),  # get allowed
+        state.current_line_models.get(move_unit_id),  # get allowed
+    )
+
+    # ── ELIGIBLE IF: Your unit is engaged ──────────────────────────────────────────────────
+    # Socles de DÉPART, même primitive que #3 (`move_adjacent_before_non_flee`) — dont ce
+    # contrôle est le NÉGATIF : l'un punit le move normal parti d'un engagement, l'autre punit
+    # le fall-back parti sans engagement. Les deux doivent donc mesurer la même grandeur.
+    positions_before = {
+        uid: pos for uid, pos in positions_at_movement.items()
+        if unit_hp_at_movement.get(uid, 0) > 0  # get allowed : unité absente = pas d'obstacle
+    }
+    engaged_before = is_within_engine_engagement_zone(
+        move_unit_id, state.unit_player, positions_before, unit_hp_at_movement,
+        engagement_zone=_get_engagement_zone_for_analyzer(),
+        position_override=(start_col, start_row),
+        positions_by_model=state.positions_by_model, unit_base=state.unit_base,
+        **state.engagement_3d_kwargs(),
+        subject_models=start_models,
+    )
+    if not engaged_before:
+        stats['flee_from_unengaged'][player] += 1
+        if stats['first_error_lines']['flee_from_unengaged'][player] is None:
+            stats['first_error_lines']['flee_from_unengaged'][player] = {
+                'episode': state.current_episode_num, 'line': line.strip()
+            }
+
+    # ── AFTER MOVING: Your unit must be unengaged ──────────────────────────────────────────
+    # Socles et hauteurs d'ARRIVÉE (le `[MODELS:]` de CETTE ligne) : mesurer une arrivée à
+    # l'altitude du départ inverse le gate vertical de 03.04.
+    positions_after = dict(positions_before)
+    positions_after[move_unit_id] = (dest_col, dest_row)
+    engaged_after = is_within_engine_engagement_zone(
+        move_unit_id, state.unit_player, positions_after, unit_hp_at_movement,
+        engagement_zone=_get_engagement_zone_for_analyzer(),
+        position_override=(dest_col, dest_row),
+        positions_by_model=state.positions_by_model, unit_base=state.unit_base,
+        **state.engagement_3d_kwargs(),
+        subject_models=state.current_line_models.get(move_unit_id),  # get allowed
+        subject_heights=state.current_line_heights.get(move_unit_id),  # get allowed
+    )
+    if engaged_after:
+        stats['flee_still_engaged'][player] += 1
+        if stats['first_error_lines']['flee_still_engaged'][player] is None:
+            stats['first_error_lines']['flee_still_engaged'][player] = {
+                'episode': state.current_episode_num, 'line': line.strip()
+            }
+
+    # ── MAXIMUM DISTANCE: M + chemin de 03 Moving ──────────────────────────────────────────
+    # Aucune garde « la position a-t-elle changé ? » : `_per_model_move_violation` ne mesure que
+    # les socles qui ont BOUGÉ, donc un fall-back immobile n'y coûte aucun BFS. Une garde à
+    # l'ancre aurait au contraire fait sauter le contrôle sur les reformations, où l'ancre ne
+    # bouge pas alors que les figurines, elles, se déplacent.
+    # 21.03 : le vol est DÉCLARÉ, pas acquis par le keyword — même lecture que move et charge,
+    # et la ligne `FLED [FLY]` porte bien le marqueur.
+    flee_is_fly = re.search(r'FLED\s+\[FLY\]\s+from', action_desc, re.IGNORECASE) is not None
+    flee_range = int(require_key(state.unit_move, move_unit_id))
+    if flee_is_fly:
+        flee_range = max(0, flee_range - 2 * _get_inches_to_subhex_for_analyzer())
+    occupied_positions, enemy_adjacent_hexes = _build_move_bfs_blockers(
+        state.positions_by_model, positions_at_movement, state.unit_base,
+        state.unit_player, unit_hp_at_movement, move_unit_id,
+        force_thru_enemy=True,
+    )
+    if _per_model_move_violation(
+        start_models,
+        state.current_line_models.get(move_unit_id),  # get allowed
+        (start_col, start_row), (dest_col, dest_row),
+        flee_range, flee_is_fly,
+        state.wall_hexes, occupied_positions, enemy_adjacent_hexes,
+    ):
+        stats['move_distance_over_limit']['flee'][player] += 1
+        if stats['first_error_lines']['move_distance_over_limit']['flee'][player] is None:
+            stats['first_error_lines']['move_distance_over_limit']['flee'][player] = {
+                'episode': state.current_episode_num, 'line': line.strip()
+            }
+
+
 def _handle_fled(state, config, line, action_desc, player, turn, phase, fled_match,
                  _track_action_phase_accuracy, _position_cache_set, _debug_log, _get_unit_hp_value):
     stats = state.stats
@@ -120,8 +252,7 @@ def _handle_fled(state, config, line, action_desc, player, turn, phase, fled_mat
         return True  # equivalent to continue
 
     _check_fall_back_move(state, line, action_desc, player, move_unit_id,
-                          start_col, start_row, dest_col, dest_row, _position_cache_set,
-                          _get_unit_hp_value, turn, phase)
+                          start_col, start_row, dest_col, dest_row, _position_cache_set)
 
     unit_hp_value = require_key(state.unit_hp, move_unit_id)
     _debug_log(f"[FLED DEBUG] BEFORE update: unit_hp[{move_unit_id}] = {unit_hp_value}")

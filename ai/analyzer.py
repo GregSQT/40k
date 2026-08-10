@@ -1273,6 +1273,13 @@ def parse_step_log(filepath: str) -> Dict:
         # Seuil de blessure 05.02 (cf. ai/analyzer_wound.py). `_unverifiable` compte les lignes
         # que le contrôle a refusé de juger faute de donnée : sans lui, un compteur à zéro ne
         # distingue pas « rien à signaler » de « plus rien de regardé ».
+        # 05.01 HIT ROLLS — jumeau du seuil de blessure ci-dessous. `*_checked` compte les
+        # lignes RÉELLEMENT jugées : sans lui, un `_mismatch` à 0 ne distingue pas « aucune
+        # faute » de « le contrôle ne regarde plus rien » (cf. ai/analyzer_hit.py).
+        'shoot_hit_result_mismatch': {1: 0, 2: 0},
+        'shoot_hit_result_checked': {1: 0, 2: 0},
+        'fight_hit_result_mismatch': {1: 0, 2: 0},
+        'fight_hit_result_checked': {1: 0, 2: 0},
         'shoot_wound_threshold_mismatch': {1: 0, 2: 0},
         'shoot_wound_threshold_unverifiable': {1: 0, 2: 0},
         'fight_wound_threshold_mismatch': {1: 0, 2: 0},
@@ -1392,6 +1399,8 @@ def parse_step_log(filepath: str) -> Dict:
         'first_error_lines': {
             'wall_collisions': {1: None, 2: None},
             'move_to_adjacent_enemy': {1: None, 2: None},
+            'shoot_hit_result_mismatch': {1: None, 2: None},
+            'fight_hit_result_mismatch': {1: None, 2: None},
             'shoot_wound_threshold_mismatch': {1: None, 2: None},
             'fight_wound_threshold_mismatch': {1: None, 2: None},
             'dead_unit_moving': {1: None, 2: None},
@@ -1847,6 +1856,28 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         _table_row(
             f"  ↳ lignes non verifiables ({label}):",
             _fmt_count(stats[f'{key}_unverifiable'][1]), _fmt_count(stats[f'{key}_unverifiable'][2]),
+        )
+
+    def _hit_result_rows(stats: Dict[str, Any], key: str, label: str) -> None:
+        """Jumeau strict de `_wound_threshold_rows` pour 05.01, seconde ligne comprise.
+
+        Ici la seconde ligne compte les lignes JUGÉES et non les non-jugeables : côté touche, ce
+        qui échappe au contrôle n'est pas une donnée manquante mais une absence de jet
+        ([TORRENT], [SUSTAINED HITS]). Le besoin est le même — distinguer « aucune faute » de
+        « plus rien n'est regardé » — la grandeur disponible ne l'est pas.
+        """
+        _table_row(
+            f"Verdict de touche faux ({label}, 05.01):",
+            _fmt_count(stats[f'{key}_mismatch'][1]), _fmt_count(stats[f'{key}_mismatch'][2]),
+        )
+        for _pl in (1, 2):
+            _first = stats['first_error_lines'][f'{key}_mismatch'][_pl]
+            if stats[f'{key}_mismatch'][_pl] > 0 and _first:
+                log_print(f"  First P{_pl} occurrence (Episode {_first['episode']}): {_first['line']}")
+                log_print(f"    {_first['detail']}")
+        _table_row(
+            f"  ↳ jets de touche juges ({label}):",
+            _fmt_count(stats[f'{key}_checked'][1]), _fmt_count(stats[f'{key}_checked'][2]),
         )
 
     def _fmt_count_pct(value: int, total: int) -> str:
@@ -2593,6 +2624,36 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         if bot_move_over > 0 and stats['first_error_lines']['move_distance_over_limit']['move'][2]:
             first_err = stats['first_error_lines']['move_distance_over_limit']['move'][2]
             log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+        # 09.07 FALL-BACK MOVE — les trois volets contrôlables. Ils vivent dans la section MOVE
+        # (et pas ailleurs) parce que le fall-back EST un type de mouvement de la phase de
+        # Mouvement au même titre que le normal move et l'advance (09.02, « Select Move Type »).
+        agent_flee_over = stats['move_distance_over_limit']['flee'][1]
+        bot_flee_over = stats['move_distance_over_limit']['flee'][2]
+        _table_row("Fall-back au-dela du budget:", _fmt_count(agent_flee_over), _fmt_count(bot_flee_over))
+        if agent_flee_over > 0 and stats['first_error_lines']['move_distance_over_limit']['flee'][1]:
+            first_err = stats['first_error_lines']['move_distance_over_limit']['flee'][1]
+            log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+        if bot_flee_over > 0 and stats['first_error_lines']['move_distance_over_limit']['flee'][2]:
+            first_err = stats['first_error_lines']['move_distance_over_limit']['flee'][2]
+            log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+        agent_flee_unengaged = stats['flee_from_unengaged'][1]
+        bot_flee_unengaged = stats['flee_from_unengaged'][2]
+        _table_row("Fall-back sans engagement:", _fmt_count(agent_flee_unengaged), _fmt_count(bot_flee_unengaged))
+        if agent_flee_unengaged > 0 and stats['first_error_lines']['flee_from_unengaged'][1]:
+            first_err = stats['first_error_lines']['flee_from_unengaged'][1]
+            log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+        if bot_flee_unengaged > 0 and stats['first_error_lines']['flee_from_unengaged'][2]:
+            first_err = stats['first_error_lines']['flee_from_unengaged'][2]
+            log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+        agent_flee_engaged = stats['flee_still_engaged'][1]
+        bot_flee_engaged = stats['flee_still_engaged'][2]
+        _table_row("Fall-back finit engage:", _fmt_count(agent_flee_engaged), _fmt_count(bot_flee_engaged))
+        if agent_flee_engaged > 0 and stats['first_error_lines']['flee_still_engaged'][1]:
+            first_err = stats['first_error_lines']['flee_still_engaged'][1]
+            log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+        if bot_flee_engaged > 0 and stats['first_error_lines']['flee_still_engaged'][2]:
+            first_err = stats['first_error_lines']['flee_still_engaged'][2]
+            log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
         agent_mas_over = stats['move_after_shooting_distance_over_limit'][1]
         bot_mas_over = stats['move_after_shooting_distance_over_limit'][2]
         _table_row("MoveAfterShoot > rule dist:", _fmt_count(agent_mas_over), _fmt_count(bot_mas_over))
@@ -2732,6 +2793,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
             # NOMME l'unite qui engage la cible : jumeau du diagnostic 1.1. Sans elle, la ligne
             # ne se verifie pas a la lecture.
             log_print(f"    Target engaged with: {_offenders_str(first_err)}")
+    _hit_result_rows(stats, "shoot_hit_result", "tir")
     _wound_threshold_rows(stats, "shoot_wound_threshold", "tir")
     agent_cq_unengaged_target = stats['close_quarters_shot_at_unengaged_target'][1]
     bot_cq_unengaged_target = stats['close_quarters_shot_at_unengaged_target'][2]
@@ -2862,6 +2924,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     if bot_fight_over_cc > 0 and stats['first_error_lines']['fight_over_cc_nb'][2]:
         first_err = stats['first_error_lines']['fight_over_cc_nb'][2]
         log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    _hit_result_rows(stats, "fight_hit_result", "melee")
     _wound_threshold_rows(stats, "fight_wound_threshold", "melee")
     agent_fight_alt = stats['fight_alternation_violations'][1]
     bot_fight_alt = stats['fight_alternation_violations'][2]
@@ -3281,6 +3344,11 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         stats['move_adjacent_before_non_flee'][1] + stats['move_adjacent_before_non_flee'][2] +
         stats['move_distance_over_limit']['move'][1] + stats['move_distance_over_limit']['move'][2] +
         stats['move_after_shooting_distance_over_limit'][1] + stats['move_after_shooting_distance_over_limit'][2] +
+        # 09.07 : le fall-back est un type de mouvement de la phase de Mouvement (09.02), ses
+        # infractions entrent donc dans le total MOVE, pas dans un total à part.
+        stats['move_distance_over_limit']['flee'][1] + stats['move_distance_over_limit']['flee'][2] +
+        stats['flee_from_unengaged'][1] + stats['flee_from_unengaged'][2] +
+        stats['flee_still_engaged'][1] + stats['flee_still_engaged'][2] +
         stats['reactive_move_stats'][1]['abnormal'] + stats['reactive_move_stats'][2]['abnormal'] +
         stats['reactive_move_checks']['to_adjacent_enemy'][1] + stats['reactive_move_checks']['to_adjacent_enemy'][2] +
         stats['reactive_move_checks']['into_wall'][1] + stats['reactive_move_checks']['into_wall'][2] +
@@ -3301,6 +3369,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         stats['advance_twice_in_shoot_phase'][1] + stats['advance_twice_in_shoot_phase'][2] +
         stats['move_distance_over_limit']['advance'][1] + stats['move_distance_over_limit']['advance'][2] +
         stats['advance_from_adjacent'][1] + stats['advance_from_adjacent'][2] +
+        stats['shoot_hit_result_mismatch'][1] + stats['shoot_hit_result_mismatch'][2] +
         stats['shoot_wound_threshold_mismatch'][1] + stats['shoot_wound_threshold_mismatch'][2] +
         shoot_invalid_total
     )
@@ -3317,6 +3386,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         stats['fight_over_cc_nb'][1] + stats['fight_over_cc_nb'][2] +
         stats['fight_move_invalid']['pile_in'][1] + stats['fight_move_invalid']['pile_in'][2] +
         stats['fight_move_invalid']['consolidation'][1] + stats['fight_move_invalid']['consolidation'][2] +
+        stats['fight_hit_result_mismatch'][1] + stats['fight_hit_result_mismatch'][2] +
         stats['fight_wound_threshold_mismatch'][1] + stats['fight_wound_threshold_mismatch'][2] +
         fight_alternation_total
     )
@@ -3559,6 +3629,9 @@ if __name__ == "__main__":
             stats['move_to_adjacent_enemy'][1] + stats['move_to_adjacent_enemy'][2] +
             stats['move_adjacent_before_non_flee'][1] + stats['move_adjacent_before_non_flee'][2] +
             stats['move_distance_over_limit']['move'][1] + stats['move_distance_over_limit']['move'][2] +
+            stats['move_distance_over_limit']['flee'][1] + stats['move_distance_over_limit']['flee'][2] +
+            stats['flee_from_unengaged'][1] + stats['flee_from_unengaged'][2] +
+            stats['flee_still_engaged'][1] + stats['flee_still_engaged'][2] +
                 stats['reactive_move_stats'][1]['abnormal'] + stats['reactive_move_stats'][2]['abnormal'] +
             stats['reactive_move_checks']['to_adjacent_enemy'][1] + stats['reactive_move_checks']['to_adjacent_enemy'][2] +
             stats['reactive_move_checks']['into_wall'][1] + stats['reactive_move_checks']['into_wall'][2] +
@@ -3574,7 +3647,8 @@ if __name__ == "__main__":
             stats['advance_twice_in_shoot_phase'][1] + stats['advance_twice_in_shoot_phase'][2] +
             stats['move_distance_over_limit']['advance'][1] + stats['move_distance_over_limit']['advance'][2] +
             stats['advance_from_adjacent'][1] + stats['advance_from_adjacent'][2] +
-            stats['shoot_wound_threshold_mismatch'][1] + stats['shoot_wound_threshold_mismatch'][2] +
+            stats['shoot_hit_result_mismatch'][1] + stats['shoot_hit_result_mismatch'][2] +
+        stats['shoot_wound_threshold_mismatch'][1] + stats['shoot_wound_threshold_mismatch'][2] +
                 shoot_invalid_total
         )
         charge_errors = (
@@ -3589,7 +3663,8 @@ if __name__ == "__main__":
             stats['fight_over_cc_nb'][1] + stats['fight_over_cc_nb'][2] +
             stats['fight_move_invalid']['pile_in'][1] + stats['fight_move_invalid']['pile_in'][2] +
             stats['fight_move_invalid']['consolidation'][1] + stats['fight_move_invalid']['consolidation'][2] +
-            stats['fight_wound_threshold_mismatch'][1] + stats['fight_wound_threshold_mismatch'][2] +
+            stats['fight_hit_result_mismatch'][1] + stats['fight_hit_result_mismatch'][2] +
+        stats['fight_wound_threshold_mismatch'][1] + stats['fight_wound_threshold_mismatch'][2] +
             stats['fight_alternation_violations'][1] + stats['fight_alternation_violations'][2]
         )
         action_phase_accuracy = require_key(stats, "action_phase_accuracy")

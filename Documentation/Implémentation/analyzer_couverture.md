@@ -5,6 +5,12 @@
 > `586c0553`). Document d'ENTRÉE des lots suivants : il dit ce qui est vérifié, ce qui ne l'est
 > pas, et **pourquoi**. Aucun code n'a été modifié pour le produire.
 >
+> **Ce que la LIVRAISON du 2026-08-10 a ajouté** (elle suit la mise à jour ci-dessous, dans le
+> même commit) — trois verts vacants traités : **V10** (09.07, le fall-back n'avait AUCUN
+> contrôle → §1.1 #65-#67), **V14** (le plafond de tir passe par figurine, et le calcul est
+> désormais mutualisé avec la mêlée) et **05.01** (verdict de touche, module neuf
+> `ai/analyzer_hit.py` → §1.10). Contrôles vivants **64 → 69**.
+>
 > **Ce que la mise à jour du 2026-08-10 a changé** — un MODULE neuf (`ai/analyzer_wound.py`) et
 > ses 4 compteurs, qui ferment 05.02 côté tir ET mêlée (§1.9) ; deux **corrections de ma part**,
 > l'une sur la double-activation FIGHT que j'avais annoncée fermée alors qu'elle était un faux
@@ -25,7 +31,7 @@
 | `Documentation/40k_rules/*.pdf` (25 fichiers, texte intégral extrait) | 156 règles numérotées `NN.MM` |
 | `config/weapon_rules.json` | 23 règles d'armes |
 | `config/unit_rules.json` | 35 règles spéciales d'unité |
-| `ai/analyzer.py` (3690 l.) + `analyzer_core.py` (1422) + `analyzer_config.py` (448) + `analyzer_perfig.py` (412) + `analyzer_state.py` (195) + `analyzer_wound.py` (251) + `analyzer_phases/*` (2858) — **9276 l. au total, 6 fichiers + 5 handlers** | 64 contrôles vivants, 3 morts, 5 supprimés documentés |
+| `ai/analyzer.py` (3690 l.) + `analyzer_core.py` (1422) + `analyzer_config.py` (448) + `analyzer_perfig.py` (412) + `analyzer_state.py` (195) + `analyzer_wound.py` (251) + `analyzer_hit.py` (108) + `analyzer_phases/*` (2991) — **9686 l. au total, 7 fichiers + 5 handlers** | 69 contrôles vivants, 3 morts, 5 supprimés documentés |
 | `ai/step_logger.py` (1186 l.), `engine/w40k_core.py` (`_STEP_LOG_TYPE_MAP`, `_build_step_log_details`, `_build_shot_details`, `_models_segment_for_unit`, `_run_rules_for_step_log`, `_log_effects_snapshot_if_changed`), `engine/action_log_utils.py` | format réel de `step.log`, champ par champ, type d'action par type d'action |
 
 ### Légende des STATUTS
@@ -179,7 +185,7 @@ prises aux constantes du moteur — le journal dit ce qui a été appliqué, il 
 
 ---
 
-## 2. Inventaire des contrôles analyzer (64 vivants)
+## 2. Inventaire des contrôles analyzer (69 vivants)
 
 > **Numéros de ligne re-dérivés par grep le 2026-08-10.** Aucun n'a été recopié de la version
 > précédente : les fichiers ont bougé de plusieurs centaines de lignes, et un numéro faux dans un
@@ -198,6 +204,26 @@ prises aux constantes du moteur — le journal dit ce qui a été appliqué, il 
 | 7 | `reactive_move_checks.to_adjacent_enemy` | `analyzer_core.py:1312` | engagement, sujet mesuré à l'ANCRE (pas de `[MODELS:]` réactif, cf. commentaire `:1302-1308`) |
 | 8 | `reactive_move_checks.into_wall` | `analyzer_core.py:1320` | ancre ∈ `wall_hexes` |
 | 9 | `reactive_move_checks.distance_over_roll` | `analyzer_core.py:1271,1278` | `_per_model_move_violation`, budget jet×échelle |
+| 65 | `move_distance_over_limit['flee']` | `move_handler.py:206` (bloc `_check_fall_back_move`, `:81`) | **09.07 « MAXIMUM DISTANCE: your unit's M »** — BFS par socle, budget `M` (−2" si `[FLY]`), figurines ennemies TRAVERSABLES (cf. ci-dessous) |
+| 66 | `flee_from_unengaged` | `move_handler.py:156` | **09.07 « ELIGIBLE IF: your unit is engaged »** — engagement per-fig aux socles de DÉPART. Négatif exact de #3 : l'un punit le move normal parti engagé, l'autre le fall-back parti libre |
+| 67 | `flee_still_engaged` | `move_handler.py:177` | **09.07 « AFTER MOVING: your unit must be unengaged »** — engagement per-fig aux socles et hauteurs d'ARRIVÉE |
+
+**Vert vacant V10 fermé le 2026-08-10.** Le fall-back était le SEUL des six déplacements sans
+aucun contrôle de budget ni de chemin : `_handle_fled` ne regardait que la collision d'ancre et
+le mur d'arrivée. Les trois compteurs entrent dans le total MOVE (`analyzer.py:3308` et `:3592`)
+— un compteur hors de tout total est aussi silencieux qu'un compteur jamais incrémenté (c'est V1
+pris par l'autre bout). Verrou : `tests/unit/ai/test_analyzer_fall_back_move.py`, 6 tests, dont
+la prémisse géométrique et l'assertion sur la ligne RENDUE du SUMMARY.
+
+**Ce qui reste hors de portée, et pourquoi ce n'est pas un trou.** 09.07 « WHILE MOVING ▪
+Desperate Escape: Each model that is moved can be moved through enemy models » : des DEUX modes
+de fall-back, un seul traverse les ennemis, et le mode choisi n'est PAS journalisé (§7 L11).
+Bloquer sur les ennemis rendrait « chemin impossible » sur toute retraite désespérée légale. Le
+BFS les laisse donc traversables (`_build_move_bfs_blockers(force_thru_enemy=True)`), ce qui ne
+perd que la retraite ORDONNÉE ayant traversé un ennemi ; le BUDGET, commun aux deux modes, reste
+pleinement contrôlé. Le jour où `[MOVE_TYPE:fall_back]` portera son mode, ce paramètre doit
+disparaître. Les volets « AFTER MOVING: not eligible to shoot / declare a charge » sont déjà
+portés par #14 et #24 ; « start an action » exige les lignes d'action (16.01), absentes.
 
 ### §1.2 SHOOTING ERRORS
 
@@ -205,7 +231,7 @@ prises aux constantes du moteur — le journal dit ce qui a été appliqué, il 
 |---|---|---|---|
 | 10 | `shoot_invalid.out_of_range` | `shoot_handler.py:711` | `squads_min_ranged_distance` socle→socle, métrique `metric.ranged` du run, cap **non tronqué** depuis le 2026-08-09 ; **aucun verdict** si ni `[TARGET_MODELS:]` ni socles connus |
 | 11 | `shoot_invalid.engaged_non_close_quarters` / `engaged_shot_with_non_close_quarters_weapon` | `:670,671` | tireur engagé (per-fig) ∧ arme non-CQ ∧ non-M/V |
-| 12 | `shoot_over_rng_nb` | `:419` (plafond `:415`) | compteur de séquence vs `NB × socles vivants` (+ `RAPID FIRE` si marqueur) ; `[SUSTAINED HITS]` exclu |
+| 12 | `shoot_over_rng_nb` | `:443` (plafond `:413,422`) | compteur de séquence vs plafond **PAR FIGURINE depuis le 2026-08-10** (V14 fermé) : `[SHOOTER_MODELS:]` donne les socles qui ont tiré, `[MODEL_TYPES:]` la datasheet de chacun. Le X de `[RAPID FIRE]` suit la même résolution — c'est un attribut d'ARME. Repli explicite sur `NB d'escouade × effectif` sans ces segments. `[SUSTAINED HITS]` exclu |
 | 13 | `shoot_combi_profile_conflicts` | `:335` | 2 profils d'un même `COMBI_WEAPON` dans le même tour |
 | 14 | `shoot_after_flee` | `:163` | `units_fled` ∧ pas de règle `shoot_after_flee` |
 | 15 | `shoot_at_friendly` | `:186` | `unit_player[cible] == unit_player[tireur]` |
@@ -231,7 +257,7 @@ prises aux constantes du moteur — le journal dit ce qui a été appliqué, il 
 | # | Compteur | Site | Ce qu'il regarde VRAIMENT |
 |---|---|---|---|
 | 27 | `fight_friendly` | `fight_handler.py:290` | même joueur |
-| 28 | `fight_over_cc_nb` | `:242` (plafond : `_cc_cap_for_line`, `:24`, appelé `:214`) | séquence vs plafond **par figurine** : `[SHOOTER_MODELS:]` donne les socles qui ont frappé, `[MODEL_TYPES:]` la datasheet de chacun, `T{tour} EFFECTS:` le bonus `waaagh_melee_atk` (`:60`). Le groupe de frappeurs entre dans la clé de séquence. Repli explicite sur `NB d'escouade × effectif` si le journal n'a pas ces segments. `[SUSTAINED HITS]` exclu. ⚠️ **Réellement par-figurine seulement depuis `baf4859a` (2026-08-10)** — avant, `[MODEL_TYPES:]` répétait le type d'escouade sur chaque socle (cf. §1.1) |
+| 28 | `fight_over_cc_nb` | `:216` (plafond : `_cc_cap_for_line`, `:16`, appelé `:188`) | séquence vs plafond **par figurine** : `[SHOOTER_MODELS:]` donne les socles qui ont frappé, `[MODEL_TYPES:]` la datasheet de chacun, `T{tour} EFFECTS:` le bonus `waaagh_melee_atk` (`:39`). Le groupe de frappeurs entre dans la clé de séquence. Repli explicite sur `NB d'escouade × effectif` si le journal n'a pas ces segments. `[SUSTAINED HITS]` exclu. ⚠️ **Réellement par-figurine seulement depuis `baf4859a` (2026-08-10)** — avant, `[MODEL_TYPES:]` répétait le type d'escouade sur chaque socle (cf. §1.1). **Le comptage lui-même a quitté ce fichier le 2026-08-10** : il est mutualisé avec le tir dans `analyzer_perfig.per_model_attack_cap` (`:262`), et `_cc_cap_for_line` ne porte plus que le bonus de Waaagh, propre à la mêlée |
 | 29 | `fight_alternation_violations` | `:151` | une unité ayant chargé, encore engagée et non encore activée, existait au moment où une autre a frappé |
 | 30-31 | `fight_move_invalid.pile_in` / `.consolidation` | `:423` | BFS par socle, budget `3"×échelle` |
 
@@ -284,8 +310,8 @@ seuil ATTENDU est recalculé depuis la donnée et comparé au seuil imprimé :
 
 | # | Compteur | Site | Ce qu'il signifie |
 |---|---|---|---|
-| 63 | `shoot_wound_threshold_mismatch` | `analyzer_wound.py:244`, appelé `shoot_handler.py:224` | le seuil imprimé au TIR contredit F/E + bonus |
-| 64 | `fight_wound_threshold_mismatch` | idem, appelé `fight_handler.py:166` | jumeau MÊLÉE |
+| 63 | `shoot_wound_threshold_mismatch` | `analyzer_wound.py:244`, appelé `shoot_handler.py:231` | le seuil imprimé au TIR contredit F/E + bonus |
+| 64 | `fight_wound_threshold_mismatch` | idem, appelé `fight_handler.py:140` | jumeau MÊLÉE |
 | — | `*_wound_threshold_unverifiable` | `:240` | donnée absente (arme irrésolue, datasheet hors registre, deux profils sur la même ligne, tous les bodyguards morts) — compté à part, **jamais en erreur** |
 
 Deux pièges nommés dans le code, tous deux mesurés :
@@ -298,8 +324,41 @@ Deux pièges nommés dans le code, tous deux mesurés :
   donc sur le roster complet (`[MODEL_TYPES:]`, jamais effacé), exact tant qu'un bodyguard vit, et
   l'effectif (`unit_models_alive`) détecte le seul cas ambigu.
 
-Les deux compteurs `_mismatch` entrent dans les totaux SHOOTING (`analyzer.py:3279`) et FIGHT
-(`:3294`) : un écart est une ERREUR, pas un diagnostic.
+Les deux compteurs `_mismatch` entrent dans les totaux SHOOTING (`analyzer.py:3373`) et FIGHT
+(`:3390`) : un écart est une ERREUR, pas un diagnostic.
+
+### §1.10 VERDICT DE TOUCHE — section neuve (2026-08-10, `ai/analyzer_hit.py`, 108 l.)
+
+Jumeau déclaré de §1.9, livré dans le même lot. Le seuil de blessure était recoupé ; le VERDICT
+de la touche ne l'était pas — rien ne contredisait un `Hit 1(3+)` suivi d'une blessure.
+
+« 05 Attack sequence.pdf », 05.01 HIT ROLLS, table normative **dans son ordre** :
+
+    Unmodified 1 → FAILS ; Unmodified 6 → CRITICAL HIT ; ≥ BS/WS → HIT ; sinon FAILS.
+
+**Le verdict n'est écrit nulle part, et c'est ce qui rend le contrôle possible sans nouveau
+champ** : le formateur n'ajoute le segment `Wound …` QUE sous `hit_result == "HIT"`
+(`step_logger.py:803`). La présence du segment EST le verdict, et elle se lit.
+
+| # | Compteur | Site | Ce qu'il signifie |
+|---|---|---|---|
+| 68 | `shoot_hit_result_mismatch` | `analyzer_hit.py:100`, appelé `shoot_handler.py:227` | le verdict de touche au TIR contredit la table 05.01 |
+| 69 | `fight_hit_result_mismatch` | idem, appelé `fight_handler.py:136` | jumeau MÊLÉE |
+| — | `*_hit_result_checked` | `analyzer_hit.py:97` | lignes RÉELLEMENT jugées — même raison d'être que les `*_unverifiable` de §1.9 |
+
+Deux points de méthode, tous deux repris de verts vacants connus :
+- le seuil critique et le 1 d'échec sont IMPORTÉS du moteur
+  (`attack_sequence.CRITICAL_HIT_ROLL` / `NATURAL_FAIL_ROLL`), jamais écrits en dur. Coder `== 6`
+  ici recréerait exactement **V8**, qui se trompe dès qu'une règle abaisse le seuil critique.
+- `[TORRENT]` 24.37 et `[SUSTAINED HITS]` 24.36 n'ont AUCUN jet : le moteur écrit
+  `attackRoll=None` ET `hitTarget=None` (`attack_sequence.py:366-368`), donc la ligne porte
+  `Hit None(None+)` et la regex ne la reconnaît pas. **Ce n'est pas une exception codée dans le
+  contrôle** — c'est le journal qui ne présente pas de dé.
+
+Affiché par `_hit_result_rows` (`analyzer.py:1861`, appelé `:2796` et `:2927`), sommé dans les
+totaux SHOOTING (`:3372`) et FIGHT (`:3389`). Verrou :
+`tests/unit/ai/test_analyzer_hit_result.py`, 14 tests (table cas par cas, ancrage des constantes
+moteur, seuil effectif vs base, et bout-en-bout dans les deux phases).
 
 ### §2.1 DEAD UNITS (11 compteurs)
 
@@ -410,13 +469,13 @@ tout contrôle mesurant une distance ou une adjacence — donc §1.1 à §1.4.
 |---|---|---|---|
 | 04.01 Select weapons | #39 (usage par arme) | `with [<arme>]` | **PARTIEL** — le volet 24.07 (« une figurine choisit SOIT ses CQ SOIT ses autres armes ») et 24.11 EXTRA ATTACKS ne sont pas contrôlés ; l'arme est loguée au niveau ESCOUADE, pas par figurine |
 | 04.02 Select targets (visible / à portée / non engagé ; en mêlée : engagé, ≤ A cibles) | #10 (portée), #16-#17 (engagé) | portée et engagement OK ; visibilité impossible | **PARTIEL** — volet « visible » (06.01) supprimé ; volet mêlée « engagé » supprimé ; « pas plus de cibles que A » non contrôlé (loggable) |
-| 04.03 Resolve attacks (gather dice = A) | #12 (tir), #28 (mêlée) | séquence de lignes, `[MODELS:]`, `[SHOOTER_MODELS:]`, `[MODEL_TYPES:]`, `T{tour} EFFECTS:`, `[RAPID FIRE:X]`, `[SUSTAINED HITS]` | **PARTIEL** — le plafond de MÊLÉE est **par figurine** (datasheet du socle, frappeurs réels, bonus lu) — réellement depuis `baf4859a` seulement, cf. §1.4 ; celui du TIR reste au niveau ESCOUADE (`NB × socles vivants`, `shoot_handler.py:396-402`), donc faux dès qu'une escouade est hétérogène — c'est le jumeau non traité (V14). Côté moteur, `[CLEAVE]` est entré dans la clé de groupe 04.03 le 2026-08-10 (`69996bf1`) : deux porteuses de la même arme dont l'une répartit ses attaques ne font pas des attaques identiques. Côté analyzer, « Identical attacks » et le regroupement par cible restent non journalisés |
+| 04.03 Resolve attacks (gather dice = A) | #12 (tir), #28 (mêlée) | séquence de lignes, `[MODELS:]`, `[SHOOTER_MODELS:]`, `[MODEL_TYPES:]`, `T{tour} EFFECTS:`, `[RAPID FIRE:X]`, `[SUSTAINED HITS]` | **PARTIEL** — les DEUX plafonds sont **par figurine** depuis le 2026-08-10, et par le MÊME calcul (`analyzer_perfig.per_model_attack_cap`) : V14 fermé, le tir ne se compte plus au niveau escouade. Mesuré sur une escouade réelle (Captain NB=1 + Sergent NB=D3 pour le même Plasma Pistol) : plafond 4 par figurine contre 2 par escouade, soit 2 faux positifs pour 4 tirs légaux. Côté moteur, `[CLEAVE]` est entré dans la clé de groupe 04.03 le même jour (`69996bf1`). Restent non journalisés : « Identical attacks » et le regroupement par cible |
 
 ### 05 Attack sequence
 
 | Règle | Contrôle | Champs | Statut |
 |---|---|---|---|
-| 05.01 Hit rolls (1 = échec, 6 = critique, sinon ≥ BS/WS) | — | `Hit R(T+)` + `hit_result` : **tout est là** | **ABSENT-LOGGABLE** |
+| 05.01 Hit rolls (1 = échec, 6 = critique, sinon ≥ BS/WS) | **#68 (tir), #69 (mêlée)** — `ai/analyzer_hit.py` | `Hit R(T+)` + présence du segment `Wound` (qui EST le verdict) | **COUVERT (2026-08-10)** — la table est appliquée dans son ordre, avec les seuils importés du moteur. Non jugées, et comptées à part : les attaques sans jet de touche ([TORRENT], [SUSTAINED HITS]) |
 | 05.02 Wound rolls (table S vs T) | **#63 (tir), #64 (mêlée)** — `ai/analyzer_wound.py` | seuil loggué + `[SHOOTER_MODELS:]` + `[MODEL_TYPES:]` + registry + `T{tour} EFFECTS:` | **COUVERT (2026-08-10)** — S et T ne sont TOUJOURS pas loggués, mais ils n'ont plus besoin de l'être : ils sont re-dérivés du registre par figurine, et le seuil attendu est calculé par la fonction du MOTEUR. Ce que le contrôle établit : le seuil imprimé est cohérent avec F/E + bonus. Ce qu'il n'établit pas : que le JET a été correctement comparé à ce seuil (volet ABSENT-LOGGABLE, cf. 05.01) |
 | 05.03 Save rolls (groupes d'allocation, ordre) | — | aucun groupe, aucune figurine cible nommée | ABSENT-LOG-MANQUANT — groupes d'allocation + ordre déclaré |
 | 05.04 Inflict damage (allocation figurine par figurine) | #59 `damage_exceeds_hp` — **jamais incrémenté** ; modèle dans `_apply_damage_and_handle_death` (`analyzer.py:222`), PV par figurine | `Dmg:NHP` ; `Sv`/`InSv`/`AP` absents | **PARTIEL** (vert vacant, cf. §5). ⚠️ Le volet « l'excès est perdu » du PDF ne s'applique pas au journal : le moteur PLAFONNE `Dmg:` aux PV restants avant de l'écrire, donc l'analyzer reporte (cf. §2.2–§2.3) |
@@ -457,7 +516,7 @@ tout contrôle mesurant une distance ou une adjacence — donc §1.1 à §1.4.
 | 09.04 Remain stationary | — | aucune ligne dédiée (indistinct d'un `WAIT`) | ABSENT-LOG-MANQUANT — type de move « remain stationary » |
 | 09.05 Normal move (max M, unengaged avant ET après) | #4 + #3 + #2 | `[MODELS:]`, `Run rules:` | **COUVERT** |
 | 09.06 Advance move (max M+D6, unengaged, ni charge ni action après) | #20, #21, #23 | `[Roll: N]`, `[MODELS:]` | **PARTIEL** — le volet « pas d'action après » n'est pas contrôlable (16 non journalisé) |
-| 09.07 Fall-back move (max M, engagé au départ, unengaged après, ni tir ni charge ; Desperate Escape = hazard + battle-shock) | #14, #24 seulement | `FLED from … to …`, `[MODELS:]` | **PARTIEL — trou majeur** : `_handle_fled` (`move_handler.py:81`) ne fait **AUCUN** contrôle de budget/chemin. C'est le seul des six déplacements sans `_per_model_move_violation`. Le mode (ordered/desperate) et son jet de hasard ne sont pas journalisés |
+| 09.07 Fall-back move (max M, engagé au départ, unengaged après, ni tir ni charge ; Desperate Escape = hazard + battle-shock) | **#65, #66, #67** (`_check_fall_back_move`, `move_handler.py:81`) + #14, #24 | `FLED from … to …`, `[MODELS:]`, `Run rules:` | **PARTIEL** — les trois volets géométriques sont contrôlés depuis le 2026-08-10 (budget `M`, engagement au départ, désengagement à l'arrivée), et « ni tir ni charge après » l'était déjà. **Reste non contrôlable** : le MODE (ordered / desperate) et son jet de hasard ne sont pas journalisés (§7 L11), donc le volet « WHILE MOVING » et le battle-shock consécutif restent hors de portée |
 
 ### 10 Shooting phase
 
@@ -743,16 +802,16 @@ par absence prouvée de site d'incrémentation.
 | V7 | Le BFS de mouvement ne connaît pas le **bord du plateau** | `analyzer.py:938` (boucle `:955-998`) | Un chemin sortant du plateau est accepté (03.01) ; `Board:` porte pourtant `cols`/`rows` | **OUVERT** — le BFS ne teste que murs / occupation / bande d'EZ |
 | V8 | `devastating_wounds` suppose que **seul un 6** est critique | `shoot_handler.py:433-437` | Faux « incorrect » dès qu'une arme [ANTI-X Y+] rend critique un Y+ < 6 | **OUVERT** — `wound_roll_value == 6` en dur |
 | V9 | Le contrôle de portée ne rend **aucun verdict** quand ni `[TARGET_MODELS:]` ni les socles de la cible ne sont connus | `shoot_handler.py:691,699` | Choix délibéré et documenté, mais silencieux : rien ne compte les tirs non évalués | **OUVERT** (délibéré) |
-| V10 | `FLED` n'a **aucun** contrôle de budget ni de chemin | `move_handler.py:81-187` | Seul déplacement sur six sans `_per_model_move_violation` (09.07) | **OUVERT** — `_handle_fled` relu intégralement le 2026-08-10 : ses seuls contrôles sont la collision d'ancre et le mur d'arrivée |
 | V12 | La ligne `phase Start` est produite et **jamais lue** | `step_logger.py:1128` (`log_phase_transition`) | 07.02 (ordre des phases) reste non vérifié alors que la donnée existe | **OUVERT** — grep `"phase Start"` sur les 7 fichiers analyzer → 0 hit |
 | V13 | `has_line_of_sight` (ancre-à-ancre, documentée comme inexacte) classe les `WAIT` en `wait_with_los` / `wait_no_los` | `shoot_handler.py:987,990` (prédicat `:908`) | Usage assumé « métriques comportementales », mais ces métriques servent au pilotage | **OUVERT** |
-| V14 | Le plafond de tir reste **par escouade** alors que celui de mêlée est par figurine | `shoot_handler.py:396-402` | `[MODEL_TYPES:]` et `[SHOOTER_MODELS:]` existent et sont lus côté mêlée (`fight_handler.py:24`) **et par §1.9 des DEUX côtés**, mais pas par le plafond de tir. Même cause de faux positif (escouade hétérogène, arme homonyme), même remède disponible | **OUVERT** — `grep MODEL_TYPES shoot_handler.py` → 0 hit. Le plafond vaut `NB × nb_socles_vivants` |
 
 ### Verts vacants FERMÉS ou RÉVISÉS le 2026-08-10
 
 | # | Ce que disait la version précédente | Ce que dit le code |
 |---|---|---|
 | ~~V11~~ | « PARTIELLEMENT FERMÉ le 2026-08-09 : FIGHT est entrée dans la liste des phases, 24 unités combattent deux fois » | **La moitié FIGHT était un FAUX POSITIF, et il venait de ce document.** La clé de phase confondait les deux phases de combat d'un tour ; corrigée par `c1487fcb` (`analyzer_core.py:1042-1052`). Zéro vrai doublon sur 12 épisodes après correction. **Le volet SHOOT, lui, reste OUVERT** : `SHOT` n'est pas dans `is_activation_marker` (`:1010-1018`), donc 10.02 n'est pas contrôlé |
+| ~~V10~~ | « `FLED` n'a AUCUN contrôle de budget ni de chemin — seul déplacement sur six sans `_per_model_move_violation` » | **FERMÉ le 2026-08-10.** Les trois volets géométriques de 09.07 sont contrôlés (#65-#67, `move_handler.py:81`) et entrent dans le total MOVE. Reste hors de portée, faute de donnée : le MODE de fall-back (§7 L11) — d'où `force_thru_enemy` |
+| ~~V14~~ | « Le plafond de tir reste par escouade alors que celui de mêlée est par figurine » | **FERMÉ le 2026-08-10**, et par mutualisation plutôt que par copie : `analyzer_perfig.per_model_attack_cap` (`:262`) est désormais LE calcul des deux côtés, `[SHOOTER_MODELS:]` a quitté `fight_handler` pour `analyzer_perfig` (`:251`), et le X de `[RAPID FIRE]` suit la même résolution par figurine. Écrire un second exemplaire côté tir aurait rouvert le défaut à la première divergence |
 | ~~V15~~ | « Cinq des six clés de `T{tour} EFFECTS:` ne sont lues par personne » | **Réduit à DEUX.** `waaagh_melee_str` alimente §1.9 (`analyzer_wound.py:208`), `waaagh` et `oath_target` alimentent le compteur d'activations §1.7 (`analyzer_core.py:127,141`), `waaagh_melee_atk` alimentait déjà #28. **Restent inexploitées : `waaagh_invul` et `oath_wound`** (grep → 0 hit) |
 
 **Grep JUMEAU** (2026-08-10) `calculate_hex_distance|is_adjacent(` sur les 7 fichiers de
@@ -772,15 +831,18 @@ aucun : il ne mesure pas de distance.
 
 | Statut | Nombre | % |
 |---|---|---|
-| COUVERT | 6 | 3,8 % |
+| COUVERT | 7 | 4,5 % |
 | PARTIEL | 35 | 22,4 % |
-| ABSENT-LOGGABLE | 10 | 6,4 % |
+| ABSENT-LOGGABLE | 9 | 5,8 % |
 | ABSENT-LOG-MANQUANT | 67 | 42,9 % |
 | NON-TESTABLE-OFFLINE | 38 | 24,4 % |
 
-Un seul mouvement depuis le 2026-08-09 : **05.02 passe d'ABSENT-LOG-MANQUANT à COUVERT** (§1.9).
-06.03 reste ABSENT-LOGGABLE, mais il ne l'était devenu qu'avec `d891fff1` — il était en réalité
-ABSENT-LOG-MANQUANT quand la version précédente le classait déjà ABSENT-LOGGABLE.
+Deux mouvements depuis le 2026-08-09, tous deux vers COUVERT : **05.02** (ABSENT-LOG-MANQUANT →
+COUVERT, §1.9) et **05.01** (ABSENT-LOGGABLE → COUVERT, §1.10). 09.07 et 04.03 restent PARTIEL
+mais changent de nature : leurs trous géométriques sont fermés, ce qui reste tient à des champs
+absents du journal, pas à des contrôles manquants. 06.03 reste ABSENT-LOGGABLE, mais il ne
+l'était devenu qu'avec `d891fff1` — il était en réalité ABSENT-LOG-MANQUANT quand la version
+précédente le classait déjà ABSENT-LOGGABLE.
 
 Par famille :
 
@@ -790,7 +852,7 @@ Par famille :
 | 02 Datasheets | 7 | 0 | 0 | 0 | 1 | 6 |
 | 03 Moving | 4 | 1 | 2 | 1 | 0 | 0 |
 | 04 Making attacks | 3 | 0 | 3 | 0 | 0 | 0 |
-| 05 Attack sequence | 4 | 1 | 1 | 1 | 1 | 0 |
+| 05 Attack sequence | 4 | 2 | 1 | 0 | 1 | 0 |
 | 06 Other concepts | 3 | 0 | 0 | 1 | 1 | 1 |
 | 07 Battle round | 3 | 0 | 0 | 1 | 0 | 2 |
 | 08 Command phase | 5 | 0 | 0 | 1 | 2 | 2 |
@@ -810,7 +872,7 @@ Par famille :
 | 22 Other rules | 5 | 0 | 1 | 0 | 3 | 1 |
 | 23 Aircraft | 4 | 0 | 0 | 0 | 4 | 0 |
 | 24 Core abilities | 38 | 0 | 10 | 0 | 27 | 1 |
-| **Total** | **156** | **6** | **35** | **10** | **67** | **38** |
+| **Total** | **156** | **7** | **35** | **9** | **67** | **38** |
 
 ### 6.2 Règles d'armes (23) et d'unité (35)
 
@@ -823,9 +885,9 @@ Par famille :
 
 | Statut | Nombre | % |
 |---|---|---|
-| COUVERT | 12 | 5,6 % |
+| COUVERT | 13 | 6,1 % |
 | PARTIEL | 63 | 29,4 % |
-| ABSENT-LOGGABLE | 12 | 5,6 % |
+| ABSENT-LOGGABLE | 11 | 5,1 % |
 | ABSENT-LOG-MANQUANT | 87 | 40,7 % |
 | NON-TESTABLE-OFFLINE | 40 | 18,7 % |
 
@@ -833,27 +895,29 @@ Par famille :
 
 | | Nombre |
 |---|---|
-| Contrôles de conformité vivants | 64 (59 + les 3 de §2.8 + les 2 de §1.9) |
+| Contrôles de conformité vivants | 69 (59 + les 3 de §2.8 + les 2 de §1.9 + les 3 de 09.07 + les 2 de §1.10) |
 | dont morts / inatteignables | 3 (V1, V2, V3) |
-| dont mesurant la mauvaise grandeur | 6 (V4, V5, V6, V7, V8, V14) |
+| dont mesurant la mauvaise grandeur | 5 (V4, V5, V6, V7, V8) — V14 fermé le 2026-08-10 |
 | Contrôles supprimés, documentés, à ne pas ré-écrire | 5 |
-| Sections de rapport | 17 (§1.1–§1.9, §2.1–§2.8) — dont 4 purement diagnostiques (§2.4, §2.5, §2.6, §2.7) |
+| Sections de rapport | 18 (§1.1–§1.10, §2.1–§2.8) — dont 4 purement diagnostiques (§2.4, §2.5, §2.6, §2.7) |
 
 ### 6.5 Mouvement net (2026-08-08 → 2026-08-09 → 2026-08-10)
 
-| | 08-08 | 08-09 | 08-10 |
-|---|---|---|---|
-| COUVERT (tous corpus) | 10 | 11 | 12 |
-| ABSENT-LOGGABLE | 13 | 13 | 12 |
-| Contrôles vivants | 59 | 62 | 64 |
-| Verts vacants ouverts | 13 | 14 | 13 (V11 réduit à SHOOT, V15 réduit à 2 clés ; aucun fermé) |
-| Fichiers de l'analyzer | 6 | 6 | 7 (`analyzer_wound.py`) |
+| | 08-08 | 08-09 | 08-10 (carto) | 08-10 (livraison) |
+|---|---|---|---|---|
+| COUVERT (tous corpus) | 10 | 11 | 12 | **13** |
+| ABSENT-LOGGABLE | 13 | 13 | 12 | **11** |
+| Contrôles vivants | 59 | 62 | 64 | **69** |
+| Verts vacants ouverts | 13 | 14 | 13 | **11** (V10 et V14 fermés) |
+| Fichiers de l'analyzer | 6 | 6 | 7 | **8** (`analyzer_wound.py`, `analyzer_hit.py`) |
 
 Le gain de couverture reste **modeste par construction**. Les quatre lots du 2026-08-09 avaient
 surtout supprimé des **faux positifs** (2218 → 18 erreurs sur un run) et ajouté un point de
-recalage (§2.8). Le lot du 2026-08-10 fait les deux : il ajoute un vrai contrôle (05.02, §1.9) et
-il retire deux faux positifs de plus (double-activation FIGHT, close-quarters ancre-à-ancre). Les
-`ABSENT-LOG-MANQUANT` n'ont bougé que d'une ligne.
+recalage (§2.8). Le lot du 2026-08-10 fait les deux : il ajoute quatre vrais contrôles (05.02,
+05.01, et les trois volets de 09.07) et il retire trois sources de faux positifs
+(double-activation FIGHT, close-quarters ancre-à-ancre, plafond de tir par escouade). Les
+`ABSENT-LOG-MANQUANT` n'ont bougé que d'une ligne : ce lot ne fait pas grossir le journal, il
+exploite ce qu'il portait déjà.
 
 **Enseignement de méthode, à ne pas perdre.** Trois affirmations de la version du 2026-08-09 se
 sont révélées fausses, et les trois pour la même raison : *elles décrivaient l'intention d'un
@@ -930,17 +994,25 @@ c'est le gisement le moins cher) :
 |---|---|---|
 | `T{tour} EFFECTS: oath_wound=+X` | aucun contrôle (`grep` → 0 hit) | validité chiffrée du `+1` d'Oath — §1.9 lit le TOKEN, pas la magnitude déclarée |
 | `T{tour} EFFECTS: waaagh_invul` | aucun contrôle | volet 5++ de `waaagh` |
-| `[MODEL_TYPES:]` + `[SHOOTER_MODELS:]` côté TIR | `shoot_handler.py:396-402` | plafond de tir par figurine (V14) — le jumeau de ce que la mêlée a obtenu, et que §1.9 lit déjà **des deux côtés** : le pont existe, il n'est pas branché sur ce compteur |
+| ~~`[MODEL_TYPES:]` + `[SHOOTER_MODELS:]` côté TIR~~ | ~~`shoot_handler.py`~~ | **CONSOMMÉ le 2026-08-10** (V14) — plafond de tir par figurine, mutualisé avec la mêlée |
 | `[FIGHT_SUBPHASE:<x>]` | aucun contrôle | 12.06 (overrun fight) |
 | ligne `phase Start` | aucun contrôle | 07.02 (ordre des phases) |
 | `CP1=` / `CP2=` | aucun contrôle | 08.02, `cp_gain_on_objective` |
 | `[MODELS:]` complet | aucun contrôle de cohérence | 03.03 (coherency, y compris la purge End of Turn) |
 | positions + `Board: cols/rows` | BFS (`analyzer.py:938`) | bord de plateau (V7, 03.01), `>8"` d'ingress (20.03, 20.04) |
-| `Hit R(T+)` + `hit_result` | aucun contrôle | 05.01 (cohérence jet/seuil/résultat) — **jumeau immédiat de §1.9**, qui vient de faire exactement ce travail sur le segment `Wound` |
+| ~~`Hit R(T+)` + présence du segment `Wound`~~ | ~~aucun contrôle~~ | **CONSOMMÉ le 2026-08-10** (§1.10) — 05.01, jumeau de §1.9 sur le segment `Wound` |
 | `[HAZARDOUS] Roll:N` + `SUFFERS X MW` | aucun contrôle (seule la ligne `was DESTROYED` est parsée, `analyzer_core.py:832`) | 06.03 |
 
-**Deux entrées ont quitté cette liste le 2026-08-10** : `oath_target` et `waaagh_melee_str` sont
-désormais consommés (cf. §1.4 et §5, V15).
+**Quatre entrées ont quitté cette liste le 2026-08-10** : `oath_target` et `waaagh_melee_str`
+(cf. §1.4 et §5, V15), puis `[MODEL_TYPES:]`/`[SHOOTER_MODELS:]` côté tir et le segment `Hit`
+(livraison V14 et §1.10). Les six restantes sont, à ce jour, le gisement le moins cher de la
+liste : aucune ne demande de toucher au StepLogger.
+
+**Ce que la livraison a confirmé sur la méthode.** Les trois chantiers du 2026-08-10 ont fermé
+un trou de règle (09.07) et deux verts vacants **sans ajouter un seul champ au journal** — L2
+comprise, réclamée depuis deux versions. Avant d'inscrire un `Lxx` dans la liste ci-dessus,
+vérifier que la donnée n'est pas déjà là sous une autre forme : le verdict de touche n'était
+écrit nulle part, il se déduisait de la PRÉSENCE d'un segment.
 
 ---
 
@@ -984,6 +1056,41 @@ V2, V3 (`skip` hors de `_STEP_LOG_TYPE_MAP`), V12 (`"phase Start"`), V14
 fois dans le mauvais sens sur la base d'une mesure *insuffisante* (« 14 intervalles sur 14 :
 somme(Dmg) == perte de PV » ne distingue pas « le journal est plafonné » de « aucun overkill n'a eu
 lieu »).
+
+### Livraison du 2026-08-10 (V10, V14, 05.01) — ce qui est PROUVÉ, et comment
+
+**Règles lues dans les PDF avant d'écrire une ligne de code**, jamais assumées :
+« 09 Movement phase.pdf » 09.07 (fall-back : distance, éligibilité, post-condition, modes) et
+« 05 Attack sequence.pdf » 05.01 (table de touche, dans son ordre). Les deux sont recopiées mot
+pour mot dans les docstrings des contrôles, pour que la prochaine relecture n'ait pas à rouvrir
+le PDF pour vérifier que le code dit la même chose.
+
+**Chaque test a été prouvé ROUGE avant d'être vert** — un test qui passe du premier coup n'est
+pas un verrou :
+
+| Défaut remis en place | Effet observé |
+|---|---|
+| appel à `_check_fall_back_move` retiré | 4 tests sur 6 tombent ; la prémisse géométrique et le cas légal restent verts (ils ne dépendent pas du contrôle) |
+| les 3 termes de fall-back retirés du total MOVE | le SUMMARY affiche « ✅ 1.1 Erreurs en phase de move : 0 » là où il doit afficher 2 |
+| plafond de tir remis au niveau escouade | 2 faux positifs sur 4 tirs LÉGAUX, et le vrai dépassement compté 4 au lieu de 2 |
+| `check_hit_result` court-circuité après son compteur `_checked` | 3 tests tombent ; celui qui ne vérifie que « 0 faute » reste vert — c'est précisément pourquoi il porte aussi une assertion sur `_checked` |
+
+**Greps JUMEAU de la livraison**, tous rapportés y compris vides :
+- `Hit\s|'Hit ` sur les 8 fichiers de l'analyzer → **0 hit** hors `analyzer_hit.py` : aucun autre
+  lecteur du segment de touche à faire converger.
+- `rng_nb_by_weapon|cc_nb_by_weapon` → 6 hits, 2 sites de plafond (les deux passent désormais par
+  `per_model_attack_cap`), 4 résolutions du NB d'ESCOUADE qui servent de repli — légitimes.
+- `_per_model_move_violation` → les **six** déplacements sont couverts (move, move-after-shooting,
+  fall-back, advance, charge, pile-in/consolidation) plus le réactif. C'était le point du vert
+  vacant V10 : il n'en manque plus.
+- `_shooter_models` → 0 hit après bascule ; l'import privé croisé `shoot_handler` →
+  `fight_handler._shooter_models` a disparu avec lui.
+
+**Tests exécutés** : les 20 fichiers `tests/unit/ai/test_analyzer_*.py` et
+`test_step_log_weapon_rule_tokens.py`, **211 tests, tous verts**. Ce n'est PAS la vérification
+large du dépôt (suite complète, `pyright`, `check_ai_rules.py`, `biome`, `tsc`) : elle appartient
+à l'utilisateur et n'a pas été lancée. Aucun verdict n'est rendu ici sur les tests d'`engine/`
+ni sur l'intégration PvP.
 
 **Non vérifié — le verdict est borné ici, et « non exploré » n'est pas « sain »** :
 - Aucun `step.log` réel n'a été analysé : les statuts décrivent le CODE, pas une mesure sur un run.

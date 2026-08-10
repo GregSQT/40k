@@ -5,20 +5,12 @@ fight_handler.py — gestion des actions FIGHT dans parse_step_log.
 import re
 from typing import TYPE_CHECKING, Tuple
 
+from ai.analyzer_perfig import parse_shooter_models_segment
 from shared.data_validation import require_key
 
 if TYPE_CHECKING:
     from ai.analyzer_state import AnalyzerState
     from ai.analyzer_config import AnalyzerConfig
-
-
-_SHOOTER_MODELS_RE = re.compile(r'\[SHOOTER_MODELS: ([^\]]+)\]')
-
-
-def _shooter_models(action_desc: str) -> Tuple[str, ...]:
-    """Socles qui ont RÉELLEMENT frappé sur cette ligne (`[SHOOTER_MODELS:]`), ou ()."""
-    m = _SHOOTER_MODELS_RE.search(action_desc)
-    return tuple(m.group(1).split()) if m else ()
 
 
 def _cc_cap_for_line(
@@ -32,49 +24,27 @@ def _cc_cap_for_line(
     n_fighter_models: int,
     shooters: Tuple[str, ...],
 ) -> int:
-    """Plafond d'attaques de CETTE ligne, calculé PAR FIGURINE quand le journal le permet.
+    """Plafond d'attaques de MÊLÉE de cette ligne — le calcul est mutualisé avec le TIR.
 
-    Deux données rendent le calcul juste, et elles n'existaient pas avant ce lot :
-      - `[MODEL_TYPES:]` (entête d'épisode) donne la DATASHEET de chaque socle. Sans elle, le NB
-        vient du type d'escouade — faux dès qu'un personnage est rattaché (règle 19) ou qu'un
-        sergent porte une autre arme. Cinq armes s'appellent « Close Combat Weapon », de NB 2 à 6.
-      - `[SHOOTER_MODELS:]` nomme les socles qui ont RÉELLEMENT frappé sur cette ligne. Le pool
-        se compte sur eux, pas sur l'effectif entier.
-      - la ligne `T{tour} EFFECTS:` donne les capacités en vigueur AVEC leur contribution
-        chiffrée (`waaagh_melee_atk=+1`). Le bonus est LU, pas redevine : le coder ici ferait
-        vivre une seconde définition de la règle, qui divergerait en silence le jour où la
-        constante du moteur bouge. Le token `[WAAAGH!]` des lignes d'attaque reste un confort de
-        lecture — ce n'est plus la donnée.
-
-    REPLI EXPLICITE sur l'ancien calcul (`NB du type d'escouade × effectif`) quand le journal ne
-    porte pas ces segments — un journal antérieur au format reste analysable, avec la précision
-    qu'il permet et pas davantage. Ce n'est pas un défaut masqué : c'est la même mesure qu'avant,
-    sur une donnée qui n'a pas changé.
+    Ce site ne porte plus que ce qui est PROPRE à la mêlée : le bonus d'attaques du Waaagh, LU
+    dans `T{tour} EFFECTS:` et jamais redeviné (le coder ici ferait vivre une seconde définition
+    de la règle, qui divergerait le jour où la constante du moteur bouge ; le token `[WAAAGH!]`
+    des lignes d'attaque reste un confort de lecture, ce n'est plus la donnée). Le comptage
+    par-figurine lui-même vit dans `analyzer_perfig.per_model_attack_cap`, avec son jumeau de tir.
     """
-    from ai.analyzer_perfig import resolve_weapon_value
+    from ai.analyzer_perfig import per_model_attack_cap
 
-    # Bonus d'attaques LU dans la ligne d'effets, pas déduit d'un token — et surtout pas
-    # ré-encodé ici. `+1` / `1` sont tous deux acceptés : c'est le producteur qui choisit sa
-    # forme, le lecteur ne lui impose rien.
+    # `+1` / `1` sont tous deux acceptés : c'est le producteur qui choisit sa forme, le lecteur
+    # ne lui impose rien.
     _effects = state.active_effects.get(int(attacker_player), {})  # get allowed : aucun effet
     _atk = _effects.get("waaagh_melee_atk")  # get allowed
     waaagh_bonus = int(str(_atk).lstrip("+")) if _atk is not None else 0
 
-    if not shooters or not state.model_types:
-        return (cc_nb_squad_type + waaagh_bonus) * n_fighter_models
-
-    total = 0
-    for mid in shooters:
-        model_type = state.model_types.get(mid, fighter_unit_type)  # get allowed
-        limits = config.unit_attack_limits.get(model_type)  # get allowed : type hors registre
-        nb = None
-        if limits is not None:
-            nb = resolve_weapon_value(
-                weapon_display_name, require_key(limits, "cc_nb_by_weapon"),
-                config.cc_nb_by_weapon_global,
-            )
-        total += (nb if nb is not None else cc_nb_squad_type) + waaagh_bonus
-    return total
+    return per_model_attack_cap(
+        shooters, state.model_types, fighter_unit_type, weapon_display_name,
+        config.unit_attack_limits, "cc_nb_by_weapon", config.cc_nb_by_weapon_global,
+        cc_nb_squad_type, n_fighter_models, waaagh_bonus,
+    )
 
 
 def handle_fight(
@@ -160,12 +130,16 @@ def handle_fight(
         if weapon_match:
             weapon_display_name = weapon_match.group(1).strip()
             fighter_unit_type = require_key(state.unit_types, fighter_id)
+            # Résultat de touche 05.01, JUMEAU du tir : même table, même fonction. Cf.
+            # ai/analyzer_hit.py.
+            from ai.analyzer_hit import check_hit_result
+            check_hit_result(state, stats, line, action_desc, player, is_melee=True)
             # Seuil de blessure 05.02, JUMEAU du tir : même contrôle, même fonction, avec le
             # +1 Force du Waaagh qui n'existe qu'ici (08.04). Cf. ai/analyzer_wound.py.
             from ai.analyzer_wound import check_wound_threshold
             check_wound_threshold(
                 state, config, stats, line, action_desc, player, fighter_unit_type,
-                weapon_display_name, target_id, _shooter_models(action_desc), is_melee=True,
+                weapon_display_name, target_id, parse_shooter_models_segment(action_desc), is_melee=True,
             )
             # RULE METRICS: Targeted Intercession granted reroll mechanics (fight)
             if re.search(r'\(TARGETED_INTERCESSION\)', action_desc, re.IGNORECASE):
@@ -210,7 +184,7 @@ def handle_fight(
                     # Mesuré sur le run du 2026-08-08, ce plafond d'escouade produisait 20 fausses
                     # « Attacks over CC_NB » : 5 attaques d'un Ancient rattaché (NB=5) plafonnées
                     # au NB=3 de l'Intercessor porteur, 20 attaques de 10 Gretchin plafonnées à 10.
-                    _shooters = _shooter_models(action_desc)
+                    _shooters = parse_shooter_models_segment(action_desc)
                     cc_nb = _cc_cap_for_line(
                         state, config, action_desc, attacker_player, fighter_unit_type,
                         weapon_display_name, cc_nb_single, n_fighter_models, _shooters,

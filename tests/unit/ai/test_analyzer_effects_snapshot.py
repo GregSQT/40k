@@ -47,12 +47,13 @@ def test_un_joueur_sans_effet_est_dit_explicitement() -> None:
 # ── Le plafond d'attaques LIT le bonus, il ne le redevine pas ──────────────────────────────
 
 def _cap(state: AnalyzerState, player: int, line: str) -> int:
-    from ai.analyzer_phases.fight_handler import _cc_cap_for_line, _shooter_models
+    from ai.analyzer_perfig import parse_shooter_models_segment
+    from ai.analyzer_phases.fight_handler import _cc_cap_for_line
     cfg = analyzer_config(
         unit_attack_limits={"WarTrakk": {"cc_nb_by_weapon": {"Choppa": 5}}},
     )
     return _cc_cap_for_line(
-        state, cfg, line, player, "WarTrakk", "Choppa", 5, 1, _shooter_models(line),
+        state, cfg, line, player, "WarTrakk", "Choppa", 5, 1, parse_shooter_models_segment(line),
     )
 
 
