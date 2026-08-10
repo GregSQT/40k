@@ -1,0 +1,9 @@
+# Dépendances d'analyse statique de sécurité (Security.md, étape 6 / F5).
+# NE PAS fusionner dans requirements.txt ni requirements.runtime.txt :
+# requirements.runtime.txt construit l'image Docker de production, l'alourdir est une régression.
+#
+# Installation : source .venv/bin/activate && pip install -r requirements-dev.txt
+# Usage        : scripts/security_check.sh
+
+bandit==1.9.4
+pip-audit==2.10.1

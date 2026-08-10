@@ -1,0 +1,40 @@
+# Vulnérabilités pip-audit acceptées SCIEMMENT sur la surface de production
+# (requirements.runtime.txt). Lu par scripts/security_check.sh.
+#
+# Format : <ID>  # <justification>
+# La justification est OBLIGATOIRE : une ligne sans `#` fait échouer le script.
+# On liste des IDs, jamais des paquets : une NOUVELLE CVE sur torch fera rougir le
+# script au lieu de se glisser sous un blanc-seing.
+
+# --- torch 2.5.1 -------------------------------------------------------------------
+# Ces CVE se déclenchent en chargeant un modèle hostile ou en passant des tenseurs
+# hostiles à des opérateurs précis. Ce que l'on peut établir, et rien de plus :
+#  - les observations sont construites par le moteur côté serveur, jamais reçues du client ;
+#  - les poids NE sont PAS dans l'image (`.dockerignore` exclut `ai/models/`) : ils arrivent
+#    par un montage hôte, `${SYNO_MODELS_PATH}:/app/ai/models` (docker-compose.yml:18) ;
+#  - aucune route de `services/api_server.py` n'écrit dans `ai/models` (grep : 0 occurrence),
+#    donc le contenu de ce montage dépend de l'opérateur, pas d'une entrée utilisateur.
+# La fermeture DÉFINITIVE de ce vecteur n'est pas cette liste : c'est torch >= 2.6, où
+# `torch.load` passe en `weights_only=True` et refuse d'exécuter du code au chargement.
+# Mesuré le 2026-08-10 : torch 2.13.0 + sb3 2.9.0 charge tous les modèles vivants à
+# l'identique, moyennant deux entrées `torch.serialization.add_safe_globals`. Cette montée
+# est un arbitrage utilisateur (revalidation de l'entraînement), pas un obstacle technique.
+CVE-2025-2148    # torch : entrée hostile requise, non atteignable depuis l'API
+CVE-2025-2149    # torch : idem
+CVE-2025-2998    # torch : idem
+CVE-2025-2999    # torch : idem
+CVE-2025-3001    # torch : idem
+PYSEC-2025-41    # torch : idem
+PYSEC-2025-191   # torch : idem
+PYSEC-2025-194   # torch : idem
+PYSEC-2025-198   # torch : idem
+PYSEC-2025-203   # torch : idem
+PYSEC-2025-204   # torch : idem
+PYSEC-2025-205   # torch : idem
+PYSEC-2025-206   # torch : idem
+PYSEC-2025-207   # torch : idem
+PYSEC-2025-208   # torch : idem
+PYSEC-2025-209   # torch : idem
+PYSEC-2026-139   # torch : idem
+PYSEC-2026-1970  # torch : idem
+PYSEC-2026-2286  # torch : idem

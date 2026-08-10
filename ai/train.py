@@ -1002,7 +1002,7 @@ def _materialize_scenario_with_refs(
     temp_dir = os.path.join(temp_root, "agents", agent_key, "scenarios", split_dir)
     os.makedirs(temp_dir, exist_ok=True)
     hash_payload = f"{os.path.abspath(scenario_path)}|{wall_ref}"
-    path_hash = hashlib.sha1(hash_payload.encode("utf-8")).hexdigest()[:16]
+    path_hash = hashlib.sha1(hash_payload.encode("utf-8"), usedforsecurity=False).hexdigest()[:16]
     file_name = f"{Path(scenario_path).stem}__{path_hash}.json"
     out_path = os.path.join(temp_dir, file_name)
     if not os.path.exists(out_path):

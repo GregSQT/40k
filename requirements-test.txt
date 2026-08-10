@@ -1,0 +1,19 @@
+# Dépendances nécessaires pour EXÉCUTER la suite de tests (CI et local).
+# À installer EN PLUS de requirements.runtime.txt, jamais à sa place.
+#
+#   pip install -r requirements.runtime.txt -r requirements-test.txt
+#
+# Pourquoi ce fichier existe (2026-08-10) : la CI installait le verrou de production seul,
+# ce qui faisait porter au périmètre de l'IMAGE la charge de satisfaire les tests. Quand
+# `tensorboard` est sorti de l'image — le serveur ne l'utilise pas — la collecte pytest est
+# devenue rouge : `ai/metrics_tracker.py:36` fait un `from torch.utils.tensorboard.writer
+# import SummaryWriter` NON protégé, et 12 fichiers de tests/unit importent ce module.
+# La bonne frontière est ici : l'image reste minimale, les tests déclarent ce qu'il leur faut.
+
+pytest
+pytest-cov
+pytest-mock
+
+# Requis par ai/metrics_tracker.py (outillage d'ENTRAÎNEMENT, jamais atteint par
+# services/api_server.py — vérifié). Sans lui, `pytest tests/unit` ne collecte même pas.
+tensorboard==2.20.0

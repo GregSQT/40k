@@ -144,7 +144,10 @@ mesure, et c'est assumé (§0.14).
 ## 4. Backlog hors chemin critique (`A_faire/`)
 
 Prêts à démarrer sans décision produit :
-- **Security étapes 4→8** (~4-5 j ; étapes 1-3 livrées, suivi à jour ; étape 5 = durcir la stack Docker existante, pas la créer) → [`Security.md`](Security.md)
+- **Security étapes 4, 5, 7, 8** (~4-5 j ; étapes **1, 2, 3 et 6 livrées**, étape 5 partielle
+  = durcir la stack Docker existante, pas la créer ; suivi à jour)
+  → [`Security.md`](Security.md) — le document est un chantier **vivant**, à la racine d'`Implémentation/`,
+  pas dans `A_faire/` (l'ancien lien de cette ligne pointait dans le vide)
 - **Tests front — reste T2b/T3a/T7 (couche A) + couches B (vitest) et C (Playwright)**
   (~10 j au total, sécable) → [`A_faire/front_test_auto.md`](A_faire/front_test_auto.md)
 - ✅ **Perf géométrie — cache d'engagement par paire — LIVRÉ le 2026-08-10.** Clé contenant la
