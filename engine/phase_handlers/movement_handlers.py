@@ -13,6 +13,7 @@ from typing import (
 import math
 import numpy as np
 from collections import deque, OrderedDict
+from functools import lru_cache
 from .generic_handlers import end_activation, _log_with_context
 from shared.data_validation import require_key
 from engine.action_log_utils import append_action_log
@@ -1710,88 +1711,168 @@ def _stamp_disc_into(
     return (c0, c1, r0, r1)
 
 
-#: Largeur de la FRANGE où la distance entre centres de cellules ne suffit pas à trancher l'EZ
-#: d'une paire non ronde, en unités ``_hex_center``. Majore la somme des deux écarts
-#: contour↔centre-de-cellule (un par socle) : le contour d'un socle déborde ses propres centres
-#: de cellules d'au plus une largeur de case.
+#: Demi-largeur de l'anneau d'AMBIGUÏTÉ NUMÉRIQUE autour du seuil d'engagement, en unités
+#: ``_hex_center``. ``_ez_offset_kernels`` mesure la clairance d'un couple de socles placé à une
+#: ORIGINE canonique, l'exécution la mesure aux coordonnées réelles du plateau : les deux calculs
+#: sont algébriquement identiques, pas bit-à-bit (les contours sont construits à partir de
+#: ``_hex_center``, dont les ordonnées passent par ``√3 × row``). Toute case dont la clairance
+#: tombe dans ``seuil ± EPS`` est donc RE-MESURÉE à sa position réelle par
+#: ``_resolve_ez_ties_exactly``, jamais tranchée depuis le noyau.
 #:
-#: Ce n'est PAS un facteur de confort : c'est une borne, et elle est VÉRIFIÉE plutôt que
-#: supposée. `test_move_ez_non_round_bases.py::test_the_band_bounds_the_gap` balaye les
-#: géométries réellement jouées et échoue si l'écart mesuré la dépasse. L'élargir ne peut jamais
-#: fausser un verdict (elle n'agrandit que la zone testée exactement) ; la réduire à tort, si.
-#: Trois largeurs de case, pas deux : deux ne suffisaient PAS. Écart mesuré au balayage,
-#: 3,047 contre une marge de 3,0 — le test a rattrapé la borne devinée. La valeur retenue garde
-#: ~50 % de réserve sur le pire cas observé.
-NON_ROUND_EZ_BAND_NORM = 3.0 * ENGAGEMENT_NORM_HEX_WIDTH
+#: Écart MESURÉ entre les deux calculs : 2,49e-13 au pire sur 277 248 comparaisons (six formes
+#: de socle croisées, quatre orientations, deux parités, trois coins du plateau) — EPS garde donc
+#: un facteur 4e6 de réserve, et reste treize ordres SOUS la plus petite distance que le jeu
+#: distingue (1 subhex = 1,5). Le balayage est rejoué par
+#: `test_move_ez_non_round_bases.py::test_the_tie_band_bounds_the_kernel_error`. L'élargir ne peut
+#: pas fausser un verdict — elle n'agrandit que l'ensemble re-mesuré exactement, au prix de
+#: quelques microsecondes ; la réduire sous le bruit, si.
+EZ_KERNEL_TIE_EPS_NORM = 1e-6
 
-def _resolve_ez_band_exactly(
-    unit: Dict[str, Any],
+
+def _hashable_base_size(base_size: Any) -> Any:
+    """Clé de mémo d'une taille de socle : ``[20, 14]`` n'est pas hachable, ``(20, 14)`` l'est."""
+    return tuple(base_size) if isinstance(base_size, list) else base_size
+
+
+#: Un noyau coûte ~40 ms à construire et ~7 Ko à garder : la borne doit couvrir TOUS les couples
+#: réellement joués, sinon l'éviction en repaie un à chaque masque. Le compte est
+#: ``|géométries mover| × |géométries ennemi| × 2 parités``, et l'ORIENTATION multiplie chaque
+#: côté par 6 — quatre tailles de socle de chaque côté suffisent donc à en demander ~1 150.
+#: 4 096 laisse la marge, pour ~28 Mo au pire ; c'est de la géométrie pure, jamais de l'état.
+@lru_cache(maxsize=4096)
+def _ez_offset_kernels(
     mover_shape: str,
     mover_bs: Any,
     mover_orient: int,
-    enemy_list: List[Tuple[Any, Any]],
+    enemy_shape: str,
+    enemy_bs: Any,
+    enemy_orient: int,
     ez_norm: float,
-    band_cols: "np.ndarray",
-    band_rows: "np.ndarray",
+    enemy_col_is_even: bool,
+) -> Tuple["np.ndarray", "np.ndarray", int, int]:
+    """Noyau des offsets ``(dcol, drow)`` qu'UNE figurine ennemie interdit — somme de Minkowski.
+
+    POURQUOI UN NOYAU SUFFIT. ``euclidean_edge_distance`` ne lit que forme, taille, orientation
+    et CENTRE des deux socles (vérifié : ``fp=None`` ne change rien à son résultat). Or le centre
+    vient de ``_hex_center``, affine en ``(col, row)`` à une exception près : l'ordonnée est
+    décalée d'une demi-ligne une colonne sur deux. L'écart entre les deux centres ne dépend donc
+    que de ``(dcol, drow)`` et de la PARITÉ de la colonne ennemie — pas de la position absolue.
+    À couple de géométries fixé, l'ensemble des ancres interdites est donc le MÊME motif
+    translaté : on le calcule une fois, puis on l'estampe autour de chaque figurine ennemie
+    exactement comme ``_stamp_disc_into`` estampe un disque.
+
+    Ce qui remplace : la version précédente encadrait le contour par la distance entre centres de
+    cellules et payait le contour sur toute une FRANGE de trois cases de large, soit
+    ``|frange| × |ennemis|`` mesures par masque. Ici le contour n'est mesuré que
+    ``|géométries| × 2`` fois pour toute la partie, et le masque ne fait plus que des ``|=``.
+
+    Retourne ``(sure, tie, dcol_max, drow_max)`` : ``sure`` = offsets interdits sans discussion
+    (clairance ``<= seuil - EPS``), ``tie`` = offsets dont la clairance est à moins de ``EPS`` du
+    seuil, que l'appelant doit re-mesurer à la position réelle (cf. ``EZ_KERNEL_TIE_EPS_NORM``).
+    Les deux tableaux sont indexés ``[dcol + dcol_max, drow + drow_max]``.
+
+    BORNE DU NOYAU. La clairance bord-à-bord vaut au moins ``écart des centres - r_mover -
+    r_ennemi`` (chaque contour tient dans son disque circonscrit), donc aucune ancre dont le
+    centre est à plus de ``seuil + r_mover + r_ennemi`` ne peut être interdite. Les demi-largeurs
+    en dérivent, arrondies vers le haut : la première case exclue est au moins à 1,5 unité
+    au-delà de la borne, très loin de ``EPS``.
+    """
+    from engine.hex_utils import Socle, euclidean_edge_distance
+
+    mover_size = list(mover_bs) if isinstance(mover_bs, tuple) else mover_bs
+    enemy_size = list(enemy_bs) if isinstance(enemy_bs, tuple) else enemy_bs
+    # Origine canonique : seule la PARITÉ de la colonne ennemie compte (cf. docstring).
+    origin_col, origin_row = (100 if enemy_col_is_even else 101), 100
+    enemy_socle = Socle(
+        shape=enemy_shape, base_size=enemy_size, col=origin_col, row=origin_row,
+        fp=None, orientation=enemy_orient,
+    )
+    mover_radius = Socle(
+        shape=mover_shape, base_size=mover_size, col=0, row=0, fp=None,
+        orientation=mover_orient,
+    ).bounding_radius()
+    reach = ez_norm + mover_radius + enemy_socle.bounding_radius()
+    dcol_max = int(reach / 1.5) + 1
+    drow_max = int(reach / _HEX_ROW_STEP) + 1
+    sure = np.zeros((2 * dcol_max + 1, 2 * drow_max + 1), dtype=bool)
+    tie = np.zeros_like(sure)
+    # `max_distance` desserré d'une unité : le contrat de `euclidean_edge_distance` ne promet
+    # l'exactitude que SOUS le seuil passé, et il faut ici lire la distance des deux côtés de
+    # `ez_norm` pour classer l'ambiguïté.
+    exact_cap = ez_norm + 1.0
+    for i, dcol in enumerate(range(-dcol_max, dcol_max + 1)):
+        for j, drow in enumerate(range(-drow_max, drow_max + 1)):
+            mover_socle = Socle(
+                shape=mover_shape, base_size=mover_size,
+                col=origin_col + dcol, row=origin_row + drow, fp=None,
+                orientation=mover_orient,
+            )
+            gap = euclidean_edge_distance(mover_socle, enemy_socle, max_distance=exact_cap)
+            if gap <= ez_norm - EZ_KERNEL_TIE_EPS_NORM:
+                sure[i, j] = True
+            elif gap <= ez_norm + EZ_KERNEL_TIE_EPS_NORM:
+                tie[i, j] = True
+    return sure, tie, dcol_max, drow_max
+
+
+def _stamp_kernel_into(
+    dst: "np.ndarray", kernel: "np.ndarray", dcol_max: int, drow_max: int,
+    source_col: int, source_row: int, board_cols: int, board_rows: int,
+) -> None:
+    """``OR`` du noyau ``_ez_offset_kernels`` centré sur ``(source_col, source_row)``, clippé au plateau."""
+    c0, c1 = source_col - dcol_max, source_col + dcol_max + 1
+    r0, r1 = source_row - drow_max, source_row + drow_max + 1
+    k_c0, k_r0 = max(0, -c0), max(0, -r0)
+    k_c1 = kernel.shape[0] - max(0, c1 - board_cols)
+    k_r1 = kernel.shape[1] - max(0, r1 - board_rows)
+    if k_c0 >= k_c1 or k_r0 >= k_r1:
+        return
+    dst[max(0, c0):min(board_cols, c1), max(0, r0):min(board_rows, r1)] |= kernel[
+        k_c0:k_c1, k_r0:k_r1
+    ]
+
+
+def _resolve_ez_ties_exactly(
+    eng_bad: "np.ndarray",
+    mover_shape: str,
+    mover_bs: Any,
+    mover_orient: int,
+    tie_sites: List[Tuple[int, int, "np.ndarray", int, int, str, Any, int]],
+    ez_norm: float,
     board_cols: int,
     board_rows: int,
-) -> "np.ndarray":
-    """Tranche la FRANGE avec le prédicat de la règle : ``euclidean_edge_distance`` (contours).
+) -> None:
+    """Tranche EN PLACE les ancres que le noyau a laissées ambiguës, à leur position RÉELLE.
 
-    Appelée uniquement sur l'anneau que l'encadrement par centres de cellules ne suffit pas à
-    décider (cf. l'appelant). Le même prédicat que ``entries_in_engagement_zone`` en euclidien,
-    donc l'EZ du move et celle du combat cessent de diverger pour les socles non ronds.
+    Une case est ambiguë PAR RAPPORT À UNE FIGURINE ennemie précise, celle dont le noyau l'a
+    signalée : on ne la re-mesure donc que contre CELLE-LÀ, jamais contre toute la liste ennemie.
+    Le calcul est mot pour mot celui que ``entries_in_engagement_zone`` fait au commit du move,
+    aux MÊMES coordonnées — c'est ce qui interdit au masque et à l'exécution de se répondre
+    différemment sur une égalité flottante.
 
-    PRUNE PAR DISQUE CIRCONSCRIT avant chaque test exact : le contour d'un oval à 32 sommets
-    contre un cercle coûte ~2,4 µs, et une ancre de frange n'a jamais plus d'un ou deux ennemis
-    réellement proches. Sans cette prune, la frange coûterait ``|frange| × |ennemis|`` tests
-    (mesuré : ~0,1 s par masque) au lieu de quelques milliers.
+    ``fp=None`` : la clairance EUCLIDIENNE ne lit PAS l'empreinte — elle passe par
+    `_socle_edge_primitives` (contours) et `_socle_bounding_circles`, qui ne dépendent que de
+    forme/taille/orientation/centre. Vérifié plutôt que déduit d'une docstring : écart maximal nul
+    entre socles avec et sans empreinte sur 2 300 configurations (oval/carré/rond, trois
+    orientations). Construire les 187 cases d'un socle oval par ancre testée était le poste de
+    coût dominant de la passe exacte, pour un résultat inchangé.
     """
-    from engine.hex_utils import Socle, euclidean_edge_distance, _hex_center
+    from engine.hex_utils import Socle, euclidean_edge_distance
 
-    out = np.zeros((board_cols, board_rows), dtype=bool)
-    # ``fp=None`` : la clairance EUCLIDIENNE ne lit PAS l'empreinte — elle passe par
-    # `_socle_edge_primitives` (contours) et `_socle_bounding_circles`, qui ne dépendent que de
-    # forme/taille/orientation/centre. Vérifié plutôt que déduit d'une docstring : écart maximal
-    # nul entre socles avec et sans empreinte sur 2 300 configurations (oval/carré/rond, trois
-    # orientations). Construire les 187 cases d'un socle oval par cellule de frange était le
-    # poste de coût dominant de cette passe, pour un résultat inchangé.
-    enemy_socles: List[Tuple[float, float, float, Any]] = []
-    for _, ce in enemy_list:
-        e_shape = require_key(ce, "BASE_SHAPE")
-        e_bs = require_base_size(
-            e_shape, require_key(ce, "BASE_SIZE"), f"units_cache enemy {ce.get('id', '?')}"
+    for ec, er, tie, dcol_max, drow_max, e_shape, e_bs, e_orient in tie_sites:
+        enemy_socle = Socle(
+            shape=e_shape, base_size=e_bs, col=ec, row=er, fp=None, orientation=e_orient,
         )
-        e_orient = int(require_key(ce, "orientation"))
-        by_model = ce.get("occupied_hexes_by_model")  # get allowed : entrée mono-figurine
-        positions = list(by_model.values()) if by_model else [
-            (int(require_key(ce, "col")), int(require_key(ce, "row")))
-        ]
-        for ec, er in positions:
-            ec, er = int(ec), int(er)
-            e_socle = Socle(
-                shape=e_shape, base_size=e_bs, col=ec, row=er, fp=None, orientation=e_orient,
-            )
-            cx, cy = _hex_center(ec, er)
-            # `bounding_radius()` : LA primitive de broad-phase du fichier (cf.
-            # `_socle_bounding_circles`), pas un rayon re-dérivé de l'empreinte.
-            enemy_socles.append((cx, cy, e_socle.bounding_radius(), e_socle))
-
-    mover_reach = Socle(
-        shape=mover_shape, base_size=mover_bs, col=0, row=0, fp=None, orientation=mover_orient,
-    ).bounding_radius()
-    for bc, br in zip(band_cols.tolist(), band_rows.tolist()):
-        mx, my = _hex_center(bc, br)
-        m_socle = Socle(
-            shape=mover_shape, base_size=mover_bs, col=bc, row=br, fp=None, orientation=mover_orient,
-        )
-        for cx, cy, reach, e_socle in enemy_socles:
-            if ((mx - cx) ** 2 + (my - cy) ** 2) ** 0.5 > ez_norm + mover_reach + reach:
+        for i, j in zip(*np.nonzero(tie)):
+            col, row = ec + int(i) - dcol_max, er + int(j) - drow_max
+            if not (0 <= col < board_cols and 0 <= row < board_rows) or eng_bad[col, row]:
                 continue
-            if euclidean_edge_distance(m_socle, e_socle, max_distance=ez_norm) <= ez_norm:
-                out[bc, br] = True
-                break
-    return out
+            mover_socle = Socle(
+                shape=mover_shape, base_size=mover_bs, col=col, row=row, fp=None,
+                orientation=mover_orient,
+            )
+            if euclidean_edge_distance(mover_socle, enemy_socle, max_distance=ez_norm) <= ez_norm:
+                eng_bad[col, row] = True
 
 
 def _euclidean_mover_ez_forbidden_mask(
@@ -1807,16 +1888,14 @@ def _euclidean_mover_ez_forbidden_mask(
     euclidien ≤ ``engagement_minimum_clearance_norm(ez)`` (= ez × 1,5) d'un socle ennemi.
     Sémantique identique à ``euclidean_edge_distance`` DANS LES DEUX CAS : paire ronde↔ronde =
     clearance continu exact (centre + rayon), vectorisé par disque NumPy borné en bbox ; paire
-    impliquant un socle NON ROND = contours continus eux aussi, mais évalués seulement sur la
-    FRANGE que l'encadrement par centres de cellules ne suffit pas à trancher (cf.
-    ``NON_ROUND_EZ_BAND_NORM`` et ``_resolve_ez_band_exactly``). Le min entre centres de cellules
-    n'est plus le verdict — il ne sert que de filtre : il sous-estimait l'EZ d'environ une case
-    et laissait un socle oval finir son move engagé (09.05).
+    impliquant un socle NON ROND = contours continus eux aussi, estampés par NOYAU DE MINKOWSKI
+    (``_ez_offset_kernels``), une seule mesure de contour par couple de géométries pour toute la
+    partie. Les rares égalités flottantes que le noyau ne peut pas trancher sont re-mesurées à
+    leur position réelle (``_resolve_ez_ties_exactly``).
     """
     from engine.hex_utils import (
         engagement_minimum_clearance_norm,
         round_base_radius_norm,
-        precompute_footprint_offsets,
     )
 
     ez_norm = engagement_minimum_clearance_norm(ez)
@@ -1845,10 +1924,12 @@ def _euclidean_mover_ez_forbidden_mask(
     ) if mover_round else 0.0
 
     # Dispatch identique à euclidean_edge_distance : round↔round (les DEUX ronds) = clearance
-    # continu exact (centre + rayons) ; toute paire impliquant un non-rond = min entre centres de
-    # cellules d'empreinte (les deux socles en cellules). On accumule les cellules ennemies des
-    # paires « cell-min » ; les paires round-round exactes tamponnent directement un disque.
-    cell_sources: List[Tuple[int, int]] = []
+    # continu exact (centre + rayons), un disque par figurine ennemie ; toute paire impliquant un
+    # non-rond = contours continus, estampés par NOYAU (cf. `_ez_offset_kernels`). Dans les deux
+    # cas le motif ne dépend que du couple de géométries : il est calculé une fois puis translaté.
+    mover_orient = int(require_key(unit, "orientation")) if "orientation" in unit else 0
+    mover_bs_key = _hashable_base_size(mover_bs)
+    tie_sites: List[Tuple[int, int, "np.ndarray", int, int, str, Any, int]] = []
     for _, ce in enemy_list:
         e_shape = require_key(ce, "BASE_SHAPE")
         e_bs = require_base_size(
@@ -1864,66 +1945,32 @@ def _euclidean_mover_ez_forbidden_mask(
             )
             for ec, er in model_positions:
                 _stamp_disc(eng_bad, int(ec), int(er), ez_norm + r_m + r_e)
-        else:
-            e_orient = int(require_key(ce, "orientation"))
-            e_off_even, e_off_odd = precompute_footprint_offsets(e_shape, e_bs, e_orient)
-            for ec, er in model_positions:
-                e_off = e_off_even if (int(ec) & 1) == 0 else e_off_odd
-                for dc, dr in e_off:
-                    cell_sources.append((int(ec) + int(dc), int(er) + int(dr)))
-
-    if cell_sources:
+            continue
         # ── Paire impliquant un socle NON ROND ────────────────────────────────────────────────
-        # Le prédicat de la règle est `euclidean_edge_distance` (contours continus), pas la
-        # distance entre CENTRES DE CELLULES. Les deux ne coïncident pas : le contour enferme ses
-        # centres de cellules, donc
-        #
-        #       exact  <=  cellules  <=  exact + MARGE
-        #
-        # (borne HAUTE vérifiée par test, cf. `test_move_ez_non_round_bases.py`). Mesuré : sur le
-        # témoin E8 du 2026-08-09 l'écart valait UNE case — assez pour qu'un WarTrakk (socle oval
-        # 20×14) finisse un move normal engagé, 09.05 violé, pendant que le masque disait « libre ».
-        #
-        # On exploite l'encadrement au lieu de payer l'exact partout (mesuré : 0,98 s par masque
-        # en exact naïf, contre ~140 s pour un run entier de 12 épisodes — inexploitable) :
-        #   cellules <= seuil          → INTERDIT à coup sûr, aucun test exact ;
-        #   cellules >  seuil + MARGE  → AUTORISÉ à coup sûr, aucun test exact ;
-        #   entre les deux             → FRANGE, seule zone où le contour tranche.
-        # La frange est un anneau (périmètre × largeur), pas une surface.
-        mover_orient = int(require_key(unit, "orientation")) if "orientation" in unit else 0
-        off_even, off_odd = precompute_footprint_offsets(mover_shape, mover_bs, mover_orient)
-        col_even = (np.arange(board_cols, dtype=np.int64) & 1) == 0
-        col_parity = np.broadcast_to(col_even[:, None], (board_cols, board_rows)).copy()
-
-        def _anchors_within(radius: float) -> "np.ndarray":
-            """Ancres dont une cellule d'empreinte a son centre à ``<= radius`` d'une cellule ennemie."""
-            cell_forbidden = np.zeros((board_cols, board_rows), dtype=bool)
-            for _sc, _sr in cell_sources:
-                _stamp_disc(cell_forbidden, _sc, _sr, radius)
-            out = np.zeros((board_cols, board_rows), dtype=bool)
-            for offs, use_even in ((off_even, True), (off_odd, False)):
-                acc = np.zeros((board_cols, board_rows), dtype=bool)
-                for dc, dr in offs:
-                    dc, dr = int(dc), int(dr)
-                    c_src_lo, c_src_hi = max(0, dc), board_cols - max(0, -dc)
-                    r_src_lo, r_src_hi = max(0, dr), board_rows - max(0, -dr)
-                    if c_src_lo >= c_src_hi or r_src_lo >= r_src_hi:
-                        continue
-                    acc[c_src_lo - dc:c_src_hi - dc, r_src_lo - dr:r_src_hi - dr] |= cell_forbidden[
-                        c_src_lo:c_src_hi, r_src_lo:r_src_hi
-                    ]
-                out |= acc & (col_parity if use_even else ~col_parity)
-            return out
-
-        certain = _anchors_within(ez_norm)
-        eng_bad |= certain
-        band = _anchors_within(ez_norm + NON_ROUND_EZ_BAND_NORM) & ~certain
-        _band_cols, _band_rows = np.where(band)
-        if len(_band_cols):
-            eng_bad |= _resolve_ez_band_exactly(
-                unit, mover_shape, mover_bs, mover_orient, enemy_list, ez_norm,
-                _band_cols, _band_rows, board_cols, board_rows,
+        # Le prédicat de la règle est `euclidean_edge_distance` (contours continus), et il est
+        # appliqué TEL QUEL ici : pas d'approximation par centres de cellules, qui sous-estimait
+        # l'EZ d'environ une case et laissait un WarTrakk (socle oval 20×14) finir son move
+        # engagé, 09.05 violé, pendant que le masque disait « libre » (témoin E8 du 2026-08-09).
+        e_orient = int(require_key(ce, "orientation"))
+        e_bs_key = _hashable_base_size(e_bs)
+        for ec, er in model_positions:
+            ec, er = int(ec), int(er)
+            sure, tie, dcol_max, drow_max = _ez_offset_kernels(
+                mover_shape, mover_bs_key, mover_orient,
+                e_shape, e_bs_key, e_orient, ez_norm, (ec & 1) == 0,
             )
+            _stamp_kernel_into(eng_bad, sure, dcol_max, drow_max, ec, er, board_cols, board_rows)
+            if tie.any():
+                tie_sites.append((ec, er, tie, dcol_max, drow_max, e_shape, e_bs, e_orient))
+
+    if tie_sites:
+        # Égalités flottantes : le noyau les a signalées sans les trancher. On les re-mesure à
+        # leur position réelle — là où l'exécution les mesurera aussi — APRÈS la boucle, pour
+        # sauter celles qu'une autre figurine ennemie a déjà rendues interdites.
+        _resolve_ez_ties_exactly(
+            eng_bad, mover_shape, mover_bs, mover_orient, tie_sites, ez_norm,
+            board_cols, board_rows,
+        )
 
     return eng_bad
 
