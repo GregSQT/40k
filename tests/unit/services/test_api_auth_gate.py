@@ -415,12 +415,27 @@ class TestAuthReadConnectionIsReused:
     def test_writes_still_use_a_dedicated_connection(self):
         """Les écritures gardent une connexion propre : une transaction en échec ne doit
         pas rester pendante sur la connexion partagée par les autres requêtes."""
-        write_connection = api_server._get_auth_db_connection()
-        try:
+        with api_server.auth_db_write_cursor() as write_cursor:
             with api_server.auth_db_read_cursor() as read_connection:
-                assert write_connection is not read_connection
-        finally:
-            write_connection.close()
+                assert write_cursor.connection is not read_connection
+
+    def test_write_cursor_rolls_back_on_exception(self):
+        """Une exception dans le `with` ne doit rien laisser committé : c'est ce qui permet
+        aux appelants de ne plus gérer eux-mêmes commit et rollback sur chaque sortie."""
+        marker = "rollback_probe"
+        with pytest.raises(RuntimeError):
+            with api_server.auth_db_write_cursor() as cursor:
+                cursor.execute(
+                    "INSERT INTO auth_events (occurred_at, event, login, ip) VALUES (0, ?, ?, ?)",
+                    ("login_failure", marker, "1.1.1.1"),
+                )
+                raise RuntimeError("échec simulé au milieu de la transaction")
+
+        with api_server.auth_db_read_cursor() as connection:
+            remaining = connection.execute(
+                "SELECT COUNT(*) FROM auth_events WHERE login = ?", (marker,)
+            ).fetchone()[0]
+        assert remaining == 0
 
 
 class TestCapturedModeMatchesRealShape:

@@ -76,6 +76,34 @@ SESSION_RENEW_AFTER_SECONDS = 3600
 LOGIN_ATTEMPT_WINDOW_SECONDS = 60
 LOGIN_ATTEMPT_MAX_FAILURES = 5
 
+# Rétention du journal d'événements d'auth. La fenêtre du rate limiting (60 s) ne dicte PAS
+# la durée de conservation : les lignes servent aussi à savoir, après coup, qui a tenté quoi.
+AUTH_EVENT_RETENTION_SECONDS = 30 * 24 * 3600
+
+# Proxys dont l'en-tête `X-Forwarded-For` fait foi, séparés par des virgules.
+# Non définie = personne n'est de confiance, `X-Forwarded-For` est ignoré (cas du poste de dev
+# lancé sans proxy). Définie mais VIDE = erreur au démarrage : c'est une faute de configuration,
+# pas une manière d'exprimer « aucun proxy » — la même convention que `W40K_PERSIST_DIR`.
+#
+# Ce réglage n'est pas cosmétique. Le front passe TOUJOURS par un proxy — `vite.config.ts` en
+# développement, le nginx de `frontend/Dockerfile` en conteneur — donc sans lui `remote_addr`
+# vaut la même valeur pour tous les utilisateurs, et le rate limiting par (login, IP) dégénère
+# en (login) : cinq essais ratés suffisent alors à verrouiller le compte de n'importe qui.
+def _resolve_trusted_proxies() -> frozenset[str]:
+    raw = os.environ.get("W40K_TRUSTED_PROXIES")
+    if raw is None:
+        return frozenset()
+    entries = {item.strip() for item in raw.split(",") if item.strip()}
+    if not entries:
+        raise ConfigurationError(
+            "W40K_TRUSTED_PROXIES est définie mais vide : donner au moins une IP ou retirer "
+            "la variable"
+        )
+    return frozenset(entries)
+
+
+TRUSTED_PROXIES = _resolve_trusted_proxies()
+
 # Plateau JOUÉ pour chaque option de l'écran de test. `x1` et `x5_44x60` sont le MÊME plateau
 # physique 44×60 à deux résolutions ; les entrées `x5` -> board/180x156 et `x10` -> board/360x312
 # ont été retirées, ces dossiers n'existent pas (l'option était cassée à la sélection).
@@ -1029,21 +1057,6 @@ def _attach_player_types(serializable_state: Dict[str, Any], engine_instance: _P
     serializable_state["current_mode_code"] = current_mode_code
 
 
-def _get_auth_db_connection() -> sqlite3.Connection:
-    """Connexion neuve, à fermer par l'appelant. Réservée aux ÉCRITURES.
-
-    Le répertoire est créé par `initialize_auth_db()` au démarrage, pas ici : depuis la
-    fermeture globale de l'API, l'accès à cette base a lieu à CHAQUE requête, où le
-    `makedirs` ne pouvait plus rien faire.
-
-    Les écritures gardent une connexion propre : partagée, un échec en cours d'écriture
-    laisserait une transaction pendante sur la connexion des autres requêtes.
-    """
-    connection = sqlite3.connect(AUTH_DB_PATH)
-    connection.row_factory = sqlite3.Row
-    return connection
-
-
 _auth_read_connection: Optional[sqlite3.Connection] = None
 _auth_read_connection_path: Optional[str] = None
 _AUTH_READ_LOCK = RLock()
@@ -1066,7 +1079,7 @@ def auth_db_read_cursor():
 
     `check_same_thread=False` est donc obligatoire, et le verrou est ce qui rend l'usage
     concurrent sûr : toute lecture se fait à l'intérieur du `with`. Réservée aux lectures —
-    les écritures gardent une connexion propre (cf. `_get_auth_db_connection`), pour qu'un
+    les écritures passent par `auth_db_write_cursor` et sa connexion propre, pour qu'un
     échec ne laisse pas de transaction pendante sur la connexion commune.
 
     Rouverte si `AUTH_DB_PATH` change : les tests le réaffectent, une connexion mémorisée
@@ -1081,6 +1094,38 @@ def auth_db_read_cursor():
             _auth_read_connection.row_factory = sqlite3.Row
             _auth_read_connection_path = AUTH_DB_PATH
         yield _auth_read_connection
+
+
+@contextmanager
+def auth_db_write_cursor(immediate: bool = False):
+    """Connexion d'ÉCRITURE : commit en sortie, rollback sur exception, fermeture garantie.
+
+    Pendant du `auth_db_read_cursor` ci-dessus, dont le docstring nommait déjà l'asymétrie
+    (« les écritures gardent une connexion propre »). Chaque site d'écriture réécrivait à la
+    main connect / try / commit / close, avec autant de sorties à ne pas oublier de committer
+    qu'une vue a de `return` — `login_user` en avait quatre. Le commit vit ici, une fois.
+
+    Connexion NEUVE et non partagée : un échec en cours d'écriture laisserait sinon une
+    transaction pendante sur la connexion commune aux lectures.
+
+    `immediate=True` ouvre la transaction en `BEGIN IMMEDIATE`, qui prend le verrou d'écriture
+    DÈS LE DÉBUT. Obligatoire dès qu'une décision est prise d'après une lecture puis écrite :
+    en mode différé, SQLite ne pose le verrou qu'à la première écriture, et deux requêtes
+    concurrentes lisent alors la même valeur avant d'écrire toutes les deux (cf. le comptage
+    des tentatives de login).
+    """
+    connection = sqlite3.connect(AUTH_DB_PATH)
+    connection.row_factory = sqlite3.Row
+    try:
+        if immediate:
+            connection.execute("BEGIN IMMEDIATE")
+        yield connection.cursor()
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
 
 
 def _hash_password(password: str) -> str:
@@ -1215,15 +1260,11 @@ def _renew_session_if_stale(token: str, expires_at: int, now: int) -> None:
     target = now + SESSION_TTL_SECONDS
     if target - expires_at < SESSION_RENEW_AFTER_SECONDS:
         return
-    connection = _get_auth_db_connection()
-    try:
-        connection.execute(
+    with auth_db_write_cursor() as cursor:
+        cursor.execute(
             "UPDATE sessions SET expires_at = ? WHERE token = ?",
             (target, token),
         )
-        connection.commit()
-    finally:
-        connection.close()
 
 
 def _is_mode_allowed(mode: str, permissions: Dict[str, Any]) -> bool:
@@ -1280,50 +1321,111 @@ def _migrate_sessions_table(cursor: sqlite3.Cursor) -> None:
 
 
 def _client_ip() -> str:
-    """IP de l'appelant, telle que vue par ce process.
+    """IP réelle de l'appelant, en tenant compte des proxys de confiance.
 
-    `X-Forwarded-For` est délibérément IGNORÉ ici : il est trivialement falsifiable par le
-    client tant qu'aucun reverse proxy de confiance n'est en place, et le lire donnerait à un
-    attaquant un moyen de remettre son compteur à zéro à chaque tentative. L'étape 5 du plan
-    sécurité installe ce proxy ; l'étape 7 (journal d'audit) le prendra en compte alors, avec
-    la liste des proxys de confiance qui manque aujourd'hui.
+    `X-Forwarded-For` est falsifiable par n'importe quel client : le lire sans condition
+    donnerait à un attaquant un moyen de repartir d'un compteur neuf à chaque tentative. Il
+    n'est donc lu QUE si la requête arrive d'une adresse listée dans `W40K_TRUSTED_PROXIES`.
+
+    Sans cette liste, `remote_addr` est l'adresse du dernier saut — c'est-à-dire celle du
+    proxy, identique pour tous les utilisateurs dès qu'il y en a un (et il y en a toujours un,
+    cf. `TRUSTED_PROXIES`). Le rate limiting par (login, IP) perdrait alors sa composante IP.
+
+    La chaîne `X-Forwarded-For` est parcourue de DROITE à GAUCHE, en sautant les proxys de
+    confiance : le premier élément non fiable est le plus proche du client qu'on puisse
+    croire. Aller de gauche à droite prendrait la valeur que le client a lui-même pu écrire.
     """
-    if not request.remote_addr:
-        raise RuntimeError("request.remote_addr absent : impossible de limiter les tentatives")
-    return request.remote_addr
+    remote_addr = request.remote_addr
+    if not remote_addr:
+        raise RuntimeError("request.remote_addr absent : impossible d'identifier l'appelant")
+
+    if remote_addr not in TRUSTED_PROXIES:
+        # Connexion directe (ou proxy non déclaré) : `remote_addr` est ce qu'on a de plus sûr,
+        # et tout `X-Forwarded-For` présent vient d'une source non fiable.
+        return remote_addr
+
+    forwarded = request.headers.get("X-Forwarded-For", "")
+    for candidate in reversed([item.strip() for item in forwarded.split(",") if item.strip()]):
+        if candidate not in TRUSTED_PROXIES:
+            return candidate
+
+    # Requête venue d'un proxy de confiance mais sans adresse client exploitable : le proxy ne
+    # pose pas l'en-tête, ou ne pose que sa propre adresse. Se rabattre sur `remote_addr`
+    # rangerait tous les utilisateurs dans le même seau et rendrait le verrouillage de compte
+    # trivial — un repli silencieux exactement là où il fait le plus de dégâts. L'erreur est
+    # explicite : c'est un défaut de configuration du proxy, à corriger au déploiement.
+    raise RuntimeError(
+        f"Requête issue du proxy de confiance {remote_addr} sans X-Forwarded-For exploitable "
+        f"(reçu : {forwarded!r}). Vérifier la configuration du reverse proxy."
+    )
 
 
-def _count_recent_login_failures(cursor: sqlite3.Cursor, login: str, ip: str, now: int) -> int:
-    """Nombre d'échecs de login pour ce couple (login, IP) dans la fenêtre courante."""
+# La TENTATIVE est distincte de son ISSUE. C'est elle qui porte le rate limiting : inscrite
+# avant la vérification du mot de passe, elle partage la transaction du comptage et le rend
+# atomique. L'issue (`login_success` / `login_failure`) est écrite après, et c'est elle que lit
+# l'audit — sans cette séparation, chaque connexion réussie laisserait dans le journal un échec
+# provisoire qui n'a jamais eu lieu.
+AUTH_EVENT_LOGIN_ATTEMPT = "login_attempt"
+AUTH_EVENT_LOGIN_SUCCESS = "login_success"
+AUTH_EVENT_LOGIN_FAILURE = "login_failure"
+AUTH_EVENT_RATE_LIMITED = "rate_limited"
+AUTH_EVENT_LOGOUT = "logout"
+
+
+def _record_auth_event(
+    cursor: sqlite3.Cursor, event: str, login: str, ip: str, now: int, details: Optional[str] = None
+) -> None:
+    """Ajoute une ligne au journal d'authentification. APPEND-ONLY : rien n'est jamais modifié
+    ni supprimé en dehors de la purge de rétention (`_purge_auth_events`).
+
+    C'est ce journal qui porte à la fois le rate limiting (compter les échecs récents) et la
+    traçabilité. Une table jetable qui s'effacerait à la fenêtre du rate limiting obligerait à
+    en tenir une seconde, quasi identique, pour l'audit — donc deux écritures sur les mêmes
+    chemins et deux versions de « qui a tenté de se connecter ».
+    """
+    cursor.execute(
+        "INSERT INTO auth_events (occurred_at, event, login, ip, details) VALUES (?, ?, ?, ?, ?)",
+        (now, event, login, ip, details),
+    )
+
+
+def _count_login_attempts_since_success(
+    cursor: sqlite3.Cursor, login: str, ip: str, now: int
+) -> int:
+    """Tentatives de ce couple (login, IP) dans la fenêtre courante, DEPUIS le dernier succès.
+
+    Le journal étant append-only, un login réussi ne peut pas effacer les échecs qui le
+    précèdent — il les rend seulement non comptables. D'où la borne sur l'`id` du dernier
+    succès : elle produit le même effet qu'une remise à zéro (un utilisateur qui finit par
+    retrouver son mot de passe n'est pas pénalisé) sans rien détruire.
+
+    Borne sur `id` et non sur l'horodatage : succès et échec peuvent tomber dans la même
+    seconde, et une comparaison de temps laisserait alors l'ordre indécidable.
+    """
     window_start = now - LOGIN_ATTEMPT_WINDOW_SECONDS
     row = cursor.execute(
-        "SELECT COUNT(*) AS failures FROM login_attempts "
-        "WHERE login = ? AND ip = ? AND attempted_at > ?",
-        (login, ip, window_start),
+        """
+        SELECT COUNT(*) AS attempts FROM auth_events
+        WHERE login = ? AND ip = ? AND event = ? AND occurred_at > ?
+          AND id > COALESCE(
+              (SELECT MAX(id) FROM auth_events WHERE login = ? AND ip = ? AND event = ?), 0
+          )
+        """,
+        (
+            login, ip, AUTH_EVENT_LOGIN_ATTEMPT, window_start,
+            login, ip, AUTH_EVENT_LOGIN_SUCCESS,
+        ),
     ).fetchone()
-    return int(row["failures"])
+    return int(row["attempts"])
 
 
-def _record_login_failure(cursor: sqlite3.Cursor, login: str, ip: str, now: int) -> None:
-    """Enregistre un échec et purge les lignes sorties de la fenêtre.
-
-    La purge est faite ici plutôt qu'au succès : un attaquant qui n'échoue que sur des logins
-    inexistants ne produit aucun login réussi, donc aucune occasion de nettoyer.
-    """
+def _purge_auth_events(cursor: sqlite3.Cursor, now: int) -> None:
+    """Applique la rétention du journal. Appelé au login réussi, pas à chaque échec : le
+    balayage n'a pas à peser sur le chemin qu'un attaquant contrôle."""
     cursor.execute(
-        "INSERT INTO login_attempts (login, ip, attempted_at) VALUES (?, ?, ?)",
-        (login, ip, now),
+        "DELETE FROM auth_events WHERE occurred_at <= ?",
+        (now - AUTH_EVENT_RETENTION_SECONDS,),
     )
-    cursor.execute(
-        "DELETE FROM login_attempts WHERE attempted_at <= ?",
-        (now - LOGIN_ATTEMPT_WINDOW_SECONDS,),
-    )
-
-
-def _clear_login_failures(cursor: sqlite3.Cursor, login: str, ip: str) -> None:
-    """Remet le compteur à zéro après un login réussi : les échecs d'un utilisateur qui a fini
-    par se rappeler de son mot de passe ne doivent pas le bloquer à la connexion suivante."""
-    cursor.execute("DELETE FROM login_attempts WHERE login = ? AND ip = ?", (login, ip))
 
 
 def _purge_expired_sessions(cursor: sqlite3.Cursor, now: int) -> None:
@@ -1341,9 +1443,7 @@ def initialize_auth_db() -> None:
     auth_db_dir = os.path.dirname(AUTH_DB_PATH)
     if auth_db_dir:
         os.makedirs(auth_db_dir, exist_ok=True)
-    connection = _get_auth_db_connection()
-    try:
-        cursor = connection.cursor()
+    with auth_db_write_cursor() as cursor:
         cursor.executescript(
             """
             CREATE TABLE IF NOT EXISTS profiles (
@@ -1384,22 +1484,33 @@ def initialize_auth_db() -> None:
                 UNIQUE(profile_id, option_id)
             );
 
-            CREATE TABLE IF NOT EXISTS login_attempts (
+            -- Journal d'authentification APPEND-ONLY. Porte le rate limiting (F8) ET la
+            -- traçabilité attendue par l'étape 7 du plan sécurité : une seule écriture par
+            -- événement, une seule vérité sur qui a tenté quoi.
+            CREATE TABLE IF NOT EXISTS auth_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                occurred_at INTEGER NOT NULL,
+                event TEXT NOT NULL,
                 login TEXT NOT NULL,
                 ip TEXT NOT NULL,
-                attempted_at INTEGER NOT NULL
+                details TEXT
             );
 
-            CREATE INDEX IF NOT EXISTS idx_login_attempts_lookup
-                ON login_attempts (login, ip, attempted_at);
+            -- Comptage des échecs depuis le dernier succès, par (login, IP).
+            CREATE INDEX IF NOT EXISTS idx_auth_events_lookup
+                ON auth_events (login, ip, event, id);
 
-            -- Index SÉPARÉ pour la purge : `WHERE attempted_at <= ?` ne peut pas se servir
-            -- de l'index ci-dessus, dont `attempted_at` n'est pas la colonne de tête. Sans
-            -- lui, chaque échec de login balaie toute la table — mesuré à l'EXPLAIN QUERY
-            -- PLAN (`SCAN login_attempts`) — et le fait sous verrou exclusif sur `users.db`.
-            CREATE INDEX IF NOT EXISTS idx_login_attempts_purge
-                ON login_attempts (attempted_at);
+            -- Index SÉPARÉ pour la purge de rétention : `WHERE occurred_at <= ?` ne peut pas
+            -- se servir de l'index ci-dessus, dont `occurred_at` n'est pas colonne de tête.
+            -- Sans lui, la purge balaie toute la table sous verrou exclusif sur `users.db`
+            -- (mesuré à l'EXPLAIN QUERY PLAN : `SCAN` contre `SEARCH`).
+            CREATE INDEX IF NOT EXISTS idx_auth_events_retention
+                ON auth_events (occurred_at);
+
+            -- `login_attempts` a été remplacée par `auth_events` : compteur jetable purgé à
+            -- 60 s, il ne pouvait pas servir de journal. Détruite explicitement — la laisser
+            -- vivante ferait croire à une seconde source d'événements d'authentification.
+            DROP TABLE IF EXISTS login_attempts;
             """
             + _SESSIONS_TABLE_SQL
         )
@@ -1565,10 +1676,6 @@ def initialize_auth_db() -> None:
             """,
             (admin_profile_id, auto_weapon_row["id"]),
         )
-
-        connection.commit()
-    finally:
-        connection.close()
 
 # Initialize Flask app
 import logging
@@ -2426,26 +2533,42 @@ def login_user():
     normalized_login = login.strip()
     now = int(time.time())
     client_ip = _client_ip()
-    connection = _get_auth_db_connection()
-    try:
-        cursor = connection.cursor()
 
-        # Rate limiting (F8) — contrôlé AVANT toute vérification de mot de passe : c'est le
-        # PBKDF2 à 200 000 itérations qui coûte cher, le laisser s'exécuter offrirait en prime
-        # un déni de service au brute-force.
-        if _count_recent_login_failures(cursor, normalized_login, client_ip, now) >= LOGIN_ATTEMPT_MAX_FAILURES:
-            # Pas de `commit()` : seul un SELECT a été exécuté et `sqlite3` n'ouvre pas de
-            # transaction dessus. En écrire un laisserait croire que le rejet persiste
-            # quelque chose — le blocage ne s'auto-prolonge pas, il expire avec la fenêtre.
-            return jsonify({
-                "success": False,
-                "error": (
-                    f"Too many failed login attempts. Retry in "
-                    f"{LOGIN_ATTEMPT_WINDOW_SECONDS} seconds."
-                ),
-            }), 429
+    # Rate limiting (F8). Comptage et inscription de la tentative dans UNE SEULE transaction
+    # `BEGIN IMMEDIATE`, donc sérialisée : compter puis écrire en deux temps laisserait N
+    # requêtes concurrentes lire toutes le même total, passer toutes le plafond, et lancer
+    # toutes le PBKDF2 — exactement le déni de service que le contrôle est censé empêcher.
+    # Werkzeug crée un thread par requête, ce parallélisme n'a rien de théorique.
+    #
+    # La tentative est inscrite AVANT de vérifier le mot de passe, faute de quoi elle ne
+    # pourrait pas partager la transaction du comptage. Un login réussi ne l'efface pas — le
+    # journal est append-only — il la rend non comptable (cf. `_count_login_attempts_since_success`).
+    with auth_db_write_cursor(immediate=True) as cursor:
+        over_limit = (
+            _count_login_attempts_since_success(cursor, normalized_login, client_ip, now)
+            >= LOGIN_ATTEMPT_MAX_FAILURES
+        )
+        _record_auth_event(
+            cursor,
+            AUTH_EVENT_RATE_LIMITED if over_limit else AUTH_EVENT_LOGIN_ATTEMPT,
+            normalized_login,
+            client_ip,
+            now,
+        )
 
-        user_row = cursor.execute(
+    if over_limit:
+        # Enregistré en `rate_limited` et non en `login_attempt` : un refus n'est pas un essai,
+        # et le compter comme tel ferait s'auto-prolonger le blocage indéfiniment.
+        return jsonify({
+            "success": False,
+            "error": (
+                f"Too many failed login attempts. Retry in "
+                f"{LOGIN_ATTEMPT_WINDOW_SECONDS} seconds."
+            ),
+        }), 429
+
+    with auth_db_read_cursor() as connection:
+        user_row = connection.execute(
             """
             SELECT u.id AS user_id, u.login, u.password_hash, p.id AS profile_id, p.code AS profile_code
             FROM users u
@@ -2454,40 +2577,39 @@ def login_user():
             """,
             (normalized_login,),
         ).fetchone()
-        # Utilisateur inconnu et mot de passe faux sont un SEUL cas : même comptage, même
-        # réponse, même message — les distinguer dirait à un attaquant quels logins existent.
-        # Le court-circuit du `or` garantit que `_verify_password` n'est pas appelé sur None.
-        if user_row is None or not _verify_password(password, user_row["password_hash"]):
-            _record_login_failure(cursor, normalized_login, client_ip, now)
-            connection.commit()
-            return jsonify({"success": False, "error": "Invalid credentials"}), 401
 
-        _clear_login_failures(cursor, normalized_login, client_ip)
+    # Utilisateur inconnu et mot de passe faux sont un SEUL cas : même comptage, même
+    # réponse, même message — les distinguer dirait à un attaquant quels logins existent.
+    # Le court-circuit du `or` garantit que `_verify_password` n'est pas appelé sur None.
+    if user_row is None or not _verify_password(password, user_row["password_hash"]):
+        with auth_db_write_cursor() as cursor:
+            _record_auth_event(cursor, AUTH_EVENT_LOGIN_FAILURE, normalized_login, client_ip, now)
+        return jsonify({"success": False, "error": "Invalid credentials"}), 401
+
+    access_token = secrets.token_urlsafe(48)
+    with auth_db_write_cursor() as cursor:
+        _record_auth_event(cursor, AUTH_EVENT_LOGIN_SUCCESS, normalized_login, client_ip, now)
+        _purge_auth_events(cursor, now)
         _purge_expired_sessions(cursor, now)
-
-        access_token = secrets.token_urlsafe(48)
         cursor.execute(
             "INSERT INTO sessions (token, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
             (access_token, user_row["user_id"], now, now + SESSION_TTL_SECONDS),
         )
-        permissions = _resolve_permissions_for_profile(connection, user_row["profile_id"])
-        connection.commit()
+        permissions = _resolve_permissions_for_profile(cursor.connection, user_row["profile_id"])
 
-        return jsonify(
-            {
-                "success": True,
-                "access_token": access_token,
-                "user": {
-                    "id": user_row["user_id"],
-                    "login": user_row["login"],
-                    "profile": user_row["profile_code"],
-                },
-                "permissions": permissions,
-                "default_redirect_mode": "pve",
-            }
-        )
-    finally:
-        connection.close()
+    return jsonify(
+        {
+            "success": True,
+            "access_token": access_token,
+            "user": {
+                "id": user_row["user_id"],
+                "login": user_row["login"],
+                "profile": user_row["profile_code"],
+            },
+            "permissions": permissions,
+            "default_redirect_mode": "pve",
+        }
+    )
 
 
 @app.route('/api/auth/logout', methods=['POST'])
@@ -2507,12 +2629,12 @@ def logout_user():
     # Token porté par la porte (`g.auth_token`), comme `current_user` lit `g.auth_user` :
     # le re-parser ici rejouerait le travail de la porte sur une donnée qu'elle détient.
     token = g.auth_token
-    connection = _get_auth_db_connection()
-    try:
-        connection.execute("DELETE FROM sessions WHERE token = ?", (token,))
-        connection.commit()
-    finally:
-        connection.close()
+    user_row = g.auth_user
+    with auth_db_write_cursor() as cursor:
+        cursor.execute("DELETE FROM sessions WHERE token = ?", (token,))
+        _record_auth_event(
+            cursor, AUTH_EVENT_LOGOUT, user_row["login"], _client_ip(), int(time.time())
+        )
     return jsonify({"success": True})
 
 

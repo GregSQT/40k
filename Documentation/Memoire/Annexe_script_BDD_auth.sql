@@ -43,11 +43,40 @@ CREATE TABLE IF NOT EXISTS profile_options (
     UNIQUE(profile_id, option_id)
 );
 
+-- `expires_at` : durée de vie glissante des sessions (F2 du plan sécurité). Colonne NOT NULL
+-- SANS valeur par défaut — une session sans échéance est une erreur, pas un cas à couvrir.
+-- Une base créée avant cette colonne est migrée au démarrage par `_migrate_sessions_table`
+-- (destruction puis recréation : les tokens sans échéance sont précisément ceux à révoquer).
 CREATE TABLE IF NOT EXISTS sessions (
     token TEXT PRIMARY KEY,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    created_at TEXT NOT NULL
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL
 );
+
+-- Journal d'authentification APPEND-ONLY : porte à la fois le rate limiting du login (F8)
+-- et la traçabilité (étape 7). Événements : login_attempt, login_success, login_failure,
+-- rate_limited, logout. `login_attempt` est écrit AVANT la vérification du mot de passe —
+-- c'est ce qui place le comptage et l'inscription dans la même transaction.
+CREATE TABLE IF NOT EXISTS auth_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    occurred_at INTEGER NOT NULL,
+    event TEXT NOT NULL,
+    login TEXT NOT NULL,
+    ip TEXT NOT NULL,
+    details TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_auth_events_lookup
+    ON auth_events (login, ip, event, id);
+
+-- Index séparé : la purge de rétention filtre sur `occurred_at`, qui n'est pas colonne de
+-- tête de l'index ci-dessus. Sans lui, chaque purge balaie toute la table.
+CREATE INDEX IF NOT EXISTS idx_auth_events_retention
+    ON auth_events (occurred_at);
+
+-- `login_attempts` (compteur jetable purgé à 60 s) a été remplacée par `auth_events`.
+DROP TABLE IF EXISTS login_attempts;
 
 -- Amorçage des profils
 INSERT OR IGNORE INTO profiles (code, label) VALUES ('base', 'Joueur Base');
