@@ -291,9 +291,6 @@ export interface APIGameState {
   move_activation_pool: string[];
   shoot_activation_pool: string[];
   charge_activation_pool: string[];
-  charging_activation_pool: string[];
-  active_alternating_activation_pool: string[];
-  non_active_alternating_activation_pool: string[];
   fight_subphase: string | null;
   // Unités actionnables dans la sous-phase fight courante (moteur : List[str]).
   fight_eligible_units?: string[];
@@ -9487,33 +9484,19 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             // CRITICAL: Check if pool size changed (unit was removed)
             const updatedGameState = activationData.game_state;
             const currentPhase = updatedGameState?.phase;
+            // Pool d'activation CC V11 (pile_in / fight / consolidate), lu par la MÊME fonction que
+            // le clic manuel : `fight_eligible_units`. Les 3 pools V10 (charging / alternating_* /
+            // cleanup_*) n'existent plus côté moteur — les brancher ici laissait `currentPoolSize`
+            // à 0 en fight, donc l'auto-play sortait de la boucle dès la première unité sans action.
+            // Calculé une seule fois : il sert aussi à `hasMoreEligibleUnits` plus bas.
+            const fightGs = updatedGameState as ActivationPointerGameState | undefined;
+            const fightPool: string[] = fightGs
+              ? getFightActivationPoolUnitIds(fightGs).map(String)
+              : [];
             let currentPoolSize = 0;
 
             if (currentPhase === "fight") {
-              const fightSubphase = updatedGameState?.fight_subphase;
-              if (fightSubphase === "charging" && updatedGameState?.charging_activation_pool) {
-                currentPoolSize = updatedGameState.charging_activation_pool.length;
-              } else if (
-                fightSubphase === "alternating_non_active" &&
-                updatedGameState?.non_active_alternating_activation_pool
-              ) {
-                currentPoolSize = updatedGameState.non_active_alternating_activation_pool.length;
-              } else if (
-                fightSubphase === "alternating_active" &&
-                updatedGameState?.active_alternating_activation_pool
-              ) {
-                currentPoolSize = updatedGameState.active_alternating_activation_pool.length;
-              } else if (
-                fightSubphase === "cleanup_non_active" &&
-                updatedGameState?.non_active_alternating_activation_pool
-              ) {
-                currentPoolSize = updatedGameState.non_active_alternating_activation_pool.length;
-              } else if (
-                fightSubphase === "cleanup_active" &&
-                updatedGameState?.active_alternating_activation_pool
-              ) {
-                currentPoolSize = updatedGameState.active_alternating_activation_pool.length;
-              }
+              currentPoolSize = fightPool.length;
             } else if (currentPhase === "move" && updatedGameState?.move_activation_pool) {
               currentPoolSize = updatedGameState.move_activation_pool.length;
             } else if (currentPhase === "charge" && updatedGameState?.charge_activation_pool) {
@@ -9539,32 +9522,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             // Check if there are still eligible AI units in the pool
             let hasMoreEligibleUnits = false;
             if (currentPhase === "fight") {
-              const fightSubphase = updatedGameState?.fight_subphase;
-              let fightPool: string[] = [];
-              if (fightSubphase === "charging" && updatedGameState?.charging_activation_pool) {
-                fightPool = updatedGameState.charging_activation_pool;
-              } else if (
-                fightSubphase === "alternating_non_active" &&
-                updatedGameState?.non_active_alternating_activation_pool
-              ) {
-                fightPool = updatedGameState.non_active_alternating_activation_pool;
-              } else if (
-                fightSubphase === "alternating_active" &&
-                updatedGameState?.active_alternating_activation_pool
-              ) {
-                fightPool = updatedGameState.active_alternating_activation_pool;
-              } else if (
-                fightSubphase === "cleanup_non_active" &&
-                updatedGameState?.non_active_alternating_activation_pool
-              ) {
-                fightPool = updatedGameState.non_active_alternating_activation_pool;
-              } else if (
-                fightSubphase === "cleanup_active" &&
-                updatedGameState?.active_alternating_activation_pool
-              ) {
-                fightPool = updatedGameState.active_alternating_activation_pool;
-              }
-
               hasMoreEligibleUnits = fightPool.some((unitId) => {
                 const unit = updatedGameState?.units?.find(
                   (u: APIGameState["units"][0]) => String(u.id) === String(unitId)

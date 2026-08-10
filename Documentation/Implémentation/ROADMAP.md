@@ -120,21 +120,12 @@ Prêts à démarrer sans décision produit :
   → [`A_faire/perf_generate_compact_formation.md`](A_faire/perf_generate_compact_formation.md)
 - **gzip/Brotli** (½ j) — à faire AVEC l'étape 5 de Security (même proxy)
   → [`A_faire/perf_noyau_natif_et_gzip.md`](A_faire/perf_noyau_natif_et_gzip.md) §1
-- **Résidu front V10 des sous-phases fight** (~½ j) — moteur purgé le 2026-07-23, le front ne l'est
-  pas : `frontend/src/hooks/useEngineAPI.ts` teste encore `fightSubphase === "charging"` /
-  `"alternating_active"` / `"alternating_non_active"` / `"cleanup_active"` / `"cleanup_non_active"`
-  alors que le moteur ne produit que `pile_in` / `fight` / `consolidate` — **aucune branche ne
-  matche**, on tombe systématiquement dans le `else`. ⚠️ Le motif est présent **DEUX FOIS**
-  (blocs `currentPoolSize` vers l.9494 **et** l.9544 — vérifié 2026-08-10 ; le registre de
-  `Replay.md` n'en signalait qu'un), plus **3** champs morts de l'interface locale (l.294-296) :
-  `charging_activation_pool` **et** `{active,non_active}_alternating_activation_pool`. Le premier
-  est le plus trompeur — c'est lui que testent les deux `if` de tête, et
-  `grep -rn charging_activation_pool engine/ services/ ai/` rend **0** : le moteur ne l'écrit
-  jamais. *(Ce fichier a compté 2 champs jusqu'au 2026-08-10.)* Chemin
-  concerné : auto-play PvP live (`currentPoolSize`/`hasMoreEligibleUnits`) ⇒ **non validable en
-  headless**, à reprendre avec une session PvP fight réelle, en remplaçant par
-  `fight_eligible_units` (déjà la source V11 vivante ailleurs dans ce hook).
-  → [`Replay.md`](Replay.md) §4.B
+- ~~**Résidu front V10 des sous-phases fight**~~ — **LIVRÉ le 2026-08-10.** Les deux cascades de
+  `useEngineAPI.ts` et les 3 champs morts de son interface sont supprimés ; le pool CC vient de
+  `getFightActivationPoolUnitIds` (`fight_eligible_units`), source unique partagée avec le clic
+  manuel. `grep` des 5 sous-phases V10 et des 3 champs : **0 hit** front comme backend.
+  ⚠️ Ce n'était PAS un nettoyage neutre — voir le changement de comportement de l'auto-play PvP
+  décrit en [`Replay.md`](Replay.md) §4.B, **à confirmer en session PvP fight réelle**.
 - **Champs manquants du `step.log`** (sécable, 15 entrées ordonnées par nombre de règles
   débloquées) — `L1` battle-shock, `L2` S/T sur les jets, `L3` figurine allouée, … `L15`
   hazardous. Ce n'est pas un chantier d'un bloc : chaque champ se livre seul et fait passer des

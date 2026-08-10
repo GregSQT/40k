@@ -456,7 +456,7 @@ et l'échec ne survit pas au changement d'unité.
 | # | Chantier | État | Prochaine action |
 |---|---|---|---|
 | A | Cercle vert en **phase fight** | **fait — validé unit + tsc ; visuel browser à confirmer** | Confirmer le cercle vert en fight dans un replay (§4.A) |
-| B | Purge legacy pools V10 du `game_state` | **fait moteur (2026-07-23)** ; **résidu front TOUJOURS PRÉSENT — revérifié le 2026-08-10** : `useEngineAPI.ts` porte encore les branches `fightSubphase === "charging"/"alternating_*"/"cleanup_*"` (**deux cascades**, pas une) et les champs `*_alternating_activation_pool` de son interface locale | Nettoyer l'auto-play PvP quand validable en live (§4.B) — ligne de backlog : [`ROADMAP.md`](ROADMAP.md) §4 |
+| B | Purge legacy pools V10 du `game_state` | **fait moteur (2026-07-23), fait front (2026-08-10)** — 0 hit des 5 sous-phases V10 et des 3 champs, front comme backend ; tsc + biome propres | Confirmer l'auto-play IA en phase fight dans une session PvP réelle : le fix **change** son comportement (§4.B) |
 | C | `pile_in` / `consolidation` classés en **phase `move`** | **fait (2026-07-23)** | — |
 | — | Replay per-figurine (segments MODELS/TARGET_MODELS) | **fait** (commits `81e56c35`, `4ea850c3`) | — |
 | — | Détail par-figurine (bouton +) move/advance/charge/reactive | **fait** (`4ea850c3`) | — |
@@ -588,7 +588,7 @@ récapitulatif de fin d'épisode ignoré, rejet d'un journal périmé, scénario
 4 mutations mises au rouge puis rétablies. `pyright ai/`, `hidden_action_finder.py` et
 `check_ai_rules.py` propres.
 
-### 4.B — Purge legacy V10 du `game_state` — ✅ MOTEUR FAIT (2026-07-23), résidu front
+### 4.B — Purge legacy V10 du `game_state` — ✅ MOTEUR (2026-07-23) + FRONT (2026-08-10)
 **Audit.** Les 3 pools étaient inertes en V11 : machine V10 (`fight_build_activation_pools`,
 `_update_fight_subphase`, helpers alternance/consolidation) **morte** (chaîne remontant à des fonctions
 sans appelant) ; seul chemin vivant = `end_activation(FIGHT)` dont le `phase_complete` dérivé des pools
@@ -608,28 +608,29 @@ vides était déjà **jeté** par le caller squad_fight.
 - Tests : `test_fight_activation_pools.py` supprimé (V10) ; 3 tests V10 retirés de `test_fight_execution`
   (+ 1 réécrit sur `shoot_activation_pool`).
 - **Front sûr** : `game.ts` (types) et `BoardPvp.tsx` (deps) purgés.
-- Validé : grep V10 **vide** côté moteur+front(hors résidu), 97 tests moteur verts, run `--step` OK
+- Validé : grep V10 **vide** côté moteur+front (le résidu front l'est aussi depuis le 2026-08-10,
+  cf. bloc suivant), 97 tests moteur verts, run `--step` OK
   (FOUGHT + pile_in/conso, 0 KeyError/NameError), tsc propre.
 
-**Résidu assumé (front)** : `useEngineAPI.ts` (blocs `currentPoolSize`/`fightPool`, + **3** champs
-morts de l'interface locale — `charging_activation_pool`,
-`active_alternating_activation_pool`, `non_active_alternating_activation_pool` ; le premier
-manquait à ce recensement jusqu'au 2026-08-10, alors que c'est celui des deux `if` de tête, et que
-le moteur ne l'écrit **jamais** : `grep -rn charging_activation_pool engine/ services/ ai/` → 0)
-garde des branches `fightSubphase === "charging"/alternating_*/cleanup_*` **mortes en V11** (les
-sous-phases V11 sont pile_in/fight/consolidate → aucune branche ne matche, on tombe dans le `else`
-final).
-⚠️ **Le motif est présent DEUX FOIS — relevé le 2026-08-10, cette section n'en décrivait qu'une
-occurrence.** Deux cascades `if/else if` identiques (vers l.9494 et l.9544), chacune avec les
-**cinq** sous-phases mortes. Nettoyer la première seulement laisserait la seconde intacte sur le
-même chemin : c'est le motif JUMEAU de CLAUDE.md, et il est ici dans le même fichier. Repères en
-numéros de ligne à titre indicatif uniquement — le repère greppable est
-`fightSubphase === "charging"` (5 hits attendus par cascade).
-Ce résidu porte désormais sa ligne dans [`ROADMAP.md`](ROADMAP.md) §4 : jusqu'au 2026-08-10 il
-n'existait que dans ce registre, donc hors de l'ordre du travail.
-Les nettoyer touche l'**auto-play PvP live** (currentPoolSize/hasMoreEligibleUnits) → non validable en
-headless. À reprendre avec un test PvP fight réel, en remplaçant par `fight_eligible_units`
-(déjà la source V11 vivante ailleurs dans ce hook).
+**Fait (front, 2026-08-10)** — `useEngineAPI.ts` portait deux cascades `if/else if` **identiques**
+(blocs `currentPoolSize` et `fightPool` de la boucle d'auto-play IA), chacune sur les cinq
+sous-phases V10 `charging`/`alternating_*`/`cleanup_*`, plus **3** champs morts de son interface
+locale. Motif JUMEAU de CLAUDE.md logé **dans le même fichier** : nettoyer une cascade seulement
+aurait laissé l'autre sur le même chemin. Les deux lisent désormais le pool V11 par
+`getFightActivationPoolUnitIds` (`utils/activationClickTarget.ts`, déjà importé par ce hook pour le
+clic manuel), calculé **une seule fois** et partagé — il n'y a plus de cascade à dupliquer.
+Vérifié : `grep` des 5 sous-phases et des 3 champs → **0 hit** dans `frontend/src/` comme dans
+`engine/ services/ ai/` ; `tsc -p tsconfig.app.json` et `biome` propres ; `activationClickTarget.test.ts`
+11/11.
+
+⚠️ **Ce n'était pas un nettoyage neutre, et le point de contrôle est là.** Les branches mortes ne
+tombaient pas dans un `else` inoffensif : `currentPoolSize` restait à **0** en phase fight, donc le
+`break` « pool vide » sortait de la boucle d'auto-play **dès la première unité IA sans action
+valide**, et le second bloc (`hasMoreEligibleUnits`) n'était jamais atteint. Le pool V11 étant
+maintenant lu, la boucle poursuit tant qu'il reste des unités IA vivantes activables — alignée sur
+les branches `move` et `charge` du même bloc, inchangées. Ce chemin ne vit qu'en **PvP live**
+(aucun test ne couvre ce hook de 9 600 lignes) : la vérification est une partie PvP avec plusieurs
+unités IA en phase de combat.
 
 ### 4.C — `pile_in` / `consolidation` classés en phase `move` ✅ FAIT (2026-07-23)
 Le moteur loggue déjà ces lignes `FIGHT : … PILED IN/CONSOLIDATED` (phase correcte côté log). Le bug
