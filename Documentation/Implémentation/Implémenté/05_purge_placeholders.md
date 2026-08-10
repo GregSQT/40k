@@ -57,10 +57,12 @@ mesure : cette datasheet est jouée par deux rosters de **benchmark KPI** de Cor
 PvP. Une dette sans échéance dans un roster de mesure, c'est exactement le défaut que ce chantier
 existe pour supprimer.
 
-Ce que la bascule coûte : le test d'OBSERVATION suit maintenant la règle du BODYGUARD et non
-celle du leader, parce que `deep_strike` n'a pas d'`obs_id`. Coût réel nul — l'observation lit
-`unit["UNIT_RULES"]`, l'union déjà calculée, et ne distingue pas l'origine d'une règle ; quelle
-source s'éteint quand reste verrouillé source par source par les 7 autres tests.
+Ce que la bascule a coûté, et qui est **soldé depuis** : le test d'OBSERVATION suivait la règle
+du BODYGUARD et non celle du leader, parce que `deep_strike` n'avait pas d'`obs_id`. Il en a un
+depuis le 2026-08-10 (**16**, cf. chantier 04) : le test suit désormais les **deux** sources —
+`charge_impact` s'éteint à la mort du dernier bodyguard, `deep_strike` survit avec le Chaplain.
+L'assertion est passée de « la règle du bodyguard n'est plus là » à une égalité d'ensembles, ce
+qui distingue « l'union a changé » de « le bloc a été zéroté ».
 
 ## Un second défaut, mineur
 

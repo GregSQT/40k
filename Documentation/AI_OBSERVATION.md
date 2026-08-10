@@ -526,7 +526,7 @@ vocabulaires coexistent dans la doc V11 :
 | **D** — ennemis | `enemies_*` | **ordre contractuel = slots d'action de tir** ; porte depuis §0.31 `los_can_see` + `cover_vs_observer`, depuis §9 P3-2 `charge_reachable_max_roll` |
 | **E** — escouades amies | `allies_[1..K-1]` | livré avec T-D : les alliés sont **agrégés** par le réseau, donc leur ordre n'a pas à être inventé |
 | *(transverse)* profils d'armes | `*_wpn_*` | même encodeur pour les deux camps ; 86 % du vecteur, et le seul bloc mémoïsé |
-| *(transverse)* règles d'unité | 13 bits dans `*_bin` | §0.31 : sur **toute** entité, amie comme ennemie (schéma unifié) |
+| *(transverse)* règles d'unité | `*_ability_ids` (8 slots d'`obs_id`) | §0.31 : sur **toute** entité, amie comme ennemie (schéma unifié). Depuis le chantier 01 ce ne sont plus 13 bits `rule_<effet>` mais des ids lus par embedding : allonger le vocabulaire coûte **zéro** scalaire |
 | *(transverse)* terrain perçu | `grid` | **9** canaux égocentriques ; **ne porte que la fenêtre** du budget d'Advance. Depuis §0.32 : un canal `self` distinct du canal allié (T-L) et le **coût géodésique** de chaque cellule du pool de move (T-K), encodé pour que la frontière normal/advance soit **constante** — la grille passe seule dans le CNN, elle doit être lisible sans le vecteur |
 
 ⚠️ Deux blocs sont **transverses** et non des blocs à part : les profils d'armes et les règles

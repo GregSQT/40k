@@ -19,11 +19,14 @@ Ce que ces tests verrouillent :
     (`cunning_hunters`, `targeted_intercession`, `target_priority`…) ;
   - ils valent pour les entites ENNEMIES (choix de cible et evaluation de menace) ;
   - **19.04** : l'observation suit l'UNION en vigueur quand elle change en cours de partie —
-    l'id d'une source DISPARAIT a la mort de sa derniere figurine. ⚠️ La source suivie est le
-    BODYGUARD, pas le leader : depuis le chantier 05 aucun character du registre ne porte de
-    regle ayant un `obs_id` (balaye le 2026-08-10 ; `ChaplainJumpPack` n'a que `leader` et
-    `deep_strike`). Le fold lui-meme est verrouille par une assertion sur `UNIT_RULES`, et
-    source par source par `test_attached_units_abilities_19_04.py` ;
+    l'id d'une source DISPARAIT a la mort de sa derniere figurine. Les DEUX sources sont
+    verrouillees en observation depuis que `deep_strike` a un `obs_id` : le BODYGUARD
+    (`charge_impact`) s'eteint quand sa derniere figurine meurt, le LEADER (`deep_strike`)
+    reste tant que le Chaplain vit. Avant cela, aucun character du registre ne portait de regle
+    observable (balaye le 2026-08-10) et seule la moitie bodyguard du tableau 19.04 etait
+    couverte ici ; le fold cote leader ne l'etait que par une assertion sur `UNIT_RULES`.
+    Laquelle source s'eteint quand reste verrouille source par source par
+    `test_attached_units_abilities_19_04.py` ;
   - les marqueurs de ROLE ne sont pas dupliques (le bloc TYPES les porte deja) ;
   - une regle sans effet n'a pas d'id (meme critere que [INDIRECT FIRE] cote armes) ;
   - les ids sont TRIES croissants et paddes a 0 (reproductibilite bit a bit des replays) ;
@@ -122,12 +125,11 @@ def test_attached_squad_rule_is_observed_then_extinguished_with_its_source():
     Le cas qui rendait ce trou couteux : depuis 19.04 l'union en vigueur change en cours de
     partie, et l'agent n'en voyait rien.
 
-    La source suivie est ici le BODYGUARD, et le leader attache SURVIT — c'est la moitie du
-    tableau 19.04 (« until the last model in that bodyguard unit is destroyed ») dont l'effet
-    est OBSERVABLE : `charge_impact` a un `obs_id`, alors que le Deep Strike du Chaplain n'en a
-    pas. L'observation ne distingue de toute facon PAS l'origine d'une regle — elle lit
-    `unit["UNIT_RULES"]`, l'union deja calculee — donc ce que ce test verrouille (l'observation
-    suit l'union quand elle change) vaut pour les deux sources. Laquelle s'eteint quand, c'est
+    La source qui S'ETEINT est le BODYGUARD (`charge_impact`), et le leader attache SURVIT —
+    c'est la moitie du tableau 19.04 « until the last model in that bodyguard unit is
+    destroyed ». Depuis que `deep_strike` a un `obs_id`, l'autre moitie est observable elle
+    aussi : la regle du Chaplain est verifiee PRESENTE avant comme apres, ce qui distingue « le
+    bloc suit l'union » de « le bloc s'est vide ». Laquelle source s'eteint quand, c'est
     `test_attached_units_abilities_19_04.py` qui le verrouille, source par source.
     """
     from engine.phase_handlers.shared_utils import destroy_model
@@ -135,10 +137,9 @@ def test_attached_squad_rule_is_observed_then_extinguished_with_its_source():
     eng = _load([_BODYGUARD, _LEADER, _ENEMY])
 
     # Le FOLD a bien eu lieu : la regle du Chaplain est dans l'union en vigueur de l'escouade.
-    # Elle n'a pas d'`obs_id`, donc l'observation ne peut pas la porter — mais sans cette
-    # assertion, casser `_fold_attached_characters` laisserait TOUT ce fichier vert, puisque la
-    # regle suivie ci-dessous appartient au bodyguard. C'est le chainon que l'observation
-    # consomme (`unit["UNIT_RULES"]`), verrouille ici a defaut de pouvoir l'etre par un bit.
+    # C'est le chainon que l'observation consomme (`unit["UNIT_RULES"]`) : sans cette assertion,
+    # casser `_fold_attached_characters` laisserait TOUT ce fichier vert, puisque la source
+    # suivie ci-dessous appartient au bodyguard.
     union = {str(r["ruleId"]) for r in eng.game_state["unit_by_id"]["101"]["UNIT_RULES"]}
     assert ATTACHED_LEADER_RULE in union, (
         "la regle du Chaplain attache n'est pas dans l'union 19.04 : le fold n'a pas eu lieu, "
@@ -147,7 +148,10 @@ def test_attached_squad_rule_is_observed_then_extinguished_with_its_source():
     assert ATTACHED_BODYGUARD_RULE in union, "l'escouade a perdu sa propre regle au fold"
 
     before = _rule_ids(eng.obs_builder.build_squad_observation(eng.game_state, "101"), "allies", 0)
-    assert ATTACHED_BODYGUARD_RULE in before, "regle de l'escouade invisible"
+    assert before == {ATTACHED_BODYGUARD_RULE, ATTACHED_LEADER_RULE}, (
+        "l'observation doit porter les DEUX sources de l'union 19.04 — celle de l'escouade et "
+        "celle du leader attache"
+    )
 
     models_cache = eng.game_state["models_cache"]
     natives = [
@@ -156,11 +160,11 @@ def test_attached_squad_rule_is_observed_then_extinguished_with_its_source():
     ]
     assert len(natives) == 3, "fixture : 3 bodyguards attendus"
 
-    # ETAPE 1 — tuer tous les bodyguards SAUF UN. La source vit encore, donc le bit doit tenir.
+    # ETAPE 1 — tuer tous les bodyguards SAUF UN. La source vit encore, donc son id doit tenir.
     # Cette assertion POSITIVE apres mutation est le garde anti-vert-vacant du test : sans elle,
-    # un bug qui zerote le bloc de capacites de la ligne 0 satisferait l'etape 2 sans rien dire
-    # (a la fin, l'unite ne porte plus que `deep_strike`, qui n'a pas d'obs_id : l'ensemble
-    # observe est vide, et un ensemble vide passe toutes les assertions negatives).
+    # un bug qui zerote le bloc de capacites de la ligne 0 satisferait l'etape 2 sans rien dire,
+    # un ensemble vide passant toutes les assertions negatives. L'etape 2 en pose un second, sur
+    # la regle du LEADER, qui elle doit SURVIVRE a la mort du bodyguard.
     for mid in natives[:-1]:
         destroy_model(eng.game_state, mid, "combat")
     mid_course = _rule_ids(
@@ -176,7 +180,10 @@ def test_attached_squad_rule_is_observed_then_extinguished_with_its_source():
     # Le leader vit encore : l'unite existe, et c'est bien la SOURCE morte qui a disparu.
     assert eng.game_state["squad_models"]["101"], "le Chaplain attache doit survivre"
     after = _rule_ids(eng.obs_builder.build_squad_observation(eng.game_state, "101"), "allies", 0)
-    assert ATTACHED_BODYGUARD_RULE not in after, "regle du bodyguard mort toujours observee"
+    assert after == {ATTACHED_LEADER_RULE}, (
+        "la regle du bodyguard mort doit disparaitre, celle du Chaplain VIVANT doit rester — "
+        "un bloc entierement vide prouverait un zerotage, pas 19.04"
+    )
 
 
 def test_role_markers_are_not_duplicated_as_rule_ids():
@@ -222,6 +229,12 @@ def test_composite_datasheet_abilities_are_captured_through_their_effects():
         # porte la seule capacite ORKE reellement lue par l'observation aujourd'hui.
         "Gretchin": {"cp_gain_on_objective"},
         "AggressorFlamestorm": {"closest_target_penetration"},
+        # Deep Strike (24.09) : les trois porteurs des rosters Armageddon. `ChaplainJumpPack`
+        # porte aussi `leader`, marqueur de ROLE sans `obs_id` — il ne doit PAS remonter ici.
+        # Les autres entrees de ce tableau font la contre-epreuve : aucune ne porte la capacite.
+        "ChaplainJumpPack": {"deep_strike"},
+        "VanguardVeteranSquadJumpPack": {"deep_strike"},
+        "LandSpeederOnslaughtGatlingCannon": {"deep_strike"},
         "Gargoyle": {"move_after_shooting"},
         "Termagant": {"reactive_move"},
         "Neurogaunt": {"charge_after_advance"},
@@ -452,7 +465,7 @@ def test_the_status_slots_go_through_the_same_writer():
 
 
 def test_the_real_registries_load_clean():
-    """Les deux registres reels passent la validation, et les 13 effets observes ont un id."""
+    """Les deux registres reels passent la validation, et TOUT effet observe a un id."""
     from config_loader import get_config_loader
 
     loader = get_config_loader()

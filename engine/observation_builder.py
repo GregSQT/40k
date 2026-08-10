@@ -115,7 +115,10 @@ def _obs_ids_for_vocabulary(
 
 
 def unit_ability_obs_ids() -> Dict[str, int]:
-    """`{effet observable -> obs_id}` pour les 13 effets de `UNIT_RULE_EFFECT_IDS`.
+    """`{effet observable -> obs_id}` pour les effets de `UNIT_RULE_EFFECT_IDS`.
+
+    Aucun compte n'est écrit ici : le vocabulaire s'allonge pour zéro scalaire (chantier 01),
+    donc un nombre en prose serait faux dès l'entrée suivante — il l'a été de 13 à 16.
 
     Mémoïsé sur le loader (il cache déjà le JSON) : appelé pour chacune des 28 entités à chaque
     step.
