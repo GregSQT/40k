@@ -144,9 +144,16 @@ def coverage_rows(stats: Dict[str, Any], section: Optional[str] = None) -> List[
         if section is not None and require_key(entry, "section") != section:
             continue
         rule_id = require_key(entry, "id")
-        applicable = rule_is_applicable(stats, entry)
         exercised = _counter_value(stats, ["rule_usage", rule_id])
         errors = rule_error_count(stats, entry)
+        # L'OBSERVATION PRIME SUR LA PRÉDICTION. Le prédicat d'applicabilité est une déduction ;
+        # un exercice ou une faute sont des FAITS. Une règle qu'on a jugée, ou qui a produit une
+        # erreur, était applicable — le prédicat ne tranche donc que les cas où l'on n'a rien
+        # observé. Sans cette priorité, le rapport pouvait affirmer le contraire de ce qu'il
+        # venait de mesurer : « HORS ROSTER » au-dessus d'un compteur d'erreur non nul, ou des
+        # exercices > 0 rendus avec un tiret. Les deux ont été mesurés en revue le 2026-08-10, et
+        # ils venaient tous deux de prédicats qui ne découpent pas comme les sites de mesure.
+        applicable = True if (exercised > 0 or errors > 0) else rule_is_applicable(stats, entry)
         if applicable is None:
             verdict = VERDICT_UNDECIDABLE
         elif not applicable:

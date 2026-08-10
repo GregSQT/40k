@@ -6,6 +6,7 @@ import re
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from shared.data_validation import require_key
+from ai.analyzer_rules import note_rule_usage
 from engine.combat_utils import calculate_hex_distance, ranged_edge_distance, get_distance_metric
 from ai.analyzer_perfig import (
     parse_shooter_models_segment,
@@ -1350,6 +1351,10 @@ def handle_advance(
             'advance_to': (dest_col, dest_row)
         })
 
+    # 03.01 JUGÉE : troisième et dernier site de `wall_collisions` (l'advance). Les trois notent
+    # désormais l'exercice — sans quoi la règle criait « jamais exercée » sur un journal où seul
+    # ce site avait travaillé.
+    note_rule_usage(stats, "03.01", player)
     # RULE: Move into wall
     if (dest_col, dest_row) in state.wall_hexes:
         stats['wall_collisions'][player] += 1

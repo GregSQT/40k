@@ -41,9 +41,29 @@
 > **Première tranche livrée le 2026-08-10 : §1.1 est passée en DONNÉE** — `config/rules_corpus.json`,
 > lu par `ai/analyzer_rules.py`, rendu à chaque analyse sous « 1.1 COUVERTURE DES REGLES ». Pour
 > ces 6 règles, le document n'est plus la source : il commente une donnée que le rapport
-> confronte au journal. Trois verdicts y sont impossibles à falsifier — **HORS ROSTER** (aucune
-> unité jouée ne porte la règle), **JAMAIS EXERCÉE** (applicable, et aucun contrôle n'a rien eu à
-> juger : c'est le signal 17.01), **ERREURS**. Un invariant interdit au corpus de devenir une
+> confronte au journal. Trois verdicts — **HORS ROSTER** (aucune unité jouée ne porte la règle),
+> **JAMAIS EXERCÉE** (applicable, et aucun contrôle n'a rien eu à juger : c'est le signal 17.01),
+> **ERREURS**.
+>
+> ⚠️ **La première version de ce paragraphe les disait « impossibles à falsifier ». C'était faux,
+> et la revue du jour l'a démontré cinq fois** — verdict d'applicabilité testé AVANT les erreurs
+> (une règle fautive sortait « hors roster »), exercice noté sur un seul des trois sites de
+> `wall_collisions` (fausse alerte « jamais exercée » sur un journal de fall-back), notes posées
+> devant les gardes qui conditionnent les contrôles. Corrigé le même jour, et la règle qui le
+> rend structurel est écrite dans le code : **l'OBSERVATION PRIME SUR LA PRÉDICTION**. Un exercice
+> ou une faute sont des faits ; le prédicat d'applicabilité n'est qu'une déduction, et il ne
+> tranche donc que les cas où l'on n'a rien observé. Le rapport ne peut plus contredire sa propre
+> mesure.
+>
+> **Ce qui n'est PAS encore fait**, et qu'aucune formulation ne doit laisser croire : le SUMMARY
+> ne porte pas le verdict de couverture. `JAMAIS EXERCÉE` et l'écart somme/bucket ne s'impriment
+> que dans la table de détail ; la ligne qu'on lit en premier reste `✅ 1.1 Erreurs en phase de
+> move : 0`. Sur le cas fondateur — 17.01 jamais appliquée, zéro erreur — le résumé afficherait
+> encore un vert. La moitié de l'objectif reste ouverte. Deuxième dette du même ordre : le corpus
+> et `error_totals` énumèrent DEUX FOIS les mêmes compteurs, tenus égaux par un test au lieu de
+> l'être par construction ; à sept sections ce seront ~60 compteurs écrits en double.
+>
+> Un invariant interdit au corpus de devenir une
 > seconde somme divergente : la somme des erreurs par règle DOIT égaler le bucket `move`
 > d'`error_totals`, sans quoi le rapport imprime l'écart (verrou :
 > `tests/unit/ai/test_analyzer_rules_corpus.py`). Mesuré sur le run du 2026-08-10 : 116 mouvements
