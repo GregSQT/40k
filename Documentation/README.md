@@ -52,6 +52,7 @@ Les plans d'implémentation sont classés dans `Implémentation/Implémenté/` (
 | **[TESTING.md](TESTING.md)** | Architecture des tests (`tests/unit/engine`, `tests/unit/services`). |
 | **[Old/KNOWN_ANOMALIES.md](Old/KNOWN_ANOMALIES.md)** | ⚠️ **Archivé dans `Old/`** — registre des anomalies connues et de leur suivi. |
 | **[Code_Compliance/](Code_Compliance/)** | Docs des outils de conformité (analyzer, check_ai_rules, hidden_action_finder). |
+| **`scripts/security_check.sh`** | Analyse statique de sécurité (bandit + pip-audit + npm audit), sortie non nulle sur finding haut. Dépendances : `requirements-dev.txt`. Seuils et exceptions : [Implémentation/Security.md](Impl%C3%A9mentation/Security.md). |
 | **[Prompts/](Prompts/)** | Prompts outillage réutilisables (CURSOR_SUB_AGENTS, fix_game_rules_violations). |
 
 ---
@@ -61,6 +62,7 @@ Les plans d'implémentation sont classés dans `Implémentation/Implémenté/` (
 | Document | Rôle |
 |----------|------|
 | **[Deployment_Synology.md](Deployment_Synology.md)** | Déploiement Synology : Docker, réseau, HTTPS, DDNS. |
+| **[Implémentation/Security.md](Impl%C3%A9mentation/Security.md)** | **Chantier sécurité avant exposition Internet** : 15 failles (F1→F15), 8 étapes, décisions hors périmètre, tableau de suivi. 🟠 actif — étapes 1, 2 et **6 (analyse statique, `scripts/security_check.sh`)** faites ; 3, 4, 7, 8 à faire, 5 partielle. **Jalon : ne pas exposer avant la fin de l'étape 5.** |
 | **[USER_ACCESS_CONTROL.md](USER_ACCESS_CONTROL.md)** | Auth, profils, droits d’accès. |
 | **[Various/Roadmap.md](Various/Roadmap.md)** | Paliers démo, état d’avancement (doc de pilotage courant). |
 | **[Various/conformite_regles.md](Various/conformite_regles.md)** | Audit règles ↔ code (courant). |

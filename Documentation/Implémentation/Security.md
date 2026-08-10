@@ -68,7 +68,7 @@ Menaces retenues :
 **Recommandé, sévérité remontée.** Exposé sur Internet, le journal d'audit (avec IP) est ton seul moyen de savoir si quelqu'un brute-force le login ou abuse de l'API.
 
 ### Analyse statique et dynamique
-- **Statique : oui** — `bandit`, `pip-audit`, `npm audit` (étape 6). NB : bandit aurait signalé le `pickle.load` (F7) dès l'origine — preuve de son utilité. Il continuera de le signaler sur `game_saves.py` : le format est conservé, c'est `_safe_loads` qui neutralise le vecteur ; l'écarter demandera une justification écrite, pas un `# nosec` muet.
+- **Statique : oui** — `bandit`, `pip-audit`, `npm audit` (étape 6, **faite**). NB : bandit aurait signalé le `pickle.load` (F7) dès l'origine — preuve de son utilité. Mesuré après correction de F7 : il ne signale plus `B301` sur `game_saves.py` (le dépickle passe par une sous-classe `pickle.Unpickler`, que bandit ne pointe pas) mais toujours `B403 import pickle`, en LOW. Ce finding est maintenu, non supprimé : aucun `# nosec` n'est posé, la justification écrite est en tête de `scripts/security_check.sh` et dans l'étape 6.
 - **Dynamique : devient pertinent** avec l'exposition. Un scan OWASP ZAP en mode baseline contre l'instance de test, une fois les étapes 1–5 faites. Optionnel mais peu coûteux.
 
 ### Buffer overflow / gestion mémoire
@@ -192,7 +192,7 @@ La **tentative** est distincte de son **issue** : `login_attempt` porte le compt
 | `frontend/Dockerfile` | Build Vite (`VITE_API_URL=/api`) puis nginx:1.27-alpine servant `dist/`, `proxy_pass` vers `backend:5001`, `X-Real-IP` et `X-Forwarded-For` posés | `listen 80` **seul** : aucun TLS, aucune redirection HTTP→HTTPS |
 
 **À faire**
-- Remplacer le `CMD` par un serveur WSGI de production : `waitress` (simple, pur Python) ou `gunicorn`, ajouté à `requirements.runtime.txt`. Le `app.run(...)` de `api_server.py:4851` reste le chemin de **développement local** (`host='127.0.0.1'` y est correct et doit le rester : c'est lui qui garantit qu'un lancement direct n'expose rien).
+- Remplacer le `CMD` par un serveur WSGI de production : `waitress` (simple, pur Python) ou `gunicorn`, ajouté à `requirements.runtime.in` **puis verrou régénéré** (depuis l'étape 6, `requirements.runtime.txt` est généré — ne pas y écrire à la main). Le `app.run(...)` de `api_server.py:4851` reste le chemin de **développement local** (`host='127.0.0.1'` y est correct et doit le rester : c'est lui qui garantit qu'un lancement direct n'expose rien).
 - Faire écouter le process de production sur `0.0.0.0` **à l'intérieur du conteneur uniquement** (via le WSGI, pas en modifiant `app.run`) — sans quoi ni nginx ni le mapping de port ne l'atteignent (F15).
 - Retirer `user: "0:0"` du compose : le `USER appuser` du `Dockerfile` doit s'appliquer. Vérifier que `W40K_PERSIST_DIR` pointe alors sur un volume inscriptible par `appuser` (montage `runtime`), et que le reste de `/app` ne l'est pas.
 - Retirer le `ports: 5001:5001` du backend : seul le frontend (nginx) doit être publié. Le backend reste joignable par le réseau interne compose.
@@ -203,13 +203,53 @@ La **tentative** est distincte de son **issue** : `login_attempt` porte le compt
 
 **Validation :** `docker compose up` → frontend en HTTPS fonctionnel, HTTP redirigé, port 5001 **non** accessible depuis l'hôte, `docker exec ... whoami` → `appuser`, healthcheck vert.
 
-### Étape 6 — Analyse statique automatisée (F5)
-**Nouveau fichier :** `scripts/security_check.sh`
+### Étape 6 — Analyse statique automatisée (F5) ✅ Fait (2026-08-10)
+**Fichiers :** `scripts/security_check.sh` (exécutable), `scripts/security_audit_ignore.txt`, `requirements-dev.txt`
 - `bandit -r services/ engine/ ai/`, `pip-audit`, `cd frontend && npm audit --audit-level=high`.
-- Dépendances dev dans un `requirements-dev.txt`.
-- Traiter les findings critiques/hauts (itération dédiée).
+- Dépendances dev (`bandit`, `pip-audit`) dans `requirements-dev.txt`, **hors** `requirements.runtime.txt` : ce dernier construit l'image de production, l'alourdir serait une régression.
 
-**Validation :** script exécutable, findings critiques traités.
+**Périmètre bandit :** `services/ engine/ ai/ shared/ scripts/ check/ spikes/ main.py config_loader.py`. Élargi par rapport au plan initial (`services/ engine/ ai/`) : `main.py`, `config_loader.py` et `shared/` sont **importés par `services/api_server.py`** (lignes 37-38) ; `scripts/`, `check/` et `spikes/` partent dans l'image via le `COPY . /app`. Les laisser dehors, c'était garantir qu'un `shell=True` ajouté là ne bloquerait jamais. **Seule exclusion, annoncée à chaque exécution du script** : `tests/`, désormais exclu de l'image elle-même (`.dockerignore`, voir plus bas) — il n'est donc plus « embarqué mais non scanné », et ses ~6 900 `assert` (B101) ne noient pas le rapport.
+
+**Seuils bloquants** (sortie non nulle, sinon le script serait décoratif) :
+- bandit : sévérité **HIGH**, toutes confiances — **et** tout fichier que bandit n'a pas su analyser, ou un échec de l'outil (code > 1). Un scan planté rend un rapport à zéro finding : sans ce contrôle il se lirait comme un feu vert.
+- pip-audit `--strict` : **toute** vulnérabilité de la surface de production (`requirements.runtime.txt`), hors exceptions justifiées **une par une** dans `scripts/security_audit_ignore.txt` — une ligne sans justification écrite fait échouer le script. `--strict` ferme côté pip-audit le même trou que `errors` côté bandit : sans lui, une dépendance dont la collecte échoue est simplement « skippée » (message de spinner, invisible hors terminal) et l'audit sort 0 sur une surface partielle. Le venv de développement est audité en parallèle mais **non bloquant** : son outillage local (jupyter, aider, pytest…) ne part pas dans l'image.
+
+**Verrou de dépendances (2026-08-10).** Le portail n'a de sens que si le fichier audité est celui que le build installe. `requirements.runtime.txt` est donc devenu un **verrou complet généré** (56 paquets, transitives comprises), et les dépendances directes vivent dans `requirements.runtime.in`. Avant, seules les directes étaient épinglées : `Werkzeug`, `Jinja2`, `matplotlib`, `pillow`, `sympy`, `triton`, `nvidia-*` flottaient au build comme à l'audit, donc ni l'audit ni l'image n'étaient reproductibles. La résolution est faite pour le Python de l'image (`python:3.11-slim`, linux x86_64) — commande exacte en tête de `requirements.runtime.in`. Le `Dockerfile` n'est pas touché : il installe toujours `requirements.runtime.txt`.
+
+Effet de bord corrigé au passage : `setuptools` est **réintroduit épinglé (84.0.0)**. Le retrait du pin `>=70,<82` n'en supprimait que la borne haute (imposée par TensorBoard) ; sur `python:3.11-slim` plus rien ne le tire — `triton` 3.1.0 ne dépend que de `filelock`, et torch 2.5.1 ne le déclare que sous `python_version >= "3.12"` — donc sans ligne explicite l'image aurait gardé le `setuptools` de son image de base, invisible pour `pip-audit -r` et hors du portail. Le verrou le rend visible et courant.
+
+**Limite connue de la commande de régénération**, mesurée : `pip --python-version 3.11` gouverne le choix des roues, mais l'évaluation des **marqueurs** suit l'interpréteur local. Résolue depuis un 3.12, elle a fait entrer `setuptools` par le marqueur `python_version >= "3.12"` de torch — surplus inoffensif, et voulu ici. Le risque symétrique (un paquet requis seulement en 3.11 et absent du verrou) impose de contrôler la clôture du verrou après chaque régénération, ou de la refaire depuis un interpréteur 3.11 dès qu'il y en a un. C'est écrit dans l'en-tête de `requirements.runtime.in`.
+
+**`scipy` manquait à la surface de production (2026-08-10).** Trouvé en auditant le verrou : `charge_handlers.py:4687` et `fight_handlers.py:2895` font un import **dur** de `scipy.optimize.milp` / `scipy.sparse`, atteint par l'action PvP `charge_autoplace` (`charge_handlers.py:1300`). `scipy` n'a jamais figuré dans `requirements.runtime.txt` — le défaut précède ce chantier : l'image répondait 500 sur cette action, et `pip-audit` ne voyait jamais scipy. Vérifié par exécution dans un venv sans le paquet : `ModuleNotFoundError: No module named 'scipy'`. Ajouté (`scipy==1.15.3`), verrou régénéré (57 paquets, seul ajout), audit toujours propre. La CI en hérite, puisqu'elle installe le verrou.
+
+**Réduction de ce que l'image embarque (2026-08-10), `.dockerignore`.** Le `COPY . /app` n'excluait ni `config/users.db` (77 Ko de comptes et de hashes de mots de passe) ni `.claude/` (4,5 Go mesurés — les worktrees sont des copies complètes du dépôt). Le montage compose masque `users.db` à l'exécution, mais la copie reste lisible dans la couche d'image pour qui l'obtient. Trois exclusions ajoutées : `*.db` + `config/users.db`, `.claude/`, `tests/`. Cette dernière rend au passage cohérent le périmètre bandit : `tests/` n'est plus « embarqué mais non scanné », il n'est plus embarqué du tout.
+
+**Frontière image / tests (2026-08-10).** La CI installait le **verrou de production seul** puis lançait `pytest tests/unit` (`.github/workflows/unit-tests.yml`). Sortir `tensorboard` de l'image rendait donc la collecte pytest rouge : `ai/metrics_tracker.py:36` fait un `from torch.utils.tensorboard.writer import SummaryWriter` **non protégé** — contrairement à sb3 — et 12 fichiers de `tests/unit` importent ce module. Vérifié par exécution : sans le paquet, `import ai.metrics_tracker` lève `ImportError: TensorBoard logging requires TensorBoard version 1.15 or above`. Correctif : `requirements-test.txt` (pytest, pytest-cov, pytest-mock, tensorboard), et la CI installe `requirements.runtime.txt` **et** `requirements-test.txt`. L'image reste minimale, les tests déclarent ce qu'il leur faut.
+- npm audit : `--audit-level=high` (high + critical), décidé sur le **rapport JSON**. `npm` sort en non-zéro aussi bien pour « j'ai trouvé des vulnérabilités » que pour « je n'ai pas pu auditer » (registre injoignable, lockfile absent) : le script lit `metadata.vulnerabilities` pour trancher et **arrête tout** si le rapport est absent, illisible ou porteur d'une erreur. Une panne d'outil n'est ni un feu vert, ni un problème de dépendances.
+
+**Findings traités :**
+- 3× bandit HIGH `B324` (SHA-1/MD5) — `ai/train.py:1005`, `ai/bot_evaluation.py:158` et `:709` : usages non cryptographiques (nom de fichier de cache, graine déterministe). Corrigés par `usedforsecurity=False`, qui laisse le digest **inchangé** (vérifié) : ni les noms de cache ni les graines ne bougent. Aucun `# nosec`.
+- pip-audit `PYSEC-2026-2151` (Flask 3.1.2, `Vary: Cookie` absent quand la session est lue → empoisonnement de cache sur des réponses porteuses de session) : Flask passé à **3.1.3** dans `requirements.runtime.in` (donc dans le verrou) et dans `requirements.txt`.
+- npm audit : 2 critical + 8 high (dont `react-router-dom`, seul de la liste à partir dans le bundle livré) résolus par `npm audit fix` — `package.json` inchangé, seul `package-lock.json` bouge. Revalidé : `npm ci`, `tsc --noEmit`, `npm run build` verts.
+
+**Pickle — justification écrite du finding maintenu (cf. §3, « l'écarter demandera une justification écrite, pas un `# nosec` muet ») :** bandit signale `B403 import pickle` sur `services/game_saves.py:28`, en LOW. Le format pickle est **conservé** ; le vecteur d'exécution est fermé par `_safe_loads`, un unpickler à liste blanche de classes (étape 2 / F7). Ce finding n'est ni supprimé ni masqué : aucun `# nosec` n'est posé, il réapparaît à chaque exécution du script, il est simplement sous le seuil bloquant. Le raisonnement est écrit en tête de `scripts/security_check.sh`.
+
+**Findings non bloquants restants** (LOW/MEDIUM, laissés en l'état sciemment) — 131 au total sur le périmètre élargi, dont 13 MEDIUM :
+- `B301 pickle.load` ×4 sur des artefacts locaux de training (`ai/vec_normalize_utils.py:105`, `ai/bot_evaluation.py:687`, `engine/pve_controller.py:470`, `engine/action_decoder.py:255`).
+- `B108` ×5 (chemin `/tmp` en dur) dans les bancs d'essai `scripts/ab_bench*.py`, `scripts/ab_sweep_nenvs.py` — outillage de mesure local, jamais exécuté par le serveur.
+- `B302 marshal` ×1 (`scripts/profile_env_step_360x312.py:214`) et `B310 urlopen` ×3 (`scripts/pvp_smoke_test.py:74,125,170`, URL construite dans le script vers `127.0.0.1`) — scripts de profilage et de smoke test, hors chemin serveur.
+- LOW : 53× `B311 random` (aléatoire de jeu, non cryptographique), 17× `B101 assert`, 8× `B110`, 1× `B112`, 5× `B105` (faux positifs : `PASS = "PASS"`, regex nommées `_TOKEN`), `B403`/`B404`/`B603`/`B607` sur des `subprocess.run([...])` à arguments constants, sans shell.
+- npm : 2 `qs` moderate.
+
+**Exceptions torch — prémisse corrigée (2026-08-10).** La justification écrite dans `scripts/security_audit_ignore.txt` disait d'abord « les poids viennent de l'image ». C'est **faux** : `.dockerignore` exclut `ai/models/`, et les poids arrivent par un montage hôte (`${SYNO_MODELS_PATH}:/app/ai/models`, `docker-compose.yml:18`). Ce qui reste établi, et qui est désormais ce qui est écrit : les observations sont construites côté serveur, jamais reçues du client, et **aucune route de `services/api_server.py` n'écrit dans `ai/models`** (grep : 0 occurrence) — le contenu du montage dépend de l'opérateur. La fermeture définitive du vecteur n'est pas cette liste, c'est torch ≥ 2.6 (`torch.load` en `weights_only=True`) : mesuré, torch 2.13.0 + sb3 2.9.0 recharge tous les modèles vivants moyennant deux entrées `add_safe_globals`.
+
+**Allègement de l'image de production (2026-08-10), mesuré :** `tensorboard`, le pin `setuptools<82`, `torchvision` et `torchaudio` sont sortis de `requirements.runtime.in`. Preuve : `torchvision`/`torchaudio` n'ont **aucun** `import` dans le dépôt et ne sont jamais chargés ; le chemin serveur complet (engine, services, `ai.unit_registry`, `sb3_contrib`) a été importé et un modèle chargé dans un venv **sans** tensorboard — sb3 protège son import (`try: from torch.utils.tensorboard import SummaryWriter / except ImportError`). Conséquence : `PYSEC-2026-3447` (setuptools) disparaît de la liste d'exceptions, il n'en reste que torch.
+
+**Purge du `package.json` racine (2026-08-10) :** ce fichier déclarait `react-scripts` et une pile CRA jamais installée (`node_modules/` à la racine est un **symlink** vers `frontend/node_modules`, posé par `scripts/link-root-node-modules.mjs`). Seul son `package-lock.json`, resté figé sur CRA, faisait remonter 2 critical + ~30 high à `npm audit` lancé depuis la racine, sur du code non déployé. Lockfile supprimé, `package.json` réduit à ses scripts réellement utilisés (biome + wrappers Python). Vérifié : `npx biome check frontend/src` (328 fichiers) et `npm run` inchangés. Piège mesuré en bac à sable : un `npm install` lancé **à la racine** supprime le symlink `node_modules` (`npm warn reify Removing non-directory …`) sans toucher au contenu réel de `frontend/node_modules` ; se rattrape par `npm --prefix frontend install`, dont le `postinstall` repose le lien. Comportement identique avant et après cette purge — ne pas lancer `npm install` à la racine.
+
+**Validation :** script exécutable, exécuté, sortie 0. Réactivité de **chaque** porte prouvée en remettant le défaut, puis rétablie : SHA-1 sans `usedforsecurity` → rouge ; fichier à erreur de syntaxe déposé dans `shared/` → rouge (`bandit n'a pas pu analyser …`) ; ligne sans justification dans `security_audit_ignore.txt` → rouge, y compris indentée ; `Flask==3.1.2` → rouge ; `--audit-level=moderate` → rouge. Contrôle inverse : commentaires indentés (espaces **et** tabulations) et lignes vides de tabulations dans le fichier d'exceptions → vert, alors qu'ils faisaient échouer le script auparavant.
+
+**Non vérifié :** l'effet propre de `pip-audit --strict`. Le drapeau est celui que documente pip-audit pour empêcher qu'une dépendance non collectée soit ignorée en silence, mais je n'ai pas su construire un cas qui distingue les deux modes — un paquet inexistant sort en 1 avec **et** sans `--strict`.
 
 ### Étape 7 — Journal d'audit (F4) 🟨 socle posé le 2026-08-10
 
@@ -253,7 +293,7 @@ La **tentative** est distincte de son **issue** : `login_attempt` porte le compt
 | 3. Durcissement sessions + rate limiting | F2, F8 | ✅ Fait, puis durci sur deux passes de revue (32 tests, preuve rouge sur 23 verrous ; runtime PvP à valider) | 2026-08-10 |
 | 4. Réduction surface d'information | F3, F10, F13 | ⬜ À faire | — |
 | 5. Infra d'exposition (WSGI + proxy + TLS) | F9, F15 | 🟨 Partiel — stack Docker + nginx existante (non documentée jusqu'au 2026-08-10), mais dev server, root et sans TLS ; **ne pas déployer en l'état** | — |
-| 6. Analyse statique | F5 | ⬜ À faire | — |
+| 6. Analyse statique | F5 | ✅ Fait — `scripts/security_check.sh` exécuté, sortie 0 ; 3 bandit HIGH + Flask 3.1.3 + 10 npm high/critical traités ; torch/setuptools acceptés avec justification écrite (voir ARBITRAGE étape 6) | 2026-08-10 |
 | 7. Journal d'audit | F4 | 🟨 Socle posé (`auth_events` append-only + IP réelle) ; reste les événements d'administration et l'exploitation | 2026-08-10 |
 | 8. Passe finale (ZAP, MFA ?, comptes) | — | ⬜ À faire | — |
 

@@ -156,7 +156,8 @@ def _materialize_eval_scenario_refs(
     out_dir = os.path.join(temp_root, "agents", agent_key, "scenarios", split_dir)
     os.makedirs(out_dir, exist_ok=True)
     path_hash = hashlib.sha1(
-        f"{os.path.abspath(scenario_path)}|{wall_ref}".encode("utf-8")
+        f"{os.path.abspath(scenario_path)}|{wall_ref}".encode("utf-8"),
+        usedforsecurity=False,
     ).hexdigest()[:16]
     out_path = os.path.join(out_dir, f"{os.path.basename(scenario_path)[:-5]}__{path_hash}.json")
     if not os.path.exists(out_path):
@@ -705,7 +706,7 @@ def _build_eval_obs_normalizer_for_worker(
 def _episode_seed(base_seed: int, bot_name: str, scenario_idx: int, ep_idx: int) -> int:
     """Seed déterministe par (bot, scenario, épisode). Reproductible entre exécutions."""
     key = f"{bot_name}:{scenario_idx}:{ep_idx}"
-    h = int(hashlib.md5(key.encode()).hexdigest()[:8], 16) % (2**31)
+    h = int(hashlib.md5(key.encode(), usedforsecurity=False).hexdigest()[:8], 16) % (2**31)
     return (base_seed + h) % (2**31)
 
 

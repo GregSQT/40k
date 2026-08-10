@@ -22,5 +22,19 @@ ai/models/
 *.sqlite
 *.sqlite3
 
+# Base de comptes. Sans cette ligne, le `COPY . /app` du Dockerfile CUISAIT `config/users.db`
+# (hashes de mots de passe) dans une couche de l'image : le montage compose la masque à
+# l'exécution, mais elle reste lisible dans l'image pour qui l'obtient. Ajouté le 2026-08-10.
+*.db
+config/users.db
+
+# Outillage de session Claude Code : contient les worktrees, soit des copies COMPLÈTES du dépôt
+# (4,5 Go mesurés le 2026-08-10). Sans cette ligne, le contexte de build les embarque toutes.
+.claude/
+
+# Jamais exécuté par le conteneur. Leur exclusion rend aussi cohérent le périmètre bandit de
+# scripts/security_check.sh, qui scanne « le Python que l'image embarque ».
+tests/
+
 agent-transcripts/
 Documentation/TODO/

@@ -84,6 +84,22 @@ python services/api_server.py
 npm --prefix frontend run dev
 ```
 
+> `requirements.txt` = environnement de développement complet.
+> `requirements.runtime.txt` = **verrou généré** de l'image Docker de production ; il ne s'édite
+> pas à la main, sa source est `requirements.runtime.in`.
+> `requirements-dev.txt` = outillage d'analyse de sécurité (`bandit`, `pip-audit`).
+> `requirements-test.txt` = ce qu'il faut **en plus** du verrou pour exécuter la suite de tests
+> (pytest et `tensorboard`, requis par `ai/metrics_tracker.py`). C'est ce que la CI installe.
+
+### Analyse de sécurité
+
+```bash
+pip install -r requirements-dev.txt
+./scripts/security_check.sh    # bandit + pip-audit + npm audit ; sortie non nulle si finding haut
+```
+
+Seuils, exceptions justifiées et findings connus : [Documentation/Implémentation/Security.md](Documentation/Impl%C3%A9mentation/Security.md).
+
 ### Entraînement IA (exemple)
 
 ```bash
@@ -145,6 +161,22 @@ python services/api_server.py
 # 3) Frontend
 npm --prefix frontend run dev
 ```
+
+> `requirements.txt` = full development environment.
+> `requirements.runtime.txt` = **generated lock** for the production Docker image; never edit it
+> by hand, its source is `requirements.runtime.in`.
+> `requirements-dev.txt` = security analysis tooling (`bandit`, `pip-audit`).
+> `requirements-test.txt` = what the test suite needs **on top of** the lock (pytest and
+> `tensorboard`, required by `ai/metrics_tracker.py`). This is what CI installs.
+
+### Security scan
+
+```bash
+pip install -r requirements-dev.txt
+./scripts/security_check.sh    # bandit + pip-audit + npm audit; non-zero exit on any high finding
+```
+
+Thresholds, written exceptions and known findings: [Documentation/Implémentation/Security.md](Documentation/Impl%C3%A9mentation/Security.md).
 
 ### AI training example
 

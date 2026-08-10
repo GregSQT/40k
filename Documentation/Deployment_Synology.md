@@ -74,10 +74,12 @@ sans étape de build.
 - `Dockerfile` (backend)
 - `frontend/Dockerfile` (frontend)
 - `docker-compose.yml`
-- `requirements.runtime.txt` (runtime backend NAS)
+- `requirements.runtime.in` (**source** des dépendances backend NAS — dépendances directes, écrite à la main)
+- `requirements.runtime.txt` (**verrou généré** installé par le `Dockerfile` : 56 paquets, transitives comprises, résolus pour `python:3.11-slim` / linux x86_64 — **ne pas éditer à la main**, régénérer depuis le `.in` avec la commande donnée dans son en-tête)
 - `scripts/nas_sync_models.py`
 - `scripts/nas_update_app.sh`
 - `scripts/nas_check_deploy.sh`
+- `scripts/security_check.sh` + `scripts/security_audit_ignore.txt` (analyse statique avant déploiement)
 
 Le `docker-compose.yml` utilise des variables d’environnement obligatoires : `SYNO_CONFIG_PATH`, `SYNO_MODELS_PATH`, `SYNO_RUNTIME_PATH`. Pas de fallback : les variables doivent être définies.
 
@@ -114,7 +116,8 @@ Note Synology : utiliser `sudo /usr/local/bin/docker compose ...` (PATH `sudo` i
 
 - **Architecture** : Vérifier le NAS (amd64 / arm64). Pour multi-arch : buildx et manifest.
 - **Sécurité** : images à jour, secrets via variables d’environnement (jamais en dur dans les Dockerfiles), pas de fallback silencieux si variable critique manquante.
-- **Compatibilité modèles IA** : conserver `numpy==2.4.2` dans `requirements.runtime.txt` pour la compatibilité de chargement des modèles PPO sérialisés.
+- **Analyse statique avant déploiement** : `./scripts/security_check.sh` (venv actif + `pip install -r requirements-dev.txt`). Il enchaîne `bandit`, `pip-audit --strict` sur le verrou de production et `npm audit --audit-level=high`, et **sort en code non nul** dès qu'un finding haut/critique subsiste. Les exceptions acceptées sont listées **avec justification écrite** dans `scripts/security_audit_ignore.txt` (une ligne sans justification fait échouer le script). Détail des seuils et des findings connus : [Implémentation/Security.md](Impl%C3%A9mentation/Security.md).
+- **Compatibilité modèles IA** : conserver `numpy==2.4.2` dans `requirements.runtime.in` (et donc dans le verrou) pour la compatibilité de chargement des modèles PPO sérialisés. Les poids **ne sont pas dans l'image** (`.dockerignore` exclut `ai/models/`) : ils arrivent par le montage `${SYNO_MODELS_PATH}:/app/ai/models`, dont le contenu relève de l'opérateur — aucune route de l'API n'y écrit.
 - **Healthcheck** : le backend expose `/api/health` ; le compose utilise un healthcheck HTTP sur `http://127.0.0.1:5001/api/health`.
 
 ---

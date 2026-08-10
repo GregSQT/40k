@@ -129,7 +129,7 @@ Un utilisateur `admin` peut acceder a:
 ## Creation de compte — pas de route API
 
 `POST /api/auth/register` **n'existe plus** (faille F12, cf.
-`Documentation/Implementation/A_faire/Security.md`). L'inscription libre etait ouverte a
+`Documentation/Implémentation/Security.md`). L'inscription libre etait ouverte a
 Internet, et la simple mise derriere authentification ne suffisait pas : n'importe quel
 testeur au profil `base` aurait pu creer des comptes en masse.
 

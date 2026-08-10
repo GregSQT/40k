@@ -1,0 +1,214 @@
+#!/usr/bin/env bash
+#
+# Analyse statique de sécurité — Documentation/Implémentation/Security.md, étape 6 (F5).
+#
+# Enchaîne bandit (code Python), pip-audit (dépendances Python) et npm audit
+# (dépendances front). Sort en code NON NUL dès qu'un finding critique/haut subsiste.
+#
+# CE QUI FAIT ÉCHOUER :
+#   bandit    : sévérité HIGH, toutes confiances confondues — ou un fichier que bandit
+#               n'a pas su analyser (un scan partiel ne doit pas se lire comme un scan
+#               propre), ou un échec de l'outil lui-même.
+#   pip-audit : toute vulnérabilité de la surface de PRODUCTION, hors exceptions
+#               justifiées une par une dans scripts/security_audit_ignore.txt.
+#   npm audit : --audit-level=high (donc high + critical).
+#
+# CE QUI EST AFFICHÉ MAIS NE BLOQUE PAS :
+#   - bandit LOW/MEDIUM. En particulier `import pickle` (B403) et `pickle.load`
+#     (B301). Cas services/game_saves.py : le format pickle est CONSERVÉ, le vecteur
+#     d'exécution est fermé par `_safe_loads`, un unpickler à liste blanche de classes
+#     (Security.md étape 2 / F7). C'est la justification écrite du maintien de ce
+#     finding : aucun `# nosec` n'est posé dans le code, le finding continue
+#     d'apparaître à chaque exécution, il est seulement sous le seuil bloquant.
+#   - pip-audit sur le venv de DÉVELOPPEMENT. Ce venv contient l'outillage local
+#     (jupyter, aider, pytest…) qui ne part pas dans l'image Docker ; le gate porte
+#     sur requirements.runtime.txt. Ce fichier n'est représentatif de l'image QUE
+#     parce que toutes ses lignes sont épinglées : une contrainte lâche (>=) ferait
+#     auditer une résolution du jour, pas ce que le build a installé.
+#
+# Prérequis : venv actif + pip install -r requirements-dev.txt
+#
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+IGNORE_FILE="$REPO_ROOT/scripts/security_audit_ignore.txt"
+RUNTIME_REQS="$REPO_ROOT/requirements.runtime.txt"
+cd "$REPO_ROOT"
+
+for required_tool in bandit pip-audit npm python3; do
+  command -v "$required_tool" >/dev/null 2>&1 || {
+    echo "ERROR: '$required_tool' introuvable. Active le venv puis: pip install -r requirements-dev.txt" >&2
+    exit 1
+  }
+done
+[[ -f "$IGNORE_FILE" ]] || { echo "ERROR: fichier d'exceptions manquant: $IGNORE_FILE" >&2; exit 1; }
+[[ -f "$RUNTIME_REQS" ]] || { echo "ERROR: fichier de dépendances manquant: $RUNTIME_REQS" >&2; exit 1; }
+
+WORK_DIR="$(mktemp -d)"
+trap 'rm -rf "$WORK_DIR"' EXIT
+
+FAILURES=()
+
+# ---------------------------------------------------------------------------------
+# Périmètre = tout le Python que l'image embarque ET qui est exécutable — par le serveur
+# (`shared/`, `main.py`, `config_loader.py` sont importés par `services/api_server.py`) ou
+# par un opérateur (`scripts/`, `check/`, `spikes/`, embarqués via le `COPY . /app`).
+# SEULE exclusion, et elle est annoncée à chaque exécution : `tests/`, que `.dockerignore`
+# retire de l'image — il n'est donc pas embarqué, et le critère ci-dessus reste vrai.
+BANDIT_TARGETS=(services/ engine/ ai/ shared/ scripts/ check/ spikes/ main.py config_loader.py)
+BANDIT_EXCLUDED="tests/ (exclu de l'image par .dockerignore ; jamais exécuté par le conteneur)"
+
+echo "==> bandit — code Python (${BANDIT_TARGETS[*]})"
+echo "    hors périmètre : $BANDIT_EXCLUDED"
+BANDIT_JSON="$WORK_DIR/bandit.json"
+# Codes de sortie bandit : 0 = rien, 1 = findings, >1 = échec de l'outil. Ne jamais avaler
+# le >1 : un scan planté rend un rapport à 0 finding, qui se lirait comme un feu vert.
+BANDIT_SCAN_RC=0
+bandit -q -r "${BANDIT_TARGETS[@]}" -f json -o "$BANDIT_JSON" >/dev/null 2>&1 || BANDIT_SCAN_RC=$?
+[[ $BANDIT_SCAN_RC -le 1 ]] || { echo "ERROR: bandit a échoué (code $BANDIT_SCAN_RC)" >&2; exit 1; }
+[[ -s "$BANDIT_JSON" ]] || { echo "ERROR: bandit n'a produit aucun rapport" >&2; exit 1; }
+
+BANDIT_RC=0
+python3 - "$BANDIT_JSON" <<'PY' || BANDIT_RC=$?
+import collections
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as report_file:
+    report = json.load(report_file)
+results = report["results"]
+
+# Un fichier que bandit n'a pas su analyser n'apparaît PAS dans `results` : sans ce contrôle,
+# un scan aveugle sur la moitié du code s'afficherait comme un scan propre.
+scan_errors = report.get("errors") or []
+for scan_error in scan_errors:
+    print(f"    [ERREUR] bandit n'a pas pu analyser {scan_error.get('filename')} : "
+          f"{scan_error.get('reason')}")
+
+counts = collections.Counter(finding["issue_severity"] for finding in results)
+print(f"    {len(results)} finding(s) : "
+      f"HIGH={counts['HIGH']} MEDIUM={counts['MEDIUM']} LOW={counts['LOW']}")
+
+for severity in ("MEDIUM", "LOW"):
+    by_test = collections.Counter(
+        (finding["test_id"], finding["test_name"])
+        for finding in results if finding["issue_severity"] == severity
+    )
+    for (test_id, test_name), count in sorted(by_test.items()):
+        print(f"    [{severity:6}] {test_id} {test_name} x{count} (non bloquant)")
+
+blocking = [finding for finding in results if finding["issue_severity"] == "HIGH"]
+for finding in blocking:
+    print(f"    [HIGH  ] {finding['test_id']} "
+          f"{finding['filename']}:{finding['line_number']} — {finding['issue_text']}")
+sys.exit(1 if (blocking or scan_errors) else 0)
+PY
+[[ $BANDIT_RC -eq 0 ]] || FAILURES+=("bandit: finding(s) de sévérité HIGH, ou fichier non analysé")
+
+# ---------------------------------------------------------------------------------
+echo "==> pip-audit — surface de production ($(basename "$RUNTIME_REQS"))"
+IGNORE_ARGS=()
+# `|| [[ -n "$ignore_line" ]]` : sans ça, une dernière ligne dépourvue de saut de ligne final
+# est lue mais jamais traitée — l'exception documentée ne serait pas passée à pip-audit, qui
+# échouerait alors sur une vulnérabilité pourtant justifiée.
+while IFS= read -r ignore_line || [[ -n "$ignore_line" ]]; do
+  # Retirer espaces ET tabulations aux deux bouts avant de décider : sans ça, un commentaire
+  # indenté ou une ligne de tabulations est lu comme une exception sans justification et
+  # tue le script avant pip-audit et npm audit.
+  ignore_line="${ignore_line#"${ignore_line%%[![:space:]]*}"}"
+  ignore_line="${ignore_line%"${ignore_line##*[![:space:]]}"}"
+  [[ -z "$ignore_line" || "$ignore_line" == \#* ]] && continue
+  [[ "$ignore_line" =~ ^([A-Za-z0-9-]+)[[:space:]]+#[[:space:]]*(.+)$ ]] || {
+    echo "ERROR: ligne sans justification dans $IGNORE_FILE : $ignore_line" >&2
+    exit 1
+  }
+  IGNORE_ARGS+=(--ignore-vuln "${BASH_REMATCH[1]}")
+  echo "    accepté : ${BASH_REMATCH[1]} — ${BASH_REMATCH[2]}"
+done < "$IGNORE_FILE"
+
+PIP_AUDIT_RC=0
+# --strict : sans lui, une dépendance dont la collecte échoue est simplement « skippée »
+# (message de spinner, invisible hors terminal) et l'audit sort 0 sur une surface partielle.
+# Même trou que celui fermé côté bandit avec `errors`.
+pip-audit --strict -r "$RUNTIME_REQS" "${IGNORE_ARGS[@]}" || PIP_AUDIT_RC=$?
+[[ $PIP_AUDIT_RC -eq 0 ]] || FAILURES+=("pip-audit: vulnérabilité non justifiée dans la surface de production")
+
+# ---------------------------------------------------------------------------------
+echo "==> pip-audit — venv de développement (informatif, non bloquant)"
+DEV_JSON="$WORK_DIR/pip-audit-dev.json"
+pip-audit -f json -o "$DEV_JSON" >/dev/null 2>&1 || true
+if [[ -s "$DEV_JSON" ]]; then
+  # Bloc informatif : un rapport tronqué (pip-audit interrompu) ne doit ni faire échouer
+  # l'analyse, ni tuer le script avant npm audit — mais il se voit.
+  DEV_RC=0
+  python3 - "$DEV_JSON" <<'PY' || DEV_RC=$?
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as report_file:
+    dependencies = json.load(report_file)["dependencies"]
+
+vulnerable = [dep for dep in dependencies if dep.get("vulns")]
+total = sum(len(dep["vulns"]) for dep in vulnerable)
+print(f"    {total} vulnérabilité(s) dans {len(vulnerable)} paquet(s) du venv local")
+for dep in sorted(vulnerable, key=lambda d: d["name"]):
+    print(f"    - {dep['name']} {dep['version']} : {len(dep['vulns'])}")
+PY
+  [[ $DEV_RC -eq 0 ]] || echo "    (rapport pip-audit du venv local illisible — bloc informatif ignoré)"
+else
+  echo "    (pip-audit n'a produit aucun rapport sur le venv local)"
+fi
+
+# ---------------------------------------------------------------------------------
+echo "==> npm audit — frontend (seuil: high)"
+[[ -d frontend ]] || { echo "ERROR: répertoire frontend/ introuvable" >&2; exit 1; }
+# npm sort en non-zéro aussi bien pour « j'ai trouvé des vulnérabilités » que pour « je n'ai
+# pas pu auditer » (registre injoignable, lockfile absent). Confondre les deux, c'est afficher
+# un problème de dépendances là où il y a une panne d'outil — et l'inverse. On lit donc le
+# rapport JSON, comme pour bandit : un rapport valide décide, une absence de rapport arrête.
+NPM_JSON="$WORK_DIR/npm-audit.json"
+(cd frontend && npm audit --audit-level=high --json) > "$NPM_JSON" 2>/dev/null || true
+(cd frontend && npm audit --audit-level=high) || true
+
+NPM_RC=0
+python3 - "$NPM_JSON" <<'PY' || NPM_RC=$?
+import json
+import sys
+
+try:
+    with open(sys.argv[1], encoding="utf-8") as report_file:
+        report = json.load(report_file)
+except (OSError, json.JSONDecodeError) as parse_error:
+    print(f"    [ERREUR] npm audit n'a pas rendu de rapport exploitable : {parse_error}")
+    sys.exit(2)
+
+if "error" in report:
+    print(f"    [ERREUR] npm audit a échoué : {report['error'].get('summary', report['error'])}")
+    sys.exit(2)
+
+counts = report.get("metadata", {}).get("vulnerabilities")
+if counts is None:
+    print("    [ERREUR] rapport npm audit sans metadata.vulnerabilities")
+    sys.exit(2)
+
+blocking = counts.get("high", 0) + counts.get("critical", 0)
+print(f"    critical={counts.get('critical', 0)} high={counts.get('high', 0)} "
+      f"moderate={counts.get('moderate', 0)} low={counts.get('low', 0)}")
+sys.exit(1 if blocking else 0)
+PY
+case $NPM_RC in
+  0) ;;
+  1) FAILURES+=("npm audit: vulnérabilité high/critical dans frontend/") ;;
+  *) echo "ERROR: npm audit n'a pas pu auditer frontend/ — audit incomplet" >&2; exit 1 ;;
+esac
+
+# ---------------------------------------------------------------------------------
+if [[ ${#FAILURES[@]} -gt 0 ]]; then
+  echo "==> ÉCHEC — findings critiques/hauts subsistants :"
+  for failure in "${FAILURES[@]}"; do
+    echo "    - $failure"
+  done
+  exit 1
+fi
+
+echo "==> Aucun finding critique/haut. Analyse statique OK."
