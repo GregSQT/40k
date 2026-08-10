@@ -9,8 +9,13 @@
 > | [`1_Agent/`](1_Agent/) | la spec et l'état du programme V11 (4 docs) | le **détail** d'une tranche, un piège de méthode |
 > | [`A_faire/`](A_faire/) | le backlog des chantiers ouverts | le **contenu** d'un chantier à faire |
 > | [`Implémenté/`](Implémenté/) | les chantiers livrés | la **référence** de conception d'un truc déjà fait |
+> | **racine** (2 docs) | les **références transverses vivantes** : [`Replay.md`](Replay.md) (contrat `step.log`, pipeline, registre replay) et [`analyzer_couverture.md`](analyzer_couverture.md) (matrice règle → contrôle → champs de log) | ce que le journal **porte**, et ce qu'il **ne porte pas encore** |
 >
-> Aucun des trois ne donne l'ordre du travail — il est **ici, et nulle part ailleurs**.
+> Aucun des quatre ne donne l'ordre du travail — il est **ici, et nulle part ailleurs**.
+> ⚠️ Les deux docs racine ne sont ni des chantiers à faire, ni des chantiers livrés : ce sont des
+> **contrats permanents**, relus à chaque livraison qui touche le journal. Ils portent en revanche
+> du travail ouvert, et **ce travail a sa ligne en §4** — ajoutée le 2026-08-10, quand on a constaté
+> qu'ils n'étaient cités nulle part ici alors que ce fichier se déclare source unique de l'ordre.
 >
 > **Règles d'arbitrage entre docs** (établies le 2026-08-10) :
 > 1. **Le code fait foi** sur fait/pas fait. Un doc contredit par le code est périmé, pas le code.
@@ -29,9 +34,13 @@
 
 ## 0. En cours — ne rien casser
 
-- 🟢 **Run `--new` ArmageddonAgent x1** (PID vivant, `run_20260810-111734`) — c'est une **base de
+- 🟢 **Run `--new` ArmageddonAgent x1** (PID 842478, `run_20260810-111734`) — c'est une **base de
   développement, PAS la mesure** (décision 2026-08-10). Ne rien lancer de cassant tant qu'il vit
-  (workers `spawn` relisent le working tree). → [`1_Agent/V11_agent_rework.md`](1_Agent/V11_agent_rework.md) §0.70
+  (workers `spawn` relisent le working tree). **Décision 2026-08-10 (2) : on le laisse aller au
+  bout**, pour disposer d'un modèle chargeable et d'une sortie d'`analyzer.py` exploitable pendant
+  les tranches P3 — son modèle deviendra inchargeable dès P3-4, sa valeur est le diagnostic, pas le
+  score. `x1` = **10 000 épisodes** (`total_episodes`, et non 50 000 qui est la clé de commentaire
+  `total_episodes_normal`). → [`1_Agent/V11_agent_rework.md`](1_Agent/V11_agent_rework.md) §0.70
 
 ## 1. Chemin critique vers la mesure de référence
 
@@ -42,14 +51,32 @@ mesure, et c'est assumé (§0.14).
 1. **P3-4 — Allocation des pertes défenseur** (= L3) → [`1_Agent/V11_phaseA.md`](1_Agent/V11_phaseA.md) §9.4 pt 4
 2. **P3-5 — Pile-in / consolidation** (= L4) — **bloqué en amont** par la migration par-figurine
    du pile-in auto V11 → [`A_faire/pile_in_overrun_par_figurine.md`](A_faire/pile_in_overrun_par_figurine.md).
-   Décision spatiale ⇒ top-K d'hex interdit (§9.0bis). → [`1_Agent/V11_phaseA.md`](1_Agent/V11_phaseA.md) §9.4 pt 5
+   Décision spatiale ⇒ top-K d'hex interdit (§9.0bis).
+   🔴 **Le périmètre décrit en §9.4 pt 5 était FAUX et a été corrigé le 2026-08-10 (lecture de
+   `12 Fights pahse.pdf`) : le MODE de consolidation n'est pas un choix de joueur** (12.08 l'impose
+   par la situation) ; les décisions réelles sont consolider ou non, quelles unités ennemies
+   sélectionner, et la destination. S'y ajoute un **écart aux règles**, pas seulement au PvP : le
+   gym ne sait pas consolider vers un objectif. → [`1_Agent/V11_phaseA.md`](1_Agent/V11_phaseA.md) §9.4 pt 5
 3. **P3-6 — Move-after-shooting + reactive move** (= L5) → [`1_Agent/V11_phaseA.md`](1_Agent/V11_phaseA.md) §9.4 pt 6
 4. **P3-8 — Optionnels à statuer** (= L7→L11) — le choix d'arme en mêlée (§0.69) est déjà acté
    en ordre 3 ; le reste (split-fire, multi-cibles charge, placement final, stratégies de
-   déploiement) exige de **mesurer le regret** avant de trancher (§9.0bis). → [`1_Agent/V11_phaseA.md`](1_Agent/V11_phaseA.md) §9.4 pt 8
+   déploiement) exige de **mesurer le regret** avant de trancher (§9.0bis).
+   🟢 **Décision 2026-08-10 (3) — la circularité est tranchée : le regret se mesure sur la BASE DE
+   DÉVELOPPEMENT en cours** (§0.70), pas après la mesure de référence. Le regret est un écart
+   *relatif* (choix branché vs heuristique auto) : il supporte l'imprécision d'un run de 10 000
+   épisodes, et l'alternative — statuer après la mesure — rachèterait un `x1_long` complet (~20 h)
+   au premier optionnel retenu. → [`1_Agent/V11_phaseA.md`](1_Agent/V11_phaseA.md) §9.4 pt 8
 5. **P4 — Observation de support** (= L12, ne se livre pas seule) → [`1_Agent/V11_phaseA.md`](1_Agent/V11_phaseA.md) §9.5
-6. **P5 — Validation par tranche** (protocole jamais appliqué depuis sa rédaction ; `x5_debug`,
-   jamais `x1_debug`) → [`1_Agent/V11_phaseA.md`](1_Agent/V11_phaseA.md) §9.6
+   ⚠️ **Ordre à ne pas prendre au pied de la lettre** : les features de §9.5 (LoS/couvert par slot
+   ennemi, portée effective, flags advanced/fell_back) sont ce qui rend P3-4 et P3-6 apprenables.
+   Livrées APRÈS, elles font échouer le critère P5 de ces tranches pour une raison connue d'avance.
+   Chaque feature part **avec** la tranche qui en dépend ; ce point 5 ne garde que le reliquat.
+6. **P5 — Validation par tranche** (protocole jamais appliqué depuis sa rédaction) — profil du run
+   court : **`x1_debug`** (480 épisodes). Le « ne PAS utiliser `x1_debug`, il porte 48 envs » de
+   §9.6 est **périmé** : `n_steps` est un TOTAL divisé par `n_envs` en un point de passage unique
+   depuis §0.33, le buffer ne dépend donc plus de `n_envs` — et les **7** profils sont à 48 envs,
+   `x5_debug` compris (vérifié config, 2026-08-10). `x5_debug` (96 épisodes) est trop court pour
+   comparer deux win-rates. → [`1_Agent/V11_phaseA.md`](1_Agent/V11_phaseA.md) §9.6
 7. **Mesure de référence** `x1_long` — solde §0.14, §0.67, critère T6 (via §10.6) d'un coup.
 8. **§0.59 — Phase 2 self-play** (`--append x1_selfplay`) — livré, JAMAIS exécuté ; le premier
    run est aussi son premier test d'intégration. → [`1_Agent/V11_agent_rework.md`](1_Agent/V11_agent_rework.md) §0.59
@@ -58,8 +85,9 @@ mesure, et c'est assumé (§0.14).
 
 - **06 — Capacités Armageddon** : 0/6 passes, tous prérequis (01→05) livrés et vérifiés.
   Passes 1-2 d'abord (12 capacités sans nouvelle structure d'état) ; FNP déjà câblé côté moteur.
-  ⚠️ Risque concret : `ABILITY_SLOTS = 8` est une projection — si une entité dépasse 8 capacités
-  en vigueur, le moteur lève. → [`A_faire/06_armageddon_abilities.md`](A_faire/06_armageddon_abilities.md)
+  ⚠️ Risque concret : `UNIT_ABILITY_SLOTS = 8` ([`engine/observation_entities.py:274`](file:///home/greg/40k/engine/observation_entities.py))
+  est une projection — si une entité dépasse 8 capacités en vigueur, le moteur lève.
+  → [`A_faire/06_armageddon_abilities.md`](A_faire/06_armageddon_abilities.md)
 - Les chantiers **01→05 sont livrés** (vérifié code, 2026-08-10) et rangés en `Implémenté/` :
   [01 embedding](Implémenté/01_ability_embedding.md) · [02 CP/battle-shock](Implémenté/02_command_points.md) ·
   [03 capacités de faction](Implémenté/03_faction_abilities.md) · [04 réserves](Implémenté/04_strategic_reserves.md) ·
@@ -92,6 +120,26 @@ Prêts à démarrer sans décision produit :
   → [`A_faire/perf_generate_compact_formation.md`](A_faire/perf_generate_compact_formation.md)
 - **gzip/Brotli** (½ j) — à faire AVEC l'étape 5 de Security (même proxy)
   → [`A_faire/perf_noyau_natif_et_gzip.md`](A_faire/perf_noyau_natif_et_gzip.md) §1
+- **Résidu front V10 des sous-phases fight** (~½ j) — moteur purgé le 2026-07-23, le front ne l'est
+  pas : `frontend/src/hooks/useEngineAPI.ts` teste encore `fightSubphase === "charging"` /
+  `"alternating_active"` / `"alternating_non_active"` / `"cleanup_active"` / `"cleanup_non_active"`
+  alors que le moteur ne produit que `pile_in` / `fight` / `consolidate` — **aucune branche ne
+  matche**, on tombe systématiquement dans le `else`. ⚠️ Le motif est présent **DEUX FOIS**
+  (blocs `currentPoolSize` vers l.9494 **et** l.9544 — vérifié 2026-08-10 ; le registre de
+  `Replay.md` n'en signalait qu'un), plus **3** champs morts de l'interface locale (l.294-296) :
+  `charging_activation_pool` **et** `{active,non_active}_alternating_activation_pool`. Le premier
+  est le plus trompeur — c'est lui que testent les deux `if` de tête, et
+  `grep -rn charging_activation_pool engine/ services/ ai/` rend **0** : le moteur ne l'écrit
+  jamais. *(Ce fichier a compté 2 champs jusqu'au 2026-08-10.)* Chemin
+  concerné : auto-play PvP live (`currentPoolSize`/`hasMoreEligibleUnits`) ⇒ **non validable en
+  headless**, à reprendre avec une session PvP fight réelle, en remplaçant par
+  `fight_eligible_units` (déjà la source V11 vivante ailleurs dans ce hook).
+  → [`Replay.md`](Replay.md) §4.B
+- **Champs manquants du `step.log`** (sécable, 15 entrées ordonnées par nombre de règles
+  débloquées) — `L1` battle-shock, `L2` S/T sur les jets, `L3` figurine allouée, … `L15`
+  hazardous. Ce n'est pas un chantier d'un bloc : chaque champ se livre seul et fait passer des
+  règles de « non vérifiable » à « vérifiable » par l'analyzer. À piocher quand un contrôle
+  analyzer manque de données. → [`analyzer_couverture.md`](analyzer_couverture.md) §7
 
 Bloqués par une décision utilisateur :
 - **Replis `unit_by_id`** — T0 (signature de `require_unit_by_id`) appartient à l'utilisateur ;
@@ -114,67 +162,59 @@ Lourds, à re-cadrer avant toute reprise :
 
 ## 5. Hygiène documentaire
 
-### Fait le 2026-08-10 — dissolution de `2_Various/`
+> **Le compte rendu du chantier du 2026-08-10 est sorti d'ici** (dissolution de `2_Various/`,
+> réparation des 497 liens, recadrage de `1_Agent/`, fusions et suppressions) →
+> [`Implémenté/hygiene_doc_2026-08-10.md`](Implémenté/hygiene_doc_2026-08-10.md). Il occupait
+> 90 lignes sur 249 d'un fichier qui se déclare source unique de l'ordre du travail, sans jamais
+> dire par quoi commencer. Extrait le 2026-08-10, en application de la règle de discipline en tête
+> de ce fichier — un chantier livré passe son doc en `Implémenté/`.
+>
+> Ne reste ici que ce qui **sert à la prochaine passe** : le contrôle des liens, et les
+> incohérences non soldées.
 
-Le dossier mélangeait 5 chantiers livrés et 1 ouvert, et sa numérotation `01_`→`06_` laissait
-croire à une séquence vive. Il est **supprimé** : les 5 livrés sont en `Implémenté/`, le 06 en
-`A_faire/`. Les noms de fichiers sont inchangés — les renvois « chantier 0X » du texte restent
-valides. Chacun des 6 porte désormais un bandeau de statut vérifié contre le code.
+### Contrôle réutilisable des liens
 
-Restent trois dossiers aux rôles disjoints (tableau en tête de ce fichier).
-
-### Fait le 2026-08-10 — 497 liens relatifs morts réparés
-
-Découvert en vérifiant les déplacements ci-dessus : **497 des 1171 liens** de
-`Documentation/Implémentation/` ne pointaient nulle part. Cause unique et mécanique —
-l'extraction des sections §1→§10 en sous-docs le **2026-07-28** a descendu les fichiers d'un
-niveau **sans re-profondir les chemins relatifs** ; `V11_agent_rework.md` a subi le même effet en
-entrant dans `1_Agent/`. Les plus touchés : `V11_agent_rework.md` (253), `V11_tranches.md` (91),
-`LoS_unique_source_of_truth.md` (55), `V11_phaseA.md` (39), `squad_audit.md` (36).
-
-Réparé par transformation déterministe (un lien n'est réécrit que si la nouvelle cible **existe**).
-Il reste **2 faux positifs** du contrôle — du texte entre parenthèses pris pour un lien, dans
-`V11_tranches.md` et `V11_refactor_plan.md` — et 2 liens retirés de `Boardx10-audit.md` vers des
-configs supprimées depuis.
-
-**Contrôle réutilisable** : parcourir les liens markdown de `Documentation/Implémentation/` et
-vérifier que chaque cible existe. À relancer après tout déplacement de doc.
-
-### Fait le 2026-08-10 — `1_Agent/` n'est plus un point d'entrée concurrent
-
-`V11_agent_rework.md` §0 s'intitulait « **À LIRE EN PREMIER** » et porte une colonne « Ordre » :
-deux documents se déclaraient point d'entrée du projet. Le titre est recadré en « entrées ouvertes
-de V11 », et les 4 docs V11 portent un bandeau qui répartit les rôles (ce fichier pour l'ordre,
-eux pour le détail et l'état). La règle d'arbitrage n°3 en tête tranche les désaccords futurs.
-
-### Fait le 2026-08-10 (arbitrages 1 et 2 validés)
-
-- **Fusion** `overrun.md` + `bug_pile_in_bfs_clearance_mismatch.md` →
-  [`A_faire/pile_in_overrun_par_figurine.md`](A_faire/pile_in_overrun_par_figurine.md). Les deux
-  prescrivaient l'inverse l'un de l'autre ; la décision 2026-07-16 tranche pour MIGRER, le fix de
-  parité BFS↔commit est conservé en §6 marqué **rejeté**. Ancres de ligne recalculées (les
-  anciennes étaient fausses de >1000 lignes).
-- **`10x/` supprimé** : `10x_Move_init.md` (chantier terminé) → [`Implémenté/`](Implémenté/10x_Move_init.md) ;
-  `10x_acceleration.md` réduit à ses deux axes vivants →
-  [`A_faire/perf_noyau_natif_et_gzip.md`](A_faire/perf_noyau_natif_et_gzip.md).
-- **`MCTS_agent_implementation.md` supprimé**, résidu absorbé en
-  [`A_faire/MCTS/MCTS_bot_final.md`](A_faire/MCTS/MCTS_bot_final.md) **§20 bis** (MCTS à
-  l'inférence, périmètre distinct de l'adversaire d'entraînement).
-- **`DB_migration_prompt.md`** recâblé vers `DB_migration.md` (le `DB_migration33.md` qu'il citait
-  n'existe pas).
-- 20 références recâblées dans 11 fichiers (docs V11, `Documentation_audit.md`,
-  `engine/w40k_core.py:6478`).
+**Contrôle réutilisable — et ses trois exclusions, sans lesquelles il ne sert à rien.** Parcourir
+les liens markdown de `Documentation/Implémentation/` et vérifier que chaque cible existe, en
+écartant : (1) les `http(s)://` et **`file:///`** — les liens vers le code sont ABSOLUS par
+convention CLAUDE.md et ne sont pas des chemins relatifs ; (2) l'encodage URL (`%20` dans
+`03%20Moving.pdf`) qu'il faut décoder avant le test ; (3) les faux positifs de regex — du texte
+entre parenthèses pris pour une cible, dans `V11_tranches.md` et `V11_refactor_plan.md`.
+Un contrôle naïf rend **152 hits** dont **aucun n'est un lien mort** (143 dans `Implémenté/stage.md`,
+5 dans `Boardx10-audit.md`, tous des `file:///`) : mesuré le 2026-08-10, ne pas le reprendre pour
+une régression. À relancer après tout déplacement de doc.
 
 ### Incohérences factuelles restantes (non traitées, aucune ne bloque)
 
-- **`obs_size` : trois valeurs en circulation** — `Implémenté/01_ability_embedding.md` annonce
-  14609/14615, la config ArmageddonAgent porte **16659** (3 occurrences), et sa `justification`
-  raconte encore la lignée 20780 → 20727. La valeur vraie à HEAD est **16659** (vérifiée par
-  exécution le 2026-08-08, revérifiée le 2026-08-10).
-- `justification` de `bot_eval_final_normal` dit « x1 (10 000 episodes) » alors que
-  `x1.total_episodes` = **50 000**.
-- `A_faire/Endless_duty_etat_mesure.md` affirme que `config/agents/CoreAgent/` n'existe plus —
-  **il existe**.
+- **`obs_size`** — la valeur vraie à HEAD est **16659**, portée par les **7** profils de la config
+  ArmageddonAgent (un `"obs_size": 16659` chacun ; ce fichier a annoncé « 3 occurrences » jusqu'au
+  2026-08-10, sans les compter). Vérifiée par exécution le 2026-08-08, recomptée le 2026-08-10.
+  ✅ `Implémenté/01_ability_embedding.md`, qui annonçait 14609/14615, est corrigé. Reste la
+  `justification` du champ dans la config, qui raconte encore la lignée 20780 → 20727 : **aucun
+  JSON de `config/` n'est touché pendant un training** (§0), à reprendre après le run.
+- ~~`justification` de `bot_eval_final_normal` dit « x1 (10 000 episodes) » alors que
+  `x1.total_episodes` = **50 000**.~~ → **L'INCOHÉRENCE ÉTAIT DANS CE FICHIER, pas dans la config**
+  (corrigé le 2026-08-10) : `x1.total_episodes` vaut bien **10 000** ; le 50 000 est
+  `total_episodes_normal`, une clé de **commentaire** que `train.py` ne lit pas (il lit
+  `total_episodes`). La `justification` avait raison. Même erreur propagée depuis
+  `V11_agent_rework.md` §0.70, corrigée là aussi.
+- ~~`A_faire/Endless_duty_etat_mesure.md` affirme que `config/agents/CoreAgent/` n'existe plus —
+  **il existe**.~~ ✅ corrigé dans le doc le 2026-08-10.
 - Bandeaux et chiffres périmés listés en `1_Agent/V11_agent_rework.md` §0bis (l.3713-3735),
   signalés et volontairement non corrigés depuis le 2026-07-20.
-- `ABILITY_SLOTS = 8` est une projection non mesurée ; le chantier 06 la rendra mesurable (§2).
+- `UNIT_ABILITY_SLOTS = 8` est une projection non mesurée ; le chantier 06 la rendra mesurable (§2).
+- **Ancres de ligne des docs V11 : périmées en masse** (relevé le 2026-08-10). Les symboles cités
+  existent tous, mais les numéros de ligne ont dérivé de 400 à 3 500 lignes — `_select_allocation_model`
+  ~5643 → **7980**, `fight_pile_in_plan` ~6708 → **10240**, `squad_consolidate_plan` ~7038 →
+  **10627**, `charge_build_valid_plan` ~3955 → **5720**, `_auto_select_cc_weapon_for_fig` L7370 →
+  **10463**, `_auto_declared_order` L6462 → **9133**, `compute_candidate_footprint` L416 → **496**.
+  Les lignes du **chemin critique** (§9.4, §9.0bis, §1bis) sont corrigées en **nom de symbole** ;
+  le reste des docs n'a pas été balayé.
+  🟢 **DÉCISION 2026-08-10 — traitement AU FIL DE L'EAU, pas de balayage global.** Motif : le
+  porteur de risque est un doc qu'on **rouvre** (c'est ainsi qu'est né le plan T7 faux, cf.
+  `V11_tranches.md` §1bis) ; un balayage complet dépenserait une journée sur `Implémenté/`, qui
+  n'a plus que valeur d'historique. **Règle : tout doc modifié voit ses ancres de ligne corrigées
+  dans la même livraison** — cela entre dans le périmètre de clôture T2, sans validation
+  supplémentaire.
+  **Convention d'écriture : citer `def <symbole>` ou un `grep` reproductible, jamais un numéro de
+  ligne** — c'est la seule forme qui survit à une livraison.

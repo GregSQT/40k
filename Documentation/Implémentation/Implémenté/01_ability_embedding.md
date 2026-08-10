@@ -285,7 +285,8 @@ exactement le même jeu.
    (cf. CONCEPTION). `obs_id` occupés à ce jour : **1 → 14** ; le prochain libre est **15**.
 
 2. **Schéma d'entités.** Retirer les 13 bits `rule_<id>` de `UNIT_BIN_FIELDS`. Ajouter
-   `ABILITY_SLOTS = 8`, `STATUS_SLOTS = 4`, et les tenseurs `allies_ability_ids`,
+   `UNIT_ABILITY_SLOTS = 8`, `UNIT_STATUS_SLOTS = 4` (noms LIVRÉS ; ce plan écrivait
+   `ABILITY_SLOTS`/`STATUS_SLOTS`, corrigé le 2026-08-10), et les tenseurs `allies_ability_ids`,
    `allies_status_ids`, `enemies_ability_ids`, `enemies_status_ids`.
    Mettre à jour `SQUAD_OBS_SIZE_TARGET`.
 

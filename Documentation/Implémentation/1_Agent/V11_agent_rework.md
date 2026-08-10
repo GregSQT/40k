@@ -231,16 +231,32 @@ serait donc invalidé par la prochaine tranche P3, exactement comme le `combined
 fois**, quand P3→P5 sont livrés.
 
 ⚠️ **Ce qu'il faut tenir en conséquence — le `combined` de ce run ne vaut PAS référence.** `x1` =
-**50 000** épisodes et `bot_eval_final` = **100** parties par bot, soit une erreur-type de **5,0
+**10 000** épisodes et `bot_eval_final` = **100** parties par bot, soit une erreur-type de **5,0
 points** sur un win-rate autour de 0,5 (IC95 ≈ ±9,8) — de quoi répondre « l'agent joue-t-il », pas
 « combien gagne-t-il ». Ne pas s'en servir pour le gate `vs_control ≥ 0.50` ([§0.14](#s0.14)), ni
 pour comparer à un chiffre antérieur. Le profil de la mesure reste `x1_long` (600 parties par bot,
 erreur-type 2,0), et c'est lui qui portera la référence le moment venu.
 
-📌 **Signalé, NON traité** (fichier de `config/` : aucun JSON n'est touché pendant un training) :
-la justification `bot_eval_final_normal` de `ArmageddonAgent_training_config.json` écrit
-« inacceptable sur x1 (10 000 episodes) » alors que `x1.total_episodes` vaut **50 000**. Le
-raisonnement reste juste, le chiffre cité est périmé.
+🔴 **CORRIGÉ le 2026-08-10 — l'erreur était ici, pas dans la config.** Cette section affirmait
+« `x1` = 50 000 épisodes » et signalait comme périmée la justification `bot_eval_final_normal` de
+`ArmageddonAgent_training_config.json` (« inacceptable sur x1 (10 000 episodes) »).
+**C'est l'inverse** : `x1.total_episodes` vaut **10 000** ; le 50 000 est `total_episodes_normal`,
+une clé de **commentaire** que `train.py` ne lit pas (il lit `total_episodes`, cf.
+`ai/train.py` `resolved["total_episodes"] = require_positive_int(budget, "total_episodes")`).
+La justification de la config est juste, aucune correction ne lui est due. Le ROADMAP §5 reprenait
+la même erreur : corrigé dans la même livraison.
+
+🟢 **DÉCISION UTILISATEUR DU 2026-08-10 (2) — le run va au bout.** Motif : disposer d'un modèle
+chargeable et d'une sortie d'`analyzer.py` exploitable pendant les tranches P3. Ce que ça n'est
+pas : une mesure. Le modèle devient inchargeable à P3-4 (nouvelle dimension d'action) — sa valeur
+est le **diagnostic de comportement**, pas le score.
+
+🟢 **DÉCISION UTILISATEUR DU 2026-08-10 (3) — le regret de P3-8 se mesure sur CE run.**
+[§9.0bis](V11_phaseA.md#s9.0bis) exige de mesurer le regret avant de brancher un optionnel, mais
+la mesure de référence est différée après P3-8 : la contrainte était circulaire. Elle est tranchée
+en faveur de la base de développement — le regret est un écart **relatif** (choix branché vs
+heuristique auto), il supporte l'imprécision de 10 000 épisodes, alors que l'attente rachèterait
+un `x1_long` complet (~20 h) au premier optionnel retenu.
 
 <a id="s0.68"></a>
 ### 0.68 Le premier run du lot est mort sur une instrumentation morte depuis la migration aux entités — ✅ CORRIGÉ (2026-08-08)
@@ -4194,8 +4210,11 @@ trois constructeurs :
 | grille (9 × 32 × 32) | 9 216 |
 | **total** | **29 968**, soit **117,1 Kio** par transition en float32 |
 
-**Dimensionnement réel au 2026-08-02** — les **six** profils portent `n_envs: 48` et
-`n_steps: 8192` : **8 160 transitions**, **≈ 0,98 Go** de buffer. Le régime validé de CoreAgent
+**Dimensionnement réel au 2026-08-02** — les profils portent `n_envs: 48` et
+`n_steps: 8192` : **8 160 transitions**, **≈ 0,98 Go** de buffer. *(Ils sont **sept** depuis
+l'ajout d'`x1_selfplay` — §0.59 ; « six » corrigé le 2026-08-10. Le buffer ne dépend PAS de
+`n_envs` puisque `n_steps` est un total divisé par lui : c'est ce qui rend caduque la consigne
+« ne pas utiliser `x1_debug` » de [§9.6](V11_phaseA.md#s9.6), corrigée le même jour.)* Le régime validé de CoreAgent
 (`n_steps = 16 384`) reste finançable (**≈ 1,97 Go**) : il n'y a **pas** de plafond à 2048, et la
 mémoire ne contraint plus le re-tuning.
 

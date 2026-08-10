@@ -120,9 +120,9 @@ ci-dessous **vérifiés par lecture** le 2026-07-24.
 
 1. **Levier tactique nul = ne pas brancher (mesurer, ne pas juger à la main).** Certaines
    décisions ont un optimum calculable déjà atteint en auto : choix d'arme CC par expected damage
-   `_auto_select_cc_weapon_for_fig` ([shared_utils.py:7370](../../../engine/phase_handlers/shared_utils.py#L7370)),
-   ordre de déclaration des groupes d'allocation `_auto_declared_order`
-   ([shared_utils.py:6462](../../../engine/phase_handlers/shared_utils.py#L6462)). Les brancher
+   `def _auto_select_cc_weapon_for_fig` ([shared_utils.py](../../../engine/phase_handlers/shared_utils.py)),
+   ordre de déclaration des groupes d'allocation `def _auto_declared_order`
+   ([shared_utils.py](../../../engine/phase_handlers/shared_utils.py)). Les brancher
    n'ajoute que de la dimensionnalité (dilution du reward, credit assignment plus profond,
    risque de catastrophic forgetting — piège connu CLAUDE.md) sans gain. **Critère d'arbitrage à
    appliquer AVANT chaque tranche P3** : mesurer le *regret* de la décision — écart de valeur
@@ -136,7 +136,8 @@ ci-dessous **vérifiés par lecture** le 2026-07-24.
    silencieuse = anti-pattern projet). Le plan le fait DÉJÀ bien pour le déploiement : actions
    4-8 = **5 stratégies tactiques scorées** (aggressive front / objective pressure /
    safe-cohesion / left / right flank), pas des hex bruts —
-   [action_decoder.py:1833](../../../engine/action_decoder.py#L1833). **À généraliser** : paramétrer
+   `ActionDecoder.deployment_slot_candidates` ([action_decoder.py](../../../engine/action_decoder.py)).
+   **À généraliser** : paramétrer
    toute décision spatiale à grand espace en *intentions scorées*, pas en hex. Sinon K=6 devient
    un plafond arbitraire sur la qualité.
 
@@ -969,22 +970,45 @@ Ordre par valeur tactique :
    ⚠️ Le DÉPLOIEMENT est hors périmètre : ses candidats ne sont pas encore sur le champ de
    bataille, donc ils n'ont pas de ligne d'observation alliée — un slot d'activation y désignerait
    une ligne vide. L'ordre de pose reste celui du pool ; c'est une autre décision.
-4. **Allocation des pertes défenseur** — remplace `_select_allocation_model`
-   (shared_utils ~5643) ; candidats = figurines éligibles 05.03/06.02 ; inclut l'allocation
+4. **Allocation des pertes défenseur** — remplace `def _select_allocation_model`
+   (shared_utils) ; candidats = figurines éligibles 05.03/06.02 ; inclut l'allocation
    hazard ET l'ordre de déclaration des groupes (`declare_order`, décision défenseur 05.03,
-   aujourd'hui `_auto_declared_order`).
-5. **Pile-in / consolidation** — les sites vifs sont `fight_pile_in_plan`
-   (shared_utils ~6708) et `squad_consolidate_plan` (~7038) appelés par `squad_fight`,
+   aujourd'hui `def _auto_declared_order`).
+5. **Pile-in / consolidation** — les sites vifs sont `def fight_pile_in_plan`
+   et `def squad_consolidate_plan` (shared_utils) appelés par `squad_fight`,
    PAS les `_ai_select_*` de fight_handlers ; candidats = top-K destinations du pool.
-   NB règles : pile-in/conso sont OPTIONNELS et la consolidation a 3 modes en cascade (dont
-   vers objectif) — l'espace de choix doit inclure « ne pas bouger ». ⚠️ Le site vif gym
-   `squad_consolidate_plan` n'implémente que le mode (1) (docstring : option (2) « vers
-   objectif » déférée) — le flux PvP (fight_handlers ~1161-1176) a la cascade complète :
-   écart gym/PvP à combler quand cette tranche s'ouvre.
+
+   🔴 **NB RÈGLES RÉÉCRIT le 2026-08-10 après lecture de `12 Fights pahse.pdf` (12.02/12.03,
+   12.07/12.08) — la version précédente décrivait une décision qui n'existe pas.** Elle disait
+   « la consolidation a 3 modes en cascade, l'espace de choix doit inclure ne pas bouger ».
+   Ce qui est vrai, et ce qui ne l'est pas :
+   - ✅ **« Ne pas bouger » est bien un choix** : « you don't have to pile in or consolidate with
+     a unit if you don't want to » (encart *Do units have to fight?*, 12.02).
+   - ❌ **Le MODE n'est PAS un choix de joueur.** 12.08 l'impose par la situation : *Ongoing* si
+     l'unité est engagée, *sinon* *Engaging* si elle est à ≤3" d'une ou plusieurs unités ennemies,
+     *sinon* *Objective* si elle est à ≤3" d'un objectif — chaque branche est écrite « you **must**
+     select this mode ». Exposer « choisis ton mode » à l'agent modéliserait une décision
+     inexistante et ouvrirait un espace d'action illégal.
+   - ✅ **Ce qui EST à décider** : (a) consolider ou non ; (b) **quelles unités ennemies
+     sélectionner** — en mode *Engaging*, 12.08 dit « one or more », et en sélectionner plusieurs
+     oblige à finir engagé avec **toutes**, tout en rendant éligibles au combat les ennemis pas
+     encore activés (encart *New Foes to Face*) : c'est un vrai arbitrage risque/récompense, et
+     c'est LUI que la tranche doit exposer ; (c) la destination des figurines.
+   - Même distinction pour le pile-in 12.03 : les cibles sont **imposées** si l'unité est engagée
+     (« select every enemy unit it is engaged with »), et choisies seulement sinon (« one or more
+     enemy units within 5" »).
+
+   ⚠️ **ÉCART AUX RÈGLES, pas seulement au PvP.** `squad_consolidate_plan` n'implémente que le
+   mode (1) et **rend `None` dès qu'il n'y a plus d'ennemi sur la table** (« plus d ennemi →
+   consolidation (2) seulement, deferree ») — or c'est exactement le cas où 12.08 rend l'*Objective
+   Consolidation* obligatoire. Le gym ne consolide donc **jamais** vers un objectif, alors que les
+   objectifs décident la partie. Le flux PvP (fight_handlers) a la cascade complète. À combler
+   quand cette tranche s'ouvre : c'est une règle manquante, pas une divergence d'interface.
 6. **Move-after-shooting** (destination — remplace
-   `_select_move_after_shooting_destination_for_ai`, shooting_handlers ~4961) et
+   `def _select_move_after_shooting_destination_for_ai`, shooting_handlers) et
    **reactive_move** (accepter/décliner + destination — protocole `decline_reactive_move`
-   déjà formalisé, shared_utils ~2190).
+   déjà formalisé, shared_utils). NB : les deux sont des **capacités d'unité**
+   (`config/unit_rules.json`), pas des règles de base — leur valeur dépend du roster.
 7. ✅ **LIVRÉ le 2026-08-07** (élément `L6` du lot, worktree `L6-fly-decision` — détail →
    [§0.67](V11_agent_rework.md#s0.67)). **FLY / Take to the skies (21.03) est une DÉCISION
    D'AGENT** : le type `fly_declaration` est déclaré dans `AGENT_DECISION_TYPE_IDS`
@@ -998,12 +1022,21 @@ Ordre par valeur tactique :
    movement_handlers ~261/271 » — périmé, corrigé le 2026-08-10.)*
 8. **Optionnels, à statuer utilisateur** : split-fire (en gym, l'escouade entière vise UN
    slot ; le PvP a `squad_shoot_assign` par-figurine), choix d'arme — deux régimes distincts
-   en gym : RNG = `selectedRngWeaponIndex` pris tel quel (shared_utils ~4489), CC =
-   auto-sélection par expected damage `_auto_select_cc_weapon_for_fig` (shared_utils ~6938,
-   appel ~7016) — les deux sont des décisions joueur auto-résolues,
+   en gym : RNG = `selectedRngWeaponIndex` pris tel quel (`engine/utils/weapon_helpers.py`), CC =
+   auto-sélection par expected damage `def _auto_select_cc_weapon_for_fig` (shared_utils)
+   — les deux sont des décisions joueur auto-résolues,
    déclaration multi-cibles de charge (PvP oui, gym mono-cible), placement final de charge
-   (`charge_build_valid_plan`, shared_utils ~3955), déploiement (les actions 4-8 sont 5
-   STRATÉGIES scorées, action_decoder ~1682-1698, pas « les 5 premiers hex » — élargir ou non).
+   (`def charge_build_valid_plan`, shared_utils), déploiement (les actions 4-8 sont 5
+   STRATÉGIES scorées, `ActionDecoder.deployment_slot_candidates`, pas « les 5 premiers hex »
+   — élargir ou non).
+
+   🟢 **DÉCISION UTILISATEUR DU 2026-08-10 — d'où vient le regret à mesurer.** La réserve 1 de
+   [§9.0bis](#s9.0bis) impose de mesurer le regret avant de brancher, et la mesure de référence est
+   différée **après** ce point : la contrainte était circulaire. Tranchée — le regret se mesure sur
+   la **base de développement** du run `x1` en cours ([§0.70](V11_agent_rework.md#s0.70)), 10 000
+   épisodes. C'est un écart **relatif** (choix branché vs heuristique auto), donc l'imprécision du
+   run est tolérable ; attendre la mesure de référence rachèterait un `x1_long` (~20 h) au premier
+   optionnel retenu.
 
 Hors scope A' (reste auto, conforme règles car « un placement légal parmi d'autres ») :
 placement par-figurine du move rigide, pivot. Montée d'étage = Phase C.
@@ -1161,14 +1194,32 @@ Bloc décision (P2) + features nécessaires aux choix : LoS/couvert par slot enn
 effective de l'arme active vs distance du slot, flags advanced/fell_back de l'unité active.
 Les niveaux/élévation restent en Phase B (scénarios plats jusque-là).
 
+⚠️ **P4 n'est pas une tranche qui vient APRÈS P3 — c'est ce qui rend P3 apprenable** (relevé le
+2026-08-10). Les trois features ci-dessus servent directement P3-4 (allocation : LoS/couvert par
+slot) et P3-6 (move-after-shooting : portée effective, flags de mouvement). Livrées après les
+décisions qu'elles éclairent, elles font échouer le critère [§9.6](#s9.6) (« win-rate ≥ tranche
+précédente ») de ces tranches pour une raison connue d'avance — et §9.6 demanderait alors de
+corriger l'observation, c'est-à-dire… de livrer P4. **Chaque feature part avec la tranche qui en
+dépend** ; ce §9.5 ne garde que le reliquat non rattachable. C'est aussi ce que veut dire
+« ne se livre pas seule ».
+
 <a id="s9.6"></a>
 ### 9.6 P5 — Validation par tranche
 
-> ⚠️ **MAJ 2026-07-28 : ne PAS utiliser `x1_debug` pour le run court.** Ce profil porte
-> `n_envs: 48` (vérifié dans la config) → `MemoryError` à l'allocation du rollout buffer
-> ([§0.33](V11_agent_rework.md#s0.33) : 46,9 Go demandés pour 29 Go disponibles). Utiliser
-> **`x5_debug`** (8 envs) tant que [§0.33](V11_agent_rework.md#s0.33) n'est pas rouvert. La phrase ci-dessous date d'avant
-> cette mesure.
+> 🔴 **CETTE MISE EN GARDE EST PÉRIMÉE — CORRIGÉ le 2026-08-10. Le profil du run court est bien
+> `x1_debug`.** Elle disait : « ne PAS utiliser `x1_debug`, il porte `n_envs: 48` → `MemoryError`
+> à l'allocation du rollout buffer ; utiliser `x5_debug` (8 envs) ». Deux faits la vident :
+> 1. **La taille du buffer ne dépend plus de `n_envs`.** `apply_rollout_n_steps` (`ai/train.py`,
+>    point de passage unique) divise `n_steps` — un TOTAL par update — par `n_envs` ; le buffer
+>    vaut donc `n_steps × floats_par_obs × 4` quel que soit le nombre d'envs, soit **≈ 1 Go**
+>    ([§0.33](V11_agent_rework.md#s0.33), ✅ résolu le 2026-08-01). Un garde-fou lève une erreur
+>    explicite au-delà de 0,5 × la mémoire disponible : le risque est visible, pas silencieux.
+> 2. **`x5_debug` n'a plus 8 envs.** Les **7** profils de `ArmageddonAgent_training_config.json`
+>    portent `n_envs: 48` (vérifié config, 2026-08-10). Le « 8 envs » datait de CoreAgent.
+>
+> Le choix se fait donc sur le NOMBRE D'ÉPISODES, seul critère qui reste : `x1_debug` = **480**,
+> `x5_debug` = **96**. À 96 épisodes, comparer deux win-rates n'a aucun sens — c'est précisément ce
+> que §9.6 demande de faire. **`x1_debug`.**
 
 Chaque tranche P3 : suite de tests verte + smoke 10 épisodes + run court `x1_debug` +
 win-rate vs GreedyBot ≥ tranche précédente. Si l'ajout d'un point de décision DÉGRADE le
@@ -1182,6 +1233,7 @@ Points de vigilance :
   normalisation `/100` de l'observation globale ;
 - les heuristiques du RewardMapper utilisées par les anciens `_ai_select_*`
   (`get_shooting_priority_reward`) peuvent devenir du reward shaping pour guider les
-  nouvelles décisions — à statuer par tranche, jamais en silence. NB : un de ses deux
+  nouvelles décisions — à statuer par tranche, jamais en silence. ~~NB : un de ses deux
   consommateurs, `_ai_select_shooting_target` (shooting_handlers, def ~2093), est DÉJÀ mort
-  (zéro appelant) — à inclure dans la suppression P1.
+  (zéro appelant) — à inclure dans la suppression P1.~~ → **fait** : `_ai_select_shooting_target`
+  a **0 occurrence** dans tout le dépôt (vérifié 2026-08-10), il a été supprimé avec P1.

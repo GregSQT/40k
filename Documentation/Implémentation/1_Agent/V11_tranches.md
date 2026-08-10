@@ -74,8 +74,9 @@ Deux structures parallèles coexistent, et tout se joue là :
 | `units_cache` | **une** position par unité | l'ancre, un **résumé** |
 
 L'ancre **n'est pas un objet physique**. C'est la position de la **figurine vivante d'index
-minimal** ([shared_utils.py:3061](../../../engine/phase_handlers/shared_utils.py#L3061) :
-« n'update `units_cache` que si la figurine est l'ancre courante (index minimum vivant) »).
+minimal** ([shared_utils.py](../../../engine/phase_handlers/shared_utils.py), commentaire
+« n'update `units_cache` que si la figurine est l'ancre courante (index minimum vivant) » —
+`grep "index minimum vivant"`).
 Ce n'est ni le centre, ni le barycentre de l'unité : un simple délégué désigné par convention.
 **Corollaire à ne pas oublier : quand la figurine d'index minimal meurt, l'ancre SAUTE** sur la
 suivante — la position « de l'unité » change sans qu'aucune figurine n'ait bougé.
@@ -135,8 +136,8 @@ l'ancre » : au déploiement, c'est faux.
 > échantillon n'est pas une vérification) et que le plan T7 (conclusion tirée sans lire les
 > deux avertissements présents dans le code).
 
-**Le levier unique** : `compute_candidate_footprint(col, row, unit, game_state)`
-([shared_utils.py:416](../../../engine/phase_handlers/shared_utils.py#L416)) ne calcule **qu'UNE
+**Le levier unique** : `def compute_candidate_footprint(col, row, unit, game_state)`
+([shared_utils.py](../../../engine/phase_handlers/shared_utils.py)) ne calcule **qu'UNE
 base** (le `BASE_SHAPE`/`BASE_SIZE` de l'unité) centrée sur `(col,row)`. Passée une unité
 multi-figurines, elle rend l'empreinte d'**une figurine à l'ancre**, jamais celle de l'escouade.
 C'est la source commune des gravités 1-2 ci-dessous.

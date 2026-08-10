@@ -56,8 +56,11 @@ d'obtenir une boucle de jeu qui tourne. Tous les bouchons ont ensuite été reti
 
 Note d'environnement (sans rapport avec le mode) : `ai/models/ArmageddonAgent/model_ArmageddonAgent.zip`
 n'existait pas au moment de la mesure (entraînement en cours, seul `_interrupted.zip` présent) ;
-la sonde a pointé un lien symbolique hors dépôt vers ce checkpoint. `CoreAgent` n'est plus
-utilisable : `config/agents/CoreAgent/` n'existe plus.
+la sonde a pointé un lien symbolique hors dépôt vers ce checkpoint. ~~`CoreAgent` n'est plus
+utilisable : `config/agents/CoreAgent/` n'existe plus.~~ → **FAUX, corrigé le 2026-08-10 :
+`config/agents/CoreAgent/` existe** (vérifié par `ls`). L'agent vif du projet est
+`ArmageddonAgent` (décision §10.2 du 2026-07-19), mais ce n'est pas parce que `CoreAgent` aurait
+été supprimé.
 
 ---
 
