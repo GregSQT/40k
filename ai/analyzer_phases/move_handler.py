@@ -315,6 +315,11 @@ def _handle_fled(state, config, line, action_desc, player, turn, phase, fled_mat
                 'move_from': (start_col, start_row),
                 'move_to': (dest_col, dest_row)
             })
+        # 03.01 JUGÉE ici aussi : `wall_collisions` a TROIS sites d'incrément (move normal,
+        # fall-back, advance) et n'en notait qu'un. La règle sortait donc « jamais exercée » sur
+        # un journal de fall-back, alors que son contrôle avait travaillé — une fausse alerte sur
+        # le seul verdict que ce chantier a créé.
+        note_rule_usage(stats, "03.01", player)
         if (dest_col, dest_row) in state.wall_hexes:
             stats['wall_collisions'][player] += 1
     else:
@@ -718,7 +723,13 @@ def _handle_move(state, config, line, action_desc, player, turn, phase, move_mat
         # l'entrée du handler — un mouvement dont la géométrie n'aurait pas pu être mesurée ne
         # doit pas compter pour un exercice de la règle, sans quoi « jamais exercée » ne se
         # déclencherait plus jamais.
-        note_rule_usage(stats, "09.05", player)
+        #
+        # ET PAS SUR UN MOVE APRÈS TIR : celui-ci emprunte le même chemin, mais son budget est
+        # celui de la CAPACITÉ, compté sur `PROJET.move_after_shooting`. Sans cette garde, un run
+        # dont tous les déplacements seraient des move-après-tir déclarait 09.05 « exercée » alors
+        # que son volet MAXIMUM DISTANCE n'avait jamais été jugé.
+        if not is_move_after_shooting:
+            note_rule_usage(stats, "09.05", player)
         if dest_adjacent:
             if not adjacent_before:
                 stats['move_to_adjacent_enemy'][player] += 1

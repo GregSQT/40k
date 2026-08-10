@@ -1310,9 +1310,6 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                     # d'ancre disparaît, la mesure par socle reste : c'est la même correction que
                     # le plafond de tir (V14), et par le même moyen — mutualiser, pas recopier.
                     reactive_abnormal = phase not in ("MOVE", "SHOOT")
-                    # Capacité de projet `reactive_move` JUGÉE : phase, budget, mur et engagement
-                    # sont mesurés sur cette ligne et les suivantes de ce bloc.
-                    note_rule_usage(stats, "PROJET.reactive_move", reactive_player)
 
                     if reactive_abnormal:
                         reactive_stats[reactive_player]['abnormal'] += 1
@@ -1344,6 +1341,12 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         unit_hp_at_reactive = dict(state.unit_hp)
                         positions_at_reactive = dict(state.unit_positions)
                         if (from_col, from_row) != (to_col, to_row):
+                            # Capacité de projet `reactive_move` JUGÉE — et seulement ICI, DERRIÈRE
+                            # ses gardes. Posée plus haut, elle comptait un exercice pour une unité
+                            # inconnue de `unit_hp` ou pour un déplacement nul, cas où trois de ses
+                            # quatre contrôles ne s'exécutent pas : le rapport rendait « OK » là où
+                            # il n'avait presque rien jugé.
+                            note_rule_usage(stats, "PROJET.reactive_move", reactive_player)
                             if roll_value is not None:
                                 # Le D6 loggué est en POUCES : le moteur le convertit
                                 # (`_build_reactive_move_destinations_pool`), l'analyzer doit

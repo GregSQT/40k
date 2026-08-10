@@ -57,8 +57,7 @@
       "label": "Coherency — 2\" d'un voisin, 9\" de toute l'escouade",
       "section": "1.1",
       "applicability": {
-        "kind": "action_seen",
-        "action": "move"
+        "kind": "always"
       },
       "controls": [
         [
@@ -66,7 +65,8 @@
         ]
       ],
       "status": "PARTIEL",
-      "status_note": "Le volet HORIZONTAL est mesuré à la mise en place et à la fin de chaque déplacement. Non couverts : le volet VERTICAL (5\") et la purge de fin de tour (« Regaining coherency »)."
+      "status_note": "Le volet HORIZONTAL est mesuré à la mise en place et à la fin de chaque déplacement. Non couverts : le volet VERTICAL (5\") et la purge de fin de tour (« Regaining coherency »).",
+      "applicability_note": "03.03 gouverne la MISE EN PLACE autant que la fin de tout deplacement : toute bataille la met en jeu. `action_seen: move` etait un proxy qui la decrivait mal — un journal de deploiement seul rendait des exercices > 0 sous un verdict « hors roster », le rapport contredisant sa propre mesure."
     },
     {
       "id": "09.05",

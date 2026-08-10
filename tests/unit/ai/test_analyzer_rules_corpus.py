@@ -195,3 +195,53 @@ def test_a_counter_dropped_from_the_corpus_is_reported(tmp_path):
     assert gaps == [("1.1", 0, 1)], (
         "l'écart entre la somme par règle et le total de section n'est pas détecté"
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Ce que la revue du 2026-08-10 a démontré : le rapport pouvait se contredire
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_a_rule_with_errors_is_never_reported_out_of_roster(tmp_path):
+    """Le verdict testait l'applicabilité AVANT les erreurs : une règle fautive sortait donc
+    « HORS ROSTER », avec ses exercices imprimés en tiret, pendant que la section affichait ❌.
+
+    Une faute est un FAIT : elle prouve que la situation s'est présentée. Ici le journal ne porte
+    aucun mouvement — le prédicat dit donc « pas applicable » — mais le compteur de 03.01 est
+    armé, et c'est lui qui doit gagner.
+    """
+    stats = _stats(tmp_path)
+    stats["wall_collisions"][1] = 1
+    row = _row(stats, "03.01")
+    assert row["verdict"] == "ERREURS", "une erreur réelle est masquée par un verdict d'applicabilité"
+
+
+def test_a_rule_that_was_exercised_is_never_reported_out_of_roster(tmp_path):
+    """Même principe, par l'autre bout : 03.03 est jugée dès la mise en place, alors que son
+    applicabilité se dérivait de la présence d'un DÉPLACEMENT. Un journal de déploiement seul
+    rendait donc des exercices > 0 sous un verdict « hors roster » — le rapport contredisant la
+    mesure qu'il venait d'imprimer.
+    """
+    body = (
+        "[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1(10,10) DEPLOYED from (-1,-1) to (10,10) "
+        "[R:+0.0] [MODELS: 1#0@(10,10,z0) 1#1@(10,12,z0)] [SUCCESS]\n"
+    )
+    stats = _stats(tmp_path, body)
+    row = _row(stats, "03.03")
+    assert row["exercised"] > 0, "la formation déployée n'a pas été jugée"
+    assert row["verdict"] != "HORS ROSTER", (
+        "le rapport déclare hors roster une règle qu'il vient de mesurer"
+    )
+
+
+def test_the_fall_back_site_also_counts_an_exercise_of_03_01(tmp_path):
+    """`wall_collisions` a TROIS sites d'incrément et n'en notait qu'un : sur un journal de
+    fall-back, 03.01 criait « jamais exercée » alors que son contrôle avait travaillé. Une fausse
+    alerte sur le seul verdict que ce chantier a créé est pire qu'une absence d'alerte."""
+    body = (
+        "[10:00:02] E1 T2 P1 MOVE : Unit 1(10,11) FLED from (10,10) to (10,11)"
+        " [R:+0.0] [MODELS: 1#0@(10,11,z0)] [SUCCESS]\n"
+    )
+    stats = _stats(tmp_path, body)
+    assert _row(stats, "03.01")["exercised"] > 0, (
+        "le site fall-back de wall_collisions ne note toujours pas d'exercice"
+    )
