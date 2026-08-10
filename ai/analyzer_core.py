@@ -237,9 +237,6 @@ def _resync_living_models(
             for m in mids
         }
     _sync_front_hp(state, config, unit_id)
-    if unit_id == "102" and state.current_episode_num == 5:
-        print(f"[TMP] resync 102 mids={mids} hp_by_mid={hp_by_mid} "
-              f"-> {state.unit_model_hp.get('102')} unit_hp={state.unit_hp.get('102')}")
 
 
 def _apply_state_snapshot(state: AnalyzerState, config: AnalyzerConfig, payload: str) -> None:
