@@ -245,19 +245,35 @@ def _apply_damage_and_handle_death(
 ) -> None:
     """Applique une blessure à la cible via l'allocation par-figurine (05 Attack sequence).
 
-    Une blessure est allouée à la figurine « front » ; si ses PV tombent ≤ 0 elle est
-    détruite et l'excès de dégâts est PERDU (jamais reporté sur la figurine suivante).
-    L'escouade n'est retirée que lorsque sa DERNIÈRE figurine est détruite. unit_hp reste
-    l'invariant d'aliveness (présent et > 0 ⟺ escouade vivante).
+    Une blessure est allouée à la figurine « front » ; si ses PV tombent ≤ 0 elle est détruite
+    et le RESTE est reporté sur la suivante. L'escouade n'est retirée que lorsque sa DERNIÈRE
+    figurine est détruite. unit_hp reste l'invariant d'aliveness (présent et > 0 ⟺ vivante).
 
-    ⚠️ NE PAS « CORRIGER » L'OVERKILL EN REPORTANT L'EXCÈS. Tenté le 2026-08-10, revenu le jour
-    même. `Dmg:XHP` est le dégât BRUT de l'attaque, pas le dégât appliqué : le moteur écrit
-    `rec["damageDealt"] = dmg_dealt` puis `new_hp = hp_before - dmg_dealt` et détruit la
-    figurine (`shared_utils._resolve_one_pool_wound`) — l'excès y est donc bien perdu. La
-    mesure qui avait motivé le report (« 14 intervalles sur 14 : somme(Dmg) == perte de PV »)
-    ne prouvait rien : elle ne distingue pas « le journal est plafonné » de « aucun overkill
-    n'a eu lieu dans ces intervalles ». Reporter fait tuer DEUX figurines par blessure à une
-    arme Damage-2 contre des socles à 1 PV, là où le moteur n'en tue qu'une.
+    ⚠️ POURQUOI L'EXCÈS EST REPORTÉ, ET NON PERDU — la question a été tranchée deux fois dans
+    le mauvais sens avant de l'être par le code. `Dmg:XHP` n'est PAS le dégât brut de l'arme :
+    le moteur le PLAFONNE avant de le journaliser.
+
+        shared_utils, résolution d'une blessure du pool (seul site écrivant un damageDealt
+        non nul) :
+            dmg_dealt = min(int(dmg), hp_before)      # ← plafond
+            … Feel No Pain peut encore le réduire …
+            new_hp = hp_before - dmg_dealt            # ≥ 0
+            rec["damageDealt"] = dmg_dealt            # ← c'est le PLAFONNÉ qui part au log
+
+    Chaque `Dmg:X` journalisé vaut donc EXACTEMENT les PV retirés à une figurine : la somme des
+    `Dmg:` d'une escouade est sa perte de PV totale. En retrancher une partie (règle d'overkill
+    appliquée une seconde fois) fait survivre des escouades que le moteur a tuées — l'unité 102
+    du témoin encaissait 4 PV pour 4 PV restants et restait debout, faisant sonner « tir sur
+    cible engagée » sur un tir légal.
+
+    Le scénario inverse, « une arme Damage-2 tue deux socles à 1 PV », ne peut pas se produire :
+    contre un socle à 1 PV le moteur journalise `Dmg:1HP`, jamais 2. C'est le plafond qui
+    l'interdit.
+
+    Le report s'arrête à la dernière figurine : au-delà, l'excès n'a plus de destinataire. Seule
+    exception connue à l'invariant, sans effet ici : la ligne `IMPACTED … Dmg:` de la charge
+    écrit une constante de blessures mortelles et plafonne au niveau de l'UNITÉ — l'escouade y
+    meurt dans les deux modèles, donc aucun écart observable.
 
     `positions_by_model` — les socles connus de la cible deviennent PÉRIMÉS dès qu'elle perd une
     figurine : le log ne dit pas LAQUELLE (l'allocation est « front », pas nominative), et le
@@ -298,6 +314,7 @@ def _apply_damage_and_handle_death(
         # Figurine front détruite. On retire le SOCLE NOMMÉ (premier de l'ordre 06.02) : les PV
         # des autres restent attachés à leur figurine, donc un recalage ultérieur sur
         # `[MODELS:]` ne peut plus les « soigner » (cf. `unit_model_hp`).
+        _reste = -front_hp  # PV du coup non absorbés par la figurine qui tombe (cf. docstring)
         _living = ordered_living_mids(target_id)
         if _living:
             unit_model_hp.get(target_id, {}).pop(_living[0], None)
@@ -328,6 +345,25 @@ def _apply_damage_and_handle_death(
             _next = ordered_living_mids(target_id)
             if _next:
                 unit_hp[target_id] = int(unit_model_hp[target_id][_next[0]])
+                if _reste > 0:
+                    # Report par le MÊME chemin : la récursion rejoue toute la comptabilité
+                    # (mort, retrait du socle, escouade détruite) au lieu d'en écrire une
+                    # seconde version ici.
+                    _apply_damage_and_handle_death(
+                        target_id=target_id, attacker_id=attacker_id, damage=_reste,
+                        player=player, turn=turn, phase=phase, line_number=line_number,
+                        current_episode_num=current_episode_num, line_text=line_text,
+                        dead_units_current_episode=dead_units_current_episode,
+                        unit_hp=unit_hp, unit_models_alive=unit_models_alive,
+                        unit_model_hp=unit_model_hp,
+                        ordered_living_mids=ordered_living_mids,
+                        unit_hp_squad_max=unit_hp_squad_max, unit_types=unit_types,
+                        unit_positions=unit_positions, unit_deaths=unit_deaths,
+                        unit_kill_context=unit_kill_context, stats=stats,
+                        positions_by_model=positions_by_model,
+                        models_invalidated=models_invalidated,
+                    )
+                    return
             else:
                 # `unit_models_alive` dit qu'il reste une figurine mais aucun socle n'est connu :
                 # composition absente du journal (antérieur à `[MODEL_TYPES:]`). Les PV
