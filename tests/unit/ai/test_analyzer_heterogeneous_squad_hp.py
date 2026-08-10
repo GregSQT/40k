@@ -14,13 +14,16 @@ Trois défauts fermés ici, tous mesurés sur de vrais journaux.
    reconstruite à PV pleins et les figurines entamées remontaient (`[…, 1, 2, 4]` → `[…, 2, 5,
    4]`). Indexer par socle supprime la question.
 
-3. L'OVERKILL EST PERDU, ET DOIT LE RESTER. Un report de l'excès sur la figurine suivante a
-   été tenté le 2026-08-10 et REVENU le jour même : `Dmg:XHP` est le dégât BRUT de l'attaque
-   (`rec["damageDealt"] = dmg_dealt`, puis `new_hp = hp_before - dmg_dealt` et destruction),
-   donc le moteur perd bien l'excès. La mesure qui avait motivé le report — « 14 intervalles
-   sur 14 : somme(Dmg) == perte de PV » — ne distinguait pas « journal plafonné » de « aucun
-   overkill dans ces intervalles ». Reporter tuait DEUX figurines par blessure à une arme
-   Damage-2 contre des socles à 1 PV.
+3. L'EXCÈS D'UNE BLESSURE EST REPORTÉ, PAS PERDU. Question tranchée deux fois dans le mauvais
+   sens avant de l'être par le code : `Dmg:XHP` n'est pas le dégât brut de l'arme, le moteur le
+   PLAFONNE avant de l'écrire (`dmg_dealt = min(int(dmg), hp_before)`, puis
+   `rec["damageDealt"] = dmg_dealt`). Chaque `Dmg:` journalisé vaut donc exactement les PV
+   retirés à une figurine, et la somme des `Dmg:` d'une escouade est sa perte totale. En
+   retrancher une part fait survivre des escouades que le moteur a tuées : l'unité 102 du
+   témoin encaissait 4 PV pour 4 PV restants et restait debout.
+
+   `test_the_log_caps_damage_to_remaining_hp` verrouille la PRÉMISSE elle-même — si le moteur
+   cessait de plafonner, ce test tomberait avant les autres et dirait pourquoi.
 """
 
 from __future__ import annotations
@@ -149,31 +152,53 @@ def _damage(state, amount: int) -> None:
     )
 
 
-def test_overkill_is_lost_not_carried_over(st):
-    """UNE blessure ne tue qu'UNE figurine, quel que soit son dégât — comme le moteur.
+def test_the_log_caps_damage_to_remaining_hp():
+    """LA PRÉMISSE de tout ce qui suit, lue dans le moteur et non supposée.
 
-    Miroir de `_resolve_one_pool_wound` : `new_hp = hp_before - dmg_dealt`, destruction, et
-    l'excès s'arrête là. Reporter ferait tomber deux socles à 1 PV sous une seule arme
-    Damage-2, et l'analyzer déclarerait détruites des escouades encore debout.
+    Le seul site qui écrit un `damageDealt` non nul le plafonne d'abord aux PV restants de la
+    figurine. C'est ce qui rend le report d'excès CORRECT — et qui rend impossible le scénario
+    inverse (« Damage-2 tue deux socles à 1 PV »), puisque le journal porterait `Dmg:1HP`.
+    Si cette ligne disparaît du moteur, c'est ici qu'il faut le voir.
     """
-    core._resync_living_models(st, _Config(), SQUAD, ["105#0", "105#1"])  # 2 PV chacune
-    _damage(st, 99)
-    assert st.unit_models_alive[SQUAD] == 1, (
-        "plus d'une figurine tuée par une seule blessure : l'excès est reporté alors que le "
-        "moteur le perd"
+    import inspect
+
+    from engine.phase_handlers import shared_utils
+
+    src = inspect.getsource(shared_utils)
+    assert "dmg_dealt = min(int(dmg), hp_before)" in src, (
+        "le moteur ne plafonne plus le dégât avant de le journaliser : `Dmg:XHP` devient le "
+        "dégât BRUT, et le report d'excès de l'analyzer tuerait plus de figurines que le moteur"
     )
-    assert st.unit_hp[SQUAD] == 2, "la relève doit arriver à SES PV, intacte"
+    assert src.count('rec["damageDealt"] = dmg_dealt') == 1, (
+        "un second site écrit damageDealt : vérifier qu'il plafonne lui aussi"
+    )
 
 
-def test_a_single_wound_never_empties_the_squad(st):
-    """Corollaire : une escouade entière ne peut pas tomber sous une seule blessure."""
-    core._resync_living_models(st, _Config(), SQUAD, ["105#0", "105#1", "105#2"])
-    _damage(st, 500)
-    assert SQUAD in st.unit_hp and st.unit_models_alive[SQUAD] == 2
+def test_damage_carries_over_to_the_next_model(st):
+    """`Dmg:` est le dégât APPLIQUÉ : 3 sur une figurine à 2 PV doit en entamer une seconde."""
+    core._resync_living_models(st, _Config(), SQUAD, ["105#0", "105#1"])  # 2 PV chacune
+    _damage(st, 3)
+    assert st.unit_models_alive[SQUAD] == 1, "la première figurine aurait dû tomber"
+    assert st.unit_hp[SQUAD] == 1, (
+        "l'excès a été perdu : l'analyzer retranche une seconde fois un plafonnement que le "
+        "moteur a déjà fait, et l'escouade survit à des dégâts qui l'ont tuée"
+    )
 
 
-def test_the_last_model_removal_destroys_the_squad(st):
-    """Et la dernière figurine tuée retire bien l'escouade."""
+def test_the_witness_squad_dies_on_exactly_its_remaining_hp(st):
+    """Le témoin 102 : 4 PV restants (1 + 3), 4 PV de dégâts journalisés → détruite."""
+    core._resync_living_models(st, _Config(), SQUAD, ["105#0", "105#1"], {"105#0": 1, "105#1": 3})
+    _damage(st, 2)
+    _damage(st, 1)
+    _damage(st, 1)
+    assert SQUAD not in st.unit_hp, (
+        "l'escouade survit à 4 PV de dégâts pour 4 PV restants — c'est exactement ce qui faisait "
+        "sonner « tir sur cible engagée » (1.2) sur un tir légal"
+    )
+
+
+def test_overkill_stops_at_the_last_model(st):
+    """Au-delà de la dernière figurine, l'excès n'a plus de destinataire : pas de récursion folle."""
     core._resync_living_models(st, _Config(), SQUAD, ["105#0"], {"105#0": 1})
     _damage(st, 99)
     assert SQUAD not in st.unit_hp
