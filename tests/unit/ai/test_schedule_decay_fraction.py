@@ -29,6 +29,7 @@ from ai.training_callbacks import (
     LearningRateScheduleCallback,
     schedule_progress,
 )
+from config_loader import get_config_loader
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 AGENT_CONFIG = os.path.join(
@@ -224,6 +225,40 @@ def test_freezing_a_scalar_ent_coef_is_a_no_op_copy() -> None:
 
 with open(AGENT_CONFIG, encoding="utf-8-sig") as _f:
     PROFILES = {k: v for k, v in json.load(_f).items() if isinstance(v, dict)}
+PROFILE_NAMES = sorted(PROFILES)
+
+# `callback_params` est HÉRITABLE : une clé absente ou nulle retombe sur `_training_common.json`
+# (`_resolve_callback_value`, train.py:3444-3459). Lire le profil brut mesurerait donc autre chose
+# que ce que le run appliquera — et `_training_common.json` définit justement `save_best_robust`,
+# `bot_eval_freq` et `robust_window`. On relit la MÊME source que le runtime, pas une copie.
+TRAINING_COMMON = get_config_loader().load_training_common_config()
+
+
+def _resolved_cb(callback_params: dict, key: str):
+    """Miroir de `_resolve_callback_value` (train.py:3444-3459), même ordre, mêmes erreurs."""
+    value = callback_params[key] if key in callback_params else None
+    if value is not None:
+        return value
+    if key not in TRAINING_COMMON:
+        raise KeyError(
+            f"callback_params.{key} est absent/null et _training_common.json ne définit pas '{key}'"
+        )
+    shared = TRAINING_COMMON[key]
+    if shared is None:
+        raise ValueError(f"_training_common.json définit '{key}' à null")
+    return shared
+
+
+# Quels profils PROMETTENT un best model. Table explicite et exhaustive : `save_best_robust` est
+# écarté des comparaisons en bloc (il dépend de la longueur du run) et le test paramétré plus bas
+# SKIP ceux qui ne promettent rien — sans cette table, le passer à false n'importe où resterait
+# vert partout, et un run de mesure ne produirait plus aucun modèle sélectionné.
+# false = run trop court pour une fenêtre de 5 évaluations : sa sortie est son modèle FINAL.
+PROMISES_BEST_MODEL = {
+    "x1": True, "x1_long": True, "x1_selfplay": True,
+    "x5_new": False, "x5_long": True, "x5_append": True,
+    "x1_debug": False, "x5_debug": False,
+}
 
 
 def _comparable(block: dict, ignored: Container[str] = ()) -> dict:
@@ -245,7 +280,7 @@ def _comparable(block: dict, ignored: Container[str] = ()) -> dict:
     }
 
 
-@pytest.mark.parametrize("profile_name", sorted(PROFILES))
+@pytest.mark.parametrize("profile_name", PROFILE_NAMES)
 @pytest.mark.parametrize("ramp_key", ["learning_rate", "ent_coef"])
 def test_every_profile_declares_decay_fraction(profile_name: str, ramp_key: str) -> None:
     """Clé OBLIGATOIRE : `setup_callbacks` la lit par `require_key`, sans défaut.
@@ -266,7 +301,7 @@ def test_every_profile_declares_decay_fraction(profile_name: str, ramp_key: str)
 @pytest.mark.parametrize(
     ("ref_name", "long_name"), [("x1", "x1_long"), ("x5_new", "x5_long")]
 )
-def test_x1_long_is_x1_recalibrated_for_long_runs(ref_name: str, long_name: str) -> None:
+def test_long_profile_is_its_reference_recalibrated(ref_name: str, long_name: str) -> None:
     """Un profil `_long` ne diffère de sa référence que par ce qui dépend de la LONGUEUR du run.
 
     Toute autre divergence est une dérive : les deux profils doivent rester comparables, sinon un
@@ -276,28 +311,28 @@ def test_x1_long_is_x1_recalibrated_for_long_runs(ref_name: str, long_name: str)
     (2026-08-02) et `x5_long` sur `x5_new` (2026-08-10). Sans le second, la paire x5 dériverait
     en silence — c'est exactement ce que ce test empêche pour la paire x1.
     """
-    x1, x1_long = PROFILES[ref_name], PROFILES[long_name]
+    ref, long_ = PROFILES[ref_name], PROFILES[long_name]
     length_dependent = {
         "type",
         "total_episodes",
         "model_params",   # seuls les decay_fraction y changent, vérifiés juste après
         "callback_params",  # seuls bot_eval_freq et bot_eval_final, idem
     }
-    assert _comparable(x1_long, length_dependent) == _comparable(x1, length_dependent)
+    assert _comparable(long_, length_dependent) == _comparable(ref, length_dependent)
 
-    assert x1_long["total_episodes"] == 200_000
+    assert long_["total_episodes"] == 200_000
     # Les deux rampes ont des `decay_fraction` DISTINCTES, et c'est délibéré : elles ne servent
     # pas la même chose. L'entropie s'arrête tôt (80k) parce qu'on veut que la politique cesse
     # d'explorer et exploite ; le learning rate descend plus longtemps (140k) parce que le mettre
     # au plancher à 80k briderait l'apprentissage sur 60 % du budget du run.
     expected_decay = {"learning_rate": 0.7, "ent_coef": 0.4}
     for ramp_key, expected in expected_decay.items():
-        long_ramp = x1_long["model_params"][ramp_key]
-        ref_ramp = x1["model_params"][ramp_key]
+        long_ramp = long_["model_params"][ramp_key]
+        ref_ramp = ref["model_params"][ramp_key]
         assert long_ramp["decay_fraction"] == expected, ramp_key
         assert ref_ramp["decay_fraction"] == 1.0
         assert _comparable(long_ramp, {"decay_fraction"}) == _comparable(ref_ramp, {"decay_fraction"}), \
-            f"x1_long change {ramp_key} au-delà de decay_fraction"
+            f"{long_name} change {ramp_key} au-delà de decay_fraction"
     assert expected_decay["ent_coef"] < expected_decay["learning_rate"], (
         "l'exploration doit s'arrêter AVANT que le learning rate n'atteigne son plancher, "
         "sinon la politique se fige alors qu'elle peut encore apprendre vite"
@@ -305,9 +340,9 @@ def test_x1_long_is_x1_recalibrated_for_long_runs(ref_name: str, long_name: str)
     # Le reste de model_params (archi, n_steps, target_kl…) doit être identique : un run long
     # sert à mesurer plus longtemps, pas à changer le modèle mesuré.
     ramps = {"learning_rate", "ent_coef"}
-    assert _comparable(x1_long["model_params"], ramps) == _comparable(x1["model_params"], ramps)
+    assert _comparable(long_["model_params"], ramps) == _comparable(ref["model_params"], ramps)
 
-    long_cb, ref_cb = x1_long["callback_params"], x1["callback_params"]
+    long_cb, ref_cb = long_["callback_params"], ref["callback_params"]
     assert long_cb["bot_eval_freq"] == 10000, (
         "20 points de mesure sur 200k. À 5000, les 40 évaluations × 100 épisodes coûteraient "
         "~8,5 h (13 min l'unité, commit 42326ed0) contre ~5,5 h d'entraînement : l'évaluation "
@@ -343,11 +378,24 @@ def test_x1_long_is_x1_recalibrated_for_long_runs(ref_name: str, long_name: str)
     # sauvegarde tous les `save_freq` APPELS du callback (callbacks.py:300), un par pas du
     # VecEnv, jamais des épisodes ; le régler depuis la durée en épisodes n'a pas de sens, le
     # levier est `max_checkpoints`, un compte.
+    # `save_best_robust` dépend lui aussi de la longueur du run, et pas par convention : un run
+    # trop court ne PEUT pas produire de best model (cf.
+    # `test_profile_can_produce_the_best_model_it_promises`), donc le déclarer y serait une
+    # promesse vide. C'est le cas de `x5_new` (1000 épisodes) face à `x5_long` (200 000).
     overridden = {
         "bot_eval_freq", "bot_eval_final", "bot_eval_task_timeout_seconds",
-        "bot_eval_intermediate",
+        "bot_eval_intermediate", "save_best_robust",
     }
     assert _comparable(long_cb, overridden) == _comparable(ref_cb, overridden)
+    assert _resolved_cb(long_cb, "save_best_robust") is True, (
+        "un run de mesure sélectionne son meilleur modèle"
+    )
+    # L'écarter de la comparaison ne dispense PAS de le vérifier des deux côtés. La valeur attendue
+    # vient de la table unique `PROMISES_BEST_MODEL`, verrouillée pour les huit profils par
+    # `test_profile_promise_of_a_best_model_is_pinned` : x1 (10 000 ép., bot_eval_freq 2000)
+    # atteint sa fenêtre de 5 évaluations, x5_new (1000 ép.) non.
+    assert _resolved_cb(ref_cb, "save_best_robust") is PROMISES_BEST_MODEL[ref_name]
+    assert PROMISES_BEST_MODEL[long_name] is True
 
 
 def test_x5_append_resumes_x5_long_where_it_stopped() -> None:
@@ -363,11 +411,11 @@ def test_x5_append_resumes_x5_long_where_it_stopped() -> None:
     VecNormalize. Ces trois réglages sont devenus faux le jour où la chaîne a changé, sans que
     rien ne le signale : c'est précisément ce que ce test rend impossible à refaire.
     """
-    append, long = PROFILES["x5_append"], PROFILES["x5_long"]
+    append, long_ = PROFILES["x5_append"], PROFILES["x5_long"]
 
     # 1. Le MODÈLE est le même objet : seules les deux rampes changent (elles sont aplaties).
     ramps = {"learning_rate", "ent_coef"}
-    assert _comparable(append["model_params"], ramps) == _comparable(long["model_params"], ramps), (
+    assert _comparable(append["model_params"], ramps) == _comparable(long_["model_params"], ramps), (
         "x5_append doit décrire le MÊME réseau que x5_long. `net_arch` n'est d'ailleurs pas "
         "réappliqué au modèle chargé (train.py:2807-2828) : une divergence y serait un mensonge "
         "silencieux, et elle fausserait tout de même le choix du device (train.py:2771) ainsi que "
@@ -376,31 +424,98 @@ def test_x5_append_resumes_x5_long_where_it_stopped() -> None:
 
     # 2. Les deux rampes sont PLATES, au plancher atteint par x5_long.
     lr, ent = append["model_params"]["learning_rate"], append["model_params"]["ent_coef"]
-    assert lr["initial"] == lr["final"] == long["model_params"]["learning_rate"]["final"]
-    assert ent["start"] == ent["end"] == long["model_params"]["ent_coef"]["end"]
+    assert lr["initial"] == lr["final"] == long_["model_params"]["learning_rate"]["final"]
+    assert ent["start"] == ent["end"] == long_["model_params"]["ent_coef"]["end"]
 
     # 3. Les stats VecNormalize du checkpoint sont CONSERVÉES. `reset_on_curriculum` les écarte
     # (train.py:1809-1814) : légitime quand l'échelle du plateau change, destructeur ici, où la
     # distribution des observations est identique — c'est le décalage muet de train.py:1821-1823.
     assert append["vec_normalize"]["reset_on_curriculum"] is False
 
-    # 4. Le score robuste doit pouvoir exister : il n'apparaît qu'après `robust_window`
-    # évaluations (training_callbacks.py:2029). Espacer les points au-delà désactiverait
-    # `save_best_robust` en silence sur tout le run.
+    # 4. Une prolongation sélectionne son meilleur modèle : c'est sa raison d'être. Que ce soit
+    # matériellement POSSIBLE est vérifié pour tous les profils par
+    # `test_profile_can_produce_the_best_model_it_promises`.
     cb = append["callback_params"]
-    assert cb["save_best_robust"] is True
-    assert cb["bot_eval_freq"] * cb["robust_window"] <= append["total_episodes"], (
-        f"{cb['robust_window']} évals de {cb['bot_eval_freq']} ép. ne tiennent pas dans "
-        f"{append['total_episodes']} : aucun score robuste ne serait jamais calculé."
-    )
+    assert _resolved_cb(cb, "save_best_robust") is True
 
     # 5. Le coût de l'évaluation reste borné par celui de l'entraînement. Une éval intermédiaire
     # coûte ~13 min à 100 ép./bot (commit 42326ed0), soit ~1,3 min à 10 ; l'entraînement tourne à
     # 36k ép./h. Le rapport toléré est celui de x1_long (~4 h 20 d'éval pour 5 h 30 de run).
-    n_evals = append["total_episodes"] // cb["bot_eval_freq"]
-    eval_minutes = n_evals * cb["bot_eval_intermediate"] * 0.13
+    n_evals = append["total_episodes"] // _resolved_cb(cb, "bot_eval_freq")
+    eval_minutes = n_evals * _resolved_cb(cb, "bot_eval_intermediate") * 0.13
     train_minutes = append["total_episodes"] / 36_000 * 60
     assert eval_minutes <= train_minutes, (
         f"{n_evals} évals × {cb['bot_eval_intermediate']} ép./bot ≈ {eval_minutes:.0f} min "
         f"d'évaluation pour {train_minutes:.0f} min d'entraînement."
+    )
+
+
+@pytest.mark.parametrize("profile_name", PROFILE_NAMES)
+def test_profile_promise_of_a_best_model_is_pinned(profile_name: str) -> None:
+    """Chaque profil déclare-t-il le best model qu'on attend de lui — ni plus, ni moins.
+
+    Le test suivant vérifie qu'une promesse est TENABLE, mais il skippe ceux qui ne promettent
+    rien : à lui seul, il laisse passer le retrait d'une promesse. Or un run de mesure sans best
+    model (`x1_selfplay`, 100 000 épisodes) ne rend que son dernier modèle, c'est-à-dire le hasard
+    du dernier point plutôt que le meilleur — sans que rien ne rougisse. D'où cette table.
+
+    Elle est exhaustive par construction : un profil ajouté au JSON sans y être classé échoue ici.
+    """
+    assert profile_name in PROMISES_BEST_MODEL, (
+        f"profil '{profile_name}' non classé : décider s'il promet un best model et l'inscrire "
+        "dans PROMISES_BEST_MODEL."
+    )
+    resolved = _resolved_cb(PROFILES[profile_name]["callback_params"], "save_best_robust")
+    assert bool(resolved) is PROMISES_BEST_MODEL[profile_name]
+
+
+@pytest.mark.parametrize("profile_name", PROFILE_NAMES)
+def test_profile_can_produce_the_best_model_it_promises(profile_name: str) -> None:
+    """Un profil qui déclare `save_best_robust` doit pouvoir calculer un score robuste.
+
+    Le score n'existe qu'une fois `robust_window` évaluations accumulées
+    (`training_callbacks.py:2029`) : il faut donc `robust_window × bot_eval_freq` épisodes rien
+    que pour en obtenir un premier. En dessous, la promesse est intenable.
+
+    Ce test DOUBLE une validation qui existe déjà — `setup_callbacks` lève au démarrage sur
+    exactement cette condition (`train.py:3596-3612`). Le doublon est délibéré, et c'est le même
+    usage que `test_every_profile_declares_decay_fraction` juste au-dessus : la validation runtime
+    n'est atteinte qu'en lançant un run, qui coûte des minutes de setup avant de refuser de
+    partir. Ici la faute se voit en quelques millisecondes, sur tous les profils qui promettent, sans
+    qu'aucun ne soit lancé.
+
+    `x5_new` était dans ce cas le 2026-08-10 : 1000 épisodes, `bot_eval_freq` 250, soit 4
+    évaluations pour une fenêtre de 5. Le profil n'était pas seulement improductif, il était
+    INLANÇABLE — `--training-config x5_new` levait au setup. Il déclare désormais
+    `save_best_robust: false` et n'expose que son modèle FINAL.
+
+    Un profil qui ne promet rien est hors sujet ; il est SKIP et non vert, pour que
+    `pytest -rs` montre qui n'est pas couvert plutôt que d'afficher huit verts pour cinq
+    vérifications.
+
+    Hors périmètre volontairement : `save_best_min_episodes`, l'autre garde de sauvegarde
+    (`training_callbacks.py:2008` et `:2088`). Elle se compare à `eval_marker`, qui est CUMULATIF
+    et amorcé à l'offset de reprise (`train.py:3649-3651`) : sur un profil de prolongation comme
+    `x5_append` le marker démarre à ~200 000, pas à zéro. Le JSON seul ne connaît pas cet offset,
+    donc aucun test lisant ce fichier ne peut trancher — l'invariant appartient à
+    `setup_callbacks`, qui, lui, l'a sous la main.
+    """
+    profile = PROFILES[profile_name]
+    cb = profile["callback_params"]
+    if not _resolved_cb(cb, "save_best_robust"):
+        pytest.skip(f"{profile_name} ne promet aucun best robust model")
+    # La garde runtime ne s'applique qu'en cadence ÉPISODES : sinon `bot_eval_freq` compte des
+    # timesteps et l'arithmétique ci-dessous ne veut rien dire. Cette clé-là n'hérite pas
+    # (`require_key`, train.py:3464) — un profil qui l'omet fait lever le run, pas ce test.
+    assert cb["bot_eval_use_episodes"] is True, (
+        f"{profile_name} évalue en timesteps : la garde train.py:3596-3612 ne le couvre pas, "
+        "et rien ne garantit plus qu'il atteigne sa fenêtre robuste."
+    )
+    total = profile["total_episodes"]
+    freq, window = _resolved_cb(cb, "bot_eval_freq"), _resolved_cb(cb, "robust_window")
+    needed = freq * window
+    assert needed <= total, (
+        f"{profile_name} : robust_window={window} × bot_eval_freq={freq} = {needed} épisodes "
+        f"avant le PREMIER score robuste, pour un run de {total}. Le run refuserait de démarrer "
+        "(train.py:3596-3612)."
     )

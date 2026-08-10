@@ -185,7 +185,7 @@ Conséquence acceptée en connaissance de cause : les évals des marqueurs
 2026-08-02). Les profils longs sont calibrés à part : évaluer tous les 2 000 épisodes sur un run de
 200 000 coûterait plus cher que l'entraînement lui-même, et c'est leur mesure FINALE qui est le
 livrable, donc sa précision. Le verrou est
-`tests/unit/ai/test_schedule_decay_fraction.py::test_x1_long_is_x1_recalibrated_for_long_runs`.
+`tests/unit/ai/test_schedule_decay_fraction.py::test_long_profile_is_its_reference_recalibrated`.
 
 | Clé | `x1` (décision ci-dessus) | `x1_long` / `x1_selfplay` (HEAD) | Pourquoi l'écart |
 |---|---|---|---|

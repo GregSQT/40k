@@ -131,8 +131,11 @@ def test_observation_emet_sa_ligne(engine: W40KEngine, perf_log) -> None:
     assert int(row["entities_n"]) == 2
     assert float(row["total_s"]) > 0.0
     # La decoupe doit sommer au total, sinon un segment entier echappe a la mesure.
+    # Les trois champs sont formates independamment en `.6f` : chacun porte une erreur d'arrondi
+    # de +/-5e-7, donc l'ecart de la somme au total vaut au pire 1,5e-6. Une tolerance de 1e-6
+    # rendait le test flaky (echec du 2026-08-11 : 0.000958 vs 0.000957).
     assert float(row["ctx_s"]) + float(row["entities_s"]) == pytest.approx(
-        float(row["total_s"]), abs=1e-6
+        float(row["total_s"]), abs=2e-6
     )
 
 

@@ -900,8 +900,22 @@ Verrou : `tests/unit/ai/test_schedule_decay_fraction.py` refuse toute autre dive
 `x1_long` — c'est attendu : le nom d'un profil ne fixe **pas** la résolution du plateau, qui vient
 de `--resolution 1|5|10` (cf. `_resolution_detail` en tête du JSON). `x5_new` est lui-même aligné
 sur `x1` depuis le 2026-08-10 (architecture 512×512, `lr` 0.002 → 0.0002, `ent_coef` end 0.01,
-seuils de gating 0.3) ; il n'en diffère plus que par `total_episodes` (1000) et `bot_eval_freq`
-(250, sans quoi un run de 1000 épisodes n'aurait aucun point de mesure intermédiaire).
+seuils de gating 0.3) ; il n'en diffère plus que par `total_episodes` (1000), `bot_eval_freq`
+(250, sans quoi un run de 1000 épisodes n'aurait aucun point de mesure intermédiaire) et
+`save_best_robust: false`. Ce dernier point n'est pas un réglage de confort : à `true`, le profil
+était **inlançable** — `setup_callbacks` refuse au démarrage une fenêtre robuste inatteignable
+(`train.py:3596-3612`), et 1000 épisodes à `bot_eval_freq` 250 n'en donnent que 4 pour une fenêtre
+de 5. Même sans cette garde, aucun best model ne serait écrit : toute sauvegarde exige
+`eval_marker >= save_best_min_episodes` (10 000), seuil qu'un run de 1000 épisodes parti de zéro
+n'atteint jamais. La sortie utile de `x5_new` est son modèle **final**, qui est ce que `x5_long`
+reprend. Deux verrous complémentaires, tous deux paramétrés sur les huit profils :
+`test_profile_promise_of_a_best_model_is_pinned` fixe QUI promet un best model (table
+`PROMISES_BEST_MODEL`, exhaustive : un profil ajouté sans y être classé échoue), et
+`test_profile_can_produce_the_best_model_it_promises` vérifie que la promesse est TENABLE — il ne
+porte donc que sur les cinq qui en font une, les trois autres étant explicitement `SKIP`. Les deux
+lisent les `callback_params` **résolus** comme le fait le run (`_resolve_callback_value`,
+`train.py:3444-3459`) : une clé absente ou nulle hérite de `_training_common.json`, qui définit
+`save_best_robust: true` — la lire brute mesurerait autre chose que ce qui sera appliqué.
 
 **Le profil `x5_append`** ferme la chaîne : `x5_new` → `x5_long` → `x5_append`. Il ne démarre pas
 un apprentissage, il **prolonge** le modèle de `x5_long` de 30 000 épisodes sur la même tâche. Ses
