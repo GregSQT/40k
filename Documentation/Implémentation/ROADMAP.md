@@ -16,6 +16,11 @@
 > **contrats permanents**, relus à chaque livraison qui touche le journal. Ils portent en revanche
 > du travail ouvert, et **ce travail a sa ligne en §4** — ajoutée le 2026-08-10, quand on a constaté
 > qu'ils n'étaient cités nulle part ici alors que ce fichier se déclare source unique de l'ordre.
+> ⚠️ **Une troisième chose traîne à la racine et n'y a pas sa place** : [`Security.md`](Security.md)
+> est un **chantier ouvert** (étapes 4→8, §4), donc du ressort d'`A_faire/` selon la 2ᵉ ligne de ce
+> tableau. Son déplacement à la racine a d'ailleurs cassé le lien relatif que
+> `A_faire/perf_noyau_natif_et_gzip.md` pointait vers lui (réparé le 2026-08-10, seul lien mort du
+> corpus). Le remettre en `A_faire/` est un `git mv` + 2 liens : à faire, ou assumer la 3ᵉ exception.
 >
 > **Règles d'arbitrage entre docs** (établies le 2026-08-10) :
 > 1. **Le code fait foi** sur fait/pas fait. Un doc contredit par le code est périmé, pas le code.
@@ -34,13 +39,17 @@
 
 ## 0. En cours — ne rien casser
 
-- 🟢 **Run `--new` ArmageddonAgent x1** (PID 842478, `run_20260810-111734`) — c'est une **base de
-  développement, PAS la mesure** (décision 2026-08-10). Ne rien lancer de cassant tant qu'il vit
-  (workers `spawn` relisent le working tree). **Décision 2026-08-10 (2) : on le laisse aller au
-  bout**, pour disposer d'un modèle chargeable et d'une sortie d'`analyzer.py` exploitable pendant
-  les tranches P3 — son modèle deviendra inchargeable dès P3-4, sa valeur est le diagnostic, pas le
-  score. `x1` = **10 000 épisodes** (`total_episodes`, et non 50 000 qui est la clé de commentaire
-  `total_episodes_normal`). → [`1_Agent/V11_agent_rework.md`](1_Agent/V11_agent_rework.md) §0.70
+- ✅ **Run `--new` ArmageddonAgent x1 — TERMINÉ** (PID 842478 absent, dernier checkpoint 15 h 18,
+  `run_20260810-111734`). C'était une **base de développement, PAS la mesure** (décision
+  2026-08-10) : modèle chargeable + sortie d'`analyzer.py` pour les tranches P3, rien de plus. Son
+  modèle deviendra inchargeable dès P3-4. `x1` = **10 000 épisodes** (`total_episodes`, et non
+  50 000 qui est la clé de commentaire `total_episodes_normal`).
+  → [`1_Agent/V11_agent_rework.md`](1_Agent/V11_agent_rework.md) §0.70
+- **Conséquence immédiate : plus rien n'est gelé.** La consigne « ne rien lancer de cassant, aucun
+  JSON de `config/` » tombe avec le run. Ce qui était différé à ce titre redevient faisable —
+  notamment la `justification` d'`obs_size` (§5) et l'ajout d'un profil de validation P5 (§1 pt 6).
+- ⚠️ **Rien n'est en cours. Cette section doit être VIDE ou décrire un run vivant** — un 🟢 périmé
+  gèle du travail pour rien, ce qu'il a fait entre 15 h 18 et sa correction.
 
 ## 1. Chemin critique vers la mesure de référence
 
@@ -71,12 +80,23 @@ mesure, et c'est assumé (§0.14).
    ennemi, portée effective, flags advanced/fell_back) sont ce qui rend P3-4 et P3-6 apprenables.
    Livrées APRÈS, elles font échouer le critère P5 de ces tranches pour une raison connue d'avance.
    Chaque feature part **avec** la tranche qui en dépend ; ce point 5 ne garde que le reliquat.
-6. **P5 — Validation par tranche** (protocole jamais appliqué depuis sa rédaction) — profil du run
-   court : **`x1_debug`** (480 épisodes). Le « ne PAS utiliser `x1_debug`, il porte 48 envs » de
-   §9.6 est **périmé** : `n_steps` est un TOTAL divisé par `n_envs` en un point de passage unique
-   depuis §0.33, le buffer ne dépend donc plus de `n_envs` — et les **7** profils sont à 48 envs,
-   `x5_debug` compris (vérifié config, 2026-08-10). `x5_debug` (96 épisodes) est trop court pour
-   comparer deux win-rates. → [`1_Agent/V11_phaseA.md`](1_Agent/V11_phaseA.md) §9.6
+6. **P5 — Validation par tranche** (protocole jamais appliqué depuis sa rédaction).
+   🔴 **AUCUN PROFIL EXISTANT NE CONVIENT — à trancher avant d'ouvrir P3-4.**
+   - Ce qui est **acquis** : le « ne PAS utiliser `x1_debug`, il porte 48 envs » de §9.6 est
+     périmé. `n_steps` est un TOTAL divisé par `n_envs` en un point de passage unique depuis
+     §0.33 ⇒ le buffer ne dépend plus de `n_envs`, et les **7** profils sont à 48 envs de toute
+     façon, `x5_debug` compris. La mémoire n'écarte plus aucun profil.
+   - Ce qui **casse** : `x1_debug.total_episodes` vaut **10** (et non 480 — la valeur a changé en
+     commit après la rédaction de cette ligne le 2026-08-10 ; recompté depuis la config). Et
+     `total_episodes` est un total **GLOBAL** tous environnements confondus
+     (`self.episode_count += episodes_finished`, `ai/training_callbacks.py:201`), pas un par-env.
+     Reste `x5_debug` = **96**. Comparer deux win-rates par tranche sur 10 ou 96 parties, c'est
+     mesurer du bruit : à 96, l'erreur-type autour de 0,5 vaut ~5 points (IC95 ≈ ±10).
+   - **Le protocole §9.6 conditionne l'ouverture de CHAQUE tranche P3 à ce chiffre.** Le mesurer
+     avec un instrument trop court revient à ne pas le mesurer, et P3-4 serait validée sur du bruit.
+   - **À faire** : ajouter un profil de validation dédié (~500-1000 épisodes) à
+     `ArmageddonAgent_training_config.json`. Plus rien ne l'interdit depuis la fin du run (§0).
+     → [`1_Agent/V11_phaseA.md`](1_Agent/V11_phaseA.md) §9.6
 7. **Mesure de référence** `x1_long` — solde §0.14, §0.67, critère T6 (via §10.6) d'un coup.
 8. **§0.59 — Phase 2 self-play** (`--append x1_selfplay`) — livré, JAMAIS exécuté ; le premier
    run est aussi son premier test d'intégration. → [`1_Agent/V11_agent_rework.md`](1_Agent/V11_agent_rework.md) §0.59
@@ -126,11 +146,13 @@ Prêts à démarrer sans décision produit :
   manuel. `grep` des 5 sous-phases V10 et des 3 champs : **0 hit** front comme backend.
   ⚠️ Ce n'était PAS un nettoyage neutre — voir le changement de comportement de l'auto-play PvP
   décrit en [`Replay.md`](Replay.md) §4.B, **à confirmer en session PvP fight réelle**.
-- **Champs manquants du `step.log`** (sécable, 15 entrées ordonnées par nombre de règles
-  débloquées) — `L1` battle-shock, `L2` S/T sur les jets, `L3` figurine allouée, … `L15`
-  hazardous. Ce n'est pas un chantier d'un bloc : chaque champ se livre seul et fait passer des
-  règles de « non vérifiable » à « vérifiable » par l'analyzer. À piocher quand un contrôle
-  analyzer manque de données. → [`analyzer_couverture.md`](analyzer_couverture.md) §7
+- **Champs manquants du `step.log`** (sécable, **27** entrées ordonnées par nombre de règles
+  débloquées : `L1`, puis `L3`→`L28` — **`L2` a été retirée**, S/T sur les jets étant livrée).
+  Ce n'est pas un chantier d'un bloc : chaque champ se livre seul et fait passer des règles de
+  « non vérifiable » à « vérifiable » par l'analyzer. À piocher quand un contrôle analyzer manque
+  de données. *(Cette ligne a annoncé « 15 entrées, L1…L15 » jusqu'au 2026-08-10 : le tableau
+  avait été lu jusqu'à `L15` seulement, sans en chercher la fin. Recompter, ne pas extrapoler.)*
+  → [`analyzer_couverture.md`](analyzer_couverture.md) §7
 
 Bloqués par une décision utilisateur :
 - **Replis `unit_by_id`** — T0 (signature de `require_unit_by_id`) appartient à l'utilisateur ;

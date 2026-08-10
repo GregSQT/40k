@@ -3,6 +3,8 @@
 observation_builder.py - Builds observations from game state
 """
 
+import time
+
 import numpy as np
 from typing import Dict, List, Any, Optional, Sequence, Tuple
 from shared.data_validation import require_key
@@ -1584,6 +1586,11 @@ class ObservationBuilder:
         La grille égocentrique est fournie à part par `build_squad_grid` ; l'assemblage du Dict
         final (avec "grid") est la responsabilité de `W40KEngine._build_observation`.
         """
+        from engine.perf_timing import append_perf_timing_line, perf_timing_enabled
+
+        _perf = perf_timing_enabled(game_state)
+        _t0 = time.perf_counter() if _perf else None
+
         # C2 cleanup (audit) : message d'erreur explicite si l'ordre d'init est cassé.
         if not all(k in game_state for k in ("units_cache", "models_cache", "squad_models", "squad_cache")):
             missing = [k for k in ("units_cache", "models_cache", "squad_models", "squad_cache") if k not in game_state]
@@ -1597,6 +1604,13 @@ class ObservationBuilder:
         squad_cache = game_state["squad_cache"]
 
         if active_squad_id not in units_cache or active_squad_id not in squad_cache:
+            if _perf and _t0 is not None:
+                append_perf_timing_line(
+                    f"SQUAD_OBSERVATION episode={game_state.get('episode_number', '?')} "
+                    f"turn={game_state.get('turn', '?')} squad={active_squad_id} "
+                    f"outcome=squad_absent ctx_s=0.000000 entities_s=0.000000 "
+                    f"total_s={time.perf_counter() - _t0:.6f} entities_n=0"
+                )
             return self._empty_squad_observation()  # squad dead/absent -> zero observation
         active_entry = units_cache[active_squad_id]
         active_sq = squad_cache[active_squad_id]
@@ -1987,11 +2001,14 @@ class ObservationBuilder:
         # les lignes suivantes ne sont plus un simple tri déterministe sans sémantique : la ligne
         # `i` est l'escouade que l'action `ACTIVATE_SLOT_i` activerait. Le mapping vient donc de
         # la SOURCE UNIQUE partagée avec le masque et le décodeur, exactement comme les ennemis.
+        _ctx_s = (time.perf_counter() - _t0) if _t0 is not None else 0.0
+        _entities_n = 0
         ally_slot_ids = get_ally_slot_mapping(game_state, active_player, active_squad_id)
         for row, asid in enumerate(ally_slot_ids):
             if asid is None:
                 continue  # slot vide : ligne de zéros, le bit `present` porte l'information
             _write_entity("allies", row, str(asid), is_ally=True, is_active=(row == 0))
+            _entities_n += 1
 
         # === ENTITÉS ENNEMIES — l'ordre des slots EST celui de l'action de tir (invariant D1) ===
         # Source unique partagée avec le masque (build_squad_action_mask) et l'exécution
@@ -2002,7 +2019,16 @@ class ObservationBuilder:
             if esid is None or esid not in units_cache:
                 continue  # slot vide/mort : ligne de zéros, le bit `present` porte l'information
             _write_entity("enemies", slot_i, str(esid), is_ally=False, is_active=False)
+            _entities_n += 1
 
+        if _perf and _t0 is not None:
+            _total_s = time.perf_counter() - _t0
+            append_perf_timing_line(
+                f"SQUAD_OBSERVATION episode={game_state.get('episode_number', '?')} "
+                f"turn={game_state.get('turn', '?')} squad={active_squad_id} outcome=built "
+                f"ctx_s={_ctx_s:.6f} entities_s={_total_s - _ctx_s:.6f} "
+                f"total_s={_total_s:.6f} entities_n={_entities_n}"
+            )
         return obs
 
     # ========================================================================

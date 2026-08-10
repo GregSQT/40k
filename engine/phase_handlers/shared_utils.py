@@ -8,6 +8,7 @@ from typing import Dict, Iterator, List, Tuple, Set, Optional, Any, Union, Calla
 from dataclasses import dataclass
 import copy
 import inspect
+import time
 
 if TYPE_CHECKING:
     from engine.hex_utils import Socle
@@ -11324,8 +11325,12 @@ def build_squad_move_cell_map(
     cellule Advance n'existe. C'est exactement la semantique de l'ancien masque directionnel
     (« Si None, mask Advance fully a 0 »), pas une valeur par defaut masquant une erreur.
     """
+    from engine.perf_timing import append_perf_timing_line, perf_timing_enabled
     from engine.phase_handlers.movement_handlers import movement_build_valid_destinations_pool
     from engine.spatial_grid import grid_half_extent_subhex, project_pool_to_grid
+
+    _perf = perf_timing_enabled(game_state)
+    _t0 = time.perf_counter() if _perf else None
 
     # `units_cache` absent = moteur non initialise (erreur), pas un cas metier -> require_key.
     # En revanche un squad ABSENT du cache est legitime (mort/pas deploye) -> aucune cellule,
@@ -11395,9 +11400,17 @@ def build_squad_move_cell_map(
         hash(_units_fp),
         hash(_block_fp),
     )
+    _fp_s = (time.perf_counter() - _t0) if _t0 is not None else 0.0
     _cache = game_state.setdefault("_squad_move_pool_cache", {})
     _hit = _cache.get(str(squad_id))
     if _hit is not None and _hit[0] == _fp_key:
+        if _perf and _t0 is not None:
+            append_perf_timing_line(
+                f"SQUAD_MOVE_CELL_MAP episode={game_state.get('episode_number', '?')} "
+                f"turn={game_state.get('turn', '?')} squad={squad_id} cache_hit=1 "
+                f"fp_s={_fp_s:.6f} pool_s=0.000000 erode_s=0.000000 project_s=0.000000 "
+                f"total_s={time.perf_counter() - _t0:.6f} cells_n={len(_hit[1])}"
+            )
         return _hit[1]
 
     if _squad_is_in_enemy_er(game_state, squad_id):
@@ -11414,24 +11427,38 @@ def build_squad_move_cell_map(
     # `destination_level` : le squad move rigide atterrit au SOL (cf.
     # `SQUAD_RIGID_MOVE_DESTINATION_LEVEL`) — la légalité des cellules doit donc être évaluée
     # au niveau 0, celui que `validate_move_plan` appliquera, et non à l'étage de départ (§0.34).
+    _t_pool = time.perf_counter() if _perf else None
     movement_build_valid_destinations_pool(
         game_state, squad_id, read_only=True, move_budget_override=budget, out_costs=costs,
         destination_level=SQUAD_RIGID_MOVE_DESTINATION_LEVEL,
     )
+    _pool_s = (time.perf_counter() - _t_pool) if _t_pool is not None else 0.0
 
     # T6-g : le pool ci-dessus ne valide que l'ANCRE ; l'execution translate tout le BLOC.
     # Erosion par l'empreinte combinee AVANT projection -> toute cellule masquee=1 est
     # executable par `build_rigid_plan` + `validate_move_plan`. On passe `budget` (le budget
     # EXACT auquel le pool a ete construit) : l'erosion du budget de chemin par-figurine en depend,
     # et le jet d'Advance n'est pas encore dans `_squad_advance_rolls` au masque (cf. erode).
+    _t_erode = time.perf_counter() if _perf else None
     costs = erode_move_pool_by_squad_block(game_state, squad_id, costs, move_budget=budget)
+    _erode_s = (time.perf_counter() - _t_erode) if _t_erode is not None else 0.0
 
     # Ancre = units_cache, la MEME source que `require_unit_position` d'ou part le pool : grille et
     # pool sont donc concentriques.
+    _t_proj = time.perf_counter() if _perf else None
     anchor_col, anchor_row = int(entry["col"]), int(entry["row"])
     half_extent = grid_half_extent_subhex(game_state, squad_id)
     result = project_pool_to_grid(costs, anchor_col, anchor_row, half_extent)
+    _project_s = (time.perf_counter() - _t_proj) if _t_proj is not None else 0.0
     _cache[str(squad_id)] = (_fp_key, result)
+    if _perf and _t0 is not None:
+        append_perf_timing_line(
+            f"SQUAD_MOVE_CELL_MAP episode={game_state.get('episode_number', '?')} "
+            f"turn={game_state.get('turn', '?')} squad={squad_id} cache_hit=0 "
+            f"fp_s={_fp_s:.6f} pool_s={_pool_s:.6f} erode_s={_erode_s:.6f} "
+            f"project_s={_project_s:.6f} total_s={time.perf_counter() - _t0:.6f} "
+            f"cells_n={len(result)}"
+        )
     return result
 
 
@@ -11463,11 +11490,29 @@ def build_squad_action_mask(
     ce qui evite un 2e BFS quand l'appelant l'a deja, sans obliger les appelants isoles (tests,
     outils) a la fabriquer.
     """
+    from engine.perf_timing import append_perf_timing_line, perf_timing_enabled
+
+    _perf = perf_timing_enabled(game_state)
+    _t0 = time.perf_counter() if _perf else None
+    _cell_map_s = 0.0
+
+    def _log_mask(outcome: str) -> None:
+        if not _perf or _t0 is None:
+            return
+        append_perf_timing_line(
+            f"SQUAD_ACTION_MASK episode={game_state.get('episode_number', '?')} "
+            f"turn={game_state.get('turn', '?')} squad={squad_id} "
+            f"phase={str(game_state.get('phase', '')).lower()} outcome={outcome} "
+            f"cell_map_s={_cell_map_s:.6f} total_s={time.perf_counter() - _t0:.6f} "
+            f"ones_n={sum(mask)}"
+        )
+
     mask = [0] * SQUAD_ACTION_SIZE
     # Cache absent = moteur non initialisé -> require_key. Squad absent = mort ou pas déployé :
     # c'est le CONTRAT du masque (« absent/mort -> all-zero »), il reste.
     units_cache = require_key(game_state, "units_cache")
     if squad_id not in units_cache:
+        _log_mask("squad_absent")
         return mask
     entry = units_cache[squad_id]
     our_player = int(require_key(entry, "player"))
@@ -11497,6 +11542,7 @@ def build_squad_action_mask(
             # Miroir EXACT des gardes de l'ancien masque directionnel : `has_advanced`/`has_fled`
             # fermaient Advance et Fall Back, mais PAS le Normal. Regle partagee avec le decoder.
             advance_or_fall_back_allowed = squad_advance_or_fall_back_allowed(game_state, squad_id)
+            _t_cm = time.perf_counter() if _perf else None
             cell_map = (
                 move_cell_map
                 if move_cell_map is not None
@@ -11504,6 +11550,8 @@ def build_squad_action_mask(
                     game_state, squad_id, advance_roll if advance_or_fall_back_allowed else None
                 )
             )
+            if _t_cm is not None:
+                _cell_map_s = time.perf_counter() - _t_cm
             # Invariants de l'escouade resolus UNE fois : les reresoudre par cellule coutait 48%
             # du masque (scan de `units` + empreintes d'engagement a chaque appel).
             # Frontiere = budget normal EXECUTABLE (descente §13.06 deduite), la meme grandeur que
@@ -11648,6 +11696,7 @@ def build_squad_action_mask(
     else:
         mask[SQUAD_ACTION_WAIT] = 1
 
+    _log_mask("built")
     return mask
 
 

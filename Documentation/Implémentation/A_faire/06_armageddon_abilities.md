@@ -3,7 +3,7 @@
 >
 > ⚠️ Risque d'exécution : `UNIT_ABILITY_SLOTS = 8` (`engine/observation_entities.py`, `grep UNIT_ABILITY_SLOTS` — le nom `ABILITY_SLOTS` nu, écrit ici jusqu'au 2026-08-10, n'existe nulle part dans le code) est une **projection non mesurée** — si une entité dépasse 8 capacités en vigueur, le moteur **lève** (débordement par erreur, jamais troncature). Ce chantier est ce qui rend le chiffre mesurable.
 >
-> ⚠️ `hit_any_fail` (primitive A) et `invul_save_override` / `melee_strength_bonus` / `melee_attacks_bonus` (primitives B et F) ont **déjà été posés par le chantier 03** : le texte ci-dessous, qui prévoit de les créer, est à corriger en les câblant.
+> ⚠️ **Recompté le 2026-08-10 — ce bandeau était faux aux 3/4.** Seul `hit_any_fail` (primitive A) a été posé par le chantier 03 (5 hits : `engine/w40k_core.py`, `engine/phase_handlers/attack_sequence.py`). `invul_save_override`, `melee_strength_bonus` et `melee_attacks_bonus` (primitives B et F) rendent **0 hit** dans tout le dépôt : ils sont à **créer**, comme le prévoit le texte ci-dessous. Ne pas partir du principe qu'il suffit de les câbler.
 >
 > **Série « chantiers capacités » (ex-`2_Various/`, dossier dissous le 2026-08-10).** Les chantiers **01 à 05 sont LIVRÉS** et rangés dans `Implémenté/` ; seul le **06** reste ouvert, dans `A_faire/`. Les renvois « chantier 0X » du texte désignent ces fichiers, qui ont gardé leur nom.
 > Ordre du travail : [`../ROADMAP.md`](../ROADMAP.md) — ce fichier n'est pas une roadmap.

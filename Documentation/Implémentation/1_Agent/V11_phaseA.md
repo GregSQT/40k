@@ -1217,11 +1217,23 @@ dépend** ; ce §9.5 ne garde que le reliquat non rattachable. C'est aussi ce qu
 > 2. **`x5_debug` n'a plus 8 envs.** Les **7** profils de `ArmageddonAgent_training_config.json`
 >    portent `n_envs: 48` (vérifié config, 2026-08-10). Le « 8 envs » datait de CoreAgent.
 >
-> Le choix se fait donc sur le NOMBRE D'ÉPISODES, seul critère qui reste : `x1_debug` = **480**,
-> `x5_debug` = **96**. À 96 épisodes, comparer deux win-rates n'a aucun sens — c'est précisément ce
-> que §9.6 demande de faire. **`x1_debug`.**
+> Le choix se fait donc sur le NOMBRE D'ÉPISODES, seul critère qui reste.
+>
+> 🔴 **ET LÀ, AUCUN PROFIL NE CONVIENT — corrigé le 2026-08-10 (2ᵉ passe).** Cette section a
+> conclu « `x1_debug` = 480 épisodes, donc `x1_debug` ». Recompté depuis la config :
+> `x1_debug.total_episodes` vaut **10** (la valeur est passée de 480 à 10 en commit, le jour même).
+> `x5_debug` vaut **96**. Et `total_episodes` est un total **GLOBAL** tous environnements confondus
+> — `self.episode_count += episodes_finished` sur la somme des `dones`, `ai/training_callbacks.py:201`
+> — pas un compte par env : 96 veut dire 96 parties, pas 96 × 48.
+>
+> Or ce §9.6 conditionne l'ouverture de chaque tranche P3 à une comparaison de win-rates. À 96
+> parties, l'erreur-type autour de 0,5 vaut ~5 points (IC95 ≈ ±10) ; à 10, il n'y a pas de mesure
+> du tout. **Le protocole exige un profil qui n'existe pas** : ~500-1000 épisodes, à ajouter à
+> `ArmageddonAgent_training_config.json`. Tant qu'il n'est pas là, P3-4 serait validée sur du bruit.
+> Ligne de suivi : [`../ROADMAP.md`](../ROADMAP.md) §1 pt 6.
 
-Chaque tranche P3 : suite de tests verte + smoke 10 épisodes + run court `x1_debug` +
+Chaque tranche P3 : suite de tests verte + smoke 10 épisodes + run court sur le profil de
+validation (à créer, cf. encart) +
 win-rate vs GreedyBot ≥ tranche précédente. Si l'ajout d'un point de décision DÉGRADE le
 win-rate, la décision est mal observée ou mal récompensée → corriger avant d'empiler la
 suivante. Interdits : masquer une régression en retirant silencieusement la décision.

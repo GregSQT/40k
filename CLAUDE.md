@@ -265,14 +265,19 @@ conclusion, il ne s'y ajoute pas. Ne jamais y répéter ce qui vient d'être dit
   RÉFS : <tests / doc / frontend / configs mis à jour | laissés tels quels volontairement>
   ARBITRAGE :
     1. <titre du sujet à arbitrer, une ligne>
-       Problème : <ce qui bloque, en clair, sans jargon inutile — pourquoi ça se pose
-                   maintenant et ce que ça change concrètement dans le jeu / le training /
-                   l'usage. 2 à 4 phrases, compréhensibles sans lire le code.>
-       Options :
-         A. <solution> — conséquence : <ce que ça donne> ; coût : <effort / risque>
-         B. <solution> — conséquence : <...> ; coût : <...>
-         C. <ne rien faire, si c'est une option> — conséquence : <...>
-       Recommandation : <A/B/C> — <pourquoi, une phrase>
+
+       <Le problème en clair, SANS jargon : ce qui se passe, pourquoi ça se pose maintenant,
+        ce que ça change concrètement. 2 à 4 phrases, lisibles sans ouvrir le code. Pas de
+        nom de fonction ni de chiffre de profil ici — ça va dans les options si c'est utile.>
+
+       A : <solution en une phrase> — <ce que ça donne, ce que ça coûte>
+       B : <solution> — <...>
+       C : <solution, ou ne rien faire si c'en est une> — <...>
+
+       RECOMMANDATION : <A/B/C>. <Pourquoi, en 1 à 3 phrases, à l'optique LONG TERME :
+       la solution qui ne laisse rien à reprendre plus tard. Ne jamais recommander un
+       enchaînement d'options (« A puis B »), ni une demi-mesure « en attendant ».>
+
     2. <sujet suivant, même structure>
   RELIRE : /code-review <fichiers modifiés>
            /simplify <fichiers modifiés>
@@ -283,15 +288,28 @@ conclusion, il ne s'y ajoute pas. Ne jamais y répéter ce qui vient d'être dit
 - RÉFS et ARBITRAGE : omettre la section s'il n'y a réellement rien. Ne jamais écrire « néant ».
 - Un arbitrage remonté n'est pas un défaut ; le taire pour paraître complet en est un.
 - ARBITRAGE — EXIGENCES DE FOND (le reste du rapport reste télégraphique, pas lui) :
+  * LISIBILITÉ D'ABORD. Un arbitrage illisible n'est pas un arbitrage : il est ignoré, donc il
+    ne sert à rien. Contraintes DURES, un dépassement = à réécrire :
+    - le problème tient en 4 phrases MAXIMUM, écrites pour quelqu'un qui n'a pas lu le code ;
+    - chaque option tient sur UNE à DEUX lignes ;
+    - la recommandation tient en 3 phrases maximum, et son étiquette s'écrit en MAJUSCULES
+      (`RECOMMANDATION :`) — c'est la ligne que je cherche du regard ;
+    - AUCUN tableau, AUCUN bloc de code, AUCUNE sous-liste, AUCUN chiffre de profilage dans le
+      corps du problème. Les mesures ont déjà été données plus haut dans la réponse.
   * Un sujet énoncé SANS ses options n'est pas un arbitrage : c'est une question posée à moitié.
     Toujours au moins DEUX options réelles ; si une seule existe, ce n'est pas un arbitrage —
     c'est une décision, à prendre et à annoncer.
-  * Le « Problème » s'écrit pour quelqu'un qui n'a pas lu le code : décrire l'EFFET observable
-    (comportement en jeu, chiffre faux, choix de règle 40K, coût de training), pas le mécanisme
-    interne. Les noms de fichier/fonction viennent en appui, jamais à la place de l'explication.
-  * Chaque option porte sa CONSÉQUENCE et son COÛT. Une liste d'options nues ne permet pas
-    d'arbitrer, donc elle ne compte pas.
-  * Toujours donner une recommandation motivée. « À toi de voir » n'est pas une recommandation.
+  * Le problème décrit l'EFFET observable (comportement en jeu, chiffre faux, choix de règle 40K,
+    coût de training), jamais le mécanisme interne. Les noms de fichier/fonction n'y ont PAS leur
+    place ; s'ils sont indispensables, ils vont dans une option, en appui.
+  * Chaque option porte ce qu'elle donne ET ce qu'elle coûte, dans la même phrase. Une liste
+    d'options nues ne permet pas d'arbitrer, donc elle ne compte pas.
+  * `RECOMMANDATION :` — étiquette en MAJUSCULES, OPTIQUE LONG TERME, SANS DETTE. Recommander la solution qui ferme le sujet
+    pour de bon, même si elle est plus longue. INTERDIT de recommander un enchaînement (« A
+    maintenant, B plus tard »), une mesure d'attente, ou une option choisie parce qu'elle est
+    rapide : c'est de la dette déguisée en prudence (cf. T2). Une option n'est recommandable
+    comme étape que si les suivantes sont techniquement IMPOSSIBLES sans elle — et il faut alors
+    le dire explicitement. « À toi de voir » n'est pas une recommandation.
   * Interdit d'y glisser du travail technique que l'agent savait faire (cf. règle ci-dessus) :
     l'ARBITRAGE développé ne devient pas un lieu où déguiser une dette en question.
 - RELIRE : obligatoire dès qu'au moins un fichier de code a été modifié ; omise sinon (réponse

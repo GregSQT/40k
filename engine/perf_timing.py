@@ -26,7 +26,10 @@ Profilage par fonctions (cProfile), optionnel — **uniquement si** ``perf_timin
 - sortie multi-lignes dans ``<racine_projet>/perf_timing_profile.log`` (override : ``W40K_PERF_PROFILE_LOG``) ;
 - une ligne référence ``PERF_PROFILE_DUMP`` dans ``perf_timing.log`` pointe vers ce fichier.
 
-Actuellement utilisé autour de ``movement_build_valid_destinations_pool`` (activation déplacement).
+Couvre le pathfinding (move / charge / fight), le tir, et — depuis le 2026-08-10 — les trois blocs
+qui dominent réellement un step d'agent : ``SQUAD_OBSERVATION``, ``SQUAD_ACTION_MASK`` et
+``SQUAD_MOVE_CELL_MAP``. Avant cet ajout, les compteurs ne voyaient que ~6,5 % du temps d'une
+évaluation (mesure cProfile du 2026-08-10 : 102 s profilées, 1 076 steps).
 
 **Important :** seul le processus **Python** (API Flask, bots, tests moteur) écrit ce fichier — pas le
 serveur frontend (Vite / ``npm run dev``). Si tu lances uniquement ``app``, aucun ``perf_timing.log``
@@ -72,6 +75,22 @@ Lignes typiques (référence) :
   ``outcome``, ``total_s``. Découpe le coût moteur d’un ``end_phase`` HTTP (plusieurs activations + ``advance_phase``).
 - ``PERF_PROFILE_DUMP`` — dump cProfile (top fonctions) : ``label``, ``unit``, ``file``, ``chars`` (voir
   ``perf_timing_profile.log``).
+- ``SQUAD_OBSERVATION`` — une observation d'escouade (``ObservationBuilder.build_squad_observation``,
+  un appel par step agent) : ``ctx_s`` (tout ce qui précède l'écriture des entités — zone
+  d'engagement, centroïde, géométrie objectifs, contexte partagé), ``entities_s`` (les deux boucles
+  d'écriture alliés/ennemis, donc ``_encode_unit_entity``), ``total_s``, ``entities_n`` (lignes
+  réellement écrites), ``outcome`` (``built`` / ``squad_absent``).
+- ``SQUAD_ACTION_MASK`` — un masque d'actions (``build_squad_action_mask``) : ``cell_map_s``
+  (uniquement ``build_squad_move_cell_map`` quand le masque doit la construire lui-même — nul si
+  l'appelant la fournit, cf. paramètre ``move_cell_map``), ``total_s``, ``ones_n`` (actions
+  légales), ``phase``, ``outcome`` (``built`` / ``squad_absent``).
+- ``SQUAD_MOVE_CELL_MAP`` — carte des cellules de move (``build_squad_move_cell_map``) :
+  ``cache_hit`` (1 = servie par la mémoïsation intra-step, les autres durées sont alors nulles),
+  ``fp_s`` (calcul du fingerprint de cache, payé même sur un hit), ``pool_s``
+  (``movement_build_valid_destinations_pool``, donc la ligne ``MOVE_POOL_BUILD`` correspondante),
+  ``erode_s`` (``erode_move_pool_by_squad_block``, érosion par-figurine), ``project_s``
+  (``project_pool_to_grid``), ``total_s``, ``cells_n``. Le taux de hit se lit en comptant les
+  lignes ``cache_hit=1`` vs ``cache_hit=0``.
 - ``MOVE_POOL_BUILD`` — ``prep_s`` (caches occupation / EZ), ``bfs_s`` (exploration seule), ``post_bfs_s``
   (union empreintes + écriture état + masque), découpé en ``footprint_union_s`` (construction
   ``move_preview_footprint_zone`` + clés état jusqu’au sync) et ``mask_loops_s`` (uniquement
@@ -505,6 +524,18 @@ if __name__ == "__main__":
     #   CHARGE_REVERSE_GOAL_BFS / CHARGE_DEST_BFS : `charge_build_valid_destinations_pool` —
     #     3 sites (charge_handlers.py 2740, 3295, 4181), seul 3295 est dans
     #     `_has_valid_charge_target`.
+    #   MOVE_POOL_BUILD : `movement_build_valid_destinations_pool` — 8 sites, seul celui de
+    #     `build_squad_move_cell_map` est dans `SQUAD_MOVE_CELL_MAP.pool_s`. Son parent était
+    #     déclaré `None` (racine) jusqu'au 2026-08-10, ce qui le faisait lire comme un coût
+    #     indépendant alors qu'il est en grande partie interne à la carte de cellules.
+    #
+    # SQUAD_MOVE_CELL_MAP est déclaré RACINE bien qu'un site d'appel existe dans
+    # `build_squad_action_mask` (shared_utils.py, branche `phase == "move"`) : ce site n'est
+    # quasiment jamais pris, parce que le DECODEUR construit la carte puis la passe au masque
+    # (`move_cell_map=`). Mesuré le 2026-08-10 sur 12 épisodes : 21 appels de masque sur 1165
+    # (1,8 %) ont un `cell_map_s` non nul. L'afficher en fille du masque produisait une ligne
+    # indentée dont le ms/ep (369) dépassait celui de sa mère (157) — lecture impossible, et
+    # invitation à retrancher un coût qui n'y est pas.
     #
     # Un parent `None` signifie « imbrication non etablie », pas « racine prouvee ».
     #
@@ -512,9 +543,12 @@ if __name__ == "__main__":
     # imbrique, et un cout DEPLACE d'un evenement note vers un evenement non note se lit comme un
     # gain. D'ou l'ajout des quatre evenements intermediaires, qui etaient mesures mais absents.
     ROWS = [
+        ("SQUAD_OBSERVATION",       "total_s",    [("entities_s", "ent"), ("ctx_s", "ctx")],            None, None),
+        ("SQUAD_ACTION_MASK",       "total_s",    [("cell_map_s", "cellmap")],                          None, None),
+        ("SQUAD_MOVE_CELL_MAP",     "total_s",    [("pool_s", "pool"), ("erode_s", "erode")],           None, None),
+        ("MOVE_POOL_BUILD",         "total_s",    [("bfs_s", "bfs")],                                   "SQUAD_MOVE_CELL_MAP", "partiel"),
         ("MOVE_DEST_TIMING",        "total_s",    [("attempt_s", "attempt")],                          None, None),
         ("MOVE_COMMIT_TIMING",      "total_s",    [("los_cache_s", "los"), ("adj_cache_s", "adj")],     "MOVE_DEST_TIMING", "total"),
-        ("MOVE_POOL_BUILD",         "total_s",    [("bfs_s", "bfs")],                                   None, None),
         ("SHOOT_ACTIVATION_START",  "total_s",    [("los_cache_s", "los")],                             None, None),
         ("WEAPON_AVAILABILITY_CHECK", "total_s",  [("weapon_row_scan_s", "scan")],                      "SHOOT_ACTIVATION_START", "partiel"),
         ("CASCADE_LOOP_TOTAL",      "duration_s", [],                                                   None, None),

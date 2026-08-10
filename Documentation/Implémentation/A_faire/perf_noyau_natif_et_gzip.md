@@ -19,7 +19,7 @@
 
 ## 1. Compression HTTP (gzip / Brotli) — petit, à faire avec Security étape 5
 
-**Statut** : ouvert, ~½ j. **À faire AVEC l'étape 5 de [`Security.md`](Security.md)**, qui
+**Statut** : ouvert, ~½ j. **À faire AVEC l'étape 5 de [`Security.md`](../Security.md)**, qui
 installe déjà un reverse proxy (Caddy/nginx) : le gzip s'y active en une directive, alors qu'un
 middleware Flask coûterait plus cher pour un gain moindre.
 
