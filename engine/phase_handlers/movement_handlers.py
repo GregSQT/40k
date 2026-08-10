@@ -2155,14 +2155,13 @@ def _build_multi_hex_vectorized(
     board_cols: int,
     board_rows: int,
     walls_set: Set[Tuple[int, int]],
-    enemy_occupied_set: Set[Tuple[int, int]],
+    enemy_transit_blocked: Set[Tuple[int, int]],
+    friendly_transit_blocked: Set[Tuple[int, int]],
     occupied_set: Set[Tuple[int, int]],
     enemy_adjacent_hexes: Set[Tuple[int, int]],
     enemy_items: Optional[List[Tuple[Any, Any]]],
     ez: int,
     thru_ez: bool,
-    thru_enemy: bool,
-    thru_friendly: bool,
     fly: bool = False,
     out_costs: Optional[Dict[Tuple[int, int], float]] = None,
     _bbox_window: bool = True,
@@ -2329,12 +2328,9 @@ def _build_multi_hex_vectorized(
     obstacles_dest_mask = _mask_from_cells(obstacles_dest_any)
     obstacles_traverse_mask: np.ndarray = obstacles_dest_mask
     if not fly:
-        # Traversée selon toggles : murs toujours bloquants ; figs ennemies/amies selon config.
-        obstacles_traverse = set(walls_set)
-        if not thru_enemy:
-            obstacles_traverse |= enemy_occupied_set
-        if not thru_friendly:
-            obstacles_traverse |= (occupied_set - enemy_occupied_set)
+        # Murs toujours bloquants ; les figurines bloquantes viennent de
+        # `build_move_traversal_blocked` (toggles, Desperate Escape 09.07, exemption M/V 17.01).
+        obstacles_traverse = set(walls_set) | enemy_transit_blocked | friendly_transit_blocked
         obstacles_traverse_mask = _mask_from_cells(obstacles_traverse)
 
     def _bounds_bad_parity(offsets_arr: "np.ndarray") -> "np.ndarray":
@@ -2674,13 +2670,12 @@ def _euclidean_ground_anchor_multihex(
     board_rows: int,
     walls: Set[Tuple[int, int]],
     occupied: Set[Tuple[int, int]],
-    enemy_occupied: Set[Tuple[int, int]],
+    enemy_transit_blocked: Set[Tuple[int, int]],
+    friendly_transit_blocked: Set[Tuple[int, int]],
     enemy_adjacent_hexes: Set[Tuple[int, int]],
     enemy_items: Optional[List[Tuple[Any, Any]]],
     ez: int,
     thru_ez: bool,
-    thru_enemy: bool,
-    thru_friendly: bool,
 ) -> Tuple[List[Tuple[int, int]], Set[Tuple[int, int]], int, Dict[Tuple[int, int], float], Set[Tuple[int, int]]]:
     """Pool d'ancre GROUND euclidien multi-hex (preview escouade), miroir du model pool par-fig.
 
@@ -2705,10 +2700,8 @@ def _euclidean_ground_anchor_multihex(
         ez_anchor_check = set()
 
     obstacles_tr: Set[Tuple[int, int]] = set(walls)
-    if not thru_enemy:
-        obstacles_tr |= enemy_occupied
-    if not thru_friendly:
-        obstacles_tr |= (occupied - enemy_occupied)
+    obstacles_tr |= enemy_transit_blocked
+    obstacles_tr |= friendly_transit_blocked
     if not thru_ez:
         obstacles_tr |= ez_forbidden
     obstacles_tr.discard(start_pos)
@@ -2977,9 +2970,20 @@ def movement_build_valid_destinations_pool(
     enemy_occupied = build_enemy_occupied_positions_set(
         game_state, current_player=current_player_int, level=_mover_level
     )
+    # Figurines qui bloquent le TRANSIT de ce mobile : toggles de config, Desperate Escape
+    # (09.07) et exemption M/V (17.01) résolus en un seul endroit, partagé avec la validation
+    # (`build_move_transit_blocked`) — les deux côtés de l'invariant « masque ⊆ exécutable ».
+    # `enemy_occupied` reste, lui, l'occupation ennemie BRUTE : elle sert au filtre de
+    # DESTINATION, que 17.01 ne touche pas (traverser n'est pas s'arrêter dessus).
+    from .shared_utils import build_move_traversal_blocked
+    _enemy_blocked, _friendly_blocked = build_move_traversal_blocked(
+        game_state, unit_id_str, current_player_int, _mover_level
+    )
     units_cache = require_key(game_state, "units_cache")
     ez = get_engagement_zone(game_state)
-    _thru_ez, _thru_enemy, _thru_friendly = _get_move_traversal_rules(game_state)
+    # Seul `thru_ez` reste lu ici : les deux autres toggles sont appliqués par
+    # `build_move_traversal_blocked`, avec Desperate Escape et 17.01, en un seul endroit.
+    _thru_ez, _, _ = _get_move_traversal_rules(game_state)
     _mover_player_int = int(require_key(unit, "player"))
     # ez > 1 : une seule liste d’ennemis pour ``_movement_engagement_violates`` (évite O(units)×BFS).
     _enemy_items_for_engagement_ez: Optional[List[Tuple[Any, Any]]] = None
@@ -3122,14 +3126,14 @@ def movement_build_valid_destinations_pool(
                 board_cols=board_cols,
                 board_rows=board_rows,
                 walls_set=_fly_walls,
-                enemy_occupied_set=set(),
+                # FLY déclaré (21.03) : rien ne bloque le transit, ni murs ni figurines.
+                enemy_transit_blocked=set(),
+                friendly_transit_blocked=set(),
                 occupied_set=occupied_positions,
                 enemy_adjacent_hexes=enemy_adjacent_hexes,
                 enemy_items=_enemy_items_for_engagement_ez,
                 ez=ez,
                 thru_ez=_thru_ez,
-                thru_enemy=_thru_enemy,
-                thru_friendly=_thru_friendly,
             )
             _m_bfs_end = _perf_clock.perf_counter() if _pt else None
             if read_only:
@@ -3314,11 +3318,11 @@ def movement_build_valid_destinations_pool(
     _bcols = board_cols
     _brows = board_rows
 
-    # Toggles de traversée (config["move"]). La destination exclut toujours occupé + EZ.
-    _check_enemy = not _thru_enemy
-    _check_friendly = not _thru_friendly
+    # Figurines bloquant le transit : résolues UNE fois par `build_move_traversal_blocked`
+    # (toggles, Desperate Escape 09.07, exemption M/V 17.01). La destination, elle, exclut
+    # toujours l'occupation et l'EZ — 17.01 autorise à traverser, pas à s'arrêter dessus.
     _check_ez = not _thru_ez
-    _friendly_occ = (_occupied - _enemy_occ) if _check_friendly else frozenset()
+    _models_blocked = _enemy_blocked | _friendly_blocked
 
     # Champ sol + obstacles de traversée réutilisables par le multi-niveaux (chemin euclidien
     # multi-hex uniquement). None sur les autres chemins → _multilevel_floor_destinations recalcule
@@ -3331,11 +3335,7 @@ def movement_build_valid_destinations_pool(
         # Champ géodésique any-angle. Obstacles = murs + (ennemis/amis/bande-EZ selon toggles) ;
         # option A (Minkowski) : clearance = rayon du socle → le trajet du centre borne la
         # distance de TOUT point du socle (règle 03). Overlap/EZ de destination restent hex.
-        _obstacles: Set[Tuple[int, int]] = set(_walls)
-        if _check_enemy:
-            _obstacles |= _enemy_occ
-        if _check_friendly:
-            _obstacles |= _friendly_occ
+        _obstacles: Set[Tuple[int, int]] = set(_walls) | _models_blocked
         if _check_ez:
             _obstacles |= _enemy_adj
         _obstacles.discard(start_pos)  # on est déjà sur la case de départ
@@ -3379,9 +3379,7 @@ def movement_build_valid_destinations_pool(
                     continue
                 if nb in _walls:
                     continue
-                if _check_enemy and nb in _enemy_occ:
-                    continue
-                if _check_friendly and nb in _friendly_occ:
+                if nb in _models_blocked:
                     continue
                 if _check_ez and nb in _enemy_adj:
                     blocked_enemy_adjacent_count += 1
@@ -3415,8 +3413,8 @@ def movement_build_valid_destinations_pool(
             valid_destinations, footprint_zone, visited_n, _ground_field, _ground_obstacles_tr = _euclidean_ground_anchor_multihex(
                 game_state, unit, start_col, start_row, start_pos, move_range,
                 base_shape, base_size, _off_even, _off_odd,
-                _bcols, _brows, _walls, _occupied, _enemy_occ, _enemy_adj,
-                _enemy_items_for_engagement_ez, ez, _thru_ez, _thru_enemy, _thru_friendly,
+                _bcols, _brows, _walls, _occupied, _enemy_blocked, _friendly_blocked, _enemy_adj,
+                _enemy_items_for_engagement_ez, ez, _thru_ez,
             )
             if out_costs is not None:
                 # `_ground_field` = {cellule: distance-norme}, le champ géodésique du move (déjà
@@ -3437,14 +3435,13 @@ def movement_build_valid_destinations_pool(
                 board_cols=_bcols,
                 board_rows=_brows,
                 walls_set=_walls,
-                enemy_occupied_set=_enemy_occ,
+                enemy_transit_blocked=_enemy_blocked,
+                friendly_transit_blocked=_friendly_blocked,
                 occupied_set=_occupied,
                 enemy_adjacent_hexes=_enemy_adj,
                 enemy_items=_enemy_items_for_engagement_ez,
                 ez=ez,
                 thru_ez=_thru_ez,
-                thru_enemy=_thru_enemy,
-                thru_friendly=_thru_friendly,
                 out_costs=out_costs,
             )
 
@@ -3915,7 +3912,9 @@ def movement_build_model_destinations_pool(
     _mm_shape = require_key(model, "BASE_SHAPE")
     _mm_base = require_key(model, "BASE_SIZE")
     ez = get_engagement_zone(game_state)
-    thru_ez, thru_enemy, thru_friendly = _get_move_traversal_rules(game_state)
+    # `thru_friendly` reste lu ici pour le terme des SŒURS et la mise en cache du champ ;
+    # `thru_enemy` est appliqué par `build_move_traversal_blocked`.
+    thru_ez, _, thru_friendly = _get_move_traversal_rules(game_state)
     if ez > 1:
         import numpy as np
         units_cache = require_key(game_state, "units_cache")
@@ -3954,13 +3953,20 @@ def movement_build_model_destinations_pool(
         ez_anchor_forbidden = enemy_adjacent_hexes
         dest_blocked = wall_hexes  # idem : occupation des figs traitée par niveau plus bas
 
-    # Traversée selon toggles config["move"]. Desperate Escape (09.07) traverse les figs ennemies
-    # quoi qu'il arrive. La destination (dest_blocked + ez_anchor_forbidden) reste inchangée :
-    # jamais sur une case occupée, jamais dans l'EZ ennemie.
-    _friendly_traverse = (
-        (other_occupied | same_squad_occupied) - enemy_occupied
-        if not thru_friendly
-        else frozenset()
+    # Figurines bloquant le TRANSIT de CETTE figurine — toggles, Desperate Escape (09.07) et
+    # exemption M/V (17.01) résolus par `build_move_traversal_blocked`. Ce site connaît le
+    # `model`, donc 17.01 s'y lit PAR FIGURINE, comme la règle l'écrit. La destination
+    # (dest_blocked + ez_anchor_forbidden) reste inchangée : jamais sur une case occupée, jamais
+    # dans l'EZ ennemie — traverser n'est pas s'arrêter dessus.
+    from .shared_utils import build_move_traversal_blocked
+    _enemy_blocked, _friendly_blocked = build_move_traversal_blocked(
+        game_state, squad_id, player, view_level, model
+    )
+    # Les SŒURS s'ajoutent au terme ami : elles ne sont pas dans l'occupation « autres escouades »
+    # et leur position peut venir du plan provisoire. 17.01 ne les rend pas traversables pour
+    # autant — une escouade M/V n'est composée que de figurines M/V, que l'exemption exclut.
+    _friendly_traverse = _friendly_blocked | (
+        (same_squad_occupied - enemy_occupied) if not thru_friendly else frozenset()
     )
 
     # Étape 4.1 — miroir par-figurine (PvP interactif) : champ géodésique euclidien du CENTRE de
@@ -4010,10 +4016,8 @@ def movement_build_model_destinations_pool(
                 _mm_obstacles: Set[Tuple[int, int]] = set()
             else:
                 _mm_obstacles = set(wall_hexes) | _low_clear
-                if not (desperate_escape or thru_enemy):
-                    _mm_obstacles |= enemy_occupied
-                if not thru_friendly:
-                    _mm_obstacles |= _friendly_traverse
+                _mm_obstacles |= _enemy_blocked
+                _mm_obstacles |= _friendly_traverse
                 if not (desperate_escape or thru_ez):
                     _mm_obstacles |= ez_anchor_forbidden
             _mm_obstacles.discard(start_pos)  # on est déjà sur la case de départ
@@ -4063,9 +4067,7 @@ def movement_build_model_destinations_pool(
                 if not has_fly:
                     if cell in wall_hexes:
                         continue
-                    if not (desperate_escape or thru_enemy) and cell in enemy_occupied:
-                        continue
-                    if not thru_friendly and cell in _friendly_traverse:
+                    if cell in _enemy_blocked or cell in _friendly_traverse:
                         continue
                     if not (desperate_escape or thru_ez) and cell in ez_anchor_forbidden:
                         continue
@@ -4148,10 +4150,8 @@ def movement_build_model_destinations_pool(
             # Mover DÉJÀ en hauteur : sol (descente) ET étage courant sortent du MÊME champ multi-niveaux
             # (construit une fois), seedé au niveau EFFECTIF réel du mover → coût de descente §13.06 facturé.
             _ground_obs = set(wall_hexes) | _low_clear
-            if not (desperate_escape or thru_enemy):
-                _ground_obs |= enemy_occupied
-            if not thru_friendly:
-                _ground_obs |= _friendly_traverse
+            _ground_obs |= _enemy_blocked
+            _ground_obs |= _friendly_traverse
             if not (desperate_escape or thru_ez):
                 _ground_obs |= ez_anchor_forbidden
             _ground_obs.discard(start_pos)
@@ -4168,10 +4168,8 @@ def movement_build_model_destinations_pool(
             _ground_dests = [_d for _d in reachable if eff_by_dest[_d] == 0]
             if _can_climb:
                 _ground_obs = set(wall_hexes) | _low_clear
-                if not (desperate_escape or thru_enemy):
-                    _ground_obs |= enemy_occupied
-                if not thru_friendly:
-                    _ground_obs |= _friendly_traverse
+                _ground_obs |= _enemy_blocked
+                _ground_obs |= _friendly_traverse
                 if not (desperate_escape or thru_ez):
                     _ground_obs |= ez_anchor_forbidden
                 _ground_obs.discard(start_pos)

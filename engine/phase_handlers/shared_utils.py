@@ -4044,6 +4044,159 @@ def build_move_blocked_cells_by_level(
     return out
 
 
+def squad_traverses_models_17_01(
+    game_state: Dict[str, Any], squad_id: str, model: Optional[Dict[str, Any]] = None
+) -> bool:
+    """17.01 s applique-t-il au deplacement en cours de ce mobile ?
+
+    « Each time you make a normal or advance move with a unit, MONSTER/VEHICLE models in that
+    unit can be moved through friendly and enemy models (excluding other MONSTER/VEHICLE
+    models). » Trois conditions, et les trois sont dans la regle :
+
+    - PHASE DE MOUVEMENT. Le pile-in et la consolidation (12.03) sont des deplacements de la
+      phase de combat : 17.01 ne les couvre pas. Meme garde de phase, et pour la meme raison,
+      que l exemption Desperate Escape ci-dessous.
+    - MOBILE NON ENGAGE. Dans la phase de mouvement, une escouade engagee ne peut faire QUE un
+      fall-back (09.05/09.06 exigent `unengaged` pour le move normal et l advance), et le
+      fall-back n est ni l un ni l autre — il a sa propre traversee, Desperate Escape.
+    - FIGURINE MONSTER/VEHICLE, lue sur ses keywords PROPRES (`_model_is_monster_or_vehicle`,
+      la meme primitive que le hazard 06.03) : l union 19.03 ferait passer une escouade
+      d infanterie pour MONSTER des qu un character MONSTER y est attache.
+
+    ``model`` fourni (pools par-figurine) : verdict EXACT, la regle etant par figurine. Absent
+    (pools d ancre, qui ne connaissent que l escouade) : verdict d escouade, et une escouade
+    MIXTE LEVE au lieu de rendre un pool faux. Aucune ne peut l etre aujourd hui — l attachement
+    19.01 est reserve aux unites portant la regle `leader`, qu aucune M/V du registre ne porte —
+    et c est exactement la garde que porte le jumeau analyzer (`monster_or_vehicle_by_unit`).
+    """
+    if str(game_state.get("phase", "")) != "move":  # get allowed (phase absente = non initialisé)
+        return False
+    if _squad_is_in_enemy_er(game_state, str(squad_id)):
+        return False
+    if model is not None:
+        return _model_is_monster_or_vehicle(model)
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    statuses = {
+        _model_is_monster_or_vehicle(m)
+        for m in (
+            models_cache.get(mid)  # get allowed (figurine morte = retiree du cache)
+            for mid in squad_models.get(str(squad_id), [])  # get allowed (contrat du masque)
+        )
+        if m is not None
+    }
+    if len(statuses) > 1:
+        raise ValueError(
+            f"Escouade {squad_id!r} : ses figurines melangent des datasheets MONSTER/VEHICLE et "
+            "non-MONSTER/VEHICLE. L exemption de traversee 17.01 se lit par figurine ; un pool "
+            "d ancre ne peut plus rendre un verdict pour toute l escouade."
+        )
+    return statuses == {True}
+
+
+def build_move_traversal_blocked(
+    game_state: Dict[str, Any],
+    squad_id: str,
+    player: int,
+    level: int,
+    model: Optional[Dict[str, Any]] = None,
+) -> Tuple[Set[Tuple[int, int]], Set[Tuple[int, int]]]:
+    """``(cellules ENNEMIES, cellules AMIES)`` qui bloquent le TRANSIT de ce mobile.
+
+    SOURCE UNIQUE de la question « cette figurine bloque-t-elle le passage ? ». Elle etait
+    ecrite SEPT fois — six dans `movement_handlers` (pool NumPy, pool d ancre euclidien, pool
+    par-figurine, BFS par-figurine, descente et montee d etage) et une ici — toutes sous la
+    meme forme `if not (desperate_escape or thru_enemy): obstacles |= enemy_occupied`. Trois
+    regles y cohabitaient deja (toggles de config, Desperate Escape 09.07, niveau) ; 17.01 en
+    faisait une quatrieme, donc sept occasions de diverger. Un site oublie ne se voit pas : il
+    produit un masque plus large que l executable, et l ecart ne remonte qu au gym, loin de sa
+    cause.
+
+    Ce que la fonction NE fait PAS : le placement. 17.01 autorise a TRAVERSER, pas a s arreter
+    sur une figurine — la destination reste filtree par `build_move_blocked_cells_by_level` et
+    `is_footprint_placement_valid`, qui ne changent pas. Les murs non plus n en font pas partie :
+    ils bloquent TOUJOURS, aucun appelant n a de raison de les rendre optionnels.
+
+    Lecture pure. Resultat memoise par `_move_spatial_cache` (renvoye par reference).
+    """
+    _cache = _move_spatial_cache(game_state).setdefault("traversal", {})
+    _ck = (str(squad_id), int(player), int(level), None if model is None else str(model.get("id")))  # get allowed
+    _hit = _cache.get(_ck)
+    if _hit is not None:
+        return _hit
+
+    from engine.phase_handlers.movement_handlers import _get_move_traversal_rules
+
+    _thru_ez, thru_enemy, thru_friendly = _get_move_traversal_rules(game_state)
+    # Desperate Escape : cf. `build_move_transit_blocked` pour la garde de phase.
+    desperate_escape = (
+        str(game_state.get("phase", "")) == "move"  # get allowed (phase absente = non initialisé)
+        and squad_is_battle_shocked_in_enemy_er(game_state, str(squad_id))
+    )
+    mv_traversal = squad_traverses_models_17_01(game_state, str(squad_id), model)
+
+    enemy_all = build_enemy_occupied_positions_set(
+        game_state, current_player=int(player), level=int(level)
+    )
+    if desperate_escape or thru_enemy:
+        enemy_blocked: Set[Tuple[int, int]] = set()
+    elif mv_traversal:
+        # « excluding other MONSTER/VEHICLE models » : l exemption s arrete la, et seulement la.
+        enemy_blocked = _monster_or_vehicle_occupied_positions(
+            game_state, level=int(level), keep=lambda p: p != int(player)
+        )
+    else:
+        enemy_blocked = enemy_all
+
+    if thru_friendly:
+        friendly_blocked: Set[Tuple[int, int]] = set()
+    else:
+        friendly_all = build_occupied_positions_set(
+            game_state, exclude_unit_id=str(squad_id), level=int(level)
+        ) - enemy_all
+        if mv_traversal:
+            friendly_blocked = _monster_or_vehicle_occupied_positions(
+                game_state, level=int(level), keep=lambda p: p == int(player),
+                exclude_unit_id=str(squad_id),
+            ) - enemy_all
+        else:
+            friendly_blocked = friendly_all
+
+    _cache[_ck] = (enemy_blocked, friendly_blocked)
+    return _cache[_ck]
+
+
+def _monster_or_vehicle_occupied_positions(
+    game_state: Dict[str, Any],
+    *,
+    level: int,
+    keep: "Any",
+    exclude_unit_id: Optional[str] = None,
+) -> Set[Tuple[int, int]]:
+    """Empreintes des seules FIGURINES MONSTER/VEHICLE, au niveau donne, cote(s) retenu(s).
+
+    Filtre par FIGURINE et non par escouade : 17.01 exclut « other MONSTER/VEHICLE models »,
+    pas « les unites qui en contiennent ». ``keep(player) -> bool`` choisit le camp.
+    """
+    units_cache = require_key(game_state, "units_cache")
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    occupied: Set[Tuple[int, int]] = set()
+    for uid, entry in entries_on_battlefield(units_cache):
+        if exclude_unit_id is not None and str(uid) == str(exclude_unit_id):
+            continue
+        if not keep(int(require_key(entry, "player"))):
+            continue
+        for mid in squad_models.get(str(uid), []):  # get allowed
+            m = models_cache.get(mid)  # get allowed (figurine morte = retiree du cache)
+            if m is None or int(require_key(m, "level")) != int(level):
+                continue
+            if not _model_is_monster_or_vehicle(m):
+                continue
+            occupied |= compute_candidate_footprint(int(m["col"]), int(m["row"]), m, game_state)
+    return occupied
+
+
 def build_move_transit_blocked(
     game_state: Dict[str, Any], squad_id: str, player: int, level: int
 ) -> Set[Tuple[int, int]]:
@@ -4073,37 +4226,23 @@ def build_move_transit_blocked(
     if _hit is not None:
         return _hit
 
-    thru_ez, thru_enemy, thru_friendly = _get_move_traversal_rules(game_state)
-    # Desperate Escape : mode du FALL-BACK MOVE (09.07) — « WHILE MOVING : each model that is
-    # moved can be moved through enemy models ». Miroir exact du pool par-figurine
-    # (`movement_build_model_destinations_pool`, `not (desperate_escape or thru_*)`) : ce set est
-    # devenu la borne de trajet de la VALIDATION, donc l'oublier ferait refuser en voile rouge les
-    # destinations que le pool offre — et lever « incohérence masque/exécution » au gym.
-    #
-    # GARDE DE PHASE, et elle est la règle, pas une précaution : 09.07 ne parle que du fall-back
-    # move. Ce prédicat borne AUSSI le pile-in et la consolidation (12.03, via
-    # `model_reach_predicate`), or une escouade qui pile-in est TOUJOURS dans l'ER ennemie — sans
-    # la garde, toute escouade battle-shocked traversait les figurines ennemies en phase de combat.
-    # Dans la phase de mouvement, `engagée` implique fall-back (09.05/09.06 exigent `unengaged`),
-    # donc le prédicat partagé ci-dessous SUFFIT à caractériser le mode.
+    thru_ez, _thru_enemy, _thru_friendly = _get_move_traversal_rules(game_state)
+    # Les figurines bloquantes viennent de `build_move_traversal_blocked` — toggles de config,
+    # Desperate Escape (09.07) et exemption M/V (17.01) y sont appliqués UNE fois, pour les sept
+    # sites qui posaient la question chacun de leur côté.
+    _enemy_blocked, _friendly_blocked = build_move_traversal_blocked(
+        game_state, str(squad_id), int(player), int(level)
+    )
+    transit: Set[Tuple[int, int]] = set(game_state.get("wall_hexes", set()))  # get allowed
+    transit |= _enemy_blocked
+    transit |= _friendly_blocked
+    # La bande d'EZ, elle, reste ici : elle ne dépend d'aucune figurine bloquante mais du cache
+    # d'adjacence ennemie, et 17.01 ne la concerne pas — traverser une figurine n'autorise pas à
+    # traverser une zone d'engagement.
     desperate_escape = (
         str(game_state.get("phase", "")) == "move"  # get allowed (phase absente = non initialisé)
         and squad_is_battle_shocked_in_enemy_er(game_state, str(squad_id))
     )
-    transit: Set[Tuple[int, int]] = set(game_state.get("wall_hexes", set()))  # get allowed
-    if not (desperate_escape or thru_enemy):
-        transit |= build_enemy_occupied_positions_set(
-            game_state, current_player=int(player), level=int(level)
-        )
-    if not thru_friendly:
-        # Amies = toute occupation hors escouade active, moins les ennemies (miroir du pool :
-        # `_friendly_occ = _occupied - _enemy_occ`, `_occupied` excluant déjà l'escouade active).
-        friendly = build_occupied_positions_set(
-            game_state, exclude_unit_id=str(squad_id), level=int(level)
-        ) - build_enemy_occupied_positions_set(
-            game_state, current_player=int(player), level=int(level)
-        )
-        transit |= friendly
     if not (desperate_escape or thru_ez):
         transit |= require_key(game_state, f"enemy_adjacent_hexes_player_{int(player)}")
     _cache[_ck] = transit
