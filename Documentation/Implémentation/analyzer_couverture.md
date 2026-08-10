@@ -608,7 +608,7 @@ Aucun stratagème n'est journalisé (aucun type dans `_STEP_LOG_TYPE_MAP`), ni l
 
 | Règle | Contrôle | Statut |
 |---|---|---|
-| 17.01 Moving M/V (traversent toutes figurines sauf autres M/V) | — | **COUVERT côté analyzer (2026-08-10, V6)** — `monster_or_vehicle_by_unit` passé au BFS pour le move normal et l'advance seulement, comme la règle. ⚠️ **Le MOTEUR, lui, n'applique pas 17.01** : `build_move_transit_blocked` ne lit aucun keyword du mobile, un Carnifex reste bloqué par une figurine ennemie. Écart de règle côté moteur, hors périmètre analyzer — à arbitrer |
+| 17.01 Moving M/V (traversent toutes figurines sauf autres M/V) | — | **COUVERT DES DEUX CÔTÉS (2026-08-10)** — analyzer : `monster_or_vehicle_by_unit` passé au BFS pour le move normal et l'advance seulement. Moteur : `build_move_traversal_blocked` (`shared_utils`), source unique des figurines bloquantes, où les toggles de config, Desperate Escape (09.07) et 17.01 sont résolus ensemble ; les SEPT sites qui décidaient chacun de leur côté la lisent désormais. Le verdict est par FIGURINE là où le site connaît le `model` (pools par-figurine), par escouade ailleurs — et une escouade mixte LÈVE. Verrou : `tests/unit/engine/test_move_traversal_monsters_vehicles.py` |
 | 17.02 Frame | — | NON-TESTABLE-OFFLINE (registre) |
 | 17.03 Shooting at engaged M/V | #16, #17 (exemptions implémentées dans `handle_shoot` ET `handle_wait`) | **PARTIEL** — le `-1` au jet de touche n'est pas vérifié |
 
