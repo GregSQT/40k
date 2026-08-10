@@ -82,7 +82,8 @@ COUNTERS = {
         ('fight_dead_unit_attacker',),
         ('fight_dead_unit_target',),
         ('dead_unit_waiting',),
-        ('dead_unit_skipping',),
+        # `dead_unit_skipping` a quitté cette liste avec le compteur lui-même le 2026-08-10
+        # (vert vacant V3) : aucune ligne `SKIP` n'existe dans un step.log.
         ('unit_revived',),
     ],
 }
@@ -102,7 +103,7 @@ _EMPTY_LOG = """=== STEP-BY-STEP ACTION LOG ===
 [10:00:00] Walls:
 [10:00:00] Objectives: none
 [10:00:00] Board: cols=220 rows=300 inches_to_subhex=5 hex_radius=2.78 margin=1
-[10:00:00] Run rules: engagement_zone_subhex=10 metric.engagement=hex metric.ranged=euclidean move.thru_ez=True move.thru_enemy=False move.thru_friendly=True
+[10:00:00] Run rules: engagement_zone_subhex=10 metric.engagement=hex metric.ranged=euclidean move.thru_ez=True move.thru_enemy=False move.thru_friendly=True cohesion.model_subhex=10 cohesion.global_subhex=45 cohesion.min_neighbors=1
 [10:00:00] === ACTIONS START ===
 [10:00:09] EPISODE END: Winner=1, Method=objectives, Actions=0, Steps=0, Total=0, Duration=1.000s
 """

@@ -1030,44 +1030,15 @@ def handle_wait(
     return False
 
 
-def handle_skip(
-    state: "AnalyzerState",
-    line: str,
-    action_desc: str,
-    player: int,
-    turn: int,
-    phase: str,
-) -> None:
-    """Traite une ligne d'action SKIP."""
-    stats = state.stats
-    stats['shoot_vs_wait']['skip'] += 1
-    stats['shoot_vs_wait_by_player'][player]['skip'] += 1
-
-    skip_unit_match = re.search(r'Unit (\d+)', action_desc)
-    if skip_unit_match:
-        skip_unit_id = skip_unit_match.group(1)
-        skip_unit_dead = skip_unit_id not in state.unit_hp or require_key(state.unit_hp, skip_unit_id) <= 0
-        if skip_unit_dead:
-            unit_died_before_skip = False
-            phase_order = {'MOVE': 1, 'SHOOT': 2, 'CHARGE': 3, 'FIGHT': 4}
-            current_phase_order = require_key(phase_order, phase)
-            for death_turn, death_phase, dead_unit_id, death_line_num in state.unit_deaths:
-                if dead_unit_id == skip_unit_id:
-                    if death_turn < turn:
-                        unit_died_before_skip = True
-                        break
-                    if death_turn == turn:
-                        death_phase_order = require_key(phase_order, death_phase)
-                        if death_phase_order < current_phase_order:
-                            unit_died_before_skip = True
-                            break
-                        if death_phase_order == current_phase_order and death_line_num < state.line_number:
-                            unit_died_before_skip = True
-                            break
-            if unit_died_before_skip:
-                stats['dead_unit_skipping'][player] += 1
-                if stats['first_error_lines']['dead_unit_skipping'][player] is None:
-                    stats['first_error_lines']['dead_unit_skipping'][player] = {'episode': state.current_episode_num, 'line': line.strip()}
+# `handle_skip` a été supprimé le 2026-08-10 (vert vacant V3). Il était inatteignable : le moteur
+# ne journalise aucune ligne `SKIP` (`_STEP_LOG_TYPE_MAP` de `w40k_core.py` est une liste blanche
+# qui ne porte pas `skip`). Il portait `dead_unit_skipping`, dont le 0 perpétuel comptait pour un
+# ✅ en §2.1. Un `SKIP` qui apparaîtrait malgré tout est signalé en §2.7 par `analyzer_core`, au
+# lieu d'être compté par un contrôle que personne n'exerce.
+#
+# ⚠️ À ne PAS confondre avec le compartiment `shoot_vs_wait['skip']`, qui reste vivant : il est
+# alimenté par `handle_wait` ci-dessus, où 10.04 requalifie en skip le WAIT d'une unité ENGAGÉE
+# (inéligible au tir normal). Deux « skip » homonymes, un seul était mort.
 
 
 def handle_advance(
@@ -1096,6 +1067,7 @@ def handle_advance(
         get_adjacent_enemies,
         _debug_log,
         _get_unit_hp_value,
+        monster_or_vehicle_by_unit,
     )
     from ai.analyzer_perfig import surviving_start_models
 
@@ -1213,6 +1185,9 @@ def handle_advance(
         occupied_positions, enemy_adjacent_hexes = _build_move_bfs_blockers(
             state.positions_by_model, state.unit_positions, state.unit_base,
             state.unit_player, state.unit_hp, advance_unit_id,
+            # 17.01 : l'ADVANCE est le second des deux déplacements couverts par l'exemption M/V
+            # (« each time you make a normal or advance move »).
+            monster_or_vehicle_by_unit=monster_or_vehicle_by_unit(config, state, advance_unit_id),
         )
         advance_unit_type = require_key(state.unit_types, advance_unit_id)
         # CONTRÔLE PER-SOCLE (09 Movement / Advance) : identique au move, budget = D6×scale.

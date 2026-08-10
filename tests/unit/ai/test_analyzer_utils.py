@@ -154,6 +154,8 @@ def test_adjacency_and_position_cache_helpers() -> None:
     from ai.analyzer_config import set_run_rules
 
     an.set_analyzer_board_scale(1)
+    # Bord du plateau (03.01) : le BFS de chemin le lit comme il lit l'échelle, et lève sans lui.
+    an.set_analyzer_board_dims(44, 60)
     set_run_rules({
         "engagement_zone_subhex": "2",
         "metric.engagement": "hex",
@@ -345,7 +347,7 @@ _LOG_HEAD = [
     # L'échelle du run vient de CETTE ligne, jamais du config courant : sans elle
     # `parse_step_log` refuse d'analyser (cf. parse_board_scale_from_log).
     "[12:00:00] Board: cols=220 rows=300 inches_to_subhex=5 hex_radius=2.78 margin=1",
-    "[10:00:00] Run rules: engagement_zone_subhex=10 metric.engagement=hex metric.ranged=euclidean move.thru_ez=True move.thru_enemy=False move.thru_friendly=True",
+    "[10:00:00] Run rules: engagement_zone_subhex=10 metric.engagement=hex metric.ranged=euclidean move.thru_ez=True move.thru_enemy=False move.thru_friendly=True cohesion.model_subhex=10 cohesion.global_subhex=45 cohesion.min_neighbors=1",
 ]
 _LOG_END = (
     "[12:00:09] EPISODE END: Winner=1, Method=objectives, Actions=0, Steps=0, "

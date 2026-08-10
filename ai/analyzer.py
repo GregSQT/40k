@@ -43,6 +43,27 @@ def _weapon_rule_usage_pair_total(weapon_rule_usage: Dict[Any, Any], pair_key: A
 
 
 _BOARD_HEADER_RE = re.compile(r'^\[[^\]]*\]\s*Board:\s.*\binches_to_subhex=(\d+)\b')
+_BOARD_DIMS_RE = re.compile(r'^\[[^\]]*\]\s*Board:\s.*\bcols=(\d+)\b.*\brows=(\d+)\b')
+
+
+def parse_board_dims_from_log(filepath: str) -> Tuple[int, int]:
+    """`(cols, rows)` du plateau du run analysé, lus dans la MÊME entête `Board:` que l'échelle.
+
+    Même contrat qu'elle, et pour la même raison : `config/board/*.json` change d'un run à
+    l'autre, et le BFS de mouvement doit refuser un pas hors plateau (03.01) sur les dimensions
+    du journal relu. L'entête est écrite à chaque démarrage d'épisode (`ai/step_logger.py`) et
+    porte `cols=` et `rows=` depuis toujours : son absence est une rupture de contrat.
+    """
+    with open(filepath, 'r', encoding='utf-8') as f:
+        for line in f:
+            m = _BOARD_DIMS_RE.match(line)
+            if m:
+                return int(m.group(1)), int(m.group(2))
+    raise ValueError(
+        f"{filepath}: aucune ligne d'entête 'Board: cols=N rows=N'. Les dimensions du plateau "
+        "sont indéterminables — un BFS de mouvement sans bord accepte les chemins qui sortent "
+        "du plateau, que 03.01 interdit."
+    )
 
 
 def parse_board_scale_from_log(filepath: str) -> int:
@@ -107,6 +128,13 @@ def set_analyzer_board_scale(inches_to_subhex: int) -> None:
     la CLI exécute `ai/analyzer.py` comme `__main__`."""
     from ai.analyzer_config import set_run_inches_to_subhex
     set_run_inches_to_subhex(int(inches_to_subhex))
+
+
+def set_analyzer_board_dims(cols: int, rows: int) -> None:
+    """Fixe les dimensions du plateau du run pour toute la passe (même raison d'emplacement que
+    l'échelle : `ai.analyzer_config` n'existe qu'en un exemplaire)."""
+    from ai.analyzer_config import set_run_board_dims
+    set_run_board_dims(int(cols), int(rows))
 
 
 def _get_inches_to_subhex_for_analyzer() -> int:
@@ -873,6 +901,38 @@ def _move_rules_for_analyzer() -> Tuple[bool, bool, bool]:
     return (_flag("move.thru_ez"), _flag("move.thru_enemy"), _flag("move.thru_friendly"))
 
 
+def monster_or_vehicle_by_unit(config: Any, state: Any, mover_unit_id: str) -> Dict[str, bool]:
+    """Carte `unit_id -> l'unité est-elle MONSTER/VEHICLE ?`, pour l'exemption 17.01 du BFS.
+
+    Construite depuis le MÊME drapeau de registre que les exemptions de tir 10.06 / 17.03
+    (`config.unit_is_monster_or_vehicle_by_type`) : un second calcul du keyword ici ferait
+    diverger la nature d'une unité entre sa phase de tir et sa phase de mouvement.
+
+    17.01 se lit par FIGURINE (« MONSTER/VEHICLE models in that unit ») ; cette carte le résout
+    par ESCOUADE, ce qui n'est exact que tant qu'une escouade ne mélange pas des datasheets M/V
+    et non-M/V. Aucune ne le peut aujourd'hui — le seul mélange possible vient de l'attachement
+    19.01, réservé aux unités portant la règle `leader`, qu'aucune M/V du registre ne porte. Ce
+    n'est pas une hypothèse laissée en l'air : la composition réelle du mobile est relue depuis
+    `[MODEL_TYPES:]` et un mélange LÈVE, au lieu de rendre un verdict de chemin faux en silence.
+    """
+    by_type = config.unit_is_monster_or_vehicle_by_type
+    mover_statuses = {
+        bool(require_key(by_type, model_type))
+        for mid, model_type in (
+            (mid, state.model_types[mid])
+            for mid in (state.positions_by_model.get(mover_unit_id) or {})  # get allowed
+            if mid in state.model_types
+        )
+    }
+    if len(mover_statuses) > 1:
+        raise ValueError(
+            f"Unité {mover_unit_id!r} : ses figurines mélangent des datasheets MONSTER/VEHICLE "
+            "et non-MONSTER/VEHICLE. L'exemption de traversée 17.01 se lit par figurine ; la "
+            "résolution par escouade de l'analyzer ne peut plus rendre un verdict de chemin."
+        )
+    return {uid: bool(require_key(by_type, ut)) for uid, ut in state.unit_types.items()}
+
+
 def _build_move_bfs_blockers(
     positions_by_model: Dict[str, Dict[str, Tuple[int, int]]],
     unit_positions: Dict[str, Tuple[int, int]],
@@ -881,6 +941,7 @@ def _build_move_bfs_blockers(
     unit_hp: Dict[str, int],
     mover_unit_id: str,
     force_thru_enemy: bool = False,
+    monster_or_vehicle_by_unit: Optional[Dict[str, bool]] = None,
 ) -> Tuple[Set[Tuple[int, int]], Set[Tuple[int, int]]]:
     """Obstacles du BFS de mouvement : (cases occupées bloquantes, bande d'EZ ennemie bloquante).
 
@@ -908,12 +969,27 @@ def _build_move_bfs_blockers(
     désespérée légale ; les laisser traversables ne perd que la retraite ORDONNÉE qui aurait
     traversé un ennemi. Le budget, lui, est commun aux deux modes et reste pleinement contrôlé.
     Le jour où `[MOVE_TYPE:fall_back]` portera son mode, ce paramètre doit disparaître.
+
+    `monster_or_vehicle_by_unit` — 17.01, et il ne se passe QUE pour un mouvement normal ou un
+    advance : « Each time you make a normal or advance move with a unit, MONSTER/VEHICLE models
+    in that unit can be moved through friendly and enemy models (excluding other MONSTER/VEHICLE
+    models). » Le fall-back (09.07, qui a sa propre Desperate Escape), la charge et le
+    pile-in / consolidation n'y ont pas droit : leurs appelants ne passent donc pas cette carte,
+    et l'omettre n'est pas un oubli mais la règle. Quand elle est fournie ET que le mobile est
+    M/V, seules les AUTRES unités M/V bloquent encore le transit — les toggles de traversée
+    gardent la main sur tout le reste, 17.01 n'étant qu'une permission de plus, jamais une
+    interdiction (un M/V ami reste traversable si `move.thru_friendly`).
     """
     from ai.analyzer_perfig import _DEFAULT_BASE, squad_footprint
     thru_ez, thru_enemy, thru_friendly = _move_rules_for_analyzer()
     if force_thru_enemy:
         thru_enemy = True
     mover_player_int = int(require_key(unit_player, mover_unit_id))
+    # Carte 17.01 du mobile, ou None si l'exemption ne s'applique pas (appelant qui ne la passe
+    # pas — fall-back, charge, pile-in — ou mobile qui n'est pas M/V).
+    mv_map: Optional[Dict[str, bool]] = None
+    if monster_or_vehicle_by_unit is not None and require_key(monster_or_vehicle_by_unit, mover_unit_id):
+        mv_map = monster_or_vehicle_by_unit
     occupied: Set[Tuple[int, int]] = set()
     for uid, anchor in unit_positions.items():
         if uid == mover_unit_id:
@@ -934,6 +1010,12 @@ def _build_move_bfs_blockers(
         if is_friendly and thru_friendly:
             continue
         if not is_friendly and thru_enemy:
+            continue
+        # 17.01 : le mobile M/V traverse les figurines, SAUF celles des autres unités M/V.
+        # `require_key` et non `.get` : une unité présente dans `unit_player` mais absente de
+        # cette carte signalerait une carte construite sur un autre jeu d'unités que le journal —
+        # la traiter en « pas M/V » rendrait un verdict de chemin faux sans le dire.
+        if mv_map is not None and not require_key(mv_map, uid):
             continue
         models = positions_by_model.get(uid)  # get allowed
         if models:
@@ -968,6 +1050,9 @@ def _bfs_shortest_path_length(
     dans « chemin bloqué ». Ce que le contrôle établit vraiment, et tout ce qu'il établit :
     **la figurine n'a pas pu atteindre sa destination dans son budget**.
     """
+    from ai.analyzer_config import get_run_board_dims
+
+    board_cols, board_rows = get_run_board_dims()
     start_pos = (start_col, start_row)
     dest_pos = (dest_col, dest_row)
     if start_pos == dest_pos:
@@ -981,6 +1066,18 @@ def _bfs_shortest_path_length(
             continue
         for neighbor in get_hex_neighbors(current_pos[0], current_pos[1]):
             if neighbor in visited:
+                continue
+            # 03.01 « Its base cannot cross the edge of the battlefield » — le bord bornait le
+            # champ géodésique du MOTEUR (`geodesic_move_reach`) sans borner celui de l'analyzer,
+            # qui acceptait donc un chemin passant hors plateau : un socle coincé dans un coin
+            # trouvait toujours un contournement par l'extérieur, et le contrôle de budget se
+            # taisait sur le seul chemin que le jeu interdit.
+            #
+            # TRANSIT, comme le reste de cette boucle : c'est le CENTRE du socle qui est borné
+            # ici, exactement comme côté moteur. Qu'un socle DÉBORDE du plateau à l'arrivée
+            # relève du placement (`is_footprint_placement_valid`), donc du contrôle de position
+            # §2.2, pas de l'atteignabilité.
+            if not (0 <= neighbor[0] < board_cols and 0 <= neighbor[1] < board_rows):
                 continue
             if neighbor in wall_hexes:
                 continue
@@ -1109,6 +1206,10 @@ def error_totals(stats: Dict[str, Any]) -> Dict[str, int]:
             + _pair('reactive_move_checks', 'to_adjacent_enemy')
             + _pair('reactive_move_checks', 'into_wall')
             + _pair('reactive_move_checks', 'distance_over_roll')
+            # 03.03 : la cohérence se juge à la fin de TOUT déplacement, y compris le pile-in et
+            # la consolidation. Elle est comptée ici, avec les déplacements, plutôt qu'éclatée
+            # entre §1.1 et §1.4 — c'est une règle de MOUVEMENT, une seule mesure, un seul total.
+            + _pair('squad_coherency_violations')
         ),
         # §1.2 — l'advance est une action de la phase de Mouvement mais ses fautes sont comptées
         # ici, avec le tir, parce que c'est là que le rapport les affiche.
@@ -1134,16 +1235,20 @@ def error_totals(stats: Dict[str, Any]) -> Dict[str, int]:
             + stats['charge_invalid'][1]['fled'] + stats['charge_invalid'][2]['fled']
         ),
         'fight': (
-            # `fight_from_non_adjacent` est conservé à 0 depuis 2026-07-24 (vert vacant V2) :
-            # terme mort assumé, gardé pour la rétro-compatibilité des totaux.
-            _pair('fight_from_non_adjacent')
-            + _pair('fight_friendly')
+            # `fight_from_non_adjacent` a disparu de ce total le 2026-08-10 (vert vacant V2). Le
+            # contrôle avait été RETIRÉ le 2026-07-24 comme faux positif (mesure hex contre gate
+            # euclidien du moteur, et position de cible post-pertes) ; sa clé, elle, restait
+            # sommée ici à 0 pour toujours. Un terme mort dans un total n'est pas neutre : il
+            # entretient l'idée qu'une règle est surveillée. 12.01 est vérifiée par le test
+            # moteur `test_fight_spatial_contract.py`, pas par le journal.
+            _pair('fight_friendly')
             + _pair('fight_over_cc_nb')
             + _pair('fight_move_invalid', 'pile_in')
             + _pair('fight_move_invalid', 'consolidation')
             + _pair('fight_hit_result_mismatch')
             + _pair('fight_wound_threshold_mismatch')
             + _pair('fight_alternation_violations')
+            + _pair('fight_double_pile_in')
         ),
         'dead_units': (
             _pair('dead_unit_moving')
@@ -1155,7 +1260,11 @@ def error_totals(stats: Dict[str, Any]) -> Dict[str, int]:
             + _pair('fight_dead_unit_attacker')
             + _pair('fight_dead_unit_target')
             + _pair('dead_unit_waiting')
-            + _pair('dead_unit_skipping')
+            # `dead_unit_skipping` a disparu de ce total le 2026-08-10 (vert vacant V3) : le
+            # moteur ne journalise AUCUNE ligne `SKIP` — `_STEP_LOG_TYPE_MAP` est une liste
+            # blanche et n'y porte pas `skip` (`w40k_core.py`, « type sans formateur ->
+            # volontairement non journalisé »). Le compteur était inatteignable, et son 0
+            # permanent comptait pour un ✅ dans « 2.1 Dead units interactions ».
             + _pair('unit_revived')
         ),
         'positions': (
@@ -1315,6 +1424,8 @@ def parse_step_log(filepath: str) -> Dict:
     # Échelle du run AVANT toute construction de config : portées d'armes, budgets de move et
     # seuil d'engagement en dérivent tous (cf. parse_board_scale_from_log).
     set_analyzer_board_scale(parse_board_scale_from_log(filepath))
+    # Bord du plateau (03.01) : même entête, même passe, même exigence que l'échelle.
+    set_analyzer_board_dims(*parse_board_dims_from_log(filepath))
     from ai.analyzer_config import set_run_rules
     set_run_rules(parse_run_rules_from_log(filepath))
 
@@ -1376,6 +1487,11 @@ def parse_step_log(filepath: str) -> Dict:
         # moteur. Ce compteur est le point du chantier : il transforme une dérive silencieuse en
         # erreur mesurée, et se déclenchera le jour où un nouvel effet cessera d'être journalisé.
         'state_resync': {'dead_missed': 0, 'alive_missed': 0, 'pos_mismatch': 0},
+        # ⚠️ Le compartiment `skip` N'EST PAS alimenté par une ligne `SKIP` du journal — il n'en
+        # existe aucune (cf. V3). Son producteur est `handle_wait` : 10.04 rend une unité ENGAGÉE
+        # inéligible au tir normal, donc son WAIT n'est pas un choix mais un skip imposé par la
+        # règle. Retirer ce compartiment avec le reste du chantier `skip` aurait détruit cette
+        # mesure-là, qui est vivante.
         'shoot_vs_wait': {
             'shoot': 0, 'wait': 0, 'skip': 0, 'advance': 0
         },
@@ -1439,15 +1555,20 @@ def parse_step_log(filepath: str) -> Dict:
         'shoot_combi_profile_conflicts': {1: 0, 2: 0},
         'devastating_wounds_correct': {1: 0, 2: 0},
         'devastating_wounds_incorrect': {1: 0, 2: 0},
+        # 03.03 : cohérence d'escouade à la fin de chaque déplacement et à la mise en place.
+        'squad_coherency_violations': {1: 0, 2: 0},
         'dead_unit_waiting': {1: 0, 2: 0},
-        'dead_unit_skipping': {1: 0, 2: 0},
+        # `dead_unit_skipping` (V3) et `fight_from_non_adjacent` (V2) ont été SUPPRIMÉS le
+        # 2026-08-10, et ils ne doivent pas être ré-écrits à l'identique :
+        #  - `dead_unit_skipping` n'avait aucun producteur possible — le moteur ne journalise pas
+        #    les `SKIP` (liste blanche `_STEP_LOG_TYPE_MAP`) ;
+        #  - `fight_from_non_adjacent` avait été retiré le 2026-07-24 comme faux positif (mesure
+        #    hex contre gate euclidien, cible lue après les pertes) ; 12.01 est vérifiée par
+        #    `tests/unit/engine/test_fight_spatial_contract.py`.
+        # Tous deux restaient déclarés à 0 et sommés dans un total : deux ✅ que rien ne mesurait.
         'charge_after_flee': {1: 0, 2: 0},
         'charge_dead_unit': {1: 0, 2: 0},
         'dead_unit_charging': {1: 0, 2: 0},
-        # 'fight_from_non_adjacent' RETIRE (2026-07-24) : cf. analyzer_phases/fight_handler.py —
-        # gate combat moteur EUCLIDIEN + position cible pré-perte non journalisee → non
-        # reconstructible. Cle conservee a 0 (jamais incrementee) pour la retro-compat des totaux.
-        'fight_from_non_adjacent': {1: 0, 2: 0},
         'fight_friendly': {1: 0, 2: 0},
         'fight_dead_unit_attacker': {1: 0, 2: 0},
         'fight_dead_unit_target': {1: 0, 2: 0},
@@ -1532,6 +1653,10 @@ def parse_step_log(filepath: str) -> Dict:
             'fight': {'total': 0, 'wrong': 0}
         },
         'fight_alternation_violations': {1: 0, 2: 0},
+        # 12.02 « Each unit cannot make more than one pile-in move during this step ». §1.6 ne
+        # pouvait pas le voir : son marqueur d'activation de combat est `CONSOLIDATED` (12.07),
+        # et un double pile-in ne produit aucune consolidation supplémentaire.
+        'fight_double_pile_in': {1: 0, 2: 0},
         'fight_attacks_by_unit': {1: {}, 2: {}},
         'fight_over_cc_nb_by_unit': {1: {}, 2: {}},
         # First occurrence lines for each error type (stores dict with 'episode' and 'line')
@@ -1556,12 +1681,11 @@ def parse_step_log(filepath: str) -> Dict:
             'shoot_over_rng_nb': {1: None, 2: None},
             'shoot_combi_profile_conflicts': {1: None, 2: None},
             'devastating_wounds_incorrect': {1: None, 2: None},
+            'squad_coherency_violations': {1: None, 2: None},
             'dead_unit_waiting': {1: None, 2: None},
-            'dead_unit_skipping': {1: None, 2: None},
             'charge_after_flee': {1: None, 2: None},
             'charge_dead_unit': {1: None, 2: None},
             'dead_unit_charging': {1: None, 2: None},
-            'fight_from_non_adjacent': {1: None, 2: None},
             'fight_friendly': {1: None, 2: None},
             'fight_dead_unit_attacker': {1: None, 2: None},
             'fight_dead_unit_target': {1: None, 2: None},
@@ -1606,6 +1730,7 @@ def parse_step_log(filepath: str) -> Dict:
                 'fight': None
             },
             'fight_alternation_violations': {1: None, 2: None},
+            'fight_double_pile_in': {1: None, 2: None},
             'position_log_mismatch': {
                 'move': None,
                 'advance': None,
@@ -2512,7 +2637,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
                       stats['shoot_vs_wait_by_player'][2]['wait'] +
                       stats['shoot_vs_wait_by_player'][2]['skip'] +
                       stats['shoot_vs_wait_by_player'][2]['advance'])
-    
+
     for action in ['shoot', 'skip', 'advance']:
         agent_count = stats['shoot_vs_wait_by_player'][1][action]
         bot_count = stats['shoot_vs_wait_by_player'][2][action]
@@ -2853,6 +2978,13 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         if bot_reactive_over_roll > 0 and stats['first_error_lines']['reactive_move_distance_over_roll'][2]:
             first_err = stats['first_error_lines']['reactive_move_distance_over_roll'][2]
             log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    _coh = require_key(stats, 'squad_coherency_violations')
+    _table_row("Coherence d'escouade (03.03):", _fmt_count(_coh[1]), _fmt_count(_coh[2]))
+    for _p in (1, 2):
+        _first = stats['first_error_lines']['squad_coherency_violations'][_p]
+        if _coh[_p] > 0 and _first:
+            log_print(f"  First P{_p} occurrence (Episode {_first['episode']}): {_first['line']}")
+            log_print(f"    {_first['detail']}")
     # SHOOTING ERRORS
     active_debug_section = "1.2"
     log_print("\n" + "-" * 80)
@@ -3081,6 +3213,12 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     if bot_fight_alt > 0 and stats['first_error_lines']['fight_alternation_violations'][2]:
         first_err = stats['first_error_lines']['fight_alternation_violations'][2]
         log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    _dpi = require_key(stats, 'fight_double_pile_in')
+    _table_row("Pile-in double (12.02):", _fmt_count(_dpi[1]), _fmt_count(_dpi[2]))
+    for _p in (1, 2):
+        _first = stats['first_error_lines']['fight_double_pile_in'][_p]
+        if _dpi[_p] > 0 and _first:
+            log_print(f"  First P{_p} occurrence (Episode {_first['episode']}): {_first['line']}")
     _fm = require_key(stats, 'fight_move_invalid')
     for _kind, _label in (('pile_in', 'Pile-in au-dela de 3"'), ('consolidation', 'Conso au-dela de 3"')):
         _table_row(f"{_label}:", _fmt_count(_fm[_kind][1]), _fmt_count(_fm[_kind][2]))
@@ -3367,13 +3505,8 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     if stats['dead_unit_waiting'][2] > 0 and stats['first_error_lines']['dead_unit_waiting'][2]:
         first_err = stats['first_error_lines']['dead_unit_waiting'][2]
         log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-    log_print(f"Dead unit skipping:            {stats['dead_unit_skipping'][1]:6d}           {stats['dead_unit_skipping'][2]:6d}")
-    if stats['dead_unit_skipping'][1] > 0 and stats['first_error_lines']['dead_unit_skipping'][1]:
-        first_err = stats['first_error_lines']['dead_unit_skipping'][1]
-        log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-    if stats['dead_unit_skipping'][2] > 0 and stats['first_error_lines']['dead_unit_skipping'][2]:
-        first_err = stats['first_error_lines']['dead_unit_skipping'][2]
-        log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    # La ligne « Dead unit skipping » a été retirée le 2026-08-10 (V3) : elle affichait 0 en
+    # permanence faute de ligne `SKIP` dans le journal, et ce 0 comptait dans le ✅ de §2.1.
     log_print(f"Unités revenues après mort:    {stats['unit_revived'][1]:6d}           {stats['unit_revived'][2]:6d}")
     if stats['unit_revived'][1] > 0 and stats['first_error_lines']['unit_revived'][1]:
         first_err = stats['first_error_lines']['unit_revived'][1]

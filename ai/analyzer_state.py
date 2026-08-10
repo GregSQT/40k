@@ -160,6 +160,11 @@ class AnalyzerState:
     #: `(phase, fight_phase_seq_id, joueur)` en combat — un tour contient DEUX phases de combat
     #: (12.04), et le joueur de la ligne est celui de l'unité qui agit, pas celui de la phase.
     phase_activation_seen: Dict[PhaseActivationKey, Set[str]] = field(default_factory=dict)
+    #: 12.02 : unités ayant DÉJÀ fait leur pile-in, par `(fight_phase_seq_id, joueur)`. Ensemble
+    #: SÉPARÉ de `phase_activation_seen` : pile-in (12.02) et consolidation (12.07) sont deux
+    #: étapes distinctes de la même phase, une unité fait légalement les deux, et les mélanger
+    #: compterait chaque combat normal comme une double activation.
+    pile_in_seen: Dict[Tuple[int, int], Set[str]] = field(default_factory=dict)
     reactive_activation_counts: Dict[Tuple[int, int, int], Dict[str, int]] = field(default_factory=dict)
     fight_phase_seq_id: int = 0
     # Points de victoire de l'épisode : recopiés du dernier instantané moteur, jamais calculés.

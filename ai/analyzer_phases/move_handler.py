@@ -329,7 +329,11 @@ def _handle_move(state, config, line, action_desc, player, turn, phase, move_mat
                  get_adjacent_enemies, is_within_engine_engagement_zone,
                  _get_engagement_zone_for_analyzer, _debug_log):
     from ai.analyzer_perfig import surviving_start_models
-    from ai.analyzer import _get_inches_to_subhex_for_analyzer, engine_engagement_zone_offenders
+    from ai.analyzer import (
+        _get_inches_to_subhex_for_analyzer,
+        engine_engagement_zone_offenders,
+        monster_or_vehicle_by_unit,
+    )
 
     stats = state.stats
     move_unit_id = move_match.group(1)
@@ -534,6 +538,9 @@ def _handle_move(state, config, line, action_desc, player, turn, phase, move_mat
         occupied_positions, enemy_adjacent_hexes = _build_move_bfs_blockers(
             state.positions_by_model, positions_at_movement, state.unit_base,
             state.unit_player, unit_hp_at_movement, move_unit_id,
+            # 17.01 : le mouvement NORMAL est l'un des deux déplacements que l'exemption M/V
+            # couvre (l'autre est l'advance). Le fall-back ci-dessus ne la reçoit pas.
+            monster_or_vehicle_by_unit=monster_or_vehicle_by_unit(config, state, move_unit_id),
         )
 
         # CONTRÔLE PER-SOCLE (03 Moving) : chaque figurine se déplace de SA position

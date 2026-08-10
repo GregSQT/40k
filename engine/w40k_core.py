@@ -5633,6 +5633,15 @@ class W40KEngine(gym.Env):
             "move.thru_ez": bool(require_key(move_rules, "can_move_through_enemy_engagement_zone")),
             "move.thru_enemy": bool(require_key(move_rules, "can_move_through_enemy_model")),
             "move.thru_friendly": bool(require_key(move_rules, "can_move_through_friendly_model")),
+            # 03.03 Coherency. Memes trois parametres que `coherency_violation_flags`, sous les
+            # memes noms de config, et pour la meme raison que la zone d'engagement : ils sont
+            # deja convertis en subhexes a l'init, et `config/game_config.json` s'edite entre
+            # deux runs. Sans eux dans l'entete, l'analyzer ne peut PAS verifier la coherency
+            # d'escouade — la seule autre source serait le config du jour, qui juge un vieux
+            # journal avec les regles d'aujourd'hui.
+            "cohesion.model_subhex": int(require_key(game_rules, "unit_model_cohesion_range")),
+            "cohesion.global_subhex": int(require_key(game_rules, "unit_global_cohesion_range")),
+            "cohesion.min_neighbors": int(require_key(game_rules, "squad_min_neighbors")),
         }
 
     def _advance_phase_and_drain(self, advance_action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:

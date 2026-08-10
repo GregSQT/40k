@@ -8,13 +8,12 @@ from functools import lru_cache
 from typing import Dict, Optional
 
 from shared.data_validation import require_key, require_present
-from engine.combat_utils import calculate_hex_distance
 
 from ai.analyzer_perfig import MODEL_TOKEN_PATTERN
 from ai.analyzer_state import AnalyzerState
 from ai.analyzer_config import AnalyzerConfig
 from ai.analyzer_phases.episode_handler import handle_episode_start
-from ai.analyzer_phases.shoot_handler import handle_shoot, handle_wait, handle_skip, handle_advance
+from ai.analyzer_phases.shoot_handler import handle_shoot, handle_wait, handle_advance
 from ai.analyzer_phases.charge_handler import handle_charge
 from ai.analyzer_phases.move_handler import handle_move_or_fled
 from ai.analyzer_phases.fight_handler import handle_fight, handle_fight_move
@@ -139,6 +138,59 @@ def _count_faction_activations(state: AnalyzerState, new_effects: "Dict[int, Dic
         for key, rule_id in _FACTION_ABILITY_KEYS.items():
             if key in entries and key not in was:
                 stats['faction_ability_activations'][rule_id][player] += 1
+
+
+#: 03.03 s'applique à la MISE EN PLACE et à la FIN DE TOUT DÉPLACEMENT (« must be set up and end
+#: any kind of move in coherency »). Ces sept verbes sont exactement les lignes qui portent une
+#: position d'arrivée par-figurine : les six déplacements de la matrice plus le déploiement. Une
+#: ligne de tir ou d'attaque porte aussi `[MODELS:]`, mais elle ne termine aucun déplacement —
+#: la contrôler ferait remonter la MÊME formation à chaque salve.
+_COHERENCY_LINE_VERBS = (
+    " MOVED ", " ADVANCED ", " FLED ", " CHARGED ", " PILED IN ", " CONSOLIDATED ", " DEPLOYED ",
+)
+
+
+def _check_line_coherency(state: AnalyzerState, line: str) -> None:
+    """03.03 Coherency — verdict sur les socles d'ARRIVÉE de cette ligne, si elle en porte.
+
+    Trou identifié de longue date (V11 T6-i) : la donnée était là — `[MODELS:]` porte toutes les
+    positions — et rien ne la lisait. Le moteur purge les figurines incohérentes en fin de tour
+    (`end_of_turn_regain_coherency_all_squads`) ; personne ne vérifiait que les formations
+    journalisées respectaient la règle À CHAQUE FIN DE DÉPLACEMENT, qui est ce que 03.03 exige.
+
+    Une ligne = au plus UNE faute par unité, même si trois de ses figurines sont hors cohérence :
+    c'est la FORMATION qui est fautive, et compter par figurine ferait dépendre la gravité de la
+    taille de l'escouade.
+    """
+    from ai.analyzer_perfig import _unit_base, squad_coherency_offenders
+    from ai.analyzer_config import get_run_rule
+
+    if not state.current_line_models:
+        return
+    upper = line.upper()
+    if not any(verb in upper for verb in _COHERENCY_LINE_VERBS):
+        return
+    coh = int(get_run_rule("cohesion.model_subhex"))
+    coh_max = int(get_run_rule("cohesion.global_subhex"))
+    min_neighbors = int(get_run_rule("cohesion.min_neighbors"))
+    stats = state.stats
+    for unit_id, models in state.current_line_models.items():
+        if unit_id not in state.unit_player:
+            continue
+        offenders = squad_coherency_offenders(
+            models, _unit_base(state.unit_base, unit_id), coh, coh_max, min_neighbors
+        )
+        if not offenders:
+            continue
+        player = int(require_key(state.unit_player, unit_id))
+        stats['squad_coherency_violations'][player] += 1
+        first = stats['first_error_lines']['squad_coherency_violations']
+        if first[player] is None:
+            first[player] = {
+                'episode': state.current_episode_num,
+                'line': line.strip(),
+                'detail': f"socles hors cohérence : {' '.join(offenders)}",
+            }
 
 
 def _model_full_hp(state: AnalyzerState, config: AnalyzerConfig, mid: str, squad_hp_max: int) -> int:
@@ -363,6 +415,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
             _line_models, _line_heights = parse_models_and_heights(line)
             state.current_line_models = _line_models or {}
             state.current_line_heights = _line_heights or {}
+            _check_line_coherency(state, line)
             if state.current_line_models:
                 for _uid, _models in state.current_line_models.items():
                     if not _models:
@@ -1063,6 +1116,34 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         else:
                             seen_units.add(actor_id)
 
+                    # 12.02, volet « Each unit cannot make more than one pile-in move during this
+                    # step ». Il lui faut sa PROPRE clé : `PILED IN` ne peut pas rejoindre
+                    # `is_activation_marker` ci-dessus, sans quoi le pile-in et la consolidation
+                    # d'une même unité — deux étapes DISTINCTES et toutes deux légales dans la
+                    # même phase (12.02 puis 12.07) — tomberaient sur le même ensemble et
+                    # compteraient un faux doublon. Même identité de phase que la double
+                    # activation (`fight_phase_seq_id`) : un tour porte DEUX phases de combat.
+                    if phase == 'FIGHT' and ") PILED IN " in action_desc_upper:
+                        if player is None:
+                            raise ValueError("player is required for the pile-in check")
+                        _pile_in_phase_id = state.fight_phase_seq_id + (
+                            1 if phase != state.last_phase else 0
+                        )
+                        _pile_in_seen = state.pile_in_seen.setdefault(
+                            (_pile_in_phase_id, int(player)), set()
+                        )
+                        if actor_id in _pile_in_seen:
+                            stats['fight_double_pile_in'][int(player)] += 1
+                            _pile_in_first = require_key(
+                                require_key(stats, "first_error_lines"), "fight_double_pile_in"
+                            )
+                            if _pile_in_first[int(player)] is None:
+                                _pile_in_first[int(player)] = {
+                                    'episode': state.current_episode_num, 'line': line.strip()
+                                }
+                        else:
+                            _pile_in_seen.add(actor_id)
+
                 # Reset markers when turn changes
                 if turn != state.last_turn:
                     state.units_moved = set()
@@ -1206,13 +1287,20 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         'episode': state.current_episode_num
                     })
 
-                    reactive_abnormal = False
-                    if phase not in ("MOVE", "SHOOT"):
-                        reactive_abnormal = True
-                    if roll_value is not None:
-                        reactive_dist = calculate_hex_distance(from_col, from_row, to_col, to_row)
-                        if reactive_dist > roll_value * _get_inches_to_subhex_for_analyzer():
-                            reactive_abnormal = True
+                    # Ce compteur ne pose plus qu'UNE question : le move réactif a-t-il eu lieu
+                    # dans une phase où il n'a rien à faire ?
+                    #
+                    # Il en posait une seconde — « la distance dépasse-t-elle le D6 ? » — mesurée
+                    # d'ANCRE à ANCRE, à vol d'oiseau, sans murs ni figurines. Or son jumeau
+                    # immédiat (`distance_over_roll`, 40 lignes plus bas) pose exactement la même
+                    # question par le contrôle mutualisé `_per_model_move_violation` : par
+                    # figurine, chemin réel, budget converti. Deux mesures contradictoires de la
+                    # même grandeur sur la même ligne, et toutes deux dans le total §1.1 : une
+                    # reformation d'ancre suffisait à n'en déclencher qu'une, un vrai dépassement
+                    # en déclenchait DEUX — le rapport comptait alors 2 fautes pour 1. La mesure
+                    # d'ancre disparaît, la mesure par socle reste : c'est la même correction que
+                    # le plafond de tir (V14), et par le même moyen — mutualiser, pas recopier.
+                    reactive_abnormal = phase not in ("MOVE", "SHOOT")
 
                     if reactive_abnormal:
                         reactive_stats[reactive_player]['abnormal'] += 1
@@ -1352,8 +1440,26 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         if handle_wait(state, config, line, action_desc, action_unit_id, player, turn, phase):
                             continue
                 elif " SKIP" in action_desc:
-                        action_type = 'skip'
-                        handle_skip(state, line, action_desc, player, turn, phase)
+                        # Le moteur ne journalise AUCUN `SKIP` : `_STEP_LOG_TYPE_MAP`
+                        # (`w40k_core.py`) est une liste blanche et n'y porte pas `skip` — « type
+                        # sans formateur -> volontairement non journalisé ». Tout ce qui pendait
+                        # à cette branche était donc inatteignable, `dead_unit_skipping` compris,
+                        # et son 0 perpétuel comptait pour un ✅ (vert vacant V3, 2026-08-10).
+                        #
+                        # La branche SURVIT, mais pour DIRE que le contrat a changé au lieu de
+                        # laisser la ligne tomber en silence dans `other` : le jour où le moteur
+                        # journalisera les skips, cette ligne apparaîtra en §2.7 et il faudra
+                        # ré-écrire les contrôles, pas les deviner.
+                        action_type = 'other'
+                        stats['parse_errors'].append({
+                            'episode': state.current_episode_num,
+                            'turn': turn,
+                            'phase': phase,
+                            'line': line.strip(),
+                            'error': "ligne SKIP inattendue : le moteur ne journalise pas ce "
+                                     "type d'action (_STEP_LOG_TYPE_MAP). Les contrôles de skip "
+                                     "ont été supprimés le 2026-08-10 comme inatteignables."
+                        })
                 # Le token optionnel `[FLY]` (21.03) s'insère entre le verbe et `from` sur les
                 # trois types de move. Un aiguillage sur la chaîne littérale `"<VERBE> from"`
                 # laissait ces lignes SANS branche : l'action n'était pas traitée, la position

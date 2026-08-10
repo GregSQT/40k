@@ -46,14 +46,14 @@ STEP_LOG = f"""=== STEP-BY-STEP ACTION LOG ===
 [10:00:00] Walls: (300,300)
 [10:00:00] Objectives: rect b NW:{OBJECTIVES}
 [10:00:00] Board: cols=220 rows=300 inches_to_subhex=5 hex_radius=2.78 margin=1
-[10:00:00] Run rules: engagement_zone_subhex=10 metric.engagement=hex metric.ranged=euclidean move.thru_ez=True move.thru_enemy=False move.thru_friendly=True
+[10:00:00] Run rules: engagement_zone_subhex=10 metric.engagement=hex metric.ranged=euclidean move.thru_ez=True move.thru_enemy=False move.thru_friendly=True cohesion.model_subhex=10 cohesion.global_subhex=45 cohesion.min_neighbors=1
 [10:00:00] Unit 1 (SternguardVeteranBoltRifle) P1: Starting position (-1,-1), HP_MAX=2 base=round/18
 [10:00:00] Unit 101 (AssaultIntercessor) P2: Starting position (-1,-1), HP_MAX=2 base=round/6
 [10:00:00] === ACTIONS START ===
 [10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1({ATTACKER[0]},{ATTACKER[1]}) DEPLOYED from (-1,-1) to ({ATTACKER[0]},{ATTACKER[1]}) [R:+0.0] [SUCCESS]
 [10:00:01] E1 T1 P2 DEPLOYMENT : Unit 101({TARGET[0]},{TARGET[1]}) DEPLOYED from (-1,-1) to ({TARGET[0]},{TARGET[1]}) [R:+0.0] [SUCCESS]
 [10:00:02] E1 T1 P2 SHOOT : Unit 101({TARGET[0]},{TARGET[1]}) WAIT [MODELS: 101#0@({TARGET[0]},{TARGET[1]},z0)] [SUCCESS]
-[10:00:03] E1 T1 P1 FIGHT : Unit 1({ATTACKER[0]},{ATTACKER[1]}) FOUGHT Unit 101({TARGET[0]},{TARGET[1]}) with [Close Combat Weapon] - Hit 4(3+) [R:+0.0] [FIGHT_SUBPHASE:fight] [MODELS: 1#0@({ATTACKER[0]},{ATTACKER[1]},z0)] [SUCCESS]
+[10:00:03] E1 T1 P1 FIGHT : Unit 1({ATTACKER[0]},{ATTACKER[1]}) FOUGHT Unit 101({TARGET[0]},{TARGET[1]}) with [Close Combat Weapon] - Hit 2(3+) [R:+0.0] [FIGHT_SUBPHASE:fight] [MODELS: 1#0@({ATTACKER[0]},{ATTACKER[1]},z0)] [SUCCESS]
 """
 
 
@@ -92,8 +92,33 @@ def stats(tmp_path):
     return an.parse_step_log(str(log))
 
 
-def test_no_fight_from_non_adjacent_false_positive(stats) -> None:
-    """Le combat légal (euclidien-engagé mais hex-non-adjacent) ne doit lever AUCUNE
-    erreur `fight_from_non_adjacent`. L'ancien code en comptait 1."""
-    fna = stats["fight_from_non_adjacent"]
-    assert fna[1] == 0 and fna[2] == 0, f"faux positif Fight-from-non-adjacent : {fna}"
+def test_the_removed_counter_has_not_been_written_back(stats) -> None:
+    """Le compteur ne doit pas RÉAPPARAÎTRE — c'est ce que ce fichier garde depuis 2026-08-10.
+
+    Jusque-là, ce test lisait `stats["fight_from_non_adjacent"]` et vérifiait qu'il valait 0. La
+    clé était déclarée à 0 et n'avait AUCUN site d'incrémentation : l'assertion était vraie quoi
+    qu'il arrive, y compris si tout le reste de l'analyzer avait disparu. C'est le vert vacant V2,
+    et il vivait jusque dans son propre verrou. La clé a été supprimée avec le terme mort qu'elle
+    ajoutait au total FIGHT ; ce test surveille maintenant son retour.
+    """
+    assert "fight_from_non_adjacent" not in stats, (
+        "le compteur hex-non-adjacent est de retour : il avait été retiré comme faux positif "
+        "(mesure hex contre gate euclidien du moteur, cible lue après les pertes). 12.01 se "
+        "vérifie dans tests/unit/engine/test_fight_spatial_contract.py, pas depuis step.log"
+    )
+
+
+def test_this_legal_fight_raises_no_fight_error_at_all(stats) -> None:
+    """Et le fond reste vérifié, par une grandeur qui, elle, bouge : le TOTAL de §1.4.
+
+    Ré-introduire un contrôle d'adjacence en hex sur cette géométrie (attaquant round/18 à
+    hexEdge=11 de sa cible, euclidien 14,9 ≤ 15) ferait passer ce total à 1.
+
+    Le jet du témoin est un ÉCHEC (`Hit 2(3+)`), et c'est ce qui rend la ligne complète : une
+    touche réussie doit être suivie de son segment `- Wound …`, faute de quoi le verdict de
+    touche (§1.10) la compte en faute — la ligne d'origine s'arrêtait après `Hit 4(3+)` et ce
+    total valait 1 pour cette seule raison, sans rapport avec la géométrie que le fichier teste.
+    """
+    import ai.analyzer as an
+
+    assert an.error_totals(stats)["fight"] == 0, "ce combat est légal : §1.4 doit rester à 0"
