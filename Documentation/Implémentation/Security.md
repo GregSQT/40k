@@ -1,6 +1,6 @@
 # Sécurité — Analyse et plan d'implémentation
 
-> Date : 2026-07-15 — mise à jour 2026-08-10 (étapes 1, 2 et 3 faites : F1, F2, F6, F7, F8, F11, F12, F14 résolus ; étape 5 réécrite à partir de la stack Docker existante, nouvelle faille F15). **Reste à faire : étapes 4 à 8** (F3, F4, F5, F9, F10, F13, F15).
+> Date : 2026-07-15 — mise à jour 2026-08-10 (étapes 1, 2 et 3 faites : F1, F2, F6, F7, F8, F11, F12, F14 résolus ; étape 3 durcie après revue — IP réelle du client, comptage atomique, journal `auth_events` append-only qui pose le socle de l'étape 7 ; étape 5 réécrite à partir de la stack Docker existante, nouvelle faille F15). **Reste à faire : étapes 4, 5, 6, 8 et la fin de la 7** (F3, F4 partiel, F5, F9, F10, F13, F15).
 > Périmètre : backend Flask (`services/api_server.py`), frontend React/Vite, base auth `config/users.db`.
 > Contexte : jeu hobby, aujourd'hui local (WSL2), **bientôt exposé sur Internet pour des tests publics**.
 
@@ -38,7 +38,7 @@ Menaces retenues :
 | **F12 (ex-haute) — inscription ouverte** | **Résolu (étape 1).** `/api/auth/register` **supprimée** (0 occurrence) ; comptes créés manuellement en SQL. | vérifié par grep |
 | **F14 (ex-moyenne) — filtre `replay/parse`** | **Résolu (étape 1).** Filtre aligné sur `/api/replay/file` : `.log` imposé, tout séparateur et `..` rejetés. | `api_server.py:4706-4712` |
 | **F2 (ex-haute) — sessions sans expiration** | **Résolu (étape 3).** `sessions.expires_at` NOT NULL, TTL 7 jours **glissant** ; validation `AND s.expires_at > ?` ; purge des échues au login ; `/api/auth/logout` révoque immédiatement. | `api_server.py` (`_SESSIONS_TABLE_SQL`, `_get_authenticated_user_or_response`, `_renew_session_if_stale`, `logout_user`) |
-| **F8 (ex-haute) — pas de rate limiting** | **Résolu (étape 3).** Table `login_attempts` : 5 échecs par (login, IP) sur 60 s → 429, contrôlé **avant** PBKDF2. | `api_server.py` (`_count_recent_login_failures`, `login_user`) |
+| **F8 (ex-haute) — pas de rate limiting** | **Résolu (étape 3, durci le 2026-08-10).** Journal `auth_events` : 5 tentatives par (login, IP réelle) sur 60 s → 429, comptage et inscription dans une même transaction `BEGIN IMMEDIATE`, **avant** PBKDF2. | `api_server.py` (`_count_login_attempts_since_success`, `_client_ip`, `login_user`) |
 
 ### Failles identifiées
 
@@ -51,7 +51,7 @@ Menaces retenues :
 | F15 | **Haute** | Backend conteneurisé injoignable + tournant en root | Constaté le 2026-08-10 : `app.run(host='127.0.0.1')` dans un conteneur n'écoute que sur le loopback **du conteneur** → ni le mapping `5001:5001` ni le `proxy_pass http://backend:5001/` de nginx ne l'atteignent. Et `docker-compose.yml` force `user: "0:0"`, ce qui annule le `USER appuser` du `Dockerfile` : le process tourne en root. | `Dockerfile`, `docker-compose.yml`, `frontend/Dockerfile` |
 | F3 | Moyenne | CORS ouvert à toutes les origines | `CORS(app, ...)` sans `origins` = `*`. | `api_server.py:1432` |
 | F10 | Moyenne | Traceback complet renvoyé au client | Le handler global d'exceptions renvoie type + message + traceback dans la réponse JSON → révèle chemins, structure du code, versions. Utile en dev, à désactiver en prod (log serveur uniquement). | `api_server.py:1438` |
-| F4 | Faible→Moyenne | Pas de journal d'audit | Aucune trace des logins réussis/échoués, IP, créations d'utilisateurs. Indispensable pour détecter une attaque en cours une fois exposé. | — |
+| F4 | Faible→Moyenne | Journal d'audit partiel | `auth_events` trace désormais tentatives, succès, échecs, refus et déconnexions avec l'IP réelle. Manquent les événements d'administration (aucun chemin de code aujourd'hui) et toute exploitation du journal. | `api_server.py` (`_record_auth_event`) |
 | F5 | Faible | Pas d'analyse automatisée | Aucun outil statique (bandit, pip-audit, npm audit) dans le workflow. | — |
 
 ---
@@ -140,12 +140,25 @@ Ordre = priorité. **Les étapes 1 à 5 sont des prérequis absolus avant toute 
 - Purge des sessions échues au login (pas à chaque requête : ce serait la même écriture systématique que ci-dessus).
 
 **Rate limiting du login (F8)**
-- **Compteur maison en base** (`login_attempts`), et non `flask-limiter` comme prévu initialement. Motif : le stockage par défaut de `flask-limiter` est la mémoire du process, ce qui devient faux dès que l'étape 5 met un WSGI multi-workers — chaque worker aurait son compteur, donc N fois la limite réelle. Le compteur en base est juste avant comme après l'étape 5, évite une dépendance, et pose la table que l'étape 7 (journal d'audit) devra construire de toute façon.
-- 5 échecs par couple (login, IP) sur une fenêtre de 60 s → 429. Contrôlé **avant** la vérification du mot de passe : PBKDF2 à 200 000 itérations est le coût dominant, le laisser s'exécuter offrirait un déni de service en prime.
-- Le plafond bloque le couple, y compris avec le **bon** mot de passe : sinon un attaquant qui le trouve passerait malgré la limitation. Un login réussi sous le plafond remet le compteur à zéro.
-- `X-Forwarded-For` délibérément **ignoré** : falsifiable par le client tant qu'aucun proxy de confiance n'existe, le lire donnerait un moyen de remettre le compteur à zéro à chaque tentative. À reprendre en étape 7, une fois l'étape 5 faite.
+- **Compteur maison en base**, et non `flask-limiter` comme prévu initialement. Motif : le stockage par défaut de `flask-limiter` est la mémoire du process, ce qui devient faux dès que l'étape 5 met un WSGI multi-workers — chaque worker aurait son compteur, donc N fois la limite réelle. Le compteur en base est juste avant comme après l'étape 5, et évite une dépendance.
+- 5 tentatives par couple (login, IP) sur une fenêtre de 60 s → 429. Contrôlé **avant** la vérification du mot de passe : PBKDF2 à 200 000 itérations est le coût dominant, le laisser s'exécuter offrirait un déni de service en prime.
+- Le plafond bloque le couple, y compris avec le **bon** mot de passe : sinon un attaquant qui le trouve passerait malgré la limitation. Un login réussi sous le plafond rend les tentatives antérieures non comptables.
 
-**Tests :** `tests/unit/services/test_api_session_hardening.py` (12 tests). Chaque verrou a sa **preuve rouge** : défaut remis → test rouge, pour les six invariants (expiration, seuil de renouvellement, migration, plafond, remise à zéro, révocation). Deux tests ne verrouillaient rien à la première écriture et ont été corrigés : l'un observait `expires_at` là où un renouvellement inutile réécrit la même valeur (il compte désormais les connexions d'écriture), l'autre ne consommait pas assez du budget d'échecs pour distinguer les deux comportements.
+#### Durcissement du 2026-08-10 (suite de `/code-review` et `/simplify`)
+
+Trois défauts réels trouvés en revue, tous corrigés ; le lot a aussi remplacé la table de comptage.
+
+- **IP du proxy prise pour celle du client — le plus grave.** `remote_addr` vaut la même valeur pour TOUS les utilisateurs dès qu'un proxy est devant, et il y en a toujours un : `vite.config.ts` en développement, le nginx de `frontend/Dockerfile` en conteneur. La clé (login, IP) dégénérait donc en (login) : cinq essais ratés suffisaient à verrouiller le compte de n'importe qui — la protection F8 se retournait en déni de service sur les comptes. `_client_ip()` lit désormais `X-Forwarded-For`, **uniquement** si la requête vient d'une adresse listée dans `W40K_TRUSTED_PROXIES`, en parcourant la chaîne de droite à gauche (la partie gauche est écrite par le client). Variable non définie = aucun proxy de confiance ; définie mais vide = erreur au démarrage. Un proxy de confiance qui ne pose pas l'en-tête lève une erreur explicite plutôt que de ranger tout le monde dans le même seau.
+- **Comptage non atomique.** Le total était lu hors transaction, puis PBKDF2 s'exécutait, puis l'échec était écrit. Werkzeug crée un thread par requête : N tentatives simultanées lisaient toutes le même total, passaient toutes le plafond et lançaient toutes PBKDF2 — exactement le déni de service que le contrôle est censé empêcher. Comptage et inscription tiennent maintenant dans une seule transaction `BEGIN IMMEDIATE`, ce qui impose de poser le verrou d'écriture avant la lecture. La tentative est donc inscrite **avant** la vérification du mot de passe : c'est la condition pour qu'elle partage cette transaction.
+- **Purge non indexée.** `WHERE attempted_at <= ?` ne pouvait pas se servir de l'index composite, dont ce n'était pas la colonne de tête : chaque échec balayait toute la table, sous verrou exclusif. Index dédié ajouté (vérifié à l'`EXPLAIN QUERY PLAN` : `SCAN` → `SEARCH`).
+
+**`login_attempts` remplacée par `auth_events` (append-only).** L'ancienne table s'effaçait à la fenêtre du rate limiting (60 s) : elle ne pouvait donc pas servir de journal, et l'étape 7 aurait dû créer une seconde table quasi identique, avec deux écritures sur les mêmes chemins et deux versions de « qui a tenté de se connecter ». `auth_events(id, occurred_at, event, login, ip, details)` porte les deux usages. Le journal étant append-only, un succès ne peut plus **effacer** les tentatives : il les rend non comptables, via une borne sur l'`id` du dernier `login_success` (borne sur l'`id` et non sur l'horodatage — succès et échec peuvent tomber dans la même seconde). Rétention 30 jours, purgée au login réussi.
+
+La **tentative** est distincte de son **issue** : `login_attempt` porte le comptage, `login_success` / `login_failure` portent la traçabilité. Sans cette séparation, chaque connexion réussie laissait dans le journal un échec provisoire qui n'avait jamais eu lieu. `rate_limited` est un événement à part : le compter comme une tentative ferait s'auto-prolonger le blocage indéfiniment.
+
+**Couche d'écriture partagée.** `auth_db_write_cursor()` (commit en sortie, rollback sur exception, fermeture garantie, `BEGIN IMMEDIATE` optionnel) répond au `auth_db_read_cursor()` existant, dont le docstring nommait déjà l'asymétrie. `login_user` comptait quatre `commit()` sur quatre sorties ; le commit vit maintenant à un seul endroit.
+
+**Tests :** `tests/unit/services/test_api_session_hardening.py` (27 tests), **preuve rouge sur 16 verrous**. Quatre tests ne verrouillaient rien au moment de leur écriture et ont été corrigés : deux à la livraison initiale (l'un observait `expires_at` là où un renouvellement inutile réécrit la même valeur, l'autre ne consommait pas assez du budget d'échecs), un troisième a cessé de voir quoi que ce soit quand les écritures sont passées par le context manager — son compteur visait l'ancienne fonction — et le quatrième ne couvrait pas `BEGIN IMMEDIATE`, qui n'était donc verrouillé par rien. Un test compare désormais le schéma produit par `initialize_auth_db()` à celui du script de référence `Documentation/Memoire/Annexe_script_BDD_auth.sql`, qui avait divergé en silence.
 
 **Validation :** token expiré forcé en SQL → 401 ; 6 logins ratés en rafale → 429 ; logout → token refusé immédiatement. Runtime PvP à valider (déconnexion depuis le menu).
 
@@ -179,7 +192,8 @@ Ordre = priorité. **Les étapes 1 à 5 sont des prérequis absolus avant toute 
 - Retirer le `ports: 5001:5001` du backend : seul le frontend (nginx) doit être publié. Le backend reste joignable par le réseau interne compose.
 - TLS sur nginx : certificat Let's Encrypt (companion certbot, ou bascule sur Caddy qui l'automatise), `listen 443 ssl`, redirection 80→443. La config nginx est aujourd'hui écrite en `printf` dans le `Dockerfile` — la sortir en fichier versionné avant de la complexifier.
 - Ne jamais exposer : `config/users.db`, `ai/models/`, le repo git. NB : `COPY . /app` embarque **tout le dépôt** dans l'image, `.git` compris s'il n'est pas exclu — vérifier/écrire un `.dockerignore`.
-- Une fois nginx en place, F4 (étape 7) peut lire `X-Forwarded-For` : il est déjà posé par le proxy.
+- **Renseigner `W40K_TRUSTED_PROXIES`** avec l'adresse du conteneur nginx. Sans elle, `_client_ip()` retombe sur `remote_addr`, qui vaut l'IP du proxy pour tous les utilisateurs : le rate limiting du login perd sa composante IP et cinq essais ratés suffisent à verrouiller n'importe quel compte. L'en-tête `X-Forwarded-For` est déjà posé par le nginx du dépôt, c'est la déclaration côté backend qui manque.
+- Le WSGI de production doit rester joignable en **TCP**. `_client_ip()` lève une erreur explicite si `remote_addr` est vide, ce qui est le cas sur un socket UNIX : un déploiement par socket casserait le login au premier appel.
 
 **Validation :** `docker compose up` → frontend en HTTPS fonctionnel, HTTP redirigé, port 5001 **non** accessible depuis l'hôte, `docker exec ... whoami` → `appuser`, healthcheck vert.
 
@@ -191,13 +205,19 @@ Ordre = priorité. **Les étapes 1 à 5 sont des prérequis absolus avant toute 
 
 **Validation :** script exécutable, findings critiques traités.
 
-### Étape 7 — Journal d'audit (F4)
-**Fichier :** `services/api_server.py`
-- Table `audit_log (id, timestamp_utc, event, login, ip, details)` dans `users.db`.
-- Événements : `login_success`, `login_failure`, `logout`, `user_created`, `profile_changed`, `password_changed`, `rate_limited`.
-- IP réelle derrière le reverse proxy : lire `X-Forwarded-For` **uniquement** si la requête vient du proxy.
+### Étape 7 — Journal d'audit (F4) 🟨 socle posé le 2026-08-10
 
-**Validation :** login réussi + raté → deux lignes avec IP correcte.
+**Déjà fait (livré avec le durcissement de l'étape 3, pas en anticipation gratuite : le rate limiting avait besoin des mêmes lignes)**
+- Table `auth_events (id, occurred_at, event, login, ip, details)` dans `users.db`, **append-only**, rétention 30 jours.
+- Événements écrits : `login_attempt`, `login_success`, `login_failure`, `rate_limited`, `logout`.
+- IP réelle derrière le reverse proxy : `_client_ip()` lit `X-Forwarded-For` uniquement depuis un proxy listé dans `W40K_TRUSTED_PROXIES`, chaîne parcourue de droite à gauche.
+
+**Reste à faire**
+- Événements `user_created`, `profile_changed`, `password_changed` : ils n'ont aujourd'hui **aucun chemin de code** — les comptes sont créés à la main en SQL (décision F12). Ils n'apparaîtront que le jour où une route d'administration existera ; les écrire avant serait du code mort.
+- Exploitation : au minimum une requête ou un petit script de lecture du journal. Une table que personne ne lit ne détecte rien.
+- Renseigner `W40K_TRUSTED_PROXIES` au déploiement (étape 5) — sans lui, l'IP journalisée est celle du proxy pour tout le monde.
+
+**Validation :** login réussi + raté → lignes correspondantes avec l'IP du client, pas celle du proxy.
 
 ### Étape 8 — Passe finale avant ouverture
 - Scan dynamique baseline (OWASP ZAP) contre l'instance de test.
@@ -224,11 +244,11 @@ Ordre = priorité. **Les étapes 1 à 5 sont des prérequis absolus avant toute 
 | — | F1 (debugger Werkzeug) | ✅ Résolu | ≤2026-08-02 |
 | 1. Auth sur toutes les routes | F6, F12, F14 | ✅ Fait — vérifié dans le code le 2026-08-10 (30 routes, porte globale, `register` supprimée, `apiFetch`) | 2026-08-02 |
 | 2. Fermer vecteurs écriture/désérialisation | F7, F11 | ✅ Fait (runtime PvP validé) | 2026-08-10 |
-| 3. Durcissement sessions + rate limiting | F2, F8 | ✅ Fait (12 tests, preuve rouge sur 6 verrous ; runtime PvP à valider) | 2026-08-10 |
+| 3. Durcissement sessions + rate limiting | F2, F8 | ✅ Fait, puis durci après revue (27 tests, preuve rouge sur 16 verrous ; runtime PvP à valider) | 2026-08-10 |
 | 4. Réduction surface d'information | F3, F10, F13 | ⬜ À faire | — |
 | 5. Infra d'exposition (WSGI + proxy + TLS) | F9, F15 | 🟨 Partiel — stack Docker + nginx existante (non documentée jusqu'au 2026-08-10), mais dev server, root et sans TLS ; **ne pas déployer en l'état** | — |
 | 6. Analyse statique | F5 | ⬜ À faire | — |
-| 7. Journal d'audit | F4 | ⬜ À faire | — |
+| 7. Journal d'audit | F4 | 🟨 Socle posé (`auth_events` append-only + IP réelle) ; reste les événements d'administration et l'exploitation | 2026-08-10 |
 | 8. Passe finale (ZAP, MFA ?, comptes) | — | ⬜ À faire | — |
 
 **Jalon : ne pas exposer sur Internet avant la fin de l'étape 5.**

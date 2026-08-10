@@ -1,24 +1,34 @@
 """Durcissement des sessions et rate limiting du login (F2, F8) — `Documentation/Implémentation/Security.md`.
 
-Verrouille quatre invariants :
+Verrouille sept invariants :
 1. une session échue n'authentifie plus (avant : `WHERE s.token = ?` seul, token valide à vie) ;
 2. une session vivante voit son échéance repoussée, mais SANS écrire à chaque requête ;
-3. le login se ferme après `LOGIN_ATTEMPT_MAX_FAILURES` échecs dans la fenêtre ;
-4. le logout révoque immédiatement, sans attendre l'expiration.
+3. le login se ferme après `LOGIN_ATTEMPT_MAX_FAILURES` tentatives dans la fenêtre ;
+4. le logout révoque immédiatement, sans attendre l'expiration ;
+5. l'IP retenue est celle du CLIENT, pas celle du proxy — sinon la clé du rate limiting perd
+   sa composante IP et cinq essais ratés verrouillent le compte de n'importe qui ;
+6. la tentative est inscrite AVANT la vérification du mot de passe, ce qui la place dans la
+   même transaction que le comptage et rend le plafond atomique ;
+7. le journal `auth_events` est append-only : un succès rend les tentatives non comptables
+   sans les détruire, et aucun échec fictif n'est inventé sur une connexion réussie.
 
 Chaque test CONSTRUIT l'état qu'il observe (échéance forcée en SQL, échecs répétés
-réellement émis) : rien n'est espéré d'un ordre d'exécution ou d'une horloge.
+réellement émis, en-têtes de proxy posés explicitement) : rien n'est espéré d'un ordre
+d'exécution, d'une horloge ou d'une configuration ambiante.
 """
 
 from __future__ import annotations
 
 import sqlite3
 import time
+from contextlib import contextmanager
+from pathlib import Path
 
 import pytest
 
 import services.api_server as api_server
 from services.api_server import app
+from shared.data_validation import ConfigurationError
 
 
 def _connect() -> sqlite3.Connection:
@@ -103,6 +113,55 @@ class TestSchema:
         assert survivors == 0
 
 
+class TestReferenceScriptMatchesProduction:
+    """Le script de référence `Documentation/Memoire/Annexe_script_BDD_auth.sql` doit décrire
+    LE MÊME schéma que `initialize_auth_db()`.
+
+    Il avait silencieusement divergé (`created_at TEXT`, pas d'`expires_at`, pas de journal) :
+    une base recréée à partir de lui produisait exactement le schéma que la migration détruit
+    au démarrage, et le rate limiting tombait sur une table absente. Rien ne le signalait —
+    d'où ce test, qui compare les deux au lieu de faire confiance à la relecture.
+    """
+
+    @staticmethod
+    def _schema_of(db_path) -> set:
+        connection = sqlite3.connect(db_path)
+        try:
+            return {
+                " ".join(row[0].split())
+                for row in connection.execute(
+                    "SELECT sql FROM sqlite_master WHERE sql IS NOT NULL"
+                )
+            }
+        finally:
+            connection.close()
+
+    def test_reference_script_produces_the_production_schema(self, tmp_path, monkeypatch):
+        script = (
+            Path(__file__).resolve().parents[3]
+            / "Documentation" / "Memoire" / "Annexe_script_BDD_auth.sql"
+        )
+        assert script.exists(), f"script de référence introuvable : {script}"
+
+        from_script = tmp_path / "from_script.db"
+        connection = sqlite3.connect(from_script)
+        try:
+            connection.executescript(script.read_text(encoding="utf-8"))
+            connection.commit()
+        finally:
+            connection.close()
+
+        from_code = tmp_path / "from_code.db"
+        monkeypatch.setattr(api_server, "AUTH_DB_PATH", str(from_code))
+        api_server.initialize_auth_db()
+
+        missing = self._schema_of(from_code) - self._schema_of(from_script)
+        assert not missing, (
+            "le script de référence ne crée pas ces objets produits par initialize_auth_db : "
+            f"{sorted(missing)}"
+        )
+
+
 class TestExpiredSessionRejected:
 
     def test_expired_session_returns_401(self, authenticated_api_client):
@@ -126,21 +185,28 @@ class TestSlidingRenewal:
 
     @staticmethod
     def _count_write_connections(monkeypatch) -> list[int]:
-        """Compte les connexions d'ÉCRITURE ouvertes pendant la requête.
+        """Compte les ouvertures de transaction d'ÉCRITURE pendant la requête.
 
         Observer `expires_at` ne suffirait pas : sur une session fraîche, un renouvellement
         inutile réécrit la MÊME valeur (`now + TTL`), donc la colonne ne bouge pas et le test
         resterait vert alors que l'écriture — le coût que le seuil existe pour éviter — a bien
         eu lieu. Mesuré : sans ce compteur, retirer le seuil ne fait échouer aucun test.
+
+        L'instrument suit `auth_db_write_cursor`, le point de passage UNIQUE des écritures.
+        Il visait auparavant `_get_auth_db_connection` : quand le code est passé au context
+        manager partagé, il a cessé de voir quoi que ce soit — un compteur qui ne compte plus
+        rien rend un test vert. C'est ce test qui l'a signalé en devenant rouge.
         """
         opened: list[int] = []
-        original = api_server._get_auth_db_connection
+        original = api_server.auth_db_write_cursor
 
-        def counting_connection():
+        @contextmanager
+        def counting_writer(*args, **kwargs):
             opened.append(1)
-            return original()
+            with original(*args, **kwargs) as cursor:
+                yield cursor
 
-        monkeypatch.setattr(api_server, "_get_auth_db_connection", counting_connection)
+        monkeypatch.setattr(api_server, "auth_db_write_cursor", counting_writer)
         return opened
 
     def test_stale_session_is_renewed(self, authenticated_api_client, monkeypatch):
@@ -231,6 +297,220 @@ class TestLoginRateLimit:
 
         expires_at = _session_row(issued)["expires_at"]
         assert expires_at == pytest.approx(int(time.time()) + api_server.SESSION_TTL_SECONDS, abs=5)
+
+
+class TestClientIp:
+    """`_client_ip` décide de la clé du rate limiting. S'il rend la même valeur pour tout le
+    monde, cinq essais ratés verrouillent le compte de n'importe qui : la protection F8 se
+    retourne en déni de service. Le front passe TOUJOURS par un proxy (Vite en dev, nginx en
+    conteneur), donc ce n'est pas un cas de bord."""
+
+    @staticmethod
+    def _ip_for(monkeypatch, *, trusted, remote_addr, forwarded=None):
+        monkeypatch.setattr(api_server, "TRUSTED_PROXIES", frozenset(trusted))
+        headers = {"X-Forwarded-For": forwarded} if forwarded is not None else {}
+        with app.test_request_context("/api/auth/login", environ_base={"REMOTE_ADDR": remote_addr},
+                                      headers=headers):
+            return api_server._client_ip()
+
+    def test_direct_connection_uses_remote_addr(self, monkeypatch):
+        assert self._ip_for(monkeypatch, trusted=[], remote_addr="203.0.113.7") == "203.0.113.7"
+
+    def test_forwarded_header_ignored_from_untrusted_source(self, monkeypatch):
+        """Sans proxy déclaré, `X-Forwarded-For` est de la donnée client : la suivre offrirait
+        un compteur neuf à chaque tentative."""
+        got = self._ip_for(
+            monkeypatch, trusted=[], remote_addr="203.0.113.7", forwarded="1.2.3.4"
+        )
+        assert got == "203.0.113.7"
+
+    def test_forwarded_header_used_from_trusted_proxy(self, monkeypatch):
+        """Derrière un proxy déclaré, c'est l'IP du client qui compte, pas celle du proxy —
+        sinon tous les utilisateurs partagent un seul seau."""
+        got = self._ip_for(
+            monkeypatch, trusted=["10.0.0.1"], remote_addr="10.0.0.1", forwarded="203.0.113.7"
+        )
+        assert got == "203.0.113.7"
+
+    def test_chain_is_walked_right_to_left(self, monkeypatch):
+        """La partie gauche de la chaîne est écrite par le client : seul le premier élément
+        non fiable en partant de la DROITE est croyable."""
+        got = self._ip_for(
+            monkeypatch,
+            trusted=["10.0.0.1", "10.0.0.2"],
+            remote_addr="10.0.0.1",
+            forwarded="9.9.9.9, 203.0.113.7, 10.0.0.2",
+        )
+        assert got == "203.0.113.7"
+
+    def test_trusted_proxy_without_usable_header_raises(self, monkeypatch):
+        """Proxy de confiance qui n'a pas posé l'en-tête : erreur explicite. Se rabattre sur
+        `remote_addr` rangerait tout le monde dans le même seau — le repli silencieux
+        exactement là où il fait le plus de dégâts."""
+        with pytest.raises(RuntimeError, match="X-Forwarded-For"):
+            self._ip_for(monkeypatch, trusted=["10.0.0.1"], remote_addr="10.0.0.1")
+
+    def test_empty_env_var_is_a_startup_error(self, monkeypatch):
+        """Variable définie mais vide = faute de configuration, pas « aucun proxy »."""
+        monkeypatch.setenv("W40K_TRUSTED_PROXIES", "  ,  ")
+        with pytest.raises(ConfigurationError):
+            api_server._resolve_trusted_proxies()
+
+    def test_unset_env_var_trusts_nobody(self, monkeypatch):
+        monkeypatch.delenv("W40K_TRUSTED_PROXIES", raising=False)
+        assert api_server._resolve_trusted_proxies() == frozenset()
+
+
+class TestAuthEventsJournal:
+    """Le journal est append-only : c'est ce qui permet au rate limiting et à la traçabilité
+    (étape 7) de vivre sur une seule table, avec une seule écriture par événement."""
+
+    @staticmethod
+    def _events(login="pytest_user"):
+        connection = _connect()
+        try:
+            return [
+                (row["event"], row["ip"])
+                for row in connection.execute(
+                    "SELECT event, ip FROM auth_events WHERE login = ? ORDER BY id", (login,)
+                )
+            ]
+        finally:
+            connection.close()
+
+    def test_failure_then_success_are_both_kept(self, authenticated_api_client):
+        """Le succès ne DÉTRUIT pas l'échec qui le précède — il le rend non comptable.
+        Un compteur qui s'efface ne peut pas servir de journal."""
+        client = app.test_client()
+        client.post("/api/auth/login", json={"login": "pytest_user", "password": "wrong"})
+        client.post("/api/auth/login", json={"login": "pytest_user", "password": "pytest_password"})
+
+        events = [event for event, _ in self._events()]
+        assert events == [
+            "login_attempt", "login_failure",   # essai raté : tentative puis issue
+            "login_attempt", "login_success",   # essai réussi : AUCUN échec inventé
+        ]
+
+    def test_rate_limited_is_recorded_as_its_own_event(self, authenticated_api_client):
+        """Un refus n'est pas un essai : le compter comme `login_failure` ferait s'auto-
+        prolonger le blocage indéfiniment."""
+        client = app.test_client()
+        for _ in range(api_server.LOGIN_ATTEMPT_MAX_FAILURES + 1):
+            client.post("/api/auth/login", json={"login": "pytest_user", "password": "wrong"})
+
+        events = [event for event, _ in self._events()]
+        assert events.count("login_attempt") == api_server.LOGIN_ATTEMPT_MAX_FAILURES
+        assert events.count("login_failure") == api_server.LOGIN_ATTEMPT_MAX_FAILURES
+        assert events.count("rate_limited") == 1
+
+    def test_logout_is_journaled(self, authenticated_api_client):
+        app.test_client().post("/api/auth/logout")
+        assert "logout" in [event for event, _ in self._events()]
+
+    def test_attempt_is_recorded_before_password_verification(self, authenticated_api_client, monkeypatch):
+        """L'inscription précède PBKDF2 — c'est ce qui la place dans la MÊME transaction que
+        le comptage, donc ce qui rend le plafond atomique.
+
+        Vérifier l'ordre plutôt que la concurrence : un test à threads dépendrait d'un
+        entrelacement, et prouverait donc quelque chose de différent à chaque exécution.
+        """
+        seen: list[int] = []
+        original = api_server._verify_password
+
+        def spying_verify(password, password_hash):
+            connection = _connect()
+            try:
+                seen.append(
+                    connection.execute(
+                        "SELECT COUNT(*) FROM auth_events WHERE event = 'login_attempt'"
+                    ).fetchone()[0]
+                )
+            finally:
+                connection.close()
+            return original(password, password_hash)
+
+        monkeypatch.setattr(api_server, "_verify_password", spying_verify)
+        app.test_client().post(
+            "/api/auth/login", json={"login": "pytest_user", "password": "pytest_password"}
+        )
+
+        assert seen == [1], (
+            "la tentative doit être committée AVANT la vérification du mot de passe ; "
+            f"vu depuis PBKDF2 : {seen}"
+        )
+
+    def test_counting_holds_the_write_lock(self, authenticated_api_client, monkeypatch):
+        """Le comptage se fait DANS une transaction d'écriture déjà verrouillée.
+
+        C'est le cœur de l'atomicité du plafond : sans `BEGIN IMMEDIATE`, SQLite ne pose le
+        verrou qu'à la première écriture, et N requêtes concurrentes lisent alors le même
+        total, passent toutes, et lancent toutes PBKDF2 — le déni de service que le contrôle
+        est censé empêcher. Werkzeug crée un thread par requête, ce parallélisme est réel.
+
+        Observé sans concurrence, donc sans dépendre d'un entrelacement : depuis l'intérieur
+        du comptage, une SECONDE connexion qui tente d'écrire immédiatement doit se heurter au
+        verrou. En transaction différée, elle l'obtiendrait.
+        """
+        blocked: list[bool] = []
+        original = api_server._count_login_attempts_since_success
+
+        def probing_count(cursor, login, ip, now):
+            rival = sqlite3.connect(api_server.AUTH_DB_PATH, timeout=0)
+            try:
+                rival.execute("BEGIN IMMEDIATE")
+                blocked.append(False)
+            except sqlite3.OperationalError:
+                blocked.append(True)
+            finally:
+                rival.close()
+            return original(cursor, login, ip, now)
+
+        monkeypatch.setattr(api_server, "_count_login_attempts_since_success", probing_count)
+        app.test_client().post(
+            "/api/auth/login", json={"login": "pytest_user", "password": "wrong"}
+        )
+
+        assert blocked == [True], (
+            "le comptage ne tient pas le verrou d'écriture : deux logins concurrents "
+            "peuvent lire le même total et passer tous les deux le plafond"
+        )
+
+    def test_retention_purges_old_events(self, authenticated_api_client):
+        """La purge suit la rétention (30 j), pas la fenêtre du rate limiting (60 s)."""
+        connection = _connect()
+        try:
+            connection.execute(
+                "INSERT INTO auth_events (occurred_at, event, login, ip) VALUES (?, ?, ?, ?)",
+                (int(time.time()) - api_server.AUTH_EVENT_RETENTION_SECONDS - 10,
+                 "login_failure", "ancien", "1.1.1.1"),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        app.test_client().post(
+            "/api/auth/login", json={"login": "pytest_user", "password": "pytest_password"}
+        )
+
+        assert self._events("ancien") == []
+
+    def test_recent_events_survive_the_purge(self, authenticated_api_client):
+        """Contre-épreuve : sans elle, une purge qui efface TOUT passerait le test ci-dessus."""
+        connection = _connect()
+        try:
+            connection.execute(
+                "INSERT INTO auth_events (occurred_at, event, login, ip) VALUES (?, ?, ?, ?)",
+                (int(time.time()) - 60, "login_failure", "recent", "1.1.1.1"),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        app.test_client().post(
+            "/api/auth/login", json={"login": "pytest_user", "password": "pytest_password"}
+        )
+
+        assert self._events("recent") != []
 
 
 class TestLogout:
