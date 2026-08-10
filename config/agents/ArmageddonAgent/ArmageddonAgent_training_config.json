@@ -597,10 +597,10 @@
     }
   },
   "x5_append": {
-    "type": "################################################### x5 — curriculum phase 2 (board 44x60x5, scale ×5) ###################################################",
+    "type": "################################################### x5_append — PROLONGATION d'un run x5_long (board 44x60x5, scale x5) ###################################################",
     "seed": 12345,
     "total_episodes": 30000,
-    "total_episodes_normal": "50000 : 0.1s/ep -> 36k ep / hour -> 100k ep / 2h30",
+    "total_episodes_normal": "30000 : 0.1s/ep -> 36k ep / hour, soit ~50 min. Ce profil ne demarre PAS un apprentissage : il PROLONGE le modele produit par x5_long (meme plateau, memes bots, meme tache). Tous ses hyperparametres reprennent donc x5_long LA OU IL S'ARRETE -- learning_rate et ent_coef a leur plancher, architecture identique -- au lieu de relancer une rampe. Avant le 2026-08-10 il enchainait sur un run x1 (transition de curriculum x1 -> x5), ce qui justifiait un learning_rate re-echauffe et une remise a zero des stats VecNormalize ; ce n'est plus le cas, et les deux sont devenus des defauts.",
     "agent_seat_mode": "random",
     "eval_episodes": 10,
     "n_envs": 48,
@@ -608,8 +608,8 @@
     "model_params": {
       "policy": "MultiInputPolicy",
       "learning_rate": {
-        "initial": 0.0005,
-        "final": 0.0003,
+        "initial": 0.0002,
+        "final": 0.0002,
         "decay_fraction": 1.0
       },
       "n_steps": 8192,
@@ -621,24 +621,29 @@
       "clip_range_vf": null,
       "normalize_advantage": true,
       "ent_coef": {
-        "start": 0.1,
-        "end": 0.1,
+        "start": 0.01,
+        "end": 0.01,
         "decay_fraction": 1.0
       },
       "vf_coef": 1.0,
       "max_grad_norm": 0.5,
-      "target_kl": 0.018,
+      "target_kl": 0.02,
       "tensorboard_log": "./tensorboard/",
       "policy_kwargs": {
         "net_arch": [
-          320,
-          320
+          512,
+          512
         ],
         "features_extractor_kwargs": {
           "cnn_features": 256
         }
       },
       "verbose": 0
+    },
+    "model_params_normal": {
+      "learning_rate_normal": "---------------------------------- PLAT au plancher de x5_long (0.0002), et non une rampe : x5_long a DELIBEREMENT recuit son learning_rate jusqu'a ce plancher (decay_fraction 0.7, atteint a 140 000 episodes) parce que c'est ce recuit qui stabilise la politique en fin de run. Redemarrer la prolongation a 0.0005 -- le reglage d'avant le 2026-08-10, quand x5_append enchainait sur un run x1 -- reviendrait a defaire ce recuit : 2,5x le pas de gradient sur un modele deja converge, soit le regime ou l'oubli catastrophique se declenche (piege connu du projet). La tache est ICI RIGOUREUSEMENT LA MEME que celle de x5_long (meme plateau, memes bots, meme roster) : rien ne justifie de reapprendre vite. Un re-echauffement ne se justifierait que si la prolongation changeait la tache ; c'est le cas de x1_selfplay (0.0005 -> 0.0001), qui introduit le self-play, pas le nôtre.",
+      "ent_coef_normal": "---------------------------------- PLAT au plancher de x5_long (0.01), meme raison que le learning_rate. Avant le 2026-08-10 ce profil tenait 0.1 -> 0.1, c'est-a-dire l'entropie d'un modele VIERGE maintenue pendant 30 000 episodes sur un modele deja entraine : la politique continuait d'explorer au lieu d'exploiter, exactement ce que la rampe d'entropie de x5_long (decay_fraction 0.4, plancher atteint a 80 000 episodes) avait passe la moitie du run a lui faire arreter. C'est le seul des quatre defauts corriges ici qui avait un effet MESURABLE sur l'apprentissage : contrairement a net_arch et target_kl, ent_coef est bien reapplique au modele charge (train.py:2809).",
+      "target_kl_normal": "---------------------------------- 0.02 comme tous les autres profils (0.018 jusqu'au 2026-08-10, sans justification ecrite). ATTENTION, cette cle n'est PAS reappliquee au modele charge : la liste de train.py:2807-2828 ne recopie que learning_rate, ent_coef, clip_range, gamma, gae_lambda, n_steps, batch_size, n_epochs, vf_coef et max_grad_norm. Sur un --append c'est donc le target_kl du ZIP qui pilote, et la valeur ecrite ici ne sert qu'a deux choses : la branche de repli (creation d'un modele neuf) et la lecture humaine. Une valeur divergente y est donc un MENSONGE silencieux, pas un reglage."
     },
     "callback_params": {
       "bot_eval_scenario_pool": "holdout",
@@ -654,7 +659,8 @@
       "eval_render": false,
       "bot_eval_freq": 2000,
       "bot_eval_use_episodes": true,
-      "bot_eval_intermediate": 100,
+      "bot_eval_intermediate": 10,
+      "bot_eval_intermediate_normal": "---------------------------------- 10 (100 jusqu'au 2026-08-10) : ce nombre d'episodes PAR BOT est paye a CHAQUE evaluation intermediaire, et il y en a 15 ici (30 000 episodes / bot_eval_freq 2000). A 100, l'unite coute ~13 min (commit 42326ed0), soit 3 h 15 d'evaluation pour ~50 min d'entrainement : l'evaluation coutait QUATRE FOIS le run qu'elle observe. A 10, ~20 min, soit 40 % du run -- la meme proportion que x1_long, qui tient 4 h 20 d'eval pour 5 h 30 d'entrainement. bot_eval_freq reste a 2000 et non plus haut : le score robuste n'existe qu'a partir de robust_window = 5 evaluations (training_callbacks.py:2029), donc espacer les points au-dela de 2000 sur un run de 30 000 episodes desactiverait purement et simplement save_best_robust. C'est la fenetre de 5, et non la precision d'un point isole, qui porte la robustesse ici.",
       "bot_eval_final": 100,
       "bot_eval_worker_device": "cpu",
       "bot_eval_task_timeout_seconds": 3600,
@@ -666,8 +672,8 @@
       "robust_penalty_hard": 0.0,
       "model_gating_enabled": false,
       "model_gating_min_worst_bot": 0.25,
-      "model_gating_min_worst_scenario_combined": 0.35,
-      "model_gating_min_vs_control": 0.5,
+      "model_gating_min_worst_scenario_combined": 0.3,
+      "model_gating_min_vs_control": 0.3,
       "holdout_hard_opponent_budget_modifier": 1.1,
       "bot_eval_weights": {
         "control": 0.4,
@@ -731,7 +737,8 @@
       "clip_obs": 10.0,
       "clip_reward": 10.0,
       "gamma": 0.99,
-      "reset_on_curriculum": true
+      "reset_on_curriculum": false,
+      "reset_on_curriculum_normal": "---------------------------------- false depuis le 2026-08-10 (true auparavant). Cette cle ECARTE les stats VecNormalize du checkpoint et en cree de neuves (train.py:1809-1814). C'etait juste tant que x5_append enchainait sur un run x1 : changer l'echelle du plateau change la distribution des observations, donc les moyennes/variances accumulees en x1 n'y valaient plus rien. x5_append prolonge desormais un x5_long -- MEME plateau, MEME echelle, MEME distribution. Reinitialiser jetterait 200 000 episodes de statistiques et servirait a la politique chargee des observations normalisees autrement que celles sur lesquelles elle a ete entrainee : le decalage muet decrit en toutes lettres a train.py:1821-1823 (classe de bug V11 §0.35). La cle est conservee, a false, plutot que supprimee : son absence donnerait le meme comportement mais perdrait la raison, et c'est le SEUL profil ou la question se pose."
     },
     "vec_normalize_eval": {
       "enabled": true,

@@ -348,3 +348,59 @@ def test_x1_long_is_x1_recalibrated_for_long_runs(ref_name: str, long_name: str)
         "bot_eval_intermediate",
     }
     assert _comparable(long_cb, overridden) == _comparable(ref_cb, overridden)
+
+
+def test_x5_append_resumes_x5_long_where_it_stopped() -> None:
+    """`x5_append` PROLONGE `x5_long` : il reprend ses planchers, il ne relance pas de rampe.
+
+    Décision du 2026-08-10 : la chaîne est `x5_long` (200 000 ép., modèle neuf) puis `x5_append`
+    (30 000 ép. de plus sur CE modèle). Même plateau, mêmes bots, même tâche — donc reprendre
+    au-dessus des planchers que `x5_long` a mis la moitié de son run à atteindre reviendrait à
+    défaire son recuit, dans le régime exact où l'oubli catastrophique se déclenche.
+
+    Auparavant `x5_append` enchaînait sur un run `x1` (transition de curriculum x1 → x5), ce qui
+    justifiait un `learning_rate` réchauffé, une entropie pleine et un reset des stats
+    VecNormalize. Ces trois réglages sont devenus faux le jour où la chaîne a changé, sans que
+    rien ne le signale : c'est précisément ce que ce test rend impossible à refaire.
+    """
+    append, long = PROFILES["x5_append"], PROFILES["x5_long"]
+
+    # 1. Le MODÈLE est le même objet : seules les deux rampes changent (elles sont aplaties).
+    ramps = {"learning_rate", "ent_coef"}
+    assert _comparable(append["model_params"], ramps) == _comparable(long["model_params"], ramps), (
+        "x5_append doit décrire le MÊME réseau que x5_long. `net_arch` n'est d'ailleurs pas "
+        "réappliqué au modèle chargé (train.py:2807-2828) : une divergence y serait un mensonge "
+        "silencieux, et elle fausserait tout de même le choix du device (train.py:2771) ainsi que "
+        "la branche de repli qui recrée un modèle neuf."
+    )
+
+    # 2. Les deux rampes sont PLATES, au plancher atteint par x5_long.
+    lr, ent = append["model_params"]["learning_rate"], append["model_params"]["ent_coef"]
+    assert lr["initial"] == lr["final"] == long["model_params"]["learning_rate"]["final"]
+    assert ent["start"] == ent["end"] == long["model_params"]["ent_coef"]["end"]
+
+    # 3. Les stats VecNormalize du checkpoint sont CONSERVÉES. `reset_on_curriculum` les écarte
+    # (train.py:1809-1814) : légitime quand l'échelle du plateau change, destructeur ici, où la
+    # distribution des observations est identique — c'est le décalage muet de train.py:1821-1823.
+    assert append["vec_normalize"]["reset_on_curriculum"] is False
+
+    # 4. Le score robuste doit pouvoir exister : il n'apparaît qu'après `robust_window`
+    # évaluations (training_callbacks.py:2029). Espacer les points au-delà désactiverait
+    # `save_best_robust` en silence sur tout le run.
+    cb = append["callback_params"]
+    assert cb["save_best_robust"] is True
+    assert cb["bot_eval_freq"] * cb["robust_window"] <= append["total_episodes"], (
+        f"{cb['robust_window']} évals de {cb['bot_eval_freq']} ép. ne tiennent pas dans "
+        f"{append['total_episodes']} : aucun score robuste ne serait jamais calculé."
+    )
+
+    # 5. Le coût de l'évaluation reste borné par celui de l'entraînement. Une éval intermédiaire
+    # coûte ~13 min à 100 ép./bot (commit 42326ed0), soit ~1,3 min à 10 ; l'entraînement tourne à
+    # 36k ép./h. Le rapport toléré est celui de x1_long (~4 h 20 d'éval pour 5 h 30 de run).
+    n_evals = append["total_episodes"] // cb["bot_eval_freq"]
+    eval_minutes = n_evals * cb["bot_eval_intermediate"] * 0.13
+    train_minutes = append["total_episodes"] / 36_000 * 60
+    assert eval_minutes <= train_minutes, (
+        f"{n_evals} évals × {cb['bot_eval_intermediate']} ép./bot ≈ {eval_minutes:.0f} min "
+        f"d'évaluation pour {train_minutes:.0f} min d'entraînement."
+    )
