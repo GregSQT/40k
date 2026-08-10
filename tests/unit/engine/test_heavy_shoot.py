@@ -175,9 +175,9 @@ def test_le_log_de_tir_affiche_le_token_heavy(monkeypatch):
             "dmg_bonus": r["dmg_bonus"],
             # [PRECISION] : pose a l allocation, absente ici (aucun groupe CHARACTER).
             "precision_applied": False,
-            # Des additionnels [BLAST]/[CLEAVE] : accumules sur le groupe par le vrai
-            # regroupement (ici une seule figurine, donc la valeur de l intent).
-            "extra_dice_by_rule": r["extra_dice_by_rule"],
+            # Regles additives [BLAST]/[CLEAVE] : reunies sur le groupe par le vrai
+            # regroupement (ici une seule figurine, donc l etat de l intent).
+            "additive_rules_applied": r["additive_rules_applied"],
             "point_blank_malus": r["point_blank_malus"],
             "player": 0,
         }

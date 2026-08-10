@@ -40,6 +40,10 @@ from engine.hex_utils import cube_to_offset, offset_to_cube
 # `engine.phase_handlers`.
 from engine.terrain_utils import resolve_model_floor_level, resolved_floor_height_at
 from .shared_utils import (
+    # Libelle de token de [CLEAVE] : la cle de `additive_rules_applied`, lue par l afficheur
+    # partage. Importee et non reecrite en litteral — c est ce qui lie les deux producteurs
+    # (tir et melee) au meme vocabulaire.
+    RULE_LABEL_CLEAVE,
     # Traducteurs de causes de relance et marqueurs de capacite, PARTAGES avec le roller de tir :
     # les inliner est la forme exacte sous laquelle ces deux chemins ont deja diverge.
     resolve_oath_effects,
@@ -4685,19 +4689,20 @@ def _manual_roll_fight_intent(
         "weapon": weapon,
         "attack_profile": _attack_profile,
         # 10.06 est une regle de la phase de TIR : elle n a pas de jumeau en melee. La cle est
-        # ECRITE et non omise, comme `rapid_fire_applied` ci-dessous et pour la meme raison —
-        # c est au producteur d affirmer que la regle ne s applique pas, pas au lecteur de le
-        # deviner par un defaut.
+        # ECRITE et non omise — c est au producteur d affirmer que la regle ne s applique pas,
+        # pas au lecteur de le deviner par un defaut.
         "point_blank_malus": False,
-        # [CLEAVE] 24.06 : des ajoutes par CETTE figurine — la clause « une seule cible » se
-        # juge par figurine, deux porteuses de la meme arme peuvent donc differer. Accumules
-        # sur le groupe, jumeau de [BLAST]/[RAPID FIRE] au tir. [RAPID FIRE] n existe pas en
-        # melee, la table est donc reduite a la seule regle additive de la phase.
-        "extra_dice_by_rule": {"CLEAVE": _cleave_extra_dice} if _cleave_extra_dice > 0 else {},
-        # [RAPID FIRE] 24.30 n'existe qu'au TIR : la melee emet 0, elle ne l'omet pas. La cle de
-        # groupe partagee peut ainsi l'exiger (`require_key`) au lieu de retomber sur un defaut
-        # silencieux — un producteur qui oublierait le champ leverait, comme l'exige T1.
-        "rapid_fire_applied": 0,
+        # [CLEAVE] 24.06 : a-t-elle joue pour CETTE figurine, et avec quel X declare ? La clause
+        # « une seule cible » se juge par figurine, deux porteuses de la meme arme peuvent donc
+        # differer. Reunie sur le groupe, jumeau de [BLAST]/[RAPID FIRE] au tir. La table est
+        # ECRITE meme vide : la cle de groupe partagee l'exige (`require_key`), donc un
+        # producteur qui l'oublierait leve au lieu de valoir « aucune regle », comme l'exige T1.
+        # [RAPID FIRE] n'existe qu'au TIR : son entree n'apparait jamais ici, et le X applique
+        # que la cle de groupe et le step.log y lisent vaut donc 0 pour toute la melee.
+        "additive_rules_applied": (
+            {RULE_LABEL_CLEAVE: _cleave_x}
+            if _cleave_extra_dice > 0 and _cleave_x is not None else {}
+        ),
         # 04.03 IDENTICAL ATTACKS : jumeau exact du roller de tir — la seconde moitie de la
         # definition (« affected by the same applicable abilities and rules ») entre dans la
         # cle de groupe, en melee comme au tir.

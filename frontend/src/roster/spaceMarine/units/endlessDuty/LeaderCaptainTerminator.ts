@@ -24,8 +24,6 @@ export class LeaderCaptainTerminator extends LeaderEliteMeleeElite {
   static RNG_WEAPON_CODES = ["storm_bolter_captain"];
   static RNG_WEAPONS = getWeapons(LeaderCaptainTerminator.RNG_WEAPON_CODES);
 
-  static UNIT_RULES = [{ ruleId: "reroll_charge", displayName: "Unstoppable Valour" }];
-  static RULES_STATUS = { reroll_charge: 2 };
   static UNIT_KEYWORDS = [
     ...CaptainTerminatorRelicFistCombi.UNIT_KEYWORDS,
     { keywordId: "endless_duty" },

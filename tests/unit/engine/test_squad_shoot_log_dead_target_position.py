@@ -86,7 +86,6 @@ def _weapon_group() -> Dict[str, Any]:
         # valent simplement False/0. Les omettre ici rendait le stub infidèle à son propre
         # docstring et faisait lever l'émission, qui les lit en accès direct à juste titre.
         "heavy_applied": False,
-        "rapid_fire_applied": 0,
         # Oath of Moment (08.04) : posées sur TOUS les groupes par la même construction, pour la
         # même raison — l'émission les lit en accès direct (`RR` / token du +1 de blessure).
         "oath_hit_reroll": False,
@@ -100,7 +99,7 @@ def _weapon_group() -> Dict[str, Any]:
         # — état parfaitement produit par le moteur. Les omettre ferait lever l'émission.
         "weapon": {"display_name": "Bolt Rifle", "WEAPON_RULES": []},
         "attack_profile": WeaponAttackProfile(),
-        "extra_dice_by_rule": {},
+        "additive_rules_applied": {},
         "point_blank_malus": False,
         "dmg_bonus": 0,
         # [PRECISION] 24.28 : posé à l'Allocation Order step, jamais à la déclaration de l'arme.

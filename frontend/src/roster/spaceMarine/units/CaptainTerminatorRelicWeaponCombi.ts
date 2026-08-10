@@ -23,12 +23,6 @@ export class CaptainTerminatorRelicWeaponCombi extends LeaderEliteMeleeElite {
   static CC_WEAPON_CODES = ["relic_weapon_captain"];
   static CC_WEAPONS = getWeapons(CaptainTerminatorRelicWeaponCombi.CC_WEAPON_CODES);
 
-  // UNIT RULES
-  static UNIT_RULES = [{ ruleId: "reroll_charge", displayName: "Unstoppable Valour" }];
-
-  // RULE IMPLEMENTATION STATUS (0=NOT_IMPLEMENTED, 1=NOT_IMPLEMENTABLE_YET, 2=IMPLEMENTED)
-  static RULES_STATUS = { reroll_charge: 2 };
-
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [
     { keywordId: "infantry" },

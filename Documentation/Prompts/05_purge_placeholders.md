@@ -30,6 +30,32 @@ Le même placeholder existe côté Space Marines sur les personnages
 vérifier unité par unité contre `Datasheets - Space Marines.pdf` avant de purger : certaines
 capacités SM légitimes pourraient s'y cacher.
 
+## Ce qui a réellement été livré (2026-08-10)
+
+Périmètre élargi sur arbitrage, au-delà de ce que la section EXÉCUTION autorisait : les 6
+datasheets SM **hors** rosters Armageddon portaient le même placeholder et sont purgées aussi
+(les 4 Captain Terminator, `LeaderCaptainTerminator`, `LibrarianTerminator`) — invérifiables
+contre un PDF, mais `CaptainTerminatorRelicWeaponBolter` est joué par
+`config/armies/v10_space_marines.json`, donc le laisser aurait maintenu la relance de charge
+fantôme en PvP.
+
+**Aucune exception, aucune dette.** `CaptainPowerWeaponBolter` a été purgé en dernier, quelques
+heures après les autres : les 8 tests de la règle 19.04 s'ancraient sur son `reroll_charge` et
+n'avaient pas d'autre porteur. Ils reposent désormais sur un couple de vraies datasheets —
+`ChaplainJumpPack` (`deep_strike`) mené sur `AssaultIntercessorJumpPack` (`charge_impact`),
+discriminant dans les deux sens, légal au titre de 19.01.
+
+Le report avait d'abord été envisagé jusqu'à la passe 1 du chantier 06. Il a été écarté sur une
+mesure : cette datasheet est jouée par deux rosters de **benchmark KPI** de CoreAgent
+(`agent_training_roster_balanced_balanced_kpis_v21.json`, 150 et 500 pts) et par quatre scénarios
+PvP. Une dette sans échéance dans un roster de mesure, c'est exactement le défaut que ce chantier
+existe pour supprimer.
+
+Ce que la bascule coûte : le test d'OBSERVATION suit maintenant la règle du BODYGUARD et non
+celle du leader, parce que `deep_strike` n'a pas d'`obs_id`. Coût réel nul — l'observation lit
+`unit["UNIT_RULES"]`, l'union déjà calculée, et ne distingue pas l'origine d'une règle ; quelle
+source s'éteint quand reste verrouillé source par source par les 7 autres tests.
+
 ## Un second défaut, mineur
 
 `RULES_STATUS = { leader: 0 }` (« non implémenté ») est **périmé** : le rattachement

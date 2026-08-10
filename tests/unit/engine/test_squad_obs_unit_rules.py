@@ -18,8 +18,12 @@ Ce que ces tests verrouillent :
   - les ids decrivent les EFFETS, donc captent aussi les capacites composites des datasheets
     (`cunning_hunters`, `targeted_intercession`, `target_priority`…) ;
   - ils valent pour les entites ENNEMIES (choix de cible et evaluation de menace) ;
-  - **19.04** : une escouade menee par un character porte les regles de son leader, et l'id
-    DISPARAIT a sa mort — c'est le point qui rendait ce trou couteux depuis la tranche 19.04 ;
+  - **19.04** : l'observation suit l'UNION en vigueur quand elle change en cours de partie —
+    l'id d'une source DISPARAIT a la mort de sa derniere figurine. ⚠️ La source suivie est le
+    BODYGUARD, pas le leader : depuis le chantier 05 aucun character du registre ne porte de
+    regle ayant un `obs_id` (balaye le 2026-08-10 ; `ChaplainJumpPack` n'a que `leader` et
+    `deep_strike`). Le fold lui-meme est verrouille par une assertion sur `UNIT_RULES`, et
+    source par source par `test_attached_units_abilities_19_04.py` ;
   - les marqueurs de ROLE ne sont pas dupliques (le bloc TYPES les porte deja) ;
   - une regle sans effet n'a pas d'id (meme critere que [INDIRECT FIRE] cote armes) ;
   - les ids sont TRIES croissants et paddes a 0 (reproductibilite bit a bit des replays) ;
@@ -28,11 +32,9 @@ Ce que ces tests verrouillent :
 
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 import sys
-import tempfile
 import types
 from pathlib import Path
 from typing import Any, Dict, List
@@ -49,54 +51,40 @@ from engine.observation_entities import (
     unit_bin_index,
 )
 from engine.w40k_core import W40KEngine
+from tests.unit.engine._config_helpers import (
+    ATTACHED_BODYGUARD,
+    ATTACHED_BODYGUARD_RULE,
+    ATTACHED_ENEMY,
+    ATTACHED_LEADER,
+    ATTACHED_LEADER_RULE,
+    attached_scenario,
+    load_engine_from_scenario,
+)
 
 PROJECT_ROOT = os.path.dirname(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 )
-TEMPLATE = os.path.join(
+#: ORK contre ORK, rosters FIXES : le seul scenario qui garantit la presence d'une datasheet
+#: orke donnee des deux cotes. Les scenarios de training tirent leurs rosters au hasard
+#: (`agent_roster_ref: training_random`), ce qui ne construit aucune situation observable.
+ORK_VS_ORK = os.path.join(
     PROJECT_ROOT,
-    "config/agents/ArmageddonAgent/scenarios/training/scenario_training_armageddon1.json",
+    "config/agents/ArmageddonAgent/scenarios/holdout_regular/scenario_bot-04.json",
 )
 
-# Memes fixtures que test_attached_units_abilities_19_04 : `AssaultIntercessor` porte
-# `targeted_intercession` et PAS `reroll_charge` ; `CaptainPowerWeaponBolter` l'inverse.
-_BODYGUARD = {
-    "id": 101, "unit_type": "AssaultIntercessor", "player": 2, "col": 12, "row": 10,
-    "models": [{"col": 12, "row": 10}, {"col": 13, "row": 10}, {"col": 14, "row": 10}],
-}
-_LEADER = {
-    "id": 102, "unit_type": "CaptainPowerWeaponBolter", "player": 2,
-    "attached_squad": 101, "col": 15, "row": 10,
-}
-_ENEMY = {"id": 1, "unit_type": "Intercessor", "player": 1, "col": 3, "row": 3}
+# Fixtures d'unites attachees PARTAGEES avec `test_attached_units_abilities_19_04` : elles y
+# etaient recopiees, et la bascule du 2026-08-10 (purge du placeholder `reroll_charge`) a du
+# etre appliquee deux fois a la main. Leur contrat — le couple discriminant dans les deux sens
+# et les deux regles qui l'opposent — vit desormais dans `_config_helpers`.
+_BODYGUARD = ATTACHED_BODYGUARD
+_LEADER = ATTACHED_LEADER
+_ENEMY = ATTACHED_ENEMY
 
 
 def _load(units: List[Dict[str, Any]]) -> W40KEngine:
-    scenario = {
-        "board_ref": "44x60x5",
-        "primary_objectives": ["objectives_control"],
-        "wall_ref": "walls-none.json",
-        # Faction d'Armée DÉCLARÉE des deux camps : 08.04 la demande à chaque phase de commandement
-        # et refuse de la déduire des unités. ADEPTUS ASTARTES est la faction RÉELLE des datasheets
-        # de ce fichier (Intercessor, AssaultIntercessor, Captain*).
-        "army_faction": {"1": "ADEPTUS ASTARTES", "2": "ADEPTUS ASTARTES"},
-        # Corollaire OBLIGATOIRE d'une armée ADEPTUS ASTARTES : la clause du +1 Wound d'Oath
-        # en dépend, et la construction de l'observation la lit désormais (bits
-        # `*_oath_wound_bonus_active`). Un scénario de production le déclare toujours.
-        "uses_codex_detachment": {"1": True, "2": True},
-        "units": units,
-    }
-    with tempfile.TemporaryDirectory() as td:
-        path = Path(td) / "rules_obs.json"
-        path.write_text(json.dumps(scenario))
-        eng = W40KEngine(
-            rewards_config="ArmageddonAgent", training_config_name="x1_debug",
-            controlled_agent="ArmageddonAgent", scenario_file=str(path),
-            unit_registry=UnitRegistry(), quiet=True, gym_training_mode=True,
-            training_n_envs=1,  # UN environnement joue en serie (engine/episode_schedule.py)
-        )
-        eng.reset(seed=0)
-        return eng
+    # `training_n_envs=1` : UN environnement joue en serie (engine/episode_schedule.py). C'est la
+    # seule difference avec les autres consommateurs du scenario d'unites attachees.
+    return load_engine_from_scenario(attached_scenario(units), training_n_envs=1)
 
 
 def _rule_ids(obs, family: str, row: int) -> set:
@@ -105,14 +93,16 @@ def _rule_ids(obs, family: str, row: int) -> set:
     return {by_obs_id[int(v)] for v in obs[f"{family}_ability_ids"][row] if int(v) != 0}
 
 
+#: Regle propre du BODYGUARD, telle que l'observation l'expose. `charge_impact` est un effet
+#: direct : contrairement a `targeted_intercession`, elle ne se resout pas en plusieurs effets.
+_OBS_REGLE_DU_BODYGUARD = {ATTACHED_BODYGUARD_RULE}
+
+
 def test_active_squad_rules_are_observed():
     """L'escouade observee expose ses propres regles (ligne 0 du bloc amis)."""
     eng = _load([_BODYGUARD, _ENEMY])
     obs = eng.obs_builder.build_squad_observation(eng.game_state, "101")
-    # `targeted_intercession` se resout en DEUX effets — ce sont les effets qui sont exposes.
-    assert _rule_ids(obs, "allies", 0) == {
-        "reroll_1_towound", "reroll_towound_target_on_objective"
-    }
+    assert _rule_ids(obs, "allies", 0) == _OBS_REGLE_DU_BODYGUARD
 
 
 def test_enemy_squad_rules_are_observed():
@@ -123,32 +113,70 @@ def test_enemy_squad_rules_are_observed():
         i for i in range(ObservationBuilder.K_ENEMY_SLOTS)
         if obs["enemies_bin"][i][unit_bin_index("present")] == 1.0
     )
-    assert _rule_ids(obs, "enemies", slot) == {
-        "reroll_1_towound", "reroll_towound_target_on_objective"
-    }
+    assert _rule_ids(obs, "enemies", slot) == _OBS_REGLE_DU_BODYGUARD
 
 
-def test_attached_leader_rule_is_observed_then_extinguished_on_his_death():
-    """19.04 dans l'observation : le bit du leader apparait, puis DISPARAIT a sa mort.
+def test_attached_squad_rule_is_observed_then_extinguished_with_its_source():
+    """19.04 dans l'observation : le bit d'une source apparait, puis DISPARAIT a sa mort.
 
     Le cas qui rendait ce trou couteux : depuis 19.04 l'union en vigueur change en cours de
     partie, et l'agent n'en voyait rien.
+
+    La source suivie est ici le BODYGUARD, et le leader attache SURVIT — c'est la moitie du
+    tableau 19.04 (« until the last model in that bodyguard unit is destroyed ») dont l'effet
+    est OBSERVABLE : `charge_impact` a un `obs_id`, alors que le Deep Strike du Chaplain n'en a
+    pas. L'observation ne distingue de toute facon PAS l'origine d'une regle — elle lit
+    `unit["UNIT_RULES"]`, l'union deja calculee — donc ce que ce test verrouille (l'observation
+    suit l'union quand elle change) vaut pour les deux sources. Laquelle s'eteint quand, c'est
+    `test_attached_units_abilities_19_04.py` qui le verrouille, source par source.
     """
     from engine.phase_handlers.shared_utils import destroy_model
 
     eng = _load([_BODYGUARD, _LEADER, _ENEMY])
-    before = _rule_ids(eng.obs_builder.build_squad_observation(eng.game_state, "101"), "allies", 0)
-    assert "reroll_charge" in before, "regle du Captain attache invisible"
 
-    leader_mid = next(
-        mid for mid in eng.game_state["squad_models"]["101"]
-        if "attached_from" in eng.game_state["models_cache"][mid]
+    # Le FOLD a bien eu lieu : la regle du Chaplain est dans l'union en vigueur de l'escouade.
+    # Elle n'a pas d'`obs_id`, donc l'observation ne peut pas la porter — mais sans cette
+    # assertion, casser `_fold_attached_characters` laisserait TOUT ce fichier vert, puisque la
+    # regle suivie ci-dessous appartient au bodyguard. C'est le chainon que l'observation
+    # consomme (`unit["UNIT_RULES"]`), verrouille ici a defaut de pouvoir l'etre par un bit.
+    union = {str(r["ruleId"]) for r in eng.game_state["unit_by_id"]["101"]["UNIT_RULES"]}
+    assert ATTACHED_LEADER_RULE in union, (
+        "la regle du Chaplain attache n'est pas dans l'union 19.04 : le fold n'a pas eu lieu, "
+        "et l'observation lit cette union"
     )
-    destroy_model(eng.game_state, leader_mid, "combat")
+    assert ATTACHED_BODYGUARD_RULE in union, "l'escouade a perdu sa propre regle au fold"
 
+    before = _rule_ids(eng.obs_builder.build_squad_observation(eng.game_state, "101"), "allies", 0)
+    assert ATTACHED_BODYGUARD_RULE in before, "regle de l'escouade invisible"
+
+    models_cache = eng.game_state["models_cache"]
+    natives = [
+        mid for mid in eng.game_state["squad_models"]["101"]
+        if "attached_from" not in models_cache[mid]
+    ]
+    assert len(natives) == 3, "fixture : 3 bodyguards attendus"
+
+    # ETAPE 1 — tuer tous les bodyguards SAUF UN. La source vit encore, donc le bit doit tenir.
+    # Cette assertion POSITIVE apres mutation est le garde anti-vert-vacant du test : sans elle,
+    # un bug qui zerote le bloc de capacites de la ligne 0 satisferait l'etape 2 sans rien dire
+    # (a la fin, l'unite ne porte plus que `deep_strike`, qui n'a pas d'obs_id : l'ensemble
+    # observe est vide, et un ensemble vide passe toutes les assertions negatives).
+    for mid in natives[:-1]:
+        destroy_model(eng.game_state, mid, "combat")
+    mid_course = _rule_ids(
+        eng.obs_builder.build_squad_observation(eng.game_state, "101"), "allies", 0
+    )
+    assert ATTACHED_BODYGUARD_RULE in mid_course, (
+        "un bodyguard vit encore : sa regle doit rester observee (19.04, « until the LAST model "
+        "in that bodyguard unit is destroyed »)"
+    )
+
+    # ETAPE 2 — la derniere figurine de la source meurt : le bit s'eteint.
+    destroy_model(eng.game_state, natives[-1], "combat")
+    # Le leader vit encore : l'unite existe, et c'est bien la SOURCE morte qui a disparu.
+    assert eng.game_state["squad_models"]["101"], "le Chaplain attache doit survivre"
     after = _rule_ids(eng.obs_builder.build_squad_observation(eng.game_state, "101"), "allies", 0)
-    assert "reroll_charge" not in after, "regle du leader mort toujours observee"
-    assert "reroll_1_towound" in after, "l'escouade a perdu ses propres regles au passage"
+    assert ATTACHED_BODYGUARD_RULE not in after, "regle du bodyguard mort toujours observee"
 
 
 def test_role_markers_are_not_duplicated_as_rule_ids():
@@ -189,7 +217,10 @@ def test_composite_datasheet_abilities_are_captured_through_their_effects():
         "AssaultIntercessor": {"reroll_1_towound", "reroll_towound_target_on_objective"},
         "TyranidWarriorRanged": {"charge_after_flee", "shoot_after_flee"},    # adaptable_predators
         "LieutenantStormShield": {"charge_after_flee", "shoot_after_flee"},   # target_priority
-        "Boyz": {"reroll_charge"},
+        # Ancre ORK. C'etait `Boyz: {reroll_charge}` avant le chantier 05 : cette capacite
+        # etait un placeholder invente, absent de la datasheet, purge des rosters. Gretchin
+        # porte la seule capacite ORKE reellement lue par l'observation aujourd'hui.
+        "Gretchin": {"cp_gain_on_objective"},
         "AggressorFlamestorm": {"closest_target_penetration"},
         "Gargoyle": {"move_after_shooting"},
         "Termagant": {"reactive_move"},
@@ -203,28 +234,46 @@ def test_composite_datasheet_abilities_are_captured_through_their_effects():
 
 
 def test_real_training_roster_writes_the_expected_id():
-    """Sur le VRAI scenario de training, les Orks ecrivent `reroll_charge` et les SM non.
+    """Sur un VRAI scenario, une capacite de datasheet remonte bien dans l'observation.
 
-    Discrimination reelle, pas un montage : c'est la seule des 13 regles portee par les rosters
-    SM/Orks actuels — les autres attendent des rosters qui les declarent (Tyranides, Loups…).
+    Le scenario est ORK contre ORK (`scenario_bot-04`), donc les deux rosters CONTIENNENT
+    Gretchin : la situation observee est construite, pas esperee d'un tirage. L'ancien
+    montage lisait `scenario_training_armageddon1`, dont les rosters sont tires au hasard
+    (`training_random`) — il pariait sur 4 resets pour voir passer un roster orke.
+
+    La capacite lue est `cp_gain_on_objective` (Thievin' Scavengers) : depuis le chantier 05
+    c'est la seule capacite ORKE que les rosters Armageddon portent encore.
+
+    PORTEE EXACTE : le verrou repose sur le bloc ENNEMI. Le chemin d'encodage des ALLIES n'est
+    pas couvert ici (cf. le commentaire ci-dessous) — il l'est par les tests de ce fichier qui
+    construisent leur propre scenario, ou l'escouade active est posee sur le plateau.
     """
     eng = W40KEngine(
         rewards_config="ArmageddonAgent", training_config_name="x5_new",
-        controlled_agent="ArmageddonAgent", scenario_file=TEMPLATE,
+        controlled_agent="ArmageddonAgent", scenario_file=ORK_VS_ORK,
         unit_registry=UnitRegistry(), quiet=True, gym_training_mode=True,
         training_n_envs=1,  # UN environnement joue en serie (engine/episode_schedule.py)
     )
     obs_ids = unit_ability_obs_ids()
-    lit = 0
-    for _ in range(4):
-        obs, _ = eng.reset()
-        for family in ("allies", "enemies"):
-            lit += int((obs[f"{family}_ability_ids"] == obs_ids["reroll_charge"]).sum())
-    assert lit > 0, "aucune escouade Ork n'ecrit reroll_charge sur 4 resets"
-
-    # Contre-epreuve : une regle qu'aucun roster de training ne porte n'est jamais ecrite.
     obs, _ = eng.reset()
-    assert np.all(obs["allies_ability_ids"] != obs_ids["reactive_move"])
+
+    # Le bloc ENNEMI, et lui seul. Au reset la phase est `deployment` : les unites amies ne sont
+    # pas encore posees, donc `allies_ability_ids` est INTEGRALEMENT nul (mesure : 0 valeur non
+    # nulle sur 12x8). Sommer les deux blocs laissait croire a une couverture des deux cotes
+    # alors que le seul hit venait des ennemis — et rendait la contre-epreuve ci-dessous
+    # trivialement vraie, puisqu'un bloc nul satisfait n'importe quelle inegalite.
+    ennemis = obs["enemies_ability_ids"]
+    assert int((ennemis == obs_ids["cp_gain_on_objective"]).sum()) > 0, (
+        "les Gretchin du roster ennemi n'ecrivent pas cp_gain_on_objective"
+    )
+
+    # VERT VACANT : la contre-epreuve qui suit ne prouve quelque chose que si ce bloc porte
+    # REELLEMENT des identifiants. Un bloc nul les satisferait toutes.
+    assert int((ennemis != 0).sum()) > 0, "bloc de capacites ennemi vide : rien n'est observe"
+
+    # Contre-epreuve, DANS LE MEME BLOC : une regle qu'aucun roster de training ne porte n'est
+    # jamais ecrite. `reactive_move` appartient aux Tyranides (Termagant, FenrisianWolf).
+    assert np.all(ennemis != obs_ids["reactive_move"])
 
 
 # ---------------------------------------------------------------------------

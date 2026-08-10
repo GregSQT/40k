@@ -27,11 +27,7 @@ export class Librarian extends LeaderEliteMeleeElite {
   static UNIT_RULES = [{ ruleId: "leader", displayName: "Leader" }];
 
   // RULE IMPLEMENTATION STATUS (0=NOT_IMPLEMENTED, 1=NOT_IMPLEMENTABLE_YET, 2=IMPLEMENTED)
-  // `reroll_charge` etait marquee 2 (IMPLEMENTEE) alors que UNIT_RULES ne la porte pas :
-  // le moteur ne l'appliquait donc JAMAIS a cette unite. Statut remis a 0 — corriger le
-  // statut ne change rien au jeu ; si cette datasheet doit vraiment relancer la charge,
-  // c'est UNIT_RULES qui doit gagner la regle, et le statut repassera a 2.
-  static RULES_STATUS = { reroll_charge: 0, leader: 0 };
+  static RULES_STATUS = { leader: 2 };
 
   // CAN LEAD (bodyguard unit-name keywords this leader may attach to — rule 19.01)
   static CAN_LEAD = [

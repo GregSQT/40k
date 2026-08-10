@@ -491,17 +491,37 @@ Two levels, because a rule either describes the whole weapon group (04.03) or on
 | Group (summary line) | `shared_utils.weapon_rule_log_tokens`, one socle for shooting **and** melee, called once per group at log emission | the segment the rule modifies | `Shots:` → `[RAPID FIRE:n]` `[BLAST:n]` `[CLEAVE:n]` `[EXTRA ATTACKS]` · `Hit:` → `[HEAVY]` `[COVER]` `[POINT-BLANK]` `[TORRENT]` `[SUSTAINED HITS:X]` `[IGNORES COVER]` `[PSYCHIC]` · `Wound:` → `[ANTI-<KEYWORD>:Y+]` `[LETHAL HITS]` `[TWIN-LINKED]` · `Save:` → `[DEVASTATING WOUNDS]` · `HP lost:` → `[MELTA:X]` `[PRECISION]` |
 | Per shot (expanded detail) | flags set by `attack_sequence.roll_attack_pool` on each shot record | the leg of that die | `Tir:` → `[TORRENT]` `[SUSTAINED HITS]` `[CRITICAL HIT]` · `Bless:` → `[TWIN-LINKED]` `[LETHAL HITS]` `[CRITICAL WOUND]` · `Svg:` → `[DEVASTATING WOUNDS]` (no save roll is made, 24.10) |
 
-**`[RAPID FIRE:n]` / `[BLAST:n]` / `[CLEAVE:n]` are counted, not copied.** `n` is always the
-number of dice **that rule added to the `Shots:` the token hangs off** — never the `X` the weapon
-declares. Every other token is constant over a weapon group (04.03) because its source is part of
-the group key; these three are not, because they all add dice **per firing model**: `[RAPID FIRE]`
-X per carrier within half range, `[BLAST]` one bracket of five per carrier, and `[CLEAVE]`'s "only
-one target for all of that weapon's attacks" clause is judged per model, so two carriers of the
-same weapon can differ. `_build_manual_allocation` therefore **accumulates** `extra_dice_by_rule`
-across the group's intents, exactly like `attacks`, and the socle renders each total.
+**`n` is always the parameter the weapon declares, never a dice count** (decided 2026-08-10). A
+shoota `[RAPID FIRE 1]` fired by ten models within half range prints `Shots:30 [RAPID FIRE:1]` —
+`1`, not `10`. Same for `[BLAST:n]` and `[CLEAVE:n]`. Bare `[BLAST]` / `[CLEAVE]` print `1`, the
+business default the PDF gives their unparameterised form; `[RAPID FIRE]` has no such form, so a
+missing parameter raises instead of defaulting.
 
-(`step.log` is different and stays so: its `[RAPID FIRE:X]` carries the declared **parameter**,
-because the analyzer uses it to raise the per-squad shot cap.)
+Why: it is the number a player reads on the datasheet, so it reconciles with the source. The dice
+actually added stay recoverable from the neighbouring `Shots:`, which already counts them. Before
+that date these three printed their accumulated total, and a `[RAPID FIRE:10]` facing a datasheet
+that says `1` read as an engine inconsistency.
+
+These three are the only rules whose effect is counted **per firing model** while the token lives
+on the **group** — hence the ambiguity that had to be settled. `[RAPID FIRE]` adds X per carrier
+within half range, `[BLAST]` one bracket of five per carrier, and `[CLEAVE]`'s "only one target for
+all of that weapon's attacks" clause is judged per model, so two carriers of the same weapon can
+differ. `_build_manual_allocation` therefore carries `additive_rules_applied`, mapping each rule
+that fired to **its declared X**. The producers fill it from the `X` they have already resolved
+(`_rf_x`, `_blast_x`, `_cleave_x`), so the formatter never re-derives it — one source, no
+reconciliation. It is also the single carrier read by `gkey` and by `step.log`'s `rapidFireApplied`.
+
+That map is **constant over a group**, because 04.03 says identical attacks must be "affected by
+the same *applicable* abilities and rules" and `gkey` enforces it: the two X values that depend on
+the *model* rather than on the declared weapon — `[RAPID FIRE]`'s (24.30, "within half range") and
+`[CLEAVE]`'s (24.06, "if you only selected one target for all of that weapon's attacks") — are both
+part of the key, so two models that differ on either never land in the same batch. `[BLAST]` needs
+no entry there: its X depends only on the target's declared size, and `target_sid` is already in
+the key. `[CLEAVE]` was added on 2026-08-10; until then only `[RAPID FIRE]`'s was in the key, and
+a melee squad where one fighter split its attacks and another did not was gathered as one batch.
+
+The group line and `step.log` therefore agree: `step.log`'s per-shot `[RAPID FIRE:X]` already
+carried the declared parameter, because the analyzer uses it to raise the per-squad shot cap.
 
 Everything else the socle needs (`weapon`, the resolved `WeaponAttackProfile`, `heavy_applied`,
 `cover`, `rapid_fire_applied`, `dmg_bonus`) is already carried by the weapon group, which is why

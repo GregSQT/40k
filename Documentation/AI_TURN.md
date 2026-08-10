@@ -1575,6 +1575,15 @@ ASSERT: game_state["units_cache"] exists (doit être construit au reset)
 >
 > (2026-07-29 — cet avertissement citait auparavant un stub pass-through `_apply_single_rule` ; la classe `WeaponRulesApplier` qui le portait a été SUPPRIMÉE, cf. la pierre tombale dans `engine/weapons/rules.py`. L'avertissement reste valable, sa cause était juste ailleurs.)
 
+> ⚠️ **FRAÎCHEUR (2026-08-10).** Seules les lignes RAPID FIRE et CLEAVE ont été re-mesurées à
+> cette date, en travaillant sur les règles additives. Elles portaient toutes deux ⛔ « non
+> appliqué » alors que le moteur les applique depuis longtemps. Les autres ⛔ ci-dessous n'ont
+> PAS été revérifiées et sont probablement périmées de la même façon : la mémoire projet note
+> « V11 P1 : toutes les règles d'armes du PDF 24 vives (tir+mêlée) », et `weapon_rule_log_tokens`
+> émet bien des tokens pour [MELTA], [SUSTAINED HITS], [LETHAL HITS], [DEVASTATING WOUNDS] et
+> [TWIN-LINKED] — ce qu'il ne ferait pas si les règles ne jouaient pas. Ne pas se fier à un ⛔ de
+> ce tableau sans lire le code : c'est un audit à refaire, pas un état vérifié.
+
 | Ability | Registry | Appliqué | Note |
 |---|---|---|---|
 | BLAST 24.05 | ✅ | ✅ | +1 dé / 5 figs (`_has_blast_keyword`) |
@@ -1582,7 +1591,8 @@ ASSERT: game_state["units_cache"] exists (doit être construit au reset)
 | AP / InSv (05.03) | — | ✅ | `save_threshold` |
 | ASSAULT 24.04 | ✅ | ✅ | éligibilité tir post-advance |
 | CLOSE_QUARTERS / CLOSE-QUARTERS 24.27 / 24.07 | ✅ | ✅ | tir en état engaged |
-| RAPID FIRE 24.30 | ✅ | ⛔ | +X dés à demi-portée non appliqué |
+| RAPID FIRE 24.30 | ✅ | ✅ | +X dés à demi-portée : `n_attacks += _rf_x` (`shared_utils.py`), test `test_rapid_fire_shoot.py`. Le X APPLIQUÉ entre dans la clé de groupe 04.03 (« same *applicable* rules ») ; le token `[RAPID FIRE:X]` porte le X DÉCLARÉ (2026-08-10) |
+| CLEAVE 24.06 | ✅ | ✅ | +X dés / 5 figs si mono-cible : `n_attacks += _cleave_extra_dice` (`fight_handlers.py`), test `test_blast_cleave.py`. Jumeau mêlée de [BLAST] ; son X appliqué est dans la clé de groupe depuis le 2026-08-10 |
 | MELTA 24.25 | ✅ | ⛔ | +X D à demi-portée non appliqué |
 | SUSTAINED HITS 24.36 | ✅ | ⛔ | dépend du critical hit (non géré) |
 | LETHAL HITS 24.23 | ✅ | ⛔ | dépend du critical hit (non géré) |
