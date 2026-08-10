@@ -1,6 +1,6 @@
 # Sécurité — Analyse et plan d'implémentation
 
-> Date : 2026-07-15 — mise à jour 2026-08-10 (étapes 1 et 2 faites : F1, F6, F7, F11, F12, F14 résolus ; ancres de ligne re-vérifiées ligne à ligne ; étape 5 réécrite à partir de la stack Docker existante). **Reste à faire : étapes 3 à 8** (F2, F3, F4, F5, F8, F9, F10, F13).
+> Date : 2026-07-15 — mise à jour 2026-08-10 (étapes 1, 2 et 3 faites : F1, F2, F6, F7, F8, F11, F12, F14 résolus ; étape 5 réécrite à partir de la stack Docker existante, nouvelle faille F15). **Reste à faire : étapes 4 à 8** (F3, F4, F5, F9, F10, F13, F15).
 > Périmètre : backend Flask (`services/api_server.py`), frontend React/Vite, base auth `config/users.db`.
 > Contexte : jeu hobby, aujourd'hui local (WSL2), **bientôt exposé sur Internet pour des tests publics**.
 
@@ -17,7 +17,7 @@ Menaces retenues :
 ### Sur le vol de code spécifiquement
 
 - **Frontend** : le code JS/WASM est **par nature envoyé à chaque visiteur** — c'est impossible à empêcher. Le build Vite est minifié et ne contient pas de source maps (vérifié : aucun `.map` dans `frontend/dist/`). L'obfuscation supplémentaire est inutile (contournable en heures). La vraie protection du frontend est **juridique** (licence, pas de repo public), pas technique.
-- **Backend + modèles IA** : c'est là qu'est la valeur (moteur de règles, agents entraînés). Ce code ne quitte jamais le serveur **sauf si** un attaquant obtient une exécution de code ou une lecture de fichiers arbitraire. Toute la stratégie consiste donc à fermer ces vecteurs — F1, F6, F7 et F11 sont résolus (étapes 1 et 2) : plus d'exécution de code ni d'écriture disque atteignables depuis le réseau. Ce qui reste à traiter (étapes 3 à 5) relève du vol de session et de l'exposition, pas de la prise de contrôle du serveur.
+- **Backend + modèles IA** : c'est là qu'est la valeur (moteur de règles, agents entraînés). Ce code ne quitte jamais le serveur **sauf si** un attaquant obtient une exécution de code ou une lecture de fichiers arbitraire. Toute la stratégie consiste donc à fermer ces vecteurs — F1, F6, F7 et F11 sont résolus (étapes 1 et 2) : plus d'exécution de code ni d'écriture disque atteignables depuis le réseau. L'étape 3 a fermé la session éternelle et le brute-force. Ce qui reste à traiter (étapes 4 et 5) relève de l'exposition et du transport, pas de la prise de contrôle du serveur.
 
 ---
 
@@ -37,6 +37,8 @@ Menaces retenues :
 | **F6 (ex-critique) — API non authentifiée** | **Résolu (étape 1).** `@app.before_request` ferme les 30 routes par défaut ; seules les vues portant `@public_endpoint` (`health_check`, `login_user`, `serve_frontend`) + les préflights `OPTIONS` sont ouvertes. RBAC appliqué dans la porte. Côté front, `apiFetch()` attache le Bearer sur tout `/api/*`. | `api_server.py:2192` (porte), `api_server.py:2247`/`2263`/`4826` (les 3 vues publiques), `frontend/src/services/apiFetch.ts` |
 | **F12 (ex-haute) — inscription ouverte** | **Résolu (étape 1).** `/api/auth/register` **supprimée** (0 occurrence) ; comptes créés manuellement en SQL. | vérifié par grep |
 | **F14 (ex-moyenne) — filtre `replay/parse`** | **Résolu (étape 1).** Filtre aligné sur `/api/replay/file` : `.log` imposé, tout séparateur et `..` rejetés. | `api_server.py:4706-4712` |
+| **F2 (ex-haute) — sessions sans expiration** | **Résolu (étape 3).** `sessions.expires_at` NOT NULL, TTL 7 jours **glissant** ; validation `AND s.expires_at > ?` ; purge des échues au login ; `/api/auth/logout` révoque immédiatement. | `api_server.py` (`_SESSIONS_TABLE_SQL`, `_get_authenticated_user_or_response`, `_renew_session_if_stale`, `logout_user`) |
+| **F8 (ex-haute) — pas de rate limiting** | **Résolu (étape 3).** Table `login_attempts` : 5 échecs par (login, IP) sur 60 s → 429, contrôlé **avant** PBKDF2. | `api_server.py` (`_count_recent_login_failures`, `login_user`) |
 
 ### Failles identifiées
 
@@ -45,8 +47,6 @@ Menaces retenues :
 | F7 | ✅ Résolu | Répertoire contrôlé par le client + `pickle.load` | Étape 2 : répertoire fixé par le serveur (`W40K_PERSIST_DIR`), `directory` de requête rejeté, pickle des snapshots supprimé, et dépickle des saves restreint à une liste blanche de classes (`_safe_loads`). | `api_server.py` (`_resolve_persist_dir`), `game_saves.py` (`_ALLOWED_CLASSES`) |
 | F11 | ✅ Résolu | Endpoint `pick-directory` exécutait `subprocess`/`powershell.exe` | Route supprimée (étape 2) ; plus aucun `subprocess` atteignable. Sélecteur natif retiré du front. | — |
 | F13 | Moyenne | Token de session en `localStorage` | Le token est stocké dans `localStorage` → volable par tout XSS (token = accès complet). Cible : cookie `HttpOnly`+`Secure`+`SameSite`. À défaut, risque à acter explicitement. | `frontend/src/auth/authStorage.ts:23,40,44` |
-| F2 | **Haute** | Sessions sans expiration | Table `sessions` : `created_at` seulement ; validation `WHERE s.token = ?` sans condition temporelle. Token volé = valide à vie. Le message "Invalid or expired session" est trompeur. | `api_server.py:1255-1259` (table), `api_server.py:1173` (validation) |
-| F8 | **Haute** | Pas de rate limiting sur le login | Brute-force des mots de passe possible à pleine vitesse depuis Internet. | `api_server.py:2264` (`login_user`) |
 | F9 | **Haute** | Flask dev server + pas de TLS | Le serveur de dev Werkzeug n'est pas fait pour Internet (perf, robustesse). Sans HTTPS, tokens et mots de passe passent en clair. Indépendant de F1 (déjà résolu) : même avec `debug=False`, Werkzeug reste un serveur de dev. Le `Dockerfile` lance ce même dev server (`CMD python services/api_server.py`) — la conteneurisation n'a rien changé à F9 (cf. étape 5). | `api_server.py:4851`, `Dockerfile` |
 | F15 | **Haute** | Backend conteneurisé injoignable + tournant en root | Constaté le 2026-08-10 : `app.run(host='127.0.0.1')` dans un conteneur n'écoute que sur le loopback **du conteneur** → ni le mapping `5001:5001` ni le `proxy_pass http://backend:5001/` de nginx ne l'atteignent. Et `docker-compose.yml` force `user: "0:0"`, ce qui annule le `USER appuser` du `Dockerfile` : le process tourne en root. | `Dockerfile`, `docker-compose.yml`, `frontend/Dockerfile` |
 | F3 | Moyenne | CORS ouvert à toutes les origines | `CORS(app, ...)` sans `origins` = `*`. | `api_server.py:1432` |
@@ -129,12 +129,25 @@ Ordre = priorité. **Les étapes 1 à 5 sont des prérequis absolus avant toute 
 
 **Validation :** requête POST avec `directory` → 400 ; `pick-directory` → 404 ; aucun `.pkl` écrit ; sauvegarde/rewind fonctionnels (runtime PvP à valider).
 
-### Étape 3 — Durcissement des sessions (F2, F8)
-**Fichier :** `services/api_server.py`
-- Colonne `expires_at` sur `sessions` (migration `ALTER TABLE` — aucun pattern existant dans `initialize_auth_db()`, à introduire) ; durée 7 jours glissants, renouvelée à chaque requête ; purge au login ; `AND expires_at > ?` dans la validation. Session expirée = 401 explicite, pas de fallback.
-- Rate limiting sur `/api/auth/login` : `flask-limiter` (ex. 5 tentatives/minute/IP). Échec → 429 explicite.
+### Étape 3 — Durcissement des sessions (F2, F8) ✅ faite le 2026-08-10
 
-**Validation :** token expiré forcé en SQL → 401 ; 6 logins ratés en rafale → 429.
+**Sessions expirantes (F2)**
+- `sessions.expires_at` INTEGER NOT NULL (et `created_at` passé en INTEGER : la colonne portait un entier dans un champ TEXT, où une comparaison est lexicographique et non numérique). TTL 7 jours.
+- Migration : `_migrate_sessions_table` détecte l'absence de la colonne (`PRAGMA table_info`) et **DÉTRUIT puis recrée** la table. `ALTER TABLE ADD COLUMN` est écarté — SQLite exige un DEFAULT sur une colonne NOT NULL ajoutée, et ce DEFAULT survivrait à la migration : un INSERT futur omettant `expires_at` produirait une session à l'échéance arbitraire au lieu d'échouer (T1). Les tokens pré-existants sont révoqués : ce sont précisément ceux qui n'avaient aucune expiration.
+- Validation : `AND s.expires_at > ?` dans la requête de la porte. Session échue = 401, **même message** qu'un token inconnu (distinguer les deux confirmerait à un attaquant que le token a existé).
+- **Renouvellement glissant à seuil** (`SESSION_RENEW_AFTER_SECONDS`, 1 h) et non à chaque requête comme prévu initialement : la porte s'exécute jusqu'à ~40 fois par seconde sur les prévisualisations au survol, et renouveler à chaque passage transformerait chaque survol de souris en écriture SQLite, donc en verrou exclusif sur `users.db`. Effet utilisateur identique — une session active n'expire jamais — pour ~1 écriture par heure et par session.
+- `/api/auth/logout` ajoutée (`@mode_agnostic`) : sans elle, l'expiration serait le seul moyen de tuer une session, et un token soupçonné volé resterait valide sept jours. Front : `logoutSession()` dans `apiFetch.ts` appelle le serveur **avant** d'effacer le `localStorage` et de rediriger — effacer le stockage local seul ne révoque rien.
+- Purge des sessions échues au login (pas à chaque requête : ce serait la même écriture systématique que ci-dessus).
+
+**Rate limiting du login (F8)**
+- **Compteur maison en base** (`login_attempts`), et non `flask-limiter` comme prévu initialement. Motif : le stockage par défaut de `flask-limiter` est la mémoire du process, ce qui devient faux dès que l'étape 5 met un WSGI multi-workers — chaque worker aurait son compteur, donc N fois la limite réelle. Le compteur en base est juste avant comme après l'étape 5, évite une dépendance, et pose la table que l'étape 7 (journal d'audit) devra construire de toute façon.
+- 5 échecs par couple (login, IP) sur une fenêtre de 60 s → 429. Contrôlé **avant** la vérification du mot de passe : PBKDF2 à 200 000 itérations est le coût dominant, le laisser s'exécuter offrirait un déni de service en prime.
+- Le plafond bloque le couple, y compris avec le **bon** mot de passe : sinon un attaquant qui le trouve passerait malgré la limitation. Un login réussi sous le plafond remet le compteur à zéro.
+- `X-Forwarded-For` délibérément **ignoré** : falsifiable par le client tant qu'aucun proxy de confiance n'existe, le lire donnerait un moyen de remettre le compteur à zéro à chaque tentative. À reprendre en étape 7, une fois l'étape 5 faite.
+
+**Tests :** `tests/unit/services/test_api_session_hardening.py` (12 tests). Chaque verrou a sa **preuve rouge** : défaut remis → test rouge, pour les six invariants (expiration, seuil de renouvellement, migration, plafond, remise à zéro, révocation). Deux tests ne verrouillaient rien à la première écriture et ont été corrigés : l'un observait `expires_at` là où un renouvellement inutile réécrit la même valeur (il compte désormais les connexions d'écriture), l'autre ne consommait pas assez du budget d'échecs pour distinguer les deux comportements.
+
+**Validation :** token expiré forcé en SQL → 401 ; 6 logins ratés en rafale → 429 ; logout → token refusé immédiatement. Runtime PvP à valider (déconnexion depuis le menu).
 
 ### Étape 4 — Réduction de la surface d'information (F3, F10)
 **Fichier :** `services/api_server.py`
@@ -211,7 +224,7 @@ Ordre = priorité. **Les étapes 1 à 5 sont des prérequis absolus avant toute 
 | — | F1 (debugger Werkzeug) | ✅ Résolu | ≤2026-08-02 |
 | 1. Auth sur toutes les routes | F6, F12, F14 | ✅ Fait — vérifié dans le code le 2026-08-10 (30 routes, porte globale, `register` supprimée, `apiFetch`) | 2026-08-02 |
 | 2. Fermer vecteurs écriture/désérialisation | F7, F11 | ✅ Fait (runtime PvP validé) | 2026-08-10 |
-| 3. Durcissement sessions + rate limiting | F2, F8 | ⬜ À faire | — |
+| 3. Durcissement sessions + rate limiting | F2, F8 | ✅ Fait (12 tests, preuve rouge sur 6 verrous ; runtime PvP à valider) | 2026-08-10 |
 | 4. Réduction surface d'information | F3, F10, F13 | ⬜ À faire | — |
 | 5. Infra d'exposition (WSGI + proxy + TLS) | F9, F15 | 🟨 Partiel — stack Docker + nginx existante (non documentée jusqu'au 2026-08-10), mais dev server, root et sans TLS ; **ne pas déployer en l'état** | — |
 | 6. Analyse statique | F5 | ⬜ À faire | — |

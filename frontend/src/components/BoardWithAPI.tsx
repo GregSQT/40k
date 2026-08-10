@@ -9,7 +9,7 @@ import rangeEvolutionConfig from "../../../config/endless_duty/range_evolution.j
 import endlessDutyScenarioConfig from "../../../config/scenario_endless_duty.json";
 import unitRulesConfig from "../../../config/unit_rules.json";
 import "../App.css";
-import { clearAuthSession, getAuthSession } from "../auth/authStorage";
+import { getAuthSession } from "../auth/authStorage";
 import {
   type ManualOrderGroup,
   type ManualOrderRequest,
@@ -18,6 +18,7 @@ import {
 } from "../hooks/useEngineAPI";
 import { useGameConfig } from "../hooks/useGameConfig";
 import { useGameLog } from "../hooks/useGameLog";
+import { logoutSession } from "../services/apiFetch";
 import type { GamePhase, GameState, PlayerId, TargetPreview, Unit } from "../types";
 import type { DeploymentState, UnitId } from "../types/game";
 import {
@@ -5726,8 +5727,11 @@ export const BoardWithAPI: React.FC = () => {
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
         onLogout={() => {
-          clearAuthSession();
-          window.location.href = "/auth";
+          // La révocation serveur est attendue avant la redirection : recharger la page
+          // pendant la requête l'annulerait, et la session resterait vivante côté serveur.
+          void logoutSession().then(() => {
+            window.location.href = "/auth";
+          });
         }}
         showAdvanceWarning={settings.showAdvanceWarning}
         canToggleAdvanceWarning={canUseAdvanceWarning}

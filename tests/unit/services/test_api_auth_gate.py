@@ -1,4 +1,4 @@
-"""Fermeture globale de l'API (F6, F12, F14) — `Documentation/Implémentation/A_faire/Security.md`.
+"""Fermeture globale de l'API (F6, F12, F14) — `Documentation/Implémentation/Security.md`.
 
 Verrouille l'invariant : **tout est fermé par défaut**. Une route ajoutée sans réflexion
 sur l'auth doit tomber en 401, jamais s'ouvrir. Ces tests échouent si le `before_request`
@@ -233,9 +233,12 @@ class TestModeRbacOnEveryRequest:
             "start_game", "load_party", "load_save", "restore_snapshot"
         }
         assert api_server._MODE_AGNOSTIC_ENDPOINTS == {
-            "current_user", "list_armies", "get_board_config", "get_config_defaults",
-            "get_default_replay_log", "get_replay_log_file", "list_replay_logs",
-            "parse_replay_log",
+            # `logout_user` : révoquer sa propre session n'agit pas sur la partie en cours.
+            # La soumettre au contrôle de mode empêcherait un testeur `pve` de se déconnecter
+            # tant qu'une partie `pvp` traîne dans le process.
+            "current_user", "logout_user", "list_armies", "get_board_config",
+            "get_config_defaults", "get_default_replay_log", "get_replay_log_file",
+            "list_replay_logs", "parse_replay_log",
         }
 
     def test_engine_without_mode_is_refused(self, monkeypatch):

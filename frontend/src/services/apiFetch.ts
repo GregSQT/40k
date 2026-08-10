@@ -38,6 +38,30 @@ const rejectSession = (): Response => {
   });
 };
 
+/**
+ * Déconnexion : révoque la session CÔTÉ SERVEUR avant de l'oublier côté navigateur.
+ *
+ * Effacer le `localStorage` seul ne déconnecte rien — le token reste valide jusqu'à son
+ * expiration (sept jours), et quiconque en a une copie continue d'accéder à l'API. C'est
+ * l'appel serveur qui déconnecte ; l'effacement local n'en est que la conséquence visible.
+ *
+ * L'effacement local a lieu même si l'appel serveur échoue : l'utilisateur a demandé à
+ * partir, le laisser connecté sur un poste qu'il quitte serait pire que de laisser une
+ * session vivante côté serveur. L'échec est remonté en console, pas masqué.
+ */
+export const logoutSession = async (): Promise<void> => {
+  try {
+    const response = await apiFetch(`${API_BASE}/auth/logout`, { method: "POST" });
+    if (!response.ok) {
+      console.error(`Logout serveur refusé (HTTP ${response.status}) : session non révoquée`);
+    }
+  } catch (error) {
+    console.error("Logout serveur injoignable : session non révoquée", error);
+  } finally {
+    clearAuthSession();
+  }
+};
+
 export const apiFetch = async (input: string, init?: RequestInit): Promise<Response> => {
   const session = getAuthSession();
   if (!session) {

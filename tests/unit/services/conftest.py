@@ -47,9 +47,10 @@ def authenticated_api_client(monkeypatch, tmp_path: Path):
             ("pytest_user", api_server._hash_password("pytest_password"), profile_id),
         )
         token = secrets.token_urlsafe(48)
+        now = int(time.time())
         connection.execute(
-            "INSERT INTO sessions (token, user_id, created_at) VALUES (?, ?, ?)",
-            (token, cursor.lastrowid, str(int(time.time()))),
+            "INSERT INTO sessions (token, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
+            (token, cursor.lastrowid, now, now + api_server.SESSION_TTL_SECONDS),
         )
         connection.commit()
     finally:

@@ -131,13 +131,16 @@ def resolve_token(args: argparse.Namespace, base_url: str) -> str:
         db_path = os.path.join(PROJECT_ROOT, "config", "users.db")
         connection = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
         try:
+            # Les sessions expirent (F2) : sans ce filtre, la plus récente peut être échue et
+            # tout le smoke test tomberait en 401 avec un message d'auth trompeur.
             row = connection.execute(
-                "SELECT token FROM sessions ORDER BY CAST(created_at AS INTEGER) DESC LIMIT 1"
+                "SELECT token FROM sessions WHERE expires_at > ? ORDER BY created_at DESC LIMIT 1",
+                (int(time.time()),),
             ).fetchone()
         finally:
             connection.close()
         if row is None:
-            raise SystemExit("Aucune session dans config/users.db — connecte-toi une fois via le front, ou utilise --login/--password.")
+            raise SystemExit("Aucune session VALIDE dans config/users.db — connecte-toi une fois via le front, ou utilise --login/--password.")
         return row[0]
     raise SystemExit(
         "Aucune authentification fournie. Utilise --token, --login/--password, ou --token-from-db."

@@ -59,6 +59,23 @@ AUTH_DB_PATH = os.environ.get(
 )
 PBKDF2_ITERATIONS = 200000
 
+# --- Durcissement des sessions (F2) ---------------------------------------------------------
+# Durée de vie d'une session, GLISSANTE : chaque requête authentifiée repousse l'échéance.
+SESSION_TTL_SECONDS = 7 * 24 * 3600
+# Le renouvellement n'écrit que si l'échéance a avancé d'au moins ce délai. La porte d'auth
+# s'exécute sur CHAQUE requête (jusqu'à ~40/s sur les prévisualisations au survol, cf.
+# `auth_db_read_cursor`) : renouveler à chaque passage transformerait chaque survol de souris
+# en écriture SQLite, donc en verrou exclusif sur `users.db`. Effet utilisateur identique —
+# une session active n'expire jamais — pour ~1 écriture par heure et par session.
+SESSION_RENEW_AFTER_SECONDS = 3600
+
+# --- Rate limiting du login (F8) ------------------------------------------------------------
+# Fenêtre glissante par (login, IP). Compté en base et non en mémoire de process : l'étape 5
+# du plan sécurité remplace le serveur de dev par un WSGI multi-workers, où un compteur
+# mémoire donnerait N fois la limite réelle (un compteur par worker).
+LOGIN_ATTEMPT_WINDOW_SECONDS = 60
+LOGIN_ATTEMPT_MAX_FAILURES = 5
+
 # Plateau JOUÉ pour chaque option de l'écran de test. `x1` et `x5_44x60` sont le MÊME plateau
 # physique 44×60 à deux résolutions ; les entrées `x5` -> board/180x156 et `x10` -> board/360x312
 # ont été retirées, ces dossiers n'existent pas (l'option était cassée à la sélection).
@@ -1156,27 +1173,57 @@ def _resolve_permissions_for_profile(connection: sqlite3.Connection, profile_id:
 def _get_authenticated_user_or_response():
     """
     Validate bearer session token and return current user row.
+
+    La session doit être NON ÉCHUE (F2) : `expires_at` est comparé à l'instant courant dans la
+    requête elle-même. Un token dont l'échéance est passée est traité exactement comme un token
+    inconnu — même 401, même message : distinguer les deux dirait à un attaquant que le token
+    qu'il essaie a existé.
     """
     try:
         token = _extract_bearer_token()
     except ValueError as auth_error:
         return None, (jsonify({"success": False, "error": str(auth_error)}), 401)
 
+    now = int(time.time())
     with auth_db_read_cursor() as connection:
         row = connection.execute(
             """
-            SELECT u.id AS user_id, u.login AS login, p.id AS profile_id, p.code AS profile_code
+            SELECT u.id AS user_id, u.login AS login, p.id AS profile_id, p.code AS profile_code,
+                   s.expires_at AS expires_at
             FROM sessions s
             JOIN users u ON u.id = s.user_id
             JOIN profiles p ON p.id = u.profile_id
-            WHERE s.token = ?
+            WHERE s.token = ? AND s.expires_at > ?
             """,
-            (token,),
+            (token, now),
         ).fetchone()
 
     if row is None:
         return None, (jsonify({"success": False, "error": "Invalid or expired session"}), 401)
+
+    _renew_session_if_stale(token, row["expires_at"], now)
     return row, None
+
+
+def _renew_session_if_stale(token: str, expires_at: int, now: int) -> None:
+    """Repousse l'échéance d'une session vivante — l'expiration est GLISSANTE (F2).
+
+    N'écrit que si l'échéance a pris au moins `SESSION_RENEW_AFTER_SECONDS` de retard sur ce
+    qu'un renouvellement produirait. Sans ce seuil, la porte d'auth écrirait sur `users.db` à
+    chaque requête (cf. `SESSION_RENEW_AFTER_SECONDS`).
+    """
+    target = now + SESSION_TTL_SECONDS
+    if target - expires_at < SESSION_RENEW_AFTER_SECONDS:
+        return
+    connection = _get_auth_db_connection()
+    try:
+        connection.execute(
+            "UPDATE sessions SET expires_at = ? WHERE token = ?",
+            (target, token),
+        )
+        connection.commit()
+    finally:
+        connection.close()
 
 
 def _is_mode_allowed(mode: str, permissions: Dict[str, Any]) -> bool:
@@ -1198,6 +1245,91 @@ def _is_mode_allowed(mode: str, permissions: Dict[str, Any]) -> bool:
     if mode == ED_MODE_CODE and "pve" in allowed_modes:
         return True
     return False
+
+
+# Définition UNIQUE de `sessions` : la création initiale et la recréation par migration
+# doivent produire exactement le même schéma, sinon une base migrée diverge d'une base neuve.
+_SESSIONS_TABLE_SQL = """
+    CREATE TABLE IF NOT EXISTS sessions (
+        token TEXT PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        created_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL
+    );
+"""
+
+
+def _migrate_sessions_table(cursor: sqlite3.Cursor) -> None:
+    """Ajoute `expires_at` aux bases créées avant le durcissement des sessions (F2).
+
+    La table est DÉTRUITE puis recréée, ce qui invalide les sessions existantes et force un
+    nouveau login. C'est le comportement voulu, pas un effet de bord : ces tokens sont
+    précisément ceux qui n'avaient aucune expiration, donc ceux qu'il faut révoquer. Les
+    conserver supposerait de leur inventer une échéance — soit une valeur par défaut destinée
+    à masquer l'absence de donnée, ce que T1 interdit.
+
+    `ALTER TABLE ... ADD COLUMN` est écarté pour la même raison : SQLite exige un DEFAULT pour
+    une colonne NOT NULL ajoutée, et ce DEFAULT survivrait à la migration — un INSERT futur
+    omettant `expires_at` produirait alors une session à l'échéance arbitraire au lieu d'échouer.
+    """
+    columns = {row["name"] for row in cursor.execute("PRAGMA table_info(sessions)")}
+    if "expires_at" in columns:
+        return
+    cursor.execute("DROP TABLE sessions")
+    cursor.executescript(_SESSIONS_TABLE_SQL)
+
+
+def _client_ip() -> str:
+    """IP de l'appelant, telle que vue par ce process.
+
+    `X-Forwarded-For` est délibérément IGNORÉ ici : il est trivialement falsifiable par le
+    client tant qu'aucun reverse proxy de confiance n'est en place, et le lire donnerait à un
+    attaquant un moyen de remettre son compteur à zéro à chaque tentative. L'étape 5 du plan
+    sécurité installe ce proxy ; l'étape 7 (journal d'audit) le prendra en compte alors, avec
+    la liste des proxys de confiance qui manque aujourd'hui.
+    """
+    if not request.remote_addr:
+        raise RuntimeError("request.remote_addr absent : impossible de limiter les tentatives")
+    return request.remote_addr
+
+
+def _count_recent_login_failures(cursor: sqlite3.Cursor, login: str, ip: str, now: int) -> int:
+    """Nombre d'échecs de login pour ce couple (login, IP) dans la fenêtre courante."""
+    window_start = now - LOGIN_ATTEMPT_WINDOW_SECONDS
+    row = cursor.execute(
+        "SELECT COUNT(*) AS failures FROM login_attempts "
+        "WHERE login = ? AND ip = ? AND attempted_at > ?",
+        (login, ip, window_start),
+    ).fetchone()
+    return int(row["failures"])
+
+
+def _record_login_failure(cursor: sqlite3.Cursor, login: str, ip: str, now: int) -> None:
+    """Enregistre un échec et purge les lignes sorties de la fenêtre.
+
+    La purge est faite ici plutôt qu'au succès : un attaquant qui n'échoue que sur des logins
+    inexistants ne produit aucun login réussi, donc aucune occasion de nettoyer.
+    """
+    cursor.execute(
+        "INSERT INTO login_attempts (login, ip, attempted_at) VALUES (?, ?, ?)",
+        (login, ip, now),
+    )
+    cursor.execute(
+        "DELETE FROM login_attempts WHERE attempted_at <= ?",
+        (now - LOGIN_ATTEMPT_WINDOW_SECONDS,),
+    )
+
+
+def _clear_login_failures(cursor: sqlite3.Cursor, login: str, ip: str) -> None:
+    """Remet le compteur à zéro après un login réussi : les échecs d'un utilisateur qui a fini
+    par se rappeler de son mot de passe ne doivent pas le bloquer à la connexion suivante."""
+    cursor.execute("DELETE FROM login_attempts WHERE login = ? AND ip = ?", (login, ip))
+
+
+def _purge_expired_sessions(cursor: sqlite3.Cursor, now: int) -> None:
+    """Retire les sessions échues. Appelé au login : la table ne grossit pas indéfiniment
+    sans imposer une écriture à chaque requête authentifiée."""
+    cursor.execute("DELETE FROM sessions WHERE expires_at <= ?", (now,))
 
 
 def initialize_auth_db() -> None:
@@ -1252,13 +1384,19 @@ def initialize_auth_db() -> None:
                 UNIQUE(profile_id, option_id)
             );
 
-            CREATE TABLE IF NOT EXISTS sessions (
-                token TEXT PRIMARY KEY,
-                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                created_at TEXT NOT NULL
+            CREATE TABLE IF NOT EXISTS login_attempts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                login TEXT NOT NULL,
+                ip TEXT NOT NULL,
+                attempted_at INTEGER NOT NULL
             );
+
+            CREATE INDEX IF NOT EXISTS idx_login_attempts_lookup
+                ON login_attempts (login, ip, attempted_at);
             """
+            + _SESSIONS_TABLE_SQL
         )
+        _migrate_sessions_table(cursor)
         cursor.execute(
             "INSERT OR IGNORE INTO profiles (code, label) VALUES (?, ?)",
             ("base", "Joueur Base"),
@@ -2275,9 +2413,26 @@ def login_user():
         return jsonify({"success": False, "error": "password is required and must be a non-empty string"}), 400
 
     normalized_login = login.strip()
+    now = int(time.time())
+    client_ip = _client_ip()
     connection = _get_auth_db_connection()
     try:
-        user_row = connection.execute(
+        cursor = connection.cursor()
+
+        # Rate limiting (F8) — contrôlé AVANT toute vérification de mot de passe : c'est le
+        # PBKDF2 à 200 000 itérations qui coûte cher, le laisser s'exécuter offrirait en prime
+        # un déni de service au brute-force.
+        if _count_recent_login_failures(cursor, normalized_login, client_ip, now) >= LOGIN_ATTEMPT_MAX_FAILURES:
+            connection.commit()
+            return jsonify({
+                "success": False,
+                "error": (
+                    f"Too many failed login attempts. Retry in "
+                    f"{LOGIN_ATTEMPT_WINDOW_SECONDS} seconds."
+                ),
+            }), 429
+
+        user_row = cursor.execute(
             """
             SELECT u.id AS user_id, u.login, u.password_hash, p.id AS profile_id, p.code AS profile_code
             FROM users u
@@ -2287,15 +2442,22 @@ def login_user():
             (normalized_login,),
         ).fetchone()
         if user_row is None:
+            _record_login_failure(cursor, normalized_login, client_ip, now)
+            connection.commit()
             return jsonify({"success": False, "error": "Invalid credentials"}), 401
 
         if not _verify_password(password, user_row["password_hash"]):
+            _record_login_failure(cursor, normalized_login, client_ip, now)
+            connection.commit()
             return jsonify({"success": False, "error": "Invalid credentials"}), 401
 
+        _clear_login_failures(cursor, normalized_login, client_ip)
+        _purge_expired_sessions(cursor, now)
+
         access_token = secrets.token_urlsafe(48)
-        connection.execute(
-            "INSERT INTO sessions (token, user_id, created_at) VALUES (?, ?, ?)",
-            (access_token, user_row["user_id"], str(int(time.time()))),
+        cursor.execute(
+            "INSERT INTO sessions (token, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
+            (access_token, user_row["user_id"], now, now + SESSION_TTL_SECONDS),
         )
         permissions = _resolve_permissions_for_profile(connection, user_row["profile_id"])
         connection.commit()
@@ -2315,6 +2477,30 @@ def login_user():
         )
     finally:
         connection.close()
+
+
+@app.route('/api/auth/logout', methods=['POST'])
+@mode_agnostic
+def logout_user():
+    """Révoque la session courante immédiatement.
+
+    Sans cette route, l'expiration (F2) est le SEUL moyen de tuer une session : un token
+    soupçonné volé resterait valide jusqu'à sept jours. La route est authentifiée — seul le
+    porteur du token peut le révoquer — et `@mode_agnostic` car se déconnecter n'agit pas sur
+    la partie en cours.
+
+    Un token déjà absent ne provoque pas d'erreur : la porte d'auth vient de le valider, donc
+    le seul cas où le DELETE ne retire rien est une double déconnexion. L'état visé — la
+    session n'existe plus — est atteint dans les deux cas.
+    """
+    token = _extract_bearer_token()
+    connection = _get_auth_db_connection()
+    try:
+        connection.execute("DELETE FROM sessions WHERE token = ?", (token,))
+        connection.commit()
+    finally:
+        connection.close()
+    return jsonify({"success": True})
 
 
 @app.route('/api/auth/me', methods=['GET'])
