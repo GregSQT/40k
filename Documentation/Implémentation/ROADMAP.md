@@ -113,7 +113,7 @@ mesure, et c'est assumé (§0.14).
 ## 4. Backlog hors chemin critique (`A_faire/`)
 
 Prêts à démarrer sans décision produit :
-- **Security étapes 3→8** (~4-6 j ; étapes 1-2 livrées, suivi à jour) → [`A_faire/Security.md`](A_faire/Security.md)
+- **Security étapes 4→8** (~4-5 j ; étapes 1-3 livrées, suivi à jour ; étape 5 = durcir la stack Docker existante, pas la créer) → [`Security.md`](Security.md)
 - **Tests front — reste T2b/T3a/T7 (couche A) + couches B (vitest) et C (Playwright)**
   (~10 j au total, sécable) → [`A_faire/front_test_auto.md`](A_faire/front_test_auto.md)
 - **Perf `generate_compact_formation`** (½-1 j) — MESURER avant d'implémenter, gain non acquis
