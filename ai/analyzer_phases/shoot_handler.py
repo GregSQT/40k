@@ -519,17 +519,24 @@ def handle_shoot(
             }
             target_pos_from_cache = positions_for_engagement.get(target_id)
             if target_pos_from_cache:
-                target_engaged = is_within_engine_engagement_zone(
-                    target_id,
-                    state.unit_player,
-                    positions_for_engagement,
-                    state.unit_hp,
-                    engagement_zone=_get_engagement_zone_for_analyzer(),
-                    position_override=target_pos_from_cache,
-                    positions_by_model=state.positions_by_model,
-                    unit_base=state.unit_base,
+                # MÊME capture d'arguments que la branche jumelle (ligne du log portant la
+                # position de la cible). L'oublier ici laissait le diagnostic sans mesure : il
+                # imprimait « le compteur et la mesure se contredisent » alors que la mesure
+                # n'avait simplement jamais été faite — accuser le compteur d'une omission de
+                # câblage est pire que de ne rien dire.
+                target_engagement_args = {
+                    "unit_player": state.unit_player,
+                    "unit_positions": positions_for_engagement,
+                    "unit_hp": state.unit_hp,
+                    "engagement_zone": _get_engagement_zone_for_analyzer(),
+                    "position_override": target_pos_from_cache,
+                    "positions_by_model": state.positions_by_model,
+                    "unit_base": state.unit_base,
                     **state.engagement_3d_kwargs(),
-                    subject_models=state.positions_by_model.get(target_id),  # get allowed
+                    "subject_models": state.positions_by_model.get(target_id),  # get allowed
+                }
+                target_engaged = is_within_engine_engagement_zone(
+                    target_id, **target_engagement_args
                 )
             else:
                 target_engaged = False

@@ -14,11 +14,13 @@ Trois défauts fermés ici, tous mesurés sur de vrais journaux.
    reconstruite à PV pleins et les figurines entamées remontaient (`[…, 1, 2, 4]` → `[…, 2, 5,
    4]`). Indexer par socle supprime la question.
 
-3. OVERKILL COMPTÉ DEUX FOIS (2026-08-10). L'analyzer appliquait la règle « l'excès d'une
-   blessure qui tue est perdu » à `Dmg:XHP`, qui est le dégât DÉJÀ APPLIQUÉ : mesuré, 14
-   intervalles entre instantanés sur 14 donnent `somme(Dmg) == perte de PV réelle`. Retranchée
-   deux fois, l'escouade 102 survivait à 4 PV de dégâts pour 4 PV restants, et le contrôle
-   « tir sur cible engagée » sonnait sur un tir légal.
+3. L'OVERKILL EST PERDU, ET DOIT LE RESTER. Un report de l'excès sur la figurine suivante a
+   été tenté le 2026-08-10 et REVENU le jour même : `Dmg:XHP` est le dégât BRUT de l'attaque
+   (`rec["damageDealt"] = dmg_dealt`, puis `new_hp = hp_before - dmg_dealt` et destruction),
+   donc le moteur perd bien l'excès. La mesure qui avait motivé le report — « 14 intervalles
+   sur 14 : somme(Dmg) == perte de PV » — ne distinguait pas « journal plafonné » de « aucun
+   overkill dans ces intervalles ». Reporter tuait DEUX figurines par blessure à une arme
+   Damage-2 contre des socles à 1 PV.
 """
 
 from __future__ import annotations
@@ -147,31 +149,31 @@ def _damage(state, amount: int) -> None:
     )
 
 
-def test_damage_carries_over_to_the_next_model(st):
-    """`Dmg:` est le dégât APPLIQUÉ : 3 sur une figurine à 2 PV doit en entamer une seconde."""
+def test_overkill_is_lost_not_carried_over(st):
+    """UNE blessure ne tue qu'UNE figurine, quel que soit son dégât — comme le moteur.
+
+    Miroir de `_resolve_one_pool_wound` : `new_hp = hp_before - dmg_dealt`, destruction, et
+    l'excès s'arrête là. Reporter ferait tomber deux socles à 1 PV sous une seule arme
+    Damage-2, et l'analyzer déclarerait détruites des escouades encore debout.
+    """
     core._resync_living_models(st, _Config(), SQUAD, ["105#0", "105#1"])  # 2 PV chacune
-    _damage(st, 3)
-    assert st.unit_models_alive[SQUAD] == 1, "la première figurine aurait dû tomber"
-    assert st.unit_hp[SQUAD] == 1, (
-        "l'excès a été perdu : l'analyzer retranche une seconde fois un overkill que le moteur "
-        "a déjà appliqué, et l'escouade survit à des dégâts qui l'ont tuée"
+    _damage(st, 99)
+    assert st.unit_models_alive[SQUAD] == 1, (
+        "plus d'une figurine tuée par une seule blessure : l'excès est reporté alors que le "
+        "moteur le perd"
     )
+    assert st.unit_hp[SQUAD] == 2, "la relève doit arriver à SES PV, intacte"
 
 
-def test_the_witness_squad_dies_on_exactly_its_remaining_hp(st):
-    """Le témoin 102 : 4 PV restants (1 + 3), 4 PV de dégâts journalisés → détruite."""
-    core._resync_living_models(st, _Config(), SQUAD, ["105#0", "105#1"], {"105#0": 1, "105#1": 3})
-    _damage(st, 2)
-    _damage(st, 1)
-    _damage(st, 1)
-    assert SQUAD not in st.unit_hp, (
-        "l'escouade survit à 4 PV de dégâts pour 4 PV restants — c'est exactement ce qui faisait "
-        "sonner « tir sur cible engagée » (1.2) sur un tir légal"
-    )
+def test_a_single_wound_never_empties_the_squad(st):
+    """Corollaire : une escouade entière ne peut pas tomber sous une seule blessure."""
+    core._resync_living_models(st, _Config(), SQUAD, ["105#0", "105#1", "105#2"])
+    _damage(st, 500)
+    assert SQUAD in st.unit_hp and st.unit_models_alive[SQUAD] == 2
 
 
-def test_overkill_stops_at_the_last_model(st):
-    """Au-delà de la dernière figurine, l'excès n'a plus de destinataire : pas de récursion folle."""
+def test_the_last_model_removal_destroys_the_squad(st):
+    """Et la dernière figurine tuée retire bien l'escouade."""
     core._resync_living_models(st, _Config(), SQUAD, ["105#0"], {"105#0": 1})
     _damage(st, 99)
     assert SQUAD not in st.unit_hp
