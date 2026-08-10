@@ -86,16 +86,27 @@ mesure, et c'est assumé (§0.14).
      périmé. `n_steps` est un TOTAL divisé par `n_envs` en un point de passage unique depuis
      §0.33 ⇒ le buffer ne dépend plus de `n_envs`, et les **7** profils sont à 48 envs de toute
      façon, `x5_debug` compris. La mémoire n'écarte plus aucun profil.
-   - Ce qui **casse** : `x1_debug.total_episodes` vaut **10** (et non 480 — la valeur a changé en
-     commit après la rédaction de cette ligne le 2026-08-10 ; recompté depuis la config). Et
+   - Ce qui **casse** — et **DEUX variables distinctes** sont en cause, que ce fichier a confondues
+     dans une première correction du 2026-08-10 :
+     | | `total_episodes` (durée d'ENTRAÎNEMENT) | `bot_eval_final` (parties par bot de la MESURE) |
+     |---|---|---|
+     | `x1_debug` | **10** (valait 480 avant un commit du 2026-08-10) | **0** |
+     | `x5_debug` | **96** | **1** |
+     | `x1` | 10 000 | 100 |
+     | `x1_long` | 200 000 | 600 |
      `total_episodes` est un total **GLOBAL** tous environnements confondus
      (`self.episode_count += episodes_finished`, `ai/training_callbacks.py:201`), pas un par-env.
-     Reste `x5_debug` = **96**. Comparer deux win-rates par tranche sur 10 ou 96 parties, c'est
-     mesurer du bruit : à 96, l'erreur-type autour de 0,5 vaut ~5 points (IC95 ≈ ±10).
-   - **Le protocole §9.6 conditionne l'ouverture de CHAQUE tranche P3 à ce chiffre.** Le mesurer
-     avec un instrument trop court revient à ne pas le mesurer, et P3-4 serait validée sur du bruit.
-   - **À faire** : ajouter un profil de validation dédié (~500-1000 épisodes) à
-     `ArmageddonAgent_training_config.json`. Plus rien ne l'interdit depuis la fin du run (§0).
+   - **`x1_debug` ne produit AUCUN win-rate** : `bot_eval_final = 0`, il n'y a pas d'évaluation
+     finale. Ce n'est pas « trop court », c'est structurellement incapable de rendre le chiffre que
+     §9.6 exige. `x5_debug` en rend un sur **1 partie par bot** (6 parties, granularité 1/6).
+   - **Les deux variables doivent tenir ensemble** : assez d'épisodes d'entraînement pour que
+     l'effet de la tranche apparaisse, ET assez de parties d'évaluation pour qu'un écart sorte du
+     bruit. Avec 6 bots, l'erreur-type de l'écart entre deux win-rates `combined` vaut
+     ≈ `0,707/√(6 × bot_eval_final)` : **2,9 points** à `bot_eval_final = 100`, 4,1 à 50, 2,0 à 200.
+   - **À faire** : un profil de validation dédié dans `ArmageddonAgent_training_config.json`. Plus
+     rien ne l'interdit depuis la fin du run (§0). Le dimensionnement est un arbitrage de **budget
+     machine par tranche** — le run `x1` de référence a pris **4 h 01** (11 h 17 → 15 h 18) pour
+     10 000 épisodes.
      → [`1_Agent/V11_phaseA.md`](1_Agent/V11_phaseA.md) §9.6
 7. **Mesure de référence** `x1_long` — solde §0.14, §0.67, critère T6 (via §10.6) d'un coup.
 8. **§0.59 — Phase 2 self-play** (`--append x1_selfplay`) — livré, JAMAIS exécuté ; le premier

@@ -1219,17 +1219,30 @@ dépend** ; ce §9.5 ne garde que le reliquat non rattachable. C'est aussi ce qu
 >
 > Le choix se fait donc sur le NOMBRE D'ÉPISODES, seul critère qui reste.
 >
-> 🔴 **ET LÀ, AUCUN PROFIL NE CONVIENT — corrigé le 2026-08-10 (2ᵉ passe).** Cette section a
-> conclu « `x1_debug` = 480 épisodes, donc `x1_debug` ». Recompté depuis la config :
-> `x1_debug.total_episodes` vaut **10** (la valeur est passée de 480 à 10 en commit, le jour même).
-> `x5_debug` vaut **96**. Et `total_episodes` est un total **GLOBAL** tous environnements confondus
-> — `self.episode_count += episodes_finished` sur la somme des `dones`, `ai/training_callbacks.py:201`
-> — pas un compte par env : 96 veut dire 96 parties, pas 96 × 48.
+> 🔴 **ET LÀ, AUCUN PROFIL NE CONVIENT — corrigé le 2026-08-10 (3ᵉ passe).** Cette section a
+> d'abord conclu « `x1_debug` = 480 épisodes, donc `x1_debug` », puis « 10 ou 96 parties, c'est du
+> bruit ». Les deux sont fausses, la seconde parce qu'elle **confond la durée d'entraînement et la
+> taille de la mesure** :
 >
-> Or ce §9.6 conditionne l'ouverture de chaque tranche P3 à une comparaison de win-rates. À 96
-> parties, l'erreur-type autour de 0,5 vaut ~5 points (IC95 ≈ ±10) ; à 10, il n'y a pas de mesure
-> du tout. **Le protocole exige un profil qui n'existe pas** : ~500-1000 épisodes, à ajouter à
-> `ArmageddonAgent_training_config.json`. Tant qu'il n'est pas là, P3-4 serait validée sur du bruit.
+> | profil | `total_episodes` (ENTRAÎNEMENT) | `bot_eval_final` (parties par bot, MESURE) |
+> |---|---|---|
+> | `x1_debug` | **10** (480 avant un commit du même jour) | **0** |
+> | `x5_debug` | **96** | **1** |
+> | `x1` | 10 000 | 100 |
+> | `x1_long` | 200 000 | 600 |
+>
+> `total_episodes` est un total **GLOBAL** tous environnements confondus
+> (`self.episode_count += episodes_finished` sur la somme des `dones`, `ai/training_callbacks.py:201`),
+> pas un compte par env.
+>
+> **`x1_debug` ne rend aucun win-rate du tout** (`bot_eval_final = 0`) : il ne peut pas servir ce
+> protocole, quelle que soit sa durée. `x5_debug` en rend un sur 6 parties. Et les deux variables
+> doivent tenir ENSEMBLE — assez d'entraînement pour que la tranche produise un effet, assez
+> d'évaluation pour qu'il sorte du bruit : avec 6 bots, l'erreur-type de l'écart entre deux
+> `combined` vaut ≈ `0,707/√(6 × bot_eval_final)`, soit **2,9 points** à 100 parties par bot.
+>
+> **Le protocole exige donc un profil qui n'existe pas.** Son dimensionnement est un arbitrage de
+> budget machine (le run `x1` a coûté 4 h 01 pour 10 000 épisodes), pas un choix technique.
 > Ligne de suivi : [`../ROADMAP.md`](../ROADMAP.md) §1 pt 6.
 
 Chaque tranche P3 : suite de tests verte + smoke 10 épisodes + run court sur le profil de
