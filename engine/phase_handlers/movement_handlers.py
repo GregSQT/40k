@@ -607,6 +607,33 @@ def squad_descent_penalty_subhex(game_state: Dict[str, Any], squad_id: str) -> i
     return max_cost
 
 
+def squad_move_net_budget_subhex(
+    game_state: Dict[str, Any], squad_id: str, *, gross_budget: Optional[int] = None
+) -> int:
+    """Budget RÉELLEMENT dépensable par le squad move rigide : borne du pool MOINS la descente.
+
+    SOURCE UNIQUE du budget net. `squad_move_pool_budget_subhex` donne la borne brute (régime
+    Advance, malus 21.03) ; `squad_descent_penalty_subhex` retranche la descente §13.06 due par la
+    figurine la plus haute. Le pool retranchait la seconde, l'ÉLIGIBILITÉ non : une escouade posée
+    sur un plancher dont la hauteur mange tout son MOVE était déclarée éligible (un voisin au sol
+    est valide) puis se voyait servir un pool VIDE au clic — masque ⊄ exécutable (§0.34), la classe
+    d'incohérence que `squad_move_pool_budget_subhex` avait déjà fermée sur le malus de vol.
+
+    ``<= 0`` = aucune destination légale : les deux appelants doivent le traiter comme tel.
+    Peut être NÉGATIF (descente strictement supérieure au budget) — la valeur n'est pas bornée à 0
+    pour que l'appelant distingue « budget nul » de « descente impayable ».
+
+    ``gross_budget`` : borne brute imposée par l'appelant (chemin gym `move_budget_override`), la
+    descente restant facturée dessus comme sur la borne calculée.
+    """
+    budget = (
+        squad_move_pool_budget_subhex(game_state, str(squad_id))
+        if gross_budget is None
+        else int(gross_budget)
+    )
+    return budget - squad_descent_penalty_subhex(game_state, str(squad_id))
+
+
 def _movement_engagement_violates(
     game_state: Dict[str, Any],
     mover: Dict[str, Any],
@@ -941,12 +968,13 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
         if move_stat <= 0:
             continue
 
-        # Borne de la recherche d'éligibilité = budget RÉEL du move, PAS la caractéristique brute.
-        # `MOVE` et le budget diffèrent dès que l'unité prend les airs (-2", 21.03) : borner sur
-        # `MOVE` déclarerait éligible une unité volante dont la seule destination légale est dans
-        # la bande `(M - 2", M]`, que le pool refusera ensuite — masque ⊄ exécutable (§0.34).
-        # MÊME fonction que celle dont le pool tire sa borne : les deux ne peuvent plus diverger.
-        move_range = squad_move_pool_budget_subhex(game_state, str(unit_id))
+        # Borne de la recherche d'éligibilité = budget NET du move, PAS la caractéristique brute.
+        # `MOVE` et le budget diffèrent dès que l'unité prend les airs (-2", 21.03) ou qu'elle doit
+        # descendre d'un étage (§13.06) : borner sur `MOVE` déclarerait éligible une unité dont
+        # toutes les destinations légales tombent hors du budget réel, que le pool refusera ensuite
+        # — masque ⊄ exécutable (§0.34). MÊME fonction que celle dont le pool tire sa borne, malus
+        # de descente COMPRIS : les deux ne peuvent plus diverger.
+        move_range = squad_move_net_budget_subhex(game_state, str(unit_id))
         if move_range <= 0:
             continue
 
@@ -1292,40 +1320,30 @@ def movement_set_fly_mode_handler(game_state: Dict[str, Any], unit_id: str, acti
 
 
 def _handle_unit_activation(game_state: Dict[str, Any], unit: Dict[str, Any], config: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
-    """AI_MOVE.md: Unit activation start + execution loop"""
+    """AI_MOVE.md: Unit activation start + execution loop — chemin PvP UNIQUEMENT.
+
+    Le gym ne passe pas par ici : `convert_squad_action` n'émet que `squad_normal_move` /
+    `squad_advance` / `squad_fall_back` / `squad_wait` / `ingress_move`, résolus par le pipeline
+    squad (`execute_semantic_action`) sans jamais traverser `_process_movement_phase`. La branche
+    gym qui vivait ici était donc morte — et fausse : le résultat « pool vide » de la boucle
+    d'exécution (`action: "skip"` + `skip_reason`, fin d'activation déjà appliquée au game_state)
+    revient avec ``True`` et se serait fait écraser par un dict `unit_activated` sans champ
+    `action`, donc un skip jamais journalisé. Erreur explicite plutôt que résultat faux — même
+    verrou que le jumeau tir (`shooting_handlers.execute_action`, « squad path expected »).
+    """
+    if config.get("gym_training_mode", False) or game_state.get("gym_training_mode", False):
+        raise RuntimeError(
+            f"_handle_unit_activation reached in gym training — squad path expected. "
+            f"unit_id={unit['id']} episode={game_state.get('episode_number')} "
+            f"turn={game_state.get('turn')}"
+        )
+
     # Unit activation start
     movement_unit_activation_start(game_state, unit["id"])
 
     # Unit execution loop (automatic)
-    execution_result = movement_unit_execution_loop(game_state, unit["id"])
-
-    # Clean flag detection
-    is_gym_training = config.get("gym_training_mode", False) or game_state.get("gym_training_mode", False)
-
-    # In gym training, ActionDecoder constructs complete movement with destCol/destRow
-    # So we should NOT return waiting_for_player=True - the action will have destination when it arrives
-    if is_gym_training and isinstance(execution_result, tuple) and execution_result[0]:
-        # Direct field access
-        if "waiting_for_player" not in execution_result[1]:
-            waiting_for_player = False
-        else:
-            waiting_for_player = execution_result[1]["waiting_for_player"]
-
-        # In gym training, ActionDecoder always provides destination in action
-        # So we should NOT return waiting_for_player=True or waiting_for_movement_choice
-        # Just return activation result without action (activation is not an action to log)
-        # The movement will be executed in the same step when action with destCol/destRow is processed
-        # Return result without action to skip logging (activation is not logged, only the movement is)
-        return True, {
-            "unit_activated": True,
-            "unitId": unit["id"],
-            "valid_destinations": execution_result[1]["valid_destinations"] if "valid_destinations" in execution_result[1] else [],
-            # No action field - activation is not an action to log
-            # Movement will be logged when action with destCol/destRow is processed
-        }
-
     # All non-gym players (humans AND PvE AI) get normal waiting_for_player response
-    return execution_result
+    return movement_unit_execution_loop(game_state, unit["id"])
 
 
 def movement_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> None:
@@ -1341,7 +1359,11 @@ def movement_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
 
 
 def movement_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> Tuple[bool, Dict[str, Any]]:
-    """AI_MOVE.md: Single movement execution (no loop like shooting)"""
+    """AI_MOVE.md: Single movement execution (no loop like shooting).
+
+    Appelant UNIQUE : `_handle_unit_activation`, donc chemin PvP seul — la branche gym qui vivait
+    ici (retour `waiting_for_player=False`) est morte avec la sienne.
+    """
     unit = get_unit_by_id(game_state, unit_id)
     if not unit:
         return False, {"error": "unit_not_found", "unit_id": unit_id}
@@ -1376,55 +1398,40 @@ def movement_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> Tu
     preview_data = movement_preview(game_state["valid_move_destinations_pool"])
     game_state["preview_hexes"] = game_state["valid_move_destinations_pool"]
     
-    # In gym training, ActionDecoder constructs complete movement with destCol/destRow
-    # So we should NOT return waiting_for_player=True - the action will have destination when it arrives
-    is_gym_training = game_state.get("gym_training_mode", False)
-    
-    if is_gym_training:
-        # Gym training: Don't return waiting_for_player=True - ActionDecoder will provide destination in action
-        # Return result without waiting_for_player so movement can be executed directly
+    # Desperate Escape (09.07) : escouade engagée ET battle-shocked → on SUSPEND le move.
+    # Pas de preview ; le front affiche un popup d'avertissement, et sa validation déclenche
+    # l'action hazard_confirm (hazard 06.03 + attribution 06.02 AVANT de bouger). Une escouade
+    # engagée mais saine = Ordered Retreat (aucun hazard) → flux normal ci-dessous.
+    engaged_de = _squad_is_in_enemy_er(game_state, str(unit_id))
+    shocked_de = bool(require_key(unit, "battle_shocked"))
+    if engaged_de and shocked_de:
+        # Desperate Escape : résolution SÉQUENTIELLE. Tant que le hazard n'est pas roulé/
+        # attribué, l'unité ne doit PAS être en cours de déplacement côté front : aucun pool
+        # vert, aucun ghost. movement_clear_preview met aussi active_movement_unit=None, et on
+        # le laisse ainsi (les handlers hazard n'en dépendent pas : confirm via action.unitId,
+        # allocate via pending_hazard_allocation). _resume_after_hazard re-posera l'unité active
+        # + le pool Fall Back une fois les MW attribuées → le flux move normal reprend.
+        movement_clear_preview(game_state)
         return True, {
-            "unit_activated": True,
+            "action": "requires_hazard",
             "unitId": unit_id,
-            "valid_destinations": game_state["valid_move_destinations_pool"],
-            "preview_data": preview_data,
-            "waiting_for_player": False  # AI executes movement directly, no waiting
-        }
-    else:
-        # Desperate Escape (09.07) : escouade engagée ET battle-shocked → on SUSPEND le move.
-        # Pas de preview ; le front affiche un popup d'avertissement, et sa validation déclenche
-        # l'action hazard_confirm (hazard 06.03 + attribution 06.02 AVANT de bouger). Une escouade
-        # engagée mais saine = Ordered Retreat (aucun hazard) → flux normal ci-dessous.
-        engaged_de = _squad_is_in_enemy_er(game_state, str(unit_id))
-        shocked_de = bool(require_key(unit, "battle_shocked"))
-        if engaged_de and shocked_de:
-            # Desperate Escape : résolution SÉQUENTIELLE. Tant que le hazard n'est pas roulé/
-            # attribué, l'unité ne doit PAS être en cours de déplacement côté front : aucun pool
-            # vert, aucun ghost. movement_clear_preview met aussi active_movement_unit=None, et on
-            # le laisse ainsi (les handlers hazard n'en dépendent pas : confirm via action.unitId,
-            # allocate via pending_hazard_allocation). _resume_after_hazard re-posera l'unité active
-            # + le pool Fall Back une fois les MW attribuées → le flux move normal reprend.
-            movement_clear_preview(game_state)
-            return True, {
-                "action": "requires_hazard",
-                "unitId": unit_id,
-                "requires_hazard": True,
-                "waiting_for_player": True,
-            }
-        # Human players: return waiting_for_player for destination selection
-        return True, {
-            "unit_activated": True,
-            "unitId": unit_id,  # ADDED: Required for reward calculation
-            "valid_destinations": game_state["valid_move_destinations_pool"],
-            "preview_data": preview_data,
+            "requires_hazard": True,
             "waiting_for_player": True,
-            # V11 : engagement de l'escouade dès l'activation (positions PRE-move). Pilote l'UI
-            # des modes de deplacement (engagee => Fall-back/Stationary ; non engagee => Move/Advance).
-            "would_flee": bool(_squad_is_in_enemy_er(game_state, str(unit_id))),
-            # V11 : jet d'Advance figé si l'escouade a déjà advancé ce tour (sinon None) — restaure
-            # le badge + l'état « advancé » du bouton à la ré-activation après un cancel.
-            "advance_roll": _advance_roll_for(str(unit_id), game_state),
         }
+    # Human players: return waiting_for_player for destination selection
+    return True, {
+        "unit_activated": True,
+        "unitId": unit_id,  # ADDED: Required for reward calculation
+        "valid_destinations": game_state["valid_move_destinations_pool"],
+        "preview_data": preview_data,
+        "waiting_for_player": True,
+        # V11 : engagement de l'escouade dès l'activation (positions PRE-move). Pilote l'UI
+        # des modes de deplacement (engagee => Fall-back/Stationary ; non engagee => Move/Advance).
+        "would_flee": bool(_squad_is_in_enemy_er(game_state, str(unit_id))),
+        # V11 : jet d'Advance figé si l'escouade a déjà advancé ce tour (sinon None) — restaure
+        # le badge + l'état « advancé » du bouton à la ré-activation après un cancel.
+        "advance_roll": _advance_roll_for(str(unit_id), game_state),
+    }
 
 
 def _attempt_movement_to_destination(
@@ -2978,9 +2985,15 @@ def movement_build_valid_destinations_pool(
                 f"({move_budget_override}) pour unit {unit_id} — le moteur ne produit jamais "
                 f"un budget < 0 (get_squad_move_budget borne à max(0, ...))"
             )
-        move_range = int(move_budget_override)
+        _gross_range = int(move_budget_override)
     else:
-        move_range = squad_move_pool_budget_subhex(game_state, str(unit_id))
+        _gross_range = squad_move_pool_budget_subhex(game_state, str(unit_id))
+    # Squad move rigide (destination sol) : la descente §13.06 des figs parties de l'étage se
+    # retranche du budget. MÊME fonction que l'éligibilité (`get_eligible_units`) — c'est ce qui
+    # interdit à la borne du masque et à celle du pool de diverger.
+    move_range = squad_move_net_budget_subhex(
+        game_state, str(unit_id), gross_budget=_gross_range
+    )
     # Normalize coordinates to int - raises error if invalid
     start_col, start_row = require_unit_position(unit, game_state)
     start_pos = (start_col, start_row)
@@ -3089,24 +3102,22 @@ def movement_build_valid_destinations_pool(
     # posé avant la construction de ce pool. Logique partagée via _fly_traversal_active.
     _fly_active = _fly_traversal_active(game_state, unit, unit_id)
 
-    # Squad move rigide (destination sol) : si des figs partent de l'étage, retrancher le coût de
-    # descente de la plus haute (§13.06) à TOUT le squad. No-op si fly actif ou tout au sol. Si le
-    # budget ne couvre pas la descente, le squad move est impossible → pool vide (aucune destination).
-    if not _fly_active:
-        _descent_pen = squad_descent_penalty_subhex(game_state, unit_id)
-        if _descent_pen > 0:
-            if _descent_pen >= move_range:
-                if read_only:
-                    return []
-                game_state["valid_move_destinations_pool"] = []
-                game_state["valid_move_destinations_pool_by_level"] = {0: []}
-                game_state["move_preview_footprint_span"] = _move_preview_footprint_span(unit)
-                game_state["move_preview_footprint_zone"] = set()
-                game_state["move_preview_border"] = []
-                if not game_state.get("gym_training_mode"):
-                    _sync_move_preview_mask_loops(game_state, set())
-                return []
-            move_range = move_range - _descent_pen
+    # Descente §13.06 : déjà retranchée de `move_range` plus haut (`squad_move_net_budget_subhex`,
+    # no-op si fly actif ou tout au sol). Il ne reste qu'à traiter le cas où elle a mangé tout le
+    # budget : le squad move est alors impossible → pool vide (aucune destination). La condition est
+    # celle du budget NET, pas un second calcul de la pénalité.
+    _descent_pen = _gross_range - move_range
+    if _descent_pen > 0 and move_range <= 0:
+        if read_only:
+            return []
+        game_state["valid_move_destinations_pool"] = []
+        game_state["valid_move_destinations_pool_by_level"] = {0: []}
+        game_state["move_preview_footprint_span"] = _move_preview_footprint_span(unit)
+        game_state["move_preview_footprint_zone"] = set()
+        game_state["move_preview_border"] = []
+        if not game_state.get("gym_training_mode"):
+            _sync_move_preview_mask_loops(game_state, set())
+        return []
 
     # FLY units: BFS ignoring walls/occupation for traversal.
     # Only destination validation checks walls, occupation and engagement zone.
@@ -4020,14 +4031,22 @@ def movement_build_model_destinations_pool(
         # sûr quand thru_friendly (sinon le champ dépend du plan provisoire, recalcul obligatoire).
         # FLY : le champ n'a aucun obstacle → indépendant du plan provisoire → toujours cacheable.
         _mm_can_cache = thru_friendly or has_fly
-        _mm_cache: Dict[Tuple[str, int, int, int, int], Dict[Tuple[int, int], float]] = game_state.setdefault(
+        _mm_cache: Dict[Tuple[str, int, int, int, int, int, bool], Dict[Tuple[int, int], float]] = game_state.setdefault(
             "_move_model_field_cache", {}
         )
         # L'orientation du socle fait partie de la clé : l'empreinte (donc le champ atteignable et la
         # limite du bord de board) dépend de l'orientation. Sans elle, un pivot ré-utilisait le champ
         # de l'orientation précédente (ex. socle vertical bloqué comme s'il était horizontal).
-        _mm_key: Tuple[str, int, int, int, int] = (
-            str(model_id), start_col, start_row, int(budget), mover_orient,
+        # Le NIVEAU DE VUE aussi : `enemy_occupied` est construit à ce niveau (cf. plus haut) et entre
+        # dans les obstacles dès que `can_move_through_enemy_model` est faux. Sans lui, le champ
+        # mémorisé au sol était relu à l'étage (ennemis du sol traités en murs), et l'inverse laissait
+        # traverser des figurines ennemies — masque ⊄ exécutable (§0.34), le `level` étant un
+        # paramètre par requête de l'UI que rien n'invalide entre deux previews sans commit.
+        # `has_fly` enfin : redondant aujourd'hui (le -2" de 21.03 est déjà dans `budget`), mais c'est
+        # une dépendance à distance sur une valeur de règle, et le jumeau charge le porte déjà
+        # (`_charge_model_field_cache`). Coût nul, les deux caches restent alignés.
+        _mm_key: Tuple[str, int, int, int, int, int, bool] = (
+            str(model_id), start_col, start_row, int(budget), mover_orient, view_level, has_fly,
         )
         _mm_field = _mm_cache.get(_mm_key) if _mm_can_cache else None
         _mm_cache_hit = _mm_field is not None
@@ -4061,7 +4080,10 @@ def movement_build_model_destinations_pool(
             )
             if _mm_pt and _mm_fb is not None:
                 _mm_field_s = _mm_clock.perf_counter() - _mm_fb
-            if _mm_cache is not None and _mm_key is not None:
+            # Écriture sous la MÊME condition que la lecture : un champ calculé avec les sœurs en
+            # obstacles (non cacheable) n'a rien à faire dans le cache, même si aucune lecture ne
+            # peut l'atteindre à budget égal aujourd'hui.
+            if _mm_can_cache:
                 _mm_cache[_mm_key] = _mm_field
         _mm_cells_n = len(_mm_field)
         # Filtres de destination appliqués À CHAQUE appel (dépendent du plan provisoire via
@@ -5427,6 +5449,14 @@ def ingress_preview_loops(game_state: Dict[str, Any], squad_id: str) -> Optional
     if cache_key in loops_cache:
         return loops_cache[cache_key]
     loops = compute_move_preview_mask_loops_world(pool, game_state)
+    # Mémo BORNÉ, comme ses deux frères (`_ingress_pool_with_key`, `_ingress_clearance_mask_cached`) :
+    # la clé porte les positions ennemies, donc une entrée périmée est déjà inaccessible et seule la
+    # croissance est en jeu — or c'est ici que les entrées sont les plus grosses (les contours, cf.
+    # docstring). Sans cette borne, la partie accumulait un jeu de contours par configuration ennemie
+    # traversée, et le commentaire de `_invalidate_all_destination_pools_after_movement` (« leur
+    # croissance est bornée ») était faux pour le troisième des trois mémos.
+    if len(loops_cache) >= _INGRESS_POOL_CACHE_MAX:
+        loops_cache.clear()
     loops_cache[cache_key] = loops
     return loops
 
