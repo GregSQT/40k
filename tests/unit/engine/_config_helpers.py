@@ -218,6 +218,117 @@ def build_armageddon_engine(seed: int, **overrides):
     return engine
 
 
+#: Répertoire de travail des scénarios de test, UN par processus pytest. Créé à la demande et
+#: supprimé à la sortie — voir `load_engine_from_scenario` pour les deux contraintes qui
+#: interdisent un `TemporaryDirectory` refermé plus tôt.
+_SESSION_SCRATCH: List[str] = []
+
+
+def _session_scratch_dir() -> Path:
+    """Répertoire de scénarios du processus courant, créé au premier appel.
+
+    `atexit` et non un `TemporaryDirectory` : le moteur doit pouvoir relire le fichier pendant
+    toute sa vie (cf. `load_engine_from_scenario`), donc le nettoyage ne peut pas être borné par
+    un `with`. Il est en revanche légitime EN TEST, où personne n'ouvre le replay après coup —
+    la raison même pour laquelle `ai.scenario_scratch` s'interdit un `atexit` côté production.
+    """
+    if not _SESSION_SCRATCH:
+        import atexit
+        import shutil
+
+        from ai.scenario_scratch import make_scenario_scratch_dir
+
+        chemin = make_scenario_scratch_dir("pytest_")
+        _SESSION_SCRATCH.append(chemin)
+        atexit.register(shutil.rmtree, chemin, True)
+    return Path(_SESSION_SCRATCH[0])
+
+
+def load_engine_from_scenario(scenario: Dict[str, Any], *, seed: int = 0, **overrides):
+    """Matérialise `scenario` sur disque et construit le moteur dessus.
+
+    Le chaînon qui manquait à `build_armageddon_engine` pour que les tests à scénario AD HOC
+    puissent l'utiliser : sans lui, chacun recopiait les 7 kwargs de `W40KEngine.__init__`.
+
+    DEUX contraintes, apprises ailleurs et payées deux fois — d'où la délégation à
+    `ai.scenario_scratch`, dont c'est exactement la raison d'être :
+
+    1. **Sous le dépôt, pas dans `/tmp`.** `repo_relative_scenario_path`
+       (`engine/w40k_core.py`) LÈVE sur un chemin hors dépôt, et `reset()` l'appelle dès qu'un
+       StepLogger est actif. Un scénario dans `/tmp` fait donc mourir l'épisode au démarrage
+       chez tout appelant qui journalise.
+    2. **Survivre à l'appel.** Le moteur retient le chemin dans `_current_scenario_file` et le
+       RELIT à tout `reset()` ultérieur qui demande un rechargement — changement de joueur
+       contrôlé, scénario aléatoire, scheduler de déploiement. Un `TemporaryDirectory` refermé à
+       la sortie de cette fonction donnait un `FileNotFoundError` au second `reset()`.
+
+    La purge de `ai.scenario_scratch` ne touche PAS un répertoire dont le processus propriétaire
+    vit encore, quel que soit son âge (empreinte `OWNER_PID`) : lancer `pytest` pendant un
+    entraînement long ne peut plus lui supprimer son scénario. C'était le cas jusqu'au
+    2026-08-10, et ce helper l'avait aggravé en faisant des tests un troisième créateur de
+    répertoires de travail.
+
+    Le fichier vit donc aussi longtemps que le PROCESSUS de test — c'est ce dont le moteur a
+    besoin, et c'est tout : `_session_scratch_dir` le supprime à la sortie de pytest. Ne PAS
+    reprendre ce nettoyage pour un run réel, où le replay ouvre le scénario après coup (c'est
+    exactement ce que la docstring de `ai.scenario_scratch` interdit).
+    """
+    scratch = _session_scratch_dir()
+    # Un fichier par appel, dans UN répertoire : un répertoire par appel laissait 37 dossiers
+    # derrière lui dans ce dépôt, que `_purge_stale` re-balayait à chaque construction de moteur.
+    path = scratch / f"scenario_{len(list(scratch.iterdir()))}.json"
+    path.write_text(json.dumps(scenario), encoding="utf-8")
+    return build_armageddon_engine(seed, scenario_file=str(path), **overrides)
+
+
+# ---------------------------------------------------------------------------
+# Unités ATTACHÉES (règle 19) — scénario et fixtures partagés
+# ---------------------------------------------------------------------------
+
+#: Datasheets du couple leader/bodyguard des tests 19.xx, et les deux règles qui les opposent.
+#: RÉUNIES ICI parce que deux fichiers les partagent (`test_attached_units_abilities_19_04`,
+#: `test_squad_obs_unit_rules`) : elles y étaient recopiées à l'identique, et la bascule du
+#: 2026-08-10 a dû être appliquée deux fois à la main. Rien n'aurait cassé si l'une avait été
+#: oubliée — le fichier d'observation serait resté vert, la source qu'il suit étant le bodyguard.
+#:
+#: Le couple est DISCRIMINANT DANS LES DEUX SENS, c'est sa raison d'être : le Chaplain porte
+#: `deep_strike` et pas `charge_impact`, l'escouade l'inverse, et 19.01 autorise l'attachement
+#: (le `CAN_LEAD` du Chaplain couvre le keyword « ASSAULT INTERCESSORS WITH JUMP PACKS »).
+#: Deux VRAIES datasheets : ces fixtures reposaient sur un placeholder INVENTÉ jusqu'à sa purge
+#: par le chantier 05, et rien ne doit en réintroduire un pour la commodité d'un test.
+ATTACHED_LEADER_RULE = "deep_strike"
+ATTACHED_BODYGUARD_RULE = "charge_impact"
+
+#: Escouade de 3 figurines : l'unité attachée en comptera 4 (le Chaplain replié).
+ATTACHED_BODYGUARD: Dict[str, Any] = {
+    "id": 101, "unit_type": "AssaultIntercessorJumpPack", "player": 2, "col": 12, "row": 10,
+    "models": [{"col": 12, "row": 10}, {"col": 13, "row": 10}, {"col": 14, "row": 10}],
+}
+ATTACHED_LEADER: Dict[str, Any] = {
+    "id": 102, "unit_type": "ChaplainJumpPack", "player": 2,
+    "attached_squad": 101, "col": 15, "row": 10,
+}
+ATTACHED_ENEMY: Dict[str, Any] = {
+    "id": 1, "unit_type": "Intercessor", "player": 1, "col": 3, "row": 3,
+}
+
+
+def attached_scenario(units: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Scénario minimal des tests d'unités attachées, pour la liste d'unités donnée."""
+    return {
+        "board_ref": "44x60x5",
+        "primary_objectives": ["objectives_control"],
+        "wall_ref": "walls-none.json",
+        # 08.04 exige la Faction d'Armée DÉCLARÉE à chaque phase de commandement et refuse de la
+        # déduire des unités. ADEPTUS ASTARTES est celle des datasheets ci-dessus.
+        "army_faction": {"1": "ADEPTUS ASTARTES", "2": "ADEPTUS ASTARTES"},
+        # Corollaire OBLIGATOIRE d'une armée ADEPTUS ASTARTES : la clause du +1 Wound d'Oath en
+        # dépend, et la construction de l'observation la lit à chaque reset.
+        "uses_codex_detachment": {"1": True, "2": True},
+        "units": units,
+    }
+
+
 #: Réglages PAR ÉPISODE qu'un test observant la phase de déploiement doit ÉPINGLER au lieu de
 #: les subir. Injectés dans le ``training_config`` de l'INSTANCE — jamais dans le fichier de
 #: config, qui porte une décision utilisateur (la rampe 0.0 → 0.8 est délibérée).
