@@ -160,21 +160,27 @@ def _enemy_items_within_move_engagement_horizon(
 
     Borne conservatrice (distance hex entre **ancres**) :
     ``MOVE + r_m + r_e + engagement_zone + 1``, avec ``r_*`` dérivés du diamètre d’empreinte
-    (ennemi plafonné par ``max_base_size_hex``). Toute destination légale est à ≤ ``MOVE`` pas
+    (rayons pris sur les socles RÉELS, sans plafond). Toute destination légale est à ≤ ``MOVE`` pas
     de l’ancre de départ (inégalité triangulaire sur la métrique hex) ; on ajoute les rayons
     car l’engagement teste bord à bord / cellules, pas seulement l’écart entre ancres. Le ``+1``
     couvre l’arrondi hex ↔ espace continu (_hex_center). Exclure au-delà pourrait omettre un
     ennemi encore pertinent → liste sur-approximée, résultat identique à un scan complet.
     """
     ez = get_engagement_zone(game_state)
-    max_bs = get_max_base_size_hex(game_state)
     mover_r = _hex_radius_upper_for_engagement_prune(_move_preview_footprint_span(unit))
     m = int(move_range)
     horizon_without_enemy_r = m + mover_r + int(ez) + 1
 
     out: List[Tuple[Any, Any]] = []
     for eid, ce in enemy_entries_on_battlefield(units_cache, mover_player_int, exclude_id=unit_id_str):
-        e_span = min(_move_preview_footprint_span(ce), max_bs)
+        # SPAN RÉEL, sans plafond. `min(span, max_base_size_hex)` RÉTRÉCISSAIT l'horizon : un
+        # WarTrakk à x10 (span 41, plafond 35) donnait un rayon de 18 au lieu de 21, donc un
+        # ennemi pertinent élagué, une ancre offerte par le masque et refusée par la validation
+        # (qui, elle, voit tous les ennemis). Cette prune ne peut se tromper que dans le sens
+        # SUR-approximé — c'est ce que sa docstring promet, et un plafond par le HAUT le
+        # contredit. Le plafond garde son rôle ailleurs (fenêtres d'observation), pas ici : une
+        # donnée aberrante coûterait une fenêtre plus large, jamais un verdict faux.
+        e_span = _move_preview_footprint_span(ce)
         e_r = _hex_radius_upper_for_engagement_prune(e_span)
         h = horizon_without_enemy_r + e_r
         # Distance à la figurine la PLUS PROCHE du squad (pas seulement l'ancre) : une escouade
@@ -4096,8 +4102,13 @@ def movement_build_model_destinations_pool(
                 reachable.append(cell)
 
     # Empreinte du mover (offsets pré-calculés) : sert au filtre destination par niveau ET à la zone.
-    base_size = unit["BASE_SIZE"]
-    base_shape = unit["BASE_SHAPE"]
+    # Socle de LA FIGURINE, comme le champ géodésique, le masque EZ, les sœurs et
+    # `validate_move_plan`. C'était le DERNIER site de cette fonction à lire celui de
+    # l'ESCOUADE : un personnage attaché à socle plus grand (Warboss 20 dans des Boyz 13) voyait
+    # son empreinte sous-évaluée pour les bornes, les murs, l'occupation et le niveau de
+    # plancher — donc des destinations offertes que la validation refuse.
+    base_size = require_key(model, "BASE_SIZE")
+    base_shape = require_key(model, "BASE_SHAPE")
     orientation = mover_orient  # orient EN COURS du mover (pivot molette non committé)
     is_single_hex = socle_is_single_hex(base_shape, base_size)
     if is_single_hex:
@@ -4340,22 +4351,26 @@ def movement_preview_move_plan(
     from engine.hex_utils import precompute_footprint_offsets as _pfo
     units_cache = game_state.get("units_cache", {})  # get allowed
     unit_entry = units_cache.get(str(squad_id), {})  # get allowed
-    base_shape = require_key(unit_entry, "BASE_SHAPE")  # get allowed
-    base_size = require_key(unit_entry, "BASE_SIZE")
     # Prédicat PARTAGÉ avec le pool (`movement_build_model_destinations_pool`) : sans le garde de
     # forme, un socle oval passait pour mono-hex et `fp_wall` / `fp_other` / `fp_intra` / l'EZ ne
     # regardaient que son ancre — un socle de 23 hexes se validait par-dessus une escouade amie.
-    is_single_hex = socle_is_single_hex(base_shape, base_size)
-    if is_single_hex:
-        footprints: List[Set[Tuple[int, int]]] = [{(nc, nr)} for _, nc, nr, _lv, _o in norm]
-    else:
-        # Empreinte PAR FIGURINE : offsets calculés avec l'orientation résolue de CHAQUE fig.
+    # Empreinte PAR FIGURINE — SOCLE compris, pas seulement l'orientation. Ces empreintes sont
+    # le SEUL test au niveau socle du voile rouge (`fp_wall` / `fp_other` / `fp_intra`) :
+    # `build_move_blocked_cells_by_level` teste la cellule d'ANCRE. Les construire au socle
+    # d'ESCOUADE sous-évaluait donc un personnage attaché à socle plus grand, et un commit
+    # pouvait poser son socle par-dessus un mur ou une autre escouade.
+    footprints: List[Set[Tuple[int, int]]] = []
+    for _mid_fp, col, row, _lv_fp, ori in norm:
+        _m_fp = _mc_norm[_mid_fp]
+        _fp_shape = require_key(_m_fp, "BASE_SHAPE")
+        _fp_size = require_key(_m_fp, "BASE_SIZE")
+        if socle_is_single_hex(_fp_shape, _fp_size):
+            footprints.append({(col, row)})
+            continue
         # ``_pfo`` est mémoïsé par (shape, size, orient) → pas de surcoût.
-        footprints = []
-        for _mid_fp, col, row, _lv_fp, ori in norm:
-            _off_even, _off_odd = _pfo(base_shape, base_size, ori)
-            offs = _off_even if (col & 1) == 0 else _off_odd
-            footprints.append({(col + dc, row + dr) for dc, dr in offs})
+        _off_even, _off_odd = _pfo(_fp_shape, _fp_size, ori)
+        offs = _off_even if (col & 1) == 0 else _off_odd
+        footprints.append({(col + dc, row + dr) for dc, dr in offs})
 
     _mc_coh = require_key(game_state, "models_cache")
     cohesion_models = [
@@ -4383,14 +4398,10 @@ def movement_preview_move_plan(
         m = require_key(_models_cache_intra, str(mid))
         m_shape = require_key(m, "BASE_SHAPE")
         m_base = require_key(m, "BASE_SIZE")
-        if m_shape == base_shape and m_base == base_size:
-            m_fp = fp_par
-        else:
-            m_fp = compute_candidate_footprint(
-                int(nc), int(nr),
-                {"BASE_SHAPE": m_shape, "BASE_SIZE": m_base, "orientation": _ori_fig},
-                game_state,
-            )
+        # `fp_par` EST déjà l'empreinte de cette figurine (socle + orientation) : la branche de
+        # recalcul qui vivait ici n'existait que parce que `footprints` était construit au socle
+        # d'ESCOUADE et ne convenait qu'aux figurines de même socle.
+        m_fp = fp_par
         intra_socles.append(
             Socle(shape=m_shape, base_size=m_base, col=int(nc), row=int(nr), fp=m_fp, orientation=_ori_fig)
         )

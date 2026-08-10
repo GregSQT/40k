@@ -640,6 +640,12 @@ def move_anchor_violates_engagement_clearance(
         "col": center_col,
         "row": center_row,
         "occupied_hexes": candidate_fp,
+        # ORIENTATION propagée. Sans elle, `socle_from_cache_entry` retombait sur 0 et la branche
+        # euclidienne — qui reconstruit le CONTOUR depuis `s.orientation` et ignore
+        # `candidate_fp` — mesurait un socle non rond à l'horizontale quelle que soit sa pose
+        # réelle. Un WarTrakk (oval) pivoté pouvait donc finir son move engagé (09.05) : la
+        # revalidation d'EZ au commit passe par ici.
+        "orientation": int(mover.get("orientation", 0)),  # get allowed (socle rond non orienté)
     }
     if enemy_cache_items is not None:
         enemy_iter: Any = enemy_cache_items
