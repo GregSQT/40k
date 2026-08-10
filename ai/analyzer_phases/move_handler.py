@@ -119,6 +119,10 @@ def _handle_fled(state, config, line, action_desc, player, turn, phase, fled_mat
         })
         return True  # equivalent to continue
 
+    _check_fall_back_move(state, line, action_desc, player, move_unit_id,
+                          start_col, start_row, dest_col, dest_row, _position_cache_set,
+                          _get_unit_hp_value, turn, phase)
+
     unit_hp_value = require_key(state.unit_hp, move_unit_id)
     _debug_log(f"[FLED DEBUG] BEFORE update: unit_hp[{move_unit_id}] = {unit_hp_value}")
     if unit_hp_value > 0:

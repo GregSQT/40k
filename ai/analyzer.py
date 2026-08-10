@@ -880,6 +880,7 @@ def _build_move_bfs_blockers(
     unit_player: Dict[str, int],
     unit_hp: Dict[str, int],
     mover_unit_id: str,
+    force_thru_enemy: bool = False,
 ) -> Tuple[Set[Tuple[int, int]], Set[Tuple[int, int]]]:
     """Obstacles du BFS de mouvement : (cases occupées bloquantes, bande d'EZ ennemie bloquante).
 
@@ -898,9 +899,20 @@ def _build_move_bfs_blockers(
     pour un bloc qui en occupe des dizaines, donc le BFS ancre-à-ancre déclarait libres les cases
     réellement tenues et bloquées les seules ancres. Sans donnée per-figurine pour une unité (log
     ancien / synthétique), repli sur son ancre — donnée absente, pas contrôle désarmé.
+
+    `force_thru_enemy` — RÉSERVÉ AU FALL-BACK (09.07), et c'est une contrainte de DONNÉE, pas une
+    complaisance. 09.07 « WHILE MOVING ▪ Desperate Escape: Each model that is moved can be moved
+    through enemy models » : des DEUX modes de fall-back, un seul traverse les ennemis. Or le mode
+    choisi n'est PAS journalisé (§7 L11 de `analyzer_couverture.md`) — un journal ne permet donc
+    pas de trancher. Bloquer sur les ennemis rendrait « chemin impossible » sur toute retraite
+    désespérée légale ; les laisser traversables ne perd que la retraite ORDONNÉE qui aurait
+    traversé un ennemi. Le budget, lui, est commun aux deux modes et reste pleinement contrôlé.
+    Le jour où `[MOVE_TYPE:fall_back]` portera son mode, ce paramètre doit disparaître.
     """
     from ai.analyzer_perfig import _DEFAULT_BASE, squad_footprint
     thru_ez, thru_enemy, thru_friendly = _move_rules_for_analyzer()
+    if force_thru_enemy:
+        thru_enemy = True
     mover_player_int = int(require_key(unit_player, mover_unit_id))
     occupied: Set[Tuple[int, int]] = set()
     for uid, anchor in unit_positions.items():
@@ -1353,8 +1365,18 @@ def parse_step_log(filepath: str) -> Dict:
         'move_adjacent_before_non_flee': {1: 0, 2: 0},
         'move_distance_over_limit': {
             'move': {1: 0, 2: 0},
-            'advance': {1: 0, 2: 0}
+            'advance': {1: 0, 2: 0},
+            # 09.07 FALL-BACK MOVE, « MAXIMUM DISTANCE: Your unit's M characteristic ». Le fall-back
+            # etait le SEUL des six deplacements sans controle de budget ni de chemin (vert vacant
+            # V10) : `_handle_fled` ne verifiait que la collision d'ancre et le mur d'arrivee.
+            'flee': {1: 0, 2: 0},
         },
+        # 09.07 « ELIGIBLE IF: Your unit is engaged. » — une unite non engagee ne peut pas battre
+        # en retraite. Mesure per-figurine aux socles de DEPART, meme primitive que #3.
+        'flee_from_unengaged': {1: 0, 2: 0},
+        # 09.07 « AFTER MOVING: Your unit must be unengaged. » — post-condition, mesuree aux
+        # socles d'ARRIVEE. C'est la raison d'etre du fall-back : s'il finit engage, il a echoue.
+        'flee_still_engaged': {1: 0, 2: 0},
         'action_phase_accuracy': {
             'move': {'total': 0, 'wrong': 0},
             'fled': {'total': 0, 'wrong': 0},
@@ -1422,8 +1444,11 @@ def parse_step_log(filepath: str) -> Dict:
             'move_adjacent_before_non_flee': {1: None, 2: None},
             'move_distance_over_limit': {
                 'move': {1: None, 2: None},
-                'advance': {1: None, 2: None}
+                'advance': {1: None, 2: None},
+                'flee': {1: None, 2: None},
             },
+            'flee_from_unengaged': {1: None, 2: None},
+            'flee_still_engaged': {1: None, 2: None},
             'action_phase_mismatch': {
                 'move': None,
                 'fled': None,
