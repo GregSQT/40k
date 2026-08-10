@@ -1,6 +1,6 @@
 # Sécurité — Analyse et plan d'implémentation
 
-> Date : 2026-07-15 — audit de conformité 2026-08-10 (ancres de ligne rafraîchies après l'étape 1, F6/F12/F14 reclassés résolus, F11 requalifié : derrière l'authentification)
+> Date : 2026-07-15 — mise à jour 2026-08-10 (étapes 1 et 2 faites : F1, F6, F7, F11, F12, F14 résolus ; ancres de ligne rafraîchies). **Reste à faire : étapes 3 à 8** (F2, F3, F4, F5, F8, F9, F10, F13).
 > Périmètre : backend Flask (`services/api_server.py`), frontend React/Vite, base auth `config/users.db`.
 > Contexte : jeu hobby, aujourd'hui local (WSL2), **bientôt exposé sur Internet pour des tests publics**.
 
@@ -191,7 +191,7 @@ Ordre = priorité. **Les étapes 1 à 5 sont des prérequis absolus avant toute 
 | Étape | Failles | Statut | Date |
 |---|---|---|---|
 | — | F1 (debugger Werkzeug) | ✅ Résolu | ≤2026-08-02 |
-| 1. Auth sur toutes les routes | F6, F12, F14 | ✅ Fait — vérifié dans le code le 2026-08-10 (31 routes, porte globale, `register` supprimée, `apiFetch`) ; runtime PvP à valider | 2026-08-02 |
+| 1. Auth sur toutes les routes | F6, F12, F14 | ✅ Fait — vérifié dans le code le 2026-08-10 (31 routes, porte globale, `register` supprimée, `apiFetch`) | 2026-08-02 |
 | 2. Fermer vecteurs écriture/désérialisation | F7, F11 | ✅ Fait (runtime PvP validé) | 2026-08-10 |
 | 3. Durcissement sessions + rate limiting | F2, F8 | ⬜ À faire | — |
 | 4. Réduction surface d'information | F3, F10, F13 | ⬜ À faire | — |
