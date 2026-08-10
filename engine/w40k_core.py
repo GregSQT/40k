@@ -5503,11 +5503,22 @@ class W40KEngine(gym.Env):
         # Une borne qui ne peut que perdre des lignes n'a pas sa place à côté d'une qui n'en perd
         # aucune.
         #
-        # Remis à 0 quand la liste a été VIDÉE ailleurs (l'API PvP le fait après chaque réponse) :
-        # le curseur désignerait alors des entrées qui n'existent plus.
+        # Un curseur AU-DELÀ de la liste est une VIOLATION D'INVARIANT, pas un état à rattraper.
+        # Une remise à 0 vivait ici, justifiée par « l'API PvP vide la liste après chaque
+        # réponse » : ce chemin n'atteint jamais cette ligne — `services/api_server` n'installe
+        # aucun StepLogger, donc le drain sort au retour anticipé ci-dessus. Sur le seul chemin
+        # qui journalise (entraînement/replay), `action_logs` n'est QUE complétée, et le seul
+        # vidage (`reset`) purge le curseur dans la même fonction. La remise à 0 ne pouvait donc
+        # corriger qu'un état impossible — et, le jour où il cesserait de l'être, elle
+        # rédrainerait en SILENCE des entrées déjà écrites : lignes dupliquées dans step.log,
+        # donc attaques, activations et distances comptées double par `ai/analyzer.py`.
         pre_action_logs_len = int(self.game_state.get(self.STEP_LOG_DRAINED_KEY, 0))  # get allowed
         if pre_action_logs_len > len(action_logs):
-            pre_action_logs_len = 0
+            raise ValueError(
+                f"{self.STEP_LOG_DRAINED_KEY}={pre_action_logs_len} cannot exceed current length "
+                f"of game_state['action_logs'] ({len(action_logs)}) : la liste a été tronquée "
+                f"sans que le curseur de drainage soit purgé (cf. reset)."
+            )
         self.game_state[self.STEP_LOG_DRAINED_KEY] = len(action_logs)
         # Position (index raw_log, index jet) du DERNIER jet visant chaque cible sur l'ensemble de
         # l'action : le segment [TARGET_MODELS:] n'est emis que la (retrait des socles en bloc apres

@@ -82,20 +82,21 @@ def test_cursor_only_logs_new_entries():
     assert [c["unit_id"] for c in logger.calls] == ["new"]
 
 
-def test_cursor_beyond_length_restarts_from_zero():
-    """Curseur au-delà de la liste = liste VIDÉE ailleurs (l'API PvP le fait après chaque
-    réponse) : il désigne des entrées qui n'existent plus, donc le drainage repart de 0.
+def test_cursor_beyond_length_raises():
+    """action_logs ne rétrécit jamais sous un drainage actif : erreur explicite, pas de silence.
 
-    C'est le SEUL cas où le curseur peut dépasser la longueur, et le laisser en l'état perdrait
-    en silence toutes les lignes de la nouvelle liste.
+    Le seul vidage du chemin journalisé (`reset`) purge le curseur dans la même fonction, et le
+    vidage de l'API PvP n'atteint pas ce code (aucun StepLogger côté serveur). Repartir de 0
+    rédrainerait des entrées déjà écrites — donc des lignes en double dans step.log, comptées
+    double par l'analyzer.
     """
     logger = _FakeStepLogger()
     logs = [{"type": "move", "unitId": "1", "player": 1, "phase": "move", "turn": 2,
              "fromCol": 1, "fromRow": 1, "toCol": 2, "toRow": 2, "move_type": "normal"}]
     eng = _engine_stub(logs, logger)
-    _drain(eng, cursor=5)
-    assert [c["unit_id"] for c in logger.calls] == ["1"]
-    assert eng.game_state[W40KEngine.STEP_LOG_DRAINED_KEY] == 1
+    with pytest.raises(ValueError, match="cannot exceed current length"):
+        _drain(eng, cursor=5)
+    assert logger.calls == [], "des lignes ont été réécrites avant le refus"
 
 
 @pytest.mark.parametrize("move_type,expected", [

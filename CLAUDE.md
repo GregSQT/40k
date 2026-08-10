@@ -239,22 +239,45 @@ Ne JAMAIS conclure par un verdict de qualité (« implémentation optimale », �
 « tout est propre ») : un verdict ne s'expose à aucun contrôle, donc il ne prouve rien et il est
 produit sans effort. Conclure par des FAITS recoupables en quelques secondes.
 
-FORMAT IMPOSÉ — 5 lignes télégraphiques MAXIMUM, pas de prose, pas de paragraphe, pas de code
-source. Ce bloc n'est PAS un récap (cf. ligne « Pas de récap final ») : il REMPLACE toute
+FORMAT IMPOSÉ — LU, JUMEAU, RÉFS et RELIRE sont télégraphiques : une ligne chacune, pas de prose,
+pas de paragraphe, pas de code source. ARBITRAGE est la SEULE section développée (voir son format
+ci-dessous). Ce bloc n'est PAS un récap (cf. ligne « Pas de récap final ») : il REMPLACE toute
 conclusion, il ne s'y ajoute pas. Ne jamais y répéter ce qui vient d'être dit au-dessus.
 
   LU : <ce qui a été lu au-delà du point modifié : fichier entier ? appelants ? module miroir ?>
   JUMEAU : <commande grep> → <n> hits, <n> traités, <n> écartés (<raison>)
   RÉFS : <tests / doc / frontend / configs mis à jour | laissés tels quels volontairement>
-  ARBITRAGE : <ce qui attend une décision utilisateur>
+  ARBITRAGE :
+    1. <titre du sujet à arbitrer, une ligne>
+       Problème : <ce qui bloque, en clair, sans jargon inutile — pourquoi ça se pose
+                   maintenant et ce que ça change concrètement dans le jeu / le training /
+                   l'usage. 2 à 4 phrases, compréhensibles sans lire le code.>
+       Options :
+         A. <solution> — conséquence : <ce que ça donne> ; coût : <effort / risque>
+         B. <solution> — conséquence : <...> ; coût : <...>
+         C. <ne rien faire, si c'est une option> — conséquence : <...>
+       Recommandation : <A/B/C> — <pourquoi, une phrase>
+    2. <sujet suivant, même structure>
   RELIRE : /code-review <fichiers modifiés>
            /simplify <fichiers modifiés>
 
 - LU et JUMEAU sont TOUJOURS présents. « grep X → 0 hit » est une réponse valide ; omettre la
   ligne n'en est pas une. Ce qui est validé localement dans un fichier à cohérence globale n'est
   pas validé — c'est le défaut le plus fréquent de ce dépôt (cf. T4 JUMEAU).
-- RÉFS et ARBITRAGE : omettre la ligne s'il n'y a réellement rien. Ne jamais écrire « néant ».
+- RÉFS et ARBITRAGE : omettre la section s'il n'y a réellement rien. Ne jamais écrire « néant ».
 - Un arbitrage remonté n'est pas un défaut ; le taire pour paraître complet en est un.
+- ARBITRAGE — EXIGENCES DE FOND (le reste du rapport reste télégraphique, pas lui) :
+  * Un sujet énoncé SANS ses options n'est pas un arbitrage : c'est une question posée à moitié.
+    Toujours au moins DEUX options réelles ; si une seule existe, ce n'est pas un arbitrage —
+    c'est une décision, à prendre et à annoncer.
+  * Le « Problème » s'écrit pour quelqu'un qui n'a pas lu le code : décrire l'EFFET observable
+    (comportement en jeu, chiffre faux, choix de règle 40K, coût de training), pas le mécanisme
+    interne. Les noms de fichier/fonction viennent en appui, jamais à la place de l'explication.
+  * Chaque option porte sa CONSÉQUENCE et son COÛT. Une liste d'options nues ne permet pas
+    d'arbitrer, donc elle ne compte pas.
+  * Toujours donner une recommandation motivée. « À toi de voir » n'est pas une recommandation.
+  * Interdit d'y glisser du travail technique que l'agent savait faire (cf. règle ci-dessus) :
+    l'ARBITRAGE développé ne devient pas un lieu où déguiser une dette en question.
 - RELIRE : obligatoire dès qu'au moins un fichier de code a été modifié ; omise sinon (réponse
   pure lecture, doc seule, discussion). Lister les chemins RÉELLEMENT modifiés dans CETTE tâche,
   jamais l'ensemble du working tree — copiables tels quels, sans reformulation. `/code-review`
