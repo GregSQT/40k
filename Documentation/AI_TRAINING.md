@@ -903,6 +903,17 @@ sur `x1` depuis le 2026-08-10 (architecture 512×512, `lr` 0.002 → 0.0002, `en
 seuils de gating 0.3) ; il n'en diffère plus que par `total_episodes` (1000) et `bot_eval_freq`
 (250, sans quoi un run de 1000 épisodes n'aurait aucun point de mesure intermédiaire).
 
+**Le profil `x5_append`** ferme la chaîne : `x5_new` → `x5_long` → `x5_append`. Il ne démarre pas
+un apprentissage, il **prolonge** le modèle de `x5_long` de 30 000 épisodes sur la même tâche. Ses
+deux rampes sont donc **plates, aux planchers atteints par `x5_long`** (`lr` 0.0002, `ent_coef`
+0.01) : les rouvrir défairait le recuit que `x5_long` a mis la moitié de son run à obtenir, dans
+le régime exact où l'oubli catastrophique se déclenche. Même réseau (512×512), même `target_kl`,
+et surtout `vec_normalize.reset_on_curriculum: false` — l'échelle du plateau ne change plus entre
+les deux runs, jeter les stats VecNormalize servirait à la politique chargée des observations
+normalisées autrement que celles sur lesquelles elle a appris. `bot_eval_intermediate` y vaut 10
+et non 100 : à 100, les 15 évaluations coûteraient 3 h 15 pour ~50 min d'entraînement.
+Verrou : `test_x5_append_resumes_x5_long_where_it_stopped`.
+
 `checkpoint_save_freq` reste **aligné sur `x1`**, délibérément : SB3 sauvegarde tous les
 `save_freq` **appels du callback** (`callbacks.py:300`), soit un par pas du VecEnv — jamais des
 épisodes. Le régler depuis une durée exprimée en épisodes n'a pas de sens ; pour couvrir plus

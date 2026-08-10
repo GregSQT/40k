@@ -81,9 +81,12 @@ les branches déclarées « NON MERGÉ » étaient en réalité mergées sur `ma
 §0.49, §0.50, §0.51, §0.53, §0.54 — vérifié par `git merge-base --is-ancestor`), et les branches
 correspondantes sont supprimées. Les conséquences par entrée sont reportées ci-dessous.
 
-📌 **Périmètre de profils** : seuls les profils **`x1*`** sont utilisés aujourd'hui (décision
-utilisateur du 2026-08-02). Les valeurs citées pour `x5_new` / `x5_append` / `x5_debug` ne sont pas
-tenues à jour et **ne doivent pas servir de référence** — les relire dans le JSON avant usage.
+📌 **Périmètre de profils** : seuls les profils **`x1*`** étaient utilisés jusqu'au 2026-08-09
+(décision utilisateur du 2026-08-02). Depuis le **2026-08-10** une chaîne x5 est réglée et
+verrouillée : `x5_new` (aligné sur `x1`, modèle neuf) → `x5_long` (200 000 ép., même recalibrage
+que `x1_long`) → `x5_append` (30 000 ép. de prolongation, reprise aux planchers de `x5_long`).
+Ces trois profils sont à jour et tenus par `tests/unit/ai/test_schedule_decay_fraction.py`.
+`x5_debug`, lui, reste hors de ce périmètre : ses valeurs ne servent pas de référence.
 ⚠️ **Un `x5_debug` a tout de même tourné le 2026-08-09** (`tensorboard/x5_debug_ArmageddonAgent/run_20260809-103610`,
 relevé le 2026-08-10) : la décision porte sur les runs qui MESURENT, elle n'interdit pas un debug
 ponctuel — mais un artefact `x5_*` postérieur au 2026-08-02 n'est pas pour autant une référence.
