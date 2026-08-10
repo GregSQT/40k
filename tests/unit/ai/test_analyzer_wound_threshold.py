@@ -106,19 +106,41 @@ def test_waaagh_strength_bonus_applies_in_melee_only():
     )
 
 
+#: Lignes réalistes : le token Oath n'a de sens que RATTACHÉ à un segment.
+_WOUND_OATH = "Hit 4(3+) - Wound 3(4+) [OATH OF MOMENT] - Save 2(4+)"
+_HIT_OATH_ONLY = "Hit 4(3+) [REROLLED:2] [OATH OF MOMENT] - Wound 3(4+) - Save 2(4+)"
+_NO_OATH = "Hit 4(3+) - Wound 3(4+) - Save 2(4+)"
+
+
 def test_oath_lowers_the_roll_and_floors_at_two():
     """Oath est un +1 au JET, donc un seuil abaissé, plancher 2+ (`resolve_oath_effects`)."""
     state = _State()
-    assert _expected(state) == 4, "prémisse : sans Oath, F4 vs E4 = 4+"
-    assert _expected(state, "[OATH OF MOMENT]") == 3
+    assert _expected(state, _NO_OATH) == 4, "prémisse : sans Oath, F4 vs E4 = 4+"
+    assert _expected(state, _WOUND_OATH) == 3
     # PLANCHER : F6 vs E3, c'est déjà 2+ (F ≥ 2×E) — Oath ne peut pas descendre plus bas.
     faible = _State()
     faible.model_types = {"9#0": "Weakling", "9#1": "Weakling"}
     faible.unit_models_alive = {"9": 2}
-    assert _expected(faible, attacker="Leader") == 2, "prémisse : le seuil de base est déjà 2+"
-    assert _expected(faible, "[OATH OF MOMENT]", attacker="Leader") == 2, (
+    assert _expected(faible, _NO_OATH, attacker="Leader") == 2, "prémisse : base déjà 2+"
+    assert _expected(faible, _WOUND_OATH, attacker="Leader") == 2, (
         "Oath descend sous 2+ : le plancher de `resolve_oath_effects` n'est pas respecté"
     )
+
+
+def test_oath_on_the_hit_reroll_does_not_lower_the_wound_threshold():
+    """Le MÊME token marque la relance de TOUCHE — il ne dit alors rien du jet de blessure.
+
+    Mesuré sur le journal : 80 occurrences du token pour 60 lignes, donc des lignes qui le
+    portent deux fois. Le chercher n'importe où dans la ligne abaissait le seuil attendu d'un
+    point sur toute ligne qui ne l'a QUE côté touche — un faux « seuil de blessure faux ».
+    """
+    state = _State()
+    assert _expected(state, _HIT_OATH_ONLY) == 4, (
+        "le token de la relance de touche a été pris pour le bonus de blessure"
+    )
+    assert aw.wound_bonus_applies(_WOUND_OATH)
+    assert not aw.wound_bonus_applies(_HIT_OATH_ONLY)
+    assert not aw.wound_bonus_applies(_NO_OATH)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -196,3 +218,52 @@ def test_a_line_without_a_wound_segment_is_ignored_entirely():
     _check(_State(), stats, "FOUGHT Unit 9 with [Choppa] - Hit 4(3+) - Wound 4")
     assert stats["fight_wound_threshold_mismatch"][1] == 0
     assert stats["fight_wound_threshold_unverifiable"][1] == 0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Ce que le contrôle refuse d'inventer
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_an_unresolved_weapon_never_borrows_another_datasheets_strength():
+    """Pas de carte GLOBALE pour la Force — contrairement au plafond d'attaques.
+
+    Les cartes globales agrègent au `max()` toutes les datasheets partageant un nom d'arme :
+    « Close Combat Weapon » y vaudrait F6 parce qu'une datasheet quelconque le porte. Pour un
+    PLAFOND c'est sûr, pour une FORCE c'est une valeur inventée — et un faux « seuil faux »
+    au lieu d'un honnête « non vérifiable ».
+    """
+    state = _State()
+
+    class _CfgGlobalPiege(_Config):
+        cc_str_by_weapon_global = {"Inconnue": 99}
+        unit_attack_limits = {
+            t: {"cc_str_by_weapon": {}, "rng_str_by_weapon": {}} for t in TOUGHNESS
+        }
+
+    assert aw.attacker_weapon_strength(
+        state, _CfgGlobalPiege(), "Inconnue", "Trooper", (), True
+    ) is None, "la Force a été empruntée à la carte globale au lieu d'être déclarée irrésoluble"
+
+
+def test_roster_fallback_declines_when_bodyguards_have_mixed_toughness():
+    """Repli sur le roster = les morts en font partie ; le moteur ne maxe que sur les vivants.
+
+    Bodyguards d'E identiques → la mort d'un socle ne change pas le max, le repli reste exact.
+    Bodyguards d'E DIFFÉRENTES → indécidable, et le dire vaut mieux que de trancher.
+    """
+    homogene = _State()
+    homogene.model_types = {"9#0": "Trooper", "9#1": "Trooper", "9#2": "Leader"}
+    homogene.unit_models_alive = {"9": 3}
+    assert aw.target_bodyguard_toughness(homogene, _Config(), "9") == 4
+
+    mixte = _State()
+    mixte.model_types = {"9#0": "Trooper", "9#1": "Brute", "9#2": "Leader"}
+    mixte.unit_models_alive = {"9": 3}
+    assert aw.target_bodyguard_toughness(mixte, _Config(), "9") is None, (
+        "E maxée sur un roster hétérogène qui contient peut-être des morts : le contrôle "
+        "tranche là où la donnée ne permet pas de trancher"
+    )
+
+    # Socles vivants CONNUS : plus d'ambiguïté, même roster hétérogène.
+    mixte.positions_by_model = {"9": {m: (0, 0) for m in mixte.model_types}}
+    assert aw.target_bodyguard_toughness(mixte, _Config(), "9") == 8

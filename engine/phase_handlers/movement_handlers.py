@@ -1835,9 +1835,13 @@ def _euclidean_mover_ez_forbidden_mask(
 
     ``eng_bad[c, r]`` ⇔ placer l'ANCRE du mover en ``(c, r)`` met son socle à un écart bord-à-bord
     euclidien ≤ ``engagement_minimum_clearance_norm(ez)`` (= ez × 1,5) d'un socle ennemi.
-    Sémantique identique à ``euclidean_edge_distance`` : paire ronde↔ronde = clearance continu
-    exact (centre + rayon) ; sinon = min entre centres de cellules occupées. Vectorisé par disque
-    NumPy borné en bbox par source (pas O(cellules × ennemis)).
+    Sémantique identique à ``euclidean_edge_distance`` DANS LES DEUX CAS : paire ronde↔ronde =
+    clearance continu exact (centre + rayon), vectorisé par disque NumPy borné en bbox ; paire
+    impliquant un socle NON ROND = contours continus eux aussi, mais évalués seulement sur la
+    FRANGE que l'encadrement par centres de cellules ne suffit pas à trancher (cf.
+    ``NON_ROUND_EZ_BAND_NORM`` et ``_resolve_ez_band_exactly``). Le min entre centres de cellules
+    n'est plus le verdict — il ne sert que de filtre : il sous-estimait l'EZ d'environ une case
+    et laissait un socle oval finir son move engagé (09.05).
     """
     from engine.hex_utils import (
         engagement_minimum_clearance_norm,
@@ -1971,9 +1975,10 @@ def _compute_mover_ez_forbidden_mask(
     Sémantique (identique à ``move_anchor_violates_engagement_clearance``) :
       - Paire **mover rond ↔ ennemi rond** : écart bord à bord euclidien (centres ``_hex_center``)
         ≥ ``engagement_minimum_clearance_norm(ez)``.
-      - Sinon (mover non-rond ou ennemi non-rond) : ``min_distance_between_sets(fp_mover, fp_enemy)
-        ≤ ez`` — équivalent à l'intersection de l'empreinte du mover avec la dilatation hex de
-        rayon ``ez`` des empreintes ennemies.
+      - Sinon (mover non-rond ou ennemi non-rond) : MÊME clearance continue, mesurée sur les
+        contours (``euclidean_edge_distance``) et non plus sur les centres de cellules — ces
+        derniers ne servent qu'à borner la frange à évaluer exactement. C'est ce qui aligne ce
+        masque sur ``entries_in_engagement_zone``, le prédicat de la phase de combat.
 
     ``eng_bad[c, r] == True`` ⇔ placer l'ANCRE du mover en ``(c, r)`` viole l'EZ (empreinte du
     mover déjà prise en compte). À tester au niveau ancre, ne PAS re-dilater par l'empreinte.
@@ -2227,9 +2232,9 @@ def _build_multi_hex_vectorized(
         * ``ez > 1`` (Board ×10) :
           - Paire **mover rond ↔ ennemi rond** : écart bord à bord euclidien (centres
             ``_hex_center``) ≥ ``engagement_minimum_clearance_norm(ez)``.
-          - Sinon (mover non-rond ou ennemi non-rond) : ``min_distance_between_sets(fp_mover,
-            fp_enemy) ≤ ez`` équivalent à ancre dont l'empreinte intersecte la dilatation hex
-            de rayon ``ez`` de l'empreinte ennemie.
+          - Sinon (mover non-rond ou ennemi non-rond) : clearance continue sur les CONTOURS,
+            les centres de cellules ne servant qu'à borner la frange évaluée exactement (cf.
+            ``_compute_mover_ez_forbidden_mask``).
     - **Destinations** : traversable ET empreinte ne chevauchant aucune cellule d'``occupied_set``.
     - **Start** : l'ancre de départ est toujours atteinte mais exclue des destinations.
     - **Footprint zone** : union des empreintes (empreinte de départ + empreinte de chaque
@@ -3939,8 +3944,20 @@ def movement_build_model_destinations_pool(
         _enemy_items_ez = _enemy_items_within_move_engagement_horizon(
             game_state, unit, squad_id, player, start_col, start_row, int(budget), units_cache
         )
+        # Socle de LA FIGURINE et orientation VISÉE (pivot molette en cours), pas ceux de
+        # l'escouade. Passer `unit` ici calculait l'EZ sur l'orientation COMMITTÉE pendant que
+        # `explain_move_plan_rejection` la calcule, depuis le 2026-08-09, sur l'orientation du
+        # PLAN : le pool offrait alors une case que la validation refuse en « ER ennemie »
+        # (masque ⊄ exécutable) dès qu'un socle non rond est pivoté. La docstring de cette
+        # fonction l'exigeait déjà pour les collisions et l'empreinte ; l'EZ y échappait.
+        _ez_mover = {
+            "id": require_key(unit, "id"),
+            "BASE_SHAPE": require_key(model, "BASE_SHAPE"),
+            "BASE_SIZE": require_key(model, "BASE_SIZE"),
+            "orientation": mover_orient,
+        }
         _ez_mask = _compute_mover_ez_forbidden_mask(
-            game_state, unit, _enemy_items_ez, ez, board_cols, board_rows
+            game_state, _ez_mover, _enemy_items_ez, ez, board_cols, board_rows
         )
         _ez_cols, _ez_rows = np.where(_ez_mask)
         ez_anchor_forbidden: Set[Tuple[int, int]] = {
