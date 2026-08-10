@@ -154,6 +154,7 @@
   },
   "deep_strike": {
     "id": "deep_strike",
+    "obs_id": 16,
     "name": "Deep Strike",
     "description": "CORE (24.09): each time this unit makes an ingress move (20.04), if every model in this unit has this ability, it can be set up anywhere on the battlefield that is more than 8\" horizontally from all enemy units, even if that is within your opponent's deployment zone."
   },

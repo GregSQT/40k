@@ -64,8 +64,9 @@ parametres du reseau ne changent, donc aucun retrain.
 Regles:
 
 - **Requis** pour toute regle du vocabulaire observe (`UNIT_RULE_EFFECT_IDS`,
-  `engine/observation_entities.py`) : les 13 effets techniques. Absent -> erreur explicite a la
-  premiere observation.
+  `engine/observation_entities.py`) : les effets techniques, sans exception. Absent -> erreur
+  explicite a la premiere observation. Le nombre n'est ecrit nulle part a dessein : la liste
+  s'allonge pour zero scalaire, donc tout compte en prose serait faux des l'entree suivante.
 - **Absent** pour tout le reste : capacites SOURCES composites (`cunning_hunters`,
   `targeted_intercession`…), regles d'affichage a `alias`, et marqueurs de ROLE (`leader`,
   `support`, `sergeant`, `special_weapon`) — le bloc TYPES porte deja ces derniers.

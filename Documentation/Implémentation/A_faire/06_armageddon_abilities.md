@@ -305,12 +305,13 @@ reposent désormais sur un couple de vraies datasheets — `ChaplainJumpPack` (`
 sur `AssaultIntercessorJumpPack` (`charge_impact`), discriminant dans les deux sens et légal au
 titre de 19.01.
 
-Conséquence pour la passe 1 : rien à solder avant de commencer. Quand **Litany of Hate**
-(`wound_roll_bonus_fight`) sera livrée sur le Chaplain, elle donnera un témoin de règle de
-leader dont l'effet est OBSERVABLE — ce que `deep_strike` n'est pas. Le seul test qui y gagnerait
-est `test_squad_obs_unit_rules.py::test_attached_squad_rule_is_observed_then_extinguished_with_its_source`,
-aujourd'hui ancré sur la source BODYGUARD. Amélioration facultative, pas une dette : l'observation
-ne distingue pas l'origine d'une règle, elle lit l'union déjà calculée.
+Conséquence pour la passe 1 : rien à solder avant de commencer. Le témoin de règle de LEADER
+observable qui manquait est arrivé sans attendre **Litany of Hate** : `deep_strike` a reçu son
+`obs_id` (**16**) le 2026-08-10, et
+`test_squad_obs_unit_rules.py::test_attached_squad_rule_is_observed_then_extinguished_with_its_source`
+verrouille désormais les deux sources de l'union 19.04 au lieu de la seule BODYGUARD. Quand
+Litany of Hate (`wound_roll_bonus_fight`) sera livrée sur le Chaplain, elle n'aura donc rien à
+rattraper de ce côté.
 
 ## Périmètre
 

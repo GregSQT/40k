@@ -116,19 +116,24 @@ Aucun nouveau champ. Les bits `deploy_*` existent. L'unité en réserves est
 `deploy_not_on_board` avec un `deployed_on_turn` nul.
 
 **`deep_strike` est une capacité OBSERVÉE, et c'est ce chantier qui la déclare** (amendement du
-chantier 01, 2026-08-04). La règle technique n'existe pas encore : la créer dans
-`config/unit_rules.json` avec le prochain `obs_id` LIBRE — **15** à ce jour, jamais un id brûlé
-— et l'ajouter à `UNIT_RULE_EFFECT_IDS`. Coût : **zéro scalaire**, `obs_size` reste à `20718`,
-aucun retrain (verrou :
+chantier 01, 2026-08-04). ⚠️ **Fait le 2026-08-10, et pas avec l'id annoncé ici.** La règle
+technique avait bien été créée dans `config/unit_rules.json`, mais **sans `obs_id` et hors
+`UNIT_RULE_EFFECT_IDS`** : la capacité était appliquée par le moteur
+(`movement_handlers.unit_has_deep_strike` bascule le pool d'ingress) et invisible à l'agent
+pendant six jours. `obs_id` **15** est entre-temps allé à `feel_no_pain` ; `deep_strike` porte
+donc le **16**, prochain libre au moment de la pose — un id n'est jamais réattribué, et celui
+qu'un document prévoit n'est pas celui qui est libre le jour venu.
+Coût mesuré à la pose : **zéro scalaire**, `obs_size` reste à `16659`, aucun retrain (verrou :
 `test_squad_obs_unit_rules.py::test_adding_an_observed_capability_costs_zero_scalar`).
 Ne PAS l'ajouter à `DECISION_GRANTABLE_EFFECT_IDS` : aucun candidat de `rule_choice` ne
 l'accorde. Sans cette déclaration, l'agent subit Deep Strike sans le percevoir — exactement le
 trou que V11 §0.30 a fermé, et la raison d'être de l'embedding du chantier 01.
 
-Vérification attendue : sur le roster d'entraînement Armageddon, les `allies_ability_ids` de
-CHAQUE unité à laquelle ce chantier accorde `deep_strike` — la liste en tête de ce chantier, à
-confirmer datasheet en main, aucune ne portant la capacité aujourd'hui — contiennent son
-`obs_id`, et une escouade sans la capacité ne le contient pas. Attention : la condition
+Vérification faite (2026-08-10) : les trois porteurs des rosters Armageddon —
+`ChaplainJumpPack`, `VanguardVeteranSquadJumpPack`, `LandSpeederOnslaughtGatlingCannon` — sont
+ancrés dans `test_composite_datasheet_abilities_are_captured_through_their_effects`, les huit
+autres unités du même tableau faisant la contre-épreuve (aucune ne porte l'id). Le `leader` du
+Chaplain, marqueur de rôle sans `obs_id`, ne remonte pas. Attention : la condition
 « every model » de 24.09 se lit sur les règles PROPRES de chaque figurine
 (`models_cache[mid]["UNIT_RULES"]`), pas sur les slots d'observation, qui décrivent l'union
 19.04.

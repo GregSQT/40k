@@ -81,7 +81,7 @@ UNIT_CONT_FIELDS: Tuple[str, ...] = (
 #: Vérifié par lecture le 2026-07-27 : chacune est consultée dans un handler vif.
 #:
 #: Ce sont les EFFETS, pas les capacités nommées. `unit_has_rule_effect` résout les règles
-#: SOURCES vers eux, donc ces 13 entrées couvrent aussi les capacités composites des datasheets —
+#: SOURCES vers eux, donc ces entrées couvrent aussi les capacités composites des datasheets —
 #: vérifié sur les unités réelles : `cunning_hunters` → shoot_after_advance + shoot_after_flee,
 #: `targeted_intercession` → les deux rerolls to-wound, `adaptable_predators` et
 #: `target_priority` → charge_after_flee + shoot_after_flee, `aggression_imperative` →
@@ -117,6 +117,14 @@ UNIT_RULE_EFFECT_IDS: Tuple[str, ...] = (
     # jet mais sur les CP. Observée parce que l'agent doit pouvoir ATTRIBUER le gain à l'unité
     # qui tient l'objectif ; ses CP seuls ne disent pas d'où ils viennent.
     "cp_gain_on_objective",
+    # Deep Strike (24.09, chantier 04) : la SEULE capacité du vocabulaire qui ne change ni un
+    # jet ni un mouvement, mais l'AIRE DE MISE EN PLACE d'un ingress move (20.04). Deux escouades
+    # en réserves sont indiscernables sans elle, alors que l'une arrive dans la bande de 6" au
+    # bord et l'autre n'importe où sur le plateau, zone adverse comprise
+    # (`movement_handlers.unit_has_deep_strike`, qui bascule le pool). L'agent la subissait sans
+    # la percevoir — c'est le trou que la section « Observation » du chantier 04 prescrivait de
+    # fermer et qui ne l'avait pas été.
+    "deep_strike",
     "move_after_shooting",
     "reactive_move",
     "reroll_1_save_fight",
