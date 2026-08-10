@@ -23,6 +23,7 @@ from engine.combat_utils import (
 )
 from shared.data_validation import require_key
 from ai.analyzer_perfig import position_is_on_battlefield
+from ai.analyzer_rules import new_rule_usage_counters
 
 
 def _weapon_rule_usage_pair_total(weapon_rule_usage: Dict[Any, Any], pair_key: Any) -> int:
@@ -1161,6 +1162,51 @@ def _per_model_move_violation(
     return False
 
 
+def _render_rule_coverage(stats: Dict[str, Any], section: str, log_print: Any) -> None:
+    """Couverture des RÈGLES de la section : applicable ? exercée ? combien d'erreurs ?
+
+    Cette table répond à la question que les compteurs d'erreur ne posent pas. Un compteur à 0 ne
+    dit pas s'il n'a rien trouvé ou s'il n'a rien regardé, et il ne dit RIEN d'une règle que le
+    moteur n'applique pas — celle-là ne produit aucune ligne fautive. `JAMAIS EXERCÉE` est le
+    verdict qui manquait : la situation s'est présentée, le contrôle n'a jamais eu à juger.
+
+    L'écart entre la somme par règle et le total de la section est imprimé s'il existe : il
+    signifie qu'un compteur d'erreur n'appartient à aucune règle du corpus, donc qu'une faute
+    peut apparaître dans le total sans qu'aucune règle ne la porte.
+    """
+    from ai.analyzer_rules import coverage_gaps, coverage_rows
+
+    rows = coverage_rows(stats, section)
+    if not rows:
+        return
+    log_print("-" * 80)
+    log_print(f"{section} COUVERTURE DES REGLES")
+    log_print("-" * 80)
+    log_print(f"{'Regle':<44} {'Exercices':>10} {'Erreurs':>9} {'Statut':>9}   Verdict")
+    for row in rows:
+        # « - » et non « 0 » pour une regle hors roster : un zero se lit comme « jamais exercee »,
+        # alors que la regle ne POUVAIT pas l'etre. Les deux ne demandent pas le meme geste.
+        _exercises = "-" if row["verdict"] == "HORS ROSTER" else str(row["exercised"])
+        _name = f"{row['id']} {row['label']}"
+        log_print(
+            f"{_name[:44]:<44} {_exercises:>10} "
+            f"{row['errors']:>9} {row['status']:>9}   {row['verdict']}"
+        )
+    _never = [r for r in rows if r["verdict"] == "JAMAIS EXERCÉE"]
+    if _never:
+        log_print(
+            "  ⚠️  Applicable(s) et jamais exercee(s) — la situation s'est presentee et aucun "
+            f"controle n'a rien juge : {', '.join(r['id'] for r in _never)}"
+        )
+    for _section, _by_rule, _bucket in coverage_gaps(stats):
+        if _section != section:
+            continue
+        log_print(
+            f"  ❌ Somme par regle ({_by_rule}) != total de la section ({_bucket}) : un compteur "
+            "d'erreur n'est porte par aucune regle du corpus."
+        )
+
+
 def error_totals(stats: Dict[str, Any]) -> Dict[str, int]:
     """Totaux d'erreurs par section — LE calcul, appelé par le SUMMARY et par le total de la CLI.
 
@@ -1557,6 +1603,11 @@ def parse_step_log(filepath: str) -> Dict:
         'devastating_wounds_incorrect': {1: 0, 2: 0},
         # 03.03 : cohérence d'escouade à la fin de chaque déplacement et à la mise en place.
         'squad_coherency_violations': {1: 0, 2: 0},
+        # Occasions JUGÉES par règle du corpus (`config/rules_corpus.json`) — le compte d'exercice
+        # qui manquait à 67 des 69 contrôles. Sans lui, « 0 erreur » ne distingue pas un contrôle
+        # qui n'a rien trouvé d'un contrôle qui n'a rien regardé. Déclarée d'avance, une clé par
+        # règle : une structure créée au premier incrément est le défaut V17.
+        'rule_usage': new_rule_usage_counters(),
         'dead_unit_waiting': {1: 0, 2: 0},
         # `dead_unit_skipping` (V3) et `fight_from_non_adjacent` (V2) ont été SUPPRIMÉS le
         # 2026-08-10, et ils ne doivent pas être ré-écrits à l'identique :
@@ -2985,6 +3036,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         if _coh[_p] > 0 and _first:
             log_print(f"  First P{_p} occurrence (Episode {_first['episode']}): {_first['line']}")
             log_print(f"    {_first['detail']}")
+    _render_rule_coverage(stats, "1.1", log_print)
     # SHOOTING ERRORS
     active_debug_section = "1.2"
     log_print("\n" + "-" * 80)
