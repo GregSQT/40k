@@ -6838,8 +6838,13 @@ export default function Board({
   // active mais que des figs sont posées dans le plan (non validé), on garde la LoS depuis la position
   // de CHAQUE fig posée : cône WASM (par-fig, socle) + cases réellement vues + blink, en UNION multi-fig.
   // Statique (dessiné une fois par changement de plan, pas par frame → aucun coût de rendu continu).
-  // Les positions posées ont été survolées juste avant le drop → preview backend déjà en cache (hit,
-  // zéro latence). L'effet « cut preview » ci-dessus délègue à celui-ci quand des figs sont posées.
+  // Le cône est par-figurine ; le blink et le couvert viennent d'UN appel portant tout le plan —
+  // le pool de cibles est une propriété de l'ESCOUADE, l'interroger figurine par figurine
+  // reviendrait à demander au moteur ce que ferait une escouade réduite à une figurine.
+  // ⚠️ Cet appel ne peut PAS réutiliser le cache du survol : celui-ci est indexé par hexe pour UNE
+  // figurine, alors qu'ici la clé porte le plan entier. Ce n'est pas un cache manqué à réparer,
+  // les deux ne calculent pas la même chose — une pose coûte donc un aperçu backend complet.
+  // L'effet « cut preview » ci-dessus délègue à celui-ci quand des figs sont posées.
   useEffect(() => {
     if (mode !== "perModelMove" && !isDeploymentMove) return;
     if (!boardConfig || !gameConfig) return;
@@ -6921,14 +6926,40 @@ export default function Board({
         // `(-1,-1)` tant que l'escouade n'est pas déployée — et rendait un verdict mesuré depuis
         // le coin du plateau. `preview_shoot_from_model_positions` pose CHAQUE figurine.
         if (!cancelled && placed.length > 0) {
-          const modelPositions: Record<string, [number, number]> = {};
-          for (const [modelId, pos] of placed) {
-            modelPositions[String(modelId)] = [pos.col, pos.row];
-          }
+          // Plan au format CANONIQUE, le même que la pose réelle : le NIVEAU décide du gate
+          // vertical de la LoS 3D (une figurine posée à l'étage d'une ruine, prévisualisée au
+          // sol, verrait son blink et son couvert basculer après Validate) et l'ORIENTATION
+          // décide de l'empreinte d'un socle ovale ou carré (pivot molette).
+          // `orientation` n'existe que sur le plan de MOVE (pivot molette par figurine) ; le plan
+          // de DÉPLOIEMENT ne pivote pas et n'en porte pas. `effectivePerModelPlan` étant l'union
+          // des deux, la lecture est explicitement typée ici — `null` signifie « orientation
+          // inchangée » pour le backend, jamais un 0 inventé.
+          const modelPlan = placed.map(([modelId, pos]) => {
+            const planned = pos as {
+              col: number;
+              row: number;
+              level?: number;
+              orientation?: number | null;
+            };
+            return [
+              String(modelId),
+              planned.col,
+              planned.row,
+              planned.level ?? 0,
+              planned.orientation ?? null,
+            ];
+          });
+          // Clé sur le plan ENTIER : cet aperçu porte l'escouade, pas une figurine. Il ne peut
+          // donc PAS partager d'entrée avec le survol (clé par hex, une figurine) — ce n'est pas
+          // un cache manqué, les deux ne calculent pas la même chose. La clé sert ici à ne pas
+          // refaire l'appel tant que le plan ne bouge pas (re-render, changement de sélection).
           const cacheKey = [
             String(squadUnit.id),
-            placed
-              .map(([modelId, pos]) => `${modelId}@${pos.col},${pos.row}`)
+            modelPlan
+              .map(
+                ([modelId, col, row, level, orientation]) =>
+                  `${modelId}@${col},${row},l${level},o${orientation ?? ""}`
+              )
               .sort()
               .join(";"),
             unitsBoardLayoutKey,
@@ -6943,7 +6974,7 @@ export default function Board({
               body: JSON.stringify({
                 action: "preview_shoot_from_model_positions",
                 unitId: String(squadUnit.id),
-                modelPositions,
+                plan: modelPlan,
                 advancePosition: false,
                 includeLosCells: false,
               }),
@@ -6958,6 +6989,15 @@ export default function Board({
               throw new Error("preview_shoot_from_model_positions returned success=false");
             }
             losPreview = parseBackendMoveLosPreviewPayload(data.result, cacheKey);
+            // Éviction : même borne que les trois autres écrivains de ce cache. Sans elle, une
+            // partie longue accumule une entrée par plan intermédiaire, sans limite.
+            if (movePreviewBackendLosCacheRef.current.size >= MOVE_PREVIEW_LOS_CACHE_MAX_ENTRIES) {
+              const oldestKey = movePreviewBackendLosCacheRef.current.keys().next().value;
+              if (typeof oldestKey !== "string") {
+                throw new Error("Move preview LoS cache oldest key is invalid");
+              }
+              movePreviewBackendLosCacheRef.current.delete(oldestKey);
+            }
             movePreviewBackendLosCacheRef.current.set(cacheKey, losPreview);
           }
           for (const id of losPreview.blinkIds) blinkSet.add(id);

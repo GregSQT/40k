@@ -3595,22 +3595,25 @@ def execute_action():
     # l'aperçu mesurerait distances et LoS depuis le coin du plateau, sans lever.
     if action.get("action") == "preview_shoot_from_model_positions":
         unit_id = action.get("unitId")
-        model_positions = action.get("modelPositions")
+        # `plan` au format CANONIQUE `[[model_id, col, row, level, orientation?]]`, le même que la
+        # pose réelle : niveau et orientation en font partie, et l'aperçu doit les honorer sous
+        # peine de mesurer une géométrie que la validation ne reproduit pas.
+        model_plan = action.get("plan")
         advance_position = action.get("advancePosition") is True
         include_los_cells = action.get("includeLosCells") is not False
-        if unit_id is None or not isinstance(model_positions, dict) or not model_positions:
+        if unit_id is None or not isinstance(model_plan, list) or not model_plan:
             return jsonify({
                 "success": False,
                 "error": (
                     "preview_shoot_from_model_positions requires unitId and a non-empty "
-                    "modelPositions(dict)"
+                    "plan([[model_id, col, row, level, orientation?]])"
                 ),
             }), 400
         from engine.phase_handlers.shooting_handlers import (
             preview_shoot_valid_targets_from_model_positions,
         )
         preview_payload = preview_shoot_valid_targets_from_model_positions(
-            engine.game_state, str(unit_id), model_positions,
+            engine.game_state, str(unit_id), model_plan,
             advance_position=advance_position,
             include_los_cells=include_los_cells,
         )
