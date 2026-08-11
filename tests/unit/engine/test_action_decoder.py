@@ -293,7 +293,10 @@ class TestDeploymentHexSelection:
             # Le plan de déploiement lit les mots-clés (INFANTRY = formation compacte au sol).
             u["UNIT_KEYWORDS"] = ["INFANTRY"]
         gs = _build_gs(units, "deployment")
-        gs["objectives"] = [{"hexes": [(12, 10)]}]
+        # `id` est OBLIGATOIRE : `objective_hex_zones` le lit en `require_key` et les cartes de
+        # distance aux objectifs (que le scoring de colonnes consulte depuis §14.02) sont indexées
+        # dessus. Un objectif sans `id` décrit une donnée de scénario impossible.
+        gs["objectives"] = [{"id": "obj1", "hexes": [(12, 10)]}]
         gs["terrain_areas"] = []  # aucun terrain : seule la géométrie du pool décide du flanc
         # Zones à la RACINE : donnée de scénario, indépendante de la phase de déploiement.
         gs["deployment_pools"] = {

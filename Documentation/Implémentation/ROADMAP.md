@@ -155,7 +155,7 @@ mesure, et c'est assumé (§0.14).
      dans une première correction du 2026-08-10 :
      | | `total_episodes` (durée d'ENTRAÎNEMENT) | `bot_eval_final` (parties par bot de la MESURE) |
      |---|---|---|
-     | `x1_debug` | **1000** (a valu 480, puis 10, en une seule journée du 2026-08-10) | **0** |
+     | `x1_debug` | **96** (a valu 480, puis 10, puis 1000, avant de revenir à 96 le 2026-08-11) | **0** |
      | `x5_debug` | **96** | **1** |
      | `x1` | 10 000 | **10** |
      | `x1_long` | 50 000 (valait 200 000 avant le 2026-08-11) | 600 |

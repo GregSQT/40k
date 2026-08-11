@@ -543,22 +543,21 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
                 "Non-finite action logits (NaN or +/-inf) produced by the pointer heads: "
                 "the policy has diverged, refusing to build a distribution from them."
             )
-        # ⚠️ Masquage À LA CONSTRUCTION, en UNE passe — ne pas revenir à
-        # `proba_distribution(logits)` puis `apply_masking(masks)`, qui fait TOMBER le run.
+        # Masquage À LA CONSTRUCTION, en UNE passe : `probs` n'existe pas encore quand torch
+        # valide, donc aucun vecteur périmé n'est jugé, et `masks` est posé par le constructeur
+        # (`entropy()` / `log_prob()`, qui s'en servent, sont inchangés).
         #
-        # `MaskableCategorical.apply_masking` se termine par `self.probs = logits_to_probs(...)` :
-        # `probs` cesse d'être une lazy_property et devient une valeur matérialisée dans
-        # `__dict__`, calculée sur les logits BRUTS. Au masquage SUIVANT, `Distribution.__init__`
-        # ne saute plus ce paramètre (il ne saute que les lazy NON matérialisés) et le valide
-        # contre `Simplex()`, dont la tolérance est ABSOLUE (`|sum - 1| < 1e-6`) quel que soit le
-        # nombre de catégories. Torch juge alors un vecteur PÉRIMÉ, qui ne décrit même pas la
-        # distribution construite : sur nos 1107 actions en float32, la somme des probas BRUTES
-        # dérive au-delà de 1e-6 là où la distribution MASQUÉE, elle, somme à 1e-8 près. Vécu en
-        # éval CPU : 25 épisodes perdus sur une passe, run arrêté à 50 000 épisodes.
-        #
-        # En une passe, `probs` n'existe pas encore quand torch valide : rien de périmé n'est
-        # jugé, et `masks` est posé par le constructeur (donc `entropy()`/`log_prob()`, qui s'en
-        # servent, sont inchangés — vérifié bit à bit contre la forme en deux temps).
+        # Cette forme a d'abord été IMPOSÉE par un défaut d'amont : jusqu'à sb3_contrib 2.8,
+        # `apply_masking` réinitialisait la distribution SANS vider le `probs` déjà matérialisé,
+        # et torch validait alors contre `Simplex()` (tolérance ABSOLUE, `|sum - 1| < 1e-6`, quel
+        # que soit le nombre de catégories) un vecteur calculé sur les logits BRUTS — au-delà de
+        # 1e-6 sur ~1100 actions en float32, là où la distribution MASQUÉE sommait à 1e-8 près.
+        # Vécu en éval CPU : 25 épisodes perdus sur une passe, run arrêté à 50 000 épisodes.
+        # sb3_contrib 2.9.0 (épinglé À L'ÉGAL dans requirements.txt) a corrigé l'amont, et les
+        # deux tests qui surveillaient ce défaut ont été retirés le 2026-08-11 : ils ne pouvaient
+        # plus rien observer (aucun rejet sur 3000 offsets, tailles d'espace d'action 1107 à 2000).
+        # La forme en UNE passe RESTE : une seule initialisation au lieu de deux, et surtout
+        # aucune dépendance à ce correctif d'amont.
         action_dist = self.action_dist
         if not isinstance(action_dist, MaskableCategoricalDistribution):
             raise TypeError(
