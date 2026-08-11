@@ -469,11 +469,18 @@ def test_merge_on_a_detached_head_is_out_of_scope(tmp_path: pathlib.Path) -> Non
     assert "sans objet" in result.stdout
 
 
-def test_unrelated_histories_still_get_a_verdict(tmp_path: pathlib.Path) -> None:
+def test_unrelated_histories_still_get_a_verdict(
+    tmp_path: pathlib.Path, monkeypatch
+) -> None:
     """`--allow-unrelated-histories` : aucune base commune, donc aucun diff trois points possible.
 
     Le diff trois points sortait 128 « no merge base » et la porte refusait en « contrôle
     impossible » une fusion qui déclare pourtant sa ligne. Elle doit RENDRE UN VERDICT.
+
+    ⚠️ LE BOUT-EN-BOUT NE SUFFIT PAS À VERROUILLER ÇA. `declares` court-circuite sur
+    `index_declares()`, vrai ici puisque la fusion en cours a déjà mis la ligne dans l'index :
+    `branch_touches_roadmap` n'est jamais atteint, et rétablir l'ancien diff laissait ce test
+    VERT (mesuré le 2026-08-12). D'où l'appel DIRECT à la fonction concernée, en plus.
     """
     repo = scratch_repo(tmp_path)
     run(repo, "checkout", "-q", "--orphan", "venu-d-ailleurs")
@@ -498,12 +505,25 @@ def test_unrelated_histories_still_get_a_verdict(tmp_path: pathlib.Path) -> None
         "la branche écrit la ligne : la porte doit le VOIR, base commune ou pas"
     )
 
+    # Le verrou réel : la question « la branche déclare-t-elle ? » doit se poser SANS base commune.
+    monkeypatch.setattr(gate, "ROOT", repo)
+    autre = run(repo, "rev-parse", "venu-d-ailleurs")
+    assert gate.branch_touches_roadmap("HEAD", autre) is True, (
+        "sans ancêtre commun, la question doit quand même recevoir une réponse"
+    )
 
-def test_an_octopus_merge_is_judged_on_all_its_heads(tmp_path: pathlib.Path) -> None:
+
+def test_an_octopus_merge_is_judged_on_all_its_heads(
+    tmp_path: pathlib.Path, monkeypatch
+) -> None:
     """`git merge A B` : MERGE_HEAD porte DEUX têtes, `rev-parse` n'en rend qu'une.
 
     La porte jugeait donc la première seule et refusait une livraison déclarée par la seconde.
     Le test met la ligne sur la SECONDE tête, celle que l'ancien code ne regardait pas.
+
+    ⚠️ MÊME PIÈGE QUE CI-DESSUS : le bout-en-bout passe par `index_declares()`, vrai dès que la
+    fusion est en cours, donc il resterait vert avec une seule tête lue (mesuré le 2026-08-12).
+    Le verrou est l'appel direct à `merge_heads()`.
     """
     repo = scratch_repo_with_debt(tmp_path, gate.MAX_UNDECLARED)
     run(repo, "checkout", "-qb", "muette")
@@ -528,6 +548,13 @@ def test_an_octopus_merge_is_judged_on_all_its_heads(tmp_path: pathlib.Path) -> 
     assert "met la feuille de route à jour" in result.stdout, (
         "une seule tête qui déclare suffit : la livraison a sa ligne"
     )
+
+    # Le verrou réel : les DEUX têtes sont lues, et c'est la seconde qui porte la ligne.
+    monkeypatch.setattr(gate, "ROOT", repo)
+    lues = gate.merge_heads()
+    assert lues == heads, f"les deux têtes doivent être lues, pas seulement la première : {lues}"
+    assert gate.branch_touches_roadmap("HEAD", lues[0]) is False
+    assert gate.branch_touches_roadmap("HEAD", lues[1]) is True
 
 
 def test_the_refusal_carries_gits_own_words(tmp_path: pathlib.Path) -> None:
