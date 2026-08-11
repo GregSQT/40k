@@ -1,9 +1,11 @@
 """Socles d'invariants pour les ``game_state`` et les unités littéraux des tests.
 
-Deux socles, même principe et même mode de verrouillage :
+Trois socles, même principe et même mode de verrouillage :
 
 - ``turn_state_invariants()`` — l'état de tour du ``game_state``, verrouillé contre ``reset()`` ;
-- ``unit_invariants()`` — les champs d'état d'une unité, verrouillés contre ``create_unit()``.
+- ``unit_invariants()`` — les champs d'état d'une unité, verrouillés contre ``create_unit()`` ;
+- ``charge_log_line()`` — une ligne d'``action_logs`` de charge, verrouillée contre les champs
+  que la production lit sans repli (``require_key``) sur ces lignes.
 
 POURQUOI CE FICHIER
 -------------------
@@ -206,3 +208,53 @@ def unit_invariants() -> Dict[str, Any]:
         # ni Oath. Une fixture qui les teste ecrase cette liste.
         "FACTION_KEYWORDS": [],
     }
+
+
+def charge_log_line(player: int, kind: str, *, roll: int = 9, **overrides: Any) -> Dict[str, Any]:
+    """Ligne d'``action_logs`` de charge, au CONTRAT COMPLET — troisième socle, même principe.
+
+    ``kind`` : ``"charge"`` (réussie) ou ``"charge_fail"``.
+
+    Une ligne de charge injectée est une fixture comme une autre, et elle décrit un état
+    impossible dès qu'il lui manque un champ que les sites émetteurs posent toujours. La
+    production en lit plusieurs sans repli :
+
+    - ``charge_nearest_enemy_inches`` / ``charge_target_distance_inches`` (11.04) — lus en
+      ``require_key`` par la passe de comptage de ``w40k_core``, parce que
+      ``charge_record_outcome`` les pose sur les sept sites qui émettent ces lignes ;
+    - ``charge_failed_reason`` — posé par les trois sites d'échec, et lu en ``require_key`` par
+      ``ai/step_logger.py`` sur les ``details`` d'une ligne ratée.
+
+    Ce socle existe parce que le contrat a déjà cassé une injection : le chantier 11.04 a mis à
+    jour ``test_episode_charge_counters`` et laissé ``test_episode_combat_counters`` derrière,
+    qui a rougi à la livraison suivante. Deux copies d'un contrat qui s'enrichit divergent
+    toujours dans ce sens-là. Le prochain champ ajouté ne casse plus qu'ICI.
+
+    ``charge_target_distance_inches`` est ``None`` sur un échec : la distance à la cible n'est
+    figée qu'au choix de cible (11.04), et les échecs sans cible retenue — cible détruite, cible
+    refusée par la boucle 11.04 — n'en ont aucune. Un échec APRÈS déclaration en porte une, lui :
+    une fixture qui veut ce cas écrase la clé par ``overrides``.
+
+    ``overrides`` : les clés propres à la fixture (``unitId``, ``turn``, ``reward``…), qui
+    gagnent sur le socle.
+    """
+    if kind not in ("charge", "charge_fail"):
+        raise ValueError(f"charge_log_line: kind must be 'charge' or 'charge_fail', got {kind!r}")
+    line: Dict[str, Any] = {
+        "type": kind,
+        "player": player,
+        "unitId": f"injected-{player}",
+        "turn": 1,
+        "phase": "charge",
+        "charge_roll": roll,
+        "message": "injected",
+        "timestamp": "server_time",
+        "charge_nearest_enemy_inches": 4.0,
+        "charge_target_distance_inches": 5.0 if kind == "charge" else None,
+    }
+    if kind == "charge":
+        line["targetId"] = "x"
+    else:
+        line["charge_failed_reason"] = "roll_too_short"
+    line.update(overrides)
+    return line
