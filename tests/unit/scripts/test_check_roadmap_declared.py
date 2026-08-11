@@ -41,9 +41,9 @@ def test_no_debt_passes() -> None:
 def test_the_calibrated_ceiling_is_three() -> None:
     """Le plafond est une MESURE, pas un réglage libre.
 
-    Mesuré sur les merges postérieurs au 2026-08-10 : 1 → 8 refus sur 8, 2 → 4, 3 → 1, et ce
-    refus unique tombe sur la fusion où trois chantiers s'étaient empilés. Le relever laisse
-    repasser des trous, le baisser rend la porte rouge en permanence — donc elle sera contournée.
+    Les chiffres du calibrage vivent en tête de `check_roadmap_declared.py`, AVEC leur méthode et
+    leur date — et nulle part ailleurs. Ils étaient recopiés ici, les deux jeux se sont
+    contredits (2026-08-12), et un chiffre recopié n'a aucun moyen de vieillir avec sa source.
     Ce test existe parce que sans lui les suivants passent à N'IMPORTE QUEL plafond : vérifié en
     portant la constante à 999, la suite restait verte.
     """
@@ -103,9 +103,27 @@ def test_the_hook_is_installed_and_executable() -> None:
     configured_path = pathlib.Path(configured)
     hooks_dir = configured_path if configured_path.is_absolute() else ROOT / configured
     if hooks_dir.resolve() != (ROOT / ".githooks").resolve():
+        # UN SEUL état justifie de ne pas conclure : `core.hooksPath` est absolu et vise les
+        # `.githooks` du dépôt PRINCIPAL, que ce worktree partage. Tout autre valeur DÉSARME la
+        # porte — `git config core.hooksPath .git/hooks` la rendait muette et ce test passait en
+        # SKIPPED, c'est-à-dire vert : exactement le vert vacant que sa docstring prétend fermer.
+        commun = subprocess.run(
+            ["git", "rev-parse", "--git-common-dir"],
+            cwd=ROOT, capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        # `--git-common-dir` rend un chemin tantôt absolu, tantôt relatif à ROOT selon la version
+        # de git : le résoudre contre ROOT couvre les deux sans dépendre d'un `--path-format`.
+        principal = (ROOT / commun).resolve().parent
+        assert hooks_dir.resolve() == (principal / ".githooks").resolve(), (
+            f"core.hooksPath vise {hooks_dir} : ni les `.githooks` de ce worktree, ni ceux du "
+            f"dépôt principal ({principal}) — la porte est DÉSARMÉE"
+        )
+        assert (hooks_dir / "prepare-commit-msg").exists(), (
+            f"core.hooksPath vise {hooks_dir}, où `prepare-commit-msg` est absent"
+        )
         pytest.skip(
-            f"core.hooksPath absolu vise {hooks_dir} (dépôt principal), pas ce worktree — "
-            "vérification du branchement actif différée au merge dans main"
+            f"core.hooksPath vise les `.githooks` du dépôt principal ({hooks_dir}), partagés par "
+            "ce worktree — branchement vérifié là-bas, rien de plus à conclure ici"
         )
     assert (hooks_dir / "prepare-commit-msg").exists(), (
         f"core.hooksPath vise {configured!r} mais `prepare-commit-msg` n'y est pas"
@@ -323,20 +341,38 @@ def test_gate_is_dead_with_pre_merge_commit_hook(tmp_path: pathlib.Path) -> None
     _setup_repo_with_script(repo)
     _install_hook(repo, "pre-merge-commit", _NEW_HOOK_BODY)
 
-    run(repo, "checkout", "-qb", "ch-final")
-    (repo / "extra.py").write_text("x\n", encoding="utf-8")
-    run(repo, "add", "-A")
-    run(repo, "commit", "-qm", "code ch-final")
-    run(repo, "checkout", "-q", "main")
+    def fusionne(nom: str) -> subprocess.CompletedProcess[str]:
+        run(repo, "checkout", "-qb", nom)
+        (repo / f"{nom}.py").write_text("x\n", encoding="utf-8")
+        run(repo, "add", "-A")
+        run(repo, "commit", "-qm", f"code {nom}")
+        run(repo, "checkout", "-q", "main")
+        return subprocess.run(
+            ["git", "merge", "--no-ff", "-m", f"merge: {nom}", nom],
+            cwd=repo, capture_output=True, text=True,
+        )
 
-    result = subprocess.run(
-        ["git", "merge", "--no-ff", "-m", "merge: ch-final", "ch-final"],
-        cwd=repo, capture_output=True, text=True,
-    )
-    assert result.returncode == 0, (
+    mort = fusionne("ch-mal-branche")
+    assert mort.returncode == 0, (
         "avec pre-merge-commit, la porte est morte : le merge doit passer sans contrôle "
-        f"(rc={result.returncode}, stderr={result.stderr!r})"
+        f"(rc={mort.returncode}, stderr={mort.stderr!r})"
     )
+    assert "feuille de route" not in mort.stdout + mort.stderr, (
+        "la porte n'a pas dû dire un mot : ce hook s'exécute avant l'écriture de MERGE_HEAD"
+    )
+
+    # CONTRASTE — sans lui ce test ne vaut rien : « rc 0 » est aussi le résultat d'un script
+    # absent, d'un chemin faux ou d'un hook jamais installé. Le MÊME corps, branché au bon
+    # moment, doit refuser sur le MÊME dépôt : c'est ce qui prouve que le montage est vivant et
+    # que seul le moment du déclenchement fait la différence.
+    (repo / ".githooks" / "pre-merge-commit").unlink()
+    _install_hook(repo, "prepare-commit-msg", _NEW_HOOK_BODY)
+    vivant = fusionne("ch-bien-branche")
+    assert vivant.returncode != 0, (
+        "le même corps en prepare-commit-msg doit refuser : sinon le vert ci-dessus ne prouve "
+        f"rien (stderr={vivant.stderr!r})"
+    )
+    assert "sans que la feuille de route" in vivant.stderr
 
 
 def run_gate(repo: pathlib.Path, mode: str) -> subprocess.CompletedProcess[str]:
@@ -443,6 +479,37 @@ def test_unrelated_histories_still_get_a_verdict(tmp_path: pathlib.Path) -> None
     assert result.returncode == 0
     assert "met la feuille de route à jour" in result.stdout, (
         "la branche écrit la ligne : la porte doit le VOIR, base commune ou pas"
+    )
+
+
+def test_an_octopus_merge_is_judged_on_all_its_heads(tmp_path: pathlib.Path) -> None:
+    """`git merge A B` : MERGE_HEAD porte DEUX têtes, `rev-parse` n'en rend qu'une.
+
+    La porte jugeait donc la première seule et refusait une livraison déclarée par la seconde.
+    Le test met la ligne sur la SECONDE tête, celle que l'ancien code ne regardait pas.
+    """
+    repo = scratch_repo_with_debt(tmp_path, gate.MAX_UNDECLARED)
+    run(repo, "checkout", "-qb", "muette")
+    (repo / "code.py").write_text("x = 1\n", encoding="utf-8")
+    run(repo, "add", "-A")
+    run(repo, "commit", "-qm", "chantier sans ligne")
+    run(repo, "checkout", "-q", "main")
+    run(repo, "checkout", "-qb", "declarante")
+    commit_roadmap(repo, "la ligne est sur la seconde tête")
+    run(repo, "checkout", "-q", "main")
+
+    subprocess.run(
+        ["git", "merge", "--no-ff", "--no-commit", "--no-verify", "muette", "declarante"],
+        cwd=repo, capture_output=True, text=True,
+    )
+    heads = (repo / ".git" / "MERGE_HEAD").read_text(encoding="utf-8").split()
+    assert len(heads) == 2, "le test ne prouve rien si la fusion n'est pas une pieuvre"
+
+    result = run_gate(repo, "--merge")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "met la feuille de route à jour" in result.stdout, (
+        "une seule tête qui déclare suffit : la livraison a sa ligne"
     )
 
 

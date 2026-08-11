@@ -632,11 +632,16 @@ chiffres : « la branche doit toucher la feuille de route » refuse **22 des 25*
 flux réel écrit la ligne dans un commit de suivi, après la fusion. Une porte rouge en permanence se
 contourne au premier usage : on aurait troqué un manque visible contre un contrôle mort.
 
-🔴 **Ce qu'elle vaut vraiment, et il faut le savoir avant de s'y fier.** Mesuré une fois ses deux
-défauts corrigés : sur les 17 fusions postérieures au 2026-08-10, le plafond 3 en refuse 4, et ce
-sont les quatre plus ANCIENNES, antérieures au moment où ce fichier a pris son rôle. Sur les treize
-suivantes elle ne se déclencherait **pas une seule fois** — y compris sur les trois chantiers dont
-on sait qu'ils n'ont pas été déclarés. La raison est structurelle : la dette retombe à zéro dès que
+🔴 **Ce qu'elle vaut vraiment, et il faut le savoir avant de s'y fier.** Les chiffres du calibrage,
+avec leur méthode et leur date, vivent en tête de `scripts/check_roadmap_declared.py` et **nulle
+part ailleurs** — ils étaient recopiés ici et dans le fichier de test, les jeux se sont contredits,
+et un chiffre recopié ne vieillit pas avec sa source (constaté le 2026-08-12). Ce qu'il faut en
+retenir : re-mesurée le 2026-08-12 sur toutes les fusions du tronc depuis le 2026-08-10, la porte ne
+se déclenche **pas une seule fois** sur le flux moderne — ses refus sont tous concentrés sur
+l'arriéré du 2026-08-10, soldé depuis. Elle est donc aujourd'hui une borne d'arriéré, pas un
+garde-fou du flux courant ; le plafond y descendre à 2 est un choix de discipline qui appartient à
+l'utilisateur (les deux fusions qu'il aurait refusées sont nommées dans le module). La raison est
+structurelle : la dette retombe à zéro dès que
 ce fichier est **touché**, pour n'importe quel motif — une valeur corrigée, une reformulation, une
 typo. Comme il est retouché souvent, la porte mesure une SÉCHERESSE d'écriture, pas la déclaration
 d'un chantier précis. Elle attrape l'oubli prolongé ; elle ne remplace pas la discipline, et il ne
@@ -679,6 +684,17 @@ qui exige une base commune : un `git merge --allow-unrelated-histories` sur `mai
 sa ligne. La question se lit maintenant en `log <main>..<branche> --name-only`, qui ne calcule
 aucune base — vérifié IDENTIQUE au diff trois points sur les **12** dernières fusions réelles du
 dépôt (déclarations et non-déclarations mélangées). Verrous vérifiés ROUGES défaut remis.
+
+✅ **Pieuvre lue en entier, deux verts vacants fermés, calibrage re-mesuré** (2026-08-12, 3ᵉ passe
+`/code-review`). (1) `rev-parse MERGE_HEAD` ne rend que la PREMIÈRE tête : sur `git merge A B`, une
+livraison déclarée par `B` était refusée — toutes les têtes sont lues désormais, une seule qui
+déclare suffit. (2) Le test du branchement `pytest.skip`ait sur **toute** valeur de `core.hooksPath`
+non conforme : `git config core.hooksPath .git/hooks` désarmait la porte et le test restait vert par
+SKIP ; seul le cas légitime (worktree visant les `.githooks` du dépôt principal, vérifiés là-bas)
+saute encore, tout le reste ÉCHOUE. (3) Le test « la porte est morte en `pre-merge-commit` »
+n'affirmait que `rc == 0`, soit le résultat de ne rien faire : il fusionne maintenant deux fois dans
+le même dépôt, le même corps de hook branché aux deux moments, et exige que le second REFUSE.
+(4) Calibrage re-mesuré (voir ci-dessus). Les trois verrous vérifiés ROUGES défaut remis.
 
 **Deux pièges déjà payés, à ne pas reprendre pour des régressions.** (1) Un contrôle de liens naïf
 rend **152 hits** dont aucun n'est mort (143 dans `Implémenté/stage.md`, 5 dans `Boardx10-audit.md`,
