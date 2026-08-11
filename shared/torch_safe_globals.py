@@ -43,5 +43,18 @@ def register_torch_safe_globals() -> None:
     # 2.4.2 : si ce chemin disparaît, l'AttributeError doit remonter telle quelle plutôt
     # que d'être rattrapée — un repli silencieux rendrait les modèles inchargeables avec
     # un message sans rapport.
-    torch.serialization.add_safe_globals([np._core.multiarray.scalar, np.dtype])
+    allowed = [np._core.multiarray.scalar, np.dtype]
+
+    # Toutes les classes de dtype de numpy, et elles seules. Énumérer à la main ne tient
+    # pas : le jeu nécessaire dépend des dtypes présents dans CHAQUE checkpoint —
+    # `Float64DType` manquait aux modèles CoreAgent alors que `Float32DType` suffisait aux
+    # Armageddon (mesuré le 2026-08-11). Un ensemble FERMÉ vaut mieux qu'une liste qu'on
+    # rallonge à chaque modèle qui casse.
+    # Sûreté : ce sont des descripteurs de type numpy, pas des appelables arbitraires ;
+    # les autoriser ne rouvre pas l'exécution de code que `weights_only=True` ferme.
+    allowed.extend(
+        getattr(np.dtypes, name) for name in dir(np.dtypes) if name.endswith("DType")
+    )
+
+    torch.serialization.add_safe_globals(allowed)
     _REGISTERED = True
