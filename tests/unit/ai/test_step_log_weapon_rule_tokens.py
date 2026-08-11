@@ -27,6 +27,7 @@ import random
 import pytest
 
 from engine.phase_handlers import shooting_handlers
+from engine.phase_handlers.fight_handlers import build_manual_fight_allocation
 from engine.phase_handlers.shared_utils import build_manual_shoot_allocation
 from tests._state_invariants import turn_state_invariants
 
@@ -68,44 +69,80 @@ def _uc(col, row, *, player, models=None):
 
 
 def _game_state(weapon_rules, *, moved_inches=0.0, target=TARGET, n_attacks=1,
-                unit_rules=(), cover=False, unit_type=UNIT_TYPE, weapon_name=WEAPON_NAME):
-    """Tireur '1' vs cible '101', 1 attaque, en `gym_training_mode` (allocation auto)."""
+                unit_rules=(), cover=False, unit_type=UNIT_TYPE, weapon_name=WEAPON_NAME,
+                target_models=1, melee=False):
+    """Attaquant '1' vs cible '101', en `gym_training_mode` (allocation auto).
+
+    `target_models` : effectif de la CIBLE. Il ne servait à rien tant qu'aucune règle ne
+    dépendait de la taille de la cible ; [BLAST] 24.05 et [CLEAVE] 24.06 comptent leurs dés
+    additionnels par tranche de 5 figurines, donc une cible d'UNE figurine sort silencieusement
+    de la règle et ne prouve rien.
+
+    `melee` : même décor, arme de CORPS À CORPS et intents de combat. La chaîne à vérifier est
+    la même à un verbe près (`SHOT`/`FOUGHT`), et c'est justement le point : [CLEAVE] n'existe
+    qu'en mêlée, [BLAST] qu'au tir, et deux harnais séparés laisseraient chacun croire l'autre
+    couvert — le motif d'échec n°1 du dépôt.
+    """
     weapon = {"ATK": 3, "STR": 4, "AP": -1, "DMG": 1, "NB": 2, "RNG": WEAPON_RANGE,
               "WEAPON_RULES": list(weapon_rules), "display_name": weapon_name}
     attacker = {"id": "1#0", "squad_id": "1", "player": 0, "T": 4, "SHOOT_LEFT": 1,
-                "col": SHOOTER[0], "row": SHOOTER[1], "RNG_WEAPONS": [weapon]}
-    target_model = {"id": "101#0", "squad_id": "101", "player": 1, "T": 4, "HP_CUR": 9, "HP_MAX": 9,
-                    "ARMOR_SAVE": 2, "INVUL_SAVE": 7, "role": None, "unitType": "AssaultIntercessor",
-                    "points_per_hp": 5.0, "VALUE": 10.0, "col": target[0], "row": target[1]}
+                "ATTACK_LEFT": n_attacks,
+                "col": SHOOTER[0], "row": SHOOTER[1],
+                "RNG_WEAPONS": [] if melee else [weapon],
+                "CC_WEAPONS": [weapon] if melee else []}
+    target_cache = {}
+    models_cache = {"1#0": attacker}
+    for index in range(target_models):
+        mid = f"101#{index}"
+        pos = (target[0], target[1] + index)
+        models_cache[mid] = {
+            "id": mid, "squad_id": "101", "player": 1, "T": 4, "HP_CUR": 9, "HP_MAX": 9,
+            "ARMOR_SAVE": 2, "INVUL_SAVE": 7, "role": None, "unitType": "AssaultIntercessor",
+            "points_per_hp": 5.0, "VALUE": 10.0, "col": pos[0], "row": pos[1],
+            "RNG_WEAPONS": [], "CC_WEAPONS": [],
+        }
+        target_cache[mid] = pos
+    intent = {"model_id": "1#0", "target_unit_id": "101", "weapon_index": 0,
+              "n_attacks_resolved": n_attacks,
+              # Taille au Select Targets step — la donnée même de [BLAST]/[CLEAVE].
+              "target_squad_size_at_declaration": target_models}
+    intents_key = "pending_squad_fight_intents" if melee else "pending_squad_shoot_intents"
     return {**turn_state_invariants(),
         "gym_training_mode": True,
-        "turn": 1, "phase": "shoot",
+        "turn": 1, "phase": "fight" if melee else "shoot",
         "action_logs": [], "action_log_seq": 0,
-        "models_cache": {"1#0": attacker, "101#0": target_model},
-        "squad_models": {"1": ["1#0"], "101": ["101#0"]},
-        "squad_cache": {"1": {"model_count_at_start": 1}, "101": {"model_count_at_start": 1}},
+        "models_cache": models_cache,
+        "squad_models": {"1": ["1#0"], "101": list(target_cache)},
+        "squad_cache": {"1": {"model_count_at_start": 1},
+                        "101": {"model_count_at_start": target_models}},
         "units_cache": {"1": _uc(*SHOOTER, player=0, models={"1#0": SHOOTER}),
-                        "101": _uc(*target, player=1, models={"101#0": target})},
+                        "101": _uc(*target, player=1, models=target_cache)},
         "units": [{"id": "1", "player": 0, "unitType": unit_type},
                   {"id": "101", "player": 1, "unitType": "AssaultIntercessor"}],
         # `deployed_on_turn` : clause 2 de [HEAVY] 24.16 (« not set up this turn »), lue par
         # le moteur. 0 = posée avant la bataille.
-        "unit_by_id": {"1": {"id": "1", "UNIT_RULES": list(unit_rules), "deployed_on_turn": 0},
-                       "101": {"id": "101", "UNIT_RULES": [], "deployed_on_turn": 0}},
+        # `player` sur l'attaquant : exigé par le décideur d'allocation du COMBAT
+        # (`_is_ai_controlled_fight_unit`), qui lève sinon avant tout log.
+        "unit_by_id": {"1": {"id": "1", "UNIT_RULES": list(unit_rules), "deployed_on_turn": 0,
+                             "player": 0},
+                       "101": {"id": "101", "UNIT_RULES": [], "deployed_on_turn": 0,
+                               "player": 1}},
         "objectives": [], "units_moved": set(), "units_advanced": set(),
         "inches_to_subhex": 5,
         "moved_distance_by_model": {"1#0": float(moved_inches) * 5},
-        "pending_squad_shoot_intents": {
-            "1": [{"model_id": "1#0", "target_unit_id": "101", "weapon_index": 0,
-                   "n_attacks_resolved": n_attacks}]
-        },
+        intents_key: {"1": [intent]},
     }
 
 
 def _engine_shoot_log(monkeypatch, weapon_rules, rolls, *, moved_inches=0.0, target=TARGET,
                       n_attacks=1, unit_rules=(), cover=False, unit_type=UNIT_TYPE,
-                      weapon_name=WEAPON_NAME):
-    """Fait jouer UN tir par le vrai moteur et rend (game_state, action_log de type 'shoot')."""
+                      weapon_name=WEAPON_NAME, target_models=1, melee=False):
+    """Fait jouer UNE attaque par le vrai moteur et rend (game_state, son action_log).
+
+    `melee=True` passe par `build_manual_fight_allocation` — le MÊME émetteur de log
+    (`_emit_squad_shoot_log`) et le même `_build_shot_details`, ce qui est précisément ce qu'on
+    veut exercer : un token écrit d'un seul côté du miroir tir/mêlée ne se verrait pas ici.
+    """
     seq = list(rolls)
 
     def fake(a, b):
@@ -121,11 +158,16 @@ def _engine_shoot_log(monkeypatch, weapon_rules, rolls, *, moved_inches=0.0, tar
     )
     gs = _game_state(weapon_rules, moved_inches=moved_inches, target=target,
                      n_attacks=n_attacks, unit_rules=unit_rules, cover=cover,
-                     unit_type=unit_type, weapon_name=weapon_name)
-    build_manual_shoot_allocation(gs, "1")
-    shoot_logs = [l for l in gs["action_logs"] if l.get("type") == "shoot"]
-    assert shoot_logs, "le moteur n'a émis aucun log de tir"
-    return gs, shoot_logs[0]
+                     unit_type=unit_type, weapon_name=weapon_name,
+                     target_models=target_models, melee=melee)
+    if melee:
+        build_manual_fight_allocation(gs, "1")
+    else:
+        build_manual_shoot_allocation(gs, "1")
+    log_type = "combat" if melee else "shoot"
+    attack_logs = [l for l in gs["action_logs"] if l.get("type") == log_type]
+    assert attack_logs, f"le moteur n'a émis aucun log de type {log_type!r}"
+    return gs, attack_logs[0]
 
 
 class _Bridge:
@@ -155,17 +197,25 @@ def _step_log_lines(tmp_path, gs, raw_log):
     assert shots, "le log de tir ne porte aucun jet"
     bridge = _Bridge(gs)
 
+    melee = raw_log.get("type") == "combat"
     out = tmp_path / "engine_line.log"
     logger = StepLogger(output_file=str(out), enabled=True, buffer_size=1)
     logger.episode_number = 1
     for shot in shots:
         logger.log_action(
-            unit_id=raw_log["shooterId"], action_type="shoot", phase="shoot",
+            unit_id=raw_log["shooterId"],
+            action_type="combat" if melee else "shoot",
+            phase="fight" if melee else "shoot",
             player=1, success=True, step_increment=True,
-            action_details=bridge._build_shot_details(raw_log, shot, 1, None),
+            # `fight_state` : le contrat de replay exige `fight_subphase` sur toute ligne de
+            # combat (le formateur lève sans, et `log_action` avale l'exception).
+            action_details=bridge._build_shot_details(
+                raw_log, shot, 1, {"fight_subphase": "fight"} if melee else None
+            ),
         )
     logger._flush_buffer()
-    lines = [l for l in out.read_text().splitlines() if " SHOOT : " in l]
+    marker = " FIGHT : " if melee else " SHOOT : "
+    lines = [l for l in out.read_text().splitlines() if marker in l]
     assert len(lines) == len(shots), (
         "le StepLogger n'a pas produit une ligne par jet — `log_action` avale ses exceptions, "
         f"un champ requis manque probablement dans le mapping ({len(lines)}/{len(shots)})"
@@ -178,17 +228,28 @@ def _step_log_line(tmp_path, gs, raw_log):
     return _step_log_lines(tmp_path, gs, raw_log)[0]
 
 
-def _analyzer_stats(tmp_path, engine_lines, *, unit_type=UNIT_TYPE):
+def _analyzer_stats(tmp_path, engine_lines, *, unit_type=UNIT_TYPE, target_models=1,
+                    melee=False):
     """Injecte la/les ligne(s) PRODUITE(S) PAR LE MOTEUR dans un step.log valide, et lance
-    le vrai analyzer dessus."""
+    le vrai analyzer dessus.
+
+    `target_models` peuple le segment `[MODELS:]` de la ligne de départ de la cible : c'est de
+    là que l'analyzer tire son effectif, donc la tranche de 5 de [BLAST] / [CLEAVE]. Sans lui,
+    la cible vaut UNE figurine et les deux règles n'ajoutent jamais rien — le test passerait
+    au vert sans avoir rien exercé.
+    """
     import ai.analyzer as an
 
     if isinstance(engine_lines, str):
         engine_lines = [engine_lines]
+    phase_label = "FIGHT" if melee else "SHOOT"
     body = "\n".join(
-        f"[10:00:0{2 + i}] E1 T1 P1 SHOOT : {l.split(' : ', 1)[1]}"
+        f"[10:00:0{2 + i}] E1 T1 P1 {phase_label} : {l.split(' : ', 1)[1]}"
         for i, l in enumerate(engine_lines)
     )
+    target_models_segment = "[MODELS: " + " ".join(
+        f"101#{i}@({TARGET[0]},{TARGET[1] + i},z0)" for i in range(target_models)
+    ) + "]"
     log = tmp_path / "step.log"
     log.write_text(
         "=== STEP-BY-STEP ACTION LOG ===\n"
@@ -199,9 +260,13 @@ def _analyzer_stats(tmp_path, engine_lines, *, unit_type=UNIT_TYPE):
         "[10:00:00] Walls: \n"
         f"[10:00:00] Objectives: rect b NW:{OBJECTIVES}\n"
         "[10:00:00] Board: cols=220 rows=300 inches_to_subhex=5 hex_radius=2.78 margin=1\n"
-        "[10:00:00] Run rules: engagement_zone_subhex=10 metric.engagement=hex metric.ranged=euclidean move.thru_ez=True move.thru_enemy=False move.thru_friendly=True cohesion.model_subhex=10 cohesion.global_subhex=45 cohesion.min_neighbors=1\n"
+        # `engagement_zone_vertical_inches` : exigée dès qu'un contrôle d'engagement per-figurine
+        # s'exécute (§03.04). Absente de cette entête, l'analyzer lève — ce qu'aucun test ne
+        # voyait tant que la cible n'avait qu'une figurine.
+        "[10:00:00] Run rules: engagement_zone_subhex=10 engagement_zone_vertical_inches=5.0 metric.engagement=hex metric.ranged=euclidean move.thru_ez=True move.thru_enemy=False move.thru_friendly=True cohesion.model_subhex=10 cohesion.global_subhex=45 cohesion.min_neighbors=1\n"
         f"[10:00:00] Unit 1 ({unit_type}) P1: Starting position (-1,-1), HP_MAX=2 base=round/6\n"
-        "[10:00:00] Unit 101 (AssaultIntercessor) P2: Starting position (-1,-1), HP_MAX=2 base=round/6\n"
+        f"[10:00:00] Unit 101 (AssaultIntercessor) P2: Starting position (-1,-1), HP_MAX=2 "
+        f"base=round/6 {target_models_segment}\n"
         "[10:00:00] === ACTIONS START ===\n"
         f"[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1({SHOOTER[0]},{SHOOTER[1]}) DEPLOYED from (-1,-1) to ({SHOOTER[0]},{SHOOTER[1]}) [R:+0.0] [SUCCESS]\n"
         f"[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 101({TARGET[0]},{TARGET[1]}) DEPLOYED from (-1,-1) to ({TARGET[0]},{TARGET[1]}) [R:+0.0] [SUCCESS]\n"
@@ -748,3 +813,105 @@ def test_l_analyzer_compte_l_usage_de_precision(monkeypatch, tmp_path):
     usage = {k: v for k, v in stats["weapon_rule_usage"].items() if k[0] == "PRECISION"}
     assert usage, "aucun usage de PRECISION compté"
     assert all(sum(v.values()) > 0 for v in usage.values()), usage
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# [BLAST] 24.05 (tir) et [CLEAVE X] 24.06 (mêlée) — les dés additionnels par
+# tranche de 5 figurines de la CIBLE. Le token dit que la règle a joué ; le
+# NOMBRE de dés, lui, est recalculé par l'analyzer.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Paires (unité, arme) RÉELLES des rosters : l'analyzer recoupe le marqueur avec l'armurerie
+# (marqueur sur une arme qui ne déclare pas la règle = parse error, valeur différente = parse
+# error). Avec une arme inventée, le test sortirait silencieusement de ces deux contrôles.
+BLAST_UNIT = "DeathwingTerminatorPlasmaCannon"
+BLAST_WEAPON = "Plasma Cannon (Standard)"   # [BLAST], forme nue → X = 1
+CLEAVE_UNIT = "Bigboss"
+CLEAVE_WEAPON = "Two-Handed Big Choppa"     # [CLEAVE:1], NB 5
+TARGET_SQUAD = 10                           # 10 // 5 = 2 dés additionnels
+
+
+def _blast_log(monkeypatch, rolls, *, target_models=TARGET_SQUAD, n_attacks=3):
+    return _engine_shoot_log(
+        monkeypatch, ["BLAST"], rolls, n_attacks=n_attacks, unit_type=BLAST_UNIT,
+        weapon_name=BLAST_WEAPON, target_models=target_models,
+    )
+
+
+def _cleave_log(monkeypatch, rolls, *, target_models=TARGET_SQUAD, n_attacks=5):
+    return _engine_shoot_log(
+        monkeypatch, ["CLEAVE:1"], rolls, n_attacks=n_attacks, unit_type=CLEAVE_UNIT,
+        weapon_name=CLEAVE_WEAPON, target_models=target_models, melee=True,
+    )
+
+
+def test_le_marqueur_blast_atteint_step_log(monkeypatch, tmp_path):
+    """Cible de 10 figurines → 2 dés additionnels, et la ligne doit le dire."""
+    gs, raw_log = _blast_log(monkeypatch, [4] * 40)
+    line = _step_log_line(tmp_path, gs, raw_log)
+
+    assert "[BLAST:1]" in line, line
+
+
+def test_le_marqueur_cleave_atteint_step_log(monkeypatch, tmp_path):
+    """JUMEAU mêlée : même règle, même token, même site d'écriture."""
+    gs, raw_log = _cleave_log(monkeypatch, [4] * 40)
+    line = _step_log_line(tmp_path, gs, raw_log)
+
+    assert "[CLEAVE:1]" in line, line
+
+
+def test_cible_de_moins_de_cinq_figurines_ne_dit_rien(monkeypatch, tmp_path):
+    """Contre-épreuve : l'arme DÉCLARE la règle, mais 4 // 5 = 0 dé — elle n'a rien fait.
+    Un token posé sur la déclaration serait compté comme une erreur par l'analyzer."""
+    gs, raw_log = _blast_log(monkeypatch, [4] * 40, target_models=4)
+    assert "BLAST" not in _step_log_line(tmp_path, gs, raw_log)
+
+    gs, raw_log = _cleave_log(monkeypatch, [4] * 40, target_models=4)
+    assert "CLEAVE" not in _step_log_line(tmp_path, gs, raw_log)
+
+
+def test_le_marqueur_cleave_leve_le_plafond_d_attaques(monkeypatch, tmp_path):
+    """LE contrôle qui compte, côté mêlée : `fight_over_cc_nb`.
+
+    C'est la mesure du 2026-08-11 rejouée en petit. Le Bigboss (Two-Handed Big Choppa, NB 5)
+    frappe une escouade de 10 : 2 dés additionnels, donc des lignes d'attaque au-delà du NB.
+    Sans le marqueur, l'analyzer plafonne au NB seul et les compte en dépassement — c'est
+    l'intégralité des 24 « Attacks over CC_NB » du run.
+    """
+    gs, raw_log = _cleave_log(monkeypatch, [4] * 40)
+    lines = _step_log_lines(tmp_path, gs, raw_log)
+    assert len(lines) == 7, (
+        f"5 attaques (NB du Two-Handed Big Choppa) + 2 dés de CLEAVE = 7 lignes, "
+        f"obtenu {len(lines)}"
+    )
+
+    stats = _analyzer_stats(tmp_path, lines, unit_type=CLEAVE_UNIT,
+                            target_models=TARGET_SQUAD, melee=True)
+
+    assert not [e for e in stats["parse_errors"] if "CLEAVE" in e.get("error", "")], (
+        stats["parse_errors"]
+    )
+    assert stats["fight_over_cc_nb"][1] == 0, (
+        "les 2 attaques de CLEAVE sont légitimes ; les compter en dépassement signifie que le "
+        "marqueur n'atteint pas la ligne ou que le plafond l'ignore"
+    )
+
+
+def test_le_marqueur_blast_leve_le_plafond_de_tirs(monkeypatch, tmp_path):
+    """JUMEAU exact au tir : `shoot_over_rng_nb`. Aucun roster joué le 2026-08-11 ne portait
+    d'arme BLAST — ce contrôle est donc corrigé AVANT de s'être allumé, et c'est ce test qui
+    l'atteste."""
+    gs, raw_log = _blast_log(monkeypatch, [4] * 40)
+    lines = _step_log_lines(tmp_path, gs, raw_log)
+    assert len(lines) == 5, (
+        f"3 attaques (NB max du Plasma Cannon, D3) + 2 dés de BLAST = 5 lignes, "
+        f"obtenu {len(lines)}"
+    )
+
+    stats = _analyzer_stats(tmp_path, lines, unit_type=BLAST_UNIT, target_models=TARGET_SQUAD)
+
+    assert not [e for e in stats["parse_errors"] if "BLAST" in e.get("error", "")], (
+        stats["parse_errors"]
+    )
+    assert stats["shoot_over_rng_nb"][1] == 0, stats["shoot_over_rng_nb"]

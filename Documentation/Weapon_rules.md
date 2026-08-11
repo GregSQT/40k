@@ -491,6 +491,13 @@ Two levels, because a rule either describes the whole weapon group (04.03) or on
 | Group (summary line) | `shared_utils.weapon_rule_log_tokens`, one socle for shooting **and** melee, called once per group at log emission | the segment the rule modifies | `Shots:` → `[RAPID FIRE:n]` `[BLAST:n]` `[CLEAVE:n]` `[EXTRA ATTACKS]` · `Hit:` → `[HEAVY]` `[COVER]` `[POINT-BLANK]` `[TORRENT]` `[SUSTAINED HITS:X]` `[IGNORES COVER]` `[PSYCHIC]` · `Wound:` → `[ANTI-<KEYWORD>:Y+]` `[LETHAL HITS]` `[TWIN-LINKED]` · `Save:` → `[DEVASTATING WOUNDS]` · `HP lost:` → `[MELTA:X]` `[PRECISION]` |
 | Per shot (expanded detail) | flags set by `attack_sequence.roll_attack_pool` on each shot record | the leg of that die | `Tir:` → `[TORRENT]` `[SUSTAINED HITS]` `[CRITICAL HIT]` · `Bless:` → `[TWIN-LINKED]` `[LETHAL HITS]` `[CRITICAL WOUND]` · `Svg:` → `[DEVASTATING WOUNDS]` (no save roll is made, 24.10) |
 
+Since 2026-08-11 `[BLAST:n]` and `[CLEAVE:n]` also reach **`step.log`**, on every attack line of
+the group (same bridge as `[RAPID FIRE:n]`: `additive_rules_applied` → `blastApplied` /
+`cleaveApplied` → `w40k_core._build_shot_details` → `step_logger._additive_rule_tokens`, which the
+`SHOT` and `FOUGHT` branches share). Without them the analyzer capped attacks at NB alone and
+counted the extra dice as violations — all 24 "Attacks over CC_NB" of the 2026-08-11 run were
+`[CLEAVE]` dice, i.e. the whole counter was false positives.
+
 **`n` is always the parameter the weapon declares, never a dice count** (decided 2026-08-10). A
 shoota `[RAPID FIRE 1]` fired by ten models within half range prints `Shots:30 [RAPID FIRE:1]` —
 `1`, not `10`. Same for `[BLAST:n]` and `[CLEAVE:n]`. Bare `[BLAST]` / `[CLEAVE]` print `1`, the

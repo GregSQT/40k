@@ -369,6 +369,76 @@ def weapon_profile_for_line(
     return None, None, ()
 
 
+#: Tranche de figurines de la cible qui ouvre un dé additionnel, pour [BLAST] 24.05 comme pour
+#: [CLEAVE] 24.06 : « for every five models that were in the target unit ». Nommée parce que les
+#: deux règles la partagent et qu'un `// 5` écrit deux fois est un `// 5` qui divergera.
+ADDITIVE_RULE_MODELS_PER_DIE: int = 5
+
+
+def additive_rule_extra_dice(
+    rule_label: str,
+    action_desc: str,
+    shooters: Tuple[str, ...],
+    model_types: Dict[str, str],
+    squad_unit_type: str,
+    weapon_display_name: str,
+    unit_attack_limits: Dict[str, Any],
+    per_unit_key: str,
+    global_by_weapon: Dict[str, int],
+    n_models: int,
+    target_models: int,
+) -> Tuple[int, Optional[str]]:
+    """Dés additionnels de [BLAST] 24.05 (tir) / [CLEAVE] 24.06 (mêlée) sur CETTE ligne.
+
+    UN SEUL calcul pour les deux règles : elles ont le même texte (« add X additional attack
+    dice for every five models that were in the target unit in the Select Targets step »),
+    [CLEAVE] ajoutant seulement la clause « une seule cible pour toutes les attaques de cette
+    arme ». Cette clause n'est PAS rejouée ici — le moteur l'a tranchée, et il le dit en posant
+    (ou non) le token sur la ligne, exactement comme `[RAPID FIRE:X]` dit que la cible était à
+    demi-portée. Le lecteur n'a pas à redevenir juge d'une déclaration qu'il ne voit pas.
+
+    Ce que le token NE dit PAS, et que ce site calcule donc lui-même : le NOMBRE de dés. Le lire
+    dans le journal rendrait le contrôle vacant — l'analyzer vérifierait le moteur avec le
+    chiffre du moteur. X vient du registre d'armes, l'effectif de la cible de l'état reconstruit.
+
+    `target_models` est l'effectif au Select Targets step (figé à l'ouverture de la séquence par
+    l'appelant), et non celui de la ligne courante : la séquence tue en avançant.
+
+    Retourne `(dés additionnels, message d'erreur ou None)`. L'erreur — token posé sur une arme
+    qui ne déclare pas la règle, ou X du journal différent de celui du registre — est RENDUE et
+    non écrite : `parse_errors` appartient à l'appelant, qui seul a l'épisode et le tour.
+    JUMEAU des deux mêmes contrôles sur `[RAPID FIRE:X]` dans `shoot_handler`.
+    """
+    logged = re.search(rf'\[{rule_label}:(\d+)\]', action_desc, re.IGNORECASE)
+    if logged is None:
+        return 0, None
+    logged_value = int(logged.group(1))
+    limits = unit_attack_limits.get(squad_unit_type)  # get allowed : type hors registre
+    declared = None
+    if limits is not None:
+        declared = resolve_weapon_value(
+            weapon_display_name, require_key(limits, per_unit_key), global_by_weapon,
+        )
+    if declared is None or declared <= 0:
+        return 0, (
+            f"{rule_label} marker present for weapon without {rule_label} rule: "
+            f"{squad_unit_type}/{weapon_display_name}"
+        )
+    if logged_value != declared:
+        return 0, (
+            f"{rule_label} marker value mismatch for {squad_unit_type}/{weapon_display_name}: "
+            f"log={logged_value}, expected={declared}"
+        )
+    # X est un attribut de l'ARME : il se résout PAR FIGURINE comme le NB (une escouade porte des
+    # datasheets différentes, règle 19). Somme des X des porteurs × tranches de 5 de la cible —
+    # `(ΣX) × k` est bien `Σ(X × k)`, la factorisation ne change pas le compte.
+    x_by_models = per_model_attack_cap(
+        shooters, model_types, squad_unit_type, weapon_display_name,
+        unit_attack_limits, per_unit_key, global_by_weapon, declared, n_models,
+    )
+    return x_by_models * (int(target_models) // ADDITIVE_RULE_MODELS_PER_DIE), None
+
+
 def per_model_attack_cap(
     shooters: Tuple[str, ...],
     model_types: Dict[str, str],

@@ -135,6 +135,18 @@ class AnalyzerState:
     # Séquences de tir/combat
     shot_sequence_counts: Dict = field(default_factory=dict)
     fight_sequence_counts: Dict = field(default_factory=dict)
+    #: Effectif de la CIBLE au Select Targets step, figé à l'OUVERTURE de chaque séquence de
+    #: tir/combat (même clé que les compteurs ci-dessus). C'est la donnée qu'exigent [BLAST]
+    #: 24.05 et [CLEAVE] 24.06 : « every five models that were in the target unit IN THE SELECT
+    #: TARGETS STEP ». Le lire à la ligne courante donnerait l'effectif APRÈS les pertes déjà
+    #: infligées par la séquence elle-même — donc un plafond trop bas, et le faux positif de
+    #: retour dès que la cible franchit un multiple de 5 en cours d'activation.
+    shot_sequence_target_models: Dict = field(default_factory=dict)
+    fight_sequence_target_models: Dict = field(default_factory=dict)
+    #: `unit_models_alive` tel qu'il était AVANT l'application des dégâts de la ligne courante.
+    #: Les dégâts sont appliqués par `analyzer_core` en amont de l'aiguillage vers les handlers :
+    #: à l'ouverture d'une séquence, la première ligne a déjà pu retirer une figurine de la cible.
+    models_alive_pre_line: Dict[str, int] = field(default_factory=dict)
     last_shoot_shooter_id: Optional[str] = None
     last_shoot_weapon: Optional[str] = None
     last_shoot_target_id: Optional[str] = None

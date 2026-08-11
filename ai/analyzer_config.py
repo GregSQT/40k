@@ -15,7 +15,7 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 from shared.data_validation import require_key
-from engine.utils.weapon_helpers import weapon_rule_parameter
+from engine.utils.weapon_helpers import weapon_rule_parameter, weapon_rule_parameter_or
 from engine.game_state import FACTION_ABILITY_KEYWORD_BY_RULE_ID, unit_faction_keywords
 
 # Échelle subhex/pouce du run en cours d'analyse, lue dans l'entête `Board:` du step.log.
@@ -164,6 +164,12 @@ class AnalyzerConfig:
     rng_nb_by_weapon_global: Dict[str, int]
     cc_nb_by_weapon_global: Dict[str, int]
     rapid_fire_by_weapon_global: Dict[str, int]
+    #: X déclaré de [BLAST] 24.05 (tir) et [CLEAVE] 24.06 (mêlée) — les deux règles qui ajoutent
+    #: X dés par tranche de 5 figurines de la CIBLE. Mêmes cartes, même agrégation que ci-dessus :
+    #: l'arme se résout par FIGURINE, et le porteur d'une arme CLEAVE est presque toujours un
+    #: personnage rattaché (règle 19) dont le type diffère de celui de l'escouade.
+    blast_by_weapon_global: Dict[str, int]
+    cleave_by_weapon_global: Dict[str, int]
     sustained_hits_by_weapon_global: Dict[str, int]
     weapon_range_global: Dict[str, int]
     weapon_is_close_quarters_global: Dict[str, bool]
@@ -264,6 +270,8 @@ def load_analyzer_config() -> AnalyzerConfig:
         )
         rng_nb_by_weapon: Dict[str, int] = {}
         rapid_fire_by_weapon: Dict[str, int] = {}
+        blast_by_weapon: Dict[str, int] = {}
+        cleave_by_weapon: Dict[str, int] = {}
         sustained_hits_by_weapon: Dict[str, int] = {}
         combi_by_weapon: Dict[str, str] = {}
         for weapon in rng_weapons:
@@ -279,6 +287,12 @@ def load_analyzer_config() -> AnalyzerConfig:
                 # la copie locale acceptait encore la forme objet que le moteur rejette depuis
                 # le 2026-07-29. `None` = l'arme ne déclare pas la règle → 0, neutre.
                 rapid_fire_by_weapon[weapon_name] = weapon_rule_parameter(weapon, "RAPID_FIRE") or 0
+                # [BLAST] 24.05 : paramètre OPTIONNEL par les règles — la forme nue `[BLAST]`
+                # vaut « 1 dé par tranche de 5 », la forme `[BLAST 2]` vaut 2. D'où le helper
+                # moteur `weapon_rule_parameter_or` et non `weapon_rule_parameter`, qui lèverait
+                # sur la forme nue (celle de 4 des 5 armes BLAST du dépôt). Le défaut 1 est une
+                # valeur MÉTIER du PDF, pas un repli anti-erreur.
+                blast_by_weapon[weapon_name] = weapon_rule_parameter_or(weapon, "BLAST", 1) or 0
                 sustained_hits_by_weapon[weapon_name] = weapon_rule_parameter(weapon, "SUSTAINED_HITS") or 0
                 combi_key = weapon.get("COMBI_WEAPON")
                 if combi_key is not None:
@@ -291,6 +305,8 @@ def load_analyzer_config() -> AnalyzerConfig:
                     require_key(weapon, "NB"),
                     "analyzer_cc_nb",
                 )
+                # [CLEAVE] 24.06 : JUMEAU mêlée de [BLAST], même helper, même défaut métier.
+                cleave_by_weapon[weapon_name] = weapon_rule_parameter_or(weapon, "CLEAVE", 1) or 0
         # FORCE par arme (05.02) : lue au MÊME endroit et sous la même clé de nom que le NB, pour
         # que la résolution par-figurine (`resolve_weapon_value`) marche à l'identique.
         #
@@ -309,6 +325,8 @@ def load_analyzer_config() -> AnalyzerConfig:
             "rng_nb_by_weapon": rng_nb_by_weapon,
             "cc_nb_by_weapon": cc_nb_by_weapon,
             "rapid_fire_by_weapon": rapid_fire_by_weapon,
+            "blast_by_weapon": blast_by_weapon,
+            "cleave_by_weapon": cleave_by_weapon,
             "sustained_hits_by_weapon": sustained_hits_by_weapon,
             "rng_str_by_weapon": rng_str_by_weapon,
             "cc_str_by_weapon": cc_str_by_weapon,
@@ -422,6 +440,8 @@ def load_analyzer_config() -> AnalyzerConfig:
     rng_nb_by_weapon_global: Dict[str, int] = {}
     cc_nb_by_weapon_global: Dict[str, int] = {}
     rapid_fire_by_weapon_global: Dict[str, int] = {}
+    blast_by_weapon_global: Dict[str, int] = {}
+    cleave_by_weapon_global: Dict[str, int] = {}
     sustained_hits_by_weapon_global: Dict[str, int] = {}
     weapon_range_global: Dict[str, int] = {}
     weapon_is_close_quarters_global: Dict[str, bool] = {}
@@ -436,6 +456,10 @@ def load_analyzer_config() -> AnalyzerConfig:
             rng_nb_by_weapon_global[_wname] = max(rng_nb_by_weapon_global.get(_wname, 0), _nb)  # get allowed : max cumulatif, 0 = neutre
         for _wname, _rf in _limits["rapid_fire_by_weapon"].items():
             rapid_fire_by_weapon_global[_wname] = max(rapid_fire_by_weapon_global.get(_wname, 0), _rf)  # get allowed : max cumulatif, 0 = neutre
+        for _wname, _bl in _limits["blast_by_weapon"].items():
+            blast_by_weapon_global[_wname] = max(blast_by_weapon_global.get(_wname, 0), _bl)  # get allowed : max cumulatif, 0 = neutre
+        for _wname, _cl in _limits["cleave_by_weapon"].items():
+            cleave_by_weapon_global[_wname] = max(cleave_by_weapon_global.get(_wname, 0), _cl)  # get allowed : max cumulatif, 0 = neutre
         for _wname, _sh in _limits["sustained_hits_by_weapon"].items():
             sustained_hits_by_weapon_global[_wname] = max(sustained_hits_by_weapon_global.get(_wname, 0), _sh)  # get allowed : max cumulatif, 0 = neutre
         for _wname, _nb in _limits["cc_nb_by_weapon"].items():
@@ -466,6 +490,8 @@ def load_analyzer_config() -> AnalyzerConfig:
         rng_nb_by_weapon_global=rng_nb_by_weapon_global,
         cc_nb_by_weapon_global=cc_nb_by_weapon_global,
         rapid_fire_by_weapon_global=rapid_fire_by_weapon_global,
+        blast_by_weapon_global=blast_by_weapon_global,
+        cleave_by_weapon_global=cleave_by_weapon_global,
         sustained_hits_by_weapon_global=sustained_hits_by_weapon_global,
         rng_str_by_weapon_global=rng_str_by_weapon_global,
         cc_str_by_weapon_global=cc_str_by_weapon_global,

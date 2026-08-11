@@ -76,6 +76,11 @@ def handle_episode_start(state: "AnalyzerState", config: "AnalyzerConfig", line:
     state.unit_movement_history = {}
     state.shot_sequence_counts = {}
     state.fight_sequence_counts = {}
+    # Effectifs de cible figés au Select Targets step : même durée de vie que les compteurs
+    # qu'ils accompagnent (mêmes clés). Les garder d'un épisode à l'autre ferait juger une
+    # séquence sur l'effectif d'une partie précédente.
+    state.shot_sequence_target_models = {}
+    state.fight_sequence_target_models = {}
     state.last_fight_fighter_id = None
     state.last_fight_weapon = None
     state.last_fight_shooters = ()

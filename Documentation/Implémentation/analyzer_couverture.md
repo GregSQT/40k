@@ -168,12 +168,12 @@ l'écriture directe de `rule_choice`) :
 | `move_after_shooting` | `Unit N(c,r) MOVED AFTER SHOOTING [<CAPACITÉ>] from … to …` | nom de la capacité (obligatoire) |
 | `reactive_move` | `Unit N(c,r) REACTIVE MOVED [<CAPACITÉ>] from … to … [Roll: N] - trigger: Unit M->(c,r)` | jet, déclencheur ; **pas de `[MODELS:]` d'arrivée** |
 | `deploy_unit` | `Unit N(c,r) DEPLOYED from (-1,-1) to (c,r)` | sentinelle hors-table `(-1,-1)` (20.01) |
-| `shoot` | `Unit N(c,r) SHOT [ASSAULT] [CLOSE-QUARTERS] [RAPID FIRE:X] [MELTA:X] [PRECISION] Unit M(c,r) with [<arme>] - Hit R(T+ ou base+->eff+) [HEAVY\|COVER] [REROLLED:n] [SUSTAINED HITS] [<CAPACITÉ>] - Wound R(T+) [<CAPACITÉ>] [REROLLED:n] - Save R(T+) [REROLLED:n] [<CAPACITÉ>] - Dmg:NHP [HAZARDOUS] Roll:N` ; ou `Save [DEVASTATING WOUNDS]` | jets, seuils, tokens de règle |
+| `shoot` | `Unit N(c,r) SHOT [ASSAULT] [CLOSE-QUARTERS] [RAPID FIRE:X] [MELTA:X] [BLAST:X] [PRECISION] Unit M(c,r) with [<arme>] - Hit R(T+ ou base+->eff+) [HEAVY\|COVER] [REROLLED:n] [SUSTAINED HITS] [<CAPACITÉ>] - Wound R(T+) [<CAPACITÉ>] [REROLLED:n] - Save R(T+) [REROLLED:n] [<CAPACITÉ>] - Dmg:NHP [HAZARDOUS] Roll:N` ; ou `Save [DEVASTATING WOUNDS]` | jets, seuils, tokens de règle |
 | `hazardous` | `Unit N(c,r) SUFFERS X Mortal Wounds [HAZARDOUS]` / `… was DESTROYED [HAZARDOUS]` | MW infligées |
 | `charge` | `Unit N(c,r) CHARGED [<CAPACITÉ>] [FLY] Unit M(c,r) from … to … [Roll: N]` | jet 2D6 (pouces), `[FLY]`, **une seule** cible |
 | `charge_fail` | `Unit N(c,r) FAILED CHARGE to unit M(c,r) [Roll: N]` | jet |
 | `charge_impact` | `Unit N(c,r) IMPACTED [<CAPACITÉ>] Unit M(c,r) - Hit:T+:R(HIT\|FAIL) Wound:AUTO Save:NONE[MW] Dmg:NHP` | seuil, jet, MW |
-| `combat` | `Unit N(c,r) FOUGHT [WAAAGH!] Unit M(c,r) with [<arme>] - Hit R(T+) [SUSTAINED HITS] [<CAPACITÉ>] [REROLLED:n] - Wound … - Save … - Dmg:NHP [FIGHT_SUBPHASE:<x>]` | idem tir + sous-phase de combat + `[WAAAGH!]` (confort de lecture — la **donnée** est dans `T{tour} EFFECTS:`) |
+| `combat` | `Unit N(c,r) FOUGHT [WAAAGH!] [CLEAVE:X] Unit M(c,r) with [<arme>] - Hit R(T+) [SUSTAINED HITS] [<CAPACITÉ>] [REROLLED:n] - Wound … - Save … - Dmg:NHP [FIGHT_SUBPHASE:<x>]` | idem tir + sous-phase de combat + `[WAAAGH!]` (confort de lecture — la **donnée** est dans `T{tour} EFFECTS:`) |
 | `pile_in` / `consolidation` | `Unit N(c,r) PILED IN\|CONSOLIDATED from … to …` | positions, `[MODELS:]` |
 | `wait` | `Unit N(c,r) WAIT` | — |
 | `rule_choice` | `Unit N(c,r) chose [<NOM DE RÈGLE>]` | nom d'affichage |
@@ -199,12 +199,12 @@ Conséquence directe : le contrôle §2.1 « Dead unit skipping » et tout `hand
 
 **Ce que la ligne d'attaque ne porte PAS** (vérifié sur `_SHOT_RECORD_FIELD_MAP`,
 `w40k_core.py`, seul pont record→step.log). Le moteur SAIT poser les tokens
-`[BLAST:X]`, `[CLEAVE:X]`, `[EXTRA ATTACKS]`, `[TORRENT]`, `[IGNORES COVER]`, `[PSYCHIC]`,
+`[EXTRA ATTACKS]`, `[TORRENT]`, `[IGNORES COVER]`, `[PSYCHIC]`,
 `[ANTI-<KW>:Y+]`, `[LETHAL HITS]` — c'est
 `shared_utils.weapon_rule_log_tokens` — mais il ne les pose que sur la ligne de
 SYNTHÈSE d'escouade du **Game Log PvP** (`_emit_squad_shoot_log`). Aucun de ces huit
 tokens n'a d'entrée dans `_SHOT_RECORD_FIELD_MAP`, donc aucun n'atteint `step.log`. Les statuts
-ABSENT-LOG-MANQUANT de §3 pour 24.03/05/06/11/18/19/23/25/28/29/37 restent donc **exacts**, mais
+ABSENT-LOG-MANQUANT de §3 pour 24.03/11/18/19/23/29/37 restent donc **exacts**, mais
 la §7-L5 est à réviser : le producteur existe déjà, il ne manque que le pont.
 
 ✅ **`[MELTA:X]` et `[PRECISION]` sont sortis de cette liste le 2026-08-11** : le pont a été posé
@@ -349,6 +349,7 @@ portés par #14 et #24 ; « start an action » exige les lignes d'action (16.01)
 | 39bis | **QUI compte l'usage** — refonte du 2026-08-11. Étaient comptés : `TWIN_LINKED`, `ASSAULT`, `HEAVY`, `SUSTAINED_HITS`, et `CLOSE_QUARTERS` sur `distance ancre-à-ancre == 1`. S'y ajoutent `RAPID_FIRE`, `MELTA`, `PRECISION` et `DEVASTATING_WOUNDS` **par arme** (la ligne GLOBAL existait seule) ; `CLOSE_QUARTERS` mesure désormais l'ENGAGEMENT, comme #17 et §10.06 — les deux sections comptaient deux grandeurs sous le même nom, **43 contre 1 280** sur le run du 2026-08-11. La clé `(<arme> (<datasheet>))` désigne la **datasheet PORTEUSE** et non plus le type d'escouade : sur 23 169 tirs, **3 138 (14 %)** portaient une arme que seule une figurine déclare (règle 19), invisible des deux côtés — ni attendue, ni comptée. Résolution : `analyzer_perfig.weapon_profile_for_line` | `shoot_handler.py` |
 | 40 | `devastating_wounds_incorrect` | `shoot_handler.py` |
 | 41 | marqueur `[RAPID FIRE:X]` absent de l'armurerie ou valeur ≠ armurerie → `parse_error` | `shoot_handler.py` |
+| 41bis | marqueur `[BLAST:X]` / `[CLEAVE:X]` absent de l'armurerie ou valeur ≠ armurerie → `parse_error` ; et **les dés additionnels entrent dans le plafond d'attaques** (#12/#28). Un seul calcul pour les deux règles (`analyzer_perfig.additive_rule_extra_dice`), avec l'effectif de la cible figé à l'ACTIVATION — pas à la séquence par arme, le moteur déclarant toutes ses attaques avant d'en résoudre une. Créé le 2026-08-11 : sans lui, les 24 « Attacks over CC_NB » du run étaient les dés de `[CLEAVE]` comptés en dépassement, soit **100 % du compteur en faux positifs** | `shoot_handler.py`, `fight_handler.py` |
 | 42 | marqueur `[SUSTAINED HITS]` sur arme sans la règle → `parse_error` | `shoot_handler.py` |
 
 Le marqueur d'activation de la phase FIGHT est `) CONSOLIDATED ` (`analyzer_core.py`) : les
@@ -741,8 +742,8 @@ Aucun TRANSPORT journalisé (ni embark, ni disembark, ni capacité).
 | 24.02 Duplicated abilities | — | ABSENT-LOG-MANQUANT — instance retenue non loggée |
 | 24.03 [ANTI-X Y+] | — | ABSENT-LOG-MANQUANT — token + seuil critique effectif |
 | 24.04 [ASSAULT] | #39 (usage) | **PARTIEL** — validité non contrôlée (cf. 10.05) |
-| 24.05 [BLAST] | — | ABSENT-LOG-MANQUANT — dés bonus + interdiction sur cible engagée |
-| 24.06 [CLEAVE] | — | ABSENT-LOG-MANQUANT |
+| 24.05 [BLAST] | #41bis | **PARTIEL** — token `[BLAST:X]` loggué et dés bonus entrés dans le plafond de tirs depuis le 2026-08-11 (latent : aucun roster joué ne porte d'arme BLAST, 4 existent côté Space Marine) ; l'interdiction sur cible engagée n'est toujours pas contrôlée |
+| 24.06 [CLEAVE] | #41bis | **PARTIEL** — token `[CLEAVE:X]` loggué et dés bonus entrés dans le plafond d'attaques depuis le 2026-08-11. La clause « une seule cible pour toutes les attaques de cette arme » n'est PAS rejouée par l'analyzer : le moteur l'a tranchée et le dit en posant (ou non) le token, comme `[RAPID FIRE:X]` dit la demi-portée |
 | 24.07 [CLOSE-QUARTERS] | #11, #16, #17 + #39 | **PARTIEL** — le compteur d'USAGE §1.8 mesure `calculate_hex_distance(ancre,ancre)==1` (`shoot_handler.py`), pas l'engagement per-figurine (vert vacant, cf. §5) ; le volet « un seul choix par figurine » manque |
 | 24.08 Deadly Demise | — | ABSENT-LOG-MANQUANT |
 | 24.09 Deep Strike | — | **PARTIEL** — règle déclarée, ingress loggué, contrainte >8" non contrôlée (loggable) |
@@ -1049,7 +1050,7 @@ lieu de la lire) et 24.03 (`[ANTI-X Y+]`, dont le token n'atteint pas step.log, 
 | ~~L2~~ | ~~`S` de l'arme et `T` de la cible~~ — **CLOS le 2026-08-10 sans ajout de champ** (cf. ci-dessus) ; le reliquat utile est le `T` RETENU par le moteur, pour cesser de le recalculer | `Wound R(T+) [S<n> vs T<n>]` | 19.02 seul |
 | L3 | **Figurine cible allouée** + groupe d'allocation | `→ <mid>` sur la partie `Save`/`Dmg` | 05.03, 05.04, 06.02, 24.28 |
 | L4 | **`AP` de l'arme, `Sv`/`InSv` du groupe** | `Save R(<base>+ AP<n> → <eff>+)` | 05.04, `closest_target_penetration`, 24.18 |
-| L5 | **Tokens d'abilité d'arme manquants — le PRODUCTEUR EXISTE DÉJÀ, il manque le PONT.** ⚠️ Révisé le 2026-08-10 : `shared_utils.weapon_rule_log_tokens` (`:8041-8156`) sait poser `[ANTI-<KW>:Y+]`, `[LETHAL HITS]`, `[TORRENT]`, `[MELTA:X]`, `[BLAST:X]`, `[CLEAVE:X]`, `[IGNORES COVER]`, `[PSYCHIC]`, `[PRECISION]`, `[EXTRA ATTACKS]` — mais seulement sur la ligne de synthèse du **Game Log PvP** (`_emit_squad_shoot_log:8164`). Aucun n'a d'entrée dans `_SHOT_RECORD_FIELD_MAP` (`w40k_core.py`), donc aucun n'atteint `step.log`. Le travail n'est PAS d'écrire des tokens : c'est d'ajouter les entrées de mapping et de verrouiller la jonction (`tests/unit/ai/test_step_log_weapon_rule_tokens.py` est le modèle). Restent à produire de zéro : `[INDIRECT FIRE]`, `[LANCE]` | entrées dans `_SHOT_RECORD_FIELD_MAP` + branches du formateur `step_logger` | 24.03, 24.05, 24.06, 24.11, 24.18, 24.19, 24.21, 24.23, 24.25, 24.28, 24.29, 24.37, 10.07 |
+| L5 | **Tokens d'abilité d'arme manquants — le PRODUCTEUR EXISTE DÉJÀ, il manque le PONT.** ⚠️ Révisé le 2026-08-10 : `shared_utils.weapon_rule_log_tokens` (`:8041-8156`) sait poser `[ANTI-<KW>:Y+]`, `[LETHAL HITS]`, `[TORRENT]`, `[IGNORES COVER]`, `[PSYCHIC]`, `[EXTRA ATTACKS]` — mais seulement sur la ligne de synthèse du **Game Log PvP** (`_emit_squad_shoot_log:8164`). Aucun n'a d'entrée dans `_SHOT_RECORD_FIELD_MAP` (`w40k_core.py`), donc aucun n'atteint `step.log`. Le travail n'est PAS d'écrire des tokens : c'est d'ajouter les entrées de mapping et de verrouiller la jonction (`tests/unit/ai/test_step_log_weapon_rule_tokens.py` est le modèle). Restent à produire de zéro : `[INDIRECT FIRE]`, `[LANCE]`. ✅ `[MELTA:X]`, `[PRECISION]` (2026-08-11), puis `[BLAST:X]` et `[CLEAVE:X]` (même jour) ont franchi le pont | entrées dans `_SHOT_RECORD_FIELD_MAP` + branches du formateur `step_logger` | 24.03, 24.11, 24.18, 24.19, 24.21, 24.23, 24.29, 24.37, 10.07 |
 | L6 | **Ligne `stratagem`** (nom, CP dépensés, cible, phase) | `P<n> STRATAGEM [<NOM>] -<n>CP → Unit M` | 15.01–15.12 (12 règles) |
 | L7 | **Lignes `action_start` / `action_complete`** | `Unit N ACTION START [<nom>]` / `… COMPLETE` | 16.01, 09.06, 09.07, 10.04–10.07 (volets « AFTER: pas d'action ») |
 | L8 | **Transports** : capacité, embark, disembark (mode + jet de hasard) | types `embark`, `disembark` dans `_STEP_LOG_TYPE_MAP` | 18.01–18.05 |

@@ -841,6 +841,13 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 _dmg_actor_match = re.match(r'Unit (\d+)\(', action_desc)
                 _dmg_actor_id = _dmg_actor_match.group(1) if _dmg_actor_match else None
 
+                # Effectifs AVANT les dégâts de cette ligne. [BLAST] 24.05 et [CLEAVE] 24.06
+                # comptent les figurines de la cible « in the Select Targets step », donc AVANT
+                # que l'activation n'en tue : les dégâts sont appliqués juste en dessous, avant
+                # que le handler de tir/combat ne voie la ligne, et la première ligne d'une
+                # séquence peut déjà avoir retiré un socle.
+                state.models_alive_pre_line = dict(state.unit_models_alive)
+
                 # CRITICAL: Apply damage regardless of STEP marker
                 # Non-step lines still contain real attacks/shots and can kill units.
                 # If we ignore STEP: NO damage, later rule checks (e.g., adjacency) can produce false positives

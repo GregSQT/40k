@@ -9,6 +9,7 @@ from shared.data_validation import require_key
 from ai.analyzer_rules import note_rule_usage
 from engine.combat_utils import calculate_hex_distance, ranged_edge_distance, get_distance_metric
 from ai.analyzer_perfig import (
+    additive_rule_extra_dice,
     parse_shooter_models_segment,
     per_model_attack_cap,
     position_is_on_battlefield,
@@ -423,6 +424,16 @@ def handle_shoot(
                     state.shot_sequence_counts[seq_key] = 0
                 if seq_key not in state.shot_sequence_counts:
                     state.shot_sequence_counts[seq_key] = 0
+                # Select Targets step — JUMEAU EXACT de `fight_handler`, clé d'ACTIVATION comprise
+                # (escouade tirante × cible × tour) : le moteur déclare toutes ses attaques avant
+                # d'en résoudre une, donc une arme qui tire en second n'a pas droit à l'effectif
+                # que la première a réduit. C'est l'effectif qu'exige [BLAST] 24.05, lu AVANT les
+                # dégâts de la ligne courante.
+                activation_key = (state.current_episode_num, turn, shooter_id, target_id)
+                if activation_key not in state.shot_sequence_target_models:
+                    state.shot_sequence_target_models[activation_key] = require_key(
+                        state.models_alive_pre_line, target_id
+                    )
                 if not is_sustained_hit_line:
                     state.shot_sequence_counts[seq_key] += 1
                 shooter_player_for_stats = require_key(state.unit_player, shooter_id)
@@ -468,7 +479,26 @@ def handle_shoot(
                 # sans lui, le plafond restait a NB de base et toute activation RAPID FIRE
                 # produisait des faux « shots over RNG_NB ».
                 # Non-regression : tests/unit/ai/test_step_log_weapon_rule_tokens.py
-                max_allowed_shots = rng_nb_squad + (
+                # [BLAST] 24.05 : JUMEAU de [CLEAVE] 24.06 en mêlée — même texte, mêmes dés
+                # additionnels par tranche de 5 figurines de la cible, même calcul partagé. Sans
+                # lui, toute arme BLAST produirait ici les faux « Shots over RNG_NB » que
+                # [CLEAVE] produisait en mêlée (24 sur le run du 2026-08-11). Aucun roster joué
+                # ce jour-là n'en porte : ce contrôle est corrigé AVANT de s'être allumé.
+                blast_dice, blast_error = additive_rule_extra_dice(
+                    "BLAST", action_desc, shooter_models, state.model_types, shooter_unit_type,
+                    weapon_name_for_limits, config.unit_attack_limits, "blast_by_weapon",
+                    config.blast_by_weapon_global, n_shooter_models,
+                    require_key(state.shot_sequence_target_models, activation_key),
+                )
+                if blast_error is not None:
+                    stats['parse_errors'].append({
+                        'episode': state.current_episode_num,
+                        'turn': turn,
+                        'phase': phase,
+                        'line': line.strip(),
+                        'error': blast_error,
+                    })
+                max_allowed_shots = rng_nb_squad + blast_dice + (
                     rapid_fire_value_squad if rapid_fire_bonus_for_this_shot > 0 else 0
                 )
                 if state.shot_sequence_counts[seq_key] > max_allowed_shots:

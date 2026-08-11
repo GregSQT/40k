@@ -18,6 +18,42 @@ from shared.data_validation import require_key
 __all__ = ['StepLogger']
 
 
+#: Regles qui AJOUTENT des des au pool d attaques et dont l effet depend de la CIBLE :
+#: `(libelle de token, cle de `details`)`. [RAPID FIRE] 24.30 n y est pas — son X s applique par
+#: figurine tirante, il a donc son propre site, deja en place. Les deux ci-dessous sont jumelles
+#: a la virgule pres (« add X additional attack dice for every five models that were in the
+#: target unit in the Select Targets step »), [CLEAVE] ajoutant la clause « une seule cible ».
+_ADDITIVE_RULE_TOKENS: tuple = (("BLAST", "blast_rule_value"), ("CLEAVE", "cleave_rule_value"))
+
+
+def _additive_rule_tokens(details) -> list:
+    """Tokens `[BLAST:X]` / `[CLEAVE:X]` d une ligne d attaque — TIR ET MELEE, un seul site.
+
+    MEME grammaire que `[RAPID FIRE:X]` : X est le parametre DECLARE par l arme, jamais le
+    nombre de des ajoutes. Ce nombre depend de la taille de la cible au Select Targets step, et
+    l ecrire ici dispenserait le lecteur de le recalculer — donc rendrait le controle VACANT :
+    l analyzer verifierait le moteur avec le chiffre du moteur.
+
+    Le token n est pose que si la regle a REELLEMENT ajoute des des (cle absente sinon) : une
+    arme [BLAST] tirant sur une escouade de 4 figurines n ajoute rien, elle ne dit rien.
+
+    Les deux branches du formateur (SHOT et FOUGHT) l appellent. Ecrire le token dans une seule
+    des deux est le motif d echec n°1 de ce depot : [CLEAVE] n existe qu en melee, [BLAST] qu au
+    tir, et deux sites separes auraient laisse chacun croire l autre couvert.
+    """
+    tokens = []
+    for rule_label, detail_key in _ADDITIVE_RULE_TOKENS:
+        rule_value = details.get(detail_key)
+        if rule_value is None:
+            continue
+        if not isinstance(rule_value, int) or rule_value <= 0:
+            raise ValueError(
+                f"{detail_key} must be a positive int when present, got: {rule_value}"
+            )
+        tokens.append(f"[{rule_label}:{rule_value}]")
+    return tokens
+
+
 def _rerolled_token(details, field_name: str) -> str:
     """`` [REROLLED:1]`` quand le jet a ete RELANCE, chaine vide sinon.
 
@@ -785,6 +821,7 @@ class StepLogger:
                         f"got: {melta_rule_value}"
                     )
                 shot_tags.append(f"[MELTA:{melta_rule_value}]")
+            shot_tags.extend(_additive_rule_tokens(details))
             # [PRECISION] 24.28 : drapeau sans parametre — meme regime que les precedents, le
             # token n est pose que si le moteur a applique la regle.
             if details.get("precision_applied") is True:
@@ -1035,6 +1072,11 @@ class StepLogger:
             # `waaagh`. Le token est posé sur la LIGNE d'attaque, comme [SUSTAINED HITS] : c'est
             # à cette granularité que le plafond se compte.
             _waaagh_seg = " [WAAAGH!]" if details.get("waaagh_melee") else ""
+            # [CLEAVE:X] 24.06 — MEME site et MEME helper que [BLAST:X] au tir. Comme [WAAAGH!],
+            # le token vit sur la LIGNE d'attaque : c'est la granularite a laquelle le plafond
+            # d'attaques se compte, et sans lui les des additionnels de la regle etaient comptes
+            # comme des attaques en trop (24 faux positifs mesures le 2026-08-11).
+            _waaagh_seg += "".join(f" {tok}" for tok in _additive_rule_tokens(details))
             if weapon_name:
                 base_msg = f"{unit_label} FOUGHT{_waaagh_seg} {target_label} with [{weapon_name}]"
             else:

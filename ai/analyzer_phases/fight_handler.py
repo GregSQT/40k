@@ -3,7 +3,7 @@ fight_handler.py — gestion des actions FIGHT dans parse_step_log.
 """
 
 import re
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING, Optional, Tuple
 
 from ai.analyzer_perfig import parse_shooter_models_segment
 from shared.data_validation import require_key
@@ -23,7 +23,8 @@ def _cc_cap_for_line(
     cc_nb_squad_type: int,
     n_fighter_models: int,
     shooters: Tuple[str, ...],
-) -> int:
+    target_models_at_declaration: int,
+) -> Tuple[int, Optional[str]]:
     """Plafond d'attaques de MÊLÉE de cette ligne — le calcul est mutualisé avec le TIR.
 
     Ce site ne porte plus que ce qui est PROPRE à la mêlée : le bonus d'attaques du Waaagh, LU
@@ -31,8 +32,15 @@ def _cc_cap_for_line(
     de la règle, qui divergerait le jour où la constante du moteur bouge ; le token `[WAAAGH!]`
     des lignes d'attaque reste un confort de lecture, ce n'est plus la donnée). Le comptage
     par-figurine lui-même vit dans `analyzer_perfig.per_model_attack_cap`, avec son jumeau de tir.
+
+    [CLEAVE X] 24.06 relève ce plafond quand le moteur a posé son token : ses dés additionnels
+    sont des ATTAQUES, elles occupent des lignes de journal, et les compter comme un dépassement
+    a produit les 24 fausses « Attacks over CC_NB » du run du 2026-08-11 — la totalité du
+    compteur. Le calcul est celui de [BLAST] au tir, au même endroit.
+
+    Retourne `(plafond, erreur de journal ou None)`.
     """
-    from ai.analyzer_perfig import per_model_attack_cap
+    from ai.analyzer_perfig import additive_rule_extra_dice, per_model_attack_cap
 
     # `+1` / `1` sont tous deux acceptés : c'est le producteur qui choisit sa forme, le lecteur
     # ne lui impose rien.
@@ -40,11 +48,17 @@ def _cc_cap_for_line(
     _atk = _effects.get("waaagh_melee_atk")  # get allowed
     waaagh_bonus = int(str(_atk).lstrip("+")) if _atk is not None else 0
 
-    return per_model_attack_cap(
+    cap = per_model_attack_cap(
         shooters, state.model_types, fighter_unit_type, weapon_display_name,
         config.unit_attack_limits, "cc_nb_by_weapon", config.cc_nb_by_weapon_global,
         cc_nb_squad_type, n_fighter_models, waaagh_bonus,
     )
+    cleave_dice, cleave_error = additive_rule_extra_dice(
+        "CLEAVE", action_desc, shooters, state.model_types, fighter_unit_type,
+        weapon_display_name, config.unit_attack_limits, "cleave_by_weapon",
+        config.cleave_by_weapon_global, n_fighter_models, target_models_at_declaration,
+    )
+    return cap + cleave_dice, cleave_error
 
 
 def handle_fight(
@@ -185,10 +199,6 @@ def handle_fight(
                     # « Attacks over CC_NB » : 5 attaques d'un Ancient rattaché (NB=5) plafonnées
                     # au NB=3 de l'Intercessor porteur, 20 attaques de 10 Gretchin plafonnées à 10.
                     _shooters = parse_shooter_models_segment(action_desc)
-                    cc_nb = _cc_cap_for_line(
-                        state, config, action_desc, attacker_player, fighter_unit_type,
-                        weapon_display_name, cc_nb_single, n_fighter_models, _shooters,
-                    )
                     # Le GROUPE de figurines qui frappe entre dans la clé, parce qu'il détermine
                     # le plafond. Sans lui, un compteur accumulé sur (phase, unité, arme) était
                     # comparé au plafond du DERNIER groupe : une escouade qui répartit ses
@@ -206,6 +216,35 @@ def handle_fight(
                         state.fight_sequence_counts[seq_key] = 0
                     elif step_marker_present and step_inc:
                         state.fight_sequence_counts[seq_key] = 0
+                    # Select Targets step — l'effectif de la cible y est figé, parce que c'est
+                    # celui qu'exige [CLEAVE] 24.06 et que le combat tue en avançant. Lu AVANT
+                    # les dégâts de la ligne courante (`models_alive_pre_line`) : la première
+                    # ligne d'une activation peut déjà avoir retiré un socle.
+                    #
+                    # ⚠️ La clé est l'ACTIVATION (escouade attaquante × cible), PAS la séquence
+                    # par arme : le moteur déclare TOUTES ses attaques d'un coup, avant d'en
+                    # résoudre une seule. Figer par arme donnait à la dernière arme de la file
+                    # l'effectif SURVIVANT aux précédentes — mesuré sur le run du 2026-08-11,
+                    # 11 des 24 lignes restaient fausses (le Bigboss frappe après les Choppa de
+                    # son escouade, qui ont déjà fait tomber la cible sous la tranche de 5).
+                    activation_key = (state.fight_phase_seq_id, fighter_id, target_id)
+                    if activation_key not in state.fight_sequence_target_models:
+                        state.fight_sequence_target_models[activation_key] = require_key(
+                            state.models_alive_pre_line, target_id
+                        )
+                    cc_nb, _cleave_error = _cc_cap_for_line(
+                        state, config, action_desc, attacker_player, fighter_unit_type,
+                        weapon_display_name, cc_nb_single, n_fighter_models, _shooters,
+                        require_key(state.fight_sequence_target_models, activation_key),
+                    )
+                    if _cleave_error is not None:
+                        stats['parse_errors'].append({
+                            'episode': state.current_episode_num,
+                            'turn': turn,
+                            'phase': phase,
+                            'line': line.strip(),
+                            'error': _cleave_error,
+                        })
                     # [SUSTAINED HITS X] 24.36 — JUMEAU du plafond de tir : une touche
                     # additionnelle n'est pas une attaque et ne consomme rien du pool. Le
                     # moteur l'écrit sans jet de touche et la marque explicitement.

@@ -167,7 +167,8 @@ mesure, et c'est assumé (§0.14).
 ## 4. Backlog hors chemin critique (`A_faire/`)
 
 Prêts à démarrer sans décision produit :
-- 🔴 **Conformité moteur — les 53 erreurs que l'analyzer voit VRAIMENT** (ouvert le 2026-08-11).
+- 🔴 **Conformité moteur — les 53 erreurs que l'analyzer voit VRAIMENT** (ouvert le 2026-08-11,
+  **29 restantes** : la famille CC_NB, la plus lourde, est soldée le jour même).
   Le rapport annonçait 370 erreurs sur le run du 2026-08-11 ; le nettoyage de l'outil de mesure
   (livré le même jour, cf. plus bas) en a supprimé 317 qui étaient des faux positifs de lecture.
   **Ce qui reste n'est plus imputable à l'analyzer** et désigne des règles appliquées de travers
@@ -178,7 +179,7 @@ Prêts à démarrer sans décision produit :
   à terme, et ces chiffres sont l'état RÉEL, pas une estimation :
   | Symptôme | P1 | P2 | Règle |
   |---|---|---|---|
-  | Attaques au-delà de CC_NB | 11 | 13 | 04.03 |
+  | ~~Attaques au-delà de CC_NB~~ **→ 0, LIVRÉ (voir ci-dessous)** | ~~11~~ | ~~13~~ | 04.03 |
   | Collisions (2 unités, même hex) | 7 (total) | | 03.01 |
   | Fall-back qui finit ENGAGÉ | 2 | 3 | 09.07 |
   | Move normal finissant au contact | 1 | 4 | 09.05 |
@@ -195,10 +196,30 @@ Prêts à démarrer sans décision produit :
   tir sur ennemi engagé) : ils ne voyaient rien tant que l'arme des personnages rattachés n'était
   pas résolue. Le total d'une section qui MONTE après une correction de l'outil est le signe normal
   d'un contrôle qui regardait dans le vide, jamais d'une régression.
-  ⚠️ **Un seul cas est PROUVÉ à ce stade** : E76 T4, la figurine `2#10` (Bigboss, `Two-Handed Big
-  Choppa`, NB 5) porte **7 attaques**, sans WAAAGH! actif ce tour-là. Les autres familles ont une
-  piste, pas une cause : ne rien corriger avant de l'avoir établie — c'est exactement l'erreur que
-  les 317 faux positifs viennent de sanctionner.
+  ✅ **« Attaques au-delà de CC_NB » : 24 → 0, LIVRÉ le 2026-08-11. Le moteur était JUSTE.**
+  Les 24 lignes sont 19 activations, et **toutes les 19** portent l'une des deux seules armes
+  `[CLEAVE:1]` du dépôt (`Two-Handed Big Choppa` NB 5, `Kustom Choppa` NB 6). Le dépassement vaut
+  **exactement `effectif de la cible // 5` dans les 19 cas** — la formule de [CLEAVE] 24.06 au dé
+  près (PDF 24 p.2, lu). Le cas « prouvé » E76 T4 est donc l'inverse de ce qu'il annonçait :
+  NB 5 + 1 × (10 // 5) = **7 attaques, le nombre correct** (mesuré en rejouant la configuration
+  dans le moteur : cible de 10-14 → 7, de 5-9 → 6, de 4 → 5).
+  Le défaut était que `step.log` ne portait AUCUN token `[CLEAVE:X]` (0 occurrence sur 30 Mo)
+  alors que le moteur sait quel X a joué : le plafond de l'analyzer valait `Σ(NB + Waaagh)` et
+  rien d'autre. **Jumeau traité en même temps** : `[BLAST] 24.05` au tir avait le même trou (0
+  token, absent du plafond) — latent, aucun roster joué ne porte d'arme BLAST, mais 4 en existent
+  côté Space Marine. Les deux règles passent désormais par un seul calcul partagé.
+  ⚠️ **Ce que le token dit et ne dit pas** : il porte le X DÉCLARÉ par l'arme, jamais le nombre de
+  dés ajoutés. Écrire le nombre rendrait le contrôle vacant — l'analyzer vérifierait le moteur
+  avec le chiffre du moteur. L'effectif de la cible est reconstruit par l'analyzer, et figé à
+  l'ACTIVATION (pas à la séquence par arme) : le moteur déclare toutes ses attaques avant d'en
+  résoudre une, et figer par arme laissait 11 des 24 lignes fausses (le Bigboss frappe après les
+  Choppa de son escouade, qui ont déjà fait tomber la cible sous la tranche de 5).
+  ⚠️ **Effet visible seulement sur un run POSTÉRIEUR** : la correction ajoute un token au journal,
+  le journal du 14 h 34 ne le porte pas. Mesuré en injectant `[CLEAVE:1]` sur les 242 lignes des
+  deux armes concernées de ce journal : **53 → 29 erreurs**, `Attacks over CC_NB` à 0/0.
+  ⚠️ **Les autres familles ont une piste, pas une cause** : ne rien corriger avant de l'avoir
+  établie — c'est l'erreur que les 317 faux positifs, puis ces 24, viennent de sanctionner deux
+  fois. Sur cinq familles instruites à ce jour, **quatre étaient des défauts de mesure**.
   ⚠️ **Piste ouverte, non prouvée, pour les deux familles de move** : le pool de destinations
   exclut bien la zone d'engagement sur les deux chemins single-hex de
   [`engine/phase_handlers/movement_handlers.py`](file:///home/greg/40k/engine/phase_handlers/movement_handlers.py),

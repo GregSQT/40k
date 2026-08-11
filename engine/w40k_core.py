@@ -5371,6 +5371,16 @@ class W40KEngine(gym.Env):
         _melta = raw_log.get("meltaApplied")  # get allowed
         if _melta:
             details["melta_rule_value"] = int(_melta)
+        # [BLAST] 24.05 / [CLEAVE X] 24.06 : JUMEAUX de [RAPID FIRE] — elles grossissent le POOL
+        # d attaques du groupe, pas un jet, donc le marqueur est porte par TOUTES les lignes du
+        # groupe. C est ce qui leve le plafond d attaques cote analyzer (NB seul -> NB + les des
+        # additionnels), au tir comme en melee. La cle n existe que si la regle a joue.
+        _blast = raw_log.get("blastApplied")  # get allowed
+        if _blast:
+            details["blast_rule_value"] = int(_blast)
+        _cleave = raw_log.get("cleaveApplied")  # get allowed
+        if _cleave:
+            details["cleave_rule_value"] = int(_cleave)
         # [PRECISION] 24.28 : drapeau sans parametre, donc un booleen la ou [MELTA] porte son X.
         if raw_log.get("precisionApplied"):  # get allowed
             details["precision_applied"] = True

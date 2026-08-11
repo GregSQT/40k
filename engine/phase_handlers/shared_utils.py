@@ -8457,6 +8457,20 @@ def _emit_squad_shoot_log(game_state: Dict[str, Any], g: Dict[str, Any], ctx: Ma
         "rapidFireApplied": int(
             require_key(g, "additive_rules_applied").get(RULE_LABEL_RAPID_FIRE, 0)
         ),
+        # [BLAST] 24.05 (tir) et [CLEAVE X] 24.06 (melee) : les deux AUTRES regles additives,
+        # meme source, meme regime que `rapidFireApplied` — X DECLARE par l arme, 0 quand la
+        # regle n a pas joue (cible de moins de 5 figurines, ou attaques d une meme arme
+        # reparties sur plusieurs cibles pour [CLEAVE]). Elles etaient rendues dans la ligne de
+        # synthese et ABSENTES de `step.log`, donc invisibles de l analyzer, dont le plafond
+        # d attaques restait au seul NB. Mesure du 2026-08-11 : les 24 « Attacks over CC_NB » du
+        # run sont les 19 activations ou [CLEAVE] avait ajoute ses des — 24 faux positifs sur 24.
+        # UN SEUL site pour les deux regles : cet emetteur sert le tir ET la melee.
+        "blastApplied": int(
+            require_key(g, "additive_rules_applied").get(RULE_LABEL_BLAST, 0)
+        ),
+        "cleaveApplied": int(
+            require_key(g, "additive_rules_applied").get(RULE_LABEL_CLEAVE, 0)
+        ),
         # [MELTA X] 24.25 : X APPLIQUE (0 hors demi-portee), meme regime que `rapidFireApplied`.
         # Le token `[MELTA:X]` existait deja dans la ligne de synthese ci-dessus, mais elle n a
         # AUCUN consommateur automatique — l analyzer et le replay lisent `step.log`, qui ne le
