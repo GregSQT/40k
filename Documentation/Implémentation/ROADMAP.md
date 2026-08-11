@@ -91,6 +91,13 @@
   calculé » à « contrôle calculé dès l'entrée en mouvement » ; reproduction roster SPACE MARINES
   inchangée ; 12 tests du fichier 14.02 verts dont le verrou prouvé rouge par mutation ; 112
   tests ciblés (cascade, step, action sémantique, déploiement, API, journal) verts.
+  CORRECTIF DE SUITE (même jour, trouvé par `/code-review` et confirmé par le journal d'une
+  partie réelle) : solder chaque frontière une par une REJOUAIT `calculate_objective_control`
+  sur un état identique, donc `previous_controller` valait le contrôleur qu'on venait d'écrire
+  et le journal disait « held by Px » sur une CAPTURE (`tri_2 Centre` n'a jamais eu sa ligne
+  « captured by P1 »). Les frontières d'une cascade séparent des états IDENTIQUES : la
+  détermination 14.02 est UNE, pas N. La boucle s'arrête désormais à la première frontière qui
+  tire, et `run_objective_control_checkpoint` rend un booléen pour le dire.
   À FAIRE : la vérification large de l'utilisateur (suite complète, `pyright`, conformité, PvE
   navigateur) n'a **pas** été passée.
 
