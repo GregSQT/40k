@@ -39,6 +39,31 @@
 
 ## 0. En cours — ne rien casser
 
+- ✅ **Socle vs mur : une seule géométrie, et la sortie de contact** (2026-08-11). Symptôme PvE :
+  un Terminator déployé le long d'une ruine ne peut plus bouger de la partie, reste en arrière de
+  son escouade et passe en voile rouge de cohésion. Cause MESURÉE : le **placement** mesurait un
+  hex de mur par son CENTRE (empreinte hex) pendant que la **traversée** le mesure comme un
+  HEXAGONE. Les deux critères divergent sur la bande `r < d <= r + circumradius` — une figurine
+  posée là est légale et n'a aucun premier pas possible. Sur `terrain-mc1` : **664 ancres** au pool
+  de mouvement VIDE, dont **198 dans les zones de déploiement**. Le défaut vit sur les géométries
+  **obliques** (0 sur un mur droit, 40 sur une diagonale, 25 sur un coin).
+  Corrigé en deux pièces indissociables : (A) le placement adopte la géométrie d'hexagone —
+  `hex_utils.socle_blocked_anchor_cells`, source unique routée dans les 9 sites de placement, y
+  compris le masque gym ; (B) les obstacles déjà chevauchés par le socle au départ ne dilatent
+  plus, mais gardent leurs cases bloquantes (09.07 : seul Desperate Escape traverse les figurines
+  ennemies) — sans quoi une unité **au contact ne peut pas faire son Fall Back** (mesuré : 0 → 1277
+  destinations). L'exception est bornée aux pas partant de la position réelle du mobile.
+  DÉCISION UTILISATEUR : les murs restent bloquants **à tous les niveaux** — la cohérence
+  géométrique retire 16 ancres d'étage de plus que l'ancien critère (85 contre 69 sur 458), sans
+  divergence masque/exécution. ⚠️ **L'espace de décision de l'IA change dans les deux sens** : le
+  run `--new` de vérification ci-dessous doit le mesurer, les modèles antérieurs ne sont plus
+  comparables.
+  À FAIRE : la vérification large de l'utilisateur (suite complète, `pyright`, conformité, PvE
+  navigateur) n'a **pas** été passée au merge — seuls les 12 fichiers de test du périmètre l'ont
+  été (125 tests, dont 12 verrous prouvés rouges par mutation).
+  SIGNALÉ, NON TRAITÉ : « on peut tirer à travers un mur quand on est à l'étage » relève de la
+  LoS, pas du placement — chantier distinct, non ouvert.
+
 - ✅ **PvE se figeait — cause identifiée et corrigée** (2026-08-11). Le symptôme était rapporté
   « en phase de mouvement » ; la mesure a montré la phase de **déploiement**, sur des unités
   simplement **pas encore posées** (`deployed_on_turn=None`, `in_strategic_reserves=False`) — les
