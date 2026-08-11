@@ -11780,11 +11780,32 @@ def build_squad_action_mask(
         # sources (le pool 12.05 et le mapping de slots), donc une cible legale peut n'avoir
         # aucun slot. Ici la seule source des candidats EST le mapping — une escouade ennemie
         # sans slot est deja loguee par `_refresh_enemy_slot_mapping`, en amont et une seule fois.
+        # 11.02.2 puis 11.04 — LE JET D'ABORD, LES CIBLES ENSUITE. L'activation d'une escouade en
+        # phase de charge vaut declaration (11.02.1) : le 2D6 est jete ici, une fois, et les slots
+        # ne s'ouvrent que sur les cibles que CE jet permet d'atteindre. Le commit relit la meme
+        # valeur memorisee, donc masque et execution ne peuvent pas diverger.
+        #
+        # Ce qui a change le 2026-08-11 : le jet avait lieu APRES le choix de la cible et le
+        # masque ouvrait tout ce qui etait a 12", si bien que l'agent declarait a l'aveugle.
+        # Mesure sur le step.log du meme jour (494 charges) : 41 % des declarations visaient une
+        # cible a 9" ou plus, quand un 2D6 n'atteint 9 que 27,8 % du temps ; mediane des ratees
+        # a 9", des reussies a 5". Le chemin PvP/PvE, lui, etait deja conforme.
+        from engine.phase_handlers.charge_handlers import (
+            charge_roll_for_activation, charge_target_is_reachable,
+        )
+
+        _charge_roll = charge_roll_for_activation(game_state, squad_id)
         for slot_i, esid in enumerate(enemy_slot_ids[:SQUAD_ACTION_CHARGE_SLOT_COUNT]):
             if esid is None or esid not in units_cache:
                 continue
-            if charge_check_eligibility(game_state, squad_id, [esid]):
+            # UN SEUL oracle, celui du commit (`charge_build_valid_plan`) : il porte a la fois
+            # l'eligibilite 11.02.1 (les 12" en ligne directe, qu'il teste en tete) et
+            # l'atteignabilite 11.04 par le jet. Pre-tester `charge_check_eligibility` ici
+            # doublerait l'appel pour toute cible declarable sans changer un seul verdict.
+            if charge_target_is_reachable(game_state, squad_id, str(esid), _charge_roll):
                 mask[SQUAD_ACTION_CHARGE_SLOT_BASE + slot_i] = 1
+        # 11.02.3 « if you still want to » : renoncer apres le jet est un choix legal, et c'est
+        # le seul qui reste quand le jet n'atteint rien.
         mask[SQUAD_ACTION_WAIT] = 1
 
     # --- Fight phase: un slot par cible de melee eligible (12.05), ou « combat a vide » ---

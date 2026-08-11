@@ -39,6 +39,22 @@
 
 ## 0. En cours — ne rien casser
 
+- 🔜 **Run `--new` ArmageddonAgent `x1` de VÉRIFICATION — à lancer** (2026-08-11). Ce qu'il doit
+  prouver n'est pas un progrès mais que le pipeline tourne de bout en bout avec un **espace de
+  décision modifié** (l'alignement de la charge sur 11.02, ci-dessous). À lire dans l'ordre :
+  `game_critical/invalid_action_rate` reste à **0** (il dirait qu'un slot ouvert n'est pas
+  exécutable, le risque propre à ce chantier), `02_combat/n_charge_success_rate` proche de **1.0**,
+  et `02_combat/m_charge_attempts` **non nul** — à zéro, le masque ne proposerait plus jamais de
+  charge, ce qui serait la régression à attraper.
+  `--new` et non `--append` : ce dernier réapplique les hyperparamètres de `x1` au modèle chargé,
+  dont `ent_coef` qui repart à 0,1, et écrase le modèle canonique. `--new`, lui, archive les
+  artefacts précédents (`archive_canonical_artifacts_for_new_run`).
+- ✅ **Livraison 2026-08-11 — métriques (réserves), barème et alignement de la charge sur 11.02.**
+  Sept tranches, chacune partie d'une mesure du run `x1_long` du même jour.
+  → [`Implémenté/metriques_reserves_et_charge_2026-08-11.md`](Implémenté/metriques_reserves_et_charge_2026-08-11.md)
+  ⚠️ **Le modèle du run de 50 000 épisodes est caduc** : la phase de charge ne propose plus les
+  mêmes décisions. Ses poids restent chargeables, mais ses statistiques de charge ne veulent plus
+  rien dire.
 - ✅ **Run `--new` ArmageddonAgent x1 — TERMINÉ** (PID 842478 absent, dernier checkpoint 15 h 18,
   `run_20260810-111734`). C'était une **base de développement, PAS la mesure** (décision
   2026-08-10) : modèle chargeable + sortie d'`analyzer.py` pour les tranches P3, rien de plus. Son
@@ -167,6 +183,19 @@ mesure, et c'est assumé (§0.14).
 ## 4. Backlog hors chemin critique (`A_faire/`)
 
 Prêts à démarrer sans décision produit :
+- **Distances de charge au `step.log` et en métriques** (~0,5 j) — distance (pathfinding) à
+  l'ennemi le plus proche **à la déclaration**, distance à la cible **au choix**. Les deux moments
+  n'existaient pas séparément avant l'alignement 11.02 du 2026-08-11 ; ils existent maintenant.
+  **Cinq** sites de journalisation à couvrir dans `charge_handlers` (2 succès, 3 échecs) — motif
+  jumeau classique, une couverture partielle rendrait la mesure muette sur une partie des cas.
+  → [`Implémenté/metriques_reserves_et_charge_2026-08-11.md`](Implémenté/metriques_reserves_et_charge_2026-08-11.md) §Ce qui reste
+- **Compteurs `abilities/`** (~1 j) — un compteur par règle d'unité RÉELLEMENT appliquée, par
+  joueur, **plus une courbe d'exposition** : sans elle, un zéro ne distingue pas « jamais
+  déclenchée » de « jamais dans le roster ». Deux familles, les deux obligatoires : celles qui
+  produisent une ligne d'`action_log` (`reactive_move`, `charge_impact`, `charge_after_advance` /
+  `charge_after_flee`, `move_after_shooting`) et celles qui ne modifient qu'un jet (rerolls, bonus
+  Oath — elles vivent sur les `shot_records`, pas dans `action_logs`).
+  → [`Implémenté/metriques_reserves_et_charge_2026-08-11.md`](Implémenté/metriques_reserves_et_charge_2026-08-11.md) §Ce qui reste
 - **Security étapes 4, 5, 7, 8** (~4-5 j ; étapes **1, 2, 3 et 6 livrées**, étape 5 partielle
   = durcir la stack Docker existante, pas la créer ; suivi à jour)
   → [`Security.md`](Security.md) — le document est un chantier **vivant**, à la racine d'`Implémentation/`,

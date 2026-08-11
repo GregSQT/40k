@@ -209,48 +209,123 @@ def test_a_failed_charge_counts_as_an_attempt_and_not_as_a_success(
     `_episode_with` se levait. Ce qui reste demande a la graine — qu'une charge soit DECLAREE —
     est justement ce que ce garde-fou exige encore.
 
-    L'echec traverse la vraie branche moteur (`squad_charge`, « aucun plan valide pour ce jet ») :
-    la ligne `charge_fail` que la passe de comptage lit est emise par le MOTEUR, pas fabriquee
-    par le test.
+    CE QUI A CHANGE LE 2026-08-11. Le pipeline gym a ete aligne sur 11.02 : le jet 2D6 a lieu a
+    l'ACTIVATION, et le masque n'ouvre que les cibles que ce jet permet d'atteindre (11.04). Une
+    charge DECLAREE en gym ne peut donc plus echouer, et un jet impose a 2 n'en fait plus
+    declarer aucune — l'ancien montage ne produit plus la situation qu'il observait.
+
+    La passe de comptage, elle, doit toujours savoir lire un `charge_fail` : le chemin PvP/PvE
+    (roll-first) en emet encore, quand le jet de l'activation n'amene aucune cible a portee. La
+    ligne est donc INJECTEE dans le journal, comme le fait deja le test des activations de tir
+    plus bas — ce qui est verrouille ici est la passe de comptage de `w40k_core`, pas la branche
+    moteur qui l'emet (celle-la est verrouillee par le test d'alignement de ce fichier).
     """
-    with patch("engine.phase_handlers.shared_utils.roll_charge_distance", return_value=2):
-        engine, tactical = _episode_with(
-            melee_scenario_file,
-            lambda _eng, td: td["charge_attempts"] > 0,
-            "une charge declaree du camp controle (jet impose a 2, donc ratee)",
-            # Etiquette de cache : ces episodes sont joues sous patch, ils ne valent pas les
-            # episodes nus des autres tests et ne doivent jamais leur etre servis.
-            variant="charge_roll_forced_to_2",
-        )
+    turn = 2
+    injected = [
+        {"type": "charge_fail", "player": 1, "unitId": "injected-squad", "turn": turn,
+         "phase": "charge", "charge_roll": 2, "charge_failed_reason": "roll_too_short",
+         "message": "injected", "timestamp": "server_time"},
+        {"type": "charge", "player": 1, "unitId": "injected-squad", "turn": turn,
+         "phase": "charge", "charge_roll": 9, "targetId": "x",
+         "message": "injected", "timestamp": "server_time"},
+    ]
+    engine, tactical = _play(melee_scenario_file, _SEEDS[0], inject=injected)
     controlled, _opponent = _seat(engine)
+    assert controlled == 1, "les lignes injectees sont posees au nom du joueur 1"
 
     failed = len(_charge_logs(engine, controlled, ("charge_fail",)))
-    assert failed > 0, "montage casse : aucune charge ratee"
+    assert failed > 0, "montage casse : aucune charge ratee dans le journal"
     # Egalites camp par camp, les quatre compteurs contre le journal du moteur.
     _assert_counters_match_journal(engine, tactical)
     # Ce que l'ancienne mesure aurait rendu ici — strictement moins que les tentatives.
     assert tactical["charge_successes"] < tactical["charge_attempts"]
 
 
-def test_both_camps_are_counted_separately(melee_scenario_file) -> None:
-    """Les charges de l'adversaire vont dans les compteurs `_opponent`, jamais dans ceux de l'agent.
+def test_a_declared_charge_can_no_longer_fail_in_gym(melee_scenario_file) -> None:
+    """ALIGNEMENT 11.02 : en gym, une charge declaree est atteignable par construction.
 
-    Le montage exige des tentatives DES DEUX cotes : sans elles, l'egalite au journal tiendrait
-    a zero d'un cote et ne dirait rien de la ventilation.
+    Le jet a lieu a l'activation et le masque ne propose que les cibles que ce jet atteint
+    (11.04 « within the maximum distance »), donc `charge_successes == charge_attempts` des deux
+    cotes, sur toutes les graines. Avant le 2026-08-11, le masque ouvrait tout ennemi a 12" et
+    les des tranchaient ensuite : mesure sur 8 episodes en actions aleatoires, 17 charges
+    declarees pour 3 reussies (18 %) contre 4 pour 4 apres alignement.
+
+    Le second volet est le pendant indispensable : avec un jet impose a 2 — « never sufficient »
+    (encart FAILED CHARGES du PDF 11) — plus AUCUNE charge n'est declarable, donc le masque
+    n'ouvre aucun slot. Sans lui, un masque qui ouvrirait tout laisserait la premiere assertion
+    verte des que les charges reussissent par chance.
     """
-    engine, tactical = _episode_with(
-        melee_scenario_file,
-        lambda _eng, td: td["charge_attempts"] > 0 and td["charge_attempts_opponent"] > 0,
-        "des tentatives de charge des DEUX camps",
+    for seed in _SEEDS[:4]:
+        _engine, tactical = _cached_play(melee_scenario_file, seed)
+        assert tactical["charge_successes"] == tactical["charge_attempts"], (
+            f"graine {seed} : une charge declaree a echoue alors que le masque ne propose que "
+            "des cibles atteignables (rupture masque/execution)"
+        )
+        assert tactical["charge_successes_opponent"] == tactical["charge_attempts_opponent"], (
+            f"graine {seed} : idem cote adversaire"
+        )
+
+    with patch("engine.phase_handlers.shared_utils.roll_charge_distance", return_value=2):
+        for seed in _SEEDS[:2]:
+            _engine, tactical = _play(melee_scenario_file, seed)
+            assert tactical["charge_attempts"] == 0, (
+                f"graine {seed} : une charge a ete declaree avec un jet de 2, qui n'atteint "
+                "jamais l'engagement (encart FAILED CHARGES, PDF 11)"
+            )
+            assert tactical["charge_attempts_opponent"] == 0, f"graine {seed} : idem adversaire"
+
+
+def _charge_line(player: int, kind: str, roll: int = 9) -> Dict[str, Any]:
+    """Ligne de journal de charge, du type et du camp voulus.
+
+    CONSTRUIRE plutot qu'esperer d'une graine (T4). Depuis l'alignement 11.02, une charge
+    declaree en gym reussit toujours et les deux camps chargent rarement dans le meme episode :
+    les montages qui parcouraient les graines a la recherche de la situation ne la trouvaient
+    plus. Ce que ces tests verrouillent est la passe de COMPTAGE de `w40k_core` (elle lit
+    `action_logs`), pas la façon dont ces lignes naissent.
+    """
+    line: Dict[str, Any] = {
+        "type": kind, "player": player, "unitId": f"injected-{player}", "turn": 2,
+        "phase": "charge", "charge_roll": roll, "message": "injected",
+        "timestamp": "server_time",
+    }
+    if kind == "charge":
+        line["targetId"] = "x"
+    else:
+        line["charge_failed_reason"] = "roll_too_short"
+    return line
+
+
+#: Journal injecte : volumes DIFFERENTS d'un camp a l'autre (4 contre 6) et taux AUX EXTREMES
+#: (4/4 contre 0/6). Les deux differences comptent — a volumes egaux, `m_`/`o_` pourraient etre
+#: croises sans qu'aucune assertion n'en souffre ; a taux egaux, `n_`/`p_` le pourraient aussi.
+#:
+#: Les extremes, et pas seulement des taux distincts : l'episode joue AJOUTE ses propres charges
+#: a ces lignes. Un premier jeu a 2/3 contre 3/5 s'est retrouve a 2/3 contre 4/6 — soit deux
+#: taux egaux — des qu'une charge naturelle est tombee du bon cote. Ici, aucune charge
+#: supplementaire ne peut rapprocher 1.0 de 0.0 au point de les confondre.
+_CHARGES_DES_DEUX_CAMPS = (
+    [_charge_line(1, "charge") for _ in range(4)]
+    + [_charge_line(2, "charge_fail", roll=3) for _ in range(6)]
+)
+
+
+def test_both_camps_are_counted_separately(melee_scenario_file) -> None:
+    """Les charges de l'adversaire vont dans les compteurs `_opponent`, jamais dans ceux de l'agent."""
+    engine, tactical = _play(
+        melee_scenario_file, _SEEDS[0], inject=list(_CHARGES_DES_DEUX_CAMPS)
     )
+    controlled, opponent = _seat(engine)
+    assert controlled == 1, "les lignes injectees sont posees au nom du joueur 1"
     _assert_counters_match_journal(engine, tactical)
 
-    controlled, opponent = _seat(engine)
     total = len(_charge_logs(engine, controlled)) + len(_charge_logs(engine, opponent))
     assert tactical["charge_attempts"] + tactical["charge_attempts_opponent"] == total
-    # Aucun des deux camps n'a absorbe l'autre.
-    assert tactical["charge_attempts"] > 0
-    assert tactical["charge_attempts_opponent"] > 0
+    # Aucun des deux camps n'a absorbe l'autre, et les VOLUMES different : un croisement des
+    # deux compteurs se verrait.
+    assert tactical["charge_attempts"] >= 4
+    assert tactical["charge_attempts_opponent"] >= 6
+    assert tactical["charge_attempts"] != tactical["charge_attempts_opponent"]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -295,14 +370,12 @@ def _recording_tracker(tmp_path: Any) -> Tuple[W40KMetricsTracker, _RecordingWri
 
 def test_the_four_charge_curves_are_emitted(melee_scenario_file, tmp_path) -> None:
     """Volumes bruts (m_, o_) et taux de reussite (n_, p_) sortent avec les valeurs de l'episode."""
-    # Volumes DIFFERENTS d'un camp a l'autre, sinon `m_` et `o_` pourraient etre croises sans
-    # que la moindre assertion en souffre. C'est le cas naturellement (2 contre 4 sur la
-    # premiere graine retenue), donc c'est exige et non espere.
-    _engine, tactical = _episode_with(
-        melee_scenario_file,
-        lambda _eng, td: (td["charge_attempts"] > 0 and td["charge_attempts_opponent"] > 0
-                          and td["charge_attempts"] != td["charge_attempts_opponent"]),
-        "des tentatives de charge des DEUX camps, en nombres differents",
+    # Volumes ET taux DIFFERENTS d'un camp a l'autre (3 charges a 2/3 contre 5 a 3/5), sinon
+    # `m_`/`o_` d'un cote et `n_`/`p_` de l'autre pourraient etre croises sans que la moindre
+    # assertion en souffre. Construits par le journal injecte : depuis l'alignement 11.02, aucune
+    # graine ne produit plus naturellement des charges des deux camps en nombres differents.
+    _engine, tactical = _play(
+        melee_scenario_file, _SEEDS[0], inject=list(_CHARGES_DES_DEUX_CAMPS)
     )
 
     tracker, recording = _recording_tracker(tmp_path)
@@ -320,19 +393,13 @@ def test_the_four_charge_curves_are_emitted(melee_scenario_file, tmp_path) -> No
         tactical["charge_successes_opponent"] / tactical["charge_attempts_opponent"]
     )
 
-    # Les deux TAUX, eux, tombent au meme chiffre sur tout episode jouable ici (aucune des 8
-    # graines ne donne deux taux distincts, mesure faite) : les egalites ci-dessus les
-    # laisseraient croiser. Seconde emission sur des SUCCES derives — les seuls chiffres
-    # fabriques de ce test, et seulement pour separer deux tags que l'episode ne separe pas.
-    contrasted = {**tactical,
-                  "charge_successes": tactical["charge_attempts"],
-                  "charge_successes_opponent": 0}
-    tracker, recording = _recording_tracker(tmp_path)
-    tracker.log_tactical_metrics(contrasted)
-
-    by_key = {key: value for key, value, _step in recording.scalars}
-    assert by_key["02_combat/n_charge_success_rate"] == pytest.approx(1.0)
-    assert by_key["02_combat/p_charge_success_rate_bot"] == pytest.approx(0.0)
+    # Les deux TAUX different deja par construction (2/3 contre 3/5), donc un croisement de
+    # `n_` et `p_` se voit sur les egalites ci-dessus. La seconde emission sur des succes
+    # fabriques n'a plus lieu d'etre : elle ne servait qu'a separer deux tags que l'episode
+    # naturel confondait.
+    assert tactical["charge_successes"] / tactical["charge_attempts"] != pytest.approx(
+        tactical["charge_successes_opponent"] / tactical["charge_attempts_opponent"]
+    ), "taux identiques : les deux tags de taux pourraient etre croises sans rien casser"
 
 
 def test_the_success_rate_is_absent_when_nothing_was_attempted(
@@ -345,12 +412,11 @@ def test_the_success_rate_is_absent_when_nothing_was_attempted(
     RESULTAT d'episode, il n'existe donc pas pour tout episode. Le VOLUME, lui, doit bien
     sortir a 0 — c'est justement lui qui dit que l'agent ne charge pas.
     """
-    _engine, tactical = _episode_with(
-        melee_scenario_file,
-        lambda _eng, td: td["charge_attempts_opponent"] > 0,
-        "des tentatives de charge du camp adverse",
+    _engine, tactical = _play(
+        melee_scenario_file, _SEEDS[0], inject=list(_CHARGES_DES_DEUX_CAMPS)
     )
     tactical = {**tactical, "charge_attempts": 0, "charge_successes": 0}
+    assert tactical["charge_attempts_opponent"] > 0, "le camp d'en face doit avoir charge"
 
     tracker, recording = _recording_tracker(tmp_path)
     tracker.log_tactical_metrics(tactical)

@@ -705,3 +705,53 @@ def test_both_config_key_arguments_are_stripped() -> None:
     assert "_non_empty_key" in rewards_decl, (
         "--rewards-config declare sans validateur : le jumeau de --agent est reste ouvert"
     )
+
+
+def test_only_bots_get_a_versus_line() -> None:
+    """Un agregat publie dans les resultats ne doit JAMAIS s'afficher comme un win-rate de bot.
+
+    ROUGE avant la liste blanche : les deux resumes selectionnaient par liste NOIRE, donc toute
+    cle numerique inconnue passait. Mesure du run du 2026-08-11 — « vs roster_gap : 1.2% » pour
+    un ECART de 0,012, et « vs total_episodes_played: 360000.0% » pour un COMPTE de 360 000.
+    """
+    from ai.training_callbacks import iter_bot_score_rows
+
+    results = {
+        "control": 0.965, "control_wins": 579, "control_losses": 19, "control_draws": 2,
+        "value_trade": 0.937,
+        # Les agregats qui ont fuite, plus un quatrieme qui n'existe pas encore : c'est
+        # precisement le cas qu'une liste noire ne peut pas couvrir.
+        "roster_gap": 0.012,
+        "total_episodes_played": 360000,
+        "eval_duration_seconds": 1041.0,
+        "une_metrique_ajoutee_demain": 42.0,
+    }
+
+    rows = list(iter_bot_score_rows(results))
+    assert [row[0] for row in rows] == ["control", "value_trade"]
+    assert rows[0] == ("control", 0.965, 579, 19, 2)
+    # Compteurs absents : la ligne sort quand meme, avec les marqueurs d'origine.
+    assert rows[1] == ("value_trade", 0.937, "?", "?", "?")
+
+    with pytest.raises(TypeError, match="doit etre numerique"):
+        list(iter_bot_score_rows({"control": "0.965"}))
+
+
+def test_both_published_summaries_read_the_same_source() -> None:
+    """JUMEAU : les DEUX resumes publies par `train.main` listent les bots par la meme fonction.
+
+    Il y en a deux — fin d'entrainement et mode eval-only — et ils portaient le meme motif de
+    liste noire, recopie. Le second ne produisait pas encore de fausse ligne, mais par
+    COINCIDENCE (sa garde exigeait un compteur `_wins`), pas par regle.
+    """
+    sources = {
+        "fin d'entrainement": _function_code(train.train_with_scenario_rotation),
+        "eval-only": _function_code(train.main),
+    }
+    for where, code in sources.items():
+        assert "iter_bot_score_rows(" in code, (
+            f"le resume « {where} » ne liste plus les bots par iter_bot_score_rows"
+        )
+        assert "'_wins', '_losses', '_draws', '_episodes'" not in code, (
+            f"selection par liste noire encore presente dans le resume « {where} »"
+        )

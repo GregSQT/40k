@@ -2109,20 +2109,37 @@ For each unit
 
 ### Charge Timing Logic
 
-**When 2d6 is Rolled**: Immediately after target selection by the player/agent
-**Charge roll duration**: The charge roll value is discarded at the end of the unit's activation
+**When 2d6 is Rolled**: à l'ACTIVATION de l'escouade, avant toute sélection de cible — séquence
+11.02 (« 1. Declare Charge → 2. Make Charge Roll → 3. Attempt Charge »). Activer une escouade en
+phase de charge VAUT déclaration au sens 11.02.1, et c'est déjà une décision explicite de l'agent.
+**Charge roll duration**: le jet est jeté une fois et mémorisé (`charge_roll_values`), puis
+détruit à la fin de l'activation de l'escouade — il appartient à CETTE activation.
+
+⚠️ **Aligné le 2026-08-11, gym compris.** Jusque-là, seul le chemin PvP/PvE suivait cette
+séquence : en entraînement, le jet tombait APRÈS le choix de la cible et le masque ouvrait tout
+ennemi à `charge_max_distance` (12"). L'agent déclarait donc à l'aveugle, puis les dés
+tranchaient. Mesure sur le step.log du 2026-08-11 (494 charges de l'agent) : 41 % des
+déclarations visaient une cible à 9" ou plus, quand un 2D6 n'atteint 9 que 27,8 % du temps ;
+médiane des charges ratées à 9", des réussies à 5". Les deux chemins partagent désormais la même
+séquence, et une charge déclarée en gym ne peut plus échouer.
 
 ### Charge Distance Logic
 
 **2D6 Roll System:**
-- **When rolled**: After target selection (not when unit becomes eligible)
-- **Distance determination**: Roll determines how far unit can charge this activation
-- **Variability purpose**: Adds uncertainty and risk to charge decisions
+- **When rolled**: à l'activation, AVANT la sélection de cible (11.02.2)
+- **Distance determination**: le jet est la distance MAXIMALE du charge move (11.04)
+- **Variability purpose**: le risque porte sur ce que le jet permet d'atteindre, pas sur un pari
+  déjà engagé — après le jet, l'agent choisit parmi les cibles réellement atteignables, ou renonce
+  (11.02.3 « if you still want to », `WAIT` reste toujours ouvert)
 
 **Charge Distance Mechanics:**
-- **Target Detection**: Enemy units within `charge_max_distance` hexes (*via pathfinding*) are eligible charge targets
-- **Roll Success**: 2D6 roll must equal or exceed distance to closest hex adjacent to target (*via pathfinding*)
-- **Example**: Enemy Ork 8 hexes away, closest adjacent hex is 7 hexes away → need 7+ on 2D6 to charge
+- **Éligibilité à déclarer** (11.02.1) : au moins un ennemi à `charge_max_distance` (12"), mesuré
+  figurine la plus proche
+- **Cibles sélectionnables** (11.04 BEFORE MOVING) : celles à 12" ET **dans le jet**. L'oracle est
+  `charge_build_valid_plan`, la fonction qu'exécute le commit — le masque, l'observation et
+  l'exécution lisent donc la même source, ce qui rend la parité structurelle
+- **Roll Success**: le jet doit permettre d'atteindre une position d'engagement avec la cible
+  (*via pathfinding*, par figurine)
 - **Why the Difference**: You charge TO a hex adjacent to the enemy, not TO the enemy itself
 
 **Concrete Example:**
@@ -2134,10 +2151,13 @@ For each unit
 
 **Example:**
 ```
-Marine 7 hexes from the closest hex adjacent to an Ork (average charge distance)
-Roll 6 or less: Charge fails (42% chance)
-Roll 7+: Charge succeeds, gains fight priority (58% chance)
-Decision: Weigh 42% failure risk vs fight advantage gained
+Marine à 7 hexes de la case d'engagement la plus proche d'un Ork.
+Le jet tombe D'ABORD :
+  Jet de 6 ou moins → cet Ork n'est pas proposé ; s'il n'y a aucune autre cible dans le
+                      jet, seul WAIT reste et l'escouade ne charge pas (11.02.3).
+  Jet de 7 ou plus  → l'Ork est proposé ; le déclarer conclut la charge et donne Fights First.
+Décision : elle ne porte plus sur un pari à 58 %, mais sur l'opportunité de charger CE
+           qui est atteignable — ou de garder l'escouade où elle est.
 ```
 
 ### Charge Priority Logic

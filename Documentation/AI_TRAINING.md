@@ -371,7 +371,22 @@ Le `RewardCalculator` (`engine/reward_calculator.py`) filtre les rewards par jou
 
 5. **Bonus « sur un objectif »** (`_calculate_on_objective_reward`, `objective_rewards.on_objective_bonus`) : versé quand une action qui porte une destination laisse l'unité **dans** une zone d'objectif que l'agent ne contrôle pas encore (il paie la *progression* vers un contrôle, pas le maintien). La présence se juge **par figurine, sur l'empreinte de socle** (14.02), par les mêmes lecteurs que le contrôle du moteur — `objective_hex_sets` + `iter_living_model_footprints`. ⚠️ Jusqu'au 2026-08-01 il comparait la **destination d'escouade** à un hexe d'objectif par égalité stricte : une escouade étalée était comptée par `sum_objective_control_oc_multi` et **pas** payée par la récompense, dans le même état de jeu — et l'inverse. Une unité **battle-shocked** ne touche rien (01.07 : OC modifié à `-`, elle ne peut pas prendre l'objectif).
 
-6. **Victory Points** : scorés par joueur absolu (P1 et P2 scorent indépendamment). Le winner est déterminé par comparaison VP à la fin du turn 5.
+6. **Pénalité de réserve gaspillée** (`RewardCalculator.wasted_reserve_penalty`,
+   `reserves_shaping.declined_arrival_lost_penalty`, **−25.0 par escouade**) : facturée quand une
+   escouade du joueur contrôlé est détruite par 20.04 (encore en réserves à la fin du 3e round)
+   **après avoir refusé au moins une arrivée possible**. Une escouade qui n'a jamais eu de
+   destination légale — pool d'ingress vide : bande de 6" du bord, > 8" de tout ennemi, zone
+   adverse fermée avant le 3e round — n'entre PAS dans le compte : la facturer punirait un choix
+   qui n'a pas existé, et 20.03 dit « can », jamais « must ». Le compte est posé à la destruction
+   par `fight_handlers` (qui n'a pas le barème) et facturé au step suivant par le même chemin
+   différé que le shaping zone-intent (`_pending_reserves_wasted`), avec ventilation dans
+   `penalties`. Motivé par une mesure : sur le run x1_long du 2026-08-11, la part des réserves de
+   l'agent détruites sans être arrivées monte de 0 % à 14 % en fin d'entraînement, en hausse
+   monotone, pendant qu'il en place de plus en plus (0,81 → 1,33 par épisode). Les courbes
+   `reserves/ingress_{offers,declined,no_destination}_{agent,opponent}` sont ce qui rend la
+   distinction lisible (cf. `AI_METRICS.md`).
+
+7. **Victory Points** : scorés par joueur absolu (P1 et P2 scorent indépendamment). Le winner est déterminé par comparaison VP à la fin du turn 5.
 
 ### Configuration (seat)
 
@@ -887,12 +902,38 @@ vaut 0.00097 au lieu de 0.0002.
 
 **Le profil `x1_long`** est `x1` recalibré pour les runs longs, et rien d'autre : mêmes
 architecture, `n_steps`, `target_kl`, rampe de déploiement. Ne changent que ce qui dépend de la
-longueur du run — `total_episodes` (200k), les deux `decay_fraction` et `bot_eval_freq`
-(**10000**, soit 20 points de mesure : à 5000, les 40 évaluations × 100 épisodes coûteraient
-~8,5 h — 13 min l'unité, cf. commit `42326ed0` — contre ~5,5 h d'entraînement à 36k ép./h, donc
-l'évaluation doublerait la durée du run). `bot_eval_intermediate` reste à 100 : c'est cette
-mesure qui pilote `save_best_robust`, la dégrader dégraderait le choix du modèle sauvegardé.
-Verrou : `tests/unit/ai/test_schedule_decay_fraction.py` refuse toute autre divergence.
+longueur du run — `total_episodes` (**50000** depuis le 2026-08-11 ; 200k auparavant), les deux
+`decay_fraction` et `bot_eval_freq` (**5000**).
+
+Cette dernière valeur ne se recopie pas d'une campagne à l'autre, elle **se dérive de
+`total_episodes`** : le score robuste n'existe qu'à partir de `robust_window` = 5 évaluations, donc
+un run qui n'en produit que 5 n'a qu'**un seul** score et `save_best_robust` garde le dernier
+modèle en le présentant comme le meilleur. C'est ce qui s'est produit sur le run du 2026-08-11
+(50 000 épisodes, `bot_eval_freq` encore à 10000 : 5 évaluations,
+`00_critical/o_robust_current_score` réduit à un point au marker 50001, « Selected at episodes:
+50001 » faute d'alternative). La règle tenue par le verrou est donc
+`total_episodes / bot_eval_freq >= 2 × robust_window` — au moins 10 points de mesure, 6 scores à
+départager. Ce qui a échoué ici n'est pas le réglage mais son **écriture en dur** : calé sur
+200 000 épisodes, il est devenu faux en même temps que la durée du run, sans que rien ne le
+signale. `test_long_profile_is_its_reference_recalibrated` ne fige donc plus ni `total_episodes`
+ni `bot_eval_freq` ; il vérifie la *relation* (`long > référence`) et laisse la cadence à
+`test_profile_can_produce_the_best_model_it_promises`, qui la dérive pour les huit profils.
+
+Coût, mesuré sur ce même run : l'évaluation finale de 3600 épisodes a pris 17 min 21 s à 4
+workers, soit 3,46 ép./s ; une évaluation intermédiaire en joue 600 (`bot_eval_intermediate` 100
+× 6 bots) et coûte donc ~2 min 55 — passer de 5 à 10 évaluations ajoute ~15 min à 5 h 04
+d'entraînement. Le « 13 min l'unité » du commit `42326ed0`, cité ailleurs, n'a pas été re-mesuré
+et ne concorde pas avec ce chiffre. `bot_eval_intermediate` reste à 100 : c'est cette mesure qui
+pilote `save_best_robust`, la dégrader dégraderait le choix du modèle sauvegardé. Verrou :
+`tests/unit/ai/test_schedule_decay_fraction.py` refuse toute autre divergence.
+
+Le profil `x1`, lui, échappe à cette règle depuis le 2026-08-11 : il ne promet plus de best model
+(`save_best_robust: false`, comme `x5_new`), donc il n'a aucun score robuste à départager et sa
+cadence reste à `bot_eval_freq` 2000 — 5 points de **monitoring** sur un run de mise au point. La
+raison est structurelle et non de réglage : `save_best_min_episodes` y vaut 10 000, c'est-à-dire
+`total_episodes`, si bien qu'aucune sauvegarde n'est possible avant le tout dernier point de
+mesure. Le seuil n'est pas abaissé en échange — sélectionner parmi les points d'un run de 10 000
+épisodes reviendrait à choisir du bruit.
 
 **Le profil `x5_long`** (2026-08-10) est le même recalibrage appliqué à `x5_new` : mêmes sept
 écarts, mêmes valeurs, et le verrou ci-dessus est paramétré sur les **deux** couples
@@ -912,7 +953,10 @@ reprend. Deux verrous complémentaires, tous deux paramétrés sur les huit prof
 `test_profile_promise_of_a_best_model_is_pinned` fixe QUI promet un best model (table
 `PROMISES_BEST_MODEL`, exhaustive : un profil ajouté sans y être classé échoue), et
 `test_profile_can_produce_the_best_model_it_promises` vérifie que la promesse est TENABLE — il ne
-porte donc que sur les cinq qui en font une, les trois autres étant explicitement `SKIP`. Les deux
+porte donc que sur les quatre qui en font une (`x1_long`, `x1_selfplay`, `x5_long`, `x5_append`),
+les quatre autres étant explicitement `SKIP`. Depuis
+le 2026-08-11 il exige non pas un premier score robuste mais de quoi **choisir** :
+`total_episodes / bot_eval_freq >= 2 × robust_window` (cf. `x1_long` plus haut). Les deux
 lisent les `callback_params` **résolus** comme le fait le run (`_resolve_callback_value`,
 `train.py:3444-3459`) : une clé absente ou nulle hérite de `_training_common.json`, qui définit
 `save_best_robust: true` — la lire brute mesurerait autre chose que ce qui sera appliqué.

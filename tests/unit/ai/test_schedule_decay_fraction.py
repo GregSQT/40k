@@ -255,7 +255,11 @@ def _resolved_cb(callback_params: dict, key: str):
 # vert partout, et un run de mesure ne produirait plus aucun modèle sélectionné.
 # false = run trop court pour une fenêtre de 5 évaluations : sa sortie est son modèle FINAL.
 PROMISES_BEST_MODEL = {
-    "x1": True, "x1_long": True, "x1_selfplay": True,
+    # x1 est passé à false le 2026-08-11, pour la raison qui avait déjà fait basculer x5_new :
+    # `save_best_min_episodes` (10 000) y vaut `total_episodes`, donc aucune sauvegarde n'est
+    # possible avant le tout dernier point de mesure — la sélection n'aurait jamais qu'un
+    # candidat. Sa sortie est son modèle FINAL.
+    "x1": False, "x1_long": True, "x1_selfplay": True,
     "x5_new": False, "x5_long": True, "x5_append": True,
     "x1_debug": False, "x5_debug": False,
 }
@@ -320,7 +324,16 @@ def test_long_profile_is_its_reference_recalibrated(ref_name: str, long_name: st
     }
     assert _comparable(long_, length_dependent) == _comparable(ref, length_dependent)
 
-    assert long_["total_episodes"] == 200_000
+    # La DURÉE d'un run long est un choix de campagne, pas une constante du profil : elle a valu
+    # 200 000, elle vaut 50 000 sur x1_long depuis le 2026-08-11. La figer ici rendait ce test
+    # rouge à chaque changement de campagne — et il l'est resté, sans que la valeur en dur
+    # protège quoi que ce soit. Ce qui doit tenir, c'est la RELATION : un profil `_long` est plus
+    # long que sa référence, et tout ce qui se calcule depuis la durée (les deux decay_fraction
+    # ci-dessous, `bot_eval_freq` dans
+    # `test_profile_can_produce_the_best_model_it_promises`) se dérive au lieu de se recopier.
+    assert long_["total_episodes"] > ref["total_episodes"], (
+        f"{long_name} n'est pas plus long que sa référence {ref_name}"
+    )
     # Les deux rampes ont des `decay_fraction` DISTINCTES, et c'est délibéré : elles ne servent
     # pas la même chose. L'entropie s'arrête tôt (80k) parce qu'on veut que la politique cesse
     # d'explorer et exploite ; le learning rate descend plus longtemps (140k) parce que le mettre
@@ -343,11 +356,11 @@ def test_long_profile_is_its_reference_recalibrated(ref_name: str, long_name: st
     assert _comparable(long_["model_params"], ramps) == _comparable(ref["model_params"], ramps)
 
     long_cb, ref_cb = long_["callback_params"], ref["callback_params"]
-    assert long_cb["bot_eval_freq"] == 10000, (
-        "20 points de mesure sur 200k. À 5000, les 40 évaluations × 100 épisodes coûteraient "
-        "~8,5 h (13 min l'unité, commit 42326ed0) contre ~5,5 h d'entraînement : l'évaluation "
-        "doublerait la durée du run."
-    )
+    # `bot_eval_freq` n'est plus vérifié ici : sa valeur se DÉRIVE de `total_episodes` (au moins
+    # 2 × robust_window évaluations) et c'est
+    # `test_profile_can_produce_the_best_model_it_promises` qui la tient, pour les huit profils
+    # et non pour les deux seuls couples de ce test. L'écrire en dur ici est exactement ce qui a
+    # laissé x1_long à 10 000 quand sa durée est passée à 50 000.
     # `bot_eval_final` est un nombre d'épisodes PAR BOT, et x1_long est le run de MESURE : son
     # win-rate final est le chiffre publié, donc sa précision fait partie du livrable. 600 divise
     # l'erreur-type par √6 (5,0 → 2,0 points autour de 0,5) pour un coût payé UNE fois en fin de
@@ -518,4 +531,26 @@ def test_profile_can_produce_the_best_model_it_promises(profile_name: str) -> No
         f"{profile_name} : robust_window={window} × bot_eval_freq={freq} = {needed} épisodes "
         f"avant le PREMIER score robuste, pour un run de {total}. Le run refuserait de démarrer "
         "(train.py:3596-3612)."
+    )
+    # SÉLECTIONNER, et pas seulement CALCULER. La garde ci-dessus (celle de `setup_callbacks`)
+    # se contente d'un premier score : elle laisse passer un profil qui n'en produit qu'UN, et
+    # `save_best_robust` retient alors le dernier modèle en le présentant comme le meilleur.
+    # Mesuré sur le run du 2026-08-11 (x1_long : 50 000 épisodes, bot_eval_freq 10 000, donc 5
+    # évaluations pour une fenêtre de 5) : `00_critical/o_robust_current_score` ne porte qu'une
+    # valeur, au marker 50001, et le résumé annonce « Best robust score / Selected at episodes:
+    # 50001 » sans qu'aucun autre candidat ait existé. La cause n'était pas le réglage lui-même
+    # mais son ÉCRITURE EN DUR : `bot_eval_freq` avait été calé sur 200 000 épisodes et est
+    # devenu faux quand la durée du run est passée à 50 000, en silence.
+    #
+    # D'où une règle DÉRIVÉE de total_episodes, et non une valeur figée profil par profil : au
+    # moins 2 × robust_window évaluations, soit `window + 1` scores robustes à départager. Le
+    # facteur 2 n'a rien d'arbitraire — c'est le plus petit qui garantisse que la fenêtre
+    # glissante ait entièrement roulé au moins une fois avant la fin du run, donc qu'un score
+    # tardif ne soit pas comparé à des points dont il partage 4 valeurs sur 5.
+    evaluations = total // freq
+    assert evaluations >= 2 * window, (
+        f"{profile_name} : {total} épisodes / bot_eval_freq={freq} = {evaluations} évaluations "
+        f"pour robust_window={window} → {max(0, evaluations - window + 1)} score(s) robuste(s). "
+        f"Il en faut au moins {window + 1} pour que save_best_robust choisisse au lieu de subir : "
+        f"bot_eval_freq <= {total // (2 * window)}."
     )

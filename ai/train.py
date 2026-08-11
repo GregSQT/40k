@@ -1333,6 +1333,7 @@ from ai.bot_evaluation import ROSTER_SIDES, evaluate_against_bots
 
 # Training callbacks (extracted to ai/training_callbacks.py)
 from ai.training_callbacks import (
+    iter_bot_score_rows,
     LearningRateScheduleCallback,
     EntropyScheduleCallback,
     EpisodeTerminationCallback,
@@ -3256,18 +3257,35 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
                 print(f"📊 FINAL BOT EVALUATION RESULTS")
                 print(f"{'='*80}")
                 if bot_results:
-                    for bot_name in sorted(bot_results.keys()):
-                        if bot_name.endswith(('_wins', '_losses', '_draws', '_episodes')) or bot_name in ('combined', 'worst_bot_score', 'worst_bot_name', 'eval_duration_seconds', 'total_failed_episodes'):
-                            continue
-                        if isinstance(bot_results[bot_name], (int, float)):
-                            win_rate = bot_results[bot_name] * 100
-                            wins = bot_results.get(f'{bot_name}_wins', '?')
-                            losses = bot_results.get(f'{bot_name}_losses', '?')
-                            draws = bot_results.get(f'{bot_name}_draws', '?')
-                            print(f"  vs {bot_name:20s}: {win_rate:5.1f}% ({wins}W-{losses}L-{draws}D)")
+                    # LISTE BLANCHE, et non plus liste noire. La boucle imprimait toute clé
+                    # numérique non exclue sous la forme « vs <clé> : <valeur×100> % », si bien
+                    # que chaque agrégat ajouté aux résultats se présentait comme le win-rate
+                    # d'un bot inexistant : `roster_gap` (un ÉCART de 0,012) s'affichait « vs
+                    # roster_gap : 1.2% » et `total_episodes_played` (un COMPTE de 360 000)
+                    # « vs total_episodes_played: 360000.0% ». Les deux mesures sont utiles —
+                    # elles sont imprimées plus bas, dans leur unité. Une liste noire ne peut
+                    # pas protéger de la PROCHAINE clé ajoutée ; la liste blanche des bots, si.
+                    for bot_name, score, wins, losses, draws in iter_bot_score_rows(bot_results):
+                        print(f"  vs {bot_name:20s}: {score * 100:5.1f}% ({wins}W-{losses}L-{draws}D)")
 
                     combined = require_key(bot_results, 'combined') * 100
                     print(f"  Combined Score: {combined:5.1f}%")
+                    # Agrégats qui ne sont PAS des win-rates de bot. Chacun dans son unité, et
+                    # seulement s'il a été produit : `roster_gap` est absent d'un pool
+                    # mono-faction (bot_evaluation.py, garde `ROSTER_GAP_FACTIONS`), et
+                    # l'imprimer à 0,0 s'y lirait « les deux factions sont à égalité ».
+                    print(f"  {'-' * 38}")
+                    if 'roster_gap' in bot_results:
+                        gap_points = float(bot_results['roster_gap']) * 100
+                        print(
+                            f"  {'Écart Spacemarine - Ork':22s}: {gap_points:+5.1f} pt "
+                            f"(win-rate pondéré, agent)"
+                        )
+                    print(
+                        f"  {'Épisodes joués':22s}: "
+                        f"{int(require_key(bot_results, 'total_episodes_played')):d} "
+                        f"(hors abandons)"
+                    )
                 print(f"{'='*80}\n")
 
         run_info: Dict[str, Any] = {}
@@ -4381,13 +4399,20 @@ def main():
             print("\n" + "="*80)
             print("📊 FINAL BOT EVALUATION SUMMARY")
             print("="*80)
-            for bot_name in sorted(results.keys()):
-                if bot_name.endswith(('_wins', '_losses', '_draws', '_episodes')) or bot_name in ('combined', 'worst_bot_score', 'worst_bot_name', 'eval_duration_seconds', 'total_failed_episodes'):
-                    continue
-                if isinstance(results[bot_name], (int, float)) and f'{bot_name}_wins' in results:
-                    wr = results[bot_name]
-                    print(f"  vs {bot_name:20s}: {wr:.2f} (W:{results[f'{bot_name}_wins']} L:{results[f'{bot_name}_losses']} D:{results[f'{bot_name}_draws']})")
+            # JUMEAU du résumé de fin d'entraînement (plus haut dans ce fichier) : même liste
+            # blanche, pour la même raison. Ici la liste noire ne produisait pas encore de faux
+            # win-rate — la garde `f'{bot_name}_wins' in results` écartait par accident les
+            # agrégats sans compteur de victoires — mais elle reposait sur cette coïncidence,
+            # pas sur une règle. Le premier agrégat publié AVEC un `_wins` s'y serait affiché.
+            for bot_name, wr, wins, losses, draws in iter_bot_score_rows(results):
+                print(f"  vs {bot_name:20s}: {wr:.2f} (W:{wins} L:{losses} D:{draws})")
             print(f"Combined Score: {float(require_key(results, 'combined')):.4f}")
+            if 'roster_gap' in results:
+                print(f"Écart Spacemarine - Ork: {float(results['roster_gap']) * 100:+.1f} pt")
+            print(
+                f"Épisodes joués: {int(require_key(results, 'total_episodes_played'))} "
+                "(hors abandons)"
+            )
             print(f"Worst bot score: {worst_bot_name} = {worst_bot_score:.4f}")
             if worst_scenario_name is not None and worst_scenario_combined is not None:
                 print(

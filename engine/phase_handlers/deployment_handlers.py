@@ -1507,10 +1507,11 @@ def deployment_place_in_strategic_reserves(
         return False, {"error": "strategic_reserves_not_allowed", "unitId": squad_id}
 
     unit["in_strategic_reserves"] = True
-    from engine.game_utils import get_controlled_player
-    if current_deployer == get_controlled_player(game_state):
-        game_state["_reserves_placed_agent"] = require_key(game_state, "_reserves_placed_agent") + 1
-    # _reserves_placed_agent est AUSSI initialisé au reset par le compte des unités pré-déclarées
+    # Compté POUR LES DEUX CAMPS, sans filtre sur le joueur contrôlé : c'est ce filtre qui
+    # rendait la mise en réserve du bot invisible. Le siège de l'agent n'est connu qu'à la
+    # terminaison (`agent_seat_mode: random`), la projection s'y fait.
+    require_key(game_state, "_reserves_placed")[int(current_deployer)] += 1
+    # _reserves_placed est AUSSI initialisé au reset par le compte des unités pré-déclarées
     # en réserve dans le roster (strategic_reserves: true). Ce hook ne couvre que les unités
     # placées EN PLUS pendant la phase de déploiement active (20.01).
     # L'unité sort du POOL À POSER, mais n'entre PAS dans `deployed_units` : elle n'est pas sur

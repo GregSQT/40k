@@ -258,20 +258,33 @@ def test_a_missing_objective_samples_key_raises(tmp_path: Any) -> None:
 
 
 def test_each_reserves_curve_carries_its_own_tactical_key(tmp_path: Any) -> None:
-    """Les trois courbes reserves/* sortent, chacune appariee a SA cle (20.01/20.04).
+    """Les DIX courbes reserves/* sortent, chacune appariee a SA cle (20.01/20.04).
 
-    Sans ce controle, les trois cles du fixture n'assertaient rien : remplacer les trois
-    `add_scalar('reserves/...')` par `pass` laissait ce fichier vert, et les courbes muettes.
-    Ce controle porte sur l'appariement tag <-> cle cote tracker ; que le MOTEUR alimente bien
-    ces compteurs est verifie a part (tests/unit/engine/test_reserves_metrics.py).
+    Sans ce controle, les cles du fixture n'assertaient rien : remplacer les `add_scalar(
+    'reserves/...')` par `pass` laissait ce fichier vert, et les courbes muettes. Ce controle
+    porte sur l'appariement tag <-> cle cote tracker ; que le MOTEUR alimente bien ces
+    compteurs est verifie a part (tests/unit/engine/test_reserves_metrics.py).
+
+    Cinq mesures x DEUX CAMPS depuis le 2026-08-11. Les dix valeurs de la fixture sont
+    distinctes deux a deux : c'est ce qui fait echouer un tag branche sur la cle voisine, et
+    surtout un tag `_agent` alimente par la cle `_opponent` -- l'erreur exacte que la boucle
+    d'emission peut introduire.
     """
     tracker, recording = _tracker(tmp_path)
     _episode(tracker, _tactical())
 
     by_key = {key: value for key, value, _step in recording.scalars}
-    assert by_key["reserves/placed_agent"] == pytest.approx(5.0)
-    assert by_key["reserves/deployed_agent"] == pytest.approx(3.0)
-    assert by_key["reserves/destroyed_turn3"] == pytest.approx(1.0)
+    attendu = {
+        "reserves/placed_agent": 5.0, "reserves/placed_opponent": 6.0,
+        "reserves/deployed_agent": 3.0, "reserves/deployed_opponent": 4.0,
+        "reserves/destroyed_turn3_agent": 1.0, "reserves/destroyed_turn3_opponent": 2.0,
+        "reserves/ingress_offers_agent": 11.0, "reserves/ingress_offers_opponent": 12.0,
+        "reserves/ingress_declined_agent": 7.0, "reserves/ingress_declined_opponent": 8.0,
+        "reserves/ingress_no_destination_agent": 9.0,
+        "reserves/ingress_no_destination_opponent": 10.0,
+    }
+    for tag, valeur in attendu.items():
+        assert by_key[tag] == pytest.approx(valeur), tag
 
 
 def test_the_guarded_curves_are_on_the_open_side_of_their_guard(tmp_path: Any) -> None:

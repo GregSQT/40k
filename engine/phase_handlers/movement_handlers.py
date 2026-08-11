@@ -5695,9 +5695,14 @@ def _finalize_ingress(
     ok, result = ingress_commit_plan(game_state, squad_id, plan)
     if not ok:
         return False, result
-    from engine.game_utils import get_controlled_player
-    if int(require_key(unit, "player")) == get_controlled_player(game_state):
-        game_state["_reserves_deployed_agent"] = require_key(game_state, "_reserves_deployed_agent") + 1
+    # ARRIVÉE COMPTÉE POUR LES DEUX CAMPS (le filtre sur le joueur contrôlé rendait celle du bot
+    # invisible), et marquée en (joueur, escouade, TOUR) : c'est ce tour-là qui distingue, plus
+    # bas, une offre d'arrivée SAISIE d'une offre DÉCLINÉE.
+    _ingress_player = int(require_key(unit, "player"))
+    require_key(game_state, "_reserves_deployed")[_ingress_player] += 1
+    require_key(game_state, "_ingress_arrived").add(
+        (_ingress_player, str(squad_id), int(require_key(game_state, "turn")))
+    )
     # Journal d'action : écrit ICI, donc pour les DEUX sièges. Il vivait dans la branche gym de
     # `w40k_core`, ce qui laissait une arrivée PvP invisible au replay et à l'analyzer — une
     # unité y apparaissait sur le plateau sans qu'aucune ligne ne l'explique.

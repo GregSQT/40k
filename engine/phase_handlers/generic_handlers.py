@@ -223,6 +223,14 @@ def end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],
             ]
             if len(pool_before) != len(game_state["charge_activation_pool"]):
                 response["removed_from_charge_pool"] = True
+        # 11.02.2 — LE JET MEURT AVEC L'ACTIVATION. Il est propre à celle-ci (« Make Charge
+        # Roll » est l'étape 2 d'UNE séquence de charge) et il est désormais posé à
+        # l'activation, pas au commit : le laisser derrière lui ferait relire au tour suivant,
+        # par le masque comme par le commit, un jet obtenu au tour précédent. Le chemin PvP le
+        # purgeait déjà à ses propres sorties ; c'est ici que le pipeline squad passe.
+        rolls = game_state.get("charge_roll_values")  # get allowed (absent hors phase de charge)
+        if rolls is not None:
+            rolls.pop(str(unit_id), None)
     # arg4 == "FIGHT" : plus de retrait de pool. La sélection FIGHT V11 (fight_subphase +
     # fight_v11_current_pool) est l'unique autorité ; les pools d'activation V10 (charging/
     # alternating) sont supprimés. Le tracking units_fought (arg3) et le step restent gérés ci-dessus.
