@@ -583,6 +583,19 @@ Ce qu'elle NE fait pas non plus : juger si la ligne écrite est juste, ni voir u
 un commit direct sur `main`. Contournement assumé quand la fusion n'est pas un chantier :
 `git merge --no-verify`. État courant sans rien bloquer : `--status`.
 
+✅ **La porte ne meurt plus sur une trace Python** (2026-08-11). Deux états REPRODUITS la tuaient en
+`CalledProcessError` de dix lignes : `--merge` lancé hors fusion, et — atteignable par le hook réel —
+une vraie fusion faite sur un **HEAD détaché**, où `symbolic-ref` sort 128 alors que `MERGE_HEAD`
+est bien là. git affichait alors « Not committing merge » sans qu'une ligne dise quoi faire, et
+relancer `git commit` faisait passer la fusion : une porte cassée, pas un refus motivé. Désormais
+toute sortie est un feu vert ou un refus lisible, filet de sécurité compris (`0` passe, `1` refuse,
+`2` = la porte n'a PAS PU se prononcer et bloque quand même). Les deux états sont tranchés
+séparément : HEAD détaché = **feu vert** (fusionner hors `main` ne livre rien, la porte est sans
+objet) ; `MERGE_HEAD` absent en `--merge` = **refus**, parce que c'est exactement l'état d'un hook
+mal branché — `pre-merge-commit` tourne avant l'écriture de `MERGE_HEAD`, et un « sans objet »
+complaisant y rendrait la porte muette pour toujours (CLAUDE.md T1). Les trois verrous
+(`tests/unit/scripts/test_check_roadmap_declared.py`) ont été vérifiés ROUGES défaut remis.
+
 **Deux pièges déjà payés, à ne pas reprendre pour des régressions.** (1) Un contrôle de liens naïf
 rend **152 hits** dont aucun n'est mort (143 dans `Implémenté/stage.md`, 5 dans `Boardx10-audit.md`,
 tous des `file:///`, qui sont ABSOLUS par convention CLAUDE.md) ; le script les résout comme tels.

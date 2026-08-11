@@ -38,8 +38,17 @@ CE QU'ELLE N'ÉTABLIT PAS :
 
 Usage : python3 scripts/check_roadmap_declared.py --merge   (depuis le hook `prepare-commit-msg`)
         python3 scripts/check_roadmap_declared.py --status   (état courant, sans rien bloquer)
-Sortie : 0 si la dette est sous le plafond, 1 sinon.
+Sortie : 0 si la dette est sous le plafond, 1 si la porte refuse, 2 si elle n'a PAS PU se
+        prononcer (usage faux, `--merge` hors fusion, état du dépôt inattendu). Une porte qui ne
+        sait pas ne dit jamais oui : 2 bloque le commit comme 1, mais l'annonce autrement.
 Contournement assumé : `git merge --no-verify`.
+
+JAMAIS DE TRACE PYTHON EN SORTIE. Mesuré le 2026-08-11 : `--merge` mourait sur une
+`CalledProcessError` de dix lignes dans deux états atteignables — sans fusion en cours, et pendant
+une vraie fusion en HEAD détaché. git affichait « Not committing merge » sans qu'une seule ligne
+dise ce qu'on attendait de l'utilisateur ; relancer `git commit` faisait passer la fusion, ce qui
+donne l'impression d'une porte cassée plutôt que d'un refus motivé. Toute sortie est désormais un
+feu vert ou un refus LISIBLE — filet de sécurité compris (voir `__main__`).
 """
 from __future__ import annotations
 
@@ -98,6 +107,21 @@ def git(*args: str) -> str:
     ).stdout.strip()
 
 
+def git_maybe(*args: str) -> str | None:
+    """Comme `git`, mais rend `None` quand la commande sort non-zéro AU LIEU de lever.
+
+    Réservé aux DEUX questions dont l'échec est un ÉTAT, pas une panne : « sur quelle branche
+    suis-je ? » (HEAD détaché → pas de branche) et « une fusion est-elle en cours ? » (pas de
+    MERGE_HEAD). Partout ailleurs `git` reste `check=True` : un échec y est une vraie panne et
+    doit remonter au filet, pas se muer en silence.
+    """
+    completed = subprocess.run(
+        ["git", "-c", "core.quotePath=false", *args],
+        cwd=ROOT, capture_output=True, text=True, encoding="utf-8", check=False,
+    )
+    return completed.stdout.strip() if completed.returncode == 0 else None
+
+
 def undeclared_merges(head: str) -> list[str]:
     """Les fusions entrées dans `main` depuis la dernière écriture de la feuille de route.
 
@@ -129,10 +153,28 @@ def main(argv: list[str]) -> int:
         print(__doc__)
         return 2
     if mode == "--merge":
-        if git("symbolic-ref", "--short", "HEAD") != PROTECTED_BRANCH:
+        # HEAD détaché : `symbolic-ref` sort 128, ce qui tuait la porte EN PLEINE FUSION. Ce
+        # n'est pourtant pas une anomalie — fusionner sur un HEAD détaché ne livre rien dans
+        # `main`, c'est exactement le cas « hors `main`, sans objet ».
+        if git_maybe("symbolic-ref", "--short", "HEAD") != PROTECTED_BRANCH:
             print("↷ feuille de route : fusion hors `main`, sans objet")
             return 0
-        merge_head = git("rev-parse", "MERGE_HEAD")
+        merge_head = git_maybe("rev-parse", "MERGE_HEAD")
+        if merge_head is None:
+            # Le hook `prepare-commit-msg` garde déjà l'appel derrière la présence de MERGE_HEAD :
+            # arriver ici veut dire que `--merge` a été lancé HORS d'une fusion — à la main, ou
+            # par un hook mal branché. Feu vert INTERDIT : `pre-merge-commit` tourne précisément
+            # avant l'écriture de MERGE_HEAD, et un « sans objet » complaisant y rendrait la porte
+            # muette pour toujours sans que rien ne le signale (CLAUDE.md T1).
+            print(
+                "❌ feuille de route : `--merge` sans fusion en cours (MERGE_HEAD absent).\n"
+                "   Sans MERGE_HEAD, la porte ne sait pas quelle branche est fusionnée : elle ne\n"
+                "   se prononce pas, et ne dit pas oui par défaut.\n"
+                "   Ce mode s'appelle depuis le hook `prepare-commit-msg`, pendant une fusion.\n"
+                "   Pour l'état courant du dépôt : "
+                "python3 scripts/check_roadmap_declared.py --status"
+            )
+            return 2
         declares = branch_touches_roadmap("HEAD", merge_head)
     else:
         declares = False
@@ -142,4 +184,18 @@ def main(argv: list[str]) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv))
+    try:
+        code = main(sys.argv)
+    except Exception as exc:  # noqa: BLE001 - filet: une trace de dix lignes ne dit rien à git
+        # Ce filet n'AVALE rien : il refuse, dit l'erreur exacte, et laisse la sortie de secours.
+        # Le rendre vert masquerait une panne de la porte derrière une fusion réussie (T1).
+        print(
+            f"❌ feuille de route : contrôle impossible — {type(exc).__name__}: {exc}\n"
+            "   La porte n'a pas pu se prononcer : le commit est refusé, pas la fusion approuvée.\n"
+            "   Si l'état du dépôt est sain, c'est un défaut de la porte elle-même — à corriger\n"
+            "   dans scripts/check_roadmap_declared.py.\n"
+            "   Pour passer outre en attendant : git merge --no-verify",
+            file=sys.stderr,
+        )
+        code = 2
+    sys.exit(code)
