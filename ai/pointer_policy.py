@@ -402,6 +402,21 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
         # clé ajoutée à `VecNormalize`, un index décalé d'un champ — le routage des ids 4-11
         # deviendrait arbitraire et l'agent jouerait des cellules de move pour des poses, sans
         # que rien ne lève. Le contrôle est là pour que ça lève.
+        #
+        # SON COÛT EST CONNU ET ASSUMÉ — ne pas le « nettoyer » sur la foi d'un avertissement.
+        # Le `bool()` force une synchronisation GPU→CPU, et sous `torch.compile` (actif via
+        # `config/config.json` → `torch.compile_mode`) il coupe le graphe, ce que torch >= 2.13
+        # signale bruyamment : « Graph break from `Tensor.item()` ». Le message est nouveau, le
+        # coût ne l'est pas.
+        # Mesuré le 2026-08-11, batch=48, minimum de 12 blocs de 50 forwards, A/B alterné pour
+        # neutraliser la dérive du GPU portable : ~0,5 ms par forward, soit 5 à 10 % du forward
+        # seul — noyé dans le pas d'environnement, qui domine la boucle. Les trois appelants de
+        # `_split_features` paient la synchronisation, mais SEUL `forward` est compilé
+        # (`ai/train.py`, `_apply_torch_compile`), donc seul lui subit la coupure de graphe.
+        # Ce qu'il ne faut PAS faire : supprimer le contrôle (il couvre une panne silencieuse),
+        # ni le réduire au premier batch (le scénario nommé plus haut, une clé ajoutée à
+        # `VecNormalize`, dérive EN COURS de run et passerait un contrôle initial), ni activer
+        # `capture_scalar_outputs` globalement pour un gain de cet ordre.
         is_deploy = features[:, self.deploy_phase_index]
         if not bool(torch.all((is_deploy == 0.0) | (is_deploy == 1.0))):
             raise RuntimeError(
