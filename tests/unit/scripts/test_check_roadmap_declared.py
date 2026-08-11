@@ -339,6 +339,96 @@ def test_gate_is_dead_with_pre_merge_commit_hook(tmp_path: pathlib.Path) -> None
     )
 
 
+def run_gate(repo: pathlib.Path, mode: str) -> subprocess.CompletedProcess[str]:
+    """Lance la porte comme le hook la lance : en PROCESSUS, depuis le dépôt jetable.
+
+    L'appeler en import ne prouverait rien sur ce qui compte ici — le code de sortie et ce que
+    l'utilisateur LIT quand git s'arrête.
+    """
+    _setup_repo_with_script(repo)
+    return subprocess.run(
+        ["python3", str(repo / "scripts" / "check_roadmap_declared.py"), mode],
+        cwd=repo, capture_output=True, text=True,
+    )
+
+
+def test_merge_mode_without_merge_head_refuses_and_says_what_to_do(
+    tmp_path: pathlib.Path,
+) -> None:
+    """LE défaut du 2026-08-11 : `--merge` hors fusion mourait sur une trace Python.
+
+    Refus, PAS feu vert : `pre-merge-commit` tourne avant l'écriture de MERGE_HEAD, donc un
+    « sans objet » ici rendrait la porte muette sans que rien ne le signale.
+    """
+    repo = scratch_repo(tmp_path)
+    result = run_gate(repo, "--merge")
+
+    assert "Traceback" not in result.stderr and "Traceback" not in result.stdout
+    assert result.returncode == 2, (
+        "sans MERGE_HEAD la porte ne peut pas se prononcer : elle refuse, elle ne dit pas oui"
+    )
+    lisible = result.stdout + result.stderr
+    assert "MERGE_HEAD" in lisible and "prepare-commit-msg" in lisible
+    assert "--status" in lisible
+
+
+def test_merge_on_a_detached_head_is_out_of_scope(tmp_path: pathlib.Path) -> None:
+    """VRAIE fusion, MERGE_HEAD présent, mais HEAD détaché : `symbolic-ref` sort 128.
+
+    Ce chemin-là est atteignable par le hook réel. Feu vert légitime : fusionner sur un HEAD
+    détaché ne livre rien dans `main`, donc la porte n'a pas d'objet — ce n'est pas un défaut masqué.
+    """
+    repo = scratch_repo(tmp_path)
+    run(repo, "checkout", "-qb", "chantier")
+    (repo / "code.py").write_text("x = 1\n", encoding="utf-8")
+    run(repo, "add", "-A")
+    run(repo, "commit", "-qm", "code de chantier")
+    run(repo, "checkout", "-q", "main")
+    run(repo, "checkout", "-q", "--detach", "HEAD")
+    subprocess.run(
+        ["git", "merge", "--no-ff", "--no-commit", "--no-verify", "chantier"],
+        cwd=repo, capture_output=True, text=True,
+    )
+    assert (repo / ".git" / "MERGE_HEAD").exists(), "le test doit VRAIMENT être en cours de fusion"
+
+    result = run_gate(repo, "--merge")
+
+    assert "Traceback" not in result.stderr and "Traceback" not in result.stdout
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "sans objet" in result.stdout
+
+
+def test_status_mode_reports_without_blocking(tmp_path: pathlib.Path) -> None:
+    """`--status` n'a pas le chemin MERGE_HEAD : il doit rester un rapport, jamais un blocage."""
+    repo = scratch_repo_with_debt(tmp_path, gate.MAX_UNDECLARED)
+    result = run_gate(repo, "--status")
+
+    assert "Traceback" not in result.stderr and "Traceback" not in result.stdout
+    assert result.returncode == 0, "`--status` ne bloque rien, même dette au plafond"
+    assert "sans que la feuille de route" in result.stdout
+
+
+def test_an_unexpected_git_failure_refuses_readably(tmp_path: pathlib.Path) -> None:
+    """Filet : hors dépôt git, tout appel git échoue. La porte refuse en clair, sans trace.
+
+    C'est la garantie de fond demandée — QUEL QUE SOIT l'état, feu vert ou refus lisible.
+    """
+    hors_depot = tmp_path / "pas-un-depot"
+    (hors_depot / "scripts").mkdir(parents=True)
+    src = ROOT / "scripts" / "check_roadmap_declared.py"
+    (hors_depot / "scripts" / "check_roadmap_declared.py").write_bytes(src.read_bytes())
+
+    result = subprocess.run(
+        ["python3", str(hors_depot / "scripts" / "check_roadmap_declared.py"), "--status"],
+        cwd=hors_depot, capture_output=True, text=True,
+    )
+
+    assert "Traceback" not in result.stderr and "Traceback" not in result.stdout
+    assert result.returncode == 2
+    assert "contrôle impossible" in result.stderr
+    assert "--no-verify" in result.stderr
+
+
 def test_gate_blocks_violations_with_prepare_commit_msg_hook(tmp_path: pathlib.Path) -> None:
     """Verrou GREEN : avec prepare-commit-msg, la porte s'exécute et bloque les violations.
 
