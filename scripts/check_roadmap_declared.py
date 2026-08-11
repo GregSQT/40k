@@ -83,12 +83,17 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 ROADMAP = "Documentation/Implémentation/ROADMAP.md"
 
-#: Nombre de chantiers qu'on tolère non déclarés. Voir le calibrage en tête de module — ce n'est
-#: pas un chiffre choisi au jugé, c'est le seul qui ne refuse que le cas réellement fautif.
-#: Porté de 3 à 2 le 2026-08-12 (décision utilisateur) : à 3, la porte ne se déclenchait plus une
-#: seule fois sur les 41 fusions du flux moderne. À 2 elle en refuse 2, qui sont précisément les
-#: deux chantiers dont on sait qu'ils n'avaient pas pris leur ligne.
+#: Dette qui DÉCLENCHE le refus — on en tolère donc `MAX_UNDECLARED - 1`. La docstring disait
+#: « nombre toléré », soit un cran de trop : la prochaine recalibration se serait décalée.
+#: Porté de 3 à 2 le 2026-08-12 (décision utilisateur). Le pourquoi et les chiffres sont dans le
+#: calibrage en tête de module, et NULLE PART AILLEURS — les recopier est ce qui a produit deux
+#: jeux contradictoires.
 MAX_UNDECLARED = 2
+
+#: Les deux façons dont une livraison déclare. Nommées ici parce que les tests les vérifient et
+#: qu'un message recopié dans un test cesse un jour de correspondre à celui du code.
+DECLARED_BY_BRANCH = "la branche fusionnée met la feuille de route à jour"
+DECLARED_BY_INDEX = "la ligne de la feuille de route est écrite dans ce commit de fusion"
 
 #: Désarmement explicite, et VISIBLE : la porte annonce elle-même qu'elle s'est tue. Elle a
 #: annoncé `--no-verify` pendant un jour, qui ne saute pas `prepare-commit-msg` — un refus dont
@@ -100,10 +105,15 @@ GATE_OFF_ENV = "ROADMAP_GATE"
 PROTECTED_BRANCH = "main"
 
 
-def verdict(undeclared: list[str], branch_declares: bool) -> tuple[bool, str]:
-    """(la fusion peut passer, message). Cœur PUR : aucun appel à git, testable tel quel."""
-    if branch_declares:
-        return True, "la branche fusionnée met la feuille de route à jour"
+def verdict(undeclared: list[str], declaration: str) -> tuple[bool, str]:
+    """(la fusion peut passer, message). Cœur PUR : aucun appel à git, testable tel quel.
+
+    `declaration` porte D'OÙ vient la ligne — vide si personne ne l'a écrite. Un booléen forçait
+    le feu vert à toujours dire « la branche fusionnée », y compris quand c'était l'index : le
+    module s'interdit ailleurs de faire dire à la porte plus qu'elle ne sait.
+    """
+    if declaration:
+        return True, declaration
     count = len(undeclared)
     if count < MAX_UNDECLARED:
         reste = MAX_UNDECLARED - count - 1
@@ -144,34 +154,20 @@ def git(*args: str) -> str:
     ).stdout.strip()
 
 
-def git_maybe(*args: str) -> str | None:
-    """Comme `git`, mais rend `None` quand la commande sort non-zéro AU LIEU de lever.
+def current_branch() -> str:
+    """La branche courante, ou la chaîne VIDE si HEAD est détaché.
 
-    Réservé à la seule question dont l'échec est un ÉTAT, pas une panne : « sur quelle branche
-    suis-je ? » (HEAD détaché → pas de branche). Partout ailleurs `git` reste `check=True` : un
-    échec y est une vraie panne et doit remonter au filet, pas se muer en silence.
+    UN SEUL appel pour les trois états qui comptent, et c'est ce qui rend la suite sûre :
+    `main` attaché → `main` ; HEAD détaché → chaîne vide, rc 0 ; git qui ne répond pas (hors
+    dépôt, dépôt illisible) → rc 128, donc `git` lève et le filet refuse en clair.
 
-    ⚠️ CETTE QUESTION NE SE POSE QUE SI git RÉPOND. Mesuré le 2026-08-12 : le script copié
-    hors d'un dépôt git sortait « fusion hors `main`, sans objet » et le code **0** — `symbolic-ref`
-    y échoue pour panne, pas pour détachement, et le feu vert silencieux était exactement ce que la
-    porte s'interdit. D'où la sonde `assert_git_answers()` avant tout appel tolérant : elle
-    distingue « pas de branche » de « pas de réponse ».
+    C'est la troisième forme de ce contrôle, les deux premières ayant coûté un défaut chacune :
+    `symbolic-ref` sortait 128 EN PLEINE FUSION sur un HEAD détaché (trace Python), puis sa
+    version tolérante confondait « pas de branche » et « pas de réponse » et rendait un feu vert
+    silencieux hors dépôt. Ici la distinction est portée par git, pas par une sonde préalable dont
+    seule de la prose garantissait l'ordre.
     """
-    completed = subprocess.run(
-        ["git", "-c", "core.quotePath=false", *args],
-        cwd=ROOT, capture_output=True, text=True, encoding="utf-8", check=False,
-    )
-    return completed.stdout.strip() if completed.returncode == 0 else None
-
-
-def assert_git_answers() -> None:
-    """Lève si git ne répond pas dans `ROOT` (pas un dépôt, binaire absent, dépôt illisible).
-
-    Sans elle, `git_maybe` traduirait une PANNE en état bénin : c'est la seule chose qui sépare
-    « HEAD est détaché » de « je n'ai aucun moyen de savoir ». L'exception remonte au filet de
-    `__main__`, qui refuse en clair — un état inconnu ne devient jamais un feu vert.
-    """
-    git("rev-parse", "--is-inside-work-tree")
+    return git("branch", "--show-current")
 
 
 def index_declares() -> bool:
@@ -184,7 +180,7 @@ def index_declares() -> bool:
     C'est aussi la définition la plus juste de « cette livraison déclare » : ce que le commit en
     train de se faire contient.
     """
-    return ROADMAP in git("diff", "--cached", "--name-only", "HEAD").split("\n")
+    return bool(git("diff", "--cached", "--name-only", "HEAD", "--", ROADMAP))
 
 
 def merge_heads() -> list[str]:
@@ -222,14 +218,16 @@ def branch_touches_roadmap(head: str, other: str) -> bool:
     Ce que la BRANCHE a écrit, pas ce qui diffère entre les deux têtes — sinon tout ce qui a
     avancé sur `main` pendant la vie du chantier lui serait mis au crédit.
 
-    `log <head>..<other> --name-only` et NON un diff trois points, qui posait la même question mais
-    exigeait une base commune : `git diff HEAD...MERGE_HEAD` sort 128 « fatal: no merge base » sur
-    un `git merge --allow-unrelated-histories`, et la fusion — déclaration comprise — devenait un
-    « contrôle impossible » opaque en pleine opération. L'énumération des commits propres à la
-    branche ne calcule aucune base : elle répond dans les deux cas.
+    Un `log` d'intervalle, et NON un diff trois points, qui posait la même question mais exigeait
+    une base commune : `git diff HEAD...MERGE_HEAD` sort 128 « fatal: no merge base » sur un
+    `git merge --allow-unrelated-histories`, et la fusion — déclaration comprise — devenait un
+    « contrôle impossible » opaque en pleine opération. L'intervalle ne calcule aucune base.
+
+    Le chemin est passé à git en PATHSPEC plutôt qu'énuméré ici : git s'arrête au premier commit
+    qui touche la feuille au lieu d'imprimer tous les fichiers de toute la branche (mesuré sur un
+    intervalle de 40 commits : 8,5 ms et une sortie constante, contre 15,1 ms et 8 ko).
     """
-    touched = git("log", "--format=", "--name-only", f"{head}..{other}")
-    return ROADMAP in touched.split("\n")
+    return bool(git("log", "-1", "--format=%H", f"{head}..{other}", "--", ROADMAP))
 
 
 def main(argv: list[str]) -> int:
@@ -238,19 +236,20 @@ def main(argv: list[str]) -> int:
         print(__doc__)
         return 2
     if mode == "--merge":
-        if os.environ.get(GATE_OFF_ENV) == "off":
+        desarme = os.environ.get(GATE_OFF_ENV, "")
+        if desarme:
             # Désarmement VOULU, et dit à voix haute : un contournement silencieux ne se distingue
-            # pas d'une porte cassée. C'est la seule sortie de secours qui marche — `--no-verify`
-            # n'atteint pas `prepare-commit-msg`.
-            print(f"↷ feuille de route : porte désarmée par {GATE_OFF_ENV}=off")
+            # pas d'une porte cassée. TOUTE valeur non vide désarme — exiger `off` à la lettre
+            # aurait refusé `=OFF`, `=1`, `=true` sans dire pourquoi, au milieu d'une fusion :
+            # c'est la même arête « issue annoncée mais murée » que cette porte a déjà payée deux
+            # fois. La valeur reçue est reprise dans le message, pour qu'un désarmement
+            # involontaire (variable exportée et oubliée) se voie.
+            print(f"↷ feuille de route : porte désarmée par {GATE_OFF_ENV}={desarme}")
             return 0
-        # L'ORDRE COMPTE : tant que git n'a pas répondu une fois, l'échec de `symbolic-ref` est
-        # ambigu — détachement ou panne. La sonde tranche, et laisse la panne partir au filet.
-        assert_git_answers()
-        # HEAD détaché : `symbolic-ref` sort 128, ce qui tuait la porte EN PLEINE FUSION. Ce
-        # n'est pourtant pas une anomalie — fusionner sur un HEAD détaché ne livre rien dans
-        # `main`, c'est exactement le cas « hors `main`, sans objet ».
-        if git_maybe("symbolic-ref", "--short", "HEAD") != PROTECTED_BRANCH:
+        # HEAD détaché → chaîne vide, donc « hors `main` » : fusionner là ne livre rien dans
+        # `main`. Hors dépôt, `current_branch()` lève et part au filet — la distinction est
+        # portée par git lui-même.
+        if current_branch() != PROTECTED_BRANCH:
             print("↷ feuille de route : fusion hors `main`, sans objet")
             return 0
         heads = merge_heads()
@@ -271,10 +270,20 @@ def main(argv: list[str]) -> int:
             return 2
         # UNE tête qui déclare suffit : la livraison a sa ligne, peu importe laquelle l'apporte.
         # L'index compte au même titre : c'est là qu'atterrit la ligne écrite pour se débloquer.
-        declares = index_declares() or any(branch_touches_roadmap("HEAD", h) for h in heads)
+        # La RAISON est transportée, pas un booléen : le feu vert affirmait « la branche fusionnée
+        # met la feuille de route à jour » y compris quand c'était l'index — donc précisément dans
+        # le cas où l'utilisateur venait de se débloquer à la main.
+        if any(branch_touches_roadmap("HEAD", h) for h in heads):
+            declaration = DECLARED_BY_BRANCH
+        elif index_declares():
+            declaration = DECLARED_BY_INDEX
+        else:
+            declaration = ""
     else:
-        declares = False
-    ok, message = verdict(undeclared_merges("HEAD"), declares)
+        declaration = ""
+    # La dette ne se calcule QUE si elle peut servir : deux `git log` de plus sur chaque fusion
+    # déjà déclarée, dont `verdict` ne regarde même pas le résultat.
+    ok, message = verdict([] if declaration else undeclared_merges("HEAD"), declaration)
     print(f"{'✅' if ok else '❌'} feuille de route : {message}")
     return 0 if ok or mode == "--status" else 1
 
