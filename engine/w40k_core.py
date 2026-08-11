@@ -230,6 +230,8 @@ def _empty_episode_tactical_data() -> Dict[str, Any]:
         'reserves_ingress_offers_opponent': 0,
         'reserves_ingress_declined_agent': 0,
         'reserves_ingress_declined_opponent': 0,
+        # Distances de CHARGE (11.04), par camp — cf. `_empty_charge_distance_data`.
+        'charge_distance': _empty_charge_distance_data(),
         'reserves_ingress_no_destination_agent': 0,
         'reserves_ingress_no_destination_opponent': 0,
     }
@@ -266,6 +268,60 @@ def _reserves_game_state_defaults() -> Dict[str, Any]:
         # le moment. Versé et remis à zéro au step suivant, comme `_pending_zone_shaping`.
         "_pending_reserves_wasted": 0,
     }
+
+
+#: 2D6 >= 9 ne sort que 27,8 % du temps. Seuil de la courbe « part des declarations lointaines »,
+#: en POUCES : c'est l'unite du jet, la seule ou le seuil se lit contre une table de probabilite.
+CHARGE_LONG_DECLARATION_INCHES = 9
+
+#: Mesures de distance de charge portees par `episode_tactical_data['charge_distance']`, par camp.
+#: Sommes + effectifs, jamais des moyennes d'episode : la plupart des episodes portent une
+#: poignee de charges, et un episode sans charge n'a pas de distance moyenne — publier 0 le
+#: rendrait indiscernable d'une charge au contact. La moyenne se fait a la publication, sur la
+#: fenetre glissante (`_emit_ratio_of_means`), qui prend justement une somme et son effectif.
+#:
+#: Les effectifs DIFFERENT du nombre de tentatives, et c'est le fond de la mesure : une charge
+#: peut etre declaree puis n'atteindre aucune cible (11.02.3), auquel cas elle n'a pas de
+#: distance a la cible. Compter ces cas comme des zeros ecraserait vers le bas precisement la
+#: moyenne des ratees qu'on veut lire.
+CHARGE_DISTANCE_MEASURES = (
+    'nearest_sum', 'nearest_n',
+    'target_sum', 'target_n',
+    'success_sum', 'success_n',
+    'fail_sum', 'fail_n',
+    'long',
+)
+
+
+def _empty_charge_distance_data() -> Dict[str, Dict[str, float]]:
+    """Accumulateur de distances de charge, par camp — SOURCE UNIQUE de sa forme.
+
+    UN SEUL nom traverse la frontiere moteur -> tracker, comme `deployment_cache_counts` : la
+    version a plat demandait d'ecrire les memes 18 noms dans trois listes tenues a la main.
+    """
+    return {
+        _side: {_measure: 0.0 for _measure in CHARGE_DISTANCE_MEASURES}
+        for _side in ('agent', 'opponent')
+    }
+
+
+def _charge_game_state_defaults() -> Dict[str, Any]:
+    """Distances de charge mesurees dans game_state — SOURCE UNIQUE (jumeau init/reset).
+
+    POURQUOI. Le step.log du 2026-08-11 (494 charges) a montre que 41 % des declarations
+    visaient une cible a 9" ou plus, la ou un 2D6 n'atteint 9 que 27,8 % — mais il a fallu
+    re-deriver ces distances a la main depuis les coordonnees loggees. Depuis l'alignement sur
+    11.02, la DECLARATION et le CHOIX DE CIBLE sont deux instants distincts et reels : la
+    mesure est donc prise au moment ou elle a un sens, plus reconstruite apres coup.
+
+    UNE SEULE cle, et c'est voulu : `_charge_declaration_current` porte l'activation EN COURS
+    (unite -> son enregistrement), le temps que les trois sites qui la mesurent se succedent.
+    La STATISTIQUE, elle, ne vit pas ici — elle se derive d'`action_logs` a la terminaison, sur
+    le meme couple de types que `charge_attempts` / `charge_successes`. Une liste
+    d'enregistrements en parallele aurait ete un second compteur du meme evenement, capable de
+    diverger du premier sans qu'aucune courbe ne le montre.
+    """
+    return {"_charge_declaration_current": {}}
 
 
 def _next_engine_id() -> int:
@@ -850,6 +906,7 @@ class W40KEngine(gym.Env):
             "action_log_seq": 0,  # Monotonic stamp per append_action_log (not cleared with action_logs flush)
             "log_delta": [],  # Combat log : events depuis la dernière row de timeline (drainé dans meta['log_delta'] à chaque capture). Reconstruit le Game Log au Load/rewind du replay (delta linéaire, pas de cumul par row)
             **_reserves_game_state_defaults(),
+            **_charge_game_state_defaults(),
 
             # PERFORMANCE: Hex-coordinate LoS cache (walls static within episode)
             "hex_los_cache": {},
@@ -1560,6 +1617,7 @@ class W40KEngine(gym.Env):
             "action_log_seq": 0,
             "log_delta": [],  # Combat log : events depuis la dernière row de timeline (voir init du game_state)
             **_reserves_game_state_defaults(),
+            **_charge_game_state_defaults(),
             "gym_training_mode": self.gym_training_mode,  # ADDED: For handler access
             "debug_mode": self.debug_mode,  # ADDED: For handler access
             "console_logs": [],  # CRITICAL: Initialize console_logs for debug logging across all episodes
@@ -2864,14 +2922,42 @@ class W40KEngine(gym.Env):
                             shoot_waits += 1
                     continue
                 if log_type in ("charge", "charge_fail"):
-                    if int(require_key(log, "player")) == controlled_player:
+                    _charge_ok = log_type == "charge"
+                    _by_controlled = int(require_key(log, "player")) == controlled_player
+                    if _by_controlled:
                         charge_attempts += 1
-                        if log_type == "charge":
+                        if _charge_ok:
                             charge_successes += 1
                     else:
                         charge_attempts_opponent += 1
-                        if log_type == "charge":
+                        if _charge_ok:
                             charge_successes_opponent += 1
+                    # DISTANCES 11.04 — derivees ICI, de la ligne elle-meme, et pas d'un second
+                    # accumulateur tenu en parallele dans `game_state` : c'est le meme evenement
+                    # que `charge_attempts` juste au-dessus, sur le meme couple de types et le
+                    # meme camp. Deux compteurs du meme evenement peuvent diverger — il suffit
+                    # d'un futur chemin de fin de charge qui emette la ligne sans passer par
+                    # l'autre — et rien sur les courbes ne le montrerait.
+                    #
+                    # `require_key` : les deux champs sont poses par `charge_record_outcome` sur
+                    # les SEPT sites qui emettent ces lignes. Une ligne qui ne les porte pas est
+                    # un site oublie, pas un cas de jeu — le motif jumeau que ce chantier a
+                    # justement trouve (le chemin gym journalisait a part).
+                    _cd = require_key(
+                        self.episode_tactical_data, 'charge_distance'
+                    )['agent' if _by_controlled else 'opponent']
+                    _near = require_key(log, "charge_nearest_enemy_inches")
+                    if _near is not None:
+                        _cd['nearest_sum'] += float(_near)
+                        _cd['nearest_n'] += 1
+                    _tgt = require_key(log, "charge_target_distance_inches")
+                    if _tgt is not None:
+                        _cd['target_sum'] += float(_tgt)
+                        _cd['target_n'] += 1
+                        if float(_tgt) >= CHARGE_LONG_DECLARATION_INCHES:
+                            _cd['long'] += 1
+                        _cd['success_sum' if _charge_ok else 'fail_sum'] += float(_tgt)
+                        _cd['success_n' if _charge_ok else 'fail_n'] += 1
                     continue
                 if log_type not in ("shoot", "combat"):
                     continue
@@ -5791,6 +5877,10 @@ class W40KEngine(gym.Env):
             ("weaponName", "weapon_name"),
             ("charge_roll", "charge_roll"),
             ("charge_failed_reason", "charge_failed_reason"),
+            # Distances 11.04, en pouces. Traduites ici comme tout le reste : sans ce mapping,
+            # les champs poses par les sept sites de charge n'atteindraient jamais step.log.
+            ("charge_nearest_enemy_inches", "charge_nearest_enemy_inches"),
+            ("charge_target_distance_inches", "charge_target_distance_inches"),
             ("advance_roll", "advance_range"),
             ("selected_rule_name", "selected_rule_name"),
         ):
@@ -6344,7 +6434,9 @@ class W40KEngine(gym.Env):
         elif action_name == "squad_charge":
             squad_id = semantic["squad_id"]
             from engine.phase_handlers.shared_utils import charge_check_eligibility
-            from engine.phase_handlers.charge_handlers import charge_roll_for_activation
+            from engine.phase_handlers.charge_handlers import (
+                charge_record_outcome, charge_record_target_choice, charge_roll_for_activation,
+            )
             # V11 §9 P3-2 : la cible de charge est CHOISIE PAR L AGENT, via le slot ennemi porte
             # par l action (11.02 « Declare Charge » : la selection de la cible est un choix de
             # joueur). Le decodeur ne tranche plus par `get_best_enemy_score_for_unit`.
@@ -6384,6 +6476,9 @@ class W40KEngine(gym.Env):
             # où son critère — « aucune cible à portée » — a encore un sens : ici, une cible a
             # justement été choisie parmi celles que le jet atteint.
             charge_roll = charge_roll_for_activation(self.game_state, squad_id)
+            # 11.04 — mesure de la cible AVANT le plan : `commit_move` deplace les figurines, et
+            # une distance relevee apres vaudrait « au contact » sur toutes les charges reussies.
+            charge_record_target_choice(self.game_state, squad_id, target_squad_id)
             plan = charge_build_valid_plan(self.game_state, squad_id, [target_squad_id], charge_roll)
             unit = get_unit_by_id(squad_id, self.game_state)
             if unit is None:
@@ -6410,6 +6505,7 @@ class W40KEngine(gym.Env):
                 # obligatoire du formateur qu'aucune donnee existante ne fournissait : ici l'echec
                 # est exactement « aucun plan de charge valide pour ce jet » (2D6 insuffisant ou
                 # aucune destination legale au contact — charge_build_valid_plan a renvoye None).
+                _charge_dist = charge_record_outcome(self.game_state, squad_id)
                 append_action_log(
                     self.game_state,
                     {
@@ -6429,6 +6525,7 @@ class W40KEngine(gym.Env):
                         "targetRow": _charge_target[1] if _charge_target else None,
                         "timestamp": "server_time",
                         "reward": 0.0,
+                        **_charge_dist,
                     },
                 )
                 result = {
@@ -6454,6 +6551,7 @@ class W40KEngine(gym.Env):
                 commit_move(plan, self.game_state, "charge")
                 end_result = end_activation(self.game_state, unit, ACTION, 1, CHARGE, CHARGE, 0)
                 _dest_uc = self.game_state.get("units_cache", {}).get(str(squad_id), {})  # get allowed
+                _charge_dist = charge_record_outcome(self.game_state, squad_id)
                 append_action_log(
                     self.game_state,
                     {
@@ -6481,6 +6579,7 @@ class W40KEngine(gym.Env):
                         "ability_display_name": _charge_ability,
                         "timestamp": "server_time",
                         "reward": 0.0,
+                        **_charge_dist,
                     },
                 )
                 result = {

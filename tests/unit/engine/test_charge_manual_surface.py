@@ -24,6 +24,7 @@ import pytest
 
 from engine.phase_handlers import charge_handlers as ch
 from engine.phase_handlers.shared_utils import build_units_cache
+from engine.w40k_core import _charge_game_state_defaults
 from tests._state_invariants import turn_state_invariants, unit_invariants
 
 
@@ -78,6 +79,11 @@ def _make_gs(units: List[Dict[str, Any]]) -> Dict[str, Any]:
         "action_logs": [],
         "action_log_seq": 0,
         "current_turn": 1,
+        # SOURCE UNIQUE, la meme qu'a l'init et au reset du moteur : les handlers de charge
+        # mesurent les distances 11.04 dans cet etat, et `require_key` y leve sans defaut. Le
+        # recopier a la main ici en ferait une troisieme definition, donc une divergence en
+        # attente.
+        **_charge_game_state_defaults(),
     }
     build_units_cache(gs)
     return gs
@@ -438,6 +444,50 @@ class TestTargetSelectionHandler:
         assert (gs["models_cache"]["1#0"]["col"], gs["models_cache"]["1#0"]["row"]) == before, (
             "la figurine a bougé malgré la charge ratée (11.02)"
         )
+
+    def test_a_target_destroyed_since_the_offer_fails_the_charge_without_raising(self):
+        """Cible morte entre l'offre et la sélection : échec de charge, PAS une exception.
+
+        Les morts sont retirés d'`units_cache` (`remove_unit_from_cache`), et le client peut
+        poster une sélection devenue obsolète. Le handler traite ce cas délibérément
+        (`_targets_ok = False` → `charge_fail`). La mesure des distances 11.04 lit `units_cache`
+        par `require_key` : posée avant cette validation, elle transformait un cas de jeu en
+        KeyError — une requête PvP en 500 et une activation laissée à moitié ouverte.
+        """
+        gs = _make_gs([_unit("1", 1, [(10, 10)]), _unit("2", 2, [(15, 10)])])
+        _activated(gs, "1", 8)
+        # Ce que fait la mort d'une escouade, réduit à ce qui compte ici : plus d'entrée de cache.
+        gs["units_cache"].pop("2")
+
+        ok, res = ch.charge_target_selection_handler(gs, "1", {"targetIds": ["2"]})
+
+        assert ok is True
+        assert res["action"] == "charge_fail"
+        # Aucune distance à une cible qui n'existe plus — l'absence est le résultat correct.
+        fail_log = [lg for lg in gs["action_logs"] if lg["type"] == "charge_fail"][-1]
+        assert fail_log["charge_target_distance_inches"] is None
+
+    def test_a_target_refused_by_1104_leaves_no_target_distance(self):
+        """Cible REFUSÉE à la déclaration : sa distance n'entre pas dans les statistiques.
+
+        Même montage que le test de distance maximale ci-dessus (vol déclaré, jet 6 → 4, cible à
+        5) : la boucle 11.04 rejette la cible. Mesurée AVANT ce rejet, sa distance partait
+        pourtant dans `charge_target_fail_*` et dans la part de déclarations à ≥ 9" — des
+        chiffres décrivant une cible que le moteur venait de refuser.
+        """
+        charger = _unit("1", 1, [(10, 10)])
+        charger["UNIT_KEYWORDS"] = [{"keywordId": "FLY"}]
+        gs = _make_gs([charger, _unit("2", 2, [(15, 10)])])
+        _activated(gs, "1", 6)
+        gs["units_took_to_skies_charge"].add("1")
+
+        ok, res = ch.charge_target_selection_handler(gs, "1", {"targetIds": ["2"]})
+
+        assert ok is True and res["action"] == "charge_fail"
+        fail_log = [lg for lg in gs["action_logs"] if lg["type"] == "charge_fail"][-1]
+        assert fail_log["charge_target_distance_inches"] is None
+        # La distance de DÉCLARATION, elle, existe : l'ennemi est bien là, à 12" ou moins.
+        assert fail_log["charge_nearest_enemy_inches"] is not None
 
 
 # ─────────────────────────────────────────────────────────────────────────────

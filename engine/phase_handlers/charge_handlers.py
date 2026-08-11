@@ -965,6 +965,10 @@ def charge_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     game_state["preview_hexes"] = []
     game_state["active_charge_unit"] = None
     game_state["charge_roll_values"] = {}  # Store 2d6 rolls per unit
+    # Meme portee que le jet ci-dessus, et pour la meme raison : une activation close sur WAIT
+    # ne passe par aucune cloture, donc son memo de distances survivrait a la phase et serait
+    # relu — la declaration du tour suivant heritant d'une distance mesuree au tour d'avant.
+    game_state["_charge_declaration_current"] = {}
     game_state["charge_target_selections"] = {}  # Store target selections per unit
     game_state["pending_charge_targets"] = []  # Store targets for gym training target selection
     game_state["pending_charge_unit_id"] = None  # Store unit ID waiting for target selection
@@ -2639,6 +2643,10 @@ def charge_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> No
     game_state["preview_hexes"] = []
     game_state["active_charge_unit"] = unit_id
     # Do NOT roll 2d6 here - roll happens after target selection
+    # Jumeau du chemin gym (`charge_roll_for_activation`) : ici le jet vient plus tard, mais la
+    # DECLARATION, elle, a lieu maintenant (11.02.1) — et c'est maintenant que le chargeur est
+    # encore a sa position de depart.
+    charge_record_declaration(game_state, unit_id)
 
 
 def charge_build_valid_targets(game_state: Dict[str, Any], unit_id: str, max_distance: Optional[int] = None) -> List[Dict[str, Any]]:
@@ -2875,6 +2883,9 @@ def charge_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> Tupl
             # n'atteint aucune cible → charge ÉCHOUÉE, unité consommée (pas un simple wait
             # qui la laisserait re-jeter). Badge d'échec côté UI (chemin charge_failed).
             current_turn = require_key(game_state, "turn")
+            # Echec SANS cible choisie : `charge_target_distance_subhex` reste None, et c'est
+            # l'information — l'agent a declare puis n'a rien pu viser.
+            _charge_dist = charge_record_outcome(game_state, unit["id"])
             append_action_log(
                 game_state,
                 {
@@ -2887,6 +2898,7 @@ def charge_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> Tupl
                     "charge_roll": charge_roll,
                     "charge_failed": True,
                     "timestamp": "server_time",
+                    **_charge_dist,
                 },
             )
             if unit_id in game_state["charge_roll_values"]:
@@ -3369,6 +3381,9 @@ def charge_roll_for_activation(game_state: Dict[str, Any], squad_id: str) -> int
 
     rolls = game_state.setdefault("charge_roll_values", {})
     squad_id = str(squad_id)
+    # AVANT le retour memoise : la declaration est le meme instant que le jet, et ce site est le
+    # seul par lequel le chemin gym passe a l'activation (masque comme commit).
+    charge_record_declaration(game_state, squad_id)
     if squad_id in rolls:
         return int(rolls[squad_id])
 
@@ -3387,6 +3402,114 @@ def charge_roll_for_activation(game_state: Dict[str, Any], squad_id: str) -> int
             charge_roll = roll_charge_distance(game_state, squad_id, previous_roll=charge_roll)
     rolls[squad_id] = int(charge_roll)
     return int(charge_roll)
+
+
+def _charge_max_distance(game_state: Dict[str, Any]) -> int:
+    """11.02 « within 12\" » — portee de DECLARATION, en subhex."""
+    return int(require_key(require_key(game_state["config"], "charge"), "charge_max_distance"))
+
+
+def charge_record_declaration(game_state: Dict[str, Any], unit_id: str) -> Dict[str, Any]:
+    """11.02.1 — l'activation VAUT declaration : fige la distance a l'ennemi le plus proche.
+
+    Enregistrement de distances de CETTE activation (get-or-create, idempotent). Une charge se
+    mesure en TROIS temps, sur trois sites de code : la declaration, le choix de la cible
+    (11.04) et l'issue. Ce memo est ce qui les relie ; il est cree au premier des trois qui se
+    presente, et la distance a l'ennemi le plus proche y est figee a cet instant — la seule
+    valeur qui ait un sens, puisque le chargeur BOUGE ensuite et qu'une mesure prise au site de
+    succes rendrait invariablement « au contact ».
+
+    Le get-or-create n'est pas un repli : c'est le meme memo par activation que
+    `charge_roll_values`, et les chemins gym et PvP n'entrent pas par la meme porte (masque
+    d'un cote, `charge_unit_activation_start` de l'autre). Exiger un ordre d'appel entre eux
+    ferait dependre une MESURE de l'ordre du code qu'elle mesure.
+    """
+    from engine.spatial_relations import enemy_entries_on_battlefield
+    from .shared_utils import charge_target_edge_distance_subhex
+
+    current = require_key(game_state, "_charge_declaration_current")
+    unit_id = str(unit_id)
+    if unit_id in current:
+        return current[unit_id]
+
+    units_cache = require_key(game_state, "units_cache")
+    entry = require_key(units_cache, unit_id)
+    player = int(require_key(entry, "player"))
+    # Borne = la portee de DECLARATION, pas le jet : un ennemi au-dela n'est de toute façon pas
+    # declarable, et borner par le jet tronquerait la mesure exactement sur les declarations
+    # lointaines qu'elle sert a compter.
+    max_declaration = _charge_max_distance(game_state)
+    record: Dict[str, Any] = {
+        # None = aucun ennemi POSE a portee de declaration. C'est une absence de mesure, pas une
+        # distance nulle : la moyenne ne doit pas la compter.
+        "nearest_subhex": min(
+            (
+                d
+                for _eid, enemy_entry in enemy_entries_on_battlefield(units_cache, player)
+                if (d := charge_target_edge_distance_subhex(
+                    entry, enemy_entry, max_declaration)) is not None
+            ),
+            default=None,
+        ),
+        "target_subhex": None,
+    }
+    current[unit_id] = record
+    return record
+
+
+def charge_record_target_choice(
+    game_state: Dict[str, Any], unit_id: str, target_id: str
+) -> None:
+    """11.04 — la cible est choisie : fige la distance a ELLE, avant tout mouvement.
+
+    C'est la grandeur que le 2D6 doit couvrir, donc la seule comparable a une table de
+    probabilite (« 41 % de declarations a >= 9\" pour un 2D6 qui n'atteint 9 que 27,8 % »).
+    """
+    from .shared_utils import charge_target_edge_distance_subhex
+
+    units_cache = require_key(game_state, "units_cache")
+    record = charge_record_declaration(game_state, unit_id)
+    record["target_subhex"] = charge_target_edge_distance_subhex(
+        require_key(units_cache, str(unit_id)),
+        require_key(units_cache, str(target_id)),
+        _charge_max_distance(game_state),
+    )
+
+
+def charge_record_outcome(game_state: Dict[str, Any], unit_id: str) -> Dict[str, Any]:
+    """Issue de l'activation → les deux distances, en pouces, a verser dans l'`action_log`.
+
+    Clot l'enregistrement ET rend les champs de log : les deux en un seul appel parce que la
+    cloture RETIRE le memo des activations en cours (sans quoi une activation d'un tour suivant
+    le relirait), donc toute lecture posee APRES aurait recree un enregistrement vierge — une
+    ligne de log a distances nulles.
+
+    La ligne ainsi decoree est le SEUL porteur de la mesure : la statistique d'episode se
+    derive d'`action_logs`, dans la meme passe et sur le meme couple de types que
+    `charge_attempts` / `charge_successes` (`w40k_core`). D'ou l'absence de parametre d'issue —
+    reussite ou echec est deja le `type` de la ligne, et un booleen a cote aurait ete une
+    seconde source pour la meme information, a sept sites, sans rien pour verifier qu'elles
+    s'accordent. D'ou aussi le fait qu'une activation close sur WAIT (11.02.3) n'entre nulle
+    part : elle n'emet aucune ligne.
+
+    Verse sur les succes comme sur les echecs : une mesure absente d'une moitie des issues ne
+    repond a aucune des deux questions qu'elle sert (« declarait-il trop loin ? », « les ratees
+    etaient-elles plus lointaines ? »).
+    """
+    record = charge_record_declaration(game_state, unit_id)
+    require_key(game_state, "_charge_declaration_current").pop(str(unit_id), None)
+    # En POUCES dans le journal, en subhex dans le memo : la ligne de step.log porte deja
+    # `[Roll: 9]`, et deux unites cote a cote sur la meme ligne se comparent de travers. La
+    # conversion passe par `inches_to_subhex`, jamais par une constante ecrite en dur.
+    ish = int(require_key(game_state, "inches_to_subhex"))
+    return {
+        "charge_nearest_enemy_inches": (
+            None if record["nearest_subhex"] is None else record["nearest_subhex"] / ish
+        ),
+        "charge_target_distance_inches": (
+            None if record["target_subhex"] is None else record["target_subhex"] / ish
+        ),
+    }
 
 
 def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: str, charge_roll: int,
@@ -4232,6 +4355,17 @@ def charge_target_selection_handler(game_state: Dict[str, Any], unit_id: str, ac
             break
         target_entries.append(_te)
     if _targets_ok and target_entries:
+        # 11.04 — la cible est DECLAREE : elle existe, elle est vivante, elle est dans la
+        # distance maximale du jet. La mesure vient APRES ces trois controles, jamais avant :
+        #  - avant, elle lisait `units_cache` pour une cible qui peut avoir ete DETRUITE depuis
+        #    l'offre (les morts sont retires du cache, `shared_utils.remove_unit_from_cache`),
+        #    donc un `require_key` levait la ou le handler prend deliberement la branche
+        #    `_targets_ok = False` -> `charge_fail` ; une instrumentation ne change pas le flot ;
+        #  - avant, elle figeait aussi la distance d'une cible que la boucle vient de REFUSER —
+        #    typiquement une bascule Take to the skies (21.03) qui retire 2" a la distance max —
+        #    et cette distance partait ensuite dans les statistiques des charges ratees.
+        # Le chargeur n'a toujours pas bouge ici : le pool ne fait que chercher des ancres.
+        charge_record_target_choice(game_state, unit_id, target_id)
         _t_bfs0 = time.perf_counter() if _perf else None
         bfs_reachable = charge_build_valid_destinations_pool(
             game_state,
@@ -4281,7 +4415,8 @@ def charge_target_selection_handler(game_state: Dict[str, Any], unit_id: str, ac
             game_state["action_logs"] = []
         
         current_turn = require_key(game_state, "turn")
-        
+
+        _charge_dist = charge_record_outcome(game_state, unit["id"])
         append_action_log(
             game_state,
             {
@@ -4295,6 +4430,7 @@ def charge_target_selection_handler(game_state: Dict[str, Any], unit_id: str, ac
                 "charge_roll": charge_roll,
                 "charge_failed": True,
                 "timestamp": "server_time",
+                **_charge_dist,
             },
         )
 
@@ -5710,6 +5846,7 @@ def charge_commit_move_plan_handler(
                 "toRow": int(nr),
             }
         )
+    _charge_dist = charge_record_outcome(game_state, unit["id"])
     append_action_log(
         game_state,
         {
@@ -5736,6 +5873,7 @@ def charge_commit_move_plan_handler(
             "timestamp": "server_time",
             "is_ai_action": unit["player"] == 1,
             "moveDetails": move_details,
+            **_charge_dist,
         },
     )
     add_console_log(game_state, charge_message)
@@ -5837,6 +5975,7 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
         
         current_turn = require_key(game_state, "turn")
         
+        _charge_dist = charge_record_outcome(game_state, unit["id"])
         append_action_log(
             game_state,
             {
@@ -5850,6 +5989,7 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
                 "charge_roll": charge_roll,
                 "charge_failed": True,
                 "timestamp": "server_time",
+                **_charge_dist,
             },
         )
 
@@ -5976,6 +6116,7 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
         f"to ({dest_col}, {dest_row}) [Roll:{charge_roll}]"
     )
 
+    _charge_dist = charge_record_outcome(game_state, unit["id"])
     append_action_log(
         game_state,
         {
@@ -6000,6 +6141,7 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
             "action_name": action_name,
             "reward": round(action_reward, 2),
             "is_ai_action": unit["player"] == 1,
+            **_charge_dist,
         },
     )
     add_console_log(game_state, charge_message)
@@ -6122,6 +6264,9 @@ def charge_phase_end(game_state: Dict[str, Any]) -> Dict[str, Any]:
 
     # Clear all charge rolls (phase complete)
     game_state["charge_roll_values"] = {}
+    # Jumeau de `charge_phase_start` : les activations non closes (WAIT) ne doivent pas franchir
+    # la borne de phase.
+    game_state["_charge_declaration_current"] = {}
 
     # Track phase completion reason
     if 'last_compliance_data' not in game_state:
