@@ -657,7 +657,9 @@ faut pas lui faire dire qu'un chantier a sa ligne.
 
 Ce qu'elle NE fait pas non plus : juger si la ligne écrite est juste, ni voir un chantier livré par
 un commit direct sur `main`. Contournement assumé quand la fusion n'est pas un chantier :
-`git merge --no-verify`. État courant sans rien bloquer : `--status`.
+`ROADMAP_GATE=off git merge …` — **pas** `--no-verify`, qui ne saute pas `prepare-commit-msg`.
+Pour se débloquer APRÈS un refus, sans annuler la fusion : écrire la ligne, `git add -A`,
+`git commit` — l'index vaut déclaration. État courant sans rien bloquer : `--status`.
 
 ✅ **La porte ne meurt plus sur une trace Python** (2026-08-11). Deux états REPRODUITS la tuaient en
 `CalledProcessError` de dix lignes : `--merge` lancé hors fusion, et — atteignable par le hook réel —
@@ -703,6 +705,18 @@ saute encore, tout le reste ÉCHOUE. (3) Le test « la porte est morte en `pre-m
 n'affirmait que `rc == 0`, soit le résultat de ne rien faire : il fusionne maintenant deux fois dans
 le même dépôt, le même corps de hook branché aux deux moments, et exige que le second REFUSE.
 (4) Calibrage re-mesuré (voir ci-dessus). Les trois verrous vérifiés ROUGES défaut remis.
+
+✅ **La sortie de secours existe pour de bon, et le refus ne piège plus** (2026-08-12, 4ᵉ passe
+`/code-review`). Deux défauts REPRODUITS, qui se cumulaient en impasse : (1) `git merge
+--no-verify`, annoncé par le refus ET par la doc, ne saute que `pre-merge-commit` et `commit-msg`,
+jamais `prepare-commit-msg` — la porte refusait quand même ; (2) la remédiation dictée (« écris
+leurs lignes puis relance ») ne débloquait rien, parce que ni la dette ni la branche fusionnée ne
+regardent l'INDEX : on pouvait écrire sa ligne, `git add`, `git commit`, et se faire refuser à
+l'identique, coincé au milieu d'une fusion. Désormais l'index vaut déclaration, le désarmement se
+fait par `ROADMAP_GATE=off` (et la porte le DIT au lieu de se taire), et le refus n'indique plus
+que des issues qui existent. Un troisième vert vacant fermé au passage : les fixtures passaient
+`--no-verify` avant toute installation de hook, donc rien n'y testait la sortie de secours.
+Verrous vérifiés ROUGES défaut remis.
 
 **Deux pièges déjà payés, à ne pas reprendre pour des régressions.** (1) Un contrôle de liens naïf
 rend **152 hits** dont aucun n'est mort (143 dans `Implémenté/stage.md`, 5 dans `Boardx10-audit.md`,

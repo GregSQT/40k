@@ -11,6 +11,7 @@ un échantillon qui bouge à chaque fusion.
 from __future__ import annotations
 
 import importlib.util
+import os
 import pathlib
 import subprocess
 
@@ -74,9 +75,14 @@ def test_the_refusal_names_the_undeclared_chantiers() -> None:
         assert line in message
 
 
-def test_the_refusal_states_its_escape_hatch() -> None:
+def test_the_refusal_states_the_escape_hatch_that_exists() -> None:
+    """Le refus indiquait `--no-verify`, qui ne désarme pas cette porte : une issue murée.
+
+    Il doit nommer celle qui marche, ET la remédiation qui débloque sans annuler la fusion.
+    """
     _ok, message = gate.verdict(merges(gate.MAX_UNDECLARED), branch_declares=False)
-    assert "--no-verify" in message
+    assert f"{gate.GATE_OFF_ENV}=off" in message
+    assert "git add" in message and "git commit" in message
 
 
 def test_the_hook_is_installed_and_executable() -> None:
@@ -143,7 +149,12 @@ def run(repo: pathlib.Path, *args: str) -> str:
 
 
 def scratch_repo(tmp_path: pathlib.Path) -> pathlib.Path:
-    """Dépôt jetable reproduisant la forme qui compte : un chemin ACCENTUÉ et des fusions."""
+    """Dépôt jetable reproduisant la forme qui compte : un chemin ACCENTUÉ et des fusions.
+
+    Les fixtures fabriquent leur historique AVANT d'installer le moindre hook : elles portaient un
+    `--no-verify` qui n'avait donc aucun effet observable, et laissait croire qu'un test couvrait
+    la sortie de secours. Il est retiré ; la sortie de secours a désormais son propre test.
+    """
     repo = tmp_path / "depot"
     (repo / "Documentation" / "Implémentation").mkdir(parents=True)
     run(repo.parent, "init", "-q", "-b", "main", str(repo))
@@ -170,7 +181,7 @@ def merge_branch(repo: pathlib.Path, name: str, touch_roadmap: bool) -> None:
         run(repo, "add", "-A")
         run(repo, "commit", "-qm", f"code de {name}")
     run(repo, "checkout", "-q", "main")
-    run(repo, "merge", "-q", "--no-ff", "--no-verify", "-m", f"merge: {name}", name)
+    run(repo, "merge", "-q", "--no-ff", "-m", f"merge: {name}", name)
 
 
 def _install_hook(repo: pathlib.Path, hook_name: str, body: str) -> None:
@@ -246,7 +257,7 @@ def scratch_repo_with_debt(tmp_path: pathlib.Path, count: int) -> pathlib.Path:
         run(repo, "add", "-A")
         run(repo, "commit", "-qm", f"code ch{i}")
         run(repo, "checkout", "-q", "main")
-        run(repo, "merge", "-q", "--no-ff", "--no-verify", "-m", f"merge: ch{i}", f"ch{i}")
+        run(repo, "merge", "-q", "--no-ff", "-m", f"merge: ch{i}", f"ch{i}")
     return repo
 
 
@@ -596,6 +607,83 @@ def test_an_unexpected_git_failure_refuses_readably(tmp_path: pathlib.Path) -> N
     assert result.returncode == 2
     assert "contrôle impossible" in result.stderr
     assert "--no-verify" in result.stderr
+
+
+def _repo_at_the_ceiling_with_the_gate_armed(tmp_path: pathlib.Path) -> pathlib.Path:
+    """Dépôt où la PROCHAINE fusion sera refusée, porte réellement branchée."""
+    repo = scratch_repo_with_debt(tmp_path, gate.MAX_UNDECLARED)
+    _setup_repo_with_script(repo)
+    _install_hook(repo, "prepare-commit-msg", _NEW_HOOK_BODY)
+    run(repo, "checkout", "-qb", "ch-refuse")
+    (repo / "extra.py").write_text("x\n", encoding="utf-8")
+    run(repo, "add", "-A")
+    run(repo, "commit", "-qm", "code ch-refuse")
+    run(repo, "checkout", "-q", "main")
+    return repo
+
+
+def test_the_announced_escape_hatch_actually_works(tmp_path: pathlib.Path) -> None:
+    """Une sortie de secours annoncée mais murée est pire que pas de sortie du tout.
+
+    Mesuré le 2026-08-12 sur git 2.43 : `git merge --no-verify` — ce que le refus indiquait —
+    ne saute PAS `prepare-commit-msg`, donc la porte refusait quand même et l'utilisateur restait
+    coincé au milieu de sa fusion. Le test exerce la sortie RÉELLEMENT annoncée aujourd'hui.
+    """
+    repo = _repo_at_the_ceiling_with_the_gate_armed(tmp_path)
+    avant = run(repo, "log", "--oneline", "--first-parent").count("\n") + 1
+
+    refuse = subprocess.run(
+        ["git", "merge", "--no-ff", "--no-verify", "-m", "merge: ch-refuse", "ch-refuse"],
+        cwd=repo, capture_output=True, text=True,
+    )
+    assert refuse.returncode != 0, (
+        "`--no-verify` n'atteint pas `prepare-commit-msg` : la porte doit refuser malgré lui — "
+        "c'est précisément pourquoi il ne peut pas servir de sortie de secours"
+    )
+    run(repo, "merge", "--abort")
+
+    passe = subprocess.run(
+        ["git", "merge", "--no-ff", "-m", "merge: ch-refuse", "ch-refuse"],
+        cwd=repo, capture_output=True, text=True,
+        env={**os.environ, gate.GATE_OFF_ENV: "off"},
+    )
+    apres = run(repo, "log", "--oneline", "--first-parent").count("\n") + 1
+
+    assert passe.returncode == 0, (
+        f"la sortie de secours annoncée doit laisser passer :\n{passe.stderr}"
+    )
+    assert apres == avant + 1, "le commit de fusion doit exister"
+    assert "désarmée" in passe.stdout + passe.stderr, "le désarmement doit se DIRE, pas se taire"
+
+
+def test_writing_the_line_during_the_merge_unblocks_it(tmp_path: pathlib.Path) -> None:
+    """La remédiation dictée par le refus doit débloquer. Elle ne débloquait pas.
+
+    Ni la dette (historique) ni la branche fusionnée ne regardent l'index : l'utilisateur écrivait
+    sa ligne, `git add`, `git commit` — et se faisait refuser à l'identique, sans issue.
+    """
+    repo = _repo_at_the_ceiling_with_the_gate_armed(tmp_path)
+    refuse = subprocess.run(
+        ["git", "merge", "--no-ff", "-m", "merge: ch-refuse", "ch-refuse"],
+        cwd=repo, capture_output=True, text=True,
+    )
+    assert refuse.returncode != 0 and (repo / ".git" / "MERGE_HEAD").exists(), (
+        "le test ne prouve rien sans un refus au milieu d'une fusion"
+    )
+    avant = run(repo, "log", "--oneline", "--first-parent").count("\n") + 1
+
+    (repo / gate.ROADMAP).write_text("la ligne écrite pour se débloquer", encoding="utf-8")
+    run(repo, "add", "-A")
+    result = subprocess.run(
+        ["git", "commit", "-m", "merge: ch-refuse + sa ligne"],
+        cwd=repo, capture_output=True, text=True,
+    )
+    apres = run(repo, "log", "--oneline", "--first-parent").count("\n") + 1
+
+    assert result.returncode == 0, (
+        f"écrire la ligne et committer DOIT sortir de l'impasse :\n{result.stdout}{result.stderr}"
+    )
+    assert apres == avant + 1
 
 
 def test_gate_blocks_violations_with_prepare_commit_msg_hook(tmp_path: pathlib.Path) -> None:

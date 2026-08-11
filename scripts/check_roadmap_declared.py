@@ -53,7 +53,11 @@ Usage : python3 scripts/check_roadmap_declared.py --merge   (depuis le hook `pre
 Sortie : 0 si la dette est sous le plafond, 1 si la porte refuse, 2 si elle n'a PAS PU se
         prononcer (usage faux, `--merge` hors fusion, état du dépôt inattendu). Une porte qui ne
         sait pas ne dit jamais oui : 2 bloque le commit comme 1, mais l'annonce autrement.
-Contournement assumé : `git merge --no-verify`.
+Contournement assumé : `ROADMAP_GATE=off git merge …`.
+⚠️ PAS `--no-verify` : mesuré le 2026-08-12 sur git 2.43, `git merge --no-verify` saute
+`pre-merge-commit` et `commit-msg`, JAMAIS `prepare-commit-msg` — là où cette porte vit depuis
+qu'elle a besoin de MERGE_HEAD. La sortie de secours annoncée pendant un jour n'existait donc pas :
+le refus enfermait l'utilisateur au milieu d'une fusion, en lui indiquant une porte murée.
 
 JAMAIS DE TRACE PYTHON EN SORTIE. Mesuré le 2026-08-11 : `--merge` mourait sur une
 `CalledProcessError` de dix lignes dans deux états atteignables — sans fusion en cours, et pendant
@@ -64,6 +68,7 @@ feu vert ou un refus LISIBLE — filet de sécurité compris (voir `__main__`).
 """
 from __future__ import annotations
 
+import os
 import pathlib
 import subprocess
 import sys
@@ -78,6 +83,11 @@ ROADMAP = "Documentation/Implémentation/ROADMAP.md"
 #: seule fois sur les 41 fusions du flux moderne. À 2 elle en refuse 2, qui sont précisément les
 #: deux chantiers dont on sait qu'ils n'avaient pas pris leur ligne.
 MAX_UNDECLARED = 2
+
+#: Désarmement explicite, et VISIBLE : la porte annonce elle-même qu'elle s'est tue. Elle a
+#: annoncé `--no-verify` pendant un jour, qui ne saute pas `prepare-commit-msg` — un refus dont
+#: la sortie de secours n'existe pas enferme l'utilisateur au milieu d'une fusion.
+GATE_OFF_ENV = "ROADMAP_GATE"
 
 #: Seule branche où « livrer » a un sens. Fusionner `main` DANS un worktree est l'opération
 #: inverse : elle n'apporte rien de neuf au projet.
@@ -100,9 +110,13 @@ def verdict(undeclared: list[str], branch_declares: bool) -> tuple[bool, str]:
         f"{count} chantiers ont été livrés dans `{PROTECTED_BRANCH}` sans que la feuille de route\n"
         f"   ne bouge :\n{listing}\n\n"
         f"   {ROADMAP} se déclare source unique de l'ordre du travail. Qui l'ouvre pour décider de\n"
-        "   la suite décide sur un état du projet qui n'existe plus. Écris leurs lignes — celle de\n"
-        "   la fusion en cours comprise — puis relance.\n\n"
-        "   Si aucun de ces merges n'est un chantier : git merge --no-verify"
+        "   la suite décide sur un état du projet qui n'existe plus.\n\n"
+        "   POUR SORTIR, sans annuler la fusion en cours :\n"
+        f"     écris leurs lignes — celle de la fusion comprise — dans {ROADMAP},\n"
+        "     puis  git add -A  et  git commit.  L'index compte : la ligne écrite ici et\n"
+        "     maintenant vaut déclaration.\n\n"
+        "   Si aucun de ces merges n'est un chantier : ROADMAP_GATE=off git merge …\n"
+        "   (`--no-verify` ne saute PAS `prepare-commit-msg` : il ne désarme pas cette porte.)"
     )
 
 
@@ -150,6 +164,19 @@ def assert_git_answers() -> None:
     `__main__`, qui refuse en clair — un état inconnu ne devient jamais un feu vert.
     """
     git("rev-parse", "--is-inside-work-tree")
+
+
+def index_declares() -> bool:
+    """La ligne écrite ET indexée MAINTENANT vaut déclaration.
+
+    Sans ça, le refus dictait une remédiation qui ne débloquait rien : la dette regarde
+    l'historique, `branch_touches_roadmap` regarde la branche, aucune des deux ne voit ce que
+    l'utilisateur vient d'écrire. Il pouvait donc écrire sa ligne, `git add`, `git commit`, et se
+    faire refuser à l'identique — au milieu d'une fusion, sans issue (mesuré le 2026-08-12).
+    C'est aussi la définition la plus juste de « cette livraison déclare » : ce que le commit en
+    train de se faire contient.
+    """
+    return ROADMAP in git("diff", "--cached", "--name-only", "HEAD").split("\n")
 
 
 def merge_heads() -> list[str]:
@@ -203,6 +230,12 @@ def main(argv: list[str]) -> int:
         print(__doc__)
         return 2
     if mode == "--merge":
+        if os.environ.get(GATE_OFF_ENV) == "off":
+            # Désarmement VOULU, et dit à voix haute : un contournement silencieux ne se distingue
+            # pas d'une porte cassée. C'est la seule sortie de secours qui marche — `--no-verify`
+            # n'atteint pas `prepare-commit-msg`.
+            print(f"↷ feuille de route : porte désarmée par {GATE_OFF_ENV}=off")
+            return 0
         # L'ORDRE COMPTE : tant que git n'a pas répondu une fois, l'échec de `symbolic-ref` est
         # ambigu — détachement ou panne. La sonde tranche, et laisse la panne partir au filet.
         assert_git_answers()
@@ -229,7 +262,8 @@ def main(argv: list[str]) -> int:
             )
             return 2
         # UNE tête qui déclare suffit : la livraison a sa ligne, peu importe laquelle l'apporte.
-        declares = any(branch_touches_roadmap("HEAD", head) for head in heads)
+        # L'index compte au même titre : c'est là qu'atterrit la ligne écrite pour se débloquer.
+        declares = index_declares() or any(branch_touches_roadmap("HEAD", h) for h in heads)
     else:
         declares = False
     ok, message = verdict(undeclared_merges("HEAD"), declares)
