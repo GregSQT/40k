@@ -1,0 +1,5 @@
+#!/bin/sh
+# Un chantier livré dans `main` met sa ligne à jour dans la feuille de route.
+# Mesuré le 2026-08-11 : 3 des 7 dernières livraisons ne l'avaient pas fait.
+# Détail, bornes et contournement : scripts/check_roadmap_declared.py
+exec python3 "$(git rev-parse --show-toplevel)/scripts/check_roadmap_declared.py" --merge
