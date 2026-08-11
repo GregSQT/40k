@@ -730,6 +730,17 @@ avant de l'exercer : il validait depuis un dépôt propre, jamais depuis l'état
 sa propre docstring — l'abort est retiré, la sortie s'exerce MERGE_HEAD présent. Trois verrous
 vérifiés ROUGES défaut remis.
 
+✅ **Deux verrous redevenus vacants par une livraison ULTÉRIEURE** (2026-08-12, 6ᵉ passe
+`/code-review`). Les tests de la pieuvre et des histoires sans ancêtre étaient bien ROUGES le jour
+où ils ont été écrits ; l'ajout de `index_declares()` — trois heures plus tard, dans une autre
+livraison — les a rendus verts pour une autre raison que celle qu'ils annoncent : `declares`
+court-circuite sur l'index, vrai dès qu'une fusion est en cours, donc `merge_heads()` et
+`branch_touches_roadmap` n'étaient plus atteints du tout. Remettre l'un ou l'autre défaut les
+laissait VERTS (mesuré). Les deux tests appellent désormais la fonction concernée EN DIRECT, en
+plus du bout-en-bout, et les deux défauts d'origine les rendent de nouveau ROUGES. ⚠️ La leçon
+n'est pas locale : un verrou prouvé rouge à sa naissance peut être désarmé par un raccourci ajouté
+plus tard EN AMONT de lui — c'est le seul cas où « le test est passé rouge une fois » ne suffit pas.
+
 **Deux pièges déjà payés, à ne pas reprendre pour des régressions.** (1) Un contrôle de liens naïf
 rend **152 hits** dont aucun n'est mort (143 dans `Implémenté/stage.md`, 5 dans `Boardx10-audit.md`,
 tous des `file:///`, qui sont ABSOLUS par convention CLAUDE.md) ; le script les résout comme tels.
