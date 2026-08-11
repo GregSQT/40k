@@ -261,7 +261,7 @@ def handle_shoot(
         from ai.analyzer_perfig import weapon_profile_for_line
         weapon_info_matched, weapon_carrier_type, _ambiguous_carriers = weapon_profile_for_line(
             parse_shooter_models_segment(action_desc), state.model_types, shooter_unit_type,
-            weapon_display_name, config.unit_weapons_cache,
+            weapon_display_name, config.unit_weapons_cache, is_melee=False,
         )
         if weapon_info_matched is not None:
             is_close_quarters = weapon_info_matched['is_close_quarters']
@@ -978,7 +978,11 @@ def handle_wait(
             wait_row = int(unit_match.group(3))
             wait_unit_type = require_key(state.unit_types, wait_unit_id)
             available_weapons = require_key(config.unit_weapons_cache, wait_unit_type)
-            ranged_weapons = [w for w in available_weapons if require_key(w, 'range') > 0]
+            # Filtre sur `is_melee` et non sur `range > 0` : la portée nulle d'une arme de mêlée
+            # l'écarterait par accident, alors que ce qu'on veut dire ici est « les armes avec
+            # lesquelles cette unité pouvait TIRER ». Le jour où une arme de tir aurait une
+            # portée 0, le filtre par la portée l'aurait avalée en silence.
+            ranged_weapons = [w for w in available_weapons if not require_key(w, 'is_melee')]
             enemy_player = 3 - player
             # Grandeurs constantes sur toute la ligne : zone d'engagement et cartes verticales
             # viennent de l'entête `Run rules:` du journal, elles ne dépendent d'aucune cible.

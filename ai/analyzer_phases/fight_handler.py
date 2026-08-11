@@ -61,6 +61,75 @@ def _cc_cap_for_line(
     return cap + cleave_dice, cleave_error
 
 
+def _note_melee_weapon_rule_usage(
+    state: "AnalyzerState",
+    config: "AnalyzerConfig",
+    stats: dict,
+    action_desc: str,
+    line: str,
+    turn: int,
+    phase: str,
+    fighter_id: str,
+    fighter_unit_type: str,
+    weapon_display_name: str,
+    player: int,
+) -> None:
+    """Usage des règles d'armes de MÊLÉE (§1.8) — jumeau du site de tir, qui vivait seul.
+
+    Le tableau §1.8 était bâti sur le seul équipement de TIR : aucune arme de mêlée n'y figurait,
+    donc aucune règle propre à la mêlée n'a jamais été comptée. 32 paires (règle, arme) étaient
+    hors du champ de la mesure, dont les deux armes [CLEAVE] dont le moteur écrit le token.
+
+    CE QUI EST COMPTÉ ICI, et rien d'autre : les règles dont la ligne `FOUGHT` porte la trace.
+      - `[CLEAVE:X]` et `[SUSTAINED HITS]` : tokens posés par le moteur quand la règle a JOUÉ ;
+      - `TWIN_LINKED` : comptée sur la DÉCLARATION de l'arme, exactement comme au tir (la
+        relance qu'elle ouvre n'a pas de trace propre dans la ligne).
+
+    CE QUI RESTE MUET, et pourquoi — le dire est la seule façon que le tableau ne mente pas :
+      - `DEVASTATING_WOUNDS` (5 armes de mêlée) : le formateur de mêlée n'écrit PAS
+        `Save [DEVASTATING WOUNDS]`, là où celui du tir l'écrit. Rien à lire, donc rien à
+        compter — et c'est un défaut du LOG, signalé au chantier, pas un compteur oublié ici ;
+      - `ANTI-X`, `PSYCHIC`, `EXTRA_ATTACKS`, `LETHAL_HITS`, `PRECISION`, `CLOSE_QUARTERS` :
+        aucun token dans `step.log`, ni au tir ni en mêlée (ABSENT-LOG-MANQUANT de §3). Elles
+        ressortent « NOT USED » des DEUX côtés, ce qui est exact : la mesure n'existe pas.
+    """
+    from ai.analyzer_perfig import weapon_profile_for_line
+
+    if not fighter_unit_type:
+        return
+    weapon_info, carrier_type, ambiguous = weapon_profile_for_line(
+        parse_shooter_models_segment(action_desc), state.model_types, fighter_unit_type,
+        weapon_display_name, config.unit_weapons_cache, is_melee=True,
+    )
+    if ambiguous:
+        # Plusieurs datasheets hors escouade déclarent cette arme : le journal ne dit pas
+        # laquelle a frappé. Attribuer au hasard inventerait un usage — même traitement qu'au
+        # tir, le cas se voit dans `parse_errors` au lieu de se ranger sous une étiquette fausse.
+        stats['parse_errors'].append({
+            'episode': state.current_episode_num,
+            'turn': turn,
+            'phase': phase,
+            'line': line.strip(),
+            'error': (
+                f"Ambiguous melee weapon carrier for '{weapon_display_name}': "
+                f"{', '.join(ambiguous)}"
+            ),
+        })
+        return
+    if weapon_info is None or carrier_type is None:
+        return
+    weapon_rules_list = require_key(weapon_info, "rules")
+    weapon_key = f"{weapon_display_name} ({carrier_type})"
+    fighter_pl = require_key(state.unit_player, fighter_id)
+    pl_int = int(fighter_pl) if fighter_pl is not None else player
+    if "TWIN_LINKED" in weapon_rules_list:
+        stats['weapon_rule_usage'][("TWIN_LINKED", weapon_key)][pl_int] += 1
+    if re.search(r'\[SUSTAINED(?: |_)?HITS\]', action_desc, re.IGNORECASE):
+        stats['weapon_rule_usage'][("SUSTAINED_HITS", weapon_key)][pl_int] += 1
+    if re.search(r'\[CLEAVE:\d+\]', action_desc, re.IGNORECASE):
+        stats['weapon_rule_usage'][("CLEAVE", weapon_key)][pl_int] += 1
+
+
 def handle_fight(
     state: "AnalyzerState",
     config: "AnalyzerConfig",
@@ -166,6 +235,10 @@ def handle_fight(
             check_wound_threshold(
                 state, config, stats, line, action_desc, player, fighter_unit_type,
                 weapon_display_name, target_id, parse_shooter_models_segment(action_desc), is_melee=True,
+            )
+            _note_melee_weapon_rule_usage(
+                state, config, stats, action_desc, line, turn, phase,
+                fighter_id, fighter_unit_type, weapon_display_name, player,
             )
             # RULE METRICS: Targeted Intercession granted reroll mechanics (fight)
             if re.search(r'\(TARGETED_INTERCESSION\)', action_desc, re.IGNORECASE):

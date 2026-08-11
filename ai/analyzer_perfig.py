@@ -313,8 +313,16 @@ def weapon_profile_for_line(
     squad_unit_type: str,
     weapon_display_name: str,
     unit_weapons_cache: Dict[str, List[Dict[str, Any]]],
+    is_melee: bool,
 ) -> Tuple[Optional[Dict[str, Any]], Optional[str], Tuple[str, ...]]:
     """Profil d'arme d'UNE ligne et DATASHEET qui le porte — `(info, porteur, ambigus)`.
+
+    `is_melee` = phase de la LIGNE, et c'est un paramètre OBLIGATOIRE : trois noms d'affichage
+    désignent deux profils différents selon la phase (`Castellan Axe`, `Guardian Spear`,
+    `Sentinel Blade`, chez les Custodes). Résoudre par le seul nom rendrait pour ces trois-là le
+    profil de l'autre phase — donc ses règles dans le tableau d'usage, et une portée absente
+    pour un contrôle de portée de tir. Aucun défaut : c'est l'appelant qui sait d'où vient sa
+    ligne, le deviner ici serait une seconde définition de la phase.
 
     Le profil était cherché dans le seul équipement du TYPE D'ESCOUADE. Une arme portée par un
     personnage rattaché (règle 19) ou par un sergent n'y est pas : elle ressortait introuvable,
@@ -345,6 +353,8 @@ def weapon_profile_for_line(
         if not unit_type:
             return None
         for weapon_info in unit_weapons_cache.get(unit_type, []):  # get allowed : type hors registre
+            if require_key(weapon_info, "is_melee") != is_melee:
+                continue
             if require_key(weapon_info, "name").lower() == weapon_name_lower:
                 return weapon_info
         return None

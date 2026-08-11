@@ -341,6 +341,33 @@ def load_analyzer_config() -> AnalyzerConfig:
                         "range": require_key(weapon, "RNG") * inches_to_subhex,
                         "rules": weapon_rules,
                         "is_close_quarters": "CLOSE_QUARTERS" in weapon_rules,
+                        "is_melee": False,
+                    }
+                )
+        # Armes de MÊLÉE dans le même registre. Sans elles, aucune règle propre à la mêlée
+        # n'existait pour le rapport : le tableau d'usage §1.8 était intégralement construit sur
+        # ce cache, donc il ne listait que des armes de tir et déclarait implicitement que les
+        # 54 profils de mêlée des rosters n'ont aucune règle. Mesuré : 32 paires (règle, arme)
+        # invisibles, dont les 2 armes [CLEAVE] dont le moteur écrit désormais le token.
+        #
+        # `is_melee` n'est PAS décoratif : trois noms d'affichage existent des DEUX côtés
+        # (`Castellan Axe`, `Guardian Spear`, `Sentinel Blade` — profils Custodes tir + mêlée).
+        # Sans le drapeau, la résolution par nom rendrait pour ces trois-là le profil de l'autre
+        # phase : règles fausses dans le tableau d'usage, et surtout portée absente pour un
+        # contrôle de portée de tir. Chaque lecture filtre donc selon la phase de la ligne.
+        #
+        # `range` vaut 0 : une arme de mêlée n'a pas de portée, ce n'est pas une valeur
+        # manquante qu'on masquerait. Les lecteurs de portée écartent d'abord `is_melee`.
+        for weapon in cc_weapons:
+            if isinstance(weapon, dict):
+                weapon_rules = require_key(weapon, "WEAPON_RULES")
+                weapons_info.append(
+                    {
+                        "name": require_key(weapon, "display_name"),
+                        "range": 0,
+                        "rules": weapon_rules,
+                        "is_close_quarters": "CLOSE_QUARTERS" in weapon_rules,
+                        "is_melee": True,
                     }
                 )
         unit_weapons_cache[unit_type] = weapons_info
@@ -466,6 +493,12 @@ def load_analyzer_config() -> AnalyzerConfig:
             cc_nb_by_weapon_global[_wname] = max(cc_nb_by_weapon_global.get(_wname, 0), _nb)  # get allowed : max cumulatif, 0 = neutre
     for _ut, _winfos in unit_weapons_cache.items():
         for _winfo in _winfos:
+            # Cartes de TIR : les entrées de mêlée en sont exclues, et pas seulement parce que
+            # leur portée vaut 0. Trois noms existent des deux côtés : y laisser entrer le profil
+            # de mêlée ferait porter à ces armes un `is_close_quarters` qui n'est pas celui de
+            # leur profil de tir — un `or` cumulatif ne se rattrape pas.
+            if require_key(_winfo, "is_melee"):
+                continue
             _wname = _winfo["name"]
             weapon_range_global[_wname] = max(weapon_range_global.get(_wname, 0), _winfo["range"])  # get allowed : max cumulatif, 0 = neutre
             weapon_is_close_quarters_global[_wname] = weapon_is_close_quarters_global.get(_wname, False) or _winfo["is_close_quarters"]
