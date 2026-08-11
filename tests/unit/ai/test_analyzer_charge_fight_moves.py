@@ -51,7 +51,7 @@ def _charge_line(dest: str, roll: int, models: str, token: str = "") -> str:
 def _advance_line(dest: str, models: str) -> str:
     return (
         f"[10:00:02] E1 T1 P1 MOVE : Unit 1({dest[1:-1]}) ADVANCED from (50,50) to {dest} "
-        f"[Roll: 3] [Strategy: aggressive] [R:+0.0] [MODELS: {models}] [SUCCESS]\n"
+        f"[Roll: 3] [R:+0.0] [MODELS: {models}] [SUCCESS]\n"
     )
 
 

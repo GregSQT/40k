@@ -626,3 +626,125 @@ def test_la_melee_nomme_aussi_la_relance_twin_linked(monkeypatch, tmp_path):
     line = _step_log_fight_line(tmp_path, gs, raw_log)
 
     assert "[TWIN-LINKED]" in line, line
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# [MELTA X] 24.25 — le token n'atteignait PAS step.log
+#
+# Le moteur applique bien le bonus de dégâts (`shared_utils` : `dmg_bonus`), et le token
+# `[MELTA:X]` existait — mais seulement dans la ligne de synthèse du Game Log, dont un
+# commentaire du moteur note lui-même qu'« aucun consommateur ne l'analyse ». Le journal que
+# lisent l'analyzer et le replay, lui, ne portait rien : mesuré sur le run du 2026-08-11,
+# 708 tirs de Multi-Melta et une paire (MELTA, Multi-Melta) rendue « NOT USED » par le rapport.
+# ─────────────────────────────────────────────────────────────────────────────
+
+MELTA_UNIT = "LandSpeederOnslaughtGatlingCannon"
+MELTA_WEAPON = "Multi-Melta"   # armurerie : ["HEAVY", "MELTA:2"]
+
+
+def test_le_token_melta_atteint_step_log(monkeypatch, tmp_path):
+    """Cible dans la demi-portée → bonus appliqué → la ligne doit porter `[MELTA:2]`.
+
+    Grammaire commune à [RAPID FIRE:X] : le X est celui que DÉCLARE l'arme, jamais le total
+    de dégâts ajoutés."""
+    gs, raw_log = _engine_shoot_log(monkeypatch, ["MELTA:2"], [3, 4, 2],
+                                    unit_type=MELTA_UNIT, weapon_name=MELTA_WEAPON)
+    line = _step_log_line(tmp_path, gs, raw_log)
+
+    assert "[MELTA:2]" in line, line
+
+
+def test_hors_demi_portee_pas_de_token_melta(monkeypatch, tmp_path):
+    """Contre-épreuve 24.25 : « if the target was within half range ». Hors demi-portée le
+    bonus n'est pas appliqué, donc rien ne doit être dit — un token posé sur la seule
+    déclaration de l'arme ferait compter une règle qui n'a pas joué."""
+    gs, raw_log = _engine_shoot_log(monkeypatch, ["MELTA:2"], [3, 4, 2], target=TARGET_FAR,
+                                    unit_type=MELTA_UNIT, weapon_name=MELTA_WEAPON)
+    line = _step_log_line(tmp_path, gs, raw_log)
+
+    assert "MELTA" not in line, line
+
+
+def test_l_analyzer_compte_l_usage_de_melta(monkeypatch, tmp_path):
+    """Maillon 4 : sans ce compteur, §1.8 déclarait morte une règle vive."""
+    gs, raw_log = _engine_shoot_log(monkeypatch, ["MELTA:2"], [3, 4, 2],
+                                    unit_type=MELTA_UNIT, weapon_name=MELTA_WEAPON)
+    stats = _analyzer_stats(tmp_path, _step_log_line(tmp_path, gs, raw_log),
+                            unit_type=MELTA_UNIT)
+
+    usage = {k: v for k, v in stats["weapon_rule_usage"].items() if k[0] == "MELTA"}
+    assert usage, ("aucun usage de MELTA compté : la chaîne moteur → step.log → analyzer "
+                   "est rompue")
+    assert all(sum(v.values()) > 0 for v in usage.values()), usage
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# [RAPID FIRE X] et [DEVASTATING WOUNDS] : le token atteignait step.log, mais §1.8 ne le
+# comptait pas. Une règle vive rendue « NOT USED » affirme que le moteur ne l'applique pas.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_l_analyzer_compte_l_usage_de_rapid_fire(monkeypatch, tmp_path):
+    """4 080 marqueurs `[RAPID FIRE:x]` dans le journal du 2026-08-11, 0 usage compté."""
+    gs, raw_log = _engine_shoot_log(monkeypatch, ["RAPID_FIRE:1"], [3, 4, 2, 3, 4, 2])
+    stats = _analyzer_stats(tmp_path, _step_log_lines(tmp_path, gs, raw_log))
+
+    usage = {k: v for k, v in stats["weapon_rule_usage"].items() if k[0] == "RAPID_FIRE"}
+    assert usage, "aucun usage de RAPID_FIRE compté"
+    assert all(sum(v.values()) > 0 for v in usage.values()), usage
+
+
+def test_l_analyzer_ventile_devastating_wounds_par_arme(devastating_line, tmp_path):
+    """La règle avait une ligne GLOBALE mais aucune ventilation : le tableau des paires
+    déclarait « NOT USED » ce que la même page comptait 336 fois."""
+    stats = _analyzer_stats(tmp_path, devastating_line)
+
+    usage = {k: v for k, v in stats["weapon_rule_usage"].items() if k[0] == "DEVASTATING_WOUNDS"}
+    assert usage, "aucun usage de DEVASTATING_WOUNDS ventilé par arme"
+    assert sum(sum(v.values()) for v in usage.values()) == stats["devastating_wounds_correct"][1], (
+        "sur CE tir, dont l'arme est portée par le type d'escouade, la ventilation et la ligne "
+        "globale comptent le même fait"
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# [PRECISION] 24.28 — dernier token de la famille à ne pas atteindre step.log
+#
+# Même histoire que [MELTA] : appliqué par le moteur, rendu dans la ligne de synthèse du Game
+# Log, absent du journal que lisent l'analyzer et le replay. Le drapeau vient du groupe
+# (`precision_applied`, posé à l'Allocation Order step) : ce test part du log de groupe RÉEL et
+# y pose le drapeau, puis exerce les maillons ajoutés — mapping `_build_shot_details`, formateur
+# `StepLogger`, regex de l'analyzer. Construire une allocation sur un CHARACTER visible relève
+# du test moteur, qui la couvre déjà (`tests/unit/engine/test_weapon_rule_log_tokens.py`).
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_le_token_precision_atteint_step_log(monkeypatch, tmp_path):
+    """Le drapeau du groupe doit ressortir en `[PRECISION]` sur la ligne."""
+    gs, raw_log = _engine_shoot_log(monkeypatch, ["PRECISION"], [3, 4, 2])
+    assert "precisionApplied" in raw_log, (
+        "le log de groupe doit PORTER le drapeau : sans lui, aucun maillon suivant ne peut le voir"
+    )
+    raw_log["precisionApplied"] = True
+    line = _step_log_line(tmp_path, gs, raw_log)
+
+    assert "[PRECISION]" in line, line
+
+
+def test_sans_application_aucun_token_precision(monkeypatch, tmp_path):
+    """Contre-épreuve 24.28 : contre une cible sans CHARACTER visible la règle n'impose aucun
+    groupe d'allocation — elle n'a rien fait, elle ne dit rien."""
+    gs, raw_log = _engine_shoot_log(monkeypatch, ["PRECISION"], [3, 4, 2])
+    assert raw_log["precisionApplied"] is False, "prémisse : le moteur ne l'a pas appliquée"
+    line = _step_log_line(tmp_path, gs, raw_log)
+
+    assert "PRECISION" not in line, line
+
+
+def test_l_analyzer_compte_l_usage_de_precision(monkeypatch, tmp_path):
+    """Maillon 4 : sans ce compteur, §1.8 déclarait la règle morte."""
+    gs, raw_log = _engine_shoot_log(monkeypatch, ["PRECISION"], [3, 4, 2])
+    raw_log["precisionApplied"] = True
+    stats = _analyzer_stats(tmp_path, _step_log_line(tmp_path, gs, raw_log))
+
+    usage = {k: v for k, v in stats["weapon_rule_usage"].items() if k[0] == "PRECISION"}
+    assert usage, "aucun usage de PRECISION compté"
+    assert all(sum(v.values()) > 0 for v in usage.values()), usage

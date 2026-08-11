@@ -90,6 +90,12 @@ class AnalyzerState:
     # le second cas l'ancre d'escouade se recalcule sans action de l'unité, et un écart avec la
     # position de départ loguée est du bruit d'ancre, pas une incohérence.
     models_invalidated: Set[str] = field(default_factory=set)
+    #: Socles SURVIVANTS de la CIBLE, lus dans `[TARGET_MODELS:]` de la ligne courante et
+    #: fusionnés dans `positions_by_model` au même rythme que `current_line_models` (décalage
+    #: d'une ligne). C'est la seule donnée qui lève l'invalidation posée à la mort d'une
+    #: figurine : `_apply_damage_and_handle_death` purge les socles de la cible parce que le
+    #: journal ne dit pas LAQUELLE tombe — mais ce segment, lui, dit qui RESTE.
+    current_line_target_models: Dict[str, Dict[str, Tuple[int, int]]] = field(default_factory=dict)
     # Socles listés SUR LA LIGNE COURANTE (nouvelles positions de l'unité qui agit) ;
     # positions_by_model garde encore l'état PRÉCÉDENT tant que la ligne n'est pas finie.
     current_line_models: Dict[str, Dict[str, Tuple[int, int]]] = field(default_factory=dict)
@@ -132,6 +138,10 @@ class AnalyzerState:
     last_shoot_shooter_id: Optional[str] = None
     last_shoot_weapon: Optional[str] = None
     last_shoot_target_id: Optional[str] = None
+    #: JUMEAU de `last_fight_shooters` — même rôle, même raison. Le tir était resté sans, et le
+    #: défaut que la mêlée avait fermé y vivait encore : mesuré sur le run du 2026-08-11,
+    #: 320 fausses « Shots over RNG_NB » sur 23 169 tirs.
+    last_shoot_shooters: Tuple[str, ...] = ()
     last_fight_fighter_id: Optional[str] = None
     last_fight_weapon: Optional[str] = None
     #: Socles ayant frappé sur la dernière ligne de combat (`[SHOOTER_MODELS:]`). Entre dans la

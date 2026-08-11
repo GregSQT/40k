@@ -163,7 +163,7 @@ l'écriture directe de `rule_choice`) :
 | `action_type` | Message | Champs porteurs de règle |
 |---|---|---|
 | `move` | `Unit N(c,r) MOVED [FLY] from (a,b) to (c,d)[R:±x]` | `[FLY]` (21.03), positions, `[MODELS:]` |
-| `advance` | `Unit N(c,r) ADVANCED [FLY] from … to … [Roll: N] [Strategy: <label>]` | jet D6 (en **pouces**), `[FLY]` |
+| `advance` | `Unit N(c,r) ADVANCED [FLY] from … to … [Roll: N]` | jet D6 (en **pouces**), `[FLY]` |
 | `flee` | `Unit N(c,r) FLED [FLY] from … to …` | `[FLY]`, positions |
 | `move_after_shooting` | `Unit N(c,r) MOVED AFTER SHOOTING [<CAPACITÉ>] from … to …` | nom de la capacité (obligatoire) |
 | `reactive_move` | `Unit N(c,r) REACTIVE MOVED [<CAPACITÉ>] from … to … [Roll: N] - trigger: Unit M->(c,r)` | jet, déclencheur ; **pas de `[MODELS:]` d'arrivée** |

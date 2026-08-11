@@ -307,6 +307,68 @@ def parse_shooter_models_segment(text: str) -> Tuple[str, ...]:
     return tuple(m.group(1).split()) if m else ()
 
 
+def weapon_profile_for_line(
+    shooters: Tuple[str, ...],
+    model_types: Dict[str, str],
+    squad_unit_type: str,
+    weapon_display_name: str,
+    unit_weapons_cache: Dict[str, List[Dict[str, Any]]],
+) -> Tuple[Optional[Dict[str, Any]], Optional[str], Tuple[str, ...]]:
+    """Profil d'arme d'UNE ligne et DATASHEET qui le porte — `(info, porteur, ambigus)`.
+
+    Le profil était cherché dans le seul équipement du TYPE D'ESCOUADE. Une arme portée par un
+    personnage rattaché (règle 19) ou par un sergent n'y est pas : elle ressortait introuvable,
+    donc sans portée (aucun contrôle de portée possible), sans `is_close_quarters` fiable, et
+    surtout absente du tableau d'usage des règles d'armes. Même écart que celui déjà fermé pour
+    les PLAFONDS d'attaques par `per_model_attack_cap` ci-dessous, qui lit `[MODEL_TYPES:]` —
+    le comptage d'usage, lui, n'avait pas suivi. Mesuré sur le run du 2026-08-11 : sur 23 169
+    tirs, 3 138 (14 %) portaient une arme absente du type d'escouade, dont les 21 blessures
+    dévastatrices d'un Librarian rattaché qui manquaient à la ventilation par arme.
+
+    RÉSOLUTION TOTALE ET DÉTERMINISTE, dans cet ordre :
+      1. le type d'ESCOUADE déclare l'arme → c'est lui le porteur. Représentant canonique du
+         groupe, et non un choix par défaut : c'est l'étiquette sous laquelle le tableau a
+         toujours compté cette arme, et 20 031 des 23 169 tirs du run passent par là. Elle
+         s'applique même quand les figurines qui tirent sont un sergent et un personnage (les
+         autres sont mortes) : l'arme reste celle de l'escouade.
+      2. sinon, les datasheets des figurines qui ont TIRÉ (`[SHOOTER_MODELS:]`) sont
+         consultées. Un seul porteur → c'est lui.
+      3. plusieurs porteurs distincts hors escouade → INDÉTERMINÉ. Le journal ne dit pas quelle
+         figurine a porté quelle attaque, et deviner attribuerait un usage à une datasheet au
+         hasard. Rendu en troisième membre pour que l'appelant l'écrive en `parse_errors` : le
+         cas ne survient pas sur le run mesuré, et s'il survient il doit se voir.
+      4. arme introuvable partout → `(None, None, ())`, comme avant.
+    """
+    weapon_name_lower = weapon_display_name.lower()
+
+    def _declared_by(unit_type: Optional[str]) -> Optional[Dict[str, Any]]:
+        if not unit_type:
+            return None
+        for weapon_info in unit_weapons_cache.get(unit_type, []):  # get allowed : type hors registre
+            if require_key(weapon_info, "name").lower() == weapon_name_lower:
+                return weapon_info
+        return None
+
+    squad_weapon = _declared_by(squad_unit_type)
+    if squad_weapon is not None:
+        return squad_weapon, squad_unit_type, ()
+
+    carriers: Dict[str, Dict[str, Any]] = {}
+    for model_id in shooters:
+        model_type = model_types.get(model_id)  # get allowed : socle hors [MODEL_TYPES:]
+        if not model_type or model_type in carriers:
+            continue
+        carrier_weapon = _declared_by(model_type)
+        if carrier_weapon is not None:
+            carriers[model_type] = carrier_weapon
+    if len(carriers) == 1:
+        carrier_type, carrier_weapon = next(iter(carriers.items()))
+        return carrier_weapon, carrier_type, ()
+    if len(carriers) > 1:
+        return None, None, tuple(sorted(carriers))
+    return None, None, ()
+
+
 def per_model_attack_cap(
     shooters: Tuple[str, ...],
     model_types: Dict[str, str],

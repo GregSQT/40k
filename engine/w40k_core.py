@@ -5365,6 +5365,15 @@ class W40KEngine(gym.Env):
         if _rapid_fire:
             details["rapid_fire_bonus_shot"] = True
             details["rapid_fire_rule_value"] = int(_rapid_fire)
+        # [MELTA] 24.25 : JUMEAU du precedent. Comme lui, propriete de l ACTIVATION (la cible
+        # etait-elle a demi-portee au moment du choix ?), constante sur le groupe, donc portee
+        # par toutes ses lignes. Absente en melee : etat metier valide.
+        _melta = raw_log.get("meltaApplied")  # get allowed
+        if _melta:
+            details["melta_rule_value"] = int(_melta)
+        # [PRECISION] 24.28 : drapeau sans parametre, donc un booleen la ou [MELTA] porte son X.
+        if raw_log.get("precisionApplied"):  # get allowed
+            details["precision_applied"] = True
         # Les 11 champs par-jet : la cle DOIT exister (le formateur teste `not in details`).
         for src, dst in self._SHOT_RECORD_FIELD_MAP.items():
             details[dst] = shot.get(src)  # get allowed
