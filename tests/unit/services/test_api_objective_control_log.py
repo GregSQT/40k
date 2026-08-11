@@ -163,6 +163,71 @@ def test_no_objective_detail_is_not_an_error():
     assert gs["action_logs"] == []
 
 
+def test_same_control_state_is_logged_once():
+    """Déduplication par CONTENU : l'API sérialise plusieurs fois le même état par phase.
+
+    Elle ne peut PAS se fier au retour de `refresh_objective_control_on_boundary` : en PvE la
+    frontière est consommée par la construction d'observation de l'IA avant que l'API ne la
+    voie. L'appel est donc inconditionnel, et c'est cette clé qui évite les doublons.
+    """
+    detail = {
+        "obj_a": {
+            "player_1_oc": 4,
+            "player_2_oc": 0,
+            "controller": 1,
+            "previous_controller": None,
+        }
+    }
+    gs = _game_state(detail=detail, units=[{"id": "u1", "player": 1}], models={"u1": (10, 10)})
+    engine = _EngineStub(gs)
+    _log_objective_control_snapshot(engine)
+    _log_objective_control_snapshot(engine)
+    _log_objective_control_snapshot(engine)
+    assert len(gs["action_logs"]) == 1
+
+
+def test_new_phase_relogs_even_when_control_is_unchanged():
+    """Un contrôle inchangé d'une phase à l'autre reste une information : « toujours à toi »."""
+    detail = {
+        "obj_a": {
+            "player_1_oc": 4,
+            "player_2_oc": 0,
+            "controller": 1,
+            "previous_controller": 1,
+        }
+    }
+    gs = _game_state(detail=detail, units=[{"id": "u1", "player": 1}], models={"u1": (10, 10)})
+    engine = _EngineStub(gs)
+    _log_objective_control_snapshot(engine)
+    gs["phase"] = "shoot"
+    _log_objective_control_snapshot(engine)
+    assert len(gs["action_logs"]) == 2
+
+
+def test_control_change_within_a_phase_is_logged():
+    """L'OC bouge dans la phase (pertes, battle-shock) : le nouvel état doit sortir."""
+    detail = {
+        "obj_a": {
+            "player_1_oc": 4,
+            "player_2_oc": 0,
+            "controller": 1,
+            "previous_controller": None,
+        }
+    }
+    gs = _game_state(detail=detail, units=[{"id": "u1", "player": 1}], models={"u1": (10, 10)})
+    engine = _EngineStub(gs)
+    _log_objective_control_snapshot(engine)
+    detail["obj_a"] = {
+        "player_1_oc": 0,
+        "player_2_oc": 3,
+        "controller": 2,
+        "previous_controller": 1,
+    }
+    _log_objective_control_snapshot(engine)
+    assert len(gs["action_logs"]) == 2
+    assert "captured by P2" in _messages(gs)[1]
+
+
 def test_log_sequence_is_assigned():
     """Les entrées passent par `append_action_log` : le `logSeq` monotone est posé."""
     gs = _game_state(

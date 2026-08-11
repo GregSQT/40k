@@ -797,6 +797,12 @@ class _EndPhaseEngine(_GameStateHolder, Protocol):
     def execute_semantic_action(self, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]: ...
 
 
+#: Dernier état de contrôle journalisé vers le client (déduplication, cf.
+#: ``_log_objective_control_snapshot``). Vit dans ``game_state`` et non dans un global du module :
+#: une partie chargée ou rembobinée doit repartir avec l'historique de son propre état.
+_OBJECTIVE_CONTROL_LOGGED_API_KEY = "_objective_control_logged_for_api"
+
+
 def _log_objective_control_snapshot(engine_instance) -> None:
     """Journalise, au checkpoint 14.02, POURQUOI chaque objectif disputé est tenu ou non.
 
@@ -809,8 +815,16 @@ def _log_objective_control_snapshot(engine_instance) -> None:
     Le comptage de présence est fait ICI et non dans ``sum_objective_control_oc_multi`` : ce
     dernier saute les unités battle-shocked et les OC nuls AVANT de regarder les empreintes,
     et les lui faire parcourir quand même alourdirait le chemin chaud de l'observation pour une
-    information que seul un humain lit. Ce chemin-ci n'est emprunté que par l'API, et seulement
-    quand une frontière de phase vient d'être franchie.
+    information que seul un humain lit. Ce chemin-ci n'est emprunté que par l'API.
+
+    ⚠️ DÉDUPLICATION PAR CONTENU, ET NON SUR LE RETOUR DE
+    ``refresh_objective_control_on_boundary``. La frontière de phase est CONSOMMÉE par le
+    premier qui la voit, et en PvE ce n'est pas l'API : chaque décision de l'IA construit une
+    observation (``pve_controller.make_ai_decision`` → ``_build_observation_and_mask``), qui
+    rafraîchit le contrôle au passage. L'API sérialisait donc l'état APRÈS coup, recevait
+    ``False``, et n'émettait rien — le journal aurait été présent pour les phases du joueur et
+    muet pour celles de l'IA, c'est-à-dire faux là où on le consulte. La clé ci-dessous
+    journalise chaque ÉTAT DE CONTRÔLE une fois, quel que soit le chemin qui l'a calculé.
     """
     from engine.action_log_utils import append_action_log
     from engine.game_state import iter_living_model_footprints, objective_hex_zones
@@ -819,6 +833,26 @@ def _log_objective_control_snapshot(engine_instance) -> None:
     detail = game_state.get("objective_control_detail")  # get allowed (aucun objectif au scénario)
     if not detail:
         return
+
+    # Clé = (tour, phase, contrôle de chaque objectif). Le tour et la phase en font partie parce
+    # qu'un contrôle INCHANGÉ d'une phase à l'autre reste une information : « toujours à toi ».
+    logged_key = (
+        require_key(game_state, "turn"),
+        require_key(game_state, "phase"),
+        tuple(
+            (
+                str(objective_id),
+                require_key(entry, "player_1_oc"),
+                require_key(entry, "player_2_oc"),
+                require_key(entry, "controller"),
+            )
+            for objective_id, entry in sorted(detail.items(), key=lambda kv: str(kv[0]))
+        ),
+    )
+    # get allowed : absent au premier passage de la partie.
+    if game_state.get(_OBJECTIVE_CONTROL_LOGGED_API_KEY) == logged_key:
+        return
+    game_state[_OBJECTIVE_CONTROL_LOGGED_API_KEY] = logged_key
 
     zones = objective_hex_zones(game_state)
     names_by_id = {
@@ -917,12 +951,11 @@ def _game_state_for_json(
     # Objective control (Rule 14.02) : détermine à la FIN de chaque phase/tour, pas en continu.
     # Détection de frontière + checkpoint = `refresh_objective_control_on_boundary` (moteur),
     # partagée avec le chemin gym : une seule implémentation pour PvP et entraînement.
-    if engine_instance.state_manager.refresh_objective_control_on_boundary(
-        engine_instance.game_state
-    ):
-        # Le checkpoint vient de tourner : c'est le SEUL moment où le contrôle change (14.02),
-        # donc le seul où une ligne de journal a quelque chose à dire.
-        _log_objective_control_snapshot(engine_instance)
+    engine_instance.state_manager.refresh_objective_control_on_boundary(engine_instance.game_state)
+    # Appel INCONDITIONNEL, la déduplication est dans la fonction : le retour du refresh ne dit
+    # que « cette frontière-ci a été vue PAR MOI », or en PvE elle est consommée par la
+    # construction d'observation de l'IA bien avant l'API (cf. le docstring de la fonction).
+    _log_objective_control_snapshot(engine_instance)
 
     had_engine_mask_loops = bool(engine_instance.game_state.get("move_preview_footprint_mask_loops"))
     gs = {
