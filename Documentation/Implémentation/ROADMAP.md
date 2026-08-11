@@ -101,6 +101,24 @@
   À FAIRE : la vérification large de l'utilisateur (suite complète, `pyright`, conformité, PvE
   navigateur) n'a **pas** été passée.
 
+- ✅ **Un objectif capturé ne changeait jamais de couleur sur le plateau** (ouvert ET livré le
+  2026-08-12). Symptôme PvE : « les Dreads ne prennent pas les objos », la ruine centrale restait
+  neutre. Le moteur, l'API et le mappage étaient HORS DE CAUSE — trois diagnostics faux ont été
+  rendus avant de le prouver (comptage d'empreinte, couleurs de contrôle, étages du décor), tous
+  déduits d'une capture d'écran au lieu d'une mesure. Ce qui a tranché : un affichage TEXTE des
+  objectifs tenus dans l'en-tête joueur, puis une trace inconditionnelle en tête de `drawBoard`.
+  CAUSE MESURÉE (trace console) : le plateau PIXI a DEUX calques, statique (fond, décor, couleur
+  de contrôle des objectifs, invalidé par `bcKey`) et surbrillances (previews, invalidé par
+  `computeDrawBoardPartialRedrawFingerprint`). Le chemin rapide de `BoardPvp` court-circuitait
+  `drawBoard` sur la SEULE réutilisabilité des surbrillances — or `objectiveControl` n'apparaît
+  nulle part dans leur empreinte (`grep` → 0). Une capture qui ne change pas les surbrillances
+  n'était donc jamais dessinée : trace réelle = **une** reconstruction (`rect b SE` déjà tenu,
+  ruine pas encore), puis `calqueReutilise: true` pour le reste de la partie.
+  CORRIGÉ : la décision passe par `utils/boardRedrawDecision.canSkipBoardRedraw`, qui EXIGE les
+  deux réutilisabilités. Verrou prouvé rouge par mutation. Instruments de diagnostic retirés
+  (traces console) ; l'affichage « Objectifs tenus » reste en place le temps de la validation
+  navigateur, il est marqué comme temporaire dans le code.
+
 - ✅ **PvE se figeait — cause identifiée et corrigée** (2026-08-11). Le symptôme était rapporté
   « en phase de mouvement » ; la mesure a montré la phase de **déploiement**, sur des unités
   simplement **pas encore posées** (`deployed_on_turn=None`, `in_strategic_reserves=False`) — les
