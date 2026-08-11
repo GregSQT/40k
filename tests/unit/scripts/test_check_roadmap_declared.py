@@ -30,12 +30,12 @@ def merges(count: int) -> list[str]:
 
 def test_branch_that_declares_always_passes() -> None:
     """Le cas idéal : la ligne est écrite dans la branche. La dette antérieure n'y change rien."""
-    ok, message = gate.verdict(merges(99), branch_declares=True)
-    assert ok and "met la feuille de route à jour" in message
+    ok, message = gate.verdict(merges(99), gate.DECLARED_BY_BRANCH)
+    assert ok and message == gate.DECLARED_BY_BRANCH
 
 
 def test_no_debt_passes() -> None:
-    ok, _message = gate.verdict([], branch_declares=False)
+    ok, _message = gate.verdict([], "")
     assert ok
 
 
@@ -56,13 +56,13 @@ def test_the_calibrated_ceiling_is_two() -> None:
 
 def test_debt_just_under_the_ceiling_still_passes() -> None:
     """Le suivi tardif reste permis : c'est le flux réel qui écrit la ligne juste après la fusion."""
-    ok, message = gate.verdict(merges(gate.MAX_UNDECLARED - 1), branch_declares=False)
+    ok, message = gate.verdict(merges(gate.MAX_UNDECLARED - 1), "")
     assert ok
     assert "avant blocage" in message
 
 
 def test_debt_at_the_ceiling_blocks() -> None:
-    ok, message = gate.verdict(merges(gate.MAX_UNDECLARED), branch_declares=False)
+    ok, message = gate.verdict(merges(gate.MAX_UNDECLARED), "")
     assert not ok
     assert "sans que la feuille de route" in message
 
@@ -70,7 +70,7 @@ def test_debt_at_the_ceiling_blocks() -> None:
 def test_the_refusal_names_the_undeclared_chantiers() -> None:
     """Un refus qui ne dit pas QUOI déclarer se contourne au lieu de se traiter."""
     listing = merges(gate.MAX_UNDECLARED)
-    _ok, message = gate.verdict(listing, branch_declares=False)
+    _ok, message = gate.verdict(listing, "")
     for line in listing:
         assert line in message
 
@@ -80,7 +80,7 @@ def test_the_refusal_states_the_escape_hatch_that_exists() -> None:
 
     Il doit nommer celle qui marche, ET la remédiation qui débloque sans annuler la fusion.
     """
-    _ok, message = gate.verdict(merges(gate.MAX_UNDECLARED), branch_declares=False)
+    _ok, message = gate.verdict(merges(gate.MAX_UNDECLARED), "")
     assert f"{gate.GATE_OFF_ENV}=off git commit" in message, (
         "mi-fusion, `git merge` répond « You have not concluded your merge » : le refus doit "
         "nommer la commande qui marche DANS l'état où il s'affiche"
@@ -114,6 +114,9 @@ def test_the_hook_is_installed_and_executable() -> None:
     assert configured, "core.hooksPath n'est pas défini : le hook ne se déclenchera jamais"
     configured_path = pathlib.Path(configured)
     hooks_dir = configured_path if configured_path.is_absolute() else ROOT / configured
+    assert (hooks_dir / "prepare-commit-msg").exists(), (
+        f"core.hooksPath vise {configured!r} mais `prepare-commit-msg` n'y est pas"
+    )
     if hooks_dir.resolve() != (ROOT / ".githooks").resolve():
         # UN SEUL état justifie de ne pas conclure : `core.hooksPath` est absolu et vise les
         # `.githooks` du dépôt PRINCIPAL, que ce worktree partage. Tout autre valeur DÉSARME la
@@ -130,19 +133,18 @@ def test_the_hook_is_installed_and_executable() -> None:
             f"core.hooksPath vise {hooks_dir} : ni les `.githooks` de ce worktree, ni ceux du "
             f"dépôt principal ({principal}) — la porte est DÉSARMÉE"
         )
-        assert (hooks_dir / "prepare-commit-msg").exists(), (
-            f"core.hooksPath vise {hooks_dir}, où `prepare-commit-msg` est absent"
-        )
         pytest.skip(
             f"core.hooksPath vise les `.githooks` du dépôt principal ({hooks_dir}), partagés par "
             "ce worktree — branchement vérifié là-bas, rien de plus à conclure ici"
         )
-    assert (hooks_dir / "prepare-commit-msg").exists(), (
-        f"core.hooksPath vise {configured!r} mais `prepare-commit-msg` n'y est pas"
-    )
 
 
 # ----------------------------------------------------------------- les deux helpers git
+
+
+def nb_commits(repo: pathlib.Path) -> int:
+    """Commits du TRONC. `--first-parent` : une fusion compte pour un, pas pour sa branche."""
+    return len(run(repo, "log", "--format=%H", "--first-parent").splitlines())
 
 
 def run(repo: pathlib.Path, *args: str) -> str:
@@ -264,11 +266,10 @@ def scratch_repo_with_debt(tmp_path: pathlib.Path, count: int) -> pathlib.Path:
     return repo
 
 
-_NEW_HOOK_BODY = (
-    "#!/bin/sh\n"
-    '[ -f "$(git rev-parse --git-dir)/MERGE_HEAD" ] || exit 0\n'
-    'exec python3 "$(git rev-parse --show-toplevel)/scripts/check_roadmap_declared.py" --merge\n'
-)
+#: LE hook livré, pas une copie. Les verrous bout-en-bout montaient une transcription du fichier :
+#: le jour où `.githooks/prepare-commit-msg` change, la suite serait restée verte sur l'ancienne
+#: version, et le seul test qui regarde le vrai fichier n'y cherche qu'une sous-chaîne.
+_NEW_HOOK_BODY = (ROOT / ".githooks" / "prepare-commit-msg").read_text(encoding="utf-8")
 
 
 def test_clean_merge_passes_with_prepare_commit_msg_hook(tmp_path: pathlib.Path) -> None:
@@ -286,12 +287,12 @@ def test_clean_merge_passes_with_prepare_commit_msg_hook(tmp_path: pathlib.Path)
     run(repo, "commit", "-qm", "code de chantier-test")
     run(repo, "checkout", "-q", "main")
 
-    count_before = run(repo, "log", "--oneline", "--first-parent").count("\n") + 1
+    count_before = nb_commits(repo)
     result = subprocess.run(
         ["git", "merge", "--no-ff", "-m", "merge: chantier-test", "chantier-test"],
         cwd=repo, capture_output=True, text=True,
     )
-    count_after = run(repo, "log", "--oneline", "--first-parent").count("\n") + 1
+    count_after = nb_commits(repo)
 
     assert result.returncode == 0, (
         f"le merge doit réussir sans git commit de rattrapage :\n{result.stderr}"
@@ -331,12 +332,12 @@ def test_conflicting_merge_passes_with_prepare_commit_msg_hook(tmp_path: pathlib
     (repo / "shared.txt").write_text("résolu\n", encoding="utf-8")
     run(repo, "add", "shared.txt")
 
-    count_before = run(repo, "log", "--oneline", "--first-parent").count("\n") + 1
+    count_before = nb_commits(repo)
     result = subprocess.run(
         ["git", "commit", "-m", "merge: chantier-conflit résolu"],
         cwd=repo, capture_output=True, text=True,
     )
-    count_after = run(repo, "log", "--oneline", "--first-parent").count("\n") + 1
+    count_after = nb_commits(repo)
 
     assert result.returncode == 0, (
         f"git commit après résolution de conflit doit réussir :\n{result.stderr}"
@@ -396,7 +397,8 @@ def run_gate(repo: pathlib.Path, mode: str) -> subprocess.CompletedProcess[str]:
     """Lance la porte comme le hook la lance : en PROCESSUS, depuis le dépôt jetable.
 
     L'appeler en import ne prouverait rien sur ce qui compte ici — le code de sortie et ce que
-    l'utilisateur LIT quand git s'arrête.
+    l'utilisateur LIT quand git s'arrête. Marche aussi sur un répertoire qui N'EST PAS un dépôt :
+    c'est ce qui permet d'exercer le filet sans réécrire trois fois la copie du script.
     """
     _setup_repo_with_script(repo)
     return subprocess.run(
@@ -425,25 +427,26 @@ def test_merge_mode_without_merge_head_refuses_and_says_what_to_do(
     assert "--status" in lisible
 
 
-def start_merge(repo: pathlib.Path, branch: str) -> None:
+def start_merge(repo: pathlib.Path, *branches: str) -> None:
+    """Met le dépôt EN ÉTAT de fusion (plusieurs branches = pieuvre) et le vérifie."""
     subprocess.run(
-        ["git", "merge", "--no-ff", "--no-commit", "--no-verify", branch],
+        ["git", "merge", "--no-ff", "--no-commit", "--no-verify", *branches],
         cwd=repo, capture_output=True, text=True,
     )
     assert (repo / ".git" / "MERGE_HEAD").exists(), "le test doit VRAIMENT être en cours de fusion"
 
 
 def test_merge_on_a_detached_head_is_out_of_scope(tmp_path: pathlib.Path) -> None:
-    """VRAIE fusion, MERGE_HEAD présent, mais HEAD détaché : `symbolic-ref` sort 128.
+    """VRAIE fusion, MERGE_HEAD présent, mais HEAD détaché : il n'y a pas de branche courante.
 
     Ce chemin-là est atteignable par le hook réel. Feu vert légitime : fusionner sur un HEAD
     détaché ne livre rien dans `main`, donc la porte n'a pas d'objet — ce n'est pas un défaut masqué.
 
     Le CONTRASTE est la moitié du verrou : sans lui, le test se contente de « rc 0 + sans objet »,
-    qui est aussi la sortie de n'importe quelle PANNE de `symbolic-ref` — vérifié, avec un
-    `git_maybe` rendant `None` en toutes circonstances le test restait vert. La même fusion, faite
-    sur `main`, doit faire se prononcer la porte : c'est ce qui prouve que le feu vert vient du
-    détachement et de rien d'autre.
+    qui est aussi la sortie de n'importe quelle PANNE de la lecture de branche — vérifié à
+    l'époque où elle passait par un helper tolérant, qui rendait le test vert en rendant `None`
+    en toutes circonstances. La même fusion, faite sur `main`, doit faire se prononcer la porte :
+    c'est ce qui prouve que le feu vert vient du détachement et de rien d'autre.
     """
     repo = scratch_repo(tmp_path)
     run(repo, "checkout", "-qb", "chantier")
@@ -535,10 +538,7 @@ def test_an_octopus_merge_is_judged_on_all_its_heads(
     commit_roadmap(repo, "la ligne est sur la seconde tête")
     run(repo, "checkout", "-q", "main")
 
-    subprocess.run(
-        ["git", "merge", "--no-ff", "--no-commit", "--no-verify", "muette", "declarante"],
-        cwd=repo, capture_output=True, text=True,
-    )
+    start_merge(repo, "muette", "declarante")
     heads = (repo / ".git" / "MERGE_HEAD").read_text(encoding="utf-8").split()
     assert len(heads) == 2, "le test ne prouve rien si la fusion n'est pas une pieuvre"
 
@@ -564,9 +564,7 @@ def test_the_refusal_carries_gits_own_words(tmp_path: pathlib.Path) -> None:
     répertoire, pour ne pas figer une formulation ni une langue.
     """
     hors_depot = tmp_path / "sans-git"
-    (hors_depot / "scripts").mkdir(parents=True)
-    src = ROOT / "scripts" / "check_roadmap_declared.py"
-    (hors_depot / "scripts" / "check_roadmap_declared.py").write_bytes(src.read_bytes())
+    hors_depot.mkdir()
 
     mot_de_git = subprocess.run(
         ["git", "rev-parse", "--is-inside-work-tree"],
@@ -574,10 +572,7 @@ def test_the_refusal_carries_gits_own_words(tmp_path: pathlib.Path) -> None:
     ).stderr.strip()
     assert mot_de_git, "le test ne prouve rien si git ne dit rien"
 
-    result = subprocess.run(
-        ["python3", str(hors_depot / "scripts" / "check_roadmap_declared.py"), "--merge"],
-        cwd=hors_depot, capture_output=True, text=True,
-    )
+    result = run_gate(hors_depot, "--merge")
 
     assert result.returncode == 2
     assert mot_de_git in result.stderr, (
@@ -593,14 +588,9 @@ def test_merge_mode_outside_a_git_repo_refuses(tmp_path: pathlib.Path) -> None:
     répertoire. Une porte qui ne peut pas lire le dépôt ne laisse pas passer la fusion.
     """
     hors_depot = tmp_path / "pas-un-depot-merge"
-    (hors_depot / "scripts").mkdir(parents=True)
-    src = ROOT / "scripts" / "check_roadmap_declared.py"
-    (hors_depot / "scripts" / "check_roadmap_declared.py").write_bytes(src.read_bytes())
+    hors_depot.mkdir()
 
-    result = subprocess.run(
-        ["python3", str(hors_depot / "scripts" / "check_roadmap_declared.py"), "--merge"],
-        cwd=hors_depot, capture_output=True, text=True,
-    )
+    result = run_gate(hors_depot, "--merge")
 
     assert "Traceback" not in result.stderr and "Traceback" not in result.stdout
     assert "sans objet" not in result.stdout, "une panne de git ne se déguise pas en « sans objet »"
@@ -624,14 +614,9 @@ def test_an_unexpected_git_failure_refuses_readably(tmp_path: pathlib.Path) -> N
     C'est la garantie de fond demandée — QUEL QUE SOIT l'état, feu vert ou refus lisible.
     """
     hors_depot = tmp_path / "pas-un-depot"
-    (hors_depot / "scripts").mkdir(parents=True)
-    src = ROOT / "scripts" / "check_roadmap_declared.py"
-    (hors_depot / "scripts" / "check_roadmap_declared.py").write_bytes(src.read_bytes())
+    hors_depot.mkdir()
 
-    result = subprocess.run(
-        ["python3", str(hors_depot / "scripts" / "check_roadmap_declared.py"), "--status"],
-        cwd=hors_depot, capture_output=True, text=True,
-    )
+    result = run_gate(hors_depot, "--status")
 
     assert "Traceback" not in result.stderr and "Traceback" not in result.stdout
     assert result.returncode == 2
@@ -668,7 +653,7 @@ def test_the_announced_escape_hatch_actually_works(tmp_path: pathlib.Path) -> No
     MERGE_HEAD présent, et c'est `git commit` qui la porte.
     """
     repo = _repo_at_the_ceiling_with_the_gate_armed(tmp_path)
-    avant = run(repo, "log", "--oneline", "--first-parent").count("\n") + 1
+    avant = nb_commits(repo)
 
     refuse = subprocess.run(
         ["git", "merge", "--no-ff", "--no-verify", "-m", "merge: ch-refuse", "ch-refuse"],
@@ -682,7 +667,9 @@ def test_the_announced_escape_hatch_actually_works(tmp_path: pathlib.Path) -> No
         "la sortie doit s'exercer depuis l'état de refus, pas depuis un dépôt propre"
     )
 
-    desarme = {**os.environ, gate.GATE_OFF_ENV: "off"}
+    # Valeur volontairement différente de « off » : exiger la chaîne exacte refusait `=1`, `=OFF`
+    # ou `=true` sans dire pourquoi, au milieu d'une fusion — la même arête « issue murée ».
+    desarme = {**os.environ, gate.GATE_OFF_ENV: "1"}
     relance = subprocess.run(
         ["git", "merge", "--no-ff", "-m", "merge: ch-refuse", "ch-refuse"],
         cwd=repo, capture_output=True, text=True, env=desarme,
@@ -695,7 +682,7 @@ def test_the_announced_escape_hatch_actually_works(tmp_path: pathlib.Path) -> No
         ["git", "commit", "-m", "merge: ch-refuse"],
         cwd=repo, capture_output=True, text=True, env=desarme,
     )
-    apres = run(repo, "log", "--oneline", "--first-parent").count("\n") + 1
+    apres = nb_commits(repo)
 
     assert passe.returncode == 0, (
         f"la sortie de secours annoncée doit laisser passer :\n{passe.stdout}{passe.stderr}"
@@ -721,7 +708,7 @@ def test_writing_the_line_during_the_merge_unblocks_it(tmp_path: pathlib.Path) -
     assert refuse.returncode != 0 and (repo / ".git" / "MERGE_HEAD").exists(), (
         "le test ne prouve rien sans un refus au milieu d'une fusion"
     )
-    avant = run(repo, "log", "--oneline", "--first-parent").count("\n") + 1
+    avant = nb_commits(repo)
 
     (repo / gate.ROADMAP).write_text("la ligne écrite pour se débloquer", encoding="utf-8")
     run(repo, "add", "-A")
@@ -729,12 +716,15 @@ def test_writing_the_line_during_the_merge_unblocks_it(tmp_path: pathlib.Path) -
         ["git", "commit", "-m", "merge: ch-refuse + sa ligne"],
         cwd=repo, capture_output=True, text=True,
     )
-    apres = run(repo, "log", "--oneline", "--first-parent").count("\n") + 1
+    apres = nb_commits(repo)
 
     assert result.returncode == 0, (
         f"écrire la ligne et committer DOIT sortir de l'impasse :\n{result.stdout}{result.stderr}"
     )
     assert apres == avant + 1
+    assert gate.DECLARED_BY_INDEX in result.stdout + result.stderr, (
+        "le feu vert doit dire que c'est CE commit qui porte la ligne, pas la branche fusionnée"
+    )
 
 
 def test_gate_blocks_violations_with_prepare_commit_msg_hook(tmp_path: pathlib.Path) -> None:

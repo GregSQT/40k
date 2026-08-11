@@ -680,8 +680,11 @@ complaisant y rendrait la porte muette pour toujours (CLAUDE.md T1). Les trois v
 `/code-review` sur la livraison ci-dessus). Le feu vert du cas détaché reposait sur l'échec de
 `symbolic-ref`, qui échoue AUSSI quand le dépôt est illisible : script copié hors dépôt git,
 `--merge` sortait « fusion hors `main`, sans objet » et **0**, quand `--status` refusait sur le même
-répertoire. Une sonde (`rev-parse --is-inside-work-tree`, en `check=True`) tranche désormais avant
-tout appel tolérant, et la panne part au filet → code 2. Le verrou du cas détaché portait le même
+répertoire. Une sonde (`rev-parse --is-inside-work-tree`, en `check=True`) a d'abord tranché avant
+tout appel tolérant ; depuis le `/simplify` du 2026-08-12 la distinction est portée par git seul
+(`branch --show-current` : `main` attaché, vide si détaché, rc 128 hors dépôt → filet), donc sans
+sonde ni helper tolérant ni contrainte d'ordre. Dans les deux cas la panne part au filet → code 2.
+Le verrou du cas détaché portait le même
 trou : il n'affirmait que « code 0 + sans objet », soit la sortie de n'importe quelle panne — il
 compare maintenant à la MÊME fusion faite sur `main`, où la porte doit se prononcer. Les deux
 verrous vérifiés ROUGES défaut remis.
@@ -740,6 +743,18 @@ laissait VERTS (mesuré). Les deux tests appellent désormais la fonction concer
 plus du bout-en-bout, et les deux défauts d'origine les rendent de nouveau ROUGES. ⚠️ La leçon
 n'est pas locale : un verrou prouvé rouge à sa naissance peut être désarmé par un raccourci ajouté
 plus tard EN AMONT de lui — c'est le seul cas où « le test est passé rouge une fois » ne suffit pas.
+
+✅ **Passe `/simplify`** (2026-08-12). Six passes de corrections avaient empilé des cas
+particuliers : trois d'entre eux disparaissent sans rien perdre. La branche courante se lit par un
+seul appel qui distingue lui-même attaché / détaché / hors dépôt (fin du helper tolérant, de la
+sonde et de la contrainte d'ordre entre les deux) ; les deux questions « la ligne est-elle là ? »
+passent le chemin à git en pathspec au lieu d'énumérer toute la branche ou tout l'index ; la dette
+n'est plus calculée quand la livraison déclare, alors que le verdict n'en faisait rien. Le feu vert
+dit désormais LAQUELLE des deux déclarations l'a ouvert — il affirmait « la branche fusionnée » y
+compris quand c'était l'index, c'est-à-dire précisément quand l'utilisateur venait de se débloquer
+à la main. Le désarmement accepte toute valeur non vide (`ROADMAP_GATE=1` refusait en silence).
+Côté tests, le corps de hook monté par les verrous EST maintenant le fichier livré, plus une
+transcription qui pouvait diverger sans que rien ne rougisse.
 
 **Deux pièges déjà payés, à ne pas reprendre pour des régressions.** (1) Un contrôle de liens naïf
 rend **152 hits** dont aucun n'est mort (143 dans `Implémenté/stage.md`, 5 dans `Boardx10-audit.md`,
