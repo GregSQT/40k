@@ -474,8 +474,10 @@ français. Le script se borne à rappeler combien de livraisons ont été mergé
 
 ### Une porte refuse la fusion quand les chantiers s'accumulent sans ligne
 
-`scripts/check_roadmap_declared.py`, branché sur le hook `pre-merge-commit` de `.githooks/`
-(`core.hooksPath` pointe dessus, les hooks sont donc versionnés). Une fusion **dans `main`** est
+`scripts/check_roadmap_declared.py`, branché sur le hook `prepare-commit-msg` de `.githooks/`
+(`core.hooksPath` pointe dessus, les hooks sont donc versionnés). Le hook ne s'exécute que lorsque
+`MERGE_HEAD` est présent — ce qui garantit que le contrôle rate toujours les contextes hors merge.
+Une fusion **dans `main`** est
 refusée quand **trois** chantiers ont déjà été livrés sans que ce fichier bouge. Le refus les nomme.
 
 **Le plafond est une mesure, pas un réglage.** Le refus sec a été essayé puis abandonné sur

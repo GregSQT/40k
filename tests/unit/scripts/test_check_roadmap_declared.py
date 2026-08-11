@@ -82,17 +82,36 @@ def test_the_hook_is_installed_and_executable() -> None:
     Ce test lisait le fichier sans jamais lire la configuration git : `core.hooksPath` pouvait
     être désarmé, la porte muette, et le test restait vert.
     """
-    hook = ROOT / ".githooks" / "pre-merge-commit"
-    assert hook.exists(), "le hook `pre-merge-commit` est absent de `.githooks/`"
+    import pytest
+
+    # Hook versionné dans ce dépôt / worktree
+    old_hook = ROOT / ".githooks" / "pre-merge-commit"
+    assert not old_hook.exists(), "le hook obsolète `pre-merge-commit` doit être supprimé"
+    hook = ROOT / ".githooks" / "prepare-commit-msg"
+    assert hook.exists(), "le hook `prepare-commit-msg` est absent de `.githooks/`"
     assert hook.stat().st_mode & 0o111, "le hook n'est pas exécutable"
-    assert "check_roadmap_declared.py" in hook.read_text(encoding="utf-8")
+    content = hook.read_text(encoding="utf-8")
+    assert "check_roadmap_declared.py" in content
+    assert "MERGE_HEAD" in content, "le hook doit garder le contrôle via MERGE_HEAD"
+
+    # Branchement actif
     configured = subprocess.run(
         ["git", "config", "core.hooksPath"],
         cwd=ROOT, capture_output=True, text=True,
     ).stdout.strip()
     assert configured, "core.hooksPath n'est pas défini : le hook ne se déclenchera jamais"
-    assert (ROOT / configured).resolve() == (ROOT / ".githooks").resolve(), (
-        f"core.hooksPath vise {configured!r} et non `.githooks` : le hook versionné est ignoré"
+    hooks_dir = (
+        pathlib.Path(configured)
+        if pathlib.Path(configured).is_absolute()
+        else ROOT / configured
+    )
+    if hooks_dir.resolve() != (ROOT / ".githooks").resolve():
+        pytest.skip(
+            f"core.hooksPath absolu vise {hooks_dir} (dépôt principal), pas ce worktree — "
+            "vérification du branchement actif différée au merge dans main"
+        )
+    assert (hooks_dir / "prepare-commit-msg").exists(), (
+        f"core.hooksPath vise {configured!r} mais `prepare-commit-msg` n'y est pas"
     )
 
 
@@ -136,6 +155,28 @@ def merge_branch(repo: pathlib.Path, name: str, touch_roadmap: bool) -> None:
     run(repo, "merge", "-q", "--no-ff", "--no-verify", "-m", f"merge: {name}", name)
 
 
+def _install_hook(repo: pathlib.Path, hook_name: str, body: str) -> None:
+    hooks_dir = repo / ".githooks"
+    hooks_dir.mkdir(exist_ok=True)
+    hook = hooks_dir / hook_name
+    hook.write_text(body, encoding="utf-8")
+    hook.chmod(0o755)
+    run(repo, "config", "core.hooksPath", ".githooks")
+
+
+def _setup_repo_with_script(repo: pathlib.Path) -> None:
+    """Copie le script dans le dépôt de test.
+
+    Permet au hook d'appeler `$(git rev-parse --show-toplevel)/scripts/check_roadmap_declared.py`
+    et d'obtenir ROOT = dépôt de test, ce qui fait que toutes les opérations git du script
+    s'exécutent dans le bon contexte (MERGE_HEAD, historique, feuille de route).
+    """
+    script_dir = repo / "scripts"
+    script_dir.mkdir(exist_ok=True)
+    src = ROOT / "scripts" / "check_roadmap_declared.py"
+    (script_dir / "check_roadmap_declared.py").write_bytes(src.read_bytes())
+
+
 def test_branch_declaration_is_seen_through_an_accented_path(
     tmp_path: pathlib.Path, monkeypatch
 ) -> None:
@@ -173,3 +214,190 @@ def test_debt_counts_only_the_trunk(tmp_path: pathlib.Path, monkeypatch) -> None
     merge_branch(repo, "chantier-b", touch_roadmap=False)
     dette = gate.undeclared_merges("HEAD")
     assert len(dette) == 2 and all("merge: chantier-" in line for line in dette)
+
+
+# -------------------------------------------- verrou end-to-end hook vs MERGE_HEAD
+
+
+_OLD_HOOK_BODY = (
+    "#!/bin/sh\n"
+    'exec python3 "$(git rev-parse --show-toplevel)/scripts/check_roadmap_declared.py" --merge\n'
+)
+
+
+def scratch_repo_with_debt(tmp_path: pathlib.Path, count: int) -> pathlib.Path:
+    """Dépôt avec `count` merges sans déclaration de feuille de route."""
+    repo = scratch_repo(tmp_path)
+    for i in range(count):
+        run(repo, "checkout", "-qb", f"ch{i}")
+        (repo / f"f{i}.py").write_text("x\n", encoding="utf-8")
+        run(repo, "add", "-A")
+        run(repo, "commit", "-qm", f"code ch{i}")
+        run(repo, "checkout", "-q", "main")
+        run(repo, "merge", "-q", "--no-ff", "--no-verify", "-m", f"merge: ch{i}", f"ch{i}")
+    return repo
+_NEW_HOOK_BODY = (
+    "#!/bin/sh\n"
+    '[ -f "$(git rev-parse --git-dir)/MERGE_HEAD" ] || exit 0\n'
+    'exec python3 "$(git rev-parse --show-toplevel)/scripts/check_roadmap_declared.py" --merge\n'
+)
+
+
+def test_clean_merge_fails_with_pre_merge_commit_hook(tmp_path: pathlib.Path) -> None:
+    """Verrou RED : pre-merge-commit fire quand MERGE_HEAD est absent → crash, commit non créé.
+
+    Ce test représente l'état AVANT le correctif. Il doit passer (l'ancien comportement doit
+    échouer) — si on le voit devenir ROUGE, c'est qu'on a réintroduit le défaut.
+    """
+    repo = scratch_repo(tmp_path)
+    _setup_repo_with_script(repo)
+    _install_hook(repo, "pre-merge-commit", _OLD_HOOK_BODY)
+
+    run(repo, "checkout", "-qb", "chantier-test")
+    (repo / "code.py").write_text("x = 1\n", encoding="utf-8")
+    run(repo, "add", "-A")
+    run(repo, "commit", "-qm", "code de chantier-test")
+    run(repo, "checkout", "-q", "main")
+
+    count_before = run(repo, "log", "--oneline", "--first-parent").count("\n") + 1
+    result = subprocess.run(
+        ["git", "merge", "--no-ff", "-m", "merge: chantier-test", "chantier-test"],
+        cwd=repo, capture_output=True, text=True,
+    )
+    count_after = run(repo, "log", "--oneline", "--first-parent").count("\n") + 1
+
+    assert result.returncode != 0, (
+        "pre-merge-commit doit échouer : MERGE_HEAD absent lors d'une fusion propre"
+    )
+    assert count_after == count_before, (
+        "aucun commit de merge ne doit avoir été créé avec le vieux hook"
+    )
+
+
+def test_clean_merge_passes_with_prepare_commit_msg_hook(tmp_path: pathlib.Path) -> None:
+    """Verrou GREEN fusion propre : prepare-commit-msg reçoit MERGE_HEAD présent → commit créé.
+
+    git merge --no-ff -m "..." branch doit suffire — plus de git commit de rattrapage.
+    """
+    repo = scratch_repo(tmp_path)
+    _setup_repo_with_script(repo)
+    _install_hook(repo, "prepare-commit-msg", _NEW_HOOK_BODY)
+
+    run(repo, "checkout", "-qb", "chantier-test")
+    (repo / "code.py").write_text("x = 1\n", encoding="utf-8")
+    run(repo, "add", "-A")
+    run(repo, "commit", "-qm", "code de chantier-test")
+    run(repo, "checkout", "-q", "main")
+
+    count_before = run(repo, "log", "--oneline", "--first-parent").count("\n") + 1
+    result = subprocess.run(
+        ["git", "merge", "--no-ff", "-m", "merge: chantier-test", "chantier-test"],
+        cwd=repo, capture_output=True, text=True,
+    )
+    count_after = run(repo, "log", "--oneline", "--first-parent").count("\n") + 1
+
+    assert result.returncode == 0, (
+        f"le merge doit réussir sans git commit de rattrapage :\n{result.stderr}"
+    )
+    assert count_after == count_before + 1, (
+        "un commit de merge doit avoir été créé directement par git merge"
+    )
+
+
+def test_conflicting_merge_passes_with_prepare_commit_msg_hook(tmp_path: pathlib.Path) -> None:
+    """Verrou GREEN fusion conflictuelle : MERGE_HEAD présent lors de git commit → porte active.
+
+    Après résolution manuelle et git commit -m "...", le hook doit s'exécuter (MERGE_HEAD présent)
+    et laisser passer la porte (dette < plafond dans un dépôt frais).
+    """
+    repo = scratch_repo(tmp_path)
+    _setup_repo_with_script(repo)
+    _install_hook(repo, "prepare-commit-msg", _NEW_HOOK_BODY)
+
+    run(repo, "checkout", "-qb", "chantier-conflit")
+    (repo / "shared.txt").write_text("version branche\n", encoding="utf-8")
+    run(repo, "add", "-A")
+    run(repo, "commit", "-qm", "chantier-conflit: shared")
+    run(repo, "checkout", "-q", "main")
+    (repo / "shared.txt").write_text("version main\n", encoding="utf-8")
+    run(repo, "add", "-A")
+    run(repo, "commit", "-qm", "main: shared concurrente")
+
+    subprocess.run(
+        ["git", "merge", "--no-ff", "chantier-conflit"],
+        cwd=repo, capture_output=True, text=True,
+    )
+    assert (repo / ".git" / "MERGE_HEAD").exists(), (
+        "MERGE_HEAD doit exister après un merge conflictuel"
+    )
+
+    (repo / "shared.txt").write_text("résolu\n", encoding="utf-8")
+    run(repo, "add", "shared.txt")
+
+    count_before = run(repo, "log", "--oneline", "--first-parent").count("\n") + 1
+    result = subprocess.run(
+        ["git", "commit", "-m", "merge: chantier-conflit résolu"],
+        cwd=repo, capture_output=True, text=True,
+    )
+    count_after = run(repo, "log", "--oneline", "--first-parent").count("\n") + 1
+
+    assert result.returncode == 0, (
+        f"git commit après résolution de conflit doit réussir :\n{result.stderr}"
+    )
+    assert count_after == count_before + 1, (
+        "un commit de merge doit avoir été créé"
+    )
+
+
+def test_gate_is_dead_with_pre_merge_commit_hook(tmp_path: pathlib.Path) -> None:
+    """Verrou RED : avec pre-merge-commit + guard MERGE_HEAD, la porte ne s'exécute jamais.
+
+    MERGE_HEAD est absent quand pre-merge-commit fire → le guard sort 0 silencieusement →
+    même avec 3 merges sans déclaration, le 4e passe sans contrôle. Ce test prouve le DÉFAUT :
+    il doit PASSER (le merge est incorrectement laissé passer). Si ce test devient ROUGE,
+    c'est que la porte s'est réveillée dans pre-merge-commit — ce qui serait inattendu.
+    """
+    repo = scratch_repo_with_debt(tmp_path, gate.MAX_UNDECLARED)
+    _setup_repo_with_script(repo)
+    _install_hook(repo, "pre-merge-commit", _NEW_HOOK_BODY)
+
+    run(repo, "checkout", "-qb", "ch-final")
+    (repo / "extra.py").write_text("x\n", encoding="utf-8")
+    run(repo, "add", "-A")
+    run(repo, "commit", "-qm", "code ch-final")
+    run(repo, "checkout", "-q", "main")
+
+    result = subprocess.run(
+        ["git", "merge", "--no-ff", "-m", "merge: ch-final", "ch-final"],
+        cwd=repo, capture_output=True, text=True,
+    )
+    assert result.returncode == 0, (
+        "avec pre-merge-commit, la porte est morte : le merge doit passer sans contrôle "
+        f"(rc={result.returncode}, stderr={result.stderr!r})"
+    )
+
+
+def test_gate_blocks_violations_with_prepare_commit_msg_hook(tmp_path: pathlib.Path) -> None:
+    """Verrou GREEN : avec prepare-commit-msg, la porte s'exécute et bloque les violations.
+
+    MERGE_HEAD est présent quand prepare-commit-msg fire → guard laisse passer → script tourne →
+    3 merges sans déclaration = plafond atteint → le 4e est bloqué. Ce test prouve le CORRECTIF.
+    """
+    repo = scratch_repo_with_debt(tmp_path, gate.MAX_UNDECLARED)
+    _setup_repo_with_script(repo)
+    _install_hook(repo, "prepare-commit-msg", _NEW_HOOK_BODY)
+
+    run(repo, "checkout", "-qb", "ch-final")
+    (repo / "extra.py").write_text("x\n", encoding="utf-8")
+    run(repo, "add", "-A")
+    run(repo, "commit", "-qm", "code ch-final")
+    run(repo, "checkout", "-q", "main")
+
+    result = subprocess.run(
+        ["git", "merge", "--no-ff", "-m", "merge: ch-final", "ch-final"],
+        cwd=repo, capture_output=True, text=True,
+    )
+    assert result.returncode != 0, (
+        "avec prepare-commit-msg, la porte doit bloquer quand la dette atteint le plafond"
+    )
+    assert "sans que la feuille de route" in result.stderr

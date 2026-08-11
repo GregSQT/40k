@@ -132,7 +132,7 @@ def main(argv: list[str]) -> int:
         if git("symbolic-ref", "--short", "HEAD") != PROTECTED_BRANCH:
             print("↷ feuille de route : fusion hors `main`, sans objet")
             return 0
-        merge_head = (ROOT / ".git" / "MERGE_HEAD").read_text(encoding="utf-8").split()[0]
+        merge_head = git("rev-parse", "MERGE_HEAD")
         declares = branch_touches_roadmap("HEAD", merge_head)
     else:
         declares = False
