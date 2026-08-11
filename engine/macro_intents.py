@@ -125,21 +125,6 @@ OATH_SLOTS = range(OATH_SLOT_BASE, OATH_SLOT_BASE + OATH_SLOT_COUNT)            
 ACTIVATE_SLOTS = range(ACTIVATE_SLOT_BASE, ACTIVATE_SLOT_BASE + ACTIVATE_SLOT_COUNT)  # 1127-1138
 
 
-def get_objective_center(obj: dict) -> tuple:
-    """Return (col, row) center of an objective. Uses 'center' key if present, else centroid of 'hexes'."""
-    if "center" in obj:
-        c = obj["center"]
-        return int(c[0]), int(c[1])
-    hexes = obj["hexes"]
-    if not hexes:
-        raise ValueError(f"Objective {obj.get('id')} has no center and no hexes")
-    def _hex_col(h):
-        return int(h[0]) if isinstance(h, (list, tuple)) else int(h["col"])
-    def _hex_row(h):
-        return int(h[1]) if isinstance(h, (list, tuple)) else int(h["row"])
-    return sum(_hex_col(h) for h in hexes) // len(hexes), sum(_hex_row(h) for h in hexes) // len(hexes)
-
-
 def is_zone_intent_action(action: int) -> bool:
     # Borne haute = CHOICE_BASE, PAS TOTAL_ACTION_SIZE : depuis P2 (§9.3) l'action space se
     # termine par les CHOICE_i, qui ne sont pas des zone intents. La borne `TOTAL_ACTION_SIZE`
@@ -170,20 +155,22 @@ def decode_zone_intent_action(action: int):
 
 
 def get_nearest_objective_zone(active_unit: dict, game_state: dict) -> int:
-    """Return index of the closest objective to active_unit. Called once per command phase."""
-    from engine.combat_utils import calculate_hex_distance
-    objectives = game_state["objectives"]
-    if not objectives:
+    """Index de l'objectif dont l'AIRE est la plus proche de `active_unit` (14.02).
+
+    ⚠️ La distance se mesure à l'AIRE, pas au centre. Un objectif de terrain fait plusieurs
+    milliers d'hexes (2030 à 3000 sur le scénario PvE) : mesurée au centroïde, une unité posée
+    sur le bord d'un objectif — donc dedans, donc en train de le contrôler — ressortait à une
+    trentaine d'hexes de « son » objectif, et l'agent pouvait recevoir une zone d'intention qui
+    n'était pas celle qu'il occupait. Le centroïde était juste tant qu'un objectif faisait 7
+    hexes ; il ne l'est plus depuis que la zone EST le terrain (cf. `engine.objective_distance`).
+    """
+    from engine.objective_distance import nearest_objective_zone
+
+    if not game_state["objectives"]:
         return 0
-    unit_col, unit_row = active_unit["col"], active_unit["row"]
-    best_idx, best_dist = 0, float("inf")
-    for i, obj in enumerate(objectives):
-        obj_col, obj_row = get_objective_center(obj)
-        d = calculate_hex_distance(unit_col, unit_row, obj_col, obj_row)
-        if d < best_dist:
-            best_dist = d
-            best_idx = i
-    return best_idx
+    return nearest_objective_zone(
+        game_state, int(active_unit["col"]), int(active_unit["row"])
+    )
 
 
 # V11 §0.43 — les heuristiques de menace par `damage_ratio` (`get_best_enemy_global`,

@@ -1724,25 +1724,6 @@ class ActionDecoder:
             raise ValueError("objectives are required for deployment scoring")
         return objective_hexes
 
-    def _get_objective_centers(self, game_state: Dict[str, Any]) -> List[tuple[int, int]]:
-        """Extract objective center hex (or centroid) from each objective — O(N_objectives)."""
-        objectives = require_key(game_state, "objectives")
-        centers: List[tuple[int, int]] = []
-        for objective in objectives:
-            if "center" in objective:
-                c = objective["center"]
-                centers.append((int(c[0]), int(c[1])))
-            else:
-                hexes = objective["hexes"]
-                if not hexes:
-                    raise ValueError(f"Objective {objective.get('id')} has no center and no hexes")
-                avg_c = sum(int(h[0]) if isinstance(h, (list, tuple)) else int(h["col"]) for h in hexes) // len(hexes)
-                avg_r = sum(int(h[1]) if isinstance(h, (list, tuple)) else int(h["row"]) for h in hexes) // len(hexes)
-                centers.append((avg_c, avg_r))
-        if not centers:
-            raise ValueError("objectives are required for deployment scoring")
-        return centers
-
     def _build_deployed_snapshot_version(
         self, deployed_snapshot: Dict[str, tuple[int, int, int]]
     ) -> tuple[tuple[str, int, int, int], ...]:
@@ -2181,6 +2162,23 @@ class ActionDecoder:
             raise RuntimeError("_nearest_hex_distance_vec: refs non vide mais aucune distance")
         return best
 
+    @staticmethod
+    def _nearest_objective_area_distance_vec(
+        game_state: Dict[str, Any], cols: "np.ndarray", rows: "np.ndarray"
+    ) -> "np.ndarray":
+        """Distance à l'aire d'objectif la plus proche, pour tous les hexes d'un coup.
+
+        Un scénario SANS objectif lève, comme le faisait `_get_objective_centers` qu'elle
+        remplace : une distance constante servie par défaut noterait tout le plateau à
+        l'identique et ferait disparaître ce critère du tri sans que rien ne le signale.
+        """
+        from engine.objective_distance import objective_distance_maps
+
+        maps = objective_distance_maps(game_state)
+        if not maps:
+            raise ValueError("objectives are required for deployment scoring")
+        return np.minimum.reduce([m[cols, rows].astype(np.int64) for m in maps])
+
     def _deployment_score_columns(
         self,
         game_state: Dict[str, Any],
@@ -2216,8 +2214,6 @@ class ActionDecoder:
             if len(raw_enemy_refs) > 10
             else raw_enemy_refs
         )
-        objective_centers = self._get_objective_centers(game_state)
-
         hexes = np.asarray(valid_hexes, dtype=np.int64)
         cols = hexes[:, 0]
         rows = hexes[:, 1]
@@ -2245,7 +2241,13 @@ class ActionDecoder:
             cluster[i] = ally_col_counts[key[0]] if key[0] in ally_col_counts else 0
 
         nearest_enemy = self._nearest_hex_distance_vec(cols, rows, enemy_reference_hexes)
-        nearest_objective = self._nearest_hex_distance_vec(cols, rows, objective_centers)
+        # Distance à l'AIRE de l'objectif, pas à son centre (14.02) : un objectif de terrain fait
+        # plusieurs milliers d'hexes, et un hexe de déploiement posé sur son bord y est DÉJÀ. Le
+        # centroïde le donnait à des dizaines d'hexes, donc moins bien noté qu'un hexe hors de
+        # toute aire mais proche d'un centre. Lecture O(1) dans une carte mémoïsée par contenu
+        # (``engine.objective_distance``) : mesuré 0,6 ms pour 14 000 candidats, contre 24 ms en
+        # énumérant les segments et 584 ms en énumérant les hexes.
+        nearest_objective = self._nearest_objective_area_distance_vec(game_state, cols, rows)
         if ally_deployed_hexes:
             nearest_ally = self._nearest_hex_distance_vec(cols, rows, ally_deployed_hexes)
         else:
