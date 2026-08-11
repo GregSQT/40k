@@ -41,6 +41,7 @@ from ai.metrics_tracker import W40KMetricsTracker  # noqa: E402
 from ai.unit_registry import UnitRegistry  # noqa: E402
 from engine.phase_handlers.shared_utils import SQUAD_ACTION_WAIT  # noqa: E402
 from engine.w40k_core import W40KEngine  # noqa: E402
+from tests._state_invariants import charge_log_line  # noqa: E402
 
 #: Graines essayees pour obtenir la situation EXIGEE par chaque test. Borne stricte et message
 #: d'echec explicite : si un correctif de regles fait qu'aucune ne produit plus de charge, le
@@ -279,22 +280,13 @@ def _charge_line(player: int, kind: str, roll: int = 9) -> Dict[str, Any]:
     les montages qui parcouraient les graines a la recherche de la situation ne la trouvaient
     plus. Ce que ces tests verrouillent est la passe de COMPTAGE de `w40k_core` (elle lit
     `action_logs`), pas la façon dont ces lignes naissent.
+
+    Le CONTRAT de la ligne (les champs que la production lit sans repli) vient du socle partage
+    `charge_log_line` : il vivait ici, et sa copie dans `test_episode_combat_counters` n'a pas
+    suivi le chantier 11.04 — elle a rougi a la livraison suivante. Ne reste ici que ce qui est
+    propre a ce fichier : le tour 2.
     """
-    line: Dict[str, Any] = {
-        "type": kind, "player": player, "unitId": f"injected-{player}", "turn": 2,
-        "phase": "charge", "charge_roll": roll, "message": "injected",
-        "timestamp": "server_time",
-        # Distances 11.04 : la passe de comptage les EXIGE sur toute ligne de charge, parce
-        # qu'elles y sont posees par les sept sites qui emettent ces lignes. Une ligne injectee
-        # qui les omettrait ne serait plus le contrat que la passe lit.
-        "charge_nearest_enemy_inches": 4.0,
-        "charge_target_distance_inches": 5.0 if kind == "charge" else None,
-    }
-    if kind == "charge":
-        line["targetId"] = "x"
-    else:
-        line["charge_failed_reason"] = "roll_too_short"
-    return line
+    return charge_log_line(player, kind, roll=roll, turn=2)
 
 
 #: Journal injecte : volumes DIFFERENTS d'un camp a l'autre (4 contre 6) et taux AUX EXTREMES
