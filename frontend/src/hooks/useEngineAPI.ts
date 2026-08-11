@@ -299,9 +299,16 @@ export interface APIGameState {
   strategic_reserves?: StrategicReservesSummary;
   primary_objective?: Record<string, unknown> | Array<Record<string, unknown>> | null;
   objectives?: Array<{
+    /** Id de l'objectif — c'est LUI qui indexe `objective_controllers` (14.02), pas le nom. */
+    id?: string | number;
     name: string;
     hexes: Array<{ col: number; row: number } | [number, number]>;
   }>;
+  /**
+   * Contrôleur par objectif (14.02), indexé par id. État autoritaire du moteur, figé à chaque
+   * frontière de phase. Était lu par des casts `as` dispersés faute d'être déclaré ici.
+   */
+  objective_controllers?: Record<string, number | null>;
   wall_hexes?: Array<{ col: number; row: number } | [number, number]>;
   game_over?: boolean;
   winner?: number | null;

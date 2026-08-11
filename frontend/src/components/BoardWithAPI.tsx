@@ -21,6 +21,8 @@ import { useGameLog } from "../hooks/useGameLog";
 import { logoutSession } from "../services/apiFetch";
 import type { GamePhase, GameState, PlayerId, TargetPreview, Unit } from "../types";
 import type { DeploymentState, UnitId } from "../types/game";
+// ⚠️ INSTRUMENT TEMPORAIRE (2026-08-12) — cf. `utils/heldObjectives.ts`.
+import { heldObjectiveLabels } from "../utils/heldObjectives";
 import {
   canDropUnitIntoReserves,
   canSelectReserveUnitForIngress,
@@ -2233,6 +2235,11 @@ export const BoardWithAPI: React.FC = () => {
           gameMode={gameMode}
           victoryPoints={getVictoryPointsForPlayer(1)}
           commandPoints={getCommandPointsForPlayer(1)}
+          heldObjectives={heldObjectiveLabels(
+            apiProps.gameState?.objective_controllers,
+            apiProps.gameState?.objectives,
+            1
+          )}
           onCollapseChange={setPlayer1Collapsed}
           detailPreviewUnitId={
             illustrationPreviewUnit?.player === 1 ? illustrationPreviewUnit.id : null
@@ -2282,6 +2289,11 @@ export const BoardWithAPI: React.FC = () => {
           gameMode={gameMode}
           victoryPoints={getVictoryPointsForPlayer(2)}
           commandPoints={getCommandPointsForPlayer(2)}
+          heldObjectives={heldObjectiveLabels(
+            apiProps.gameState?.objective_controllers,
+            apiProps.gameState?.objectives,
+            2
+          )}
           onCollapseChange={setPlayer2Collapsed}
           detailPreviewUnitId={
             illustrationPreviewUnit?.player === 2 ? illustrationPreviewUnit.id : null
