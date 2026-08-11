@@ -170,6 +170,109 @@ def test_symbol_reference_is_not_an_anchor(tmp_path: pathlib.Path) -> None:
 # --------------------------------------------------------------------------- corpus réel
 
 
+def test_prose_pairs_an_adjacent_symbol(tmp_path: pathlib.Path) -> None:
+    """`fichier.py` (`symbole`) est une affirmation du document : elle doit être vérifiée."""
+    doc = write(tmp_path, "note.md", "le moteur `engine/w40k_core.py` (`_get_unit_by_id`) le lit\n")
+    resolved, _unverifiable, broken = cdr.check_references(doc)
+    assert resolved == 1 and not broken
+
+
+def test_prose_adjacent_symbol_that_is_absent_is_broken(tmp_path: pathlib.Path) -> None:
+    doc = write(tmp_path, "note.md", "le moteur `engine/w40k_core.py` (`zzz_absent`) le lit\n")
+    _resolved, _unverifiable, broken = cdr.check_references(doc)
+    assert len(broken) == 1 and "AUCUN SYMBOLE" in broken[0]
+
+
+def test_prose_colon_form_is_also_a_claim(tmp_path: pathlib.Path) -> None:
+    doc = write(tmp_path, "note.md", "voir `engine/w40k_core.py` : `_get_unit_by_id`\n")
+    resolved, _unverifiable, broken = cdr.check_references(doc)
+    assert resolved == 1 and not broken
+
+
+def test_a_filename_between_parentheses_is_not_a_symbol(tmp_path: pathlib.Path) -> None:
+    """`moteur.py` (`autre/fichier.py`) cite DEUX fichiers, pas un fichier et son symbole."""
+    doc = write(
+        tmp_path, "note.md",
+        "voir `engine/w40k_core.py` (`ai/hidden_action_finder.py`) pour le détail\n",
+    )
+    _resolved, _unverifiable, broken = cdr.check_references(doc)
+    assert not broken
+
+
+def test_a_deep_relative_claim_is_confirmed(tmp_path: pathlib.Path) -> None:
+    """Un renvoi qui remonte PLUSIEURS niveaux doit être confirmé, pas tronqué.
+
+    Tronqué, il ne se résolvait plus et disparaissait des trois compteurs à la fois. Le test
+    exige donc la CONFIRMATION : se contenter de « il sort quelque part » le laisserait passer
+    dès que le renvoi cassé est simplement signalé ailleurs.
+    """
+    (tmp_path / "engine").mkdir()
+    (tmp_path / "engine" / "moteur.py").write_text("def _get_unit_by_id():\n    ...\n", "utf-8")
+    profond = tmp_path / "a" / "b" / "c"
+    profond.mkdir(parents=True)
+    doc = profond / "note.md"
+    doc.write_text("`../../../engine/moteur.py` (`_get_unit_by_id`) le lit\n", encoding="utf-8")
+    resolved, _unverifiable, broken = cdr.check_references(doc)
+    assert (resolved, broken) == (1, [])
+
+
+def test_a_missing_file_claimed_in_prose_is_reported(tmp_path: pathlib.Path) -> None:
+    doc = write(tmp_path, "note.md", "`engine/pas_ici.py` (`un_symbole`) ferait foi\n")
+    _resolved, _unverifiable, broken = cdr.check_references(doc)
+    assert len(broken) == 1 and "FICHIER INTROUVABLE" in broken[0]
+
+
+def test_a_broken_path_is_not_rescued_by_a_namesake(tmp_path: pathlib.Path) -> None:
+    """Deux chemins, un seul nom de fichier : l'appariement ne doit PAS les confondre.
+
+    Une phrase cite couramment un chemin faux depuis ce document (`../engine/x.py`) et, plus
+    loin, le bon (`engine/x.py`). Apparié par basename, le premier héritait du fichier du second :
+    la paire portait alors un chemin irrésolvable et le contrôle partait en exception, perdant les
+    renvois déjà collectés et les documents suivants du run.
+    """
+    line = "le `../engine/w40k_core.py` (`_get_unit_by_id`) et `engine/w40k_core.py` le lisent\n"
+    doc = write(tmp_path, "note.md", line)
+    resolved, unverifiable, broken = cdr.check_references(doc)
+    assert len(broken) == 1 and "FICHIER INTROUVABLE" in broken[0]
+    assert (resolved, unverifiable) == (0, 1)
+
+
+def test_a_file_cited_twice_is_one_reference(tmp_path: pathlib.Path) -> None:
+    """Un fichier cité deux fois vaut UN renvoi, et son voisin sans symbole reste compté.
+
+    En soustrayant des PAIRES au nombre de fichiers, le décompte des invérifiables tombait à zéro :
+    `ai/train.py`, confronté à aucun symbole, disparaissait des trois compteurs pendant que
+    `resolved` annonçait deux confirmations pour un seul fichier — le vert vacant que ce module
+    existe pour fermer.
+    """
+    doc = write(
+        tmp_path, "note.md",
+        "`engine/w40k_core.py` (`_get_unit_by_id`) puis `engine/w40k_core.py` "
+        "(`_get_unit_by_id`) et `ai/train.py` aussi\n",
+    )
+    resolved, unverifiable, broken = cdr.check_references(doc)
+    assert (resolved, unverifiable, broken) == (1, 1, [])
+
+
+@pytest.mark.parametrize("line", [
+    "`../../../engine/moteur.py` (`symbole`)",
+    "`../engine/moteur.py` (`symbole`)",
+    "`engine/moteur.py` (`symbole`)",
+    "`moteur.py` (`symbole`)",
+    "voir `engine/moteur.py` : `symbole`",
+    "`a/b/c-d_e.py` (`symbole`)",
+])
+def test_adjacent_is_a_subset(line: str) -> None:
+    """L'invariant dont dépend l'appariement des symboles en prose.
+
+    Tout fichier que l'appariement adjacent reconnaît doit AUSSI être reconnu par l'extracteur
+    général, à l'identique — l'appariement se faisant sur le chemin ENTIER, une divergence des
+    deux motifs rendrait muette la vérification des symboles de la phrase. C'est ce qui s'est
+    produit le 2026-08-11, quand l'un acceptait plusieurs `../` et l'autre un seul.
+    """
+    assert [p[0] for p in cdr.adjacent_pairs(line)] == cdr.names_in(line)
+
+
 def test_a_dotted_call_is_not_a_file(tmp_path: pathlib.Path) -> None:
     """`hashlib.md5` n'est pas un fichier `hashlib.md` — mesuré comme fausse alerte réelle."""
     doc = write(tmp_path, "note.md", "| x | on dépose un `hashlib.md5` dans `config/` | y |\n")

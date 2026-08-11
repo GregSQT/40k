@@ -165,6 +165,9 @@ def mask_pair_of(
 # verifie par `unwrap_engine` : rien de plus (on n'exige pas ce qu'on n'appelle pas), rien de
 # moins (chaque acces d'ici est couvert). Toute nouvelle utilisation de `self.engine.<x>` dans
 # ce module doit etre ajoutee ici, sinon la verification cesse de prouver ce qu'elle affirme.
+# CONSEQUENCE EN AVAL : ce tuple a DEUX consommateurs. Tout membre ajoute ici doit aussi etre
+# expose par le double `_DummyEngine` des tests, sans quoi `unwrap_engine` refuse de construire
+# les wrappers et tous les tests qui en montent un tombent d'un coup.
 ENGINE_CONTRACT_ATTRS = (
     "game_state",
     "action_decoder",
@@ -172,6 +175,7 @@ ENGINE_CONTRACT_ATTRS = (
     "get_turn_step_limit",
     "step_with_mask",
     "get_action_mask",
+    "auto_deployment_action",
     "_build_observation",
     "defer_observation",
     "_check_game_over",

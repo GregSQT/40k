@@ -71,7 +71,7 @@ def _make_wrapped_env(active_ratio: float):
     from ai.unit_registry import UnitRegistry
 
     engine = _make_engine(active_ratio)
-    masked = ActionMasker(engine, lambda env: env.get_action_mask())
+    masked = ActionMasker(engine, lambda _env: engine.get_action_mask())
     return BotControlledEnv(
         masked,
         RandomBot(),

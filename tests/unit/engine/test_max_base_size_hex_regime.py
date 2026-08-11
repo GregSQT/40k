@@ -33,15 +33,30 @@ import pytest
 
 from shared.data_validation import ConfigurationError
 
-from tests.unit.engine._config_helpers import TRAINING_SCENARIO, build_armageddon_engine
+from tests.unit.engine._config_helpers import (
+    TRAINING_SCENARIO,
+    build_armageddon_engine,
+    play_out_deployment,
+)
 
 
 @pytest.fixture(scope="module")
 def gym_engine():
-    """Portée module : les 4 tests lisent le même état sans jamais le muter (tous copient)."""
-    return build_armageddon_engine(
+    """Moteur DÉPLOYÉ : la phase de déploiement est jouée jusqu'au bout avant de rendre l'état.
+
+    Portée module : les 4 tests lisent le même état sans jamais le muter (tous copient).
+
+    Le `reset` seul ne suffit plus. Il rend un moteur en phase `deployment` dont AUCUNE figurine
+    n'est sur la table (les 10 unités à `col=-1`) : depuis que le mode `fixed` a été remplacé par
+    `auto` (2026-08-08), plus aucune pose n'est pré-écrite dans les rosters. Or l'horizon
+    d'engagement se mesure entre unités POSÉES — sur cet état, le test d'appelant n'a aucune
+    unité de référence à prendre et la boucle d'ennemis de la prune tournerait à vide.
+    """
+    engine = build_armageddon_engine(
         seed=0, scenario_file=TRAINING_SCENARIO, training_n_envs=1,
     )
+    play_out_deployment(engine)
+    return engine
 
 
 def _copied_layers(game_state):

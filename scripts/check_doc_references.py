@@ -44,7 +44,7 @@ import re
 import subprocess
 import sys
 import urllib.parse
-from typing import Callable, Iterable
+from typing import Any, Callable, Iterable, TypeVar
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 DOCS = ROOT / "Documentation" / "Implémentation"
@@ -191,6 +191,36 @@ def symbols_in(cell: str) -> list[str]:
     return [s for s in dict.fromkeys(symbols) if not s.endswith("py")]
 
 
+#: `fichier.py` (`sym`, `sym2`) ou `fichier.py` : `sym` — la forme par laquelle ce corpus DIT
+#: « ce symbole vit dans ce fichier ». C'est une affirmation adjacente, donc appariable même en
+#: prose, là où apparier toute la ligne rendait 4 fausses alertes sur 4.
+#: `(?:\.{1,2}/)*` et non `?` : un renvoi remonte couramment plusieurs niveaux
+#: (`../../../engine/x.py`). Avec `?` le chemin était TRONQUÉ, ne se résolvait plus, et la
+#: citation disparaissait de tous les compteurs à la fois — un vert vacant, mesuré le 2026-08-11.
+ADJACENT = re.compile(
+    r"`?((?:\.{1,2}/)*[\w/-]+\.py)`?\s*(?:\((?P<par>[^)]*)\)|:\s*(?P<col>`[^`]+`))"
+)
+
+
+def adjacent_pairs(line: str) -> list[tuple[str, list[str]]]:
+    """(fichier, symboles) que la ligne affirme explicitement, quelle que soit sa forme."""
+    pairs: list[tuple[str, list[str]]] = []
+    for match in ADJACENT.finditer(line):
+        blob = match.group("par") or match.group("col") or ""
+        # Même garde que `symbols_in` : un NOM DE FICHIER entre parenthèses désigne un fichier,
+        # pas un symbole. Sans elle, `w40k_core.py` (`ai/hidden_action_finder.py`) faisait
+        # chercher un symbole `hidden_action_finder` dans le moteur — fausse alerte, mesurée.
+        symbols = [
+            s for raw in BACKTICKED.findall(blob)
+            if not ("/" in raw or "*" in raw or FILE_REF.fullmatch(raw.strip()))
+            for s in IDENTIFIER.findall(raw)
+        ]
+        symbols = [s for s in dict.fromkeys(symbols) if not s.endswith("py")]
+        if symbols:
+            pairs.append((match.group(1), symbols))
+    return pairs
+
+
 def check_references(doc_path: pathlib.Path) -> tuple[int, int, list[str]]:
     """Passe 1 — les fichiers cités existent, les symboles cités y vivent."""
     doc_dir = doc_path.parent
@@ -202,14 +232,46 @@ def check_references(doc_path: pathlib.Path) -> tuple[int, int, list[str]]:
             names = names_in(cell)
             if not names:
                 continue
-            missing = [n for n in names if resolve(n, doc_dir) is None]
-            for name in missing:
-                broken.append(f"{doc_path.name}:{lineno}  FICHIER INTROUVABLE  {name}")
-            present = [n for n in names if n not in missing]
+            found: dict[str, pathlib.Path] = {}
+            for name in names:
+                path = resolve(name, doc_dir)
+                if path is None:
+                    broken.append(f"{doc_path.name}:{lineno}  FICHIER INTROUVABLE  {name}")
+                else:
+                    found[name] = path
+            present = list(found)
             if not present:
                 continue
             if not pairing_allowed:
-                unverifiable += len(present)
+                # En prose, seule l'ADJACENCE fait foi : `fichier.py` (`symbole`). Le reste de la
+                # phrase peut citer n'importe quoi d'autre sans que le document l'affirme.
+                # L'appariement se fait sur le chemin ENTIER, jamais sur le nom de fichier nu :
+                # une phrase cite couramment `../engine/x.py` (faux depuis ce doc) puis
+                # `engine/x.py` (juste), et un rapprochement par basename attribuait au premier
+                # le fichier du second — la paire portait alors un chemin qui ne se résout pas.
+                claimed: dict[str, list[str]] = {}
+                for name, symbols in adjacent_pairs(cell):
+                    if name in found:
+                        # Un même fichier peut être cité deux fois dans la phrase : les symboles
+                        # se cumulent sur UN renvoi, ils n'en fabriquent pas deux (le tableau, lui,
+                        # compte déjà des fichiers distincts — les deux branches doivent compter
+                        # la même chose, sans quoi le total ne dit plus rien).
+                        merged = claimed.setdefault(name, [])
+                        merged += [s for s in symbols if s not in merged]
+                # Une paire dont le fichier n'est pas dans `found` est soit déjà sortie en
+                # `FICHIER INTROUVABLE`, soit capturée par `ADJACENT` sous une forme que
+                # `FILE_REF` ne rend pas (divergence verrouillée par `test_adjacent_is_a_subset`) :
+                # dans les deux cas le fichier reste compté ci-dessous, jamais escamoté.
+                unverifiable += len([n for n in present if n not in claimed])
+                for name, symbols in claimed.items():
+                    body = found[name].read_text(encoding="utf-8", errors="replace")
+                    if any(symbol_is_present(s, body) for s in symbols):
+                        resolved += 1
+                    else:
+                        broken.append(
+                            f"{doc_path.name}:{lineno}  AUCUN SYMBOLE dans {name} — "
+                            f"cherchés : {', '.join(symbols[:4])}"
+                        )
                 continue
             symbols = symbols_in(cell)
             if not symbols:
@@ -219,10 +281,7 @@ def check_references(doc_path: pathlib.Path) -> tuple[int, int, list[str]]:
             # de la cellule. Exiger que CHAQUE fichier les porte tous serait une affirmation que
             # le document ne fait pas : une cellule cite couramment le producteur ET le lecteur
             # d'une donnée, dont les symboles ne vivent que d'un côté.
-            bodies = [
-                path.read_text(encoding="utf-8", errors="replace")
-                for path in (resolve(n, doc_dir) for n in present) if path is not None
-            ]
+            bodies = [p.read_text(encoding="utf-8", errors="replace") for p in found.values()]
             if any(symbol_is_present(s, b) for s in symbols for b in bodies):
                 resolved += len(present)
             else:
@@ -290,16 +349,16 @@ def integers_in(cell: str) -> list[int]:
             for m in re.finditer(r"\d[\d  \xa0]*\d|\d", cell)]
 
 
-def claim_profile_count(text: str) -> list[tuple[str, object]]:
+def claim_profile_count(text: str) -> list[tuple[str, int]]:
     return [(m.group(0).strip(), int(m.group(1)))
             for m in re.finditer(r"\*\*(\d+)\*\*\s*profils", text)]
 
 
-def claim_n_envs(text: str) -> list[tuple[str, object]]:
+def claim_n_envs(text: str) -> list[tuple[str, int]]:
     return [(m.group(0).strip(), int(m.group(1))) for m in re.finditer(r"(\d+)\s+envs\b", text)]
 
 
-def claim_obs_size(text: str) -> list[tuple[str, object]]:
+def claim_obs_size(text: str) -> list[tuple[str, int]]:
     found = [(m.group(0).strip(), int(m.group(1)))
              for m in re.finditer(r"`obs_size`[^\n]*?\*\*(\d{4,})\*\*", text)]
     found += [(m.group(0).strip(), int(m.group(1)))
@@ -307,14 +366,14 @@ def claim_obs_size(text: str) -> list[tuple[str, object]]:
     return found
 
 
-def claim_profile_table(text: str) -> list[tuple[str, object]]:
+def claim_profile_table(text: str) -> list[tuple[str, int]]:
     """Les cases du tableau `profil | total_episodes | bot_eval_final` de §1.
 
     Ancré sur le NOM du profil, seul repère qui survive à une reformulation : la ligne peut
     porter du gras, une parenthèse d'historique ou un séparateur de milliers sans se dérober.
     """
     known = set(agent_profiles())
-    claims: list[tuple[str, object]] = []
+    claims: list[tuple[str, int]] = []
     for line in text.split("\n"):
         if not line.lstrip().startswith("|"):
             continue
@@ -333,7 +392,7 @@ def claim_profile_table(text: str) -> list[tuple[str, object]]:
     return claims
 
 
-def claim_step_log(text: str) -> list[tuple[str, object]]:
+def claim_step_log(text: str) -> list[tuple[str, tuple[str, int]]]:
     found = [(m.group(0).strip(), ("count", int(m.group(1))))
              for m in re.finditer(r"\*\*(\d+)\*\*\s*entrées", text)]
     found += [(m.group(0).strip(), ("max", int(m.group(1))))
@@ -379,11 +438,16 @@ def expected_from_table_key(claim: object) -> object:
 
 #: label -> (extracteur des valeurs ANNONCÉES par le document, valeur ATTENDUE de la source).
 #: L'extracteur qui ne trouve rien fait ÉCHOUER le contrôle : voir la docstring du module.
-ValueCheck = tuple[Callable[[str], list[tuple[str, object]]], Callable[[object], object]]
+#: La valeur ANNONCÉE change de nature d'un contrôle à l'autre (un entier ici, un couple
+#: `(sorte, entier)` là) : le couple est donc générique en cette valeur, et chaque paire
+#: extracteur/attendu reste typée ensemble. Le registre, lui, est hétérogène par nature —
+#: `Any` y est l'aveu exact de ce qui s'y range, pas un relâchement du typage des contrôles.
+_Claim = TypeVar("_Claim")
+ValueCheck = tuple[Callable[[str], list[tuple[str, _Claim]]], Callable[[_Claim], object]]
 
 TABLE_LABEL = "tableau des profils"
 
-VALUE_CHECKS: dict[str, dict[str, ValueCheck]] = {
+VALUE_CHECKS: dict[str, dict[str, ValueCheck[Any]]] = {
     "ROADMAP.md": {
         "nombre de profils": (claim_profile_count, lambda _claim: expected_profile_count()),
         "n_envs des profils": (claim_n_envs, lambda _claim: expected_n_envs()),

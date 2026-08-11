@@ -215,9 +215,21 @@ Prêts à démarrer sans décision produit :
   jamais appris. Le générateur de positions figées et son test sont supprimés.
   ⚠️ Même conséquence que la ligne ci-dessus sur la comparabilité des win-rates, et pour la même
   raison : ce qui est mesuré n'est plus la même partie.
-  ⚠️ Résidu signalé, non traité (hors périmètre) : un bloc `deployment_random_mix` — le nom
-  d'avant — survit dans `tests/unit/engine/_config_helpers.py`, seul reste dans tout le dépôt.
+  Le résidu `deployment_random_mix` qui survivait dans `tests/unit/engine/_config_helpers.py`
+  est **supprimé le 2026-08-11** : il épinglait « à l'arrêt » un mécanisme moteur
+  (`_should_force_random_deployment_action`) qui n'existe plus, donc il injectait une clé que
+  plus personne ne lit. 0 occurrence dans le code désormais.
   Livré sans passer par ce fichier ; ligne ajoutée après coup le 2026-08-11.
+- ✅ **Résidus T1/T2/T3 de l'accélération du move pool — SOLDÉS le 2026-08-11.** Les trois tâches
+  restées ouvertes depuis le 2026-07-21 sont fermées. **T1** : les copies du motif slice-OR
+  passent par `hex_utils.offset_slice_windows` (bornes de slice d'un décalage de grille, calculées
+  une fois), verrouillé par `test_offset_slice_windows.py` — équivalence exhaustive contre
+  l'indexation naïve, verrou prouvé rouge. **T2** : `numba` n'est pas une dépendance du projet,
+  acté par écrit dans `requirements.runtime.txt`. **T3** : le poste coûteux du déploiement n'était
+  pas l'heuristique de scoring mais le **recalcul à l'identique** du pool d'ancres valides (mesuré
+  121 appels pour 12 états distincts, 90 % de redite) — désormais mis en cache derrière un
+  fingerprint de tout ce dont le pool dépend, verrouillé par `test_deployment_cache_equivalence.py`.
+  → [`Implémenté/V11_move_build_acceleration.md`](Implémenté/V11_move_build_acceleration.md)
 - **Perf `generate_compact_formation`** (½-1 j) — MESURER avant d'implémenter, gain non acquis
   → [`A_faire/perf_generate_compact_formation.md`](A_faire/perf_generate_compact_formation.md)
 - **gzip/Brotli** (½ j) — à faire AVEC l'étape 5 de Security (même proxy)
@@ -304,6 +316,32 @@ approché par un proxy ; et **rien ne peut prouver qu'un chantier livré a pris 
 chantier peut n'avoir aucun document, et un nom de branche ne se retrouve pas dans un texte
 français. Le script se borne à rappeler combien de livraisons ont été mergées depuis la dernière
 écriture du document, sans verdict.
+
+### Une porte refuse la fusion quand les chantiers s'accumulent sans ligne
+
+`scripts/check_roadmap_declared.py`, branché sur le hook `pre-merge-commit` de `.githooks/`
+(`core.hooksPath` pointe dessus, les hooks sont donc versionnés). Une fusion **dans `main`** est
+refusée quand **trois** chantiers ont déjà été livrés sans que ce fichier bouge. Le refus les nomme.
+
+**Le plafond est une mesure, pas un réglage.** Le refus sec a été essayé puis abandonné sur
+chiffres : « la branche doit toucher la feuille de route » refuse **22 des 25** derniers merges,
+« la feuille doit avoir bougé depuis le merge précédent » en refuse **20 sur 25** — parce que le
+flux réel écrit la ligne dans un commit de suivi, après la fusion. Une porte rouge en permanence se
+contourne au premier usage : on aurait troqué un manque visible contre un contrôle mort.
+
+🔴 **Ce qu'elle vaut vraiment, et il faut le savoir avant de s'y fier.** Mesuré une fois ses deux
+défauts corrigés : sur les 17 fusions postérieures au 2026-08-10, le plafond 3 en refuse 4, et ce
+sont les quatre plus ANCIENNES, antérieures au moment où ce fichier a pris son rôle. Sur les treize
+suivantes elle ne se déclencherait **pas une seule fois** — y compris sur les trois chantiers dont
+on sait qu'ils n'ont pas été déclarés. La raison est structurelle : la dette retombe à zéro dès que
+ce fichier est **touché**, pour n'importe quel motif — une valeur corrigée, une reformulation, une
+typo. Comme il est retouché souvent, la porte mesure une SÉCHERESSE d'écriture, pas la déclaration
+d'un chantier précis. Elle attrape l'oubli prolongé ; elle ne remplace pas la discipline, et il ne
+faut pas lui faire dire qu'un chantier a sa ligne.
+
+Ce qu'elle NE fait pas non plus : juger si la ligne écrite est juste, ni voir un chantier livré par
+un commit direct sur `main`. Contournement assumé quand la fusion n'est pas un chantier :
+`git merge --no-verify`. État courant sans rien bloquer : `--status`.
 
 **Deux pièges déjà payés, à ne pas reprendre pour des régressions.** (1) Un contrôle de liens naïf
 rend **152 hits** dont aucun n'est mort (143 dans `Implémenté/stage.md`, 5 dans `Boardx10-audit.md`,
