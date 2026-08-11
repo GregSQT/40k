@@ -83,17 +83,20 @@ raison (cf. `config/bot_movement_weights.json`, entrée `tactical`).
 
    | style | doctrine | erreur punie |
    |---|---|---|
-   | Racer | prend tous les objectifs au plus vite, se disperse, refuse le combat | l'agent qui campe et ne conteste jamais |
-   | Endgame | reste hors de portée, préserve ses OC, fond sur les objectifs aux tours 4-5 | l'agent qui marque tôt et se croit gagnant |
-   | Standoff | maximise ses dégâts espérés hors de portée adverse, exploite LoS et couvert | l'agent qui avance à découvert |
-   | Alpha strike | cherche le contact au plus tôt sur la pièce clé, joue Fights First par la charge | l'agent qui expose ses unités de tir |
+   | Racer | prend tous les objectifs au plus vite, refuse le combat | l'agent qui campe et ne conteste jamais |
+   | Endgame | tient le minimum tôt, prend le maximum à partir du tour 3 | l'agent qui marque tôt et se croit gagnant |
+   | Alpha strike | cherche le contact au plus tôt sur la pièce clé | l'agent qui expose ses unités de tir |
    | Attrition | joue le départage VALUE : préserve ses pièces chères, tue le rentable | l'agent qui trade mal |
    | Décapitation | concentre tout sur une escouade par tour pour la retirer entièrement | l'agent qui étale ses forces |
 
-   Racer/Endgame sont les deux bornes du **tempo**, Standoff/Alpha celles de la **distance**,
-   Attrition/Décapitation les deux façons opposées de dépenser ses dégâts.
+   Racer/Endgame sont les deux bornes du **tempo**, Attrition/Décapitation les deux façons
+   opposées de dépenser ses dégâts, Alpha la distance nulle.
    `adaptive` **disparaît** : c'est un commutateur entre trois autres styles, donc corrélé par
    construction.
+   ⚠️ **Le panel compte CINQ styles, pas six.** `Standoff` (« tenir ses distances ») a été
+   **supprimé** le 2026-08-11 — mesures et raison en §9. Décision de l'utilisateur, reprise
+   telle quelle : « je préfère des bots pertinents plutôt que forcer pour en avoir un de plus
+   qui n'apprend rien ». Le nombre n'a aucune vertu ; l'orthogonalité si.
 3. **Le holdout garde le nom `tactical` mais change de nature.** Il n'a pas de doctrine, il a un
    objectif : il joue pour gagner. Recherche à **un coup d'anticipation** — énumérer ses actions
    légales, les simuler, garder la meilleure. Sa fonction de valeur d'état (option C) :
@@ -119,10 +122,11 @@ raison (cf. `config/bot_movement_weights.json`, entrée `tactical`).
 | 1 | `step.log` nomme l'adversaire réellement affronté | ✅ 2026-08-11 |
 | 2 | ~~appariement des graines entre bots comparés~~ | ❌ **retirée** 2026-08-11, cf. §4.1 |
 | 3 | chiffrage de faisabilité du holdout à un coup | ✅ 2026-08-11, cf. §6 |
-| 4 | modèle de dégâts espérés (attaquant → cible) | |
-| 5 | les six styles + le holdout | |
-| 6 | réglage et orthogonalité en **bot-contre-bot** | |
+| 4 | modèle de dégâts espérés (attaquant → cible) | ✅ 2026-08-11, cf. §7 |
+| 5 | les CINQ styles + le holdout | ✅ 2026-08-11, cf. §7 (6ᵉ style supprimé, §9.2) |
+| 6 | réglage et orthogonalité en **bot-contre-bot** | ✅ 2026-08-12, cf. §8 et §9 |
 | 7 | correspondance ancien/nouveau, puis suppression des six anciens | |
+| — | **⚠️ sort du holdout : arbitrage OUVERT, cf. §10.1** | |
 | 8 | mesure finale contre l'agent, commande de §2 | |
 
 ### 4.1 Pourquoi l'appariement des graines a été retiré
@@ -219,3 +223,139 @@ de `ai/evaluation_bots.py`) : le coût du move y est encore plus haut.
 **Ce qui reste à trancher** : le holdout simule-t-il ses coups partout (impossible en l'état), ou
 seulement là où le branchement le permet, ou sur un sous-ensemble filtré des destinations ?
 Remonté à l'utilisateur le 2026-08-11.
+
+## 7. Ce qui a été livré aux étapes 4 et 5
+
+**Le socle n'était pas à écrire.** `engine/weapon_damage_cache.py` calculait déjà les dégâts
+espérés attaquant→cible en O(1) (jet pour toucher, Force contre Endurance, AP contre sauvegarde),
+sur une table pré-calculée que l'observation de l'agent lit déjà
+(`ObservationBuilder._score_weapon_vs_target`). Un second modèle de dégâts aurait créé le doublon
+divergent que ce dépôt paie le plus cher.
+
+Il manquait **un facteur** : la table donne un dégât **par figurine** (sa clé offensive porte `NB`,
+les attaques d'une figurine), alors que les bots décident au niveau de l'escouade — dix Boyz y
+valaient un Boy. `squad_expected_damage()` multiplie par l'effectif **vivant**, lu comme le fait le
+moteur (ids de `squad_models` présents dans `models_cache`). Aucun repli : cache absent ou escouade
+inconnue lèvent, sans quoi une unité inconnue passerait pour inoffensive.
+
+**Nouveaux fichiers** : `ai/bot_doctrines.py` (les six styles), `ai/bot_holdout.py` (le holdout à
+un coup), `ai/bot_registry.py` (source unique clé→classe).
+
+**Un défaut jumeau trouvé en chemin** : la table clé→classe existait en DEUX copies
+(`ai/bot_evaluation.py` et `scripts/bot_ranking.py`). Brancher les six styles dans la première a
+suffi pour l'évaluation, et `bot_ranking.py --bots racer` levait toujours « Unknown bot type ».
+`ai/bot_registry.py` est désormais la source unique, les deux appelants y passent.
+
+**Accès moteur du holdout** : un bot ne reçoit d'ordinaire que `game_state` et ne peut rien
+simuler. `BotControlledEnv` remet le moteur aux bots qui le **déclarent** (`NEEDS_ENGINE`, attribut
+de classe) — jamais par `hasattr`, dont le repli mou a déjà fait jouer `TacticalBot` en aveugle
+toute une campagne. Les trois voies d'arrivée d'un bot sont couvertes (`bot=`, `bots=[...]` tiré à
+chaque épisode, et l'injection au vol de `scripted_action_for_agent_side`) ; une déclaration non
+honorée lève. Verrou : `tests/unit/ai/test_bot_engine_access.py`.
+
+**Clé de transition** : le nouveau holdout est enregistré sous `tactical_lookahead`. Il prendra le
+nom `tactical` à l'étape 7, quand l'ancien partira — c'est l'ancien qui a un historique de mesures
+à préserver, pas lui.
+
+## 8. Réglage (étape 6) — mesures en bot-contre-bot, x1
+
+Protocole : `W40K_BOARD_PATH=board/44x60x1 python3 scripts/bot_ranking.py --training-config x1`,
+pool holdout, les deux sièges.
+
+**Premier tournoi des six** (120 épisodes, poids d'origine posés par doctrine) :
+
+| bot | win-rate moyen |
+|---|---|
+| attrition | 0,725 |
+| decapitation | 0,700 |
+| standoff | 0,550 |
+| racer | 0,450 |
+| alpha | 0,425 |
+| endgame | **0,025** |
+
+**`endgame` était perdant par construction, pas par réglage.** Le score primaire court à partir du
+tour 2 (`config/primary_objective/44x60/Objectives_Control.json` : `start_turn: 2`, 15 VP/tour) et
+la partie dure 5 tours. Ne rien tenir avant le tour 4, c'est renoncer aux tours 2 et 3 — la moitié
+des tours qui rapportent. Aucun jeu de poids ne rattrape ça.
+
+Correction : « jouer la fin de partie » ne peut pas vouloir dire « ne rien marquer avant ». Il
+prend le premier palier tôt (5 VP dès qu'il tient une zone) et bascule sur le maximum au tour 3,
+en gardant ses unités intactes pour ce moment-là. `PUSH_TURN` 4 → 3 ; `w_objective` 0,3 → 0,9 ;
+`w_enemy` −0,8 → −0,35.
+
+Mesure après correction (sous-tournoi à trois, 16 épisodes) : **0,025 → 0,562**, et il gagne les
+appariements qu'il perdait à 0,000 (racer) et 0,250 (alpha).
+
+⚠️ Un sous-tournoi à trois bots ne se compare pas à un tournoi à six : seuls les appariements
+communs le sont. Le tournoi complet des six, poids corrigés, reste à consigner ici.
+
+**Le holdout** (`tactical_lookahead` contre `racer`, 8 épisodes) : **0,875**. Peu d'épisodes, donc
+marge large — mais il joue, il ne lève pas, et il domine.
+
+## 9. Résultats de l'étape 6 — panel corrigé (2026-08-11/12)
+
+### 9.1 Quatre doctrines corrigées, toutes pour la MÊME cause
+
+Chaque style décrivait « ce que je fais » sans jamais peser **ce qui fait gagner**. Les points se
+comptent dès le tour 2 et la partie s'arrête au tour 5 : un bot qui gagne des combats en ignorant
+les zones perd la partie. Les quatre corrections, mesurées en bot-contre-bot :
+
+| bot | défaut | correction | effet |
+|---|---|---|---|
+| `endgame` | ne tenait AUCUN objectif avant le tour 4, soit la moitié des tours qui rapportent | `PUSH_TURN` 4→3, `w_objective` 0,3→0,9 | 0,025 → 0,562 |
+| `racer` | visait en priorité les cibles qu'il ne pouvait PAS blesser, et **fuyait** l'ennemi tout en courant aux objectifs — il occupait les zones que personne ne dispute | `_score_contester` rend `None` au lieu de `0.0` ; `w_enemy` −0,1 → +0,2 ; facteur de distance 100 → 10 | 0,219 → 0,542 |
+| `alpha` | chargeait **inconditionnellement**, y compris un tireur à 36" sur une cible qu'il n'entame pas au contact | seuil `MELEE_TRADE_FLOOR` ; `w_objective` 0,3→0,8 | 0,292 → 0,594 |
+| `standoff` | `w_risk` = `w_fire` : refusait toute position exposée, donc reculait au lieu de tirer | `w_risk` 1,0→0,5, `w_objective` 0,6→1,0 | 0,396 → 0,365 (**sans effet**) |
+
+⚠️ **Le bug de `_score_contester` mérite d'être retenu** : le score d'une cible valide vaut
+`-distance × 10 + dégâts`, donc négatif ; rendre `0.0` pour « aucune arme ne peut la blesser » en
+faisait le MEILLEUR score du lot. C'est exactement le défaut reproché à l'ancien panel — ignorer
+si l'on peut blesser la cible — réintroduit par une erreur de signe dans le code censé le corriger.
+
+### 9.2 `standoff` supprimé
+
+0,92 / 0,90 / 0,97 contre trois agents de forces différentes : **amplitude 0,05**, dans le bruit.
+Deux campagnes et une correction de poids n'y ont rien changé. Hypothèse retenue : l'axe
+« se préserver, tenir ses distances » est **structurellement perdant dans ce format**, où le score
+court dès le tour 2 et la partie s'arrête au tour 5 — un style qui attend n'a pas le temps d'être
+payé. Non remplacé.
+
+### 9.3 Mesure contre l'agent, panel corrigé
+
+Même protocole qu'en §2, profil `x1_panel` (les cinq styles seuls).
+
+| bot | 0.8330 | 0.8457 | 0.9438 | amplitude |
+|---|---|---|---|---|
+| **racer** | **0,56** | **0,64** | **0,66** | +0,10 |
+| attrition | 0,60 | 0,65 | 0,79 | +0,19 |
+| decapitation | 0,69 | 0,84 | 0,81 | +0,12 |
+| alpha | 0,75 | 0,97 | 0,91 | +0,16 |
+| endgame | 0,77 | 0,78 | 0,89 | +0,12 |
+| **combined** | 0,716 | 0,798 | 0,839 | |
+
+Trois acquis : `racer` tient l'agent à **0,66** là où `control` — le meilleur de l'ancien panel —
+le laissait à 0,73 ; le combined passe de 0,899 (avant corrections) à **0,839**, soit le niveau de
+l'ancien panel (0,846) avec un pire bot nettement meilleur ; et le panel **ordonne correctement**
+les trois agents, ce qui est la propriété qui compte pour un thermomètre.
+
+⚠️ **L'orthogonalité n'est PAS établie.** Trois modèles resserrés en force (0,833 / 0,846 / 0,944)
+ne suffisent pas à décider si deux bots sont redondants. Le bot-contre-bot ne peut pas y répondre
+non plus : il mesure la force relative, pas ce que chaque bot révèle de l'agent.
+
+## 10. Ce qui reste ouvert — à lire avant de reprendre
+
+1. **Le holdout `tactical_lookahead` n'est pas validé.** Ses deux seules mesures (0,875 puis 0,250
+   contre `racer`) portent chacune sur **8 épisodes**, soit ±35 points de marge, et elles encadrent
+   **six changements simultanés** — quatre corrections du bot, deux de son unique adversaire.
+   Aucune conclusion n'en est tirable, ni sur sa force ni sur l'effet du retrait de son « oracle ».
+   Il coûte par ailleurs ~5× un bot normal par épisode (recalcul du contrôle d'objectif par
+   candidate). Son sort est un arbitrage OUVERT, pas une décision prise.
+2. **Deux reviews ont trouvé 11 défauts** dans ce code, dont 3 introduits en corrigeant la review
+   précédente : la simulation du holdout qui polluait les compteurs du moteur, le rembobinage du
+   hasard qui en faisait un oracle, un test de dés qui ne testait rien. Tous corrigés et verrouillés
+   (`tests/unit/ai/test_holdout_simulation_isolation.py`), mais le taux d'erreur sur ce fichier
+   invite à la prudence.
+3. **Étapes 7 et 8 non commencées** : correspondance ancien/nouveau puis suppression des six
+   anciens, et mesure finale contre l'agent.
+4. **Le merge dans `main` attend la fin du training en cours** — il touche `config/`, relu à chaud
+   par les évaluations (cf. CLAUDE.md, « Training en cours »).

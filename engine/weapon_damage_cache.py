@@ -159,3 +159,55 @@ def lookup_best_weapon(
     if entry is None:
         return (-1, 0.0)
     return entry
+
+
+def squad_expected_damage(
+    game_state: Dict[str, Any],
+    attacker_id: str,
+    target_id: str,
+    is_ranged: bool,
+) -> float:
+    """Degats esperes d'une ACTIVATION d'escouade sur une autre, figurines vivantes comprises.
+
+    `lookup_best_weapon` rend le degat espere de la meilleure arme POUR UNE FIGURINE : sa cle
+    offensive est `[ATK, STR, expected_NB, expected_DMG, AP]`, ou `NB` est le nombre d'attaques
+    d'UNE figurine (cf. `scripts/weapon_damage_builder.py`). Une escouade de dix Boyz y vaut donc
+    autant qu'un seul Boy. Cette fonction est le facteur qui manquait.
+
+    POURQUOI ELLE EXISTE — les bots d'evaluation tranchaient toutes leurs decisions (menace, choix
+    de cible, « tuable ce tour », « charger ou pas ») sur `max(NB x DMG)`, qui ignore le jet pour
+    toucher, la Force contre l'Endurance, l'AP contre la sauvegarde, les figurines et la portee.
+    Mesure du 2026-08-11 : sur le roster 500 pts d'ArmageddonAgent, **16 unites sur 23** passaient
+    pour des unites de melee sous ce proxy, Intercessor compris — c'est le test qui decide de
+    charger, donc les bots envoyaient leurs tireurs au contact.
+    Ici, aucun calcul nouveau : la table pre-calculee est la MEME que celle que lit l'observation
+    de l'agent (`ObservationBuilder._score_weapon_vs_target`). Une seconde implementation des
+    degats esperes divergerait de la premiere au premier reglage.
+
+    ⚠️ AUCUN REPLI. Un cache absent, une escouade inconnue de `squad_models` ou une paire hors
+    cache sont des divergences d'invariant : elles levent. Rendre 0.0 ferait passer une escouade
+    inconnue pour une escouade inoffensive, et un bot choisirait sa cible sur cette invention.
+
+    Le comptage des figurines suit le patron unique du moteur — les ids de `squad_models` PRESENTS
+    dans `models_cache`, d'ou les morts sont retires (cf. `shared_utils.select_eligible_models`).
+    """
+    cache = game_state.get("_best_weapon_cache")  # get allowed : l'absence leve juste en dessous
+    if cache is None:
+        raise RuntimeError(
+            "squad_expected_damage exige game_state['_best_weapon_cache'], construit au reset "
+            "par W40KEngine ; sans lui, aucune estimation de degats n'est possible."
+        )
+    _, per_model_damage = lookup_best_weapon(cache, str(attacker_id), str(target_id), is_ranged)
+    if per_model_damage <= 0.0:
+        # Pas d'arme capable de blesser cette cible : zero est le RESULTAT, pas un repli.
+        return 0.0
+
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    att_id = str(attacker_id)
+    if att_id not in squad_models:
+        raise KeyError(
+            f"squad_expected_damage: escouade attaquante {att_id} absente de squad_models."
+        )
+    alive_models = sum(1 for mid in squad_models[att_id] if mid in models_cache)
+    return float(alive_models) * per_model_damage

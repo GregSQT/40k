@@ -41,31 +41,31 @@ from config_loader import get_config_loader
 # Aucune des sept classes n'est plus referencee ici : les adversaires d'evaluation sont instancies
 # par ai/bot_evaluation.evaluate_against_bots, importe la ou il sert.
 
-# V11 §10.5 : adversaires RESERVES a l'evaluation, jamais rencontres a l'entrainement.
-# Ils sont mesures et affiches, mais exclus de TOUT signal de selection de modele
-# (combined, worst_bot, gating, score robuste) : un holdout sur lequel la selection
+# ⚠️ CES CONSTANTES SONT DERIVEES, PLUS DECLAREES. Elles vivaient ici en dur — troisieme table
+# de bots du depot, apres celles de `ai/bot_evaluation.py` et `scripts/bot_ranking.py`. Et
+# c'etait la plus dangereuse des trois : une liste BLANCHE, donc les cinq styles refondus ont
+# JOUE leurs 600 episodes le 2026-08-11 sans qu'une seule ligne `vs <bot>` ne soit imprimee et
+# sans compter dans le `worst_bot`. La mesure tournait, ses resultats etaient invisibles.
+# Source unique desormais : `ai/bot_registry.py`.
+#
+# CE QUE CETTE DERIVATION NE FAIT PAS (precision ajoutee apres la review du 2026-08-11, qui
+# soupconnait l'inverse) : elle ne decide pas QUELS bots sont joues. Ceux-la sortent des CLES de
+# `callback_params.bot_eval_weights` (`ai/bot_evaluation.py`, `active_bot_names`), profil de
+# training par profil de training. Ajouter un bot au registre le rend AFFICHABLE et selectionnable
+# des qu'il joue ; c'est le profil qui le fait jouer. Le profil `x1_panel` est celui qui porte les
+# cinq styles refondus ; les autres profils gardent le panel d'origine, et leurs entrees de
+# `bot_eval_randomness` pour les nouveaux bots ne servent qu'a ce qu'un ajout aux poids ne leve pas.
+#
+# V11 §10.5 : les holdouts sont MESURES et affiches, mais exclus de TOUT signal de selection de
+# modele (combined, worst_bot, gating, score robuste) — un holdout sur lequel la selection
 # optimise n'est plus un holdout.
-HOLDOUT_BOT_NAMES = frozenset(["tactical"])
+from ai.bot_registry import (  # noqa: E402
+    ALL_BOT_KEYS as ALL_BOT_NAMES,
+    BOT_DISPLAY_NAMES,
+    HOLDOUT_BOT_KEYS,
+)
 
-# Nom de classe reel de chaque adversaire d'evaluation, pour les tags TensorBoard : une courbe
-# `03_eval/<scenario>/defensive` n'identifie pas l'adversaire pour qui lit le dashboard, alors
-# que le code n'echange que ces cles courtes. Table EXPLICITE et non derivee de la cle (un
-# `''.join(part.capitalize()) + 'Bot'` rendrait le bon nom aujourd'hui et divergerait en silence
-# a la premiere classe qui ne suit pas la convention) ; verrouillee contre les classes reelles
-# de ai/evaluation_bots par tests/unit/ai/test_eval_bot_display_names.py.
-BOT_DISPLAY_NAMES = {
-    "random": "RandomBot",
-    "greedy": "GreedyBot",
-    "defensive": "DefensiveBot",
-    "control": "ControlBot",
-    "adaptive": "AdaptiveBot",
-    "value_trade": "ValueTradeBot",
-    "tactical": "TacticalBot",
-}
-
-ALL_BOT_NAMES = frozenset([
-    "random", "greedy", "defensive", "control", "adaptive", "value_trade",
-]) | HOLDOUT_BOT_NAMES
+HOLDOUT_BOT_NAMES = frozenset(HOLDOUT_BOT_KEYS)
 
 # Bots qui pilotent la selection (gating, worst_bot, score robuste). Le holdout en est exclu.
 SELECTION_BOT_NAMES = ALL_BOT_NAMES - HOLDOUT_BOT_NAMES

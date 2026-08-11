@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Tuple
 
 import pytest
 
-import ai.evaluation_bots as evaluation_bots
+from ai.bot_registry import bot_classes
 from ai.training_callbacks import (
     ALL_BOT_NAMES,
     BOT_DISPLAY_NAMES,
@@ -25,14 +25,32 @@ def test_display_names_cover_exactly_the_evaluation_bots() -> None:
 
 
 @pytest.mark.parametrize("bot_key", sorted(BOT_DISPLAY_NAMES))
-def test_display_name_is_a_real_class_of_evaluation_bots(bot_key: str) -> None:
-    """Le nom affiche designe une classe qui existe VRAIMENT, pas une convention supposee."""
+def test_display_name_is_the_real_class_of_the_registered_bot(bot_key: str) -> None:
+    """Le nom affiche designe la classe REELLEMENT enregistree pour cette cle.
+
+    ⚠️ Ce test cherchait ses classes dans `ai/evaluation_bots` uniquement. Depuis que le panel
+    refondu vit dans `ai/bot_doctrines.py` et `ai/bot_holdout.py`, ce module n'est plus la
+    reference : c'est `ai/bot_registry.bot_classes()`, qui est aussi ce que l'evaluation
+    instancie. Le verrou est donc PLUS FORT qu'avant — il ne prouve plus qu'une classe du meme
+    nom existe quelque part, mais que le nom affiche est celui de la classe reellement jouee.
+
+    `random` est traite a part : `RandomBot` n'est pas dans `bot_classes()` (il ne prend pas de
+    `randomness`, cf. la docstring du registre) alors qu'il produit bien une ligne de resultat.
+    """
     class_name = BOT_DISPLAY_NAMES[bot_key]
-    bot_class = getattr(evaluation_bots, class_name, None)
-    assert bot_class is not None, (
-        f"BOT_DISPLAY_NAMES['{bot_key}'] = '{class_name}' n'existe pas dans ai/evaluation_bots"
+    if bot_key == "random":
+        from ai.evaluation_bots import RandomBot
+
+        assert class_name == RandomBot.__name__
+        return
+    registered = bot_classes().get(bot_key)
+    assert registered is not None, (
+        f"BOT_DISPLAY_NAMES['{bot_key}'] n'a aucune classe enregistree dans ai/bot_registry"
     )
-    assert isinstance(bot_class, type)
+    assert class_name == registered.__name__, (
+        f"BOT_DISPLAY_NAMES['{bot_key}'] = '{class_name}' mais le registre enregistre "
+        f"'{registered.__name__}'"
+    )
 
 
 class _RecordingLogger:
