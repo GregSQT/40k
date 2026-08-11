@@ -622,6 +622,17 @@ trou : il n'affirmait que « code 0 + sans objet », soit la sortie de n'importe
 compare maintenant à la MÊME fusion faite sur `main`, où la porte doit se prononcer. Les deux
 verrous vérifiés ROUGES défaut remis.
 
+✅ **Un refus dit la cause, et une fusion sans ancêtre commun garde son verdict** (2026-08-12,
+2ᵉ passe `/code-review`). Deux trous mesurés : (1) le filet imprimait `exit status 128` sans le
+stderr de git, donc sans jamais nommer la panne (`fatal: not a git repository`) — il le porte
+désormais, et le verrou le compare à ce que git dit LUI-MÊME dans le répertoire, sans figer de
+formulation ni de langue ; (2) « la branche déclare-t-elle ? » se lisait en diff **trois points**,
+qui exige une base commune : un `git merge --allow-unrelated-histories` sur `main` sortait 128
+« no merge base » et devenait un « contrôle impossible » opaque, alors même que la branche écrivait
+sa ligne. La question se lit maintenant en `log <main>..<branche> --name-only`, qui ne calcule
+aucune base — vérifié IDENTIQUE au diff trois points sur les **12** dernières fusions réelles du
+dépôt (déclarations et non-déclarations mélangées). Verrous vérifiés ROUGES défaut remis.
+
 **Deux pièges déjà payés, à ne pas reprendre pour des régressions.** (1) Un contrôle de liens naïf
 rend **152 hits** dont aucun n'est mort (143 dans `Implémenté/stage.md`, 5 dans `Boardx10-audit.md`,
 tous des `file:///`, qui sont ABSOLUS par convention CLAUDE.md) ; le script les résout comme tels.
