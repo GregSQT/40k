@@ -3010,8 +3010,18 @@ class GameStateManager:
             result[obj_id] = {
                 "player_1_oc": player_1_oc,
                 "player_2_oc": player_2_oc,
-                "controller": new_controller
+                "controller": new_controller,
+                # Contrôleur AVANT ce checkpoint : c'est lui qui distingue « capturé maintenant »
+                # de « déjà tenu », et en méthode `secured` il explique une égalité d'OC qui ne
+                # change rien (14.03). Le journal de partie s'appuie dessus.
+                "previous_controller": current_controller,
             }
+
+        # Détail du DERNIER checkpoint, gardé pour le journal de partie (14.02) : sans lui,
+        # `objective_controllers` ne dit QUE le vainqueur, jamais pourquoi — un joueur posé sur un
+        # objectif qu'il ne prend pas n'a aucun moyen de savoir s'il est contesté, battle-shocked
+        # (01.07 : OC à '-') ou hors zone. Écriture O(nb_objectifs), sans coût en entraînement.
+        game_state["objective_control_detail"] = result
 
         return result
 

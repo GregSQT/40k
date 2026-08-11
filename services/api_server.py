@@ -797,6 +797,81 @@ class _EndPhaseEngine(_GameStateHolder, Protocol):
     def execute_semantic_action(self, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]: ...
 
 
+def _log_objective_control_snapshot(engine_instance) -> None:
+    """Journalise, au checkpoint 14.02, POURQUOI chaque objectif disputé est tenu ou non.
+
+    ``objective_controllers`` ne dit que le vainqueur. Un joueur posé sur un objectif qu'il ne
+    prend pas n'avait donc aucun moyen de savoir s'il était contesté par plus d'OC, neutralisé
+    par un battle-shock (01.07 : OC de toutes ses figurines à « - », donc présent mais sans
+    aucun contrôle) ou simplement hors de la zone. La ligne porte les trois : sommes d'OC,
+    figurines PRÉSENTES dans l'aire, et verdict.
+
+    Le comptage de présence est fait ICI et non dans ``sum_objective_control_oc_multi`` : ce
+    dernier saute les unités battle-shocked et les OC nuls AVANT de regarder les empreintes,
+    et les lui faire parcourir quand même alourdirait le chemin chaud de l'observation pour une
+    information que seul un humain lit. Ce chemin-ci n'est emprunté que par l'API, et seulement
+    quand une frontière de phase vient d'être franchie.
+    """
+    from engine.action_log_utils import append_action_log
+    from engine.game_state import iter_living_model_footprints, objective_hex_zones
+
+    game_state = engine_instance.game_state
+    detail = game_state.get("objective_control_detail")  # get allowed (aucun objectif au scénario)
+    if not detail:
+        return
+
+    zones = objective_hex_zones(game_state)
+    names_by_id = {
+        str(require_key(obj, "id")): obj.get("name", str(require_key(obj, "id")))  # get allowed
+        for obj in require_key(game_state, "objectives")
+    }
+    models_by_zone: Dict[str, Dict[int, int]] = {
+        str(objective_id): {1: 0, 2: 0} for objective_id, _hexes in zones
+    }
+    for unit in require_key(game_state, "units"):
+        player = int(require_key(unit, "player"))
+        if player not in (1, 2):
+            continue
+        for footprint in iter_living_model_footprints(game_state, str(require_key(unit, "id"))):
+            for objective_id, zone_hexes in zones:
+                if not footprint.isdisjoint(zone_hexes):
+                    models_by_zone[str(objective_id)][player] += 1
+
+    for objective_id, entry in detail.items():
+        key = str(objective_id)
+        p1_oc = int(require_key(entry, "player_1_oc"))
+        p2_oc = int(require_key(entry, "player_2_oc"))
+        present = models_by_zone.get(key, {1: 0, 2: 0})  # get allowed (objectif sans zone)
+        if p1_oc == 0 and p2_oc == 0 and present[1] == 0 and present[2] == 0:
+            continue  # Personne dans l'aire : il n'y a rien à expliquer.
+        controller = require_key(entry, "controller")
+        previous = require_key(entry, "previous_controller")
+        if controller is None:
+            verdict = "contested — no controller"
+        elif controller == previous:
+            verdict = f"held by P{controller}"
+        else:
+            verdict = f"captured by P{controller}"
+        append_action_log(
+            game_state,
+            {
+                "type": "objective_control",
+                "message": (
+                    f"OBJECTIVE {names_by_id.get(key, key)} — "  # get allowed (id inconnu)
+                    f"OC P1={p1_oc} P2={p2_oc}, "
+                    f"models in area P1={present[1]} P2={present[2]} → {verdict}"
+                ),
+                "turn": require_key(game_state, "turn"),
+                "phase": require_key(game_state, "phase"),
+                "objectiveId": key,
+                "player_1_oc": p1_oc,
+                "player_2_oc": p2_oc,
+                "controller": controller,
+                "timestamp": "server_time",
+            },
+        )
+
+
 def _game_state_for_json(
     engine_instance: _SerializableGameSource,
     *,
@@ -842,7 +917,12 @@ def _game_state_for_json(
     # Objective control (Rule 14.02) : détermine à la FIN de chaque phase/tour, pas en continu.
     # Détection de frontière + checkpoint = `refresh_objective_control_on_boundary` (moteur),
     # partagée avec le chemin gym : une seule implémentation pour PvP et entraînement.
-    engine_instance.state_manager.refresh_objective_control_on_boundary(engine_instance.game_state)
+    if engine_instance.state_manager.refresh_objective_control_on_boundary(
+        engine_instance.game_state
+    ):
+        # Le checkpoint vient de tourner : c'est le SEUL moment où le contrôle change (14.02),
+        # donc le seul où une ligne de journal a quelque chose à dire.
+        _log_objective_control_snapshot(engine_instance)
 
     had_engine_mask_loops = bool(engine_instance.game_state.get("move_preview_footprint_mask_loops"))
     gs = {
@@ -3053,6 +3133,36 @@ def start_game():
         "message": f"Game started successfully ({mode_label} mode)",
     })
 
+def _require_preview_destination_on_table(
+    engine_ref, unit_id: Any, dest_col: int, dest_row: int, what: str
+) -> None:
+    """Lève si un preview « depuis une position » vise la sentinelle HORS TABLE `(-1,-1)`.
+
+    Ces previews REPOSITIONNENT virtuellement l'unité en (dest_col, dest_row) puis mesurent sa
+    géométrie (zone d'engagement, LoS). À la sentinelle des réserves (20.01, unité non déployée,
+    repositionnement 20.02), la mesure lève tout au fond de ``spatial_relations`` sur une
+    entrée-cache ANONYME — les entrées de ``units_cache`` ne portent pas de clé ``id``, donc le
+    message dit ``escouade '?'`` sans jamais nommer ni l'unité ni l'appelant.
+
+    On lève ICI, seul endroit où l'unité et la destination sont encore nommables. Le contrat de
+    règle est inchangé (une unité sans position sur la table ne tire pas et n'est pas vue) : ce
+    garde ne masque rien, il rend l'appel fautif localisable.
+    """
+    if dest_col >= 0 and dest_row >= 0:
+        return
+    unit = engine_ref._get_unit_by_id(str(unit_id))
+    deployed = unit.get("deployed_on_turn") if unit else "<unité absente>"  # get allowed (diagnostic)
+    reserves = unit.get("in_strategic_reserves") if unit else "<unité absente>"  # get allowed
+    raise ValueError(
+        f"{what}: destination HORS TABLE pour l'unité {unit_id!r} — "
+        f"destCol={dest_col}, destRow={dest_row}, deployed_on_turn={deployed}, "
+        f"in_strategic_reserves={reserves}, phase={engine_ref.game_state.get('phase')}, "
+        f"current_player={engine_ref.game_state.get('current_player')}. "
+        f"Une unité sans position sur la table n'a pas de géométrie (20.01) : l'appelant ne "
+        f"doit pas demander ce preview."
+    )
+
+
 @app.route('/api/game/action', methods=['POST'])
 @with_engine_state_lock
 def execute_action():
@@ -3419,6 +3529,9 @@ def execute_action():
                 "success": False,
                 "error": "preview_shoot_from_position requires unitId, destCol, destRow",
             }), 400
+        _require_preview_destination_on_table(
+            engine, unit_id, int(dest_col), int(dest_row), "preview_shoot_from_position"
+        )
         from engine.phase_handlers.shooting_handlers import preview_shoot_valid_targets_from_position
         preview_payload = preview_shoot_valid_targets_from_position(
             engine.game_state, str(unit_id), int(dest_col), int(dest_row),
@@ -3451,6 +3564,9 @@ def execute_action():
                 "success": False,
                 "error": "preview_hidden_from_position requires unitId, destCol, destRow",
             }), 400
+        _require_preview_destination_on_table(
+            engine, unit_id, int(dest_col), int(dest_row), "preview_hidden_from_position"
+        )
         from engine.phase_handlers.shooting_handlers import preview_hidden_models_from_position
         hidden_payload = preview_hidden_models_from_position(
             engine.game_state, str(unit_id), int(dest_col), int(dest_row),
