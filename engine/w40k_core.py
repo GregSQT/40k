@@ -1833,10 +1833,14 @@ class W40KEngine(gym.Env):
             for uid, d in uc.items()
         }
 
+        # Cache indexe PAR FIGURINE depuis le 2026-08-12 : `models_cache`/`squad_models` sont
+        # donc exiges ici. Ils viennent d'etre poses par `build_units_cache` ci-dessus.
         self.game_state["_best_weapon_cache"] = build_best_weapon_cache(
             self.game_state["units"],
             require_key(self.game_state, "weapon_damage_table"),
             uc,
+            require_key(self.game_state, "models_cache"),
+            require_key(self.game_state, "squad_models"),
         )
 
         # Load AI model for PvE mode after units_cache is built

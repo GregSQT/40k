@@ -8,10 +8,7 @@ import time
 import numpy as np
 from typing import Dict, List, Any, Optional, Sequence, Tuple
 from shared.data_validation import require_key
-from engine.combat_utils import (
-    calculate_hex_distance,
-    expected_dice_value,
-)
+from engine.combat_utils import calculate_hex_distance
 from engine.game_utils import get_unit_by_id
 # Projection géométrique des hexes (§0.32 T-I) : UNE seule géométrie dans l'observation — celle
 # de la grille égocentrique et des directions d'objectif. `hex_utils` est une feuille (math/numpy
@@ -19,7 +16,6 @@ from engine.game_utils import get_unit_by_id
 from engine.hex_utils import _hex_center
 from engine.phase_handlers.shared_utils import (
     entries_on_battlefield,
-    get_hp_from_cache, require_hp_from_cache,
     unit_has_rule_effect,
     # PR4 4a: nouveau pipeline d observation squad
     get_fighting_models,
@@ -34,7 +30,6 @@ from engine.phase_handlers.shared_utils import (
     CHARGE_MAX_ROLL,
     charge_build_valid_plan,
 )
-from engine.weapon_damage_cache import lookup_best_weapon
 from engine.observation_weapon_profiles import (
     PROFILE_BIN_SIZE,
     PROFILE_CONT_SIZE,
@@ -312,51 +307,6 @@ class ObservationBuilder:
             )
         self.obs_size = obs_params["obs_size"]  # Source unique de vérité
 
-    def _use_ranged_scoring_for_phase(self, game_state: Dict[str, Any]) -> bool:
-        """
-        Resolve phase-aware weapon mode for target scoring features.
-
-        Returns:
-            True for ranged scoring, False for melee scoring.
-        """
-        phase = require_key(game_state, "phase")
-        if phase in ("shoot", "move", "command", "deployment"):
-            return True
-        if phase in ("charge", "fight"):
-            return False
-        raise KeyError(f"Unknown phase for phase-aware weapon scoring: {phase}")
-
-    def _get_phase_aware_best_weapon_features(
-        self,
-        attacker: Dict[str, Any],
-        target: Dict[str, Any],
-        game_state: Dict[str, Any],
-    ) -> Tuple[int, float, bool]:
-        """
-        Common scoring service used by enemy and valid-target encoding.
-
-        Uses _best_weapon_cache for O(1) lookup (pre-computed at episode reset).
-
-        Returns:
-            (best_weapon_index, best_kill_probability, is_ranged_mode)
-        """
-        is_ranged_mode = self._use_ranged_scoring_for_phase(game_state)
-        cache = game_state.get("_best_weapon_cache")
-        if cache is None:
-            return (-1, 0.0, is_ranged_mode)
-
-        hp_cur = get_hp_from_cache(str(target["id"]), game_state)
-        if hp_cur is None or hp_cur <= 0:
-            return (-1, 0.0, is_ranged_mode)
-
-        best_idx, best_dmg = lookup_best_weapon(
-            cache, str(attacker["id"]), str(target["id"]), is_ranged_mode,
-        )
-        if best_idx < 0 or best_dmg <= 0.0:
-            return (-1, 0.0, is_ranged_mode)
-        kp = min(1.0, best_dmg / float(hp_cur))
-        return best_idx, kp, is_ranged_mode
-    
     # ============================================================================
     # ============================================================================
     # ============================================================================
@@ -2335,80 +2285,6 @@ class ObservationBuilder:
     # HELPER METHODS
     # ============================================================================
 
-    def _target_priority_score(
-        self,
-        target: Dict[str, Any],
-        active_unit: Dict[str, Any],
-        game_state: Dict[str, Any],
-        positions: Dict[str, Tuple[int, int]],
-    ):
-        """
-        Sort key for valid targets: (lower = higher priority).
-        Returns (-strategic_efficiency, distance) so best targets sort first.
-        """
-        active_col, active_row = positions[str(active_unit["id"])]
-        target_col, target_row = positions[str(target["id"])]
-        distance = calculate_hex_distance(
-            active_col, active_row, target_col, target_row
-        )
-        if "VALUE" not in target:
-            raise KeyError(f"Target missing required 'VALUE' field: {target}")
-        target_value = target["VALUE"]
-        best_weapon_idx, _, is_ranged_mode = self._get_phase_aware_best_weapon_features(
-            active_unit, target, game_state
-        )
-        if is_ranged_mode:
-            weapons = require_key(active_unit, "RNG_WEAPONS")
-        else:
-            weapons = require_key(active_unit, "CC_WEAPONS")
-
-        if best_weapon_idx < 0:
-            return (0.0, distance)
-        if best_weapon_idx >= len(weapons):
-            raise ValueError(
-                f"Phase-aware best weapon index out of range in target priority: idx={best_weapon_idx}, "
-                f"weapons_len={len(weapons)}, is_ranged_mode={is_ranged_mode}, "
-                f"active_unit_id={active_unit.get('id')}, target_id={target.get('id')}"
-            )
-        weapon = weapons[best_weapon_idx]
-        unit_attacks = expected_dice_value(require_key(weapon, "NB"), "target_priority_nb")
-        unit_bs = weapon["ATK"]
-        unit_s = weapon["STR"]
-        unit_ap = weapon["AP"]
-        unit_dmg = expected_dice_value(require_key(weapon, "DMG"), "target_priority_dmg")
-        if "T" not in target or "ARMOR_SAVE" not in target:
-            raise KeyError(f"Target missing required T/ARMOR_SAVE: {target}")
-        target_t = target["T"]
-        target_save = target["ARMOR_SAVE"]
-        target_hp = require_hp_from_cache(str(target["id"]), game_state)
-        our_hit_prob = (7 - unit_bs) / 6.0
-        if unit_s >= target_t * 2:
-            our_wound_prob = 5 / 6
-        elif unit_s > target_t:
-            our_wound_prob = 4 / 6
-        elif unit_s == target_t:
-            our_wound_prob = 3 / 6
-        elif unit_s * 2 <= target_t:
-            our_wound_prob = 1 / 6
-        else:
-            our_wound_prob = 2 / 6
-        target_modified_save = target_save - unit_ap
-        target_failed_save = (
-            1.0 if target_modified_save > 6 else (target_modified_save - 1) / 6.0
-        )
-        damage_per_attack = (
-            our_hit_prob * our_wound_prob * target_failed_save * unit_dmg
-        )
-        if damage_per_attack > 0:
-            activations_to_kill = target_hp / damage_per_attack
-        else:
-            activations_to_kill = 100
-        if activations_to_kill > 0:
-            strategic_efficiency = target_value / activations_to_kill
-        else:
-            strategic_efficiency = target_value * 100
-        return (-strategic_efficiency, distance)
-    
     # ============================================================================
     # DIRECTIONAL HELPERS
     # ============================================================================

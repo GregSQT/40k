@@ -18,8 +18,9 @@ Ces fonctions ignorent le jet pour toucher, la Force contre l'Endurance, l'AP co
 sauvegarde, **le nombre de figurines** de l'escouade, la portée, et toutes les règles d'arme
 (SUSTAINED, DEVASTATING, TORRENT, MELTA, ANTI_X, BLAST).
 
-Conséquence sur le roster 500 pts d'ArmageddonAgent, calculée le 2026-08-11 : **16 unités sur 23**
-ont `melee > ranged` selon ce proxy, dont l'Intercessor (2.00 contre 3.00 — un fusil à 24" contre
+Conséquence sur le roster 500 pts d'ArmageddonAgent, **recomptée le 2026-08-12 sur les rosters
+holdout** (le 2026-08-11 annonçait 16, à un profil près) : **17 profils sur 23** ont
+`melee > ranged` selon ce proxy, dont l'Intercessor (2.00 contre 3.00 — un fusil à 24" contre
 un couteau), l'Ancient, le Librarian et les Boyz. Or c'est exactement le test qui décide de
 charger (`TacticalBot._select_charge_action`, `ValueTradeBot._charge`) et celui qui identifie une
 « menace de mêlée » à contre-charger (`DefensiveBot`, `_score_melee_threat_only`). Les bots
@@ -228,15 +229,45 @@ Remonté à l'utilisateur le 2026-08-11.
 
 **Le socle n'était pas à écrire.** `engine/weapon_damage_cache.py` calculait déjà les dégâts
 espérés attaquant→cible en O(1) (jet pour toucher, Force contre Endurance, AP contre sauvegarde),
-sur une table pré-calculée que l'observation de l'agent lit déjà
-(`ObservationBuilder._score_weapon_vs_target`). Un second modèle de dégâts aurait créé le doublon
-divergent que ce dépôt paie le plus cher.
+sur une table pré-calculée. Un second modèle de dégâts aurait créé le doublon divergent que ce
+dépôt paie le plus cher.
 
 Il manquait **un facteur** : la table donne un dégât **par figurine** (sa clé offensive porte `NB`,
 les attaques d'une figurine), alors que les bots décident au niveau de l'escouade — dix Boyz y
-valaient un Boy. `squad_expected_damage()` multiplie par l'effectif **vivant**, lu comme le fait le
-moteur (ids de `squad_models` présents dans `models_cache`). Aucun repli : cache absent ou escouade
-inconnue lèvent, sans quoi une unité inconnue passerait pour inoffensive.
+valaient un Boy. `squad_expected_damage()` agrège sur les figurines **vivantes**, lues comme le
+fait le moteur (ids de `squad_models` présents dans `models_cache`). Aucun repli : cache absent ou
+escouade inconnue lèvent, sans quoi une unité inconnue passerait pour inoffensive.
+
+### 7.1 Correction du 2026-08-12 — l'agrégation était une multiplication, et elle était fausse
+
+La première version prenait la meilleure arme de l'**escouade** et la multipliait par l'effectif.
+Or le profil d'armes porté par l'objet `unit` n'est **que celui du soldat de base** : sergents,
+armes spéciales et personnages attachés n'y figurent pas, et les figurines de base comptaient à
+leur place. Mesuré sur `scenario_bot-01` en comparant à la vraie somme par figurine : **50 paires
+(attaquant, cible, phase) sur 90 étaient fausses**, médiane **0,50×** la vraie valeur, pire cas
+**0,18×** (0,78 annoncé contre 4,23 réels en mêlée). Seules les deux escouades **homogènes** du
+scénario tombaient juste. Le moteur, lui, a toujours résolu par figurine — l'estimation mentait
+donc sur le combat réel, et c'est le même défaut que celui que ce chantier existe pour corriger,
+déplacé d'un cran : modèle juste, jeu d'armes tronqué.
+
+`_best_weapon_cache` est désormais indexé **par figurine** (`models_cache`) et
+`squad_expected_damage` **somme** sur les vivantes. Après correction : 90 paires contrôlées, **0
+fausse**. Verrou : `tests/unit/engine/test_squad_expected_damage.py`, dont
+`test_the_special_weapons_of_a_mixed_squad_are_counted` est le seul test qu'aucune multiplication
+ne peut passer (vérifié rouge en remettant le défaut : 2,5 rendu au lieu de 6,0).
+
+⚠️ **L'observation de l'agent n'était PAS concernée, contrairement à ce qui était écrit ici.**
+Instrumentation d'une partie complète le 2026-08-12 : son unique lecteur du cache,
+`ObservationBuilder._target_priority_score`, **n'avait aucun appelant**. Il portait par ailleurs
+une **troisième** implémentation des dégâts (jet pour toucher et sauvegarde recodés à la main),
+elle-même fausse sur deux points de plus — nombre d'attaques calculé puis jamais utilisé,
+sauvegarde invulnérable ignorée. Supprimé, avec les deux aides qu'il tirait derrière lui. **Aucun
+ré-entraînement n'est donc requis par cette correction** : le seul consommateur vivant du cache
+est le panel de bots.
+
+🔎 Signalé, non traité (défaut sans lien, hors périmètre) : `shared_utils.calculate_target_priority_score`
+est **morte elle aussi** — définie, importée par `shooting_handlers` et `fight_handlers`, jamais
+appelée. Elle porte le même proxy `max(DMG)` que ce chantier condamne.
 
 **Nouveaux fichiers** : `ai/bot_doctrines.py` (les six styles), `ai/bot_holdout.py` (le holdout à
 un coup), `ai/bot_registry.py` (source unique clé→classe).
