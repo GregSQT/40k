@@ -399,7 +399,11 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
     stats = state.stats
     unit_id: Optional[str] = None  # may be set from unit_start or deploy lines
 
-    from ai.analyzer_perfig import parse_models_and_heights, surviving_start_models
+    from ai.analyzer_perfig import (
+        parse_models_and_heights,
+        parse_target_models_segment,
+        surviving_start_models,
+    )
 
     with open(filepath, 'r', encoding='utf-8') as f:
         for line in f:
@@ -416,6 +420,18 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
             for _muid, _mmodels in state.current_line_models.items():
                 state.positions_by_model[_muid] = _mmodels
                 state.models_invalidated.discard(_muid)
+            # Socles de la CIBLE, même rythme et même autorité que ceux de l'unité qui agit.
+            # Sans eux, toute unité ayant perdu une figurine était réduite à SON ANCRE pour tous
+            # les contrôles géométriques (`_apply_damage_and_handle_death` purge ses socles :
+            # le journal ne dit pas laquelle tombe). Or `[TARGET_MODELS:]` dit qui RESTE, et il
+            # est écrit sur la dernière ligne visant cette cible, donc après résolution.
+            # Effet mesuré sur le run du 2026-08-11 (E123 T4) : le fall-back de l'unité 105
+            # partait à 1 hex du socle survivant `1#5`, dans une zone d'engagement de 2 — donc
+            # d'un engagement bien réel — et l'analyzer, qui ne voyait que l'ancre ennemie à
+            # 3 hex, le comptait « fall-back sans engagement ».
+            for _tuid, _tmodels in state.current_line_target_models.items():
+                state.positions_by_model[_tuid] = _tmodels
+                state.models_invalidated.discard(_tuid)
             # Altitudes : MÊME décalage d'une ligne que les positions. `heights_by_model` porte
             # l'état d'ORIGINE (jusqu'à la ligne N-1), qu'exigent les contrôles mesurés à la
             # position de DÉPART ; `current_line_heights` porte l'arrivée de la ligne N.
@@ -424,6 +440,14 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
             _line_models, _line_heights = parse_models_and_heights(line)
             state.current_line_models = _line_models or {}
             state.current_line_heights = _line_heights or {}
+            # `[TARGET_MODELS:]` ne nomme qu'une cible, mais ses socles sont groupés par
+            # préfixe `<unit_id>#` comme partout ailleurs : aucune hypothèse sur l'unité.
+            state.current_line_target_models = {}
+            _target_models = parse_target_models_segment(line)
+            if _target_models:
+                for _tmid, _tpos in _target_models.items():
+                    _tuid = _tmid.split("#", 1)[0]
+                    state.current_line_target_models.setdefault(_tuid, {})[_tmid] = _tpos
             _check_line_coherency(state, line)
             if state.current_line_models:
                 for _uid, _models in state.current_line_models.items():
@@ -617,6 +641,12 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         _mid, _sep, _mtype = _pair.partition("=")
                         if _sep:
                             state.model_types[_mid] = _mtype
+                            # Les datasheets PORTEUSES entrent dans les types vus, au même titre
+                            # que celle de l'escouade : c'est `unit_types_seen` qui décide des
+                            # paires (règle, arme) que le tableau §1.8 ATTEND. Sans elles, l'arme
+                            # d'un sergent ou d'un personnage rattaché (règle 19) n'était ni
+                            # attendue ni comptée — donc invisible des deux côtés à la fois.
+                            require_key(stats, 'unit_types_seen').add(_mtype)
                 # PV PAR SOCLE (cf. `unit_model_hp`). Posés ICI et pas plus haut : ils ont besoin
                 # de `[MODEL_TYPES:]`, que la même ligne d'entête vient seulement de fournir.
                 # À l'entête, aucune figurine n'est entamée : PV pleins par datasheet.

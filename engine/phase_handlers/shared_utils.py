@@ -8457,6 +8457,19 @@ def _emit_squad_shoot_log(game_state: Dict[str, Any], g: Dict[str, Any], ctx: Ma
         "rapidFireApplied": int(
             require_key(g, "additive_rules_applied").get(RULE_LABEL_RAPID_FIRE, 0)
         ),
+        # [MELTA X] 24.25 : X APPLIQUE (0 hors demi-portee), meme regime que `rapidFireApplied`.
+        # Le token `[MELTA:X]` existait deja dans la ligne de synthese ci-dessus, mais elle n a
+        # AUCUN consommateur automatique — l analyzer et le replay lisent `step.log`, qui ne le
+        # portait pas. Resultat mesure le 2026-08-11 : 708 tirs de Multi-Melta dans le journal et
+        # une paire (MELTA, Multi-Melta) rendue « NOT USED » par le rapport. `dmg_bonus` n a
+        # qu une source, [MELTA] (la melee le fixe a 0), donc la valeur est le X de l arme.
+        "meltaApplied": int(require_key(g, "dmg_bonus")),
+        # [PRECISION] 24.28 : JUMEAU de [MELTA] jusque dans son histoire — appliquee par le
+        # moteur (posee a l Allocation Order step), rendue dans la ligne de synthese, absente du
+        # journal que lisent l analyzer et le replay. Le drapeau dit que la regle a IMPOSE un
+        # groupe d allocation, pas que l arme la declare : contre une cible sans CHARACTER
+        # visible elle n a rien fait, et elle ne doit rien dire.
+        "precisionApplied": bool(require_key(g, "precision_applied")),
         "shootDetails": [{"shotNumber": i + 1, **s} for i, s in enumerate(g["shots"])],
     })
 

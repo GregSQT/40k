@@ -645,16 +645,17 @@ class StepLogger:
                 start_col, start_row = details["start_pos"]
                 end_col, end_row = details["end_pos"]
                 advance_range = details.get("advance_range")
-                _strategy_labels = {0: "aggressive", 1: "tactical", 2: "defensive", 3: "objective"}
-                _advance_strategy = details.get("advance_strategy")
-                strategy_label = _strategy_labels.get(_advance_strategy, "aggressive") if _advance_strategy is not None else "aggressive"
-                # 21.03 : meme marqueur que MOVED/FLED — l'advance d'une escouade ayant
-                # declare le vol traverse murs et figurines, l'analyzer doit le savoir.
+                # `[Strategy: <label>]` SUPPRIMÉ le 2026-08-11 : le segment annonçait un choix
+                # tactique (aggressive/tactical/defensive/objective) que RIEN ne calculait.
+                # `details["advance_strategy"]` n'avait aucun producteur dans tout le dépôt —
+                # ni moteur, ni gym, ni frontend — et deux valeurs par défaut, ici et dans
+                # l'analyzer, écrivaient « aggressive » à chaque advance. Le rapport en tirait
+                # « Advance : 100 % aggressive », une donnée inventée sur 12 163 advances.
                 _fly_seg = " [FLY]" if details.get("is_fly_move") is True else ""
                 if advance_range is not None and advance_range > 0:
-                    base_msg = f"{unit_label} ADVANCED{_fly_seg} from ({start_col},{start_row}) to ({end_col},{end_row}) [Roll: {advance_range}] [Strategy: {strategy_label}]"
+                    base_msg = f"{unit_label} ADVANCED{_fly_seg} from ({start_col},{start_row}) to ({end_col},{end_row}) [Roll: {advance_range}]"
                 else:
-                    base_msg = f"{unit_label} ADVANCED{_fly_seg} from ({start_col},{start_row}) to ({end_col},{end_row}) [Strategy: {strategy_label}]"
+                    base_msg = f"{unit_label} ADVANCED{_fly_seg} from ({start_col},{start_row}) to ({end_col},{end_row})"
             else:
                 raise KeyError("Advance action missing required position data")
 
@@ -773,6 +774,21 @@ class StepLogger:
                         f"got: {rapid_fire_rule_value}"
                     )
                 shot_tags.append(f"[RAPID FIRE:{rapid_fire_rule_value}]")
+            # [MELTA:X] 24.25 : meme grammaire que [RAPID FIRE:X] — X est le parametre DECLARE
+            # par l arme, jamais le total. Le token n est pose que si le moteur a applique le
+            # bonus (cible a demi-portee) : `melta_rule_value` n existe pas sinon.
+            melta_rule_value = details.get("melta_rule_value")
+            if melta_rule_value is not None:
+                if not isinstance(melta_rule_value, int) or melta_rule_value <= 0:
+                    raise ValueError(
+                        "melta_rule_value must be a positive int when present, "
+                        f"got: {melta_rule_value}"
+                    )
+                shot_tags.append(f"[MELTA:{melta_rule_value}]")
+            # [PRECISION] 24.28 : drapeau sans parametre — meme regime que les precedents, le
+            # token n est pose que si le moteur a applique la regle.
+            if details.get("precision_applied") is True:
+                shot_tags.append("[PRECISION]")
             shot_tags_suffix = f" {' '.join(shot_tags)}" if shot_tags else ""
             if weapon_name:
                 base_msg = f"{unit_label} SHOT{shot_tags_suffix} {target_label} with [{weapon_name}]"

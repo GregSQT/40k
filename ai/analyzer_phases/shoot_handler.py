@@ -219,6 +219,10 @@ def handle_shoot(
     shooter_player_from_types = require_key(state.unit_player, shooter_id)
     weapon_info_matched = None
     weapon_display_name = None
+    # Datasheet SOUS LAQUELLE l'usage des règles de l'arme est compté. Le type d'escouade quand
+    # il déclare l'arme, la figurine porteuse sinon : `Smite (focused witchfire) (Librarian)` et
+    # non `(Intercessor)`, qui ne porte pas cette arme et sous laquelle rien n'était compté.
+    weapon_carrier_type = None
 
     if weapon_match:
         weapon_display_name = weapon_match.group(1)
@@ -234,14 +238,32 @@ def handle_shoot(
             weapon_display_name, target_id, parse_shooter_models_segment(action_desc), is_melee=False,
         )
         weapon_name_lower = weapon_display_name.lower()
-        weapons_info = require_key(config.unit_weapons_cache, shooter_unit_type)
-        for weapon_info in weapons_info:
-            if weapon_info['name'].lower() == weapon_name_lower:
-                is_close_quarters = weapon_info['is_close_quarters']
-                weapon_range = weapon_info['range']
-                weapon_found = True
-                weapon_info_matched = weapon_info
-                break
+        # Profil résolu par la DATASHEET QUI PORTE l'arme, pas par le seul type d'escouade :
+        # sergents et personnages rattachés (règle 19) portent des armes que l'escouade ne
+        # déclare pas. Cf. `weapon_profile_for_line` pour l'ordre de résolution et sa mesure.
+        from ai.analyzer_perfig import weapon_profile_for_line
+        weapon_info_matched, weapon_carrier_type, _ambiguous_carriers = weapon_profile_for_line(
+            parse_shooter_models_segment(action_desc), state.model_types, shooter_unit_type,
+            weapon_display_name, config.unit_weapons_cache,
+        )
+        if weapon_info_matched is not None:
+            is_close_quarters = weapon_info_matched['is_close_quarters']
+            weapon_range = weapon_info_matched['range']
+            weapon_found = True
+        elif _ambiguous_carriers:
+            # Ni deviné, ni tu. Le journal ne dit pas quelle figurine porte quelle attaque ;
+            # attribuer l'usage à l'une des datasheets serait un chiffre inventé.
+            stats['parse_errors'].append({
+                'episode': state.current_episode_num,
+                'turn': turn,
+                'phase': phase,
+                'line': line.strip(),
+                'error': (
+                    f"Weapon '{weapon_display_name}' carried by several datasheets of the firing "
+                    f"group ({', '.join(_ambiguous_carriers)}) and by none of the squad type "
+                    f"{shooter_unit_type}: rule usage cannot be attributed"
+                ),
+            })
         if not weapon_found:
             # Escouade HÉTÉROGÈNE (V11) : l'arme loguée appartient souvent à un model-type du
             # squad et non à l'entrée `unit_type` — un Plasma Pistol de sergent dans une
@@ -380,9 +402,22 @@ def handle_shoot(
                         _shooter_pl = require_key(state.unit_player, shooter_id)
                         stats['weapon_rule_usage'][_sustained_key][int(_shooter_pl)] += 1
 
-                seq_key = (state.current_episode_num, turn, shooter_id, weapon_name_for_limits)
+                # Le GROUPE de figurines qui tire entre dans la clé, parce qu'il détermine le
+                # plafond (`per_model_attack_cap` plus bas lit CE segment). JUMEAU EXACT de
+                # `fight_handler`, qui avait fermé ce défaut de son côté sans que le tir suive :
+                # sans le groupe, le compteur accumulé sur (épisode, tour, unité, arme) était
+                # opposé au plafond du SEUL dernier groupe. Mesuré sur le run du 2026-08-11,
+                # E55 T3 P1 : les 8 Boyz tirent leurs 24 tirs réglementaires (8 × [NB 2 + RAPID
+                # FIRE 1]), puis 2#7 tire les 3 siens — comptés 25, 26, 27 contre un plafond de
+                # 3, soit 3 fausses erreurs. 320 au total sur 23 169 tirs.
+                shooter_models = parse_shooter_models_segment(action_desc)
+                seq_key = (
+                    state.current_episode_num, turn, shooter_id, weapon_name_for_limits,
+                    shooter_models,
+                )
                 if (state.last_shoot_shooter_id != shooter_id or
-                        state.last_shoot_weapon != weapon_name_for_limits):
+                        state.last_shoot_weapon != weapon_name_for_limits or
+                        state.last_shoot_shooters != shooter_models):
                     state.shot_sequence_counts[seq_key] = 0
                 elif step_marker_present and step_inc:
                     state.shot_sequence_counts[seq_key] = 0
@@ -390,7 +425,6 @@ def handle_shoot(
                     state.shot_sequence_counts[seq_key] = 0
                 if not is_sustained_hit_line:
                     state.shot_sequence_counts[seq_key] += 1
-                current_shot_index = state.shot_sequence_counts[seq_key]
                 shooter_player_for_stats = require_key(state.unit_player, shooter_id)
                 # Effectif de repli quand le journal ne nomme pas les tireurs : [MODELS:] de la
                 # ligne, sinon l'effectif persistant connu, sinon 1 (borne minimale).
@@ -408,7 +442,6 @@ def handle_shoot(
                 # objet que celui de `fight_handler._cc_cap_for_line`.
                 # Aucun bonus d'attaques au tir : `waaagh_melee_atk` est explicitement de MÊLÉE
                 # (08.04), et l'appliquer ici relèverait le plafond là où rien ne le relève.
-                shooter_models = parse_shooter_models_segment(action_desc)
                 rng_nb_squad = per_model_attack_cap(
                     shooter_models, state.model_types, shooter_unit_type, weapon_name_for_limits,
                     config.unit_attack_limits, "rng_nb_by_weapon", config.rng_nb_by_weapon_global,
@@ -444,6 +477,7 @@ def handle_shoot(
                         stats['first_error_lines']['shoot_over_rng_nb'][shooter_player_for_stats] = {'episode': state.current_episode_num, 'line': line.strip()}
                 state.last_shoot_shooter_id = shooter_id
                 state.last_shoot_weapon = weapon_name_for_limits
+                state.last_shoot_shooters = shooter_models
                 state.last_shoot_target_id = target_id
 
     # DEVASTATING_WOUNDS checks
@@ -752,7 +786,13 @@ def handle_shoot(
     # Track weapon rule usage
     if weapon_found and weapon_info_matched and weapon_display_name is not None:
         weapon_rules_list = require_key(weapon_info_matched, "rules")
-        weapon_key = f"{weapon_display_name} ({shooter_unit_type})"
+        if weapon_carrier_type is None:
+            # Impossible par construction (`weapon_profile_for_line` rend les deux ensemble) :
+            # une clé bâtie sur un porteur inconnu compterait sous une étiquette inventée.
+            raise ValueError(
+                f"weapon_info resolved without a carrier datasheet for '{weapon_display_name}'"
+            )
+        weapon_key = f"{weapon_display_name} ({weapon_carrier_type})"
         shooter_pl = require_key(state.unit_player, shooter_id)
         pl_int = int(shooter_pl) if shooter_pl is not None else player
         if "TWIN_LINKED" in weapon_rules_list:
@@ -761,11 +801,33 @@ def handle_shoot(
         if shooter_id in state.units_advanced and "ASSAULT" in weapon_rules_list:
             key = ("ASSAULT", weapon_key)
             stats['weapon_rule_usage'][key][pl_int] += 1
-        if target_pos:
-            distance = calculate_hex_distance(shooter_col, shooter_row, target_pos[0], target_pos[1])
-            if distance == 1 and "CLOSE_QUARTERS" in weapon_rules_list:
-                key = ("CLOSE_QUARTERS", weapon_key)
-                stats['weapon_rule_usage'][key][pl_int] += 1
+        # [RAPID FIRE X] 24.30 — USAGE, même régime que [HEAVY] : le token n'est écrit que si le
+        # moteur a APPLIQUÉ le bonus (portée dans la moitié de la portée de l'arme), donc on le
+        # compte tel quel sans re-dériver la condition. Il MANQUAIT : `[RAPID FIRE:x]` apparaît
+        # 4 080 fois dans le journal du 2026-08-11, et le rapport annonçait pourtant
+        # « Rapid_fire Shoota : NOT USED ». Une règle vive déclarée morte est pire qu'une absence
+        # de mesure : elle dit que le moteur ne l'applique pas.
+        if re.search(r'\[RAPID(?: |_)?FIRE:\d+\]', action_desc, re.IGNORECASE):
+            stats['weapon_rule_usage'][("RAPID_FIRE", weapon_key)][pl_int] += 1
+        # [MELTA X] 24.25 — JUMEAU du précédent, et même histoire : le moteur applique bien le
+        # bonus de dégâts, mais il ne l'écrivait que dans la ligne de synthèse du Game Log, que
+        # personne ne relit. Le token est désormais dans step.log (`ai/step_logger`), posé au
+        # même endroit et sous la même grammaire que [RAPID FIRE:X].
+        if re.search(r'\[MELTA:\d+\]', action_desc, re.IGNORECASE):
+            stats['weapon_rule_usage'][("MELTA", weapon_key)][pl_int] += 1
+        # [PRECISION] 24.28 — dernier de la famille. Le token dit que la règle a IMPOSÉ un
+        # groupe d'allocation (une cible sans CHARACTER visible ne le porte pas), donc il compte
+        # les attaques où elle a réellement pesé, jamais celles où l'arme la déclare seulement.
+        if re.search(r'\[PRECISION\]', action_desc, re.IGNORECASE):
+            stats['weapon_rule_usage'][("PRECISION", weapon_key)][pl_int] += 1
+        # [CLOSE-QUARTERS] 10.06 — la règle joue quand le tireur est ENGAGÉ avec sa cible, pas
+        # quand les deux ancres sont à un hex. Cette ligne mesurait `calculate_hex_distance(ancre,
+        # ancre) == 1` : la quatrième occurrence de la famille « ancre vs par-figurine » dans ce
+        # fichier, et elle survivait à côté du contrôle §10.06 qui, lui, avait déjà été réaligné
+        # sur `shooter_engaged_with_target`. Les deux sections comptaient donc deux grandeurs
+        # différentes sous le même nom : 1 280 tirs pour §10.06 contre 43 pour §1.8.
+        if is_close_quarters and shooter_engaged_with_target:
+            stats['weapon_rule_usage'][("CLOSE_QUARTERS", weapon_key)][pl_int] += 1
         if heavy_applied_in_log:
             # [HEAVY] 24.16 — USAGE seulement, jamais VALIDITE. Le contrôle de validité
             # (`shooter in units_moved/units_advanced` → invalide) a été SUPPRIMÉ le
@@ -779,6 +841,13 @@ def handle_shoot(
             # Vérification portée par tests/unit/engine/test_heavy_shoot.py.
             # Non-régression : tests/unit/ai/test_analyzer_no_heavy_after_move_false_positive.py
             stats['weapon_rule_usage'][("HEAVY", weapon_key)][pl_int] += 1
+        # [DEVASTATING WOUNDS] 24.10 — la règle avait une ligne GLOBALE (correct/incorrect) mais
+        # AUCUNE ventilation par arme, si bien que le tableau des paires déclarait « NOT USED »
+        # une règle dont la même page comptait 336 applications. `Save [DEVASTATING WOUNDS]` est
+        # la trace de l'APPLICATION (sauvegarde sautée), c'est-à-dire exactement ce que compte la
+        # ligne globale : les deux mesures restent le même nombre, ventilé ici.
+        if save_skipped_dw_match:
+            stats['weapon_rule_usage'][("DEVASTATING_WOUNDS", weapon_key)][pl_int] += 1
 
     # Target priority analysis
     stats['target_priority'][player]['total_shots'] += 1
@@ -1096,11 +1165,6 @@ def handle_advance(
     start_row = int(advance_match.group(5))
     dest_col = int(advance_match.group(6))
     dest_row = int(advance_match.group(7))
-
-    strategy_match = re.search(r'\[Strategy: (\w+)\]', action_desc)
-    advance_strategy_label = strategy_match.group(1) if strategy_match else "aggressive"
-    if advance_strategy_label in stats['advance_by_strategy'][player]:
-        stats['advance_by_strategy'][player][advance_strategy_label] += 1
 
     _track_action_phase_accuracy(stats, "advance", phase, state.current_episode_num, line)
 
