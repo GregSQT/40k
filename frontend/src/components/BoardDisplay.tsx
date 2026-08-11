@@ -2108,6 +2108,22 @@ export const drawBoard = (
 
     const cachedStaticBoard = options?.cachedStaticBoard ?? null;
     const reuseStatic = cachedStaticBoard !== null;
+    // ⚠️ INSTRUMENT TEMPORAIRE (2026-08-12) — INCONDITIONNEL, à la toute première ligne utile de
+    // `drawBoard`. La trace précédente vivait sous `if (!reuseStatic)` ET sous
+    // `Array.isArray(objective_zones)` : son absence ne distinguait pas « garde fausse » de
+    // « fonction jamais appelée », donc elle n'a rien tranché. Celle-ci ne peut pas être avalée.
+    console.log("[DIAG board]", {
+      calqueReutilise: reuseStatic,
+      zonesObjectif: Array.isArray(boardConfig.objective_zones)
+        ? boardConfig.objective_zones.length
+        : `PAS UN TABLEAU (${typeof boardConfig.objective_zones})`,
+      zonesTerrain: Array.isArray(boardConfig.terrain_zones)
+        ? boardConfig.terrain_zones.length
+        : `PAS UN TABLEAU (${typeof boardConfig.terrain_zones})`,
+      contourLisse: boardConfig.display?.objective_smooth_contour ?? true,
+      tailleCarteControle: Object.keys(objectiveControl).length,
+      plateau: `${boardConfig.cols}x${boardConfig.rows}`,
+    });
     const baseHexContainer = reuseStatic ? cachedStaticBoard : new PIXI.Container();
     const highlightContainer = new PIXI.Container();
     if (!reuseStatic) {
