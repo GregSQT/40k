@@ -372,11 +372,25 @@ def test_merge_mode_without_merge_head_refuses_and_says_what_to_do(
     assert "--status" in lisible
 
 
+def start_merge(repo: pathlib.Path, branch: str) -> None:
+    subprocess.run(
+        ["git", "merge", "--no-ff", "--no-commit", "--no-verify", branch],
+        cwd=repo, capture_output=True, text=True,
+    )
+    assert (repo / ".git" / "MERGE_HEAD").exists(), "le test doit VRAIMENT être en cours de fusion"
+
+
 def test_merge_on_a_detached_head_is_out_of_scope(tmp_path: pathlib.Path) -> None:
     """VRAIE fusion, MERGE_HEAD présent, mais HEAD détaché : `symbolic-ref` sort 128.
 
     Ce chemin-là est atteignable par le hook réel. Feu vert légitime : fusionner sur un HEAD
     détaché ne livre rien dans `main`, donc la porte n'a pas d'objet — ce n'est pas un défaut masqué.
+
+    Le CONTRASTE est la moitié du verrou : sans lui, le test se contente de « rc 0 + sans objet »,
+    qui est aussi la sortie de n'importe quelle PANNE de `symbolic-ref` — vérifié, avec un
+    `git_maybe` rendant `None` en toutes circonstances le test restait vert. La même fusion, faite
+    sur `main`, doit faire se prononcer la porte : c'est ce qui prouve que le feu vert vient du
+    détachement et de rien d'autre.
     """
     repo = scratch_repo(tmp_path)
     run(repo, "checkout", "-qb", "chantier")
@@ -384,18 +398,45 @@ def test_merge_on_a_detached_head_is_out_of_scope(tmp_path: pathlib.Path) -> Non
     run(repo, "add", "-A")
     run(repo, "commit", "-qm", "code de chantier")
     run(repo, "checkout", "-q", "main")
-    run(repo, "checkout", "-q", "--detach", "HEAD")
-    subprocess.run(
-        ["git", "merge", "--no-ff", "--no-commit", "--no-verify", "chantier"],
-        cwd=repo, capture_output=True, text=True,
-    )
-    assert (repo / ".git" / "MERGE_HEAD").exists(), "le test doit VRAIMENT être en cours de fusion"
 
+    start_merge(repo, "chantier")
+    sur_main = run_gate(repo, "--merge")
+    assert "sans objet" not in sur_main.stdout, (
+        "sur `main`, la porte doit se PRONONCER — sinon le feu vert du cas détaché ne prouve rien"
+    )
+    assert sur_main.returncode == 0 and "chantier(s) livré(s)" in sur_main.stdout
+    run(repo, "merge", "--abort")
+
+    run(repo, "checkout", "-q", "--detach", "HEAD")
+    start_merge(repo, "chantier")
     result = run_gate(repo, "--merge")
 
     assert "Traceback" not in result.stderr and "Traceback" not in result.stdout
     assert result.returncode == 0, result.stdout + result.stderr
     assert "sans objet" in result.stdout
+
+
+def test_merge_mode_outside_a_git_repo_refuses(tmp_path: pathlib.Path) -> None:
+    """« git ne répond pas » n'est PAS « HEAD détaché ».
+
+    Mesuré le 2026-08-12 avant correctif : hors dépôt, `--merge` imprimait « fusion hors `main`,
+    sans objet » et sortait **0** — un feu vert silencieux, quand `--status` refusait sur le même
+    répertoire. Une porte qui ne peut pas lire le dépôt ne laisse pas passer la fusion.
+    """
+    hors_depot = tmp_path / "pas-un-depot-merge"
+    (hors_depot / "scripts").mkdir(parents=True)
+    src = ROOT / "scripts" / "check_roadmap_declared.py"
+    (hors_depot / "scripts" / "check_roadmap_declared.py").write_bytes(src.read_bytes())
+
+    result = subprocess.run(
+        ["python3", str(hors_depot / "scripts" / "check_roadmap_declared.py"), "--merge"],
+        cwd=hors_depot, capture_output=True, text=True,
+    )
+
+    assert "Traceback" not in result.stderr and "Traceback" not in result.stdout
+    assert "sans objet" not in result.stdout, "une panne de git ne se déguise pas en « sans objet »"
+    assert result.returncode == 2
+    assert "contrôle impossible" in result.stderr
 
 
 def test_status_mode_reports_without_blocking(tmp_path: pathlib.Path) -> None:

@@ -114,12 +114,28 @@ def git_maybe(*args: str) -> str | None:
     suis-je ? » (HEAD détaché → pas de branche) et « une fusion est-elle en cours ? » (pas de
     MERGE_HEAD). Partout ailleurs `git` reste `check=True` : un échec y est une vraie panne et
     doit remonter au filet, pas se muer en silence.
+
+    ⚠️ CES DEUX QUESTIONS NE SE POSENT QUE SI git RÉPOND. Mesuré le 2026-08-12 : le script copié
+    hors d'un dépôt git sortait « fusion hors `main`, sans objet » et le code **0** — `symbolic-ref`
+    y échoue pour panne, pas pour détachement, et le feu vert silencieux était exactement ce que la
+    porte s'interdit. D'où la sonde `assert_git_answers()` avant tout appel tolérant : elle
+    distingue « pas de branche » de « pas de réponse ».
     """
     completed = subprocess.run(
         ["git", "-c", "core.quotePath=false", *args],
         cwd=ROOT, capture_output=True, text=True, encoding="utf-8", check=False,
     )
     return completed.stdout.strip() if completed.returncode == 0 else None
+
+
+def assert_git_answers() -> None:
+    """Lève si git ne répond pas dans `ROOT` (pas un dépôt, binaire absent, dépôt illisible).
+
+    Sans elle, `git_maybe` traduirait une PANNE en état bénin : c'est la seule chose qui sépare
+    « HEAD est détaché » de « je n'ai aucun moyen de savoir ». L'exception remonte au filet de
+    `__main__`, qui refuse en clair — un état inconnu ne devient jamais un feu vert.
+    """
+    git("rev-parse", "--is-inside-work-tree")
 
 
 def undeclared_merges(head: str) -> list[str]:
@@ -153,6 +169,9 @@ def main(argv: list[str]) -> int:
         print(__doc__)
         return 2
     if mode == "--merge":
+        # L'ORDRE COMPTE : tant que git n'a pas répondu une fois, l'échec de `symbolic-ref` est
+        # ambigu — détachement ou panne. La sonde tranche, et laisse la panne partir au filet.
+        assert_git_answers()
         # HEAD détaché : `symbolic-ref` sort 128, ce qui tuait la porte EN PLEINE FUSION. Ce
         # n'est pourtant pas une anomalie — fusionner sur un HEAD détaché ne livre rien dans
         # `main`, c'est exactement le cas « hors `main`, sans objet ».

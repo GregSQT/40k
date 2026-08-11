@@ -606,6 +606,16 @@ mal branché — `pre-merge-commit` tourne avant l'écriture de `MERGE_HEAD`, et
 complaisant y rendrait la porte muette pour toujours (CLAUDE.md T1). Les trois verrous
 (`tests/unit/scripts/test_check_roadmap_declared.py`) ont été vérifiés ROUGES défaut remis.
 
+✅ **« git ne répond pas » ne se déguise plus en « HEAD détaché »** (2026-08-12, relevé par
+`/code-review` sur la livraison ci-dessus). Le feu vert du cas détaché reposait sur l'échec de
+`symbolic-ref`, qui échoue AUSSI quand le dépôt est illisible : script copié hors dépôt git,
+`--merge` sortait « fusion hors `main`, sans objet » et **0**, quand `--status` refusait sur le même
+répertoire. Une sonde (`rev-parse --is-inside-work-tree`, en `check=True`) tranche désormais avant
+tout appel tolérant, et la panne part au filet → code 2. Le verrou du cas détaché portait le même
+trou : il n'affirmait que « code 0 + sans objet », soit la sortie de n'importe quelle panne — il
+compare maintenant à la MÊME fusion faite sur `main`, où la porte doit se prononcer. Les deux
+verrous vérifiés ROUGES défaut remis.
+
 **Deux pièges déjà payés, à ne pas reprendre pour des régressions.** (1) Un contrôle de liens naïf
 rend **152 hits** dont aucun n'est mort (143 dans `Implémenté/stage.md`, 5 dans `Boardx10-audit.md`,
 tous des `file:///`, qui sont ABSOLUS par convention CLAUDE.md) ; le script les résout comme tels.
