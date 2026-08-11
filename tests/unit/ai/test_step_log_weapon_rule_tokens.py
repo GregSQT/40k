@@ -915,3 +915,10 @@ def test_le_marqueur_blast_leve_le_plafond_de_tirs(monkeypatch, tmp_path):
         stats["parse_errors"]
     )
     assert stats["shoot_over_rng_nb"][1] == 0, stats["shoot_over_rng_nb"]
+    # §1.8 : une règle dont le token est dans le journal ne doit PAS ressortir « NOT USED ».
+    # C'est le mode d'échec de [MELTA] (708 tirs déclarés morts), et il se rejouerait à
+    # l'identique pour [BLAST] si le token atteignait step.log sans compteur en face.
+    usage = {k: v for k, v in stats["weapon_rule_usage"].items() if k[0] == "BLAST"}
+    assert usage and any(sum(v.values()) > 0 for v in usage.values()), (
+        "aucun usage de BLAST compté alors que le token est présent sur les lignes"
+    )

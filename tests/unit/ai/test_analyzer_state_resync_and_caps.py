@@ -129,10 +129,13 @@ def test_case_darrivee_occupee_reste_joignable() -> None:
 def _cap(state: AnalyzerState, config: AnalyzerConfig, action_desc: str, n_models: int = 6) -> int:
     from ai.analyzer_perfig import parse_shooter_models_segment
     from ai.analyzer_phases.fight_handler import _cc_cap_for_line
-    return _cc_cap_for_line(
+    # Cible de 1 figurine et arme sans [CLEAVE] : le plafond rendu est celui du seul NB
+    # par figurine, ce que ces verrous mesurent. Cf. test_analyzer_effects_snapshot.py.
+    cap, _ = _cc_cap_for_line(
         state, config, action_desc, 1, "Intercessor", "Close Combat Weapon", 3, n_models,
-        parse_shooter_models_segment(action_desc),
+        parse_shooter_models_segment(action_desc), 1,
     )
+    return cap
 
 
 def test_plafond_suit_la_datasheet_de_la_figurine_qui_frappe() -> None:

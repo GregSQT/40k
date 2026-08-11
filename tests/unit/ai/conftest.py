@@ -157,6 +157,11 @@ def analyzer_config(**overrides: Any) -> AnalyzerConfig:
         "rng_nb_by_weapon_global": {},
         "cc_nb_by_weapon_global": {},
         "rapid_fire_by_weapon_global": {},
+        # [BLAST] 24.05 / [CLEAVE] 24.06 : mêmes cartes que `rapid_fire`, et présentes ici pour
+        # la même raison — un champ requis d'`AnalyzerConfig` absent de cette fixture fait lever
+        # TOUTES les fixtures analyzer, pas seulement celles qui touchent aux dés additionnels.
+        "blast_by_weapon_global": {},
+        "cleave_by_weapon_global": {},
         "sustained_hits_by_weapon_global": {},
         "weapon_range_global": {},
         "weapon_is_close_quarters_global": {},

@@ -107,6 +107,22 @@ def handle_shoot(
     stats['shoot_invalid'][player]['total'] += 1
     _track_action_phase_accuracy(stats, "shoot", phase, state.current_episode_num, line)
 
+    # Select Targets step — JUMEAU EXACT de `fight_handler`, clé d'ACTIVATION comprise (escouade
+    # tirante × cible × tour) : le moteur déclare toutes ses attaques avant d'en résoudre une,
+    # donc une arme qui tire en second n'a pas droit à l'effectif que la première a réduit.
+    # C'est l'effectif qu'exige [BLAST] 24.05, lu AVANT les dégâts de la ligne courante.
+    #
+    # Posé ICI, à la PREMIÈRE ligne de l'activation, et non plus dans la branche qui résout le
+    # NB de l'arme : une arme dont le NB ne se résout pas (`parse_error`) sortait de cette
+    # branche SANS rien figer, tout en tuant ; la première arme résoluble de l'activation figeait
+    # alors l'effectif d'APRÈS ces pertes, ce qui rouvre le faux positif que la clé d'activation
+    # ferme. Le gel ne dépend d'aucune arme, il ne doit dépendre d'aucune résolution d'arme.
+    shot_activation_key = (state.current_episode_num, turn, shooter_id, target_id)
+    if shot_activation_key not in state.shot_sequence_target_models:
+        state.shot_sequence_target_models[shot_activation_key] = require_key(
+            state.models_alive_pre_line, target_id
+        )
+
     if (
         shooter_id in state.units_moved_after_shooting_in_turn
         and shooter_id in state.unit_positions
@@ -424,16 +440,6 @@ def handle_shoot(
                     state.shot_sequence_counts[seq_key] = 0
                 if seq_key not in state.shot_sequence_counts:
                     state.shot_sequence_counts[seq_key] = 0
-                # Select Targets step — JUMEAU EXACT de `fight_handler`, clé d'ACTIVATION comprise
-                # (escouade tirante × cible × tour) : le moteur déclare toutes ses attaques avant
-                # d'en résoudre une, donc une arme qui tire en second n'a pas droit à l'effectif
-                # que la première a réduit. C'est l'effectif qu'exige [BLAST] 24.05, lu AVANT les
-                # dégâts de la ligne courante.
-                activation_key = (state.current_episode_num, turn, shooter_id, target_id)
-                if activation_key not in state.shot_sequence_target_models:
-                    state.shot_sequence_target_models[activation_key] = require_key(
-                        state.models_alive_pre_line, target_id
-                    )
                 if not is_sustained_hit_line:
                     state.shot_sequence_counts[seq_key] += 1
                 shooter_player_for_stats = require_key(state.unit_player, shooter_id)
@@ -488,7 +494,7 @@ def handle_shoot(
                     "BLAST", action_desc, shooter_models, state.model_types, shooter_unit_type,
                     weapon_name_for_limits, config.unit_attack_limits, "blast_by_weapon",
                     config.blast_by_weapon_global, n_shooter_models,
-                    require_key(state.shot_sequence_target_models, activation_key),
+                    require_key(state.shot_sequence_target_models, shot_activation_key),
                 )
                 if blast_error is not None:
                     stats['parse_errors'].append({
@@ -845,6 +851,14 @@ def handle_shoot(
         # même endroit et sous la même grammaire que [RAPID FIRE:X].
         if re.search(r'\[MELTA:\d+\]', action_desc, re.IGNORECASE):
             stats['weapon_rule_usage'][("MELTA", weapon_key)][pl_int] += 1
+        # [BLAST] 24.05 — même famille, même régime : le token n'est posé que si la règle a
+        # RÉELLEMENT ajouté des dés (cible d'au moins 5 figurines), donc il compte les tirs où
+        # elle a pesé. Sans cette ligne, §1.8 déclarerait « NOT USED » une règle dont le token
+        # est présent dans le journal — le mode d'échec exact que [MELTA] vient de fermer
+        # (708 tirs de Multi-Melta annoncés morts). Aucun roster joué ne porte d'arme BLAST
+        # aujourd'hui : le compteur est posé AVANT que le cas ne se présente.
+        if re.search(r'\[BLAST:\d+\]', action_desc, re.IGNORECASE):
+            stats['weapon_rule_usage'][("BLAST", weapon_key)][pl_int] += 1
         # [PRECISION] 24.28 — dernier de la famille. Le token dit que la règle a IMPOSÉ un
         # groupe d'allocation (une cible sans CHARACTER visible ne le porte pas), donc il compte
         # les attaques où elle a réellement pesé, jamais celles où l'arme la déclare seulement.

@@ -52,9 +52,14 @@ def _cap(state: AnalyzerState, player: int, line: str) -> int:
     cfg = analyzer_config(
         unit_attack_limits={"WarTrakk": {"cc_nb_by_weapon": {"Choppa": 5}}},
     )
-    return _cc_cap_for_line(
+    # Cible de 1 figurine et arme sans [CLEAVE] : aucun dé additionnel possible, le plafond
+    # rendu est celui du seul NB (+ Waaagh). L'erreur de journal (2e membre) est ignorée ici —
+    # elle a ses propres tests dans test_step_log_weapon_rule_tokens.py.
+    cap, _ = _cc_cap_for_line(
         state, cfg, line, player, "WarTrakk", "Choppa", 5, 1, parse_shooter_models_segment(line),
+        1,
     )
+    return cap
 
 
 def test_le_bonus_vient_de_la_ligne_deffets_pas_du_token() -> None:

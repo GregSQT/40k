@@ -99,6 +99,18 @@ def handle_fight(
         target_row = int(fight_match.group(6))
 
         _track_action_phase_accuracy(stats, "fight", phase, state.current_episode_num, line)
+        # Select Targets step de l'ACTIVATION (escouade attaquante × cible), figé à sa PREMIÈRE
+        # ligne : c'est l'effectif qu'exige [CLEAVE] 24.06, et le combat tue en avançant. Lu
+        # AVANT les dégâts de la ligne courante (`models_alive_pre_line`).
+        #
+        # Hors de toute branche de résolution d'arme — JUMEAU du tir : une arme dont le NB ne se
+        # résout pas (`parse_error`) tue quand même, et si elle avait empêché le gel, l'arme
+        # suivante aurait hérité de l'effectif d'APRÈS ses pertes.
+        fight_activation_key = (state.fight_phase_seq_id, fighter_id, target_id)
+        if fight_activation_key not in state.fight_sequence_target_models:
+            state.fight_sequence_target_models[fight_activation_key] = require_key(
+                state.models_alive_pre_line, target_id
+            )
         attacker_player = require_key(state.unit_player, fighter_id)
         fight_attacks_by_unit = require_key(stats, 'fight_attacks_by_unit')
         fight_attacks_by_player = require_key(fight_attacks_by_unit, attacker_player)
@@ -216,26 +228,10 @@ def handle_fight(
                         state.fight_sequence_counts[seq_key] = 0
                     elif step_marker_present and step_inc:
                         state.fight_sequence_counts[seq_key] = 0
-                    # Select Targets step — l'effectif de la cible y est figé, parce que c'est
-                    # celui qu'exige [CLEAVE] 24.06 et que le combat tue en avançant. Lu AVANT
-                    # les dégâts de la ligne courante (`models_alive_pre_line`) : la première
-                    # ligne d'une activation peut déjà avoir retiré un socle.
-                    #
-                    # ⚠️ La clé est l'ACTIVATION (escouade attaquante × cible), PAS la séquence
-                    # par arme : le moteur déclare TOUTES ses attaques d'un coup, avant d'en
-                    # résoudre une seule. Figer par arme donnait à la dernière arme de la file
-                    # l'effectif SURVIVANT aux précédentes — mesuré sur le run du 2026-08-11,
-                    # 11 des 24 lignes restaient fausses (le Bigboss frappe après les Choppa de
-                    # son escouade, qui ont déjà fait tomber la cible sous la tranche de 5).
-                    activation_key = (state.fight_phase_seq_id, fighter_id, target_id)
-                    if activation_key not in state.fight_sequence_target_models:
-                        state.fight_sequence_target_models[activation_key] = require_key(
-                            state.models_alive_pre_line, target_id
-                        )
                     cc_nb, _cleave_error = _cc_cap_for_line(
                         state, config, action_desc, attacker_player, fighter_unit_type,
                         weapon_display_name, cc_nb_single, n_fighter_models, _shooters,
-                        require_key(state.fight_sequence_target_models, activation_key),
+                        require_key(state.fight_sequence_target_models, fight_activation_key),
                     )
                     if _cleave_error is not None:
                         stats['parse_errors'].append({
