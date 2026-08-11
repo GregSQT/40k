@@ -64,6 +64,8 @@ import {
   unitsCacheModelCenters,
   unitsCacheModelLevels,
 } from "../utils/losPreviewHelpers";
+import type { PlanModelWithOrientation } from "../utils/modelPlan";
+import { toPlanArrayWithOrientation } from "../utils/modelPlan";
 import { syncMoveDestinationPoolRefs } from "../utils/movePoolRefsSync";
 import { normalizeMaskLoopsFromApi } from "../utils/movePreviewFootprintMaskLoops";
 import { type OathUnitsCache, pickOathTargetAtHex } from "../utils/oathTargetSelection";
@@ -6926,29 +6928,14 @@ export default function Board({
         // `(-1,-1)` tant que l'escouade n'est pas déployée — et rendait un verdict mesuré depuis
         // le coin du plateau. `preview_shoot_from_model_positions` pose CHAQUE figurine.
         if (!cancelled && placed.length > 0) {
-          // Plan au format CANONIQUE, le même que la pose réelle : le NIVEAU décide du gate
-          // vertical de la LoS 3D (une figurine posée à l'étage d'une ruine, prévisualisée au
-          // sol, verrait son blink et son couvert basculer après Validate) et l'ORIENTATION
-          // décide de l'empreinte d'un socle ovale ou carré (pivot molette).
-          // `orientation` n'existe que sur le plan de MOVE (pivot molette par figurine) ; le plan
-          // de DÉPLOIEMENT ne pivote pas et n'en porte pas. `effectivePerModelPlan` étant l'union
-          // des deux, la lecture est explicitement typée ici — `null` signifie « orientation
-          // inchangée » pour le backend, jamais un 0 inventé.
-          const modelPlan = placed.map(([modelId, pos]) => {
-            const planned = pos as {
-              col: number;
-              row: number;
-              level?: number;
-              orientation?: number | null;
-            };
-            return [
-              String(modelId),
-              planned.col,
-              planned.row,
-              planned.level ?? 0,
-              planned.orientation ?? null,
-            ];
-          });
+          // Plan au format CANONIQUE, par l'encodeur PARTAGÉ (`utils/modelPlan`) : le NIVEAU
+          // décide du gate vertical de la LoS 3D et l'ORIENTATION de l'empreinte d'un socle
+          // ovale ou carré. `orientation` n'existe que sur le plan de MOVE (pivot molette) ; le
+          // plan de DÉPLOIEMENT n'en porte pas, et l'encodeur rend alors `null` — « inchangée »,
+          // jamais un 0 inventé.
+          const modelPlan = toPlanArrayWithOrientation(
+            Object.fromEntries(placed) as Record<string, PlanModelWithOrientation>
+          );
           // Clé sur le plan ENTIER : cet aperçu porte l'escouade, pas une figurine. Il ne peut
           // donc PAS partager d'entrée avec le survol (clé par hex, une figurine) — ce n'est pas
           // un cache manqué, les deux ne calculent pas la même chose. La clé sert ici à ne pas
