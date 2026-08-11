@@ -36,7 +36,7 @@ CE QU'ELLE N'ÉTABLIT PAS :
   - qu'un chantier livré par un commit direct sur `main` soit déclaré : la porte ne regarde que
     les fusions, sinon elle viserait chaque correction de détail.
 
-Usage : python3 scripts/check_roadmap_declared.py --merge   (depuis le hook `pre-merge-commit`)
+Usage : python3 scripts/check_roadmap_declared.py --merge   (depuis le hook `prepare-commit-msg`)
         python3 scripts/check_roadmap_declared.py --status   (état courant, sans rien bloquer)
 Sortie : 0 si la dette est sous le plafond, 1 sinon.
 Contournement assumé : `git merge --no-verify`.

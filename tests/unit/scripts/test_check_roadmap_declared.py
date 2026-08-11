@@ -236,42 +236,13 @@ def scratch_repo_with_debt(tmp_path: pathlib.Path, count: int) -> pathlib.Path:
         run(repo, "checkout", "-q", "main")
         run(repo, "merge", "-q", "--no-ff", "--no-verify", "-m", f"merge: ch{i}", f"ch{i}")
     return repo
+
+
 _NEW_HOOK_BODY = (
     "#!/bin/sh\n"
     '[ -f "$(git rev-parse --git-dir)/MERGE_HEAD" ] || exit 0\n'
     'exec python3 "$(git rev-parse --show-toplevel)/scripts/check_roadmap_declared.py" --merge\n'
 )
-
-
-def test_clean_merge_fails_with_pre_merge_commit_hook(tmp_path: pathlib.Path) -> None:
-    """Verrou RED : pre-merge-commit fire quand MERGE_HEAD est absent → crash, commit non créé.
-
-    Ce test représente l'état AVANT le correctif. Il doit passer (l'ancien comportement doit
-    échouer) — si on le voit devenir ROUGE, c'est qu'on a réintroduit le défaut.
-    """
-    repo = scratch_repo(tmp_path)
-    _setup_repo_with_script(repo)
-    _install_hook(repo, "pre-merge-commit", _OLD_HOOK_BODY)
-
-    run(repo, "checkout", "-qb", "chantier-test")
-    (repo / "code.py").write_text("x = 1\n", encoding="utf-8")
-    run(repo, "add", "-A")
-    run(repo, "commit", "-qm", "code de chantier-test")
-    run(repo, "checkout", "-q", "main")
-
-    count_before = run(repo, "log", "--oneline", "--first-parent").count("\n") + 1
-    result = subprocess.run(
-        ["git", "merge", "--no-ff", "-m", "merge: chantier-test", "chantier-test"],
-        cwd=repo, capture_output=True, text=True,
-    )
-    count_after = run(repo, "log", "--oneline", "--first-parent").count("\n") + 1
-
-    assert result.returncode != 0, (
-        "pre-merge-commit doit échouer : MERGE_HEAD absent lors d'une fusion propre"
-    )
-    assert count_after == count_before, (
-        "aucun commit de merge ne doit avoir été créé avec le vieux hook"
-    )
 
 
 def test_clean_merge_passes_with_prepare_commit_msg_hook(tmp_path: pathlib.Path) -> None:
