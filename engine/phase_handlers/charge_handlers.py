@@ -38,6 +38,7 @@ from .shared_utils import (
     ACTION, WAIT, NO, ERROR, PASS, CHARGE,
     update_units_cache_position, translate_squad_to_destination, update_units_cache_hp, is_unit_alive, get_hp_from_cache, require_hp_from_cache,
     get_unit_position, require_unit_position, require_unit_from_cache,
+    resolve_model_effective_level,
     update_enemy_adjacent_caches_after_unit_move,
     unit_has_rule_effect as shared_unit_has_rule_effect,
     get_source_unit_rule_id_for_effect as shared_get_source_unit_rule_id_for_effect,
@@ -1987,7 +1988,6 @@ def _compute_plan_context(
     INF = int(budget) + 1
     # Niveau EFFECTIF de départ par figurine (§13.06) — dérivé du niveau COMMITTÉ, jamais de la vue.
     # Un chargeur DÉJÀ en hauteur qui charge vers le sol doit payer la DESCENTE (indépendant de l'affichage).
-    from engine.terrain_utils import resolve_model_floor_level as _rmfl_charge
     _terrain_areas_ctx = game_state.get("terrain_areas", [])  # get allowed
     start_eff_by_model: Dict[str, int] = {}
     if can_classify:
@@ -2002,8 +2002,10 @@ def _compute_plan_context(
                     other_origins |= origin_fp[m2]
             other_origins_by_model[m] = other_origins
             _start_eff = (
-                _rmfl_charge(sc, sr, sib["BASE_SHAPE"], sib["BASE_SIZE"],
-                             int(sib.get("orientation", 0)), int(sib.get("level", 0)), _terrain_areas_ctx)  # get allowed
+                resolve_model_effective_level(
+                    game_state, sib, sc, sr,
+                    int(sib.get("level", 0)),  # get allowed (champ optionnel : level absent = sol)
+                )
                 if (_cm_use_eucl and not fly_active) else 0
             )
             start_eff_by_model[m] = _start_eff
@@ -4718,12 +4720,12 @@ def _charge_model_pos_is_closer(
     # se voyait facturer une montée qu'elle avait déjà payée, et sa descente vers le sol ne coûtait
     # rien. Le pool proposait alors des cases que ce contrôle refusait, et l'inverse.
     # Même garde que le pool : le champ multi-niveaux n'est défini qu'en euclidien, hors vol.
-    from engine.terrain_utils import low_clearance_ground_hexes, resolve_model_floor_level
+    from engine.terrain_utils import low_clearance_ground_hexes
     _terrain_areas = game_state.get("terrain_areas", [])  # get allowed
     start_eff = (
-        resolve_model_floor_level(
-            start_col, start_row, model["BASE_SHAPE"], model["BASE_SIZE"],
-            int(model.get("orientation", 0)), int(model.get("level", 0)), _terrain_areas,  # get allowed
+        resolve_model_effective_level(
+            game_state, model, start_col, start_row,
+            int(model.get("level", 0)),  # get allowed (champ optionnel : level absent = sol)
         )
         if (_charge_distance_metric(game_state) == "euclidean" and not fly_active) else 0
     )
@@ -5030,7 +5032,6 @@ def charge_autoplace_plan(
     from engine.terrain_utils import (
         floor_levels_present,
         low_clearance_ground_hexes,
-        resolve_model_floor_level,
     )
     from engine.game_state import unit_can_occupy_upper_floor
 
@@ -5047,9 +5048,9 @@ def charge_autoplace_plan(
     for mid in alive:
         m = models_cache[mid]
         start_eff[mid] = (
-            resolve_model_floor_level(
-                int(m["col"]), int(m["row"]), m["BASE_SHAPE"], m["BASE_SIZE"],
-                int(m.get("orientation", 0)), int(m.get("level", 0)), terrain_areas,  # get allowed
+            resolve_model_effective_level(
+                game_state, m, int(m["col"]), int(m["row"]),
+                int(m.get("level", 0)),  # get allowed (champ optionnel : level absent = sol)
             )
             if multilevel_ok else 0
         )

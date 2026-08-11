@@ -39,7 +39,7 @@ sur le plancher), **puis** est écrite. `None` = orientation inchangée, et la r
 celle déjà portée par la figurine — exactement la sémantique de `plan_entry_model_orientation`,
 qui reste la source unique de cette résolution côté plan.
 
-**Les six sites annoncés, plus deux jumeaux trouvés au grep**, passent par l'une des deux :
+**Les six sites annoncés, plus douze trouvés au grep**, passent par l'une des deux :
 
 - `deployment_handlers` — niveau effectif des sœurs (collision intra-escouade), aperçu de plan,
   et le commit par-figurine (seul des trois à écrire) ;
@@ -47,7 +47,15 @@ qui reste la source unique de cette résolution côté plan.
   (jumeau exact du site de déploiement, non annoncé au départ) ;
 - `shooting_handlers` — branche `models` de `_apply_preview_placement` ;
 - `shared_utils.commit_move` — **la résolution y descend**, donc elle vaut pour ses sept appelants.
-  La pré-résolution que `commit_move_plan` appliquait juste avant son appel disparaît.
+  La pré-résolution que `commit_move_plan` appliquait juste avant son appel disparaît ;
+- `shared_utils.translate_squad_to_destination` — squad move rigide, seul écrivain de niveau
+  hors `update_model_position` (cf. l'arbitrage tranché plus bas) ;
+- `fight_handlers` (×7) et `charge_handlers` (×3) — pools, aperçus et niveaux de départ, tous en
+  LECTURE. Ils ont été migrés dans un second temps, après une revue de code qui a justement
+  relevé que la « source unique » annoncée n'était atteinte que côté écrivains. Le wrapper local
+  `_fight_effective_level_at` conserve son nom mais délègue : il réécrivait la primitive avec
+  deux replis anti-erreur qu'elle n'a pas (`orientation` par défaut 0, `terrain_areas` par
+  défaut vide).
 
 ### Divergences de sémantique tranchées, pas uniformisées en silence
 
@@ -80,6 +88,21 @@ immédiatement, avec le renvoi vers la primitive. Trois raisons :
 
 Le seul appelant qu'il a fait tomber était un **helper de test**, et il avait raison de tomber :
 voir ci-dessous.
+
+### Le garde refuse SANS ÉCRIRE — corrigé après revue
+
+Première version : le garde levait **après** que `col`/`row` aient été écrits. Il laissait donc
+la figurine déplacée sous son ancien niveau d'étage — exactement l'état corrompu qu'il existe
+pour empêcher, et le `game_state` PvP survivant à la requête en 500, toutes les requêtes
+suivantes de la session levaient à leur tour. Le contrôle d'orientation avait le même défaut,
+préexistant celui-là, sur `col`/`row` **et** `level`.
+
+`update_model_position` valide donc maintenant TOUT avant d'écrire QUOI QUE CE SOIT. Un refus
+laisse la figurine exactement où elle était.
+
+Le test ne le voyait pas : il vérifiait le `raises`, jamais l'état après. Il pose désormais la
+figurine à une case **différente** de la destination refusée — sans cet écart, une écriture
+prématurée de `col`/`row` reste indétectable — et vérifie les trois champs après la levée.
 
 ### L'exception a été résorbée le jour même (arbitrage tranché : option B)
 
