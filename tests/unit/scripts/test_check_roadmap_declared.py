@@ -100,11 +100,8 @@ def test_the_hook_is_installed_and_executable() -> None:
         cwd=ROOT, capture_output=True, text=True,
     ).stdout.strip()
     assert configured, "core.hooksPath n'est pas défini : le hook ne se déclenchera jamais"
-    hooks_dir = (
-        pathlib.Path(configured)
-        if pathlib.Path(configured).is_absolute()
-        else ROOT / configured
-    )
+    configured_path = pathlib.Path(configured)
+    hooks_dir = configured_path if configured_path.is_absolute() else ROOT / configured
     if hooks_dir.resolve() != (ROOT / ".githooks").resolve():
         pytest.skip(
             f"core.hooksPath absolu vise {hooks_dir} (dépôt principal), pas ce worktree — "
@@ -217,12 +214,6 @@ def test_debt_counts_only_the_trunk(tmp_path: pathlib.Path, monkeypatch) -> None
 
 
 # -------------------------------------------- verrou end-to-end hook vs MERGE_HEAD
-
-
-_OLD_HOOK_BODY = (
-    "#!/bin/sh\n"
-    'exec python3 "$(git rev-parse --show-toplevel)/scripts/check_roadmap_declared.py" --merge\n'
-)
 
 
 def scratch_repo_with_debt(tmp_path: pathlib.Path, count: int) -> pathlib.Path:
