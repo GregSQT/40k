@@ -1370,6 +1370,10 @@ from shared.data_validation import (
     require_positive_int,
     require_present,
 )
+from shared.torch_safe_globals import register_torch_safe_globals
+
+# Avant tout `MaskablePPO.load` de ce module : torch >= 2.6 charge en `weights_only=True`.
+register_torch_safe_globals()
 
 _progress_bar_width_cache: Optional[Dict[str, int]] = None
 _wall_override_temp_dir: Optional[str] = None

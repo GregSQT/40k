@@ -17,8 +17,12 @@ import time
 import hashlib
 import numpy as np
 from shared.data_validation import require_key, require_positive_int, require_present
+from shared.torch_safe_globals import register_torch_safe_globals
 from engine.action_decoder import ActionValidationError
 from engine.debug_trace import CH_BOT_LOOP, channel_enabled, trace
+
+# Avant tout `MaskablePPO.load` de ce module : torch >= 2.6 charge en `weights_only=True`.
+register_torch_safe_globals()
 
 
 def _trace_sampled(count: int) -> bool:
