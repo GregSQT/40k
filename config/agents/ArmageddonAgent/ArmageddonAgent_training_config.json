@@ -1136,10 +1136,10 @@
   "x1_debug": {
     "type": "################################################### x1 debug ###################################################",
     "seed": 12345,
-    "total_episodes": 1000,
+    "total_episodes": 96,
     "total_episodes_normal": "1000 : 0.1s/ep -> ~1 min 40. Profil de DEBUG : il verifie que le pipeline demarre et se termine, il n'apprend rien et ne produit aucun best model (save_best_robust false, et save_best_min_episodes 10000 depasse de toute facon la duree du run). Le texte precedent annoncait 50000 et datait d'avant le passage a 96 puis a 1000 episodes.",
     "agent_seat_mode": "random",
-    "eval_episodes": 1,
+    "eval_episodes": 10,
     "n_envs": 48,
     "metrics_smoothing": null,
     "model_params": {
