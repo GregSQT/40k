@@ -55,6 +55,7 @@ COUNTERS = {
         ('advance_from_adjacent',),
         ('shoot_hit_result_mismatch',),
         ('shoot_wound_threshold_mismatch',),
+        ('shoot_not_allocated_target_alive',),
     ],
     'charge': [
         ('charge_from_adjacent',),
@@ -67,6 +68,7 @@ COUNTERS = {
         ('fight_hit_result_mismatch',),
         ('fight_wound_threshold_mismatch',),
         ('fight_alternation_violations',),
+        ('fight_not_allocated_target_alive',),
     ],
     'damage': [
         ('damage_missing_unit_hp',),
