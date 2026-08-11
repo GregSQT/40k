@@ -142,10 +142,12 @@ def _move_los_preview_cache_key(
 ) -> Tuple[Any, ...]:
     """Build strict backend cache key for move LoS target preview.
 
-    ``placement`` décrit OÙ l'aperçu pose l'escouade : ancre `("anchor", col, row)` ou positions
-    par figurine `("models", ((model_id, col, row), ...))`. Il entre dans la clé sous cette forme
-    parce que les deux placements donnent des empreintes DIFFÉRENTES pour la même escouade — une
-    clé qui ne porterait que l'ancre servirait le résultat de l'un à l'autre.
+    ``placement`` décrit OÙ l'aperçu pose l'escouade : ancre `("anchor", col, row)` ou plan par
+    figurine `("models", ((model_id, col, row, level, orientation), ...))`. Il entre dans la clé
+    sous cette forme parce que les deux placements donnent des empreintes DIFFÉRENTES pour la même
+    escouade — une clé qui ne porterait que l'ancre servirait le résultat de l'un à l'autre. Le
+    niveau et l'orientation en font partie : ils changent l'empreinte et le gate vertical, donc
+    deux plans qui n'en diffèrent que par eux ne peuvent pas partager une entrée.
     """
     return (
         os.getpid(),
@@ -1315,21 +1317,48 @@ def _apply_preview_placement(
         return
     if kind == "models":
         from engine.phase_handlers.shared_utils import update_model_position
+        from engine.terrain_utils import resolve_model_floor_level
 
         known = {str(m) for m in require_key(gs, "squad_models").get(unit_id_str, [])}
+        models_cache = require_key(gs, "models_cache")
+        terrain_areas = require_key(gs, "terrain_areas")
         for model_id, col, row, level, orientation in placement[1]:
             if model_id not in known:
                 raise KeyError(
                     f"_apply_preview_placement: figurine {model_id!r} absente de l'escouade "
                     f"{unit_id_str!r} — plan incohérent, pas une figurine à ignorer"
                 )
-            # `level` et `orientation` sont passés TELS QUELS : le niveau décide du gate vertical
-            # de la LoS 3D, l'orientation de l'empreinte d'un socle ovale/carré. `orientation`
-            # vaut None quand le plan n'en porte pas (déploiement, pas de pivot) — c'est le
-            # contrat de `update_model_position` : None = ne pas toucher, pas un défaut à 0.
+            model = require_key(models_cache, str(model_id))
+            # L'orientation du PLAN prime (pivot molette en cours), sinon celle de la figurine :
+            # c'est elle qui oriente l'empreinte, donc elle entre dans la résolution du niveau.
+            effective_orientation = (
+                int(model.get("orientation", 0))  # get allowed (défaut 0 = face nord)
+                if orientation is None
+                else int(orientation)
+            )
+            # ⚠️ NIVEAU EFFECTIF, JAMAIS LE NIVEAU BRUT DU PLAN. Le niveau porté par le plan est
+            # celui de la VUE au moment du drop — un HINT que `deploy_generate_formation` estampe
+            # sur TOUTES les figurines sans vérifier chacune. Une figurine dont le socle ne tient
+            # pas sur un plancher de ce niveau est au SOL (13.06), et l'écrire à l'étage fait
+            # lever `floor_height_at` : côté aperçu, la requête partait en 500 et l'effet client
+            # perdait TOUT son calque (cône, blink, couvert). Dans le cas non levant, l'aperçu
+            # mesurait à l'étage ce que la validation résout au sol — la divergence même que
+            # cette fonction existe pour supprimer.
+            # `resolve_model_floor_level` est le MÊME résolveur que les chemins de commit
+            # (`deployment_handlers` avant chaque `update_model_position`) : la garantie vit dans
+            # le moteur, pas dans la discipline de l'appelant.
+            effective_level = resolve_model_floor_level(
+                int(col),
+                int(row),
+                require_key(model, "BASE_SHAPE"),
+                require_key(model, "BASE_SIZE"),
+                effective_orientation,
+                int(level),
+                terrain_areas,
+            )
             update_model_position(
                 gs, model_id, int(col), int(row),
-                level=int(level),
+                level=effective_level,
                 orientation=None if orientation is None else int(orientation),
             )
         return
