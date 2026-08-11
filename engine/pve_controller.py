@@ -10,6 +10,10 @@ from engine.phase_handlers.shared_utils import is_unit_alive
 from shared.data_validation import require_key
 from engine.action_decoder import ActionValidationError
 from config_loader import get_config_loader
+from shared.torch_safe_globals import register_torch_safe_globals
+
+# Avant tout `MaskablePPO.load` de ce module : torch >= 2.6 charge en `weights_only=True`.
+register_torch_safe_globals()
 
 class PvEController:
     """Controls AI opponent in PvE mode."""

@@ -46,3 +46,11 @@ def deterministic_seed() -> None:
     torch = sys.modules.get("torch")
     if torch is not None:
         torch.manual_seed(seed)
+        # Même règle que ci-dessus : on n'importe pas torch pour l'occasion, on profite de
+        # ce qu'il est déjà là. S'il l'est, un test peut charger un modèle — or torch >= 2.6
+        # charge en `weights_only=True` et refuse les scalaires numpy des checkpoints sb3.
+        # Les tests qui appellent `MaskablePPO.load`/`load_from_zip_file` DIRECTEMENT ne
+        # passent par aucun module de `ai/`, donc par aucune autre inscription.
+        from shared.torch_safe_globals import register_torch_safe_globals
+
+        register_torch_safe_globals()

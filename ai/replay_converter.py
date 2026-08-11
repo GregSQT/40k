@@ -20,6 +20,10 @@ import json
 from datetime import datetime
 
 from shared.data_validation import require_key
+from shared.torch_safe_globals import register_torch_safe_globals
+
+# Avant tout `MaskablePPO.load` de ce module : torch >= 2.6 charge en `weights_only=True`.
+register_torch_safe_globals()
 
 # Import required modules for generate_steplog_and_replay
 from ai.step_logger import StepLogger

@@ -28,7 +28,11 @@ if TYPE_CHECKING:
     from ai.env_wrappers import BotControlledEnv
 
 from shared.data_validation import require_key, require_present
+from shared.torch_safe_globals import register_torch_safe_globals
 from ai.scenario_scratch import make_scenario_scratch_dir
+
+# Avant tout `MaskablePPO.load` de ce module : torch >= 2.6 charge en `weights_only=True`.
+register_torch_safe_globals()
 
 __all__ = ['evaluate_against_bots', 'validate_bot_eval_worker_params']
 
