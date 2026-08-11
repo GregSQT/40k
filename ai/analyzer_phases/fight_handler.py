@@ -243,10 +243,11 @@ def handle_fight(
             )
             # 05 Attack sequence — attaque non allouée alors que la cible vit. JUMEAU du site
             # de tir, même module. Cf. `ai/analyzer_allocation.py` pour ce qui est légitime.
-            from ai.analyzer_allocation import check_attack_not_allocated
-            check_attack_not_allocated(
-                stats, state.unit_hp, action_desc, line, state.current_episode_num,
-                target_id, attacker_player, 'fight_not_allocated_target_alive',
+            from ai.analyzer_allocation import flush_not_allocated, note_not_allocated
+            flush_not_allocated(state, stats, current_attacker_id=fighter_id)
+            note_not_allocated(
+                state, action_desc, line, fighter_id, target_id, attacker_player,
+                'fight_not_allocated_target_alive',
             )
             _note_melee_weapon_rule_usage(
                 state, config, stats, action_desc, line, turn, phase,

@@ -519,11 +519,14 @@ def handle_shoot(
     # 05 Attack sequence — attaque non allouée alors que la cible vit. JUMEAU du site de mêlée,
     # même module. Cf. `ai/analyzer_allocation.py` pour ce qui est légitime (« excess attacks
     # lost ») et ce qui ne l'est pas.
-    from ai.analyzer_allocation import check_attack_not_allocated
-    check_attack_not_allocated(
-        stats, state.unit_hp, action_desc, line, state.current_episode_num,
-        target_id, require_key(state.unit_player, shooter_id),
-        'shoot_not_allocated_target_alive',
+    from ai.analyzer_allocation import flush_not_allocated, note_not_allocated
+    # Verdict des activations PRÉCÉDENTES d'abord (toute leur casse est appliquée), mise en
+    # attente de la ligne courante ensuite. Jamais l'inverse : juger une activation en cours,
+    # c'est juger avant que ses dégâts ne soient tous là.
+    flush_not_allocated(state, stats, current_attacker_id=shooter_id)
+    note_not_allocated(
+        state, action_desc, line, shooter_id, target_id,
+        require_key(state.unit_player, shooter_id), 'shoot_not_allocated_target_alive',
     )
 
     # DEVASTATING_WOUNDS checks

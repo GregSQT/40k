@@ -1564,6 +1564,11 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
 
                 state.current_episode.append(line.strip())
     
+    # Dernière activation du FICHIER : aucun `EPISODE START` ne suivra pour la juger.
+    # Sans ce vidage, le dernier tir/combat de la dernière partie sortirait du contrôle.
+    from ai.analyzer_allocation import flush_not_allocated
+    flush_not_allocated(state, stats)
+
     # Check if last episode ended without EPISODE END
     if state.current_episode:
         stats['episodes_without_end'].append({
