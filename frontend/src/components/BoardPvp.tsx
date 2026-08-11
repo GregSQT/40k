@@ -33,6 +33,7 @@ import {
 } from "../utils/blinkingHPBar";
 // import { SingleShotDisplay } from './SingleShotDisplay';
 import { setupBoardClickHandler } from "../utils/boardClickHandler";
+import { canSkipBoardRedraw } from "../utils/boardRedrawDecision";
 import { areUnitsAdjacent, cubeDistance, offsetToCube } from "../utils/gameHelpers";
 import {
   boardWorldSize,
@@ -9981,7 +9982,17 @@ export default function Board({
     }
 
     let drawResult: ReturnType<typeof drawBoard>;
-    if (canReuseExistingHighlightsThroughDestroy && savedHighlightsThroughDestroy) {
+    // `canReuseStatic` est OBLIGATOIRE dans cette condition : ce chemin rapide n'appelle PAS
+    // `drawBoard`, donc il fige le calque statique — où vit la couleur de contrôle des objectifs.
+    // Sans lui, une capture qui ne change pas les surbrillances n'était jamais dessinée.
+    // Contrat et mesure dans `utils/boardRedrawDecision.ts`.
+    if (
+      canSkipBoardRedraw({
+        highlightsReusable: canReuseExistingHighlightsThroughDestroy,
+        staticLayerReusable: canReuseStatic,
+      }) &&
+      savedHighlightsThroughDestroy
+    ) {
       const onlyPatchMovePolygon =
         partialFp.movePolygonCacheKey !== null &&
         (partialFp.movePolygonCacheKey ?? "") !== (lastMovePolygonCacheKeyRef.current ?? "");
