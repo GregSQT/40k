@@ -6910,10 +6910,27 @@ export default function Board({
           });
           clearCells.push(...conePreview.clearCells);
           coverCells.push(...conePreview.terrainCoverCells);
-          // Blink + cases vues règlementaires (backend) à cette position (cache hit attendu).
+        }
+
+        // Blink + cases vues règlementaires : UN SEUL appel portant TOUTES les figurines posées.
+        // Le cône ci-dessus est par-figurine (géométrie visuelle) ; le pool de cibles, lui, est
+        // une propriété de l'ESCOUADE — le demander position par position revenait à interroger
+        // le moteur sur une escouade réduite à une figurine, puis à en unir les réponses.
+        // Surtout : pendant un placement non validé, le moteur ignore le plan. Un aperçu placé
+        // par l'ANCRE laissait les autres figurines à leur position précédente — la sentinelle
+        // `(-1,-1)` tant que l'escouade n'est pas déployée — et rendait un verdict mesuré depuis
+        // le coin du plateau. `preview_shoot_from_model_positions` pose CHAQUE figurine.
+        if (!cancelled && placed.length > 0) {
+          const modelPositions: Record<string, [number, number]> = {};
+          for (const [modelId, pos] of placed) {
+            modelPositions[String(modelId)] = [pos.col, pos.row];
+          }
           const cacheKey = [
             String(squadUnit.id),
-            `${pos.col},${pos.row}`,
+            placed
+              .map(([modelId, pos]) => `${modelId}@${pos.col},${pos.row}`)
+              .sort()
+              .join(";"),
             unitsBoardLayoutKey,
             String(gameState?.turn ?? ""),
             String(gameState?.episode_steps ?? ""),
@@ -6924,20 +6941,21 @@ export default function Board({
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
-                action: "preview_shoot_from_position",
+                action: "preview_shoot_from_model_positions",
                 unitId: String(squadUnit.id),
-                destCol: pos.col,
-                destRow: pos.row,
+                modelPositions,
                 advancePosition: false,
                 includeLosCells: false,
               }),
             });
             if (!response.ok) {
-              throw new Error(`preview_shoot_from_position failed with HTTP ${response.status}`);
+              throw new Error(
+                `preview_shoot_from_model_positions failed with HTTP ${response.status}`
+              );
             }
             const data = await response.json();
             if (data?.success !== true) {
-              throw new Error("preview_shoot_from_position returned success=false");
+              throw new Error("preview_shoot_from_model_positions returned success=false");
             }
             losPreview = parseBackendMoveLosPreviewPayload(data.result, cacheKey);
             movePreviewBackendLosCacheRef.current.set(cacheKey, losPreview);

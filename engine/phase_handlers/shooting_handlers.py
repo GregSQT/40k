@@ -137,11 +137,16 @@ def _move_los_preview_cache_key(
     game_state: Dict[str, Any],
     unit: Dict[str, Any],
     unit_id_str: str,
-    dest_col: int,
-    dest_row: int,
+    placement: Tuple[Any, ...],
     advance_position: bool,
 ) -> Tuple[Any, ...]:
-    """Build strict backend cache key for move LoS target preview."""
+    """Build strict backend cache key for move LoS target preview.
+
+    ``placement`` décrit OÙ l'aperçu pose l'escouade : ancre `("anchor", col, row)` ou positions
+    par figurine `("models", ((model_id, col, row), ...))`. Il entre dans la clé sous cette forme
+    parce que les deux placements donnent des empreintes DIFFÉRENTES pour la même escouade — une
+    clé qui ne porterait que l'ancre servirait le résultat de l'un à l'autre.
+    """
     return (
         os.getpid(),
         require_key(game_state, "episode_number"),
@@ -149,8 +154,7 @@ def _move_los_preview_cache_key(
         require_key(game_state, "episode_steps"),
         str(require_key(game_state, "current_player")),
         unit_id_str,
-        int(dest_col),
-        int(dest_row),
+        placement,
         bool(advance_position),
         _units_cache_fingerprint(require_key(game_state, "units_cache")),
         _tracking_collection_fingerprint(require_key(game_state, "units_advanced")),
@@ -1292,6 +1296,38 @@ def _emit_shoot_activation_perf(
     )
 
 
+def _apply_preview_placement(
+    gs: Dict[str, Any], unit_id_str: str, unit: Dict[str, Any], placement: Tuple[Any, ...]
+) -> None:
+    """Pose l'escouade sur la COPIE d'aperçu, selon la forme du placement.
+
+    Les deux branches passent par les écrivains RÉELS du moteur — `update_units_cache_position`
+    pour l'ancre, `update_model_position` pour les figurines — et non par une écriture directe du
+    cache : c'est ce qui garantit que l'aperçu et l'état après validation décrivent la même
+    empreinte. `update_model_position` resynchronise au passage `occupied_hexes` et l'ancre de
+    l'escouade, donc rien n'est à recalculer ici.
+    """
+    kind = placement[0]
+    if kind == "anchor":
+        _unused, dest_col, dest_row = placement
+        set_unit_coordinates(unit, int(dest_col), int(dest_row))
+        update_units_cache_position(gs, unit_id_str, int(unit["col"]), int(unit["row"]))
+        return
+    if kind == "models":
+        from engine.phase_handlers.shared_utils import update_model_position
+
+        known = {str(m) for m in require_key(gs, "squad_models").get(unit_id_str, [])}
+        for model_id, col, row in placement[1]:
+            if model_id not in known:
+                raise KeyError(
+                    f"_apply_preview_placement: figurine {model_id!r} absente de l'escouade "
+                    f"{unit_id_str!r} — plan incohérent, pas une figurine à ignorer"
+                )
+            update_model_position(gs, model_id, int(col), int(row))
+        return
+    raise ValueError(f"_apply_preview_placement: forme de placement inconnue {kind!r}")
+
+
 def preview_shoot_valid_targets_from_position(
     game_state: Dict[str, Any],
     unit_id: str,
@@ -1301,19 +1337,92 @@ def preview_shoot_valid_targets_from_position(
     advance_position: bool = False,
     include_los_cells: bool = True,
 ) -> Dict[str, Any]:
+    """Aperçu de tir depuis une ANCRE hypothétique (lecture pure, aucune mutation).
+
+    ⚠️ PLACEMENT PAR ANCRE — ne convient qu'à une escouade DÉJÀ SUR LA TABLE, déplacée d'un bloc.
+    `update_units_cache_position` ne resynchronise les figurines que pour les escouades
+    mono-figurine ; sur une multi-figurine, elles gardent leurs positions précédentes (ou la
+    sentinelle `(-1,-1)` si l'escouade n'est pas déployée) pendant que l'ancre, elle, bouge.
+    Pour un placement figurine par figurine — déploiement en cours, `perModelMove` — utiliser
+    `preview_shoot_valid_targets_from_model_positions`, qui pose CHAQUE figurine.
+
+    Args:
+        advance_position: Si True, simule une unité après Advance (``units_advanced`` sur la copie).
+        include_los_cells: Si False, ne calcule pas la grille complète LoS (coûteuse) et renvoie
+            seulement les cibles tirables backend + couvert par cible.
     """
-    Return shooting preview data from a hypothetical position (read-only, no mutation).
+    return _preview_shoot_valid_targets(
+        game_state,
+        unit_id,
+        placement=("anchor", int(dest_col), int(dest_row)),
+        advance_position=advance_position,
+        include_los_cells=include_los_cells,
+    )
+
+
+def preview_shoot_valid_targets_from_model_positions(
+    game_state: Dict[str, Any],
+    unit_id: str,
+    model_positions: Dict[Any, Any],
+    *,
+    advance_position: bool = False,
+    include_los_cells: bool = True,
+) -> Dict[str, Any]:
+    """Aperçu de tir depuis les positions EXPLICITES des figurines (lecture pure).
+
+    Jumeau de `preview_hidden_models_from_model_positions`, pour la même raison : pendant un
+    placement figurine par figurine, le plan vit dans le CLIENT et le moteur n'en sait rien avant
+    la validation. L'escouade y est donc hors table (`occupied_hexes_by_model` à `(-1,-1)`), et un
+    aperçu placé par l'ancre mesurait distances et LoS depuis le coin du plateau sans jamais lever
+    — un verdict inventé, précisément ce que `require_entry_on_battlefield` refuse ailleurs.
+
+    Chaque figurine est posée par `update_model_position`, qui resynchronise l'empreinte de
+    l'escouade et son ancre : c'est le MÊME écrivain que la pose réelle, donc l'aperçu et le
+    résultat après validation décrivent la même géométrie.
+
+    ``model_positions`` : `{model_id: (col, row)}`. Une figurine inconnue lève (incohérence de
+    plan), un plan vide lève (rien à mesurer), une position hors table lève (la sentinelle n'a
+    pas de sens en ENTRÉE : ce sont les positions choisies par le joueur).
+    """
+    if not model_positions:
+        raise ValueError(
+            f"preview_shoot_valid_targets_from_model_positions: aucune figurine pour l'unité "
+            f"{unit_id!r} — un aperçu sans position n'a rien à mesurer"
+        )
+    normalised: Dict[str, Tuple[int, int]] = {}
+    for model_id, position in model_positions.items():
+        col, row = int(position[0]), int(position[1])
+        if col < 0 or row < 0:
+            raise ValueError(
+                f"preview_shoot_valid_targets_from_model_positions: figurine {model_id!r} de "
+                f"l'unité {unit_id!r} HORS TABLE ({col},{row}) — les positions viennent du plan "
+                f"du joueur, la sentinelle n'y a pas de sens"
+            )
+        normalised[str(model_id)] = (col, row)
+    return _preview_shoot_valid_targets(
+        game_state,
+        unit_id,
+        placement=("models", tuple(sorted((m, c, r) for m, (c, r) in normalised.items()))),
+        advance_position=advance_position,
+        include_los_cells=include_los_cells,
+    )
+
+
+def _preview_shoot_valid_targets(
+    game_state: Dict[str, Any],
+    unit_id: str,
+    *,
+    placement: Tuple[Any, ...],
+    advance_position: bool = False,
+    include_los_cells: bool = True,
+) -> Dict[str, Any]:
+    """Corps commun des deux aperçus : SEUL le placement diffère.
 
     Aligné sur l'activation tir : copie d'état, tireur déplacé virtuellement, ``build_unit_los_cache``
     puis ``valid_target_pool_build`` (empreintes §3.3, CLOSE_QUARTERS / adjacent, alliés au contact, etc.).
 
     L'ancienne implémentation (distance centre-à-centre + ``compute_los_state`` seuls) pouvait
     marquer des cibles « valides » alors que le pool moteur les exclut.
-
-    Args:
-        advance_position: Si True, simule une unité après Advance (``units_advanced`` sur la copie).
-        include_los_cells: Si False, ne calcule pas la grille complète LoS (coûteuse) et renvoie
-            seulement les cibles tirables backend + couvert par cible.
     """
     empty_preview: Dict[str, Any] = {
         "valid_targets": [],
@@ -1343,8 +1452,7 @@ def preview_shoot_valid_targets_from_position(
             game_state,
             unit,
             unit_id_str,
-            dest_col,
-            dest_row,
+            placement,
             advance_position,
         )
         cached_preview = _move_los_preview_cache.get(preview_cache_key)
@@ -1352,7 +1460,7 @@ def preview_shoot_valid_targets_from_position(
             _preview_perf_after_cache = time.perf_counter()
             # print(
             #     "[MOVE_LOS_PREVIEW_PERF] "
-            #     f"unit={unit_id_str} dest=({dest_col},{dest_row}) "
+            #     f"unit={unit_id_str} placement={placement} "
             #     f"total_ms={(_preview_perf_after_cache - _preview_perf_t0) * 1000:.1f} "
             #     f"cache_hit=1 "
             #     f"cache_lookup_ms={(_preview_perf_after_cache - _preview_perf_cache_t0) * 1000:.1f} "
@@ -1399,8 +1507,7 @@ def preview_shoot_valid_targets_from_position(
     for weapon in require_key(u, "RNG_WEAPONS"):
         weapon["shot"] = 0
 
-    set_unit_coordinates(u, dest_col, dest_row)
-    update_units_cache_position(gs, unit_id_str, int(u["col"]), int(u["row"]))
+    _apply_preview_placement(gs, unit_id_str, u, placement)
 
     if advance_position:
         ua_raw = gs.get("units_advanced") or []
@@ -1479,7 +1586,7 @@ def preview_shoot_valid_targets_from_position(
     _preview_perf_after_cover = time.perf_counter()
     # print(
     #     "[MOVE_LOS_PREVIEW_PERF] "
-    #     f"unit={unit_id_str} dest=({dest_col},{dest_row}) "
+    #     f"unit={unit_id_str} placement={placement} "
     #     f"total_ms={(_preview_perf_after_cover - _preview_perf_t0) * 1000:.1f} "
     #     f"deepcopy_ms={(_preview_perf_after_deepcopy - _preview_perf_deepcopy_t0) * 1000:.1f} "
     #     f"los_cache_ms={(_preview_perf_after_los - _preview_perf_los_t0) * 1000:.1f} "
