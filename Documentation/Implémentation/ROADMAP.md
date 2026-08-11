@@ -145,6 +145,12 @@
   établir que le mécanisme fonctionnait, alors que la réponse ÉTAIT « personne n'est sur un
   objectif ». Une ligne « aucun objectif disputé » sort désormais **une fois par tour** (et non par
   frontière : six lignes identiques par tour auraient rendu illisible le journal qu'elles éclairent).
+  ⚠️ **Deux trous refermés le jour même** (`/code-review`) : la déduplication du silence n'était
+  jamais relâchée, donc une table qui se vidait APRÈS avoir été occupée dans le même tour — la
+  dernière figurine d'une aire qui meurt en combat — retombait muette, exactement le cas ambigu
+  visé ; et le test de vacuité ignorait le contrôleur, si bien qu'en méthode `secured` (14.03,
+  contrôle persistant) un objectif encore tenu à 0 OC aurait été déclaré « non disputé » pendant
+  que le joueur marquait dessus.
 - ✅ **Livraison 2026-08-11 — distances de charge au `step.log` et en métriques.** Distance à
   l'ennemi le plus proche **à la déclaration** (11.02.1) et distance à la cible **au choix**
   (11.04), mesurées par la primitive qui porte déjà le gate 11.04 — donc par figurine, dans la
