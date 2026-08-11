@@ -1725,7 +1725,9 @@ def _charge_model_multilevel_reachable_cells(
 
     shape = require_key(model, "BASE_SHAPE")
     base = require_key(model, "BASE_SIZE")
-    orientation = int(unit.get("orientation", 0))  # get allowed
+    # Orientation de LA FIGURINE, comme les deux lignes au-dessus lisent SON socle (jumeau du
+    # champ multi-niveaux du move). Celle de l'escouade ne suit pas les pivots par-figurine.
+    orientation = int(require_key(model, "orientation"))
     shape_round = shape == "round"
     # Base ronde : polygones d'étage précalculés une fois par niveau (confinement euclidien du bord).
     floor_polys_by_level = (

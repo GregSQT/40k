@@ -102,7 +102,34 @@ laisse la figurine exactement où elle était.
 
 Le test ne le voyait pas : il vérifiait le `raises`, jamais l'état après. Il pose désormais la
 figurine à une case **différente** de la destination refusée — sans cet écart, une écriture
-prématurée de `col`/`row` reste indétectable — et vérifie les trois champs après la levée.
+prématurée de `col`/`row` reste indétectable — et vérifie l'état après la levée.
+
+Deuxième passe de revue : ce test n'exerçait toujours pas `orientation=`, donc son assertion sur
+l'orientation ne pouvait pas échouer et le réordonnancement du contrôle d'orientation n'était
+verrouillé par rien. Un test dédié le couvre — orientation hors bornes, puis vérification que
+`col`, `row` **et** `level` sont intacts.
+
+### Le niveau se résout sur l'orientation de la FIGURINE, pas du bloc
+
+Trouvé par la même revue, et c'est un défaut **préexistant** que la consolidation a rendu visible :
+pile-in, consolidation et les deux champs multi-niveaux (move et charge) résolvaient le niveau —
+et calculaient l'empreinte — avec `unit["orientation"]`, l'orientation de l'**escouade**, alors
+que le socle du même couple `(niveau, socle)` était lu sur la **figurine**.
+
+`update_model_position` écrit `model["orientation"]` lors d'un pivot par-figurine et ne
+resynchronise jamais celle de l'escouade : après un pivot en phase de mouvement, les deux
+divergent. Mesuré sur `scenario_floors_test.json` avec un socle oval 8×4 : **206 cases de
+plancher** où la même figurine est au sol dans une orientation et à l'étage dans une autre. Le
+pool la traitait comme au sol pendant que l'autoplace la traitait comme à l'étage — donc des
+cases proposées que la validation refuse, et le coût de descente §13.06 non facturé.
+
+Sept sites corrigés (`fight_handlers` ×6, `charge_handlers` ×1, `movement_handlers` ×1), plus
+deux replis morts qui rendaient l'orientation du bloc à défaut de celle de la figurine.
+
+**Ce qui N'A PAS été traité, et pourquoi.** `_charge_prepare_footprint_offsets` lit le socle
+d'**escouade** (forme, taille, orientation) pour l'empreinte des candidats du pool. C'est le même
+motif « bloc vs figurine », mais sur un autre objet — l'empreinte, pas le niveau — et il touche
+toute la géométrie du pool de charge. Sujet distinct, signalé, non ouvert ici.
 
 ### L'exception a été résorbée le jour même (arbitrage tranché : option B)
 

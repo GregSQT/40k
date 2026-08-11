@@ -3666,7 +3666,11 @@ def _model_multilevel_reachable_field(
 
     shape = require_key(model, "BASE_SHAPE")
     base = require_key(model, "BASE_SIZE")
-    orientation = int(unit.get("orientation", 0))  # get allowed
+    # Orientation de LA FIGURINE, comme les deux lignes au-dessus lisent SON socle. Lire celle de
+    # l'escouade mesurait l'empreinte d'un socle non rond dans une autre orientation que la sienne
+    # dès qu'un pivot par-figurine avait eu lieu — `update_model_position` écrit
+    # `model["orientation"]` et ne resynchronise jamais celle de l'escouade.
+    orientation = int(require_key(model, "orientation"))
     if shape == "round":
         off_even: Tuple[Tuple[int, int], ...] = ()
         off_odd: Tuple[Tuple[int, int], ...] = ()
@@ -3764,8 +3768,10 @@ def movement_build_model_destinations_pool(
     # transmis par l'UI) si fourni, sinon l'orientation committée de la figurine. Sans ça le pool
     # (EZ ennemie 2", collisions) serait calculé sur l'orientation d'origine → une case « valide »
     # deviendrait illégale une fois le socle pivoté.
-    _uo = int(unit.get("orientation", 0))  # get allowed (champ optionnel, défaut 0 = face nord)
-    mover_orient = int(orientation) if orientation is not None else int(model.get("orientation", _uo))
+    # Repli sur l'orientation d'ESCOUADE retiré : `models_cache` pose TOUJOURS `orientation`
+    # (`_build_models_for_unit`), donc il ne se déclenchait jamais — et le jour où il l'aurait
+    # fait, il aurait rendu l'orientation d'un bloc pour une figurine pivotée à part.
+    mover_orient = int(orientation) if orientation is not None else int(require_key(model, "orientation"))
 
     _adv_roll = _advance_roll_for(squad_id, game_state)
     if _adv_roll is not None:
@@ -4170,8 +4176,10 @@ def movement_build_model_destinations_pool(
     for _sib, _sc, _sr, _sib_eff in sibling_states:
         _s_shape = require_key(_sib, "BASE_SHAPE")
         _s_base = require_key(_sib, "BASE_SIZE")
-        # Empreinte du SIBLING : son orientation propre (défaut = orient unité), pas celle du mover.
-        _s_orient = int(_sib.get("orientation", _uo))  # get allowed
+        # Empreinte du SIBLING : SON orientation propre, pas celle du mover ni celle de l'escouade.
+        # Le repli sur l'orientation d'unité qui vivait ici ne se déclenchait jamais
+        # (`models_cache` pose toujours `orientation`) et aurait rendu celle du bloc.
+        _s_orient = int(require_key(_sib, "orientation"))
         _s_fp = None if _s_shape == "round" else compute_candidate_footprint(
             _sc, _sr,
             {"BASE_SHAPE": _s_shape, "BASE_SIZE": _s_base, "orientation": _s_orient},
