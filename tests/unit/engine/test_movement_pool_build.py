@@ -14,7 +14,11 @@ from engine.phase_handlers.movement_handlers import (
     _movement_engagement_violates,
     movement_build_valid_destinations_pool,
 )
-from engine.phase_handlers.shared_utils import build_enemy_adjacent_hexes, build_units_cache
+from engine.phase_handlers.shared_utils import (
+    build_enemy_adjacent_hexes,
+    build_units_cache,
+    wall_blocked_anchors,
+)
 from shared.data_validation import require_key
 from tests._state_invariants import turn_state_invariants, unit_invariants
 
@@ -310,9 +314,11 @@ def _oracle_pool(
     ez: int,
 ) -> Set[Tuple[int, int]]:
     """Oracle brute-force : énumère chaque ancre valide selon la sémantique de référence V11.
-    Traversée = bounds + walls + figs ennemies (l'EZ est traversable, toggle
-    ``can_move_through_enemy_engagement_zone``). Destination = empreinte hors occupation ET
-    hors EZ ennemie (``_movement_engagement_violates``). BFS exhaustif borné par ``MOVE``.
+
+    Traversée = bounds + murs (au socle, cf. ``wall_blocked_anchors``) + figs ennemies (l'EZ est
+    traversable, toggle ``can_move_through_enemy_engagement_zone``). Destination = empreinte hors
+    occupation ET hors EZ ennemie (``_movement_engagement_violates``). BFS exhaustif borné
+    par ``MOVE``.
     """
     from engine.hex_utils import precompute_footprint_offsets
 
@@ -320,7 +326,6 @@ def _oracle_pool(
     units_cache = require_key(game_state, "units_cache")
     board_cols = int(require_key(game_state, "board_cols"))
     board_rows = int(require_key(game_state, "board_rows"))
-    walls = game_state.get("wall_hexes", set())
     shape = unit.get("BASE_SHAPE", "round")
     size = int(unit.get("BASE_SIZE", 1))
     orient = int(unit.get("orientation", 0) or 0)
@@ -353,14 +358,27 @@ def _oracle_pool(
         if str(eid) != str(unit_id) and int(require_key(ce, "player")) != mover_player
     ]
 
+    # Volet MUR : la SOURCE UNIQUE du placement contre les murs (chantier « socle vs mur », les
+    # 9 sites de placement de production la lisent). Le critère qui vivait ici — « aucune case de
+    # l'empreinte n'est un mur » — mesure un hex de mur par son CENTRE, exactement la métrique que
+    # ce chantier a condamnée : une ancre où le socle chevauche l'HEXAGONE du mur sans couvrir son
+    # centre y passait, et la figurine s'y retrouvait sans aucun premier pas possible. L'oracle
+    # acceptait donc 14 ancres que la production refuse à raison, sur le cas `base2_walls_ez5`.
+    # Ce n'est pas une tautologie : l'oracle garde son BFS et sa sémantique de référence, il
+    # aligne seulement le PRÉDICAT DE LÉGALITÉ sur celui du jeu, comme il le fait déjà pour
+    # l'occupation et l'EZ.
+    wall_blocked = wall_blocked_anchors(game_state, unit)
+
     def _anchor_traversable(ac: int, ar: int) -> bool:
         # Traversée V11 : bounds + murs + figs ennemies. L'EZ ne bloque PLUS la traversée.
+        if (ac, ar) in wall_blocked:
+            return False
         offs = off_even if (ac & 1) == 0 else off_odd
         for dc, dr in offs:
             fc, fr = ac + dc, ar + dr
             if fc < 0 or fr < 0 or fc >= board_cols or fr >= board_rows:
                 return False
-            if (fc, fr) in walls or (fc, fr) in enemy_occupied:
+            if (fc, fr) in enemy_occupied:
                 return False
         return True
 
