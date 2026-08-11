@@ -82,6 +82,13 @@
   la garantie vit dans le moteur, pas dans la discipline de l'appelant. Trois rondes de review
   auront été nécessaires sur ce chantier, chacune trouvant la divergence aperçu/validation
   déplacée d'un cran.
+  ⚠️ **Encodeur de plan re-centralisé** : ce chantier avait recopié l'encodage du plan dans
+  `BoardPvp` alors qu'un encodeur partagé existait — et que son propre commentaire racontait que
+  ces copies avaient déjà produit deux dialectes de défaut pour l'étage. La review suivante a
+  d'ailleurs trouvé un bug de niveau à cet endroit précis. L'encodeur vit désormais dans
+  `frontend/src/utils/modelPlan.ts` (et non dans `useEngineAPI`, ce qui rendait la copie tentante
+  pour un composant), avec ses tests : la prochaine divergence sera visible au lieu d'être
+  silencieuse.
 - 🔜 **Run `--new` ArmageddonAgent `x1` de VÉRIFICATION — à lancer** (2026-08-11). Ce qu'il doit
   prouver n'est pas un progrès mais que le pipeline tourne de bout en bout avec un **espace de
   décision modifié** (l'alignement de la charge sur 11.02, ci-dessous). À lire dans l'ordre :

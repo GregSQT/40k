@@ -32,6 +32,7 @@ import {
 import { readEngineActionOutcome } from "../utils/engineActionOutcome";
 import { logFightClick } from "../utils/fightClickDebug";
 import { cubeDistance, cubeToOffset, offsetToCube } from "../utils/gameHelpers";
+import { toPlanArray, toPlanArrayWithOrientation } from "../utils/modelPlan";
 import { addHexKeysToSet } from "../utils/movePoolRefsSync";
 import { normalizeMaskLoopsFromApi } from "../utils/movePreviewFootprintMaskLoops";
 import { getSelectedRangedWeaponAgainstTarget } from "../utils/probabilityCalculator";
@@ -58,37 +59,8 @@ const getMaxTurnsFromConfig = async (): Promise<number> => {
 /** Replay : notifie useGameLog de réhydrater le Game Log avec l'historique complet renvoyé par une
  *  réponse de Load / rewind / retour live (champ ``game_log_history``). Même canal window que le flux
  *  live ``backendLogEvent`` → aucun threading de props entre le hook API et useGameLog. */
-/** Modèle d'un plan provisoire côté front : position + étage capturé au drop. */
-type PlanModel = { col: number; row: number; level?: number };
-
-/**
- * Encode un plan par-figurine pour le backend : `[[model_id, col, row, level], …]`.
- *
- * Miroir front de `parse_model_plan` (engine/phase_handlers/shared_utils.py) : l'étage est
- * TOUJOURS envoyé, le backend refuse une entrée muette. Un seul encodeur pour toutes les phases
- * — la version recopiée par site avait déjà produit deux dialectes de défaut (`?? 0` contre le
- * niveau de VUE), c'est-à-dire exactement l'étage inventé que la frontière backend élimine.
- */
-function toPlanArray(
-  models: Record<string, PlanModel>,
-  fallbackLevel = 0
-): Array<[string, number, number, number]> {
-  return Object.entries(models).map(([mid, p]) => [mid, p.col, p.row, p.level ?? fallbackLevel]);
-}
-
-/** Variante du move : l'orientation socle par-fig voyage en 5ᵉ élément (`null` = inchangée).
- *  Miroir de `parse_model_plan_with_orientation` côté backend. */
-function toPlanArrayWithOrientation(
-  models: Record<string, PlanModel & { orientation?: number | null }>
-): Array<[string, number, number, number, number | null]> {
-  return Object.entries(models).map(([mid, p]) => [
-    mid,
-    p.col,
-    p.row,
-    p.level ?? 0,
-    p.orientation ?? null,
-  ]);
-}
+/** Encodeurs de plan : SOURCE UNIQUE dans `utils/modelPlan`, jamais recopiés ici (cf. son
+ *  en-tête — le dépôt a déjà payé deux dialectes de défaut pour l'étage). */
 
 /** Décode un plan rendu par le backend (autoplace) en modèles provisoires. L'étage vient du
  *  moteur : le front le transporte, il ne le redevine pas. */
