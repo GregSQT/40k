@@ -61,15 +61,32 @@ def _send_off_table(game_state: Dict[str, Any], unit_id: str, model_ids: List[st
 
 
 def _upper_floor_cells(game_state: Dict[str, Any], count: int) -> List[Tuple[int, int]]:
-    """`count` cases contiguës d'un plancher de niveau 1 réellement présent dans le scénario."""
+    """`count` cases au CŒUR d'un plancher de niveau 1 réellement présent dans le scénario.
+
+    Au cœur, et non n'importe où : `resolve_model_floor_level` ne place une figurine à l'étage que
+    si son socle tient ENTIÈREMENT sur le plancher (13.06). Une case de bord rend « sol », et le
+    test observerait alors le contraire de ce qu'il croit vérifier — un vert vacant.
+    """
+    from engine.combat_utils import calculate_hex_distance
+
     for area in game_state.get("terrain_areas", []):
         for floor in area.get("floors") or []:
             if int(floor.get("level", 0)) != 1:
                 continue
-            cells = [(int(h[0]), int(h[1])) for h in floor.get("hexes") or []]
-            if len(cells) >= count:
-                return cells[:count]
-    pytest.skip("aucun plancher de niveau 1 dans le scénario")
+            cells = {(int(h[0]), int(h[1])) for h in floor.get("hexes") or []}
+            inner = [
+                (col, row)
+                for col, row in sorted(cells)
+                if all(
+                    (c, r) in cells
+                    for c in range(col - 4, col + 5)
+                    for r in range(row - 4, row + 5)
+                    if calculate_hex_distance(col, row, c, r) <= 4
+                )
+            ]
+            if len(inner) >= count:
+                return inner[:count]
+    pytest.skip("aucun plancher de niveau 1 assez large dans le scénario")
 
 
 def _model_centers_seen_by_engine(preview_state: Dict[str, Any], unit_id: str):
@@ -257,3 +274,40 @@ def test_invalid_orientation_raises(engine):
         preview_shoot_valid_targets_from_model_positions(
             game_state, unit_id, [[model_ids[0], 20, 20, 0, 99]], include_los_cells=False,
         )
+
+
+def test_view_level_outside_a_floor_resolves_to_ground_instead_of_raising(engine, monkeypatch):
+    """Le niveau du plan est le niveau de la VUE, pas celui de la figurine.
+
+    `deploy_generate_formation` estampe le niveau de vue sur TOUTES les figurines sans vérifier
+    chacune : déposer une escouade en vue « étage 1 » hors de l'empreinte du plancher produit un
+    plan à `level=1` sur des cases de sol. Écrit tel quel, il faisait lever `floor_height_at`,
+    la requête partait en 500 et le calque de LoS du client disparaissait entièrement (son `catch`
+    avale l'erreur). Le résolveur du moteur rend le SOL pour ces figurines (13.06).
+    """
+    game_state = engine.game_state
+    unit_id, model_ids = _multi_model_unit(game_state)
+    _send_off_table(game_state, unit_id, model_ids)
+
+    seen: Dict[str, Any] = {}
+    from engine.phase_handlers import shooting_handlers
+
+    original = shooting_handlers.build_unit_los_cache
+
+    def _spy(gs, uid, **kwargs):
+        if str(uid) == unit_id and "levels" not in seen:
+            seen["levels"] = sorted(int(gs["models_cache"][mid]["level"]) for mid in model_ids)
+        return original(gs, uid, **kwargs)
+
+    monkeypatch.setattr(shooting_handlers, "build_unit_los_cache", _spy)
+    # (20,20) : plein sol, aucun plancher de niveau 1 — mais la VUE était à l'étage.
+    preview_shoot_valid_targets_from_model_positions(
+        game_state, unit_id,
+        [[mid, 20 + i, 20, 1] for i, mid in enumerate(model_ids)],
+        include_los_cells=False,
+    )
+    assert "levels" in seen, "le pipeline n'a pas été atteint — le test ne prouve rien"
+    assert seen["levels"] == [0] * len(model_ids), (
+        "une figurine hors empreinte de plancher est au SOL ; l'écrire à l'étage fait lever le "
+        "moteur et le client perd tout son calque de LoS"
+    )

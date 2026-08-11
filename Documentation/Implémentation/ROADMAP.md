@@ -74,6 +74,14 @@
   trois autres écrivains, et le commentaire qui promettait un « cache hit » du survol est corrigé :
   cet aperçu porte l'escouade entière, le survol une figurine — ils ne peuvent pas partager
   d'entrée, une pose coûte donc un aperçu backend complet.
+  ⚠️ **3ᵉ `/code-review`, bug reproduit headless** : le niveau du plan est celui de la **VUE** au
+  drop, estampé sans distinction sur toutes les figurines. Écrit tel quel, il faisait lever le
+  moteur (« figurine marquée à l'étage mais hors empreinte de plancher ») → 500 → le client
+  **perdait tout son calque de LoS**, son `catch` avalant l'erreur. L'aperçu résout désormais le
+  niveau EFFECTIF avec `resolve_model_floor_level`, le même résolveur que les chemins de commit :
+  la garantie vit dans le moteur, pas dans la discipline de l'appelant. Trois rondes de review
+  auront été nécessaires sur ce chantier, chacune trouvant la divergence aperçu/validation
+  déplacée d'un cran.
 - 🔜 **Run `--new` ArmageddonAgent `x1` de VÉRIFICATION — à lancer** (2026-08-11). Ce qu'il doit
   prouver n'est pas un progrès mais que le pipeline tourne de bout en bout avec un **espace de
   décision modifié** (l'alignement de la charge sur 11.02, ci-dessous). À lire dans l'ordre :
