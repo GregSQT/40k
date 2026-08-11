@@ -729,7 +729,8 @@ def movement_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     verify_advance_rolls_cycle(game_state)
 
     # Set phase
-    game_state["phase"] = "move"
+    from engine.game_utils import enter_phase
+    enter_phase(game_state, "move")
 
     from engine.game_utils import add_debug_file_log
     episode = game_state.get("episode_number", "?")

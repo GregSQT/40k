@@ -746,7 +746,8 @@ def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
         game_state["pending_shooting_phase_init"] = False
 
     # Set phase
-    game_state["phase"] = "shoot"
+    from engine.game_utils import enter_phase
+    enter_phase(game_state, "shoot")
 
     from engine.game_utils import add_debug_file_log
     episode = game_state.get("episode_number", "?")

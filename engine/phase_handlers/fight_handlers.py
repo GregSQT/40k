@@ -18,7 +18,7 @@ from .generic_handlers import end_activation
 from shared.data_validation import require_key
 from engine.utils.weapon_helpers import melee_weapons
 from engine.action_log_utils import append_action_log
-from engine.game_utils import add_console_log, safe_print
+from engine.game_utils import add_console_log, safe_print, enter_phase
 from engine.combat_utils import (
     normalize_coordinates,
     calculate_hex_distance,
@@ -1860,7 +1860,7 @@ def fight_v11_start(game_state: Dict[str, Any]) -> None:
     START OF FIGHT PHASE (12.01) → entre dans l'étape PILE IN (12.02).
     Réinitialise les états de suivi V11 de la phase et positionne la sous-phase.
     """
-    game_state["phase"] = "fight"
+    enter_phase(game_state, "fight")
     if "units_fought" not in game_state:
         game_state["units_fought"] = set()
     if "units_charged" not in game_state:

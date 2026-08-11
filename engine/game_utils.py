@@ -14,6 +14,11 @@ from shared.data_validation import require_key
 
 _debug_log_initialized = False
 
+#: File des phases FRANCHIES depuis le dernier solde de frontiere. Ecrite par `enter_phase`,
+#: DRAINEE par `GameStateManager.refresh_objective_control_on_boundary` (regle 14.02). Prefixe `_` :
+#: memo moteur, jamais serialise vers le client.
+PHASES_TRAVERSED_KEY = "_phases_traversed_since_boundary"
+
 
 def _write_diagnostic_to_debug_log(message: str) -> None:
     """Write diagnostic message directly to debug.log"""
@@ -222,3 +227,42 @@ def turn_limit_reached(game_state: Dict[str, Any]) -> bool:
     if limit is None:
         return False
     return int(require_key(game_state, "turn")) > limit
+
+
+def enter_phase(game_state: Dict[str, Any], phase: str) -> None:
+    """ECRIVAIN UNIQUE de ``game_state["phase"]`` : pose la phase ET enregistre le passage.
+
+    POURQUOI un ecrivain unique. Le controle d objectif (14.02) est determine A LA FIN de chaque
+    phase, et son declencheur
+    (``GameStateManager.refresh_objective_control_on_boundary``) n observe l etat que par
+    intermittence : une fois par step moteur, une fois par serialisation d API. Or
+    ``W40KEngine.execute_semantic_action`` enchaine plusieurs phases DANS LA MEME action
+    (cascade de `phase_complete`). Les phases intermediaires n etaient alors visibles de
+    personne, et leur fin n etait jamais soldee.
+
+    MESURE (2026-08-12, scenario PvE) : la derniere pose de deploiement enchainait
+    ``deployment -> command -> move`` en une action ; la seule frontiere observee etait
+    ``deployment -> move``, qui ne correspond a AUCUN point de
+    ``game_config.objective_control_check.points``. Le checkpoint de fin de phase de
+    commandement du tour 1 etait perdu : un Dreadnought pose dans un terrain-objectif laissait
+    l objectif neutre, sans une ligne au journal, pendant TOUTE la phase de mouvement.
+
+    La file ``PHASES_TRAVERSED_KEY`` porte donc la SUITE des phases franchies depuis le dernier
+    solde. Elle est drainee par le declencheur, qui solde chaque frontiere une par une. Ajouter
+    ``deployment/end`` aux points aurait ferme ce cas-la seulement, et laisse le meme trou sur
+    toute autre cascade (une phase de tir sans tireur eligible, par exemple).
+
+    Une reecriture de la MEME phase n est pas une frontiere : elle n empile rien.
+
+    Ici et pas dans ``game_state.py`` : ce module est sans dependance interne, donc importable
+    au niveau module par les six `phase_handlers` et par `w40k_core`, qui importent
+    ``game_state`` en differe pour cause de cycle.
+    """
+    if not isinstance(phase, str) or not phase:
+        raise ValueError(f"enter_phase: phase doit etre une chaine non vide, recu {phase!r}")
+    if game_state.get("phase") == phase:  # get allowed (aucune phase posee = 1re pose)
+        return
+    if PHASES_TRAVERSED_KEY not in game_state:
+        game_state[PHASES_TRAVERSED_KEY] = []
+    game_state[PHASES_TRAVERSED_KEY].append(phase)
+    game_state["phase"] = phase

@@ -8,7 +8,7 @@ Footprint-aware: validates entire unit footprint (multi-hex bases) during deploy
 import math
 from typing import AbstractSet, Dict, Any, Iterable, Sequence, Tuple, List, Optional, Set
 from shared.data_validation import require_key
-from engine.game_utils import get_unit_by_id
+from engine.game_utils import enter_phase, get_unit_by_id
 from engine.combat_utils import set_unit_coordinates
 from engine.terrain_utils import validate_floor_placement
 from engine.phase_handlers.shared_utils import (
@@ -25,7 +25,7 @@ def deployment_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     """
     if "deployment_state" not in game_state:
         raise KeyError("deployment_state is required to start deployment phase")
-    game_state["phase"] = "deployment"
+    enter_phase(game_state, "deployment")
     return {"phase_start": True}
 
 

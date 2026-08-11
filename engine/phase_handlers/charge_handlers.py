@@ -25,7 +25,7 @@ from engine.game_state import (
     waaagh_applies_to_unit,
 )
 from engine.hex_utils import hex_distance as _hex_distance
-from engine.game_utils import add_console_log, safe_print, add_debug_file_log
+from engine.game_utils import add_console_log, safe_print, add_debug_file_log, enter_phase
 from engine.combat_utils import (
     normalize_coordinates,
     get_unit_by_id,
@@ -938,7 +938,7 @@ def charge_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     _t_total0 = time.perf_counter() if _perf else None
 
     # Set phase
-    game_state["phase"] = "charge"
+    enter_phase(game_state, "charge")
 
     from engine.game_utils import add_debug_file_log
     episode = game_state.get("episode_number", "?")

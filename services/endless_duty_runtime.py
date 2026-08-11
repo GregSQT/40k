@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from shared.data_validation import require_key
 from engine.combat_utils import calculate_hex_distance, resolve_dice_value
+from engine.game_utils import enter_phase
 from engine.hex_utils import is_in_bounds, is_phantom_bottom_hex
 from engine.phase_handlers.shared_utils import build_units_cache, rebuild_choice_timing_index
 from engine.phase_handlers import movement_handlers
@@ -872,7 +873,7 @@ def _slot_profile_to_unit_type(slot_name: str, profile_name: str) -> str:
 def _start_next_wave_turn_context(engine_instance: Any, gs: Dict[str, Any]) -> None:
     gs["turn"] = int(require_key(gs, "turn")) + 1
     gs["current_player"] = 1
-    gs["phase"] = "command"
+    enter_phase(gs, "command")
     gs["turn_limit_reached"] = False
     gs["game_over"] = False
     gs["winner"] = None
@@ -888,7 +889,7 @@ def _start_next_wave_turn_context(engine_instance: Any, gs: Dict[str, Any]) -> N
 def _start_initial_wave_turn_context(engine_instance: Any, gs: Dict[str, Any]) -> None:
     """Initialize run at P1 command phase (no deployment / no auto-move)."""
     gs["current_player"] = 1
-    gs["phase"] = "command"
+    enter_phase(gs, "command")
     gs["turn_limit_reached"] = False
     gs["game_over"] = False
     gs["winner"] = None
