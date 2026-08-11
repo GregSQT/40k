@@ -2383,6 +2383,13 @@ export const drawBoard = (
             ? displayCfg.objective_zone_center_radius_ratio
             : 0.14;
 
+        // ⚠️ INSTRUMENT TEMPORAIRE (2026-08-12) : quelles zones entrent seulement dans la boucle,
+        // et avec quelles clés. Une zone absente de cette liste est filtrée AVANT toute décision
+        // de couleur — ce serait alors là qu'est le défaut, pas dans la carte de contrôle.
+        console.log(
+          "[DIAG objectif] zones recues par le rendu :",
+          boardConfig.objective_zones.map((z) => `${String(z.id)}(${(z.hexes ?? []).length})`)
+        );
         for (const zone of boardConfig.objective_zones) {
           const zoneHexes = zone.hexes || [];
           if (!Array.isArray(zoneHexes) || zoneHexes.length === 0) continue;
@@ -2419,6 +2426,20 @@ export const drawBoard = (
               zoneCells.length > 0 ? `${zoneCells[0]![0]},${zoneCells[0]![1]}` : null;
             const zoneController =
               sampleHexKey != null ? (objectiveControl[sampleHexKey] ?? null) : null;
+            // ⚠️ INSTRUMENT TEMPORAIRE (2026-08-12) — à retirer une fois le défaut tranché.
+            // Question unique : pourquoi la ruine centrale se dessine-t-elle en neutre alors que
+            // `objective_controllers` la donne à P1 ? Le tableau ci-dessous confronte, POUR CHAQUE
+            // zone, la clé réellement échantillonnée et ce que la carte de contrôle rend pour elle.
+            // `drawBoard` n'est appelée qu'à la reconstruction du calque statique : pas de spam.
+            console.log("[DIAG objectif]", {
+              zone: String(zone.id),
+              nbHexes: zoneCells.length,
+              premierHexEchantillonne: sampleHexKey,
+              controleurResolu: zoneController,
+              presentDansLaCarte: sampleHexKey != null && sampleHexKey in objectiveControl,
+              tailleCarte: Object.keys(objectiveControl).length,
+              couleur: zoneController === 1 ? "P1" : zoneController === 2 ? "P2" : "NEUTRE",
+            });
             const zoneRingColor =
               zoneController === 1
                 ? OBJECTIVE_P1_COLOR
