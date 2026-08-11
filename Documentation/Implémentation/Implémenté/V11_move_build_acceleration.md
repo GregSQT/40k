@@ -2,12 +2,16 @@
 
 > **ARCHIVÉ DANS `Implémenté/` LE 2026-08-08.** Il vivait à la racine `Implémentation/`, réservée
 > aux chantiers EN COURS, alors qu'il est clos depuis le 2026-07-21. Ses trois tâches résiduelles
-> (§5) restent **ouvertes et lisibles ici** — même régime que
+> (§5) y sont restées **ouvertes et lisibles** — même régime que
 > [`campagne_typage_et_replis_2026-07-29.md`](campagne_typage_et_replis_2026-07-29.md), archivé
-> avec ses résidus nommés. État revérifié dans le code ce jour : **T1 ouvert** (aucun helper
-> module-level, les 5 copies du motif slice-OR sont toujours des closures locales), **T2 ouvert**
-> (`numba` toujours absent des deux `requirements*.txt` et importé nulle part), **T3 dépassé par
-> §0.63/§0.64/§0.65** (cf. l'encadré de §5).
+> avec ses résidus nommés.
+>
+> **LES TROIS SONT SOLDÉES LE 2026-08-11.** **T1 FAIT** : les copies du motif slice-OR passent
+> par `hex_utils.offset_slice_windows`, verrouillé par `test_offset_slice_windows.py`. **T2
+> TRANCHÉ** : `numba` n'est pas une dépendance du projet, acté par écrit dans
+> `requirements.runtime.txt`. **T3 FAIT** : le poste réel n'était pas l'heuristique de scoring
+> mais le recalcul à l'identique du pool d'ancres, désormais mis en cache derrière un
+> fingerprint (`test_deployment_cache_equivalence.py`). Détail de chacune en §5.
 
 > **Chantier perf CLOS** (décision (B) STOP, utilisateur, 2026-07-21 — §3). Ce document est
 > **réduit à sa valeur résiduelle le 2026-07-28** : le cadrage de leviers d'origine (~460 lignes de
@@ -221,51 +225,6 @@ décodeur de déploiement en portait une que le document ignorait. Les six sites
 | 4 | `_spread_by_kernel` idem [:1912](../../../engine/phase_handlers/movement_handlers.py#L1912) | spread | ❌ |
 | 5 | inline de `_euclidean_mover_ez_forbidden_mask` [:1831](../../../engine/phase_handlers/movement_handlers.py#L1831) | dilate | ❌ |
 | 6 | érosion du pool de déploiement [action_decoder.py:1506](../../../engine/action_decoder.py#L1506) | **érode (`&`)** | ❌ |
-
-### T3 — Pôle « scoring de déploiement » : MESURÉ, ~~JAMAIS TRAITÉ~~ — **PARTIELLEMENT TRAITÉ DEPUIS, par d'autres chantiers**.
-
-🔴 **Mise à jour du 2026-08-08 — le constat ci-dessous date du 2026-07-28 et a été dépassé sans que
-ce document soit repris.** Trois chantiers d'août ont travaillé ce pôle, tous documentés dans
-[`V11_agent_rework.md`](../1_Agent/V11_agent_rework.md) :
-- **§0.63** (2026-08-03) : le cache de scoring **ne servait jamais** — 100 % de reconstruction.
-  Corrigé (sur-ensemble stable, un cache par joueur, delta généralisé à N poses) : reconstruction
-  **100 % → 20 %**, phase de déploiement **2,01 → 1,46 s**.
-- **§0.64** (2026-08-03) : la LoS du scoring était une **autre implémentation** que la règle
-  (607 désaccords sur 16 104 hexes) — alignée sur `compute_unit_los`, coût 1,46 → 2,85 s.
-- **§0.65** (2026-08-03) : ce coût **rendu et davantage** par la vectorisation
-  (`batch_hex_line_steps`, `batch_ground_hex_can_see`) : phase de déploiement **3,58 → 1,33 s**,
-  part LoS **1,58 → 0,09 s**, à l'ISO-VALEUR prouvée.
-
-Ce qui reste vrai : `_get_valid_deployment_hexes` et `_build_deployment_scoring_cache` existent
-toujours (vérifié le 2026-08-08) et **aucune mesure de profil n'a été refaite depuis** — les
-chiffres ci-dessous (18,8 s / 8,8 s, 835 k `score_for_hex`) sont **périmés** et ne doivent pas
-servir de référence. Re-profiler avant de rouvrir quoi que ce soit ici.
-
-Constat d'origine, conservé pour mémoire :
-
-
-Après les gains §3.2, le test de déploiement le plus lourd (20,2 s) est dominé par
-`_get_valid_deployment_hexes` ([action_decoder.py:1013](../../../engine/action_decoder.py#L1013), 18,8 s
-cumulés / 98 appels) et `_build_deployment_scoring_cache`
-([:1487](../../../engine/action_decoder.py#L1487), 8,8 s / 66 appels) — 835 k appels à `score_for_hex`,
-8,4 M à `calculate_hex_distance`. **Vérifié 2026-07-28 : les deux fonctions sont inchangées, et leurs
-caches internes (`_deployment_pool_cache`, `_get_or_build_deployment_scoring_cache`) datent de mai,
-donc antérieurs à la mesure — ils n'y répondent pas.** ⚠️ Ce n'est **pas** une mémoïsation neutre comme
-celles de §3.2 : c'est l'heuristique de déploiement de l'IA, y toucher est un changement de
-comportement potentiel, à cadrer et bencher séparément. C'est le seul chiffrage de ce pôle dans toute
-la documentation.
-Le site 6 partage le calcul de bornes mais pas l'opérateur (érosion, pas dilatation) et travaille sur
-la grille étendue `grid_cols/grid_rows`, pas sur le plateau : c'est bien le même calcul, jamais la
-même opération. La copie « dilatation `ez == 1` » que le document comptait comme distincte était déjà
-devenue un simple APPEL de (1).
-
-**Verrou** : [`test_offset_slice_windows.py`](../../../tests/unit/engine/test_offset_slice_windows.py) —
-équivalence exhaustive contre l'indexation naïve case par case, pour les deux sens, sur 6 formes de
-grille × 81 décalages (dont ceux entièrement hors plateau), plus les deux régimes de fenêtrage
-exprimés comme des égalités vérifiables (`clamp="dst"` == plein-board masqué à la fenêtre ;
-`clamp="src"` == propagation d'une source effacée hors fenêtre). Verrou PROUVÉ : un `-dr` changé en
-`dr` dans les bornes rend 8 tests rouges. Aucun changement de perf attendu ni mesuré : les bornes
-sont le même calcul, au même endroit de la boucle.
 
 ### T2 — Statut de `numba`. TRANCHÉ : ce n'est pas une dépendance du projet.
 

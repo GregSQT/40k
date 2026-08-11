@@ -405,19 +405,6 @@ _ACTIVE_DEPLOYMENT_PINS: Dict[str, Dict[str, Any]] = {
         "schedule": "linear",
         "freeze_after_progress": 1.0,
     },
-    # Épinglé À L'ARRÊT. Activé, ``W40KEngine._should_force_random_deployment_action`` REMPLACE
-    # l'action de déploiement choisie par une action valide tirée au hasard : un test qui pilote
-    # le déploiement (clustering forcé, slot précis…) verrait ses choix silencieusement écrasés
-    # et continuerait de passer en ne testant plus ce qu'il annonce.
-    "deployment_random_mix": {
-        "enabled": False,
-        "training_only": False,
-        "force_random_ratio_start": 0.0,
-        "force_random_ratio_end": 0.0,
-        "schedule": "linear",
-        "freeze_after_progress": 1.0,
-        "apply_to": "agent_only",
-    },
 }
 
 
