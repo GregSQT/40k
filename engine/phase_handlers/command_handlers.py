@@ -144,7 +144,8 @@ def command_step_start_of_phase(game_state: Dict[str, Any]) -> None:
     déclenche aujourd'hui : les capacités qui le feront appartiennent aux chantiers 03 et 06.
     """
     # Set phase
-    game_state["phase"] = "command"
+    from engine.game_utils import enter_phase
+    enter_phase(game_state, "command")
 
     from engine.game_utils import add_debug_file_log
     episode = game_state.get("episode_number", "?")

@@ -64,6 +64,36 @@
   SIGNALÉ, NON TRAITÉ : « on peut tirer à travers un mur quand on est à l'étage » relève de la
   LoS, pas du placement — chantier distinct, non ouvert.
 
+- ✅ **Contrôle d'objectif perdu quand deux phases s'enchaînent dans la même action**
+  (ouvert ET livré le 2026-08-12). Symptôme PvE rapporté : Dreadnought posé DANS un terrain-objectif, objectif neutre,
+  et **aucune** ligne `OBJECTIVE` au journal de partie. Cause MESURÉE, et ce n'est PAS le comptage :
+  une figurine en `(102,132)` est bien dans `ruin_center_OK` (colonnes 85→134, lignes 120→180) et
+  `calculate_objective_control` rend `controller=1` avec `OC P1=4`. Le défaut est dans le
+  DÉCLENCHEMENT : `refresh_objective_control_on_boundary` ne retient que la DERNIÈRE frontière vue
+  et teste `_match(old,"end") or _match(new,"start")`. Or `execute_semantic_action` enchaîne les
+  phases en cascade dans une seule action (`w40k_core` ~6740) : quand la dernière pose de
+  déploiement fait passer `deployment → command → move`, la seule frontière observée est
+  `deployment → move`, qui ne correspond à AUCUN point configuré. Le checkpoint de fin de phase de
+  commandement du tour 1 est perdu, `_objective_control_detail` reste absent, et l'objectif reste
+  neutre en silence pendant TOUTE la phase de mouvement du tour 1. Reproduit headless : roster
+  ADEPTUS ASTARTES (Oath en attente → la cascade s'arrête, pas de défaut) vs roster TYRANIDS
+  (aucune décision → cascade → 0 ligne `OBJECTIVE`).
+  DÉCISION UTILISATEUR (2026-08-12) : option A — le moteur **mémorise la suite des phases
+  franchies** et les solde une par une, au lieu de ne regarder que les deux extrémités. Ajouter
+  `deployment/end` aux points configurés a été ÉCARTÉ : ça ne ferme que le cas du jour et laisse
+  le même trou sur toute autre cascade.
+  LIVRÉ : `game_utils.enter_phase` devient l'ÉCRIVAIN UNIQUE de `game_state["phase"]` (9 sites
+  routés, plus aucune écriture directe hors du helper — grep à l'appui) et empile chaque phase
+  franchie ; `refresh_objective_control_on_boundary` draine cette file et solde les frontières
+  une par une, la fin de TOUR n'étant soldée que sur la dernière. Un état sans file (fixture de
+  test, sauvegarde restaurée) retombe sur les deux extrémités, donc le comportement d'avant.
+  Vérifié : reproduction PvE roster TYRANIDS passée de « 0 ligne `OBJECTIVE`, contrôle jamais
+  calculé » à « contrôle calculé dès l'entrée en mouvement » ; reproduction roster SPACE MARINES
+  inchangée ; 12 tests du fichier 14.02 verts dont le verrou prouvé rouge par mutation ; 112
+  tests ciblés (cascade, step, action sémantique, déploiement, API, journal) verts.
+  À FAIRE : la vérification large de l'utilisateur (suite complète, `pyright`, conformité, PvE
+  navigateur) n'a **pas** été passée.
+
 - ✅ **PvE se figeait — cause identifiée et corrigée** (2026-08-11). Le symptôme était rapporté
   « en phase de mouvement » ; la mesure a montré la phase de **déploiement**, sur des unités
   simplement **pas encore posées** (`deployed_on_turn=None`, `in_strategic_reserves=False`) — les

@@ -3073,31 +3073,67 @@ class GameStateManager:
         """Réévalue le contrôle d'objectif SI une frontière de phase/tour vient d'être franchie.
 
         Règle 14.02 : le contrôle est déterminé à la FIN de chaque phase et de chaque tour, pas
-        en continu. Cette méthode est le point d'entrée unique de ce rafraîchissement : elle
-        mémorise la dernière frontière vue dans ``game_state`` et n'appelle
-        ``run_objective_control_checkpoint`` que lorsque (phase, tour) a changé — donc au plus
-        une fois par phase, jamais à chaque action.
+        en continu. Cette méthode est le point d'entrée unique de ce rafraîchissement.
 
         Partagée par les DEUX chemins : le moteur gym (``W40KEngine.step``/``reset``) et l'API
         PvP (sérialisation d'état). Avant, seul le PvP déclenchait le checkpoint : en
         entraînement ``objective_controllers`` n'était jamais rafraîchi, donc le contrôle
         d'objectif restait figé sur son état initial.
 
-        Retourne True si le checkpoint a été exécuté.
+        ⚠️ CHAQUE FRONTIÈRE FRANCHIE EST SOLDÉE, PAS SEULEMENT LES DEUX EXTRÉMITÉS. Cette
+        méthode n'observe l'état que par intermittence (une fois par step moteur, une fois par
+        sérialisation d'API), alors que ``execute_semantic_action`` enchaîne plusieurs phases
+        DANS LA MÊME action. Ne comparer que « phase d'avant » et « phase de maintenant »
+        perdait tout point situé entre les deux : MESURÉ le 2026-08-12, la dernière pose de
+        déploiement enchaînait ``deployment → command → move`` et la seule frontière vue,
+        ``deployment → move``, ne correspondait à AUCUN point configuré — le checkpoint de fin
+        de phase de commandement du tour 1 n'existait pas, et un objectif occupé restait neutre
+        en silence pendant toute la phase de mouvement. La suite réelle des phases est donc
+        enregistrée par ``enter_phase`` (écrivain unique) et drainée ici.
+
+        Solder N frontières coûte N recalculs IDENTIQUES : une frontière ne change aucun état de
+        jeu (cf. ``run_objective_control_checkpoint``), et ``calculate_objective_control`` relit
+        l'état courant. On les joue quand même une par une pour que ``previous_controller`` —
+        donc le « capturé » / « déjà tenu » du journal — décrive la même séquence qu'un
+        enchaînement de phases observé pas à pas.
+
+        Retourne True si au moins un checkpoint a été exécuté.
         """
+        from engine.game_utils import PHASES_TRAVERSED_KEY
+
         phase = game_state.get("phase")  # get allowed (pré-reset)
         turn = game_state.get("turn")  # get allowed (pré-reset)
+        # DRAINE avant tout retour anticipé : une file conservée serait rejouée à la frontière
+        # suivante, sur un état qui n'est plus le sien.
+        traversed = game_state.pop(PHASES_TRAVERSED_KEY, [])  # pop allowed (absence = 1er passage)
         last = game_state.get("_objective_control_last_boundary")  # get allowed (1er passage)
         game_state["_objective_control_last_boundary"] = (phase, turn)
         if last is None:
             # Début de bataille : aucune frontière franchie → aucun objectif contrôlé (14.02).
             return False
         last_phase, last_turn = last
-        if phase == last_phase and turn == last_turn:
-            return False
-        self.run_objective_control_checkpoint(
-            game_state, last_phase, phase, turn_changed=(turn != last_turn)
-        )
+        turn_changed = turn != last_turn
+        # Chaîne des phases réellement traversées, de la dernière vue jusqu'à la courante. Elle
+        # se termine TOUJOURS sur `phase` : les états reconstruits hors `enter_phase` (fixtures
+        # de test, restauration d'une sauvegarde) n'ont pas de file, et retombent alors sur les
+        # deux extrémités — le comportement d'avant, jamais faux, seulement moins fin.
+        chain = [last_phase] + [p for p in traversed]
+        if chain[-1] != phase:
+            chain.append(phase)
+        boundaries = list(zip(chain, chain[1:]))
+        if not boundaries:
+            if not turn_changed:
+                return False
+            # Même phase, tour différent : c'est la fin de TOUR (14.02) qu'il faut solder.
+            boundaries = [(last_phase, phase)]
+        for index, (old_phase, new_phase) in enumerate(boundaries):
+            self.run_objective_control_checkpoint(
+                game_state,
+                old_phase,
+                new_phase,
+                # La fin de tour ne se solde qu'UNE fois, sur la dernière frontière franchie.
+                turn_changed=turn_changed and index == len(boundaries) - 1,
+            )
         return True
 
     def _calculate_primary_objective_control_counts(

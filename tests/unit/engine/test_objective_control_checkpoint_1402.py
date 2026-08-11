@@ -92,6 +92,89 @@ def test_le_checkpoint_1402_tire_reellement_en_entrainement(gym_engine) -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Cascade de phases : une frontière franchie SANS être observée doit être soldée
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_une_cascade_de_phases_solde_la_frontiere_intermediaire(gym_engine) -> None:
+    """`deployment → command → move` en UNE action : la fin de commandement est soldée.
+
+    DÉFAUT CORRIGÉ (2026-08-12, mesuré sur le scénario PvE). `execute_semantic_action` enchaîne
+    les phases en cascade ; personne n'observe l'état entre deux. La méthode ne comparait que la
+    dernière phase VUE et la phase courante, donc elle testait la frontière `deployment → move`,
+    qui ne correspond à aucun point de `objective_control_check.points`. Résultat en jeu : un
+    Dreadnought posé dans un terrain-objectif laissait l'objectif neutre et le journal muet
+    pendant TOUTE la phase de mouvement du tour 1.
+
+    Le test CONSTRUIT la cascade au lieu de l'espérer d'un enchaînement de handlers : c'est
+    `enter_phase` qui enregistre la suite, et c'est elle qui est vérifiée ici.
+    """
+    from engine.game_utils import PHASES_TRAVERSED_KEY, enter_phase
+
+    game_state = gym_engine.game_state
+    game_state["objective_controllers"] = {}
+    game_state["phase"] = "deployment"
+    game_state.pop(PHASES_TRAVERSED_KEY, None)
+    game_state["_objective_control_last_boundary"] = ("deployment", int(game_state["turn"]))
+
+    enter_phase(game_state, "command")
+    enter_phase(game_state, "move")
+    assert game_state[PHASES_TRAVERSED_KEY] == ["command", "move"], (
+        "`enter_phase` n'a pas enregistré la suite des phases franchies : sans elle, la "
+        "frontière intermédiaire reste invisible"
+    )
+
+    fired = gym_engine.state_manager.refresh_objective_control_on_boundary(game_state)
+
+    assert fired is True
+    assert game_state["objective_controllers"], (
+        "la fin de la phase de commandement n'a pas été soldée : seule la frontière "
+        "`deployment -> move` a été testée, et elle ne correspond à aucun point configuré"
+    )
+    assert PHASES_TRAVERSED_KEY not in game_state, (
+        "la file n'a pas été drainée : elle serait rejouée à la frontière suivante, sur un état "
+        "qui n'est plus le sien"
+    )
+
+
+def test_enter_phase_ne_compte_pas_une_reecriture_de_la_meme_phase() -> None:
+    """Reposer la phase courante n'est pas une frontière — sinon la file enflerait à chaque step.
+
+    `movement_phase_start` et ses jumelles sont rappelées plusieurs fois par tour sur certains
+    chemins ; compter ces réécritures ferait rejouer des frontières qui n'ont pas eu lieu.
+    """
+    from engine.game_utils import PHASES_TRAVERSED_KEY, enter_phase
+
+    game_state: dict = {"phase": "move"}
+    enter_phase(game_state, "move")
+    enter_phase(game_state, "move")
+
+    assert PHASES_TRAVERSED_KEY not in game_state
+    assert game_state["phase"] == "move"
+
+
+def test_un_etat_sans_file_retombe_sur_les_deux_extremites(gym_engine) -> None:
+    """Fixtures de test et sauvegardes restaurées n'ont pas de file : le comportement tient.
+
+    Sans cette garantie, tout état reconstruit hors `enter_phase` cesserait de solder ses
+    frontières — le défaut corrigé, déplacé au lieu d'être fermé.
+    """
+    from engine.game_utils import PHASES_TRAVERSED_KEY
+
+    game_state = gym_engine.game_state
+    game_state["objective_controllers"] = {}
+    game_state.pop(PHASES_TRAVERSED_KEY, None)
+    game_state["_objective_control_last_boundary"] = ("command", int(game_state["turn"]))
+    game_state["phase"] = "move"  # écriture directe : aucune file n'existe
+
+    fired = gym_engine.state_manager.refresh_objective_control_on_boundary(game_state)
+
+    assert fired is True
+    assert game_state["objective_controllers"], (
+        "la frontière `command -> move` n'est plus soldée quand la file est absente"
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Le MÉCANISME : une section oubliée doit ÉCHOUER, pas s'éteindre
 # ─────────────────────────────────────────────────────────────────────────────
 

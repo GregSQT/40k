@@ -112,7 +112,7 @@ def _mask_only_opens_wait(mask: Any) -> bool:
 # Import shared utilities FIRST (no circular dependencies)
 from engine.episode_schedule import episodes_per_env
 from engine.game_utils import (
-    ONCE_CLAIMS_KEY, get_controlled_player, get_unit_by_id, once_claim, once_claimed,
+    ONCE_CLAIMS_KEY, enter_phase, get_controlled_player, get_unit_by_id, once_claim, once_claimed,
     turn_limit_reached, get_effective_turn_limit,
 )
 
@@ -2049,7 +2049,7 @@ class W40KEngine(gym.Env):
             self.game_state["episode_number"] = self.step_logger.episode_number
         
         if self.game_state.get("deployment_type") == "active":
-            self.game_state["phase"] = "deployment"
+            enter_phase(self.game_state, "deployment")
             deployment_state = self.game_state.get("deployment_state")
             if deployment_state is not None:
                 self.game_state["current_player"] = int(require_key(deployment_state, "current_deployer"))
