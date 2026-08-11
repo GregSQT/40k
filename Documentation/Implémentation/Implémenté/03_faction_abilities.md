@@ -182,7 +182,13 @@ n'a pas le droit de changer `obs_size` ni `TOTAL_ACTION_SIZE`.
 1. **État.** `waaagh_called` (par joueur, 1×/partie), `waaagh_active_until`,
    `oath_target` (par joueur, id d'unité ennemie).
 2. **Décision Waaagh!** en début de phase de commandement du joueur orke, si non encore
-   appelé : `pending_agent_decision` à 2 candidats.
+   appelé : `pending_agent_decision` à 2 candidats. Troisième condition, ajoutée le
+   2026-08-11 : **le joueur doit avoir au moins une escouade sur la table**
+   (`player_has_squads_on_board`). Le moteur ne termine pas l'épisode sur une armée anéantie,
+   donc la phase de commandement du joueur vidé arrive ; la décision est une capacité d'ARMÉE,
+   sans unité porteuse, et l'observation prend la première escouade du décideur comme repère —
+   sans aucune, elle lève et l'épisode plante. Le « once per battle » n'est pas consommé : la
+   décision se repose si le joueur revient sur la table.
 3. **Décision Oath** en début de phase de commandement du joueur SM : masque exposant les
    `OATH_SLOTS` des escouades ennemies vivantes. **Non optionnel** — pas de candidat « aucune
    cible » ; si des ennemis existent, l'agent doit en désigner un.

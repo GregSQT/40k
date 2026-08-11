@@ -875,29 +875,54 @@ différentes** — elles ne pilotent pas la même chose :
 | Profil | `total_episodes` | `learning_rate` | `ent_coef` |
 |--------|------------------|-----------------|------------|
 | `x1` | 10 000 | 1.0 → fin du run | 1.0 → fin du run |
-| `x1_long` | 200 000 | **0.7** → 140 000 ép. | **0.4** → 80 000 ép. |
+| `x1_long` | 50 000 (valait 200 000 avant le 2026-08-11) | **0.7** → 35 000 ép. | **0.4** → 20 000 ép. |
 | `x5_long` | 200 000 | **0.7** → 140 000 ép. | **0.4** → 80 000 ép. |
 | autres | — | 1.0 | 1.0 |
 
-L'**entropie** s'arrête tôt (80k) : passé ce point on veut que la politique cesse d'explorer et
-exploite ce qu'elle a appris, sur les 120k épisodes restants. Le **learning rate** descend plus
-longtemps (140k) : le poser au plancher (0.0002) dès 80k briderait l'apprentissage sur 60 % du
-budget du run. La rampe restant continue, ce choix ne rend pas le début plus risqué — à 80k le LR
-vaut 0.00097 au lieu de 0.0002.
+Les deux valeurs sont des **fractions du run**, donc les deux longueurs les partagent : c'est le
+même réglage, exprimé en épisodes il donne simplement des points différents. L'**entropie**
+s'arrête aux 40 % : passé ce point on veut que la politique cesse d'explorer et exploite ce
+qu'elle a appris, sur les 60 % restants. Le **learning rate** descend jusqu'aux 70 % : le poser au
+plancher (0.0002) dès 40 % briderait l'apprentissage sur 60 % du budget du run. La rampe restant
+continue, ce choix ne rend pas le début plus risqué — aux 40 % le LR vaut 0.00097 au lieu de 0.0002.
 
 **Le profil `x1_long`** est `x1` recalibré pour les runs longs, et rien d'autre : mêmes
 architecture, `n_steps`, `target_kl`, rampe de déploiement. Ne changent que ce qui dépend de la
-longueur du run — `total_episodes` (200k), les deux `decay_fraction` et `bot_eval_freq`
-(**10000**, soit 20 points de mesure : à 5000, les 40 évaluations × 100 épisodes coûteraient
-~8,5 h — 13 min l'unité, cf. commit `42326ed0` — contre ~5,5 h d'entraînement à 36k ép./h, donc
-l'évaluation doublerait la durée du run). `bot_eval_intermediate` reste à 100 : c'est cette
+longueur du run — `total_episodes` (50k), les deux `decay_fraction`, `bot_eval_freq` et
+`robust_window`.
+
+`bot_eval_freq` vaut **10000**, soit 5 points de mesure. Ils ne sont d'ailleurs atteints que
+depuis le 2026-08-11 : le déclencheur reportait le dépassement du seuil d'une évaluation à la
+suivante, n'en produisait que 4, et la garde de démarrage en comptait pourtant 5 (verrou :
+`tests/unit/ai/test_bot_eval_trigger_no_drift.py`). Descendre à 5000 doublerait le coût de
+l'évaluation intermédiaire — ~2 h 10 au lieu de ~1 h 05, 13 min l'unité cf. commit `42326ed0` —
+sur un run **mesuré à ~20 h** (4 h 01 pour 10 000 épisodes, cf. ROADMAP §1 pt 6, run du
+2026-08-10).
+
+> ⚠️ **Deux régimes de durée cohabitent dans le dépôt et diffèrent d'un facteur ~14.** Les notes
+> `total_episodes_normal` de la config annoncent `0.1 s/ep → 36k ép./h` ; le seul run réellement
+> chronométré donne 4 h 01 pour 10 000 épisodes, soit ~2 500 ép./h. La refonte d'observation V11
+> (`obs_size` 16659) a rendu le pas bien plus cher, et le premier chiffre n'a pas suivi. **Toutes
+> les durées d'entraînement de cette page qui portent sur 200 000 épisodes (~5 h 30) viennent du
+> régime ANCIEN et sont donc à prendre pour ce qu'elles sont.** L'écart est antérieur au
+> 2026-08-11 et n'est traité nulle part.
+
+`robust_window` vaut **3** et non 5, conséquence directe de ces 5 points : la fenêtre du score
+robuste GLISSE sur les points de mesure, donc une fenêtre de 5 n'aurait qu'**une** position — la
+dernière — et le best model serait mécaniquement le modèle final. À 3 elle en occupe trois, et la
+sélection redevient réelle sans toucher au budget d'évaluation. Contrepartie assumée : une fenêtre
+de 3 lisse moins un point isolé. `x5_long` garde 5, ses 20 points lui laissant 16 positions.
+
+`bot_eval_intermediate` reste à 100 : c'est cette
 mesure qui pilote `save_best_robust`, la dégrader dégraderait le choix du modèle sauvegardé.
 Verrou : `tests/unit/ai/test_schedule_decay_fraction.py` refuse toute autre divergence.
 
 **Le profil `x5_long`** (2026-08-10) est le même recalibrage appliqué à `x5_new` : mêmes sept
 écarts, mêmes valeurs, et le verrou ci-dessus est paramétré sur les **deux** couples
-(`x1` / `x1_long` et `x5_new` / `x5_long`). Son contenu est d'ailleurs identique à celui de
-`x1_long` — c'est attendu : le nom d'un profil ne fixe **pas** la résolution du plateau, qui vient
+(`x1` / `x1_long` et `x5_new` / `x5_long`). Son contenu ne diffère de celui de `x1_long` que par
+`total_episodes` (200 000 contre 50 000 depuis le 2026-08-11 ; le verrou épingle la longueur
+**par couple**, cf. `LONG_PROFILE_EPISODES`) — le reste est identique, et c'est attendu : le nom
+d'un profil ne fixe **pas** la résolution du plateau, qui vient
 de `--resolution 1|5|10` (cf. `_resolution_detail` en tête du JSON). `x5_new` est lui-même aligné
 sur `x1` depuis le 2026-08-10 (architecture 512×512, `lr` 0.002 → 0.0002, `ent_coef` end 0.01,
 seuils de gating 0.3) ; il n'en diffère plus que par `total_episodes` (1000), `bot_eval_freq`
@@ -912,7 +937,17 @@ reprend. Deux verrous complémentaires, tous deux paramétrés sur les huit prof
 `test_profile_promise_of_a_best_model_is_pinned` fixe QUI promet un best model (table
 `PROMISES_BEST_MODEL`, exhaustive : un profil ajouté sans y être classé échoue), et
 `test_profile_can_produce_the_best_model_it_promises` vérifie que la promesse est TENABLE — il ne
-porte donc que sur les cinq qui en font une, les trois autres étant explicitement `SKIP`. Les deux
+porte donc que sur les **quatre** qui en font une, les quatre autres étant explicitement `SKIP`.
+
+**`x1` est passé à `save_best_robust: false` le 2026-08-11**, pour la même raison que `x5_long`
+a vu sa fenêtre bouger : 10 000 épisodes à `bot_eval_freq` 2000 donnent 5 points de mesure pour
+une fenêtre de 5, soit **une seule position** — le « meilleur » modèle y était mécaniquement le
+dernier point évalué, et pas même toujours, la sauvegarde robuste étant conditionnée au gate (un
+dernier point recalé ne produisait aucun `model_<agent>.zip`). À `false`, `train.py` écrit le
+modèle **final** inconditionnellement, avec son `run_state` et ses stats VecNormalize : c'est ce
+qu'on attend d'un profil de mise au point. Son `robust_window` reste à 5, sans effet désormais et
+volontairement — `x1` est la référence à laquelle `x1_long` est comparé en bloc, y toucher
+déplacerait la référence. Les deux
 lisent les `callback_params` **résolus** comme le fait le run (`_resolve_callback_value`,
 `train.py:3444-3459`) : une clé absente ou nulle hérite de `_training_common.json`, qui définit
 `save_best_robust: true` — la lire brute mesurerait autre chose que ce qui sera appliqué.

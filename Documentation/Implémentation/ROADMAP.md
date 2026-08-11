@@ -367,6 +367,18 @@ vérifiée ; l'appariement reste réservé aux cellules de tableau, où le renvo
   `V11_agent_rework.md` §0.70, corrigée là aussi.
 - ~~`A_faire/Endless_duty_etat_mesure.md` affirme que `config/agents/CoreAgent/` n'existe plus —
   **il existe**.~~ ✅ corrigé dans le doc le 2026-08-10.
+- **Vitesse d'entraînement : deux régimes incompatibles, facteur ~14** (relevé le 2026-08-11).
+  Les notes `total_episodes_normal` de cinq profils de la config ArmageddonAgent annoncent
+  `0.1 s/ep -> 36k ep / hour` ; le seul run réellement chronométré donne **4 h 01 pour 10 000
+  épisodes** (§1 pt 6), soit ~2 500 ép./h. La refonte d'observation V11 (`obs_size` 16659) a rendu
+  le pas bien plus cher et le premier chiffre n'a pas suivi. Conséquence directe : **toute durée
+  d'entraînement dérivée du régime ancien est fausse d'un ordre de grandeur** — dont les « ~5 h 30
+  pour 200 000 épisodes » que répètent [`../AI_TRAINING.md`](../AI_TRAINING.md) et trois notes
+  `bot_eval_*_normal`, et le
+  `36_000` codé en dur dans `test_schedule_decay_fraction.py` (seuil conservé parce qu'il est le
+  plus SÉVÈRE des deux, jamais laxiste). Les durées de `x1_long` ont été réancrées sur la mesure
+  le 2026-08-11 ; le reste ne l'est pas. Le traiter = re-dériver chaque note de coût d'évaluation
+  des 8 profils, donc un chantier à ouvrir, pas un périmètre de clôture.
 - Bandeaux et chiffres périmés listés en `1_Agent/V11_agent_rework.md` §0bis (l.3713-3735),
   signalés et volontairement non corrigés depuis le 2026-07-20.
 - `UNIT_ABILITY_SLOTS = 8` est une projection non mesurée ; le chantier 06 la rendra mesurable (§2).

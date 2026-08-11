@@ -263,9 +263,15 @@ def command_step_command_abilities(game_state: Dict[str, Any]) -> None:
     #    pour le moteur — 0 = appeler, 1 = passer —, mais ce n'est PAS lui qui les distingue POUR
     #    L'AGENT : l'index n'est écrit dans aucun scalaire d'observation. C'est `declines` qui
     #    porte la différence (cf. DECISION_OPTION_BIN_FIELDS).
+    #    Troisième condition, du même ordre que « aucune unité ennemie vivante » pour l'Oath juste
+    #    en dessous : un joueur qui n'a plus AUCUNE escouade sur la table n'a rien à faire crier.
+    #    Le Waaagh! n'accorde ses effets qu'à ses propres unités, et le « once per battle » n'est
+    #    pas consommé (`waaagh_called` reste False) — la décision se repose au tour suivant si le
+    #    joueur revient sur la table.
     if (
         army_faction(game_state, current_player) == WAAAGH_FACTION_KEYWORD
         and waaagh_is_available(game_state, current_player)
+        and player_has_squads_on_board(game_state, current_player)
     ):
         from engine.agent_decision import set_pending_agent_decision
 
@@ -309,6 +315,26 @@ def command_step_command_abilities(game_state: Dict[str, Any]) -> None:
     return None
 
 
+def player_has_squads_on_board(game_state: Dict[str, Any], player: int) -> bool:
+    """True si `player` a encore au moins une escouade dans `units_cache`.
+
+    Lit le cache, et PAS `game_state["units"]` filtré par PV : c'est exactement la ressource dont
+    l'observation a besoin pour décrire une décision de 08.04 quand le pool d'activation est vide.
+    `waaagh_call` ne porte sur aucune unité, donc `_observer_squad_for_pending_decision`
+    (w40k_core) prend la première escouade du joueur décideur comme repère égocentrique et LÈVE
+    s'il n'y en a aucune — poser la décision dans cet état plante l'épisode au step suivant
+    (mesuré le 2026-08-11, eval `control` sur `fixed_brawl_sm_orks`). L'Oath ne lève pas mais
+    échoue de l'autre façon : l'observation tombe à ZÉRO faute d'escouade à décrire, et l'agent
+    doit quand même désigner une cible. Le prédicat et le besoin de l'observateur sont donc la
+    même chose, pour les deux capacités.
+    """
+    player_int = int(player)
+    return any(
+        int(require_key(entry, "player")) == player_int
+        for entry in require_key(game_state, "units_cache").values()
+    )
+
+
 def arm_oath_selection(game_state: Dict[str, Any], player: int) -> None:
     """Pose la désignation d'Oath si `player` la doit — ÉCRIVAIN UNIQUE de l'armement.
 
@@ -318,9 +344,19 @@ def arm_oath_selection(game_state: Dict[str, Any], player: int) -> None:
 
     « Select one unit from your opponent's army » : s'il n'existe aucune unité ennemie vivante,
     il n'y a rien à désigner et la clause est sans objet — elle ne pourrait bénéficier à personne.
+
+    JUMEAU du Waaagh! de la même étape, et pour la même raison : la clause est tout aussi sans
+    objet quand c'est le DÉSIGNANT qui n'a plus d'escouade — ses effets (relance de touche,
+    +1 Wound) ne s'appliquent qu'à ses propres modèles. Mesuré le 2026-08-11 sur l'état
+    correspondant : la désignation restait armée, le pool d'activation était vide, et le SEUL
+    coup ouvert du masque était un `OATH_SLOT` — que l'agent devait choisir sur une observation
+    ENTIÈREMENT NULLE, faute d'escouade à décrire (`_build_observation_and_mask`, dernière
+    branche).
     """
     player_int = int(player)
     if not army_has_oath_ability(game_state, player_int):
+        return
+    if not player_has_squads_on_board(game_state, player_int):
         return
     if oath_selectable_enemy_ids(game_state, player_int):
         game_state["pending_oath_selection"] = player_int

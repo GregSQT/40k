@@ -40,6 +40,7 @@ from engine.game_state import (
     unit_can_charge_after_advance,
     waaagh_applies_to_unit,
     waaagh_is_active,
+    waaagh_is_available,
 )
 from engine.macro_intents import CHOICE_BASE, CHOICE_COUNT, OATH_SLOT_BASE
 from engine.phase_handlers import command_handlers
@@ -368,6 +369,54 @@ def test_le_waaagh_n_est_pas_propose_a_une_armee_non_orke():
 
     decision = read_pending_agent_decision(gs)
     assert decision is None or decision["type"] != "waaagh_call"
+
+
+def test_verrou_le_waaagh_n_est_pas_pose_a_un_joueur_sans_escouade():
+    """Un joueur balayé de la table ne se voit plus poser la décision — et ne la perd pas.
+
+    Le moteur ne termine pas l'épisode quand une armée est anéantie (il va au bout des tours) :
+    la phase de commandement du joueur vidé arrive donc bel et bien. La décision y est une
+    capacité d'ARMÉE, sans unité porteuse, et l'observation prend la première escouade du
+    décideur comme repère ; sans aucune escouade elle LÈVE, et l'épisode plante au step suivant
+    (constaté le 2026-08-11 sur l'éval `control` du scénario `fixed_brawl_sm_orks`).
+
+    Le « once per battle » n'est PAS consommé : si le joueur revient sur la table (réserves),
+    la décision se repose.
+    """
+    gs = _command_state(1, p1_faction=ORKS, p2_faction=ASTARTES, alive=("2",))
+
+    command_handlers.command_step_command_abilities(gs)
+
+    assert read_pending_agent_decision(gs) is None
+    assert waaagh_is_available(gs, 1), "refuser de poser la decision ne consomme pas l'appel"
+
+    # Le joueur revient sur la table : la décision se repose telle quelle.
+    gs["units_cache"]["1"] = _uc(0, 0, player=1)
+    gs["turn"] = 2
+    command_handlers.command_step_command_abilities(gs)
+    decision = read_pending_agent_decision(gs)
+    assert decision is not None and decision["type"] == "waaagh_call"
+
+
+def test_verrou_l_oath_n_est_pas_arme_pour_un_joueur_sans_escouade():
+    """JUMEAU du verrou ci-dessus, dans la même étape 08.04 et pour la même raison.
+
+    Sans cette garde, la désignation restait armée pour une armée anéantie : le pool
+    d'activation est vide, le SEUL coup ouvert du masque est un `OATH_SLOT`, et l'observation
+    n'a plus aucune escouade à décrire — l'agent choisissait donc une cible d'Oath sur une
+    observation entièrement nulle, pour des effets qui ne peuvent bénéficier à personne.
+    """
+    gs = _command_state(1, p1_faction=ASTARTES, p2_faction=ORKS, alive=("2",))
+
+    command_handlers.command_step_command_abilities(gs)
+
+    assert gs["pending_oath_selection"] is None
+    decoder = ActionDecoder({"board": {"default": {"hex_radius": 1.0, "margin": 0.0}}})
+    mask, eligible = decoder.get_squad_action_mask_and_eligible_units(gs)
+    assert not eligible
+    assert not any(mask[i] for i in range(OATH_SLOT_BASE, OATH_SLOT_BASE + 8)), (
+        "aucun slot d'Oath ne doit rester ouvert a un joueur qui n'a plus rien a decrire"
+    )
 
 
 def test_verrou_une_fois_par_partie_l_action_sort_du_masque():
