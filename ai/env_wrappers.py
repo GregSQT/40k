@@ -454,6 +454,27 @@ class BotControlledEnv(gym.Wrapper):
         # self.env is set by gym.Wrapper.__init__ to base_env
         self.engine: "W40KEngine" = unwrap_engine(self.env, "BotControlledEnv")
 
+        # ACCES MOTEUR POUR LES BOTS QUI ESSAIENT LEURS COUPS (holdout d'evaluation).
+        #
+        # Un bot ne recoit d'ordinaire qu'une PHOTO de la partie (`game_state`) : il ne peut rien
+        # simuler. Le holdout, lui, doit jouer pour gagner — enumerer ses actions legales, les
+        # essayer, garder la meilleure — donc atteindre le moteur qui joue les coups.
+        #
+        # ⚠️ DECLARATION EXPLICITE, JAMAIS UN `hasattr`. Le repli mou a deja coute une campagne
+        # entiere ici : `_get_bot_action` testait `hasattr(bot, "select_action_with_state")`, et
+        # `TacticalBot`, faute de l'avoir, a joue la branche « phase inconnue » pendant TOUTE une
+        # evaluation sans que rien ne le signale. Un bot qui a besoin du moteur le DIT, par un
+        # attribut de classe ; s'il le dit, il l'obtient ; s'il ne le dit pas, il ne l'a pas. Les
+        # six bots geles n'ont pas cet attribut et ne changent donc pas d'une ligne.
+        # Verrou : tests/unit/ai/test_bot_engine_access.py.
+        #
+        # TOUS les acteurs connus, pas seulement `self.bot` : avec `bots=[...]` l'adversaire est
+        # retire au hasard a chaque episode (cf. `_use_random_bots` dans reset), et
+        # `scripted_action_for_agent_side` en injecte un TROISIEME au vol (bot-contre-bot). Les
+        # trois voies passent par `_attach_engine_if_needed`.
+        for actor in (self._bots if self._bots else [self.bot]):
+            self._attach_engine_if_needed(actor)
+
         # DIAGNOSTIC: Track shoot phase decisions FOR BOT
         self.shoot_opportunities = 0  # Times shoot was available
         self.shoot_actions = 0        # Times bot actually shot
@@ -1574,6 +1595,26 @@ class BotControlledEnv(gym.Wrapper):
             )
         return cell
 
+    def _attach_engine_if_needed(self, actor) -> None:
+        """Remet le moteur a un acteur qui DECLARE en avoir besoin, et a lui seul.
+
+        ⚠️ La declaration est un attribut de CLASSE (`NEEDS_ENGINE`), jamais un `hasattr` sur la
+        methode. Le repli mou a deja coute une campagne entiere dans ce module : `_get_bot_action`
+        testait `hasattr(bot, "select_action_with_state")` et `TacticalBot`, faute de l'avoir, a
+        joue la branche « phase inconnue » pendant TOUTE une evaluation sans que rien ne le
+        signale. Ici, un bot qui reclame le moteur sans exposer `attach_engine` LEVE : c'est une
+        declaration non honoree, pas un cas a absorber.
+        """
+        if not getattr(type(actor), "NEEDS_ENGINE", False):
+            return
+        attach = getattr(actor, "attach_engine", None)
+        if attach is None:
+            raise TypeError(
+                f"{type(actor).__name__} declare NEEDS_ENGINE mais n'expose pas attach_engine("
+                "engine) : la declaration n'est pas honoree."
+            )
+        attach(self.engine)
+
     def scripted_action_for_agent_side(self, bot) -> int:
         """Action que `bot` jouerait A LA PLACE DE L'AGENT sur l'etat courant.
 
@@ -1587,6 +1628,7 @@ class BotControlledEnv(gym.Wrapper):
         par `_get_bot_action`, donc un appel ici les melange avec ceux du bot de P2.
         `get_shoot_stats()` n'a pas de sens sur un env pilote des deux cotes.
         """
+        self._attach_engine_if_needed(bot)
         return self._get_bot_action(bot=bot)
 
     def _get_bot_action(self, debug=False, decision: Optional[MaskDecision] = None, bot=None) -> int:

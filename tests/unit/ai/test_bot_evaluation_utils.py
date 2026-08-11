@@ -413,7 +413,15 @@ def test_eval_worker_task_attaches_step_logger(monkeypatch: pytest.MonkeyPatch) 
     be._worker_model = _DummyModel()
     be._worker_obs_normalizer = None
     monkeypatch.setattr(be, "_create_eval_env", lambda **kwargs: env)
-    marker_logger = object()
+
+    class _MarkerLogger:
+        """Doublure de journal. `object()` ne convient plus : depuis le 2026-08-11 la tache pose
+        `current_bot_name` sur le journal — c'est le maillon qui manquait pour que l'en-tete
+        nomme l'adversaire REELLEMENT affronte, au lieu de l'etiquette en dur « SelfPlay ».
+        Un doublure sans attribut assignable ferait echouer cette pose, donc ce test la verifie
+        aussi (assertion plus bas)."""
+
+    marker_logger = _MarkerLogger()
     result = be._eval_worker_task(
         {
             "bot_name": "random",
@@ -438,6 +446,8 @@ def test_eval_worker_task_attaches_step_logger(monkeypatch: pytest.MonkeyPatch) 
         }
     )
     assert env.engine.step_logger is marker_logger
+    # Le nom du bot de la TACHE atteint le journal : sans lui, l'en-tete ne nomme plus personne.
+    assert marker_logger.current_bot_name == "random"
     assert result["wins"] == 1
 
 

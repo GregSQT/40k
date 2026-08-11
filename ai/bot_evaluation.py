@@ -589,38 +589,19 @@ def _create_eval_env(
 
     Tout ce qui est passé doit être sérialisable (picklable) pour usage en workers.
     """
-    from ai.evaluation_bots import (
-        RandomBot, GreedyBot, DefensiveBot, ControlBot,
-        AdaptiveBot, ValueTradeBot, TacticalBot,
-    )
     from ai.training_utils import setup_imports
     from ai.env_wrappers import BotControlledEnv
     from sb3_contrib.common.wrappers import ActionMasker
     from ai.unit_registry import UnitRegistry
+    from ai.bot_registry import build_bot
 
     unit_registry = UnitRegistry()
     W40KEngine, _ = setup_imports()
 
-    BOT_CLASSES = {
-        "greedy": GreedyBot,
-        "defensive": DefensiveBot,
-        "control": ControlBot,
-        "adaptive": AdaptiveBot,
-        "value_trade": ValueTradeBot,
-        # V11 §10.5 : holdout d'evaluation — JAMAIS dans bot_training.ratios.
-        "tactical": TacticalBot,
-    }
-    if bot_type == "random":
-        bot = RandomBot()
-    elif bot_type in BOT_CLASSES:
-        if bot_type not in randomness_config:
-            raise KeyError(
-                f"randomness_config n'a pas d'entree pour le bot '{bot_type}' — renseigner "
-                "callback_params.bot_eval_randomness (V11 §10.5 : plus de defaut 0.15 silencieux)."
-            )
-        bot = BOT_CLASSES[bot_type](randomness=randomness_config[bot_type])
-    else:
-        raise ValueError(f"Unknown bot_type: {bot_type!r}. Valid: random, {', '.join(BOT_CLASSES)}")
+    # SOURCE UNIQUE de la table cle -> classe : `ai/bot_registry.py`. Elle vivait ici en copie,
+    # avec une jumelle dans `scripts/bot_ranking.py` — brancher un bot dans l'une laissait
+    # l'autre lever « Unknown bot type » (mesure du 2026-08-11, sur `racer`).
+    bot = build_bot(bot_type, randomness_config)
 
     def mask_fn(env):
         return env.get_action_mask()
@@ -775,6 +756,12 @@ def _eval_worker_task(
     # step_logger : uniquement en mode sérial (non picklable, ne pas ajouter en mode parallèle)
     if config_params.get("step_logger"):
         env.engine.step_logger = config_params["step_logger"]
+        # ADVERSAIRE RÉELLEMENT AFFRONTÉ, posé ICI et nulle part ailleurs : c'est le seul endroit
+        # qui tient à la fois le journal et la tâche. `current_bot_name` portait le commentaire
+        # « Set externally for bot-evaluation logging » depuis sa création sans qu'aucun code ne
+        # l'assigne : le moteur retombait alors sur l'étiquette en dur « SelfPlay », écrite sur
+        # 100 % des lignes — 600 épisodes contre six bots pondérés annoncés comme du self-play.
+        env.engine.step_logger.current_bot_name = task["bot_name"]
 
     wins, losses, draws = 0, 0, 0
     # Troncatures rencontrees PENDANT L'EVAL. Sans elles, une boucle du moteur qui ne se

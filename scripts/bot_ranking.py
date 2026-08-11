@@ -95,28 +95,12 @@ def _play_match(
 
     import numpy as np
 
-    from ai.evaluation_bots import (
-        AdaptiveBot, ControlBot, DefensiveBot, GreedyBot, RandomBot, TacticalBot, ValueTradeBot,
-    )
+    # SOURCE UNIQUE de la table cle -> classe : `ai/bot_registry.py`. Ce bloc en portait une
+    # COPIE, jumelle de celle de `ai/bot_evaluation.py` : brancher les six styles refondus dans
+    # l'une laissait l'autre lever « Unknown bot type: 'racer' » (mesure du 2026-08-11).
+    from ai.bot_registry import build_bot
 
-    BOT_CLASSES = {
-        "greedy": GreedyBot,
-        "defensive": DefensiveBot,
-        "control": ControlBot,
-        "adaptive": AdaptiveBot,
-        "value_trade": ValueTradeBot,
-        "tactical": TacticalBot,
-    }
-    if p1_bot_type == "random":
-        p1_bot = RandomBot()
-    else:
-        if p1_bot_type not in BOT_CLASSES:
-            raise ValueError(f"Unknown bot type: {p1_bot_type!r}")
-        if p1_bot_type not in randomness:
-            raise KeyError(
-                f"callback_params.bot_eval_randomness n'a pas d'entree pour '{p1_bot_type}'"
-            )
-        p1_bot = BOT_CLASSES[p1_bot_type](randomness=randomness[p1_bot_type])
+    p1_bot = build_bot(p1_bot_type, randomness)
 
     env = _create_eval_env(
         bot_name=p2_bot_type,

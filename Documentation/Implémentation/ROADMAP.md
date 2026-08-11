@@ -250,6 +250,23 @@ mesure, et c'est assumé (§0.14).
    accompagnait l'ancienne valeur.
 8. **§0.59 — Phase 2 self-play** (`--append x1_selfplay`) — livré, JAMAIS exécuté ; le premier
    run est aussi son premier test d'intégration. → [`1_Agent/V11_agent_rework.md`](1_Agent/V11_agent_rework.md) §0.59
+9. **Refonte du panel de bots** (ouvert le 2026-08-11) — six styles orthogonaux, holdout qui joue
+   pour gagner. → [`A_faire/bots_refonte_panel.md`](A_faire/bots_refonte_panel.md)
+   ⚠️ **Ce point CONDITIONNE la valeur du point 7, il ne s'y ajoute pas.** Le panel actuel ne rend
+   que **deux signaux distincts pour six bots** (mesuré le 2026-08-11, 100 parties/bot, x1,
+   holdout, modèle `robust_0.9438` : `tactical`/`adaptive`/`value_trade` ont des intervalles de
+   confiance entièrement recouvrants, `greedy` 0,98 et `defensive` 0,96 sont indiscernables ; seul
+   `control` 0,73 porte de l'information). Une mesure de référence rendue contre ce panel mesure
+   donc moins que ce qu'elle prétend.
+   Cause **mesurée**, pas supposée : tous les critères de décision des bots reposent sur
+   `max(NB × DMG)` d'une seule arme — ni toucher, ni Force/Endurance, ni AP/sauvegarde, ni nombre
+   de figurines. Sur le roster 500 pts d'ArmageddonAgent, **16 unités sur 23** sont classées
+   « mêlée » par ce proxy, Intercessor compris : c'est le test qui décide de charger, donc les bots
+   envoient leurs unités de tir au contact.
+   L'ordre interne du chantier et les décisions actées sont dans son doc ; l'orthogonalité et la
+   correspondance ancien/nouveau se mesurent en **bot-contre-bot** (`scripts/bot_ranking.py`),
+   la mesure contre l'agent ne servant qu'à confirmer — mesurer un bot par le win-rate de l'agent
+   est circulaire.
 
 ## 2. Capacités — seul chantier restant de la série « chantiers capacités »
 
