@@ -16,11 +16,22 @@ flux réel écrit la ligne dans un commit de suivi, après la fusion — accepta
 arrive. Une porte rouge en permanence serait contournée dès le premier usage : on aurait troqué un
 manque visible contre un contrôle mort.
 
-CE QU'ELLE VAUT VRAIMENT, mesuré une fois ses deux défauts corrigés (échappement des accents,
-simplification d'historique) : sur les 17 fusions postérieures au 2026-08-10, le plafond 3 en
-refuse 4 — et ce sont les QUATRE plus anciennes, antérieures au moment où la feuille a pris son
-rôle. Sur les treize suivantes, **elle ne se déclencherait pas une seule fois**, y compris sur les
-trois chantiers dont on sait qu'ils n'ont pas été déclarés.
+CE QU'ELLE VAUT VRAIMENT — SEULE SOURCE DU CALIBRAGE, ne pas en recopier les chiffres ailleurs.
+MÉTHODE, re-jouable en quelques secondes : pour chaque fusion du tronc depuis le 2026-08-10,
+rejouer la porte telle qu'elle se serait prononcée à ce moment — `undeclared_merges(M^1)` pour la
+dette, `branch_touches_roadmap(M^1, M^2)` pour la déclaration — et compter les refus par plafond.
+MESURE du 2026-08-12, sur **50** fusions : plafond 1 → **15** refus, 2 → **11**, 3 → **9**,
+4 → **9**. Les 9 refus du plafond 3 tombent TOUS le 2026-08-10, sur une dette de 92 à 100 : c'est
+l'arriéré antérieur au moment où la feuille a pris son rôle, soldé par la première déclaration.
+Sur les **41** fusions qui suivent ce solde, **le plafond 3 ne se déclenche pas une seule fois** —
+y compris sur les chantiers dont on sait qu'ils n'ont pas été déclarés. Le plafond 2 y aurait
+refusé 2 fusions — `c38ee8f5` (ez-mask-minkowski) et `2ede29f5` (socle-ligne-charge), deux
+chantiers effectivement non déclarés — et le plafond 1 en aurait refusé 6.
+
+⚠️ CE QUE CETTE MESURE DIT DU RÉGLAGE : 3 et 4 rendent le même résultat, et sur le flux moderne
+aucun des deux ne se déclenche. Le plafond 3 est donc aujourd'hui une borne d'arriéré, pas un
+garde-fou du flux courant. Le descendre à 2 est un choix de DISCIPLINE, pas une correction — il
+appartient à l'utilisateur, et les deux fusions qu'il aurait refusées sont nommées ci-dessus.
 
 LA RAISON, et c'est sa limite de fond : la dette retombe à zéro dès que la feuille de route est
 TOUCHÉE, pour n'importe quel motif — une correction de valeur, une reformulation, une typo. Or ce
@@ -110,12 +121,11 @@ def git(*args: str) -> str:
 def git_maybe(*args: str) -> str | None:
     """Comme `git`, mais rend `None` quand la commande sort non-zéro AU LIEU de lever.
 
-    Réservé aux DEUX questions dont l'échec est un ÉTAT, pas une panne : « sur quelle branche
-    suis-je ? » (HEAD détaché → pas de branche) et « une fusion est-elle en cours ? » (pas de
-    MERGE_HEAD). Partout ailleurs `git` reste `check=True` : un échec y est une vraie panne et
-    doit remonter au filet, pas se muer en silence.
+    Réservé à la seule question dont l'échec est un ÉTAT, pas une panne : « sur quelle branche
+    suis-je ? » (HEAD détaché → pas de branche). Partout ailleurs `git` reste `check=True` : un
+    échec y est une vraie panne et doit remonter au filet, pas se muer en silence.
 
-    ⚠️ CES DEUX QUESTIONS NE SE POSENT QUE SI git RÉPOND. Mesuré le 2026-08-12 : le script copié
+    ⚠️ CETTE QUESTION NE SE POSE QUE SI git RÉPOND. Mesuré le 2026-08-12 : le script copié
     hors d'un dépôt git sortait « fusion hors `main`, sans objet » et le code **0** — `symbolic-ref`
     y échoue pour panne, pas pour détachement, et le feu vert silencieux était exactement ce que la
     porte s'interdit. D'où la sonde `assert_git_answers()` avant tout appel tolérant : elle
@@ -136,6 +146,20 @@ def assert_git_answers() -> None:
     `__main__`, qui refuse en clair — un état inconnu ne devient jamais un feu vert.
     """
     git("rev-parse", "--is-inside-work-tree")
+
+
+def merge_heads() -> list[str]:
+    """TOUTES les têtes de la fusion en cours ; liste vide si aucune fusion n'est en cours.
+
+    `git rev-parse MERGE_HEAD` n'en rend qu'UNE — la première ligne du fichier. Sur une pieuvre
+    (`git merge A B`), la porte jugeait donc `A` seul et refusait une livraison que `B` avait
+    déclarée. Le fichier porte une tête par ligne ; `--git-path` donne son emplacement sans
+    supposer que le dossier git s'appelle `.git` (worktrees).
+    """
+    path = ROOT / git("rev-parse", "--git-path", "MERGE_HEAD")
+    if not path.exists():
+        return []
+    return [line.strip() for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
 def undeclared_merges(head: str) -> list[str]:
@@ -184,8 +208,8 @@ def main(argv: list[str]) -> int:
         if git_maybe("symbolic-ref", "--short", "HEAD") != PROTECTED_BRANCH:
             print("↷ feuille de route : fusion hors `main`, sans objet")
             return 0
-        merge_head = git_maybe("rev-parse", "MERGE_HEAD")
-        if merge_head is None:
+        heads = merge_heads()
+        if not heads:
             # Le hook `prepare-commit-msg` garde déjà l'appel derrière la présence de MERGE_HEAD :
             # arriver ici veut dire que `--merge` a été lancé HORS d'une fusion — à la main, ou
             # par un hook mal branché. Feu vert INTERDIT : `pre-merge-commit` tourne précisément
@@ -200,7 +224,8 @@ def main(argv: list[str]) -> int:
                 "python3 scripts/check_roadmap_declared.py --status"
             )
             return 2
-        declares = branch_touches_roadmap("HEAD", merge_head)
+        # UNE tête qui déclare suffit : la livraison a sa ligne, peu importe laquelle l'apporte.
+        declares = any(branch_touches_roadmap("HEAD", head) for head in heads)
     else:
         declares = False
     ok, message = verdict(undeclared_merges("HEAD"), declares)
