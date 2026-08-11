@@ -156,11 +156,17 @@ def undeclared_merges(head: str) -> list[str]:
 def branch_touches_roadmap(head: str, other: str) -> bool:
     """La branche fusionnée écrit-elle dans la feuille de route ?
 
-    Trois points : ce que la BRANCHE a fait depuis la base commune, pas ce qui diffère entre les
-    deux têtes — sinon tout ce qui a avancé sur `main` pendant la vie du chantier lui serait mis
-    au crédit.
+    Ce que la BRANCHE a écrit, pas ce qui diffère entre les deux têtes — sinon tout ce qui a
+    avancé sur `main` pendant la vie du chantier lui serait mis au crédit.
+
+    `log <head>..<other> --name-only` et NON un diff trois points, qui posait la même question mais
+    exigeait une base commune : `git diff HEAD...MERGE_HEAD` sort 128 « fatal: no merge base » sur
+    un `git merge --allow-unrelated-histories`, et la fusion — déclaration comprise — devenait un
+    « contrôle impossible » opaque en pleine opération. L'énumération des commits propres à la
+    branche ne calcule aucune base : elle répond dans les deux cas.
     """
-    return ROADMAP in git("diff", "--name-only", f"{head}...{other}").split("\n")
+    touched = git("log", "--format=", "--name-only", f"{head}..{other}")
+    return ROADMAP in touched.split("\n")
 
 
 def main(argv: list[str]) -> int:
@@ -208,8 +214,13 @@ if __name__ == "__main__":
     except Exception as exc:  # noqa: BLE001 - filet: une trace de dix lignes ne dit rien à git
         # Ce filet n'AVALE rien : il refuse, dit l'erreur exacte, et laisse la sortie de secours.
         # Le rendre vert masquerait une panne de la porte derrière une fusion réussie (T1).
+        # Le stderr de git est LA cause lisible (« fatal: not a git repository ») : sans lui le
+        # refus se réduit à « exit status 128 », qui ne dit à personne quoi réparer.
+        cause = getattr(exc, "stderr", "")
+        dit_par_git = f"   git a dit : {cause.strip()}\n" if cause else ""
         print(
             f"❌ feuille de route : contrôle impossible — {type(exc).__name__}: {exc}\n"
+            f"{dit_par_git}"
             "   La porte n'a pas pu se prononcer : le commit est refusé, pas la fusion approuvée.\n"
             "   Si l'état du dépôt est sain, c'est un défaut de la porte elle-même — à corriger\n"
             "   dans scripts/check_roadmap_declared.py.\n"

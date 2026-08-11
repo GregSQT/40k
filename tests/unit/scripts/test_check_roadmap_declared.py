@@ -416,6 +416,64 @@ def test_merge_on_a_detached_head_is_out_of_scope(tmp_path: pathlib.Path) -> Non
     assert "sans objet" in result.stdout
 
 
+def test_unrelated_histories_still_get_a_verdict(tmp_path: pathlib.Path) -> None:
+    """`--allow-unrelated-histories` : aucune base commune, donc aucun diff trois points possible.
+
+    Le diff trois points sortait 128 « no merge base » et la porte refusait en « contrôle
+    impossible » une fusion qui déclare pourtant sa ligne. Elle doit RENDRE UN VERDICT.
+    """
+    repo = scratch_repo(tmp_path)
+    run(repo, "checkout", "-q", "--orphan", "venu-d-ailleurs")
+    run(repo, "rm", "-rqf", ".")
+    (repo / gate.ROADMAP).parent.mkdir(parents=True, exist_ok=True)
+    (repo / gate.ROADMAP).write_text("ligne du chantier venu d'ailleurs", encoding="utf-8")
+    run(repo, "add", "-A")
+    run(repo, "commit", "-qm", "chantier sans ancêtre commun")
+    run(repo, "checkout", "-q", "main")
+    subprocess.run(
+        ["git", "merge", "--no-ff", "--no-commit", "--no-verify",
+         "--allow-unrelated-histories", "venu-d-ailleurs"],
+        cwd=repo, capture_output=True, text=True,
+    )
+    assert (repo / ".git" / "MERGE_HEAD").exists()
+
+    result = run_gate(repo, "--merge")
+
+    assert "contrôle impossible" not in result.stderr, result.stderr
+    assert result.returncode == 0
+    assert "met la feuille de route à jour" in result.stdout, (
+        "la branche écrit la ligne : la porte doit le VOIR, base commune ou pas"
+    )
+
+
+def test_the_refusal_carries_gits_own_words(tmp_path: pathlib.Path) -> None:
+    """Un refus qui dit « exit status 128 » ne dit à personne quoi réparer.
+
+    La cause lisible est le stderr de git. On la compare à ce que git dit LUI-MÊME dans le même
+    répertoire, pour ne pas figer une formulation ni une langue.
+    """
+    hors_depot = tmp_path / "sans-git"
+    (hors_depot / "scripts").mkdir(parents=True)
+    src = ROOT / "scripts" / "check_roadmap_declared.py"
+    (hors_depot / "scripts" / "check_roadmap_declared.py").write_bytes(src.read_bytes())
+
+    mot_de_git = subprocess.run(
+        ["git", "rev-parse", "--is-inside-work-tree"],
+        cwd=hors_depot, capture_output=True, text=True,
+    ).stderr.strip()
+    assert mot_de_git, "le test ne prouve rien si git ne dit rien"
+
+    result = subprocess.run(
+        ["python3", str(hors_depot / "scripts" / "check_roadmap_declared.py"), "--merge"],
+        cwd=hors_depot, capture_output=True, text=True,
+    )
+
+    assert result.returncode == 2
+    assert mot_de_git in result.stderr, (
+        f"le refus doit porter la cause dite par git ({mot_de_git!r}) :\n{result.stderr}"
+    )
+
+
 def test_merge_mode_outside_a_git_repo_refuses(tmp_path: pathlib.Path) -> None:
     """« git ne répond pas » n'est PAS « HEAD détaché ».
 
