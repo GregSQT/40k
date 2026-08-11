@@ -38,27 +38,30 @@ def test_no_debt_passes() -> None:
     assert ok
 
 
-def test_the_calibrated_ceiling_is_three() -> None:
+def test_the_calibrated_ceiling_is_two() -> None:
     """Le plafond est une MESURE, pas un réglage libre.
 
     Les chiffres du calibrage vivent en tête de `check_roadmap_declared.py`, AVEC leur méthode et
     leur date — et nulle part ailleurs. Ils étaient recopiés ici, les deux jeux se sont
     contredits (2026-08-12), et un chiffre recopié n'a aucun moyen de vieillir avec sa source.
-    Ce test existe parce que sans lui les suivants passent à N'IMPORTE QUEL plafond : vérifié en
-    portant la constante à 999, la suite restait verte.
+    Ce test existe parce que les suivants sont écrits EN FONCTION du plafond : sans cette épingle,
+    ils passeraient à n'importe quelle valeur — vérifié en portant la constante à 999.
+
+    2 depuis le 2026-08-12 (décision utilisateur, option B de l'arbitrage) : à 3, la mesure montre
+    que la porte ne se déclenchait plus une seule fois sur le flux moderne.
     """
-    assert gate.MAX_UNDECLARED == 3
+    assert gate.MAX_UNDECLARED == 2
 
 
-def test_two_undeclared_chantiers_still_pass() -> None:
-    """Le suivi tardif reste permis : c'est le flux réel, mesuré sur 25 merges."""
-    ok, message = gate.verdict(merges(2), branch_declares=False)
+def test_debt_just_under_the_ceiling_still_passes() -> None:
+    """Le suivi tardif reste permis : c'est le flux réel qui écrit la ligne juste après la fusion."""
+    ok, message = gate.verdict(merges(gate.MAX_UNDECLARED - 1), branch_declares=False)
     assert ok
     assert "avant blocage" in message
 
 
-def test_three_undeclared_chantiers_block() -> None:
-    ok, message = gate.verdict(merges(3), branch_declares=False)
+def test_debt_at_the_ceiling_blocks() -> None:
+    ok, message = gate.verdict(merges(gate.MAX_UNDECLARED), branch_declares=False)
     assert not ok
     assert "sans que la feuille de route" in message
 
@@ -72,7 +75,7 @@ def test_the_refusal_names_the_undeclared_chantiers() -> None:
 
 
 def test_the_refusal_states_its_escape_hatch() -> None:
-    _ok, message = gate.verdict(merges(3), branch_declares=False)
+    _ok, message = gate.verdict(merges(gate.MAX_UNDECLARED), branch_declares=False)
     assert "--no-verify" in message
 
 
@@ -333,7 +336,7 @@ def test_gate_is_dead_with_pre_merge_commit_hook(tmp_path: pathlib.Path) -> None
     """Verrou RED : avec pre-merge-commit + guard MERGE_HEAD, la porte ne s'exécute jamais.
 
     MERGE_HEAD est absent quand pre-merge-commit fire → le guard sort 0 silencieusement →
-    même avec 3 merges sans déclaration, le 4e passe sans contrôle. Ce test prouve le DÉFAUT :
+    même avec la dette au plafond, la fusion suivante passe sans contrôle. Ce test prouve le DÉFAUT :
     il doit PASSER (le merge est incorrectement laissé passer). Si ce test devient ROUGE,
     c'est que la porte s'est réveillée dans pre-merge-commit — ce qui serait inattendu.
     """
@@ -599,7 +602,8 @@ def test_gate_blocks_violations_with_prepare_commit_msg_hook(tmp_path: pathlib.P
     """Verrou GREEN : avec prepare-commit-msg, la porte s'exécute et bloque les violations.
 
     MERGE_HEAD est présent quand prepare-commit-msg fire → guard laisse passer → script tourne →
-    3 merges sans déclaration = plafond atteint → le 4e est bloqué. Ce test prouve le CORRECTIF.
+    dette portée au plafond (`MAX_UNDECLARED`) → la fusion suivante est bloquée. Ce test prouve
+    le CORRECTIF.
     """
     repo = scratch_repo_with_debt(tmp_path, gate.MAX_UNDECLARED)
     _setup_repo_with_script(repo)

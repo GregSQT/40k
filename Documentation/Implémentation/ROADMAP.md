@@ -624,7 +624,8 @@ français. Le script se borne à rappeler combien de livraisons ont été mergé
 (`core.hooksPath` pointe dessus, les hooks sont donc versionnés). Le hook ne s'exécute que lorsque
 `MERGE_HEAD` est présent — ce qui garantit que le contrôle rate toujours les contextes hors merge.
 Une fusion **dans `main`** est
-refusée quand **trois** chantiers ont déjà été livrés sans que ce fichier bouge. Le refus les nomme.
+refusée quand **deux** chantiers ont déjà été livrés sans que ce fichier bouge (plafond porté de 3
+à 2 le 2026-08-12, voir ci-dessous). Le refus les nomme.
 
 **Le plafond est une mesure, pas un réglage.** Le refus sec a été essayé puis abandonné sur
 chiffres : « la branche doit toucher la feuille de route » refuse **22 des 25** derniers merges,
@@ -636,12 +637,12 @@ contourne au premier usage : on aurait troqué un manque visible contre un contr
 avec leur méthode et leur date, vivent en tête de `scripts/check_roadmap_declared.py` et **nulle
 part ailleurs** — ils étaient recopiés ici et dans le fichier de test, les jeux se sont contredits,
 et un chiffre recopié ne vieillit pas avec sa source (constaté le 2026-08-12). Ce qu'il faut en
-retenir : re-mesurée le 2026-08-12 sur toutes les fusions du tronc depuis le 2026-08-10, la porte ne
-se déclenche **pas une seule fois** sur le flux moderne — ses refus sont tous concentrés sur
-l'arriéré du 2026-08-10, soldé depuis. Elle est donc aujourd'hui une borne d'arriéré, pas un
-garde-fou du flux courant ; le plafond y descendre à 2 est un choix de discipline qui appartient à
-l'utilisateur (les deux fusions qu'il aurait refusées sont nommées dans le module). La raison est
-structurelle : la dette retombe à zéro dès que
+retenir : re-mesurée le 2026-08-12 sur toutes les fusions du tronc depuis le 2026-08-10, **au
+plafond 3 la porte ne se déclenchait pas une seule fois** sur le flux moderne — ses refus étaient
+tous concentrés sur l'arriéré du 2026-08-10, soldé depuis. D'où la **DÉCISION UTILISATEUR du
+2026-08-12 : plafond porté à 2**, le seul réglage que la mesure distingue — il refuse exactement
+les 2 oublis avérés sur 41 fusions, quand 1 en refuserait 6 et se ferait donc contourner. La limite
+de fond ne change pas pour autant : la dette retombe à zéro dès que
 ce fichier est **touché**, pour n'importe quel motif — une valeur corrigée, une reformulation, une
 typo. Comme il est retouché souvent, la porte mesure une SÉCHERESSE d'écriture, pas la déclaration
 d'un chantier précis. Elle attrape l'oubli prolongé ; elle ne remplace pas la discipline, et il ne
