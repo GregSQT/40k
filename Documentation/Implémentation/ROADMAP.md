@@ -49,6 +49,20 @@
   `--new` et non `--append` : ce dernier réapplique les hyperparamètres de `x1` au modèle chargé,
   dont `ent_coef` qui repart à 0,1, et écrase le modèle canonique. `--new`, lui, archive les
   artefacts précédents (`archive_canonical_artifacts_for_new_run`).
+- ✅ **Livraison 2026-08-11 — la distance à un objectif se mesure à son AIRE, plus à son centroïde.**
+  Un objectif est toute l'aire de terrain (14.02), soit 1 730 à 3 000 hexes sur le scénario PvE.
+  Les **quatre** sites qui demandaient « quel objectif est le plus proche » la réduisaient à son
+  centroïde : une unité posée sur le bord d'un objectif — donc dedans, donc en train de le
+  contrôler — ressortait à une trentaine d'hexes de « son » objectif. Nouveau module
+  `engine/objective_distance.py` (segments par colonne → carte mémoïsée, exactitude vérifiée
+  contre une énumération naïve) ; les deux fonctions centroïde sont supprimées, plus aucun
+  appelant. Mesuré : 0,3 µs par appel courant, +0,45 ms par scoring de déploiement, 645 Ko.
+  ⚠️ **Deux des quatre sites alimentent l'observation de l'agent** (zone intent, scoring de
+  déploiement) : le modèle actuel a appris avec le centroïde, **le gain demande un
+  ré-entraînement pour être mesuré**. À joindre au prochain run `--new`.
+  Livré avec le **journal de contrôle d'objectif** côté API : une ligne par objectif disputé à
+  chaque frontière de phase (sommes d'OC, figurines présentes dans l'aire, verdict), qui répond
+  à « pourquoi mon unité posée sur l'objectif ne le prend pas » sans ouvrir la console.
 - ✅ **Livraison 2026-08-11 — métriques (réserves), barème et alignement de la charge sur 11.02.**
   Sept tranches, chacune partie d'une mesure du run `x1_long` du même jour.
   → [`Implémenté/metriques_reserves_et_charge_2026-08-11.md`](Implémenté/metriques_reserves_et_charge_2026-08-11.md)
