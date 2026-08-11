@@ -135,8 +135,13 @@ def test_contested_objective_has_no_controller():
     assert "contested — no controller" in _messages(gs)[0]
 
 
-def test_empty_objective_emits_nothing():
-    """Aucune figurine dans l'aire : il n'y a rien à expliquer, donc pas de ligne."""
+def test_empty_objective_emits_no_per_objective_line():
+    """Aucune figurine dans l'aire : rien à expliquer SUR CET OBJECTIF, donc pas de ligne pour lui.
+
+    Le journal n'est pour autant pas muet : une ligne globale « aucun objectif disputé » sort une
+    fois par tour (cf. `test_empty_board_says_so_once_per_turn`). C'est ce que ce test vérifiait
+    avant qu'elle existe — il décrit désormais la bonne moitié du contrat.
+    """
     gs = _game_state(
         detail={
             "obj_a": {
@@ -150,7 +155,8 @@ def test_empty_objective_emits_nothing():
         models={"u1": (40, 40)},
     )
     _log_objective_control_snapshot(_EngineStub(gs))
-    assert gs["action_logs"] == []
+    assert all("obj_a" not in entry.get("objectiveId", "") for entry in gs["action_logs"])
+    assert all("OC P1=" not in entry["message"] for entry in gs["action_logs"])
 
 
 def test_no_objective_detail_is_not_an_error():
@@ -313,3 +319,71 @@ def test_line_reaches_the_serialised_response_not_just_game_state():
     # La clé de déduplication est INTERNE : convention `_` du moteur, jamais envoyée au client.
     assert "_objective_control_logged_for_api" not in serialised
     assert "_objective_control_detail" not in serialised
+
+
+def _empty_state():
+    """Table vide : aucune figurine dans l'aire, tous les objectifs à zéro."""
+    return _game_state(
+        detail={
+            "obj_a": {
+                "player_1_oc": 0,
+                "player_2_oc": 0,
+                "controller": None,
+                "previous_controller": None,
+            }
+        },
+        units=[{"id": "u1", "player": 1}],
+        models={"u1": (40, 40)},
+    )
+
+
+def test_empty_board_says_so_once_per_turn():
+    """Un journal qui se tait ne dit pas s'il n'a rien à dire ou s'il est cassé.
+
+    C'est ce silence qui a coûté trois sondes du chemin API le 2026-08-11 alors que la réponse
+    était « personne n'est sur un objectif ». Une ligne le dit désormais — une seule par tour.
+    """
+    gs = _empty_state()
+    engine = _EngineStub(gs)
+    _log_objective_control_snapshot(engine)
+    assert len(gs["action_logs"]) == 1
+    assert "aucun objectif disputé" in _messages(gs)[0]
+
+
+def test_empty_board_line_is_not_repeated_at_each_phase_boundary():
+    """Six frontières par tour (14.02) : six lignes identiques rendraient le journal illisible."""
+    gs = _empty_state()
+    engine = _EngineStub(gs)
+    for phase in ("command", "move", "shoot", "charge", "fight"):
+        gs["phase"] = phase
+        _log_objective_control_snapshot(engine)
+    assert len(gs["action_logs"]) == 1
+
+
+def test_empty_board_line_returns_on_the_next_turn():
+    gs = _empty_state()
+    engine = _EngineStub(gs)
+    _log_objective_control_snapshot(engine)
+    gs["turn"] = int(gs["turn"]) + 1
+    gs["phase"] = "command"
+    _log_objective_control_snapshot(engine)
+    assert len(gs["action_logs"]) == 2
+
+
+def test_a_contested_objective_suppresses_the_empty_line():
+    """La ligne « aucun objectif disputé » ne doit sortir QUE si rien n'a été dit."""
+    gs = _game_state(
+        detail={
+            "obj_a": {
+                "player_1_oc": 4,
+                "player_2_oc": 0,
+                "controller": 1,
+                "previous_controller": None,
+            }
+        },
+        units=[{"id": "u1", "player": 1}],
+        models={"u1": (10, 10)},
+    )
+    _log_objective_control_snapshot(_EngineStub(gs))
+    assert len(gs["action_logs"]) == 1
+    assert "aucun objectif disputé" not in _messages(gs)[0]

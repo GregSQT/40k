@@ -140,6 +140,11 @@
   Livré avec le **journal de contrôle d'objectif** côté API : une ligne par objectif disputé à
   chaque frontière de phase (sommes d'OC, figurines présentes dans l'aire, verdict), qui répond
   à « pourquoi mon unité posée sur l'objectif ne le prend pas » sans ouvrir la console.
+  ⚠️ **Complété le 2026-08-12** : le journal se taisait quand PERSONNE n'était sur un objectif, et
+  ce silence ne se distinguait pas d'un journal cassé — il a fallu trois sondes du chemin API pour
+  établir que le mécanisme fonctionnait, alors que la réponse ÉTAIT « personne n'est sur un
+  objectif ». Une ligne « aucun objectif disputé » sort désormais **une fois par tour** (et non par
+  frontière : six lignes identiques par tour auraient rendu illisible le journal qu'elles éclairent).
 - ✅ **Livraison 2026-08-11 — distances de charge au `step.log` et en métriques.** Distance à
   l'ennemi le plus proche **à la déclaration** (11.02.1) et distance à la cible **au choix**
   (11.04), mesurées par la primitive qui porte déjà le gate 11.04 — donc par figurine, dans la
