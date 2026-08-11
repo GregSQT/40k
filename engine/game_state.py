@@ -3031,7 +3031,7 @@ class GameStateManager:
         old_phase: Optional[str],
         new_phase: Optional[str],
         turn_changed: bool,
-    ) -> None:
+    ) -> bool:
         """
         Rule 14.02: objective control is determined at the END of each phase and turn.
 
@@ -3043,6 +3043,11 @@ class GameStateManager:
         ``objective_controllers`` used for both display and scoring.
 
         No-op when no listed point matches this boundary.
+
+        Retourne True SI la détermination a réellement eu lieu. C'est ce que lit
+        ``refresh_objective_control_on_boundary`` pour s'arrêter à la PREMIÈRE frontière qui
+        tire : rejouer la détermination sur un état identique écraserait le
+        ``previous_controller`` du détail par le contrôleur qu'on vient d'écrire.
 
         La section est OBLIGATOIRE (`require_key`, cf.
         `config_loader.GAME_CONFIG_SECTIONS_REQUIRED_BY_ENGINE`) : elle etait auparavant lue en
@@ -3060,14 +3065,15 @@ class GameStateManager:
         if turn_changed:
             fire = fire or _match("turn", "end")
         if not fire:
-            return
+            return False
         if not (
             game_state.get("objectives")
             and game_state.get("primary_objective") is not None
             and game_state.get("units_cache")
         ):
-            return
+            return False
         self.calculate_objective_control(game_state)
+        return True
 
     def refresh_objective_control_on_boundary(self, game_state: Dict[str, Any]) -> bool:
         """Réévalue le contrôle d'objectif SI une frontière de phase/tour vient d'être franchie.
@@ -3091,13 +3097,15 @@ class GameStateManager:
         en silence pendant toute la phase de mouvement. La suite réelle des phases est donc
         enregistrée par ``enter_phase`` (écrivain unique) et drainée ici.
 
-        Solder N frontières coûte N recalculs IDENTIQUES : une frontière ne change aucun état de
-        jeu (cf. ``run_objective_control_checkpoint``), et ``calculate_objective_control`` relit
-        l'état courant. On les joue quand même une par une pour que ``previous_controller`` —
-        donc le « capturé » / « déjà tenu » du journal — décrive la même séquence qu'un
-        enchaînement de phases observé pas à pas.
+        ⚠️ UNE SEULE DÉTERMINATION, à la PREMIÈRE frontière qui tire. Les frontières d'une
+        cascade sont instantanées et séparent des états IDENTIQUES : les rejouer ne produit
+        aucune séquence, ça écrase ``previous_controller`` par le contrôleur qu'on vient
+        d'écrire. Le journal de partie dirait alors « held by Px » sur une CAPTURE — mesuré le
+        2026-08-12 en jeu (`tri_2 Centre` n'a jamais eu sa ligne « captured by P1 »), et sur
+        une cascade ``move → shoot → charge`` : détail `(1, 1)` au lieu de `(1, None)`.
+        La boucle sert donc à trouver QUELLE frontière tire, pas à tirer plusieurs fois.
 
-        Retourne True si au moins un checkpoint a été exécuté.
+        Retourne True si le checkpoint a été exécuté.
         """
         from engine.game_utils import PHASES_TRAVERSED_KEY
 
@@ -3126,15 +3134,12 @@ class GameStateManager:
                 return False
             # Même phase, tour différent : c'est la fin de TOUR (14.02) qu'il faut solder.
             boundaries = [(last_phase, phase)]
-        for index, (old_phase, new_phase) in enumerate(boundaries):
-            self.run_objective_control_checkpoint(
-                game_state,
-                old_phase,
-                new_phase,
-                # La fin de tour ne se solde qu'UNE fois, sur la dernière frontière franchie.
-                turn_changed=turn_changed and index == len(boundaries) - 1,
-            )
-        return True
+        for old_phase, new_phase in boundaries:
+            if self.run_objective_control_checkpoint(
+                game_state, old_phase, new_phase, turn_changed=turn_changed
+            ):
+                return True
+        return False
 
     def _calculate_primary_objective_control_counts(
         self,

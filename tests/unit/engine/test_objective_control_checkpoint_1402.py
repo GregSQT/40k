@@ -152,6 +152,102 @@ def test_enter_phase_ne_compte_pas_une_reecriture_de_la_meme_phase() -> None:
     assert game_state["phase"] == "move"
 
 
+def _manager_et_etat_avec_un_objectif_tenu_par_p1():
+    """Un objectif d'UN hexe, une figurine P1 (OC 2) posée dessus. Rien d'autre.
+
+    État construit à la main plutôt qu'emprunté à un scénario : le test observe
+    ``previous_controller``, donc il lui faut un objectif dont il MAÎTRISE le contrôleur —
+    l'espérer d'un scénario, c'est le vert vacant garanti le jour où un roster bouge.
+    """
+    from engine.game_state import GameStateManager
+
+    manager = GameStateManager({
+        "objective_control_check": {
+            "points": [
+                {"phase": "move", "moment": "end"},
+                {"phase": "shoot", "moment": "end"},
+                {"phase": "charge", "moment": "end"},
+            ]
+        }
+    })
+    unit = {
+        "id": "1", "player": 1, "OC": 2, "battle_shocked": False,
+        "col": 0, "row": 0, "orientation": 0,
+        "BASE_SHAPE": "round", "BASE_SIZE": 1, "HP_CUR": 1,
+    }
+    game_state = {
+        "turn": 1,
+        "objectives": [{"id": "obj", "hexes": [[0, 0]]}],
+        "primary_objective": {
+            "control": {
+                "method": "oc_sum_greater",
+                "control_method": "default",
+                "tie_behavior": "no_control",
+            }
+        },
+        "units": [unit],
+        "units_cache": {"1": {"orientation": 0}},
+        "squad_models": {"1": ["1#0"]},
+        "models_cache": {
+            "1#0": {
+                "col": 0, "row": 0, "HP_CUR": 1, "orientation": 0,
+                "BASE_SHAPE": "round", "BASE_SIZE": 1,
+            }
+        },
+    }
+    return manager, game_state
+
+
+def test_une_cascade_ne_rejoue_pas_la_determination_et_dit_bien_capture() -> None:
+    """Une CAPTURE reste « captured », même si la cascade franchit plusieurs points.
+
+    DÉFAUT CORRIGÉ (2026-08-12, vu en jeu). Solder chaque frontière une par une rejouait
+    ``calculate_objective_control`` sur un état IDENTIQUE : au 2e passage,
+    ``previous_controller`` valait déjà le contrôleur qu'on venait d'écrire, et le journal
+    disait « held by P1 » sur un objectif que le joueur venait de prendre. Mesuré en partie :
+    `tri_2 Centre` n'a jamais eu sa ligne « captured by P1 ».
+
+    Les frontières d'une cascade séparent des états identiques : la détermination 14.02 est
+    UNE, pas N.
+    """
+    from engine.game_utils import PHASES_TRAVERSED_KEY, enter_phase
+
+    manager, game_state = _manager_et_etat_avec_un_objectif_tenu_par_p1()
+    game_state["phase"] = "move"
+    game_state["_objective_control_last_boundary"] = ("move", 1)
+    # Cascade `move -> shoot -> charge` : DEUX points configurés franchis d'un coup.
+    enter_phase(game_state, "shoot")
+    enter_phase(game_state, "charge")
+    assert game_state[PHASES_TRAVERSED_KEY] == ["shoot", "charge"]
+
+    assert manager.refresh_objective_control_on_boundary(game_state) is True
+
+    detail = game_state["_objective_control_detail"]["obj"]
+    assert detail["controller"] == 1, "la figurine P1 (OC 2) tient l'objectif"
+    assert detail["previous_controller"] is None, (
+        "la détermination a été rejouée sur un état identique : `previous_controller` porte le "
+        "contrôleur qu'on vient d'écrire, donc le journal dit « held by P1 » sur une CAPTURE"
+    )
+
+
+def test_une_frontiere_sans_point_configure_ne_declenche_rien() -> None:
+    """`refresh` ne rend True que si la détermination a REELLEMENT eu lieu.
+
+    Son retour pilote l'arrêt à la première frontière qui tire ; le confondre avec « une
+    frontière a été vue » ferait s'arrêter la boucle avant d'avoir soldé quoi que ce soit —
+    exactement le défaut de la cascade de déploiement, réintroduit par l'autre bout.
+    """
+    from engine.game_utils import enter_phase
+
+    manager, game_state = _manager_et_etat_avec_un_objectif_tenu_par_p1()
+    game_state["phase"] = "deployment"
+    game_state["_objective_control_last_boundary"] = ("deployment", 1)
+    enter_phase(game_state, "command")  # ni `deployment/end` ni `command/start` n'est un point
+
+    assert manager.refresh_objective_control_on_boundary(game_state) is False
+    assert "_objective_control_detail" not in game_state
+
+
 def test_un_etat_sans_file_retombe_sur_les_deux_extremites(gym_engine) -> None:
     """Fixtures de test et sauvegardes restaurées n'ont pas de file : le comportement tient.
 
