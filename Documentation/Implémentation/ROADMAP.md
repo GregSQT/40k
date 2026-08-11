@@ -167,6 +167,60 @@ mesure, et c'est assumé (§0.14).
 ## 4. Backlog hors chemin critique (`A_faire/`)
 
 Prêts à démarrer sans décision produit :
+- 🔴 **Conformité moteur — les 53 erreurs que l'analyzer voit VRAIMENT** (ouvert le 2026-08-11).
+  Le rapport annonçait 370 erreurs sur le run du 2026-08-11 ; le nettoyage de l'outil de mesure
+  (livré le même jour, cf. plus bas) en a supprimé 317 qui étaient des faux positifs de lecture.
+  **Ce qui reste n'est plus imputable à l'analyzer** et désigne des règles appliquées de travers
+  en partie réelle. Par famille, telles que mesurées après nettoyage :
+  | Symptôme | Occurrences | Règle |
+  |---|---|---|
+  | Fall-back qui finit ENGAGÉ | 5 | 09.07 |
+  | Move normal finissant au contact | 5 | 09.05 |
+  | Move normal PARTI d'un engagement | 2 | 09.05 |
+  | Attaques au-delà de CC_NB | 24 | 04.03 |
+  | Tirs hors portée | 5 | 10 Shooting |
+  | Collisions (2 unités, même hex) | 7 | 03.01 |
+  | Charge depuis un hex déjà adjacent | 1 | 11.02 |
+  | Pile-in / consolidation au-delà de 3" | 2 | 12.02 / 12.08 |
+  | Mort « fantôme » (état reconstruit ≠ moteur) | 1 | — |
+  ⚠️ **Un seul cas est PROUVÉ à ce stade** : E76 T4, la figurine `2#10` (Bigboss, `Two-Handed Big
+  Choppa`, NB 5) porte **7 attaques**, sans WAAAGH! actif ce tour-là. Les autres familles ont une
+  piste, pas une cause : ne rien corriger avant de l'avoir établie — c'est exactement l'erreur que
+  les 317 faux positifs viennent de sanctionner.
+  ⚠️ **Piste ouverte, non prouvée, pour les deux familles de move** : le pool de destinations
+  exclut bien la zone d'engagement sur les deux chemins single-hex de
+  [`engine/phase_handlers/movement_handlers.py`](file:///home/greg/40k/engine/phase_handlers/movement_handlers.py),
+  mais le commentaire y affirme que la destination l'exclut « quels que soient les toggles » alors
+  que la ligne suivante écrit `_check_ez = not _thru_ez`, et le run tourne en `move.thru_ez=True`.
+  Par ailleurs un déplacement d'ESCOUADE n'est pas validé par ce pool mais par
+  `movement_preview_move_plan` : les deux voies sont à départager **en rejouant le cas dans le
+  moteur**, pas en relisant `step.log`.
+  ⚠️ **Ce chantier a besoin d'un run récent** : les chiffres ci-dessus viennent d'un `step.log` du
+  2026-08-11 (600 épisodes, `ArmageddonAgent`, holdout_regular). Un run postérieur portera en plus
+  les tokens `[MELTA:X]` et `[PRECISION]`, créés le même jour.
+- ✅ **Analyzer — la mesure cesse de mentir. LIVRÉ le 2026-08-11.** Sur le run du jour :
+  **370 → 53 erreurs**, et quatre contrôles jusque-là muets se sont allumés. Cinq causes, toutes
+  vérifiées en remettant le défaut et en constatant le rouge :
+  (1) le plafond de tirs était accumulé sans le GROUPE de figurines tireuses, qui le détermine —
+  **320 faux positifs**, `fight_handler` avait fermé ce défaut, le tir ne l'avait pas suivi ;
+  (2) `RAPID_FIRE` (4 080 marqueurs) et `DEVASTATING_WOUNDS` par arme n'étaient comptés nulle part,
+  `CLOSE_QUARTERS` mesurait l'adjacence d'ancre quand §10.06 mesurait l'engagement (43 contre
+  1 280 pour le même fait), `MELTA` et `PRECISION` n'atteignaient jamais `step.log` ;
+  (3) le profil d'arme était cherché dans le seul équipement du type d'ESCOUADE — **3 138 tirs sur
+  23 169 (14 %)** portaient une arme que seule une figurine déclare (règle 19), donc sans portée
+  contrôlable et absente du tableau d'usage ;
+  (4) à la mort d'une figurine les socles de la cible étaient purgés, alors que `[TARGET_MODELS:]`
+  dit qui RESTE — toute unité entamée était réduite à son ANCRE pour la géométrie ;
+  (5) `[Strategy: <label>]` annonçait un choix tactique qu'**aucun code ne calculait** (deux
+  valeurs par défaut fabriquaient « 100 % aggressive » sur 12 163 advances) et `WINS BY SCENARIO`
+  fusionnait deux terrains sous un même libellé.
+  ⚠️ **Le total remonte quand un contrôle vacant s'allume** : rendre sa portée à une arme de
+  personnage a fait apparaître 4 tirs hors portée jamais vérifiés. Une hausse n'est pas une
+  régression ici — c'est la contrepartie normale d'un contrôle qui regardait dans le vide.
+  Verrouillé par 4 fichiers de test créés (`tests/unit/ai/test_analyzer_attack_cap_shooter_group.py`,
+  `test_analyzer_close_quarters_usage.py`, `test_analyzer_weapon_usage_carrier.py`,
+  `test_analyzer_target_models_restore_footprint.py`) et un étendu
+  (`test_step_log_weapon_rule_tokens.py`).
 - **Security étapes 4, 5, 7, 8** (~4-5 j ; étapes **1, 2, 3 et 6 livrées**, étape 5 partielle
   = durcir la stack Docker existante, pas la créer ; suivi à jour)
   → [`Security.md`](Security.md) — le document est un chantier **vivant**, à la racine d'`Implémentation/`,

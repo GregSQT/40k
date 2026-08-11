@@ -152,7 +152,7 @@ Segments per-figurine (`engine/action_log_utils.py`) :
 | Segment | Contenu | Consommateur |
 |---|---|---|
 | `[MODELS: <mid>@(c,r,z<h>) …]` | socles VIVANTS de l'unité qui agit ; `mid = <unit_id>#<index>` ; `z` = hauteur de PLANCHER en pouces | analyzer (source de vérité par-socle) + replay |
-| `[TARGET_MODELS: …]` | survivants de la CIBLE après pertes, uniquement sur le DERNIER jet visant cette cible | replay + `shoot_handler` (portée) |
+| `[TARGET_MODELS: …]` | survivants de la CIBLE après pertes, uniquement sur le DERNIER jet visant cette cible | replay + `shoot_handler` (portée) + **état per-figurine** (`analyzer_core`, depuis le 2026-08-11) |
 | `[SHOOTER_MODELS: <mid> …]` | figurines ayant EFFECTIVEMENT tiré/frappé | replay seul |
 
 ### 1.3 Messages par type d'action
@@ -168,7 +168,7 @@ l'écriture directe de `rule_choice`) :
 | `move_after_shooting` | `Unit N(c,r) MOVED AFTER SHOOTING [<CAPACITÉ>] from … to …` | nom de la capacité (obligatoire) |
 | `reactive_move` | `Unit N(c,r) REACTIVE MOVED [<CAPACITÉ>] from … to … [Roll: N] - trigger: Unit M->(c,r)` | jet, déclencheur ; **pas de `[MODELS:]` d'arrivée** |
 | `deploy_unit` | `Unit N(c,r) DEPLOYED from (-1,-1) to (c,r)` | sentinelle hors-table `(-1,-1)` (20.01) |
-| `shoot` | `Unit N(c,r) SHOT [ASSAULT] [CLOSE-QUARTERS] [RAPID FIRE:X] Unit M(c,r) with [<arme>] - Hit R(T+ ou base+->eff+) [HEAVY\|COVER] [REROLLED:n] [SUSTAINED HITS] [<CAPACITÉ>] - Wound R(T+) [<CAPACITÉ>] [REROLLED:n] - Save R(T+) [REROLLED:n] [<CAPACITÉ>] - Dmg:NHP [HAZARDOUS] Roll:N` ; ou `Save [DEVASTATING WOUNDS]` | jets, seuils, tokens de règle |
+| `shoot` | `Unit N(c,r) SHOT [ASSAULT] [CLOSE-QUARTERS] [RAPID FIRE:X] [MELTA:X] [PRECISION] Unit M(c,r) with [<arme>] - Hit R(T+ ou base+->eff+) [HEAVY\|COVER] [REROLLED:n] [SUSTAINED HITS] [<CAPACITÉ>] - Wound R(T+) [<CAPACITÉ>] [REROLLED:n] - Save R(T+) [REROLLED:n] [<CAPACITÉ>] - Dmg:NHP [HAZARDOUS] Roll:N` ; ou `Save [DEVASTATING WOUNDS]` | jets, seuils, tokens de règle |
 | `hazardous` | `Unit N(c,r) SUFFERS X Mortal Wounds [HAZARDOUS]` / `… was DESTROYED [HAZARDOUS]` | MW infligées |
 | `charge` | `Unit N(c,r) CHARGED [<CAPACITÉ>] [FLY] Unit M(c,r) from … to … [Roll: N]` | jet 2D6 (pouces), `[FLY]`, **une seule** cible |
 | `charge_fail` | `Unit N(c,r) FAILED CHARGE to unit M(c,r) [Roll: N]` | jet |
@@ -200,12 +200,20 @@ Conséquence directe : le contrôle §2.1 « Dead unit skipping » et tout `hand
 **Ce que la ligne d'attaque ne porte PAS** (vérifié sur `_SHOT_RECORD_FIELD_MAP`,
 `w40k_core.py`, seul pont record→step.log). Le moteur SAIT poser les tokens
 `[BLAST:X]`, `[CLEAVE:X]`, `[EXTRA ATTACKS]`, `[TORRENT]`, `[IGNORES COVER]`, `[PSYCHIC]`,
-`[ANTI-<KW>:Y+]`, `[LETHAL HITS]`, `[MELTA:X]`, `[PRECISION]` — c'est
-`shared_utils.weapon_rule_log_tokens` (`:8041-8156`) — mais il ne les pose que sur la ligne de
-SYNTHÈSE d'escouade du **Game Log PvP** (`_emit_squad_shoot_log`, `:8164`). Aucun de ces dix
+`[ANTI-<KW>:Y+]`, `[LETHAL HITS]` — c'est
+`shared_utils.weapon_rule_log_tokens` — mais il ne les pose que sur la ligne de
+SYNTHÈSE d'escouade du **Game Log PvP** (`_emit_squad_shoot_log`). Aucun de ces huit
 tokens n'a d'entrée dans `_SHOT_RECORD_FIELD_MAP`, donc aucun n'atteint `step.log`. Les statuts
 ABSENT-LOG-MANQUANT de §3 pour 24.03/05/06/11/18/19/23/25/28/29/37 restent donc **exacts**, mais
 la §7-L5 est à réviser : le producteur existe déjà, il ne manque que le pont.
+
+✅ **`[MELTA:X]` et `[PRECISION]` sont sortis de cette liste le 2026-08-11** : le pont a été posé
+(`meltaApplied` / `precisionApplied` dans le log de groupe → `_build_shot_details` →
+`StepLogger` → analyzer). Les deux étaient dans le cas décrit ci-dessus — appliqués par le moteur,
+écrits dans la seule ligne que rien ne relit — et §1.8 les déclarait « NOT USED » alors que
+`Multi-Melta` était tiré 708 fois sur le run du 2026-08-11. **C'est le mode d'échec de cette liste
+entière** : un token qui n'atteint pas `step.log` ne rend pas la règle invisible, il la rend
+**FAUSSEMENT MORTE**, ce qui est pire — le rapport affirme alors que le moteur ne l'applique pas.
 
 ### 1.4 Lignes hors action
 
@@ -296,7 +304,7 @@ portés par #14 et #24 ; « start an action » exige les lignes d'action (16.01)
 |---|---|---|---|
 | 10 | `shoot_invalid.out_of_range` | `shoot_handler.py` | `squads_min_ranged_distance` socle→socle, métrique `metric.ranged` du run, cap **non tronqué** depuis le 2026-08-09 ; **aucun verdict** si ni `[TARGET_MODELS:]` ni socles connus |
 | 11 | `shoot_invalid.engaged_non_close_quarters` / `engaged_shot_with_non_close_quarters_weapon` | `:670,671` | tireur engagé (per-fig) ∧ arme non-CQ ∧ non-M/V |
-| 12 | `shoot_over_rng_nb` | `:443` (plafond `:413,422`) | compteur de séquence vs plafond **PAR FIGURINE depuis le 2026-08-10** (V14 fermé) : `[SHOOTER_MODELS:]` donne les socles qui ont tiré, `[MODEL_TYPES:]` la datasheet de chacun. Le X de `[RAPID FIRE]` suit la même résolution — c'est un attribut d'ARME. Repli explicite sur `NB d'escouade × effectif` sans ces segments. `[SUSTAINED HITS]` exclu |
+| 12 | `shoot_over_rng_nb` | `shoot_handler.py` (`per_model_attack_cap`) | compteur de séquence vs plafond **PAR FIGURINE depuis le 2026-08-10** (V14 fermé) : `[SHOOTER_MODELS:]` donne les socles qui ont tiré, `[MODEL_TYPES:]` la datasheet de chacun. Le X de `[RAPID FIRE]` suit la même résolution — c'est un attribut d'ARME. Repli explicite sur `NB d'escouade × effectif` sans ces segments. `[SUSTAINED HITS]` exclu. ⚠️ **Le GROUPE de tireurs est entré dans la clé du compteur le 2026-08-11** : il détermine le plafond de la ligne, et sans lui la somme de deux groupes d'une même escouade était opposée au plafond d'un seul — **320 faux positifs sur 23 169 tirs**. `fight_handler` avait fermé ce défaut de son côté sans que le tir suive |
 | 13 | `shoot_combi_profile_conflicts` | `:335` | 2 profils d'un même `COMBI_WEAPON` dans le même tour |
 | 14 | `shoot_after_flee` | `:163` | `units_fled` ∧ pas de règle `shoot_after_flee` |
 | 15 | `shoot_at_friendly` | `:186` | `unit_player[cible] == unit_player[tireur]` |
@@ -338,6 +346,7 @@ portés par #14 et #24 ; « start an action » exige les lignes d'action (16.01)
 | 37 | `rule_choice_usage.missing` (effet utilisé sans choix préalable) | `analyzer_core.py` |
 | 38 | `rule_choice_usage.mismatch` (effet utilisé ≠ effet choisi) | `analyzer_core.py` |
 | 39 | `weapon_rule_usage` → `Validité` : la paire (règle, arme) existe-t-elle dans l'armurerie ? + `NOT USED` | `analyzer.py` (§1.8) |
+| 39bis | **QUI compte l'usage** — refonte du 2026-08-11. Étaient comptés : `TWIN_LINKED`, `ASSAULT`, `HEAVY`, `SUSTAINED_HITS`, et `CLOSE_QUARTERS` sur `distance ancre-à-ancre == 1`. S'y ajoutent `RAPID_FIRE`, `MELTA`, `PRECISION` et `DEVASTATING_WOUNDS` **par arme** (la ligne GLOBAL existait seule) ; `CLOSE_QUARTERS` mesure désormais l'ENGAGEMENT, comme #17 et §10.06 — les deux sections comptaient deux grandeurs sous le même nom, **43 contre 1 280** sur le run du 2026-08-11. La clé `(<arme> (<datasheet>))` désigne la **datasheet PORTEUSE** et non plus le type d'escouade : sur 23 169 tirs, **3 138 (14 %)** portaient une arme que seule une figurine déclare (règle 19), invisible des deux côtés — ni attendue, ni comptée. Résolution : `analyzer_perfig.weapon_profile_for_line` | `shoot_handler.py` |
 | 40 | `devastating_wounds_incorrect` | `shoot_handler.py` |
 | 41 | marqueur `[RAPID FIRE:X]` absent de l'armurerie ou valeur ≠ armurerie → `parse_error` | `shoot_handler.py` |
 | 42 | marqueur `[SUSTAINED HITS]` sur arme sans la règle → `parse_error` | `shoot_handler.py` |
