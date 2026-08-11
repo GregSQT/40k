@@ -85,10 +85,11 @@ def _note_melee_weapon_rule_usage(
       - `TWIN_LINKED` : comptée sur la DÉCLARATION de l'arme, exactement comme au tir (la
         relance qu'elle ouvre n'a pas de trace propre dans la ligne).
 
+      - `DEVASTATING_WOUNDS` : `Save [DEVASTATING WOUNDS]`, que le formateur de mêlée écrit
+        depuis le 2026-08-11 — il imprimait jusque-là `Save None(<seuil>+)`, un jet inexistant
+        (24.10 : « no saving throw can be made »). Le compteur suit le token, comme au tir.
+
     CE QUI RESTE MUET, et pourquoi — le dire est la seule façon que le tableau ne mente pas :
-      - `DEVASTATING_WOUNDS` (5 armes de mêlée) : le formateur de mêlée n'écrit PAS
-        `Save [DEVASTATING WOUNDS]`, là où celui du tir l'écrit. Rien à lire, donc rien à
-        compter — et c'est un défaut du LOG, signalé au chantier, pas un compteur oublié ici ;
       - `ANTI-X`, `PSYCHIC`, `EXTRA_ATTACKS`, `LETHAL_HITS`, `PRECISION`, `CLOSE_QUARTERS` :
         aucun token dans `step.log`, ni au tir ni en mêlée (ABSENT-LOG-MANQUANT de §3). Elles
         ressortent « NOT USED » des DEUX côtés, ce qui est exact : la mesure n'existe pas.
@@ -128,6 +129,10 @@ def _note_melee_weapon_rule_usage(
         stats['weapon_rule_usage'][("SUSTAINED_HITS", weapon_key)][pl_int] += 1
     if re.search(r'\[CLEAVE:\d+\]', action_desc, re.IGNORECASE):
         stats['weapon_rule_usage'][("CLEAVE", weapon_key)][pl_int] += 1
+    # 24.10 — JUMEAU EXACT du site de tir : `Save [DEVASTATING WOUNDS]` est la trace de
+    # l'APPLICATION (sauvegarde sautée), donc ce qui se compte.
+    if re.search(r'Save\s+\[DEVASTATING WOUNDS\]', action_desc, re.IGNORECASE):
+        stats['weapon_rule_usage'][("DEVASTATING_WOUNDS", weapon_key)][pl_int] += 1
 
 
 def handle_fight(

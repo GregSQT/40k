@@ -922,3 +922,63 @@ def test_le_marqueur_blast_leve_le_plafond_de_tirs(monkeypatch, tmp_path):
     assert usage and any(sum(v.values()) > 0 for v in usage.values()), (
         "aucun usage de BLAST compté alors que le token est présent sur les lignes"
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Le segment `Save …` ne décrit QUE ce qui a eu lieu
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_la_melee_annonce_la_sauvegarde_sautee(monkeypatch, tmp_path):
+    """24.10 en MÊLÉE : le miroir du tir, qui n'avait jamais été écrit.
+
+    La branche `FOUGHT` imprimait `Save {roll}({target}+)` sans condition. Sur une blessure
+    critique d'une arme [DEVASTATING WOUNDS], le moteur ne lance AUCUN dé de sauvegarde
+    (« no saving throw can be made ») : la ligne affichait donc littéralement `Save None(3+)`,
+    un jet inexistant sous un seuil réel.
+    """
+    gs, raw_log = _engine_shoot_log(
+        monkeypatch, ["DEVASTATING_WOUNDS"], [4, 6] * 20, melee=True,
+        unit_type=CLEAVE_UNIT, weapon_name=CLEAVE_WEAPON, target_models=1,
+    )
+    assert raw_log["shootDetails"][0]["saveSkipped"] is True, "prémisse : le moteur l'a sautée"
+    line = _step_log_line(tmp_path, gs, raw_log)
+
+    assert "Save [DEVASTATING WOUNDS]" in line, line
+    assert "Save None" not in line, f"un jet inexistant ne doit plus être imprimé : {line}"
+
+
+def test_l_analyzer_compte_devastating_en_melee(monkeypatch, tmp_path):
+    """Maillon 4 : §1.8 comptait 0 usage en mêlée faute de token à lire."""
+    gs, raw_log = _engine_shoot_log(
+        monkeypatch, ["DEVASTATING_WOUNDS"], [4, 6] * 20, melee=True,
+        unit_type=CLEAVE_UNIT, weapon_name=CLEAVE_WEAPON, target_models=1,
+    )
+    stats = _analyzer_stats(tmp_path, _step_log_lines(tmp_path, gs, raw_log),
+                            unit_type=CLEAVE_UNIT, target_models=1, melee=True)
+
+    usage = {k: v for k, v in stats["weapon_rule_usage"].items()
+             if k[0] == "DEVASTATING_WOUNDS"}
+    assert usage and any(sum(v.values()) > 0 for v in usage.values()), (
+        "aucun usage de DEVASTATING_WOUNDS compté en mêlée : la chaîne est rompue"
+    )
+
+
+def test_une_attaque_non_allouee_ne_fabrique_pas_de_sauvegarde(tmp_path):
+    """05 Attack sequence — « excess attacks lost ».
+
+    Le seuil de sauvegarde n'est écrit qu'à l'ALLOCATION. Quand la cible est détruite avant que
+    le pool ne soit résolu, le moteur cesse (à raison) d'allouer : le record reste sans seuil et
+    sans résultat. Le formateur imprimait quand même `Save {roll}(None+)` — 1 429 lignes sur
+    10 021 du run du 2026-08-11, soit 14 %, qu'aucun contrôle ne pouvait relire.
+
+    Le record est construit à la main ici : provoquer un wipe en cours de pool par le vrai
+    moteur demanderait un scénario entier, alors que l'invariant testé est celui du FORMATEUR —
+    « pas de seuil ⇒ pas de segment chiffré ».
+    """
+    from ai.step_logger import _save_segments
+
+    unallocated = {"save_target": None, "save_roll": 4, "save_skipped": False}
+    assert _save_segments(unallocated, damage=2, save_result=None) == ["Save [NOT ALLOCATED]"]
+
+    allocated = {"save_target": 3, "save_roll": 4, "save_skipped": False}
+    assert _save_segments(allocated, damage=2, save_result="FAIL") == ["Save 4(3+)", "Dmg:2HP"]

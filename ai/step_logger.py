@@ -54,6 +54,41 @@ def _additive_rule_tokens(details) -> list:
     return tokens
 
 
+def _save_segments(details, *, damage, save_result, ap_ability_token: str = "") -> list:
+    """Segments `Save …` (+ `Dmg:` le cas echeant) d une attaque — TIR ET MELEE, un seul site.
+
+    Trois etats, et un seul d entre eux comporte des chiffres :
+
+    1. `Save [DEVASTATING WOUNDS]` — 24.10, « no saving throw can be made » : le moteur a SAUTE
+       la sauvegarde, il le dit (`save_skipped` + motif). Ecrire un jet ici serait decrire un de
+       qui n a jamais ete lance. La branche existait au TIR seulement : la melee imprimait
+       `Save None(<seuil>+)`, c est-a-dire un jet inexistant sous un seuil reel.
+
+    2. `Save [NOT ALLOCATED]` — l attaque n a jamais ete ALLOUEE a une figurine. Le seuil de
+       sauvegarde n est ecrit qu a l allocation (`_resolve_one_manual_wound`) : sans elle, ni
+       seuil ni resultat n existent. C est un etat de jeu LEGITIME (05 Attack sequence, « excess
+       attacks lost » : la cible est detruite avant que le reste du pool ne soit resolu), et le
+       moteur a raison de s arreter. Mesure du 2026-08-11 : **1 429 lignes sur 10 021 (14 %)**
+       imprimaient `Save <jet>(None+)` ou `Save None(None+)` — un segment de sauvegarde
+       entierement fabrique par le formateur, que les controles de conformite ne peuvent pas
+       lire (ils cherchent des nombres) et qu ils sautaient donc EN SILENCE.
+
+    3. Le cas normal : jet, seuil, relance et capacite d AP, puis les degats si la save echoue.
+    """
+    save_skipped = bool(details.get("save_skipped", False))
+    if save_skipped and details.get("save_skip_reason") == "DEVASTATING_WOUNDS":
+        return ["Save [DEVASTATING WOUNDS]", f"Dmg:{damage}HP"]
+    if details.get("save_target") is None:
+        return ["Save [NOT ALLOCATED]"]
+    save_part = f"Save {details['save_roll']}({details['save_target']}+)"
+    save_part += _rerolled_token(details, "save_roll_initial")
+    save_part += ap_ability_token
+    segments = [save_part]
+    if save_result == "FAIL":
+        segments.append(f"Dmg:{damage}HP")
+    return segments
+
+
 def _rerolled_token(details, field_name: str) -> str:
     """`` [REROLLED:1]`` quand le jet a ete RELANCE, chaine vide sinon.
 
@@ -870,21 +905,15 @@ class StepLogger:
                     f"Wound {wound_roll}({wound_target}+){wound_suffix}"
                 )
                 if wound_result in ("WOUND", "SUCCESS"):
-                    if save_skipped and save_skip_reason == "DEVASTATING_WOUNDS":
-                        detail_parts.append("Save [DEVASTATING WOUNDS]")
-                        detail_parts.append(f"Dmg:{damage}HP")
-                    else:
-                        # Le couvert ne touche PAS la sauvegarde dans ce moteur : 13.08 y
-                        # degrade le SEUIL DE TOUCHE (`_cover_worsened_bs`), et le token
-                        # [COVER] est rendu de ce cote-la (plus haut). L ancienne branche
-                        # `save_cover_applied` / `save_target_base` portait le modele du code
-                        # mort de tir et n avait plus aucun producteur (V11 §0hist.38).
-                        save_part = f"Save {save_roll}({save_target}+)"
-                        save_part += _rerolled_token(details, "save_roll_initial")
-                        save_part += _ability_token(ap_modifier_ability_display_name)
-                        detail_parts.append(save_part)
-                        if save_result == "FAIL":
-                            detail_parts.append(f"Dmg:{damage}HP")
+                    # Le couvert ne touche PAS la sauvegarde dans ce moteur : 13.08 y degrade le
+                    # SEUIL DE TOUCHE (`_cover_worsened_bs`), et le token [COVER] est rendu de ce
+                    # cote-la (plus haut). L ancienne branche `save_cover_applied` /
+                    # `save_target_base` portait le modele du code mort de tir et n avait plus
+                    # aucun producteur (V11 §0hist.38).
+                    detail_parts.extend(_save_segments(
+                        details, damage=damage, save_result=save_result,
+                        ap_ability_token=_ability_token(ap_modifier_ability_display_name),
+                    ))
             detail_msg = f" - {' - '.join(detail_parts)}"
             if hazardous_test_required:
                 if not isinstance(hazardous_test_roll, int) or hazardous_test_roll < 1 or hazardous_test_roll > 6:
@@ -1105,14 +1134,15 @@ class StepLogger:
 
                 # Only show save if wound succeeded
                 if wound_result in ("WOUND", "SUCCESS"):
-                    detail_parts.append(
-                        f"Save {save_roll}({save_target}+)"
-                        + _rerolled_token(details, "save_roll_initial")
-                    )
-                    
-                    # Show damage if save failed (even if damage is 0, it should be logged)
-                    if save_result == "FAIL":
-                        detail_parts.append(f"Dmg:{damage}HP")
+                    # MEME helper que le tir. Cette branche imprimait `Save {roll}({target}+)`
+                    # sans condition : sur une blessure DEVASTATING elle affichait `Save None`
+                    # — 24.10 dit qu aucune sauvegarde n est faite — et sur une attaque non
+                    # allouee, un seuil `None`. Le tir avait la premiere moitie du remede depuis
+                    # V11 §0hist.38, la melee ne l a jamais eue : miroir a moitie ecrit, motif
+                    # d echec n°1 du depot. Pas de capacite d AP en melee (aucun producteur).
+                    detail_parts.extend(_save_segments(
+                        details, damage=damage, save_result=save_result,
+                    ))
             
             detail_msg = f" - {' - '.join(detail_parts)}"
 
