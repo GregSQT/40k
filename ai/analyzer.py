@@ -346,7 +346,7 @@ def _apply_damage_and_handle_death(
         _reste = -front_hp  # PV du coup non absorbés par la figurine qui tombe (cf. docstring)
         _living = ordered_living_mids(target_id)
         if _living:
-            unit_model_hp.get(target_id, {}).pop(_living[0], None)
+            require_key(unit_model_hp, target_id).pop(_living[0], None)
         unit_models_alive[target_id] -= 1
         if positions_by_model is not None:
             positions_by_model.pop(target_id, None)

@@ -94,7 +94,7 @@ def git(*args: str) -> str:
     """
     return subprocess.run(
         ["git", "-c", "core.quotePath=false", *args],
-        cwd=ROOT, capture_output=True, text=True, check=True,
+        cwd=ROOT, capture_output=True, text=True, encoding="utf-8", check=True,
     ).stdout.strip()
 
 

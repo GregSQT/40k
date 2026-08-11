@@ -2285,7 +2285,7 @@ class W40KEngine(gym.Env):
                     "pose rendue — en tirer une seconde ici ferait exécuter une action que "
                     "l'appelant n'a pas vue."
                 )
-            auto_steps = self.game_state.get("_deployment_auto_steps", 0)
+            auto_steps = self.game_state.get("_deployment_auto_steps", 0)  # get allowed : compteur initialisé au 1er pas auto
             if not isinstance(auto_steps, int) or isinstance(auto_steps, bool):
                 raise TypeError(
                     f"_deployment_auto_steps must be integer (got {type(auto_steps).__name__})"
