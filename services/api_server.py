@@ -802,6 +802,11 @@ class _EndPhaseEngine(_GameStateHolder, Protocol):
 #: une partie chargée ou rembobinée doit repartir avec l'historique de son propre état.
 _OBJECTIVE_CONTROL_LOGGED_API_KEY = "_objective_control_logged_for_api"
 
+#: Dernier TOUR pour lequel « aucun objectif disputé » a été journalisé. Clé distincte de la
+#: précédente parce qu'elle déduplique sur une autre granularité : la phase pour l'état de
+#: contrôle, le tour pour l'absence de contrôle (cf. `_log_objective_control_snapshot`).
+_OBJECTIVE_EMPTY_LOGGED_TURN_KEY = "_objective_control_empty_logged_turn"
+
 
 def _log_objective_control_snapshot(engine_instance) -> None:
     """Journalise, au checkpoint 14.02, POURQUOI chaque objectif disputé est tenu ou non.
@@ -871,13 +876,15 @@ def _log_objective_control_snapshot(engine_instance) -> None:
                 if not footprint.isdisjoint(zone_hexes):
                     models_by_zone[str(objective_id)][player] += 1
 
+    emitted = 0
     for objective_id, entry in detail.items():
         key = str(objective_id)
         p1_oc = int(require_key(entry, "player_1_oc"))
         p2_oc = int(require_key(entry, "player_2_oc"))
         present = models_by_zone.get(key, {1: 0, 2: 0})  # get allowed (objectif sans zone)
         if p1_oc == 0 and p2_oc == 0 and present[1] == 0 and present[2] == 0:
-            continue  # Personne dans l'aire : il n'y a rien à expliquer.
+            continue  # Personne dans l'aire : il n'y a rien à expliquer sur CET objectif.
+        emitted += 1
         controller = require_key(entry, "controller")
         previous = require_key(entry, "previous_controller")
         if controller is None:
@@ -904,6 +911,38 @@ def _log_objective_control_snapshot(engine_instance) -> None:
                 "timestamp": "server_time",
             },
         )
+
+    if emitted:
+        return
+    # AUCUN objectif disputé : le dire, une fois par TOUR.
+    #
+    # Un journal qui se tait ne dit pas s'il n'a rien à dire ou s'il est cassé. C'est ce qui a
+    # coûté le plus de temps le 2026-08-11 : situation reproduite, zéro ligne, et il a fallu trois
+    # sondes du chemin API pour établir que le mécanisme fonctionnait — alors que la réponse
+    # ÉTAIT « personne n'est sur un objectif ». Ce journal existe pour lever une ambiguïté ; il ne
+    # doit pas en créer une autre.
+    #
+    # Une fois par TOUR et non par frontière : le contrôle est réévalué à six frontières par tour
+    # (14.02), et six lignes identiques par tour rendraient illisible le journal qu'elles sont
+    # censées éclairer. La clé de déduplication principale, elle, porte la phase — elle laisserait
+    # donc passer ces six lignes.
+    turn = require_key(game_state, "turn")
+    if game_state.get(_OBJECTIVE_EMPTY_LOGGED_TURN_KEY) == turn:  # get allowed (1er tour)
+        return
+    game_state[_OBJECTIVE_EMPTY_LOGGED_TURN_KEY] = turn
+    append_action_log(
+        game_state,
+        {
+            "type": "objective_control",
+            "message": (
+                f"OBJECTIVE — aucun objectif disputé : aucune figurine dans les aires "
+                f"({len(detail)} objectifs, 14.02)"
+            ),
+            "turn": turn,
+            "phase": require_key(game_state, "phase"),
+            "timestamp": "server_time",
+        },
+    )
 
 
 def _game_state_for_json(
