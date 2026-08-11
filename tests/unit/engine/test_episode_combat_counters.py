@@ -474,6 +474,14 @@ def _inject_charges(engine: W40KEngine) -> None:
         engine.game_state["action_logs"].append({
             "type": log_type, "phase": "charge", "player": player,
             "turn": 1, "unitId": "1", "targetId": "3", "charge_roll": 7,
+            # Distances 11.04 : `charge_record_outcome` les pose sur les SEPT sites qui émettent
+            # ces lignes, et la passe de comptage les lit en `require_key` — une ligne de charge
+            # qui ne les porte pas est un site oublié, pas un cas de jeu. Une injection qui les
+            # omettait décrivait donc une ligne que le moteur ne produit jamais, et faisait lever
+            # la terminaison. Valeurs réalistes plutôt que `None` : une charge déclarée est une
+            # charge mesurée ; `None` n'existe que si le mémo de déclaration est vide.
+            "charge_nearest_enemy_inches": 4.0,
+            "charge_target_distance_inches": 6.0,
             "message": "injected", "timestamp": "server_time", "reward": 0.0,
         })
 
