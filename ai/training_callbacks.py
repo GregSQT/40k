@@ -2062,6 +2062,14 @@ class BotEvaluationCallback(BaseCallback):
             if 'holdout_hard_mean' in results:
                 bot_results['holdout_hard_mean'] = float(results['holdout_hard_mean'])
             self.metrics_tracker.log_bot_evaluations(bot_results, step=int(eval_marker))
+            # COUT de ce point de mesure. `eval_duration_seconds` n'etait imprimee que sur
+            # erreur ou sur timeout : dans le cas nominal, rien ne disait ce qu'une evaluation
+            # coute, alors que c'est exactement ce sur quoi `bot_eval_freq` se regle.
+            self.metrics_tracker.log_bot_eval_cost(
+                eval_duration_seconds,
+                int(require_key(results, "total_episodes_played")),
+                int(eval_marker),
+            )
             self.metrics_tracker.log_faction_scores(
                 require_key(results, 'faction_scores'),
                 results.get('roster_gap'),

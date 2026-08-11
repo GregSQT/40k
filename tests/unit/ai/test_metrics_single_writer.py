@@ -287,6 +287,30 @@ def test_each_reserves_curve_carries_its_own_tactical_key(tmp_path: Any) -> None
         assert by_key[tag] == pytest.approx(valeur), tag
 
 
+def test_the_bot_eval_cost_curves_carry_duration_and_throughput(tmp_path: Any) -> None:
+    """Les deux courbes de cout d'evaluation sortent, appariees a leur grandeur.
+
+    Ce que `bot_eval_freq` coute n'etait mesure NULLE PART : `eval_duration_seconds` n'etait
+    imprimee que sur erreur ou sur timeout, donc jamais dans le cas nominal, et les notes de
+    config s'appuyaient sur un chiffre herite jamais re-mesure.
+
+    Les deux valeurs sont volontairement distinctes ici (600 episodes en 300 s = 2,0 ep/s) :
+    a debit 1,0 les deux tags pourraient etre croises sans qu'aucune assertion n'en souffre.
+    """
+    tracker, recording = _tracker(tmp_path)
+    tracker.log_bot_eval_cost(300.0, 600, step=10_000)
+
+    by_key = {key: (value, step) for key, value, step in recording.scalars}
+    assert by_key["perf/d_bot_eval_seconds"] == (pytest.approx(300.0), 10_000)
+    assert by_key["perf/e_bot_eval_episodes_per_second"] == (pytest.approx(2.0), 10_000)
+
+    # Un cout sans episode joue ou sans duree n'est pas « zero », c'est une donnee corrompue :
+    # publier 0.0 se lirait « evaluation instantanee » et fausserait le reglage qu'elle sert.
+    for episodes, duration in ((0, 300.0), (600, 0.0), (-1, 300.0)):
+        with pytest.raises(ValueError):
+            tracker.log_bot_eval_cost(duration, episodes, step=10_000)
+
+
 def test_the_guarded_curves_are_on_the_open_side_of_their_guard(tmp_path: Any) -> None:
     """Les courbes gardees par un compteur non nul SORTENT sur la fixture partagee.
 

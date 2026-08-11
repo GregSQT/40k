@@ -3281,10 +3281,14 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
                             f"  {'Écart Spacemarine - Ork':22s}: {gap_points:+5.1f} pt "
                             f"(win-rate pondéré, agent)"
                         )
+                    # Le DÉBIT et pas seulement la durée : une éval intermédiaire (600 épisodes)
+                    # et une finale (3600) ne se comparent qu'en épisodes par seconde, et c'est
+                    # sur ce chiffre que `bot_eval_freq` se règle — il n'était mesuré nulle part.
+                    _joues = int(require_key(bot_results, 'total_episodes_played'))
+                    _duree = float(require_key(bot_results, 'eval_duration_seconds'))
                     print(
-                        f"  {'Épisodes joués':22s}: "
-                        f"{int(require_key(bot_results, 'total_episodes_played')):d} "
-                        f"(hors abandons)"
+                        f"  {'Épisodes joués':22s}: {_joues:d} (hors abandons) "
+                        f"en {_duree:.0f} s — {_joues / _duree:.2f} ép./s"
                     )
                 print(f"{'='*80}\n")
 
@@ -4409,9 +4413,11 @@ def main():
             print(f"Combined Score: {float(require_key(results, 'combined')):.4f}")
             if 'roster_gap' in results:
                 print(f"Écart Spacemarine - Ork: {float(results['roster_gap']) * 100:+.1f} pt")
+            _joues = int(require_key(results, 'total_episodes_played'))
+            _duree = float(require_key(results, 'eval_duration_seconds'))
             print(
-                f"Épisodes joués: {int(require_key(results, 'total_episodes_played'))} "
-                "(hors abandons)"
+                f"Épisodes joués: {_joues} (hors abandons) en {_duree:.0f} s "
+                f"— {_joues / _duree:.2f} ép./s"
             )
             print(f"Worst bot score: {worst_bot_name} = {worst_bot_score:.4f}")
             if worst_scenario_name is not None and worst_scenario_combined is not None:

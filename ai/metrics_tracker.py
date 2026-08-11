@@ -1758,6 +1758,45 @@ class W40KMetricsTracker:
         baseline = sum(control[c] * intent[i] for c, i in paid)
         return aligned, baseline
 
+    def log_bot_eval_cost(
+        self, duration_seconds: float, episodes_played: int, step: int
+    ) -> None:
+        """Ce que CETTE evaluation a coute : duree, et debit en episodes par seconde.
+
+        POURQUOI CETTE COURBE EXISTE. `bot_eval_freq` et `bot_eval_intermediate` se reglent sur
+        le cout d'une evaluation, et ce cout n'etait mesure NULLE PART : la duree
+        (`eval_duration_seconds`) n'etait imprimee que sur erreur ou sur timeout, donc jamais
+        dans le cas nominal. Les notes de config s'appuyaient sur un chiffre herite d'un commit
+        de 2026-07, jamais re-mesure — et deux estimations en desaccord d'un facteur ~4,5
+        cohabitaient le 2026-08-11 sans que rien ne permette de trancher.
+
+        LE DEBIT, et pas seulement la duree : une evaluation intermediaire (600 episodes) et une
+        finale (3600) ne se comparent pas en secondes. `episodes_per_second` est la seule des
+        deux qui reponde a « combien coutera un point de mesure de plus », qui est la question
+        que le reglage pose. Le denominateur est le nombre d'episodes REELLEMENT joues, hors
+        abandons (`total_episodes_played`) : les episodes tues sur timeout n'ont pas ete joues,
+        les compter gonflerait le debit d'autant.
+
+        ⚠️ Ces valeurs dependent du regime de mesure : la journalisation pas-a-pas (`--step`) et
+        `W40K_PERF_TIMING=1` ralentissent l'evaluation. Une mesure prise sous instrumentation ne
+        sert pas a regler une cadence de production.
+        """
+        if episodes_played <= 0:
+            raise ValueError(
+                f"log_bot_eval_cost: episodes_played doit etre > 0 (got {episodes_played}) — "
+                "une evaluation sans episode joue n'a pas de cout a publier."
+            )
+        if duration_seconds <= 0.0:
+            raise ValueError(
+                f"log_bot_eval_cost: duration_seconds doit etre > 0 (got {duration_seconds})."
+            )
+        self.writer.add_scalar('perf/d_bot_eval_seconds', float(duration_seconds), step)
+        self.writer.add_scalar(
+            'perf/e_bot_eval_episodes_per_second',
+            float(episodes_played) / float(duration_seconds),
+            step,
+        )
+
     def log_bot_evaluations(self, bot_results: Dict[str, float], step: Optional[int] = None):
         """
         Log bot evaluation results to both 00_critical/ and bot_eval/ namespaces.

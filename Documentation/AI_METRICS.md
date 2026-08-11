@@ -332,6 +332,29 @@ To monitor whether forcing improves or degrades robustness:
 
 ---
 
+## Coût de l'évaluation (`perf/d_`, `perf/e_`)
+
+Ce que coûte UN point de mesure, publié à chaque évaluation (abscisse = `eval_marker`).
+
+- `perf/d_bot_eval_seconds`
+  - Durée mur de l'évaluation, telle que mesurée par `bot_evaluation` (`eval_duration_seconds`).
+- `perf/e_bot_eval_episodes_per_second`
+  - Débit : épisodes **réellement joués** (hors abandons) par seconde. C'est **la** courbe à
+    lire pour régler `bot_eval_freq` — une évaluation intermédiaire (600 épisodes) et une finale
+    (3600) ne se comparent pas en secondes, alors que « combien coûte un point de mesure de
+    plus » est exactement la question que le réglage pose.
+
+Pourquoi elles existent (2026-08-11) : la durée n'était imprimée **que** sur erreur ou sur
+timeout, donc jamais dans le cas nominal. Les notes de config s'appuyaient sur un chiffre hérité
+d'un commit de juillet, jamais re-mesuré — et deux estimations en désaccord d'un facteur ~4,5
+cohabitaient sans que rien ne permette de trancher.
+
+⚠️ **Une mesure prise sous instrumentation ne règle rien.** La journalisation pas-à-pas (`--step`)
+et `W40K_PERF_TIMING=1` ralentissent l'évaluation, et le débit s'en ressent. Ne comparer que des
+runs de même régime, et ne régler `bot_eval_freq` que sur un run nominal.
+
+---
+
 ## Réserves stratégiques (`reserves/`)
 
 Usage des réserves (règles 20.01 / 20.04), un point par épisode. **Six mesures, chacune en deux

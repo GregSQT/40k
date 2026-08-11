@@ -132,7 +132,7 @@ mesure, et c'est assumé (§0.14).
      |---|---|---|
      | `x1_debug` | **1000** (a valu 480, puis 10, en une seule journée du 2026-08-10) | **0** |
      | `x5_debug` | **96** | **1** |
-     | `x1` | 10 000 | 100 |
+     | `x1` | 10 000 | **10** |
      | `x1_long` | 50 000 (valait 200 000 avant le 2026-08-11) | 600 |
      `total_episodes` est un total **GLOBAL** tous environnements confondus : c'est
      `def EpisodeTerminationCallback` (`ai/training_callbacks.py`) qui porte le budget de run, et
@@ -207,6 +207,16 @@ mesure, et c'est assumé (§0.14).
 ## 4. Backlog hors chemin critique (`A_faire/`)
 
 Prêts à démarrer sans décision produit :
+- **Réécrire la note `bot_eval_freq_normal` de `x1_long` avec le coût MESURÉ** (~10 min, décidé
+  le 2026-08-11). Cette note fonde le réglage sur « 13 min l'unité », chiffre hérité du commit
+  `42326ed0` et jamais re-mesuré ; l'évaluation finale du run du 2026-08-11 donne plutôt
+  ~2 min 55 pour 600 épisodes. Un facteur ~4,5 sépare les deux, et c'est le plus élevé qui a
+  écarté l'option `bot_eval_freq` 5000. Les courbes `perf/d_bot_eval_seconds` et
+  `perf/e_bot_eval_episodes_per_second` existent depuis le même jour pour trancher : lire le
+  débit du prochain run **nominal** (pas sous `--step` ni `W40K_PERF_TIMING`, qui ralentissent),
+  puis réécrire la note avec ce chiffre. Un réglage tenu par un chiffre faux se retourne au
+  premier changement de durée — c'est déjà ce qui était arrivé à `bot_eval_freq` calé sur
+  200 000 épisodes.
 - **Distances de charge au `step.log` et en métriques** (~0,5 j) — distance (pathfinding) à
   l'ennemi le plus proche **à la déclaration**, distance à la cible **au choix**. Les deux moments
   n'existaient pas séparément avant l'alignement 11.02 du 2026-08-11 ; ils existent maintenant.
