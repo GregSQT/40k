@@ -1318,6 +1318,54 @@ class RewardCalculator:
                 return on_objective_bonus
         return 0.0
 
+    def wasted_reserve_penalty(self, wasted_count: int) -> float:
+        """Cout des escouades detruites en reserve APRES avoir refuse d'arriver (20.04).
+
+        CE QUI EST FACTURE, et rien d'autre : une DECISION. Une escouade a qui le masque a
+        ouvert au moins un slot d'arrivee et qui est restee en reserves jusqu'a sa destruction a
+        choisi de le faire — 20.03 dit « can », jamais « must ». Une escouade qui n'a jamais eu
+        de destination legale (pool d'ingress vide : bande de 6" du bord, > 8" de tout ennemi,
+        zone adverse fermee avant le 3e round) n'a rien choisi ; le compteur qui alimente cette
+        methode l'exclut deja (`fight_handlers`, 20.04).
+
+        POURQUOI IL FALLAIT CE TERME. Sur le run x1_long du 2026-08-11, la part des reserves de
+        l'agent detruites sans etre arrivees passe de 0 % a 14 % en fin d'entrainement, en
+        hausse monotone, pendant qu'il en place de plus en plus (0,81 -> 1,33 par episode a
+        mesure que la part d'episodes en deploiement actif monte de 0,31 a 0,80). Le bareme ne
+        portait aucun cout : une unite oubliee hors table ne coutait qu'un manque a gagner
+        diffus, jamais nomme.
+
+        Le montant est un COUT PAR ESCOUADE et il est NEGATIF par contrat — la config le declare
+        tel quel, ce qui rend son signe lisible la ou il se regle plutot qu'ici.
+        """
+        if wasted_count <= 0:
+            return 0.0
+        agent_key = require_key(self.config, "controlled_agent")
+        cfg = self.rewards_config[agent_key]["reserves_shaping"]
+
+        enabled = require_key(cfg, "enabled")
+        if not isinstance(enabled, bool):
+            raise TypeError(
+                f"reserves_shaping.enabled doit etre un booleen "
+                f"(got {type(enabled).__name__}: {enabled!r})"
+            )
+        if not enabled:
+            return 0.0
+
+        penalty = require_key(cfg, "declined_arrival_lost_penalty")
+        if not isinstance(penalty, (int, float)) or isinstance(penalty, bool):
+            raise TypeError(
+                f"reserves_shaping.declined_arrival_lost_penalty doit etre un nombre "
+                f"(got {type(penalty).__name__}: {penalty!r})"
+            )
+        if penalty > 0.0:
+            raise ValueError(
+                f"reserves_shaping.declined_arrival_lost_penalty doit etre negatif ou nul "
+                f"(got {penalty}) : c'est un COUT. Un montant positif recompenserait la perte "
+                f"d'une escouade hors table."
+            )
+        return float(penalty) * int(wasted_count)
+
     def settle_zone_intent_declaration(
         self, game_state: Dict[str, Any], declaration: Dict[str, Any], player: int
     ) -> float:
@@ -1348,6 +1396,32 @@ class RewardCalculator:
         """
         agent_key = require_key(self.config, "controlled_agent")
         zone_intent_cfg = self.rewards_config[agent_key]["zone_intent_shaping"]
+
+        # DEBRANCHEMENT MESURE, pas desactivation par commodite. Sur le run du 2026-08-11, la
+        # part des free steps dont le couple (controle, intent) est PAYE par cette fonction
+        # valait 0.269 pour une reference de 0.355 — la reference etant ce que la MEME politique
+        # obtiendrait en tirant son intent sans regarder le plateau
+        # (`combat/intent_shaping_aligned_ratio` et son `_baseline`, metrics_tracker). L'agent
+        # est reste SOUS cette reference dans 95 % des fenetres des 10 000 derniers episodes,
+        # tout en conditionnant de mieux en mieux son intent sur l'etat
+        # (`00_critical/o_intent_control_dependency` 0.004 -> 0.104) : il a donc appris a lire le
+        # plateau et a en tirer l'intention que ce bareme ne paie PAS, et il gagne (96,9 % de
+        # combined) en encaissant la penalite a chaque tour. Un terme dense anti-correle au
+        # comportement gagnant est du bruit dans le gradient.
+        #
+        # `enabled` est LU PAR require_key, sans defaut : une config qui l'omet fait lever, elle
+        # ne retombe pas en silence sur un shaping actif. Le code et les quatre montants restent
+        # en place, et les courbes `combat/intent_*` continuent d'etre emises — on garde la
+        # MESURE de ce que l'agent declare, on retire seulement la prime.
+        enabled = require_key(zone_intent_cfg, "enabled")
+        if not isinstance(enabled, bool):
+            raise TypeError(
+                f"zone_intent_shaping.enabled doit etre un booleen "
+                f"(got {type(enabled).__name__}: {enabled!r})"
+            )
+        if not enabled:
+            return 0.0
+
         defend_bonus = zone_intent_cfg["defend_held_bonus"]
         invade_success_bonus = zone_intent_cfg["invade_success_bonus"]
         invade_neutral_bonus = zone_intent_cfg["invade_neutral_bonus"]

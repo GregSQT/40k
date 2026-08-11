@@ -35,9 +35,11 @@ from smoke_t5_bare import MELEE_SCENARIO  # noqa: E402
 from engine.macro_intents import ACTION_WAIT, CHARGE_SLOT_BASE  # noqa: E402
 from engine.phase_handlers.shared_utils import (  # noqa: E402
     build_squad_action_mask,
+    charge_build_valid_plan,
     charge_check_eligibility,
     get_enemy_slot_mapping,
 )
+from shared.data_validation import require_key  # noqa: E402
 
 
 def _engine(scenario_file: str, seed: int):
@@ -115,11 +117,18 @@ def test_charge_mask_offers_only_committable_actions(melee_scenario_file, seed):
         eng.step(action)
 
 
-def test_mask_opens_exactly_the_declarable_targets(melee_scenario_file):
-    """Les slots ouverts décrivent EXACTEMENT l'ensemble des cibles déclarables (11.02).
+def test_mask_opens_exactly_the_targets_the_roll_can_reach(melee_scenario_file):
+    """Les slots ouverts décrivent EXACTEMENT les cibles ATTEIGNABLES par le jet (11.02 + 11.04).
 
-    Les deux moitiés comptent : un slot ouvert de trop ferait charger une cible illégale, un
-    slot manquant rendrait une cible légale INCHARGEABLE sans que rien ne le signale.
+    Les deux moitiés comptent : un slot ouvert de trop ferait déclarer une charge que le jet ne
+    peut pas conclure, un slot manquant rendrait une cible atteignable INCHARGEABLE sans que
+    rien ne le signale.
+
+    CE QUI A CHANGE LE 2026-08-11. La référence était `charge_check_eligibility` seule — les 12"
+    de 11.02.1 — parce que le jet tombait APRÈS le choix de la cible. Depuis l'alignement sur la
+    séquence 11.02, le jet a lieu à l'activation et 11.04 borne les cibles sélectionnables par
+    lui : l'ensemble ouvert est donc un SOUS-ENSEMBLE des déclarables, celui que
+    `charge_build_valid_plan` — l'oracle du commit — accepte pour ce jet.
     """
     eng = _engine(melee_scenario_file, seed=1)
     gs = eng.game_state
@@ -129,7 +138,18 @@ def test_mask_opens_exactly_the_declarable_targets(melee_scenario_file):
 
     mask = build_squad_action_mask(gs, squad_id, enemy_slot_ids=slot_map)
     opened = [i for i in range(len(slot_map)) if mask[CHARGE_SLOT_BASE + i] == 1]
-    assert opened == declarable
+
+    roll = int(require_key(gs, "charge_roll_values")[squad_id])
+    reachable = [
+        i for i, esid in enumerate(slot_map)
+        if esid is not None
+        and charge_build_valid_plan(gs, str(squad_id), [str(esid)], roll) is not None
+    ]
+    assert opened == reachable
+    assert set(opened).issubset(set(declarable)), (
+        "un slot ouvert sur une cible non déclarable (11.02.1) : le jet ne peut pas rendre "
+        "légale une cible hors des 12\""
+    )
     assert mask[ACTION_WAIT] == 1, "11.02 : la charge est OPTIONNELLE, WAIT reste ouvert"
 
     # CONTRE-ÉPREUVE : le filtre d'éligibilité MORD. Sans elle, un masque qui ouvrirait tout slot

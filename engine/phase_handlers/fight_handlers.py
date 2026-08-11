@@ -2036,15 +2036,31 @@ def _fight_v11_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
 
         destroyed_units = destroy_unarrived_strategic_reserves(game_state)
         if destroyed_units:
+            # LES DEUX CAMPS. Ce site filtrait sur le joueur contrôlé alors que la doc annonçait
+            # « tous joueurs » : la perte de réserves du bot n'était mesurée nulle part, et la
+            # promesse « le bot arrive dès qu'un slot s'ouvre » restait invérifiable.
+            destroyed_by_player = require_key(game_state, "_reserves_destroyed_turn3")
+            for unit in destroyed_units:
+                destroyed_by_player[int(require_key(unit, "player"))] += 1
+
+            # PÉNALITÉ : seulement pour ce qui était une DÉCISION. Une escouade détruite ici
+            # après s'être vu offrir au moins une arrivée a choisi de rester (20.03 dit « can »,
+            # jamais « must ») ; une escouade qui n'a jamais eu de destination légale n'a rien
+            # choisi, et la facturer punirait un choix qui n'a pas existé. Un COMPTE est posé —
+            # le barème est lu ailleurs, par le seul objet qui l'a (`RewardCalculator`).
             from engine.game_utils import get_controlled_player
+
             controlled = get_controlled_player(game_state)
-            agent_destroyed = sum(
+            offered = require_key(game_state, "_ingress_offered")
+            declined_ids = {squad_id for player, squad_id, _turn in offered if player == controlled}
+            wasted = sum(
                 1 for unit in destroyed_units
                 if int(require_key(unit, "player")) == controlled
+                and str(require_key(unit, "id")) in declined_ids
             )
-            if agent_destroyed:
-                game_state["_reserves_destroyed_turn3"] = (
-                    require_key(game_state, "_reserves_destroyed_turn3") + agent_destroyed
+            if wasted:
+                game_state["_pending_reserves_wasted"] = (
+                    require_key(game_state, "_pending_reserves_wasted") + wasted
                 )
 
     if current_player == 1:

@@ -97,9 +97,20 @@ def tactical_data(**overrides: Any) -> Dict[str, Any]:
         "forced_unit_episode_has_controlled": 0,
         "forced_unit_instances_controlled": 0,
         "forced_unit_counts_controlled": {},
+        # Dix valeurs DISTINCTES, et c'est ce qui fait le test d'appariement : cinq mesures x
+        # deux camps: un tag branche sur la cle du voisin -- ou sur le mauvais camp -- se voit.
         "reserves_placed_agent": 5,
+        "reserves_placed_opponent": 6,
         "reserves_deployed_agent": 3,
-        "reserves_destroyed_turn3": 1,
+        "reserves_deployed_opponent": 4,
+        "reserves_destroyed_turn3_agent": 1,
+        "reserves_destroyed_turn3_opponent": 2,
+        "reserves_ingress_offers_agent": 11,
+        "reserves_ingress_offers_opponent": 12,
+        "reserves_ingress_declined_agent": 7,
+        "reserves_ingress_declined_opponent": 8,
+        "reserves_ingress_no_destination_agent": 9,
+        "reserves_ingress_no_destination_opponent": 10,
     }
     data.update(overrides)
     return data

@@ -82,6 +82,32 @@ DEPLOY_SLOT_CANDIDATES_CACHE_KEY = "_deployment_slot_candidates"
 INGRESS_SLOT_CANDIDATES_CACHE_KEY = "_ingress_slot_candidates"
 
 
+def _record_ingress_offer(
+    game_state: Dict[str, Any], player: int, squad_id: Any, has_slot: bool
+) -> None:
+    """Note qu'à CE tour, cette escouade en réserves s'est vu offrir — ou non — une arrivée.
+
+    POURQUOI ICI. « Détruite en réserve » (20.04) confond deux situations qu'aucune courbe ne
+    séparait : l'unité a REFUSÉ d'arriver alors qu'elle le pouvait, ou aucune destination légale
+    n'existait (bande de 6" du bord, > 8" de tout ennemi, zone adverse fermée avant le 3e round).
+    La première est une décision, la seconde n'en est pas une — et pénaliser la seconde
+    reviendrait à punir un choix qui n'a jamais été proposé.
+
+    Ce point de mesure est le SEUL qui connaisse la réponse sans rien recalculer : le pool
+    d'ingress est déjà construit ici, pour le masque. Le mesurer ailleurs (en fin de phase, par
+    exemple) demanderait de le reconstruire sur un état modifié — un masque de plateau entier
+    par unité et par tour, sur le chemin chaud de l'entraînement.
+
+    Enregistré en (joueur, escouade, TOUR) dans un ensemble : le masque est reconstruit à chaque
+    step tant que l'escouade est active, un compteur incrémental compterait la même occasion des
+    dizaines de fois. L'appel est donc posé sur les TROIS sorties de `ingress_slot_candidates`,
+    cache-hit compris — sortir par le cache reste une occasion offerte à l'agent.
+    """
+    key = (int(player), str(squad_id), int(require_key(game_state, "turn")))
+    bucket = "_ingress_offered" if has_slot else "_ingress_no_destination"
+    require_key(game_state, bucket).add(key)
+
+
 def open_deploy_slot_count(num_valid_hexes: int) -> int:
     """Nombre de slots de déploiement OUVERTS pour ce nombre d'hexes valides.
 
@@ -2510,11 +2536,13 @@ class ActionDecoder:
         )
         store = game_state.get(INGRESS_SLOT_CANDIDATES_CACHE_KEY)  # get allowed (1er appel)
         if store is not None and store["key"] == cache_key:
+            _record_ingress_offer(game_state, player, squad_id, bool(store["candidates"]))
             return store["candidates"]
 
         pool = ingress_setup_pool(game_state, str(squad_id))
         if not pool:
             game_state[INGRESS_SLOT_CANDIDATES_CACHE_KEY] = {"key": cache_key, "candidates": {}}
+            _record_ingress_offer(game_state, player, squad_id, False)
             return {}
         # Ordre STABLE et déterministe : les stratégies trient ces hexes, et `np.lexsort`
         # départage les ex æquo par l'index d'apparition (cf. `_deployment_slot_order`).
@@ -2551,6 +2579,7 @@ class ActionDecoder:
             "key": cache_key,
             "candidates": candidates,
         }
+        _record_ingress_offer(game_state, player, squad_id, bool(candidates))
         return candidates
 
     def _select_deployment_hex_for_action(

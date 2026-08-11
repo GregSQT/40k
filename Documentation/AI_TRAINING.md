@@ -371,7 +371,28 @@ Le `RewardCalculator` (`engine/reward_calculator.py`) filtre les rewards par jou
 
 5. **Bonus « sur un objectif »** (`_calculate_on_objective_reward`, `objective_rewards.on_objective_bonus`) : versé quand une action qui porte une destination laisse l'unité **dans** une zone d'objectif que l'agent ne contrôle pas encore (il paie la *progression* vers un contrôle, pas le maintien). La présence se juge **par figurine, sur l'empreinte de socle** (14.02), par les mêmes lecteurs que le contrôle du moteur — `objective_hex_sets` + `iter_living_model_footprints`. ⚠️ Jusqu'au 2026-08-01 il comparait la **destination d'escouade** à un hexe d'objectif par égalité stricte : une escouade étalée était comptée par `sum_objective_control_oc_multi` et **pas** payée par la récompense, dans le même état de jeu — et l'inverse. Une unité **battle-shocked** ne touche rien (01.07 : OC modifié à `-`, elle ne peut pas prendre l'objectif).
 
-6. **Victory Points** : scorés par joueur absolu (P1 et P2 scorent indépendamment). Le winner est déterminé par comparaison VP à la fin du turn 5.
+6. **Pénalité de réserve gaspillée** (`RewardCalculator.wasted_reserve_penalty`,
+   `reserves_shaping.declined_arrival_lost_penalty`, **−25.0 par escouade**) : facturée quand une
+   escouade du joueur contrôlé est détruite par 20.04 (encore en réserves à la fin du 3e round)
+   **après avoir refusé au moins une arrivée possible**. Une escouade qui n'a jamais eu de
+   destination légale — pool d'ingress vide : bande de 6" du bord, > 8" de tout ennemi, zone
+   adverse fermée avant le 3e round — n'entre PAS dans le compte : la facturer punirait un choix
+   qui n'a pas existé, et 20.03 dit « can », jamais « must ». Le compte est posé à la destruction
+   par `fight_handlers` (qui n'a pas le barème) et facturé au step suivant par le même chemin
+   différé que le shaping zone-intent (`_pending_reserves_wasted`), avec ventilation dans
+   `penalties`. Motivé par une mesure : sur le run x1_long du 2026-08-11, la part des réserves de
+   l'agent détruites sans être arrivées monte de 0 % à 14 % en fin d'entraînement, en hausse
+   monotone, pendant qu'il en place de plus en plus (0,81 → 1,33 par épisode). Les courbes
+   `reserves/ingress_{offers,declined,no_destination}_{agent,opponent}` sont ce qui rend la
+   distinction lisible (cf. `AI_METRICS.md`).
+
+7. **Zone-intent — DÉBRANCHÉ depuis le 2026-08-11** (`zone_intent_shaping.enabled: false`). Le
+   code et les quatre montants restent, un `true` rebranche tout. Mesure qui a tranché : la part
+   des déclarations payées par ce barème valait 0,269 contre 0,355 pour la même politique tirant
+   son intent au hasard, et l'agent restait **sous** ce hasard dans 95 % des fenêtres des 10 000
+   derniers épisodes — un terme dense anti-corrélé au comportement gagnant.
+
+8. **Victory Points** : scorés par joueur absolu (P1 et P2 scorent indépendamment). Le winner est déterminé par comparaison VP à la fin du turn 5.
 
 ### Configuration (seat)
 

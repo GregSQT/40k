@@ -10,10 +10,9 @@ DUAL TIER SYSTEM (41 Total Metrics):
      - win_rate_100ep, episode_reward, episode_length, 
        units_killed_vs_lost_ratio, invalid_action_rate
   
-  🎯 game_tactical/ (8) - Tactical decision quality
+  🎯 game_tactical/ - Tactical decision quality
      - shooting_accuracy, damage_efficiency, unit_trade_ratio,
-       movement_efficiency, shooting_participation,
-       action_efficiency, wait_frequency
+       movement_efficiency, shooting_participation
   
   🔬 game_detailed/ (12+) - Deep tactical analysis
      - reward_decomposition (5), phase_performance (4),
@@ -925,10 +924,11 @@ class W40KMetricsTracker:
         if total_actions > 0:
             invalid_rate = invalid_actions / total_actions
             self.writer.add_scalar('game_critical/invalid_action_rate', invalid_rate, self.episode_count)
-            
-            # GAME TACTICAL: Action efficiency - Valid action rate
-            action_efficiency = valid_actions / total_actions
-            self.writer.add_scalar('game_tactical/action_efficiency', action_efficiency, self.episode_count)
+            # `game_tactical/action_efficiency` vivait ici et valait `valid / total`, c'est-à-dire
+            # exactement `1 - invalid_rate` — même dénominateur, même garde, aucune information
+            # propre. Sur le run du 2026-08-11 elle était plate à 1.0 sur les 50 001 épisodes,
+            # comme son complément à 0.0. Supprimée et NON remplacée : ce que ce couple mesure se
+            # lit sur `invalid_action_rate`, la seule des deux dont le zéro est la bonne nouvelle.
 
         # USAGE PAR FAMILLE D'ACTION — la part de chaque DECISION dans ce que l'agent joue.
         #
@@ -1087,9 +1087,25 @@ class W40KMetricsTracker:
             )
     
         # Réserves stratégiques (20.01/20.04) — clés garanties par _empty_episode_tactical_data().
-        self.writer.add_scalar('reserves/placed_agent', float(require_key(tactical_data, 'reserves_placed_agent')), self.episode_count)
-        self.writer.add_scalar('reserves/deployed_agent', float(require_key(tactical_data, 'reserves_deployed_agent')), self.episode_count)
-        self.writer.add_scalar('reserves/destroyed_turn3', float(require_key(tactical_data, 'reserves_destroyed_turn3')), self.episode_count)
+        # UNE COURBE PAR CAMP, sur les cinq mesures. `destroyed_turn3` etait publie seul et
+        # documente « tous joueurs » alors que le moteur ne comptait que l'agent : la perte de
+        # reserves du bot n'existait sur aucune courbe, donc rien ne permettait de verifier ce
+        # que son code promet (il arrive des qu'un slot s'ouvre, cf. env_wrappers).
+        #
+        # `declined` et `no_destination` separent ce que `destroyed_turn3` confond : un slot
+        # d'arrivee etait ouvert et l'unite est restee (DECISION), ou le pool etait vide (aucune
+        # decision possible). Les lire ENSEMBLE est le seul moyen de savoir si une reserve
+        # perdue est un choix ou une impasse geometrique.
+        for _metric in (
+            'placed', 'deployed', 'destroyed_turn3',
+            'ingress_offers', 'ingress_declined', 'ingress_no_destination',
+        ):
+            for _side in ('agent', 'opponent'):
+                self.writer.add_scalar(
+                    f'reserves/{_metric}_{_side}',
+                    float(require_key(tactical_data, f'reserves_{_metric}_{_side}')),
+                    self.episode_count,
+                )
 
     def log_training_step(self, step_data: Dict[str, Any]):
         """Log training step metrics - exploration rate and loss"""

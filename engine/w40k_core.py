@@ -205,23 +205,66 @@ def _empty_episode_tactical_data() -> Dict[str, Any]:
         # le `game_state` a la terminaison, comme `shots_fired` l'est depuis `action_logs`.
         'deployment_cache_counts': ActionDecoder.empty_deployment_cache_counts(),
         'reward_breakdown': empty_reward_breakdown_totals(),
-        # Réserves stratégiques (20.01/20.04) : usage de l'agent sur l'épisode.
+        # Réserves stratégiques (20.01/20.04) : usage sur l'épisode, PAR CAMP.
+        #
+        # Les trois premiers couples ont vécu en `_agent` seul, et `destroyed_turn3` était même
+        # DOCUMENTÉ « tous joueurs » alors que son site d'écriture filtrait sur le joueur
+        # contrôlé — la mesure du bot n'existait donc nulle part, et rien ne permettait de
+        # vérifier ce que le code lui promet (il arrive dès qu'un slot s'ouvre, cf.
+        # `env_wrappers._select_bot_move_action`).
+        #
+        # Les deux derniers couples SÉPARENT ce que « détruite en réserve » confondait :
+        #   - `ingress_declined`      : un slot d'arrivée était ouvert, l'unité est restée. DÉCISION.
+        #   - `ingress_no_destination`: le pool d'ingress était vide (bande de 6" du bord, >8" de
+        #                               tout ennemi, zone adverse fermée avant le 3e round), donc
+        #                               AUCUNE décision n'a été prise.
+        # Sans cette séparation, pénaliser une réserve perdue punirait un choix qui n'a pas
+        # existé. Comptés en (unité, tour) uniques : le masque est reconstruit à chaque step.
         'reserves_placed_agent': 0,
+        'reserves_placed_opponent': 0,
         'reserves_deployed_agent': 0,
-        'reserves_destroyed_turn3': 0,
+        'reserves_deployed_opponent': 0,
+        'reserves_destroyed_turn3_agent': 0,
+        'reserves_destroyed_turn3_opponent': 0,
+        'reserves_ingress_offers_agent': 0,
+        'reserves_ingress_offers_opponent': 0,
+        'reserves_ingress_declined_agent': 0,
+        'reserves_ingress_declined_opponent': 0,
+        'reserves_ingress_no_destination_agent': 0,
+        'reserves_ingress_no_destination_opponent': 0,
     }
 
 
-def _reserves_game_state_defaults() -> Dict[str, int]:
+def _reserves_game_state_defaults() -> Dict[str, Any]:
     """Compteurs de réserves dans game_state — SOURCE UNIQUE (jumeau init/reset).
 
     Intégrer avec ** dans le dict initial ET dans game_state.update() du reset.
     Miroir de fly_declaration_reset_state() pour les drapeaux de vol.
+
+    INDEXÉS PAR NUMÉRO DE JOUEUR, jamais par « agent / adversaire » : `agent_seat_mode` vaut
+    `random`, donc le joueur contrôlé est 1 ou 2 selon l'épisode, et les handlers qui écrivent
+    ici ne connaissent que `unit["player"]`. La projection sur agent/adversaire se fait au SEUL
+    endroit qui a la réponse, à la terminaison (`get_controlled_player`).
+
+    Les trois ensembles d'ingress portent des (joueur, escouade, tour) UNIQUES : le masque
+    d'action est reconstruit à chaque step tant que l'escouade en réserves est active, donc un
+    compteur incrémental compterait la même occasion des dizaines de fois.
     """
     return {
-        "_reserves_placed_agent": 0,
-        "_reserves_deployed_agent": 0,
-        "_reserves_destroyed_turn3": 0,
+        "_reserves_placed": {1: 0, 2: 0},
+        "_reserves_deployed": {1: 0, 2: 0},
+        "_reserves_destroyed_turn3": {1: 0, 2: 0},
+        # (joueur, squad_id, tour) où le masque a ouvert au moins un slot d'arrivée.
+        "_ingress_offered": set(),
+        # (joueur, squad_id, tour) où le pool d'ingress était VIDE : aucune décision possible.
+        "_ingress_no_destination": set(),
+        # (joueur, squad_id, tour) où l'ingress a réellement eu lieu.
+        "_ingress_arrived": set(),
+        # Escouades du joueur CONTRÔLÉ détruites par 20.04 après avoir décliné au moins une
+        # arrivée possible, en attente de facturation. Un COMPTE, pas un montant : le handler
+        # qui détruit ne connaît pas le barème, et le calculateur de récompense ne connaît pas
+        # le moment. Versé et remis à zéro au step suivant, comme `_pending_zone_shaping`.
+        "_pending_reserves_wasted": 0,
     }
 
 
@@ -1822,15 +1865,16 @@ class W40KEngine(gym.Env):
             if not (cmd_result and cmd_result.get("phase_complete") is False):
                 movement_handlers.movement_phase_start(self.game_state)
         self.episode_tactical_data = _empty_episode_tactical_data()
-        # Compte initial des réserves déclarées dans le roster (strategic_reserves: true).
-        # Le hook dans deployment_place_in_strategic_reserves ajoute ensuite les unités placées
-        # manuellement pendant la phase de déploiement active. Les deux sources s'additionnent.
-        controlled_player_for_reserves = get_controlled_player(self.game_state)
-        self.game_state["_reserves_placed_agent"] = sum(
-            1 for u in require_key(self.game_state, "units")
-            if u.get("in_strategic_reserves", False)
-            and int(require_key(u, "player")) == controlled_player_for_reserves
-        )
+        # Compte initial des réserves déclarées dans le roster (strategic_reserves: true), POUR
+        # LES DEUX CAMPS. Le hook dans deployment_place_in_strategic_reserves ajoute ensuite les
+        # unités placées manuellement pendant la phase de déploiement active — un choix que
+        # l'agent peut faire et que les bots ne font jamais (le wrapper leur retire WAIT du pool
+        # de mise en place). Les deux sources s'additionnent.
+        placed_by_player: Dict[int, int] = {1: 0, 2: 0}
+        for u in require_key(self.game_state, "units"):
+            if u.get("in_strategic_reserves", False):  # get allowed (champ optionnel du loader)
+                placed_by_player[int(require_key(u, "player"))] += 1
+        self.game_state["_reserves_placed"] = placed_by_player
 
         # Log episode start with all unit positions, walls, and objectives
         if hasattr(self, 'step_logger') and self.step_logger and self.step_logger.enabled:
@@ -2479,6 +2523,10 @@ class W40KEngine(gym.Env):
         # cinq `reward/*_total` ne sommaient plus le retour, et `reward/objective_share`, la
         # metrique meme que ce shaping doit eclairer, ignorait un flux d'objectif reellement percu.
         zone_shaping_paid = 0.0
+        # Meme raison pour la penalite de reserve gaspillee : elle ne sort pas de
+        # `calculate_reward`, donc sans ce cumul elle alourdirait le retour de l'episode sans
+        # entrer dans aucune des cinq categories ventilees.
+        reserves_penalty_paid = 0.0
         # Zone intent free step: reward is always 0.0 (agent learns via deferred rewards)
         if isinstance(result, dict) and result.get("action") == "zone_intent":
             reward = 0.0
@@ -2493,6 +2541,15 @@ class W40KEngine(gym.Env):
             self.game_state["_pending_zone_shaping"] = 0.0
             reward += shaping
             zone_shaping_paid += shaping
+            # RESERVES GASPILLEES (20.04) : facture au premier step qui suit la destruction, par
+            # le meme chemin que le shaping ci-dessus et pour la meme raison — le handler qui
+            # detruit n'a ni le bareme ni la main sur la recompense. Le compte est pose par
+            # `fight_handlers` et n'inclut QUE les escouades qui avaient une arrivee possible.
+            wasted = require_key(self.game_state, "_pending_reserves_wasted")
+            if wasted:
+                self.game_state["_pending_reserves_wasted"] = 0
+                reserves_penalty_paid += self.reward_calculator.wasted_reserve_penalty(wasted)
+                reward += reserves_penalty_paid
         _step_t5 = time.perf_counter() if _step_t0 is not None else None
         terminated = self.game_state["game_over"]
         if terminated:
@@ -2589,6 +2646,12 @@ class W40KEngine(gym.Env):
             totals = self.episode_tactical_data['reward_breakdown']
             totals['objective'] += zone_shaping_paid
             totals['objective_positive'] += max(0.0, zone_shaping_paid)
+
+        if reserves_penalty_paid != 0.0:
+            # Categorie `penalties`, comme tout ce qui coute sans etre le resultat d'une action
+            # jouee. Meme raison qu'au-dessus de ne pas passer par `last_reward_breakdown` : le
+            # versement peut tomber sur un step ou `calculate_reward` n'a pas ete appele.
+            self.episode_tactical_data['reward_breakdown']['penalties'] += reserves_penalty_paid
 
         # Cles de FIN D'EPISODE, tenues a part de l'`info` d'action. Deux raisons, et la seconde
         # est celle qui a coute : (1) elles sont les seules que `_drain_forced_waits` reprend du
@@ -2877,10 +2940,42 @@ class W40KEngine(gym.Env):
             self.episode_tactical_data['deployment_cache_counts'] = (
                 self.action_decoder.deployment_cache_counts()
             )
-            # Réserves stratégiques : compteurs incrémentés par les handlers via game_state.
-            self.episode_tactical_data['reserves_placed_agent'] = require_key(self.game_state, "_reserves_placed_agent")
-            self.episode_tactical_data['reserves_deployed_agent'] = require_key(self.game_state, "_reserves_deployed_agent")
-            self.episode_tactical_data['reserves_destroyed_turn3'] = require_key(self.game_state, "_reserves_destroyed_turn3")
+            # Réserves stratégiques : compteurs incrémentés par les handlers via game_state,
+            # indexés PAR JOUEUR. La projection sur agent/adversaire se fait ici et nulle part
+            # ailleurs — c'est le seul endroit qui connaisse le siège de l'agent sur CET épisode
+            # (`agent_seat_mode: random` : le joueur contrôlé est 1 ou 2 selon le tirage).
+            _controlled = get_controlled_player(self.game_state)
+            _opponent = 2 if _controlled == 1 else 1
+            for _key, _state_key in (
+                ('reserves_placed', '_reserves_placed'),
+                ('reserves_deployed', '_reserves_deployed'),
+                ('reserves_destroyed_turn3', '_reserves_destroyed_turn3'),
+            ):
+                _by_player = require_key(self.game_state, _state_key)
+                self.episode_tactical_data[f'{_key}_agent'] = int(_by_player[_controlled])
+                self.episode_tactical_data[f'{_key}_opponent'] = int(_by_player[_opponent])
+
+            # ARRIVÉES DÉCLINÉES vs SANS DESTINATION — deux causes que « détruite en réserve »
+            # confondait, et dont dépend toute pénalité juste : décliner est une DÉCISION, un
+            # pool vide n'en est pas une. Dérivé ici des trois ensembles de (joueur, escouade,
+            # tour) : décliné = une offre dont l'arrivée n'a pas suivi, LE MÊME TOUR.
+            _offered = require_key(self.game_state, "_ingress_offered")
+            _arrived = require_key(self.game_state, "_ingress_arrived")
+            _no_dest = require_key(self.game_state, "_ingress_no_destination")
+            _declined = _offered - _arrived
+            for _label, _player in (('agent', _controlled), ('opponent', _opponent)):
+                # `offers` est le DÉNOMINATEUR, et il n'est pas décoratif : sans lui, un
+                # `declined` à zéro ne distingue pas « toutes les occasions ont été saisies » de
+                # « aucune n'a été offerte » — les deux se lisent 0 sur la courbe.
+                self.episode_tactical_data[f'reserves_ingress_offers_{_label}'] = sum(
+                    1 for _p, _sq, _t in _offered if _p == _player
+                )
+                self.episode_tactical_data[f'reserves_ingress_declined_{_label}'] = sum(
+                    1 for _p, _sq, _t in _declined if _p == _player
+                )
+                self.episode_tactical_data[f'reserves_ingress_no_destination_{_label}'] = sum(
+                    1 for _p, _sq, _t in _no_dest if _p == _player
+                )
 
             # VALUE attrition metrics (episode-level): destroyed enemy value and lost ally value.
             #
@@ -6247,9 +6342,8 @@ class W40KEngine(gym.Env):
         # ── charge ────────────────────────────────────────────────────────────
         elif action_name == "squad_charge":
             squad_id = semantic["squad_id"]
-            from engine.phase_handlers.shared_utils import (
-                charge_check_eligibility, roll_charge_distance, unit_can_reroll_charge,
-            )
+            from engine.phase_handlers.shared_utils import charge_check_eligibility
+            from engine.phase_handlers.charge_handlers import charge_roll_for_activation
             # V11 §9 P3-2 : la cible de charge est CHOISIE PAR L AGENT, via le slot ennemi porte
             # par l action (11.02 « Declare Charge » : la selection de la cible est un choix de
             # joueur). Le decodeur ne tranche plus par `get_best_enemy_score_for_unit`.
@@ -6280,19 +6374,16 @@ class W40KEngine(gym.Env):
                     f"squad_charge: slot {target_slot} -> cible {target_squad_id} non declarable "
                     f"(11.02) pour squad {squad_id} (rupture masque/commit)"
                 )
-            charge_roll = roll_charge_distance(self.game_state, squad_id)
+            # 11.02.2 — le jet a DÉJÀ eu lieu, à l'activation, et c'est lui qui a borné les slots
+            # que le masque a ouverts (`charge_roll_for_activation`, appelée par
+            # `build_squad_action_mask`). On le RELIT : le rejeter ici rendrait le masque
+            # mensonger, puisqu'il a promis une cible atteignable pour un jet donné.
+            #
+            # La relance éventuelle (`reroll_charge`) est décidée au moment du jet, seul instant
+            # où son critère — « aucune cible à portée » — a encore un sens : ici, une cible a
+            # justement été choisie parmi celles que le jet atteint.
+            charge_roll = charge_roll_for_activation(self.game_state, squad_id)
             plan = charge_build_valid_plan(self.game_state, squad_id, [target_squad_id], charge_roll)
-            # `reroll_charge` (unit_rules.json ; 19.04 pour une unité attachée) : « it CAN reroll
-            # the charge roll ». La décision est prise sur le seul critère qui compte et qui est
-            # ici connu sans approximation — le jet n'atteint aucune destination légale au contact
-            # de la cible. Un dé ne se relance qu'une fois (01 Core, Re-rolls) : une seule tentative.
-            if plan is None and unit_can_reroll_charge(self.game_state, squad_id):
-                charge_roll = roll_charge_distance(
-                    self.game_state, squad_id, previous_roll=charge_roll
-                )
-                plan = charge_build_valid_plan(
-                    self.game_state, squad_id, [target_squad_id], charge_roll
-                )
             unit = get_unit_by_id(squad_id, self.game_state)
             if unit is None:
                 raise KeyError(f"Squad {squad_id} introuvable pour squad_charge")

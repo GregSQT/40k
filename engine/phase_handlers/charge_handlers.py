@@ -3297,6 +3297,85 @@ def _charge_unit_within_engagement_zone(game_state: Dict[str, Any], unit: Dict[s
     )
 
 
+def charge_target_is_reachable(
+    game_state: Dict[str, Any], squad_id: str, target_squad_id: str, charge_roll: int
+) -> bool:
+    """CE jet permet-il d'atteindre CETTE cible (11.04 « within the maximum distance ») ?
+
+    L'ORACLE EST `charge_build_valid_plan`, la fonction que le commit exécute — jamais une
+    réimplémentation, qui annoncerait une atteignabilité que la résolution ne produirait pas.
+    C'est déjà le choix fait par l'observation pour son canal `charge_reachable_max_roll`
+    (`observation_builder`), et par le commit `squad_charge` ; le masque devient ainsi la
+    troisième lecture de la MÊME source, donc la parité masque/exécution est structurelle.
+
+    MESURÉ, et c'est pourquoi le pool par-ancre ne convient pas ici : `charge_build_valid_plan`
+    raisonne PAR FIGURINE (plan de 4-uplets), là où `charge_build_valid_destinations_pool`
+    raisonne par ANCRE d'escouade. Une première version de ce masque dérivait l'atteignabilité du
+    second — 9 divergences sur 37 comparaisons, toutes dans le sens « le commit accepte, le
+    masque refuse », c'est-à-dire des charges légales rendues injouables.
+
+    Aucune garde d'éligibilité 11.02.1 avant l'appel : `charge_build_valid_plan` commence par
+    `charge_check_eligibility` et rend `None`. La doubler ici coûterait deux appels par cible
+    déclarable sans rien changer au verdict.
+    """
+    from engine.phase_handlers.shared_utils import charge_build_valid_plan
+
+    return charge_build_valid_plan(
+        game_state, str(squad_id), [str(target_squad_id)], int(charge_roll)
+    ) is not None
+
+
+def charge_roll_for_activation(game_state: Dict[str, Any], squad_id: str) -> int:
+    """Jet 2D6 de CETTE activation (11.02.2), jeté une fois et mémorisé.
+
+    POURQUOI À L'ACTIVATION, ET PLUS À LA SÉLECTION DE CIBLE. La séquence 11.02 est « Declare
+    Charge → Make Charge Roll → Attempt Charge », et 11.04 borne les cibles sélectionnables par
+    le jet. Le chemin PvP/PvE l'applique depuis V11 ; le chemin gym, lui, gardait le jet APRÈS le
+    choix de la cible, avec un pool de cibles borné par `charge_max_distance` (12") au lieu du
+    jet — l'agent choisissait donc à l'aveugle, puis les dés tranchaient.
+
+    Ce que ça coûtait, mesuré sur le step.log du 2026-08-11 (494 charges de l'agent) : 41 % des
+    déclarations visaient une cible à 9" ou plus, quand un 2D6 n'atteint 9 que 27,8 % du temps.
+    La médiane des charges ratées est à 9" de distance, celle des réussies à 5". Les 10 points de
+    taux de réussite qui séparaient l'agent de son adversaire (33,6 % contre 43,6 %) sortaient
+    entièrement de là.
+
+    Le masque de charge appelle cette fonction avant de borner ses slots, le commit la relit :
+    une seule valeur, donc aucune divergence masque/exécution possible. L'activation d'une
+    escouade en phase de charge VAUT déclaration (11.02.1), et c'est déjà une décision explicite
+    de l'agent (`ActionDecoder.activation_selection_slots`).
+
+    RELANCE (`reroll_charge`, unit_rules.json ; 19.04 sur une escouade attachée) : « it CAN
+    reroll the charge roll », et le seul critère connu ici est celui de 11.04 — le jet n'amène
+    AUCUNE cible à portée. Elle est donc décidée ICI, au jet, et plus au commit : c'est le seul
+    moment où la question se pose encore. Un dé ne se relance qu'une fois (01 Core).
+    """
+    from engine.phase_handlers.shared_utils import (
+        get_enemy_slot_mapping, roll_charge_distance, unit_can_reroll_charge,
+    )
+
+    rolls = game_state.setdefault("charge_roll_values", {})
+    squad_id = str(squad_id)
+    if squad_id in rolls:
+        return int(rolls[squad_id])
+
+    charge_roll = roll_charge_distance(game_state, squad_id)
+    if unit_can_reroll_charge(game_state, squad_id):
+        entry = require_key(require_key(game_state, "units_cache"), squad_id)
+        candidates = [
+            str(esid)
+            for esid in get_enemy_slot_mapping(game_state, int(require_key(entry, "player")))
+            if esid is not None
+        ]
+        if not any(
+            charge_target_is_reachable(game_state, squad_id, esid, charge_roll)
+            for esid in candidates
+        ):
+            charge_roll = roll_charge_distance(game_state, squad_id, previous_roll=charge_roll)
+    rolls[squad_id] = int(charge_roll)
+    return int(charge_roll)
+
+
 def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: str, charge_roll: int,
                                         target_id: Optional[str] = None,
                                         full_occupied_positions: Optional[Set[Tuple[int, int]]] = None,

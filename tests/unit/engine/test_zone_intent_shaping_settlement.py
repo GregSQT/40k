@@ -37,13 +37,19 @@ INVADE_NEUTRAL = 0.1
 INVADE_OWN = -0.1
 
 
-def _calculator() -> RewardCalculator:
-    """RewardCalculator sans __init__ : seuls la config et le bareme sont utiles ici."""
+def _calculator(enabled: Any = True) -> RewardCalculator:
+    """RewardCalculator sans __init__ : seuls la config et le bareme sont utiles ici.
+
+    `enabled` est explicite et sans defaut cote PRODUCTION (`require_key`) : ces verrous-ci
+    decrivent le shaping ACTIF, ils le posent donc a True. Le drapeau lui-meme est verrouille
+    par les trois tests de fin de fichier.
+    """
     calc = RewardCalculator.__new__(RewardCalculator)
     calc.config = {"controlled_agent": "TestAgent"}  # type: ignore[assignment]
     calc.rewards_config = {  # type: ignore[assignment]
         "TestAgent": {
             "zone_intent_shaping": {
+                "enabled": enabled,
                 "defend_held_bonus": DEFEND_HELD,
                 "invade_success_bonus": INVADE_SUCCESS,
                 "invade_neutral_bonus": INVADE_NEUTRAL,
@@ -491,3 +497,79 @@ def test_pending_shaping_does_not_leak_across_episodes() -> None:
     engine.reset()
 
     assert engine.game_state["_pending_zone_shaping"] == 0.0
+
+
+def test_the_flag_switches_the_whole_shaping_off() -> None:
+    """`enabled: false` ne verse RIEN, pas meme les termes negatifs.
+
+    Debranche le 2026-08-11 sur mesure : la part des declarations payees par ce bareme valait
+    0.269 contre 0.355 pour la meme politique tirant son intent au hasard
+    (`combat/intent_shaping_aligned_ratio` / `_baseline`), et l'agent restait sous ce hasard
+    dans 95 % des fenetres des 10 000 derniers episodes. Le terme etait anti-correle au
+    comportement gagnant.
+
+    Les quatre situations payantes sont passees en revue, la penalite comprise : un
+    debranchement qui laisserait passer le seul terme negatif serait pire que l'ancien etat.
+    """
+    payantes = [
+        ([INTENT_DEFEND], [1.0], [1]),      # defend tenu    -> +DEFEND_HELD
+        ([INTENT_INVADE], [-1.0], [1]),     # invasion reussie -> +INVADE_SUCCESS
+        ([INTENT_INVADE], [0.0], [1]),      # zone neutre prise -> +INVADE_NEUTRAL
+        ([INTENT_INVADE], [1.0], [1]),      # invasion de sa propre zone -> INVADE_OWN (< 0)
+    ]
+    for intents, declared, controllers in payantes:
+        actif = _calculator(True).settle_zone_intent_declaration(
+            _game_state(controllers), {"intents": intents, "control": declared}, 1
+        )
+        assert actif != 0.0, f"cas non payant, il ne mesure rien : {intents} {declared}"
+        debranche = _calculator(False).settle_zone_intent_declaration(
+            _game_state(controllers), {"intents": intents, "control": declared}, 1
+        )
+        assert debranche == 0.0, f"shaping verse malgre enabled=false : {intents} {declared}"
+
+
+def test_the_flag_is_required_and_must_be_a_boolean() -> None:
+    """Aucun defaut : ni cle absente, ni chaine truthy.
+
+    Les deux se lisent « shaping actif » si on les laisse passer — `"false"` est une chaine non
+    vide, donc vraie en Python. C'est exactement le repli silencieux que T1 interdit.
+    """
+    from shared.data_validation import ConfigurationError
+
+    calc = _calculator(True)
+    del calc.rewards_config["TestAgent"]["zone_intent_shaping"]["enabled"]
+    with pytest.raises(ConfigurationError, match="'enabled' is missing"):
+        calc.settle_zone_intent_declaration(
+            _game_state([1]), {"intents": [INTENT_DEFEND], "control": [1.0]}, 1
+        )
+
+    for pas_un_bool in ("false", "true", 0, 1, None):
+        with pytest.raises(TypeError, match="doit etre un booleen"):
+            _calculator(pas_un_bool).settle_zone_intent_declaration(
+                _game_state([1]), {"intents": [INTENT_DEFEND], "control": [1.0]}, 1
+            )
+
+
+def test_the_shipped_config_declares_the_flag() -> None:
+    """La config LIVREE porte la cle, quelle que soit sa valeur.
+
+    Sa VALEUR est un choix de campagne et n'est deliberement pas verrouillee ici — rebrancher le
+    shaping ne doit pas rendre un test rouge. Sa PRESENCE, si : elle est lue par `require_key` a
+    chaque solde, donc une config qui l'omet fait lever le run en cours de partie, pas au
+    demarrage.
+    """
+    import json
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[3] / (
+        "config/agents/ArmageddonAgent/ArmageddonAgent_rewards_config.json"
+    )
+    shaping = json.loads(path.read_text(encoding="utf-8"))["ArmageddonAgent"]["zone_intent_shaping"]
+    assert isinstance(shaping.get("enabled"), bool), (
+        f"{path.name} : zone_intent_shaping.enabled absent ou non booleen"
+    )
+    # Les quatre montants restent declares : le debranchement n'est pas une suppression.
+    for montant in (
+        "defend_held_bonus", "invade_success_bonus", "invade_neutral_bonus", "invade_lost_penalty"
+    ):
+        assert montant in shaping, f"{montant} retire de la config au lieu d'etre debranche"

@@ -571,3 +571,21 @@ def test_profile_can_produce_the_best_model_it_promises(profile_name: str) -> No
         f"avant le PREMIER score robuste, pour un run de {total}. Le run refuserait de démarrer "
         "(train.py:3596-3612)."
     )
+    # SÉLECTIONNER, et pas seulement CALCULER. La garde ci-dessus — celle de `setup_callbacks` —
+    # se contente d'un premier score : elle laisse passer un profil qui n'en produit qu'UN, et
+    # `save_best_robust` retient alors le dernier modèle en le présentant comme le meilleur.
+    # C'est exactement l'état de `x1_long` avant le 2026-08-11 (50 000 épisodes, `bot_eval_freq`
+    # 10000, fenêtre de 5 : une seule position possible, la dernière), corrigé ce jour-là en
+    # ramenant la fenêtre à 3 — pas en abaissant `bot_eval_freq`, dont le coût est mesuré dans sa
+    # note. Sans ce verrou, rien n'empêche le défaut de revenir au prochain changement de durée.
+    #
+    # Le seuil est le MINIMUM STRICT — deux positions de fenêtre, donc un vrai choix — et non un
+    # confort : `x1_long` en a trois (5 évaluations pour une fenêtre de 3), et c'est ce qui rend
+    # sa marge visible ici plutôt que supposée.
+    evaluations = total // freq
+    assert evaluations >= window + 1, (
+        f"{profile_name} : {total} épisodes / bot_eval_freq={freq} = {evaluations} évaluations "
+        f"pour robust_window={window} → {max(0, evaluations - window + 1)} score(s) robuste(s). "
+        "Il en faut au moins 2 pour que save_best_robust choisisse au lieu de subir : baisser "
+        f"robust_window à {max(1, evaluations - 1)} ou bot_eval_freq à {total // (window + 1)}."
+    )

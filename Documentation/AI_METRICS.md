@@ -334,21 +334,46 @@ To monitor whether forcing improves or degrades robustness:
 
 ## Réserves stratégiques (`reserves/`)
 
-Usage des réserves (règles 20.01 / 20.04) par l'agent, un point par épisode.
+Usage des réserves (règles 20.01 / 20.04), un point par épisode. **Six mesures, chacune en deux
+courbes** — suffixe `_agent` (le joueur contrôlé) et `_opponent` (le bot). Le siège de l'agent
+étant tiré au sort (`agent_seat_mode: random`), le moteur compte par numéro de joueur et projette
+sur ces deux suffixes à la terminaison.
 
-- `reserves/placed_agent`
-  - Unités que l'agent a mises en réserve au déploiement. **0 et plat** sur un scénario sans
-    réserve déclarée : ce n'est pas une panne, c'est le scénario.
-- `reserves/deployed_agent`
-  - Unités effectivement arrivées depuis la réserve. Toujours `<= placed_agent`.
-- `reserves/destroyed_turn3`
-  - Unités détruites par la règle 20.04 (encore en réserve à la fin du tour 3), **tous joueurs**.
-    Monte quand l'agent place en réserve sans jamais faire arriver ses unités — un placement
-    subi, pas une tactique.
+- `reserves/placed_{agent,opponent}`
+  - Unités mises en réserve au déploiement. **0 et plat** sur un scénario sans réserve
+    déclarée : ce n'est pas une panne, c'est le scénario. Côté bot, la valeur ne vient QUE de la
+    liste : le wrapper lui retire `WAIT` du pool de mise en place, donc il ne décide jamais
+    d'une mise en réserve (`env_wrappers._open_placement_slots`).
+- `reserves/deployed_{agent,opponent}`
+  - Unités effectivement arrivées depuis la réserve. Toujours `<= placed_*`.
+- `reserves/destroyed_turn3_{agent,opponent}`
+  - Unités détruites par 20.04 (encore en réserve à la fin du 3e round). Monte quand un camp
+    place en réserve sans jamais faire arriver ses unités.
+- `reserves/ingress_offers_{agent,opponent}`
+  - Occasions d'arriver **réellement offertes** : couples (unité, tour) où le masque a ouvert au
+    moins un slot d'ingress. C'est le DÉNOMINATEUR des deux courbes suivantes — sans lui, un
+    `declined` à zéro ne distingue pas « toutes les occasions ont été saisies » de « aucune n'a
+    été offerte ».
+- `reserves/ingress_declined_{agent,opponent}`
+  - Occasions offertes et **non saisies** : l'unité pouvait arriver, elle est restée en réserve.
+    C'est une DÉCISION, et 20.03 l'autorise (« can », jamais « must »).
+- `reserves/ingress_no_destination_{agent,opponent}`
+  - Tours où le pool d'ingress était **vide** : aucune case ne satisfaisait à la fois la bande
+    de 6" du bord, les > 8" de tout ennemi et la fermeture de la zone adverse avant le 3e round.
+    Aucune décision n'a été prise — l'unité n'avait nulle part où arriver.
 
-Lire les trois ENSEMBLE : `placed` seul ne dit pas si la réserve a servi, et `deployed` seul ne
-dit pas ce qu'elle a coûté. `placed` élevé avec `deployed` bas et `destroyed_turn3` qui monte
-est la signature d'une réserve gaspillée.
+Lire l'ensemble, jamais une courbe seule : `placed` ne dit pas si la réserve a servi, `deployed`
+ne dit pas ce qu'elle a coûté. `placed` élevé avec `deployed` bas et `destroyed_turn3` qui monte
+est la signature d'une réserve gaspillée — mais **c'est le couple `declined` / `no_destination`
+qui dit à qui la faute** : un `declined` élevé est un choix de l'agent (donc corrigible par le
+barème), un `no_destination` élevé est une impasse géométrique du scénario, que pénaliser
+reviendrait à punir un choix qui n'a jamais existé.
+
+> Le suffixe `_opponent` n'est pas décoratif. Avant le 2026-08-11, les trois premières mesures ne
+> comptaient que le joueur contrôlé — `destroyed_turn3` était même documenté ici « tous joueurs »
+> alors que son site d'écriture filtrait sur l'agent. La perte de réserves du bot n'apparaissait
+> donc sur aucune courbe, et rien ne permettait de vérifier ce que son code promet : il arrive
+> dès qu'un slot s'ouvre, et ne peut perdre une réserve que si le pool est resté vide.
 
 ---
 
@@ -550,6 +575,21 @@ sous `model_params` (PPO) ou `callback_params` (évaluation) ; `bot_training.rat
 | **00_critical/s_deploy_active_share** | Suit la rampe du profil (0.3 → 0.8 en fin de run : depuis le 2026-08-02 `freeze_after_progress` vaut 1.0, donc `active_ratio_end` est bel et bien atteint) | **Reste à `active_ratio_start`** : la rampe ne progresse pas — scénario hors split training (le scheduler n'émet alors rien du tout), ou compteur d'épisodes qui n'avance pas au regard du dénominateur (V11 §0.57 : compteur LOCAL à un env divisé par le total GLOBAL, la rampe restait plate à `n_envs=48`) | **Proche de 1.0** : plus aucun épisode en placement fixe — `active_ratio_end` ↓ (le placement fixe conserve les positions du scénario comme source de variété) | Part réelle d'épisodes en déploiement actif | Variable explicative des trois lignes ci-dessus |
 
 | **00_critical/t_truncated_episodes** | **0, et plat** | **Croissante** : le garde anti-runaway du moteur coupe des épisodes — une BOUCLE, pas une fin de partie. Le diagnostic de chacune (tour, phase, unité active, pools, dernière action) est écrit ligne à ligne dans `truncations.jsonl`, à côté des événements TensorBoard de l'agent ; le bilan est aussi imprimé en fin de run | *(sans objet : ce compteur ne doit pas monter)* | Cumul des épisodes coupés par `_episode_step_limit`, sur les épisodes d'ENTRAÎNEMENT de CE run. Un point est posé à CHAQUE fin d'épisode, y compris normale : sans cela la courbe serait absente du cas nominal, donc indiscernable d'une métrique non câblée | Un épisode tronqué n'entre dans AUCUNE courbe de jeu (ni reward, ni longueur, ni win rate) mais compte dans `episode_count` — c'est lui qui est persisté dans `_run_state.json`, et le run s'arrête sur la somme des `dones`. Les troncatures d'ÉVAL ne sont pas sur cette courbe (l'abscisse ne compte que les épisodes d'entraînement) : elles sont dans le bilan de fin de run et dans `truncations.jsonl`. Sur un `--append`, le cumul repart de 0 à un `episode_count` plus élevé — l'historique inter-runs est dans le journal, dont chaque ligne porte son `run` |
+
+> **Le shaping zone-intent est DÉBRANCHÉ depuis le 2026-08-11**
+> (`zone_intent_shaping.enabled: false` dans le fichier de récompenses ; le code de
+> `settle_zone_intent_declaration` et les quatre montants restent en place, un `true` suffit à
+> tout rebrancher). Conséquence de lecture : `combat/intent_shaping_aligned_ratio` et son
+> `_baseline` restent émis et gardent leur sens descriptif — « à quelle fréquence l'agent tombe
+> sur les couples (contrôle, intent) que ce barème payait, comparé au même tirage sans regarder
+> le plateau » — mais l'écart entre les deux **ne coûte ni ne rapporte plus rien**. Ne plus en
+> tirer de conclusion sur les récompenses tant que le drapeau est à `false`.
+>
+> Ce qui a motivé le débranchement, mesuré sur le run x1_long du 2026-08-11 : `aligned` 0.269
+> contre un `baseline` de 0.355, l'agent restant **sous** le hasard dans 95 % des fenêtres des
+> 10 000 derniers épisodes, pendant que `o_intent_control_dependency` montait de 0.004 à 0.104.
+> Soit une tête qui lit le plateau de mieux en mieux pour en tirer l'intention que le barème ne
+> paie pas — un terme dense anti-corrélé au comportement gagnant (96,9 % de combined).
 
 > **Deux tags en `o_`** — `o_intent_control_dependency` (diagnostic, écrit par `metrics_tracker`) et
 > `o_robust_current_score` (décision, écrit par `training_callbacks`) partagent la lettre sans

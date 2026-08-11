@@ -90,6 +90,44 @@ def selection_worst_bot(scores):
         )
     return min(selection.items(), key=lambda item: item[1])
 
+
+def iter_bot_score_rows(results):
+    """``(nom, win-rate, wins, losses, draws)`` pour les BOTS presents dans un dict de resultats.
+
+    SOURCE UNIQUE de « qu'est-ce qui merite une ligne `vs <bot>` », pour les deux resumes
+    publies (fin d'entrainement et mode eval-only, tous deux dans ai/train.py).
+
+    Les deux selectionnaient par LISTE NOIRE — imprimer toute cle numerique sauf une liste de
+    cles connues — et une liste noire ne protege pas de la cle SUIVANTE. Mesure du run du
+    2026-08-11 : `roster_gap`, un ECART de 0,012, s'est affiche « vs roster_gap : 1.2% », et
+    `total_episodes_played`, un COMPTE de 360 000, « vs total_episodes_played: 360000.0% ».
+    Les deux se lisaient comme des win-rates de bots qui n'existent pas.
+
+    L'iteration part donc de `ALL_BOT_NAMES` : un agregat ajoute aux resultats ne peut plus s'y
+    glisser, quel que soit son type ou son nom.
+
+    Raises:
+        TypeError: si un bot present porte un score non numerique (donnee corrompue, jamais
+            un cas normal — pas de saut silencieux).
+    """
+    for bot_name in sorted(ALL_BOT_NAMES):
+        if bot_name not in results:
+            continue
+        score = results[bot_name]
+        if not isinstance(score, (int, float)) or isinstance(score, bool):
+            raise TypeError(
+                f"results['{bot_name}'] doit etre numerique "
+                f"(got {type(score).__name__}: {score!r})"
+            )
+        yield (
+            bot_name,
+            float(score),
+            results.get(f'{bot_name}_wins', '?'),      # get allowed : compteurs optionnels
+            results.get(f'{bot_name}_losses', '?'),    # (une eval peut publier le seul score)
+            results.get(f'{bot_name}_draws', '?'),
+        )
+
+
 __all__ = [
     'LearningRateScheduleCallback',
     'EntropyScheduleCallback',
