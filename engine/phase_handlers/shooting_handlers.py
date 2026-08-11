@@ -1316,51 +1316,64 @@ def _apply_preview_placement(
         update_units_cache_position(gs, unit_id_str, int(unit["col"]), int(unit["row"]))
         return
     if kind == "models":
-        from engine.phase_handlers.shared_utils import update_model_position
+        from engine.phase_handlers.shared_utils import (
+            _los_begin_batch,
+            _los_end_batch,
+            plan_entry_model_orientation,
+            update_model_position,
+        )
         from engine.terrain_utils import resolve_model_floor_level
 
-        known = {str(m) for m in require_key(gs, "squad_models").get(unit_id_str, [])}
         models_cache = require_key(gs, "models_cache")
         terrain_areas = require_key(gs, "terrain_areas")
-        for model_id, col, row, level, orientation in placement[1]:
-            if model_id not in known:
-                raise KeyError(
-                    f"_apply_preview_placement: figurine {model_id!r} absente de l'escouade "
-                    f"{unit_id_str!r} — plan incohérent, pas une figurine à ignorer"
+        # Batch LoS : `update_model_position` invalide les caches de LoS à CHAQUE appel, et
+        # chaque invalidation balaie `los_cache` et `hex_los_cache` en entier. En posant N
+        # figurines une à une, on payait N balayages là où un seul suffit. Même encadrement que
+        # `commit_move`, le seul autre écrivain multi-figurines du dépôt (« choke-point LoS D1 »).
+        # MESURÉ à 6 figurines sur un cache de 20 000 entrées : 8,85 ms → 2,19 ms.
+        _los_owned = _los_begin_batch(gs)
+        try:
+            for entry in placement[1]:
+                model_id, col, row, level, orientation = entry
+                model = models_cache.get(str(model_id))  # get allowed (absence = plan incohérent)
+                if model is None or str(require_key(model, "squad_id")) != unit_id_str:
+                    raise KeyError(
+                        f"_apply_preview_placement: figurine {model_id!r} absente de l'escouade "
+                        f"{unit_id_str!r} — plan incohérent, pas une figurine à ignorer"
+                    )
+                # Orientation VISÉE par ce plan, sinon celle du cache : `plan_entry_model_orientation`
+                # est la SOURCE UNIQUE de cette résolution. Elle était réécrite ici, et la copie
+                # avait déjà divergé — un `get(..., 0)` là où la source `require_key` et lève,
+                # donc un aperçu mesuré socle face nord sur un cache que tout commit refuserait.
+                effective_orientation = plan_entry_model_orientation(entry, model)
+                # ⚠️ NIVEAU EFFECTIF, JAMAIS LE NIVEAU BRUT DU PLAN. Le niveau porté par le plan
+                # est celui de la VUE au drop — un HINT que `deploy_generate_formation` estampe
+                # sur TOUTES les figurines sans vérifier chacune. Une figurine dont le socle ne
+                # tient pas sur un plancher de ce niveau est au SOL (13.06), et l'écrire à l'étage
+                # fait lever `floor_height_at` : la requête partait en 500 et le client perdait
+                # TOUT son calque (cône, blink, couvert). Dans le cas non levant, l'aperçu
+                # mesurait à l'étage ce que la validation résout au sol.
+                # ⚠️ Cette résolution est réécrite à l'identique par CHAQUE écrivain de plan
+                # (`deployment_handlers`, `movement_handlers`, et ici) : l'invariant « le niveau
+                # écrit est un niveau résolu » tient par la discipline de ses appelants, pas par
+                # construction. Le porter dans une primitive commune est un chantier ouvert, cf.
+                # ROADMAP — tant qu'il n'est pas fait, un nouvel écrivain refait le défaut ci-dessus.
+                effective_level = resolve_model_floor_level(
+                    int(col),
+                    int(row),
+                    require_key(model, "BASE_SHAPE"),
+                    require_key(model, "BASE_SIZE"),
+                    effective_orientation,
+                    int(level),
+                    terrain_areas,
                 )
-            model = require_key(models_cache, str(model_id))
-            # L'orientation du PLAN prime (pivot molette en cours), sinon celle de la figurine :
-            # c'est elle qui oriente l'empreinte, donc elle entre dans la résolution du niveau.
-            effective_orientation = (
-                int(model.get("orientation", 0))  # get allowed (défaut 0 = face nord)
-                if orientation is None
-                else int(orientation)
-            )
-            # ⚠️ NIVEAU EFFECTIF, JAMAIS LE NIVEAU BRUT DU PLAN. Le niveau porté par le plan est
-            # celui de la VUE au moment du drop — un HINT que `deploy_generate_formation` estampe
-            # sur TOUTES les figurines sans vérifier chacune. Une figurine dont le socle ne tient
-            # pas sur un plancher de ce niveau est au SOL (13.06), et l'écrire à l'étage fait
-            # lever `floor_height_at` : côté aperçu, la requête partait en 500 et l'effet client
-            # perdait TOUT son calque (cône, blink, couvert). Dans le cas non levant, l'aperçu
-            # mesurait à l'étage ce que la validation résout au sol — la divergence même que
-            # cette fonction existe pour supprimer.
-            # `resolve_model_floor_level` est le MÊME résolveur que les chemins de commit
-            # (`deployment_handlers` avant chaque `update_model_position`) : la garantie vit dans
-            # le moteur, pas dans la discipline de l'appelant.
-            effective_level = resolve_model_floor_level(
-                int(col),
-                int(row),
-                require_key(model, "BASE_SHAPE"),
-                require_key(model, "BASE_SIZE"),
-                effective_orientation,
-                int(level),
-                terrain_areas,
-            )
-            update_model_position(
-                gs, model_id, int(col), int(row),
-                level=effective_level,
-                orientation=None if orientation is None else int(orientation),
-            )
+                update_model_position(
+                    gs, model_id, int(col), int(row),
+                    level=effective_level,
+                    orientation=None if orientation is None else int(orientation),
+                )
+        finally:
+            _los_end_batch(gs, _los_owned)
         return
     raise ValueError(f"_apply_preview_placement: forme de placement inconnue {kind!r}")
 
@@ -1491,10 +1504,8 @@ def _preview_shoot_valid_targets(
     if not ranged_weapons(unit):
         return empty_preview
 
-    _preview_perf_t0 = time.perf_counter()
     preview_cache_key: Optional[Tuple[Any, ...]] = None
     if not include_los_cells:
-        _preview_perf_cache_t0 = time.perf_counter()
         preview_cache_key = _move_los_preview_cache_key(
             game_state,
             unit,
@@ -1504,16 +1515,6 @@ def _preview_shoot_valid_targets(
         )
         cached_preview = _move_los_preview_cache.get(preview_cache_key)
         if cached_preview is not None:
-            _preview_perf_after_cache = time.perf_counter()
-            # print(
-            #     "[MOVE_LOS_PREVIEW_PERF] "
-            #     f"unit={unit_id_str} placement={placement} "
-            #     f"total_ms={(_preview_perf_after_cache - _preview_perf_t0) * 1000:.1f} "
-            #     f"cache_hit=1 "
-            #     f"cache_lookup_ms={(_preview_perf_after_cache - _preview_perf_cache_t0) * 1000:.1f} "
-            #     f"valid_targets={cached_preview['valid_targets']}",
-            #     flush=True,
-            # )
             return copy.deepcopy(cached_preview)
 
     # Preview read-only : ``config`` et ``weapon_damage_table`` sont des données statiques
@@ -1524,15 +1525,39 @@ def _preview_shoot_valid_targets(
     # revalide un fingerprint de l'état. Le partager par référence au lieu de le copier est donc
     # sans risque : si la preview bouge une figurine, le fingerprint change et la preview se
     # reconstruit SON propre holder, sans toucher celui de l'état réel.
+    #
+    # MÊME RAISONNEMENT pour les cinq clés suivantes, chacune vérifiée individuellement — le
+    # deepcopy est 99 % du coût de l'aperçu, et l'aperçu part à CHAQUE pose de figurine :
+    #   - `objectives` / `terrain_areas` / `deployment_pools` : écrites une fois au chargement du
+    #     scénario (`w40k_core`), jamais pendant une action ;
+    #   - `_obscuring_area_sets_cache` : RÉ-ASSIGNÉ (`game_state[...] = out`, construit dans un
+    #     local), jamais muté en place — une reconstruction sur la copie ne touche pas l'original ;
+    #   - `_objective_hex_zones_cache` : idem, ré-assigné en bloc `(objectifs, zones)`.
+    # MESURÉ sur le scénario d'entraînement : 124,5 ms → 54,4 ms de deepcopy, soit 70 ms rendus
+    # par aperçu.
+    #
+    # ⚠️ `_deployment_scoring_cache` est VOLONTAIREMENT ABSENT alors qu'il est le plus gros poste
+    # (55 ms) : c'est le seul de la liste qui soit muté EN PLACE (`setdefault` puis écriture d'une
+    # sous-clé par joueur, `action_decoder`). Le partager par référence marcherait tant qu'aucun
+    # aperçu ne déclenche de scoring de déploiement — c'est-à-dire jusqu'au jour où l'un le fera,
+    # et il écrirait alors dans l'état RÉEL depuis une copie de travail. Un gain de 55 ms ne paie
+    # pas ce risque-là.
     _preview_share_memo: Dict[int, Any] = {}
-    for _shared_key in ("config", "weapon_damage_table", "_move_spatial_cache"):
+    for _shared_key in (
+        "config",
+        "weapon_damage_table",
+        "_move_spatial_cache",
+        "objectives",
+        "terrain_areas",
+        "deployment_pools",
+        "_obscuring_area_sets_cache",
+        "_objective_hex_zones_cache",
+    ):
         _shared_val = game_state.get(_shared_key)
         if _shared_val is not None:
             _preview_share_memo[id(_shared_val)] = _shared_val
 
-    _preview_perf_deepcopy_t0 = time.perf_counter()
     gs = copy.deepcopy(game_state, _preview_share_memo)
-    _preview_perf_after_deepcopy = time.perf_counter()
     # Preview de la phase de MOVE : elle simule une future activation de tir alors que
     # `shooting_phase_start` (seul poseur de `weapon_rule`) n a pas encore tourne. Cette
     # initialisation est donc un MONTAGE de simulation sur la copie `gs`, au meme titre que
@@ -1583,18 +1608,13 @@ def _preview_shoot_valid_targets(
         if _r > _preview_max_rng:
             _preview_max_rng = _r
 
-    _preview_perf_los_t0 = time.perf_counter()
     build_unit_los_cache(
         gs, unit_id_str,
         max_target_range=_preview_max_rng if _preview_max_rng > 0 else None,
     )
-    _preview_perf_after_los = time.perf_counter()
-    _preview_perf_enemy_precheck_t0 = time.perf_counter()
     preview_enemy_precheck = _build_weapon_availability_enemy_precheck(
         gs, u, require_key(u, "RNG_WEAPONS")
     )
-    _preview_perf_after_enemy_precheck = time.perf_counter()
-    _preview_perf_weapon_availability_t0 = time.perf_counter()
     preview_weapon_available_pool = weapon_availability_check(
         gs,
         u,
@@ -1603,9 +1623,7 @@ def _preview_shoot_valid_targets(
         adjacent_status,
         _precheck=preview_enemy_precheck,
     )
-    _preview_perf_after_weapon_availability = time.perf_counter()
 
-    _preview_perf_pool_t0 = time.perf_counter()
     valid_targets = valid_target_pool_build(
         gs,
         u,
@@ -1615,36 +1633,15 @@ def _preview_shoot_valid_targets(
         precomputed_weapon_available_pool=preview_weapon_available_pool,
         precomputed_enemy_precheck=preview_enemy_precheck,
     )
-    _preview_perf_after_pool = time.perf_counter()
     if include_los_cells:
-        _preview_perf_cells_t0 = time.perf_counter()
         _update_unit_los_preview_data(gs, u, weapon_rule, advance_status, adjacent_status)
-        _preview_perf_after_cells = time.perf_counter()
     else:
-        _preview_perf_cells_t0 = time.perf_counter()
         u["los_preview_attack_cells"] = []
         u["los_preview_cover_cells"] = []
         u["los_preview_ratio_by_hex"] = {}
-        _preview_perf_after_cells = time.perf_counter()
 
-    _preview_perf_cover_t0 = time.perf_counter()
     cover_by_unit_id = build_cover_by_unit_id_for_valid_targets(gs, u, valid_targets)
     visible_cells_by_target = build_visible_cells_by_target(gs, u, valid_targets)
-    _preview_perf_after_cover = time.perf_counter()
-    # print(
-    #     "[MOVE_LOS_PREVIEW_PERF] "
-    #     f"unit={unit_id_str} placement={placement} "
-    #     f"total_ms={(_preview_perf_after_cover - _preview_perf_t0) * 1000:.1f} "
-    #     f"deepcopy_ms={(_preview_perf_after_deepcopy - _preview_perf_deepcopy_t0) * 1000:.1f} "
-    #     f"los_cache_ms={(_preview_perf_after_los - _preview_perf_los_t0) * 1000:.1f} "
-    #     f"enemy_precheck_ms={(_preview_perf_after_enemy_precheck - _preview_perf_enemy_precheck_t0) * 1000:.1f} "
-    #     f"weapon_availability_ms={(_preview_perf_after_weapon_availability - _preview_perf_weapon_availability_t0) * 1000:.1f} "
-    #     f"valid_pool_ms={(_preview_perf_after_pool - _preview_perf_pool_t0) * 1000:.1f} "
-    #     f"cells_ms={(_preview_perf_after_cells - _preview_perf_cells_t0) * 1000:.1f} "
-    #     f"cover_ms={(_preview_perf_after_cover - _preview_perf_cover_t0) * 1000:.1f} "
-    #     f"valid_targets={valid_targets}",
-    #     flush=True,
-    # )
 
     result_payload = {
         "valid_targets": valid_targets,

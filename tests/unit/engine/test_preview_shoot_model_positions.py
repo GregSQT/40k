@@ -311,3 +311,27 @@ def test_view_level_outside_a_floor_resolves_to_ground_instead_of_raising(engine
         "une figurine hors empreinte de plancher est au SOL ; l'écrire à l'étage fait lever le "
         "moteur et le client perd tout son calque de LoS"
     )
+
+
+def test_corrupt_orientation_raises_instead_of_defaulting_to_north(engine):
+    """L'orientation absente du cache est un cache CORROMPU, pas une figurine face nord.
+
+    `plan_entry_model_orientation` est la source unique de cette résolution et lève dans ce cas ;
+    l'aperçu la réécrivait avec un `get(..., 0)`, donc mesurait une empreinte orientée nord là où
+    tous les chemins de commit refusent l'état. Verrouille la réutilisation du helper.
+    """
+    game_state = engine.game_state
+    unit_id, model_ids = _multi_model_unit(game_state)
+    _send_off_table(game_state, unit_id, model_ids)
+    del game_state["models_cache"][model_ids[0]]["orientation"]
+
+    # Coordonnées PROPRES à ce test : l'aperçu est mémoïsé sur (plan, fingerprint d'état), et
+    # `orientation` n'entre pas dans ce fingerprint — réutiliser le plan d'un autre test servirait
+    # une entrée de cache sans jamais exécuter le placement, donc un vert vacant.
+    with pytest.raises(Exception) as excinfo:
+        preview_shoot_valid_targets_from_model_positions(
+            game_state, unit_id,
+            [[mid, 31 + i, 27, 0] for i, mid in enumerate(model_ids)],
+            include_los_cells=False,
+        )
+    assert "orientation" in str(excinfo.value).lower()
