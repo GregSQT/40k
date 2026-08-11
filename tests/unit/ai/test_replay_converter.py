@@ -109,7 +109,7 @@ def test_toute_la_famille_move_est_parsee_pas_seulement_moved() -> None:
     ctx = {"turn": 1, "phase": "move", "player": 1, "timestamp": "t"}
     attendu = {
         "Unit 1(1,1) MOVED from (0,0) to (3,0)": "move",
-        "Unit 1(1,1) ADVANCED [FLY] from (0,0) to (3,0) [Roll: 4] [Strategy: aggressive]": "advance",
+        "Unit 1(1,1) ADVANCED [FLY] from (0,0) to (3,0) [Roll: 4]": "advance",
         "Unit 1(1,1) FLED from (0,0) to (3,0)": "flee",
         "Unit 1(1,1) REACTIVE MOVED [FIRE OVERWATCH] from (0,0) to (3,0) [Roll: 5]"
         " - trigger: Unit 2->(1,1)": "reactive_move",

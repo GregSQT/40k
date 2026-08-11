@@ -2329,7 +2329,7 @@ class W40KEngine(gym.Env):
                     "pose rendue — en tirer une seconde ici ferait exécuter une action que "
                     "l'appelant n'a pas vue."
                 )
-            auto_steps = self.game_state.get("_deployment_auto_steps", 0)
+            auto_steps = self.game_state.get("_deployment_auto_steps", 0)  # get allowed : compteur initialisé au 1er pas auto
             if not isinstance(auto_steps, int) or isinstance(auto_steps, bool):
                 raise TypeError(
                     f"_deployment_auto_steps must be integer (got {type(auto_steps).__name__})"
@@ -5460,6 +5460,15 @@ class W40KEngine(gym.Env):
         if _rapid_fire:
             details["rapid_fire_bonus_shot"] = True
             details["rapid_fire_rule_value"] = int(_rapid_fire)
+        # [MELTA] 24.25 : JUMEAU du precedent. Comme lui, propriete de l ACTIVATION (la cible
+        # etait-elle a demi-portee au moment du choix ?), constante sur le groupe, donc portee
+        # par toutes ses lignes. Absente en melee : etat metier valide.
+        _melta = raw_log.get("meltaApplied")  # get allowed
+        if _melta:
+            details["melta_rule_value"] = int(_melta)
+        # [PRECISION] 24.28 : drapeau sans parametre, donc un booleen la ou [MELTA] porte son X.
+        if raw_log.get("precisionApplied"):  # get allowed
+            details["precision_applied"] = True
         # Les 11 champs par-jet : la cle DOIT exister (le formateur teste `not in details`).
         for src, dst in self._SHOT_RECORD_FIELD_MAP.items():
             details[dst] = shot.get(src)  # get allowed

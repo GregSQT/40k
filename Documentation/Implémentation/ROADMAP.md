@@ -196,6 +196,77 @@ Prêts à démarrer sans décision produit :
   `charge_after_flee`, `move_after_shooting`) et celles qui ne modifient qu'un jet (rerolls, bonus
   Oath — elles vivent sur les `shot_records`, pas dans `action_logs`).
   → [`Implémenté/metriques_reserves_et_charge_2026-08-11.md`](Implémenté/metriques_reserves_et_charge_2026-08-11.md) §Ce qui reste
+- 🔴 **Conformité moteur — les 53 erreurs que l'analyzer voit VRAIMENT** (ouvert le 2026-08-11).
+  Le rapport annonçait 370 erreurs sur le run du 2026-08-11 ; le nettoyage de l'outil de mesure
+  (livré le même jour, cf. plus bas) en a supprimé 317 qui étaient des faux positifs de lecture.
+  **Ce qui reste n'est plus imputable à l'analyzer** et désigne des règles appliquées de travers
+  en partie réelle. Par famille, sur le journal du **2026-08-11 14 h 34** — le MÊME run rejoué
+  après nettoyage (600 épisodes, 83 384 actions, jets de touche identiques au journal de 11 h 39 ;
+  l'écart de taille de 274 345 octets s'explique exactement par les 12 163 `[Strategy:]` retirés
+  moins les 532 `[MELTA:X]` et 7 `[PRECISION]` ajoutés). Les deux journaux se comparent donc terme
+  à terme, et ces chiffres sont l'état RÉEL, pas une estimation :
+  | Symptôme | P1 | P2 | Règle |
+  |---|---|---|---|
+  | Attaques au-delà de CC_NB | 11 | 13 | 04.03 |
+  | Collisions (2 unités, même hex) | 7 (total) | | 03.01 |
+  | Fall-back qui finit ENGAGÉ | 2 | 3 | 09.07 |
+  | Move normal finissant au contact | 1 | 4 | 09.05 |
+  | Tirs hors portée | 2 | 3 | 10 Shooting |
+  | Tir engagé visant une unité NON engagée avec le tireur | 0 | 3 | 10.06 |
+  | Move normal PARTI d'un engagement | 0 | 2 | 09.05 |
+  | Tir sur un ennemi engagé | 0 | 1 | 10.06 |
+  | Mort « fantôme » (état reconstruit ≠ moteur) | 1 (total) | | — |
+  ✅ **Trois familles annoncées le matin ont DISPARU** — pile-in au-delà de 3" (1), consolidation
+  au-delà de 3" (1), charge depuis un hex déjà adjacent (1) sont à **0**. C'étaient des faux
+  positifs de la mesure d'ancre, éteints par la reconstruction d'empreinte du même jour. Le run
+  étant le même, ce n'est pas un effet du hasard.
+  ⚠️ **Deux contrôles de §1.2 se sont ALLUMÉS** au même moment (tir engagé sur unité non engagée,
+  tir sur ennemi engagé) : ils ne voyaient rien tant que l'arme des personnages rattachés n'était
+  pas résolue. Le total d'une section qui MONTE après une correction de l'outil est le signe normal
+  d'un contrôle qui regardait dans le vide, jamais d'une régression.
+  ⚠️ **Un seul cas est PROUVÉ à ce stade** : E76 T4, la figurine `2#10` (Bigboss, `Two-Handed Big
+  Choppa`, NB 5) porte **7 attaques**, sans WAAAGH! actif ce tour-là. Les autres familles ont une
+  piste, pas une cause : ne rien corriger avant de l'avoir établie — c'est exactement l'erreur que
+  les 317 faux positifs viennent de sanctionner.
+  ⚠️ **Piste ouverte, non prouvée, pour les deux familles de move** : le pool de destinations
+  exclut bien la zone d'engagement sur les deux chemins single-hex de
+  [`engine/phase_handlers/movement_handlers.py`](file:///home/greg/40k/engine/phase_handlers/movement_handlers.py),
+  mais le commentaire y affirme que la destination l'exclut « quels que soient les toggles » alors
+  que la ligne suivante écrit `_check_ez = not _thru_ez`, et le run tourne en `move.thru_ez=True`.
+  Par ailleurs un déplacement d'ESCOUADE n'est pas validé par ce pool mais par
+  `movement_preview_move_plan` : les deux voies sont à départager **en rejouant le cas dans le
+  moteur**, pas en relisant `step.log`.
+  ✅ **La chaîne des tokens créés le 2026-08-11 est vérifiée sur ce run** : `[MELTA:X]` compte
+  **532** usages (Multi-Melta, déclaré « NOT USED » le matin même) et `[PRECISION]` **7**. Les deux
+  traversent bien moteur → `step.log` → analyzer en conditions réelles.
+  ⚠️ **`PSYCHIC` restera « NOT USED » quoi qu'il arrive** sur ses 3 armes — dont `'eadbanger`, dont
+  la même page compte pourtant 7 usages de `PRECISION`. Ce n'est pas un compteur manquant : 24.29
+  est un mot-clé d'INTERACTION (avec les règles anti-psychic), il n'a aucun instant où il « joue ».
+  Il n'y a rien à compter, et la ligne est condamnée à afficher une absence trompeuse — à traiter
+  dans l'affichage (statut distinct de `NOT USED`), pas dans la mesure.
+- ✅ **Analyzer — la mesure cesse de mentir. LIVRÉ le 2026-08-11.** Sur le run du jour :
+  **370 → 53 erreurs**, et quatre contrôles jusque-là muets se sont allumés. Cinq causes, toutes
+  vérifiées en remettant le défaut et en constatant le rouge :
+  (1) le plafond de tirs était accumulé sans le GROUPE de figurines tireuses, qui le détermine —
+  **320 faux positifs**, `fight_handler` avait fermé ce défaut, le tir ne l'avait pas suivi ;
+  (2) `RAPID_FIRE` (4 080 marqueurs) et `DEVASTATING_WOUNDS` par arme n'étaient comptés nulle part,
+  `CLOSE_QUARTERS` mesurait l'adjacence d'ancre quand §10.06 mesurait l'engagement (43 contre
+  1 280 pour le même fait), `MELTA` et `PRECISION` n'atteignaient jamais `step.log` ;
+  (3) le profil d'arme était cherché dans le seul équipement du type d'ESCOUADE — **3 138 tirs sur
+  23 169 (14 %)** portaient une arme que seule une figurine déclare (règle 19), donc sans portée
+  contrôlable et absente du tableau d'usage ;
+  (4) à la mort d'une figurine les socles de la cible étaient purgés, alors que `[TARGET_MODELS:]`
+  dit qui RESTE — toute unité entamée était réduite à son ANCRE pour la géométrie ;
+  (5) `[Strategy: <label>]` annonçait un choix tactique qu'**aucun code ne calculait** (deux
+  valeurs par défaut fabriquaient « 100 % aggressive » sur 12 163 advances) et `WINS BY SCENARIO`
+  fusionnait deux terrains sous un même libellé.
+  ⚠️ **Le total remonte quand un contrôle vacant s'allume** : rendre sa portée à une arme de
+  personnage a fait apparaître 4 tirs hors portée jamais vérifiés. Une hausse n'est pas une
+  régression ici — c'est la contrepartie normale d'un contrôle qui regardait dans le vide.
+  Verrouillé par 4 fichiers de test créés (`tests/unit/ai/test_analyzer_attack_cap_shooter_group.py`,
+  `test_analyzer_close_quarters_usage.py`, `test_analyzer_weapon_usage_carrier.py`,
+  `test_analyzer_target_models_restore_footprint.py`) et un étendu
+  (`test_step_log_weapon_rule_tokens.py`).
 - **Security étapes 4, 5, 7, 8** (~4-5 j ; étapes **1, 2, 3 et 6 livrées**, étape 5 partielle
   = durcir la stack Docker existante, pas la créer ; suivi à jour)
   → [`Security.md`](Security.md) — le document est un chantier **vivant**, à la racine d'`Implémentation/`,
@@ -244,9 +315,21 @@ Prêts à démarrer sans décision produit :
   jamais appris. Le générateur de positions figées et son test sont supprimés.
   ⚠️ Même conséquence que la ligne ci-dessus sur la comparabilité des win-rates, et pour la même
   raison : ce qui est mesuré n'est plus la même partie.
-  ⚠️ Résidu signalé, non traité (hors périmètre) : un bloc `deployment_random_mix` — le nom
-  d'avant — survit dans `tests/unit/engine/_config_helpers.py`, seul reste dans tout le dépôt.
+  Le résidu `deployment_random_mix` qui survivait dans `tests/unit/engine/_config_helpers.py`
+  est **supprimé le 2026-08-11** : il épinglait « à l'arrêt » un mécanisme moteur
+  (`_should_force_random_deployment_action`) qui n'existe plus, donc il injectait une clé que
+  plus personne ne lit. 0 occurrence dans le code désormais.
   Livré sans passer par ce fichier ; ligne ajoutée après coup le 2026-08-11.
+- ✅ **Résidus T1/T2/T3 de l'accélération du move pool — SOLDÉS le 2026-08-11.** Les trois tâches
+  restées ouvertes depuis le 2026-07-21 sont fermées. **T1** : les copies du motif slice-OR
+  passent par `hex_utils.offset_slice_windows` (bornes de slice d'un décalage de grille, calculées
+  une fois), verrouillé par `test_offset_slice_windows.py` — équivalence exhaustive contre
+  l'indexation naïve, verrou prouvé rouge. **T2** : `numba` n'est pas une dépendance du projet,
+  acté par écrit dans `requirements.runtime.txt`. **T3** : le poste coûteux du déploiement n'était
+  pas l'heuristique de scoring mais le **recalcul à l'identique** du pool d'ancres valides (mesuré
+  121 appels pour 12 états distincts, 90 % de redite) — désormais mis en cache derrière un
+  fingerprint de tout ce dont le pool dépend, verrouillé par `test_deployment_cache_equivalence.py`.
+  → [`Implémenté/V11_move_build_acceleration.md`](Implémenté/V11_move_build_acceleration.md)
 - **Perf `generate_compact_formation`** (½-1 j) — MESURER avant d'implémenter, gain non acquis
   → [`A_faire/perf_generate_compact_formation.md`](A_faire/perf_generate_compact_formation.md)
 - **gzip/Brotli** (½ j) — à faire AVEC l'étape 5 de Security (même proxy)
@@ -334,6 +417,32 @@ chantier peut n'avoir aucun document, et un nom de branche ne se retrouve pas da
 français. Le script se borne à rappeler combien de livraisons ont été mergées depuis la dernière
 écriture du document, sans verdict.
 
+### Une porte refuse la fusion quand les chantiers s'accumulent sans ligne
+
+`scripts/check_roadmap_declared.py`, branché sur le hook `pre-merge-commit` de `.githooks/`
+(`core.hooksPath` pointe dessus, les hooks sont donc versionnés). Une fusion **dans `main`** est
+refusée quand **trois** chantiers ont déjà été livrés sans que ce fichier bouge. Le refus les nomme.
+
+**Le plafond est une mesure, pas un réglage.** Le refus sec a été essayé puis abandonné sur
+chiffres : « la branche doit toucher la feuille de route » refuse **22 des 25** derniers merges,
+« la feuille doit avoir bougé depuis le merge précédent » en refuse **20 sur 25** — parce que le
+flux réel écrit la ligne dans un commit de suivi, après la fusion. Une porte rouge en permanence se
+contourne au premier usage : on aurait troqué un manque visible contre un contrôle mort.
+
+🔴 **Ce qu'elle vaut vraiment, et il faut le savoir avant de s'y fier.** Mesuré une fois ses deux
+défauts corrigés : sur les 17 fusions postérieures au 2026-08-10, le plafond 3 en refuse 4, et ce
+sont les quatre plus ANCIENNES, antérieures au moment où ce fichier a pris son rôle. Sur les treize
+suivantes elle ne se déclencherait **pas une seule fois** — y compris sur les trois chantiers dont
+on sait qu'ils n'ont pas été déclarés. La raison est structurelle : la dette retombe à zéro dès que
+ce fichier est **touché**, pour n'importe quel motif — une valeur corrigée, une reformulation, une
+typo. Comme il est retouché souvent, la porte mesure une SÉCHERESSE d'écriture, pas la déclaration
+d'un chantier précis. Elle attrape l'oubli prolongé ; elle ne remplace pas la discipline, et il ne
+faut pas lui faire dire qu'un chantier a sa ligne.
+
+Ce qu'elle NE fait pas non plus : juger si la ligne écrite est juste, ni voir un chantier livré par
+un commit direct sur `main`. Contournement assumé quand la fusion n'est pas un chantier :
+`git merge --no-verify`. État courant sans rien bloquer : `--status`.
+
 **Deux pièges déjà payés, à ne pas reprendre pour des régressions.** (1) Un contrôle de liens naïf
 rend **152 hits** dont aucun n'est mort (143 dans `Implémenté/stage.md`, 5 dans `Boardx10-audit.md`,
 tous des `file:///`, qui sont ABSOLUS par convention CLAUDE.md) ; le script les résout comme tels.
@@ -358,6 +467,18 @@ vérifiée ; l'appariement reste réservé aux cellules de tableau, où le renvo
   `V11_agent_rework.md` §0.70, corrigée là aussi.
 - ~~`A_faire/Endless_duty_etat_mesure.md` affirme que `config/agents/CoreAgent/` n'existe plus —
   **il existe**.~~ ✅ corrigé dans le doc le 2026-08-10.
+- **Vitesse d'entraînement : deux régimes incompatibles, facteur ~14** (relevé le 2026-08-11).
+  Les notes `total_episodes_normal` de cinq profils de la config ArmageddonAgent annoncent
+  `0.1 s/ep -> 36k ep / hour` ; le seul run réellement chronométré donne **4 h 01 pour 10 000
+  épisodes** (§1 pt 6), soit ~2 500 ép./h. La refonte d'observation V11 (`obs_size` 16659) a rendu
+  le pas bien plus cher et le premier chiffre n'a pas suivi. Conséquence directe : **toute durée
+  d'entraînement dérivée du régime ancien est fausse d'un ordre de grandeur** — dont les « ~5 h 30
+  pour 200 000 épisodes » que répètent [`../AI_TRAINING.md`](../AI_TRAINING.md) et trois notes
+  `bot_eval_*_normal`, et le
+  `36_000` codé en dur dans `test_schedule_decay_fraction.py` (seuil conservé parce qu'il est le
+  plus SÉVÈRE des deux, jamais laxiste). Les durées de `x1_long` ont été réancrées sur la mesure
+  le 2026-08-11 ; le reste ne l'est pas. Le traiter = re-dériver chaque note de coût d'évaluation
+  des 8 profils, donc un chantier à ouvrir, pas un périmètre de clôture.
 - Bandeaux et chiffres périmés listés en `1_Agent/V11_agent_rework.md` §0bis (l.3713-3735),
   signalés et volontairement non corrigés depuis le 2026-07-20.
 - `UNIT_ABILITY_SLOTS = 8` est une projection non mesurée ; le chantier 06 la rendra mesurable (§2).

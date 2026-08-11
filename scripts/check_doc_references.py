@@ -20,7 +20,12 @@ CE QU'IL ÉTABLIT, en quatre passes :
 
 CE QU'IL N'ÉTABLIT PAS, et qui est COMPTÉ ET AFFICHÉ plutôt que passé sous silence :
   - un renvoi sans symbole à confronter : il n'y a rien à vérifier, et le taire ferait croire à
-    une couverture qui n'existe pas — c'est le mode d'échec du VERT VACANT ;
+    une couverture qui n'existe pas — c'est le mode d'échec du VERT VACANT. En font partie le
+    jeton backtiqué qui n'a pas la FORME d'un symbole (`directory`, `CORS`, `debug=False` — un mot
+    de prose se retrouve dans n'importe quel fichier et confirmerait n'importe quoi), le
+    symbole noyé dans une phrase et démenti par le code (la phrase n'affirmait peut-être pas
+    qu'il vivait là) et le nom de fichier NU cité à plusieurs exemplaires dans le dépôt
+    (`conftest.py`) : le document ne dit pas duquel il parle, donc rien n'y est confrontable ;
   - une cible de lien qui n'a pas la forme d'un chemin (texte entre parenthèses, motif de regex
     cité en prose) : écartée sur un critère de FORME, jamais par une liste d'exceptions nommées,
     qui masquerait le jour où l'une d'elles deviendrait un vrai lien mort ;
@@ -38,13 +43,15 @@ Sortie : 0 si rien n'est cassé, 1 sinon.
 """
 from __future__ import annotations
 
+import collections
+import functools
 import json
 import pathlib
 import re
 import subprocess
 import sys
 import urllib.parse
-from typing import Callable, Iterable
+from typing import Any, Callable, Iterable, TypeVar
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 DOCS = ROOT / "Documentation" / "Implémentation"
@@ -77,7 +84,11 @@ SEARCH_DIRS = [
 #: alertes sur `V11_phaseA.md` le 2026-08-11, sur un document dont les 9 cibles existaient toutes.
 #: `(?!\w)` en queue : sans lui, `hashlib.md5` était capturé comme un fichier `hashlib.md`
 #: (mesuré sur `Security.md` le 2026-08-11).
-FILE_REF = re.compile(r"((?:\.{1,2}/)+[\w./-]+\.(?:py|json|md)|[\w/-]+\.(?:py|json|md))(?!\w)")
+#: Les extensions vivent ici SEULES : `FILE_REF` et `ADJACENT` doivent les reconnaître à
+#: l'identique, faute de quoi une affirmation portée par un `.json` est vue par l'un et pas par
+#: l'autre — c'est arrivé, l'appariement était resté limité au `.py`.
+CODE_SUFFIX = r"(?:py|json|md)"
+FILE_REF = re.compile(rf"((?:\.{{1,2}}/)+[\w./-]+\.{CODE_SUFFIX}|[\w/-]+\.{CODE_SUFFIX})(?!\w)")
 BACKTICKED = re.compile(r"`([^`]+)`")
 IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]{3,}")
 MD_LINK = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
@@ -86,6 +97,10 @@ LINE_ANCHOR = re.compile(r"\b([A-Za-z0-9_]+\.py):(\d+)")
 #: Un renvoi générique (`*_handler.py`, `analyzer_phases/*`) ne désigne aucun fichier précis : il
 #: n'y a rien à résoudre, et le compter en échec ferait du bruit là où le document est correct.
 WILDCARD = re.compile(r"[*]")
+
+#: La bosse de casse d'un identifiant composé (`SummaryWriter`, `GameClient`, `XMLHttpRequest`).
+#: `token != token.lower()` ne suffisait pas : il tenait `False` et `Objectives` pour des symboles.
+CASE_HUMP = re.compile(r"[a-z][A-Z]")
 
 #: Suffixes qu'une cible de lien doit porter pour être tenue pour un chemin. Un lien vers un
 #: répertoire (`1_Agent/`) est reconnu par sa barre finale.
@@ -130,6 +145,35 @@ def resolve(name: str, doc_dir: pathlib.Path) -> pathlib.Path | None:
     return None
 
 
+@functools.lru_cache(maxsize=1)
+def tracked_basenames() -> collections.Counter[str]:
+    """Combien de fichiers SUIVIS portent chaque nom. Une seule invocation de git par run.
+
+    `-z` n'est pas un détail : sans lui, git échappe les octets non-ASCII et ENTOURE le chemin de
+    guillemets (73 chemins de ce dépôt, tout `Documentation/Implémentation/` en tête). Le basename
+    en sortait avec son guillemet collé, sous une clé que personne n'interroge — l'ambiguïté de ces
+    fichiers-là n'aurait jamais été vue. Même piège que `core.quotePath` dans
+    `scripts/check_roadmap_declared.py`, qui l'a payé le 2026-08-11.
+    """
+    listing = subprocess.run(
+        ["git", "ls-files", "-z"], cwd=ROOT, capture_output=True,
+        text=True, encoding="utf-8", check=True,
+    ).stdout
+    return collections.Counter(f.rsplit("/", 1)[-1] for f in listing.split("\0") if f)
+
+
+def is_ambiguous(name: str) -> bool:
+    """Ce nom NU désigne-t-il plusieurs fichiers du dépôt ?
+
+    `conftest.py` existe cinq fois. L'ordre de recherche de `resolve` est une convention
+    d'EXISTENCE — il rend le premier trouvé — et ne vaut pas identification : confronter des
+    symboles au fichier qu'il désigne, c'est interroger un fichier dont le document ne parle pas.
+    Mesuré : `conftest.py` : `GameClient` sortait en AUCUN SYMBOLE, le symbole étant défini dans
+    l'autre `conftest.py`. Le renvoi est donc compté INVÉRIFIABLE, jamais cassé.
+    """
+    return "/" not in name and tracked_basenames()[name] > 1
+
+
 def symbol_is_present(symbol: str, body: str) -> bool:
     """Le symbole vit-il dans ce fichier, littéralement ou COMPOSÉ ?
 
@@ -158,11 +202,14 @@ def fragments(line: str) -> tuple[list[str], bool]:
     ensemble ; les apparier tous avec tous fabrique des affirmations que le document n'a jamais
     faites. On découpe donc par cellule.
 
-    En PROSE, seule l'EXISTENCE des fichiers est vérifiée — elle n'est jamais ambiguë. AUCUN
-    appariement, même quand la phrase ne cite qu'un fichier : mesuré le 2026-08-11, les quatre
-    tentatives d'appariement en prose d'`analyzer_couverture.md` étaient toutes fausses (une
-    phrase cite `check_ai_rules.py` et, plus loin, `pyright` et `biome`, qui n'ont rien à y
-    faire). Un contrôle qui crie à tort finit désactivé ; ces cas sont comptés comme non vérifiés.
+    Le booléen rendu n'autorise QUE cette CO-OCCURRENCE de cellule — « un fichier de la cellule
+    porte un symbole de la cellule ». Les affirmations adjacentes (`fichier.py` (`sym`)), elles,
+    valent partout : c'est le document qui les écrit, pas la mise en page qui les crée.
+    En PROSE, rien d'autre n'est apparié, même quand la phrase ne cite qu'un fichier : mesuré le
+    2026-08-11, les quatre tentatives d'appariement large en prose d'`analyzer_couverture.md`
+    étaient toutes fausses (une phrase cite `check_ai_rules.py` et, plus loin, `pyright` et
+    `biome`, qui n'ont rien à y faire). Un contrôle qui crie à tort finit désactivé ; ces cas
+    sont comptés comme non vérifiés.
     """
     if line.lstrip().startswith("|"):
         return line.split("|"), True
@@ -179,16 +226,83 @@ def names_in(cell: str) -> list[str]:
     return [n for n in dict.fromkeys(found) if not WILDCARD.search(n)]
 
 
+def is_symbol_token(token: str) -> bool:
+    """Ce jeton backtiqué a-t-il la FORME d'un symbole ?
+
+    Un identifiant ENTIER (ni chemin, ni joker, ni appel pointé, ni `debug=False`) portant un `_`
+    ou une BOSSE de casse — une majuscule précédée d'une minuscule, comme `SummaryWriter` ou
+    `GameClient`. Le critère est de FORME, jamais une liste de mots exclus ; mesuré sur le corpus,
+    il écarte `directory`, `leader`, `os.system`, et aussi les mots simplement CAPITALISÉS
+    (`False`, `Objectives`, `CORS`), qui se retrouvent dans n'importe quel fichier et
+    confirmeraient n'importe quoi. Il garde `_safe_loads`, `SummaryWriter`, `W40K_PERSIST_DIR`.
+    Il COÛTE les symboles d'un seul mot sans bosse ni `_` (`reset`, `CORS`), comptés invérifiables :
+    sous-affirmer et l'afficher est la doctrine de ce module, fabriquer une confirmation ne l'est
+    pas.
+    """
+    return bool(IDENTIFIER.fullmatch(token)) and ("_" in token or bool(CASE_HUMP.search(token)))
+
+
 def symbols_in(cell: str) -> list[str]:
-    symbols: list[str] = []
-    for raw in BACKTICKED.findall(cell):
-        # Un fragment qui porte un chemin ou un joker (`analyzer_phases/*`) désigne un ENSEMBLE
-        # de fichiers, pas un symbole : en tirer des identifiants fabriquait des paires que le
-        # document n'a jamais affirmées.
-        if "/" in raw or "*" in raw or FILE_REF.fullmatch(raw.strip()):
+    """Les symboles d'une CELLULE, qu'aucune forme n'attache à un fichier précis.
+
+    Même critère qu'une affirmation adjacente : le tableau acceptait tout identifiant tiré d'un
+    fragment backtiqué, et confirmait 8 renvois du corpus sur des MOTS (`False`, `CORS`, `leader`,
+    `Objectives`) pendant que la prose, elle, les refusait déjà. Une même phrase ne peut pas
+    changer de verdict selon qu'elle est écrite entre deux barres verticales.
+    """
+    tokens = [raw.strip() for raw in BACKTICKED.findall(cell)]
+    return list(dict.fromkeys(t for t in tokens if is_symbol_token(t)))
+
+
+#: `fichier.py` (`sym`, `sym2`) ou `fichier.py` : `sym`, `sym2` — la forme par laquelle ce corpus
+#: DIT « ce symbole vit dans ce fichier ». C'est une affirmation adjacente, donc appariable même en
+#: prose, là où apparier toute la ligne rendait 4 fausses alertes sur 4.
+#: `(?:\.{1,2}/)*` et non `?` : un renvoi remonte couramment plusieurs niveaux
+#: (`../../../engine/x.py`). Avec `?` le chemin était TRONQUÉ, ne se résolvait plus, et la
+#: citation disparaissait de tous les compteurs à la fois — un vert vacant, mesuré le 2026-08-11.
+#: Après `:`, la liste ENTIÈRE est captée (`a`, `b` — pas seulement `a`), et AUCUN de ses jetons
+#: ne peut porter un `/` ou un `.` : `train.py` : `engine/x.py` (`sym`) n'affirme rien sur
+#: `train.py`, et l'avaler consommait l'affirmation réelle qui suivait (mesuré). La contrainte
+#: porte sur CHAQUE jeton, pas sur le premier : le chemin arrive aussi en deuxième position.
+ADJACENT = re.compile(
+    rf"`?((?:\.{{1,2}}/)*[\w/-]+\.{CODE_SUFFIX})`?\s*"
+    r"(?:\((?P<par>[^)]*)\)"
+    r"|:\s*(?P<col>`[^`/.]+`(?:\s*,\s*`[^`/.]+`)*))"
+)
+
+
+def claimed_symbols(blob: str) -> tuple[list[str], bool]:
+    """(symboles affirmés, l'affirmation est-elle FERME ?).
+
+    Une LISTE PURE — que des symboles et leurs séparateurs — est une affirmation ferme : le
+    document dit que ce fichier porte ces symboles, leur absence est une erreur. Un symbole noyé
+    dans une phrase (« (`_safe_loads` en aval) », « (par exemple quand `x` survient) ») affirme
+    beaucoup moins : sa présence confirme le renvoi, son absence ne prouve rien. Rendre l'un et
+    l'autre rouges ferait crier le contrôle sur des phrases correctes, et un contrôle qui crie à
+    tort finit désactivé — c'est la raison pour laquelle la prose n'était pas appariée du tout.
+    """
+    tokens = [raw.strip() for raw in BACKTICKED.findall(blob)]
+    kept = [t for t in tokens if is_symbol_token(t)]
+    around = BACKTICKED.sub("", blob)
+    firm = len(kept) == len(tokens) and not re.search(r"[^\W\d_]", around)
+    return list(dict.fromkeys(kept)), firm
+
+
+def adjacent_pairs(line: str) -> list[tuple[str, list[str], bool]]:
+    """(fichier, symboles, affirmation ferme) que la ligne affirme, quelle que soit sa forme."""
+    # Un fichier que l'extracteur général ne rend pas (`*_handler.py`, `{move,charge}_handler.py`)
+    # ne peut pas porter d'affirmation : il ne sera jamais résolu. Filtrer sur `names_in` rend
+    # l'inclusion STRUCTURELLE au lieu de recopier ici ses gardes, qui ont déjà divergé une fois.
+    names = names_in(line)
+    pairs: list[tuple[str, list[str], bool]] = []
+    for match in ADJACENT.finditer(line):
+        name = match.group(1)
+        if name not in names:
             continue
-        symbols += IDENTIFIER.findall(raw)
-    return [s for s in dict.fromkeys(symbols) if not s.endswith("py")]
+        symbols, firm = claimed_symbols(match.group("par") or match.group("col") or "")
+        if symbols:
+            pairs.append((name, symbols, firm))
+    return pairs
 
 
 def check_references(doc_path: pathlib.Path) -> tuple[int, int, list[str]]:
@@ -197,37 +311,96 @@ def check_references(doc_path: pathlib.Path) -> tuple[int, int, list[str]]:
     resolved = unverifiable = 0
     broken: list[str] = []
     for lineno, line in enumerate(doc_path.read_text(encoding="utf-8").split("\n"), 1):
-        cells, pairing_allowed = fragments(line)
+        cells, cooccurrence_allowed = fragments(line)
         for cell in cells:
             names = names_in(cell)
             if not names:
                 continue
-            missing = [n for n in names if resolve(n, doc_dir) is None]
-            for name in missing:
-                broken.append(f"{doc_path.name}:{lineno}  FICHIER INTROUVABLE  {name}")
-            present = [n for n in names if n not in missing]
+            found: dict[str, pathlib.Path] = {}
+            for name in names:
+                path = resolve(name, doc_dir)
+                if path is None:
+                    broken.append(f"{doc_path.name}:{lineno}  FICHIER INTROUVABLE  {name}")
+                else:
+                    found[name] = path
+            present = list(found)
             if not present:
                 continue
-            if not pairing_allowed:
-                unverifiable += len(present)
+            # 1. Les affirmations ADJACENTES — `fichier.py` (`a`, `b`) — valent dans les DEUX
+            # formes de ligne : la même phrase dit la même chose entre deux barres verticales que
+            # dans un paragraphe. C'est la preuve la plus forte du corpus, et la laisser au régime
+            # mou des cellules revenait à la perdre là où elle est la plus dense.
+            # L'appariement se fait sur le chemin ENTIER, jamais sur le nom de fichier nu : un
+            # fragment cite couramment `../engine/x.py` (faux depuis ce doc) puis `engine/x.py`
+            # (juste), et un rapprochement par basename attribuait au premier le fichier du second.
+            # Un même fichier peut être cité deux fois : les symboles se cumulent sur UN renvoi,
+            # ils n'en fabriquent pas deux. Fermes et molles restent séparées : une phrase ne doit
+            # pas pouvoir amollir l'affirmation ferme du même fichier.
+            claimed: dict[str, tuple[list[str], list[str]]] = {}
+            # Un symbole que le fragment attribue à UN fichier n'est plus à la disposition des
+            # autres, même quand ce fichier-là s'avère inconfrontable (nom ambigu, renvoi cassé) :
+            # l'attribution est un fait du DOCUMENT, elle ne dépend pas de ce que la machine sait
+            # en faire. Sans ça, `conftest.py` (`GameClient`), `w40k_core.py` rendait le second
+            # rouge pour un symbole que la cellule donne explicitement au premier.
+            pairs = adjacent_pairs(cell)
+            attributed = {s for _name, syms, _firm in pairs for s in syms}
+            for name, symbols, firm in pairs:
+                if name in found and not is_ambiguous(name):
+                    buckets = claimed.setdefault(name, ([], []))
+                    bucket = buckets[0] if firm else buckets[1]
+                    bucket += [s for s in symbols if s not in bucket]
+            for name, (firm_symbols, soft_symbols) in claimed.items():
+                body = found[name].read_text(encoding="utf-8", errors="replace")
+                # `x.py` (`a`, `b`) affirme les DEUX symboles : il suffit qu'UN manque pour que le
+                # document soit faux. Se contenter d'un `any`, c'était laisser un seul jeton encore
+                # vivant confirmer la citation entière et masquer la suppression de l'autre — le
+                # vert vacant, cette fois côté symboles. Le message nomme les ABSENTS, seuls à
+                # corriger.
+                absent = [s for s in firm_symbols if not symbol_is_present(s, body)]
+                if absent:
+                    broken.append(
+                        f"{doc_path.name}:{lineno}  SYMBOLE ABSENT de {name} — "
+                        f"introuvable(s) : {', '.join(absent[:4])}"
+                    )
+                elif firm_symbols or any(symbol_is_present(s, body) for s in soft_symbols):
+                    resolved += 1
+                else:
+                    # Affirmation molle démentie : la phrase n'a peut-être jamais dit que ce
+                    # symbole vivait là. Rien de prouvé, rien de faux — compté, pas crié.
+                    unverifiable += 1
+            # 2. Ce qui reste : les fichiers du fragment qu'aucune affirmation adjacente ne porte
+            # — paire absente, nom ambigu, ou capture `ADJACENT` que `FILE_REF` ne rend pas
+            # (divergence verrouillée par `test_adjacent_is_a_subset`). Jamais escamotés.
+            rest = [n for n in present if n not in claimed]
+            if not rest:
                 continue
-            symbols = symbols_in(cell)
-            if not symbols:
-                unverifiable += len(present)
+            if not cooccurrence_allowed:
+                # En prose, seule l'ADJACENCE fait foi. Le reste de la phrase peut citer n'importe
+                # quoi d'autre sans que le document l'affirme : mesuré le 2026-08-11, les quatre
+                # tentatives d'appariement en prose d'`analyzer_couverture.md` étaient fausses.
+                unverifiable += len(rest)
+                continue
+            # Un nom ambigu ne dit pas DE QUEL fichier la cellule parle : il ne peut porter
+            # aucune confrontation, ici comme en prose. Il reste compté, jamais confronté.
+            sure = [n for n in rest if not is_ambiguous(n)]
+            unverifiable += len(rest) - len(sure)
+            # `a.py` (1186 l.), `b.py` (`_sym`), `c.py` : la cellule affirme `_sym` de `b.py`, et
+            # rien du tout de `a.py` ni de `c.py`. Opposer `_sym` à ces deux-là les rendait rouges
+            # pour un symbole que le document attribue explicitement ailleurs.
+            symbols = [s for s in symbols_in(cell) if s not in attributed]
+            if not (sure and symbols):
+                unverifiable += len(sure)
                 continue
             # UN renvoi est confirmé dès qu'UN des fichiers de la cellule porte UN des symboles
             # de la cellule. Exiger que CHAQUE fichier les porte tous serait une affirmation que
             # le document ne fait pas : une cellule cite couramment le producteur ET le lecteur
             # d'une donnée, dont les symboles ne vivent que d'un côté.
-            bodies = [
-                path.read_text(encoding="utf-8", errors="replace")
-                for path in (resolve(n, doc_dir) for n in present) if path is not None
-            ]
+            bodies = [found[n].read_text(encoding="utf-8", errors="replace") for n in sure]
             if any(symbol_is_present(s, b) for s in symbols for b in bodies):
-                resolved += len(present)
+                resolved += len(sure)
             else:
                 broken.append(
-                    f"{doc_path.name}:{lineno}  AUCUN SYMBOLE dans {', '.join(present)} — "
+                    f"{doc_path.name}:{lineno}  AUCUN SYMBOLE dans {', '.join(sure)} — "
                     f"cherchés : {', '.join(symbols[:4])}"
                 )
     return resolved, unverifiable, broken
@@ -290,16 +463,16 @@ def integers_in(cell: str) -> list[int]:
             for m in re.finditer(r"\d[\d  \xa0]*\d|\d", cell)]
 
 
-def claim_profile_count(text: str) -> list[tuple[str, object]]:
+def claim_profile_count(text: str) -> list[tuple[str, int]]:
     return [(m.group(0).strip(), int(m.group(1)))
             for m in re.finditer(r"\*\*(\d+)\*\*\s*profils", text)]
 
 
-def claim_n_envs(text: str) -> list[tuple[str, object]]:
+def claim_n_envs(text: str) -> list[tuple[str, int]]:
     return [(m.group(0).strip(), int(m.group(1))) for m in re.finditer(r"(\d+)\s+envs\b", text)]
 
 
-def claim_obs_size(text: str) -> list[tuple[str, object]]:
+def claim_obs_size(text: str) -> list[tuple[str, int]]:
     found = [(m.group(0).strip(), int(m.group(1)))
              for m in re.finditer(r"`obs_size`[^\n]*?\*\*(\d{4,})\*\*", text)]
     found += [(m.group(0).strip(), int(m.group(1)))
@@ -307,14 +480,14 @@ def claim_obs_size(text: str) -> list[tuple[str, object]]:
     return found
 
 
-def claim_profile_table(text: str) -> list[tuple[str, object]]:
+def claim_profile_table(text: str) -> list[tuple[str, int]]:
     """Les cases du tableau `profil | total_episodes | bot_eval_final` de §1.
 
     Ancré sur le NOM du profil, seul repère qui survive à une reformulation : la ligne peut
     porter du gras, une parenthèse d'historique ou un séparateur de milliers sans se dérober.
     """
     known = set(agent_profiles())
-    claims: list[tuple[str, object]] = []
+    claims: list[tuple[str, int]] = []
     for line in text.split("\n"):
         if not line.lstrip().startswith("|"):
             continue
@@ -333,7 +506,7 @@ def claim_profile_table(text: str) -> list[tuple[str, object]]:
     return claims
 
 
-def claim_step_log(text: str) -> list[tuple[str, object]]:
+def claim_step_log(text: str) -> list[tuple[str, tuple[str, int]]]:
     found = [(m.group(0).strip(), ("count", int(m.group(1))))
              for m in re.finditer(r"\*\*(\d+)\*\*\s*entrées", text)]
     found += [(m.group(0).strip(), ("max", int(m.group(1))))
@@ -379,11 +552,16 @@ def expected_from_table_key(claim: object) -> object:
 
 #: label -> (extracteur des valeurs ANNONCÉES par le document, valeur ATTENDUE de la source).
 #: L'extracteur qui ne trouve rien fait ÉCHOUER le contrôle : voir la docstring du module.
-ValueCheck = tuple[Callable[[str], list[tuple[str, object]]], Callable[[object], object]]
+#: La valeur ANNONCÉE change de nature d'un contrôle à l'autre (un entier ici, un couple
+#: `(sorte, entier)` là) : le couple est donc générique en cette valeur, et chaque paire
+#: extracteur/attendu reste typée ensemble. Le registre, lui, est hétérogène par nature —
+#: `Any` y est l'aveu exact de ce qui s'y range, pas un relâchement du typage des contrôles.
+_Claim = TypeVar("_Claim")
+ValueCheck = tuple[Callable[[str], list[tuple[str, _Claim]]], Callable[[_Claim], object]]
 
 TABLE_LABEL = "tableau des profils"
 
-VALUE_CHECKS: dict[str, dict[str, ValueCheck]] = {
+VALUE_CHECKS: dict[str, dict[str, ValueCheck[Any]]] = {
     "ROADMAP.md": {
         "nombre de profils": (claim_profile_count, lambda _claim: expected_profile_count()),
         "n_envs des profils": (claim_n_envs, lambda _claim: expected_n_envs()),
@@ -461,13 +639,13 @@ def merges_since(doc_path: pathlib.Path) -> str:
     try:
         last = subprocess.run(
             ["git", "log", "-1", "--format=%H", "--", relative],
-            cwd=ROOT, capture_output=True, text=True, check=True,
+            cwd=ROOT, capture_output=True, text=True, encoding="utf-8", check=True,
         ).stdout.strip()
         if not last:
             return f"   ℹ️  {doc_path.name} n'a aucun commit — rappel des livraisons impossible"
         merges = subprocess.run(
             ["git", "log", "--merges", "--oneline", f"{last}..HEAD"],
-            cwd=ROOT, capture_output=True, text=True, check=True,
+            cwd=ROOT, capture_output=True, text=True, encoding="utf-8", check=True,
         ).stdout.strip()
     except (OSError, subprocess.CalledProcessError) as error:
         return f"   ℹ️  rappel des livraisons indisponible : {error}"

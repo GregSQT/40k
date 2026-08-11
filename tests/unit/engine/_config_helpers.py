@@ -458,3 +458,37 @@ def assert_deployment_phase(engine: Any) -> None:
             f"Le mécanisme de sélection du mode de déploiement a changé : réaligner "
             f"`_ACTIVE_DEPLOYMENT_PINS` sur le contrat du moteur, ne pas contourner l'assertion."
         )
+
+
+def play_out_deployment(engine: Any, *, limit: int = 1000) -> int:
+    """Joue la phase de déploiement jusqu'à sa fin et rend le nombre de steps joués.
+
+    TROISIÈME helper de déploiement de ce module, et il complète les deux autres :
+    ``pin_active_deployment`` force le MODE, ``assert_deployment_phase`` vérifie qu'on Y EST,
+    et celui-ci en SORT. Il manquait, alors que c'est le besoin majoritaire depuis que le mode
+    ``fixed`` (poses pré-écrites dans les rosters) a été remplacé par ``auto`` le 2026-08-08 :
+    un ``reset()`` rend désormais un plateau VIDE, donc tout test qui observe des figurines
+    posées doit d'abord dérouler la phase.
+
+    POLITIQUE DE CHOIX : la PREMIÈRE action légale du masque. Elle n'est pas neutre et c'est
+    pourquoi elle est nommée ici plutôt que recopiée — dans le masque de déploiement,
+    ``ACTION_WAIT`` met l'escouade en RÉSERVES stratégiques (20.01) au lieu de la poser (cf.
+    ``test_strategic_reserves_20``). Un test qui exige que TOUTES les unités soient sur la table
+    ne peut donc pas se contenter de ce helper : il doit restreindre lui-même son pool d'actions.
+
+    Aucune pose n'est écrite à la main : chaque step passe par le VRAI chemin moteur, donc les
+    figurines atterrissent là où le moteur les accepte, sous les mêmes invariants qu'en production.
+    """
+    import numpy as np
+
+    game_state = engine.game_state
+    steps = 0
+    while str(game_state["phase"]) == "deployment" and steps < limit:
+        legal = np.flatnonzero(engine.get_action_mask())
+        assert legal.size, f"masque vide en déploiement (step {steps})"
+        engine.step(int(legal[0]))
+        steps += 1
+    assert str(game_state["phase"]) != "deployment", (
+        f"toujours en déploiement après {steps} steps — déploiement bloqué"
+    )
+    return steps

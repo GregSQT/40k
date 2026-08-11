@@ -166,8 +166,10 @@ def test_hard_penalty_without_declared_split_is_refused_at_construction(
     """
     Detection STATIQUE : refusee au demarrage, pas apres `robust_window` evaluations.
 
-    Le controle au calcul du score n'est atteint qu'au 10 000e episode avec le profil x1
-    (bot_eval_freq=2000 x robust_window=5) — trop tard pour une incoherence de config.
+    Le controle au calcul du score n'est atteint qu'au 30 000e episode avec le profil x1_long
+    (bot_eval_freq=10000 x robust_window=3) — trop tard pour une incoherence de config. Ce n'est
+    plus x1 qui sert d'exemple depuis le 2026-08-11 : il est passe a save_best_robust: false,
+    donc le score robuste n'y est jamais calcule, si tard soit-il.
     """
     _stub_callback_params(monkeypatch, {})
     with pytest.raises(ValueError, match=r"hard holdout split cannot be measured"):

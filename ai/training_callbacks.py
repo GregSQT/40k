@@ -2308,7 +2308,22 @@ class BotEvaluationCallback(BaseCallback):
         if should_evaluate:
             self.eval_count += 1
             if self.use_episode_freq and self.metrics_tracker is not None:
-                self.last_eval_episode = int(self.metrics_tracker.episode_count)
+                # AVANCE PAR MULTIPLES ENTIERS de `eval_freq`, jamais « = compteur courant ».
+                # L'entraînement vectorisé fait sauter le compteur d'épisodes (plusieurs `dones`
+                # au même pas), donc le déclenchement a lieu à `k*eval_freq + depassement`.
+                # Reporter ce dépassement dans le repère le CUMULE : chaque éval décale la
+                # suivante un peu plus loin, et la DERNIÈRE tombe au-delà de `total_episodes`
+                # — elle n'a jamais lieu. `setup_callbacks` (train.py) promet pourtant
+                # `total_episodes // bot_eval_freq` évaluations et refuse au démarrage une
+                # fenêtre `robust_window` inatteignable : la promesse était fausse d'une éval,
+                # et pour un profil calibré au ras de la fenêtre (x1_long : 50 000 / 10 000 = 5
+                # pour `robust_window` 5) cela veut dire AUCUN best model robuste, en silence.
+                # Aligné sur le repère initial et non sur zéro, pour qu'une reprise de run
+                # (`initial_episode_marker`) garde sa propre cadence.
+                current = int(self.metrics_tracker.episode_count)
+                self.last_eval_episode += self.eval_freq * (
+                    (current - self.last_eval_episode) // self.eval_freq
+                )
             if self.async_eval_enabled:
                 self._submit_async_eval(eval_marker)
                 # When early stopping is active, wait for this eval immediately

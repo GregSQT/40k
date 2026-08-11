@@ -346,7 +346,7 @@ def _apply_damage_and_handle_death(
         _reste = -front_hp  # PV du coup non absorbés par la figurine qui tombe (cf. docstring)
         _living = ordered_living_mids(target_id)
         if _living:
-            unit_model_hp.get(target_id, {}).pop(_living[0], None)
+            require_key(unit_model_hp, target_id).pop(_living[0], None)
         unit_models_alive[target_id] -= 1
         if positions_by_model is not None:
             positions_by_model.pop(target_id, None)
@@ -1541,10 +1541,6 @@ def parse_step_log(filepath: str) -> Dict:
             1: {'shoot': 0, 'wait': 0, 'wait_with_targets': 0, 'wait_no_targets': 0, 'skip': 0, 'advance': 0},
             2: {'shoot': 0, 'wait': 0, 'wait_with_targets': 0, 'wait_no_targets': 0, 'skip': 0, 'advance': 0}
         },
-        'advance_by_strategy': {
-            1: {'aggressive': 0, 'tactical': 0, 'defensive': 0, 'objective': 0},
-            2: {'aggressive': 0, 'tactical': 0, 'defensive': 0, 'objective': 0},
-        },
         'shots_after_advance': {1: 0, 2: 0},
         'close_quarters_shots': {
             1: {'engaged_target': 0, 'unengaged_target': 0},
@@ -2617,13 +2613,29 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         log_print(f"WINS BY SCENARIO {'Agent':>37} {'Bot':>13} {'Draws':>12}")
         log_print("-" * 80)
 
+        # Le libellé doit rester UNIQUE. `bot-(\d+)` seul ne l'est pas : un même bot est joué sur
+        # plusieurs TERRAINS (`bot_evaluation._materialize_eval_scenario_refs` matérialise un
+        # scénario par `wall_ref` et signe le fichier d'un sha1 tronqué), si bien que le run du
+        # 2026-08-11 affichait huit séries de 75 épisodes sous quatre libellés répétés deux fois —
+        # deux cartes fusionnées à l'œil, sans qu'aucune colonne ne le dise. Le hash est conservé :
+        # il est stable d'un run à l'autre (il ne dépend que du chemin et du `wall_ref`), donc deux
+        # rapports restent comparables ligne à ligne.
+        # Tri par LIBELLÉ et non plus par total : les séries d'un même bot se suivent, et le tri par
+        # total n'ordonnait plus rien dès lors que chaque scénario reçoit le même nombre d'épisodes.
         scenario_totals = []
         for scenario, wins in stats['wins_by_scenario'].items():
             total = wins['agent'] + wins['bot'] + wins['draws']
-            scenario_totals.append((scenario, wins, total))
-        scenario_totals.sort(key=lambda x: -x[2])
+            bot_match = re.search(r'bot-(\d+)(?:__([0-9a-f]{6,}))?', scenario, re.IGNORECASE)
+            if bot_match:
+                label = f"bot-{bot_match.group(1)}"
+                if bot_match.group(2):
+                    label = f"{label}__{bot_match.group(2)[:8]}"
+            else:
+                label = scenario[:39]
+            scenario_totals.append((label, wins, total))
+        scenario_totals.sort(key=lambda x: x[0])
 
-        for scenario, wins, total in scenario_totals:
+        for scenario_display, wins, total in scenario_totals:
             # Colonnes au SIÈGE de l'agent : `p1`/`p2` restent renseignés (diagnostic de siège),
             # mais les afficher ici mélangeait les épisodes où l'agent tient P2.
             p1_count = wins['agent']
@@ -2632,11 +2644,6 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
             p1_pct = (p1_count / total * 100) if total > 0 else 0
             p2_pct = (p2_count / total * 100) if total > 0 else 0
             draws_pct = (draws_count / total * 100) if total > 0 else 0
-            bot_match = re.search(r'bot-(\d+)', scenario, re.IGNORECASE)
-            if bot_match:
-                scenario_display = f"bot-{bot_match.group(1)}"
-            else:
-                scenario_display = scenario[:39]
             log_print(f"{scenario_display:<40} {p1_count:5d} ({p1_pct:4.1f}%) {p2_count:5d} ({p2_pct:4.1f}%) {draws_count:5d} ({draws_pct:4.1f}%)")
     
     # TURN DISTRIBUTION
@@ -2695,20 +2702,6 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
             f"{agent_count:6d} ({agent_pct:5.1f}%)",
             f"{bot_count:6d} ({bot_pct:5.1f}%)",
         )
-        if action == 'advance':
-            agent_adv_total = stats['shoot_vs_wait_by_player'][1]['advance']
-            bot_adv_total = stats['shoot_vs_wait_by_player'][2]['advance']
-            for strat in ['aggressive', 'tactical', 'defensive', 'objective']:
-                agent_s = stats['advance_by_strategy'][1][strat]
-                bot_s = stats['advance_by_strategy'][2][strat]
-                agent_s_pct = (agent_s / agent_adv_total * 100) if agent_adv_total > 0 else 0
-                bot_s_pct = (bot_s / bot_adv_total * 100) if bot_adv_total > 0 else 0
-                _table_row(
-                    f"  ↳ {strat.capitalize()}",
-                    f"{agent_s:6d} ({agent_s_pct:5.1f}%)",
-                    f"{bot_s:6d} ({bot_s_pct:5.1f}%)",
-                )
-    
     agent_wait_with = stats['shoot_vs_wait_by_player'][1]['wait_with_targets']
     bot_wait_with = stats['shoot_vs_wait_by_player'][2]['wait_with_targets']
     agent_wait_with_pct = (agent_wait_with / agent_shoot_total * 100) if agent_shoot_total > 0 else 0

@@ -104,6 +104,17 @@ class _DummyEngine(gym.Env):
         )
         return mask
 
+    def auto_deployment_action(self, action_mask):
+        """Pose que le MOTEUR jouerait a la place de la politique, ou None s'il n'en joue pas.
+
+        Membre du contrat moteur (`ENGINE_CONTRACT_ATTRS`) : `BotControlledEnv` l'interroge a
+        CHAQUE etat ou le joueur controle a une action jouable, pas seulement en deploiement.
+        `None` n'est pas un repli : ce double n'a pas de phase de deploiement (sa `phase` est
+        `move` ou `shoot`), donc le vrai moteur y rendrait `None` lui aussi.
+        """
+        _ = action_mask
+        return None
+
     def _step_observation(self, mask_and_eligible=None):
         # Rend `(observation, masque_utilise)`, comme le vrai `_step_observation`.
         if self.defer_observation:
@@ -810,10 +821,14 @@ def test_unwrap_engine_names_what_it_found() -> None:
 
 
 def test_engine_contract_covers_every_engine_access() -> None:
-    """`ENGINE_CONTRACT_ATTRS` doit couvrir TOUS les `self.engine.<x>` du module.
+    """`ENGINE_CONTRACT_ATTRS` doit couvrir EXACTEMENT les `self.engine.<x>` du module.
 
     Sinon la vérification cesse de prouver ce qu'elle affirme : un membre utilisé mais non
     listé retomberait sur un AttributeError tardif, exactement ce que le cast faisait.
+
+    Égalité et non inclusion : le commentaire du tuple promet « rien de plus, rien de moins »,
+    et seule l'égalité prouve la première moitié. Un membre retiré du code mais laissé dans le
+    tuple resterait exigé de tout moteur ET de tout double, sans que rien ne le signale.
     """
     import ast
     import inspect
@@ -831,9 +846,26 @@ def test_engine_contract_covers_every_engine_access() -> None:
         and node.value.value.id == "self"
     }
     assert used, "aucun accès self.engine.<x> détecté : le balayage AST est cassé"
-    assert used <= set(ENGINE_CONTRACT_ATTRS), (
-        f"membres du moteur utilisés mais non vérifiés par unwrap_engine : "
-        f"{sorted(used - set(ENGINE_CONTRACT_ATTRS))}"
+    declared = set(ENGINE_CONTRACT_ATTRS)
+    assert used == declared, (
+        f"membres utilisés mais non vérifiés par unwrap_engine : {sorted(used - declared)} ; "
+        f"membres exigés mais plus utilisés : {sorted(declared - used)}"
+    )
+
+
+@pytest.mark.parametrize("attr", ENGINE_CONTRACT_ATTRS)
+def test_dummy_engine_honours_every_contract_member(attr: str) -> None:
+    """Verrou SYMÉTRIQUE du précédent : le double expose tout ce que le contrat exige.
+
+    Il existait déjà, mais comme effet de bord de `test_unwrap_engine_peels_every_wrapper_layer`,
+    dont le nom promet autre chose. Un membre ajouté au contrat et oublié sur `_DummyEngine`
+    faisait donc virer au rouge les ~10 tests qui construisent un wrapper, en enfouissant la
+    cause dans leur message. Paramétré, l'échec nomme le membre manquant, et une réécriture du
+    test de déballage ne peut plus emporter la garantie sans que rien ne le dise.
+    """
+    assert hasattr(_DummyEngine(), attr), (
+        f"`_DummyEngine` n'expose pas '{attr}' : tout ajout à ENGINE_CONTRACT_ATTRS doit être "
+        f"reflété sur le double, sinon `unwrap_engine` refuse de construire les wrappers en test"
     )
 
 
