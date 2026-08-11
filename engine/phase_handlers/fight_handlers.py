@@ -38,7 +38,7 @@ from engine.hex_utils import cube_to_offset, offset_to_cube
 # (des milliers de fois par construction), et un import local y coute un lookup `sys.modules`
 # a chaque appel. Aucun cycle ne le justifiait : `engine.terrain_utils` n'importe rien de
 # `engine.phase_handlers`.
-from engine.terrain_utils import resolve_model_floor_level, resolved_floor_height_at
+from engine.terrain_utils import resolved_floor_height_at
 from .shared_utils import (
     # Libelle de token de [CLEAVE] : la cle de `additive_rules_applied`, lue par l afficheur
     # partage. Importee et non reecrite en litteral — c est ce qui lie les deux producteurs
@@ -68,6 +68,7 @@ from .shared_utils import (
     compute_candidate_footprint,
     is_footprint_placement_valid,
     is_placement_valid_with_clearance, wall_blocked_anchors, socle_orientation,
+    resolve_model_effective_level,
     update_units_cache_position,
     translate_squad_to_destination,
     update_enemy_adjacent_caches_after_unit_move,
@@ -453,20 +454,20 @@ def _fight_effective_level_at(
 ) -> int:
     """Niveau EFFECTIF (§13.06) d'une figurine posée en ``(col, row)`` avec ce niveau DEMANDÉ.
 
-    SOURCE UNIQUE, partagée par tout ce que le fight construit à une position CANDIDATE :
-    translation rigide d'un pool d'ancres, slot d'ILP, plan d'auto-placement. Un niveau ne se
-    transporte pas d'une position à l'autre — une figurine translatée hors de l'empreinte de son
-    plancher est AU SOL (règle 13.06, la même que le move et le déploiement appliquent via
-    ``resolve_model_floor_level``). Coller le niveau d'origine à une case sans plancher faisait
-    lever ``floor_height_at`` (« figurine marquée à l'étage mais hors empreinte de plancher »),
-    c'est-à-dire un crash du pool là où la règle demande simplement de la poser au sol.
+    Point d'entrée du FIGHT vers `resolve_model_effective_level` (`shared_utils`), la source
+    unique du dépôt : translation rigide d'un pool d'ancres, slot d'ILP, plan d'auto-placement.
+    Un niveau ne se transporte pas d'une position à l'autre — une figurine translatée hors de
+    l'empreinte de son plancher est AU SOL. Coller le niveau d'origine à une case sans plancher
+    faisait lever ``floor_height_at`` (« figurine marquée à l'étage mais hors empreinte de
+    plancher »), c'est-à-dire un crash du pool là où la règle demande de la poser au sol.
+
+    Ce wrapper existait AVANT la primitive commune et en réécrivait le contenu, avec deux
+    replis anti-erreur que la source unique n'a pas : `orientation` par défaut 0 (le cache la
+    pose toujours) et `terrain_areas` par défaut vide (le moteur la pose toujours). Il ne garde
+    que son rôle de nom local.
     """
-    return resolve_model_floor_level(
-        int(col), int(row),
-        require_key(model_entry, "BASE_SHAPE"), require_key(model_entry, "BASE_SIZE"),
-        int(model_entry.get("orientation", 0)),  # get allowed (défaut 0 = face nord)
-        int(requested_level),
-        game_state.get("terrain_areas", []),  # get allowed (plateau sans terrain)
+    return resolve_model_effective_level(
+        game_state, model_entry, int(col), int(row), int(requested_level)
     )
 
 
@@ -2352,7 +2353,6 @@ def _fight_pile_in_build_model_pool(
         _charge_model_socle,
     )
     from engine.hex_utils import footprints_overlap, Socle
-    from engine.terrain_utils import resolve_model_floor_level
 
     models_cache = require_key(game_state, "models_cache")
     model = models_cache.get(str(model_id))
@@ -2439,9 +2439,7 @@ def _fight_pile_in_build_model_pool(
         else:
             pc, pr = int(sib["col"]), int(sib["row"])
             _sib_req = int(sib.get("level", 0))  # get allowed (champ optionnel : level absent = sol)
-        _sib_eff = resolve_model_floor_level(
-            pc, pr, sib["BASE_SHAPE"], sib["BASE_SIZE"], _orient, _sib_req, terrain_areas
-        )
+        _sib_eff = resolve_model_effective_level(game_state, sib, pc, pr, _sib_req, _orient)
         sib_socles.append((_sib_eff, _charge_model_socle(game_state, sib, int(pc), int(pr))))
 
     wall_set = set(wall_hexes)
@@ -2465,9 +2463,9 @@ def _fight_pile_in_build_model_pool(
         from engine.game_state import unit_can_occupy_upper_floor
         if not unit_can_occupy_upper_floor(require_key(unit, "UNIT_KEYWORDS")):
             return empty  # §13.06 : ne peut pas finir en hauteur
-        start_eff = resolve_model_floor_level(
-            start_col, start_row, model["BASE_SHAPE"], model["BASE_SIZE"], _orient,
-            int(model.get("level", 0)), terrain_areas  # get allowed (champ optionnel : level absent = sol)
+        start_eff = resolve_model_effective_level(
+            game_state, model, start_col, start_row,
+            int(model.get("level", 0)), _orient,  # get allowed (champ optionnel : level absent = sol)
         )
         _ground_obs = set(wall_set) | _low_clear | _enemy_ground | build_occupied_positions_set(
             game_state, exclude_unit_id=squad_id, level=0
@@ -2483,9 +2481,9 @@ def _fight_pile_in_build_model_pool(
         # Mover DÉJÀ en hauteur descendant vers le SOL (vue 0) : reach = champ multi-niveaux niveau 0
         # (coût de DESCENTE §13.06 facturé sur le budget). Pile-in/conso ≤ 3" ne franchit en général pas
         # un étage, mais certaines unités ont un budget plus grand → descente facturée comme le move.
-        _start_eff = resolve_model_floor_level(
-            start_col, start_row, model["BASE_SHAPE"], model["BASE_SIZE"], _orient,
-            int(model.get("level", 0)), terrain_areas  # get allowed (champ optionnel : level absent = sol)
+        _start_eff = resolve_model_effective_level(
+            game_state, model, start_col, start_row,
+            int(model.get("level", 0)), _orient,  # get allowed (champ optionnel : level absent = sol)
         )
         if _start_eff >= 1:
             from engine.game_state import unit_can_occupy_upper_floor
@@ -2921,7 +2919,7 @@ def pile_in_autoplace_plan(
     from scipy.sparse import coo_matrix
     from engine.hex_utils import min_distance_between_sets, footprints_overlap, Socle
     from engine.spatial_relations import unit_entries_within_engagement_zone
-    from engine.terrain_utils import low_clearance_ground_hexes, resolve_model_floor_level
+    from engine.terrain_utils import low_clearance_ground_hexes
     from .shared_utils import build_enemy_occupied_positions_set, get_engagement_zone
     from .charge_handlers import (
         _charge_model_footprint,
@@ -3651,7 +3649,6 @@ def _fight_consolidation_build_model_pool(
         _charge_model_socle,
     )
     from engine.hex_utils import footprints_overlap, Socle
-    from engine.terrain_utils import resolve_model_floor_level
 
     if tier_kind not in ("enemy", "zone"):
         raise ValueError(f"_fight_consolidation_build_model_pool: tier_kind invalide {tier_kind!r}")
@@ -3743,9 +3740,7 @@ def _fight_consolidation_build_model_pool(
         else:
             pc, pr = int(sib["col"]), int(sib["row"])
             _sib_req = int(sib.get("level", 0))  # get allowed (champ optionnel : level absent = sol)
-        _sib_eff = resolve_model_floor_level(
-            pc, pr, sib["BASE_SHAPE"], sib["BASE_SIZE"], _orient, _sib_req, terrain_areas
-        )
+        _sib_eff = resolve_model_effective_level(game_state, sib, pc, pr, _sib_req, _orient)
         sib_socles.append((_sib_eff, _charge_model_socle(game_state, sib, int(pc), int(pr))))
 
     wall_set = set(wall_hexes)
@@ -3769,9 +3764,9 @@ def _fight_consolidation_build_model_pool(
         from engine.game_state import unit_can_occupy_upper_floor
         if not unit_can_occupy_upper_floor(require_key(unit, "UNIT_KEYWORDS")):
             return empty
-        start_eff = resolve_model_floor_level(
-            start_col, start_row, model["BASE_SHAPE"], model["BASE_SIZE"], _orient,
-            int(model.get("level", 0)), terrain_areas  # get allowed (champ optionnel : level absent = sol)
+        start_eff = resolve_model_effective_level(
+            game_state, model, start_col, start_row,
+            int(model.get("level", 0)), _orient,  # get allowed (champ optionnel : level absent = sol)
         )
         _ground_obs = set(wall_set) | _low_clear | _enemy_ground | build_occupied_positions_set(
             game_state, exclude_unit_id=squad_id, level=0
@@ -3786,9 +3781,9 @@ def _fight_consolidation_build_model_pool(
     else:
         # Mover DÉJÀ en hauteur descendant vers le SOL (vue 0) : reach = champ multi-niveaux niveau 0
         # (coût de DESCENTE §13.06), miroir pile-in. Budget conso > 3" possible → descente facturée.
-        _start_eff = resolve_model_floor_level(
-            start_col, start_row, model["BASE_SHAPE"], model["BASE_SIZE"], _orient,
-            int(model.get("level", 0)), terrain_areas  # get allowed (champ optionnel : level absent = sol)
+        _start_eff = resolve_model_effective_level(
+            game_state, model, start_col, start_row,
+            int(model.get("level", 0)), _orient,  # get allowed (champ optionnel : level absent = sol)
         )
         if _start_eff >= 1:
             from engine.game_state import unit_can_occupy_upper_floor

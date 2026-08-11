@@ -286,15 +286,20 @@ mesure, et c'est assumé (§0.14).
 ## 4. Backlog hors chemin critique (`A_faire/`)
 
 Prêts à démarrer sans décision produit :
-- ✅ **Une primitive commune « poser un plan par figurine »** — **LIVRÉ le 2026-08-11**.
+- ✅ **Une primitive commune « poser un plan par figurine »** — **LIVRÉ les 2026-08-11 / 08-12**.
   `resolve_model_effective_level` (résout) et `place_model_at_effective_level` (résout puis écrit)
-  dans `shared_utils`. Les six sites annoncés migrés, plus **deux jumeaux** trouvés au grep dans
-  `movement_handlers`, plus `commit_move` — qui ne résolvait pas du tout, laissant charge, pile-in,
-  consolidation et gym écrire le niveau brut. `update_model_position` porte désormais un **garde
-  dur** : écrire un étage sous une figurine qui n'y tient pas lève à la ligne fautive au lieu de
-  produire le 500 du 2026-08-11. Le garde a immédiatement révélé que les six tests de charge 3D
-  posaient leur cible sur une case de BORD de plancher — ils mesuraient un état qu'aucun chemin de
-  jeu ne produit.
+  dans `shared_utils`. Les six sites annoncés migrés, plus **douze** trouvés au grep : deux jumeaux
+  dans `movement_handlers`, le squad move rigide, dix résolveurs de `fight_handlers` /
+  `charge_handlers`, et surtout `commit_move` — qui ne résolvait pas du tout, laissant charge,
+  pile-in, consolidation et gym écrire le niveau brut. `update_model_position` porte désormais un
+  **garde dur** : écrire un étage sous une figurine qui n'y tient pas lève à la ligne fautive au
+  lieu de produire le 500 du 2026-08-11.
+  Deux défauts trouvés APRÈS la première livraison, et c'est le plus instructif du chantier : le
+  garde a révélé que les six tests de charge 3D posaient leur cible sur une case de BORD de
+  plancher (ils mesuraient un état qu'aucun chemin de jeu ne produit) ; et le garde lui-même
+  levait APRÈS avoir écrit `col`/`row`, laissant l'état corrompu qu'il devait empêcher — trouvé
+  par `/code-review`, que le test ne voyait pas parce qu'il vérifiait le `raises` sans regarder
+  l'état après.
   → [`Implémenté/primitive_poser_plan_par_figurine_2026-08-11.md`](Implémenté/primitive_poser_plan_par_figurine_2026-08-11.md)
 - **Réécrire la note `bot_eval_freq_normal` de `x1_long` avec le coût MESURÉ** (~10 min, décidé
   le 2026-08-11). Cette note fonde le réglage sur « 13 min l'unité », chiffre hérité du commit

@@ -3627,32 +3627,16 @@ def update_model_position(
     if model is None:
         raise KeyError(f"update_model_position: model {model_id} not in models_cache (dead/absent)")
     norm_col, norm_row = normalize_coordinates(int(col), int(row))
-    model["col"] = norm_col
-    model["row"] = norm_row
+
+    # ─── TOUTES LES VALIDATIONS, AVANT LA MOINDRE ÉCRITURE ───────────────────────────────
+    # Un refus doit laisser la figurine EXACTEMENT où elle était. Ces contrôles vivaient après
+    # l'écriture de `col`/`row` : le garde §13.06 levait donc en laissant la figurine déplacée
+    # sous son ANCIEN niveau d'étage — précisément l'état corrompu qu'il existe pour empêcher,
+    # et le `game_state` PvP survit à la requête en 500, donc toutes les suivantes levaient à
+    # leur tour. Le contrôle d'orientation avait le même défaut, sur `col`/`row` ET `level`.
     if level is not None:
         if isinstance(level, bool) or not isinstance(level, int) or level < 0:
             raise ValueError(f"update_model_position: level must be an int >= 0, got {level!r}")
-        # GARDE §13.06 : un niveau ÉCRIT est un niveau RÉSOLU. Une figurine marquée à l'étage dont
-        # l'empreinte ne tient pas entièrement sur un plancher est un état corrompu — `floor_height_at`
-        # lève ensuite, très loin de l'écriture fautive (500 du 2026-08-11 : le client perdait TOUT
-        # son calque de LoS). Les écrivains passent par `place_model_at_effective_level`, qui résout ;
-        # ce garde est là pour que le PROCHAIN écrivain casse ici, à la ligne fautive, au lieu de
-        # produire l'état corrompu. Coût nul au sol : `resolve_model_floor_level` sort immédiatement
-        # sous `level < 1`, et tout le jeu au sol passe donc par ce raccourci.
-        if level >= 1:
-            _guard_orientation = (
-                int(require_key(model, "orientation")) if orientation is None else int(orientation)
-            )
-            if resolve_model_effective_level(
-                game_state, model, norm_col, norm_row, level, _guard_orientation
-            ) != level:
-                raise ValueError(
-                    f"update_model_position: niveau {level} NON RÉSOLU pour la figurine {model_id} "
-                    f"en ({norm_col},{norm_row}) orientation {_guard_orientation} — son empreinte ne "
-                    f"tient pas sur un plancher de ce niveau (§13.06). Utiliser "
-                    f"place_model_at_effective_level, qui résout le niveau avant d'écrire."
-                )
-        model["level"] = level
     if orientation is not None:
         from engine.hex_utils import ORIENTATION_STEP_COUNT
         if (
@@ -3663,6 +3647,35 @@ def update_model_position(
             raise ValueError(
                 f"update_model_position: orientation must be an int in 0..{ORIENTATION_STEP_COUNT - 1}, got {orientation!r}"
             )
+    # GARDE §13.06 : un niveau ÉCRIT est un niveau RÉSOLU. Une figurine marquée à l'étage dont
+    # l'empreinte ne tient pas entièrement sur un plancher est un état corrompu — `floor_height_at`
+    # lève ensuite, très loin de l'écriture fautive (500 du 2026-08-11 : le client perdait TOUT
+    # son calque de LoS). Les écrivains passent par `place_model_at_effective_level`, qui résout ;
+    # ce garde est là pour que le PROCHAIN écrivain casse ici, à la ligne fautive, au lieu de
+    # produire l'état corrompu. Coût nul au sol : `resolve_model_floor_level` sort immédiatement
+    # sous `level < 1`, et tout le jeu au sol passe donc par ce raccourci.
+    # Mesuré sur la position VISÉE et l'orientation VISÉE, pas sur celles du cache : c'est l'état
+    # que cet appel produirait, et rien n'est encore écrit à cet instant.
+    if level is not None and level >= 1:
+        _guard_orientation = (
+            int(require_key(model, "orientation")) if orientation is None else int(orientation)
+        )
+        if resolve_model_effective_level(
+            game_state, model, norm_col, norm_row, level, _guard_orientation
+        ) != level:
+            raise ValueError(
+                f"update_model_position: niveau {level} NON RÉSOLU pour la figurine {model_id} "
+                f"en ({norm_col},{norm_row}) orientation {_guard_orientation} — son empreinte ne "
+                f"tient pas sur un plancher de ce niveau (§13.06). Utiliser "
+                f"place_model_at_effective_level, qui résout le niveau avant d'écrire."
+            )
+
+    # ─── ÉCRITURES ───────────────────────────────────────────────────────────────────────
+    model["col"] = norm_col
+    model["row"] = norm_row
+    if level is not None:
+        model["level"] = level
+    if orientation is not None:
         model["orientation"] = orientation
 
     squad_id = str(model["squad_id"])

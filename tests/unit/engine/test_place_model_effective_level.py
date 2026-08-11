@@ -109,10 +109,29 @@ def test_update_model_position_refuse_un_niveau_non_resolu(cells):
 
     Sans lui, l'état corrompu se propage et c'est `floor_height_at` qui lève, très loin de
     l'écriture — le 500 du 2026-08-11, où l'erreur remontait dans un `catch` client.
+
+    Le refus doit être ATOMIQUE, et c'est la moitié du test qui compte : vérifier le seul
+    `raises` laissait passer un garde qui levait APRÈS avoir écrit `col`/`row`. La figurine se
+    retrouvait alors déplacée sous son ancien niveau d'étage — exactement l'état que le garde
+    existe pour empêcher. Le `game_state` PvP survivant à la requête en 500, toutes les
+    requêtes suivantes de la session levaient à leur tour.
     """
     gs, mid, (col, row) = cells["gs"], cells["mid"], cells["spilling"]
+    # Départ posé au SOL, à une case DIFFÉRENTE de la destination refusée : sans cet écart, une
+    # écriture de `col`/`row` avant la levée serait indétectable.
+    depart = (int(col) + 3, int(row) + 3)
+    place_model_at_effective_level(gs, mid, depart[0], depart[1], 0)
+    avant = dict(gs["models_cache"][mid])
+
     with pytest.raises(ValueError, match="NON RÉSOLU"):
         update_model_position(gs, mid, col, row, level=1)
+
+    apres = gs["models_cache"][mid]
+    assert (int(apres["col"]), int(apres["row"])) == depart, (
+        "refus non atomique : la figurine a été DÉPLACÉE avant que le garde ne lève"
+    )
+    assert int(apres["level"]) == int(avant["level"])
+    assert int(apres["orientation"]) == int(avant["orientation"])
 
 
 def test_update_model_position_accepte_un_niveau_resolu(cells):
