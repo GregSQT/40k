@@ -39,18 +39,16 @@
 
 ## 0. En cours — ne rien casser
 
-- ⛔ **PvE se fige en phase de mouvement — cause NON identifiée, en attente d'une donnée**
-  (2026-08-11). Symptôme : après une activation de l'IA, plus rien ne se passe. La chaîne est
-  établie — le client demande un aperçu de tir « depuis une position » pour une unité qui n'est
-  **pas sur la table** (sentinelle `(-1,-1)` des réserves, 20.01), la mesure d'engagement lève,
-  la requête part en 500, et la boucle de tour IA du front meurt sur l'exception.
-  Ce qui manque : **lequel** des cinq sites d'appel du front émet cette requête, et **pourquoi**
-  l'unité est hors table à ce moment. Un garde nomme désormais l'unité, la destination,
-  `deployed_on_turn` et `in_strategic_reserves` dans le message d'erreur
-  (`_require_preview_destination_on_table`, posé sur les deux previews « depuis une position ») :
-  la prochaine occurrence donnera la réponse dans la console backend.
-  ⚠️ **Ce garde est un instrument de diagnostic, pas le correctif** : il rend l'erreur lisible,
-  il n'empêche pas le figement. Ne pas clore ce point tant que la cause n'est pas traitée.
+- ✅ **PvE se figeait — cause identifiée et corrigée** (2026-08-11). Le symptôme était rapporté
+  « en phase de mouvement » ; la mesure a montré la phase de **déploiement**, sur des unités
+  simplement **pas encore posées** (`deployed_on_turn=None`, `in_strategic_reserves=False`) — les
+  réserves stratégiques n'étaient pas en cause. L'effet de « baseline de portée depuis la position
+  actuelle » de `BoardPvp` tourne aussi en déploiement, où l'unité en cours de placement n'a pas
+  de position : il demandait un aperçu de tir depuis la sentinelle `(-1,-1)`, le backend refusait
+  (20.01), la requête partait en 500 et tuait la boucle appelante. L'effet sort désormais sans
+  requête quand l'unité n'est pas sur la table, avec le **même prédicat que le moteur**.
+  Le garde qui a permis le diagnostic reste en place comme assertion de contrat sur les deux
+  previews « depuis une position » (`_require_preview_destination_on_table`).
 - 🔜 **Run `--new` ArmageddonAgent `x1` de VÉRIFICATION — à lancer** (2026-08-11). Ce qu'il doit
   prouver n'est pas un progrès mais que le pipeline tourne de bout en bout avec un **espace de
   décision modifié** (l'alignement de la charge sur 11.02, ci-dessous). À lire dans l'ordre :

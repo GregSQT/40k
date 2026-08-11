@@ -830,7 +830,7 @@ def _log_objective_control_snapshot(engine_instance) -> None:
     from engine.game_state import iter_living_model_footprints, objective_hex_zones
 
     game_state = engine_instance.game_state
-    detail = game_state.get("objective_control_detail")  # get allowed (aucun objectif au scénario)
+    detail = game_state.get("_objective_control_detail")  # get allowed (aucun objectif au scénario)
     if not detail:
         return
 

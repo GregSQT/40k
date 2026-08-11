@@ -6636,7 +6636,13 @@ export default function Board({
     const restUnit = units.find((u) => String(u.id) === String(squadMovePlan?.unitId ?? -1));
     const restRange =
       restUnit?.RNG_WEAPONS && restUnit.RNG_WEAPONS.length > 0 ? getMaxRangedRange(restUnit) : 0;
-    if (!restUnit || restRange <= 0) {
+    // HORS TABLE : cet effet tourne AUSSI en déploiement (`isDeploymentMove`), et l'unité qu'on y
+    // place n'a encore aucune figurine posée — son ancre est la sentinelle `(-1,-1)`. Demander une
+    // « baseline depuis la position actuelle » n'a alors pas d'objet : il n'y a pas de position.
+    // Le backend le refuse (`entry_is_on_battlefield`, 20.01) et la requête partait en 500, ce qui
+    // tuait la boucle appelante. Même prédicat que le moteur — la sentinelle, pas une heuristique.
+    const restUnitOnBattlefield = !!restUnit && restUnit.col >= 0 && restUnit.row >= 0;
+    if (!restUnit || restRange <= 0 || !restUnitOnBattlefield) {
       setMovePreviewLosTooFarById({});
       setMovePreviewLosDetectionInfoById({});
       return;

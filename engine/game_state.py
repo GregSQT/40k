@@ -3021,7 +3021,7 @@ class GameStateManager:
         # `objective_controllers` ne dit QUE le vainqueur, jamais pourquoi — un joueur posé sur un
         # objectif qu'il ne prend pas n'a aucun moyen de savoir s'il est contesté, battle-shocked
         # (01.07 : OC à '-') ou hors zone. Écriture O(nb_objectifs), sans coût en entraînement.
-        game_state["objective_control_detail"] = result
+        game_state["_objective_control_detail"] = result
 
         return result
 

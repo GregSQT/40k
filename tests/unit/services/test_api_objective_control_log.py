@@ -30,6 +30,7 @@ def _game_state(*, detail, units, models, battle_shocked_ids=()):
             "col": col,
             "row": row,
             "HP_CUR": 1,
+            "HP_MAX": 1,
             "BASE_SHAPE": "round",
             "BASE_SIZE": 1,
         }
@@ -40,7 +41,7 @@ def _game_state(*, detail, units, models, battle_shocked_ids=()):
         "action_log_seq": 0,
         "action_logs": [],
         "objectives": [{"id": "obj_a", "name": "Centre", "hexes": [[10, 10], [10, 11], [11, 10], [11, 11]]}],
-        "objective_control_detail": detail,
+        "_objective_control_detail": detail,
         "units": units,
         "units_cache": units_cache,
         "models_cache": models_cache,
@@ -265,3 +266,50 @@ def test_incomplete_detail_raises_instead_of_guessing(missing_key):
 
     with pytest.raises(ConfigurationError):
         _log_objective_control_snapshot(_EngineStub(gs))
+
+
+def test_line_reaches_the_serialised_response_not_just_game_state():
+    """Le VRAI chemin : `_game_state_for_json` journalise AVANT de copier `action_logs`.
+
+    Motif récurrent de ce dépôt — du code testé mais jamais atteint par le chemin de production.
+    Ici le risque est précis : si la journalisation passait après la construction du dict
+    sérialisé, ou si `action_logs` était exclu du JSON, la ligne existerait dans le moteur sans
+    jamais atteindre le navigateur, et le test unitaire ci-dessus resterait vert.
+    """
+    from services import api_server
+
+    class _StateManagerStub:
+        def refresh_objective_control_on_boundary(self, game_state):
+            return False
+
+    class _FullEngineStub:
+        def __init__(self, game_state):
+            self.game_state = game_state
+            self.state_manager = _StateManagerStub()
+            self.current_mode_code = "pve"
+            self.unit_registry = None
+
+    gs = _game_state(
+        detail={
+            "obj_a": {
+                "player_1_oc": 4,
+                "player_2_oc": 0,
+                "controller": 1,
+                "previous_controller": None,
+            }
+        },
+        units=[{"id": "u1", "player": 1}],
+        models={"u1": (10, 10)},
+    )
+    # Clés exigées par la sérialisation elle-même (cf. `test_api_server_helpers`).
+    gs["terrain_areas"] = []
+    gs["unit_by_id"] = {str(u["id"]): u for u in gs["units"]}
+    serialised = api_server._game_state_for_json(_FullEngineStub(gs))
+
+    messages = [entry["message"] for entry in serialised["action_logs"]]
+    assert any("OBJECTIVE Centre" in m for m in messages), (
+        f"la ligne d'objectif n'atteint pas la réponse sérialisée : {messages}"
+    )
+    # La clé de déduplication est INTERNE : convention `_` du moteur, jamais envoyée au client.
+    assert "_objective_control_logged_for_api" not in serialised
+    assert "_objective_control_detail" not in serialised
