@@ -81,14 +81,32 @@ immédiatement, avec le renvoi vers la primitive. Trois raisons :
 Le seul appelant qu'il a fait tomber était un **helper de test**, et il avait raison de tomber :
 voir ci-dessous.
 
-### Une seule exception, assumée et commentée
+### L'exception a été résorbée le jour même (arbitrage tranché : option B)
 
 `translate_squad_to_destination` (squad move rigide) écrit `m["level"]` **directement**, sans passer
-par `update_model_position`, et lit `terrain_areas` en `get(..., [])`. Il résout déjà correctement —
-il ne porte donc pas le défaut de ce chantier. Le migrer vers `resolve_model_effective_level`
-changerait son contrat en `require_key`, ce que le moteur garantit en production
-(`w40k_core.py` pose toujours la clé) mais que des fixtures de test n'honorent pas. Sujet distinct,
-signalé sur place par un commentaire.
+par `update_model_position` — il échappe donc au garde. Il résolvait déjà correctement, mais restait
+la **dernière copie** de la règle hors de la primitive, et il lisait `terrain_areas` en
+`get(..., [])` là où `resolve_model_effective_level` l'exige en `require_key`.
+
+Il passe désormais par la primitive. Le changement de contrat est justifié : le moteur pose
+**toujours** la clé (`W40KEngine.reset`, `terrain_areas or []`), donc un `game_state` qui l'omet
+décrit un état impossible en production — le raisonnement même de `tests/_state_invariants.py`.
+Deux fixtures l'omettaient (`test_move_execution.py`, `test_reactive_move.py`) : elles la posent
+maintenant à côté de `wall_hexes`, dont elle partage le registre (donnée de board, valeur dépendante
+du scénario — c'est pourquoi sa place n'est **pas** dans `turn_state_invariants()`, dont chaque
+valeur est comparée à celle de `reset()`).
+
+Périmètre vérifié, pas supposé : les **70** fichiers de test qui posent `wall_hexes` sans
+`terrain_areas` — le sur-ensemble strict des fixtures que ce changement peut rompre — ont tous été
+passés. Deux échecs subsistent, tous deux **antérieurs** à ce chantier et sans rapport (vérifié par
+stash) : `test_movement_pool_build::…[base2_walls_ez5]` et
+`test_episode_combat_counters::test_charge_counters_ventilate_by_seat`
+(`charge_nearest_enemy_inches` manquant), venus des deux chantiers mergés juste avant.
+
+Verrou : `test_fight_engagement_3d::test_moving_a_squad_off_its_floor_resyncs_its_level_and_height`
+existait déjà et couvre ce site. Résolution retirée → il lève
+`floor_height_at: no floor at level 1 contains cell (50, 20)`, c'est-à-dire **exactement** l'erreur
+du 500 d'origine. Rétabli → vert.
 
 ## Ce que le garde a trouvé en entrant
 
