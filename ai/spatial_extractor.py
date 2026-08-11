@@ -106,6 +106,13 @@ class EntityRunningNorm(nn.Module):
     ferait converger toutes les statistiques vers zéro dès qu'un slot est vide.
     """
 
+    # Déclarations de type des buffers : `register_buffer` passe par `__getattr__`, dont le
+    # type de retour est `Tensor | Module`. Sans ces annotations, toute lecture de statistique
+    # est vue comme potentiellement un sous-module.
+    running_mean: torch.Tensor
+    running_var: torch.Tensor
+    count: torch.Tensor
+
     def __init__(self, num_features: int, epsilon: float = 1e-8, clip: float = 10.0):
         super().__init__()
         if num_features <= 0:
@@ -275,6 +282,10 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
     `entity_dim` / `weapon_dim` / `type_dim` / `model_dim` / `map_channels` : largeurs des
     encodeurs partagés et de la branche carte.
     """
+
+    # Cf. `EntityRunningNorm` : un buffer se déclare aussi côté types, sinon il est vu comme
+    # `Tensor | Module`.
+    pos_channels: torch.Tensor
 
     def __init__(
         self,

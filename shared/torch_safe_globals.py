@@ -38,12 +38,13 @@ def register_torch_safe_globals() -> None:
 
     import numpy as np
     import torch.serialization
+    from numpy._core.multiarray import scalar as numpy_scalar
 
-    # `np._core` est le chemin de numpy 2.x (`np.core` en 1.x). Le dépôt épingle numpy
-    # 2.4.2 : si ce chemin disparaît, l'AttributeError doit remonter telle quelle plutôt
+    # `numpy._core` est le chemin de numpy 2.x (`numpy.core` en 1.x). Le dépôt épingle numpy
+    # 2.4.2 : si ce chemin disparaît, l'ImportError doit remonter telle quelle plutôt
     # que d'être rattrapée — un repli silencieux rendrait les modèles inchargeables avec
     # un message sans rapport.
-    allowed = [np._core.multiarray.scalar, np.dtype]
+    allowed = [numpy_scalar, np.dtype]
 
     # Toutes les classes de dtype de numpy, et elles seules. Énumérer à la main ne tient
     # pas : le jeu nécessaire dépend des dtypes présents dans CHAQUE checkpoint —
