@@ -1340,10 +1340,33 @@ class W40KEngine(gym.Env):
 
         return reward_configs
 
+    def _logged_opponent_name(self) -> Optional[str]:
+        """Nom de l'adversaire pour l'en-tete de `step.log`, ou None s'il est INCONNU.
+
+        Le repli « SelfPlay » a ete supprime le 2026-08-11 — il ne decrivait rien.
+        `current_bot_name` porte le commentaire « Set externally for bot-evaluation logging »
+        depuis toujours et AUCUN code ne l'assignait : la branche par defaut etait donc prise a
+        100 % des episodes, y compris les 600 d'une evaluation contre les six bots ponderes
+        (control, value_trade, adaptive, greedy, defensive, tactical). Le journal du 2026-08-11
+        annoncait « Opponent: SelfplayBot » sur ses 600 lignes, et cette etiquette a fait conclure
+        a tort que l'agent affrontait un instantane de lui-meme — un diagnostic entier bati sur
+        une constante. Meme famille que `[Strategy: <label>]`, supprime le meme jour : un champ
+        que rien ne produit, plus une valeur par defaut, egale une information inventee.
+
+        `None` = « adversaire inconnu », et le StepLogger n'ecrit alors PAS la ligne.
+
+        ⚠️ METHODE SEPAREE, ET C'EST LE POINT : ces deux lignes vivaient au milieu de `reset()`,
+        donc hors de portee de tout test qui ne construit pas un moteur complet. Le seul controle
+        possible etait un grep de `bot_name = "SelfPlay"` sur le source — et il a ete MESURE
+        contournable le 2026-08-11 : reintroduire le defaut sous la forme `... or "SelfPlay"`
+        laissait les quatre tests VERTS. L'invariant se verifie maintenant en appelant ce chemin.
+        """
+        return getattr(self.step_logger, "current_bot_name", None)
+
     # ============================================================================
     # GYM INTERFACE - KEEP THESE CORE METHODS
     # ============================================================================
-    
+
     def reset(self, *, seed: Optional[int] = None, options: Optional[Dict[str, Any]] = None) -> Tuple[Dict[str, np.ndarray], Dict[str, Any]]:
         """Reset game state for new episode - gym.Env interface."""
 
@@ -1895,14 +1918,8 @@ class W40KEngine(gym.Env):
                 else:
                     scenario_name = "Unknown Scenario"
             
-            # Determine bot_name for self-play (default to "SelfPlay" if not set)
-            bot_name = None
-            if hasattr(self.step_logger, 'current_bot_name') and self.step_logger.current_bot_name:
-                bot_name = self.step_logger.current_bot_name
-            else:
-                # In self-play mode, use a default name
-                bot_name = "SelfPlay"
-            
+            bot_name = self._logged_opponent_name()
+
             # Use _scenario_wall_hexes (set during scenario loading) - convert to step_logger format
             raw_walls = self._scenario_wall_hexes if self._scenario_wall_hexes is not None else []
             walls = [{"col": normalize_coordinates(w[0], w[1])[0], "row": normalize_coordinates(w[0], w[1])[1]} for w in raw_walls] if raw_walls else []
