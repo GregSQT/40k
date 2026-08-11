@@ -896,6 +896,7 @@ class W40KEngine(gym.Env):
 
         self.game_state.pop("_wall_set_cache", None)
         self.game_state.pop("_dense_wall_set_cache", None)
+        self.game_state.pop("_socle_wall_blocked_cache", None)
         self.game_state.pop("_obscuring_area_sets_cache", None)
         self.game_state.pop("_obscuring_hex_to_area_cache", None)
         # Grilles de blocage de la LoS vectorisee : DERIVEES des deux caches ci-dessus, donc
@@ -7843,6 +7844,7 @@ class W40KEngine(gym.Env):
         self.game_state.pop("_unit_los_pair_cache", None)
         self.game_state.pop("_wall_set_cache", None)
         self.game_state.pop("_dense_wall_set_cache", None)
+        self.game_state.pop("_socle_wall_blocked_cache", None)
         self.game_state.pop("_hex_los_state_cache", None)
         objectives = require_key(self.game_state, "objectives")
         self.game_state["macro_target_objective_index"] = 0 if objectives else None

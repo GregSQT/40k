@@ -15,7 +15,7 @@ from engine.phase_handlers.shared_utils import (
     rebuild_choice_timing_index,
     compute_candidate_footprint, build_occupied_positions_set,
     candidate_overlaps_any_unit, coherency_violation_flags,
-    update_model_position,
+    update_model_position, wall_blocked_anchors,
 )
 
 
@@ -292,7 +292,6 @@ def generate_compact_formation(
     pool_set = _deploy_pool_set(game_state, player, pool_override)
     board_cols = require_key(game_state, "board_cols")
     board_rows = require_key(game_state, "board_rows")
-    wall_hexes = game_state.get("wall_hexes", set())  # get allowed
     # Formation générée AU SOL → seules les figs déployées au niveau 0 bloquent (une fig à
     # l'étage ne bloque pas le sol sous elle). Le preview revalide ensuite par niveau effectif.
     other_occ = _deployed_occupied_positions(game_state, str(squad_id), level=0)
@@ -358,12 +357,14 @@ def generate_compact_formation(
         ne pas flagger en rouge un ajustement manuel où les socles se touchent."""
         _is_round = require_key(model, "BASE_SHAPE") == "round"
         fp = _model_fp(model, c, r)
+        # Mur : ancre interdite au SOCLE (jumeau du pool et du commit). La boucle par cellules
+        # ci-dessous ne teste donc plus les murs — elle mesurait le mur comme un point.
+        if (int(c), int(r)) in wall_blocked_anchors(game_state, model):
+            return None
         for cc, rr in fp:
             if cc < 0 or cc >= board_cols or rr < 0 or rr >= board_rows:
                 return None
             if (cc, rr) not in pool_set:
-                return None
-            if (cc, rr) in wall_hexes:
                 return None
             # Clairance _low_clear par empreinte hex : NON-rond seulement (le rond passe par le disque).
             if not _is_round and (cc, rr) in _low_clear:
@@ -645,7 +646,6 @@ def deployment_build_model_destinations_pool(
     squad_id = str(require_key(model, "squad_id"))
     player = int(require_key(model, "player"))
     pool_set = _deploy_pool_set(game_state, player, placement_pool_for_squad(game_state, squad_id))
-    wall_hexes = game_state.get("wall_hexes", set())  # get allowed
     level = int(level or 0)
     terrain_areas = require_key(game_state, "terrain_areas")
     from engine.terrain_utils import (
@@ -758,7 +758,10 @@ def deployment_build_model_destinations_pool(
     # L'occupation déployée est lue ICI, à son unique consommateur, et non pré-calculée dans un
     # dict par niveau : c'est ce producteur-là qui s'était désynchronisé des niveaux réellement
     # atteignables. Il ne peut plus, il itère `_levels`.
-    pool_free = pool_set - wall_hexes
+    # Murs : ancres où le SOCLE chevauche un mur (géométrie d'hexagone, jumeau exact du move).
+    # `pool_set - wall_hexes` mesurait le mur comme un point, si bien que le déploiement offrait
+    # des cases d'où la figurine ne pouvait plus faire un seul pas (664 sur `terrain-mc1`).
+    pool_free = pool_set - wall_blocked_anchors(game_state, model)
     allowed_by_level: List[Optional[AbstractSet[Tuple[int, int]]]] = []
     for lv in _levels:
         # Occupation des unités déployées AU NIVEAU EFFECTIF de la candidate — plus d'union
@@ -978,7 +981,6 @@ def deployment_preview_plan(
     pool_set = _deploy_pool_set(game_state, player, pool_override)
     board_cols = require_key(game_state, "board_cols")
     board_rows = require_key(game_state, "board_rows")
-    wall_hexes = game_state.get("wall_hexes", set())  # get allowed
     terrain_areas = require_key(game_state, "terrain_areas")
     unit = get_unit_by_id(str(squad_id), game_state)
     if not unit:
@@ -1047,7 +1049,9 @@ def deployment_preview_plan(
             cc < 0 or cc >= board_cols or rr < 0 or rr >= board_rows for cc, rr in fp
         )
         out_of_zone = any((cc, rr) not in pool_set for cc, rr in fp)
-        on_wall = bool(wall_hexes and fp & wall_hexes)
+        on_wall = (nc, nr) in wall_blocked_anchors(
+            game_state, require_key(models_cache, str(mid))
+        )
         on_other = bool(other_occ_by_level[lv] and fp & other_occ_by_level[lv])
         # Collision intra-escouade uniquement entre figs du plan AU MÊME NIVEAU.
         intra = any(
@@ -1629,15 +1633,19 @@ def execute_deployment_action(game_state: Dict[str, Any], action: Dict[str, Any]
 
     board_cols = require_key(game_state, "board_cols")
     board_rows = require_key(game_state, "board_rows")
-    wall_hexes = game_state.get("wall_hexes", set())
 
     for c, r in candidate_fp:
         if c < 0 or c >= board_cols or r < 0 or r >= board_rows:
             return False, {"error": "deploy_footprint_out_of_bounds", "cell": (c, r)}
         if (c, r) not in pool_set:
             return False, {"error": "deploy_footprint_outside_zone", "cell": (c, r)}
-        if (c, r) in wall_hexes:
-            return False, {"error": "deploy_footprint_on_wall", "cell": (c, r)}
+
+    # Mur : ancre interdite au SOCLE, pas cellule d'empreinte — même prédicat que le pool qui a
+    # offert la case, sinon le commit et le pool ne peuvent que diverger.
+    if (int(dest_col), int(dest_row)) in wall_blocked_anchors(game_state, unit):
+        return False, {
+            "error": "deploy_footprint_on_wall", "cell": (int(dest_col), int(dest_row)),
+        }
 
     if _is_footprint_overlapping(
         game_state, candidate_fp,

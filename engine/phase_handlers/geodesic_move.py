@@ -12,33 +12,8 @@ from typing import AbstractSet, Any, Dict, List, Mapping, Optional, Set, Tuple
 
 from engine.hex_utils import (
     geodesic_field, geodesic_field_multi_source, get_neighbors, round_base_radius_norm, _hex_center,
+    inflate_obstacles_by_footprint as _inflate_obstacles_by_footprint, obstacles_touching_disc,
 )
-
-
-def _inflate_obstacles_by_footprint(
-    obstacles: Set[Tuple[int, int]],
-    off_even: Tuple[Tuple[int, int], ...],
-    off_odd: Tuple[Tuple[int, int], ...],
-) -> Set[Tuple[int, int]]:
-    """Minkowski discret : cellules-ancre dont l'empreinte toucherait un obstacle.
-
-    Une ancre ``A`` est bloquée ssi ``A + off`` ∈ ``obstacles`` pour un ``off`` de son
-    empreinte (``off_even`` si colonne paire, ``off_odd`` si impaire). Équivalent à la
-    dilatation ``_placement_bad`` du chemin hex vectorisé, mais sous forme de set pour
-    ``geodesic_field`` (clearance=0) : un socle non-rond est représenté par son empreinte
-    discrète ORIENTÉE (garde l'orientation, contrairement à un disque circonscrit).
-    """
-    inflated: Set[Tuple[int, int]] = set()
-    for _oc, _orr in obstacles:
-        for _dc, _dr in off_even:
-            _ac, _ar = _oc - _dc, _orr - _dr
-            if (_ac & 1) == 0:
-                inflated.add((_ac, _ar))
-        for _dc, _dr in off_odd:
-            _ac, _ar = _oc - _dc, _orr - _dr
-            if (_ac & 1) == 1:
-                inflated.add((_ac, _ar))
-    return inflated
 
 
 def _euclidean_move_field(
@@ -61,9 +36,15 @@ def _euclidean_move_field(
     restent cohérents pour toutes les formes.
     """
     if base_shape == "round":
+        # Obstacles que le socle chevauche DÉJÀ au départ (contact de mêlée) : ils gardent leurs
+        # cases bloquantes mais ne dilatent plus, sinon aucun premier pas n'existe — cf.
+        # ``geodesic_field``. Sur socle NON ROND la question ne se pose pas : la dilatation y est
+        # discrète (empreinte ∩ obstacles), et la tangence ne fait pas se recouper deux empreintes.
+        radius = round_base_radius_norm(base_size)
         return geodesic_field(
             start_pos, board_cols, board_rows, obstacles_traverse,
-            budget_norm, round_base_radius_norm(base_size),
+            budget_norm, radius,
+            contact_obstacles=obstacles_touching_disc(obstacles_traverse, start_pos, radius),
         )
     _inflated = _inflate_obstacles_by_footprint(obstacles_traverse, off_even, off_odd)
     _inflated.discard(start_pos)  # start jamais obstacle (geodesic_field lèverait sinon)
@@ -80,6 +61,8 @@ def _euclidean_move_field_multi(
     board_cols: int,
     board_rows: int,
     budget_norm: float,
+    contact_obstacles: Optional[AbstractSet[Tuple[int, int]]] = None,
+    contact_start: Optional[Tuple[int, int]] = None,
 ) -> Dict[Tuple[int, int], float]:
     """Version MULTI-SOURCE de ``_euclidean_move_field`` (départs multiples avec distance initiale).
 
@@ -91,6 +74,7 @@ def _euclidean_move_field_multi(
         return geodesic_field_multi_source(
             starts, board_cols, board_rows, obstacles_traverse,
             budget_norm, round_base_radius_norm(base_size),
+            contact_obstacles=contact_obstacles, contact_start=contact_start,
         )
     _inflated = _inflate_obstacles_by_footprint(obstacles_traverse, off_even, off_odd)
     for s in starts:
@@ -246,9 +230,21 @@ def reachable_multilevel_field(
             }
             if not active:
                 continue
+            # Sortie de CONTACT : uniquement pour la passe qui part de la position réelle du
+            # mobile (son niveau ET sa case). Aux passes suivantes il a franchi un portail, donc
+            # il n'est plus au contact et l'exception élargirait le champ à tort.
+            _contact = (
+                obstacles_touching_disc(
+                    obstacles_by_level.get(level, set()), start_pos,
+                    round_base_radius_norm(base_size),
+                )
+                if base_shape == "round" and level == start_level and start_pos in active
+                else None
+            )
             field = _euclidean_move_field_multi(
                 active, base_shape, base_size, off_even, off_odd,
                 obstacles_by_level.get(level, set()), board_cols, board_rows, budget_norm,
+                contact_obstacles=_contact, contact_start=start_pos if _contact else None,
             )
             for (cc, cr), dc in field.items():
                 key = (cc, cr, level)

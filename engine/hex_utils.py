@@ -1763,6 +1763,141 @@ def round_base_radius_norm(base_size: float) -> float:
     return (base_size / 2.0) * _FOOTPRINT_SIZE_SCALE
 
 
+def inflate_obstacles_by_footprint(
+    obstacles: AbstractSet[Tuple[int, int]],
+    off_even: Tuple[Tuple[int, int], ...],
+    off_odd: Tuple[Tuple[int, int], ...],
+) -> Set[Tuple[int, int]]:
+    """Minkowski discret : cellules-ancre dont l'empreinte toucherait un obstacle.
+
+    Une ancre ``A`` est bloquée ssi ``A + off`` ∈ ``obstacles`` pour un ``off`` de son empreinte
+    (``off_even`` si colonne paire, ``off_odd`` si impaire). C'est la forme « ensemble d'ancres »
+    du test ``empreinte ∩ obstacles``, et la seule géométrie que le champ géodésique applique aux
+    socles NON RONDS (clearance 0 + obstacles dilatés).
+    """
+    inflated: Set[Tuple[int, int]] = set()
+    for _oc, _orr in obstacles:
+        for _dc, _dr in off_even:
+            _ac, _ar = _oc - _dc, _orr - _dr
+            if (_ac & 1) == 0:
+                inflated.add((_ac, _ar))
+        for _dc, _dr in off_odd:
+            _ac, _ar = _oc - _dc, _orr - _dr
+            if (_ac & 1) == 1:
+                inflated.add((_ac, _ar))
+    return inflated
+
+
+def socle_blocked_anchor_cells(
+    obstacle_hexes: AbstractSet[Tuple[int, int]],
+    base_shape: str,
+    base_size: Any,
+    orientation: int,
+    board_cols: int,
+    board_rows: int,
+) -> Set[Tuple[int, int]]:
+    """Ancres où le SOCLE chevaucherait l'un des ``obstacle_hexes``.
+
+    SOURCE UNIQUE de « ce socle touche-t-il un obstacle de terrain ? » pour le PLACEMENT.
+    Un hex-obstacle est un HEXAGONE, pas son centre : c'est déjà la géométrie qu'applique la
+    TRAVERSÉE (``_segment_hits_hex``, clearance = rayon du socle). Le placement, lui, mesurait
+    l'obstacle comme un POINT via l'empreinte hex (``_footprint_round`` = cases dont le CENTRE est
+    dans le disque). Les deux critères divergent exactement sur la bande ``r < d <= r +
+    circumradius`` : une figurine posée là est légale au placement et n'a AUCUN premier pas
+    possible — ``geodesic_field`` ne garde le départ que par appartenance de case et suppose donc
+    que le socle de départ ne chevauche aucun hexagone d'obstacle. Mesuré sur ``terrain-mc1``
+    (base 8 à ×5) : 664 ancres légales au pool de mouvement VIDE, dont 198 dans les zones de
+    déploiement. Cette fonction rétablit la précondition.
+
+    Le désaccord est une propriété des géométries OBLIQUES : sur un mur en colonne droite les pas
+    de colonne valent 1,5 unité-norme et la bande tombe entre deux colonnes, donc reste vide
+    (mesuré : 0 ancre piège sur une colonne, 40 sur une diagonale, 25 sur un coin).
+
+    Socle NON ROND : rien ne change, et c'est voulu — le champ géodésique dilate déjà ces socles
+    par leur empreinte hex ORIENTÉE (``inflate_obstacles_by_footprint``, clearance 0), donc
+    placement et traversée y coïncident déjà. Renvoyer autre chose ROUVRIRAIT l'écart.
+
+    Lecture pure. Ne dépend que d'entrées STATIQUES pour une partie (murs, socle, orientation) →
+    mémoïsé par ``shared_utils.wall_blocked_anchors``.
+    """
+    if not obstacle_hexes:
+        return set()
+    if base_shape != "round":
+        off_even, off_odd = precompute_footprint_offsets(base_shape, base_size, orientation)
+        blocked = inflate_obstacles_by_footprint(obstacle_hexes, off_even, off_odd)
+    else:
+        diameter = require_scalar_base_size(base_shape, base_size, "socle_blocked_anchor_cells")
+        off_even_r, off_odd_r = _round_disc_contact_offsets(diameter)
+        # Dilatation par un MOTIF, pas un test géométrique par paire (ancre, obstacle) : le motif
+        # ne dépend que du rayon et de la parité de colonne de l'obstacle, donc il se calcule une
+        # fois. Un scan géométrique coûtait ~1,4 M tests disque↔hexagone par rotation à ×10.
+        blocked = set()
+        for oc, orr in obstacle_hexes:
+            oc_i, or_i = int(oc), int(orr)
+            for dc, dr in (off_even_r if (oc_i & 1) == 0 else off_odd_r):
+                blocked.add((oc_i + dc, or_i + dr))
+    blocked |= _isolated_anchor_cells(blocked, board_cols, board_rows)
+    return blocked
+
+
+@lru_cache(maxsize=64)
+def _round_disc_contact_offsets(
+    diameter: int,
+) -> Tuple[Tuple[Tuple[int, int], ...], Tuple[Tuple[int, int], ...]]:
+    """Offsets ``obstacle → ancre`` où le disque de l'ancre chevauche l'HEXAGONE de l'obstacle.
+
+    Deux motifs, indexés par la parité de colonne de l'OBSTACLE : en odd-q, le décalage vertical
+    d'une demi-hauteur dépend de la parité de chaque colonne, donc la géométrie relative n'est pas
+    invariante par translation — même raison qui fait porter deux jeux d'offsets à
+    ``precompute_footprint_offsets``. Mémoïsé : le motif ne dépend que du diamètre.
+    """
+    radius = round_base_radius_norm(diameter)
+    reach = radius + _HEX_CIRCUMRADIUS  # au-delà, contact impossible
+    d_col = int(math.ceil(reach / ENGAGEMENT_NORM_HEX_WIDTH)) + 1
+    d_row = int(math.ceil(reach / math.sqrt(3.0))) + 1
+    out: List[Tuple[Tuple[int, int], ...]] = []
+    for obstacle_parity in (0, 1):
+        corners = _hex_corners_at(*_hex_center(obstacle_parity, 0))
+        offs: List[Tuple[int, int]] = []
+        for dc in range(-d_col, d_col + 1):
+            for dr in range(-d_row, d_row + 1):
+                acx, acy = _hex_center(obstacle_parity + dc, dr)
+                if disc_overlaps_polygon(acx, acy, radius, corners):
+                    offs.append((dc, dr))
+        out.append(tuple(offs))
+    return out[0], out[1]
+
+
+def _isolated_anchor_cells(
+    blocked: AbstractSet[Tuple[int, int]], board_cols: int, board_rows: int
+) -> Set[Tuple[int, int]]:
+    """Ancres licites dont les SIX voisines sont interdites (ou hors plateau).
+
+    Résidu mesuré : sur ``terrain-mc1``, la dilatation par le disque couvre 663 des 664 ancres d'où
+    aucun mouvement n'est possible. La 664ᵉ n'est PAS une contradiction de métrique — le socle y
+    tient vraiment — mais une POCHE d'une seule case : les six voisines sont trop étroites pour le
+    socle, donc la figurine y entre au déploiement et n'en sort jamais. Aucun seuil arbitraire
+    ici : « aucune voisine licite » est la définition exacte de « ne peut pas faire un premier
+    pas », donc la règle ferme la classe sans en inventer une autre.
+
+    Hors plateau compte comme interdit : une poche adossée au bord se referme par le bord.
+    """
+    isolated: Set[Tuple[int, int]] = set()
+    for cell in blocked:
+        for nb in get_neighbors(*cell):
+            if nb in blocked or nb in isolated:
+                continue
+            nc, nr = nb
+            if not (0 <= nc < board_cols and 0 <= nr < board_rows):
+                continue
+            if all(
+                (m in blocked) or not (0 <= m[0] < board_cols and 0 <= m[1] < board_rows)
+                for m in get_neighbors(nc, nr)
+            ):
+                isolated.add(nb)
+    return isolated
+
+
 def euclidean_edge_clearance_round_round(
     center_col_a: int,
     center_row_a: int,
@@ -2720,6 +2855,29 @@ def segment_clear(
     return _segment_clear_indexed(ax, ay, bx, by, bs, _build_obstacle_index(obstacles, bs), clearance)
 
 
+def obstacles_touching_disc(
+    obstacles: AbstractSet[Tuple[int, int]], start: Tuple[int, int], radius: float
+) -> Set[Tuple[int, int]]:
+    """Obstacles dont l'HEXAGONE est déjà chevauché par le disque du socle posé en ``start``.
+
+    Alimente ``geodesic_field(contact_obstacles=...)``. Pendant STATIONNAIRE du test de segment
+    (``_segment_hits_hex`` sur un segment dégénéré) : même géométrie, donc un obstacle « au
+    contact » ici est exactement celui qui, sinon, refuserait les six premiers pas.
+    """
+    if not obstacles or radius <= 0.0:
+        return set()
+    sx, sy = _hex_center(*start)
+    reach_sq = (radius + _HEX_CIRCUMRADIUS) ** 2
+    touching: Set[Tuple[int, int]] = set()
+    for oc, orr in obstacles:
+        ox, oy = _hex_center(int(oc), int(orr))
+        if (ox - sx) ** 2 + (oy - sy) ** 2 > reach_sq:
+            continue
+        if disc_overlaps_polygon(sx, sy, radius, _hex_corners_at(ox, oy)):
+            touching.add((int(oc), int(orr)))
+    return touching
+
+
 def geodesic_field(
     start: Tuple[int, int],
     board_cols: int,
@@ -2727,6 +2885,7 @@ def geodesic_field(
     obstacles: Set[Tuple[int, int]],
     budget: float,
     clearance: float = 0.0,
+    contact_obstacles: Optional[AbstractSet[Tuple[int, int]]] = None,
 ) -> Dict[Tuple[int, int], float]:
     """Distance géodésique any-angle de `start` à chaque cellule atteignable dans `budget`.
 
@@ -2738,6 +2897,26 @@ def geodesic_field(
     - `obstacles` : cellules bloquantes (voir `segment_clear`).
     - `budget` : distance max en unités `_hex_center` (= MOVE_subhex × ENGAGEMENT_NORM_HEX_WIDTH).
     - `clearance` : rayon de socle (règle 03). 0 = robot-point.
+    - `contact_obstacles` : obstacles que le socle chevauche DÉJÀ au départ. Ils bloquent encore
+      leurs propres cases (on ne les traverse pas) mais ne sont plus DILATÉS de `clearance`, et
+      SEULEMENT pour les pas qui partent de `start`.
+
+    Pourquoi `contact_obstacles`. La garde du départ est une appartenance de case
+    (`start in obstacles`), donc cette fonction suppose que le socle de départ ne chevauche aucun
+    hexagone d'obstacle. Pour les murs, `socle_blocked_anchor_cells` le garantit désormais côté
+    placement. Pour les obstacles MOBILES, non : le contact socle à socle avec un ennemi est
+    l'issue NORMALE d'une charge, et on ne peut pas l'interdire. Sans cette distinction, tout
+    segment partant du départ passe dans la clairance de l'ennemi au contact — les six directions
+    sont refusées et l'unité ne peut plus faire son Fall Back (mesuré : 0 destination au contact,
+    1277 avec l'exception). La règle 09.07 ne permet de TRAVERSER les figurines ennemies que sous
+    Desperate Escape ; garder leurs cases bloquantes préserve exactement cela.
+
+    La borne « pas partant de `start` » est le cœur du raisonnement : elle dit « ce sur quoi je
+    suis déjà posé ne peut pas m'empêcher de partir », pas « cet ennemi ne me gêne plus de la
+    partie ». Sans elle, un mobile flanqué de deux ennemis pourrait, plus loin dans le champ, se
+    faufiler ENTRE eux en chevauchant les deux socles. Un pas vaut ~1,5 unité-norme et le contact
+    n'excède le seuil que de moins que ça : après le premier pas, la clairance pleine est
+    satisfaite d'elle-même.
 
     Retourne {cellule: distance}. Une seule passe (champ complet), pas point-à-point.
     Sur-estime légèrement (lazy Theta* quasi-optimal) → ne triche jamais vs la règle 03.
@@ -2754,6 +2933,19 @@ def geodesic_field(
     _gf_sx, _gf_sy = _hex_center(*start)
     _gf_reach = budget + (clearance if clearance > 0.0 else 0.0) + 4.0 * _HEX_CIRCUMRADIUS
     idx = _build_obstacle_index(obstacles, bs, center=(_gf_sx, _gf_sy), reach_sq=_gf_reach * _gf_reach)
+    # `idx_far` = tout sauf le contact, dilaté normalement ; `idx_contact` = le contact, à
+    # clairance NULLE. Un pas partant de `start` doit franchir les deux : « clairance pleine
+    # partout, sauf sur ce que le socle chevauche déjà, qui reste infranchissable ».
+    _gf_contact = frozenset(contact_obstacles) & obstacles if contact_obstacles else frozenset()
+    bs0 = _obstacle_bucket_size(0.0)
+    if _gf_contact:
+        idx_far = _build_obstacle_index(
+            obstacles - _gf_contact, bs,
+            center=(_gf_sx, _gf_sy), reach_sq=_gf_reach * _gf_reach,
+        )
+        idx_contact = _build_obstacle_index(set(_gf_contact), bs0)
+    else:
+        idx_far, idx_contact = idx, {}
     g: Dict[Tuple[int, int], float] = {start: 0.0}
     parent: Dict[Tuple[int, int], Tuple[int, int]] = {start: start}
     pq: List[Tuple[float, Tuple[int, int]]] = [(0.0, start)]
@@ -2775,10 +2967,24 @@ def geodesic_field(
             if nb in obstacles or nb in closed:
                 continue
             nx, ny = _hex_center(nc, nr)
-            # Rattachement à l'ancêtre si LoS dégagé (cœur de Theta*).
-            if _segment_clear_indexed(px, py, nx, ny, bs, idx, clearance):
+            # Rattachement à l'ancêtre si LoS dégagé (cœur de Theta*). L'exception de CONTACT ne
+            # vaut que pour les pas partant de `start` : au-delà, le mobile n'est plus posé sur
+            # l'obstacle. Sans `idx_contact`, la boucle est bit-identique à l'originale.
+            if _segment_clear_indexed(px, py, nx, ny, bs, idx, clearance) or (
+                idx_contact and par == start
+                and _segment_clear_indexed(px, py, nx, ny, bs, idx_far, clearance)
+                and _segment_clear_indexed(px, py, nx, ny, bs0, idx_contact, 0.0)
+            ):
                 anchor, axr, ayr, base = par, px, py, g_par
-            elif clearance <= _SEG_TOL or _segment_clear_indexed(cx, cy, nx, ny, bs, idx, clearance):
+            elif (
+                clearance <= _SEG_TOL
+                or _segment_clear_indexed(cx, cy, nx, ny, bs, idx, clearance)
+                or (
+                    idx_contact and cur == start
+                    and _segment_clear_indexed(cx, cy, nx, ny, bs, idx_far, clearance)
+                    and _segment_clear_indexed(cx, cy, nx, ny, bs0, idx_contact, 0.0)
+                )
+            ):
                 # Raccourci ancêtre bloqué → pas adjacent cur→nb, testé à la CAPSULE : à
                 # `clearance>0` un socle ne peut ni transiter ni se centrer sur `nb` s'il
                 # chevauche un mur (couvre goulot + corner-cutting). Court-circuit à
@@ -2801,6 +3007,8 @@ def geodesic_field_multi_source(
     obstacles: Set[Tuple[int, int]],
     budget: float,
     clearance: float = 0.0,
+    contact_obstacles: Optional[AbstractSet[Tuple[int, int]]] = None,
+    contact_start: Optional[Tuple[int, int]] = None,
 ) -> Dict[Tuple[int, int], float]:
     """Variante MULTI-SOURCE de ``geodesic_field`` : plusieurs départs, chacun avec sa distance
     initiale ``starts[cell]``. Une seule passe couvre toutes les sources (Dijkstra classique à
@@ -2808,10 +3016,28 @@ def geodesic_field_multi_source(
     lieu de O(sources) passes). Utilisé pour le mouvement multi-niveaux (entrées d'étage seedées
     en bloc). ``budget`` borne la distance TOTALE (init + trajet). Sources dans ``obstacles`` ignorées.
 
+    ``contact_obstacles`` / ``contact_start`` : même rôle et même contrat que dans
+    ``geodesic_field``. ``contact_start`` désigne, parmi les sources, la position RÉELLE du mobile
+    — l'exception ne vaut que pour les pas qui en partent, jamais depuis une entrée d'étage seedée
+    par un portail. Obligatoire dès que ``contact_obstacles`` est fourni : le déduire serait une
+    supposition sur l'appelant.
+
     Retourne ``{cellule: distance_totale}`` — chaque source est sa propre ancre (any-angle depuis elle).
     """
     bs = _obstacle_bucket_size(clearance)
+    _gm_contact = frozenset(contact_obstacles) & obstacles if contact_obstacles else frozenset()
+    if _gm_contact and contact_start is None:
+        raise ValueError(
+            "geodesic_field_multi_source: contact_obstacles exige contact_start "
+            "(la position RÉELLE du mobile parmi les sources)"
+        )
     idx = _build_obstacle_index(obstacles, bs)
+    bs0 = _obstacle_bucket_size(0.0)
+    if _gm_contact:
+        idx_far = _build_obstacle_index(obstacles - _gm_contact, bs)
+        idx_contact = _build_obstacle_index(set(_gm_contact), bs0)
+    else:
+        idx_far, idx_contact = idx, {}
     g: Dict[Tuple[int, int], float] = {}
     parent: Dict[Tuple[int, int], Tuple[int, int]] = {}
     pq: List[Tuple[float, Tuple[int, int]]] = []
@@ -2840,9 +3066,22 @@ def geodesic_field_multi_source(
             if nb in obstacles or nb in closed:
                 continue
             nx, ny = _hex_center(nc, nr)
-            if _segment_clear_indexed(px, py, nx, ny, bs, idx, clearance):
+            # Exception de CONTACT bornée aux pas partant de `contact_start` (cf. geodesic_field).
+            if _segment_clear_indexed(px, py, nx, ny, bs, idx, clearance) or (
+                idx_contact and par == contact_start
+                and _segment_clear_indexed(px, py, nx, ny, bs, idx_far, clearance)
+                and _segment_clear_indexed(px, py, nx, ny, bs0, idx_contact, 0.0)
+            ):
                 anchor, axr, ayr, base = par, px, py, g_par
-            elif clearance <= _SEG_TOL or _segment_clear_indexed(cx, cy, nx, ny, bs, idx, clearance):
+            elif (
+                clearance <= _SEG_TOL
+                or _segment_clear_indexed(cx, cy, nx, ny, bs, idx, clearance)
+                or (
+                    idx_contact and cur == contact_start
+                    and _segment_clear_indexed(cx, cy, nx, ny, bs, idx_far, clearance)
+                    and _segment_clear_indexed(cx, cy, nx, ny, bs0, idx_contact, 0.0)
+                )
+            ):
                 anchor, axr, ayr, base = cur, cx, cy, g_cur
             else:
                 continue

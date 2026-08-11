@@ -4,7 +4,7 @@ engine/phase_handlers/shared_utils.py - Shared utility functions for phase handl
 Functions used across multiple phase handlers to avoid duplication.
 """
 
-from typing import Dict, Iterator, List, Tuple, Set, Optional, Any, Union, Callable, Sequence, Mapping, cast, TYPE_CHECKING
+from typing import AbstractSet, Dict, Iterator, List, Tuple, Set, Optional, Any, Union, Callable, Sequence, Mapping, cast, TYPE_CHECKING
 from dataclasses import dataclass
 import copy
 import inspect
@@ -377,6 +377,20 @@ def rebuild_choice_timing_index(game_state: Dict[str, Any]) -> None:
 # UNITS_CACHE - Single source of truth for position, HP, player of living units
 # =============================================================================
 
+def socle_orientation(socle: Mapping[str, Any]) -> int:
+    """Orientation (0..N-1) d'un socle — CONVENTION UNIQUE, absente = 0 (face nord).
+
+    Ce n'est pas un défaut anti-erreur : l'orientation est un champ OPTIONNEL de la datasheet
+    (une escouade sans pivot n'en porte pas), et 0 en est la valeur métier. Ce qui compte est que
+    l'empreinte (`_compute_unit_occupied_hexes`) et le volet mur du placement
+    (`wall_blocked_anchors`) la lisent EXACTEMENT pareil : deux conventions donneraient deux
+    géométries pour le même socle, ce que ce chantier existe pour supprimer.
+    """
+    if "orientation" in socle:
+        return int(require_key(socle, "orientation"))
+    return 0
+
+
 def _compute_unit_occupied_hexes(
     col: int, row: int, unit: Dict[str, Any],
     game_state: Optional[Dict[str, Any]] = None,
@@ -407,10 +421,7 @@ def _compute_unit_occupied_hexes(
         return {(col, row)}
     base_shape = unit["BASE_SHAPE"]
     base_size = unit["BASE_SIZE"]
-    if "orientation" in unit:
-        orientation = int(require_key(unit, "orientation"))
-    else:
-        orientation = 0
+    orientation = socle_orientation(unit)
     if base_size == 1:
         return {(col, row)}
     from engine.hex_utils import compute_occupied_hexes
@@ -515,22 +526,69 @@ def compute_candidate_footprint(
     return _compute_unit_occupied_hexes(center_col, center_row, unit_or_stub, game_state)
 
 
+def wall_blocked_anchors(
+    game_state: Dict[str, Any], socle: Mapping[str, Any]
+) -> AbstractSet[Tuple[int, int]]:
+    """Ancres où le socle chevaucherait un MUR — source unique du volet « mur » du placement.
+
+    Mémoïsé par ``(forme, taille, orientation)`` dans ``game_state``. Les murs sont STATIQUES
+    pendant une partie (même doctrine que ``_move_spatial_cache``, qui les exclut de son
+    fingerprint pour cette raison) ; ils ne changent qu'à la ROTATION DE SCÉNARIO, où
+    ``w40k_core`` jette ce cache avec les autres dérivés statiques (jumeau de ``_wall_set_cache``).
+    L'orientation est normalisée à 0 pour un socle rond : un disque n'en a pas, et six entrées
+    identiques coûteraient six dilatations pour un seul ensemble.
+    """
+    from engine.hex_utils import base_size_cache_key, socle_blocked_anchor_cells
+    from engine.spatial_relations import geometry_is_hex
+
+    # x1 (`geometry_is_hex`) : une figurine tient dans UNE case par définition de la résolution, et
+    # rien n'y mesure de distance continue — ni le pool, ni la traversée. Il n'y a donc AUCUN écart
+    # à corriger, et dilater un « disque » de rayon 0,75 y interdirait tous les voisins d'un mur.
+    if geometry_is_hex(game_state):
+        return game_state.get("wall_hexes", set())  # get allowed (carte sans mur)
+
+    shape = str(require_key(socle, "BASE_SHAPE"))
+    base = require_key(socle, "BASE_SIZE")
+    orient = 0 if shape == "round" else socle_orientation(socle)
+    key = (shape, base_size_cache_key(base), orient)
+    cache: Dict[Any, Set[Tuple[int, int]]] = game_state.setdefault("_socle_wall_blocked_cache", {})
+    hit = cache.get(key)  # get allowed (mémoïsation)
+    if hit is None:
+        hit = socle_blocked_anchor_cells(
+            game_state.get("wall_hexes", set()), shape, base, orient,  # get allowed (carte sans mur)
+            int(require_key(game_state, "board_cols")), int(require_key(game_state, "board_rows")),
+        )
+        cache[key] = hit
+    return hit
+
+
 def is_footprint_placement_valid(
     candidate_hexes: Set[Tuple[int, int]],
     game_state: Dict[str, Any],
     occupied_positions: Set[Tuple[int, int]],
     enemy_adjacent_hexes: Optional[Set[Tuple[int, int]]] = None,
+    *,
+    anchor: Tuple[int, int],
+    socle: Mapping[str, Any],
 ) -> bool:
     """Check if all cells of a candidate footprint are valid for placement.
 
     Validates: within board bounds, not a wall, not occupied by another unit.
     Optionally checks that no cell falls within the enemy engagement zone.
 
+    ``anchor``/``socle`` sont OBLIGATOIRES et nommés : le volet « mur » ne se mesure plus sur
+    l'empreinte hex (un mur y comptait pour son CENTRE) mais sur la géométrie d'hexagone, la
+    même que la traversée — cf. ``hex_utils.socle_blocked_anchor_cells``. Les rendre optionnels
+    laisserait un site retomber en silence sur l'ancien critère, qui produit des positions d'où
+    aucun mouvement n'est possible ; ils sont donc requis, et l'oubli est une erreur de typage.
+
     Args:
         candidate_hexes: Set of (col, row) for the candidate footprint
         game_state: With board_cols, board_rows, wall_hexes
         occupied_positions: Pre-computed set of occupied cells
         enemy_adjacent_hexes: If provided, also blocks cells in enemy engagement zone
+        anchor: (col, row) de l'ancre dont ``candidate_hexes`` est l'empreinte
+        socle: mapping portant BASE_SHAPE / BASE_SIZE (+ orientation pour les socles non ronds)
 
     Returns:
         True if ALL cells pass every check
@@ -539,14 +597,13 @@ def is_footprint_placement_valid(
         return False
     board_cols = require_key(game_state, "board_cols")
     board_rows = require_key(game_state, "board_rows")
-    wall_hexes = game_state.get("wall_hexes", set())
     # Bounds check (must iterate — no way to vectorize without numpy)
     for c, r in candidate_hexes:
         if c < 0 or r < 0 or c >= board_cols or r >= board_rows:
             return False
-    # Set-intersection checks are implemented in C and much faster than Python loops
-    if wall_hexes and (candidate_hexes & wall_hexes):
+    if anchor in wall_blocked_anchors(game_state, socle):
         return False
+    # Set-intersection checks are implemented in C and much faster than Python loops
     if occupied_positions and (candidate_hexes & occupied_positions):
         return False
     if enemy_adjacent_hexes is not None and (candidate_hexes & enemy_adjacent_hexes):
@@ -596,17 +653,22 @@ def is_placement_valid_with_clearance(
     base_size: "int | list[int]",
     col: int,
     row: int,
+    orientation: int,
     exclude_unit_id: Optional[str] = None,
     enemy_adjacent_hexes: Optional[Set[Tuple[int, int]]] = None,
 ) -> bool:
-    """Placement légal = bornes + murs (discret, inchangé) ET aucun chevauchement de socle.
+    """Placement légal = bornes + murs ET aucun chevauchement de socle.
 
     Le volet bornes/murs reste ``is_footprint_placement_valid`` (avec ``occupied_positions``
     vide : le chevauchement n'est plus testé par cellules ici). Le chevauchement entre unités
     passe par ``candidate_overlaps_any_unit`` (clearance continu rond↔rond, méthode empreinte).
     Remplace 1:1 le couple ``build_occupied_positions_set`` + ``is_footprint_placement_valid``.
     """
-    if not is_footprint_placement_valid(candidate_fp, game_state, set(), enemy_adjacent_hexes):
+    if not is_footprint_placement_valid(
+        candidate_fp, game_state, set(), enemy_adjacent_hexes,
+        anchor=(int(col), int(row)),
+        socle={"BASE_SHAPE": shape, "BASE_SIZE": base_size, "orientation": int(orientation)},
+    ):
         return False
     from engine.hex_utils import Socle
 
@@ -4020,10 +4082,17 @@ def build_move_blocked_cells_by_level(
     if _hit is not None:
         return _hit
 
-    wall_hexes = game_state.get("wall_hexes", set())  # get allowed
+    # Murs : ancres où le SOCLE chevauche un mur, jamais `wall_hexes` brut. Ces sets sont testés
+    # sur l'ANCRE de chaque figurine (cf. `validate_move_plan`) et l'EZ ennemie, juste en dessous,
+    # est déjà socle-consciente pour cette raison exacte. Le mur était le DERNIER terme mesuré
+    # comme une cellule nue, donc le seul à pouvoir accepter une ancre que la traversée refuse.
+    wall_anchors = wall_blocked_anchors(
+        game_state,
+        {"BASE_SHAPE": base_shape, "BASE_SIZE": base_size, "orientation": int(orientation)},
+    )
     static_blocked: List[Tuple[str, Set[Tuple[int, int]]]] = []
-    if not constraints["allow_walls"] and wall_hexes:
-        static_blocked.append(("mur", wall_hexes))
+    if not constraints["allow_walls"] and wall_anchors:
+        static_blocked.append(("mur", cast(Set[Tuple[int, int]], wall_anchors)))
     if constraints["forbid_enemy_er"]:
         enemy_er = move_enemy_ez_forbidden_cells(
             game_state, int(player), base_shape, base_size, int(orientation)
