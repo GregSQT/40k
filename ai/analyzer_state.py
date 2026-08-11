@@ -133,6 +133,11 @@ class AnalyzerState:
     unit_movement_history: Dict[str, List] = field(default_factory=dict)
 
     # Séquences de tir/combat
+    #: Lignes `Save [NOT ALLOCATED]` EN ATTENTE de verdict, par (attaquant, cible, joueur,
+    #: compteur). Le verdict ne peut pas être rendu sur la ligne : l'ordre des lignes n'est pas
+    #: l'ordre d'allocation (pool trié par jet de sauvegarde, lots par profil d'arme), et juger
+    #: trop tôt a produit 334 fausses erreurs. Cf. `ai/analyzer_allocation.py`.
+    not_allocated_pending: Dict = field(default_factory=dict)
     shot_sequence_counts: Dict = field(default_factory=dict)
     fight_sequence_counts: Dict = field(default_factory=dict)
     #: Effectif de la CIBLE au Select Targets step, figé à l'OUVERTURE de chaque séquence de
