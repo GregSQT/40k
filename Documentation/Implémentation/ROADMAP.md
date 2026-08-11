@@ -359,6 +359,20 @@ Prêts à démarrer sans décision produit :
   par `/code-review`, que le test ne voyait pas parce qu'il vérifiait le `raises` sans regarder
   l'état après.
   → [`Implémenté/primitive_poser_plan_par_figurine_2026-08-11.md`](Implémenté/primitive_poser_plan_par_figurine_2026-08-11.md)
+- ✅ **L'empreinte d'une figurine se mesure à SON socle (pile-in / consolidation)** — ouvert et
+  **LIVRÉ le 2026-08-12**, sorti de l'arbitrage du chantier ci-dessus. Les six fonctions
+  par-figurine du combat empreintaient au socle de l'ESCOUADE : un personnage attaché y était
+  sous-empreinté, donc le pool lui offrait des cases que le commit refuse. 21 sites migrés vers
+  `_fight_model_fp_pair`. `charge_handlers` n'est PAS touché — ses 21 sites équivalents servent le
+  pool d'ANCRES du bloc, où aucune figurine ne circule (lus un par un, pas extrapolés).
+  Mesuré : 67 figurines sur 684 portent un socle différent de leur escouade, les 67 étaient
+  sous-empreintées (19 hex annoncés contre 43 réels). **Effet réel sur le pool : 3 cases sur 330**
+  — le facteur ×2,3 sur l'empreinte ne se traduit pas en ×2,3 sur les destinations, seules les
+  cases proches d'un obstacle discriminent. Aucun test du dépôt ne couvrait ce cas ; six verrous
+  ajoutés, un par fonction.
+  ⚠️ Comme « socle vs mur », ce chantier déplace l'espace de décision du pile-in : effet sur les
+  modèles entraînés non mesuré.
+  → [`Implémenté/empreinte_par_figurine_fight_2026-08-12.md`](Implémenté/empreinte_par_figurine_fight_2026-08-12.md)
 - **Réécrire la note `bot_eval_freq_normal` de `x1_long` avec le coût MESURÉ** (~10 min, décidé
   le 2026-08-11). Cette note fonde le réglage sur « 13 min l'unité », chiffre hérité du commit
   `42326ed0` et jamais re-mesuré ; l'évaluation finale du run du 2026-08-11 donne plutôt

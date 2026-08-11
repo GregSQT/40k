@@ -471,6 +471,32 @@ def _fight_effective_level_at(
     )
 
 
+def _fight_model_fp_pair(game_state: Dict[str, Any], model_entry: Dict[str, Any]) -> Any:
+    """Offsets d'empreinte even/odd au socle de CETTE figurine — SOURCE UNIQUE côté fight.
+
+    Le pile-in et la consolidation sont des mouvements PAR FIGURINE, mais ils préparaient leurs
+    offsets d'empreinte avec `_charge_prepare_footprint_offsets(unit, …)`, c'est-à-dire au socle
+    de l'ESCOUADE. Mesuré sur les scénarios du dépôt : 67 figurines sur 684 portent un socle
+    différent de leur escouade — toutes des personnages attachés — et les 67 étaient
+    SOUS-empreintées, de 19 hexes annoncés contre 43 réels (jusqu'à 61). Le pool leur proposait
+    donc des cases où leur socle chevauche un mur ou une coéquipière, que le commit refuse
+    ensuite : la divergence pool/commit que ce dépôt a déjà payée plusieurs fois.
+
+    Le cache de `_charge_offsets_for_base` est indexé par SOCLE (forme, taille, orientation), pas
+    par unité : deux figurines de même socle le partagent, et l'appeler par figurine dans une
+    boucle reste un accès de dictionnaire. Mesuré à 20 000 empreintes : 1,05× le coût de la forme
+    « préparée une seule fois », sur la part empreinte uniquement.
+    """
+    from .charge_handlers import _charge_offsets_for_base
+
+    return _charge_offsets_for_base(
+        game_state,
+        require_key(model_entry, "BASE_SHAPE"),
+        require_key(model_entry, "BASE_SIZE"),
+        int(require_key(model_entry, "orientation")),
+    )
+
+
 def _fight_rigid_model_placements(
     game_state: Dict[str, Any], squad_id: str, anchor_col: int, anchor_row: int
 ) -> Dict[str, Tuple[int, int, int]]:
@@ -2347,7 +2373,6 @@ def _fight_pile_in_build_model_pool(
     from engine.spatial_relations import unit_entries_within_engagement_zone
     from .shared_utils import get_engagement_zone
     from .charge_handlers import (
-        _charge_prepare_footprint_offsets,
         _candidate_footprint_charge,
         _charge_synthetic_charger_cache_entry,
         _charge_model_socle,
@@ -2418,7 +2443,9 @@ def _fight_pile_in_build_model_pool(
     if not target_entries:
         return empty
 
-    fp_offset_pair = _charge_prepare_footprint_offsets(unit, game_state)
+    # Offsets d'empreinte du MOVER, à SON socle — pas à celui de l'escouade (cf.
+    # `_fight_model_fp_pair`). Préparés UNE FOIS hors des boucles, comme avant.
+    fp_offset_pair = _fight_model_fp_pair(game_state, model)
 
     # Coéquipières : collision euclidienne, un socle à la base PROPRE de chaque fig
     # (_charge_model_socle) — un Captain terminator (base large) attaché à des terminators n'est
@@ -2451,7 +2478,7 @@ def _fight_pile_in_build_model_pool(
     # TRANSIT du BFS sol, qui chemine en cellules.
     _wall_anchors_end = wall_blocked_anchors(game_state, model)
     start_col, start_row = int(model["col"]), int(model["row"])
-    start_fp = _candidate_footprint_charge(start_col, start_row, unit, game_state, fp_offset_pair)
+    start_fp = _candidate_footprint_charge(start_col, start_row, model, game_state, fp_offset_pair)
     start_min = min(min_distance_between_sets(start_fp, tfp) for tfp in target_fps)
 
     # --- Candidats (col,row) selon le niveau de VUE (§13.06) ------------------------------------
@@ -2530,7 +2557,7 @@ def _fight_pile_in_build_model_pool(
     closer: List[List[int]] = []
     engaged: List[List[int]] = []
     for cc, rr in reachable:
-        cand_fp = _candidate_footprint_charge(cc, rr, unit, game_state, fp_offset_pair)
+        cand_fp = _candidate_footprint_charge(cc, rr, model, game_state, fp_offset_pair)
         if any(not (0 <= x < board_cols and 0 <= y < board_rows) for (x, y) in cand_fp):
             continue
         if not skip_wall_blocker and (cc, rr) in _wall_anchors_end:
@@ -2620,7 +2647,6 @@ def _fight_pile_in_preview_plan(
         coherency_violation_flags,
     )
     from .charge_handlers import (
-        _charge_prepare_footprint_offsets,
         _candidate_footprint_charge,
         _charge_synthetic_charger_cache_entry,
     )
@@ -2662,8 +2688,16 @@ def _fight_pile_in_preview_plan(
 
     # Empreintes par-figurine du plan : consommées par les contrôles d'engagement ci-dessous
     # (la cohésion, elle, passe par la source unique juste en dessous).
-    fp_pair = _charge_prepare_footprint_offsets(unit, game_state)
-    fps = [_candidate_footprint_charge(c, r, unit, game_state, fp_pair) for _, c, r, _ in norm]
+    # Empreinte de CHAQUE figurine à SON socle (`_fight_model_fp_pair`) : le plan est par-figurine,
+    # et un personnage attaché y était sous-empreinté au socle de l'escouade.
+    _mc_fp = require_key(game_state, "models_cache")
+    fps = [
+        _candidate_footprint_charge(
+            c, r, _mc_fp[str(_mid)], game_state,
+            _fight_model_fp_pair(game_state, _mc_fp[str(_mid)]),
+        )
+        for _mid, c, r, _ in norm
+    ]
 
     # 2) Cohésion 03.03 — SOURCE UNIQUE `coherency_violation_flags` (move, déploiement, charge et
     # combat mesurent désormais la MÊME chose). Cette section était une COPIE inline des deux puces,
@@ -2707,7 +2741,7 @@ def _fight_pile_in_preview_plan(
         if m is None:
             continue
         start_fp_i = _candidate_footprint_charge(
-            int(m["col"]), int(m["row"]), unit, game_state, fp_pair
+            int(m["col"]), int(m["row"]), m, game_state, _fight_model_fp_pair(game_state, m)
         )
         # Départ = étage COURANT de la figurine, arrivée = étage PLANIFIÉ : comparer les deux
         # engagements au même niveau ferait perdre/gagner un engagement par pur effet vertical.
@@ -2758,7 +2792,6 @@ def _fight_pile_in_model_plan_state(
     from engine.spatial_relations import unit_entries_within_engagement_zone
     from .shared_utils import get_engagement_zone
     from .charge_handlers import (
-        _charge_prepare_footprint_offsets,
         _candidate_footprint_charge,
         _charge_synthetic_charger_cache_entry,
     )
@@ -2798,10 +2831,12 @@ def _fight_pile_in_model_plan_state(
             game_state, sel, closest_tier, provisional_plan=sel_prov, view_level=_vl
         )["closer"]
         if pool:
-            fp_pair = _charge_prepare_footprint_offsets(unit, game_state)
+            # Le pool est celui de la figurine SELECTIONNEE : son voile se mesure a SON socle.
+            _m_sel = require_key(game_state, "models_cache")[sel]
+            fp_pair = _fight_model_fp_pair(game_state, _m_sel)
             fp_zone: Set[Tuple[int, int]] = set()
             for cc, rr in pool:
-                fp_zone |= _candidate_footprint_charge(int(cc), int(rr), unit, game_state, fp_pair)
+                fp_zone |= _candidate_footprint_charge(int(cc), int(rr), _m_sel, game_state, fp_pair)
             loops = compute_move_preview_mask_loops_world(fp_zone, game_state)
             if loops:
                 mask_loops = [[[float(x), float(y)] for (x, y) in loop] for loop in loops]
@@ -2815,11 +2850,13 @@ def _fight_pile_in_model_plan_state(
     # Figs (posées ou à l'origine) dont l'empreinte finit à ≤ EZ d'une cible pile-in → voile vert UI
     # (en mesure de frapper). Cibles exposées au front pour le cercle violet + hit-test du Focus.
     ez = int(get_engagement_zone(game_state))
-    fp_pair = _charge_prepare_footprint_offsets(unit, game_state)
     target_entries = [units_cache[t] for t in targets if t in units_cache]
     engaged_models: List[str] = []
     for m, c, r, _lv in full_plan:
-        fp = _candidate_footprint_charge(int(c), int(r), unit, game_state, fp_pair)
+        _m_fp = require_key(game_state, "models_cache")[str(m)]
+        fp = _candidate_footprint_charge(
+            int(c), int(r), _m_fp, game_state, _fight_model_fp_pair(game_state, _m_fp)
+        )
         synth = _charge_synthetic_charger_cache_entry(
             game_state, unit, int(c), int(r), fp, level=int(_lv)
         )
@@ -3645,7 +3682,6 @@ def _fight_consolidation_build_model_pool(
     from engine.spatial_relations import unit_entries_within_engagement_zone
     from .shared_utils import get_engagement_zone
     from .charge_handlers import (
-        _charge_prepare_footprint_offsets,
         _candidate_footprint_charge,
         _charge_synthetic_charger_cache_entry,
         _charge_model_socle,
@@ -3723,7 +3759,9 @@ def _fight_consolidation_build_model_pool(
     if tier_kind == "zone" and not zone_set:
         return empty
 
-    fp_offset_pair = _charge_prepare_footprint_offsets(unit, game_state)
+    # Offsets d'empreinte du MOVER, à SON socle — pas à celui de l'escouade (cf.
+    # `_fight_model_fp_pair`). Préparés UNE FOIS hors des boucles, comme avant.
+    fp_offset_pair = _fight_model_fp_pair(game_state, model)
 
     # Coéquipières (collision euclidienne) : le plan provisoire override les figs déjà posées (col,row[,level]).
     sib_socles: List[Tuple[int, Any]] = []
@@ -3754,7 +3792,7 @@ def _fight_consolidation_build_model_pool(
     # TRANSIT du BFS sol, qui chemine en cellules.
     _wall_anchors_end = wall_blocked_anchors(game_state, model)
     start_col, start_row = int(model["col"]), int(model["row"])
-    start_fp = _candidate_footprint_charge(start_col, start_row, unit, game_state, fp_offset_pair)
+    start_fp = _candidate_footprint_charge(start_col, start_row, model, game_state, fp_offset_pair)
     if tier_kind == "enemy":
         start_min = min(min_distance_between_sets(start_fp, tfp) for tfp in target_fps)
     else:
@@ -3831,7 +3869,7 @@ def _fight_consolidation_build_model_pool(
     closer: List[List[int]] = []
     engaged: List[List[int]] = []
     for cc, rr in reachable:
-        cand_fp = _candidate_footprint_charge(cc, rr, unit, game_state, fp_offset_pair)
+        cand_fp = _candidate_footprint_charge(cc, rr, model, game_state, fp_offset_pair)
         if any(not (0 <= x < board_cols and 0 <= y < board_rows) for (x, y) in cand_fp):
             continue
         if not skip_wall_blocker and (cc, rr) in _wall_anchors_end:
@@ -3897,7 +3935,6 @@ def _fight_consolidation_preview_plan(
         coherency_violation_flags,
     )
     from .charge_handlers import (
-        _charge_prepare_footprint_offsets,
         _candidate_footprint_charge,
         _charge_synthetic_charger_cache_entry,
     )
@@ -3942,8 +3979,16 @@ def _fight_consolidation_preview_plan(
 
     # Empreintes par-figurine du plan : consommées par les contrôles d'engagement ci-dessous
     # (la cohésion, elle, passe par la source unique juste en dessous).
-    fp_pair = _charge_prepare_footprint_offsets(unit, game_state)
-    fps = [_candidate_footprint_charge(c, r, unit, game_state, fp_pair) for _, c, r, _ in norm]
+    # Empreinte de CHAQUE figurine à SON socle (`_fight_model_fp_pair`) : le plan est par-figurine,
+    # et un personnage attaché y était sous-empreinté au socle de l'escouade.
+    _mc_fp = require_key(game_state, "models_cache")
+    fps = [
+        _candidate_footprint_charge(
+            c, r, _mc_fp[str(_mid)], game_state,
+            _fight_model_fp_pair(game_state, _mc_fp[str(_mid)]),
+        )
+        for _mid, c, r, _ in norm
+    ]
 
     # 2) Cohésion 03.03 — SOURCE UNIQUE `coherency_violation_flags` (move, déploiement, charge et
     # combat mesurent désormais la MÊME chose). Cette section était une COPIE inline des deux puces,
@@ -3993,7 +4038,7 @@ def _fight_consolidation_preview_plan(
             if m is None:
                 continue
             start_fp_i = _candidate_footprint_charge(
-                int(m["col"]), int(m["row"]), unit, game_state, fp_pair
+                int(m["col"]), int(m["row"]), m, game_state, _fight_model_fp_pair(game_state, m)
             )
             # Départ = étage COURANT de la figurine (miroir strict du pile-in) : le comparer
             # au sol ferait perdre/gagner un engagement par pur effet vertical.
@@ -4065,7 +4110,6 @@ def _fight_consolidation_model_plan_state(
     from engine.spatial_relations import unit_entries_within_engagement_zone
     from .shared_utils import get_engagement_zone
     from .charge_handlers import (
-        _charge_prepare_footprint_offsets,
         _candidate_footprint_charge,
         _charge_synthetic_charger_cache_entry,
     )
@@ -4146,10 +4190,12 @@ def _fight_consolidation_model_plan_state(
             lock_base_contact=lock_base_contact, provisional_plan=sel_prov, view_level=_vl,
         )["closer"]
         if pool:
-            fp_pair = _charge_prepare_footprint_offsets(unit, game_state)
+            # Le pool est celui de la figurine SELECTIONNEE : son voile se mesure a SON socle.
+            _m_sel = require_key(game_state, "models_cache")[sel]
+            fp_pair = _fight_model_fp_pair(game_state, _m_sel)
             fp_zone: Set[Tuple[int, int]] = set()
             for cc, rr in pool:
-                fp_zone |= _candidate_footprint_charge(int(cc), int(rr), unit, game_state, fp_pair)
+                fp_zone |= _candidate_footprint_charge(int(cc), int(rr), _m_sel, game_state, fp_pair)
             loops = compute_move_preview_mask_loops_world(fp_zone, game_state)
             if loops:
                 mask_loops = [[[float(x), float(y)] for (x, y) in loop] for loop in loops]
@@ -4166,12 +4212,14 @@ def _fight_consolidation_model_plan_state(
 
     # Voile vert UI : figs « en position » (≤ EZ d'un ennemi du palier, ou dans la zone objectif).
     ez = int(get_engagement_zone(game_state))
-    fp_pair = _charge_prepare_footprint_offsets(unit, game_state)
     engaged_models: List[str] = []
     if tier_kind == "enemy":
         target_entries = [units_cache[t] for t in closest_tier if t in units_cache]
         for m, c, r, _lv in full_plan:
-            fp = _candidate_footprint_charge(int(c), int(r), unit, game_state, fp_pair)
+            _m_fp = require_key(game_state, "models_cache")[str(m)]
+            fp = _candidate_footprint_charge(
+                int(c), int(r), _m_fp, game_state, _fight_model_fp_pair(game_state, _m_fp)
+            )
             synth = _charge_synthetic_charger_cache_entry(
                 game_state, unit, int(c), int(r), fp, level=int(_lv)
             )
@@ -4183,7 +4231,10 @@ def _fight_consolidation_model_plan_state(
     else:
         zone_set: Set[Tuple[int, int]] = set(tier)
         for m, c, r, _lv in full_plan:
-            fp = _candidate_footprint_charge(int(c), int(r), unit, game_state, fp_pair)
+            _m_fp = require_key(game_state, "models_cache")[str(m)]
+            fp = _candidate_footprint_charge(
+                int(c), int(r), _m_fp, game_state, _fight_model_fp_pair(game_state, _m_fp)
+            )
             if fp & zone_set:
                 engaged_models.append(m)
 
