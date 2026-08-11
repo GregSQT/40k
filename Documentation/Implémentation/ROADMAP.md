@@ -289,7 +289,7 @@ Lourds, à re-cadrer avant toute reprise :
 
     python3 scripts/check_doc_references.py
 
-Sans argument, il passe `analyzer_couverture.md` **et ce fichier**. Il rend 0 s'il ne trouve rien,
+Sans argument, il passe `analyzer_couverture.md`, **ce fichier** et `Security.md`. Il rend 0 s'il ne trouve rien,
 1 sinon, et se lance sur n'importe quel `.md` passé en argument. Quatre passes : les fichiers cités
 existent et portent les symboles cités ; les cibles de liens existent ; les **nombres recopiés**
 d'une source mécanique valent encore ce qu'ils annoncent ; aucun renvoi ne porte un numéro de

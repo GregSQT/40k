@@ -192,6 +192,65 @@ TRAINING_SCENARIO = (
 )
 
 
+def both_terrains(module, attr: str = "SCENARIO"):
+    """Fabrique une fixture `autouse` qui rejoue TOUT le module sur les deux terrains.
+
+    Pourquoi une fabrique plutôt qu'un `parametrize` par test : ces fichiers lisent leur scénario
+    dans une CONSTANTE DE MODULE, consommée par un helper `_load()`. Décorer chaque test
+    imposerait de faire descendre le paramètre à travers ce helper, fichier par fichier et test
+    par test — beaucoup de surface pour un seul axe. Ici la constante est réécrite par
+    `monkeypatch` le temps du test, donc chaque test existant est rejoué tel quel sur les deux
+    cartes, sans toucher à son corps.
+
+    LIMITE, à connaître avant d'utiliser : ne marche que si le scénario est lu À L'EXÉCUTION.
+    Un test qui capture la constante au moment de l'import — dans un décorateur
+    `@pytest.mark.parametrize`, ou une valeur par défaut d'argument — ne verra jamais le second
+    terrain, et resterait vert en ne testant que le premier.
+
+    Usage, dans le module de test :
+
+        _terrain = both_terrains(sys.modules[__name__])
+    """
+    import pathlib
+
+    import pytest
+
+    # Les deux variantes sont dérivées du scénario PROPRE AU MODULE, pas du template de
+    # training : plusieurs de ces fichiers pointent sur une fixture `reserves_*`, qui existe
+    # elle aussi en `...1` / `...2`. Imposer le template à tout le monde ferait charger un
+    # scénario étranger — rosters et identifiants d'unités différents, tests rouges pour une
+    # raison sans rapport avec ce qu'ils vérifient.
+    base = getattr(module, attr)
+    base_str = str(base)
+    if "1.json" not in base_str:
+        raise ValueError(
+            f"both_terrains({module.__name__}, {attr!r}) : le scénario {base_str!r} ne porte pas "
+            "le suffixe de terrain '1.json'. Les variantes par terrain ne peuvent pas en être "
+            "dérivées — nommer le scénario '<nom>1.json' / '<nom>2.json' ou ne pas paramétrer "
+            "ce module."
+        )
+    variants = [base_str, base_str.replace("1.json", "2.json")]
+    for variant in variants:
+        # La variante DOIT exister : sans ce contrôle, un module se paramétrerait sur un fichier
+        # absent et l'erreur ne sortirait qu'au reset, très loin d'ici.
+        path = pathlib.Path(variant)
+        if not path.is_absolute():
+            path = pathlib.Path(__file__).resolve().parents[3] / variant
+        if not path.exists():
+            raise FileNotFoundError(f"variante de terrain absente : {path}")
+
+    @pytest.fixture(params=variants, autouse=True, ids=["mc1", "mc2"])
+    def _terrain_fixture(request, monkeypatch):
+        # La constante garde la FORME qu'elle avait (str ou Path) : ces fichiers stockent tantôt
+        # un chemin relatif, tantôt un absolu, tantôt un `Path`, et le corps des tests compte
+        # dessus.
+        value = type(base)(request.param) if isinstance(base, pathlib.Path) else request.param
+        monkeypatch.setattr(module, attr, value)
+        return value
+
+    return _terrain_fixture
+
+
 def build_armageddon_engine(seed: int, **overrides):
     """Construit et `reset` un `W40KEngine` ArmageddonAgent / `x1_debug`.
 

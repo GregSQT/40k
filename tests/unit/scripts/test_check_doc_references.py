@@ -170,9 +170,16 @@ def test_symbol_reference_is_not_an_anchor(tmp_path: pathlib.Path) -> None:
 # --------------------------------------------------------------------------- corpus réel
 
 
+def test_a_dotted_call_is_not_a_file(tmp_path: pathlib.Path) -> None:
+    """`hashlib.md5` n'est pas un fichier `hashlib.md` — mesuré comme fausse alerte réelle."""
+    doc = write(tmp_path, "note.md", "| x | on dépose un `hashlib.md5` dans `config/` | y |\n")
+    _resolved, _unverifiable, broken = cdr.check_references(doc)
+    assert not broken
+
+
 def test_reference_documents_are_clean() -> None:
-    """Les deux documents d'entrée passent le contrôle — c'est la ligne de base à tenir."""
-    for name in ("analyzer_couverture.md", "ROADMAP.md"):
+    """Les trois documents d'entrée passent le contrôle — c'est la ligne de base à tenir."""
+    for name in ("analyzer_couverture.md", "ROADMAP.md", "Security.md"):
         path = ROOT / "Documentation" / "Implémentation" / name
         _resolved, _unverifiable, broken_refs = cdr.check_references(path)
         _checked, _skipped, broken_links = cdr.check_links(path)

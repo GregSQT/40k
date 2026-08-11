@@ -52,7 +52,13 @@ DOCS = ROOT / "Documentation" / "Implémentation"
 DEFAULT_DOCS = [
     "Documentation/Implémentation/analyzer_couverture.md",
     "Documentation/Implémentation/ROADMAP.md",
+    "Documentation/Implémentation/Security.md",
 ]
+
+#: Documents tenus à la convention « le symbole, jamais la ligne » (`ROADMAP.md` §5). La liste est
+#: explicite : l'imposer à tout `.md` du dépôt rendrait rouges des documents d'historique que
+#: personne ne rouvre, et un contrôle durablement rouge finit par être ignoré.
+ANCHOR_ENFORCED = {"analyzer_couverture.md", "ROADMAP.md", "Security.md"}
 
 AGENT_CONFIG = ROOT / "config" / "agents" / "ArmageddonAgent" / "ArmageddonAgent_training_config.json"
 COUVERTURE = DOCS / "analyzer_couverture.md"
@@ -62,13 +68,16 @@ COUVERTURE = DOCS / "analyzer_couverture.md"
 SEARCH_DIRS = [
     "", "ai", "ai/analyzer_phases", "engine", "engine/phase_handlers", "engine/utils",
     "shared", "scripts", "services", "config", "tests/unit/ai", "tests/unit/engine",
+    "frontend",
 ]
 
 #: Un chemin peut être relatif AU DOCUMENT (`../../engine/x.py`), absolu, ou nu. La classe de
 #: caractères doit donc accepter le point : sans lui, `../../engine/x.py` était capturé comme
 #: `/engine/x.py`, que `ROOT / name` transformait en chemin absolu inexistant — 18 fausses
 #: alertes sur `V11_phaseA.md` le 2026-08-11, sur un document dont les 9 cibles existaient toutes.
-FILE_REF = re.compile(r"((?:\.{1,2}/)+[\w./-]+\.(?:py|json|md)|[\w/-]+\.(?:py|json|md))")
+#: `(?!\w)` en queue : sans lui, `hashlib.md5` était capturé comme un fichier `hashlib.md`
+#: (mesuré sur `Security.md` le 2026-08-11).
+FILE_REF = re.compile(r"((?:\.{1,2}/)+[\w./-]+\.(?:py|json|md)|[\w/-]+\.(?:py|json|md))(?!\w)")
 BACKTICKED = re.compile(r"`([^`]+)`")
 IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]{3,}")
 MD_LINK = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
@@ -425,7 +434,7 @@ def check_anchors(doc_path: pathlib.Path) -> list[str]:
     Convention `ROADMAP.md` §5 : un numéro de ligne ne survit pas à une livraison. Mesuré sur ce
     dépôt : `UNIT_ABILITY_SLOTS` a changé deux fois de ligne en vingt-quatre heures.
     """
-    if doc_path.name not in VALUE_CHECKS and doc_path != COUVERTURE:
+    if doc_path.name not in ANCHOR_ENFORCED:
         return []
     found: list[str] = []
     for lineno, line in enumerate(doc_path.read_text(encoding="utf-8").split("\n"), 1):
