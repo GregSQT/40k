@@ -1323,6 +1323,195 @@ def compute_footprint_placement_mask(
     return bad
 
 
+#: Fenêtre de slice 2D, bornes demi-ouvertes ``(c_lo, c_hi, r_lo, r_hi)``.
+SliceWindow = Tuple[int, int, int, int]
+
+
+def offset_slice_windows(
+    dc: int,
+    dr: int,
+    board_cols: int,
+    board_rows: int,
+    *,
+    bbox: Optional[SliceWindow] = None,
+    clamp: str = "dst",
+) -> Optional[Tuple[SliceWindow, SliceWindow]]:
+    """Fenêtres ``(source, destination)`` d'un décalage de grille, pour ``dst_vue op= src_vue``.
+
+    Brique BAS NIVEAU. Les appelants du moteur passent par ``dilate_by_kernel`` /
+    ``spread_by_kernel`` / ``erode_by_kernel`` juste en dessous, qui apparient pour eux le signe du
+    décalage et le côté à borner — c'est cet appariement, et non le calcul des bornes, qui est
+    facile à écrire de travers. N'appeler directement que pour un opérateur qu'aucune des trois ne
+    couvre.
+
+    CONVENTION, unique et explicite : ``src = dst + (dc, dr)``, c'est-à-dire
+    ``out[c, r] op= src[c + dc, r + dr]`` (une DILATATION par le noyau).
+    Une PROPAGATION (``out[c + dc, r + dr] op= src[c, r]``) est la même opération avec le décalage
+    OPPOSÉ : l'appeler avec ``(-dc, -dr)``. C'est ce qui permet un seul calcul pour les deux sens,
+    au lieu des deux jeux de bornes symétriques d'avant.
+
+    ``bbox`` (L_bbox, §0.22) : borne la fenêtre à ``(c_lo, c_hi, r_lo, r_hi)``, l'autre côté étant
+    RE-DÉRIVÉ du décalage — jamais clampé lui aussi, ce qui décalerait les deux vues l'une par
+    rapport à l'autre. ``clamp`` dit de quel côté la bbox s'applique :
+      - ``"dst"`` : la sortie utile est connue (dilatation bornée à la bbox du move) ;
+      - ``"src"`` : les sources non nulles sont connues (union d'empreintes : les ancres valides
+        sont toutes dans la bbox).
+    Les deux étaient déjà en usage, chacun avec sa propre écriture ; ils sont ici le MÊME code.
+
+    Rend ``None`` quand le décalage ne laisse aucune case commune (l'appelant passe à l'offset
+    suivant) — le ``continue`` que les six copies écrivaient chacune.
+    """
+    if clamp not in ("dst", "src"):
+        raise ValueError(f"clamp doit valoir 'dst' ou 'src', reçu {clamp!r}")
+    dc, dr = int(dc), int(dr)
+
+    # Intersection naturelle : la source doit tenir dans le plateau, la destination aussi.
+    src_c_lo = max(0, dc)
+    src_c_hi = board_cols - max(0, -dc)
+    src_r_lo = max(0, dr)
+    src_r_hi = board_rows - max(0, -dr)
+    if src_c_lo >= src_c_hi or src_r_lo >= src_r_hi:
+        return None
+    dst_c_lo, dst_c_hi = src_c_lo - dc, src_c_hi - dc
+    dst_r_lo, dst_r_hi = src_r_lo - dr, src_r_hi - dr
+
+    if bbox is not None:
+        if clamp == "dst":
+            dst_c_lo = max(dst_c_lo, bbox[0])
+            dst_c_hi = min(dst_c_hi, bbox[1])
+            dst_r_lo = max(dst_r_lo, bbox[2])
+            dst_r_hi = min(dst_r_hi, bbox[3])
+            if dst_c_lo >= dst_c_hi or dst_r_lo >= dst_r_hi:
+                return None
+            src_c_lo, src_c_hi = dst_c_lo + dc, dst_c_hi + dc
+            src_r_lo, src_r_hi = dst_r_lo + dr, dst_r_hi + dr
+        else:
+            src_c_lo = max(src_c_lo, bbox[0])
+            src_c_hi = min(src_c_hi, bbox[1])
+            src_r_lo = max(src_r_lo, bbox[2])
+            src_r_hi = min(src_r_hi, bbox[3])
+            if src_c_lo >= src_c_hi or src_r_lo >= src_r_hi:
+                return None
+            dst_c_lo, dst_c_hi = src_c_lo - dc, src_c_hi - dc
+            dst_r_lo, dst_r_hi = src_r_lo - dr, src_r_hi - dr
+
+    return (
+        (src_c_lo, src_c_hi, src_r_lo, src_r_hi),
+        (dst_c_lo, dst_c_hi, dst_r_lo, dst_r_hi),
+    )
+
+
+def _accumulate_by_kernel(
+    src: "np.ndarray",
+    kernel: "Any",
+    board_cols: int,
+    board_rows: int,
+    *,
+    spread: bool,
+    bbox: Optional[SliceWindow],
+    erode: bool,
+) -> "np.ndarray":
+    """Noyau commun des trois opérations de décalage ci-dessous. Ne pas appeler directement.
+
+    Toute la géométrie tient dans les deux lignes qui suivent : le SENS décide à la fois du signe
+    du décalage et du côté à borner, et ces deux choix ne sont pas indépendants. Les tenir ici est
+    l'objet même de ce module — les six sites d'appel les appariaient à la main, et rien ne signalait
+    un appariement croisé (offsets non niés avec un clamp de source, par exemple), qui produit un
+    masque faux sans lever.
+    """
+    sign = -1 if spread else 1
+    clamp = "src" if spread else "dst"
+    out = np.ones_like(src) if erode else np.zeros_like(src)
+    for dc, dr in kernel:
+        windows = offset_slice_windows(
+            sign * int(dc), sign * int(dr), board_cols, board_rows, bbox=bbox, clamp=clamp
+        )
+        if erode:
+            # Une empreinte dont un décalage sort entièrement du plateau ne peut être placée
+            # NULLE PART : l'accumulateur tombe à faux et il n'y a plus rien à intersecter.
+            if windows is None:
+                out[:] = False
+                return out
+            (sc0, sc1, sr0, sr1), (dc0, dc1, dr0, dr1) = windows
+            shifted = np.zeros_like(src)
+            shifted[dc0:dc1, dr0:dr1] = src[sc0:sc1, sr0:sr1]
+            out &= shifted
+            if not out.any():
+                return out
+            continue
+        if windows is None:
+            continue
+        (sc0, sc1, sr0, sr1), (dc0, dc1, dr0, dr1) = windows
+        out[dc0:dc1, dr0:dr1] |= src[sc0:sc1, sr0:sr1]
+    return out
+
+
+def dilate_by_kernel(
+    src: "np.ndarray",
+    kernel: "Any",
+    board_cols: int,
+    board_rows: int,
+    *,
+    bbox: Optional[SliceWindow] = None,
+) -> "np.ndarray":
+    """``out[c, r] = any_{(dc, dr) ∈ kernel} src[c + dc, r + dr]``.
+
+    SOURCE UNIQUE des dilatations de masque du moteur. Boucle de slices uniquement :
+    ``scipy.ndimage.binary_dilation`` a provoqué des segfaults sur certains environnements
+    (extensions natives / ``origin``), donc pas de chemin SciPy ici — ni ailleurs.
+
+    ``bbox`` (L_bbox, §0.22) : borne le slice DESTINATION à cette fenêtre, la source suivant par le
+    décalage. Le tableau reste plein-board ; seules les cases de sortie utiles sont écrites → coût
+    ``O(|kernel| × bbox)`` au lieu de ``O(|kernel| × board)``, sans remapping ni perte de parité.
+    Correct dès que la sortie n'est jamais LUE hors de la fenêtre.
+    """
+    if getattr(kernel, "size", None) == 0:
+        return np.zeros_like(src)
+    return _accumulate_by_kernel(
+        src, kernel, board_cols, board_rows, spread=False, bbox=bbox, erode=False
+    )
+
+
+def spread_by_kernel(
+    src: "np.ndarray",
+    kernel: "Any",
+    board_cols: int,
+    board_rows: int,
+    *,
+    bbox: Optional[SliceWindow] = None,
+) -> "np.ndarray":
+    """``out[c + dc, r + dr] = any src[c, r]`` pour chaque ``(dc, dr)`` du noyau.
+
+    SOURCE UNIQUE des propagations : pas de BFS (src → voisin) ou union d'empreintes (ancre valide →
+    cellules de son empreinte). C'est la dilatation par le décalage OPPOSÉ ; la négation des offsets
+    et le bornage côté SOURCE en découlent tous les deux et sont faits ici, jamais par l'appelant.
+
+    ``bbox`` : borne le slice SOURCE, la destination suivant par le décalage. Correct quand toutes
+    les sources non nulles sont dans la fenêtre (union d'empreintes : ancres valides ⊆ reach ⊆ bbox).
+    """
+    return _accumulate_by_kernel(
+        src, kernel, board_cols, board_rows, spread=True, bbox=bbox, erode=False
+    )
+
+
+def erode_by_kernel(
+    src: "np.ndarray",
+    kernel: "Any",
+    board_cols: int,
+    board_rows: int,
+) -> "np.ndarray":
+    """``out[c, r] = all_{(dc, dr) ∈ kernel} src[c + dc, r + dr]`` — l'érosion, jumelle du ET.
+
+    Même géométrie que ``dilate_by_kernel`` (``src = dst + offset``), opérateur ``&`` au lieu de
+    ``|``, et court-circuit dès que l'accumulateur est vide : une empreinte qui ne tient nulle part
+    n'a plus besoin des offsets restants. Utilisée pour « l'ANCRE est-elle valide, c'est-à-dire
+    TOUTE son empreinte est-elle acceptable ? ».
+    """
+    return _accumulate_by_kernel(
+        src, kernel, board_cols, board_rows, spread=False, bbox=None, erode=True
+    )
+
+
 _FOOTPRINT_OFFSETS_CACHE: Dict[
     Tuple[str, Any, int],
     Tuple[Tuple[Tuple[int, int], ...], Tuple[Tuple[int, int], ...]],

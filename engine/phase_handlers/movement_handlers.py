@@ -50,8 +50,10 @@ from engine.hex_utils import (
     engagement_minimum_clearance_norm,
     euclidean_edge_clearance_round_round,
     geodesic_field,
+    dilate_by_kernel,
     min_distance_between_sets,
     ORIENTATION_STEP_COUNT,
+    spread_by_kernel,
     require_base_size,
     require_scalar_base_size,
     round_base_radius_norm,
@@ -2060,43 +2062,14 @@ def _compute_mover_ez_forbidden_mask(
         col_is_even[:, None], (board_cols, board_rows)
     ).copy()
 
-    def _dilate_by_kernel(src: "np.ndarray", kernel: "np.ndarray") -> "np.ndarray":
-        out = np.zeros_like(src)
-        if kernel.size == 0:
-            return out
-        for dc, dr in kernel:
-            c_src_lo = max(0, int(dc))
-            c_src_hi = board_cols - max(0, -int(dc))
-            r_src_lo = max(0, int(dr))
-            r_src_hi = board_rows - max(0, -int(dr))
-            if c_src_lo >= c_src_hi or r_src_lo >= r_src_hi:
-                continue
-            c_dst_lo = c_src_lo - int(dc)
-            c_dst_hi = c_src_hi - int(dc)
-            r_dst_lo = r_src_lo - int(dr)
-            r_dst_hi = r_src_hi - int(dr)
-            out[c_dst_lo:c_dst_hi, r_dst_lo:r_dst_hi] |= src[
-                c_src_lo:c_src_hi, r_src_lo:r_src_hi
-            ]
-        return out
+    # Dilatation / propagation plein-board : ce chemin (masque EZ `ez > 1`) n'a pas de bbox de
+    # sortie connue a priori, d'où l'absence de `bbox=`. Les deux closures qui vivaient ici sont
+    # devenues les fonctions module `hex_utils.dilate_by_kernel` / `spread_by_kernel`.
+    def _dilate(src: "np.ndarray", kernel: "np.ndarray") -> "np.ndarray":
+        return dilate_by_kernel(src, kernel, board_cols, board_rows)
 
-    def _spread_by_kernel(src: "np.ndarray", kernel: "np.ndarray") -> "np.ndarray":
-        out = np.zeros_like(src)
-        for dc, dr in kernel:
-            src_c_lo = max(0, -int(dc))
-            src_c_hi = board_cols - max(0, int(dc))
-            src_r_lo = max(0, -int(dr))
-            src_r_hi = board_rows - max(0, int(dr))
-            if src_c_lo >= src_c_hi or src_r_lo >= src_r_hi:
-                continue
-            dst_c_lo = src_c_lo + int(dc)
-            dst_c_hi = src_c_hi + int(dc)
-            dst_r_lo = src_r_lo + int(dr)
-            dst_r_hi = src_r_hi + int(dr)
-            out[dst_c_lo:dst_c_hi, dst_r_lo:dst_r_hi] |= src[
-                src_c_lo:src_c_hi, src_r_lo:src_r_hi
-            ]
-        return out
+    def _spread(src: "np.ndarray", kernel: "np.ndarray") -> "np.ndarray":
+        return spread_by_kernel(src, kernel, board_cols, board_rows)
 
     nb_even = np.asarray(
         [(0, -1), (1, -1), (1, 0), (0, 1), (-1, 0), (-1, -1)], dtype=np.int64
@@ -2140,14 +2113,12 @@ def _compute_mover_ez_forbidden_mask(
         for _ in range(int(ez)):
             even_src = dilated & col_parity_mask
             odd_src = dilated & ~col_parity_mask
-            nxt = dilated | _spread_by_kernel(even_src, nb_even) | _spread_by_kernel(
-                odd_src, nb_odd
-            )
+            nxt = dilated | _spread(even_src, nb_even) | _spread(odd_src, nb_odd)
             if np.array_equal(nxt, dilated):
                 break
             dilated = nxt
-        eng_bad_even_mix = _dilate_by_kernel(dilated, off_even_arr)
-        eng_bad_odd_mix = _dilate_by_kernel(dilated, off_odd_arr)
+        eng_bad_even_mix = _dilate(dilated, off_even_arr)
+        eng_bad_odd_mix = _dilate(dilated, off_odd_arr)
         eng_bad |= np.where(col_parity_mask, eng_bad_even_mix, eng_bad_odd_mix)
 
     return eng_bad
@@ -2277,89 +2248,23 @@ def _build_multi_hex_vectorized(
             off_even_arr, off_odd_arr, board_cols, board_rows,
         )
 
+    # Dilatation / propagation FENÊTRÉES sur la bbox du move (L_bbox, §0.22). Les deux closures
+    # qui portaient ici leur propre calcul de bornes sont devenues `hex_utils.dilate_by_kernel` /
+    # `spread_by_kernel` ; il ne reste que le passage de la fenêtre, que le chemin `fly` laisse à
+    # `None` (disque, étendue row ~1,5x move_range) et que l'A/B `_bbox_window=False` neutralise.
     def _dilate_by_kernel(
         src: "np.ndarray",
         kernel: "np.ndarray",
         bbox: Optional[Tuple[int, int, int, int]] = None,
     ) -> "np.ndarray":
-        """``out[c, r] = any_{(dc, dr) ∈ kernel} src[c+dc, r+dr]``.
-
-        Boucle slices uniquement : ``scipy.ndimage.binary_dilation`` a provoqué des segfaults
-        sur certains environnements (extensions natives / ``origin``), donc pas de chemin SciPy ici.
-
-        ``bbox`` (L_bbox) : si fourni ``(c_lo, c_hi, r_lo, r_hi)``, borne le slice **destination**
-        à cette fenêtre (la source suit par le décalage ``dst + offset``). Le tableau reste
-        plein-board ; seules les cases de sortie utiles sont écrites → coût ``O(|kernel|×bbox)``
-        au lieu de ``O(|kernel|×board)``, sans remapping ni perte de parité.
-        """
-        out = np.zeros_like(src)
-        if kernel.size == 0:
-            return out
-        for dc, dr in kernel:
-            c_src_lo = max(0, int(dc))
-            c_src_hi = board_cols - max(0, -int(dc))
-            r_src_lo = max(0, int(dr))
-            r_src_hi = board_rows - max(0, -int(dr))
-            if c_src_lo >= c_src_hi or r_src_lo >= r_src_hi:
-                continue
-            c_dst_lo = c_src_lo - int(dc)
-            c_dst_hi = c_src_hi - int(dc)
-            r_dst_lo = r_src_lo - int(dr)
-            r_dst_hi = r_src_hi - int(dr)
-            if bbox is not None:
-                c_dst_lo = max(c_dst_lo, bbox[0])
-                c_dst_hi = min(c_dst_hi, bbox[1])
-                r_dst_lo = max(r_dst_lo, bbox[2])
-                r_dst_hi = min(r_dst_hi, bbox[3])
-                if c_dst_lo >= c_dst_hi or r_dst_lo >= r_dst_hi:
-                    continue
-                # src = dst + offset (invariant du slice ci-dessus) : dériver après le clamp.
-                c_src_lo = c_dst_lo + int(dc)
-                c_src_hi = c_dst_hi + int(dc)
-                r_src_lo = r_dst_lo + int(dr)
-                r_src_hi = r_dst_hi + int(dr)
-            out[c_dst_lo:c_dst_hi, r_dst_lo:r_dst_hi] |= src[
-                c_src_lo:c_src_hi, r_src_lo:r_src_hi
-            ]
-        return out
+        return dilate_by_kernel(src, kernel, board_cols, board_rows, bbox=bbox)
 
     def _spread_by_kernel(
         src: "np.ndarray",
         kernel: "np.ndarray",
         bbox: Optional[Tuple[int, int, int, int]] = None,
     ) -> "np.ndarray":
-        """``out[c+dc, r+dr] = any src[c, r]`` pour chaque ``(dc, dr) ∈ kernel``.
-
-        Utilisé pour : propagation BFS (src → voisin = src + offset) ou union d’empreintes
-        (ancre valide → cellules (c+dc, r+dr) de son empreinte).
-
-        ``bbox`` (L_bbox) : si fourni, borne le slice **source** à la fenêtre (la destination suit
-        par ``dst = src + offset``). Correct quand toutes les sources non nulles sont dans la bbox
-        (footprint : ancres valides ⊆ ``reach`` ⊆ bbox) → sortie identique au plein-board.
-        """
-        out = np.zeros_like(src)
-        for dc, dr in kernel:
-            src_c_lo = max(0, -int(dc))
-            src_c_hi = board_cols - max(0, int(dc))
-            src_r_lo = max(0, -int(dr))
-            src_r_hi = board_rows - max(0, int(dr))
-            if src_c_lo >= src_c_hi or src_r_lo >= src_r_hi:
-                continue
-            if bbox is not None:
-                src_c_lo = max(src_c_lo, bbox[0])
-                src_c_hi = min(src_c_hi, bbox[1])
-                src_r_lo = max(src_r_lo, bbox[2])
-                src_r_hi = min(src_r_hi, bbox[3])
-                if src_c_lo >= src_c_hi or src_r_lo >= src_r_hi:
-                    continue
-            dst_c_lo = src_c_lo + int(dc)
-            dst_c_hi = src_c_hi + int(dc)
-            dst_r_lo = src_r_lo + int(dr)
-            dst_r_hi = src_r_hi + int(dr)
-            out[dst_c_lo:dst_c_hi, dst_r_lo:dst_r_hi] |= src[
-                src_c_lo:src_c_hi, src_r_lo:src_r_hi
-            ]
-        return out
+        return spread_by_kernel(src, kernel, board_cols, board_rows, bbox=bbox)
 
     def _mask_from_cells(cells: Set[Tuple[int, int]]) -> "np.ndarray":
         m = np.zeros((board_cols, board_rows), dtype=bool)
