@@ -286,19 +286,16 @@ mesure, et c'est assumé (§0.14).
 ## 4. Backlog hors chemin critique (`A_faire/`)
 
 Prêts à démarrer sans décision produit :
-- **Une primitive commune « poser un plan par figurine »** (2026-08-11, sorti d'un `/simplify`).
-  L'enchaînement « résoudre le niveau EFFECTIF (13.06) puis écrire la figurine » est réécrit à
-  l'identique par **cinq à six** écrivains : `deployment_handlers` (×3), `movement_handlers` (×2)
-  et l'aperçu de tir. L'invariant « le niveau écrit est un niveau résolu » tient donc par la
-  discipline de chaque appelant, jamais par construction — et `update_model_position` accepte
-  aujourd'hui n'importe quel entier ≥ 0 sans vérifier que l'empreinte tient sur un plancher.
-  ⚠️ Ce n'est pas théorique : c'est exactement ce défaut qui a produit le 500 « figurine marquée
-  à l'étage mais hors empreinte de plancher » du 2026-08-11, où le client perdait tout son calque
-  de LoS. Le prochain écrivain (pile-in/consolidation, réserves, un aperçu de charge) le refera
-  sans que rien ne devienne rouge.
-  Forme visée : `place_model_at_effective_level(...)` dans `shared_utils`, à côté de
-  `update_model_position`, appelée par les 6 sites. Chantier de migration, à ne pas glisser dans
-  une correction ponctuelle — d'où sa ligne ici.
+- ✅ **Une primitive commune « poser un plan par figurine »** — **LIVRÉ le 2026-08-11**.
+  `resolve_model_effective_level` (résout) et `place_model_at_effective_level` (résout puis écrit)
+  dans `shared_utils`. Les six sites annoncés migrés, plus **deux jumeaux** trouvés au grep dans
+  `movement_handlers`, plus `commit_move` — qui ne résolvait pas du tout, laissant charge, pile-in,
+  consolidation et gym écrire le niveau brut. `update_model_position` porte désormais un **garde
+  dur** : écrire un étage sous une figurine qui n'y tient pas lève à la ligne fautive au lieu de
+  produire le 500 du 2026-08-11. Le garde a immédiatement révélé que les six tests de charge 3D
+  posaient leur cible sur une case de BORD de plancher — ils mesuraient un état qu'aucun chemin de
+  jeu ne produit.
+  → [`Implémenté/primitive_poser_plan_par_figurine_2026-08-11.md`](Implémenté/primitive_poser_plan_par_figurine_2026-08-11.md)
 - **Réécrire la note `bot_eval_freq_normal` de `x1_long` avec le coût MESURÉ** (~10 min, décidé
   le 2026-08-11). Cette note fonde le réglage sur « 13 min l'unité », chiffre hérité du commit
   `42326ed0` et jamais re-mesuré ; l'évaluation finale du run du 2026-08-11 donne plutôt
