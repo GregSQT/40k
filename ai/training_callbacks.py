@@ -520,46 +520,23 @@ class EpisodeTerminationCallback(BaseCallback):
                 # cumulatif rend un taux effondre — a l'offset 992, 0.000 pour un vrai 0,031 s/ep.
                 # Non garde : on est sous `if episode_ended`, qui vient d'incrementer le compteur.
                 #
-                # Numerateur, SUITE : le temps deja investi dans les episodes EN COURS en est
-                # retranche. Sans ca, le wall des `n_envs` slots est au numerateur mais seuls les
-                # slots ARRIVES sont au denominateur, et la colonne surestime d'un facteur ~n_envs/k
-                # tant que k slots sur n_envs ont rendu — mesure du 2026-08-11 a n_envs=48 :
-                # `moy` 29,141 affiche contre 4,480/5,324 pour `min/max`, soit 291 s de wall
-                # divisees par les 10 seuls episodes arrives, les 38 autres etant deja aux trois
-                # quarts payes. Ce n'est PAS une estimation : `n_envs * elapsed` est le temps-slot
-                # total disponible, `wip` la part qui n'a pas encore produit d'episode, et la
-                # difference le temps-slot reellement consomme par les `episode_count` episodes
-                # termines. Aucune fraction d'avancement n'est supposee — c'est pour ca qu'on
-                # retranche au numerateur au lieu d'ajouter au denominateur, ou il faudrait deviner
-                # a quel point chaque episode en cours est avance.
-                # Le terme est borne (au plus une duree d'episode par slot) alors que
-                # `episode_count` croit : sa contribution decroit en 1/N et `moy` converge
-                # EXACTEMENT vers le `training_elapsed / episode_count` d'avant. Les chiffres de
-                # fin de run ne bougent donc pas, seuls les premiers affichages sont corriges.
-                # Meme horloge des deux cotes de chaque soustraction : `now_perf`/`_episode_wall_time_by_env`
-                # en `perf_counter`, `elapsed` en `time.time`, jamais melangees entre elles.
-                # L'eval bloquante est retranchee slot par slot, comme dans les durees ci-dessus :
-                # une eval enjambee par un episode en cours gonflerait sa part de `wip`.
+                # NE PAS retrancher le temps deja investi dans les episodes EN COURS. Essaye le
+                # 2026-08-11, mesure, et ANNULE le meme jour : `moy` est une DEFINITION verifiable
+                # (temps ecoule / episodes produits), pas un estimateur du regime, et elle porte
+                # l'identite exacte `moy x episodes == elapsed` dont `read_steady_rate`
+                # (scripts/ab_bench.py) tire le regime etabli par difference. Retrancher le
+                # work-in-progress remplace cette identite par une approximation : mesure en regime
+                # etabli a n_envs=48, `elapsed / episodes` rend le vrai taux a 0,0 % pres a toute
+                # taille, la version amputee du wip sous-estime de 9,8 % a 240 episodes, 2,6 % a
+                # 960, 1,1 % a 1920 — un biais qui suit `n_envs`, donc aligne sur l'axe que les
+                # bancs CLASSENT.
+                # Ce que la colonne affiche tant que la premiere vague n'est pas retombee reste
+                # exact : le 2026-08-11 a n_envs=48, 291 s pour 10 episodes termines, c'est bien
+                # 29,141 s par episode PRODUIT. Ce n'est pas faux, c'est non representatif du
+                # regime a venir — les 38 autres slots n'ont encore rien rendu. Cette phase se
+                # SIGNALE (cf. `slots_note` plus bas), elle ne se corrige pas dans le chiffre.
                 training_elapsed = elapsed - blocking_eval_seconds
-                work_in_progress_seconds = sum(
-                    (now_perf - slot_start_perf)
-                    - (blocking_eval_seconds - slot_eval_at_start)
-                    for slot_start_perf, slot_eval_at_start in zip(
-                        self._episode_wall_time_by_env, self._episode_eval_time_by_env
-                    )
-                )
-                episodes_training_elapsed = training_elapsed - work_in_progress_seconds / n_envs
-                # Strictement positif par construction : les slots qui viennent de rendre sont a
-                # `now_perf`, donc contribuent 0 a `wip`, et aucun autre slot ne peut avoir demarre
-                # avant `start_time`. Un chiffre nul ou negatif signale une horloge incoherente, pas
-                # un run rapide — l'afficher tel quel rendrait la colonne trompeuse.
-                if episodes_training_elapsed <= 0:
-                    raise ValueError(
-                        "Non-positive training time for completed episodes: "
-                        f"{episodes_training_elapsed} (elapsed={elapsed}, "
-                        f"blocking_eval={blocking_eval_seconds}, wip={work_in_progress_seconds})"
-                    )
-                avg_training_time_per_episode = episodes_training_elapsed / self.episode_count
+                avg_training_time_per_episode = training_elapsed / self.episode_count
 
                 if self.ema_episode_time is not None:
                     eta = self.ema_episode_time * remaining_episodes
@@ -599,20 +576,24 @@ class EpisodeTerminationCallback(BaseCallback):
                 # deux decimales ecraseraient la dispersion que `min/max` sert a montrer. Sous
                 # ~0,005 s par episode (soit une duree par slot inferieure a 0,25 s a n_envs=48,
                 # regime que ce moteur n'atteint pas), il faudrait une decimale de plus.
-                # `moy` n'est PAS divise : il vaut deja temps d'entrainement par episode produit
-                # (cf. son calcul plus haut, work-in-progress retranche). Il ne se calcule surtout
-                # pas comme `moyenne par slot / n_envs`, division qui n'est exacte qu'une fois que
-                # CHAQUE slot a fini un episode et rend `n_envs/k` fois trop peu tant que seuls `k`
-                # slots sont arrives — 48x sur le premier affichage. Les quatre valeurs excluent le
-                # temps d'eval bot, retranche a la source dans la boucle des durees.
+                # `moy` n'est PAS divise : il vaut deja temps d'entrainement par episode produit.
+                # Il ne se calcule surtout pas comme `moyenne par slot / n_envs`, division qui
+                # n'est exacte qu'une fois que CHAQUE slot a fini un episode et rend `n_envs/k`
+                # fois trop peu tant que seuls `k` slots sont arrives — 48x sur le premier
+                # affichage. Les quatre valeurs excluent le temps d'eval bot, retranche a la
+                # source dans la boucle des durees.
                 #
-                # `slots_note` annonce l'amorcage tant que les `n_envs` slots n'ont pas tous rendu.
-                # `moy` est juste des le premier affichage, mais `cur/min/max` ne portent alors que
-                # sur les episodes ARRIVES, c'est-a-dire les plus courts : `moy` peut legitimement
-                # depasser `max` pendant cette phase (6,1 contre 5,324 sur la mesure du 2026-08-11).
-                # Sans cette mention, l'ecart se lit comme une incoherence de la barre. Le segment
-                # disparait de lui-meme des que le regime est etabli, ou la ligne reprend sa
-                # largeur habituelle.
+                # `slots_note` annonce l'AMORCAGE tant que les `n_envs` slots n'ont pas tous rendu.
+                # Pendant cette phase les quatre chiffres decrivent une population incomplete et
+                # s'ecartent violemment les uns des autres, sans qu'aucun soit faux : mesure du
+                # 2026-08-11 a n_envs=48 et 10 slots arrives, `moy` 29,141 contre `min/max`
+                # 4,480/5,324. `moy` compte les 291 s de wall qu'ont coute les 10 episodes
+                # PRODUITS, tandis que `min/max` ne voient que ces 10 memes episodes — les plus
+                # COURTS, seuls arrives — sans rien savoir des 38 encore en vol. C'est un biais de
+                # SELECTION sur `min/max`, que rien ne corrige et qu'il ne faut pas essayer de
+                # rattraper dans `moy` (cf. le bloc de calcul plus haut). La mention est le seul
+                # remede honnete ; elle disparait d'elle-meme des que le regime est etabli, ou la
+                # ligne reprend sa largeur habituelle.
                 slots_served = sum(self._slot_has_completed_episode)
                 slots_note = (
                     "" if slots_served >= n_envs else f", {slots_served}/{n_envs} slots"

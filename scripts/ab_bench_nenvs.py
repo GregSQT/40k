@@ -37,12 +37,13 @@ CE QUE CET OUTIL IMPOSE
    - le DEMARRAGE (imports torch, fork des N workers, chargement du modele) et la CLOTURE
      (sauvegarde, arret des workers). Couts fixes par run, negligeables sur les 150 000 a
      200 000 episodes d'un entrainement reel, dominants sur un run de banc de 150 episodes ;
-   - le STOCK d'episodes EN VOL : `n_envs` episodes commences et non termines a tout instant,
-     dont le temps est deja compte et le resultat pas encore. Il gonflait le rapport cumule de
-     `n_envs / episodes` — 33 % a n_envs=48 sur 144 episodes contre 4 % a n_envs=6, un biais
-     aligne sur l'axe meme que cet outil classe. Depuis le 2026-08-11 `moy` retranche ce temps
-     en vol a la source (training_callbacks.py), et la soustraction continue d'absorber son
-     residu de fluctuation : un stock constant disparait dans une difference.
+   - le REMPLISSAGE initial : tant qu'aucun slot n'a rendu son premier episode, le wall court
+     sans rien produire. Ce cout vaut environ une duree d'episode, soit un residu de
+     `n_envs / episodes` sur le rapport cumule — mesure a n_envs=48, slots echelonnes : +19,5 %
+     a 240 episodes, +9,7 % a 480, +4,9 % a 960. Il suit `n_envs`, donc l'axe meme que cet outil
+     classe. La soustraction l'elimine exactement : c'est une constante additive au numerateur.
+     Ne pas tenter de le corriger dans `moy` (essaye et annule le 2026-08-11, cf. ab_bench.py) :
+     `moy x episodes == elapsed` est l'identite dont depend ce calcul.
    LES CAMPAGNES ANTERIEURES AU 2026-08-02 ONT ETE CLASSEES SUR LE WALL COMPLET : leurs verdicts
    sont a reprendre, « n_envs=48 optimal » compris.
    `wall`, `hors-boucle` et `boucle` restent AFFICHES par run : ils disent ce que coute la

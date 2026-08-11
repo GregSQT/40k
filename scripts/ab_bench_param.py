@@ -34,11 +34,12 @@ CE QUE CE BANC IMPOSE (identique a `ab_bench_nenvs.py`, dont il generalise le pr
      avec le parametre compare, qu'un entrainement de production de 150 000 a 200 000 episodes
      amortit jusqu'a les rendre negligeables. Les compter classerait les configurations sur une
      charge qui n'existe pas a l'echelle ou elles serviront ;
-   - `moy` est un rapport CUMULE, donc il porte le stock d'episodes EN VOL : a tout instant,
-     `n_envs` episodes sont commences et non termines, leur temps deja au numerateur et leur
-     compte pas encore au denominateur. Ce stock gonfle `moy` d'environ `n_envs / episodes` —
-     33 % a n_envs=48 sur 144 episodes contre 4 % a n_envs=6. Une soustraction entre deux
-     rafraichissements elimine un stock constant par construction.
+   - `moy` est un rapport CUMULE, donc il porte le cout de la PREMIERE VAGUE : tant qu'aucun
+     slot n'a rendu son premier episode, le wall court sans rien produire. Ce cout vaut environ
+     une duree d'episode, soit un residu de `n_envs / episodes` — mesure a n_envs=48, slots
+     echelonnes : +19,5 % a 240 episodes, +9,7 % a 480, +4,9 % a 960. Une soustraction entre
+     deux rafraichissements l'elimine exactement : c'est une constante additive au numerateur.
+     Ne pas tenter de le corriger dans `moy` (essaye et annule le 2026-08-11, cf. ab_bench.py).
    `wall` et `hors-boucle` restent AFFICHES par run : ils disent ce que coute la campagne, ils ne
    disent rien du parametre. Pas de CPU : `getrusage(RUSAGE_CHILDREN)` ne compte pas les workers
    `SubprocVecEnv` arretes en fin de run (mesure : 33,7 s annoncees pour 530 s de wall a

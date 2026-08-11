@@ -202,13 +202,9 @@ def test_moy_est_invariant_quand_n_envs_change_a_debit_egal(monkeypatch):
 def test_moy_est_juste_des_le_premier_affichage_slots_echelonnes(monkeypatch):
     """Le tout premier affichage, avec UN SEUL slot arrive sur 8, doit rendre le vrai rapport.
 
-    Ce premier affichage est encadre par DEUX fautes symetriques, et la valeur juste est entre
-    les deux — c'est pour ca que le test les nomme toutes les deux :
-      - `moyenne par slot / n_envs` (0.125 ici) : la somme des durees ne couvre que le seul slot
-        arrive, la diviser par 8 rend un `moy` 8 fois trop petit ;
-      - `elapsed / episodes_termines` (1.000 ici) : les 7 slots encore en vol ont consomme du
-        wall qui se retrouve au numerateur sans etre au denominateur.
-    La valeur juste retranche le temps en vol : `(elapsed - 7 x 0.95 / 8) / 1`.
+    C'est le cas que la moyenne-par-slot-divisee-par-n_envs ratait : la somme des durees ne
+    couvre alors que le seul slot arrive, donc la diviser par 8 rendait un `moy` 8 fois trop
+    petit. Un rapport temps / episodes produits est juste des le premier episode.
     Le pilotage ci-dessous est deliberement DESYNCHRONISE — c'est la situation reelle, les
     slots ne terminent pas ensemble.
     """
@@ -227,72 +223,69 @@ def test_moy_est_juste_des_le_premier_affichage_slots_echelonnes(monkeypatch):
 
     assert printed, "aucune ligne affichee : le premier episode n'a pas declenche l'affichage"
     elapsed = steps_per_episode * step_seconds
-    # Les 7 slots en vol ont demarre au PREMIER `_on_step`, soit un pas apres l'origine.
-    in_flight = (n_envs - 1) * (steps_per_episode - 1) * step_seconds
-    assert _read_moy(printed[-1]) == pytest.approx(
-        (elapsed - in_flight / n_envs) / 1, abs=5e-4
-    ), "le temps deja investi dans les 7 episodes en vol ne doit pas etre impute au seul arrive"
-    assert _read_moy(printed[-1]) != pytest.approx(elapsed / n_envs, abs=5e-4), (
-        "`moy` ne se calcule pas comme `moyenne par slot / n_envs`"
-    )
-    assert _read_moy(printed[-1]) != pytest.approx(elapsed, abs=5e-4), (
-        "`moy` ne se calcule pas comme `elapsed / episodes_termines`"
+    assert _read_moy(printed[-1]) == pytest.approx(elapsed / 1, abs=5e-4), (
+        "un seul episode produit en `elapsed` secondes : `moy` doit valoir `elapsed`, "
+        "pas `elapsed / n_envs`"
     )
 
 
-def test_moy_retranche_le_temps_des_episodes_en_cours(monkeypatch):
-    """Reproduction du 2026-08-11 : `moy` a 29,141 pendant que `min/max` disaient 4,480/5,324.
+def test_moy_est_exact_en_regime_etabli_slots_dephases(monkeypatch):
+    """`moy` doit rendre le vrai taux EXACTEMENT quand le regime tourne, slots decales.
 
-    A n_envs=48, 291 s de wall n'avaient produit que 10 episodes termines : les 38 autres slots
-    tournaient depuis le debut sans avoir rendu. Leur temps etait deja au numerateur de `moy`,
-    leur compte pas encore au denominateur, d'ou un chiffre ~5x trop lent — et l'ecart avec
-    `min/max` se lisait comme une incoherence de la barre.
+    VERROU CONTRE UNE CORRECTION TENTEE ET ANNULEE (2026-08-11). Voyant `moy` a 29,141 quand
+    `min/max` disaient 4,480/5,324 (n_envs=48, 10 slots arrives), on a essaye de retrancher du
+    numerateur le temps deja investi dans les episodes EN VOL. Mesure sur ce meme montage :
+    `elapsed / episodes` rend le vrai taux a 0,0 % pres a toute taille, la version amputee du
+    work-in-progress sous-estime de 9,8 % a 240 episodes, 2,6 % a 960, 1,1 % a 1920 — un biais
+    proportionnel a `n_envs`, donc aligne sur l'axe meme que les bancs classent. `moy` est une
+    DEFINITION (temps ecoule / episodes produits), pas un estimateur du regime : elle porte
+    l'identite `moy x episodes == elapsed` dont `read_steady_rate` tire le regime par difference.
+    Ce que 29,141 decrivait n'etait pas une erreur de calcul mais une population incomplete —
+    c'est `slots_note` qui repond a ca, pas une correction du chiffre.
 
-    Le pilotage ci-dessous reproduit exactement cette forme : 10 slots sur 48 rendent au tout
-    dernier pas, les 38 autres restent en vol. La valeur attendue n'est pas une constante ajustee
-    a l'implementation, elle est REDERIVEE ici depuis le temps-slot total disponible.
+    Le dephasage est construit pour qu'AUCUN temps mort de remplissage ne subsiste : le slot `i`
+    rend aux pas ou `(pas + decalage_i) % periode == 0`, donc son premier episode est plus COURT
+    au lieu d'etre precede d'une attente. Sans cette precaution, la premiere vague — pendant
+    laquelle aucun episode n'est produit — laisse un residu `n_envs / episodes` dans les deux
+    formules et masquerait l'ecart qu'on veut verrouiller.
     """
-    n_envs, steps, step_seconds = 48, 100, 2.914
-    slots_done = 10
-    clock, callback, printed = _install(monkeypatch, n_envs, steps, episodes_per_slot=2)
+    n_envs, period_steps, step_seconds = 8, 40, 0.05
+    true_rate = period_steps * step_seconds / n_envs
+    total_steps = 800
+    clock, callback, printed = _install(
+        monkeypatch, n_envs, period_steps, episodes_per_slot=total_steps // period_steps
+    )
 
-    partial_done = [index < slots_done for index in range(n_envs)]
-    not_done = [False] * n_envs
-    for step_index in range(steps):
+    offsets = [index * period_steps // n_envs for index in range(n_envs)]
+    origin = clock.now
+    samples: list[tuple[int, float, str]] = []
+    for step in range(1, total_steps + 1):
         clock.advance(step_seconds)
+        before = len(printed)
         callback.locals = {
-            "dones": partial_done if step_index == steps - 1 else not_done
+            "dones": [(step + offset) % period_steps == 0 for offset in offsets]
         }
         callback._on_step()
+        if len(printed) > before:
+            # `elapsed` et le compteur LUS au moment exact de l'affichage : l'attendu ne vient
+            # pas de la formule testee.
+            samples.append((callback.episode_count, clock.now - origin, printed[-1]))
 
-    assert printed, "aucune ligne affichee : les 10 episodes n'ont pas declenche l'affichage"
-    line = printed[-1]
-
-    # Temps-slot total disponible = n_envs x elapsed. Les 38 slots en vol ont demarre au PREMIER
-    # `_on_step` (soit un pas apres l'origine du chronometre) et n'ont rien rendu ; les 10 arrives
-    # viennent d'etre remis a l'instant courant, donc ne portent aucun temps en vol.
-    elapsed = steps * step_seconds
-    in_flight = (n_envs - slots_done) * (steps - 1) * step_seconds
-    expected_moy = (elapsed - in_flight / n_envs) / slots_done
-
-    assert _read_moy(line) == pytest.approx(expected_moy, abs=5e-4), (
-        "le wall des 38 episodes en vol ne doit pas etre impute aux 10 episodes termines"
+    established = [point for point in samples if point[0] >= 4 * n_envs]
+    assert len(established) >= 3, (
+        f"{len(established)} affichage(s) en regime etabli : le test ne regarde presque rien"
     )
-    # Garde-fou anti-regression silencieuse : la valeur fautive historique doit etre LOIN.
-    assert _read_moy(line) == pytest.approx(6.302, abs=5e-3)
-    assert _read_moy(line) < 10.0, (
-        f"`moy` a {_read_moy(line)} : c'est l'ancien `elapsed / episodes_termines` "
-        f"(~{elapsed / slots_done:.1f}), le temps en vol n'est pas retranche"
-    )
+    for episodes, elapsed, line in established:
+        assert _read_moy(line) == pytest.approx(elapsed / episodes, abs=5e-4), (
+            f"a {episodes} episodes, `moy` doit valoir `elapsed / episodes` ({elapsed / episodes:.4f}) "
+            f"— tout terme retranche au numerateur casse l'identite `moy x episodes == elapsed`"
+        )
+        assert _read_moy(line) == pytest.approx(true_rate, abs=5e-4), (
+            f"a {episodes} episodes, `moy` doit rendre le vrai taux {true_rate:.4f} s/ep"
+        )
 
-    # `moy` DEPASSE `max`, et c'est correct : `min/max` ne portent que sur les episodes ARRIVES,
-    # les plus courts, tandis que `moy` compte aussi le cout des 38 episodes plus longs encore en
-    # vol. C'est un biais de SELECTION, que rien ne corrige — d'ou la mention d'amorcage.
-    _, maximum = _read_min_max(line)
-    assert _read_moy(line) > maximum, (
-        "pendant l'amorcage, `min/max` ne voient que les episodes les plus courts : `moy` doit "
-        "legitimement les depasser"
-    )
+    # Le regime est etabli : la mention d'amorcage a disparu.
+    assert _read_slots_note(established[-1][2]) is None
 
 
 def test_la_barre_annonce_l_amorcage_puis_le_retire(monkeypatch):

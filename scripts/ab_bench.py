@@ -144,17 +144,19 @@ _LOOP_ELAPSED_RE = re.compile(r"\[(\d+):(\d\d)(?::(\d\d))?<")
 def read_steady_rate(output: str) -> tuple:
     """Rend (secondes par episode en REGIME ETABLI, n_envs, episodes de la fenetre de mesure).
 
-    POURQUOI PAS `moy` DIRECTEMENT — c'est un rapport CUMULE, donc une moyenne sur TOUT le run,
-    demarrage compris (caches froids, premieres mises a jour PPO). Un banc A/B compare des regimes
-    ETABLIS : c'est la derivee qu'on veut, pas l'integrale, et la difference entre deux
-    rafraichissements la rend directement.
+    POURQUOI PAS `moy` DIRECTEMENT — c'est un rapport CUMULE, donc il porte le cout de la PREMIERE
+    VAGUE : tant qu'aucun slot n'a rendu son premier episode, le wall court sans produire. Ce cout
+    vaut environ une duree d'episode, soit un residu de `n_envs / episodes` sur le rapport —
+    mesure a n_envs=48, slots echelonnes : +19,5 % a 240 episodes, +9,7 % a 480, +4,9 % a 960.
+    Le residu suit `n_envs`, donc l'axe meme que les campagnes CLASSENT : il fabrique une pente.
+    La DIFFERENCE entre deux rafraichissements l'elimine EXACTEMENT, et pas approximativement :
+    le cout de remplissage est une constante additive au numerateur (`elapsed = remplissage +
+    episodes x taux`), et une constante additive disparait dans une soustraction.
 
-    Le stock d'episodes EN VOL, lui, n'entre plus dans le calcul : `moy` retranche desormais a son
-    numerateur le temps deja investi dans les episodes non termines (training_callbacks.py). Il
-    gonflait auparavant d'environ `n_envs / episodes` — 33 % a n_envs=48 sur 144 episodes contre
-    4 % a n_envs=6 — un biais qui suivait l'axe classe et fabriquait une pente sur les campagnes
-    qui balaient `n_envs`. La difference l'annulait deja par construction (un stock constant
-    disparait dans une soustraction) et continue de le faire pour son residu de fluctuation.
+    Ne pas chercher a corriger `moy` a la source pour autant : essaye le 2026-08-11 en retranchant
+    le temps des episodes en vol, mesure, annule le meme jour — en regime etabli `elapsed /
+    episodes` rend le vrai taux a 0,0 % pres, la version corrigee sous-estimait de 9,8 % a 240
+    episodes. `moy x episodes == elapsed` est une identite exacte dont ce calcul DEPEND.
 
     Elimine aussi la phase de remplissage initiale (aucun episode termine tant que le premier
     slot n'a pas fini) : les affichages anterieurs a `n_envs` episodes sont ecartes.
