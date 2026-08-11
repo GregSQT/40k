@@ -42,6 +42,7 @@ from .shared_utils import (
     _compute_unit_occupied_hexes, _squad_is_in_enemy_er, squad_is_battle_shocked_in_enemy_er,
     roll_advance_for_squad, unit_is_in_strategic_reserves,
     MovePlan, parse_model_plan_with_orientation, plan_entry_level, plan_entry_model_orientation,
+    resolve_model_effective_level,
 )
 from engine.hex_utils import (
     _hex_center,
@@ -3773,15 +3774,15 @@ def movement_build_model_destinations_pool(
     # partagé : ces hexes SONT le plancher de l'étage, praticable en surface). Vide si assez petit / FLY.
     from engine.terrain_utils import low_clearance_ground_hexes
     _low_clear = low_clearance_ground_hexes(terrain_areas, float(require_key(unit, "MODEL_HEIGHT")))
-    from engine.terrain_utils import floor_hexes_at_level, resolve_model_floor_level
+    from engine.terrain_utils import floor_hexes_at_level
     floor_hexes_view: AbstractSet[Tuple[int, int]] = (
         floor_hexes_at_level(terrain_areas, view_level) if view_level >= 1 else set()
     )
     # Niveau EFFECTIF de DÉPART du mover (§13.06) — dérivé de son niveau COMMITTÉ (models_cache),
     # jamais de la vue courante : la facturation de la descente doit être indépendante de l'affichage.
-    start_level_eff = resolve_model_floor_level(
-        start_col, start_row, require_key(model, "BASE_SHAPE"), require_key(model, "BASE_SIZE"),
-        mover_orient, int(model.get("level", 0)), terrain_areas,  # get allowed (orient EN COURS du mover)
+    start_level_eff = resolve_model_effective_level(
+        game_state, model, start_col, start_row,
+        int(model.get("level", 0)), mover_orient,  # get allowed ; orient EN COURS du mover
     )
     _levels_of_interest: Set[int] = {0} | ({view_level} if view_level >= 1 else set())
 
@@ -3816,10 +3817,7 @@ def movement_build_model_destinations_pool(
         else:
             sc, sr = int(sibling["col"]), int(sibling["row"])
             sib_req = int(sibling.get("level", 0))  # get allowed
-        sib_eff = resolve_model_floor_level(
-            sc, sr, require_key(sibling, "BASE_SHAPE"), require_key(sibling, "BASE_SIZE"),
-            int(sibling.get("orientation", 0)), sib_req, terrain_areas,  # get allowed
-        )
+        sib_eff = resolve_model_effective_level(game_state, sibling, sc, sr, sib_req)
         same_squad_occ_by_level.setdefault(sib_eff, set()).update(
             # Socle de LA SŒUR, pas de l'escouade — les trois lignes au-dessus lisent déjà le
             # sien pour résoudre son niveau. Avec la géométrie d'escouade, un personnage attaché
@@ -4247,9 +4245,7 @@ def movement_preview_move_plan(
     # Niveau EFFECTIF (13.06) : le niveau demandé (vue) n'est retenu que si l'empreinte tient ENTIÈREMENT
     # sur le plancher ; sinon la fig est au SOL (0). PAS de voile rouge pour un débordement partiel : on
     # la ramène simplement au niveau 0 (cohérent avec le pool de destinations et le déploiement).
-    from engine.terrain_utils import resolve_model_floor_level
     _mc_norm = require_key(game_state, "models_cache")
-    terrain_areas = require_key(game_state, "terrain_areas")
     # Entrées NORMALISÉES : niveau EFFECTIF (13.06) et orientation RÉSOLUE (5ᵉ champ du plan si
     # le pivot molette est en cours, sinon celle de la fig). Une seule liste, pas de listes
     # parallèles ré-jointes par indice : c'est la forme qu'attendent le footprint orienté
@@ -4259,11 +4255,8 @@ def movement_preview_move_plan(
         _mid = str(e[0])
         _m_norm = _mc_norm[_mid]
         _ori = plan_entry_model_orientation(e, _m_norm)
-        _lvl_req = plan_entry_level(e)
-        _lvl_eff = resolve_model_floor_level(
-            int(e[1]), int(e[2]),
-            require_key(_m_norm, "BASE_SHAPE"), require_key(_m_norm, "BASE_SIZE"),
-            _ori, _lvl_req, terrain_areas,
+        _lvl_eff = resolve_model_effective_level(
+            game_state, _m_norm, int(e[1]), int(e[2]), plan_entry_level(e), _ori
         )
         norm.append((_mid, int(e[1]), int(e[2]), _lvl_eff, _ori))
 
@@ -4436,27 +4429,9 @@ def movement_commit_move_plan_handler(
         for mid in alive
     }
 
-    # Persiste le niveau EFFECTIF (13.06) : le niveau demandé (vue) n'est retenu que si l'empreinte
-    # tient ENTIÈREMENT sur le plancher ; sinon la fig est committée au SOL (0). Miroir du preview et
-    # du déploiement — jamais un étage « à moitié » persisté.
-    from engine.terrain_utils import resolve_model_floor_level as _rmfl_commit
-    _ta_commit = require_key(game_state, "terrain_areas")
-    _resolved_plan: List[Tuple[str, int, int, int, Optional[int]]] = []
-    for _mid_c, _nc_c, _nr_c, _lv_c, _ori_c in plan:
-        _m_c = models_cache[_mid_c]
-        # Orientation du PLAN, pas celle encore committée : le preview a validé l'étage avec
-        # l'orientation visée (`movement_preview_move_plan`), et c'est elle que `commit_move`
-        # posera juste après. La lire sur `models_cache` faisait tenir l'empreinte d'un socle
-        # pivoté sur le plancher au preview puis retomber au sol au commit — le pivot était
-        # appliqué quand même, donc la figurine finissait pivotée à l'étage 0.
-        _eff_c = _rmfl_commit(
-            _nc_c, _nr_c, require_key(_m_c, "BASE_SHAPE"), require_key(_m_c, "BASE_SIZE"),
-            plan_entry_model_orientation((_mid_c, _nc_c, _nr_c, _lv_c, _ori_c), _m_c),
-            int(_lv_c), _ta_commit,
-        )
-        _resolved_plan.append((_mid_c, _nc_c, _nr_c, _eff_c, _ori_c))
-    plan = _resolved_plan
-
+    # Le niveau EFFECTIF (13.06) est désormais résolu par `commit_move` lui-même, pour TOUS ses
+    # appelants (move, charge, pile-in, consolidation, gym) et non plus par pré-résolution du plan
+    # ici : c'est le même invariant, mais tenu par construction au lieu de la discipline de chacun.
     commit_move(plan, game_state, move_type)
 
     unit = get_unit_by_id(game_state, squad_id)

@@ -10,12 +10,12 @@ from typing import AbstractSet, Dict, Any, Iterable, Sequence, Tuple, List, Opti
 from shared.data_validation import require_key
 from engine.game_utils import get_unit_by_id
 from engine.combat_utils import set_unit_coordinates
-from engine.terrain_utils import validate_floor_placement, resolve_model_floor_level
+from engine.terrain_utils import validate_floor_placement
 from engine.phase_handlers.shared_utils import (
     rebuild_choice_timing_index,
     compute_candidate_footprint, build_occupied_positions_set,
     candidate_overlaps_any_unit, coherency_violation_flags,
-    update_model_position,
+    place_model_at_effective_level, resolve_model_effective_level,
 )
 
 
@@ -720,10 +720,7 @@ def deployment_build_model_destinations_pool(
         else:
             sc, sr = int(sibling["col"]), int(sibling["row"])
             sib_req = int(sibling.get("level", 0))  # get allowed
-        sib_eff = resolve_model_floor_level(
-            sc, sr, require_key(sibling, "BASE_SHAPE"), require_key(sibling, "BASE_SIZE"),
-            int(sibling.get("orientation", 0)), sib_req, terrain_areas,  # get allowed
-        )
+        sib_eff = resolve_model_effective_level(game_state, sibling, sc, sr, sib_req)
         sibling_states.append((sibling, sc, sr, sib_eff))
     same_squad_by_level: Dict[int, Set[Tuple[int, int]]] = {}
     for sibling, sc, sr, sib_eff in sibling_states:
@@ -1008,10 +1005,7 @@ def deployment_preview_plan(
     norm: List[Tuple[str, int, int, int]] = []
     for _mid, _nc, _nr, _req in (_normalize_plan_entry(e) for e in plan):
         _m = require_key(models_cache, str(_mid))
-        _bs = require_key(_m, "BASE_SHAPE")
-        _bz = require_key(_m, "BASE_SIZE")
-        _ori = int(_m.get("orientation", 0))  # get allowed
-        _eff = resolve_model_floor_level(_nc, _nr, _bs, _bz, _ori, _req, terrain_areas)
+        _eff = resolve_model_effective_level(game_state, _m, _nc, _nr, _req)
         norm.append((_mid, _nc, _nr, _eff))
     n = len(norm)
     levels = [lv for _, _, _, lv in norm]
@@ -1311,16 +1305,11 @@ def _apply_deploy_plan(
         }
 
     # Persiste le niveau EFFECTIF (dérivé de la position, cf. deployment_preview_plan) : une fig
-    # hors empreinte d'étage est posée au sol même si la vue était sur l'étage.
-    _terrain_areas = require_key(game_state, "terrain_areas")
-    _models_cache = require_key(game_state, "models_cache")
+    # hors empreinte d'étage est posée au sol même si la vue était sur l'étage. Un plan de
+    # déploiement ne porte pas d'orientation (4-uplets) : la primitive résout donc avec celle déjà
+    # posée sur la figurine, et ne l'écrit pas.
     for mid, c, r, level in plan:
-        _m = require_key(_models_cache, str(mid))
-        _bs = require_key(_m, "BASE_SHAPE")
-        _bz = require_key(_m, "BASE_SIZE")
-        _ori = int(_m.get("orientation", 0))  # get allowed (défaut 0 = face nord)
-        _eff = resolve_model_floor_level(c, r, _bs, _bz, _ori, level, _terrain_areas)
-        update_model_position(game_state, mid, c, r, level=_eff)
+        place_model_at_effective_level(game_state, mid, c, r, level)
 
     # Sync ancre de la liste units sur l'ancre recalculée dans units_cache (col/row + niveau).
     units_cache = require_key(game_state, "units_cache")

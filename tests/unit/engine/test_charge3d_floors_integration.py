@@ -30,7 +30,10 @@ from engine.phase_handlers.charge_handlers import (
     _charge_model_pos_is_closer,
     charge_model_plan_state,
 )
-from engine.phase_handlers.shared_utils import update_model_position
+from engine.phase_handlers.shared_utils import (
+    place_model_at_effective_level,
+    resolve_model_effective_level,
+)
 from engine.spatial_relations import unit_entries_within_engagement_zone
 from engine.terrain_utils import floor_hexes_at_level, low_clearance_ground_hexes
 
@@ -68,7 +71,14 @@ def floors_env():
 
 @pytest.fixture
 def setup(floors_env):
-    """Acteurs + hexes centraux de chaque étage (l'ancre doit tenir sur le plancher)."""
+    """Acteurs + hexes de chaque étage où le socle de la CIBLE tient réellement (§13.06).
+
+    La médiane de `sorted(floor_hexes_at_level(...))` — ce que cette fixture prenait — est une case
+    quelconque du plancher, souvent au BORD : l'empreinte de la cible y déborde, donc le moteur y
+    résout « sol » et refuserait d'écrire l'étage. Les tests posaient alors la cible dans un état
+    qu'aucun chemin de jeu ne produit, et vérifiaient l'engagement 3D dessus. Filtrer par le
+    résolveur est le seul moyen de CONSTRUIRE la situation observée au lieu de l'espérer.
+    """
     gs = floors_env.game_state
     ubi = gs["unit_by_id"]
     p1 = [(str(k), u) for k, u in ubi.items() if u["player"] == 1]
@@ -82,21 +92,40 @@ def setup(floors_env):
 
     tgt_uid = p2[0][0]
     chg_uid = p1[0][0]
+    tgt_mid = gs["squad_models"][tgt_uid][0]
+    tgt_model = gs["models_cache"][tgt_mid]
+
+    def _median_holding(cells, level):
+        holding = [
+            c for c in cells
+            if resolve_model_effective_level(gs, tgt_model, c[0], c[1], level) == level
+        ]
+        assert holding, f"aucune case de L{level} ne porte ENTIÈREMENT le socle de la cible"
+        return holding[len(holding) // 2]
+
     return {
         "gs": gs,
         "p1": p1,
         "fh1": fh1,
-        "c1": fh1[len(fh1) // 2],
-        "c2": fh2[len(fh2) // 2],
+        "c1": _median_holding(fh1, 1),
+        "c2": _median_holding(fh2, 2),
         "tgt_uid": tgt_uid,
         "chg_uid": chg_uid,
-        "tgt_mid": gs["squad_models"][tgt_uid][0],
+        "tgt_mid": tgt_mid,
         "chg_mid": gs["squad_models"][chg_uid][0],
     }
 
 
 def _place(gs, mid, col, row, level):
-    update_model_position(gs, str(mid), int(col), int(row), level=int(level))
+    """Pose la figurine et EXIGE le niveau demandé — un placement rabattu au sol est une erreur ici.
+
+    Sans ce contrôle, un test « cible à L1 » repasse au vert en mesurant une cible au sol.
+    """
+    written = place_model_at_effective_level(gs, str(mid), int(col), int(row), int(level))
+    assert written == int(level), (
+        f"figurine {mid} en ({col},{row}) : niveau {level} demandé, {written} écrit — "
+        f"l'empreinte ne tient pas sur ce plancher, le test ne mesure pas ce qu'il croit"
+    )
 
 
 def test_roster_heights_reach_units_cache(setup):

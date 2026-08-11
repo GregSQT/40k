@@ -1319,13 +1319,10 @@ def _apply_preview_placement(
         from engine.phase_handlers.shared_utils import (
             _los_begin_batch,
             _los_end_batch,
-            plan_entry_model_orientation,
-            update_model_position,
+            place_model_at_effective_level,
         )
-        from engine.terrain_utils import resolve_model_floor_level
 
         models_cache = require_key(gs, "models_cache")
-        terrain_areas = require_key(gs, "terrain_areas")
         # Batch LoS : `update_model_position` invalide les caches de LoS à CHAQUE appel, et
         # chaque invalidation balaie `los_cache` et `hex_los_cache` en entier. En posant N
         # figurines une à une, on payait N balayages là où un seul suffit. Même encadrement que
@@ -1341,35 +1338,14 @@ def _apply_preview_placement(
                         f"_apply_preview_placement: figurine {model_id!r} absente de l'escouade "
                         f"{unit_id_str!r} — plan incohérent, pas une figurine à ignorer"
                     )
-                # Orientation VISÉE par ce plan, sinon celle du cache : `plan_entry_model_orientation`
-                # est la SOURCE UNIQUE de cette résolution. Elle était réécrite ici, et la copie
-                # avait déjà divergé — un `get(..., 0)` là où la source `require_key` et lève,
-                # donc un aperçu mesuré socle face nord sur un cache que tout commit refuserait.
-                effective_orientation = plan_entry_model_orientation(entry, model)
-                # ⚠️ NIVEAU EFFECTIF, JAMAIS LE NIVEAU BRUT DU PLAN. Le niveau porté par le plan
-                # est celui de la VUE au drop — un HINT que `deploy_generate_formation` estampe
-                # sur TOUTES les figurines sans vérifier chacune. Une figurine dont le socle ne
-                # tient pas sur un plancher de ce niveau est au SOL (13.06), et l'écrire à l'étage
-                # fait lever `floor_height_at` : la requête partait en 500 et le client perdait
-                # TOUT son calque (cône, blink, couvert). Dans le cas non levant, l'aperçu
-                # mesurait à l'étage ce que la validation résout au sol.
-                # ⚠️ Cette résolution est réécrite à l'identique par CHAQUE écrivain de plan
-                # (`deployment_handlers`, `movement_handlers`, et ici) : l'invariant « le niveau
-                # écrit est un niveau résolu » tient par la discipline de ses appelants, pas par
-                # construction. Le porter dans une primitive commune est un chantier ouvert, cf.
-                # ROADMAP — tant qu'il n'est pas fait, un nouvel écrivain refait le défaut ci-dessus.
-                effective_level = resolve_model_floor_level(
-                    int(col),
-                    int(row),
-                    require_key(model, "BASE_SHAPE"),
-                    require_key(model, "BASE_SIZE"),
-                    effective_orientation,
-                    int(level),
-                    terrain_areas,
-                )
-                update_model_position(
-                    gs, model_id, int(col), int(row),
-                    level=effective_level,
+                # NIVEAU EFFECTIF, JAMAIS LE NIVEAU BRUT DU PLAN (§13.06) : le niveau porté par
+                # le plan est celui de la VUE au drop, que `deploy_generate_formation` estampe sur
+                # TOUTES les figurines sans vérifier chacune. L'écrire tel quel faisait lever
+                # `floor_height_at` — requête en 500, client privé de TOUT son calque de LoS.
+                # L'orientation visée entre dans la résolution (elle oriente l'empreinte) puis est
+                # écrite : la primitive fait les deux, dans cet ordre, pour tous les écrivains.
+                place_model_at_effective_level(
+                    gs, model_id, int(col), int(row), int(level),
                     orientation=None if orientation is None else int(orientation),
                 )
         finally:

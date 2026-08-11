@@ -3480,6 +3480,10 @@ def translate_squad_to_destination(
     entry = units_cache.get(squad_id)
     if entry is None:
         return
+    # ⚠️ SEUL résolveur de niveau du dépôt à ne PAS passer par `resolve_model_effective_level` :
+    # celle-ci exige `terrain_areas` en `require_key` (la clé est garantie en production,
+    # `w40k_core` la pose toujours) là où cette ligne tolère son absence. Des fixtures de test
+    # construisent un `game_state` sans elle ; les aligner est un sujet distinct de ce chantier.
     _ta_translate = game_state.get("terrain_areas", [])  # get allowed (board sans terrain)
     norm_dest_col, norm_dest_row = normalize_coordinates(int(dest_col), int(dest_row))
     old_col = int(entry.get("col", norm_dest_col))
@@ -3575,6 +3579,26 @@ def update_model_position(
     if level is not None:
         if isinstance(level, bool) or not isinstance(level, int) or level < 0:
             raise ValueError(f"update_model_position: level must be an int >= 0, got {level!r}")
+        # GARDE §13.06 : un niveau ÉCRIT est un niveau RÉSOLU. Une figurine marquée à l'étage dont
+        # l'empreinte ne tient pas entièrement sur un plancher est un état corrompu — `floor_height_at`
+        # lève ensuite, très loin de l'écriture fautive (500 du 2026-08-11 : le client perdait TOUT
+        # son calque de LoS). Les écrivains passent par `place_model_at_effective_level`, qui résout ;
+        # ce garde est là pour que le PROCHAIN écrivain casse ici, à la ligne fautive, au lieu de
+        # produire l'état corrompu. Coût nul au sol : `resolve_model_floor_level` sort immédiatement
+        # sous `level < 1`, et tout le jeu au sol passe donc par ce raccourci.
+        if level >= 1:
+            _guard_orientation = (
+                int(require_key(model, "orientation")) if orientation is None else int(orientation)
+            )
+            if resolve_model_effective_level(
+                game_state, model, norm_col, norm_row, level, _guard_orientation
+            ) != level:
+                raise ValueError(
+                    f"update_model_position: niveau {level} NON RÉSOLU pour la figurine {model_id} "
+                    f"en ({norm_col},{norm_row}) orientation {_guard_orientation} — son empreinte ne "
+                    f"tient pas sur un plancher de ce niveau (§13.06). Utiliser "
+                    f"place_model_at_effective_level, qui résout le niveau avant d'écrire."
+                )
         model["level"] = level
     if orientation is not None:
         from engine.hex_utils import ORIENTATION_STEP_COUNT
@@ -3623,6 +3647,82 @@ def update_model_position(
     _ue_los = require_key(game_state, "units_cache").get(squad_id)
     if _ue_los is not None:
         _touch_unit_los(game_state, squad_id, _ue_los.get("col"), _ue_los.get("row"))
+
+
+def resolve_model_effective_level(
+    game_state: Dict[str, Any],
+    model: Dict[str, Any],
+    col: int,
+    row: int,
+    requested_level: int,
+    orientation: Optional[int] = None,
+) -> int:
+    """Niveau EFFECTIF (§13.06) d'une figurine posée en ``(col, row)`` — SOURCE UNIQUE.
+
+    ``requested_level`` est un HINT (le niveau de la VUE au moment du drop) : la figurine n'est
+    réellement à cet étage que si son empreinte tient ENTIÈREMENT sur un plancher de ce niveau,
+    sinon elle est au SOL. Cette dérivation était réécrite à l'identique par chaque écrivain et
+    chaque aperçu de plan — déploiement (×3), mouvement (×2), aperçu de tir — chacun relisant à
+    la main ``BASE_SHAPE`` / ``BASE_SIZE`` / ``orientation`` / ``terrain_areas``. C'est ce
+    recopiage qui a produit le 500 « figurine marquée à l'étage mais hors empreinte de plancher »
+    du 2026-08-11 : l'aperçu de tir était le seul des six à ne pas résoudre.
+
+    ``orientation`` = orientation VISÉE par le plan, ``None`` = celle de la figurine. Même
+    résolution que `plan_entry_model_orientation` (l'orientation décide de la forme de
+    l'empreinte, donc si le socle tient sur le plancher) : ``models_cache`` pose toujours
+    ``orientation``, son absence est un cache corrompu et lève.
+    """
+    from engine.terrain_utils import resolve_model_floor_level
+
+    return resolve_model_floor_level(
+        int(col),
+        int(row),
+        require_key(model, "BASE_SHAPE"),
+        require_key(model, "BASE_SIZE"),
+        int(require_key(model, "orientation")) if orientation is None else int(orientation),
+        int(requested_level),
+        require_key(game_state, "terrain_areas"),
+    )
+
+
+def place_model_at_effective_level(
+    game_state: Dict[str, Any],
+    model_id: str,
+    col: int,
+    row: int,
+    level: int,
+    orientation: Optional[int] = None,
+) -> int:
+    """Pose une figurine d'un plan : résout le niveau (§13.06) PUIS écrit. Renvoie le niveau écrit.
+
+    L'unique manière correcte d'écrire la position d'une figurine issue d'un PLAN (déploiement,
+    move, aperçu) : le niveau porté par le plan n'est qu'un hint de vue, jamais un fait.
+    Enchaîner `resolve_model_effective_level` puis `update_model_position` à la main — ce que
+    faisait chaque écrivain — laisse l'invariant « le niveau écrit est un niveau résolu » tenir
+    par la discipline de l'appelant ; ici il tient par construction.
+
+    ``orientation`` (0..5) = orientation visée : elle sert d'abord à résoudre le niveau (elle
+    oriente l'empreinte), puis elle est ÉCRITE. ``None`` = orientation inchangée, et la
+    résolution utilise alors celle déjà portée par la figurine.
+
+    ⚠️ Ne pas confondre avec `update_model_position(level=...)`, qui écrit le niveau tel quel :
+    celui-ci n'est légitime que pour un niveau DÉJÀ résolu (cf. son garde) ou une écriture sans
+    niveau (retrait hors table).
+    """
+    model = require_key(game_state, "models_cache").get(str(model_id))  # get allowed
+    if model is None:
+        raise KeyError(
+            f"place_model_at_effective_level: model {model_id} not in models_cache (dead/absent)"
+        )
+    effective_level = resolve_model_effective_level(
+        game_state, model, int(col), int(row), int(level), orientation
+    )
+    update_model_position(
+        game_state, model_id, int(col), int(row),
+        level=effective_level,
+        orientation=None if orientation is None else int(orientation),
+    )
+    return effective_level
 
 
 def update_model_hp(game_state: Dict[str, Any], model_id: str, new_hp_cur: int) -> None:
@@ -6194,12 +6294,14 @@ def commit_move(
 
     Pre-condition: plan validé via validate_move_plan (ce helper ne re-valide pas).
 
-    Entrées de plan : ``(mid, col, row)``, ``(mid, col, row, level)`` (étages) OU
-    ``(mid, col, row, level, orientation)`` (pivot socle par-fig). Le 4ᵉ élément
-    fixe le niveau de destination ; **son absence signifie « garder le niveau courant »**
-    (``level=None`` → ``update_model_position`` ne touche pas au niveau) — jamais un reset à 0,
-    sinon une fig déjà à l'étage serait remise au sol par un move horizontal. Le 5ᵉ élément
-    (0..5) fixe l'orientation de la fig ; absent/None = orientation inchangée.
+    Entrées de plan : ``(mid, col, row, level)`` (étages) ou ``(mid, col, row, level, orientation)``
+    (pivot socle par-fig). Le 4ᵉ élément est OBLIGATOIRE (`plan_entry_level`, frontière de
+    décodage) et porte le niveau DEMANDÉ — un hint, pas un fait : `place_model_at_effective_level`
+    le résout (§13.06) avant d'écrire, donc une figurine dont l'empreinte ne tient pas sur le
+    plancher visé est posée au SOL. Cette résolution vivait chez le seul appelant `commit_move_plan`
+    (mouvement) ; les six autres — charge, pile-in, consolidation, gym, plan rigide — écrivaient le
+    niveau brut. Le 5ᵉ élément (0..5) fixe l'orientation ; absent/None = orientation inchangée,
+    et c'est alors celle déjà portée par la figurine qui oriente l'empreinte.
     Flags:
         "advance"   → units_advanced.add(squad_id)
         "fall_back" → units_fled.add(squad_id)
@@ -6241,9 +6343,9 @@ def commit_move(
     try:
         for entry in plan:
             mid, nc, nr = str(entry[0]), int(entry[1]), int(entry[2])
-            update_model_position(
+            place_model_at_effective_level(
                 game_state, mid, nc, nr,
-                level=plan_entry_level(entry), orientation=plan_entry_orientation(entry),
+                plan_entry_level(entry), orientation=plan_entry_orientation(entry),
             )
         if move_type == "advance":
             game_state.setdefault("units_advanced", set()).add(squad_id)
