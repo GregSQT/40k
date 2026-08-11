@@ -66,6 +66,10 @@ def _make_game_state(units: List[Dict[str, Any]], current_player: int = 1) -> Di
         "current_player": current_player,
         "phase": "move",
         "wall_hexes": set(),
+        # Donnée de BOARD, au même titre que `wall_hexes` : le moteur la pose TOUJOURS
+        # (`W40KEngine.reset`, `terrain_areas or []`), donc un `game_state` qui l'omet décrit un
+        # état impossible en production. Vide = plateau sans terrain, ce que ces tests veulent.
+        "terrain_areas": [],
         "units": units,
         "unit_by_id": {str(u["id"]): u for u in units},
         "console_logs": [],

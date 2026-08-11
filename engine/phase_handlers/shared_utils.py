@@ -3536,17 +3536,11 @@ def translate_squad_to_destination(
     celle que ``validate_move_plan`` a acceptée.
     """
     from engine.hex_utils import offset_to_cube, cube_to_offset
-    from engine.terrain_utils import resolve_model_floor_level as _rmfl_translate
 
     units_cache = game_state.get("units_cache", {})  # get allowed
     entry = units_cache.get(squad_id)
     if entry is None:
         return
-    # ⚠️ SEUL résolveur de niveau du dépôt à ne PAS passer par `resolve_model_effective_level` :
-    # celle-ci exige `terrain_areas` en `require_key` (la clé est garantie en production,
-    # `w40k_core` la pose toujours) là où cette ligne tolère son absence. Des fixtures de test
-    # construisent un `game_state` sans elle ; les aligner est un sujet distinct de ce chantier.
-    _ta_translate = game_state.get("terrain_areas", [])  # get allowed (board sans terrain)
     norm_dest_col, norm_dest_row = normalize_coordinates(int(dest_col), int(dest_row))
     old_col = int(entry.get("col", norm_dest_col))
     old_row = int(entry.get("row", norm_dest_row))
@@ -3570,11 +3564,8 @@ def translate_squad_to_destination(
             # `resolve_model_floor_level`). Une translation rigide peut sortir une figurine de
             # l'empreinte de son plancher : la laisser marquée à l'étage faisait ensuite lever
             # `floor_height_at` au resync, en plein commit et sur un état déjà à moitié muté.
-            m["level"] = _rmfl_translate(
-                int(new_col), int(new_row),
-                require_key(m, "BASE_SHAPE"), require_key(m, "BASE_SIZE"),
-                int(m.get("orientation", 0)),  # get allowed (défaut 0 = face nord)
-                int(require_key(m, "level")), _ta_translate,
+            m["level"] = resolve_model_effective_level(
+                game_state, m, int(new_col), int(new_row), int(require_key(m, "level"))
             )
     # Update anchor first (sets entry.col/row, entry.occupied_hexes = anchor footprint).
     update_units_cache_position(game_state, squad_id, norm_dest_col, norm_dest_row)
