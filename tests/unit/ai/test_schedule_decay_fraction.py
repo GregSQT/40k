@@ -311,6 +311,15 @@ def test_every_profile_declares_decay_fraction(profile_name: str, ramp_key: str)
 #: objet.
 LONG_PROFILE_EPISODES = {"x1_long": 50_000, "x5_long": 200_000}
 
+#: `bot_eval_final` ATTENDU de chaque profil de RÉFÉRENCE (le court des deux), par couple.
+#: ÉPINGLÉ pour la même raison que la table ci-dessus, et plus commun aux deux couples depuis le
+#: 2026-08-11 : `x1` est descendu de 100 à 10. C'est la BASE DE DÉVELOPPEMENT (ROADMAP §1 pt 6 /
+#: V11 §0.70) — son éval finale est du MONITORING, pas une mesure : à 10 épisodes par bot,
+#: l'erreur-type de l'écart entre deux win-rates `combined` vaut ≈ 0,707/√(6 × 10) = 9,1 points,
+#: donc aucun écart réaliste n'en sort. Le chiffre publié vient de `x1_long` (600), et de rien
+#: d'autre.
+REFERENCE_BOT_EVAL_FINAL = {"x1": 10, "x5_new": 100}
+
 #: Fenêtre du score robuste de chaque profil `_long`. Elle DÉPEND de la longueur du run, et pas
 #: par convention : la fenêtre glisse sur les points de mesure, donc `total // freq - window + 1`
 #: est le nombre de positions qu'elle peut occuper. À une seule position, le « meilleur modèle »
@@ -379,7 +388,7 @@ def test_long_profile_is_its_reference_recalibrated(ref_name: str, long_name: st
     # l'erreur-type par √6 (5,0 → 2,0 points autour de 0,5) pour un coût payé UNE fois en fin de
     # run ; le détail du calcul et du coût est dans `bot_eval_final_normal` du JSON, seule source.
     assert long_cb["bot_eval_final"] == 600
-    assert ref_cb["bot_eval_final"] == 100
+    assert ref_cb["bot_eval_final"] == REFERENCE_BOT_EVAL_FINAL[ref_name]
     # Corollaire OBLIGATOIRE de la ligne précédente : le timeout porte sur un TASK, et un task
     # joue `bot_eval_final / nb_scenarios` épisodes en séquence. ×6 sur `bot_eval_final` = ×6 sur
     # la durée d'un task (150 épisodes au lieu de 25 sur les 4 scénarios du holdout). Laisser

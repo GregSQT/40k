@@ -116,6 +116,28 @@ def turn_state_invariants() -> Dict[str, Any]:
         "waaagh_active": {1: False, 2: False},
         "oath_target": {1: None, 2: None},
         "pending_oath_selection": None,
+        # Compteurs de RESERVES (chantier 04), poses par `_reserves_game_state_defaults()`
+        # (`engine/w40k_core.py`) a l'init ET au reset. Ce sont les SEULES cles a underscore du
+        # socle, et elles y sont pour la meme raison que les autres : la production les lit en
+        # `require_key`, pas en `.get`. `_record_ingress_offer` (`engine/action_decoder.py`) ecrit
+        # dans `_ingress_offered` / `_ingress_no_destination` depuis la CONSTRUCTION DU MASQUE
+        # d'une escouade en reserves — donc toute fixture qui demande un masque a un joueur ayant
+        # une unite en reserves leve sans elles, et pas seulement les fixtures de metriques.
+        # Recopiees a la MAIN, jamais importees, pour la raison donnee sur les parametres
+        # 20.03/20.04 d'`unit_invariants`, plus bas.
+        # ⚠️ Elles echappent DEUX FOIS au filet de derive INVERSE
+        # (`test_reset_poses_no_unknown_turn_state_key`) : il prend ses candidats par LISTE BLANCHE
+        # de prefixes (`units_`, `reactive_`, `last_move_`, `advance_`, `reaction_`), qu'aucune ne
+        # porte, et il ecarte EN PLUS tout ce qui commence par `_`, parce que le moteur y range
+        # aussi ses caches derives. Lever la seule exclusion `_` ne les couvrirait donc pas. Un
+        # compteur de reserves ajoute au moteur devra etre porte ici a la main.
+        "_reserves_placed": {1: 0, 2: 0},
+        "_reserves_deployed": {1: 0, 2: 0},
+        "_reserves_destroyed_turn3": {1: 0, 2: 0},
+        "_ingress_offered": set(),
+        "_ingress_no_destination": set(),
+        "_ingress_arrived": set(),
+        "_pending_reserves_wasted": 0,
     }
 
 
