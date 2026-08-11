@@ -131,6 +131,30 @@ def test_update_model_position_refuse_un_niveau_non_resolu(cells):
         "refus non atomique : la figurine a été DÉPLACÉE avant que le garde ne lève"
     )
     assert int(apres["level"]) == int(avant["level"])
+
+
+def test_update_model_position_refuse_une_orientation_invalide_sans_rien_ecrire(cells):
+    """Le contrôle d'orientation est lui aussi une PRÉ-condition, pas une post-écriture.
+
+    Il vivait après l'écriture de `col`/`row` ET de `level` : une orientation hors bornes levait
+    en laissant la figurine déplacée ET remontée d'étage. Ce test est le seul à couvrir ce
+    réordonnancement — celui du niveau ne passe pas d'`orientation`, donc il ne l'exerce jamais.
+    """
+    gs, mid, (col, row) = cells["gs"], cells["mid"], cells["holding"]
+    depart = (int(col) + 3, int(row) + 3)
+    place_model_at_effective_level(gs, mid, depart[0], depart[1], 0)
+    avant = dict(gs["models_cache"][mid])
+
+    with pytest.raises(ValueError, match="orientation must be an int"):
+        update_model_position(gs, mid, col, row, level=1, orientation=99)
+
+    apres = gs["models_cache"][mid]
+    assert (int(apres["col"]), int(apres["row"])) == depart, (
+        "refus non atomique : la figurine a été DÉPLACÉE avant le contrôle d'orientation"
+    )
+    assert int(apres["level"]) == int(avant["level"]), (
+        "refus non atomique : le NIVEAU a été écrit avant le contrôle d'orientation"
+    )
     assert int(apres["orientation"]) == int(avant["orientation"])
 
 

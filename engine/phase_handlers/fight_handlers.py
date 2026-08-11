@@ -2372,7 +2372,6 @@ def _fight_pile_in_build_model_pool(
     player = int(model["player"])
     units_cache = require_key(game_state, "units_cache")
     terrain_areas = game_state.get("terrain_areas", [])  # get allowed (champ optionnel : board sans terrain)
-    _orient = int(unit.get("orientation", 0))  # get allowed (champ optionnel : orientation absente = 0)
     _view_level = int(view_level or 0)
 
     closest = {str(t) for t in closest_tier_ids}
@@ -2439,7 +2438,10 @@ def _fight_pile_in_build_model_pool(
         else:
             pc, pr = int(sib["col"]), int(sib["row"])
             _sib_req = int(sib.get("level", 0))  # get allowed (champ optionnel : level absent = sol)
-        _sib_eff = resolve_model_effective_level(game_state, sib, pc, pr, _sib_req, _orient)
+        # Orientation de LA SŒUR, jamais celle de l'escouade : c'est son socle à elle qui doit
+        # tenir sur le plancher, et le `Socle` construit à la ligne suivante lit déjà la sienne.
+        # Le couple (niveau, socle) était mesuré sur DEUX orientations différentes.
+        _sib_eff = resolve_model_effective_level(game_state, sib, pc, pr, _sib_req)
         sib_socles.append((_sib_eff, _charge_model_socle(game_state, sib, int(pc), int(pr))))
 
     wall_set = set(wall_hexes)
@@ -2465,7 +2467,7 @@ def _fight_pile_in_build_model_pool(
             return empty  # §13.06 : ne peut pas finir en hauteur
         start_eff = resolve_model_effective_level(
             game_state, model, start_col, start_row,
-            int(model.get("level", 0)), _orient,  # get allowed (champ optionnel : level absent = sol)
+            int(model.get("level", 0)),  # get allowed (champ optionnel : level absent = sol)
         )
         _ground_obs = set(wall_set) | _low_clear | _enemy_ground | build_occupied_positions_set(
             game_state, exclude_unit_id=squad_id, level=0
@@ -2483,7 +2485,7 @@ def _fight_pile_in_build_model_pool(
         # un étage, mais certaines unités ont un budget plus grand → descente facturée comme le move.
         _start_eff = resolve_model_effective_level(
             game_state, model, start_col, start_row,
-            int(model.get("level", 0)), _orient,  # get allowed (champ optionnel : level absent = sol)
+            int(model.get("level", 0)),  # get allowed (champ optionnel : level absent = sol)
         )
         if _start_eff >= 1:
             from engine.game_state import unit_can_occupy_upper_floor
@@ -3674,7 +3676,6 @@ def _fight_consolidation_build_model_pool(
     player = int(model["player"])
     units_cache = require_key(game_state, "units_cache")
     terrain_areas = game_state.get("terrain_areas", [])  # get allowed (champ optionnel : board sans terrain)
-    _orient = int(unit.get("orientation", 0))  # get allowed (champ optionnel : orientation absente = 0)
     _view_level = int(view_level or 0)
 
     closest = {str(t) for t in tier} if tier_kind == "enemy" else set()
@@ -3740,7 +3741,10 @@ def _fight_consolidation_build_model_pool(
         else:
             pc, pr = int(sib["col"]), int(sib["row"])
             _sib_req = int(sib.get("level", 0))  # get allowed (champ optionnel : level absent = sol)
-        _sib_eff = resolve_model_effective_level(game_state, sib, pc, pr, _sib_req, _orient)
+        # Orientation de LA SŒUR, jamais celle de l'escouade : c'est son socle à elle qui doit
+        # tenir sur le plancher, et le `Socle` construit à la ligne suivante lit déjà la sienne.
+        # Le couple (niveau, socle) était mesuré sur DEUX orientations différentes.
+        _sib_eff = resolve_model_effective_level(game_state, sib, pc, pr, _sib_req)
         sib_socles.append((_sib_eff, _charge_model_socle(game_state, sib, int(pc), int(pr))))
 
     wall_set = set(wall_hexes)
@@ -3766,7 +3770,7 @@ def _fight_consolidation_build_model_pool(
             return empty
         start_eff = resolve_model_effective_level(
             game_state, model, start_col, start_row,
-            int(model.get("level", 0)), _orient,  # get allowed (champ optionnel : level absent = sol)
+            int(model.get("level", 0)),  # get allowed (champ optionnel : level absent = sol)
         )
         _ground_obs = set(wall_set) | _low_clear | _enemy_ground | build_occupied_positions_set(
             game_state, exclude_unit_id=squad_id, level=0
@@ -3783,7 +3787,7 @@ def _fight_consolidation_build_model_pool(
         # (coût de DESCENTE §13.06), miroir pile-in. Budget conso > 3" possible → descente facturée.
         _start_eff = resolve_model_effective_level(
             game_state, model, start_col, start_row,
-            int(model.get("level", 0)), _orient,  # get allowed (champ optionnel : level absent = sol)
+            int(model.get("level", 0)),  # get allowed (champ optionnel : level absent = sol)
         )
         if _start_eff >= 1:
             from engine.game_state import unit_can_occupy_upper_floor
