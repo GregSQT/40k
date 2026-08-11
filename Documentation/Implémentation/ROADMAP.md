@@ -49,6 +49,22 @@
   requête quand l'unité n'est pas sur la table, avec le **même prédicat que le moteur**.
   Le garde qui a permis le diagnostic reste en place comme assertion de contrat sur les deux
   previews « depuis une position » (`_require_preview_destination_on_table`).
+- ✅ **Livraison 2026-08-11 — l'aperçu de tir se place PAR FIGURINE pendant un placement**
+  (trouvé par `/code-review` sur la livraison ci-dessus, même classe de défaut, danger déplacé de
+  la destination vers l'unité). Pendant un placement figurine par figurine — déploiement en cours
+  ou `perModelMove` — le plan vit dans le CLIENT : le moteur n'en sait rien avant validation, donc
+  l'escouade y est hors table avec `occupied_hexes_by_model` à `(-1,-1)`. L'aperçu était placé par
+  l'ANCRE, or `update_units_cache_position` ne resynchronise les figurines que pour les escouades
+  MONO-figurine : sur une multi-figurine, l'ancre passait sur le plateau pendant que ses figurines
+  restaient à la sentinelle, et `_socle_from_entry` mesurait distances et LoS **depuis le coin du
+  plateau, sans lever** — un verdict inventé, exactement ce que `require_entry_on_battlefield`
+  refuse ailleurs. Le Dreadnought (mono-figurine) n'était pas touché ; toute escouade l'était.
+  Nouveau `preview_shoot_valid_targets_from_model_positions` + action API
+  `preview_shoot_from_model_positions`, jumeaux de ceux qui existaient déjà pour la détection
+  (13.09). Les figurines sont posées par `update_model_position`, l'écrivain RÉEL de la pose :
+  l'aperçu et l'état après validation décrivent la même géométrie. Le client fait désormais UN
+  appel portant toutes les figurines au lieu d'un par figurine — le pool de cibles est une
+  propriété de l'escouade, pas d'une figurine isolée.
 - 🔜 **Run `--new` ArmageddonAgent `x1` de VÉRIFICATION — à lancer** (2026-08-11). Ce qu'il doit
   prouver n'est pas un progrès mais que le pipeline tourne de bout en bout avec un **espace de
   décision modifié** (l'alignement de la charge sur 11.02, ci-dessous). À lire dans l'ordre :

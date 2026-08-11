@@ -3587,6 +3587,49 @@ def execute_action():
             },
         })
 
+    # Read-only preview: cibles tirables depuis les positions EXPLICITES des figurines.
+    # Jumeau de `preview_hidden_from_model_positions`, et pour la même raison : pendant un
+    # placement figurine par figurine (déploiement, `perModelMove`), le plan vit dans le client et
+    # le moteur n'en sait rien. Placer l'escouade par son ANCRE laisserait ses figurines à leur
+    # position précédente — la sentinelle `(-1,-1)` si elle n'est pas encore déployée — et
+    # l'aperçu mesurerait distances et LoS depuis le coin du plateau, sans lever.
+    if action.get("action") == "preview_shoot_from_model_positions":
+        unit_id = action.get("unitId")
+        model_positions = action.get("modelPositions")
+        advance_position = action.get("advancePosition") is True
+        include_los_cells = action.get("includeLosCells") is not False
+        if unit_id is None or not isinstance(model_positions, dict) or not model_positions:
+            return jsonify({
+                "success": False,
+                "error": (
+                    "preview_shoot_from_model_positions requires unitId and a non-empty "
+                    "modelPositions(dict)"
+                ),
+            }), 400
+        from engine.phase_handlers.shooting_handlers import (
+            preview_shoot_valid_targets_from_model_positions,
+        )
+        preview_payload = preview_shoot_valid_targets_from_model_positions(
+            engine.game_state, str(unit_id), model_positions,
+            advance_position=advance_position,
+            include_los_cells=include_los_cells,
+        )
+        valid_targets = preview_payload["valid_targets"]
+        return jsonify({
+            "success": True,
+            "result": {
+                "blinking_units": valid_targets,
+                "start_blinking": len(valid_targets) > 0,
+                "los_preview_attack_cells": preview_payload["los_preview_attack_cells"],
+                "los_preview_cover_cells": preview_payload["los_preview_cover_cells"],
+                "los_preview_ratio_by_hex": preview_payload["los_preview_ratio_by_hex"],
+                "cover_by_unit_id": preview_payload["cover_by_unit_id"],
+                "hidden_too_far_by_unit_id": preview_payload["hidden_too_far_by_unit_id"],
+                "hidden_detection_info_by_unit_id": preview_payload["hidden_detection_info_by_unit_id"],
+                "visible_cells_by_target": preview_payload["visible_cells_by_target"],
+            },
+        })
+
     if action.get("action") == "preview_hidden_from_position":
         unit_id = action.get("unitId")
         dest_col = action.get("destCol")
