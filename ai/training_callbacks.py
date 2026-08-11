@@ -267,6 +267,11 @@ class EpisodeTerminationCallback(BaseCallback):
         self.last_episode_duration_seconds = 0.0
         self._episode_wall_time_by_env: Optional[List[float]] = None
         self._episode_eval_time_by_env: Optional[List[float]] = None
+        # Slots ayant deja rendu AU MOINS un episode. Tant qu'il en manque, `min/max` ne
+        # decrivent qu'une sous-population — celle des episodes les plus COURTS, seuls arrives —
+        # et la barre l'annonce (cf. `slots_note` a l'affichage). Aucun calcul ne s'y appuie :
+        # c'est un biais de selection, pas de comptage, et rien ne le corrige.
+        self._slot_has_completed_episode: Optional[List[bool]] = None
         self._last_step_perf_time: Optional[float] = None
         self.gate_display_state = gate_display_state
         self.blocking_eval_seconds_at_last_display = 0.0
@@ -403,12 +408,15 @@ class EpisodeTerminationCallback(BaseCallback):
         if self._episode_wall_time_by_env is None:
             self._episode_wall_time_by_env = [now_perf] * n_envs
             self._episode_eval_time_by_env = [blocking_eval_seconds] * n_envs
+            self._slot_has_completed_episode = [False] * n_envs
         elif len(self._episode_wall_time_by_env) != n_envs:
             raise ValueError(
                 "Environment count changed during training; cannot maintain per-env episode timing"
             )
         if self._episode_eval_time_by_env is None:
             raise RuntimeError("Per-env eval time tracking not initialized")
+        if self._slot_has_completed_episode is None:
+            raise RuntimeError("Per-env completion tracking not initialized")
 
         episodes_finished = 0
         for env_index, done in enumerate(done_flags):
@@ -421,6 +429,7 @@ class EpisodeTerminationCallback(BaseCallback):
             )
             self._episode_wall_time_by_env[env_index] = now_perf
             self._episode_eval_time_by_env[env_index] = blocking_eval_seconds
+            self._slot_has_completed_episode[env_index] = True
             self.max_episode_duration_seconds = max(
                 self.max_episode_duration_seconds,
                 wall_duration
@@ -510,8 +519,47 @@ class EpisodeTerminationCallback(BaseCallback):
                 # precedents (ai/train.py:4381-4382) : diviser un temps local par un compteur
                 # cumulatif rend un taux effondre — a l'offset 992, 0.000 pour un vrai 0,031 s/ep.
                 # Non garde : on est sous `if episode_ended`, qui vient d'incrementer le compteur.
+                #
+                # Numerateur, SUITE : le temps deja investi dans les episodes EN COURS en est
+                # retranche. Sans ca, le wall des `n_envs` slots est au numerateur mais seuls les
+                # slots ARRIVES sont au denominateur, et la colonne surestime d'un facteur ~n_envs/k
+                # tant que k slots sur n_envs ont rendu — mesure du 2026-08-11 a n_envs=48 :
+                # `moy` 29,141 affiche contre 4,480/5,324 pour `min/max`, soit 291 s de wall
+                # divisees par les 10 seuls episodes arrives, les 38 autres etant deja aux trois
+                # quarts payes. Ce n'est PAS une estimation : `n_envs * elapsed` est le temps-slot
+                # total disponible, `wip` la part qui n'a pas encore produit d'episode, et la
+                # difference le temps-slot reellement consomme par les `episode_count` episodes
+                # termines. Aucune fraction d'avancement n'est supposee — c'est pour ca qu'on
+                # retranche au numerateur au lieu d'ajouter au denominateur, ou il faudrait deviner
+                # a quel point chaque episode en cours est avance.
+                # Le terme est borne (au plus une duree d'episode par slot) alors que
+                # `episode_count` croit : sa contribution decroit en 1/N et `moy` converge
+                # EXACTEMENT vers le `training_elapsed / episode_count` d'avant. Les chiffres de
+                # fin de run ne bougent donc pas, seuls les premiers affichages sont corriges.
+                # Meme horloge des deux cotes de chaque soustraction : `now_perf`/`_episode_wall_time_by_env`
+                # en `perf_counter`, `elapsed` en `time.time`, jamais melangees entre elles.
+                # L'eval bloquante est retranchee slot par slot, comme dans les durees ci-dessus :
+                # une eval enjambee par un episode en cours gonflerait sa part de `wip`.
                 training_elapsed = elapsed - blocking_eval_seconds
-                avg_training_time_per_episode = training_elapsed / self.episode_count
+                work_in_progress_seconds = sum(
+                    (now_perf - slot_start_perf)
+                    - (blocking_eval_seconds - slot_eval_at_start)
+                    for slot_start_perf, slot_eval_at_start in zip(
+                        self._episode_wall_time_by_env, self._episode_eval_time_by_env
+                    )
+                )
+                episodes_training_elapsed = training_elapsed - work_in_progress_seconds / n_envs
+                # Strictement positif par construction : les slots qui viennent de rendre sont a
+                # `now_perf`, donc contribuent 0 a `wip`, et aucun autre slot ne peut avoir demarre
+                # avant `start_time`. Un chiffre nul ou negatif signale une horloge incoherente, pas
+                # un run rapide — l'afficher tel quel rendrait la colonne trompeuse.
+                if episodes_training_elapsed <= 0:
+                    raise ValueError(
+                        "Non-positive training time for completed episodes: "
+                        f"{episodes_training_elapsed} (elapsed={elapsed}, "
+                        f"blocking_eval={blocking_eval_seconds}, wip={work_in_progress_seconds})"
+                    )
+                avg_training_time_per_episode = episodes_training_elapsed / self.episode_count
 
                 if self.ema_episode_time is not None:
                     eta = self.ema_episode_time * remaining_episodes
@@ -551,14 +599,26 @@ class EpisodeTerminationCallback(BaseCallback):
                 # deux decimales ecraseraient la dispersion que `min/max` sert a montrer. Sous
                 # ~0,005 s par episode (soit une duree par slot inferieure a 0,25 s a n_envs=48,
                 # regime que ce moteur n'atteint pas), il faudrait une decimale de plus.
-                # `moy` n'est PAS divise : il vaut deja temps d'entrainement / episodes produits.
-                # Il ne se calcule surtout pas comme `moyenne par slot / n_envs`, division qui
-                # n'est exacte qu'une fois que CHAQUE slot a fini un episode et rend `n_envs/k`
-                # fois trop peu tant que seuls `k` slots sont arrives — 48x sur le premier
-                # affichage. Les quatre valeurs excluent le temps d'eval bot, retranche a la
-                # source dans la boucle des durees.
+                # `moy` n'est PAS divise : il vaut deja temps d'entrainement par episode produit
+                # (cf. son calcul plus haut, work-in-progress retranche). Il ne se calcule surtout
+                # pas comme `moyenne par slot / n_envs`, division qui n'est exacte qu'une fois que
+                # CHAQUE slot a fini un episode et rend `n_envs/k` fois trop peu tant que seuls `k`
+                # slots sont arrives — 48x sur le premier affichage. Les quatre valeurs excluent le
+                # temps d'eval bot, retranche a la source dans la boucle des durees.
+                #
+                # `slots_note` annonce l'amorcage tant que les `n_envs` slots n'ont pas tous rendu.
+                # `moy` est juste des le premier affichage, mais `cur/min/max` ne portent alors que
+                # sur les episodes ARRIVES, c'est-a-dire les plus courts : `moy` peut legitimement
+                # depasser `max` pendant cette phase (6,1 contre 5,324 sur la mesure du 2026-08-11).
+                # Sans cette mention, l'ecart se lit comme une incoherence de la barre. Le segment
+                # disparait de lui-meme des que le regime est etabli, ou la ligne reprend sa
+                # largeur habituelle.
+                slots_served = sum(self._slot_has_completed_episode)
+                slots_note = (
+                    "" if slots_served >= n_envs else f", {slots_served}/{n_envs} slots"
+                )
                 duration_display = (
-                    f"s/ep ({n_envs} env): "
+                    f"s/ep ({n_envs} env{slots_note}): "
                     f"cur {self.last_episode_duration_seconds / n_envs:.3f}, "
                     f"moy {avg_training_time_per_episode:.3f}, "
                     f"min/max: {self.min_episode_duration_seconds / n_envs:.3f}"

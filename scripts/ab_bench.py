@@ -130,8 +130,13 @@ def assert_clean_environment() -> None:
 # cote train.py supprimerait ce risque.
 # Les deux captures viennent du MEME rafraichissement : lire le compteur et `moy` par deux regex
 # separees les apparierait au petit bonheur.
+# `, k/N slots` : segment d'AMORCAGE, present tant que les `n_envs` slots n'ont pas tous rendu
+# un episode (training_callbacks.py, `slots_note`). Optionnel dans le motif, sinon ces
+# rafraichissements-la ne matchent plus du tout et disparaissent de `points` en silence — un
+# format non reconnu doit ARRETER la campagne, jamais retirer discretement des mesures.
 _PROGRESS_RE = re.compile(
-    r"(\d+)/\d+ \[[\d:]+<[\d:]+\] \[s/ep \((\d+) env\): cur [\d.]+, moy ([\d.]+)"
+    r"(\d+)/\d+ \[[\d:]+<[\d:]+\] \[s/ep \((\d+) env(?:, \d+/\d+ slots)?\): "
+    r"cur [\d.]+, moy ([\d.]+)"
 )
 _LOOP_ELAPSED_RE = re.compile(r"\[(\d+):(\d\d)(?::(\d\d))?<")
 
@@ -139,14 +144,17 @@ _LOOP_ELAPSED_RE = re.compile(r"\[(\d+):(\d\d)(?::(\d\d))?<")
 def read_steady_rate(output: str) -> tuple:
     """Rend (secondes par episode en REGIME ETABLI, n_envs, episodes de la fenetre de mesure).
 
-    POURQUOI PAS `moy` DIRECTEMENT — c'est un rapport CUMULE, et un rapport cumule porte le stock
-    d'episodes EN VOL. A tout instant, `n_envs` episodes sont commences et non termines : leur
-    temps est deja dans le numerateur, leur compte pas encore dans le denominateur. Ce stock est
-    constant en regime, donc il gonfle `moy` d'environ `n_envs / episodes` — 33 % a n_envs=48 sur
-    144 episodes contre 4 % a n_envs=6. Sur une campagne qui CLASSE des valeurs de `n_envs`, ce
-    biais suit l'axe classe et penalise les grandes valeurs : il fabrique une pente.
-    La DIFFERENCE entre deux rafraichissements l'elimine par construction — un stock constant
-    disparait dans une soustraction. C'est la derivee qu'on veut, pas l'integrale.
+    POURQUOI PAS `moy` DIRECTEMENT — c'est un rapport CUMULE, donc une moyenne sur TOUT le run,
+    demarrage compris (caches froids, premieres mises a jour PPO). Un banc A/B compare des regimes
+    ETABLIS : c'est la derivee qu'on veut, pas l'integrale, et la difference entre deux
+    rafraichissements la rend directement.
+
+    Le stock d'episodes EN VOL, lui, n'entre plus dans le calcul : `moy` retranche desormais a son
+    numerateur le temps deja investi dans les episodes non termines (training_callbacks.py). Il
+    gonflait auparavant d'environ `n_envs / episodes` — 33 % a n_envs=48 sur 144 episodes contre
+    4 % a n_envs=6 — un biais qui suivait l'axe classe et fabriquait une pente sur les campagnes
+    qui balaient `n_envs`. La difference l'annulait deja par construction (un stock constant
+    disparait dans une soustraction) et continue de le faire pour son residu de fluctuation.
 
     Elimine aussi la phase de remplissage initiale (aucun episode termine tant que le premier
     slot n'a pas fini) : les affichages anterieurs a `n_envs` episodes sont ecartes.

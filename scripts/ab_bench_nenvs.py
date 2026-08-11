@@ -38,9 +38,11 @@ CE QUE CET OUTIL IMPOSE
      (sauvegarde, arret des workers). Couts fixes par run, negligeables sur les 150 000 a
      200 000 episodes d'un entrainement reel, dominants sur un run de banc de 150 episodes ;
    - le STOCK d'episodes EN VOL : `n_envs` episodes commences et non termines a tout instant,
-     dont le temps est deja compte et le resultat pas encore. Il gonfle le rapport cumule de
-     `n_envs / episodes` — 33 % a n_envs=48 sur 144 episodes contre 4 % a n_envs=6. La
-     soustraction l'elimine : un stock constant disparait dans une difference.
+     dont le temps est deja compte et le resultat pas encore. Il gonflait le rapport cumule de
+     `n_envs / episodes` — 33 % a n_envs=48 sur 144 episodes contre 4 % a n_envs=6, un biais
+     aligne sur l'axe meme que cet outil classe. Depuis le 2026-08-11 `moy` retranche ce temps
+     en vol a la source (training_callbacks.py), et la soustraction continue d'absorber son
+     residu de fluctuation : un stock constant disparait dans une difference.
    LES CAMPAGNES ANTERIEURES AU 2026-08-02 ONT ETE CLASSEES SUR LE WALL COMPLET : leurs verdicts
    sont a reprendre, « n_envs=48 optimal » compris.
    `wall`, `hors-boucle` et `boucle` restent AFFICHES par run : ils disent ce que coute la
