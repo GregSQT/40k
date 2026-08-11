@@ -24,7 +24,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 import numpy as np
 import torch
 import gymnasium as gym
-from typing import Dict, Optional, Any, List, Tuple, cast
+from typing import Dict, Optional, Any, List, Set, Tuple, cast
 from stable_baselines3.common.callbacks import BaseCallback
 
 from engine.episode_schedule import ramp_progress
@@ -267,11 +267,13 @@ class EpisodeTerminationCallback(BaseCallback):
         self.last_episode_duration_seconds = 0.0
         self._episode_wall_time_by_env: Optional[List[float]] = None
         self._episode_eval_time_by_env: Optional[List[float]] = None
-        # Slots ayant deja rendu AU MOINS un episode. Tant qu'il en manque, `min/max` ne
-        # decrivent qu'une sous-population — celle des episodes les plus COURTS, seuls arrives —
-        # et la barre l'annonce (cf. `slots_note` a l'affichage). Aucun calcul ne s'y appuie :
-        # c'est un biais de selection, pas de comptage, et rien ne le corrige.
-        self._slot_has_completed_episode: Optional[List[bool]] = None
+        # Index des slots ayant deja rendu AU MOINS un episode. Tant qu'il en manque, `min/max`
+        # ne decrivent qu'une sous-population — celle des episodes les plus COURTS, seuls
+        # arrives — et la barre l'annonce (cf. `slots_note` a l'affichage). Aucun calcul ne s'y
+        # appuie : c'est un biais de selection, pas de comptage, et rien ne le corrige.
+        # Un set plutot qu'une liste par slot : il n'a pas besoin de connaitre `n_envs` a la
+        # construction, donc pas d'initialisation paresseuse ni de garde `Optional` a porter.
+        self._slots_served: Set[int] = set()
         self._last_step_perf_time: Optional[float] = None
         self.gate_display_state = gate_display_state
         self.blocking_eval_seconds_at_last_display = 0.0
@@ -408,15 +410,12 @@ class EpisodeTerminationCallback(BaseCallback):
         if self._episode_wall_time_by_env is None:
             self._episode_wall_time_by_env = [now_perf] * n_envs
             self._episode_eval_time_by_env = [blocking_eval_seconds] * n_envs
-            self._slot_has_completed_episode = [False] * n_envs
         elif len(self._episode_wall_time_by_env) != n_envs:
             raise ValueError(
                 "Environment count changed during training; cannot maintain per-env episode timing"
             )
         if self._episode_eval_time_by_env is None:
             raise RuntimeError("Per-env eval time tracking not initialized")
-        if self._slot_has_completed_episode is None:
-            raise RuntimeError("Per-env completion tracking not initialized")
 
         episodes_finished = 0
         for env_index, done in enumerate(done_flags):
@@ -429,7 +428,7 @@ class EpisodeTerminationCallback(BaseCallback):
             )
             self._episode_wall_time_by_env[env_index] = now_perf
             self._episode_eval_time_by_env[env_index] = blocking_eval_seconds
-            self._slot_has_completed_episode[env_index] = True
+            self._slots_served.add(env_index)
             self.max_episode_duration_seconds = max(
                 self.max_episode_duration_seconds,
                 wall_duration
@@ -594,7 +593,7 @@ class EpisodeTerminationCallback(BaseCallback):
                 # rattraper dans `moy` (cf. le bloc de calcul plus haut). La mention est le seul
                 # remede honnete ; elle disparait d'elle-meme des que le regime est etabli, ou la
                 # ligne reprend sa largeur habituelle.
-                slots_served = sum(self._slot_has_completed_episode)
+                slots_served = len(self._slots_served)
                 slots_note = (
                     "" if slots_served >= n_envs else f", {slots_served}/{n_envs} slots"
                 )

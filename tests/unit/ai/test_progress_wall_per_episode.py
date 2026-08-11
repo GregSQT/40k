@@ -29,12 +29,24 @@ connus exactement, puis lisent la valeur RENDUE sur stdout — pas un attribut i
 from __future__ import annotations
 
 import re
+import sys
 import time
-from typing import Any, Dict
+from pathlib import Path
+from typing import Any, Dict, Optional, Tuple
 
 import pytest
 
 from ai.training_callbacks import EpisodeTerminationCallback
+
+# `scripts/` n'est pas un package : les bancs s'importent par le chemin, comme le font deja
+# tests/unit/scripts/test_ab_n_steps_contract.py et test_ab_worktree_guard.py. Une seule fois
+# ici, au niveau module : deux tests de ce fichier ont besoin du parseur des bancs, et deux
+# copies d'un chemin en dur se desynchronisent au premier deplacement de fichier.
+_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+if str(_PROJECT_ROOT / "scripts") not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT / "scripts"))
+
+from ab_bench import _PROGRESS_RE, read_loop_elapsed, read_steady_rate  # noqa: E402
 
 
 class _FakeClock:
@@ -122,24 +134,40 @@ def _read_moy(line: str) -> float:
     return float(match.group(1))
 
 
-def _read_cur(line: str) -> float:
-    match = re.search(r"s/ep \((\d+) env(?:, \d+/\d+ slots)?\): cur ([0-9.]+)", line)
+# L'en-tete de la ligne, en UN seul endroit. Le motif etait recopie par chaque lecteur, si bien
+# que l'ajout du segment d'amorcage a impose de retoucher deux helpers sur trois : en oublier un
+# aurait laisse le test vert sur un format que le banc ne lit plus, exactement ce que ce fichier
+# existe pour empecher.
+_HEADER_RE = re.compile(r"s/ep \((\d+) env(?:, (\d+)/(\d+) slots)?\): cur ([0-9.]+)")
+
+
+def _read_header(line: str) -> re.Match:
+    match = _HEADER_RE.search(line)
     assert match is not None, f"pas d'en-tete `s/ep (N env): cur` dans la ligne : {line!r}"
-    return float(match.group(2))
+    return match
+
+
+def _read_cur(line: str) -> float:
+    return float(_read_header(line).group(4))
 
 
 def _read_n_envs(line: str) -> int:
-    match = re.search(r"s/ep \((\d+) env", line)
-    assert match is not None, f"pas de diviseur en tete de ligne : {line!r}"
-    return int(match.group(1))
+    return int(_read_header(line).group(1))
 
 
-def _read_slots_note(line: str):
+def _read_slots_note(line: str) -> Optional[Tuple[int, int]]:
     """Rend (slots arrives, n_envs) si la barre annonce l'amorcage, sinon None."""
-    match = re.search(r"s/ep \(\d+ env, (\d+)/(\d+) slots\)", line)
-    if match is None:
+    match = _read_header(line)
+    if match.group(2) is None:
         return None
-    return int(match.group(1)), int(match.group(2))
+    return int(match.group(2)), int(match.group(3))
+
+
+def _read_episode_count(line: str) -> int:
+    """Le compteur d'episodes en tete de barre, celui que `_PROGRESS_RE` capture en groupe 1."""
+    match = re.search(r"(\d+)/\d+ \[", line)
+    assert match is not None, f"pas de compteur d'episodes dans la ligne : {line!r}"
+    return int(match.group(1))
 
 
 def _read_min_max(line: str) -> tuple[float, float]:
@@ -299,15 +327,6 @@ def test_la_barre_annonce_l_amorcage_puis_le_retire(monkeypatch):
     ferait silencieusement disparaitre des rafraichissements de `read_steady_rate` fausserait les
     campagnes sans rien casser de visible.
     """
-    import os
-    import sys
-
-    scripts_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
-        os.path.dirname(os.path.abspath(__file__))))), "scripts")
-    if scripts_dir not in sys.path:
-        sys.path.insert(0, scripts_dir)
-    from ab_bench import _PROGRESS_RE  # noqa: E402
-
     n_envs, steps, step_seconds = 8, 20, 0.05
     clock, callback, printed = _install(monkeypatch, n_envs, steps, episodes_per_slot=2)
 
@@ -338,8 +357,56 @@ def test_la_barre_annonce_l_amorcage_puis_le_retire(monkeypatch):
         f"chaque slot a rendu : la mention d'amorcage doit disparaitre : {printed[-1]!r}"
     )
     assert _read_n_envs(printed[-1]) == n_envs, "le diviseur doit rester annonce en tete"
-    assert _PROGRESS_RE.search(printed[-1]) is not None, (
-        "la ligne de regime etabli doit rester lisible par `read_steady_rate`"
+
+
+def test_read_steady_rate_ecarte_les_rafraichissements_d_amorcage(monkeypatch):
+    """`read_steady_rate` doit ecarter l'amorcage sur la MENTION, pas sur `episodes >= n_envs`.
+
+    Le banc a longtemps devine la fin du remplissage par ce proxy. Il n'est pas equivalent : un
+    slot rapide peut rendre `n_envs` episodes a lui seul pendant que les autres n'ont pas fini
+    le leur. Ces rafraichissements passaient alors le filtre tout en portant le residu de
+    remplissage que le calcul existe justement pour eliminer.
+
+    Le pilotage construit exactement ce cas — un seul slot produit les 20 premiers episodes,
+    donc bien au-dela de `n_envs=8` — puis passe en regime. La fenetre retenue doit commencer
+    APRES l'amorcage ; avec l'ancien proxy elle commencait a 10 episodes, en pleine phase ou un
+    seul slot sur huit avait rendu.
+    """
+    n_envs, steps_per_round, step_seconds = 8, 5, 0.05
+    clock, callback, printed = _install(monkeypatch, n_envs, steps_per_round,
+                                        episodes_per_slot=10)
+
+    not_done = [False] * n_envs
+    solo_done = [index == 0 for index in range(n_envs)]
+
+    def play_round(done_flags):
+        for step_index in range(steps_per_round):
+            clock.advance(step_seconds)
+            callback.locals = {
+                "dones": done_flags if step_index == steps_per_round - 1 else not_done
+            }
+            callback._on_step()
+
+    for _ in range(20):          # le seul slot 0 produit 20 episodes : 20 >= n_envs
+        play_round(solo_done)
+    for round_index in range(30):  # les autres slots entrent en lice, puis regime
+        play_round([index == round_index % n_envs for index in range(n_envs)])
+
+    output = "\n".join(printed)
+    bootstrapping = [line for line in printed if _read_slots_note(line) is not None]
+    assert bootstrapping, "le pilotage n'a produit aucune ligne d'amorcage : le test ne verrouille rien"
+    bootstrap_counts = {_read_episode_count(line) for line in bootstrapping}
+    assert max(bootstrap_counts) >= n_envs, (
+        "aucune ligne d'amorcage au-dela de `n_envs` episodes : le proxy et la mention ne sont "
+        "pas discrimines par ce pilotage"
+    )
+
+    _, n_envs_read, window = read_steady_rate(output)
+    assert n_envs_read == n_envs
+    first_episodes = window[0]
+    assert first_episodes not in bootstrap_counts, (
+        f"la fenetre commence a {first_episodes} episodes, un rafraichissement encore marque "
+        f"amorcage ({sorted(bootstrap_counts)})"
     )
 
 
@@ -448,15 +515,6 @@ def test_la_ligne_reste_lisible_par_les_parseurs_des_bancs(monkeypatch):
     s/ep) differe alors du `moy` cumule affiche (1,0 s/ep), donc un parseur qui lirait la mauvaise
     colonne, ou le test qui verifierait la mauvaise grandeur, ne pourrait pas passer par hasard.
     """
-    import os
-    import sys
-
-    scripts_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
-        os.path.dirname(os.path.abspath(__file__))))), "scripts")
-    if scripts_dir not in sys.path:
-        sys.path.insert(0, scripts_dir)
-    from ab_bench import read_loop_elapsed, read_steady_rate  # noqa: E402
-
     # n_envs=8 : les episodes tombent par vagues de 8, donc les rafraichissements (tous les 10
     # episodes affiches) ont lieu a 40 et 80. Deux points, le minimum qu'exige `read_steady_rate`.
     n_envs, steps_per_episode, episodes_per_slot = 8, 20, 10

@@ -134,8 +134,10 @@ def assert_clean_environment() -> None:
 # un episode (training_callbacks.py, `slots_note`). Optionnel dans le motif, sinon ces
 # rafraichissements-la ne matchent plus du tout et disparaissent de `points` en silence — un
 # format non reconnu doit ARRETER la campagne, jamais retirer discretement des mesures.
+# CAPTURE et non `(?:...)` : sa presence est la reponse EXACTE a « le parallelisme est-il
+# etabli ? », que `read_steady_rate` devinait auparavant par le proxy `episodes >= n_envs`.
 _PROGRESS_RE = re.compile(
-    r"(\d+)/\d+ \[[\d:]+<[\d:]+\] \[s/ep \((\d+) env(?:, \d+/\d+ slots)?\): "
+    r"(\d+)/\d+ \[[\d:]+<[\d:]+\] \[s/ep \((\d+) env(, \d+/\d+ slots)?\): "
     r"cur [\d.]+, moy ([\d.]+)"
 )
 _LOOP_ELAPSED_RE = re.compile(r"\[(\d+):(\d\d)(?::(\d\d))?<")
@@ -153,20 +155,20 @@ def read_steady_rate(output: str) -> tuple:
     le cout de remplissage est une constante additive au numerateur (`elapsed = remplissage +
     episodes x taux`), et une constante additive disparait dans une soustraction.
 
-    Ne pas chercher a corriger `moy` a la source pour autant : essaye le 2026-08-11 en retranchant
-    le temps des episodes en vol, mesure, annule le meme jour — en regime etabli `elapsed /
-    episodes` rend le vrai taux a 0,0 % pres, la version corrigee sous-estimait de 9,8 % a 240
-    episodes. `moy x episodes == elapsed` est une identite exacte dont ce calcul DEPEND.
+    Ne pas chercher a corriger `moy` a la source pour autant : `moy x episodes == elapsed` est
+    l'identite exacte dont ce calcul DEPEND. Tentative faite et annulee le 2026-08-11, chiffres
+    et verrou dans `test_moy_est_exact_en_regime_etabli_slots_dephases`.
 
-    Elimine aussi la phase de remplissage initiale (aucun episode termine tant que le premier
-    slot n'a pas fini) : les affichages anterieurs a `n_envs` episodes sont ecartes.
+    C'est aussi ce qui ecarte la phase de remplissage : la barre marque elle-meme ses
+    rafraichissements d'amorcage (`, k/N slots`), et seuls ceux qui n'en portent pas entrent
+    dans la fenetre.
 
     `elapsed` est reconstitue par `moy x episodes` plutot que lu dans `[MM:SS<` : `moy` a trois
     decimales, le chronometre affiche la seconde. Sur une fenetre de 27 s, la seconde vaut 3,7 %.
     """
     points = [
-        (int(episodes), int(n_envs), float(rate))
-        for episodes, n_envs, rate in _PROGRESS_RE.findall(output)
+        (int(episodes), int(n_envs), bool(bootstrap), float(rate))
+        for episodes, n_envs, bootstrap, rate in _PROGRESS_RE.findall(output)
     ]
     if len(points) < 2:
         raise SystemExit(
@@ -180,17 +182,22 @@ def read_steady_rate(output: str) -> tuple:
             f"`n_envs` change en cours de run dans la barre ({sorted({p[1] for p in points})}) : "
             f"les rafraichissements ne decrivent pas la meme configuration."
         )
-    # Avant que chaque slot ait termine un episode, le parallelisme n'est pas etabli : ces
-    # rafraichissements-la decrivent le remplissage, pas le regime.
-    usable = [point for point in points if point[0] >= n_envs]
+    # Tant que les `n_envs` slots n'ont pas tous rendu un episode, le parallelisme n'est pas
+    # etabli : ces rafraichissements decrivent le remplissage, pas le regime. On lit la mention
+    # que la barre pose elle-meme, au lieu de la deduire de `episodes >= n_envs` : ce proxy-la
+    # n'est pas equivalent, un slot rapide peut rendre `n_envs` episodes a lui seul avant que les
+    # autres aient fini le leur — et ces rafraichissements entraient alors dans la fenetre en
+    # portant precisement le residu de remplissage que ce calcul existe pour eliminer.
+    usable = [point for point in points if not point[2]]
     if len(usable) < 2:
         raise SystemExit(
-            f"aucune fenetre exploitable : la barre n'a rendu que {len(usable)} rafraichissement(s) "
-            f"au-dela de {n_envs} episodes. Le run est trop court devant `n_envs` — prendre "
-            f"--episodes >= {4 * n_envs} pour que le regime etabli existe."
+            f"aucune fenetre exploitable : sur {len(points)} rafraichissement(s), seuls "
+            f"{len(usable)} sont hors amorcage (les autres portent la mention `k/{n_envs} slots`). "
+            f"Le run est trop court devant `n_envs` — prendre --episodes >= {4 * n_envs} pour que "
+            f"le regime etabli existe."
         )
-    first_episodes, _, first_rate = usable[0]
-    last_episodes, _, last_rate = usable[-1]
+    first_episodes, _, _, first_rate = usable[0]
+    last_episodes, _, _, last_rate = usable[-1]
     span = last_episodes - first_episodes
     if span < n_envs:
         raise SystemExit(
