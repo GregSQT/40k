@@ -397,7 +397,22 @@ Prêts à démarrer sans décision produit :
   ajoutés, un par fonction.
   ⚠️ Comme « socle vs mur », ce chantier déplace l'espace de décision du pile-in : effet sur les
   modèles entraînés non mesuré.
+  ⚠️ **Il corrige les DESTINATIONS, pas les VERDICTS d'engagement** — mesuré après coup : les
+  empreintes par-figurine sont transmises à une entrée d'engagement bâtie sur la ligne d'escouade,
+  qui ne les lit jamais (0 divergence de verdict sur 13 distances, empreinte 19 contre 43 hexes).
+  Le reste est ouvert ci-dessous.
   → [`Implémenté/empreinte_par_figurine_fight_2026-08-12.md`](Implémenté/empreinte_par_figurine_fight_2026-08-12.md)
+- **L'engagement d'une figurine se mesure à SON socle** (ouvert le 2026-08-12, sorti de la
+  `/code-review` du chantier ci-dessus). `kept_engagements`, `unit_engaged`, `engaged` et le voile
+  vert du pile-in / de la consolidation mesurent un personnage attaché au socle du BLOC : l'entrée
+  synthétique d'engagement est copiée de la ligne `units_cache` d'escouade, et l'empreinte
+  par-figurine qu'on lui passe est ignorée. Confirmé par mesure, pas par lecture.
+  Forme visée : `shared_utils._synth_model_entry`, déjà documentée comme la source unique de
+  l'engagement par-figurine et déjà importée par `fight_handlers`, où elle ne sert qu'à UN site.
+  **11 sites** de `fight_handlers` à router, **2** au niveau unité à examiner
+  (`_fight_synth_cache_entry_at_footprint`), et le jumeau probable dans `charge_handlers`.
+  ⚠️ Touche la sémantique de l'engagement (12.03 / 12.08), pas une géométrie de pool : plus
+  risqué que le chantier d'empreinte, et il déplacera lui aussi l'espace de décision.
 - **Réécrire la note `bot_eval_freq_normal` de `x1_long` avec le coût MESURÉ** (~10 min, décidé
   le 2026-08-11). Cette note fonde le réglage sur « 13 min l'unité », chiffre hérité du commit
   `42326ed0` et jamais re-mesuré ; l'évaluation finale du run du 2026-08-11 donne plutôt

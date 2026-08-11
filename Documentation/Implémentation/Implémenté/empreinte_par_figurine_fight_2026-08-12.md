@@ -72,7 +72,34 @@ empreinte calculée » — sans elle, deux tests auraient été verts en ne rega
   ensuite** : le `game_state` est partagé par le module, une mise en scène non défaite ferait
   dépendre les tests suivants de l'ordre d'exécution.
 
+## ⚠️ Ce que ce chantier NE corrige PAS — les VERDICTS d'engagement
+
+Relevé par la `/code-review` de la livraison, puis **confirmé par mesure** : les empreintes
+par-figurine calculées ici sont passées à `_charge_synthetic_charger_cache_entry`, qui construit
+son entrée en copiant la ligne `units_cache` de l'**escouade**. Le test d'engagement reconstruit
+alors le socle depuis la base de cette entrée et **ne lit jamais** l'`occupied_hexes` fourni.
+
+Mesuré sur le personnage attaché de `scenario_attached_unit_test.json`, à 13 distances de la
+cible : le verdict est **identique** que l'empreinte transmise fasse 19 ou 43 hexes. 0 divergence
+sur 13.
+
+Autrement dit, ce chantier corrige les **destinations proposées** (le pool), pas les **verdicts
+d'engagement** — `kept_engagements`, `unit_engaged`, `engaged`, le voile vert. Un personnage
+attaché y reste mesuré au socle du bloc.
+
+La voie est identifiée et déjà dans le dépôt : `shared_utils._synth_model_entry`, documentée comme
+la SOURCE UNIQUE de l'engagement par-figurine (« la géométrie de base provient du MODÈLE, pas du
+squad — seul choix correct pour une unité à bases mixtes »), déjà importée par `fight_handlers` et
+utilisée à un seul endroit. **Onze** sites de `fight_handlers` construisent une entrée
+d'engagement de figurine avec le socle d'escouade, plus deux au niveau unité
+(`_fight_synth_cache_entry_at_footprint`) à examiner, et `charge_handlers` porte probablement les
+mêmes. Chantier distinct : il touche la sémantique de l'engagement (12.03 / 12.08), pas une
+géométrie de pool.
+
 ## Ce qui n'est pas mesuré
 
 L'effet sur l'agent entraîné. L'espace de décision du pile-in change, comme l'a fait le chantier
 « socle vs mur » du 2026-08-11 ; seul un run le dirait.
+
+Aucun exercice PvP en conditions réelles du pile-in d'un personnage attaché : la vérification
+s'arrête aux appels directs des six fonctions migrées.
