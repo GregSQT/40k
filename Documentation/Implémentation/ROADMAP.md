@@ -171,18 +171,30 @@ Prêts à démarrer sans décision produit :
   Le rapport annonçait 370 erreurs sur le run du 2026-08-11 ; le nettoyage de l'outil de mesure
   (livré le même jour, cf. plus bas) en a supprimé 317 qui étaient des faux positifs de lecture.
   **Ce qui reste n'est plus imputable à l'analyzer** et désigne des règles appliquées de travers
-  en partie réelle. Par famille, telles que mesurées après nettoyage :
-  | Symptôme | Occurrences | Règle |
-  |---|---|---|
-  | Fall-back qui finit ENGAGÉ | 5 | 09.07 |
-  | Move normal finissant au contact | 5 | 09.05 |
-  | Move normal PARTI d'un engagement | 2 | 09.05 |
-  | Attaques au-delà de CC_NB | 24 | 04.03 |
-  | Tirs hors portée | 5 | 10 Shooting |
-  | Collisions (2 unités, même hex) | 7 | 03.01 |
-  | Charge depuis un hex déjà adjacent | 1 | 11.02 |
-  | Pile-in / consolidation au-delà de 3" | 2 | 12.02 / 12.08 |
-  | Mort « fantôme » (état reconstruit ≠ moteur) | 1 | — |
+  en partie réelle. Par famille, sur le journal du **2026-08-11 14 h 34** — le MÊME run rejoué
+  après nettoyage (600 épisodes, 83 384 actions, jets de touche identiques au journal de 11 h 39 ;
+  l'écart de taille de 274 345 octets s'explique exactement par les 12 163 `[Strategy:]` retirés
+  moins les 532 `[MELTA:X]` et 7 `[PRECISION]` ajoutés). Les deux journaux se comparent donc terme
+  à terme, et ces chiffres sont l'état RÉEL, pas une estimation :
+  | Symptôme | P1 | P2 | Règle |
+  |---|---|---|---|
+  | Attaques au-delà de CC_NB | 11 | 13 | 04.03 |
+  | Collisions (2 unités, même hex) | 7 (total) | | 03.01 |
+  | Fall-back qui finit ENGAGÉ | 2 | 3 | 09.07 |
+  | Move normal finissant au contact | 1 | 4 | 09.05 |
+  | Tirs hors portée | 2 | 3 | 10 Shooting |
+  | Tir engagé visant une unité NON engagée avec le tireur | 0 | 3 | 10.06 |
+  | Move normal PARTI d'un engagement | 0 | 2 | 09.05 |
+  | Tir sur un ennemi engagé | 0 | 1 | 10.06 |
+  | Mort « fantôme » (état reconstruit ≠ moteur) | 1 (total) | | — |
+  ✅ **Trois familles annoncées le matin ont DISPARU** — pile-in au-delà de 3" (1), consolidation
+  au-delà de 3" (1), charge depuis un hex déjà adjacent (1) sont à **0**. C'étaient des faux
+  positifs de la mesure d'ancre, éteints par la reconstruction d'empreinte du même jour. Le run
+  étant le même, ce n'est pas un effet du hasard.
+  ⚠️ **Deux contrôles de §1.2 se sont ALLUMÉS** au même moment (tir engagé sur unité non engagée,
+  tir sur ennemi engagé) : ils ne voyaient rien tant que l'arme des personnages rattachés n'était
+  pas résolue. Le total d'une section qui MONTE après une correction de l'outil est le signe normal
+  d'un contrôle qui regardait dans le vide, jamais d'une régression.
   ⚠️ **Un seul cas est PROUVÉ à ce stade** : E76 T4, la figurine `2#10` (Bigboss, `Two-Handed Big
   Choppa`, NB 5) porte **7 attaques**, sans WAAAGH! actif ce tour-là. Les autres familles ont une
   piste, pas une cause : ne rien corriger avant de l'avoir établie — c'est exactement l'erreur que
@@ -195,9 +207,14 @@ Prêts à démarrer sans décision produit :
   Par ailleurs un déplacement d'ESCOUADE n'est pas validé par ce pool mais par
   `movement_preview_move_plan` : les deux voies sont à départager **en rejouant le cas dans le
   moteur**, pas en relisant `step.log`.
-  ⚠️ **Ce chantier a besoin d'un run récent** : les chiffres ci-dessus viennent d'un `step.log` du
-  2026-08-11 (600 épisodes, `ArmageddonAgent`, holdout_regular). Un run postérieur portera en plus
-  les tokens `[MELTA:X]` et `[PRECISION]`, créés le même jour.
+  ✅ **La chaîne des tokens créés le 2026-08-11 est vérifiée sur ce run** : `[MELTA:X]` compte
+  **532** usages (Multi-Melta, déclaré « NOT USED » le matin même) et `[PRECISION]` **7**. Les deux
+  traversent bien moteur → `step.log` → analyzer en conditions réelles.
+  ⚠️ **`PSYCHIC` restera « NOT USED » quoi qu'il arrive** sur ses 3 armes — dont `'eadbanger`, dont
+  la même page compte pourtant 7 usages de `PRECISION`. Ce n'est pas un compteur manquant : 24.29
+  est un mot-clé d'INTERACTION (avec les règles anti-psychic), il n'a aucun instant où il « joue ».
+  Il n'y a rien à compter, et la ligne est condamnée à afficher une absence trompeuse — à traiter
+  dans l'affichage (statut distinct de `NOT USED`), pas dans la mesure.
 - ✅ **Analyzer — la mesure cesse de mentir. LIVRÉ le 2026-08-11.** Sur le run du jour :
   **370 → 53 erreurs**, et quatre contrôles jusque-là muets se sont allumés. Cinq causes, toutes
   vérifiées en remettant le défaut et en constatant le rouge :
