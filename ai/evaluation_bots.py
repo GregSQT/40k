@@ -218,17 +218,16 @@ def _score_objective_proximity(
     Score = -distance-hex a l'objectif le plus proche. Sans objectif sur la table la doctrine
     n'a pas d'objet : on retombe sur la menace, jamais sur un ordre de liste.
     """
+    from engine.objective_distance import objective_distance_maps
+
     objectives = game_state.get("objectives")
     if not objectives:
         return _score_threat(sid, entry, game_state)
     # Position = units_cache (source de verite spatiale), jamais le col/row de la datasheet.
     col, row = require_unit_position(sid, game_state)
-    return -float(
-        min(
-            calculate_hex_distance(col, row, *mi.get_objective_center(obj))
-            for obj in objectives
-        )
-    )
+    # Distance a l'AIRE de l'objectif, pas a son centre (14.02) : le bot doit mesurer la meme
+    # geometrie que l'agent qu'il sert a evaluer, sinon le score de reference decrit un autre jeu.
+    return -float(min(int(m[col, row]) for m in objective_distance_maps(game_state)))
 
 
 def _score_value_per_damage(
@@ -400,25 +399,31 @@ def _squad_on_objective(unit, game_state, zones=None) -> bool:
 
 
 def _objective_context(game_state):
-    """(centres d'objectif, zones d'objectif, bonus de tenue) — lus une fois par decision."""
+    """(cartes de distance aux aires, zones d'objectif, bonus de tenue) — une fois par decision.
+
+    Les CARTES et non les centres : un objectif est toute son aire de terrain (14.02), et le bot
+    qui sert de reference doit mesurer la meme geometrie que l'agent evalue. Les cartes sont
+    memoisees par contenu (`engine.objective_distance`), donc ce contexte reste O(1).
+    """
+    from engine.objective_distance import objective_distance_maps
+
     objectives = game_state.get("objectives")  # get allowed : scenario sans objectif
-    centers = [mi.get_objective_center(obj) for obj in objectives] if objectives else []
-    return centers, objective_hex_sets(game_state), load_hold_bonus()
+    distance_maps = objective_distance_maps(game_state) if objectives else []
+    return distance_maps, objective_hex_sets(game_state), load_hold_bonus()
 
 
 def _objective_term(
-    dest, centers, zones, hold_bonus: float, w_obj: float, on_objective: Optional[bool] = None
+    dest, distance_maps, zones, hold_bonus: float, w_obj: float,
+    on_objective: Optional[bool] = None,
 ) -> float:
     """Part « objectif » du score d'une destination. Sans objectif sur la table : 0.0.
 
     `on_objective` force le verdict de presence (lecture exacte par figurine pour la position
     courante) ; None le derive de l'ancre de la destination candidate (heuristique O(1)).
     """
-    if not centers:
+    if not len(distance_maps):
         return 0.0
-    score = -w_obj * min(
-        calculate_hex_distance(dest[0], dest[1], ocol, orow) for ocol, orow in centers
-    )
+    score = -w_obj * min(int(m[dest[0], dest[1]]) for m in distance_maps)
     inside = any(dest in zone for zone in zones) if on_objective is None else on_objective
     if inside:
         score += w_obj * hold_bonus
@@ -439,10 +444,10 @@ def _select_destination(
     """
     current = require_unit_position(unit, game_state)
     enemy_positions = _living_enemy_positions(unit, game_state)
-    centers, zones, hold_bonus = _objective_context(game_state)
+    distance_maps, zones, hold_bonus = _objective_context(game_state)
 
     def _score(dest, on_objective: Optional[bool]) -> float:
-        score = _objective_term(dest, centers, zones, hold_bonus, w_obj, on_objective)
+        score = _objective_term(dest, distance_maps, zones, hold_bonus, w_obj, on_objective)
         if enemy_positions:
             score -= w_enn * _dest_nearest_enemy_hexdist(dest, enemy_positions)
         return score
@@ -1494,7 +1499,7 @@ class TacticalBot(_WeightedMover):
         best_pos = destinations[0]
         best_score = -float('inf')
         w_obj, _ = self._weights()
-        centers, zones, hold_bonus = _objective_context(game_state)
+        distance_maps, zones, hold_bonus = _objective_context(game_state)
 
         for col, row in destinations:
             unit_fp = compute_candidate_footprint(col, row, unit, game_state)
@@ -1515,7 +1520,7 @@ class TacticalBot(_WeightedMover):
             # Aucune menace de melee sur la table : la distance vaut +inf pour TOUTES les
             # candidates (le jeu d'ennemis est le meme), le terme d'objectif tranche seul.
             safety = 0.0 if min_enemy_dist == float('inf') else float(min_enemy_dist)
-            score = safety + _objective_term((col, row), centers, zones, hold_bonus, w_obj)
+            score = safety + _objective_term((col, row), distance_maps, zones, hold_bonus, w_obj)
             if score > best_score:
                 best_score = score
                 best_pos = (col, row)
@@ -1546,7 +1551,7 @@ class TacticalBot(_WeightedMover):
         )
         target_fp = entry_footprint(target_entry)
         w_obj, _ = self._weights()
-        centers, zones, hold_bonus = _objective_context(game_state)
+        distance_maps, zones, hold_bonus = _objective_context(game_state)
         best_pos = destinations[0]
         best_score = -float('inf')
         found_in_range = False
@@ -1557,7 +1562,7 @@ class TacticalBot(_WeightedMover):
             if dist > rng_rng:
                 continue
             found_in_range = True
-            score = -float(dist) + _objective_term((col, row), centers, zones, hold_bonus, w_obj)
+            score = -float(dist) + _objective_term((col, row), distance_maps, zones, hold_bonus, w_obj)
             if score > best_score:
                 best_score = score
                 best_pos = (col, row)
@@ -1567,7 +1572,7 @@ class TacticalBot(_WeightedMover):
                 unit_fp = compute_candidate_footprint(col, row, unit, game_state)
                 dist = min_distance_between_sets(unit_fp, target_fp)
                 score = -float(dist) + _objective_term(
-                    (col, row), centers, zones, hold_bonus, w_obj
+                    (col, row), distance_maps, zones, hold_bonus, w_obj
                 )
                 if score > best_score:
                     best_score = score

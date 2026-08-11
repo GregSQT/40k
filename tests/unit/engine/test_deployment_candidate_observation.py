@@ -246,16 +246,20 @@ def test_candidate_positions_are_measured_from_the_zone_anchor_not_from_the_sent
 def test_candidate_features_match_the_state_they_claim_to_describe():
     """Les grandeurs décrites sont recalculées depuis le `game_state` brut, pas relues du bloc.
 
-    Distance au centre d'objectif le plus proche, appartenance à un hexe d'objectif (14.02) et
-    bénéfice du couvert (13.08) sont réévalués ici sur l'hexe que le slot poserait. Un bloc qui
-    porterait les grandeurs d'un AUTRE hexe (celui d'un autre slot, ou celui du step précédent)
-    passerait tous les tests de « non-vacuité » et échouerait ici.
+    Distance à l'AIRE d'objectif la plus proche (14.02 : l'objectif est toute l'aire de terrain,
+    pas son centre), appartenance à un hexe d'objectif et bénéfice du couvert (13.08) sont
+    réévalués ici sur l'hexe que le slot poserait. Un bloc qui porterait les grandeurs d'un AUTRE
+    hexe (celui d'un autre slot, ou celui du step précédent) passerait tous les tests de
+    « non-vacuité » et échouerait ici.
+
+    La distance attendue est recalculée par ÉNUMÉRATION NAÏVE de tous les hexes d'objectif —
+    volontairement, et non par la structure de segments qu'utilise le moteur : un test qui
+    reprendrait l'optimisation validerait l'optimisation par elle-même.
     """
     eng = _load()
     gs = eng.game_state
     dec = eng.action_decoder
 
-    objective_centers = dec._get_objective_centers(gs)
     objective_hexes = {
         (int(h[0]), int(h[1])) if isinstance(h, (list, tuple))
         else (int(h["col"]), int(h["row"]))
@@ -277,7 +281,7 @@ def test_candidate_features_match_the_state_they_claim_to_describe():
             slot = action_int - DEPLOY_SLOT_BASE
             col, row = candidate["hex"]
             expected_objective = min(
-                calculate_hex_distance(col, row, cc, cr) for cc, cr in objective_centers
+                calculate_hex_distance(col, row, hc, hr) for hc, hr in objective_hexes
             )
             assert obs["deploy_cand_cont"][
                 slot, deploy_cand_cont_index("objective_distance")

@@ -3532,8 +3532,8 @@ def objective_hex_zones(game_state: Dict[str, Any]) -> List[Tuple[Any, Set[Tuple
     Une zone VIDE leve, et l erreur nomme l objectif fautif. Un objectif sans hexe n est
     controlable par personne : il fausse `control_at_least_one` / `control_at_least_two` et le
     depart « j en tiens plus que lui », donc les VP. Le moteur le traite DEJA comme une erreur
-    ailleurs — `macro_intents.get_objective_center` leve « has no center and no hexes » sur la
-    meme donnee, et les bots d evaluation passent par la a chaque decision. Lever ici ne cree
+    ailleurs — `objective_distance.distances_to_zone` leve sur une aire sans segment, et le
+    scoring de deploiement comme les bots d evaluation passent par la. Lever ici ne cree
     donc pas un mode d echec, il l avance a un endroit qui dit lequel des objectifs est en cause.
     Les deux lectures precedentes en donnaient DEUX interpretations muettes : ensemble vide
     conserve cote moteur, objectif ecarte cote combat. Aucune occurrence en production (zones de
