@@ -23,15 +23,16 @@ dette, `branch_touches_roadmap(M^1, M^2)` pour la déclaration — et compter le
 MESURE du 2026-08-12, sur **50** fusions : plafond 1 → **15** refus, 2 → **11**, 3 → **9**,
 4 → **9**. Les 9 refus du plafond 3 tombent TOUS le 2026-08-10, sur une dette de 92 à 100 : c'est
 l'arriéré antérieur au moment où la feuille a pris son rôle, soldé par la première déclaration.
-Sur les **41** fusions qui suivent ce solde, **le plafond 3 ne se déclenche pas une seule fois** —
-y compris sur les chantiers dont on sait qu'ils n'ont pas été déclarés. Le plafond 2 y aurait
-refusé 2 fusions — `c38ee8f5` (ez-mask-minkowski) et `2ede29f5` (socle-ligne-charge), deux
-chantiers effectivement non déclarés — et le plafond 1 en aurait refusé 6.
+Sur les **41** fusions qui suivent ce solde : le plafond 3 ne se déclenche **pas une seule fois**
+— y compris sur les chantiers dont on sait qu'ils n'ont pas été déclarés —, le plafond 2 refuse
+**2** fusions, `c38ee8f5` (ez-mask-minkowski) et `2ede29f5` (socle-ligne-charge, tous deux
+réellement non déclarés), et le plafond 1 en refuse **6**.
 
-⚠️ CE QUE CETTE MESURE DIT DU RÉGLAGE : 3 et 4 rendent le même résultat, et sur le flux moderne
-aucun des deux ne se déclenche. Le plafond 3 est donc aujourd'hui une borne d'arriéré, pas un
-garde-fou du flux courant. Le descendre à 2 est un choix de DISCIPLINE, pas une correction — il
-appartient à l'utilisateur, et les deux fusions qu'il aurait refusées sont nommées ci-dessus.
+D'OÙ LE RÉGLAGE, tranché par l'utilisateur le 2026-08-12 : **plafond 2**. À 3 (et 4, qui rend le
+même résultat) la porte était devenue une borne d'arriéré sans effet sur le flux courant. À 2 elle
+refuse exactement les deux oublis avérés sur 41 fusions, sans toucher aux 39 autres. À 1 elle
+refuserait 6 fois : assez souvent pour qu'on prenne l'habitude de la contourner, ce qui est le
+risque qui avait fait abandonner le refus sec.
 
 LA RAISON, et c'est sa limite de fond : la dette retombe à zéro dès que la feuille de route est
 TOUCHÉE, pour n'importe quel motif — une correction de valeur, une reformulation, une typo. Or ce
@@ -73,7 +74,10 @@ ROADMAP = "Documentation/Implémentation/ROADMAP.md"
 
 #: Nombre de chantiers qu'on tolère non déclarés. Voir le calibrage en tête de module — ce n'est
 #: pas un chiffre choisi au jugé, c'est le seul qui ne refuse que le cas réellement fautif.
-MAX_UNDECLARED = 3
+#: Porté de 3 à 2 le 2026-08-12 (décision utilisateur) : à 3, la porte ne se déclenchait plus une
+#: seule fois sur les 41 fusions du flux moderne. À 2 elle en refuse 2, qui sont précisément les
+#: deux chantiers dont on sait qu'ils n'avaient pas pris leur ligne.
+MAX_UNDECLARED = 2
 
 #: Seule branche où « livrer » a un sens. Fusionner `main` DANS un worktree est l'opération
 #: inverse : elle n'apporte rien de neuf au projet.
