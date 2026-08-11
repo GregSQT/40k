@@ -387,3 +387,63 @@ def test_a_contested_objective_suppresses_the_empty_line():
     _log_objective_control_snapshot(_EngineStub(gs))
     assert len(gs["action_logs"]) == 1
     assert "aucun objectif disputé" not in _messages(gs)[0]
+
+
+def test_board_emptied_within_the_turn_says_so_again():
+    """La table se vide APRÈS avoir été occupée, dans le MÊME tour : le journal doit le redire.
+
+    C'est le trou de la première version : la clé de déduplication du silence était posée au
+    premier tour vide et jamais relâchée. Une dernière figurine qui meurt en phase de combat
+    laissait donc le journal muet — exactement le cas ambigu que cette ligne existe pour
+    supprimer. Mesuré avant correction : t1/command → ligne globale, t1/move → ligne par
+    objectif, t1/fight revidé → RIEN.
+    """
+    gs = _empty_state()
+    engine = _EngineStub(gs)
+    _log_objective_control_snapshot(engine)
+    assert "aucun objectif disputé" in _messages(gs)[0]
+
+    # Une unité entre dans l'aire, même tour.
+    gs["phase"] = "move"
+    gs["models_cache"]["u1_m0"].update({"col": 10, "row": 10})
+    gs["_objective_control_detail"]["obj_a"].update({"player_1_oc": 4, "controller": 1})
+    gs["action_logs"] = []
+    _log_objective_control_snapshot(engine)
+    assert len(gs["action_logs"]) == 1
+    assert "OC P1=4" in _messages(gs)[0]
+
+    # Elle meurt : tout redevient vide, toujours dans le même tour.
+    gs["phase"] = "fight"
+    gs["models_cache"]["u1_m0"]["HP_CUR"] = 0
+    gs["_objective_control_detail"]["obj_a"].update({"player_1_oc": 0, "controller": None})
+    gs["action_logs"] = []
+    _log_objective_control_snapshot(engine)
+    assert len(gs["action_logs"]) == 1, "le journal est redevenu muet dans le cas ambigu"
+    assert "aucun objectif disputé" in _messages(gs)[0]
+
+
+def test_a_held_objective_without_oc_is_not_silence():
+    """Méthode `secured` (14.03) : le contrôle PERSISTE après le départ des figurines.
+
+    Un objectif encore tenu à 0 OC rapporte des VP. Le sauter ferait affirmer « aucun objectif
+    disputé » pendant que le joueur marque dessus. Aucune config livrée n'utilise `secured`
+    aujourd'hui, mais la branche est supportée par le moteur : le test de vacuité doit décrire la
+    règle, pas la configuration du moment.
+    """
+    gs = _game_state(
+        detail={
+            "obj_a": {
+                "player_1_oc": 0,
+                "player_2_oc": 0,
+                "controller": 1,
+                "previous_controller": 1,
+            }
+        },
+        units=[{"id": "u1", "player": 1}],
+        models={"u1": (40, 40)},
+    )
+    _log_objective_control_snapshot(_EngineStub(gs))
+    assert len(gs["action_logs"]) == 1
+    message = _messages(gs)[0]
+    assert "aucun objectif disputé" not in message
+    assert "held by P1" in message

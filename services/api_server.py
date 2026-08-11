@@ -882,10 +882,23 @@ def _log_objective_control_snapshot(engine_instance) -> None:
         p1_oc = int(require_key(entry, "player_1_oc"))
         p2_oc = int(require_key(entry, "player_2_oc"))
         present = models_by_zone.get(key, {1: 0, 2: 0})  # get allowed (objectif sans zone)
-        if p1_oc == 0 and p2_oc == 0 and present[1] == 0 and present[2] == 0:
-            continue  # Personne dans l'aire : il n'y a rien à expliquer sur CET objectif.
-        emitted += 1
         controller = require_key(entry, "controller")
+        if (
+            p1_oc == 0
+            and p2_oc == 0
+            and present[1] == 0
+            and present[2] == 0
+            and controller is None
+        ):
+            # Personne dans l'aire ET personne ne le tient : rien à expliquer sur CET objectif.
+            # `controller` fait partie du test : en méthode `secured` (14.03), le contrôle
+            # PERSISTE après le départ des figurines — un objectif tenu à 0 OC rapporte des VP,
+            # et le sauter ferait affirmer plus bas « aucun objectif disputé » pendant que le
+            # joueur marque dessus. Aucune config livrée n'utilise `secured` aujourd'hui, mais la
+            # branche est supportée par `calculate_objective_control` : le test de vacuité doit
+            # décrire la règle, pas la configuration du moment.
+            continue
+        emitted += 1
         previous = require_key(entry, "previous_controller")
         if controller is None:
             verdict = "contested — no controller"
@@ -913,6 +926,12 @@ def _log_objective_control_snapshot(engine_instance) -> None:
         )
 
     if emitted:
+        # La table a parlé : on RELÂCHE la déduplication du silence. Sans ce relâchement, une
+        # table qui se vide APRÈS avoir été occupée dans le même tour (la dernière figurine d'une
+        # aire meurt en phase de combat) retombait muette — précisément le cas ambigu que cette
+        # ligne existe pour supprimer. Vérifié : t1/command vide → ligne globale, t1/move occupé
+        # → ligne par objectif, t1/fight revidé → plus rien.
+        game_state.pop(_OBJECTIVE_EMPTY_LOGGED_TURN_KEY, None)
         return
     # AUCUN objectif disputé : le dire, une fois par TOUR.
     #
