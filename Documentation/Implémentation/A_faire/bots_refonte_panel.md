@@ -117,13 +117,42 @@ raison (cf. `config/bot_movement_weights.json`, entrée `tactical`).
 |---|---|---|
 | 0 | consigner la mesure de référence (ce doc, §2) | ✅ 2026-08-11 |
 | 1 | `step.log` nomme l'adversaire réellement affronté | ✅ 2026-08-11 |
-| 2 | appariement des graines entre bots comparés | |
-| 3 | chiffrage de faisabilité du holdout à un coup | |
+| 2 | ~~appariement des graines entre bots comparés~~ | ❌ **retirée** 2026-08-11, cf. §4.1 |
+| 3 | chiffrage de faisabilité du holdout à un coup | ✅ 2026-08-11, cf. §6 |
 | 4 | modèle de dégâts espérés (attaquant → cible) | |
 | 5 | les six styles + le holdout | |
 | 6 | réglage et orthogonalité en **bot-contre-bot** | |
 | 7 | correspondance ancien/nouveau, puis suppression des six anciens | |
 | 8 | mesure finale contre l'agent, commande de §2 | |
+
+### 4.1 Pourquoi l'appariement des graines a été retiré
+
+Les deux dérivations de graine du dépôt mettent le nom des bots dans la clé —
+`ai/bot_evaluation.py:706` (le bot évalué) et `scripts/bot_ranking.py:67` (la paire). Deux bots de
+noms différents jouent donc des parties différentes. L'étape 2 proposait de retirer cette
+dépendance pour que l'ancien bot et son remplaçant soient comparés sur les mêmes tirages
+(*common random numbers*, réduction de variance de la différence).
+
+Elle est **sans objet**, pour trois raisons qui se cumulent :
+
+1. **La correspondance est un match DIRECT, pas la comparaison de deux mesures.** Ancien bot
+   contre nouveau bot dans la même partie (§4, étape 7) : il n'y a qu'une expérience, donc rien à
+   apparier.
+2. **L'effet attendu à l'étape 8 est massif**, pas marginal. Un appariement sert à extraire un
+   écart du bruit ; ici l'écart est l'objet même du chantier.
+3. **Le changement invaliderait la référence de §2**, mesurée avec la dérivation actuelle : elle
+   cesserait d'être reproductible à l'identique, ce qui est précisément sa fonction.
+
+S'y ajoute que `scripts/bot_ranking.py:67` porte la justification **inverse**, explicite : « sans
+le nom des DEUX bots dans la graine, deux appariements différents rejoueraient la même séquence de
+tirages ». Le désaccord est réel — l'appariement est une technique de réduction de variance, pas
+un biais — mais le gain n'a **pas été mesuré**, et il ne le sera pas ici : il ne servirait aucune
+des mesures de ce chantier.
+
+⚠️ Le seul cas où la dépendance au nom nuirait vraiment : **renommer un bot sans changer son
+comportement** ferait sauter ses graines et rendrait ses win-rates incomparables aux anciens. Ce
+chantier n'en contient aucun — `tactical` garde son nom en changeant de nature (§3.3), et les six
+styles sont des noms neufs.
 
 **L'orthogonalité et la correspondance se mesurent en bot-contre-bot**, via
 [`scripts/bot_ranking.py`](../../../scripts/bot_ranking.py), pas contre l'agent : mesurer un bot
@@ -151,3 +180,42 @@ un autre jeu que la référence de §2.
 - **`_episode_seed` dérive du nom du bot** (`ai/bot_evaluation.py:706-710`) : deux bots de noms
   différents jouent des parties différentes. Un bot et son remplaçant ne sont donc pas comparés
   sur les mêmes tirages — c'est l'objet de l'étape 2.
+
+## 6. Chiffrage du holdout à un coup (étape 3) — mesuré le 2026-08-11
+
+Protocole : `ArmageddonAgent`, profil `x1`, `W40K_BOARD_PATH=board/44x60x1`, scénario holdout
+`scenario_bot-01`, `reset(seed=42)`, trajectoire aléatoire de 60 pas couvrant les cinq phases
+(deployment, command, move, shoot, charge). Médianes.
+
+| grandeur | mesure |
+|---|---|
+| `copy.deepcopy(game_state)` complet | **68,4 ms** |
+| dont `weapon_damage_table` seule | 46,2 ms (**75 %**) |
+| `deepcopy` en excluant les clés statiques | **9,6 ms** (×7,1) |
+| `engine.step()` | **6,85 ms** |
+| actions légales par décision | **médiane 5**, min 2, **max 458** |
+
+**La copie n'est pas le problème, et la solution existe déjà.** Les trois quarts du coût sont une
+table de dégâts d'armes **immuable** (`config/weapon_damage_table.json`, chargée par
+`engine/weapon_damage_cache.py`) que rien ne mute en partie. `services/game_snapshots.py` a déjà
+tranché exactement cette question pour le rewind PvP : `_GS_STATIC_KEYS` liste 17 clés invariantes
+non copiées — les 17 sont présentes dans l'état mesuré. Le clone rapide est donc du **code de
+production éprouvé à réutiliser**, pas une optimisation à inventer.
+
+**Le branchement, lui, est rédhibitoire en phase de MOVE.** Avec le clone rapide, simuler un coup
+coûte ≈ 16,5 ms (9,6 + 6,85) :
+
+| phase | actions | coût 1-ply par décision |
+|---|---|---|
+| tir / charge / combat | ≈ 5 | **≈ 82 ms** |
+| move | jusqu'à 458 | **≈ 7,6 s** |
+
+Un `select_movement_destination` à 7,6 s rend le holdout inutilisable : à ~150 décisions par
+épisode, une seule partie dépasserait la minute rien qu'en déplacements, contre ~2 s aujourd'hui.
+
+⚠️ **Ces mesures valent pour x1.** Le pool BFS de move monte à ~634 cellules sur x5 (cf. en-tête
+de `ai/evaluation_bots.py`) : le coût du move y est encore plus haut.
+
+**Ce qui reste à trancher** : le holdout simule-t-il ses coups partout (impossible en l'état), ou
+seulement là où le branchement le permet, ou sur un sous-ensemble filtré des destinations ?
+Remonté à l'utilisateur le 2026-08-11.
