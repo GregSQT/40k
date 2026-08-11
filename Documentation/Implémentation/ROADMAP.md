@@ -65,6 +65,15 @@
   l'aperçu et l'état après validation décrivent la même géométrie. Le client fait désormais UN
   appel portant toutes les figurines au lieu d'un par figurine — le pool de cibles est une
   propriété de l'escouade, pas d'une figurine isolée.
+  ⚠️ **Complété le jour même** (2ᵉ `/code-review`) : le premier jet n'envoyait que `(col, row)` et
+  perdait le **niveau** et l'**orientation** du plan. Une figurine déployée à l'étage d'une ruine
+  était donc prévisualisée AU SOL — blink et couvert basculaient après validation, c'est-à-dire la
+  divergence même que ce chantier supprime, déplacée d'un cran. L'action prend désormais le plan
+  au format CANONIQUE `[[model_id, col, row, level, orientation?]]`, lu par le MÊME parseur que la
+  pose réelle (`parse_model_plan_with_orientation`). Éviction du cache d'aperçu alignée sur les
+  trois autres écrivains, et le commentaire qui promettait un « cache hit » du survol est corrigé :
+  cet aperçu porte l'escouade entière, le survol une figurine — ils ne peuvent pas partager
+  d'entrée, une pose coûte donc un aperçu backend complet.
 - 🔜 **Run `--new` ArmageddonAgent `x1` de VÉRIFICATION — à lancer** (2026-08-11). Ce qu'il doit
   prouver n'est pas un progrès mais que le pipeline tourne de bout en bout avec un **espace de
   décision modifié** (l'alignement de la charge sur 11.02, ci-dessous). À lire dans l'ordre :

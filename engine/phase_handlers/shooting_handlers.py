@@ -1317,13 +1317,21 @@ def _apply_preview_placement(
         from engine.phase_handlers.shared_utils import update_model_position
 
         known = {str(m) for m in require_key(gs, "squad_models").get(unit_id_str, [])}
-        for model_id, col, row in placement[1]:
+        for model_id, col, row, level, orientation in placement[1]:
             if model_id not in known:
                 raise KeyError(
                     f"_apply_preview_placement: figurine {model_id!r} absente de l'escouade "
                     f"{unit_id_str!r} — plan incohérent, pas une figurine à ignorer"
                 )
-            update_model_position(gs, model_id, int(col), int(row))
+            # `level` et `orientation` sont passés TELS QUELS : le niveau décide du gate vertical
+            # de la LoS 3D, l'orientation de l'empreinte d'un socle ovale/carré. `orientation`
+            # vaut None quand le plan n'en porte pas (déploiement, pas de pivot) — c'est le
+            # contrat de `update_model_position` : None = ne pas toucher, pas un défaut à 0.
+            update_model_position(
+                gs, model_id, int(col), int(row),
+                level=int(level),
+                orientation=None if orientation is None else int(orientation),
+            )
         return
     raise ValueError(f"_apply_preview_placement: forme de placement inconnue {kind!r}")
 
@@ -1363,12 +1371,12 @@ def preview_shoot_valid_targets_from_position(
 def preview_shoot_valid_targets_from_model_positions(
     game_state: Dict[str, Any],
     unit_id: str,
-    model_positions: Dict[Any, Any],
+    model_plan: Any,
     *,
     advance_position: bool = False,
     include_los_cells: bool = True,
 ) -> Dict[str, Any]:
-    """Aperçu de tir depuis les positions EXPLICITES des figurines (lecture pure).
+    """Aperçu de tir depuis le PLAN par figurine (lecture pure).
 
     Jumeau de `preview_hidden_models_from_model_positions`, pour la même raison : pendant un
     placement figurine par figurine, le plan vit dans le CLIENT et le moteur n'en sait rien avant
@@ -1376,33 +1384,43 @@ def preview_shoot_valid_targets_from_model_positions(
     aperçu placé par l'ancre mesurait distances et LoS depuis le coin du plateau sans jamais lever
     — un verdict inventé, précisément ce que `require_entry_on_battlefield` refuse ailleurs.
 
-    Chaque figurine est posée par `update_model_position`, qui resynchronise l'empreinte de
-    l'escouade et son ancre : c'est le MÊME écrivain que la pose réelle, donc l'aperçu et le
-    résultat après validation décrivent la même géométrie.
+    ``model_plan`` est le format CANONIQUE du plan, `[[model_id, col, row, level, orientation?]]`,
+    lu par le MÊME parseur que la pose réelle (`parse_model_plan_with_orientation`). Le niveau et
+    l'orientation en font partie et ne sont pas optionnels par confort :
+    - le NIVEAU décide du gate vertical de la LoS 3D (§03.04) — une figurine déployée à l'étage
+      d'une ruine, prévisualisée au sol, donne un blink et un couvert qui basculent après
+      validation ;
+    - l'ORIENTATION décide de l'empreinte d'un socle ovale ou carré (pivot molette du move).
+    Les ignorer ferait mesurer à l'aperçu une géométrie que la validation ne reproduit pas — le
+    défaut que cette fonction existe pour supprimer, déplacé d'un cran.
 
-    ``model_positions`` : `{model_id: (col, row)}`. Une figurine inconnue lève (incohérence de
-    plan), un plan vide lève (rien à mesurer), une position hors table lève (la sentinelle n'a
-    pas de sens en ENTRÉE : ce sont les positions choisies par le joueur).
+    Chaque figurine est posée par `update_model_position`, qui resynchronise l'empreinte de
+    l'escouade et son ancre : c'est le MÊME écrivain que la pose réelle.
+
+    Une figurine inconnue lève (incohérence de plan), un plan vide lève (rien à mesurer), une
+    position hors table lève (la sentinelle n'a pas de sens en ENTRÉE : ce sont les positions
+    choisies par le joueur).
     """
-    if not model_positions:
+    from engine.phase_handlers.shared_utils import parse_model_plan_with_orientation
+
+    action_name = "preview_shoot_valid_targets_from_model_positions"
+    parsed = parse_model_plan_with_orientation(model_plan, action_name=action_name)
+    if not parsed:
         raise ValueError(
-            f"preview_shoot_valid_targets_from_model_positions: aucune figurine pour l'unité "
-            f"{unit_id!r} — un aperçu sans position n'a rien à mesurer"
+            f"{action_name}: aucune figurine pour l'unité {unit_id!r} — un aperçu sans position "
+            f"n'a rien à mesurer"
         )
-    normalised: Dict[str, Tuple[int, int]] = {}
-    for model_id, position in model_positions.items():
-        col, row = int(position[0]), int(position[1])
+    for model_id, col, row, _level, _orientation in parsed:
         if col < 0 or row < 0:
             raise ValueError(
-                f"preview_shoot_valid_targets_from_model_positions: figurine {model_id!r} de "
-                f"l'unité {unit_id!r} HORS TABLE ({col},{row}) — les positions viennent du plan "
-                f"du joueur, la sentinelle n'y a pas de sens"
+                f"{action_name}: figurine {model_id!r} de l'unité {unit_id!r} HORS TABLE "
+                f"({col},{row}) — les positions viennent du plan du joueur, la sentinelle n'y a "
+                f"pas de sens"
             )
-        normalised[str(model_id)] = (col, row)
     return _preview_shoot_valid_targets(
         game_state,
         unit_id,
-        placement=("models", tuple(sorted((m, c, r) for m, (c, r) in normalised.items()))),
+        placement=("models", tuple(sorted(parsed))),
         advance_position=advance_position,
         include_los_cells=include_los_cells,
     )

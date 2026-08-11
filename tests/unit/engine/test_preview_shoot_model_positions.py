@@ -60,6 +60,18 @@ def _send_off_table(game_state: Dict[str, Any], unit_id: str, model_ids: List[st
     unit["deployed_on_turn"] = None
 
 
+def _upper_floor_cells(game_state: Dict[str, Any], count: int) -> List[Tuple[int, int]]:
+    """`count` cases contiguës d'un plancher de niveau 1 réellement présent dans le scénario."""
+    for area in game_state.get("terrain_areas", []):
+        for floor in area.get("floors") or []:
+            if int(floor.get("level", 0)) != 1:
+                continue
+            cells = [(int(h[0]), int(h[1])) for h in floor.get("hexes") or []]
+            if len(cells) >= count:
+                return cells[:count]
+    pytest.skip("aucun plancher de niveau 1 dans le scénario")
+
+
 def _model_centers_seen_by_engine(preview_state: Dict[str, Any], unit_id: str):
     entry = get_unit_from_cache(unit_id, preview_state)
     assert entry is not None
@@ -105,7 +117,7 @@ def test_model_positions_preview_puts_every_figure_on_the_board(engine, monkeypa
     unit_id, model_ids = _multi_model_unit(game_state)
     _send_off_table(game_state, unit_id, model_ids)
 
-    positions = {mid: (20 + index, 20) for index, mid in enumerate(model_ids)}
+    positions = [[mid, 20 + index, 20, 0] for index, mid in enumerate(model_ids)]
 
     seen: Dict[str, Any] = {}
     from engine.phase_handlers import shooting_handlers
@@ -123,7 +135,7 @@ def test_model_positions_preview_puts_every_figure_on_the_board(engine, monkeypa
     )
 
     assert "centers" in seen, "le pipeline n'a pas été atteint — le test ne prouve rien"
-    assert seen["centers"] == sorted(positions.values())
+    assert seen["centers"] == sorted((c, r) for _m, c, r, _l in positions)
     assert all(col >= 0 and row >= 0 for col, row in seen["centers"])
 
 
@@ -135,7 +147,7 @@ def test_preview_does_not_mutate_the_real_state(engine):
 
     before = _model_centers_seen_by_engine(game_state, unit_id)
     preview_shoot_valid_targets_from_model_positions(
-        game_state, unit_id, {mid: (20 + i, 20) for i, mid in enumerate(model_ids)},
+        game_state, unit_id, [[mid, 20 + i, 20, 0] for i, mid in enumerate(model_ids)],
         include_los_cells=False,
     )
     assert _model_centers_seen_by_engine(game_state, unit_id) == before
@@ -147,7 +159,7 @@ def test_unknown_model_id_raises_instead_of_being_ignored(engine):
     unit_id, model_ids = _multi_model_unit(game_state)
     with pytest.raises(KeyError):
         preview_shoot_valid_targets_from_model_positions(
-            game_state, unit_id, {"figurine_qui_n_existe_pas": (20, 20)},
+            game_state, unit_id, [["figurine_qui_n_existe_pas", 20, 20, 0]],
             include_los_cells=False,
         )
 
@@ -158,7 +170,7 @@ def test_off_board_position_raises(engine):
     unit_id, model_ids = _multi_model_unit(game_state)
     with pytest.raises(ValueError, match="HORS TABLE"):
         preview_shoot_valid_targets_from_model_positions(
-            game_state, unit_id, {model_ids[0]: (-1, -1)}, include_los_cells=False,
+            game_state, unit_id, [[model_ids[0], -1, -1, 0]], include_los_cells=False,
         )
 
 
@@ -167,5 +179,81 @@ def test_empty_plan_raises(engine):
     unit_id, _model_ids = _multi_model_unit(game_state)
     with pytest.raises(ValueError, match="aucune figurine"):
         preview_shoot_valid_targets_from_model_positions(
-            game_state, unit_id, {}, include_los_cells=False,
+            game_state, unit_id, [], include_los_cells=False,
+        )
+
+
+def test_plan_level_reaches_the_measured_state(engine, monkeypatch):
+    """Le NIVEAU du plan doit être posé : c'est lui qui décide du gate vertical de la LoS 3D.
+
+    Une figurine déployée à l'étage d'une ruine et prévisualisée au sol donne un blink et un
+    couvert qui basculent après validation — la divergence même que cette fonction supprime.
+    """
+    game_state = engine.game_state
+    unit_id, model_ids = _multi_model_unit(game_state)
+    _send_off_table(game_state, unit_id, model_ids)
+
+    seen: Dict[str, Any] = {}
+    from engine.phase_handlers import shooting_handlers
+
+    original = shooting_handlers.build_unit_los_cache
+
+    def _spy(gs, uid, **kwargs):
+        if str(uid) == unit_id and "levels" not in seen:
+            seen["levels"] = sorted(
+                int(gs["models_cache"][mid]["level"]) for mid in model_ids
+            )
+        return original(gs, uid, **kwargs)
+
+    monkeypatch.setattr(shooting_handlers, "build_unit_los_cache", _spy)
+    # Cases d'un vrai plancher de niveau 1 : le moteur refuse (à raison) une figurine marquée à
+    # l'étage sur une case sans plancher, donc le test doit CONSTRUIRE la situation qu'il observe.
+    upper_floor = _upper_floor_cells(game_state, len(model_ids))
+    preview_shoot_valid_targets_from_model_positions(
+        game_state, unit_id,
+        [[mid, upper_floor[i][0], upper_floor[i][1], 1] for i, mid in enumerate(model_ids)],
+        include_los_cells=False,
+    )
+    assert "levels" in seen, "le pipeline n'a pas été atteint — le test ne prouve rien"
+    assert seen["levels"] == [1] * len(model_ids), (
+        "le niveau du plan n'est pas arrivé jusqu'à l'état mesuré : l'aperçu décrit une autre "
+        "géométrie que la validation"
+    )
+
+
+def test_plan_orientation_reaches_the_measured_state(engine, monkeypatch):
+    """L'ORIENTATION du plan aussi : elle décide de l'empreinte d'un socle ovale ou carré."""
+    game_state = engine.game_state
+    unit_id, model_ids = _multi_model_unit(game_state)
+    _send_off_table(game_state, unit_id, model_ids)
+
+    seen: Dict[str, Any] = {}
+    from engine.phase_handlers import shooting_handlers
+
+    original = shooting_handlers.build_unit_los_cache
+
+    def _spy(gs, uid, **kwargs):
+        if str(uid) == unit_id and "orientations" not in seen:
+            seen["orientations"] = sorted(
+                int(gs["models_cache"][mid]["orientation"]) for mid in model_ids
+            )
+        return original(gs, uid, **kwargs)
+
+    monkeypatch.setattr(shooting_handlers, "build_unit_los_cache", _spy)
+    preview_shoot_valid_targets_from_model_positions(
+        game_state, unit_id,
+        [[mid, 20 + i, 20, 0, 2] for i, mid in enumerate(model_ids)],
+        include_los_cells=False,
+    )
+    assert "orientations" in seen, "le pipeline n'a pas été atteint — le test ne prouve rien"
+    assert seen["orientations"] == [2] * len(model_ids)
+
+
+def test_invalid_orientation_raises(engine):
+    """Le parseur canonique borne l'orientation : une valeur hors 0..5 est une erreur de plan."""
+    game_state = engine.game_state
+    unit_id, model_ids = _multi_model_unit(game_state)
+    with pytest.raises(ValueError):
+        preview_shoot_valid_targets_from_model_positions(
+            game_state, unit_id, [[model_ids[0], 20, 20, 0, 99]], include_los_cells=False,
         )
