@@ -34,7 +34,8 @@ from .shared_utils import (
     build_occupied_positions_set,
     build_enemy_occupied_positions_set,
     compute_candidate_footprint,
-    is_footprint_placement_valid, is_placement_valid_with_clearance,
+    is_footprint_placement_valid, is_placement_valid_with_clearance, wall_blocked_anchors,
+    socle_orientation,
     get_engagement_zone,
     get_squad_move_budget, validate_move_plan, _validate_plan_coherency, commit_move,
     get_coherency_subhex, get_cohesion_max_subhex, get_min_neighbors,
@@ -1007,6 +1008,8 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
                         game_state,
                         occupied_positions,
                         enemy_adjacent_hexes,
+                        anchor=(nc, nr),
+                        socle=unit_obj,
                     )
                     if base_ok and (
                         _geometry_is_hex(game_state)
@@ -1033,6 +1036,8 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
                     game_state,
                     occupied_positions,
                     enemy_adjacent_hexes,
+                    anchor=(neighbor_col, neighbor_row),
+                    socle=unit_obj,
                 )
                 if base_ok and (
                     _geometry_is_hex(game_state)
@@ -1444,7 +1449,8 @@ def _attempt_movement_to_destination(
     if not is_placement_valid_with_clearance(
         game_state, candidate_fp,
         shape=footprint_unit["BASE_SHAPE"], base_size=footprint_unit["BASE_SIZE"],
-        col=dest_col_int, row=dest_row_int, exclude_unit_id=unit_id_str,
+        col=dest_col_int, row=dest_row_int, orientation=socle_orientation(footprint_unit),
+        exclude_unit_id=unit_id_str,
     ):
         if "console_logs" not in game_state:
             game_state["console_logs"] = []
@@ -2276,8 +2282,13 @@ def _build_multi_hex_vectorized(
         m[cs[in_b], rs[in_b]] = True
         return m
 
-    obstacles_dest_any = walls_set | occupied_set
+    # Murs : PAS ici. Ce sont des ancres interdites au SOCLE (`wall_blocked_anchors`), déjà
+    # socle-conscientes ; les dilater par l'empreinte mesurerait le mur comme un POINT, soit
+    # strictement plus laxiste que le commit (`is_placement_valid_with_clearance`) — le masque
+    # offrirait alors des destinations que l'exécution refuse. Retranchées après la dilatation.
+    obstacles_dest_any = occupied_set
     obstacles_dest_mask = _mask_from_cells(obstacles_dest_any)
+    _wall_anchor_mask = _mask_from_cells(set(wall_blocked_anchors(game_state, unit)))
     obstacles_traverse_mask: np.ndarray = obstacles_dest_mask
     if not fly:
         # Murs toujours bloquants ; les figurines bloquantes viennent de
@@ -2308,9 +2319,11 @@ def _build_multi_hex_vectorized(
         bounds_bad = np.where(col_parity_mask, bounds_bad_even, bounds_bad_odd)
         return hit | bounds_bad
 
-    bad_dest = _placement_bad(obstacles_dest_mask)
+    bad_dest = _placement_bad(obstacles_dest_mask) | _wall_anchor_mask
     bad_traverse: np.ndarray = bad_dest
     if not fly:
+        # Traversée : les murs restent des CELLULES dilatées par l'empreinte (le socle ne
+        # traverse pas un mur), c'est la géométrie du transit et elle ne change pas.
         bad_traverse = _placement_bad(obstacles_traverse_mask)
 
     if ez > 1:
@@ -2520,7 +2533,7 @@ def _filter_ground_anchors_vectorized(
     start_pos: Tuple[int, int],
     start_col: int,
     start_row: int,
-    ez_anchor_check: Set[Tuple[int, int]],
+    anchor_blocked: Set[Tuple[int, int]],
     dest_blocked_fp: Set[Tuple[int, int]],
     walls: Set[Tuple[int, int]],
 ) -> Tuple[List[Tuple[int, int]], Set[Tuple[int, int]]]:
@@ -2528,7 +2541,9 @@ def _filter_ground_anchors_vectorized(
 
     Équivalence STRICTE avec la boucle Python d'origine (prouvée par test randomisé) :
     une ancre du champ est une destination valide ssi elle n'est ni ``start_pos`` ni dans
-    ``ez_anchor_check``, que toute son empreinte (offsets selon parité de colonne) tient dans le
+    ``anchor_blocked`` (EZ ennemie ET ancres où le socle chevauche un mur — deux ensembles déjà
+    socle-conscients, qui ne doivent donc PAS être re-dilatés par l'empreinte), que toute son
+    empreinte (offsets selon parité de colonne) tient dans le
     plateau, et qu'aucune cellule d'empreinte n'est dans ``dest_blocked_fp``. ``footprint_zone`` =
     union des empreintes des destinations valides + empreinte de départ (ajoutée telle quelle, même
     hors plateau, comme l'original), moins ``walls``. L'ordre de ``valid_destinations`` suit l'ordre
@@ -2568,10 +2583,10 @@ def _filter_ground_anchors_vectorized(
         blocked_any = (blk[fcc, frc] & inb).any(axis=1)
         valid[idx[inb_all & ~blocked_any]] = True
 
-    # Exclusion start_pos + ez_anchor_check (AVANT ajout d'empreinte, comme le ``continue`` d'origine).
+    # Exclusion start_pos + anchor_blocked (AVANT ajout d'empreinte, comme le ``continue`` d'origine).
     # Appartenance ensembliste exacte (pas d'encodage : injectivité non garantie si une ancre a un
     # centre hors plateau — cas permis par la référence, l'empreinte pouvant rester dans le plateau).
-    excl = set(ez_anchor_check)
+    excl = set(anchor_blocked)
     excl.add(start_pos)
     if n:
         excl_mask = np.fromiter(
@@ -2638,18 +2653,22 @@ def _euclidean_ground_anchor_multihex(
     ``ez <= 1`` (legacy) dilatée par l'empreinte via ``enemy_adjacent_hexes``.
     """
     import numpy as np
+    _wall_anchors_pool = wall_blocked_anchors(game_state, unit)
     if ez > 1:
         _ez_mask = _compute_mover_ez_forbidden_mask(
             game_state, unit, enemy_items, ez, board_cols, board_rows
         )
         _ec, _er = np.where(_ez_mask)
         ez_forbidden: Set[Tuple[int, int]] = {(int(c), int(r)) for c, r in zip(_ec, _er)}
-        dest_blocked_fp = walls | occupied           # EZ testée sur l'ancre (ci-dessous)
-        ez_anchor_check = ez_forbidden
+        # Murs retirés de `dest_blocked_fp` : ancres interdites au SOCLE, testées sur l'ancre
+        # comme l'EZ. Les laisser ici les mesurerait comme des POINTS dilatés par l'empreinte,
+        # soit plus laxiste que le commit — masque ⊄ exécutable.
+        dest_blocked_fp = occupied                   # EZ + murs testés sur l'ancre (ci-dessous)
+        ez_anchor_check = ez_forbidden | _wall_anchors_pool
     else:
         ez_forbidden = enemy_adjacent_hexes
-        dest_blocked_fp = walls | occupied | enemy_adjacent_hexes  # EZ dilatée par l'empreinte
-        ez_anchor_check = set()
+        dest_blocked_fp = occupied | enemy_adjacent_hexes  # EZ dilatée par l'empreinte
+        ez_anchor_check = set(_wall_anchors_pool)
 
     obstacles_tr: Set[Tuple[int, int]] = set(walls)
     obstacles_tr |= enemy_transit_blocked
@@ -3863,6 +3882,13 @@ def movement_build_model_destinations_pool(
     # vient de rétablir face à la validation.
     _mm_shape = require_key(model, "BASE_SHAPE")
     _mm_base = require_key(model, "BASE_SIZE")
+    # Ancres où le SOCLE DE CETTE FIGURINE chevauche un mur — même géométrie d'hexagone que la
+    # traversée (cf. `socle_blocked_anchor_cells`). Remplace le test par cellules d'empreinte, qui
+    # mesurait le mur comme un point et offrait des destinations d'où aucun mouvement n'est possible.
+    _wall_anchors = wall_blocked_anchors(
+        game_state,
+        {"BASE_SHAPE": _mm_shape, "BASE_SIZE": _mm_base, "orientation": mover_orient},
+    )
     ez = get_engagement_zone(game_state)
     # `thru_friendly` reste lu ici pour le terme des SŒURS et la mise en cache du champ ;
     # `thru_enemy` est appliqué par `build_move_traversal_blocked`.
@@ -3900,10 +3926,10 @@ def movement_build_model_destinations_pool(
         ez_anchor_forbidden: Set[Tuple[int, int]] = {
             (int(c), int(r)) for c, r in zip(_ez_cols, _ez_rows)
         }
-        dest_blocked = wall_hexes  # figs filtrées par niveau EFFECTIF au post-traitement (superposition inter-étage)
+        dest_blocked = _wall_anchors  # figs filtrées par niveau EFFECTIF au post-traitement (superposition inter-étage)
     else:
         ez_anchor_forbidden = enemy_adjacent_hexes
-        dest_blocked = wall_hexes  # idem : occupation des figs traitée par niveau plus bas
+        dest_blocked = _wall_anchors  # idem : occupation des figs traitée par niveau plus bas
 
     # Figurines bloquant le TRANSIT de CETTE figurine — toggles, Desperate Escape (09.07) et
     # exemption M/V (17.01) résolus par `build_move_traversal_blocked`. Ce site connaît le
@@ -4068,7 +4094,7 @@ def movement_build_model_destinations_pool(
         cells = _mover_cells(ac, ar)
         if any(not (0 <= c < board_cols and 0 <= r < board_rows) for c, r in cells):
             continue
-        if any(c in wall_hexes for c in cells):
+        if (ac, ar) in _wall_anchors:
             continue
         eff = _eff_level(cells)
         if any(c in fig_occ_by_level.get(eff, set()) for c in cells):
@@ -4300,7 +4326,6 @@ def movement_preview_move_plan(
     ]
     cohesion_red = coherency_violation_flags(cohesion_models, game_state)
 
-    wall_hexes_set = game_state.get("wall_hexes", set())
     # Occupation des autres escouades PAR NIVEAU (figs à des étages différents ne se gênent pas ;
     # murs verticaux prolongés gérés par wall_hexes, cf. stage.md). Calcul unique par niveau du plan.
     other_occ_by_level: Dict[int, Set[Tuple[int, int]]] = {
@@ -4336,7 +4361,19 @@ def movement_preview_move_plan(
         # pool l'offrait à son orientation pivotée — voile rouge sur une case parfaitement légale.
         base_valid = validate_move_plan([norm[idx]], game_state, c_individual)
         fp = footprints[idx]
-        fp_wall = bool(wall_hexes_set and fp & wall_hexes_set)
+        # Mur : géométrie d'hexagone sur l'ANCRE, comme le pool et la traversée. Le test par
+        # cellules d'empreinte qui vivait ici mesurait le mur comme un point : plus laxiste que
+        # le pool, il ne pouvait plus contredire une destination offerte, mais il laissait passer
+        # un socle chevauchant réellement un mur (jumeau exact de `_wall_anchors` du pool).
+        _m_veil = _mc_norm[str(mid)]
+        fp_wall = (nc, nr) in wall_blocked_anchors(
+            game_state,
+            {
+                "BASE_SHAPE": require_key(_m_veil, "BASE_SHAPE"),
+                "BASE_SIZE": require_key(_m_veil, "BASE_SIZE"),
+                "orientation": _ori_v,
+            },
+        )
         _other_lv = other_occ_by_level.get(lv, set())
         fp_other = bool(_other_lv and fp & _other_lv)
         # Collision intra-escouade uniquement entre figs AU MÊME NIVEAU (étages différents = pas de gêne).

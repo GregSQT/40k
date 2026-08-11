@@ -67,7 +67,7 @@ from .shared_utils import (
     build_occupied_positions_set,
     compute_candidate_footprint,
     is_footprint_placement_valid,
-    is_placement_valid_with_clearance,
+    is_placement_valid_with_clearance, wall_blocked_anchors, socle_orientation,
     update_units_cache_position,
     translate_squad_to_destination,
     update_enemy_adjacent_caches_after_unit_move,
@@ -351,7 +351,8 @@ def _fight_apply_pile_in_move(
     if not is_placement_valid_with_clearance(
         game_state, candidate_fp,
         shape=unit["BASE_SHAPE"], base_size=unit["BASE_SIZE"],
-        col=dest_col_i, row=dest_row_i, exclude_unit_id=unit_id_str,
+        col=dest_col_i, row=dest_row_i, orientation=socle_orientation(unit),
+        exclude_unit_id=unit_id_str,
     ):
         raise ValueError(
             f"Pile in illegal placement unit={unit_id_str} dest=({dest_col_i},{dest_row_i})"
@@ -705,7 +706,10 @@ def _fight_bfs_reachable_anchors_consolidation(
             if _perf:
                 s_compute_fp += time.perf_counter() - _t1
                 _t2 = time.perf_counter()
-            if not is_footprint_placement_valid(candidate_fp, game_state, occupied_positions):
+            if not is_footprint_placement_valid(
+                candidate_fp, game_state, occupied_positions,
+                anchor=(neighbor_col, neighbor_row), socle=unit,
+            ):
                 if _perf:
                     s_placement_valid += time.perf_counter() - _t2
                 continue
@@ -2441,6 +2445,11 @@ def _fight_pile_in_build_model_pool(
         sib_socles.append((_sib_eff, _charge_model_socle(game_state, sib, int(pc), int(pr))))
 
     wall_set = set(wall_hexes)
+    # Fin de mouvement 03 : ancres où le SOCLE chevauche un mur (jumeau du move et de la charge).
+    # `cand_fp & wall_set` mesurait le mur comme un point, donc pile-in / consolidation pouvaient
+    # poser une figurine d'où plus aucun mouvement n'est possible. `wall_set` reste pour le seul
+    # TRANSIT du BFS sol, qui chemine en cellules.
+    _wall_anchors_end = wall_blocked_anchors(game_state, model)
     start_col, start_row = int(model["col"]), int(model["row"])
     start_fp = _candidate_footprint_charge(start_col, start_row, unit, game_state, fp_offset_pair)
     start_min = min(min_distance_between_sets(start_fp, tfp) for tfp in target_fps)
@@ -2524,8 +2533,8 @@ def _fight_pile_in_build_model_pool(
         cand_fp = _candidate_footprint_charge(cc, rr, unit, game_state, fp_offset_pair)
         if any(not (0 <= x < board_cols and 0 <= y < board_rows) for (x, y) in cand_fp):
             continue
-        if not skip_wall_blocker and (cand_fp & wall_set):
-            continue  # 03 « Ending a move » : mur discret (déjà exclu sur étage)
+        if not skip_wall_blocker and (cc, rr) in _wall_anchors_end:
+            continue  # 03 « Ending a move » : socle vs hexagone de mur (déjà exclu sur étage)
         cand_socle = _charge_model_socle(game_state, model, int(cc), int(rr))
         if any(footprints_overlap(cand_socle, b) for b in _blockers_lvl):
             continue
@@ -3740,6 +3749,11 @@ def _fight_consolidation_build_model_pool(
         sib_socles.append((_sib_eff, _charge_model_socle(game_state, sib, int(pc), int(pr))))
 
     wall_set = set(wall_hexes)
+    # Fin de mouvement 03 : ancres où le SOCLE chevauche un mur (jumeau du move et de la charge).
+    # `cand_fp & wall_set` mesurait le mur comme un point, donc pile-in / consolidation pouvaient
+    # poser une figurine d'où plus aucun mouvement n'est possible. `wall_set` reste pour le seul
+    # TRANSIT du BFS sol, qui chemine en cellules.
+    _wall_anchors_end = wall_blocked_anchors(game_state, model)
     start_col, start_row = int(model["col"]), int(model["row"])
     start_fp = _candidate_footprint_charge(start_col, start_row, unit, game_state, fp_offset_pair)
     if tier_kind == "enemy":
@@ -3821,8 +3835,8 @@ def _fight_consolidation_build_model_pool(
         cand_fp = _candidate_footprint_charge(cc, rr, unit, game_state, fp_offset_pair)
         if any(not (0 <= x < board_cols and 0 <= y < board_rows) for (x, y) in cand_fp):
             continue
-        if not skip_wall_blocker and (cand_fp & wall_set):
-            continue  # finir sur un mur interdit (déjà exclu sur étage)
+        if not skip_wall_blocker and (cc, rr) in _wall_anchors_end:
+            continue  # 03 « Ending a move » : socle vs hexagone de mur (déjà exclu sur étage)
         cand_socle = _charge_model_socle(game_state, model, int(cc), int(rr))
         if any(footprints_overlap(cand_socle, b) for b in _blockers_lvl):
             continue  # chevauchement ennemi / autre unité amie AU MÊME ÉTAGE (euclidien, tangence OK)

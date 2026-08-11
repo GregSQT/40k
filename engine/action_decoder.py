@@ -1500,7 +1500,6 @@ class ActionDecoder:
         rangement était écrit à chacune. Une troisième sortie ajoutée ici ne peut plus servir un
         pool sans le mémoïser.
         """
-        wall_hexes = self._wall_hex_set(game_state)
         board_cols = int(require_key(game_state, "board_cols"))
         board_rows = int(require_key(game_state, "board_rows"))
         pool_set, normalized_pool, pool_np, pool_grid, even_mask_np = self._deployment_pool_entry(
@@ -1518,12 +1517,21 @@ class ActionDecoder:
         # `deploy_footprint_occupied`). Convention projet : le déploiement copie la phase move.
         # Empreinte mono-hex : géométrie hex (x1 — 1 fig = 1 case, `geometry_is_hex`) ou socle de
         # taille 1. Le prédicat était `ez <= 1`, qui ne désigne plus le x1 depuis que l'EZ vaut 2".
+        from engine.phase_handlers.shared_utils import wall_blocked_anchors
+        _wall_anchors = wall_blocked_anchors(game_state, unit)
+
         from engine.spatial_relations import geometry_is_hex
         if geometry_is_hex(game_state) or base_size == 1:
             # Single-hex footprint: pool + murs (le chevauchement passe par le clearance)
-            # Exactement le sur-ensemble de scoring (pool moins murs) : le recopier ici en
-            # ferait diverger la définition du contrat `valid_hexes ⊆ scoring_hexes`.
-            cell_valid = self.deployment_scoring_hexes(game_state, current_deployer)
+            # Part du sur-ensemble `scoring` (pool moins murs bruts), puis retire les ancres où le
+            # SOCLE chevauche un mur. À x1 les deux ensembles coïncident (une fig = une case), au
+            # dessus un socle de taille 1 a un rayon non nul et peut mordre l'hexagone voisin — le
+            # commit le refuse, le masque doit donc le refuser aussi. Le contrat
+            # `valid_hexes ⊆ scoring_hexes` tient : on ne fait que retrancher.
+            cell_valid = [
+                hx for hx in self.deployment_scoring_hexes(game_state, current_deployer)
+                if hx not in _wall_anchors
+            ]
             return self._deployment_clearance_filter(game_state, str(unit_id), unit, cell_valid)
 
         # Multi-hex units: vectorized numpy footprint check (bornes + murs + pool)
@@ -1536,17 +1544,13 @@ class ActionDecoder:
 
         grid_cols = board_cols + 10
         grid_rows = board_rows + 10
-        obstacle_grid = np.zeros((grid_cols, grid_rows), dtype=bool)
-        if wall_hexes:
-            obs_arr = np.array(list(wall_hexes), dtype=np.int32)
-            in_grid = (
-                (obs_arr[:, 0] >= 0) & (obs_arr[:, 0] < grid_cols) &
-                (obs_arr[:, 1] >= 0) & (obs_arr[:, 1] < grid_rows)
-            )
-            obs_arr = obs_arr[in_grid]
-            if len(obs_arr) > 0:
-                obstacle_grid[obs_arr[:, 0], obs_arr[:, 1]] = True
-
+        # Murs : PLUS dans la grille érodée. Le volet mur est désormais un ensemble d'ANCRES
+        # interdites (socle vs hexagone, `wall_blocked_anchors`), donc DÉJÀ socle-conscient —
+        # l'éroder une seconde fois par l'empreinte mesurerait le socle deux fois. Il est
+        # retranché APRÈS l'érosion, exactement comme le pool de déploiement PvP le fait. La
+        # grille n'érode plus que l'appartenance au pool et les bornes, qui sont bien des
+        # propriétés de CELLULE.
+        #
         # Erosion morphologique. Le calcul direct materialisait un tableau (Nk, M, 2) par unite :
         # sur le board x5 le pool de deploiement fait ~16 000 hexes et un socle 18 pese 211
         # offsets, soit 3,4 M positions construites puis indexees a chaque appel. On erode plutot
@@ -1560,7 +1564,7 @@ class ActionDecoder:
         # la grille etendue laisse la case a False (`shifted` initialise a zero).
         in_board = np.zeros_like(pool_grid)
         in_board[:board_cols, :board_rows] = True
-        ok_grid = pool_grid & ~obstacle_grid & in_board
+        ok_grid = pool_grid & in_board
 
         valid_mask = np.zeros(len(pool_np), dtype=bool)
         for mask, off_arr in ((even_mask_np, off_e_np), (~even_mask_np, off_o_np)):
@@ -1575,7 +1579,9 @@ class ActionDecoder:
 
         # `.tolist()` convertit le tableau en entiers Python en une passe C ; l'ancien
         # `(int(c), int(r))` par element payait deux appels `int()` par hex retenu.
-        cell_valid = [(c, r) for c, r in pool_np[valid_mask].tolist()]
+        cell_valid = [
+            (c, r) for c, r in pool_np[valid_mask].tolist() if (c, r) not in _wall_anchors
+        ]
         return self._deployment_clearance_filter(game_state, str(unit_id), unit, cell_valid)
 
     def _deployment_clearance_filter(

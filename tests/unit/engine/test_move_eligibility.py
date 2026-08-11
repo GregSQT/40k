@@ -280,7 +280,9 @@ class TestMultiHexFootprintInvariants:
         # Footprints at (5,10) and (6,10) share 4 hexes: (5,9),(5,10),(6,10),(6,11)
         occupied = compute_candidate_footprint(5, 10, stub, gs)
         candidate_near = compute_candidate_footprint(6, 10, stub, gs)
-        assert not is_footprint_placement_valid(candidate_near, gs, occupied)
+        assert not is_footprint_placement_valid(
+            candidate_near, gs, occupied, anchor=(6, 10), socle=stub
+        )
 
     def test_footprint_no_overlap_valid_placement(self):
         """footprint_no_overlap : placement valide si l'empreinte candidate ne chevauche aucune cellule occupée."""
@@ -288,7 +290,9 @@ class TestMultiHexFootprintInvariants:
         stub = {"BASE_SIZE": 3, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "round"}
         occupied = compute_candidate_footprint(5, 10, stub, gs)
         candidate_far = compute_candidate_footprint(20, 10, stub, gs)
-        assert is_footprint_placement_valid(candidate_far, gs, occupied)
+        assert is_footprint_placement_valid(
+            candidate_far, gs, occupied, anchor=(20, 10), socle=stub
+        )
 
     def test_footprint_clearance_off_board_invalid(self):
         """footprint_clearance : empreinte multi-hex sortant du bord du plateau → placement invalide."""
@@ -298,4 +302,4 @@ class TestMultiHexFootprintInvariants:
         fp_corner = compute_candidate_footprint(0, 0, stub, gs)
         neg_hexes = {(c, r) for c, r in fp_corner if c < 0 or r < 0}
         assert neg_hexes, "footprint at (0,0) must extend off-board with BASE_SIZE=3"
-        assert not is_footprint_placement_valid(fp_corner, gs, set())
+        assert not is_footprint_placement_valid(fp_corner, gs, set(), anchor=(0, 0), socle=stub)

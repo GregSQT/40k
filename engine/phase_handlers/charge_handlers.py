@@ -43,7 +43,8 @@ from .shared_utils import (
     get_source_unit_rule_id_for_effect as shared_get_source_unit_rule_id_for_effect,
     get_source_unit_rule_display_name_for_effect as shared_get_source_unit_rule_display_name_for_effect,
     build_occupied_positions_set, build_enemy_occupied_positions_set, compute_candidate_footprint, is_footprint_placement_valid,
-    is_placement_valid_with_clearance, candidate_overlaps_any_unit,
+    is_placement_valid_with_clearance, candidate_overlaps_any_unit, wall_blocked_anchors,
+    socle_orientation,
     _synth_model_entry,
     enemy_entries_on_battlefield, entries_on_battlefield, entry_footprint, entry_is_on_battlefield,
     roll_charge_distance, unit_can_reroll_charge, charge_target_within_max_distance,
@@ -785,7 +786,10 @@ def _charge_reverse_goal_bfs_for_eligibility(
         if _perf and _t_candidate_fp0 is not None:
             goal_candidate_fp_s += time.perf_counter() - _t_candidate_fp0
         _t_placement0 = time.perf_counter() if _perf else None
-        if not is_footprint_placement_valid(candidate_fp, game_state, occupied_positions):
+        if not is_footprint_placement_valid(
+            candidate_fp, game_state, occupied_positions,
+            anchor=(anchor[0], anchor[1]), socle=unit,
+        ):
             if _perf and _t_placement0 is not None:
                 goal_placement_s += time.perf_counter() - _t_placement0
             rejected_placement_n += 1
@@ -894,7 +898,10 @@ def _charge_reverse_goal_bfs_for_eligibility(
             candidate_fp = _candidate_footprint_charge(
                 neighbor[0], neighbor[1], unit, game_state, fp_offset_pair
             )
-            if not is_footprint_placement_valid(candidate_fp, game_state, occupied_positions):
+            if not is_footprint_placement_valid(
+                candidate_fp, game_state, occupied_positions,
+                anchor=(neighbor[0], neighbor[1]), socle=unit,
+            ):
                 continue
             visited.add(neighbor)
             queue.append((neighbor, next_dist, origin_goal))
@@ -3007,7 +3014,8 @@ def _attempt_charge_to_destination(game_state: Dict[str, Any], unit: Dict[str, A
     _placement_ok = is_placement_valid_with_clearance(
         game_state, candidate_fp,
         shape=unit["BASE_SHAPE"], base_size=unit["BASE_SIZE"],
-        col=dest_col_int, row=dest_row_int, exclude_unit_id=unit_id_str,
+        col=dest_col_int, row=dest_row_int, orientation=socle_orientation(unit),
+        exclude_unit_id=unit_id_str,
     )
     _t_occ1 = time.perf_counter() if _perf else None
     if not _placement_ok:
@@ -3144,15 +3152,20 @@ def _is_valid_charge_destination(game_state: Dict[str, Any], col: int, row: int,
         row_int >= game_state["board_rows"]):
         return False
 
-    # Wall collision check
-    if (col_int, row_int) in game_state["wall_hexes"]:
+    # Wall collision check — SOCLE, pas ancre : sortie anticipée avant le coût de
+    # `build_occupied_positions_set`, avec la même géométrie que le test complet plus bas
+    # (l'ancienne appartenance `(col,row) in wall_hexes` en était le sous-ensemble strict).
+    if (col_int, row_int) in wall_blocked_anchors(game_state, unit):
         return False
 
     unit_id_str = str(unit["id"])
     occupied_positions = build_occupied_positions_set(game_state, exclude_unit_id=unit_id_str)
     _fp_pair = _charge_prepare_footprint_offsets(unit, game_state)
     candidate_fp = _candidate_footprint_charge(col_int, row_int, unit, game_state, _fp_pair)
-    if not is_footprint_placement_valid(candidate_fp, game_state, occupied_positions):
+    if not is_footprint_placement_valid(
+        candidate_fp, game_state, occupied_positions,
+        anchor=(col_int, row_int), socle=unit,
+    ):
         return False
 
     # CRITICAL: Verify destination is in the valid pool
@@ -3641,6 +3654,10 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
     _bfs_board_cols = int(require_key(game_state, "board_cols"))
     _bfs_board_rows = int(require_key(game_state, "board_rows"))
     _bfs_wall_hexes: Set[Tuple[int, int]] = game_state.get("wall_hexes", set())
+    # Ancres où le SOCLE DU CHARGEUR chevauche un mur (géométrie d'hexagone, jumeau du move) :
+    # c'est le prédicat de PLACEMENT. `_bfs_wall_hexes` reste, mais pour le seul TRANSIT du BFS
+    # hex, où une figurine tient dans sa case et où walls == ancres interdites.
+    _bfs_wall_anchors = wall_blocked_anchors(game_state, unit)
 
     # Take to the skies (21.03) : la charge FLY traverse murs + figs → reachability = disque cube de
     # rayon ``bfs_max_distance`` (traversée libre, comme la phase move). Seuls le placement final
@@ -3668,7 +3685,7 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
                 candidate_fp = _candidate_footprint_charge(nc, nr, unit, game_state, fp_offset_pair)
                 if any(not (0 <= x < _bfs_board_cols and 0 <= y < _bfs_board_rows) for (x, y) in candidate_fp):
                     continue
-                if (_bfs_wall_hexes and (candidate_fp & _bfs_wall_hexes)) or (
+                if (neighbor_pos in _bfs_wall_anchors) or (
                     occupied_positions and (candidate_fp & occupied_positions)
                 ):
                     continue
@@ -3769,7 +3786,7 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
             candidate_fp = _candidate_footprint_charge(nc, nr, unit, game_state, fp_offset_pair)
             if any(not (0 <= x < _bfs_board_cols and 0 <= y < _bfs_board_rows) for (x, y) in candidate_fp):
                 continue
-            if (_bfs_wall_hexes and (candidate_fp & _bfs_wall_hexes)) or (
+            if (neighbor_pos in _bfs_wall_anchors) or (
                 occupied_positions and (candidate_fp & occupied_positions)
             ):
                 continue
@@ -3923,13 +3940,19 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
 
             _t_placement0 = time.perf_counter() if _perf else None
             if _bbox is not None:
-                # Bbox pre-check already confirmed in-bounds: only check walls + occupied (C-level set ops)
+                # Bbox pre-check already confirmed in-bounds: only check walls + occupied.
+                # Murs = ancre interdite au SOCLE (`_bfs_wall_anchors`), JAMAIS `fp & wall_hexes` :
+                # ce raccourci était la copie « rapide » du test complet et mesurait le mur comme
+                # un point, donc il ré-ouvrait à lui seul l'écart placement/traversée.
                 _placement_ok = not (
-                    (_bfs_wall_hexes and (candidate_fp & _bfs_wall_hexes)) or
+                    (neighbor_col_int, neighbor_row_int) in _bfs_wall_anchors or
                     (occupied_positions and (candidate_fp & occupied_positions))
                 )
             else:
-                _placement_ok = is_footprint_placement_valid(candidate_fp, game_state, occupied_positions)
+                _placement_ok = is_footprint_placement_valid(
+                    candidate_fp, game_state, occupied_positions,
+                    anchor=(neighbor_col_int, neighbor_row_int), socle=unit,
+                )
             if not _placement_ok:
                 if _perf and _t_placement0 is not None:
                     bfs_placement_s += time.perf_counter() - _t_placement0
