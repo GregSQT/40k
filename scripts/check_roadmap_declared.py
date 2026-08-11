@@ -53,11 +53,17 @@ Usage : python3 scripts/check_roadmap_declared.py --merge   (depuis le hook `pre
 Sortie : 0 si la dette est sous le plafond, 1 si la porte refuse, 2 si elle n'a PAS PU se
         prononcer (usage faux, `--merge` hors fusion, état du dépôt inattendu). Une porte qui ne
         sait pas ne dit jamais oui : 2 bloque le commit comme 1, mais l'annonce autrement.
-Contournement assumé : `ROADMAP_GATE=off git merge …`.
+Contournement assumé — DEUX FORMES, selon le moment, et c'est le moment qui décide :
+  - avant de lancer la fusion   : `ROADMAP_GATE=off git merge …`
+  - après un refus (fusion en cours, MERGE_HEAD présent) : `ROADMAP_GATE=off git commit`
 ⚠️ PAS `--no-verify` : mesuré le 2026-08-12 sur git 2.43, `git merge --no-verify` saute
 `pre-merge-commit` et `commit-msg`, JAMAIS `prepare-commit-msg` — là où cette porte vit depuis
 qu'elle a besoin de MERGE_HEAD. La sortie de secours annoncée pendant un jour n'existait donc pas :
 le refus enfermait l'utilisateur au milieu d'une fusion, en lui indiquant une porte murée.
+⚠️ ET PAS `git merge` DANS LE MESSAGE DE REFUS : quand ce refus s'affiche, la fusion est déjà
+commencée, et git répond alors `fatal: You have not concluded your merge (MERGE_HEAD exists)`.
+Une consigne juste au mauvais moment est aussi murée qu'une consigne fausse (mesuré le 2026-08-12,
+deuxième fois sur la même arête).
 
 JAMAIS DE TRACE PYTHON EN SORTIE. Mesuré le 2026-08-11 : `--merge` mourait sur une
 `CalledProcessError` de dix lignes dans deux états atteignables — sans fusion en cours, et pendant
@@ -115,8 +121,10 @@ def verdict(undeclared: list[str], branch_declares: bool) -> tuple[bool, str]:
         f"     écris leurs lignes — celle de la fusion comprise — dans {ROADMAP},\n"
         "     puis  git add -A  et  git commit.  L'index compte : la ligne écrite ici et\n"
         "     maintenant vaut déclaration.\n\n"
-        "   Si aucun de ces merges n'est un chantier : ROADMAP_GATE=off git merge …\n"
-        "   (`--no-verify` ne saute PAS `prepare-commit-msg` : il ne désarme pas cette porte.)"
+        f"   Si aucun de ces merges n'est un chantier : {GATE_OFF_ENV}=off git commit\n"
+        "   (la fusion est DÉJÀ en cours quand tu lis ceci : `git merge` répondrait\n"
+        "    « You have not concluded your merge ». Et `--no-verify` ne saute pas\n"
+        "    `prepare-commit-msg`, donc il ne désarme pas cette porte.)"
     )
 
 
@@ -287,7 +295,8 @@ if __name__ == "__main__":
             "   La porte n'a pas pu se prononcer : le commit est refusé, pas la fusion approuvée.\n"
             "   Si l'état du dépôt est sain, c'est un défaut de la porte elle-même — à corriger\n"
             "   dans scripts/check_roadmap_declared.py.\n"
-            "   Pour passer outre en attendant : git merge --no-verify",
+            f"   Pour passer outre en attendant : {GATE_OFF_ENV}=off git commit  (fusion en cours)\n"
+            f"   ou {GATE_OFF_ENV}=off git merge …  si elle n'a pas encore commencé.",
             file=sys.stderr,
         )
         code = 2

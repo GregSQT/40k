@@ -81,8 +81,11 @@ def test_the_refusal_states_the_escape_hatch_that_exists() -> None:
     Il doit nommer celle qui marche, ET la remédiation qui débloque sans annuler la fusion.
     """
     _ok, message = gate.verdict(merges(gate.MAX_UNDECLARED), branch_declares=False)
-    assert f"{gate.GATE_OFF_ENV}=off" in message
-    assert "git add" in message and "git commit" in message
+    assert f"{gate.GATE_OFF_ENV}=off git commit" in message, (
+        "mi-fusion, `git merge` répond « You have not concluded your merge » : le refus doit "
+        "nommer la commande qui marche DANS l'état où il s'affiche"
+    )
+    assert "git add" in message
 
 
 def test_the_hook_is_installed_and_executable() -> None:
@@ -606,7 +609,9 @@ def test_an_unexpected_git_failure_refuses_readably(tmp_path: pathlib.Path) -> N
     assert "Traceback" not in result.stderr and "Traceback" not in result.stdout
     assert result.returncode == 2
     assert "contrôle impossible" in result.stderr
-    assert "--no-verify" in result.stderr
+    # Le filet aussi doit indiquer une issue qui existe : il annonçait `git merge --no-verify`,
+    # murée deux fois (n'atteint pas `prepare-commit-msg`, et `git merge` est refusé mi-fusion).
+    assert f"{gate.GATE_OFF_ENV}=off git commit" in result.stderr
 
 
 def _repo_at_the_ceiling_with_the_gate_armed(tmp_path: pathlib.Path) -> pathlib.Path:
@@ -627,7 +632,13 @@ def test_the_announced_escape_hatch_actually_works(tmp_path: pathlib.Path) -> No
 
     Mesuré le 2026-08-12 sur git 2.43 : `git merge --no-verify` — ce que le refus indiquait —
     ne saute PAS `prepare-commit-msg`, donc la porte refusait quand même et l'utilisateur restait
-    coincé au milieu de sa fusion. Le test exerce la sortie RÉELLEMENT annoncée aujourd'hui.
+    coincé au milieu de sa fusion.
+
+    ⚠️ LE TEST NE REVIENT PAS À UN DÉPÔT PROPRE. Il portait un `git merge --abort` avant
+    d'exercer la sortie : il validait donc un état que l'utilisateur refusé n'a jamais sous la
+    main. Or c'est exactement là qu'était le second défaut — `ROADMAP_GATE=off git merge` répond
+    `fatal: You have not concluded your merge`. La sortie s'exerce DEPUIS l'état de refus,
+    MERGE_HEAD présent, et c'est `git commit` qui la porte.
     """
     repo = _repo_at_the_ceiling_with_the_gate_armed(tmp_path)
     avant = run(repo, "log", "--oneline", "--first-parent").count("\n") + 1
@@ -640,20 +651,33 @@ def test_the_announced_escape_hatch_actually_works(tmp_path: pathlib.Path) -> No
         "`--no-verify` n'atteint pas `prepare-commit-msg` : la porte doit refuser malgré lui — "
         "c'est précisément pourquoi il ne peut pas servir de sortie de secours"
     )
-    run(repo, "merge", "--abort")
+    assert (repo / ".git" / "MERGE_HEAD").exists(), (
+        "la sortie doit s'exercer depuis l'état de refus, pas depuis un dépôt propre"
+    )
+
+    desarme = {**os.environ, gate.GATE_OFF_ENV: "off"}
+    relance = subprocess.run(
+        ["git", "merge", "--no-ff", "-m", "merge: ch-refuse", "ch-refuse"],
+        cwd=repo, capture_output=True, text=True, env=desarme,
+    )
+    assert relance.returncode != 0 and "MERGE_HEAD" in relance.stderr, (
+        "mi-fusion, git refuse un nouveau `merge` : le message ne doit donc pas l'indiquer"
+    )
 
     passe = subprocess.run(
-        ["git", "merge", "--no-ff", "-m", "merge: ch-refuse", "ch-refuse"],
-        cwd=repo, capture_output=True, text=True,
-        env={**os.environ, gate.GATE_OFF_ENV: "off"},
+        ["git", "commit", "-m", "merge: ch-refuse"],
+        cwd=repo, capture_output=True, text=True, env=desarme,
     )
     apres = run(repo, "log", "--oneline", "--first-parent").count("\n") + 1
 
     assert passe.returncode == 0, (
-        f"la sortie de secours annoncée doit laisser passer :\n{passe.stderr}"
+        f"la sortie de secours annoncée doit laisser passer :\n{passe.stdout}{passe.stderr}"
     )
     assert apres == avant + 1, "le commit de fusion doit exister"
     assert "désarmée" in passe.stdout + passe.stderr, "le désarmement doit se DIRE, pas se taire"
+    assert f"{gate.GATE_OFF_ENV}=off git commit" in refuse.stdout + refuse.stderr, (
+        "le refus doit nommer la commande qui marche DANS l'état où il s'affiche"
+    )
 
 
 def test_writing_the_line_during_the_merge_unblocks_it(tmp_path: pathlib.Path) -> None:

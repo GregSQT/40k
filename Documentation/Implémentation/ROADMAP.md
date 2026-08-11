@@ -657,9 +657,11 @@ faut pas lui faire dire qu'un chantier a sa ligne.
 
 Ce qu'elle NE fait pas non plus : juger si la ligne écrite est juste, ni voir un chantier livré par
 un commit direct sur `main`. Contournement assumé quand la fusion n'est pas un chantier :
-`ROADMAP_GATE=off git merge …` — **pas** `--no-verify`, qui ne saute pas `prepare-commit-msg`.
-Pour se débloquer APRÈS un refus, sans annuler la fusion : écrire la ligne, `git add -A`,
-`git commit` — l'index vaut déclaration. État courant sans rien bloquer : `--status`.
+`ROADMAP_GATE=off git merge …` **avant** de lancer la fusion, `ROADMAP_GATE=off git commit` une
+fois qu'elle est commencée — c'est le moment qui décide, et mi-fusion git refuse tout nouveau
+`merge`. **Pas** `--no-verify`, qui ne saute pas `prepare-commit-msg`. Pour se débloquer APRÈS un
+refus sans rien désarmer : écrire la ligne, `git add -A`, `git commit` — l'index vaut déclaration.
+État courant sans rien bloquer : `--status`.
 
 ✅ **La porte ne meurt plus sur une trace Python** (2026-08-11). Deux états REPRODUITS la tuaient en
 `CalledProcessError` de dix lignes : `--merge` lancé hors fusion, et — atteignable par le hook réel —
@@ -717,6 +719,16 @@ fait par `ROADMAP_GATE=off` (et la porte le DIT au lieu de se taire), et le refu
 que des issues qui existent. Un troisième vert vacant fermé au passage : les fixtures passaient
 `--no-verify` avant toute installation de hook, donc rien n'y testait la sortie de secours.
 Verrous vérifiés ROUGES défaut remis.
+
+✅ **La consigne de sortie vaut pour le MOMENT où elle s'affiche** (2026-08-12, 5ᵉ passe
+`/code-review`, même arête une troisième fois). Le refus indiquait `ROADMAP_GATE=off git merge …`
+alors qu'il ne s'affiche QUE fusion commencée : git répond là `fatal: You have not concluded your
+merge (MERGE_HEAD exists)`. La commande qui marche à cet instant est `ROADMAP_GATE=off git commit`,
+et c'est elle qui est écrite — dans le refus, dans le filet d'exception (qui annonçait encore
+`--no-verify`) et ici. Le test de la sortie de secours faisait par ailleurs `git merge --abort`
+avant de l'exercer : il validait depuis un dépôt propre, jamais depuis l'état de refus décrit par
+sa propre docstring — l'abort est retiré, la sortie s'exerce MERGE_HEAD présent. Trois verrous
+vérifiés ROUGES défaut remis.
 
 **Deux pièges déjà payés, à ne pas reprendre pour des régressions.** (1) Un contrôle de liens naïf
 rend **152 hits** dont aucun n'est mort (143 dans `Implémenté/stage.md`, 5 dans `Boardx10-audit.md`,
