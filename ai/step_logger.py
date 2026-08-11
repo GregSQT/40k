@@ -11,7 +11,7 @@ Extracted from ai/train.py during refactoring (2025-01-21)
 import time
 import builtins
 import json
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
 from shared.data_validation import require_key
 
@@ -120,6 +120,32 @@ def _ability_token(display_name: Any) -> str:
     if not isinstance(display_name, str) or not display_name.strip():
         return ""
     return f" [{display_name.strip().upper()}]"
+
+
+def _charge_distance_segment(details: Dict[str, Any]) -> str:
+    """`` [Dist: 5.0" | Nearest: 3.0"]`` — les deux distances 11.04 de cette charge.
+
+    JUMEAU EXACT des lignes CHARGED et FAILED CHARGE : c'est en les comparant que la mesure
+    parle (mediane des ratees a 9", des reussies a 5", sur le step.log du 2026-08-11), donc un
+    segment pose d'un seul cote ne repondrait a rien.
+
+    `Dist` = distance a la cible AU MOMENT DU CHOIX, `Nearest` = distance a l'ennemi le plus
+    proche a la DECLARATION : leur ecart dit si l'agent charge autre chose que ce qu'il a sous
+    la main. En POUCES, comme le `[Roll: N]` qui les precede sur la meme ligne.
+
+    Chaque terme est omis s'il est absent, et l'absence est une information : une charge
+    declaree qui n'atteint aucune cible (11.02.3) n'a pas de distance a la cible, et ecrire 0
+    la ferait passer pour une charge au contact.
+    """
+    parts = []
+    target_inches = details.get("charge_target_distance_inches")  # get allowed : cf. docstring
+    nearest_inches = details.get("charge_nearest_enemy_inches")  # get allowed : cf. docstring
+    if target_inches is not None:
+        parts.append(f'Dist: {float(target_inches):.1f}"')
+    if nearest_inches is not None:
+        parts.append(f'Nearest: {float(nearest_inches):.1f}"')
+    return f" [{' | '.join(parts)}]" if parts else ""
+
 
 class StepLogger:
     """
@@ -992,6 +1018,8 @@ class StepLogger:
             else:
                 base_msg = f"{unit_label} CHARGED"
 
+            base_msg += _charge_distance_segment(details)
+
             # Add reward if available
             reward = details.get("reward")
             if reward is not None:
@@ -1022,6 +1050,7 @@ class StepLogger:
                 f"{unit_label} FAILED CHARGE to unit {target_id}({target_col},{target_row}) "
                 f"[Roll: {charge_roll}]"
             )
+            base_msg += _charge_distance_segment(details)
 
             return base_msg
 

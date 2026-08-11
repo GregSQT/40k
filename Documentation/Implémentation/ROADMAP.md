@@ -55,7 +55,9 @@
   `game_critical/invalid_action_rate` reste à **0** (il dirait qu'un slot ouvert n'est pas
   exécutable, le risque propre à ce chantier), `02_combat/n_charge_success_rate` proche de **1.0**,
   et `02_combat/m_charge_attempts` **non nul** — à zéro, le masque ne proposerait plus jamais de
-  charge, ce qui serait la régression à attraper.
+  charge, ce qui serait la régression à attraper. Les courbes `reserves/*` et `charge_distance/*`
+  doivent être **peuplées** : ce sont elles qui rendent ce run utile au-delà du contrôle de
+  pipeline, et c'est la raison pour laquelle il vient APRÈS les chantiers de métriques.
   `--new` et non `--append` : ce dernier réapplique les hyperparamètres de `x1` au modèle chargé,
   dont `ent_coef` qui repart à 0,1, et écrase le modèle canonique. `--new`, lui, archive les
   artefacts précédents (`archive_canonical_artifacts_for_new_run`).
@@ -73,6 +75,18 @@
   Livré avec le **journal de contrôle d'objectif** côté API : une ligne par objectif disputé à
   chaque frontière de phase (sommes d'OC, figurines présentes dans l'aire, verdict), qui répond
   à « pourquoi mon unité posée sur l'objectif ne le prend pas » sans ouvrir la console.
+- ✅ **Livraison 2026-08-11 — distances de charge au `step.log` et en métriques.** Distance à
+  l'ennemi le plus proche **à la déclaration** (11.02.1) et distance à la cible **au choix**
+  (11.04), mesurées par la primitive qui porte déjà le gate 11.04 — donc par figurine, dans la
+  métrique du moteur, sans second oracle. Le trajet réel n'est PAS mesuré : il n'existe ici que
+  borné par le jet ou par ancre, l'un tronqué, l'autre divergent de l'oracle par-figurine.
+  **Sept** sites de journalisation, pas cinq : le décompte annoncé oubliait le chemin **gym**
+  (`w40k_core`), celui-là même qui produit le step.log d'entraînement.
+  10 courbes `charge_distance/*` (deux camps × plus proche, cible, cible réussie, cible ratée,
+  part à ≥ 9"), dérivées des **mêmes lignes de journal** que `m_charge_attempts` : un seul
+  compteur par événement, pas deux qui pourraient diverger. Une activation close sur WAIT
+  n'émet aucune ligne, donc n'entre dans aucune statistique.
+  → [`Implémenté/metriques_reserves_et_charge_2026-08-11.md`](Implémenté/metriques_reserves_et_charge_2026-08-11.md) §Ce qui reste
 - ✅ **Livraison 2026-08-11 — métriques (réserves), barème et alignement de la charge sur 11.02.**
   Sept tranches, chacune partie d'une mesure du run `x1_long` du même jour.
   → [`Implémenté/metriques_reserves_et_charge_2026-08-11.md`](Implémenté/metriques_reserves_et_charge_2026-08-11.md)
@@ -217,12 +231,6 @@ Prêts à démarrer sans décision produit :
   puis réécrire la note avec ce chiffre. Un réglage tenu par un chiffre faux se retourne au
   premier changement de durée — c'est déjà ce qui était arrivé à `bot_eval_freq` calé sur
   200 000 épisodes.
-- **Distances de charge au `step.log` et en métriques** (~0,5 j) — distance (pathfinding) à
-  l'ennemi le plus proche **à la déclaration**, distance à la cible **au choix**. Les deux moments
-  n'existaient pas séparément avant l'alignement 11.02 du 2026-08-11 ; ils existent maintenant.
-  **Cinq** sites de journalisation à couvrir dans `charge_handlers` (2 succès, 3 échecs) — motif
-  jumeau classique, une couverture partielle rendrait la mesure muette sur une partie des cas.
-  → [`Implémenté/metriques_reserves_et_charge_2026-08-11.md`](Implémenté/metriques_reserves_et_charge_2026-08-11.md) §Ce qui reste
 - **Compteurs `abilities/`** (~1 j) — un compteur par règle d'unité RÉELLEMENT appliquée, par
   joueur, **plus une courbe d'exposition** : sans elle, un zéro ne distingue pas « jamais
   déclenchée » de « jamais dans le roster ». Deux familles, les deux obligatoires : celles qui

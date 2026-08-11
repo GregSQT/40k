@@ -155,14 +155,77 @@ réparés — deux espéraient d'une graine une situation devenue rare et **cons
 leur journal, un troisième verrouillait un échec de charge en gym, motif qui reste testé sur le
 chemin qui l'émet encore.
 
+## 8. Distances de charge — la mesure prise à l'instant où la règle la regarde
+
+Le §6 ci-dessus a été obtenu en **re-dérivant à la main** les distances depuis les coordonnées du
+step.log. Elles sont désormais mesurées par le moteur, aux deux instants que l'alignement 11.02 a
+rendus distincts et réels : la **déclaration** (11.02.1, l'activation) et le **choix de la cible**
+(11.04).
+
+**Quelle distance.** Celle du gate 11.04 lui-même — « within the maximum distance of your unit » —
+via `charge_target_edge_distance_subhex`, qui n'est que la VALEUR de `charge_target_within_max_distance`.
+Donc bord-à-bord, **par figurine** (le socle est construit sur `model_centers`), dans la métrique
+que le moteur résout déjà. C'est la seule grandeur directement comparable à un 2D6.
+
+**Ce qu'elle ne dit pas** : le trajet réel. 11.04 exige aussi un plan légal dans le budget, et un
+mur peut rendre une cible proche inatteignable. La distance de trajet n'existe ici que **bornée par
+le jet** (`_compute_plan_context`, donc tronquée exactement sur les déclarations trop lointaines
+qu'on veut compter) ou **par ancre** (pool BFS, donc divergente de l'oracle par-figurine — 9 cas
+sur 37 mesurés). La mesurer autrement demanderait un **troisième** oracle d'atteignabilité dans un
+fichier qui en porte déjà deux ; le motif d'échec n°1 du dépôt.
+
+**Sept sites, pas cinq.** Le décompte annoncé dans « Ce qui reste » ne comptait que
+`charge_handlers` (2 succès, 3 échecs). Le chemin **gym** journalise à part, dans `w40k_core` —
+et c'est lui qui produit le step.log d'entraînement. S'en tenir à cinq aurait rendu la mesure
+muette là où elle sert.
+
+**Cinq pièges, cinq verrous** (`test_charge_declaration_distances.py` et
+`test_charge_manual_surface.py`, chacun vérifié ROUGE en réintroduisant son défaut ; les deux
+derniers viennent de la relecture) :
+
+| piège | ce qui se serait passé |
+|---|---|
+| mesure prise au site de succès | `commit_move` a déplacé les figurines → toutes les charges réussies à l'ER, moyenne effondrée, aucun `require_key` levé |
+| activation close sur WAIT comptée | 11.02.3 permet de renoncer ; le dénominateur enflerait de non-charges et la part à ≥ 9" baisserait avec le nombre de renoncements |
+| un site oublié | la moitié des issues sans mesure, donc aucune des deux questions posées ne trouve réponse |
+| mesure posée avant la validation de la cible | une cible **détruite** depuis l'offre fait lever `require_key` là où le handler prend délibérément la branche `charge_fail` → requête PvP en 500 ; et la distance d'une cible **refusée** par 11.04 (bascule 21.03) partait quand même dans les stats des ratées |
+| part à ≥ 9" rapportée à toutes les déclarations | une charge sans cible ne peut jamais entrer au numérateur ; au dénominateur, elle fait baisser la part **quand ces cas se multiplient** — la courbe décrirait l'inverse de ce qui se passe |
+
+La distance est calculée avec un **élagage** à `charge_max_distance` (11.02 « within 12" »),
+au-delà duquel elle vaut `None` : sans lui, le contour complet des socles était parcouru par
+couple (chargeur, ennemi) à chaque activation, sur le chemin chaud de l'entraînement, pour une
+courbe de télémétrie. Le gate jumeau passe un cap exactement pour cette raison.
+
+Un quatrième verrou tient le **jumeau log/analyzer** : le segment `[Dist: … | Nearest: …]` est posé
+en fin de ligne, après `[Roll: N]`, là où aucun des trois parseurs de step.log n'ancre. Vérifié non
+vacant — le même segment glissé avant `from (c,r)` casse bien la regex.
+
+Dix courbes `charge_distance/*`, deux camps × cinq mesures : `a_nearest_enemy_inches`,
+`b_target_inches`, `c_target_inches_success`, `d_target_inches_fail`, `e_declarations_ge9_share`.
+Chacune est un **rapport de moyennes sur la fenêtre glissante** (`_emit_ratio_of_means`), comme
+`n_charge_success_rate` juste à côté et pour la raison que documente cette fonction : le
+dénominateur est un **résultat d'épisode**, donc un épisode sans charge n'a pas de moyenne, et
+toute façon de le traiter isolément biaise la courbe. Aucun point tant que la fenêtre n'a rien
+mesuré : un 0.0 se lirait « il charge au contact ».
+
+Pas de courbe de volume ici : `02_combat/m_charge_attempts` et `o_charge_attempts_bot` la
+portent déjà, **dérivées des mêmes lignes de journal**. C'est le fond du câblage — la ligne de
+charge est le SEUL porteur de la mesure, et la statistique d'épisode se dérive d'`action_logs`
+dans la même passe et sur le même couple de types que `charge_attempts` / `charge_successes`.
+Une liste d'enregistrements tenue en parallèle dans `game_state` aurait été un second compteur
+du même événement, capable de diverger du premier sans qu'aucune courbe ne le montre — et il
+aurait suffi d'un futur chemin de fin de charge émettant la ligne sans passer par lui.
+
+Corollaire : `charge_record_outcome` ne prend **pas** de paramètre d'issue. Réussite ou échec est
+déjà le `type` de la ligne ; un booléen à côté aurait été une seconde source pour la même
+information, à sept sites, sans rien pour vérifier qu'elles s'accordent.
+
 ---
 
 ## Ce qui reste
 
-- **Distances de charge au `step.log` et en métriques** : distance (pathfinding) à l'ennemi le plus
-  proche **à la déclaration**, et distance à la cible **au choix**. Les deux moments existent
-  maintenant réellement. Cinq sites de journalisation à couvrir dans `charge_handlers` (2 succès,
-  3 échecs) — motif jumeau classique.
+- ~~**Distances de charge au `step.log` et en métriques**~~ — **livré le 2026-08-11**, cf. §8
+  ci-dessous.
 - **Compteurs `abilities/`** : un compteur par règle d'unité réellement appliquée, par joueur, plus
   une courbe d'exposition (sans elle, un zéro ne distingue pas « jamais déclenchée » de « jamais
   dans le roster »). Deux familles à couvrir : celles qui produisent une ligne d'`action_log`

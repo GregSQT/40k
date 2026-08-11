@@ -38,6 +38,7 @@ from typing import Any, Deque, Dict, List, Optional, Protocol, Sequence, Tuple, 
 from shared.data_validation import require_key
 from ai.truncation_log import TruncationLog, agent_log_dir
 from engine.action_decoder import ActionDecoder
+from engine.w40k_core import CHARGE_DISTANCE_MEASURES
 from config_loader import get_config_loader
 
 
@@ -174,6 +175,14 @@ class W40KMetricsTracker:
         'charge_attempts_bot', 'charge_successes_bot',
         'move_actions', 'move_flees', 'move_opportunities',
         'shoot_activations', 'shoot_opportunities',
+        # Distances de charge (11.04) : une serie par somme ET par effectif, les deux camps.
+        # Elles vont par paires dans `_emit_ratio_of_means` — c'est exactement la forme qu'il
+        # attend, un numerateur et un denominateur qui sont tous deux des RESULTATS d'episode.
+        *(
+            f'charge_{_measure}_{_side}'
+            for _side in ('agent', 'opponent')
+            for _measure in CHARGE_DISTANCE_MEASURES
+        ),
         # Cout du cache de scoring du deploiement (V11 §0.46 axe A).
         'deploy_cache_lookups', 'deploy_cache_full_builds', 'deploy_cache_incremental_failed',
     )
@@ -370,7 +379,8 @@ class W40KMetricsTracker:
             'baseline_combined': None,       # first combined after forcing exposure starts
             'baseline_worst_bot': None,      # first worst_bot_score after forcing exposure starts
         }
-        
+
+
 
         # Rolling histories for 01_VP/ + 02_combat/ smoothing (window=500)
         self._game_history: Dict[str, List[float]] = {k: [] for k in self.GAME_HISTORY_KEYS}
@@ -1105,6 +1115,47 @@ class W40KMetricsTracker:
                     f'reserves/{_metric}_{_side}',
                     float(require_key(tactical_data, f'reserves_{_metric}_{_side}')),
                     self.episode_count,
+                )
+
+        # Distances de CHARGE (11.04), par camp. Ce que la mesure sert : le step.log du
+        # 2026-08-11 avait montre 41 % de declarations a >= 9" pour un 2D6 qui n'atteint 9 que
+        # 27,8 % du temps, mediane des ratees a 9" contre 5" pour les reussies — mais il avait
+        # fallu re-deriver ces distances a la main. Elles sont desormais mesurees a l'instant
+        # ou la regle les regarde.
+        #
+        # Chaque courbe est un RAPPORT DE MOYENNES sur la fenetre glissante, comme
+        # `n_charge_success_rate` juste au-dessus et pour la raison que documente
+        # `_emit_ratio_of_means` : son denominateur est un RESULTAT d'episode. Un episode sans
+        # charge n'a pas de distance moyenne, et toute façon de le traiter isolement biaise la
+        # courbe — l'ecarter retire une population, y verser 0.0 le compte comme une charge au
+        # contact. Sommer les deux cotes sur la fenetre n'exclut rien.
+        #
+        # Le VOLUME de charges, lui, n'est pas republie ici : `02_combat/m_charge_attempts` et
+        # `o_charge_attempts_bot` le portent deja, et ces courbes-ci se derivent des MEMES
+        # lignes de journal. Une seconde courbe du meme compte n'aurait pu que diverger.
+        _charge_distance = require_key(tactical_data, 'charge_distance')
+        for _side in ('agent', 'opponent'):
+            _side_data = require_key(_charge_distance, _side)
+            _hist = {
+                _measure: self._game_push(
+                    f'charge_{_measure}_{_side}', float(require_key(_side_data, _measure))
+                )
+                for _measure in CHARGE_DISTANCE_MEASURES
+            }
+            for _name, _num, _den in (
+                ('a_nearest_enemy_inches', 'nearest_sum', 'nearest_n'),
+                ('b_target_inches', 'target_sum', 'target_n'),
+                ('c_target_inches_success', 'success_sum', 'success_n'),
+                ('d_target_inches_fail', 'fail_sum', 'fail_n'),
+                # DENOMINATEUR = les charges qui ont VISE une cible, pas toutes les tentatives.
+                # Une charge declaree qui n'atteint aucune cible (11.02.3) n'a pas de distance :
+                # la compter en bas de la fraction sans jamais pouvoir la compter en haut ferait
+                # baisser la part a mesure que ces cas se multiplient — soit exactement le
+                # phenomene que la courbe existe pour montrer, dilue par lui-meme.
+                ('e_declarations_ge9_share', 'long', 'target_n'),
+            ):
+                self._emit_ratio_of_means(
+                    f'charge_distance/{_name}_{_side}', _hist[_num], _hist[_den]
                 )
 
     def log_training_step(self, step_data: Dict[str, Any]):

@@ -222,12 +222,8 @@ def test_a_failed_charge_counts_as_an_attempt_and_not_as_a_success(
     """
     turn = 2
     injected = [
-        {"type": "charge_fail", "player": 1, "unitId": "injected-squad", "turn": turn,
-         "phase": "charge", "charge_roll": 2, "charge_failed_reason": "roll_too_short",
-         "message": "injected", "timestamp": "server_time"},
-        {"type": "charge", "player": 1, "unitId": "injected-squad", "turn": turn,
-         "phase": "charge", "charge_roll": 9, "targetId": "x",
-         "message": "injected", "timestamp": "server_time"},
+        {**_charge_line(1, "charge_fail", roll=2), "turn": turn},
+        {**_charge_line(1, "charge", roll=9), "turn": turn},
     ]
     engine, tactical = _play(melee_scenario_file, _SEEDS[0], inject=injected)
     controlled, _opponent = _seat(engine)
@@ -288,6 +284,11 @@ def _charge_line(player: int, kind: str, roll: int = 9) -> Dict[str, Any]:
         "type": kind, "player": player, "unitId": f"injected-{player}", "turn": 2,
         "phase": "charge", "charge_roll": roll, "message": "injected",
         "timestamp": "server_time",
+        # Distances 11.04 : la passe de comptage les EXIGE sur toute ligne de charge, parce
+        # qu'elles y sont posees par les sept sites qui emettent ces lignes. Une ligne injectee
+        # qui les omettrait ne serait plus le contrat que la passe lit.
+        "charge_nearest_enemy_inches": 4.0,
+        "charge_target_distance_inches": 5.0 if kind == "charge" else None,
     }
     if kind == "charge":
         line["targetId"] = "x"

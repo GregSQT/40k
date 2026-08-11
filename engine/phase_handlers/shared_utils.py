@@ -5860,6 +5860,54 @@ def charge_target_within_max_distance(
     )
 
 
+def charge_target_edge_distance_subhex(
+    charger_entry: Dict[str, Any],
+    target_entry: Dict[str, Any],
+    max_distance: int,
+) -> Optional[int]:
+    """Distance 11.04 chargeur→cible, en subhex — la VALEUR du gate juste au-dessus.
+
+    Mesure de journalisation, pas de decision : c'est la grandeur que 11.04 compare au jet
+    (« within the maximum distance of your unit »), donc la seule directement comparable a un
+    2D6. Meme primitive, meme metrique et meme granularite que
+    `charge_target_within_max_distance` — par FIGURINE, `socle_from_cache_entry` construisant
+    le socle sur `model_centers`. Une deuxieme facon de mesurer la meme charge serait la
+    divergence que le selecteur unique existe pour empecher.
+
+    `max_distance` est un ELAGAGE, pas un arrondi : `ranged_edge_distance` rend une valeur
+    EXACTE tant qu'elle lui est inferieure ou egale, et une valeur simplement superieure
+    au-dela. Il est OBLIGATOIRE — sans lui, le contour complet des socles est parcouru par
+    couple (chargeur, ennemi) a CHAQUE activation de charge, sur le chemin chaud de
+    l'entrainement, pour une courbe de telemetrie. Le gate jumeau juste au-dessus passe un cap
+    exactement pour cette raison.
+
+    Au-dela du cap → None, et c'est correct pour la mesure : le cap utile est
+    `charge_max_distance` (11.02 « within 12\" »), donc un ennemi plus loin n'est a AUCUNE
+    distance de declaration. Rendre la valeur elaguee ferait entrer un nombre faux dans une
+    moyenne.
+
+    Ce qu'elle ne dit PAS : le trajet reel. 11.04 exige aussi un plan legal dans le budget, et
+    un mur peut rendre une cible proche inatteignable. Aucune mesure unique ne couvre les deux ;
+    la distance de trajet n'existe ici que bornee par le jet (`_compute_plan_context`) ou par
+    ancre (pool BFS), donc tronquee ou divergente de l'oracle par-figurine.
+
+    Hors table (20.01, ou pas encore posee) → None, jamais un nombre : la sentinelle (-1,-1)
+    de ces figurines rendrait une distance inventee.
+    """
+    from engine.combat_utils import ranged_edge_distance, socle_from_cache_entry
+    from engine.spatial_relations import engagement_distance_metric, entry_is_on_battlefield
+
+    if not entry_is_on_battlefield(charger_entry) or not entry_is_on_battlefield(target_entry):
+        return None
+    distance = ranged_edge_distance(
+        socle_from_cache_entry(charger_entry),
+        socle_from_cache_entry(target_entry),
+        engagement_distance_metric(),
+        max_distance=int(max_distance),
+    )
+    return None if distance > int(max_distance) else int(round(distance))
+
+
 def charge_build_valid_plan(
     game_state: Dict[str, Any],
     squad_id: str,

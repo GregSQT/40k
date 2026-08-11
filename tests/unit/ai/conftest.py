@@ -111,6 +111,25 @@ def tactical_data(**overrides: Any) -> Dict[str, Any]:
         "reserves_ingress_declined_opponent": 8,
         "reserves_ingress_no_destination_agent": 9,
         "reserves_ingress_no_destination_opponent": 10,
+        # Distances de charge (11.04) : UN bloc, pas dix-huit cles a plat. Valeurs DISTINCTES
+        # d'une mesure a l'autre et d'un camp a l'autre, pour la meme raison que les reserves
+        # ci-dessus — une courbe branchee sur la mesure voisine, ou sur le mauvais camp, se voit.
+        "charge_distance": {
+            "agent": {
+                "nearest_sum": 12.0, "nearest_n": 4.0,
+                "target_sum": 21.0, "target_n": 3.0,
+                "success_sum": 10.0, "success_n": 2.0,
+                "fail_sum": 11.0, "fail_n": 1.0,
+                "long": 2.0,
+            },
+            "opponent": {
+                "nearest_sum": 30.0, "nearest_n": 5.0,
+                "target_sum": 32.0, "target_n": 4.0,
+                "success_sum": 24.0, "success_n": 3.0,
+                "fail_sum": 8.0, "fail_n": 1.0,
+                "long": 1.0,
+            },
+        },
     }
     data.update(overrides)
     return data
