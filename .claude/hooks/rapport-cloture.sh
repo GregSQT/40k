@@ -27,6 +27,12 @@
 #   - CLAUDE.md garde la SUBSTANCE (ce que LU doit contenir, pourquoi JUMEAU existe, quand PROMPTS
 #     est dû). Rien de tout ça n'est mécaniquement vérifiable, donc rien de tout ça n'entre ici.
 #
+# LA LISTE DES SECTIONS N'EST PAS ÉCRITE ICI — elle est LUE dans la ligne `SECTIONS EXIGÉES :` de
+# CLAUDE.md (puce « FORME DU RAPPORT »). Motif mesuré le 2026-08-12 : la liste existait en deux
+# exemplaires indépendants, l'ajout de COUVERTURE au hook a laissé la puce énumérer LU/JUMEAU/
+# RELIRE, et un agent qui s'y fiait se faisait réclamer une section absente de la liste qu'il
+# venait de lire. Une source unique, et `--sections` pour que le test la lise par le hook.
+#
 # Python et non bash : la charge utile est un transcript JSONL à parcourir. jq n'est PAS installé
 # sur cette machine, et python3 l'est toujours (même constat que deny-verif-large.sh).
 #
@@ -37,8 +43,52 @@ import os
 import re
 import sys
 
-CODE_SUFFIXES = (".py", ".pyi", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs")
+# `.sh` en fait partie : les hooks de ce dossier SONT du code (et l'un d'eux a son fichier
+# pytest). Sans lui, le tour qui modifie un garde-fou est le seul à n'en réclamer aucun.
+CODE_SUFFIXES = (".py", ".pyi", ".sh", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs")
+# CLAUDE.md n'est pas de la doc pour ce hook : il porte la ligne `SECTIONS EXIGÉES :` qui le
+# pilote. Le modifier peut éteindre le garde-fou, donc ce tour-là doit sa COUVERTURE et son
+# RELIRE comme n'importe quelle modification de code — même motif que `.sh` ci-dessus.
+CODE_BASENAMES = ("CLAUDE.md",)
 EDIT_TOOLS = {"Edit", "Write", "NotebookEdit", "MultiEdit"}
+
+CLAUDE_MD = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "CLAUDE.md")
+LIGNE_SECTIONS = re.compile(r"^\s*SECTIONS EXIGÉES\s*:\s*(.+)$", re.MULTILINE)
+ITEM_SECTION = re.compile(r"`([A-ZÉÈÀÂÎÔÛÇ]+)`\s*=\s*(toujours|code)")
+
+
+def required_sections(claude_md=CLAUDE_MD):
+    """Sections exigées [(nom, portée), ...], LUES dans CLAUDE.md — jamais écrites ici.
+
+    Portée `toujours` : due sur tout tour qui a modifié un fichier. Portée `code` : due seulement
+    si un fichier de code a bougé. Toute anomalie de lecture lève : une liste vide ferait un hook
+    qui ne réclame plus rien, donc un garde-fou muet indistinguable d'un tour conforme (T1).
+
+    Un parse PARTIEL est aussi grave qu'un parse vide, et plus sournois : une entrée qui perd ses
+    backticks, ou une liste repliée sur deux lignes, ferait disparaître RELIRE en silence — donc
+    le contrôle des chemins absolus en worktree, celui du défaut du 2026-08-08. D'où le refus de
+    tout résidu non consommé.
+    """
+    with open(claude_md, encoding="utf-8") as fh:
+        ligne = LIGNE_SECTIONS.search(fh.read())
+    if not ligne:
+        raise ValueError("aucune ligne `SECTIONS EXIGÉES :` dans " + claude_md)
+    contenu = ligne.group(1).strip()
+    sections = ITEM_SECTION.findall(contenu)
+    if not sections:
+        raise ValueError("ligne `SECTIONS EXIGÉES :` illisible : " + contenu)
+    if contenu.endswith(","):
+        raise ValueError(
+            "la liste `SECTIONS EXIGÉES :` doit tenir sur UNE ligne, elle semble repliée : "
+            + contenu
+        )
+    residu = ITEM_SECTION.sub("", contenu).strip(" \t,")
+    if residu:
+        raise ValueError(
+            "entrée non reconnue dans `SECTIONS EXIGÉES :` (attendu `NOM`=toujours|code) : "
+            + residu
+        )
+    return sections
 
 
 def blocks(entry):
@@ -137,21 +187,53 @@ def relire_faults(report, in_worktree):
     return faults
 
 
-def faults_of(turn):
+def faults_of(turn, sections):
     """Défauts de forme du rapport d'un tour. Liste vide = rien à redire."""
     edited, report = turn
     if not edited:
         return []  # tour de lecture, d'analyse ou de discussion : aucun rapport n'est dû
+    du_code = any(
+        f.endswith(CODE_SUFFIXES) or os.path.basename(f) in CODE_BASENAMES for f in edited
+    )
     faults = []
-    for section in ("LU", "JUMEAU"):
-        if not re.search(r"^\s*" + section + r"\s*:", report, re.MULTILINE):
-            faults.append(f"la ligne {section} est absente (elle est TOUJOURS due)")
-    if any(f.endswith(CODE_SUFFIXES) for f in edited):
-        faults += relire_faults(report, any("/.claude/worktrees/" in f for f in edited))
+    for name, portee in sections:
+        if portee == "code" and not du_code:
+            continue
+        if name == "RELIRE":
+            # Seule section dont la forme INTERNE est vérifiable : son absence y est déjà dite.
+            faults += relire_faults(report, any("/.claude/worktrees/" in f for f in edited))
+            continue
+        if not re.search(r"^\s*" + name + r"\s*:", report, re.MULTILINE):
+            due = (
+                "elle est TOUJOURS due"
+                if portee == "toujours"
+                else "due dès qu'un fichier de code a bougé"
+            )
+            faults.append(f"la ligne {name} est absente ({due})")
     return faults
 
 
+def emit(context):
+    print(
+        json.dumps(
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "UserPromptSubmit",
+                    "additionalContext": context,
+                }
+            },
+            ensure_ascii=False,
+        )
+    )
+
+
 def main():
+    if sys.argv[1:2] == ["--sections"]:
+        # Le test lit la liste PAR le hook, pas en reparsant CLAUDE.md de son côté : reparser
+        # recréerait le deuxième exemplaire que cette source unique supprime.
+        print(json.dumps(required_sections(), ensure_ascii=False))
+        sys.exit(0)
+
     try:
         payload = json.load(sys.stdin)
     except ValueError:
@@ -173,24 +255,25 @@ def main():
     if not turns:
         sys.exit(0)
 
-    faults = faults_of(turns[-1])
+    try:
+        sections = required_sections()
+    except (OSError, ValueError) as err:
+        # Se taire ici rendrait le garde-fou muet sans que rien ne le signale (T1) : on le DIT.
+        emit(
+            "Le contrôle de forme du rapport de clôture ne peut pas lire sa liste de sections "
+            f"({err}). Signale-le : tant que ce n'est pas réparé, plus rien ne vérifie la forme "
+            "du rapport."
+        )
+        sys.exit(0)
+
+    faults = faults_of(turns[-1], sections)
     if faults:
-        print(
-            json.dumps(
-                {
-                    "hookSpecificOutput": {
-                        "hookEventName": "UserPromptSubmit",
-                        "additionalContext": (
-                            "Ton tour PRÉCÉDENT a modifié des fichiers sans rapport de clôture "
-                            "conforme — " + " ; ".join(faults) + ". Rends ce rapport maintenant, "
-                            "en tête de ta réponse, AVANT de traiter la nouvelle demande. Ne "
-                            "relance aucun travail : il s'agit seulement de rendre compte de ce "
-                            "qui a déjà été fait."
-                        ),
-                    }
-                },
-                ensure_ascii=False,
-            )
+        emit(
+            "Ton tour PRÉCÉDENT a modifié des fichiers sans rapport de clôture conforme — "
+            + " ; ".join(faults)
+            + ". Rends ce rapport maintenant, en tête de ta réponse, AVANT de traiter la "
+            "nouvelle demande. Ne relance aucun travail : il s'agit seulement de rendre compte "
+            "de ce qui a déjà été fait."
         )
     sys.exit(0)
 

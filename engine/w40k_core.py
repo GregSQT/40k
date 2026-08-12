@@ -386,6 +386,7 @@ def destroy_unarrived_strategic_reserves(game_state: Dict[str, Any]) -> List[Dic
     scoring de fin de partie : une unité détruite par cette règle ne doit pas compter dans le
     départage aux points.
     """
+    from engine.action_log_utils import append_action_log
     from engine.game_utils import add_console_log
     from engine.phase_handlers.shared_utils import destroy_model
 
@@ -400,14 +401,39 @@ def destroy_unarrived_strategic_reserves(game_state: Dict[str, Any]) -> List[Dic
             continue
         squad_models = require_key(game_state, "squad_models")
         models_cache = require_key(game_state, "models_cache")
-        for model_id in list(squad_models.get(str(unit_id), [])):  # get allowed
-            if model_id in models_cache:
-                destroy_model(game_state, model_id, "strategic_reserves_timeout")
+        model_ids_destroyed = [
+            m for m in list(squad_models.get(str(unit_id), []))  # get allowed
+            if m in models_cache
+        ]
+        for model_id in model_ids_destroyed:
+            destroy_model(game_state, model_id, "strategic_reserves_timeout")
         destroyed.append(unit)
         add_console_log(
             game_state,
             f"STRATEGIC RESERVES (20.04): unit {unit_id} never made an ingress move by the end "
             f"of battle round {require_key(game_state, 'turn')} — destroyed",
+        )
+        # Même canal que coherency_removal (03.03) : le step.log doit porter cet événement pour
+        # que l'analyzer ne garde pas l'escouade vivante et ne fausse pas les ratios d'attrition.
+        # L'escouade est ENTIÈREMENT détruite ici : units_cache n'a plus d'entrée pour elle, et le
+        # segment [MODELS:] sera donc vide — ce qui est correct (le lecteur voit une escouade qui
+        # disparaît, pas qui réduit).
+        append_action_log(
+            game_state,
+            {
+                "type": "strategic_reserves_timeout",
+                "message": (
+                    f"Unit {unit_id} RESERVES TIMEOUT (20.04) : "
+                    f"{len(model_ids_destroyed)} model(s) destroyed"
+                ),
+                "turn": require_key(game_state, "turn"),
+                "phase": "fight",
+                "unitId": unit_id,
+                "player": int(require_key(unit, "player")),
+                "removed_models": model_ids_destroyed,
+                "timestamp": "server_time",
+                "reward": 0.0,
+            },
         )
     return destroyed
 
@@ -5346,7 +5372,12 @@ class W40KEngine(gym.Env):
     # `coherency_removal` y figure pour la meme raison que `reactive_move` : ce n'est pas une
     # action d'agent mais un effet de fin de tour. L'incrementer decalerait `episode_steps` de la
     # suite d'actions reellement decidees (contrat AI_TURN.md, en-tete de step.log).
-    _STEP_LOG_NON_INCREMENTING_TYPES: frozenset = frozenset({"reactive_move", "coherency_removal"})
+    _STEP_LOG_NON_INCREMENTING_TYPES: frozenset = frozenset({
+        "reactive_move", "coherency_removal",
+        # 20.04 — destruction en fin de 3e round : même statut que coherency_removal, pas une
+        # action d'agent.
+        "strategic_reserves_timeout",
+    })
 
     _STEP_LOG_TYPE_MAP: Dict[str, str] = {
         "shoot": "shoot",
@@ -5380,6 +5411,11 @@ class W40KEngine(gym.Env):
         # lecteur qui accumule les evenements garde la figurine vivante (cf.
         # `_log_end_of_turn_coherency_removals`).
         "coherency_removal": "coherency_removal",
+        # 20.04 — destruction fin de 3e round des unites restees en reserves strategiques. Meme
+        # canal que coherency_removal : sans ce mapping, l'entree d'action_log emise par
+        # `destroy_unarrived_strategic_reserves` n'atteint jamais step.log et l'analyzer ignore
+        # des escouades entieres dans ses ratios d'attrition.
+        "strategic_reserves_timeout": "strategic_reserves_timeout",
     }
 
     # Le moteur emet un seul type "move" ; la nuance vit dans move_type (cf. move_type_map du

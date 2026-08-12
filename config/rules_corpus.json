@@ -148,6 +148,18 @@
       "status_note": "La ligne réactive ne porte pas toujours son segment par-figurine : l'engagement y est mesuré à l'ANCRE, pas au socle."
     },
     {
+      "id": "20.04",
+      "source": "20 Strategic reserves",
+      "label": "Reserves strategiques — destruction fin de 3e round (ingress non effectue)",
+      "section": "1.1",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [],
+      "status": "COUVERT",
+      "status_note": "La regle est journalisee comme evenement (RESERVES TIMEOUT) et comptee dans `reserves_timeout_destroyed`. Aucun compteur d'ERREUR : la destruction est toujours correcte (c'est le moteur qui l'applique). Le compteur d'exercice signale si la regle a été exercée sur un run donne."
+    },
+    {
       "id": "PROJET.move_after_shooting",
       "source": "capacité de projet (hors corpus PDF)",
       "label": "Déplacement après tir — distance de la capacité",

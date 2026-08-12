@@ -1801,6 +1801,9 @@ def parse_step_log(filepath: str) -> Dict:
         # parce qu'il en est la conséquence directe — une escouade qui finit son déplacement hors
         # cohérence perd des figurines à la fin du tour.
         'coherency_removals': {1: 0, 2: 0},
+        # 20.04 — escouades entières détruites faute d'ingress au 3e round. Distinct de
+        # coherency_removals (03.03) qui ne retire que des figurines isolées.
+        'reserves_timeout_destroyed': {1: 0, 2: 0},
         # Occasions JUGÉES par règle du corpus (`config/rules_corpus.json`) — le compte d'exercice
         # qui manquait à 67 des 69 contrôles. Sans lui, « 0 erreur » ne distingue pas un contrôle
         # qui n'a rien trouvé d'un contrôle qui n'a rien regardé. Déclarée d'avance, une clé par
@@ -3239,6 +3242,8 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     # retraits, or son absence a coûté deux fautes inventées (cf. `_log_end_of_turn_coherency_removals`).
     _coh_rm = require_key(stats, 'coherency_removals')
     _table_row("  dont figurines retirees (End of Turn):", _fmt_count(_coh_rm[1]), _fmt_count(_coh_rm[2]))
+    _res_tm = require_key(stats, 'reserves_timeout_destroyed')
+    _table_row("  dont escouades detruites reserves (20.04):", _fmt_count(_res_tm[1]), _fmt_count(_res_tm[2]))
     _render_rule_coverage(stats, "1.1", log_print)
     # SHOOTING ERRORS
     active_debug_section = "1.2"

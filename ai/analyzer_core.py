@@ -388,6 +388,7 @@ def _apply_state_snapshot(state: AnalyzerState, config: AnalyzerConfig, payload:
         state.models_invalidated.discard(uid)
 
     # Unités que l'analyzer croit vivantes et que le moteur ne voit plus : c'est le fantôme.
+    import sys
     from ai.analyzer_perfig import position_is_on_battlefield
     for uid in [u for u, hp in state.unit_hp.items() if hp > 0 and u not in seen_units]:
         known_models = state.positions_by_model.get(uid)  # get allowed
@@ -402,6 +403,17 @@ def _apply_state_snapshot(state: AnalyzerState, config: AnalyzerConfig, payload:
             continue
         if known_models:
             stats['state_resync']['dead_missed'] += 1
+            unit_type = state.unit_types.get(uid, "?")
+            hp_val = state.unit_hp.get(uid, 0)
+            model_count = state.unit_models_alive.get(uid, 0)
+            model_hp = state.unit_model_hp.get(uid, {})
+            positions = {mid: pos for mid, pos in known_models.items()}
+            print(
+                f"[GHOST] E{state.current_episode_num} T{state.episode_turn} "
+                f"unit={uid} type={unit_type} hp={hp_val} models_alive={model_count} "
+                f"model_hp={model_hp} positions={positions}",
+                file=sys.stderr,
+            )
         state.unit_hp[uid] = 0
         state.unit_models_alive[uid] = 0
         state.positions_by_model.pop(uid, None)
@@ -1651,6 +1663,27 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         else:
                             stats['coherency_removals'][player] += len(_removed.group(1).split())
                             note_rule_usage(stats, "03.03", player)
+                elif " RESERVES TIMEOUT " in action_desc:
+                        # 20.04 — destruction en fin de 3e round des unités restées en réserves
+                        # stratégiques. L'escouade est entièrement détruite : contrairement à
+                        # coherency_removal, aucun survivant ne resynchronise la position.
+                        # On marque l'escouade comme morte pour que les compteurs d'attrition
+                        # soient cohérents, et on l'exclut du tracking de positions.
+                        action_type = 'reserves_timeout'
+                        _rt_match = re.match(r'Unit\s+(\d+)', action_desc)
+                        if _rt_match:
+                            _rt_uid = _rt_match.group(1)
+                            if _rt_uid in state.unit_hp and require_key(state.unit_hp, _rt_uid) > 0:
+                                _rt_type = require_key(state.unit_types, _rt_uid)
+                                stats['current_episode_deaths'].append((player, _rt_uid, _rt_type))
+                                stats['wounded_enemies'][player].discard(_rt_uid)
+                                _position_cache_remove(state.unit_positions, _rt_uid)
+                                state.unit_deaths.append((turn, phase, _rt_uid, state.line_number))
+                                state.dead_units_current_episode.add(_rt_uid)
+                                state.unit_models_alive[_rt_uid] = 0
+                                del state.unit_hp[_rt_uid]
+                        stats['reserves_timeout_destroyed'][player] += 1
+                        note_rule_usage(stats, "20.04", player)
                 elif attack_verb_present(action_desc):
                         action_type = 'fight'
                         handle_fight(state, config, line, action_desc, action_unit_id, player, turn, phase, step_marker_present, step_inc)

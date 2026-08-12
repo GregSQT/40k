@@ -92,7 +92,8 @@ TESTS — QUI LANCE QUOI (NON NÉGOCIABLE) :
   marqueur `# VERIF-LARGE-AUTORISEE`, qui ouvre la porte de sortie du hook. Ajouter ce marqueur
   sans autorisation du prompt courant est une faute grave, au même titre qu'un contournement.
 - Ce qu'un agent DOIT faire dans tous les cas : lancer les FICHIERS de test ciblés qu'il vient
-  d'écrire ou de toucher (`pytest tests/unit/engine/test_xxx.py`), aussi souvent qu'il veut.
+  d'écrire ou de toucher — `pytest tests/unit/engine/test_xxx.py` côté Python, `cd frontend &&
+  npx vitest run src/.../xxx.test.ts` côté front —, aussi souvent qu'il veut.
 - Sans autorisation, si une validation large semble nécessaire : LE DIRE à l'utilisateur et
   s'arrêter là. Ne jamais annoncer « suite verte » sans l'avoir réellement obtenue.
 - Outils de conformité (documentés dans Documentation/Code_Compliance/) : `scripts/check_ai_rules.py`
@@ -286,14 +287,15 @@ Ne JAMAIS conclure par un verdict de qualité (« implémentation optimale », �
 « tout est propre ») : un verdict ne s'expose à aucun contrôle, donc il ne prouve rien et il est
 produit sans effort. Conclure par des FAITS recoupables en quelques secondes.
 
-FORMAT IMPOSÉ — LU, JUMEAU, RÉFS et RELIRE sont télégraphiques : une ligne chacune, pas de prose,
-pas de paragraphe, pas de code source. ARBITRAGE et PROMPTS sont les SEULES sections développées
+FORMAT IMPOSÉ — toute section est télégraphique : une ligne, pas de prose, pas de paragraphe, pas
+de code source. ARBITRAGE et PROMPTS sont les SEULES exceptions, développées
 (voir leur format ci-dessous). Ce bloc n'est PAS un récap (cf. ligne « Pas de récap final ») : il REMPLACE toute
 conclusion, il ne s'y ajoute pas. Ne jamais y répéter ce qui vient d'être dit au-dessus.
 
   LU : <ce qui a été lu au-delà du point modifié : fichier entier ? appelants ? module miroir ?>
   JUMEAU : <commande grep> → <n> hits, <n> traités, <n> écartés (<raison>)
   RÉFS : <tests / doc / frontend / configs mis à jour | laissés tels quels volontairement>
+  COUVERTURE : <tests ajoutés/étendus, pytest `fichier::test` ou vitest `fichier > test`> | <trous vus non couverts → PROMPTS>
   ARBITRAGE :
     1. <titre du sujet à arbitrer, une ligne>
 
@@ -322,6 +324,12 @@ conclusion, il ne s'y ajoute pas. Ne jamais y répéter ce qui vient d'être dit
   validé localement dans un fichier à cohérence globale n'est pas validé — c'est le défaut le
   plus fréquent de ce dépôt (cf. T4 JUMEAU).
 - RÉFS, ARBITRAGE et PROMPTS : omettre la section s'il n'y a réellement rien. Ne jamais écrire « néant ».
+- COUVERTURE : obligatoire dès qu'au moins un fichier de code a été modifié (même condition que
+  RELIRE), omise sinon. Elle porte les DEUX faces exigées par T4 COUVERTURE : les tests écrits ou
+  étendus, NOMMÉS, dans le harnais du code touché (pytest ou vitest), et les trous de couverture
+  VUS et non traités.
+  « aucun trou vu » est une réponse valide ; « rien à tester » n'en est pas une — un comportement
+  modifié sans test nommé est un manquement, pas un cas particulier.
 - Un arbitrage remonté n'est pas un défaut ; le taire pour paraître complet en est un.
 - ARBITRAGE — EXIGENCES DE FOND (le reste du rapport reste télégraphique, pas lui) :
   * LISIBILITÉ D'ABORD. Un arbitrage illisible n'est pas un arbitrage : il est ignoré, donc il
@@ -371,9 +379,15 @@ conclusion, il ne s'y ajoute pas. Ne jamais y répéter ce qui vient d'être dit
   alors un chantier étranger sans que rien ne le signale (mesuré le 2026-08-08 — un verdict
   entier, findings compris, rendu sur le mauvais code).
 - FORME DU RAPPORT — tenue par un hook, pas par ta vigilance : `.claude/hooks/rapport-cloture.sh`
-  vérifie, sur tout tour qui a modifié un fichier, la présence de LU et JUMEAU, celle de RELIRE si
-  du code a bougé, la disposition du bloc (étiquette seule, une commande par ligne) et les chemins
-  absolus en worktree. Il s'exécute au PROMPT SUIVANT, pas à la fin du tour : le transcript est
+  vérifie, sur tout tour qui a modifié un fichier, la présence des sections listées à la ligne
+  ci-dessous, la disposition du bloc RELIRE (étiquette seule, une commande par ligne) et les
+  chemins absolus en worktree. Cette ligne est la SOURCE UNIQUE de la liste : le hook la LIT ici
+  même, donc y ajouter ou en retirer une section change ce qu'il réclame, et
+  `tests/unit/scripts/test_hooks_garde_fous.py` échoue si elle diverge du FORMAT IMPOSÉ ci-dessus.
+  `=toujours` : due dès qu'un fichier a été modifié ; `=code` : due seulement si un fichier de
+  code a bougé.
+  SECTIONS EXIGÉES : `LU`=toujours, `JUMEAU`=toujours, `COUVERTURE`=code, `RELIRE`=code
+  Il s'exécute au PROMPT SUIVANT, pas à la fin du tour : le transcript est
   écrit de façon asynchrone, et un contrôle branché sur la fin du tour prend un texte intermédiaire
   pour le rapport final (mesuré le 2026-08-12, il a bloqué le tour même qui l'installait). Donc si
   ce rappel arrive, le rapport manquant est celui du tour d'AVANT : rends-le en tête de réponse,
@@ -430,6 +444,23 @@ VERROU — prouver que le test tient
   Symétrique déjà vécu : un contrôle qui regarde la MAUVAISE chose (ancre vs par-figurine).
 - Un test doit CONSTRUIRE la situation qu'il observe — jamais l'espérer d'une graine aléatoire,
   d'un ordre d'exécution ou de l'absence d'une configuration.
+
+COUVERTURE — toute feature touchée est couverte par un test automatisé
+- Ajouter ou modifier un comportement OBLIGE à écrire/étendre son test dans la MÊME livraison.
+  Ce test entre au périmètre de clôture (T2) : ni validation ni STOP à demander.
+- LE HARNAIS SUIT LE CODE TOUCHÉ, il ne se choisit pas : Python → pytest (`tests/unit/...`,
+  `tests/integration/...`), noté `fichier::test` ; frontend TS/TSX → vitest (`*.test.ts(x)` à côté
+  du module, `cd frontend && npx vitest run <fichier>`), noté `fichier > nom du test`. Un tour qui
+  ne touche que le front satisfait la règle en vitest, jamais en inventant une référence pytest.
+- Toute feature RENCONTRÉE pendant le travail sans test se traite ainsi :
+  * elle touche le code modifié (même fonction, même invariant, même jumeau) → le test s'écrit
+    MAINTENANT, comme le reste du périmètre de clôture ;
+  * elle est SANS LIEN avec la modification → interdit de l'écrire (ASK 5, et T2 « n'entre jamais
+    tant qu'on y est ») : elle se SIGNALE au rapport et prend son prompt en PROMPTS.
+- Le rapport de clôture DIT les deux, en COUVERTURE : tests écrits, et trous vus non couverts.
+  Un trou vu et tu est une régression au même titre qu'un document rendu faux par sa livraison.
+- « Validé via --step / le PvP / l'analyzer / le navigateur / un script jetable » ne remplace pas
+  un test du harnais : ce n'est pas rejouable, donc ça ne verrouille rien (cf. VERROU ci-dessus).
 
 RENDRE COMPTE — borner le verdict
 - Dire ce qui a été VÉRIFIÉ et ce qui n'a PAS pu l'être. « non exploré » n'est pas « sain » :

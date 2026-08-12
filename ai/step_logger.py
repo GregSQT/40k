@@ -858,6 +858,14 @@ class StepLogger:
                 raise KeyError("Coherency_removal action missing required removed_models")
             return f"{unit_label} COHERENCY REMOVED {' '.join(str(m) for m in removed)} (03.03)"
 
+        elif action_type == "strategic_reserves_timeout":
+            # 20.04 — destruction fin de 3e round. L'escouade est ENTIEREMENT detruite : le
+            # segment [MODELS:] sera vide (units_cache n'a plus d'entree pour elle), ce qui est
+            # semantiquement correct — le lecteur voit la disparition totale de l'escouade.
+            # Le verbe `RESERVES TIMEOUT` est distinct et unique : aucun autre type de mort
+            # ne le porte, l'analyzer peut l'aiguiller sans risque de collision.
+            return f"{unit_label} RESERVES TIMEOUT (20.04)"
+
         elif action_type == "shoot":
             if "target_id" not in details:
                 raise KeyError("Shoot action missing required target_id")

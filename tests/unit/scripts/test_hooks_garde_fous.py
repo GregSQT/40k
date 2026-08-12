@@ -13,12 +13,16 @@ première version du contrôle prenait pour le rapport lui-même.
 from __future__ import annotations
 
 import json
+import re
+import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
 
-HOOKS = Path(__file__).resolve().parents[3] / ".claude" / "hooks"
+RACINE = Path(__file__).resolve().parents[3]
+CLAUDE_MD = RACINE / "CLAUDE.md"
+HOOKS = RACINE / ".claude" / "hooks"
 H_RAPPORT = HOOKS / "rapport-cloture.sh"
 H_DENY = HOOKS / "deny-verif-large.sh"
 
@@ -26,6 +30,7 @@ RAPPORT_CONFORME = """Fait.
 
 LU : engine/x.py en entier, ses 3 appelants
 JUMEAU : grep -rn "foo" engine/ -> 2 hits, 2 traites
+COUVERTURE : tests/unit/engine/test_x.py::test_foo etendu ; aucun trou vu
 RELIRE :
 /code-review engine/x.py
 /simplify engine/x.py
@@ -91,6 +96,34 @@ def _rapport(tmp_path: Path, *entries: dict) -> str | None:
     return json.loads(proc.stdout)["hookSpecificOutput"]["additionalContext"]
 
 
+def _sections_exigees() -> list[tuple[str, str]]:
+    """Liste lue PAR le hook, pas reparsée ici : reparser recréerait le doublon qu'on supprime."""
+    proc = subprocess.run(
+        [str(H_RAPPORT), "--sections"], capture_output=True, text=True, check=True
+    )
+    return [(nom, portee) for nom, portee in json.loads(proc.stdout)]
+
+
+def _labels_du_format_impose() -> list[str]:
+    """Étiquettes du gabarit `FORMAT IMPOSÉ` de CLAUDE.md, dans l'ordre où elles y figurent.
+
+    Le gabarit indente ses étiquettes de DEUX espaces ; les sous-parties de l'ARBITRAGE
+    (`RECOMMANDATION :`) le sont davantage et ne sont donc pas des sections du rapport.
+    """
+    texte = CLAUDE_MD.read_text(encoding="utf-8")
+    debut = texte.index("FORMAT IMPOSÉ")
+    fin = texte.index("/simplify <fichiers modifiés>", debut)
+    return re.findall(r"^ {2}([A-ZÉÈÀÂÎÔÛÇ]+)\s*:", texte[debut:fin], re.MULTILINE)
+
+
+def _sections_declarees_facultatives() -> set[str]:
+    """Sections que CLAUDE.md autorise explicitement à omettre (« omettre la section »)."""
+    texte = CLAUDE_MD.read_text(encoding="utf-8")
+    puce = re.search(r"^- ([A-ZÉÈÀÂÎÔÛÇ, et]+) : omettre la section", texte, re.MULTILINE)
+    assert puce is not None, "la puce qui déclare les sections omissibles a disparu de CLAUDE.md"
+    return set(re.findall(r"[A-ZÉÈÀÂÎÔÛÇ]{2,}", puce.group(1)))
+
+
 def _run_deny(command: str) -> dict | None:
     """Verdict du hook PreToolUse : le dict de refus, ou None si la commande passe."""
     proc = subprocess.run(
@@ -101,6 +134,120 @@ def _run_deny(command: str) -> dict | None:
         check=True,
     )
     return json.loads(proc.stdout) if proc.stdout.strip() else None
+
+
+# -------------------------------------------------------- source unique de la liste des sections
+
+
+def test_la_liste_vient_bien_de_claude_md(tmp_path: Path) -> None:
+    """VERROU de la source unique : la liste est LUE, pas codée en dur dans le hook.
+
+    On rejoue le hook sur une copie du dépôt dont le CLAUDE.md exige une section inventée : si
+    elle est réclamée, c'est bien le fichier qui commande. Sans ce test, un hook redevenu
+    autonome passerait tous les autres.
+    """
+    hooks = tmp_path / ".claude" / "hooks"
+    hooks.mkdir(parents=True)
+    shutil.copy(H_RAPPORT, hooks / H_RAPPORT.name)
+    (tmp_path / "CLAUDE.md").write_text(
+        "SECTIONS EXIGÉES : `LU`=toujours, `TOTO`=toujours\n", encoding="utf-8"
+    )
+
+    sections = json.loads(
+        subprocess.run(
+            [str(hooks / H_RAPPORT.name), "--sections"], capture_output=True, text=True, check=True
+        ).stdout
+    )
+    assert sections == [["LU", "toujours"], ["TOTO", "toujours"]]
+
+    transcript = tmp_path / "t.jsonl"
+    transcript.write_text(
+        "".join(
+            json.dumps(e) + "\n"
+            for e in (_user("corrige"), _edit("engine/x.py"), _say(RAPPORT_CONFORME))
+        ),
+        encoding="utf-8",
+    )
+    proc = subprocess.run(
+        [str(hooks / H_RAPPORT.name)],
+        input=json.dumps({"transcript_path": str(transcript)}),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    contexte = json.loads(proc.stdout)["hookSpecificOutput"]["additionalContext"]
+    assert "TOTO" in contexte and "RELIRE" not in contexte
+
+
+def test_liste_illisible_est_signalee_et_non_ignoree(tmp_path: Path) -> None:
+    """Un garde-fou qui ne peut plus lire sa liste le DIT — se taire le rendrait muet (T1)."""
+    hooks = tmp_path / ".claude" / "hooks"
+    hooks.mkdir(parents=True)
+    shutil.copy(H_RAPPORT, hooks / H_RAPPORT.name)
+    (tmp_path / "CLAUDE.md").write_text("plus aucune liste ici\n", encoding="utf-8")
+
+    transcript = tmp_path / "t.jsonl"
+    transcript.write_text(json.dumps(_user("q")) + "\n" + json.dumps(_say("r")) + "\n", "utf-8")
+    proc = subprocess.run(
+        [str(hooks / H_RAPPORT.name)],
+        input=json.dumps({"transcript_path": str(transcript)}),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    contexte = json.loads(proc.stdout)["hookSpecificOutput"]["additionalContext"]
+    assert "SECTIONS EXIGÉES" in contexte
+
+
+@pytest.mark.parametrize(
+    "ligne",
+    [
+        # Une entrée qui perd ses backticks : le parse la sauterait et RELIRE disparaîtrait.
+        "SECTIONS EXIGÉES : `LU`=toujours, JUMEAU=toujours, `RELIRE`=code",
+        # Liste repliée sur deux lignes : la seconde n'est jamais lue.
+        "SECTIONS EXIGÉES : `LU`=toujours, `JUMEAU`=toujours,\n  `RELIRE`=code",
+        # Portée inventée : ni `toujours` ni `code`.
+        "SECTIONS EXIGÉES : `LU`=parfois, `RELIRE`=code",
+    ],
+)
+def test_liste_partiellement_illisible_est_refusee(tmp_path: Path, ligne: str) -> None:
+    """Un parse PARTIEL éteindrait RELIRE en silence — donc le contrôle des chemins en worktree."""
+    hooks = tmp_path / ".claude" / "hooks"
+    hooks.mkdir(parents=True)
+    shutil.copy(H_RAPPORT, hooks / H_RAPPORT.name)
+    (tmp_path / "CLAUDE.md").write_text(ligne + "\n", encoding="utf-8")
+
+    proc = subprocess.run(
+        [str(hooks / H_RAPPORT.name), "--sections"], capture_output=True, text=True
+    )
+    assert proc.returncode != 0, "liste partiellement illisible acceptée sans bruit"
+
+
+def test_modifier_claude_md_engage_couverture_et_relire(tmp_path: Path) -> None:
+    """CLAUDE.md pilote le hook : le tour qui peut l'éteindre ne peut pas être le seul exempté."""
+    contexte = _rapport(tmp_path, _user("change la liste"), _edit("CLAUDE.md"),
+                        _say("Fait.\n\nLU : CLAUDE.md\nJUMEAU : grep -c foo -> 0 hit\n"))
+    assert contexte is not None
+    assert "COUVERTURE" in contexte and "RELIRE" in contexte
+
+
+def test_sections_du_hook_et_gabarit_de_claude_md_ne_divergent_pas() -> None:
+    """Le défaut du 2026-08-12 : le hook réclamait COUVERTURE, la puce ne la listait pas."""
+    exigees = [nom for nom, _ in _sections_exigees()]
+    labels = _labels_du_format_impose()
+    assert set(exigees) <= set(labels), "section exigée par le hook mais absente du FORMAT IMPOSÉ"
+    facultatives = _sections_declarees_facultatives()
+    assert set(labels) == set(exigees) | facultatives, (
+        "toute section du FORMAT IMPOSÉ doit être soit exigée par le hook, soit déclarée omissible"
+    )
+
+
+def test_portee_des_sections_est_celle_annoncee() -> None:
+    """La liste reste lisible : rien d'autre que `toujours` / `code`, et RELIRE reste gaté code."""
+    sections = dict(_sections_exigees())
+    assert set(sections.values()) <= {"toujours", "code"}
+    assert sections["LU"] == sections["JUMEAU"] == "toujours"
+    assert sections["COUVERTURE"] == sections["RELIRE"] == "code"
 
 
 # ------------------------------------------------------------------- contrôle du rapport de clôture
@@ -147,8 +294,39 @@ def test_rapport_absent_reclame_chaque_section(tmp_path: Path) -> None:
     contexte = _rapport(tmp_path, _user("corrige"), _edit("engine/x.py"), _tool_result(),
                         _say("c'est corrigé."))
     assert contexte is not None and "PRÉCÉDENT" in contexte
-    for section in ("LU", "JUMEAU", "RELIRE"):
+    for section in ("LU", "JUMEAU", "COUVERTURE", "RELIRE"):
         assert section in contexte
+
+
+def test_couverture_est_exigee_des_qu_un_fichier_de_code_bouge(tmp_path: Path) -> None:
+    """T4 COUVERTURE : un comportement modifié sans son test pytest ne passe pas en silence."""
+    ampute = "\n".join(
+        ln for ln in RAPPORT_CONFORME.splitlines() if not ln.startswith("COUVERTURE")
+    )
+    contexte = _rapport(tmp_path, _user("corrige"), _edit("engine/x.py"), _say(ampute))
+    assert contexte is not None and "COUVERTURE" in contexte
+
+
+def test_couverture_n_est_pas_exigee_sur_une_modification_de_doc(tmp_path: Path) -> None:
+    """Même condition que RELIRE : aucun code n'a bougé, donc aucun test n'est dû.
+
+    Sur une doc ORDINAIRE : CLAUDE.md, lui, pilote le hook et compte comme du code (voir
+    `test_modifier_claude_md_engage_couverture_et_relire`).
+    """
+    doc = "Fait.\n\nLU : le doc en entier\nJUMEAU : grep -c COUVERTURE -> 1 hit\n"
+    assert _rapport(tmp_path, _user("corrige la doc"), _edit("Documentation/x.md"),
+                    _say(doc)) is None
+
+
+def test_un_hook_shell_compte_comme_du_code(tmp_path: Path) -> None:
+    """Sinon le tour qui modifie un garde-fou serait le seul à n'en réclamer aucun."""
+    ampute = "\n".join(
+        ln for ln in RAPPORT_CONFORME.splitlines() if not ln.startswith("COUVERTURE")
+    )
+    contexte = _rapport(
+        tmp_path, _user("corrige le hook"), _edit(".claude/hooks/rapport-cloture.sh"), _say(ampute)
+    )
+    assert contexte is not None and "COUVERTURE" in contexte
 
 
 def test_etiquette_relire_doit_etre_seule_sur_sa_ligne(tmp_path: Path) -> None:

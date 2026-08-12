@@ -1610,3 +1610,51 @@ def test_squad_destinations_erosion_matches_the_naive_definition():
     got2 = {tuple(d) for d in deployment_build_squad_destinations_pool(gs2, plan2)["destinations"]}
     assert got2, "VERT VACANT : aucune ancre retenue sur l'aire d'arrivée"
     assert got2 == naive(gs2, set(area), plan2)
+
+
+# ---------------------------------------------------------------------------
+# JOURNALISATION (step.log) — trou réparé le 2026-08-12
+# ---------------------------------------------------------------------------
+
+
+def test_timeout_destruction_emits_an_action_log_entry():
+    """VERROU : supprimer l'`append_action_log` de `destroy_unarrived_strategic_reserves` rend
+    ce test ROUGE. Sans ce log, step.log ne porte aucune trace de la mort et l'analyzer ignore
+    des escouades entières dans ses ratios d'attrition."""
+    from engine.w40k_core import destroy_unarrived_strategic_reserves
+
+    eng = _engine()
+    _drive_deployment(eng)
+    gs = eng.game_state
+    gs["action_logs"] = []
+    gs["action_log_seq"] = 0
+    squad_id = _reserve_squad(eng, deep_strike=True)
+    gs["turn"] = 3
+
+    destroy_unarrived_strategic_reserves(gs)
+
+    entries = [e for e in gs["action_logs"] if e.get("type") == "strategic_reserves_timeout"]
+    assert len(entries) == 1, "la destruction 20.04 doit produire UNE entree d'action_log par escouade"
+    e = entries[0]
+    assert e["unitId"] == squad_id
+    assert e["player"] in (1, 2)
+    assert e["turn"] == 3
+    assert isinstance(e["removed_models"], list) and len(e["removed_models"]) > 0
+
+
+def test_timeout_no_log_when_no_unit_qualifies():
+    """Aucune escouade en réserves non repositionnée → aucune entrée."""
+    from engine.w40k_core import destroy_unarrived_strategic_reserves
+
+    eng = _engine()
+    _drive_deployment(eng)
+    gs = eng.game_state
+    gs["action_logs"] = []
+    gs["action_log_seq"] = 0
+    gs["turn"] = 3
+
+    destroy_unarrived_strategic_reserves(gs)
+
+    assert not any(
+        e.get("type") == "strategic_reserves_timeout" for e in gs["action_logs"]
+    ), "sans unité en réserves, aucun log ne doit être émis"
