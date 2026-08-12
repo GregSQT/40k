@@ -68,12 +68,22 @@ pools de pile-in, de consolidation et de charge aient une raison de le traverser
 |---|---|
 | prémisse | `models_cache` porte bien deux hauteurs, et l'étage sépare bien les deux |
 | 5 pools par-figurine (move, pile-in, consolidation, charge, déploiement) | la figurine de 2" reçoit des cases sous l'étage, celle de 4" **aucune** — chaque pool a sa contre-épreuve, sans quoi un pool vide rendrait son verrou vacant |
-| voile rouge du déploiement | les DEUX figurines dans le même plan, sur la même case : verdicts opposés. Un refus global (zone, mur, bord) frapperait les deux, il ne peut donc pas se faire passer pour une décision de clairance |
+| voile rouge du déploiement — hauteur | les DEUX figurines dans le même plan, sur la même case : verdicts opposés. Un refus global (zone, mur, bord) frapperait les deux, il ne peut donc pas se faire passer pour une décision de clairance |
+| voile rouge du déploiement — **rayon de socle** | deux figurines de MÊME hauteur et de socles différents, posées hors du couloir : seul le disque du socle large y déborde. La hauteur est neutralisée, donc seul le rayon peut décider |
 | formation compacte | la figurine trop haute n'est pas posée sous l'étage, celle qui tient l'est |
-| garde de source (4 fichiers) | aucun appel de `low_clearance_ground_hexes` ne reprend la hauteur de l'ESCOUADE, et le NOMBRE d'appels par fichier est opposable — en ajouter un force à relire la liste |
+| garde de source (4 fichiers) | ces quatre fichiers ne lisent PLUS la hauteur d'escouade, sous aucune forme, et le NOMBRE d'appels par fichier est opposable — en ajouter un force à relire la liste |
 
 **Preuve de rouge** : hauteur remise sur l'escouade aux six sites couverts par comportement → les
-six verrous correspondants rougissent, plus les trois gardes de source ; rétablis → verts.
+six verrous correspondants rougissent, plus les trois gardes de source ; rayon repris sur
+l'escouade aux deux sites de déploiement → le verrou de socle rougit ; hauteur transitant par une
+variable → le garde de source rougit. Tous rétablis → verts.
+
+⚠️ Deux défauts de ces verrous ont été trouvés par la `/code-review` qui a suivi la livraison, et
+corrigés dans la foulée : **le rayon de socle n'était verrouillé nulle part** (toutes les figurines
+du fichier avaient le même socle — la moitié de la correction était donc non testée), et le garde
+de source n'inspectait que le texte SUIVANT chaque appel, si bien que les deux sites de déploiement
+— qui passent la hauteur par une variable calculée plus haut — lui échappaient entièrement. Un
+garde aveugle aux seuls sites qu'il était censé protéger. Il porte désormais sur le fichier entier.
 
 ⚠️ **Quatre des onze appels ne sont couverts que par le garde de source** : ils vivent sur des
 branches d'ÉTAGE (montée, descente, ILP d'autoplace) que les pools de plain-pied n'exécutent pas,

@@ -59,16 +59,15 @@ def _unit(uid: str, player: int, models: Sequence[Dict[str, Any]]) -> Dict[str, 
     }
 
 
-@pytest.fixture
-def gs() -> Dict[str, Any]:
-    """Deux figurines côte à côte : l'une à la taille de l'escouade, l'autre plus grande."""
-    troupe = {"col": DEPART[0], "row": DEPART[1], "level": 0, "VALUE": 10}
-    perso = {
-        "col": DEPART[0], "row": DEPART[1] + 20, "level": 0, "VALUE": 10,
-        "MODEL_HEIGHT": HAUTEUR_PERSONNAGE,
-    }
+def _etat(models: Sequence[Dict[str, Any]], cohesion: int = 2) -> Dict[str, Any]:
+    """Plateau x10 avec un couloir sous un étage bas, l'escouade ``S`` et un ennemi ``E``.
+
+    ``cohesion`` : portée de cohésion en sous-hexes. Élargie par le test de SOCLE, où les deux
+    figurines doivent s'écarter assez pour que le disque de la plus large ne chevauche pas sa
+    voisine — sinon c'est la collision intra-escouade, et non la clairance, qui rougit.
+    """
     units = [
-        _unit("S", 1, [troupe, perso]),
+        _unit("S", 1, list(models)),
         _unit("E", 2, [{"col": ENNEMI[0], "row": ENNEMI[1], "level": 0, "VALUE": 10}]),
     ]
     state: Dict[str, Any] = {
@@ -78,7 +77,7 @@ def gs() -> Dict[str, Any]:
                 "engagement_zone": 2 * ISH,
                 "engagement_zone_vertical": 5.0,
                 "max_base_size_hex": 35,
-                "unit_model_cohesion_range": 2,
+                "unit_model_cohesion_range": cohesion,
                 "unit_global_cohesion_range": 9,
                 "squad_min_neighbors": 1,
                 "cohesion_distance_mode": "euclidean",
@@ -129,6 +128,18 @@ def gs() -> Dict[str, Any]:
     # vide, ce que la fonction produit d'elle-même.
     build_enemy_adjacent_hexes(state, 1)
     return state
+
+
+@pytest.fixture
+def gs() -> Dict[str, Any]:
+    """Deux figurines : l'une à la taille de l'escouade, l'autre plus grande. Même socle."""
+    return _etat([
+        {"col": DEPART[0], "row": DEPART[1], "level": 0, "VALUE": 10},
+        {
+            "col": DEPART[0], "row": DEPART[1] + 20, "level": 0, "VALUE": 10,
+            "MODEL_HEIGHT": HAUTEUR_PERSONNAGE,
+        },
+    ])
 
 
 def _cases_sous_l_etage(destinations: List[Any]) -> List[Tuple[int, int]]:
@@ -266,7 +277,12 @@ _SOUS_ETAGE = (115, 100)  # au cœur du couloir, hors de toute autre contrainte
 # les pools de plain-pied n'exécutent pas. Les couvrir par comportement demanderait une mise en
 # scène multi-niveaux par site. Ce garde ne remplace pas un verrou de comportement — il ne dit
 # rien de ce que le code CALCULE — mais il interdit la seule régression réaliste : quelqu'un qui
-# repasse la hauteur de l'escouade à un appel, en silence.
+# repasse la hauteur de l'escouade, en silence.
+#
+# ⚠️ Il porte sur le FICHIER, pas sur le voisinage de l'appel. Une première version lisait les 200
+# caractères suivant chaque parenthèse ouvrante : les deux sites de déploiement, qui passent une
+# variable calculée cinq lignes plus haut, lui échappaient entièrement — un garde aveugle aux
+# seuls sites qu'il était censé couvrir (relevé par `/code-review`).
 # ─────────────────────────────────────────────────────────────────────────────
 
 #: Les onze sites, nommés. Un appel ajouté ou retiré fait échouer le compte : c'est voulu, la
@@ -277,37 +293,44 @@ _FICHIERS_CLAIRANCE = {
     "engine/phase_handlers/charge_handlers.py": 4,
     "engine/phase_handlers/deployment_handlers.py": 3,
 }
-#: Formes qui prennent la hauteur sur l'ESCOUADE. C'est exactement ce qui a été corrigé.
-_HAUTEUR_D_ESCOUADE = ('require_key(unit, "MODEL_HEIGHT")', 'unit["MODEL_HEIGHT"]')
+#: Lectures de la hauteur d'ESCOUADE. Le garde interdit la PRÉSENCE de ces formes dans ces quatre
+#: fichiers, au lieu d'inspecter le texte qui suit chaque appel : la hauteur y transite parfois par
+#: une variable calculée plus haut (`_h = _model_height_of(...)`), qu'une fenêtre de texte autour
+#: de l'appel ne verrait jamais. La règle est plus simple à tenir ET plus difficile à contourner :
+#: un pool par-figurine n'a AUCUNE raison de lire la hauteur du bloc.
+_HAUTEUR_D_ESCOUADE = (
+    'require_key(unit, "MODEL_HEIGHT")',
+    'unit["MODEL_HEIGHT"]',
+    'unit.get("MODEL_HEIGHT"',
+)
 
 
-def _appels_clairance(chemin: str) -> List[str]:
-    """Les arguments de chaque appel à `low_clearance_ground_hexes` du fichier (texte brut)."""
-    import re
+def _source(chemin: str) -> str:
     from pathlib import Path
 
-    racine = Path(__file__).resolve().parents[3]
-    source = (racine / chemin).read_text(encoding="utf-8")
-    # L'appel tient parfois sur trois lignes : on prend la fenêtre qui suit la parenthèse
-    # ouvrante, ce qui suffit à voir d'où vient la hauteur.
-    return [source[m.end():m.end() + 200] for m in re.finditer(r"low_clearance_ground_hexes\(", source)
-            if "def low_clearance_ground_hexes" not in source[max(0, m.start() - 20):m.start()]]
+    return (Path(__file__).resolve().parents[3] / chemin).read_text(encoding="utf-8")
+
+
+def _nb_appels_clairance(chemin: str) -> int:
+    """Nombre d'appels à `low_clearance_ground_hexes` — sa DÉFINITION vit dans `terrain_utils`."""
+    import re
+
+    return len(re.findall(r"low_clearance_ground_hexes\(", _source(chemin)))
 
 
 @pytest.mark.parametrize("chemin", sorted(_FICHIERS_CLAIRANCE))
 def test_aucun_appel_de_clairance_ne_prend_la_hauteur_de_l_escouade(chemin):
     """VERROU DE SOURCE : la hauteur passée à la clairance vient toujours d'une FIGURINE."""
-    appels = _appels_clairance(chemin)
-
-    assert len(appels) == _FICHIERS_CLAIRANCE[chemin], (
-        f"{chemin} : {len(appels)} appels à la clairance, {_FICHIERS_CLAIRANCE[chemin]} attendus. "
-        "Un appel a été ajouté ou retiré — relire la liste de ce test, elle est opposable"
+    assert _nb_appels_clairance(chemin) == _FICHIERS_CLAIRANCE[chemin], (
+        f"{chemin} : {_nb_appels_clairance(chemin)} appels à la clairance, "
+        f"{_FICHIERS_CLAIRANCE[chemin]} attendus. Un appel a été ajouté ou retiré — relire la "
+        "liste de ce test, elle est opposable"
     )
-    fautifs = [a for a in appels if any(f in a for f in _HAUTEUR_D_ESCOUADE)]
+    source = _source(chemin)
+    fautifs = [f for f in _HAUTEUR_D_ESCOUADE if f in source]
     assert not fautifs, (
-        f"{chemin} : {len(fautifs)} appel(s) reprennent la hauteur de l'ESCOUADE alors que la "
-        f"clairance est par figurine (§13.06). Passer par `_model_height_of(model, unit)`. "
-        f"Extrait : {fautifs[0][:80]!r}"
+        f"{chemin} lit la hauteur de l'ESCOUADE ({fautifs}) alors que tous ses pools raisonnent "
+        "par figurine (§13.06). Passer par `_model_height_of(model, unit)`"
     )
 
 
@@ -333,6 +356,56 @@ def test_le_voile_rouge_de_deploiement_refuse_le_personnage_sous_l_etage(gs):
     assert etat["per_model"]["S#1"] is False, (
         f"la figurine de {HAUTEUR_PERSONNAGE}\" est acceptée sous un étage laissant "
         f"{CLAIRANCE_ETAGE}\" : le voile rouge mesure la hauteur de l'escouade"
+    )
+
+
+#: Colonne d'où un socle LARGE déborde sous l'étage alors qu'un socle étroit non. Calibrée par
+#: balayage : à x10, les rayons 1 et 5 changent de verdict entre les colonnes 107 et 110.
+_HORS_ETAGE_MAIS_LARGE = 107
+
+
+@pytest.fixture
+def gs_socles() -> Dict[str, Any]:
+    """Deux figurines de MÊME hauteur, de socles différents — l'escouade porte le socle étroit.
+
+    La hauteur est neutralisée (les deux dépassent la clairance) : seul le RAYON peut décider,
+    donc le test ne peut pas passer au vert par l'effet de la correction voisine.
+    """
+    return _etat([
+        {
+            "col": DEPART[0], "row": DEPART[1], "level": 0, "VALUE": 10,
+            "MODEL_HEIGHT": HAUTEUR_PERSONNAGE,
+        },
+        {
+            "col": DEPART[0], "row": DEPART[1] + 20, "level": 0, "VALUE": 10,
+            "MODEL_HEIGHT": HAUTEUR_PERSONNAGE, "BASE_SHAPE": "round", "BASE_SIZE": 5,
+        },
+    ], cohesion=20)
+
+
+def test_le_voile_rouge_de_deploiement_mesure_le_socle_de_la_figurine(gs_socles):
+    """VERROU : le disque de clairance a le RAYON de la figurine, pas celui de l'escouade.
+
+    Le déploiement testait le débordement avec le socle de l'ESCOUADE alors qu'il lisait déjà
+    celui de la figurine pour le reste de son verdict — l'autre moitié du même gabarit.
+    """
+    from engine.phase_handlers.deployment_handlers import deployment_preview_plan
+
+    # Écart de 6 sous-hexes, calibré entre deux murs : en dessous, le disque du socle large
+    # chevauche sa voisine (collision intra-escouade) ; au-delà, la cohésion rougit les deux.
+    # Dans les deux cas le test cesserait de mesurer le rayon de clairance.
+    etat = deployment_preview_plan(gs_socles, "S", [
+        ("S#0", _HORS_ETAGE_MAIS_LARGE, 100, 0),
+        ("S#1", _HORS_ETAGE_MAIS_LARGE, 106, 0),
+    ])
+
+    assert etat["per_model"]["S#0"] is True, (
+        f"le socle étroit est refusé en colonne {_HORS_ETAGE_MAIS_LARGE} : il ne déborde pas sous "
+        "l'étage, le refus vient d'ailleurs et le test ne mesure plus le rayon"
+    )
+    assert etat["per_model"]["S#1"] is False, (
+        "le socle LARGE est accepté alors que son disque déborde sous un étage qui ne le laisse "
+        "pas passer : le rayon de clairance est pris sur l'escouade"
     )
 
 
