@@ -18,8 +18,9 @@ Ces fonctions ignorent le jet pour toucher, la Force contre l'Endurance, l'AP co
 sauvegarde, **le nombre de figurines** de l'escouade, la portée, et toutes les règles d'arme
 (SUSTAINED, DEVASTATING, TORRENT, MELTA, ANTI_X, BLAST).
 
-Conséquence sur le roster 500 pts d'ArmageddonAgent, calculée le 2026-08-11 : **16 unités sur 23**
-ont `melee > ranged` selon ce proxy, dont l'Intercessor (2.00 contre 3.00 — un fusil à 24" contre
+Conséquence sur le roster 500 pts d'ArmageddonAgent, **recomptée le 2026-08-12 sur les rosters
+holdout** (le 2026-08-11 annonçait 16, à un profil près) : **17 profils sur 23** ont
+`melee > ranged` selon ce proxy, dont l'Intercessor (2.00 contre 3.00 — un fusil à 24" contre
 un couteau), l'Ancient, le Librarian et les Boyz. Or c'est exactement le test qui décide de
 charger (`TacticalBot._select_charge_action`, `ValueTradeBot._charge`) et celui qui identifie une
 « menace de mêlée » à contre-charger (`DefensiveBot`, `_score_melee_threat_only`). Les bots
@@ -88,25 +89,21 @@ raison (cf. `config/bot_movement_weights.json`, entrée `tactical`).
    | Alpha strike | cherche le contact au plus tôt sur la pièce clé | l'agent qui expose ses unités de tir |
    | Attrition | joue le départage VALUE : préserve ses pièces chères, tue le rentable | l'agent qui trade mal |
    | Décapitation | concentre tout sur une escouade par tour pour la retirer entièrement | l'agent qui étale ses forces |
+   | Scorer | joue pour marquer, ne se bat que pour ça | l'agent qui gagne des combats et perd la partie |
 
    Racer/Endgame sont les deux bornes du **tempo**, Attrition/Décapitation les deux façons
-   opposées de dépenser ses dégâts, Alpha la distance nulle.
+   opposées de dépenser ses dégâts, Alpha la distance nulle, Scorer l'axe du score lui-même.
    `adaptive` **disparaît** : c'est un commutateur entre trois autres styles, donc corrélé par
    construction.
-   ⚠️ **Le panel compte CINQ styles, pas six.** `Standoff` (« tenir ses distances ») a été
-   **supprimé** le 2026-08-11 — mesures et raison en §9. Décision de l'utilisateur, reprise
-   telle quelle : « je préfère des bots pertinents plutôt que forcer pour en avoir un de plus
-   qui n'apprend rien ». Le nombre n'a aucune vertu ; l'orthogonalité si.
-3. **Le holdout garde le nom `tactical` mais change de nature.** Il n'a pas de doctrine, il a un
-   objectif : il joue pour gagner. Recherche à **un coup d'anticipation** — énumérer ses actions
-   légales, les simuler, garder la meilleure. Sa fonction de valeur d'état (option C) :
-   **points marqués + zones tenues + différentiel de valeur des armées, pondéré par les tours
-   restants**. Il sacrifie une unité en fin de partie pour un objectif décisif et la préserve au
-   tour 1. Un holdout doit différer en **nature**, pas en degré : l'agent qui apprend à battre des
-   heuristiques pondérées bat par construction une heuristique pondérée plus forte.
-   ⚠️ Conserver le nom rend **l'historique de `tactical` illisible** après bascule. Aucun chiffre
-   de sélection de modèle n'en dépend (poids 0,0 en éval, exclu du `worst_bot_score`), mais la
-   bascule se date dans la config, comme le gel du 2026-08-04.
+   ⚠️ `Standoff` (« tenir ses distances ») a été **supprimé** le 2026-08-11 — mesures et raison
+   en §9.2. Décision de l'utilisateur, reprise telle quelle : « je préfère des bots pertinents
+   plutôt que forcer pour en avoir un de plus qui n'apprend rien ». Le nombre n'a aucune vertu ;
+   l'orthogonalité si. Le panel est retombé à cinq styles, puis remonté à six le 2026-08-12 avec
+   `Scorer` — qui, lui, porte un axe réel (cf. §11).
+3. ~~**Le holdout garde le nom `tactical` mais change de nature**~~ — **ABANDONNÉ le 2026-08-12,
+   cf. §11.** La refonte « joue pour gagner » (recherche à un coup) a été écrite, mesurée, puis
+   supprimée : elle coûtait 9,5× un bot normal par épisode et ne gagnait pas plus souvent qu'eux.
+   `tactical` reste donc l'ancien `TacticalBot`, et le holdout reste ce qu'il était.
 4. **Le budget d'évaluation se répartit selon l'incertitude**, pas uniformément : un bot battu à
    98 % est confirmé en ~100 parties, un bot serré autour de 50 % en demande 600.
 5. **`ai/reward_mapper.py` reste hors chantier.** Il partage le proxy faux (`:24-25`), mais
@@ -121,13 +118,12 @@ raison (cf. `config/bot_movement_weights.json`, entrée `tactical`).
 | 0 | consigner la mesure de référence (ce doc, §2) | ✅ 2026-08-11 |
 | 1 | `step.log` nomme l'adversaire réellement affronté | ✅ 2026-08-11 |
 | 2 | ~~appariement des graines entre bots comparés~~ | ❌ **retirée** 2026-08-11, cf. §4.1 |
-| 3 | chiffrage de faisabilité du holdout à un coup | ✅ 2026-08-11, cf. §6 |
-| 4 | modèle de dégâts espérés (attaquant → cible) | ✅ 2026-08-11, cf. §7 |
-| 5 | les CINQ styles + le holdout | ✅ 2026-08-11, cf. §7 (6ᵉ style supprimé, §9.2) |
-| 6 | réglage et orthogonalité en **bot-contre-bot** | ✅ 2026-08-12, cf. §8 et §9 |
-| 7 | correspondance ancien/nouveau, puis suppression des six anciens | |
-| — | **⚠️ sort du holdout : arbitrage OUVERT, cf. §10.1** | |
-| 8 | mesure finale contre l'agent, commande de §2 | |
+| 3 | ~~chiffrage de faisabilité du holdout à un coup~~ | ⛔ **sans objet** — holdout abandonné 2026-08-12, §11.2 |
+| 4 | modèle de dégâts espérés (attaquant → cible) | ✅ 2026-08-11, **corrigé à la racine** 2026-08-12, cf. §7 et §7.1 |
+| 5 | les SIX styles | ✅ 2026-08-12, cf. §7 et §11.3 (`standoff` supprimé §9.2, `scorer` ajouté §11.3) |
+| 6 | réglage et orthogonalité en **bot-contre-bot** | 🟠 **PARTIEL** — cinq styles réglés, `scorer` **non réglé** ; chiffres du §8/§9 à rejouer, cf. §11.1 |
+| 7 | correspondance ancien/nouveau, puis suppression des cinq anciens | |
+| 8 | mesure finale contre l'agent, commande de §2 | ⚠️ bloquée : modèle canonique absent, cf. §10.2 |
 
 ### 4.1 Pourquoi l'appariement des graines a été retiré
 
@@ -228,15 +224,45 @@ Remonté à l'utilisateur le 2026-08-11.
 
 **Le socle n'était pas à écrire.** `engine/weapon_damage_cache.py` calculait déjà les dégâts
 espérés attaquant→cible en O(1) (jet pour toucher, Force contre Endurance, AP contre sauvegarde),
-sur une table pré-calculée que l'observation de l'agent lit déjà
-(`ObservationBuilder._score_weapon_vs_target`). Un second modèle de dégâts aurait créé le doublon
-divergent que ce dépôt paie le plus cher.
+sur une table pré-calculée. Un second modèle de dégâts aurait créé le doublon divergent que ce
+dépôt paie le plus cher.
 
 Il manquait **un facteur** : la table donne un dégât **par figurine** (sa clé offensive porte `NB`,
 les attaques d'une figurine), alors que les bots décident au niveau de l'escouade — dix Boyz y
-valaient un Boy. `squad_expected_damage()` multiplie par l'effectif **vivant**, lu comme le fait le
-moteur (ids de `squad_models` présents dans `models_cache`). Aucun repli : cache absent ou escouade
-inconnue lèvent, sans quoi une unité inconnue passerait pour inoffensive.
+valaient un Boy. `squad_expected_damage()` agrège sur les figurines **vivantes**, lues comme le
+fait le moteur (ids de `squad_models` présents dans `models_cache`). Aucun repli : cache absent ou
+escouade inconnue lèvent, sans quoi une unité inconnue passerait pour inoffensive.
+
+### 7.1 Correction du 2026-08-12 — l'agrégation était une multiplication, et elle était fausse
+
+La première version prenait la meilleure arme de l'**escouade** et la multipliait par l'effectif.
+Or le profil d'armes porté par l'objet `unit` n'est **que celui du soldat de base** : sergents,
+armes spéciales et personnages attachés n'y figurent pas, et les figurines de base comptaient à
+leur place. Mesuré sur `scenario_bot-01` en comparant à la vraie somme par figurine : **50 paires
+(attaquant, cible, phase) sur 90 étaient fausses**, médiane **0,50×** la vraie valeur, pire cas
+**0,18×** (0,78 annoncé contre 4,23 réels en mêlée). Seules les deux escouades **homogènes** du
+scénario tombaient juste. Le moteur, lui, a toujours résolu par figurine — l'estimation mentait
+donc sur le combat réel, et c'est le même défaut que celui que ce chantier existe pour corriger,
+déplacé d'un cran : modèle juste, jeu d'armes tronqué.
+
+`_best_weapon_cache` est désormais indexé **par figurine** (`models_cache`) et
+`squad_expected_damage` **somme** sur les vivantes. Après correction : 90 paires contrôlées, **0
+fausse**. Verrou : `tests/unit/engine/test_squad_expected_damage.py`, dont
+`test_the_special_weapons_of_a_mixed_squad_are_counted` est le seul test qu'aucune multiplication
+ne peut passer (vérifié rouge en remettant le défaut : 2,5 rendu au lieu de 6,0).
+
+⚠️ **L'observation de l'agent n'était PAS concernée, contrairement à ce qui était écrit ici.**
+Instrumentation d'une partie complète le 2026-08-12 : son unique lecteur du cache,
+`ObservationBuilder._target_priority_score`, **n'avait aucun appelant**. Il portait par ailleurs
+une **troisième** implémentation des dégâts (jet pour toucher et sauvegarde recodés à la main),
+elle-même fausse sur deux points de plus — nombre d'attaques calculé puis jamais utilisé,
+sauvegarde invulnérable ignorée. Supprimé, avec les deux aides qu'il tirait derrière lui. **Aucun
+ré-entraînement n'est donc requis par cette correction** : le seul consommateur vivant du cache
+est le panel de bots.
+
+🔎 Signalé, non traité (défaut sans lien, hors périmètre) : `shared_utils.calculate_target_priority_score`
+est **morte elle aussi** — définie, importée par `shooting_handlers` et `fight_handlers`, jamais
+appelée. Elle porte le même proxy `max(DMG)` que ce chantier condamne.
 
 **Nouveaux fichiers** : `ai/bot_doctrines.py` (les six styles), `ai/bot_holdout.py` (le holdout à
 un coup), `ai/bot_registry.py` (source unique clé→classe).
@@ -353,18 +379,123 @@ non plus : il mesure la force relative, pas ce que chaque bot révèle de l'agen
 
 ## 10. Ce qui reste ouvert — à lire avant de reprendre
 
-1. **Le holdout `tactical_lookahead` n'est pas validé.** Ses deux seules mesures (0,875 puis 0,250
-   contre `racer`) portent chacune sur **8 épisodes**, soit ±35 points de marge, et elles encadrent
-   **six changements simultanés** — quatre corrections du bot, deux de son unique adversaire.
-   Aucune conclusion n'en est tirable, ni sur sa force ni sur l'effet du retrait de son « oracle ».
-   Il coûte par ailleurs ~5× un bot normal par épisode (recalcul du contrôle d'objectif par
-   candidate). Son sort est un arbitrage OUVERT, pas une décision prise.
-2. **Deux reviews ont trouvé 11 défauts** dans ce code, dont 3 introduits en corrigeant la review
-   précédente : la simulation du holdout qui polluait les compteurs du moteur, le rembobinage du
-   hasard qui en faisait un oracle, un test de dés qui ne testait rien. Tous corrigés et verrouillés
-   (`tests/unit/ai/test_holdout_simulation_isolation.py`), mais le taux d'erreur sur ce fichier
-   invite à la prudence.
-3. **Étapes 7 et 8 non commencées** : correspondance ancien/nouveau puis suppression des six
+1. **Étapes 7 et 8 non commencées** : correspondance ancien/nouveau puis suppression des cinq
    anciens, et mesure finale contre l'agent.
-4. **Le merge dans `main` attend la fin du training en cours** — il touche `config/`, relu à chaud
-   par les évaluations (cf. CLAUDE.md, « Training en cours »).
+2. **Le modèle canonique n'existe pas.** `ai/models/ArmageddonAgent/model_ArmageddonAgent.zip` a
+   été consommé par un training le 2026-08-11 à 23:14. `--test-only` retourne `Model not found` :
+   avant toute mesure contre l'agent, réinstaller `ArmageddonAgent_12345_robust_0.9438.zip` **avec
+   son `.pkl` apparié** au chemin canonique.
+3. **Tous les chiffres des §8, §9.1 et §9.3 sont à rejouer** (cf. §11.1) : ils sont soit sous
+   l'échantillon, soit arithmétiquement faux, soit mesurés sur un modèle de dégâts depuis corrigé.
+
+## 11. Relecture du 2026-08-12 — ce qui a été trouvé, mesuré et décidé
+
+Relecture complète du chantier, code en main. Trois livraisons en sont sorties.
+
+### 11.1 Ce que les mesures ne soutenaient pas
+
+Le pool holdout compte **4 scénarios**, et `--episodes` de `bot_ranking.py` compte *par
+appariement **et** par scénario*. « 8 épisodes » pour deux bots = 2 appariements × 4 scénarios × 1
+épisode : c'est `--episodes 1` qui a servi partout. Le tournoi des six (« 120 épisodes ») donne
+donc **40 épisodes par bot**, soit ±15,5 points à 95 %.
+
+Rejoué à **n = 384 par bot** (±5,0), poids corrigés, `tactical_lookahead` exclu :
+
+| bot | mesuré n=384 | annoncé §8 (n=40) | annoncé §9.1 |
+|---|---|---|---|
+| decapitation | 0,570 | 0,700 | — |
+| racer | 0,565 | 0,450 | 0,542 ✅ |
+| alpha | 0,529 | 0,425 | 0,594 |
+| attrition | 0,464 | **0,725 (1er)** | — |
+| endgame | **0,336** | 0,025 | 0,562 ❌ |
+
+- **`endgame` n'est pas remonté à 0,562.** Il est **dernier**, à 0,336, avec 12,8 points d'écart
+  au 4ᵉ pour une marge de 5. La correction l'a bien sorti du 0,025, elle ne l'a pas rendu
+  compétitif. Le « sous-tournoi à trois, 16 épisodes » qui fondait ce 0,562 est en outre
+  **arithmétiquement impossible** avec cet outil (6 appariements × 4 scénarios = 24 minimum).
+- **`attrition` s'effondre de 1ᵉʳ (0,725) à 4ᵉ (0,464)** alors que **ses poids n'ont pas été
+  touchés** — §9.1 ne corrige qu'`endgame`, `racer`, `alpha` et `standoff`. C'est la démonstration
+  directe que le classement du §8 était du bruit.
+- **Les « avant » du §9.1 contredisent le §8** : racer y vaut 0,219 contre 0,450, alpha 0,292
+  contre 0,425. Deux tournois différents comparés comme s'ils étaient le même — ce que le §8
+  s'interdit lui-même deux lignes plus bas.
+- **Le `combined` du §9.3 n'est pas la combinaison de sa propre colonne.** Les poids de `x1_panel`
+  sont uniformes, donc le combined doit être la moyenne simple : elle vaut 0,674 / 0,776 / 0,812,
+  pas 0,716 / 0,798 / 0,839. L'arrondi à 2 décimales plafonne à ±0,005. Contrôle négatif : le §2
+  se recalcule **exactement** (0,4 × 0,73 + 0,15 × 3,69 = 0,8455 ✓). Le 0,899 « avant corrections »
+  n'est sourcé nulle part.
+- **« Le panel ordonne correctement les trois agents »** ne vaut que pour l'agrégat : par bot,
+  **3 des 5** inversent les deux meilleurs modèles. Et l'ordre « vrai » de ces trois modèles vient
+  de leurs noms, c'est-à-dire du verdict de l'**ancien** panel — la validation est circulaire.
+- **§9.2 (`standoff`)** : une amplitude de 0,05 est indétectable au régime d'échantillon employé.
+  La suppression peut être la bonne décision ; sa justification *mesurée*, elle, n'existe pas.
+
+### 11.2 Le holdout à un coup, supprimé
+
+Mesuré sur le code final, pas sur des étapes intermédiaires :
+
+- **coût : 9,5×** un bot normal (209,8 s contre 22,2 s pour 16 épisodes identiques), pas les « ~5× »
+  qu'annonçait le §10 ;
+- **force : 0,431 [0,354 ; 0,508] sur 160 épisodes**, dernier derrière `decapitation` (0,537) et
+  `racer` (0,463). Le « 0,875, il domine » du §8 est réfuté ;
+- **il n'a jamais affronté l'agent** : `tactical_lookahead` n'était dans le `bot_eval_weights`
+  d'aucun des neuf profils.
+
+Sa raison d'être (§3.3) — « un agent qui apprend à battre des heuristiques pondérées bat par
+construction une heuristique pondérée plus forte » — est un bon argument, mais sa seule prédiction
+testable est contredite : à 9,5× le prix, il fait jeu égal avec elles. Sa propre docstring disait
+pourquoi il ne pouvait pas mieux faire : en mouvement il ne juge que 12 destinations retenues par
+un score géométrique **sans simulation**. Un chercheur à qui l'on présélectionne les coups par
+heuristique n'est plus un chercheur.
+
+Supprimés avec lui : `ai/bot_holdout.py`, le mécanisme `NEEDS_ENGINE` de `BotControlledEnv` (plus
+aucun client) et leurs deux fichiers de tests. `tactical` reste l'ancien `TacticalBot`.
+
+⚠️ Ses verrous tournaient tous contre un **moteur factice** de 6 attributs, écrit pour muter
+exactement les trois fuites déjà connues — alors que leur docstring affirmait comparer « l'état
+COMPLET du moteur ». Ils n'auraient pas détecté une **nouvelle** fuite du vrai moteur. À se
+rappeler avant de reprendre cette idée.
+
+### 11.3 `scorer`, le style qui manquait
+
+`ControlBot` — le seul des six d'origine à porter de l'information (0,73 quand les autres
+saturaient au-dessus de 0,87) — n'avait **aucun remplaçant** dans le panel refondu : `racer` est sa
+caricature (il refuse le combat sans condition), `alpha`/`attrition`/`decapitation` jouent les
+pertes, `endgame` attend. `ScorerBot` reprend l'axe : cible qui conteste, charge seulement quand
+elle ne coûte pas une zone tenue, déplacement vers les zones en acceptant l'exposition qui paie.
+
+Il occupe le créneau libéré par le holdout, à **1×** son coût. Le panel repasse à six styles — non
+par arithmétique, mais parce que l'axe est réel.
+
+⚠️ **Ses poids ne sont PAS réglés** (`config/bot_movement_weights.json`, entrée `scorer`) : posés
+par doctrine, à établir en bot-contre-bot avant toute mesure contre l'agent.
+
+### 11.4 Deux défauts récupérés du holdout avant de le supprimer
+
+Le travail en cours sur le holdout, non commité au moment de sa suppression, contenait deux
+constats qui ne mouraient **pas** avec lui. Ils ont été portés sur les styles qui restent.
+
+- **La durée d'une bataille se lit sur l'état.** `EndgameBot` basculait en mode poussée à
+  `PUSH_TURN = 3`, déduit à la main de « la partie dure 5 tours ». Sur un scénario plus court la
+  bascule tombait après la fin ; sur un plus long, le style devenait un Racer dès le premier
+  tiers. Le seuil s'exprime désormais en **tours restants** (`PUSH_LAST_TURNS = 3`) et la durée
+  vient de `get_effective_turn_limit`. ⚠️ **Comportement inchangé sur la bataille standard** :
+  5 − 3 + 1 = tour 3, exactement l'ancien réglage — les chiffres du panel restent comparables.
+- **`game_state.get("turn", 1)`**, deux fois, était un défaut posé pour éviter une `KeyError`
+  (T1). Chez `EndgameBot` un état cassé se lisait « avant la bascule » ; chez `DecapitationBot`,
+  plus grave, le marqueur de tour devenait **constant**, donc le bot gardait la même cible
+  focalisée toute la partie — sa doctrine entière s'annulait en silence. Les deux lèvent.
+
+Verrou : `tests/unit/ai/test_bot_doctrine_battle_length.py` (7 tests), dont un ancre la
+non-régression sur 5 tours. Vérifié rouge en remettant la constante : 3 tests tombent.
+
+Un troisième élément de ce travail, `engine.game_state.army_value_by_player` (source unique du
+départage de fin de partie), est **indépendant du holdout** et reste à l'autre chantier — il
+n'était pas encore commité.
+
+### 11.5 Le modèle de dégâts, corrigé à la racine
+
+Voir §7.1. En résumé : l'estimation par escouade ne lisait que le profil du soldat de base, donc
+50 paires sur 90 étaient fausses (médiane 0,50×, pire cas 0,18×). Le cache est désormais indexé par
+figurine. **Aucun ré-entraînement n'est requis** — contrairement à ce qui était supposé, le seul
+consommateur vivant du cache était le panel de bots.

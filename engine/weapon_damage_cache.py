@@ -64,6 +64,23 @@ def load_weapon_damage_table(path: Optional[Path] = None) -> NestedTable:
     return table
 
 
+def weapon_off_key(weapon: Dict[str, Any]) -> Tuple:
+    """Cle offensive d'un profil d'arme, telle que la table l'indexe.
+
+    SOURCE UNIQUE de cette cle. Elle etait construite a l'identique en trois endroits de
+    `stamp_weapon_keys` ; `build_best_weapon_cache` en a maintenant besoin pour les armes des
+    FIGURINES, qui ne passent pas par le tamponnage (cf. sa docstring). Une quatrieme copie
+    aurait diverge de la table au premier champ ajoute.
+    """
+    return (
+        int(weapon["ATK"]),
+        int(weapon["STR"]),
+        expected_dice_value(weapon["NB"], "stamp_nb"),
+        expected_dice_value(weapon["DMG"], "stamp_dmg"),
+        int(weapon["AP"]),
+    )
+
+
 def stamp_weapon_keys(unit: Dict[str, Any]) -> None:
     """
     Pre-compute and store _wdc_off_key on each weapon, _wdc_def_key on unit.
@@ -77,85 +94,112 @@ def stamp_weapon_keys(unit: Dict[str, Any]) -> None:
         int(unit.get("INVUL_SAVE", 7)),
     )
     for weapon in require_key(unit, "RNG_WEAPONS"):
-        weapon["_wdc_off_key"] = (
-            int(weapon["ATK"]),
-            int(weapon["STR"]),
-            expected_dice_value(weapon["NB"], "stamp_nb"),
-            expected_dice_value(weapon["DMG"], "stamp_dmg"),
-            int(weapon["AP"]),
-        )
+        weapon["_wdc_off_key"] = weapon_off_key(weapon)
     for weapon in require_key(unit, "CC_WEAPONS"):
-        weapon["_wdc_off_key"] = (
-            int(weapon["ATK"]),
-            int(weapon["STR"]),
-            expected_dice_value(weapon["NB"], "stamp_nb"),
-            expected_dice_value(weapon["DMG"], "stamp_dmg"),
-            int(weapon["AP"]),
-        )
+        weapon["_wdc_off_key"] = weapon_off_key(weapon)
 
 
 def build_best_weapon_cache(
     units: List[Dict[str, Any]],
     table: NestedTable,
     units_cache: Dict[str, Any],
+    models_cache: Dict[str, Any],
+    squad_models: Dict[str, Any],
 ) -> BestWeaponCache:
     """
-    Pre-compute best weapon (idx, expected_damage) for every alive (attacker, target) pair.
+    Meilleure arme (idx, degat espere) de chaque FIGURINE contre chaque escouade ennemie.
 
     Called once per episode reset. Result stored in game_state["_best_weapon_cache"].
 
-    Key: (attacker_id_str, is_ranged_int, target_id_str)
+    Key: (attacker_MODEL_id_str, is_ranged_int, target_squad_id_str)
     Value: (best_weapon_idx, best_expected_damage)
 
     is_ranged_int: 1 for ranged, 0 for melee (int for fast hashing).
+
+    ⚠️ PAR FIGURINE, ET C'EST LE POINT. Ce cache etait indexe par ESCOUADE et lisait
+    `unit["RNG_WEAPONS"]` / `unit["CC_WEAPONS"]`, qui ne portent QUE le profil du soldat de
+    base — pas l'union des armes de l'escouade. Sergents, armes speciales et personnages
+    attaches y etaient donc invisibles. Mesure du 2026-08-12 sur `scenario_bot-01`, en
+    comparant a la vraie somme par figurine : **50 paires (attaquant, cible, phase) sur 90
+    etaient fausses, d'un facteur 0,50 en mediane et jusqu'a 0,18** — une escouade menee par
+    un personnage passait pour cinq fois moins dangereuse qu'elle ne l'est. Seules les deux
+    escouades HOMOGENES du scenario tombaient juste.
+    Le moteur, lui, resout toujours par figurine (`engine/utils/weapon_helpers.py` : profils
+    « portes par une unite OU une figurine »), donc l'estimation mentait sur le combat reel.
+
+    Les armes des figurines ne sont PAS tamponnees (`stamp_weapon_keys` ne voit que les
+    objets `unit`) : leur cle est calculee ici par `weapon_off_key`, la meme fonction. C'est
+    une fois par episode, sur quelques dizaines de profils — mesurable, mais sans commune
+    mesure avec le cout d'un second tamponnage a maintenir en phase avec `models_cache`,
+    qui est reconstruit en cours de partie.
+
+    L'INDEX rendu est celui de la liste d'armes de LA FIGURINE, pas de l'escouade. Aucun
+    appelant ne s'en sert aujourd'hui — `squad_expected_damage` ne lit que le degat — mais le
+    rendre reste juste et ne coute rien.
     """
     cache: BestWeaponCache = {}
 
     alive_units = [u for u in units if str(u["id"]) in units_cache]
+    targets_by_player: Dict[Any, List[Tuple[str, Tuple]]] = {}
+    for target in alive_units:
+        targets_by_player.setdefault(target["player"], []).append(
+            (str(target["id"]), target["_wdc_def_key"])
+        )
 
     for attacker in alive_units:
-        att_id = str(attacker["id"])
+        att_squad_id = str(attacker["id"])
         att_player = attacker["player"]
+        enemies = [
+            entry
+            for player, entries in targets_by_player.items()
+            if player != att_player
+            for entry in entries
+        ]
+        if not enemies:
+            continue
 
-        for target in alive_units:
-            tgt_id = str(target["id"])
-            if target["player"] == att_player:
-                continue
-
-            def_key = target["_wdc_def_key"]
-
+        # Les ids de `squad_models` PRESENTS dans `models_cache` : le patron unique du moteur
+        # pour « les figurines vivantes de cette escouade » (cf. `select_eligible_models`).
+        model_ids = [
+            mid for mid in require_key(squad_models, att_squad_id) if mid in models_cache
+        ]
+        for model_id in model_ids:
+            model = models_cache[model_id]
             for is_ranged_int, weapons_key in ((1, "RNG_WEAPONS"), (0, "CC_WEAPONS")):
-                weapons = require_key(attacker, weapons_key)
-                best_idx = -1
-                best_dmg = 0.0
-
-                for idx, weapon in enumerate(weapons):
-                    off_key = weapon["_wdc_off_key"]
-                    off_subtable = table.get(off_key)
-                    if off_subtable is None:
-                        continue
-                    exp_dmg = off_subtable.get(def_key, 0.0)
-                    if exp_dmg > best_dmg:
-                        best_dmg = exp_dmg
-                        best_idx = idx
-
-                cache[(att_id, is_ranged_int, tgt_id)] = (best_idx, best_dmg)
+                weapons = require_key(model, weapons_key)
+                # Cle offensive calculee UNE fois par arme, pas une fois par cible.
+                off_subtables = [table.get(weapon_off_key(w)) for w in weapons]
+                for tgt_id, def_key in enemies:
+                    best_idx = -1
+                    best_dmg = 0.0
+                    for idx, off_subtable in enumerate(off_subtables):
+                        if off_subtable is None:
+                            continue
+                        exp_dmg = off_subtable.get(def_key, 0.0)
+                        if exp_dmg > best_dmg:
+                            best_dmg = exp_dmg
+                            best_idx = idx
+                    cache[(model_id, is_ranged_int, tgt_id)] = (best_idx, best_dmg)
 
     return cache
 
 
 def lookup_best_weapon(
     cache: BestWeaponCache,
-    attacker_id: str,
+    attacker_model_id: str,
     target_id: str,
     is_ranged: bool,
 ) -> Tuple[int, float]:
     """
-    O(1) lookup: best weapon index and expected damage for attacker vs target.
+    O(1) lookup: meilleure arme (index, degat espere) d'UNE FIGURINE contre une escouade.
 
-    Returns (-1, 0.0) if pair not in cache (unit dead or same player).
+    ⚠️ Le premier terme de la cle est un id de FIGURINE (`models_cache`), plus un id
+    d'escouade : passer un id d'escouade rend systematiquement (-1, 0.0), donc « inoffensif ».
+    C'est `squad_expected_damage` qui somme sur les figurines vivantes.
+
+    Returns (-1, 0.0) if pair not in cache (model dead, or same player).
     """
-    entry = cache.get((attacker_id, 1 if is_ranged else 0, target_id))
+    entry = cache.get((attacker_model_id, 1 if is_ranged else 0, target_id))
     if entry is None:
         return (-1, 0.0)
     return entry
@@ -167,29 +211,35 @@ def squad_expected_damage(
     target_id: str,
     is_ranged: bool,
 ) -> float:
-    """Degats esperes d'une ACTIVATION d'escouade sur une autre, figurines vivantes comprises.
+    """Degats esperes d'une ACTIVATION d'escouade sur une autre : SOMME sur les figurines vivantes.
 
-    `lookup_best_weapon` rend le degat espere de la meilleure arme POUR UNE FIGURINE : sa cle
-    offensive est `[ATK, STR, expected_NB, expected_DMG, AP]`, ou `NB` est le nombre d'attaques
-    d'UNE figurine (cf. `scripts/weapon_damage_builder.py`). Une escouade de dix Boyz y vaut donc
-    autant qu'un seul Boy. Cette fonction est le facteur qui manquait.
+    SOURCE UNIQUE des degats esperes du depot, et SEUL consommateur vivant de
+    `_best_weapon_cache` : les bots d'evaluation (`ai/bot_doctrines.py`) passent tous par ici.
+    L'observation de l'agent NE la lit pas — verifie le 2026-08-12 en instrumentant une partie
+    complete : son ancien lecteur (`ObservationBuilder._target_priority_score`) n'avait aucun
+    appelant et a ete supprime, tout comme les deux aides qu'il tirait derriere lui.
 
-    POURQUOI ELLE EXISTE — les bots d'evaluation tranchaient toutes leurs decisions (menace, choix
+    CHAQUE FIGURINE TIRE AVEC SON ARME, ET C'EST LA CORRECTION DU 2026-08-12. La version
+    precedente prenait la meilleure arme de l'ESCOUADE et la multipliait par l'effectif — or le
+    profil d'armes porte par l'objet `unit` n'est que celui du soldat de base, donc sergents,
+    armes speciales et personnages attaches ne comptaient pas, et les figurines de base
+    comptaient a leur place. Mesure sur `scenario_bot-01` : 50 paires sur 90 fausses, mediane
+    0,50x la vraie valeur, pire cas 0,18x (0,78 annonce contre 4,23 reels en melee). Le detail
+    du defaut et la forme du cache sont dans `build_best_weapon_cache`.
+
+    POURQUOI CETTE FONCTION EXISTE — les bots tranchaient toutes leurs decisions (menace, choix
     de cible, « tuable ce tour », « charger ou pas ») sur `max(NB x DMG)`, qui ignore le jet pour
     toucher, la Force contre l'Endurance, l'AP contre la sauvegarde, les figurines et la portee.
-    Mesure du 2026-08-11 : sur le roster 500 pts d'ArmageddonAgent, **16 unites sur 23** passaient
-    pour des unites de melee sous ce proxy, Intercessor compris — c'est le test qui decide de
-    charger, donc les bots envoyaient leurs tireurs au contact.
-    Ici, aucun calcul nouveau : la table pre-calculee est la MEME que celle que lit l'observation
-    de l'agent (`ObservationBuilder._score_weapon_vs_target`). Une seconde implementation des
-    degats esperes divergerait de la premiere au premier reglage.
+    Mesure du 2026-08-12 : sur les rosters holdout 500 pts, **17 profils sur 23** passaient pour
+    de la melee sous ce proxy, Intercessor compris (fusil a 24 pouces contre couteau) — c'est le
+    test qui decide de charger, donc les bots envoyaient leurs tireurs au contact.
 
-    ⚠️ AUCUN REPLI. Un cache absent, une escouade inconnue de `squad_models` ou une paire hors
-    cache sont des divergences d'invariant : elles levent. Rendre 0.0 ferait passer une escouade
-    inconnue pour une escouade inoffensive, et un bot choisirait sa cible sur cette invention.
-
-    Le comptage des figurines suit le patron unique du moteur — les ids de `squad_models` PRESENTS
-    dans `models_cache`, d'ou les morts sont retires (cf. `shared_utils.select_eligible_models`).
+    ⚠️ AUCUN REPLI. Un cache absent ou une escouade inconnue de `squad_models` sont des
+    divergences d'invariant : elles levent. Rendre 0.0 ferait passer une escouade inconnue pour
+    une escouade inoffensive, et un bot choisirait sa cible sur cette invention.
+    Une FIGURINE hors cache, en revanche, ne leve pas : le cache est bati au reset et
+    `models_cache` perd ses morts en cours de partie, donc « absent » y veut dire « mort », ce
+    que la boucle ecarte deja. C'est la seule asymetrie, et elle est voulue.
     """
     cache = game_state.get("_best_weapon_cache")  # get allowed : l'absence leve juste en dessous
     if cache is None:
@@ -197,11 +247,6 @@ def squad_expected_damage(
             "squad_expected_damage exige game_state['_best_weapon_cache'], construit au reset "
             "par W40KEngine ; sans lui, aucune estimation de degats n'est possible."
         )
-    _, per_model_damage = lookup_best_weapon(cache, str(attacker_id), str(target_id), is_ranged)
-    if per_model_damage <= 0.0:
-        # Pas d'arme capable de blesser cette cible : zero est le RESULTAT, pas un repli.
-        return 0.0
-
     models_cache = require_key(game_state, "models_cache")
     squad_models = require_key(game_state, "squad_models")
     att_id = str(attacker_id)
@@ -209,5 +254,12 @@ def squad_expected_damage(
         raise KeyError(
             f"squad_expected_damage: escouade attaquante {att_id} absente de squad_models."
         )
-    alive_models = sum(1 for mid in squad_models[att_id] if mid in models_cache)
-    return float(alive_models) * per_model_damage
+    tgt_id = str(target_id)
+    # Les ids PRESENTS dans `models_cache` : patron unique du moteur pour « vivantes »
+    # (cf. `shared_utils.select_eligible_models`). Zero figurine vivante = zero degat, ce qui
+    # est le RESULTAT et non un repli.
+    return sum(
+        lookup_best_weapon(cache, mid, tgt_id, is_ranged)[1]
+        for mid in squad_models[att_id]
+        if mid in models_cache
+    )

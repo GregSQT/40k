@@ -10,12 +10,15 @@ POURQUOI CE MODULE EXISTE
 
 CE QUE LA TABLE CONTIENT, ET POUR COMBIEN DE TEMPS
     - `random` : la baseline, sans doctrine ni randomness parametrable.
-    - Les SIX bots d'origine, GELES et condamnes : ils ne valent plus que par la campagne de
+    - Les CINQ bots d'origine, GELES et condamnes : ils ne valent plus que par la campagne de
       correspondance (etape 7 de `Documentation/Implementation/A_faire/bots_refonte_panel.md`),
       apres quoi leurs entrees et leur module partent.
     - Les SIX styles refondus (`ai/bot_doctrines.py`), qui les remplacent.
-    - `tactical`, le holdout : il reste l'ancien tant que sa refonte « joue pour gagner » n'est
-      pas livree (etape 5 du meme doc).
+    - `tactical`, le holdout, et il le reste : la refonte « joue pour gagner » a ete ECRITE puis
+      SUPPRIMEE le 2026-08-12 (cf. §10.1 du chantier). Mesuree, elle coutait 9,5x un bot normal
+      par episode et rendait 0,431 sur 160 parties contre deux styles ordinaires — donc pas plus
+      forte qu'eux, alors que tout son interet reposait sur l'inverse. Elle n'avait par ailleurs
+      jamais affronte l'agent : aucun profil ne la portait dans `bot_eval_weights`.
 """
 
 from typing import Any, Dict
@@ -37,12 +40,11 @@ from typing import Any, Dict
 LEGACY_BOT_KEYS = ("greedy", "defensive", "control", "adaptive", "value_trade")
 
 #: Panel refondu : six styles orthogonaux (`ai/bot_doctrines.py`).
-DOCTRINE_BOT_KEYS = ("racer", "endgame", "alpha", "attrition", "decapitation")
+DOCTRINE_BOT_KEYS = ("racer", "endgame", "alpha", "attrition", "decapitation", "scorer")
 
 #: Adversaires RESERVES a l'evaluation (V11 §10.5) : mesures et affiches, mais exclus de TOUT
-#: signal de selection de modele. `tactical_lookahead` y entre des sa creation — un holdout qui
-#: pilote la selection n'est plus un holdout.
-HOLDOUT_BOT_KEYS = ("tactical", "tactical_lookahead")
+#: signal de selection de modele — un holdout sur lequel la selection optimise n'en est plus un.
+HOLDOUT_BOT_KEYS = ("tactical",)
 
 #: Nom de classe reel, pour les tags TensorBoard et les resumes. Table EXPLICITE : un
 #: `''.join(part.capitalize()) + 'Bot'` rendrait le bon nom aujourd'hui et divergerait en
@@ -60,7 +62,7 @@ BOT_DISPLAY_NAMES: Dict[str, str] = {
     "alpha": "AlphaStrikeBot",
     "attrition": "AttritionBot",
     "decapitation": "DecapitationBot",
-    "tactical_lookahead": "LookaheadHoldoutBot",
+    "scorer": "ScorerBot",
 }
 
 #: Tous les adversaires mesurables, `random` compris (il n'est pas dans `bot_classes()`, cf. sa
@@ -106,7 +108,6 @@ def bot_classes() -> Dict[str, Any]:
         AdaptiveBot, ControlBot, DefensiveBot, GreedyBot, TacticalBot, ValueTradeBot,
     )
     from ai.bot_doctrines import DOCTRINE_BOTS
-    from ai.bot_holdout import LookaheadHoldoutBot
 
     return {
         # ─ Panel GELE, condamne apres la campagne de correspondance ─
@@ -119,10 +120,6 @@ def bot_classes() -> Dict[str, Any]:
         "tactical": TacticalBot,
         # ─ Panel refondu : six styles orthogonaux sur un plancher de competence commun ─
         **DOCTRINE_BOTS,
-        # ─ Holdout refondu ─ il n'a pas de doctrine, il essaie ses coups et joue pour gagner.
-        # Cle de TRANSITION : il prendra le nom `tactical` quand l'ancien partira (etape 7).
-        # C'est l'ancien qui a un historique de mesures a preserver, pas lui.
-        "tactical_lookahead": LookaheadHoldoutBot,
     }
 
 
