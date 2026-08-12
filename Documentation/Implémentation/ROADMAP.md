@@ -473,8 +473,18 @@ Prêts à démarrer sans décision produit :
   `charge_after_flee`, `move_after_shooting`) et celles qui ne modifient qu'un jet (rerolls, bonus
   Oath — elles vivent sur les `shot_records`, pas dans `action_logs`).
   → [`Implémenté/metriques_reserves_et_charge_2026-08-11.md`](Implémenté/metriques_reserves_et_charge_2026-08-11.md) §Ce qui reste
+- ✅ **La portée d'un tir se juge AVANT les pertes** — **LIVRÉ le 2026-08-12**. L'analyzer mesurait
+  la distance vers `[TARGET_MODELS:]`, segment que `step_logger` réserve explicitement au replay
+  parce qu'il liste les survivants POST-pertes : la figurine visée, la plus proche, en disparaît
+  quand elle meurt du tir, et le survivant suivant faisait déclarer le tir hors portée. Mesuré sur
+  600 épisodes / 27 991 tirs : **31 verdicts, 0 réel**. Même journal avant/après : 67 → 32 erreurs,
+  et rien d'autre ne bouge. Le contrôle n'est pas devenu aveugle — il rend encore 18 702 verdicts.
+  ⚠️ Piège de lecture à connaître : la ligne « Tirs invalides » du rapport AGRÈGE `out_of_range` et
+  `engaged_non_close_quarters` (42 = 31 + 11). Ne pas la lire comme un seul contrôle.
+  → [`Implémenté/analyzer_portee_source_correcte_2026-08-12.md`](Implémenté/analyzer_portee_source_correcte_2026-08-12.md)
 - 🔴 **Conformité moteur — les 53 erreurs que l'analyzer voit VRAIMENT** (ouvert le 2026-08-11,
-  **29 restantes** : la famille CC_NB, la plus lourde, est soldée le jour même).
+  **29 restantes** : la famille CC_NB, la plus lourde, est soldée le jour même ; la famille
+  « tirs hors portée » est soldée le 2026-08-12 — c'étaient des artefacts, cf. ci-dessus).
   Le rapport annonçait 370 erreurs sur le run du 2026-08-11 ; le nettoyage de l'outil de mesure
   (livré le même jour, cf. plus bas) en a supprimé 317 qui étaient des faux positifs de lecture.
   **Ce qui reste n'est plus imputable à l'analyzer** et désigne des règles appliquées de travers
@@ -489,7 +499,7 @@ Prêts à démarrer sans décision produit :
   | Collisions (2 unités, même hex) | 7 (total) | | 03.01 |
   | Fall-back qui finit ENGAGÉ | 2 | 3 | 09.07 |
   | Move normal finissant au contact | 1 | 4 | 09.05 |
-  | Tirs hors portée | 2 | 3 | 10 Shooting |
+  | ~~Tirs hors portée~~ **→ 0, ARTEFACTS (voir ci-dessous)** | ~~2~~ | ~~3~~ | 10 Shooting |
   | Tir engagé visant une unité NON engagée avec le tireur | 0 | 3 | 10.06 |
   | Move normal PARTI d'un engagement | 0 | 2 | 09.05 |
   | Tir sur un ennemi engagé | 0 | 1 | 10.06 |
