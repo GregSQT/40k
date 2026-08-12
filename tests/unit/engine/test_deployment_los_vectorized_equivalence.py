@@ -140,7 +140,7 @@ def test_le_vectorise_egale_la_regle_scalaire_sur_un_second_terrain(tmp_path):
     """Second TERRAIN : d'autres murs, d'autres areas obscurantes, mêmes réponses attendues."""
     from ai.unit_registry import UnitRegistry
     from engine.w40k_core import W40KEngine
-    from tests.unit.engine.conftest import ACTIVE_DEPLOYMENT_SCENARIO
+    from tests.unit.engine._config_helpers import ACTIVE_DEPLOYMENT_SCENARIO
 
     scenario = json.loads(open(ACTIVE_DEPLOYMENT_SCENARIO, encoding="utf-8").read())
     assert scenario["terrain_ref"] != SECOND_TERRAIN_REF, (

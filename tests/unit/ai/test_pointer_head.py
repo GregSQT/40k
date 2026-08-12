@@ -64,7 +64,7 @@ from engine.observation_entities import (
     unit_bin_index,
 )
 from engine.spatial_grid import GRID_SIZE, cell_from_index, cell_index
-from tests.unit.ai.conftest import squad_obs_space
+from tests.unit.ai._fabriques import squad_obs_space
 
 _UNIT_PRESENT = unit_bin_index("present")
 _OPTION_PRESENT = decision_option_bin_index("present")

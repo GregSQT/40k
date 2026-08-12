@@ -44,7 +44,7 @@ from engine.spatial_grid import (
     GRID_SIZE,
     cell_center_px,
 )
-from tests.unit.ai.conftest import squad_obs_space
+from tests.unit.ai._fabriques import squad_obs_space
 
 _UNIT_PRESENT = unit_bin_index("present")
 

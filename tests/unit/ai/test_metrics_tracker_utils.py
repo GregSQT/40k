@@ -16,7 +16,7 @@ from ai.metrics_tracker import (
 )
 from ai.truncation_log import TruncationLog
 from config_loader import get_config_loader
-from tests.unit.ai.conftest import tactical_data
+from tests.unit.ai._fabriques import tactical_data
 
 # Agent de reference de ces tests : il porte le training config lu ci-dessous ET la config de
 # rewards que `__init__` charge dans le verrou `test_stub_matches_the_attributes_of_a_real_tracker`.
@@ -501,6 +501,45 @@ def test_log_episode_end_and_tactical_metrics_runtime_paths() -> None:
     assert "01_VP/e_objectives_held" in keys
     assert "02_combat/a_value_trade_ratio" in keys
     assert "forcing/episodes_with_forced_unit_ratio" in keys
+
+
+def test_le_forcing_par_unite_separe_l_exposition_de_l_intensite() -> None:
+    """VERROU des deux courbes du forcing qui vivent DANS la boucle par unite.
+
+    `forcing/unit_episode_exposure/*` (part des episodes ou l'unite a ete forcee) et
+    `forcing/unit_instance_mean/*` (nombre moyen d'instances forcees par episode) ne sont emises
+    que si `forced_unit_counts_controlled` n'est pas vide. Tant que la fabrique partagee y
+    laissait un dict vide, AUCUN test du depot ne les atteignait : les supprimer, ou brancher
+    l'une sur le compteur de l'autre, restait vert.
+
+    Les deux formules partagent leur denominateur et se separent par le numerateur — d'ou le
+    second episode, sans Intercessor : il fait diverger les deux courbes d'Ork Boyz, ce qu'un
+    episode unique ne montre pas.
+    """
+    t = _tracker_stub()
+    t.compute_and_log_phase_metrics = lambda: None
+    t.log_critical_dashboard = lambda: None
+
+    t.log_tactical_metrics(tactical_data())
+    premier = {k: v for k, v, _ in _dw(t).scalars}
+    assert premier["forcing/unit_episode_exposure/intercessor"] == 1.0
+    assert premier["forcing/unit_episode_exposure/ork_boyz"] == 1.0
+    assert premier["forcing/unit_instance_mean/intercessor"] == 2.0
+    assert premier["forcing/unit_instance_mean/ork_boyz"] == 3.0
+
+    deja_publie = len(_dw(t).scalars)
+    t.log_tactical_metrics(tactical_data(
+        forced_unit_instances_controlled=1,
+        forced_unit_counts_controlled={"Ork Boyz": 1},
+    ))
+    nouveaux = {k: v for k, v, _ in _dw(t).scalars[deja_publie:]}
+    # Deux episodes, Ork Boyz force dans les deux : exposition 2/2, intensite (3+1)/2.
+    assert nouveaux["forcing/unit_episode_exposure/ork_boyz"] == 1.0
+    assert nouveaux["forcing/unit_instance_mean/ork_boyz"] == 2.0
+    assert "forcing/unit_instance_mean/intercessor" not in nouveaux, (
+        "une unite non forcee cet episode-la n'a pas de point a publier : la courbe est CREUSE, "
+        "et republier son ancienne valeur ferait mentir la moyenne au pas suivant"
+    )
 
 
 def test_compliance_mapper_phase_and_training_metrics_paths() -> None:
