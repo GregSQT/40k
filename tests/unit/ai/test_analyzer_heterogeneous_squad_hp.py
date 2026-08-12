@@ -36,7 +36,7 @@ import ai.analyzer as an
 import ai.analyzer_core as core
 from ai.analyzer_config import AnalyzerConfig
 from ai.analyzer_state import AnalyzerState
-from tests.unit.ai.conftest import analyzer_config
+from tests.unit.ai._fabriques import analyzer_config
 
 
 SQUAD = "105"

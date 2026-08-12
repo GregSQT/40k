@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from ai.analyzer_core import _parse_effects_snapshot
 from ai.analyzer_state import AnalyzerState
-from tests.unit.ai.conftest import analyzer_config
+from tests.unit.ai._fabriques import analyzer_config
 
 
 def test_les_deux_moities_du_waaagh_sont_declarees() -> None:

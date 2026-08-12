@@ -12,10 +12,7 @@ hex pour ces modules afin d'isoler la logique fight.
 
 import pytest
 
-from tests.unit.engine._config_helpers import (
-    ACTIVE_DEPLOYMENT_SCENARIO,  # noqa: F401  (re-export : des tests l'importent depuis ici)
-    build_armageddon_engine,
-)
+from tests.unit.engine._config_helpers import build_armageddon_engine
 
 
 @pytest.fixture(autouse=True)

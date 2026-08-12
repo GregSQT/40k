@@ -27,7 +27,7 @@ import pytest
 
 from ai.metrics_tracker import W40KMetricsTracker
 from engine.macro_intents import ACTION_FAMILIES
-from tests.unit.ai.conftest import tactical_data
+from tests.unit.ai._fabriques import tactical_data
 
 
 class _RecordingWriter:

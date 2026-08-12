@@ -25,7 +25,7 @@ import ai.analyzer as an
 from ai.analyzer_core import _apply_state_snapshot
 from ai.analyzer_config import AnalyzerConfig
 from ai.analyzer_state import AnalyzerState
-from tests.unit.ai.conftest import analyzer_config
+from tests.unit.ai._fabriques import analyzer_config
 
 
 def _state() -> AnalyzerState:
