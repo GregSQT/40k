@@ -350,10 +350,6 @@ def _apply_damage_and_handle_death(
         unit_models_alive[target_id] -= 1
         if positions_by_model is not None:
             positions_by_model.pop(target_id, None)
-            import os as _os
-            if _os.environ.get("PHANTOM_PROBE"):
-                from ai import _phantom_probe as _pp
-                _pp.opened(target_id, line_number, phase, turn, current_episode_num)
         if models_invalidated is not None:
             models_invalidated.add(target_id)
         if unit_models_alive[target_id] <= 0:
@@ -1260,6 +1256,10 @@ def error_totals(stats: Dict[str, Any]) -> Dict[str, int]:
         # §1.2 — l'advance est une action de la phase de Mouvement mais ses fautes sont comptées
         # ici, avec le tir, parce que c'est là que le rapport les affiche.
         'shooting': (
+            # Clé RETIRÉE de ce total, pas seulement remise à zéro : `shoot_not_allocated_target_alive`
+            # le 2026-08-12 (avec son jumeau de mêlée, plus bas). Un terme mort dans un total n'est
+            # pas neutre — il entretient l'idée qu'une règle est surveillée. Motif du retrait et
+            # chiffres : `analyzer_couverture.md`, table « Contrôles SUPPRIMÉS ».
             _pair('shoot_over_rng_nb')
             + _pair('shoot_combi_profile_conflicts')
             + _pair('shoot_after_flee')
@@ -1272,9 +1272,6 @@ def error_totals(stats: Dict[str, Any]) -> Dict[str, int]:
             + _pair('advance_from_adjacent')
             + _pair('shoot_hit_result_mismatch')
             + _pair('shoot_wound_threshold_mismatch')
-            # `shoot_not_allocated_target_alive` a disparu de ce total le 2026-08-12, avec son
-            # jumeau de mêlée : le contrôle ne pouvait rendre que des faux positifs (cf. le
-            # commentaire du total 'fight'). Aucune clé morte laissée à sommer.
             + shoot_invalid
         ),
         'charge': (
@@ -1284,12 +1281,13 @@ def error_totals(stats: Dict[str, Any]) -> Dict[str, int]:
             + stats['charge_invalid'][1]['fled'] + stats['charge_invalid'][2]['fled']
         ),
         'fight': (
-            # `fight_from_non_adjacent` a disparu de ce total le 2026-08-10 (vert vacant V2). Le
-            # contrôle avait été RETIRÉ le 2026-07-24 comme faux positif (mesure hex contre gate
-            # euclidien du moteur, et position de cible post-pertes) ; sa clé, elle, restait
-            # sommée ici à 0 pour toujours. Un terme mort dans un total n'est pas neutre : il
-            # entretient l'idée qu'une règle est surveillée. 12.01 est vérifiée par le test
-            # moteur `test_fight_spatial_contract.py`, pas par le journal.
+            # Deux clés RETIRÉES de ce total, pas seulement remises à zéro — un terme mort dans un
+            # total n'est pas neutre, il entretient l'idée qu'une règle est surveillée :
+            #   - `fight_from_non_adjacent` le 2026-08-10 (vert vacant V2 ; contrôle retiré comme
+            #     faux positif le 2026-07-24). 12.01 est vérifiée par `test_fight_spatial_contract.py` ;
+            #   - `fight_not_allocated_target_alive` le 2026-08-12, avec son jumeau de tir. 05 est
+            #     vérifiée par `tests/unit/engine/test_attack_allocation_contract.py`.
+            # Motifs et chiffres : `analyzer_couverture.md`, table « Contrôles SUPPRIMÉS ».
             _pair('fight_friendly')
             + _pair('fight_over_cc_nb')
             + _pair('fight_move_invalid', 'pile_in')
@@ -1297,15 +1295,6 @@ def error_totals(stats: Dict[str, Any]) -> Dict[str, int]:
             + _pair('fight_hit_result_mismatch')
             + _pair('fight_wound_threshold_mismatch')
             + _pair('fight_alternation_violations')
-            # `fight_not_allocated_target_alive` (et son jumeau de tir) ont suivi le 2026-08-12,
-            # pour la même raison mesurée : le moteur ne laisse une blessure non allouée QUE
-            # lorsque l'escouade cible est entièrement détruite (un seul chemin,
-            # `_mark_manual_overkill_wasted`, atteint quand plus aucun groupe d'allocation ne
-            # vit). Le contrôle comparait donc la règle 05 à l'état RECONSTRUIT par l'analyzer,
-            # et ne signalait que les dérives de cette reconstruction : 2 puis 15 signalements
-            # sur les deux runs du 2026-08-12, tous en fin d'épisode, là où aucun instantané
-            # `T{n} STATE:` ne recale plus l'état. 05 est vérifiée par le test moteur
-            # `tests/unit/engine/test_attack_allocation_contract.py`.
             + _pair('fight_double_pile_in')
         ),
         'dead_units': (
