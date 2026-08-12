@@ -345,6 +345,10 @@ def _apply_state_snapshot(state: AnalyzerState, config: AnalyzerConfig, payload:
                 if mid in known and known[mid] != pos:
                     stats['state_resync']['pos_mismatch'] += 1
 
+        import os as _os
+        if _os.environ.get("PHANTOM_PROBE"):
+            from ai import _phantom_probe as _pp
+            _pp.closed_by(uid, state.line_number, "STATE", state.last_turn)
         state.positions_by_model[uid] = models
         state.heights_by_model[uid] = heights
         # PV PAR SOCLE, pris TELS QUELS dans l'instantané : c'est la seule source qui les donne
@@ -417,7 +421,12 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
             # positions_by_model reflète alors tout jusqu'à la ligne N-1 (= positions
             # d'ORIGINE per-socle pour le contrôle de move de la ligne N), tandis que
             # current_line_models portera les positions de DESTINATION de la ligne N.
+            import os as _os
+            _probe = _os.environ.get("PHANTOM_PROBE")
             for _muid, _mmodels in state.current_line_models.items():
+                if _probe:
+                    from ai import _phantom_probe as _pp
+                    _pp.closed_by(_muid, state.line_number, "MODELS", state.last_turn)
                 state.positions_by_model[_muid] = _mmodels
                 state.models_invalidated.discard(_muid)
             # Socles de la CIBLE, même rythme et même autorité que ceux de l'unité qui agit.
@@ -430,6 +439,9 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
             # d'un engagement bien réel — et l'analyzer, qui ne voyait que l'ancre ennemie à
             # 3 hex, le comptait « fall-back sans engagement ».
             for _tuid, _tmodels in state.current_line_target_models.items():
+                if _probe:
+                    from ai import _phantom_probe as _pp
+                    _pp.closed_by(_tuid, state.line_number, "TARGET_MODELS", state.last_turn)
                 state.positions_by_model[_tuid] = _tmodels
                 state.models_invalidated.discard(_tuid)
             # Altitudes : MÊME décalage d'une ligne que les positions. `heights_by_model` porte

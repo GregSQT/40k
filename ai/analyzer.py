@@ -350,6 +350,10 @@ def _apply_damage_and_handle_death(
         unit_models_alive[target_id] -= 1
         if positions_by_model is not None:
             positions_by_model.pop(target_id, None)
+            import os as _os
+            if _os.environ.get("PHANTOM_PROBE"):
+                from ai import _phantom_probe as _pp
+                _pp.opened(target_id, line_number, phase, turn, current_episode_num)
         if models_invalidated is not None:
             models_invalidated.add(target_id)
         if unit_models_alive[target_id] <= 0:
