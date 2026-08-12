@@ -71,26 +71,34 @@ pools de pile-in, de consolidation et de charge aient une raison de le traverser
 | voile rouge du déploiement — hauteur | les DEUX figurines dans le même plan, sur la même case : verdicts opposés. Un refus global (zone, mur, bord) frapperait les deux, il ne peut donc pas se faire passer pour une décision de clairance |
 | voile rouge du déploiement — **rayon de socle** | deux figurines de MÊME hauteur et de socles différents, posées hors du couloir : seul le disque du socle large y déborde. La hauteur est neutralisée, donc seul le rayon peut décider |
 | formation compacte | la figurine trop haute n'est pas posée sous l'étage, celle qui tient l'est |
-| garde de source (4 fichiers) | ces quatre fichiers ne lisent PLUS la hauteur d'escouade, sous aucune forme, et le NOMBRE d'appels par fichier est opposable — en ajouter un force à relire la liste |
+| contrat de la primitive | les trois façons d'écrire l'ancien défaut sont refusées : hauteur nue, escouade passée deux fois, argument manquant |
 
-**Preuve de rouge** : hauteur remise sur l'escouade aux six sites couverts par comportement → les
-six verrous correspondants rougissent, plus les trois gardes de source ; rayon repris sur
-l'escouade aux deux sites de déploiement → le verrou de socle rougit ; hauteur transitant par une
-variable → le garde de source rougit. Tous rétablis → verts.
+**Preuve de rouge** : hauteur remise sur l'escouade aux sites couverts par comportement → les
+verrous correspondants rougissent ; rayon repris sur l'escouade aux deux sites de déploiement → le
+verrou de socle rougit. Tous rétablis → verts. Le contrat de la primitive, lui, se prouve
+directement : les trois écritures fautives lèvent.
 
-⚠️ Deux défauts de ces verrous ont été trouvés par la `/code-review` qui a suivi la livraison, et
-corrigés dans la foulée : **le rayon de socle n'était verrouillé nulle part** (toutes les figurines
-du fichier avaient le même socle — la moitié de la correction était donc non testée), et le garde
-de source n'inspectait que le texte SUIVANT chaque appel, si bien que les deux sites de déploiement
-— qui passent la hauteur par une variable calculée plus haut — lui échappaient entièrement. Un
-garde aveugle aux seuls sites qu'il était censé protéger. Il porte désormais sur le fichier entier.
+⚠️ Un défaut de ces verrous a été trouvé par la `/code-review` qui a suivi la livraison :
+**le rayon de socle n'était verrouillé nulle part** — toutes les figurines du fichier avaient le
+même socle, donc la moitié de la correction était non testée. Corrigé dans la foulée.
 
-⚠️ **Quatre des onze appels ne sont couverts que par le garde de source** : ils vivent sur des
-branches d'ÉTAGE (montée, descente, ILP d'autoplace) que les pools de plain-pied n'exécutent pas,
-et les couvrir par comportement demanderait une mise en scène multi-niveaux par site. Le garde ne
-dit rien de ce que le code calcule — il interdit la seule régression réaliste : repasser la hauteur
-de l'escouade à un appel, en silence. C'est dit ici parce qu'un garde de source présenté comme un
-verrou de comportement serait un faux vert de plus.
+## La signature, plutôt qu'un garde (2026-08-12, arbitrage tranché)
+
+La première livraison couvrait sept des onze appels par comportement et surveillait les quatre
+autres — les branches d'ÉTAGE, qu'aucun pool de plain-pied n'exécute — avec un test qui **relisait
+le texte source** des handlers. La `/simplify` qui a suivi a nommé le vrai défaut d'altitude : la
+primitive acceptait un `float` nu, donc rien ne distinguait « hauteur d'une figurine » de « hauteur
+d'une escouade », et c'est ce trou qui obligeait à surveiller du texte.
+
+`low_clearance_ground_hexes(terrain_areas, model_entry, squad_entry)` exige désormais les deux
+entrées et appelle `_model_height_of` lui-même. Trois façons d'écrire l'ancien défaut, trois refus :
+hauteur nue (arité), escouade passée deux fois (erreur explicite), argument manquant (arité). **La
+faute n'est plus détectée après coup : elle n'est plus écrivable**, sur les quatre sites d'étage
+comme sur les sept autres. Le garde de source disparaît, ainsi que le compte d'appels par fichier
+qui figeait la forme de l'implémentation et aurait rougi sur toute factorisation légitime.
+
+Coût : 7 fichiers (la primitive, les 4 handlers, et deux tests qui l'appelaient en direct — dont un
+qui commettait exactement la faute interdite au moteur).
 
 ⚠️ Le fichier monte le plateau à **x10**. À x1, `geometry_is_hex` court-circuite le chemin
 multi-niveaux et la clairance n'est jamais consultée : la première version du test, écrite à x1,

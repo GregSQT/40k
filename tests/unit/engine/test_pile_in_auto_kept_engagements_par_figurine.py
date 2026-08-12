@@ -17,14 +17,14 @@ Règles : Documentation/40k_rules/12 Fights phase (12.03 AFTER MOVING), /03 Movi
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Sequence, Tuple
+from typing import Any, Dict, List
 
 import pytest
 
 from engine.phase_handlers import fight_handlers as fh
-from engine.phase_handlers.shared_utils import build_units_cache, get_engagement_zone
+from engine.phase_handlers.shared_utils import get_engagement_zone
 from engine.spatial_relations import unit_entries_within_engagement_zone
-from tests._state_invariants import turn_state_invariants, unit_invariants
+from tests.unit.engine._state_builders import synthetic_state, synthetic_unit
 
 ENGAGEMENT_ZONE = 2  # 2" (03.04) à x1 : 1 sous-hex = 1"
 MODEL_HEIGHT = 2.5
@@ -46,61 +46,22 @@ ANCRE_LEGALE = (11, 10)
 ANCRE_CANDIDATE = (9, 10)
 
 
-def _unit(uid: str, player: int, models: Sequence[Tuple[int, int]]) -> Dict[str, Any]:
-    col, row = models[0]
-    return {**unit_invariants(),
-        "id": uid, "player": player, "col": col, "row": row,
-        "HP_CUR": len(models), "HP_MAX": len(models), "VALUE": 100, "OC": 1, "T": 4,
-        "ARMOR_SAVE": 3, "INVUL_SAVE": 7, "SHOOT_LEFT": 1, "ATTACK_LEFT": 1,
-        "RNG_WEAPONS": [], "CC_WEAPONS": [], "BASE_SIZE": 1, "MODEL_HEIGHT": MODEL_HEIGHT,
-        "BASE_SHAPE": "round", "MOVE": 6, "UNIT_RULES": [],
-        "models": [{"col": c, "row": r, "level": 0, "VALUE": 10} for c, r in models],
-    }
-
-
 @pytest.fixture
 def gs() -> Dict[str, Any]:
-    units = [
-        _unit("S", 1, [TETE, TENANTE, REPRENEUSE]),
-        _unit("E", 2, [CIBLE]),
-        _unit("F", 2, [AUTRE_ENNEMI]),
-    ]
-    state: Dict[str, Any] = {
-        **turn_state_invariants(),
-        "config": {
-            "game_rules": {
-                "engagement_zone": ENGAGEMENT_ZONE,
-                "engagement_zone_vertical": 5.0,
-                "max_base_size_hex": 35,
-                "unit_model_cohesion_range": 2,
-                "unit_global_cohesion_range": 9,
-                "squad_min_neighbors": 1,
-                "cohesion_distance_mode": "euclidean",
-                "pile_in_target_range": 5,
-                "consolidation_trigger_range": 3,
-            },
-            "move": {"can_move_through_enemy_engagement_zone": True,
-                     "can_move_through_enemy_model": False,
-                     "can_move_through_friendly_model": True},
-            "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
-        },
-        "board_cols": 60, "board_rows": 60,
-        "current_player": 1,
-        "phase": "fight",
-        "wall_hexes": set(),
-        "terrain_areas": [],
-        "units": units,
-        "unit_by_id": {str(u["id"]): u for u in units},
-        "units_charged": set(), "units_fled": set(), "units_advanced": set(),
-        "units_selected_to_fight": set(),
-        "_unit_move_version": 0,
-        "inches_to_subhex": 1,
-        "action_logs": [],
-        "action_log_seq": 0,
-        "current_turn": 1,
-    }
-    build_units_cache(state)
-    return state
+    """L'escouade ``S`` (tête + tenante + repreneuse), la CIBLE ``E`` et le second ennemi ``F``."""
+    return synthetic_state(
+        [
+            synthetic_unit("S", 1, [
+                {"col": TETE[0], "row": TETE[1]},
+                {"col": TENANTE[0], "row": TENANTE[1]},
+                {"col": REPRENEUSE[0], "row": REPRENEUSE[1]},
+            ]),
+            synthetic_unit("E", 2, [{"col": CIBLE[0], "row": CIBLE[1]}]),
+            synthetic_unit("F", 2, [{"col": AUTRE_ENNEMI[0], "row": AUTRE_ENNEMI[1]}]),
+        ],
+        game_rules={"engagement_zone": ENGAGEMENT_ZONE},
+        phase="fight",
+    )
 
 
 def _engagements_de_depart(state: Dict[str, Any]) -> Dict[str, List[str]]:

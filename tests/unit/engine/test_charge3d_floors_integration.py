@@ -226,7 +226,11 @@ def _climb_setup(setup) -> _ClimbCtx:
         mid=clb_mid,
         start=(ground_start[0], ground_start[1]),
         # (les ennemis ne bloquent pas ici : on teste la montée pure)
-        ground_obs=walls | low_clearance_ground_hexes(gs["terrain_areas"], float(clb_u["MODEL_HEIGHT"])),
+        # Clairance de LA FIGURINE qui monte (§13.06) : c'est ce que fait le moteur, et la
+        # primitive ne prend plus de hauteur nue.
+        ground_obs=walls | low_clearance_ground_hexes(
+            gs["terrain_areas"], gs["models_cache"][clb_mid], clb_u
+        ),
         big=12 * ish,
         tiny=max(0, (2 * ish) - 1),
     )

@@ -327,7 +327,7 @@ def generate_compact_formation(
         _radius = round_base_radius_norm(require_key(model, "BASE_SIZE")) if _shape == "round" else 0.0
         cached = _lc_by_gabarit.get((_h, _radius))
         if cached is None:
-            _cells = low_clearance_ground_hexes(terrain_areas, _h)
+            _cells = low_clearance_ground_hexes(terrain_areas, model, unit)
             _bucket = _radius + _HEX_CIRCUMRADIUS
             _index = build_hex_center_index(_cells, _bucket) if (_shape == "round" and _cells) else {}
             cached = (_cells, _index, _bucket, _radius)
@@ -686,7 +686,7 @@ def deployment_build_model_destinations_pool(
         raise KeyError(f"deployment_build_model_destinations_pool: unit {squad_id} missing from game_state['units']")
     # Clairance de LA FIGURINE (`_model_height_of`) : ce pool est par-figurine de bout en bout
     # (socle, facing, niveau), la hauteur ne pouvait pas rester celle de l'escouade.
-    _low_clear = low_clearance_ground_hexes(terrain_areas, _model_height_of(model, unit))
+    _low_clear = low_clearance_ground_hexes(terrain_areas, model, unit)
     # Clairance verticale — MIROIR EXACT du move. Le move n'ajoute PAS _low_clear au filtre d'empreinte :
     # il met _low_clear dans les obstacles du champ géodésique avec clearance = RAYON du socle (round).
     # Le socle rond « heurte » un hex _low_clear ssi son DISQUE le chevauche (clairance capsule
@@ -1020,7 +1020,7 @@ def deployment_preview_plan(
         _radius = round_base_radius_norm(require_key(model, "BASE_SIZE")) if _shape == "round" else 0.0
         cached = _pv_lc_by_gabarit.get((_h, _radius))
         if cached is None:
-            _cells = low_clearance_ground_hexes(terrain_areas, _h)
+            _cells = low_clearance_ground_hexes(terrain_areas, model, unit)
             _bucket = _radius + _HEX_CIRCUMRADIUS
             _index = build_hex_center_index(_cells, _bucket) if (_shape == "round" and _cells) else {}
             cached = (_cells, _index, _bucket, _radius)

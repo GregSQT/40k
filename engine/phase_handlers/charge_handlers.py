@@ -1887,7 +1887,7 @@ def _compute_plan_context(
     def _path_blocked_for(model_entry: Dict[str, Any]) -> Set[Tuple[int, int]]:
         return path_blocked | low_clearance_ground_hexes(
             game_state.get("terrain_areas", []),  # get allowed (board sans terrain)
-            _model_height_of(model_entry, unit),
+            model_entry, unit,
         )
     # Take to the skies (21.03) : vol actif → la reachability BFS et le champ de distance ignorent
     # tout (traversée libre) ; le placement final (``cand_fp & blocked_static``, collision ``others``)
@@ -2276,9 +2276,7 @@ def _compute_plan_context(
             sib = models_cache.get(str(m))
             if sib is None:
                 continue
-            _ground_obs = _ground_obs_common | low_clearance_ground_hexes(
-                terrain_areas, _model_height_of(sib, unit)
-            )
+            _ground_obs = _ground_obs_common | low_clearance_ground_hexes(terrain_areas, sib, unit)
             fdist = _charge_model_climb_reachable_floor_cells(
                 game_state, unit, unit_id, sib,
                 (int(sib["col"]), int(sib["row"])), int(budget), int(view_level),
@@ -4776,7 +4774,7 @@ def _charge_model_pos_is_closer(
         # par-figurine de bout en bout (socle, niveau, budget).
         _ground_obs = (
             path_blocked
-            | low_clearance_ground_hexes(_terrain_areas, _model_height_of(model, unit))
+            | low_clearance_ground_hexes(_terrain_areas, model, unit)
         )
         _cells = _charge_model_multilevel_reachable_cells(
             game_state, unit, squad_id, model, (start_col, start_row), int(budget),
@@ -5296,9 +5294,8 @@ def charge_autoplace_plan(
                 out = _charge_model_multilevel_reachable_cells(
                     game_state, unit, squad_id, models_cache[mid], (sc, sr), int(budget),
                     wanted,
-                    ground_obstacles_for_climb_common | low_clearance_ground_hexes(
-                        terrain_areas, _model_height_of(models_cache[mid], unit)
-                    ),
+                    ground_obstacles_for_climb_common
+                    | low_clearance_ground_hexes(terrain_areas, models_cache[mid], unit),
                     terrain_areas,
                     start_level=start_eff[mid],
                 )

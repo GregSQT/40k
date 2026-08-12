@@ -13,11 +13,11 @@ import pytest
 
 from shared.data_validation import ConfigurationError
 from engine.terrain_utils import (
+    _floor_index,
     floor_height_at,
     floor_hexes_at_level,
     floor_levels_present,
     floor_polys_at_level,
-    low_clearance_ground_hexes,
 )
 
 
@@ -41,7 +41,10 @@ def test_floor_accessors_do_not_require_polygon_vertices():
     assert floor_levels_present(terrain) == (1,)
     assert floor_hexes_at_level(terrain, 1) == frozenset({(10, 10), (11, 10)})
     assert floor_height_at(terrain, 10, 10, 1) == pytest.approx(3.0)
-    assert low_clearance_ground_hexes(terrain, model_height=5.0) == {(10, 10), (11, 10)}
+    # `_floor_index(...).low_clearance(hauteur)` et non `low_clearance_ground_hexes` : la
+    # fonction publique exige la FIGURINE et son escouade (§13.06), là où ce test ne parle que
+    # de l'index et de ses accesseurs. Lui fabriquer deux entrées ne prouverait rien de plus.
+    assert _floor_index(terrain).low_clearance(5.0) == {(10, 10), (11, 10)}
 
     # Contre-épreuve : la clé reste EXIGÉE par le seul accesseur qui la lit — pas d'assouplissement
     # du schéma, juste la fin d'une exigence parasite. L'exception est TYPÉE et son message vérifié :

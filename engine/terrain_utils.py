@@ -12,7 +12,7 @@ Membership is answered by testing hex appartenance against the precomputed
 so a unit "within a terrain area" matches exactly what the player sees on board.
 """
 import threading
-from typing import AbstractSet, Any, Dict, FrozenSet, List, Optional, Set, Tuple
+from typing import AbstractSet, Any, Dict, FrozenSet, List, Mapping, Optional, Set, Tuple
 
 from shared.data_validation import require_key
 
@@ -295,20 +295,41 @@ def floor_height_at(
 
 def low_clearance_ground_hexes(
     terrain_areas: List[Dict[str, Any]],
-    model_height: float,
+    model_entry: Mapping[str, Any],
+    squad_entry: Mapping[str, Any],
 ) -> Set[Tuple[int, int]]:
-    """Hexes du SOL (niveau 0) infranchissables par un modèle de hauteur ``model_height`` (pouces).
+    """Hexes du SOL (niveau 0) infranchissables par LA FIGURINE ``model_entry`` (§13.06).
 
     Union des hexes des étages dont la hauteur libre ``height_inches`` est STRICTEMENT inférieure à
-    ``model_height`` : un modèle plus haut que la clairance ne peut ni traverser ni s'arrêter sous cet
-    étage (même unité pouce que ``height_inches``, pas de scaling). Tangence (égalité) autorisée.
-    Retourne un set vide si aucun étage n'est trop bas. À unir aux murs pour le pathfinding AU SOL
-    uniquement (la surface de l'étage, elle, reste praticable).
+    la hauteur de la figurine : un modèle plus haut que la clairance ne peut ni traverser ni
+    s'arrêter sous cet étage (même unité pouce que ``height_inches``, pas de scaling). Tangence
+    (égalité) autorisée. Retourne un set vide si aucun étage n'est trop bas. À unir aux murs pour le
+    pathfinding AU SOL uniquement (la surface de l'étage, elle, reste praticable).
 
-    ⚠️ Le set rendu est MÉMOÏSÉ par hauteur (les appels sont désormais par figurine) : les appelants
-    le lisent, ils ne le mutent jamais. Une mutation en place corromprait la clairance de toutes les
-    figurines de cette taille pour le reste de la bataille."""
-    return _floor_index(terrain_areas).low_clearance(float(model_height))
+    POURQUOI DEUX ENTRÉES ET NON UNE HAUTEUR. Cette fonction a longtemps pris un ``float`` nu : rien
+    ne distinguait alors « hauteur de la figurine » de « hauteur de l'escouade », et ses onze
+    appelants — des pools qui raisonnent par figurine pour tout le reste — passaient tous la
+    seconde. Le défaut a dû être corrigé site par site, puis surveillé par un test qui relisait le
+    TEXTE des handlers. En exigeant les deux entrées, la hauteur ne peut plus venir que de
+    ``_model_height_of``, seule source de l'héritage figurine→escouade : la faute n'est plus
+    détectée après coup, elle n'est plus écrivable.
+
+    ⚠️ Le set rendu est MÉMOÏSÉ par hauteur : les appelants le lisent, ils ne le mutent jamais. Une
+    mutation en place corromprait la clairance de toutes les figurines de cette taille pour le
+    reste de la bataille."""
+    # Import local : `shared_utils` importe `terrain_utils`, l'inverse au chargement fermerait le
+    # cycle. Même convention que les autres primitives inter-modules de ce fichier.
+    from engine.phase_handlers.shared_utils import _model_height_of
+
+    if model_entry is squad_entry:
+        raise ValueError(
+            "low_clearance_ground_hexes: figurine et escouade sont la MÊME entrée — la clairance "
+            "se mesure sur la figurine (§13.06), et l'héritage vers l'escouade appartient à "
+            "`_model_height_of`, pas à l'appelant"
+        )
+    return _floor_index(terrain_areas).low_clearance(
+        _model_height_of(model_entry, squad_entry)
+    )
 
 
 def footprint_within_floor(

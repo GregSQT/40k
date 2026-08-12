@@ -21,8 +21,7 @@ from typing import Any, Dict, List, Sequence, Tuple
 import pytest
 
 from engine.phase_handlers import fight_handlers as fh
-from engine.phase_handlers.shared_utils import build_units_cache
-from tests._state_invariants import turn_state_invariants, unit_invariants
+from tests.unit.engine._state_builders import synthetic_state, synthetic_unit
 
 
 ISH = 10                     # 1" = 10 sous-hexes → géométrie EUCLIDIENNE (cf. geometry_is_hex)
@@ -42,69 +41,34 @@ _FLOOR_POLYGON = [[10, 10], [40, 10], [40, 40], [10, 40]]
 
 def _unit(uid: str, player: int, models: Sequence[Tuple[int, int, int]]) -> Dict[str, Any]:
     """Unité dont chaque figurine porte SA position ET SON étage ``(col, row, level)``."""
-    col, row, _lv = models[0]
-    return {**unit_invariants(),
-        "id": uid, "player": player, "col": col, "row": row,
-        "HP_CUR": len(models), "HP_MAX": len(models), "VALUE": 100, "OC": 1, "T": 4,
-        "ARMOR_SAVE": 3, "INVUL_SAVE": 7, "SHOOT_LEFT": 1, "ATTACK_LEFT": 1,
-        "RNG_WEAPONS": [], "CC_WEAPONS": [], "BASE_SIZE": 1, "MODEL_HEIGHT": MODEL_HEIGHT,
-        "BASE_SHAPE": "round", "MOVE": 6, "UNIT_RULES": [],
-        "models": [{"col": c, "row": r, "level": lv, "VALUE": 10} for c, r, lv in models],
-    }
+    return synthetic_unit(
+        uid, player,
+        [{"col": c, "row": r, "level": lv} for c, r, lv in models],
+        MODEL_HEIGHT=MODEL_HEIGHT,
+    )
 
 
 def _make_gs(units: List[Dict[str, Any]]) -> Dict[str, Any]:
-    gs: Dict[str, Any] = {
-        **turn_state_invariants(),
-        "config": {
-            "game_rules": {
-                "engagement_zone": ENGAGEMENT_ZONE,
-                "engagement_zone_vertical": VERTICAL_ZONE,
-                "max_base_size_hex": 35,
-                "unit_model_cohesion_range": 2,
-                "unit_global_cohesion_range": 9,
-                "squad_min_neighbors": 1,
-                "cohesion_distance_mode": "euclidean",
-            },
-            # Toggles de traversée 03.01 (valeurs réelles) : le pile-in borne chaque figurine
-            # par son TRAJET (12.03 EFFECT « moves as described in Moving (03) »), il les lit
-            # donc au même endroit que le move. Requis dès qu'une figurine est MOBILE.
-            "move": {"can_move_through_enemy_engagement_zone": True,
-                     "can_move_through_enemy_model": False,
-                     "can_move_through_friendly_model": True},
-            "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
+    return synthetic_state(
+        units,
+        inches_to_subhex=ISH,
+        game_rules={
+            "engagement_zone": ENGAGEMENT_ZONE,
+            "engagement_zone_vertical": VERTICAL_ZONE,
         },
-        "board_cols": 60, "board_rows": 60,
-        "current_player": 1,
-        "phase": "fight",
-        "wall_hexes": set(),
-        "terrain_areas": [
-            {
-                "id": "ruin",
-                "polygon_vertices": _FLOOR_POLYGON,
+        phase="fight",
+        terrain_areas=[{
+            "id": "ruin",
+            "polygon_vertices": _FLOOR_POLYGON,
+            "hexes": _FLOOR_HEXES,
+            "floors": [{
+                "level": 1,
+                "height_inches": FLOOR_HEIGHT,
                 "hexes": _FLOOR_HEXES,
-                "floors": [
-                    {
-                        "level": 1,
-                        "height_inches": FLOOR_HEIGHT,
-                        "hexes": _FLOOR_HEXES,
-                        "polygon_vertices": _FLOOR_POLYGON,
-                    }
-                ],
-            }
-        ],
-        "units": units,
-        "unit_by_id": {str(u["id"]): u for u in units},
-        "units_charged": set(), "units_fled": set(), "units_advanced": set(),
-        "units_selected_to_fight": set(),
-        "_unit_move_version": 0,
-        "inches_to_subhex": ISH,
-        "action_logs": [],
-        "action_log_seq": 0,
-        "current_turn": 1,
-    }
-    build_units_cache(gs)
-    return gs
+                "polygon_vertices": _FLOOR_POLYGON,
+            }],
+        }],
+    )
 
 
 def _duel(attacker_level: int) -> Dict[str, Any]:

@@ -2563,7 +2563,7 @@ def _fight_pile_in_build_model_pool(
     _enemy_ground = build_enemy_occupied_positions_set(game_state, current_player=player, level=0)
     # Hauteur de LA FIGURINE qui bouge (`_model_height_of`), jumeau du move : le pool est
     # par-figurine, et un personnage attaché plus haut ne passe pas là où passe la troupe.
-    _low_clear = low_clearance_ground_hexes(terrain_areas, _model_height_of(model, unit))
+    _low_clear = low_clearance_ground_hexes(terrain_areas, model, unit)
     # Bloqueurs (ennemis + autres unités amies) → collision par TEST EUCLIDIEN officiel
     # (footprints_overlap), un socle PAR FIGURINE à sa base RÉELLE (miroir consolidation). Le test
     # par cellules (cand_fp & occupied) sous-estimait le disque et rejetait des socles tangents.
@@ -3232,9 +3232,7 @@ def pile_in_autoplace_plan(
         bas. `low_clearance_ground_hexes` mémoïse par hauteur, donc une escouade homogène ne paie
         qu'une union.
         """
-        return low_clearance_ground_hexes(
-            terrain_areas, _model_height_of(models_cache[mid], unit)
-        )
+        return low_clearance_ground_hexes(terrain_areas, models_cache[mid], unit)
 
     # Figs figées (base-contact) : ne bougent pas ; leurs socles bloquent les placements de leur étage.
     frozen_socles: List[Tuple[int, Any]] = []
@@ -3878,7 +3876,7 @@ def _fight_consolidation_build_model_pool(
     _enemy_ground = build_enemy_occupied_positions_set(game_state, current_player=player, level=0)
     # Hauteur de LA FIGURINE qui bouge (`_model_height_of`), jumeau du move : le pool est
     # par-figurine, et un personnage attaché plus haut ne passe pas là où passe la troupe.
-    _low_clear = low_clearance_ground_hexes(terrain_areas, _model_height_of(model, unit))
+    _low_clear = low_clearance_ground_hexes(terrain_areas, model, unit)
     # Bloqueurs (ennemis + autres unités amies) → collision par TEST EUCLIDIEN officiel
     # (footprints_overlap), comme les autoplaces. Chaque socle étiqueté de son niveau EFFECTIF :
     # une fig d'un autre étage ne gêne pas (superposition inter-étage, §13.06, miroir pile-in).
