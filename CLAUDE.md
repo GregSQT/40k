@@ -152,6 +152,15 @@ STYLE DE RÉPONSE (NON NÉGOCIABLE) :
 - Si la réponse tient en 3 phrases, ne fais pas 3 paragraphes
 - Si je dis "oui" ou "ok", ne développe pas
 - Explique ce qui a été fait de façon simple et précise
+- UNE SEULE RÉPONSE, À LA FIN (tous modes) : ne rien m'adresser en cours de route. Pas de
+  « je commence par… », pas de bilan d'étape entre deux outils, pas de commentaire après chaque
+  fichier lu ou modifié. Tout ce que je dois lire tient dans le message FINAL, une fois le travail
+  terminé — je peux rater le reste, donc le reste ne doit pas exister.
+  → Les seules exceptions : une question bloquante (ASK 1/2, ou un arbitrage sans lequel le travail
+    serait à refaire) et un STOP imposé par une règle. Dans ce cas, la réponse EST le message final :
+    on s'arrête, on attend.
+  → Ne pas contourner en réduisant le message final : le FORMAT DE MISE À JOUR et le RAPPORT DE
+    CLÔTURE y figurent en entier.
 - ÉTAT DU CODE : ne jamais supposer. Toujours lire/vérifier avant d'affirmer.
   → Si incertain sur ce que fait le code : lire le fichier, puis répondre.
   → Ne jamais répondre avec "devrait", "probablement", "je pense que" sur le code.
@@ -256,8 +265,8 @@ Ne JAMAIS conclure par un verdict de qualité (« implémentation optimale », �
 produit sans effort. Conclure par des FAITS recoupables en quelques secondes.
 
 FORMAT IMPOSÉ — LU, JUMEAU, RÉFS et RELIRE sont télégraphiques : une ligne chacune, pas de prose,
-pas de paragraphe, pas de code source. ARBITRAGE est la SEULE section développée (voir son format
-ci-dessous). Ce bloc n'est PAS un récap (cf. ligne « Pas de récap final ») : il REMPLACE toute
+pas de paragraphe, pas de code source. ARBITRAGE et PROMPTS sont les SEULES sections développées
+(voir leur format ci-dessous). Ce bloc n'est PAS un récap (cf. ligne « Pas de récap final ») : il REMPLACE toute
 conclusion, il ne s'y ajoute pas. Ne jamais y répéter ce qui vient d'être dit au-dessus.
 
   LU : <ce qui a été lu au-delà du point modifié : fichier entier ? appelants ? module miroir ?>
@@ -279,13 +288,20 @@ conclusion, il ne s'y ajoute pas. Ne jamais y répéter ce qui vient d'être dit
        enchaînement d'options (« A puis B »), ni une demi-mesure « en attendant ».>
 
     2. <sujet suivant, même structure>
-  RELIRE : /code-review <fichiers modifiés>
-           /simplify <fichiers modifiés>
+  PROMPTS :
+    1. <titre du bug / sujet à traiter, une ligne>
+       ```
+       <prompt complet, copiable tel quel, à donner à un autre agent>
+       ```
+    2. <sujet suivant, même structure>
+  RELIRE :
+  /code-review <fichiers modifiés>
+  /simplify <fichiers modifiés>
 
 - LU et JUMEAU sont TOUJOURS présents. « grep X → 0 hit » est une réponse valide ; omettre la
   ligne n'en est pas une. Ce qui est validé localement dans un fichier à cohérence globale n'est
   pas validé — c'est le défaut le plus fréquent de ce dépôt (cf. T4 JUMEAU).
-- RÉFS et ARBITRAGE : omettre la section s'il n'y a réellement rien. Ne jamais écrire « néant ».
+- RÉFS, ARBITRAGE et PROMPTS : omettre la section s'il n'y a réellement rien. Ne jamais écrire « néant ».
 - Un arbitrage remonté n'est pas un défaut ; le taire pour paraître complet en est un.
 - ARBITRAGE — EXIGENCES DE FOND (le reste du rapport reste télégraphique, pas lui) :
   * LISIBILITÉ D'ABORD. Un arbitrage illisible n'est pas un arbitrage : il est ignoré, donc il
@@ -312,6 +328,15 @@ conclusion, il ne s'y ajoute pas. Ne jamais y répéter ce qui vient d'être dit
     le dire explicitement. « À toi de voir » n'est pas une recommandation.
   * Interdit d'y glisser du travail technique que l'agent savait faire (cf. règle ci-dessus) :
     l'ARBITRAGE développé ne devient pas un lieu où déguiser une dette en question.
+- PROMPTS — OBLIGATOIRE dès qu'un bug, une incohérence ou un sujet à traiter a été RENCONTRÉ
+  pendant le travail sans être corrigé dans la livraison (hors périmètre, ou remonté en ARBITRAGE) :
+  * un bloc de code par sujet, contenant un prompt AUTONOME, copiable tel quel pour un autre agent
+    qui n'a AUCUN contexte de cette session : ce qu'on observe, où (fichier:ligne), ce qu'on attend,
+    et le périmètre attendu. Pas de « comme vu plus haut », pas de « le fichier en question ».
+  * un sujet remonté en ARBITRAGE a AUSSI son prompt ici, écrit pour l'option RECOMMANDÉE.
+  * cette section ne dispense de RIEN : ce que l'agent savait faire dans le périmètre de clôture
+    se fait, il ne se transforme pas en prompt (cf. T2). Un prompt n'est pas un moyen de sortir
+    du périmètre du travail en cours.
 - RELIRE : obligatoire dès qu'au moins un fichier de code a été modifié ; omise sinon (réponse
   pure lecture, doc seule, discussion). Lister les chemins RÉELLEMENT modifiés dans CETTE tâche,
   jamais l'ensemble du working tree — copiables tels quels, sans reformulation. `/code-review`
@@ -321,10 +346,14 @@ conclusion, il ne s'y ajoute pas. Ne jamais y répéter ce qui vient d'être dit
   exécute que si le PROMPT COURANT l'y autorise explicitement, l'autorisation ne vaut que pour
   ce prompt, ne se déduit d'aucun contexte et se retire en ne la redonnant pas. En cas de doute,
   elle n'existe pas : écrire la ligne RELIRE et s'arrêter là.
+- RELIRE, DISPOSITION : l'étiquette `RELIRE :` est SEULE sur sa ligne, aucune commande à sa suite.
+  `/code-review` sur la ligne suivante, `/simplify` sur la ligne d'après — une commande par ligne,
+  sans indentation d'alignement, pour être copiables d'un seul geste.
 - RELIRE, CHEMINS : relatifs quand le travail a été fait dans le dépôt principal, ABSOLUS DANS LE
   WORKTREE quand il y a été fait — jamais relatifs dans ce cas :
-      RELIRE : /code-review /home/greg/40k/.claude/worktrees/<nom>/engine/xxx.py
-               /simplify /home/greg/40k/.claude/worktrees/<nom>/engine/xxx.py
+      RELIRE :
+      /code-review /home/greg/40k/.claude/worktrees/<nom>/engine/xxx.py
+      /simplify /home/greg/40k/.claude/worktrees/<nom>/engine/xxx.py
   Un chemin relatif désigne le fichier du dépôt PRINCIPAL, qui porte le même nom sans porter la
   modification : la review relit alors un chantier étranger sans que rien ne le signale (mesuré le
   2026-08-08 — un verdict entier, findings compris, rendu sur le mauvais code).

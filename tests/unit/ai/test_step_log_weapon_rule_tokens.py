@@ -982,3 +982,58 @@ def test_une_attaque_non_allouee_ne_fabrique_pas_de_sauvegarde(tmp_path):
 
     allocated = {"save_target": 3, "save_roll": 4, "save_skipped": False}
     assert _save_segments(allocated, damage=2, save_result="FAIL") == ["Save 4(3+)", "Dmg:2HP"]
+
+
+@pytest.mark.parametrize("melee", [False, True], ids=["tir", "melee"])
+def test_la_ligne_nomme_la_figurine_allouee(monkeypatch, tmp_path, melee):
+    """La chaîne `[ALLOC_MODEL:]` : record moteur → mapping → ligne (2026-08-12).
+
+    Le journal disait qu'une escouade perdait des PV, jamais QUI. L'analyzer le déduisait, et ses
+    deux déductions étaient fausses : 2 342 fenêtres où l'escouade entière retombait sur son
+    ancre — donc un point fantôme là où la figurine venait de tomber — et 200 PV par socle faux
+    sur 173 129 comparés aux instantanés moteur, la cascade d'allocation réelle
+    (`_select_allocation_model`) n'étant pas le tri de l'analyzer.
+
+    Ce test tient le maillon d'ÉMISSION ; l'exploitation par l'analyzer est verrouillée par
+    `tests/unit/ai/test_analyzer_alloc_model_named.py`. Les deux moitiés doivent exister
+    séparément : couper l'émission ici ne fait PAS tomber les tests de lecture, qui travaillent
+    sur des journaux écrits à la main (vérifié par mutation, 2026-08-12).
+
+    PARAMÉTRÉ tir/mêlée : le token est écrit au point d'émission COMMUN (`log_action`), jamais
+    dans les deux branches du formateur. C'est ce choix que ce paramètre vérifie — un token posé
+    dans la seule branche SHOT laisserait sans donnée les 19 157 lignes de mêlée du run de
+    référence, et le miroir tir/mêlée est le motif d'échec n°1 de ce dépôt.
+    """
+    gs, raw_log = _engine_shoot_log(monkeypatch, [], [6, 6, 1], melee=melee)
+    line = _step_log_line(tmp_path, gs, raw_log)
+    assert "[ALLOC_MODEL: 101#0]" in line, (
+        "la ligne ne nomme pas la figurine allouée — la chaîne record → mapping → ligne est "
+        f"rompue :\n{line}"
+    )
+
+
+def test_l_entete_declare_la_grammaire_du_journal(tmp_path):
+    """`Log grammar:` — sans elle, un lecteur ne peut pas distinguer « donnée absente » de
+    « producteur en panne », et n'a d'autre choix que de retomber en silence sur une
+    reconstruction approximative. C'est cette ligne qui rend `[ALLOC_MODEL:]` EXIGIBLE.
+
+    Ce qu'il prouve exactement : l'ALLER-RETOUR. Le producteur écrit la ligne, le lecteur la
+    retrouve. Un désaccord de version entre les deux est hors de portée d'un test — et n'a pas
+    à être testé : les deux lisent la MÊME constante, il n'y a rien à désynchroniser. Verrou
+    prouvé en supprimant l'écriture de la ligne → ROUGE.
+    """
+    from ai.analyzer import parse_log_grammar_version
+    from ai.step_logger import LOG_GRAMMAR_VERSION, StepLogger
+
+    out = tmp_path / "entete.log"
+    logger = StepLogger(output_file=str(out), enabled=True, buffer_size=1)
+    logger.log_episode_start(
+        units_data=[], scenario_info="scenario_bot-01", bot_name="tactical",
+        board_config={"cols": 44, "rows": 60, "inches_to_subhex": 1, "hex_radius": 13.9,
+                      "margin": 5},
+        run_rules={"engagement_zone_subhex": 2},
+    )
+    logger._flush_buffer()
+    assert parse_log_grammar_version(str(out)) == LOG_GRAMMAR_VERSION, (
+        "le producteur et le lecteur ne s'accordent pas sur la version de grammaire"
+    )

@@ -414,6 +414,44 @@ describe("replayParser", () => {
     expect(shoot.wound_ability).toBe("TARGETED INTERCESSION");
   });
 
+  // VERROU de `LINE_METADATA_TOKEN` (jeu FERMÉ des tokens d'enveloppe). Un segment de journal
+  // absent de ce jeu est avalé par le dernier segment de jet et lu comme un NOM DE CAPACITÉ —
+  // panne déjà payée (`wound_ability = "R:+0.0"`). `[ALLOC_MODEL:]` est entré dans le jeu avec
+  // le token lui-même (2026-08-12) ; ce test tient la porte fermée derrière lui.
+  //
+  // ⚠️ CE QUE CE TEST NE PROUVE PAS, et il faut le dire : sur une ligne RÉELLE, `[ALLOC_MODEL:]`
+  // est précédé de `[R:…]` et `[MODELS:…]`, déjà membres du jeu — le scan s'arrête avant lui,
+  // et l'entrée du jeu ne change donc rien. Mesuré : la retirer laisse la vraie ligne verte.
+  // La ligne ci-dessous place donc le token JUSTE APRÈS le jet, ce que l'émetteur ne fait pas
+  // aujourd'hui. C'est délibéré : ce test tient la protection pour le jour où l'ordre
+  // d'émission changera, pas un défaut vivant. Un test qui ne peut pas rougir n'en est pas un.
+  //
+  // La ligne est construite tout ratée EXPRÈS : c'est le cas qui déclenche le défaut. Une ligne
+  // complète se termine par un segment `Save`, qui borne naturellement le précédent — le token
+  // ne se retrouve collé au dernier jet que lorsque la ligne s'arrête sur un jet manqué.
+  it("ne lit pas [ALLOC_MODEL:] comme une capacité sur une attaque ratée", () => {
+    const text = [
+      "=== EPISODE 1 START ===",
+      "Scenario: demo",
+      "Bot: RandomBot",
+      `Rules: ${VALID_RULES_JSON}`,
+      "[12:00:00] Board: cols=10 rows=10 inches_to_subhex=1 hex_radius=2.78 margin=1",
+      "Unit 1 (Intercessor) P1: Starting position (0, 0), HP_MAX=5",
+      "Unit 2 (Termagant) P2: Starting position (2, 0), HP_MAX=4",
+      "[12:00:00] T1 P1 DEPLOYMENT : Unit 1(-1,-1) DEPLOYED from (-1,-1) to (0,0)",
+      "[12:00:01] T1 P2 DEPLOYMENT : Unit 2(-1,-1) DEPLOYED from (-1,-1) to (1,0)",
+      "[12:00:02] T1 P1 SHOOT : Unit 1(0,0) SHOT [Bolt Rifle] Unit 2(1,0)" +
+        " - Hit 1(3+) [ALLOC_MODEL: 2#1] [R:+0.0] [MODELS: 1#0@(0,0,z0)]",
+      "EPISODE END: Winner=1, Method=elimination",
+    ].join("\n");
+
+    const shoot = parse_log_file_from_text(text).episodes[0].actions.find(
+      (a) => (a as { type?: string }).type === "shoot"
+    ) as { hit_ability?: string; hit_roll?: number };
+    expect(shoot.hit_roll).toBe(1);
+    expect(shoot.hit_ability).toBeUndefined();
+  });
+
   // VERROU du discriminateur PAR NOM. Le segment Wound porte deux capacités possibles écrites
   // avec la MÊME syntaxe : la relance (`woundAbility`) puis le modificateur (`woundBonusAbility`).
   // Séparer par la POSITION est tentant — l'émetteur écrit toujours relance puis bonus — mais

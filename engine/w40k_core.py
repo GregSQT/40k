@@ -5444,6 +5444,11 @@ class W40KEngine(gym.Env):
         # roller de melee n atteint jamais step.log, et le plafond d attaques recalcule par
         # l analyzer est inferieur d un cran a celui que le moteur a reellement applique.
         "waaaghMelee": "waaagh_melee",
+        # FIGURINE ALLOUEE (05, « Allocate Attack ») : l identite de celle qui encaisse. Le
+        # journal disait qu une escouade perd des PV, jamais QUI — et l analyzer le devinait par
+        # un tri qui ignore la cascade du moteur (`_select_allocation_model`). Sans cette entree,
+        # le fait reste dans le shot_record et n atteint ni step.log, ni le replay, ni l analyzer.
+        "targetModelId": "target_model_id",
     }
 
     def _models_segment_for_unit(self, unit_id: Any, label: str = "MODELS") -> str:

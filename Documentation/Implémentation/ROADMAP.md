@@ -580,6 +580,43 @@ Prêts à démarrer sans décision produit :
   « 18 702 » que la livraison du matin citait comme preuve de non-aveuglement était déjà la mesure
   du trou.
   → [`Implémenté/analyzer_engagement_avant_pertes_2026-08-12.md`](Implémenté/analyzer_engagement_avant_pertes_2026-08-12.md)
+- ✅ **Le journal nomme la figurine qui encaisse chaque attaque** — **LIVRÉ le 2026-08-12**. Le
+  journal dit qu'une escouade perd des PV, jamais QUI les perd. L'analyzer le devine donc deux
+  fois, et se trompe des deux côtés. (1) POSITION : à la mort d'une figurine il oublie TOUS les
+  socles de l'escouade et la ramène à son ancre — restée sur le hex de la figurine qui vient de
+  tomber. Mesuré sur 600 épisodes : **2 342 fenêtres** ainsi ouvertes, refermées par
+  `[TARGET_MODELS:]` (1 652) ou `[MODELS:]` (690), jamais par l'instantané de tour ; médiane
+  3 lignes, p90 119, **19 % débordent sur un tour suivant**. Pendant ces fenêtres tout contrôle
+  géométrique mesure un point fantôme — c'est ce qui fait dire « tir au contact avec une arme
+  non-CLOSE_QUARTERS » sur un tir parfaitement légal (journal construit à l'appui). (2) PV : le
+  moteur alloue par la cascade `_select_allocation_model` (blessée d'abord → tier de rôle →
+  plus proche d'un ennemi → index) quand l'analyzer trie sur le seul critère CHARACTER/non-
+  CHARACTER. Mesuré contre les instantanés `T{n} STATE:` : **141 escouades divergentes sur
+  32 233**, **200 PV par socle faux sur 173 129** — minorant, l'instantané recalant tout à chaque
+  tour. CORRECTION : le moteur nomme au journal la figurine ALLOUÉE (pas seulement la morte —
+  la deuxième devinette resterait vivante), l'analyzer la LIT au lieu de la déduire, et les
+  deux heuristiques disparaissent avec le report du surplus de dégâts, qui contredit le moteur.
+  La version de grammaire entre à l'en-tête : sur un journal qui l'annonce, une ligne de dégâts
+  sans le token est une ERREUR, pas un repli silencieux. Périmètre : moteur (record + carte de
+  champs), `step_logger`, analyzer (parseur + retrait des devinettes), `replayParser.ts` (jeu de
+  tokens FERMÉ, un token inconnu y passerait pour un nom de capacité), verrous, `Replay.md` et
+  `analyzer_couverture.md`. NON TRAITÉ, dit ici : trois chemins de retrait n'écrivent aucune
+  ligne (cohérence 03.03, blessures mortelles par socle, expiration de réserves) — rattrapés par
+  l'instantané de fin de tour, mesurés à 1 fantôme sur 600 épisodes.
+  **MESURE AVANT/APRÈS sur le MÊME journal** (60 épisodes, 17 h 23, le second passage étant le
+  journal privé de sa ligne d'entête et de ses tokens) : **496 lignes de seuil de blessure non
+  vérifiables → 0** (201 au tir, 295 en mêlée), et **aucun seuil faux** découvert — le moteur
+  avait raison, l'analyzer ne pouvait pas le dire. Section 2.8 à 0 partout, y compris le nouveau
+  compteur « figurine allouée inconnue » : sur 60 épisodes, l'état par-socle reconstruit ne
+  contredit jamais les instantanés du moteur. Aucune autre famille du rapport ne bouge.
+  ⚠️ **Deux corrections de ma propre analyse, trouvées en implémentant** : (1) le retrait du
+  socle doit attendre la FIN DE L'ACTIVATION, pas la ligne suivante — sinon les derniers jets
+  d'une salve se jugent sur les survivants des premiers (E44 : Gatling à 24" visant à 22 hex,
+  ses six victimes les plus proches mortes, les trois derniers jets « hors portée » à 25-27) ;
+  (2) la fenêtre fantôme ne franchit PAS l'activation sur un journal réel — `[TARGET_MODELS:]`
+  la referme — donc le faux positif « tir engagé arme non-CLOSE_QUARTERS » que je pensais
+  expliquer par elle vient d'ailleurs, et reste ouvert.
+  → [`Implémenté/figurine_allouee_nommee_au_journal_2026-08-12.md`](Implémenté/figurine_allouee_nommee_au_journal_2026-08-12.md)
 - 🔴 **Conformité moteur — les 53 erreurs que l'analyzer voit VRAIMENT** (ouvert le 2026-08-11,
   **26 restantes** : la famille CC_NB, la plus lourde, est soldée le jour même ; les familles
   « tirs hors portée » et « tir engagé visant une unité non engagée » sont soldées le 2026-08-12 —

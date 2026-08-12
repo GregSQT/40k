@@ -9403,6 +9403,16 @@ def _resolve_one_manual_wound(game_state: Dict[str, Any], alloc: Dict[str, Any],
     ap = int(g["ap"])
     dmg_raw = g["dmg_raw"]
     rec = pw["rec"]
+    # FIGURINE ALLOUEE (05 Attack sequence, « Allocate Attack ») — ecrite ICI, avant les trois
+    # retours anticipes ci-dessous (save reussie, D nul, Feel No Pain), parce que l allocation a
+    # eu lieu dans TOUS ces cas : c est le fait, les degats n en sont que la consequence.
+    #
+    # Sans elle, le journal disait qu une escouade perd des PV sans jamais dire QUI les perd, et
+    # l analyzer devinait — avec un tri (non-CHARACTER puis ordre du segment) qui ignore la
+    # cascade reelle de `_select_allocation_model` (blessee d abord, tier de role, proximite).
+    # Mesure du 2026-08-12 sur 600 episodes : 200 PV par socle faux sur 173 129 compares aux
+    # instantanes `T{n} STATE:`, et 2 342 fenetres ou l escouade entiere retombait sur son ancre.
+    rec["targetModelId"] = str(cur)
     from engine.game_state import effective_invul_save  # import paresseux : cycle, cf. plus haut
 
     # Waaagh! (chantier 03) : « models from your army with this ability have a 5+ invulnerable

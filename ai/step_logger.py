@@ -17,7 +17,20 @@ from shared.data_validation import require_key
 
 from ai.bot_registry import bot_display_name
 
-__all__ = ['StepLogger']
+__all__ = ['StepLogger', 'LOG_GRAMMAR_VERSION']
+
+
+#: Version de la GRAMMAIRE du journal, ecrite a l entete de chaque episode (`Log grammar:`).
+#: Elle dit ce que le journal GARANTIT porter — ce qui permet a un lecteur de traiter une donnee
+#: manquante comme une PANNE et non comme un vieux format, sans jamais retomber en silence sur
+#: une reconstruction approximative.
+#:
+#:   1 — grammaire d avant le 2026-08-12 : aucune ligne ne nomme la figurine cible allouee.
+#:   2 — `[ALLOC_MODEL: <mid>]` sur toute attaque parvenue a l allocation (tir ET melee).
+#:
+#: N incrementer que pour une garantie NOUVELLE, jamais pour un changement cosmetique : un
+#: lecteur qui refuse une version qu il ne connait pas doit avoir une raison de le faire.
+LOG_GRAMMAR_VERSION = 2
 
 
 #: Regles qui AJOUTENT des des au pool d attaques et dont l effet depend de la CIBLE :
@@ -414,6 +427,21 @@ class StepLogger:
                 _shooter_models_seg = action_details.get("shooter_models_segment")  # get allowed
                 if _shooter_models_seg:
                     message = f"{message} {_shooter_models_seg}"
+                # Segment [ALLOC_MODEL: <mid>] : la figurine CIBLE a qui cette attaque a ete
+                # allouee (05, « Allocate Attack »). Une ligne = un jet — verifie sur 144 022
+                # lignes, aucune n'en porte deux — donc un seul socle par ligne, jamais une liste.
+                #
+                # Emis ICI, au meme point que les trois segments ci-dessus, et pour la meme
+                # raison : les deux branches du formateur (SHOT et FOUGHT) sont la paire ou ce
+                # depot diverge. Un token ecrit dans l'une et oublie dans l'autre laisserait la
+                # melee (19 157 lignes du run de reference) sans la donnee que le tir aurait.
+                #
+                # NOM : ni `[TARGET_MODEL:` (prefixe de `[TARGET_MODELS:`, segment qui a deja
+                # fausse deux verdicts de distance en s'y substituant), ni `[ALLOC:` (que l'oeil
+                # confond avec le `Save [NOT ALLOCATED]` du meme journal).
+                _alloc_model = action_details.get("target_model_id")  # get allowed
+                if _alloc_model:
+                    message = f"{message} [ALLOC_MODEL: {_alloc_model}]"
 
 
             # Standard format: [timestamp] TX PX PHASE : Message [SUCCESS/FAILED]
@@ -591,6 +619,16 @@ class StepLogger:
                     )
                 _rules_txt = " ".join(f"{k}={v}" for k, v in sorted(run_rules.items()))
                 f.write(f"[{timestamp}] Run rules: {_rules_txt}\n")
+                # VERSION DE GRAMMAIRE — ce que le journal GARANTIT porter, pas ce qu'il porte
+                # peut-être. Sans elle, l'absence de `[ALLOC_MODEL:]` sur une ligne de dégâts
+                # serait indécidable : vieux journal, ou ligne que le moteur a oublié d'annoter ?
+                # Le lecteur devrait alors retomber en silence sur son ancienne devinette — le
+                # repli qui masque une panne, exactement ce que ce dépôt s'interdit.
+                # Déclarée ici, elle rend le token EXIGIBLE : sur un journal `log_grammar=2`,
+                # une ligne qui applique des dégâts sans nommer sa figurine est une ERREUR.
+                #   1 = grammaire d'avant le 2026-08-12 (aucune figurine allouée nommée)
+                #   2 = `[ALLOC_MODEL: <mid>]` sur toute attaque parvenue à l'allocation
+                f.write(f"[{timestamp}] Log grammar: {LOG_GRAMMAR_VERSION}\n")
 
                 # Log all unit starting positions (already validated above)
                 for unit in units_list:

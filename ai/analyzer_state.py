@@ -59,6 +59,17 @@ class AnalyzerState:
     #: RÉ-ENCODER la règle (« waaagh ⇒ +1 »), donc en faire vivre une seconde définition qui
     #: diverge en silence le jour où la première bouge.
     active_effects: Dict[int, Dict[str, str]] = field(default_factory=dict)
+    #: Socles tués et pas encore retirés de `positions_by_model` (unité → mids), avec l'unité dont
+    #: l'ACTIVATION les a tués. Ils sont retirés quand une autre unité agit : pendant une salve,
+    #: les jets se jugent tous sur l'empreinte d'AVANT la salve (la portée se décide au Select
+    #: Targets, une fois). Cf. le bloc qui les applique dans `analyzer_core.run`.
+    pending_model_removals: Dict[str, Set[str]] = field(default_factory=dict)
+    pending_removals_actor: Optional[str] = None
+    #: Version de grammaire déclarée par l'entête `Log grammar:` du journal (1 si absente).
+    #: Elle dit ce que le journal GARANTIT porter : à partir de 2, une ligne d'attaque qui
+    #: applique des dégâts DOIT nommer sa figurine allouée, et son absence est une panne du
+    #: producteur — pas un vieux format sur lequel on retomberait en silence.
+    log_grammar: int = 1
     episode_turn: int = 0
     episode_actions: int = 0
     last_turn: int = 0
