@@ -1677,12 +1677,41 @@ def update_units_cache_position(game_state: Dict[str, Any], unit_id: str, col: i
         "BASE_SIZE": entry["BASE_SIZE"],
         "orientation": orient_val,
     }
-    new_occupied = _compute_unit_occupied_hexes(col, row, unit_stub, game_state)
-    _update_occupation_map(game_state, unit_id, entry, new_occupied)
+    # MULTI-FIGURINE : `occupied_hexes` est l'union des socles VIVANTS, jamais l'empreinte de la
+    # seule ancre — c'est `_recompute_squad_occupied_hexes` qui la produit, et lui seul. La
+    # décision se prend AVANT d'écrire : poser l'empreinte d'ancre pour l'écraser ensuite ferait
+    # exister, le temps de trois instructions, exactement l'état faux que cette fonction doit
+    # empêcher, et ferait payer un calcul d'empreinte plus deux passes de `occupation_map`
+    # pour rien.
+    #
+    # ⚠️ DÉFAUT MESURÉ le 2026-08-12 (run x1 instrumenté, E4 T5). `destroy_model` recalcule bien
+    # l'union après un retrait, PUIS recalcule l'ancre — et quand c'est l'ANCRE qui tombe
+    # (figurine d'index minimum), il appelle cette fonction, qui écrasait l'union. L'escouade
+    # 102, 11 socles étalés de (0,35) à (7,38), se retrouvait avec `occupied_hexes == {(1,38)}`.
+    # Or c'est CE champ que `build_enemy_adjacent_hexes` dilate pour produire la zone
+    # d'engagement que `validate_move_plan` oppose aux déplacements : la zone se réduisait à
+    # l'ancre, et l'unité 3 a fini son move NORMAL à 1 subhex de 102#7 — engagée, ce que 09.05
+    # interdit — sans qu'aucun contrôle ne bronche. 2 violations sur ~1 300 moves ; 0 sur 2 259
+    # après correction. Même champ, mêmes conséquences pour la LoS et le ciblage, qui le lisent.
+    #
+    # `update_model_position` enchaînait la même inversion (recompute puis ancre) ; poser la
+    # correction ICI la ferme pour les deux, et pour tout futur appelant.
+    squad_models = game_state.get("squad_models")
+    model_ids = squad_models.get(unit_id) if isinstance(squad_models, dict) else None
+    if not isinstance(model_ids, (list, tuple)):
+        model_ids = None
 
     entry["col"] = col
     entry["row"] = row
-    entry["occupied_hexes"] = new_occupied
+    if model_ids is not None and len(model_ids) > 1:
+        # `_recompute` fait lui-même le diff de `occupation_map` à partir de l'empreinte
+        # PRÉCÉDENTE encore présente dans l'entrée : ne pas la réécrire ici lui laisse la vraie
+        # union à retirer, au lieu de cases d'ancre transitoires posées pour être reprises.
+        _recompute_squad_occupied_hexes(game_state, unit_id)
+    else:
+        new_occupied = _compute_unit_occupied_hexes(col, row, unit_stub, game_state)
+        _update_occupation_map(game_state, unit_id, entry, new_occupied)
+        entry["occupied_hexes"] = new_occupied
 
     # Mono-figurine : la fig unique EST à l'ancre → resync sa position (occupied_hexes_by_model
     # + models_cache) pour rester cohérent après un déplacement d'ancre. Sans ça, model_centers
@@ -1690,10 +1719,8 @@ def update_units_cache_position(game_state: Dict[str, Any], unit_id: str, col: i
     # position (ex. tireur déplacé virtuellement en preview → cibles hors portée vues à tort).
     # Multi-figurine : ne PAS toucher les figs survivantes (sémantique « resync ancre seule » ;
     # les déplacements rigides passent par translate_squad_to_destination / _recompute).
-    squad_models = game_state.get("squad_models")
-    if isinstance(squad_models, dict):
-        model_ids = squad_models.get(unit_id)
-        if isinstance(model_ids, (list, tuple)) and len(model_ids) == 1:
+    if model_ids is not None:
+        if len(model_ids) == 1:
             mid = model_ids[0]
             entry["occupied_hexes_by_model"] = {mid: (col, row)}
             models_cache = game_state.get("models_cache")
@@ -3581,11 +3608,19 @@ def translate_squad_to_destination(
             m["level"] = resolve_model_effective_level(
                 game_state, m, int(new_col), int(new_row), int(require_key(m, "level"))
             )
-    # Update anchor first (sets entry.col/row, entry.occupied_hexes = anchor footprint).
+    # Ancre d'abord (écrit entry.col/row ; l'empreinte, elle, y est déjà rétablie en union des
+    # socles vivants — cf. la correction posée dans `update_units_cache_position`).
     update_units_cache_position(game_state, squad_id, norm_dest_col, norm_dest_row)
-    # Then override occupied_hexes (union de toutes les figs) + occupied_hexes_by_model
-    # depuis models_cache déplacés. Ordre important : ce 2e appel écrase ce qui doit l'être.
-    _recompute_squad_occupied_hexes(game_state, squad_id)
+    # Puis les cartes par-figurine, POUR LA SEULE ESCOUADE MONO-FIGURINE. Au-dessus d'une
+    # figurine, `update_units_cache_position` vient d'appeler `_recompute_squad_occupied_hexes`
+    # lui-même : le refaire ici réécrivait à l'identique les cinq mêmes champs et la même
+    # `occupation_map` (mesuré : +3,7 µs à 5 figurines, +7,5 µs à 11, soit ~27 % du coût de
+    # cette fonction, à chaque move / charge / pile-in / consolidation).
+    # La branche mono, elle, n'écrit ni `orientation_by_model` ni les cartes de niveau au-delà
+    # de son unique mid : sans cet appel, un socle non rond pivoté était rendu par le front à
+    # son ANCIENNE orientation (`orientation_by_model` a CE seul producteur).
+    if len(require_key(game_state, "squad_models").get(squad_id, ())) <= 1:  # get allowed
+        _recompute_squad_occupied_hexes(game_state, squad_id)
 
 
 def _recompute_squad_hp_total(game_state: Dict[str, Any], squad_id: str) -> int:

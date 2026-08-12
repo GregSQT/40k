@@ -24,7 +24,7 @@ from engine.action_log_utils import append_action_log
 from .shared_utils import (
     calculate_target_priority_score, enrich_unit_for_reward_mapper, check_if_melee_can_charge,
     ACTION, WAIT, PASS, SHOOTING, ADVANCE, NOT_REMOVED,
-    update_units_cache_position, update_units_cache_hp, remove_from_units_cache,
+    translate_squad_to_destination, update_units_cache_hp, remove_from_units_cache,
     is_unit_alive, get_hp_from_cache, require_hp_from_cache,
     get_unit_position, require_unit_position, require_unit_from_cache,
     update_enemy_adjacent_caches_after_unit_move,
@@ -1304,17 +1304,21 @@ def _apply_preview_placement(
 ) -> None:
     """Pose l'escouade sur la COPIE d'aperçu, selon la forme du placement.
 
-    Les deux branches passent par les écrivains RÉELS du moteur — `update_units_cache_position`
-    pour l'ancre, `update_model_position` pour les figurines — et non par une écriture directe du
-    cache : c'est ce qui garantit que l'aperçu et l'état après validation décrivent la même
-    empreinte. `update_model_position` resynchronise au passage `occupied_hexes` et l'ancre de
-    l'escouade, donc rien n'est à recalculer ici.
+    Les deux branches passent par les écrivains RÉELS du moteur — `translate_squad_to_destination`
+    pour un placement à l'ancre, `update_model_position` pour les figurines — et non par une
+    écriture directe du cache : c'est ce qui garantit que l'aperçu et l'état après validation
+    décrivent la même empreinte. `update_model_position` resynchronise au passage
+    `occupied_hexes` et l'ancre de l'escouade, donc rien n'est à recalculer ici.
     """
     kind = placement[0]
     if kind == "anchor":
         _unused, dest_col, dest_row = placement
         set_unit_coordinates(unit, int(dest_col), int(dest_row))
-        update_units_cache_position(gs, unit_id_str, int(unit["col"]), int(unit["row"]))
+        # « Pose l'escouade à cette ancre » = déplacement RIGIDE, donc figurines comprises.
+        # `update_units_cache_position` ne bouge que l'ancre : sur une escouade multi-figurines,
+        # l'aperçu mesurait la LoS et les cibles depuis l'empreinte RESTÉE à la position
+        # courante, pour chaque case survolée — un aperçu qui ne décrit pas ce qu'il annonce.
+        translate_squad_to_destination(gs, unit_id_str, int(unit["col"]), int(unit["row"]))
         return
     if kind == "models":
         from engine.phase_handlers.shared_utils import (
@@ -1367,10 +1371,13 @@ def preview_shoot_valid_targets_from_position(
     """Aperçu de tir depuis une ANCRE hypothétique (lecture pure, aucune mutation).
 
     ⚠️ PLACEMENT PAR ANCRE — ne convient qu'à une escouade DÉJÀ SUR LA TABLE, déplacée d'un bloc.
-    `update_units_cache_position` ne resynchronise les figurines que pour les escouades
-    mono-figurine ; sur une multi-figurine, elles gardent leurs positions précédentes (ou la
-    sentinelle `(-1,-1)` si l'escouade n'est pas déployée) pendant que l'ancre, elle, bouge.
-    Pour un placement figurine par figurine — déploiement en cours, `perModelMove` — utiliser
+    Les figurines SUIVENT l'ancre depuis le 2026-08-12 (`translate_squad_to_destination`, qui
+    translate le bloc en préservant la formation) ; auparavant elles restaient en place pour une
+    escouade multi-figurines et l'aperçu mesurait depuis l'empreinte d'origine.
+    La limite qui SUBSISTE est ailleurs : une escouade PAS ENCORE DÉPLOYÉE a toutes ses figurines
+    sur la sentinelle `(-1,-1)`, donc aucune formation à translater — elles s'empilent sur
+    l'ancre et l'aperçu mesure depuis un point unique. Pour un placement figurine par figurine —
+    déploiement en cours, `perModelMove` — utiliser
     `preview_shoot_valid_targets_from_model_positions`, qui pose CHAQUE figurine.
 
     Args:
@@ -5037,7 +5044,12 @@ def _apply_move_after_shooting(
     old_occupied = old_cache_entry.get("occupied_hexes") if old_cache_entry else None
 
     set_unit_coordinates(unit, dest_col_int, dest_row_int)
-    update_units_cache_position(game_state, unit_id_str, dest_col_int, dest_row_int)
+    # DÉPLACEMENT RIGIDE de l'escouade, pas un simple recalage d'ancre. `move_after_shooting`
+    # est nommément listé par la docstring de `translate_squad_to_destination` comme l'un de ses
+    # clients ; `update_units_cache_position`, elle, ne bouge QUE l'ancre — « à ne pas confondre »,
+    # dit la même docstring. Sur une escouade multi-figurines (Gargoyle, la seule porteuse de la
+    # capacité) l'ancre partait à destination et les figurines restaient sur place.
+    translate_squad_to_destination(game_state, unit_id_str, dest_col_int, dest_row_int)
 
     new_cache_entry = require_key(game_state, "units_cache").get(unit_id_str)
     new_occupied = new_cache_entry.get("occupied_hexes") if new_cache_entry else None
@@ -5053,7 +5065,7 @@ def _apply_move_after_shooting(
         old_occupied=old_occupied,
         new_occupied=new_occupied,
     )
-    # LoS : invalidation ciblée + bump émis par update_units_cache_position (ci-dessus, dest) →
+    # LoS : invalidation ciblée + bump émis par translate_squad_to_destination (ci-dessus, dest) →
     # _touch_unit_los (choke-point a′). build_unit_los_cache reconstruit le los_cache local ensuite.
     build_unit_los_cache(game_state, unit_id_str)
     _invalidate_all_destination_pools_after_movement(game_state)

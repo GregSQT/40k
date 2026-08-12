@@ -719,10 +719,32 @@ Prêts à démarrer sans décision produit :
   la referme — donc le faux positif « tir engagé arme non-CLOSE_QUARTERS » que je pensais
   expliquer par elle vient d'ailleurs, et reste ouvert.
   → [`Implémenté/figurine_allouee_nommee_au_journal_2026-08-12.md`](Implémenté/figurine_allouee_nommee_au_journal_2026-08-12.md)
-- 🔴 **Conformité moteur — les 53 erreurs que l'analyzer voit VRAIMENT** (ouvert le 2026-08-11,
+- 🟠 **Conformité moteur — les 53 erreurs que l'analyzer voit VRAIMENT** (ouvert le 2026-08-11,
   **26 restantes** : la famille CC_NB, la plus lourde, est soldée le jour même ; les familles
   « tirs hors portée » et « tir engagé visant une unité non engagée » sont soldées le 2026-08-12 —
   c'étaient des artefacts, cf. ci-dessus).
+  ✅ **LES DEUX FAMILLES DE MOVE SONT SOLDÉES le 2026-08-12, et c'était un défaut MOTEUR.**
+  Cause mesurée sur run instrumenté (x1, E4 T5), pas déduite : `destroy_model` recalcule l'union
+  des socles après un retrait, PUIS recalcule l'ancre — et quand c'est l'ANCRE qui tombe,
+  `update_units_cache_position` réécrivait `occupied_hexes` avec l'empreinte de la SEULE ancre.
+  L'escouade 102, 11 socles étalés de (0,35) à (7,38), se retrouvait avec `occupied_hexes` =
+  1 case. Or c'est CE champ que `build_enemy_adjacent_hexes` dilate pour produire la zone
+  d'engagement que `validate_move_plan` oppose aux déplacements : la zone se réduisait à l'ancre,
+  et un move NORMAL a fini à 1 subhex d'un socle ennemi sans qu'aucun contrôle ne bronche.
+  **2 violations sur ~1 300 moves avant, 0 sur 2 259 après.** La correction est posée chez
+  l'ÉCRIVAIN (l'invariant « `occupied_hexes` == union des socles vivants » tient désormais par
+  construction), et deux appelants qui utilisaient cet écrivain d'ANCRE comme mécanisme de
+  DÉPLACEMENT — aperçu de tir, `move_after_shooting` — passent à `translate_squad_to_destination`.
+  ⚠️ **La piste ouverte le 2026-08-11 était FAUSSE** : ni le pool ni `validate_move_plan` n'étaient
+  en cause, ils refusent correctement une destination engagée. C'est la DONNÉE qu'ils lisent qui
+  l'était. La piste venait d'une relecture de commentaire ; la cause, d'une mesure.
+  ✅ **Deux trous de journalisation fermés dans la même passe** : `[HAZARD]` n'a jamais porté son
+  segment `[MODELS:]` depuis sa création (`units_cache` est clé par CHAÎNE, le payload pose un
+  `int`, le lookup échouait en silence) — donc aucune blessure mortelle ne repositionnait
+  l'escouade chez le lecteur du journal ; et le renoncement du contrôle de portée est désormais
+  COMPTÉ (`shoot_range_unverifiable`), ce qui ferme le résidu V9 d'`analyzer_couverture.md`.
+  Verrouillé par 3 fichiers de test créés et 2 retournés/étendus ; les 5 correctifs ont subi
+  l'épreuve de la panne réintroduite, une à une : les 5 rendent rouge.
   Le rapport annonçait 370 erreurs sur le run du 2026-08-11 ; le nettoyage de l'outil de mesure
   (livré le même jour, cf. plus bas) en a supprimé 317 qui étaient des faux positifs de lecture.
   **Ce qui reste n'est plus imputable à l'analyzer** et désigne des règles appliquées de travers
@@ -735,8 +757,8 @@ Prêts à démarrer sans décision produit :
   |---|---|---|---|
   | ~~Attaques au-delà de CC_NB~~ **→ 0, LIVRÉ (voir ci-dessous)** | ~~11~~ | ~~13~~ | 04.03 |
   | Collisions (2 unités, même hex) | 7 (total) | | 03.01 |
-  | Fall-back qui finit ENGAGÉ | 2 | 3 | 09.07 |
-  | Move normal finissant au contact | 1 | 4 | 09.05 |
+  | ~~Fall-back qui finit ENGAGÉ~~ **→ 0, LIVRÉ (empreinte d'escouade)** | ~~2~~ | ~~3~~ | 09.07 |
+  | ~~Move normal finissant au contact~~ **→ 0, LIVRÉ (empreinte d'escouade)** | ~~1~~ | ~~4~~ | 09.05 |
   | ~~Tirs hors portée~~ **→ 0, ARTEFACTS (voir ci-dessous)** | ~~2~~ | ~~3~~ | 10 Shooting |
   | ~~Tir engagé visant une unité NON engagée avec le tireur~~ **→ 0, ARTEFACTS (voir ci-dessus)** | ~~0~~ | ~~3~~ | 10.06 |
   | Move normal PARTI d'un engagement | 0 | 2 | 09.05 |
