@@ -83,25 +83,21 @@ TESTS — QUI LANCE QUOI (NON NÉGOCIABLE) :
    python3 -m pytest tests/integration/pvp/ -q -n 6 --dist load ; pyright ;
    p ai/hidden_action_finder.py ; p scripts/check_ai_rules.py ; npx biome check frontend/src ;
    (cd frontend && npx tsc --noEmit -p tsconfig.app.json)`
-- PAR DÉFAUT, UN AGENT NE LA LANCE JAMAIS, sous aucune de ses formes. Le hook
-  `.claude/hooks/deny-verif-large.sh` REFUSE la commande — inutile de chercher la formulation
-  qui passerait : il voit la ligne entière, et il couvre les sept briques de la vérification.
-- DÉLÉGATION PONCTUELLE — seule exception. L'utilisateur peut confier cette vérification à
-  l'agent, et seulement ainsi :
-  * l'autorisation doit être EXPLICITE et porter sur les tests, dans le PROMPT COURANT ;
-  * elle vaut pour ce prompt SEUL. Elle ne se reconduit pas au prompt suivant, ne se déduit
-    d'aucun contexte, d'aucun mode (AGENT/AUTO/NUIT), d'aucune tâche « qui aurait besoin » de
-    la suite, ni d'une autorisation donnée plus tôt dans la même session ;
-  * elle se retire en ne la redonnant pas. Aucune formule de retrait n'est nécessaire ;
-  * en cas de doute sur l'existence de l'autorisation : elle n'existe pas. DEMANDER.
-  Quand — et seulement quand — elle est donnée, l'agent ajoute en FIN de ligne de commande le
-  marqueur `# VERIF-LARGE-AUTORISEE`, qui ouvre la porte de sortie du hook. Ajouter ce marqueur
-  sans autorisation du prompt courant est une faute grave, au même titre qu'un contournement.
+- UN AGENT NE LA LANCE JAMAIS, sous aucune de ses formes, dans AUCUN mode. Il n'existe AUCUNE
+  exception, AUCUNE délégation, AUCUN marqueur, AUCUNE variable d'environnement, AUCUN fichier
+  jeton qui l'autorise — et il est INTERDIT d'en proposer un. Le hook
+  `.claude/hooks/deny-verif-large.sh` REFUSE la commande : il découpe la ligne sur `;`, `&&`, `|`
+  et juge CHAQUE segment, il couvre les sept briques de la vérification, et il n'a plus de porte
+  de sortie (retirée le 2026-08-13,
+  après qu'un agent se soit délivré à lui-même le marqueur qui existait alors). Chercher la
+  formulation qui passerait est un contournement, au même titre que désactiver le hook.
+- Ce qu'un agent peut vérifier : CE QU'IL A TOUCHÉ, rien d'autre. Un agent qui pense avoir besoin
+  de plus se trompe de rôle : il le DIT et s'arrête.
 - Ce qu'un agent DOIT faire dans tous les cas : lancer les FICHIERS de test ciblés qu'il vient
   d'écrire ou de toucher — `pytest tests/unit/engine/test_xxx.py` côté Python, `cd frontend &&
   npx vitest run src/.../xxx.test.ts` côté front —, aussi souvent qu'il veut.
-- Sans autorisation, si une validation large semble nécessaire : LE DIRE à l'utilisateur et
-  s'arrêter là. Ne jamais annoncer « suite verte » sans l'avoir réellement obtenue.
+- Si une validation large semble nécessaire : LE DIRE à l'utilisateur et s'arrêter là.
+  Ne jamais annoncer « suite verte » sans l'avoir réellement obtenue.
 - Outils de conformité (documentés dans Documentation/Code_Compliance/) : `scripts/check_ai_rules.py`
   et `ai/hidden_action_finder.py` font partie de la vérification de l'utilisateur, pas de la tienne.
 
@@ -419,8 +415,8 @@ conclusion, il ne s'y ajoute pas. Ne jamais y répéter ce qui vient d'être dit
   * Enchaînement : `/code-review` sur cette liste → traiter les findings AVEC scénario
     (T4 CAUSE) → relancer `/code-review` si une correction a été appliquée. Dès qu'une passe ne
     rend plus de finding avec scénario, lancer `/simplify`, traiter de même, puis `--vider`.
-  * Cette autorisation ne s'étend à RIEN d'autre : la VÉRIFICATION LARGE reste à l'utilisateur et
-    garde son régime de délégation ponctuelle (cf. §TESTS ci-dessus).
+  * Cette autorisation ne s'étend à RIEN d'autre : la VÉRIFICATION LARGE appartient à
+    l'utilisateur et ne se délègue jamais (cf. §TESTS ci-dessus).
   * Elle se suspend sur demande, pour la tâche en cours (« ne relance pas la review ») : la ligne
     RELIRE est alors écrite sans être exécutée, et le `→` dit qu'elle ne l'a pas été. La liste
     n'est PAS vidée dans ce cas — elle attend le sujet suivant.
