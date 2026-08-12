@@ -10,6 +10,7 @@ import endlessDutyScenarioConfig from "../../../config/scenario_endless_duty.jso
 import unitRulesConfig from "../../../config/unit_rules.json";
 import "../App.css";
 import { getAuthSession } from "../auth/authStorage";
+import { type RawObjective, useNormalizedObjectives } from "../hooks/useBoardHexMemos";
 import {
   type ManualOrderGroup,
   type ManualOrderRequest,
@@ -578,42 +579,12 @@ export const BoardWithAPI: React.FC = () => {
   })();
   const victoryPoints = apiProps.gameState?.victory_points;
   const commandPoints = apiProps.gameState?.command_points;
-  const objectivesOverride = (() => {
-    const objectives = apiProps.gameState?.objectives as
-      | Array<{ name: string; hexes: Array<{ col: number; row: number } | [number, number]> }>
-      | undefined;
-    if (!objectives) {
-      return undefined;
-    }
-    return objectives.map((objective) => {
-      if (!objective?.name) {
-        throw new Error("Objective missing required name field");
-      }
-      if (!objective.hexes) {
-        throw new Error(`Objective ${objective.name} missing required hexes`);
-      }
-      const normalizedHexes = objective.hexes.map((hex) => {
-        if (Array.isArray(hex)) {
-          if (hex.length !== 2) {
-            throw new Error(
-              `Objective ${objective.name} has invalid hex tuple: ${JSON.stringify(hex)}`
-            );
-          }
-          return { col: hex[0], row: hex[1] };
-        }
-        if (typeof hex === "object" && hex !== null && "col" in hex && "row" in hex) {
-          return { col: (hex as { col: number }).col, row: (hex as { row: number }).row };
-        }
-        throw new Error(
-          `Objective ${objective.name} has invalid hex format: ${JSON.stringify(hex)}`
-        );
-      });
-      return {
-        name: objective.name,
-        hexes: normalizedHexes,
-      };
-    });
-  })();
+  // Mémoïsée sur le CHAMP `objectives` (cf. useBoardHexMemos) : ~10 500 hexes sur terrain-mc1, et
+  // ce composant rend à cadence de souris. Sa sortie descend en prop `objectivesOverride` jusqu'aux
+  // dépendances de l'effet de dessin de BoardPvp — une référence neuve y rejouait tout le dessin.
+  const objectivesOverride = useNormalizedObjectives(
+    apiProps.gameState?.objectives as RawObjective[] | undefined
+  );
 
   // Get board configuration for line of sight calculations
   const { gameConfig, boardConfig } = useGameConfig();

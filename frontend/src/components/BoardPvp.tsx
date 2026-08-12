@@ -8,6 +8,7 @@ import {
   orientationStepToRadians,
   wrapOrientationStep,
 } from "../constants/gameConfig";
+import { useEffectiveObjectiveHexes, useWallHexKeySet } from "../hooks/useBoardHexMemos";
 import { useGameConfig } from "../hooks/useGameConfig";
 import { useSingleDoubleClick } from "../hooks/useSingleDoubleClick";
 import { API_BASE, apiFetch } from "../services/apiFetch";
@@ -1570,6 +1571,16 @@ export default function Board({
           : boardConfig?.objective_zones,
     [boardConfig?.objective_zones, objectivesOverride]
   );
+  // Hexes d'objectif APLATIS en couples, la forme que `drawBoard` consomme. Mémoïsés : l'effet de
+  // dessin les reconstruisait à chaque exécution, soit ~10 500 couples neufs par mouvement de
+  // souris dès que l'override est présent (mesuré ~0,15 ms/rendu).
+  const effectiveObjectiveHexes = useEffectiveObjectiveHexes(
+    objectivesOverride,
+    boardConfig?.objective_hexes
+  );
+  // `Set` des murs lu par la branche de glisser du déploiement. Mémoïsé sur `wall_hexes` ET sa
+  // longueur — l'effet de dessin complète ce tableau EN PLACE (cf. useBoardHexMemos).
+  const wallHexKeySetForDrag = useWallHexKeySet(boardConfig?.wall_hexes);
   // Contrôle d'objectif (terrain colouring) : suit l'état backend faisant autorité
   // game_state.objective_controllers (règle 14.02), indexé par id d'objectif et rafraîchi par le
   // moteur à chaque frontière phase/tour configurée (game_config.objective_control_check). On le
@@ -9285,18 +9296,8 @@ export default function Board({
 
     // ✅ DRAW BOARD ONCE with populated availableCells
     // Override wall_hexes if wallHexesOverride is provided (for replay mode)
-    // Override objective_hexes if objectivesOverride is provided (for replay mode)
-    // Convert grouped objectives format to flat hex list for BoardDisplay
-    let effectiveObjectiveHexes: [number, number][] = boardConfig.objective_hexes || [];
-    if (objectivesOverride && objectivesOverride.length > 0) {
-      // Flatten grouped objectives: [{name, hexes: [{col,row}]}] -> [[col,row], ...]
-      effectiveObjectiveHexes = [];
-      for (const obj of objectivesOverride) {
-        for (const hex of obj.hexes) {
-          effectiveObjectiveHexes.push([hex.col, hex.row]);
-        }
-      }
-    }
+    // (`effectiveObjectiveHexes` — objective_hexes surchargés par l'override — est mémoïsé
+    // au-dessus : ~10 500 couples, et cet effet se réexécute à cadence de souris.)
 
     // Type assertion for boardConfig to match UnitRenderer's expected type
     const boardConfigForRender = boardConfig as unknown as Record<string, unknown> | null;
@@ -11250,7 +11251,6 @@ export default function Board({
       }
 
       const selectedUnit = units.find((u) => u.id === selectedUnitId);
-      const wallSet = new Set((boardConfig.wall_hexes ?? []).map(([c, r]) => `${c},${r}`));
       const occupiedSet = buildOccupiedSet(
         units.map((u) => ({
           id: u.id,
@@ -11367,7 +11367,7 @@ export default function Board({
         const sizeDrag = resolveBaseSizeForUnitDisplay(selectedUnit);
         const fp = computeOccupiedHexes(hex.col, hex.row, "round", sizeDrag);
         const inBounds = isFootprintInBounds(fp, BOARD_COLS, BOARD_ROWS);
-        const onWall = isFootprintOnWall(fp, wallSet);
+        const onWall = isFootprintOnWall(fp, wallHexKeySetForDrag);
         const overlapping = isFootprintOverlapping(fp, occupiedSet);
         const inPool = deployPool ? isFootprintInDeployPool(fp, deployPool) : true;
         const valid = inBounds && !onWall && !overlapping && inPool;
@@ -11389,7 +11389,7 @@ export default function Board({
         const sizeUp = resolveBaseSizeForUnitDisplay(selectedUnit);
         const fp = computeOccupiedHexes(hex.col, hex.row, "round", sizeUp);
         const inBounds = isFootprintInBounds(fp, BOARD_COLS, BOARD_ROWS);
-        const onWall = isFootprintOnWall(fp, wallSet);
+        const onWall = isFootprintOnWall(fp, wallHexKeySetForDrag);
         const overlapping = isFootprintOverlapping(fp, occupiedSet);
         const inPool = deployPool ? isFootprintInDeployPool(fp, deployPool) : true;
         const valid = inBounds && !onWall && !overlapping && inPool;
@@ -11616,6 +11616,8 @@ export default function Board({
     objectiveControlKeyForBoard,
     objectiveZonesGeomKey,
     effectiveObjectiveZones,
+    effectiveObjectiveHexes,
+    wallHexKeySetForDrag,
     squadMovePlan,
     fleePreviewUnitId,
     squadMoveModelPoolRef,
