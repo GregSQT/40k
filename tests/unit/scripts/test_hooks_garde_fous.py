@@ -63,12 +63,15 @@ def _tool_result() -> dict:
     }
 
 
-def _edit(path: str, *, sidechain: bool = False) -> dict:
+def _edit(path: str, *, sidechain: bool = False, nom: str = "Edit", cle: str = "file_path") -> dict:
+    """Entrée de transcript pour une édition. `nom`/`cle` : `EDIT_TOOLS` en compte quatre, et
+    `NotebookEdit` nomme son argument `notebook_path` — une seule fabrique pour toutes les formes.
+    """
     entry = {
         "type": "assistant",
         "message": {
             "role": "assistant",
-            "content": [{"type": "tool_use", "name": "Edit", "input": {"file_path": path}}],
+            "content": [{"type": "tool_use", "name": nom, "input": {cle: path}}],
         },
     }
     if sidechain:
@@ -359,7 +362,7 @@ def test_couverture_est_exigee_des_qu_un_fichier_de_code_bouge(tmp_path: Path) -
 
 
 def test_couverture_n_est_pas_exigee_sur_une_modification_de_doc(tmp_path: Path) -> None:
-    """Même condition que RELIRE : aucun code n'a bougé, donc aucun test n'est dû.
+    """Ni COUVERTURE ni RELIRE : aucun code n'a bougé, donc aucun test et aucune passe ne sont dus.
 
     Sur une doc ORDINAIRE : CLAUDE.md, lui, pilote le hook et compte comme du code (voir
     `test_modifier_claude_md_engage_couverture_et_relire`).
@@ -466,17 +469,20 @@ def test_une_commande_vraiment_absente_ne_recoit_pas_un_diagnostic_de_fence(
     assert avec_prompt == seul
 
 
-def test_un_vrai_relatif_ne_recoit_pas_le_conseil_de_citer(tmp_path: Path) -> None:
+def test_le_diagnostic_couvre_les_deux_lectures_d_un_fragment_relatif(tmp_path: Path) -> None:
     """`/code-review /abs/x.py engine` : `engine` EST le défaut du 2026-08-08, pas un fragment.
 
-    L'indice « cite ton chemin » y envoyait écrire `'engine'`, refusé pareillement : conseil faux
-    sur un défaut réel. Il ne se donne que si recoller les morceaux DÉSIGNE un fichier existant.
+    Un message qui ne conseillerait QUE de citer enverrait écrire `'engine'`, refusé pareillement.
+    Rien ne distingue les deux lectures dans le texte du rapport — la version d'avant les triait en
+    SONDANT le disque, ce qui faisait dépendre le diagnostic de l'état de la machine. Donc le
+    message porte les deux issues, et il est vrai dans les deux cas.
     """
     relatif = RAPPORT_CONFORME.replace(
         "/code-review /home/greg/40k/engine/x.py", "/code-review /home/greg/40k/engine/x.py engine"
     )
     contexte = _rapport(tmp_path, _user("corrige"), _edit("engine/x.py"), _say(relatif))
-    assert contexte is not None and "ABSOLUS" in contexte and "se CITE" not in contexte
+    assert contexte is not None and "ABSOLUS" in contexte
+    assert "ESPACE, CITE-le" in contexte and "Sinon écris-le en absolu" in contexte
 
 
 def test_un_prompt_copiable_n_est_pas_pris_pour_le_bloc_relire(tmp_path: Path) -> None:
@@ -605,7 +611,7 @@ def test_un_chemin_a_espace_ECRIT_NU_est_refuse_avec_le_moyen_de_le_corriger(
     assert contexte is not None and "ABSOLUS" in contexte
     # Le libellé EXACT du hook : `"CITE" in contexte.upper()` était satisfait par le mot
     # « explicite » de n'importe quel autre diagnostic, donc l'assertion ne regardait rien.
-    assert "ESPACE se CITE" in contexte
+    assert "ESPACE, CITE-le" in contexte
 
 
 def test_un_repertoire_relatif_est_refuse_comme_un_fichier(tmp_path: Path) -> None:
@@ -613,12 +619,6 @@ def test_un_repertoire_relatif_est_refuse_comme_un_fichier(tmp_path: Path) -> No
     dossier = RAPPORT_CONFORME.replace("/home/greg/40k/engine/x.py", "engine")
     contexte = _rapport(tmp_path, _user("corrige"), _edit("engine/x.py"), _say(dossier))
     assert contexte is not None and "ABSOLUS" in contexte
-
-
-def test_modification_de_doc_seule_n_exige_pas_relire(tmp_path: Path) -> None:
-    doc = "Fait.\n\nLU : CLAUDE.md en entier\nJUMEAU : grep -c foo -> 0 hit\n"
-    assert _rapport(tmp_path, _user("corrige la doc"), _edit("Documentation/x.md"),
-                    _say(doc)) is None
 
 
 def test_modification_de_doc_exige_quand_meme_lu_et_jumeau(tmp_path: Path) -> None:
@@ -631,19 +631,7 @@ def test_un_tour_qui_n_edite_qu_un_notebook_doit_quand_meme_son_rapport(tmp_path
 
     Un tour vu comme sans modification ne se fait réclamer AUCUNE section — ni LU, ni JUMEAU.
     """
-    carnet = {
-        "type": "assistant",
-        "message": {
-            "role": "assistant",
-            "content": [
-                {
-                    "type": "tool_use",
-                    "name": "NotebookEdit",
-                    "input": {"notebook_path": "ai/explore.ipynb"},
-                }
-            ],
-        },
-    }
+    carnet = _edit("ai/explore.ipynb", nom="NotebookEdit", cle="notebook_path")
     contexte = _rapport(tmp_path, _user("corrige le carnet"), carnet, _say("c'est corrigé."))
     assert contexte is not None and "LU" in contexte
 
@@ -729,27 +717,37 @@ CLAUDE_MD_MINIMAL = (
 
 
 def _bac(tmp_path: Path, claude_md: str = CLAUDE_MD_MINIMAL) -> Path:
-    """Copie des deux hooks dans un faux dépôt : la vraie liste de session ne doit pas bouger.
+    """Le bac de `_hook_isole`, plus le hook de liste : la vraie liste de session ne doit pas bouger.
 
     `relire-en-attente.sh` lit ce qui compte comme du code DANS son voisin, qui le lit dans
-    CLAUDE.md : le bac reproduit donc les trois pièces, sinon on ne teste pas le vrai chemin.
+    CLAUDE.md : les trois pièces sont donc nécessaires pour emprunter le vrai chemin. La disposition
+    du bac vient de `_hook_isole` et n'est pas recopiée ici — sinon le jour où un hook lit un
+    quatrième fichier, un seul des deux bacs est mis à jour et l'autre reste vert à vide.
     """
-    hooks = tmp_path / ".claude" / "hooks"
-    hooks.mkdir(parents=True)
-    shutil.copy(H_ATTENTE, hooks / H_ATTENTE.name)
-    shutil.copy(H_RAPPORT, hooks / H_RAPPORT.name)
-    (tmp_path / "CLAUDE.md").write_text(claude_md, encoding="utf-8")
-    return hooks / H_ATTENTE.name
+    voisin = _hook_isole(tmp_path, claude_md)
+    shutil.copy(H_ATTENTE, voisin.parent / H_ATTENTE.name)
+    return voisin.parent / H_ATTENTE.name
 
 
-def _edite(hook: Path, chemin: str, session: str = S1, cwd: Path | None = None) -> str:
+def _edite(
+    hook: Path,
+    chemin: str,
+    session: str | None = S1,
+    cwd: Path | None = None,
+    cle: str = "file_path",
+) -> str:
     """Rejoue un PostToolUse d'édition. Rend ce que le hook a écrit sur stdout.
 
-    `cwd` compte : un chemin RELATIF dans le payload ne se résout que par rapport à lui.
+    `cwd` compte : un chemin RELATIF dans le payload ne se résout que par rapport à lui. `session`
+    à `None` construit un payload SANS `session_id`, et `cle` couvre `notebook_path` : le payload
+    du hook a déjà changé une fois, une seule fabrique évite de propager la prochaine à la main.
     """
+    payload = {"tool_input": {cle: chemin}}
+    if session is not None:
+        payload["session_id"] = session
     proc = subprocess.run(
         [str(hook)],
-        input=json.dumps({"session_id": session, "tool_input": {"file_path": chemin}}),
+        input=json.dumps(payload),
         capture_output=True,
         text=True,
         check=True,
@@ -938,7 +936,7 @@ def test_le_message_de_liste_vide_ne_compte_pas_ses_propres_fichiers(tmp_path: P
     _en_attente(hook)
     _cmd(hook, "--vider", S1)
     _edite(hook, str(tmp_path / "engine" / "y.py"), session=S2)
-    (tmp_path / ".claude" / "relire-en-attente" / f"{S1}.txt").write_text("", encoding="utf-8")
+    _fichier_liste(tmp_path).write_text("", encoding="utf-8")
     assert "1 autre(s) session(s)" in _cmd(hook, "--liste", S1).stderr
 
 
@@ -1045,6 +1043,21 @@ def test_une_liste_ecrite_par_une_version_anterieure_est_reparee_a_la_lecture(
     ]
 
 
+def test_une_entree_qui_n_est_plus_du_code_sort_de_la_liste_a_la_lecture(tmp_path: Path) -> None:
+    """La lecture applique le prédicat ENTIER, pas sa seule moitié « dans le dépôt ».
+
+    Sinon retirer un suffixe de CLAUDE.md laisse indéfiniment des entrées non-code dans les listes
+    déjà écrites — et `--liste` les rend au bloc RELIRE, qui part relire ce qui n'est plus du code.
+    """
+    hook = _bac(tmp_path, "SECTIONS EXIGÉES : `LU`=toujours\nFICHIERS COMPTÉS COMME CODE : `.py`\n")
+    liste = _fichier_liste(tmp_path)
+    liste.parent.mkdir(parents=True)
+    liste.write_text(
+        f"{tmp_path / 'engine' / 'x.py'}\n{tmp_path / 'scripts' / 'vieux.sh'}\n", encoding="utf-8"
+    )
+    assert _en_attente(hook) == [str(tmp_path / "engine" / "x.py")]
+
+
 def test_doublon_arrive_par_concurrence_est_gomme_a_la_lecture(tmp_path: Path) -> None:
     """Deux éditions du même fichier dans un message = deux processus qui lisent la même liste.
 
@@ -1059,21 +1072,26 @@ def test_doublon_arrive_par_concurrence_est_gomme_a_la_lecture(tmp_path: Path) -
 
 
 @pytest.mark.parametrize("hook_teste", ["attente", "rapport"])
-def test_flag_inconnu_echoue(tmp_path: Path, hook_teste: str) -> None:
+@pytest.mark.parametrize("argument", ["--list", S1])
+def test_flag_inconnu_echoue(tmp_path: Path, hook_teste: str, argument: str) -> None:
     """Sans ça, `--list` tombait dans le chemin de hook : rc=0, stdout vide, aucun signe.
 
-    Les deux hooks, parce qu'ils ont tous deux une interface en ligne de commande pour les tests et
-    pour l'agent : le défaut a été trouvé sur l'un puis retrouvé tel quel sur l'autre.
+    Deux formes, une seule ligne de code : le flag mal tapé et le session_id passé SANS son flag
+    (`relire-en-attente.sh <uuid>`, qui rendait « rien à relire » sur une liste pleine). Et les deux
+    hooks, parce qu'ils ont tous deux une CLI : le défaut a été trouvé sur l'un puis sur l'autre.
     """
     hook = _bac(tmp_path)
     if hook_teste == "rapport":
         hook = hook.parent / H_RAPPORT.name
-    proc = _cmd(hook, "--list")
+    proc = _cmd(hook, argument)
     assert proc.returncode != 0 and "flag inconnu" in proc.stderr
 
 
+@pytest.mark.parametrize("id_donne", ["", "AILLEURS"])
 @pytest.mark.parametrize("commande", ["--liste", "--vider"])
-def test_session_id_omis_refuse_au_lieu_de_deviner(tmp_path: Path, commande: str) -> None:
+def test_un_id_non_conforme_refuse_au_lieu_de_deviner(
+    tmp_path: Path, commande: str, id_donne: str
+) -> None:
     """Une seule liste présente NE prouve PAS qu'elle est la nôtre.
 
     Mesuré le 2026-08-12 : une session qui n'avait rien édité récupérait puis EFFAÇAIT la liste de
@@ -1081,8 +1099,11 @@ def test_session_id_omis_refuse_au_lieu_de_deviner(tmp_path: Path, commande: str
     """
     hook = _bac(tmp_path)
     _edite(hook, str(tmp_path / "engine" / "x.py"), session=S2)
-    proc = _cmd(hook, commande)
-    assert proc.returncode != 0 and "session_id" in proc.stderr
+    # `""` = id omis ; `AILLEURS` = un id qui n'a pas la forme d'un UUID (un chemin, par exemple,
+    # sortirait du dossier des listes). Les deux échouent sur le même contrôle de forme.
+    donne = str(tmp_path / "ailleurs") if id_donne == "AILLEURS" else id_donne
+    proc = _cmd(hook, commande, *( [donne] if donne else [] ))
+    assert proc.returncode != 0 and ("session_id" in proc.stderr or "invalide" in proc.stderr)
     assert _en_attente(hook, S2) == [str(tmp_path / "engine" / "x.py")]
 
 
@@ -1108,13 +1129,6 @@ def test_un_id_non_conforme_est_refuse_a_l_ecriture_aussi(tmp_path: Path, mauvai
     assert not (tmp_path / ".claude" / "relire-en-attente").exists()
 
 
-def test_session_id_qui_est_un_chemin_est_refuse(tmp_path: Path) -> None:
-    """L'id nomme un fichier : un chemin le ferait sortir du dossier des listes."""
-    hook = _bac(tmp_path)
-    proc = _cmd(hook, "--liste", str(tmp_path / "ailleurs"))
-    assert proc.returncode != 0 and "invalide" in proc.stderr
-
-
 def test_une_edition_de_notebook_entre_aussi_dans_la_liste(tmp_path: Path) -> None:
     """`NotebookEdit` nomme son argument `notebook_path` : la brancher sur `file_path` la perdait."""
     hook = _bac(
@@ -1122,28 +1136,15 @@ def test_une_edition_de_notebook_entre_aussi_dans_la_liste(tmp_path: Path) -> No
         "SECTIONS EXIGÉES : `LU`=toujours, `RELIRE`=code\nFICHIERS COMPTÉS COMME CODE : `.ipynb`\n",
     )
     carnet = tmp_path / "ai" / "explore.ipynb"
-    proc = subprocess.run(
-        [str(hook)],
-        input=json.dumps({"session_id": S1, "tool_input": {"notebook_path": str(carnet)}}),
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    assert proc.stdout == ""
+    assert _edite(hook, str(carnet), cle="notebook_path") == ""
     assert _en_attente(hook) == [str(carnet)]
 
 
 def test_session_id_absent_du_payload_est_signale_et_non_ignore(tmp_path: Path) -> None:
     """Se taire laisserait croire la relecture à jour avec une liste vide (T1)."""
     hook = _bac(tmp_path)
-    proc = subprocess.run(
-        [str(hook)],
-        input=json.dumps({"tool_input": {"file_path": str(tmp_path / "engine" / "x.py")}}),
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    contexte = json.loads(proc.stdout)["hookSpecificOutput"]["additionalContext"]
+    sortie = _edite(hook, str(tmp_path / "engine" / "x.py"), session=None)
+    contexte = json.loads(sortie)["hookSpecificOutput"]["additionalContext"]
     assert "ne peut pas être tenue" in contexte
 
 
@@ -1173,8 +1174,7 @@ def test_ordre_des_deux_lignes_declaratives_est_indifferent(tmp_path: Path) -> N
     _edite(hook, str(tmp_path / "engine" / "x.py"))
     assert _en_attente(hook) == [str(tmp_path / "engine" / "x.py")]
     # Vérifié sur le CONTENU, pas sur un rc=0 : un `config()` entièrement cassé sortirait 0 aussi.
-    voisin = hook.parent / H_RAPPORT.name
-    cfg = json.loads(_cmd(voisin, "--config").stdout)
+    cfg = _config(hook.parent / H_RAPPORT.name)
     assert cfg["sections"] == [["LU", "toujours"], ["RELIRE", "code"]]
     assert cfg["code_suffixes"] == [".py"] and cfg["code_basenames"] == ["CLAUDE.md"]
 

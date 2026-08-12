@@ -49,20 +49,17 @@ EDIT_TOOLS = {"Edit", "Write", "NotebookEdit", "MultiEdit"}
 
 # Ce que `/code-review` et `/simplify` acceptent en plus des chemins : niveaux d'effort et options.
 # Un numéro de PR est reconnu à part (chiffres seuls). Tout le reste est un chemin, donc à vérifier.
-ARGS_NON_CHEMIN = {
-    "low", "medium", "high", "xhigh", "max", "ultra",
-    "--fix", "--comment", "--post", "--no-post",
-}
+ARGS_NON_CHEMIN = {"low", "medium", "high", "xhigh", "max", "ultra"}
 
 RACINE = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
-CLAUDE_MD = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "CLAUDE.md")
+CLAUDE_MD = os.path.join(RACINE, "CLAUDE.md")
 LIGNE_SECTIONS = re.compile(r"^\s*SECTIONS EXIGÉES\s*:\s*(.+)$", re.MULTILINE)
 ITEM_SECTION = re.compile(r"`([A-ZÉÈÀÂÎÔÛÇ]+)`\s*=\s*(toujours|code)")
 LIGNE_CODE = re.compile(r"^\s*FICHIERS COMPTÉS COMME CODE\s*:\s*(.+)$", re.MULTILINE)
 ITEM_CODE = re.compile(r"`([^`\s]+)`")
 # Une fence markdown : au moins trois backticks, puis l'éventuel langage. Les deux groupes servent
 # à distinguer une OUVERTURE (```python) d'une FERMETURE (``` seule, aussi large que l'ouverture).
-FENCE = re.compile(r"^(`{3,})(.*)$")
+FENCE = re.compile(r"^\s*(`{3,})(.*)$")
 
 
 def _items(texte, ligne_motif, item_motif, etiquette, claude_md):
@@ -74,10 +71,7 @@ def _items(texte, ligne_motif, item_motif, etiquette, claude_md):
     indistinguable d'un tour conforme (T1), donc on préfère l'erreur bruyante.
 
     Chaque morceau séparé par une virgule doit correspondre ENTIÈREMENT à un item : ni résidu, ni
-    virgule finale, ni entrée collée à sa voisine. Reste le repli non ponctué, que rien sur la
-    ligne ne trahit : on regarde si la ligne IMMÉDIATEMENT suivante commence par un item. Borné
-    là EXPRÈS — balayer tout le fichier ferait mourir le hook sur une mention illustrative écrite
-    ailleurs dans CLAUDE.md, avec en prime un diagnostic faux.
+    virgule finale, ni entrée collée à sa voisine. Le repli non ponctué est traité à part, plus bas.
     """
     lignes = list(ligne_motif.finditer(texte))
     if not lignes:
@@ -99,13 +93,12 @@ def _items(texte, ligne_motif, item_motif, etiquette, claude_md):
         if not reconnu:
             raise ValueError(f"entrée non reconnue dans `{etiquette} :` : {morceau!r}")
         items.append(reconnu.groups())
-    # Un repli COMMENCE par un item, donc par un backtick : c'est ce qui le distingue d'une ligne
-    # voisine qui en cite un (l'autre ligne déclarative, une glose entre parenthèses, une puce).
-    # Chercher un item n'importe où sur la ligne suivante suffisait à faire mourir les deux
-    # garde-fous sur un CLAUDE.md conforme, selon l'ordre où ses lignes sont écrites.
-    # Deux amorces possibles pour une continuation : l'item lui-même (backtick) ou la virgule qui le
-    # relie au précédent. Une prose qui CITE un item sans commencer par l'un des deux n'en est pas
-    # une, et rien ne permet de l'en distinguer — c'est la limite assumée de ce contrôle.
+    # REPLI : une continuation commence par l'item lui-même (backtick) ou par la virgule qui le
+    # relie au précédent — deux amorces, et rien d'autre. Contrôle borné à la ligne IMMÉDIATEMENT
+    # suivante ; chercher un item plus loin, ou n'importe où sur cette ligne, faisait mourir les
+    # DEUX garde-fous sur un CLAUDE.md conforme dès qu'une ligne voisine citait un item (l'autre
+    # ligne déclarative, une glose entre parenthèses, une puce). Limite assumée : une prose qui cite
+    # un item sans commencer par l'une des deux amorces est indistinguable d'un repli.
     suivante = [
         ln for ln in texte[ligne.end():].split("\n")[1:2] if ln.lstrip()[:1] in ("`", ",")
     ]
@@ -139,6 +132,17 @@ def config(claude_md=CLAUDE_MD):
     }
 
 
+def absolu(chemin):
+    """Chemin résolu depuis la RACINE, jamais depuis le cwd.
+
+    Résolution UNIQUE, partagée par les deux hooks : dans un transcript comme dans une liste, un
+    chemin relatif a été écrit relativement au dépôt. La version d'avant en avait deux — le cwd
+    pour ce qui s'écrivait, la racine pour ce qui se relisait — donc une édition validée pouvait
+    s'enregistrer sous une forme que la relecture refiltrait, et disparaître sans un mot.
+    """
+    return os.path.normpath(chemin if os.path.isabs(chemin) else os.path.join(RACINE, chemin))
+
+
 def dans_le_depot(chemin):
     """Vrai si le fichier appartient au dépôt — worktrees inclus, ils vivent sous `.claude/`.
 
@@ -146,10 +150,22 @@ def dans_le_depot(chemin):
     doivent s'accorder sur ce qui est du travail livrable, sinon l'un réclame une relecture que
     l'autre refuse d'inscrire dans sa liste.
     """
-    # Un chemin relatif est résolu depuis la RACINE, pas depuis le cwd : dans un transcript comme
-    # dans une liste, il a été écrit relativement au dépôt, et le cwd du contrôle n'a rien à y voir.
-    absolu = chemin if os.path.isabs(chemin) else os.path.join(RACINE, chemin)
-    return os.path.normpath(absolu).startswith(RACINE + os.sep)
+    return absolu(chemin).startswith(RACINE + os.sep)
+
+
+def est_du_code(chemin, cfg):
+    """Vrai si ce fichier engage une relecture : dans le dépôt, ET déclaré comme du code.
+
+    Défini ICI, comme `dans_le_depot`, et appelé par les DEUX hooks. La liste venait déjà de
+    CLAUDE.md, mais le prédicat était réécrit de chaque côté — donc toute règle non exprimable en
+    suffixe (un glob, une casse, un chemin partiel) se serait ajoutée à un seul, et l'un aurait
+    réclamé RELIRE pour un fichier que l'autre n'inscrit jamais dans sa liste. C'est le motif
+    jumeau que l'en-tête de `relire-en-attente.sh` dit fermer.
+    """
+    return dans_le_depot(chemin) and (
+        chemin.endswith(tuple(cfg["code_suffixes"]))
+        or os.path.basename(chemin) in cfg["code_basenames"]
+    )
 
 
 def blocks(entry):
@@ -177,13 +193,13 @@ def is_real_user_prompt(entry):
     return not any(b.get("type") == "tool_result" for b in bs)
 
 
-def read_turns(path):
-    """Découpe le transcript en tours : [(fichiers modifiés, dernier texte assistant), ...].
+def entrees(path):
+    """Entrées du transcript, une par une, sans jamais toutes les tenir en mémoire.
 
-    Le DERNIER texte et non le premier : les textes intermédiaires d'un tour ne sont pas son
-    rapport, et c'est en les confondant avec lui qu'un contrôle branché sur Stop se trompe.
+    Mesuré le 2026-08-12 : le plus gros transcript de ce dépôt pèse 13,8 Mo et une seule de ses
+    lignes 1,2 Mo. En construire la liste coûtait +19 Mo de crête pour ne garder, in fine, que le
+    dernier tour. Un générateur rend le même découpage à mémoire constante.
     """
-    entries = []
     with open(path, encoding="utf-8") as fh:
         for line in fh:
             line = line.strip()
@@ -196,10 +212,17 @@ def read_turns(path):
             # Les sous-agents écrivent dans le même transcript : leurs éditions et leurs messages
             # ne sont pas le rapport du tour principal.
             if isinstance(entry, dict) and not entry.get("isSidechain"):
-                entries.append(entry)
+                yield entry
 
+
+def read_turns(path):
+    """Découpe le transcript en tours : [(fichiers modifiés, dernier texte assistant), ...].
+
+    Le DERNIER texte et non le premier : les textes intermédiaires d'un tour ne sont pas son
+    rapport, et c'est en les confondant avec lui qu'un contrôle branché sur Stop se trompe.
+    """
     turns, edited, last_text = [], [], ""
-    for entry in entries:
+    for entry in entrees(path):
         if is_real_user_prompt(entry):
             turns.append((edited, last_text))
             edited, last_text = [], ""
@@ -237,7 +260,7 @@ def hors_bloc_de_code(lines):
     """
     dehors, ouverture, largeur = [], None, 0
     for numero, ln in enumerate(lines, start=1):
-        fence = FENCE.match(ln.lstrip())
+        fence = FENCE.match(ln)
         if fence:
             if ouverture is None:
                 ouverture, largeur = numero, len(fence.group(1))
@@ -314,9 +337,12 @@ def relire_faults(lines):
     # relatif se résolvait sur la copie du worktree, c'est-à-dire le défaut du 2026-08-08 intact.
     # Où l'on est n'est pas observable ici ; l'absolu est juste partout, donc on l'exige partout.
     for ln in cmd_lines:
-        # Tout argument est un chemin SAUF ce que ces commandes acceptent d'autre — liste fermée,
-        # donc décidable. Trier « ça ressemble à un chemin » ne l'est pas : `engine` (un répertoire
-        # relatif, sans point ni slash) passait, et le défaut du 2026-08-08 restait ouvert.
+        # Tout argument est un chemin SAUF une OPTION (elle commence par `-`, décidable et ouvert :
+        # les flags de `/code-review` suivent un contrat qui ne vit pas dans ce dépôt, donc les
+        # énumérer aurait fait réclamer « chemin relatif » sur le prochain flag ajouté) et SAUF les
+        # mots nus qu'acceptent ces commandes — niveaux d'effort et numéro de PR, liste stable.
+        # Trier « ça ressemble à un chemin » n'est PAS décidable : `engine` (un répertoire relatif,
+        # sans point ni slash) passait, et le défaut du 2026-08-08 restait ouvert.
         # Découpage qui HONORE les guillemets : un chemin contenant une espace existe dans ce dépôt
         # (`shared/gameLogStructure - save.ts`), et sa SEULE forme acceptable est CITÉE — simples ou
         # doubles, c'est aussi ce que rend `relire-en-attente.sh --liste` (shlex.quote), donc l'agent
@@ -328,28 +354,21 @@ def relire_faults(lines):
             arguments = shlex.split(ln)[1:]
         except ValueError:  # guillemets non fermés : on ne devine pas, on lit les mots
             arguments = ln.split()[1:]
-        chemins = [a for a in arguments if a not in ARGS_NON_CHEMIN and not a.isdigit()]
+        chemins = [
+            a for a in arguments
+            if not a.startswith("-") and a not in ARGS_NON_CHEMIN and not a.isdigit()
+        ]
         relatifs = [a for a in chemins if not a.startswith("/")]
         if relatifs:
-            # Un fragment relatif QUI SUIT un chemin absolu, c'est presque toujours un chemin à
-            # espace écrit nu : sans cette phrase, le diagnostic rendu est « ABSOLUS — vu : -,
-            # save.ts », qui ne dit rien de la façon d'y remédier. Indice seulement, jamais un
-            # verdict : le refus reste le même dans les deux lectures.
-            # MESURÉ, pas deviné : on recolle les fragments au chemin absolu qui précède et on
-            # regarde si ça DÉSIGNE un fichier. Le compte des fragments ne tranchait rien — il
-            # donnait l'indice « cite ton chemin » sur `/code-review /abs/x.py engine`, où `engine`
-            # est un vrai répertoire relatif, donc le défaut du 2026-08-08 lui-même.
-            morcele = chemins[0].startswith("/") and os.path.exists(" ".join(chemins))
+            # Un message VRAI dans les deux lectures — c'est le principe du fichier, et le sonder
+            # le système de fichiers pour choisir entre deux libellés l'enfreignait : le même
+            # rapport rendait deux diagnostics selon qu'un fichier existait encore.
             faults.append(
                 "tous les chemins du bloc RELIRE doivent être ABSOLUS — vu : "
                 + ", ".join(relatifs[:3])
-                + " (le verdict d'une passe se met sur la ligne `→`, pas sur la commande)"
-                + (
-                    " ; un chemin contenant une ESPACE se CITE ('…' ou \"…\"), sinon il se coupe "
-                    "en fragments relatifs — c'est la forme que rend `relire-en-attente.sh --liste`"
-                    if morcele
-                    else ""
-                )
+                + ". Si l'un de ces morceaux appartient à un chemin contenant une ESPACE, CITE-le "
+                "('…' ou \"…\") : c'est la forme que rend `relire-en-attente.sh --liste`. Sinon "
+                "écris-le en absolu. Le verdict d'une passe se met sur la ligne `→`, pas ici."
             )
             break
     return faults
@@ -360,15 +379,11 @@ def faults_of(turn, cfg):
     edited, report = turn
     if not edited:
         return []  # tour de lecture, d'analyse ou de discussion : aucun rapport n'est dû
-    # `dans_le_depot` compte autant que le suffixe : un script de sonde jetable écrit dans le
-    # scratchpad est du `.py` mais ne sera pas livré. Sans ce filtre, RELIRE était réclamée pour lui
-    # alors que `relire-en-attente.sh` l'exclut de sa liste — les deux hooks se contredisaient sur
-    # tout tour qui instrumente quelque chose.
-    du_code = any(
-        dans_le_depot(f)
-        and (f.endswith(tuple(cfg["code_suffixes"])) or os.path.basename(f) in cfg["code_basenames"])
-        for f in edited
-    )
+    # `est_du_code` porte les DEUX conditions (dans le dépôt, et déclaré comme code) et sert aussi
+    # au hook voisin : un script de sonde jetable du scratchpad est du `.py` mais ne sera pas livré,
+    # et sans cette condition RELIRE était réclamée pour un fichier que l'autre hook n'inscrit
+    # jamais dans sa liste — les deux se contredisaient sur tout tour qui instrumente quelque chose.
+    du_code = any(est_du_code(f, cfg) for f in edited)
     # Les sections se cherchent HORS des blocs ```, comme les commandes du bloc RELIRE : un prompt
     # copiable qui cite `LU :` satisfaisait l'exigence sans que le rapport la porte.
     visibles, bloc_ouvert = hors_bloc_de_code(report.splitlines())
@@ -385,7 +400,6 @@ def faults_of(turn, cfg):
             f"un bloc ``` ouvert ligne {bloc_ouvert} n'est jamais refermé, donc la fin du message "
             "n'est pas analysable (RELIRE comprise) : referme-le et rends le rapport en entier"
         ]
-    cherchable = "\n".join(visibles)
     faults = []
     for name, portee in cfg["sections"]:
         if portee == "code" and not du_code:
@@ -394,7 +408,10 @@ def faults_of(turn, cfg):
             # Seule section dont la forme INTERNE est vérifiable : son absence y est déjà dite.
             faults += relire_faults(visibles)
             continue
-        if not re.search(r"^\s*" + name + r"\s*:", cherchable, re.MULTILINE):
+        # Une seule forme du texte filtré, la LISTE : recoller les lignes pour les redécouper à
+        # chaque section entretenait deux représentations de la même chose, et c'est en choisissant
+        # la mauvaise qu'on réintroduit la confusion PROMPTS/RELIRE que ce filtrage ferme.
+        if not any(re.match(r"^\s*" + name + r"\s*:", ln) for ln in visibles):
             due = (
                 "elle est TOUJOURS due"
                 if portee == "toujours"
