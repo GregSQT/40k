@@ -10,6 +10,7 @@ import {
 } from "../constants/gameConfig";
 import { useEffectiveObjectiveHexes, useWallHexKeySet } from "../hooks/useBoardHexMemos";
 import { useGameConfig } from "../hooks/useGameConfig";
+import { useResolvedBoardConfig } from "../hooks/useResolvedBoardConfig";
 import { useSingleDoubleClick } from "../hooks/useSingleDoubleClick";
 import { API_BASE, apiFetch } from "../services/apiFetch";
 import type {
@@ -1553,16 +1554,11 @@ export default function Board({
     loading,
     error,
   } = useGameConfig({ inchesToSubhexOverride, scenarioFileOverride });
-  const _rawBoardConfig =
-    boardConfigOverride && _boardConfigFromHook
-      ? { ..._boardConfigFromHook, ...boardConfigOverride }
-      : _boardConfigFromHook;
-  const boardConfig = (() => {
-    if (!_rawBoardConfig) return _rawBoardConfig;
-    const ds = (_rawBoardConfig.display as { display_scale?: number } | undefined)?.display_scale;
-    if (!ds || ds === 1) return _rawBoardConfig;
-    return { ..._rawBoardConfig, hex_radius: _rawBoardConfig.hex_radius * ds };
-  })();
+  // Surcharge du plateau JOUÉ (replay) puis échelle d'affichage. Mémoïsé pour la RÉFÉRENCE : les
+  // deux étapes fabriquaient un objet neuf à chaque rendu dès qu'elles avaient quelque chose à
+  // faire, ce qui rendait inopérante toute mémoïsation accrochée à `boardConfig` — en replay et sur
+  // les plateaux à `display_scale` ≠ 1 seulement, jamais en PvP standard. cf. useResolvedBoardConfig.
+  const boardConfig = useResolvedBoardConfig(_boardConfigFromHook, boardConfigOverride);
   // Objectifs = terrains "objective": true : la géométrie (polygone + vertices) vient de
   // boardConfig.objective_zones (endpoint board) et doit être PRÉFÉRÉE pour le rendu — sinon la
   // forme est perdue et la zone retombe sur un cercle englobant. objectivesOverride (runtime
@@ -1589,9 +1585,9 @@ export default function Board({
   // (losPreviewHelpers), donc les murs affichés sont par construction ceux que la LoS oppose.
   // L'effet de dessin en tenait sa propre copie et complétait `boardConfig.wall_hexes` EN PLACE :
   // le contenu de la config dépendait alors de l'ordre des passages de l'effet.
-  // Les dépendances portent sur les CHAMPS, jamais sur `boardConfig` : quand `display_scale` vaut
-  // autre chose que 1, l'objet est reconstruit par spread à CHAQUE rendu (cf. `_rawBoardConfig`
-  // ci-dessus) — s'y accrocher rendrait cette mémoïsation inopérante sur ces plateaux-là.
+  // Les dépendances portent sur les CHAMPS lus, pas sur `boardConfig` : sa référence est stable
+  // (`useResolvedBoardConfig`), mais elle change à tout changement d'ÉCHELLE d'affichage, qui ne
+  // déplace aucun mur — les murs ne se recalculent donc qu'au chargement d'un plateau.
   const boardCols = boardConfig?.cols;
   const boardRows = boardConfig?.rows;
   const boardWallHexes = boardConfig?.wall_hexes;

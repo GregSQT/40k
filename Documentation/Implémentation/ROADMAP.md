@@ -198,10 +198,28 @@
   était de faire dépendre le contenu de la config de l'ordre des passages de l'effet.
   RESTE : la validation navigateur (glisser de déploiement le long de la rangée du bas ; murs et
   couleurs d'objectif inchangés, en PvP comme en replay).
-  SIGNALÉ, NON TRAITÉ : quand `display_scale` ≠ 1, l'objet `boardConfig` de `BoardPvp` est
-  reconstruit par spread à CHAQUE rendu (IIFE non mémoïsée). Les mémos de ce chantier dépendent des
-  CHAMPS et y échappent, mais toute mémoïsation future qui s'accrocherait à l'objet serait
-  inopérante sur ces plateaux-là.
+  SIGNALÉ PUIS TRAITÉ le même jour, cf. la ligne suivante : l'objet `boardConfig` de `BoardPvp`
+  était lui-même reconstruit à chaque rendu.
+
+- ✅ **La config plateau de `BoardPvp` retrouve une référence stable** (ouvert ET livré le
+  2026-08-12, à la demande de l'utilisateur après la ligne ci-dessus). `boardConfig` naissait de
+  DEUX expressions non mémoïsées empilées : la surcharge du plateau JOUÉ (replay, `Replay.md` §2.4)
+  et la mise à l'échelle d'affichage. Chacune fabriquait un objet neuf à CHAQUE rendu dès qu'elle
+  avait quelque chose à faire.
+  CE QUE ÇA COÛTAIT, compté et non estimé : **17 tableaux de dépendances** de `BoardPvp` portent sur
+  l'OBJET `boardConfig`, dont le gros effet de dessin et le cône de LoS WASM. Tous se réexécutaient
+  à chaque rendu sur ces plateaux-là, alors qu'ils tenaient en PvP standard — où les deux étapes
+  rendent l'objet du hook inchangé. La correction ALIGNE les cas instables sur le cas déjà éprouvé,
+  elle n'invente pas un régime de mémoïsation nouveau.
+  PORTÉE RÉELLE, à ne pas surestimer : `grep display_scale config/ services/ engine/` → **0 hit**,
+  aucune configuration ne pose ce champ aujourd'hui. Le seul chemin réellement emprunté est donc le
+  REPLAY, qui fournit toujours une surcharge de plateau. Le PvP standard ne change pas.
+  `hooks/useResolvedBoardConfig.ts`, deux étapes mémoïsées SÉPARÉMENT (une surcharge inchangée ne
+  doit pas être réappliquée parce que l'échelle a bougé). 8 tests d'identité, **trois verrous
+  prouvés ROUGES par mutation** (dé-mémoïsation de l'étape de surcharge, copie systématique dans la
+  mise à l'échelle, ordre de spread inversé — ce dernier ferait gagner la config de l'API sur le
+  plateau joué, soit un replay rendu à la mauvaise échelle).
+  RESTE : la validation navigateur du replay (changement d'épisode, décor et échelle corrects).
 
 - ✅ **PvE se figeait — cause identifiée et corrigée** (2026-08-11). Le symptôme était rapporté
   « en phase de mouvement » ; la mesure a montré la phase de **déploiement**, sur des unités
