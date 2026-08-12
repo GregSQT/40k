@@ -13,16 +13,16 @@ import tempfile
 import atexit
 import hashlib
 
+import warnings
+
 # Fix Windows encoding for emoji/Unicode output with line buffering
 if sys.platform == 'win32':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace', line_buffering=True)
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace', line_buffering=True)
-
-# Suppress NumPy MINGW-W64 warnings on Windows (MUST be before numpy import)
-import warnings
-warnings.filterwarnings('ignore')  # Suppress all warnings
-import os
-os.environ['PYTHONWARNINGS'] = 'ignore'
+    # Le seul avertissement vise : NumPy compile avec MINGW-W64 (MUST be before numpy import).
+    # Filtrer plus large eteignait les depreciations de nos propres dependances pour tout script
+    # qui importe simplement `ai.train`.
+    warnings.filterwarnings('ignore', message='.*MINGW-W64.*', category=RuntimeWarning)
 
 import subprocess
 import json
@@ -241,10 +241,11 @@ def _apply_curriculum_model_params(model, model_params: dict, log=print) -> None
     `clip_range`, le rollout buffer — vient donc de la phase precedente. Sans cette passe, la
     config du run serait ignoree en silence.
 
-    A APPELER HORS du `try` de chargement des deux appelants (`create_multi_agent_model`,
-    `train_with_scenario_rotation`), qui portaient ce bloc en DOUBLE : leur `except` retombe sur
-    un modele NEUF, donc une config refusee ici y deviendrait un abandon silencieux des poids de
-    la phase 1. `log` absorbe la seule variation restante entre les deux (`print` / `chunk_log`).
+    Appele par les deux appelants (`create_multi_agent_model`, `train_with_scenario_rotation`),
+    qui portaient ce bloc en DOUBLE. `log` absorbe la seule variation restante entre les deux
+    (`print` / `chunk_log`). Le chargement lui-meme passe par `_load_checkpoint` et ne rattrape
+    plus rien : un refus emis ici, comme un checkpoint illisible, remonte et arrete le run — il ne
+    peut plus se transformer en abandon silencieux des poids de la phase 1.
 
     Doit couvrir TOUT `model_params` hors `CURRICULUM_EXCLUDED_MODEL_PARAMS`.
     `test_curriculum_covers_every_model_param` derive la liste attendue du fichier de config REEL :
@@ -286,6 +287,32 @@ def _apply_curriculum_model_params(model, model_params: dict, log=print) -> None
     recreate_rollout_buffer(model, log=log)
 
     log(f"✅ Applied new phase hyperparameters: lr={model.learning_rate}, ent={model.ent_coef}, clip={model.clip_range}")
+
+
+def _load_checkpoint(model_path: str, env, device: str) -> MaskablePPO:
+    """Charge un checkpoint MaskablePPO. LEVE si le fichier est illisible — jamais de repli.
+
+    Les trois sites de chargement de ce module entouraient `MaskablePPO.load` d'un
+    `except Exception` qui construisait un modele NEUF et poursuivait l'entrainement : un
+    `--append` dont le .zip est corrompu, tronque ou remplace par autre chose tournait des heures
+    depuis des poids aleatoires, sortait en code 0, et n'en disait que deux lignes noyees dans le
+    log. Le seul signal du desastre etait le win-rate du run suivant. C'est exactement le repli
+    anti-erreur que T1 refuse : ici l'echec de lecture n'a AUCUNE reprise metier valide, il n'y a
+    rien a continuer.
+
+    Passe par un helper unique et non recopie sur les trois sites : le motif etait deja divergent
+    (deux `print`, un `chunk_log`, et un des trois messages avec un emoji casse), et c'est
+    precisement ainsi qu'un repli survit a la suppression de son jumeau.
+    """
+    try:
+        return MaskablePPO.load(model_path, env=env, device=device)
+    except Exception as exc:
+        raise RuntimeError(
+            f"Checkpoint illisible : {model_path} ({type(exc).__name__}: {exc}). "
+            f"L'entrainement s'arrete au lieu de repartir de poids aleatoires. Verifier le "
+            f"chemin et l'integrite du .zip ; pour repartir volontairement de zero, relancer "
+            f"avec --new (qui archive le modele existant) au lieu de --append."
+        ) from exc
 
 
 def _load_configured_unit_rule_ids(project_root_path: str) -> Set[str]:
@@ -2206,63 +2233,32 @@ def create_multi_agent_model(config, training_config_name, rewards_config_name, 
             model.logger.record = _filtered_record
     elif append_training:
         print(f"📁 Loading existing model for continued training: {model_path}")
-        # Le `try` n'enveloppe QUE le chargement. Il couvrait aussi toute la configuration qui
-        # suit : une config refusee (type invalide, cle manquante, `clip_range_vf: 0`) y devenait
-        # « Failed to load model » puis un modele NEUF, c'est-a-dire les poids de la phase 1 jetes
-        # en silence sur un run qui demandait explicitement --append. Le repli n'a de sens que
-        # pour un checkpoint reellement illisible ; une config fausse doit lever.
-        try:
-            model = MaskablePPO.load(model_path, env=env, device=device)
-        except Exception as e:
-            print(f"⚠️ Failed to load model: {e}")
-            print("🆕 Creating new model instead...")
-            tb_log_name = f"{training_config_name}_{agent_key}"
-            specific_log_dir = os.path.join(model_params["tensorboard_log"], tb_log_name)
-            os.makedirs(specific_log_dir, exist_ok=True)
-            model_params_copy = model_params.copy()
-            model_params_copy["tensorboard_log"] = specific_log_dir
-            if "learning_rate" in model_params_copy and isinstance(model_params_copy["learning_rate"], dict):
-                model_params_copy["learning_rate"] = _make_constant_lr_schedule(model_params_copy["learning_rate"])
-            model = MaskablePPO(env=env, **model_params_copy)
-        else:
-            model.tensorboard_log = require_key(model_params, "tensorboard_log")
-            model.verbose = require_key(model_params, "verbose")
+        model = _load_checkpoint(model_path, env, device)
+        model.tensorboard_log = require_key(model_params, "tensorboard_log")
+        model.verbose = require_key(model_params, "verbose")
 
-            _apply_curriculum_model_params(model, model_params)
+        _apply_curriculum_model_params(model, model_params)
 
-            # CRITICAL FIX: Reinitialize logger after loading from checkpoint
-            # This ensures PPO training metrics (policy_loss, value_loss, etc.) are logged correctly
-            # Without this, model.logger.name_to_value remains empty/stale from the checkpoint
-            from stable_baselines3.common.logger import configure
+        # CRITICAL FIX: Reinitialize logger after loading from checkpoint
+        # This ensures PPO training metrics (policy_loss, value_loss, etc.) are logged correctly
+        # Without this, model.logger.name_to_value remains empty/stale from the checkpoint
+        from stable_baselines3.common.logger import configure
 
-            # Use specific log directory to ensure continuous TensorBoard graphs across runs
-            # Format: ./tensorboard/{config_name}_{agent_key}/{run_name}
-            # This prevents creating new timestamped subdirectories on each script run
-            tb_log_name = f"{training_config_name}_{agent_key}"
-            specific_log_dir = os.path.join(model.tensorboard_log, tb_log_name)
+        # Use specific log directory to ensure continuous TensorBoard graphs across runs
+        # Format: ./tensorboard/{config_name}_{agent_key}/{run_name}
+        # This prevents creating new timestamped subdirectories on each script run
+        tb_log_name = f"{training_config_name}_{agent_key}"
+        specific_log_dir = os.path.join(model.tensorboard_log, tb_log_name)
 
-            # Create directory if it doesn't exist
-            os.makedirs(specific_log_dir, exist_ok=True)
+        # Create directory if it doesn't exist
+        os.makedirs(specific_log_dir, exist_ok=True)
 
-            new_logger = configure(specific_log_dir, ["tensorboard"])
-            model.set_logger(new_logger)
-            print(f"✅ Logger reinitialized for continuous TensorBoard: {specific_log_dir}")
+        new_logger = configure(specific_log_dir, ["tensorboard"])
+        model.set_logger(new_logger)
+        print(f"✅ Logger reinitialized for continuous TensorBoard: {specific_log_dir}")
     else:
         print(f"📁 Loading existing model: {model_path}")
-        try:
-            model = MaskablePPO.load(model_path, env=env, device=device)
-        except Exception as e:
-            print(f"⚠️ Failed to load model: {e}")
-            print("�' Creating new model instead...")
-            # Need to create specific directory here too
-            tb_log_name = f"{training_config_name}_{agent_key}"
-            specific_log_dir = os.path.join(model_params["tensorboard_log"], tb_log_name)
-            os.makedirs(specific_log_dir, exist_ok=True)
-            model_params_copy = model_params.copy()
-            model_params_copy["tensorboard_log"] = specific_log_dir
-            if "learning_rate" in model_params_copy and isinstance(model_params_copy["learning_rate"], dict):
-                model_params_copy["learning_rate"] = _make_constant_lr_schedule(model_params_copy["learning_rate"])
-            model = MaskablePPO(env=env, **model_params_copy)
+        model = _load_checkpoint(model_path, env, device)
     
     _apply_torch_compile(model)
     return model, env, training_config, model_path, _episode_offset
@@ -2863,34 +2859,22 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         model = MaskablePPO(env=env, **model_params_copy)
     elif append_training:
         chunk_log(f"📁 Loading existing model for continued training: {model_path}")
-        # Le `try` n'enveloppe QUE le chargement — cf. le jumeau dans `create_multi_agent_model` :
-        # une config refusee ne doit pas se transformer en abandon silencieux des poids appris.
-        try:
-            model = MaskablePPO.load(model_path, env=env, device=device)
-        except Exception as e:
-            chunk_log(f"⚠️ Failed to load model: {e}")
-            chunk_log("🆕 Creating new model instead...")
-            model_params_copy = model_params.copy()
-            model_params_copy["tensorboard_log"] = specific_log_dir
-            if "learning_rate" in model_params_copy and isinstance(model_params_copy["learning_rate"], dict):
-                model_params_copy["learning_rate"] = _make_constant_lr_schedule(model_params_copy["learning_rate"])
-            model = MaskablePPO(env=env, **model_params_copy)
-        else:
-            # Jumeau de `create_multi_agent_model` : ces deux cles sont exclues du bloc curriculum
-            # parce que l'APPELANT les pose, et celui-ci ne le faisait pas — un profil qui change
-            # `verbose` en --append heritait de la valeur du checkpoint, sans rien afficher.
-            model.tensorboard_log = require_key(model_params, "tensorboard_log")
-            model.verbose = require_key(model_params, "verbose")
+        model = _load_checkpoint(model_path, env, device)
+        # Jumeau de `create_multi_agent_model` : ces deux cles sont exclues du bloc curriculum
+        # parce que l'APPELANT les pose, et celui-ci ne le faisait pas — un profil qui change
+        # `verbose` en --append heritait de la valeur du checkpoint, sans rien afficher.
+        model.tensorboard_log = require_key(model_params, "tensorboard_log")
+        model.verbose = require_key(model_params, "verbose")
 
-            _apply_curriculum_model_params(model, model_params, log=chunk_log)
+        _apply_curriculum_model_params(model, model_params, log=chunk_log)
 
-            # CRITICAL FIX: Reinitialize logger after loading from checkpoint
-            # This ensures PPO training metrics (policy_loss, value_loss, etc.) are logged correctly
-            # Without this, model.logger.name_to_value remains empty/stale from the checkpoint
-            from stable_baselines3.common.logger import configure
-            new_logger = configure(specific_log_dir, ["tensorboard"])
-            model.set_logger(new_logger)
-            chunk_log(f"✅ Logger reinitialized for TensorBoard run: {specific_log_dir}")
+        # CRITICAL FIX: Reinitialize logger after loading from checkpoint
+        # This ensures PPO training metrics (policy_loss, value_loss, etc.) are logged correctly
+        # Without this, model.logger.name_to_value remains empty/stale from the checkpoint
+        from stable_baselines3.common.logger import configure
+        new_logger = configure(specific_log_dir, ["tensorboard"])
+        model.set_logger(new_logger)
+        chunk_log(f"✅ Logger reinitialized for TensorBoard run: {specific_log_dir}")
     else:
         chunk_log(f"⚠️ Model exists but neither --new nor --append specified. Creating new model.")
         model_params_copy = model_params.copy()

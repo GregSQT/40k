@@ -425,6 +425,29 @@ def test_un_argument_qui_n_est_pas_un_chemin_ne_declenche_rien(
     assert _rapport(tmp_path, _user("corrige"), _edit("engine/x.py"), _say(avec)) is None
 
 
+def test_un_prompt_copiable_n_est_pas_pris_pour_le_bloc_relire(tmp_path: Path) -> None:
+    """PROMPTS contient des prompts COPIABLES, donc souvent une commande en début de ligne.
+
+    Balayer tout le message reprochait au rapport des chemins relatifs qui n'étaient pas les siens.
+    """
+    avec_prompts = RAPPORT_CONFORME + (
+        "PROMPTS :\n  1. relire le module\n     ```\n     /code-review engine/y.py\n     ```\n"
+    )
+    assert _rapport(tmp_path, _user("corrige"), _edit("engine/x.py"), _say(avec_prompts)) is None
+
+
+def test_un_chemin_absolu_contenant_une_espace_est_acceptable(tmp_path: Path) -> None:
+    """`shared/gameLogStructure - save.ts` existe dans ce dépôt : il doit avoir une forme écrivable.
+
+    Nu, il se coupait en trois mots relatifs ; cité, il gardait ses guillemets. Aucune des deux
+    formes ne passait, donc le hook réclamait sans fin sur un rapport correct.
+    """
+    espace = RAPPORT_CONFORME.replace(
+        "/home/greg/40k/engine/x.py", '"/home/greg/40k/shared/gameLogStructure - save.ts"'
+    )
+    assert _rapport(tmp_path, _user("corrige"), _edit("engine/x.py"), _say(espace)) is None
+
+
 def test_un_repertoire_relatif_est_refuse_comme_un_fichier(tmp_path: Path) -> None:
     """`engine` n'a ni point ni slash : trié par ressemblance, il passait pour un mot ordinaire."""
     dossier = RAPPORT_CONFORME.replace("/home/greg/40k/engine/x.py", "engine")
@@ -623,11 +646,32 @@ def test_un_fichier_hors_liste_de_code_n_engage_aucune_relecture(tmp_path: Path)
 
 
 def test_un_fichier_hors_depot_n_entre_pas(tmp_path: Path) -> None:
-    """Constaté le 2026-08-12 : trois scripts jetables du scratchpad attendaient d'être relus."""
+    """Constaté le 2026-08-12 : trois scripts jetables du scratchpad attendaient d'être relus.
+
+    Le contrôle porte sur le FICHIER de liste, pas seulement sur ce que `--liste` rend : la lecture
+    refiltre (cf. le test des listes d'une version antérieure), donc s'en tenir à `--liste` laissait
+    passer la suppression du filtre à l'ÉCRITURE — vérifié par mutation, la version qui écrivait le
+    scratchpad dans la liste restait verte.
+    """
     hook = _bac(tmp_path)
     dehors = tmp_path.parent / "scratchpad_migrate.py"
     _edite(hook, str(dehors))
     assert _cmd(hook, "--liste", S1).returncode != 0
+    liste = tmp_path / ".claude" / "relire-en-attente" / f"{S1}.txt"
+    assert not liste.exists(), liste.read_text(encoding="utf-8")
+
+
+def test_un_fichier_hors_depot_ne_s_ajoute_pas_a_une_liste_existante(tmp_path: Path) -> None:
+    """L'écriture est aussi le cas « liste déjà ouverte » : le fichier existe, l'ajout doit être nu.
+
+    Sans ce cas, le scratchpad entrait bien dans le fichier de liste et n'en ressortait que par le
+    filtre de LECTURE — donc invisible tant qu'on n'inspecte que `--liste`.
+    """
+    hook = _bac(tmp_path)
+    _edite(hook, str(tmp_path / "engine" / "x.py"))
+    _edite(hook, str(tmp_path.parent / "scratchpad_migrate.py"))
+    liste = tmp_path / ".claude" / "relire-en-attente" / f"{S1}.txt"
+    assert liste.read_text(encoding="utf-8").splitlines() == [str(tmp_path / "engine" / "x.py")]
 
 
 def test_ce_qui_compte_comme_du_code_vient_de_claude_md(tmp_path: Path) -> None:
@@ -809,6 +853,20 @@ def test_session_id_omis_refuse_au_lieu_de_deviner(tmp_path: Path, commande: str
     proc = _cmd(hook, commande)
     assert proc.returncode != 0 and "session_id" in proc.stderr
     assert _en_attente(hook, S2) == [str(tmp_path / "engine" / "x.py")]
+
+
+@pytest.mark.parametrize("mauvais_id", ["scratchpad", "../../../evil"])
+def test_un_id_non_conforme_est_refuse_a_l_ecriture_aussi(tmp_path: Path, mauvais_id: str) -> None:
+    """Le contrôle manquait sur le chemin PostToolUse, celui qui écrit.
+
+    Conséquences mesurées : `scratchpad` (le mauvais composant du chemin) créait une liste que
+    `--liste` refuse ensuite de lire — relecture perdue en silence — et `../../../evil` écrivait
+    hors du dossier des listes.
+    """
+    hook = _bac(tmp_path)
+    sortie = _edite(hook, str(tmp_path / "engine" / "x.py"), session=mauvais_id)
+    assert "invalide" in json.loads(sortie)["hookSpecificOutput"]["additionalContext"]
+    assert not list((tmp_path / ".claude").glob("relire-en-attente/*.txt"))
 
 
 def test_session_id_qui_est_un_chemin_est_refuse(tmp_path: Path) -> None:

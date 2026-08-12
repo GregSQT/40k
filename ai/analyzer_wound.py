@@ -99,9 +99,13 @@ def attacker_weapon_strengths(
     d'agrégation (`resolve_weapon_characteristic`) : un plafond agrégé sur-autorise, une Force
     agrégée est inventée.
 
-    ``None`` (non vérifiable) dès qu'un profil de la ligne reste inconnu de TOUTES les figurines
-    qui ont frappé — datasheet hors registre, arme absente, F symbolique — ou qu'un même profil
-    y prend deux valeurs, ce que la donnée ne permet pas de départager.
+    Un même nom d'arme à DEUX Forces selon la figurine (« Close Combat Weapon » F3 au troupier,
+    F4 au personnage rattaché) rend les DEUX, pour la même raison : ce sont deux Forces réelles
+    de la ligne. Le verdict se joue sur le seuil, pas sur l'unicité de la Force.
+
+    ``None`` (non vérifiable) dans les deux seuls cas où la donnée manque VRAIMENT : une figurine
+    dont la datasheet ne connaît AUCUN profil de la ligne, ou un profil qu'AUCUNE d'elles ne
+    connaît — datasheet hors registre, arme absente, F symbolique du registre.
     """
     from ai.analyzer_perfig import resolve_weapon_characteristic, weapon_profile_names
 
@@ -134,9 +138,9 @@ def attacker_weapon_strengths(
                 # ligne : c'est le cas normal d'un composite inter-datasheets, pas un trou. Le
                 # trou, c'est un profil qu'AUCUNE d'elles ne connaît — contrôlé après la boucle.
                 by_profile[profile].add(value)
-    if any(len(values) != 1 for values in by_profile.values()):
+    if any(not values for values in by_profile.values()):
         return None
-    return tuple(sorted(values.pop() for values in by_profile.values()))
+    return tuple(sorted({v for values in by_profile.values() for v in values}))
 
 
 def target_bodyguard_toughness(state: Any, config: Any, target_id: str) -> Optional[int]:

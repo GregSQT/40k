@@ -409,6 +409,25 @@ def test_a_composite_whose_profiles_disagree_is_counted_unverifiable_not_as_an_e
     assert stats["fight_wound_threshold_unverifiable"][1] == 1
 
 
+def test_one_weapon_name_with_two_strengths_is_judged_on_the_threshold_not_on_the_force():
+    """« Choppa » vaut F4 au troupier et F6 au personnage rattaché, et les deux ont frappé.
+
+    Cas le plus courant du dépôt — « Close Combat Weapon » couvre F2 à F5 selon la datasheet —
+    et c'est le cas d'attelage (règle 19) que ce contrôle existe pour surveiller. Deux Forces
+    réelles ne rendent pas la ligne muette : elles la rendent muette seulement si elles blessent
+    la cible différemment. Vs E2, F4 et F6 blessent toutes deux sur 2+ → verdict ; vs E4, c'est
+    4+ et 3+ → le seuil unique imprimé n'a pas d'attendu unique.
+    """
+    state = _State()
+    convergent = _config(unit_toughness_by_type={**TOUGHNESS, "Trooper": 2})
+    assert aw.expected_wound_threshold(
+        state, convergent, "", 1, "Trooper", "Choppa", "9", ("9#0", "9#2"), is_melee=True
+    ) == 2, "le contrôle s'est tu alors que les deux Forces de la ligne donnent le même seuil"
+    assert aw.expected_wound_threshold(
+        state, _config(), "", 1, "Trooper", "Choppa", "9", ("9#0", "9#2"), is_melee=True
+    ) is None, "une des deux Forces a tranché pour toute la ligne (4+ et 3+ vs E4)"
+
+
 def test_a_striker_whose_datasheet_knows_no_profile_makes_the_line_unverifiable():
     """Le troupier résout « Choppa », le personnage rattaché ne le porte pas du tout.
 
