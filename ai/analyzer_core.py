@@ -855,6 +855,13 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 state.unit_hp_pre_line = dict(state.unit_hp)
                 state.unit_positions_pre_line = dict(state.unit_positions)
                 state.positions_by_model_pre_line = dict(state.positions_by_model)
+                # MÊME instant, pour la même raison : `_apply_damage_and_handle_death` ajoute la
+                # cible aux blessés (ou l'en retire quand elle meurt) AVANT que le handler ne
+                # juge la priorité de ciblage — qui est, elle aussi, une décision du Select
+                # Targets step. Cf. `AnalyzerState.freeze_select_targets`.
+                state.wounded_enemies_pre_line = {
+                    _pl: set(_wounded) for _pl, _wounded in require_key(stats, 'wounded_enemies').items()
+                }
 
                 # CRITICAL: Apply damage regardless of STEP marker
                 # Non-step lines still contain real attacks/shots and can kill units.

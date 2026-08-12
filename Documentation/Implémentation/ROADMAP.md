@@ -569,6 +569,13 @@ Prêts à démarrer sans décision produit :
   29 664 lignes, soit 37 % jugés par personne**, et les 10 962 regagnés n'en condamnent aucun. Le
   « 18 702 » que la livraison du matin citait comme preuve de non-aveuglement était déjà la mesure
   du trou.
+  **Deux résidus de la même famille fermés ensuite** : (1) la PRIORITÉ DE CIBLAGE lisait le set des
+  blessés après les dégâts de la ligne — un tir qui blesse une cible intacte était crédité « a visé
+  un blessé », un tir qui achève un blessé était compté « a visé du plein PV » ; mesuré sur 2 964
+  tirs, **66 → 83 et 16 → 40 échecs**, le masquage domine et le rapport annonçait donc l'agent
+  meilleur qu'il n'est ; (2) le bloc WAIT transcrivait 10.06/17.03 une seconde fois et lui manquait
+  le volet CIBLES — sans verdict faux (une ligne WAIT n'inflige rien), mais les deux lecteurs
+  passent désormais par une source unique, `ranged_engagement_verdict`, avec sa table de vérité.
   → [`Implémenté/analyzer_engagement_avant_pertes_2026-08-12.md`](Implémenté/analyzer_engagement_avant_pertes_2026-08-12.md)
 - 🔴 **Conformité moteur — les 53 erreurs que l'analyzer voit VRAIMENT** (ouvert le 2026-08-11,
   **26 restantes** : la famille CC_NB, la plus lourde, est soldée le jour même ; les familles

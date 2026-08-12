@@ -3,7 +3,7 @@ shoot_handler.py — gestion des actions SHOT, WAIT, SKIP, ADVANCED dans parse_s
 """
 
 import re
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, NamedTuple, Optional
 
 from shared.data_validation import require_key
 from ai.analyzer_rules import note_rule_usage
@@ -18,6 +18,72 @@ from ai.analyzer_perfig import (
 if TYPE_CHECKING:
     from ai.analyzer_state import AnalyzerState
     from ai.analyzer_config import AnalyzerConfig
+
+
+class RangedEngagementVerdict(NamedTuple):
+    """Les trois interdits d'engagement qui pèsent sur UN tir (10.06, 04.02, 17.03).
+
+    Un seul énoncé de la règle pour les DEUX lecteurs du fichier : `handle_shoot`, qui compte les
+    fautes commises, et `handle_wait`, qui écarte du pool de cibles ce qu'un tir n'aurait pas eu le
+    droit de viser. Les deux avaient leur propre transcription, à quelques lignes d'écart : la
+    version WAIT ignorait `close_quarters_at_unengaged` et aurait manqué toute évolution suivante.
+    Un WAIT n'inflige aucun dégât, donc aucun verdict n'était faux — mais « pas encore faux » n'est
+    pas une propriété qui se maintient toute seule.
+    """
+    #: 10.06, volet ARMES : un tireur engagé non-M/V ne tire qu'avec des armes [CLOSE-QUARTERS].
+    engaged_with_non_close_quarters: bool
+    #: 10.06, volet CIBLES : engagé, il ne peut viser QUE les unités avec lesquelles il l'est.
+    close_quarters_at_unengaged: bool
+    #: 04.02 : la cible doit être Unengaged — sauf arme [CLOSE-QUARTERS], sauf exemption 17.03
+    #: (cible M/V, tireur non engagé), sauf si le tireur est engagé avec ELLE (ce que 10.06
+    #: l'autorise justement à viser).
+    target_engaged_untargetable: bool
+
+    def forbids_shot(self) -> bool:
+        """Un seul interdit suffit à rendre le tir impossible — lecture du pool de cibles."""
+        return (
+            self.engaged_with_non_close_quarters
+            or self.close_quarters_at_unengaged
+            or self.target_engaged_untargetable
+        )
+
+
+def ranged_engagement_verdict(
+    *,
+    shooter_engaged: bool,
+    shooter_is_monster_or_vehicle: bool,
+    shooter_engaged_with_target: bool,
+    target_engaged: bool,
+    target_is_monster_or_vehicle: bool,
+    weapon_is_close_quarters: bool,
+) -> RangedEngagementVerdict:
+    """SOURCE UNIQUE des interdits 10.06 / 04.02 / 17.03 côté analyzer.
+
+    Les deux exemptions MONSTER/VEHICLE sont distinctes et aucune n'est un repli :
+    - TIREUR M/V engagé : éligible au close-quarters shooting avec TOUTES ses armes (10.06
+      « Has one or more [CLOSE-QUARTERS] weapons OR is a MONSTER/VEHICLE unit »), au prix du -1
+      pour toucher que le moteur applique à la résolution ;
+    - CIBLE M/V : 17.03 « enemy MONSTER/VEHICLE units that are engaged can be selected as targets
+      of ranged attacks » — n'exempte QUE la cible. Un tireur non-M/V lui-même engagé reste borné
+      au close-quarters (encadré de 17.03), sinon le contrôle se désarmait dès qu'un véhicule
+      ennemi était au contact.
+    """
+    engaged_shooter_restricted = shooter_engaged and not shooter_is_monster_or_vehicle
+    target_mv_exempt = target_is_monster_or_vehicle and not shooter_engaged
+    return RangedEngagementVerdict(
+        engaged_with_non_close_quarters=engaged_shooter_restricted and not weapon_is_close_quarters,
+        close_quarters_at_unengaged=(
+            engaged_shooter_restricted
+            and weapon_is_close_quarters
+            and not shooter_engaged_with_target
+        ),
+        target_engaged_untargetable=(
+            target_engaged
+            and not weapon_is_close_quarters
+            and not target_mv_exempt
+            and not shooter_engaged_with_target
+        ),
+    )
 
 
 def _analyzer_ranged_metric(config: "AnalyzerConfig") -> str:
@@ -137,7 +203,8 @@ def handle_shoot(
     # cf. `SelectTargetsFreeze`, dont les deux moitiés ont déjà divergé une fois.
     shot_activation_key = (state.current_episode_num, turn, shooter_id, target_id)
     frozen_target = state.freeze_select_targets(
-        state.shot_sequence_target_models, shot_activation_key, target_id, log_anchor=target_pos,
+        state.shot_sequence_target_models, shot_activation_key, target_id, player,
+        log_anchor=target_pos,
     )
     engagement_positions, engagement_hp, engagement_models = state.engagement_maps(
         frozen_target, target_id
@@ -594,13 +661,8 @@ def handle_shoot(
                     target_id, **target_engagement_args
                 )
 
-    # 10.06 / 17.03 — MONSTER/VEHICLE. Deux exemptions distinctes, aucune n'est un repli :
-    #  - TIREUR M/V : engagé, il est éligible au close-quarters shooting avec TOUTES ses armes
-    #    (10.06 « Has one or more [CLOSE-QUARTERS] weapons OR is a MONSTER/VEHICLE unit »), et
-    #    peut cibler les unités avec lesquelles il est engagé, à -1 pour toucher.
-    #  - CIBLE M/V : 17.03 « enemy MONSTER/VEHICLE units that are engaged can be selected as
-    #    targets of ranged attacks ». L'interdiction de tirer sur une unité engagée ne la vise pas.
-    # Sans ces deux exemptions, chaque tir d'un LandSpeeder au contact remontait deux erreurs
+    # Les deux natures M/V qu'exigent les exemptions 10.06 / 17.03 (cf. `ranged_engagement_verdict`,
+    # qui porte la règle). Sans elles, chaque tir d'un LandSpeeder au contact remontait deux erreurs
     # (« tir invalide adjacent » + « cible engagée ») alors que le moteur applique correctement
     # le -1 (Gatling 3+ -> 4+, Multi-Melta 4+ -> 5+ dans step.log).
     shooter_is_monster_or_vehicle = bool(require_key(
@@ -660,17 +722,15 @@ def handle_shoot(
             position_override=(shooter_col, shooter_row),
         )
 
-    # 17.03 n'autorise que la CIBLE : un tireur non-M/V qui est LUI-MÊME engagé reste borné au
-    # close-quarters shooting, donc aux armes [CLOSE_QUARTERS] (10.06, « Non-MONSTER/
-    # Non-VEHICLE Models », rappelé mot pour mot par l'encadré de 17.03). Exempter sur la seule
-    # nature de la cible desarmait le controle des qu'un vehicule ennemi etait au contact.
-    target_mv_exempt = target_is_monster_or_vehicle and not shooter_engaged_at_all
-    if (
-        target_engaged
-        and not is_close_quarters
-        and not target_mv_exempt
-        and not shooter_engaged_with_target
-    ):
+    engagement_verdict = ranged_engagement_verdict(
+        shooter_engaged=shooter_engaged_at_all,
+        shooter_is_monster_or_vehicle=shooter_is_monster_or_vehicle,
+        shooter_engaged_with_target=shooter_engaged_with_target,
+        target_engaged=target_engaged,
+        target_is_monster_or_vehicle=target_is_monster_or_vehicle,
+        weapon_is_close_quarters=is_close_quarters,
+    )
+    if engagement_verdict.target_engaged_untargetable:
         stats['shoot_at_engaged_enemy'][player] += 1
         if stats['first_error_lines']['shoot_at_engaged_enemy'][player] is None:
             # NOMME l'unité qui engage la cible, avec la mesure du compteur — jumeau du
@@ -712,7 +772,7 @@ def handle_shoot(
                 # Tireur non engagé : une arme [CLOSE-QUARTERS] est une arme de tir comme une
                 # autre, elle peut viser n'importe quelle cible à portée. La faute n'existe que
                 # pour un tireur ENGAGÉ, borné par 10.06 aux unités avec lesquelles il l'est.
-                if shooter_engaged_at_all and not shooter_is_monster_or_vehicle:
+                if engagement_verdict.close_quarters_at_unengaged:
                     stats['close_quarters_shot_at_unengaged_target'][player] += 1
                     if stats['first_error_lines']['close_quarters_shot_at_unengaged_target'][player] is None:
                         stats['first_error_lines']['close_quarters_shot_at_unengaged_target'][player] = {
@@ -723,7 +783,7 @@ def handle_shoot(
             # 10.06 : un tireur MONSTER/VEHICLE engagé tire avec TOUTES ses armes sur l'unité
             # avec laquelle il est engagé — l'arme non-[CLOSE_QUARTERS] au contact est légale
             # pour lui (elle subit le -1, que le moteur applique déjà).
-            if shooter_engaged_at_all and not shooter_is_monster_or_vehicle:
+            if engagement_verdict.engaged_with_non_close_quarters:
                 stats['engaged_shot_with_non_close_quarters_weapon'][player] += 1
                 stats['shoot_invalid'][player]['engaged_non_close_quarters'] += 1
                 if stats['first_error_lines']['shoot_invalid'][player] is None:
@@ -874,12 +934,20 @@ def handle_shoot(
             stats['weapon_rule_usage'][("DEVASTATING_WOUNDS", weapon_key)][pl_int] += 1
 
     # Target priority analysis
+    #
+    # Blessés du Select Targets step, JAMAIS `stats['wounded_enemies']` de la ligne : ce set est
+    # muté par `_apply_damage_and_handle_death` avant que ce handler ne voie la ligne — la cible y
+    # ENTRE quand le tir qu'on juge la blesse, et en SORT quand il l'achève. Lu tel quel, il rendait
+    # deux verdicts faux en sens inverse : tout premier tir blessant une escouade intacte était
+    # crédité « a visé une cible déjà blessée », et un tir qui achève un blessé était compté « a
+    # visé du plein PV alors qu'un blessé était en vue ». Même famille que les gels ci-dessus, sur
+    # un set de `stats` que la géométrie ne couvrait pas.
     stats['target_priority'][player]['total_shots'] += 1
-    target_was_wounded = target_id in stats['wounded_enemies'][player]
+    target_was_wounded = target_id in frozen_target.wounded_enemies
     wounded_in_los = set()
-    for wounded_id in stats['wounded_enemies'][player]:
-        if wounded_id in state.unit_positions and wounded_id in state.unit_hp and require_key(state.unit_hp, wounded_id) > 0:
-            wounded_pos = state.unit_positions[wounded_id]
+    for wounded_id in frozen_target.wounded_enemies:
+        if wounded_id in engagement_positions and wounded_id in engagement_hp and require_key(engagement_hp, wounded_id) > 0:
+            wounded_pos = engagement_positions[wounded_id]
             if has_line_of_sight(shooter_col, shooter_row, wounded_pos[0], wounded_pos[1], state.wall_hexes):
                 wounded_in_los.add(wounded_id)
     if target_was_wounded:
@@ -1070,7 +1138,6 @@ def handle_wait(
                     target_is_monster_or_vehicle = bool(require_key(
                         config.unit_is_monster_or_vehicle_by_type, enemy_unit_type
                     ))
-                    target_mv_exempt = target_is_monster_or_vehicle and not wait_unit_engaged
                     can_reach = False
                     for weapon in ranged_weapons:
                         weapon_range = require_key(weapon, 'range')
@@ -1078,25 +1145,20 @@ def handle_wait(
                         # Portée bord-à-bord (sélecteur `ranged`).
                         if _wait_ranged_edge > weapon_range:
                             continue
-                        # Les deux mêmes conditions que les deux contrôles d'erreur de
-                        # `handle_shoot`, à l'identique — un tir impossible là-bas est une cible
-                        # invalide ici, et écrire deux modèles de règles pour un seul chemin de
-                        # jeu est ce qui a laissé `handle_wait` diverger.
-                        #
-                        # 1) 10.06, volet « Non-MONSTER/Non-VEHICLE Models » : un tireur ENGAGÉ ne
-                        #    peut attaquer qu'avec des armes [CLOSE-QUARTERS]. Un M/V engagé, lui,
-                        #    tire avec TOUTES ses armes (au -1, que le moteur applique).
-                        if wait_unit_engaged and not is_close_quarters and not wait_unit_is_monster_or_vehicle:
-                            continue
-                        # 2) Cible engagée : intirable, sauf arme [CLOSE-QUARTERS], sauf exemption
-                        #    17.03 (cible M/V, tireur non engagé), sauf si le tireur est engagé
-                        #    avec ELLE — c'est précisément ce que 10.06 l'autorise à viser.
-                        if (
-                            target_engaged
-                            and not is_close_quarters
-                            and not target_mv_exempt
-                            and not wait_unit_engaged_with_target
-                        ):
+                        # MÊME règle que les contrôles d'erreur de `handle_shoot`, lue au MÊME
+                        # endroit : un tir impossible là-bas est une cible invalide ici. Écrire
+                        # deux modèles d'une seule règle de jeu est ce qui a laissé `handle_wait`
+                        # diverger — il lui manquait le volet CIBLES de 10.06 (un tireur engagé,
+                        # pistolet au poing, gardait dans son pool les unités avec lesquelles il
+                        # n'était PAS engagé).
+                        if ranged_engagement_verdict(
+                            shooter_engaged=wait_unit_engaged,
+                            shooter_is_monster_or_vehicle=wait_unit_is_monster_or_vehicle,
+                            shooter_engaged_with_target=wait_unit_engaged_with_target,
+                            target_engaged=target_engaged,
+                            target_is_monster_or_vehicle=target_is_monster_or_vehicle,
+                            weapon_is_close_quarters=is_close_quarters,
+                        ).forbids_shot():
                             continue
                         can_reach = True
                         break

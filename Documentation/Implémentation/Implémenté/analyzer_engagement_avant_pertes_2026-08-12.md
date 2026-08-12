@@ -115,7 +115,40 @@ dont la cible mourait du coup. Les 24 usages de règle en plus sont la même cau
 (`shoot_handler`, compteur §1.8 conditionné à `shooter_engaged_with_target`). **Aucune autre famille
 du rapport ne bouge.**
 
+## Deux résidus de la même famille, fermés ensuite
+
+**La priorité de ciblage se jugeait, elle aussi, sur l'état d'après.** `target_priority` lit
+`stats['wounded_enemies']`, que `_apply_damage_and_handle_death` mute avant que le handler ne voie
+la ligne : la cible y ENTRE quand le tir qu'on juge la blesse, et en SORT quand il l'achève. Deux
+verdicts faux en sens inverse — tout premier tir blessant une escouade intacte était crédité « a
+visé une cible déjà blessée » (échec masqué), et un tir achevant un blessé était compté « a visé du
+plein PV alors qu'un blessé était en vue » (échec inventé). Le gel géométrique ne pouvait pas
+l'attraper : il porte sur des cartes d'état, pas sur les sets de `stats`. Le set des blessés rejoint
+donc `SelectTargetsFreeze` — c'est le même instant et la même question, celle du CHOIX de cible.
+
+MESURÉ sur un journal de 41 épisodes (2 964 tirs) : **échecs de priorité 66 → 83 (P1) et 16 → 40
+(P2)**. Le masquage domine largement : le rapport annonçait l'agent meilleur qu'il n'est, de 41
+tirs. Aucun autre compteur ne bouge.
+
+**Le bloc WAIT réécrivait 10.06/17.03 à la main.** `handle_wait` construit le pool de cibles qu'une
+unité aurait pu viser ; il transcrivait la règle une deuxième fois, à quelques lignes de
+`handle_shoot`, et il lui manquait le volet CIBLES de 10.06 (un tireur engagé, pistolet au poing,
+gardait dans son pool les unités avec lesquelles il n'était PAS engagé). Aucun verdict faux à ce
+jour — une ligne WAIT n'inflige pas de dégâts, et l'unité avec laquelle on est engagé reste de toute
+façon une cible valide, donc le compartiment `wait_with_targets` ne bougeait pas. C'est le motif du
+dépôt : « pas encore faux » ne se maintient pas tout seul. Les deux lecteurs passent par
+`ranged_engagement_verdict`, source unique, dont la table de vérité est un test.
+
 ## Verrou
+
+`tests/unit/ai/test_analyzer_target_priority_pre_loss.py` (nouveau) : les DEUX sens du défaut, dont
+le second isolé par une blessure infligée en MÊLÉE — une blessure de tir compterait elle-même dans
+la priorité et masquerait l'effet mesuré. Correctif retiré → `assert 0 == 1` et `assert 1 == 0`.
+
+`tests/unit/ai/test_analyzer_ranged_engagement_rule.py` (nouveau) : la table de vérité 10.06 /
+04.02 / 17.03, plus un test d'USAGE — le défaut réparé était un doublon, qu'aucun test de valeurs
+n'aurait attrapé, donc c'est le NOMBRE de lecteurs qui est verrouillé. Règle ré-inlinée dans
+`handle_wait` → `assert 2 >= 3` rouge.
 
 `tests/unit/ai/test_analyzer_close_quarters_engagement.py` (3 tests ajoutés) : un troisième ennemi
 tient le tireur engagé quand sa cible meurt — sans lui le contrôle se tairait pour une raison

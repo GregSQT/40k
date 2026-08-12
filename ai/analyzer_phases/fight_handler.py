@@ -181,14 +181,14 @@ def handle_fight(
         # résout pas (`parse_error`) tue quand même, et si elle avait empêché le gel, l'arme
         # suivante aurait hérité de l'effectif d'APRÈS ses pertes.
         fight_activation_key = (state.fight_phase_seq_id, fighter_id, target_id)
+        attacker_player = require_key(state.unit_player, fighter_id)
         frozen_target = state.freeze_select_targets(
-            state.fight_sequence_target_models, fight_activation_key, target_id,
+            state.fight_sequence_target_models, fight_activation_key, target_id, attacker_player,
             log_anchor=(target_col, target_row),
         )
         engagement_positions, engagement_hp, engagement_models = state.engagement_maps(
             frozen_target, target_id
         )
-        attacker_player = require_key(state.unit_player, fighter_id)
         fight_attacks_by_unit = require_key(stats, 'fight_attacks_by_unit')
         fight_attacks_by_player = require_key(fight_attacks_by_unit, attacker_player)
         fight_over_by_unit = require_key(stats, 'fight_over_cc_nb_by_unit')
