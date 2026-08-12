@@ -72,11 +72,17 @@ def test_la_liste_blanche_n_est_pas_vide_de_sens():
 
 
 def test_le_controle_de_portee_lit_bien_l_etat_d_avant():
-    """Le tir, corrigé le 2026-08-12, doit lire `positions_by_model` — et rien d'autre."""
+    """Le tir, corrigé le 2026-08-12, doit lire la géométrie gelée — et rien d'autre.
+
+    D'abord `positions_by_model` (état jusqu'à la ligne N-1), puis `engagement_models` : cette carte
+    EST `positions_by_model`, figée à la première ligne de l'activation. Le passage au gel répare
+    une extinction silencieuse — la carte vive est purgée dès la première figurine tuée, et le
+    contrôle ne rendait plus aucun verdict pour le reste de l'activation.
+    """
     source = (AI / "analyzer_phases" / "shoot_handler.py").read_text(encoding="utf-8")
     bloc = source[source.index("if weapon_range is not None:"):]
     bloc = bloc[: bloc.index("# Track shots after advance")]
-    assert "positions_by_model" in bloc, "le contrôle de portée doit lire l'état d'AVANT l'action"
+    assert "engagement_models" in bloc, "le contrôle de portée doit lire l'état d'AVANT l'action"
     assert "parse_target_models_segment" not in bloc, (
         "le contrôle de portée relit le segment post-pertes — régression du 2026-08-12"
     )

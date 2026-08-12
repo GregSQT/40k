@@ -548,6 +548,13 @@ Prêts à démarrer sans décision produit :
   quand le coup hors tour tuait la cible (faux négatif), corrigé du même geste. Même journal
   avant/après : 18 → 17 erreurs de tir, 24 tirs close-quarters reclassés « cible engagée », rien
   d'autre ne bouge.
+  **Relecture du gel, même jour, trois défauts fermés** : (1) deux mesures jumelles lisaient deux
+  ancres différentes de la même cible ; (2) une cible déjà détruite se voyait rendre son ancre sans
+  ses PV, inventant une erreur de parsing par ligne ; (3) le contrôle de PORTÉE, jumeau resté sur la
+  carte vive, ne rendait **aucun** verdict dès qu'un tir tuait — mesuré : **18 702 verdicts sur
+  29 664 lignes, soit 37 % jugés par personne**, et les 10 962 regagnés n'en condamnent aucun. Le
+  « 18 702 » que la livraison du matin citait comme preuve de non-aveuglement était déjà la mesure
+  du trou.
   → [`Implémenté/analyzer_engagement_avant_pertes_2026-08-12.md`](Implémenté/analyzer_engagement_avant_pertes_2026-08-12.md)
 - 🔴 **Conformité moteur — les 53 erreurs que l'analyzer voit VRAIMENT** (ouvert le 2026-08-11,
   **26 restantes** : la famille CC_NB, la plus lourde, est soldée le jour même ; les familles
