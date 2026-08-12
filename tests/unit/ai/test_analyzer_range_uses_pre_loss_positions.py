@@ -147,26 +147,20 @@ def test_la_deuxieme_ligne_d_une_activation_est_encore_jugee(tmp_path):
 # dans une activation SUIVANTE. Entre les deux, aucun segment ne redonne ses socles : le gel de la
 # nouvelle activation part donc d'une carte vide, et le contrôle ne PEUT pas juger. C'est le seul
 # cas où renoncer est légitime — et c'est celui que le compteur doit rendre visible.
-STEP_LOG_SANS_SOCLE = f"""=== STEP-BY-STEP ACTION LOG ===
-================================================================================
-
-[10:00:00] === EPISODE 1 START ===
-[10:00:00] Scenario: scenario_bot-01
-[10:00:00] Opponent: SelfplayBot
-[10:00:00] Walls:
-[10:00:00] Objectives: rect b NW:{OBJECTIVES}
-[10:00:00] Board: cols=48 rows=60 inches_to_subhex=1 hex_radius=13.9 margin=5
-[10:00:00] Run rules: engagement_zone_subhex=2 engagement_zone_vertical_inches=5.0 metric.engagement=hex metric.ranged=hex move.thru_ez=True move.thru_enemy=False move.thru_friendly=True cohesion.model_subhex=2 cohesion.global_subhex=9 cohesion.min_neighbors=1
-[10:00:00] Unit 1 (SternguardVeteranBoltRifle) P1: Starting position (-1,-1), HP_MAX=2 base=round/1
-[10:00:00] Unit 2 (SternguardVeteranBoltRifle) P1: Starting position (-1,-1), HP_MAX=2 base=round/1
-[10:00:00] Unit 101 (AssaultIntercessor) P2: Starting position (-1,-1), HP_MAX=2 base=round/1
-[10:00:00] === ACTIONS START ===
-[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1({SHOOTER[0]},{SHOOTER[1]}) DEPLOYED from (-1,-1) to ({SHOOTER[0]},{SHOOTER[1]}) [R:+0.0] [MODELS: 1#0@({SHOOTER[0]},{SHOOTER[1]},z0)] [SUCCESS]
-[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 2({SHOOTER[0]},{SHOOTER[1] + 2}) DEPLOYED from (-1,-1) to ({SHOOTER[0]},{SHOOTER[1] + 2}) [R:+0.0] [MODELS: 2#0@({SHOOTER[0]},{SHOOTER[1] + 2},z0)] [SUCCESS]
-[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 101({PROCHE[0]},{PROCHE[1]}) DEPLOYED from (-1,-1) to ({PROCHE[0]},{PROCHE[1]}) [R:+0.0] [MODELS: 101#0@({PROCHE[0]},{PROCHE[1]},z0) 101#1@({LOIN[0]},{LOIN[1]},z0)] [SUCCESS]
-[10:00:02] E1 T1 P1 SHOOT : Unit 1({SHOOTER[0]},{SHOOTER[1]}) SHOT Unit 101({PROCHE[0]},{PROCHE[1]}) with [Sternguard Bolt Rifle] - Hit 4(5+) - Wound 5(4+) - Save 2(5+) - Dmg:2HP [R:+0.0] [MODELS: 1#0@({SHOOTER[0]},{SHOOTER[1]},z0)] [SHOOTER_MODELS: 1#0] [SUCCESS]
-[10:00:03] E1 T2 P1 SHOOT : Unit 2({SHOOTER[0]},{SHOOTER[1] + 2}) SHOT Unit 101({PROCHE[0]},{PROCHE[1]}) with [Sternguard Bolt Rifle] - Hit 4(5+) [R:+0.0] [MODELS: 2#0@({SHOOTER[0]},{SHOOTER[1] + 2},z0)] [SHOOTER_MODELS: 2#0] [SUCCESS]
-"""
+STEP_LOG_SANS_SOCLE = entete_step_log(
+    f"[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1({SHOOTER[0]},{SHOOTER[1]}) DEPLOYED from (-1,-1) to ({SHOOTER[0]},{SHOOTER[1]}) [R:+0.0] [MODELS: 1#0@({SHOOTER[0]},{SHOOTER[1]},z0)] [SUCCESS]\n"
+    f"[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 2({SHOOTER[0]},{SHOOTER[1] + 2}) DEPLOYED from (-1,-1) to ({SHOOTER[0]},{SHOOTER[1] + 2}) [R:+0.0] [MODELS: 2#0@({SHOOTER[0]},{SHOOTER[1] + 2},z0)] [SUCCESS]\n"
+    f"[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 101({PROCHE[0]},{PROCHE[1]}) DEPLOYED from (-1,-1) to ({PROCHE[0]},{PROCHE[1]}) [R:+0.0] [MODELS: 101#0@({PROCHE[0]},{PROCHE[1]},z0) 101#1@({LOIN[0]},{LOIN[1]},z0)] [SUCCESS]\n"
+    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1({SHOOTER[0]},{SHOOTER[1]}) SHOT Unit 101({PROCHE[0]},{PROCHE[1]}) with [Sternguard Bolt Rifle] - Hit 4(5+) - Wound 5(4+) - Save 2(5+) - Dmg:2HP [R:+0.0] [MODELS: 1#0@({SHOOTER[0]},{SHOOTER[1]},z0)] [SHOOTER_MODELS: 1#0] [SUCCESS]\n"
+    f"[10:00:03] E1 T2 P1 SHOOT : Unit 2({SHOOTER[0]},{SHOOTER[1] + 2}) SHOT Unit 101({PROCHE[0]},{PROCHE[1]}) with [Sternguard Bolt Rifle] - Hit 4(5+) [R:+0.0] [MODELS: 2#0@({SHOOTER[0]},{SHOOTER[1] + 2},z0)] [SHOOTER_MODELS: 2#0] [SUCCESS]\n",
+    board="cols=48 rows=60",
+    units=(
+        "[10:00:00] Unit 1 (SternguardVeteranBoltRifle) P1: Starting position (-1,-1), HP_MAX=2 base=round/1\n"
+        "[10:00:00] Unit 2 (SternguardVeteranBoltRifle) P1: Starting position (-1,-1), HP_MAX=2 base=round/1\n"
+        "[10:00:00] Unit 101 (AssaultIntercessor) P2: Starting position (-1,-1), HP_MAX=2 base=round/1\n"
+    ),
+    **{k: v for k, v in _COMMON.items() if k != "units"},
+)
 
 
 def test_un_tir_non_jugeable_est_compte_comme_tel(tmp_path):
