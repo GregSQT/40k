@@ -578,7 +578,12 @@ def handle_shoot(
                 "unit_positions": positions_for_engagement,
                 "unit_hp": engagement_hp,
                 "engagement_zone": _get_engagement_zone_for_analyzer(),
-                "position_override": target_pos,
+                # Ancre GELÉE, comme les socles de la ligne au-dessous et comme la mesure jumelle
+                # `shooter_engaged_with_target`. Elle vaut `target_pos` à la première ligne de
+                # l'activation ; aux suivantes, l'ancre du log peut avoir sauté sur un survivant.
+                # Les deux mesures décriraient alors deux instants différents — et la cible sans
+                # socles connus est mesurée COMME UN POINT, donc entièrement sur cette ancre.
+                "position_override": positions_for_engagement.get(target_id, target_pos),  # get allowed
                 "positions_by_model": engagement_models,
                 "unit_base": state.unit_base,
                 **state.engagement_3d_kwargs(),
@@ -803,13 +808,19 @@ def handle_shoot(
             # MESURÉ sur le run du 2026-08-12 (600 épisodes, 27 991 tirs) : les 31 verdicts
             # `out_of_range` étaient TOUS des artefacts — à portée avant les pertes, hors portée
             # après (E39 : 23 puis 27 pour une arme de 24). Zéro tir réellement illégal.
-            # `positions_by_model` est la source correcte, et elle est faite pour ça : elle porte
-            # l'état jusqu'à la ligne N-1, « qu'exigent les contrôles mesurés à la position de
-            # DÉPART » (`analyzer_core`). Sans elle, pas de verdict — mieux vaut ne pas juger que
-            # juger sur l'état d'après.
+            # La source est la géométrie GELÉE au Select Targets step (`engagement_models`), la
+            # même que les contrôles d'engagement ci-dessus. Elle vient de `positions_by_model`,
+            # état jusqu'à la ligne N-1 « qu'exigent les contrôles mesurés à la position de DÉPART »
+            # (`analyzer_core`), figé à la première ligne de l'activation.
+            # POURQUOI LE GEL, ET PAS LA CARTE VIVE : celle-ci est PURGÉE dès que la cible perd une
+            # figurine (le log ne dit pas laquelle). À partir de la deuxième ligne d'une activation
+            # qui a tué, la carte vive ne rendait plus AUCUN verdict de portée — une extinction
+            # silencieuse du contrôle, exactement ce que le journal ne montre pas. Le moteur, lui,
+            # juge la portée au Select Targets step, comme le ciblage 10.06 (`_target_within_half_
+            # range`, même instant).
             # Même famille que le contrôle « fight from non-adjacent », retiré le 2026-07-24 pour
             # cette raison exacte.
-            target_models = state.positions_by_model.get(target_id)  # get allowed
+            target_models = engagement_models.get(target_id)  # get allowed
             edge_dist = None if not target_models else squads_min_ranged_distance(
                 shooter_models, state.unit_base.get(shooter_id, _DEFAULT_BASE),  # get allowed
                 target_models, state.unit_base.get(target_id, _DEFAULT_BASE),  # get allowed

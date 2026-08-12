@@ -56,6 +56,41 @@ l'alternance 12.04.
 n'est plus engagée avec personne au moment de la mesure : la faute d'alternance devenait **invisible**.
 Même cause, verdict inverse — un faux négatif. Corrigé par le même gel.
 
+## Trois défauts du gel lui-même, trouvés en relecture (même jour)
+
+Le gel a été relu après livraison. Trois défauts, tous corrigés et verrouillés — les deux premiers
+sont des incohérences INTERNES au gel, le troisième un jumeau qu'il fallait traiter avec lui.
+
+**1. Un seul instant.** Une cible sans socles connus est mesurée comme un POINT : son ancre décide
+seule. La mesure 04.02 gardait l'ancre de la LIGNE quand sa jumelle 10.06 prenait l'ancre gelée. Dès
+que le moteur ré-ancre l'escouade sur un survivant en cours d'activation, les deux décrivaient deux
+instants différents et la faute disparaissait à la deuxième attaque.
+
+**2. Tout ou rien.** Le gel rendait l'ancre d'une cible sans lui rendre ses PV quand elle n'en avait
+plus au Select Targets step (tir sur une escouade déjà détruite — cas réel, il a son propre
+contrôle). Elle ressortait alors « unité sans données » à chaque ligne : une erreur de parsing
+inventée par le gel, que les cartes vives ne produisaient pas. La vivacité commande désormais les
+trois cartes d'un seul geste.
+
+**3. Le contrôle de PORTÉE, jumeau resté sur la carte vive.** Corrigé le matin même pour lire
+`positions_by_model`, il lisait la carte VIVE — purgée dès qu'une figurine de la cible tombe. Un tir
+qui tue ne rendait donc **aucun** verdict de portée, ni sur sa propre ligne ni sur le reste de
+l'activation : le contrôle ne se trompait plus, il se taisait. Il lit maintenant la même géométrie
+gelée que l'engagement — c'est aussi l'instant du moteur, qui juge la portée au Select Targets step
+(`_target_within_half_range`).
+
+MESURÉ sur le même journal, en comptant les deux sources ligne à ligne :
+
+| Lignes de tir à portée d'arme connue | verdicts rendus |
+|---|---|
+| carte vive (avant) | 18 702 / 29 664 — **37 % jugés par personne** |
+| géométrie gelée (après) | **29 664 / 29 664** |
+
+Le « 18 702 verdicts » que la livraison du matin citait comme preuve de non-aveuglement était donc
+déjà la mesure du trou, sans qu'on le sache : les 10 962 lignes manquantes sont exactement les tirs
+qui tuent. Et les 10 962 verdicts regagnés ne condamnent **aucun** tir — `Tirs hors portee` reste à
+0 / 0.
+
 ## Vérification sur le même journal, avant / après
 
 | | avant | après |
@@ -65,6 +100,10 @@ Même cause, verdict inverse — un faux négatif. Corrigé par le même gel.
 | Tirs `[CLOSE_QUARTERS]` classés « cible engagée » | 58 / 224 | 70 / 236 |
 | Tirs `[CLOSE_QUARTERS]` classés « cible non engagée » | 1157 / 1713 | 1145 / 1701 |
 | Usage de la règle CLOSE_QUARTERS (§1.8) | 13 825 | 13 849 |
+
+Ces chiffres isolent CETTE livraison (journal du 2026-08-12 14 h 14, rejoué avant/après sur la même
+base). Le rapport du jour affiche §1.2 à **2** et non 17 : les 15 restants étaient le contrôle
+« attaque non allouée », retiré le même jour par une livraison indépendante.
 
 Le total de tirs close-quarters ne bouge pas (1 215 / 1 937) : ce sont **24 tirs reclassés**, ceux
 dont la cible mourait du coup. Les 24 usages de règle en plus sont la même cause, au même endroit
@@ -89,9 +128,15 @@ famille. Quatre tests : les prémisses géométriques, la faute réelle (cible a
 tireur), le témoin négatif (allié à l'autre bout → aucune faute), et la faute qui doit **survivre au
 tir mortel**.
 
-Correctif retiré → `assert 2 == 0`, `assert 0 == 1` et `assert 0 == 1` (le faux positif de tir
-10.06, le faux négatif de mêlée 12.04, le faux négatif de tir 04.02) ; rétabli → verts. Les fichiers
-de test analyzer voisins (20 fichiers) restent verts.
+`tests/unit/ai/test_analyzer_select_targets_freeze.py` (nouveau) verrouille les deux contrats
+internes du gel (défauts 1 et 2 ci-dessus) : les deux lignes d'une activation jugent la MÊME ancre
+même après ré-ancrage, et une cible déjà détruite ne produit aucune erreur de parsing.
+`test_analyzer_range_uses_pre_loss_positions.py` gagne le cas du défaut 3 : une activation de deux
+tirs hors portée dont le premier tue — les DEUX doivent être comptés.
+
+Correctif retiré → `assert 2 == 0`, `assert 0 == 1`, `assert 0 == 1`, `assert 1 == 2`,
+`assert 0 == 2` et une erreur de parsing inventée ; rétabli → verts. Les fichiers de test analyzer
+voisins (20 fichiers) restent verts.
 
 ## Ce qui reste ouvert
 
