@@ -535,9 +535,24 @@ Prêts à démarrer sans décision produit :
   vivante** sur les 1747 lignes `NOT ALLOCATED` arbitrées par les instantanés `T{n} STATE:` du
   moteur. L'invariant 05 est désormais tenu par `tests/unit/engine/test_attack_allocation_contract.py`.
   → [`Implémenté/analyzer_retrait_controle_non_allouee_2026-08-12.md`](Implémenté/analyzer_retrait_controle_non_allouee_2026-08-12.md)
+- ✅ **L'engagement d'un tir se juge AVANT les pertes** — **LIVRÉ le 2026-08-12**. Même famille que
+  la ligne ci-dessus, autre canal : ce n'est plus `[TARGET_MODELS:]` qui fausse la mesure mais
+  l'état reconstruit lui-même. `analyzer_core` applique les dégâts d'une ligne AVANT de l'aiguiller
+  vers son handler ; une cible tuée par le tir qu'on juge est déjà retirée de `unit_hp` /
+  `unit_positions`, donc absente de l'énumération des ennemis — le tireur est déclaré « non engagé
+  avec sa cible » alors qu'il l'était quand le moteur a décidé. Mesuré : **1 verdict, 0 réel**
+  (E422, un pistolet tuant à bout portant l'unité avec laquelle il était engagé). Corrigé par un gel
+  au **Select Targets step de l'activation**, jumeau exact des gels d'effectif [BLAST] 24.05 déjà en
+  place — pas un instantané par ligne, qui laisserait la deuxième attaque juger sur les pertes de la
+  première. **Le jumeau mêlée portait le défaut SYMÉTRIQUE** : l'alternance 12.04 devenait aveugle
+  quand le coup hors tour tuait la cible (faux négatif), corrigé du même geste. Même journal
+  avant/après : 18 → 17 erreurs de tir, 24 tirs close-quarters reclassés « cible engagée », rien
+  d'autre ne bouge.
+  → [`Implémenté/analyzer_engagement_avant_pertes_2026-08-12.md`](Implémenté/analyzer_engagement_avant_pertes_2026-08-12.md)
 - 🔴 **Conformité moteur — les 53 erreurs que l'analyzer voit VRAIMENT** (ouvert le 2026-08-11,
-  **29 restantes** : la famille CC_NB, la plus lourde, est soldée le jour même ; la famille
-  « tirs hors portée » est soldée le 2026-08-12 — c'étaient des artefacts, cf. ci-dessus).
+  **26 restantes** : la famille CC_NB, la plus lourde, est soldée le jour même ; les familles
+  « tirs hors portée » et « tir engagé visant une unité non engagée » sont soldées le 2026-08-12 —
+  c'étaient des artefacts, cf. ci-dessus).
   Le rapport annonçait 370 erreurs sur le run du 2026-08-11 ; le nettoyage de l'outil de mesure
   (livré le même jour, cf. plus bas) en a supprimé 317 qui étaient des faux positifs de lecture.
   **Ce qui reste n'est plus imputable à l'analyzer** et désigne des règles appliquées de travers
@@ -553,7 +568,7 @@ Prêts à démarrer sans décision produit :
   | Fall-back qui finit ENGAGÉ | 2 | 3 | 09.07 |
   | Move normal finissant au contact | 1 | 4 | 09.05 |
   | ~~Tirs hors portée~~ **→ 0, ARTEFACTS (voir ci-dessous)** | ~~2~~ | ~~3~~ | 10 Shooting |
-  | Tir engagé visant une unité NON engagée avec le tireur | 0 | 3 | 10.06 |
+  | ~~Tir engagé visant une unité NON engagée avec le tireur~~ **→ 0, ARTEFACTS (voir ci-dessus)** | ~~0~~ | ~~3~~ | 10.06 |
   | Move normal PARTI d'un engagement | 0 | 2 | 09.05 |
   | Tir sur un ennemi engagé | 0 | 1 | 10.06 |
   | Mort « fantôme » (état reconstruit ≠ moteur) | 1 (total) | | — |
@@ -564,7 +579,9 @@ Prêts à démarrer sans décision produit :
   ⚠️ **Deux contrôles de §1.2 se sont ALLUMÉS** au même moment (tir engagé sur unité non engagée,
   tir sur ennemi engagé) : ils ne voyaient rien tant que l'arme des personnages rattachés n'était
   pas résolue. Le total d'une section qui MONTE après une correction de l'outil est le signe normal
-  d'un contrôle qui regardait dans le vide, jamais d'une régression.
+  d'un contrôle qui regardait dans le vide, jamais d'une régression. **Suite le 2026-08-12** : les
+  deux mesuraient l'engagement APRÈS les pertes de la ligne jugée — ce qu'ils voyaient en
+  s'allumant était un artefact, pas une faute du moteur (cf. la ligne ✅ ci-dessus).
   ✅ **« Attaques au-delà de CC_NB » : 24 → 0, LIVRÉ le 2026-08-11. Le moteur était JUSTE.**
   Les 24 lignes sont 19 activations, et **toutes les 19** portent l'une des deux seules armes
   `[CLEAVE:1]` du dépôt (`Two-Handed Big Choppa` NB 5, `Kustom Choppa` NB 6). Le dépassement vaut

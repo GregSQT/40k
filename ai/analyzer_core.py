@@ -847,6 +847,14 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 # que le handler de tir/combat ne voie la ligne, et la première ligne d'une
                 # séquence peut déjà avoir retiré un socle.
                 state.models_alive_pre_line = dict(state.unit_models_alive)
+                # Jumeaux géométriques du gel ci-dessus, pris au MÊME instant : les contrôles
+                # d'engagement (10.06, 04.02, alternance 12.04) se jugent au Select Targets step,
+                # et les dégâts appliqués juste en dessous retirent socles, PV et ancre de la
+                # cible. Sans ces instantanés, un handler n'a plus AUCUN moyen de savoir où était
+                # la cible quand le moteur a décidé (cf. `select_targets_engagement_maps`).
+                state.unit_hp_pre_line = dict(state.unit_hp)
+                state.unit_positions_pre_line = dict(state.unit_positions)
+                state.positions_by_model_pre_line = dict(state.positions_by_model)
 
                 # CRITICAL: Apply damage regardless of STEP marker
                 # Non-step lines still contain real attacks/shots and can kill units.

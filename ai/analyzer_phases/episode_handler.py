@@ -81,6 +81,9 @@ def handle_episode_start(state: "AnalyzerState", config: "AnalyzerConfig", line:
     # séquence sur l'effectif d'une partie précédente.
     state.shot_sequence_target_models = {}
     state.fight_sequence_target_models = {}
+    # Même durée de vie, même raison : la géométrie de cible figée d'un épisode précédent ferait
+    # juger un engagement sur une partie qui n'existe plus.
+    state.activation_target_geometry = {}
     state.last_fight_fighter_id = None
     state.last_fight_weapon = None
     state.last_fight_shooters = ()

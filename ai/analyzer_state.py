@@ -147,6 +147,22 @@ class AnalyzerState:
     #: Les dégâts sont appliqués par `analyzer_core` en amont de l'aiguillage vers les handlers :
     #: à l'ouverture d'une séquence, la première ligne a déjà pu retirer une figurine de la cible.
     models_alive_pre_line: Dict[str, int] = field(default_factory=dict)
+    #: JUMEAUX GÉOMÉTRIQUES de `models_alive_pre_line`, mêmes rythme et raison : vivacité, ancre
+    #: et socles de CHAQUE unité avant les dégâts de la ligne courante. Ce sont les seules
+    #: sources dont dispose un handler pour reconstituer l'état du Select Targets step — les
+    #: cartes vives, elles, portent déjà les pertes de la ligne qu'il est en train de juger.
+    unit_hp_pre_line: Dict[str, int] = field(default_factory=dict)
+    unit_positions_pre_line: Dict[str, Tuple[int, int]] = field(default_factory=dict)
+    positions_by_model_pre_line: Dict[str, Dict[str, Tuple[int, int]]] = field(default_factory=dict)
+    #: Géométrie de la CIBLE au Select Targets step, figée à la PREMIÈRE ligne de chaque
+    #: activation : `(clé) -> (ancre, PV de la figurine front, socles)`. Jumeau exact de
+    #: `shot_sequence_target_models` / `fight_sequence_target_models`, qui figent l'EFFECTIF de la
+    #: même cible au même instant et pour la même raison (24.05, 24.06). Clé préfixée par la
+    #: phase : les deux familles de clés n'ont ni la même forme ni la même durée de vie.
+    activation_target_geometry: Dict[
+        Tuple[Any, ...],
+        Tuple[Optional[Tuple[int, int]], Optional[int], Optional[Dict[str, Tuple[int, int]]]]
+    ] = field(default_factory=dict)
     last_shoot_shooter_id: Optional[str] = None
     last_shoot_weapon: Optional[str] = None
     last_shoot_target_id: Optional[str] = None
@@ -215,6 +231,60 @@ class AnalyzerState:
             "heights_by_model": self.heights_by_model,
             "unit_model_height": self.unit_model_height,
         }
+
+    def select_targets_engagement_maps(
+        self,
+        key: Tuple[Any, ...],
+        target_id: str,
+        log_anchor: Optional[Tuple[int, int]] = None,
+    ) -> Tuple[
+        Dict[str, Tuple[int, int]], Dict[str, int], Dict[str, Dict[str, Tuple[int, int]]]
+    ]:
+        """``(unit_positions, unit_hp, positions_by_model)`` avec la CIBLE telle qu'elle était au
+        Select Targets step de l'activation ``key``.
+
+        POURQUOI CETTE MÉTHODE EXISTE. Les dégâts d'une ligne sont appliqués par `analyzer_core`
+        AVANT que le handler ne voie cette ligne : quand un contrôle d'engagement s'exécute, la
+        cible a déjà encaissé les pertes de l'attaque qu'il prétend juger. `_apply_damage_and_
+        handle_death` purge alors ses socles (`positions_by_model`), et si elle meurt la retire de
+        `unit_hp` et `unit_positions`. Une cible morte disparaît de l'énumération des ennemis :
+        le tireur est déclaré « non engagé avec sa cible » — mesuré le 2026-08-12 (E422, un
+        pistolet tuant à bout portant l'unité avec laquelle il était engagé), et c'est la
+        troisième fois que ce dépôt juge une géométrie sur un état postérieur à la décision
+        (mêlée 2026-07-24, portée 2026-08-12).
+
+        POURQUOI PAR ACTIVATION, ET NON PAR LIGNE. 10.06 et 04.02 sont des règles de CIBLAGE :
+        le moteur les tranche au Select Targets step (`_shoot_engagement_blocks_target`), une
+        fois pour l'activation entière, avant d'en résoudre la moindre attaque. Un gel par ligne
+        laisserait la deuxième attaque d'une activation juger sur les pertes de la première —
+        même défaut, un tir plus tard. C'est déjà la raison d'être des gels d'effectif jumeaux
+        (`shot_sequence_target_models`, [BLAST] 24.05).
+
+        Les autres unités restent lues sur les cartes VIVES : une activation n'inflige de pertes
+        qu'à sa cible, et le reste du plateau doit rester au plus frais. ``log_anchor`` (ancre de
+        la cible portée par la ligne) prime sur l'ancre en cache, périmée dès que l'escouade perd
+        la figurine qui la portait.
+        """
+        frozen = self.activation_target_geometry.get(key)  # get allowed
+        if frozen is None:
+            frozen = (
+                log_anchor if log_anchor is not None else self.unit_positions_pre_line.get(target_id),  # get allowed
+                self.unit_hp_pre_line.get(target_id),  # get allowed
+                self.positions_by_model_pre_line.get(target_id),  # get allowed
+            )
+            self.activation_target_geometry[key] = frozen
+        anchor, hp, models = frozen
+        positions = dict(self.unit_positions)
+        hps = dict(self.unit_hp)
+        models_by_unit = dict(self.positions_by_model)
+        # Absence figée = absence restituée : une cible qui n'était DÉJÀ pas mesurable au Select
+        # Targets step ne doit pas le redevenir par la carte vive.
+        for carte, valeur in ((positions, anchor), (hps, hp), (models_by_unit, models)):
+            if valeur is None:
+                carte.pop(target_id, None)
+            else:
+                carte[target_id] = valeur
+        return positions, hps, models_by_unit
 
 
 def make_initial_state(stats: Dict) -> "AnalyzerState":

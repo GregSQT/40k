@@ -146,6 +146,14 @@ def handle_shoot(
     else:
         target_pos = None
 
+    # Cartes des CONTRÔLES D'ENGAGEMENT (10.06, 04.02), gelées au Select Targets step de cette
+    # activation : les dégâts de la ligne courante sont déjà appliqués ici, et une cible tuée par
+    # le tir qu'on juge sortait purement et simplement de l'énumération des ennemis. Détail et
+    # mesure : `AnalyzerState.select_targets_engagement_maps`.
+    engagement_positions, engagement_hp, engagement_models = state.select_targets_engagement_maps(
+        ("shoot",) + shot_activation_key, target_id, log_anchor=target_pos,
+    )
+
     # RULE: Dead unit shooting
     shooter_is_dead = shooter_id in state.unit_hp and require_key(state.unit_hp, shooter_id) <= 0
     if shooter_is_dead:
@@ -552,7 +560,7 @@ def handle_shoot(
             })
             target_engaged = False
         else:
-            missing_ids = [uid for uid in state.unit_positions if uid not in state.unit_hp or uid not in state.unit_player]
+            missing_ids = [uid for uid in engagement_positions if uid not in engagement_hp or uid not in state.unit_player]
             for missing_id in missing_ids:
                 stats['parse_errors'].append({
                     'episode': state.current_episode_num,
@@ -562,24 +570,24 @@ def handle_shoot(
                     'error': f"Engagement check missing unit data for unit_id: {missing_id}"
                 })
             positions_for_engagement = {
-                uid: pos for uid, pos in state.unit_positions.items()
-                if uid in state.unit_hp and uid in state.unit_player
+                uid: pos for uid, pos in engagement_positions.items()
+                if uid in engagement_hp and uid in state.unit_player
             }
             target_engagement_args = {
                 "unit_player": state.unit_player,
                 "unit_positions": positions_for_engagement,
-                "unit_hp": state.unit_hp,
+                "unit_hp": engagement_hp,
                 "engagement_zone": _get_engagement_zone_for_analyzer(),
                 "position_override": target_pos,
-                "positions_by_model": state.positions_by_model,
+                "positions_by_model": engagement_models,
                 "unit_base": state.unit_base,
                 **state.engagement_3d_kwargs(),
-                "subject_models": state.positions_by_model.get(target_id),  # get allowed
+                "subject_models": engagement_models.get(target_id),  # get allowed
             }
             target_engaged = is_within_engine_engagement_zone(
                 target_id, **target_engagement_args
             )
-    elif target_id in state.unit_positions:
+    elif target_id in engagement_positions:
         stats['parse_errors'].append({
             'episode': state.current_episode_num,
             'turn': turn,
@@ -597,7 +605,7 @@ def handle_shoot(
             })
             target_engaged = False
         else:
-            missing_ids = [uid for uid in state.unit_positions if uid not in state.unit_hp or uid not in state.unit_player]
+            missing_ids = [uid for uid in engagement_positions if uid not in engagement_hp or uid not in state.unit_player]
             for missing_id in missing_ids:
                 stats['parse_errors'].append({
                     'episode': state.current_episode_num,
@@ -607,8 +615,8 @@ def handle_shoot(
                     'error': f"Engagement check missing unit data for unit_id: {missing_id}"
                 })
             positions_for_engagement = {
-                uid: pos for uid, pos in state.unit_positions.items()
-                if uid in state.unit_hp and uid in state.unit_player
+                uid: pos for uid, pos in engagement_positions.items()
+                if uid in engagement_hp and uid in state.unit_player
             }
             target_pos_from_cache = positions_for_engagement.get(target_id)
             if target_pos_from_cache:
@@ -620,13 +628,13 @@ def handle_shoot(
                 target_engagement_args = {
                     "unit_player": state.unit_player,
                     "unit_positions": positions_for_engagement,
-                    "unit_hp": state.unit_hp,
+                    "unit_hp": engagement_hp,
                     "engagement_zone": _get_engagement_zone_for_analyzer(),
                     "position_override": target_pos_from_cache,
-                    "positions_by_model": state.positions_by_model,
+                    "positions_by_model": engagement_models,
                     "unit_base": state.unit_base,
                     **state.engagement_3d_kwargs(),
-                    "subject_models": state.positions_by_model.get(target_id),  # get allowed
+                    "subject_models": engagement_models.get(target_id),  # get allowed
                 }
                 target_engaged = is_within_engine_engagement_zone(
                     target_id, **target_engagement_args
@@ -662,10 +670,10 @@ def handle_shoot(
     shooter_engaged_at_all = is_within_engine_engagement_zone(
         shooter_id,
         state.unit_player,
-        state.unit_positions,
-        state.unit_hp,
+        engagement_positions,
+        engagement_hp,
         engagement_zone=_get_engagement_zone_for_analyzer(),
-        positions_by_model=state.positions_by_model,
+        positions_by_model=engagement_models,
         unit_base=state.unit_base,
         **state.engagement_3d_kwargs(),
         subject_models=state.current_line_models.get(shooter_id),  # get allowed
@@ -685,10 +693,13 @@ def handle_shoot(
         shooter_engaged_with_target = is_within_engine_engagement_zone(
             shooter_id,
             state.unit_player,
-            {target_id: (target_pos[0], target_pos[1])},
-            state.unit_hp,
+            # Ancre GELÉE, pas celle de la ligne : le moteur ré-ancre l'escouade sur un survivant
+            # dès qu'elle perd la figurine qui la portait, et les lignes suivantes de l'activation
+            # portent alors une ancre d'après les pertes.
+            {target_id: engagement_positions[target_id]} if target_id in engagement_positions else {},
+            engagement_hp,
             engagement_zone=_get_engagement_zone_for_analyzer(),
-            positions_by_model=state.positions_by_model,
+            positions_by_model=engagement_models,
             unit_base=state.unit_base,
             **state.engagement_3d_kwargs(),
             subject_models=state.current_line_models.get(shooter_id),  # get allowed
