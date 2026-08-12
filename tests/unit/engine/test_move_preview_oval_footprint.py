@@ -19,6 +19,8 @@ exactement celui que le predicat desactivait.
 
 from typing import Any, Dict, List, Tuple
 
+import pytest
+
 from engine.hex_utils import precompute_footprint_offsets, socle_is_single_hex
 from engine.phase_handlers.movement_handlers import movement_preview_move_plan
 from tests._state_invariants import turn_state_invariants, unit_invariants
@@ -98,6 +100,23 @@ def test_un_socle_oval_n_est_pas_mono_hex() -> None:
     assert socle_is_single_hex("square", 4) is False
     assert socle_is_single_hex("round", 1) is True
     assert socle_is_single_hex("round", 6) is False
+
+
+def test_un_socle_rond_de_taille_non_scalaire_n_est_pas_mono_hex() -> None:
+    """RESIDU DU PREDICAT NAIF, corrige le 2026-08-12 — la 3e occurrence de la meme divergence.
+
+    Un `round` porte un diametre SCALAIRE (`require_scalar_base_size` refuse tout le reste). La
+    branche `not isinstance(base_size, int)` qui survivait ici rendait donc `True` pour un etat
+    FAUX, et le declarait mono-hex : l'appelant sautait l'expansion d'empreinte et lisait une ancre
+    nue la ou `compute_occupied_hexes` LEVE. C'est le meme motif que l'oval du test precedent,
+    par l'autre bout de l'union etiquetee.
+    """
+    for taille in ([1, 1], [2, 2], (1, 1)):
+        assert socle_is_single_hex("round", taille) is False, (
+            f"round/{taille!r} est un etat corrompu, pas un socle mono-hex"
+        )
+    with pytest.raises(ValueError):
+        precompute_footprint_offsets("round", [1, 1], 0)
 
 
 def test_un_socle_oval_pose_sur_une_escouade_amie_est_refuse() -> None:

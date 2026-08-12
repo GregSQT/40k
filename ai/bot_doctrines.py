@@ -56,7 +56,8 @@ import numpy as np
 from engine import macro_intents as mi
 from engine.combat_utils import calculate_hex_distance
 from engine.game_state import (
-    objective_hex_sets, sum_objective_control_oc_multi, unit_is_within_objective,
+    fold_control_contributions, objective_control_contributions, objective_hex_sets,
+    unit_is_within_objective,
 )
 from engine.game_utils import get_effective_turn_limit
 from engine.objective_distance import objective_distance_maps
@@ -321,9 +322,9 @@ def _surplus_oc_by_zone(game_state, zones, me: int, sauf_escouade: str) -> List[
     plus qu'un comptage, donc plus rien a garder en phase.
 
     ⚠️ `sauf_escouade` est EXCLUE du total : sans ca, une escouade seule sur sa zone se verrait
-    elle-meme comme un encombrement et la quitterait aussitot. L'exclusion est faite A LA SOURCE
-    (`exclude_unit_id`) plutot que par soustraction apres coup — soustraire supposerait de
-    recalculer sa contribution ici, c'est-a-dire de reintroduire le second comptage.
+    elle-meme comme un encombrement et la quitterait aussitot. L'exclusion est un FILTRE sur les
+    contributions, jamais une question posee au moteur — le pourquoi est chez
+    `objective_control_contributions`. Ce qui reste ici est de l'addition, pas de la geometrie.
 
     Aucune memoire de tour n'est necessaire : les escouades s'activent l'une apres l'autre et
     l'etat est a jour entre deux activations, donc la presence physique porte deja les
@@ -331,9 +332,13 @@ def _surplus_oc_by_zone(game_state, zones, me: int, sauf_escouade: str) -> List[
     """
     if not zones:
         return []
-    sums = sum_objective_control_oc_multi(game_state, zones, exclude_unit_id=sauf_escouade)
+    contributions = objective_control_contributions(game_state, zones)
+    sauf = str(sauf_escouade)
+    sums = fold_control_contributions(
+        (part for squad_id, part in contributions.items() if squad_id != sauf), len(zones)
+    )
     mien = 0 if int(me) == 1 else 1
-    return [max(0.0, float(zone[mien]) - float(zone[1 - mien])) for zone in sums]
+    return [max(0.0, float(zone[mien] - zone[1 - mien])) for zone in sums]
 
 
 def _objective_terms(
@@ -402,7 +407,12 @@ def _objective_terms(
         # UNE soustraction par objectif et par DECISION (pas par candidate) : le cout est celui
         # d'un `np.subtract` sur la grille, deja paye par la memoisation des cartes.
         maps = [m - pull if pull else m for m, pull in zip(maps, pulls)]
-    combined = np.minimum.reduce(maps)
+    # FLOTTANT TOUJOURS. Les cartes du moteur sont des `int16` que les deux ponderations ci-dessus
+    # promeuvent en `float64` — mais seulement si elles s'appliquent, et « un surplus non nul » est
+    # une donnee de PARTIE, pas un reglage : sans cette conversion, le dtype du retour dependrait
+    # de l'etat du jeu. Un lecteur serait alors juste tant qu'aucun allie ne tient de zone, puis
+    # faux. `copy=False` : aucune copie quand la promotion a deja eu lieu.
+    combined = np.minimum.reduce(maps).astype(np.float64, copy=False)
     return combined, zones
 
 
@@ -612,8 +622,7 @@ class _DoctrineBot(_PlacementMemory):
                 # entiere du moteur : `_objective_terms` y a deja ajoute `w_crowd x surplus` et
                 # retranche le rabais de contestation, tous deux FRACTIONNAIRES. Tronquer ici
                 # annulait purement et simplement tout poids inferieur a 1 — `w_crowd: 0.5` avec
-                # un surplus de 1 rendait 5 + 0,5 -> 5, soit aucune penalite. Les cartes brutes
-                # etant des entiers, la conversion reste exacte quand les deux poids valent 0.
+                # un surplus de 1 rendait 5 + 0,5 -> 5, soit aucune penalite.
                 score -= w_obj * float(distance_map[dest[0], dest[1]])
                 if inside:
                     score += w_obj * hold_bonus
