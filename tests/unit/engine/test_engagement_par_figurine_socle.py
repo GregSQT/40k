@@ -383,20 +383,27 @@ def test_la_figurine_porte_sa_propre_hauteur(cas):
 
 
 def test_la_hauteur_se_lit_sur_la_figurine_puis_sur_l_escouade(cas):
-    """`_model_height_of` — source unique de l'héritage escouade→figurine (engagement 3D ET LoS tir).
+    """`_model_height_of` — source unique de l'héritage escouade→figurine (engagement 3D, LoS, 13.06).
 
-    Trois comportements, parce que les trois sont utilisés : la figurine prime, l'escouade prend
-    le relais quand la figurine ne porte rien (escouade homogène, états de test), et l'absence des
-    DEUX lève — une hauteur inventée serait une mesure fausse et silencieuse.
+    Quatre comportements, parce que les quatre sont utilisés : la figurine prime, l'escouade prend
+    le relais quand la figurine ne porte rien (escouade homogène, états de test), l'absence des
+    DEUX lève — une hauteur inventée serait une mesure fausse et silencieuse —, et une entrée qui
+    n'est PAS une figurine est refusée : y passer une ligne d'escouade ramènerait la hauteur du
+    BLOC, le défaut que ce chantier a corrigé sur onze sites de clairance.
     """
     from shared.data_validation import ConfigurationError
 
     from engine.phase_handlers.shared_utils import _model_height_of
 
-    assert _model_height_of({"MODEL_HEIGHT": 4.0}, {"MODEL_HEIGHT": 2.5}) == pytest.approx(4.0)
-    assert _model_height_of({}, {"MODEL_HEIGHT": 2.5}) == pytest.approx(2.5)
+    figurine = {"squad_id": "1", "MODEL_HEIGHT": 4.0}
+    escouade = {"MODEL_HEIGHT": 2.5}
+
+    assert _model_height_of(figurine, escouade) == pytest.approx(4.0)
+    assert _model_height_of({"squad_id": "1"}, escouade) == pytest.approx(2.5)
     with pytest.raises(ConfigurationError):
-        _model_height_of({}, {})
+        _model_height_of({"squad_id": "1"}, {})
+    with pytest.raises(ValueError, match="squad_id"):
+        _model_height_of(escouade, escouade)
 
 
 def test_l_entree_d_engagement_prend_la_hauteur_de_la_figurine(cas):

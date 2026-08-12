@@ -5833,13 +5833,25 @@ def _model_height_of(model_entry: Mapping[str, Any], squad_entry: Mapping[str, A
     """Hauteur (pouces) d une FIGURINE — source unique de l heritage escouade→figurine.
 
     Borne haute de l intervalle vertical [plancher, plancher + MODEL_HEIGHT] : elle sert
-    l engagement 3D (§03.04, 5\" vertical) comme la LoS 3D du tir. Elle se lit sur la figurine
-    quand elle la porte (`build_models_cache` la propage comme le socle) et sur l escouade sinon.
+    l engagement 3D (§03.04, 5\" vertical), la LoS 3D du tir et la clairance sous les etages
+    (§13.06). Elle se lit sur la figurine quand elle la porte (`build_models_cache` la propage
+    comme le socle) et sur l escouade sinon.
 
     L heritage n est PAS un repli anti-erreur : une escouade homogene ne stocke pas N fois la meme
     hauteur, exactement comme pour `BASE_SHAPE`/`BASE_SIZE`. L absence des DEUX leve (`require_key`)
     — une hauteur inventee est une mesure fausse, silencieuse.
+
+    `model_entry` doit etre une entree de `models_cache`, reconnaissable a sa cle `squad_id` : une
+    ligne d escouade y porterait la hauteur du BLOC, et la mesure serait fausse sans que rien ne le
+    dise. C est le defaut qui avait ete corrige sur onze sites de clairance ; le controle vit ici,
+    avec l heritage, plutot que devant une seule des portes qui l utilisent.
     """
+    if "squad_id" not in model_entry:
+        raise ValueError(
+            "_model_height_of: `model_entry` doit etre une FIGURINE (entree de `models_cache`, "
+            "reconnaissable a sa cle `squad_id`). Une ligne d escouade y ramenerait la hauteur du "
+            f"BLOC. Recu les cles : {sorted(model_entry)[:8]}"
+        )
     if "MODEL_HEIGHT" in model_entry:
         return float(model_entry["MODEL_HEIGHT"])
     return float(require_key(squad_entry, "MODEL_HEIGHT"))

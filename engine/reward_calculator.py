@@ -14,9 +14,9 @@ from engine.combat_utils import expected_dice_value
 from engine.phase_handlers.shared_utils import is_unit_alive
 from engine.game_utils import get_unit_by_id, once_claim, once_claimed
 from engine.game_state import (
-    iter_living_model_footprints,
     objective_hex_sets,
     primary_objective_points,
+    unit_is_within_objective,
 )
 from shared.data_validation import require_key
 
@@ -1299,23 +1299,30 @@ class RewardCalculator:
         on_objective_bonus = float(require_key(objective_rewards, "on_objective_bonus"))
 
         # LECTURE PAR FIGURINE (14.02), et non « l'ancre d'escouade est EGALE a un hexe
-        # d'objectif ». Deux erreurs cumulees dans la version precedente : l'ancre n'est pas une
+        # d'objectif ». Deux erreurs cumulees dans une version ancienne : l'ancre n'est pas une
         # figurine (une escouade etalee couvre la zone sans que son ancre y soit, et l'inverse),
         # et l'egalite de centre ignore l'EMPREINTE DE SOCLE, alors que le decompte de controle
         # du meme moteur (`sum_objective_control_oc_multi`) compte une figurine des qu'une case
-        # de son socle recouvre la zone. Ce bonus paie la progression vers un controle : il doit
-        # se juger comme le controle lui-meme, par le meme lecteur
-        # (`iter_living_model_footprints` / `objective_hex_sets`) que `unit_is_within_objective`.
-        # L'ordre des zones est celui de `game_state["objectives"]`, donc `zone_idx` designe le
-        # meme objectif ici et dans `get_objective_control`.
-        unit_id = str(require_key(unit, "id"))
-        for zone_idx, zone in enumerate(objective_hex_sets(game_state)):
-            in_zone = any(
-                not footprint.isdisjoint(zone)
-                for footprint in iter_living_model_footprints(game_state, unit_id)
-            )
-            if in_zone and get_objective_control(zone_idx, game_state) < 1.0:
-                return on_objective_bonus
+        # de son socle recouvre la zone. Ce bonus paie la progression vers un controle : il se
+        # juge donc par le MEME lecteur que le controle, et c'est `unit_is_within_objective` —
+        # une seule implementation de la traversee empreintes x zones, ici comme ailleurs.
+        #
+        # LE FILTRE PRECEDE LA TRAVERSEE, et c'est la tout l'interet : le controle ne depend pas
+        # de l'unite, donc il se lit N fois d'avance et reduit la question a « une figurine
+        # touche-t-elle l'une des zones QUI PAIENT ? ». Le cas frequent (aucune zone payante, ou
+        # aucune figurine dessus) ne deroule plus aucune empreinte. La version d'avant relancait
+        # le generateur d'empreintes POUR CHAQUE zone — cinq passes completes par appel, sur un
+        # chemin tire a CHAQUE action de move : mesure du 2026-08-12, 3,6x.
+        # `zone_idx` indexe `game_state["objectives"]`, la meme liste que `get_objective_control`.
+        payantes = [
+            zone
+            for zone_idx, zone in enumerate(objective_hex_sets(game_state))
+            if get_objective_control(zone_idx, game_state) < 1.0
+        ]
+        if not payantes:
+            return 0.0
+        if unit_is_within_objective(game_state, unit, payantes):
+            return on_objective_bonus
         return 0.0
 
     def wasted_reserve_penalty(self, wasted_count: int) -> float:

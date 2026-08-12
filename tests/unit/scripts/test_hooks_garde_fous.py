@@ -1,8 +1,9 @@
-"""Verrou des deux hooks de .claude/hooks/.
+"""Verrou des trois hooks de .claude/hooks/.
 
 Ces hooks portent des règles qui vivaient auparavant dans CLAUDE.md sous forme de texte, donc
 sans exécution : présence des sections du rapport de clôture, disposition du bloc RELIRE, refus
-de la vérification large. Un hook muet est indistinguable d'un hook conforme — d'où ce fichier.
+de la vérification large, liste des fichiers restant à relire. Un hook muet est indistinguable
+d'un hook conforme — d'où ce fichier.
 
 Les cas PASSANTS comptent autant que les cas bloquants : un hook qui réclame sur tout est ignoré
 aussi vite qu'un hook qui ne réclame rien laisse passer les défauts. Le cas central est celui du
@@ -25,6 +26,12 @@ CLAUDE_MD = RACINE / "CLAUDE.md"
 HOOKS = RACINE / ".claude" / "hooks"
 H_RAPPORT = HOOKS / "rapport-cloture.sh"
 H_DENY = HOOKS / "deny-verif-large.sh"
+H_ATTENTE = HOOKS / "relire-en-attente.sh"
+
+# Les listes sont nommées par le session_id, dont la FORME est contrôlée : un identifiant
+# fantaisiste est refusé, donc les tests emploient de vrais UUID.
+S1 = "11111111-1111-1111-1111-111111111111"
+S2 = "22222222-2222-2222-2222-222222222222"
 
 RAPPORT_CONFORME = """Fait.
 
@@ -32,8 +39,8 @@ LU : engine/x.py en entier, ses 3 appelants
 JUMEAU : grep -rn "foo" engine/ -> 2 hits, 2 traites
 COUVERTURE : tests/unit/engine/test_x.py::test_foo etendu ; aucun trou vu
 RELIRE :
-/code-review engine/x.py
-/simplify engine/x.py
+/code-review /home/greg/40k/engine/x.py
+/simplify /home/greg/40k/engine/x.py
 """
 
 WORKTREE_FILE = "/home/greg/40k/.claude/worktrees/sujet/engine/x.py"
@@ -74,12 +81,12 @@ def _say(text: str) -> dict:
     }
 
 
-def _rapport(tmp_path: Path, *entries: dict) -> str | None:
+def _rapport(tmp_path: Path, *entries: dict, hook: Path = H_RAPPORT) -> str | None:
     """Contexte injecté par le hook au prompt suivant, ou None s'il se tait."""
     transcript = tmp_path / "transcript.jsonl"
     transcript.write_text("".join(json.dumps(e) + "\n" for e in entries), encoding="utf-8")
     proc = subprocess.run(
-        [str(H_RAPPORT)],
+        [str(hook)],
         input=json.dumps(
             {
                 "transcript_path": str(transcript),
@@ -96,12 +103,15 @@ def _rapport(tmp_path: Path, *entries: dict) -> str | None:
     return json.loads(proc.stdout)["hookSpecificOutput"]["additionalContext"]
 
 
-def _sections_exigees() -> list[tuple[str, str]]:
-    """Liste lue PAR le hook, pas reparsée ici : reparser recréerait le doublon qu'on supprime."""
-    proc = subprocess.run(
-        [str(H_RAPPORT), "--sections"], capture_output=True, text=True, check=True
-    )
-    return [(nom, portee) for nom, portee in json.loads(proc.stdout)]
+def _config(hook: Path = H_RAPPORT) -> dict:
+    """Config lue PAR le hook, pas reparsée ici : reparser recréerait le doublon qu'on supprime."""
+    proc = subprocess.run([str(hook), "--config"], capture_output=True, text=True, check=True)
+    return json.loads(proc.stdout)
+
+
+def _config_refusee(hook: Path) -> bool:
+    """Le hook refuse-t-il de lire une config qu'il ne comprend pas entièrement ?"""
+    return subprocess.run([str(hook), "--config"], capture_output=True).returncode != 0
 
 
 def _labels_du_format_impose() -> list[str]:
@@ -139,6 +149,21 @@ def _run_deny(command: str) -> dict | None:
 # -------------------------------------------------------- source unique de la liste des sections
 
 
+def _hook_isole(tmp_path: Path, claude_md: str) -> Path:
+    """Copie du hook au-dessus d'un CLAUDE.md fabriqué, pour éprouver sa lecture de la config.
+
+    La ligne des fichiers-code est complétée si le cas sous test ne la fournit pas : chaque test
+    n'énonce ainsi que la ligne qu'il éprouve.
+    """
+    hooks = tmp_path / ".claude" / "hooks"
+    hooks.mkdir(parents=True)
+    shutil.copy(H_RAPPORT, hooks / H_RAPPORT.name)
+    if "FICHIERS COMPTÉS COMME CODE" not in claude_md:
+        claude_md += "\nFICHIERS COMPTÉS COMME CODE : `.py`, `CLAUDE.md`\n"
+    (tmp_path / "CLAUDE.md").write_text(claude_md, encoding="utf-8")
+    return hooks / H_RAPPORT.name
+
+
 def test_la_liste_vient_bien_de_claude_md(tmp_path: Path) -> None:
     """VERROU de la source unique : la liste est LUE, pas codée en dur dans le hook.
 
@@ -146,57 +171,20 @@ def test_la_liste_vient_bien_de_claude_md(tmp_path: Path) -> None:
     elle est réclamée, c'est bien le fichier qui commande. Sans ce test, un hook redevenu
     autonome passerait tous les autres.
     """
-    hooks = tmp_path / ".claude" / "hooks"
-    hooks.mkdir(parents=True)
-    shutil.copy(H_RAPPORT, hooks / H_RAPPORT.name)
-    (tmp_path / "CLAUDE.md").write_text(
-        "SECTIONS EXIGÉES : `LU`=toujours, `TOTO`=toujours\n", encoding="utf-8"
-    )
+    hook = _hook_isole(tmp_path, "SECTIONS EXIGÉES : `LU`=toujours, `TOTO`=toujours\n")
+    assert _config(hook)["sections"] == [["LU", "toujours"], ["TOTO", "toujours"]]
 
-    sections = json.loads(
-        subprocess.run(
-            [str(hooks / H_RAPPORT.name), "--sections"], capture_output=True, text=True, check=True
-        ).stdout
-    )
-    assert sections == [["LU", "toujours"], ["TOTO", "toujours"]]
-
-    transcript = tmp_path / "t.jsonl"
-    transcript.write_text(
-        "".join(
-            json.dumps(e) + "\n"
-            for e in (_user("corrige"), _edit("engine/x.py"), _say(RAPPORT_CONFORME))
-        ),
-        encoding="utf-8",
-    )
-    proc = subprocess.run(
-        [str(hooks / H_RAPPORT.name)],
-        input=json.dumps({"transcript_path": str(transcript)}),
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    contexte = json.loads(proc.stdout)["hookSpecificOutput"]["additionalContext"]
+    contexte = _rapport(tmp_path, _user("corrige"), _edit("engine/x.py"),
+                        _say(RAPPORT_CONFORME), hook=hook)
+    assert contexte is not None
     assert "TOTO" in contexte and "RELIRE" not in contexte
 
 
 def test_liste_illisible_est_signalee_et_non_ignoree(tmp_path: Path) -> None:
     """Un garde-fou qui ne peut plus lire sa liste le DIT — se taire le rendrait muet (T1)."""
-    hooks = tmp_path / ".claude" / "hooks"
-    hooks.mkdir(parents=True)
-    shutil.copy(H_RAPPORT, hooks / H_RAPPORT.name)
-    (tmp_path / "CLAUDE.md").write_text("plus aucune liste ici\n", encoding="utf-8")
-
-    transcript = tmp_path / "t.jsonl"
-    transcript.write_text(json.dumps(_user("q")) + "\n" + json.dumps(_say("r")) + "\n", "utf-8")
-    proc = subprocess.run(
-        [str(hooks / H_RAPPORT.name)],
-        input=json.dumps({"transcript_path": str(transcript)}),
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    contexte = json.loads(proc.stdout)["hookSpecificOutput"]["additionalContext"]
-    assert "SECTIONS EXIGÉES" in contexte
+    hook = _hook_isole(tmp_path, "plus aucune liste ici\n")
+    contexte = _rapport(tmp_path, _user("q"), _say("r"), hook=hook)
+    assert contexte is not None and "SECTIONS EXIGÉES" in contexte
 
 
 @pytest.mark.parametrize(
@@ -204,25 +192,63 @@ def test_liste_illisible_est_signalee_et_non_ignoree(tmp_path: Path) -> None:
     [
         # Une entrée qui perd ses backticks : le parse la sauterait et RELIRE disparaîtrait.
         "SECTIONS EXIGÉES : `LU`=toujours, JUMEAU=toujours, `RELIRE`=code",
-        # Liste repliée sur deux lignes : la seconde n'est jamais lue. Les deux ponctuations de
-        # continuation comptent — deviner laquelle laisse toujours une forme passer.
+        # Liste repliée sur deux lignes : la seconde n'est jamais lue. Les trois ponctuations de
+        # continuation comptent — deviner laquelle laisse toujours une forme passer, et le cas
+        # SANS ponctuation est le seul que la ligne elle-même ne trahit pas.
         "SECTIONS EXIGÉES : `LU`=toujours, `JUMEAU`=toujours,\n  `RELIRE`=code",
         "SECTIONS EXIGÉES : `LU`=toujours `JUMEAU`=toujours\n  `RELIRE`=code",
+        "SECTIONS EXIGÉES : `LU`=toujours\n  `RELIRE`=code",
+        # Repli dont la VIRGULE part à la ligne : l'amorce n'est alors pas un backtick.
+        "SECTIONS EXIGÉES : `LU`=toujours\n  , `RELIRE`=code",
         # Portée inventée : ni `toujours` ni `code`.
         "SECTIONS EXIGÉES : `LU`=parfois, `RELIRE`=code",
+        # Entrée reconnaissable MAIS noyée dans du texte : la nuance ne serait appliquée par
+        # personne, donc la ligne ne dit plus ce que le hook fait.
+        "SECTIONS EXIGÉES : `LU`=toujours sauf en doc, `RELIRE`=code",
+        # Source dédoublée : la seconde ligne ne commanderait rien, sans que rien ne le dise.
+        "SECTIONS EXIGÉES : `LU`=toujours\n\ntexte\n\nSECTIONS EXIGÉES : `RELIRE`=code",
     ],
 )
 def test_liste_partiellement_illisible_est_refusee(tmp_path: Path, ligne: str) -> None:
     """Un parse PARTIEL éteindrait RELIRE en silence — donc le contrôle des chemins en worktree."""
-    hooks = tmp_path / ".claude" / "hooks"
-    hooks.mkdir(parents=True)
-    shutil.copy(H_RAPPORT, hooks / H_RAPPORT.name)
-    (tmp_path / "CLAUDE.md").write_text(ligne + "\n", encoding="utf-8")
-
-    proc = subprocess.run(
-        [str(hooks / H_RAPPORT.name), "--sections"], capture_output=True, text=True
+    assert _config_refusee(_hook_isole(tmp_path, ligne + "\n")), (
+        "liste partiellement illisible acceptée sans bruit"
     )
-    assert proc.returncode != 0, "liste partiellement illisible acceptée sans bruit"
+
+
+def test_une_mention_illustrative_ailleurs_ne_tue_pas_le_hook(tmp_path: Path) -> None:
+    """Le contrôle du repli est borné à la ligne suivante, et doit le rester.
+
+    Compté sur tout le fichier, il ferait lever la lecture de la config dès qu'une puce cite une
+    entrée en exemple — et une exception éteint TOUT le contrôle de forme, pas seulement le
+    repli, sur un CLAUDE.md pourtant conforme.
+    """
+    hook = _hook_isole(
+        tmp_path,
+        "SECTIONS EXIGÉES : `LU`=toujours, `RELIRE`=code\n\n"
+        "- exemple documentaire : écrire `LU`=toujours signifie que la section est due partout.\n",
+    )
+    assert _config(hook)["sections"] == [["LU", "toujours"], ["RELIRE", "code"]]
+
+
+@pytest.mark.parametrize(
+    "voisine",
+    [
+        # L'AUTRE ligne déclarative : elles sont adjacentes dans CLAUDE.md, dans un ordre ou
+        # dans l'autre. Chercher un item n'importe où sur la ligne suivante rendait cet ordre
+        # mortel — les deux garde-fous éteints sur un fichier conforme.
+        "SECTIONS EXIGÉES : `LU`=toujours, `RELIRE`=code",
+        # La glose qui suit la ligne, dès qu'elle cite un item entre backticks.
+        "  (un suffixe comme `.py`, ou un nom entier comme `CLAUDE.md`)",
+        "- puce voisine citant `.sh` en exemple",
+    ],
+)
+def test_ligne_voisine_citant_un_item_n_est_pas_un_repli(tmp_path: Path, voisine: str) -> None:
+    """Un repli COMMENCE par l'item ; une ligne qui en cite un ailleurs n'en est pas un."""
+    claude_md = "FICHIERS COMPTÉS COMME CODE : `.py`, `CLAUDE.md`\n" + voisine + "\n"
+    if "SECTIONS EXIGÉES" not in voisine:
+        claude_md += "SECTIONS EXIGÉES : `LU`=toujours, `RELIRE`=code\n"
+    assert _config(_hook_isole(tmp_path, claude_md))["code_suffixes"] == [".py"]
 
 
 def test_modifier_claude_md_engage_couverture_et_relire(tmp_path: Path) -> None:
@@ -233,31 +259,30 @@ def test_modifier_claude_md_engage_couverture_et_relire(tmp_path: Path) -> None:
     assert "COUVERTURE" in contexte and "RELIRE" in contexte
 
 
-def test_portee_code_du_hook_est_celle_decrite_par_claude_md() -> None:
-    """L'autre face de la divergence : les puces de PORTÉE, pas seulement le gabarit.
+def test_portee_code_vient_aussi_de_claude_md(tmp_path: Path) -> None:
+    """La portée « qu'est-ce que du code » est déclarée au même endroit que les sections.
 
-    Le hook compte CLAUDE.md comme du code ; les puces COUVERTURE et RELIRE annoncent quand ces
-    sections sont dues. Une portée élargie dans le hook et tue dans les puces referait exactement
-    le défaut du 2026-08-12, à l'endroit voisin.
+    Elle vivait en dur dans le hook pendant que les puces COUVERTURE/RELIRE la décrivaient en
+    prose : deux exemplaires, donc la divergence du 2026-08-12 à l'endroit voisin. Ici on prouve
+    que c'est bien CLAUDE.md qui commande, suffixes comme noms entiers.
     """
-    basenames = json.loads(
-        subprocess.run(
-            [str(H_RAPPORT), "--code-basenames"], capture_output=True, text=True, check=True
-        ).stdout
+    reel = _config()
+    assert "CLAUDE.md" in reel["code_basenames"] and ".py" in reel["code_suffixes"]
+
+    hook = _hook_isole(
+        tmp_path,
+        "SECTIONS EXIGÉES : `COUVERTURE`=code\nFICHIERS COMPTÉS COMME CODE : `.zzz`, `INVENTE.md`\n",
     )
-    texte = CLAUDE_MD.read_text(encoding="utf-8")
-    for etiquette in ("COUVERTURE", "RELIRE"):
-        puce = re.search(
-            r"^- " + etiquette + r" : obligatoire.+?(?=\n- |\n\n)", texte, re.MULTILINE | re.DOTALL
-        )
-        assert puce is not None, f"la puce de portée de {etiquette} a disparu de CLAUDE.md"
-        for nom in basenames:
-            assert nom in puce.group(0), f"{nom} compte comme du code sans que {etiquette} le dise"
+    assert _config(hook)["code_suffixes"] == [".zzz"]
+    for fichier in ("a.zzz", "INVENTE.md"):
+        contexte = _rapport(tmp_path, _user("corrige"), _edit(fichier), _say("fait."), hook=hook)
+        assert contexte is not None and "COUVERTURE" in contexte
+    assert _rapport(tmp_path, _user("corrige"), _edit("a.py"), _say("fait."), hook=hook) is None
 
 
 def test_sections_du_hook_et_gabarit_de_claude_md_ne_divergent_pas() -> None:
     """Le défaut du 2026-08-12 : le hook réclamait COUVERTURE, la puce ne la listait pas."""
-    exigees = [nom for nom, _ in _sections_exigees()]
+    exigees = [nom for nom, _ in _config()["sections"]]
     labels = _labels_du_format_impose()
     assert set(exigees) <= set(labels), "section exigée par le hook mais absente du FORMAT IMPOSÉ"
     facultatives = _sections_declarees_facultatives()
@@ -268,7 +293,7 @@ def test_sections_du_hook_et_gabarit_de_claude_md_ne_divergent_pas() -> None:
 
 def test_portee_des_sections_est_celle_annoncee() -> None:
     """La liste reste lisible : rien d'autre que `toujours` / `code`, et RELIRE reste gaté code."""
-    sections = dict(_sections_exigees())
+    sections = dict(_config()["sections"])
     assert set(sections.values()) <= {"toujours", "code"}
     assert sections["LU"] == sections["JUMEAU"] == "toujours"
     assert sections["COUVERTURE"] == sections["RELIRE"] == "code"
@@ -342,14 +367,23 @@ def test_couverture_n_est_pas_exigee_sur_une_modification_de_doc(tmp_path: Path)
                     _say(doc)) is None
 
 
-def test_un_hook_shell_compte_comme_du_code(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "fichier",
+    [
+        ".claude/hooks/rapport-cloture.sh",
+        # Il n'ENREGISTRE pas moins les hooks que CLAUDE.md ne les configure : l'y retirer les
+        # éteint aussi sûrement, donc ce tour-là doit son rapport complet.
+        ".claude/settings.json",
+    ],
+)
+def test_un_fichier_qui_pilote_les_hooks_compte_comme_du_code(
+    tmp_path: Path, fichier: str
+) -> None:
     """Sinon le tour qui modifie un garde-fou serait le seul à n'en réclamer aucun."""
     ampute = "\n".join(
         ln for ln in RAPPORT_CONFORME.splitlines() if not ln.startswith("COUVERTURE")
     )
-    contexte = _rapport(
-        tmp_path, _user("corrige le hook"), _edit(".claude/hooks/rapport-cloture.sh"), _say(ampute)
-    )
+    contexte = _rapport(tmp_path, _user("corrige le hook"), _edit(fichier), _say(ampute))
     assert contexte is not None and "COUVERTURE" in contexte
 
 
@@ -368,15 +402,33 @@ def test_les_deux_commandes_de_relecture_sont_exigees(tmp_path: Path, manquante:
     assert contexte is not None and manquante in contexte
 
 
-def test_worktree_exige_des_chemins_absolus(tmp_path: Path) -> None:
-    """Défaut mesuré le 2026-08-08 : une review entière rendue sur le dépôt principal."""
-    contexte = _rapport(tmp_path, _user("corrige"), _edit(WORKTREE_FILE), _say(RAPPORT_CONFORME))
+@pytest.mark.parametrize("edite", ["engine/x.py", WORKTREE_FILE])
+def test_un_chemin_relatif_est_refuse_ou_que_l_on_travaille(tmp_path: Path, edite: str) -> None:
+    """Défaut mesuré le 2026-08-08 : une review entière rendue sur le dépôt principal.
+
+    Le paramètre `WORKTREE_FILE` n'est pas le cas intéressant — c'est `engine/x.py` : une session
+    worktree qui ne touche QUE le dépôt principal n'est pas distinguable d'une session normale
+    depuis les fichiers édités. L'exigence ne peut donc pas être conditionnelle.
+    """
+    relatif = RAPPORT_CONFORME.replace("/home/greg/40k/engine/x.py", "engine/x.py")
+    contexte = _rapport(tmp_path, _user("corrige"), _edit(edite), _say(relatif))
     assert contexte is not None and "ABSOLUS" in contexte
 
 
-def test_worktree_avec_chemins_absolus_ne_reclame_rien(tmp_path: Path) -> None:
-    absolu = RAPPORT_CONFORME.replace("engine/x.py", WORKTREE_FILE)
-    assert _rapport(tmp_path, _user("corrige"), _edit(WORKTREE_FILE), _say(absolu)) is None
+@pytest.mark.parametrize("argument", ["high", "--fix", "1234"])
+def test_un_argument_qui_n_est_pas_un_chemin_ne_declenche_rien(
+    tmp_path: Path, argument: str
+) -> None:
+    """Niveau d'effort, option, numéro de PR : ce que ces commandes acceptent en plus des chemins."""
+    avec = RAPPORT_CONFORME.replace("/code-review ", f"/code-review {argument} ")
+    assert _rapport(tmp_path, _user("corrige"), _edit("engine/x.py"), _say(avec)) is None
+
+
+def test_un_repertoire_relatif_est_refuse_comme_un_fichier(tmp_path: Path) -> None:
+    """`engine` n'a ni point ni slash : trié par ressemblance, il passait pour un mot ordinaire."""
+    dossier = RAPPORT_CONFORME.replace("/home/greg/40k/engine/x.py", "engine")
+    contexte = _rapport(tmp_path, _user("corrige"), _edit("engine/x.py"), _say(dossier))
+    assert contexte is not None and "ABSOLUS" in contexte
 
 
 def test_modification_de_doc_seule_n_exige_pas_relire(tmp_path: Path) -> None:
@@ -388,6 +440,28 @@ def test_modification_de_doc_seule_n_exige_pas_relire(tmp_path: Path) -> None:
 def test_modification_de_doc_exige_quand_meme_lu_et_jumeau(tmp_path: Path) -> None:
     assert _rapport(tmp_path, _user("corrige la doc"), _edit("Documentation/x.md"),
                     _say("fait.")) is not None
+
+
+def test_un_tour_qui_n_edite_qu_un_notebook_doit_quand_meme_son_rapport(tmp_path: Path) -> None:
+    """`NotebookEdit` nomme son argument `notebook_path` : lu nulle part, le tour passait pour vide.
+
+    Un tour vu comme sans modification ne se fait réclamer AUCUNE section — ni LU, ni JUMEAU.
+    """
+    carnet = {
+        "type": "assistant",
+        "message": {
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "tool_use",
+                    "name": "NotebookEdit",
+                    "input": {"notebook_path": "ai/explore.ipynb"},
+                }
+            ],
+        },
+    }
+    contexte = _rapport(tmp_path, _user("corrige le carnet"), carnet, _say("c'est corrigé."))
+    assert contexte is not None and "LU" in contexte
 
 
 def test_edition_d_un_sous_agent_n_engage_pas_le_rapport(tmp_path: Path) -> None:
@@ -459,3 +533,310 @@ def test_verification_large_refusee(command: str) -> None:
 )
 def test_verification_ciblee_et_delegation_passent(command: str) -> None:
     assert _run_deny(command) is None
+
+
+# ------------------------------------------------- liste des fichiers restant à relire (PostToolUse)
+
+
+CLAUDE_MD_MINIMAL = (
+    "SECTIONS EXIGÉES : `LU`=toujours, `RELIRE`=code\n"
+    "FICHIERS COMPTÉS COMME CODE : `.py`, `.sh`, `CLAUDE.md`\n"
+)
+
+
+def _bac(tmp_path: Path, claude_md: str = CLAUDE_MD_MINIMAL) -> Path:
+    """Copie des deux hooks dans un faux dépôt : la vraie liste de session ne doit pas bouger.
+
+    `relire-en-attente.sh` lit ce qui compte comme du code DANS son voisin, qui le lit dans
+    CLAUDE.md : le bac reproduit donc les trois pièces, sinon on ne teste pas le vrai chemin.
+    """
+    hooks = tmp_path / ".claude" / "hooks"
+    hooks.mkdir(parents=True)
+    shutil.copy(H_ATTENTE, hooks / H_ATTENTE.name)
+    shutil.copy(H_RAPPORT, hooks / H_RAPPORT.name)
+    (tmp_path / "CLAUDE.md").write_text(claude_md, encoding="utf-8")
+    return hooks / H_ATTENTE.name
+
+
+def _edite(hook: Path, chemin: str, session: str = S1, cwd: Path | None = None) -> str:
+    """Rejoue un PostToolUse d'édition. Rend ce que le hook a écrit sur stdout.
+
+    `cwd` compte : un chemin RELATIF dans le payload ne se résout que par rapport à lui.
+    """
+    proc = subprocess.run(
+        [str(hook)],
+        input=json.dumps({"session_id": session, "tool_input": {"file_path": chemin}}),
+        capture_output=True,
+        text=True,
+        check=True,
+        cwd=str(cwd) if cwd else None,
+    )
+    return proc.stdout
+
+
+def _cmd(hook: Path, *args: str) -> subprocess.CompletedProcess:
+    """Appel en ligne de commande, SANS check : l'échec fait partie de ce qu'on vérifie."""
+    return subprocess.run([str(hook), *args], capture_output=True, text=True)
+
+
+def _en_attente(hook: Path, session: str = S1) -> list[str]:
+    """Ce que `--liste` rend. Échec = liste absente, distinct d'une liste vide (il n'en existe pas).
+
+    `--liste` prend aussi un INSTANTANÉ de ce qu'il rend : c'est ce que `--vider` aura le droit
+    d'effacer. Les tests qui vérifient une liste passent donc par le même chemin que la production.
+    """
+    proc = _cmd(hook, "--liste", session)
+    assert proc.returncode == 0, proc.stderr
+    return [ln for ln in proc.stdout.splitlines() if ln.strip()]
+
+
+def test_un_fichier_de_code_entre_dans_la_liste(tmp_path: Path) -> None:
+    hook = _bac(tmp_path)
+    assert _edite(hook, str(tmp_path / "engine" / "x.py")) == ""  # aucun bruit sur stdout
+    assert _en_attente(hook) == [str(tmp_path / "engine" / "x.py")]
+
+
+def test_les_chemins_notes_sont_toujours_absolus(tmp_path: Path) -> None:
+    """Un relatif s'interprète depuis le cwd de la review, pas depuis le dépôt édité (2026-08-08).
+
+    Le cas qui a motivé la règle : une session worktree qui touche AUSSI le dépôt principal. Noté
+    en relatif, `CLAUDE.md` désignerait la copie du worktree — et `rapport-cloture.sh` rejetterait
+    le bloc RELIRE, les deux hooks se contredisant sur la liste que l'un produit pour l'autre.
+    """
+    hook = _bac(tmp_path)
+    (tmp_path / "engine").mkdir()
+    # Entrée RELATIVE, cwd = le dépôt : c'est le seul cas où la conversion peut échouer. L'alimenter
+    # en chemins déjà absolus laissait `chemin_note` réduite à `return chemin` passer tous les tests.
+    _edite(hook, "engine/x.py", cwd=tmp_path)
+    _edite(hook, str(tmp_path / ".claude" / "worktrees" / "sujet" / "engine" / "y.py"))
+    assert _en_attente(hook) == [
+        str(tmp_path / "engine" / "x.py"),
+        str(tmp_path / ".claude" / "worktrees" / "sujet" / "engine" / "y.py"),
+    ]
+
+
+def test_un_fichier_hors_liste_de_code_n_engage_aucune_relecture(tmp_path: Path) -> None:
+    hook = _bac(tmp_path)
+    _edite(hook, str(tmp_path / "Documentation" / "x.md"))
+    assert _cmd(hook, "--liste", S1).returncode != 0  # aucune liste n'a été créée
+
+
+def test_un_fichier_hors_depot_n_entre_pas(tmp_path: Path) -> None:
+    """Constaté le 2026-08-12 : trois scripts jetables du scratchpad attendaient d'être relus."""
+    hook = _bac(tmp_path)
+    dehors = tmp_path.parent / "scratchpad_migrate.py"
+    _edite(hook, str(dehors))
+    assert _cmd(hook, "--liste", S1).returncode != 0
+
+
+def test_ce_qui_compte_comme_du_code_vient_de_claude_md(tmp_path: Path) -> None:
+    """VERROU de la source unique : ce hook ne redéfinit pas sa propre liste de suffixes."""
+    hook = _bac(
+        tmp_path,
+        "SECTIONS EXIGÉES : `LU`=toujours, `RELIRE`=code\n"
+        "FICHIERS COMPTÉS COMME CODE : `.toto`\n",
+    )
+    _edite(hook, str(tmp_path / "engine" / "x.py"))
+    _edite(hook, str(tmp_path / "engine" / "x.toto"))
+    assert _en_attente(hook) == [str(tmp_path / "engine" / "x.toto")]
+
+
+def test_un_fichier_edite_deux_fois_ne_figure_qu_une_fois(tmp_path: Path) -> None:
+    """Le point de la demande : un sujet dure plusieurs tours, la liste ne doit pas gonfler."""
+    hook = _bac(tmp_path)
+    for _ in range(3):
+        _edite(hook, str(tmp_path / "engine" / "x.py"))
+    _edite(hook, str(tmp_path / "engine" / "y.py"))
+    assert _en_attente(hook) == [
+        str(tmp_path / "engine" / "x.py"),
+        str(tmp_path / "engine" / "y.py"),
+    ]
+
+
+def test_deux_sessions_ne_se_melangent_pas(tmp_path: Path) -> None:
+    """Sinon la review d'un sujet emporterait les fichiers d'une session parallèle."""
+    hook = _bac(tmp_path)
+    _edite(hook, str(tmp_path / "engine" / "x.py"), session=S1)
+    _edite(hook, str(tmp_path / "engine" / "autre.py"), session=S2)
+    assert _en_attente(hook, S1) == [str(tmp_path / "engine" / "x.py")]
+    assert _en_attente(hook, S2) == [str(tmp_path / "engine" / "autre.py")]
+
+
+def test_vider_efface_ce_qui_a_ete_relu(tmp_path: Path) -> None:
+    hook = _bac(tmp_path)
+    _edite(hook, str(tmp_path / "engine" / "x.py"))
+    _en_attente(hook)
+    assert _cmd(hook, "--vider", S1).returncode == 0
+    assert _cmd(hook, "--liste", S1).returncode != 0
+
+
+def test_vider_garde_ce_qui_est_arrive_apres_le_liste(tmp_path: Path) -> None:
+    """Sinon les corrections appliquées PAR la review sortent de la liste sans avoir été relues."""
+    hook = _bac(tmp_path)
+    _edite(hook, str(tmp_path / "engine" / "x.py"))
+    _en_attente(hook)
+    _edite(hook, str(tmp_path / "engine" / "corrige_par_la_review.py"))
+    assert _cmd(hook, "--vider", S1).returncode == 0
+    assert _en_attente(hook) == [str(tmp_path / "engine" / "corrige_par_la_review.py")]
+
+
+def test_vider_sans_liste_prealable_refuse(tmp_path: Path) -> None:
+    """`--vider` n'efface que du relu : sans `--liste`, rien n'a été relu, donc rien à effacer."""
+    hook = _bac(tmp_path)
+    _edite(hook, str(tmp_path / "engine" / "x.py"))
+    assert _cmd(hook, "--vider", S1).returncode != 0
+    assert _en_attente(hook) == [str(tmp_path / "engine" / "x.py")]
+
+
+def test_session_id_inconnu_echoue_au_lieu_de_rendre_une_liste_vide(tmp_path: Path) -> None:
+    """Une faute d'un caractère sautait la relecture en silence, ou relisait le sujet d'avant."""
+    hook = _bac(tmp_path)
+    _edite(hook, str(tmp_path / "engine" / "x.py"))
+    for commande in ("--liste", "--vider"):
+        proc = _cmd(hook, commande, S2)
+        assert proc.returncode != 0, commande
+    assert _en_attente(hook) == [str(tmp_path / "engine" / "x.py")]
+
+
+def test_argument_sans_flag_echoue(tmp_path: Path) -> None:
+    """`relire-en-attente.sh <uuid>`, flag oublié : sortait 0 et vide, donc « rien à relire »."""
+    hook = _bac(tmp_path)
+    _edite(hook, str(tmp_path / "engine" / "x.py"))
+    proc = _cmd(hook, S1)
+    assert proc.returncode != 0 and "flag inconnu" in proc.stderr
+
+
+def test_une_liste_ecrite_par_une_version_anterieure_est_reparee_a_la_lecture(
+    tmp_path: Path,
+) -> None:
+    """7 listes de production portaient des chemins relatifs et des scripts jetables (2026-08-12).
+
+    Elles ne peuvent pas être réécrites — elles appartiennent à d'autres sessions — donc c'est la
+    LECTURE qui répare : sans ça, ces sessions écrivent un RELIRE que le hook voisin refuse, et
+    relisent des scripts du scratchpad.
+    """
+    hook = _bac(tmp_path)
+    liste = tmp_path / ".claude" / "relire-en-attente" / f"{S1}.txt"
+    liste.parent.mkdir(parents=True)
+    liste.write_text(
+        f"engine/legacy.py\n/tmp/ailleurs/scratch.py\n{tmp_path / 'engine' / 'x.py'}\n",
+        encoding="utf-8",
+    )
+    assert _en_attente(hook) == [
+        str(tmp_path / "engine" / "legacy.py"),
+        str(tmp_path / "engine" / "x.py"),
+    ]
+
+
+def test_doublon_arrive_par_concurrence_est_gomme_a_la_lecture(tmp_path: Path) -> None:
+    """Deux éditions du même fichier dans un message = deux processus qui lisent la même liste.
+
+    Le dédoublonnage à l'écriture ne peut pas les voir ; celui à la lecture, si. La liste est écrite
+    à la main ici parce que la course elle-même n'est pas reproductible à volonté.
+    """
+    hook = _bac(tmp_path)
+    _edite(hook, str(tmp_path / "engine" / "x.py"))
+    liste = tmp_path / ".claude" / "relire-en-attente" / f"{S1}.txt"
+    liste.write_text(liste.read_text(encoding="utf-8") * 2, encoding="utf-8")
+    assert _en_attente(hook) == [str(tmp_path / "engine" / "x.py")]
+
+
+@pytest.mark.parametrize("hook_teste", ["attente", "rapport"])
+def test_flag_inconnu_echoue(tmp_path: Path, hook_teste: str) -> None:
+    """Sans ça, `--list` tombait dans le chemin de hook : rc=0, stdout vide, aucun signe.
+
+    Les deux hooks, parce qu'ils ont tous deux une interface en ligne de commande pour les tests et
+    pour l'agent : le défaut a été trouvé sur l'un puis retrouvé tel quel sur l'autre.
+    """
+    hook = _bac(tmp_path)
+    if hook_teste == "rapport":
+        hook = hook.parent / H_RAPPORT.name
+    proc = _cmd(hook, "--list")
+    assert proc.returncode != 0 and "flag inconnu" in proc.stderr
+
+
+@pytest.mark.parametrize("commande", ["--liste", "--vider"])
+def test_session_id_omis_refuse_au_lieu_de_deviner(tmp_path: Path, commande: str) -> None:
+    """Une seule liste présente NE prouve PAS qu'elle est la nôtre.
+
+    Mesuré le 2026-08-12 : une session qui n'avait rien édité récupérait puis EFFAÇAIT la liste de
+    la session parallèle, seule à avoir touché du code. Deviner est donc destructeur, pas pratique.
+    """
+    hook = _bac(tmp_path)
+    _edite(hook, str(tmp_path / "engine" / "x.py"), session=S2)
+    proc = _cmd(hook, commande)
+    assert proc.returncode != 0 and "session_id" in proc.stderr
+    assert _en_attente(hook, S2) == [str(tmp_path / "engine" / "x.py")]
+
+
+def test_session_id_qui_est_un_chemin_est_refuse(tmp_path: Path) -> None:
+    """L'id nomme un fichier : un chemin le ferait sortir du dossier des listes."""
+    hook = _bac(tmp_path)
+    proc = _cmd(hook, "--liste", str(tmp_path / "ailleurs"))
+    assert proc.returncode != 0 and "invalide" in proc.stderr
+
+
+def test_une_edition_de_notebook_entre_aussi_dans_la_liste(tmp_path: Path) -> None:
+    """`NotebookEdit` nomme son argument `notebook_path` : la brancher sur `file_path` la perdait."""
+    hook = _bac(
+        tmp_path,
+        "SECTIONS EXIGÉES : `LU`=toujours, `RELIRE`=code\nFICHIERS COMPTÉS COMME CODE : `.ipynb`\n",
+    )
+    carnet = tmp_path / "ai" / "explore.ipynb"
+    proc = subprocess.run(
+        [str(hook)],
+        input=json.dumps({"session_id": S1, "tool_input": {"notebook_path": str(carnet)}}),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert proc.stdout == ""
+    assert _en_attente(hook) == [str(carnet)]
+
+
+def test_session_id_absent_du_payload_est_signale_et_non_ignore(tmp_path: Path) -> None:
+    """Se taire laisserait croire la relecture à jour avec une liste vide (T1)."""
+    hook = _bac(tmp_path)
+    proc = subprocess.run(
+        [str(hook)],
+        input=json.dumps({"tool_input": {"file_path": str(tmp_path / "engine" / "x.py")}}),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    contexte = json.loads(proc.stdout)["hookSpecificOutput"]["additionalContext"]
+    assert "ne peut pas être tenue" in contexte
+
+
+def test_config_illisible_est_signalee_et_non_ignoree(tmp_path: Path) -> None:
+    """Même exigence que son voisin : un garde-fou muet est indistinguable d'un tour conforme.
+
+    Le message doit être DISTINCT de celui du session_id manquant : les deux pannes n'ont pas la
+    même réparation, et un test qui ne les distingue pas laisse passer l'une pour l'autre.
+    """
+    hook = _bac(tmp_path, "plus aucune liste ici\n")
+    contexte = json.loads(_edite(hook, str(tmp_path / "engine" / "x.py")))
+    assert "n'a pas pu être mise à jour" in contexte["hookSpecificOutput"]["additionalContext"]
+
+
+def test_ordre_des_deux_lignes_declaratives_est_indifferent(tmp_path: Path) -> None:
+    """Elles sont VOISINES dans CLAUDE.md : leur ordre suffisait à tuer les deux garde-fous.
+
+    Le garde anti-repli du voisin prenait la seconde déclaration pour la suite de la première, donc
+    `config()` levait sur un fichier conforme — plus aucune section vérifiée, plus aucune liste
+    tenue. Le test lit la config PAR le hook, sur les deux ordres.
+    """
+    hook = _bac(
+        tmp_path,
+        "FICHIERS COMPTÉS COMME CODE : `.py`, `CLAUDE.md`\n"
+        "SECTIONS EXIGÉES : `LU`=toujours, `RELIRE`=code\n",
+    )
+    _edite(hook, str(tmp_path / "engine" / "x.py"))
+    assert _en_attente(hook) == [str(tmp_path / "engine" / "x.py")]
+    # Vérifié sur le CONTENU, pas sur un rc=0 : un `config()` entièrement cassé sortirait 0 aussi.
+    voisin = hook.parent / H_RAPPORT.name
+    cfg = json.loads(_cmd(voisin, "--config").stdout)
+    assert cfg["sections"] == [["LU", "toujours"], ["RELIRE", "code"]]
+    assert cfg["code_suffixes"] == [".py"] and cfg["code_basenames"] == ["CLAUDE.md"]
+
+

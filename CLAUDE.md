@@ -142,6 +142,9 @@ Un autre mode est activé si et seulement si le message de l'utilisateur contien
   mesurer plutôt que déduire. Ça ne se coupe JAMAIS au nom du quota.
 → L'économie porte sur ce que j'ai à LIRE : pas de prose, pas de récap, pas de code recopié,
   pas d'étape narrée. Message court adossé à une vérification complète.
+→ Elle ne porte JAMAIS sur le PÉRIMÈTRE DE LA CONCEPTION proposée. Proposer la solution la plus
+  petite parce qu'elle s'explique en trois lignes est un défaut, pas une économie : c'est la
+  dette de T2 payée avec mon budget de lecture. La solution retenue est celle qui ferme le sujet.
 → « Ça coûtait trop de tokens » n'est jamais une raison de ne pas avoir vérifié.
   C'est une raison de ne pas me l'avoir raconté.
 L'autonomie est secondaire (cf. règles ASK 1 à 5).
@@ -211,6 +214,23 @@ explicitement. Elles ne concernent QUE le droit d'agir et le périmètre, jamais
 - Toujours expliquer l'hypothèse et le plan AVANT toute modification.
 - Une seule hypothèse à la fois.
 - Attendre confirmation avant de continuer.
+- OPTIONS OBLIGATOIRES — toute réponse qui propose une APPROCHE (conception, architecture, choix
+  de mécanisme, tout ce qui ne se réduit pas à un correctif dont la forme va de soi) la présente
+  au format A/B/C + `RECOMMANDATION` de l'ARBITRAGE (§RAPPORT DE CLÔTURE), avec ses contraintes
+  de lisibilité : DEUX ou TROIS conceptions RÉELLES, une à deux lignes chacune portant ce qu'elle
+  donne ET ce qu'elle coûte, puis la retenue et pourquoi elle ferme le sujet à LONG TERME.
+  * MOTIF, mesuré le 2026-08-12 : sans comparaison écrite, le premier jet est la solution qui
+    SUFFIT, et la seule chose qui l'évalue est l'utilisateur demandant « est-ce optimal ? » —
+    question à laquelle la réponse était systématiquement non, suivie d'une correction. La
+    comparaison doit donc précéder la proposition, pas la question.
+  * Une option ne compte que si elle est DÉFENDABLE : « ne rien faire » en est une, un épouvantail
+    non. Si une seule conception existe réellement, le dire et l'écrire — ce n'est pas un arbitrage,
+    c'est une décision, et l'annoncer comme telle est conforme.
+  * INTERDIT de recommander l'option la plus rapide, ou un enchaînement « A maintenant, B plus
+    tard » : c'est la dette déguisée en prudence que T2 refuse.
+  * Aucun hook ne tient cette règle : le tour qui propose ne modifie aucun fichier, donc rien ne
+    la constate à ma place. Elle ne tient que par le contrôle, avant d'envoyer une proposition,
+    que le bloc d'options y figure.
 
 3. SCOPE DE MODIFICATION PAR ITÉRATION
 - Par défaut : Une réponse = une modification ciblée.
@@ -325,8 +345,8 @@ conclusion, il ne s'y ajoute pas. Ne jamais y répéter ce qui vient d'être dit
   validé localement dans un fichier à cohérence globale n'est pas validé — c'est le défaut le
   plus fréquent de ce dépôt (cf. T4 JUMEAU).
 - RÉFS, ARBITRAGE et PROMPTS : omettre la section s'il n'y a réellement rien. Ne jamais écrire « néant ».
-- COUVERTURE : obligatoire dès qu'au moins un fichier de code a été modifié — CLAUDE.md compte
-  comme du code, il pilote les hooks — (même condition que RELIRE), omise sinon. Elle porte les DEUX faces exigées par T4 COUVERTURE : les tests écrits ou
+- COUVERTURE : obligatoire dès qu'au moins un fichier de code a été modifié (au sens de la ligne
+  FICHIERS COMPTÉS COMME CODE ci-dessous, même condition que RELIRE), omise sinon. Elle porte les DEUX faces exigées par T4 COUVERTURE : les tests écrits ou
   étendus, NOMMÉS, dans le harnais du code touché (pytest ou vitest), et les trous de couverture
   VUS et non traités.
   « aucun trou vu » est une réponse valide ; « rien à tester » n'en est pas une — un comportement
@@ -365,38 +385,61 @@ conclusion, il ne s'y ajoute pas. Ne jamais y répéter ce qui vient d'être dit
   * cette section ne dispense de RIEN : ce que l'agent savait faire dans le périmètre de clôture
     se fait, il ne se transforme pas en prompt (cf. T2). Un prompt n'est pas un moyen de sortir
     du périmètre du travail en cours.
-- RELIRE : obligatoire dès qu'au moins un fichier de code a été modifié — CLAUDE.md compte comme
-  du code, il pilote les hooks ; omise sinon (réponse pure lecture, doc seule, discussion). Lister les chemins RÉELLEMENT modifiés dans CETTE tâche,
-  jamais l'ensemble du working tree — copiables tels quels, sans reformulation. `/code-review`
+- RELIRE : obligatoire dès qu'au moins un fichier de code a été modifié (au sens de la ligne
+  FICHIERS COMPTÉS COMME CODE ci-dessous) ; omise sinon (pure lecture, doc seule, discussion).
+  Lister les chemins RÉELLEMENT modifiés depuis la dernière relecture — donc tout le SUJET, pas
+  seulement le dernier tour (cf. la liste accumulée ci-dessous), et jamais l'ensemble du working
+  tree. Copiables tels quels, sans reformulation. `/code-review`
   d'abord (bugs), `/simplify` ensuite (conception sur du code déjà correct).
 - RELIRE, EXÉCUTION — AUTORISATION PERMANENTE, acquise le 2026-08-12 : ces deux passes font partie
   de la CLÔTURE, pas de la vérification de l'utilisateur. L'agent les LANCE lui-même, sans le
-  demander, dès qu'un fichier de code a bougé. Motif : les faire porter par l'utilisateur, c'était
-  lui déléguer la fin du travail de l'agent, et il les relançait à chaque tâche.
-  * Enchaînement : `/code-review` sur les fichiers modifiés → traiter les findings AVEC scénario
+  demander. Motif : les faire porter par l'utilisateur, c'était lui déléguer la fin du travail de
+  l'agent, et il les relançait à chaque tâche.
+  * QUAND — une seule fois par SUJET, à la fin, et pas à chaque tour : seulement lorsque plus
+    aucune tâche demandée n'est ouverte ET que le rapport ne remonte AUCUN `ARBITRAGE`. Tant qu'un
+    arbitrage attend une réponse, le sujet n'est pas fini et le code peut encore changer : relire
+    maintenant, c'est relire deux fois. Dans ce cas la ligne RELIRE est écrite sans être exécutée,
+    et le `→` dit « différée, n fichiers en attente ».
+  * SUR QUOI — la liste ACCUMULÉE des fichiers de code édités depuis la dernière relecture, tenue
+    par `.claude/hooks/relire-en-attente.sh` (PostToolUse), à lire avec
+    `.claude/hooks/relire-en-attente.sh --liste <session_id>` et à effacer avec
+    `--vider <session_id>` APRÈS les passes. Le session_id est l'UUID du dossier qui CONTIENT ton
+    `scratchpad` (pas le dernier composant du chemin) ; il est toujours requis, car plusieurs
+    sessions travaillent en parallèle dans ce dépôt et le deviner revenait à relire — ou à
+    effacer — la liste d'une autre session.
+    JAMAIS `git status` : mesuré le 2026-08-12, le tree portait 38 fichiers modifiés pour une tâche
+    qui en touchait 2 — la review serait partie sur les chantiers des autres sessions.
+    Si le hook signale qu'il n'a pas pu tenir la liste, la tenir à la main et le dire.
+  * Enchaînement : `/code-review` sur cette liste → traiter les findings AVEC scénario
     (T4 CAUSE) → relancer `/code-review` si une correction a été appliquée. Dès qu'une passe ne
-    rend plus de finding avec scénario, lancer `/simplify`, traiter de même, et s'arrêter là.
+    rend plus de finding avec scénario, lancer `/simplify`, traiter de même, puis `--vider`.
   * Cette autorisation ne s'étend à RIEN d'autre : la VÉRIFICATION LARGE reste à l'utilisateur et
     garde son régime de délégation ponctuelle (cf. §TESTS ci-dessus).
   * Elle se suspend sur demande, pour la tâche en cours (« ne relance pas la review ») : la ligne
-    RELIRE est alors écrite sans être exécutée, et le `→` dit qu'elle ne l'a pas été.
+    RELIRE est alors écrite sans être exécutée, et le `→` dit qu'elle ne l'a pas été. La liste
+    n'est PAS vidée dans ce cas — elle attend le sujet suivant.
   * Le résultat de chaque passe se rend dans le `→` du bloc RELIRE, dans le message final unique.
     Un finding traité modifie du code : COUVERTURE et les autres lignes du rapport en tiennent
     compte, elles ne décrivent pas l'état d'avant la review.
-- RELIRE, CHEMINS : relatifs quand le travail a été fait dans le dépôt principal, ABSOLUS DANS LE
-  WORKTREE quand il y a été fait — jamais relatifs dans ce cas. Un chemin relatif désigne le
-  fichier du dépôt PRINCIPAL, qui porte le même nom sans porter la modification : la review relit
-  alors un chantier étranger sans que rien ne le signale (mesuré le 2026-08-08 — un verdict
-  entier, findings compris, rendu sur le mauvais code).
+- RELIRE, CHEMINS : ABSOLUS, c'est ce que rend la liste du hook, et c'est juste dans les deux
+  dépôts. Un chemin relatif s'interprète depuis le cwd de la review et non depuis le dépôt édité :
+  il désigne alors l'homonyme, qui porte le même nom sans porter la modification, et la review
+  relit un chantier étranger sans que rien ne le signale (mesuré le 2026-08-08 — un verdict entier,
+  findings compris, rendu sur le mauvais code). Le hook REFUSE tout chemin relatif, sans condition :
+  une session worktree qui ne touche que le dépôt principal ne se distingue d'une session normale
+  par aucun signe observable, donc l'exigence ne peut pas dépendre de l'endroit où l'on croit être.
 - FORME DU RAPPORT — tenue par un hook, pas par ta vigilance : `.claude/hooks/rapport-cloture.sh`
   vérifie, sur tout tour qui a modifié un fichier, la présence des sections listées à la ligne
-  ci-dessous, la disposition du bloc RELIRE (étiquette seule, une commande par ligne) et les
-  chemins absolus en worktree. Cette ligne est la SOURCE UNIQUE de la liste : le hook la LIT ici
+  ci-dessous, la disposition du bloc RELIRE (étiquette seule, une commande par ligne) et le
+  caractère absolu de ses chemins. Cette ligne est la SOURCE UNIQUE de la liste : le hook la LIT ici
   même, donc y ajouter ou en retirer une section change ce qu'il réclame, et
   `tests/unit/scripts/test_hooks_garde_fous.py` échoue si elle diverge du FORMAT IMPOSÉ ci-dessus.
   `=toujours` : due dès qu'un fichier a été modifié ; `=code` : due seulement si un fichier de
   code a bougé.
   SECTIONS EXIGÉES : `LU`=toujours, `JUMEAU`=toujours, `COUVERTURE`=code, `RELIRE`=code
+  FICHIERS COMPTÉS COMME CODE : `.py`, `.pyi`, `.sh`, `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`, `CLAUDE.md`, `settings.json`
+  (deuxième source unique, lue par le même hook : un suffixe, ou un nom entier pour un fichier
+  qui PILOTE les hooks — le modifier peut les éteindre, ce tour-là doit donc son rapport complet.)
   Il s'exécute au PROMPT SUIVANT, pas à la fin du tour : le transcript est
   écrit de façon asynchrone, et un contrôle branché sur la fin du tour prend un texte intermédiaire
   pour le rapport final (mesuré le 2026-08-12, il a bloqué le tour même qui l'installait). Donc si
@@ -508,6 +551,10 @@ A2. ANALYSE AVANT ACTION (RELÂCHÉE)
 - Expliquer l'hypothèse et le plan AVANT toute modification
 - Peut proposer plusieurs hypothèses si le prompt le permet
 - Peut continuer automatiquement si le prompt définit un workflow clair
+- Ce qui est RELÂCHÉ, c'est l'ATTENTE d'une confirmation, jamais la comparaison : les OPTIONS
+  OBLIGATOIRES d'ASK 2 valent aussi ici dès qu'une APPROCHE est proposée ou choisie en autonomie.
+  Un choix de conception fait sans écrire les options écartées reste un choix non justifié, que
+  l'agent attende une réponse ou non. Idem en MODE NUIT.
 
 A3. MODIFICATIONS MULTIPLES AUTORISÉES
 - Peut faire plusieurs modifications dans la même itération si le prompt le permet

@@ -200,8 +200,6 @@ def analyzer_config(**overrides: Any) -> AnalyzerConfig:
         "sustained_hits_by_weapon_global": {},
         "weapon_range_global": {},
         "weapon_is_close_quarters_global": {},
-        "rng_str_by_weapon_global": {},
-        "cc_str_by_weapon_global": {},
         "unit_toughness_by_type": {},
     }
     unknown = set(overrides) - set(fields)

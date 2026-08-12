@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional, Tuple
 
 from engine.reward_calculator import RewardCalculator
 
@@ -80,28 +80,64 @@ class TestDetermineWinner:
 # _calculate_on_objective_reward — cohérence avec le contrôle réel (01.07 + 14.02)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _objective_gs(battle_shocked: bool) -> Dict[str, Any]:
-    """Escouade de 2 figurines dont l'ANCRE est HORS de la zone et la SECONDE figurine dedans.
+def _objective_state(
+    models: List[Tuple[int, int]],
+    objectives: List[Tuple[str, Tuple[int, int], Optional[int]]],
+    *,
+    battle_shocked: bool = False,
+) -> Dict[str, Any]:
+    """État minimal pour ``_calculate_on_objective_reward`` : une escouade, N objectifs à 1 hexe.
 
-    Ce montage est ce qui rend le test non vacant : le bonus se juge par FIGURINE (14.02, meme
-    lecteur que ``sum_objective_control_oc_multi``), et une lecture a l'ancre d'escouade —
-    l'erreur classique de ce depot — rendrait 0.0 ici alors que l'escouade est bien sur
-    l'objectif. Les trois caches sont ceux que ``iter_living_model_footprints`` exige.
+    SOURCE UNIQUE de la forme du game_state pour ces tests — les trois caches sont ceux que
+    ``iter_living_model_footprints`` exige, et les recopier par test créait autant de points de
+    maintenance que de scénarios.
+
+    ``models`` : positions ``(col, row)`` des figurines vivantes. La PREMIÈRE porte aussi l'ancre
+    d'escouade, ce qui permet de monter le cas décisif de ce dépôt — ancre HORS de la zone,
+    figurine suivante dedans : le bonus se juge par FIGURINE (14.02), et une lecture à l'ancre
+    rendrait 0.0 alors que l'escouade est bien sur l'objectif.
+    ``objectives`` : ``(id, (col, row), contrôleur)``, ``None`` = zone neutre. L'ORDRE fixe le
+    ``zone_idx`` que lit ``get_objective_control``.
     """
-    unit = {"id": "1", "player": 1, "battle_shocked": battle_shocked}
+    unit: Dict[str, Any] = {"id": "1", "player": 1, "battle_shocked": battle_shocked}
+    anchor_col, anchor_row = models[0]
     return {
         "units": [unit],
         "unit_by_id": {"1": unit},
-        "units_cache": {"1": {"player": 1, "col": 3, "row": 3, "HP_CUR": 1, "orientation": 0}},
-        "squad_models": {"1": ["1#0", "1#1"]},
-        "models_cache": {
-            "1#0": {"col": 3, "row": 3, "HP_CUR": 1, "BASE_SHAPE": "round", "BASE_SIZE": 1},
-            "1#1": {"col": 5, "row": 5, "HP_CUR": 1, "BASE_SHAPE": "round", "BASE_SIZE": 1},
+        "units_cache": {
+            "1": {
+                "player": 1,
+                "col": anchor_col,
+                "row": anchor_row,
+                "HP_CUR": 1,
+                "orientation": 0,
+            }
         },
-        "objectives": [{"id": "obj1", "hexes": [{"col": 5, "row": 5}]}],
-        "objective_controllers": {"obj1": None},
+        "squad_models": {"1": [f"1#{i}" for i in range(len(models))]},
+        "models_cache": {
+            f"1#{i}": {
+                "col": col,
+                "row": row,
+                "HP_CUR": 1,
+                "BASE_SHAPE": "round",
+                "BASE_SIZE": 1,
+            }
+            for i, (col, row) in enumerate(models)
+        },
+        "objectives": [
+            {"id": obj_id, "hexes": [{"col": col, "row": row}]}
+            for obj_id, (col, row), _ in objectives
+        ],
+        "objective_controllers": {obj_id: ctrl for obj_id, _, ctrl in objectives},
         "current_player": 1,
     }
+
+
+def _objective_gs(battle_shocked: bool) -> Dict[str, Any]:
+    """Escouade de 2 figurines dont l'ANCRE est HORS de la zone et la SECONDE figurine dedans."""
+    return _objective_state(
+        [(3, 3), (5, 5)], [("obj1", (5, 5), None)], battle_shocked=battle_shocked
+    )
 
 
 def _objective_calculator() -> RewardCalculator:
@@ -132,3 +168,42 @@ class TestOnObjectiveRewardBattleShock:
         rc = _objective_calculator()
         result = {"unitId": "1", "toCol": 5, "toRow": 5}
         assert rc._calculate_on_objective_reward(_objective_gs(True), result) == 0.0
+
+
+#: Deux zones à un hexe chacune : l'index 0 est DÉJÀ contrôlé par le joueur 1 (il ne paie plus),
+#: l'index 1 est neutre (il paie). C'est le montage qui distingue les zones par leur index :
+#: confondre les deux inverse la réponse sur les deux tests ci-dessous.
+_ZONE_CONTROLEE = ("obj0", (3, 3), 1)
+_ZONE_NEUTRE = ("obj1", (7, 7), None)
+
+
+class TestOnObjectiveRewardMultiZone:
+    """Le bonus se lit ZONE PAR ZONE : seule une zone non contrôlée paie (14.02).
+
+    Le filtre de contrôle précède la traversée des empreintes ; ces tests verrouillent qu'il
+    porte bien sur la zone TOUCHÉE et non sur la première de la liste, et qu'il regarde TOUTES
+    les figurines et non la seule ancre.
+    """
+
+    def test_no_bonus_on_controlled_zone(self):
+        """obj_multi_controlled : unité sur la zone déjà contrôlée → rien à payer."""
+        rc = _objective_calculator()
+        gs = _objective_state([(3, 3)], [_ZONE_CONTROLEE, _ZONE_NEUTRE])
+        assert rc._calculate_on_objective_reward(gs, {"unitId": "1", "toCol": 3, "toRow": 3}) == 0.0
+
+    def test_bonus_on_uncontrolled_second_zone(self):
+        """obj_multi_uncontrolled : unité sur la zone neutre d'index 1 (pas 0) → bonus versé."""
+        rc = _objective_calculator()
+        gs = _objective_state([(7, 7)], [_ZONE_CONTROLEE, _ZONE_NEUTRE])
+        assert rc._calculate_on_objective_reward(gs, {"unitId": "1", "toCol": 7, "toRow": 7}) == 2.5
+
+    def test_bonus_when_only_second_model_reaches_uncontrolled_zone(self):
+        """obj_multi_fig : ancre sur la zone contrôlée, SECONDE figurine sur la zone neutre.
+
+        Non vacant : la lecture s'arrêtant à la première figurine — ou à l'ancre d'escouade,
+        l'erreur classique de ce dépôt — rendrait 0.0 alors que l'escouade progresse bien vers
+        un contrôle qu'elle n'a pas.
+        """
+        rc = _objective_calculator()
+        gs = _objective_state([(3, 3), (7, 7)], [_ZONE_CONTROLEE, _ZONE_NEUTRE])
+        assert rc._calculate_on_objective_reward(gs, {"unitId": "1", "toCol": 7, "toRow": 7}) == 2.5

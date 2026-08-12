@@ -27,7 +27,6 @@ from engine.spatial_relations import unit_entries_within_engagement_zone
 from tests.unit.engine._state_builders import synthetic_state, synthetic_unit
 
 ENGAGEMENT_ZONE = 2  # 2" (03.04) à x1 : 1 sous-hex = 1"
-MODEL_HEIGHT = 2.5
 
 #: Cible du pile-in. La figurine de TÊTE s'en rapproche : l'ancre est donc légale au regard du
 #: WHILE (« end closer »), ce qui isole la clause AFTER comme seule cause possible de refus.

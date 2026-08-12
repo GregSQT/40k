@@ -192,11 +192,6 @@ class AnalyzerConfig:
     sustained_hits_by_weapon_global: Dict[str, int]
     weapon_range_global: Dict[str, int]
     weapon_is_close_quarters_global: Dict[str, bool]
-    #: FORCE des armes, même structure et même raison que les cartes NB ci-dessus : le seuil de
-    #: blessure (05.02) est une fonction de (F de l'arme, E de la cible), et l'arme se résout PAR
-    #: FIGURINE — cinq armes s'appellent « Close Combat Weapon », de F 3 à 6.
-    rng_str_by_weapon_global: Dict[str, int]
-    cc_str_by_weapon_global: Dict[str, int]
     #: ENDURANCE par datasheet. Par FIGURINE et non par escouade : 19.02 impose la plus haute E
     #: des figurines bodyguard, jamais celle du leader rattaché.
     unit_toughness_by_type: Dict[str, int]
@@ -491,13 +486,7 @@ def load_analyzer_config() -> AnalyzerConfig:
     sustained_hits_by_weapon_global: Dict[str, int] = {}
     weapon_range_global: Dict[str, int] = {}
     weapon_is_close_quarters_global: Dict[str, bool] = {}
-    rng_str_by_weapon_global: Dict[str, int] = {}
-    cc_str_by_weapon_global: Dict[str, int] = {}
     for _ut, _limits in unit_attack_limits.items():
-        for _wname, _s in _limits["rng_str_by_weapon"].items():
-            rng_str_by_weapon_global[_wname] = max(rng_str_by_weapon_global.get(_wname, 0), _s)  # get allowed : max cumulatif, 0 = neutre
-        for _wname, _s in _limits["cc_str_by_weapon"].items():
-            cc_str_by_weapon_global[_wname] = max(cc_str_by_weapon_global.get(_wname, 0), _s)  # get allowed : max cumulatif, 0 = neutre
         for _wname, _nb in _limits["rng_nb_by_weapon"].items():
             rng_nb_by_weapon_global[_wname] = max(rng_nb_by_weapon_global.get(_wname, 0), _nb)  # get allowed : max cumulatif, 0 = neutre
         for _wname, _rf in _limits["rapid_fire_by_weapon"].items():
@@ -545,8 +534,6 @@ def load_analyzer_config() -> AnalyzerConfig:
         blast_by_weapon_global=blast_by_weapon_global,
         cleave_by_weapon_global=cleave_by_weapon_global,
         sustained_hits_by_weapon_global=sustained_hits_by_weapon_global,
-        rng_str_by_weapon_global=rng_str_by_weapon_global,
-        cc_str_by_weapon_global=cc_str_by_weapon_global,
         unit_toughness_by_type=unit_toughness_by_type,
         weapon_range_global=weapon_range_global,
         weapon_is_close_quarters_global=weapon_is_close_quarters_global,

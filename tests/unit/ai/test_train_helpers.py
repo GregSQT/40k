@@ -1,4 +1,5 @@
 import json
+import warnings
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -82,6 +83,188 @@ def test_make_constant_lr_schedule() -> None:
     assert sched(0.0) == pytest.approx(0.002), "l'optimizer doit partir de `initial`, pas de `final`"
     with pytest.raises(ValueError, match=r"learning_rate must be float or dict"):
         train._make_constant_lr_schedule(["bad"])
+
+
+def test_schedules_use_the_supported_sb3_api(monkeypatch) -> None:
+    """Aucun avertissement de depreciation ne doit sortir de la conversion des schedules.
+
+    ROUGE avant le 2026-08-12 : `get_schedule_fn()` (et le `constant_fn()` qu'il appelle) sont
+    depuis SB3 2.9 dans le bloc « Deprecated schedule functions » de
+    stable_baselines3/common/utils.py et emettent chacun un `UserWarning`. Les deux se voyaient
+    dans le resume de la suite, sur ce test-ci -- un avertissement qu'on apprend a ignorer est
+    un avertissement qui ne servira plus quand SB3 supprimera la fonction.
+
+    Les DEUX conversions sont exercees ici : celle du learning rate, et celle de `clip_range`,
+    qui passe par `_apply_curriculum_model_params` (le bloc autrefois duplique dans les deux
+    chemins de chargement --append, inatteignable depuis un test unitaire tant qu'il vivait au
+    milieu de deux fonctions de 700 lignes).
+    """
+    monkeypatch.setattr(train, "recreate_rollout_buffer", lambda model, log=print: None)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        train._make_constant_lr_schedule(0.002)
+        train._make_constant_lr_schedule({"initial": 0.002, "final": 0.0005, "decay_fraction": 0.9})
+        train._apply_curriculum_model_params(
+            SimpleNamespace(),
+            {"learning_rate": 0.002, "ent_coef": 0.03, "clip_range": 0.2},
+            log=lambda _msg: None,
+        )
+    # Filtre sur « deprecated » : le test porte sur l'API SB3 utilisee, pas sur le bruit qu'un
+    # import paresseux de torch/numpy peut emettre au premier appel (il ferait echouer ce test
+    # avec un message qui accuserait get_schedule_fn).
+    assert [str(w.message) for w in caught if "deprecated" in str(w.message)] == []
+
+    assert not hasattr(train, "get_schedule_fn"), (
+        "ai.train ne doit plus importer get_schedule_fn : c'est l'API depreciee."
+    )
+
+
+def test_apply_curriculum_model_params_writes_every_hyperparameter(monkeypatch) -> None:
+    """Le bloc --append doit poser TOUS les hyperparametres du run sur le modele charge.
+
+    `MaskablePPO.load` ecrase `__dict__` avec les hyperparametres du CHECKPOINT avant de rejouer
+    `_setup_model` : un hyperparametre oublie ici est la config du run ignoree en silence. Ce
+    bloc vivait en DOUBLE dans `create_multi_agent_model` et `train_with_scenario_rotation`, a
+    l'octet pres hormis la fonction de log ; le test suit desormais la fonction unique, et `log`
+    est le seul point de variation restant entre les deux appelants.
+
+    `lr_schedule` est verifie ici parce que c'est LUI que PPO lit pendant `train()` : ecrire
+    `learning_rate` seul laissait `_setup_model` imposer le taux du checkpoint pour tout le run.
+    """
+    rebuilds: list = []
+    monkeypatch.setattr(train, "recreate_rollout_buffer", lambda model, log=print: rebuilds.append(model))
+    model = SimpleNamespace()
+    lines: list[str] = []
+    params = {
+        "learning_rate": {"initial": 0.002, "final": 0.0005, "decay_fraction": 0.9},
+        "ent_coef": 0.03,
+        "clip_range": 0.2,
+        "gamma": 0.99,
+        "gae_lambda": 0.95,
+        "batch_size": 1020,
+        "n_epochs": 3,
+        "vf_coef": 1.0,
+        "max_grad_norm": 0.5,
+    }
+    train._apply_curriculum_model_params(model, params, log=lines.append)
+
+    assert model.learning_rate(1.0) == pytest.approx(0.002), "l'optimizer part de `initial`"
+    assert model.lr_schedule(1.0) == pytest.approx(0.002), "PPO ne lit QUE lr_schedule en train()"
+    assert model.lr_schedule(0.0) == pytest.approx(0.002), "constant : la rampe est au callback"
+    assert model.clip_range(1.0) == pytest.approx(0.2)
+    assert model.clip_range(0.0) == pytest.approx(0.2), "clip_range constant, aucune rampe"
+    assert (model.ent_coef, model.gamma, model.gae_lambda) == (0.03, 0.99, 0.95)
+    assert (model.batch_size, model.n_epochs) == (1020, 3)
+    assert (model.vf_coef, model.max_grad_norm) == (1.0, 0.5)
+    assert len(lines) == 1 and lines[0].startswith("✅ Applied new phase hyperparameters")
+
+    # `n_steps` est absent de `params` A DESSEIN : le buffer doit quand meme etre reconstruit,
+    # parce qu'il porte SA copie de gamma/gae_lambda et que ce sont eux qui viennent de changer.
+    assert not hasattr(model, "n_steps")
+    assert rebuilds == [model], "le rollout buffer doit etre reconstruit meme sans n_steps"
+
+
+def test_curriculum_clip_range_vf_null_is_business_not_missing(monkeypatch) -> None:
+    """`clip_range_vf: null` = « pas de clipping de la value function », valeur METIER de SB3.
+
+    Elle doit rester None (PPO teste `is not None` avant d'appliquer le clipping), et surtout ne
+    pas devenir un schedule constant a 0, qui gelerait la value function. Un 0 explicite, lui,
+    est REFUSE par `validate_curriculum_model_params` : `MaskablePPO._setup_model` l'assert a la
+    creation, mais ce controle-la ne s'execute pas sur un modele charge -- la meme config serait
+    rejetee en --new et acceptee en --append.
+
+    Le refus est teste sur la fonction de VALIDATION et non sur l'application : les deux
+    appelants l'invoquent hors de leur `try`, dont l'`except Exception` retomberait sinon sur un
+    modele neuf -- le refus de config deviendrait un abandon silencieux des poids de phase 1.
+    """
+    monkeypatch.setattr(train, "recreate_rollout_buffer", lambda model, log=print: None)
+    base = {"learning_rate": 0.002, "ent_coef": 0.03, "clip_range": 0.2}
+
+    model = SimpleNamespace()
+    train._apply_curriculum_model_params(model, {**base, "clip_range_vf": None}, log=lambda _m: None)
+    assert model.clip_range_vf is None
+
+    model = SimpleNamespace()
+    train._apply_curriculum_model_params(model, {**base, "clip_range_vf": 0.3}, log=lambda _m: None)
+    assert model.clip_range_vf(1.0) == pytest.approx(0.3)
+
+    with pytest.raises(ValueError, match=r"clip_range_vf doit etre > 0"):
+        train.validate_curriculum_model_params({**base, "clip_range_vf": 0})
+    train.validate_curriculum_model_params({**base, "clip_range_vf": None})
+    train.validate_curriculum_model_params(base)
+
+
+def test_curriculum_applies_discounts_before_rebuilding_the_buffer(monkeypatch) -> None:
+    """`gamma`/`gae_lambda` doivent etre poses AVANT `recreate_rollout_buffer`.
+
+    Le nouveau buffer copie les coefficients portes par le modele a l'instant de sa construction
+    (`RolloutBuffer.__init__`). Les ecrire apres laisserait le GAE du run sur le discount du
+    CHECKPOINT, sans le moindre signal -- et la suite resterait verte, puisque l'etat final du
+    modele serait juste. Seul l'ORDRE distingue les deux, d'ou ce test.
+    """
+    seen: dict = {}
+
+    def _spy(model, log=print) -> None:
+        seen["gamma"] = getattr(model, "gamma", None)
+        seen["gae_lambda"] = getattr(model, "gae_lambda", None)
+        seen["n_steps"] = getattr(model, "n_steps", None)
+
+    monkeypatch.setattr(train, "recreate_rollout_buffer", _spy)
+    train._apply_curriculum_model_params(
+        SimpleNamespace(),
+        {"learning_rate": 0.002, "ent_coef": 0.03, "clip_range": 0.2,
+         "gamma": 0.97, "gae_lambda": 0.9, "n_steps": 8192},
+        log=lambda _msg: None,
+    )
+    assert seen == {"gamma": 0.97, "gae_lambda": 0.9, "n_steps": 8192}
+
+
+def test_curriculum_covers_every_model_param(monkeypatch) -> None:
+    """Tout `model_params` d'un profil REEL doit atterrir sur le modele charge en --append.
+
+    La liste est derivee du fichier de config livre, pas recopiee ici : un hyperparametre ajoute
+    a un profil sans etre traite par `_apply_curriculum_model_params` rend ce test rouge, au lieu
+    d'etre pris au checkpoint en silence pendant tout un run.
+
+    ROUGE avant le 2026-08-12 sur `clip_range_vf`, `normalize_advantage` et `target_kl` : les
+    trois sont dans les neuf profils et aucun n'etait applique.
+    """
+    config_path = (
+        Path(__file__).resolve().parents[3]
+        / "config" / "agents" / "ArmageddonAgent" / "ArmageddonAgent_training_config.json"
+    )
+    profiles = json.loads(config_path.read_text(encoding="utf-8"))
+    # Poses ailleurs (log/verbosite/device) ou non modifiables sur un modele deja construit :
+    # `policy` et `policy_kwargs` decrivent le reseau, dont les poids sont precisement ce qu'on
+    # conserve. Les changer imposerait un `--new`, pas un `--append`.
+    NOT_CURRICULUM = {"policy", "policy_kwargs", "tensorboard_log", "verbose", "device"}
+
+    monkeypatch.setattr(train, "recreate_rollout_buffer", lambda model, log=print: None)
+    with_params = {
+        name: profile for name, profile in profiles.items()
+        if isinstance(profile, dict) and "model_params" in profile
+    }
+    # VERT VACANT : sans cette borne, une config renommee ou videe ferait passer le test en ne
+    # parcourant rien. Le nombre exact de profils, lui, n'est pas fige : en ajouter un est legitime.
+    assert len(with_params) >= 5, f"config sans profils exploitables : {sorted(profiles)}"
+
+    checked = 0
+    for name, profile in with_params.items():
+        # Comme en production : les deux appelants aplatissent la rampe `ent_coef` en un float
+        # AVANT de charger le modele (PPO n'accepte qu'un scalaire, la rampe est au callback).
+        # Sans cette passe le test poserait un dict sur `model.ent_coef`, valeur qui ferait
+        # crasher `PPO.train()` -- il verifierait une couverture que la production n'a pas.
+        model_params = train._model_params_with_ent_coef_frozen(
+            profile["model_params"], log=lambda _msg: None
+        )
+        model = SimpleNamespace()
+        train._apply_curriculum_model_params(model, model_params, log=lambda _msg: None)
+        expected = set(model_params) - NOT_CURRICULUM
+        missing = expected - set(vars(model))
+        assert not missing, f"profil {name} : {sorted(missing)} jamais applique au modele charge"
+        assert isinstance(model.ent_coef, float), f"profil {name} : ent_coef doit etre un scalaire"
+        checked += 1
+    assert checked == len(with_params)
 
 
 def test_load_configured_unit_rule_ids(tmp_path: Path) -> None:

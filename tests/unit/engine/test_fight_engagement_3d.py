@@ -21,13 +21,12 @@ from typing import Any, Dict, List, Sequence, Tuple
 import pytest
 
 from engine.phase_handlers import fight_handlers as fh
-from tests.unit.engine._state_builders import synthetic_state, synthetic_unit
+from tests.unit.engine._state_builders import MODEL_HEIGHT, synthetic_state, synthetic_unit
 
 
 ISH = 10                     # 1" = 10 sous-hexes → géométrie EUCLIDIENNE (cf. geometry_is_hex)
 ENGAGEMENT_ZONE = 2 * ISH    # 2" (03.04), déjà scalé comme le fait w40k_core au chargement
 VERTICAL_ZONE = 5.0          # 5" (03.04), en POUCES — jamais scalé
-MODEL_HEIGHT = 2.5
 FLOOR_HEIGHT = 10.0          # plancher très au-dessus des 5" → hors zone verticale
 
 # Plancher de niveau 1 : large, pour qu'un socle rond y tienne ENTIÈREMENT (13.06).
@@ -44,7 +43,6 @@ def _unit(uid: str, player: int, models: Sequence[Tuple[int, int, int]]) -> Dict
     return synthetic_unit(
         uid, player,
         [{"col": c, "row": r, "level": lv} for c, r, lv in models],
-        MODEL_HEIGHT=MODEL_HEIGHT,
     )
 
 

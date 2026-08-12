@@ -306,18 +306,11 @@ def low_clearance_ground_hexes(
     (égalité) autorisée. Retourne un set vide si aucun étage n'est trop bas. À unir aux murs pour le
     pathfinding AU SOL uniquement (la surface de l'étage, elle, reste praticable).
 
-    POURQUOI DEUX ENTRÉES ET NON UNE HAUTEUR. Cette fonction a longtemps pris un ``float`` nu : rien
-    ne distinguait alors « hauteur de la figurine » de « hauteur de l'escouade », et ses onze
-    appelants — des pools qui raisonnent par figurine pour tout le reste — passaient tous la
-    seconde. Le défaut a dû être corrigé site par site, puis surveillé par un test qui relisait le
-    TEXTE des handlers. En exigeant les deux entrées, la hauteur ne peut plus venir que de
-    ``_model_height_of``, seule source de l'héritage figurine→escouade.
-
-    LES DEUX RÔLES SONT VÉRIFIÉS, pas seulement documentés. Une signature à deux entrées de même
-    forme laisse écrire ``(units_cache[squad_id], unit)`` ou l'ordre inverse : la hauteur
-    d'escouade repasserait en silence, et c'est exactement le défaut d'origine. On exige donc la
-    MARQUE de chaque rôle — ``squad_id`` n'existe que sur une entrée de ``models_cache``, ``id``
-    que sur une unité. Les deux fautes lèvent au lieu de mesurer faux.
+    ``model_entry`` est une entrée de ``models_cache``, ``squad_entry`` la ligne de l'escouade :
+    la hauteur vient de ``_model_height_of``, seule source de l'héritage figurine→escouade, qui
+    REFUSE une entrée d'escouade en première position. Cette fonction a longtemps pris un ``float``
+    nu — rien ne distinguait alors les deux hauteurs, et ses onze appelants passaient tous celle de
+    l'escouade.
 
     ⚠️ Le set rendu est MÉMOÏSÉ par hauteur : les appelants le lisent, ils ne le mutent jamais. Une
     mutation en place corromprait la clairance de toutes les figurines de cette taille pour le
@@ -326,19 +319,6 @@ def low_clearance_ground_hexes(
     # cycle. Même convention que les autres primitives inter-modules de ce fichier.
     from engine.phase_handlers.shared_utils import _model_height_of
 
-    if "squad_id" not in model_entry:
-        raise ValueError(
-            "low_clearance_ground_hexes: `model_entry` doit être une entrée de `models_cache` "
-            "(une FIGURINE, reconnaissable à sa clé `squad_id`). La clairance se mesure par "
-            "figurine (§13.06) ; passer l'escouade y ramènerait le défaut que cette signature "
-            f"existe pour interdire. Reçu les clés : {sorted(model_entry)[:8]}"
-        )
-    if "id" not in squad_entry:
-        raise ValueError(
-            "low_clearance_ground_hexes: `squad_entry` doit être l'unité (`game_state['units']`, "
-            "reconnaissable à sa clé `id`) — elle ne sert que d'héritage quand la figurine ne "
-            f"porte pas sa hauteur. Reçu les clés : {sorted(squad_entry)[:8]}"
-        )
     return _floor_index(terrain_areas).low_clearance(
         _model_height_of(model_entry, squad_entry)
     )

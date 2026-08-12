@@ -26,6 +26,7 @@ import torch
 import gymnasium as gym
 from typing import Dict, Optional, Any, List, Set, Tuple, cast
 from stable_baselines3.common.callbacks import BaseCallback
+from stable_baselines3.common.utils import ConstantSchedule
 
 from engine.episode_schedule import ramp_progress
 from shared.data_validation import require_key, require_positive_int, require_present
@@ -252,7 +253,12 @@ class LearningRateScheduleCallback(_EpisodeRampCallback):
         model = self.model
         model.learning_rate = value
         # PPO uses lr_schedule internally during train(); keep it aligned with episode-based LR.
-        model.lr_schedule = lambda _progress_remaining: value
+        # `ConstantSchedule` et non un lambda : `lr_schedule` n'est PAS dans les
+        # `_excluded_save_params` de SB3, il part donc dans chaque .zip sauvegarde. Un lambda n'est
+        # pas picklable, ce qui force la serialisation cloudpickle PAR VALEUR du code objet a
+        # chaque `model.save()` (mesure : 721 octets contre 279, et une archive liee au bytecode
+        # de l'interpreteur qui l'a ecrite). La classe SB3 dit la meme chose et se pickle.
+        model.lr_schedule = ConstantSchedule(value)
         if hasattr(model, 'policy') and hasattr(model.policy, 'optimizer'):
             for param_group in model.policy.optimizer.param_groups:
                 param_group["lr"] = value

@@ -92,7 +92,7 @@ MASKABLE_PPO_AVAILABLE = True
 from stable_baselines3.common.callbacks import EvalCallback, CheckpointCallback, BaseCallback, CallbackList
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv, VecNormalize, VecEnv  # VecEnv : resout la forward-ref de GymEnv pour get_type_hints()
-from stable_baselines3.common.utils import get_schedule_fn  # Convert float hyperparameters to callable schedules
+from stable_baselines3.common.utils import ConstantSchedule, FloatSchedule  # Convert float hyperparameters to callable schedules
 from stable_baselines3.common.type_aliases import GymEnv
 
 
@@ -207,10 +207,104 @@ def _make_constant_lr_schedule(lr_config):
     Documentation/AI_TRAINING.md, section « Rampes learning_rate / ent_coef ».
     """
     if isinstance(lr_config, (int, float)):
-        return get_schedule_fn(float(lr_config))
+        return ConstantSchedule(float(lr_config))
     if isinstance(lr_config, dict):
-        return get_schedule_fn(float(lr_config["initial"]))
+        return ConstantSchedule(float(lr_config["initial"]))
     raise ValueError(f"learning_rate must be float or dict with initial/final, got {type(lr_config)}")
+
+
+def validate_curriculum_model_params(model_params: dict) -> None:
+    """Refuse une config que `--append` accepterait alors que `--new` la rejette.
+
+    `MaskablePPO._setup_model` assert `clip_range_vf > 0` (sb3_contrib/ppo_mask/ppo_mask.py:177),
+    mais il ne s'execute qu'a la CREATION du modele : sur un modele charge, `clip_range_vf: 0`
+    passait sans un mot et gelait la value function pour tout le run.
+
+    A APPELER AVANT le `try` de chargement des deux appelants, jamais dedans : leur
+    `except Exception` retombe sur la construction d'un modele neuf, ce qui transformerait ce
+    refus de config en abandon SILENCIEUX des poids de la phase 1.
+    """
+    clip_vf = model_params.get("clip_range_vf")
+    if clip_vf is not None and not clip_vf > 0:
+        raise ValueError(
+            f"model_params.clip_range_vf doit etre > 0 (ou null pour desactiver le clipping "
+            f"de la value function), got {clip_vf}"
+        )
+
+
+def _apply_curriculum_model_params(model, model_params: dict, log=print) -> None:
+    """CURRICULUM LEARNING : applique les hyperparametres du run a un modele CHARGE.
+
+    Permet a une phase 2 (`--append`) de tourner avec d'autres learning rate, entropie, clip...
+    que la phase 1, en conservant les poids appris. `MaskablePPO.load` rejoue bien `_setup_model`,
+    mais APRES avoir ecrase `__dict__` avec les hyperparametres du CHECKPOINT
+    (stable_baselines3/common/base_class.py:738-740) : tout ce qu'il derive — `lr_schedule`,
+    `clip_range`, le rollout buffer — vient donc de la phase precedente. Sans cette passe, la
+    config du run serait ignoree en silence.
+
+    Les deux chemins de chargement (`create_multi_agent_model`, `train_with_scenario_rotation`)
+    portaient ce bloc en DOUBLE, a l'octet pres hormis la fonction de log — 28 lignes a maintenir
+    deux fois. `log` absorbe toute la variation (`print` d'un cote, `chunk_log` de l'autre), et
+    c'est la seule raison pour laquelle le parametre existe.
+
+    La liste ci-dessous doit couvrir TOUT `model_params` hors `policy`, `policy_kwargs`,
+    `tensorboard_log`, `verbose` et `device` (poses ailleurs, ou non modifiables sur un modele
+    charge). Trois y manquaient tant qu'elle etait dupliquee — `clip_range_vf`,
+    `normalize_advantage` et `target_kl`, presents dans les neuf profils : un run --append les
+    prenait au checkpoint. `tests/unit/ai/test_train_helpers.py::test_curriculum_covers_every_model_param`
+    derive la liste attendue du fichier de config REEL, donc un hyperparametre ajoute a un profil
+    sans etre traite ici rend le test rouge.
+
+    `clip_range` et `clip_range_vf` passent par `FloatSchedule`, EXACTEMENT ce que
+    `MaskablePPO._setup_model` leur applique lui-meme (sb3_contrib/ppo_mask/ppo_mask.py:174-179) :
+    la conversion faite ici est le jumeau de la sienne, et elle accepte aussi bien un float qu'un
+    callable deja pret. `clip_range_vf: null` reste None — c'est la valeur METIER « pas de clipping
+    de la value function », que SB3 teste explicitement, pas une absence a combler.
+
+    `lr_schedule` est ecrit EN PLUS de `learning_rate` : SB3 ne lit que le premier une fois le
+    modele construit, et `_setup_model` l'a derive du learning_rate du CHECKPOINT. Sans cette ligne, un profil
+    a learning_rate SCALAIRE (aucun `LearningRateScheduleCallback` n'est alors installe, cf.
+    `setup_callbacks`) s'entrainait en --append au rythme de la phase precedente pendant que le
+    log annoncait le nouveau. Les neuf profils livres declarent une rampe (dict), ce qui masquait
+    le trou : le callback ecrase `lr_schedule` a `_on_training_start`.
+    """
+    if "learning_rate" in model_params:
+        model.learning_rate = _make_constant_lr_schedule(model_params["learning_rate"])
+        model.lr_schedule = model.learning_rate
+    if "ent_coef" in model_params:
+        model.ent_coef = model_params["ent_coef"]
+    if "clip_range" in model_params:
+        model.clip_range = FloatSchedule(model_params["clip_range"])
+    if "clip_range_vf" in model_params:
+        clip_vf = model_params["clip_range_vf"]
+        model.clip_range_vf = None if clip_vf is None else FloatSchedule(clip_vf)
+    if "normalize_advantage" in model_params:
+        model.normalize_advantage = model_params["normalize_advantage"]
+    if "target_kl" in model_params:
+        model.target_kl = model_params["target_kl"]
+    if "gamma" in model_params:
+        model.gamma = model_params["gamma"]
+    if "gae_lambda" in model_params:
+        model.gae_lambda = model_params["gae_lambda"]
+    # Reconstruction INCONDITIONNELLE du rollout buffer, et APRES n_steps/gamma/gae_lambda : le
+    # buffer recopie les trois a sa construction (`RolloutBuffer.__init__`, buffers.py:386-387) et
+    # c'est SA copie que lit `compute_returns_and_advantage`. La conditionner a `n_steps` — sa
+    # seule raison d'etre historique, le redimensionnement — laissait un profil qui change le
+    # discount sans toucher n_steps calculer son GAE avec le gamma du CHECKPOINT, pendant que le
+    # log annoncait l'autre. Sans changement de taille, une reallocation d'un buffer vide.
+    if "n_steps" in model_params:
+        model.n_steps = model_params["n_steps"]
+    recreate_rollout_buffer(model, log=log)
+    if "batch_size" in model_params:
+        model.batch_size = model_params["batch_size"]
+    if "n_epochs" in model_params:
+        model.n_epochs = model_params["n_epochs"]
+    if "vf_coef" in model_params:
+        model.vf_coef = model_params["vf_coef"]
+    if "max_grad_norm" in model_params:
+        model.max_grad_norm = model_params["max_grad_norm"]
+
+    log(f"✅ Applied new phase hyperparameters: lr={model.learning_rate}, ent={model.ent_coef}, clip={model.clip_range}")
 
 
 def _load_configured_unit_rule_ids(project_root_path: str) -> Set[str]:
@@ -2131,40 +2225,31 @@ def create_multi_agent_model(config, training_config_name, rewards_config_name, 
             model.logger.record = _filtered_record
     elif append_training:
         print(f"📁 Loading existing model for continued training: {model_path}")
+        # Le `try` n'enveloppe QUE le chargement. Il couvrait aussi toute la configuration qui
+        # suit : une config refusee (type invalide, cle manquante, `clip_range_vf: 0`) y devenait
+        # « Failed to load model » puis un modele NEUF, c'est-a-dire les poids de la phase 1 jetes
+        # en silence sur un run qui demandait explicitement --append. Le repli n'a de sens que
+        # pour un checkpoint reellement illisible ; une config fausse doit lever.
         try:
             model = MaskablePPO.load(model_path, env=env, device=device)
+        except Exception as e:
+            print(f"⚠️ Failed to load model: {e}")
+            print("🆕 Creating new model instead...")
+            tb_log_name = f"{training_config_name}_{agent_key}"
+            specific_log_dir = os.path.join(model_params["tensorboard_log"], tb_log_name)
+            os.makedirs(specific_log_dir, exist_ok=True)
+            model_params_copy = model_params.copy()
+            model_params_copy["tensorboard_log"] = specific_log_dir
+            if "learning_rate" in model_params_copy and isinstance(model_params_copy["learning_rate"], dict):
+                model_params_copy["learning_rate"] = _make_constant_lr_schedule(model_params_copy["learning_rate"])
+            model = MaskablePPO(env=env, **model_params_copy)
+        else:
             if "tensorboard_log" not in model_params:
                 raise KeyError("model_params missing required 'tensorboard_log' field")
             model.tensorboard_log = model_params["tensorboard_log"]
             model.verbose = model_params["verbose"]
 
-            # CURRICULUM LEARNING: Apply new phase hyperparameters to loaded model
-            # This allows Phase 2 to use different learning rates, entropy, etc. than Phase 1
-            # while preserving the neural network weights learned in Phase 1
-            if "learning_rate" in model_params:
-                model.learning_rate = _make_constant_lr_schedule(model_params["learning_rate"])
-            if "ent_coef" in model_params:
-                model.ent_coef = model_params["ent_coef"]
-            if "clip_range" in model_params:
-                # Convert to callable schedule function (required by PPO)
-                model.clip_range = get_schedule_fn(model_params["clip_range"])
-            if "gamma" in model_params:
-                model.gamma = model_params["gamma"]
-            if "gae_lambda" in model_params:
-                model.gae_lambda = model_params["gae_lambda"]
-            if "n_steps" in model_params:
-                model.n_steps = model_params["n_steps"]
-                recreate_rollout_buffer(model)
-            if "batch_size" in model_params:
-                model.batch_size = model_params["batch_size"]
-            if "n_epochs" in model_params:
-                model.n_epochs = model_params["n_epochs"]
-            if "vf_coef" in model_params:
-                model.vf_coef = model_params["vf_coef"]
-            if "max_grad_norm" in model_params:
-                model.max_grad_norm = model_params["max_grad_norm"]
-
-            print(f"✅ Applied new phase hyperparameters: lr={model.learning_rate}, ent={model.ent_coef}, clip={model.clip_range}")
+            _apply_curriculum_model_params(model, model_params)
 
             # CRITICAL FIX: Reinitialize logger after loading from checkpoint
             # This ensures PPO training metrics (policy_loss, value_loss, etc.) are logged correctly
@@ -2808,36 +2893,11 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         model = MaskablePPO(env=env, **model_params_copy)
     elif append_training:
         chunk_log(f"📁 Loading existing model for continued training: {model_path}")
+        validate_curriculum_model_params(model_params)  # HORS du try : cf. sa docstring
         try:
             model = MaskablePPO.load(model_path, env=env, device=device)
 
-            # CURRICULUM LEARNING: Apply new phase hyperparameters to loaded model
-            # This allows Phase 2 to use different learning rates, entropy, etc. than Phase 1
-            # while preserving the neural network weights learned in Phase 1
-            if "learning_rate" in model_params:
-                model.learning_rate = _make_constant_lr_schedule(model_params["learning_rate"])
-            if "ent_coef" in model_params:
-                model.ent_coef = model_params["ent_coef"]
-            if "clip_range" in model_params:
-                # Convert to callable schedule function (required by PPO)
-                model.clip_range = get_schedule_fn(model_params["clip_range"])
-            if "gamma" in model_params:
-                model.gamma = model_params["gamma"]
-            if "gae_lambda" in model_params:
-                model.gae_lambda = model_params["gae_lambda"]
-            if "n_steps" in model_params:
-                model.n_steps = model_params["n_steps"]
-                recreate_rollout_buffer(model, log=chunk_log)
-            if "batch_size" in model_params:
-                model.batch_size = model_params["batch_size"]
-            if "n_epochs" in model_params:
-                model.n_epochs = model_params["n_epochs"]
-            if "vf_coef" in model_params:
-                model.vf_coef = model_params["vf_coef"]
-            if "max_grad_norm" in model_params:
-                model.max_grad_norm = model_params["max_grad_norm"]
-
-            chunk_log(f"✅ Applied new phase hyperparameters: lr={model.learning_rate}, ent={model.ent_coef}, clip={model.clip_range}")
+            _apply_curriculum_model_params(model, model_params, log=chunk_log)
 
             # CRITICAL FIX: Reinitialize logger after loading from checkpoint
             # This ensures PPO training metrics (policy_loss, value_loss, etc.) are logged correctly

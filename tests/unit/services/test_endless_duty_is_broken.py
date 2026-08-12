@@ -23,6 +23,8 @@ import pytest
 from ai.unit_registry import UnitRegistry
 from services.endless_duty_runtime import ED_SCENARIO_DEFAULT, _build_unit_from_registry
 
+pytestmark = pytest.mark.anomaly
+
 _DOC = "Documentation/Implémentation/A_faire/Endless_duty_etat_mesure.md"
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
@@ -111,6 +113,10 @@ def test_obstacle_6_ed_unit_builder_does_not_emit_what_the_engine_reads(registry
     assert built["MOVE"] == 6, (
         f"MOVE = {built['MOVE']!r} : la conversion subhex a peut-être été ajoutée (attendu 30 pour "
         f"inches_to_subhex=5). Obstacle 6 levé ? Mettre à jour {_DOC}."
+    )
+    assert built.get("RNG_WEAPONS"), (
+        f"RNG_WEAPONS absent ou vide dans la sortie de _build_unit_from_registry : "
+        f"la structure a changé — mettre à jour {_DOC}."
     )
     assert built["RNG_WEAPONS"][0]["RNG"] == 18, (
         f"Portée = {built['RNG_WEAPONS'][0]['RNG']!r} : la conversion subhex des armes a peut-être "

@@ -36,6 +36,7 @@
 # seule à avoir édité du code (mesuré le 2026-08-12).
 import json
 import os
+import re
 import sys
 from importlib import util
 from importlib.machinery import SourceFileLoader
@@ -43,6 +44,18 @@ from importlib.machinery import SourceFileLoader
 RACINE = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 DOSSIER = os.path.join(RACINE, ".claude", "relire-en-attente")
 VOISIN = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rapport-cloture.sh")
+FORME_UUID = re.compile(r"[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}")
+
+
+_VOISIN_CHARGE = None
+
+
+def voisin():
+    """Le module voisin, chargé UNE fois par processus (il relit CLAUDE.md à chaque `config()`)."""
+    global _VOISIN_CHARGE
+    if _VOISIN_CHARGE is None:
+        _VOISIN_CHARGE = _rapport_cloture()
+    return _VOISIN_CHARGE
 
 
 def _rapport_cloture():
@@ -75,20 +88,20 @@ def _rapport_cloture():
 
 def est_du_code(chemin):
     """Vrai si ce fichier engage une relecture, selon la SEULE liste du dépôt (CLAUDE.md)."""
-    cfg = _rapport_cloture().config()
+    cfg = voisin().config()
     return chemin.endswith(tuple(cfg["code_suffixes"])) or os.path.basename(chemin) in cfg[
         "code_basenames"
     ]
 
 
 def dans_le_depot(chemin):
-    """Vrai si le fichier appartient au dépôt — worktrees inclus, ils vivent sous `.claude/`.
+    """Appartenance au dépôt, telle que le VOISIN la définit — jamais une seconde définition ici.
 
     Un script jetable écrit dans le scratchpad est du `.py`, mais le relire n'a aucun sens : il ne
     sera pas livré. Constaté le 2026-08-12 : trois `migrate_*.py` du scratchpad figuraient dans une
     liste de production et seraient partis en review.
     """
-    return os.path.abspath(chemin).startswith(RACINE + os.sep)
+    return voisin().dans_le_depot(chemin)
 
 
 def chemin_note(chemin):
@@ -113,16 +126,23 @@ def fichier_relu(session_id):
 
 
 def lire(fichier):
-    """Lignes du fichier, dédoublonnées à la LECTURE, dans l'ordre d'arrivée.
+    """Entrées du fichier, NORMALISÉES à la lecture : absolues, dans le dépôt, dédoublonnées.
 
-    Dédoublonner seulement à l'écriture ne suffit pas : deux éditions du même fichier dans un même
-    message passent par deux processus concurrents, qui lisent tous deux une liste sans l'entrée.
+    Normaliser aussi ici et pas seulement à l'écriture, pour deux raisons mesurées le 2026-08-12 :
+    - les listes déjà écrites par une version antérieure portent des chemins relatifs et des scripts
+      jetables du scratchpad ; elles se réparent ainsi sans qu'on touche l'état d'autres sessions ;
+    - deux éditions du même fichier dans un même message passent par deux processus concurrents, qui
+      lisent tous deux une liste sans l'entrée : le dédoublonnage à l'écriture ne peut pas les voir.
+    Une entrée relative est jointe à la RACINE, jamais au cwd du moment : c'est ce qu'elle voulait
+    dire quand elle a été écrite.
     """
     try:
         with open(fichier, encoding="utf-8") as fh:
-            return list(dict.fromkeys(ln.strip() for ln in fh if ln.strip()))
+            brutes = [ln.strip() for ln in fh if ln.strip()]
     except FileNotFoundError:
         return []
+    absolues = [c if os.path.isabs(c) else os.path.join(RACINE, c) for c in brutes]
+    return list(dict.fromkeys(c for c in absolues if dans_le_depot(c)))
 
 
 def ecrire(fichier, chemins):
@@ -162,19 +182,28 @@ def session_valide(session_id):
     mienne » est faux dès qu'une session parallèle est la seule à avoir édité du code — mesuré, elle
     se faisait relire puis EFFACER sa liste par une session qui n'avait rien touché.
     """
-    if not session_id or os.sep in session_id or session_id in (".", ".."):
+    if not FORME_UUID.fullmatch(session_id or ""):
         raise ValueError(
-            f"session_id invalide : {session_id!r}. Attendu l'UUID seul (le dernier composant du "
-            "chemin de ton dossier scratchpad), pas un chemin"
+            f"session_id invalide : {session_id!r}. Attendu l'UUID seul — dans le chemin de ton "
+            "scratchpad, c'est le dossier qui CONTIENT `scratchpad`, pas le dernier composant"
         )
     return session_id
 
 
-def commande_liste(session_id):
-    """Rend la liste et retient ce qui a été rendu : `--vider` n'effacera QUE ça.
+def horodatage(chemin):
+    """mtime du fichier, ou None s'il n'existe plus : la version relue, pas seulement son nom."""
+    try:
+        return os.stat(chemin).st_mtime
+    except OSError:
+        return None
 
-    Sans cet instantané, `--vider` emporterait les fichiers édités ENTRE les deux appels — soit les
-    corrections appliquées par la review elle-même, qui n'auraient donc jamais été relues.
+
+def commande_liste(session_id):
+    """Rend la liste et DATE ce qui a été rendu : `--vider` n'effacera que cette version-là.
+
+    Retenir les seuls NOMS ne suffit pas : la review corrige les fichiers qu'elle relit (`--fix`,
+    `/simplify`), donc chaque correction se faisait effacer d'une liste où elle venait de rentrer,
+    sans jamais avoir été relue — c'est-à-dire le cas le plus fréquent, pas un cas limite.
     """
     en_attente = lire(fichier_de_session(session_id))
     if not en_attente:
@@ -182,19 +211,28 @@ def commande_liste(session_id):
             f"aucune liste pour la session {session_id} : id faux, ou liste déjà vidée. "
             f"Listes présentes : {sorted(os.listdir(DOSSIER)) if os.path.isdir(DOSSIER) else []}"
         )
-    ecrire(fichier_relu(session_id), en_attente)
+    with open(fichier_relu(session_id), "w", encoding="utf-8") as fh:
+        json.dump({c: horodatage(c) for c in en_attente}, fh)
     print("\n".join(en_attente))
 
 
 def commande_vider(session_id):
-    """Retire les entrées effectivement relues, garde celles arrivées depuis le `--liste`."""
-    relus = lire(fichier_relu(session_id))
+    """Retire les entrées relues INCHANGÉES depuis, garde celles que la review a rouvertes."""
+    try:
+        with open(fichier_relu(session_id), encoding="utf-8") as fh:
+            relus = json.load(fh)
+    except (FileNotFoundError, ValueError):
+        relus = {}
     if not relus:
         raise ValueError(
             f"rien de relu à effacer pour la session {session_id} : `--vider` s'appelle APRÈS un "
             "`--liste` et les passes de relecture"
         )
-    reste = [c for c in lire(fichier_de_session(session_id)) if c not in relus]
+    reste = [
+        c
+        for c in lire(fichier_de_session(session_id))
+        if c not in relus or horodatage(c) != relus[c]
+    ]
     if reste:
         ecrire(fichier_de_session(session_id), reste)
     elif os.path.exists(fichier_de_session(session_id)):
@@ -245,10 +283,14 @@ def main():
     try:
         if dans_le_depot(chemin) and est_du_code(chemin):
             ajouter(session_id, chemin_note(chemin))
-    except (OSError, ValueError, AttributeError) as err:
+    # `except Exception` et non une liste de types : le voisin est CHARGÉ ici, donc une coquille
+    # dedans lève ce qu'elle veut (SyntaxError, ImportError…) — et ça arrive précisément sur les
+    # tours qui l'éditent. Un traceback nu sortirait rc=1 sans rien dire à l'agent, et l'édition
+    # disparaîtrait de la liste en silence. On ne masque rien : on le DIT (T1).
+    except Exception as err:  # noqa: BLE001
         emit(
-            f"La liste des fichiers à relire n'a pas pu être mise à jour ({err}). Tant que ce "
-            "n'est pas réparé, le bloc RELIRE doit être écrit à la main."
+            f"La liste des fichiers à relire n'a pas pu être mise à jour ({type(err).__name__}: "
+            f"{err}). Tant que ce n'est pas réparé, le bloc RELIRE doit être écrit à la main."
         )
     sys.exit(0)
 

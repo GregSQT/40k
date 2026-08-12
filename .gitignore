@@ -224,6 +224,8 @@ frontend/src/roster/pdf/
 .aider*
 .claude/settings.local.json
 .claude/worktrees/
+# Liste des fichiers restant à relire, par session : état de travail, jamais du dépôt
+.claude/relire-en-attente/
 
 frontend/wasm-los/target/
 

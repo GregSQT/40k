@@ -11,7 +11,9 @@ import pytest
 from ai.analyzer_perfig import (
     parse_models_segment,
     parse_base_token,
+    resolve_weapon_characteristic,
     resolve_weapon_value,
+    weapon_profile_names,
     squads_min_edge_distance,
 )
 
@@ -67,6 +69,53 @@ def test_resolve_weapon_global_fallback():
 def test_resolve_weapon_unresolved_returns_none():
     # Vraie donnée manquante -> None (l'erreur doit remonter, pas de valeur par défaut).
     assert resolve_weapon_value("Inconnue", {}, {}) is None
+
+
+# --------------------------------------------------------------------------- #
+# 05.02 — résolution d'une CARACTÉRISTIQUE (Force) : aucune agrégation         #
+# --------------------------------------------------------------------------- #
+def test_profile_names_splits_the_engine_composite():
+    assert weapon_profile_names("Choppa") == ("Choppa",)
+    assert weapon_profile_names("Shoota / Kustom Shoota") == ("Shoota", "Kustom Shoota")
+
+
+def test_characteristic_reads_the_model_datasheet():
+    assert resolve_weapon_characteristic("Choppa", {"Choppa": 4}) == {"Choppa": 4}
+
+
+def test_characteristic_keeps_each_composite_profile_apart():
+    """Le cas RÉEL : `DreadnoughtRedemptor`, Heavy Onslaught Gatling Cannon F6 et Onslaught
+    Gatling Cannon F5, mêmes ATK/AP/DMG/règles — le moteur les fusionne dès que les deux
+    blessent la cible sur le même seuil. Le `max()` des PLAFONDS rendait F6, une Force que le
+    profil F5 de la même ligne ne porte pas ; rendre les deux laisse l'appelant conclure sur des
+    Forces réelles, sans en inventer ni en perdre une.
+    """
+    per_unit = {"Heavy Onslaught Gatling Cannon": 6, "Onslaught Gatling Cannon": 5}
+    resolved = resolve_weapon_characteristic(
+        "Heavy Onslaught Gatling Cannon / Onslaught Gatling Cannon", per_unit
+    )
+    assert resolved == per_unit, "les profils ont été agrégés en une seule valeur"
+
+
+def test_characteristic_marks_a_profile_absent_from_this_datasheet():
+    """Composite inter-datasheets (règle 19) : chaque figurine ne connaît que SON profil.
+
+    L'absence est RENDUE (`None`) et non comblée — un emprunt à une autre datasheet serait la
+    Force d'un socle qui n'a pas frappé avec cette arme-là.
+    """
+    assert resolve_weapon_characteristic("Choppa / Big Choppa", {"Choppa": 4}) == {
+        "Choppa": 4, "Big Choppa": None,
+    }
+
+
+def test_characteristic_has_no_global_map_parameter():
+    """Verrou de conception : l'emprunt inter-datasheets doit être IMPOSSIBLE, pas non branché."""
+    import inspect
+
+    params = list(inspect.signature(resolve_weapon_characteristic).parameters)
+    assert params == ["weapon_name", "per_unit_map"], (
+        "une carte d'agrégation a été rouverte sur la résolution des caractéristiques"
+    )
 
 
 # --------------------------------------------------------------------------- #

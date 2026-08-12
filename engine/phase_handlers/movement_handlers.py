@@ -3263,9 +3263,13 @@ def movement_build_valid_destinations_pool(
     # Socle mono-hex : géométrie hex (x1) ou socle de taille 1 (même prédicat que la branche FLY).
     is_single_hex = (_geometry_is_hex(game_state) or base_size == 1)
 
-    # Étape 4.1 : champ géodésique euclidien (any-angle) LIMITÉ au socle qui tient dans UNE case
-    # (`socle_is_single_hex`, source unique du prédicat — le corps littéral qui vivait ici en était
-    # la 4e copie). Multi-hex / non-rond / fly restent sur le BFS hex → Étape 4b.
+    # Étape 4.1 : champ géodésique euclidien (any-angle) SANS empreinte, réservé au socle qui tient
+    # dans UNE case — `socle_is_single_hex`, source unique du prédicat (le corps littéral qui vivait
+    # ici en était la 4e copie ; il classait mono-hex un socle non rond de taille scalaire 1, dont
+    # l'empreinte n'est pas l'ancre). Les autres socles ne retombent PAS sur le BFS hex en
+    # euclidean : le sol multi-hex passe par `_euclidean_ground_anchor_multihex` (Étape 4b) et le
+    # fly par le disque euclidien de `_build_multi_hex_vectorized`. Le BFS hex ci-dessous est le
+    # chemin de la métrique `hex` — donc de tout le x1 (`geometry_is_hex`) et du gym par défaut.
     # PvP/replay lisent ``move`` (euclidean) ; gym lit ``move_gym`` (défaut hex).
     _use_euclidean_move = (
         _move_distance_metric(game_state) == "euclidean"

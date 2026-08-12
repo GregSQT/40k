@@ -293,6 +293,53 @@ def resolve_weapon_value(
     return None
 
 
+def weapon_profile_names(weapon_name: str) -> Tuple[str, ...]:
+    """Les PROFILS qu'un nom d'arme logué désigne — un seul, ou les composantes d'un « A / B ».
+
+    Le moteur fusionne sur une seule ligne les armes de même signature d'attaque et écrit leurs
+    noms joints (`shared_utils`, `" / ".join(g["weapon_names"])`). La ligne porte alors DEUX
+    profils, et tout ce qui se résout par arme doit le savoir.
+    """
+    name = weapon_name.strip()
+    return tuple(p.strip() for p in name.split(" / ")) if " / " in name else (name,)
+
+
+def resolve_weapon_characteristic(
+    weapon_name: str,
+    per_unit_map: Dict[str, int],
+) -> Dict[str, Optional[int]]:
+    """CARACTÉRISTIQUE (Force…) de CHAQUE profil de la ligne, SUR CETTE DATASHEET, sans agrégation.
+
+    Jumeau de `resolve_weapon_value` pour l'autre nature de valeur, et il n'y en a que deux :
+
+    - un PLAFOND (NB d'attaques, [RAPID FIRE], [SUSTAINED HITS]) borne un comptage. Sur-évaluer
+      ne peut que sur-autoriser, donc l'agrégation y est SÛRE : `resolve_weapon_value` emprunte à
+      la carte globale et retient le `max()` des composantes d'un profil fusionné.
+    - une CARACTÉRISTIQUE entre dans un CALCUL de règle (la F dans la table 05.02). Une valeur
+      agrégée n'est portée par AUCUNE figurine : elle est inventée, et le contrôle qui s'en sert
+      rend un verdict faux au lieu d'un honnête « non vérifiable ». D'où cette fonction, qui
+      n'agrège RIEN — ni carte globale (aucun paramètre pour en passer une : l'emprunt est
+      impossible, pas seulement non branché — les cartes globales de Force ont été supprimées
+      d'`AnalyzerConfig` pour la même raison), ni `max()`, ni moyenne. Elle RENVOIE LES PROFILS,
+      chacun sous son nom, et laisse l'appelant décider ce qu'une ligne à deux profils permet de
+      conclure : lui seul sait quelles figurines ont frappé et quel calcul en dépend.
+
+    `None` pour un profil = absent de CETTE datasheet (porté par une autre figurine de la ligne,
+    ou caractéristique symbolique du registre). Ce n'est pas une valeur manquante en soi : sur un
+    composite inter-datasheets, chaque figurine ne connaît que le sien.
+
+    Le composite aux profils DIVERGENTS est ATTEIGNABLE, mesuré sur `config/unit_registry.json` :
+    le `DreadnoughtRedemptor` (deux rosters de training) porte Heavy Onslaught Gatling Cannon F6
+    et Onslaught Gatling Cannon F5, de mêmes ATK/AP/DMG/règles — la clé de fusion moteur (`gkey`)
+    les réunit dès que les deux blessent la cible sur le même seuil (E ∈ {1,2,4,7,8,9,12,13,14}).
+    """
+    name = weapon_name.strip()
+    if name in per_unit_map:
+        return {name: per_unit_map[name]}
+    # get allowed : profil porté par une AUTRE figurine de la ligne, ou valeur symbolique
+    return {part: per_unit_map.get(part) for part in weapon_profile_names(name)}
+
+
 _SHOOTER_MODELS_RE = re.compile(r'\[SHOOTER_MODELS: ([^\]]+)\]')
 
 

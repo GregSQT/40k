@@ -17,11 +17,13 @@ Ce que ces tests verrouillent :
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 import pytest
 
 import ai.analyzer_wound as aw
+from ai.analyzer_config import AnalyzerConfig
+from tests.unit.ai._fabriques import analyzer_config
 
 
 # Roster hétérogène : bodyguards E4, personnage rattaché E5 — 19.02 doit ignorer le second.
@@ -36,22 +38,36 @@ STR_RNG = {"Trooper": {"Bolter": 4}, "Leader": {"Bolter": 4}, "Brute": {"Bolter"
 CHARACTERS = {"Leader"}
 
 
-class _Config:
-    unit_toughness_by_type = TOUGHNESS
-    cc_str_by_weapon_global: Dict[str, int] = {}
-    rng_str_by_weapon_global: Dict[str, int] = {}
-    unit_attack_limits = {
-        t: {"cc_str_by_weapon": STR_CC[t], "rng_str_by_weapon": STR_RNG[t]}
+ATTACK_LIMITS = {
+    t: {"cc_str_by_weapon": STR_CC[t], "rng_str_by_weapon": STR_RNG[t]}
+    for t in TOUGHNESS
+}
+
+
+class _Registry:
+    """Registry PEUPLÉ : `_model_is_character` lit `UNIT_RULES` pour appliquer 19.02."""
+
+    units = {
+        t: {"UNIT_RULES": ([{"ruleId": "leader"}] if t in CHARACTERS else [])}
         for t in TOUGHNESS
     }
 
-    class _Registry:
-        units = {
-            t: {"UNIT_RULES": ([{"ruleId": "leader"}] if t in CHARACTERS else [])}
-            for t in TOUGHNESS
-        }
 
-    unit_registry = _Registry()
+def _config(**overrides: Any) -> AnalyzerConfig:
+    """`AnalyzerConfig` RÉEL, pas une classe canard (`_fabriques.analyzer_config`).
+
+    Un stub local ne porte que les tables que la fonction consulte AUJOURD'HUI : le jour où
+    `analyzer_wound` en lit une de plus, il lève un `AttributeError` au lieu de rougir sur ce
+    qui a changé, et le vérificateur de types ne voit rien venir. Mesuré : la suppression des
+    cartes globales de Force a demandé une édition à la main dans ce fichier, zéro dans les
+    douze qui passent par la fabrique.
+    """
+    return analyzer_config(**{
+        "unit_registry": _Registry(),
+        "unit_toughness_by_type": TOUGHNESS,
+        "unit_attack_limits": ATTACK_LIMITS,
+        **overrides,  # un override REMPLACE la valeur par défaut, il ne la double pas
+    })
 
 
 class _State:
@@ -65,7 +81,7 @@ class _State:
 
 def _expected(state, action_desc="", *, melee=True, attacker="Trooper", weapon="Choppa"):
     return aw.expected_wound_threshold(
-        state, _Config(), action_desc, 1, attacker, weapon, "9", (), is_melee=melee
+        state, _config(), action_desc, 1, attacker, weapon, "9", (), is_melee=melee
     )
 
 
@@ -83,7 +99,7 @@ def test_strength_is_the_weapon_of_the_model_that_strikes():
     """`[SHOOTER_MODELS:]` désigne le socle : « Choppa » vaut F4 au troupier, F6 au leader."""
     state = _State()
     par_figurine = aw.expected_wound_threshold(
-        state, _Config(), "", 1, "Trooper", "Choppa", "9", ("9#2",), is_melee=True
+        state, _config(), "", 1, "Trooper", "Choppa", "9", ("9#2",), is_melee=True
     )
     assert par_figurine == 3, (
         "la F est prise sur la datasheet d'ESCOUADE : un personnage rattaché serait mesuré à "
@@ -183,7 +199,7 @@ def _stats() -> Dict[str, Any]:
 
 def _check(state, stats, desc):
     aw.check_wound_threshold(
-        state, _Config(), stats, desc, desc, 1, "Trooper", "Choppa", "9", (), is_melee=True
+        state, _config(), stats, desc, desc, 1, "Trooper", "Choppa", "9", (), is_melee=True
     )
 
 
@@ -224,25 +240,126 @@ def test_a_line_without_a_wound_segment_is_ignored_entirely():
 # Ce que le contrôle refuse d'inventer
 # ─────────────────────────────────────────────────────────────────────────────
 
-def test_an_unresolved_weapon_never_borrows_another_datasheets_strength():
-    """Pas de carte GLOBALE pour la Force — contrairement au plafond d'attaques.
+@pytest.mark.parametrize(
+    "is_melee,weapon,empruntable", [(True, "Choppa", 6), (False, "Bolter", 4)]
+)
+def test_an_unresolved_weapon_never_borrows_another_datasheets_strength(
+    is_melee, weapon, empruntable
+):
+    """La F se résout sur la datasheet de la FIGURINE, ou pas du tout.
 
-    Les cartes globales agrègent au `max()` toutes les datasheets partageant un nom d'arme :
-    « Close Combat Weapon » y vaudrait F6 parce qu'une datasheet quelconque le porte. Pour un
-    PLAFOND c'est sûr, pour une FORCE c'est une valeur inventée — et un faux « seuil faux »
-    au lieu d'un honnête « non vérifiable ».
+    Une agrégation inter-datasheets — `max()` des datasheets partageant un nom d'arme — est sûre
+    pour un PLAFOND d'attaques (on ne peut que sur-autoriser) et INVENTÉE pour une Force :
+    « Close Combat Weapon » vaudrait F6 parce qu'une datasheet quelconque le porte, et le
+    contrôle crierait « seuil de blessure faux » sur une ligne correcte. Arme irrésolue sur la
+    datasheet de la figurine → `None`, ligne écartée et COMPTÉE non vérifiable.
+
+    PIÈGE, et il doit rester mordant : la datasheet de l'attaquant est vidée, les AUTRES restent
+    peuplées, et l'arme demandée n'existe QUE chez elles (`Choppa` F6 / `Bolter` F4 sur le
+    Leader). Tout emprunt INTER-DATASHEET — carte globale rebranchée, balayage des autres
+    types — rend ce test rouge avec cette valeur-là. Vider TOUTES les datasheets rendrait `None`
+    inévitable et le test tautologique. Les deux faces ont leur nœud : un emprunt côté tir seul
+    ne se cache pas derrière la mêlée.
+
+    Ce piège-ci résout par ESCOUADE (`shooters=()`), donc il ne peut RIEN dire du repli
+    escouade — c'est son chemin nominal. Ce repli-là a son propre verrou :
+    `test_a_per_model_weapon_never_falls_back_on_the_squad_datasheet`.
     """
     state = _State()
-
-    class _CfgGlobalPiege(_Config):
-        cc_str_by_weapon_global = {"Inconnue": 99}
-        unit_attack_limits = {
-            t: {"cc_str_by_weapon": {}, "rng_str_by_weapon": {}} for t in TOUGHNESS
+    piege = _config(
+        unit_attack_limits={
+            **ATTACK_LIMITS,
+            "Trooper": {"cc_str_by_weapon": {}, "rng_str_by_weapon": {}},
         }
+    )
 
-    assert aw.attacker_weapon_strength(
-        state, _CfgGlobalPiege(), "Inconnue", "Trooper", (), True
-    ) is None, "la Force a été empruntée à la carte globale au lieu d'être déclarée irrésoluble"
+    assert aw.attacker_weapon_strengths(
+        state, piege, weapon, "Trooper", (), is_melee
+    ) is None, (
+        f"la Force a été empruntée à une autre datasheet (F{empruntable}) au lieu d'être "
+        "déclarée irrésoluble"
+    )
+
+
+@pytest.mark.parametrize("is_melee,weapon", [(True, "Choppa"), (False, "Bolter")])
+def test_a_per_model_weapon_never_falls_back_on_the_squad_datasheet(is_melee, weapon):
+    """Arme irrésolue SUR LA FIGURINE : on décline, on ne retombe pas sur l'escouade.
+
+    Jumeau du piège ci-dessus, sur l'autre chemin : celui-là résout par ESCOUADE
+    (`shooters=()`), celui-ci par FIGURINE. Le repli d'escouade existe pour de bon chez le
+    jumeau des PLAFONDS (`analyzer_perfig`, `value if value is not None else squad_value`) ;
+    l'écrire ici mesurerait la F6 du personnage rattaché à la F4 du troupier — exactement le
+    faux « seuil de blessure faux » que ce module existe pour éviter.
+
+    PIÈGE : la datasheet du tireur (`9#2`, Leader) est vidée, celle de l'escouade (Trooper)
+    reste peuplée. Tout repli sur l'escouade rend une valeur au lieu de `None` → rouge.
+    """
+    state = _State()
+    piege = _config(
+        unit_attack_limits={
+            **ATTACK_LIMITS,
+            "Leader": {"cc_str_by_weapon": {}, "rng_str_by_weapon": {}},
+        }
+    )
+
+    assert aw.attacker_weapon_strengths(
+        state, piege, weapon, "Trooper", ("9#2",), is_melee
+    ) is None, (
+        "la F de la figurine irrésolue a été reprise sur la datasheet d'ESCOUADE au lieu "
+        "d'être déclarée irrésoluble"
+    )
+
+
+@pytest.mark.parametrize("is_melee,key", [(True, "cc_str_by_weapon"), (False, "rng_str_by_weapon")])
+def test_a_composite_profile_of_divergent_strengths_is_unverifiable(is_melee, key):
+    """Profil composite « A / B » : le moteur FUSIONNE deux armes sur une seule ligne.
+
+    Cas réel du registre — `DreadnoughtRedemptor`, Heavy Onslaught Gatling Cannon F6 et
+    Onslaught Gatling Cannon F5, mêmes ATK/AP/DMG/règles : la clé de fusion moteur les réunit
+    dès que les deux blessent la cible sur le même seuil. Le `max()` des PLAFONDS rendait F6,
+    une Force que le profil F5 de la même ligne ne porte pas — troisième face du même emprunt
+    que les deux pièges ci-dessus, à l'intérieur d'une seule datasheet cette fois. Composantes
+    de MÊME F → la ligne garde bien une valeur attendue unique, elle reste vérifiable.
+    """
+    state = _State()
+    limits = {
+        **ATTACK_LIMITS,
+        "Trooper": {
+            "cc_str_by_weapon": {"Choppa": 4, "Big Choppa": 6, "Choppa Jumelle": 4},
+            "rng_str_by_weapon": {"Choppa": 4, "Big Choppa": 6, "Choppa Jumelle": 4},
+        },
+    }
+    divergent = _config(unit_attack_limits=limits)
+
+    assert aw.attacker_weapon_strengths(
+        state, divergent, "Choppa / Big Choppa", "Trooper", (), is_melee
+    ) is None, (
+        "la F du composite a été agrégée (F6) : le contrôle 05.02 se prononce sur une valeur "
+        "qu'aucune figurine de la ligne ne porte"
+    )
+    assert aw.attacker_weapon_strengths(
+        state, divergent, "Choppa / Choppa Jumelle", "Trooper", (), is_melee
+    ) == 4, "un composite HOMOGÈNE reste vérifiable — le contrôle ne doit pas s'aveugler"
+    assert limits["Trooper"][key]  # la datasheet du tireur est peuplée : rien n'est tautologique
+
+
+def test_a_divergent_composite_is_counted_unverifiable_not_as_an_error():
+    """Face compteur du test ci-dessus : la ligne est écartée, jamais comptée en erreur."""
+    stats = _stats()
+    config = _config(unit_attack_limits={
+        **ATTACK_LIMITS,
+        "Trooper": {
+            "cc_str_by_weapon": {"Choppa": 4, "Big Choppa": 6},
+            "rng_str_by_weapon": {"Choppa": 4},
+        },
+    })
+    desc = "FOUGHT Unit 9 with [Choppa / Big Choppa] - Hit 4(3+) - Wound 4(5+)"
+    aw.check_wound_threshold(
+        _State(), config, stats, desc, desc, 1, "Trooper", "Choppa / Big Choppa", "9", (),
+        is_melee=True,
+    )
+    assert stats["fight_wound_threshold_mismatch"][1] == 0
+    assert stats["fight_wound_threshold_unverifiable"][1] == 1
 
 
 def test_roster_fallback_declines_when_bodyguards_have_mixed_toughness():
@@ -254,16 +371,16 @@ def test_roster_fallback_declines_when_bodyguards_have_mixed_toughness():
     homogene = _State()
     homogene.model_types = {"9#0": "Trooper", "9#1": "Trooper", "9#2": "Leader"}
     homogene.unit_models_alive = {"9": 3}
-    assert aw.target_bodyguard_toughness(homogene, _Config(), "9") == 4
+    assert aw.target_bodyguard_toughness(homogene, _config(), "9") == 4
 
     mixte = _State()
     mixte.model_types = {"9#0": "Trooper", "9#1": "Brute", "9#2": "Leader"}
     mixte.unit_models_alive = {"9": 3}
-    assert aw.target_bodyguard_toughness(mixte, _Config(), "9") is None, (
+    assert aw.target_bodyguard_toughness(mixte, _config(), "9") is None, (
         "E maxée sur un roster hétérogène qui contient peut-être des morts : le contrôle "
         "tranche là où la donnée ne permet pas de trancher"
     )
 
     # Socles vivants CONNUS : plus d'ambiguïté, même roster hétérogène.
     mixte.positions_by_model = {"9": {m: (0, 0) for m in mixte.model_types}}
-    assert aw.target_bodyguard_toughness(mixte, _Config(), "9") == 8
+    assert aw.target_bodyguard_toughness(mixte, _config(), "9") == 8

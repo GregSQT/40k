@@ -53,7 +53,7 @@ lancement : une archive laissee par un run precedent prouverait la configuration
 
 CE QUI N'EST PAS VERIFIABLE, ET QUI EST DONC REFUSE (jamais mesure en silence)
 ------------------------------------------------------------------------------
-- `model_params.clip_range` : SB3 le convertit en fonction (`get_schedule_fn`) et le serialise en
+- `model_params.clip_range` : SB3 le convertit en objet schedule (`FloatSchedule`) et le serialise en
   cloudpickle. La valeur n'est pas relisible sans desérialiser du code arbitraire.
 - `model_params.policy_kwargs.*` (dont `net_arch`) : meme serialisation opaque.
 - tout chemin absent de `_PROOFS` : il vaut mieux un refus qu'un banc qui compare deux fois la
@@ -104,7 +104,7 @@ _PROOFS = {
 # Chemins explicitement refuses, avec la raison — un message precis vaut mieux qu'un "inconnu".
 _UNPROVABLE = {
     "model_params.clip_range": (
-        "SB3 convertit clip_range en fonction (get_schedule_fn) et la serialise en cloudpickle : "
+        "SB3 convertit clip_range en objet schedule (FloatSchedule) et le serialise en cloudpickle : "
         "la valeur effective n'est pas relisible sans desérialiser du code arbitraire."
     ),
     "model_params.policy_kwargs": (

@@ -77,47 +77,59 @@ def _effect_bonus(state: Any, player: int, key: str) -> int:
     return int(str(raw).lstrip("+")) if raw is not None else 0
 
 
-def attacker_weapon_strength(
+def attacker_weapon_strengths(
     state: Any,
     config: Any,
     weapon_display_name: str,
     attacker_unit_type: str,
     shooters: Tuple[str, ...],
     is_melee: bool,
-) -> Optional[int]:
-    """F de l'arme, résolue PAR FIGURINE. ``None`` = irrésoluble, donc non vérifiable.
+) -> Optional[Tuple[int, ...]]:
+    """F de CHAQUE profil d'arme que la ligne couvre, résolue PAR FIGURINE. ``None`` = irrésoluble.
 
-    Même résolution que le plafond d'attaques (`resolve_weapon_value`) : cinq armes s'appellent
-    « Close Combat Weapon », de F 3 à 6, et c'est la datasheet de la FIGURINE qui tranche.
-    Plusieurs figurines sur la même ligne → la F doit être la MÊME pour toutes, sinon la ligne
-    agrège deux profils et son seuil unique n'a pas de valeur attendue unique : non vérifiable.
+    Une ligne n'a pas toujours UNE Force, et c'est le fait central de cette fonction : le moteur
+    fusionne sur une seule ligne les armes de même signature d'attaque (« A / B »), et plusieurs
+    figurines de datasheets différentes (règle 19) peuvent y frapper. La ligne porte alors
+    plusieurs Forces RÉELLES — et le seuil imprimé, lui, est unique. C'est à
+    `expected_wound_threshold` de dire si ces Forces convergent vers un seuil attendu unique ;
+    en inventer une ici (le `max()`) rendrait un verdict sur une figurine qui n'existe pas.
+
+    RÉSOLUTION PAR FIGURINE, comme le plafond d'attaques — cinq armes s'appellent « Close Combat
+    Weapon », de F 3 à 6, et c'est la datasheet de la FIGURINE qui tranche — mais SANS ses étages
+    d'agrégation (`resolve_weapon_characteristic`) : un plafond agrégé sur-autorise, une Force
+    agrégée est inventée.
+
+    ``None`` (non vérifiable) dès qu'un profil de la ligne reste inconnu de TOUTES les figurines
+    qui ont frappé — datasheet hors registre, arme absente, F symbolique — ou qu'un même profil
+    y prend deux valeurs, ce que la donnée ne permet pas de départager.
     """
-    from ai.analyzer_perfig import resolve_weapon_value
+    from ai.analyzer_perfig import resolve_weapon_characteristic, weapon_profile_names
 
     per_unit_key = "cc_str_by_weapon" if is_melee else "rng_str_by_weapon"
     candidates = shooters or (None,)
-    values = set()
+    by_profile: Dict[str, set] = {p: set() for p in weapon_profile_names(weapon_display_name)}
     for mid in candidates:
         model_type = state.model_types.get(mid, attacker_unit_type) if mid else attacker_unit_type  # get allowed
         limits = config.unit_attack_limits.get(model_type)  # get allowed : type hors registre
         if limits is None:
             return None
-        # ⚠️ Carte GLOBALE VIDE, contrairement au plafond d'attaques. Les cartes globales
-        # agrègent au `max()` toutes les datasheets partageant un nom d'arme : « Close Combat
-        # Weapon » y vaut F6 parce qu'une datasheet quelconque le porte. Pour un PLAFOND c'est
-        # sûr (on ne peut que sur-autoriser) ; pour une FORCE c'est une valeur INVENTÉE, qui
-        # produirait un faux « seuil de blessure faux » au lieu d'un honnête « non vérifiable ».
-        # Arme non résolue sur la datasheet de la figurine → `None`, donc ligne écartée et
-        # COMPTÉE comme telle.
-        value = resolve_weapon_value(
-            weapon_display_name, require_key(limits, per_unit_key), {}
-        )
-        if value is None:
-            return None
-        values.add(value)
-    if len(values) != 1:
+        # ⚠️ `resolve_weapon_characteristic` et NON `resolve_weapon_value` : ce dernier résout des
+        # PLAFONDS et agrège pour ça à DEUX étages — carte globale de toutes les datasheets, et
+        # `max()` des composantes d'un profil composite. Sur-évaluer un plafond ne peut que
+        # sur-autoriser ; sur-évaluer une FORCE rend une valeur qu'AUCUNE figurine ne porte, donc
+        # un faux « seuil de blessure faux » au lieu d'un honnête « non vérifiable ». Passer `{}`
+        # en carte globale ne fermait que le premier étage.
+        for profile, value in resolve_weapon_characteristic(
+            weapon_display_name, require_key(limits, per_unit_key)
+        ).items():
+            if value is not None:
+                # Un profil ABSENT de cette datasheet est porté par une autre figurine de la
+                # ligne : c'est le cas normal d'un composite inter-datasheets, pas un trou. Le
+                # trou, c'est un profil qu'AUCUNE d'elles ne connaît — contrôlé après la boucle.
+                by_profile[profile].add(value)
+    if any(len(values) != 1 for values in by_profile.values()):
         return None
-    return values.pop()
+    return tuple(sorted(values.pop() for values in by_profile.values()))
 
 
 def target_bodyguard_toughness(state: Any, config: Any, target_id: str) -> Optional[int]:
@@ -197,27 +209,43 @@ def expected_wound_threshold(
     shooters: Tuple[str, ...],
     is_melee: bool,
 ) -> Optional[int]:
-    """Seuil que le moteur DEVRAIT imprimer, ou ``None`` si la ligne n'est pas vérifiable."""
+    """Seuil que le moteur DEVRAIT imprimer, ou ``None`` si la ligne n'est pas vérifiable.
+
+    UNE ligne, PLUSIEURS profils d'arme (cf. `attacker_weapon_strengths`) : le seuil attendu est
+    calculé pour CHACUN, avec sa vraie Force, et n'est rendu que s'ils tombent tous sur la même
+    valeur. Sinon le seuil unique imprimé n'a pas d'attendu unique — non vérifiable, et le dire
+    vaut mieux que trancher pour l'un des profils.
+
+    Ce n'est pas un contrôle qui s'aveugle : la clé de fusion du moteur est bâtie sur le seuil
+    AFFICHÉ, donc deux profils fusionnés blessent déjà la cible pareil et convergent tant que le
+    moteur a raison — la ligne garde son verdict. Ils ne divergent que si l'Endurance retenue par
+    le moteur n'est pas celle que la donnée dit (mesuré : 2 750 quadruplets (Fa, Fb, E moteur,
+    E réelle) où la fusion est possible et les attendus diffèrent). Ce cas-là est précisément
+    celui où choisir une Force — l'ancien `max()` — rendait un verdict sur un profil inventé.
+    """
     from engine.combat_utils import calculate_wound_target
 
-    strength = attacker_weapon_strength(
+    strengths = attacker_weapon_strengths(
         state, config, weapon_display_name, attacker_unit_type, shooters, is_melee
     )
-    if strength is None:
+    if strengths is None:
         return None
     toughness = target_bodyguard_toughness(state, config, target_id)
     if toughness is None:
         return None
     # +1 Force du Waaagh : armes de MÊLÉE uniquement (08.04). Il n'a pas de jumeau au tir, et
     # l'appliquer là rendrait le contrôle faux exactement là où il doit être utile.
-    if is_melee:
-        strength += _effect_bonus(state, attacker_player, "waaagh_melee_str")
-    threshold = calculate_wound_target(strength, toughness)
+    bonus = _effect_bonus(state, attacker_player, "waaagh_melee_str") if is_melee else 0
     # Oath of Moment : +1 au JET, donc seuil abaissé, plancher 2+ (`resolve_oath_effects`).
     # Le token doit suivre le segment `Wound …` — ailleurs sur la ligne, il décrit la touche.
-    if wound_bonus_applies(action_desc):
-        threshold = max(2, threshold - 1)
-    return threshold
+    # Appliqué PAR PROFIL, avant l'unanimité : le plancher 2+ rapproche deux seuils voisins, et
+    # ce qui doit être unique, c'est la valeur IMPRIMABLE — pas une étape de son calcul.
+    oath = wound_bonus_applies(action_desc)
+    thresholds = set()
+    for strength in strengths:
+        threshold = calculate_wound_target(strength + bonus, toughness)
+        thresholds.add(max(2, threshold - 1) if oath else threshold)
+    return thresholds.pop() if len(thresholds) == 1 else None
 
 
 def check_wound_threshold(
