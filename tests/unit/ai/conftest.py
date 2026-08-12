@@ -20,12 +20,45 @@ from typing import Any, Dict
 
 import gymnasium as gym
 import numpy as np
+import pytest
 
+# Sous ce nom-là, et pas `analyzer_config` : ce module définit plus bas une FABRIQUE de
+# `AnalyzerConfig` qui porte ce nom, et elle écraserait l'alias — les remises à zéro
+# ci-dessous se seraient posées sur la fonction, sans rien réinitialiser ni rien signaler.
+import ai.analyzer_config as ai_analyzer_config
 from ai.analyzer_config import AnalyzerConfig
 from engine.action_decoder import ActionDecoder
 from engine.macro_intents import ACTION_FAMILIES
 from engine.observation_builder import ObservationBuilder
 from engine.spatial_grid import GRID_CHANNELS, GRID_SIZE
+
+
+@pytest.fixture(autouse=True)
+def _etat_du_run_analyse_remis_a_zero():
+    """L'état du run ANALYSÉ (échelle, règles, plateau) est « non posé » à l'entrée de chaque
+    test, et l'est de nouveau à sa sortie.
+
+    Ces trois valeurs vivent dans des globales de module (`ai/analyzer_config.py`) : en
+    production `parse_step_log` les repose à chaque passe depuis l'entête du journal, mais un
+    test qui les pose à la main les LAISSAIT au module pour tous ses voisins du même worker. Le
+    voisin qui avait oublié de les poser passait alors en vert — et rougissait le jour où `-n`
+    changeait sa place dans la file (mesuré le 2026-08-12 sur le BFS de chemin).
+
+    Remise à `None`, et non à des valeurs « raisonnables » : les getters LÈVENT sans entête, et
+    c'est exactement le garde-fou qu'il faut préserver — un plateau ou une échelle par défaut
+    rendrait des verdicts faux en silence, ce que ces globales existent pour empêcher.
+
+    Des DEUX côtés du test : à l'entrée pour ne rien hériter d'un voisin (y compris d'un autre
+    dossier partageant le worker), à la sortie pour ne rien lui laisser.
+    """
+    def _remettre_a_zero() -> None:
+        ai_analyzer_config._run_inches_to_subhex = None
+        ai_analyzer_config._run_rules = None
+        ai_analyzer_config._run_board_dims = None
+
+    _remettre_a_zero()
+    yield
+    _remettre_a_zero()
 
 
 @lru_cache(maxsize=1)

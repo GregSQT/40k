@@ -116,6 +116,12 @@ def test_case_darrivee_occupee_reste_joignable() -> None:
     exactement la distance à vol d'oiseau. Le chevauchement est mesuré par le contrôle de
     collision (2.2), avec son propre nom.
     """
+    # Le BFS borne son champ au plateau du run (03.01) : hors `parse_step_log`, aucune entête
+    # `Board:` ne l'a posé et le getter LÈVE plutôt que de retomber sur le config courant. On le
+    # pose donc ici, comme les autres tests qui appellent le BFS à la main — sans quoi ce test ne
+    # passait que derrière un voisin qui l'avait laissé au module (mesuré rouge en `-n 16`).
+    # 60×60 contient largement les hexes ci-dessous : le bord ne participe à aucun verdict ici.
+    an.set_analyzer_board_dims(60, 60)
     walls: set = set()
     occupied = {(4, 49)}
     assert an._bfs_shortest_path_length(5, 48, 4, 49, 4, walls, occupied, set()) == 1

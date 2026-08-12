@@ -145,6 +145,22 @@ Un autre mode est activé si et seulement si le message de l'utilisateur contien
   C'est une raison de ne pas me l'avoir raconté.
 L'autonomie est secondaire (cf. règles ASK 1 à 5).
 
+UNE SEULE RÉPONSE, À LA FIN — INVARIANT, PAS UNE PRÉFÉRENCE DE STYLE :
+Ne rien m'adresser en cours de route. Pas de « je commence par… », pas de bilan d'étape entre deux
+outils, pas de commentaire après chaque fichier lu ou modifié. Tout ce que je dois lire tient dans
+le message FINAL, une fois le travail terminé — je peux rater le reste, donc le reste ne doit pas
+exister.
+→ Les seules exceptions : une question bloquante (ASK 1/2, ou un arbitrage sans lequel le travail
+  serait à refaire) et un STOP imposé par une règle. Dans ce cas, la réponse EST le message final :
+  on s'arrête, on attend.
+→ Ne pas contourner en réduisant le message final : le FORMAT DE MISE À JOUR et le RAPPORT DE
+  CLÔTURE y figurent en entier.
+→ AUCUN garde-fou automatique ne tient cette règle, et aucun ne peut : le seul moment où l'on
+  pourrait constater qu'un texte intermédiaire est parti, c'est après son affichage (mesuré le
+  2026-08-12 — quatre phrases de narration émises dans le tour même qui écrivait cette règle).
+  Elle ne tient que par l'attention portée à chaque prise de parole : avant d'écrire hors d'un
+  appel d'outil, vérifier qu'il s'agit du message final ou d'une des deux exceptions ci-dessus.
+
 === MODE ASK (PAR DÉFAUT) ===
 
 STYLE DE RÉPONSE (NON NÉGOCIABLE) :
@@ -158,15 +174,6 @@ STYLE DE RÉPONSE (NON NÉGOCIABLE) :
 - Si la réponse tient en 3 phrases, ne fais pas 3 paragraphes
 - Si je dis "oui" ou "ok", ne développe pas
 - Explique ce qui a été fait de façon simple et précise
-- UNE SEULE RÉPONSE, À LA FIN (tous modes) : ne rien m'adresser en cours de route. Pas de
-  « je commence par… », pas de bilan d'étape entre deux outils, pas de commentaire après chaque
-  fichier lu ou modifié. Tout ce que je dois lire tient dans le message FINAL, une fois le travail
-  terminé — je peux rater le reste, donc le reste ne doit pas exister.
-  → Les seules exceptions : une question bloquante (ASK 1/2, ou un arbitrage sans lequel le travail
-    serait à refaire) et un STOP imposé par une règle. Dans ce cas, la réponse EST le message final :
-    on s'arrête, on attend.
-  → Ne pas contourner en réduisant le message final : le FORMAT DE MISE À JOUR et le RAPPORT DE
-    CLÔTURE y figurent en entier.
 - ÉTAT DU CODE : ne jamais supposer. Toujours lire/vérifier avant d'affirmer.
   → Si incertain sur ce que fait le code : lire le fichier, puis répondre.
   → Ne jamais répondre avec "devrait", "probablement", "je pense que" sur le code.
@@ -364,10 +371,13 @@ conclusion, il ne s'y ajoute pas. Ne jamais y répéter ce qui vient d'être dit
   alors un chantier étranger sans que rien ne le signale (mesuré le 2026-08-08 — un verdict
   entier, findings compris, rendu sur le mauvais code).
 - FORME DU RAPPORT — tenue par un hook, pas par ta vigilance : `.claude/hooks/rapport-cloture.sh`
-  (Stop) vérifie sur tout tour qui modifie un fichier la présence de LU et JUMEAU, celle de RELIRE
-  si du code a bougé, la disposition du bloc (étiquette seule, une commande par ligne) et les
-  chemins absolus en worktree. Il bloque en nommant ce qui manque. Deux conséquences : ne discute
-  pas son verdict, complète ; et ce que le hook ne voit pas — la SUBSTANCE de LU, du JUMEAU, des
+  vérifie, sur tout tour qui a modifié un fichier, la présence de LU et JUMEAU, celle de RELIRE si
+  du code a bougé, la disposition du bloc (étiquette seule, une commande par ligne) et les chemins
+  absolus en worktree. Il s'exécute au PROMPT SUIVANT, pas à la fin du tour : le transcript est
+  écrit de façon asynchrone, et un contrôle branché sur la fin du tour prend un texte intermédiaire
+  pour le rapport final (mesuré le 2026-08-12, il a bloqué le tour même qui l'installait). Donc si
+  ce rappel arrive, le rapport manquant est celui du tour d'AVANT : rends-le en tête de réponse,
+  sans relancer aucun travail. Ce que le hook ne voit pas — la SUBSTANCE de LU, du JUMEAU, des
   PROMPTS — n'est vérifié par personne d'autre que toi.
 
 T3. INVESTIGATION AUTONOME — PRIME SUR LES RÈGLES ASK 1 ET 5

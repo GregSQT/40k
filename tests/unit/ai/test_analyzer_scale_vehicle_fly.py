@@ -361,40 +361,67 @@ def test_les_socles_de_depart_excluent_les_figurines_mortes_entre_temps():
 _STALE_UNITS = (
     "[10:00:00] Unit 1 (Intercessor) P1: Starting position (-1,-1), HP_MAX=2\n"
     "[10:00:00] Unit 2 (Intercessor) P1: Starting position (-1,-1), HP_MAX=2\n"
+    # 3 = tireur de la seconde activation (cf. Tir 3).
+    "[10:00:00] Unit 3 (Intercessor) P1: Starting position (-1,-1), HP_MAX=2\n"
     "[10:00:00] Unit 101 (AssaultIntercessor) P2: Starting position (-1,-1), HP_MAX=2\n"
+)
+
+_STALE_SETUP = (
+    "[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1(10,10) DEPLOYED from (-1,-1) to (10,10) [R:+0.0] [SUCCESS]\n"
+    "[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 2(30,10) DEPLOYED from (-1,-1) to (30,10) [R:+0.0] [SUCCESS]\n"
+    "[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 3(45,10) DEPLOYED from (-1,-1) to (45,10) [R:+0.0] [SUCCESS]\n"
+    "[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 101(50,10) DEPLOYED from (-1,-1) to (50,10) [R:+0.0] [SUCCESS]\n"
+    # 101 agit : ses DEUX socles sont connus, dont 101#1 collé à l'unité 2.
+    "[10:00:02] E1 T1 P2 MOVE : Unit 101(50,10) MOVED from (50,10) to (50,10)"
+    "[R:+0.0] [MODELS: 101#0@(50,10) 101#1@(31,10)] [SUCCESS]\n"
+)
+# Tir 1 : une figurine de 101 tombe. Laquelle ? le log ne le dit pas.
+_STALE_TIR_1 = (
+    "[10:00:03] E1 T1 P1 SHOOT : Unit 1(10,10) SHOT Unit 101(50,10) with [Bolt Rifle] "
+    "- Hit 4(3+) - Wound 5(4+) - Save 2(3+) - Dmg:2HP [R:+0.0] [SUCCESS]\n"
+)
+# Tir 2 : même tireur, même cible, donc même activation — l'ancre loguée est déjà celle du survivant.
+_STALE_TIR_2 = (
+    "[10:00:04] E1 T1 P1 SHOOT : Unit 1(10,10) SHOT Unit 101(50,10) with [Bolt Rifle] "
+    "- Hit 4(3+) - Wound 5(4+) - Save 2(3+) [R:+0.0] [SUCCESS]\n"
+)
+# Tir 3 : activation SUIVANTE, tireur non engagé (l'unité 2, elle, serait exemptée par 10.06).
+_STALE_TIR_3 = (
+    "[10:00:05] E1 T1 P1 SHOOT : Unit 3(45,10) SHOT Unit 101(50,10) with [Bolt Rifle] "
+    "- Hit 4(3+) - Wound 5(4+) - Save 2(3+) [R:+0.0] [SUCCESS]\n"
 )
 
 
 def test_les_socles_d_une_cible_fauchee_ne_hantent_pas_le_plateau(tmp_path):
     """`positions_by_model` n'est réécrit que quand l'unité AGIT : une cible qui perd une
     figurine garde ses socles morts jusqu'à sa prochaine action, et le log ne dit pas LAQUELLE
-    est tombée (allocation « front », pas nominative).
+    est tombée (allocation « front », pas nominative). Ces socles périmés ne doivent pas fabriquer
+    d'engagement — mais ils ne doivent pas non plus en effacer un qui existait au ciblage.
 
-    Ici le socle avancé de 101 — le seul proche de l'unité 2 — meurt au premier tir. Le second
-    tir vise un survivant à l'autre bout du plateau, donc une cible NON engagée : le compter en
-    faute, c'est mesurer contre une figurine retirée du plateau.
+    LA FRONTIÈRE EST L'ACTIVATION (04.02 : « Select Weapons, Select Targets, Resolve Attacks »
+    — les cibles de TOUTES les armes sont choisies avant la première résolution). Le socle 101#1
+    collé à l'unité 2 était vivant au ciblage de l'unité 1 : ses deux lignes sont fautives, et
+    les juger après les pertes était le faux négatif fermé le 2026-08-12. L'activation suivante,
+    elle, se juge sur un plateau où ce socle n'est plus — c'est le sujet de ce test.
+
+    DEUX MESURES, PAS UN TOTAL : un seul compteur agrégé se laisse satisfaire par la compensation
+    (gel qui régresse ET socle qui hante ⇒ même somme). Le second journal ne diffère du premier
+    que par le tir de l'unité 3, donc son apport se lit à l'unité près.
     """
-    body = (
-        "[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1(10,10) DEPLOYED from (-1,-1) to (10,10) [R:+0.0] [SUCCESS]\n"
-        "[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 2(30,10) DEPLOYED from (-1,-1) to (30,10) [R:+0.0] [SUCCESS]\n"
-        "[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 101(50,10) DEPLOYED from (-1,-1) to (50,10) [R:+0.0] [SUCCESS]\n"
-        # 101 agit : ses DEUX socles sont connus, dont 101#1 collé à l'unité 2.
-        "[10:00:02] E1 T1 P2 MOVE : Unit 101(50,10) MOVED from (50,10) to (50,10)"
-        "[R:+0.0] [MODELS: 101#0@(50,10) 101#1@(31,10)] [SUCCESS]\n"
-        # Tir 1 : une figurine de 101 tombe. Laquelle ? le log ne le dit pas.
-        "[10:00:03] E1 T1 P1 SHOOT : Unit 1(10,10) SHOT Unit 101(50,10) with [Bolt Rifle] "
-        "- Hit 4(3+) - Wound 5(4+) - Save 2(3+) - Dmg:2HP [R:+0.0] [SUCCESS]\n"
-        # Tir 2 : l'ancre loguée est celle du survivant, à 20 cases de l'unité 2.
-        "[10:00:04] E1 T1 P1 SHOOT : Unit 1(10,10) SHOT Unit 101(50,10) with [Bolt Rifle] "
-        "- Hit 4(3+) - Wound 5(4+) - Save 2(3+) [R:+0.0] [SUCCESS]\n"
-    )
-    log = tmp_path / "stale.log"
-    log.write_text(_log(body, inches_to_subhex=1, board="cols=60 rows=60", units=_STALE_UNITS))
-    stats = an.parse_step_log(str(log))
+    def _erreurs(*lignes: str) -> int:
+        log = tmp_path / f"stale_{len(lignes)}.log"
+        log.write_text(_log(
+            "".join((_STALE_SETUP,) + lignes),
+            inches_to_subhex=1, board="cols=60 rows=60", units=_STALE_UNITS,
+        ))
+        return an.parse_step_log(str(log))["shoot_at_engaged_enemy"][1]
 
-    assert stats["shoot_at_engaged_enemy"][1] == 0, (
-        "les socles morts de la cible sont encore mesurés : "
-        f"{stats['shoot_at_engaged_enemy']}"
+    activation_fautive = _erreurs(_STALE_TIR_1, _STALE_TIR_2)
+    assert activation_fautive == 2, (
+        f"les deux lignes d'un ciblage fautif se comptent, pertes comprises : {activation_fautive}"
+    )
+    assert _erreurs(_STALE_TIR_1, _STALE_TIR_2, _STALE_TIR_3) == activation_fautive, (
+        "l'activation suivante vise un survivant à 20 cases : le socle mort est encore mesuré"
     )
 
 
