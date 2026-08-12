@@ -238,38 +238,80 @@ def test_a_failed_charge_counts_as_an_attempt_and_not_as_a_success(
     assert tactical["charge_successes"] < tactical["charge_attempts"]
 
 
-def test_a_declared_charge_can_no_longer_fail_in_gym(melee_scenario_file) -> None:
-    """ALIGNEMENT 11.02 : en gym, une charge declaree est atteignable par construction.
+def test_a_charge_with_a_chosen_target_never_fails_in_gym(melee_scenario_file) -> None:
+    """ALIGNEMENT 11.02 : une fois la CIBLE choisie, une charge gym ne peut plus rater.
 
     Le jet a lieu a l'activation et le masque ne propose que les cibles que ce jet atteint
-    (11.04 « within the maximum distance »), donc `charge_successes == charge_attempts` des deux
-    cotes, sur toutes les graines. Avant le 2026-08-11, le masque ouvrait tout ennemi a 12" et
-    les des tranchaient ensuite : mesure sur 8 episodes en actions aleatoires, 17 charges
-    declarees pour 3 reussies (18 %) contre 4 pour 4 apres alignement.
+    (11.04 « within the maximum distance ») ; masque et commit interrogent le MEME oracle
+    (`charge_target_is_reachable` -> `charge_build_valid_plan`). Aucun `charge_fail` ne peut donc
+    porter le motif « no valid charge plan for roll ». Avant le 2026-08-11, le masque ouvrait tout
+    ennemi a 12" et les des tranchaient ensuite : mesure sur 8 episodes en actions aleatoires,
+    17 charges declarees pour 3 reussies (18 %) contre 4 pour 4 apres alignement.
 
-    Le second volet est le pendant indispensable : avec un jet impose a 2 — « never sufficient »
-    (encart FAILED CHARGES du PDF 11) — plus AUCUNE charge n'est declarable, donc le masque
-    n'ouvre aucun slot. Sans lui, un masque qui ouvrirait tout laisserait la premiere assertion
-    verte des que les charges reussissent par chance.
+    CE QUI A CHANGE LE 2026-08-12, et pourquoi ce test ne compare plus les deux compteurs : le
+    second mode d'echec de 11.02 — declarer puis n'avoir AUCUNE cible a portee du jet — est
+    desormais journalise (`roll_too_short`), alors qu'il sortait en `wait` invisible. Les
+    tentatives peuvent donc legitimement depasser les reussites, et l'egalite d'avant mesurait
+    l'absence d'un journal, pas une propriete du jeu. Mesure a l'appui, graine 1 : l'adversaire y
+    rate 1 charge sur 1 tentative, que l'ancien montage comptait 0 sur 0.
     """
     for seed in _SEEDS[:4]:
-        _engine, tactical = _cached_play(melee_scenario_file, seed)
-        assert tactical["charge_successes"] == tactical["charge_attempts"], (
-            f"graine {seed} : une charge declaree a echoue alors que le masque ne propose que "
-            "des cibles atteignables (rupture masque/execution)"
-        )
-        assert tactical["charge_successes_opponent"] == tactical["charge_attempts_opponent"], (
-            f"graine {seed} : idem cote adversaire"
-        )
+        engine, tactical = _cached_play(melee_scenario_file, seed)
+        controlled, opponent = _seat(engine)
+        for player in (controlled, opponent):
+            for log in _charge_logs(engine, player, ("charge_fail",)):
+                assert log["charge_failed_reason"] == "roll_too_short", (
+                    f"graine {seed}, joueur {player} : charge ratee APRES choix de cible "
+                    f"({log['charge_failed_reason']}) — le masque a promis une cible que le "
+                    "commit a refusee (rupture masque/execution)"
+                )
+        assert tactical["charge_successes"] <= tactical["charge_attempts"]
+        assert tactical["charge_successes_opponent"] <= tactical["charge_attempts_opponent"]
 
+
+def test_a_roll_that_reaches_nothing_is_a_failed_charge_and_not_a_wait(
+    melee_scenario_file,
+) -> None:
+    """11.02 : declarer puis ne rien pouvoir viser est une charge RATEE, pas une attente.
+
+    Jet IMPOSE a 2 — « a result of 2 (a double 1) is never sufficient » (encart FAILED CHARGES du
+    PDF 11) : toute escouade activee en phase de charge se retrouve donc sans aucune cible a
+    portee, et le masque ne lui laisse que WAIT. 11.02.3 tranche l'issue : « Otherwise, your unit
+    does not make a charge move. In either case, the charge is then resolved » — la charge est
+    resolue, donc ratee, et l'activation est consommee.
+
+    CE QUE CE TEST VERROUILLE, et ce qu'il rendait AVANT le 2026-08-12 : l'evenement sortait en
+    `wait`, `charge_attempts` ne le voyait pas, et `02_combat/n_charge_success_rate` valait 1.000
+    — valeur UNIQUE sur les 49 502 points du run x1_long de 50 000 episodes, des deux cotes. Une
+    courbe qui ne peut plus varier ne peut plus alerter. Ce test etait alors ecrit a l'envers : il
+    exigeait `charge_attempts == 0` sous ce meme patch, c'est-a-dire l'absence de la mesure.
+
+    La RECOMPENSE n'est pas le sujet ici et ne change pas : le masque n'ouvrant que WAIT, la regle
+    d'attente forcee rend 0.0 (verrou dans test_forced_wait_not_penalised).
+    """
     with patch("engine.phase_handlers.shared_utils.roll_charge_distance", return_value=2):
+        seen_failures = 0
         for seed in _SEEDS[:2]:
-            _engine, tactical = _play(melee_scenario_file, seed)
-            assert tactical["charge_attempts"] == 0, (
-                f"graine {seed} : une charge a ete declaree avec un jet de 2, qui n'atteint "
-                "jamais l'engagement (encart FAILED CHARGES, PDF 11)"
+            engine, tactical = _play(melee_scenario_file, seed)
+            controlled, opponent = _seat(engine)
+            assert tactical["charge_successes"] == 0, (
+                f"graine {seed} : une charge a REUSSI avec un jet de 2, qui n'atteint jamais "
+                "l'engagement (encart FAILED CHARGES, PDF 11)"
             )
-            assert tactical["charge_attempts_opponent"] == 0, f"graine {seed} : idem adversaire"
+            assert tactical["charge_successes_opponent"] == 0, f"graine {seed} : idem adversaire"
+            _assert_counters_match_journal(engine, tactical)
+            for player in (controlled, opponent):
+                for log in _charge_logs(engine, player, ("charge_fail",)):
+                    seen_failures += 1
+                    assert log["charge_failed_reason"] == "roll_too_short", log
+                    # Aucune cible a nommer : l'escouade a declare et n'a rien pu viser. C'est ce
+                    # qui distingue cette ligne de celle du jet insuffisant POUR une cible.
+                    assert "targetId" not in log, log
+                    assert int(log["charge_roll"]) == 2, log
+        assert seen_failures > 0, (
+            "montage casse : aucune activation de charge sous un jet de 2, donc rien de mesure — "
+            "ce test ne doit pas verifier le vide"
+        )
 
 
 def _charge_line(player: int, kind: str, roll: int = 9) -> Dict[str, Any]:

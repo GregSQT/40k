@@ -2029,6 +2029,69 @@ class W40KMetricsTracker:
                     x,
                 )
 
+    def log_seat_scores(
+        self,
+        seat_scores: Dict[str, float],
+        seat_gap: Optional[float] = None,
+        step: Optional[int] = None,
+    ) -> None:
+        """Log le combined par SIEGE et leur ecart (`00_critical/0_gap_p1-p2`).
+
+        CE QU'AUCUNE AUTRE COURBE NE DONNAIT. `agent_seat_mode: "random"` fait jouer l'agent
+        premier ou second a parts egales, et l'entrainement mesure deja les deux separement
+        (`seat_aware/winrate_agent_p1` / `_p2`). L'EVALUATION, elle, les melangeait : son
+        `combined` — le chiffre dont derive le score robuste qui SELECTIONNE le modele livre —
+        etait aveugle a l'ecart. Mesure du run x1_long du 2026-08-12 : 0.707 en jouant premier
+        contre 0.586 en jouant second, 12 points stables jusqu'a la fin du run. Un combined de
+        0.909 peut donc cacher un 0.95/0.87, et rien ne le montrait cote evaluation.
+
+        Sens de la soustraction, fige par `ai.bot_evaluation.SEAT_KEYS` :
+          > 0 -> l'agent est meilleur en jouant PREMIER
+          < 0 -> meilleur en jouant SECOND
+          ~ 0 -> parite entre les deux sieges
+        `seat_gap` vaut None quand un seul siege est couvert (`agent_seat_mode` a "p1" ou "p2") :
+        aucune courbe n'est alors tracee, plutot qu'un score absolu deguise en ecart — meme regle
+        que `roster_gap` dans `log_faction_scores`.
+
+        Ces scores sont PONDERES par `bot_eval_weights`, comme `results["combined"]` et comme les
+        agregats par faction : c'est ce qui les rend directement comparables entre eux. Le
+        croisement brut siege x bot vit dans `log_seat_bot_win_rates`.
+        """
+        if not isinstance(seat_scores, dict):
+            raise TypeError(f"seat_scores must be dict (got {type(seat_scores).__name__})")
+        x = step if step is not None else self.episode_count
+        for seat, score in seat_scores.items():
+            self.writer.add_scalar(f'bot_eval/seat/{seat}', float(score), x)
+        if seat_gap is not None:
+            self.writer.add_scalar('00_critical/0_gap_p1-p2', float(seat_gap), x)
+
+    def log_seat_bot_win_rates(
+        self,
+        seat_bot_win_rates: Dict[str, Dict[str, float]],
+        step: Optional[int] = None,
+    ) -> None:
+        """Log le croisement `bot_eval/seat/<seat>/vs_<bot>`.
+
+        Ce que `bot_eval/seat/<seat>` ne dit pas : si le desavantage du second siege vient de TOUS
+        les adversaires ou d'un seul. La question est concrete — un bot qui prend l'initiative sur
+        les objectifs punit surtout le joueur qui subit le premier tour — et l'agregat pondere la
+        noie.
+
+        Comme `log_faction_bot_win_rates`, ces cellules sont des win-rates BRUTS incluant le
+        holdout : leur moyenne ne redonne pas l'agregat pondere, et c'est voulu.
+        """
+        if not isinstance(seat_bot_win_rates, dict):
+            raise TypeError(
+                f"seat_bot_win_rates must be dict "
+                f"(got {type(seat_bot_win_rates).__name__})"
+            )
+        x = step if step is not None else self.episode_count
+        for seat, per_bot in seat_bot_win_rates.items():
+            for bot_name, win_rate in per_bot.items():
+                self.writer.add_scalar(
+                    f'bot_eval/seat/{seat}/vs_{bot_name}', float(win_rate), x
+                )
+
     def log_holdout_split_metrics(self, split_metrics: Dict[str, float]) -> None:
         """Log holdout split aggregates to TensorBoard."""
         if 'holdout_regular_mean' in split_metrics:

@@ -345,8 +345,16 @@ def handle_charge(
             stats['sample_actions']['charge'] = line.strip()
     else:
         # Check if it's a FAILED charge
+        #
+        # DEUX FORMES, une par mode d'echec de 11.02, et les deux sont journalisees depuis le
+        # 2026-08-12 : le jet est insuffisant pour la cible CHOISIE (« to unit N(c,r) »), ou il
+        # n'amene AUCUNE cible a portee (« - no target within reach ») — l'escouade a declare puis
+        # n'a rien pu viser, il n'y a pas de cible a nommer. N'accepter que la premiere forme
+        # comptait la seconde en `parse_errors`, c'est-a-dire en erreur de format, alors que c'est
+        # une ligne legitime.
         failed_charge_match = re.search(
-            r'Unit (\d+)\s+FAILED CHARGE to unit (\d+)\((\d+),\s*(\d+)\)',
+            r'Unit (\d+)\s+FAILED CHARGE'
+            r'(?: to unit (\d+)\((\d+),\s*(\d+)\)| - no target within reach)',
             action_desc,
             re.IGNORECASE
         )

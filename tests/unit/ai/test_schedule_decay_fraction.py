@@ -358,9 +358,18 @@ def test_long_profile_is_its_reference_recalibrated(ref_name: str, long_name: st
     # Les deux rampes ont des `decay_fraction` DISTINCTES, et c'est délibéré : elles ne servent
     # pas la même chose. Ce sont des FRACTIONS du run, donc les deux longueurs les partagent :
     # l'entropie s'arrête aux 40 % (80k sur x5_long, 20k sur x1_long) parce qu'on veut que la
-    # politique cesse d'explorer et exploite ; le learning rate descend jusqu'aux 70 % (140k /
-    # 35k) parce que le mettre au plancher dès 40 % briderait l'apprentissage sur 60 % du budget.
-    expected_decay = {"learning_rate": 0.7, "ent_coef": 0.4}
+    # politique cesse d'explorer et exploite ; le learning rate descend jusqu'aux 90 % (180k /
+    # 45k) parce que le mettre au plancher plus tôt fige la politique alors qu'il reste du budget.
+    #
+    # 0.9 et non 0.7 depuis le 2026-08-12, MESURÉ sur le run x1_long de 50 000 épisodes
+    # (run_20260812-033643) : le plancher atteint à 35 000 épisodes laissait le dernier quart du
+    # run à une fraction de clipping de 0.032, trois fois SOUS le `clip_fraction_min` que le
+    # profil déclare (0.1), et à un approx_kl de 0.007 pour un `kl_min` de 0.005 — la politique ne
+    # bougeait plus. Côté résultat : +8.7 points de win-rate entre 10k et 20k épisodes, +0.9 point
+    # entre 40k et 50k. Le plancher lui-même est passé de 2e-4 à 5e-4 dans le même mouvement (cf.
+    # la justification du bloc `learning_rate` dans le JSON), sur les DEUX membres de chaque paire
+    # — l'assertion de comparabilité ci-dessous est ce qui l'exige.
+    expected_decay = {"learning_rate": 0.9, "ent_coef": 0.4}
     for ramp_key, expected in expected_decay.items():
         long_ramp = long_["model_params"][ramp_key]
         ref_ramp = ref["model_params"][ramp_key]

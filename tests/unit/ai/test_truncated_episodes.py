@@ -485,7 +485,10 @@ def test_the_backstop_records_instead_of_scoring_a_silent_loss(monkeypatch) -> N
         engine = _Engine()
 
         def reset(self, seed=None):
-            return _obs(), {}
+            # `controlled_player` : le siege de l'episode, publie par `BotControlledEnv` a chaque
+            # reset et lu par la tache d'evaluation pour sa ventilation par siege. La doublure
+            # porte le contrat, elle ne le contourne pas.
+            return _obs(), {"controlled_player": 1}
 
         def action_masks(self):
             return _mask()
@@ -673,7 +676,8 @@ def test_the_eval_worker_records_the_truncation_it_meets(monkeypatch) -> None:
         engine = _FakeEngine()
 
         def reset(self, seed=None):
-            return np.zeros(4, dtype=np.float32), {}
+            # Cf. `_NeverEndsEnv` plus haut : le siege de l'episode est publie au reset.
+            return np.zeros(4, dtype=np.float32), {"controlled_player": 1}
 
         def action_masks(self):
             return np.ones(3, dtype=bool)

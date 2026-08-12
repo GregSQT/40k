@@ -6271,7 +6271,85 @@ class W40KEngine(gym.Env):
                 self.game_state.get("_squad_advance_rolls", {}).pop(squad_id, None)  # get allowed
                 # Miroir du pop du jet : la carte de cellules est propre a cette activation.
                 clear_squad_move_cell_map(self.game_state, squad_id)
-            end_result = end_activation(self.game_state, unit, WAIT, 1, tracking, pool, 0)
+            # 11.02 — UNE ATTENTE EN PHASE DE CHARGE N'EST PAS TOUJOURS UNE ATTENTE. L'activation
+            # d'une escouade en phase de charge VAUT declaration (11.02.1 ; le pool d'activation ne
+            # retient que des escouades eligibles, `get_eligible_units`), et le 2D6 a deja ete jete
+            # a ce moment-la (`charge_roll_for_activation`, appelee par le masque). Quand ce jet
+            # n'amene AUCUNE cible a portee, le masque n'ouvre plus que WAIT : l'agent ne renonce
+            # pas, il subit une CHARGE RATEE — 11.02.3 « Otherwise, your unit does not make a
+            # charge move. In either case, the charge is then resolved ».
+            #
+            # Ce que ca corrigeait, MESURE sur le run x1_long du 2026-08-12 :
+            # `02_combat/n_charge_success_rate` valait 1.000 — valeur UNIQUE sur 49 502 points, des
+            # deux cotes — parce que le seul emetteur `charge_fail` du chemin gym (branche
+            # `plan is None` de squad_charge, ci-dessous) est inatteignable par construction : le
+            # masque et le commit interrogent le MEME oracle (`charge_target_is_reachable` ->
+            # `charge_build_valid_plan`), donc un slot ouvert produit toujours un plan valide. Les
+            # jets trop courts sortaient en `wait` et `charge_attempts` ne les voyait pas : la
+            # courbe censee separer « ne charge pas » de « rate ses charges » ne pouvait plus
+            # varier. Le chemin PvP, lui, journalisait deja `charge_fail` (charge_handlers ~L2897).
+            #
+            # LA RECOMPENSE NE CHANGE PAS, et c'est deliberé : `result["action"]` reste
+            # `squad_wait`, donc le calcul passe par `_wait_reward`, donc par la regle d'ATTENTE
+            # FORCEE (masque n'ouvrant que WAIT -> 0.0). Router l'evenement vers la branche
+            # `charge_fail` du reward_calculator (-0.01) penaliserait une NON-DECISION, ce que
+            # cette regle-la existe precisement pour empecher. Le cout de la charge ratee est deja
+            # reel et structurel : l'activation est consommee (Arg4 = CHARGE) sans aucun dommage.
+            # `None` = aucune charge ratee : c'est la branche de charge ci-dessous, et elle seule,
+            # qui peut clore l'activation autrement qu'en attente.
+            end_result: Optional[Dict[str, Any]] = None
+            if current_phase == "charge":
+                from engine.phase_handlers.charge_handlers import (
+                    charge_record_outcome, charge_target_is_reachable,
+                )
+                # LE JET MEMORISE EST LA TRACE DE LA DECLARATION, et son absence est un etat de
+                # jeu, pas une erreur a masquer : `charge_roll_for_activation` jette et appelle
+                # `charge_record_declaration` au MEME instant (11.02.1 + 11.02.2). Pas de jet pour
+                # cette escouade = aucune declaration n'a ete faite en son nom = l'attente est une
+                # attente, pas une charge ratee. C'est le cas d'une activation close sans que le
+                # masque de charge ait ete construit pour elle (appel direct de
+                # `_process_squad_action`, cf. test_units_charged_means_charge_move).
+                _charge_roll_raw = self.game_state.get(  # get allowed
+                    "charge_roll_values", {}
+                ).get(str(squad_id))  # get allowed
+                if _charge_roll_raw is not None:
+                    _charge_roll = int(_charge_roll_raw)
+                    _enemy_slot_ids = get_enemy_slot_mapping(
+                        self.game_state, int(require_key(unit, "player"))
+                    )
+                    if not any(
+                        charge_target_is_reachable(
+                            self.game_state, str(squad_id), str(esid), _charge_roll
+                        )
+                        for esid in _enemy_slot_ids if esid is not None
+                    ):
+                        # Arg1 = NO : c'est la ligne `charge_fail` ci-dessous qui journalise
+                        # l'evenement, une ligne `wait` en plus compterait deux actions pour un
+                        # seul step. Arg3 = PASS (jamais CHARGE) : aucun charge move n'a eu lieu,
+                        # donc aucun Fights First — meme raison que la branche `plan is None`.
+                        end_result = end_activation(self.game_state, unit, NO, 1, PASS, CHARGE, 0)
+                        _charge_dist = charge_record_outcome(self.game_state, squad_id)
+                        append_action_log(
+                            self.game_state,
+                            {
+                                "type": "charge_fail",
+                                "message": (
+                                    f"Unit {squad_id} FAILED CHARGE (Roll: {_charge_roll} "
+                                    f"too short to reach any target)"
+                                ),
+                                "turn": require_key(self.game_state, "turn"),
+                                "phase": "charge",
+                                "unitId": squad_id,
+                                "player": require_key(unit, "player"),
+                                "charge_roll": _charge_roll,
+                                "charge_failed_reason": "roll_too_short",
+                                "timestamp": "server_time",
+                                "reward": 0.0,
+                                **_charge_dist,
+                            },
+                        )
+            if end_result is None:
+                end_result = end_activation(self.game_state, unit, WAIT, 1, tracking, pool, 0)
             result = {**end_result, "action": "squad_wait", "squad_id": squad_id}
 
         # ── mouvement : normal / advance / fall_back ──────────────────────────

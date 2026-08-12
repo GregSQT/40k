@@ -247,24 +247,41 @@ def test_the_distance_counters_match_the_journal(melee_scenario_file) -> None:
         assert measured["long"] == sum(1 for d in target if d >= 9)
 
 
-def test_waiting_in_the_charge_phase_is_not_an_attempt(melee_scenario_file) -> None:
-    """VERROU DU DENOMINATEUR : un episode ou l'agent renonce toujours ne mesure rien.
+def test_waiting_in_the_charge_phase_is_not_a_declaration_distance(melee_scenario_file) -> None:
+    """VERROU DU DENOMINATEUR : un episode ou l'agent renonce toujours ne mesure aucune DISTANCE
+    DE DECLARATION.
 
-    11.02.3 laisse renoncer apres le jet. L'enregistrement de distances est bien cree a
-    l'activation — c'est le seul instant ou le chargeur est encore a sa position de depart —
-    mais une activation close sur WAIT n'emet aucune ligne de charge, donc elle n'entre dans
-    aucune statistique. Si elle y entrait, la part de declarations a >= 9\" baisserait
-    mecaniquement avec le nombre de renoncements.
+    11.02.3 laisse renoncer apres le jet, et un renoncement n'emet aucune ligne de charge : le
+    denominateur de la part de declarations a >= 9\" ne bouge donc pas avec le nombre de
+    renoncements. C'est ce que ce test protege, et c'est `target_n` qui le porte.
+
+    CE QUI A CHANGE LE 2026-08-12 : il faut distinguer DEUX attentes. Celle ou le jet atteignait
+    une cible et ou l'agent a renonce (11.02.3) n'emet toujours rien. Celle ou le jet n'atteint
+    AUCUNE cible n'est pas un renoncement — l'escouade a declare et subit une charge ratee
+    (`roll_too_short`) : elle emet desormais sa ligne, la ou elle sortait en `wait` invisible.
+    Cette ligne porte la distance a l'ennemi le plus proche mais AUCUNE distance de cible
+    (`charge_target_distance_inches` reste None, il n'y a pas de cible), donc `target_n` — et avec
+    lui la part des >= 9\" — reste intact. C'est exactement la propriete a verrouiller ici.
     """
     engine, tactical = _cached_play(melee_scenario_file, _SEEDS[0], charge_policy="wait")
-    assert not [
+    mine = [
         lg for lg in _charge_lines(engine)
         if int(lg["player"]) == int(engine.config["controlled_player"])
-    ], "montage casse : l'agent a charge alors qu'il attend toujours"
-    assert tactical["charge_attempts"] == 0
+    ]
+    assert not [lg for lg in mine if lg["type"] == "charge"], (
+        "montage casse : l'agent a charge alors qu'il attend toujours"
+    )
+    for lg in mine:
+        assert lg["charge_failed_reason"] == "roll_too_short", lg
+        assert lg["charge_target_distance_inches"] is None, lg
     measured = tactical["charge_distance"]["agent"]
-    assert measured["nearest_n"] == 0
+    assert tactical["charge_attempts"] == len(mine)
+    assert tactical["charge_successes"] == 0
+    # Le denominateur de la part des >= 9" : aucune distance de CIBLE, quel que soit le nombre
+    # d'attentes — c'est le sujet du test et la seule grandeur qu'un renoncement pourrait fausser.
     assert measured["target_n"] == 0
+    assert measured["success_n"] == 0
+    assert measured["long"] == 0
 
 
 # ─────────────────────────────────────────────────────────────────────────────

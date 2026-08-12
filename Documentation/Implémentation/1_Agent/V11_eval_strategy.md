@@ -239,6 +239,15 @@ training qui les référencent.
 > le holdout ; leur moyenne ne redonne pas `bot_eval/faction/<faction>`, qui est pondéré et
 > l'exclut.
 >
+> ✅ **Le win-rate PAR SIÈGE est publié depuis le 2026-08-12** : `bot_eval/seat/<p1|p2>` (agrégat
+> pondéré), `bot_eval/seat/<seat>/vs_<bot>` (croisement brut) et `00_critical/0_gap_p1-p2` (l'écart),
+> dérivés du même `_seat_bot_tally`. **Ce que ça ferme** : `agent_seat_mode: "random"` fait jouer
+> l'agent premier ou second à parts égales, l'entraînement mesurait déjà les deux séparément
+> (`seat_aware/winrate_agent_p1` / `_p2` : **0.707 contre 0.586** au run du 2026-08-12, 12 points
+> stables jusqu'à la fin), mais l'évaluation les confondait — donc le `combined` dont dérive le score
+> robuste qui **sélectionne le modèle livré** était aveugle à l'écart. Un 0.909 pouvait cacher un
+> 0.95/0.87. L'écart n'est pas publié quand un seul siège est couvert.
+>
 > ✅ **Le holdout est désaturé et GELÉ depuis le 2026-08-04** ([§0.55](V11_agent_rework.md#s0.55)) :
 > `w_objective 2.0`, `vs_tactical` passe de 0.89 à **0.72** et le bot passe de dernier à premier du
 > panel. L'indicateur mesure donc enfin quelque chose. Le volet 2 (qualitatif) reste entièrement

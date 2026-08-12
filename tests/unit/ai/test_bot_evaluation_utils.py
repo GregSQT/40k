@@ -219,6 +219,10 @@ def test_eval_worker_task_counts_outcomes_and_reports_progress(monkeypatch: pyte
             self._episode = -1
             self._closed = False
             self._winners = [0, -1, 1]
+            # Le SIEGE change au 3e episode, comme la faction juste au-dessus et pour la meme
+            # raison : `agent_seat_mode: "random"` le tire a chaque reset, donc le worker doit le
+            # relever episode par episode et non une fois par tache.
+            self._seats = [1, 1, 2]
 
         def get_wrapper_attr(self, name):
             # Chemin de PPO : `get_action_masks` resout `action_masks` par ce biais. L'appel
@@ -234,7 +238,13 @@ def test_eval_worker_task_counts_outcomes_and_reports_progress(monkeypatch: pyte
             _ = seed
             self._episode += 1
             self.engine.game_state["units"] = self._rosters[self._episode]
-            return np.array([0.0, 1.0], dtype=np.float32), {}
+            # `controlled_player` : le siege de l'episode, publie par `BotControlledEnv` a chaque
+            # reset (`agent_seat_mode: "random"` le tire episode par episode) et lu par la tache
+            # d'evaluation pour sa ventilation par siege.
+            return (
+                np.array([0.0, 1.0], dtype=np.float32),
+                {"controlled_player": self._seats[self._episode]},
+            )
 
         def step(self, action):
             _ = action
@@ -288,6 +298,17 @@ def test_eval_worker_task_counts_outcomes_and_reports_progress(monkeypatch: pyte
         "Spacemarine": {"wins": 1, "total": 2},
         "Ork": {"wins": 0, "total": 1},
     }
+    # MEME releve pour le SIEGE, et c'est ce que l'evaluation ne faisait pas : son `combined`
+    # melangeait les deux sieges, donc le score qui selectionne le modele livre etait aveugle a
+    # l'ecart entre eux (12 points sur le run x1_long du 2026-08-12).
+    assert result["seat_stats"] == {
+        "p1": {"wins": 1, "total": 2},
+        "p2": {"wins": 0, "total": 1},
+    }
+    # La ventilation par siege partitionne les episodes : ni un episode compte deux fois, ni un
+    # episode perdu en route. Vrai par construction (un seul site d'ecriture), verrouille ici.
+    assert sum(b["total"] for b in result["seat_stats"].values()) == task["n_episodes"]
+    assert sum(b["wins"] for b in result["seat_stats"].values()) == result["wins"]
 
 
 def test_eval_worker_task_requires_worker_init() -> None:
@@ -400,7 +421,8 @@ def test_eval_worker_task_attaches_step_logger(monkeypatch: pytest.MonkeyPatch) 
 
         def reset(self, seed=None):
             _ = seed
-            return np.array([0.0], dtype=np.float32), {}
+            # Cf. l'autre faux env de ce fichier : le siege de l'episode est publie au reset.
+            return np.array([0.0], dtype=np.float32), {"controlled_player": 1}
 
         def step(self, action):
             _ = action
@@ -711,6 +733,91 @@ def test_faction_bot_win_rates_skip_cells_without_episodes() -> None:
 def test_roster_gap_faction_order_carries_the_curve_sign() -> None:
     """L'ordre de ROSTER_GAP_FACTIONS fixe le sens de 00_critical/0_gap_sm-ork."""
     assert be.ROSTER_GAP_FACTIONS == ("Spacemarine", "Ork")
+
+
+def _seat_result(bot_name: str, seat_stats: dict) -> dict:
+    return {"bot_name": bot_name, "seat_stats": seat_stats}
+
+
+def _seat_scores(results_list: list, active: tuple, weights: dict) -> dict:
+    """Chaine REELLE de `evaluate_against_bots`, jumelle de `_faction_scores`."""
+    return be._compute_faction_scores(be._seat_bot_tally(results_list, active), active, weights)
+
+
+def test_seat_scores_show_the_gap_that_combined_hides() -> None:
+    """Ce que la ventilation par SIEGE apporte, et qu'aucune courbe d'evaluation ne donnait.
+
+    Un agent a 100 % en jouant premier et 50 % en jouant second rend le MEME `combined` (0.75)
+    qu'un agent a 75 % des deux cotes. C'est le cas mesure sur le run x1_long du 2026-08-12 :
+    0.707 contre 0.586 en entrainement, 12 points, quand l'evaluation ne publiait qu'un chiffre
+    unique — et c'est ce chiffre unique dont derive le score robuste qui SELECTIONNE le modele
+    livre. Les deux situations doivent cesser d'etre indiscernables.
+
+    Le score par siege est PONDERE par les memes poids que `combined` (`_compute_faction_scores`
+    est agnostique a la cle du tally) : un win-rate brut melangerait des adversaires de
+    difficultes differentes et ne serait pas comparable a `combined`.
+    """
+    weights = {"random": 0.75, "greedy": 0.25}
+    results_list = [
+        # Siege p1 : 100 % contre les deux bots -> 1.0
+        _seat_result("random", {"p1": {"wins": 4, "total": 4}}),
+        _seat_result("greedy", {"p1": {"wins": 4, "total": 4}}),
+        # Siege p2 : 50 % contre les deux -> 0.5
+        _seat_result("random", {"p2": {"wins": 2, "total": 4}}),
+        _seat_result("greedy", {"p2": {"wins": 2, "total": 4}}),
+    ]
+    scores = _seat_scores(results_list, ("random", "greedy"), weights)
+    assert scores == {"p1": 1.0, "p2": 0.5}
+    # L'ECART est la grandeur publiee (`00_critical/0_gap_p1-p2`), et son signe vient de l'ordre
+    # de SEAT_KEYS : positif = meilleur en jouant premier.
+    assert be.SEAT_KEYS == ("p1", "p2")
+    assert scores[be.SEAT_KEYS[0]] - scores[be.SEAT_KEYS[1]] == 0.5
+    # Le combined global, lui, vaut 0.75 dans ce montage comme dans un montage parfaitement
+    # symetrique : c'est exactement ce qu'il ne pouvait pas distinguer.
+    assert sum(weights[bn] * 0.75 for bn in weights) == 0.75
+
+
+def test_seat_scores_drop_a_seat_missing_a_bot() -> None:
+    """Un siege sans episode contre l'un des bots n'est pas sur la meme echelle : ecarte.
+
+    C'est ce qui rend la courbe muette — plutot que fausse — quand `agent_seat_mode` vaut "p1"
+    ou "p2" : un seul siege est couvert, et l'ecart n'est alors pas publie du tout.
+    """
+    results_list = [
+        _seat_result("random", {"p1": {"wins": 2, "total": 4}, "p2": {"wins": 1, "total": 2}}),
+        _seat_result("greedy", {"p1": {"wins": 1, "total": 4}}),
+    ]
+    scores = _seat_scores(results_list, ("random", "greedy"), {"random": 0.5, "greedy": 0.5})
+    assert set(scores) == {"p1"}
+    assert not all(seat in scores for seat in be.SEAT_KEYS), (
+        "un seul siege couvert : `evaluate_against_bots` ne doit pas publier `seat_gap`"
+    )
+
+
+def test_every_failed_task_result_carries_seat_stats() -> None:
+    """Jumeau de `test_every_failed_task_result_carries_faction_stats` pour le siege.
+
+    `_seat_bot_tally` lit `seat_stats` par require_key : une fabrique d'echec qui l'omettrait
+    ferait sauter le run au premier timeout, exactement comme cela s'etait produit sur
+    `roster_stats`.
+    """
+    task = {"bot_name": "random", "scenario_file": "/tmp/s1.json", "n_episodes": 3}
+    for result in (
+        be._failed_task_result(task, "training_bot-1", timeout=True),
+        be._failed_task_result(task, "training_bot-1", error="boom"),
+    ):
+        assert result["seat_stats"] == {}
+    assert _seat_scores(
+        [be._failed_task_result(task, "training_bot-1", timeout=True)], ("random",), {"random": 1.0}
+    ) == {}
+
+
+def test_seat_key_refuses_anything_but_the_two_seats() -> None:
+    """`_seat_key` ne connait que 1 et 2 : un autre siege est une rupture, pas un cas de jeu."""
+    assert (be._seat_key(1), be._seat_key(2)) == ("p1", "p2")
+    for bad in (0, 3, -1):
+        with pytest.raises(ValueError, match=r"controlled_player"):
+            be._seat_key(bad)
 
 
 def test_every_failed_task_result_carries_faction_stats() -> None:

@@ -1039,7 +1039,6 @@ class StepLogger:
 
         elif action_type == "charge_fail" and details:
             # Charge failed because roll was too low
-            target_id = require_key(details, "target_id")
             charge_roll = details.get("charge_roll")
             require_key(details, "charge_failed_reason")
             if charge_roll is None:
@@ -1048,18 +1047,31 @@ class StepLogger:
                 raise ValueError(
                     f"charge_roll must be int for charge_fail, got {type(charge_roll).__name__}: {charge_roll!r}"
                 )
+            # DEUX ECHECS DE CHARGE, ET UN SEUL PORTE UNE CIBLE. 11.02 les distingue : le jet peut
+            # etre insuffisant pour la cible CHOISIE (`no valid charge plan for roll`), ou
+            # n'amener AUCUNE cible a portee — l'escouade a declare (11.02.1) puis n'a rien pu
+            # viser, il n'y a donc pas de cible a nommer. `target_id` et `target_coords` etaient
+            # exiges par `require_key` : le second cas levait, et `log_action` avale ses
+            # exceptions, si bien que la ligne n'atteignait JAMAIS step.log. Ni le chemin gym
+            # (`_process_squad_action`, squad_wait) ni le chemin PvP (`charge_handlers`, branche
+            # « too short to reach any target ») n'etaient donc journalises — d'ou un
+            # `n_charge_success_rate` bloque a 1.000 sur tout un run de 50 000 episodes.
+            target_id = details.get("target_id")
             target_coords = details.get("target_coords")
-            if target_coords is None:
-                raise KeyError("Charge_fail action missing required target_coords")
-            if not isinstance(target_coords, tuple) or len(target_coords) != 2:
-                raise ValueError(
-                    f"Charge_fail target_coords must be tuple(col,row), got {target_coords!r}"
+            if target_id is None:
+                base_msg = f"{unit_label} FAILED CHARGE - no target within reach [Roll: {charge_roll}]"
+            else:
+                if target_coords is None:
+                    raise KeyError("Charge_fail action missing required target_coords")
+                if not isinstance(target_coords, tuple) or len(target_coords) != 2:
+                    raise ValueError(
+                        f"Charge_fail target_coords must be tuple(col,row), got {target_coords!r}"
+                    )
+                target_col, target_row = target_coords
+                base_msg = (
+                    f"{unit_label} FAILED CHARGE to unit {target_id}({target_col},{target_row}) "
+                    f"[Roll: {charge_roll}]"
                 )
-            target_col, target_row = target_coords
-            base_msg = (
-                f"{unit_label} FAILED CHARGE to unit {target_id}({target_col},{target_row}) "
-                f"[Roll: {charge_roll}]"
-            )
             base_msg += _charge_distance_segment(details)
 
             return base_msg

@@ -818,6 +818,16 @@ class MetricsCollectionCallback(BaseCallback):
                     self.metrics_tracker.log_faction_bot_win_rates(
                         require_key(bot_results, 'faction_bot_win_rates')
                     )
+                    # Ventilation par SIEGE : meme raison que le gap par roster juste au-dessus —
+                    # c'est AU SCORE LIVRE que l'ecart p1/p2 doit etre lisible, puisque c'est ce
+                    # score-la qui est publie et qui selectionne le modele.
+                    self.metrics_tracker.log_seat_scores(
+                        require_key(bot_results, 'seat_scores'),
+                        bot_results.get('seat_gap'),
+                    )
+                    self.metrics_tracker.log_seat_bot_win_rates(
+                        require_key(bot_results, 'seat_bot_win_rates')
+                    )
                     # Ventilation par ROSTER (chantier 04c) : c'est elle qui rend une variante
                     # « avec reserves » lisible separement de la liste dont elle derive.
                     for _side in ("agent", "opponent"):
@@ -2075,6 +2085,17 @@ class BotEvaluationCallback(BaseCallback):
             )
             self.metrics_tracker.log_faction_bot_win_rates(
                 require_key(results, 'faction_bot_win_rates'),
+                step=int(eval_marker),
+            )
+            # Ventilation par SIEGE, meme point de mesure : c'est en cours de run qu'on veut voir
+            # si l'ecart p1/p2 se resorbe ou s'installe.
+            self.metrics_tracker.log_seat_scores(
+                require_key(results, 'seat_scores'),
+                results.get('seat_gap'),
+                step=int(eval_marker),
+            )
+            self.metrics_tracker.log_seat_bot_win_rates(
+                require_key(results, 'seat_bot_win_rates'),
                 step=int(eval_marker),
             )
             # Ventilation par ROSTER (chantier 04c), meme point de mesure que la faction.

@@ -257,6 +257,26 @@ NO_ROSTER_REF = "<no_roster_ref>"
 #: huit sites, et un oubli sur `_failed_task_result` fait sauter le run au premier timeout.
 ROSTER_SIDES: Tuple[str, str] = ("agent", "opponent")
 
+#: Les deux SIEGES que l'agent peut occuper, dans l'ordre ou le gap les soustrait.
+#:
+#: POURQUOI CETTE VENTILATION EXISTE. `agent_seat_mode: "random"` fait jouer l'agent premier ou
+#: second a parts egales, et l'entrainement mesure les deux separement (`seat_aware/winrate_agent_p1`
+#: / `_p2`). L'EVALUATION, elle, ne le faisait pas : son `combined` melangeait les deux sieges, si
+#: bien que le chiffre qui SELECTIONNE le modele livre (score robuste) etait aveugle a l'ecart entre
+#: eux. Mesure du run x1_long du 2026-08-12 : 0.707 en jouant premier contre 0.586 en jouant second,
+#: 12 points, stables jusqu'a la fin du run. Un 0.909 de combined peut donc cacher un 0.95/0.87 —
+#: c'est-a-dire un agent qui perd la moitie de ses parties reelles pour une raison qu'aucune courbe
+#: d'evaluation ne montrait.
+SEAT_KEYS: Tuple[str, str] = ("p1", "p2")
+
+
+def _seat_key(controlled_player: int) -> str:
+    """`1 -> "p1"`, `2 -> "p2"`. Aucun autre siege n'existe : tout le reste est une rupture."""
+    seat = int(controlled_player)
+    if seat not in (1, 2):
+        raise ValueError(f"controlled_player doit valoir 1 ou 2, pas {controlled_player!r}")
+    return f"p{seat}"
+
 
 def _episode_roster_ids(engine: Any) -> Dict[str, str]:
     """`{"agent": <roster_id>, "opponent": <roster_id>}` de l'episode courant.
@@ -333,6 +353,21 @@ def _faction_bot_tally(
     """
     return _bot_tally(
         results_list, active_bot_names, lambda r: require_key(r, "faction_stats")
+    )
+
+
+def _seat_bot_tally(
+    results_list: List[Dict[str, Any]],
+    active_bot_names: Tuple[str, ...],
+) -> Dict[str, Dict[str, List[int]]]:
+    """`tally[seat][bot] = [wins, total]`, `seat` valant "p1" ou "p2" (cf. SEAT_KEYS).
+
+    Meme mecanique que la faction et le roster, et c'est ce qui garantit la propriete annoncee :
+    la somme des deux sieges retombe sur le win-rate global parce que le filtre de bot et
+    l'accumulation sont LE MEME code, pas parce que trois copies se ressemblent.
+    """
+    return _bot_tally(
+        results_list, active_bot_names, lambda r: require_key(r, "seat_stats")
     )
 
 
@@ -777,8 +812,14 @@ def _eval_worker_task(
     # Meme releve, meme raison, pour les deux ROSTERS de l'episode : une variante de liste est un
     # roster, et `agent_roster_ref: "training_random"` peut en changer a chaque reset.
     roster_stats: Dict[str, Dict[str, Dict[str, int]]] = {side: {} for side in ROSTER_SIDES}
+    # Meme releve, meme raison, pour le SIEGE de l'episode (cf. SEAT_KEYS) : `agent_seat_mode`
+    # peut valoir "random", auquel cas le siege est tire a chaque reset et la tache ne le connait
+    # pas d'avance.
+    seat_stats: Dict[str, Dict[str, int]] = {}
 
-    def _count_episode(faction: str, roster_ids: Dict[str, str], won: bool) -> None:
+    def _count_episode(
+        faction: str, roster_ids: Dict[str, str], seat: str, won: bool
+    ) -> None:
         """Comptabilise UN episode dans les trois ventilations, gagne ou non.
 
         Un seul site d'ecriture, appele une fois par episode : le `total` et le `wins` d'une
@@ -787,7 +828,7 @@ def _eval_worker_task(
         `wins` plus loin — un aliasing a preserver a la main, alors que `winner` est connu avant
         l'appel.
         """
-        for stats, key in [(faction_stats, faction)] + [
+        for stats, key in [(faction_stats, faction), (seat_stats, seat)] + [
             (roster_stats[side], roster_ids[side]) for side in ROSTER_SIDES
         ]:
             bucket = stats.setdefault(key, {"wins": 0, "total": 0})
@@ -801,6 +842,11 @@ def _eval_worker_task(
         obs, info = env.reset(seed=ep_seed)
         episode_faction = _agent_faction_from_engine(env.engine)
         episode_roster_ids = _episode_roster_ids(env.engine)
+        # `require_key` sur l'`info` du RESET, et non `env.engine.config` : c'est
+        # `BotControlledEnv._apply_episode_seat` qui tire le siege de l'episode et le publie ici
+        # (meme cle que celle dont vivent les courbes `seat_aware/*` de l'entrainement). Un siege
+        # absent est une anomalie d'environnement, pas un cas de jeu.
+        episode_seat = _seat_key(require_key(info, "controlled_player"))
         done = False
         step_count = 0
         # BACKSTOP, et il ne peut PAS preempter le garde moteur : les deux compteurs n'ont pas
@@ -879,7 +925,7 @@ def _eval_worker_task(
                 "engine_step_limit": engine_episode_limit,
             })
             draws += 1
-            _count_episode(episode_faction, episode_roster_ids, won=False)
+            _count_episode(episode_faction, episode_roster_ids, episode_seat, won=False)
             if progress_callback is not None:
                 progress_callback()
             continue
@@ -890,7 +936,8 @@ def _eval_worker_task(
         winner = require_key(info, "winner")
         controlled_player = require_key(info, "controlled_player")
         _count_episode(
-            episode_faction, episode_roster_ids, won=(winner == controlled_player)
+            episode_faction, episode_roster_ids, episode_seat,
+            won=(winner == controlled_player),
         )
         if winner == controlled_player:
             wins += 1
@@ -911,6 +958,7 @@ def _eval_worker_task(
         "bot_name": task["bot_name"],
         "scenario_name": task["scenario_name"],
         "faction_stats": faction_stats,
+        "seat_stats": seat_stats,
         "roster_stats": roster_stats,
     }
 
@@ -945,6 +993,8 @@ def _failed_task_result(
         # Aucun episode joue : la tache ne contribue a aucune faction. Cle PRESENTE et vide,
         # jamais absente — _compute_faction_scores la lit par require_key.
         "faction_stats": {},
+        # Meme regle pour le siege : `_seat_bot_tally` lit `seat_stats` par require_key.
+        "seat_stats": {},
         # Meme regle, et c'est TOUT LE POINT de cette fabrique unique : `_roster_bot_tally` lit
         # `roster_stats[side]` par require_key, donc les deux cotes doivent exister meme vides,
         # sans quoi le premier timeout tuerait le run.
@@ -1612,6 +1662,22 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
         results["roster_gap"] = (
             faction_scores[ROSTER_GAP_FACTIONS[0]] - faction_scores[ROSTER_GAP_FACTIONS[1]]
         )
+
+    # Ventilation par SIEGE (cf. SEAT_KEYS). `results["combined"]` melange les deux, donc le
+    # chiffre qui selectionne le modele livre ne voyait pas l'ecart entre eux — 12 points sur le
+    # run du 2026-08-12, cote entrainement, sans aucune contrepartie en evaluation.
+    # `_compute_faction_scores` est AGNOSTIQUE a la cle du tally (elle ne fait que ponderer par bot
+    # et ecarter les cles a couverture partielle) : l'appeler ici donne un `combined` par siege
+    # directement comparable a `results["combined"]`, ce qu'un win-rate brut ne serait pas.
+    seat_tally = _seat_bot_tally(results_list, active_bot_names)
+    seat_scores = _compute_faction_scores(seat_tally, active_bot_names, eval_weights)
+    results["seat_scores"] = seat_scores
+    results["seat_bot_win_rates"] = _compute_bot_win_rates(seat_tally)
+    # L'ECART, publie seulement si les deux sieges sont couverts : un run en `agent_seat_mode: p1`
+    # n'a pas d'ecart a montrer, et en publier un vaudrait un score absolu deguise en ecart —
+    # meme regle que `roster_gap` ci-dessus.
+    if all(seat in seat_scores for seat in SEAT_KEYS):
+        results["seat_gap"] = seat_scores[SEAT_KEYS[0]] - seat_scores[SEAT_KEYS[1]]
 
     # Ventilation par ROSTER, des DEUX cotes (chantier 04c). `faction_bot_win_rates` confond
     # deux variantes d'une meme faction — typiquement « avec » et « sans » reserves
