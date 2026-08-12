@@ -489,8 +489,9 @@ def test_a_striker_whose_datasheet_knows_no_profile_makes_the_line_unverifiable(
     Sauter cette figurine rendrait un verdict sur la seule autre — le repli d'escouade que ce
     module refuse, déguisé en per-figurine. La ligne est écartée, pas moyennée.
 
-    MÊLÉE SEULE : l'arme cherchée manque à la datasheet du rattaché dans les DEUX cartes, donc le
-    chemin de tir ne peut pas casser seul.
+    MÊLÉE SEULE : « Choppa » ne figure dans AUCUNE des deux cartes de `_COMPOSITE_LIMITS` au tir,
+    pas même chez le troupier — un jumeau de tir déclinerait donc dès la première figurine, pour
+    une prémisse qui n'existe plus.
     """
     assert _strengths(
         _composite(), weapon="Choppa", shooters=("9#0", "9#2"),
@@ -503,14 +504,17 @@ def test_a_named_model_absent_from_model_types_is_unverifiable():
     Retomber sur la datasheet d'ESCOUADE mesurerait un personnage rattaché à l'arme du troupier :
     faux « seuil de blessure faux », alors qu'on ne sait simplement pas qui a frappé.
 
-    MÊLÉE SEULE : la décision tombe avant toute lecture de la carte de Force.
+    MÊLÉE SEULE : le socle `9#7` n'a AUCUN type, donc aucune carte de Force n'entre jamais en jeu
+    — le chemin de tir refait le même trajet pour la même réponse. Raison de FIXTURE, pas d'ordre
+    d'exécution : elle reste vraie quoi que fasse la boucle de production.
     """
     assert _strengths(
         weapon="Choppa", shooters=("9#7",),
     ) is None, "un socle de type inconnu a été mesuré à la datasheet d'escouade"
 
 
-def test_a_striker_whose_type_is_outside_the_registry_is_unverifiable():
+@pytest.mark.parametrize("is_melee,arme", [(True, "Choppa"), (False, "Bolter")])
+def test_a_striker_whose_type_is_outside_the_registry_is_unverifiable(is_melee, arme):
     """Le socle est NOMMÉ et son type est connu — mais ce type n'a pas de datasheet.
 
     Distinct du socle hors `[MODEL_TYPES:]` : là on ignore QUI a frappé, ici on sait qui, et c'est
@@ -520,12 +524,11 @@ def test_a_striker_whose_type_is_outside_the_registry_is_unverifiable():
     PIÈGE, et c'est lui qui fait le verrou : la ligne a DEUX porteurs, et l'AUTRE résout le profil
     en entier, donc sauter la figurine sans datasheet laisserait `missing` vide et rendrait `(4,)`.
     Mesuré : sans ce test, la mutation `return None` → `continue` garde toute la suite verte.
-
-    MÊLÉE SEULE : la garde tombe avant toute lecture de la carte de Force.
     """
     sans_leader = {t: v for t, v in ATTACK_LIMITS.items() if t != "Leader"}
     assert _strengths(
-        _config(unit_attack_limits=sans_leader), weapon="Choppa", shooters=("9#0", "9#2"),
+        _config(unit_attack_limits=sans_leader), weapon=arme,
+        shooters=("9#0", "9#2"), melee=is_melee,
     ) is None, (
         "la figurine dont le type est hors registre a été sautée : la ligne a été jugée sur "
         "l'autre porteur seul"
