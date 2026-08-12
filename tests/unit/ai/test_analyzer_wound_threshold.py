@@ -114,7 +114,7 @@ def test_strength_is_the_weapon_of_the_model_that_strikes():
         state, discriminant, "", 1, "Trooper", "Choppa", "9", ("9#2",), is_melee=True
     ) == 3, (
         "l'Endurance du leader (E7) a été incluse dans le pool des bodyguards (E5) — "
-        "F6 vs E7 = 5+, F6 vs E5 = 3+"
+        "résultat None (garde hétérogénéité active) ou 5+ (deux gardes cassées), jamais 3+"
     )
 
 
