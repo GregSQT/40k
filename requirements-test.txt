@@ -10,7 +10,7 @@
 # import SummaryWriter` NON protégé, et 12 fichiers de tests/unit importent ce module.
 # La bonne frontière est ici : l'image reste minimale, les tests déclarent ce qu'il leur faut.
 
-pytest
+pytest>=8.1
 pytest-cov
 pytest-mock
 
