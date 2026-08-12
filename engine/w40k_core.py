@@ -5481,6 +5481,17 @@ class W40KEngine(gym.Env):
         # un tri qui ignore la cascade du moteur (`_select_allocation_model`). Sans cette entree,
         # le fait reste dans le shot_record et n atteint ni step.log, ni le replay, ni l analyzer.
         "targetModelId": "target_model_id",
+        # [TORRENT] 24.37 : « does not make a Hit roll ». Le record porte `attackRoll=None` ET
+        # `hitTarget=None`, donc la ligne rend `Hit None(None+)` — exactement la forme d une
+        # ligne malformee, et exactement le trou qu a deja coute [SUSTAINED HITS]. Ce marqueur
+        # est la SEULE trace qui distingue « la regle a fait toucher d office » de « le
+        # producteur est en panne ».
+        "autoHit": "auto_hit",
+        # [LETHAL HITS] 24.23 : blessure AUTOMATIQUE sur une touche critique. Marqueur PAR
+        # ATTAQUE et non par groupe, parce que la regle ne joue que sur les touches critiques
+        # du groupe : un drapeau de groupe aurait annonce la regle sur des attaques ou elle n a
+        # rien fait. `strengthRoll=None` sur ces lignes, `Wound None(4+)`.
+        "lethalHit": "lethal_hit",
     }
 
     def _models_segment_for_unit(self, unit_id: Any, label: str = "MODELS") -> str:
@@ -5638,6 +5649,25 @@ class W40KEngine(gym.Env):
         # [PRECISION] 24.28 : drapeau sans parametre, donc un booleen la ou [MELTA] porte son X.
         if raw_log.get("precisionApplied"):  # get allowed
             details["precision_applied"] = True
+        # [IGNORES COVER] 24.18, [EXTRA ATTACKS] 24.11, [PSYCHIC] 24.29 : JUMEAUX de [PRECISION]
+        # — proprietes de l ACTIVATION, constantes sur le groupe, donc portees par toutes ses
+        # lignes. La cle n existe cote moteur que si la regle a joue (ou, pour les deux
+        # premieres, si l arme la declare — exception assumee, cf. l emetteur).
+        if raw_log.get("ignoresCoverApplied"):  # get allowed
+            details["ignores_cover_applied"] = True
+        if raw_log.get("extraAttacksApplied"):  # get allowed
+            details["extra_attacks_applied"] = True
+        if raw_log.get("psychicApplied"):  # get allowed
+            details["psychic_applied"] = True
+        # [ANTI-X Y+] 24.03 : keyword de l instance retenue + seuil DECLARE par l arme. Les deux
+        # voyagent ENSEMBLE — un keyword sans seuil ecrirait `[ANTI-INFANTRY:None+]`, une valeur
+        # par defaut deguisee en donnee. `require_key` sur le second : le producteur les pose
+        # d un bloc (`WeaponAttackProfile.__post_init__` le garantit), donc un keyword arrive
+        # ici sans son seuil signale une chaine rompue, pas un cas metier.
+        anti_keyword = raw_log.get("antiKeyword")  # get allowed
+        if anti_keyword:
+            details["anti_keyword"] = str(anti_keyword)
+            details["anti_threshold"] = int(require_key(raw_log, "antiThreshold"))
         # Les 11 champs par-jet : la cle DOIT exister (le formateur teste `not in details`).
         for src, dst in self._SHOT_RECORD_FIELD_MAP.items():
             details[dst] = shot.get(src)  # get allowed

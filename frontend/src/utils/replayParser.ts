@@ -133,10 +133,31 @@ const TWIN_LINKED_TOKEN = "TWIN-LINKED";
 /** [SUSTAINED HITS] 24.36 — touche additionnelle, accolée au segment `Hit`. */
 const SUSTAINED_HITS_TOKEN = "SUSTAINED HITS";
 
+/**
+ * `[ANTI-INFANTRY:4+]` 24.03 — règle d'ARME accolée au segment `Wound`, avec son seuil DÉCLARÉ.
+ *
+ * Motif et non chaîne : le keyword et le seuil varient, donc aucune entrée du `Set` ci-dessous
+ * ne peut l'attraper. Sans lui, `wound_ability = "ANTI-VEHICLE:4+"` sur chaque attaque d'une
+ * arme anti-véhicule — la bulle d'aide du replay chercherait une capacité d'unité de ce nom et
+ * n'en trouverait aucune, exactement le défaut que `[R:+0.0]` a déjà coûté.
+ */
+const ANTI_RULE_TOKEN = /^ANTI-[A-Z]+:\d\+$/;
+
 const NON_ABILITY_ROLL_TOKENS = new Set([
   "HEAVY",
   "COVER",
   SUSTAINED_HITS_TOKEN,
+  // Les règles d'ARME entrées au journal le 2026-08-12 (grammaire 3). Elles sont accolées à un
+  // jet — `[TORRENT]`, `[IGNORES COVER]` et `[PSYCHIC]` au segment `Hit`, `[LETHAL HITS]` au
+  // segment `Wound` — donc, sans cette liste, chacune passerait pour le nom d'affichage d'une
+  // capacité d'unité. Le jeu est FERMÉ côté producteur : `ai/step_logger._HIT_SEGMENT_RULE_TOKENS`
+  // et `_WOUND_SEGMENT_RULE_TOKENS` sont les deux seules tables qui l'alimentent, et
+  // `[EXTRA ATTACKS]` n'y figure pas parce qu'il vit dans les tags de ligne, avant la cible,
+  // hors de tout segment de jet (comme `[RAPID FIRE:n]`).
+  "TORRENT",
+  "IGNORES COVER",
+  "PSYCHIC",
+  "LETHAL HITS",
   // [TWIN-LINKED] 24.38 : elle ouvre bien une relance de blessure, mais c'est une règle
   // d'ARME — la ranger dans `wound_ability` referait exactement la confusion que le moteur
   // vient de défaire en lui donnant son propre champ (`woundRerollRule`). Elle a le sien ici
@@ -212,7 +233,10 @@ function tokensForRoll(line: string, rollKeyword: RollKeyword): string[] {
 /** Les seuls tokens d'un jet qui NOMMENT une capacité d'unité. */
 function abilityTokensForRoll(tokens: string[]): string[] {
   return tokens.filter(
-    (token) => !NON_ABILITY_ROLL_TOKENS.has(token) && !REROLLED_TOKEN.test(token)
+    (token) =>
+      !NON_ABILITY_ROLL_TOKENS.has(token) &&
+      !REROLLED_TOKEN.test(token) &&
+      !ANTI_RULE_TOKEN.test(token)
   );
 }
 

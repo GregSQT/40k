@@ -187,7 +187,23 @@ le convertir (× `inches_to_subhex`) avant de le comparer à une distance de gri
 ```
 
 `Log grammar:` (2026-08-12) déclare ce que le journal **garantit porter** : `1` = grammaire
-antérieure, `2` = `[ALLOC_MODEL:]` sur toute attaque allouée. Ligne absente ⇒ 1.
+antérieure, `2` = `[ALLOC_MODEL:]` sur toute attaque allouée, `3` = toute règle d'arme
+implémentée par le moteur qui a JOUÉ est nommée sur la ligne — les six dernières muettes
+(`[TORRENT]`, `[LETHAL HITS]`, `[IGNORES COVER]`, `[EXTRA ATTACKS]`, `[ANTI-<KW>:Y+]`,
+`[PSYCHIC]`) y sont entrées d'un bloc, au tir comme en mêlée. Ligne absente ⇒ 1.
+
+⚠️ Sous la grammaire 3, un compteur d'usage à zéro dit que la règle **n'a pas joué**, et non plus
+que le journal ne sait pas le dire. C'est toute la valeur de la version : le premier état se
+corrige côté analyzer, le second ne se corrigeait que côté moteur. Seule exception, et elle est
+nommée : `INDIRECT_FIRE` 24.19, que le moteur n'implémente pas — écrire son token annoncerait un
+effet qui n'a pas lieu.
+
+⚠️ **Lecteurs à jeu de tokens FERMÉ** : ces six tokens sont accolés aux segments `Hit` et `Wound`
+(sauf `[EXTRA ATTACKS]`, qui vit dans les tags de ligne, avant la cible). Un lecteur qui traite
+tout token adjacent à un jet comme un nom de capacité d'unité les lira comme des capacités
+inexistantes — c'est le défaut déjà payé par `[R:+0.0]`. `replayParser.ts`
+(`NON_ABILITY_ROLL_TOKENS`, `ANTI_RULE_TOKEN`) a été étendu dans la même livraison ; l'analyzer,
+lui, lit `ACTION_ABILITY_TOKENS`, un motif OUVERT, et n'avait rien à changer.
 
 Elle n'existe que pour rendre une absence DÉCIDABLE. Sans elle, un lecteur qui ne trouve pas un
 segment ne peut pas distinguer « ce journal ne le porte pas » de « le producteur est en panne » —

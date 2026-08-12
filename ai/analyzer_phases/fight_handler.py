@@ -90,9 +90,14 @@ def _note_melee_weapon_rule_usage(
         (24.10 : « no saving throw can be made »). Le compteur suit le token, comme au tir.
 
     CE QUI RESTE MUET, et pourquoi — le dire est la seule façon que le tableau ne mente pas :
-      - `ANTI-X`, `PSYCHIC`, `EXTRA_ATTACKS`, `LETHAL_HITS`, `PRECISION`, `CLOSE_QUARTERS` :
-        aucun token dans `step.log`, ni au tir ni en mêlée (ABSENT-LOG-MANQUANT de §3). Elles
-        ressortent « NOT USED » des DEUX côtés, ce qui est exact : la mesure n'existe pas.
+      - `PRECISION`, `CLOSE_QUARTERS` : leur token n'existe qu'au TIR (`shoot_handler`), la
+        mêlée n'en compte donc pas l'usage. Elles ressortent « NOT USED » de ce côté.
+      - `ANTI-X`, `PSYCHIC`, `EXTRA_ATTACKS`, `LETHAL_HITS`, `TORRENT`, `IGNORES_COVER` :
+        ⚠️ leur token EST dans `step.log` depuis le 2026-08-12 (grammaire 3), au tir comme en
+        mêlée — c'est le compteur qui n'est pas encore écrit, ici ni au tir. La distinction
+        n'est pas rhétorique : avant cette date « NOT USED » voulait dire « le journal ne sait
+        pas le dire », il veut désormais dire « personne ne l'a encore compté ». Le premier
+        état n'était pas rattrapable côté analyzer, le second l'est.
     """
     from ai.analyzer_perfig import weapon_profile_for_line
 

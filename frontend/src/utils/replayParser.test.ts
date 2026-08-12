@@ -526,6 +526,66 @@ describe("replayParser", () => {
     expect(shoot.wound_ability).toBeUndefined();
   });
 
+  // VERROU du lot A (2026-08-12, grammaire de journal 3). Six règles d'armes ont cessé d'être
+  // muettes dans `step.log` ; quatre de leurs tokens sont ACCOLÉS à un jet, donc dans le
+  // périmètre exact du discriminateur ci-dessus. Sans entrée dans `NON_ABILITY_ROLL_TOKENS`,
+  // chacune passerait pour le nom d'affichage d'une capacité d'unité — `hit_ability = "TORRENT"`,
+  // `wound_ability = "LETHAL HITS"` — et le replay chercherait une capacité qui n'existe pas.
+  // C'est le défaut déjà payé par `[R:+0.0]`, avec un jeu de tokens qui grossit cette fois côté
+  // moteur : la contre-mesure doit grossir avec lui.
+  it("ne prend aucun token de règle d'arme du lot A pour une capacité", () => {
+    const ligne = (hitTokens: string, woundTokens: string) =>
+      [
+        "=== EPISODE 1 START ===",
+        "Scenario: demo",
+        "Bot: RandomBot",
+        `Rules: ${VALID_RULES_JSON}`,
+        "[12:00:00] Board: cols=10 rows=10 inches_to_subhex=1 hex_radius=2.78 margin=1",
+        "Unit 1 (Intercessor) P1: Starting position (0, 0), HP_MAX=5",
+        "Unit 2 (Termagant) P2: Starting position (2, 0), HP_MAX=4",
+        "[12:00:00] T1 P1 DEPLOYMENT : Unit 1(-1,-1) DEPLOYED from (-1,-1) to (0,0)",
+        "[12:00:01] T1 P2 DEPLOYMENT : Unit 2(-1,-1) DEPLOYED from (-1,-1) to (1,0)",
+        "[12:00:02] T1 P1 SHOOT : Unit 1(0,0) SHOT [EXTRA ATTACKS] [Bolt Rifle] Unit 2(1,0)" +
+          ` - Hit 4(3+)${hitTokens} - Wound 5(3+)${woundTokens} - Save 2(3+) - Dmg:1HP`,
+        "EPISODE END: Winner=1, Method=elimination",
+      ].join("\n");
+    const parse = (text: string) =>
+      parse_log_file_from_text(text).episodes[0].actions.find(
+        (a) => (a as { type?: string }).type === "shoot"
+      ) as { hit_ability?: string; wound_ability?: string; wound_bonus_ability?: string };
+
+    // Les trois tokens du segment `Hit`, ensemble et séparément.
+    for (const hitTokens of [
+      " [TORRENT]",
+      " [IGNORES COVER]",
+      " [PSYCHIC]",
+      " [IGNORES COVER] [PSYCHIC]",
+    ]) {
+      expect(parse(ligne(hitTokens, "")).hit_ability).toBeUndefined();
+    }
+
+    // Les deux du segment `Wound`. `[ANTI-<KW>:Y+]` porte un paramètre variable : aucune entrée
+    // littérale ne peut l'attraper, c'est un motif — et sa forme est celle du journal, seuil
+    // DÉCLARÉ par l'arme compris.
+    for (const woundTokens of [
+      " [LETHAL HITS]",
+      " [ANTI-INFANTRY:4+]",
+      " [ANTI-VEHICLE:2+]",
+      " [LETHAL HITS] [ANTI-MONSTER:5+]",
+    ]) {
+      const shoot = parse(ligne("", woundTokens));
+      expect(shoot.wound_ability).toBeUndefined();
+      expect(shoot.wound_bonus_ability).toBeUndefined();
+    }
+
+    // CONTRE-ÉPREUVE : le filtre ne doit pas avaler une VRAIE capacité posée à côté d'eux.
+    // Un denylist trop large est le symétrique exact du défaut qu'il corrige — muet au lieu
+    // de faux, et tout aussi invisible.
+    const avecCapacite = parse(ligne(" [TORRENT] [OATH OF MOMENT]", " [ANTI-INFANTRY:4+]"));
+    expect(avecCapacite.hit_ability).toBe("OATH OF MOMENT");
+    expect(avecCapacite.wound_ability).toBeUndefined();
+  });
+
   // VERROU borne DROITE. Les fixtures ci-dessus finissent toutes par `Dmg:1HP`, qui protège le
   // dernier jet de la queue de ligne. Un jet RATÉ termine la ligne : la métadonnée (récompense,
   // figurines, sous-phase, issue) lui est alors collée sans séparateur ` - `, et se retrouvait
