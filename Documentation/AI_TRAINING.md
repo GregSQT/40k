@@ -147,8 +147,10 @@ Si `ai/models/<agent_key>/model_<agent_key>.zip` est déjà là, une commande d�
 ne porte ni `--new` ni `--append` est **refusée à l’entrée**, avant le moindre effet de bord :
 
 - `--new` repart de poids aléatoires ; le modèle en place et ses artefacts canoniques
-  (`best_model.zip`, `_vec_normalize.pkl`, `_run_state.json`, `_robust_meta.json`) sont **écartés
-  sous un nom horodaté**, jamais écrasés ni supprimés ;
+  (`best_model.zip` **et ses stats**, `_vec_normalize.pkl`, `_run_state.json`, `_robust_meta.json`,
+  `_interrupted.zip` **et ses compagnons**, sidecar `*.tb_run.json`) sont **écartés sous un nom
+  horodaté**, jamais écrasés ni supprimés ;
+  l'archive reste un modèle **entier et reprenable**, et le run TensorBoard repart à neuf ;
 - `--append` **continue** le modèle en place (poids, compteur d’épisodes, stats VecNormalize) ;
 - `--resume-from` implique `--append`, il n’a donc pas à être accompagné.
 
@@ -167,10 +169,32 @@ python ai/train.py --agent <agent_key> --training-config default --scenario bot 
   --resume-from ai/models/<agent_key>/ppo_checkpoint_640000_steps.zip
 ```
 `--resume-from` installe le checkpoint **et ses stats VecNormalize** (`<stem>_vec_normalize.pkl`,
-écrit par le callback de checkpoint) au chemin canonique du modèle, écarte l’ancien modèle en
-`model_<agent_key>_pre_resume_<horodatage>.zip` au lieu de l’écraser, ouvre un **run TensorBoard
+écrit par le callback de checkpoint) au chemin canonique du modèle, écarte les artefacts canoniques
+du run précédent en `*_pre_resume_<horodatage>` au lieu de les écraser, ouvre un **run TensorBoard
 neuf** (le checkpoint est un point antérieur : prolonger l’ancien run ferait reculer les steps),
-puis active `--append`. Exclusif avec `--new`.
+puis active `--append`.
+
+Sont écartés **les mêmes artefacts que sous `--new`** — modèle, `_vec_normalize.pkl`,
+`_run_state.json`, `_robust_meta.json`, `best_model.zip` et ses propres stats
+`best_model_vec_normalize.pkl`, la sauvegarde d'urgence `_interrupted.zip` et ses compagnons —
+plus le sidecar `*.tb_run.json`. Les compagnons prennent le nom
+dérivé du **modèle écarté** (`model_<agent>_pre_resume_<horodatage>_vec_normalize.pkl`), pour que
+l'archive reste un modèle entier, reprenable tel quel. Laisser
+`_robust_meta.json` en place imposerait au run repris de battre le **seuil de score robuste** du run
+abandonné, mesuré bien plus loin dans l’entraînement : le run entier tournerait sans jamais publier
+son modèle canonique (V11 §0.36).
+
+**La promotion est transactionnelle.** Elle n’est définitive qu’au démarrage de l’entraînement :
+tant que le premier pas n’a pas tourné, tout échec — checkpoint illisible ou incompatible,
+environnement inconstruisible, `Ctrl-C` — **remet le run précédent à sa place** et le dit dans le
+log (`↩️ --resume-from annulé`). Sans cela, un `--resume-from` raté laissait le checkpoint
+inexploitable au chemin canonique et le bon modèle sous son seul nom `_pre_resume_*`, que la
+commande suivante ne lit pas. Passé le premier pas d’entraînement, il n’y a plus de retour en
+arrière : le run appartient au modèle promu.
+
+Exclusif avec `--new`, et **refusé avec les modes qui n’entraînent pas** (`--test-only` / `--eval`,
+`--replay`, `--convert-steplog`) : la promotion y serait installée puis défaite pour rien. Pour
+évaluer un checkpoint, le nommer directement.
 
 Un checkpoint sans son `.pkl` de stats (produits par une version antérieure du callback) n’est
 **pas** reprenable : la commande échoue explicitement plutôt que de servir les stats d’un autre
