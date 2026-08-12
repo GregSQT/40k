@@ -281,6 +281,10 @@ def main():
         sys.exit(0)
 
     try:
+        # Même contrôle qu'en ligne de commande : l'id NOMME le fichier de liste. Non validé ici, un
+        # id fantaisiste écrivait une liste que `--liste` refuse ensuite de lire (donc une relecture
+        # perdue), et `../../..` écrivait hors du dossier des listes.
+        session_valide(session_id)
         if dans_le_depot(chemin) and est_du_code(chemin):
             ajouter(session_id, chemin_note(chemin))
     # `except Exception` et non une liste de types : le voisin est CHARGÉ ici, donc une coquille
