@@ -108,6 +108,15 @@ def test_characteristic_marks_a_profile_absent_from_this_datasheet():
     }
 
 
+def test_characteristic_keys_on_the_profiles_even_when_the_whole_name_is_known():
+    """Contrat de CLÉS : l'appelant énumère les profils avec `weapon_profile_names` et indexe
+    le résultat avec. Rendre ici le nom ENTIER pour un `display_name` contenant lui-même « / »
+    lui vaudrait un `KeyError` — l'analyse entière tombe. Non vérifiable est le bon verdict.
+    """
+    resolved = resolve_weapon_characteristic("A / B", {"A / B": 9, "A": 4})
+    assert set(resolved) == {"A", "B"}, "une clé hors du découpage des profils a été rendue"
+
+
 def test_characteristic_has_no_global_map_parameter():
     """Verrou de conception : l'emprunt inter-datasheets doit être IMPOSSIBLE, pas non branché."""
     import inspect

@@ -383,16 +383,20 @@ combattent deux fois » annoncé par la version du 2026-08-09 est réfuté** : `
 instrumenté sur 1427 phases n'a jamais été appelé deux fois pour la même ; 55 « doublons » sur
 12 épisodes, dont zéro vrai.
 
-### §1.9 SEUIL DE BLESSURE — section neuve (2026-08-10, `ai/analyzer_wound.py`, 251 l.)
+### §1.9 SEUIL DE BLESSURE — section neuve (2026-08-10, `ai/analyzer_wound.py`, 292 l.)
 
 Le journal écrit le seuil qu'il a réellement appliqué (`Wound 4(4+)`) ; rien ne le vérifiait. Le
 seuil ATTENDU est recalculé depuis la donnée et comparé au seuil imprimé :
 
-    F de l'ARME de la figurine qui frappe   (`[SHOOTER_MODELS:]` + `[MODEL_TYPES:]` + registry,
-                                             `attacker_weapon_strength:80`)
+    F de CHAQUE profil d'arme de la ligne   (`[SHOOTER_MODELS:]` + `[MODEL_TYPES:]` + registry,
+                                             `attacker_weapon_strengths:80`. Le moteur fusionne
+                                             sur une ligne les armes de même signature d'attaque
+                                             (« A / B ») : chaque profil garde sa F RÉELLE, aucune
+                                             n'est agrégée, et le seuil n'est rendu que si tous
+                                             tombent sur la même valeur)
   + bonus de Force en vigueur               (`waaagh_melee_str`, MÊLÉE seulement — 08.04)
   vs E de la cible                          (19.02 : plus haute E des BODYGUARDS, jamais celle du
-                                             leader rattaché — `target_bodyguard_toughness:123`)
+                                             leader rattaché — `target_bodyguard_toughness:142`)
   → `engine.combat_utils.calculate_wound_target`   (la fonction du MOTEUR, jamais une copie)
   − 1 si `[OATH OF MOMENT]` suit le segment `Wound` (plancher 2+)
 

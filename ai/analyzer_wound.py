@@ -119,9 +119,16 @@ def attacker_weapon_strengths(
         # sur-autoriser ; sur-évaluer une FORCE rend une valeur qu'AUCUNE figurine ne porte, donc
         # un faux « seuil de blessure faux » au lieu d'un honnête « non vérifiable ». Passer `{}`
         # en carte globale ne fermait que le premier étage.
-        for profile, value in resolve_weapon_characteristic(
+        resolved = resolve_weapon_characteristic(
             weapon_display_name, require_key(limits, per_unit_key)
-        ).items():
+        )
+        if all(value is None for value in resolved.values()):
+            # Cette figurine a frappé avec l'arme de la ligne et sa datasheet n'en connaît AUCUN
+            # profil : c'est un trou de donnée pour ELLE, pas une répartition entre porteurs. La
+            # sauter reviendrait à rendre un verdict sur la seule autre figurine — le repli
+            # d'escouade que ce module refuse, déguisé en per-figurine.
+            return None
+        for profile, value in resolved.items():
             if value is not None:
                 # Un profil ABSENT de cette datasheet est porté par une autre figurine de la
                 # ligne : c'est le cas normal d'un composite inter-datasheets, pas un trou. Le

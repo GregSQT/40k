@@ -333,11 +333,14 @@ def resolve_weapon_characteristic(
     et Onslaught Gatling Cannon F5, de mêmes ATK/AP/DMG/règles — la clé de fusion moteur (`gkey`)
     les réunit dès que les deux blessent la cible sur le même seuil (E ∈ {1,2,4,7,8,9,12,13,14}).
     """
-    name = weapon_name.strip()
-    if name in per_unit_map:
-        return {name: per_unit_map[name]}
+    # `weapon_profile_names` est la SEULE définition du découpage, y compris quand le nom entier
+    # figure dans la carte : essayer d'abord le nom entier ferait rendre à cette fonction des
+    # clés que l'appelant n'attend pas (il énumère les profils avec le même helper), donc un
+    # `KeyError` au premier `display_name` contenant lui-même « / ». Un tel nom se découperait
+    # ici en composantes inconnues → `None` partout → ligne non vérifiable : le contrat tient,
+    # et il se voit, au lieu d'abattre l'analyse entière.
     # get allowed : profil porté par une AUTRE figurine de la ligne, ou valeur symbolique
-    return {part: per_unit_map.get(part) for part in weapon_profile_names(name)}
+    return {part: per_unit_map.get(part) for part in weapon_profile_names(weapon_name)}
 
 
 _SHOOTER_MODELS_RE = re.compile(r'\[SHOOTER_MODELS: ([^\]]+)\]')
