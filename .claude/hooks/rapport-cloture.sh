@@ -42,6 +42,7 @@
 import json
 import os
 import re
+import shlex
 import sys
 
 EDIT_TOOLS = {"Edit", "Write", "NotebookEdit", "MultiEdit"}
@@ -216,20 +217,36 @@ def read_turns(path):
     return turns[1:]  # le premier segment précède tout prompt : ce n'est pas un tour
 
 
+def bloc_relire(lines, depart):
+    """Lignes du bloc RELIRE, de son étiquette jusqu'à la section suivante ou la fin du message.
+
+    Borner compte : la section PROMPTS contient des prompts COPIABLES, donc souvent une commande
+    `/code-review` en début de ligne. Balayer tout le message la prenait pour le bloc RELIRE et
+    reprochait à un rapport conforme des chemins relatifs qui n'étaient pas les siens.
+    """
+    bloc = []
+    for ln in lines[depart + 1:]:
+        if re.match(r"^\s*[A-ZÉÈÀÂÎÔÛÇ]{2,}[A-ZÉÈÀÂÎÔÛÇ ]*:", ln):
+            break
+        bloc.append(ln)
+    return bloc
+
+
 def relire_faults(report):
     """Défauts de forme du bloc RELIRE. Liste vide = conforme."""
     lines = report.splitlines()
-    labels = [ln for ln in lines if re.match(r"^\s*RELIRE\s*:", ln)]
+    labels = [i for i, ln in enumerate(lines) if re.match(r"^\s*RELIRE\s*:", ln)]
     if not labels:
         return ["la section RELIRE est absente"]
 
     faults = []
-    if not any(re.match(r"^\s*RELIRE\s*:\s*$", ln) for ln in labels):
+    if not any(re.match(r"^\s*RELIRE\s*:\s*$", lines[i]) for i in labels):
         faults.append(
             "l'étiquette `RELIRE :` doit être SEULE sur sa ligne, la première commande sur la suivante"
         )
 
-    cmd_lines = [ln for ln in lines if re.match(r"^\s*/(code-review|simplify)\b", ln)]
+    bloc = [ln for i in labels for ln in bloc_relire(lines, i)]
+    cmd_lines = [ln for ln in bloc if re.match(r"^\s*/(code-review|simplify)\b", ln)]
     for name in ("code-review", "simplify"):
         if not any(re.match(r"^\s*/" + name + r"\b", ln) for ln in cmd_lines):
             faults.append(f"`/{name}` doit être seul en début de sa propre ligne")
@@ -243,7 +260,14 @@ def relire_faults(report):
         # Tout argument est un chemin SAUF ce que ces commandes acceptent d'autre — liste fermée,
         # donc décidable. Trier « ça ressemble à un chemin » ne l'est pas : `engine` (un répertoire
         # relatif, sans point ni slash) passait, et le défaut du 2026-08-08 restait ouvert.
-        chemins = [a for a in ln.split()[1:] if a not in ARGS_NON_CHEMIN and not a.isdigit()]
+        # Découpage qui HONORE les guillemets : un chemin contenant une espace existe dans ce dépôt
+        # (`shared/gameLogStructure - save.ts`), et sans ça il n'avait AUCUNE forme acceptable —
+        # nu il se coupait en trois mots relatifs, cité il gardait ses guillemets.
+        try:
+            arguments = shlex.split(ln)[1:]
+        except ValueError:  # guillemets non fermés : on ne devine pas, on lit les mots
+            arguments = ln.split()[1:]
+        chemins = [a for a in arguments if a not in ARGS_NON_CHEMIN and not a.isdigit()]
         relatifs = [a for a in chemins if not a.startswith("/")]
         if relatifs:
             faults.append(
