@@ -133,9 +133,9 @@ raison (cf. `config/bot_movement_weights.json`, entrée `tactical`).
 | 3 | ~~chiffrage de faisabilité du holdout à un coup~~ | ⛔ **sans objet** — holdout abandonné 2026-08-12, §11.2 |
 | 4 | modèle de dégâts espérés (attaquant → cible) | ✅ 2026-08-11, **corrigé à la racine** 2026-08-12, cf. §7 et §7.1 |
 | 5 | les SIX styles | ✅ 2026-08-12, cf. §7 et §11.3 (`standoff` supprimé §9.2, `scorer` ajouté §11.3) |
-| 6 | réglage en **bot-contre-bot** (~~orthogonalité~~ abandonnée, §3.2) | 🟠 **PARTIEL** — `w_contest` et `w_crowd` **non réglés** ; chiffres du §8/§9 à rejouer, cf. §11.1 |
+| 6 | réglage en **bot-contre-bot** (~~orthogonalité~~ abandonnée, §3.2) | 🟠 **PARTIEL** — `w_contest` et `w_crowd` **non réglés** ; chiffres du §8/§9 à rejouer, cf. §11.1. Régler seulement APRÈS §12.6 : avant, tout poids fractionnaire était annulé, donc irréglable |
 | 7 | correspondance ancien/nouveau, puis suppression des cinq anciens | |
-| 8 | mesure finale contre l'agent, commande de §2 | 🟠 **PARTIEL** — mesurée sur `robust_0.8721` (§12.5) ; reste à rejouer après réglage |
+| 8 | mesure finale contre l'agent, commande de §2 | 🟠 **PARTIEL** — mesurée sur `robust_0.8721` (§12.5), chiffres antérieurs au §12.6 ; reste à rejouer après réglage |
 
 ### 4.1 Pourquoi l'appariement des graines a été retiré
 
@@ -678,3 +678,49 @@ plus de contact — il reste 4,76 escouades vivantes au tour 5 contre 5,27 avant
 
 ⚠️ **Le mur du tour 2 tient toujours** : 1,61 zone couverte au tour 2 (contre 1,49). Tout le gain
 arrive aux tours 3 à 5. Le prochain levier, s'il en faut un, est le déploiement.
+
+⚠️ **CES CHIFFRES SONT ANTÉRIEURS AU §12.6** et n'ont pas été rejoués depuis. Ils ont été obtenus
+avec les deux défauts corrigés là-bas : les profils à `w_crowd` fractionnaire n'avaient donc
+**aucune** pénalité, et le surplus se comptait autrement que le contrôle réel. Le sens du résultat
+n'est pas en cause (le pire bot passe bien de 0,78 à 0,62), son AMPLITUDE l'est.
+
+### 12.6 Deux défauts de la pénalité et le trou de test qui les cachait — 2026-08-12
+
+Trouvés en relisant le verrou de la §12.5, pas en jouant : le test d'ensemble d'alors posait ses
+deux zones à distance ÉGALE, or la carte rendue est leur **minimum**. Appliquer la pénalité à la
+mauvaise zone rendait donc exactement la même valeur, et le test restait vert. Il est maintenant
+écrit avec deux distances différentes, et une mutation qui inverse cartes et zones le fait rougir.
+
+**a) Les poids inférieurs à 1 étaient purement annulés.** Le score de destination tronquait la
+distance à l'entier **avant** d'appliquer les poids. Or la carte n'est plus la distance entière du
+moteur : `_objective_terms` y a déjà ajouté `w_crowd × surplus` et retranché le rabais de
+contestation, tous deux fractionnaires. Avec `w_crowd: 0.5` et un surplus de 1, `5 + 0,5` se
+relisait `5` — aucune pénalité. Deux profils du panel sont dans ce cas, et `w_contest` à `1.5` /
+`3.5` perdait de même sa demi-unité. C'est le **même « poids inerte »** que la §12.4 reproche à
+`w_contest` : les paliers bas du panel ne mesuraient pas ce qui y était écrit.
+
+**b) Le surplus ne comptait pas comme le moteur compte.** Il tranchait la présence sur l'hexe
+**centre** de chaque figurine et ignorait la règle 01.07, quand `sum_objective_control_oc_multi`
+compte dès qu'une case de l'**empreinte de socle** recouvre la zone et retire les escouades
+battle-shockées (02.02, leur OC vaut `-`). Les deux écarts poussaient vers le défaut que ce §12
+corrige : un gros socle au bord tenait la zone pour le moteur mais pas pour le bot, qui y renvoyait
+une escouade de plus ; une escouade choquée fabriquait à l'inverse un surplus **fantôme** et faisait
+déserter une zone que le camp ne tenait pas.
+
+Le surplus est désormais **dérivé** du décompte du moteur, qui reçoit un `exclude_unit_id` pour
+retirer l'escouade qui décide. Il n'y a donc plus deux comptages de contrôle à garder en phase —
+c'était le motif ancre-contre-par-figurine, déjà payé plusieurs fois dans ce dépôt.
+
+Coût **mesuré** (10 escouades × 5 figurines, 5 zones, 2000 appels) : **0,046 ms par décision**,
+contre 0,02 ms pour le comptage maison — un doublement, sur un poste qui pesait 0,2 % du temps de
+run. Le calcul est fait une fois par décision, pas par candidate, et le moteur paie déjà la même
+passe à chaque step pour l'observation.
+
+**c) Le câblage est enfin testé par l'entrée publique.** Aucun test n'instanciait de bot de
+doctrine : tout s'arrêtait aux fonctions privées, et trois décisions n'étaient couvertes par rien
+— l'ordre des six poids déballés, le joueur, l'identité de l'escouade activée. Intervertir
+`w_contest` et `w_crowd` laissait les quinze tests des deux fichiers verts. Un test joue maintenant
+`select_movement_destination` sur deux destinations, une zone servie contre une zone libre.
+
+⚠️ **À REJOUER** : la mesure du §12.5 sur 600 parties. Les poids agissent désormais tels qu'ils sont
+écrits dans `config/bot_movement_weights.json`, ce que les chiffres actuels ne reflètent pas.

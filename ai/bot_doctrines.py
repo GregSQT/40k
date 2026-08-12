@@ -55,7 +55,9 @@ import numpy as np
 
 from engine import macro_intents as mi
 from engine.combat_utils import calculate_hex_distance
-from engine.game_state import objective_hex_sets, unit_is_within_objective
+from engine.game_state import (
+    objective_hex_sets, sum_objective_control_oc_multi, unit_is_within_objective,
+)
 from engine.game_utils import get_effective_turn_limit
 from engine.objective_distance import objective_distance_maps
 from engine.phase_handlers.shared_utils import (
@@ -308,13 +310,20 @@ def _surplus_oc_by_zone(game_state, zones, me: int, sauf_escouade: str) -> List[
     DES OC (`GameStateManager.calculate_objective_control` : `if player_1_oc > player_2_oc`),
     donc l'excedent au-dela de celui d'en face est exactement ce qui ne rapporte rien de plus.
 
-    ⚠️ EN OC, PAS EN NOMBRE D'ESCOUADES. Compter les escouades serait un proxy de la meme famille
-    que le `max(NB x DMG)` que ce chantier a passe sa journee a retirer : deux Gretchin et un
-    Carnifex ne pesent pas pareil sur une zone, et `models_cache[mid]["OC"]` est a un acces de
-    distance.
+    ⚠️ LE COMPTAGE EST CELUI DU MOTEUR, PAS UN SECOND (corrige le 2026-08-12). Cette fonction
+    tranchait la presence sur l'hexe-CENTRE de chaque figurine et ignorait la regle 01.07, quand
+    `sum_objective_control_oc_multi` compte des qu'une case de l'EMPREINTE DE SOCLE recouvre la
+    zone et retire les escouades battle-shocked (02.02 : leur OC vaut '-'). Les deux ecarts
+    tiraient dans des sens opposes et tous deux vers le defaut que ce chantier corrige : un gros
+    socle au bord tenait la zone pour le moteur mais pas pour le bot, qui y renvoyait donc une
+    escouade de plus ; une escouade choquee fabriquait a l'inverse un surplus FANTOME et faisait
+    deserter une zone que le camp ne tenait pas. Deriver du moteur supprime la question : il n'y a
+    plus qu'un comptage, donc plus rien a garder en phase.
 
     ⚠️ `sauf_escouade` est EXCLUE du total : sans ca, une escouade seule sur sa zone se verrait
-    elle-meme comme un encombrement et la quitterait aussitot.
+    elle-meme comme un encombrement et la quitterait aussitot. L'exclusion est faite A LA SOURCE
+    (`exclude_unit_id`) plutot que par soustraction apres coup — soustraire supposerait de
+    recalculer sa contribution ici, c'est-a-dire de reintroduire le second comptage.
 
     Aucune memoire de tour n'est necessaire : les escouades s'activent l'une apres l'autre et
     l'etat est a jour entre deux activations, donc la presence physique porte deja les
@@ -322,25 +331,9 @@ def _surplus_oc_by_zone(game_state, zones, me: int, sauf_escouade: str) -> List[
     """
     if not zones:
         return []
-    units_cache = require_key(game_state, "units_cache")
-    models_cache = require_key(game_state, "models_cache")
-    squad_models = require_key(game_state, "squad_models")
-    mien = [0.0] * len(zones)
-    sien = [0.0] * len(zones)
-    for squad_id, entry in units_cache.items():
-        if str(squad_id) == str(sauf_escouade):
-            continue
-        cote = mien if int(require_key(entry, "player")) == int(me) else sien
-        for model_id in squad_models.get(str(squad_id), ()):  # get allowed : escouade sans figurine posee
-            model = models_cache.get(model_id)  # get allowed : absent = morte
-            if model is None:
-                continue
-            position = (int(model["col"]), int(model["row"]))
-            for index, zone in enumerate(zones):
-                if position in zone:
-                    cote[index] += float(require_key(model, "OC"))
-                    break
-    return [max(0.0, mien[i] - sien[i]) for i in range(len(zones))]
+    sums = sum_objective_control_oc_multi(game_state, zones, exclude_unit_id=sauf_escouade)
+    mien = 0 if int(me) == 1 else 1
+    return [max(0.0, float(zone[mien]) - float(zone[1 - mien])) for zone in sums]
 
 
 def _objective_terms(
@@ -615,7 +608,13 @@ class _DoctrineBot(_PlacementMemory):
             appelant sur les ~458."""
             score = 0.0
             if distance_map is not None:
-                score -= w_obj * int(distance_map[dest[0], dest[1]])
+                # `float` et NON `int` (corrige le 2026-08-12). La carte n'est plus la distance
+                # entiere du moteur : `_objective_terms` y a deja ajoute `w_crowd x surplus` et
+                # retranche le rabais de contestation, tous deux FRACTIONNAIRES. Tronquer ici
+                # annulait purement et simplement tout poids inferieur a 1 — `w_crowd: 0.5` avec
+                # un surplus de 1 rendait 5 + 0,5 -> 5, soit aucune penalite. Les cartes brutes
+                # etant des entiers, la conversion reste exacte quand les deux poids valent 0.
+                score -= w_obj * float(distance_map[dest[0], dest[1]])
                 if inside:
                     score += w_obj * hold_bonus
             if enemy_anchors:

@@ -11,40 +11,106 @@ une zone plus attirante quand personne ne se coordonne ne fait que déplacer le 
 
 La pénalité porte sur le **surplus d'OC**, pas sur l'occupation : une zone disputée n'est pas
 pénalisée — les renforts doivent y aller — mais une zone déjà gagnée large repousse la suivante.
+
+⚠️ L'ÉTAT DE CE FICHIER EST UN ÉTAT MOTEUR, pas un dict de commodité : le surplus est dérivé de
+`sum_objective_control_oc_multi`, donc il lit les EMPREINTES DE SOCLE et le drapeau
+`battle_shocked`. Un état bricolé à côté (une position par escouade, aucun socle) rendrait
+indétectables les deux écarts que ce fichier verrouille précisément.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 import numpy as np
 import pytest
 
 import ai.bot_doctrines as doc
 
-#: Deux objectifs de même distance : seul l'encombrement peut les départager.
-EGALE = np.full((3, 3), 5, dtype=np.int16)
-ZONE_A = {(1, 1)}
-ZONE_B = {(2, 2)}
+Hexes = Set[Tuple[int, int]]
+
+#: Les deux zones sont DISJOINTES même pour un gros socle : le test du socle pose une empreinte de
+#: 7 cases autour de la zone A, qui ne doit pas mordre la zone B par accident.
+ZONE_A: Hexes = {(1, 1)}
+ZONE_B: Hexes = {(6, 6)}
+
+#: Les deux zones sont à des distances DIFFÉRENTES, et c'est indispensable : `_objective_terms`
+#: rend le MINIMUM des cartes. Avec deux cartes identiques, appliquer la pénalité à la mauvaise
+#: zone rendrait exactement la même valeur et aucune assertion ne pourrait le voir.
+DISTANCE_PROCHE = 5
+DISTANCE_LOIN = 8
+
+#: Les cartes uniformes portent la même valeur partout : cette case n'a rien de particulier.
+SONDE = (0, 0)
+
+GRILLE = 12
 
 
-@pytest.fixture(autouse=True)
-def _deux_zones_equidistantes(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(doc, "objective_distance_maps", lambda gs: [EGALE.copy(), EGALE.copy()])
-    monkeypatch.setattr(doc, "objective_hex_sets", lambda gs: [ZONE_A, ZONE_B])
+def _uniforme(distance: int) -> np.ndarray:
+    """Carte de distance constante. `int16` est le dtype rendu par le moteur."""
+    return np.full((GRILLE, GRILLE), distance, dtype=np.int16)
 
 
-def _state(figurines: List[Tuple[str, int, Tuple[int, int], int]]) -> Dict[str, Any]:
-    """`figurines` = [(id_escouade, joueur, position, OC), …] — une figurine par escouade suffit."""
+def _carte_vers(zone: Hexes, dedans: int, dehors: int) -> np.ndarray:
+    """Carte à deux paliers : `dedans` sur la zone, `dehors` partout ailleurs."""
+    grille = np.full((GRILLE, GRILLE), dehors, dtype=np.int16)
+    for col, row in zone:
+        grille[col, row] = dedans
+    return grille
+
+
+def _zones(monkeypatch: pytest.MonkeyPatch, *objectifs: Tuple[np.ndarray, Hexes]) -> None:
+    """Impose les objectifs vus par les doctrines : `(carte de distance, hexes de la zone)`.
+
+    Les cartes sont fournies par le test, jamais partagées entre deux tests. Ce que ce patch
+    remplace est une pure ENTRÉE (la géométrie du plateau) ; le comptage de contrôle, lui, reste
+    celui du moteur — c'est justement ce que ce fichier doit exercer.
+    """
+    cartes = [carte for carte, _ in objectifs]
+    hexes = [zone for _, zone in objectifs]
+    monkeypatch.setattr(doc, "objective_distance_maps", lambda gs: cartes)
+    monkeypatch.setattr(doc, "objective_hex_sets", lambda gs: hexes)
+
+
+def _state(
+    figurines: Sequence[Tuple[str, int, Tuple[int, int], int]],
+    *,
+    shocked: Iterable[str] = (),
+    socles: Optional[Dict[str, int]] = None,
+) -> Dict[str, Any]:
+    """État moteur minimal mais RÉEL : `figurines` = [(id_escouade, joueur, position, OC), …].
+
+    `socles` donne le diamètre de socle EN HEXES d'une escouade (1 par défaut) ; `shocked` liste
+    les escouades battle-shockées (01.07). Les deux existent parce que le décompte de contrôle du
+    moteur les lit — un état qui ne pourrait pas les exprimer ne verrouillerait rien.
+    """
+    shocked = set(shocked)
+    socles = socles or {}
+    units: List[Dict[str, Any]] = []
     units_cache: Dict[str, Any] = {}
     models_cache: Dict[str, Any] = {}
     squad_models: Dict[str, Any] = {}
     for squad_id, player, (col, row), oc in figurines:
-        units_cache[squad_id] = {"player": player}
+        units.append({
+            "id": squad_id,
+            "player": player,
+            "OC": oc,
+            "battle_shocked": squad_id in shocked,
+            "RNG_WEAPONS": [],
+            "CC_WEAPONS": [],
+        })
+        units_cache[squad_id] = {
+            "player": player, "col": col, "row": row, "orientation": 0, "HP_CUR": 6,
+        }
         model_id = f"{squad_id}#0"
-        models_cache[model_id] = {"col": col, "row": row, "OC": oc}
         squad_models[squad_id] = [model_id]
+        models_cache[model_id] = {
+            "player": player, "col": col, "row": row, "HP_CUR": 6,
+            "BASE_SHAPE": "round", "BASE_SIZE": socles.get(squad_id, 1),
+        }
     return {
         "objectives": [{"id": "A"}, {"id": "B"}],
+        "units": units,
+        "unit_by_id": {str(unit["id"]): unit for unit in units},
         "units_cache": units_cache,
         "models_cache": models_cache,
         "squad_models": squad_models,
@@ -55,9 +121,24 @@ def _surplus(state: Dict[str, Any], me: int, sauf: str) -> List[float]:
     return doc._surplus_oc_by_zone(state, [ZONE_A, ZONE_B], me, sauf)
 
 
+def _qui_decide(state: Dict[str, Any]) -> Dict[str, Any]:
+    """L'escouade « 2 » : celle qui est activée et qui doit choisir sa destination."""
+    return state["unit_by_id"]["2"]
+
+
+def _distance_percue(state: Dict[str, Any], w_crowd: float, escouade: str) -> int:
+    """La distance que l'escouade `escouade` LIT sur la carte combinée, pénalité comprise."""
+    carte, _zones_rendues = doc._objective_terms(state, me=1, w_crowd=w_crowd, escouade=escouade)
+    assert carte is not None, "aucune carte rendue : le test ne regarde rien"
+    return int(carte[SONDE])
+
+
+# ── Le surplus : la grandeur qui dit « cette zone est déjà servie » ─────────────────────────────
+
+
 def test_an_uncontested_ally_creates_a_surplus() -> None:
     """Un allié seul sur la zone A : surplus de son OC, rien sur B."""
-    state = _state([("1", 1, (1, 1), 4), ("2", 1, (9, 9), 4)])
+    state = _state([("1", 1, (1, 1), 4), ("2", 1, (9, 9), 1)])
 
     assert _surplus(state, me=1, sauf="2") == [4.0, 0.0]
 
@@ -100,36 +181,160 @@ def test_the_surplus_is_counted_in_oc_not_in_squads() -> None:
     assert _surplus(un_lourd, me=1, sauf="3")[0] == 9.0
 
 
+def test_a_base_that_only_overlaps_the_zone_still_holds_it() -> None:
+    """Le socle mord la zone, le CENTRE est dehors : le moteur donne le contrôle, le bot aussi.
+
+    LE DÉFAUT CORRIGÉ. Le surplus tranchait la présence sur l'hexe-centre de chaque figurine,
+    alors que `sum_objective_control_oc_multi` compte dès qu'une case de l'empreinte recouvre la
+    zone. Une escouade à gros socle posée au bord tenait donc la zone pour le moteur et pas pour
+    le bot, qui y renvoyait une escouade de plus : le motif ancre-contre-par-figurine.
+    """
+    state = _state([("1", 1, (2, 1), 4), ("2", 1, (9, 9), 1)], socles={"1": 3})
+
+    assert (1, 1) not in {(2, 1)}, "le centre du socle doit être HORS de la zone A"
+    assert _surplus(state, me=1, sauf="2") == [4.0, 0.0]
+
+
+def test_a_battle_shocked_squad_holds_nothing() -> None:
+    """Règle 01.07 : l'OC d'une escouade battle-shockée vaut '-', elle ne tient donc rien (02.02).
+
+    L'ANCIEN CALCUL LA COMPTAIT. Elle fabriquait un surplus FANTÔME : le bot refusait de renforcer
+    une zone que son camp ne tenait pas — exactement le mode d'échec que
+    `test_my_own_squad_never_counts_against_itself` prétend protéger, par l'autre bout.
+    """
+    state = _state([("1", 1, (1, 1), 4), ("2", 1, (9, 9), 1)], shocked={"1"})
+
+    assert _surplus(state, me=1, sauf="2") == [0.0, 0.0]
+
+
+# ── La carte de distance : ce que le surplus fait au choix de destination ───────────────────────
+
+
 def test_a_served_zone_moves_away_by_the_penalty(monkeypatch: pytest.MonkeyPatch) -> None:
     """UNE seule zone, déjà servie : sa distance perçue augmente de `w_crowd × surplus`.
 
     Une seule zone, exprès. Avec deux, la carte rendue est leur MINIMUM : la zone libre masquerait
     la pénalité de l'autre et le test passerait sans rien observer.
     """
-    monkeypatch.setattr(doc, "objective_distance_maps", lambda gs: [EGALE.copy()])
-    monkeypatch.setattr(doc, "objective_hex_sets", lambda gs: [ZONE_A])
-    state = _state([("1", 1, (1, 1), 6), ("2", 1, (9, 9), 3)])
+    _zones(monkeypatch, (_uniforme(DISTANCE_PROCHE), ZONE_A))
+    state = _state([("1", 1, (1, 1), 6), ("2", 1, (9, 9), 1)])
     state["objectives"] = [{"id": "A"}]
 
-    nu, _z = doc._objective_terms(state, me=1, w_crowd=0.0, escouade="2")
-    penalise, _z = doc._objective_terms(state, me=1, w_crowd=2.0, escouade="2")
-    assert nu is not None and penalise is not None, "aucune carte rendue : le test ne regarde rien"
+    assert _distance_percue(state, w_crowd=0.0, escouade="2") == DISTANCE_PROCHE, (
+        "sans pénalité, la carte est la distance nue"
+    )
+    assert _distance_percue(state, w_crowd=2.0, escouade="2") == DISTANCE_PROCHE + 2 * 6, (
+        "servie : elle doit s'éloigner de w_crowd × surplus"
+    )
 
-    assert int(nu[2, 2]) == 5, "sans pénalité, la carte est la distance nue"
-    assert int(penalise[2, 2]) == 5 + 2 * 6, "servie : elle doit s'éloigner de w_crowd × surplus"
 
+def test_the_next_squad_prefers_the_free_zone_even_when_it_is_farther(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """La zone servie est la PLUS PROCHE, et la pénalité lui fait perdre le duel.
 
-def test_the_next_squad_prefers_the_free_zone_at_equal_distance() -> None:
-    """LE verrou d'ensemble : à distance ÉGALE, la zone libre l'emporte sur la zone servie.
+    C'est l'état d'avant qui est décrit par la première assertion : sans pénalité, l'escouade lit
+    5 et part rejoindre le tas. Avec, elle lit 8 — la zone libre, pourtant plus loin.
 
-    Sans la pénalité, les deux valent 5 et rien ne les départage — c'est exactement l'état
-    d'avant, où les cinq escouades convergeaient sur la même.
+    Les deux zones sont à des distances différentes EXPRÈS : la carte rendue étant leur minimum,
+    deux distances égales rendraient `min(17, 5)` et `min(5, 17)` identiques, et le test resterait
+    vert même si la pénalité était appliquée à la mauvaise zone.
     """
-    state = _state([("1", 1, (1, 1), 6), ("2", 1, (9, 9), 3)])
-    surplus = _surplus(state, me=1, sauf="2")
+    _zones(monkeypatch, (_uniforme(DISTANCE_PROCHE), ZONE_A), (_uniforme(DISTANCE_LOIN), ZONE_B))
+    state = _state([("1", 1, (1, 1), 6), ("2", 1, (9, 9), 1)])
 
-    assert surplus[0] > 0.0 and surplus[1] == 0.0, "la zone A doit être la seule servie"
-    # La carte combinée retient le minimum : la libre reste à 5, la servie part à 17.
-    penalise, _z = doc._objective_terms(state, me=1, w_crowd=2.0, escouade="2")
-    assert penalise is not None, "aucune carte rendue : le test ne regarde rien"
-    assert int(penalise[2, 2]) == 5, "la zone LIBRE garde son prix, c'est elle qui sera choisie"
+    assert _surplus(state, me=1, sauf="2") == [6.0, 0.0], "la zone A doit être la seule servie"
+    assert _distance_percue(state, w_crowd=0.0, escouade="2") == DISTANCE_PROCHE, (
+        "sans pénalité, la zone SERVIE gagne parce qu'elle est la plus proche"
+    )
+    assert _distance_percue(state, w_crowd=2.0, escouade="2") == DISTANCE_LOIN, (
+        "pénalisée, la zone servie part à 17 : c'est la zone LIBRE qui sera choisie"
+    )
+
+
+# ── Le chemin RÉEL : ce qu'un bot du panel fait de tout ça ──────────────────────────────────────
+
+
+class _BotSousTest(doc._DoctrineBot):
+    """Doctrine réduite au terme d'objectif : les poids sont FIXÉS ici, pas lus en config.
+
+    Aucun style du panel n'est instancié exprès. Ce test ne mesure pas une doctrine, il vérifie le
+    CÂBLAGE que `select_movement_destination` fait entre l'unité activée et le calcul de la carte
+    (ordre des six poids, joueur, identité de l'escouade) — trois décisions qu'aucun test
+    n'atteignait, puisque tous s'arrêtaient aux fonctions privées d'un cran plus bas.
+    """
+
+    MOVEMENT_BOT_KEY = "sous_test"
+
+    #: `w_enn`, `w_fire` et `w_risk` sont nuls : la destination ne doit dépendre QUE des objectifs,
+    #: et la seconde passe (coûteuse) est court-circuitée.
+    def movement_weights(self, unit, game_state):
+        return (1.0, 0.0, 0.0, 0.0, 0.0, self.w_crowd)
+
+    def __init__(self, w_crowd: float):
+        super().__init__()
+        self.w_crowd = w_crowd
+
+
+@pytest.mark.parametrize(
+    ("w_crowd", "attendue", "pourquoi"),
+    [
+        (0.0, (1, 1), "sans pénalité, le bot rejoint le tas sur la zone la plus attirante"),
+        (2.0, (6, 6), "pénalisée, la zone servie est abandonnée à la zone libre"),
+    ],
+)
+def test_the_real_bot_walks_away_from_a_zone_its_allies_already_hold(
+    monkeypatch: pytest.MonkeyPatch, w_crowd: float, attendue: Tuple[int, int], pourquoi: str
+) -> None:
+    """LE verrou d'ensemble, joué par l'ENTRÉE PUBLIQUE d'un bot de doctrine.
+
+    Deux destinations, une par zone. La zone A est la plus attirante (distance 0 contre 3) et elle
+    est déjà tenue large par un allié ; la zone B est libre. Le bot doit choisir A sans pénalité
+    et B avec — c'est la décision réelle que prend une escouade en phase de mouvement.
+
+    Ce que ce test attrape et qu'aucun autre n'attrapait : intervertir `w_contest` et `w_crowd` au
+    déballage des six poids, ou cesser de transmettre l'identité de l'escouade activée.
+    """
+    _zones(
+        monkeypatch,
+        (_carte_vers(ZONE_A, dedans=0, dehors=10), ZONE_A),
+        (_carte_vers(ZONE_B, dedans=3, dehors=10), ZONE_B),
+    )
+    state = _state([
+        ("1", 1, (1, 1), 6),    # l'allié qui tient déjà la zone A, large
+        ("2", 1, (9, 9), 1),    # l'escouade qui décide, loin des deux zones
+        ("101", 2, (11, 11), 1),  # un ennemi sur la table, hors de portée de tout
+    ])
+
+    choisie = _BotSousTest(w_crowd).select_movement_destination(
+        _qui_decide(state), [(1, 1), (6, 6)], state
+    )
+
+    assert choisie == attendue, pourquoi
+
+
+def test_a_fractional_weight_still_moves_the_decision(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Un poids INFÉRIEUR À 1 doit agir. Deux profils du panel sont réglés à `w_crowd: 0.5`.
+
+    LE DÉFAUT CORRIGÉ. Le score tronquait la distance à l'entier avant d'appliquer les poids, donc
+    toute pénalité fractionnaire disparaissait : 3 + 0,5 se relisait 3, et le poids ne servait à
+    rien. C'est le même « poids inerte » que ce chantier reprochait à `w_contest`, et il rendait
+    les paliers bas du panel indiscernables les uns des autres.
+
+    Les deux zones sont à ÉGALITÉ STRICTE (3 et 3) : seule la demi-pénalité peut les départager,
+    donc la tronquer ramène le choix à l'égalité et la zone servie l'emporte.
+    """
+    _zones(
+        monkeypatch,
+        (_carte_vers(ZONE_A, dedans=3, dehors=10), ZONE_A),
+        (_carte_vers(ZONE_B, dedans=3, dehors=10), ZONE_B),
+    )
+    state = _state([("1", 1, (1, 1), 1), ("2", 1, (9, 9), 1)])
+
+    assert _surplus(state, me=1, sauf="2") == [1.0, 0.0], "surplus de 1 : la pénalité vaut 0,5"
+
+    choisie = _BotSousTest(w_crowd=0.5).select_movement_destination(
+        _qui_decide(state), [(1, 1), (6, 6)], state
+    )
+
+    assert choisie == (6, 6), "0,5 de pénalité suffit à départager deux zones à égalité"

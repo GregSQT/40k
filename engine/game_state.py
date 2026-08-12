@@ -3743,9 +3743,19 @@ def unit_is_within_objective(
 
 
 def sum_objective_control_oc_multi(
-    game_state: Dict[str, Any], hex_sets: List[Set[Tuple[int, int]]]
+    game_state: Dict[str, Any],
+    hex_sets: List[Set[Tuple[int, int]]],
+    exclude_unit_id: Optional[Any] = None,
 ) -> List[Tuple[int, int]]:
     """Version multi-zones de ``sum_objective_control_oc`` : UNE passe pour N objectifs.
+
+    ``exclude_unit_id`` retire UNE escouade du decompte, comme si elle n etait pas sur la table.
+    Seul appelant : le surplus d encombrement des doctrines de bot (``_surplus_oc_by_zone``), qui
+    doit repondre « qu est-ce que mes ALLIES tiennent deja, sans moi ? » — une escouade qui se
+    compte elle-meme se voit comme un encombrement et quitte la zone qu elle tient. Ce parametre
+    existe pour qu il n y ait QU UN comptage de controle dans le depot : la version precedente
+    reimplementait la question a cote (hexe-centre au lieu de l empreinte de socle, sans la regle
+    01.07), et divergeait donc du controle reel dans les deux cas.
 
     Chaque empreinte de figurine est calculee une seule fois puis testee contre les N zones,
     au lieu d etre recalculee par zone (``compute_occupied_hexes`` rescanne un carre de cases,
@@ -3761,7 +3771,10 @@ def sum_objective_control_oc_multi(
     unit_by_id = {str(u["id"]): u for u in game_state["units"]}
 
     sums: List[List[int]] = [[0, 0] for _ in hex_sets]
+    exclude = None if exclude_unit_id is None else str(exclude_unit_id)
     for unit_id in units_cache:
+        if exclude is not None and str(unit_id) == exclude:
+            continue
         unit = unit_by_id.get(str(unit_id))
         if not unit:
             raise KeyError(f"Unit {unit_id} missing from game_state['units']")
