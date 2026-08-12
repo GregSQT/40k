@@ -18,39 +18,26 @@ import pytest
 
 import ai.analyzer as an
 
-_HEAD = [
-    "=== STEP-BY-STEP ACTION LOG ===",
-    "[12:00:00] Board: cols=220 rows=300 inches_to_subhex=5 hex_radius=2.78 margin=1",
-    "[12:00:00] Run rules: engagement_zone_subhex=10 metric.engagement=hex "
-    "metric.ranged=euclidean move.thru_ez=True move.thru_enemy=False move.thru_friendly=True cohesion.model_subhex=10 cohesion.global_subhex=45 cohesion.min_neighbors=1",
-]
+from tests.unit.ai._fabriques import entete_step_log
 
 
-def _episode(num: int, agent_seat: int | None, winner: int) -> list:
-    lines = [
-        f"[12:00:0{num} ] === EPISODE {num} START ===".replace(" ]", "]"),
-        f"[12:00:00] Scenario: scenario_bot-01",
-    ]
-    if agent_seat is not None:
-        lines.append(
-            f"[12:00:00] Rosters: scale=500pts AGENT_PLAYER={agent_seat} "
-            f"AGENT=a (a.json) OPPONENT=o (o.json)"
-        )
-    lines += [
-        "[12:00:00] Walls: none",
-        "[12:00:00] === ACTIONS START ===",
-        f"[12:00:09] EPISODE END: Winner={winner}, Method=objectives, Actions=0, Steps=0, "
-        f"Total=0, Duration=1.000s",
-    ]
-    return lines
+def _episode_n(num: int, agent_seat: int | None, winner: int) -> str:
+    rosters = (
+        f"scale=500pts AGENT_PLAYER={agent_seat} AGENT=a (a.json) OPPONENT=o (o.json)"
+        if agent_seat is not None else ""
+    )
+    return entete_step_log(
+        f"[10:00:09] EPISODE END: Winner={winner}, Method=objectives, Actions=0, Steps=0, Total=0, Duration=1.000s\n",
+        rosters=rosters,
+        walls="none",
+        ez_vertical_inches=None,
+        objectives=None,
+    )
 
 
 def _run(tmp_path: Path, episodes: list) -> dict:
-    lines = list(_HEAD)
-    for ep in episodes:
-        lines += ep
     path = tmp_path / "step.log"
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    path.write_text("".join(episodes), encoding="utf-8")
     return an.parse_step_log(str(path))
 
 
@@ -61,8 +48,8 @@ def test_victoire_attribuee_au_siege_de_lagent_pas_a_p1(tmp_path: Path) -> None:
     « Agent » ; le compte juste est 1 victoire agent et 1 victoire bot.
     """
     stats = _run(tmp_path, [
-        _episode(1, agent_seat=1, winner=1),
-        _episode(2, agent_seat=2, winner=1),
+        _episode_n(1, agent_seat=1, winner=1),
+        _episode_n(2, agent_seat=2, winner=1),
     ])
 
     by_seat = stats["win_methods_by_seat"]
@@ -76,8 +63,8 @@ def test_victoire_attribuee_au_siege_de_lagent_pas_a_p1(tmp_path: Path) -> None:
 
 def test_wins_by_scenario_suit_le_siege(tmp_path: Path) -> None:
     stats = _run(tmp_path, [
-        _episode(1, agent_seat=2, winner=2),
-        _episode(2, agent_seat=2, winner=1),
+        _episode_n(1, agent_seat=2, winner=2),
+        _episode_n(2, agent_seat=2, winner=1),
     ])
     wins = stats["wins_by_scenario"]["scenario_bot-01"]
     assert (wins["agent"], wins["bot"]) == (1, 1), wins
@@ -92,13 +79,13 @@ def test_journal_sans_agent_player_est_refuse(tmp_path: Path) -> None:
     format doit être régénéré, comme pour l'instantané `OBJECTIVE CONTROL`.
     """
     with pytest.raises(ValueError, match="AGENT_PLAYER"):
-        _run(tmp_path, [_episode(1, agent_seat=None, winner=1)])
+        _run(tmp_path, [_episode_n(1, agent_seat=None, winner=1)])
 
 
 def test_le_siege_ne_fuit_pas_dun_episode_a_lautre(tmp_path: Path) -> None:
     """Le 2ᵉ épisode perd sa ligne `Rosters:` : il doit LEVER, pas hériter du siège du 1ᵉʳ."""
     with pytest.raises(ValueError, match="AGENT_PLAYER"):
         _run(tmp_path, [
-            _episode(1, agent_seat=1, winner=1),
-            _episode(2, agent_seat=None, winner=2),
+            _episode_n(1, agent_seat=1, winner=1),
+            _episode_n(2, agent_seat=None, winner=2),
         ])

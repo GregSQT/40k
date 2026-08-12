@@ -18,6 +18,7 @@ from __future__ import annotations
 import pytest
 
 import ai.analyzer as an
+from tests.unit.ai._fabriques import pose_etat_du_run
 
 
 EZ = 10          # 2" × inches_to_subhex 5, déjà scalé (contrat moteur)
@@ -35,18 +36,7 @@ MOVER_ANCHOR = MOVER_MODELS["105#0"]
 def _regles_du_run():
     """Règles du run posées à la main : hors `parse_step_log` les getters lèvent plutôt que de
     retomber sur le config du jour. `metric.engagement=euclidean` est celle du témoin."""
-    from ai.analyzer_config import set_run_rules
-
-    an.set_analyzer_board_scale(5)
-    set_run_rules({
-        "engagement_zone_subhex": str(EZ),
-        "engagement_zone_vertical_inches": "5.0",
-        "metric.engagement": "euclidean",
-        "metric.ranged": "euclidean",
-        "move.thru_ez": "True",
-        "move.thru_enemy": "False",
-        "move.thru_friendly": "True",
-    })
+    pose_etat_du_run(5, ez_subhex=EZ, ez_vertical_inches=5.0, metric_engagement="euclidean")
 
 
 def _args():

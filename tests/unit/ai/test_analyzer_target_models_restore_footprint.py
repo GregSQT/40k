@@ -21,31 +21,35 @@ quoi le test ne prouverait rien.
 """
 from __future__ import annotations
 
+from tests.unit.ai._fabriques import entete_step_log
+
 ANCHOR_FAR = (70, 50)      # ancre de l'unité 1 : hors de toute zone d'engagement
 SURVIVOR = (51, 50)        # son socle survivant : au contact
 FLEEING = (50, 50)         # ancre du fugitif au départ
 FLED_TO = (44, 50)         # arrivée : hors de portée d'engagement du survivant
 OBJECTIVES = ";".join(f"(150,{r})" for r in range(150, 156))
 
-STEP_LOG = f"""=== STEP-BY-STEP ACTION LOG ===
-================================================================================
-
-[10:00:00] === EPISODE 1 START ===
-[10:00:00] Scenario: scenario_bot-01
-[10:00:00] Rosters: scale=5 AGENT_PLAYER=1 AGENT=sm (ref) OPPONENT=sm (ref)
-[10:00:00] Opponent: SelfplayBot
-[10:00:00] Walls:
-[10:00:00] Objectives: rect b NW:{OBJECTIVES}
-[10:00:00] Board: cols=220 rows=300 inches_to_subhex=5 hex_radius=2.78 margin=1
-[10:00:00] Run rules: engagement_zone_subhex=10 engagement_zone_vertical_inches=5.0 metric.engagement=hex metric.ranged=euclidean move.thru_ez=True move.thru_enemy=False move.thru_friendly=True cohesion.model_subhex=10 cohesion.global_subhex=45 cohesion.min_neighbors=1
-[10:00:00] Unit 1 (Intercessor) P1: Starting position ({ANCHOR_FAR[0]},{ANCHOR_FAR[1]}), HP_MAX=2 base=round/6 [MODELS: 1#0@({ANCHOR_FAR[0]},{ANCHOR_FAR[1]},z0) 1#1@({SURVIVOR[0]},{SURVIVOR[1]},z0)] [MODEL_TYPES: 1#0=Intercessor 1#1=Intercessor]
-[10:00:00] Unit 101 (AssaultIntercessor) P2: Starting position ({FLEEING[0]},{FLEEING[1]}), HP_MAX=2 base=round/6 [MODELS: 101#0@({FLEEING[0]},{FLEEING[1]},z0)] [MODEL_TYPES: 101#0=AssaultIntercessor]
-[10:00:00] === ACTIONS START ===
-[10:00:02] E1 T1 P2 SHOOT : Unit 101({FLEEING[0]},{FLEEING[1]}) SHOT Unit 1({ANCHOR_FAR[0]},{ANCHOR_FAR[1]}) with [Bolt Pistol] - Hit 4(3+) - Wound 5(4+) - Save 1(3+) - Dmg:2HP [MODELS: 101#0@({FLEEING[0]},{FLEEING[1]},z0)] [TARGET_MODELS: 1#1@({SURVIVOR[0]},{SURVIVOR[1]},z0)] [SHOOTER_MODELS: 101#0] [R:+0.0] [SUCCESS]
-[10:00:03] E1 T2 P2 MOVE : Unit 101({FLED_TO[0]},{FLED_TO[1]}) FLED from ({FLEEING[0]},{FLEEING[1]}) to ({FLED_TO[0]},{FLED_TO[1]}) [R:+0.0] [MODELS: 101#0@({FLED_TO[0]},{FLED_TO[1]},z0)] [SUCCESS]
-[10:00:08] T2 OBJECTIVE CONTROL: VP1=0 VP2=0 CP1=0 CP2=0 ZONES=rect b NW:Ctrl=none
-[10:00:09] EPISODE END: Winner=1, Method=objectives, Actions=0, Steps=0, Total=0, Duration=1.000s
-"""
+STEP_LOG = entete_step_log(
+    f"[10:00:02] E1 T1 P2 SHOOT : Unit 101({FLEEING[0]},{FLEEING[1]}) SHOT Unit 1({ANCHOR_FAR[0]},{ANCHOR_FAR[1]}) with [Bolt Pistol]"
+    f" - Hit 4(3+) - Wound 5(4+) - Save 1(3+) - Dmg:2HP"
+    f" [MODELS: 101#0@({FLEEING[0]},{FLEEING[1]},z0)]"
+    f" [TARGET_MODELS: 1#1@({SURVIVOR[0]},{SURVIVOR[1]},z0)]"
+    " [SHOOTER_MODELS: 101#0] [R:+0.0] [SUCCESS]\n"
+    f"[10:00:03] E1 T2 P2 MOVE : Unit 101({FLED_TO[0]},{FLED_TO[1]}) FLED"
+    f" from ({FLEEING[0]},{FLEEING[1]}) to ({FLED_TO[0]},{FLED_TO[1]})"
+    f" [R:+0.0] [MODELS: 101#0@({FLED_TO[0]},{FLED_TO[1]},z0)] [SUCCESS]\n"
+    "[10:00:08] T2 OBJECTIVE CONTROL: VP1=0 VP2=0 CP1=0 CP2=0 ZONES=rect b NW:Ctrl=none\n"
+    "[10:00:09] EPISODE END: Winner=1, Method=objectives, Actions=0, Steps=0, Total=0, Duration=1.000s\n",
+    units=(
+        f"[10:00:00] Unit 1 (Intercessor) P1: Starting position ({ANCHOR_FAR[0]},{ANCHOR_FAR[1]}), HP_MAX=2 base=round/6"
+        f" [MODELS: 1#0@({ANCHOR_FAR[0]},{ANCHOR_FAR[1]},z0) 1#1@({SURVIVOR[0]},{SURVIVOR[1]},z0)]"
+        " [MODEL_TYPES: 1#0=Intercessor 1#1=Intercessor]\n"
+        f"[10:00:00] Unit 101 (AssaultIntercessor) P2: Starting position ({FLEEING[0]},{FLEEING[1]}), HP_MAX=2 base=round/6"
+        f" [MODELS: 101#0@({FLEEING[0]},{FLEEING[1]},z0)] [MODEL_TYPES: 101#0=AssaultIntercessor]\n"
+    ),
+    rosters="scale=5 AGENT_PLAYER=1 AGENT=sm (ref) OPPONENT=sm (ref)",
+    objectives=OBJECTIVES,
+)
 
 
 def _stats(tmp_path):

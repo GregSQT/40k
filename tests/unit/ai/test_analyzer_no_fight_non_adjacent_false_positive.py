@@ -30,6 +30,8 @@ from __future__ import annotations
 
 import pytest
 
+from tests.unit.ai._fabriques import entete_step_log
+
 # Attaquant round/18 à (100,100) ; cible round/6 à (105,81). Empreintes moteur :
 #   - distance bord-à-bord HEX  = 11 subhex (> ez=10 → ancien contrôle : FAUX POSITIF) ;
 #   - distance bord-à-bord EUCL = 14,9 (≤ ez×1,5 = 15 → moteur : ENGAGÉ, combat légal).
@@ -37,24 +39,19 @@ ATTACKER = (100, 100)   # Unit 1, base round/18
 TARGET = (105, 81)      # Unit 101, base round/6
 OBJECTIVES = ";".join(f"(200,{r})" for r in range(200, 206))
 
-STEP_LOG = f"""=== STEP-BY-STEP ACTION LOG ===
-================================================================================
-
-[10:00:00] === EPISODE 1 START ===
-[10:00:00] Scenario: scenario_bot-01
-[10:00:00] Opponent: SelfplayBot
-[10:00:00] Walls: (300,300)
-[10:00:00] Objectives: rect b NW:{OBJECTIVES}
-[10:00:00] Board: cols=220 rows=300 inches_to_subhex=5 hex_radius=2.78 margin=1
-[10:00:00] Run rules: engagement_zone_subhex=10 metric.engagement=hex metric.ranged=euclidean move.thru_ez=True move.thru_enemy=False move.thru_friendly=True cohesion.model_subhex=10 cohesion.global_subhex=45 cohesion.min_neighbors=1
-[10:00:00] Unit 1 (SternguardVeteranBoltRifle) P1: Starting position (-1,-1), HP_MAX=2 base=round/18
-[10:00:00] Unit 101 (AssaultIntercessor) P2: Starting position (-1,-1), HP_MAX=2 base=round/6
-[10:00:00] === ACTIONS START ===
-[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1({ATTACKER[0]},{ATTACKER[1]}) DEPLOYED from (-1,-1) to ({ATTACKER[0]},{ATTACKER[1]}) [R:+0.0] [SUCCESS]
-[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 101({TARGET[0]},{TARGET[1]}) DEPLOYED from (-1,-1) to ({TARGET[0]},{TARGET[1]}) [R:+0.0] [SUCCESS]
-[10:00:02] E1 T1 P2 SHOOT : Unit 101({TARGET[0]},{TARGET[1]}) WAIT [MODELS: 101#0@({TARGET[0]},{TARGET[1]},z0)] [SUCCESS]
-[10:00:03] E1 T1 P1 FIGHT : Unit 1({ATTACKER[0]},{ATTACKER[1]}) FOUGHT Unit 101({TARGET[0]},{TARGET[1]}) with [Close Combat Weapon] - Hit 2(3+) [R:+0.0] [FIGHT_SUBPHASE:fight] [MODELS: 1#0@({ATTACKER[0]},{ATTACKER[1]},z0)] [SUCCESS]
-"""
+STEP_LOG = entete_step_log(
+    f"[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1({ATTACKER[0]},{ATTACKER[1]}) DEPLOYED from (-1,-1) to ({ATTACKER[0]},{ATTACKER[1]}) [R:+0.0] [SUCCESS]\n"
+    f"[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 101({TARGET[0]},{TARGET[1]}) DEPLOYED from (-1,-1) to ({TARGET[0]},{TARGET[1]}) [R:+0.0] [SUCCESS]\n"
+    f"[10:00:02] E1 T1 P2 SHOOT : Unit 101({TARGET[0]},{TARGET[1]}) WAIT [MODELS: 101#0@({TARGET[0]},{TARGET[1]},z0)] [SUCCESS]\n"
+    f"[10:00:03] E1 T1 P1 FIGHT : Unit 1({ATTACKER[0]},{ATTACKER[1]}) FOUGHT Unit 101({TARGET[0]},{TARGET[1]}) with [Close Combat Weapon] - Hit 2(3+) [R:+0.0] [FIGHT_SUBPHASE:fight] [MODELS: 1#0@({ATTACKER[0]},{ATTACKER[1]},z0)] [SUCCESS]\n",
+    units=(
+        "[10:00:00] Unit 1 (SternguardVeteranBoltRifle) P1: Starting position (-1,-1), HP_MAX=2 base=round/18\n"
+        "[10:00:00] Unit 101 (AssaultIntercessor) P2: Starting position (-1,-1), HP_MAX=2 base=round/6\n"
+    ),
+    walls="(300,300)",
+    objectives=OBJECTIVES,
+    ez_vertical_inches=None,
+)
 
 
 def test_geometry_premise_hex_non_adjacent_but_euclidean_engaged() -> None:

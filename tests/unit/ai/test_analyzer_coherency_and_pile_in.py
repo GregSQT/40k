@@ -25,6 +25,8 @@ from __future__ import annotations
 
 import ai.analyzer as an
 
+from tests.unit.ai._fabriques import entete_step_log
+
 
 SCALE = 1
 COH, COH_MAX = 2 * SCALE, 9 * SCALE
@@ -39,23 +41,16 @@ TWO_CLUMPS = [(10, 10), (10, 12), (10, 20), (10, 22)]
 
 OBJECTIVES = ";".join(f"(30,{r})" for r in range(30, 33))
 
-_HEADER = (
-    "=== STEP-BY-STEP ACTION LOG ===\n"
-    "================================================================================\n\n"
-    "[10:00:00] === EPISODE 1 START ===\n"
-    "[10:00:00] Scenario: scenario_bot-01\n"
-    "[10:00:00] Rosters: scale=1 AGENT_PLAYER=1 AGENT=sm (ref) OPPONENT=sm (ref)\n"
-    "[10:00:00] Opponent: SelfplayBot\n"
-    "[10:00:00] Walls: none\n"
-    f"[10:00:00] Objectives: rect b NW:{OBJECTIVES}\n"
-    "[10:00:00] Board: cols=40 rows=40 inches_to_subhex=1 hex_radius=2.78 margin=1\n"
-    "[10:00:00] Run rules: engagement_zone_subhex=2 engagement_zone_vertical_inches=5.0 "
-    "metric.engagement=hex metric.ranged=euclidean move.thru_ez=True move.thru_enemy=False "
-    f"move.thru_friendly=True cohesion.model_subhex={COH} cohesion.global_subhex={COH_MAX} "
-    "cohesion.min_neighbors=1\n"
-    "[10:00:00] Unit 1 (Intercessor) P1: Starting position (-1,-1), HP_MAX=2 base=round/1\n"
-    "[10:00:00] Unit 101 (Intercessor) P2: Starting position (-1,-1), HP_MAX=2 base=round/1\n"
-    "[10:00:00] === ACTIONS START ===\n"
+_HEADER = entete_step_log(
+    units=(
+        "[10:00:00] Unit 1 (Intercessor) P1: Starting position (-1,-1), HP_MAX=2 base=round/1\n"
+        "[10:00:00] Unit 101 (Intercessor) P2: Starting position (-1,-1), HP_MAX=2 base=round/1\n"
+    ),
+    inches_to_subhex=SCALE,
+    board="cols=40 rows=40",
+    walls="none",
+    objectives=OBJECTIVES,
+    rosters="scale=1 AGENT_PLAYER=1 AGENT=sm (ref) OPPONENT=sm (ref)",
 )
 
 _END = ("[10:00:08] T2 OBJECTIVE CONTROL: VP1=0 VP2=0 CP1=0 CP2=0 ZONES=rect b NW:Ctrl=none\n"

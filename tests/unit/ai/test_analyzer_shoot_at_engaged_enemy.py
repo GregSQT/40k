@@ -15,6 +15,8 @@ piège, autre règle.
 """
 from __future__ import annotations
 
+from tests.unit.ai._fabriques import entete_step_log
+
 OBJECTIVES = ";".join(f"(150,{r})" for r in range(150, 156))
 
 # Échelle x5 : zone d'engagement du run = 10 subhex. Le tireur est LOIN (il ne doit lui-même être
@@ -30,26 +32,20 @@ S = f"({SHOOTER[0]},{SHOOTER[1]})"
 T = f"({TARGET[0]},{TARGET[1]})"
 
 
-def _header(brawler: tuple[int, int]) -> str:
-    b = f"({brawler[0]},{brawler[1]})"
-    return f"""=== STEP-BY-STEP ACTION LOG ===
-================================================================================
+_UNITS = (
+    "[10:00:00] Unit 1 (Intercessor) P1: Starting position (-1,-1), HP_MAX=2 base=round/6\n"
+    "[10:00:00] Unit 2 (AssaultIntercessor) P1: Starting position (-1,-1), HP_MAX=2 base=round/6\n"
+    "[10:00:00] Unit 101 (AssaultIntercessor) P2: Starting position (-1,-1), HP_MAX=2 base=round/6\n"
+)
 
-[10:00:00] === EPISODE 1 START ===
-[10:00:00] Scenario: scenario_bot-01
-[10:00:00] Opponent: SelfplayBot
-[10:00:00] Walls:
-[10:00:00] Objectives: rect b NW:{OBJECTIVES}
-[10:00:00] Board: cols=220 rows=300 inches_to_subhex=5 hex_radius=2.78 margin=1
-[10:00:00] Run rules: engagement_zone_subhex=10 metric.engagement=hex metric.ranged=euclidean move.thru_ez=True move.thru_enemy=False move.thru_friendly=True cohesion.model_subhex=10 cohesion.global_subhex=45 cohesion.min_neighbors=1
-[10:00:00] Unit 1 (Intercessor) P1: Starting position (-1,-1), HP_MAX=2 base=round/6
-[10:00:00] Unit 2 (AssaultIntercessor) P1: Starting position (-1,-1), HP_MAX=2 base=round/6
-[10:00:00] Unit 101 (AssaultIntercessor) P2: Starting position (-1,-1), HP_MAX=2 base=round/6
-[10:00:00] === ACTIONS START ===
-[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1{S} DEPLOYED from (-1,-1) to {S} [R:+0.0] [SUCCESS]
-[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 2{b} DEPLOYED from (-1,-1) to {b} [R:+0.0] [SUCCESS]
-[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 101{T} DEPLOYED from (-1,-1) to {T} [R:+0.0] [SUCCESS]
-"""
+
+def _setup(brawler: tuple[int, int]) -> str:
+    b = f"({brawler[0]},{brawler[1]})"
+    return (
+        f"[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1{S} DEPLOYED from (-1,-1) to {S} [R:+0.0] [SUCCESS]\n"
+        f"[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 2{b} DEPLOYED from (-1,-1) to {b} [R:+0.0] [SUCCESS]\n"
+        f"[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 101{T} DEPLOYED from (-1,-1) to {T} [R:+0.0] [SUCCESS]\n"
+    )
 
 
 # Arme NON-[CLOSE_QUARTERS] : c'est 04.02 qu'on teste, pas la restriction d'armes de 10.06.
@@ -68,7 +64,7 @@ def _stats(tmp_path, brawler: tuple[int, int], body: str):
     import ai.analyzer as an
 
     log = tmp_path / "step.log"
-    log.write_text(_header(brawler) + body)
+    log.write_text(entete_step_log(_setup(brawler) + body, units=_UNITS, ez_vertical_inches=None))
     return an.parse_step_log(str(log))
 
 

@@ -27,6 +27,8 @@ import pytest
 
 import ai.analyzer as an
 
+from tests.unit.ai._fabriques import entete_step_log
+
 
 # ─── Géométrie V7 ────────────────────────────────────────────────────────────────────────────
 # Plateau 6×8 à l'échelle 1 (1 subhex = 1"), donc M=6" d'un Intercessor = 6 pas de BFS.
@@ -60,21 +62,13 @@ def _models(unit_id: str, positions) -> str:
 
 
 def _header(*, cols: int, rows: int, walls: str, units: str) -> str:
-    return (
-        "=== STEP-BY-STEP ACTION LOG ===\n"
-        "================================================================================\n\n"
-        "[10:00:00] === EPISODE 1 START ===\n"
-        "[10:00:00] Scenario: scenario_bot-01\n"
-        "[10:00:00] Rosters: scale=1 AGENT_PLAYER=1 AGENT=sm (ref) OPPONENT=sm (ref)\n"
-        "[10:00:00] Opponent: SelfplayBot\n"
-        f"[10:00:00] Walls: {walls}\n"
-        f"[10:00:00] Objectives: rect b NW:{OBJECTIVES}\n"
-        f"[10:00:00] Board: cols={cols} rows={rows} inches_to_subhex=1 hex_radius=2.78 margin=1\n"
-        "[10:00:00] Run rules: engagement_zone_subhex=2 engagement_zone_vertical_inches=5.0 "
-        "metric.engagement=hex metric.ranged=euclidean move.thru_ez=True move.thru_enemy=False "
-        "move.thru_friendly=True cohesion.model_subhex=2 cohesion.global_subhex=9 cohesion.min_neighbors=1\n"
-        f"{units}"
-        "[10:00:00] === ACTIONS START ===\n"
+    return entete_step_log(
+        units=units,
+        inches_to_subhex=1,
+        board=f"cols={cols} rows={rows}",
+        walls=walls,
+        objectives=OBJECTIVES,
+        rosters="scale=1 AGENT_PLAYER=1 AGENT=sm (ref) OPPONENT=sm (ref)",
     )
 
 

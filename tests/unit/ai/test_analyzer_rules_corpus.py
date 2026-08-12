@@ -22,6 +22,7 @@ from __future__ import annotations
 import pytest
 
 import ai.analyzer as an
+from tests.unit.ai._fabriques import entete_step_log
 from ai.analyzer_rules import (
     coverage_gaps,
     coverage_rows,
@@ -33,27 +34,18 @@ from ai.analyzer_rules import (
 
 OBJECTIVES = ";".join(f"(30,{r})" for r in range(30, 33))
 
-_HEADER = (
-    "=== STEP-BY-STEP ACTION LOG ===\n"
-    "================================================================================\n\n"
-    "[10:00:00] === EPISODE 1 START ===\n"
-    "[10:00:00] Scenario: scenario_bot-01\n"
-    "[10:00:00] Rosters: scale=1 AGENT_PLAYER=1 AGENT=sm (ref) OPPONENT=sm (ref)\n"
-    "[10:00:00] Opponent: SelfplayBot\n"
-    "[10:00:00] Walls: none\n"
-    f"[10:00:00] Objectives: rect b NW:{OBJECTIVES}\n"
-    "[10:00:00] Board: cols=40 rows=40 inches_to_subhex=1 hex_radius=2.78 margin=1\n"
-    "[10:00:00] Run rules: engagement_zone_subhex=2 engagement_zone_vertical_inches=5.0 "
-    "metric.engagement=hex metric.ranged=euclidean move.thru_ez=True move.thru_enemy=False "
-    "move.thru_friendly=True cohesion.model_subhex=2 cohesion.global_subhex=9 "
-    "cohesion.min_neighbors=1\n"
-    "[10:00:00] Unit 1 (Intercessor) P1: Starting position (-1,-1), HP_MAX=2 base=round/1\n"
-    "[10:00:00] Unit 101 (Intercessor) P2: Starting position (-1,-1), HP_MAX=2 base=round/1\n"
-    "[10:00:00] === ACTIONS START ===\n"
-    "[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1(10,10) DEPLOYED from (-1,-1) to (10,10) "
-    "[R:+0.0] [MODELS: 1#0@(10,10,z0)] [SUCCESS]\n"
-    "[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 101(30,30) DEPLOYED from (-1,-1) to (30,30) "
-    "[R:+0.0] [MODELS: 101#0@(30,30,z0)] [SUCCESS]\n"
+_HEADER = entete_step_log(
+    "[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1(10,10) DEPLOYED from (-1,-1) to (10,10) [R:+0.0] [MODELS: 1#0@(10,10,z0)] [SUCCESS]\n"
+    "[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 101(30,30) DEPLOYED from (-1,-1) to (30,30) [R:+0.0] [MODELS: 101#0@(30,30,z0)] [SUCCESS]\n",
+    units=(
+        "[10:00:00] Unit 1 (Intercessor) P1: Starting position (-1,-1), HP_MAX=2 base=round/1\n"
+        "[10:00:00] Unit 101 (Intercessor) P2: Starting position (-1,-1), HP_MAX=2 base=round/1\n"
+    ),
+    inches_to_subhex=1,
+    board="cols=40 rows=40",
+    walls="none",
+    objectives=OBJECTIVES,
+    rosters="scale=1 AGENT_PLAYER=1 AGENT=sm (ref) OPPONENT=sm (ref)",
 )
 
 _END = ("[10:00:08] T2 OBJECTIVE CONTROL: VP1=0 VP2=0 CP1=0 CP2=0 ZONES=rect b NW:Ctrl=none\n"

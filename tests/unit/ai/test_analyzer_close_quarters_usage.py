@@ -21,6 +21,8 @@ qui interroge §10.06 — la seule autorité sur cette grandeur.
 """
 from __future__ import annotations
 
+from tests.unit.ai._fabriques import entete_step_log
+
 UNIT_TYPE = "Intercessor"
 WEAPON = "Bolt Pistol"          # armurerie : ["CLOSE_QUARTERS"]
 
@@ -32,24 +34,26 @@ OBJECTIVES = ";".join(f"(150,{r})" for r in range(150, 156))
 
 def _log(target: tuple[int, int]) -> str:
     s, t = f"({SHOOTER[0]},{SHOOTER[1]})", f"({target[0]},{target[1]})"
-    return f"""=== STEP-BY-STEP ACTION LOG ===
-================================================================================
-
-[10:00:00] === EPISODE 1 START ===
-[10:00:00] Scenario: scenario_bot-01
-[10:00:00] Rosters: scale=5 AGENT_PLAYER=1 AGENT=sm (ref) OPPONENT=sm (ref)
-[10:00:00] Opponent: SelfplayBot
-[10:00:00] Walls:
-[10:00:00] Objectives: rect b NW:{OBJECTIVES}
-[10:00:00] Board: cols=220 rows=300 inches_to_subhex=5 hex_radius=2.78 margin=1
-[10:00:00] Run rules: engagement_zone_subhex=10 engagement_zone_vertical_inches=5.0 metric.engagement=hex metric.ranged=euclidean move.thru_ez=True move.thru_enemy=False move.thru_friendly=True cohesion.model_subhex=10 cohesion.global_subhex=45 cohesion.min_neighbors=1
-[10:00:00] Unit 1 ({UNIT_TYPE}) P1: Starting position {s}, HP_MAX=2 base=round/6 [MODELS: 1#0@({SHOOTER[0]},{SHOOTER[1]},z0)] [MODEL_TYPES: 1#0={UNIT_TYPE}]
-[10:00:00] Unit 101 (AssaultIntercessor) P2: Starting position {t}, HP_MAX=2 base=round/6 [MODELS: 101#0@({target[0]},{target[1]},z0)]
-[10:00:00] === ACTIONS START ===
-[10:00:02] E1 T1 P1 SHOOT : Unit 1{s} SHOT Unit 101{t} with [{WEAPON}] - Hit 4(3+) - Wound 5(4+) - Save 2(3+) - Dmg:0HP [MODELS: 1#0@({SHOOTER[0]},{SHOOTER[1]},z0)] [TARGET_MODELS: 101#0@({target[0]},{target[1]},z0)] [SHOOTER_MODELS: 1#0] [R:+0.0] [SUCCESS]
-[10:00:08] T2 OBJECTIVE CONTROL: VP1=0 VP2=0 CP1=0 CP2=0 ZONES=rect b NW:Ctrl=none
-[10:00:09] EPISODE END: Winner=1, Method=objectives, Actions=0, Steps=0, Total=0, Duration=1.000s
-"""
+    body = (
+        f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{s} SHOT Unit 101{t} with [{WEAPON}]"
+        f" - Hit 4(3+) - Wound 5(4+) - Save 2(3+) - Dmg:0HP"
+        f" [MODELS: 1#0@({SHOOTER[0]},{SHOOTER[1]},z0)]"
+        f" [TARGET_MODELS: 101#0@({target[0]},{target[1]},z0)]"
+        " [SHOOTER_MODELS: 1#0] [R:+0.0] [SUCCESS]\n"
+        "[10:00:08] T2 OBJECTIVE CONTROL: VP1=0 VP2=0 CP1=0 CP2=0 ZONES=rect b NW:Ctrl=none\n"
+        "[10:00:09] EPISODE END: Winner=1, Method=objectives, Actions=0, Steps=0, Total=0, Duration=1.000s\n"
+    )
+    return entete_step_log(
+        body,
+        units=(
+            f"[10:00:00] Unit 1 ({UNIT_TYPE}) P1: Starting position {s}, HP_MAX=2 base=round/6"
+            f" [MODELS: 1#0@({SHOOTER[0]},{SHOOTER[1]},z0)] [MODEL_TYPES: 1#0={UNIT_TYPE}]\n"
+            f"[10:00:00] Unit 101 (AssaultIntercessor) P2: Starting position {t}, HP_MAX=2 base=round/6"
+            f" [MODELS: 101#0@({target[0]},{target[1]},z0)]\n"
+        ),
+        rosters="scale=5 AGENT_PLAYER=1 AGENT=sm (ref) OPPONENT=sm (ref)",
+        objectives=OBJECTIVES,
+    )
 
 
 def _stats(tmp_path, target):

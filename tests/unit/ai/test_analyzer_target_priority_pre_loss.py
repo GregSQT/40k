@@ -10,6 +10,8 @@ ne couvrait pas.
 """
 from __future__ import annotations
 
+from tests.unit.ai._fabriques import entete_step_log
+
 OBJECTIVES = ";".join(f"(60,{r})" for r in range(40, 46))
 
 # Board x1, tout le monde en ligne de vue, personne engagé : seule la priorité est en jeu.
@@ -17,26 +19,24 @@ SHOOTER = (10, 20)
 FRESH = (14, 20)     # cible intacte
 WOUNDED = (18, 20)   # cible que l'on blesse au tour 1
 
-_HEADER = f"""=== STEP-BY-STEP ACTION LOG ===
-================================================================================
-
-[10:00:00] === EPISODE 1 START ===
-[10:00:00] Scenario: scenario_bot-01
-[10:00:00] Opponent: SelfplayBot
-[10:00:00] Walls:
-[10:00:00] Objectives: rect b NW:{OBJECTIVES}
-[10:00:00] Board: cols=60 rows=60 inches_to_subhex=1 hex_radius=13.9 margin=5
-[10:00:00] Run rules: engagement_zone_subhex=2 engagement_zone_vertical_inches=5.0 metric.engagement=hex metric.ranged=hex move.thru_ez=True move.thru_enemy=False move.thru_friendly=True cohesion.model_subhex=2 cohesion.global_subhex=9 cohesion.min_neighbors=1
-[10:00:00] Unit 1 (SternguardVeteranBoltRifle) P1: Starting position (-1,-1), HP_MAX=2 base=round/1
-[10:00:00] Unit 2 (AssaultIntercessor) P1: Starting position (-1,-1), HP_MAX=2 base=round/1
-[10:00:00] Unit 101 (AssaultIntercessor) P2: Starting position (-1,-1), HP_MAX=2 base=round/1
-[10:00:00] Unit 102 (AssaultIntercessor) P2: Starting position (-1,-1), HP_MAX=2 base=round/1
-[10:00:00] === ACTIONS START ===
-[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1(10,20) DEPLOYED from (-1,-1) to (10,20) [R:+0.0] [MODELS: 1#0@(10,20,z0)] [SUCCESS]
-[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 2(13,20) DEPLOYED from (-1,-1) to (13,20) [R:+0.0] [MODELS: 2#0@(13,20,z0)] [SUCCESS]
-[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 101(14,20) DEPLOYED from (-1,-1) to (14,20) [R:+0.0] [MODELS: 101#0@(14,20,z0)] [SUCCESS]
-[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 102(18,20) DEPLOYED from (-1,-1) to (18,20) [R:+0.0] [MODELS: 102#0@(18,20,z0)] [SUCCESS]
-"""
+_HEADER = entete_step_log(
+    "[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1(10,20) DEPLOYED from (-1,-1) to (10,20) [R:+0.0] [MODELS: 1#0@(10,20,z0)] [SUCCESS]\n"
+    "[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 2(13,20) DEPLOYED from (-1,-1) to (13,20) [R:+0.0] [MODELS: 2#0@(13,20,z0)] [SUCCESS]\n"
+    "[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 101(14,20) DEPLOYED from (-1,-1) to (14,20) [R:+0.0] [MODELS: 101#0@(14,20,z0)] [SUCCESS]\n"
+    "[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 102(18,20) DEPLOYED from (-1,-1) to (18,20) [R:+0.0] [MODELS: 102#0@(18,20,z0)] [SUCCESS]\n",
+    units=(
+        "[10:00:00] Unit 1 (SternguardVeteranBoltRifle) P1: Starting position (-1,-1), HP_MAX=2 base=round/1\n"
+        "[10:00:00] Unit 2 (AssaultIntercessor) P1: Starting position (-1,-1), HP_MAX=2 base=round/1\n"
+        "[10:00:00] Unit 101 (AssaultIntercessor) P2: Starting position (-1,-1), HP_MAX=2 base=round/1\n"
+        "[10:00:00] Unit 102 (AssaultIntercessor) P2: Starting position (-1,-1), HP_MAX=2 base=round/1\n"
+    ),
+    inches_to_subhex=1,
+    board="cols=60 rows=60",
+    hex_radius="13.9",
+    margin=5,
+    objectives=OBJECTIVES,
+    metric_ranged="hex",
+)
 
 _SHOT = (
     "[10:00:0{t}] E1 T{t} P1 SHOOT : Unit 1(10,20) SHOT Unit {target}({tc},20)"

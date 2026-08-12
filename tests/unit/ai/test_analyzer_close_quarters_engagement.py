@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import pytest
 
+from tests.unit.ai._fabriques import entete_step_log
+
 # Échelle x5 : la zone d'engagement du run vaut 10 subhex (2"). Le tireur et sa cible sont à
 # 8 subhex d'ancre à ancre — donc ENGAGÉS au sens du moteur, et pourtant jamais « adjacents ».
 # C'est exactement la configuration qui produisait le faux positif.
@@ -37,26 +39,18 @@ T = f"({ENGAGED_TARGET[0]},{ENGAGED_TARGET[1]})"
 F = f"({FAR_TARGET[0]},{FAR_TARGET[1]})"
 OTH = f"({OTHER_ENGAGING[0]},{OTHER_ENGAGING[1]})"
 
-_HEADER = f"""=== STEP-BY-STEP ACTION LOG ===
-================================================================================
-
-[10:00:00] === EPISODE 1 START ===
-[10:00:00] Scenario: scenario_bot-01
-[10:00:00] Opponent: SelfplayBot
-[10:00:00] Walls:
-[10:00:00] Objectives: rect b NW:{OBJECTIVES}
-[10:00:00] Board: cols=220 rows=300 inches_to_subhex=5 hex_radius=2.78 margin=1
-[10:00:00] Run rules: engagement_zone_subhex=10 metric.engagement=hex metric.ranged=euclidean move.thru_ez=True move.thru_enemy=False move.thru_friendly=True cohesion.model_subhex=10 cohesion.global_subhex=45 cohesion.min_neighbors=1
-[10:00:00] Unit 1 (VanguardVeteranSquadJumpPack) P1: Starting position (-1,-1), HP_MAX=2 base=round/6
-[10:00:00] Unit 101 (AssaultIntercessor) P2: Starting position (-1,-1), HP_MAX=2 base=round/6
-[10:00:00] Unit 102 (AssaultIntercessor) P2: Starting position (-1,-1), HP_MAX=2 base=round/6
-[10:00:00] Unit 103 (AssaultIntercessor) P2: Starting position (-1,-1), HP_MAX=2 base=round/6
-[10:00:00] === ACTIONS START ===
-[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1{S} DEPLOYED from (-1,-1) to {S} [R:+0.0] [SUCCESS]
-[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 101{T} DEPLOYED from (-1,-1) to {T} [R:+0.0] [SUCCESS]
-[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 102{F} DEPLOYED from (-1,-1) to {F} [R:+0.0] [SUCCESS]
-[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 103{OTH} DEPLOYED from (-1,-1) to {OTH} [R:+0.0] [SUCCESS]
-"""
+_SETUP = (
+    f"[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1{S} DEPLOYED from (-1,-1) to {S} [R:+0.0] [SUCCESS]\n"
+    f"[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 101{T} DEPLOYED from (-1,-1) to {T} [R:+0.0] [SUCCESS]\n"
+    f"[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 102{F} DEPLOYED from (-1,-1) to {F} [R:+0.0] [SUCCESS]\n"
+    f"[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 103{OTH} DEPLOYED from (-1,-1) to {OTH} [R:+0.0] [SUCCESS]\n"
+)
+_UNITS = (
+    "[10:00:00] Unit 1 (VanguardVeteranSquadJumpPack) P1: Starting position (-1,-1), HP_MAX=2 base=round/6\n"
+    "[10:00:00] Unit 101 (AssaultIntercessor) P2: Starting position (-1,-1), HP_MAX=2 base=round/6\n"
+    "[10:00:00] Unit 102 (AssaultIntercessor) P2: Starting position (-1,-1), HP_MAX=2 base=round/6\n"
+    "[10:00:00] Unit 103 (AssaultIntercessor) P2: Starting position (-1,-1), HP_MAX=2 base=round/6\n"
+)
 
 _SHOT_AT_ENGAGED = (
     f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT Unit 101{T} with [Heavy Bolt Pistol]"
@@ -86,7 +80,7 @@ def _stats(tmp_path, body: str):
     import ai.analyzer as an
 
     log = tmp_path / "step.log"
-    log.write_text(_HEADER + body)
+    log.write_text(entete_step_log(_SETUP + body, units=_UNITS, ez_vertical_inches=None))
     return an.parse_step_log(str(log))
 
 

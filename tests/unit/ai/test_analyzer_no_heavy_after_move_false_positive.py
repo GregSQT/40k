@@ -33,6 +33,8 @@ from __future__ import annotations
 
 import pytest
 
+from tests.unit.ai._fabriques import entete_step_log
+
 UNIT_TYPE = "TerminatorAssaultCannon"
 WEAPON_NAME = "Assault Cannon"
 START = (50, 50)
@@ -40,24 +42,17 @@ AFTER_MOVE = (60, 50)  # 10 subhex = 2" (inches_to_subhex=5) — sous le seuil d
 TARGET = (90, 50)      # 30 subhex = 6" — dans les 24" de l'arme
 OBJECTIVES = ";".join(f"(150,{r})" for r in range(150, 156))
 
-STEP_LOG = f"""=== STEP-BY-STEP ACTION LOG ===
-================================================================================
-
-[10:00:00] === EPISODE 1 START ===
-[10:00:00] Scenario: scenario_bot-01
-[10:00:00] Opponent: SelfplayBot
-[10:00:00] Walls:
-[10:00:00] Objectives: rect b NW:{OBJECTIVES}
-[10:00:00] Board: cols=220 rows=300 inches_to_subhex=5 hex_radius=2.78 margin=1
-[10:00:00] Run rules: engagement_zone_subhex=10 metric.engagement=hex metric.ranged=euclidean move.thru_ez=True move.thru_enemy=False move.thru_friendly=True cohesion.model_subhex=10 cohesion.global_subhex=45 cohesion.min_neighbors=1
-[10:00:00] Unit 1 ({UNIT_TYPE}) P1: Starting position (-1,-1), HP_MAX=2 base=round/6
-[10:00:00] Unit 101 (AssaultIntercessor) P2: Starting position (-1,-1), HP_MAX=2 base=round/6
-[10:00:00] === ACTIONS START ===
-[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1{START} DEPLOYED from (-1,-1) to {START} [R:+0.0] [SUCCESS]
-[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 101{TARGET} DEPLOYED from (-1,-1) to {TARGET} [R:+0.0] [SUCCESS]
-[10:00:02] E1 T1 P1 MOVE : Unit 1{AFTER_MOVE} MOVED from {START} to {AFTER_MOVE} [R:+0.0] [SUCCESS]
-[10:00:03] E1 T1 P1 SHOOT : Unit 1{AFTER_MOVE} SHOT Unit 101{TARGET} with [{WEAPON_NAME}] - Hit 4(3+->2+) [HEAVY] - Wound 5(3+) - Save 2(2+) - Dmg:1HP [R:+0.0] [SUCCESS]
-"""
+STEP_LOG = entete_step_log(
+    f"[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1{START} DEPLOYED from (-1,-1) to {START} [R:+0.0] [SUCCESS]\n"
+    f"[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 101{TARGET} DEPLOYED from (-1,-1) to {TARGET} [R:+0.0] [SUCCESS]\n"
+    f"[10:00:02] E1 T1 P1 MOVE : Unit 1{AFTER_MOVE} MOVED from {START} to {AFTER_MOVE} [R:+0.0] [SUCCESS]\n"
+    f"[10:00:03] E1 T1 P1 SHOOT : Unit 1{AFTER_MOVE} SHOT Unit 101{TARGET} with [{WEAPON_NAME}] - Hit 4(3+->2+) [HEAVY] - Wound 5(3+) - Save 2(2+) - Dmg:1HP [R:+0.0] [SUCCESS]\n",
+    units=(
+        f"[10:00:00] Unit 1 ({UNIT_TYPE}) P1: Starting position (-1,-1), HP_MAX=2 base=round/6\n"
+        "[10:00:00] Unit 101 (AssaultIntercessor) P2: Starting position (-1,-1), HP_MAX=2 base=round/6\n"
+    ),
+    ez_vertical_inches=None,
+)
 
 
 @pytest.fixture

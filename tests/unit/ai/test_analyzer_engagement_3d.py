@@ -23,6 +23,7 @@ import pytest
 
 import ai.analyzer as an
 from ai.analyzer_perfig import parse_models_heights, parse_models_segment
+from tests.unit.ai._fabriques import pose_etat_du_run
 
 
 ENGAGEMENT_ZONE = 20     # 2" à inches_to_subhex=10, déjà scalé (contrat moteur)
@@ -35,18 +36,7 @@ FLOOR_HEIGHT = 10.0      # 10" > 5" + 2,5" → hors zone verticale
 def _regles_du_run():
     """Hors `parse_step_log`, les règles du run se posent à la main : les getters lèvent plutôt
     que de retomber sur le config courant (une règle absente n'a pas de repli JUSTE)."""
-    from ai.analyzer_config import set_run_rules
-
-    an.set_analyzer_board_scale(10)
-    set_run_rules({
-        "engagement_zone_subhex": str(ENGAGEMENT_ZONE),
-        "engagement_zone_vertical_inches": str(VERTICAL_ZONE),
-        "metric.engagement": "hex",
-        "metric.ranged": "euclidean",
-        "move.thru_ez": "True",
-        "move.thru_enemy": "False",
-        "move.thru_friendly": "True",
-    })
+    pose_etat_du_run(10, ez_subhex=ENGAGEMENT_ZONE, ez_vertical_inches=VERTICAL_ZONE)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

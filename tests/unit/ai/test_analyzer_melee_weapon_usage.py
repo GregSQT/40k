@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import ai.analyzer_config as analyzer_config
 
+from tests.unit.ai._fabriques import entete_step_log
+
 # Escouade Boyz avec un Bigboss rattaché (règle 19) : le cas RÉEL du run: l'arme `[CLEAVE]`
 # n'est pas déclarée par le type d'escouade, seule la figurine du personnage la porte.
 SQUAD_TYPE = "Boyz"
@@ -36,24 +38,24 @@ def _log(*, with_cleave_token: bool) -> str:
     target_models = " ".join(
         f"101#{i}@({TARGET[0]},{TARGET[1] + i},z0)" for i in range(10)
     )
-    return f"""=== STEP-BY-STEP ACTION LOG ===
-================================================================================
-
-[10:00:00] === EPISODE 1 START ===
-[10:00:00] Scenario: scenario_bot-01
-[10:00:00] Rosters: scale=5 AGENT_PLAYER=1 AGENT=ork (ref) OPPONENT=sm (ref)
-[10:00:00] Opponent: SelfplayBot
-[10:00:00] Walls:
-[10:00:00] Objectives: rect b NW:{OBJECTIVES}
-[10:00:00] Board: cols=220 rows=300 inches_to_subhex=5 hex_radius=2.78 margin=1
-[10:00:00] Run rules: engagement_zone_subhex=10 engagement_zone_vertical_inches=5.0 metric.engagement=hex metric.ranged=euclidean move.thru_ez=True move.thru_enemy=False move.thru_friendly=True cohesion.model_subhex=10 cohesion.global_subhex=45 cohesion.min_neighbors=1
-[10:00:00] Unit 1 ({SQUAD_TYPE}) P1: Starting position {a}, HP_MAX=1 base=round/6 {models} [MODEL_TYPES: 1#0={SQUAD_TYPE} 1#1={CARRIER_TYPE}]
-[10:00:00] Unit 101 (AssaultIntercessor) P2: Starting position {t}, HP_MAX=2 base=round/6 [MODELS: {target_models}]
-[10:00:00] === ACTIONS START ===
-[10:00:02] E1 T1 P1 FIGHT : Unit 1{a} FOUGHT{token} Unit 101{t} with [{WEAPON}] - Hit 4(3+) - Wound 5(3+) - Save 2(3+) - Dmg:2HP [FIGHT_SUBPHASE:fight] {models} [SHOOTER_MODELS: 1#1] [R:+0.0] [SUCCESS]
-[10:00:08] T2 OBJECTIVE CONTROL: VP1=0 VP2=0 CP1=0 CP2=0 ZONES=rect b NW:Ctrl=none
-[10:00:09] EPISODE END: Winner=1, Method=objectives, Actions=0, Steps=0, Total=0, Duration=1.000s
-"""
+    body = (
+        f"[10:00:02] E1 T1 P1 FIGHT : Unit 1{a} FOUGHT{token} Unit 101{t} with [{WEAPON}]"
+        f" - Hit 4(3+) - Wound 5(3+) - Save 2(3+) - Dmg:2HP"
+        f" [FIGHT_SUBPHASE:fight] {models} [SHOOTER_MODELS: 1#1] [R:+0.0] [SUCCESS]\n"
+        "[10:00:08] T2 OBJECTIVE CONTROL: VP1=0 VP2=0 CP1=0 CP2=0 ZONES=rect b NW:Ctrl=none\n"
+        "[10:00:09] EPISODE END: Winner=1, Method=objectives, Actions=0, Steps=0, Total=0, Duration=1.000s\n"
+    )
+    return entete_step_log(
+        body,
+        units=(
+            f"[10:00:00] Unit 1 ({SQUAD_TYPE}) P1: Starting position {a}, HP_MAX=1 base=round/6"
+            f" {models} [MODEL_TYPES: 1#0={SQUAD_TYPE} 1#1={CARRIER_TYPE}]\n"
+            f"[10:00:00] Unit 101 (AssaultIntercessor) P2: Starting position {t}, HP_MAX=2 base=round/6"
+            f" [MODELS: {target_models}]\n"
+        ),
+        rosters="scale=5 AGENT_PLAYER=1 AGENT=ork (ref) OPPONENT=sm (ref)",
+        objectives=OBJECTIVES,
+    )
 
 
 def _stats(tmp_path, *, with_cleave_token=True):

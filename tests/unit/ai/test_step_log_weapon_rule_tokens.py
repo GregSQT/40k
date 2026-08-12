@@ -30,6 +30,7 @@ from engine.phase_handlers import shooting_handlers
 from engine.phase_handlers.fight_handlers import build_manual_fight_allocation
 from engine.phase_handlers.shared_utils import build_manual_shoot_allocation
 from tests._state_invariants import turn_state_invariants
+from tests.unit.ai._fabriques import entete_step_log
 
 
 # Unité et arme RÉELLES du roster Space Marines. `sternguard_bolt_rifle` est le seul profil
@@ -251,27 +252,15 @@ def _analyzer_stats(tmp_path, engine_lines, *, unit_type=UNIT_TYPE, target_model
         f"101#{i}@({TARGET[0]},{TARGET[1] + i},z0)" for i in range(target_models)
     ) + "]"
     log = tmp_path / "step.log"
-    log.write_text(
-        "=== STEP-BY-STEP ACTION LOG ===\n"
-        "================================================================================\n\n"
-        "[10:00:00] === EPISODE 1 START ===\n"
-        "[10:00:00] Scenario: scenario_bot-01\n"
-        "[10:00:00] Opponent: SelfplayBot\n"
-        "[10:00:00] Walls: \n"
-        f"[10:00:00] Objectives: rect b NW:{OBJECTIVES}\n"
-        "[10:00:00] Board: cols=220 rows=300 inches_to_subhex=5 hex_radius=2.78 margin=1\n"
-        # `engagement_zone_vertical_inches` : exigée dès qu'un contrôle d'engagement per-figurine
-        # s'exécute (§03.04). Absente de cette entête, l'analyzer lève — ce qu'aucun test ne
-        # voyait tant que la cible n'avait qu'une figurine.
-        "[10:00:00] Run rules: engagement_zone_subhex=10 engagement_zone_vertical_inches=5.0 metric.engagement=hex metric.ranged=euclidean move.thru_ez=True move.thru_enemy=False move.thru_friendly=True cohesion.model_subhex=10 cohesion.global_subhex=45 cohesion.min_neighbors=1\n"
-        f"[10:00:00] Unit 1 ({unit_type}) P1: Starting position (-1,-1), HP_MAX=2 base=round/6\n"
-        f"[10:00:00] Unit 101 (AssaultIntercessor) P2: Starting position (-1,-1), HP_MAX=2 "
-        f"base=round/6 {target_models_segment}\n"
-        "[10:00:00] === ACTIONS START ===\n"
+    log.write_text(entete_step_log(
         f"[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1({SHOOTER[0]},{SHOOTER[1]}) DEPLOYED from (-1,-1) to ({SHOOTER[0]},{SHOOTER[1]}) [R:+0.0] [SUCCESS]\n"
         f"[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 101({TARGET[0]},{TARGET[1]}) DEPLOYED from (-1,-1) to ({TARGET[0]},{TARGET[1]}) [R:+0.0] [SUCCESS]\n"
-        f"{body}\n"
-    )
+        f"{body}\n",
+        units=(
+            f"[10:00:00] Unit 1 ({unit_type}) P1: Starting position (-1,-1), HP_MAX=2 base=round/6\n"
+            f"[10:00:00] Unit 101 (AssaultIntercessor) P2: Starting position (-1,-1), HP_MAX=2 base=round/6 {target_models_segment}\n"
+        ),
+    ))
     return an.parse_step_log(str(log))
 
 

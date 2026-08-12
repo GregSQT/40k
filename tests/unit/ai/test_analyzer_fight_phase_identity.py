@@ -19,30 +19,32 @@ from __future__ import annotations
 from pathlib import Path
 
 import ai.analyzer as an
+from tests.unit.ai._fabriques import entete_step_log
 
-_HEAD = [
-    "=== STEP-BY-STEP ACTION LOG ===",
-    "[12:00:00] === EPISODE 1 START ===",
-    "[12:00:00] Scenario: scenario_bot-01",
-    "[12:00:00] Rosters: scale=500pts AGENT_PLAYER=1 AGENT=a (a.json) OPPONENT=o (o.json)",
-    "[12:00:00] Walls: none",
-    "[12:00:00] Board: cols=44 rows=60 inches_to_subhex=1 hex_radius=2.78 margin=1",
-    "[12:00:00] Run rules: engagement_zone_subhex=2 engagement_zone_vertical_inches=5.0 "
-    "metric.engagement=hex metric.ranged=hex move.thru_ez=True move.thru_enemy=False "
-    "move.thru_friendly=True cohesion.model_subhex=2 cohesion.global_subhex=9 cohesion.min_neighbors=1",
-    "[12:00:00] Unit 1 (Intercessor) P1: Starting position (-1,-1), HP_MAX=2 "
-    "[MODELS: 1#0@(-1,-1,z0)]",
-    "[12:00:00] Unit 101 (Intercessor) P2: Starting position (-1,-1), HP_MAX=2 "
-    "[MODELS: 101#0@(-1,-1,z0)]",
-    "[12:00:00] === ACTIONS START ===",
-]
-_END = ("[12:00:09] EPISODE END: Winner=1, Method=objectives, Actions=0, Steps=0, "
-        "Total=0, Duration=1.000s")
+_UNITS = (
+    "[10:00:00] Unit 1 (Intercessor) P1: Starting position (-1,-1), HP_MAX=2 "
+    "[MODELS: 1#0@(-1,-1,z0)]\n"
+    "[10:00:00] Unit 101 (Intercessor) P2: Starting position (-1,-1), HP_MAX=2 "
+    "[MODELS: 101#0@(-1,-1,z0)]\n"
+)
+_END = "[12:00:09] EPISODE END: Winner=1, Method=objectives, Actions=0, Steps=0, Total=0, Duration=1.000s"
+_COMMON = dict(
+    units=_UNITS,
+    inches_to_subhex=1,
+    board="cols=44 rows=60",
+    walls="none",
+    metric_ranged="hex",
+    rosters="scale=500pts AGENT_PLAYER=1 AGENT=a (a.json) OPPONENT=o (o.json)",
+    objectives=None,
+)
 
 
 def _run(tmp_path: Path, body: list) -> dict:
     path = tmp_path / "step.log"
-    path.write_text("\n".join(_HEAD + body + [_END]) + "\n", encoding="utf-8")
+    path.write_text(
+        entete_step_log("\n".join(body) + "\n" + _END + "\n", **_COMMON),
+        encoding="utf-8",
+    )
     return an.parse_step_log(str(path))
 
 
@@ -119,10 +121,15 @@ def test_le_RESUME_1_7_compte_aussi_les_capacites_de_faction(tmp_path) -> None:
     """
 
     log = tmp_path / "step.log"
-    log.write_text("\n".join(_HEAD + [
-        "[12:00:01] T1 EFFECTS: P1 none | P2 none",
-        "[12:00:02] T1 EFFECTS: P1 oath_target=101 oath_wound=+1 | P2 waaagh=on waaagh_melee_atk=+1",
-    ] + [_END]) + "\n", encoding="utf-8")
+    log.write_text(
+        entete_step_log(
+            "[12:00:01] T1 EFFECTS: P1 none | P2 none\n"
+            "[12:00:02] T1 EFFECTS: P1 oath_target=101 oath_wound=+1 | P2 waaagh=on waaagh_melee_atk=+1\n"
+            + _END + "\n",
+            **_COMMON,
+        ),
+        encoding="utf-8",
+    )
 
     stats = an.parse_step_log(str(log))
     lines: list = []
