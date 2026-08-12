@@ -144,6 +144,18 @@ describe("objectiveControlKey — équivalence avec la clé exhaustive", () => {
     );
   });
 
+  it("distingue deux zones de mêmes hexes et de FORMES différentes", () => {
+    // `shape` gouverne le tracé (polygone réel vs union d'hexes) : deux zones de mêmes hexes ne se
+    // dessinent pas pareil. C'est la part que portait la clé `zonesKey`, désormais fondue ici.
+    const hexes = ZONES[0]!.hexes;
+    expect(objectiveZonesGeometryKey([{ id: "z", hexes, shape: "polygon" }])).not.toBe(
+      objectiveZonesGeometryKey([{ id: "z", hexes, shape: "rect" }])
+    );
+    expect(objectiveZonesGeometryKey([{ id: "z", hexes }])).not.toBe(
+      objectiveZonesGeometryKey([{ id: "z", hexes, shape: "rect" }])
+    );
+  });
+
   it("échantillonne l'hex que le rendu lit — le premier aux coordonnées finies", () => {
     const malformee: ObjectiveZoneLike = {
       id: "z",

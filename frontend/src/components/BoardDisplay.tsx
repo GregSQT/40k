@@ -9,6 +9,7 @@ import {
 } from "../utils/hexUnionBoundaryPolygon";
 import { mountLosPolarClippedByVisibleUnion } from "../utils/losPolarMaskedByVisibleUnion";
 import { addHexKeysToSet } from "../utils/movePoolRefsSync";
+import { objectiveZoneSampleHexKey } from "../utils/objectiveControlKey";
 import { smoothMaskLoopsForRender } from "../utils/polygonSmooth";
 
 /** Contourne TS2345 : certaines fusions de types sur `.on` attendent `(...args: unknown[]) => void`. */
@@ -2212,14 +2213,13 @@ export const drawBoard = (
           if (zone.objective) {
             // Terrain objectif : remplit/contour à la couleur du joueur qui contrôle la zone
             // (sinon jaune neutre). Contrôleur déduit du 1er hex de la zone (tous partagent
-            // le même contrôleur), comme le contour lissé plus bas.
-            const firstHex = (zone.hexes || [])[0];
-            const sampleHexKey =
-              firstHex === undefined
-                ? null
-                : Array.isArray(firstHex)
-                  ? `${firstHex[0]},${firstHex[1]}`
-                  : `${firstHex.col},${firstHex.row}`;
+            // le même contrôleur), comme le contour lissé plus bas. L'hex échantillon vient du
+            // module de la clé d'invalidation : c'est ce qui garantit que la clé lit la MÊME
+            // valeur que ce rendu, l'invariant de sûreté du calque statique.
+            const sampleHexKey = objectiveZoneSampleHexKey({
+              id: zone.id,
+              hexes: zone.hexes ?? [],
+            });
             const zoneController =
               sampleHexKey != null ? (objectiveControl[sampleHexKey] ?? null) : null;
             zoneColor =
@@ -2414,9 +2414,9 @@ export const drawBoard = (
             const outerR = Math.max(0, mec.r * smoothRadiusRatio);
             const innerR = Math.max(0.5, outerR * centerRadiusRatio);
 
-            // Determine zone controller from objectiveControl (any zone hex works — all share the same controller)
-            const sampleHexKey =
-              zoneCells.length > 0 ? `${zoneCells[0]![0]},${zoneCells[0]![1]}` : null;
+            // Determine zone controller from objectiveControl (any zone hex works — all share the
+            // same controller). Même hex échantillon que la clé d'invalidation du calque statique.
+            const sampleHexKey = objectiveZoneSampleHexKey({ id: zone.id, hexes: zoneCells });
             const zoneController =
               sampleHexKey != null ? (objectiveControl[sampleHexKey] ?? null) : null;
             const zoneRingColor =
