@@ -91,19 +91,49 @@ primitive acceptait un `float` nu, donc rien ne distinguait « hauteur d'une fig
 d'une escouade », et c'est ce trou qui obligeait à surveiller du texte.
 
 `low_clearance_ground_hexes(terrain_areas, model_entry, squad_entry)` exige désormais les deux
-entrées et appelle `_model_height_of` lui-même. **La faute n'est plus détectée après coup : elle
-n'est plus écrivable**, sur les quatre sites d'étage comme sur les sept autres. Le garde de source
-disparaît, ainsi que le compte d'appels par fichier qui figeait la forme de l'implémentation et
-aurait rougi sur toute factorisation légitime.
+entrées et délègue à `_model_height_of`, qui REFUSE une entrée qui n'est pas une figurine. **La
+faute n'est plus détectée après coup : elle n'est plus écrivable**, sur les quatre sites d'étage
+comme sur les sept autres. Le garde de source disparaît, ainsi que le compte d'appels par fichier
+qui figeait la forme de l'implémentation et aurait rougi sur toute factorisation légitime.
 
 ⚠️ **Deux entrées de même forme ne suffisaient pas** — relevé par la `/code-review` : la première
 version ne refusait que `(x, x)`, et `low_clearance_ground_hexes(terrain, units_cache[squad_id],
 unit)` ou l'ordre inversé rendaient la hauteur d'escouade en silence, sans plus aucun garde pour
-le voir. La primitive exige donc la MARQUE de chaque rôle : `squad_id` n'existe que sur une entrée
-de `models_cache`, `id` que sur une unité. Quatre écritures fautives, quatre refus.
+le voir. Le contrôle exige donc la MARQUE du rôle : `squad_id` n'existe que sur une entrée de
+`models_cache`. Quatre écritures fautives, quatre refus.
 
-Coût : 7 fichiers (la primitive, les 4 handlers, et deux tests qui l'appelaient en direct — dont un
-qui commettait exactement la faute interdite au moteur).
+⚠️ **Et il ne vit pas dans `terrain_utils`** — relevé par la `/simplify` suivante : la contrainte
+porte sur l'héritage figurine→escouade, donc sur `_model_height_of`, pas sur la clairance. Placée
+devant la seule porte du terrain, elle laissait les **six autres appels** de `_model_height_of`
+(déploiement ×2, charge, entrée synthétique d'engagement, LoS 3D ×2) exposés au même défaut.
+Descendue dans `_model_height_of`, elle les couvre tous, et `low_clearance_ground_hexes` redevient
+une ligne.
+
+Coût : 8 fichiers (la primitive, `_model_height_of`, les 4 handlers, et deux tests qui appelaient
+la primitive en direct — dont un qui commettait exactement la faute interdite au moteur).
+
+## Ce que la passe de simplification a changé ensuite
+
+**Le contrôle de rôle ne vit pas dans `terrain_utils`.** Une primitive de TERRAIN devait importer
+`shared_utils` pour répondre à une question qui n'est pas la sienne, et son contrôle ne protégeait
+qu'une seule des portes de `_model_height_of`. Descendu dans `_model_height_of`, il couvre les six
+autres appels — déploiement ×2, charge, entrée synthétique d'engagement, LoS 3D ×2 — et
+`low_clearance_ground_hexes` redevient une ligne.
+
+**La marque `id` sur l'escouade était de trop** : `_model_height_of` reçoit légitimement soit
+l'unité, soit sa ligne `units_cache` (LoS du tir, synth d'engagement). L'exiger aurait cassé ces
+appels. Seule la marque `squad_id` de la FIGURINE est vérifiée — elle suffit aux quatre écritures
+fautives, puisqu'aucune ligne d'escouade ne la porte.
+
+**`tests/unit/engine/_state_builders.py`** remplace les trois copies du même harnais de test
+(engagement 3D, pile-in AUTO, clairance) : `synthetic_unit` / `synthetic_state`, config RÉELLE via
+`build_game_rules` / `build_move_rules`, −141 lignes nettes. `phase` et `game_rules` y sont des
+paramètres explicites : passés par 100 % des appelants, ils étaient invisibles dans `**overrides`.
+
+**Efficacité : rien à faire, mesuré.** La revalidation de l'index de terrain coûte 5,5 µs par appel
+pour des sites appelés 10 à 100 fois par action de joueur, devant des BFS et des ILP à dizaines de
+millisecondes ; `build_game_rules` relit son JSON pour 0,11 % d'un run, et cette relecture EST son
+mécanisme d'isolation. Les deux pistes sont documentées comme écartées, chiffres à l'appui.
 
 ⚠️ Le fichier monte le plateau à **x10**. À x1, `geometry_is_hex` court-circuite le chemin
 multi-niveaux et la clairance n'est jamais consultée : la première version du test, écrite à x1,

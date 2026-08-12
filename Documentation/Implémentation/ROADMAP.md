@@ -619,11 +619,14 @@ Prêts à démarrer sans décision produit :
   d'être corrigée, au moment où la donnée par-figurine vient d'exister ; le verrou FABRIQUE donc le
   cas (et à x10 : à x1 la clairance n'est jamais consultée, la première version du test était verte
   sans exécuter la ligne corrigée).
-  Complété le même jour par l'arbitrage de la `/simplify` : `low_clearance_ground_hexes` prend
-  désormais **la figurine ET son escouade** au lieu d'un `float` nu, et appelle `_model_height_of`
-  elle-même — la faute n'est plus surveillée par un test qui relisait le texte des handlers, elle
-  n'est plus écrivable. Un builder d'état synthétique partagé (`tests/unit/engine/_state_builders`)
-  remplace au passage les trois copies du même harnais de test.
+  Complété le même jour par les arbitrages de la `/simplify` : `low_clearance_ground_hexes` prend
+  **la figurine ET son escouade** au lieu d'un `float` nu, et `_model_height_of` — seule source de
+  l'héritage figurine→escouade — REFUSE une entrée qui n'est pas une figurine (marque `squad_id`).
+  La faute n'est plus surveillée par un test qui relisait le texte des handlers : elle n'est plus
+  écrivable, et le contrôle placé sur l'héritage couvre AUSSI les six autres appels qui ne
+  l'avaient pas (déploiement ×2, charge, entrée synthétique d'engagement, LoS 3D ×2). Un builder
+  d'état synthétique partagé (`tests/unit/engine/_state_builders`) remplace au passage les trois
+  copies du même harnais de test.
   → [`Implémenté/clairance_par_figurine_2026-08-12.md`](Implémenté/clairance_par_figurine_2026-08-12.md)
 - **Réécrire la note `bot_eval_freq_normal` de `x1_long` avec le coût MESURÉ** (~10 min, décidé
   le 2026-08-11). Cette note fonde le réglage sur « 13 min l'unité », chiffre hérité du commit
