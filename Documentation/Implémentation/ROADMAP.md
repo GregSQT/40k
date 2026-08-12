@@ -114,10 +114,21 @@
   nulle part dans leur empreinte (`grep` → 0). Une capture qui ne change pas les surbrillances
   n'était donc jamais dessinée : trace réelle = **une** reconstruction (`rect b SE` déjà tenu,
   ruine pas encore), puis `calqueReutilise: true` pour le reste de la partie.
-  CORRIGÉ : la décision passe par `utils/boardRedrawDecision.canSkipBoardRedraw`, qui EXIGE les
-  deux réutilisabilités. Verrou prouvé rouge par mutation. Instruments de diagnostic retirés
-  (traces console) ; l'affichage « Objectifs tenus » reste en place le temps de la validation
-  navigateur, il est marqué comme temporaire dans le code.
+  CORRIGÉ : la décision passe par `utils/boardRedrawDecision.planBoardRedraw`, source UNIQUE des
+  trois gestes du rendu (appeler `drawBoard`, conserver le calque statique, conserver les
+  surbrillances). Instruments de diagnostic retirés (traces console) ; l'affichage
+  « Objectifs tenus » reste en place le temps de la validation navigateur, marqué temporaire.
+  DEUXIÈME PASSE, même jour (`/code-review` sur la première) : corriger le point ci-dessus avait
+  rendu ATTEIGNABLES deux chemins de nettoyage de scène jusque-là morts, tous deux du même genre
+  — un conteneur périmé laissé visible sur le stage. (a) le calque statique périmé était
+  ré-attaché puis `drawBoard` insérait le neuf en index 0, donc EN DESSOUS (zIndex égaux, tri
+  stable) : l'ancienne couleur masquait la nouvelle et les remplissages de terrain se doublaient,
+  si bien que le symptôme visé n'était PAS corrigé au rendu de la capture ; (b) les surbrillances
+  conservées restaient sur le stage pendant que `drawBoard` en ajoutait de nouvelles — previews
+  et contours d'étage en double, alpha doublée, anciens orphelins jusqu'au balayage suivant.
+  Cause commune : trois décisions prises séparément et libres de se contredire. Elles dérivent
+  désormais d'un seul plan, dont l'invariant est « on ne conserve jamais un calque que
+  `drawBoard` va recréer ». Trois verrous, chacun prouvé rouge par sa propre mutation.
 
 - ✅ **PvE se figeait — cause identifiée et corrigée** (2026-08-11). Le symptôme était rapporté
   « en phase de mouvement » ; la mesure a montré la phase de **déploiement**, sur des unités
