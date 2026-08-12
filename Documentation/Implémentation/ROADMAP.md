@@ -131,6 +131,30 @@
   désormais d'un seul plan, dont l'invariant est « on ne conserve jamais un calque que
   `drawBoard` va recréer ». Trois verrous, chacun prouvé rouge par sa propre mutation.
 
+- ✅ **Le coût de la clé de contrôle d'objectif — supprimé du chemin chaud** (ouvert ET livré le
+  2026-08-12, suite directe de la ligne ci-dessus). L'effet de dessin de `BoardPvp` se réexécute à
+  cadence de souris (ses dépendances portent `movePreview`, les plans d'escouade, `blinkVersion`),
+  et il reconstruisait à chaque fois la table `objectiveControl` (~10 500 entrées sur
+  `terrain-mc1`, ~1 Mo jeté → pression GC pendant un glisser) puis la sérialisait triée pour en
+  faire `objControlKey` — une chaîne de 86 ko, pour distinguer **cinq** valeurs, une par zone.
+  CORRIGÉ en deux pièces : (A) la clé est dérivée des zones (`utils/objectiveControlKey.ts`), en
+  lisant l'hex ÉCHANTILLON que `BoardDisplay` lit déjà (« any zone hex works ») ; (B) la table est
+  mémoïsée sur `objective_controllers` / `objective_zones` / l'override de replay, donc reconstruite
+  une fois par réponse API au lieu d'une fois par mouvement de souris — sa référence devient stable.
+  MESURÉ (vite-node, 5 zones × 2 116 sous-hex, moyenne sur 200 à 20 000 itérations) :
+  **6,40 ms/rendu → 0,001 ms/rendu** (1,96 ms de table + 4,31 ms de clé, supprimés du chemin chaud).
+  CONTRAINTE TENUE : la clé gouverne `bcKey` → `canReuseStatic` → l'invalidation du calque statique,
+  et une clé qui rate un changement de contrôle réintroduirait le défaut livré plus haut (objectif
+  capturé jamais bleu). L'équivalence avec la clé exhaustive est verrouillée par
+  `objectiveControlKey.test.ts` (6 tests, comparaison paire à paire sur 7 instantanés successifs),
+  dont trois verrous prouvés ROUGES par mutation. Deux pièges nommés et couverts : l'override de
+  replay REMPLACE la table (la clé lit la table effective, jamais le `gameState`), et la géométrie
+  des zones — que l'ancienne clé portait par accident — passe dans une empreinte djb2 mémoïsée,
+  sans quoi deux épisodes de replay aux zones différentes se partageraient le calque statique.
+  ÉCARTÉ, à arbitrer séparément : scinder `bcKey` en clé de géométrie et clé de contrôle pour ne
+  plus reconstruire fond et murs à chaque capture d'objectif.
+  RESTE : la validation navigateur (une capture d'objectif doit toujours recolorer la zone).
+
 - ✅ **PvE se figeait — cause identifiée et corrigée** (2026-08-11). Le symptôme était rapporté
   « en phase de mouvement » ; la mesure a montré la phase de **déploiement**, sur des unités
   simplement **pas encore posées** (`deployed_on_turn=None`, `in_strategic_reserves=False`) — les

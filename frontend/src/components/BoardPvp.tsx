@@ -70,6 +70,12 @@ import { toPlanArrayWithOrientation } from "../utils/modelPlan";
 import { syncMoveDestinationPoolRefs } from "../utils/movePoolRefsSync";
 import { normalizeMaskLoopsFromApi } from "../utils/movePreviewFootprintMaskLoops";
 import { type OathUnitsCache, pickOathTargetAtHex } from "../utils/oathTargetSelection";
+import {
+  buildObjectiveControlTable,
+  type ObjectiveControlTable,
+  objectiveControlKey,
+  objectiveZonesGeometryKey,
+} from "../utils/objectiveControlKey";
 import { destroyLayerChild } from "../utils/pixiTeardown";
 import { pointInAnyMaskLoop, pointInMaskLoopsEvenOdd } from "../utils/pointInPolygon";
 import {
@@ -1544,6 +1550,52 @@ export default function Board({
     if (!ds || ds === 1) return _rawBoardConfig;
     return { ..._rawBoardConfig, hex_radius: _rawBoardConfig.hex_radius * ds };
   })();
+  // Objectifs = terrains "objective": true : la géométrie (polygone + vertices) vient de
+  // boardConfig.objective_zones (endpoint board) et doit être PRÉFÉRÉE pour le rendu — sinon la
+  // forme est perdue et la zone retombe sur un cercle englobant. objectivesOverride (runtime
+  // gameState.objectives = {name, hexes} sans shape) ne sert qu'en repli (ex. replay sans board).
+  const effectiveObjectiveZones = useMemo(
+    () =>
+      boardConfig?.objective_zones && boardConfig.objective_zones.length > 0
+        ? boardConfig.objective_zones
+        : objectivesOverride && objectivesOverride.length > 0
+          ? objectivesOverride.map((obj) => ({ id: obj.name, hexes: obj.hexes }))
+          : boardConfig?.objective_zones,
+    [boardConfig?.objective_zones, objectivesOverride]
+  );
+  // Contrôle d'objectif (terrain colouring) : suit l'état backend faisant autorité
+  // game_state.objective_controllers (règle 14.02), indexé par id d'objectif et rafraîchi par le
+  // moteur à chaque frontière phase/tour configurée (game_config.objective_control_check). On le
+  // mappe sur les hexes d'objectif de la config STATIQUE (objective_zones), toujours présente —
+  // contrairement à game_state.objectives, que l'API omet sur les réponses post-action (c'est
+  // exactement cette omission qui vidait les couleurs du terrain).
+  const backendObjectiveControllers = useMemo<Record<string, number | null>>(
+    () =>
+      (gameState as unknown as { objective_controllers?: Record<string, number | null> } | null)
+        ?.objective_controllers ?? {},
+    [gameState]
+  );
+  // Mémoïsée : ~10 500 entrées sur terrain-mc1, et l'effet de dessin se réexécute à cadence de
+  // souris. La reconstruire à chaque rendu coûtait 13,1 ms et ~1 Mo jetés (pression GC pendant un
+  // glisser). En replay, l'instantané pré-calculé du step.log REMPLACE la table.
+  const objectiveControl = useMemo<ObjectiveControlTable>(
+    () =>
+      objectiveControlOverride !== undefined
+        ? objectiveControlOverride
+        : buildObjectiveControlTable(
+            boardConfig?.objective_zones ?? [],
+            backendObjectiveControllers
+          ),
+    [objectiveControlOverride, boardConfig?.objective_zones, backendObjectiveControllers]
+  );
+  // Empreinte de géométrie des zones : O(sous-hex), donc mémoïsée sur la référence du tableau —
+  // elle ne change qu'au chargement d'un plateau ou d'un épisode de replay. Elle est indispensable
+  // à bcKey : sans elle, deux plateaux aux zones différentes mais de mêmes identifiants
+  // réutiliseraient le calque statique l'un de l'autre.
+  const objectiveZonesGeomKey = useMemo(
+    () => objectiveZonesGeometryKey(effectiveObjectiveZones ?? []),
+    [effectiveObjectiveZones]
+  );
   // LoS cone terrain data (rule 13.10), extracted once from the static board terrain_zones (subhex,
   // same grid as wall_hexes). obscuring → sight-line blockers ; all zones → cover classification.
   // Absent terrain_zones → [] (cone falls back to walls-only, no silent masking of a real error).
@@ -9289,17 +9341,6 @@ export default function Board({
         bottom_right?: [number, number];
       }>;
     }
-    // Objectifs = terrains "objective": true : la géométrie (polygone + vertices) vient de
-    // boardConfig.objective_zones (endpoint board) et doit être PRÉFÉRÉE pour le rendu — sinon la
-    // forme est perdue et la zone retombe sur un cercle englobant. objectivesOverride (runtime
-    // gameState.objectives = {name, hexes} sans shape) ne sert qu'en repli (ex. replay sans board).
-    const effectiveObjectiveZones =
-      boardConfig.objective_zones && boardConfig.objective_zones.length > 0
-        ? boardConfig.objective_zones
-        : objectivesOverride && objectivesOverride.length > 0
-          ? objectivesOverride.map((obj) => ({ id: obj.name, hexes: obj.hexes }))
-          : boardConfig.objective_zones;
-
     const boardConfigWithOverrides: BoardConfigForDrawBoard = {
       ...boardConfig,
       colors: {
@@ -9443,41 +9484,6 @@ export default function Board({
     if (objectiveControlStartTurn === undefined || objectiveControlStartTurn === null) {
       throw new Error("objective control start_turn is missing");
     }
-    // Objective control (terrain colouring) follows the authoritative backend state
-    // game_state.objective_controllers (Rule 14.02), keyed by objective id and refreshed by
-    // the engine at each configured phase/turn boundary (game_config.objective_control_check).
-    // We map it onto the objective hexes from the STATIC board config (objective_zones), which
-    // is always present — unlike game_state.objectives, which the API omits on post-action
-    // responses (that omission is exactly what used to blank the terrain colours).
-    let objectiveControl: { [hexKey: string]: number | null } = {};
-    const backendObjectiveControllers =
-      (
-        gameState as unknown as {
-          objective_controllers?: Record<string, number | null>;
-        } | null
-      )?.objective_controllers ?? {};
-    const objectiveZonesForControl =
-      (
-        boardConfig as unknown as {
-          objective_zones?: Array<{
-            id: string | number;
-            hexes: Array<[number, number] | { col: number; row: number }>;
-          }>;
-        } | null
-      )?.objective_zones ?? [];
-    for (const zone of objectiveZonesForControl) {
-      const controller = backendObjectiveControllers[String(zone.id)] ?? null;
-      for (const hex of zone.hexes) {
-        const key = Array.isArray(hex) ? `${hex[0]},${hex[1]}` : `${hex.col},${hex.row}`;
-        objectiveControl[key] = controller;
-      }
-    }
-
-    // Replay mode: override with pre-computed snapshot (correct sticky state at exact action index)
-    if (objectiveControlOverride !== undefined) {
-      objectiveControl = objectiveControlOverride;
-    }
-
     // Compute units fingerprint to determine if unit re-rendering is needed
     const unitsFingerprint = (() => {
       const parts: string[] = [];
@@ -9544,10 +9550,16 @@ export default function Board({
     const unitsChanged = unitsFingerprint !== unitsFingerprintRef.current;
 
     // Reuse cached static board layers when the board config and objective control haven't changed.
-    const objControlKey = Object.entries(objectiveControl)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([k, v]) => `${k}:${v ?? "n"}`)
-      .join("|");
+    // La clé de contrôle est en O(zones) : toutes les entrées d'une zone portent la même valeur et
+    // le rendu n'en lit qu'un hex échantillon, donc la sérialiser entière (10 500 entrées triées,
+    // 20,8 ms/rendu) distinguait CINQ valeurs. Équivalence verrouillée par objectiveControlKey.test.
+    // La géométrie des zones, elle, sort de la clé mémoïsée `objectiveZonesGeomKey` (cf. `oz` plus
+    // bas) — l'ancienne clé la portait par accident, en sérialisant toutes les coordonnées.
+    const objControlKey = objectiveControlKey(
+      effectiveObjectiveZones ?? [],
+      objectiveControl,
+      objectiveControlOverride !== undefined ? null : backendObjectiveControllers
+    );
     const zonesKey = (boardConfigWithOverrides.objective_zones ?? [])
       .map((z) => `${z.id}:${(z as { shape?: string }).shape ?? "hexes"}`)
       .join(",");
@@ -9566,7 +9578,7 @@ export default function Board({
       }
       return `${hexes.length}:${(h | 0) >>> 0}`;
     })();
-    const bcKey = `${boardConfigWithOverrides.cols}x${boardConfigWithOverrides.rows}|oc:${objControlKey}|oz:${zonesKey}|w:${wallsFp}|dep:${phase === "deployment" ? 1 : 0}`;
+    const bcKey = `${boardConfigWithOverrides.cols}x${boardConfigWithOverrides.rows}|oc:${objControlKey}|oz:${zonesKey}/${objectiveZonesGeomKey}|w:${wallsFp}|dep:${phase === "deployment" ? 1 : 0}`;
     const canReuseStatic =
       staticBoardConfigKeyRef.current === bcKey && staticBoardRef.current !== null;
 
@@ -11592,6 +11604,10 @@ export default function Board({
     blinkingHiddenDetectionInfoByUnitId,
     blinkingLosOverviewUnitId,
     objectiveControlOverride,
+    objectiveControl,
+    backendObjectiveControllers,
+    effectiveObjectiveZones,
+    objectiveZonesGeomKey,
     squadMovePlan,
     fleePreviewUnitId,
     squadMoveModelPoolRef,
