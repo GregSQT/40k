@@ -967,8 +967,11 @@ export const BoardReplay: React.FC = () => {
                   // que le parseur atteint : la relance [TWIN-LINKED] et la sauvegarde sautée de
                   // [DEVASTATING WOUNDS]. [SUSTAINED HITS] et [TORRENT] produisent `Hit None(T+)`,
                   // que `hitMatch` ne reconnaît pas — la ligne n'a alors AUCUN détail déplié, donc
-                  // aucun champ à remplir. Les critiques et [LETHAL HITS] ne sont écrits nulle
-                  // part dans step.log. Voir le rapport de parité de Documentation/Weapon_rules.md.
+                  // aucun champ à remplir. ⚠️ [LETHAL HITS] EST écrit dans step.log depuis le
+                  // 2026-08-12 (`Wound None(T+) [LETHAL HITS]`), mais il bute sur le MÊME
+                  // mécanisme côté blessure : jambe sans dé, donc pas de détail à remplir. Seules
+                  // les CRITIQUES ne sont écrites nulle part. Voir le rapport de parité de
+                  // Documentation/Weapon_rules.md.
                   woundRerollRule: action.wound_reroll_rule,
                   devastating: action.devastating_wounds_applied,
                   // Dé d'origine d'un jet relancé : le détail affiche « 1->3 », comme en PvP.

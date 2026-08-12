@@ -27,10 +27,17 @@ __all__ = ['StepLogger', 'LOG_GRAMMAR_VERSION']
 #:
 #:   1 — grammaire d avant le 2026-08-12 : aucune ligne ne nomme la figurine cible allouee.
 #:   2 — `[ALLOC_MODEL: <mid>]` sur toute attaque parvenue a l allocation (tir ET melee).
+#:   3 — TOUTE regle d arme de `config/weapon_rules.json` qui a joue est NOMMEE sur la ligne.
+#:       Sept y sont entrees d un bloc le 2026-08-12 ([TORRENT], [LETHAL HITS], [IGNORES COVER],
+#:       [EXTRA ATTACKS], [ANTI-X:Y+], [PSYCHIC] et, en melee comme au tir, leurs jumeaux) ;
+#:       INDIRECT_FIRE reste hors du journal parce qu elle n est pas implementee dans le moteur
+#:       — un token pour elle annoncerait un effet qui n a pas lieu. C est ce qui rend un
+#:       compteur d usage a zero LISIBLE : sous cette version, il dit que la regle n a pas joue,
+#:       plus jamais que le journal ne sait pas le dire.
 #:
 #: N incrementer que pour une garantie NOUVELLE, jamais pour un changement cosmetique : un
 #: lecteur qui refuse une version qu il ne connait pas doit avoir une raison de le faire.
-LOG_GRAMMAR_VERSION = 2
+LOG_GRAMMAR_VERSION = 3
 
 
 #: Regles qui AJOUTENT des des au pool d attaques et dont l effet depend de la CIBLE :
@@ -67,6 +74,80 @@ def _additive_rule_tokens(details) -> list:
             )
         tokens.append(f"[{rule_label}:{rule_value}]")
     return tokens
+
+
+#: Regles d arme SANS parametre dont le journal ne portait aucune trace, rangees par SEGMENT de
+#: la ligne : `(cle de `details`, libelle de token)`.
+#:
+#: Le segment n est pas cosmetique — c est lui qui donne son sens au token pour les deux seuls
+#: lecteurs automatiques du journal. L analyzer et `replayParser.ts` rattachent un token au jet
+#: qu il SUIT ; ecrire `[LETHAL HITS]` du cote de la touche le ferait lire comme une propriete
+#: du jet de touche, alors qu il decrit la blessure qui n a pas ete jetee.
+_HIT_SEGMENT_RULE_TOKENS: tuple = (
+    # 24.37 « does not make a Hit roll » : la ligne rend `Hit None(None+)`, forme indiscernable
+    # d une ligne malformee tant que ce token n est pas la.
+    ("auto_hit", "TORRENT"),
+    # 24.18 : le couvert n est meme pas calcule (court-circuit moteur), donc le token dit ce qui
+    # est vrai et verifiable — cette attaque ignore le couvert — et non « la cible l aurait eu ».
+    ("ignores_cover_applied", "IGNORES COVER"),
+    # 24.29 : pose UNIQUEMENT quand un modificateur a ete neutralise (cf. `psychic_rule_applies`).
+    ("psychic_applied", "PSYCHIC"),
+)
+#: JUMEAU du precedent, cote BLESSURE.
+_WOUND_SEGMENT_RULE_TOKENS: tuple = (
+    # 24.23 : blessure automatique -> `Wound None(4+)`. Sans le token, rien ne distingue cette
+    # absence de jet d une panne du producteur.
+    ("lethal_hit", "LETHAL HITS"),
+)
+#: JUMEAU des deux precedents, sur les TAGS de ligne (avant la cible, comme [RAPID FIRE:X]).
+_LINE_TAG_RULE_TOKENS: tuple = (
+    # 24.11 : l arme est resolue EN PLUS des autres — son effet est l existence meme du groupe,
+    # donc le token est pose sur la declaration, comme [IGNORES COVER]. C est ce qui permet a un
+    # lecteur de ne pas compter ce groupe dans le plafond d attaques de la figurine.
+    ("extra_attacks_applied", "EXTRA ATTACKS"),
+)
+
+
+def _flag_rule_tokens(details, table) -> list:
+    """Tokens `[REGLE]` d une des trois tables ci-dessus, dans leur ordre de declaration.
+
+    Un drapeau n est jamais pose a `False` par le moteur : la cle EXISTE ou la regle n a pas
+    joue. Une cle presente avec autre chose que `True` est donc une chaine rompue, pas un
+    « non » — l accepter en silence rendrait le token muet sans que rien ne le signale, ce que
+    ce fichier a deja paye trois fois.
+    """
+    tokens = []
+    for detail_key, rule_label in table:
+        flag = details.get(detail_key)
+        if flag is None:
+            continue
+        if flag is not True:
+            raise ValueError(
+                f"{detail_key} must be True when present, got: {flag!r}"
+            )
+        tokens.append(f"[{rule_label}]")
+    return tokens
+
+
+def _anti_rule_token(details) -> str:
+    """`[ANTI-INFANTRY:4+]` 24.03, suffixe du segment `Wound` — ou chaine vide.
+
+    Le seuil ecrit est celui que l ARME DECLARE, jamais le `crit_wound_on` que le moteur en a
+    tire : c est la seule forme sous laquelle l analyzer peut recouper la ligne avec
+    l armurerie. Ecrire le chiffre du moteur reviendrait a lui faire verifier le moteur avec sa
+    propre reponse — un vert vacant, exactement ce que la grammaire `[REGLE:X]` existe pour
+    empecher (cf. `_additive_rule_tokens`).
+    """
+    anti_keyword = details.get("anti_keyword")
+    if anti_keyword is None:
+        return ""
+    anti_threshold = require_key(details, "anti_threshold")
+    if not isinstance(anti_threshold, int) or anti_threshold < 2:
+        raise ValueError(
+            f"anti_threshold must be an int >= 2 when anti_keyword is present, "
+            f"got: {anti_threshold!r}"
+        )
+    return f" [ANTI-{anti_keyword}:{anti_threshold}+]"
 
 
 def _save_segments(details, *, damage, save_result, ap_ability_token: str = "") -> list:
@@ -948,6 +1029,10 @@ class StepLogger:
                     )
                 shot_tags.append(f"[MELTA:{melta_rule_value}]")
             shot_tags.extend(_additive_rule_tokens(details))
+            # [EXTRA ATTACKS] 24.11 : MEME site et MEME table qu en melee, ou la regle vit
+            # surtout. Le token se range avec les tags de ligne (et non sur un jet) parce qu il
+            # decrit le GROUPE d attaques, comme [RAPID FIRE:X] et [BLAST:X].
+            shot_tags.extend(_flag_rule_tokens(details, _LINE_TAG_RULE_TOKENS))
             # [PRECISION] 24.28 : drapeau sans parametre — meme regime que les precedents, le
             # token n est pose que si le moteur a applique la regle.
             if details.get("precision_applied") is True:
@@ -965,6 +1050,13 @@ class StepLogger:
             hit_rule_suffix = (
                 f" [{hit_rule_modifier}]" if hit_rule_modifier in ("HEAVY", "COVER") else ""
             )
+            # [TORRENT] / [IGNORES COVER] / [PSYCHIC] : MEME table qu en melee, un seul site
+            # pour les deux faces du miroir. Posees AVANT `[REROLLED:n]` et les capacites, comme
+            # [HEAVY] : la queue du segment reste ordonnee « regles d arme, puis ce qui est
+            # arrive a CE de ».
+            hit_rule_suffix += "".join(
+                f" {tok}" for tok in _flag_rule_tokens(details, _HIT_SEGMENT_RULE_TOKENS)
+            )
             hit_rule_suffix += _rerolled_token(details, "hit_roll_initial")
             # [SUSTAINED HITS] 24.36 : touche additionnelle d une touche critique. Elle n a pas
             # de jet (`Hit None(...)`) : le marqueur est la SEULE trace exploitable par
@@ -980,7 +1072,13 @@ class StepLogger:
                 hit_target_display = f"{hit_target}+"
             detail_parts = [f"Hit {hit_roll}({hit_target_display}){hit_rule_suffix}"]
             if hit_result == "HIT":
-                wound_suffix = _ability_token(wound_ability_display_name)
+                # [LETHAL HITS] 24.23 puis [ANTI-X Y+] 24.03 : MEME table et MEME helper qu en
+                # melee. En tete du suffixe, avant les capacites d unite, comme du cote touche.
+                wound_suffix = "".join(
+                    f" {tok}" for tok in _flag_rule_tokens(details, _WOUND_SEGMENT_RULE_TOKENS)
+                )
+                wound_suffix += _anti_rule_token(details)
+                wound_suffix += _ability_token(wound_ability_display_name)
                 # Regle d ARME ayant ouvert la relance ([TWIN-LINKED] 24.38) : `wound_ability`
                 # ne nomme que les capacites d UNITE, si bien qu une relance d arme laissait
                 # `Wound 5(4+) [REROLLED:1]` sans aucune cause — l asymetrie exacte que le
@@ -1209,6 +1307,13 @@ class StepLogger:
             # d'attaques se compte, et sans lui les des additionnels de la regle etaient comptes
             # comme des attaques en trop (24 faux positifs mesures le 2026-08-11).
             _waaagh_seg += "".join(f" {tok}" for tok in _additive_rule_tokens(details))
+            # [EXTRA ATTACKS] 24.11 — JUMEAU du tir, et c est ici que la regle vit reellement :
+            # elle designe une arme de melee resolue EN PLUS des autres. Sans le token, ses
+            # attaques se comptent dans le plafond de la figurine et ressortent en « Attacks
+            # over CC_NB » — le faux positif deja paye par [CLEAVE] et [WAAAGH!].
+            _waaagh_seg += "".join(
+                f" {tok}" for tok in _flag_rule_tokens(details, _LINE_TAG_RULE_TOKENS)
+            )
             if weapon_name:
                 base_msg = f"{unit_label} FOUGHT{_waaagh_seg} {target_label} with [{weapon_name}]"
             else:
@@ -1220,6 +1325,15 @@ class StepLogger:
             # `sustainedHit` arrive ici. Sans le token, `fight_over_cc_nb` les compte comme des
             # attaques — le faux positif exactement symétrique de celui du tir.
             _sustained_seg = " [SUSTAINED HITS]" if details.get("sustained_hit") else ""
+            # [TORRENT] / [IGNORES COVER] / [PSYCHIC] — JUMEAU du tir, MEME table. Les deux
+            # dernieres n ont pas d effet en melee (13.08 est ranged-only, donc `cover` y est
+            # toujours faux et [PSYCHIC] ne se pose jamais ; [IGNORES COVER] s y pose sur la
+            # seule declaration de l arme, comme au tir). Le site EXISTE quand meme : c est le
+            # producteur qui decide qu une regle ne dit rien ici, pas un lecteur qui le devine
+            # d une branche manquante — et une arme de melee [TORRENT] resterait sinon muette.
+            _sustained_seg += "".join(
+                f" {tok}" for tok in _flag_rule_tokens(details, _HIT_SEGMENT_RULE_TOKENS)
+            )
             _sustained_seg += _ability_token(hit_ability_display_name)
             # JUMEAU du tir : le de d avant relance (cf. `_rerolled_token`).
             _sustained_seg += _rerolled_token(details, "hit_roll_initial")
@@ -1227,7 +1341,14 @@ class StepLogger:
             
             # Only show wound if hit succeeded
             if hit_result == "HIT":
-                wound_suffix = _ability_token(wound_ability_display_name)
+                # [LETHAL HITS] 24.23 et [ANTI-X Y+] 24.03 — JUMEAUX du tir, MEME table et MEME
+                # helper. [ANTI] est la regle de melee par excellence (les armes anti-vehicule
+                # frappent au contact) : c est ici qu elle manquait le plus.
+                wound_suffix = "".join(
+                    f" {tok}" for tok in _flag_rule_tokens(details, _WOUND_SEGMENT_RULE_TOKENS)
+                )
+                wound_suffix += _anti_rule_token(details)
+                wound_suffix += _ability_token(wound_ability_display_name)
                 # JUMEAU du tir : regle d ARME relanceuse ([TWIN-LINKED]), puis modificateur +1
                 # d Oath, tous deux distincts de la relance de capacite (cf. la-bas).
                 wound_suffix += _ability_token(details.get("wound_reroll_rule_name"))

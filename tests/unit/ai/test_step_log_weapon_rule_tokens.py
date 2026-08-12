@@ -71,7 +71,7 @@ def _uc(col, row, *, player, models=None):
 
 def _game_state(weapon_rules, *, moved_inches=0.0, target=TARGET, n_attacks=1,
                 unit_rules=(), cover=False, unit_type=UNIT_TYPE, weapon_name=WEAPON_NAME,
-                target_models=1, melee=False):
+                target_models=1, melee=False, target_keywords=()):
     """Attaquant '1' vs cible '101', en `gym_training_mode` (allocation auto).
 
     `target_models` : effectif de la CIBLE. Il ne servait à rien tant qu'aucune règle ne
@@ -126,8 +126,12 @@ def _game_state(weapon_rules, *, moved_inches=0.0, target=TARGET, n_attacks=1,
         # (`_is_ai_controlled_fight_unit`), qui lève sinon avant tout log.
         "unit_by_id": {"1": {"id": "1", "UNIT_RULES": list(unit_rules), "deployed_on_turn": 0,
                              "player": 0},
+                       # `unit_keywords` de la CIBLE : c'est la donnée même de [ANTI-X Y+] 24.03
+                       # (« against a target with the X keyword »). Sans elle, l'instance de la
+                       # règle n'est retenue par AUCUNE cible et le profil sort sans `ANTI` —
+                       # le test passerait au vert en n'ayant rien exercé.
                        "101": {"id": "101", "UNIT_RULES": [], "deployed_on_turn": 0,
-                               "player": 1}},
+                               "player": 1, "unit_keywords": list(target_keywords)}},
         "objectives": [], "units_moved": set(), "units_advanced": set(),
         "inches_to_subhex": 5,
         "moved_distance_by_model": {"1#0": float(moved_inches) * 5},
@@ -137,7 +141,8 @@ def _game_state(weapon_rules, *, moved_inches=0.0, target=TARGET, n_attacks=1,
 
 def _engine_shoot_log(monkeypatch, weapon_rules, rolls, *, moved_inches=0.0, target=TARGET,
                       n_attacks=1, unit_rules=(), cover=False, unit_type=UNIT_TYPE,
-                      weapon_name=WEAPON_NAME, target_models=1, melee=False):
+                      weapon_name=WEAPON_NAME, target_models=1, melee=False,
+                      target_keywords=()):
     """Fait jouer UNE attaque par le vrai moteur et rend (game_state, son action_log).
 
     `melee=True` passe par `build_manual_fight_allocation` — le MÊME émetteur de log
@@ -160,7 +165,8 @@ def _engine_shoot_log(monkeypatch, weapon_rules, rolls, *, moved_inches=0.0, tar
     gs = _game_state(weapon_rules, moved_inches=moved_inches, target=target,
                      n_attacks=n_attacks, unit_rules=unit_rules, cover=cover,
                      unit_type=unit_type, weapon_name=weapon_name,
-                     target_models=target_models, melee=melee)
+                     target_models=target_models, melee=melee,
+                     target_keywords=target_keywords)
     if melee:
         build_manual_fight_allocation(gs, "1")
     else:
@@ -1025,4 +1031,213 @@ def test_l_entete_declare_la_grammaire_du_journal(tmp_path):
     logger._flush_buffer()
     assert parse_log_grammar_version(str(out)) == LOG_GRAMMAR_VERSION, (
         "le producteur et le lecteur ne s'accordent pas sur la version de grammaire"
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LOT A (2026-08-12) — les six règles d'armes que `step.log` ne portait PAS
+#
+# Elles étaient dans le cas décrit par `Documentation/Implémentation/analyzer_couverture.md`
+# §1.3 : le moteur SAIT poser leur token (`shared_utils.weapon_rule_log_tokens`), mais
+# seulement sur la ligne de synthèse du Game Log PvP, que rien ne relit automatiquement. Aucun
+# contrôle analyzer ne pouvait donc exister pour elles, et §1.8 les rendait « NOT USED » —
+# c'est-à-dire FAUSSEMENT MORTES : le rapport affirmait que le moteur ne les appliquait pas.
+#
+# Chaque règle est vérifiée SUR LES DEUX FACES du miroir (tir ET mêlée) par le même
+# paramétrage, parce que l'émetteur (`_emit_squad_shoot_log`) et le formateur (`step_logger`)
+# sont partagés : un token écrit d'un seul côté est le motif d'échec n°1 de ce dépôt.
+# ─────────────────────────────────────────────────────────────────────────────
+
+#: `(règle d'arme, token attendu, dés scriptés, kwargs, joue_en_melee)` — la table de vérité
+#: du lot. Les dés sont choisis pour ATTEINDRE le segment qui porte le token : `[LETHAL HITS]`
+#: exige une touche CRITIQUE (6), les autres une touche puis une blessure réussies.
+#:
+#: `joue_en_melee=False` pour [PSYCHIC] SEULEMENT, et ce n'est pas une exception de commodité :
+#: 24.29 neutralise un modificateur, et le seul modificateur d'attaque de ce moteur est le
+#: couvert 13.08, qui est ranged-only. En mêlée la règle n'a jamais rien à neutraliser, donc le
+#: token n'y est jamais posé — la BRANCHE existe (même table partagée), c'est sa CONDITION qui
+#: ne peut pas être vraie. Le test de contre-épreuve couvre les deux faces dans tous les cas.
+LOT_A_TOKENS = [
+    ("TORRENT", "[TORRENT]", [4, 2], {}, True),
+    ("LETHAL_HITS", "[LETHAL HITS]", [6, 2], {}, True),
+    ("IGNORES_COVER", "[IGNORES COVER]", [3, 4, 2], {}, True),
+    ("EXTRA_ATTACKS", "[EXTRA ATTACKS]", [3, 4, 2], {}, True),
+    ("PSYCHIC", "[PSYCHIC]", [3, 4, 2], {"cover": True}, False),
+    ("ANTI_INFANTRY:4", "[ANTI-INFANTRY:4+]", [3, 4, 2],
+     {"target_keywords": ("INFANTRY",)}, True),
+]
+
+_LOT_A_IDS = [rule.split(":")[0] for rule, _, _, _, _ in LOT_A_TOKENS]
+
+#: Paire (unité, arme) RÉELLE de MÊLÉE. Le décor de tir par défaut porte une arme de TIR : la
+#: rejouer en mêlée fait remonter `missing CC_NB` à l'analyzer, donc des `parse_errors` qui
+#: masqueraient ceux que le contrôle de masse cherche vraiment.
+MELEE_KWARGS = {"unit_type": CLEAVE_UNIT, "weapon_name": CLEAVE_WEAPON}
+
+
+@pytest.mark.parametrize("melee", [False, True], ids=["tir", "melee"])
+@pytest.mark.parametrize("rule,token,rolls,kwargs,melee_ok", LOT_A_TOKENS, ids=_LOT_A_IDS)
+def test_le_token_du_lot_a_atteint_step_log(monkeypatch, tmp_path, melee, rule, token, rolls,
+                                            kwargs, melee_ok):
+    """Maillons 1-3, les DEUX faces du miroir : le token que l'analyzer et le replay
+    cherchent doit être présent sur la ligne réellement écrite par le StepLogger."""
+    if melee and not melee_ok:
+        pytest.skip("24.29 n'a rien à neutraliser en mêlée (13.08 est ranged-only)")
+    extra = dict(MELEE_KWARGS) if melee else {}
+    gs, raw_log = _engine_shoot_log(monkeypatch, [rule], rolls, melee=melee, **kwargs, **extra)
+    line = _step_log_line(tmp_path, gs, raw_log)
+
+    assert token in line, f"{rule} n'a pas franchi le pont vers step.log : {line}"
+
+
+@pytest.mark.parametrize("melee", [False, True], ids=["tir", "melee"])
+@pytest.mark.parametrize("rule,token,rolls,kwargs,melee_ok", LOT_A_TOKENS, ids=_LOT_A_IDS)
+def test_sans_la_regle_le_token_du_lot_a_est_absent(monkeypatch, tmp_path, melee, rule, token,
+                                                    rolls, kwargs, melee_ok):
+    """Contre-épreuve OBLIGATOIRE : une arme SANS la règle ne doit rien dire.
+
+    Sans elle, un token posé inconditionnellement passerait le test ci-dessus tout en étant un
+    faux positif pour tout lecteur — le mode d'échec historique de ce chantier."""
+    extra = dict(MELEE_KWARGS) if melee else {}
+    gs, raw_log = _engine_shoot_log(monkeypatch, [], rolls, melee=melee, **kwargs, **extra)
+    line = _step_log_line(tmp_path, gs, raw_log)
+
+    assert token not in line, f"token posé sans que l'arme déclare {rule} : {line}"
+
+
+def test_torrent_se_distingue_d_une_ligne_malformee(monkeypatch, tmp_path):
+    """24.37 « does not make a Hit roll » : le moteur écrit `attackRoll=None` ET
+    `hitTarget=None`, donc la ligne rend `Hit None(None+)` — exactement la forme d'une ligne
+    cassée. Le token est la SEULE chose qui distingue « la règle a fait toucher d'office » de
+    « le producteur est en panne » ; c'est le trou que [SUSTAINED HITS] a déjà coûté."""
+    gs, raw_log = _engine_shoot_log(monkeypatch, ["TORRENT"], [4, 2])
+    line = _step_log_line(tmp_path, gs, raw_log)
+
+    assert "Hit None(None+) [TORRENT]" in line, line
+
+
+def test_lethal_hits_ne_parle_que_sur_la_touche_critique(monkeypatch, tmp_path):
+    """24.23 ne joue QUE sur une touche critique : le marqueur est par ATTAQUE, pas par groupe.
+
+    Deux attaques, une seule critique. Un drapeau de groupe aurait annoncé la règle sur les
+    deux — donc sur une attaque où elle n'a rien fait, et où le jet de blessure a bel et bien
+    eu lieu (`Wound 4(4+)`, pas `Wound None(4+)`)."""
+    gs, raw_log = _engine_shoot_log(
+        monkeypatch, ["LETHAL_HITS"], [6, 2, 3, 4, 2], n_attacks=2,
+    )
+    lines = _step_log_lines(tmp_path, gs, raw_log)
+
+    assert len(lines) == 2, lines
+    porteuses = [l for l in lines if "[LETHAL HITS]" in l]
+    assert len(porteuses) == 1, (
+        "exactement une des deux attaques est critique ; le marqueur doit suivre l'ATTAQUE "
+        f"et non le groupe : {lines}"
+    )
+    assert "Wound None(" in porteuses[0], porteuses[0]
+
+
+def test_psychic_ne_dit_rien_sans_modificateur_a_neutraliser(monkeypatch, tmp_path):
+    """24.29 : la règle ignore les modificateurs subis. Le seul modificateur d'attaque de ce
+    moteur est la dégradation de seuil du couvert 13.08 ; sans couvert, la règle n'a rien
+    neutralisé et l'annoncer ferait croire à un effet. MÊME prédicat que le Game Log PvP
+    (`psychic_rule_applies`), et c'est justement pour qu'il n'y en ait qu'un."""
+    gs, raw_log = _engine_shoot_log(monkeypatch, ["PSYCHIC"], [3, 4, 2], cover=False)
+    line = _step_log_line(tmp_path, gs, raw_log)
+
+    assert "[PSYCHIC]" not in line, line
+
+
+def test_anti_ne_dit_rien_quand_la_cible_n_a_pas_le_keyword(monkeypatch, tmp_path):
+    """24.03 : « against a target with the X keyword ». Une arme [ANTI-VEHICLE 4+] tirant sur
+    de l'INFANTERIE n'a AUCUNE instance applicable — 24.02 n'en retient aucune — donc le seuil
+    critique n'a pas bougé et la ligne ne doit rien dire."""
+    gs, raw_log = _engine_shoot_log(
+        monkeypatch, ["ANTI_VEHICLE:4"], [3, 4, 2], target_keywords=("INFANTRY",),
+    )
+    line = _step_log_line(tmp_path, gs, raw_log)
+
+    assert "[ANTI-" not in line, line
+
+
+def test_anti_ecrit_le_seuil_declare_par_l_arme(monkeypatch, tmp_path):
+    """Le `Y+` du token est celui de la DATASHEET, jamais le `crit_wound_on` que le moteur en
+    tire.
+
+    C'est la différence entre un contrôle et un vert vacant : avec le chiffre du moteur,
+    l'analyzer vérifierait le moteur avec sa propre réponse, et le seul recoupement qui vaille
+    — le token contre l'armurerie — n'existerait plus.
+
+    Les deux valeurs coïncident pour tout Y+ jouable (2..6), donc un test à 4+ ne DISCRIMINE
+    rien : il passerait au vert avec l'une comme avec l'autre source. On déclare donc un `7+`,
+    seule valeur où le clamp de 05.02 (« rien n'est plus critique qu'un 6 ») les sépare. C'est
+    une armurerie fautive — et c'est le point : le journal doit l'exposer, pas la lisser.
+    """
+    from engine.phase_handlers.attack_sequence import build_weapon_attack_profile
+
+    weapon = {"WEAPON_RULES": ["ANTI_INFANTRY:7"], "display_name": WEAPON_NAME}
+    profile = build_weapon_attack_profile(weapon, {"unit_keywords": ["INFANTRY"]})
+    assert (profile.anti_threshold, profile.crit_wound_on) == (7, 6), (
+        "prémisse : les deux seuils doivent DIVERGER, sinon le test ne discrimine rien"
+    )
+
+    gs, raw_log = _engine_shoot_log(
+        monkeypatch, ["ANTI_INFANTRY:7"], [3, 4, 2], target_keywords=("INFANTRY",),
+    )
+    line = _step_log_line(tmp_path, gs, raw_log)
+
+    assert "[ANTI-INFANTRY:7+]" in line, (
+        f"le token doit porter le 7+ DÉCLARÉ, pas le 6 que le moteur en a tiré : {line}"
+    )
+
+
+def test_un_profil_anti_a_moitie_rempli_est_refuse():
+    """Le keyword et le seuil sont UN SEUL fait. Un profil qui n'en porte qu'un écrirait
+    `[ANTI-INFANTRY:None+]` — une valeur par défaut déguisée en donnée (T1). L'invariant vit
+    sur le dataclass, donc aucun producteur ne peut le contourner."""
+    from engine.phase_handlers.attack_sequence import WeaponAttackProfile
+
+    with pytest.raises(ValueError, match="anti_keyword et anti_threshold"):
+        WeaponAttackProfile(anti_keyword="INFANTRY")
+
+
+@pytest.mark.parametrize("melee", [False, True], ids=["tir", "melee"])
+def test_l_analyzer_accepte_les_lignes_porteuses_des_six_tokens(monkeypatch, tmp_path, melee):
+    """CONTRÔLE DE MASSE — un token que personne ne lit ne se livre pas.
+
+    Ce lot ne produit AUCUN contrôle analyzer : il n'y a donc pas de compteur à vérifier. Ce
+    qui doit l'être, c'est que le parseur ne se casse pas sur la grammaire nouvelle — une
+    ligne qu'il rejette est une ligne perdue pour TOUS les contrôles existants, pas seulement
+    pour les règles ajoutées. `parse_errors` est le seul témoin de ce mode d'échec, et il est
+    muet par construction tant qu'on ne le regarde pas."""
+    lignes = []
+    attendus = []
+    extra = dict(MELEE_KWARGS) if melee else {}
+    for rule, token, rolls, kwargs, melee_ok in LOT_A_TOKENS:
+        if melee and not melee_ok:
+            continue
+        gs, raw_log = _engine_shoot_log(
+            monkeypatch, [rule], rolls, melee=melee, **kwargs, **extra
+        )
+        lignes.extend(_step_log_lines(tmp_path, gs, raw_log))
+        attendus.append(token)
+
+    # Le journal réellement soumis au parseur PORTE bien chaque token, une fois chacun : sans
+    # ce comptage, un `parse_errors` vide n'attesterait que d'un journal vide de tokens.
+    journal = "\n".join(lignes)
+    for token in attendus:
+        assert journal.count(token) == 1, f"{token} : {journal.count(token)} occurrence(s)"
+
+    stats = _analyzer_stats(
+        tmp_path, lignes, melee=melee,
+        unit_type=CLEAVE_UNIT if melee else UNIT_TYPE,
+    )
+
+    assert stats["parse_errors"] == [], stats["parse_errors"]
+    # VERT VACANT : un analyzer qui n'aurait reconnu AUCUNE de ces lignes rendrait lui aussi
+    # `parse_errors == []`. Le compteur de lignes de touche réellement JUGÉES atteste qu'il a
+    # bien lu les six — moins celle de [TORRENT], qui ne porte aucun jet de touche.
+    checked = "fight_hit_result_checked" if melee else "shoot_hit_result_checked"
+    assert stats[checked][1] == len(lignes) - 1, (
+        "toutes les lignes sauf celle de [TORRENT] (`Hit None(None+)`) doivent être jugées "
+        f"par l'analyzer : {stats[checked]} pour {len(lignes)} lignes"
     )

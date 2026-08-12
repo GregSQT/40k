@@ -548,7 +548,8 @@ fields it can actually obtain, which is fewer than `step.log` appears to offer:
 | `[TWIN-LINKED]` | ✅ | ✅ | token on the `Wound` segment, parsed on both branches |
 | `[DEVASTATING WOUNDS]` | ✅ | ❌ | shooting writes `Save [DEVASTATING WOUNDS]`; **melee writes `Save None(T+)`** (`step_logger.py`, FOUGHT formatter) and the fight branch has no `saveSkipped` match |
 | `[SUSTAINED HITS]`, `[TORRENT]` | ❌ | ❌ | both produce `Hit None(T+)`; `hitMatch` (`Hit\s+(\d+)\(`) does not match, so the line yields **no expanded detail at all** — there is no field to fill |
-| `[CRITICAL HIT]`, `[CRITICAL WOUND]`, `[LETHAL HITS]` | ❌ | ❌ | never written to `step.log` in any form |
+| `[LETHAL HITS]` | ❌ | ❌ | ⚠️ **written to `step.log` since 2026-08-12** (`Wound None(T+) [LETHAL HITS]`, both branches), but the wound leg has no roll, so `woundMatch` does not fire and the line yields no expanded detail — same mechanism as the row above, not a missing token |
+| `[CRITICAL HIT]`, `[CRITICAL WOUND]` | ❌ | ❌ | never written to `step.log` in any form |
 
 ⚠️ The melee row above is not only a display gap: `Save None(T+)` fails `saveMatch`, so
 `wound_result` is inferred as `"FAIL"` and the whole save/damage section vanishes — a melee
@@ -557,9 +558,23 @@ its wounds. This defect predates the Game Log work and is **not fixed** by it: c
 reworking how `step.log` writes rollless legs and how the parser reads them, which changes the
 input format the analyzer consumes.
 
+**Since 2026-08-12 (log grammar 3), six more rules reach `step.log`**, on both the SHOT and
+FOUGHT branches: `[TORRENT]`, `[IGNORES COVER]` and `[PSYCHIC]` on the `Hit` segment,
+`[LETHAL HITS]` and `[ANTI-<KW>:Y+]` on the `Wound` segment, `[EXTRA ATTACKS]` in the line tags.
+`replayParser.ts` treats all of them as weapon-rule tokens rather than unit-ability names — the
+denylist grew with the producer, in the same delivery. **Reaching the log is not the same as
+being rendered**: the replay's expanded per-shot detail only fills fields whose leg carries a
+roll, so the table above still stands for `[TORRENT]` and `[LETHAL HITS]`.
+
+⚠️ `[ANTI-<KW>:Y+]` carries the threshold the WEAPON DECLARES, not the `crit_wound_on` the engine
+derives from it (05.02 clamps at 6). They coincide for every playable `Y+`; writing the engine's
+number would make any check of it circular — the log would confirm the engine with the engine's
+own answer. The PvP group line was aligned onto that same grammar in the same delivery.
+
 `[HAZARDOUS]` has its own log line (`[HAZARD] roll …`) with per-model mortal wound details.
 `[INDIRECT FIRE]` is never printed: it is a shooting type (10.07) that the engine does not
-implement, so no attack can be affected by it.
+implement, so no attack can be affected by it — and that is precisely why no token is written
+for it: a token would announce an effect that never takes place.
 
 Tooltips are resolved from `config/weapon_rules.json` by normalised name, parameters included
 (`[SUSTAINED HITS:2]` finds `SUSTAINED_HITS`). `[CRITICAL HIT]` / `[CRITICAL WOUND]` are not

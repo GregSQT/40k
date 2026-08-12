@@ -53,6 +53,23 @@ class WeaponAttackProfile:
     #: sans lui, le seuil de blessure critique change sans que rien ne dise pourquoi. Il est
     #: pose ici, et non recalcule par le log, pour qu il n existe qu UNE resolution de [ANTI].
     anti_keyword: Optional[str] = None
+    #: Seuil Y+ DECLARE par cette instance de [ANTI-X Y+], AVANT le clamp de 05.02 que subit
+    #: `crit_wound_on`. Les deux coincident pour tout Y+ valide (2..6) ; ils divergent sur une
+    #: armurerie fautive (Y=7), et c est precisement ce cas que le journal doit rendre
+    #: verifiable. Un log qui n ecrit que `crit_wound_on` fait controler le moteur avec le
+    #: chiffre du moteur : le lecteur ne peut plus recouper le seuil avec la datasheet.
+    anti_threshold: Optional[int] = None
+
+    def __post_init__(self) -> None:
+        # Les deux champs [ANTI] sont UN SEUL fait (l instance retenue par 24.02) : ils sont
+        # poses ensemble par `build_weapon_attack_profile`. Un profil qui n en porte qu un est
+        # une corruption, pas un cas a gerer — le log ecrirait `[ANTI-INFANTRY:None+]`, une
+        # valeur par defaut deguisee en donnee (T1).
+        if (self.anti_keyword is None) != (self.anti_threshold is None):
+            raise ValueError(
+                "WeaponAttackProfile: anti_keyword et anti_threshold vont ensemble, "
+                f"got keyword={self.anti_keyword!r}, threshold={self.anti_threshold!r}"
+            )
 
 
 @dataclass(frozen=True)
@@ -153,6 +170,7 @@ def build_weapon_attack_profile(
         twin_linked=weapon_has_rule(weapon, "TWIN_LINKED"),
         torrent=weapon_has_rule(weapon, "TORRENT"),
         anti_keyword=None if anti is None else anti[1],
+        anti_threshold=None if anti is None else anti[0],
     )
 
 

@@ -206,15 +206,35 @@ Conséquence directe : le contrôle §2.1 « Dead unit skipping » et tout `hand
   `additive_rules_applied` (`shared_utils.py`) → `rapidFireApplied` (`:8310`) →
   `w40k_core.py` → `step_logger.py`.
 
-**Ce que la ligne d'attaque ne porte PAS** (vérifié sur `_SHOT_RECORD_FIELD_MAP`,
-`w40k_core.py`, seul pont record→step.log). Le moteur SAIT poser les tokens
-`[EXTRA ATTACKS]`, `[TORRENT]`, `[IGNORES COVER]`, `[PSYCHIC]`,
-`[ANTI-<KW>:Y+]`, `[LETHAL HITS]` — c'est
-`shared_utils.weapon_rule_log_tokens` — mais il ne les pose que sur la ligne de
-SYNTHÈSE d'escouade du **Game Log PvP** (`_emit_squad_shoot_log`). Aucun de ces huit
-tokens n'a d'entrée dans `_SHOT_RECORD_FIELD_MAP`, donc aucun n'atteint `step.log`. Les statuts
-ABSENT-LOG-MANQUANT de §3 pour 24.03/11/18/19/23/29/37 restent donc **exacts**, mais
-la §7-L5 est à réviser : le producteur existe déjà, il ne manque que le pont.
+✅ **Le pont est posé (2026-08-12, lot A).** Cette section décrivait six tokens que le moteur
+savait produire (`shared_utils.weapon_rule_log_tokens`) mais ne posait que sur la ligne de
+SYNTHÈSE d'escouade du **Game Log PvP** (`_emit_squad_shoot_log`) — donc invisibles de
+l'analyzer et du replay. `[EXTRA ATTACKS]`, `[TORRENT]`, `[IGNORES COVER]`, `[PSYCHIC]`,
+`[ANTI-<KW>:Y+]` et `[LETHAL HITS]` atteignent désormais `step.log`, **au tir comme en mêlée**
+(même émetteur, même formateur). Les statuts §3 de 24.03/11/18/23/29/37 passent d'ABSENT-LOG-MANQUANT
+à **ABSENT-LOGGABLE** : le contrôle reste à écrire, mais il est désormais possible.
+
+Trois chemins, selon où vit le fait :
+- **par ATTAQUE**, via `_SHOT_RECORD_FIELD_MAP` — `autoHit` → `[TORRENT]`, `lethalHit` →
+  `[LETHAL HITS]`. Ce sont les deux seules règles du lot dont l'application varie d'un jet à
+  l'autre du même groupe (24.23 ne joue que sur les touches critiques) ;
+- **par GROUPE**, via des clés du log d'action lues par `_build_shot_details` —
+  `ignoresCoverApplied`, `extraAttacksApplied`, `psychicApplied`, `antiKeyword` + `antiThreshold` ;
+- le **formatage** vit dans `ai/step_logger.py` seul (`_HIT_SEGMENT_RULE_TOKENS`,
+  `_WOUND_SEGMENT_RULE_TOKENS`, `_LINE_TAG_RULE_TOKENS`, `_anti_rule_token`), en tables partagées
+  par les deux branches `SHOT` et `FOUGHT` — un token écrit d'un seul côté du miroir est
+  structurellement impossible.
+
+⚠️ **`[ANTI-<KW>:Y+]` porte le seuil DÉCLARÉ par l'arme**, pas le `crit_wound_on` que le moteur
+en tire (le clamp de 05.02). Les deux coïncident pour tout Y+ jouable ; la distinction n'est pas
+cosmétique : écrire le chiffre du moteur ferait vérifier le moteur avec sa propre réponse, et le
+seul recoupement qui vaille — le token contre l'armurerie — deviendrait un vert vacant. La ligne
+de synthèse du Game Log PvP a été alignée sur cette grammaire dans la même livraison ; c'est
+d'ailleurs celle que son propre docstring annonçait (« TOUJOURS le paramètre X que l'ARME DÉCLARE »).
+
+**`INDIRECT_FIRE` reste hors du journal, et ce n'est pas un oubli** : la règle n'est pas
+implémentée dans le moteur. Son token annoncerait un effet qui n'a pas lieu — le pont ne peut
+pas précéder la règle.
 
 ✅ **`[MELTA:X]` et `[PRECISION]` sont sortis de cette liste le 2026-08-11** : le pont a été posé
 (`meltaApplied` / `precisionApplied` dans le log de groupe → `_build_shot_details` →
@@ -629,7 +649,7 @@ tout contrôle mesurant une distance ou une adjacence — donc §1.1 à §1.4.
 | 10.04 Normal shooting (unengaged ∧ pas d'advance) | #11, #16 | `[ASSAULT]`, `units_advanced` | **PARTIEL** — tirer après un advance **sans** `[ASSAULT]` ni règle d'unité n'est compté que comme métrique (`shots_after_advance`), pas comme faute |
 | 10.05 Assault shooting | #39 (usage `ASSAULT`) | `[ASSAULT]` | **PARTIEL** — « seules les armes [ASSAULT] peuvent être sélectionnées » non contrôlé |
 | 10.06 Close-quarters shooting | #11, #16, #17 (+ exemptions M/V) | `[CLOSE-QUARTERS]`, `[MODELS:]`, engagement | **PARTIEL** — le `-1` au jet de touche n'est pas vérifié (`hit_target_base` n'est fourni que pour `HEAVY`/`COVER`) ; l'interdiction [BLAST] sur cible engagée n'est pas contrôlée |
-| 10.07 Indirect shooting | — | aucun marqueur | ABSENT-LOG-MANQUANT — token `[INDIRECT FIRE]` + seuil de touche modifié |
+| 10.07 Indirect shooting | — | aucun marqueur | ABSENT-LOG-MANQUANT — ⚠️ mais **le manque n'est pas dans le journal** : la règle n'est pas implémentée dans le moteur (`config_loader`, `test_indirect_fire_is_deliberately_absent`). Poser le token `[INDIRECT FIRE]` seul annoncerait un effet qui n'a pas lieu ; il faut d'abord implémenter 24.19 |
 
 ### 11 Charge phase
 
@@ -758,7 +778,7 @@ Aucun TRANSPORT journalisé (ni embark, ni disembark, ni capacité).
 |---|---|---|
 | 24.01 Abilities (définition) | — | NON-TESTABLE-OFFLINE |
 | 24.02 Duplicated abilities | — | ABSENT-LOG-MANQUANT — instance retenue non loggée |
-| 24.03 [ANTI-X Y+] | — | ABSENT-LOG-MANQUANT — token + seuil critique effectif |
+| 24.03 [ANTI-X Y+] | — | **ABSENT-LOGGABLE** depuis le 2026-08-12 — `[ANTI-<KW>:Y+]` atteint `step.log` (tir ET mêlée), avec le seuil **DÉCLARÉ** par l'arme et non le `crit_wound_on` du moteur : c'est cette forme-là qui se recoupe avec l'armurerie. Le contrôle reste à écrire |
 | 24.04 [ASSAULT] | #39 (usage) | **PARTIEL** — validité non contrôlée (cf. 10.05) |
 | 24.05 [BLAST] | #41bis | **PARTIEL** — token `[BLAST:X]` loggué et dés bonus entrés dans le plafond de tirs depuis le 2026-08-11 (latent : aucun roster joué ne porte d'arme BLAST, 4 existent côté Space Marine) ; l'interdiction sur cible engagée n'est toujours pas contrôlée |
 | 24.06 [CLEAVE] | #41bis, #39ter | **PARTIEL** — token `[CLEAVE:X]` loggué, dés bonus entrés dans le plafond d'attaques et USAGE compté depuis le 2026-08-11. La clause « une seule cible pour toutes les attaques de cette arme » n'est PAS rejouée par l'analyzer : le moteur l'a tranchée et le dit en posant (ou non) le token, comme `[RAPID FIRE:X]` dit la demi-portée |
@@ -766,25 +786,25 @@ Aucun TRANSPORT journalisé (ni embark, ni disembark, ni capacité).
 | 24.08 Deadly Demise | — | ABSENT-LOG-MANQUANT |
 | 24.09 Deep Strike | — | **PARTIEL** — règle déclarée, ingress loggué, contrainte >8" non contrôlée (loggable) |
 | 24.10 [DEVASTATING WOUNDS] | #40 (tir), #39quater (usage, mêlée) | **PARTIEL** — le contrôle suppose que seul un 6 est critique ; ignore [ANTI-X Y+]. ✅ La MÊLÉE écrit enfin `Save [DEVASTATING WOUNDS]` (2026-08-11) : jusque-là elle imprimait un jet de sauvegarde sur une blessure où 24.10 interdit d'en faire un |
-| 24.11 [EXTRA ATTACKS] | — | ABSENT-LOG-MANQUANT — le plafond `fight_over_cc_nb` ne les distingue pas des attaques normales |
+| 24.11 [EXTRA ATTACKS] | — | **ABSENT-LOGGABLE** depuis le 2026-08-12 — token `[EXTRA ATTACKS]` dans les tags de ligne (tir ET mêlée). Le plafond `fight_over_cc_nb` ne s'en sert pas encore : le contrôle reste à écrire |
 | 24.12 Feel No Pain | — | ABSENT-LOG-MANQUANT — jet FNP + seuil |
 | 24.13 Fights First | — | ABSENT-LOG-MANQUANT — statut Fights First de l'unité activée |
 | 24.14 Firing Deck | — | ABSENT-LOG-MANQUANT |
 | 24.15 [HAZARDOUS] | ligne `hazardous` + `[HAZARDOUS] Roll:N` | **PARTIEL** — le nombre de jets doit égaler le nombre d'armes Hazardous sélectionnées : ce nombre n'est pas loggué |
 | 24.16 [HEAVY] | #39 (usage) ; validité **supprimée** 2026-07-29 | **PARTIEL** (suppression justifiée : distance de chemin par figurine non re-dérivable) |
 | 24.17 Hover | — | ABSENT-LOG-MANQUANT (et fausse les budgets de vol, cf. 21.03) |
-| 24.18 [IGNORES COVER] | — | ABSENT-LOG-MANQUANT |
-| 24.19 [INDIRECT FIRE] | — | ABSENT-LOG-MANQUANT |
+| 24.18 [IGNORES COVER] | — | **ABSENT-LOGGABLE** depuis le 2026-08-12 — token `[IGNORES COVER]` sur le segment `Hit`. Posé sur la DÉCLARATION de l'arme (exception assumée : le couvert n'est même pas calculé, donc « la cible l'aurait-elle eu ? » est inconnaissable) |
+| 24.19 [INDIRECT FIRE] | — | ABSENT-LOG-MANQUANT — règle NON IMPLÉMENTÉE dans le moteur, cf. 10.07 : ce n'est pas un trou de journal |
 | 24.20 Infiltrators | — | ABSENT-LOG-MANQUANT (zone de déploiement absente) |
 | 24.21 [LANCE] | — | ABSENT-LOG-MANQUANT (absente aussi de `weapon_rules.json`) |
 | 24.22 Leader | — | ABSENT-LOG-MANQUANT |
-| 24.23 [LETHAL HITS] | — | ABSENT-LOG-MANQUANT — l'auto-blessure n'est pas distinguable dans le message |
+| 24.23 [LETHAL HITS] | — | **ABSENT-LOGGABLE** depuis le 2026-08-12 — token `[LETHAL HITS]` sur le segment `Wound`, par ATTAQUE (la règle ne joue que sur les touches critiques du groupe). `Wound None(<seuil>+) [LETHAL HITS]` : l'auto-blessure est enfin distinguable |
 | 24.24 Lone Operative | — | ABSENT-LOG-MANQUANT |
 | 24.25 [MELTA X] | — | ABSENT-LOG-MANQUANT — bonus de D + marqueur « demi-portée » |
 | 24.26 [ONE SHOT] | — | ABSENT-LOG-MANQUANT |
 | 24.27 [PISTOL] | = 24.07 (alias) | **PARTIEL** (même statut que 24.07) |
 | 24.28 [PRECISION] | — | ABSENT-LOG-MANQUANT — groupe d'allocation courant |
-| 24.29 [PSYCHIC] | — | ABSENT-LOG-MANQUANT |
+| 24.29 [PSYCHIC] | — | **ABSENT-LOGGABLE** depuis le 2026-08-12 — token `[PSYCHIC]` sur le segment `Hit`, posé uniquement quand un modificateur a été neutralisé (couvert 13.08, seul modificateur d'attaque de ce moteur) |
 | 24.30 [RAPID FIRE X] | #41 (présence + valeur vs armurerie), #12 (lève le plafond) | **PARTIEL** — la condition « cible à demi-portée » n'est pas vérifiée, alors qu'elle est MESURABLE per-socle depuis `[MODELS:]`/`[TARGET_MODELS:]` |
 | 24.31 Scouts | — | ABSENT-LOG-MANQUANT |
 | 24.32 Scout move | — | ABSENT-LOG-MANQUANT (type de move absent) |
@@ -792,7 +812,7 @@ Aucun TRANSPORT journalisé (ni embark, ni disembark, ni capacité).
 | 24.34 Support | — | ABSENT-LOG-MANQUANT |
 | 24.35 Super-heavy Walker | — | ABSENT-LOG-MANQUANT |
 | 24.36 [SUSTAINED HITS X] | #42 (présence vs armurerie), #12/#28 (exclu du plafond), #39 (usage) | **PARTIEL** — le NOMBRE de touches additionnelles (X) n'est pas vérifié |
-| 24.37 [TORRENT] | — | ABSENT-LOG-MANQUANT — aucun token ; le motif « auto-hit » n'est pas distinguable de `[SUSTAINED HITS]` |
+| 24.37 [TORRENT] | — | **ABSENT-LOGGABLE** depuis le 2026-08-12 — token `[TORRENT]` sur le segment `Hit` : `Hit None(None+) [TORRENT]` se distingue enfin de `[SUSTAINED HITS]` et d'une ligne malformée |
 | 24.38 [TWIN-LINKED] | #39 (usage, tir) + #39ter (usage, mêlée) + token `wound_reroll_rule_name` + `[REROLLED:n]` | **PARTIEL** — aucun contrôle de cohérence entre le token et la relance effective |
 
 ---
@@ -805,31 +825,36 @@ ne qualifie qu'une chose — une paire observée que l'armurerie ne déclare pas
 
 | Règle d'arme | Règle PDF | Contrôle de conformité | Statut |
 |---|---|---|---|
-| `ANTI_FLY` | 24.03 | — | ABSENT-LOG-MANQUANT |
-| `ANTI_INFANTRY` | 24.03 | — | ABSENT-LOG-MANQUANT |
-| `ANTI_MONSTER` | 24.03 | — | ABSENT-LOG-MANQUANT |
-| `ANTI_PSYKER` | 24.03 | — | ABSENT-LOG-MANQUANT |
-| `ANTI_VEHICLE` | 24.03 | — | ABSENT-LOG-MANQUANT |
+| `ANTI_FLY` | 24.03 | — | **ABSENT-LOGGABLE** — token dans `step.log` depuis le 2026-08-12 (lot A), contrôle à écrire |
+| `ANTI_INFANTRY` | 24.03 | — | **ABSENT-LOGGABLE** — token dans `step.log` depuis le 2026-08-12 (lot A), contrôle à écrire |
+| `ANTI_MONSTER` | 24.03 | — | **ABSENT-LOGGABLE** — token dans `step.log` depuis le 2026-08-12 (lot A), contrôle à écrire |
+| `ANTI_PSYKER` | 24.03 | — | **ABSENT-LOGGABLE** — token dans `step.log` depuis le 2026-08-12 (lot A), contrôle à écrire |
+| `ANTI_VEHICLE` | 24.03 | — | **ABSENT-LOGGABLE** — token dans `step.log` depuis le 2026-08-12 (lot A), contrôle à écrire |
 | `ASSAULT` | 24.04 / 10.05 | #39 usage (`shoot_handler.py`) | PARTIEL |
-| `BLAST` | 24.05 | — | ABSENT-LOG-MANQUANT |
-| `CLEAVE` | 24.06 | — | ABSENT-LOG-MANQUANT |
+| `BLAST` | 24.05 | usage §1.8 (`[BLAST:X]`) | **ABSENT-LOGGABLE** — token depuis le 2026-08-11 ; aucun contrôle de conformité |
+| `CLEAVE` | 24.06 | usage §1.8 (`[CLEAVE:X]`, mêlée) | **ABSENT-LOGGABLE** — token depuis le 2026-08-11 ; aucun contrôle de conformité |
 | `CLOSE_QUARTERS` | 24.07 / 10.06 | #11, #16, #17 + usage §1.8 (ancre, cf. §5) | PARTIEL |
 | `DEVASTATING_WOUNDS` | 24.10 | #40 | PARTIEL |
-| `EXTRA_ATTACKS` | 24.11 | — | ABSENT-LOG-MANQUANT |
+| `EXTRA_ATTACKS` | 24.11 | — | **ABSENT-LOGGABLE** — token dans `step.log` depuis le 2026-08-12 (lot A), contrôle à écrire |
 | `HAZARDOUS` | 24.15 / 06.03 | ligne `hazardous`, jet loggué | PARTIEL |
 | `HEAVY` | 24.16 | #39 usage ; validité supprimée | PARTIEL |
-| `IGNORES_COVER` | 24.18 | — | ABSENT-LOG-MANQUANT |
-| `INDIRECT_FIRE` | 24.19 / 10.07 | — | ABSENT-LOG-MANQUANT |
-| `LETHAL_HITS` | 24.23 | — | ABSENT-LOG-MANQUANT |
-| `MELTA` | 24.25 | — | ABSENT-LOG-MANQUANT |
-| `PRECISION` | 24.28 / 05.03 | — | ABSENT-LOG-MANQUANT |
-| `PSYCHIC` | 24.29 | — | ABSENT-LOG-MANQUANT |
+| `IGNORES_COVER` | 24.18 | — | **ABSENT-LOGGABLE** — token dans `step.log` depuis le 2026-08-12 (lot A), contrôle à écrire |
+| `INDIRECT_FIRE` | 24.19 / 10.07 | — | ABSENT-LOG-MANQUANT — règle NON IMPLÉMENTÉE dans le moteur (seule entrée de `weapon_rules.json` sans `obs_id` pour cette raison) |
+| `LETHAL_HITS` | 24.23 | — | **ABSENT-LOGGABLE** — token dans `step.log` depuis le 2026-08-12 (lot A), contrôle à écrire |
+| `MELTA` | 24.25 | usage §1.8 (`[MELTA:X]`) | **ABSENT-LOGGABLE** — token depuis le 2026-08-11 ; aucun contrôle de conformité |
+| `PRECISION` | 24.28 / 05.03 | usage §1.8 (`[PRECISION]`) | **ABSENT-LOGGABLE** — token depuis le 2026-08-11 ; aucun contrôle de conformité |
+| `PSYCHIC` | 24.29 | — | **ABSENT-LOGGABLE** — token dans `step.log` depuis le 2026-08-12 (lot A), contrôle à écrire |
 | `RAPID_FIRE` | 24.30 | #41 + #12 | PARTIEL |
 | `SUSTAINED_HITS` | 24.36 | #42 + #12/#28 + #39 | PARTIEL |
-| `TORRENT` | 24.37 | — | ABSENT-LOG-MANQUANT |
+| `TORRENT` | 24.37 | — | **ABSENT-LOGGABLE** — token dans `step.log` depuis le 2026-08-12 (lot A), contrôle à écrire |
 | `TWIN_LINKED` | 24.38 | #39 + tokens | PARTIEL |
 
-**0 COUVERT / 8 PARTIEL / 15 ABSENT-LOG-MANQUANT.**
+**0 COUVERT / 8 PARTIEL / 14 ABSENT-LOGGABLE / 1 ABSENT-LOG-MANQUANT.**
+
+Le seul ABSENT-LOG-MANQUANT restant est `INDIRECT_FIRE`, et ce n'est pas un trou de journal :
+la règle n'est **pas implémentée dans le moteur** (`config_loader.load_weapon_rules_config`,
+`tests/unit/engine/test_squad_obs_weapon_profiles.py::test_indirect_fire_is_deliberately_absent`).
+Écrire son token journaliserait un effet qui n'a pas lieu — la règle doit d'abord exister.
 
 ---
 
@@ -1037,7 +1062,10 @@ l'engagement (03, 09, 11, 12 partiels, 21) et sur l'éligibilité au tir (10). L
 `ABSENT-LOG-MANQUANT` se répartissent en trois blocs quasi disjoints :
 **(a)** les sous-systèmes non implémentés ou non journalisés (15 Stratagems, 16 Actions,
 18 Transports, 23 Aircraft, 21.01–21.02 Surge) — 26 règles ;
-**(b)** les abilités d'arme sans token (24.03/05/06/11/18/19/21/23/25/26/28/29/31–35/37) — 20 règles ;
+**(b)** les abilités d'arme sans token — **bloc quasi vidé le 2026-08-12** : n'y restent que
+24.19 ([INDIRECT FIRE]) et 24.21 ([LANCE]), toutes deux NON IMPLÉMENTÉES dans le moteur, plus
+les abilités de datasheet de 24.26/31–35 qui ne sont pas des règles d'arme journalisables.
+24.03/05/06/11/18/23/25/28/29/37 ont leur token depuis les lots des 11 et 12 août ;
 **(c)** la mécanique de résolution d'attaque au niveau figurine (05.02, 05.03, 06.02, 24.12, 24.28,
 02.02) et le battle-shock (01.06, 01.07, 08.03, 14.03).
 
@@ -1068,7 +1096,6 @@ lieu de la lire) et 24.03 (`[ANTI-X Y+]`, dont le token n'atteint pas step.log, 
 | ~~L2~~ | ~~`S` de l'arme et `T` de la cible~~ — **CLOS le 2026-08-10 sans ajout de champ** (cf. ci-dessus) ; le reliquat utile est le `T` RETENU par le moteur, pour cesser de le recalculer | `Wound R(T+) [S<n> vs T<n>]` | 19.02 seul |
 | L3 | **Figurine cible allouée** + groupe d'allocation | `→ <mid>` sur la partie `Save`/`Dmg` | 05.03, 05.04, 06.02, 24.28 |
 | L4 | **`AP` de l'arme, `Sv`/`InSv` du groupe** | `Save R(<base>+ AP<n> → <eff>+)` | 05.04, `closest_target_penetration`, 24.18 |
-| L5 | **Tokens d'abilité d'arme manquants — le PRODUCTEUR EXISTE DÉJÀ, il manque le PONT.** ⚠️ Révisé le 2026-08-10 : `shared_utils.weapon_rule_log_tokens` (`:8041-8156`) sait poser `[ANTI-<KW>:Y+]`, `[LETHAL HITS]`, `[TORRENT]`, `[IGNORES COVER]`, `[PSYCHIC]`, `[EXTRA ATTACKS]` — mais seulement sur la ligne de synthèse du **Game Log PvP** (`_emit_squad_shoot_log:8164`). Aucun n'a d'entrée dans `_SHOT_RECORD_FIELD_MAP` (`w40k_core.py`), donc aucun n'atteint `step.log`. Le travail n'est PAS d'écrire des tokens : c'est d'ajouter les entrées de mapping et de verrouiller la jonction (`tests/unit/ai/test_step_log_weapon_rule_tokens.py` est le modèle). Restent à produire de zéro : `[INDIRECT FIRE]`, `[LANCE]`. ✅ `[MELTA:X]`, `[PRECISION]` (2026-08-11), puis `[BLAST:X]` et `[CLEAVE:X]` (même jour) ont franchi le pont | entrées dans `_SHOT_RECORD_FIELD_MAP` + branches du formateur `step_logger` | 24.03, 24.11, 24.18, 24.19, 24.21, 24.23, 24.29, 24.37, 10.07 |
 | L6 | **Ligne `stratagem`** (nom, CP dépensés, cible, phase) | `P<n> STRATAGEM [<NOM>] -<n>CP → Unit M` | 15.01–15.12 (12 règles) |
 | L7 | **Lignes `action_start` / `action_complete`** | `Unit N ACTION START [<nom>]` / `… COMPLETE` | 16.01, 09.06, 09.07, 10.04–10.07 (volets « AFTER: pas d'action ») |
 | L8 | **Transports** : capacité, embark, disembark (mode + jet de hasard) | types `embark`, `disembark` dans `_STEP_LOG_TYPE_MAP` | 18.01–18.05 |
@@ -1121,6 +1148,8 @@ vérifier que la donnée n'est pas déjà là sous une autre forme : le verdict 
 écrit nulle part, il se déduisait de la PRÉSENCE d'un segment.
 
 ---
+
+**`L5` a été RETIRÉE de ce tableau le 2026-08-12**, comme `L2` avant elle : elle réclamait des tokens de règles d'armes dans `step.log`, et les six derniers (`[TORRENT]`, `[LETHAL HITS]`, `[IGNORES COVER]`, `[EXTRA ATTACKS]`, `[ANTI-<KW>:Y+]`, `[PSYCHIC]`) y sont entrés, au tir comme en mêlée, verrouillés par `tests/unit/ai/test_step_log_weapon_rule_tokens.py`. Le résidu — `[INDIRECT FIRE]` 24.19 et `[LANCE]` 24.21 — **n'est pas un champ manquant du StepLogger** : la RÈGLE n'est pas implémentée dans le moteur, donc aucun token ne peut la décrire sans annoncer un effet qui n'a pas lieu. Elle est portée par §3 et §4, pas ici.
 
 ## 8. Ce qui a été vérifié, et ce qui ne l'a pas été
 

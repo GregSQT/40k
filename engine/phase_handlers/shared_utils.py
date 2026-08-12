@@ -8498,6 +8498,21 @@ ADDITIVE_RULE_ORDER: Tuple[str, ...] = (
 )
 
 
+def psychic_rule_applies(weapon: Dict[str, Any], *, cover: bool) -> bool:
+    """[PSYCHIC] 24.29 a-t-elle NEUTRALISE quelque chose sur ce groupe d attaques ?
+
+    La regle ignore les modificateurs subis par l attaque ; le seul modificateur que ce moteur
+    applique a une attaque est la degradation de seuil du couvert 13.08. Sans couvert, la regle
+    n a donc rien neutralise, et l annoncer ferait croire a un effet.
+
+    Predicat EXTRAIT parce qu il a deux lecteurs — le Game Log PvP (`weapon_rule_log_tokens`)
+    et `step.log` (`_emit_squad_shoot_log`) — et que c est le seul des sept tokens du lot dont
+    la condition ne se reduit pas a `weapon_has_rule`. Deux copies auraient diverge au premier
+    changement de 13.08, et le journal aurait dit d un cote ce qu il tait de l autre.
+    """
+    return bool(cover) and weapon_has_rule(weapon, "PSYCHIC")
+
+
 def weapon_rule_log_tokens(
     profile: "WeaponAttackProfile",
     *,
@@ -8575,18 +8590,20 @@ def weapon_rule_log_tokens(
         tokens["hit"].append(f"[SUSTAINED HITS:{profile.sustained_hits}]")
     if weapon_has_rule(weapon, "IGNORES_COVER"):
         tokens["hit"].append("[IGNORES COVER]")
-    # [PSYCHIC] 24.29 : le token ne se justifie QUE si un modificateur a ete ignore. Sans
-    # couvert, la regle n a rien neutralise — l afficher ferait croire a un effet.
-    if cover and weapon_has_rule(weapon, "PSYCHIC"):
+    # [PSYCHIC] 24.29 : cf. `psychic_rule_applies` — MEME predicat que `step.log`, un seul site.
+    if psychic_rule_applies(weapon, cover=cover):
         tokens["hit"].append("[PSYCHIC]")
 
     if profile.anti_keyword is not None:
-        # Seuil AFFICHE = `crit_wound_on`, c est-a-dire le seuil de blessure critique reellement
-        # en vigueur (le Y+ de l arme, borne a 6 par 05.02 : rien n est plus critique qu un 6).
-        # C est le seuil qui a JOUE qu on nomme, pas le texte de l arme — meme contrat que les
-        # autres tokens.
+        # Seuil AFFICHE = le Y+ que l ARME DECLARE (`anti_threshold`), pas le `crit_wound_on`
+        # que le moteur en a tire. La regle d une seule grammaire enoncee ci-dessus ne souffre
+        # pas d exception, et celle-ci en etait une : afficher `crit_wound_on`, c est nommer le
+        # seuil avec le chiffre que le moteur a calcule, donc rendre invérifiable le seul
+        # recoupement qui vaille (le token contre la datasheet). Les deux valeurs coincident
+        # pour tout Y+ jouable (2..6) ; sur une armurerie fautive (Y=7) elles divergent, et
+        # c est exactement le cas que le journal doit exposer plutot que lisser.
         tokens["wound"].append(
-            f"[ANTI-{profile.anti_keyword}:{profile.crit_wound_on}+]"
+            f"[ANTI-{profile.anti_keyword}:{profile.anti_threshold}+]"
         )
     # [LETHAL HITS] 24.23 dit « you CAN choose for that attack to automatically wound » : le
     # moteur tranche par esperance de degats, et il DECLINE l auto-blessure quand elle est
@@ -8797,6 +8814,29 @@ def _emit_squad_shoot_log(game_state: Dict[str, Any], g: Dict[str, Any], ctx: Ma
         # groupe d allocation, pas que l arme la declare : contre une cible sans CHARACTER
         # visible elle n a rien fait, et elle ne doit rien dire.
         "precisionApplied": bool(require_key(g, "precision_applied")),
+        # ── Les regles d arme du GROUPE que `step.log` ne portait pas ────────────────────
+        # Elles etaient rendues dans la ligne de synthese ci-dessus (Game Log PvP) et ABSENTES
+        # du journal que lisent l analyzer et le replay : aucun controle de conformite ne
+        # pouvait donc exister pour elles, et leur compteur d usage serait reste a zero pour
+        # toujours. Meme regime que les cinq cles precedentes — un FAIT brut par cle, le
+        # formatage (`[TOKEN]`) vit dans `ai/step_logger.py`, jamais ici.
+        #
+        # [IGNORES COVER] 24.18 et [EXTRA ATTACKS] 24.11 sont posees sur la DECLARATION de
+        # l arme, et c est assume : leur effet n est pas mesurable a posteriori sur ce groupe
+        # (le couvert n est meme pas calcule pour la premiere — court-circuit de
+        # `_cover_worsened_bs` ; l effet de la seconde est l existence meme du groupe). MEME
+        # regle d emission que le socle de tokens, qui nomme ces deux exceptions.
+        "ignoresCoverApplied": weapon_has_rule(require_key(g, "weapon"), "IGNORES_COVER"),
+        "extraAttacksApplied": weapon_has_rule(require_key(g, "weapon"), "EXTRA_ATTACKS"),
+        # [PSYCHIC] 24.29 : predicat PARTAGE avec le socle de tokens, jamais recopie.
+        "psychicApplied": psychic_rule_applies(require_key(g, "weapon"), cover=_cover),
+        # [ANTI-X Y+] 24.03 : l instance RETENUE par 24.02 (keyword) et son seuil DECLARE. Le
+        # seuil est celui de la datasheet, pas le `crit_wound_on` que le moteur en tire : c est
+        # la seule forme sous laquelle un lecteur peut recouper le journal avec l armurerie
+        # (cf. `WeaponAttackProfile.anti_threshold`). Les deux cles valent None ensemble quand
+        # l arme ne porte pas la regle, ou quand la cible n a aucun des keywords vises.
+        "antiKeyword": require_key(g, "attack_profile").anti_keyword,
+        "antiThreshold": require_key(g, "attack_profile").anti_threshold,
         "shootDetails": [{"shotNumber": i + 1, **s} for i, s in enumerate(g["shots"])],
     })
 

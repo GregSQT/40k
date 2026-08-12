@@ -260,6 +260,27 @@ def test_anti_nomme_le_keyword_qui_s_applique(monkeypatch):
     assert msg.index("[ANTI-INFANTRY:4+]") > msg.index("Wound:")
 
 
+def test_anti_ecrit_le_seuil_declare_et_non_le_clamp_du_moteur(monkeypatch):
+    """MEME grammaire que [RAPID FIRE:X] / [BLAST:X] : le `n` de `[REGLE:n]` est TOUJOURS le
+    parametre que l ARME DECLARE, jamais ce que le moteur en a tire.
+
+    Le token affichait `crit_wound_on`, c est-a-dire le seuil DEJA borne a 6 par 05.02 — la
+    seule exception a la regle enoncee par le docstring du socle, et elle n y etait pas listee.
+    Un `7+` declare ressortait en `6+`, si bien que le log confirmait le moteur avec le chiffre
+    du moteur au lieu de se recouper avec la datasheet. `7+` est une armurerie fautive, et c est
+    le point : c est le seul cas ou les deux valeurs se separent, donc le seul qui DISCRIMINE.
+
+    Meme grammaire des deux cotes : `step.log` porte le meme seuil declare
+    (`tests/unit/ai/test_step_log_weapon_rule_tokens.py`), pour qu une regle ne puisse pas etre
+    nommee d une facon d un cote et d une autre en face.
+    """
+    msg, _ = _resolve(
+        monkeypatch, ["ANTI_INFANTRY:7"], rolls=[4, 5, 1], target_keywords=("INFANTRY",)
+    )
+    assert "[ANTI-INFANTRY:7+]" in msg, msg
+    assert "[ANTI-INFANTRY:6+]" not in msg, msg
+
+
 def test_anti_sur_cible_sans_le_keyword_ne_dit_rien(monkeypatch):
     """24.03 : la regle est indexee sur les keywords de la CIBLE — sur un vehicule,
     [ANTI-INFANTRY] n abaisse aucun seuil, donc ne s affiche pas."""
