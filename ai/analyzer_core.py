@@ -10,7 +10,7 @@ from typing import Dict, Optional
 from shared.data_validation import require_key, require_present
 from ai.analyzer_rules import note_rule_usage
 
-from ai.analyzer_perfig import MODEL_TOKEN_PATTERN
+from ai.analyzer_perfig import MODEL_TOKEN_PATTERN, position_is_on_battlefield
 from ai.analyzer_state import AnalyzerState
 from ai.analyzer_config import AnalyzerConfig
 from ai.analyzer_phases.episode_handler import handle_episode_start
@@ -133,6 +133,7 @@ def _alloc_model_from_line(state: AnalyzerState, action_desc: str, line: str) ->
 
 
 _EFFECTS_PLAYER_RE = re.compile(r'P(\d+)\s+([^|]*)')
+_RT_UNIT_ID_RE = re.compile(r'Unit\s+(\d+)')
 
 
 def _parse_effects_snapshot(payload: str) -> "Dict[int, Dict[str, str]]":
@@ -388,36 +389,22 @@ def _apply_state_snapshot(state: AnalyzerState, config: AnalyzerConfig, payload:
         state.models_invalidated.discard(uid)
 
     # Unités que l'analyzer croit vivantes et que le moteur ne voit plus : c'est le fantôme.
-    import sys
-    from ai.analyzer_perfig import position_is_on_battlefield
+    # HORS TABLE ≠ MORTE. Deux cas légitimes d'absence dans l'instantané moteur :
+    #   - aucun segment [MODELS:] encore reçu (réserves jamais déployées, positions_by_model vide)
+    #   - tous les socles connus portent la sentinelle (-1,-1) (réserves stratégiques 20.01)
+    # Dans les deux cas, l'unité est HORS TABLE — pas morte. La tuer ici la ferait « ressusciter »
+    # à son ingress move, et un compteur qui sonne sur les réserves finit par être ignoré.
     for uid in [u for u, hp in state.unit_hp.items() if hp > 0 and u not in seen_units]:
         known_models = state.positions_by_model.get(uid)  # get allowed
-        # HORS TABLE ≠ MORTE. Une escouade en réserves stratégiques (20.01) — ou pas encore
-        # déployée — est déclarée à l'entête avec la sentinelle `(-1,-1)` et n'a aucune entrée
-        # dans `units_cache` : son absence de l'instantané est NORMALE. La compter ferait sonner
-        # 2.8 sur toute partie à réserves, et la tuer ici la ferait « ressusciter » à son ingress
-        # move — un compteur qui crie sans raison finit ignoré, et c'est la panne dont il protège.
-        if known_models and not any(
-            position_is_on_battlefield(pos) for pos in known_models.values()
-        ):
+        if not known_models or not any(position_is_on_battlefield(pos) for pos in known_models.values()):
             continue
-        if known_models:
-            stats['state_resync']['dead_missed'] += 1
-            unit_type = state.unit_types.get(uid, "?")
-            hp_val = state.unit_hp.get(uid, 0)
-            model_count = state.unit_models_alive.get(uid, 0)
-            model_hp = state.unit_model_hp.get(uid, {})
-            positions = {mid: pos for mid, pos in known_models.items()}
-            print(
-                f"[GHOST] E{state.current_episode_num} T{state.episode_turn} "
-                f"unit={uid} type={unit_type} hp={hp_val} models_alive={model_count} "
-                f"model_hp={model_hp} positions={positions}",
-                file=sys.stderr,
-            )
+        stats['state_resync']['dead_missed'] += 1
         state.unit_hp[uid] = 0
         state.unit_models_alive[uid] = 0
         state.positions_by_model.pop(uid, None)
         state.dead_units_current_episode.add(uid)
+        if state.last_phase in {'MOVE', 'SHOOT', 'CHARGE', 'FIGHT'}:
+            state.unit_deaths.append((state.episode_turn, state.last_phase, uid, state.line_number))
 
 
 def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
@@ -1020,32 +1007,8 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                 models_invalidated=state.models_invalidated,
                         )
 
-                # HAZARDOUS explicit self-destruction line:
-                # "Unit X(c,r) was DESTROYED [HAZARDOUS]"
-                hazardous_destroyed_match = re.search(
-                    r'Unit\s+(\d+)\(\d+,\s*\d+\)\s+was\s+DESTROYED\s+\[HAZARDOUS\]',
-                    action_desc,
-                    re.IGNORECASE
-                )
-                if hazardous_destroyed_match:
-                    destroyed_unit_id = hazardous_destroyed_match.group(1)
-                    if destroyed_unit_id in state.unit_hp and require_key(state.unit_hp, destroyed_unit_id) > 0:
-                        destroyed_unit_type = require_key(state.unit_types, destroyed_unit_id)
-                        stats['current_episode_deaths'].append((player, destroyed_unit_id, destroyed_unit_type))
-                        stats['wounded_enemies'][player].discard(destroyed_unit_id)
-                        _position_cache_remove(state.unit_positions, destroyed_unit_id)
-                        state.unit_deaths.append((turn, phase, destroyed_unit_id, state.line_number))
-                        state.dead_units_current_episode.add(destroyed_unit_id)
-                        _debug_log(
-                            f"[DEATH REMOVED] E{state.current_episode_num} T{turn} {phase} "
-                            f"target_id={destroyed_unit_id} target_type={destroyed_unit_type} reason=hazardous_destroyed_line"
-                        )
-                        state.unit_models_alive[destroyed_unit_id] = 0
-                        del state.unit_hp[destroyed_unit_id]
-
-                actor_match = re.match(r'Unit (\d+)\(', action_desc)
-                if actor_match:
-                    actor_id = actor_match.group(1)
+                if _dmg_actor_match:
+                    actor_id = _dmg_actor_id
                     _track_unit_reappearance(
                         actor_id,
                         state.unit_hp,
@@ -1670,14 +1633,16 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         # On marque l'escouade comme morte pour que les compteurs d'attrition
                         # soient cohérents, et on l'exclut du tracking de positions.
                         action_type = 'reserves_timeout'
-                        _rt_match = re.match(r'Unit\s+(\d+)', action_desc)
+                        _rt_match = _RT_UNIT_ID_RE.match(action_desc)
                         if _rt_match:
                             _rt_uid = _rt_match.group(1)
-                            if _rt_uid in state.unit_hp and require_key(state.unit_hp, _rt_uid) > 0:
-                                _rt_type = require_key(state.unit_types, _rt_uid)
-                                stats['current_episode_deaths'].append((player, _rt_uid, _rt_type))
-                                stats['wounded_enemies'][player].discard(_rt_uid)
+                            if state.unit_hp.get(_rt_uid, 0) > 0:
+                                # Pas de current_episode_deaths.append : le timeout n'est pas un
+                                # kill attribuable à un joueur (même convention que coherency_removal).
+                                # Pas de wounded_enemies.discard : une unité en réserves n'a jamais
+                                # été sur le plateau et ne peut donc figurer dans aucun des deux sets.
                                 _position_cache_remove(state.unit_positions, _rt_uid)
+                                state.positions_by_model.pop(_rt_uid, None)
                                 state.unit_deaths.append((turn, phase, _rt_uid, state.line_number))
                                 state.dead_units_current_episode.add(_rt_uid)
                                 state.unit_models_alive[_rt_uid] = 0

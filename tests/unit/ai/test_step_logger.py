@@ -496,3 +496,36 @@ def test_coherency_removal_is_mapped_and_does_not_increment_steps() -> None:
     assert W40KEngine._STEP_LOG_TYPE_MAP["coherency_removal"] == "coherency_removal"
     # Effet de fin de tour, pas action d'agent : l'incrémenter décalerait `episode_steps`.
     assert "coherency_removal" in W40KEngine._STEP_LOG_NON_INCREMENTING_TYPES
+
+
+def test_format_replay_style_message_reserves_timeout() -> None:
+    """VERROU : supprimer le formateur 'strategic_reserves_timeout' rend ce test ROUGE."""
+    logger = StepLogger(enabled=False)
+    result = logger._format_replay_style_message(1, "strategic_reserves_timeout", {})
+    assert result == "Unit 1 RESERVES TIMEOUT (20.04)"
+
+
+def test_reserves_timeout_is_mapped_and_does_not_increment_steps() -> None:
+    """VERROU : sans ce mapping, l'entrée d'action_log 20.04 n'atteint jamais step.log."""
+    from engine.w40k_core import W40KEngine
+
+    assert W40KEngine._STEP_LOG_TYPE_MAP["strategic_reserves_timeout"] == "strategic_reserves_timeout"
+    assert "strategic_reserves_timeout" in W40KEngine._STEP_LOG_NON_INCREMENTING_TYPES
+
+
+def test_format_replay_style_message_hazardous_mortal_wounds() -> None:
+    """VERROU : supprimer hazardous_mortal_wounds du formatter rend ce test ROUGE."""
+    logger = StepLogger(enabled=False)
+    result = logger._format_replay_style_message(
+        1, "hazardous", {"unit_with_coords": "3(2, 4)", "hazardous_mortal_wounds": 2}
+    )
+    assert result == "Unit 3(2, 4) SUFFERS 2 Mortal Wounds [HAZARDOUS]"
+
+
+def test_format_replay_style_message_hazardous_missing_mortal_wounds_raises() -> None:
+    """VERROU : un payload sans hazardous_mortal_wounds lève ConfigurationError."""
+    from shared.data_validation import ConfigurationError
+
+    logger = StepLogger(enabled=False)
+    with pytest.raises(ConfigurationError, match=r"hazardous_mortal_wounds"):
+        logger._format_replay_style_message(1, "hazardous", {"unit_with_coords": "3(2, 4)"})

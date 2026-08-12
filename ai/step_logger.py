@@ -1024,9 +1024,6 @@ class StepLogger:
             unit_with_coords = details.get("unit_with_coords")
             if not isinstance(unit_with_coords, str) or not unit_with_coords:
                 raise KeyError("Hazardous action missing required unit_with_coords")
-            hazardous_self_died = bool(details.get("hazardous_self_died", False))
-            if hazardous_self_died:
-                return f"Unit {unit_with_coords} was DESTROYED [HAZARDOUS]"
             hazardous_mortal_wounds = require_key(details, "hazardous_mortal_wounds")
             return f"Unit {unit_with_coords} SUFFERS {hazardous_mortal_wounds} Mortal Wounds [HAZARDOUS]"
             

@@ -30,8 +30,10 @@ from engine.utils.weapon_helpers import melee_weapons, ranged_weapons
 from engine.phase_handlers import movement_handlers, shooting_handlers, charge_handlers, fight_handlers, command_handlers, deployment_handlers
 
 # units_cache helpers (single source of truth for position/HP of living units)
+from engine.action_log_utils import append_action_log
 from engine.phase_handlers.shared_utils import (
     build_units_cache,
+    destroy_model,
     rebuild_choice_timing_index,
     is_unit_alive,
     require_unit_position,
@@ -112,8 +114,8 @@ def _mask_only_opens_wait(mask: Any) -> bool:
 # Import shared utilities FIRST (no circular dependencies)
 from engine.episode_schedule import episodes_per_env
 from engine.game_utils import (
-    ONCE_CLAIMS_KEY, enter_phase, get_controlled_player, get_unit_by_id, once_claim, once_claimed,
-    turn_limit_reached, get_effective_turn_limit,
+    ONCE_CLAIMS_KEY, add_console_log, enter_phase, get_controlled_player, get_unit_by_id,
+    once_claim, once_claimed, turn_limit_reached, get_effective_turn_limit,
 )
 
 # Import NEW extracted modules
@@ -386,11 +388,9 @@ def destroy_unarrived_strategic_reserves(game_state: Dict[str, Any]) -> List[Dic
     scoring de fin de partie : une unité détruite par cette règle ne doit pas compter dans le
     départage aux points.
     """
-    from engine.action_log_utils import append_action_log
-    from engine.game_utils import add_console_log
-    from engine.phase_handlers.shared_utils import destroy_model
-
     destroyed: List[Dict[str, Any]] = []
+    squad_models = require_key(game_state, "squad_models")
+    models_cache = require_key(game_state, "models_cache")
     for unit in list(require_key(game_state, "units")):
         unit_id = str(require_key(unit, "id"))
         if not unit.get("in_strategic_reserves", False):  # get allowed (champ optionnel, cf. loader)
@@ -399,10 +399,8 @@ def destroy_unarrived_strategic_reserves(game_state: Dict[str, Any]) -> List[Dic
             continue
         if bool(unit.get("reserves_repositioned", False)):  # get allowed (idem)
             continue
-        squad_models = require_key(game_state, "squad_models")
-        models_cache = require_key(game_state, "models_cache")
         model_ids_destroyed = [
-            m for m in list(squad_models.get(str(unit_id), []))  # get allowed
+            m for m in squad_models.get(str(unit_id), [])  # get allowed
             if m in models_cache
         ]
         for model_id in model_ids_destroyed:
@@ -3707,8 +3705,6 @@ class W40KEngine(gym.Env):
             raise TypeError(
                 f"game_state['action_logs'] must be a list before rule choice logging, got {type(action_logs).__name__}"
             )
-        from engine.action_log_utils import append_action_log
-
         append_action_log(
             self.game_state,
             {
