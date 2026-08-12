@@ -1427,6 +1427,13 @@ class GameStateManager:
                         "ILLUSTRATION_RATIO": require_key(m_data, "ILLUSTRATION_RATIO"),
                         "BASE_SHAPE": _m_base_shape,
                         "BASE_SIZE": _m_base_size,
+                        # Hauteur PROPRE de la figurine (§03.04 : l'engagement est 2" horizontal ET
+                        # 5" vertical). Même raison que `BASE_SHAPE`/`BASE_SIZE` juste au-dessus :
+                        # l'intervalle vertical d'un personnage attaché est le sien, pas celui de
+                        # l'escouade qui l'héberge. Sans cette recopie, le socle était mesuré par
+                        # figurine et la hauteur au bloc — une moitié de la règle par figurine,
+                        # l'autre au bloc.
+                        "MODEL_HEIGHT": float(require_key(m_data, "MODEL_HEIGHT")),
                         "HP_MAX": int(require_key(m_data, "HP_MAX")),
                         "T": int(require_key(m_data, "T")),
                         "ARMOR_SAVE": int(require_key(m_data, "ARMOR_SAVE")),

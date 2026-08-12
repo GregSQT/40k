@@ -87,25 +87,25 @@ def test_the_shared_enumeration_drops_off_table_and_keeps_the_rest(gs: Dict[str,
 
 
 def test_engagement_probe_ignores_an_off_table_enemy(gs: Dict[str, Any]) -> None:
-    """`_fight_entry_in_engagement_with_any_enemy` : le hors-table ne cree pas d'engagement.
+    """`_fight_entries_in_engagement_with_any_enemy` : le hors-table ne cree pas d'engagement.
 
     Deux appels, pas un : avec l'ennemi pose on prouve que la sonde DETECTE (sinon un False
     constant passerait), sans lui on prouve que la reserve seule n'en cree aucun.
     """
     from engine.phase_handlers.fight_handlers import (
-        _fight_entry_in_engagement_with_any_enemy,
+        _fight_entries_in_engagement_with_any_enemy,
     )
 
     unit = {"id": "mover", "player": ACTING}
-    synth = gs["units_cache"]["mover"]
+    synths = [gs["units_cache"]["mover"]]
 
-    assert _fight_entry_in_engagement_with_any_enemy(gs, unit, synth), (
+    assert _fight_entries_in_engagement_with_any_enemy(gs, unit, synths), (
         "l'ennemi POSE en (6,5) est adjacent au mover en (5,5) : la sonde doit le voir, sinon "
         "l'assertion suivante serait vraie sans rien prouver"
     )
 
     del gs["units_cache"]["ennemi_pose"]
-    assert not _fight_entry_in_engagement_with_any_enemy(gs, unit, synth), (
+    assert not _fight_entries_in_engagement_with_any_enemy(gs, unit, synths), (
         "seule reste une unite HORS TABLE : elle n'est engagee avec personne (03.04 mesure entre "
         "socles poses), et la mesurer ferait lever `_require_measurable_entry`"
     )

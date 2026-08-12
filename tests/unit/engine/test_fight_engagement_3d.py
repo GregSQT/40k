@@ -119,6 +119,19 @@ def _duel(attacker_level: int) -> Dict[str, Any]:
     ])
 
 
+def _only(entries: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """L'entrée synthétique UNIQUE d'une escouade à socle homogène.
+
+    ``_fight_synth_cache_entries_at_footprint`` rend une entrée PAR SOCLE distinct (un personnage
+    attaché n'est plus mesuré au gabarit de la troupe). Les escouades de ce fichier sont
+    homogènes : en attendre exactement une, sinon le test mesurerait une classe au hasard.
+    """
+    assert len(entries) == 1, (
+        f"escouade homogène attendue → 1 entrée par socle, obtenu {len(entries)}"
+    )
+    return entries[0]
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Prémisses du harnais — un test qui ne construit pas sa situation ne vérifie rien
 # ─────────────────────────────────────────────────────────────────────────────
@@ -233,7 +246,7 @@ def test_engaged_units_listing_follows_the_vertical_zone():
 # ─────────────────────────────────────────────────────────────────────────────
 
 def test_the_candidate_synthetic_entry_describes_the_candidate_position():
-    """``_fight_synth_cache_entry_at_footprint`` décrit une position CANDIDATE.
+    """``_fight_synth_cache_entries_at_footprint`` décrit une position CANDIDATE.
 
     Elle héritait ``occupied_hexes_by_model`` de l'entrée réelle, c'est-à-dire les positions
     d'AVANT le mouvement. Or en métrique euclidienne ``socle_from_cache_entry`` mesure depuis
@@ -245,7 +258,7 @@ def test_the_candidate_synthetic_entry_describes_the_candidate_position():
     origin = gs["units_cache"]["1"]["occupied_hexes_by_model"]["1#0"]
     assert tuple(origin) == (20, 20), f"prémisse : origine attendue (20,20), obtenue {origin}"
 
-    synth = fh._fight_synth_cache_entry_at_footprint(unit, gs, 30, 20, {(30, 20)})
+    synth = _only(fh._fight_synth_cache_entries_at_footprint(unit, gs, 30, 20))
 
     assert tuple(synth["occupied_hexes_by_model"]["1#0"]) == (30, 20), (
         "la carte par-figurine de l'entrée candidate pointe encore la position de DÉPART "
@@ -267,10 +280,10 @@ def test_the_candidate_synthetic_entry_accepts_a_per_model_plan():
     gs = _make_gs([_unit("1", 1, [(20, 20, 0), (21, 20, 1)]), _unit("2", 2, [(30, 30, 0)])])
     unit = gs["unit_by_id"]["1"]
 
-    synth = fh._fight_synth_cache_entry_at_footprint(
-        unit, gs, 20, 20, {(20, 20), (21, 20)},
+    synth = _only(fh._fight_synth_cache_entries_at_footprint(
+        unit, gs, 20, 20,
         model_placements={"1#0": (20, 20, 0), "1#1": (21, 20, 1)},
-    )
+    ))
 
     assert synth["floor_height_by_model"] == {
         "1#0": pytest.approx(0.0),
@@ -301,9 +314,9 @@ def test_a_rigid_translation_off_the_floor_lands_on_the_ground():
         f"une figurine translatée hors du plancher doit être au SOL, obtenu {placements['1#0']}"
     )
     # Le vrai symptôme : l'entrée synthétique se construisait avec ce niveau et levait.
-    synth = fh._fight_synth_cache_entry_at_footprint(
-        gs["unit_by_id"]["1"], gs, off_floor[0], off_floor[1], {off_floor}
-    )
+    synth = _only(fh._fight_synth_cache_entries_at_footprint(
+        gs["unit_by_id"]["1"], gs, off_floor[0], off_floor[1]
+    ))
     assert synth["floor_height_by_model"]["1#0"] == pytest.approx(0.0)
 
 
@@ -329,10 +342,10 @@ def test_a_read_only_preview_of_an_off_floor_plan_does_not_raise():
     off_floor = (50, 20)
     assert off_floor[0] not in _FLOOR_COLS, "prémisse : la case visée est hors du plancher"
 
-    synth = fh._fight_synth_cache_entry_at_footprint(
-        gs["unit_by_id"]["1"], gs, off_floor[0], off_floor[1], {off_floor},
+    synth = _only(fh._fight_synth_cache_entries_at_footprint(
+        gs["unit_by_id"]["1"], gs, off_floor[0], off_floor[1],
         model_placements={"1#0": (off_floor[0], off_floor[1], 1)},  # étage DEMANDÉ, plancher absent
-    )
+    ))
 
     assert synth["floor_height_by_model"]["1#0"] == pytest.approx(0.0), (
         "un étage demandé sur une case sans plancher doit être résolu au SOL, pas lever"

@@ -932,6 +932,20 @@ def _build_models_for_unit(
             "ICON_SCALE": spec.get("ICON_SCALE", unit.get("ICON_SCALE")),
             "BASE_SHAPE": spec.get("BASE_SHAPE", unit.get("BASE_SHAPE")),
             "BASE_SIZE": spec.get("BASE_SIZE", unit.get("BASE_SIZE")),
+            # HAUTEUR PAR FIGURINE (§03.04) : l'engagement est 2" horizontal ET 5" vertical, et
+            # l'intervalle vertical [plancher, plancher + MODEL_HEIGHT] se mesure sur la FIGURINE,
+            # exactement comme son socle deux lignes plus haut. Un personnage attache portait la
+            # hauteur de l'escouade qui l'heberge : socle par figurine, hauteur au bloc, soit une
+            # moitie de la regle par figurine et l'autre au bloc.
+            # Propagation SANS invention, meme convention que `LD` / `UNIT_KEYWORDS` ci-dessous :
+            # la cle n'est posee que si la donnee existe (toute unite de roster la porte, cf.
+            # create_unit / _build_enhanced_unit) ; son absence LEVE chez le consommateur qui en a
+            # besoin (`_vertical_classes`), jamais ici — une hauteur inventee est une mesure fausse.
+            **(
+                {"MODEL_HEIGHT": float(spec["MODEL_HEIGHT"])} if "MODEL_HEIGHT" in spec
+                else {"MODEL_HEIGHT": float(unit["MODEL_HEIGHT"])} if "MODEL_HEIGHT" in unit
+                else {}
+            ),
             # Orientation PAR FIGURINE (0..5, pas de 60°). Source de vérité du footprint
             # oriente par-fig (pivot molette en move). Défaut métier : héritée de l'unité
             # (spec surchargeable dans le scénario) — pas un fallback anti-erreur.
@@ -5780,6 +5794,22 @@ def _squad_model_positions(game_state: Dict[str, Any], squad_id: str) -> List[Tu
     return out
 
 
+def _model_height_of(model_entry: Mapping[str, Any], squad_entry: Mapping[str, Any]) -> float:
+    """Hauteur (pouces) d une FIGURINE — source unique de l heritage escouade→figurine.
+
+    Borne haute de l intervalle vertical [plancher, plancher + MODEL_HEIGHT] : elle sert
+    l engagement 3D (§03.04, 5\" vertical) comme la LoS 3D du tir. Elle se lit sur la figurine
+    quand elle la porte (`build_models_cache` la propage comme le socle) et sur l escouade sinon.
+
+    L heritage n est PAS un repli anti-erreur : une escouade homogene ne stocke pas N fois la meme
+    hauteur, exactement comme pour `BASE_SHAPE`/`BASE_SIZE`. L absence des DEUX leve (`require_key`)
+    — une hauteur inventee est une mesure fausse, silencieuse.
+    """
+    if "MODEL_HEIGHT" in model_entry:
+        return float(model_entry["MODEL_HEIGHT"])
+    return float(require_key(squad_entry, "MODEL_HEIGHT"))
+
+
 def _synth_model_entry(
     game_state: Dict[str, Any],
     squad_id: str,
@@ -5800,7 +5830,13 @@ def _synth_model_entry(
     ``level`` (defaut ``None``) — engagement 3D (chantier 4). ``None`` → entree 2D
     **inchangee** (byte-identique). Un entier = niveau de la figurine placee : on pose
     alors les donnees verticales (fig unique a (col,row), hauteur = plancher du niveau ;
-    ``MODEL_HEIGHT`` herite de l entree squad = borne haute de l intervalle vertical)."""
+    ``MODEL_HEIGHT`` = borne haute de l intervalle vertical).
+
+    ``MODEL_HEIGHT`` se lit sur la FIGURINE quand elle la porte (`build_models_cache` la
+    propage comme le socle), sinon sur l escouade. Ce n est pas un repli anti-erreur mais
+    la MEME heritage metier que le socle : une escouade homogene ne stocke pas N fois la
+    meme hauteur. La lire au bloc pour un personnage attache mesurait son engagement 3D
+    (§03.04, 5\" vertical) avec l intervalle vertical d une autre figurine."""
     from engine.hex_utils import compute_occupied_hexes
     squad_entry = game_state.get("units_cache", {}).get(str(squad_id), {})  # get allowed
     shape = require_key(model_entry, "BASE_SHAPE")
@@ -5829,7 +5865,7 @@ def _synth_model_entry(
                 int(col), int(row), shape, size, orient, int(level),
             )
         }
-        synth["MODEL_HEIGHT"] = float(require_key(squad_entry, "MODEL_HEIGHT"))
+        synth["MODEL_HEIGHT"] = _model_height_of(model_entry, squad_entry)
     return synth
 
 
@@ -6658,8 +6694,12 @@ def _attacker_model_can_reach_squad(
     shooter_squad_id = str(require_key(attacker_model, "squad_id"))
     shooter_z: Optional[float] = None
     shooter_occ = None
+    # Hauteur de la FIGURINE qui tire, pas de son escouade — même raison que son socle deux lignes
+    # plus haut (`attacker_model`), et même convention que `_synth_model_entry` : la figurine quand
+    # elle la porte (`build_models_cache` la propage), l'escouade sinon. Un personnage attaché plus
+    # haut voyait par-dessus un occulteur à la taille de la troupe qu'il accompagne, ou l'inverse.
     if shooter_level >= 1:
-        _s_mh = float(require_key(units_cache[shooter_squad_id], "MODEL_HEIGHT"))
+        _s_mh = float(_model_height_of(attacker_model, units_cache[shooter_squad_id]))
         shooter_z, shooter_occ = _fig_z_and_occluder(
             game_state, shooter_level, shooter_hexes, _s_mh
         )
@@ -6703,9 +6743,12 @@ def _attacker_model_can_reach_squad(
         if shooter_level >= 1 or target_level >= 1:
             if shooter_z is None:
                 # Tireur au sol, cible élevée : z tireur = 0 (sol) + MODEL_HEIGHT, sans dalle.
-                shooter_z = float(require_key(units_cache[shooter_squad_id], "MODEL_HEIGHT"))
+                shooter_z = float(
+                    _model_height_of(attacker_model, units_cache[shooter_squad_id])
+                )
             z_start = shooter_z
-            _t_mh = float(require_key(base_unit, "MODEL_HEIGHT"))
+            # Hauteur de la figurine VISÉE (jumeau du tireur ci-dessus) : `tm` porte la sienne.
+            _t_mh = float(_model_height_of(tm, base_unit))
             z_end, target_occ = _fig_z_and_occluder(
                 game_state, target_level, footprint, _t_mh
             )

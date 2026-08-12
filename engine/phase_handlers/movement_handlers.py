@@ -3799,7 +3799,10 @@ def movement_build_model_destinations_pool(
     # passer sous un étage bas). Injecté dans les obstacles AU SOL uniquement (jamais dans wall_hexes
     # partagé : ces hexes SONT le plancher de l'étage, praticable en surface). Vide si assez petit / FLY.
     from engine.terrain_utils import low_clearance_ground_hexes
-    _low_clear = low_clearance_ground_hexes(terrain_areas, float(require_key(unit, "MODEL_HEIGHT")))
+    from .shared_utils import _model_height_of
+    # Hauteur de LA FIGURINE qui bouge, pas de son escouade (`_model_height_of`) : c'est elle qui
+    # passe — ou non — sous le plancher bas, comme c'est son socle qui décide du reste du pool.
+    _low_clear = low_clearance_ground_hexes(terrain_areas, _model_height_of(model, unit))
     from engine.terrain_utils import floor_hexes_at_level
     floor_hexes_view: AbstractSet[Tuple[int, int]] = (
         floor_hexes_at_level(terrain_areas, view_level) if view_level >= 1 else set()

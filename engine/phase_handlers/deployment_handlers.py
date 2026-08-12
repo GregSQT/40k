@@ -16,6 +16,7 @@ from engine.phase_handlers.shared_utils import (
     compute_candidate_footprint, build_occupied_positions_set,
     candidate_overlaps_any_unit, coherency_violation_flags,
     place_model_at_effective_level, resolve_model_effective_level, wall_blocked_anchors,
+    _model_height_of,
 )
 
 
@@ -302,24 +303,36 @@ def generate_compact_formation(
     unit = get_unit_by_id(str(squad_id), game_state)
     if not unit:
         raise KeyError(f"generate_compact_formation: unit {squad_id} missing from game_state['units']")
-    # Clairance verticale — miroir du pool per-fig / du move. Base ronde : le DISQUE ne doit chevaucher
-    # aucun hex _low_clear (clairance capsule stationnaire, rayon = socle). Base non-ronde : empreinte hex.
-    _mh = float(require_key(unit, "MODEL_HEIGHT"))
-    _low_clear = low_clearance_ground_hexes(terrain_areas, _mh)
-
     from engine.hex_utils import (
         Socle, footprints_overlap, _hex_center, _HEX_CIRCUMRADIUS,
         build_hex_center_index, disc_overlaps_indexed_hexes, round_base_radius_norm,
     )
     from engine.phase_handlers.shared_utils import get_engagement_zone
     ez = get_engagement_zone(game_state)
-    # Index _low_clear construit une fois (base ronde de l'unité) : clairance disque O(1) par case spirale.
-    _cf_shape = require_key(unit, "BASE_SHAPE")
-    _cf_radius = round_base_radius_norm(require_key(unit, "BASE_SIZE")) if _cf_shape == "round" else 0.0
-    _cf_bucket = _cf_radius + _HEX_CIRCUMRADIUS
-    _cf_lc_index = (
-        build_hex_center_index(_low_clear, _cf_bucket) if (_cf_shape == "round" and _low_clear) else {}
-    )
+
+    # Clairance verticale — miroir du pool per-fig / du move. Base ronde : le DISQUE ne doit
+    # chevaucher aucun hex de clairance (capsule stationnaire, rayon = socle) ; base non-ronde :
+    # empreinte hex.
+    #
+    # PAR FIGURINE (socle ET hauteur), comme tout le reste de ce placement : les deux venaient de
+    # l'escouade, si bien qu'un personnage attaché — plus large, éventuellement plus haut — était
+    # posé sous un plancher où il ne tient pas. Mémoïsé par (hauteur, rayon) : une escouade
+    # homogène ne construit qu'un index, exactement comme avant.
+    _lc_by_gabarit: Dict[Tuple[float, float], Tuple[Set[Tuple[int, int]], Dict[Any, Any], float, float]] = {}
+
+    def _clearance_for(model: Dict[str, Any]) -> Tuple[Set[Tuple[int, int]], Dict[Any, Any], float, float]:
+        """(hexes de clairance, index disque, bucket, rayon) du gabarit de CETTE figurine."""
+        _h = _model_height_of(model, unit)
+        _shape = require_key(model, "BASE_SHAPE")
+        _radius = round_base_radius_norm(require_key(model, "BASE_SIZE")) if _shape == "round" else 0.0
+        cached = _lc_by_gabarit.get((_h, _radius))
+        if cached is None:
+            _cells = low_clearance_ground_hexes(terrain_areas, _h)
+            _bucket = _radius + _HEX_CIRCUMRADIUS
+            _index = build_hex_center_index(_cells, _bucket) if (_shape == "round" and _cells) else {}
+            cached = (_cells, _index, _bucket, _radius)
+            _lc_by_gabarit[(_h, _radius)] = cached
+        return cached
 
     placed: List[Tuple[str, int, int]] = []
     placed_socles: List["Socle"] = []
@@ -356,6 +369,7 @@ def generate_compact_formation(
         (``footprints_overlap``, preview/commit) tolère le contact — non modifiée — pour
         ne pas flagger en rouge un ajustement manuel où les socles se touchent."""
         _is_round = require_key(model, "BASE_SHAPE") == "round"
+        _lc_cells, _lc_index, _lc_bucket, _lc_radius = _clearance_for(model)
         fp = _model_fp(model, c, r)
         # Mur : ancre interdite au SOCLE (jumeau du pool et du commit). La boucle par cellules
         # ci-dessous ne teste donc plus les murs — elle mesurait le mur comme un point.
@@ -366,16 +380,16 @@ def generate_compact_formation(
                 return None
             if (cc, rr) not in pool_set:
                 return None
-            # Clairance _low_clear par empreinte hex : NON-rond seulement (le rond passe par le disque).
-            if not _is_round and (cc, rr) in _low_clear:
+            # Clairance par empreinte hex : NON-rond seulement (le rond passe par le disque).
+            if not _is_round and (cc, rr) in _lc_cells:
                 return None
             if (cc, rr) in other_occ:
                 return None
         # Base ronde : clairance disque↔hexunion _low_clear (miroir move) → la spirale continue tant que
         # le DISQUE chevauche un étage trop bas, s'arrête dès qu'il est dégagé (même distance que le move).
-        if _is_round and _cf_lc_index:
+        if _is_round and _lc_index:
             _cx, _cy = _hex_center(int(c), int(r))
-            if disc_overlaps_indexed_hexes(_cx, _cy, _cf_radius, _cf_lc_index, _cf_bucket):
+            if disc_overlaps_indexed_hexes(_cx, _cy, _lc_radius, _lc_index, _lc_bucket):
                 return None
         cand = Socle(
             shape=require_key(model, "BASE_SHAPE"),
@@ -670,7 +684,9 @@ def deployment_build_model_destinations_pool(
     unit = get_unit_by_id(squad_id, game_state)
     if not unit:
         raise KeyError(f"deployment_build_model_destinations_pool: unit {squad_id} missing from game_state['units']")
-    _low_clear = low_clearance_ground_hexes(terrain_areas, float(require_key(unit, "MODEL_HEIGHT")))
+    # Clairance de LA FIGURINE (`_model_height_of`) : ce pool est par-figurine de bout en bout
+    # (socle, facing, niveau), la hauteur ne pouvait pas rester celle de l'escouade.
+    _low_clear = low_clearance_ground_hexes(terrain_areas, _model_height_of(model, unit))
     # Clairance verticale — MIROIR EXACT du move. Le move n'ajoute PAS _low_clear au filtre d'empreinte :
     # il met _low_clear dans les obstacles du champ géodésique avec clearance = RAYON du socle (round).
     # Le socle rond « heurte » un hex _low_clear ssi son DISQUE le chevauche (clairance capsule
@@ -987,19 +1003,29 @@ def deployment_preview_plan(
     # trop bas → voile rouge. Ne concerne que le niveau 0 (la pose EN SURFACE d'un étage passe par
     # validate_floor_placement). MODEL_HEIGHT requis au chargement → toujours présent.
     from engine.terrain_utils import low_clearance_ground_hexes
-    _low_clear = low_clearance_ground_hexes(terrain_areas, float(require_key(unit, "MODEL_HEIGHT")))
     # Clairance verticale — miroir du pool per-fig / du move. Base ronde : le DISQUE ne doit chevaucher
-    # aucun hex _low_clear (clairance capsule, index spatial). Base non-ronde : empreinte hex ∩ _low_clear.
+    # aucun hex de clairance (capsule, index spatial). Base non-ronde : empreinte hex ∩ clairance.
     from engine.hex_utils import (
         _hex_center, _HEX_CIRCUMRADIUS, build_hex_center_index, disc_overlaps_indexed_hexes,
         round_base_radius_norm,
     )
-    _pv_shape = require_key(unit, "BASE_SHAPE")
-    _pv_radius = round_base_radius_norm(require_key(unit, "BASE_SIZE")) if _pv_shape == "round" else 0.0
-    _pv_bucket = _pv_radius + _HEX_CIRCUMRADIUS
-    _pv_lc_index = (
-        build_hex_center_index(_low_clear, _pv_bucket) if (_pv_shape == "round" and _low_clear) else {}
-    )
+    # Gabarit (hauteur ET socle) pris sur la FIGURINE, pas sur l'escouade : le voile rouge de cette
+    # fonction juge chaque figurine du plan, et le reste de son verdict (empreinte, plancher) la lit
+    # déjà par figurine. Mémoïsé par (hauteur, rayon) — escouade homogène = un seul index.
+    _pv_lc_by_gabarit: Dict[Tuple[float, float], Tuple[Set[Tuple[int, int]], Dict[Any, Any], float, float]] = {}
+
+    def _pv_clearance_for(model: Dict[str, Any]) -> Tuple[Set[Tuple[int, int]], Dict[Any, Any], float, float]:
+        _h = _model_height_of(model, unit)
+        _shape = require_key(model, "BASE_SHAPE")
+        _radius = round_base_radius_norm(require_key(model, "BASE_SIZE")) if _shape == "round" else 0.0
+        cached = _pv_lc_by_gabarit.get((_h, _radius))
+        if cached is None:
+            _cells = low_clearance_ground_hexes(terrain_areas, _h)
+            _bucket = _radius + _HEX_CIRCUMRADIUS
+            _index = build_hex_center_index(_cells, _bucket) if (_shape == "round" and _cells) else {}
+            cached = (_cells, _index, _bucket, _radius)
+            _pv_lc_by_gabarit[(_h, _radius)] = cached
+        return cached
 
     # Niveau EFFECTIF par figurine = niveau demandé (vue) SI l'empreinte tient sur ce plancher, sinon
     # sol (0). Permet une escouade MIXTE (figs sur l'étage + figs au sol) déployée depuis la vue étage :
@@ -1038,6 +1064,7 @@ def deployment_preview_plan(
 
     per_model: Dict[str, bool] = {}
     for idx, (mid, nc, nr, lv) in enumerate(norm):
+        m = require_key(models_cache, str(mid))
         fp = footprints[idx]
         out_of_bounds = any(
             cc < 0 or cc >= board_cols or rr < 0 or rr >= board_rows for cc, rr in fp
@@ -1055,7 +1082,6 @@ def deployment_preview_plan(
         # Pose sur étage (niveau >= 1) : règle 13.06 (mot-clé + empreinte entièrement sur l'étage).
         floor_bad = False
         if lv >= 1:
-            m = require_key(models_cache, str(mid))
             floor_ok, _reason = validate_floor_placement(
                 {
                     "id": squad_id,
@@ -1069,11 +1095,12 @@ def deployment_preview_plan(
             floor_bad = not floor_ok
         # Niveau 0 : fig trop haute sous un étage trop bas (§13.06, clairance verticale) → invalide.
         # Base ronde : DISQUE↔hexunion _low_clear (miroir move, index). Non-ronde : empreinte hex.
-        if lv == 0 and _pv_lc_index:
+        _lc_cells, _lc_index, _lc_bucket, _lc_radius = _pv_clearance_for(m)
+        if lv == 0 and _lc_index:
             _cx, _cy = _hex_center(int(nc), int(nr))
-            low_clear_bad = disc_overlaps_indexed_hexes(_cx, _cy, _pv_radius, _pv_lc_index, _pv_bucket)
+            low_clear_bad = disc_overlaps_indexed_hexes(_cx, _cy, _lc_radius, _lc_index, _lc_bucket)
         else:
-            low_clear_bad = lv == 0 and bool(_low_clear) and bool(fp & _low_clear)
+            low_clear_bad = lv == 0 and bool(_lc_cells) and bool(fp & _lc_cells)
         per_model[str(mid)] = bool(
             not out_of_bounds and not out_of_zone and not on_wall
             and not on_other and not intra and not cohesion_red[idx] and not floor_bad
