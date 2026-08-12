@@ -16,12 +16,25 @@ Règles : Documentation/40k_rules/13 Terrain (13.06).
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Dict, List, Sequence, Tuple
 
 import pytest
 
+from engine.phase_handlers.charge_handlers import charge_model_plan_state
+from engine.phase_handlers.deployment_handlers import (
+    deployment_build_model_destinations_pool,
+    deployment_preview_plan,
+    generate_compact_formation,
+)
+from engine.phase_handlers.fight_handlers import (
+    _fight_consolidation_build_model_pool,
+    _fight_pile_in_build_model_pool,
+)
+from engine.phase_handlers.movement_handlers import movement_build_model_destinations_pool
 from engine.phase_handlers.shared_utils import build_enemy_adjacent_hexes, build_units_cache
 from tests._state_invariants import turn_state_invariants, unit_invariants
+from tests.unit.engine._config_helpers import build_game_rules, build_move_rules
 
 #: 1" = 10 sous-hexes → géométrie EUCLIDIENNE. À x1, `geometry_is_hex` court-circuite le chemin
 #: multi-niveaux et la clairance n'y est jamais consultée : un test monté à x1 serait vert sans
@@ -35,9 +48,15 @@ CLAIRANCE_ETAGE = 3.0    # hauteur libre sous le plancher : entre les deux
 _ETAGE_COLS = range(110, 121)
 _ETAGE_ROWS = range(80, 121)
 _ETAGE_HEXES = [[c, r] for c in _ETAGE_COLS for r in _ETAGE_ROWS]
-_ETAGE_POLY = [[110, 80], [120, 80], [120, 120], [110, 120]]
+_C0, _C1 = _ETAGE_COLS.start, _ETAGE_COLS.stop - 1
+_R0, _R1 = _ETAGE_ROWS.start, _ETAGE_ROWS.stop - 1
+#: Dérivé des deux ranges ci-dessus : écrit en dur, il faudrait penser à le suivre à chaque
+#: déplacement du couloir, et un polygone désaccordé de ses hexes ne lève nulle part.
+_ETAGE_POLY = [[_C0, _R0], [_C1, _R0], [_C1, _R1], [_C0, _R1]]
 
 DEPART = (100, 100)
+#: Case de référence AU CŒUR du couloir, hors de toute autre contrainte (zone, mur, bord).
+_SOUS_ETAGE = (115, 100)
 #: Ennemi posé DE L'AUTRE CÔTÉ du couloir : traverser rapproche, donc les cases sous l'étage
 #: entrent dans les pools de pile-in, de consolidation et de charge. Sans lui, ces pools seraient
 #: vides et les verrous correspondants ne mesureraient rien.
@@ -51,7 +70,10 @@ def _unit(uid: str, player: int, models: Sequence[Dict[str, Any]]) -> Dict[str, 
         "HP_CUR": len(models), "HP_MAX": len(models), "VALUE": 100, "OC": 1, "T": 4,
         "ARMOR_SAVE": 3, "INVUL_SAVE": 7, "SHOOT_LEFT": 1, "ATTACK_LEFT": 1,
         "RNG_WEAPONS": [], "CC_WEAPONS": [], "BASE_SIZE": 1, "BASE_SHAPE": "round",
-        "MODEL_HEIGHT": HAUTEUR_ESCOUADE, "MOVE": 60, "UNIT_RULES": [],
+        # MOVE = 3" : le BFS atteint le couloir avec 107 cases de marge pour la contre-épreuve,
+        # et coûte 4x moins que 6" (0,08 s contre 0,37 s par pool). En dessous de 2" il ne reste
+        # que 6 cases — trop mince pour que la contre-épreuve prouve quoi que ce soit.
+        "MODEL_HEIGHT": HAUTEUR_ESCOUADE, "MOVE": 3 * ISH, "UNIT_RULES": [],
         # INFANTRY : sans mot-clé, une figurine ne peut pas finir en hauteur (13.06) et les
         # chemins d'étage sortent avant d'atteindre la clairance.
         "UNIT_KEYWORDS": [{"keywordId": "infantry"}],
@@ -72,19 +94,15 @@ def _etat(models: Sequence[Dict[str, Any]], cohesion: int = 2) -> Dict[str, Any]
     ]
     state: Dict[str, Any] = {
         **turn_state_invariants(),
+        # Règles RÉELLES (`build_game_rules` / `build_move_rules`) : un sous-ensemble recopié à la
+        # main laisserait ce test sur des règles figées, et toute clé nouvellement requise par le
+        # moteur manquerait ici en silence. Seules les deux valeurs que le test PILOTE sont
+        # surchargées — la zone d'engagement à l'échelle du plateau, et la cohésion.
         "config": {
-            "game_rules": {
-                "engagement_zone": 2 * ISH,
-                "engagement_zone_vertical": 5.0,
-                "max_base_size_hex": 35,
-                "unit_model_cohesion_range": cohesion,
-                "unit_global_cohesion_range": 9,
-                "squad_min_neighbors": 1,
-                "cohesion_distance_mode": "euclidean",
-            },
-            "move": {"can_move_through_enemy_engagement_zone": True,
-                     "can_move_through_enemy_model": False,
-                     "can_move_through_friendly_model": True},
+            "game_rules": build_game_rules(
+                engagement_zone=2 * ISH, unit_model_cohesion_range=cohesion
+            ),
+            "move": build_move_rules(),
             "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
         },
         "board_cols": 200, "board_rows": 200,
@@ -114,7 +132,11 @@ def _etat(models: Sequence[Dict[str, Any]], cohesion: int = 2) -> Dict[str, Any]
             1: [(c, r) for c in range(60, 180) for r in range(60, 160)],
             2: [(c, r) for c in range(60, 180) for r in range(60, 160)],
         },
-        "charge_roll_values": {"S": 12},
+        # Jet de charge de 6" : le champ multi-niveaux balaie un rayon proportionnel au jet, et
+        # 12" coûtaient 3,7 s par appel pour un ennemi à 2,5" — pools rendus IDENTIQUES à 6"
+        # (312 et 237 destinations, 75 et 0 cases sous l'étage). À 3" le pool du personnage se
+        # vide et la contre-épreuve deviendrait vacante.
+        "charge_roll_values": {"S": 6},
         "charge_target_selections": {"S": ["E"]},
         "_unit_move_version": 0,
         "inches_to_subhex": ISH,
@@ -172,76 +194,47 @@ def test_la_premisse_tient_les_deux_figurines_portent_des_hauteurs_differentes(g
     )
 
 
-def test_la_troupe_peut_passer_sous_l_etage_bas(gs):
-    """Contre-épreuve : si PERSONNE ne passe, le verrou suivant serait vert sans rien prouver."""
-    from engine.phase_handlers.movement_handlers import movement_build_model_destinations_pool
-
-    pool = movement_build_model_destinations_pool(gs, "S#0")
-
-    assert _cases_sous_l_etage(pool["destinations"]), (
-        f"aucune case sous l'étage n'est proposée à la figurine de {HAUTEUR_ESCOUADE}\" alors que "
-        f"la hauteur libre est de {CLAIRANCE_ETAGE}\" — le couloir est infranchissable pour tous, "
-        "donc le verrou ci-dessous ne mesurerait rien"
-    )
-
-
-def test_le_personnage_trop_haut_ne_passe_pas_sous_l_etage_bas(gs):
-    """VERROU : mesurée à la hauteur de l'ESCOUADE, cette figurine se voit offrir le couloir."""
-    from engine.phase_handlers.movement_handlers import movement_build_model_destinations_pool
-
-    pool = movement_build_model_destinations_pool(gs, "S#1")
-
-    offertes = _cases_sous_l_etage(pool["destinations"])
-    assert not offertes, (
-        f"{len(offertes)} cases sous un étage de {CLAIRANCE_ETAGE}\" de clairance sont proposées à "
-        f"une figurine de {HAUTEUR_PERSONNAGE}\" : la clairance est mesurée à la hauteur de "
-        f"l'escouade ({HAUTEUR_ESCOUADE}\"). Ex. {sorted(offertes)[:3]}"
-    )
-
-
 # ─────────────────────────────────────────────────────────────────────────────
-# Les autres pools par-figurine — même règle, même verdict attendu
+# Les pools par-figurine — même règle, même verdict attendu
 #
 # Un pool par phase, chacun avec sa contre-épreuve : sans elle, un pool vide (mauvaise mise en
 # scène, cible hors de portée, mode inattendu) rendrait le verrou vert sans rien exécuter — c'est
 # exactement le faux vert déjà rencontré sur ce chantier.
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _pool_pile_in(gs: Dict[str, Any], mid: str) -> List[Any]:
-    from engine.phase_handlers.fight_handlers import _fight_pile_in_build_model_pool
+def _pool_move(gs: Dict[str, Any], mid: str) -> List[Any]:
+    return movement_build_model_destinations_pool(gs, mid)["destinations"]
 
+
+def _pool_pile_in(gs: Dict[str, Any], mid: str) -> List[Any]:
     return _fight_pile_in_build_model_pool(gs, mid, ["E"], None, view_level=0)["closer"]
 
 
 def _pool_consolidation(gs: Dict[str, Any], mid: str) -> List[Any]:
-    from engine.phase_handlers.fight_handlers import _fight_consolidation_build_model_pool
-
     return _fight_consolidation_build_model_pool(
         gs, mid, tier_kind="enemy", tier=["E"], lock_base_contact=False, view_level=0
     )["closer"]
 
 
 def _pool_charge(gs: Dict[str, Any], mid: str) -> List[Any]:
-    from engine.phase_handlers.charge_handlers import charge_model_plan_state
-
     return charge_model_plan_state(gs, "S", {}, selected_model=mid)["pool"]
 
 
 def _pool_deploiement(gs: Dict[str, Any], mid: str) -> List[Any]:
-    from engine.phase_handlers.deployment_handlers import deployment_build_model_destinations_pool
-
     return deployment_build_model_destinations_pool(gs, mid)["destinations"]
 
 
 _POOLS = {
+    "mouvement (09.01)": _pool_move,
     "pile-in (12.03)": _pool_pile_in,
     "consolidation (12.08)": _pool_consolidation,
     "charge (11.04)": _pool_charge,
     "déploiement (03.02)": _pool_deploiement,
 }
+_PHASES = sorted(_POOLS)
 
 
-@pytest.mark.parametrize("phase", sorted(_POOLS))
+@pytest.mark.parametrize("phase", _PHASES)
 def test_la_troupe_recoit_des_cases_sous_l_etage_dans_chaque_pool(gs, phase):
     """Contre-épreuve, une par phase : le couloir doit être proposé à la figurine qui y tient."""
     cases = _cases_sous_l_etage(_POOLS[phase](gs, "S#0"))
@@ -252,7 +245,7 @@ def test_la_troupe_recoit_des_cases_sous_l_etage_dans_chaque_pool(gs, phase):
     )
 
 
-@pytest.mark.parametrize("phase", sorted(_POOLS))
+@pytest.mark.parametrize("phase", _PHASES)
 def test_le_personnage_trop_haut_n_a_aucune_case_sous_l_etage_dans_chaque_pool(gs, phase):
     """VERROU : chaque pool par-figurine mesure la clairance à la hauteur de LA figurine."""
     offertes = _cases_sous_l_etage(_POOLS[phase](gs, "S#1"))
@@ -264,14 +257,7 @@ def test_le_personnage_trop_haut_n_a_aucune_case_sous_l_etage_dans_chaque_pool(g
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Déploiement : les deux autres sites, où le RAYON DE SOCLE venait lui aussi de l'escouade
-# ─────────────────────────────────────────────────────────────────────────────
-
-_SOUS_ETAGE = (115, 100)  # au cœur du couloir, hors de toute autre contrainte
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Garde opposable — les sites que les verrous ci-dessus n'atteignent pas
+# Garde de source — les sites que les verrous ci-dessus n'atteignent pas
 #
 # Quatre des onze appels vivent sur des branches d'ÉTAGE (montée, descente, ILP d'autoplace) que
 # les pools de plain-pied n'exécutent pas. Les couvrir par comportement demanderait une mise en
@@ -279,25 +265,23 @@ _SOUS_ETAGE = (115, 100)  # au cœur du couloir, hors de toute autre contrainte
 # rien de ce que le code CALCULE — mais il interdit la seule régression réaliste : quelqu'un qui
 # repasse la hauteur de l'escouade, en silence.
 #
-# ⚠️ Il porte sur le FICHIER, pas sur le voisinage de l'appel. Une première version lisait les 200
-# caractères suivant chaque parenthèse ouvrante : les deux sites de déploiement, qui passent une
-# variable calculée cinq lignes plus haut, lui échappaient entièrement — un garde aveugle aux
-# seuls sites qu'il était censé couvrir (relevé par `/code-review`).
+# Deux choix de portée, tous deux payés d'un faux vert avant d'être pris :
+# - il balaie TOUT `engine/phase_handlers/`, pas une liste de fichiers : le jour où une cinquième
+#   phase apprend à consulter la clairance, elle est surveillée sans que personne y pense ;
+# - dans chaque fichier trouvé, il interdit la PRÉSENCE des formes de lecture d'escouade au lieu
+#   d'inspecter le voisinage de l'appel : la hauteur y transite parfois par une variable calculée
+#   cinq lignes plus haut, qu'une fenêtre de texte ne verrait jamais.
 # ─────────────────────────────────────────────────────────────────────────────
 
-#: Les onze sites, nommés. Un appel ajouté ou retiré fait échouer le compte : c'est voulu, la
-#: liste doit être RELUE à chaque fois qu'un pool apprend à consulter la clairance.
-_FICHIERS_CLAIRANCE = {
-    "engine/phase_handlers/movement_handlers.py": 1,
-    "engine/phase_handlers/fight_handlers.py": 3,
-    "engine/phase_handlers/charge_handlers.py": 4,
-    "engine/phase_handlers/deployment_handlers.py": 3,
+_PHASE_HANDLERS = Path(__file__).resolve().parents[3] / "engine" / "phase_handlers"
+#: Les fichiers dont on SAIT qu'ils consultent la clairance. Ils ne bornent pas le balayage — ils
+#: le rendent non vacant : si le motif cessait d'être trouvé (renommage de la primitive, appel
+#: déplacé), un garde qui ne regarde rien afficherait « tout va bien ».
+_CONSOMMATEURS_CONNUS = {
+    "movement_handlers.py", "fight_handlers.py", "charge_handlers.py", "deployment_handlers.py",
 }
-#: Lectures de la hauteur d'ESCOUADE. Le garde interdit la PRÉSENCE de ces formes dans ces quatre
-#: fichiers, au lieu d'inspecter le texte qui suit chaque appel : la hauteur y transite parfois par
-#: une variable calculée plus haut (`_h = _model_height_of(...)`), qu'une fenêtre de texte autour
-#: de l'appel ne verrait jamais. La règle est plus simple à tenir ET plus difficile à contourner :
-#: un pool par-figurine n'a AUCUNE raison de lire la hauteur du bloc.
+#: Lectures de la hauteur d'ESCOUADE. `unit` est le nom que ces handlers donnent à l'entrée
+#: d'escouade ; la figurine s'y appelle `model`, `m`, `sib` ou `rep_model`.
 _HAUTEUR_D_ESCOUADE = (
     'require_key(unit, "MODEL_HEIGHT")',
     'unit["MODEL_HEIGHT"]',
@@ -305,32 +289,42 @@ _HAUTEUR_D_ESCOUADE = (
 )
 
 
-def _source(chemin: str) -> str:
-    from pathlib import Path
+def _fichiers_consultant_la_clairance() -> Dict[str, str]:
+    """{nom de fichier: source} des handlers qui appellent `low_clearance_ground_hexes`.
 
-    return (Path(__file__).resolve().parents[3] / chemin).read_text(encoding="utf-8")
+    Sa DÉFINITION vit dans `terrain_utils`, jamais ici : tout ce qui est trouvé est un APPEL.
+    """
+    trouves = {}
+    for chemin in sorted(_PHASE_HANDLERS.glob("*.py")):
+        source = chemin.read_text(encoding="utf-8")
+        if "low_clearance_ground_hexes(" in source:
+            trouves[chemin.name] = source
+    return trouves
 
 
-def _nb_appels_clairance(chemin: str) -> int:
-    """Nombre d'appels à `low_clearance_ground_hexes` — sa DÉFINITION vit dans `terrain_utils`."""
-    import re
+def test_le_balayage_de_la_clairance_voit_tous_les_consommateurs_connus():
+    """Prémisse du garde : un balayage qui ne trouve rien passerait au vert sans rien vérifier."""
+    trouves = set(_fichiers_consultant_la_clairance())
 
-    return len(re.findall(r"low_clearance_ground_hexes\(", _source(chemin)))
-
-
-@pytest.mark.parametrize("chemin", sorted(_FICHIERS_CLAIRANCE))
-def test_aucun_appel_de_clairance_ne_prend_la_hauteur_de_l_escouade(chemin):
-    """VERROU DE SOURCE : la hauteur passée à la clairance vient toujours d'une FIGURINE."""
-    assert _nb_appels_clairance(chemin) == _FICHIERS_CLAIRANCE[chemin], (
-        f"{chemin} : {_nb_appels_clairance(chemin)} appels à la clairance, "
-        f"{_FICHIERS_CLAIRANCE[chemin]} attendus. Un appel a été ajouté ou retiré — relire la "
-        "liste de ce test, elle est opposable"
+    assert _CONSOMMATEURS_CONNUS <= trouves, (
+        f"consommateurs de clairance vus : {sorted(trouves)} ; il en manque parmi "
+        f"{sorted(_CONSOMMATEURS_CONNUS)}. La primitive a été renommée ou l'appel déplacé — le "
+        "garde ci-dessous ne surveille plus ce qu'il croit surveiller"
     )
-    source = _source(chemin)
-    fautifs = [f for f in _HAUTEUR_D_ESCOUADE if f in source]
+
+
+def test_aucun_consommateur_de_clairance_ne_lit_la_hauteur_de_l_escouade():
+    """VERROU DE SOURCE : la hauteur passée à la clairance vient toujours d'une FIGURINE."""
+    fautifs = {
+        nom: [f for f in _HAUTEUR_D_ESCOUADE if f in source]
+        for nom, source in _fichiers_consultant_la_clairance().items()
+        if any(f in source for f in _HAUTEUR_D_ESCOUADE)
+    }
+
     assert not fautifs, (
-        f"{chemin} lit la hauteur de l'ESCOUADE ({fautifs}) alors que tous ses pools raisonnent "
-        "par figurine (§13.06). Passer par `_model_height_of(model, unit)`"
+        f"{fautifs} : ces fichiers consultent la clairance ET lisent la hauteur de l'ESCOUADE, "
+        "alors que leurs pools raisonnent par figurine (§13.06). Passer par "
+        "`_model_height_of(model, unit)`"
     )
 
 
@@ -340,8 +334,6 @@ def test_le_voile_rouge_de_deploiement_refuse_le_personnage_sous_l_etage(gs):
     Les avoir ensemble interdit qu'un refus global (zone, mur, hors plateau) passe pour une
     décision de clairance — il frapperait les deux.
     """
-    from engine.phase_handlers.deployment_handlers import deployment_preview_plan
-
     # Écart de 2 sous-hexes : au-delà, la COHÉSION rougit les deux figurines et le test ne
     # mesurerait plus la clairance (constaté en le calibrant).
     etat = deployment_preview_plan(gs, "S", [
@@ -378,7 +370,7 @@ def gs_socles() -> Dict[str, Any]:
         },
         {
             "col": DEPART[0], "row": DEPART[1] + 20, "level": 0, "VALUE": 10,
-            "MODEL_HEIGHT": HAUTEUR_PERSONNAGE, "BASE_SHAPE": "round", "BASE_SIZE": 5,
+            "MODEL_HEIGHT": HAUTEUR_PERSONNAGE, "BASE_SIZE": 5,
         },
     ], cohesion=20)
 
@@ -389,8 +381,6 @@ def test_le_voile_rouge_de_deploiement_mesure_le_socle_de_la_figurine(gs_socles)
     Le déploiement testait le débordement avec le socle de l'ESCOUADE alors qu'il lisait déjà
     celui de la figurine pour le reste de son verdict — l'autre moitié du même gabarit.
     """
-    from engine.phase_handlers.deployment_handlers import deployment_preview_plan
-
     # Écart de 6 sous-hexes, calibré entre deux murs : en dessous, le disque du socle large
     # chevauche sa voisine (collision intra-escouade) ; au-delà, la cohésion rougit les deux.
     # Dans les deux cas le test cesserait de mesurer le rayon de clairance.
@@ -411,8 +401,6 @@ def test_le_voile_rouge_de_deploiement_mesure_le_socle_de_la_figurine(gs_socles)
 
 def test_la_formation_compacte_ne_pose_pas_le_personnage_sous_l_etage(gs):
     """La formation automatique place les figurines une par une : chacune à SON gabarit."""
-    from engine.phase_handlers.deployment_handlers import generate_compact_formation
-
     formation = {
         str(mid): (int(c), int(r))
         for mid, c, r in generate_compact_formation(gs, "S", *_SOUS_ETAGE)
