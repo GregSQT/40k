@@ -680,6 +680,60 @@ def test_tour_vide_du_prompt_qui_vient_d_arriver_est_ecarte(tmp_path: Path) -> N
         "(cd frontend && npx tsc --noEmit -p tsconfig.app.json)",
         "p ai/hidden_action_finder.py",
         "python3 scripts/check_ai_rules.py",
+        # Le marqueur de l'ancienne délégation ponctuelle (retirée le 2026-08-13) ne doit plus
+        # rien ouvrir : un agent se l'écrivait à lui-même, et le hook ne voit pas le prompt.
+        "python3 -m pytest tests/unit/ -q -n 8  # VERIF-LARGE-AUTORISEE",
+        "pyright  # VERIF-LARGE-AUTORISEE",
+        "npx biome check frontend/src  # VERIF-LARGE-AUTORISEE",
+        # Celui-ci était déjà refusé avant la suppression : il garde la porte fermée à la
+        # variable d'environnement, il ne prouve pas la suppression du marqueur.
+        "VERIF_LARGE_AUTORISEE=1 python3 -m pytest tests/unit/ -q",
+        # Briques ENCHAÎNÉES : chacune se juge pour elle-même. Tant que les contrôles étaient
+        # en `elif`, une première brique ciblée dispensait les suivantes de tout examen — la
+        # vérification large passait en entier, écrite sur une ligne.
+        "pytest tests/unit/engine/test_x.py ; pyright",
+        "pytest tests/unit/engine/test_x.py && npx biome check frontend/src",
+        "pyright engine/x.py ; python3 ai/hidden_action_finder.py",
+        "pytest tests/unit/engine/test_x.py | tail -5 ; (cd frontend && npx tsc --noEmit -p tsconfig.app.json)",
+        # Un `.py` derrière `--ignore=` filtre une collecte complète, il ne la cible pas.
+        "python3 -m pytest -q -n 8 --ignore=tests/integration/pvp/test_x.py",
+        # Le MÊME outil deux fois : un premier appel ciblé ne couvre pas le second.
+        "pytest tests/unit/engine/test_x.py && pytest",
+        "pyright engine/x.py ; pyright",
+        "npx biome check frontend/src/a.ts && npx biome check frontend/src",
+        # Sous-commande citée : shlex en fait un seul token, elle se juge quand même. Ses
+        # séparateurs sont les SIENS — découper la ligne avant de lexer les hachait en morceaux
+        # dont aucun ne ressemblait plus à un run, et la commande passait entière.
+        'bash -c "python3 -m pytest tests/unit/ -q -n 8"',
+        'bash -c "pytest tests/unit/; pyright"',
+        'bash -lc "pytest"',
+        # Un run ciblé suivi d'un run nu : le second se juge pour lui-même.
+        'echo "je vérifie" ; pytest',
+        # Deux fois le MÊME outil : la première occurrence compte autant que la dernière.
+        "pytest tests/unit/ ; pytest tests/unit/engine/test_x.py",
+        # Un `#` au milieu d'un mot n'ouvre pas de commentaire : la suite de la ligne s'exécute.
+        "git log --grep=#42 ; pytest tests/unit/",
+        # Un RETOUR À LA LIGNE sépare deux commandes, il ne les fusionne pas.
+        "pytest tests/unit/engine/test_x.py\npyright",
+        # Un préfixe qui porte SES propres arguments ne sert pas de laissez-passer.
+        "timeout 1200 pytest tests/unit/",
+        "nice -n 10 pytest tests/unit/",
+        "stdbuf -o0 pytest tests/unit/",
+        "env FOO=1 pytest tests/unit/",
+        "command pytest tests/unit/",
+        # `find -exec` et `git bisect run` LANCENT l'outil : ce ne sont pas des lecteurs.
+        "find . -name 'test_*.py' -exec pytest {} +",
+        "git bisect run pytest",
+        # Un glob rend la main au shell, donc rouvre la suite entière.
+        "pytest tests/unit/**/*.py",
+        # tsc sur un PROJET, avec ou sans --noEmit : c'est tout le frontend.
+        "npx tsc -p frontend/tsconfig.app.json",
+        # Un nom de fichier écrit dans un COMMENTAIRE ne cible rien : ce serait le marqueur qu'on
+        # vient de retirer, sous un autre nom.
+        "python3 -m pytest -q -n 8  # cf tests/unit/engine/test_x.py",
+        "pyright  # engine/x.py",
+        # Guillemet non fermé : le découpage dégradé REFUSE, il n'autorise pas.
+        'pytest "tests/unit/engine/test_x.py',
     ],
 )
 def test_verification_large_refusee(command: str) -> None:
@@ -698,12 +752,34 @@ def test_verification_large_refusee(command: str) -> None:
         "python3 ai/train.py --agent CoreAgent --scenario bot --step",
         "grep -rn foo engine/",
         "git status --short",
-        # Délégation ponctuelle : le marqueur ouvre la porte, et lui seul.
-        "python3 -m pytest tests/unit/ -q -n 8  # VERIF-LARGE-AUTORISEE",
-        "pyright  # VERIF-LARGE-AUTORISEE",
+        # Le marqueur n'est plus un laissez-passer, mais il ne doit pas non plus refuser un run
+        # ciblé qui le mentionnerait (commentaire, doc, test) : c'est la CIBLE qui décide.
+        "pytest tests/unit/scripts/test_hooks_garde_fous.py  # VERIF-LARGE-AUTORISEE",
+        # Une cible CITÉE reste une cible : le hook lit la ligne comme le shell, pas au motif.
+        'pytest "tests/unit/engine/test_x.py"',
+        # MENTIONNER l'outil n'est pas le lancer : un agent doit pouvoir relire son propre hook.
+        "grep -rn pytest .claude/hooks/",
+        "grep -rn check_ai_rules.py Documentation/",
+        # Le TEST d'un script de conformité n'est pas le script : c'est un run ciblé, donc dû.
+        "pytest tests/unit/ai/test_hidden_action_finder.py",
+        # tsc sur des fichiers NOMMÉS reste ciblé.
+        "npx tsc --noEmit frontend/src/utils/replayParser.ts",
+        # NOMMER l'outil n'est pas le lancer : installation, message de commit, texte cité.
+        "python3 -m pip install pytest pyright",
+        'git commit -m "test(hook): un run pytest ciblé reste libre"',
+        'python3 -c "import pytest; print(pytest.__version__)"',
+        'gh pr create --body "lance pytest tests/unit/"',
+        "git add scripts/check_ai_rules.py",
+        "pip install pytest",
+        # `--cov` prend sa valeur collée : il ne mange pas la cible qui le suit.
+        "pytest --cov tests/unit/engine/test_x.py",
+        # Commentaire ouvert juste après un `;` : ce qui suit n'est pas exécuté.
+        "git status ;# npx biome check frontend/src",
+        # Le node id paramétré est la cible la plus fine du dépôt : son `[` n'est pas un glob.
+        "pytest tests/unit/scripts/test_hooks_garde_fous.py::test_verification_large_refusee[pyright]",
     ],
 )
-def test_verification_ciblee_et_delegation_passent(command: str) -> None:
+def test_verification_ciblee_passe(command: str) -> None:
     assert _run_deny(command) is None
 
 
