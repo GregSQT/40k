@@ -527,6 +527,14 @@ Prêts à démarrer sans décision produit :
   rapport n'agrège plus `out_of_range` et `engaged_non_close_quarters` sous un seul chiffre, ce
   qui m'a fait chercher un écart de 11 inexistant.
   → [`Implémenté/analyzer_portee_source_correcte_2026-08-12.md`](Implémenté/analyzer_portee_source_correcte_2026-08-12.md)
+- ✅ **« Attaque non allouée, cible vivante » : contrôle RETIRÉ** — **LIVRÉ le 2026-08-12**. Le
+  moteur ne laisse une blessure sans allocataire que sur une escouade cible anéantie (un seul
+  chemin, `_mark_manual_overkill_wasted`) : le contrôle ne pouvait donc signaler que les dérives de
+  l'état reconstruit par l'analyzer. Mesuré : 2 signalements sur le run de 12 h 23 (une seule
+  activation, avec 1 mort fantôme en §2.8), 15 sur celui de 14 h 14 (3 activations), et **0 cible
+  vivante** sur les 1747 lignes `NOT ALLOCATED` arbitrées par les instantanés `T{n} STATE:` du
+  moteur. L'invariant 05 est désormais tenu par `tests/unit/engine/test_attack_allocation_contract.py`.
+  → [`Implémenté/analyzer_retrait_controle_non_allouee_2026-08-12.md`](Implémenté/analyzer_retrait_controle_non_allouee_2026-08-12.md)
 - 🔴 **Conformité moteur — les 53 erreurs que l'analyzer voit VRAIMENT** (ouvert le 2026-08-11,
   **29 restantes** : la famille CC_NB, la plus lourde, est soldée le jour même ; la famille
   « tirs hors portée » est soldée le 2026-08-12 — c'étaient des artefacts, cf. ci-dessus).

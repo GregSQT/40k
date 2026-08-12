@@ -19,13 +19,6 @@ def handle_episode_start(state: "AnalyzerState", config: "AnalyzerConfig", line:
 
     stats = state.stats
 
-    # Dernière activation de l'épisode qui s'achève : son verdict n'a pas encore été rendu (il
-    # l'est au changement d'attaquant). Sans ce vidage, la dernière activation de CHAQUE épisode
-    # échapperait au contrôle — et ses entrées seraient jugées, plus tard, contre l'état d'un
-    # AUTRE épisode où l'unité porte le même identifiant.
-    from ai.analyzer_allocation import flush_not_allocated
-    flush_not_allocated(state, stats)
-
     if state.current_episode:
         stats['episodes_without_end'].append({
             'episode_num': state.current_episode_num,
