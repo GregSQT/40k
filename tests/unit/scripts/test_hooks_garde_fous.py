@@ -204,8 +204,10 @@ def test_liste_illisible_est_signalee_et_non_ignoree(tmp_path: Path) -> None:
     [
         # Une entrée qui perd ses backticks : le parse la sauterait et RELIRE disparaîtrait.
         "SECTIONS EXIGÉES : `LU`=toujours, JUMEAU=toujours, `RELIRE`=code",
-        # Liste repliée sur deux lignes : la seconde n'est jamais lue.
+        # Liste repliée sur deux lignes : la seconde n'est jamais lue. Les deux ponctuations de
+        # continuation comptent — deviner laquelle laisse toujours une forme passer.
         "SECTIONS EXIGÉES : `LU`=toujours, `JUMEAU`=toujours,\n  `RELIRE`=code",
+        "SECTIONS EXIGÉES : `LU`=toujours `JUMEAU`=toujours\n  `RELIRE`=code",
         # Portée inventée : ni `toujours` ni `code`.
         "SECTIONS EXIGÉES : `LU`=parfois, `RELIRE`=code",
     ],
@@ -229,6 +231,28 @@ def test_modifier_claude_md_engage_couverture_et_relire(tmp_path: Path) -> None:
                         _say("Fait.\n\nLU : CLAUDE.md\nJUMEAU : grep -c foo -> 0 hit\n"))
     assert contexte is not None
     assert "COUVERTURE" in contexte and "RELIRE" in contexte
+
+
+def test_portee_code_du_hook_est_celle_decrite_par_claude_md() -> None:
+    """L'autre face de la divergence : les puces de PORTÉE, pas seulement le gabarit.
+
+    Le hook compte CLAUDE.md comme du code ; les puces COUVERTURE et RELIRE annoncent quand ces
+    sections sont dues. Une portée élargie dans le hook et tue dans les puces referait exactement
+    le défaut du 2026-08-12, à l'endroit voisin.
+    """
+    basenames = json.loads(
+        subprocess.run(
+            [str(H_RAPPORT), "--code-basenames"], capture_output=True, text=True, check=True
+        ).stdout
+    )
+    texte = CLAUDE_MD.read_text(encoding="utf-8")
+    for etiquette in ("COUVERTURE", "RELIRE"):
+        puce = re.search(
+            r"^- " + etiquette + r" : obligatoire.+?(?=\n- |\n\n)", texte, re.MULTILINE | re.DOTALL
+        )
+        assert puce is not None, f"la puce de portée de {etiquette} a disparu de CLAUDE.md"
+        for nom in basenames:
+            assert nom in puce.group(0), f"{nom} compte comme du code sans que {etiquette} le dise"
 
 
 def test_sections_du_hook_et_gabarit_de_claude_md_ne_divergent_pas() -> None:

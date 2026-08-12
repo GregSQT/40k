@@ -319,13 +319,14 @@ conclusion, il ne s'y ajoute pas. Ne jamais y répéter ce qui vient d'être dit
   RELIRE :
   /code-review <fichiers modifiés>
   /simplify <fichiers modifiés>
+  → <verdict de chaque passe lancée : findings traités, ou « rien avec scénario »>
 
 - LU et JUMEAU sont TOUJOURS présents. « grep X → 0 hit » est une réponse valide. Ce qui est
   validé localement dans un fichier à cohérence globale n'est pas validé — c'est le défaut le
   plus fréquent de ce dépôt (cf. T4 JUMEAU).
 - RÉFS, ARBITRAGE et PROMPTS : omettre la section s'il n'y a réellement rien. Ne jamais écrire « néant ».
-- COUVERTURE : obligatoire dès qu'au moins un fichier de code a été modifié (même condition que
-  RELIRE), omise sinon. Elle porte les DEUX faces exigées par T4 COUVERTURE : les tests écrits ou
+- COUVERTURE : obligatoire dès qu'au moins un fichier de code a été modifié — CLAUDE.md compte
+  comme du code, il pilote les hooks — (même condition que RELIRE), omise sinon. Elle porte les DEUX faces exigées par T4 COUVERTURE : les tests écrits ou
   étendus, NOMMÉS, dans le harnais du code touché (pytest ou vitest), et les trous de couverture
   VUS et non traités.
   « aucun trou vu » est une réponse valide ; « rien à tester » n'en est pas une — un comportement
@@ -364,15 +365,24 @@ conclusion, il ne s'y ajoute pas. Ne jamais y répéter ce qui vient d'être dit
   * cette section ne dispense de RIEN : ce que l'agent savait faire dans le périmètre de clôture
     se fait, il ne se transforme pas en prompt (cf. T2). Un prompt n'est pas un moyen de sortir
     du périmètre du travail en cours.
-- RELIRE : obligatoire dès qu'au moins un fichier de code a été modifié ; omise sinon (réponse
-  pure lecture, doc seule, discussion). Lister les chemins RÉELLEMENT modifiés dans CETTE tâche,
+- RELIRE : obligatoire dès qu'au moins un fichier de code a été modifié — CLAUDE.md compte comme
+  du code, il pilote les hooks ; omise sinon (réponse pure lecture, doc seule, discussion). Lister les chemins RÉELLEMENT modifiés dans CETTE tâche,
   jamais l'ensemble du working tree — copiables tels quels, sans reformulation. `/code-review`
-  d'abord (bugs), `/simplify` ensuite (conception sur du code déjà correct). Ces deux commandes
-  appartiennent à l'utilisateur : PAR DÉFAUT, ne JAMAIS les lancer soi-même, seulement les écrire.
-  Même régime de délégation ponctuelle que la vérification large ci-dessus : l'agent ne les
-  exécute que si le PROMPT COURANT l'y autorise explicitement, l'autorisation ne vaut que pour
-  ce prompt, ne se déduit d'aucun contexte et se retire en ne la redonnant pas. En cas de doute,
-  elle n'existe pas : écrire la ligne RELIRE et s'arrêter là.
+  d'abord (bugs), `/simplify` ensuite (conception sur du code déjà correct).
+- RELIRE, EXÉCUTION — AUTORISATION PERMANENTE, acquise le 2026-08-12 : ces deux passes font partie
+  de la CLÔTURE, pas de la vérification de l'utilisateur. L'agent les LANCE lui-même, sans le
+  demander, dès qu'un fichier de code a bougé. Motif : les faire porter par l'utilisateur, c'était
+  lui déléguer la fin du travail de l'agent, et il les relançait à chaque tâche.
+  * Enchaînement : `/code-review` sur les fichiers modifiés → traiter les findings AVEC scénario
+    (T4 CAUSE) → relancer `/code-review` si une correction a été appliquée. Dès qu'une passe ne
+    rend plus de finding avec scénario, lancer `/simplify`, traiter de même, et s'arrêter là.
+  * Cette autorisation ne s'étend à RIEN d'autre : la VÉRIFICATION LARGE reste à l'utilisateur et
+    garde son régime de délégation ponctuelle (cf. §TESTS ci-dessus).
+  * Elle se suspend sur demande, pour la tâche en cours (« ne relance pas la review ») : la ligne
+    RELIRE est alors écrite sans être exécutée, et le `→` dit qu'elle ne l'a pas été.
+  * Le résultat de chaque passe se rend dans le `→` du bloc RELIRE, dans le message final unique.
+    Un finding traité modifie du code : COUVERTURE et les autres lignes du rapport en tiennent
+    compte, elles ne décrivent pas l'état d'avant la review.
 - RELIRE, CHEMINS : relatifs quand le travail a été fait dans le dépôt principal, ABSOLUS DANS LE
   WORKTREE quand il y a été fait — jamais relatifs dans ce cas. Un chemin relatif désigne le
   fichier du dépôt PRINCIPAL, qui porte le même nom sans porter la modification : la review relit

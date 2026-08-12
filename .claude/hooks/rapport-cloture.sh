@@ -66,21 +66,25 @@ def required_sections(claude_md=CLAUDE_MD):
 
     Un parse PARTIEL est aussi grave qu'un parse vide, et plus sournois : une entrée qui perd ses
     backticks, ou une liste repliée sur deux lignes, ferait disparaître RELIRE en silence — donc
-    le contrôle des chemins absolus en worktree, celui du défaut du 2026-08-08. D'où le refus de
-    tout résidu non consommé.
+    le contrôle des chemins absolus en worktree, celui du défaut du 2026-08-08. D'où DEUX refus :
+    tout résidu non consommé sur la ligne, et toute entrée du fichier qui n'est pas SUR la ligne.
+    Ce second contrôle est ce qui rattrape un repli, quel que soit son séparateur — deviner la
+    ponctuation d'une continuation (virgule ? espace ?) laisse toujours une forme passer.
     """
     with open(claude_md, encoding="utf-8") as fh:
-        ligne = LIGNE_SECTIONS.search(fh.read())
+        texte = fh.read()
+    ligne = LIGNE_SECTIONS.search(texte)
     if not ligne:
         raise ValueError("aucune ligne `SECTIONS EXIGÉES :` dans " + claude_md)
     contenu = ligne.group(1).strip()
     sections = ITEM_SECTION.findall(contenu)
     if not sections:
         raise ValueError("ligne `SECTIONS EXIGÉES :` illisible : " + contenu)
-    if contenu.endswith(","):
+    hors_ligne = len(ITEM_SECTION.findall(texte)) - len(sections)
+    if hors_ligne:
         raise ValueError(
-            "la liste `SECTIONS EXIGÉES :` doit tenir sur UNE ligne, elle semble repliée : "
-            + contenu
+            f"la liste `SECTIONS EXIGÉES :` doit tenir sur UNE ligne : {hors_ligne} entrée(s) "
+            "figurent ailleurs dans " + claude_md
         )
     residu = ITEM_SECTION.sub("", contenu).strip(" \t,")
     if residu:
@@ -228,6 +232,11 @@ def emit(context):
 
 
 def main():
+    if sys.argv[1:2] == ["--code-basenames"]:
+        # Exposé pour que le test vérifie que CLAUDE.md décrit bien la portée réelle du hook.
+        print(json.dumps(list(CODE_BASENAMES), ensure_ascii=False))
+        sys.exit(0)
+
     if sys.argv[1:2] == ["--sections"]:
         # Le test lit la liste PAR le hook, pas en reparsant CLAUDE.md de son côté : reparser
         # recréerait le deuxième exemplaire que cette source unique supprime.
