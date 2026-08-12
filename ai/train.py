@@ -1356,17 +1356,119 @@ import time  # Add time import for StepLogger timestamps
 #: (ou lirait comme une reference). Les sauvegardes horodatees et les modeles nommes avec leur
 #: score (`<agent>_<seed>_robust_<score>.zip`) n'en font PAS partie : leur nom est unique, ils
 #: sont l'historique et doivent rester en place.
+def _interrupted_model_path(model_path: str) -> str:
+    """Le `model_<agent>_interrupted.zip` du Ctrl-C, derive du modele canonique.
+
+    Un helper plutot qu'un `replace('.zip', '_interrupted.zip')` recopie : `str.replace` frappe la
+    PREMIERE occurrence ou qu'elle soit, donc un dossier contenant `.zip` dans son nom donnait un
+    chemin faux — et le motif etait deja present a deux endroits.
+    """
+    return f"{os.path.splitext(model_path)[0]}_interrupted.zip"
+
+
 def canonical_run_artifacts(model_path: str) -> list:
     """Chemins des artefacts a nom FIXE d'un run, pour `model_path` = le modele canonique."""
     model_dir = os.path.dirname(model_path)
     stem = os.path.splitext(os.path.basename(model_path))[0]
 
+    best_model = os.path.join(model_dir, "best_model.zip")
+    interrupted = _interrupted_model_path(model_path)
+
     return [
         model_path,                                              # model_<agent>.zip
         *model_companion_paths(model_path),                      # ..._vec_normalize.pkl, ..._run_state.json
         os.path.join(model_dir, f"{stem}_robust_meta.json"),     # seuil du score robuste
-        os.path.join(model_dir, "best_model.zip"),               # meilleur modele SB3 du run
+        best_model,                                              # meilleur modele SB3 du run
+        # `_save_model_with_vecnormalize` ecrit SYSTEMATIQUEMENT les stats a cote du best_model
+        # (ai/training_callbacks.py). Oubliees ici, elles restaient en place pendant que leur zip
+        # partait a l'archive : le run suivant les ecrasait, et le best_model archive devenait
+        # inexploitable — la normalisation d'un autre entrainement (V11 §0.35).
+        get_vec_normalize_path(best_model),
+        # La sauvegarde d'urgence du Ctrl-C, avec ses deux compagnons : nom FIXE, donc le run
+        # suivant l'ECRASE a son propre Ctrl-C. C'est pourtant le seul artefact reprenable d'un
+        # entrainement interrompu — le laisser en place, c'est perdre les poids du run precedent
+        # au premier accident du run suivant.
+        interrupted,
+        *model_companion_paths(interrupted),
     ]
+
+
+def canonical_set_aside_pairs(model_path: str, suffix: str) -> List[Tuple[str, str]]:
+    """`(origine, nom ecarte)` pour chaque artefact canonique PRESENT, plus le sidecar TensorBoard.
+
+    SOURCE UNIQUE du renommage, partagee par les deux operations qui ecartent un run entier :
+    `--new` (`archive_canonical_artifacts_for_new_run`) et la promotion `--resume-from`. Les deux
+    divergeaient : la premiere renommait a plat, ce qui produisait un `model_<agent>_<stamp>.zip`
+    a cote d'un `model_<agent>_vec_normalize_<stamp>.pkl` que `companion_path` ne resout PAS — un
+    modele archive sans ses stats, donc irreprenable — et laissait le sidecar `.tb_run.json` en
+    place, ou le run suivant l'ecrasait.
+
+    Les compagnons prennent donc le nom que `model_artifacts` derive du MODELE ecarte, et
+    `best_model.zip` emporte les siens de la meme facon. Les artefacts qui n'ont pas de convention
+    de compagnon (le seuil de score robuste) prennent le suffixe a plat.
+    """
+    def _renamed(path: str) -> str:
+        stem, ext = os.path.splitext(path)
+        return f"{stem}_{suffix}{ext}"
+
+    set_aside_model = _renamed(model_path)
+    best_model = os.path.join(os.path.dirname(model_path), "best_model.zip")
+    by_convention = dict(
+        zip(model_companion_paths(model_path), model_companion_paths(set_aside_model))
+    )
+    by_convention[model_path] = set_aside_model
+    by_convention[get_vec_normalize_path(best_model)] = get_vec_normalize_path(_renamed(best_model))
+    # Meme regle pour la sauvegarde d'urgence : elle est ecartee AVEC ses compagnons, sous des noms
+    # que `companion_path` sait redonner — sinon l'archive du Ctrl-C serait un zip sans stats.
+    interrupted = _interrupted_model_path(model_path)
+    by_convention[interrupted] = _renamed(interrupted)
+    by_convention.update(
+        zip(model_companion_paths(interrupted), model_companion_paths(_renamed(interrupted)))
+    )
+
+    pairs = [
+        (path, by_convention.get(path) or _renamed(path))
+        for path in canonical_run_artifacts(model_path)
+        if os.path.exists(path)
+    ]
+    # Le sidecar n'est pas un artefact canonique — il n'est ni relu par la reprise ni ecrit par
+    # les checkpoints — mais il est nomme d'apres le modele et le run suivant l'ECRASE : laisse
+    # en place, le modele ecarte perd definitivement le run TensorBoard qui l'a produit.
+    #
+    # SAUF s'il est vide : `prepare_run_artifacts` en repose un a `run_dir: ""` apres chaque
+    # `--new`, et celui-la ne porte rien a sauver. L'ecarter quand meme rendait DEUX `--new`
+    # dans la meme minute impossibles — le second butait sur l'archive du premier et levait
+    # `FileExistsError` pour un fichier vide, alors qu'il n'avait plus rien a ecarter du tout
+    # (cas reel : un `--new` qui meurt en 20 s sur une config fausse, corrigee et relancee).
+    previous_meta = _get_tensorboard_run_meta_path(model_path)
+    if os.path.exists(previous_meta):
+        try:
+            carries_a_run = bool(_read_tensorboard_run_meta(model_path).get("run_dir"))
+        except (ValueError, TypeError, OSError):
+            # Sidecar illisible — JSON tronque (l'ecriture n'est pas atomique) comme lecture
+            # refusee par le systeme de fichiers : on l'ECARTE au lieu de
+            # lever. Ce n'est pas un repli qui masque l'erreur — le fichier est conserve sous son
+            # nom horodate, donc inspectable, et un sidecar neuf le remplace. Lever ici rendait
+            # `--new` impossible, alors que `--new` est precisement la reparation que
+            # `_read_tensorboard_run_meta` recommande quand ce fichier manque ou ment.
+            carries_a_run = True
+        if carries_a_run:
+            pairs.append((previous_meta, _get_tensorboard_run_meta_path(set_aside_model)))
+    return pairs
+
+
+def refuse_to_overwrite_set_aside(pairs: List[Tuple[str, str]]) -> None:
+    """Refuse d'ecraser une sauvegarde : deux mises a l'ecart partageant leur horodatage.
+
+    Verifie TOUT avant de deplacer quoi que ce soit — lever au milieu laisserait un run a moitie
+    ecarte, dont la moitie restee en place serait relue comme celle du run suivant.
+    """
+    for _origin, archived in pairs:
+        if os.path.exists(archived):
+            raise FileExistsError(
+                f"{archived} existe deja — deux mises a l'ecart partagent leur horodatage, "
+                f"les executer ecraserait une sauvegarde."
+            )
 
 
 def archive_canonical_artifacts_for_new_run(model_path: str, log_fn=print) -> list:
@@ -1382,7 +1484,7 @@ def archive_canonical_artifacts_for_new_run(model_path: str, log_fn=print) -> li
     2. `model_<agent>.zip` et `best_model.zip` sont ECRASES en silence par le run neuf. L'agent
        precedent disparait sans trace, alors que c'est le seul artefact servi au PvE.
 
-    Renommage horodate `<stem>_<AAAAMMJJ-HHMM><ext>`, jamais une suppression : c'est l'agent de
+    Renommage horodate `<stem>_<AAAAMMJJ-HHMMSS><ext>`, jamais une suppression : c'est l'agent de
     l'utilisateur. Idempotent — un artefact absent n'est pas une erreur, et un second appel dans
     le meme run ne fait rien (les fichiers ont deja ete deplaces).
 
@@ -1390,18 +1492,13 @@ def archive_canonical_artifacts_for_new_run(model_path: str, log_fn=print) -> li
     C'est une exception DEMANDEE explicitement par l'utilisateur (2026-07-28), et elle ne
     supprime rien : elle empeche precisement l'ecrasement silencieux que la regle protege.
     """
-    stamp = time.strftime("%Y%m%d-%H%M")
+    # Horodatage a la SECONDE, comme `--resume-from`. A la minute, un `--new` mort apres l'ouverture
+    # de son run TensorBoard (le sidecar porte alors un `run_dir` reel, donc il s'ecarte) refusait
+    # d'etre relance avant la minute suivante : son propre archivage occupait deja le nom.
+    pairs = canonical_set_aside_pairs(model_path, time.strftime("%Y%m%d-%H%M%S"))
+    refuse_to_overwrite_set_aside(pairs)
     moved = []
-    for path in canonical_run_artifacts(model_path):
-        if not os.path.exists(path):
-            continue
-        stem, ext = os.path.splitext(path)
-        archived = f"{stem}_{stamp}{ext}"
-        if os.path.exists(archived):
-            raise FileExistsError(
-                f"archive_canonical_artifacts_for_new_run: {archived} existe deja — "
-                f"deux runs --new dans la meme minute, l'archivage ecraserait une sauvegarde."
-            )
+    for path, archived in pairs:
         os.rename(path, archived)
         moved.append(archived)
     if moved:
@@ -1519,6 +1616,13 @@ def prepare_run_artifacts(
     os.makedirs(os.path.dirname(model_path), exist_ok=True)
     if new_model:
         archive_canonical_artifacts_for_new_run(model_path, log_fn)
+        # Le sidecar part avec le run archive : sans cette remise a neuf, l'agent n'en aurait plus
+        # du tout, et un `--append` ultérieur mourrait dans `_read_tensorboard_run_meta` en
+        # conseillant un `--new` qui vient justement d'etre fait. Le remettre A VIDE et non le
+        # laisser en place : garde, il ferait ecrire le modele NEUF dans le run du modele archive,
+        # dont les steps sont plus avances — les courbes reculeraient. Meme remise a neuf que la
+        # promotion `--resume-from`, pour la meme raison.
+        _write_tensorboard_run_meta(model_path, "")
 
     episode_offset = resume_episode_offset(model_path, append_training and not new_model)
     if episode_offset > 0:
@@ -1726,6 +1830,226 @@ class RotatingCheckpointCallback(VecNormalizeCheckpointCallback):
         return continue_training
 
 
+class _ResumePromotion:
+    """Etat restaurable d'une promotion `--resume-from`, tant que l'entrainement n'a pas demarre.
+
+    La promotion ECARTE le modele canonique avant d'installer le checkpoint a sa place, et cela
+    se produit AVANT toute tentative de chargement. Depuis que `_load_checkpoint` leve au lieu de
+    replier sur un modele neuf, un checkpoint corrompu ou incompatible laissait le depot dans un
+    etat pire qu'avant la commande : l'inexploitable au chemin canonique, le bon modele seulement
+    sous son nom `_pre_resume_*`. La commande SUIVANTE, sans `--resume-from`, lisait donc le
+    mauvais fichier — et rien ne le disait.
+
+    D'ou la transaction. Elle est ARMEE par la promotion et VALIDEE au demarrage de
+    l'entrainement, pas au chargement du modele : entre les deux il reste la construction des
+    environnements, celle des callbacks et un Ctrl-C possible, qui laissaient tous le meme degat.
+    Apres le premier `model.learn()` en revanche, la restauration deviendrait la destruction :
+    les checkpoints periodiques, le run TensorBoard et le `_interrupted` du Ctrl-C sont ecrits
+    dans la lignee du modele promu.
+
+    La promotion elle-meme ecrit en deux temps — mise a l'ecart du modele canonique, puis
+    installation du checkpoint — et la transaction est armee AVANT le premier : un Ctrl-C entre
+    les deux laisse un agent SANS `model_<agent>.zip` du tout, ce qui est pire encore que le bug
+    d'origine. D'ou les deux drapeaux plutot qu'une deduction a partir des fichiers presents :
+    `model_<agent>.zip` absent ne dit pas s'il a ete ecarte ou jamais installe, et se tromper sur
+    ce point efface le modele au lieu de le rendre.
+    """
+
+    def __init__(self, model_path: str, log_fn: Callable[[str], None]):
+        self.model_path = model_path
+        #: Deplacements `(origine, nom ecarte)` decides AVANT d'etre executes, pour qu'une
+        #: interruption au milieu de la mise a l'ecart reste restaurable. Vide quand le run
+        #: precedent n'a laisse aucun artefact canonique.
+        self.set_aside_pairs: List[Tuple[str, str]] = []
+        #: Passe a True juste avant la premiere copie. Tant qu'il est False, `model_path` porte
+        #: encore le modele PRECEDENT (ou rien) : le retirer serait la destruction meme que
+        #: cette classe evite.
+        self.installed = False
+        #: Le sidecar TensorBoard existait AVANT la promotion mais n'a pas ete ecarte, parce qu'il
+        #: etait vide. La restauration doit alors le REECRIRE vide, pas le laisser absent.
+        self.empty_sidecar_left_in_place = False
+        #: Vrai si la restauration a du retirer une sauvegarde d'urgence produite APRES la
+        #: promotion. Journalise : l'utilisateur vient de lire « Progress saved to » a l'ecran.
+        self.removed_an_interrupted_save = False
+        self.log_fn = log_fn
+        self._rolled_back = False
+
+    @property
+    def set_aside_path(self) -> Optional[str]:
+        """Le nom sous lequel le MODELE precedent a ete ecarte — celui qu'un humain cherchera."""
+        for origin, archived in self.set_aside_pairs:
+            if origin == self.model_path:
+                return archived
+        return None
+
+    def rollback(self) -> None:
+        """Remet le depot dans l'etat d'avant la promotion. Idempotent."""
+        if self._rolled_back:
+            return
+        self._rolled_back = True
+
+        # TOUT verifier avant de deplacer quoi que ce soit — meme discipline que
+        # `refuse_to_overwrite_set_aside`. Un artefact introuvable des DEUX cotes (ni a sa place,
+        # ni sous son nom ecarte : un tiers l'a supprime pendant la commande) constate en cours de
+        # route laissait l'agent sans `model_<agent>.zip` du tout, les compagnons de l'ancien run
+        # en orphelins. Ne rien toucher est strictement mieux : le checkpoint promu reste en place,
+        # utilisable, et le message dit quoi remettre.
+        # `installed` distingue les deux lectures de « l'origine est la » : une fois le checkpoint
+        # installe, `model_<agent>.zip` existe parce que la PROMOTION l'a ecrit, pas parce que la
+        # mise a l'ecart n'a pas eu lieu — tous les deplacements sont termines a ce moment-la, donc
+        # chaque nom ecarte doit exister. Avant, au contraire, un artefact encore a sa place est le
+        # cas normal d'une coupure en cours de deplacement.
+        vanished = [
+            (origin, archived) for origin, archived in self.set_aside_pairs
+            if not os.path.exists(archived) and (self.installed or not os.path.exists(origin))
+        ]
+        if vanished:
+            raise FileNotFoundError(
+                "--resume-from : restauration impossible, "
+                + "; ".join(
+                    f"{origin} introuvable sous son nom d'origine comme sous son nom ecarte "
+                    f"({archived})" for origin, archived in vanished
+                )
+                + ". Un tiers les a deplaces ou supprimes pendant la commande. Rien n'a ete "
+                  "touche : le checkpoint promu est toujours en place."
+            )
+
+        if self.installed:
+            # Ne retirer QUE ce que la promotion a installe : le modele, ses deux compagnons et
+            # le sidecar. `best_model.zip` et le seuil de score robuste sont ecartes sans etre
+            # remplaces — les supprimer ici detruirait le run precedent.
+            remove_model_with_companions(self.model_path)
+            # Un Ctrl-C pendant `_setup_learn` (le premier `env.reset()` de SB3) passe par le
+            # gestionnaire d'interruption de `train_model`, qui sauve un
+            # `model_<agent>_interrupted.zip` — depuis les poids du checkpoint PROMU, avec un
+            # compte d'episodes nul. Le laisser derriere une restauration, c'est laisser un
+            # artefact reprenable de la lignee abandonnee a cote du modele rendu. Celui du run
+            # PRECEDENT, lui, a ete ecarte avec le reste : il revient par la boucle ci-dessous.
+            interrupted = _interrupted_model_path(self.model_path)
+            if os.path.exists(interrupted):
+                remove_model_with_companions(interrupted)
+                self.removed_an_interrupted_save = True
+            meta_path = _get_tensorboard_run_meta_path(self.model_path)
+            if self.empty_sidecar_left_in_place:
+                # Un sidecar VIDE n'est pas ecarte (il ne porte rien), donc rien ne le ramenera :
+                # le supprimer ferait mourir le `--append` suivant dans
+                # `_read_tensorboard_run_meta`, qui conseillerait un `--new` — c'est-a-dire de
+                # jeter le modele que cette restauration vient de sauver. On le REECRIT.
+                _write_tensorboard_run_meta(self.model_path, "")
+            elif os.path.exists(meta_path):
+                os.remove(meta_path)
+
+        if self.removed_an_interrupted_save:
+            # L'utilisateur vient de lire « 💾 Progress saved to: ..._interrupted.zip » : lui
+            # laisser croire que ce fichier existe encore, c'est l'envoyer sur un chemin mort.
+            self.log_fn(
+                f"↩️  --resume-from annule : la sauvegarde d'urgence "
+                f"{os.path.basename(_interrupted_model_path(self.model_path))} a ete retiree avec "
+                f"le reste — elle portait les poids du checkpoint promu, pas ceux du run rendu."
+            )
+
+        if not self.set_aside_pairs:
+            if self.installed:
+                self.log_fn(
+                    f"↩️  --resume-from annule : le checkpoint installe a ete retire de "
+                    f"{self.model_path} (aucun artefact canonique ne s'y trouvait avant la commande)."
+                )
+            return
+
+        restored = 0
+        for origin, archived in self.set_aside_pairs:
+            if os.path.exists(archived):
+                # La coupure a pu tomber au milieu de la mise a l'ecart : les fichiers pas encore
+                # deplaces sont deja a leur place. Ne ramener que ce qui a bouge n'est pas un repli
+                # anti-erreur, c'est la definition d'une restauration.
+                shutil.move(archived, origin)
+                restored += 1
+        self.log_fn(
+            f"↩️  --resume-from annule : {restored} artefact(s) canonique(s) du run precedent "
+            f"remis en place ({self.model_path} et ses compagnons). Le checkpoint promu n'a pas servi."
+        )
+
+
+#: Promotion `--resume-from` en attente de validation. Global parce que les deux extremites de la
+#: transaction sont a 2400 lignes l'une de l'autre — la promotion se fait au tout debut de `main()`,
+#: la validation au demarrage de l'entrainement, en traversant la construction des environnements,
+#: le curriculum et deux points d'entree d'entrainement distincts.
+_pending_resume_promotion: Optional[_ResumePromotion] = None
+
+
+def _commit_resume_promotion() -> None:
+    """Rend la promotion `--resume-from` DEFINITIVE : l'entrainement a commence pour de bon.
+
+    Declenche par `ResumePromotionCommitCallback` au PREMIER pas reellement joue, et pas depuis
+    les points d'entree d'entrainement : place juste avant `model.learn()`, il tombait avant
+    `_setup_learn`, donc avant le premier `env.reset()` de SB3. Un scenario illisible ou une
+    memoire insuffisante y levaient APRES le point de non-retour et sans qu'un seul pas ait
+    tourne : le `finally` de `main()` ne trouvait plus rien a defaire et laissait exactement
+    l'etat que la transaction existe pour empecher.
+
+    Passe ce point en revanche, restaurer l'ancien modele effacerait du travail reel
+    (cf. `_ResumePromotion`).
+    """
+    global _pending_resume_promotion
+    _pending_resume_promotion = None
+
+
+class ResumePromotionCommitCallback(BaseCallback):
+    """Valide la promotion `--resume-from` au premier pas d'entrainement effectif.
+
+    Pose par `setup_callbacks`, source UNIQUE des callbacks des deux points d'entree : la
+    validation voyage donc avec eux au lieu d'etre recopiee sur chaque site d'appel de `learn()`,
+    ou l'un des deux finissait par diverger de l'autre.
+    """
+
+    def _on_step(self) -> bool:
+        _commit_resume_promotion()
+        return True
+
+
+def _rollback_resume_promotion_if_pending() -> None:
+    """Annule la promotion `--resume-from` si l'entrainement n'a jamais demarre. Idempotent.
+
+    Appelee depuis le `finally` de `main()` : c'est le seul point qui voit TOUTES les sorties —
+    exception fatale, `return 1` anticipe, et interruption clavier, qui n'est pas une
+    `Exception`. Une promotion non validee y est forcement une promotion dont l'entrainement n'a
+    pas commence.
+    """
+    global _pending_resume_promotion
+    promotion = _pending_resume_promotion
+    if promotion is None:
+        return
+    _pending_resume_promotion = None
+    # Releve MAINTENANT : dans le `except` ci-dessous, `sys.exc_info()` designerait l'echec de
+    # restauration lui-meme, jamais ce qui se propageait deja — le test etait toujours faux.
+    already_propagating = sys.exc_info()[0] is not None
+    try:
+        promotion.rollback()
+    except OSError as restore_error:
+        # Une restauration qui echoue (droits, fichier verrouille, disque plein) ne doit pas
+        # EFFACER le diagnostic en cours : elle s'ajoute a lui. Relancer telle quelle remplacerait
+        # l'erreur fatale — ou l'interruption — par une trace de menage, et l'utilisateur perdrait
+        # a la fois la cause et l'endroit ou se trouve son modele. On la relance donc uniquement
+        # quand rien d'autre ne se propage, sinon elle serait avalee pour de bon.
+        # La restauration a pu s'arreter EN COURS : certains artefacts sont deja revenus a leur
+        # place, d'autres portent encore leur nom `_pre_resume_*`. Nommer les deux etats plutot
+        # qu'un seul chemin, qui aurait une chance sur deux de ne plus exister.
+        remaining = [
+            f"{os.path.basename(archived)} -> {os.path.basename(origin)}"
+            for origin, archived in promotion.set_aside_pairs
+            if os.path.exists(archived)
+        ]
+        encore_ecartes = ", ".join(remaining) if remaining else "(aucun : verifier le dossier)"
+        print(
+            f"🛑 --resume-from : RESTAURATION IMPOSSIBLE ({type(restore_error).__name__}: "
+            f"{restore_error}). Dans {os.path.dirname(promotion.model_path)}, renommer A LA MAIN "
+            f"les artefacts encore ecartes avant toute nouvelle commande sur cet agent : "
+            f"{encore_ecartes}"
+        )
+        if not already_propagating:
+            raise
+
+
 def _promote_checkpoint_for_resume(
     checkpoint_path: str, agent_key: str, config_loader: Any, log_fn=print
 ) -> str:
@@ -1740,6 +2064,9 @@ def _promote_checkpoint_for_resume(
     Le modele canonique deja en place est ECARTE, pas ecrase (meme principe que `--new`), et le
     run TensorBoard est remis a neuf : un checkpoint est un point ANTERIEUR, prolonger le run qui
     l'a produit ferait reculer les steps dans les courbes.
+
+    La mise a l'ecart est TRANSACTIONNELLE : elle arme `_pending_resume_promotion`, que le
+    `finally` de `main()` defait si l'entrainement n'a jamais demarre (cf. `_ResumePromotion`).
     """
     if not agent_key:
         raise ValueError("--resume-from exige --agent (chemin du modele canonique inconnu sinon)")
@@ -1770,18 +2097,44 @@ def _promote_checkpoint_for_resume(
         )
     os.makedirs(os.path.dirname(model_path), exist_ok=True)
 
-    if os.path.exists(model_path):
-        stamp = time.strftime("%Y%m%d-%H%M%S")
-        stem = os.path.splitext(model_path)[0]
-        set_aside = f"{stem}_pre_resume_{stamp}.zip"
-        shutil.move(model_path, set_aside)
-        # Les compagnons suivent le modele ecarte : restes en place, ils seraient lus comme ceux
-        # du modele installe a sa place (cf. ai/model_artifacts.py).
-        for previous, archived in zip(model_companion_paths(model_path), model_companion_paths(set_aside)):
-            if os.path.exists(previous):
-                shutil.move(previous, archived)
-        log_fn(f"📦 --resume-from : modele canonique precedent ecarte -> {stem}_pre_resume_{stamp}.zip")
+    global _pending_resume_promotion
+    # Armee avant la premiere ecriture, et pas seulement avant les copies : la mise a l'ecart
+    # ci-dessous DEPLACE le modele canonique, et une coupure a cet instant precis laisserait un
+    # agent sans modele du tout.
+    promotion = _ResumePromotion(model_path, log_fn)
+    _pending_resume_promotion = promotion
 
+    # MEME mise a l'ecart que `--new`, par la meme fonction : modele et compagnons, seuil de score
+    # robuste, best_model et ses stats, sidecar TensorBoard. N'ecarter que le modele et ses deux
+    # compagnons laissait au run repris le SEUIL du run abandonne — mesure plus loin dans
+    # l'entrainement, donc quasi imbattable : `save_best_robust` ne mettait plus jamais a jour le
+    # modele canonique, et le run entier tournait sans rien publier (V11 §0.36).
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    pairs = canonical_set_aside_pairs(model_path, f"pre_resume_{stamp}")
+    # VALIDER AVANT D'ARMER, jamais l'inverse : une collision d'horodatage leve, et le rollback
+    # declenche par cette levee prendrait l'archive PREEXISTANTE pour la sienne — il la
+    # deplacerait par-dessus le modele canonique vivant, detruisant a la fois le modele et la
+    # sauvegarde que ce garde protege.
+    refuse_to_overwrite_set_aside(pairs)
+    promotion.set_aside_pairs = pairs
+    promotion.empty_sidecar_left_in_place = os.path.exists(
+        _get_tensorboard_run_meta_path(model_path)
+    ) and not any(origin == _get_tensorboard_run_meta_path(model_path) for origin, _ in pairs)
+    set_aside_model = f"{os.path.splitext(model_path)[0]}_pre_resume_{stamp}.zip"
+
+    for origin, archived in promotion.set_aside_pairs:
+        shutil.move(origin, archived)
+    if promotion.set_aside_pairs:
+        where = (
+            f", dont le modele -> {os.path.basename(set_aside_model)}"
+            if promotion.set_aside_path else ""
+        )
+        log_fn(
+            f"📦 --resume-from : {len(promotion.set_aside_pairs)} artefact(s) canonique(s) du run "
+            f"precedent ecarte(s){where}"
+        )
+
+    promotion.installed = True
     shutil.copy2(checkpoint_path, model_path)
     shutil.copy2(checkpoint_vec_path, get_vec_normalize_path(model_path))
     shutil.copy2(checkpoint_run_state, get_run_state_path(model_path))
@@ -3463,7 +3816,10 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
                    global_start_time=None, agent=None, rewards_config_name=None,
                    silent_logs: bool = False):
     W40KEngine, _ = setup_imports()
-    callbacks = []
+    # En tete : c'est le premier pas joue qui rend une promotion `--resume-from` definitive, et
+    # rien d'autre. Sans lui dans la liste, la transaction resterait armee pendant tout le run et
+    # la moindre sortie non nominale rendrait le modele au point de depart (cf. `_ResumePromotion`).
+    callbacks: List[BaseCallback] = [ResumePromotionCommitCallback()]
     total_eps = 0
     resume_offset = require_non_negative_int(global_episode_offset, "global_episode_offset")
 
@@ -3916,7 +4272,7 @@ def train_model(model, training_config, callbacks, model_path, training_config_n
         
         # Use consistent naming: training_config_agent_key
         tb_log_name = f"{training_config_name}_{agent_name}"
-        
+
         model.learn(
             total_timesteps=total_timesteps,
             tb_log_name=tb_log_name,
@@ -3960,7 +4316,7 @@ def train_model(model, training_config, callbacks, model_path, training_config_n
         
         # Also remove interrupted file if it exists — WITH its per-model VecNormalize stats
         # (V11 §0.35) : supprimer le zip en laissant le pkl fabrique un artefact orphelin.
-        interrupted_path = model_path.replace('.zip', '_interrupted.zip')
+        interrupted_path = _interrupted_model_path(model_path)
         if os.path.exists(interrupted_path):
             try:
                 os.remove(interrupted_path)
@@ -3976,7 +4332,7 @@ def train_model(model, training_config, callbacks, model_path, training_config_n
     except KeyboardInterrupt:
         print("\n⏹️ Training interrupted by user")
         # Save current progress
-        interrupted_path = model_path.replace('.zip', '_interrupted.zip')
+        interrupted_path = _interrupted_model_path(model_path)
         model.save(interrupted_path)
         save_run_state(interrupted_path, int(metrics_tracker.episode_count))
         if save_vec_normalize(model.get_env(), interrupted_path):
@@ -4232,6 +4588,23 @@ def main():
     if args.resume_from:
         if args.new:
             raise ValueError("--resume-from et --new sont exclusifs (--new repartirait de zero)")
+        # `--resume-from` n'existe que pour REPRENDRE un entrainement : la promotion n'est
+        # definitive qu'au demarrage de celui-ci, donc combinee a un mode qui n'entraine pas elle
+        # serait installee puis defaite, pour rien. Le dire ici plutot que de laisser la commande
+        # aller au bout : evaluer un checkpoint se fait en le nommant directement.
+        non_training_modes = [
+            name for name, active in (
+                ("--test-only", args.test_only),
+                ("--replay", bool(args.replay)),
+                ("--convert-steplog", bool(args.convert_steplog)),
+            ) if active
+        ]
+        if non_training_modes:
+            raise ValueError(
+                f"--resume-from reprend un ENTRAINEMENT : il n'a pas de sens avec "
+                f"{', '.join(non_training_modes)}, qui n'entraine pas. Le checkpoint serait "
+                f"installe au chemin canonique puis remis en etat en sortie."
+            )
         args.append = True
 
     # AU PLUS TOT : avant le StepLogger, avant `node scripts/copy-configs.js`, avant toute
@@ -4758,6 +5131,9 @@ def main():
                 return 1
         
     except Exception as e:
+        # Avant le message d'erreur, pas apres : la restauration fait partie du diagnostic, et
+        # noyee sous la stacktrace elle laisserait croire que le depot est reste casse.
+        _rollback_resume_promotion_if_pending()
         print(f"💥 Fatal error: {e}")
         import traceback
         traceback.print_exc()
@@ -4769,7 +5145,18 @@ def main():
         # plus haut ne couvrent que les chemins nominaux ; sans ce balayage, une exception
         # laissait les workers etre tues par signal, c'est-a-dire exactement la perte que ce
         # chantier corrige.
-        close_all_training_envs()
+        #
+        # La promotion `--resume-from` passe AVANT ce balayage, et dans son propre `try` : le
+        # `except` ci-dessus ne voit ni le Ctrl-C (qui n'est pas une `Exception`) ni les
+        # `return 1` anticipes, et la fermeture des environnements attend jusqu'a 30 s par VecEnv
+        # — un second Ctrl-C pendant cette attente sortirait du `finally` sans avoir restaure
+        # quoi que ce soit. La restauration ne touche aucun environnement, elle ne coute rien,
+        # elle est idempotente : elle n'a aucune raison d'attendre son tour. Le `try/finally`
+        # garantit reciproquement que son echec ne prive pas les workers de leur fermeture.
+        try:
+            _rollback_resume_promotion_if_pending()
+        finally:
+            close_all_training_envs()
 
 if __name__ == "__main__":
     exit_code = main()
