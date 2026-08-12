@@ -2225,10 +2225,8 @@ def create_multi_agent_model(config, training_config_name, rewards_config_name, 
                 model_params_copy["learning_rate"] = _make_constant_lr_schedule(model_params_copy["learning_rate"])
             model = MaskablePPO(env=env, **model_params_copy)
         else:
-            if "tensorboard_log" not in model_params:
-                raise KeyError("model_params missing required 'tensorboard_log' field")
-            model.tensorboard_log = model_params["tensorboard_log"]
-            model.verbose = model_params["verbose"]
+            model.tensorboard_log = require_key(model_params, "tensorboard_log")
+            model.verbose = require_key(model_params, "verbose")
 
             _apply_curriculum_model_params(model, model_params)
 

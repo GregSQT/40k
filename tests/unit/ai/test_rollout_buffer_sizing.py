@@ -80,10 +80,15 @@ def test_every_n_steps_assignment_rebuilds_the_buffer() -> None:
         if not isinstance(target.value, ast.Name) or target.value.id != "model":
             continue
         parent_fn = _enclosing_function(tree, node.lineno)
+        # La reconstruction doit etre DANS LA MEME FONCTION et APRES l'affectation. La proximite
+        # de lignes seule (le controle d'avant) etait satisfaite par n'importe quel appel du
+        # module tombant a +/-3 lignes : elle aurait laisse passer une affectation dans une
+        # fonction qui ne reconstruit rien, des qu'une deuxieme fonction en appelait une.
         rebuilt = any(
             isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
             and n.func.id == "recreate_rollout_buffer"
-            and abs(n.lineno - node.lineno) <= 3
+            and n.lineno > node.lineno
+            and _enclosing_function(tree, n.lineno) == parent_fn
             for n in ast.walk(tree)
         )
         if not rebuilt:
