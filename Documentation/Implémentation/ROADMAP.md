@@ -363,6 +363,25 @@
   les **22 imports frère-à-frère** (`from _config_helpers import …`, `from test_… import …`)
   passent en chemin complet. Les 395 modules de `tests/` s'importent sans erreur. Vérification
   large passée (4878 unit + 61 intégration verts).
+- ✅ **La liste des sections du rapport de clôture n'existe plus en deux exemplaires**
+  (ouvert ET livré le 2026-08-12). Symptôme : l'ajout de la section COUVERTURE au hook
+  `.claude/hooks/rapport-cloture.sh` a laissé la puce « FORME DU RAPPORT » de `CLAUDE.md`
+  n'énumérer que LU/JUMEAU/RELIRE — un agent qui s'y fiait se faisait réclamer une section absente
+  de la liste qu'il venait de lire. Cause : la liste vivait DEUX fois, dans le texte et dans le
+  code, sans rien pour les relier. Correction : le hook LIT sa configuration dans deux lignes
+  déclaratives de `CLAUDE.md` (`SECTIONS EXIGÉES :` et `FICHIERS COMPTÉS COMME CODE :`) et n'en
+  garde aucune copie ; `--config` l'expose pour que le test la lise PAR le hook au lieu de
+  reparser le document. Toute lecture partielle lève au lieu de réclamer moins : entrée non
+  reconnue, ligne dédoublée, liste repliée sur la ligne suivante — sans quoi RELIRE disparaissait
+  en silence, donc le contrôle des chemins absolus en worktree (défaut du 2026-08-08).
+  `CLAUDE.md` compte désormais comme du **code** pour ce hook : le tour qui peut l'éteindre n'est
+  plus le seul à ne devoir aucun rapport. Deux troisièmes exemplaires supprimés au passage (la
+  phrase d'ouverture du FORMAT IMPOSÉ, l'énumération des puces COUVERTURE/RELIRE, qui renvoient
+  maintenant à la ligne déclarative).
+  Verrouillé par `tests/unit/scripts/test_hooks_garde_fous.py` : divergence hook ↔ gabarit dans
+  les deux sens, dérivation réelle (section, suffixe et nom de fichier inventés dans un
+  `CLAUDE.md` fabriqué), sept formes de lecture partielle, et une ligne voisine qui cite un item
+  sans être un repli. Chaque contrôle prouvé ROUGE par mutation.
 - **Conséquence immédiate : plus rien n'est gelé.** La consigne « ne rien lancer de cassant, aucun
   JSON de `config/` » tombe avec le run. Ce qui était différé à ce titre redevient faisable —
   notamment la `justification` d'`obs_size` (§5) et l'ajout d'un profil de validation P5 (§1 pt 6).
