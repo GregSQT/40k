@@ -191,7 +191,13 @@ def test_a_base_that_only_overlaps_the_zone_still_holds_it() -> None:
     """
     state = _state([("1", 1, (2, 1), 4), ("2", 1, (9, 9), 1)], socles={"1": 3})
 
-    assert (1, 1) not in {(2, 1)}, "le centre du socle doit être HORS de la zone A"
+    figurine = state["models_cache"]["1#0"]
+    centre = (int(figurine["col"]), int(figurine["row"]))
+
+    assert centre not in ZONE_A, (
+        "le centre du socle est DANS la zone : le test repasserait par l'hexe-centre et ne "
+        "verrouillerait plus l'empreinte"
+    )
     assert _surplus(state, me=1, sauf="2") == [4.0, 0.0]
 
 
