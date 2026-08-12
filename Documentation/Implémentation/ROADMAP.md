@@ -182,16 +182,26 @@
   pour que leur IDENTITÉ soit verrouillable : une mémoïsation ne se prouve pas par la valeur (elle
   rend la même dans les deux cas) mais par `Object.is` entre deux rendus. 17 tests, dont **trois
   verrous prouvés ROUGES par mutation** (un par hook).
-  PIÈGE NOMMÉ ET VERROUILLÉ : l'effet de dessin COMPLÈTE `boardConfig.wall_hexes` EN PLACE (rangée
-  du bas, colonnes impaires). Le tableau garde donc sa référence en changeant de contenu : le `Set`
-  des murs se mémoïse sur la référence ET la longueur, sans quoi le glisser de déploiement tiendrait
-  la rangée du bas pour libre. La mutation elle-même reste en place, cf. arbitrage ci-dessous.
-  RESTE : la validation navigateur (glisser de déploiement le long de la rangée du bas ; couleurs
-  d'objectif inchangées).
-  SIGNALÉ, NON TRAITÉ (hors périmètre, arbitrage à rendre) : la mutation en place de
-  `boardConfig.wall_hexes` rend le contenu de la config dépendante de l'ordre des passages de
-  l'effet — cinq appels LoS lisent ce tableau et n'y voient pas la même chose avant et après le
-  premier dessin. `wallsFp` (hachage djb2 des ~1 000 murs dans `bcKey`) reste calculé par rendu.
+  PIÈGE NOMMÉ : l'effet de dessin COMPLÉTAIT `boardConfig.wall_hexes` EN PLACE (rangée du bas,
+  colonnes impaires) — le tableau gardait sa référence en changeant de contenu, donc une
+  mémoïsation sur sa seule référence aurait laissé le glisser de déploiement tenir la rangée du bas
+  pour libre. TRANCHÉ PAR L'UTILISATEUR le 2026-08-12 (option B) et livré dans la foulée : la
+  mutation est SUPPRIMÉE, les murs effectifs deviennent une SOURCE UNIQUE mémoïsée
+  (`buildEffectiveLosWallHexes`, déjà la fonction par laquelle la LoS passait), consommée par le
+  dessin, le glisser et `bcKey`. Le `Set` de murs se mémoïse dès lors sur la seule référence.
+  À la mesure, la correction ne rapporte presque rien en temps (complétion 0,055 ms, empreinte djb2
+  0,002 ms par exécution d'effet) : elle vaut par la cohérence, pas par la vitesse.
+  ⚠️ CE QUI A ÉTÉ CORRIGÉ À L'ÉNONCÉ DE L'ARBITRAGE : il annonçait un changement de comportement
+  LoS. FAUX — `buildLosPreviewFromSource` refait la complétion lui-même, de façon idempotente et
+  sur une COPIE, et il reçoit déjà `wallHexesOverride`. Les cinq appels LoS rendaient donc le même
+  résultat avant et après la mutation, et n'ont PAS été touchés. Le seul effet réel de la mutation
+  était de faire dépendre le contenu de la config de l'ordre des passages de l'effet.
+  RESTE : la validation navigateur (glisser de déploiement le long de la rangée du bas ; murs et
+  couleurs d'objectif inchangés, en PvP comme en replay).
+  SIGNALÉ, NON TRAITÉ : quand `display_scale` ≠ 1, l'objet `boardConfig` de `BoardPvp` est
+  reconstruit par spread à CHAQUE rendu (IIFE non mémoïsée). Les mémos de ce chantier dépendent des
+  CHAMPS et y échappent, mais toute mémoïsation future qui s'accrocherait à l'objet serait
+  inopérante sur ces plateaux-là.
 
 - ✅ **PvE se figeait — cause identifiée et corrigée** (2026-08-11). Le symptôme était rapporté
   « en phase de mouvement » ; la mesure a montré la phase de **déploiement**, sur des unités

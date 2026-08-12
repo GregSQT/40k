@@ -60,6 +60,7 @@ import type { HexUnionMaskLayout } from "../utils/hexUnionBoundaryPolygon";
 import { drawHiddenEyeBadge } from "../utils/hiddenBadgeDraw";
 import { mountLosPolarClippedByVisibleUnion } from "../utils/losPolarMaskedByVisibleUnion";
 import {
+  buildEffectiveLosWallHexes,
   buildLosPreviewFromSource,
   hexDistOff,
   rangedPreviewMetric,
@@ -1216,6 +1217,10 @@ function normalizeZoneHex(h: unknown): [number, number] {
  */
 const EMPTY_CONTROLLERS: Record<string, number | null> = {};
 
+/** Murs vides, en constante de MODULE : même raison — la référence doit être stable tant que le
+ * plateau n'est pas chargé, sans quoi tout ce qui dérive des murs se recalcule à chaque rendu. */
+const EMPTY_WALL_HEXES: [number, number][] = [];
+
 export default function Board({
   units,
   loadEpoch,
@@ -1578,9 +1583,35 @@ export default function Board({
     objectivesOverride,
     boardConfig?.objective_hexes
   );
-  // `Set` des murs lu par la branche de glisser du déploiement. Mémoïsé sur `wall_hexes` ET sa
-  // longueur — l'effet de dessin complète ce tableau EN PLACE (cf. useBoardHexMemos).
-  const wallHexKeySetForDrag = useWallHexKeySet(boardConfig?.wall_hexes);
+  // Murs EFFECTIFS — SOURCE UNIQUE du dessin, du glisser de déploiement et de `bcKey`. L'override
+  // de replay remplace les murs du plateau, et la rangée du bas (colonnes impaires) est complétée :
+  // `buildEffectiveLosWallHexes` est la même fonction que celle par laquelle la LoS passe déjà
+  // (losPreviewHelpers), donc les murs affichés sont par construction ceux que la LoS oppose.
+  // L'effet de dessin en tenait sa propre copie et complétait `boardConfig.wall_hexes` EN PLACE :
+  // le contenu de la config dépendait alors de l'ordre des passages de l'effet.
+  // Les dépendances portent sur les CHAMPS, jamais sur `boardConfig` : quand `display_scale` vaut
+  // autre chose que 1, l'objet est reconstruit par spread à CHAQUE rendu (cf. `_rawBoardConfig`
+  // ci-dessus) — s'y accrocher rendrait cette mémoïsation inopérante sur ces plateaux-là.
+  const boardCols = boardConfig?.cols;
+  const boardRows = boardConfig?.rows;
+  const boardWallHexes = boardConfig?.wall_hexes;
+  const effectiveWallHexes = useMemo(
+    () =>
+      boardCols === undefined || boardRows === undefined
+        ? EMPTY_WALL_HEXES
+        : buildEffectiveLosWallHexes(boardCols, boardRows, boardWallHexes, wallHexesOverride),
+    [boardCols, boardRows, boardWallHexes, wallHexesOverride]
+  );
+  // `Set` des murs lu par la branche de glisser du déploiement.
+  const wallHexKeySetForDrag = useWallHexKeySet(effectiveWallHexes);
+  // Empreinte des murs pour `bcKey` (invalidation du calque statique, cf. boardRedrawDecision) :
+  // O(murs), donc mémoïsée sur la même source — elle ne change qu'au chargement d'un plateau ou
+  // d'un épisode de replay. La longueur entre dans l'empreinte : `hashHexList` rend le hachage
+  // BRUT, et sans elle deux listes de longueurs différentes pourraient se confondre.
+  const wallsFp = useMemo(
+    () => `${effectiveWallHexes.length}:${hashHexList(effectiveWallHexes)}`,
+    [effectiveWallHexes]
+  );
   // Contrôle d'objectif (terrain colouring) : suit l'état backend faisant autorité
   // game_state.objective_controllers (règle 14.02), indexé par id d'objectif et rafraîchi par le
   // moteur à chaque frontière phase/tour configurée (game_config.objective_control_check). On le
@@ -8426,22 +8457,6 @@ export default function Board({
     // ✅ ALL COLORS FROM CONFIG - NO FALLBACKS, RAISE ERRORS IF MISSING
     const ELIGIBLE_COLOR = parseColor(boardConfig.colors.eligible!);
 
-    // Use wallHexesOverride if provided (from replay), otherwise use config wall_hexes
-    const effectiveWallHexes: [number, number][] = wallHexesOverride
-      ? wallHexesOverride.map((w) => [w.col, w.row] as [number, number])
-      : boardConfig.wall_hexes || [];
-    const bottomRow = BOARD_ROWS - 1;
-    const wallHexKeySet = new Set<string>(effectiveWallHexes.map(([c, r]) => `${c},${r}`));
-    for (let col = 0; col < BOARD_COLS; col++) {
-      if (col % 2 === 1) {
-        const key = `${col},${bottomRow}`;
-        if (!wallHexKeySet.has(key)) {
-          wallHexKeySet.add(key);
-          effectiveWallHexes.push([col, bottomRow]);
-        }
-      }
-    }
-
     // ✅ ALL DISPLAY VALUES FROM CONFIG - NO FALLBACKS, RAISE ERRORS IF MISSING
     if (!boardConfig.display) {
       throw new Error("Missing required boardConfig.display configuration");
@@ -9374,7 +9389,7 @@ export default function Board({
         ...boardConfig.colors,
         attack: boardConfig.colors.attack || "#FF0000", // Ensure attack is defined
       },
-      wall_hexes: wallHexesOverride ? effectiveWallHexes : boardConfig.wall_hexes || [],
+      wall_hexes: effectiveWallHexes,
       objective_hexes: effectiveObjectiveHexes,
       objective_zones: effectiveObjectiveZones,
     } as BoardConfigForDrawBoard;
@@ -9585,8 +9600,6 @@ export default function Board({
     // Les murs sont dessinés dans le plateau statique (cachedWalls) : sans eux dans la clé, deux
     // boards de mêmes dimensions mais aux murs différents (replay : épisode N → N+1) réutilisent
     // le container de murs du précédent → murs fantômes à l'écran.
-    const wallHexes = boardConfigWithOverrides.wall_hexes ?? [];
-    const wallsFp = `${wallHexes.length}:${hashHexList(wallHexes)}`;
     const bcKey = `${boardConfigWithOverrides.cols}x${boardConfigWithOverrides.rows}|oc:${objectiveControlKeyForBoard}|oz:${objectiveZonesGeomKey}|w:${wallsFp}|dep:${phase === "deployment" ? 1 : 0}`;
     const canReuseStatic =
       staticBoardConfigKeyRef.current === bcKey && staticBoardRef.current !== null;
@@ -11618,6 +11631,8 @@ export default function Board({
     effectiveObjectiveZones,
     effectiveObjectiveHexes,
     wallHexKeySetForDrag,
+    effectiveWallHexes,
+    wallsFp,
     squadMovePlan,
     fleePreviewUnitId,
     squadMoveModelPoolRef,

@@ -127,17 +127,14 @@ export function useEffectiveObjectiveHexes(
 }
 
 /**
- * `Set` des murs, mémoïsé sur la référence du tableau ET SUR SA LONGUEUR.
+ * `Set` des murs, mémoïsé sur la référence du tableau.
  *
- * La longueur n'est pas une précaution : l'effet de dessin de `BoardPvp` COMPLÈTE `wall_hexes` en
- * place (rangée du bas, colonnes impaires) sur le tableau de `boardConfig` lui-même. Le tableau
- * garde donc sa référence en changeant de contenu, une fois, après le premier passage de l'effet.
- * Sans la longueur, ce `Set` resterait figé sur l'état d'avant complétion et le glisser de
- * déploiement tiendrait la rangée du bas pour libre. La complétion étant idempotente (elle est
- * gardée par un test d'appartenance), la longueur se stabilise dès le premier passage.
+ * La référence SUFFIT parce que la source est immuable : `buildEffectiveLosWallHexes` rend un
+ * tableau neuf et ne touche pas celui qu'elle reçoit (verrouillé par `losPreviewHelpers.test.ts`).
+ * L'effet de dessin de `BoardPvp` complétait autrefois `boardConfig.wall_hexes` EN PLACE — le
+ * tableau gardait sa référence en changeant de contenu, et ce `Set` serait resté figé sur l'état
+ * d'avant complétion, laissant le glisser de déploiement tenir la rangée du bas pour libre.
  */
 export function useWallHexKeySet(wallHexes: [number, number][] | undefined): Set<string> {
-  const length = wallHexes?.length ?? 0;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `length` est VOULUE — le tableau source est muté EN PLACE par l'effet de dessin, sa référence ne suffit donc pas (cf. docstring).
-  return useMemo(() => buildHexKeySet(wallHexes ?? EMPTY_HEX_TUPLES), [wallHexes, length]);
+  return useMemo(() => buildHexKeySet(wallHexes ?? EMPTY_HEX_TUPLES), [wallHexes]);
 }

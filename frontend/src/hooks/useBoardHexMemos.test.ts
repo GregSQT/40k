@@ -163,15 +163,16 @@ describe("useWallHexKeySet", () => {
     expect(Object.is(result.current, first)).toBe(true);
   });
 
-  // VERROU du piège nommé : l'effet de dessin COMPLÈTE `wall_hexes` en place (rangée du bas). Sans
-  // la longueur en dépendance, ce Set resterait figé sur l'état d'AVANT complétion et le glisser de
-  // déploiement tiendrait la rangée du bas pour libre.
-  it("tableau MUTÉ EN PLACE → Set recalculé, la case ajoutée est vue", () => {
+  // La mémoïsation se fie à la RÉFÉRENCE : la non-mutation de la source est verrouillée à sa
+  // source, sur `buildEffectiveLosWallHexes` (cf. losPreviewHelpers.test.ts).
+  it("tableau REMPLACÉ → Set recalculé, la case ajoutée est vue", () => {
     const walls: [number, number][] = [[1, 2]];
-    const { result, rerender } = renderHook(() => useWallHexKeySet(walls));
+    const { result, rerender } = renderHook(
+      (props: { walls: [number, number][] }) => useWallHexKeySet(props.walls),
+      { initialProps: { walls } }
+    );
     const first = result.current;
-    walls.push([7, 8]);
-    rerender();
+    rerender({ walls: [...walls, [7, 8]] });
     expect(Object.is(result.current, first)).toBe(false);
     expect(result.current.has("7,8")).toBe(true);
   });
