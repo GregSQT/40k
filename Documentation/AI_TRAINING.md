@@ -129,7 +129,7 @@
 ### Run Training
 ```bash
 # From project root (--agent obligatoire : argparse refuse la commande sans lui)
-python ai/train.py --agent <agent_key> --training-config default --rewards-config <agent_key> --scenario bot   # Entraînement standard (P1)
+python ai/train.py --agent <agent_key> --training-config default --rewards-config <agent_key> --scenario bot --new   # Entraînement standard (P1), depuis zéro
 python ai/train.py --agent <agent_key> --scenario bot --new --param agent_seat_mode p2                         # Entraînement en P2
 python ai/train.py --agent <agent_key> --scenario bot --new --param agent_seat_mode random                     # Entraînement seat aléatoire
 python ai/train.py --agent <agent_key> --scenario bot --test-only --step --test-episodes 50                    # Test rapide avec logs
@@ -140,6 +140,26 @@ python ai/train.py --agent <agent_key> --scenario bot --test-only --step --test-
 python ai/train.py --agent <agent_key> --training-config default --rewards-config <agent_key> --scenario bot --append
 ```
 (Le chemin du modèle est dérivé de l’agent : `ai/models/<agent_key>/model_<agent_key>.zip`.)
+
+### `--new` ou `--append` : obligatoire dès qu’un modèle existe
+
+Si `ai/models/<agent_key>/model_<agent_key>.zip` est déjà là, une commande d’**entraînement** qui
+ne porte ni `--new` ni `--append` est **refusée à l’entrée**, avant le moindre effet de bord :
+
+- `--new` repart de poids aléatoires ; le modèle en place et ses artefacts canoniques
+  (`best_model.zip`, `_vec_normalize.pkl`, `_run_state.json`, `_robust_meta.json`) sont **écartés
+  sous un nom horodaté**, jamais écrasés ni supprimés ;
+- `--append` **continue** le modèle en place (poids, compteur d’épisodes, stats VecNormalize) ;
+- `--resume-from` implique `--append`, il n’a donc pas à être accompagné.
+
+Les modes qui ne s’entraînent pas — `--test-only` / `--eval`, `--convert-steplog`, `--replay` — ne
+lisent aucun des deux drapeaux et n’en exigent aucun.
+
+Avant ce refus, les deux points d’entrée répondaient **l’inverse l’un de l’autre** à cette commande
+ambiguë : `--scenario bot` construisait un modèle **neuf** depuis des poids aléatoires puis
+l’enregistrait par-dessus le modèle entraîné **sans l’archiver** (seul signal : une ligne
+`⚠️ Model exists but neither --new nor --append specified`), tandis qu’un scénario unique
+rechargeait l’existant.
 
 ### Reprendre depuis un checkpoint périodique
 ```bash
@@ -470,7 +490,7 @@ During training or evaluation with `--step`, a `step.log` file is generated cont
 
 ```bash
 # Training with step logging enabled
-python ai/train.py --agent <agent_key> --training-config default --rewards-config <agent_key> --scenario bot --step
+python ai/train.py --agent <agent_key> --training-config default --rewards-config <agent_key> --scenario bot --new --step
 ```
 
 The log captures:
@@ -708,7 +728,8 @@ python ai/train.py \
   --agent <agent_unique_key> \
   --training-config default \
   --rewards-config <agent_unique_key> \
-  --scenario bot
+  --scenario bot \
+  --new
 ```
 
 ---
@@ -1308,7 +1329,7 @@ PV) et n'utilise du fichier que `w_objective`, ajouté à son score.
 
 ```bash
 # Automatic evaluation during training (configured in training_config callback_params)
-python ai/train.py --agent <agent_key> --training-config default --rewards-config <agent_key> --scenario bot
+python ai/train.py --agent <agent_key> --training-config default --rewards-config <agent_key> --scenario bot --new
 # bot_eval_freq, bot_eval_intermediate are in callback_params (e.g. 200 episodes, 30 per bot)
 
 # Manual evaluation (test-only, no training)
@@ -1566,7 +1587,7 @@ un `KeyError` explicite (`bot_evaluation.py`, contrôle `missing_randomness`).
 #### Starting Fresh Training
 
 ```bash
-python ai/train.py --agent <agent_key> --training-config default --rewards-config <agent_key> --scenario bot
+python ai/train.py --agent <agent_key> --training-config default --rewards-config <agent_key> --scenario bot --new
 ```
 
 The new settings will automatically be used if:
@@ -1586,7 +1607,7 @@ If your agent already learned bad habits:
 2. **Option B: Start fresh** (Recommended)
    - Faster to learn correct patterns
    - Use if current performance vs RandomBot is very poor (<40% win rate)
-   - Delete old model and restart training
+   - Relancer avec `--new` : le modèle existant est **écarté sous un nom horodaté**, pas supprimé
 
 ---
 
@@ -2217,7 +2238,7 @@ Les nouveaux tests vérifient que `hex_los_cache` est **intact** après un mouve
 
 ```bash
 # Force CPU usage
-python ai/train.py --agent <agent_key> --training-config default --rewards-config <agent_key> --scenario bot --device cpu
+python ai/train.py --agent <agent_key> --training-config default --rewards-config <agent_key> --scenario bot --new --mode CPU
 ```
 
 ---
@@ -2292,12 +2313,12 @@ python ai/train.py --agent <agent_key> --training-config default --rewards-confi
 
 ```bash
 # Training commands (replace <agent_key> e.g. Infantry_Troop_RangedTroop)
-python ai/train.py --agent <agent_key> --training-config debug --rewards-config <agent_key> --scenario bot    # Fast test
-python ai/train.py --agent <agent_key> --training-config default --rewards-config <agent_key> --scenario bot  # Standard training
+python ai/train.py --agent <agent_key> --training-config debug --rewards-config <agent_key> --scenario bot --new    # Fast test
+python ai/train.py --agent <agent_key> --training-config default --rewards-config <agent_key> --scenario bot --new  # Standard training (depuis zéro)
 python ai/train.py --agent <agent_key> --training-config default --rewards-config <agent_key> --scenario bot --append  # Continue le modèle canonique
 python ai/train.py --agent <agent_key> --scenario bot --resume-from ai/models/<agent_key>/ppo_checkpoint_640000_steps.zip  # Reprend un checkpoint
-python ai/train.py --agent <agent_key> --training-config default --rewards-config <agent_key> --scenario bot --step    # With step logging
-python ai/train.py --agent <agent_key> --scenario bot --device cpu   # Force CPU
+python ai/train.py --agent <agent_key> --training-config default --rewards-config <agent_key> --scenario bot --new --step    # With step logging
+python ai/train.py --agent <agent_key> --scenario bot --new --mode CPU   # Force CPU
 
 # Evaluation (no training)
 python ai/train.py --agent <agent_key> --scenario bot --test-only --test-episodes 20

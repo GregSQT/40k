@@ -217,6 +217,31 @@ def read_turns(path):
     return turns[1:]  # le premier segment précède tout prompt : ce n'est pas un tour
 
 
+def hors_bloc_de_code(lines):
+    """`(lignes hors des blocs ```, n° de ligne d'un bloc jamais refermé ou None)`.
+
+    La section PROMPTS contient des prompts COPIABLES, donc encadrés par des ``` : et un prompt
+    complet cite volontiers `RELIRE :` ou `/code-review <chemin relatif>`. Tant qu'on les lisait, le
+    hook reprochait au rapport des chemins qui n'étaient pas les siens. Retirer les blocs de code
+    ferme la catégorie entière, au lieu de courir derrière chaque forme.
+
+    Le second retour existe parce qu'une bascule seule MENT quand un ``` n'est jamais refermé
+    (PROMPTS tronqué, fence oubliée) : tout ce qui suit l'ouverture disparaît, RELIRE comprise, et
+    le hook rend « la section RELIRE est absente » sur un rapport qui la contient — un diagnostic
+    faux sur un défaut réel, donc la pire des sorties. Le nombre de lignes ne permet PAS de trancher
+    laquelle des deux lectures est la bonne (bloc ouvert, ou fence surnuméraire ouvrant un faux
+    bloc) : on ne devine pas, on le REMONTE à l'appelant, à qui il revient de ne rien avaler.
+    """
+    dehors, ouverture = [], None
+    for numero, ln in enumerate(lines, start=1):
+        if ln.lstrip().startswith("```"):
+            ouverture = None if ouverture is not None else numero
+            continue
+        if ouverture is None:
+            dehors.append(ln)
+    return dehors, ouverture
+
+
 def bloc_relire(lines, depart):
     """Lignes du bloc RELIRE, de son étiquette jusqu'à la section suivante ou la fin du message.
 
@@ -232,9 +257,12 @@ def bloc_relire(lines, depart):
     return bloc
 
 
-def relire_faults(report):
-    """Défauts de forme du bloc RELIRE. Liste vide = conforme."""
-    lines = report.splitlines()
+def relire_faults(lines):
+    """Défauts de forme du bloc RELIRE, sur les lignes HORS blocs ```. Liste vide = conforme.
+
+    Prend les lignes déjà filtrées par `hors_bloc_de_code` et non le message brut : le cas de la
+    fence orpheline se tranche UNE fois, en amont (`faults_of`), pour tous les contrôles à la fois.
+    """
     labels = [i for i, ln in enumerate(lines) if re.match(r"^\s*RELIRE\s*:", ln)]
     if not labels:
         return ["la section RELIRE est absente"]
@@ -261,8 +289,12 @@ def relire_faults(report):
         # donc décidable. Trier « ça ressemble à un chemin » ne l'est pas : `engine` (un répertoire
         # relatif, sans point ni slash) passait, et le défaut du 2026-08-08 restait ouvert.
         # Découpage qui HONORE les guillemets : un chemin contenant une espace existe dans ce dépôt
-        # (`shared/gameLogStructure - save.ts`), et sans ça il n'avait AUCUNE forme acceptable —
-        # nu il se coupait en trois mots relatifs, cité il gardait ses guillemets.
+        # (`shared/gameLogStructure - save.ts`), et sa SEULE forme acceptable est CITÉE — simples ou
+        # doubles, c'est aussi ce que rend `relire-en-attente.sh --liste` (shlex.quote), donc l'agent
+        # recopie une forme qui passe. Le nu reste refusé et ne peut pas être rattrapé : recoller un
+        # fragment sans `/` au chemin précédent ferait passer `/code-review /abs/x.py engine`, or ce
+        # `engine` relatif EST le défaut du 2026-08-08. Entre les deux lectures rien ne tranche, donc
+        # on garde celle qui protège, et on DIT comment écrire l'autre.
         try:
             arguments = shlex.split(ln)[1:]
         except ValueError:  # guillemets non fermés : on ne devine pas, on lit les mots
@@ -270,10 +302,21 @@ def relire_faults(report):
         chemins = [a for a in arguments if a not in ARGS_NON_CHEMIN and not a.isdigit()]
         relatifs = [a for a in chemins if not a.startswith("/")]
         if relatifs:
+            # Un fragment relatif QUI SUIT un chemin absolu, c'est presque toujours un chemin à
+            # espace écrit nu : sans cette phrase, le diagnostic rendu est « ABSOLUS — vu : -,
+            # save.ts », qui ne dit rien de la façon d'y remédier. Indice seulement, jamais un
+            # verdict : le refus reste le même dans les deux lectures.
+            morcele = chemins[0].startswith("/") and len(relatifs) < len(chemins)
             faults.append(
                 "tous les chemins du bloc RELIRE doivent être ABSOLUS — vu : "
                 + ", ".join(relatifs[:3])
                 + " (le verdict d'une passe se met sur la ligne `→`, pas sur la commande)"
+                + (
+                    " ; un chemin contenant une ESPACE se CITE ('…' ou \"…\"), sinon il se coupe "
+                    "en fragments relatifs — c'est la forme que rend `relire-en-attente.sh --liste`"
+                    if morcele
+                    else ""
+                )
             )
             break
     return faults
@@ -293,15 +336,32 @@ def faults_of(turn, cfg):
         and (f.endswith(tuple(cfg["code_suffixes"])) or os.path.basename(f) in cfg["code_basenames"])
         for f in edited
     )
+    # Les sections se cherchent HORS des blocs ```, comme les commandes du bloc RELIRE : un prompt
+    # copiable qui cite `LU :` satisfaisait l'exigence sans que le rapport la porte.
+    visibles, bloc_ouvert = hors_bloc_de_code(report.splitlines())
+    if bloc_ouvert is not None and du_code:
+        # DÉCISION : une fence jamais refermée rend le message MALFORMÉ, et c'est CE défaut qu'on
+        # rend — seul, et sans regarder plus loin. Les deux autres lectures ont été écartées :
+        # ignorer la fence orpheline ferait relire un prompt copiable comme s'il était le rapport
+        # (le défaut même que `hors_bloc_de_code` ferme) ; juger sur la moitié visible rendrait
+        # « la section RELIRE est absente » sur un message qui la porte. Se rabattre sur le message
+        # BRUT n'est pas une troisième voie : sur un tour doc-only, `relire_faults` n'est pas
+        # appelée, donc plus rien ne dirait la malformation et le hook se tairait entièrement —
+        # un garde-fou muet (T1). Le contrôle est donc ici, en amont de toute portée.
+        return [
+            f"un bloc ``` ouvert ligne {bloc_ouvert} n'est jamais refermé, donc la fin du message "
+            "n'est pas analysable (RELIRE comprise) : referme-le et rends le rapport en entier"
+        ]
+    cherchable = report if bloc_ouvert is not None else "\n".join(visibles)
     faults = []
     for name, portee in cfg["sections"]:
         if portee == "code" and not du_code:
             continue
         if name == "RELIRE":
             # Seule section dont la forme INTERNE est vérifiable : son absence y est déjà dite.
-            faults += relire_faults(report)
+            faults += relire_faults(visibles)
             continue
-        if not re.search(r"^\s*" + name + r"\s*:", report, re.MULTILINE):
+        if not re.search(r"^\s*" + name + r"\s*:", cherchable, re.MULTILINE):
             due = (
                 "elle est TOUJOURS due"
                 if portee == "toujours"

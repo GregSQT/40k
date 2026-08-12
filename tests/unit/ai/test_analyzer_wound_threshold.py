@@ -371,16 +371,21 @@ def test_a_composite_keeps_its_verdict_when_its_profiles_agree_on_the_threshold(
     assert attendu == 3, "le contrôle s'est aveuglé sur un composite pourtant sans ambiguïté"
 
 
-def test_a_composite_across_datasheets_resolves_each_profile_on_its_bearer():
+@pytest.mark.parametrize("is_melee,ligne", [
+    (True, "Choppa / Relic Weapon"), (False, "Bolter / Relic Bolter"),
+])
+def test_a_composite_across_datasheets_resolves_each_profile_on_its_bearer(is_melee, ligne):
     """Composite inter-datasheets : la clé de fusion moteur ne porte pas l'id de la figurine.
 
     « Choppa / Relic Weapon » frappé par le troupier ET le personnage rattaché : AUCUNE datasheet
     ne porte les deux profils. Exiger que chacune les résolve tous rendrait toutes ces lignes
-    non vérifiables ; les résoudre chacune sur son porteur donne ici F4 et F4 → 4+.
+    non vérifiables ; les résoudre chacune sur son porteur donne ici F4 et F4 → 4+. Les deux
+    phases, parce que la carte lue (`cc_` / `rng_`) est le SEUL écart entre les deux chemins :
+    un correctif posé d'un seul côté est le défaut le plus fréquent de ce dépôt.
     """
     attendu = aw.expected_wound_threshold(
         _State(), _config(unit_attack_limits=_COMPOSITE_LIMITS), "", 1, "Trooper",
-        "Choppa / Relic Weapon", "9", ("9#0", "9#2"), is_melee=True,
+        ligne, "9", ("9#0", "9#2"), is_melee=is_melee,
     )
     assert attendu == 4, (
         "un profil absent de la datasheet du socle a été pris pour un trou de donnée alors "
@@ -438,6 +443,17 @@ def test_a_striker_whose_datasheet_knows_no_profile_makes_the_line_unverifiable(
         _State(), _config(unit_attack_limits=_COMPOSITE_LIMITS),
         "Choppa", "Trooper", ("9#0", "9#2"), is_melee=True,
     ) is None, "une figurine dont la datasheet ignore l'arme a été silencieusement sautée"
+
+
+def test_a_named_model_absent_from_model_types_is_unverifiable():
+    """`[SHOOTER_MODELS:]` nomme un socle que `[MODEL_TYPES:]` ne décrit pas (segment optionnel).
+
+    Retomber sur la datasheet d'ESCOUADE mesurerait un personnage rattaché à l'arme du troupier :
+    faux « seuil de blessure faux », alors qu'on ne sait simplement pas qui a frappé.
+    """
+    assert aw.attacker_weapon_strengths(
+        _State(), _config(), "Choppa", "Trooper", ("9#7",), is_melee=True
+    ) is None, "un socle de type inconnu a été mesuré à la datasheet d'escouade"
 
 
 def test_a_composite_profile_unknown_to_every_striker_is_unverifiable():

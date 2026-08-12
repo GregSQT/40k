@@ -1,58 +1,47 @@
 """Verrous sur `pytest.ini` — la configuration du harnais qui rend des défauts VISIBLES.
 
 Une option retirée de `pytest.ini` ne casse rien : la suite reste verte, elle regarde simplement
-moins de choses. C'est le mode de disparition le plus silencieux qui soit, et le seul contrôle
-possible est de relire le fichier.
+moins de choses. C'est le mode de disparition le plus silencieux qui soit.
+
+Ces tests observent donc les filtres RÉELLEMENT ACTIFS pendant leur propre exécution, jamais une
+copie reparsée du fichier : mesuré le 2026-08-12, un contrôle qui relisait `pytest.ini` et
+rejouait ses filtres dans un `catch_warnings` restait vert sous `-p no:warnings`, c'est-à-dire
+dans la configuration exacte qu'il existait pour interdire.
 """
 
 from __future__ import annotations
 
-import configparser
 import warnings
-from pathlib import Path
 
 import pytest
 
-PYTEST_INI = Path(__file__).resolve().parents[3] / "pytest.ini"
 
-
-def _pytest_ini_section() -> dict:
-    parser = configparser.ConfigParser()
-    parser.read(PYTEST_INI, encoding="utf-8")
-    assert parser.has_section("pytest"), f"{PYTEST_INI} sans section [pytest]"
-    return dict(parser["pytest"])
-
-
-def test_deprecations_are_errors() -> None:
-    """Une API dépréciée par une dépendance doit faire ÉCHOUER la suite, pas la commenter.
+def test_a_deprecation_warning_is_an_error_here() -> None:
+    """L'avis de dépréciation d'une dépendance doit faire ÉCHOUER la suite, pas la commenter.
 
     Mesuré le 2026-08-12 : `get_schedule_fn()` était dépréciée depuis une version majeure entière
     de SB3 et s'affichait à chaque exécution, sans que rien ne la traite. Le training ne peut pas
-    jouer ce rôle (les appels ont lieu au chargement du modèle, la sortie est noyée) : la suite
-    est le seul endroit où ces avis sont lus.
+    jouer ce rôle (les appels ont lieu au chargement du modèle, la sortie est noyée dans le log) :
+    la suite est le seul endroit où ces avis sont lus.
+
+    Le message reproduit celui de SB3 : un `UserWarning` NU, pas un `DeprecationWarning`
+    (stable_baselines3/common/utils.py:166). Un filtre `error::DeprecationWarning` serait présent,
+    lisible, et n'attraperait rien.
     """
-    filtres = _pytest_ini_section().get("filterwarnings", "")
-    assert "error:.*is deprecated" in filtres, (
-        "pytest.ini a perdu son filtre `error:.*is deprecated` : les depreciations des "
-        "dependances redeviennent une ligne de resume que personne ne traite."
-    )
+    with pytest.raises(UserWarning, match="deprecated"):
+        warnings.warn("get_schedule_fn() is deprecated, please use FloatSchedule() instead")
 
 
-def test_the_deprecation_filter_matches_a_bare_userwarning() -> None:
-    """Le filtre doit porter sur le MESSAGE, pas sur `DeprecationWarning`.
-
-    VERT VACANT : c'est le piège exact de ce réglage. SB3 lève des `UserWarning` nus
-    (stable_baselines3/common/utils.py:166), donc un filtre `error::DeprecationWarning` serait
-    présent, lisible, et n'attraperait RIEN. Ce test construit l'avertissement tel que SB3
-    l'émet et vérifie que la règle configurée le transforme bien en erreur.
+def test_the_filter_survives_a_multiline_message() -> None:
+    """VERT VACANT : pytest confronte le message par `re.match`, où `.` ne franchit pas un saut de
+    ligne. gymnasium et SB3 écrivent des avis sur plusieurs lignes ; sans `(?s)` dans le motif, le
+    filtre est actif, le test ci-dessus passe, et ces avis-là continuent de défiler.
     """
-    brut = _pytest_ini_section().get("filterwarnings")
-    assert brut, "pytest.ini n'a plus de `filterwarnings` : rien ne transforme un avis en echec."
-    filtres = [ligne for ligne in brut.splitlines() if ligne.strip()]
-    with warnings.catch_warnings():
-        warnings.resetwarnings()
-        for ligne in filtres:
-            action, _, motif = ligne.partition(":")
-            warnings.filterwarnings(action.strip(), message=motif)
-        with pytest.raises(UserWarning, match="is deprecated"):
-            warnings.warn("get_schedule_fn() is deprecated, please use FloatSchedule() instead")
+    with pytest.raises(UserWarning):
+        warnings.warn("The environment is out of date.\nThis API will be deprecated in v3.")
+
+
+def test_the_filter_is_not_limited_to_the_exact_phrase_is_deprecated() -> None:
+    """« will be deprecated », « deprecation notice » : le même avis, une autre tournure."""
+    with pytest.raises(FutureWarning):
+        warnings.warn("deprecation of the old loader, use the new one", FutureWarning)

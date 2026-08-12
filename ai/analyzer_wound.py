@@ -103,17 +103,31 @@ def attacker_weapon_strengths(
     F4 au personnage rattaché) rend les DEUX, pour la même raison : ce sont deux Forces réelles
     de la ligne. Le verdict se joue sur le seuil, pas sur l'unicité de la Force.
 
-    ``None`` (non vérifiable) dans les deux seuls cas où la donnée manque VRAIMENT : une figurine
-    dont la datasheet ne connaît AUCUN profil de la ligne, ou un profil qu'AUCUNE d'elles ne
-    connaît — datasheet hors registre, arme absente, F symbolique du registre.
+    ``None`` (non vérifiable) dans les seuls cas où la donnée manque VRAIMENT : une figurine
+    nommée dont on ignore la datasheet (hors `[MODEL_TYPES:]`, ou type hors registre), une
+    figurine dont la datasheet ne connaît AUCUN profil de la ligne, ou un profil qu'AUCUNE
+    d'elles ne connaît — arme absente, F symbolique du registre.
     """
     from ai.analyzer_perfig import resolve_weapon_characteristic, weapon_profile_names
 
     per_unit_key = "cc_str_by_weapon" if is_melee else "rng_str_by_weapon"
-    candidates = shooters or (None,)
-    by_profile: Dict[str, set] = {p: set() for p in weapon_profile_names(weapon_display_name)}
-    for mid in candidates:
-        model_type = state.model_types.get(mid, attacker_unit_type) if mid else attacker_unit_type  # get allowed
+    if shooters:
+        # Socle NOMMÉ mais absent de `[MODEL_TYPES:]` : retomber sur la datasheet d'ESCOUADE
+        # mesurerait la F6 d'un personnage rattaché à la F4 du troupier — un faux « seuil de
+        # blessure faux », exactement ce que la résolution per-figurine existe pour éviter.
+        types = [state.model_types.get(mid) for mid in shooters]  # get allowed : hors segment
+        if any(t is None for t in types):
+            return None
+    else:
+        # Journal SANS `[SHOOTER_MODELS:]` : aucune figurine nommée, l'escouade est le seul
+        # porteur connu. C'est le mode dégradé assumé des vieux journaux, pas un repli.
+        types = [attacker_unit_type]
+    strengths = set()
+    # Profils que personne n'a encore résolus. Un profil ABSENT d'une datasheet est porté par une
+    # autre figurine de la ligne — cas normal d'un composite inter-datasheets. Le trou, c'est un
+    # profil qu'AUCUNE d'elles ne connaît, donc ce qui reste ici à la fin.
+    missing = set(weapon_profile_names(weapon_display_name))
+    for model_type in types:
         limits = config.unit_attack_limits.get(model_type)  # get allowed : type hors registre
         if limits is None:
             return None
@@ -123,24 +137,21 @@ def attacker_weapon_strengths(
         # sur-autoriser ; sur-évaluer une FORCE rend une valeur qu'AUCUNE figurine ne porte, donc
         # un faux « seuil de blessure faux » au lieu d'un honnête « non vérifiable ». Passer `{}`
         # en carte globale ne fermait que le premier étage.
-        resolved = resolve_weapon_characteristic(
+        connus = 0
+        for profile, value in resolve_weapon_characteristic(
             weapon_display_name, require_key(limits, per_unit_key)
-        )
-        if all(value is None for value in resolved.values()):
+        ).items():
+            if value is not None:
+                connus += 1
+                strengths.add(value)
+                missing.discard(profile)
+        if not connus:
             # Cette figurine a frappé avec l'arme de la ligne et sa datasheet n'en connaît AUCUN
             # profil : c'est un trou de donnée pour ELLE, pas une répartition entre porteurs. La
             # sauter reviendrait à rendre un verdict sur la seule autre figurine — le repli
             # d'escouade que ce module refuse, déguisé en per-figurine.
             return None
-        for profile, value in resolved.items():
-            if value is not None:
-                # Un profil ABSENT de cette datasheet est porté par une autre figurine de la
-                # ligne : c'est le cas normal d'un composite inter-datasheets, pas un trou. Le
-                # trou, c'est un profil qu'AUCUNE d'elles ne connaît — contrôlé après la boucle.
-                by_profile[profile].add(value)
-    if any(not values for values in by_profile.values()):
-        return None
-    return tuple(sorted({v for values in by_profile.values() for v in values}))
+    return None if missing else tuple(sorted(strengths))
 
 
 def target_bodyguard_toughness(state: Any, config: Any, target_id: str) -> Optional[int]:

@@ -260,6 +260,17 @@ def squads_min_edge_distance(
     return min_distance_between_sets(fp_a, fp_b, max_distance=max_distance)
 
 
+def weapon_profile_names(weapon_name: str) -> Tuple[str, ...]:
+    """Les PROFILS qu'un nom d'arme logué désigne — un seul, ou les composantes d'un « A / B ».
+
+    Le moteur fusionne sur une seule ligne les armes de même signature d'attaque et écrit leurs
+    noms joints (`shared_utils`, `" / ".join(g["weapon_names"])`). La ligne porte alors DEUX
+    profils, et tout ce qui se résout par arme doit le savoir.
+    """
+    name = weapon_name.strip()
+    return tuple(p.strip() for p in name.split(" / ")) if " / " in name else (name,)
+
+
 def resolve_weapon_value(
     weapon_name: str,
     per_unit_map: Dict[str, int],
@@ -276,10 +287,15 @@ def resolve_weapon_value(
     name = weapon_name.strip()
     if name in per_unit_map:
         return per_unit_map[name]
-    if " / " in name:
+    profiles = weapon_profile_names(name)
+    if len(profiles) > 1:
+        # Découpage par `weapon_profile_names`, SEUL site qui connaisse la grammaire du nom
+        # composite. Le refaire ici à la main, c'était deux définitions du séparateur à quinze
+        # lignes d'écart : celle du jumeau `resolve_weapon_characteristic` suivrait le jour où le
+        # moteur change le joint, celle-ci non, et les deux résolveurs du MÊME nom logué
+        # divergeraient en silence.
         vals = []
-        for part in name.split(" / "):
-            part = part.strip()
+        for part in profiles:
             v = per_unit_map.get(part)
             if v is None:
                 v = global_map.get(part)
@@ -291,17 +307,6 @@ def resolve_weapon_value(
     if name in global_map:
         return global_map[name]
     return None
-
-
-def weapon_profile_names(weapon_name: str) -> Tuple[str, ...]:
-    """Les PROFILS qu'un nom d'arme logué désigne — un seul, ou les composantes d'un « A / B ».
-
-    Le moteur fusionne sur une seule ligne les armes de même signature d'attaque et écrit leurs
-    noms joints (`shared_utils`, `" / ".join(g["weapon_names"])`). La ligne porte alors DEUX
-    profils, et tout ce qui se résout par arme doit le savoir.
-    """
-    name = weapon_name.strip()
-    return tuple(p.strip() for p in name.split(" / ")) if " / " in name else (name,)
 
 
 def resolve_weapon_characteristic(

@@ -383,7 +383,7 @@ combattent deux fois » annoncé par la version du 2026-08-09 est réfuté** : `
 instrumenté sur 1427 phases n'a jamais été appelé deux fois pour la même ; 55 « doublons » sur
 12 épisodes, dont zéro vrai.
 
-### §1.9 SEUIL DE BLESSURE — section neuve (2026-08-10, `ai/analyzer_wound.py`, 292 l.)
+### §1.9 SEUIL DE BLESSURE — section neuve (2026-08-10, `ai/analyzer_wound.py`, 307 l.)
 
 Le journal écrit le seuil qu'il a réellement appliqué (`Wound 4(4+)`) ; rien ne le vérifiait. Le
 seuil ATTENDU est recalculé depuis la donnée et comparé au seuil imprimé :
@@ -396,7 +396,7 @@ seuil ATTENDU est recalculé depuis la donnée et comparé au seuil imprimé :
                                              tombent sur la même valeur)
   + bonus de Force en vigueur               (`waaagh_melee_str`, MÊLÉE seulement — 08.04)
   vs E de la cible                          (19.02 : plus haute E des BODYGUARDS, jamais celle du
-                                             leader rattaché — `target_bodyguard_toughness:142`)
+                                             leader rattaché — `target_bodyguard_toughness:157`)
   → `engine.combat_utils.calculate_wound_target`   (la fonction du MOTEUR, jamais une copie)
   − 1 si `[OATH OF MOMENT]` suit le segment `Wound` (plancher 2+)
 
@@ -404,7 +404,7 @@ seuil ATTENDU est recalculé depuis la donnée et comparé au seuil imprimé :
 |---|---|---|---|
 | 63 | `shoot_wound_threshold_mismatch` | `analyzer_wound.py`, appelé `shoot_handler.py` | le seuil imprimé au TIR contredit F/E + bonus |
 | 64 | `fight_wound_threshold_mismatch` | idem, appelé `fight_handler.py` | jumeau MÊLÉE |
-| — | `*_wound_threshold_unverifiable` | `:240` | donnée absente (arme irrésolue, datasheet hors registre, deux profils sur la même ligne, tous les bodyguards morts) — compté à part, **jamais en erreur** |
+| — | `*_wound_threshold_unverifiable` | `:296` | donnée absente (arme irrésolue, socle hors `[MODEL_TYPES:]`, datasheet hors registre, tous les bodyguards morts) ou profils de la ligne qui n'attendent PAS le même seuil — compté à part, **jamais en erreur** |
 
 Deux pièges nommés dans le code, tous deux mesurés :
 - `[OATH OF MOMENT]` est aussi posé sur la relance de TOUCHE. Le chercher n'importe où dans la

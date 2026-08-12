@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 from pathlib import Path
@@ -430,22 +431,85 @@ def test_un_prompt_copiable_n_est_pas_pris_pour_le_bloc_relire(tmp_path: Path) -
 
     Balayer tout le message reprochait au rapport des chemins relatifs qui n'étaient pas les siens.
     """
-    avec_prompts = RAPPORT_CONFORME + (
-        "PROMPTS :\n  1. relire le module\n     ```\n     /code-review engine/y.py\n     ```\n"
+    prompt_copiable = (
+        "PROMPTS :\n  1. relire le module\n     ```\n     RELIRE :\n"
+        "     /code-review engine/y.py\n     /simplify engine/y.py\n     ```\n"
     )
-    assert _rapport(tmp_path, _user("corrige"), _edit("engine/x.py"), _say(avec_prompts)) is None
+    # PROMPTS précède RELIRE dans le gabarit : le bloc du prompt est rencontré EN PREMIER, donc
+    # « prendre la première étiquette » ne suffit pas — ce sont les ``` qui tranchent.
+    assert _rapport(
+        tmp_path, _user("corrige"), _edit("engine/x.py"),
+        _say(prompt_copiable + RAPPORT_CONFORME),
+    ) is None
 
 
-def test_un_chemin_absolu_contenant_une_espace_est_acceptable(tmp_path: Path) -> None:
+PROMPT_TRONQUE = "PROMPTS :\n  1. corriger le module\n     ```\n     lire engine/y.py\n"
+
+
+@pytest.mark.parametrize("avant", [True, False])
+def test_un_bloc_de_code_non_referme_est_signale_et_non_avale(tmp_path: Path, avant: bool) -> None:
+    """Une fence ``` jamais refermée faisait disparaître TOUT ce qui la suit, RELIRE comprise.
+
+    Le hook répondait alors « la section RELIRE est absente » sur un rapport qui la contenait :
+    diagnostic faux sur un défaut réel, donc l'agent corrigeait la mauvaise chose. Le paramètre
+    `avant=False` est le cas qui le prouve : RELIRE y est complète AVANT le bloc ouvert, et rien
+    dans le message ne manque — seule la fence est en trop.
+    """
+    message = PROMPT_TRONQUE + RAPPORT_CONFORME if avant else RAPPORT_CONFORME + PROMPT_TRONQUE
+    contexte = _rapport(tmp_path, _user("corrige"), _edit("engine/x.py"), _say(message))
+    assert contexte is not None and "jamais refermé" in contexte
+    assert "RELIRE est absente" not in contexte
+
+
+def test_un_bloc_non_referme_est_signale_meme_sans_fichier_de_code(tmp_path: Path) -> None:
+    """Le cas où le hook se TAISAIT : tour doc-only, donc RELIRE hors de portée.
+
+    Un message doc-only dont la fence orpheline enferme `LU :` et `JUMEAU :` n'a AUCUNE section
+    visible hors des blocs, et le contrôle de RELIRE — seul endroit qui disait la malformation —
+    n'est pas exécuté. Le hook ne sortait alors rien du tout : garde-fou muet, indistinguable d'un
+    rapport conforme.
+    """
+    message = "Fait.\n\nPROMPTS :\n  1. sujet\n     ```\n     LU : x\n     JUMEAU : grep -> 0\n"
+    contexte = _rapport(tmp_path, _user("corrige la doc"), _edit("Documentation/x.md"),
+                        _say(message))
+    assert contexte is not None and "jamais refermé" in contexte
+
+
+A_ESPACE = "/home/greg/40k/shared/gameLogStructure - save.ts"
+
+
+@pytest.mark.parametrize("forme", [f"'{A_ESPACE}'", f'"{A_ESPACE}"'])
+def test_un_chemin_absolu_contenant_une_espace_est_acceptable_s_il_est_cite(
+    tmp_path: Path, forme: str
+) -> None:
     """`shared/gameLogStructure - save.ts` existe dans ce dépôt : il doit avoir une forme écrivable.
 
-    Nu, il se coupait en trois mots relatifs ; cité, il gardait ses guillemets. Aucune des deux
-    formes ne passait, donc le hook réclamait sans fin sur un rapport correct.
+    Cité, il gardait ses guillemets et passait pour relatif — donc le hook réclamait sans fin sur
+    un rapport correct. Les DEUX guillemets comptent : `relire-en-attente.sh --liste` rend du
+    `shlex.quote`, qui produit des guillemets SIMPLES, et l'agent recopie cette sortie telle quelle ;
+    un agent qui écrit le chemin à la main met plutôt des doubles.
     """
-    espace = RAPPORT_CONFORME.replace(
-        "/home/greg/40k/engine/x.py", '"/home/greg/40k/shared/gameLogStructure - save.ts"'
-    )
+    espace = RAPPORT_CONFORME.replace("/home/greg/40k/engine/x.py", forme)
     assert _rapport(tmp_path, _user("corrige"), _edit("engine/x.py"), _say(espace)) is None
+
+
+def test_un_chemin_a_espace_ECRIT_NU_est_refuse_avec_le_moyen_de_le_corriger(
+    tmp_path: Path,
+) -> None:
+    """DÉCISION : le nu reste refusé, et le refus DIT qu'il faut citer.
+
+    Le rattraper — recoller au chemin précédent tout fragment sans `/` — ferait passer
+    `/code-review /abs/x.py engine`, c'est-à-dire le chemin relatif du 2026-08-08 exactement.
+    Rien ne distingue les deux lectures, donc on garde celle qui protège. Reste que le diagnostic
+    nu (« ABSOLUS — vu : -, save.ts ») n'indiquait pas la forme à écrire : c'est ce que verrouille
+    la seconde assertion.
+    """
+    nu = RAPPORT_CONFORME.replace("/home/greg/40k/engine/x.py", A_ESPACE)
+    contexte = _rapport(tmp_path, _user("corrige"), _edit("engine/x.py"), _say(nu))
+    assert contexte is not None and "ABSOLUS" in contexte
+    # Le libellé EXACT du hook : `"CITE" in contexte.upper()` était satisfait par le mot
+    # « explicite » de n'importe quel autre diagnostic, donc l'assertion ne regardait rien.
+    assert "ESPACE se CITE" in contexte
 
 
 def test_un_repertoire_relatif_est_refuse_comme_un_fichier(tmp_path: Path) -> None:
@@ -614,6 +678,28 @@ def _en_attente(hook: Path, session: str = S1) -> list[str]:
     return [ln for ln in proc.stdout.splitlines() if ln.strip()]
 
 
+def _fichier_liste(tmp_path: Path, session: str = S1) -> Path:
+    """Le fichier de liste, tel que le hook le nomme. Sa disposition ne se recopie pas de test en
+    test : elle vient de `relire-en-attente.sh` (`DOSSIER` + `fichier_de_session`).
+
+    Normalisé, parce que le session_id peut porter des `..` : le chemin rendu est alors celui où
+    l'écriture atterrit RÉELLEMENT, hors du bac, et pas une forme qui le laisse croire dedans.
+    """
+    return Path(os.path.normpath(tmp_path / ".claude" / "relire-en-attente" / f"{session}.txt"))
+
+
+def _lignes_brutes(tmp_path: Path, session: str = S1) -> list[str]:
+    """Le CONTENU du fichier de liste, sans passer par `--liste`, `[]` s'il n'existe pas.
+
+    La lecture du hook refiltre ce qu'elle rend : un contrôle qui s'en tient à `--liste` ne voit
+    donc pas ce que l'ÉCRITURE a laissé entrer (prouvé par mutation le 2026-08-12).
+    """
+    fichier = _fichier_liste(tmp_path, session)
+    if not fichier.exists():
+        return []
+    return fichier.read_text(encoding="utf-8").splitlines()
+
+
 def test_un_fichier_de_code_entre_dans_la_liste(tmp_path: Path) -> None:
     hook = _bac(tmp_path)
     assert _edite(hook, str(tmp_path / "engine" / "x.py")) == ""  # aucun bruit sur stdout
@@ -639,39 +725,63 @@ def test_les_chemins_notes_sont_toujours_absolus(tmp_path: Path) -> None:
     ]
 
 
+@pytest.mark.parametrize("section", ["LU", "JUMEAU", "COUVERTURE"])
+def test_une_section_citee_dans_un_prompt_ne_tient_pas_lieu_de_rapport(
+    tmp_path: Path, section: str
+) -> None:
+    """Jumeau du filtrage des commandes : un prompt copiable cite volontiers `LU :` ou `JUMEAU :`.
+
+    Cherchées dans le message brut, ces citations satisfaisaient l'exigence sans que le rapport
+    porte la ligne — le contrôle disait alors « conforme » sur un rapport amputé.
+    """
+    ampute = "\n".join(
+        ln for ln in RAPPORT_CONFORME.splitlines() if not ln.startswith(section)
+    )
+    avec_prompt = ampute + f"\nPROMPTS :\n  1. sujet\n     ```\n     {section} : ...\n     ```\n"
+    contexte = _rapport(tmp_path, _user("corrige"), _edit("engine/x.py"), _say(avec_prompt))
+    # Le diagnostic NOMMÉ, pas la simple présence du mot : `"LU" in contexte` est satisfait par
+    # « ABSOLUS » d'un défaut voisin, donc un autre défaut sur la même entrée verdissait le test
+    # sans que la section manquante ait jamais été réclamée.
+    assert contexte is not None and f"la ligne {section} est absente" in contexte
+
+
+def test_un_chemin_a_espace_sort_sous_une_forme_que_le_voisin_accepte(tmp_path: Path) -> None:
+    """Les deux hooks doivent se boucler : ce que `--liste` produit, `rapport-cloture.sh` l'accepte.
+
+    Sans échappement, `.../gameLogStructure - save.ts` sortait nu, se coupait en trois mots relatifs
+    à la relecture du rapport, et l'agent n'avait aucune forme acceptable à écrire.
+    """
+    hook = _bac(tmp_path)
+    _edite(hook, str(tmp_path / "shared" / "gameLogStructure - save.py"))
+    ligne = _cmd(hook, "--liste", S1).stdout.strip()
+    assert " " in ligne, "le cas testé exige un chemin à espace"
+    rapport = RAPPORT_CONFORME.replace("/home/greg/40k/engine/x.py", ligne)
+    # Le fichier ÉDITÉ est dans le dépôt réel : sans ça, RELIRE ne serait pas due et le test ne
+    # regarderait rien (le contrôle des chemins n'est atteint que si un fichier de code a bougé).
+    assert _rapport(tmp_path, _user("corrige"), _edit("engine/x.py"), _say(rapport)) is None
+
+
 def test_un_fichier_hors_liste_de_code_n_engage_aucune_relecture(tmp_path: Path) -> None:
     hook = _bac(tmp_path)
     _edite(hook, str(tmp_path / "Documentation" / "x.md"))
     assert _cmd(hook, "--liste", S1).returncode != 0  # aucune liste n'a été créée
 
 
-def test_un_fichier_hors_depot_n_entre_pas(tmp_path: Path) -> None:
+@pytest.mark.parametrize("deja_ouverte", [False, True])
+def test_un_fichier_hors_depot_n_entre_pas(tmp_path: Path, deja_ouverte: bool) -> None:
     """Constaté le 2026-08-12 : trois scripts jetables du scratchpad attendaient d'être relus.
 
-    Le contrôle porte sur le FICHIER de liste, pas seulement sur ce que `--liste` rend : la lecture
-    refiltre (cf. le test des listes d'une version antérieure), donc s'en tenir à `--liste` laissait
-    passer la suppression du filtre à l'ÉCRITURE — vérifié par mutation, la version qui écrivait le
-    scratchpad dans la liste restait verte.
+    DEUX états d'écriture, parce que `ajouter()` ne fait pas le même geste : liste absente (le
+    fichier est créé) et liste déjà ouverte (le chemin est concaténé). Le contrôle porte sur le
+    FICHIER, pas sur ce que `--liste` rend : la lecture refiltre, donc une version qui écrivait
+    le scratchpad restait verte tant qu'on n'inspectait que `--liste` (vérifié par mutation).
     """
     hook = _bac(tmp_path)
-    dehors = tmp_path.parent / "scratchpad_migrate.py"
-    _edite(hook, str(dehors))
-    assert _cmd(hook, "--liste", S1).returncode != 0
-    liste = tmp_path / ".claude" / "relire-en-attente" / f"{S1}.txt"
-    assert not liste.exists(), liste.read_text(encoding="utf-8")
-
-
-def test_un_fichier_hors_depot_ne_s_ajoute_pas_a_une_liste_existante(tmp_path: Path) -> None:
-    """L'écriture est aussi le cas « liste déjà ouverte » : le fichier existe, l'ajout doit être nu.
-
-    Sans ce cas, le scratchpad entrait bien dans le fichier de liste et n'en ressortait que par le
-    filtre de LECTURE — donc invisible tant qu'on n'inspecte que `--liste`.
-    """
-    hook = _bac(tmp_path)
-    _edite(hook, str(tmp_path / "engine" / "x.py"))
+    deja = [str(tmp_path / "engine" / "x.py")] if deja_ouverte else []
+    for chemin in deja:
+        _edite(hook, chemin)
     _edite(hook, str(tmp_path.parent / "scratchpad_migrate.py"))
-    liste = tmp_path / ".claude" / "relire-en-attente" / f"{S1}.txt"
-    assert liste.read_text(encoding="utf-8").splitlines() == [str(tmp_path / "engine" / "x.py")]
+    assert _lignes_brutes(tmp_path) == deja
 
 
 def test_ce_qui_compte_comme_du_code_vient_de_claude_md(tmp_path: Path) -> None:
@@ -723,6 +833,31 @@ def test_vider_garde_ce_qui_est_arrive_apres_le_liste(tmp_path: Path) -> None:
     _edite(hook, str(tmp_path / "engine" / "corrige_par_la_review.py"))
     assert _cmd(hook, "--vider", S1).returncode == 0
     assert _en_attente(hook) == [str(tmp_path / "engine" / "corrige_par_la_review.py")]
+
+
+def test_le_message_de_liste_vide_ne_compte_pas_ses_propres_fichiers(tmp_path: Path) -> None:
+    """Compter sa propre liste et l'annoncer « d'autres sessions » envoie chercher un mauvais id."""
+    hook = _bac(tmp_path)
+    _edite(hook, str(tmp_path / "engine" / "x.py"))
+    _en_attente(hook)
+    _cmd(hook, "--vider", S1)
+    _edite(hook, str(tmp_path / "engine" / "y.py"), session=S2)
+    (tmp_path / ".claude" / "relire-en-attente" / f"{S1}.txt").write_text("", encoding="utf-8")
+    assert "1 autre(s) session(s)" in _cmd(hook, "--liste", S1).stderr
+
+
+def test_vider_echappe_ce_qu_il_rend_comme_le_liste(tmp_path: Path) -> None:
+    """`--vider` rend ce qui reste à relire : cette sortie ira dans le prochain bloc RELIRE.
+
+    Jumeau de `commande_liste` : la sortir nue redonnait un chemin à espace que le hook voisin
+    refuse, dans le fichier même dont le commentaire dit avoir fermé ce défaut.
+    """
+    hook = _bac(tmp_path)
+    _edite(hook, str(tmp_path / "engine" / "x.py"))
+    _en_attente(hook)
+    _edite(hook, str(tmp_path / "shared" / "gameLogStructure - save.py"))
+    reste = _cmd(hook, "--vider", S1).stdout.strip()
+    assert reste == shlex.quote(str(tmp_path / "shared" / "gameLogStructure - save.py"))
 
 
 def test_vider_garde_un_fichier_que_la_review_vient_de_corriger(tmp_path: Path) -> None:
@@ -802,7 +937,7 @@ def test_une_liste_ecrite_par_une_version_anterieure_est_reparee_a_la_lecture(
     relisent des scripts du scratchpad.
     """
     hook = _bac(tmp_path)
-    liste = tmp_path / ".claude" / "relire-en-attente" / f"{S1}.txt"
+    liste = _fichier_liste(tmp_path)
     liste.parent.mkdir(parents=True)
     liste.write_text(
         f"engine/legacy.py\n/tmp/ailleurs/scratch.py\n{tmp_path / 'engine' / 'x.py'}\n",
@@ -822,7 +957,7 @@ def test_doublon_arrive_par_concurrence_est_gomme_a_la_lecture(tmp_path: Path) -
     """
     hook = _bac(tmp_path)
     _edite(hook, str(tmp_path / "engine" / "x.py"))
-    liste = tmp_path / ".claude" / "relire-en-attente" / f"{S1}.txt"
+    liste = _fichier_liste(tmp_path)
     liste.write_text(liste.read_text(encoding="utf-8") * 2, encoding="utf-8")
     assert _en_attente(hook) == [str(tmp_path / "engine" / "x.py")]
 
@@ -866,7 +1001,14 @@ def test_un_id_non_conforme_est_refuse_a_l_ecriture_aussi(tmp_path: Path, mauvai
     hook = _bac(tmp_path)
     sortie = _edite(hook, str(tmp_path / "engine" / "x.py"), session=mauvais_id)
     assert "invalide" in json.loads(sortie)["hookSpecificOutput"]["additionalContext"]
-    assert not list((tmp_path / ".claude").glob("relire-en-attente/*.txt"))
+    # Le chemin est CALCULÉ par paramètre, avec la formule du hook : `../../../evil` remonte de
+    # trois crans depuis le dossier des listes et atterrit DEHORS, là où aucun balayage du bac ne
+    # le voit. Un contrôle qui ne regarde que le bac reste vert sur le hook non corrigé pour
+    # exactement le cas le plus grave — c'est le vert vacant que ce calcul supprime.
+    ecrit = _fichier_liste(tmp_path, mauvais_id)
+    assert not ecrit.exists(), f"liste écrite en {ecrit}"
+    # Et nulle part ailleurs dans le bac, au cas où le nom retenu ne serait pas celui calculé.
+    assert not list(tmp_path.rglob("*.txt"))
 
 
 def test_session_id_qui_est_un_chemin_est_refuse(tmp_path: Path) -> None:

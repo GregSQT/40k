@@ -30,6 +30,8 @@
 #
 # Usage hors hook, pour l'agent :
 #   relire-en-attente.sh --liste <session_id>  -> un chemin par ligne, prêt pour le bloc RELIRE
+#                                                 (cité s'il porte une espace : la seule forme que
+#                                                  `rapport-cloture.sh` accepte pour ces chemins-là)
 #   relire-en-attente.sh --vider <session_id>  -> à n'appeler QU'APRÈS avoir lancé les passes
 # Le session_id est TOUJOURS requis : plusieurs sessions travaillent en parallèle dans ce dépôt, et
 # le déduire des listes présentes revenait à effacer celle d'une autre session quand elle était la
@@ -37,6 +39,7 @@
 import json
 import os
 import re
+import shlex
 import sys
 from importlib import util
 from importlib.machinery import SourceFileLoader
@@ -207,13 +210,26 @@ def commande_liste(session_id):
     """
     en_attente = lire(fichier_de_session(session_id))
     if not en_attente:
+        # Sans ÉNUMÉRER les autres listes : ce serait inviter la devinette que cette conception
+        # interdit, et que `--vider` rend destructrice.
+        # Ne compte que ce qui appartient VRAIMENT à d'autres sessions : compter les fichiers de
+        # la session courante — une liste périmée entièrement filtrée par `lire()`, son `.relu` —
+        # envoyait chercher un mauvais id pour un état qui n'a rien d'anormal.
+        autres = (
+            len({f.split(".")[0] for f in os.listdir(DOSSIER)} - {session_id})
+            if os.path.isdir(DOSSIER)
+            else 0
+        )
         raise ValueError(
-            f"aucune liste pour la session {session_id} : id faux, ou liste déjà vidée. "
-            f"Listes présentes : {sorted(os.listdir(DOSSIER)) if os.path.isdir(DOSSIER) else []}"
+            f"aucune liste pour la session {session_id} : id faux, ou liste déjà vidée "
+            f"({autres} autre(s) session(s) ont une liste dans {DOSSIER} — ne pas relire la leur)"
         )
     with open(fichier_relu(session_id), "w", encoding="utf-8") as fh:
         json.dump({c: horodatage(c) for c in en_attente}, fh)
-    print("\n".join(en_attente))
+    # `shlex.quote` : un chemin à espace existe dans ce dépôt, et le sortir nu donnait une liste que
+    # `rapport-cloture.sh` refuse ensuite — le producteur ne produisait alors AUCUNE forme que son
+    # contrôleur accepte, donc une réclamation sans issue.
+    print("\n".join(shlex.quote(c) for c in en_attente))
 
 
 def commande_vider(session_id):
@@ -239,7 +255,9 @@ def commande_vider(session_id):
         os.remove(fichier_de_session(session_id))
     os.remove(fichier_relu(session_id))
     if reste:
-        print("\n".join(reste))
+        # Échappé comme dans `commande_liste` : ce reste s'écrit tel quel dans le prochain RELIRE,
+        # et le sortir nu redonnait un chemin à espace que `rapport-cloture.sh` refuse.
+        print("\n".join(shlex.quote(c) for c in reste))
 
 
 def main():

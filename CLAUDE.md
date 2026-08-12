@@ -428,6 +428,10 @@ conclusion, il ne s'y ajoute pas. Ne jamais y répéter ce qui vient d'être dit
   findings compris, rendu sur le mauvais code). Le hook REFUSE tout chemin relatif, sans condition :
   une session worktree qui ne touche que le dépôt principal ne se distingue d'une session normale
   par aucun signe observable, donc l'exigence ne peut pas dépendre de l'endroit où l'on croit être.
+  Un chemin qui contient une ESPACE (`shared/gameLogStructure - save.ts`) se recopie CITÉ —
+  guillemets simples ou doubles, au choix ; c'est déjà la forme que rend `--liste`. Écrit nu, il
+  se coupe en fragments relatifs et le hook le refuse : recoller les morceaux ferait passer un
+  `engine` relatif à côté d'un chemin absolu, c'est-à-dire le défaut du 2026-08-08 lui-même.
 - FORME DU RAPPORT — tenue par un hook, pas par ta vigilance : `.claude/hooks/rapport-cloture.sh`
   vérifie, sur tout tour qui a modifié un fichier, la présence des sections listées à la ligne
   ci-dessous, la disposition du bloc RELIRE (étiquette seule, une commande par ligne) et le

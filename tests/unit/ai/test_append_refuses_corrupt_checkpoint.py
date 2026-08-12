@@ -8,6 +8,7 @@ model / Creating new model instead » noyees dans le log. Le desastre ne se voya
 du run suivant.
 """
 
+import ast
 import zipfile
 from pathlib import Path
 
@@ -16,6 +17,8 @@ import pytest
 import ai.train as train
 
 from .test_train_helpers import _function_code
+
+TRAIN_PY = Path(__file__).resolve().parents[3] / "ai" / "train.py"
 
 
 def test_load_checkpoint_raises_on_a_corrupt_zip(tmp_path: Path) -> None:
@@ -51,6 +54,39 @@ def test_load_checkpoint_raises_on_a_missing_path(tmp_path: Path) -> None:
         train._load_checkpoint(str(absent), env=None, device="cpu")
 
 
+def test_load_checkpoint_diagnoses_an_observation_space_mismatch(monkeypatch) -> None:
+    """Mode d'echec DOMINANT apres un changement d'obs_size (199 -> 1011, GRID_CHANNELS 7 -> 9) :
+    le .zip est intact, c'est l'environnement qui a change. Un message unique « verifier
+    l'integrite du .zip » envoie chercher un probleme de fichier qui n'existe pas.
+    """
+    def _refuse(*_args, **_kwargs):
+        raise ValueError(
+            "Observation spaces do not match: Box(-1.0, 1.0, (199,), float32) "
+            "!= Box(-1.0, 1.0, (1011,), float32)"
+        )
+
+    monkeypatch.setattr(train.MaskablePPO, "load", staticmethod(_refuse))
+
+    with pytest.raises(RuntimeError) as excinfo:
+        train._load_checkpoint("ai/models/CoreAgent/model_CoreAgent.zip", env=None, device="cpu")
+
+    message = str(excinfo.value)
+    assert "incompatible" in message, "le desaccord d'espace doit avoir son propre diagnostic"
+    assert "integrite du .zip" not in message, (
+        "un fichier intact ne doit pas etre presente comme corrompu"
+    )
+    assert "--new" in message
+
+
+def test_no_recovery_message_names_a_flag_that_does_not_exist() -> None:
+    """Les messages de recuperation apres echec de chargement proposent une COMMANDE. `--new-model`
+    n'existe pas dans l'argparse de ce module : la commande copiee sortait en erreur d'argument.
+    """
+    source = TRAIN_PY.read_text(encoding="utf-8")
+    assert "--new-model" not in source, "flag inexistant propose dans un message d'aide"
+    assert '"--new"' in source, "VERT VACANT : le flag reellement declare doit etre trouve ici"
+
+
 def test_load_checkpoint_chains_the_original_cause(tmp_path: Path) -> None:
     """`raise ... from exc` : sans la cause chainee, la traceback ne dit plus POURQUOI le zip est
     illisible (tronque ? mauvais pickle ? droits ?) et le diagnostic repart de zero."""
@@ -84,4 +120,45 @@ def test_no_training_entry_point_rebuilds_a_model_when_the_load_fails(func_name:
     )
     assert "Creating new model instead" not in code, (
         f"{func_name} reconstruit un modele neuf sur echec de chargement"
+    )
+
+
+def test_no_load_site_at_all_rebuilds_a_model_on_failure() -> None:
+    """Meme interdit, mais sur TOUT le module et sans liste de fonctions a tenir a jour.
+
+    Le test ci-dessus nomme les deux points d'entree connus : un TROISIEME site de chargement,
+    ajoute demain, y echapperait en silence — et c'est exactement l'histoire de ce repli, qui a
+    survecu a la suppression de ses jumeaux. Celui-ci n'interroge plus des noms mais le MOTIF :
+    un `except` qui enveloppe un chargement et y reconstruit un `MaskablePPO`.
+    """
+    tree = ast.parse(TRAIN_PY.read_text(encoding="utf-8"))
+    essais_de_chargement = 0
+    fautifs: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Try):
+            continue
+        # `MaskablePPO.load` / `VecNormalize.load`, jamais `json.load` : mesure du 2026-08-12, la
+        # sentinelle comptait quatre `json.load` et restait donc verte apres suppression de TOUS
+        # les chargements de modele — elle ne pouvait plus voir ce pour quoi elle existe.
+        charge = any(
+            isinstance(n, ast.Attribute) and n.attr == "load"
+            and isinstance(n.value, ast.Name) and n.value.id in ("MaskablePPO", "VecNormalize")
+            for corps in node.body for n in ast.walk(corps)
+        )
+        if not charge:
+            continue
+        essais_de_chargement += 1
+        for handler in node.handlers:
+            if any(
+                isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "MaskablePPO"
+                for n in ast.walk(handler)
+            ):
+                fautifs.append(f"ai/train.py:{handler.lineno}")
+    # VERT VACANT : sans ce compte, la suppression du dernier `try` autour d'un chargement rendrait
+    # ce test vert en ne regardant plus rien.
+    assert essais_de_chargement >= 1, "aucun chargement sous `try` trouve : le test regarde le vide"
+    assert not fautifs, (
+        f"un `except` autour d'un chargement reconstruit un MaskablePPO : {fautifs}. "
+        "Un --append dont le checkpoint est illisible doit s'arreter, pas s'entrainer des heures "
+        "depuis des poids aleatoires en sortant en code 0."
     )
