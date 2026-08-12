@@ -146,14 +146,24 @@
   CONTRAINTE TENUE : la clé gouverne `bcKey` → `canReuseStatic` → l'invalidation du calque statique,
   et une clé qui rate un changement de contrôle réintroduirait le défaut livré plus haut (objectif
   capturé jamais bleu). L'équivalence avec la clé exhaustive est verrouillée par
-  `objectiveControlKey.test.ts` (6 tests, comparaison paire à paire sur 7 instantanés successifs),
-  dont trois verrous prouvés ROUGES par mutation. Deux pièges nommés et couverts : l'override de
+  `objectiveControlKey.test.ts` (7 tests, comparaison paire à paire sur 7 instantanés successifs),
+  dont quatre verrous prouvés ROUGES par mutation. Deux pièges nommés et couverts : l'override de
   replay REMPLACE la table (la clé lit la table effective, jamais le `gameState`), et la géométrie
   des zones — que l'ancienne clé portait par accident — passe dans une empreinte djb2 mémoïsée,
   sans quoi deux épisodes de replay aux zones différentes se partageraient le calque statique.
+  PASSE `/simplify` le même jour : la clé `oc` sort à son tour de l'effet de dessin (mémoïsée), la
+  clé `zonesKey` (identifiants + formes, une boucle par rendu) fusionne dans l'empreinte de
+  géométrie, le djb2 est mutualisé avec celui des murs, et `BoardDisplay` appelle désormais
+  l'échantillonneur du module à ses deux sites — l'invariant « la clé lit le même hex que le
+  rendu » devient structurel au lieu d'être documenté.
   ÉCARTÉ, à arbitrer séparément : scinder `bcKey` en clé de géométrie et clé de contrôle pour ne
-  plus reconstruire fond et murs à chaque capture d'objectif.
+  plus reconstruire fond et murs à chaque capture d'objectif ; sortir tout `bcKey` dans
+  `boardRedrawDecision.ts`, à côté de l'invariant qu'il alimente.
   RESTE : la validation navigateur (une capture d'objectif doit toujours recolorer la zone).
+  SIGNALÉ, NON TRAITÉ (même motif, hors périmètre de clôture — un prompt de chantier existe) :
+  `BoardWithAPI.tsx:581` recopie les ~10 500 hexes d'objectif à chaque rendu, `BoardPvp.tsx:9290`
+  les aplatit dans l'effet de dessin, `BoardPvp.tsx:11253` rebâtit un `Set` de ~1 000 murs par
+  rendu pendant le glisser de déploiement.
 
 - ✅ **PvE se figeait — cause identifiée et corrigée** (2026-08-11). Le symptôme était rapporté
   « en phase de mouvement » ; la mesure a montré la phase de **déploiement**, sur des unités
@@ -473,8 +483,21 @@ Prêts à démarrer sans décision produit :
   `charge_after_flee`, `move_after_shooting`) et celles qui ne modifient qu'un jet (rerolls, bonus
   Oath — elles vivent sur les `shot_records`, pas dans `action_logs`).
   → [`Implémenté/metriques_reserves_et_charge_2026-08-11.md`](Implémenté/metriques_reserves_et_charge_2026-08-11.md) §Ce qui reste
+- ✅ **La portée d'un tir se juge AVANT les pertes** — **LIVRÉ le 2026-08-12**. L'analyzer mesurait
+  la distance vers `[TARGET_MODELS:]`, segment que `step_logger` réserve explicitement au replay
+  parce qu'il liste les survivants POST-pertes : la figurine visée, la plus proche, en disparaît
+  quand elle meurt du tir, et le survivant suivant faisait déclarer le tir hors portée. Mesuré sur
+  600 épisodes / 27 991 tirs : **31 verdicts, 0 réel**. Même journal avant/après : 67 → 32 erreurs,
+  et rien d'autre ne bouge. Le contrôle n'est pas devenu aveugle — il rend encore 18 702 verdicts.
+  **Deux gardes posés dans la foulée, parce que le défaut était reproductible** : (1) une liste
+  blanche opposable interdit désormais de lire `[TARGET_MODELS:]` pour un verdict — c'était la
+  DEUXIÈME fois qu'il faussait une distance, après la mêlée le 2026-07-24 ; (2) la section 1.2 du
+  rapport n'agrège plus `out_of_range` et `engaged_non_close_quarters` sous un seul chiffre, ce
+  qui m'a fait chercher un écart de 11 inexistant.
+  → [`Implémenté/analyzer_portee_source_correcte_2026-08-12.md`](Implémenté/analyzer_portee_source_correcte_2026-08-12.md)
 - 🔴 **Conformité moteur — les 53 erreurs que l'analyzer voit VRAIMENT** (ouvert le 2026-08-11,
-  **29 restantes** : la famille CC_NB, la plus lourde, est soldée le jour même).
+  **29 restantes** : la famille CC_NB, la plus lourde, est soldée le jour même ; la famille
+  « tirs hors portée » est soldée le 2026-08-12 — c'étaient des artefacts, cf. ci-dessus).
   Le rapport annonçait 370 erreurs sur le run du 2026-08-11 ; le nettoyage de l'outil de mesure
   (livré le même jour, cf. plus bas) en a supprimé 317 qui étaient des faux positifs de lecture.
   **Ce qui reste n'est plus imputable à l'analyzer** et désigne des règles appliquées de travers
@@ -489,7 +512,7 @@ Prêts à démarrer sans décision produit :
   | Collisions (2 unités, même hex) | 7 (total) | | 03.01 |
   | Fall-back qui finit ENGAGÉ | 2 | 3 | 09.07 |
   | Move normal finissant au contact | 1 | 4 | 09.05 |
-  | Tirs hors portée | 2 | 3 | 10 Shooting |
+  | ~~Tirs hors portée~~ **→ 0, ARTEFACTS (voir ci-dessous)** | ~~2~~ | ~~3~~ | 10 Shooting |
   | Tir engagé visant une unité NON engagée avec le tireur | 0 | 3 | 10.06 |
   | Move normal PARTI d'un engagement | 0 | 2 | 09.05 |
   | Tir sur un ennemi engagé | 0 | 1 | 10.06 |

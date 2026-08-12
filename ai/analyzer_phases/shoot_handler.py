@@ -793,15 +793,25 @@ def handle_shoot(
             shooter_models = state.current_line_models.get(shooter_id) or {  # get allowed
                 f"{shooter_id}#anchor": (shooter_col, shooter_row)
             }
-            # Cible : `[TARGET_MODELS:]` de la ligne (survivants post-pertes) en priorité, sinon
-            # ses socles connus. À défaut des deux on NE REND PAS de verdict : l'ancre d'une
-            # escouade de sept figurines ne dit rien de la distance à la plus proche, et un tir
-            # légal ressortait « out of range » pour cette seule raison.
-            from ai.analyzer_perfig import parse_target_models_segment
-            target_models = (
-                parse_target_models_segment(action_desc)
-                or state.positions_by_model.get(target_id)  # get allowed
-            )
+            # Cible : les socles connus AVANT l'action, jamais `[TARGET_MODELS:]` de la ligne.
+            #
+            # Ce segment liste les survivants POST-pertes et n'est émis que sur le DERNIER jet
+            # visant la cible (`w40k_core`) : la figurine visée — la plus proche, celle sur
+            # laquelle le moteur a jugé la portée — en a disparu quand elle meurt du tir. Mesurer
+            # dessus revient à demander « la cible était-elle à portée ? » en regardant où sont
+            # ses survivants après coup. `step_logger` le dit d'ailleurs à sa source : ce segment
+            # est « consommé UNIQUEMENT par le replay », tenu distinct de `[MODELS:]` précisément
+            # pour ne pas perturber l'analyzer.
+            # MESURÉ sur le run du 2026-08-12 (600 épisodes, 27 991 tirs) : les 31 verdicts
+            # `out_of_range` étaient TOUS des artefacts — à portée avant les pertes, hors portée
+            # après (E39 : 23 puis 27 pour une arme de 24). Zéro tir réellement illégal.
+            # `positions_by_model` est la source correcte, et elle est faite pour ça : elle porte
+            # l'état jusqu'à la ligne N-1, « qu'exigent les contrôles mesurés à la position de
+            # DÉPART » (`analyzer_core`). Sans elle, pas de verdict — mieux vaut ne pas juger que
+            # juger sur l'état d'après.
+            # Même famille que le contrôle « fight from non-adjacent », retiré le 2026-07-24 pour
+            # cette raison exacte.
+            target_models = state.positions_by_model.get(target_id)  # get allowed
             edge_dist = None if not target_models else squads_min_ranged_distance(
                 shooter_models, state.unit_base.get(shooter_id, _DEFAULT_BASE),  # get allowed
                 target_models, state.unit_base.get(target_id, _DEFAULT_BASE),  # get allowed
