@@ -112,12 +112,7 @@ def attacker_weapon_strengths(
 
     per_unit_key = "cc_str_by_weapon" if is_melee else "rng_str_by_weapon"
     if shooters:
-        # Socle NOMMÉ mais absent de `[MODEL_TYPES:]` : retomber sur la datasheet d'ESCOUADE
-        # mesurerait la F6 d'un personnage rattaché à la F4 du troupier — un faux « seuil de
-        # blessure faux », exactement ce que la résolution per-figurine existe pour éviter.
-        types = [state.model_types.get(mid) for mid in shooters]  # get allowed : hors segment
-        if any(t is None for t in types):
-            return None
+        types = [state.model_types.get(mid) for mid in shooters]  # get allowed
     else:
         # Journal SANS `[SHOOTER_MODELS:]` : aucune figurine nommée, l'escouade est le seul
         # porteur connu. C'est le mode dégradé assumé des vieux journaux, pas un repli.
@@ -128,7 +123,17 @@ def attacker_weapon_strengths(
     # profil qu'AUCUNE d'elles ne connaît, donc ce qui reste ici à la fin.
     missing = set(weapon_profile_names(weapon_display_name))
     for model_type in types:
-        limits = config.unit_attack_limits.get(model_type)  # get allowed : type hors registre
+        # Datasheet indisponible pour CETTE figurine (la docstring dit lesquels des deux manques) :
+        # on décline la ligne entière plutôt que de retomber sur la datasheet d'ESCOUADE, ce qui
+        # mesurerait la F6 d'un personnage rattaché à la F4 du troupier — le faux « seuil de
+        # blessure faux » que la résolution per-figurine existe pour éviter.
+        # Le cas « type inconnu » est testé ICI et non laissé au dictionnaire : faire porter la
+        # décision par l'absence de la clé `None` la ferait dépendre d'une propriété que rien
+        # n'écrit. Même forme qu'au jumeau `target_bodyguard_toughness` de ce fichier.
+        limits = (
+            config.unit_attack_limits.get(model_type)  # get allowed
+            if model_type is not None else None
+        )
         if limits is None:
             return None
         # ⚠️ `resolve_weapon_characteristic` et NON `resolve_weapon_value` : ce dernier résout des
