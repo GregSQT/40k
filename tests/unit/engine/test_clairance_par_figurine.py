@@ -234,31 +234,39 @@ def test_le_personnage_trop_haut_n_a_aucune_case_sous_l_etage_dans_chaque_pool(g
 # La signature de la primitive — ce qui a remplacé le garde de source
 # ─────────────────────────────────────────────────────────────────────────────
 
-def test_la_primitive_de_clairance_refuse_une_hauteur_qui_n_est_pas_celle_d_une_figurine():
-    """VERROU DE CONTRAT : les trois façons d'écrire l'ancien défaut sont refusées.
+def test_la_primitive_de_clairance_refuse_tout_ce_qui_n_est_pas_une_figurine():
+    """VERROU DE CONTRAT : les quatre façons d'écrire l'ancien défaut sont refusées.
 
-    C'est ce test qui rend inutile le garde qui relisait le texte des handlers : la faute n'est
-    plus détectée après coup, elle ne compile plus. Les branches d'ÉTAGE (montée, descente, ILP
-    d'autoplace), qu'aucun pool de plain-pied n'exécute, sont couvertes par là.
+    C'est ce test qui rend inutile le garde qui relisait le texte des handlers. Les deux dernières
+    formes sont celles qu'une signature « deux entrées de même forme » laisserait passer, et que
+    la `/code-review` avait relevées : rien n'oblige un appelant à mettre la figurine en premier,
+    ni à ne pas passer l'escouade deux fois sous deux visages. Les branches d'ÉTAGE (montée,
+    descente, ILP d'autoplace), qu'aucun pool de plain-pied n'exécute, sont couvertes par là.
     """
     terrain = [{"floors": [{
         "level": 1, "height_inches": CLAIRANCE_ETAGE, "hexes": [[10, 10]],
         "polygon_vertices": [[10, 10], [12, 10], [12, 12], [10, 12]],
     }]}]
-    escouade = {"MODEL_HEIGHT": HAUTEUR_ESCOUADE}
-    figurine = {"MODEL_HEIGHT": HAUTEUR_PERSONNAGE}
+    #: Les MARQUES de rôle : `squad_id` n'existe que sur une figurine, `id` que sur une unité.
+    escouade = {"id": "S", "MODEL_HEIGHT": HAUTEUR_ESCOUADE}
+    figurine = {"squad_id": "S", "MODEL_HEIGHT": HAUTEUR_PERSONNAGE}
+    ligne_d_escouade = {"MODEL_HEIGHT": HAUTEUR_ESCOUADE}  # une entrée `units_cache`
 
     with pytest.raises(TypeError):
         low_clearance_ground_hexes(terrain, HAUTEUR_ESCOUADE)  # type: ignore[arg-type]
-    with pytest.raises(ValueError, match="MÊME entrée"):
+    with pytest.raises(ValueError, match="squad_id"):
         low_clearance_ground_hexes(terrain, escouade, escouade)
+    with pytest.raises(ValueError, match="squad_id"):
+        low_clearance_ground_hexes(terrain, ligne_d_escouade, escouade)
+    with pytest.raises(ValueError, match="squad_id"):
+        low_clearance_ground_hexes(terrain, escouade, figurine)  # arguments inversés
 
     assert low_clearance_ground_hexes(terrain, figurine, escouade) == {(10, 10)}, (
         "la figurine plus haute que la clairance doit voir la case bloquée"
     )
-    assert low_clearance_ground_hexes(terrain, {"col": 1}, escouade) == set(), (
+    assert low_clearance_ground_hexes(terrain, {"squad_id": "S"}, escouade) == set(), (
         "une figurine sans hauteur propre hérite de celle de son escouade (`_model_height_of`), "
-        "qui passe sous l'étage : sans cet héritage, une escouade homogène lèverait"
+        "qui passe sous l'étage : sans cet héritage, un état de test 2D lèverait"
     )
 
 

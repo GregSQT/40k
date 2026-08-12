@@ -71,7 +71,7 @@ pools de pile-in, de consolidation et de charge aient une raison de le traverser
 | voile rouge du déploiement — hauteur | les DEUX figurines dans le même plan, sur la même case : verdicts opposés. Un refus global (zone, mur, bord) frapperait les deux, il ne peut donc pas se faire passer pour une décision de clairance |
 | voile rouge du déploiement — **rayon de socle** | deux figurines de MÊME hauteur et de socles différents, posées hors du couloir : seul le disque du socle large y déborde. La hauteur est neutralisée, donc seul le rayon peut décider |
 | formation compacte | la figurine trop haute n'est pas posée sous l'étage, celle qui tient l'est |
-| contrat de la primitive | les trois façons d'écrire l'ancien défaut sont refusées : hauteur nue, escouade passée deux fois, argument manquant |
+| contrat de la primitive | les QUATRE façons d'écrire l'ancien défaut sont refusées : hauteur nue, unité passée en figurine, ligne `units_cache` passée en figurine, arguments inversés |
 
 **Preuve de rouge** : hauteur remise sur l'escouade aux sites couverts par comportement → les
 verrous correspondants rougissent ; rayon repris sur l'escouade aux deux sites de déploiement → le
@@ -91,11 +91,16 @@ primitive acceptait un `float` nu, donc rien ne distinguait « hauteur d'une fig
 d'une escouade », et c'est ce trou qui obligeait à surveiller du texte.
 
 `low_clearance_ground_hexes(terrain_areas, model_entry, squad_entry)` exige désormais les deux
-entrées et appelle `_model_height_of` lui-même. Trois façons d'écrire l'ancien défaut, trois refus :
-hauteur nue (arité), escouade passée deux fois (erreur explicite), argument manquant (arité). **La
-faute n'est plus détectée après coup : elle n'est plus écrivable**, sur les quatre sites d'étage
-comme sur les sept autres. Le garde de source disparaît, ainsi que le compte d'appels par fichier
-qui figeait la forme de l'implémentation et aurait rougi sur toute factorisation légitime.
+entrées et appelle `_model_height_of` lui-même. **La faute n'est plus détectée après coup : elle
+n'est plus écrivable**, sur les quatre sites d'étage comme sur les sept autres. Le garde de source
+disparaît, ainsi que le compte d'appels par fichier qui figeait la forme de l'implémentation et
+aurait rougi sur toute factorisation légitime.
+
+⚠️ **Deux entrées de même forme ne suffisaient pas** — relevé par la `/code-review` : la première
+version ne refusait que `(x, x)`, et `low_clearance_ground_hexes(terrain, units_cache[squad_id],
+unit)` ou l'ordre inversé rendaient la hauteur d'escouade en silence, sans plus aucun garde pour
+le voir. La primitive exige donc la MARQUE de chaque rôle : `squad_id` n'existe que sur une entrée
+de `models_cache`, `id` que sur une unité. Quatre écritures fautives, quatre refus.
 
 Coût : 7 fichiers (la primitive, les 4 handlers, et deux tests qui l'appelaient en direct — dont un
 qui commettait exactement la faute interdite au moteur).

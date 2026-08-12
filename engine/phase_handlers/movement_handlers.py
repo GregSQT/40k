@@ -3263,13 +3263,13 @@ def movement_build_valid_destinations_pool(
     # Socle mono-hex : géométrie hex (x1) ou socle de taille 1 (même prédicat que la branche FLY).
     is_single_hex = (_geometry_is_hex(game_state) or base_size == 1)
 
-    # Étape 4.1 : champ géodésique euclidien (any-angle) LIMITÉ au socle rond mono-hex
-    # (base_size == 1), ground. Multi-hex / non-rond / fly restent sur le BFS hex → Étape 4b.
+    # Étape 4.1 : champ géodésique euclidien (any-angle) LIMITÉ au socle qui tient dans UNE case
+    # (`socle_is_single_hex`, source unique du prédicat — le corps littéral qui vivait ici en était
+    # la 4e copie). Multi-hex / non-rond / fly restent sur le BFS hex → Étape 4b.
     # PvP/replay lisent ``move`` (euclidean) ; gym lit ``move_gym`` (défaut hex).
     _use_euclidean_move = (
         _move_distance_metric(game_state) == "euclidean"
-        and base_size == 1
-        and unit["BASE_SHAPE"] == "round"
+        and socle_is_single_hex(unit["BASE_SHAPE"], base_size)
     )
 
     # Grille dense O(1) : même sémantique que ``dict`` (case visitée ou non pour ce BFS).
@@ -3799,9 +3799,9 @@ def movement_build_model_destinations_pool(
     # passer sous un étage bas). Injecté dans les obstacles AU SOL uniquement (jamais dans wall_hexes
     # partagé : ces hexes SONT le plancher de l'étage, praticable en surface). Vide si assez petit / FLY.
     from engine.terrain_utils import low_clearance_ground_hexes
-    from .shared_utils import _model_height_of
-    # Hauteur de LA FIGURINE qui bouge, pas de son escouade (`_model_height_of`) : c'est elle qui
-    # passe — ou non — sous le plancher bas, comme c'est son socle qui décide du reste du pool.
+    # Hauteur de LA FIGURINE qui bouge, pas de son escouade : c'est elle qui passe — ou non — sous
+    # le plancher bas, comme c'est son socle qui décide du reste du pool. La primitive EXIGE la
+    # figurine (elle refuse une entrée d'escouade), l'héritage lui appartient.
     _low_clear = low_clearance_ground_hexes(terrain_areas, model, unit)
     from engine.terrain_utils import floor_hexes_at_level
     floor_hexes_view: AbstractSet[Tuple[int, int]] = (

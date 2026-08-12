@@ -311,8 +311,13 @@ def low_clearance_ground_hexes(
     appelants — des pools qui raisonnent par figurine pour tout le reste — passaient tous la
     seconde. Le défaut a dû être corrigé site par site, puis surveillé par un test qui relisait le
     TEXTE des handlers. En exigeant les deux entrées, la hauteur ne peut plus venir que de
-    ``_model_height_of``, seule source de l'héritage figurine→escouade : la faute n'est plus
-    détectée après coup, elle n'est plus écrivable.
+    ``_model_height_of``, seule source de l'héritage figurine→escouade.
+
+    LES DEUX RÔLES SONT VÉRIFIÉS, pas seulement documentés. Une signature à deux entrées de même
+    forme laisse écrire ``(units_cache[squad_id], unit)`` ou l'ordre inverse : la hauteur
+    d'escouade repasserait en silence, et c'est exactement le défaut d'origine. On exige donc la
+    MARQUE de chaque rôle — ``squad_id`` n'existe que sur une entrée de ``models_cache``, ``id``
+    que sur une unité. Les deux fautes lèvent au lieu de mesurer faux.
 
     ⚠️ Le set rendu est MÉMOÏSÉ par hauteur : les appelants le lisent, ils ne le mutent jamais. Une
     mutation en place corromprait la clairance de toutes les figurines de cette taille pour le
@@ -321,11 +326,18 @@ def low_clearance_ground_hexes(
     # cycle. Même convention que les autres primitives inter-modules de ce fichier.
     from engine.phase_handlers.shared_utils import _model_height_of
 
-    if model_entry is squad_entry:
+    if "squad_id" not in model_entry:
         raise ValueError(
-            "low_clearance_ground_hexes: figurine et escouade sont la MÊME entrée — la clairance "
-            "se mesure sur la figurine (§13.06), et l'héritage vers l'escouade appartient à "
-            "`_model_height_of`, pas à l'appelant"
+            "low_clearance_ground_hexes: `model_entry` doit être une entrée de `models_cache` "
+            "(une FIGURINE, reconnaissable à sa clé `squad_id`). La clairance se mesure par "
+            "figurine (§13.06) ; passer l'escouade y ramènerait le défaut que cette signature "
+            f"existe pour interdire. Reçu les clés : {sorted(model_entry)[:8]}"
+        )
+    if "id" not in squad_entry:
+        raise ValueError(
+            "low_clearance_ground_hexes: `squad_entry` doit être l'unité (`game_state['units']`, "
+            "reconnaissable à sa clé `id`) — elle ne sert que d'héritage quand la figurine ne "
+            f"porte pas sa hauteur. Reçu les clés : {sorted(squad_entry)[:8]}"
         )
     return _floor_index(terrain_areas).low_clearance(
         _model_height_of(model_entry, squad_entry)

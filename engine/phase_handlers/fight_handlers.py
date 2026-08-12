@@ -97,7 +97,6 @@ from .shared_utils import (
     _union_weapons,
     _enemy_squad_ids,
     _synth_model_entry,
-    _model_height_of,
     MovePlan,
     parse_model_plan_as_map,
 )
@@ -2561,7 +2560,7 @@ def _fight_pile_in_build_model_pool(
     # sol — un ennemi en hauteur ne gêne pas (superposition inter-étage §13.06). ``_low_clear`` =
     # clairance verticale (§13.06/§2.11 : une fig trop haute ne peut finir/passer sous un plancher bas).
     _enemy_ground = build_enemy_occupied_positions_set(game_state, current_player=player, level=0)
-    # Hauteur de LA FIGURINE qui bouge (`_model_height_of`), jumeau du move : le pool est
+    # Hauteur de LA FIGURINE qui bouge, jumeau du move : le pool est
     # par-figurine, et un personnage attaché plus haut ne passe pas là où passe la troupe.
     _low_clear = low_clearance_ground_hexes(terrain_areas, model, unit)
     # Bloqueurs (ennemis + autres unités amies) → collision par TEST EUCLIDIEN officiel
@@ -3874,7 +3873,7 @@ def _fight_consolidation_build_model_pool(
     # sol — un ennemi en hauteur ne gêne pas (superposition inter-étage §13.06). ``_low_clear`` =
     # clairance verticale (§13.06/§2.11 : une fig trop haute ne peut finir/passer sous un plancher bas).
     _enemy_ground = build_enemy_occupied_positions_set(game_state, current_player=player, level=0)
-    # Hauteur de LA FIGURINE qui bouge (`_model_height_of`), jumeau du move : le pool est
+    # Hauteur de LA FIGURINE qui bouge, jumeau du move : le pool est
     # par-figurine, et un personnage attaché plus haut ne passe pas là où passe la troupe.
     _low_clear = low_clearance_ground_hexes(terrain_areas, model, unit)
     # Bloqueurs (ennemis + autres unités amies) → collision par TEST EUCLIDIEN officiel
