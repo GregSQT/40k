@@ -3,12 +3,36 @@ AnalyzerState — état partagé entre les handlers de parse_step_log.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, NamedTuple, Optional, Set, Tuple, Union
 
 from ai.analyzer_perfig import Base
+from shared.data_validation import require_key
 
 #: cf. `AnalyzerState.phase_activation_seen`.
 PhaseActivationKey = Union[Tuple[int, str, int], Tuple[str, int, int]]
+
+
+class SelectTargetsFreeze(NamedTuple):
+    """La CIBLE d'une activation, telle qu'elle était au Select Targets step.
+
+    UN SEUL enregistrement, parce que ces quatre grandeurs décrivent le MÊME instant et servent
+    des règles de la même famille — le ciblage, que le moteur tranche une fois pour l'activation
+    entière avant d'en résoudre la moindre attaque :
+
+    - ``models_alive`` : effectif, qu'exigent [BLAST] 24.05 et [CLEAVE] 24.06 (« models that were
+      in the target unit IN THE SELECT TARGETS STEP ») ;
+    - ``anchor`` / ``hp`` / ``models`` : la géométrie, qu'exigent 10.06, 04.02 et l'alternance
+      12.04.
+
+    Les deux moitiés ont vécu dans deux dictionnaires séparés le temps d'une livraison, et
+    l'invariant « même instant » n'a tenu que par un commentaire — il a cédé le jour même : deux
+    mesures jumelles se sont mises à lire deux ancres différentes de la même cible. Les réunir le
+    rend STRUCTUREL : un site ne peut plus geler une moitié en oubliant l'autre.
+    """
+    models_alive: int
+    anchor: Optional[Tuple[int, int]]
+    hp: Optional[int]
+    models: Optional[Dict[str, Tuple[int, int]]]
 
 
 @dataclass
@@ -135,14 +159,12 @@ class AnalyzerState:
     # Séquences de tir/combat
     shot_sequence_counts: Dict = field(default_factory=dict)
     fight_sequence_counts: Dict = field(default_factory=dict)
-    #: Effectif de la CIBLE au Select Targets step, figé à l'OUVERTURE de chaque séquence de
-    #: tir/combat (même clé que les compteurs ci-dessus). C'est la donnée qu'exigent [BLAST]
-    #: 24.05 et [CLEAVE] 24.06 : « every five models that were in the target unit IN THE SELECT
-    #: TARGETS STEP ». Le lire à la ligne courante donnerait l'effectif APRÈS les pertes déjà
-    #: infligées par la séquence elle-même — donc un plafond trop bas, et le faux positif de
-    #: retour dès que la cible franchit un multiple de 5 en cours d'activation.
-    shot_sequence_target_models: Dict = field(default_factory=dict)
-    fight_sequence_target_models: Dict = field(default_factory=dict)
+    #: La CIBLE au Select Targets step — effectif ET géométrie, un seul `SelectTargetsFreeze` par
+    #: activation (même clé que les compteurs ci-dessus). Cf. la docstring de ce type : la lire à
+    #: la ligne courante donnerait l'état APRÈS les pertes déjà infligées par l'activation
+    #: elle-même, donc un plafond trop bas ([BLAST] 24.05) et une géométrie d'après-coup (10.06).
+    shot_sequence_target_models: Dict[Tuple[Any, ...], SelectTargetsFreeze] = field(default_factory=dict)
+    fight_sequence_target_models: Dict[Tuple[Any, ...], SelectTargetsFreeze] = field(default_factory=dict)
     #: `unit_models_alive` tel qu'il était AVANT l'application des dégâts de la ligne courante.
     #: Les dégâts sont appliqués par `analyzer_core` en amont de l'aiguillage vers les handlers :
     #: à l'ouverture d'une séquence, la première ligne a déjà pu retirer une figurine de la cible.
@@ -154,15 +176,6 @@ class AnalyzerState:
     unit_hp_pre_line: Dict[str, int] = field(default_factory=dict)
     unit_positions_pre_line: Dict[str, Tuple[int, int]] = field(default_factory=dict)
     positions_by_model_pre_line: Dict[str, Dict[str, Tuple[int, int]]] = field(default_factory=dict)
-    #: Géométrie de la CIBLE au Select Targets step, figée à la PREMIÈRE ligne de chaque
-    #: activation : `(clé) -> (ancre, PV de la figurine front, socles)`. Jumeau exact de
-    #: `shot_sequence_target_models` / `fight_sequence_target_models`, qui figent l'EFFECTIF de la
-    #: même cible au même instant et pour la même raison (24.05, 24.06). Clé préfixée par la
-    #: phase : les deux familles de clés n'ont ni la même forme ni la même durée de vie.
-    activation_target_geometry: Dict[
-        Tuple[Any, ...],
-        Tuple[Optional[Tuple[int, int]], Optional[int], Optional[Dict[str, Tuple[int, int]]]]
-    ] = field(default_factory=dict)
     last_shoot_shooter_id: Optional[str] = None
     last_shoot_weapon: Optional[str] = None
     last_shoot_target_id: Optional[str] = None
@@ -232,48 +245,64 @@ class AnalyzerState:
             "unit_model_height": self.unit_model_height,
         }
 
-    def select_targets_engagement_maps(
+    def freeze_select_targets(
         self,
+        store: Dict[Tuple[Any, ...], SelectTargetsFreeze],
         key: Tuple[Any, ...],
         target_id: str,
         log_anchor: Optional[Tuple[int, int]] = None,
+    ) -> SelectTargetsFreeze:
+        """La cible de l'activation ``key``, figée à la PREMIÈRE ligne qui la nomme.
+
+        POURQUOI UN GEL. Les dégâts d'une ligne sont appliqués par `analyzer_core` AVANT que le
+        handler ne voie cette ligne : quand un contrôle s'exécute, la cible a déjà encaissé les
+        pertes de l'attaque qu'il prétend juger. `_apply_damage_and_handle_death` purge ses socles
+        (`positions_by_model`), et si elle meurt la retire de `unit_hp` et `unit_positions`.
+
+        POURQUOI PAR ACTIVATION, ET NON PAR LIGNE. Ciblage et effectif sont tranchés par le moteur
+        au Select Targets step (`_shoot_engagement_blocks_target`), une fois pour l'activation
+        entière, avant d'en résoudre la moindre attaque. Un gel par ligne laisserait la deuxième
+        attaque juger sur les pertes de la première — même défaut, un tir plus tard.
+
+        APPELÉ HORS DE TOUTE BRANCHE DE RÉSOLUTION D'ARME, à la première ligne de l'activation :
+        une arme dont le NB ne se résout pas (`parse_error`) tue quand même, et si elle avait
+        empêché le gel, l'arme suivante aurait hérité de l'état d'APRÈS ses pertes.
+
+        ``log_anchor`` (ancre portée par la ligne) prime sur l'ancre en cache, périmée dès que
+        l'escouade perd la figurine qui la portait. L'effectif, lui, LÈVE s'il est inconnu : une
+        cible nommée par le journal a toujours été comptée.
+        """
+        frozen = store.get(key)  # get allowed
+        if frozen is None:
+            frozen = SelectTargetsFreeze(
+                models_alive=require_key(self.models_alive_pre_line, target_id),
+                anchor=log_anchor if log_anchor is not None else self.unit_positions_pre_line.get(target_id),  # get allowed
+                hp=self.unit_hp_pre_line.get(target_id),  # get allowed
+                models=self.positions_by_model_pre_line.get(target_id),  # get allowed
+            )
+            store[key] = frozen
+        return frozen
+
+    def engagement_maps(
+        self,
+        frozen: SelectTargetsFreeze,
+        target_id: str,
     ) -> Tuple[
         Dict[str, Tuple[int, int]], Dict[str, int], Dict[str, Dict[str, Tuple[int, int]]]
     ]:
-        """``(unit_positions, unit_hp, positions_by_model)`` avec la CIBLE telle qu'elle était au
-        Select Targets step de l'activation ``key``.
+        """``(unit_positions, unit_hp, positions_by_model)`` où la CIBLE est celle de ``frozen``.
 
-        POURQUOI CETTE MÉTHODE EXISTE. Les dégâts d'une ligne sont appliqués par `analyzer_core`
-        AVANT que le handler ne voie cette ligne : quand un contrôle d'engagement s'exécute, la
-        cible a déjà encaissé les pertes de l'attaque qu'il prétend juger. `_apply_damage_and_
-        handle_death` purge alors ses socles (`positions_by_model`), et si elle meurt la retire de
-        `unit_hp` et `unit_positions`. Une cible morte disparaît de l'énumération des ennemis :
-        le tireur est déclaré « non engagé avec sa cible » — mesuré le 2026-08-12 (E422, un
-        pistolet tuant à bout portant l'unité avec laquelle il était engagé), et c'est la
-        troisième fois que ce dépôt juge une géométrie sur un état postérieur à la décision
-        (mêlée 2026-07-24, portée 2026-08-12).
+        C'est la forme que consomment les contrôles d'engagement (10.06, 04.02, alternance 12.04)
+        et de portée : ils énumèrent des cartes complètes. Les autres unités y restent VIVES —
+        une activation n'inflige de pertes qu'à sa cible, et le reste du plateau doit rester au
+        plus frais.
 
-        POURQUOI PAR ACTIVATION, ET NON PAR LIGNE. 10.06 et 04.02 sont des règles de CIBLAGE :
-        le moteur les tranche au Select Targets step (`_shoot_engagement_blocks_target`), une
-        fois pour l'activation entière, avant d'en résoudre la moindre attaque. Un gel par ligne
-        laisserait la deuxième attaque d'une activation juger sur les pertes de la première —
-        même défaut, un tir plus tard. C'est déjà la raison d'être des gels d'effectif jumeaux
-        (`shot_sequence_target_models`, [BLAST] 24.05).
-
-        Les autres unités restent lues sur les cartes VIVES : une activation n'inflige de pertes
-        qu'à sa cible, et le reste du plateau doit rester au plus frais. ``log_anchor`` (ancre de
-        la cible portée par la ligne) prime sur l'ancre en cache, périmée dès que l'escouade perd
-        la figurine qui la portait.
+        Sans ce recalage, une cible morte disparaît de l'énumération des ennemis et le tireur est
+        déclaré « non engagé avec sa cible » — mesuré le 2026-08-12 (E422, un pistolet tuant à
+        bout portant l'unité avec laquelle il était engagé), troisième fois que ce dépôt juge une
+        géométrie sur un état postérieur à la décision (mêlée 2026-07-24, portée 2026-08-12).
         """
-        frozen = self.activation_target_geometry.get(key)  # get allowed
-        if frozen is None:
-            frozen = (
-                log_anchor if log_anchor is not None else self.unit_positions_pre_line.get(target_id),  # get allowed
-                self.unit_hp_pre_line.get(target_id),  # get allowed
-                self.positions_by_model_pre_line.get(target_id),  # get allowed
-            )
-            self.activation_target_geometry[key] = frozen
-        anchor, hp, models = frozen
+        anchor, hp, models = frozen.anchor, frozen.hp, frozen.models
         positions = dict(self.unit_positions)
         hps = dict(self.unit_hp)
         models_by_unit = dict(self.positions_by_model)

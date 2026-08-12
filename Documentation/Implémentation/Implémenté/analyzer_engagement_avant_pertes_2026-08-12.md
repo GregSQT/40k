@@ -31,11 +31,16 @@ légal ; le tour d'après, la même unité 1 combat 103 au contact.
 
 ## La correction
 
-Un gel, posé au même endroit et au même rythme que les gels d'effectif déjà en place
-(`shot_sequence_target_models`, [BLAST] 24.05) : `analyzer_core` instantanie vivacité, ancre et
-socles **avant** les dégâts (`unit_hp_pre_line`, `unit_positions_pre_line`,
-`positions_by_model_pre_line`), et `AnalyzerState.select_targets_engagement_maps` rend aux contrôles
-les trois cartes avec la cible telle qu'elle était au **Select Targets step de l'activation**.
+Le gel d'effectif déjà en place (`shot_sequence_target_models`, [BLAST] 24.05) est ÉLARGI plutôt que
+doublé : `analyzer_core` instantanie vivacité, ancre et socles **avant** les dégâts
+(`unit_hp_pre_line`, `unit_positions_pre_line`, `positions_by_model_pre_line`) et
+`AnalyzerState.freeze_select_targets` en fait un `SelectTargetsFreeze` unique — effectif ET
+géométrie de la cible au **Select Targets step de l'activation**, que `engagement_maps` rend aux
+contrôles sous forme de cartes complètes.
+
+Les deux moitiés ont vécu un temps dans deux dictionnaires séparés, l'invariant « même instant »
+tenu par un commentaire : il a cédé le jour même (défaut n°1 ci-dessous). Un seul enregistrement le
+rend structurel — un site ne peut plus geler une moitié en oubliant l'autre.
 
 **Par activation, pas par ligne.** 10.06 et 04.02 sont des règles de CIBLAGE : le moteur les tranche
 une fois pour l'activation entière (`_shoot_engagement_blocks_target`), avant d'en résoudre la

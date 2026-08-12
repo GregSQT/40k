@@ -107,22 +107,6 @@ def handle_shoot(
     stats['shoot_invalid'][player]['total'] += 1
     _track_action_phase_accuracy(stats, "shoot", phase, state.current_episode_num, line)
 
-    # Select Targets step — JUMEAU EXACT de `fight_handler`, clé d'ACTIVATION comprise (escouade
-    # tirante × cible × tour) : le moteur déclare toutes ses attaques avant d'en résoudre une,
-    # donc une arme qui tire en second n'a pas droit à l'effectif que la première a réduit.
-    # C'est l'effectif qu'exige [BLAST] 24.05, lu AVANT les dégâts de la ligne courante.
-    #
-    # Posé ICI, à la PREMIÈRE ligne de l'activation, et non plus dans la branche qui résout le
-    # NB de l'arme : une arme dont le NB ne se résout pas (`parse_error`) sortait de cette
-    # branche SANS rien figer, tout en tuant ; la première arme résoluble de l'activation figeait
-    # alors l'effectif d'APRÈS ces pertes, ce qui rouvre le faux positif que la clé d'activation
-    # ferme. Le gel ne dépend d'aucune arme, il ne doit dépendre d'aucune résolution d'arme.
-    shot_activation_key = (state.current_episode_num, turn, shooter_id, target_id)
-    if shot_activation_key not in state.shot_sequence_target_models:
-        state.shot_sequence_target_models[shot_activation_key] = require_key(
-            state.models_alive_pre_line, target_id
-        )
-
     if (
         shooter_id in state.units_moved_after_shooting_in_turn
         and shooter_id in state.unit_positions
@@ -146,12 +130,17 @@ def handle_shoot(
     else:
         target_pos = None
 
-    # Cartes des CONTRÔLES D'ENGAGEMENT (10.06, 04.02), gelées au Select Targets step de cette
-    # activation : les dégâts de la ligne courante sont déjà appliqués ici, et une cible tuée par
-    # le tir qu'on juge sortait purement et simplement de l'énumération des ennemis. Détail et
-    # mesure : `AnalyzerState.select_targets_engagement_maps`.
-    engagement_positions, engagement_hp, engagement_models = state.select_targets_engagement_maps(
-        ("shoot",) + shot_activation_key, target_id, log_anchor=target_pos,
+    # Select Targets step — JUMEAU EXACT de `fight_handler`, clé d'ACTIVATION comprise (escouade
+    # tirante × cible × tour) : le moteur déclare toutes ses attaques avant d'en résoudre une,
+    # donc une arme qui tire en second n'a droit ni à l'effectif ([BLAST] 24.05) ni à la géométrie
+    # (10.06, 04.02, portée) que la première a réduits. Un seul enregistrement pour les deux :
+    # cf. `SelectTargetsFreeze`, dont les deux moitiés ont déjà divergé une fois.
+    shot_activation_key = (state.current_episode_num, turn, shooter_id, target_id)
+    frozen_target = state.freeze_select_targets(
+        state.shot_sequence_target_models, shot_activation_key, target_id, log_anchor=target_pos,
+    )
+    engagement_positions, engagement_hp, engagement_models = state.engagement_maps(
+        frozen_target, target_id
     )
 
     # RULE: Dead unit shooting
@@ -502,7 +491,7 @@ def handle_shoot(
                     "BLAST", action_desc, shooter_models, state.model_types, shooter_unit_type,
                     weapon_name_for_limits, config.unit_attack_limits, "blast_by_weapon",
                     config.blast_by_weapon_global, n_shooter_models,
-                    require_key(state.shot_sequence_target_models, shot_activation_key),
+                    frozen_target.models_alive,
                 )
                 if blast_error is not None:
                     stats['parse_errors'].append({
@@ -548,94 +537,54 @@ def handle_shoot(
     # diagnostic les rejoue pour NOMMER l'unité qui engage (cf. plus bas) : les reconstruire à
     # l'endroit du compteur ferait vivre deux fois le filtre des unités mesurables, et le
     # diagnostic pourrait décrire une autre situation que celle qui a déclenché.
+    #
+    # UNE SEULE mesure, que la position de la cible vienne de la ligne ou du cache. Les deux cas
+    # ont vécu en branches jumelles, à cinq lignes près : chaque décision du gel a dû y être
+    # recopiée, et la première livraison en a manqué une — les deux branches se sont retrouvées
+    # sur deux ancres différentes de la même cible. La différence réelle tient en une ligne
+    # (l'erreur de parsing signalant l'absence de coordonnées), pas en cinquante.
     target_engagement_args: Optional[Dict[str, Any]] = None
-    if target_pos:
-        if target_id not in state.unit_player:
-            stats['parse_errors'].append({
-                'episode': state.current_episode_num,
-                'turn': turn,
-                'phase': phase,
-                'line': line.strip(),
-                'error': f"Engagement check missing unit_player for target_id: {target_id}"
-            })
-            target_engaged = False
-        else:
-            missing_ids = [uid for uid in engagement_positions if uid not in engagement_hp or uid not in state.unit_player]
-            for missing_id in missing_ids:
-                stats['parse_errors'].append({
-                    'episode': state.current_episode_num,
-                    'turn': turn,
-                    'phase': phase,
-                    'line': line.strip(),
-                    'error': f"Engagement check missing unit data for unit_id: {missing_id}"
-                })
-            positions_for_engagement = {
-                uid: pos for uid, pos in engagement_positions.items()
-                if uid in engagement_hp and uid in state.unit_player
-            }
-            target_engagement_args = {
-                "unit_player": state.unit_player,
-                "unit_positions": positions_for_engagement,
-                "unit_hp": engagement_hp,
-                "engagement_zone": _get_engagement_zone_for_analyzer(),
-                # Ancre GELÉE, comme les socles de la ligne au-dessous et comme la mesure jumelle
-                # `shooter_engaged_with_target`. Elle vaut `target_pos` à la première ligne de
-                # l'activation ; aux suivantes, l'ancre du log peut avoir sauté sur un survivant.
-                # Les deux mesures décriraient alors deux instants différents — et la cible sans
-                # socles connus est mesurée COMME UN POINT, donc entièrement sur cette ancre.
-                "position_override": positions_for_engagement.get(target_id, target_pos),  # get allowed
-                "positions_by_model": engagement_models,
-                "unit_base": state.unit_base,
-                **state.engagement_3d_kwargs(),
-                "subject_models": engagement_models.get(target_id),  # get allowed
-            }
-            target_engaged = is_within_engine_engagement_zone(
-                target_id, **target_engagement_args
-            )
-    elif target_id in engagement_positions:
+    target_engaged = False
+
+    def _parse_error(message: str) -> None:
         stats['parse_errors'].append({
             'episode': state.current_episode_num,
             'turn': turn,
             'phase': phase,
             'line': line.strip(),
-            'error': f"Engagement check missing target_pos in log; using unit_positions for target_id: {target_id}"
+            'error': message,
         })
+
+    if target_pos or target_id in engagement_positions:
+        if not target_pos:
+            _parse_error(
+                f"Engagement check missing target_pos in log; using unit_positions for target_id: {target_id}"
+            )
         if target_id not in state.unit_player:
-            stats['parse_errors'].append({
-                'episode': state.current_episode_num,
-                'turn': turn,
-                'phase': phase,
-                'line': line.strip(),
-                'error': f"Engagement check missing unit_player for target_id: {target_id}"
-            })
-            target_engaged = False
+            _parse_error(f"Engagement check missing unit_player for target_id: {target_id}")
         else:
-            missing_ids = [uid for uid in engagement_positions if uid not in engagement_hp or uid not in state.unit_player]
-            for missing_id in missing_ids:
-                stats['parse_errors'].append({
-                    'episode': state.current_episode_num,
-                    'turn': turn,
-                    'phase': phase,
-                    'line': line.strip(),
-                    'error': f"Engagement check missing unit data for unit_id: {missing_id}"
-                })
+            for missing_id in [
+                uid for uid in engagement_positions
+                if uid not in engagement_hp or uid not in state.unit_player
+            ]:
+                _parse_error(f"Engagement check missing unit data for unit_id: {missing_id}")
             positions_for_engagement = {
                 uid: pos for uid, pos in engagement_positions.items()
                 if uid in engagement_hp and uid in state.unit_player
             }
-            target_pos_from_cache = positions_for_engagement.get(target_id)
-            if target_pos_from_cache:
-                # MÊME capture d'arguments que la branche jumelle (ligne du log portant la
-                # position de la cible). L'oublier ici laissait le diagnostic sans mesure : il
-                # imprimait « le compteur et la mesure se contredisent » alors que la mesure
-                # n'avait simplement jamais été faite — accuser le compteur d'une omission de
-                # câblage est pire que de ne rien dire.
+            # Ancre GELÉE, comme les socles ci-dessous et comme la mesure jumelle
+            # `shooter_engaged_with_target`. Elle vaut `target_pos` à la première ligne de
+            # l'activation ; aux suivantes, l'ancre du log peut avoir sauté sur un survivant. Les
+            # deux mesures décriraient alors deux instants différents — et la cible sans socles
+            # connus est mesurée COMME UN POINT, donc entièrement sur cette ancre.
+            frozen_anchor = positions_for_engagement.get(target_id, target_pos)  # get allowed
+            if frozen_anchor:
                 target_engagement_args = {
                     "unit_player": state.unit_player,
                     "unit_positions": positions_for_engagement,
                     "unit_hp": engagement_hp,
                     "engagement_zone": _get_engagement_zone_for_analyzer(),
-                    "position_override": target_pos_from_cache,
+                    "position_override": frozen_anchor,
                     "positions_by_model": engagement_models,
                     "unit_base": state.unit_base,
                     **state.engagement_3d_kwargs(),
@@ -644,10 +593,6 @@ def handle_shoot(
                 target_engaged = is_within_engine_engagement_zone(
                     target_id, **target_engagement_args
                 )
-            else:
-                target_engaged = False
-    else:
-        target_engaged = False
 
     # 10.06 / 17.03 — MONSTER/VEHICLE. Deux exemptions distinctes, aucune n'est un repli :
     #  - TIREUR M/V : engagé, il est éligible au close-quarters shooting avec TOUTES ses armes
@@ -695,13 +640,16 @@ def handle_shoot(
         # qu'exige 10.06 (« you can only select enemy units that are ENGAGED WITH your unit as
         # targets »), donc celle du contrôle close-quarters ci-dessous. Restreint aux M/V, il
         # laissait ce contrôle mesurer une adjacence d'ancre — voir plus bas.
+        # Cartes réduites à la CIBLE, sur son ancre GELÉE et non celle de la ligne : le moteur
+        # ré-ancre l'escouade sur un survivant dès qu'elle perd la figurine qui la portait, et les
+        # lignes suivantes de l'activation portent alors une ancre d'après les pertes.
+        target_only_positions = (
+            {target_id: engagement_positions[target_id]} if target_id in engagement_positions else {}
+        )
         shooter_engaged_with_target = is_within_engine_engagement_zone(
             shooter_id,
             state.unit_player,
-            # Ancre GELÉE, pas celle de la ligne : le moteur ré-ancre l'escouade sur un survivant
-            # dès qu'elle perd la figurine qui la portait, et les lignes suivantes de l'activation
-            # portent alors une ancre d'après les pertes.
-            {target_id: engagement_positions[target_id]} if target_id in engagement_positions else {},
+            target_only_positions,
             engagement_hp,
             engagement_zone=_get_engagement_zone_for_analyzer(),
             positions_by_model=engagement_models,

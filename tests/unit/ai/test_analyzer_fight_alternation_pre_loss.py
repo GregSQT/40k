@@ -7,7 +7,7 @@ Or `analyzer_core` applique les dégâts d'une ligne avant que le handler ne la 
 qui combat hors tour TUE la cible, l'unité chargeuse qu'on venait de sauter n'est plus engagée
 avec personne au moment de la mesure : la faute d'alternance devenait invisible — l'exact
 symétrique du faux positif de tir mesuré le 2026-08-12 (E422), même cause, même correction
-(`AnalyzerState.select_targets_engagement_maps`).
+(`AnalyzerState.freeze_select_targets` / `engagement_maps`).
 """
 from __future__ import annotations
 
