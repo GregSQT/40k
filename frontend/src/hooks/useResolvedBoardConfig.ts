@@ -10,11 +10,13 @@
  * plateaux-là, alors que la même mémoïsation tenait en PvP standard, où les deux étapes rendaient
  * l'objet du hook inchangé. Ce hook aligne les deux cas sur le comportement déjà éprouvé.
  *
- * Les deux étapes sont mémoïsées SÉPARÉMENT : une surcharge de replay inchangée ne doit pas être
- * réappliquée parce que l'échelle a bougé, et réciproquement.
+ * Les deux étapes tiennent dans UN mémo : l'échelle n'est pas une entrée à part, elle se lit dans
+ * l'objet lui-même (`display.display_scale`), donc rien ne peut la faire bouger sans que la
+ * surcharge ait déjà changé.
  */
 
 import { useMemo } from "react";
+import type { DisplayConfig } from "./useGameConfig";
 
 /** Surcharge de plateau du journal de replay (cf. Replay.md §2.4) : dimensions et échelle jouées. */
 export interface BoardConfigOverride {
@@ -27,7 +29,7 @@ export interface BoardConfigOverride {
 
 interface BoardConfigLike {
   hex_radius: number;
-  display?: unknown;
+  display?: DisplayConfig;
 }
 
 /**
@@ -37,7 +39,7 @@ interface BoardConfigLike {
  * garde la référence stable sur le cas courant, sans dépendre de la mémoïsation.
  */
 export function applyDisplayScale<T extends BoardConfigLike>(config: T): T {
-  const scale = (config.display as { display_scale?: number } | undefined)?.display_scale;
+  const scale = config.display?.display_scale;
   if (!scale || scale === 1) {
     return config;
   }
@@ -48,15 +50,12 @@ export function useResolvedBoardConfig<T extends BoardConfigLike>(
   boardConfigFromApi: T | null,
   boardConfigOverride: BoardConfigOverride | undefined
 ): T | null {
-  const withOverride = useMemo(
-    () =>
-      boardConfigOverride && boardConfigFromApi
-        ? { ...boardConfigFromApi, ...boardConfigOverride }
-        : boardConfigFromApi,
-    [boardConfigFromApi, boardConfigOverride]
-  );
-  return useMemo(
-    () => (withOverride === null ? null : applyDisplayScale(withOverride)),
-    [withOverride]
-  );
+  return useMemo(() => {
+    if (boardConfigFromApi === null) {
+      return null;
+    }
+    return applyDisplayScale(
+      boardConfigOverride ? { ...boardConfigFromApi, ...boardConfigOverride } : boardConfigFromApi
+    );
+  }, [boardConfigFromApi, boardConfigOverride]);
 }
