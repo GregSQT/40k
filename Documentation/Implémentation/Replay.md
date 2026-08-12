@@ -47,6 +47,17 @@ C'est voulu — une donnée manquante doit crier, pas être masquée.
 - Le champ est **obligatoire côté analyzer** (un journal d'archive lève plutôt que d'être lu
   comme un plateau entièrement au sol) et **optionnel côté replay** (un replay d'archive
   s'affiche encore).
+- `[ALLOC_MODEL: uid#idx]` (2026-08-12) — la figurine de la **cible** à qui CETTE attaque a été
+  allouée (05, « Allocate Attack »). Une ligne = un jet, donc un seul socle, jamais une liste.
+  Émise sur toute attaque parvenue à l'allocation, sauvegarde réussie comprise ; absente des
+  lignes `Save [NOT ALLOCATED]`, de `IMPACTED` (la charge applique ses blessures mortelles à
+  l'ESCOUADE, aucune figurine n'y est allouée côté moteur) et de `[HAZARDOUS]`.
+  Consommée par l'**analyzer** (PV par socle et retrait du socle mort, nommément) ; le replay ne
+  s'en sert pas encore — les socles y tombent via `[TARGET_MODELS:]`, en fin d'action.
+  ⚠️ **Elle est déclarée dans `LINE_METADATA_TOKEN`** (`replayParser.ts`), le jeu FERMÉ qui borne
+  à droite le parsing des jets. Un token de journal absent de ce jeu est lu comme un nom de
+  capacité sur toute attaque entièrement ratée — panne déjà payée une fois (`wound_ability =
+  "R:+0.0"`). Tout nouveau segment de ligne doit y entrer DANS la même livraison.
 
 Parsés par `extractModelsSegment` → posés sur l'unité via `occupied_hexes_by_model`
 (`replayParser.ts` `applyModels` + `initial_models`). Présent → `BoardPvp`/`UnitRenderer` dessinent
@@ -168,11 +179,25 @@ compte de steps de tous les épisodes sans qu'aucune décision supplémentaire n
 `[Roll: N]` est en **pouces**, comme le jet d'advance et le jet de charge : tout consommateur doit
 le convertir (× `inches_to_subhex`) avant de le comparer à une distance de grille.
 
-### 2.3quater Règles du run
+### 2.3quater Règles du run et grammaire du journal
 
 ```
 [hh:mm:ss] Run rules: engagement_zone_subhex=… metric.engagement=… metric.ranged=… move.thru_ez=… move.thru_enemy=… move.thru_friendly=…
+[hh:mm:ss] Log grammar: <n>
 ```
+
+`Log grammar:` (2026-08-12) déclare ce que le journal **garantit porter** : `1` = grammaire
+antérieure, `2` = `[ALLOC_MODEL:]` sur toute attaque allouée. Ligne absente ⇒ 1.
+
+Elle n'existe que pour rendre une absence DÉCIDABLE. Sans elle, un lecteur qui ne trouve pas un
+segment ne peut pas distinguer « ce journal ne le porte pas » de « le producteur est en panne » —
+et n'a d'autre choix que de retomber en silence sur une reconstruction approximative, c'est-à-dire
+le repli qui masque un défaut au lieu de le dire. Avec elle, l'analyzer LÈVE sur un journal qui
+promet la donnée et ne la porte pas.
+
+Source unique, producteur et lecteur : `ai/step_logger.LOG_GRAMMAR_VERSION`. Ne s'incrémente que
+pour une garantie NOUVELLE, jamais pour un changement cosmétique — un numéro qu'on bouge pour rien
+force les lecteurs à refuser des journaux parfaitement lisibles.
 
 Les valeurs de règle que le moteur a **réellement appliquées**. Elles vivent dans
 `config/game_config.json`, qu'on édite entre deux runs : les relire au moment de l'analyse, c'est

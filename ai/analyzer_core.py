@@ -99,6 +99,39 @@ _STATE_MODEL_RE = re.compile(MODEL_TOKEN_PATTERN + r':(-?\d+)')
 
 
 
+#: `[ALLOC_MODEL: 101#3]` — la figurine CIBLE à qui le moteur a alloué cette attaque (05).
+#: Le motif de socle est celui des segments `[MODELS:]`, pour la même raison qu'au-dessus : deux
+#: écritures d'un même token finissent par diverger, et celle qui ne matche plus est silencieuse.
+_ALLOC_MODEL_RE = re.compile(r'\[ALLOC_MODEL:\s*(\d+#\d+)\s*\]')
+
+
+def _alloc_model_from_line(state: AnalyzerState, action_desc: str, line: str) -> Optional[str]:
+    """Figurine allouée nommée par la ligne, ou None sur un journal de grammaire 1.
+
+    EXIGIBLE à partir de la grammaire 2 : le producteur promet alors de nommer la figurine sur
+    toute attaque parvenue à l'allocation, donc sur toute ligne qui applique des dégâts. Son
+    absence n'est plus une donnée manquante, c'est une panne du producteur — et la taire ferait
+    retomber l'analyzer sur les deux déductions fausses que ce token vient précisément retirer.
+
+    HORS PROMESSE, et c'est pourquoi ce garde n'est appelé qu'aux deux sites d'attaque : la
+    ligne `IMPACTED` de la charge applique ses blessures mortelles au niveau de l'ESCOUADE
+    (`_apply_charge_impact` → `update_units_cache_hp`), sans jamais toucher une figurine. Aucune
+    figurine allouée n'y existe, côté moteur comme côté journal.
+    """
+    m = _ALLOC_MODEL_RE.search(action_desc)
+    if m:
+        return m.group(1)
+    if state.log_grammar >= 2:
+        raise ValueError(
+            f"ligne {state.line_number}: journal `Log grammar: {state.log_grammar}` — une "
+            "attaque applique des dégâts sans segment `[ALLOC_MODEL:]`. Le producteur "
+            "(`ai/step_logger`, via `_resolve_one_manual_wound`) garantit ce segment sur toute "
+            "attaque parvenue à l'allocation ; son absence est une panne de la chaîne "
+            f"moteur→journal, pas un vieux format.\n  {line.strip()}"
+        )
+    return None
+
+
 _EFFECTS_PLAYER_RE = re.compile(r'P(\d+)\s+([^|]*)')
 
 
@@ -440,6 +473,34 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
             _line_models, _line_heights = parse_models_and_heights(line)
             state.current_line_models = _line_models or {}
             state.current_line_heights = _line_heights or {}
+            # Socles TUÉS et pas encore retirés — appliqués à la FIN DE L'ACTIVATION, c'est-à-dire
+            # dès qu'une AUTRE unité agit. Ni plus tôt, ni plus tard, et les deux bornes ont été
+            # payées :
+            #
+            #  - plus tôt (à la ligne suivante) : les jets SUIVANTS de la même salve se retrouvent
+            #    jugés sur les survivants des précédents. Mesuré le 2026-08-12 (E44) — un Onslaught
+            #    Gatling Cannon vise une escouade à 22 hex, tue les six figurines les plus proches,
+            #    et ses derniers jets ressortent « hors portée », les survivantes étant à 25-27
+            #    pour une arme de 24. La portée se juge au Select Targets, une fois par activation.
+            #  - plus tard (jamais, en laissant `[TARGET_MODELS:]` seul trancher) : une mort qui
+            #    n'émet AUCUN segment de survivants — blessures mortelles, retrait de cohérence —
+            #    laisserait la figurine debout jusqu'à la prochaine action de son escouade.
+            #
+            # Le moteur applique la même règle à son propre journal : il diffère `[TARGET_MODELS:]`
+            # au dernier jet parce que « les pertes se retirent APRÈS résolution de toutes les
+            # attaques » (`w40k_core`). Ce bloc en est le miroir côté lecteur.
+            if state.pending_model_removals and state.current_line_models:
+                if state.pending_removals_actor not in state.current_line_models:
+                    for _duid, _dmids in state.pending_model_removals.items():
+                        _known_models = state.positions_by_model.get(_duid)  # get allowed
+                        if _known_models is None:
+                            continue
+                        for _dmid in _dmids:
+                            _known_models.pop(_dmid, None)
+                        if not _known_models:
+                            state.positions_by_model.pop(_duid, None)
+                    state.pending_model_removals = {}
+                    state.pending_removals_actor = None
             # `[TARGET_MODELS:]` ne nomme qu'une cible, mais ses socles sont groupés par
             # préfixe `<unit_id>#` comme partout ailleurs : aucune hypothèse sur l'unité.
             state.current_line_target_models = {}
@@ -885,7 +946,10 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                 line, state.dead_units_current_episode, state.unit_hp, state.unit_models_alive, state.unit_model_hp, lambda _u: _ordered_living_mids(state, config, _u), state.unit_hp_squad_max, state.unit_types, state.unit_positions, state.unit_deaths, state.unit_kill_context, stats,
                                 positions_by_model=state.positions_by_model,
                                 models_invalidated=state.models_invalidated,
+                                alloc_model_id=_alloc_model_from_line(state, action_desc, line),
+                                pending_model_removals=state.pending_model_removals,
                             )
+                            state.pending_removals_actor = _dmg_actor_id
 
                 # Grammaire PARTAGÉE (`attack_line_re`) : le test par sous-chaîne qui vivait ici
                 # cessait de matcher dès qu'un token de capacité s'intercalait — la cible gardait
@@ -905,7 +969,10 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                             line, state.dead_units_current_episode, state.unit_hp, state.unit_models_alive, state.unit_model_hp, lambda _u: _ordered_living_mids(state, config, _u), state.unit_hp_squad_max, state.unit_types, state.unit_positions, state.unit_deaths, state.unit_kill_context, stats,
                             positions_by_model=state.positions_by_model,
                             models_invalidated=state.models_invalidated,
+                            alloc_model_id=_alloc_model_from_line(state, action_desc, line),
+                            pending_model_removals=state.pending_model_removals,
                         )
+                        state.pending_removals_actor = _dmg_actor_id
 
                 # CHARGE IMPACT mortal wounds:
                 # "Unit X(c,r) IMPACTED [...] Unit Y(c,r) - Hit:T+:N(HIT|FAIL) Wound:AUTO Save:NONE[MW] Dmg:ZHP"

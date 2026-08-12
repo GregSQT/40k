@@ -92,6 +92,36 @@ def parse_board_scale_from_log(filepath: str) -> int:
 
 
 _RUN_RULES_RE = re.compile(r'^\[[^\]]*\]\s*Run rules:\s*(.+)$')
+_LOG_GRAMMAR_RE = re.compile(r'^\[[^\]]*\]\s*Log grammar:\s*(\d+)\s*$')
+
+
+def parse_log_grammar_version(filepath: str) -> int:
+    """Version de grammaire déclarée par l'entête `Log grammar:` — 1 si la ligne est absente.
+
+    ⚠️ CE QUE CETTE VERSION SERT À FAIRE, et c'est sa seule raison d'exister : distinguer
+    « le journal ne PORTE pas cette donnée » de « le producteur a OUBLIÉ de l'écrire ».
+
+    Sans elle, un lecteur qui ne trouve pas `[ALLOC_MODEL:]` sur une ligne de dégâts n'a d'autre
+    choix que de retomber en silence sur une reconstruction approximative — le repli qui masque
+    une panne au lieu de la dire. Avec elle, l'absence devient une ERREUR sur un journal qui
+    promet la donnée, et reste un fait normal sur un journal antérieur.
+
+    Une version INCONNUE (> celles gérées) n'est pas une erreur : un journal plus récent porte
+    au moins ce que promettent les versions antérieures — c'est la règle qui rend le numéro
+    utile, et `ai/step_logger.LOG_GRAMMAR_VERSION` ne s'incrémente que pour une garantie
+    NOUVELLE, jamais pour un changement cosmétique.
+    """
+    with open(filepath, 'r', encoding='utf-8') as f:
+        for line in f:
+            m = _LOG_GRAMMAR_RE.match(line)
+            if m:
+                return int(m.group(1))
+            # L'entête est un bloc contigu : dès la première ligne d'action, la ligne de version
+            # ne viendra plus. Balayer 35 Mo pour une ligne absente coûterait le prix d'une passe
+            # entière à chaque journal d'ancienne grammaire.
+            if "=== ACTIONS START ===" in line:
+                break
+    return 1
 
 
 def parse_run_rules_from_log(filepath: str) -> Dict[str, str]:
@@ -271,8 +301,17 @@ def _apply_damage_and_handle_death(
     stats: Dict[str, Any],
     positions_by_model: Optional[Dict[str, Dict[str, Tuple[int, int]]]] = None,
     models_invalidated: Optional[Set[str]] = None,
+    alloc_model_id: Optional[str] = None,
+    pending_model_removals: Optional[Dict[str, Set[str]]] = None,
 ) -> None:
     """Applique une blessure à la cible via l'allocation par-figurine (05 Attack sequence).
+
+    ``alloc_model_id`` — la figurine que le MOTEUR a allouée, lue dans le segment
+    `[ALLOC_MODEL:]` de la ligne (grammaire de journal ≥ 2). Quand elle est là, plus rien n'est
+    déduit : la blessure va sur CETTE figurine, et si elle tombe c'est CE socle qui est retiré.
+    Le reste de cette docstring décrit le chemin HÉRITÉ, celui des journaux qui ne la portent
+    pas — il reconstruit par déduction ce que le journal ne disait pas, et les deux déductions
+    qu'il fait sont fausses (mesuré le 2026-08-12, cf. ci-dessous).
 
     Une blessure est allouée à la figurine « front » ; si ses PV tombent ≤ 0 elle est détruite
     et le RESTE est reporté sur la suivante. L'escouade n'est retirée que lorsque sa DERNIÈRE
@@ -310,7 +349,17 @@ def _apply_damage_and_handle_death(
     mesurer l'engagement, les empreintes et les obstacles de BFS contre des figurines retirées
     du plateau — un tir sur une escouade dont le socle avancé vient d'être tué remontait
     « cible engagée » alors que le survivant est à l'autre bout. On efface donc l'entrée : la
-    mesure retombe sur l'ancre, fraîche à chaque ligne. Donnée absente, pas mesure fausse."""
+    mesure retombe sur l'ancre, fraîche à chaque ligne. Donnée absente, pas mesure fausse.
+
+    ⚠️ CE QUE CE CHEMIN HÉRITÉ COÛTE, mesuré sur 600 épisodes le 2026-08-12 — c'est ce qui a
+    fait écrire `[ALLOC_MODEL:]`, et ça vaut pour tout journal de grammaire 1 :
+      - POSITIONS : 2 342 fenêtres où l'escouade entière retombe sur son ancre, elle-même restée
+        sur le hex de la figurine qui vient de tomber. Médiane 3 lignes, p90 119, 19 % débordent
+        sur le tour suivant. Un tir légal y ressort « au contact avec une arme non-CLOSE_QUARTERS ».
+      - PV : la figurine touchée est déduite d'un tri CHARACTER/non-CHARACTER, quand le moteur
+        applique la cascade `_select_allocation_model` (blessée d'abord, tier de rôle, proximité
+        d'un ennemi, index). 200 PV par socle faux sur 173 129 comparés aux instantanés
+        `T{n} STATE:` — minorant, l'instantané recalant tout à chaque tour."""
     if damage <= 0:
         return
     if target_id not in unit_hp:
@@ -338,6 +387,20 @@ def _apply_damage_and_handle_death(
         f"target_id={target_id} damage={damage} front_hp={unit_hp[target_id]} "
         f"models_alive={require_key(unit_models_alive, target_id)}"
     )
+    if alloc_model_id is not None:
+        _apply_damage_to_named_model(
+            target_id=target_id, attacker_id=attacker_id, alloc_model_id=alloc_model_id,
+            damage=damage, player=player, turn=turn, phase=phase, line_number=line_number,
+            current_episode_num=current_episode_num,
+            dead_units_current_episode=dead_units_current_episode,
+            unit_hp=unit_hp, unit_models_alive=unit_models_alive, unit_model_hp=unit_model_hp,
+            ordered_living_mids=ordered_living_mids, unit_types=unit_types,
+            unit_positions=unit_positions, unit_deaths=unit_deaths,
+            unit_kill_context=unit_kill_context, stats=stats,
+            positions_by_model=positions_by_model,
+            pending_model_removals=pending_model_removals,
+        )
+        return
     front_hp = unit_hp[target_id] - damage
     if front_hp <= 0:
         # Figurine front détruite. On retire le SOCLE NOMMÉ (premier de l'ordre 06.02) : les PV
@@ -418,6 +481,130 @@ def _apply_damage_and_handle_death(
             f"[DAMAGE RESULT] E{current_episode_num} T{turn} {phase} "
             f"target_id={target_id} front_hp={front_hp}"
         )
+
+
+def _apply_damage_to_named_model(
+    *,
+    target_id: str,
+    attacker_id: Optional[str],
+    alloc_model_id: str,
+    damage: int,
+    player: int,
+    turn: int,
+    phase: str,
+    line_number: int,
+    current_episode_num: int,
+    dead_units_current_episode: Set[str],
+    unit_hp: Dict[str, int],
+    unit_models_alive: Dict[str, int],
+    unit_model_hp: Dict[str, Dict[str, int]],
+    ordered_living_mids: Any,
+    unit_types: Dict[str, str],
+    unit_positions: Dict[str, Tuple[int, int]],
+    unit_deaths: List[Tuple[int, str, str, int]],
+    unit_kill_context: Dict[str, Tuple[str, int, str]],
+    stats: Dict[str, Any],
+    positions_by_model: Optional[Dict[str, Dict[str, Tuple[int, int]]]],
+    pending_model_removals: Optional[Dict[str, Set[str]]],
+) -> None:
+    """Blessure appliquée à la figurine que le moteur a NOMMÉE (`[ALLOC_MODEL:]`).
+
+    Rien n'est déduit ici — ni qui encaisse, ni qui tombe. C'est toute la différence avec le
+    chemin hérité, et c'est pourquoi ce chemin est plus court : les deux déductions qu'il
+    remplace étaient les deux sources de faux mesurées le 2026-08-12.
+
+    Trois conséquences, dans l'ordre :
+
+    1. **Les PV vont sur CE socle.** `unit_hp` n'est plus qu'un miroir : il est recalculé depuis
+       la figurine front après coup, jamais décrémenté à part. Deux compteurs qu'on décrémente
+       chacun de son côté finissent par se contredire — c'est la panne front/relève déjà payée.
+
+    2. **L'excès est PERDU, jamais reporté.** Le moteur plafonne (`dmg_dealt = min(dmg, hp_before)`)
+       et c'est le plafonné qui part au journal : un `Dmg:` supérieur aux PV de la figurine
+       nommée ne décrit donc aucune situation de jeu. Le reporter sur la suivante — ce que fait
+       le chemin hérité, faute de savoir QUI encaisse — tuerait ici une figurine que le moteur
+       laisse debout.
+
+    3. **Seul CE socle sera retiré** de `positions_by_model` — et pas tout de suite : à la fin de
+       l'ACTIVATION (`pending_model_removals`, appliqué par `analyzer_core` dès qu'une autre unité
+       agit). L'escouade garde donc ses autres socles : plus de repli sur l'ancre, donc plus de
+       point fantôme sur le hex du mort.
+
+       Le retard n'est pas une précaution, c'est la règle : la portée se décide au Select Targets,
+       une fois pour toute la salve. Mesuré le 2026-08-12 (E44) — retirer le socle dès sa mort
+       faisait juger les derniers jets d'un Onslaught Gatling Cannon sur les survivants des
+       premiers, à 25-27 hex pour une arme de 24, alors que la cible avait été choisie à 22.
+
+    Figurine inconnue de l'analyzer : comptée en 2.8 (`alloc_model_unknown`), jamais silencieuse.
+    Le moteur nomme un socle que l'état reconstruit ne connaît pas = les deux ont divergé, et
+    c'est précisément ce que la section 2.8 existe pour dire.
+    """
+    per_model = require_key(unit_model_hp, target_id)
+    if alloc_model_id not in per_model:
+        stats['state_resync']['alloc_model_unknown'] += 1
+        _debug_log(
+            f"[ALLOC MODEL UNKNOWN] E{current_episode_num} T{turn} {phase} "
+            f"target_id={target_id} model={alloc_model_id} known={sorted(per_model)}"
+        )
+        return
+    hp_before = int(per_model[alloc_model_id])
+    if hp_before - damage > 0:
+        per_model[alloc_model_id] = hp_before - damage
+        stats['wounded_enemies'][player].add(target_id)
+        _sync_front_hp_mirror(target_id, unit_hp, unit_model_hp, ordered_living_mids)
+        _debug_log(
+            f"[DAMAGE RESULT] E{current_episode_num} T{turn} {phase} "
+            f"target_id={target_id} model={alloc_model_id} hp={per_model[alloc_model_id]}"
+        )
+        return
+
+    # Figurine détruite — celle-là, nommément.
+    del per_model[alloc_model_id]
+    unit_models_alive[target_id] -= 1
+    if pending_model_removals is not None:
+        pending_model_removals.setdefault(target_id, set()).add(alloc_model_id)
+    if unit_models_alive[target_id] > 0:
+        stats['wounded_enemies'][player].add(target_id)
+        _sync_front_hp_mirror(target_id, unit_hp, unit_model_hp, ordered_living_mids)
+        _debug_log(
+            f"[MODEL SLAIN] E{current_episode_num} T{turn} {phase} "
+            f"target_id={target_id} model={alloc_model_id} "
+            f"models_left={unit_models_alive[target_id]}"
+        )
+        return
+
+    # Dernière figurine : l'escouade quitte le plateau. Même comptabilité que le chemin hérité —
+    # `unit_hp` reste l'invariant d'aliveness lu par tout le reste de l'analyzer.
+    target_type = require_key(unit_types, target_id)
+    stats['current_episode_deaths'].append((player, target_id, target_type))
+    stats['wounded_enemies'][player].discard(target_id)
+    _position_cache_remove(unit_positions, target_id)
+    unit_deaths.append((turn, phase, target_id, line_number))
+    dead_units_current_episode.add(target_id)
+    if attacker_id is not None:
+        unit_kill_context[target_id] = (attacker_id, turn, phase)
+    _debug_log(
+        f"[DEATH REMOVED] E{current_episode_num} T{turn} {phase} "
+        f"target_id={target_id} target_type={target_type} killer={attacker_id}"
+    )
+    del unit_hp[target_id]
+
+
+def _sync_front_hp_mirror(
+    target_id: str,
+    unit_hp: Dict[str, int],
+    unit_model_hp: Dict[str, Dict[str, int]],
+    ordered_living_mids: Any,
+) -> None:
+    """Réaligne ``unit_hp`` (miroir scalaire) sur les PV de la figurine front.
+
+    Jumeau de `_sync_front_hp` (analyzer_core), qui fait le même réalignement après un recalage
+    sur `[MODELS:]`. Ici la source est la carte par-socle qu'on vient de modifier : le miroir se
+    DÉDUIT, il ne se maintient pas en parallèle — sans quoi les deux dérivent l'un de l'autre.
+    """
+    _living = ordered_living_mids(target_id)
+    if _living:
+        unit_hp[target_id] = int(unit_model_hp[target_id][_living[0]])
 
 
 def _track_unit_reappearance(
@@ -1533,7 +1720,11 @@ def parse_step_log(filepath: str) -> Dict:
         # Écarts entre l'état RECONSTRUIT par l'analyzer et l'instantané `T{tour} STATE:` du
         # moteur. Ce compteur est le point du chantier : il transforme une dérive silencieuse en
         # erreur mesurée, et se déclenchera le jour où un nouvel effet cessera d'être journalisé.
-        'state_resync': {'dead_missed': 0, 'alive_missed': 0, 'pos_mismatch': 0},
+        # `alloc_model_unknown` : le moteur a nommé une figurine allouée que l'état reconstruit
+        # ne connaît pas. Même famille que les trois autres — l'analyzer et le moteur ne
+        # décrivent plus la même partie — et compté au même endroit pour la même raison.
+        'state_resync': {'dead_missed': 0, 'alive_missed': 0, 'pos_mismatch': 0,
+                         'alloc_model_unknown': 0},
         # ⚠️ Le compartiment `skip` N'EST PAS alimenté par une ligne `SKIP` du journal — il n'en
         # existe aucune (cf. V3). Son producteur est `handle_wait` : 10.04 rend une unité ENGAGÉE
         # inéligible au tir normal, donc son WAIT n'est pas un choix mais un skip imposé par la
@@ -1809,6 +2000,9 @@ def parse_step_log(filepath: str) -> Dict:
     from ai.analyzer_state import make_initial_state
     from ai.analyzer_core import run as _run_core
     state = make_initial_state(stats)
+    # Ce que le journal GARANTIT porter, lu AVANT la boucle : c'est ce qui autorise le parseur à
+    # traiter une donnée manquante comme une panne plutôt que comme un vieux format.
+    state.log_grammar = parse_log_grammar_version(filepath)
     _run_core(state, _cfg, filepath)
 
 
@@ -3672,6 +3866,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     log_print(f"Morts non vues par l'analyzer (fantomes)  : {_resync['dead_missed']}")
     log_print(f"Unites tuees a tort par l'analyzer        : {_resync['alive_missed']}")
     log_print(f"Figurines mal positionnees (deplacement non journalise) : {_resync['pos_mismatch']}")
+    log_print(f"Figurine allouee inconnue de l'analyzer  : {_resync['alloc_model_unknown']}")
 
     # LE calcul, partagé avec le total de la CLI (`error_totals`). Les deux copies qui vivaient
     # ici et là-bas avaient divergé sur deux compteurs : le rapport se contredisait lui-même.
@@ -3801,7 +3996,8 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         f"{summary_error_icon(_resync_total > 0)} 2.8 Etat reconstruit vs moteur : {_resync_total} "
         f"(fantomes={stats['state_resync']['dead_missed']}, "
         f"tuees-a-tort={stats['state_resync']['alive_missed']}, "
-        f"positions={stats['state_resync']['pos_mismatch']})"
+        f"positions={stats['state_resync']['pos_mismatch']}, "
+        f"figurine-allouee-inconnue={stats['state_resync']['alloc_model_unknown']})"
     )
 
     log_print("\n" + "#" * 80 + "\n")

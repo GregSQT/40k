@@ -118,10 +118,18 @@ La §5 liste les verts vacants trouvés.
 [hh:mm:ss] Board: cols=<n> rows=<n> inches_to_subhex=<n> hex_radius=<n> margin=<n>
 [hh:mm:ss] Run rules: engagement_zone_subhex=… engagement_zone_vertical_inches=…
            metric.engagement=… metric.ranged=… move.thru_ez=… move.thru_enemy=… move.thru_friendly=…
+[hh:mm:ss] Log grammar: <n>
 [hh:mm:ss] Unit <id> (<unitType>) [<DISPLAY_NAME>] P<n>: Starting position (c,r), HP_MAX=<n>
            base=<shape>/<size> [MODELS: <mid>@(c,r,z<h>) …] [MODEL_TYPES: <mid>=<UnitType> …]
 [hh:mm:ss] === ACTIONS START ===
 ```
+
+`Log grammar:` (2026-08-12) déclare ce que le journal **garantit porter** — `1` = grammaire
+antérieure, `2` = `[ALLOC_MODEL:]` sur toute attaque allouée. Absente ⇒ 1. Elle existe pour une
+seule raison : sans elle, un lecteur qui ne trouve pas un segment ne peut pas distinguer « ce
+journal ne le porte pas » de « le producteur est en panne », et n'a d'autre choix que de retomber
+en silence sur une reconstruction approximative. Avec elle, l'absence LÈVE
+(`analyzer_core._alloc_model_from_line`). Source unique : `ai/step_logger.LOG_GRAMMAR_VERSION`.
 
 `Board:` et `Run rules:` sont **exigés** par l'analyzer (`analyzer_config.get_run_inches_to_subhex:68` /
 `get_run_rule:44` lèvent sinon) : ils figent l'échelle et les règles du run analysé, jamais celles du
@@ -144,7 +152,7 @@ figurine de §1.9 (`analyzer_wound.py`) et les PV par figurine de §2.3 (`analyz
 ### 1.2 Ligne d'action (`log_action`, `ai/step_logger.py`)
 
 ```
-[hh:mm:ss] E<ep> T<turn> P<player> <PHASE> : <message> [<MODELS:…>] [<TARGET_MODELS:…>] [<SHOOTER_MODELS:…>] [SUCCESS|FAILED]
+[hh:mm:ss] E<ep> T<turn> P<player> <PHASE> : <message> [<MODELS:…>] [<TARGET_MODELS:…>] [<SHOOTER_MODELS:…>] [<ALLOC_MODEL:…>] [SUCCESS|FAILED]
 ```
 
 Segments per-figurine (`engine/action_log_utils.py`) :
@@ -154,6 +162,7 @@ Segments per-figurine (`engine/action_log_utils.py`) :
 | `[MODELS: <mid>@(c,r,z<h>) …]` | socles VIVANTS de l'unité qui agit ; `mid = <unit_id>#<index>` ; `z` = hauteur de PLANCHER en pouces | analyzer (source de vérité par-socle) + replay |
 | `[TARGET_MODELS: …]` | survivants de la CIBLE après pertes, uniquement sur le DERNIER jet visant cette cible | replay + **état per-figurine** (`analyzer_core`, depuis le 2026-08-11). ⚠️ **JAMAIS un verdict de distance** : `shoot_handler` (portée) l'a lu jusqu'au 2026-08-12 et rendait 31 faux « hors portée » sur 600 épisodes — la figurine visée, la plus proche, disparaît du segment quand elle meurt du tir |
 | `[SHOOTER_MODELS: <mid> …]` | figurines ayant EFFECTIVEMENT tiré/frappé | replay seul |
+| `[ALLOC_MODEL: <mid>]` | figurine de la CIBLE à qui CETTE attaque a été allouée (05, « Allocate Attack ») — une ligne = un jet, donc jamais une liste. Émise sur toute attaque parvenue à l'allocation, y compris sauvegarde réussie ; absente des lignes `Save [NOT ALLOCATED]`, de `IMPACTED` (charge : dégâts appliqués à l'ESCOUADE, aucune figurine allouée côté moteur) et des lignes `[HAZARDOUS]` | analyzer : PV par socle et retrait du socle mort, **nommément** (depuis le 2026-08-12). ⚠️ Avant ce segment, l'analyzer DEVINAIT : socle touché déduit d'un tri CHARACTER/non-CHARACTER quand le moteur applique `_select_allocation_model` (200 PV par socle faux sur 173 129), et TOUS les socles de l'escouade oubliés à chaque mort (2 342 fenêtres, p90 119 lignes, 19 % débordant sur le tour suivant) |
 
 ### 1.3 Messages par type d'action
 

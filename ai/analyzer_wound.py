@@ -128,11 +128,17 @@ def target_bodyguard_toughness(state: Any, config: Any, target_id: str) -> Optio
     `_target_highest_bodyguard_toughness` — le rôle est dérivé par le MOTEUR
     (`ai.analyzer_core._model_is_character`), pas par une table locale.
 
-    ⚠️ LES SOCLES VIVANTS NE SONT PAS TOUJOURS CONNUS. `_apply_damage_and_handle_death` efface
-    `positions_by_model[cible]` à chaque perte, et délibérément : le journal ne dit pas QUELLE
-    figurine est morte, donc les garder ferait mesurer des socles retirés du plateau. Mesuré sur
-    le journal du témoin : 96 lignes sur 96 étaient écartées pour cette seule raison — un
-    contrôle qui ne juge rien.
+    ⚠️ LES SOCLES VIVANTS NE SONT PAS TOUJOURS CONNUS — mais depuis le 2026-08-12 c'est devenu
+    l'exception. Sur un journal de grammaire 1, `_apply_damage_and_handle_death` efface
+    `positions_by_model[cible]` à chaque perte, faute de savoir QUELLE figurine est morte : les
+    garder ferait mesurer des socles retirés du plateau. Mesuré sur le journal du témoin :
+    96 lignes sur 96 écartées pour cette seule raison — un contrôle qui ne juge rien.
+
+    À partir de la grammaire 2, `[ALLOC_MODEL:]` nomme la figurine allouée : l'escouade garde ses
+    socles, ce repli ne sert plus, et le contrôle rend un verdict. Mesuré sur le même journal de
+    60 épisodes, avant/après : **496 lignes non vérifiables → 0** (201 au tir, 295 en mêlée), et
+    aucun seuil faux découvert — le moteur avait raison, l'analyzer ne pouvait simplement pas
+    le dire.
 
     On retombe donc sur le ROSTER complet (`[MODEL_TYPES:]`, jamais effacé), ce qui est EXACT
     tant qu'au moins un bodyguard est vivant : la plus haute E des bodyguards ne dépend pas de

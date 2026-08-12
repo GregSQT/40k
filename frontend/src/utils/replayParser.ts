@@ -155,9 +155,17 @@ const NON_ABILITY_ROLL_TOKENS = new Set([
  *
  * Jeu FERMÉ, contrairement au denylist ci-dessus : c'est l'enveloppe du log (récompense,
  * figurines, issue), pas les règles du jeu — elle ne grossit pas quand une règle est ajoutée.
+ * Il grossit en revanche quand le journal porte une DONNÉE de plus : `ALLOC_MODEL:` (figurine
+ * cible allouée, 2026-08-12) y est entré avec le token, dans la même livraison.
+ *
+ * ⚠️ Cette entrée-là est DÉFENSIVE, et il faut le savoir pour ne pas la croire testée de près :
+ * l'émetteur écrit `[ALLOC_MODEL:]` APRÈS `[R:…]` et `[MODELS:…]`, déjà membres du jeu, si bien
+ * que le scan s'arrête avant de l'atteindre. Elle ne protège donc rien AUJOURD'HUI — elle
+ * protège le jour où l'ordre d'émission change. Sans elle, ce jour-là, le token serait lu comme
+ * un nom de capacité sur toute attaque entièrement ratée (`wound_ability = "R:+0.0"`, déjà payé).
  */
 const LINE_METADATA_TOKEN =
-  /^(?:R:|MODELS:|SHOOTER_MODELS:|TARGET_MODELS:|FIGHT_SUBPHASE:|SUCCESS$|FAILURE$|HAZARDOUS$)/;
+  /^(?:R:|MODELS:|SHOOTER_MODELS:|TARGET_MODELS:|ALLOC_MODEL:|FIGHT_SUBPHASE:|SUCCESS$|FAILURE$|HAZARDOUS$)/;
 
 /** `[REROLLED:1]` — le dé AVANT relance, posé par le StepLogger sur le segment du jet. */
 const REROLLED_TOKEN = /^REROLLED:(\d+)$/;
