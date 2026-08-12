@@ -185,6 +185,13 @@ def handle_fight(
             state.fight_sequence_target_models[fight_activation_key] = require_key(
                 state.models_alive_pre_line, target_id
             )
+        # Cartes des contrôles d'engagement, gelées au même instant que l'effectif ci-dessus :
+        # les dégâts de la ligne courante sont déjà appliqués quand ce handler s'exécute, et une
+        # cible tuée par le coup qu'on juge disparaît de l'énumération des ennemis. JUMEAU EXACT
+        # du tir (cf. `AnalyzerState.select_targets_engagement_maps`).
+        engagement_positions, engagement_hp, engagement_models = state.select_targets_engagement_maps(
+            ("fight",) + fight_activation_key, target_id, log_anchor=(target_col, target_row),
+        )
         attacker_player = require_key(state.unit_player, fighter_id)
         fight_attacks_by_unit = require_key(stats, 'fight_attacks_by_unit')
         fight_attacks_by_player = require_key(fight_attacks_by_unit, attacker_player)
@@ -202,17 +209,17 @@ def handle_fight(
             for charged_id in state.charged_units_current_fight:
                 if charged_id in state.charged_units_fought:
                     continue
-                if charged_id not in state.unit_positions:
+                if charged_id not in engagement_positions:
                     continue
-                if charged_id not in state.unit_hp or require_key(state.unit_hp, charged_id) <= 0:
+                if charged_id not in engagement_hp or require_key(engagement_hp, charged_id) <= 0:
                     continue
                 if is_within_engine_engagement_zone(
                     charged_id,
                     state.unit_player,
-                    state.unit_positions,
-                    state.unit_hp,
+                    engagement_positions,
+                    engagement_hp,
                     engagement_zone=_get_engagement_zone_for_analyzer(),
-                    positions_by_model=state.positions_by_model,
+                    positions_by_model=engagement_models,
                     unit_base=state.unit_base,
                     **state.engagement_3d_kwargs(),
                 ):
