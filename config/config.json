@@ -29,7 +29,8 @@
     "OPENBLAS_NUM_THREADS": 1,
     "NUMEXPR_NUM_THREADS": 1,
     "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True",
-    "CUDA_LAUNCH_BLOCKING": "0"
+    "CUDA_LAUNCH_BLOCKING": "0",
+    "TORCH_LOGS": "-dynamo"
   },
   "torch": {
     "compile_mode": "default",

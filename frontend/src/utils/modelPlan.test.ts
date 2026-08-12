@@ -25,9 +25,7 @@ describe("toPlanArray", () => {
   });
 
   it("encode toutes les figurines du plan", () => {
-    expect(
-      toPlanArray({ a: { col: 1, row: 1, level: 1 }, b: { col: 2, row: 2 } })
-    ).toEqual([
+    expect(toPlanArray({ a: { col: 1, row: 1, level: 1 }, b: { col: 2, row: 2 } })).toEqual([
       ["a", 1, 1, 1],
       ["b", 2, 2, 0],
     ]);
@@ -48,9 +46,9 @@ describe("toPlanArrayWithOrientation", () => {
   });
 
   it("conserve une orientation 0 explicite (face nord), qui n'est pas « absente »", () => {
-    expect(
-      toPlanArrayWithOrientation({ m1: { col: 3, row: 4, orientation: 0 } })
-    ).toEqual([["m1", 3, 4, 0, 0]]);
+    expect(toPlanArrayWithOrientation({ m1: { col: 3, row: 4, orientation: 0 } })).toEqual([
+      ["m1", 3, 4, 0, 0],
+    ]);
   });
 
   it("garde le même encodage des 4 premiers éléments que `toPlanArray`", () => {

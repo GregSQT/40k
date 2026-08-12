@@ -49,8 +49,12 @@ except Exception:
 if (_training_env_vars or _torch_compile_mode) and multiprocessing.current_process().name == "MainProcess":
     _rel = os.path.relpath(_config_path, _project_root) if _project_root else _config_path
     print(f"📋 Config from {_rel}")
+    # Ordre de lecture prefere, PUIS toute clef ajoutee a `training_env` : une liste figee
+    # affichait un env partiel (NUMEXPR_NUM_THREADS, TORCH_LOGS manquaient), donc une ligne
+    # d'entete qui ment sur ce qui est reellement pose dans l'environnement du run.
     _order = ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "PYTORCH_CUDA_ALLOC_CONF", "CUDA_LAUNCH_BLOCKING")
-    _parts = " ".join(f"{k}={os.environ.get(k, '')}" for k in _order if k in _training_env_vars)
+    _keys = [k for k in _order if k in _training_env_vars] + [k for k in _training_env_vars if k not in _order]
+    _parts = " ".join(f"{k}={os.environ[k]}" for k in _keys)
     if _parts:
         print(f"   env: {_parts}")
     print(f"   torch.compile_mode: {_torch_compile_mode or 'off'}")

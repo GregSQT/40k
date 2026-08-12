@@ -26,6 +26,23 @@ except Exception:
 # Pas de pytest dans la commande -> rien à faire.
 printf '%s' "$cmd" | grep -q 'pytest' || exit 0
 
+# PORTE DE SORTIE — délégation ponctuelle (CLAUDE.md, « TESTS — QUI LANCE QUOI »).
+#
+# L'utilisateur peut confier SA vérification large à l'agent pour un prompt donné. CLAUDE.md
+# décrit depuis toujours le marqueur ci-dessous comme le moyen de le signaler au hook... et le
+# hook ne l'a jamais implémenté (constaté le 2026-08-12 : autorisation donnée, commande refusée
+# quand même). Une règle écrite que le code contredit ne protège rien — elle fait perdre un
+# aller-retour à chaque délégation, et pousse à contourner par des appels fichier par fichier,
+# c'est-à-dire exactement ce que ce hook existe pour empêcher.
+#
+# Ce n'est PAS un affaiblissement : le marqueur n'est légitime que si le PROMPT COURANT porte
+# l'autorisation explicite, il ne vaut que pour ce prompt et ne se déduit d'aucun contexte
+# (cf. CLAUDE.md). L'ajouter sans autorisation reste une faute grave — simplement, elle se juge
+# à la lecture du transcript, pas ici : un hook ne voit pas le prompt.
+if printf '%s' "$cmd" | grep -q 'VERIF-LARGE-AUTORISEE'; then
+  exit 0
+fi
+
 reason=""
 
 # Cas 1 : un RÉPERTOIRE de tests est passé en cible (tests, tests/, tests/unit, tests/integration…).

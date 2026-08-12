@@ -15,6 +15,8 @@ from typing import Any, Dict, Optional
 
 from shared.data_validation import require_key
 
+from ai.bot_registry import bot_display_name
+
 __all__ = ['StepLogger']
 
 
@@ -486,6 +488,11 @@ class StepLogger:
 
         # Use bot_name parameter or fall back to current_bot_name attribute
         effective_bot_name = bot_name or getattr(self, 'current_bot_name', None)
+        # Nom LISIBLE resolu ICI, AVANT le `try` : ce bloc avale ses exceptions (il degrade en
+        # avertissement plutot que de casser un episode pour une ligne de journal), donc une cle
+        # hors registre y disparaitrait en silence — l'en-tete perdrait sa ligne `Opponent:` sans
+        # que rien ne le signale, exactement le mode d'echec que ce fichier a deja paye.
+        opponent_display = bot_display_name(effective_bot_name) if effective_bot_name else None
 
         try:
             timestamp = time.strftime("%H:%M:%S", time.localtime())
@@ -535,8 +542,11 @@ class StepLogger:
                         f"OPPONENT={opponent_roster_id} ({opponent_roster_ref})\n"
                     )
 
-                if effective_bot_name:
-                    f.write(f"[{timestamp}] Opponent: {effective_bot_name.capitalize()}Bot\n")
+                if opponent_display:
+                    # Nom lu dans le registre, jamais fabrique ici : `capitalize() + "Bot"` ne
+                    # tombait juste que sur les cles d'un seul mot et inventait `Value_tradeBot`
+                    # ou `AlphaBot` pour les autres (cf. `bot_display_name`).
+                    f.write(f"[{timestamp}] Opponent: {opponent_display}\n")
 
                 # Log walls/obstacles for replay
                 if walls:

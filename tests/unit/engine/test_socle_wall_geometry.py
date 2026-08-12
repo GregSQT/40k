@@ -312,7 +312,10 @@ class TestCarteReelle:
         terrain = json.load(open("config/board/44x60x5/terrain/terrain-mc1.json"))
         walls: Set[Tuple[int, int]] = set()
         for gi, group in enumerate(terrain["walls"]):
-            walls.update(map(tuple, expand_wall_group_to_hex_list(group, path_hint=f"walls[{gi}]")))
+            walls.update(
+                (int(col), int(row))
+                for col, row in expand_wall_group_to_hex_list(group, path_hint=f"walls[{gi}]")
+            )
         assert len(walls) > 900, "le fixture doit vraiment porter des murs (pas de vert vacant)"
 
         blocked = socle_blocked_anchor_cells(walls, "round", BASE, 0, cols, rows)

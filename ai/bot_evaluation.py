@@ -755,13 +755,14 @@ def _eval_worker_task(
 
     # step_logger : uniquement en mode sérial (non picklable, ne pas ajouter en mode parallèle)
     if config_params.get("step_logger"):
-        env.engine.step_logger = config_params["step_logger"]
+        step_logger = config_params["step_logger"]
+        env.engine.step_logger = step_logger
         # ADVERSAIRE RÉELLEMENT AFFRONTÉ, posé ICI et nulle part ailleurs : c'est le seul endroit
         # qui tient à la fois le journal et la tâche. `current_bot_name` portait le commentaire
         # « Set externally for bot-evaluation logging » depuis sa création sans qu'aucun code ne
         # l'assigne : le moteur retombait alors sur l'étiquette en dur « SelfPlay », écrite sur
         # 100 % des lignes — 600 épisodes contre six bots pondérés annoncés comme du self-play.
-        env.engine.step_logger.current_bot_name = task["bot_name"]
+        step_logger.current_bot_name = task["bot_name"]
 
     wins, losses, draws = 0, 0, 0
     # Troncatures rencontrees PENDANT L'EVAL. Sans elles, une boucle du moteur qui ne se

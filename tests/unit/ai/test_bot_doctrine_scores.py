@@ -89,5 +89,9 @@ def test_contester_still_ranks_reachable_targets_by_distance_to_the_objective() 
     state = _state({"hurtable": 4.0, "immune": 4.0})
     score = _score_contester(ATTACKER, True)
 
-    assert score("immune", {}, state) > score("hurtable", {}, state)
+    immune = score("immune", {}, state)
+    hurtable = score("hurtable", {}, state)
+
+    assert immune is not None and hurtable is not None, "les deux cibles sont blessables ici"
+    assert immune > hurtable
 

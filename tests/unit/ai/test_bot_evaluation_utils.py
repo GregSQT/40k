@@ -421,6 +421,10 @@ def test_eval_worker_task_attaches_step_logger(monkeypatch: pytest.MonkeyPatch) 
         Un doublure sans attribut assignable ferait echouer cette pose, donc ce test la verifie
         aussi (assertion plus bas)."""
 
+        # Annonce sans valeur : l'attribut n'existe qu'une fois POSE par la tache. Lui donner une
+        # valeur initiale ferait passer l'assertion en cas de non-pose... par la valeur initiale.
+        current_bot_name: str
+
     marker_logger = _MarkerLogger()
     result = be._eval_worker_task(
         {

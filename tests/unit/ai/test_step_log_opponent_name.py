@@ -21,6 +21,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from ai.step_logger import StepLogger
 from engine.w40k_core import W40KEngine
 from tests._state_invariants import unit_invariants
@@ -74,6 +76,37 @@ def test_the_real_bot_name_reaches_the_log(tmp_path: Path) -> None:
     assert "Opponent: ControlBot" in content, content
 
 
+@pytest.mark.parametrize(
+    "bot_key,display",
+    [
+        ("value_trade", "ValueTradeBot"),
+        ("alpha", "AlphaStrikeBot"),
+    ],
+)
+def test_the_displayed_name_comes_from_the_registry_not_from_capitalize(
+    tmp_path: Path, bot_key: str, display: str
+) -> None:
+    """VERROU : `capitalize() + "Bot"` rend ce test ROUGE sur les trois clés.
+
+    L'en-tête fabriquait le nom lui-même, et la recette ne tombait juste que sur les clés d'un
+    seul mot — `control` étant précisément celle que le test d'origine couvrait. Les autres
+    s'affichaient `Value_tradeBot`, ou `AlphaBot` pour un bot dont le nom est `AlphaStrikeBot` :
+    le journal nommait des adversaires qui n'existent pas. Deux failles de la recette, deux cas :
+    le séparateur `_` qu'elle ne repasse pas en majuscule, et le nom de classe qui n'est pas la
+    clé habillée (`alpha` → `AlphaStrikeBot`).
+    """
+    content = _episode_header(tmp_path, current_bot_name=bot_key)
+
+    assert f"Opponent: {display}" in content, content
+    assert f"{bot_key.capitalize()}Bot" not in content, content
+
+
+def test_an_unknown_bot_key_raises_rather_than_inventing_a_label(tmp_path: Path) -> None:
+    """Une clé hors registre est un bot ajouté à moitié, pas une étiquette à improviser."""
+    with pytest.raises(KeyError, match="inconnu du registre"):
+        _episode_header(tmp_path, current_bot_name="pas_un_bot")
+
+
 def test_the_eval_task_sets_the_name_on_the_logger() -> None:
     """Le maillon qui manquait, vérifié sur le CODE DE PRODUCTION et non sur une reconstitution.
 
@@ -86,8 +119,9 @@ def test_the_eval_task_sets_the_name_on_the_logger() -> None:
     from ai import bot_evaluation
 
     src = inspect.getsource(bot_evaluation._eval_worker_task)
-    assert 'env.engine.step_logger = config_params["step_logger"]' in src
-    assert 'env.engine.step_logger.current_bot_name = task["bot_name"]' in src
+    assert 'step_logger = config_params["step_logger"]' in src
+    assert "env.engine.step_logger = step_logger" in src
+    assert 'step_logger.current_bot_name = task["bot_name"]' in src
 
 
 def _engine_with_logger(logger) -> W40KEngine:

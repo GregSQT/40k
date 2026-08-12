@@ -3361,25 +3361,10 @@ class GameStateManager:
         if p2_points > p1_points:
             return 2
 
-        units_cache = require_key(game_state, "units_cache")
-        unit_by_id = {str(u["id"]): u for u in game_state["units"]}
-        p1_value = 0
-        p2_value = 0
-        for unit_id, entry in units_cache.items():
-            unit = unit_by_id.get(str(unit_id))
-            if not unit:
-                raise KeyError(f"Unit {unit_id} missing from game_state['units']")
-            unit_value = require_key(unit, "VALUE")
-            if entry["player"] == 1:
-                p1_value += unit_value
-            elif entry["player"] == 2:
-                p2_value += unit_value
-            else:
-                raise ValueError(f"Unexpected unit player id: {entry['player']}")
-
-        if p1_value > p2_value:
+        army_value = army_value_by_player(game_state)
+        if army_value[1] > army_value[2]:
             return 1
-        if p2_value > p1_value:
+        if army_value[2] > army_value[1]:
             return 2
         return -1
 
@@ -3404,28 +3389,41 @@ class GameStateManager:
         if p2_points > p1_points:
             return 2, "objectives"
 
-        units_cache = require_key(game_state, "units_cache")
-        unit_by_id = {str(u["id"]): u for u in game_state["units"]}
-        p1_value = 0
-        p2_value = 0
-        for unit_id, entry in units_cache.items():
-            unit = unit_by_id.get(str(unit_id))
-            if not unit:
-                raise KeyError(f"Unit {unit_id} missing from game_state['units']")
-            unit_value = require_key(unit, "VALUE")
-            if entry["player"] == 1:
-                p1_value += unit_value
-            elif entry["player"] == 2:
-                p2_value += unit_value
-            else:
-                raise ValueError(f"Unexpected unit player id: {entry['player']}")
-
-        if p1_value > p2_value:
+        army_value = army_value_by_player(game_state)
+        if army_value[1] > army_value[2]:
             return 1, "value_tiebreaker"
-        if p2_value > p1_value:
+        if army_value[2] > army_value[1]:
             return 2, "value_tiebreaker"
         return -1, "draw"
 
+
+
+def army_value_by_player(game_state: Dict[str, Any]) -> Dict[int, int]:
+    """Valeur d'armee ENCORE EN JEU, par joueur — le critere de DEPARTAGE de la bataille.
+
+    SOURCE UNIQUE de ce calcul : il decide la victoire a egalite de points de mission
+    (« value_tiebreaker »). `determine_winner` et `determine_winner_with_method` en portaient
+    chacune une copie ECRITE A LA MAIN, identiques au caractere pres — deux implementations d'une
+    meme regle divergent au premier ajustement, et c'est le mode d'echec n°1 de ce depot.
+
+    ⚠️ C'est du TOUT-OU-RIEN, et c'est la regle : une escouade rend sa VALUE entiere a sa mort,
+    jamais au prorata des figurines tombees. `units_cache` ne contient que les escouades vivantes,
+    et la VALUE est celle de l'ESCOUADE. Tout consommateur qui voudrait un signal continu (une
+    heuristique de bot, par exemple) mesurerait alors autre chose que la condition de victoire :
+    c'est un autre calcul, pas un raffinement de celui-ci.
+    """
+    units_cache = require_key(game_state, "units_cache")
+    unit_by_id = {str(u["id"]): u for u in require_key(game_state, "units")}
+    value_by_player: Dict[int, int] = {1: 0, 2: 0}
+    for unit_id, entry in units_cache.items():
+        unit = unit_by_id.get(str(unit_id))
+        if not unit:
+            raise KeyError(f"Unit {unit_id} missing from game_state['units']")
+        player = int(require_key(entry, "player"))
+        if player not in value_by_player:
+            raise ValueError(f"Unexpected unit player id: {player}")
+        value_by_player[player] += int(require_key(unit, "VALUE"))
+    return value_by_player
 
 
 def primary_objective_points(
