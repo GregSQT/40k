@@ -181,16 +181,12 @@ def handle_fight(
         # résout pas (`parse_error`) tue quand même, et si elle avait empêché le gel, l'arme
         # suivante aurait hérité de l'effectif d'APRÈS ses pertes.
         fight_activation_key = (state.fight_phase_seq_id, fighter_id, target_id)
-        if fight_activation_key not in state.fight_sequence_target_models:
-            state.fight_sequence_target_models[fight_activation_key] = require_key(
-                state.models_alive_pre_line, target_id
-            )
-        # Cartes des contrôles d'engagement, gelées au même instant que l'effectif ci-dessus :
-        # les dégâts de la ligne courante sont déjà appliqués quand ce handler s'exécute, et une
-        # cible tuée par le coup qu'on juge disparaît de l'énumération des ennemis. JUMEAU EXACT
-        # du tir (cf. `AnalyzerState.select_targets_engagement_maps`).
-        engagement_positions, engagement_hp, engagement_models = state.select_targets_engagement_maps(
-            ("fight",) + fight_activation_key, target_id, log_anchor=(target_col, target_row),
+        frozen_target = state.freeze_select_targets(
+            state.fight_sequence_target_models, fight_activation_key, target_id,
+            log_anchor=(target_col, target_row),
+        )
+        engagement_positions, engagement_hp, engagement_models = state.engagement_maps(
+            frozen_target, target_id
         )
         attacker_player = require_key(state.unit_player, fighter_id)
         fight_attacks_by_unit = require_key(stats, 'fight_attacks_by_unit')
@@ -316,7 +312,7 @@ def handle_fight(
                     cc_nb, _cleave_error = _cc_cap_for_line(
                         state, config, action_desc, attacker_player, fighter_unit_type,
                         weapon_display_name, cc_nb_single, n_fighter_models, _shooters,
-                        require_key(state.fight_sequence_target_models, fight_activation_key),
+                        frozen_target.models_alive,
                     )
                     if _cleave_error is not None:
                         stats['parse_errors'].append({
