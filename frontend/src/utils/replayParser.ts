@@ -816,6 +816,37 @@ export function parse_log_file_from_text(text: string): ReplayData {
       continue;
     }
 
+    // Etape End of Turn — RETRAIT POUR COHERENCE (03.03).
+    // Format StepLogger : "FIGHT : Unit X(c,r) COHERENCY REMOVED <mid> ... (03.03) [MODELS:...]".
+    // C'est la SEULE mort qui ne descend d'aucune attaque : sans cette branche, la ligne n'est
+    // reconnue par aucun verbe, aucune action n'est poussee, et le segment [MODELS:] (qui ne
+    // liste QUE les survivantes) est perdu — les figurines retirees restent affichees jusqu'a la
+    // prochaine action de leur escouade. Le travail utile est fait par `applyModels` via
+    // pushAction ; cette branche existe pour que l'action EXISTE.
+    const coherencyRemovalMatch = trimmed.match(
+      /\[([^\]]+)\] (?:E\d+\s+)?(T\d+) P(\d+) FIGHT : Unit (\d+)\((\d+),(\d+)\) COHERENCY REMOVED ([^(]+)\(03\.03\)/
+    );
+    if (coherencyRemovalMatch) {
+      const unitId = parseInt(coherencyRemovalMatch[4], 10);
+      const col = parseInt(coherencyRemovalMatch[5], 10);
+      const row = parseInt(coherencyRemovalMatch[6], 10);
+      syncKnownUnitPosition(currentEpisode, unitId, col, row);
+      pushAction({
+        type: "coherency_removal",
+        timestamp: coherencyRemovalMatch[1],
+        turn: coherencyRemovalMatch[2],
+        player: parseInt(coherencyRemovalMatch[3], 10),
+        unit_id: unitId,
+        pos: { col, row },
+        log_message: extractLogMessage(trimmed),
+      });
+      if (currentEpisode.units[unitId]) {
+        currentEpisode.units[unitId].col = col;
+        currentEpisode.units[unitId].row = row;
+      }
+      continue;
+    }
+
     const hazardousResultMatch = trimmed.match(
       /\[([^\]]+)\]\s(?:E\d+\s+)?(T\d+)\sP(\d+)\sSHOOT\s:\sUnit\s(\d+)\((\d+),(\d+)\)\s(SUFFERS\s3\sMortal\sWounds\s\[HAZARDOUS\]|was\sDESTROYED\s\[HAZARDOUS\])/
     );
@@ -1654,7 +1685,11 @@ export function parse_log_file_from_text(text: string): ReplayData {
       } else if (
         action.type.includes("fight") ||
         action.type === "pile_in" ||
-        action.type === "consolidation"
+        action.type === "consolidation" ||
+        // 03.03 : le retrait a lieu a l'etape End of Turn, que le moteur resout a la fin de la
+        // phase de combat (`_fight_phase_complete`). Sans cette clause il tomberait en "move",
+        // c'est-a-dire dans le tour SUIVANT a l'ecran.
+        action.type === "coherency_removal"
       ) {
         // pile_in (12.02) / consolidation (12.07) sont des déplacements de la PHASE FIGHT — le moteur
         // les loggue « FIGHT : … PILED IN/CONSOLIDATED ». Sans ça, ils tombaient en phase "move".

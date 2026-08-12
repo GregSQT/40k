@@ -190,6 +190,11 @@ def _fight_end_gs():
         "units_fought": [],
         "units_selected_to_fight": set(),
         "console_logs": [],
+        # Journal d'actions : l'etape 03.03 y ecrit sa ligne de retrait (cf. section (e)). Present
+        # dans tout game_state reel (initialise par w40k_core), et deja exige par les autres
+        # `append_action_log` de la phase de combat.
+        "action_logs": [],
+        "action_log_seq": 0,
     })
     gs["config"]["game_rules"]["max_turns"] = 5
     return gs
@@ -242,3 +247,72 @@ def test_step_runs_before_the_turn_limit_test(monkeypatch, phase_complete):
 
     assert validate_squad_coherency(gs, "1")
     assert len(_alive(gs)) == 2
+
+
+# --- (e) le retrait LAISSE UNE TRACE dans le journal -------------------------------------------
+#
+# 03.03 est la seule mort qui ne descend d'aucune attaque : sans ligne d'action, aucun lecteur
+# reconstruisant l'etat par accumulation d'evenements (analyzer, replay) n'apprend le retrait, et
+# la figurine retiree continue d'engager ses ennemis et de bloquer leurs chemins jusqu'a la
+# prochaine action de son escouade. Mesure sur le run du 2026-08-12 (E485) : la figurine `2#9`,
+# retiree ici, a fabrique a elle seule un « advance from adjacent » ET un « advance au-dela du
+# budget » sur l'escouade adverse.
+
+
+def _log_gs():
+    """game_state du helper de journalisation : compteur de sequence + tour."""
+    gs = _gs([(10, 10), (11, 10), (30, 40)])
+    gs.update({"turn": 3, "action_log_seq": 0, "action_logs": []})
+    return gs
+
+
+def _coherency_entries(gs):
+    return [e for e in gs["action_logs"] if e["type"] == "coherency_removal"]
+
+
+def test_removal_emits_an_action_log_entry():
+    """VERROU : supprimer l'`append_action_log` de `_log_end_of_turn_coherency_removals` rend ce
+    test ROUGE — c'est exactement l'etat dans lequel le moteur a vecu jusqu'au 2026-08-12."""
+    gs = _log_gs()
+
+    fight_handlers._log_end_of_turn_coherency_removals(
+        gs, end_of_turn_regain_coherency_all_squads(gs)
+    )
+
+    entries = _coherency_entries(gs)
+    assert len(entries) == 1, "un retrait 03.03 doit produire UNE entree d'action_log par escouade"
+    assert entries[0]["unitId"] == "1"
+    assert entries[0]["removed_models"] == ["1#2"]
+    assert entries[0]["player"] == 1
+    assert entries[0]["turn"] == 3
+
+
+def test_no_removal_emits_nothing():
+    """Une escouade coherente ne produit aucune ligne : le journal ne se remplit pas a vide."""
+    gs = _log_gs()
+    gs["models_cache"]["1#2"].update({"col": 12, "row": 10})
+
+    fight_handlers._log_end_of_turn_coherency_removals(
+        gs, end_of_turn_regain_coherency_all_squads(gs)
+    )
+
+    assert _coherency_entries(gs) == []
+
+
+def test_logged_anchor_is_the_post_removal_one():
+    """L'ancre journalisee est celle d'APRES retrait — `destroy_model` la recalcule quand c'est
+    l'ancre qui tombe, et une ligne qui porterait l'ancienne contredirait son propre `[MODELS:]`."""
+    # L'isolee est ici la figurine d'INDEX 0, donc l'ancre initiale de l'escouade.
+    gs = _gs([(30, 40), (10, 10), (11, 10)])
+    gs.update({"turn": 1, "action_log_seq": 0, "action_logs": []})
+
+    fight_handlers._log_end_of_turn_coherency_removals(
+        gs, end_of_turn_regain_coherency_all_squads(gs)
+    )
+
+    entry = _coherency_entries(gs)[0]
+    assert entry["removed_models"] == ["1#0"]
+    assert (entry["col"], entry["row"]) == (
+        gs["units_cache"]["1"]["col"], gs["units_cache"]["1"]["row"]
+    ), "l'ancre journalisee doit etre celle que le cache porte APRES le retrait"
+    assert (entry["col"], entry["row"]) != (30, 40)

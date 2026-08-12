@@ -1544,6 +1544,31 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         # combat, contrôlés comme les autres (budget 3", per-socle, chemin).
                         action_type = 'move'
                         handle_fight_move(state, config, line, action_desc, player, turn, phase)
+                elif " COHERENCY REMOVED " in action_desc:
+                        # 03.03 End of Turn — retrait de figurines hors cohérence. Ce n'est PAS
+                        # une faute : c'est la règle qui s'applique, et c'est la seule mort qui ne
+                        # descend d'aucune attaque. Le travail utile est fait en amont par le
+                        # segment `[MODELS:]` de cette ligne (survivants de l'escouade), qui purge
+                        # les socles retirés de `positions_by_model` — sans elle ils restaient
+                        # « vivants » jusqu'à la prochaine action de l'escouade et fabriquaient
+                        # des engagements et des blocages de chemin qui n'existaient pas.
+                        # La branche existe pour COMPTER l'exercice de la règle et pour que la
+                        # ligne ne tombe pas dans `other`, où plus personne ne la lit.
+                        action_type = 'coherency_removal'
+                        _removed = re.search(
+                            r'COHERENCY REMOVED\s+(.+?)\s+\(03\.03\)', action_desc
+                        )
+                        if not _removed:
+                            stats['parse_errors'].append({
+                                'episode': state.current_episode_num,
+                                'turn': turn,
+                                'phase': phase,
+                                'line': line.strip(),
+                                'error': "ligne COHERENCY REMOVED sans liste de figurines",
+                            })
+                        else:
+                            stats['coherency_removals'][player] += len(_removed.group(1).split())
+                            note_rule_usage(stats, "03.03", player)
                 elif attack_verb_present(action_desc):
                         action_type = 'fight'
                         handle_fight(state, config, line, action_desc, action_unit_id, player, turn, phase, step_marker_present, step_inc)

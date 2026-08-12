@@ -1602,6 +1602,11 @@ def parse_step_log(filepath: str) -> Dict:
         'devastating_wounds_incorrect': {1: 0, 2: 0},
         # 03.03 : cohérence d'escouade à la fin de chaque déplacement et à la mise en place.
         'squad_coherency_violations': {1: 0, 2: 0},
+        # 03.03 End of Turn — figurines RETIRÉES faute de cohérence. Compteur d'EXERCICE, pas
+        # d'erreur : le moteur applique la règle, il ne la viole pas. Il vit à côté des violations
+        # parce qu'il en est la conséquence directe — une escouade qui finit son déplacement hors
+        # cohérence perd des figurines à la fin du tour.
+        'coherency_removals': {1: 0, 2: 0},
         # Occasions JUGÉES par règle du corpus (`config/rules_corpus.json`) — le compte d'exercice
         # qui manquait à 67 des 69 contrôles. Sans lui, « 0 erreur » ne distingue pas un contrôle
         # qui n'a rien trouvé d'un contrôle qui n'a rien regardé. Déclarée d'avance, une clé par
@@ -3034,6 +3039,11 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         if _coh[_p] > 0 and _first:
             log_print(f"  First P{_p} occurrence (Episode {_first['episode']}): {_first['line']}")
             log_print(f"    {_first['detail']}")
+    # Conséquence de la ligne ci-dessus, et pas une faute : les figurines que le moteur retire à
+    # l'étape End of Turn. Affiché même à 0 — c'est ce chiffre qui dit si le journal PORTE ces
+    # retraits, or son absence a coûté deux fautes inventées (cf. `_log_end_of_turn_coherency_removals`).
+    _coh_rm = require_key(stats, 'coherency_removals')
+    _table_row("  dont figurines retirees (End of Turn):", _fmt_count(_coh_rm[1]), _fmt_count(_coh_rm[2]))
     _render_rule_coverage(stats, "1.1", log_print)
     # SHOOTING ERRORS
     active_debug_section = "1.2"

@@ -811,6 +811,15 @@ class StepLogger:
 
             return base_msg
                 
+        elif action_type == "coherency_removal" and details:
+            # 03.03 End of Turn. Le VERBE est `COHERENCY REMOVED` et non `REMOVED` seul : les
+            # aiguillages de l'analyzer testent des verbes entoures d'espaces (` MOVED `,
+            # ` FLED `...), et un verbe trop generique risquerait de capter une autre ligne.
+            removed = details.get("removed_models")  # get allowed
+            if not isinstance(removed, list) or not removed:
+                raise KeyError("Coherency_removal action missing required removed_models")
+            return f"{unit_label} COHERENCY REMOVED {' '.join(str(m) for m in removed)} (03.03)"
+
         elif action_type == "shoot":
             if "target_id" not in details:
                 raise KeyError("Shoot action missing required target_id")
