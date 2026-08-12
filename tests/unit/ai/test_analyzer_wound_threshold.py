@@ -310,49 +310,85 @@ def test_a_per_model_weapon_never_falls_back_on_the_squad_datasheet(is_melee, we
     )
 
 
-@pytest.mark.parametrize("is_melee,key", [(True, "cc_str_by_weapon"), (False, "rng_str_by_weapon")])
-def test_a_composite_profile_of_divergent_strengths_is_unverifiable(is_melee, key):
-    """Profil composite « A / B » : le moteur FUSIONNE deux armes sur une seule ligne.
+# ─────────────────────────────────────────────────────────────────────────────
+# Une ligne, PLUSIEURS profils d'arme (fusion moteur « A / B »)
+# ─────────────────────────────────────────────────────────────────────────────
 
-    Cas réel du registre — `DreadnoughtRedemptor`, Heavy Onslaught Gatling Cannon F6 et
-    Onslaught Gatling Cannon F5, mêmes ATK/AP/DMG/règles : la clé de fusion moteur les réunit
-    dès que les deux blessent la cible sur le même seuil. Le `max()` des PLAFONDS rendait F6,
-    une Force que le profil F5 de la même ligne ne porte pas — troisième face du même emprunt
-    que les deux pièges ci-dessus, à l'intérieur d'une seule datasheet cette fois. Composantes
-    de MÊME F → la ligne garde bien une valeur attendue unique, elle reste vérifiable.
+#: Datasheets du composite. Cas réel du registre : le `DreadnoughtRedemptor` porte Heavy
+#: Onslaught Gatling Cannon F6 et Onslaught Gatling Cannon F5, de mêmes ATK/AP/DMG/règles — la
+#: clé de fusion moteur les réunit dès que les deux blessent la cible sur le même seuil, et la
+#: ligne loguée s'appelle alors « A / B ». `Big Choppa` F6 tient le rôle de la seconde arme.
+_COMPOSITE_LIMITS = {
+    **ATTACK_LIMITS,
+    "Trooper": {
+        "cc_str_by_weapon": {"Choppa": 4, "Choppa Lourd": 5, "Big Choppa": 6},
+        "rng_str_by_weapon": {"Bolter": 4, "Bolter Lourd": 5, "Big Bolter": 6},
+    },
+    # Le personnage rattaché ne porte QUE son arme : sur un composite inter-datasheets, chaque
+    # figurine ne connaît que son propre profil (règle 19).
+    "Leader": {"cc_str_by_weapon": {"Relic Weapon": 4}, "rng_str_by_weapon": {"Relic Bolter": 4}},
+}
+
+
+@pytest.mark.parametrize("is_melee,arme", [(True, "Choppa"), (False, "Bolter")])
+def test_a_composite_line_never_invents_a_strength_no_model_carries(is_melee, arme):
+    """Les DEUX Forces réelles de la ligne sont rendues, aucune n'est fabriquée.
+
+    L'ancien résolveur de PLAFONDS retenait le `max()` des composantes : F6 pour une ligne qui
+    couvre aussi un profil F4. Sur-évaluer un plafond ne peut que sur-autoriser ; sur-évaluer
+    une Force fabrique une figurine qui n'existe pas, et le verdict 05.02 porte sur elle.
     """
-    state = _State()
-    limits = {
-        **ATTACK_LIMITS,
-        "Trooper": {
-            "cc_str_by_weapon": {"Choppa": 4, "Big Choppa": 6, "Choppa Jumelle": 4},
-            "rng_str_by_weapon": {"Choppa": 4, "Big Choppa": 6, "Choppa Jumelle": 4},
-        },
-    }
-    divergent = _config(unit_attack_limits=limits)
-
-    assert aw.attacker_weapon_strengths(
-        state, divergent, "Choppa / Big Choppa", "Trooper", (), is_melee
-    ) is None, (
-        "la F du composite a été agrégée (F6) : le contrôle 05.02 se prononce sur une valeur "
-        "qu'aucune figurine de la ligne ne porte"
+    fortes = aw.attacker_weapon_strengths(
+        _State(), _config(unit_attack_limits=_COMPOSITE_LIMITS),
+        f"{arme} / Big {arme}", "Trooper", (), is_melee,
     )
-    assert aw.attacker_weapon_strengths(
-        state, divergent, "Choppa / Choppa Jumelle", "Trooper", (), is_melee
-    ) == 4, "un composite HOMOGÈNE reste vérifiable — le contrôle ne doit pas s'aveugler"
-    assert limits["Trooper"][key]  # la datasheet du tireur est peuplée : rien n'est tautologique
+    assert fortes == (4, 6), "les profils de la ligne ont été agrégés en une seule Force"
 
 
-def test_a_divergent_composite_is_counted_unverifiable_not_as_an_error():
-    """Face compteur du test ci-dessus : la ligne est écartée, jamais comptée en erreur."""
+def test_a_composite_keeps_its_verdict_when_its_profiles_agree_on_the_threshold():
+    """F5 et F6 vs E4 : les deux blessent sur 3+, donc la ligne A un attendu unique.
+
+    C'est le cas NOMINAL d'un composite, et non un cas de bord : la clé de fusion du moteur est
+    bâtie sur le seuil AFFICHÉ, donc deux profils ne se retrouvent sur une ligne que s'ils
+    blessent déjà la cible pareil. Décréter « non vérifiable » dès que les Forces diffèrent
+    éteindrait le contrôle sur toutes ces lignes — un compteur qui ne regarde plus rien.
+    """
+    attendu = aw.expected_wound_threshold(
+        _State(), _config(unit_attack_limits=_COMPOSITE_LIMITS), "", 1, "Trooper",
+        "Choppa Lourd / Big Choppa", "9", (), is_melee=True,
+    )
+    assert attendu == 3, "le contrôle s'est aveuglé sur un composite pourtant sans ambiguïté"
+
+
+def test_a_composite_across_datasheets_resolves_each_profile_on_its_bearer():
+    """Composite inter-datasheets : la clé de fusion moteur ne porte pas l'id de la figurine.
+
+    « Choppa / Relic Weapon » frappé par le troupier ET le personnage rattaché : AUCUNE datasheet
+    ne porte les deux profils. Exiger que chacune les résolve tous rendrait toutes ces lignes
+    non vérifiables ; les résoudre chacune sur son porteur donne ici F4 et F4 → 4+.
+    """
+    attendu = aw.expected_wound_threshold(
+        _State(), _config(unit_attack_limits=_COMPOSITE_LIMITS), "", 1, "Trooper",
+        "Choppa / Relic Weapon", "9", ("9#0", "9#2"), is_melee=True,
+    )
+    assert attendu == 4, (
+        "un profil absent de la datasheet du socle a été pris pour un trou de donnée alors "
+        "qu'il est porté par l'autre socle de la ligne"
+    )
+
+
+def test_a_composite_whose_profiles_disagree_is_counted_unverifiable_not_as_an_error():
+    """F4 et F6 vs E4 : 4+ et 3+. Le seuil imprimé est unique, son attendu ne l'est pas.
+
+    C'est là — et seulement là — que choisir une Force rendait un verdict sur un profil inventé.
+    La ligne est écartée et COMPTÉE, jamais comptée en erreur.
+    """
+    config = _config(unit_attack_limits=_COMPOSITE_LIMITS)
+    assert aw.expected_wound_threshold(
+        _State(), config, "", 1, "Trooper", "Choppa / Big Choppa", "9", (), is_melee=True,
+    ) is None, "un seul des deux profils a tranché pour toute la ligne"
+
     stats = _stats()
-    config = _config(unit_attack_limits={
-        **ATTACK_LIMITS,
-        "Trooper": {
-            "cc_str_by_weapon": {"Choppa": 4, "Big Choppa": 6},
-            "rng_str_by_weapon": {"Choppa": 4},
-        },
-    })
     desc = "FOUGHT Unit 9 with [Choppa / Big Choppa] - Hit 4(3+) - Wound 4(5+)"
     aw.check_wound_threshold(
         _State(), config, stats, desc, desc, 1, "Trooper", "Choppa / Big Choppa", "9", (),
@@ -360,6 +396,27 @@ def test_a_divergent_composite_is_counted_unverifiable_not_as_an_error():
     )
     assert stats["fight_wound_threshold_mismatch"][1] == 0
     assert stats["fight_wound_threshold_unverifiable"][1] == 1
+
+
+def test_a_striker_whose_datasheet_knows_no_profile_makes_the_line_unverifiable():
+    """Le troupier résout « Choppa », le personnage rattaché ne le porte pas du tout.
+
+    Sauter cette figurine rendrait un verdict sur la seule autre — le repli d'escouade que ce
+    module refuse, déguisé en per-figurine. La ligne est écartée, pas moyennée.
+    """
+    assert aw.attacker_weapon_strengths(
+        _State(), _config(unit_attack_limits=_COMPOSITE_LIMITS),
+        "Choppa", "Trooper", ("9#0", "9#2"), is_melee=True,
+    ) is None, "une figurine dont la datasheet ignore l'arme a été silencieusement sautée"
+
+
+def test_a_composite_profile_unknown_to_every_striker_is_unverifiable():
+    """Un profil qu'AUCUNE figurine de la ligne ne connaît (F symbolique du registre, arme
+    absente) : c'est un vrai trou de donnée, pas une répartition entre porteurs."""
+    assert aw.attacker_weapon_strengths(
+        _State(), _config(unit_attack_limits=_COMPOSITE_LIMITS),
+        "Choppa / Choppa Inconnu", "Trooper", (), is_melee=True,
+    ) is None, "un profil irrésolu a été silencieusement ignoré au lieu d'écarter la ligne"
 
 
 def test_roster_fallback_declines_when_bodyguards_have_mixed_toughness():

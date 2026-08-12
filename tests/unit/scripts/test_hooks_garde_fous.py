@@ -14,6 +14,7 @@ première version du contrôle prenait pour le rapport lui-même.
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -678,6 +679,47 @@ def test_vider_garde_ce_qui_est_arrive_apres_le_liste(tmp_path: Path) -> None:
     _edite(hook, str(tmp_path / "engine" / "corrige_par_la_review.py"))
     assert _cmd(hook, "--vider", S1).returncode == 0
     assert _en_attente(hook) == [str(tmp_path / "engine" / "corrige_par_la_review.py")]
+
+
+def test_vider_garde_un_fichier_que_la_review_vient_de_corriger(tmp_path: Path) -> None:
+    """Le cas FRÉQUENT, pas le cas limite : la review corrige ce qu'elle relit (`--fix`, /simplify).
+
+    Le fichier est déjà dans l'instantané ; seule sa VERSION a changé. Retenir les noms seuls
+    effaçait donc chaque correction d'une liste où elle venait de rentrer, sans relecture.
+    """
+    hook = _bac(tmp_path)
+    fichier = tmp_path / "engine" / "x.py"
+    fichier.parent.mkdir()
+    fichier.write_text("avant\n", encoding="utf-8")
+    _edite(hook, str(fichier))
+    _en_attente(hook)
+    os.utime(fichier, (0, 0))  # la review a réécrit le fichier : mtime différent
+    assert _cmd(hook, "--vider", S1).returncode == 0
+    assert _en_attente(hook) == [str(fichier)]
+
+
+def test_un_script_jetable_hors_depot_n_engage_pas_de_rapport(tmp_path: Path) -> None:
+    """Les deux hooks doivent s'accorder : l'un réclamait RELIRE pour un fichier que l'autre exclut.
+
+    Un `.py` de sonde écrit dans le scratchpad n'est pas du travail livrable — RELIRE n'a alors
+    aucune liste à donner, et l'agent se retrouvait devant une exigence insatisfiable.
+    """
+    contexte = _rapport(
+        tmp_path, _user("instrumente"), _edit("/tmp/ailleurs/sonde.py"), _say("fait.")
+    )
+    assert contexte is not None and "COUVERTURE" not in contexte and "RELIRE" not in contexte
+
+
+def test_un_voisin_casse_est_signale_et_non_avale(tmp_path: Path) -> None:
+    """Panne atteignable précisément sur les tours qui ÉDITENT le voisin.
+
+    Un traceback nu sortirait rc=1 sans `additionalContext` : l'édition disparaîtrait de la liste
+    sans que rien ne le dise.
+    """
+    hook = _bac(tmp_path)
+    (hook.parent / H_RAPPORT.name).write_text("def config(:\n", encoding="utf-8")
+    contexte = json.loads(_edite(hook, str(tmp_path / "engine" / "x.py")))
+    assert "SyntaxError" in contexte["hookSpecificOutput"]["additionalContext"]
 
 
 def test_vider_sans_liste_prealable_refuse(tmp_path: Path) -> None:

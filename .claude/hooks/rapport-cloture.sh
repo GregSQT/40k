@@ -142,7 +142,10 @@ def dans_le_depot(chemin):
     doivent s'accorder sur ce qui est du travail livrable, sinon l'un réclame une relecture que
     l'autre refuse d'inscrire dans sa liste.
     """
-    return os.path.abspath(chemin).startswith(RACINE + os.sep)
+    # Un chemin relatif est résolu depuis la RACINE, pas depuis le cwd : dans un transcript comme
+    # dans une liste, il a été écrit relativement au dépôt, et le cwd du contrôle n'a rien à y voir.
+    absolu = chemin if os.path.isabs(chemin) else os.path.join(RACINE, chemin)
+    return os.path.normpath(absolu).startswith(RACINE + os.sep)
 
 
 def blocks(entry):
