@@ -437,6 +437,20 @@ mesure, et c'est assumé (§0.14).
 
 ## 3. Suspendus à un jalon explicite — ne pas commencer avant
 
+- 🔵 **P3-0 — Retrait pour cohérence 03.03 : le choix passe au joueur ET à l'agent** — déclencheur :
+  **le prochain dégel de `TOTAL_ACTION_SIZE`**, groupé avec les tranches de §1 qui en demanderont un
+  (P3-4, P3-5, P3-6 branchent elles aussi des décisions).
+  → [`A_faire/coherency_removal_choix_agent.md`](A_faire/coherency_removal_choix_agent.md)
+  L'étape End of Turn retire les figurines hors cohérence en choisissant **à la place du joueur**
+  (la plus éloignée du centroïde), et c'est vrai des DEUX côtés — le PvP ne l'offre pas davantage
+  que le gym. La règle 03.03 donne ce choix au contrôleur de l'unité.
+  DÉCISIONS UTILISATEUR du 2026-08-12, toutes deux tranchées et à ne pas rouvrir : (1) le choix est
+  branché **pour les deux** ; (2) via une tranche d'ids d'action **DÉDIÉE** (1139 → 1159) et non
+  taillée dans la plage des cellules de move — arbitrage pris sur la qualité d'apprentissage, pas
+  sur le coût (le raisonnement complet est dans le doc de chantier §3.1).
+  ⚠️ Le jalon EST le coût : ce dégel se paie en run `--new` complet. Le payer une fois par tranche
+  coûterait quatre runs là où un seul suffit. C'est la raison — et la seule — pour laquelle ce
+  chantier n'est pas en §1 alors qu'il corrige un écart aux règles.
 - **T7 — Unification validation de déploiement** — déclencheur : « le training tourne ».
   🔴 Le fix décrit est FAUX en l'état (mesuré 2026-07-20) ; c'est une décision de design
   (plan contraint par l'ancre), pas un bug. → [`1_Agent/V11_tranches.md`](1_Agent/V11_tranches.md) §5 T7
