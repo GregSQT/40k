@@ -384,6 +384,9 @@ mesure, et c'est assumé (§0.14).
    🟠 **État au 2026-08-12** : six styles livrés, modèle de dégâts corrigé à la racine
    (par figurine), et les bots **s'étalent** au lieu d'empiler trois escouades par zone — le pire
    bot passe de 0,837 (ancien panel) à **0,62** et l'écart de VP est divisé par deux (§12.5).
+   ⚠️ Ces chiffres sont **à rejouer** : deux défauts de la pénalité d'encombrement ont été corrigés
+   depuis (poids fractionnaires annulés par une troncature, surplus compté autrement que le
+   contrôle réel — §12.6). Le sens du résultat tient, son amplitude n'est plus mesurée.
    🔴 **L'ORTHOGONALITÉ est ABANDONNÉE comme critère** (décision du 2026-08-12) : les six bots se
    déplacent en bloc d'un modèle à l'autre, ils forment une seule dimension. La cause est le
    format — seuls les objectifs marquent, zéro victoire par élimination sur 600 parties — donc
