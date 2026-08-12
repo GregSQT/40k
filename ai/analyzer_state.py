@@ -329,23 +329,24 @@ class AnalyzerState:
         positions = dict(self.unit_positions)
         hps = dict(self.unit_hp)
         models_by_unit = dict(self.positions_by_model)
+        # Absence figée = absence restituée : la cible est d'abord RETIRÉE des trois cartes vives
+        # (elles ne portent que l'après), puis rendue à partir du seul gel. Ce qui n'a pas été figé
+        # au Select Targets step ne réapparaît donc jamais.
+        positions.pop(target_id, None)
+        hps.pop(target_id, None)
+        models_by_unit.pop(target_id, None)
         # TOUT OU RIEN, et c'est la VIVACITÉ qui commande. Une cible sans PV au Select Targets step
         # (déjà détruite par une activation antérieure — le journal contient bien ces lignes, cf.
         # le contrôle `shoot_at_dead_unit`) n'est pas mesurable : lui rendre son ancre sans ses PV
         # la faisait ressortir « unité sans données » à chaque ligne de l'activation, une erreur de
         # parsing que les cartes vives ne produisaient pas — elles ne la portaient plus du tout.
         if hp is None:
-            for carte in (positions, hps, models_by_unit):
-                carte.pop(target_id, None)
             return positions, hps, models_by_unit
         hps[target_id] = hp
-        # Absence figée = absence restituée : des socles inconnus au Select Targets step ne doivent
-        # pas réapparaître depuis la carte vive (elle ne porte que l'après).
-        for carte, valeur in ((positions, anchor), (models_by_unit, models)):
-            if valeur is None:
-                carte.pop(target_id, None)
-            else:
-                carte[target_id] = valeur
+        if anchor is not None:
+            positions[target_id] = anchor
+        if models is not None:
+            models_by_unit[target_id] = models
         return positions, hps, models_by_unit
 
 

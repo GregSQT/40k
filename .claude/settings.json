@@ -9,10 +9,21 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/home/greg/40k/.claude/hooks/deny-full-test-suite.sh",
-            "if": "Bash(*pytest*)",
+            "command": "/home/greg/40k/.claude/hooks/deny-verif-large.sh",
             "timeout": 10,
-            "statusMessage": "Garde-fou suite de tests..."
+            "statusMessage": "Garde-fou verification large..."
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/greg/40k/.claude/hooks/rapport-cloture.sh",
+            "timeout": 10,
+            "statusMessage": "Controle du rapport de cloture..."
           }
         ]
       }

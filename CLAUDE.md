@@ -10,7 +10,7 @@ CONVENTIONS IMPORTANTES :
 - Les modèles IA sont dans ai/models/<agent_key>/model_<agent_key>.zip
 - Les configs d'agents sont dans config/agents/<agent_name>/
 - Format de code : Python type hints, docstrings, respect AI_TURN.md
-- Ne jamais utiliser de fallbacks ou de workaround ou de valeur par défaut pour masquer des erreurs potentielles
+- Aucun fallback, workaround ni valeur par défaut pour masquer une erreur → voir T1
 
 === ROADMAP — QUOI FAIRE ENSUITE ===
 
@@ -77,9 +77,9 @@ TESTS — QUI LANCE QUOI (NON NÉGOCIABLE) :
    python3 -m pytest tests/integration/pvp/ -q -n 6 --dist load ; pyright ;
    p ai/hidden_action_finder.py ; p scripts/check_ai_rules.py ; npx biome check frontend/src ;
    (cd frontend && npx tsc --noEmit -p tsconfig.app.json)`
-- PAR DÉFAUT, UN AGENT NE LA LANCE JAMAIS. Ni `pytest tests/unit/`, ni `pytest tests/`,
-  ni `pytest` nu, sous aucune forme (y compris derrière un `source .venv/... &&`).
-  Un hook la REFUSE (.claude/hooks/deny-full-test-suite.sh) — inutile de contourner.
+- PAR DÉFAUT, UN AGENT NE LA LANCE JAMAIS, sous aucune de ses formes. Le hook
+  `.claude/hooks/deny-verif-large.sh` REFUSE la commande — inutile de chercher la formulation
+  qui passerait : il voit la ligne entière, et il couvre les sept briques de la vérification.
 - DÉLÉGATION PONCTUELLE — seule exception. L'utilisateur peut confier cette vérification à
   l'agent, et seulement ainsi :
   * l'autorisation doit être EXPLICITE et porter sur les tests, dans le PROMPT COURANT ;
@@ -112,7 +112,7 @@ TESTS — QUI LANCE QUOI (NON NÉGOCIABLE) :
 
 === WORKFLOW IA ===
 
-FICHIERS À NE JAMAIS MODIFIER AUTOMATIQUEMENT :
+FICHIERS À NE JAMAIS MODIFIER AUTOMATIQUEMENT, TOUS MODES :
 - config/users.db
 - ai/models/**/*.zip
 
@@ -131,15 +131,21 @@ PIÈGES CONNUS :
 
 === MODE PAR DÉFAUT : ASK ===
 Par défaut, suivre les règles "MODE ASK" (validation stricte).
-Le mode est activé si et seulement si le message de l'utilisateur contient [MODE AUTO] ou [MODE AGENT] (insensible à la casse).
+Un autre mode est activé si et seulement si le message de l'utilisateur contient [MODE AUTO],
+[MODE AGENT] ou [MODE NUIT] (insensible à la casse). Aucun de ces marqueurs → MODE ASK.
+
+=== OBJECTIF PRINCIPAL — CET ARBITRAGE TRANCHE TOUT LE FICHIER, TOUS MODES ===
+
+Économiser les tokens de SORTIE, jamais le travail de VÉRIFICATION.
+→ La qualité (T1–T4) prime toujours : lire le fichier, grep le jumeau, prouver le test rouge,
+  mesurer plutôt que déduire. Ça ne se coupe JAMAIS au nom du quota.
+→ L'économie porte sur ce que j'ai à LIRE : pas de prose, pas de récap, pas de code recopié,
+  pas d'étape narrée. Message court adossé à une vérification complète.
+→ « Ça coûtait trop de tokens » n'est jamais une raison de ne pas avoir vérifié.
+  C'est une raison de ne pas me l'avoir raconté.
+L'autonomie est secondaire (cf. règles ASK 1 à 5).
 
 === MODE ASK (PAR DÉFAUT) ===
-
-MODE ÉCONOME STRICT — PRIORITÉ ABSOLUE AU QUOTA
-
-OBJECTIF PRINCIPAL :
-Minimiser la consommation de tokens.
-L'autonomie est secondaire.
 
 STYLE DE RÉPONSE (NON NÉGOCIABLE) :
 - Réponds en français, ton direct, tutoiement
@@ -168,11 +174,15 @@ STYLE DE RÉPONSE (NON NÉGOCIABLE) :
 - Hors code (estimations, architecture, opinions) : l'incertitude est explicite et acceptable.
 - AVIS EXPERT : rester objectif et factuel. Si une approche meilleure existe, la signaler spontanément — ne jamais valider une idée par défaut si une meilleure solution est possible. Une phrase suffit.
 
-RECOMMANDATION MODÈLE/EFFORT (critères stricts) :Ne recommander que si un critère est explicitement rempli.
-→ Opus      : refactor >3 fichiers interdépendants, décision d'architecture irréversible, bug impliquant 3+ systèmes en interaction
-→ /think    : algorithme avec cas limites complexes, raisonnement multi-étapes avec dépendances croisées
-→ Sonnet    : tout le reste (défaut) — édition ciblée, bug isolé, ajout de feature simple
-Format      : "🔴🔴🔴 Modèle suggéré : Opus — [critère exact rempli] 🔴🔴🔴" en début de réponse.
+RECOMMANDATION MODÈLE/EFFORT (critères stricts) : ne recommander que si un critère est
+explicitement rempli. Deux leviers réels, et deux seulement : le modèle (`/model`) et le niveau
+d'effort de raisonnement.
+→ Opus 5      : refactor >3 fichiers interdépendants, décision d'architecture irréversible,
+                bug impliquant 3+ systèmes en interaction
+→ Effort haut : algorithme avec cas limites complexes, raisonnement multi-étapes avec
+                dépendances croisées
+→ Sonnet 5    : tout le reste (défaut) — édition ciblée, bug isolé, ajout de feature simple
+Format        : "🔴🔴🔴 Modèle suggéré : Opus 5 — [critère exact rempli] 🔴🔴🔴" en début de réponse.
 Si aucun critère n'est rempli → ne rien dire.
 
 === RÈGLES MODE ASK — 1 à 5 (NON NÉGOCIABLES) ===
@@ -181,8 +191,13 @@ Ces cinq règles sont propres au MODE ASK. Les modes AGENT/AUTO et NUIT les rel�
 explicitement. Elles ne concernent QUE le droit d'agir et le périmètre, jamais la qualité.
 
 1. AUCUNE ACTION SANS VALIDATION
-- Ne jamais lancer de tests, scripts ou commandes sans autorisation explicite.
+- Ne jamais lancer de scripts ou de commandes sans autorisation explicite.
 - Ne jamais modifier du code sans validation préalable.
+- EXCEPTION, tranchée le 2026-08-12 : l'exécution des FICHIERS de test ciblés que l'agent vient
+  d'écrire ou de toucher est TOUJOURS libre, y compris le rouge/vert exigé par T4 VERROU. Le
+  risque que cette règle protège, c'est une commande longue ou destructive ; un fichier de test
+  ciblé n'est ni l'un ni l'autre, et le hook `deny-verif-large.sh` refuse déjà tout ce qui déborde.
+  Demander pour ça coûtait un aller-retour par correction, pour un risque nul.
 
 2. ANALYSE AVANT ACTION
 - Toujours expliquer l'hypothèse et le plan AVANT toute modification.
@@ -283,9 +298,7 @@ conclusion, il ne s'y ajoute pas. Ne jamais y répéter ce qui vient d'être dit
        B : <solution> — <...>
        C : <solution, ou ne rien faire si c'en est une> — <...>
 
-       RECOMMANDATION : <A/B/C>. <Pourquoi, en 1 à 3 phrases, à l'optique LONG TERME :
-       la solution qui ne laisse rien à reprendre plus tard. Ne jamais recommander un
-       enchaînement d'options (« A puis B »), ni une demi-mesure « en attendant ».>
+       RECOMMANDATION : <A/B/C>. <Pourquoi, en 1 à 3 phrases, à l'optique LONG TERME.>
 
     2. <sujet suivant, même structure>
   PROMPTS :
@@ -298,9 +311,9 @@ conclusion, il ne s'y ajoute pas. Ne jamais y répéter ce qui vient d'être dit
   /code-review <fichiers modifiés>
   /simplify <fichiers modifiés>
 
-- LU et JUMEAU sont TOUJOURS présents. « grep X → 0 hit » est une réponse valide ; omettre la
-  ligne n'en est pas une. Ce qui est validé localement dans un fichier à cohérence globale n'est
-  pas validé — c'est le défaut le plus fréquent de ce dépôt (cf. T4 JUMEAU).
+- LU et JUMEAU sont TOUJOURS présents. « grep X → 0 hit » est une réponse valide. Ce qui est
+  validé localement dans un fichier à cohérence globale n'est pas validé — c'est le défaut le
+  plus fréquent de ce dépôt (cf. T4 JUMEAU).
 - RÉFS, ARBITRAGE et PROMPTS : omettre la section s'il n'y a réellement rien. Ne jamais écrire « néant ».
 - Un arbitrage remonté n'est pas un défaut ; le taire pour paraître complet en est un.
 - ARBITRAGE — EXIGENCES DE FOND (le reste du rapport reste télégraphique, pas lui) :
@@ -308,8 +321,7 @@ conclusion, il ne s'y ajoute pas. Ne jamais y répéter ce qui vient d'être dit
     ne sert à rien. Contraintes DURES, un dépassement = à réécrire :
     - le problème tient en 4 phrases MAXIMUM, écrites pour quelqu'un qui n'a pas lu le code ;
     - chaque option tient sur UNE à DEUX lignes ;
-    - la recommandation tient en 3 phrases maximum, et son étiquette s'écrit en MAJUSCULES
-      (`RECOMMANDATION :`) — c'est la ligne que je cherche du regard ;
+    - la recommandation tient en 3 phrases maximum — c'est la ligne que je cherche du regard ;
     - AUCUN tableau, AUCUN bloc de code, AUCUNE sous-liste, AUCUN chiffre de profilage dans le
       corps du problème. Les mesures ont déjà été données plus haut dans la réponse.
   * Un sujet énoncé SANS ses options n'est pas un arbitrage : c'est une question posée à moitié.
@@ -320,12 +332,12 @@ conclusion, il ne s'y ajoute pas. Ne jamais y répéter ce qui vient d'être dit
     place ; s'ils sont indispensables, ils vont dans une option, en appui.
   * Chaque option porte ce qu'elle donne ET ce qu'elle coûte, dans la même phrase. Une liste
     d'options nues ne permet pas d'arbitrer, donc elle ne compte pas.
-  * `RECOMMANDATION :` — étiquette en MAJUSCULES, OPTIQUE LONG TERME, SANS DETTE. Recommander la solution qui ferme le sujet
-    pour de bon, même si elle est plus longue. INTERDIT de recommander un enchaînement (« A
-    maintenant, B plus tard »), une mesure d'attente, ou une option choisie parce qu'elle est
-    rapide : c'est de la dette déguisée en prudence (cf. T2). Une option n'est recommandable
-    comme étape que si les suivantes sont techniquement IMPOSSIBLES sans elle — et il faut alors
-    le dire explicitement. « À toi de voir » n'est pas une recommandation.
+  * `RECOMMANDATION :` — étiquette en MAJUSCULES, OPTIQUE LONG TERME, SANS DETTE. Recommander la
+    solution qui ferme le sujet pour de bon, même si elle est plus longue. INTERDIT de recommander
+    un enchaînement (« A maintenant, B plus tard »), une mesure d'attente, ou une option choisie
+    parce qu'elle est rapide : c'est de la dette déguisée en prudence (cf. T2). Une option n'est
+    recommandable comme étape que si les suivantes sont techniquement IMPOSSIBLES sans elle — et
+    il faut alors le dire explicitement. « À toi de voir » n'est pas une recommandation.
   * Interdit d'y glisser du travail technique que l'agent savait faire (cf. règle ci-dessus) :
     l'ARBITRAGE développé ne devient pas un lieu où déguiser une dette en question.
 - PROMPTS — OBLIGATOIRE dès qu'un bug, une incohérence ou un sujet à traiter a été RENCONTRÉ
@@ -346,23 +358,23 @@ conclusion, il ne s'y ajoute pas. Ne jamais y répéter ce qui vient d'être dit
   exécute que si le PROMPT COURANT l'y autorise explicitement, l'autorisation ne vaut que pour
   ce prompt, ne se déduit d'aucun contexte et se retire en ne la redonnant pas. En cas de doute,
   elle n'existe pas : écrire la ligne RELIRE et s'arrêter là.
-- RELIRE, DISPOSITION : l'étiquette `RELIRE :` est SEULE sur sa ligne, aucune commande à sa suite.
-  `/code-review` sur la ligne suivante, `/simplify` sur la ligne d'après — une commande par ligne,
-  sans indentation d'alignement, pour être copiables d'un seul geste.
 - RELIRE, CHEMINS : relatifs quand le travail a été fait dans le dépôt principal, ABSOLUS DANS LE
-  WORKTREE quand il y a été fait — jamais relatifs dans ce cas :
-      RELIRE :
-      /code-review /home/greg/40k/.claude/worktrees/<nom>/engine/xxx.py
-      /simplify /home/greg/40k/.claude/worktrees/<nom>/engine/xxx.py
-  Un chemin relatif désigne le fichier du dépôt PRINCIPAL, qui porte le même nom sans porter la
-  modification : la review relit alors un chantier étranger sans que rien ne le signale (mesuré le
-  2026-08-08 — un verdict entier, findings compris, rendu sur le mauvais code).
+  WORKTREE quand il y a été fait — jamais relatifs dans ce cas. Un chemin relatif désigne le
+  fichier du dépôt PRINCIPAL, qui porte le même nom sans porter la modification : la review relit
+  alors un chantier étranger sans que rien ne le signale (mesuré le 2026-08-08 — un verdict
+  entier, findings compris, rendu sur le mauvais code).
+- FORME DU RAPPORT — tenue par un hook, pas par ta vigilance : `.claude/hooks/rapport-cloture.sh`
+  (Stop) vérifie sur tout tour qui modifie un fichier la présence de LU et JUMEAU, celle de RELIRE
+  si du code a bougé, la disposition du bloc (étiquette seule, une commande par ligne) et les
+  chemins absolus en worktree. Il bloque en nommant ce qui manque. Deux conséquences : ne discute
+  pas son verdict, complète ; et ce que le hook ne voit pas — la SUBSTANCE de LU, du JUMEAU, des
+  PROMPTS — n'est vérifié par personne d'autre que toi.
 
 T3. INVESTIGATION AUTONOME — PRIME SUR LES RÈGLES ASK 1 ET 5
 - Si l'utilisateur demande explicitement d'investiguer un problème, d'analyser une erreur, ou de trouver la root cause :
   → INVESTIGUER IMMÉDIATEMENT ET AUTONOMEMENT sans redemander la permission
   → Lire tous les fichiers nécessaires pour comprendre le problème
-  → Utiliser codebase_search, grep, read_file pour explorer le code
+  → Utiliser Grep, Glob et Read pour explorer le code
   → Suivre les traces d'erreur, analyser les logs, examiner le flux d'exécution
   → Ne s'arrêter QUE si :
     * La root cause est identifiée avec certitude (présenter alors la solution)
@@ -483,5 +495,5 @@ ACTIVATION :
 PÉRIMÈTRE AUTORISÉ :
 - Scripts : python3 ai/*, python3 scripts/*, python3 engine/*, python3 services/*
 - Lecture : grep, rg, find, wc, stat
-- NE JAMAIS modifier : config/users.db, ai/models/**/*.zip
+- Fichiers intouchables : ceux de WORKFLOW IA ci-dessus, sans exception de mode.
 
