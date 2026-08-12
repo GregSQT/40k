@@ -29,7 +29,7 @@ def test_display_name_is_the_real_class_of_the_registered_bot(bot_key: str) -> N
     """Le nom affiche designe la classe REELLEMENT enregistree pour cette cle.
 
     ⚠️ Ce test cherchait ses classes dans `ai/evaluation_bots` uniquement. Depuis que le panel
-    refondu vit dans `ai/bot_doctrines.py` et `ai/bot_holdout.py`, ce module n'est plus la
+    refondu vit dans `ai/bot_doctrines.py`, ce module n'est plus la
     reference : c'est `ai/bot_registry.bot_classes()`, qui est aussi ce que l'evaluation
     instancie. Le verrou est donc PLUS FORT qu'avant — il ne prouve plus qu'une classe du meme
     nom existe quelque part, mais que le nom affiche est celui de la classe reellement jouee.

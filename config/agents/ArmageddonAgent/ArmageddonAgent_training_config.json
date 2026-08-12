@@ -95,7 +95,7 @@
         "alpha": 0.05,
         "attrition": 0.05,
         "decapitation": 0.05,
-        "tactical_lookahead": 0.0
+        "scorer": 0.05
       }
     },
     "roster_pool_schedule": {
@@ -288,7 +288,7 @@
         "alpha": 0.05,
         "attrition": 0.05,
         "decapitation": 0.05,
-        "tactical_lookahead": 0.0
+        "scorer": 0.05
       }
     },
     "roster_pool_schedule": {
@@ -482,7 +482,7 @@
         "alpha": 0.05,
         "attrition": 0.05,
         "decapitation": 0.05,
-        "tactical_lookahead": 0.0
+        "scorer": 0.05
       }
     },
     "roster_pool_schedule": {
@@ -688,7 +688,7 @@
         "alpha": 0.05,
         "attrition": 0.05,
         "decapitation": 0.05,
-        "tactical_lookahead": 0.0
+        "scorer": 0.05
       }
     },
     "roster_pool_schedule": {
@@ -881,7 +881,7 @@
         "alpha": 0.05,
         "attrition": 0.05,
         "decapitation": 0.05,
-        "tactical_lookahead": 0.0
+        "scorer": 0.05
       }
     },
     "roster_pool_schedule": {
@@ -1073,7 +1073,7 @@
         "alpha": 0.05,
         "attrition": 0.05,
         "decapitation": 0.05,
-        "tactical_lookahead": 0.0
+        "scorer": 0.05
       }
     },
     "roster_pool_schedule": {
@@ -1262,7 +1262,7 @@
         "alpha": 0.05,
         "attrition": 0.05,
         "decapitation": 0.05,
-        "tactical_lookahead": 0.0
+        "scorer": 0.05
       }
     },
     "roster_pool_schedule": {
@@ -1419,7 +1419,7 @@
         "alpha": 0.05,
         "attrition": 0.05,
         "decapitation": 0.05,
-        "tactical_lookahead": 0.0
+        "scorer": 0.05
       }
     },
     "roster_pool_schedule": {
@@ -1626,18 +1626,20 @@
       "model_gating_min_vs_control": 0.3,
       "holdout_hard_opponent_budget_modifier": 1.1,
       "bot_eval_weights": {
-        "racer": 0.2,
-        "endgame": 0.2,
-        "alpha": 0.2,
-        "attrition": 0.2,
-        "decapitation": 0.2
+        "racer": 0.16666666666666666,
+        "endgame": 0.16666666666666666,
+        "alpha": 0.16666666666666666,
+        "attrition": 0.16666666666666666,
+        "decapitation": 0.16666666666666666,
+        "scorer": 0.16666666666666666
       },
       "bot_eval_randomness": {
         "racer": 0.05,
         "endgame": 0.05,
         "alpha": 0.05,
         "attrition": 0.05,
-        "decapitation": 0.05
+        "decapitation": 0.05,
+        "scorer": 0.05
       }
     },
     "roster_pool_schedule": {
@@ -1732,6 +1734,6 @@
       "target_controlled_episode_ratio": 0.2,
       "max_scenario_weight": 6
     },
-    "_justification_x1_panel": "PROFIL DE MESURE, PAS D'ENTRAINEMENT (2026-08-11, chantier A_faire/bots_refonte_panel.md etape 6). Copie de x1 dont bot_eval_weights ne porte QUE les six styles refondus : l'evaluation joue les CLES de ce dict, poids nul compris, donc y laisser les six anciens doublerait le cout de chaque mesure. Sert a mesurer l'ORTHOGONALITE du panel : le win-rate de l'agent contre chaque bot, sur trois modeles de forces differentes ; deux bots dont les courbes se suivent sont redondants et l'un des deux se supprime. Poids uniformes (somme 1.0) — ils ne pesent que le `combined`, qui n'est pas l'objet de la mesure. `tactical_lookahead` en est ABSENT a dessein : il simule ses coups, donc il est lent, et l'orthogonalite porte sur les six styles."
+    "_justification_x1_panel": "PROFIL DE MESURE, PAS D'ENTRAINEMENT (chantier A_faire/bots_refonte_panel.md etape 6). Copie de x1 dont bot_eval_weights ne porte QUE les SIX styles refondus : l'evaluation joue les CLES de ce dict, poids nul compris, donc y laisser les anciens doublerait le cout de chaque mesure. Sert a mesurer l'ORTHOGONALITE du panel : le win-rate de l'agent contre chaque bot, sur plusieurs modeles de forces differentes ; deux bots dont les courbes se suivent sont redondants et l'un des deux se supprime. Poids uniformes (1/6, somme 1.0 exactement — bot_evaluation leve au-dela de 1e-9) : ils ne pesent que le `combined`, qui n'est pas l'objet de la mesure. 2026-08-12 : `scorer` remplace `tactical_lookahead`, supprime le meme jour. Le holdout a un coup coutait 9,5x un bot normal par episode et rendait 0,431 sur 160 parties contre deux styles ordinaires — donc pas plus fort qu'eux — et aucun profil ne l'a jamais fait affronter l'agent. `scorer` occupe le creneau a 1x, sur l'axe que la mesure designait comme manquant : jouer pour marquer, ne se battre que pour ca."
   }
 }

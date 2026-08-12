@@ -69,8 +69,8 @@ def test_the_three_families_do_not_overlap() -> None:
 def test_every_registered_bot_builds(bot_key: str) -> None:
     """Le registre CONSTRUIT vraiment ce qu'il déclare — une classe importable ne suffit pas.
 
-    Randomness à 0.0 pour tous : `LookaheadHoldoutBot` refuse toute autre valeur (un mètre étalon
-    ne joue pas aux dés), et les autres l'acceptent.
+    Randomness à 0.0 pour tous : c'est la seule valeur que chaque bot accepte sans condition,
+    donc celle qui teste la CONSTRUCTION et rien d'autre.
     """
     bot = bot_registry.build_bot(bot_key, {bot_key: 0.0})
 

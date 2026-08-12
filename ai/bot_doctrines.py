@@ -791,12 +791,59 @@ class DecapitationBot(_DoctrineBot):
         return action
 
 
+class ScorerBot(_DoctrineBot):
+    """Il joue pour MARQUER, et ne se bat que pour ca.
+
+    Punit l'agent qui gagne des combats sans regarder les zones — la faute que le panel refondu
+    ne savait plus punir. `racer` en est la caricature (il refuse le combat quoi qu'il arrive),
+    `alpha`, `attrition` et `decapitation` jouent les pertes, `endgame` attend : aucun ne
+    reprenait l'axe de l'ancien `ControlBot`, le SEUL des six d'origine a porter de
+    l'information (il tenait l'agent a 0,73 la ou les autres saturaient au-dessus de 0,87).
+
+    Ajoute le 2026-08-12, a la place du holdout a un coup supprime le meme jour : meme creneau,
+    1x le cout au lieu de 9,5x, et un axe que la mesure designait comme manquant.
+
+    Doctrine, en une phrase par phase :
+      - CIBLE : celle qui conteste, c'est-a-dire la plus proche d'une zone (comme `racer`) ;
+      - CHARGE : jamais depuis une zone tenue — la quitter coute des points — et ailleurs
+        seulement si la melee est vraiment son meilleur mode ;
+      - DEPLACEMENT : vers les zones, en acceptant l'exposition quand elle paie (`w_fire`
+        au-dessus de `w_risk`).
+    """
+
+    MOVEMENT_BOT_KEY = "scorer"
+    PLACEMENT_WEIGHTS = {
+        DEPLOYMENT_ACTIONS[0]: 0.15, DEPLOYMENT_ACTIONS[1]: 0.45, DEPLOYMENT_ACTIONS[2]: 0.20,
+        DEPLOYMENT_ACTIONS[3]: 0.10, DEPLOYMENT_ACTIONS[4]: 0.10,
+    }
+
+    def target_score(self, attacker, is_ranged: bool, game_state):
+        """Il frappe qui conteste ses zones : le reste ne lui coute pas de points."""
+        return _score_contester(attacker, is_ranged)
+
+    def wants_charge(self, attacker, game_state) -> bool:
+        """Se battre doit RAPPORTER une zone, jamais en coûter une.
+
+        Tenir une zone et charger, c'est la quitter pour un corps a corps qui immobilise :
+        l'escouade cesse de marquer pendant que l'adversaire encaisse. Le predicat est celui du
+        moteur (`unit_is_within_objective`, empreinte de socle par figurine, 14.02) et non une
+        egalite de coordonnees, qui manquerait les escouades a cheval sur une zone.
+
+        Hors zone, la charge redevient un choix ordinaire, tranche par le socle commun sur les
+        degats esperes CONTRE LES CIBLES REELLES.
+        """
+        if unit_is_within_objective(game_state, attacker, objective_hex_sets(game_state)):
+            return False
+        return self._melee_beats_ranged(attacker, game_state)
+
+
 #: Les six styles, par cle de configuration. `tactical` (le holdout) n'est PAS ici : il ne porte
-#: pas de doctrine, il joue pour gagner — cf. le doc de chantier §3.3.
+#: pas de doctrine — cf. le doc de chantier §3.3.
 DOCTRINE_BOTS = {
     "racer": RacerBot,
     "endgame": EndgameBot,
     "alpha": AlphaStrikeBot,
     "attrition": AttritionBot,
     "decapitation": DecapitationBot,
+    "scorer": ScorerBot,
 }
