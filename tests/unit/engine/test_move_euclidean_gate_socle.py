@@ -14,8 +14,10 @@ par `métrique euclidean ET socle mono-hex`, où la condition de socle était le
     laissait VERTE toute la suite du mouvement) ;
   - la route elle-même était inatteignable en partie (métrique forcée `hex` à x1, socle >= 5 cases
     à x5) et dupliquait la géométrie continue de `_euclidean_ground_anchor_multihex`.
-Elle a été supprimée : le raccourci BFS est désormais gardé par la métrique, et un socle mono-hex
-en euclidean part sur le chemin continu — la seule route qui applique la règle 03 en longueur.
+Elle a été supprimée : le choix de route vit maintenant dans `_mono_hex_bfs_shortcut`, un seul
+corps pour les deux branches (sol et FLY), et le raccourci BFS y est gardé par la MÉTRIQUE. Un
+socle mono-hex en euclidean part donc sur le chemin continu — la seule route qui applique la
+règle 03 en longueur.
 
 CE QUE CE FICHIER MESURE. Le budget géodésique vaut `MOVE × 1.5` en unités `_hex_center`, où un
 pas plein nord coûte `sqrt(3)` ≈ 1,732 : la case à MOVE pas au nord est donc dans le pool du BFS
@@ -111,48 +113,78 @@ def _make_engine(base_shape: str, base_size: Any, *, fly: bool = False) -> W40KE
     return eng
 
 
-def _pool(engine: W40KEngine, metric: str) -> set:
+def _pool(engine: W40KEngine, metric: str, *, read_only: bool = True) -> set:
     """Pool de l'unité 1 avec la métrique de move FORCÉE.
 
     On patche le SÉLECTEUR (`movement_handlers._move_distance_metric`) et non la config : la
     métrique effective sort de `combat_utils.resolve_gym_split_metric`, qui lit le config-loader
     global — le muter contaminerait les autres tests du process.
+
+    ``read_only=False`` fait aussi écrire l'état de preview (`move_preview_footprint_zone`), qui
+    vit APRÈS la sortie anticipée du chemin read_only et ne serait sinon jamais exécuté ici.
     """
     with patch.object(
         phase_handlers.movement_handlers, "_move_distance_metric", return_value=metric
     ):
-        return set(movement_build_valid_destinations_pool(engine.game_state, "1", read_only=True))
+        return set(
+            movement_build_valid_destinations_pool(engine.game_state, "1", read_only=read_only)
+        )
 
 
+@pytest.mark.parametrize("fly", [False, True], ids=["ground", "fly"])
 @pytest.mark.parametrize("base_shape", ["round", "square"])
-def test_single_hex_base_does_not_take_the_hex_bfs_in_euclidean_metric(base_shape: str):
-    """Socle mono-hex, en euclidean : le pool doit venir du chemin continu, pas du BFS hex.
+def test_single_hex_base_does_not_measure_its_move_in_hex_steps_in_euclidean(
+    base_shape: str, fly: bool
+):
+    """Socle mono-hex : en euclidean, le pool vient du chemin continu, pas du raccourci hex.
+
+    Les deux routes ont leur propre choix (sol et FLY 21.03), et elles avaient le même défaut :
+    décider sur le socle seul, si bien qu'un mono-hex mesurait en pas d'hexagone au milieu d'une
+    partie euclidienne. Le budget est le même des deux côtés — pour le vol, le -2" de 21.03 est
+    rajouté au profil.
 
     L'assertion sur le pool `hex` n'est pas décorative : c'est elle qui prouve que la case témoin
     est bien atteignable à ce budget, donc que son absence du pool euclidien mesure la métrique et
     non un board trop petit (vert vacant).
     """
-    eng = _make_engine(base_shape, 1)
+    eng = _make_engine(base_shape, 1, fly=fly)
     hex_pool = _pool(eng, "hex")
     euclid_pool = _pool(eng, "euclidean")
 
     assert DUE_NORTH in hex_pool, "case témoin hors du pool hex : le test ne mesurerait rien"
     assert DUE_NORTH not in euclid_pool
-    assert euclid_pool != hex_pool
     assert euclid_pool, "pool euclidien vide : le chemin continu n'a rien produit"
 
 
-def test_flying_single_hex_base_does_not_take_the_hex_disc_in_euclidean_metric():
-    """JUMEAU FLY : la branche 21.03 a son propre choix de route, et le même défaut.
+@pytest.mark.parametrize(
+    "fly,metric",
+    [(False, "euclidean"), (True, "euclidean"), (True, "hex")],
+    ids=["ground-euclidean", "fly-euclidean", "fly-hex"],
+)
+def test_preview_footprint_zone_follows_the_same_route(fly: bool, metric: str):
+    """La preview est écrite APRÈS le pool, par un site qui teste lui aussi la route.
 
-    Elle décidait aussi sur le socle seul, si bien qu'un volant mono-hex mesurait son disque en
-    cube-distance en pleine métrique euclidean. Même témoin, même budget (le -2" de 21.03 est
-    rajouté au profil), autre route.
+    Elle ne peut pas DISCRIMINER la route ici — l'empreinte d'un socle mono-hex vaut son ancre,
+    donc « union des empreintes des ancres » et « ensemble des ancres » sont le même ensemble. Ce
+    test exécute donc ces lignes et vérifie le seul sens qui soit un invariant : la preview COUVRE
+    le pool AU SOL (le niveau 0 ; les destinations d'étage vivent dans un autre état, que la preview
+    n'éclaire pas), sinon une case jouable resterait éteinte. L'inclusion inverse n'en est PAS un — le
+    bornage rigide d'escouade retire des ancres du pool en laissant la zone complète, exprès, pour
+    que le fantôme PvP ne clignote pas au bord du plateau.
     """
-    eng = _make_engine("round", 1, fly=True)
-    hex_pool = _pool(eng, "hex")
-    euclid_pool = _pool(eng, "euclidean")
+    eng = _make_engine("round", 1, fly=fly)
+    pool = _pool(eng, metric, read_only=False)
+    zone = eng.game_state["move_preview_footprint_zone"]
 
-    assert DUE_NORTH in hex_pool, "case témoin hors du disque hex : le test ne mesurerait rien"
-    assert DUE_NORTH not in euclid_pool
-    assert euclid_pool, "pool euclidien vide : le disque continu n'a rien produit"
+    assert pool, "pool vide : l'inclusion ci-dessous serait vacante"
+    assert START in zone, "la case de départ manque à la preview"
+    assert pool <= zone, "des destinations du pool ne sont pas éclairées par la preview"
+    if metric == "euclidean":
+        # Exact ici, et seulement ici : l'empreinte d'un socle mono-hex n'a pas de rayon, donc la
+        # zone ne peut pas déborder plus loin que ses ancres, elles-mêmes bornées en longueur.
+        assert DUE_NORTH not in zone, "la preview propose une case hors de portée continue"
+    else:
+        # Le cas `fly-hex` est le SEUL qui exécute la preview mono-hex de la branche FLY : en
+        # euclidean le chemin vectorisé rend la main avant, et le régime `read_only` sort encore
+        # plus tôt. Sans lui, le repli mort retiré de cette branche ne serait vérifié par personne.
+        assert DUE_NORTH in zone, "le disque hex atteint cette case : la preview doit l'éclairer"

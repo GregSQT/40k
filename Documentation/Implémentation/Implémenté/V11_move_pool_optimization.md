@@ -115,6 +115,8 @@ La fonction **ne sert pas** les phases charge / pile-in / consolidation, qui ont
 > **100 % des appels sont `fly=False single_hex=False`** = **ground multi-hex** → passent tous par
 > `_build_multi_hex_vectorized` (appel 2, [movement_handlers.py:2747](../../../engine/phase_handlers/movement_handlers.py#L2747)).
 > **Aucun** single-hex, **aucun** fly. La cible est donc unique et certaine.
+> _(Le champ de log s'appelle `single_hex_bfs=` depuis le 2026-08-13 et nomme la ROUTE prise, pas le
+> régime de socle : refaire cette agrégation sur un log récent demande le nouveau nom.)_
 > Décomposition du temps : `bfs_s` (= durée de `_build_multi_hex_vectorized` entière) =
 > **4542 s / 6549 s = 69,4 %** ; `prep_s + post_bfs_s` (sets walls/occupied/enemy + footprint) =
 > **30,6 %**. Socles réels (distribution exacte sur les 374 390 lignes du log) : `base=6` 45,4 %,
