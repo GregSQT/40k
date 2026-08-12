@@ -19,7 +19,7 @@ from typing import Any, Dict, List
 
 import pytest
 
-from _config_helpers import NEUTRAL_TEST_ARMY_FACTION, NEUTRAL_TEST_FACTION
+from tests.unit.engine._config_helpers import NEUTRAL_TEST_ARMY_FACTION, NEUTRAL_TEST_FACTION
 from engine.phase_handlers.shared_utils import build_units_cache
 from shared.data_validation import ConfigurationError
 from engine.reward_calculator import RewardCalculator

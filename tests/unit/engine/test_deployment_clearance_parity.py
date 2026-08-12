@@ -21,7 +21,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from _config_helpers import pin_active_deployment
+from tests.unit.engine._config_helpers import pin_active_deployment
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 BANK_DIR = PROJECT_ROOT / "config" / "agents" / "ArmageddonAgent" / "scenarios" / "training"

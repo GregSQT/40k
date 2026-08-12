@@ -26,7 +26,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pytest
 
-from _config_helpers import pin_active_deployment
+from tests.unit.engine._config_helpers import pin_active_deployment
 from engine.macro_intents import (
     ACTIVATE_SLOT_BASE,
     ACTIVATE_SLOT_COUNT,

@@ -27,7 +27,7 @@ import os
 import numpy as np
 import pytest
 
-from _config_helpers import bank_training_scenarios
+from tests.unit.engine._config_helpers import bank_training_scenarios
 from ai.unit_registry import UnitRegistry
 from engine.hex_utils import _hex_center
 from engine.observation_builder import ObservationBuilder

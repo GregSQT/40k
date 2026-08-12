@@ -26,7 +26,7 @@ import random
 
 import pytest
 
-from _config_helpers import bank_training_scenarios
+from tests.unit.engine._config_helpers import bank_training_scenarios
 from engine.phase_handlers.shared_utils import (
     MOVE_CELL_MAP_CACHE_KEY,
     build_rigid_plan,

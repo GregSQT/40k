@@ -79,7 +79,7 @@ from typing import Any, Dict, List, Tuple
 
 import pytest
 
-from _config_helpers import assert_deployment_phase, pin_active_deployment
+from tests.unit.engine._config_helpers import assert_deployment_phase, pin_active_deployment
 from ai.env_wrappers import engine_is_paused_on_player_choice
 from engine.action_decoder import ActionValidationError
 from engine.agent_decision import set_pending_agent_decision

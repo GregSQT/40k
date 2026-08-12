@@ -215,7 +215,7 @@ def test_regime_ramps_start_from_this_run_not_from_the_model_lifetime() -> None:
     modèle, ces deux rampes seraient saturées dès le premier épisode — LR collé à `final`,
     warmup de self-play sauté, ratio final d'entrée.
     """
-    from test_env_wrappers import _DummyBot, _DummyEngine  # doubles du contrat moteur
+    from tests.unit.ai.test_env_wrappers import _DummyBot, _DummyEngine  # doubles du contrat moteur
 
     from ai.env_wrappers import BotControlledEnv
     from ai.training_callbacks import LearningRateScheduleCallback

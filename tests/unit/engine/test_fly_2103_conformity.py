@@ -31,7 +31,7 @@ from typing import Any, Dict, List, Set, Tuple
 
 import pytest
 
-from _config_helpers import build_move_rules
+from tests.unit.engine._config_helpers import build_move_rules
 from engine.phase_handlers.movement_handlers import (
     _fly_traversal_active,
     _unit_has_keyword,

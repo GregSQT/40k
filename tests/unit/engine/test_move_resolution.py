@@ -7,7 +7,7 @@ from typing import Any, Dict, List
 from engine.phase_handlers.movement_handlers import movement_build_valid_destinations_pool
 from engine.phase_handlers.shared_utils import build_enemy_adjacent_hexes, build_units_cache
 
-from _config_helpers import build_move_rules
+from tests.unit.engine._config_helpers import build_move_rules
 from tests._state_invariants import turn_state_invariants, unit_invariants
 
 

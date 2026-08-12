@@ -18,7 +18,7 @@ from unittest.mock import patch
 
 import pytest
 
-from _config_helpers import build_move_rules
+from tests.unit.engine._config_helpers import build_move_rules
 from engine.action_decoder import ActionDecoder
 from engine.agent_decision import read_pending_agent_decision
 from engine.macro_intents import (

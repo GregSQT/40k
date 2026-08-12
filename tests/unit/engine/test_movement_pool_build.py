@@ -22,7 +22,7 @@ from engine.phase_handlers.shared_utils import (
 from shared.data_validation import require_key
 from tests._state_invariants import turn_state_invariants, unit_invariants
 
-from _config_helpers import build_move_rules
+from tests.unit.engine._config_helpers import build_move_rules
 
 
 def _board_config() -> Dict[str, Any]:
