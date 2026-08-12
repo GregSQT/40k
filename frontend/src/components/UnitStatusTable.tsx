@@ -634,10 +634,6 @@ interface UnitStatusTableProps {
   /** Points de commandement du joueur (règle 08.02). Affichés dans le MÊME en-tête que les VP :
    *  un seul endroit à l'écran pour les deux compteurs de partie. */
   commandPoints?: number;
-  /** ⚠️ INSTRUMENT TEMPORAIRE (2026-08-12) : objectifs tenus par ce joueur (14.02), en clair.
-   *  Le contrôle n'était lisible que par la couleur d'un contour de 2,4 px sur le plateau —
-   *  invérifiable, y compris sur une capture. À retirer avec `utils/heldObjectives.ts`. */
-  heldObjectives?: string[];
   onCollapseChange?: (collapsed: boolean) => void;
   /** Preview plateau : forcer cette unité et ses armes à être visibles tant que l'illustration est affichée. */
   detailPreviewUnitId?: UnitId | null;
@@ -1459,7 +1455,6 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
     inchesToSubhex = 1,
     victoryPoints,
     commandPoints,
-    heldObjectives,
     onCollapseChange,
     detailPreviewUnitId = null,
     inspectedModel = null,
@@ -1761,13 +1756,6 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
               )}
               {victoryPoints !== undefined && (
                 <span style={{ fontSize: "14px" }}>{`VP : ${victoryPoints}`}</span>
-              )}
-              {/* ⚠️ INSTRUMENT TEMPORAIRE (2026-08-12) — cf. `utils/heldObjectives.ts`. */}
-              {heldObjectives !== undefined && (
-                <span
-                  data-testid={`held-objectives-p${player}`}
-                  style={{ fontSize: "14px" }}
-                >{`Objectifs : ${heldObjectives.length > 0 ? heldObjectives.join(", ") : "aucun"}`}</span>
               )}
             </div>
           </div>
