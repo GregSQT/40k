@@ -82,12 +82,18 @@ d'un gel par ligne) ; et tuer une unité avec laquelle on n'est PAS engagé rest
 `tests/unit/ai/test_analyzer_fight_alternation_pre_loss.py` (nouveau) : la faute d'alternance doit
 survivre au coup mortel, avec la prémisse sans mort pour prouver que le contrôle voit quelque chose.
 
-Correctif retiré → `assert 2 == 0` et `assert 0 == 1` (le faux positif de tir ET le faux négatif de
-mêlée) ; rétabli → verts. Les fichiers de test analyzer voisins (20 fichiers) restent verts.
+`tests/unit/ai/test_analyzer_shoot_at_engaged_enemy.py` (nouveau) : le contrôle 04.02 valait 0 sur
+tous les runs disponibles, avant comme après — un compteur à zéro sans verrou ne se distingue pas
+d'un contrôle mort, et c'est précisément ce qui a laissé vivre les trois faux positifs de cette
+famille. Quatre tests : les prémisses géométriques, la faute réelle (cible au contact d'un allié du
+tireur), le témoin négatif (allié à l'autre bout → aucune faute), et la faute qui doit **survivre au
+tir mortel**.
+
+Correctif retiré → `assert 2 == 0`, `assert 0 == 1` et `assert 0 == 1` (le faux positif de tir
+10.06, le faux négatif de mêlée 12.04, le faux négatif de tir 04.02) ; rétabli → verts. Les fichiers
+de test analyzer voisins (20 fichiers) restent verts.
 
 ## Ce qui reste ouvert
 
 Les autres familles du tableau de conformité (collisions, fall-back finissant engagé, move finissant
-au contact, tir sur ennemi engagé) ne sont pas investiguées. Le contrôle « tir sur un ennemi engagé »
-(04.02) partageait le défaut mesuré ici et a été réaligné en même temps — il valait déjà 0 sur ce
-run, donc rien ne prouve son comportement en conditions réelles.
+au contact) ne sont pas investiguées.
