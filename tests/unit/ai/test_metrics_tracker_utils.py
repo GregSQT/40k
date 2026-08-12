@@ -488,7 +488,7 @@ def test_log_episode_end_and_tactical_metrics_runtime_paths() -> None:
     assert _dw(t).flushed == 1
     assert t.seat_aware["episodes_agent_p1"] == 1
 
-    # Fabrique PARTAGEE (tests/unit/ai/conftest.py) : `log_tactical_metrics` lit toutes ses
+    # Fabrique PARTAGEE (tests/unit/ai/_fabriques.py) : `log_tactical_metrics` lit toutes ses
     # cles en STRICT, donc toute fixture ecrite a la main doit les porter TOUTES. Trois copies
     # manuelles ont casse une par une a chaque cle ajoutee au tracker — il n'en reste qu'une.
     t.log_tactical_metrics(tactical_data(
@@ -512,9 +512,15 @@ def test_le_forcing_par_unite_separe_l_exposition_de_l_intensite() -> None:
     laissait un dict vide, AUCUN test du depot ne les atteignait : les supprimer, ou brancher
     l'une sur le compteur de l'autre, restait vert.
 
-    Les deux formules partagent leur denominateur et se separent par le numerateur — d'ou le
-    second episode, sans Intercessor : il fait diverger les deux courbes d'Ork Boyz, ce qu'un
-    episode unique ne montre pas.
+    TROIS EPISODES, et aucun n'est decoratif :
+      1. les deux unites forcees — les deux courbes existent, avec des valeurs distinctes ;
+      2. AUCUNE unite forcee — seul episode qui separe `episodes_total` (3) de
+         `episodes_with_forced_unit` (2). Sans lui, les deux compteurs restent egaux et le
+         denominateur des expositions n'est pas verrouille : le brancher sur le mauvais des
+         deux passait inapercu ;
+      3. Ork Boyz seul — son exposition (2/3) et son intensite (4/3) divergent enfin l'une de
+         l'autre, ce qu'un episode unique ne montre pas, et l'Intercessor absent de cet
+         episode-la ne publie RIEN.
     """
     t = _tracker_stub()
     t.compute_and_log_phase_metrics = lambda: None
@@ -527,15 +533,22 @@ def test_le_forcing_par_unite_separe_l_exposition_de_l_intensite() -> None:
     assert premier["forcing/unit_instance_mean/intercessor"] == 2.0
     assert premier["forcing/unit_instance_mean/ork_boyz"] == 3.0
 
+    t.log_tactical_metrics(tactical_data(
+        forced_unit_episode_has_controlled=0,
+        forced_unit_instances_controlled=0,
+        forced_unit_counts_controlled={},
+    ))
+
     deja_publie = len(_dw(t).scalars)
     t.log_tactical_metrics(tactical_data(
         forced_unit_instances_controlled=1,
         forced_unit_counts_controlled={"Ork Boyz": 1},
     ))
     nouveaux = {k: v for k, v, _ in _dw(t).scalars[deja_publie:]}
-    # Deux episodes, Ork Boyz force dans les deux : exposition 2/2, intensite (3+1)/2.
-    assert nouveaux["forcing/unit_episode_exposure/ork_boyz"] == 1.0
-    assert nouveaux["forcing/unit_instance_mean/ork_boyz"] == 2.0
+    # Ork Boyz force dans 2 episodes sur 3, pour 3 + 1 instances : les deux courbes se separent,
+    # et chacune se lit sur le NOMBRE D'EPISODES (3), jamais sur les episodes forces (2).
+    assert nouveaux["forcing/unit_episode_exposure/ork_boyz"] == pytest.approx(2 / 3)
+    assert nouveaux["forcing/unit_instance_mean/ork_boyz"] == pytest.approx(4 / 3)
     assert "forcing/unit_instance_mean/intercessor" not in nouveaux, (
         "une unite non forcee cet episode-la n'a pas de point a publier : la courbe est CREUSE, "
         "et republier son ancienne valeur ferait mentir la moyenne au pas suivant"

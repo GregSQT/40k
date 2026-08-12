@@ -17,7 +17,19 @@ from tests.unit.ai import _fabriques
 _RACINE = Path(__file__).resolve().parents[3]
 # L'IMPORT, pas la mention : ce fichier parle de `conftest` en toutes lettres dans ses messages,
 # et une recherche de sous-chaîne se serait dénoncée elle-même.
-_IMPORT_DE_CONFTEST = re.compile(r"^\s*(?:from\s+\S*conftest\s+import|import\s+\S*conftest)", re.M)
+#
+# LES QUATRE FORMES, parce que trois d'entre elles chargent le module aussi sûrement que la
+# première : `from tests.unit.ai import conftest` est même la plus naturelle — c'est celle que ce
+# fichier utilise juste au-dessus pour `_fabriques` — et `import_module` la moins visible.
+_IMPORT_DE_CONFTEST = re.compile(
+    r"""
+      ^\s*from\s+\S*conftest\s+import          # from …conftest import X
+    | ^\s*import\s+\S*conftest                 # import …conftest
+    | ^\s*from\s+\S+\s+import\s+[^\n]*\bconftest\b   # from … import conftest
+    | import_module\(\s*['"][^'"]*conftest     # chargement par nom de module via importlib
+    """,
+    re.M | re.X,
+)
 
 
 def test_les_fabriques_ne_sont_chargees_qu_une_fois() -> None:
@@ -36,9 +48,9 @@ def test_les_fabriques_ne_sont_chargees_qu_une_fois() -> None:
 def test_aucun_test_n_importe_le_conftest_comme_module() -> None:
     """C'est l'import qui fabrique la seconde copie — pas le conftest lui-même.
 
-    Le contrôle porte donc sur le geste, et pas sur le symptôme : un `from ....conftest import`
-    ajouté demain rouvrirait exactement le même trou, et le test ci-dessus ne le verrait que si
-    ce fichier-là est collecté dans la même session.
+    Le contrôle porte donc sur le geste, et pas sur le symptôme : un import ajouté demain
+    rouvrirait exactement le même trou, et le test ci-dessus ne le verrait que si ce fichier-là
+    est collecté dans la même session.
     """
     fichiers = sorted((_RACINE / "tests").rglob("*.py"))
     assert fichiers, "aucun fichier de test énuméré : le contrôle ne regarderait rien"
