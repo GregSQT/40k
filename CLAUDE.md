@@ -67,11 +67,13 @@ REDÉMARRAGE DES SERVICES — ACQUIS, NE JAMAIS LE DEMANDER :
 
 ENTRAÎNEMENT IA :
 - Lancer   : python3 ai/train.py --agent CoreAgent --scenario bot --new
-- Valider  : python3 ai/train.py --agent CoreAgent --scenario bot --step --append
-  (`--new` ou `--append` est désormais OBLIGATOIRE dès qu'un modèle existe : sans l'un des deux,
-   train.py refuse au lieu de choisir. Ici `--append` : la validation porte sur le modèle
-   ENTRAÎNÉ, et `--new` l'écarterait pour laisser un run court au chemin canonique — celui que
-   lisent le PvE et le `--append` suivant.)
+- Valider  : python3 ai/train.py --agent CoreAgent --test-only --step
+  (`--test-only` n'entraîne RIEN : il joue le modèle en place sur le HOLDOUT et écrit step.log.
+   C'est ce que « valider » veut dire ici, et c'est le seul des trois modes qui laisse le modèle
+   intact — `--new` l'écarte, `--append` l'écrase par un run court. Pas de `--scenario bot` ici :
+   ce mode n'évalue que le holdout et refuse le pool d'entraînement. Sur un lancement qui
+   ENTRAÎNE, `--new` ou `--append` est désormais OBLIGATOIRE dès qu'un modèle existe, et
+   `--append` exige qu'il en existe un : sans ça train.py refuse au lieu de choisir à ta place.)
 - Analyser : python3 ai/analyzer.py <fichier_de_résultats>
 - Pas de tests automatisés — validation via --step + analyzer.py + replay
 

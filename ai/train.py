@@ -289,6 +289,16 @@ def _apply_curriculum_model_params(model, model_params: dict, log=print) -> None
     log(f"✅ Applied new phase hyperparameters: lr={model.learning_rate}, ent={model.ent_coef}, clip={model.clip_range}")
 
 
+#: Fin commune des deux diagnostics de `_load_checkpoint` : ce qu'on fait APRES l'arret ne depend
+#: pas de la raison de l'arret. Une constante, pas deux tails recopies — c'est la divergence des
+#: copies qui a laissé le repli survivre a la suppression de ses jumeaux.
+_CONSEIL_DE_REPRISE = (
+    "L'entrainement s'arrete au lieu de repartir de poids aleatoires ; pour repartir "
+    "volontairement de zero, relancer avec --new (qui ecarte le modele existant sous un nom "
+    "horodate) au lieu de --append."
+)
+
+
 def _load_checkpoint(model_path: str, env, device: str) -> MaskablePPO:
     """Charge un checkpoint MaskablePPO. LEVE si le fichier est illisible — jamais de repli.
 
@@ -307,7 +317,9 @@ def _load_checkpoint(model_path: str, env, device: str) -> MaskablePPO:
     Deux diagnostics, parce qu'ils n'ont pas la meme reparation : un .zip illisible se remplace,
     un desaccord d'espace d'observation se re-entraine. Confondre les deux enverrait verifier
     l'integrite d'un fichier intact — c'est le mode d'echec DOMINANT ici, l'obs_size ayant bouge
-    plusieurs fois (199 -> 1011, GRID_CHANNELS 7 -> 9), et le site d'eval le distingue deja.
+    plusieurs fois (199 -> 1011, GRID_CHANNELS 7 -> 9). Ce qui SUIT le diagnostic est commun aux
+    deux et vit dans `_CONSEIL_DE_REPRISE` : recopier ce conseil, c'est refaire a l'echelle de
+    deux branches le motif qui a produit le bug d'origine — trois exemplaires deja divergents.
     """
     try:
         return MaskablePPO.load(model_path, env=env, device=device)
@@ -316,15 +328,11 @@ def _load_checkpoint(model_path: str, env, device: str) -> MaskablePPO:
             raise RuntimeError(
                 f"Checkpoint incompatible avec l'environnement : {model_path} ({exc}). Le modele "
                 f"a ete entraine sur une autre observation ou un autre espace d'action ; ses poids "
-                f"ne sont pas reprenables tels quels. L'entrainement s'arrete au lieu de repartir "
-                f"de poids aleatoires : re-entrainer depuis zero avec --new (qui archive le modele "
-                f"existant) au lieu de --append."
+                f"ne sont pas reprenables tels quels. {_CONSEIL_DE_REPRISE}"
             ) from exc
         raise RuntimeError(
-            f"Checkpoint illisible : {model_path} ({type(exc).__name__}: {exc}). "
-            f"L'entrainement s'arrete au lieu de repartir de poids aleatoires. Verifier le "
-            f"chemin et l'integrite du .zip ; pour repartir volontairement de zero, relancer "
-            f"avec --new (qui archive le modele existant) au lieu de --append."
+            f"Checkpoint illisible : {model_path} ({type(exc).__name__}: {exc}). Verifier le "
+            f"chemin et l'integrite du .zip. {_CONSEIL_DE_REPRISE}"
         ) from exc
 
 
@@ -1404,13 +1412,7 @@ def archive_canonical_artifacts_for_new_run(model_path: str, log_fn=print) -> li
 
 
 def model_lifecycle_conflict(model_path: str) -> ValueError:
-    """L'erreur unique de « un modele existe, la commande ne dit pas quoi en faire ».
-
-    SOURCE UNIQUE du message, levee depuis les TROIS sites qui peuvent constater l'ambiguite :
-    la garde d'entree de `main()` (avant tout effet de bord) et le `else` terminal des deux
-    points d'entree d'entrainement, qui ne peut plus etre atteint depuis la ligne de commande
-    mais reste joignable par un appel direct.
-    """
+    """L'erreur unique de « un modele existe, la commande ne dit pas quoi en faire »."""
     return ValueError(
         f"Un modele entraine existe deja ({model_path}) et la commande ne dit pas quoi en "
         "faire. Preciser l'intention :\n"
@@ -1444,29 +1446,44 @@ def append_without_model(model_path: str) -> ValueError:
     )
 
 
-def require_explicit_model_lifecycle(config, args) -> None:
-    """Refuse une invocation d'ENTRAINEMENT dont l'intention sur le modele n'est pas realisable.
+def is_training_invocation(args) -> bool:
+    """`main()` entraine-t-il, ou joue-t-il un des modes qui se contentent de LIRE le modele ?
 
-    Deux refus, memes enjeux : ni `--new` ni `--append` alors qu'un modele existe (on ne devine
-    pas s'il faut l'ecraser ou le continuer), et `--append` alors qu'il n'en existe aucun (il n'y
-    a rien a continuer). Appelee au plus tot dans `main()` : le cout d'une erreur tardive ici,
-    c'est un modele entraine pendant des heures remplace par des poids aleatoires. Les modes qui
-    ne s'entrainent pas (`--test-only`, `--convert-steplog`, `--replay`) ne lisent aucun des deux
-    drapeaux : ils sont hors sujet, pas tolerants.
-
-    `--resume-from` est traduit en `args.append = True` par l'appelant, mais il INSTALLE le
-    checkpoint au chemin canonique plus tard, dans la branche d'entrainement : ici le modele peut
-    donc legitimement ne pas exister encore, et le second refus ne le concerne pas. Il reste
-    couvert par `prepare_run_artifacts`, joue APRES la promotion.
+    `--test-only`/`--eval`, `--convert-steplog` et `--replay` ne lisent ni `--new` ni `--append` :
+    leur imposer une intention sur le cycle de vie du modele interdirait d'evaluer un agent.
+    Enumerer ce qui n'entraine PAS est le seul sens possible ici : la garde est jouee avant le
+    dispatch de `main()`, donc avant que le mode ne soit tranche.
     """
-    if args.test_only or args.convert_steplog or args.replay:
+    return not (args.test_only or args.convert_steplog or args.replay)
+
+
+def check_model_lifecycle(
+    model_path: str,
+    new_model: bool,
+    append_training: bool,
+    resume_pending: bool = False,
+) -> None:
+    """REGLE UNIQUE : une commande d'entrainement doit dire ce qu'elle fait du modele en place.
+
+    Deux refus jumeaux, memes enjeux — ni `--new` ni `--append` alors qu'un modele existe (on ne
+    devine pas s'il faut l'ecraser ou le continuer), et `--append` alors qu'il n'en existe aucun
+    (il n'y a rien a continuer). Le terme `not new_model` du second refus applique « `--new` GAGNE
+    SUR `--append` » (cf. `prepare_run_artifacts`). ATTENTION a ne pas le lire comme une invocation
+    CLI possible : `main()` refuse la paire bien avant (« --new et --append sont exclusifs »). Ce
+    terme ne couvre que l'APPEL DIRECT de ces fonctions — bancs, tests —, ou la paire est
+    atteignable et ou elle vaut premier entrainement.
+
+    `resume_pending` = `--resume-from` : il pose `append=True` mais n'installe le checkpoint au
+    chemin canonique que plus tard, dans la branche d'entrainement. Le modele peut donc
+    legitimement manquer AVANT la promotion, et pas apres — d'ou le drapeau, plutot que deux
+    regles divergentes sur les deux sites d'appel.
+    """
+    if os.path.exists(model_path):
+        if not (new_model or append_training):
+            raise model_lifecycle_conflict(model_path)
         return
-    model_path = build_agent_model_path(config.get_models_root(), args.agent)
-    if args.new or args.append:
-        return
-    if not os.path.exists(model_path):
-        return
-    raise model_lifecycle_conflict(model_path)
+    if append_training and not new_model and not resume_pending:
+        raise append_without_model(model_path)
 
 
 def prepare_run_artifacts(
@@ -1484,24 +1501,21 @@ def prepare_run_artifacts(
     new_model` (donc jamais execute sur un `--append`), un `os.makedirs` en triple exemplaire,
     et l'annonce de reprise conditionnee tantot par `append_training`, tantot par l'offset.
 
-    `--new` GAGNE SUR `--append`. Les deux drapeaux sont des `store_true` independants et rien
-    ne les rend exclusifs : sans cette regle, `--new --append` faisait demarrer un modele NEUF
-    sur le compte d'episodes de l'ancien — rampe de deploiement a `active_ratio_end` pour des
-    poids initialises au hasard. Elle est appliquee ICI, sur l'argument passe a
-    `resume_episode_offset`, et non par l'ordre des deux appels : un ordre ne se verifie pas,
-    il se re-casse au refactor suivant.
+    `--new` GAGNE SUR `--append`. Depuis que `main()` refuse la paire (« --new et --append sont
+    exclusifs »), elle n'arrive plus que par APPEL DIRECT — bancs, tests —, ou les deux drapeaux
+    restent deux booleens independants. La regle garde donc toute son utilite : sans elle, l'appel
+    direct faisait demarrer un modele NEUF sur le compte d'episodes de l'ancien — rampe de
+    deploiement a `active_ratio_end` pour des poids initialises au hasard. Elle est appliquee ICI,
+    sur l'argument passe a `resume_episode_offset`, et non par l'ordre des deux appels : un ordre
+    ne se verifie pas, il se re-casse au refactor suivant.
     """
     model_path = build_agent_model_path(models_root, require_present(agent_key, "agent_key"))
-    # AVANT le moindre effet de bord des deux points d'entree (creation de dossier, archivage
-    # `--new`, ouverture d'un run TensorBoard neuf qui ecrase le run-meta du modele). Le refus
-    # vit aussi dans `main()`, plus tot encore ; ici il couvre l'appel DIRECT aux deux fonctions
-    # d'entrainement, pour lequel un refus tardif laissait deja le modele sans ses courbes.
-    if os.path.exists(model_path) and not (new_model or append_training):
-        raise model_lifecycle_conflict(model_path)
-    # Jumeau du refus ci-dessus, dans l'autre sens. `--new` GAGNE SUR `--append` (cf. docstring),
-    # donc `--new --append` sur un dossier vide reste un premier entrainement legitime. C'est le
-    # seul site qui puisse porter ce refus : il est joue APRES l'installation du checkpoint de
-    # `--resume-from` au chemin canonique, que la garde de `main()` precede.
+    # SEUL site de refus atteint par les deux points d'entree, et le premier de chacun : ce qui
+    # suit (creation de dossier, archivage `--new`, ouverture d'un run TensorBoard qui reecrit le
+    # run-meta du modele) sont des effets de bord, et tout le reste depend du `model_path` rendu
+    # ici. `main()` porte la MEME regle plus tot encore, avant le StepLogger et la sync des
+    # configs ; ici, `--resume-from` a deja installe son checkpoint, donc plus aucune tolerance.
+    check_model_lifecycle(model_path, new_model, append_training)
     os.makedirs(os.path.dirname(model_path), exist_ok=True)
     if new_model:
         archive_canonical_artifacts_for_new_run(model_path, log_fn)
@@ -1994,11 +2008,18 @@ def _vec_norm_obs_keys(observation_space):
     return ["global_cont"] if _is_dict_obs_space(observation_space) else None
 
 
-def _apply_vec_normalize(env, model_path_for_vn, vec_norm_cfg, new_model, n_envs, log_fn):
+def _apply_vec_normalize(env, model_path_for_vn, vec_norm_cfg, starts_from_scratch, n_envs, log_fn):
     """Enveloppe `env` dans VecNormalize (charge les stats du checkpoint ou en cree de neuves).
 
+    `starts_from_scratch` doit etre la MEME expression que la branche de construction du modele,
+    `new_model or not os.path.exists(model_path)`, et non `new_model` seul : les deux appelants ne
+    passaient que le drapeau, donc un PREMIER entrainement sur un dossier `ai/models/<agent>/`
+    vide (aucun drapeau requis, `check_model_lifecycle` le laisse passer) prenait la branche
+    « reprise » et mourait sur « stats absentes » — un message qui accuse une reprise que personne
+    n'a demandee. La decision « ce run part de zero » se prend UNE fois et se transmet.
+
     Ne charge l'ancienne VecNormalize que si elle sera reellement reutilisee. Sur un retrain
-    from-scratch (new_model) ou un reset de curriculum, le .pkl est ecarte de toute facon ;
+    from-scratch ou un reset de curriculum, le .pkl est ecarte de toute facon ;
     le charger planterait sur le shape check de set_venv des que l'obs space a change
     (ex: passage Box(108) -> Dict), sans raison metier.
 
@@ -2010,7 +2031,7 @@ def _apply_vec_normalize(env, model_path_for_vn, vec_norm_cfg, new_model, n_envs
     reset_vec_normalize = vec_norm_cfg.get("reset_on_curriculum", False)
     vec_norm_loaded = (
         load_vec_normalize(env, model_path_for_vn)
-        if not new_model and not reset_vec_normalize
+        if not starts_from_scratch and not reset_vec_normalize
         else None
     )
     if vec_norm_loaded is not None:
@@ -2018,7 +2039,7 @@ def _apply_vec_normalize(env, model_path_for_vn, vec_norm_cfg, new_model, n_envs
         env.training = True
         env.norm_reward = vec_norm_cfg.get("norm_reward", True)
         log_fn("✅ VecNormalize: loaded stats from checkpoint")
-    elif not new_model and not reset_vec_normalize:
+    elif not starts_from_scratch and not reset_vec_normalize:
         # Reprise (--step) SANS stats sur disque : creer des stats neuves en silence ferait
         # continuer un modele entraine normalise sur une distribution recalee de zero — un
         # decalage muet, la classe de bug V11 §0.35. L'absence est une erreur explicite.
@@ -2262,7 +2283,11 @@ def create_multi_agent_model(config, training_config_name, rewards_config_name, 
     vec_norm_cfg = training_config.get("vec_normalize", {})  # get allowed: optional config
     vec_normalize_enabled = vec_norm_cfg.get("enabled", False)
     if vec_normalize_enabled:
-        env = _apply_vec_normalize(env, model_path, vec_norm_cfg, new_model, n_envs, print)
+        # MEME expression que la branche de construction du modele, cf. `_apply_vec_normalize`.
+        env = _apply_vec_normalize(
+            env, model_path, vec_norm_cfg,
+            new_model or not os.path.exists(model_path), n_envs, print,
+        )
 
     # Set device for model creation
     # PPO optimization: MlpPolicy performs BETTER on CPU (proven by benchmarks)
@@ -2295,15 +2320,18 @@ def create_multi_agent_model(config, training_config_name, rewards_config_name, 
     elif gpu_available:
         print(f"ℹ️  Using CPU for {agent_key} PPO (10% faster than GPU for MlpPolicy)")
     
-    # Determine whether to create new model or load existing
-    specific_log_dir = ""
+    # Repertoire de run TensorBoard, resolu UNE fois pour les deux branches. Elles le derivaient
+    # chacune de leur cote — l'une de `model_params["tensorboard_log"]`, l'autre de
+    # `model.tensorboard_log`, que la reprise venait de poser a cette meme valeur : deux
+    # derivations a garder en phase pour un seul repertoire, dans une fonction dont le jumeau
+    # `train_with_scenario_rotation` n'en a qu'une. L'initialisation a `""` qui precedait la
+    # cascade n'etait lue par personne, les deux branches l'ecrasant.
+    tb_log_name = f"{training_config_name}_{agent_key}"
+    specific_log_dir = os.path.join(require_key(model_params, "tensorboard_log"), tb_log_name)
+    os.makedirs(specific_log_dir, exist_ok=True)
+
     if new_model or not os.path.exists(model_path):
         print(f"🆕 Creating new model for {agent_key} on {device.upper()}...")
-
-        # Use specific log directory for continuous TensorBoard graphs across runs
-        tb_log_name = f"{training_config_name}_{agent_key}"
-        specific_log_dir = os.path.join(model_params["tensorboard_log"], tb_log_name)
-        os.makedirs(specific_log_dir, exist_ok=True)
 
         # Update model_params to use specific directory
         model_params_copy = model_params.copy()
@@ -2320,7 +2348,11 @@ def create_multi_agent_model(config, training_config_name, rewards_config_name, 
                     return
                 return _orig_record(key, value, exclude)
             model.logger.record = _filtered_record
-    elif append_training:
+    else:
+        # SEULE alternative restante : `append_training` sur un modele existant. Les deux autres
+        # etats possibles de la cascade sont refuses par `check_model_lifecycle`, en tete de
+        # `prepare_run_artifacts` — un `elif append_training` suivi d'un `else` etait une
+        # troisieme reponse a une commande qui n'existe plus.
         print(f"📁 Loading existing model for continued training: {model_path}")
         model = _load_checkpoint(model_path, env, device)
         model.tensorboard_log = require_key(model_params, "tensorboard_log")
@@ -2333,25 +2365,11 @@ def create_multi_agent_model(config, training_config_name, rewards_config_name, 
         # Without this, model.logger.name_to_value remains empty/stale from the checkpoint
         from stable_baselines3.common.logger import configure
 
-        # Use specific log directory to ensure continuous TensorBoard graphs across runs
-        # Format: ./tensorboard/{config_name}_{agent_key}/{run_name}
-        # This prevents creating new timestamped subdirectories on each script run
-        tb_log_name = f"{training_config_name}_{agent_key}"
-        specific_log_dir = os.path.join(model.tensorboard_log, tb_log_name)
-
-        # Create directory if it doesn't exist
-        os.makedirs(specific_log_dir, exist_ok=True)
-
+        # Repertoire resolu en tete de fonction : format ./tensorboard/{config}_{agent}/{run},
+        # continu d'un run a l'autre au lieu d'un sous-dossier horodate par lancement.
         new_logger = configure(specific_log_dir, ["tensorboard"])
         model.set_logger(new_logger)
         print(f"✅ Logger reinitialized for continuous TensorBoard: {specific_log_dir}")
-    else:
-        # Modele existant, ni --new ni --append : ce site RECHARGEAIT, son jumeau
-        # `train_with_scenario_rotation` ECRASAIT par un modele neuf — deux reponses opposees a
-        # la meme commande. `main()` refuse desormais l'invocation en amont ; ce raise couvre
-        # l'appel direct a la fonction, qui ne passe pas par cette garde.
-        raise model_lifecycle_conflict(model_path)
-
     _apply_torch_compile(model)
     return model, env, training_config, model_path, _episode_offset
 
@@ -2471,9 +2489,13 @@ def resume_episode_offset(model_path: str, append_training: bool) -> int:
     nul. Il ne pilote PAS learning_rate ni ent_coef, rampes de REGIME propres a chaque run
     (cf. ai/run_state.py).
 
-    `--append` SANS modele existant n'est pas une reprise : les chemins creent alors un
-    modele neuf (`if new_model or not os.path.exists(model_path)`). Exiger un etat de run ferait
-    echouer le premier entrainement d'un agent, avec un message qui accuse le mauvais coupable.
+    Le garde `not os.path.exists(model_path)` est MORT sur le chemin de production, et il faut le
+    lire comme tel : l'unique appelant passe `append_training and not new_model`, donc `--new
+    --append` court-circuite deja sur la premiere clause, et quand la seconde est evaluee
+    `check_model_lifecycle` a garanti que le fichier existe. Il ne reste atteignable que par
+    APPEL DIRECT (tests). Ne pas en conclure que le module tolere un `--append` sans modele : il
+    le REFUSE (`append_without_model`, pose dans `main()` et dans `prepare_run_artifacts`), et
+    c'est ce refus, pas ce `return 0`, qui protege la rampe de deploiement.
     """
     if not append_training or not os.path.exists(model_path):
         return 0
@@ -2803,7 +2825,13 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     )
 
     # Create initial model with first scenario (or load if append_training)
-    chunk_log(f"📦 {'Loading existing model' if append_training else 'Creating initial model'} with first scenario...")
+    # MEME expression que la branche annoncee, 100 lignes plus bas, et non `append_training` seul :
+    # sur un appel direct `--new --append` (ou `--new` gagne) le log annoncait un chargement
+    # pendant que le code construisait un modele neuf.
+    chunk_log(
+        f"📦 {'Creating initial model' if (new_model or not os.path.exists(model_path)) else 'Loading existing model'}"
+        f" with first scenario..."
+    )
     
     # Import environment
     W40KEngine, register_environment = setup_imports()
@@ -2892,7 +2920,11 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     vec_norm_cfg = training_config.get("vec_normalize", {})  # get allowed: optional config
     vec_normalize_enabled = vec_norm_cfg.get("enabled", False)
     if vec_normalize_enabled:
-        env = _apply_vec_normalize(env, model_path, vec_norm_cfg, new_model, n_envs, chunk_log)
+        # Jumeau du site de `create_multi_agent_model` : meme expression, meme raison.
+        env = _apply_vec_normalize(
+            env, model_path, vec_norm_cfg,
+            new_model or not os.path.exists(model_path), n_envs, chunk_log,
+        )
     
     # Create or load model
     model_params = training_config["model_params"].copy()
@@ -2949,7 +2981,9 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
             model_params_copy["learning_rate"] = _make_constant_lr_schedule(lr_cfg)
             chunk_log(f"✅ Learning rate: constant {lr_cfg['initial']} (decay → {lr_cfg['final']} via LearningRateScheduleCallback)")
         model = MaskablePPO(env=env, **model_params_copy)
-    elif append_training:
+    else:
+        # Jumeau du site ci-dessus : seul `append_training` sur un modele existant arrive ici,
+        # `check_model_lifecycle` ayant refuse les deux autres etats en tete de prologue.
         chunk_log(f"📁 Loading existing model for continued training: {model_path}")
         model = _load_checkpoint(model_path, env, device)
         # Jumeau de `create_multi_agent_model` : ces deux cles sont exclues du bloc curriculum
@@ -2967,13 +3001,6 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         new_logger = configure(specific_log_dir, ["tensorboard"])
         model.set_logger(new_logger)
         chunk_log(f"✅ Logger reinitialized for TensorBoard run: {specific_log_dir}")
-    else:
-        # Modele existant, ni --new ni --append : ce site construisait un modele NEUF depuis des
-        # poids aleatoires puis l'enregistrait par-dessus le modele entraine SANS l'archiver,
-        # derriere un simple `⚠️` — alors que `create_multi_agent_model` rechargeait l'existant.
-        # `main()` refuse desormais l'invocation en amont ; ce raise couvre l'appel direct.
-        raise model_lifecycle_conflict(model_path)
-
     _apply_torch_compile(model)
     # Import metrics tracker
     from ai.metrics_tracker import W40KMetricsTracker, resolve_perf_windows
@@ -4210,8 +4237,15 @@ def main():
     # AU PLUS TOT : avant le StepLogger, avant `node scripts/copy-configs.js`, avant toute
     # construction d'environnement. Ce qui se joue ici, c'est un modele entraine des heures
     # remplace par des poids aleatoires ; l'apprendre apres deux minutes de mise en place, ou
-    # pire au premier `model.save()`, c'est trop tard.
-    require_explicit_model_lifecycle(get_config_loader(), args)
+    # pire au premier `model.save()`, c'est trop tard. Meme regle que le prologue des deux points
+    # d'entrainement, une seule fonction pour les deux.
+    if is_training_invocation(args):
+        check_model_lifecycle(
+            build_agent_model_path(get_config_loader().get_models_root(), args.agent),
+            args.new,
+            args.append,
+            resume_pending=bool(args.resume_from),
+        )
 
     # Default rewards-config to agent (simplifies: --agent X implies rewards X)
     if args.rewards_config is None:
@@ -4393,21 +4427,20 @@ def main():
             from sb3_contrib.common.wrappers import ActionMasker
             masked_env = ActionMasker(base_env, mask_fn)
             
-            # Load model
+            # TROISIEME site de chargement, et il passe par le MEME helper que les deux points
+            # d'entree d'entrainement. Il portait sa propre copie du diagnostic « observation
+            # spaces do not match », sous un `except ValueError` : un .zip corrompu leve
+            # `BadZipFile`, qui n'en est pas un, donc ce site sortait en traceback brute sans
+            # nommer le chemin ni proposer --new — sur le mode que CLAUDE.md designe comme LA
+            # validation. Traduire le refus en code de sortie est un choix d'APPELANT ; recopier
+            # le diagnostic, c'est le motif qui a laissé le repli survivre a ses jumeaux.
             try:
-                model = MaskablePPO.load(model_path, env=masked_env)
-            except ValueError as e:
-                error_msg = str(e)
-                if "Observation spaces do not match" in error_msg:
-                    print(f"❌ Model incompatible: {error_msg}")
-                    print(f"⚠️  The model was trained with a different observation space size.")
-                    # Le flag declare par l'argparse de ce module est `--new` tout court : la
-                    # variante suffixee proposee ici sortait en erreur d'argument une fois copiee.
-                    print(f"💡 Solution: Re-train the model with the --new flag:")
-                    print(f"   python ai/train.py --agent {args.agent} --training-config {args.training_config} --rewards-config {args.rewards_config} --scenario bot --new")
-                    return 1
-                else:
-                    raise
+                model = _load_checkpoint(model_path, masked_env, "auto")
+            except RuntimeError as exc:
+                print(f"❌ {exc}")
+                print(f"💡 Commande de re-entrainement :")
+                print(f"   python ai/train.py --agent {args.agent} --training-config {args.training_config} --rewards-config {args.rewards_config} --scenario bot --new")
+                return 1
             
             # Run bot evaluation ONLY
             training_config = cfg.load_agent_training_config(args.agent, args.training_config)

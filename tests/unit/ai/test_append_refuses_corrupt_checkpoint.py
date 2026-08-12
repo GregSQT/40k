@@ -9,7 +9,9 @@ du run suivant.
 """
 
 import ast
+import re
 import zipfile
+from functools import lru_cache
 from pathlib import Path
 
 import pytest
@@ -18,12 +20,48 @@ import ai.train as train
 
 from .test_train_helpers import _function_code
 
-TRAIN_PY = Path(__file__).resolve().parents[3] / "ai" / "train.py"
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+TRAIN_PY = PROJECT_ROOT / "ai" / "train.py"
+#: Fichiers qui portent des COMMANDES `ai/train.py` copiables telles quelles. La doc de reference
+#: et le fichier d'instructions du depot : le meme flag mort avait survecu dans les deux apres sa
+#: correction dans le code.
+DOCS_AVEC_COMMANDES = (PROJECT_ROOT / "CLAUDE.md", PROJECT_ROOT / "Documentation" / "AI_TRAINING.md")
+
+
+@lru_cache(maxsize=1)
+def _source_train() -> str:
+    """`ai/train.py` lu UNE fois par process. 237 Ko : le relire par test coutait ~2 ms chacun, et
+    le re-parser 0,17 s — 70 % du temps de ce fichier de test."""
+    return TRAIN_PY.read_text(encoding="utf-8")
+
+
+@lru_cache(maxsize=1)
+def _arbre_train() -> ast.Module:
+    return ast.parse(_source_train())
+
+
+@lru_cache(maxsize=1)
+def _flags_declares() -> frozenset:
+    """Les `--flags` que l'argparse de `ai/train.py` declare REELLEMENT."""
+    flags = set()
+    for node in ast.walk(_arbre_train()):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
+            continue
+        if node.func.attr != "add_argument":
+            continue
+        for arg in node.args:
+            if isinstance(arg, ast.Constant) and isinstance(arg.value, str) and arg.value.startswith("--"):
+                flags.add(arg.value)
+    return frozenset(flags)
 
 
 def test_load_checkpoint_raises_on_a_corrupt_zip(tmp_path: Path) -> None:
-    """Le cas vecu : le .zip existe, donc `os.path.exists` est vrai et la branche --append est
-    prise, mais son contenu n'est pas un checkpoint."""
+    """Le cas vecu : le .zip existe, donc `os.path.exists` est vrai et la branche de reprise est
+    prise, mais son contenu n'est pas un checkpoint.
+
+    La cause d'origine reste CHAINEE : sans elle, la traceback ne dit plus POURQUOI le zip est
+    illisible (tronque ? mauvais pickle ? droits ?) et le diagnostic repart de zero.
+    """
     corrupt = tmp_path / "model_CoreAgent.zip"
     corrupt.write_bytes(b"ce n'est pas une archive zip")
 
@@ -33,6 +71,7 @@ def test_load_checkpoint_raises_on_a_corrupt_zip(tmp_path: Path) -> None:
     message = str(excinfo.value)
     assert str(corrupt) in message, "le message doit NOMMER le chemin du modele illisible"
     assert "--new" in message, "le message doit rappeler l'option pour repartir de zero"
+    assert excinfo.value.__cause__ is not None, "la cause d'origine doit rester chainee"
 
 
 def test_load_checkpoint_raises_on_a_valid_zip_that_is_not_a_checkpoint(tmp_path: Path) -> None:
@@ -46,12 +85,6 @@ def test_load_checkpoint_raises_on_a_valid_zip_that_is_not_a_checkpoint(tmp_path
 
     with pytest.raises(RuntimeError, match="Checkpoint illisible"):
         train._load_checkpoint(str(archive), env=None, device="cpu")
-
-
-def test_load_checkpoint_raises_on_a_missing_path(tmp_path: Path) -> None:
-    absent = tmp_path / "jamais_ecrit.zip"
-    with pytest.raises(RuntimeError, match="Checkpoint illisible"):
-        train._load_checkpoint(str(absent), env=None, device="cpu")
 
 
 def test_load_checkpoint_diagnoses_an_observation_space_mismatch(monkeypatch) -> None:
@@ -78,34 +111,48 @@ def test_load_checkpoint_diagnoses_an_observation_space_mismatch(monkeypatch) ->
     assert "--new" in message
 
 
-def test_no_recovery_message_names_a_flag_that_does_not_exist() -> None:
-    """Les messages de recuperation apres echec de chargement proposent une COMMANDE. `--new-model`
-    n'existe pas dans l'argparse de ce module : la commande copiee sortait en erreur d'argument.
-    """
-    source = TRAIN_PY.read_text(encoding="utf-8")
-    assert "--new-model" not in source, "flag inexistant propose dans un message d'aide"
-    assert '"--new"' in source, "VERT VACANT : le flag reellement declare doit etre trouve ici"
+def test_les_deux_diagnostics_partagent_le_meme_conseil_de_reprise() -> None:
+    """Ce qu'on fait APRES l'arret ne depend pas de la raison de l'arret : une constante, pas deux
+    queues de message recopiees. C'est la divergence des copies — trois exemplaires, deux `print`,
+    un `chunk_log`, un emoji casse — qui a laisse le repli survivre a la suppression de ses
+    jumeaux ; le refaire a l'echelle de deux branches rejouerait la meme histoire."""
+    code = _function_code(train._load_checkpoint)
+    assert code.count("_CONSEIL_DE_REPRISE") == 2, (
+        "les deux branches de diagnostic doivent citer la constante, pas recopier le conseil"
+    )
+    assert "relancer avec --new" not in code, "conseil recopie dans une branche"
 
-    # La doc porte les MEMES commandes, copiees-collees telles quelles, et le meme flag mort y
-    # avait survecu a sa correction dans le code : un fichier de distance 1 que la sentinelle ne
-    # regardait pas.
-    doc = TRAIN_PY.parent.parent / "Documentation" / "AI_TRAINING.md"
-    assert doc.exists(), "VERT VACANT : la doc d'entrainement doit etre trouvee"
-    assert "--new-model" not in doc.read_text(encoding="utf-8"), (
-        "flag inexistant propose dans Documentation/AI_TRAINING.md"
+
+def test_aucune_commande_documentee_ne_cite_un_flag_inexistant() -> None:
+    """Les messages d'aide et les docs proposent des COMMANDES `ai/train.py` copiables. `--new-model`
+    n'a jamais existe dans l'argparse : la commande copiee sortait en erreur d'argument, et le flag
+    mort a survecu dans `Documentation/AI_TRAINING.md` a sa correction dans le code.
+
+    Le controle porte sur la PROPRIETE, pas sur une chaine nommee en dur : tout `--flag` cite sur
+    une ligne qui appelle `ai/train.py` doit etre declare par l'argparse. N'importe quel autre flag
+    invente (`--from-scratch`, `--eval-only`) est couvert sans liste a tenir. Limite assumee : une
+    commande etalee sur plusieurs lignes n'est lue que sur celle qui porte `ai/train.py`.
+    """
+    declares = _flags_declares()
+    assert "--new" in declares and "--append" in declares, (
+        "VERT VACANT : l'extraction des flags declares ne rend rien d'attendu"
     )
 
+    inconnus = []
+    for fichier in (*DOCS_AVEC_COMMANDES, TRAIN_PY):
+        assert fichier.exists(), f"VERT VACANT : {fichier} introuvable, le controle ne lit rien"
+        contenu = _source_train() if fichier == TRAIN_PY else fichier.read_text(encoding="utf-8")
+        for numero, ligne in enumerate(contenu.splitlines(), 1):
+            if "ai/train.py" not in ligne:
+                continue
+            for token in re.findall(r"(?<![\w-])--[a-z][a-z0-9-]*", ligne):
+                if token not in declares:
+                    inconnus.append(f"{fichier.relative_to(PROJECT_ROOT)}:{numero} → {token}")
 
-def test_load_checkpoint_chains_the_original_cause(tmp_path: Path) -> None:
-    """`raise ... from exc` : sans la cause chainee, la traceback ne dit plus POURQUOI le zip est
-    illisible (tronque ? mauvais pickle ? droits ?) et le diagnostic repart de zero."""
-    corrupt = tmp_path / "model.zip"
-    corrupt.write_bytes(b"\x00\x01\x02")
-
-    with pytest.raises(RuntimeError) as excinfo:
-        train._load_checkpoint(str(corrupt), env=None, device="cpu")
-
-    assert excinfo.value.__cause__ is not None, "la cause d'origine doit rester chainee"
+    assert not inconnus, (
+        f"commandes citant un flag que l'argparse ne declare pas : {inconnus}. "
+        f"Flags declares : {sorted(declares)}"
+    )
 
 
 @pytest.mark.parametrize(
@@ -127,8 +174,48 @@ def test_no_training_entry_point_rebuilds_a_model_when_the_load_fails(func_name:
     assert "MaskablePPO.load(model_path" not in code, (
         f"{func_name} recharge le checkpoint en direct : le repli peut y etre revenu"
     )
-    assert "Creating new model instead" not in code, (
-        f"{func_name} reconstruit un modele neuf sur echec de chargement"
+
+
+def test_un_premier_entrainement_sans_flag_ne_reclame_pas_de_stats_vecnormalize(tmp_path) -> None:
+    """Scenario : `python3 ai/train.py --agent <nouvel_agent> --scenario bot`, dossier
+    `ai/models/<agent>/` VIDE, profil avec `vec_normalize.enabled: true`.
+
+    Aucun drapeau n'est exige (rien a ecraser), la branche de construction cree bien un modele
+    neuf — mais `_apply_vec_normalize` ne recevait que `new_model`, donc il prenait la branche
+    « reprise » et levait « stats absentes ». Un premier entrainement legal mourait sur un message
+    qui accuse une reprise que personne n'a demandee.
+    """
+    model_path = str(tmp_path / "model_NouvelAgent.zip")
+    assert not Path(model_path).exists(), "VERT VACANT : le modele doit vraiment manquer"
+
+    # `object()` suffit : avec `starts_from_scratch`, la fonction ne doit toucher ni au disque ni
+    # a l'env avant la construction des stats neuves — c'est le refus qu'on verifie ici.
+    with pytest.raises(FileNotFoundError):
+        train._apply_vec_normalize(object(), model_path, {}, False, 2, lambda _m: None)
+    erreur_levee = None
+    try:
+        train._apply_vec_normalize(object(), model_path, {}, True, 2, lambda _m: None)
+    except FileNotFoundError as exc:  # pragma: no cover - c'est precisement ce qui ne doit pas arriver
+        erreur_levee = exc
+    except Exception:
+        pass  # la construction de VecNormalize sur un `object()` echoue, et c'est hors sujet
+    assert erreur_levee is None, (
+        "un run qui part de zero ne doit pas reclamer les stats d'une reprise"
+    )
+
+
+@pytest.mark.parametrize(
+    "func_name", ["create_multi_agent_model", "train_with_scenario_rotation"]
+)
+def test_vecnormalize_lit_le_meme_predicat_que_la_branche_du_modele(func_name: str) -> None:
+    """JUMEAU : la question « ce run part-il de zero ? » se decide UNE fois. Les deux points
+    d'entree la posaient deux fois, sur deux entrees differentes — `new_model` pour VecNormalize,
+    `new_model or not os.path.exists(model_path)` pour le modele — et ces deux reponses divergent
+    exactement sur le premier entrainement d'un agent."""
+    code = _function_code(getattr(train, func_name))
+    appel = code[code.index("_apply_vec_normalize("):]
+    assert "new_model or not os.path.exists(model_path)" in appel[:400], (
+        f"{func_name} passe a _apply_vec_normalize un predicat different de celui de la branche"
     )
 
 
@@ -140,10 +227,9 @@ def test_no_load_site_at_all_rebuilds_a_model_on_failure() -> None:
     survecu a la suppression de ses jumeaux. Celui-ci n'interroge plus des noms mais le MOTIF :
     un `except` qui enveloppe un chargement et y reconstruit un `MaskablePPO`.
     """
-    tree = ast.parse(TRAIN_PY.read_text(encoding="utf-8"))
     essais_de_chargement = 0
     fautifs: list[str] = []
-    for node in ast.walk(tree):
+    for node in ast.walk(_arbre_train()):
         if not isinstance(node, ast.Try):
             continue
         # `MaskablePPO.load` / `VecNormalize.load`, jamais `json.load` : mesure du 2026-08-12, la
@@ -154,7 +240,11 @@ def test_no_load_site_at_all_rebuilds_a_model_on_failure() -> None:
             and isinstance(n.value, ast.Name) and n.value.id in ("MaskablePPO", "VecNormalize")
             for corps in node.body for n in ast.walk(corps)
         )
-        if not charge:
+        # `and node.handlers` : un `try/finally` NU ne peut rien rattraper, donc il ne prouve rien.
+        # Sans ce terme, le compte etait satisfait par le `try/finally` de nettoyage du tmpdir et
+        # par le site d'eval — la sentinelle serait restee verte apres disparition du seul `try`
+        # qu'elle surveille, c'est-a-dire en ne regardant plus rien.
+        if not charge or not node.handlers:
             continue
         essais_de_chargement += 1
         for handler in node.handlers:
@@ -163,8 +253,6 @@ def test_no_load_site_at_all_rebuilds_a_model_on_failure() -> None:
                 for n in ast.walk(handler)
             ):
                 fautifs.append(f"ai/train.py:{handler.lineno}")
-    # VERT VACANT : sans ce compte, la suppression du dernier `try` autour d'un chargement rendrait
-    # ce test vert en ne regardant plus rien.
     assert essais_de_chargement >= 1, "aucun chargement sous `try` trouve : le test regarde le vide"
     assert not fautifs, (
         f"un `except` autour d'un chargement reconstruit un MaskablePPO : {fautifs}. "

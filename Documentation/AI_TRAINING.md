@@ -132,7 +132,7 @@
 python ai/train.py --agent <agent_key> --training-config default --rewards-config <agent_key> --scenario bot --new   # Entraînement standard (P1), depuis zéro
 python ai/train.py --agent <agent_key> --scenario bot --new --param agent_seat_mode p2                         # Entraînement en P2
 python ai/train.py --agent <agent_key> --scenario bot --new --param agent_seat_mode random                     # Entraînement seat aléatoire
-python ai/train.py --agent <agent_key> --scenario bot --test-only --step --test-episodes 50                    # Test rapide avec logs
+python ai/train.py --agent <agent_key> --test-only --step --test-episodes 50                    # Test rapide avec logs
 ```
 
 ### Continue Existing Model
@@ -151,6 +151,11 @@ ne porte ni `--new` ni `--append` est **refusée à l’entrée**, avant le moin
   sous un nom horodaté**, jamais écrasés ni supprimés ;
 - `--append` **continue** le modèle en place (poids, compteur d’épisodes, stats VecNormalize) ;
 - `--resume-from` implique `--append`, il n’a donc pas à être accompagné.
+
+Le refus JUMEAU vaut dans l’autre sens : `--append` alors qu’**aucun** `model_<agent_key>.zip`
+n’existe est refusé aussi. Il tombait sinon dans la branche « modèle neuf » et s’entraînait des
+heures depuis des poids aléatoires sous un drapeau qui promet exactement le contraire — typiquement
+un `--agent` mal orthographié ou un modèle déplacé. Pour un **premier** entraînement : `--new`.
 
 Les modes qui ne s’entraînent pas — `--test-only` / `--eval`, `--convert-steplog`, `--replay` — ne
 lisent aucun des deux drapeaux et n’en exigent aucun.
@@ -215,7 +220,7 @@ Cette section décrit comment le training est structuré (qui appelle quoi). Pou
   - `--scenario <name>` : scénario ou mode (`bot`, `default`, `phase1`, etc.). Avec `bot`, l’adversaire est un mix configurable de 5 bots (Random, Greedy, Defensive, Control, Adaptive).
 - **Options utiles** : `--step` (écrit `step.log`), `--test-only` (pas d’apprentissage, évaluation uniquement), `--eval` (alias de `--test-only`), `--test-episodes N`, `--append` (reprendre un modèle existant), `--resume-from <checkpoint.zip>`
 - **Ce que mesure `--test-episodes N`** : le win-rate sur le **holdout**, jamais sur les scénarios d'entraînement — `holdout_regular` en priorité, `holdout_hard` seulement à défaut. Le scénario est résolu **avant** le premier épisode d'entraînement : un agent sans dossier `config/agents/<agent>/scenarios/holdout_regular|holdout_hard/` fait échouer la commande immédiatement, au lieu de perdre le run et de sortir en code 1 des heures plus tard.
-(reprendre depuis un checkpoint périodique), `--new-model` (partir de zéro, en écartant le modèle
+(reprendre depuis un checkpoint périodique), `--new` (partir de zéro, en écartant le modèle
 existant sous un nom horodaté). **`--new` ou `--append` est obligatoire dès qu'un modèle existe**,
 et `--append` exige qu'il en existe un : sans cela `train.py` refuse au lieu de choisir à ta place.
 
@@ -1335,7 +1340,7 @@ python ai/train.py --agent <agent_key> --training-config default --rewards-confi
 # bot_eval_freq, bot_eval_intermediate are in callback_params (e.g. 200 episodes, 30 per bot)
 
 # Manual evaluation (test-only, no training)
-python ai/train.py --agent <agent_key> --scenario bot --test-only --test-episodes 20
+python ai/train.py --agent <agent_key> --test-only --test-episodes 20
 # Equivalent alias:
 python ai/train.py --agent <agent_key> --scenario bot --eval --test-episodes 20
 # Uses model at ai/models/<agent_key>/model_<agent_key>.zip
@@ -2323,7 +2328,7 @@ python ai/train.py --agent <agent_key> --training-config default --rewards-confi
 python ai/train.py --agent <agent_key> --scenario bot --new --mode CPU   # Force CPU
 
 # Evaluation (no training)
-python ai/train.py --agent <agent_key> --scenario bot --test-only --test-episodes 20
+python ai/train.py --agent <agent_key> --test-only --test-episodes 20
 
 # Monitoring
 tensorboard --logdir=./tensorboard/

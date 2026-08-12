@@ -3065,14 +3065,20 @@ def movement_build_valid_destinations_pool(
         _fly_walls = game_state.get("wall_hexes", set())
         _fly_occupied = occupied_positions
 
+        # ROUTE FLY — JUMEAU du choix de route du sol (cf. la pierre tombale plus bas) : le
+        # raccourci mono-hex compte 1 par pas de cube, il n'est donc valable qu'en métrique `hex`.
+        # En euclidean, tout socle passe par le disque continu de `_build_multi_hex_vectorized`.
         # Socle mono-hex : géométrie hex (x1) ou socle de taille 1 — cf. `_geometry_is_hex`, qui
         # remplace l'ancien `ez <= 1` (devenu faux à x1 quand l'EZ est passée à 2").
         _fly_base_size = unit["BASE_SIZE"]
-        _fly_single_hex = (_geometry_is_hex(game_state) or _fly_base_size == 1)
+        _fly_single_hex_bfs = (
+            (_geometry_is_hex(game_state) or _fly_base_size == 1)
+            and _move_distance_metric(game_state) == "hex"
+        )
 
         _fly_off_even: Tuple[Tuple[int, int], ...] = ()
         _fly_off_odd: Tuple[Tuple[int, int], ...] = ()
-        if not _fly_single_hex:
+        if not _fly_single_hex_bfs:
             from engine.hex_utils import precompute_footprint_offsets
             _fly_shape = unit["BASE_SHAPE"]
             if "orientation" in unit:
@@ -3084,7 +3090,7 @@ def movement_build_valid_destinations_pool(
             )
 
         # Multi-hex FLY: vectorized NumPy path (cube-distance disk + destination filter).
-        if not _fly_single_hex:
+        if not _fly_single_hex_bfs:
             _m_bfs_start = _perf_clock.perf_counter() if _pt else None
             valid_destinations, _fly_fp_zone_vec, fly_visited_n = _build_multi_hex_vectorized(
                 fly=True,
@@ -3210,7 +3216,7 @@ def movement_build_valid_destinations_pool(
         game_state["move_preview_footprint_span"] = _move_preview_footprint_span(unit)
         if game_state.get("gym_training_mode"):
             _fly_fp_zone: Set[Tuple[int, int]] = set()
-        elif _fly_single_hex:
+        elif _fly_single_hex_bfs:
             _fly_fp_zone = set(valid_destinations)
             _fly_fp_zone.add(start_pos)
         else:
@@ -3262,20 +3268,29 @@ def movement_build_valid_destinations_pool(
     base_size = unit["BASE_SIZE"]
     # Socle mono-hex : géométrie hex (x1) ou socle de taille 1 (même prédicat que la branche FLY).
     is_single_hex = (_geometry_is_hex(game_state) or base_size == 1)
+    # Le raccourci mono-hex est une optimisation de la métrique HEX, pas un régime de socle : il
+    # compte 1 par pas d'hexagone. En euclidean, tout socle — mono-hex compris — passe donc par le
+    # chemin continu ci-dessous (`_euclidean_ground_anchor_multihex`), qui mesure la règle 03 en
+    # longueur réelle. Cf. la pierre tombale juste en dessous.
+    # ROUTE effectivement prise plus bas, et SEULE chose que les trois sites post-BFS doivent
+    # tester (bornage rigide, `footprint_zone`, log de perf) : eux dépendent de `_off_even/_off_odd`
+    # et du `footprint_zone` que seul le chemin empreinte remplit, pas de la taille du socle.
+    _single_hex_bfs = is_single_hex and _move_distance_metric(game_state) == "hex"
 
     # ── PIERRE TOMBALE — « Étape 4.1 », champ géodésique euclidien du socle MONO-HEX (2026-08-12) ─
-    # Une branche `geodesic_field` sans empreinte vivait ici, gardée par
+    # Une branche `geodesic_field` SANS empreinte vivait ici, gardée par
     # `_move_distance_metric(...) == "euclidean" and <socle mono-hex>`. Elle était INATTEIGNABLE :
     #   - `combat_utils.resolve_gym_split_metric` force la métrique `hex` dès `geometry_is_hex`
     #     (inches_to_subhex <= 1), donc « mono-hex par la résolution » implique « mesuré en hex » ;
     #   - au-dessus, `game_state._scale_socle` rend BASE_SIZE >= 5 à x5 et >= 10 à x10 (le plus
     #     petit socle des rosters vaut 10), alors que la garde exigeait une taille <= 1.
-    # Mesuré : instrumentée, la branche n'a été atteinte par AUCUN test du dépôt hors une fixture
-    # écrite exprès. Le socle rond mono-hex en euclidean est de toute façon traité, avec la MÊME
-    # géométrie continue (clearance = rayon du socle), par `_euclidean_ground_anchor_multihex`
-    # ci-dessous. Garder les deux, c'était tenir en phase deux fois la même règle 03 et faire
-    # diverger le pool d'ESCOUADE du pool PAR-FIGURINE sur les socles non ronds.
-    # Le BFS hex ci-dessous est donc le chemin du mono-hex, c'est-à-dire du x1 tout entier.
+    # Mesuré le 2026-08-12 : instrumentée, elle n'a été atteinte par AUCUN test du dépôt hors une
+    # fixture écrite exprès. C'était un SECOND modèle de la règle 03 en continu, à côté de
+    # `_euclidean_ground_anchor_multihex` qui applique la même clearance (rayon du socle) et sert
+    # déjà le pool PAR-FIGURINE — deux modèles à tenir en phase, et une divergence
+    # escouade/figurine sur les socles non ronds pour seul écart.
+    # Elle n'est pas remplacée : c'est `_single_hex_bfs` ci-dessus qui envoie désormais le mono-hex
+    # euclidien sur le chemin continu, au prix d'une empreinte d'un seul hex à précalculer.
     # ─────────────────────────────────────────────────────────────────────────────────────────────
 
     # Grille dense O(1) : même sémantique que ``dict`` (case visitée ou non pour ce BFS).
@@ -3310,7 +3325,7 @@ def movement_build_valid_destinations_pool(
     _ground_obstacles_tr: Optional[Set[Tuple[int, int]]] = None
 
     _m_bfs_start = _perf_clock.perf_counter() if _pt else None
-    if is_single_hex:
+    if _single_hex_bfs:
         while queue:
             (cc, cr), cd = queue.popleft()
             if cd >= move_range:
@@ -3409,7 +3424,7 @@ def movement_build_valid_destinations_pool(
     # Borne les CENTRES des figs (même définition de "hors board" que validate_move_plan).
     # N'affecte PAS footprint_zone (calculé séparément côté multi-hex) → la zone reste
     # complète, donc inZone ne rétrécit pas et le ghost PvP ne blink pas au bord.
-    if not is_single_hex:
+    if not _single_hex_bfs:
         # Escouade absente = désynchronisation : le repli `None` SAUTAIT le bornage rigide, donc
         # acceptait des ancres qui sortent une figurine du plateau.
         _sq_entry = require_unit_from_cache(
@@ -3453,7 +3468,7 @@ def movement_build_valid_destinations_pool(
         # masque spatial V11 (`build_squad_move_cell_map`), et sans cette ligne le pool de
         # move reste invisible dans perf_timing.log alors qu'il est construit à chaque masque.
         if _pt and _m0 is not None and _m_prep_end is not None and _m_bfs_start is not None and _m_bfs_end is not None:
-            _fp_n = len(_off_even) if not is_single_hex else 1
+            _fp_n = len(_off_even) if not _single_hex_bfs else 1
             _ro_end = _perf_clock.perf_counter()
             # `post_bfs_s` couvre le bornage rigide de l'enveloppe d'empreinte + la resync
             # `out_costs` : sans lui, prep+bfs ne recouvrent pas total et le reliquat (qui scale
@@ -3525,7 +3540,7 @@ def movement_build_valid_destinations_pool(
     game_state["valid_move_destinations_pool_by_level"] = _pool_by_level
     game_state["move_preview_footprint_span"] = _move_preview_footprint_span(unit)
 
-    if is_single_hex:
+    if _single_hex_bfs:
         footprint_zone = set(valid_destinations)
         footprint_zone.add(start_pos)
 
@@ -3536,7 +3551,7 @@ def movement_build_valid_destinations_pool(
         _sync_move_preview_mask_loops(game_state, footprint_zone)
     _m_ground_done = _perf_clock.perf_counter() if _pt else None
     if _pt and _m0 is not None and _m_prep_end is not None and _m_bfs_start is not None and _m_bfs_end is not None and _m_ground_before_sync is not None and _m_ground_done is not None:
-        _fp_n = len(_off_even) if not is_single_hex else 1
+        _fp_n = len(_off_even) if not _single_hex_bfs else 1
         _post_bfs = _m_ground_done - _m_bfs_end
         _fu = _m_ground_before_sync - _m_bfs_end
         _ml = _m_ground_done - _m_ground_before_sync

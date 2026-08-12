@@ -73,10 +73,12 @@ def _rapport_cloture():
         "rapport_cloture", VOISIN, loader=SourceFileLoader("rapport_cloture", VOISIN)
     )
     module = util.module_from_spec(spec)
-    argv, stdin, dwb = sys.argv, sys.stdin, sys.dont_write_bytecode
-    # Pas de .pyc : il atterrirait dans `.claude/hooks/__pycache__` à chaque édition, et un cache
-    # d'un fichier qu'on relit à chaque appel n'a aucun intérêt ici.
-    sys.dont_write_bytecode = True
+    argv, stdin = sys.argv, sys.stdin
+    # Le .pyc est LAISSÉ (`.claude/hooks/__pycache__` est gitignoré) : mesuré le 2026-08-12, le
+    # charger coûte 10,8 ms contre 18,2 ms à recompiler, sur un hook qui tourne à chaque édition.
+    # L'interdire ne l'empêchait même pas de LIRE un cache créé par un autre processus, donc le hook
+    # avait deux régimes de performance selon un fichier que personne ne pilote. Un `.pyc` est
+    # invalidé par le mtime de sa source : le tour qui édite le voisin le périme de lui-même.
     sys.argv = [VOISIN]
     with open(os.devnull, encoding="utf-8") as vide:
         sys.stdin = vide
@@ -85,38 +87,31 @@ def _rapport_cloture():
         except SystemExit:
             pass
         finally:
-            sys.argv, sys.stdin, sys.dont_write_bytecode = argv, stdin, dwb
+            sys.argv, sys.stdin = argv, stdin
     return module
 
 
-def est_du_code(chemin):
-    """Vrai si ce fichier engage une relecture, selon la SEULE liste du dépôt (CLAUDE.md)."""
-    cfg = voisin().config()
-    return chemin.endswith(tuple(cfg["code_suffixes"])) or os.path.basename(chemin) in cfg[
-        "code_basenames"
-    ]
+def engage_relecture(chemin):
+    """Ce fichier doit-il être relu ? Prédicat du VOISIN — jamais une seconde définition ici.
 
-
-def dans_le_depot(chemin):
-    """Appartenance au dépôt, telle que le VOISIN la définit — jamais une seconde définition ici.
-
-    Un script jetable écrit dans le scratchpad est du `.py`, mais le relire n'a aucun sens : il ne
-    sera pas livré. Constaté le 2026-08-12 : trois `migrate_*.py` du scratchpad figuraient dans une
-    liste de production et seraient partis en review.
+    Il porte les deux conditions : dans le dépôt (un script jetable du scratchpad est du `.py` mais
+    ne sera pas livré — trois `migrate_*.py` attendaient d'être relus le 2026-08-12) et déclaré
+    comme du code dans CLAUDE.md. Le réécrire ici ferait diverger les deux hooks sur ce qui engage
+    une relecture, soit exactement ce que l'en-tête de ce fichier dit fermer.
     """
-    return voisin().dans_le_depot(chemin)
+    return voisin().est_du_code(chemin, voisin().config())
 
 
 def chemin_note(chemin):
-    """Chemin tel qu'il figurera au bloc RELIRE : TOUJOURS absolu.
+    """Chemin tel qu'il figurera au bloc RELIRE : absolu, résolu comme le VOISIN le résout.
 
-    Un chemin relatif s'interprète depuis le cwd de la review, qui n'est pas forcément le dépôt où
+    Un chemin relatif s'interprète sinon depuis le cwd, qui n'est pas forcément le dépôt où
     l'édition a eu lieu : en session worktree, `CLAUDE.md` relatif désigne la copie du worktree, pas
-    celle du dépôt principal qu'on vient de modifier — c'est le défaut mesuré le 2026-08-08, avec un
-    verdict entier rendu sur le mauvais code. L'absolu est le seul forme juste dans les deux dépôts,
-    et `rapport-cloture.sh` l'exige déjà dès qu'un worktree est en jeu.
+    celle du dépôt principal qu'on vient de modifier — défaut mesuré le 2026-08-08, un verdict
+    entier rendu sur le mauvais code. Et deux résolutions concurrentes (cwd à l'écriture, racine à
+    la lecture) faisaient disparaître sans un mot une édition acceptée puis refiltrée.
     """
-    return os.path.abspath(chemin)
+    return voisin().absolu(chemin)
 
 
 def fichier_de_session(session_id):
@@ -129,23 +124,23 @@ def fichier_relu(session_id):
 
 
 def lire(fichier):
-    """Entrées du fichier, NORMALISÉES à la lecture : absolues, dans le dépôt, dédoublonnées.
+    """Entrées du fichier, NORMALISÉES à la lecture : absolues, relisables, dédoublonnées.
 
-    Normaliser aussi ici et pas seulement à l'écriture, pour deux raisons mesurées le 2026-08-12 :
-    - les listes déjà écrites par une version antérieure portent des chemins relatifs et des scripts
+    Le MÊME prédicat qu'à l'écriture, et pas seulement sa moitié « dans le dépôt » : sinon retirer
+    un suffixe de CLAUDE.md laisserait indéfiniment des entrées non-code dans les listes déjà
+    écrites, que `--liste` rendrait au bloc RELIRE. Normaliser ici aussi, pour deux raisons mesurées
+    le 2026-08-12 :
+    - les listes écrites par une version antérieure portent des chemins relatifs et des scripts
       jetables du scratchpad ; elles se réparent ainsi sans qu'on touche l'état d'autres sessions ;
     - deux éditions du même fichier dans un même message passent par deux processus concurrents, qui
       lisent tous deux une liste sans l'entrée : le dédoublonnage à l'écriture ne peut pas les voir.
-    Une entrée relative est jointe à la RACINE, jamais au cwd du moment : c'est ce qu'elle voulait
-    dire quand elle a été écrite.
     """
     try:
         with open(fichier, encoding="utf-8") as fh:
             brutes = [ln.strip() for ln in fh if ln.strip()]
     except FileNotFoundError:
         return []
-    absolues = [c if os.path.isabs(c) else os.path.join(RACINE, c) for c in brutes]
-    return list(dict.fromkeys(c for c in absolues if dans_le_depot(c)))
+    return list(dict.fromkeys(chemin_note(c) for c in brutes if engage_relecture(c)))
 
 
 def ecrire(fichier, chemins):
@@ -303,7 +298,7 @@ def main():
         # id fantaisiste écrivait une liste que `--liste` refuse ensuite de lire (donc une relecture
         # perdue), et `../../..` écrivait hors du dossier des listes.
         session_valide(session_id)
-        if dans_le_depot(chemin) and est_du_code(chemin):
+        if engage_relecture(chemin):
             ajouter(session_id, chemin_note(chemin))
     # `except Exception` et non une liste de types : le voisin est CHARGÉ ici, donc une coquille
     # dedans lève ce qu'elle veut (SyntaxError, ImportError…) — et ça arrive précisément sur les
