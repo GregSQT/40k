@@ -840,7 +840,15 @@ def handle_shoot(
                 # `shooting_handlers.hidden_enemy_out_of_detection`.
                 max_distance=weapon_range,
             )
-            if edge_dist is not None and edge_dist > weapon_range:
+            if edge_dist is None:
+                # NON ÉVALUÉ, et ça se COMPTE. « Aucun verdict » est le choix documenté quand
+                # aucun socle de la cible n'est connu (résidu V9 d'`analyzer_couverture.md`),
+                # mais il était SILENCIEUX : un contrôle qui renonce sans le dire affiche le même
+                # 0 qu'un contrôle qui a tout vérifié. C'est le « vert vacant », et il s'est
+                # produit ici même — une version antérieure du gel rendait `None` sur toute
+                # activation ayant tué, éteignant le contrôle sans que rien ne le montre.
+                stats['shoot_range_unverifiable'][player] += 1
+            elif edge_dist > weapon_range:
                 stats['shoot_invalid'][player]['out_of_range'] += 1
                 if stats['first_error_lines']['shoot_invalid'][player] is None:
                     stats['first_error_lines']['shoot_invalid'][player] = {'episode': state.current_episode_num, 'line': line.strip()}

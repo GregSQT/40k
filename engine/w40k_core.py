@@ -5466,7 +5466,13 @@ class W40KEngine(gym.Env):
         units_cache = self.game_state.get("units_cache")  # get allowed
         if not isinstance(units_cache, dict):
             return ""
-        entry = units_cache.get(unit_id)  # get allowed
+        # `str(unit_id)` : `units_cache` est clé par CHAÎNE, et les payloads d'action_log portent
+        # `unitId` tantôt en int, tantôt en str. Sans cette normalisation, le lookup échoue en
+        # SILENCE sur les premiers et le segment ressort VIDE. Mesuré le 2026-08-12 : la ligne
+        # `[HAZARD]` (`roll_hazard_for_unit` pose `int(unit_id)`) n'a jamais porté son
+        # `[MODELS:]` depuis sa création — l'analyzer ne voyait donc jamais l'escouade se
+        # repositionner après une blessure mortelle, et gardait des socles morts pour vivants.
+        entry = units_cache.get(str(unit_id))  # get allowed
         if not isinstance(entry, dict):
             return ""
         by_model = entry.get("occupied_hexes_by_model")  # get allowed

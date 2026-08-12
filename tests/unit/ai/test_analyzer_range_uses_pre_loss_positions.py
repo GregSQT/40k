@@ -107,8 +107,16 @@ def test_un_tir_legitime_n_est_pas_compte_hors_portee(stats):
 
 def test_le_controle_rend_bien_un_verdict(stats):
     """Un contrôle qui ne juge plus rien afficherait 0 sans rien regarder — pire que le faux
-    positif qu'on retire. Le tir doit avoir été COMPTÉ, donc mesuré."""
+    positif qu'on retire. Le tir doit avoir été COMPTÉ, donc mesuré.
+
+    Les DEUX assertions sont nécessaires, et la seconde est la seule qui porte sur la PORTÉE :
+    `total` compte les lignes de tir traitées, et il est incrémenté à l'entrée du handler,
+    bien avant le bloc de portée — une ligne peut donc y figurer sans qu'aucune distance ait
+    été mesurée. `shoot_range_unverifiable` compte exactement les tirs auxquels le contrôle a
+    RENONCÉ : à 0, il a jugé ; sans lui, « 0 hors portée » ne se distingue pas d'un silence.
+    """
     assert stats["shoot_invalid"][1]["total"] == 1
+    assert stats["shoot_range_unverifiable"][1] == 0
 
 
 def test_premisse_les_deux_figurines_sont_hors_portee():
@@ -137,3 +145,51 @@ def test_la_deuxieme_ligne_d_une_activation_est_encore_jugee(tmp_path):
     log.write_text(STEP_LOG_ACTIVATION)
     stats = an.parse_step_log(str(log))
     assert stats["shoot_invalid"][1]["out_of_range"] == 2
+    # Et AUCUN des deux tirs n'a échappé à la mesure : c'est ce que l'extinction silencieuse
+    # produisait — deux lignes traitées, zéro distance mesurée, zéro faute affichée.
+    assert stats["shoot_range_unverifiable"][1] == 0
+
+# Troisième journal : la cible perd une figurine dans une activation, puis un AUTRE tireur la vise
+# dans une activation SUIVANTE. Entre les deux, aucun segment ne redonne ses socles : le gel de la
+# nouvelle activation part donc d'une carte vide, et le contrôle ne PEUT pas juger. C'est le seul
+# cas où renoncer est légitime — et c'est celui que le compteur doit rendre visible.
+STEP_LOG_SANS_SOCLE = f"""=== STEP-BY-STEP ACTION LOG ===
+================================================================================
+
+[10:00:00] === EPISODE 1 START ===
+[10:00:00] Scenario: scenario_bot-01
+[10:00:00] Opponent: SelfplayBot
+[10:00:00] Walls:
+[10:00:00] Objectives: rect b NW:{OBJECTIVES}
+[10:00:00] Board: cols=48 rows=60 inches_to_subhex=1 hex_radius=13.9 margin=5
+[10:00:00] Run rules: engagement_zone_subhex=2 engagement_zone_vertical_inches=5.0 metric.engagement=hex metric.ranged=hex move.thru_ez=True move.thru_enemy=False move.thru_friendly=True cohesion.model_subhex=2 cohesion.global_subhex=9 cohesion.min_neighbors=1
+[10:00:00] Unit 1 (SternguardVeteranBoltRifle) P1: Starting position (-1,-1), HP_MAX=2 base=round/1
+[10:00:00] Unit 2 (SternguardVeteranBoltRifle) P1: Starting position (-1,-1), HP_MAX=2 base=round/1
+[10:00:00] Unit 101 (AssaultIntercessor) P2: Starting position (-1,-1), HP_MAX=2 base=round/1
+[10:00:00] === ACTIONS START ===
+[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1({SHOOTER[0]},{SHOOTER[1]}) DEPLOYED from (-1,-1) to ({SHOOTER[0]},{SHOOTER[1]}) [R:+0.0] [MODELS: 1#0@({SHOOTER[0]},{SHOOTER[1]},z0)] [SUCCESS]
+[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 2({SHOOTER[0]},{SHOOTER[1] + 2}) DEPLOYED from (-1,-1) to ({SHOOTER[0]},{SHOOTER[1] + 2}) [R:+0.0] [MODELS: 2#0@({SHOOTER[0]},{SHOOTER[1] + 2},z0)] [SUCCESS]
+[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 101({PROCHE[0]},{PROCHE[1]}) DEPLOYED from (-1,-1) to ({PROCHE[0]},{PROCHE[1]}) [R:+0.0] [MODELS: 101#0@({PROCHE[0]},{PROCHE[1]},z0) 101#1@({LOIN[0]},{LOIN[1]},z0)] [SUCCESS]
+[10:00:02] E1 T1 P1 SHOOT : Unit 1({SHOOTER[0]},{SHOOTER[1]}) SHOT Unit 101({PROCHE[0]},{PROCHE[1]}) with [Sternguard Bolt Rifle] - Hit 4(5+) - Wound 5(4+) - Save 2(5+) - Dmg:2HP [R:+0.0] [MODELS: 1#0@({SHOOTER[0]},{SHOOTER[1]},z0)] [SHOOTER_MODELS: 1#0] [SUCCESS]
+[10:00:03] E1 T2 P1 SHOOT : Unit 2({SHOOTER[0]},{SHOOTER[1] + 2}) SHOT Unit 101({PROCHE[0]},{PROCHE[1]}) with [Sternguard Bolt Rifle] - Hit 4(5+) [R:+0.0] [MODELS: 2#0@({SHOOTER[0]},{SHOOTER[1] + 2},z0)] [SHOOTER_MODELS: 2#0] [SUCCESS]
+"""
+
+
+def test_un_tir_non_jugeable_est_compte_comme_tel(tmp_path):
+    """TÉMOIN POSITIF du compteur : à 0 partout, il ne prouverait rien.
+
+    Ici le contrôle a une raison LÉGITIME de se taire — plus aucun socle connu pour la cible.
+    Il doit alors le DIRE, pas afficher la même chose qu'un tir jugé conforme. Sans cette
+    assertion, un compteur cassé (jamais incrémenté) passerait tous les autres tests du fichier.
+    """
+    import ai.analyzer as an
+
+    log = tmp_path / "step.log"
+    log.write_text(STEP_LOG_SANS_SOCLE)
+    stats = an.parse_step_log(str(log))
+
+    assert stats["shoot_range_unverifiable"][1] == 1, (
+        "le second tir a été jugé alors qu'aucun socle de la cible n'est connu, ou son "
+        "renoncement n'a pas été compté"
+    )
+    assert stats["shoot_invalid"][1]["out_of_range"] == 0

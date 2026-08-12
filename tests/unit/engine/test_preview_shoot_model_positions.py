@@ -9,8 +9,11 @@ mono-figurine : une escouade multi-figurine gardait donc toutes ses figurines à
 que l'ancre, elle, passait sur le plateau. `_socle_from_entry` construit ses centres depuis ces
 figurines → distances et LoS mesurées depuis le coin du plateau, sans la moindre erreur levée.
 
-Le premier test verrouille le défaut par la MESURE : sans l'aperçu par-figurine, l'empreinte vue
-par le moteur reste la sentinelle. Les suivants verrouillent le contrat de la correction.
+Le premier test verrouillait ce défaut par la MESURE. Il a été RETOURNÉ le 2026-08-12 : la
+branche `"anchor"` passe désormais par `translate_squad_to_destination`, donc les figurines
+suivent l'ancre au lieu de rester sur la sentinelle. Il vérifie maintenant que la sentinelle a
+disparu de la mesure — l'aperçu par-figurine reste le seul mode EXACT (tests suivants), parce
+qu'une escouade hors table n'a aucune formation à translater.
 """
 
 from typing import Any, Dict, List, Tuple
@@ -95,12 +98,20 @@ def _model_centers_seen_by_engine(preview_state: Dict[str, Any], unit_id: str):
     return sorted(entry["occupied_hexes_by_model"].values())
 
 
-def test_anchor_preview_leaves_multi_model_squad_at_the_sentinel(engine, monkeypatch):
-    """LE DÉFAUT : placer par l'ANCRE laisse les figurines hors table, sans lever.
+def test_anchor_preview_no_longer_measures_from_the_sentinel(engine, monkeypatch):
+    """Le placement par ANCRE ne laisse plus les figurines hors table.
 
-    On intercepte l'état de la copie de travail au moment où le pipeline mesure : c'est lui qui
-    décide des distances et de la LoS. Si les figurines y sont encore à `(-1,-1)`, tout ce que
-    l'aperçu rend est mesuré depuis le coin du plateau.
+    Ce test verrouillait le DÉFAUT : `update_units_cache_position` ne recale les figurines que
+    pour une escouade mono-figurine, donc une escouade multi-figurine gardait tout son monde à
+    `(-1,-1)` pendant que l'ancre passait sur le plateau, et la LoS partait du coin du plateau.
+    La branche `"anchor"` de `_apply_preview_placement` passe désormais par
+    `translate_squad_to_destination` (2026-08-12) : les figurines SUIVENT l'ancre.
+
+    ⚠️ Ce que ce test ne dit PAS : que l'aperçu par ancre soit exact. Une escouade hors table a
+    toutes ses figurines sur la sentinelle, donc la translation les EMPILE sur l'ancre — mesure
+    depuis un point unique, pas depuis la formation. C'est strictement mieux que le coin du
+    plateau, et ça reste une approximation : le seul mode exact pendant un placement est
+    l'aperçu par-figurine que verrouille le test suivant.
     """
     game_state = engine.game_state
     unit_id, model_ids = _multi_model_unit(game_state)
@@ -122,9 +133,13 @@ def test_anchor_preview_leaves_multi_model_squad_at_the_sentinel(engine, monkeyp
     )
 
     assert "centers" in seen, "le pipeline n'a pas été atteint — le test ne prouve rien"
-    assert seen["centers"] == [(-1, -1)] * len(model_ids), (
-        "le placement par ancre est censé laisser les figurines à la sentinelle ; si ce n'est "
-        "plus le cas, ce test ne décrit plus le défaut qu'il documente"
+    assert (-1, -1) not in seen["centers"], (
+        f"des figurines mesurent encore depuis la sentinelle : {seen['centers']} — la LoS et "
+        "les distances de l'aperçu repartent du coin du plateau"
+    )
+    assert seen["centers"] == [(20, 20)] * len(model_ids), (
+        "les figurines doivent suivre l'ancre demandée (empilées ici, faute de formation "
+        f"connue hors table) : {seen['centers']}"
     )
 
 

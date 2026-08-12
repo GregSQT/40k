@@ -1791,6 +1791,11 @@ def parse_step_log(filepath: str) -> Dict:
         'devastating_wounds_incorrect': {1: 0, 2: 0},
         # 03.03 : cohérence d'escouade à la fin de chaque déplacement et à la mise en place.
         'squad_coherency_violations': {1: 0, 2: 0},
+        # Tirs dont la PORTÉE n'a pas pu être jugée (aucun socle connu pour la cible). Ce n'est
+        # pas une faute — c'est une absence de mesure — mais elle doit être VISIBLE : sans ce
+        # compteur, « 0 tir hors portée » ne distingue pas un contrôle qui n'a rien trouvé d'un
+        # contrôle qui n'a rien regardé (résidu V9 d'`analyzer_couverture.md`).
+        'shoot_range_unverifiable': {1: 0, 2: 0},
         # 03.03 End of Turn — figurines RETIRÉES faute de cohérence. Compteur d'EXERCICE, pas
         # d'erreur : le moteur applique la règle, il ne la viole pas. Il vit à côté des violations
         # parce qu'il en est la conséquence directe — une escouade qui finit son déplacement hors
@@ -3256,6 +3261,15 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         "Tirs hors portee (10.02):",
         _fmt_count(stats['shoot_invalid'][1]['out_of_range']),
         _fmt_count(stats['shoot_invalid'][2]['out_of_range']),
+    )
+    # Couverture RÉELLE de la ligne ci-dessus : les tirs qu'elle a renoncé à juger, faute de
+    # connaître un seul socle de la cible. MÊME forme que les « lignes non verifiables » des
+    # seuils de touche/blessure — sans elle, « 0 hors portée » ne distingue pas un contrôle qui
+    # n'a rien trouvé d'un contrôle qui n'a rien regardé (résidu V9, fermé le 2026-08-12).
+    _rng_unver = require_key(stats, 'shoot_range_unverifiable')
+    _table_row(
+        "  ↳ portees non jugees (cible sans socle):",
+        _fmt_count(_rng_unver[1]), _fmt_count(_rng_unver[2]),
     )
     _table_row(
         "Tirs engage, arme non-close_quarters:",
