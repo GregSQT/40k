@@ -39,6 +39,25 @@ _run_rules: Optional[Dict[str, str]] = None
 _run_board_dims: Optional[Tuple[int, int]] = None
 
 
+def reset_run_state() -> None:
+    """Ramène l'état du run analysé à « non posé », c'est-à-dire à l'état d'import du module.
+
+    Une passe de production n'en a pas besoin — `parse_step_log` repose les trois valeurs depuis
+    l'entête de chaque journal. C'est l'ARBRE DE TEST qui l'appelle, entre deux tests d'un même
+    worker : les valeurs posées à la main par l'un restaient visibles pour le suivant, et le
+    voisin qui avait oublié de les poser passait en vert sur l'échelle ou le plateau d'autrui.
+
+    La fonction vit ICI, avec les globales et leurs setters, plutôt qu'en trois affectations
+    recopiées dans un `conftest` : une quatrième valeur de run ajoutée au-dessus doit être remise
+    à zéro au même endroit qu'elle est déclarée, sans quoi elle échappera à la remise à zéro sans
+    que rien ne le dise.
+    """
+    global _run_inches_to_subhex, _run_rules, _run_board_dims
+    _run_inches_to_subhex = None
+    _run_rules = None
+    _run_board_dims = None
+
+
 def set_run_rules(rules: Dict[str, str]) -> None:
     """Fixe les règles du run pour toute la passe d'analyse."""
     global _run_rules
