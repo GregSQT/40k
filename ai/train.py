@@ -2878,6 +2878,12 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
                 model_params_copy["learning_rate"] = _make_constant_lr_schedule(model_params_copy["learning_rate"])
             model = MaskablePPO(env=env, **model_params_copy)
         else:
+            # Jumeau de `create_multi_agent_model` : ces deux cles sont exclues du bloc curriculum
+            # parce que l'APPELANT les pose, et celui-ci ne le faisait pas — un profil qui change
+            # `verbose` en --append heritait de la valeur du checkpoint, sans rien afficher.
+            model.tensorboard_log = require_key(model_params, "tensorboard_log")
+            model.verbose = require_key(model_params, "verbose")
+
             _apply_curriculum_model_params(model, model_params, log=chunk_log)
 
             # CRITICAL FIX: Reinitialize logger after loading from checkpoint
