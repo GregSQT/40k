@@ -113,6 +113,7 @@ def test_a_served_zone_moves_away_by_the_penalty(monkeypatch: pytest.MonkeyPatch
 
     nu, _z = doc._objective_terms(state, me=1, w_crowd=0.0, escouade="2")
     penalise, _z = doc._objective_terms(state, me=1, w_crowd=2.0, escouade="2")
+    assert nu is not None and penalise is not None, "aucune carte rendue : le test ne regarde rien"
 
     assert int(nu[2, 2]) == 5, "sans pénalité, la carte est la distance nue"
     assert int(penalise[2, 2]) == 5 + 2 * 6, "servie : elle doit s'éloigner de w_crowd × surplus"
@@ -130,4 +131,5 @@ def test_the_next_squad_prefers_the_free_zone_at_equal_distance() -> None:
     assert surplus[0] > 0.0 and surplus[1] == 0.0, "la zone A doit être la seule servie"
     # La carte combinée retient le minimum : la libre reste à 5, la servie part à 17.
     penalise, _z = doc._objective_terms(state, me=1, w_crowd=2.0, escouade="2")
+    assert penalise is not None, "aucune carte rendue : le test ne regarde rien"
     assert int(penalise[2, 2]) == 5, "la zone LIBRE garde son prix, c'est elle qui sera choisie"
