@@ -152,7 +152,7 @@ Segments per-figurine (`engine/action_log_utils.py`) :
 | Segment | Contenu | Consommateur |
 |---|---|---|
 | `[MODELS: <mid>@(c,r,z<h>) …]` | socles VIVANTS de l'unité qui agit ; `mid = <unit_id>#<index>` ; `z` = hauteur de PLANCHER en pouces | analyzer (source de vérité par-socle) + replay |
-| `[TARGET_MODELS: …]` | survivants de la CIBLE après pertes, uniquement sur le DERNIER jet visant cette cible | replay + `shoot_handler` (portée) + **état per-figurine** (`analyzer_core`, depuis le 2026-08-11) |
+| `[TARGET_MODELS: …]` | survivants de la CIBLE après pertes, uniquement sur le DERNIER jet visant cette cible | replay + **état per-figurine** (`analyzer_core`, depuis le 2026-08-11). ⚠️ **JAMAIS un verdict de distance** : `shoot_handler` (portée) l'a lu jusqu'au 2026-08-12 et rendait 31 faux « hors portée » sur 600 épisodes — la figurine visée, la plus proche, disparaît du segment quand elle meurt du tir |
 | `[SHOOTER_MODELS: <mid> …]` | figurines ayant EFFECTIVEMENT tiré/frappé | replay seul |
 
 ### 1.3 Messages par type d'action
@@ -302,7 +302,7 @@ portés par #14 et #24 ; « start an action » exige les lignes d'action (16.01)
 
 | # | Compteur | Site | Ce qu'il regarde VRAIMENT |
 |---|---|---|---|
-| 10 | `shoot_invalid.out_of_range` | `shoot_handler.py` | `squads_min_ranged_distance` socle→socle, métrique `metric.ranged` du run, cap **non tronqué** depuis le 2026-08-09 ; **aucun verdict** si ni `[TARGET_MODELS:]` ni socles connus |
+| 10 | `shoot_invalid.out_of_range` | `shoot_handler.py` | `squads_min_ranged_distance` socle→socle, métrique `metric.ranged` du run, cap **non tronqué** depuis le 2026-08-09 ; cible lue dans `positions_by_model` — l'état d'AVANT l'action, **jamais** `[TARGET_MODELS:]` (2026-08-12) ; **aucun verdict** si la cible n'a pas de socles connus |
 | 11 | `shoot_invalid.engaged_non_close_quarters` / `engaged_shot_with_non_close_quarters_weapon` | `:670,671` | tireur engagé (per-fig) ∧ arme non-CQ ∧ non-M/V |
 | 12 | `shoot_over_rng_nb` | `shoot_handler.py` (`per_model_attack_cap`) | compteur de séquence vs plafond **PAR FIGURINE depuis le 2026-08-10** (V14 fermé) : `[SHOOTER_MODELS:]` donne les socles qui ont tiré, `[MODEL_TYPES:]` la datasheet de chacun. Le X de `[RAPID FIRE]` suit la même résolution — c'est un attribut d'ARME. Repli explicite sur `NB d'escouade × effectif` sans ces segments. `[SUSTAINED HITS]` exclu. ⚠️ **Le GROUPE de tireurs est entré dans la clé du compteur le 2026-08-11** : il détermine le plafond de la ligne, et sans lui la somme de deux groupes d'une même escouade était opposée au plafond d'un seul — **320 faux positifs sur 23 169 tirs**. `fight_handler` avait fermé ce défaut de son côté sans que le tir suive |
 | 13 | `shoot_combi_profile_conflicts` | `:335` | 2 profils d'un même `COMBI_WEAPON` dans le même tour |
