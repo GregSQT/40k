@@ -205,7 +205,7 @@
       "learning_rate": {
         "initial": 0.002,
         "final": 0.0002,
-        "decay_fraction": 0.7
+        "decay_fraction": 0.9
       },
       "n_steps": 8192,
       "batch_size": 1020,
@@ -398,7 +398,7 @@
       "learning_rate": {
         "initial": 0.0005,
         "final": 0.0001,
-        "decay_fraction": 0.7,
+        "decay_fraction": 0.9,
         "justification": "4x plus bas que la phase 1 (0.002). Le modele arrive DEJA CONVERGE : le remettre a son LR initial est la definition du catastrophic forgetting. Assez haut malgre tout pour s'adapter a un adversaire qui n'est plus un bot scripte. Plancher 0.0001, moitie de celui de la phase 1 : on affine, on ne reapprend pas."
       },
       "n_steps": 8192,
