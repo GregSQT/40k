@@ -72,6 +72,7 @@ import { normalizeMaskLoopsFromApi } from "../utils/movePreviewFootprintMaskLoop
 import { type OathUnitsCache, pickOathTargetAtHex } from "../utils/oathTargetSelection";
 import {
   buildObjectiveControlTable,
+  hashHexList,
   type ObjectiveControlTable,
   objectiveControlKey,
   objectiveZonesGeometryKey,
@@ -1208,6 +1209,12 @@ function normalizeZoneHex(h: unknown): [number, number] {
     : [(h as { col: number }).col, (h as { row: number }).row];
 }
 
+/**
+ * Instantané de contrôle vide, en constante de MODULE : un `?? {}` littéral rendrait un objet neuf
+ * à chaque rendu et invaliderait la mémoïsation de la table de contrôle qu'il alimente.
+ */
+const EMPTY_CONTROLLERS: Record<string, number | null> = {};
+
 export default function Board({
   units,
   loadEpoch,
@@ -1569,14 +1576,15 @@ export default function Board({
   // mappe sur les hexes d'objectif de la config STATIQUE (objective_zones), toujours présente —
   // contrairement à game_state.objectives, que l'API omet sur les réponses post-action (c'est
   // exactement cette omission qui vidait les couleurs du terrain).
-  const backendObjectiveControllers = useMemo<Record<string, number | null>>(
-    () =>
-      (gameState as unknown as { objective_controllers?: Record<string, number | null> } | null)
-        ?.objective_controllers ?? {},
-    [gameState]
-  );
+  // La dépendance porte sur le CHAMP, pas sur `gameState` : chaque réponse API rend un objet
+  // `gameState` neuf, et s'y accrocher reconstruirait les ~10 500 entrées de la table à chaque
+  // action alors que le contrôle ne change qu'une poignée de fois par partie. `EMPTY_CONTROLLERS`
+  // est une constante de module pour la même raison — un `?? {}` littéral casse la mémoïsation.
+  const backendObjectiveControllers =
+    (gameState as unknown as { objective_controllers?: Record<string, number | null> } | null)
+      ?.objective_controllers ?? EMPTY_CONTROLLERS;
   // Mémoïsée : ~10 500 entrées sur terrain-mc1, et l'effet de dessin se réexécute à cadence de
-  // souris. La reconstruire à chaque rendu coûtait 13,1 ms et ~1 Mo jetés (pression GC pendant un
+  // souris. La reconstruire à chaque rendu coûtait 1,96 ms et ~1 Mo jetés (pression GC pendant un
   // glisser). En replay, l'instantané pré-calculé du step.log REMPLACE la table.
   const objectiveControl = useMemo<ObjectiveControlTable>(
     () =>
@@ -1590,11 +1598,29 @@ export default function Board({
   );
   // Empreinte de géométrie des zones : O(sous-hex), donc mémoïsée sur la référence du tableau —
   // elle ne change qu'au chargement d'un plateau ou d'un épisode de replay. Elle est indispensable
-  // à bcKey : sans elle, deux plateaux aux zones différentes mais de mêmes identifiants
-  // réutiliseraient le calque statique l'un de l'autre.
+  // à bcKey : sans elle, deux plateaux aux zones différentes mais de mêmes identifiants (ou de
+  // mêmes hexes et de formes différentes) réutiliseraient le calque statique l'un de l'autre.
   const objectiveZonesGeomKey = useMemo(
     () => objectiveZonesGeometryKey(effectiveObjectiveZones ?? []),
     [effectiveObjectiveZones]
+  );
+  // Composante `oc` de `bcKey` (invalidation du calque statique PIXI, cf. boardRedrawDecision).
+  // Hissée hors de l'effet de dessin : celui-ci ne dépend plus que de la chaîne de 5 valeurs, pas
+  // des trois entrées qui la produisent. En replay, l'override REMPLACE la table et l'instantané
+  // `objective_controllers` ne décrit plus ce qui est dessiné — d'où le `null`.
+  const objectiveControlKeyForBoard = useMemo(
+    () =>
+      objectiveControlKey(
+        effectiveObjectiveZones ?? [],
+        objectiveControl,
+        objectiveControlOverride !== undefined ? null : backendObjectiveControllers
+      ),
+    [
+      effectiveObjectiveZones,
+      objectiveControl,
+      objectiveControlOverride,
+      backendObjectiveControllers,
+    ]
   );
   // LoS cone terrain data (rule 13.10), extracted once from the static board terrain_zones (subhex,
   // same grid as wall_hexes). obscuring → sight-line blockers ; all zones → cover classification.
@@ -9550,35 +9576,17 @@ export default function Board({
     const unitsChanged = unitsFingerprint !== unitsFingerprintRef.current;
 
     // Reuse cached static board layers when the board config and objective control haven't changed.
-    // La clé de contrôle est en O(zones) : toutes les entrées d'une zone portent la même valeur et
-    // le rendu n'en lit qu'un hex échantillon, donc la sérialiser entière (10 500 entrées triées,
-    // 20,8 ms/rendu) distinguait CINQ valeurs. Équivalence verrouillée par objectiveControlKey.test.
-    // La géométrie des zones, elle, sort de la clé mémoïsée `objectiveZonesGeomKey` (cf. `oz` plus
-    // bas) — l'ancienne clé la portait par accident, en sérialisant toutes les coordonnées.
-    const objControlKey = objectiveControlKey(
-      effectiveObjectiveZones ?? [],
-      objectiveControl,
-      objectiveControlOverride !== undefined ? null : backendObjectiveControllers
-    );
-    const zonesKey = (boardConfigWithOverrides.objective_zones ?? [])
-      .map((z) => `${z.id}:${(z as { shape?: string }).shape ?? "hexes"}`)
-      .join(",");
+    // `oc` (contrôle) et `oz` (identifiants, formes et coordonnées des zones) sont mémoïsées hors
+    // de cet effet : elles ne dépendent ni de la souris ni des previews, cf. leur définition.
     // lvl/ofl ne font PLUS partie de la clé : les contours d'étage (dépendants du niveau et de
     // l'occupation) sont désormais dessinés dynamiquement dans highlightContainer, plus dans le
     // plateau statique. Changer de niveau ne reconstruit donc plus le plateau (contours instantanés).
     // Les murs sont dessinés dans le plateau statique (cachedWalls) : sans eux dans la clé, deux
     // boards de mêmes dimensions mais aux murs différents (replay : épisode N → N+1) réutilisent
     // le container de murs du précédent → murs fantômes à l'écran.
-    const wallsFp = (() => {
-      const hexes = boardConfigWithOverrides.wall_hexes ?? [];
-      let h = 5381 >>> 0;
-      for (const [c, r] of hexes) {
-        h = Math.imul(33, h) ^ c;
-        h = Math.imul(33, h) ^ r;
-      }
-      return `${hexes.length}:${(h | 0) >>> 0}`;
-    })();
-    const bcKey = `${boardConfigWithOverrides.cols}x${boardConfigWithOverrides.rows}|oc:${objControlKey}|oz:${zonesKey}/${objectiveZonesGeomKey}|w:${wallsFp}|dep:${phase === "deployment" ? 1 : 0}`;
+    const wallHexes = boardConfigWithOverrides.wall_hexes ?? [];
+    const wallsFp = `${wallHexes.length}:${hashHexList(wallHexes)}`;
+    const bcKey = `${boardConfigWithOverrides.cols}x${boardConfigWithOverrides.rows}|oc:${objectiveControlKeyForBoard}|oz:${objectiveZonesGeomKey}|w:${wallsFp}|dep:${phase === "deployment" ? 1 : 0}`;
     const canReuseStatic =
       staticBoardConfigKeyRef.current === bcKey && staticBoardRef.current !== null;
 
@@ -11605,9 +11613,9 @@ export default function Board({
     blinkingLosOverviewUnitId,
     objectiveControlOverride,
     objectiveControl,
-    backendObjectiveControllers,
-    effectiveObjectiveZones,
+    objectiveControlKeyForBoard,
     objectiveZonesGeomKey,
+    effectiveObjectiveZones,
     squadMovePlan,
     fleePreviewUnitId,
     squadMoveModelPoolRef,

@@ -9,9 +9,10 @@
  * POURQUOI CE MODULE EXISTE — deux raisons, une de coût et une de sûreté.
  *
  * 1. COÛT. Sur `terrain-mc1`, cinq zones rasterisées font ~10 500 entrées. L'effet de dessin de
- *    `BoardPvp` se réexécute à cadence de souris (survol, glisser). Reconstruire la table à chaque
- *    rendu coûtait 13,1 ms et ~1 Mo jetés ; sérialiser ses 10 500 entrées triées pour en faire une
- *    clé en coûtait 20,8 ms de plus, pour distinguer CINQ valeurs — une par zone.
+ *    `BoardPvp` se réexécute à cadence de souris (survol, glisser). MESURÉ (vite-node, moyenne sur
+ *    200 à 20 000 itérations) : reconstruire la table à chaque rendu coûtait 1,96 ms et ~1 Mo
+ *    jetés, sérialiser ses entrées triées pour en faire une clé 4,31 ms de plus — 6,40 ms par
+ *    rendu, pour distinguer CINQ valeurs, une par zone. La clé ci-dessous : 0,001 ms.
  *
  * 2. SÛRETÉ. La clé entre dans `bcKey`, qui décide si le calque PIXI STATIQUE est reconstruit — et
  *    la couleur de contrôle des objectifs vit dans ce calque (cf. `boardRedrawDecision.ts`). Une
@@ -38,6 +39,8 @@ export type ObjectiveZoneHex = [number, number] | { col: number; row: number };
 export interface ObjectiveZoneLike {
   id: string | number;
   hexes: ObjectiveZoneHex[];
+  /** Tracé de la zone (`"polygon"`, `"rect"`, absent = union d'hexes) — entre dans la géométrie. */
+  shape?: string;
 }
 
 /** Clé de table d'un sous-hex — `"col,row"`, l'unique forme lue par le rendu. */
@@ -116,7 +119,23 @@ export function objectiveControlKey(
 }
 
 /**
- * Empreinte de la GÉOMÉTRIE des zones (djb2 sur les coordonnées, comme `wallsFp` pour les murs).
+ * djb2 sur une liste de sous-hex — le hachage de `bcKey` pour toute géométrie volumineuse (zones
+ * d'objectif, murs). Rend le hachage BRUT : l'appelant y ajoute le nombre d'éléments, sans quoi
+ * deux listes de longueurs différentes pourraient se confondre.
+ */
+export function hashHexList(hexes: readonly ObjectiveZoneHex[], seed = 5381 >>> 0): number {
+  let hash = seed;
+  for (const hex of hexes) {
+    const col = Array.isArray(hex) ? Number(hex[0]) : Number(hex.col);
+    const row = Array.isArray(hex) ? Number(hex[1]) : Number(hex.row);
+    hash = Math.imul(33, hash) ^ col;
+    hash = Math.imul(33, hash) ^ row;
+  }
+  return (hash | 0) >>> 0;
+}
+
+/**
+ * Empreinte de la GÉOMÉTRIE des zones : identifiant, forme et coordonnées de chacune.
  *
  * Sans elle, deux plateaux aux zones différentes mais de mêmes identifiants réutiliseraient le
  * calque statique de l'un pour l'autre (replay : épisode N → N+1) — la clé exhaustive remplacée
@@ -128,16 +147,13 @@ export function objectiveZonesGeometryKey(zones: readonly ObjectiveZoneLike[]): 
   let hash = 5381 >>> 0;
   let count = 0;
   for (const zone of zones) {
-    for (const ch of String(zone.id)) {
+    // `shape` gouverne le tracé de la zone (polygone, rectangle, union d'hexes) : deux zones de
+    // mêmes hexes mais de formes différentes ne se dessinent pas pareil.
+    for (const ch of `${zone.id}:${zone.shape ?? "hexes"}`) {
       hash = Math.imul(33, hash) ^ ch.charCodeAt(0);
     }
-    for (const hex of zone.hexes) {
-      const col = Array.isArray(hex) ? Number(hex[0]) : Number(hex.col);
-      const row = Array.isArray(hex) ? Number(hex[1]) : Number(hex.row);
-      hash = Math.imul(33, hash) ^ col;
-      hash = Math.imul(33, hash) ^ row;
-      count += 1;
-    }
+    hash = hashHexList(zone.hexes, hash);
+    count += zone.hexes.length;
   }
-  return `${zones.length}:${count}:${(hash | 0) >>> 0}`;
+  return `${zones.length}:${count}:${hash}`;
 }
