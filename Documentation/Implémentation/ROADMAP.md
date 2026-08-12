@@ -146,14 +146,24 @@
   CONTRAINTE TENUE : la clé gouverne `bcKey` → `canReuseStatic` → l'invalidation du calque statique,
   et une clé qui rate un changement de contrôle réintroduirait le défaut livré plus haut (objectif
   capturé jamais bleu). L'équivalence avec la clé exhaustive est verrouillée par
-  `objectiveControlKey.test.ts` (6 tests, comparaison paire à paire sur 7 instantanés successifs),
-  dont trois verrous prouvés ROUGES par mutation. Deux pièges nommés et couverts : l'override de
+  `objectiveControlKey.test.ts` (7 tests, comparaison paire à paire sur 7 instantanés successifs),
+  dont quatre verrous prouvés ROUGES par mutation. Deux pièges nommés et couverts : l'override de
   replay REMPLACE la table (la clé lit la table effective, jamais le `gameState`), et la géométrie
   des zones — que l'ancienne clé portait par accident — passe dans une empreinte djb2 mémoïsée,
   sans quoi deux épisodes de replay aux zones différentes se partageraient le calque statique.
+  PASSE `/simplify` le même jour : la clé `oc` sort à son tour de l'effet de dessin (mémoïsée), la
+  clé `zonesKey` (identifiants + formes, une boucle par rendu) fusionne dans l'empreinte de
+  géométrie, le djb2 est mutualisé avec celui des murs, et `BoardDisplay` appelle désormais
+  l'échantillonneur du module à ses deux sites — l'invariant « la clé lit le même hex que le
+  rendu » devient structurel au lieu d'être documenté.
   ÉCARTÉ, à arbitrer séparément : scinder `bcKey` en clé de géométrie et clé de contrôle pour ne
-  plus reconstruire fond et murs à chaque capture d'objectif.
+  plus reconstruire fond et murs à chaque capture d'objectif ; sortir tout `bcKey` dans
+  `boardRedrawDecision.ts`, à côté de l'invariant qu'il alimente.
   RESTE : la validation navigateur (une capture d'objectif doit toujours recolorer la zone).
+  SIGNALÉ, NON TRAITÉ (même motif, hors périmètre de clôture — un prompt de chantier existe) :
+  `BoardWithAPI.tsx:581` recopie les ~10 500 hexes d'objectif à chaque rendu, `BoardPvp.tsx:9290`
+  les aplatit dans l'effet de dessin, `BoardPvp.tsx:11253` rebâtit un `Set` de ~1 000 murs par
+  rendu pendant le glisser de déploiement.
 
 - ✅ **PvE se figeait — cause identifiée et corrigée** (2026-08-11). Le symptôme était rapporté
   « en phase de mouvement » ; la mesure a montré la phase de **déploiement**, sur des unités
