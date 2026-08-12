@@ -1509,7 +1509,8 @@ def _preview_shoot_valid_targets(
     #     scénario (`w40k_core`), jamais pendant une action ;
     #   - `_obscuring_area_sets_cache` : RÉ-ASSIGNÉ (`game_state[...] = out`, construit dans un
     #     local), jamais muté en place — une reconstruction sur la copie ne touche pas l'original ;
-    #   - `_objective_hex_zones_cache` : idem, ré-assigné en bloc `(objectifs, zones)`.
+    #   - `_objective_hex_zones_cache` : idem, ré-assigné en bloc — le triplet
+    #     `(objectifs, zones, union)` est reconstruit entier, jamais modifié en place.
     # MESURÉ sur le scénario d'entraînement : 124,5 ms → 54,4 ms de deepcopy, soit 70 ms rendus
     # par aperçu.
     #

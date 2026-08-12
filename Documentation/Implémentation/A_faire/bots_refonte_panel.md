@@ -707,14 +707,71 @@ corrige : un gros socle au bord tenait la zone pour le moteur mais pas pour le b
 une escouade de plus ; une escouade choquée fabriquait à l'inverse un surplus **fantôme** et faisait
 déserter une zone que le camp ne tenait pas.
 
-Le surplus est désormais **dérivé** du décompte du moteur, qui reçoit un `exclude_unit_id` pour
-retirer l'escouade qui décide. Il n'y a donc plus deux comptages de contrôle à garder en phase —
-c'était le motif ancre-contre-par-figurine, déjà payé plusieurs fois dans ce dépôt.
+Le surplus est désormais **dérivé** du décompte du moteur : celui-ci rend les contributions par
+escouade, et le bot écarte la sienne par un filtre. Il n'y a donc plus deux comptages de contrôle
+à garder en phase — c'était le motif ancre-contre-par-figurine, déjà payé plusieurs fois dans ce
+dépôt. (Une version intermédiaire de ce §12.6 faisait passer un `exclude_unit_id` au moteur ;
+c'est ce qu'a corrigé la décomposition décrite plus bas.)
 
-Coût **mesuré** (10 escouades × 5 figurines, 5 zones, 2000 appels) : **0,046 ms par décision**,
-contre 0,02 ms pour le comptage maison — un doublement, sur un poste qui pesait 0,2 % du temps de
-run. Le calcul est fait une fois par décision, pas par candidate, et le moteur paie déjà la même
-passe à chaque step pour l'observation.
+Coût **mesuré** (10 escouades × 5 figurines, 5 zones) : **0,043 ms par décision**, contre 0,014 ms
+pour le comptage maison. Le calcul est fait une fois par DÉCISION, pas par candidate — à comparer
+aux **2,88 ms** que coûte la boucle de score qui l'entoure (458 candidates × 25 ancres ennemies) :
+le surcoût introduit vaut **1 % de la décision**.
+
+⚠️ Ne PAS écrire, comme une première version de cette section le faisait, que « le moteur paie déjà
+la même passe à chaque step pour l'observation ». C'est faux : `ObservationBuilder`
+`_squad_objective_control` relit `objective_controllers`, l'état persistant, et n'appelle jamais
+`sum_objective_control_oc_multi`. Ses appelants réels sont `calculate_objective_control` (aux
+frontières de phase), le wrapper mono-zone, et ce surplus.
+
+**Deux suites données le même jour, sur décision de l'utilisateur.**
+
+*Le décompte de contrôle, moitié moins cher.* Le temps partait dans le générateur d'empreintes,
+alors qu'à `inches_to_subhex == 1` tous les socles sont normalisés en `round`/1 et que l'empreinte
+y vaut toujours l'ancre. Trois changements : `iter_living_model_footprints` rend `{(col, row)}`
+directement dans ce cas, les conversions d'ancre ne sont plus faites deux fois, et une empreinte
+disjointe de l'UNION des zones saute la boucle par zone (filtre exact : disjoint de l'union ⇒
+disjoint de chacune).
+
+Mesuré **entrelacé** (round-robin, même processus, résultats assertés identiques), sur cinq zones
+de **2000 hexes** — la taille réelle du scénario d'entraînement : **−51 %** à 12 escouades × 6
+figurines, **−62 %** à 20 × 10.
+
+⚠️ **DEUX PIÈGES DE MESURE, tous deux tombés dedans le 2026-08-12 avant d'être rattrapés.**
+1. *Mesurer en deux processus séquentiels.* La dérive atteint ±40 % sur cette machine ; une
+   première mesure ainsi obtenue annonçait −42 % pour le seul générateur là où l'entrelacé rend
+   −41 à −46 %. Toute mesure de ce poste doit être entrelacée.
+2. *Mesurer sur des zones jouets.* Le pré-filtre a d'abord été validé sur des zones de 9 hexes, où
+   reconstruire l'union à chaque appel semblait gagner 29 %. Aux 2000 hexes réels, la même
+   reconstruction coûte **+625 %** — six fois le coût qu'elle prétend éviter. C'est la mémoïsation
+   de l'union (`objective_hexes_union`) qui rend le filtre payant, et elle seule.
+
+Le gain porte aussi sur `calculate_objective_control` et `unit_is_within_objective`, qui
+consomment le même générateur.
+⚠️ **Un défaut du moteur a été trouvé en chemin, et corrigé** (arbitrage tranché par l'utilisateur).
+`socle_is_single_hex`, qui se déclare source unique du prédicat « ce socle tient-il dans une
+case ? », rendait `True` pour un `round` de taille NON SCALAIRE — état que le validateur de
+datasheet refuse et sur lequel le calcul d'empreinte LÈVE (mesuré sur 1 344 couples forme/taille).
+Il affirmait donc « une seule case » exactement là où le calcul refuse de répondre. C'était le
+résidu du prédicat naïf `not isinstance(base_size, int)` que ce dépôt avait déjà corrigé deux fois
+ailleurs, et il vivait dans la fonction censée l'avoir remplacé. La forme tranche maintenant
+d'abord, puis la taille, qui doit être scalaire. Le prédicat reste volontairement CONSERVATEUR
+dans l'autre sens (`round`/2 et `square`/1 sont classés multi-hexes alors que leur empreinte est
+l'ancre) : un « non » de trop ne coûte qu'un calcul, un « oui » de trop fait sauter tous les
+contrôles de mur et de chevauchement du masque de mouvement.
+La variante « carte plate cellule → index de zone » a été mesurée et REJETÉE (aucun gain,
+régression à 20 escouades).
+
+*La décomposition par escouade.* `objective_control_contributions` devient la source unique du
+comptage et rend `{escouade: (joueur, [OC par zone])}` ; le pli qui ramène ces parts à `(OC1, OC2)`
+par zone est lui aussi exposé (`fold_control_contributions`), et `sum_objective_control_oc_multi`
+n'est plus que la composition des deux. Sans ce pli partagé, chaque appelant réécrivait sa double
+boucle d'agrégation — la série des contrefactuels aurait changé de nature au lieu de se fermer. Le `exclude_unit_id` ajouté plus haut dans ce §12.6 **disparaît** : il faisait
+porter une question HYPOTHÉTIQUE de l'IA (« qui tiendrait quoi si je n'étais pas là ») à la
+fonction qui énonce la RÈGLE, et le contrefactuel suivant — « sans mes escouades condamnées », « si
+je me posais ici » — aurait ajouté son paramètre à son tour. Le surplus compose maintenant son
+exclusion par arithmétique. Coût : nul à la mesure (0,034 ms pour les contributions contre 0,037 ms
+pour la somme complète).
 
 **c) Le câblage est enfin testé par l'entrée publique.** Aucun test n'instanciait de bot de
 doctrine : tout s'arrêtait aux fonctions privées, et trois décisions n'étaient couvertes par rien

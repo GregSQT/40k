@@ -1543,8 +1543,28 @@ def socle_is_single_hex(base_shape: str, base_size: "int | Sequence[int]") -> bo
     Un socle NON ROND est toujours multi-hex : son ``BASE_SIZE`` est une PAIRE, si bien que le
     prédicat naïf ``not isinstance(base_size, int)`` — écrit deux fois dans le move — le classait
     à tort mono-hex. C'est la forme, pas le type de la taille, qui tranche.
+
+    Une taille de socle ROND est scalaire (``require_scalar_base_size`` refuse tout le reste) : une
+    paire y est un état FAUX et doit le rester. La branche ``not isinstance(base_size, int) or …``
+    qui survivait ici rendait ``True`` dans ce cas — donc « ce socle tient dans une case » là où
+    ``compute_occupied_hexes`` LÈVE, et un appelant qui l'aurait crue aurait transformé un état
+    corrompu en empreinte plausible (mesuré le 2026-08-12 sur 1 344 couples forme/taille).
+
+    ⚠️ CE PRÉDICAT N'EST PAS EXACT, ET NE PEUT PAS L'ÊTRE À CETTE SIGNATURE. Il rend ``False`` pour
+    ``round``/2, ``square``/1 ou ``oval``/[2, 1], dont l'empreinte est pourtant l'ancre seule — 33
+    couples sont dans ce cas. L'exactitude n'est pas une fonction de ``(forme, taille)`` : un
+    ``oval``/[1, 3] n'occupe une seule case qu'aux orientations 1, 3 et 5, et un ``oval``/[3, 1]
+    qu'aux orientations 0, 2 et 4. Il faudrait donc un paramètre ``orientation``, et il serait
+    TOXIQUE là où ce prédicat compte : ``movement_handlers`` l'appelle avec l'orientation EN COURS
+    d'un pivot à la molette non committé, si bien que le chemin rapide basculerait pendant que le
+    joueur tourne la molette. La forme exacte est de toute façon
+    ``len(precompute_footprint_offsets(...)[0]) == 1``, c'est-à-dire le calcul que le prédicat sert
+    à éviter. Le conservatisme est donc la réponse, pas un pis-aller : un ``False`` de trop ne
+    coûte qu'un calcul d'empreinte, un ``True`` de trop fait sauter tous les contrôles.
+    Aucun de ces 33 couples n'est d'ailleurs atteignable : les ``BASE_SIZE`` du roster sont ≥ 10,
+    et ``_scale_socle`` normalise tout en ``round``/1 dès ``inches_to_subhex <= 1``.
     """
-    return base_shape == "round" and (not isinstance(base_size, int) or base_size <= 1)
+    return base_shape == "round" and isinstance(base_size, int) and base_size <= 1
 
 
 def precompute_footprint_offsets(

@@ -3,7 +3,7 @@
 game_state.py - Game state initialization and management
 """
 
-from typing import Dict, Iterator, List, Any, Optional, Tuple, Set
+from typing import Dict, FrozenSet, Iterable, Iterator, List, Any, Optional, Tuple, Set
 import copy
 import json
 import math
@@ -3497,7 +3497,7 @@ def iter_living_model_footprints(
 
     Les figurines mortes (absentes de ``models_cache`` ou HP_CUR <= 0) sont ignorees.
     """
-    from engine.hex_utils import compute_occupied_hexes
+    from engine.hex_utils import compute_occupied_hexes, socle_is_single_hex
 
     units_cache = require_key(game_state, "units_cache")
     models_cache = require_key(game_state, "models_cache")
@@ -3514,7 +3514,9 @@ def iter_living_model_footprints(
         # déploiement. Elle n'occupe AUCUNE case, donc ne contrôle aucun objectif (14.02) —
         # jumeau de la garde de `_compute_unit_occupied_hexes`, ici sur le chemin par-figurine
         # qui appelle `compute_occupied_hexes` directement.
-        if int(model["col"]) < 0 or int(model["row"]) < 0:
+        col = int(model["col"])
+        row = int(model["row"])
+        if col < 0 or row < 0:
             continue
         # ORIENTATION PAR FIGURINE, defaut = celle de l escouade. Meme lecture que
         # `shared_utils._recompute_squad_occupied_hexes`, qui ecrit les empreintes de reference
@@ -3525,19 +3527,32 @@ def iter_living_model_footprints(
         # effet sur un socle rond (l orientation n y change rien), d ou l absence de symptome
         # jusqu ici. `get` et non `require_key` : les etats anterieurs au pivot par figurine
         # n ont pas la cle, et l orientation d escouade EST leur valeur.
+        base_shape = model["BASE_SHAPE"]
+        base_size = model["BASE_SIZE"]
+        # CHEMIN RAPIDE MONO-HEXE (2026-08-12). A `inches_to_subhex == 1` — le plateau
+        # d'entrainement — `_scale_socle` normalise TOUS les socles en `round` de taille 1, et
+        # l'empreinte y vaut toujours l'ancre. Mesure ENTRELACEE (round-robin, min sur 25 tours ;
+        # une mesure sequentielle avant/apres derive de ±40 % sur cette machine et rend un
+        # classement faux) : **-35 % a -39 %** sur ce generateur, a toutes les echelles testees.
+        # Le gain porte aussi sur `calculate_objective_control` et `unit_is_within_objective`.
+        #
+        # ⚠️ QUATRIEME COPIE DU RACCOURCI, pas du predicat. Le predicat, lui, a une source unique
+        # (`socle_is_single_hex`, corrige le meme jour pour pouvoir servir ici) ; le raccourci
+        # « empreinte = ancre » est ecrit aussi a `movement_handlers.py:4074` et `:4317`, et sous
+        # une forme volontairement differente a `deployment_handlers.py:240`. Toute 5e occurrence
+        # doit etre relue avec ces quatre-la sous les yeux.
+        if socle_is_single_hex(base_shape, base_size):
+            yield {(col, row)}
+            continue
         orientation = int(model.get("orientation", squad_orientation))
-        yield compute_occupied_hexes(
-            int(model["col"]),
-            int(model["row"]),
-            model["BASE_SHAPE"],
-            model["BASE_SIZE"],
-            orientation,
-        )
+        yield compute_occupied_hexes(col, row, base_shape, base_size, orientation)
 
 
-#: Cle du cache des zones d'objectif (cf. `objective_hex_zones`). Valeur : `(objectifs, zones)`,
-#: ou le premier element est la liste SOURCE, comparee par identite — remplacer `objectives`
-#: invalide donc le cache sans aucun code d'invalidation.
+#: Cle du cache des zones d'objectif (cf. `objective_hex_zones`). Valeur : le TRIPLET
+#: `(objectifs, zones, union)`, ou le premier element est la liste SOURCE, comparee par identite —
+#: remplacer `objectives` invalide donc le cache sans aucun code d'invalidation. Le troisieme est
+#: l'union de toutes les zones (`objective_hexes_union`), memoisee AVEC elles parce que la
+#: reconstruire par appel coute six fois ce qu'elle fait gagner.
 _OBJECTIVE_ZONES_CACHE_KEY = "_objective_hex_zones_cache"
 
 
@@ -3602,7 +3617,19 @@ def objective_hex_zones(game_state: Dict[str, Any]) -> List[Tuple[Any, Set[Tuple
     # mode de defaillance qu'un cache invalide a la main introduit.
     #
     # ⚠️ Les ensembles rendus sont PARTAGES entre appelants : les muter empoisonnerait le cache.
-    # Tous les consommateurs les lisent (`isdisjoint`, `in`) ; aucun n'y ecrit.
+    # Tous les consommateurs les lisent (`isdisjoint`, `in`) ; aucun n'y ecrit (verifie par grep).
+    #
+    # ⚠️ DEPUIS LE 2026-08-12, MUTER UNE ZONE COUTE PLUS CHER QU'AVANT. L'union memoisee (3e
+    # element du triplet) en est DERIVEE, sans lien d'invalidation : une zone mutee laisserait
+    # l'union en arriere, et le pre-filtre de `objective_control_contributions` ecarterait alors
+    # des figurines REELLEMENT dans la zone — du controle perdu en silence, exactement la faute
+    # pour laquelle le pre-filtre par union d'escouade a ete refuse. Avant, une telle mutation
+    # restait au moins auto-coherente.
+    # LE GEL EN `frozenset`, qui rendrait l'invariant STRUCTUREL, a ete tente puis ECARTE le meme
+    # jour : le type se propage a `objective_distance` et `fight_handlers`, deux modules etrangers
+    # a ce chantier (7 erreurs de typage). L'invariant reste donc porte par ce commentaire — mais
+    # il n'est plus une precaution de style, et toute future mutation de zone doit reconstruire
+    # l'union dans le meme geste.
     cached = game_state.get(_OBJECTIVE_ZONES_CACHE_KEY)  # get allowed : absence = 1er appel
     if cached is not None and cached[0] is objectives:
         return cached[1]
@@ -3630,8 +3657,37 @@ def objective_hex_zones(game_state: Dict[str, Any]) -> List[Tuple[Any, Set[Tuple
                 f"an objective with no hex cannot be controlled by anyone."
             )
         zones.append((require_key(objective, "id"), zone))
-    game_state[_OBJECTIVE_ZONES_CACHE_KEY] = (objectives, zones)
+    game_state[_OBJECTIVE_ZONES_CACHE_KEY] = (
+        objectives, zones, frozenset().union(*(z for _id, z in zones)),
+    )
     return zones
+
+
+def objective_hexes_union(game_state: Dict[str, Any]) -> "frozenset[Tuple[int, int]]":
+    """Union de TOUTES les zones d objectif — memoisee avec elles, jamais reconstruite.
+
+    Sert de PRE-FILTRE exact : une empreinte disjointe de l union est disjointe de chaque zone,
+    donc l ecarter ne peut rien perdre. Reconstruire l union a chaque appel, en revanche, coute
+    beaucoup plus que le filtre ne rapporte — mesure entrelacee sur des zones de la taille REELLE
+    du scenario d entrainement (1730 a 3000 hexes chacune, cf. `objective_hex_zones`) :
+
+        zones de 2000 hexes, 12 escouades x 6 figurines
+          sans filtre                  0,042 ms
+          filtre, union par appel      0,303 ms   (+625 %)
+          filtre, union memoisee       0,028 ms   (-32 %)
+
+    ⚠️ MESURER CE FILTRE SUR DES ZONES JOUETS DONNE LE VERDICT INVERSE : a 9 hexes par zone, la
+    reconstruction par appel semble gagner 29 %. C est l erreur qui a ete commise le 2026-08-12 et
+    rattrapee en review. Toute mesure de ce poste se fait aux tailles de zone du scenario reel.
+
+    ``frozenset`` et non ``set`` : l union est partagee entre appelants comme les zones elles-memes
+    (cf. l avertissement de `objective_hex_zones`), et le type interdit ici la mutation qui
+    empoisonnerait le cache.
+    """
+    if not game_state.get("objectives"):  # get allowed : scenario sans objectif
+        return frozenset()
+    objective_hex_zones(game_state)  # peuple le cache si besoin
+    return game_state[_OBJECTIVE_ZONES_CACHE_KEY][2]
 
 
 #: Gain de Core CP de l'étape 08.02, en dur : « Both players gain 1 Command Point ». Ce n'est
@@ -3742,40 +3798,66 @@ def unit_is_within_objective(
     return False
 
 
-def sum_objective_control_oc_multi(
-    game_state: Dict[str, Any],
-    hex_sets: List[Set[Tuple[int, int]]],
-    exclude_unit_id: Optional[Any] = None,
-) -> List[Tuple[int, int]]:
-    """Version multi-zones de ``sum_objective_control_oc`` : UNE passe pour N objectifs.
+def objective_control_contributions(
+    game_state: Dict[str, Any], hex_sets: List[Set[Tuple[int, int]]]
+) -> Dict[str, Tuple[int, List[int]]]:
+    """Ce que CHAQUE escouade apporte au controle : ``{unit_id: (joueur, [OC par zone])}``.
 
-    ``exclude_unit_id`` retire UNE escouade du decompte, comme si elle n etait pas sur la table.
-    Seul appelant : le surplus d encombrement des doctrines de bot (``_surplus_oc_by_zone``), qui
-    doit repondre « qu est-ce que mes ALLIES tiennent deja, sans moi ? » — une escouade qui se
-    compte elle-meme se voit comme un encombrement et quitte la zone qu elle tient. Ce parametre
-    existe pour qu il n y ait QU UN comptage de controle dans le depot : la version precedente
-    reimplementait la question a cote (hexe-centre au lieu de l empreinte de socle, sans la regle
-    01.07), et divergeait donc du controle reel dans les deux cas.
+    SOURCE UNIQUE du comptage de controle (14.02). ``sum_objective_control_oc_multi`` n en est
+    plus que l addition, et tout appelant qui a besoin d une variante — « sans telle escouade »,
+    « qui apporte quoi » — la compose ICI, par arithmetique, sans recompter une presence.
 
-    Chaque empreinte de figurine est calculee une seule fois puis testee contre les N zones,
-    au lieu d etre recalculee par zone (``compute_occupied_hexes`` rescanne un carre de cases,
-    c est le poste dominant quand l observation evalue les 5 objectifs a chaque step).
+    ⚠️ POURQUOI CETTE FORME, et non un parametre d exclusion sur la somme (arbitrage tranche le
+    2026-08-12). Le surplus d encombrement des bots doit repondre « qu est-ce que mes ALLIES
+    tiennent deja, SANS moi ? » — une escouade qui se compte elle-meme se voit comme un
+    encombrement et quitte la zone qu elle tient. La premiere version reimplementait la question a
+    cote (hexe-centre au lieu de l empreinte de socle, sans la regle 01.07) et divergeait du
+    controle reel dans les deux sens ; la deuxieme a ajoute un ``exclude_unit_id`` a la fonction
+    qui enonce la REGLE, ce qui lui faisait porter une question HYPOTHETIQUE de l IA. Le prochain
+    contrefactuel (« sans mes escouades condamnees », « si je me posais la ») aurait ajoute son
+    parametre a son tour. Exposer les contributions ferme la serie : le moteur dit qui apporte
+    quoi, l appelant compose ce qu il veut, et il n y a toujours qu un seul comptage.
 
-    Un pre-filtre par union d escouade (``units_cache[uid]["occupied_hexes"]``) a ete envisage
-    puis ECARTE : sur un plateau ``engagement_zone <= 1``, ``_compute_unit_occupied_hexes``
-    reduit l occupation a UNE case par figurine, alors que le controle d objectif teste
-    l empreinte complete — l union n y est donc pas un sur-ensemble et le filtre perdrait du
-    controle en silence. Seule la mutualisation des empreintes (exacte) est conservee.
+    Une escouade qui n apporte rien (battle-shocked 01.07, OC nul, aucune figurine dans aucune
+    zone) est ABSENTE du dictionnaire : « ne rien apporter » et « ne pas figurer » sont la meme
+    chose pour tous les appelants, et l addition comme la soustraction s en accommodent.
+
+    Chaque empreinte de figurine est calculee une seule fois puis testee contre les N zones, au
+    lieu d etre recalculee par zone. ``compute_occupied_hexes`` ne balaie rien : il translate des
+    offsets memoises par ``precompute_footprint_offsets``. Le poste dominant MESURE est le
+    generateur d empreintes lui-meme.
+
+    DEUX pre-filtres, l un pris et l autre ECARTE, et la difference tient a l exactitude :
+      - PRIS : l union des zones (``objective_hexes_union``, MEMOISEE — la construire par appel
+        coute six fois ce qu elle rapporte, cf. son docstring). Une empreinte disjointe de l union
+        est disjointe de chaque zone, donc ce filtre ne peut rien perdre. Mesure : -32 a -37 %,
+        stable de 9 a 2000 hexes par zone.
+      - ECARTE : l union d escouade (``units_cache[uid]["occupied_hexes"]``). Sur un plateau
+        ``engagement_zone <= 1``, ``_compute_unit_occupied_hexes`` reduit l occupation a UNE case
+        par figurine alors que le controle teste l empreinte complete — cette union-la n est pas un
+        sur-ensemble et le filtre perdrait du controle EN SILENCE.
+
+    ⚠️ ``hex_sets`` est ARBITRAIRE : rien n oblige un appelant a passer les zones de l etat, et le
+    wrapper mono-zone ne le fait pas. Le pre-filtre n est donc applique QUE si les ensembles recus
+    sont exactement ceux du cache (comparaison par identite, 5 tests) ; sinon il est desactive,
+    parce que l union memoisee ne decrirait pas ces zones-la. Filtrer sur la mauvaise union
+    perdrait du controle en silence — le defaut meme que le second pre-filtre s est vu refuser.
     """
     units_cache = require_key(game_state, "units_cache")
     unit_by_id = {str(u["id"]): u for u in game_state["units"]}
+    cached_zones = game_state.get(_OBJECTIVE_ZONES_CACHE_KEY)  # get allowed : absence = 1er appel
+    zones_union: Optional[FrozenSet[Tuple[int, int]]] = None
+    if (
+        cached_zones is not None
+        and len(hex_sets) == len(cached_zones[1])
+        and all(recu is connu for recu, (_id, connu) in zip(hex_sets, cached_zones[1]))
+    ):
+        zones_union = cached_zones[2]
 
-    sums: List[List[int]] = [[0, 0] for _ in hex_sets]
-    exclude = None if exclude_unit_id is None else str(exclude_unit_id)
+    contributions: Dict[str, Tuple[int, List[int]]] = {}
     for unit_id in units_cache:
-        if exclude is not None and str(unit_id) == exclude:
-            continue
-        unit = unit_by_id.get(str(unit_id))
+        uid = str(unit_id)
+        unit = unit_by_id.get(uid)
         if not unit:
             raise KeyError(f"Unit {unit_id} missing from game_state['units']")
         # Regle 01.07 : tant qu une unite est battle-shocked, la caracteristique OC de TOUTES
@@ -3791,16 +3873,48 @@ def sum_objective_control_oc_multi(
         unit_player = int(require_key(unit, "player"))
         if unit_player not in (1, 2):
             raise ValueError(f"Unexpected unit player id: {unit_player}")
-        candidate_zones = range(len(hex_sets))
         models_in_area = [0] * len(hex_sets)
         for footprint in iter_living_model_footprints(game_state, unit_id):
-            for i in candidate_zones:
-                if not footprint.isdisjoint(hex_sets[i]):
+            if zones_union is not None and footprint.isdisjoint(zones_union):
+                continue
+            for i, zone in enumerate(hex_sets):
+                if not footprint.isdisjoint(zone):
                     models_in_area[i] += 1
-        for i in candidate_zones:
-            if models_in_area[i]:
-                sums[i][0 if unit_player == 1 else 1] += oc * models_in_area[i]
+        if any(models_in_area):
+            contributions[uid] = (unit_player, [oc * n for n in models_in_area])
+    return contributions
+
+
+def fold_control_contributions(
+    contributions: Iterable[Tuple[int, List[int]]], n_zones: int
+) -> List[Tuple[int, int]]:
+    """Replie des contributions en ``(OC joueur 1, OC joueur 2)`` par zone.
+
+    Le pli est ICI et nulle part ailleurs : ``objective_control_contributions`` rend une
+    decomposition, et chaque appelant qui la compose — la somme totale, le surplus d encombrement
+    des bots qui saute une escouade, le prochain contrefactuel — la replie avec cette fonction. Le
+    parametre est un ITERABLE de contributions et non le dictionnaire : selectionner QUI entre dans
+    le pli est l affaire de l appelant, et ca reste une comprehension d une ligne chez lui.
+    """
+    sums: List[List[int]] = [[0, 0] for _ in range(n_zones)]
+    for unit_player, par_zone in contributions:
+        camp = 0 if unit_player == 1 else 1
+        for i, oc in enumerate(par_zone):
+            sums[i][camp] += oc
     return [(p1, p2) for p1, p2 in sums]
+
+
+def sum_objective_control_oc_multi(
+    game_state: Dict[str, Any], hex_sets: List[Set[Tuple[int, int]]]
+) -> List[Tuple[int, int]]:
+    """``(OC joueur 1, OC joueur 2)`` par zone — l addition des contributions par escouade.
+
+    Toute la regle est dans ``objective_control_contributions``, tout le pli dans
+    ``fold_control_contributions`` : il ne reste ici que leur composition.
+    """
+    return fold_control_contributions(
+        objective_control_contributions(game_state, hex_sets).values(), len(hex_sets)
+    )
 
 
 # ===========================================================================================
