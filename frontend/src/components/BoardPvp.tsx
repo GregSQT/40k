@@ -33,7 +33,7 @@ import {
 } from "../utils/blinkingHPBar";
 // import { SingleShotDisplay } from './SingleShotDisplay';
 import { setupBoardClickHandler } from "../utils/boardClickHandler";
-import { canSkipBoardRedraw } from "../utils/boardRedrawDecision";
+import { planBoardRedraw } from "../utils/boardRedrawDecision";
 import { areUnitsAdjacent, cubeDistance, offsetToCube } from "../utils/gameHelpers";
 import {
   boardWorldSize,
@@ -9802,6 +9802,14 @@ export default function Board({
       fingerprintMatchStructural &&
       (fingerprintMatchMove || partialFp.movePolygonCacheKey !== null);
 
+    // UNE seule décision pour les trois gestes de ce rendu : appeler `drawBoard`, conserver le
+    // calque statique, conserver les surbrillances. Les prendre séparément laissait des
+    // conteneurs périmés VISIBLES sur le stage (contrat et défauts mesurés dans le module).
+    const redrawPlan = planBoardRedraw({
+      highlightsReusable: canReuseExistingHighlightsThroughDestroy,
+      staticLayerReusable: canReuseStatic,
+    });
+
     let savedHighlightsThroughDestroy: PIXI.Container | null = null;
     let savedFloorContourThroughDestroy: PIXI.Container | null = null;
 
@@ -9846,10 +9854,7 @@ export default function Board({
       if (savedOathOverlay?.parent) app.stage.removeChild(savedOathOverlay);
       if (savedRangeRingsOverlay?.parent) app.stage.removeChild(savedRangeRingsOverlay);
       if (savedWaaaghFangsOverlay?.parent) app.stage.removeChild(savedWaaaghFangsOverlay);
-      if (
-        canReuseExistingHighlightsThroughDestroy &&
-        highlightsLayerRef.current?.parent === app.stage
-      ) {
+      if (redrawPlan.keepHighlightLayers && highlightsLayerRef.current?.parent === app.stage) {
         savedHighlightsThroughDestroy = highlightsLayerRef.current;
         app.stage.removeChild(savedHighlightsThroughDestroy);
         // Contours d'étage : même cycle de vie que les highlights (drawBoard n'est pas rappelé ici).
@@ -9885,13 +9890,24 @@ export default function Board({
         }
       }
 
-      // Re-attach persistent containers in correct z-order
-      if (savedStatic) app.stage.addChild(savedStatic);
+      // Re-attach persistent containers in correct z-order.
+      // ⚠️ Le calque statique PÉRIMÉ n'est pas ré-attaché mais DÉTRUIT : `drawBoard` insère le
+      // neuf en index 0, donc SOUS lui (zIndex égaux, tri stable) — l'ancienne couleur d'objectif
+      // masquerait la nouvelle et les remplissages de terrain seraient doublés. Les refs sont
+      // remises à null pour qu'aucun lecteur ne tienne un conteneur détruit ; `drawBoard` les
+      // réécrit juste après.
+      if (!redrawPlan.keepStaticLayer) {
+        if (savedStatic) destroyLayerChild(savedStatic);
+        if (savedWalls) destroyLayerChild(savedWalls);
+        staticBoardRef.current = null;
+        staticWallsRef.current = null;
+      }
+      if (redrawPlan.keepStaticLayer && savedStatic) app.stage.addChild(savedStatic);
       if (savedFloorContourThroughDestroy) {
         savedFloorContourThroughDestroy.zIndex = 10;
         app.stage.addChild(savedFloorContourThroughDestroy);
       }
-      if (savedWalls) {
+      if (redrawPlan.keepStaticLayer && savedWalls) {
         // zIndex forcé ici (et pas seulement à la création) : le conteneur des murs est réutilisé
         // (staticWallsRef) ; sans ça un mur créé avant l'ajout du zIndex resterait à 0 et repasserait
         // SOUS les contours d'étage. 130 : AU-DESSUS du highlightContainer (120) qui porte le voile
@@ -9982,17 +9998,7 @@ export default function Board({
     }
 
     let drawResult: ReturnType<typeof drawBoard>;
-    // `canReuseStatic` est OBLIGATOIRE dans cette condition : ce chemin rapide n'appelle PAS
-    // `drawBoard`, donc il fige le calque statique — où vit la couleur de contrôle des objectifs.
-    // Sans lui, une capture qui ne change pas les surbrillances n'était jamais dessinée.
-    // Contrat et mesure dans `utils/boardRedrawDecision.ts`.
-    if (
-      canSkipBoardRedraw({
-        highlightsReusable: canReuseExistingHighlightsThroughDestroy,
-        staticLayerReusable: canReuseStatic,
-      }) &&
-      savedHighlightsThroughDestroy
-    ) {
+    if (!redrawPlan.callDrawBoard && savedHighlightsThroughDestroy) {
       const onlyPatchMovePolygon =
         partialFp.movePolygonCacheKey !== null &&
         (partialFp.movePolygonCacheKey ?? "") !== (lastMovePolygonCacheKeyRef.current ?? "");
