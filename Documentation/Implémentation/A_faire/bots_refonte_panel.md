@@ -393,12 +393,41 @@ non plus : il mesure la force relative, pas ce que chaque bot révèle de l'agen
 
 1. **Étapes 7 et 8 non commencées** : correspondance ancien/nouveau puis suppression des cinq
    anciens, et mesure finale contre l'agent.
-2. **Le modèle canonique n'existe pas.** `ai/models/ArmageddonAgent/model_ArmageddonAgent.zip` a
-   été consommé par un training le 2026-08-11 à 23:14. `--test-only` retourne `Model not found` :
-   avant toute mesure contre l'agent, réinstaller `ArmageddonAgent_12345_robust_0.9438.zip` **avec
-   son `.pkl` apparié** au chemin canonique.
+2. **VÉRIFIER LE MODÈLE CANONIQUE AVANT TOUTE MESURE COMPARABLE.** Le chemin canonique
+   `ai/models/ArmageddonAgent/model_ArmageddonAgent.zip` est **partagé et volatil** : tout
+   `ai/train.py --new` l'écrase, y compris un run de debug de 120 épisodes, et plusieurs sessions
+   travaillent sur ce dépôt en parallèle. Il a déjà été consommé une fois (le 2026-08-11 à 23:14,
+   `--test-only` rendait alors `Model not found`) puis remplacé deux fois dans la même journée.
+
+   **Toutes les mesures des §11 et §12 portent sur `ArmageddonAgent_12345_robust_0.8721` :**
+
+   ```bash
+   md5sum ai/models/ArmageddonAgent/model_ArmageddonAgent.zip
+   # 6f6b98059a0a6c279b7d11dc427461fd  = robust_0.8721, la référence de §11.3 et §12.5
+   # 07ca14b4f0b4f62903718cece0ce1fdf  = robust_0.9438, la référence du §2 et de la colonne §11.2
+   ```
+
+   Réinstaller = copier le `.zip` **ET** son `_vec_normalize.pkl` apparié
+   (`<stem>_vec_normalize.pkl`, cf. `ai/vec_normalize_utils.get_vec_normalize_path`). Un modèle
+   chargé avec les statistiques de normalisation d'un autre run mesure autre chose.
+
+   ⚠️ Pour une mesure longue, copier le modèle dans un `ai/models/` **privé au worktree** plutôt
+   que de lire le chemin partagé : les workers d'évaluation chargent le modèle PARESSEUSEMENT, donc
+   un training voisin qui l'écrase en cours de route fait lire un autre modèle à une partie des
+   épisodes — sans que rien ne le signale. C'est ce qui a été fait pour la mesure du §12.5.
 3. **Tous les chiffres des §8, §9.1 et §9.3 sont à rejouer** (cf. §11.1) : ils sont soit sous
    l'échantillon, soit arithmétiquement faux, soit mesurés sur un modèle de dégâts depuis corrigé.
+4. **TROIS RESSOURCES PARTAGÉES rendent deux mesures simultanées incomparables.** Ce dépôt est
+   travaillé par plusieurs sessions à la fois ; chacune de ces trois-là a déjà mordu :
+   - **le modèle canonique** (cf. point 2) ;
+   - **`step.log`** — un seul fichier, écrasé à chaque run `--step`. Deux sessions journalisant en
+     même temps mélangent leurs épisodes dans le même fichier, et l'analyzer ne peut pas les
+     démêler. Lancer depuis un worktree suffit à l'isoler ;
+   - **les JSON de `config/`**, relus À CHAUD par les évaluations. Régler des poids pendant qu'une
+     mesure tourne change ce qu'elle mesure en cours de route. `pgrep -af train.py` avant, et ne
+     rien toucher tant que ça tourne.
+   S'y ajoute le CPU : une évaluation occupe 4 à 6 workers. Deux en parallèle se ralentissent
+   mutuellement d'un facteur 2 — mesuré le 2026-08-12 (0,70 puis 0,35 ép./s).
 
 ## 11. Relecture du 2026-08-12 — ce qui a été trouvé, mesuré et décidé
 
