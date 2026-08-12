@@ -165,6 +165,34 @@
   les aplatit dans l'effet de dessin, `BoardPvp.tsx:11253` rebâtit un `Set` de ~1 000 murs par
   rendu pendant le glisser de déploiement.
 
+- ✅ **Les trois aplatissements volumineux restants du chemin de rendu** (ouvert ET livré le
+  2026-08-12, suite directe de la ligne ci-dessus, qui les avait signalés sans les traiter — ils ne
+  portaient pas le motif corrigé ce jour-là, donc ils n'entraient pas dans son périmètre de clôture).
+  Même motif que la clé de contrôle : un tableau volumineux reconstruit à chaque rendu alors que sa
+  source ne change qu'au chargement d'un plateau ou d'une réponse API.
+  MESURÉ (node, 5 zones × 2 116 sous-hex = 10 580 hexes, 1 000 murs, 3 exécutions) :
+  normalisation des objectifs 0,10 ms, aplatissement en couples 0,15 ms, `Set` de murs 0,07 ms —
+  **≈ 0,32 ms et ~21 000 objets jetés par rendu → sous 0,0001 ms** une fois mémoïsés.
+  LE VRAI COÛT n'était PAS ces 0,32 ms : la sortie de la normalisation descend en prop
+  `objectivesOverride`, qui figure dans les DÉPENDANCES du gros effet de dessin de `BoardPvp`. Une
+  référence neuve à chaque rendu y rejouait tout le dessin PIXI, même quand rien de dessinable
+  n'avait bougé — et, en repli replay-sans-board, invalidait l'empreinte de géométrie livrée la
+  veille. C'est ce lien-là, pas les millisecondes, qui justifiait le chantier.
+  Les trois dérivations vivent désormais dans `hooks/useBoardHexMemos.ts`, hors des composants,
+  pour que leur IDENTITÉ soit verrouillable : une mémoïsation ne se prouve pas par la valeur (elle
+  rend la même dans les deux cas) mais par `Object.is` entre deux rendus. 17 tests, dont **trois
+  verrous prouvés ROUGES par mutation** (un par hook).
+  PIÈGE NOMMÉ ET VERROUILLÉ : l'effet de dessin COMPLÈTE `boardConfig.wall_hexes` EN PLACE (rangée
+  du bas, colonnes impaires). Le tableau garde donc sa référence en changeant de contenu : le `Set`
+  des murs se mémoïse sur la référence ET la longueur, sans quoi le glisser de déploiement tiendrait
+  la rangée du bas pour libre. La mutation elle-même reste en place, cf. arbitrage ci-dessous.
+  RESTE : la validation navigateur (glisser de déploiement le long de la rangée du bas ; couleurs
+  d'objectif inchangées).
+  SIGNALÉ, NON TRAITÉ (hors périmètre, arbitrage à rendre) : la mutation en place de
+  `boardConfig.wall_hexes` rend le contenu de la config dépendante de l'ordre des passages de
+  l'effet — cinq appels LoS lisent ce tableau et n'y voient pas la même chose avant et après le
+  premier dessin. `wallsFp` (hachage djb2 des ~1 000 murs dans `bcKey`) reste calculé par rendu.
+
 - ✅ **PvE se figeait — cause identifiée et corrigée** (2026-08-11). Le symptôme était rapporté
   « en phase de mouvement » ; la mesure a montré la phase de **déploiement**, sur des unités
   simplement **pas encore posées** (`deployed_on_turn=None`, `in_strategic_reserves=False`) — les
