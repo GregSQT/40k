@@ -50,7 +50,7 @@ class _RecordingWriter:
 
 
 def _tactical(**overrides: Any) -> Dict[str, Any]:
-    """`tactical_data` complet d'un episode — fabrique partagee, voir `conftest.tactical_data`."""
+    """`tactical_data` complet d'un episode — fabrique partagee, voir `_fabriques.tactical_data`."""
     return tactical_data(**overrides)
 
 
@@ -318,7 +318,7 @@ def test_the_guarded_curves_are_on_the_open_side_of_their_guard(tmp_path: Any) -
     denominateur de consultations non nul. Tant que la fixture laissait ces compteurs a zero,
     les trois familles restaient du cote SILENCIEUX de leur garde : supprimer leurs
     `add_scalar` n'aurait fait rougir aucun test. Ce controle est ce qui rend les valeurs non
-    nulles de `conftest.tactical_data` obligatoires — les remettre a zero le rend ROUGE.
+    nulles de `_fabriques.tactical_data` obligatoires — les remettre a zero le rend ROUGE.
     """
     tracker, recording = _tracker(tmp_path)
     _episode(tracker, _tactical())
