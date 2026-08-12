@@ -55,7 +55,8 @@ COUNTERS = {
         ('advance_from_adjacent',),
         ('shoot_hit_result_mismatch',),
         ('shoot_wound_threshold_mismatch',),
-        ('shoot_not_allocated_target_alive',),
+        # `shoot_not_allocated_target_alive` a quitté cette liste avec le compteur lui-même le
+        # 2026-08-12, comme son jumeau de mêlée ci-dessous.
     ],
     'charge': [
         ('charge_from_adjacent',),
@@ -68,7 +69,9 @@ COUNTERS = {
         ('fight_hit_result_mismatch',),
         ('fight_wound_threshold_mismatch',),
         ('fight_alternation_violations',),
-        ('fight_not_allocated_target_alive',),
+        # `fight_not_allocated_target_alive` : compteur retiré le 2026-08-12 (faux positifs par
+        # construction ; l'invariant 05 est tenu par
+        # `tests/unit/engine/test_attack_allocation_contract.py`).
     ],
     'damage': [
         ('damage_missing_unit_hp',),

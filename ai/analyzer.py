@@ -1268,7 +1268,9 @@ def error_totals(stats: Dict[str, Any]) -> Dict[str, int]:
             + _pair('advance_from_adjacent')
             + _pair('shoot_hit_result_mismatch')
             + _pair('shoot_wound_threshold_mismatch')
-            + _pair('shoot_not_allocated_target_alive')
+            # `shoot_not_allocated_target_alive` a disparu de ce total le 2026-08-12, avec son
+            # jumeau de mêlée : le contrôle ne pouvait rendre que des faux positifs (cf. le
+            # commentaire du total 'fight'). Aucune clé morte laissée à sommer.
             + shoot_invalid
         ),
         'charge': (
@@ -1291,7 +1293,15 @@ def error_totals(stats: Dict[str, Any]) -> Dict[str, int]:
             + _pair('fight_hit_result_mismatch')
             + _pair('fight_wound_threshold_mismatch')
             + _pair('fight_alternation_violations')
-            + _pair('fight_not_allocated_target_alive')
+            # `fight_not_allocated_target_alive` (et son jumeau de tir) ont suivi le 2026-08-12,
+            # pour la même raison mesurée : le moteur ne laisse une blessure non allouée QUE
+            # lorsque l'escouade cible est entièrement détruite (un seul chemin,
+            # `_mark_manual_overkill_wasted`, atteint quand plus aucun groupe d'allocation ne
+            # vit). Le contrôle comparait donc la règle 05 à l'état RECONSTRUIT par l'analyzer,
+            # et ne signalait que les dérives de cette reconstruction : 2 puis 15 signalements
+            # sur les deux runs du 2026-08-12, tous en fin d'épisode, là où aucun instantané
+            # `T{n} STATE:` ne recale plus l'état. 05 est vérifiée par le test moteur
+            # `tests/unit/engine/test_attack_allocation_contract.py`.
             + _pair('fight_double_pile_in')
         ),
         'dead_units': (
@@ -1592,11 +1602,6 @@ def parse_step_log(filepath: str) -> Dict:
         'shoot_dead_unit': {1: 0, 2: 0},
         'shoot_at_dead_unit': {1: 0, 2: 0},
         'shoot_over_rng_nb': {1: 0, 2: 0},
-        # 05 Attack sequence — attaque dont la sauvegarde n'a jamais été allouée ALORS
-        # QUE la cible est vivante. Le cas normal (cible détruite, « excess attacks
-        # lost ») n'entre PAS ici : cf. `ai/analyzer_allocation.py`.
-        'shoot_not_allocated_target_alive': {1: 0, 2: 0},
-        'fight_not_allocated_target_alive': {1: 0, 2: 0},
         'shoot_combi_profile_conflicts': {1: 0, 2: 0},
         'devastating_wounds_correct': {1: 0, 2: 0},
         'devastating_wounds_incorrect': {1: 0, 2: 0},
@@ -1729,8 +1734,6 @@ def parse_step_log(filepath: str) -> Dict:
             'shoot_dead_unit': {1: None, 2: None},
             'shoot_at_dead_unit': {1: None, 2: None},
             'shoot_over_rng_nb': {1: None, 2: None},
-            'shoot_not_allocated_target_alive': {1: None, 2: None},
-            'fight_not_allocated_target_alive': {1: None, 2: None},
             'shoot_combi_profile_conflicts': {1: None, 2: None},
             'devastating_wounds_incorrect': {1: None, 2: None},
             'squad_coherency_violations': {1: None, 2: None},
@@ -3077,15 +3080,6 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     if bot_shoot_over_rng > 0 and stats['first_error_lines']['shoot_over_rng_nb'][2]:
         first_err = stats['first_error_lines']['shoot_over_rng_nb'][2]
         log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-    _agent_na = stats['shoot_not_allocated_target_alive'][1]
-    _bot_na = stats['shoot_not_allocated_target_alive'][2]
-    _table_row("Attaque non allouee, cible vivante:", _fmt_count(_agent_na), _fmt_count(_bot_na))
-    if _agent_na > 0 and stats['first_error_lines']['shoot_not_allocated_target_alive'][1]:
-        first_err = stats['first_error_lines']['shoot_not_allocated_target_alive'][1]
-        log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-    if _bot_na > 0 and stats['first_error_lines']['shoot_not_allocated_target_alive'][2]:
-        first_err = stats['first_error_lines']['shoot_not_allocated_target_alive'][2]
-        log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
     agent_shoot_combi = stats['shoot_combi_profile_conflicts'][1]
     bot_shoot_combi = stats['shoot_combi_profile_conflicts'][2]
     _table_row("COMBI profiles in same phase:", _fmt_count(agent_shoot_combi), _fmt_count(bot_shoot_combi))
@@ -3270,15 +3264,6 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
     if bot_fight_over_cc > 0 and stats['first_error_lines']['fight_over_cc_nb'][2]:
         first_err = stats['first_error_lines']['fight_over_cc_nb'][2]
-        log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-    _agent_na = stats['fight_not_allocated_target_alive'][1]
-    _bot_na = stats['fight_not_allocated_target_alive'][2]
-    _table_row("Attaque non allouee, cible vivante:", _fmt_count(_agent_na), _fmt_count(_bot_na))
-    if _agent_na > 0 and stats['first_error_lines']['fight_not_allocated_target_alive'][1]:
-        first_err = stats['first_error_lines']['fight_not_allocated_target_alive'][1]
-        log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-    if _bot_na > 0 and stats['first_error_lines']['fight_not_allocated_target_alive'][2]:
-        first_err = stats['first_error_lines']['fight_not_allocated_target_alive'][2]
         log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
     _hit_result_rows(stats, "fight_hit_result", "melee")
     _wound_threshold_rows(stats, "fight_wound_threshold", "melee")
