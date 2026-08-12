@@ -35,6 +35,8 @@ Deux trous s'y ajoutent, établis par lecture de `ai/evaluation_bots.py` :
   sur les cartes de distance) ; `objective_controllers` n'est lu que par `AdaptiveBot`, et
   seulement pour sa posture, jamais pour choisir où aller. Avec `hold_bonus = 3.0` et la règle
   « à égalité on ne bouge pas », un bot qui touche un objectif s'y assied jusqu'à la fin.
+  ✅ **Traité le 2026-08-12, cf. §12** — la refonte ne l'avait PAS rebouché : `objective_controllers`
+  n'était lu nulle part dans `ai/bot_doctrines.py`.
 
 ## 2. Mesure de référence — 2026-08-11, à ne plus rejouer autrement
 
@@ -499,3 +501,70 @@ Voir §7.1. En résumé : l'estimation par escouade ne lisait que le profil du s
 50 paires sur 90 étaient fausses (médiane 0,50×, pire cas 0,18×). Le cache est désormais indexé par
 figurine. **Aucun ré-entraînement n'est requis** — contrairement à ce qui était supposé, le seul
 consommateur vivant du cache était le panel de bots.
+
+## 12. Les bots ne contestaient rien — corrigé le 2026-08-12
+
+### 12.1 Le constat, venu du replay puis confirmé par le journal
+
+Observation de l'utilisateur en regardant un replay : « l'agent joue mal, super passif, mais ça
+passe car le bot est encore plus nul ». Un win-rate contre des bots est une mesure **relative** :
+il ne peut pas, par construction, détecter que les deux camps jouent mal. Rien dans tout ce
+chantier ne mesurait le niveau **absolu** de jeu.
+
+Le journal du run du 2026-08-12 (600 épisodes, ancien panel, `analyzer.py`) le chiffre :
+
+- **0 victoire par élimination**, des deux côtés. Aucune armée n'est jamais détruite.
+- **100 % des parties vont au tour 5.** Aucune ne se conclut avant.
+- **207 épisodes sur 600 (34,5 %) sans aucun mort.** 689 escouades détruites en 600 parties, pour
+  dix escouades sur la table.
+- **Les charges font 0,8 % / 1,0 % des actions.**
+- **~34 % des décisions de phase de tir se prennent sans cible visible** (`no LOS`).
+- VP moyens : **agent 53,8 sur 60**, bot **27,2**.
+
+⚠️ Les colonnes « Joueur 1 / Joueur 2 » de l'analyzer sont par NUMÉRO DE JOUEUR, et l'agent occupe
+P1 sur 240 épisodes et P2 sur 360 : ce sont des mélanges, on ne peut pas leur faire dire « l'agent
+fait ceci ». Seuls les tableaux étiquetés *Agent/Bot* le permettent.
+
+**L'agent n'est pas passif par défaut d'apprentissage : la passivité gagne.** Le primaire court à
+15 VP/tour du tour 2 au tour 5, tuer ne rapporte rien directement, l'élimination n'arrive jamais et
+le départage de valeur ne décide que 1,4 % des parties. Il a résolu le jeu tel qu'il est posé.
+
+**Et c'est ce qui explique l'échec de l'orthogonalité (§11.2).** Le scénario n'a qu'une dimension —
+seuls les objectifs marquent. Aucun dessin de bot ne créera six axes dans un jeu qui n'en compte
+qu'un. Le seul bot qui inquiétait l'agent était `racer`, celui qui joue les zones : ce n'était pas
+une coïncidence.
+
+Piste écartée par l'utilisateur : les 34 % de tirs sans cible viennent du terrain, et **les
+plateaux sont réglementaires** — ce n'est pas un défaut à corriger.
+
+### 12.2 La cause, prouvée par absence
+
+`objective_controllers` **n'était lu nulle part** dans `ai/bot_doctrines.py`. Aucun chemin ne
+permettait à un des six styles de savoir qui tenait quoi. Et `_objective_terms` réduisait les
+cartes par `np.minimum.reduce` : chaque escouade partait vers **l'objectif le plus proche d'elle**.
+
+Conséquence : chaque camp s'asseyait sur les zones de son côté de la table et personne n'allait
+disputer celles d'en face. Le bot marquait 6,8 VP/tour (≈ une zone), l'agent 13,5 (≈ le maximum).
+
+### 12.3 La correction
+
+La carte de distance combinée est désormais **pondérée par qui tient quoi** : un rabais en HEXES
+est retiré de la distance de chaque objectif, double pour une zone tenue par l'adversaire (la lui
+prendre fait basculer le score des deux côtés), simple pour une zone neutre, nul pour la sienne
+(y envoyer une deuxième escouade ne rapporte rien).
+
+Cinquième poids par style, `w_contest`, **dans le même tuple que les quatre autres** : `EndgameBot`
+et `AttritionBot` échangent l'entrée entière selon leur mode (`endgame_push`, `attrition_withdraw`),
+donc un poids chargé à part resterait sur la valeur du mode précédent.
+
+`w_contest = 0.0` rend exactement la carte d'avant — le changement est donc mesurable style par
+style. Le rabais est appliqué **une fois par décision**, pas par candidate : le coût est une
+soustraction numpy par objectif, déjà payée par la mémoïsation des cartes.
+
+⚠️ **Les valeurs sont POSÉES PAR DOCTRINE, non réglées** (`config/bot_movement_weights.json`).
+
+⚠️ `objective_controllers` est lu tel quel, donc **rafraîchi aux frontières de phase seulement**.
+C'est correct ICI, et c'est l'inverse de ce qu'exigeait le holdout supprimé : on veut savoir qui
+tenait la zone au début de la phase, pas recalculer par candidate — la cible d'un déplacement ne
+doit pas changer en cours de route. Son absence (dict créé paresseusement) vaut « personne ne tient
+rien », l'état réel en début de partie et non un repli.
