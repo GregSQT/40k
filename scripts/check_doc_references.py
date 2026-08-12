@@ -11,12 +11,20 @@ des renvois d'`analyzer_couverture.md` **après une seule journée de livraisons
 Les numéros de ligne ont donc été supprimés au profit du couple `fichier.py` + nom de symbole, qui
 ne rouille pas. Ce script est la seconde moitié de cette décision.
 
-CE QU'IL ÉTABLIT, en quatre passes :
+CE QU'IL ÉTABLIT, en cinq passes :
   1. RENVOIS  — tout fichier cité existe, et tout symbole cité vit dans le fichier cité.
   2. LIENS    — toute cible de lien markdown existe.
   3. VALEURS  — les nombres recopiés d'une source mécanique (config d'agent, tableau d'un autre
-                document) valent encore ce que le document annonce.
+                document, constante d'un script) valent encore ce que le document annonce.
   4. ANCRES   — aucun renvoi de la forme `fichier.py:123`, convention posée par `ROADMAP.md` §5.
+                La convention vaut pour TOUTE extension citée par ces documents, pas seulement le
+                `.py` : mesuré le 2026-08-12, les deux seules ancres survivantes de `ROADMAP.md`
+                étaient des `.tsx`, invisibles au contrôle et déjà décalées de plusieurs milliers
+                de lignes. Une convention qui ne tient que sur un suffixe n'en est pas une.
+  5. SORTES   — un symbole cité `def X` est bien un `def`, un `class X` bien un `class`. Motif :
+                `ROADMAP.md` écrivait « `def EpisodeTerminationCallback` », en promettant
+                explicitement un grep reproductible — or ce sont des `class`, et le grep promis
+                rendait 0 hit. Le document se présentait comme vérifiable et ne l'était pas.
 
 CE QU'IL N'ÉTABLIT PAS, et qui est COMPTÉ ET AFFICHÉ plutôt que passé sous silence :
   - un renvoi sans symbole à confronter : il n'y a rien à vérifier, et le taire ferait croire à
@@ -43,8 +51,10 @@ Sortie : 0 si rien n'est cassé, 1 sinon.
 """
 from __future__ import annotations
 
+import ast
 import collections
 import functools
+import importlib.util
 import json
 import pathlib
 import re
@@ -52,6 +62,17 @@ import subprocess
 import sys
 import urllib.parse
 from typing import Any, Callable, Iterable, TypeVar
+
+
+class SourceUnavailable(RuntimeError):
+    """Une SOURCE du contrôle a disparu ou ne se lit plus.
+
+    Type dédié, et pas un `LookupError` générique : attraper `LookupError` en sortie de `main`
+    avalait aussi le `KeyError` d'un profil mal formé, et annonçait « les sources du contrôle ont
+    disparu » en désignant le mauvais fichier. Ce qui est bloquant-mais-lisible doit se distinguer
+    de ce qui est un défaut interne, lequel garde sa trace.
+    """
+
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 DOCS = ROOT / "Documentation" / "Implémentation"
@@ -92,7 +113,83 @@ FILE_REF = re.compile(rf"((?:\.{{1,2}}/)+[\w./-]+\.{CODE_SUFFIX}|[\w/-]+\.{CODE_
 BACKTICKED = re.compile(r"`([^`]+)`")
 IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]{3,}")
 MD_LINK = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
-LINE_ANCHOR = re.compile(r"\b([A-Za-z0-9_]+\.py):(\d+)")
+
+#: Une ancre de ligne, quelle que soit l'extension : la convention §5 porte sur la LIGNE, pas sur le
+#: langage. Le basename accepte les points internes, sans quoi `useBoardHexMemos.test.ts:117` se
+#: réduit à `test.ts` — 25 fichiers `*.test.ts(x)` et 3 `*.d.ts` échappaient à la convention. Et
+#: l'extension n'est bornée ni en longueur ni au seul alphanumérique : `.example`, `.errors` et
+#: `.code-workspace` sont des extensions RÉELLES de ce dépôt, qu'une borne à 5 caractères écartait
+#: en silence alors que la docstring promettait « toute extension ». Le tri, lui, se fait après.
+#: `(?<![\w.])` plutôt que `\b`, avec un point initial optionnel : `.env.example:7` était rapporté
+#: comme `env.example:7`, qui envoie chercher un fichier que le dépôt ne porte pas sous ce nom.
+#: Le CHEMIN est capturé quand il est écrit : `engine/phase_handlers/move_handler.py:99` rapporté
+#: comme `move_handler.py:99` désigne cinq fichiers du dépôt au lieu d'un, et n'envoie donc nulle
+#: part. Le tri, lui, ne regarde que le basename (cf. `is_a_line_anchor`).
+#: LIMITE ASSUMÉE : le chemin ne traverse pas l'espace, donc un renvoi vers un fichier dont le nom
+#: en porte (`Documentation/40k_rules/09 Movement phase.pdf:12`) est bien DÉTECTÉ, mais rapporté
+#: sous son dernier segment. Autoriser l'espace ferait avaler la phrase autour du chemin dans tous
+#: les autres cas — un message tronqué vaut mieux qu'un message inventé.
+#: L'extension est OPTIONNELLE : `Dockerfile:14` est un renvoi de ligne comme un autre, et
+#: `Security.md` — document sous convention — cite justement les deux `Dockerfile` du dépôt. Sans
+#: extension, seul le critère de dépôt s'applique (cf. `is_a_line_anchor`), ce qui écarte les
+#: `Note:12` et autres deux-points de prose.
+LINE_ANCHOR = re.compile(
+    r"(?<![\w.])((?:[\w.-]+/)*\.?[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*):(\d+)"
+)
+
+#: Les DEUX autres graphies du même renvoi, employées par ce corpus : `L7370` et `(l.3713-3735)`.
+#: Ne contrôler que `fichier.ext:123`, c'était appliquer la convention à une graphie sur trois — et
+#: les deux autres étaient vivantes dans `ROADMAP.md` au 2026-08-12.
+#:
+#: La graphie `Ln` est AMBIGUË, et irréductiblement : `L1`, `L11`, `L28` NOMMENT les entrées du
+#: `step.log`, backtiquées en prose mais NUES dans les cellules du tableau §7 — 34 occurrences
+#: mesurées. Ni le backtick ni un seuil de chiffres écrit en dur ne les séparent d'un numéro de
+#: ligne : la suite GRANDIT, et un seuil devenu faux rendrait le contrôle rouge sur un document
+#: juste. Le départage est donc DONNÉ PAR LE CORPUS — `step_log_entries` connaît le plus grand
+#: index existant, et il grandit avec lui (cf. `is_a_bare_anchor`).
+#: Le `-` est exclu du voisinage gauche pour les noms de modèle (`ViT-L336`).
+BARE_ANCHOR = re.compile(r"(?<![\w.-])(?:L(\d+)|l\.(\d+))\b")
+
+#: `def X` / `class X` backtiqués : la seule forme par laquelle ces documents PROMETTENT un grep.
+#: La signature est tolérée (`def X(a, b) -> int`, `class X(Base)`, `class X:`) : exiger le backtick
+#: collé au nom laissait la citation la plus courante DÉSARMER la passe en silence — ni vérifiée, ni
+#: comptée non vérifiée, sous un rapport « 0 fausse, 0 non vérifiée ». Le tail est borné à ce qui
+#: OUVRE une signature — une parenthèse, ou le deux-points COLLÉ au nom. Laisser le deux-points
+#: ouvrir n'importe quoi tenait `class Objectives : la liste des objectifs` pour une citation ferme
+#: et sortait un SYMBOLE NON DÉFINI sur une phrase juste. `async def X` est la même citation : la
+#: refuser rendait le traitement d'`AsyncFunctionDef` par `definitions` inatteignable, donc
+#: mensonger. Le nom accepte la QUALIFICATION (`def W40KEngine.execute_action`) : sans elle, la
+#: citation ne tombait dans aucun compteur — ni vérifiée, ni non vérifiée.
+SYMBOL_KIND = re.compile(
+    r"`(?:async[ \t]+)?(def|class)[ \t]+"
+    r"([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)(?:\([^`]*)?:?`"
+)
+
+#: La citation et son fichier, DANS LES DEUX ORDRES — `def X` (`a/b.py`) comme `a/b.py` (`def X`),
+#: qui est celui de la passe 1 (cf. `ADJACENT`). N'en traiter qu'un, c'était laisser le défaut
+#: d'origine passer intégralement dès qu'il était écrit dans l'autre sens ; la passe 1 ne le
+#: rattrape pas non plus, `is_symbol_token` refusant l'espace de « def Foo ».
+#:
+#: UN SEUL LIEN les apparie, et il est FERMÉ : la parenthèse qui se referme, ou le deux-points. La
+#: simple juxtaposition est écartée dans les deux sens, parce qu'elle ne se distingue pas d'une
+#: phrase qui continue — `class X` `a/b.py` l'importe de SB3 — et la tenir pour ferme sortait un
+#: SYMBOLE NON DÉFINI, donc un code 1, sur une phrase juste. C'est la distinction ferme/molle de la
+#: passe 1, appliquée symétriquement : ce qui est molle d'un côté ne peut pas être ferme de l'autre.
+#: La parenthèse se referme ; le deux-points, lui, n'a pas de fin — c'est le lecteur qui la met. Il
+#: n'affirme donc que s'il TERMINE la ligne : `a.py` : `class X` est importé de SB3, pas défini ici
+#: est une phrase, et la tenir pour ferme sortait un code 1 dessus, quand la même phrase entre
+#: parenthèses était correctement comptée non vérifiée. Le verdict ne peut pas dépendre de la
+#: ponctuation. C'est la garde de pureté de `claimed_symbols`, transposée à une forme sans clôture.
+_END = r"(?=[ \t.,;)]*$)"
+_PY_TOKEN = r"`((?:\.{1,2}/)*[\w/-]+\.py)`"
+KIND_CLAIM = re.compile(
+    SYMBOL_KIND.pattern
+    + rf"[ \t]*(?:\([ \t]*{_PY_TOKEN}[ \t]*\)|:[ \t]*{_PY_TOKEN}{_END})"
+)
+KIND_CLAIM_REVERSED = re.compile(
+    _PY_TOKEN
+    + rf"[ \t]*(?:\([ \t]*{SYMBOL_KIND.pattern}[ \t]*\)|:[ \t]*{SYMBOL_KIND.pattern}{_END})"
+)
 
 #: Un renvoi générique (`*_handler.py`, `analyzer_phases/*`) ne désigne aucun fichier précis : il
 #: n'y a rien à résoudre, et le compter en échec ferait du bruit là où le document est correct.
@@ -172,6 +269,60 @@ def is_ambiguous(name: str) -> bool:
     l'autre `conftest.py`. Le renvoi est donc compté INVÉRIFIABLE, jamais cassé.
     """
     return "/" not in name and tracked_basenames()[name] > 1
+
+
+@functools.lru_cache(maxsize=1)
+def tracked_suffixes() -> frozenset[str]:
+    """Les extensions que le dépôt emploie RÉELLEMENT, mesurées, jamais énumérées à la main.
+
+    Une liste écrite à la main se périme : celle du 2026-08-12 ignorait `.rs`, `.sql`, `.html` et
+    `.css`, tous porteurs d'ancres dans le corpus. Le dépôt sait ce qu'il contient ; lui demander
+    coûte le `git ls-files` déjà fait pour les basenames.
+    """
+    return frozenset(
+        "." + name.rsplit(".", 1)[-1] for name in tracked_basenames() if "." in name[1:]
+    )
+
+
+def is_a_bare_anchor(index: int) -> bool:
+    """`L<index>` est-il un numéro de ligne, ou un NOM d'entrée du `step.log` ?
+
+    Le seul repère non arbitraire est le corpus lui-même : le tableau §7 d'`analyzer_couverture.md`
+    énumère les entrées existantes, donc tout ce qui dépasse son plus grand index est un numéro de
+    ligne. Le seuil grandit avec la table, là où un seuil écrit en dur serait devenu faux le jour où
+    la suite passe la centaine — et aurait alors rendu rouge un document juste.
+
+    LIMITE ASSUMÉE, et elle vaut pour les trois documents : sous ce seuil, `L18` n'est pas
+    opposable, même dans un document qui ne parle pas du `step.log`. Rien dans la FORME ne sépare
+    un nom d'entrée d'un petit numéro de ligne, et il n'y a pas de troisième critère : refuser
+    reviendrait à rendre rouge le §7 lui-même. Les renvois de cette taille restent attrapés par la
+    graphie `fichier.ext:ligne`, qui, elle, nomme son fichier.
+    """
+    return index > step_log_entries()[1]
+
+
+def is_a_line_anchor(basename: str) -> bool:
+    """Ce `nom:123` est-il un renvoi de ligne à refuser ?
+
+    DEUX critères, en OU, et chacun ferme ce que l'autre laisse ouvert :
+      - le nom est celui d'un fichier SUIVI du dépôt. Seul moyen d'atteindre les extensions rares :
+        `docker-compose.yml:18` vivait dans `Security.md`, invisible ;
+      - son extension est employée quelque part dans le dépôt. Indispensable, parce que le motif
+        n°1 de rouille d'une ancre est justement que son fichier ait été RENOMMÉ ou SUPPRIMÉ :
+        `engine/ancien.py:412` n'est plus suivi, et le critère de dépôt seul le rendait muet — la
+        passe aurait perdu sa cible principale.
+
+    COÛT ASSUMÉ : une version écrite avec un deux-points (`Node.js:20`) porte exactement la forme
+    d'une ancre et sera refusée. Le corriger tient dans une espace ; manquer l'ancre d'un fichier
+    supprimé, non.
+    """
+    if tracked_basenames()[basename] > 0:
+        return True
+    if "." not in basename[1:]:
+        # Sans extension, il ne reste RIEN à opposer : un jeton nu suivi de `:12` est le plus
+        # souvent de la prose (`Note:12`). Seul le critère de dépôt, déjà tenté, pouvait trancher.
+        return False
+    return "." + basename.rsplit(".", 1)[-1] in tracked_suffixes()
 
 
 def symbol_is_present(symbol: str, body: str) -> bool:
@@ -445,15 +596,16 @@ def agent_profiles() -> dict[str, dict]:
     return {key: value for key, value in data.items() if isinstance(value, dict)}
 
 
+@functools.lru_cache(maxsize=1)
 def step_log_entries() -> tuple[int, int, bool]:
     """(nombre d'entrées, plus grand index, L2 absente) du tableau §7 d'`analyzer_couverture`."""
     text = COUVERTURE.read_text(encoding="utf-8")
     section = re.search(r"^## 7\..*?(?=^## 8\.)", text, re.S | re.M)
     if section is None:
-        raise LookupError("analyzer_couverture.md : §7 introuvable")
+        raise SourceUnavailable("analyzer_couverture.md : §7 introuvable")
     indexes = sorted({int(m) for m in re.findall(r"^\|\s*`?L(\d+)`?\s*\|", section.group(0), re.M)})
     if not indexes:
-        raise LookupError("analyzer_couverture.md : §7 ne porte aucune entrée `Ln`")
+        raise SourceUnavailable("analyzer_couverture.md : §7 ne porte aucune entrée `Ln`")
     return len(indexes), max(indexes), 2 not in indexes
 
 
@@ -514,6 +666,42 @@ def claim_step_log(text: str) -> list[tuple[str, tuple[str, int]]]:
     return found
 
 
+def claim_gate_ceiling(text: str) -> list[tuple[str, int]]:
+    return [(m.group(0).strip(), int(m.group(1)))
+            for m in re.finditer(r"refusée quand \*\*(\d+)\*\* chantiers", text)]
+
+
+@functools.lru_cache(maxsize=1)
+def gate_module() -> Any:
+    """La porte de fusion, chargée UNE fois. Sans le cache, elle l'était à chaque assertion."""
+    path = ROOT / "scripts" / "check_roadmap_declared.py"
+    spec = importlib.util.spec_from_file_location("check_roadmap_declared_for_docs", path)
+    if spec is None or spec.loader is None:
+        raise SourceUnavailable(f"{path} : module illisible, plafond de la porte invérifiable")
+    module = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(module)
+    except Exception as error:  # import cassé, syntaxe cassée, constante calculée qui lève…
+        raise SourceUnavailable(f"{path} ne se charge pas : {error}") from error
+    return module
+
+
+def expected_gate_ceiling(_claim: object) -> object:
+    """`MAX_UNDECLARED`, lu dans la porte elle-même.
+
+    La source est le MODULE, pas une relecture de son texte : `§5` du document annonce une valeur
+    de réglage, et la seule chose qui la rende vraie est la constante que la porte évalue. Son
+    absence est une erreur bruyante — un `getattr` avec repli rendrait le contrôle vert le jour où
+    la constante serait renommée, c'est-à-dire précisément le jour où le document devient faux.
+    """
+    module = gate_module()
+    if not hasattr(module, "MAX_UNDECLARED"):
+        raise SourceUnavailable(
+            "`MAX_UNDECLARED` a disparu de la porte — le plafond n'a plus de source"
+        )
+    return module.MAX_UNDECLARED
+
+
 def expected_profile_count() -> object:
     return len(agent_profiles())
 
@@ -568,6 +756,7 @@ VALUE_CHECKS: dict[str, dict[str, ValueCheck[Any]]] = {
         "obs_size": (claim_obs_size, lambda _claim: expected_obs_size()),
         TABLE_LABEL: (claim_profile_table, expected_from_table_key),
         "entrées manquantes du step.log": (claim_step_log, expected_step_log),
+        "plafond de la porte de fusion": (claim_gate_ceiling, expected_gate_ceiling),
     },
 }
 
@@ -611,17 +800,182 @@ def check_anchors(doc_path: pathlib.Path) -> list[str]:
 
     Convention `ROADMAP.md` §5 : un numéro de ligne ne survit pas à une livraison. Mesuré sur ce
     dépôt : `UNIT_ABILITY_SLOTS` a changé deux fois de ligne en vingt-quatre heures.
+
+    Toutes les extensions, pas seulement `.py` : la seule ligne de `ROADMAP.md` qui portait encore
+    des ancres au 2026-08-12 citait deux `.tsx`, que le contrôle laissait passer. Le tri se fait sur
+    le FAIT (le nom est-il un fichier du dépôt ?) et non sur une liste de suffixes, qui se serait
+    périmée à son tour.
     """
     if doc_path.name not in ANCHOR_ENFORCED:
         return []
     found: list[str] = []
     for lineno, line in enumerate(doc_path.read_text(encoding="utf-8").split("\n"), 1):
+        # Un même renvoi s'écrit couramment DEUX FOIS sur une ligne — `[a.py:629](…/a.py#L629)`
+        # porte le numéro dans le texte et dans l'URL. Compté deux fois, le rapport annonçait
+        # « 2 ancres » là où il y en a une, et le lecteur cherchait la seconde.
+        # Le dédoublonnage est borné AU MÊME LIEN : sur le seul numéro, « les deux sites a.py:629
+        # et L629 de b.tsx » perdait le second en silence, ce qui est pire que le doublon. La clé
+        # porte donc l'identité du lien — deux liens différents qui citent le même numéro sont deux
+        # renvois, et un numéro hors lien (clé `None`) n'en dédoublonne aucun.
+        links = [(match.span(0), match.span(1)) for match in MD_LINK.finditer(line)]
+
+        def enclosing_link(position: int) -> int | None:
+            for index, ((start, end), _target) in enumerate(links):
+                if start <= position < end:
+                    return index
+            return None
+
+        # La clé porte AUSSI le fichier : deux fichiers différents cités au même numéro dans le
+        # texte d'un même lien sont deux renvois. La graphie `Ln`, qui ne nomme aucun fichier, se
+        # dédoublonne alors sur le couple (lien, numéro) seul — c'est elle, et elle seule, qui
+        # répète un renvoi déjà écrit en toutes lettres.
+        seen: set[tuple[int | None, int, str]] = set()
         for match in LINE_ANCHOR.finditer(line):
+            if not is_a_line_anchor(match.group(1).rsplit("/", 1)[-1]):
+                continue
+            link = enclosing_link(match.start())
+            number = int(match.group(2))
+            key = (link, number, match.group(1).rsplit("/", 1)[-1])
+            if link is not None and key in seen:
+                continue
+            seen.add(key)
+            found.append(
+                f"{doc_path.name}:{lineno}  ANCRE DE LIGNE  {match.group(0)} — "
+                f"citer le symbole, pas la ligne (§5)"
+            )
+        for match in BARE_ANCHOR.finditer(line):
+            number = int(match.group(1) or match.group(2))
+            if match.group(1) is not None and not is_a_bare_anchor(number):
+                continue
+            link = enclosing_link(match.start())
+            if link is not None and any(
+                seen_link == link and seen_number == number for seen_link, seen_number, _ in seen
+            ):
+                continue
+            seen.add((link, number, ""))
             found.append(
                 f"{doc_path.name}:{lineno}  ANCRE DE LIGNE  {match.group(0)} — "
                 f"citer le symbole, pas la ligne (§5)"
             )
     return found
+
+
+def definitions(source: str) -> dict[str, set[str]]:
+    """Ce que ce fichier DÉFINIT vraiment : nom -> sortes (`def`, `class`).
+
+    Lu par l'AST, jamais au motif textuel. Un motif ancré en début de ligne semblait suffire, mais
+    il tient pour définition tout `def` INDENTÉ, y compris l'exemple recopié dans une docstring —
+    le contrôle confirmait alors la sorte qu'on lui soufflait, très exactement le vert vacant qu'il
+    existe pour refuser. L'AST ferme aussi `async def`, qui est un `def` pour qui lit le document
+    et que le motif déclarait « introuvable » en accusant le grep de rendre 0 hit.
+
+    Les définitions IMBRIQUÉES comptent : une méthode citée par son nom est bien définie dans le
+    fichier cité, et exiger le niveau module rendrait rouges des renvois justes. Chacune est indexée
+    SOUS SES DEUX NOMS, nu et QUALIFIÉ (`agit` et `Moteur.agit`) : confronter `def Moteur.agit` sur
+    son seul dernier segment confirmait la citation contre un `def agit` de module, sans `Moteur`
+    nulle part — le grep promis par le document rendait alors 0 hit, ce que cette passe existe
+    précisément pour attraper.
+    """
+    kinds: dict[str, set[str]] = {}
+
+    def walk(node: ast.AST, prefix: str) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                kind = "class" if isinstance(child, ast.ClassDef) else "def"
+                kinds.setdefault(child.name, set()).add(kind)
+                qualified = f"{prefix}{child.name}"
+                kinds.setdefault(qualified, set()).add(kind)
+                walk(child, f"{qualified}.")
+            else:
+                walk(child, prefix)
+
+    walk(ast.parse(source), "")
+    return kinds
+
+
+def kind_claims(line: str) -> tuple[list[tuple[str, str, str]], int]:
+    """([(sorte, symbole, fichier) affirmés], nombre de CITATIONS distinctes), les deux ordres.
+
+    Les groupes alternatifs non retenus sortent vides ; le `or` choisit celui qui a matché.
+
+    Le COMPTE de citations est rendu à part, et il ne double pas : mal tenu, il faisait afficher
+    « -1 non vérifiée » et pouvait satisfaire à lui seul le garde-fou de vert vacant. L'identité
+    d'une citation est la POSITION de son symbole, pas son texte : la même ligne peut légitimement
+    citer deux fois le même symbole.
+    """
+    claims: list[tuple[str, str, str]] = []
+    spans: set[tuple[int, int]] = set()
+    for match in KIND_CLAIM.finditer(line):
+        kind, symbol, parenthesised, colon = match.groups()
+        spans.add(match.span(2))
+        claims.append((kind, symbol, parenthesised or colon))
+    for match in KIND_CLAIM_REVERSED.finditer(line):
+        name, kind_p, symbol_p, kind_c, symbol_c = match.groups()
+        spans.add(match.span(3) if kind_p else match.span(5))
+        claims.append((kind_p or kind_c, symbol_p or symbol_c, name))
+    return claims, len(spans)
+
+
+def check_symbol_kinds(doc_path: pathlib.Path) -> tuple[int, int, list[str], list[str]]:
+    """Passe 5 — un symbole annoncé `def X` est un `def`, un `class X` est un `class`.
+
+    L'appariement est ADJACENT, comme celui de la passe 1 : le fichier doit suivre immédiatement la
+    citation, éventuellement entre parenthèses — `class X` (`ai/y.py`). Rien d'autre n'est apparié,
+    pas même l'unique `.py` de la ligne : mesuré sur ce corpus, une phrase cite couramment un
+    fichier ici et un symbole étranger là (« les rampes vivent dans `ai/training_callbacks.py` ; on
+    y branche `class VecNormalize` de SB3 » sortait un SYMBOLE NON DÉFINI sur une phrase juste).
+    C'est la même règle qui écarte les tableaux : entre deux barres verticales, la citation et le
+    fichier ne sont plus adjacents, et `analyzer_couverture.md` est presque entièrement tabulaire.
+
+    Une citation SANS fichier adjacent — « ne pas confondre avec `class _EpisodeRampCallback`, du
+    même fichier » — est comptée NON VÉRIFIÉE : la rattacher au fichier de la phrase précédente
+    fabriquerait une affirmation que le document ne fait pas.
+
+    Un `.py` du dépôt que l'AST ne sait pas lire n'est PAS un défaut du document : au 2026-08-12,
+    `ai/train.py` ne compilait pas à HEAD, et l'imputer au document aurait rendu la porte
+    documentaire rouge pour un défaut de code. Il est donc compté non vérifié — mais NOMMÉ, en
+    quatrième valeur de retour : un compteur qui absorbe cette panne sous l'étiquette « pas de
+    fichier adjacent » donne une raison FAUSSE d'un silence réel, et c'est ainsi qu'une passe
+    s'éteint sans que personne ne le voie.
+    """
+    checked = unverifiable = 0
+    broken: list[str] = []
+    notes: list[str] = []
+    doc_dir = doc_path.parent
+    for lineno, line in enumerate(doc_path.read_text(encoding="utf-8").split("\n"), 1):
+        cited = len(SYMBOL_KIND.findall(line))
+        if not cited:
+            continue
+        claims, paired = kind_claims(line)
+        unverifiable += cited - paired
+        for kind, symbol, name in claims:
+            path = resolve(name, doc_dir)
+            if path is None or is_ambiguous(name):
+                unverifiable += 1
+                continue
+            try:
+                kinds = definitions(path.read_text(encoding="utf-8", errors="replace"))
+            except SyntaxError as error:
+                unverifiable += 1
+                note = f"{name} ne se lit pas ({error.msg}, ligne {error.lineno})"
+                if note not in notes:
+                    notes.append(note)
+                continue
+            # Un nom QUALIFIÉ se confronte TEL QUEL : `definitions` indexe sous les deux noms.
+            actual = kinds.get(symbol, set())
+            if kind in actual:
+                checked += 1
+            elif actual:
+                broken.append(
+                    f"{doc_path.name}:{lineno}  SORTE FAUSSE  `{kind} {symbol}` — "
+                    f"{name} le définit en `{'`, `'.join(sorted(actual))}`"
+                )
+            else:
+                broken.append(
+                    f"{doc_path.name}:{lineno}  SYMBOLE NON DÉFINI  `{kind} {symbol}` — "
+                    f"absent de {name}, le grep promis rend 0 hit"
+                )
+    return checked, unverifiable, broken, notes
 
 
 def merges_since(doc_path: pathlib.Path) -> str:
@@ -663,7 +1017,8 @@ def report(doc: str, path: pathlib.Path) -> tuple[bool, list[str]]:
     checked, skipped, broken_links = check_links(path)
     verified, broken_values = check_values(path)
     broken_anchors = check_anchors(path)
-    broken = broken_refs + broken_links + broken_values + broken_anchors
+    kinds, kinds_unverifiable, broken_kinds, kind_notes = check_symbol_kinds(path)
+    broken = broken_refs + broken_links + broken_values + broken_anchors + broken_kinds
     lines = [
         f"{'❌' if broken else '✅'} {doc}",
         f"   renvois  : {resolved} confirmés, {len(broken_refs)} cassés, "
@@ -671,8 +1026,12 @@ def report(doc: str, path: pathlib.Path) -> tuple[bool, list[str]]:
         f"   liens    : {checked} vérifiés, {len(broken_links)} morts, "
         f"{skipped} écartés (pas une forme de chemin)",
         f"   valeurs  : {verified} confirmées, {len(broken_values)} périmées ou orphelines",
-        f"   ancres   : {len(broken_anchors)} renvois `fichier.py:ligne`",
+        f"   ancres   : {len(broken_anchors)} renvois `fichier.ext:ligne`",
+        f"   sortes   : {kinds} confirmées, {len(broken_kinds)} fausses, "
+        f"{kinds_unverifiable} non confrontées (pas de fichier adjacent, chemin irrésolu, "
+        f"nom ambigu, ou `.py` illisible)",
     ]
+    lines += [f"   ℹ️  {note}" for note in kind_notes]
     lines += [f"   {entry}" for entry in broken]
     reminder = merges_since(path)
     if reminder:
@@ -689,7 +1048,17 @@ def main(argv: list[str]) -> int:
             print(f"❌ document introuvable : {doc}")
             failed = True
             continue
-        has_broken, lines = report(doc, path)
+        try:
+            has_broken, lines = report(doc, path)
+        except (SourceUnavailable, OSError) as error:
+            # Les SOURCES du contrôle peuvent disparaître ou cesser de se lire : le §7
+            # d'`analyzer_couverture.md` renommé, `MAX_UNDECLARED` supprimé, la porte de fusion
+            # devenue illisible. C'est bloquant — jamais un vert —, mais ça n'a pas à sortir en
+            # trace Python : le script promet 0 ou 1, et une trace sur un document SANS RAPPORT
+            # avec la panne envoie corriger le mauvais fichier.
+            print(f"❌ {doc}\n   CONTRÔLE IMPOSSIBLE — {type(error).__name__} : {error}")
+            failed = True
+            continue
         print("\n".join(lines))
         failed = failed or has_broken
     print(

@@ -89,6 +89,33 @@ def test_orphan_assertion_is_reported(tmp_path: pathlib.Path) -> None:
     assert all("ASSERTION ORPHELINE" in entry for entry in broken)
 
 
+def test_the_gate_ceiling_is_read_from_the_gate(tmp_path: pathlib.Path) -> None:
+    """Le plafond annoncé par §5 se confronte à `MAX_UNDECLARED`, pas à une relecture du texte."""
+    ceiling = cdr.expected_gate_ceiling(None)
+    doc = write(tmp_path, "ROADMAP.md", f"est refusée quand **{ceiling}** chantiers ont été livrés\n")
+    verified, broken = cdr.check_values(doc)
+    assert verified == 1
+    assert not any("plafond" in entry for entry in broken)
+
+
+def test_a_stale_gate_ceiling_is_detected(tmp_path: pathlib.Path) -> None:
+    """Le cas vécu : le document a annoncé 3 pendant que la porte refusait à 2."""
+    ceiling = cdr.expected_gate_ceiling(None)
+    doc = write(
+        tmp_path, "ROADMAP.md", f"est refusée quand **{ceiling + 1}** chantiers ont été livrés\n"
+    )
+    _verified, broken = cdr.check_values(doc)
+    assert any("VALEUR PÉRIMÉE" in entry and f"la source dit {ceiling}" in entry for entry in broken)
+
+
+def test_the_gate_ceiling_matches_the_real_roadmap() -> None:
+    """Bout en bout, sur le document réel : la phrase existe et dit la valeur de la porte."""
+    text = (ROOT / "Documentation" / "Implémentation" / "ROADMAP.md").read_text(encoding="utf-8")
+    claims = cdr.claim_gate_ceiling(text)
+    assert claims, "ROADMAP.md n'annonce plus le plafond de la porte — assertion orpheline"
+    assert all(value == cdr.expected_gate_ceiling(None) for _where, value in claims)
+
+
 def test_profile_table_reads_thousands_separator(tmp_path: pathlib.Path) -> None:
     """« 10 000 » vaut dix mille : le lire comme 10 inventerait une valeur périmée."""
     episodes = cdr.agent_profiles()["x1"]["total_episodes"]
@@ -253,6 +280,547 @@ def test_line_anchor_is_reported(tmp_path: pathlib.Path) -> None:
 def test_symbol_reference_is_not_an_anchor(tmp_path: pathlib.Path) -> None:
     doc = write(tmp_path, "ROADMAP.md", "voir `def compute_candidate_footprint` dans le moteur\n")
     assert cdr.check_anchors(doc) == []
+
+
+@pytest.mark.parametrize("ref", [
+    "BoardPvp.tsx:9290",
+    "useBoardHexMemos.ts:117",
+    "settings.json:17",
+    "V11_agent_rework.md:3713",
+    "docker-compose.yml:18",
+    "pytest.ini:12",
+    "useBoardHexMemos.test.ts:117",
+    "engine/ce_module_a_ete_supprime.py:412",
+    "Annexe_script_BDD_auth.sql:42",
+    ".env.example:7",
+    "frontend.code-workspace:3",
+])
+def test_a_line_anchor_of_any_extension_is_reported(tmp_path: pathlib.Path, ref: str) -> None:
+    """La convention §5 porte sur la LIGNE, pas sur le langage.
+
+    Mesuré le 2026-08-12 : les seules ancres survivantes de `ROADMAP.md` étaient deux `.tsx`,
+    décalées de plusieurs milliers de lignes et invisibles au contrôle, qui affichait pourtant
+    « 0 renvoi ». Une liste de suffixes aurait reconduit le trou sur `.yml` et `.ini` — ces deux
+    cas-là sont dans l'échantillon pour cette raison, et `docker-compose.yml:18` était bel et bien
+    présent dans `Security.md`.
+    """
+    doc = write(tmp_path, "ROADMAP.md", f"le composant `{ref}` recopie les hexes\n")
+    entries = cdr.check_anchors(doc)
+    assert len(entries) == 1
+    # Le renvoi est cité ENTIER, chemin compris. Capturé sans ses points internes,
+    # `useBoardHexMemos.test.ts:117` sortait comme `test.ts:117` ; capturé sans son dossier,
+    # `engine/…/move_handler.py:99` sortait comme `move_handler.py:99`, qui désigne cinq fichiers
+    # du dépôt au lieu d'un. Dans les deux cas le message n'envoie nulle part.
+    assert ref in entries[0]
+
+
+@pytest.mark.parametrize("line", [
+    "`_auto_declared_order` L6462 → **9133**\n",
+    "listés en `1_Agent/V11_agent_rework.md` §0bis (l.3713-3735)\n",
+])
+def test_the_other_two_spellings_of_an_anchor_are_reported(
+    tmp_path: pathlib.Path, line: str
+) -> None:
+    """§5 interdit le NUMÉRO DE LIGNE, pas une graphie particulière.
+
+    Ces deux écritures vivaient dans `ROADMAP.md` au 2026-08-12 pendant que le contrôle affichait
+    « 0 renvoi » : il n'en surveillait qu'une sur trois.
+    """
+    doc = write(tmp_path, "ROADMAP.md", line)
+    assert len(cdr.check_anchors(doc)) >= 1
+
+
+def test_a_step_log_entry_is_not_an_anchor(tmp_path: pathlib.Path) -> None:
+    """`Ln` NOMME une entrée du `step.log` : le corpus en porte 34, dont 28 NUES dans le §7.
+
+    Le seuil n'est pas écrit en dur — il est lu dans le tableau §7 et grandit avec lui. Ce test
+    construit donc son échantillon depuis la MÊME source : figer `L28` ici le rendrait faux à la
+    prochaine entrée, ce qui est exactement le défaut qu'on ferme.
+    """
+    largest = cdr.step_log_entries()[1]
+    doc = write(tmp_path, "ROADMAP.md", f"| L1 | `L3` → `L{largest}` |\n")
+    assert cdr.check_anchors(doc) == []
+
+
+def test_a_line_number_beyond_the_step_log_is_an_anchor(tmp_path: pathlib.Path) -> None:
+    """Au-delà du plus grand index existant, `Ln` ne peut plus être un nom d'entrée."""
+    largest = cdr.step_log_entries()[1]
+    doc = write(tmp_path, "ROADMAP.md", f"`_auto_declared_order` L{largest + 1} → **9133**\n")
+    assert len(cdr.check_anchors(doc)) == 1
+
+
+def test_a_citation_cannot_be_framed_by_two_files(tmp_path: pathlib.Path) -> None:
+    """Encadrer une citation de deux fichiers n'affirme plus rien, et c'est voulu.
+
+    Une citation encadrée affirmait deux choses contradictoires, et le fichier ACCUSÉ dépendait du
+    seul ordre des mots. Depuis que le deux-points doit terminer la ligne et la parenthèse se
+    refermer, l'encadrement n'est plus exprimable : la ligne ci-dessous ne porte qu'une affirmation,
+    celle qui se clôt, et le reste est compté non vérifié plutôt que deviné.
+    """
+    porteur = tmp_path / "porteur.py"
+    porteur.write_text("def agit():\n    return 1\n", encoding="utf-8")
+    absent = tmp_path / "absent.py"
+    absent.write_text("VALEUR = 1\n", encoding="utf-8")
+    doc = write(tmp_path, "ROADMAP.md", f"`{absent}` : `def agit` : `{porteur}`\n")
+    checked, unverifiable, broken, _notes = cdr.check_symbol_kinds(doc)
+    assert (checked, unverifiable, broken) == (1, 0, [])
+
+
+@pytest.mark.parametrize("line", [
+    "mesuré sur torch 2.13, git 2.43, à 15 h 18\n",
+    "le rapport de charge tient à `3.7:1` après la bascule\n",
+    "voir `Makefile.local:12`, hors dépôt\n",
+    "le modèle `ViT-L336` et la variante `SM-L1000`\n",
+])
+def test_what_is_not_a_repo_reference_is_not_an_anchor(
+    tmp_path: pathlib.Path, line: str
+) -> None:
+    """Ce qui a la FORME d'une ancre sans désigner de fichier du dépôt n'en est pas une.
+
+    `3.7:1` et `Makefile.local:12` ont bien la forme `nom.ext:chiffres` et traversent donc
+    `LINE_ANCHOR` : c'est `is_a_line_anchor` qui les écarte, sur une extension qu'aucun fichier
+    suivi n'emploie. Sans eux, ce test resterait vert avec le filtre remplacé par `return True`.
+    `ViT-L336`, lui, est écarté plus tôt, par le voisinage gauche de `BARE_ANCHOR`.
+    """
+    doc = write(tmp_path, "ROADMAP.md", line)
+    assert cdr.check_anchors(doc) == []
+
+
+# --------------------------------------------------------------------------- sortes
+
+
+def test_a_def_claimed_for_a_class_is_reported(tmp_path: pathlib.Path) -> None:
+    """Le défaut réel : `ROADMAP.md` promettait un grep `def` sur deux `class`, qui rend 0 hit."""
+    doc = write(
+        tmp_path, "ROADMAP.md",
+        "c'est `def EpisodeTerminationCallback` (`ai/training_callbacks.py`) qui porte le budget\n",
+    )
+    _checked, _unverifiable, broken, _notes = cdr.check_symbol_kinds(doc)
+    assert len(broken) == 1
+    assert "SORTE FAUSSE" in broken[0] and "`class`" in broken[0]
+
+
+def test_the_right_kind_is_confirmed(tmp_path: pathlib.Path) -> None:
+    doc = write(
+        tmp_path, "ROADMAP.md",
+        "c'est `class EpisodeTerminationCallback` (`ai/training_callbacks.py`) qui compte\n",
+    )
+    checked, _unverifiable, broken, _notes = cdr.check_symbol_kinds(doc)
+    assert checked == 1 and not broken
+
+
+def test_a_symbol_that_is_not_defined_at_all_is_reported(tmp_path: pathlib.Path) -> None:
+    doc = write(
+        tmp_path, "ROADMAP.md",
+        "voir `def _ce_symbole_na_jamais_existe` (`ai/training_callbacks.py`)\n",
+    )
+    _checked, _unverifiable, broken, _notes = cdr.check_symbol_kinds(doc)
+    assert len(broken) == 1 and "SYMBOLE NON DÉFINI" in broken[0]
+
+
+@pytest.mark.parametrize("body", [
+    'def porteur():\n    """Le lecteur cherchera `def write`, qui vit ailleurs."""\n'
+    "    return write(1)\n",
+    'PROSE = """\n    def write(source):\n        exemple recopié, pas une définition\n"""\n',
+])
+def test_a_mention_is_not_a_definition(tmp_path: pathlib.Path, body: str) -> None:
+    """Une MENTION ne vaut pas définition, y compris recopiée indentée dans une docstring.
+
+    Les deux corps citent `def write` sans le définir. Un motif textuel — même ancré en début de
+    ligne, l'indentation étant tolérée — les prend l'un et l'autre pour des définitions et
+    confirme la sorte qu'on lui souffle : c'est le vert vacant, côté sortes. La lecture par AST
+    ferme les deux d'un coup.
+    """
+    module = tmp_path / "faux_module.py"
+    module.write_text(body, encoding="utf-8")
+    doc = write(tmp_path, "ROADMAP.md", f"voir `def write` (`{module}`)\n")
+    _checked, _unverifiable, broken, _notes = cdr.check_symbol_kinds(doc)
+    assert len(broken) == 1 and "SYMBOLE NON DÉFINI" in broken[0]
+
+
+@pytest.mark.parametrize("citation", ["`def sert`", "`async def sert`"])
+def test_an_async_def_is_a_def(tmp_path: pathlib.Path, citation: str) -> None:
+    """`async def X` est un `def` des deux côtés : dans le code, et dans la CITATION.
+
+    Traiter `AsyncFunctionDef` côté AST sans accepter `async def` côté citation, c'était écrire un
+    traitement inatteignable : la ligne sortait « 0 fausse, 0 non vérifiée », le silence même que
+    la passe existe pour refuser.
+    """
+    module = tmp_path / "faux_module.py"
+    module.write_text("async def sert(requete):\n    return requete\n", encoding="utf-8")
+    doc = write(tmp_path, "ROADMAP.md", f"voir {citation} (`{module}`)\n")
+    checked, _unverifiable, broken, _notes = cdr.check_symbol_kinds(doc)
+    assert checked == 1 and not broken
+
+
+def test_a_nested_definition_counts(tmp_path: pathlib.Path) -> None:
+    """Une méthode citée par son nom est bien définie dans le fichier cité."""
+    module = tmp_path / "faux_module.py"
+    module.write_text("class Porteur:\n    def methode(self):\n        return 1\n", encoding="utf-8")
+    doc = write(tmp_path, "ROADMAP.md", f"voir `def methode` (`{module}`)\n")
+    checked, _unverifiable, broken, _notes = cdr.check_symbol_kinds(doc)
+    assert checked == 1 and not broken
+
+
+@pytest.mark.parametrize("citation", [
+    "`def EpisodeTerminationCallback()`",
+    "`def EpisodeTerminationCallback(model, verbose=0) -> None`",
+    "`def EpisodeTerminationCallback:`",
+])
+def test_a_signature_does_not_disarm_the_pass(tmp_path: pathlib.Path, citation: str) -> None:
+    """Citer la signature est la forme la plus courante : elle doit être CONFRONTÉE, pas ignorée.
+
+    Ignorée, elle ne comptait même pas comme non vérifiée — la passe rendait « 0 fausse, 0 non
+    vérifiée » sur une ligne fausse.
+    """
+    doc = write(tmp_path, "ROADMAP.md", f"c'est {citation} (`ai/training_callbacks.py`) qui compte\n")
+    _checked, _unverifiable, broken, _notes = cdr.check_symbol_kinds(doc)
+    assert len(broken) == 1 and "SORTE FAUSSE" in broken[0]
+
+
+def test_an_ambiguous_file_makes_the_cell_unconfrontable(tmp_path: pathlib.Path) -> None:
+    """`conftest.py` existe cinq fois : le document ne dit pas duquel il parle.
+
+    L'adjacence donne un fichier, pas une identité : ouvrir le premier trouvé, c'est interroger un
+    fichier dont le document ne parle peut-être pas — même doctrine qu'en passe 1.
+    """
+    doc = write(tmp_path, "ROADMAP.md", "voir `class GameClient` (`conftest.py`)\n")
+    checked, unverifiable, broken, _notes = cdr.check_symbol_kinds(doc)
+    assert (checked, unverifiable, broken) == (0, 1, [])
+
+
+def test_an_unparsable_file_is_not_blamed_on_the_document(tmp_path: pathlib.Path) -> None:
+    """Un `.py` du dépôt qui ne compile pas n'est pas un défaut du DOCUMENT.
+
+    Scénario vécu le 2026-08-12 : `ai/train.py` ne compilait pas à HEAD. Imputer sa syntaxe au
+    document aurait rendu la porte documentaire rouge — et invérifiable — pour un défaut de code.
+    Compté non vérifié, jamais « symbole absent », qui aurait accusé le document à tort.
+    """
+    module = tmp_path / "faux_module.py"
+    module.write_text("def casse(:\n", encoding="utf-8")
+    doc = write(tmp_path, "ROADMAP.md", f"voir `def casse` (`{module}`)\n")
+    checked, unverifiable, broken, _notes = cdr.check_symbol_kinds(doc)
+    assert (checked, unverifiable, broken) == (0, 1, [])
+
+
+def test_a_table_never_pairs_across_cells(tmp_path: pathlib.Path) -> None:
+    """Une cellule cite le symbole, une AUTRE cite un fichier étranger : rien n'est affirmé.
+
+    `analyzer_couverture.md` est presque entièrement tabulaire ; apparier la ligne entière le
+    rendrait rouge à la première ligne de cette forme, et un contrôle qui crie à tort finit
+    désactivé.
+    """
+    doc = write(
+        tmp_path, "ROADMAP.md",
+        "| `class EpisodeTerminationCallback` | oui | `ai/train.py` |\n",
+    )
+    checked, unverifiable, broken, _notes = cdr.check_symbol_kinds(doc)
+    assert (checked, unverifiable, broken) == (0, 1, [])
+
+
+def test_prose_never_pairs_a_distant_file(tmp_path: pathlib.Path) -> None:
+    """Le seul `.py` de la phrase n'est PAS le fichier du symbole cité.
+
+    Scénario mesuré : la phrase parle d'un fichier du dépôt puis cite une classe de SB3, qui n'y
+    vit évidemment pas. Apparier les deux sortait un SYMBOLE NON DÉFINI, donc un code 1, sur une
+    phrase juste — et un contrôle qui crie à tort finit désactivé.
+    """
+    doc = write(
+        tmp_path, "ROADMAP.md",
+        "les rampes vivent dans `ai/training_callbacks.py` ; on y branche `class VecNormalize` "
+        "de SB3\n",
+    )
+    checked, unverifiable, broken, _notes = cdr.check_symbol_kinds(doc)
+    assert (checked, unverifiable, broken) == (0, 1, [])
+
+
+def test_a_parenthesis_that_keeps_talking_is_not_a_claim(tmp_path: pathlib.Path) -> None:
+    """`class X` (`a/b.py` l'importe de SB3) n'affirme pas que `X` vit dans `a/b.py`.
+
+    C'est la distinction ferme/molle de la passe 1 : sans elle, cette ligne sortait CASSÉE ici
+    (donc code 1) et « non vérifiée » là, sur exactement la même phrase.
+    """
+    doc = write(
+        tmp_path, "ROADMAP.md",
+        "on branche `class VecNormalize` (`ai/training_callbacks.py` l'importe de SB3)\n",
+    )
+    checked, unverifiable, broken, _notes = cdr.check_symbol_kinds(doc)
+    assert (checked, unverifiable, broken) == (0, 1, [])
+
+
+@pytest.mark.parametrize("line", [
+    "le budget vit dans `ai/training_callbacks.py` (`def EpisodeTerminationCallback`)\n",
+    "le budget vit dans `ai/training_callbacks.py` : `def EpisodeTerminationCallback`\n",
+])
+def test_the_file_may_come_first(tmp_path: pathlib.Path, line: str) -> None:
+    """L'ordre `fichier.py` (`def X`) est celui de la passe 1 : le défaut y passait entier.
+
+    Ni la passe 5 (qui n'appariait que symbole-puis-fichier) ni la passe 1 (dont
+    `is_symbol_token` refuse l'espace de « def Foo ») ne voyaient cette écriture. Le motif même
+    qui a ouvert ce chantier, écrit à l'envers, sortait vert.
+    """
+    doc = write(tmp_path, "ROADMAP.md", line)
+    _checked, unverifiable, broken, _notes = cdr.check_symbol_kinds(doc)
+    assert len(broken) == 1 and "SORTE FAUSSE" in broken[0]
+    # La citation est APPARIÉE : la compter EN PLUS comme « non vérifiée » ferait dire au rapport
+    # qu'un renvoi confronté ne l'a pas été.
+    assert unverifiable == 0
+
+
+@pytest.mark.parametrize("line", [
+    "on branche `class VecNormalize` `ai/training_callbacks.py` l'importe de SB3\n",
+    "`ai/training_callbacks.py` `def EpisodeTerminationCallback` porte le budget\n",
+])
+def test_a_bare_juxtaposition_is_not_a_firm_claim(tmp_path: pathlib.Path, line: str) -> None:
+    """Deux jetons collés ne se distinguent pas d'une phrase qui continue — dans les DEUX sens.
+
+    Tenue pour ferme, la première ligne sortait un SYMBOLE NON DÉFINI (donc un code 1) sur une
+    phrase juste ; et l'accepter dans un sens sans l'accepter dans l'autre faisait dépendre le
+    verdict de l'ordre des mots. Le lien fermé — parenthèse ou deux-points — est exigé partout.
+    """
+    doc = write(tmp_path, "ROADMAP.md", line)
+    checked, unverifiable, broken, _notes = cdr.check_symbol_kinds(doc)
+    assert (checked, unverifiable, broken) == (0, 1, [])
+
+
+def test_a_qualified_citation_is_confronted(tmp_path: pathlib.Path) -> None:
+    """`def Classe.methode` est une citation : la rejeter la faisait disparaître de TOUS les compteurs.
+
+    Ni vérifiée, ni non vérifiée : le rapport annonçait « 0 fausse » sur une ligne jamais regardée.
+    Le nom QUALIFIÉ est confronté tel quel — `definitions` indexe chaque définition sous ses deux
+    noms —, et le test suivant prouve qu'un homonyme de module ne suffit pas à le satisfaire.
+    """
+    module = tmp_path / "faux_module.py"
+    module.write_text("class Moteur:\n    def agit(self):\n        return 1\n", encoding="utf-8")
+    doc = write(tmp_path, "ROADMAP.md", f"voir `class Moteur.agit` (`{module}`)\n")
+    _checked, _unverifiable, broken, _notes = cdr.check_symbol_kinds(doc)
+    assert len(broken) == 1 and "SORTE FAUSSE" in broken[0]
+
+
+def test_a_qualified_citation_is_not_satisfied_by_a_module_level_twin(
+    tmp_path: pathlib.Path
+) -> None:
+    """`def Moteur.agit` n'est pas confirmé par un `def agit` de module, sans `Moteur` nulle part.
+
+    Confronter le seul dernier segment rendait vert un document dont le grep promis rend 0 hit —
+    le défaut même que cette passe existe pour attraper.
+    """
+    module = tmp_path / "faux_module.py"
+    module.write_text("def agit():\n    return 1\n", encoding="utf-8")
+    doc = write(tmp_path, "ROADMAP.md", f"voir `def Moteur.agit` (`{module}`)\n")
+    checked, _unverifiable, broken, _notes = cdr.check_symbol_kinds(doc)
+    assert checked == 0
+    assert len(broken) == 1 and "SYMBOLE NON DÉFINI" in broken[0]
+
+
+def test_an_extensionless_tracked_file_is_an_anchor(tmp_path: pathlib.Path) -> None:
+    """`Dockerfile:14` est un renvoi de ligne — et `Security.md` cite justement ce fichier."""
+    doc = write(tmp_path, "ROADMAP.md", "le montage est décrit en `Dockerfile:14`\n")
+    assert len(cdr.check_anchors(doc)) == 1
+
+
+def test_the_same_anchor_written_twice_is_reported_once(tmp_path: pathlib.Path) -> None:
+    """`[a.py:629](…/a.py#L629)` porte UN renvoi, écrit dans le texte et dans l'URL.
+
+    Compté deux fois, le rapport annonçait « 2 ancres » et envoyait chercher une seconde qui
+    n'existe pas.
+    """
+    doc = write(
+        tmp_path, "ROADMAP.md",
+        "voir [shared_utils.py:629](../../engine/phase_handlers/shared_utils.py#L629)\n",
+    )
+    assert len(cdr.check_anchors(doc)) == 1
+
+
+def test_two_distinct_anchors_sharing_a_number_are_both_reported(
+    tmp_path: pathlib.Path
+) -> None:
+    """Hors lien, deux renvois qui portent le même nombre restent DEUX renvois.
+
+    Dédoublonner sur le seul numéro perdait le second en silence — pire que le doublon qu'on
+    voulait éviter.
+    """
+    doc = write(tmp_path, "ROADMAP.md", "les deux sites `shared_utils.py:629` et L629 de BoardPvp\n")
+    assert len(cdr.check_anchors(doc)) == 2
+
+
+def test_two_files_at_the_same_line_inside_one_link_are_both_reported(
+    tmp_path: pathlib.Path
+) -> None:
+    """Deux FICHIERS différents au même numéro, dans un même lien, sont deux renvois."""
+    doc = write(tmp_path, "ROADMAP.md", "voir [train.py:12 et w40k_core.py:12](x.md)\n")
+    assert len(cdr.check_anchors(doc)) == 2
+
+
+def test_a_file_url_link_repeating_its_anchor_is_reported_once(tmp_path: pathlib.Path) -> None:
+    """La forme `file:///` imposée par CLAUDE.md répète le renvoi sans passer par un `#L`.
+
+    Le dédoublonnage doit donc valoir des DEUX côtés du lien, pas seulement pour la graphie `Ln` :
+    autrement cette forme-là, la plus courante du corpus, était comptée deux fois.
+    """
+    doc = write(
+        tmp_path, "ROADMAP.md",
+        "voir [shared_utils.py:629](file:///home/greg/40k/engine/phase_handlers/"
+        "shared_utils.py:629)\n",
+    )
+    assert len(cdr.check_anchors(doc)) == 1
+
+
+def test_an_unloadable_source_blocks_without_a_traceback(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Une porte de fusion qui ne s'importe plus bloque en une ligne, pas en trace Python."""
+    doc = write(tmp_path, "ROADMAP.md", "est refusée quand **2** chantiers ont été livrés\n")
+    monkeypatch.setattr(
+        cdr, "gate_module",
+        lambda: (_ for _ in ()).throw(cdr.SourceUnavailable("import cassé")),
+    )
+    assert cdr.main(["prog", str(doc)]) == 1
+
+
+def test_a_gate_that_no_longer_imports_is_a_source_failure(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """La porte de fusion qui ne s'exécute plus est une SOURCE indisponible, pas une trace brute.
+
+    Un import cassé dans `check_roadmap_declared.py` sortait en `ImportError` nu — hors du filet,
+    donc en trace Python, sur un document qui n'y est pour rien.
+    """
+    faux = tmp_path / "scripts"
+    faux.mkdir()
+    (faux / "check_roadmap_declared.py").write_text(
+        "import ce_module_nexiste_pas\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(cdr, "ROOT", tmp_path)
+    cdr.gate_module.cache_clear()
+    try:
+        with pytest.raises(cdr.SourceUnavailable):
+            cdr.gate_module()
+    finally:
+        cdr.gate_module.cache_clear()
+
+
+def test_an_internal_defect_keeps_its_traceback(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Un `KeyError` de profil mal formé n'est PAS « une source disparue ».
+
+    Le confondre avec elle annonçait la mauvaise panne et désignait le mauvais fichier : ce qui
+    est un défaut interne garde sa trace.
+    """
+    doc = write(tmp_path, "ROADMAP.md", "les **9** profils\n")
+    monkeypatch.setattr(
+        cdr, "expected_profile_count",
+        lambda: (_ for _ in ()).throw(KeyError("callback_params")),
+    )
+    with pytest.raises(KeyError):
+        cdr.main(["prog", str(doc)])
+
+
+def test_a_source_that_disappears_blocks_without_a_traceback(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Une SOURCE du contrôle qui s'évapore bloque — mais en une ligne, pas en trace Python.
+
+    Le §7 d'`analyzer_couverture.md` renommé faisait mourir la passe 4 de n'importe quel document,
+    y compris ceux qui n'ont aucun rapport avec le `step.log` : une trace envoie alors corriger le
+    mauvais fichier, et le script promet 0 ou 1.
+    """
+    doc = write(tmp_path, "ROADMAP.md", "`_auto_declared_order` L6462 → **9133**\n")
+    monkeypatch.setattr(
+        cdr, "step_log_entries",
+        lambda: (_ for _ in ()).throw(cdr.SourceUnavailable("§7 introuvable")),
+    )
+    assert cdr.main(["prog", str(doc)]) == 1
+
+
+def test_backticked_prose_with_a_colon_is_not_a_citation(tmp_path: pathlib.Path) -> None:
+    """`class Objectives : la liste des objectifs` est une phrase, pas une signature.
+
+    Laisser le deux-points ouvrir n'importe quoi sortait un SYMBOLE NON DÉFINI, donc un code 1,
+    sur une ligne juste. Le deux-points de signature est COLLÉ au nom.
+    """
+    doc = write(
+        tmp_path, "ROADMAP.md",
+        "`class Objectives : la liste des objectifs` (`engine/w40k_core.py`)\n",
+    )
+    checked, unverifiable, broken, _notes = cdr.check_symbol_kinds(doc)
+    assert (checked, unverifiable, broken) == (0, 0, [])
+
+
+def test_an_unparsable_file_is_named_not_just_counted(tmp_path: pathlib.Path) -> None:
+    """Le silence est compté ET sa raison NOMMÉE, sinon la passe s'éteint sans témoin.
+
+    Absorbée dans « pas de fichier adjacent », la panne donnait une raison fausse d'un silence
+    réel — et c'est exactement ainsi qu'un contrôle meurt sans que personne ne le voie.
+    """
+    module = tmp_path / "faux_module.py"
+    module.write_text("def casse(:\n", encoding="utf-8")
+    doc = write(tmp_path, "ROADMAP.md", f"voir `def casse` (`{module}`)\n")
+    _checked, unverifiable, broken, notes = cdr.check_symbol_kinds(doc)
+    assert (unverifiable, broken) == (1, [])
+    assert len(notes) == 1 and "faux_module.py" in notes[0]
+
+
+@pytest.mark.parametrize("line", [
+    "`ai/training_callbacks.py` : `class VecNormalize` est importé de SB3, pas défini ici\n",
+    "`class VecNormalize` : `ai/training_callbacks.py` l'importe de SB3\n",
+])
+def test_a_colon_that_opens_a_sentence_is_not_a_claim(
+    tmp_path: pathlib.Path, line: str
+) -> None:
+    """Le deux-points n'a pas de clôture : il n'affirme que s'il TERMINE la ligne.
+
+    Sans cette garde, la phrase ci-dessus sortait un SYMBOLE NON DÉFINI — donc un code 1 — quand
+    la même phrase écrite entre parenthèses était correctement comptée non vérifiée. Le verdict ne
+    peut pas dépendre de la ponctuation.
+    """
+    doc = write(tmp_path, "ROADMAP.md", line)
+    checked, unverifiable, broken, _notes = cdr.check_symbol_kinds(doc)
+    assert (checked, unverifiable, broken) == (0, 1, [])
+
+
+def test_the_colon_form_claims_in_both_orders(tmp_path: pathlib.Path) -> None:
+    """Le deux-points affirme, quel que soit le côté où se trouve le fichier."""
+    doc = write(
+        tmp_path, "ROADMAP.md",
+        "`def EpisodeTerminationCallback` : `ai/training_callbacks.py`\n",
+    )
+    _checked, _unverifiable, broken, _notes = cdr.check_symbol_kinds(doc)
+    assert len(broken) == 1 and "SORTE FAUSSE" in broken[0]
+
+
+def test_the_message_names_the_adjacent_file(tmp_path: pathlib.Path) -> None:
+    """Le message accuse le fichier ADJACENT, seul que le contrôle ait ouvert.
+
+    Le fichier cité plus loin dans la phrase n'existe même pas : le nommer enverrait corriger le
+    mauvais endroit.
+    """
+    doc = write(
+        tmp_path, "ROADMAP.md",
+        "`def EpisodeTerminationCallback` (`ai/training_callbacks.py`) a remplacé "
+        "`ai/disparu.py`\n",
+    )
+    _checked, _unverifiable, broken, _notes = cdr.check_symbol_kinds(doc)
+    assert len(broken) == 1
+    assert "training_callbacks.py" in broken[0] and "disparu" not in broken[0]
+
+
+@pytest.mark.parametrize("line", [
+    "⚠️ ne pas confondre avec `def _EpisodeRampCallback`, du même fichier\n",
+    "`def enter_phase` vit entre `engine/game_utils.py` et `ai/train.py`\n",
+])
+def test_a_kind_without_a_single_file_is_counted_not_guessed(
+    tmp_path: pathlib.Path, line: str
+) -> None:
+    """Zéro ou deux fichiers sur la ligne : rien n'est confrontable, rien n'est inventé.
+
+    « du même fichier » ne se résout pas, et rattacher la ligne au fichier de la précédente
+    fabriquerait une affirmation que le document ne fait pas.
+    """
+    doc = write(tmp_path, "ROADMAP.md", line)
+    checked, unverifiable, broken, _notes = cdr.check_symbol_kinds(doc)
+    assert (checked, unverifiable, broken) == (0, 1, [])
 
 
 # --------------------------------------------------------------------------- corpus réel
@@ -501,5 +1069,24 @@ def test_reference_documents_are_clean() -> None:
         _resolved, _unverifiable, broken_refs = cdr.check_references(path)
         _checked, _skipped, broken_links = cdr.check_links(path)
         _verified, broken_values = cdr.check_values(path)
-        broken = broken_refs + broken_links + broken_values + cdr.check_anchors(path)
+        _kinds, _kinds_unverifiable, broken_kinds, _notes = cdr.check_symbol_kinds(path)
+        broken = (
+            broken_refs + broken_links + broken_values + cdr.check_anchors(path) + broken_kinds
+        )
         assert not broken, f"{name} : " + " | ".join(broken)
+
+
+def test_the_corpus_really_confronts_some_kinds() -> None:
+    """VERT VACANT : « 0 sorte fausse » ne vaut rien si aucune sorte n'a été confrontée.
+
+    Les trois documents en portent trois au 2026-08-12 (deux dans `ROADMAP.md`, une dans
+    `Security.md`). Le jour où la dernière disparaît, ce test doit le dire plutôt que laisser la
+    passe s'éteindre en silence.
+    """
+    total = 0
+    for name in ("analyzer_couverture.md", "ROADMAP.md", "Security.md"):
+        checked, _unverifiable, _broken, _notes = cdr.check_symbol_kinds(
+            ROOT / "Documentation" / "Implémentation" / name
+        )
+        total += checked
+    assert total >= 3

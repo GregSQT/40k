@@ -160,10 +160,11 @@
   plus reconstruire fond et murs à chaque capture d'objectif ; sortir tout `bcKey` dans
   `boardRedrawDecision.ts`, à côté de l'invariant qu'il alimente.
   RESTE : la validation navigateur (une capture d'objectif doit toujours recolorer la zone).
-  SIGNALÉ, NON TRAITÉ (même motif, hors périmètre de clôture — un prompt de chantier existe) :
-  `BoardWithAPI.tsx:581` recopie les ~10 500 hexes d'objectif à chaque rendu, `BoardPvp.tsx:9290`
-  les aplatit dans l'effet de dessin, `BoardPvp.tsx:11253` rebâtit un `Set` de ~1 000 murs par
-  rendu pendant le glisser de déploiement.
+  SIGNALÉ ICI, puis TRAITÉ le même jour par la ligne suivante (trois sites du même motif : la
+  normalisation des ~10 500 hexes d'objectif de `BoardWithAPI.tsx`, leur aplatissement dans l'effet
+  de dessin de `BoardPvp.tsx`, le `Set` de ~1 000 murs rebâti pendant le glisser de déploiement).
+  Ils vivent désormais dans `frontend/src/hooks/useBoardHexMemos.ts` — `useNormalizedObjectives`,
+  `useEffectiveObjectiveHexes`, `useWallHexKeySet`.
 
 - ✅ **Les trois aplatissements volumineux restants du chemin de rendu** (ouvert ET livré le
   2026-08-12, suite directe de la ligne ci-dessus, qui les avait signalés sans les traiter — ils ne
@@ -413,10 +414,10 @@ mesure, et c'est assumé (§0.14).
      | `x1` | 10 000 | **10** |
      | `x1_long` | 50 000 (valait 200 000 avant le 2026-08-11) | 600 |
      `total_episodes` est un total **GLOBAL** tous environnements confondus : c'est
-     `def EpisodeTerminationCallback` (`ai/training_callbacks.py`) qui porte le budget de run, et
+     `class EpisodeTerminationCallback` (`ai/training_callbacks.py`) qui porte le budget de run, et
      son `episode_count += episodes_finished` somme les fins d'épisode de TOUS les env d'un pas.
-     ⚠️ Ne pas confondre avec `def _EpisodeRampCallback`, du même fichier, qui compte pareil mais
-     ne pilote que les rampes — c'est la classe que ce fichier a d'abord citée, à tort.
+     ⚠️ Ne pas confondre avec `class _EpisodeRampCallback` (`ai/training_callbacks.py`), qui compte
+     pareil mais ne pilote que les rampes — c'est la classe que ce fichier a d'abord citée, à tort.
      Ces trois valeurs sont désormais confrontées à la config par `scripts/check_doc_references.py`
      (§5) : elles ont été fausses trois fois en vingt-quatre heures avant qu'il existe.
    - **`x1_debug` ne produit AUCUN win-rate** : `bot_eval_final = 0`, il n'y a pas d'évaluation
@@ -598,7 +599,7 @@ Prêts à démarrer sans décision produit :
   03.04 est 2" horizontal ET 5" vertical, et corriger le socle en laissant la hauteur au bloc
   n'aurait rendu la règle juste qu'à moitié.
   Mesuré : **67 figurines sur 684** au gabarit divergent, **21 530 cases sur 575 515 (3,7 %)**
-  changent de VERDICT d'engagement — deux ordres de grandeur au-dessus des 3 cases sur 330 du
+  changent de VERDICT d'engagement — **quatre fois** le taux des 3 cases sur 330 (0,9 %) du
   chantier d'empreinte. Effet de la hauteur seule : **0** (aucune datasheet du dépôt n'en porte une
   différente de son escouade — le câblage prévient, il ne corrige rien aujourd'hui).
   Livré dans la foulée (arbitrage tranché) : `pile_in_move_destinations_12_03` (pool AUTO/gym,
@@ -728,9 +729,9 @@ Prêts à démarrer sans décision produit :
   expliquer par elle vient d'ailleurs, et reste ouvert.
   → [`Implémenté/figurine_allouee_nommee_au_journal_2026-08-12.md`](Implémenté/figurine_allouee_nommee_au_journal_2026-08-12.md)
 - 🟠 **Conformité moteur — les 53 erreurs que l'analyzer voit VRAIMENT** (ouvert le 2026-08-11,
-  **26 restantes** : la famille CC_NB, la plus lourde, est soldée le jour même ; les familles
-  « tirs hors portée » et « tir engagé visant une unité non engagée » sont soldées le 2026-08-12 —
-  c'étaient des artefacts, cf. ci-dessus).
+  **10 restantes** — le tableau ci-dessous en est la source, cette ligne le résume : la famille
+  CC_NB, la plus lourde, est soldée le jour même ; les deux familles de move le 2026-08-12 ; les
+  trois familles de tir le 2026-08-12 aussi, c'étaient des artefacts, cf. ci-dessus).
   ✅ **LES DEUX FAMILLES DE MOVE SONT SOLDÉES le 2026-08-12, et c'était un défaut MOTEUR.**
   Cause mesurée sur run instrumenté (x1, E4 T5), pas déduite : `destroy_model` recalcule l'union
   des socles après un retrait, PUIS recalcule l'ancre — et quand c'est l'ANCRE qui tombe,
@@ -779,7 +780,7 @@ Prêts à démarrer sans décision produit :
   | ~~Tirs hors portée~~ **→ 0, ARTEFACTS (voir ci-dessous)** | ~~2~~ | ~~3~~ | 10 Shooting |
   | ~~Tir engagé visant une unité NON engagée avec le tireur~~ **→ 0, ARTEFACTS (voir ci-dessus)** | ~~0~~ | ~~3~~ | 10.06 |
   | Move normal PARTI d'un engagement | 0 | 2 | 09.05 |
-  | Tir sur un ennemi engagé | 0 | 1 | 10.06 |
+  | ~~Tir sur un ennemi engagé~~ **→ 0, ARTEFACTS (voir ci-dessous)** | ~~0~~ | ~~1~~ | 10.06 |
   | Mort « fantôme » (état reconstruit ≠ moteur) | 1 (total) | | — |
   ✅ **Trois familles annoncées le matin ont DISPARU** — pile-in au-delà de 3" (1), consolidation
   au-delà de 3" (1), charge depuis un hex déjà adjacent (1) sont à **0**. C'étaient des faux
@@ -989,12 +990,24 @@ Lourds, à re-cadrer avant toute reprise :
     python3 scripts/check_doc_references.py
 
 Sans argument, il passe `analyzer_couverture.md`, **ce fichier** et `Security.md`. Il rend 0 s'il ne trouve rien,
-1 sinon, et se lance sur n'importe quel `.md` passé en argument. Quatre passes : les fichiers cités
+1 sinon, et se lance sur n'importe quel `.md` passé en argument. Cinq passes : les fichiers cités
 existent et portent les symboles cités ; les cibles de liens existent ; les **nombres recopiés**
 d'une source mécanique valent encore ce qu'ils annoncent ; aucun renvoi ne porte un numéro de
-ligne (`<fichier>.py:<ligne>`). Verrouillé par `tests/unit/scripts/test_check_doc_references.py`.
+ligne — les **trois graphies** du corpus, `<fichier>.<ext>:<ligne>` (toutes extensions, `.tsx` et
+`.yml` compris), `<L>7370` et `(<l>.3713-3735)` ; et un symbole
+annoncé `<def> X` ou `<class> X` est bien de cette sorte dans le fichier cité JUSTE À CÔTÉ (lu par
+l'AST, jamais au grep : un exemple recopié dans une docstring confirmait la sorte qu'on lui
+soufflait).
+Verrouillé par `tests/unit/scripts/test_check_doc_references.py`.
 Il ne distingue pas une citation d'une mention : écrire la forme interdite en exemple la déclenche,
 d'où la notation entre chevrons ci-dessus.
+
+🔴 **Ce que ces deux dernières passes ont coûté d'apprendre** (2026-08-12). La convention d'ancres
+ne portait que sur `.py` : les seules ancres survivantes du fichier étaient deux `.tsx`, déjà
+décalées de plusieurs milliers de lignes, et invisibles. Et la ligne qui promettait un `grep`
+reproductible sur `<def> EpisodeTerminationCallback` en promettait un qui rend **0 hit** — ce sont
+des `<class>`. Un document qui se présente comme vérifiable sans l'être est pire qu'un document
+muet : il fait économiser la vérification.
 
 **Ce qu'il ne sait pas faire, et qui est affiché plutôt que tu, à chaque exécution** : un renvoi
 sans symbole à confronter n'est pas vérifié (il est compté) ; le nombre de « contrôles analyzer
@@ -1010,25 +1023,27 @@ français. Le script se borne à rappeler combien de livraisons ont été mergé
 (`core.hooksPath` pointe dessus, les hooks sont donc versionnés). Le hook ne s'exécute que lorsque
 `MERGE_HEAD` est présent — ce qui garantit que le contrôle rate toujours les contextes hors merge.
 Une fusion **dans `main`** est
-refusée quand **deux** chantiers ont déjà été livrés sans que ce fichier bouge (plafond porté de 3
-à 2 le 2026-08-12, voir ci-dessous). Le refus les nomme.
+refusée quand **2** chantiers ont déjà été livrés sans que ce fichier bouge (plafond abaissé le
+2026-08-12, voir ci-dessous ; cette valeur est confrontée à `MAX_UNDECLARED` par le contrôle de
+§5). Le refus les nomme.
 
 **Le plafond est une mesure, pas un réglage.** Le refus sec a été essayé puis abandonné sur
-chiffres : « la branche doit toucher la feuille de route » refuse **22 des 25** derniers merges,
-« la feuille doit avoir bougé depuis le merge précédent » en refuse **20 sur 25** — parce que le
-flux réel écrit la ligne dans un commit de suivi, après la fusion. Une porte rouge en permanence se
-contourne au premier usage : on aurait troqué un manque visible contre un contrôle mort.
+chiffres : rejoué sur les fusions réelles du tronc, il en refusait la très grande majorité — parce
+que le flux réel écrit la ligne dans un commit de suivi, après la fusion. Une porte rouge en
+permanence se contourne au premier usage : on aurait troqué un manque visible contre un contrôle
+mort.
 
 🔴 **Ce qu'elle vaut vraiment, et il faut le savoir avant de s'y fier.** Les chiffres du calibrage,
 avec leur méthode et leur date, vivent en tête de `scripts/check_roadmap_declared.py` et **nulle
 part ailleurs** — ils étaient recopiés ici et dans le fichier de test, les jeux se sont contredits,
-et un chiffre recopié ne vieillit pas avec sa source (constaté le 2026-08-12). Ce qu'il faut en
-retenir : re-mesurée le 2026-08-12 sur toutes les fusions du tronc depuis le 2026-08-10, **au
-plafond 3 la porte ne se déclenchait pas une seule fois** sur le flux moderne — ses refus étaient
-tous concentrés sur l'arriéré du 2026-08-10, soldé depuis. D'où la **DÉCISION UTILISATEUR du
-2026-08-12 : plafond porté à 2**, le seul réglage que la mesure distingue — il refuse exactement
-les 2 oublis avérés sur 41 fusions, quand 1 en refuserait 6 et se ferait donc contourner. La limite
-de fond ne change pas pour autant : la dette retombe à zéro dès que
+et un chiffre recopié ne vieillit pas avec sa source (constaté le 2026-08-12). Aucun n'est donc
+répété ici : pour savoir combien de fusions chaque plafond refuse et sur quel échantillon, lire
+l'en-tête du script, qui est la seule source. Ce qui se retient sans chiffre : au plafond
+précédent la porte ne se déclenchait plus une seule fois sur le flux moderne, ses refus étant tous
+concentrés sur un arriéré depuis soldé ; d'où la **DÉCISION UTILISATEUR du 2026-08-12** de le
+descendre au seul réglage que la mesure distingue — il refuse exactement les oublis avérés, quand
+le cran en dessous refuserait assez souvent pour qu'on prenne l'habitude de le contourner. La
+limite de fond ne change pas pour autant : la dette retombe à zéro dès que
 ce fichier est **touché**, pour n'importe quel motif — une valeur corrigée, une reformulation, une
 typo. Comme il est retouché souvent, la porte mesure une SÉCHERESSE d'écriture, pas la déclaration
 d'un chantier précis. Elle attrape l'oubli prolongé ; elle ne remplace pas la discipline, et il ne
@@ -1171,16 +1186,17 @@ vérifiée ; l'appariement reste réservé aux cellules de tableau, où le renvo
   plus SÉVÈRE des deux, jamais laxiste). Les durées de `x1_long` ont été réancrées sur la mesure
   le 2026-08-11 ; le reste ne l'est pas. Le traiter = re-dériver chaque note de coût d'évaluation
   des 9 profils, donc un chantier à ouvrir, pas un périmètre de clôture.
-- Bandeaux et chiffres périmés listés en `1_Agent/V11_agent_rework.md` §0bis (l.3713-3735),
-  signalés et volontairement non corrigés depuis le 2026-07-20.
+- Bandeaux et chiffres périmés listés en `1_Agent/V11_agent_rework.md` §0bis, signalés et
+  volontairement non corrigés depuis le 2026-07-20.
 - `UNIT_ABILITY_SLOTS = 8` est une projection non mesurée ; le chantier 06 la rendra mesurable (§2).
 - **Ancres de ligne des docs V11 : périmées en masse** (relevé le 2026-08-10). Les symboles cités
-  existent tous, mais les numéros de ligne ont dérivé de 400 à 3 500 lignes — `_select_allocation_model`
-  ~5643 → **7980**, `fight_pile_in_plan` ~6708 → **10240**, `squad_consolidate_plan` ~7038 →
-  **10627**, `charge_build_valid_plan` ~3955 → **5720**, `_auto_select_cc_weapon_for_fig` L7370 →
-  **10463**, `_auto_declared_order` L6462 → **9133**, `compute_candidate_footprint` L416 → **496**.
-  Les lignes du **chemin critique** (§9.4, §9.0bis, §1bis) sont corrigées en **nom de symbole** ;
-  le reste des docs n'a pas été balayé.
+  existent tous, mais les numéros de ligne ont dérivé de plusieurs centaines à plusieurs milliers
+  de lignes. Les sept symboles concernés vivent tous dans le même fichier :
+  `engine/phase_handlers/shared_utils.py` (`_select_allocation_model`, `fight_pile_in_plan`, `squad_consolidate_plan`, `charge_build_valid_plan`, `_auto_select_cc_weapon_for_fig`, `_auto_declared_order`, `compute_candidate_footprint`).
+  Aucune correction de ligne n'est écrite ici, **parce qu'elle
+  serait fausse à son tour** — celle du 2026-08-10 l'était de 300 à 500 lignes deux jours plus tard
+  (constaté le 2026-08-12). Les lignes du **chemin critique** (§9.4, §9.0bis, §1bis) sont corrigées
+  en **nom de symbole** ; le reste des docs n'a pas été balayé.
   🟢 **DÉCISION 2026-08-10 — traitement AU FIL DE L'EAU, pas de balayage global.** Motif : le
   porteur de risque est un doc qu'on **rouvre** (c'est ainsi qu'est né le plan T7 faux, cf.
   `V11_tranches.md` §1bis) ; un balayage complet dépenserait une journée sur `Implémenté/`, qui
