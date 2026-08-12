@@ -294,18 +294,123 @@ def _firepower_from(dest, profile, my_range: int) -> Tuple[float, float]:
     return mine, theirs
 
 
-def _objective_terms(game_state):
+#: Rabais de distance, EN HEXES, applique a un objectif selon qui le tient (cf.
+#: `_objective_terms`). Un objectif tenu par l'ADVERSAIRE vaut double : le lui prendre le fait
+#: passer de « il marque » a « je marque ». Un objectif NEUTRE vaut simple. Le mien vaut zero —
+#: y envoyer une deuxieme escouade ne rapporte rien, la premiere le tient deja.
+_CONTEST_PULL = {"enemy": 2.0, "neutral": 1.0, "mine": 0.0}
+
+
+def _surplus_oc_by_zone(game_state, zones, me: int, sauf_escouade: str) -> List[float]:
+    """Par zone : de combien d'OC MON camp y depasse deja l'adversaire, hors mon escouade.
+
+    C'est la grandeur qui dit « cette zone est deja servie ». Le controle se tranche a la SOMME
+    DES OC (`GameStateManager.calculate_objective_control` : `if player_1_oc > player_2_oc`),
+    donc l'excedent au-dela de celui d'en face est exactement ce qui ne rapporte rien de plus.
+
+    ⚠️ EN OC, PAS EN NOMBRE D'ESCOUADES. Compter les escouades serait un proxy de la meme famille
+    que le `max(NB x DMG)` que ce chantier a passe sa journee a retirer : deux Gretchin et un
+    Carnifex ne pesent pas pareil sur une zone, et `models_cache[mid]["OC"]` est a un acces de
+    distance.
+
+    ⚠️ `sauf_escouade` est EXCLUE du total : sans ca, une escouade seule sur sa zone se verrait
+    elle-meme comme un encombrement et la quitterait aussitot.
+
+    Aucune memoire de tour n'est necessaire : les escouades s'activent l'une apres l'autre et
+    l'etat est a jour entre deux activations, donc la presence physique porte deja les
+    deplacements qui viennent d'etre joues.
+    """
+    if not zones:
+        return []
+    units_cache = require_key(game_state, "units_cache")
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    mien = [0.0] * len(zones)
+    sien = [0.0] * len(zones)
+    for squad_id, entry in units_cache.items():
+        if str(squad_id) == str(sauf_escouade):
+            continue
+        cote = mien if int(require_key(entry, "player")) == int(me) else sien
+        for model_id in squad_models.get(str(squad_id), ()):  # get allowed : escouade sans figurine posee
+            model = models_cache.get(model_id)  # get allowed : absent = morte
+            if model is None:
+                continue
+            position = (int(model["col"]), int(model["row"]))
+            for index, zone in enumerate(zones):
+                if position in zone:
+                    cote[index] += float(require_key(model, "OC"))
+                    break
+    return [max(0.0, mien[i] - sien[i]) for i in range(len(zones))]
+
+
+def _objective_terms(
+    game_state,
+    me: Optional[int] = None,
+    w_contest: float = 0.0,
+    w_crowd: float = 0.0,
+    escouade: Optional[str] = None,
+):
     """(carte de distance COMBINEE, zones) — une seule reduction par decision.
 
     Les cartes par objectif sont memoisees, mais leur reduction ne l'etait pas : `min(m[dest] for
     m in maps)` coutait une indexation numpy et un `int()` PAR CARTE et PAR CANDIDATE, sur un pool
     qui monte a 458 cellules (x1) et ~634 (x5). `np.minimum.reduce` une fois par decision rend la
     meme valeur pour un sixieme du temps.
+
+    ⚠️ LA CARTE EST PONDEREE PAR QUI TIENT QUOI — ajoute le 2026-08-12, et c'est le trou n°2 du
+    §1 du chantier, reste ouvert par la refonte. Avant, la reduction etait une distance NUE : chaque
+    escouade partait vers l'objectif le PLUS PROCHE d'elle, sans jamais savoir qu'une zone etait
+    tenue par l'adversaire. Aucun bot n'allait donc contester quoi que ce soit — chacun s'asseyait
+    sur son cote de la table. Mesure du 2026-08-12 sur 600 parties : le bot marquait 27,2 VP de
+    moyenne contre 53,8 a l'agent, soit une zone tenue contre trois, et **zero victoire par
+    elimination** — les deux camps se regardaient.
+    Le rabais est retire de la DISTANCE, donc exprime en hexes : un objectif adverse a 10 hexes
+    avec `w_contest = 3` pese comme un objectif neutre a 4. Il ne remplace pas la geometrie, il la
+    corrige.
+
+    ⚠️ LA CARTE EST AUSSI PENALISEE PAR L'ENCOMBREMENT ALLIE (`w_crowd`, 2026-08-12). Mesure sur
+    600 parties du panel refondu : les bots empilent **2,6 a 3,0 escouades par zone** et n'en
+    couvrent que 1,7 sur 5, quand l'agent etale les siennes sur 2,9. Ils ne sont ni lents (92 % de
+    l'armee est dans une zone des le tour 3) ni battus au decompte (ils controlent 1,66 des 1,92
+    zones ou ils sont presents) : ils vont simplement tous au meme endroit.
+    C'est aussi ce qui rendait `w_contest` INERTE — rendre une zone plus attirante quand les cinq
+    escouades calculent la meme reponse chacune dans son coin ne fait que DEPLACER LE TAS.
+    La penalite porte sur le SURPLUS d'OC (cf. `_surplus_oc_by_zone`), pas sur l'occupation : une
+    zone disputee n'est pas penalisee, donc les renforts y vont ; une zone deja gagnee large repousse
+    la suivante. Elle est ajoutee a la DISTANCE, dans la meme unite que le rabais de contestation.
+
+    `w_contest = 0.0` et `w_crowd = 0.0` rendent exactement la carte d'avant, au bit pres : c'est le
+    defaut, et c'est ce qui rend chaque terme mesurable separement.
     """
     objectives = game_state.get("objectives")  # get allowed : scenario sans objectif
     maps = objective_distance_maps(game_state) if objectives else []
-    combined = np.minimum.reduce(maps) if len(maps) else None
-    return combined, objective_hex_sets(game_state)
+    if not len(maps):
+        return None, objective_hex_sets(game_state)
+    zones = objective_hex_sets(game_state)
+    if w_crowd and me is not None and escouade is not None:
+        surplus = _surplus_oc_by_zone(game_state, zones, int(me), str(escouade))
+        maps = [m + w_crowd * s if s else m for m, s in zip(maps, surplus)]
+    if w_contest and me is not None:
+        # `get allowed` : le dict est cree PARESSEUSEMENT par `calculate_objective_control`, donc
+        # legitimement absent tant qu'aucun controle n'a ete calcule (debut de partie). Absent =
+        # personne ne tient rien, ce qui est l'etat reel et non un repli sur une valeur commode.
+        controllers = game_state.get("objective_controllers") or {}
+        opponent = 3 - int(me)
+        pulls = []
+        for objective in objectives:
+            holder = controllers.get(str(require_key(objective, "id")))
+            if holder is None:
+                side = "neutral"
+            else:
+                side = "mine" if int(holder) == int(me) else (
+                    "enemy" if int(holder) == opponent else "neutral"
+                )
+            pulls.append(w_contest * _CONTEST_PULL[side])
+        # UNE soustraction par objectif et par DECISION (pas par candidate) : le cout est celui
+        # d'un `np.subtract` sur la grille, deja paye par la memoisation des cartes.
+        maps = [m - pull if pull else m for m, pull in zip(maps, pulls)]
+    combined = np.minimum.reduce(maps)
+    return combined, zones
 
 
 # ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -397,7 +502,7 @@ class _DoctrineBot(_PlacementMemory):
         """
         return self._melee_beats_ranged(attacker, game_state)
 
-    def movement_weights(self, unit, game_state) -> Tuple[float, float, float, float]:
+    def movement_weights(self, unit, game_state) -> Tuple[float, float, float, float, float, float]:
         """(w_objectif, w_ennemi, w_tir, w_risque), lus dans la config. Aucun defaut."""
         return load_doctrine_weights(self.MOVEMENT_BOT_KEY)
 
@@ -485,8 +590,17 @@ class _DoctrineBot(_PlacementMemory):
             chosen = random.choice(valid_destinations)
             return (int(chosen[0]), int(chosen[1]))
 
-        w_obj, w_enn, w_fire, w_risk = self.movement_weights(unit, game_state)
-        distance_map, zones = _objective_terms(game_state)
+        w_obj, w_enn, w_fire, w_risk, w_contest, w_crowd = self.movement_weights(unit, game_state)
+        # La carte de distance est PONDEREE par qui tient quoi ET par ce que les allies couvrent
+        # deja : c'est ici que le bot cesse d'aller betement vers la zone la plus proche, et qu'il
+        # cesse d'y aller a cinq (cf. `_objective_terms`).
+        distance_map, zones = _objective_terms(
+            game_state,
+            me=int(require_key(unit, "player")),
+            w_contest=w_contest,
+            w_crowd=w_crowd,
+            escouade=str(require_key(unit, "id")),
+        )
         enemies = _living_enemies_on_table(unit, game_state)
         enemy_anchors = [
             (int(e["col"]), int(e["row"]))
@@ -547,17 +661,24 @@ def _weights_config() -> Dict[str, Any]:
     return get_config_loader().load_config(_WEIGHTS_CONFIG, force_reload=False)
 
 
-def load_doctrine_weights(bot_key: str) -> Tuple[float, float, float, float]:
-    """(w_objectif, w_ennemi, w_tir, w_risque) du style `bot_key`.
+def load_doctrine_weights(bot_key: str) -> Tuple[float, float, float, float, float, float]:
+    """(w_objectif, w_ennemi, w_tir, w_risque, w_contest, w_crowd) du style `bot_key`.
 
     Quatre termes et non deux : les six anciens bots n'avaient que la geometrie
     (objectif, ennemi), ce qui rendait impossible d'exprimer « je me place pour tirer » ou
     « je reste hors de portee ». Ces deux-la sont precisement les axes de Standoff et d'Endgame.
+
+    `w_contest` (2026-08-12) est le cinquieme : il dit a quel point le style prefere une zone
+    TENUE PAR L'ADVERSAIRE a la zone la plus proche (cf. `_objective_terms`). Il voyage dans le
+    MEME tuple que les autres, et ce n'est pas cosmetique : `EndgameBot` et `AttritionBot`
+    echangent l'entree entiere selon leur mode (`endgame_push`, `attrition_withdraw`), donc un
+    poids charge a part resterait sur la valeur du mode precedent.
     """
     bots = require_key(_weights_config(), "doctrines")
     entry = require_key(bots, bot_key)
     return (float(require_key(entry, "w_objective")), float(require_key(entry, "w_enemy")),
-            float(require_key(entry, "w_fire")), float(require_key(entry, "w_risk")))
+            float(require_key(entry, "w_fire")), float(require_key(entry, "w_risk")),
+            float(require_key(entry, "w_contest")), float(require_key(entry, "w_crowd")))
 
 
 def load_hold_bonus() -> float:

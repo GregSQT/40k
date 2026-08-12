@@ -1,4 +1,4 @@
-# Refonte du panel de bots — six styles orthogonaux + holdout qui joue pour gagner
+# Refonte du panel de bots — six styles, une échelle de difficulté graduée
 
 > Ouvert le **2026-08-11**. Chantier du benchmark d'évaluation, pas de l'agent.
 > Doc de détail ; l'ordre du travail reste dans [`../ROADMAP.md`](../ROADMAP.md) §1.
@@ -35,6 +35,8 @@ Deux trous s'y ajoutent, établis par lecture de `ai/evaluation_bots.py` :
   sur les cartes de distance) ; `objective_controllers` n'est lu que par `AdaptiveBot`, et
   seulement pour sa posture, jamais pour choisir où aller. Avec `hold_bonus = 3.0` et la règle
   « à égalité on ne bouge pas », un bot qui touche un objectif s'y assied jusqu'à la fin.
+  ✅ **Traité le 2026-08-12, cf. §12** — la refonte ne l'avait PAS rebouché : `objective_controllers`
+  n'était lu nulle part dans `ai/bot_doctrines.py`.
 
 ## 2. Mesure de référence — 2026-08-11, à ne plus rejouer autrement
 
@@ -79,8 +81,15 @@ raison (cf. `config/bot_movement_weights.json`, entrée `tactical`).
    ⚠️ **Gel = ne pas toucher une ligne des six classes actuelles.** Un flag `damage_model`
    commutable avait été envisagé puis **rejeté** : le nouveau panel n'a pas les mêmes doctrines
    que l'ancien, un paramètre ne peut pas exprimer ça.
-2. **Six styles orthogonaux**, un axe de faiblesse chacun. Le critère n'est pas « sont-ils
-   bons ? » mais « punissent-ils des erreurs différentes ? ».
+2. ~~**Six styles orthogonaux**, un axe de faiblesse chacun~~ — **L'ORTHOGONALITÉ EST ABANDONNÉE
+   comme critère, décision de l'utilisateur du 2026-08-12 sur la mesure du §11.2.** Les six bots
+   se déplacent en bloc d'un modèle à l'autre (+3 à +7 points, ordre strictement identique) : ils
+   forment **une seule dimension**, mesurée à six niveaux de difficulté. La cause est le format,
+   pas le dessin des bots — seuls les objectifs marquent (§12.1 : zéro victoire par élimination
+   sur 600 parties), donc aucun panel ne peut rendre six axes dans un jeu qui n'en a qu'un.
+   Le panel reste un instrument utile, mais c'est une **échelle de difficulté**, pas une base de
+   mesure multi-dimensionnelle. La table ci-dessous décrit ce que chaque style FAIT ; elle ne
+   promet plus qu'il mesure un axe indépendant.
 
    | style | doctrine | erreur punie |
    |---|---|---|
@@ -99,7 +108,10 @@ raison (cf. `config/bot_movement_weights.json`, entrée `tactical`).
    en §9.2. Décision de l'utilisateur, reprise telle quelle : « je préfère des bots pertinents
    plutôt que forcer pour en avoir un de plus qui n'apprend rien ». Le nombre n'a aucune vertu ;
    l'orthogonalité si. Le panel est retombé à cinq styles, puis remonté à six le 2026-08-12 avec
-   `Scorer` — qui, lui, porte un axe réel (cf. §11).
+   `Scorer`. ⚠️ Ce raisonnement est **périmé par la décision ci-dessus** : `Scorer` a été ajouté
+   au nom d'un « axe manquant », et la mesure du §11.2 dit qu'il n'y a pas d'axes. Il se justifie
+   toujours — il reprend la doctrine du seul ancien bot informatif — mais comme un **barreau de
+   l'échelle**, pas comme une dimension.
 3. ~~**Le holdout garde le nom `tactical` mais change de nature**~~ — **ABANDONNÉ le 2026-08-12,
    cf. §11.** La refonte « joue pour gagner » (recherche à un coup) a été écrite, mesurée, puis
    supprimée : elle coûtait 9,5× un bot normal par épisode et ne gagnait pas plus souvent qu'eux.
@@ -121,9 +133,9 @@ raison (cf. `config/bot_movement_weights.json`, entrée `tactical`).
 | 3 | ~~chiffrage de faisabilité du holdout à un coup~~ | ⛔ **sans objet** — holdout abandonné 2026-08-12, §11.2 |
 | 4 | modèle de dégâts espérés (attaquant → cible) | ✅ 2026-08-11, **corrigé à la racine** 2026-08-12, cf. §7 et §7.1 |
 | 5 | les SIX styles | ✅ 2026-08-12, cf. §7 et §11.3 (`standoff` supprimé §9.2, `scorer` ajouté §11.3) |
-| 6 | réglage et orthogonalité en **bot-contre-bot** | 🟠 **PARTIEL** — cinq styles réglés, `scorer` **non réglé** ; chiffres du §8/§9 à rejouer, cf. §11.1 |
+| 6 | réglage en **bot-contre-bot** (~~orthogonalité~~ abandonnée, §3.2) | 🟠 **PARTIEL** — `w_contest` et `w_crowd` **non réglés** ; chiffres du §8/§9 à rejouer, cf. §11.1 |
 | 7 | correspondance ancien/nouveau, puis suppression des cinq anciens | |
-| 8 | mesure finale contre l'agent, commande de §2 | ⚠️ bloquée : modèle canonique absent, cf. §10.2 |
+| 8 | mesure finale contre l'agent, commande de §2 | 🟠 **PARTIEL** — mesurée sur `robust_0.8721` (§12.5) ; reste à rejouer après réglage |
 
 ### 4.1 Pourquoi l'appariement des graines a été retiré
 
@@ -381,12 +393,41 @@ non plus : il mesure la force relative, pas ce que chaque bot révèle de l'agen
 
 1. **Étapes 7 et 8 non commencées** : correspondance ancien/nouveau puis suppression des cinq
    anciens, et mesure finale contre l'agent.
-2. **Le modèle canonique n'existe pas.** `ai/models/ArmageddonAgent/model_ArmageddonAgent.zip` a
-   été consommé par un training le 2026-08-11 à 23:14. `--test-only` retourne `Model not found` :
-   avant toute mesure contre l'agent, réinstaller `ArmageddonAgent_12345_robust_0.9438.zip` **avec
-   son `.pkl` apparié** au chemin canonique.
+2. **VÉRIFIER LE MODÈLE CANONIQUE AVANT TOUTE MESURE COMPARABLE.** Le chemin canonique
+   `ai/models/ArmageddonAgent/model_ArmageddonAgent.zip` est **partagé et volatil** : tout
+   `ai/train.py --new` l'écrase, y compris un run de debug de 120 épisodes, et plusieurs sessions
+   travaillent sur ce dépôt en parallèle. Il a déjà été consommé une fois (le 2026-08-11 à 23:14,
+   `--test-only` rendait alors `Model not found`) puis remplacé deux fois dans la même journée.
+
+   **Toutes les mesures des §11 et §12 portent sur `ArmageddonAgent_12345_robust_0.8721` :**
+
+   ```bash
+   md5sum ai/models/ArmageddonAgent/model_ArmageddonAgent.zip
+   # 6f6b98059a0a6c279b7d11dc427461fd  = robust_0.8721, la référence de §11.3 et §12.5
+   # 07ca14b4f0b4f62903718cece0ce1fdf  = robust_0.9438, la référence du §2 et de la colonne §11.2
+   ```
+
+   Réinstaller = copier le `.zip` **ET** son `_vec_normalize.pkl` apparié
+   (`<stem>_vec_normalize.pkl`, cf. `ai/vec_normalize_utils.get_vec_normalize_path`). Un modèle
+   chargé avec les statistiques de normalisation d'un autre run mesure autre chose.
+
+   ⚠️ Pour une mesure longue, copier le modèle dans un `ai/models/` **privé au worktree** plutôt
+   que de lire le chemin partagé : les workers d'évaluation chargent le modèle PARESSEUSEMENT, donc
+   un training voisin qui l'écrase en cours de route fait lire un autre modèle à une partie des
+   épisodes — sans que rien ne le signale. C'est ce qui a été fait pour la mesure du §12.5.
 3. **Tous les chiffres des §8, §9.1 et §9.3 sont à rejouer** (cf. §11.1) : ils sont soit sous
    l'échantillon, soit arithmétiquement faux, soit mesurés sur un modèle de dégâts depuis corrigé.
+4. **TROIS RESSOURCES PARTAGÉES rendent deux mesures simultanées incomparables.** Ce dépôt est
+   travaillé par plusieurs sessions à la fois ; chacune de ces trois-là a déjà mordu :
+   - **le modèle canonique** (cf. point 2) ;
+   - **`step.log`** — un seul fichier, écrasé à chaque run `--step`. Deux sessions journalisant en
+     même temps mélangent leurs épisodes dans le même fichier, et l'analyzer ne peut pas les
+     démêler. Lancer depuis un worktree suffit à l'isoler ;
+   - **les JSON de `config/`**, relus À CHAUD par les évaluations. Régler des poids pendant qu'une
+     mesure tourne change ce qu'elle mesure en cours de route. `pgrep -af train.py` avant, et ne
+     rien toucher tant que ça tourne.
+   S'y ajoute le CPU : une évaluation occupe 4 à 6 workers. Deux en parallèle se ralentissent
+   mutuellement d'un facteur 2 — mesuré le 2026-08-12 (0,70 puis 0,35 ép./s).
 
 ## 11. Relecture du 2026-08-12 — ce qui a été trouvé, mesuré et décidé
 
@@ -499,3 +540,141 @@ Voir §7.1. En résumé : l'estimation par escouade ne lisait que le profil du s
 50 paires sur 90 étaient fausses (médiane 0,50×, pire cas 0,18×). Le cache est désormais indexé par
 figurine. **Aucun ré-entraînement n'est requis** — contrairement à ce qui était supposé, le seul
 consommateur vivant du cache était le panel de bots.
+
+## 12. Les bots ne contestaient rien — corrigé le 2026-08-12
+
+### 12.1 Le constat, venu du replay puis confirmé par le journal
+
+Observation de l'utilisateur en regardant un replay : « l'agent joue mal, super passif, mais ça
+passe car le bot est encore plus nul ». Un win-rate contre des bots est une mesure **relative** :
+il ne peut pas, par construction, détecter que les deux camps jouent mal. Rien dans tout ce
+chantier ne mesurait le niveau **absolu** de jeu.
+
+Le journal du run du 2026-08-12 (600 épisodes, ancien panel, `analyzer.py`) le chiffre :
+
+- **0 victoire par élimination**, des deux côtés. Aucune armée n'est jamais détruite.
+- **100 % des parties vont au tour 5.** Aucune ne se conclut avant.
+- **207 épisodes sur 600 (34,5 %) sans aucun mort.** 689 escouades détruites en 600 parties, pour
+  dix escouades sur la table.
+- **Les charges font 0,8 % / 1,0 % des actions.**
+- **~34 % des décisions de phase de tir se prennent sans cible visible** (`no LOS`).
+- VP moyens : **agent 53,8 sur 60**, bot **27,2**.
+
+⚠️ Les colonnes « Joueur 1 / Joueur 2 » de l'analyzer sont par NUMÉRO DE JOUEUR, et l'agent occupe
+P1 sur 240 épisodes et P2 sur 360 : ce sont des mélanges, on ne peut pas leur faire dire « l'agent
+fait ceci ». Seuls les tableaux étiquetés *Agent/Bot* le permettent.
+
+**L'agent n'est pas passif par défaut d'apprentissage : la passivité gagne.** Le primaire court à
+15 VP/tour du tour 2 au tour 5, tuer ne rapporte rien directement, l'élimination n'arrive jamais et
+le départage de valeur ne décide que 1,4 % des parties. Il a résolu le jeu tel qu'il est posé.
+
+**Et c'est ce qui explique l'échec de l'orthogonalité (§11.2).** Le scénario n'a qu'une dimension —
+seuls les objectifs marquent. Aucun dessin de bot ne créera six axes dans un jeu qui n'en compte
+qu'un. Le seul bot qui inquiétait l'agent était `racer`, celui qui joue les zones : ce n'était pas
+une coïncidence.
+
+Piste écartée par l'utilisateur : les 34 % de tirs sans cible viennent du terrain, et **les
+plateaux sont réglementaires** — ce n'est pas un défaut à corriger.
+
+### 12.2 La cause, prouvée par absence
+
+`objective_controllers` **n'était lu nulle part** dans `ai/bot_doctrines.py`. Aucun chemin ne
+permettait à un des six styles de savoir qui tenait quoi. Et `_objective_terms` réduisait les
+cartes par `np.minimum.reduce` : chaque escouade partait vers **l'objectif le plus proche d'elle**.
+
+Conséquence : chaque camp s'asseyait sur les zones de son côté de la table et personne n'allait
+disputer celles d'en face. Le bot marquait 6,8 VP/tour (≈ une zone), l'agent 13,5 (≈ le maximum).
+
+### 12.3 La correction
+
+La carte de distance combinée est désormais **pondérée par qui tient quoi** : un rabais en HEXES
+est retiré de la distance de chaque objectif, double pour une zone tenue par l'adversaire (la lui
+prendre fait basculer le score des deux côtés), simple pour une zone neutre, nul pour la sienne
+(y envoyer une deuxième escouade ne rapporte rien).
+
+Cinquième poids par style, `w_contest`, **dans le même tuple que les quatre autres** : `EndgameBot`
+et `AttritionBot` échangent l'entrée entière selon leur mode (`endgame_push`, `attrition_withdraw`),
+donc un poids chargé à part resterait sur la valeur du mode précédent.
+
+`w_contest = 0.0` rend exactement la carte d'avant — le changement est donc mesurable style par
+style. Le rabais est appliqué **une fois par décision**, pas par candidate : le coût est une
+soustraction numpy par objectif, déjà payée par la mémoïsation des cartes.
+
+⚠️ **Les valeurs sont POSÉES PAR DOCTRINE, non réglées** (`config/bot_movement_weights.json`).
+
+⚠️ `objective_controllers` est lu tel quel, donc **rafraîchi aux frontières de phase seulement**.
+C'est correct ICI, et c'est l'inverse de ce qu'exigeait le holdout supprimé : on veut savoir qui
+tenait la zone au début de la phase, pas recalculer par candidate — la cible d'un déplacement ne
+doit pas changer en cours de route. Son absence (dict créé paresseusement) vaut « personne ne tient
+rien », l'état réel en début de partie et non un repli.
+
+### 12.4 `w_contest` seul était inerte — la vraie cause était l'empilement
+
+La pondération par le contrôleur (§12.3) a été mesurée : **aucun effet**. Combined 0,869 → 0,872
+sur le même modèle, tous les bots dans ±2 points pour une marge de ±6 à 7. Un zéro franc.
+
+L'arithmétique l'explique : une escouade posée sur sa zone a une distance nulle **et** touche le
+`hold_bonus`. Pour `racer` rester vaut +3,9 ; partir vers une zone adverse à 12 hexes avec 8 de
+rabais vaut −5,2. Le rabais n'agit donc que sur les escouades **pas encore garées**, c'est-à-dire
+avant le tour 2.
+
+**Le vrai gaspillage est l'empilement, et il se mesure.** Dépouillement de 600 parties :
+
+| tour | escouades bot dans une zone | zones couvertes | **escouades par zone** |
+|---|---|---|---|
+| 2 | 4,22 | 1,49 | **2,85** |
+| 3 | 5,03 | 1,67 | **3,01** |
+| 5 | 5,00 | 1,92 | **2,61** |
+
+L'agent étale ses cinq escouades sur 2,90 zones (~1,7 par zone). Les bots les tassent à trois par
+zone. Les deux autres hypothèses sont écartées par la même lecture : **vitesse** non (92 % de
+l'armée est dans une zone dès le tour 3), **OC** non (le bot contrôle 1,66 des 1,92 zones où il est
+présent — il ne perd pas les décomptes, il est absent).
+
+Et c'est pourquoi `w_contest` ne pouvait rien donner : quand cinq escouades calculent la même
+réponse chacune dans son coin, rendre une zone plus attirante **déplace le tas**, il ne le disperse
+pas.
+
+### 12.5 La pénalité d'encombrement — le seul changement qui ait déplacé les chiffres
+
+Sixième poids, `w_crowd`. Une zone déjà servie par les alliés coûte plus cher à l'escouade
+suivante. C'est le dual du `hold_bonus`.
+
+**Terme de score, pas ordre d'en haut.** Une affectation d'armée avait été envisagée puis écartée :
+elle aurait imposé une zone à `alpha` (qui va au contact) et à `decapitation` (qui poursuit une
+escouade), donc détruit ce qui les distingue, et exigé une table d'affectation avec sa péremption.
+Ici chaque style garde ses poids et voit simplement qu'une zone est servie.
+
+**La pénalité porte sur le SURPLUS d'OC**, `max(0, mon_OC − son_OC)` par zone, hors l'escouade qui
+décide. Une zone disputée n'est donc pas pénalisée — les renforts y vont — et une zone gagnée large
+repousse la suivante. En OC et non en nombre d'escouades : deux Gretchin et un Carnifex ne pèsent
+pas pareil, et le contrôle se tranche à la somme des OC.
+
+**Aucune mémoire de tour n'est nécessaire** : les escouades s'activent l'une après l'autre et
+l'état est à jour entre deux activations, donc la présence physique porte déjà les déplacements
+qui viennent d'être joués.
+
+Mesure, même modèle `robust_0.8721`, `x1_panel`, 100 ép./bot :
+
+| | avant | après |
+|---|---|---|
+| escouades par zone (T5) | 2,61 | **1,28** |
+| zones couvertes (T5) | 1,92 | **2,47** |
+| zones contrôlées (T5) | 1,61 | **1,90** |
+| VP bot | 27,8 | **31,0** |
+| écart de VP | 16,4 | **10,0** |
+| pire bot (`racer`) | 0,78 | **0,62** |
+| **combined** | **0,873** | **0,788** |
+
+Par bot : `racer` −0,16, `endgame` −0,15, `scorer` −0,12, `attrition` −0,11, `decapitation` +0,03,
+`alpha` 0,00. Les deux derniers sont dans le bruit à n=100 (±8 à 9 points) ; les quatre premiers
+non.
+
+⚠️ **Poids POSÉS par doctrine, non réglés.**
+
+⚠️ Le run a duré 1730 s contre 863 s. Ce **n'est pas** le coût du calcul : mesuré à **0,02 ms par
+décision, 3 ms par épisode**, soit 0,2 % de l'écart. Les bots font simplement plus de chemin et
+plus de contact — il reste 4,76 escouades vivantes au tour 5 contre 5,27 avant.
+
+⚠️ **Le mur du tour 2 tient toujours** : 1,61 zone couverte au tour 2 (contre 1,49). Tout le gain
+arrive aux tours 3 à 5. Le prochain levier, s'il en faut un, est le déploiement.
