@@ -28,23 +28,23 @@ from __future__ import annotations
 
 import pytest
 
+from tests.unit.ai._fabriques import entete_step_log
+
 # Board x1 (inches_to_subhex=1) : 1 hex = 1 pouce.
 TIREUR = (10, 20)
 PROCHE = (30, 20)   # 1#0 — 20 hex : DANS les 24" de l'arme
 LOIN = (36, 20)     # 1#1 — 26 hex : HORS des 24"
 OBJECTIVES = ";".join(f"(60,{r})" for r in range(40, 46))
 
-_ENTETE = f"""=== STEP-BY-STEP ACTION LOG ===
-================================================================================
-
-[10:00:00] === EPISODE 1 START ===
-[10:00:00] Scenario: scenario_bot-01
-[10:00:00] Opponent: SelfplayBot
-[10:00:00] Walls:
-[10:00:00] Objectives: rect b NW:{OBJECTIVES}
-[10:00:00] Board: cols=44 rows=60 inches_to_subhex=1 hex_radius=13.9 margin=5
-[10:00:00] Run rules: engagement_zone_subhex=2 engagement_zone_vertical_inches=5.0 metric.engagement=hex metric.ranged=hex move.thru_ez=True move.thru_enemy=False move.thru_friendly=True cohesion.model_subhex=2 cohesion.global_subhex=9 cohesion.min_neighbors=1
-"""
+# Entête jusqu'à Run rules inclus — la ligne Log grammar: s'insère juste après (cf. _analyse).
+_ENTETE = entete_step_log(
+    inches_to_subhex=1,
+    board="cols=44 rows=60",
+    hex_radius="13.9",
+    margin=5,
+    objectives=OBJECTIVES,
+    metric_ranged="hex",
+).replace("[10:00:00] === ACTIONS START ===\n", "")
 
 _UNITES = f"""[10:00:00] Unit 1 (AssaultIntercessor) P1: Starting position (-1,-1), HP_MAX=2 base=round/1
 [10:00:00] Unit 102 (SternguardVeteranBoltRifle) P2: Starting position (-1,-1), HP_MAX=2 base=round/1

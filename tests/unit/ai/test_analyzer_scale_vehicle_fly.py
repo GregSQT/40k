@@ -22,6 +22,7 @@ from __future__ import annotations
 import pytest
 
 import ai.analyzer as an
+from tests.unit.ai._fabriques import entete_step_log, pose_etat_du_run
 
 OBJECTIVES = ";".join(f"(150,{r})" for r in range(150, 156))
 
@@ -29,37 +30,11 @@ OBJECTIVES = ";".join(f"(150,{r})" for r in range(150, 156))
 def _pose_regles_du_run(scale: int, *, ez_inches: int = 2, metric: str = "hex") -> int:
     """Hors `parse_step_log`, l'échelle ET les règles du run se posent à la main : les getters
     lèvent plutôt que de retomber sur le config courant. Rend la zone d'engagement en subhex."""
-    from ai.analyzer_config import set_run_rules
-
-    an.set_analyzer_board_scale(scale)
     ez = ez_inches * scale
-    set_run_rules({
-        "engagement_zone_subhex": str(ez),
-        "metric.engagement": metric,
-        "metric.ranged": "euclidean",
-        "move.thru_ez": "True",
-        "move.thru_enemy": "False",
-        "move.thru_friendly": "True",
-    })
+    pose_etat_du_run(scale, ez_subhex=ez, metric_engagement=metric)
     return ez
 
 
-def _log(body: str, *, inches_to_subhex: int = 5, walls: str = "", board: str = "cols=220 rows=300",
-         units: str = "") -> str:
-    return (
-        "=== STEP-BY-STEP ACTION LOG ===\n"
-        "================================================================================\n\n"
-        "[10:00:00] === EPISODE 1 START ===\n"
-        "[10:00:00] Scenario: scenario_bot-01\n"
-        "[10:00:00] Opponent: SelfplayBot\n"
-        f"[10:00:00] Walls: {walls}\n"
-        f"[10:00:00] Objectives: rect b NW:{OBJECTIVES}\n"
-        f"[10:00:00] Board: {board} inches_to_subhex={inches_to_subhex} hex_radius=2.78 margin=1\n"
-        f"[10:00:00] Run rules: engagement_zone_subhex={2 * inches_to_subhex} metric.engagement=hex metric.ranged=euclidean move.thru_ez=True move.thru_enemy=False move.thru_friendly=True cohesion.model_subhex={2 * inches_to_subhex} cohesion.global_subhex={9 * inches_to_subhex} cohesion.min_neighbors=1\n"
-        f"{units}"
-        "[10:00:00] === ACTIONS START ===\n"
-        f"{body}"
-    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -83,7 +58,7 @@ def test_l_echelle_lue_est_celle_du_log_pas_celle_du_config(tmp_path):
     """Le même fichier, deux entêtes : la valeur retenue suit le log."""
     for scale in (1, 5, 10):
         log = tmp_path / f"step_{scale}.log"
-        log.write_text(_log("", inches_to_subhex=scale))
+        log.write_text(entete_step_log("", inches_to_subhex=scale))
         assert an.parse_board_scale_from_log(str(log)) == scale
 
 
@@ -94,18 +69,8 @@ def test_la_zone_d_engagement_est_celle_du_journal(tmp_path):
     Ce test comparait auparavant deux appels de son propre helper : il vérifiait l'arithmétique
     de la fixture, pas le code. Il lit maintenant un vrai journal et interroge la fonction.
     """
-    from ai.analyzer_config import set_run_rules
-
-    an.set_analyzer_board_scale(1)
     # Valeur qu'aucune combinaison config × échelle ne produirait par hasard.
-    set_run_rules({
-        "engagement_zone_subhex": "13",
-        "metric.engagement": "hex",
-        "metric.ranged": "euclidean",
-        "move.thru_ez": "True",
-        "move.thru_enemy": "False",
-        "move.thru_friendly": "True",
-    })
+    pose_etat_du_run(1, ez_subhex=13)
 
     assert an._get_engagement_zone_for_analyzer() == 13
 
@@ -132,7 +97,7 @@ def _adjacent_shot_stats(tmp_path, shooter_id: str, weapon: str, name: str):
         f"- Hit 4(4+) - Wound 5(3+) - Save 2(3+) - Dmg:1HP [R:+0.0] [SUCCESS]\n"
     )
     log = tmp_path / name
-    log.write_text(_log(body, units=_MV_UNITS))
+    log.write_text(entete_step_log(body, units=_MV_UNITS))
     return an.parse_step_log(str(log))
 
 
@@ -176,7 +141,7 @@ def _fly_move_stats(tmp_path, fly_token: str, name: str):
         f"[R:+0.0] [MODELS: 1#0@(65,50)] [SUCCESS]\n"
     )
     log = tmp_path / name
-    log.write_text(_log(body, walls=_FLY_WALLS, units=_FLY_UNITS))
+    log.write_text(entete_step_log(body, walls=_FLY_WALLS, units=_FLY_UNITS))
     return an.parse_step_log(str(log))
 
 
@@ -213,7 +178,7 @@ def test_le_token_fly_ne_casse_l_aiguillage_d_aucun_type_de_move(verbe, action_k
         f"[10:00:02] E1 T1 P1 MOVE : {ligne} [R:+0.0] [MODELS: 1#0@(65,50)] [SUCCESS]\n"
     )
     log = tmp_path / f"{verbe}.log"
-    log.write_text(_log(body, units=_FLY_UNITS))
+    log.write_text(entete_step_log(body, units=_FLY_UNITS))
     stats = an.parse_step_log(str(log))
 
     assert not stats["parse_errors"], stats["parse_errors"]
@@ -410,7 +375,7 @@ def test_les_socles_d_une_cible_fauchee_ne_hantent_pas_le_plateau(tmp_path):
     """
     def _erreurs(*lignes: str) -> int:
         log = tmp_path / f"stale_{len(lignes)}.log"
-        log.write_text(_log(
+        log.write_text(entete_step_log(
             "".join((_STALE_SETUP,) + lignes),
             inches_to_subhex=1, board="cols=60 rows=60", units=_STALE_UNITS,
         ))
@@ -454,7 +419,7 @@ def test_la_sentinelle_est_bien_adjacente_a_l_origine_du_plateau():
 
 def _wait_stats(tmp_path, name: str, body: str):
     log = tmp_path / name
-    log.write_text(_log(body, inches_to_subhex=1, board="cols=60 rows=60", units=_OFF_TABLE_UNITS))
+    log.write_text(entete_step_log(body, inches_to_subhex=1, board="cols=60 rows=60", units=_OFF_TABLE_UNITS))
     return an.parse_step_log(str(log))
 
 

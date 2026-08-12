@@ -17,6 +17,8 @@ fichier reprend le montage. `handle_shoot` avait été corrigé, `handle_wait` �
 """
 from __future__ import annotations
 
+from tests.unit.ai._fabriques import entete_step_log
+
 # Échelle x5 : la zone d'engagement du run vaut 10 subhex (2"). L'unité qui attend et l'ennemi sont
 # à 8 subhex d'ancre à ancre — ENGAGÉS au sens du moteur, et pourtant jamais « adjacents ».
 WAITER = (50, 50)
@@ -31,23 +33,17 @@ E = f"({ENGAGING_ENEMY[0]},{ENGAGING_ENEMY[1]})"
 F = f"({FAR_ENEMY[0]},{FAR_ENEMY[1]})"
 
 
-def _header(enemy_pos: str) -> str:
-    return f"""=== STEP-BY-STEP ACTION LOG ===
-================================================================================
+_UNITS = (
+    "[10:00:00] Unit 1 (Terminator) P1: Starting position (-1,-1), HP_MAX=2 base=round/6\n"
+    "[10:00:00] Unit 101 (AssaultIntercessor) P2: Starting position (-1,-1), HP_MAX=2 base=round/6\n"
+)
 
-[10:00:00] === EPISODE 1 START ===
-[10:00:00] Scenario: scenario_bot-01
-[10:00:00] Opponent: SelfplayBot
-[10:00:00] Walls:
-[10:00:00] Objectives: rect b NW:{OBJECTIVES}
-[10:00:00] Board: cols=220 rows=300 inches_to_subhex=5 hex_radius=2.78 margin=1
-[10:00:00] Run rules: engagement_zone_subhex=10 metric.engagement=hex metric.ranged=euclidean move.thru_ez=True move.thru_enemy=False move.thru_friendly=True cohesion.model_subhex=10 cohesion.global_subhex=45 cohesion.min_neighbors=1
-[10:00:00] Unit 1 (Terminator) P1: Starting position (-1,-1), HP_MAX=2 base=round/6
-[10:00:00] Unit 101 (AssaultIntercessor) P2: Starting position (-1,-1), HP_MAX=2 base=round/6
-[10:00:00] === ACTIONS START ===
-[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1{W} DEPLOYED from (-1,-1) to {W} [R:+0.0] [SUCCESS]
-[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 101{enemy_pos} DEPLOYED from (-1,-1) to {enemy_pos} [R:+0.0] [SUCCESS]
-"""
+
+def _setup(enemy_pos: str) -> str:
+    return (
+        f"[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1{W} DEPLOYED from (-1,-1) to {W} [R:+0.0] [SUCCESS]\n"
+        f"[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 101{enemy_pos} DEPLOYED from (-1,-1) to {enemy_pos} [R:+0.0] [SUCCESS]\n"
+    )
 
 
 # Format EXACT des journaux réels : `Unit 1(50,50)`, SANS espace après la virgule — c'est ce
@@ -58,11 +54,15 @@ _WAIT = (
 )
 
 
+def _header(enemy_pos: str) -> str:
+    return entete_step_log(_setup(enemy_pos), units=_UNITS, ez_vertical_inches=None)
+
+
 def _stats(tmp_path, enemy_pos: str):
     import ai.analyzer as an
 
     log = tmp_path / "step.log"
-    log.write_text(_header(enemy_pos) + _WAIT)
+    log.write_text(entete_step_log(_setup(enemy_pos) + _WAIT, units=_UNITS, ez_vertical_inches=None))
     return an.parse_step_log(str(log))
 
 

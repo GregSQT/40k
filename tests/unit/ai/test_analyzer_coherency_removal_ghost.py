@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import pytest
 
+from tests.unit.ai._fabriques import entete_step_log
+
 # Board x1 (inches_to_subhex=1) : 1 hex = 1 pouce.
 ISOLEE = (30, 20)      # figurine 1#2 : hors cohérence (>2 de ses voisines), retirée par 03.03
 GROUPE = [(10, 20), (11, 20)]   # 1#0 / 1#1 : cohérentes entre elles, LOIN de l'avance
@@ -36,22 +38,21 @@ OBJECTIVES = ";".join(f"(60,{r})" for r in range(40, 46))
 # test passerait au vert sans rien mesurer.
 WALLS = ";".join(f"({c},{r})" for c in range(23, 34) for r in (19, 21))
 
-_HEADER = f"""=== STEP-BY-STEP ACTION LOG ===
-================================================================================
-
-[10:00:00] === EPISODE 1 START ===
-[10:00:00] Scenario: scenario_bot-01
-[10:00:00] Opponent: SelfplayBot
-[10:00:00] Walls: {WALLS}
-[10:00:00] Objectives: rect b NW:{OBJECTIVES}
-[10:00:00] Board: cols=44 rows=60 inches_to_subhex=1 hex_radius=13.9 margin=5
-[10:00:00] Run rules: engagement_zone_subhex=2 engagement_zone_vertical_inches=5.0 metric.engagement=hex metric.ranged=hex move.thru_ez=True move.thru_enemy=False move.thru_friendly=True cohesion.model_subhex=2 cohesion.global_subhex=9 cohesion.min_neighbors=1
-[10:00:00] Unit 1 (SternguardVeteranBoltRifle) P1: Starting position (-1,-1), HP_MAX=2 base=round/1
-[10:00:00] Unit 101 (AssaultIntercessor) P2: Starting position (-1,-1), HP_MAX=2 base=round/1
-[10:00:00] === ACTIONS START ===
-[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1({GROUPE[0][0]},{GROUPE[0][1]}) DEPLOYED from (-1,-1) to ({GROUPE[0][0]},{GROUPE[0][1]}) [R:+0.0] [MODELS: 1#0@({GROUPE[0][0]},{GROUPE[0][1]},z0) 1#1@({GROUPE[1][0]},{GROUPE[1][1]},z0) 1#2@({ISOLEE[0]},{ISOLEE[1]},z0)] [SUCCESS]
-[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 101({ADV_FROM[0]},{ADV_FROM[1]}) DEPLOYED from (-1,-1) to ({ADV_FROM[0]},{ADV_FROM[1]}) [R:+0.0] [MODELS: 101#0@({ADV_FROM[0]},{ADV_FROM[1]},z0)] [SUCCESS]
-"""
+_HEADER = entete_step_log(
+    f"[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1({GROUPE[0][0]},{GROUPE[0][1]}) DEPLOYED from (-1,-1) to ({GROUPE[0][0]},{GROUPE[0][1]}) [R:+0.0] [MODELS: 1#0@({GROUPE[0][0]},{GROUPE[0][1]},z0) 1#1@({GROUPE[1][0]},{GROUPE[1][1]},z0) 1#2@({ISOLEE[0]},{ISOLEE[1]},z0)] [SUCCESS]\n"
+    f"[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 101({ADV_FROM[0]},{ADV_FROM[1]}) DEPLOYED from (-1,-1) to ({ADV_FROM[0]},{ADV_FROM[1]}) [R:+0.0] [MODELS: 101#0@({ADV_FROM[0]},{ADV_FROM[1]},z0)] [SUCCESS]\n",
+    units=(
+        "[10:00:00] Unit 1 (SternguardVeteranBoltRifle) P1: Starting position (-1,-1), HP_MAX=2 base=round/1\n"
+        "[10:00:00] Unit 101 (AssaultIntercessor) P2: Starting position (-1,-1), HP_MAX=2 base=round/1\n"
+    ),
+    inches_to_subhex=1,
+    board="cols=44 rows=60",
+    hex_radius="13.9",
+    margin=5,
+    walls=WALLS,
+    objectives=OBJECTIVES,
+    metric_ranged="hex",
+)
 
 # Ligne de retrait 03.03 : le `[MODELS:]` ne porte QUE les survivantes — c'est lui qui purge la
 # figurine retirée chez tout lecteur du journal.

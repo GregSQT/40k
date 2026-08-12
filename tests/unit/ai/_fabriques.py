@@ -209,3 +209,104 @@ def analyzer_config(**overrides: Any) -> AnalyzerConfig:
         raise TypeError(f"champs inconnus d'AnalyzerConfig : {sorted(unknown)}")
     fields.update(overrides)
     return AnalyzerConfig(**fields)
+
+
+def pose_etat_du_run(
+    scale: int,
+    *,
+    ez_subhex: int | str,
+    ez_vertical_inches: float | str | None = None,
+    metric_engagement: str = "hex",
+    board_dims: tuple[int, int] | None = None,
+) -> None:
+    """Fixe l'état du run dans le module `ai.analyzer` pour les tests qui n'appellent pas
+    `parse_step_log` (les getters d'analyzer lèvent si l'état n'a pas été initialisé).
+
+    Cinq sites le faisaient à la main — `set_analyzer_board_scale` + `set_run_rules` avec un dict
+    de 6 ou 7 clés dont les copies avaient divergé sur `engagement_zone_vertical_inches`. Ce
+    motif est concentré ici.
+    """
+    import ai.analyzer as an
+    from ai.analyzer_config import set_run_rules
+
+    an.set_analyzer_board_scale(scale)
+    if board_dims is not None:
+        an.set_analyzer_board_dims(*board_dims)
+    rules: Dict[str, str] = {"engagement_zone_subhex": str(ez_subhex)}
+    if ez_vertical_inches is not None:
+        rules["engagement_zone_vertical_inches"] = str(ez_vertical_inches)
+    rules.update({
+        "metric.engagement": metric_engagement,
+        "metric.ranged": "euclidean",
+        "move.thru_ez": "True",
+        "move.thru_enemy": "False",
+        "move.thru_friendly": "True",
+    })
+    set_run_rules(rules)
+
+
+def entete_step_log(
+    body: str = "",
+    *,
+    inches_to_subhex: int = 5,
+    board: str = "cols=220 rows=300",
+    hex_radius: str = "2.78",
+    margin: int = 1,
+    walls: str = "",
+    units: str = "",
+    objectives: str | None = "",
+    rosters: str = "",
+    ez_vertical_inches: float | None = 5.0,
+    metric_engagement: str = "hex",
+    metric_ranged: str = "euclidean",
+) -> str:
+    """Entête complet d'un step.log à épisode unique, pour les tests qui appellent `parse_step_log`.
+
+    Était `_log` dans test_analyzer_scale_vehicle_fly.py — version publique. La ligne
+    `Run rules:` est générée dynamiquement (clés triées, conformes au StepLogger) : un jeton
+    ajouté par le StepLogger ne brise que ce fichier, pas les ~25 fichiers qui la recopiaient.
+
+    `ez_vertical_inches=None` omet la clé : utile pour les tests qui vérifient le comportement
+    sans seuil vertical (l'analyzer est 2D dans ce cas).
+
+    `objectives=None` omet la ligne Objectives : les épisodes sans ce marqueur ne requièrent pas
+    de snapshot `T<n> OBJECTIVE CONTROL:`.
+    """
+    ez = 2 * inches_to_subhex
+    rules: Dict[str, str] = {
+        "cohesion.global_subhex": str(9 * inches_to_subhex),
+        "cohesion.min_neighbors": "1",
+        "cohesion.model_subhex": str(ez),
+        "engagement_zone_subhex": str(ez),
+    }
+    if ez_vertical_inches is not None:
+        rules["engagement_zone_vertical_inches"] = str(ez_vertical_inches)
+    rules.update({
+        "metric.engagement": metric_engagement,
+        "metric.ranged": metric_ranged,
+        "move.thru_enemy": "False",
+        "move.thru_ez": "True",
+        "move.thru_friendly": "True",
+    })
+    rules_txt = " ".join(f"{k}={v}" for k, v in sorted(rules.items()))
+    if objectives is None:
+        objectives_line = ""
+    else:
+        obj = objectives or ";".join(f"(150,{r})" for r in range(150, 156))
+        objectives_line = f"[10:00:00] Objectives: rect b NW:{obj}\n"
+    rosters_line = f"[10:00:00] Rosters: {rosters}\n" if rosters else ""
+    return (
+        "=== STEP-BY-STEP ACTION LOG ===\n"
+        "================================================================================\n\n"
+        "[10:00:00] === EPISODE 1 START ===\n"
+        "[10:00:00] Scenario: scenario_bot-01\n"
+        "[10:00:00] Opponent: SelfplayBot\n"
+        f"{rosters_line}"
+        f"[10:00:00] Walls: {walls}\n"
+        f"{objectives_line}"
+        f"[10:00:00] Board: {board} inches_to_subhex={inches_to_subhex} hex_radius={hex_radius} margin={margin}\n"
+        f"[10:00:00] Run rules: {rules_txt}\n"
+        f"{units}"
+        "[10:00:00] === ACTIONS START ===\n"
+        f"{body}"
+    )

@@ -5,6 +5,7 @@ from typing import Dict, Optional
 import pytest
 
 import ai.analyzer as an
+from tests.unit.ai._fabriques import entete_step_log, pose_etat_du_run
 
 
 def test_max_dice_value_valid_and_invalid() -> None:
@@ -151,19 +152,8 @@ def test_adjacency_and_position_cache_helpers() -> None:
     # Les primitives géométriques exigent l'échelle ET les règles du run ; hors parse_step_log
     # on les pose. Explicitement : cet état est porté par le module, donc un test qui l'a fixé
     # avant celui-ci le lui laisserait (`parse_step_log` le repose à chaque passe en production).
-    from ai.analyzer_config import set_run_rules
-
-    an.set_analyzer_board_scale(1)
     # Bord du plateau (03.01) : le BFS de chemin le lit comme il lit l'échelle, et lève sans lui.
-    an.set_analyzer_board_dims(44, 60)
-    set_run_rules({
-        "engagement_zone_subhex": "2",
-        "metric.engagement": "hex",
-        "metric.ranged": "euclidean",
-        "move.thru_ez": "True",
-        "move.thru_enemy": "False",
-        "move.thru_friendly": "True",
-    })
+    pose_etat_du_run(1, ez_subhex=2, board_dims=(44, 60))
     assert an.is_adjacent(1, 1, 2, 1) is True
     assert an.parse_timestamp_to_seconds("[01:02:03] line") == 3723
     assert an.parse_timestamp_to_seconds("line") is None
@@ -336,42 +326,35 @@ def test_advance_is_expected_in_move_phase_rule_09_02() -> None:
 # annonçait P1=60 / P2=20 là où le moteur avait attribué 35/35.
 
 
-_LOG_HEAD = [
-    "=== STEP-BY-STEP ACTION LOG ===",
-    "[12:00:00] === EPISODE 1 START ===",
-    "[12:00:00] Scenario: scenario_demo",
-    # Siège de l'agent : EXIGÉ dès qu'un épisode se termine sur un vainqueur — l'analyzer ne
-    # suppose plus « agent == P1 » (controlled_player_mode accepte p2 et random).
-    "[12:00:00] Rosters: scale=500pts AGENT_PLAYER=1 AGENT=a (a.json) OPPONENT=o (o.json)",
-    "[12:00:00] Walls: none",
-    # L'échelle du run vient de CETTE ligne, jamais du config courant : sans elle
-    # `parse_step_log` refuse d'analyser (cf. parse_board_scale_from_log).
-    "[12:00:00] Board: cols=220 rows=300 inches_to_subhex=5 hex_radius=2.78 margin=1",
-    "[10:00:00] Run rules: engagement_zone_subhex=10 metric.engagement=hex metric.ranged=euclidean move.thru_ez=True move.thru_enemy=False move.thru_friendly=True cohesion.model_subhex=10 cohesion.global_subhex=45 cohesion.min_neighbors=1",
-]
 _LOG_END = (
     "[12:00:09] EPISODE END: Winner=1, Method=objectives, Actions=0, Steps=0, "
     "Total=0, Duration=1.000s"
 )
 
 
-def _write_log(tmp_path: Path, lines: list) -> str:
+def _write_log(tmp_path: Path, body: str) -> str:
     path = tmp_path / "step.log"
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    path.write_text(
+        entete_step_log(
+            body,
+            rosters="scale=500pts AGENT_PLAYER=1 AGENT=a (a.json) OPPONENT=o (o.json)",
+            walls="none",
+        ),
+        encoding="utf-8",
+    )
     return str(path)
 
 
 def test_victory_points_come_from_engine_snapshot(tmp_path: Path) -> None:
     """Le DERNIER instantané de l'épisode fait foi : les VP sont un total courant, pas un delta."""
-    log = _write_log(tmp_path, _LOG_HEAD + [
-        "[12:00:00] Objectives: West:(1,1)|North:(5,5)",
-        "[12:00:01] T1 OBJECTIVE CONTROL: VP1=0 VP2=0 ZONES=West:Ctrl=none|North:Ctrl=none",
+    log = _write_log(tmp_path, "\n".join([
+        "[12:00:01] T1 OBJECTIVE CONTROL: VP1=0 VP2=0 ZONES=rect b NW:Ctrl=none",
         # VP non nuls AVANT le dernier instantané : une accumulation (au lieu d'un écrasement)
         # donnerait 17/9 au lieu de 12/7 — le moteur journalise un TOTAL, pas un delta.
-        "[12:00:03] T2 OBJECTIVE CONTROL: VP1=5 VP2=2 ZONES=West:Ctrl=1|North:Ctrl=none",
-        "[12:00:05] T3 OBJECTIVE CONTROL: VP1=12 VP2=7 ZONES=West:Ctrl=1|North:Ctrl=2",
+        "[12:00:03] T2 OBJECTIVE CONTROL: VP1=5 VP2=2 ZONES=rect b NW:Ctrl=1",
+        "[12:00:05] T3 OBJECTIVE CONTROL: VP1=12 VP2=7 ZONES=rect b NW:Ctrl=1",
         _LOG_END,
-    ])
+    ]) + "\n")
     stats = an.parse_step_log(log)
     assert stats["victory_points_by_episode"][1] == {1: 12, 2: 7}
     assert stats["victory_points_values"][1] == [12]
@@ -381,12 +364,11 @@ def test_victory_points_come_from_engine_snapshot(tmp_path: Path) -> None:
 def test_end_of_episode_recap_is_not_read_as_a_snapshot(tmp_path: Path) -> None:
     """`[ts] OBJECTIVE CONTROL: Obj1:P1_OC=…` n'a ni T{tour} ni VP1= : il doit être ignoré,
     sinon il écraserait les VP par un format qui n'en porte pas."""
-    log = _write_log(tmp_path, _LOG_HEAD + [
-        "[12:00:00] Objectives: West:(1,1)",
-        "[12:00:05] T3 OBJECTIVE CONTROL: VP1=12 VP2=7 ZONES=West:Ctrl=1",
+    log = _write_log(tmp_path, "\n".join([
+        "[12:00:05] T3 OBJECTIVE CONTROL: VP1=12 VP2=7 ZONES=rect b NW:Ctrl=1",
         "[12:00:08] OBJECTIVE CONTROL: Objwest:P1_OC=9,P2_OC=0,Ctrl=1",
         _LOG_END,
-    ])
+    ]) + "\n")
     stats = an.parse_step_log(log)
     assert stats["victory_points_by_episode"][1] == {1: 12, 2: 7}
 
@@ -394,20 +376,24 @@ def test_end_of_episode_recap_is_not_read_as_a_snapshot(tmp_path: Path) -> None:
 def test_log_with_objectives_but_no_snapshot_is_rejected(tmp_path: Path) -> None:
     """Journal antérieur au format : erreur explicite qui demande la régénération, pas des VP
     devinés (même contrat que le replay, cf. replayParser.ts)."""
-    log = _write_log(tmp_path, _LOG_HEAD + [
-        "[12:00:00] Objectives: West:(1,1)",
-        _LOG_END,
-    ])
+    log = _write_log(tmp_path, _LOG_END + "\n")
     with pytest.raises(ValueError, match=r"no 'T<turn> OBJECTIVE CONTROL:' snapshot"):
         an.parse_step_log(log)
 
 
 def test_log_without_objectives_is_accepted(tmp_path: Path) -> None:
     """Un scénario sans zone n'écrit aucun instantané : ce n'est pas un journal périmé."""
-    log = _write_log(tmp_path, _LOG_HEAD + [
-        "[12:00:00] Objectives: none",
-        _LOG_END,
-    ])
+    path = tmp_path / "step.log"
+    path.write_text(
+        entete_step_log(
+            _LOG_END + "\n",
+            rosters="scale=500pts AGENT_PLAYER=1 AGENT=a (a.json) OPPONENT=o (o.json)",
+            walls="none",
+            objectives=None,
+        ),
+        encoding="utf-8",
+    )
+    log = str(path)
     stats = an.parse_step_log(log)
     assert stats["victory_points_values"][1] == []
     assert stats["victory_points_values"][2] == []

@@ -23,6 +23,8 @@ cinquième test — et `force_thru_enemy` disparaître.
 """
 from __future__ import annotations
 
+from tests.unit.ai._fabriques import entete_step_log
+
 # Échelle x5 : M=6" d'un AssaultIntercessor vaut 30 subhex, la zone d'engagement 10 subhex.
 # Toutes les distances ci-dessous sont choisies pour tomber sans ambiguïté d'un côté ou de
 # l'autre de ces deux seuils — jamais dessus.
@@ -45,25 +47,16 @@ def _xy(p):
     return f"({p[0]},{p[1]})"
 
 
-_HEADER = f"""=== STEP-BY-STEP ACTION LOG ===
-================================================================================
-
-[10:00:00] === EPISODE 1 START ===
-[10:00:00] Scenario: scenario_bot-01
-[10:00:00] Rosters: scale=5 AGENT_PLAYER=1 AGENT=sm (ref) OPPONENT=sm (ref)
-[10:00:00] Opponent: SelfplayBot
-[10:00:00] Walls:
-[10:00:00] Objectives: rect b NW:{OBJECTIVES}
-[10:00:00] Board: cols=220 rows=300 inches_to_subhex=5 hex_radius=2.78 margin=1
-[10:00:00] Run rules: engagement_zone_subhex=10 metric.engagement=hex metric.ranged=euclidean move.thru_ez=True move.thru_enemy=False move.thru_friendly=True cohesion.model_subhex=10 cohesion.global_subhex=45 cohesion.min_neighbors=1
-[10:00:00] Unit 1 (AssaultIntercessor) P1: Starting position (-1,-1), HP_MAX=2 base=round/6
-[10:00:00] Unit 2 (AssaultIntercessor) P1: Starting position (-1,-1), HP_MAX=2 base=round/6
-[10:00:00] Unit 101 (AssaultIntercessor) P2: Starting position (-1,-1), HP_MAX=2 base=round/6
-[10:00:00] === ACTIONS START ===
-[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1{_xy(START)} DEPLOYED from (-1,-1) to {_xy(START)} [R:+0.0] [SUCCESS]
-[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 2{_xy(LONE_START)} DEPLOYED from (-1,-1) to {_xy(LONE_START)} [R:+0.0] [SUCCESS]
-[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 101{_xy(ENEMY)} DEPLOYED from (-1,-1) to {_xy(ENEMY)} [R:+0.0] [SUCCESS]
-"""
+_SETUP = (
+    f"[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1{_xy(START)} DEPLOYED from (-1,-1) to {_xy(START)} [R:+0.0] [SUCCESS]\n"
+    f"[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 2{_xy(LONE_START)} DEPLOYED from (-1,-1) to {_xy(LONE_START)} [R:+0.0] [SUCCESS]\n"
+    f"[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 101{_xy(ENEMY)} DEPLOYED from (-1,-1) to {_xy(ENEMY)} [R:+0.0] [SUCCESS]\n"
+)
+_UNITS = (
+    "[10:00:00] Unit 1 (AssaultIntercessor) P1: Starting position (-1,-1), HP_MAX=2 base=round/6\n"
+    "[10:00:00] Unit 2 (AssaultIntercessor) P1: Starting position (-1,-1), HP_MAX=2 base=round/6\n"
+    "[10:00:00] Unit 101 (AssaultIntercessor) P2: Starting position (-1,-1), HP_MAX=2 base=round/6\n"
+)
 
 
 # Clôture minimale exigée par `parse_step_log` : sans l'instantané d'objectifs et sans
@@ -85,7 +78,13 @@ def _stats(tmp_path, body: str):
     import ai.analyzer as an
 
     log = tmp_path / "step.log"
-    log.write_text(_HEADER + body)
+    log.write_text(entete_step_log(
+        _SETUP + body,
+        units=_UNITS,
+        rosters="scale=5 AGENT_PLAYER=1 AGENT=sm (ref) OPPONENT=sm (ref)",
+        objectives=OBJECTIVES,
+        ez_vertical_inches=None,
+    ))
     return an.parse_step_log(str(log))
 
 
@@ -155,7 +154,13 @@ def test_the_violations_reach_the_MOVE_error_total_of_the_summary(tmp_path):
         + _fled("2", LONE_START, LONE_DEST)  # éligibilité
     )
     log = tmp_path / "step.log"
-    log.write_text(_HEADER + body + _END)
+    log.write_text(entete_step_log(
+        _SETUP + body + _END,
+        units=_UNITS,
+        rosters="scale=5 AGENT_PLAYER=1 AGENT=sm (ref) OPPONENT=sm (ref)",
+        objectives=OBJECTIVES,
+        ez_vertical_inches=None,
+    ))
     stats = an.parse_step_log(str(log))
     assert stats["move_distance_over_limit"]["flee"][1] == 1
     assert stats["flee_from_unengaged"][1] == 1

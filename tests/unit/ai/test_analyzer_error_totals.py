@@ -24,6 +24,7 @@ from __future__ import annotations
 import pytest
 
 import ai.analyzer as an
+from tests.unit.ai._fabriques import entete_step_log
 
 
 #: Compteur → bucket de `error_totals` qui DOIT l'inclure. Cette table est le contrat : y ajouter
@@ -100,18 +101,12 @@ _CASES = [(bucket, path) for bucket, paths in COUNTERS.items() for path in paths
 #: Il sert à obtenir un `stats` neuf par le VRAI chemin d'initialisation — une fabrique de test
 #: recopierait la structure et divergerait le jour où un compteur s'ajoute, ce qui est
 #: exactement le défaut que ce fichier verrouille.
-_EMPTY_LOG = """=== STEP-BY-STEP ACTION LOG ===
-================================================================================
-
-[10:00:00] === EPISODE 1 START ===
-[10:00:00] Rosters: scale=5 AGENT_PLAYER=1 AGENT=sm (ref) OPPONENT=sm (ref)
-[10:00:00] Walls:
-[10:00:00] Objectives: none
-[10:00:00] Board: cols=220 rows=300 inches_to_subhex=5 hex_radius=2.78 margin=1
-[10:00:00] Run rules: engagement_zone_subhex=10 metric.engagement=hex metric.ranged=euclidean move.thru_ez=True move.thru_enemy=False move.thru_friendly=True cohesion.model_subhex=10 cohesion.global_subhex=45 cohesion.min_neighbors=1
-[10:00:00] === ACTIONS START ===
-[10:00:09] EPISODE END: Winner=1, Method=objectives, Actions=0, Steps=0, Total=0, Duration=1.000s
-"""
+_EMPTY_LOG = entete_step_log(
+    "[10:00:09] EPISODE END: Winner=1, Method=objectives, Actions=0, Steps=0, Total=0, Duration=1.000s\n",
+    rosters="scale=5 AGENT_PLAYER=1 AGENT=sm (ref) OPPONENT=sm (ref)",
+    objectives=None,
+    ez_vertical_inches=None,
+)
 
 
 @pytest.fixture(scope="module")

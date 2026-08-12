@@ -12,6 +12,8 @@ verrouille ses DEUX contrats internes, tous deux trouvés en relecture :
 """
 from __future__ import annotations
 
+from tests.unit.ai._fabriques import entete_step_log
+
 OBJECTIVES = ";".join(f"(60,{r})" for r in range(40, 46))
 
 # Board x1 : 1 hex = 1 pouce, zone d'engagement = 2. Lecture directe des distances.
@@ -25,24 +27,22 @@ S = f"({SHOOTER[0]},{SHOOTER[1]})"
 B = f"({BRAWLER[0]},{BRAWLER[1]})"
 A0 = f"({M0[0]},{M0[1]})"
 
-_HEADER = f"""=== STEP-BY-STEP ACTION LOG ===
-================================================================================
-
-[10:00:00] === EPISODE 1 START ===
-[10:00:00] Scenario: scenario_bot-01
-[10:00:00] Opponent: SelfplayBot
-[10:00:00] Walls:
-[10:00:00] Objectives: rect b NW:{OBJECTIVES}
-[10:00:00] Board: cols=60 rows=60 inches_to_subhex=1 hex_radius=13.9 margin=5
-[10:00:00] Run rules: engagement_zone_subhex=2 engagement_zone_vertical_inches=5.0 metric.engagement=hex metric.ranged=hex move.thru_ez=True move.thru_enemy=False move.thru_friendly=True cohesion.model_subhex=2 cohesion.global_subhex=9 cohesion.min_neighbors=1
-[10:00:00] Unit 1 (SternguardVeteranBoltRifle) P1: Starting position (-1,-1), HP_MAX=2 base=round/1
-[10:00:00] Unit 2 (AssaultIntercessor) P1: Starting position (-1,-1), HP_MAX=2 base=round/1
-[10:00:00] Unit 101 (AssaultIntercessor) P2: Starting position (-1,-1), HP_MAX=2 base=round/1
-[10:00:00] === ACTIONS START ===
-[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1{S} DEPLOYED from (-1,-1) to {S} [R:+0.0] [MODELS: 1#0@({SHOOTER[0]},{SHOOTER[1]},z0)] [SUCCESS]
-[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 2{B} DEPLOYED from (-1,-1) to {B} [R:+0.0] [MODELS: 2#0@({BRAWLER[0]},{BRAWLER[1]},z0)] [SUCCESS]
-[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 101{A0} DEPLOYED from (-1,-1) to {A0} [R:+0.0] [MODELS: 101#0@({M0[0]},{M0[1]},z0) 101#1@({M1[0]},{M1[1]},z0) 101#2@({M2[0]},{M2[1]},z0)] [SUCCESS]
-"""
+_HEADER = entete_step_log(
+    f"[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1{S} DEPLOYED from (-1,-1) to {S} [R:+0.0] [MODELS: 1#0@({SHOOTER[0]},{SHOOTER[1]},z0)] [SUCCESS]\n"
+    f"[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 2{B} DEPLOYED from (-1,-1) to {B} [R:+0.0] [MODELS: 2#0@({BRAWLER[0]},{BRAWLER[1]},z0)] [SUCCESS]\n"
+    f"[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 101{A0} DEPLOYED from (-1,-1) to {A0} [R:+0.0] [MODELS: 101#0@({M0[0]},{M0[1]},z0) 101#1@({M1[0]},{M1[1]},z0) 101#2@({M2[0]},{M2[1]},z0)] [SUCCESS]\n",
+    units=(
+        "[10:00:00] Unit 1 (SternguardVeteranBoltRifle) P1: Starting position (-1,-1), HP_MAX=2 base=round/1\n"
+        "[10:00:00] Unit 2 (AssaultIntercessor) P1: Starting position (-1,-1), HP_MAX=2 base=round/1\n"
+        "[10:00:00] Unit 101 (AssaultIntercessor) P2: Starting position (-1,-1), HP_MAX=2 base=round/1\n"
+    ),
+    inches_to_subhex=1,
+    board="cols=60 rows=60",
+    hex_radius="13.9",
+    margin=5,
+    objectives=OBJECTIVES,
+    metric_ranged="hex",
+)
 
 # La mêlée de l'allié tue une figurine : les socles de la cible sont PURGÉS (le journal ne dit pas
 # laquelle tombe) et ne seront réécrits qu'à sa prochaine action. La cible devient donc un POINT

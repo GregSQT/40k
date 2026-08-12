@@ -16,6 +16,8 @@ import pytest
 
 import ai.analyzer as an
 
+from tests.unit.ai._fabriques import entete_step_log
+
 OBJECTIVES = ";".join(f"(150,{r})" for r in range(150, 156))
 _UNITS = (
     "[10:00:00] Unit 1 (Intercessor) P1: Starting position (-1,-1), HP_MAX=2\n"
@@ -24,20 +26,15 @@ _UNITS = (
 
 
 def _log(body: str, *, scale: int, walls: str = "") -> str:
-    return (
-        "=== STEP-BY-STEP ACTION LOG ===\n"
-        "[10:00:00] === EPISODE 1 START ===\n"
-        "[10:00:00] Scenario: scenario_bot-01\n"
-        "[10:00:00] Opponent: SelfplayBot\n"
-        f"[10:00:00] Walls: {walls}\n"
-        f"[10:00:00] Objectives: rect b NW:{OBJECTIVES}\n"
-        f"[10:00:00] Board: cols=220 rows=300 inches_to_subhex={scale} hex_radius=2.78 margin=1\n"
-        f"[10:00:00] Run rules: engagement_zone_subhex={2 * scale} metric.engagement=hex metric.ranged=euclidean move.thru_ez=True move.thru_enemy=False move.thru_friendly=True cohesion.model_subhex={2 * scale} cohesion.global_subhex={9 * scale} cohesion.min_neighbors=1\n"
-        f"{_UNITS}"
-        "[10:00:00] === ACTIONS START ===\n"
+    return entete_step_log(
         "[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1(50,50) DEPLOYED from (-1,-1) to (50,50) [R:+0.0] [SUCCESS]\n"
         "[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 101(90,50) DEPLOYED from (-1,-1) to (90,50) [R:+0.0] [SUCCESS]\n"
-        f"{body}"
+        + body,
+        inches_to_subhex=scale,
+        walls=walls,
+        objectives=OBJECTIVES,
+        units=_UNITS,
+        ez_vertical_inches=None,
     )
 
 
