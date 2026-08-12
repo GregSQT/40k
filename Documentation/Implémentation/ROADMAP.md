@@ -117,7 +117,8 @@
   CORRIGÉ : la décision passe par `utils/boardRedrawDecision.planBoardRedraw`, source UNIQUE des
   trois gestes du rendu (appeler `drawBoard`, conserver le calque statique, conserver les
   surbrillances). Instruments de diagnostic retirés (traces console) ; l'affichage
-  « Objectifs tenus » reste en place le temps de la validation navigateur, marqué temporaire.
+  « Objectifs tenus » a servi à prouver que le moteur avait raison, puis a été retiré.
+  VALIDÉ AU NAVIGATEUR le 2026-08-12 : la ruine centrale devient bien bleue à la capture.
   DEUXIÈME PASSE, même jour (`/code-review` sur la première) : corriger le point ci-dessus avait
   rendu ATTEIGNABLES deux chemins de nettoyage de scène jusque-là morts, tous deux du même genre
   — un conteneur périmé laissé visible sur le stage. (a) le calque statique périmé était
