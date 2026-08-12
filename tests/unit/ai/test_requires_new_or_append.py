@@ -16,6 +16,9 @@ Verrous :
 - HORS SUJET : `--test-only`, `--convert-steplog`, `--replay` ne s'entraînent pas, ils passent ;
 - PLACEMENT : `main()` appelle la garde AVANT son `try:`, donc avant le StepLogger, avant
   `node scripts/copy-configs.js` et avant toute construction d'environnement ;
+- PROLOGUE + ORDRE : `prepare_run_artifacts`, commun aux deux points d'entrée, refuse, et il est
+  appelé AVANT `_resolve_tensorboard_run_dir` — sans quoi un appel direct était refusé APRÈS
+  avoir réécrit le run-meta du modèle, qui perdait le rattachement à ses courbes ;
 - JUMEAU : les DEUX points d'entrée lèvent sur leur `else` terminal — aucun ne peut plus créer ni
   recharger un modèle en silence si on l'appelle directement.
 """
@@ -30,6 +33,7 @@ import pytest
 
 from ai.train import (
     build_agent_model_path,
+    prepare_run_artifacts,
     model_lifecycle_conflict,
     require_explicit_model_lifecycle,
 )
@@ -60,6 +64,10 @@ def _args(**overrides) -> argparse.Namespace:
         test_only=False,
         convert_steplog=None,
         replay=False,
+        # Lu par la garde : `--resume-from` pose `append=True` alors que le modele canonique peut
+        # ne pas exister encore (il l'installe plus tard). Absent du Namespace, le refus
+        # « --append sans modele » levait un AttributeError sur toutes les invocations.
+        resume_from=None,
     )
     base.update(overrides)
     return argparse.Namespace(**base)
@@ -105,6 +113,50 @@ def test_sans_modele_existant_aucun_flag_n_est_exige(tmp_path) -> None:
     require_explicit_model_lifecycle(_ModelsRoot(tmp_path), _args())
 
 
+def test_append_sans_modele_a_continuer_est_refuse(tmp_path) -> None:
+    """JUMEAU EXACT du refus ci-dessus, dans l'autre sens, et le même désastre.
+
+    La condition d'entrée des deux points d'entraînement est `new_model or not
+    os.path.exists(model_path)` : un `--append` dont le .zip est ABSENT — `--agent` mal
+    orthographié, modèle déplacé, `ai/models/` pas encore peuplé — ne passait donc JAMAIS par le
+    chargement. Il tombait dans la branche « modèle neuf » et s'entraînait des heures depuis des
+    poids aléatoires sous un drapeau qui promet exactement le contraire, avant d'écrire au chemin
+    canonique. Ça n'échouait bruyamment que PAR ACCIDENT, quand les stats VecNormalize compagnonnes
+    manquaient à l'appel : un profil `vec_normalize.enabled: false` sortait en code 0.
+    """
+    with pytest.raises(ValueError) as excinfo:
+        require_explicit_model_lifecycle(_ModelsRoot(tmp_path), _args(append=True))
+
+    message = str(excinfo.value)
+    assert build_agent_model_path(str(tmp_path), AGENT) in message, "le modèle absent est nommé"
+    assert "--new" in message, "l'option d'un PREMIER entraînement doit être rappelée"
+
+
+def test_resume_from_echappe_au_refus_append_sans_modele(tmp_path) -> None:
+    """`--resume-from` pose `append=True` AVANT d'avoir installé quoi que ce soit : le checkpoint
+    est copié au chemin canonique plus tard, dans la branche d'entraînement. Refuser ici rendrait
+    impossible la reprise d'un checkpoint sur un agent dont le modèle canonique a été supprimé —
+    précisément le cas où elle sert."""
+    require_explicit_model_lifecycle(
+        _ModelsRoot(tmp_path), _args(append=True, resume_from="ppo_checkpoint_640000_steps.zip")
+    )
+
+
+def test_new_gagne_sur_append_meme_sans_modele(tmp_path) -> None:
+    """`--new --append` sur un dossier vide reste un premier entraînement légitime : `--new` gagne
+    (cf. `prepare_run_artifacts`), donc le refus « rien à continuer » ne doit pas s'y déclencher."""
+    require_explicit_model_lifecycle(_ModelsRoot(tmp_path), _args(new=True, append=True))
+    prepare_run_artifacts(str(tmp_path), AGENT, True, True, 1, log_fn=lambda _m: None)
+
+
+def test_le_prologue_commun_refuse_aussi_append_sans_modele(tmp_path) -> None:
+    """Le prologue porte les DEUX refus : c'est le seul site joué APRÈS l'installation du
+    checkpoint de `--resume-from`, donc le seul qui puisse constater qu'elle a échoué à produire
+    un modèle."""
+    with pytest.raises(ValueError, match="n'existe pas"):
+        prepare_run_artifacts(str(tmp_path), AGENT, False, True, 1, log_fn=lambda _m: None)
+
+
 @pytest.mark.parametrize(
     "mode", [{"test_only": True}, {"convert_steplog": "step.log"}, {"replay": True}]
 )
@@ -112,6 +164,37 @@ def test_les_modes_sans_entrainement_ne_sont_pas_concernes(tmp_path, mode) -> No
     """Ils ne lisent ni `--new` ni `--append` : les exiger interdirait d'évaluer un modèle."""
     _existing_model(tmp_path)
     require_explicit_model_lifecycle(_ModelsRoot(tmp_path), _args(**mode))
+
+
+def test_le_prologue_commun_des_deux_points_d_entree_refuse(tmp_path) -> None:
+    """`prepare_run_artifacts` est la PREMIÈRE chose que font les deux points d'entrée.
+
+    Le `else` terminal, seul, refusait trop tard : voir le test d'ordre ci-dessous.
+    """
+    model_path = _existing_model(tmp_path)
+
+    with pytest.raises(ValueError) as excinfo:
+        prepare_run_artifacts(str(tmp_path), AGENT, False, False, 1)
+
+    assert model_path in str(excinfo.value), "même erreur, même fabrique que les autres sites"
+
+
+def test_le_refus_precede_l_ouverture_du_run_tensorboard() -> None:
+    """ORDRE : refuser après `_resolve_tensorboard_run_dir` refuse ET casse le modèle.
+
+    Sans `--append`, cette fonction ouvre un répertoire de run NEUF et réécrit le run-meta du
+    modèle (`_write_tensorboard_run_meta`). Un refus rendu plus bas laissait donc le modèle
+    entraîné détaché de ses courbes : le `--append` suivant repartait sur un run vide, alors
+    même que la commande fautive avait été rejetée.
+    """
+    source = TRAIN_PY.read_text(encoding="utf-8").splitlines()
+    prologue = [i for i, line in enumerate(source) if "prepare_run_artifacts(" in line and "def " not in line]
+    tb_run = [i for i, line in enumerate(source) if "_resolve_tensorboard_run_dir(" in line and "def " not in line]
+    assert prologue and tb_run, "sites introuvables : ce test ne verrouille plus rien"
+    assert min(prologue) < min(tb_run) and max(prologue) < min(tb_run), (
+        "tout appel a `prepare_run_artifacts` doit precéder `_resolve_tensorboard_run_dir` : "
+        "c'est ce qui garantit que le refus arrive avant la réécriture du run-meta"
+    )
 
 
 def _main_body() -> list:

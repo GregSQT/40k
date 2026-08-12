@@ -1424,21 +1424,46 @@ def model_lifecycle_conflict(model_path: str) -> ValueError:
     )
 
 
-def require_explicit_model_lifecycle(config, args) -> None:
-    """Refuse une invocation d'ENTRAINEMENT qui ne dit ni `--new` ni `--append`.
+def append_without_model(model_path: str) -> ValueError:
+    """L'erreur unique de « `--append` sans modele a continuer ».
 
-    Appelee au plus tot dans `main()` : le cout d'une erreur tardive ici, c'est un modele
-    entraine pendant des heures remplace par des poids aleatoires. Les modes qui ne
-    s'entrainent pas (`--test-only`, `--convert-steplog`, `--replay`) ne lisent aucun des deux
+    JUMEAU EXACT de `model_lifecycle_conflict`, dans l'autre sens, et le meme desastre : la
+    condition d'entree des deux points d'entree est `new_model or not os.path.exists(model_path)`,
+    donc un `--append` dont le .zip est ABSENT — agent mal orthographie, modele deplace, dossier
+    `ai/models/` pas encore peuple — ne passait jamais par le chargement : il tombait dans la
+    branche « modele neuf » et s'entrainait des heures depuis des poids aleatoires, avant
+    d'ecrire au chemin canonique. Rien ne le disait. Ca n'echouait bruyamment que PAR ACCIDENT,
+    quand `_apply_vec_normalize` ne trouvait pas le `.pkl` compagnon : un profil avec
+    `vec_normalize.enabled: false` sortait en code 0.
+    """
+    return ValueError(
+        f"--append demande de CONTINUER un modele qui n'existe pas ({model_path}). "
+        "L'entrainement s'arrete au lieu de repartir de poids aleatoires sous un drapeau qui "
+        "promet le contraire. Verifier --agent et le contenu de ai/models/<agent>/ ; pour un "
+        "PREMIER entrainement, utiliser --new."
+    )
+
+
+def require_explicit_model_lifecycle(config, args) -> None:
+    """Refuse une invocation d'ENTRAINEMENT dont l'intention sur le modele n'est pas realisable.
+
+    Deux refus, memes enjeux : ni `--new` ni `--append` alors qu'un modele existe (on ne devine
+    pas s'il faut l'ecraser ou le continuer), et `--append` alors qu'il n'en existe aucun (il n'y
+    a rien a continuer). Appelee au plus tot dans `main()` : le cout d'une erreur tardive ici,
+    c'est un modele entraine pendant des heures remplace par des poids aleatoires. Les modes qui
+    ne s'entrainent pas (`--test-only`, `--convert-steplog`, `--replay`) ne lisent aucun des deux
     drapeaux : ils sont hors sujet, pas tolerants.
 
-    `--resume-from` est deja traduit en `args.append = True` par l'appelant, donc il passe.
+    `--resume-from` est traduit en `args.append = True` par l'appelant, mais il INSTALLE le
+    checkpoint au chemin canonique plus tard, dans la branche d'entrainement : ici le modele peut
+    donc legitimement ne pas exister encore, et le second refus ne le concerne pas. Il reste
+    couvert par `prepare_run_artifacts`, joue APRES la promotion.
     """
     if args.test_only or args.convert_steplog or args.replay:
         return
+    model_path = build_agent_model_path(config.get_models_root(), args.agent)
     if args.new or args.append:
         return
-    model_path = build_agent_model_path(config.get_models_root(), args.agent)
     if not os.path.exists(model_path):
         return
     raise model_lifecycle_conflict(model_path)
@@ -1467,6 +1492,16 @@ def prepare_run_artifacts(
     il se re-casse au refactor suivant.
     """
     model_path = build_agent_model_path(models_root, require_present(agent_key, "agent_key"))
+    # AVANT le moindre effet de bord des deux points d'entree (creation de dossier, archivage
+    # `--new`, ouverture d'un run TensorBoard neuf qui ecrase le run-meta du modele). Le refus
+    # vit aussi dans `main()`, plus tot encore ; ici il couvre l'appel DIRECT aux deux fonctions
+    # d'entrainement, pour lequel un refus tardif laissait deja le modele sans ses courbes.
+    if os.path.exists(model_path) and not (new_model or append_training):
+        raise model_lifecycle_conflict(model_path)
+    # Jumeau du refus ci-dessus, dans l'autre sens. `--new` GAGNE SUR `--append` (cf. docstring),
+    # donc `--new --append` sur un dossier vide reste un premier entrainement legitime. C'est le
+    # seul site qui puisse porter ce refus : il est joue APRES l'installation du checkpoint de
+    # `--resume-from` au chemin canonique, que la garde de `main()` precede.
     os.makedirs(os.path.dirname(model_path), exist_ok=True)
     if new_model:
         archive_canonical_artifacts_for_new_run(model_path, log_fn)

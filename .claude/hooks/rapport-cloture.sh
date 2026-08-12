@@ -60,6 +60,9 @@ LIGNE_SECTIONS = re.compile(r"^\s*SECTIONS EXIGÉES\s*:\s*(.+)$", re.MULTILINE)
 ITEM_SECTION = re.compile(r"`([A-ZÉÈÀÂÎÔÛÇ]+)`\s*=\s*(toujours|code)")
 LIGNE_CODE = re.compile(r"^\s*FICHIERS COMPTÉS COMME CODE\s*:\s*(.+)$", re.MULTILINE)
 ITEM_CODE = re.compile(r"`([^`\s]+)`")
+# Une fence markdown : au moins trois backticks, puis l'éventuel langage. Les deux groupes servent
+# à distinguer une OUVERTURE (```python) d'une FERMETURE (``` seule, aussi large que l'ouverture).
+FENCE = re.compile(r"^(`{3,})(.*)$")
 
 
 def _items(texte, ligne_motif, item_motif, etiquette, claude_md):
@@ -232,10 +235,20 @@ def hors_bloc_de_code(lines):
     laquelle des deux lectures est la bonne (bloc ouvert, ou fence surnuméraire ouvrant un faux
     bloc) : on ne devine pas, on le REMONTE à l'appelant, à qui il revient de ne rien avaler.
     """
-    dehors, ouverture = [], None
+    dehors, ouverture, largeur = [], None, 0
     for numero, ln in enumerate(lines, start=1):
-        if ln.lstrip().startswith("```"):
-            ouverture = None if ouverture is not None else numero
+        fence = FENCE.match(ln.lstrip())
+        if fence:
+            if ouverture is None:
+                ouverture, largeur = numero, len(fence.group(1))
+                continue
+            # Fermeture au sens du markdown QUI REND le message : au moins autant de backticks que
+            # l'ouverture, et RIEN d'autre sur la ligne. Une bascule aveugle prenait ```python pour
+            # une fermeture, donc un extrait fencé DANS un prompt copiable rouvrait le filtre : le
+            # `LU :` ou le `/code-review <relatif>` du prompt redevenait visible et tenait lieu de
+            # rapport — exactement ce que ce filtrage existe pour empêcher (mesuré 2026-08-12).
+            if len(fence.group(1)) >= largeur and not fence.group(2).strip():
+                ouverture = None
             continue
         if ouverture is None:
             dehors.append(ln)
@@ -260,12 +273,22 @@ def bloc_relire(lines, depart):
 def relire_faults(lines):
     """Défauts de forme du bloc RELIRE, sur les lignes HORS blocs ```. Liste vide = conforme.
 
-    Prend les lignes déjà filtrées par `hors_bloc_de_code` et non le message brut : le cas de la
-    fence orpheline se tranche UNE fois, en amont (`faults_of`), pour tous les contrôles à la fois.
+    `lines` est déjà filtré par `hors_bloc_de_code` : le cas de la fence orpheline se tranche UNE
+    fois en amont (`faults_of`), pour tous les contrôles à la fois.
+
+    Les diagnostics rendus ici disent TOUJOURS « hors des blocs ``` », et ne prétendent jamais
+    savoir laquelle des deux lectures est la bonne : un `RELIRE :` fencé est le rapport écrit dans
+    une fence OU un prompt copiable qui cite l'étiquette, et RIEN dans le texte ne les distingue —
+    c'est la raison d'être du filtrage. Un message qui tranche est faux une fois sur deux, et sa
+    consigne (« sors-le de la fence ») envoie alors défencer un prompt, donc rendre visible le
+    chemin relatif qu'il porte. Un message vrai dans les deux lectures ferme la boucle.
     """
     labels = [i for i, ln in enumerate(lines) if re.match(r"^\s*RELIRE\s*:", ln)]
     if not labels:
-        return ["la section RELIRE est absente"]
+        return [
+            "la section RELIRE est absente HORS des blocs ``` — si elle y est, sors-l'en : fencée, "
+            "rien ne la distingue d'un prompt copiable qui cite `RELIRE :`"
+        ]
 
     faults = []
     if not any(re.match(r"^\s*RELIRE\s*:\s*$", lines[i]) for i in labels):
@@ -277,7 +300,13 @@ def relire_faults(lines):
     cmd_lines = [ln for ln in bloc if re.match(r"^\s*/(code-review|simplify)\b", ln)]
     for name in ("code-review", "simplify"):
         if not any(re.match(r"^\s*/" + name + r"\b", ln) for ln in cmd_lines):
-            faults.append(f"`/{name}` doit être seul en début de sa propre ligne")
+            # Même indécidabilité que pour l'étiquette, un cran plus bas : une commande fencée est
+            # celle du rapport OU celle d'un prompt copiable. On énonce donc les deux façons de
+            # rendre le rapport conforme, sans affirmer laquelle s'applique.
+            faults.append(
+                f"`/{name}` doit être seul en début de sa propre ligne, HORS des blocs ``` "
+                "(fencé, il ne se distingue pas de la commande d'un prompt copiable)"
+            )
 
     # Chemins ABSOLUS, sans condition. La version d'avant n'exigeait l'absolu que si un fichier
     # ÉDITÉ vivait sous `.claude/worktrees/` : une session worktree qui ne touche que le dépôt
@@ -306,7 +335,11 @@ def relire_faults(lines):
             # espace écrit nu : sans cette phrase, le diagnostic rendu est « ABSOLUS — vu : -,
             # save.ts », qui ne dit rien de la façon d'y remédier. Indice seulement, jamais un
             # verdict : le refus reste le même dans les deux lectures.
-            morcele = chemins[0].startswith("/") and len(relatifs) < len(chemins)
+            # MESURÉ, pas deviné : on recolle les fragments au chemin absolu qui précède et on
+            # regarde si ça DÉSIGNE un fichier. Le compte des fragments ne tranchait rien — il
+            # donnait l'indice « cite ton chemin » sur `/code-review /abs/x.py engine`, où `engine`
+            # est un vrai répertoire relatif, donc le défaut du 2026-08-08 lui-même.
+            morcele = chemins[0].startswith("/") and os.path.exists(" ".join(chemins))
             faults.append(
                 "tous les chemins du bloc RELIRE doivent être ABSOLUS — vu : "
                 + ", ".join(relatifs[:3])
@@ -339,7 +372,7 @@ def faults_of(turn, cfg):
     # Les sections se cherchent HORS des blocs ```, comme les commandes du bloc RELIRE : un prompt
     # copiable qui cite `LU :` satisfaisait l'exigence sans que le rapport la porte.
     visibles, bloc_ouvert = hors_bloc_de_code(report.splitlines())
-    if bloc_ouvert is not None and du_code:
+    if bloc_ouvert is not None:
         # DÉCISION : une fence jamais refermée rend le message MALFORMÉ, et c'est CE défaut qu'on
         # rend — seul, et sans regarder plus loin. Les deux autres lectures ont été écartées :
         # ignorer la fence orpheline ferait relire un prompt copiable comme s'il était le rapport
@@ -352,7 +385,7 @@ def faults_of(turn, cfg):
             f"un bloc ``` ouvert ligne {bloc_ouvert} n'est jamais refermé, donc la fin du message "
             "n'est pas analysable (RELIRE comprise) : referme-le et rends le rapport en entier"
         ]
-    cherchable = report if bloc_ouvert is not None else "\n".join(visibles)
+    cherchable = "\n".join(visibles)
     faults = []
     for name, portee in cfg["sections"]:
         if portee == "code" and not du_code:

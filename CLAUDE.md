@@ -67,7 +67,11 @@ REDÉMARRAGE DES SERVICES — ACQUIS, NE JAMAIS LE DEMANDER :
 
 ENTRAÎNEMENT IA :
 - Lancer   : python3 ai/train.py --agent CoreAgent --scenario bot --new
-- Valider  : python3 ai/train.py --agent CoreAgent --scenario bot --step
+- Valider  : python3 ai/train.py --agent CoreAgent --scenario bot --step --append
+  (`--new` ou `--append` est désormais OBLIGATOIRE dès qu'un modèle existe : sans l'un des deux,
+   train.py refuse au lieu de choisir. Ici `--append` : la validation porte sur le modèle
+   ENTRAÎNÉ, et `--new` l'écarterait pour laisser un run court au chemin canonique — celui que
+   lisent le PvE et le `--append` suivant.)
 - Analyser : python3 ai/analyzer.py <fichier_de_résultats>
 - Pas de tests automatisés — validation via --step + analyzer.py + replay
 
@@ -435,7 +439,10 @@ conclusion, il ne s'y ajoute pas. Ne jamais y répéter ce qui vient d'être dit
 - FORME DU RAPPORT — tenue par un hook, pas par ta vigilance : `.claude/hooks/rapport-cloture.sh`
   vérifie, sur tout tour qui a modifié un fichier, la présence des sections listées à la ligne
   ci-dessous, la disposition du bloc RELIRE (étiquette seule, une commande par ligne) et le
-  caractère absolu de ses chemins. Cette ligne est la SOURCE UNIQUE de la liste : le hook la LIT ici
+  caractère absolu de ses chemins. Deux points de LECTURE, qui décident de ce qu'il voit : rien de
+  ce qui est écrit DANS un bloc ``` ne compte — ni une section, ni une commande, parce que les
+  prompts copiables de PROMPTS en citent — et un ``` jamais refermé fait rejeter le rapport comme
+  malformé, plutôt que d'avaler tout ce qui suit. Cette ligne est la SOURCE UNIQUE de la liste : le hook la LIT ici
   même, donc y ajouter ou en retirer une section change ce qu'il réclame, et
   `tests/unit/scripts/test_hooks_garde_fous.py` échoue si elle diverge du FORMAT IMPOSÉ ci-dessus.
   `=toujours` : due dès qu'un fichier a été modifié ; `=code` : due seulement si un fichier de

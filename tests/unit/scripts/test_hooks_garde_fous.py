@@ -426,6 +426,59 @@ def test_un_argument_qui_n_est_pas_un_chemin_ne_declenche_rien(
     assert _rapport(tmp_path, _user("corrige"), _edit("engine/x.py"), _say(avec)) is None
 
 
+def test_des_commandes_dans_une_fence_sont_nommees_comme_telles(tmp_path: Path) -> None:
+    """Étiquette en clair, commandes dans la fence : le diagnostic doit dire CE défaut-là.
+
+    Reprocher « doit être seul en début de sa propre ligne » à une commande qui l'est déjà envoie
+    réécrire l'identique — l'agent rend le même rapport et le hook réclame sans fin. Le diagnostic
+    nomme donc la fence, sans AFFIRMER qu'elle est en cause : rien ne distingue une commande fencée
+    du rapport de celle d'un prompt copiable, et prétendre trancher enverrait défencer un prompt.
+    """
+    fencees = RAPPORT_CONFORME.replace(
+        "/code-review /home/greg/40k/engine/x.py\n/simplify /home/greg/40k/engine/x.py",
+        "```\n/code-review /home/greg/40k/engine/x.py\n/simplify /home/greg/40k/engine/x.py\n```",
+    )
+    contexte = _rapport(tmp_path, _user("corrige"), _edit("engine/x.py"), _say(fencees))
+    assert contexte is not None and "HORS des blocs" in contexte
+
+
+def test_une_commande_vraiment_absente_ne_recoit_pas_un_diagnostic_de_fence(
+    tmp_path: Path,
+) -> None:
+    """L'indécidabilité se dit, elle ne se devine pas : `/simplify` manque VRAIMENT ici.
+
+    Chercher la commande dans le message BRUT faisait rendre « écrit DANS un bloc ``` » dès qu'un
+    prompt copiable en portait une : l'agent allait défencer son prompt, donc rendre visible le
+    chemin relatif qu'il contient, et le hook réclamait ensuite « chemins ABSOLUS » — la confusion
+    PROMPTS/RELIRE que le bornage du bloc existe pour empêcher.
+    """
+    sans_simplify = "\n".join(
+        ln for ln in RAPPORT_CONFORME.splitlines() if not ln.startswith("/simplify")
+    )
+    prompt = "PROMPTS :\n  1. sujet\n     ```\n     /simplify engine/y.py\n     ```\n"
+    seul = _rapport(tmp_path, _user("corrige"), _edit("engine/x.py"), _say(sans_simplify))
+    avec_prompt = _rapport(
+        tmp_path, _user("corrige"), _edit("engine/x.py"), _say(sans_simplify + "\n" + prompt)
+    )
+    # Le VERROU est l'égalité : le diagnostic ne doit pas dépendre de ce que porte PROMPTS, sinon
+    # c'est qu'il a cru trancher une lecture que rien ne tranche.
+    assert seul is not None and "/simplify" in seul
+    assert avec_prompt == seul
+
+
+def test_un_vrai_relatif_ne_recoit_pas_le_conseil_de_citer(tmp_path: Path) -> None:
+    """`/code-review /abs/x.py engine` : `engine` EST le défaut du 2026-08-08, pas un fragment.
+
+    L'indice « cite ton chemin » y envoyait écrire `'engine'`, refusé pareillement : conseil faux
+    sur un défaut réel. Il ne se donne que si recoller les morceaux DÉSIGNE un fichier existant.
+    """
+    relatif = RAPPORT_CONFORME.replace(
+        "/code-review /home/greg/40k/engine/x.py", "/code-review /home/greg/40k/engine/x.py engine"
+    )
+    contexte = _rapport(tmp_path, _user("corrige"), _edit("engine/x.py"), _say(relatif))
+    assert contexte is not None and "ABSOLUS" in contexte and "se CITE" not in contexte
+
+
 def test_un_prompt_copiable_n_est_pas_pris_pour_le_bloc_relire(tmp_path: Path) -> None:
     """PROMPTS contient des prompts COPIABLES, donc souvent une commande en début de ligne.
 
@@ -473,6 +526,49 @@ def test_un_bloc_non_referme_est_signale_meme_sans_fichier_de_code(tmp_path: Pat
     contexte = _rapport(tmp_path, _user("corrige la doc"), _edit("Documentation/x.md"),
                         _say(message))
     assert contexte is not None and "jamais refermé" in contexte
+
+
+def test_une_fence_a_langage_dans_un_prompt_ne_rouvre_pas_le_filtre(tmp_path: Path) -> None:
+    """```python DANS un prompt copiable : contenu au sens markdown, pas une fermeture.
+
+    Une bascule aveugle le prenait pour la fermeture du bloc du prompt, donc les lignes suivantes
+    — celles du prompt — redevenaient visibles : le `/code-review <relatif>` qu'il porte était
+    reproché au rapport, alors que ce n'est pas le sien.
+    """
+    prompt = (
+        "PROMPTS :\n  1. sujet\n     ```\n     voici un extrait :\n     ```python\n"
+        "     x = 1\n     /code-review engine/y.py\n     ```\n"
+    )
+    assert _rapport(
+        tmp_path, _user("corrige"), _edit("engine/x.py"), _say(prompt + RAPPORT_CONFORME)
+    ) is None
+
+
+def test_une_fence_plus_large_encadre_une_fence_ordinaire(tmp_path: Path) -> None:
+    """La seule imbrication VALIDE en markdown : quatre backticks autour de trois.
+
+    Le `LU :` de l'extrait imbriqué reste du contenu — sinon il tiendrait lieu de la ligne LU que
+    le rapport ne porte pas.
+    """
+    ampute = "\n".join(ln for ln in RAPPORT_CONFORME.splitlines() if not ln.startswith("LU"))
+    prompt = "PROMPTS :\n  1. sujet\n     ````\n     ```python\n     LU : x\n     ```\n     ````\n"
+    contexte = _rapport(tmp_path, _user("corrige"), _edit("engine/x.py"), _say(ampute + prompt))
+    assert contexte is not None and "la ligne LU est absente" in contexte
+
+
+def test_un_bloc_relire_ecrit_dans_une_fence_dit_comment_le_rendre_conforme(
+    tmp_path: Path,
+) -> None:
+    """« absente » tout court envoyait réécrire une section déjà là, donc réclamait sans fin.
+
+    Un RELIRE fencé reste refusé — rien ne le distingue d'un prompt copiable qui cite `RELIRE :` —
+    mais le refus doit porter les DEUX lectures : la section manque hors des blocs, et si elle y
+    est, il faut l'en sortir.
+    """
+    fence = RAPPORT_CONFORME.replace("RELIRE :", "```\nRELIRE :").rstrip("\n") + "\n```\n"
+    contexte = _rapport(tmp_path, _user("corrige"), _edit("engine/x.py"), _say(fence))
+    assert contexte is not None and "HORS des blocs" in contexte
+    assert "seul en début" not in contexte
 
 
 A_ESPACE = "/home/greg/40k/shared/gameLogStructure - save.ts"
@@ -1007,8 +1103,9 @@ def test_un_id_non_conforme_est_refuse_a_l_ecriture_aussi(tmp_path: Path, mauvai
     # exactement le cas le plus grave — c'est le vert vacant que ce calcul supprime.
     ecrit = _fichier_liste(tmp_path, mauvais_id)
     assert not ecrit.exists(), f"liste écrite en {ecrit}"
-    # Et nulle part ailleurs dans le bac, au cas où le nom retenu ne serait pas celui calculé.
-    assert not list(tmp_path.rglob("*.txt"))
+    # Et rien du tout dans le dossier des listes : le hook y écrit aussi des `.relu`, donc un
+    # balayage borné à `*.txt` laisserait un angle mort sur le nom que la régression choisirait.
+    assert not (tmp_path / ".claude" / "relire-en-attente").exists()
 
 
 def test_session_id_qui_est_un_chemin_est_refuse(tmp_path: Path) -> None:

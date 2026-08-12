@@ -215,7 +215,9 @@ Cette section décrit comment le training est structuré (qui appelle quoi). Pou
   - `--scenario <name>` : scénario ou mode (`bot`, `default`, `phase1`, etc.). Avec `bot`, l’adversaire est un mix configurable de 5 bots (Random, Greedy, Defensive, Control, Adaptive).
 - **Options utiles** : `--step` (écrit `step.log`), `--test-only` (pas d’apprentissage, évaluation uniquement), `--eval` (alias de `--test-only`), `--test-episodes N`, `--append` (reprendre un modèle existant), `--resume-from <checkpoint.zip>`
 - **Ce que mesure `--test-episodes N`** : le win-rate sur le **holdout**, jamais sur les scénarios d'entraînement — `holdout_regular` en priorité, `holdout_hard` seulement à défaut. Le scénario est résolu **avant** le premier épisode d'entraînement : un agent sans dossier `config/agents/<agent>/scenarios/holdout_regular|holdout_hard/` fait échouer la commande immédiatement, au lieu de perdre le run et de sortir en code 1 des heures plus tard.
-(reprendre depuis un checkpoint périodique), `--new-model` (partir de zéro).
+(reprendre depuis un checkpoint périodique), `--new-model` (partir de zéro, en écartant le modèle
+existant sous un nom horodaté). **`--new` ou `--append` est obligatoire dès qu'un modèle existe**,
+et `--append` exige qu'il en existe un : sans cela `train.py` refuse au lieu de choisir à ta place.
 
 ### Chargement de la config
 

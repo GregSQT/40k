@@ -3263,18 +3263,20 @@ def movement_build_valid_destinations_pool(
     # Socle mono-hex : géométrie hex (x1) ou socle de taille 1 (même prédicat que la branche FLY).
     is_single_hex = (_geometry_is_hex(game_state) or base_size == 1)
 
-    # Étape 4.1 : champ géodésique euclidien (any-angle) SANS empreinte, réservé au socle qui tient
-    # dans UNE case — `socle_is_single_hex`, source unique du prédicat (le corps littéral qui vivait
-    # ici en était la 4e copie ; il classait mono-hex un socle non rond de taille scalaire 1, dont
-    # l'empreinte n'est pas l'ancre). Les autres socles ne retombent PAS sur le BFS hex en
-    # euclidean : le sol multi-hex passe par `_euclidean_ground_anchor_multihex` (Étape 4b) et le
-    # fly par le disque euclidien de `_build_multi_hex_vectorized`. Le BFS hex ci-dessous est le
-    # chemin de la métrique `hex` — donc de tout le x1 (`geometry_is_hex`) et du gym par défaut.
-    # PvP/replay lisent ``move`` (euclidean) ; gym lit ``move_gym`` (défaut hex).
-    _use_euclidean_move = (
-        _move_distance_metric(game_state) == "euclidean"
-        and socle_is_single_hex(unit["BASE_SHAPE"], base_size)
-    )
+    # ── PIERRE TOMBALE — « Étape 4.1 », champ géodésique euclidien du socle MONO-HEX (2026-08-12) ─
+    # Une branche `geodesic_field` sans empreinte vivait ici, gardée par
+    # `_move_distance_metric(...) == "euclidean" and <socle mono-hex>`. Elle était INATTEIGNABLE :
+    #   - `combat_utils.resolve_gym_split_metric` force la métrique `hex` dès `geometry_is_hex`
+    #     (inches_to_subhex <= 1), donc « mono-hex par la résolution » implique « mesuré en hex » ;
+    #   - au-dessus, `game_state._scale_socle` rend BASE_SIZE >= 5 à x5 et >= 10 à x10 (le plus
+    #     petit socle des rosters vaut 10), alors que la garde exigeait une taille <= 1.
+    # Mesuré : instrumentée, la branche n'a été atteinte par AUCUN test du dépôt hors une fixture
+    # écrite exprès. Le socle rond mono-hex en euclidean est de toute façon traité, avec la MÊME
+    # géométrie continue (clearance = rayon du socle), par `_euclidean_ground_anchor_multihex`
+    # ci-dessous. Garder les deux, c'était tenir en phase deux fois la même règle 03 et faire
+    # diverger le pool d'ESCOUADE du pool PAR-FIGURINE sur les socles non ronds.
+    # Le BFS hex ci-dessous est donc le chemin du mono-hex, c'est-à-dire du x1 tout entier.
+    # ─────────────────────────────────────────────────────────────────────────────────────────────
 
     # Grille dense O(1) : même sémantique que ``dict`` (case visitée ou non pour ce BFS).
     _n_cells = board_cols * board_rows
@@ -3308,29 +3310,7 @@ def movement_build_valid_destinations_pool(
     _ground_obstacles_tr: Optional[Set[Tuple[int, int]]] = None
 
     _m_bfs_start = _perf_clock.perf_counter() if _pt else None
-    if is_single_hex and _use_euclidean_move:
-        # Champ géodésique any-angle. Obstacles = murs + (ennemis/amis/bande-EZ selon toggles) ;
-        # option A (Minkowski) : clearance = rayon du socle → le trajet du centre borne la
-        # distance de TOUT point du socle (règle 03). Overlap/EZ de destination restent hex.
-        _obstacles: Set[Tuple[int, int]] = set(_walls) | _models_blocked
-        if _check_ez:
-            _obstacles |= _enemy_adj
-        _obstacles.discard(start_pos)  # on est déjà sur la case de départ
-        _budget_norm = move_range * ENGAGEMENT_NORM_HEX_WIDTH
-        _clearance = round_base_radius_norm(base_size)
-        _field = geodesic_field(start_pos, _bcols, _brows, _obstacles, _budget_norm, _clearance)
-        visited_n = len(_field)
-        for _cell in _field:
-            # Destination jamais sur case occupée (03.01) ni dans l'EZ ennemie (unengaged 09.05),
-            # quels que soient les toggles de traversée — identique au BFS hex.
-            if _cell == start_pos or _cell in _occupied or _cell in _enemy_adj:
-                continue
-            valid_destinations.append(_cell)
-            if out_costs is not None:
-                # `geodesic_field` renvoie {cellule: distance} en unités `_hex_center`, où le
-                # budget vaut move_range × 1.5 -> conversion en subhex par la même constante.
-                out_costs[_cell] = _field[_cell] / ENGAGEMENT_NORM_HEX_WIDTH
-    elif is_single_hex:
+    if is_single_hex:
         while queue:
             (cc, cr), cd = queue.popleft()
             if cd >= move_range:

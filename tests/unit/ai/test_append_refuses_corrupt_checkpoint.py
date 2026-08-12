@@ -86,6 +86,15 @@ def test_no_recovery_message_names_a_flag_that_does_not_exist() -> None:
     assert "--new-model" not in source, "flag inexistant propose dans un message d'aide"
     assert '"--new"' in source, "VERT VACANT : le flag reellement declare doit etre trouve ici"
 
+    # La doc porte les MEMES commandes, copiees-collees telles quelles, et le meme flag mort y
+    # avait survecu a sa correction dans le code : un fichier de distance 1 que la sentinelle ne
+    # regardait pas.
+    doc = TRAIN_PY.parent.parent / "Documentation" / "AI_TRAINING.md"
+    assert doc.exists(), "VERT VACANT : la doc d'entrainement doit etre trouvee"
+    assert "--new-model" not in doc.read_text(encoding="utf-8"), (
+        "flag inexistant propose dans Documentation/AI_TRAINING.md"
+    )
+
 
 def test_load_checkpoint_chains_the_original_cause(tmp_path: Path) -> None:
     """`raise ... from exc` : sans la cause chainee, la traceback ne dit plus POURQUOI le zip est

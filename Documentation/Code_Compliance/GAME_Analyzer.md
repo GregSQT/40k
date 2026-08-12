@@ -33,7 +33,7 @@ L'analyzer parse le fichier `step.log` généré par l'entraînement (avec `--st
 
 ```bash
 # Générer step.log puis analyser
-python ai/train.py --agent <agent> --training-config default --step --test-episodes 300 2>&1 | tee train.log
+python ai/train.py --agent <agent> --training-config default --step --new --test-episodes 300 2>&1 | tee train.log
 python ai/analyzer.py step.log
 ```
 
