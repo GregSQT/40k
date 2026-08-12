@@ -106,6 +106,17 @@ def test_strength_is_the_weapon_of_the_model_that_strikes():
         "l'arme du troupier"
     )
 
+    # Discrimination E : F6 vs E_bodyguard=5 → 3+, vs E_leader=7 → 5+ si target_bodyguard_toughness
+    # incluait le leader. Sans cet assert, E_bodyguard=4 et E_leader=5 donnent tous deux 3+ avec F6,
+    # donc un pool cassé passerait inaperçu.
+    discriminant = _config(unit_toughness_by_type={**TOUGHNESS, "Trooper": 5, "Leader": 7})
+    assert aw.expected_wound_threshold(
+        state, discriminant, "", 1, "Trooper", "Choppa", "9", ("9#2",), is_melee=True
+    ) == 3, (
+        "l'Endurance du leader (E7) a été incluse dans le pool des bodyguards (E5) — "
+        "F6 vs E7 = 5+, F6 vs E5 = 3+"
+    )
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Les modificateurs
