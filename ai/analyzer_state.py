@@ -3,7 +3,7 @@ AnalyzerState — état partagé entre les handlers de parse_step_log.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, NamedTuple, Optional, Set, Tuple, Union
+from typing import Any, Dict, FrozenSet, List, NamedTuple, Optional, Set, Tuple, Union
 
 from ai.analyzer_perfig import Base
 from shared.data_validation import require_key
@@ -22,7 +22,10 @@ class SelectTargetsFreeze(NamedTuple):
     - ``models_alive`` : effectif, qu'exigent [BLAST] 24.05 et [CLEAVE] 24.06 (« models that were
       in the target unit IN THE SELECT TARGETS STEP ») ;
     - ``anchor`` / ``hp`` / ``models`` : la géométrie, qu'exigent 10.06, 04.02 et l'alternance
-      12.04.
+      12.04 ;
+    - ``wounded_enemies`` : les ennemis DÉJÀ blessés que l'attaquant voyait en choisissant sa
+      cible. Ce n'est pas une propriété de la cible mais du champ de tir ; elle est ici parce
+      qu'elle décrit le même instant et sert la même question — celle du CHOIX de cible.
 
     Les deux moitiés ont vécu dans deux dictionnaires séparés le temps d'une livraison, et
     l'invariant « même instant » n'a tenu que par un commentaire — il a cédé le jour même : deux
@@ -33,6 +36,7 @@ class SelectTargetsFreeze(NamedTuple):
     anchor: Optional[Tuple[int, int]]
     hp: Optional[int]
     models: Optional[Dict[str, Tuple[int, int]]]
+    wounded_enemies: FrozenSet[str]
 
 
 @dataclass
@@ -187,6 +191,10 @@ class AnalyzerState:
     unit_hp_pre_line: Dict[str, int] = field(default_factory=dict)
     unit_positions_pre_line: Dict[str, Tuple[int, int]] = field(default_factory=dict)
     positions_by_model_pre_line: Dict[str, Dict[str, Tuple[int, int]]] = field(default_factory=dict)
+    #: `stats['wounded_enemies']` avant les dégâts de la ligne courante, par joueur. Même famille
+    #: que les trois ci-dessus : la priorité de ciblage se juge sur les blessés que le joueur
+    #: VOYAIT en choisissant sa cible, pas sur ceux que son tir vient de faire ou d'achever.
+    wounded_enemies_pre_line: Dict[int, Set[str]] = field(default_factory=dict)
     last_shoot_shooter_id: Optional[str] = None
     last_shoot_weapon: Optional[str] = None
     last_shoot_target_id: Optional[str] = None
@@ -261,6 +269,7 @@ class AnalyzerState:
         store: Dict[Tuple[Any, ...], SelectTargetsFreeze],
         key: Tuple[Any, ...],
         target_id: str,
+        player: int,
         log_anchor: Optional[Tuple[int, int]] = None,
     ) -> SelectTargetsFreeze:
         """La cible de l'activation ``key``, figée à la PREMIÈRE ligne qui la nomme.
@@ -290,6 +299,9 @@ class AnalyzerState:
                 anchor=log_anchor if log_anchor is not None else self.unit_positions_pre_line.get(target_id),  # get allowed
                 hp=self.unit_hp_pre_line.get(target_id),  # get allowed
                 models=self.positions_by_model_pre_line.get(target_id),  # get allowed
+                wounded_enemies=frozenset(
+                    require_key(self.wounded_enemies_pre_line, int(player))
+                ),
             )
             store[key] = frozen
         return frozen
