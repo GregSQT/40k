@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "../services/apiFetch";
 
-interface DisplayConfig {
+export interface DisplayConfig {
   resolution?: "auto" | number;
   display_scale?: number;
   autoDensity?: boolean;

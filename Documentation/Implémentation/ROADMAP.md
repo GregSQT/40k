@@ -214,12 +214,26 @@
   PORTÉE RÉELLE, à ne pas surestimer : `grep display_scale config/ services/ engine/` → **0 hit**,
   aucune configuration ne pose ce champ aujourd'hui. Le seul chemin réellement emprunté est donc le
   REPLAY, qui fournit toujours une surcharge de plateau. Le PvP standard ne change pas.
-  `hooks/useResolvedBoardConfig.ts`, deux étapes mémoïsées SÉPARÉMENT (une surcharge inchangée ne
-  doit pas être réappliquée parce que l'échelle a bougé). 8 tests d'identité, **trois verrous
-  prouvés ROUGES par mutation** (dé-mémoïsation de l'étape de surcharge, copie systématique dans la
-  mise à l'échelle, ordre de spread inversé — ce dernier ferait gagner la config de l'API sur le
-  plateau joué, soit un replay rendu à la mauvaise échelle).
-  RESTE : la validation navigateur du replay (changement d'épisode, décor et échelle corrects).
+  `hooks/useResolvedBoardConfig.ts`, UN mémo pour les deux étapes. La première version en posait
+  deux, « séparément », au motif qu'une surcharge inchangée ne devait pas être réappliquée parce que
+  l'échelle avait bougé : la passe `/simplify` a montré que ce scénario est IMPOSSIBLE — l'échelle
+  n'est pas une entrée à part, elle se lit dans l'objet, donc les deux mémos avaient la même
+  empreinte et le second ne coupait rien. 8 tests d'identité, **trois verrous prouvés ROUGES par
+  mutation** (dé-mémoïsation, copie systématique dans la mise à l'échelle, ordre de spread inversé —
+  ce dernier ferait gagner la config de l'API sur le plateau joué, soit un replay rendu à la
+  mauvaise échelle).
+  PASSE `/simplify` le même jour, au-delà du mémo ci-dessus : `EMPTY_WALL_HEXES` cessait d'être un
+  doublon de la liste vide partagée que le chantier précédent venait de poser ; les props
+  `boardConfigOverride` et `objectivesOverride` réutilisent les types exportés au lieu de les
+  recopier ; `applyDisplayScale` lit `DisplayConfig` au lieu de re-caster un `unknown` par-dessus un
+  champ déjà typé. Et surtout un JUMEAU manqué par le chantier des aplatissements : la branche de
+  glisser du déploiement reconstruisait elle aussi ~10 500 couples d'objectif à chaque exécution de
+  l'effet — même motif, même correction, mémoïsé sur `objectivesOverride`.
+  RESTE : la validation navigateur du replay (changement d'épisode, décor et échelle corrects) et du
+  glisser de déploiement au contact d'un objectif (surbrillance de zone contestée).
+  SIGNALÉ, NON TRAITÉ (hors périmètre, chantiers distincts — voir §4) : le chemin LoS refait à
+  chaque survol ce que ce chantier a sorti du chemin de dessin, et `BoardReplay` rend l'effet de
+  dessin inévitable à chaque rendu.
 
 - ✅ **PvE se figeait — cause identifiée et corrigée** (2026-08-11). Le symptôme était rapporté
   « en phase de mouvement » ; la mesure a montré la phase de **déploiement**, sur des unités
@@ -496,6 +510,24 @@ mesure, et c'est assumé (§0.14).
 ## 4. Backlog hors chemin critique (`A_faire/`)
 
 Prêts à démarrer sans décision produit :
+- ⬜ **Le chemin LoS refait à chaque survol ce que le chantier des aplatissements a sorti du chemin
+  de dessin** (signalé le 2026-08-12 par la passe `/simplify`, non traité — le périmètre était le
+  chemin de dessin). `buildLosPreviewFromSource` reconstruit à CHAQUE appel les murs effectifs (~1 000
+  couples + un `Set`) et aplatit les zones obscurantes et le terrain (~16 000 couples), puis fabrique
+  une `key` triée sur ces trois listes. Sur les cinq appelants de `BoardPvp`, **un seul lit cette
+  `key`** ; deux des quatre autres sont des gestionnaires de survol cadencés à la frame, et un
+  troisième tourne DANS une boucle par figurine posée. Chiffres rapportés par la revue et NON
+  revérifiés par moi : ~6,2 ms pour la `key`, ~0,34 ms et ~17 000 objets pour les listes, par appel.
+  ⚠️ À MESURER AVANT DE TOUCHER : le gain suppose de changer la signature de `losPreviewHelpers`
+  (recevoir des listes DÉJÀ résolues, rendre la `key` paresseuse) — passer les murs déjà effectifs
+  aux appelants actuels ne supprimerait RIEN, la fonction les re-dérive de toute façon.
+- ⬜ **`BoardReplay` rend l'effet de dessin de `BoardPvp` inévitable à chaque rendu** (signalé le
+  2026-08-12, non traité). Quatre valeurs passées en props sont refabriquées à chaque rendu
+  (l'état courant enrichi, les unités avec fantômes, la liste d'unités éligibles, deux tables
+  d'activation) et figurent dans les dépendances de l'effet de dessin. Tant qu'elles ne sont pas
+  mémoïsées, la stabilisation de `boardConfig` et les mémos de murs/objectifs ne suffisent pas à
+  éviter un redessin complet en replay — ils tiennent, mais un autre le déclenche.
+
 - ✅ **Une primitive commune « poser un plan par figurine »** — **LIVRÉ les 2026-08-11 / 08-12**.
   `resolve_model_effective_level` (résout) et `place_model_at_effective_level` (résout puis écrit)
   dans `shared_utils`. Les six sites annoncés migrés, plus **douze** trouvés au grep : deux jumeaux

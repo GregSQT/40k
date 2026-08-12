@@ -23,7 +23,7 @@ import { useMemo } from "react";
 /** Liste vide PARTAGÉE : la sortie « pas d'hexes » garde la même référence d'un hook à l'autre et
  * d'un appel à l'autre, y compris hors mémoïsation — un `[]` littéral ne le garantirait que tant
  * qu'il reste enfermé dans un `useMemo`. */
-const EMPTY_HEX_TUPLES: [number, number][] = [];
+export const EMPTY_HEX_TUPLES: [number, number][] = [];
 
 export type RawObjectiveHex = { col: number; row: number } | [number, number];
 export interface RawObjective {

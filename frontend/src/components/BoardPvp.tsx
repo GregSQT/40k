@@ -8,9 +8,14 @@ import {
   orientationStepToRadians,
   wrapOrientationStep,
 } from "../constants/gameConfig";
-import { useEffectiveObjectiveHexes, useWallHexKeySet } from "../hooks/useBoardHexMemos";
+import {
+  EMPTY_HEX_TUPLES,
+  type NormalizedObjective,
+  useEffectiveObjectiveHexes,
+  useWallHexKeySet,
+} from "../hooks/useBoardHexMemos";
 import { useGameConfig } from "../hooks/useGameConfig";
-import { useResolvedBoardConfig } from "../hooks/useResolvedBoardConfig";
+import { type BoardConfigOverride, useResolvedBoardConfig } from "../hooks/useResolvedBoardConfig";
 import { useSingleDoubleClick } from "../hooks/useSingleDoubleClick";
 import { API_BASE, apiFetch } from "../services/apiFetch";
 import type {
@@ -925,13 +930,7 @@ type BoardProps = {
   onCancelAdvanceWarning?: () => void;
   onSkipAdvanceWarning?: () => void;
   showAdvanceWarningPopup?: boolean; // If false, skip advance warning popup
-  boardConfigOverride?: {
-    cols: number;
-    rows: number;
-    hex_radius: number;
-    margin: number;
-    inches_to_subhex: number;
-  };
+  boardConfigOverride?: BoardConfigOverride;
   // Replay : résolution (cases par pouce) et scénario JOUÉS, lus dans le journal, pour que la
   // config plateau soit chargée à la bonne échelle et pour le bon scénario. Le décor (terrain,
   // icônes, zones de déploiement, segments de murs) n'est pas journalisé et vient de là.
@@ -941,7 +940,7 @@ type BoardProps = {
   wallHexesOverride?: Array<{ col: number; row: number }>; // For replay mode: override walls from log
   availableCellsOverride?: Array<{ col: number; row: number }>; // Replay / pile in : surbrillance des hexes disponibles
   deploymentState?: GameState["deployment_state"];
-  objectivesOverride?: Array<{ name: string; hexes: Array<{ col: number; row: number }> }>; // For replay mode: override objectives from log
+  objectivesOverride?: NormalizedObjective[]; // For replay mode: override objectives from log
   objectiveControlOverride?: Record<string, number | null>; // For replay mode: pre-computed objective control (bypasses sticky-ref heuristic)
   replayActionIndex?: number; // For replay mode: detect rollback and reset objective control
   autoSelectWeapon?: boolean;
@@ -1217,10 +1216,6 @@ function normalizeZoneHex(h: unknown): [number, number] {
  * à chaque rendu et invaliderait la mémoïsation de la table de contrôle qu'il alimente.
  */
 const EMPTY_CONTROLLERS: Record<string, number | null> = {};
-
-/** Murs vides, en constante de MODULE : même raison — la référence doit être stable tant que le
- * plateau n'est pas chargé, sans quoi tout ce qui dérive des murs se recalcule à chaque rendu. */
-const EMPTY_WALL_HEXES: [number, number][] = [];
 
 export default function Board({
   units,
@@ -1554,10 +1549,8 @@ export default function Board({
     loading,
     error,
   } = useGameConfig({ inchesToSubhexOverride, scenarioFileOverride });
-  // Surcharge du plateau JOUÉ (replay) puis échelle d'affichage. Mémoïsé pour la RÉFÉRENCE : les
-  // deux étapes fabriquaient un objet neuf à chaque rendu dès qu'elles avaient quelque chose à
-  // faire, ce qui rendait inopérante toute mémoïsation accrochée à `boardConfig` — en replay et sur
-  // les plateaux à `display_scale` ≠ 1 seulement, jamais en PvP standard. cf. useResolvedBoardConfig.
+  // Plateau du journal (replay) puis échelle d'affichage, mémoïsés pour la RÉFÉRENCE : sans quoi
+  // tout ce qui se mémoïse sur `boardConfig` est inopérant. cf. useResolvedBoardConfig.
   const boardConfig = useResolvedBoardConfig(_boardConfigFromHook, boardConfigOverride);
   // Objectifs = terrains "objective": true : la géométrie (polygone + vertices) vient de
   // boardConfig.objective_zones (endpoint board) et doit être PRÉFÉRÉE pour le rendu — sinon la
@@ -1579,12 +1572,10 @@ export default function Board({
     objectivesOverride,
     boardConfig?.objective_hexes
   );
-  // Murs EFFECTIFS — SOURCE UNIQUE du dessin, du glisser de déploiement et de `bcKey`. L'override
-  // de replay remplace les murs du plateau, et la rangée du bas (colonnes impaires) est complétée :
-  // `buildEffectiveLosWallHexes` est la même fonction que celle par laquelle la LoS passe déjà
-  // (losPreviewHelpers), donc les murs affichés sont par construction ceux que la LoS oppose.
-  // L'effet de dessin en tenait sa propre copie et complétait `boardConfig.wall_hexes` EN PLACE :
-  // le contenu de la config dépendait alors de l'ordre des passages de l'effet.
+  // Murs EFFECTIFS (override de replay + rangée du bas) du DESSIN, du glisser de déploiement et de
+  // `bcKey`. La LoS n'en consomme pas cet exemplaire : elle redérive le sien, mais par la MÊME
+  // fonction (`buildLosPreviewFromSource` → `buildEffectiveLosWallHexes`), donc les murs affichés
+  // sont par construction ceux qu'elle oppose.
   // Les dépendances portent sur les CHAMPS lus, pas sur `boardConfig` : sa référence est stable
   // (`useResolvedBoardConfig`), mais elle change à tout changement d'ÉCHELLE d'affichage, qui ne
   // déplace aucun mur — les murs ne se recalculent donc qu'au chargement d'un plateau.
@@ -1594,12 +1585,24 @@ export default function Board({
   const effectiveWallHexes = useMemo(
     () =>
       boardCols === undefined || boardRows === undefined
-        ? EMPTY_WALL_HEXES
+        ? EMPTY_HEX_TUPLES
         : buildEffectiveLosWallHexes(boardCols, boardRows, boardWallHexes, wallHexesOverride),
     [boardCols, boardRows, boardWallHexes, wallHexesOverride]
   );
   // `Set` des murs lu par la branche de glisser du déploiement.
   const wallHexKeySetForDrag = useWallHexKeySet(effectiveWallHexes);
+  // Objectifs en couples, pour le test de chevauchement d'empreinte du glisser de déploiement
+  // (`getContestedObjectives`). Même motif que `effectiveObjectiveHexes` ci-dessus, et même raison :
+  // la branche de glisser les reconstruisait à chaque exécution de l'effet de dessin, soit ~10 500
+  // couples neufs pendant tout le glisser. L'identifiant est le RANG de la zone, pas son nom.
+  const objectivesForIntersection = useMemo<Array<{ id: number; hexes: HexCoord[] }>>(
+    () =>
+      (objectivesOverride ?? []).map((obj, idx) => ({
+        id: idx + 1,
+        hexes: obj.hexes.map((h) => [h.col, h.row] as HexCoord),
+      })),
+    [objectivesOverride]
+  );
   // Empreinte des murs pour `bcKey` (invalidation du calque statique, cf. boardRedrawDecision) :
   // O(murs), donc mémoïsée sur la même source — elle ne change qu'au chargement d'un plateau ou
   // d'un épisode de replay. La longueur entre dans l'empreinte : `hashHexList` rend le hachage
@@ -9306,9 +9309,6 @@ export default function Board({
     }
 
     // ✅ DRAW BOARD ONCE with populated availableCells
-    // Override wall_hexes if wallHexesOverride is provided (for replay mode)
-    // (`effectiveObjectiveHexes` — objective_hexes surchargés par l'override — est mémoïsé
-    // au-dessus : ~10 500 couples, et cet effet se réexécute à cadence de souris.)
 
     // Type assertion for boardConfig to match UnitRenderer's expected type
     const boardConfigForRender = boardConfig as unknown as Record<string, unknown> | null;
@@ -11288,13 +11288,6 @@ export default function Board({
           }
         }
       }
-      const objsForIntersection: Array<{ id: number; hexes: HexCoord[] }> = (
-        objectivesOverride ?? []
-      ).map((obj, idx) => ({
-        id: idx + 1,
-        hexes: obj.hexes.map((h) => [h.col, h.row] as HexCoord),
-      }));
-
       let lastHexKey = "";
 
       const drawDragOverlay = (
@@ -11324,7 +11317,7 @@ export default function Board({
           objBatch.beginFill(0xffcc00, 0.5);
           objBatch.lineStyle(2, 0xffcc00, 0.8);
           for (const objId of contestedIds) {
-            const obj = objsForIntersection.find((o) => o.id === objId);
+            const obj = objectivesForIntersection.find((o) => o.id === objId);
             if (!obj) continue;
             for (const [c, r] of obj.hexes) {
               const pos = hexToPixel(c, r, HEX_RADIUS, MARGIN);
@@ -11380,7 +11373,7 @@ export default function Board({
         const overlapping = isFootprintOverlapping(fp, occupiedSet);
         const inPool = deployPool ? isFootprintInDeployPool(fp, deployPool) : true;
         const valid = inBounds && !onWall && !overlapping && inPool;
-        const contestedIds = getContestedObjectives(fp, objsForIntersection);
+        const contestedIds = getContestedObjectives(fp, objectivesForIntersection);
         drawDragOverlay(hex, fp, valid, contestedIds);
       };
 
@@ -11629,6 +11622,7 @@ export default function Board({
     wallHexKeySetForDrag,
     effectiveWallHexes,
     wallsFp,
+    objectivesForIntersection,
     squadMovePlan,
     fleePreviewUnitId,
     squadMoveModelPoolRef,
