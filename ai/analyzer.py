@@ -3039,6 +3039,11 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     active_debug_section = "1.2"
     log_print("\n" + "-" * 80)
     _table_header("1.2 SHOOTING ERRORS")
+    # DEUX contrôles distincts, DEUX lignes. Ils ont vécu agrégés sous « Tirs invalides », et un
+    # lecteur (2026-08-12) a pris le total pour le seul compteur de portée : il a cherché un écart
+    # de 11 entre son propre décompte et le rapport, écart qui n'existait pas. Un chiffre qu'on ne
+    # peut pas rapprocher de sa source fait perdre plus de temps qu'il n'en fait gagner.
+    # Le total reste affiché par la section « SHOOTING VALIDITY », qui le décompose déjà.
     agent_shoot_invalid = (
         stats['shoot_invalid'][1]['out_of_range'] +
         stats['shoot_invalid'][1]['engaged_non_close_quarters']
@@ -3048,9 +3053,14 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         stats['shoot_invalid'][2]['engaged_non_close_quarters']
     )
     _table_row(
-        "Tirs invalides (portee / arme non-close_quarters engage):",
-        _fmt_count(agent_shoot_invalid),
-        _fmt_count(bot_shoot_invalid),
+        "Tirs hors portee (10.02):",
+        _fmt_count(stats['shoot_invalid'][1]['out_of_range']),
+        _fmt_count(stats['shoot_invalid'][2]['out_of_range']),
+    )
+    _table_row(
+        "Tirs engage, arme non-close_quarters:",
+        _fmt_count(stats['shoot_invalid'][1]['engaged_non_close_quarters']),
+        _fmt_count(stats['shoot_invalid'][2]['engaged_non_close_quarters']),
     )
     if agent_shoot_invalid > 0 and stats['first_error_lines']['shoot_invalid'][1]:
         first_err = stats['first_error_lines']['shoot_invalid'][1]

@@ -70,6 +70,36 @@ Trois tests : la prémisse (les deux distances encadrent bien la portée — san
 prouverait rien), l'absence de faux positif, et le fait que le contrôle **rende un verdict**.
 Source fautive remise → ROUGE (`assert 1 == 0`) ; rétablie → verts.
 
+## Les deux gardes posés ensuite — pour que ça ne recommence pas
+
+Le correctif ci-dessus répare un cas. Deux choses le rendaient **reproductible**, et elles sont
+traitées à leur tour.
+
+### 1. Le segment ne peut plus servir à juger — liste blanche opposable
+
+C'était la **deuxième fois** que `[TARGET_MODELS:]` faussait un verdict de distance : la mêlée le
+2026-07-24 (contrôle « fight from non-adjacent » retiré), le tir le 2026-08-12. La cause est
+structurelle — ce segment décrit un état POSTÉRIEUR à la décision qu'on prétend contrôler — donc
+un commentaire ne suffisait pas.
+
+`tests/unit/ai/test_analyzer_target_models_never_judges.py` porte une **liste blanche des
+lecteurs** : le parseur lui-même, et `analyzer_core` qui recale l'état après l'action — le seul
+usage que le segment décrit. Tout nouveau lecteur rougit, avec le rappel des deux incidents.
+Un troisième test épingle le contrôle de portée sur `positions_by_model`.
+
+Verrou prouvé : segment rebranché dans le handler → **deux** tests rouges ; rétabli → verts.
+
+### 2. Le rapport ne peut plus agréger deux contrôles sous un seul chiffre
+
+La section 1.2 affichait `out_of_range` et `engaged_non_close_quarters` additionnés, sous
+« Tirs invalides ». Un lecteur a pris ce total pour le seul compteur de portée et a cherché un
+écart de 11 avec son propre décompte — écart qui n'existait pas. Un chiffre qu'on ne peut pas
+rapprocher de sa source coûte plus qu'il ne rapporte.
+
+Deux lignes distinctes désormais : « Tirs hors portee (10.02) » et « Tirs engage, arme
+non-close_quarters ». Le total reste dans la section « SHOOTING VALIDITY », qui le décomposait
+déjà — c'est cette dissymétrie qui a piégé.
+
 ## Ce qui reste ouvert
 
 Les autres erreurs de tir du rapport n'ont pas été investiguées : `engaged_non_close_quarters`

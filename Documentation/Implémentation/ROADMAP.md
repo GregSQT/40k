@@ -479,8 +479,11 @@ Prêts à démarrer sans décision produit :
   quand elle meurt du tir, et le survivant suivant faisait déclarer le tir hors portée. Mesuré sur
   600 épisodes / 27 991 tirs : **31 verdicts, 0 réel**. Même journal avant/après : 67 → 32 erreurs,
   et rien d'autre ne bouge. Le contrôle n'est pas devenu aveugle — il rend encore 18 702 verdicts.
-  ⚠️ Piège de lecture à connaître : la ligne « Tirs invalides » du rapport AGRÈGE `out_of_range` et
-  `engaged_non_close_quarters` (42 = 31 + 11). Ne pas la lire comme un seul contrôle.
+  **Deux gardes posés dans la foulée, parce que le défaut était reproductible** : (1) une liste
+  blanche opposable interdit désormais de lire `[TARGET_MODELS:]` pour un verdict — c'était la
+  DEUXIÈME fois qu'il faussait une distance, après la mêlée le 2026-07-24 ; (2) la section 1.2 du
+  rapport n'agrège plus `out_of_range` et `engaged_non_close_quarters` sous un seul chiffre, ce
+  qui m'a fait chercher un écart de 11 inexistant.
   → [`Implémenté/analyzer_portee_source_correcte_2026-08-12.md`](Implémenté/analyzer_portee_source_correcte_2026-08-12.md)
 - 🔴 **Conformité moteur — les 53 erreurs que l'analyzer voit VRAIMENT** (ouvert le 2026-08-11,
   **29 restantes** : la famille CC_NB, la plus lourde, est soldée le jour même ; la famille
