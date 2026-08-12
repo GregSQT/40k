@@ -22,10 +22,32 @@ from .test_train_helpers import _function_code
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 TRAIN_PY = PROJECT_ROOT / "ai" / "train.py"
-#: Fichiers qui portent des COMMANDES `ai/train.py` copiables telles quelles. La doc de reference
-#: et le fichier d'instructions du depot : le meme flag mort avait survecu dans les deux apres sa
-#: correction dans le code.
-DOCS_AVEC_COMMANDES = (PROJECT_ROOT / "CLAUDE.md", PROJECT_ROOT / "Documentation" / "AI_TRAINING.md")
+#: Dossiers de `Documentation/` qui ARCHIVENT au lieu d'instruire : chantiers livres, spec V11,
+#: backlog, memoires, PDF de regles. Les commandes qu'ils citent sont des relevés d'execution
+#: passes — les reecrire falsifierait l'archive, donc les controler n'aurait pas de sens.
+_DOSSIERS_ARCHIVES = {"Old", "Memoire", "Implémenté", "1_Agent", "A_faire", "40k_rules"}
+
+
+def _docs_vivantes() -> list:
+    """Les docs qu'on EXECUTE : `CLAUDE.md` et tout `Documentation/` hors archives.
+
+    Nommer deux fichiers en dur ne suffisait pas — la meme commande fausse vivait aussi dans
+    `Documentation/Prompts/` et `Documentation/Code_Compliance/`, que rien ne regardait.
+    """
+    docs = [PROJECT_ROOT / "CLAUDE.md"]
+    docs += [
+        p for p in (PROJECT_ROOT / "Documentation").rglob("*.md")
+        if not (_DOSSIERS_ARCHIVES & set(p.relative_to(PROJECT_ROOT).parts))
+    ]
+    return docs
+
+
+def _lignes_de_commande_train():
+    """(fichier, numero, ligne) pour chaque ligne de doc vivante qui appelle `ai/train.py`."""
+    for fichier in _docs_vivantes():
+        for numero, ligne in enumerate(fichier.read_text(encoding="utf-8").splitlines(), 1):
+            if "ai/train.py" in ligne:
+                yield fichier, numero, ligne
 
 
 @lru_cache(maxsize=1)
@@ -87,6 +109,17 @@ def test_load_checkpoint_raises_on_a_valid_zip_that_is_not_a_checkpoint(tmp_path
         train._load_checkpoint(str(archive), env=None, device="cpu")
 
 
+def test_load_checkpoint_ne_court_circuite_jamais_sur_un_fichier_absent(tmp_path: Path) -> None:
+    """CONTRAT DU HELPER, pas du flux : la production ne l'atteint plus (`--append` sans modele est
+    refuse en amont, la branche de chargement teste `os.path.exists`). Le verrou reste utile parce
+    que la tentation, le jour ou ce chemin redevient atteignable, est d'y remettre un
+    `if not os.path.exists(...): return <modele neuf>` — un repli qu'aucune sentinelle `except` ne
+    verrait, puisqu'il n'y a pas d'`except`."""
+    absent = tmp_path / "jamais_ecrit.zip"
+    with pytest.raises(RuntimeError, match="Checkpoint illisible"):
+        train._load_checkpoint(str(absent), env=None, device="cpu")
+
+
 def test_load_checkpoint_diagnoses_an_observation_space_mismatch(monkeypatch) -> None:
     """Mode d'echec DOMINANT apres un changement d'obs_size (199 -> 1011, GRID_CHANNELS 7 -> 9) :
     le .zip est intact, c'est l'environnement qui a change. Un message unique « verifier
@@ -138,20 +171,50 @@ def test_aucune_commande_documentee_ne_cite_un_flag_inexistant() -> None:
         "VERT VACANT : l'extraction des flags declares ne rend rien d'attendu"
     )
 
-    inconnus = []
-    for fichier in (*DOCS_AVEC_COMMANDES, TRAIN_PY):
-        assert fichier.exists(), f"VERT VACANT : {fichier} introuvable, le controle ne lit rien"
-        contenu = _source_train() if fichier == TRAIN_PY else fichier.read_text(encoding="utf-8")
-        for numero, ligne in enumerate(contenu.splitlines(), 1):
-            if "ai/train.py" not in ligne:
-                continue
-            for token in re.findall(r"(?<![\w-])--[a-z][a-z0-9-]*", ligne):
-                if token not in declares:
-                    inconnus.append(f"{fichier.relative_to(PROJECT_ROOT)}:{numero} → {token}")
+    lignes = list(_lignes_de_commande_train())
+    lignes += [
+        (TRAIN_PY, numero, ligne)
+        for numero, ligne in enumerate(_source_train().splitlines(), 1)
+        if "ai/train.py" in ligne
+    ]
+    assert len(lignes) > 20, (
+        f"VERT VACANT : {len(lignes)} ligne(s) de commande trouvee(s), le controle ne lit rien"
+    )
 
+    inconnus = [
+        f"{fichier.relative_to(PROJECT_ROOT)}:{numero} → {token}"
+        for fichier, numero, ligne in lignes
+        for token in re.findall(r"(?<![\w-])--[a-z][a-z0-9-]*", ligne)
+        if token not in declares
+    ]
     assert not inconnus, (
         f"commandes citant un flag que l'argparse ne declare pas : {inconnus}. "
         f"Flags declares : {sorted(declares)}"
+    )
+
+
+def test_aucune_commande_documentee_ne_combine_des_options_que_train_refuse() -> None:
+    """Un flag qui EXISTE ne fait pas une commande qui MARCHE. `--test-only`/`--eval` n'evalue que
+    le holdout et refuse explicitement `--scenario bot` (« --scenario bot is not allowed in
+    --test-only mode ») : trois docs vivantes portaient cette combinaison, dont deux dont le
+    pipeline enchaine `| tee … ; ai/analyzer.py step.log` — la commande sortait en ValueError et
+    l'analyse tournait sur un step.log PERIME, sans que rien ne le signale.
+
+    Le controle porte sur l'incompatibilite declaree par le code, pas sur une liste de fichiers :
+    toute doc vivante qui la reintroduit devient rouge.
+    """
+    assert "--scenario bot is not allowed in --test-only mode" in _source_train(), (
+        "VERT VACANT : le refus surveille n'existe plus dans ai/train.py, le test ne prouve rien"
+    )
+
+    fautives = [
+        f"{fichier.relative_to(PROJECT_ROOT)}:{numero}"
+        for fichier, numero, ligne in _lignes_de_commande_train()
+        if "--scenario bot" in ligne and ("--test-only" in ligne or "--eval" in ligne)
+    ]
+    assert not fautives, (
+        f"commandes qui sortiront en ValueError avant d'evaluer quoi que ce soit : {fautives}. "
+        "En mode eval, retirer `--scenario bot` : le holdout est resolu tout seul."
     )
 
 

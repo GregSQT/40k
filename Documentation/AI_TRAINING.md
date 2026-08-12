@@ -1342,7 +1342,7 @@ python ai/train.py --agent <agent_key> --training-config default --rewards-confi
 # Manual evaluation (test-only, no training)
 python ai/train.py --agent <agent_key> --test-only --test-episodes 20
 # Equivalent alias:
-python ai/train.py --agent <agent_key> --scenario bot --eval --test-episodes 20
+python ai/train.py --agent <agent_key> --eval --test-episodes 20
 # Uses model at ai/models/<agent_key>/model_<agent_key>.zip
 ```
 

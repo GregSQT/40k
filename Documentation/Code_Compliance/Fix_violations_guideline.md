@@ -5,7 +5,7 @@
 ## WORKFLOW ITÉRATIF
 
 ### Phase 1 : EXÉCUTION & ANALYSE INITIALE
-1. Exécuter : `python ai/train.py --agent SpaceMarine_Infantry_Troop_RangedSwarm --training-config default --rewards-config SpaceMarine_Infantry_Troop_RangedSwarm --scenario bot --test-only --step --test-episodes 15 2>&1 | tee movement_debug.log ; python ai/analyzer.py step.log ; python ai/hidden_action_finder.py`
+1. Exécuter : `python ai/train.py --agent SpaceMarine_Infantry_Troop_RangedSwarm --training-config default --rewards-config SpaceMarine_Infantry_Troop_RangedSwarm --test-only --step --test-episodes 15 2>&1 | tee movement_debug.log ; python ai/analyzer.py step.log ; python ai/hidden_action_finder.py`
 
 2. Analyser les résultats dans cet ordre de priorité :
    - **FATAL ERRORS** (ValueError, exceptions) → STOP, fix immédiat
