@@ -381,3 +381,59 @@ def test_agent_seat_mode_is_validated_before_use(script, monkeypatch):
     _patch_env_dependencies(monkeypatch)
     with pytest.raises(ValueError, match="agent_seat_mode"):
         _build_env(script, "bot", "p3")
+
+
+def test_every_registry_bot_is_selectable_as_eval_opponent(script, monkeypatch):
+    """Les styles refondus etaient REFUSES ici : `--eval-bot racer` levait « Unknown eval bot ».
+
+    Ce fichier portait sa propre table cle -> classe, restee sur le panel d'origine — le defaut
+    exact qui a fait naitre `ai/bot_registry.py` (constate sur `bot_ranking.py` le 2026-08-11),
+    survivant dans ce troisieme appelant. Le controle porte sur TOUS les noms du registre, donc un
+    bot ajoute demain est couvert sans qu'on y revienne.
+    """
+    from ai.bot_registry import ALL_BOT_KEYS, BOT_DISPLAY_NAMES
+
+    for bot_name in sorted(ALL_BOT_KEYS):
+        recorder = _patch_env_dependencies(monkeypatch)
+        script._build_eval_env(
+            scenario_file="/tmp/scenario.json",
+            agent_key="AnyAgent",
+            model_path="/tmp/model.zip",
+            training_config_name="default",
+            rewards_config_name="default",
+            n_episodes=3,
+            opponent_mode="bot",
+            eval_bot_name=bot_name,
+            # 0.0 et non une valeur quelconque : un bot DETERMINISTE par construction refuse tout
+            # bruit (il definit un metre), et le test porte sur la selection du bot, pas sur son
+            # reglage.
+            eval_bot_randomness=0.0,
+            agent_seat_mode="p1",
+        )
+        assert len(recorder.calls) == 1, f"'{bot_name}' n'a pas construit d'environnement"
+        bot = recorder.calls[0]["args"][1]
+        assert type(bot).__name__ == BOT_DISPLAY_NAMES[bot_name], (
+            f"'{bot_name}' a construit {type(bot).__name__}, pas {BOT_DISPLAY_NAMES[bot_name]}"
+        )
+
+
+def test_unknown_eval_bot_still_raises(script, monkeypatch):
+    """Garde anti-vert-vacant : la validation n'a pas ete remplacee par « tout passe »."""
+    _patch_env_dependencies(monkeypatch)
+    with pytest.raises(ValueError, match="Unknown eval bot"):
+        _build_env_with_bot(script, "pas_un_bot")
+
+
+def _build_env_with_bot(script, bot_name):
+    return script._build_eval_env(
+        scenario_file="/tmp/scenario.json",
+        agent_key="AnyAgent",
+        model_path="/tmp/model.zip",
+        training_config_name="default",
+        rewards_config_name="default",
+        n_episodes=3,
+        opponent_mode="bot",
+        eval_bot_name=bot_name,
+        eval_bot_randomness=0.05,
+        agent_seat_mode="p1",
+    )

@@ -63,12 +63,10 @@ from ai.bot_registry import (  # noqa: E402
     ALL_BOT_KEYS as ALL_BOT_NAMES,
     BOT_DISPLAY_NAMES,
     HOLDOUT_BOT_KEYS,
+    SELECTION_BOT_KEYS as SELECTION_BOT_NAMES,
 )
 
 HOLDOUT_BOT_NAMES = frozenset(HOLDOUT_BOT_KEYS)
-
-# Bots qui pilotent la selection (gating, worst_bot, score robuste). Le holdout en est exclu.
-SELECTION_BOT_NAMES = ALL_BOT_NAMES - HOLDOUT_BOT_NAMES
 
 
 def selection_worst_bot(scores):

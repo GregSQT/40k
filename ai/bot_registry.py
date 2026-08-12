@@ -67,6 +67,33 @@ BOT_DISPLAY_NAMES: Dict[str, str] = {
 #: docstring, mais il produit bien une ligne de resultat).
 ALL_BOT_KEYS = frozenset(("random",) + LEGACY_BOT_KEYS + DOCTRINE_BOT_KEYS + HOLDOUT_BOT_KEYS)
 
+#: Adversaires qui PILOTENT la selection de modele : tous sauf les holdouts (V11 §10.5). La
+#: partition vit ICI et non chez ses consommateurs : `ai/training_callbacks.py` (gating, score
+#: robuste) et `ai/metrics_tracker.py` (worst_bot_score de TensorBoard) la refaisaient chacun de
+#: leur cote, et le second le faisait avec une liste ECRITE A LA MAIN restee sur le panel d'origine.
+SELECTION_BOT_KEYS = ALL_BOT_KEYS - frozenset(HOLDOUT_BOT_KEYS)
+
+
+def bot_display_name(bot_key: str) -> str:
+    """Nom LISIBLE d'un adversaire, pour tout ce qui s'affiche a un humain.
+
+    SOURCE UNIQUE de la traduction cle -> nom. `ai/step_logger.py` la fabriquait de son cote par
+    `bot_key.capitalize() + "Bot"`, ce qui rendait `Value_tradeBot`, `Tactical_lookaheadBot` et
+    `AlphaBot` pour un bot qui s'appelle `AlphaStrikeBot` — l'en-tete de `step.log` nommait donc
+    des adversaires qui n'existent pas. La recette ne tombait juste que sur les cles d'un seul mot.
+
+    Une cle inconnue LEVE : cette table et `bot_classes()` couvrent le meme panel (verrou
+    `tests/unit/ai/test_bot_registry_names.py`), donc un nom absent signale un bot ajoute a moitie,
+    pas un cas a habiller d'une etiquette approximative.
+    """
+    display = BOT_DISPLAY_NAMES.get(bot_key)
+    if display is None:
+        raise KeyError(
+            f"Bot inconnu du registre : {bot_key!r}. BOT_DISPLAY_NAMES couvre "
+            f"{sorted(BOT_DISPLAY_NAMES)} — un adversaire qui s'affiche doit y figurer."
+        )
+    return display
+
 
 def bot_classes() -> Dict[str, Any]:
     """Table cle -> classe de bot. Import differe : `evaluation_bots` tire tout le moteur.

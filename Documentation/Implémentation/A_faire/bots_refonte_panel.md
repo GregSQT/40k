@@ -246,6 +246,15 @@ un coup), `ai/bot_registry.py` (source unique clé→classe).
 suffi pour l'évaluation, et `bot_ranking.py --bots racer` levait toujours « Unknown bot type ».
 `ai/bot_registry.py` est désormais la source unique, les deux appelants y passent.
 
+⚠️ **Il y en avait cinq, pas deux** (trouvés le 2026-08-12, tous branchés depuis) : `ai/metrics_tracker.py`
+n'écrivait de courbe `bot_eval/vs_<bot>` que pour les six anciens — les cinq styles refondus n'en ont eu
+**aucune**, et sur `x1_panel` le `worst_bot_score` de TensorBoard ne s'écrivait plus du tout ;
+`ai/train.py` levait « did not return any known bot score keys » en fin d'évaluation d'un profil qui ne
+joue que les styles refondus ; et `scripts/roster_matchup_stats.py` refusait `--eval-bot racer`,
+exactement comme `bot_ranking.py` avant sa correction. La table de `_build_training_bots_from_config`
+(`ai/train.py`) est laissée à part **volontairement** : elle construit les adversaires
+d'ENTRAÎNEMENT, et ne pas savoir instancier un holdout y est une protection (V11 §10.5), pas un oubli.
+
 **Accès moteur du holdout** : un bot ne reçoit d'ordinaire que `game_state` et ne peut rien
 simuler. `BotControlledEnv` remet le moteur aux bots qui le **déclarent** (`NEEDS_ENGINE`, attribut
 de classe) — jamais par `hasattr`, dont le repli mou a déjà fait jouer `TacticalBot` en aveugle

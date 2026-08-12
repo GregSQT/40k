@@ -1332,6 +1332,7 @@ from ai.step_logger import StepLogger
 from ai.bot_evaluation import ROSTER_SIDES, evaluate_against_bots
 
 # Training callbacks (extracted to ai/training_callbacks.py)
+from ai.bot_registry import ALL_BOT_KEYS
 from ai.training_callbacks import (
     iter_bot_score_rows,
     LearningRateScheduleCallback,
@@ -3194,15 +3195,12 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
                     metrics_tracker.log_eval_truncations(
                         require_key(bot_results, "truncations")
                     )
-                    known_bot_keys = (
-                        "random",
-                        "greedy",
-                        "defensive",
-                        "control",
-                        "adaptive",
-                        "value_trade",
-                        "tactical",  # V11 §10.5 : holdout d'evaluation
-                    )
+                    # SOURCE UNIQUE des noms de bots : `ai/bot_registry.py`. Cette liste etait
+                    # ecrite a la main et restee sur le panel d'origine : sur un profil qui ne joue
+                    # que les styles refondus (`x1_panel`), elle ne reconnaissait AUCUNE cle et
+                    # l'evaluation finale levait « did not return any known bot score keys » —
+                    # les win-rates etaient la, c'est la liste qui ne savait pas les nommer.
+                    known_bot_keys = tuple(sorted(ALL_BOT_KEYS))
                     available_bot_keys = [key for key in known_bot_keys if key in bot_results]
                     if len(available_bot_keys) == 0:
                         raise ValueError(

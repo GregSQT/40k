@@ -36,6 +36,9 @@ from torch.utils.tensorboard.writer import SummaryWriter
 import os
 from typing import Any, Deque, Dict, List, Optional, Protocol, Sequence, Tuple, Tuple
 from shared.data_validation import require_key
+# SOURCE UNIQUE des noms de bots (cf. l'en-tete de `ai/bot_registry.py`) : ce module portait la
+# QUATRIEME table du depot, ecrite a la main et restee sur le panel d'origine.
+from ai.bot_registry import ALL_BOT_KEYS, SELECTION_BOT_KEYS
 from ai.truncation_log import TruncationLog, agent_log_dir
 from engine.action_decoder import ActionDecoder
 from engine.w40k_core import CHARGE_DISTANCE_MEASURES
@@ -1857,31 +1860,23 @@ class W40KMetricsTracker:
             step: Optional step for x-axis (e.g. eval_marker). If None, uses episode_count.
         """
         x = step if step is not None else self.episode_count
-        # Log individual bot results to bot_eval/ namespace
-        if 'random' in bot_results:
-            self.writer.add_scalar('bot_eval/vs_random', bot_results['random'], x)
-        if 'greedy' in bot_results:
-            self.writer.add_scalar('bot_eval/vs_greedy', bot_results['greedy'], x)
-        if 'defensive' in bot_results:
-            self.writer.add_scalar('bot_eval/vs_defensive', bot_results['defensive'], x)
-        if 'control' in bot_results:
-            self.writer.add_scalar('bot_eval/vs_control', bot_results['control'], x)
-        if 'adaptive' in bot_results:
-            self.writer.add_scalar('bot_eval/vs_adaptive', bot_results['adaptive'], x)
-        if 'value_trade' in bot_results:
-            self.writer.add_scalar('bot_eval/vs_value_trade', bot_results['value_trade'], x)
-        # V11 §10.5 : holdout d'evaluation, jamais rencontre a l'entrainement — c'est
-        # LE win-rate qui mesure la competence et non l'exploitation apprise (§10.6).
-        if 'tactical' in bot_results:
-            self.writer.add_scalar('bot_eval/vs_tactical', bot_results['tactical'], x)
-        # V11 §10.5 : 'tactical' est le holdout — mesure et logge ci-dessus, mais EXCLU de
-        # worst_bot_score, qui alimente 00_critical/b_worst_bot_score et suit la selection.
+        # Une courbe `bot_eval/vs_<bot>` par adversaire MESURE, quel qu'il soit. La liste vient du
+        # registre : cette methode enumerait les six bots d'origine un par un, en dur, si bien que
+        # les cinq styles refondus (racer, endgame, alpha, attrition, decapitation) ont joue leurs
+        # episodes le 2026-08-11 sans produire une seule courbe. Le nom du scalaire est inchange
+        # pour tous les bots existants — les courbes deja tracees ne se coupent pas en deux.
+        # V11 §10.5 : les holdouts en ont une eux aussi. C'est LE win-rate qui mesure la competence
+        # et non l'exploitation apprise (§10.6) ; ils sont mesures et affiches, jamais selectionnes.
+        for bot_name in sorted(ALL_BOT_KEYS):
+            if bot_name in bot_results:
+                self.writer.add_scalar(f'bot_eval/vs_{bot_name}', bot_results[bot_name], x)
+        # worst_bot_score alimente 00_critical/b_worst_bot_score et suit la selection : il itere
+        # donc sur les bots de SELECTION, holdouts exclus (V11 §10.5) — un `min` sur des NOMS de
+        # bots n'est pas protege par le poids nul de `bot_eval_weights`.
         # Le regroupement « palier 2 » (aggressive_smart + defensive_smart + adaptive) et son
         # scalaire bot_eval/tier2_combined ont ete SUPPRIMES avec deux de leurs trois bots :
         # une moyenne sur un seul adversaire n'est plus un palier, c'est `vs_adaptive`.
-        ALL_BOT_KEYS = ('random', 'greedy', 'defensive', 'control', 'adaptive', 'value_trade')
-
-        bot_score_keys = [k for k in ALL_BOT_KEYS if k in bot_results]
+        bot_score_keys = [k for k in sorted(SELECTION_BOT_KEYS) if k in bot_results]
         if len(bot_score_keys) >= 3:
             worst_bot_score = min(bot_results[k] for k in bot_score_keys)
             self.writer.add_scalar('bot_eval/worst_bot_score', worst_bot_score, x)

@@ -78,6 +78,11 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 os.chdir(PROJECT_ROOT)
 
+# SOURCE UNIQUE des noms de bots (cf. l'en-tete de `ai/bot_registry.py`). Import de module et non
+# differe : les `choices` d'argparse sont evaluees au montage du parseur. Le registre ne declare que
+# des chaines, il ne tire ni le moteur ni torch — c'est ce qui le rend importable ici.
+from ai.bot_registry import ALL_BOT_KEYS  # noqa: E402
+
 
 def _import_roster_aggregate() -> Any:
     import importlib.util
@@ -495,11 +500,9 @@ def _build_eval_env(
     etait documentee, et n'avait aucun effet.
     """
     from ai.training_utils import setup_imports
+    from ai.bot_registry import build_bot
     from ai.env_wrappers import BotControlledEnv
-    from ai.evaluation_bots import (
-        RandomBot, GreedyBot, DefensiveBot, ControlBot,
-        AdaptiveBot, ValueTradeBot,
-    )
+    from ai.evaluation_bots import GreedyBot
     from sb3_contrib.common.wrappers import ActionMasker
     from ai.unit_registry import UnitRegistry
 
@@ -510,16 +513,14 @@ def _build_eval_env(
     if agent_seat_mode not in {"p1", "p2"}:
         raise ValueError(f"agent_seat_mode must be 'p1' or 'p2' (got {agent_seat_mode!r})")
 
-    BOT_CLASSES = {
-        "random": RandomBot,
-        "greedy": GreedyBot,
-        "defensive": DefensiveBot,
-        "control": ControlBot,
-        "adaptive": AdaptiveBot,
-        "value_trade": ValueTradeBot,
-    }
-    if opponent_mode == "bot" and eval_bot_name not in BOT_CLASSES:
-        raise ValueError(f"Unknown eval bot: {eval_bot_name!r}")
+    # SOURCE UNIQUE des noms de bots : `ai/bot_registry.py`. Ce fichier portait sa propre table
+    # cle -> classe, restee sur le panel d'origine : `--eval-bot racer` levait « Unknown eval bot »
+    # alors que le bot existe. C'est le defaut exact qui a fait naitre le registre (constate sur
+    # `bot_ranking.py` le 2026-08-11), reste ici parce que ce troisieme appelant a ete manque.
+    if opponent_mode == "bot" and eval_bot_name not in ALL_BOT_KEYS:
+        raise ValueError(
+            f"Unknown eval bot: {eval_bot_name!r}. Valid: {', '.join(sorted(ALL_BOT_KEYS))}"
+        )
 
     def mask_fn(env):
         return env.get_action_mask()
@@ -539,10 +540,7 @@ def _build_eval_env(
     )
     masked_env = ActionMasker(base_env, mask_fn)
     if opponent_mode == "bot":
-        if eval_bot_name == "random":
-            bot = RandomBot()
-        else:
-            bot = BOT_CLASSES[eval_bot_name](randomness=float(eval_bot_randomness))
+        bot = build_bot(eval_bot_name, {eval_bot_name: float(eval_bot_randomness)})
         env = BotControlledEnv(
             masked_env,
             bot,
@@ -724,7 +722,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--eval-bot",
         default="greedy",
-        choices=["random", "greedy", "defensive", "control", "adaptive", "value_trade"],
+        choices=sorted(ALL_BOT_KEYS),
         help="Single evaluation bot used for matchup generation",
     )
     parser.add_argument(
@@ -882,10 +880,9 @@ def main() -> None:
         if not eval_bot_names:
             print("❌ --eval-bots provided but empty after parsing")
             sys.exit(1)
-        valid_bots = {"random", "greedy", "defensive", "control", "adaptive", "value_trade"}
-        invalid = [name for name in eval_bot_names if name not in valid_bots]
+        invalid = [name for name in eval_bot_names if name not in ALL_BOT_KEYS]
         if invalid:
-            print(f"❌ Invalid bot(s) in --eval-bots: {invalid}. Valid: {sorted(valid_bots)}")
+            print(f"❌ Invalid bot(s) in --eval-bots: {invalid}. Valid: {sorted(ALL_BOT_KEYS)}")
             sys.exit(1)
 
     for current_split in splits_to_run:

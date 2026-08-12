@@ -1,4 +1,4 @@
-"""V11 T5 — Boucle complète moteur nu (gym) : terminaison, invariant masque, mêlée, Carnifex.
+"""V11 T5 — Boucle complète moteur nu (gym) : terminaison, invariant masque, mêlée.
 
 Couvre les critères de sortie T5 sur le MOTEUR NU (gym_training_mode, sans wrapper) :
 - **Invariant R7** : à chaque step, `mask.any() or game_over` — jamais de masque vide sans
@@ -7,8 +7,17 @@ Couvre les critères de sortie T5 sur le MOTEUR NU (gym_training_mode, sans wrap
 - **Terminaison** : l'épisode se termine (turn limit atteint, `game_over=True`).
 - **Pertes en mêlée (FIGHT_CTX)** : une paire pré-engagée résout le combat en auto (défenseur
   non-humain → allocation auto) et inflige des pertes réelles (chemin FIGHT_CTX de R4/T1).
-- **Carnifex en phase charge (R6)** : une unité à socle ovale (`BASE_SIZE` liste) est éligible en
-  charge sans `TypeError` (fix R6).
+
+⚠️ **R6 (socle ovale, `BASE_SIZE` liste) n'est PLUS couvert ici.** Ce fichier a porté un
+`test_bare_loop_carnifex_charge_eligible_no_r6_crash` qui déroulait des épisodes d'actions tirées
+au hasard et regardait si le Carnifex s'y trouvait un jour éligible en charge. Il ne tenait que par
+chance de trajectoire — mesuré le 2026-08-12 : 4 graines sur 10 le voyaient éligible, dont aucune
+des trois qu'il utilisait, d'où un rouge sans la moindre régression de R6. Et il n'atteignait de
+toute façon aucun des deux sites du fix : le scénario ci-dessous est en `44x60x5`, où le BFS
+inverse d'éligibilité est désactivé (`inches_to_subhex > 1`, charge_handlers L3698) — vérifié par
+mutation de `_charge_reverse_goal_bfs_for_eligibility`, restée verte. R6 est verrouillé, sur ses
+DEUX sites et par construction, par `tests/unit/engine/test_charge_oval_base_reverse_bfs.py`, qui
+porte en plus une garde d'atteinte — c'est ce fichier-là qui l'a repris (V11 §0.19.3).
 
 Scénario fixe minimal (écrit en tmp) : ScreamerKiller(P1) pré-engagé avec Termagant(P2) ;
 Carnifex(P1) non engagé à portée de charge d'un Termagant(P2). Positions vérifiées hors murs sur
@@ -80,19 +89,13 @@ def scenario_file(tmp_path_factory):
 def _run_episode(scenario_file, seed):
     eng = _make_engine(scenario_file, seed)
     gs = eng.game_state
-    dec = eng.action_decoder
     melee_kills = 0
-    carnifex_charge_eligible = False
     terminated = False
     steps = 0
     while steps < 3000:
         if gs.get("game_over"):
             terminated = True
             break
-        if gs.get("phase") == "charge":
-            elig = dec._get_eligible_units_for_current_phase(gs)
-            if any(str(u["id"]) == "3" for u in elig):
-                carnifex_charge_eligible = True
         mask = eng.get_action_mask()
         # Invariant R7 : jamais de masque vide sans terminaison.
         assert mask.any() or gs.get("game_over"), (
@@ -111,13 +114,13 @@ def _run_episode(scenario_file, seed):
         if term or trunc:
             terminated = True
             break
-    return terminated, melee_kills, carnifex_charge_eligible
+    return terminated, melee_kills
 
 
 def test_bare_loop_terminates_no_empty_mask(scenario_file):
     """Chaque épisode se termine et respecte l'invariant `mask.any() or game_over` (R7)."""
     for seed in (1, 2, 3):
-        terminated, _kills, _carn = _run_episode(scenario_file, seed)
+        terminated, _kills = _run_episode(scenario_file, seed)
         assert terminated, f"épisode seed={seed} non terminé"
 
 
@@ -125,9 +128,3 @@ def test_bare_loop_melee_losses_via_fight_ctx(scenario_file):
     """La paire pré-engagée inflige des pertes en mêlée (chemin FIGHT_CTX auto en gym)."""
     total_kills = sum(_run_episode(scenario_file, s)[1] for s in (1, 2, 3))
     assert total_kills > 0, "aucune perte en mêlée — le chemin FIGHT_CTX n'a pas résolu de blessure"
-
-
-def test_bare_loop_carnifex_charge_eligible_no_r6_crash(scenario_file):
-    """Un Carnifex (socle ovale, BASE_SIZE liste) est éligible en phase charge sans TypeError R6."""
-    carn_any = any(_run_episode(scenario_file, s)[2] for s in (1, 2, 3))
-    assert carn_any, "le Carnifex n'a jamais été vu éligible en phase charge (chemin R6 non exercé)"

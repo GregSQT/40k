@@ -269,7 +269,7 @@ mesure, et c'est assumé (§0.14).
    🔴 **AUCUN PROFIL EXISTANT NE CONVIENT — à trancher avant d'ouvrir P3-4.**
    - Ce qui est **acquis** : le « ne PAS utiliser `x1_debug`, il porte 48 envs » de §9.6 est
      périmé. `n_steps` est un TOTAL divisé par `n_envs` en un point de passage unique depuis
-     §0.33 ⇒ le buffer ne dépend plus de `n_envs`, et les **8** profils sont à 48 envs de toute
+     §0.33 ⇒ le buffer ne dépend plus de `n_envs`, et les **9** profils sont à 48 envs de toute
      façon, `x5_debug` compris. La mémoire n'écarte plus aucun profil.
    - Ce qui **casse** — et **DEUX variables distinctes** sont en cause, que ce fichier a confondues
      dans une première correction du 2026-08-10 :
@@ -812,7 +812,7 @@ vérifiée ; l'appariement reste réservé aux cellules de tableau, où le renvo
 
 ### Incohérences factuelles restantes (non traitées, aucune ne bloque)
 
-- **`obs_size`** — la valeur vraie à HEAD est **16659**, portée par les **8** profils de la config
+- **`obs_size`** — la valeur vraie à HEAD est **16659**, portée par les **9** profils de la config
   ArmageddonAgent (un `"obs_size": 16659` chacun ; ce fichier a annoncé « 3 occurrences », puis
   « 7 profils », sans jamais les compter — c'est le contrôle de §5 qui les compte désormais).
   ✅ `Implémenté/01_ability_embedding.md`, qui annonçait 14609/14615, est corrigé. Reste la
@@ -838,7 +838,7 @@ vérifiée ; l'appariement reste réservé aux cellules de tableau, où le renvo
   `36_000` codé en dur dans `test_schedule_decay_fraction.py` (seuil conservé parce qu'il est le
   plus SÉVÈRE des deux, jamais laxiste). Les durées de `x1_long` ont été réancrées sur la mesure
   le 2026-08-11 ; le reste ne l'est pas. Le traiter = re-dériver chaque note de coût d'évaluation
-  des 8 profils, donc un chantier à ouvrir, pas un périmètre de clôture.
+  des 9 profils, donc un chantier à ouvrir, pas un périmètre de clôture.
 - Bandeaux et chiffres périmés listés en `1_Agent/V11_agent_rework.md` §0bis (l.3713-3735),
   signalés et volontairement non corrigés depuis le 2026-07-20.
 - `UNIT_ABILITY_SLOTS = 8` est une projection non mesurée ; le chantier 06 la rendra mesurable (§2).

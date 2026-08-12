@@ -11,7 +11,7 @@ Ce fichier vérifie les trois choses qui peuvent réellement casser :
   1. la valeur produite (rampe terminée au bon épisode, plancher tenu ensuite) ;
   2. le fait que les callbacks ÉCRIVENT bien dans le modèle (une rampe juste mais jamais appliquée
      ne règle rien — c'est le motif d'échec récurrent de ce dépôt) ;
-  3. le contrat de config : la clé est OBLIGATOIRE dans les huit profils, sans défaut.
+  3. le contrat de config : la clé est OBLIGATOIRE dans TOUS les profils, sans défaut.
 """
 
 from __future__ import annotations
@@ -258,10 +258,13 @@ def _resolved_cb(callback_params: dict, key: str):
 # ou il la remplit exactement une fois — une seule position de fenêtre, donc le « meilleur »
 # modèle est mécaniquement le dernier point évalué (`x1` depuis le 2026-08-11 : 5 points pour une
 # fenêtre de 5). Dans les deux cas la promesse était vide ; c'est le sens du `false`.
+# Troisième cause depuis le 2026-08-12 avec `x1_panel` : un profil de MESURE, joué en `--test-only`
+# pour comparer des bots entre eux, n'entraîne rien et n'a donc rien à sélectionner.
 PROMISES_BEST_MODEL = {
     "x1": False, "x1_long": True, "x1_selfplay": True,
     "x5_new": False, "x5_long": True, "x5_append": True,
     "x1_debug": False, "x5_debug": False,
+    "x1_panel": False,
 }
 
 
@@ -448,7 +451,7 @@ def test_long_profile_is_its_reference_recalibrated(ref_name: str, long_name: st
         "final sous un autre nom."
     )
     # L'écarter de la comparaison ne dispense PAS de le vérifier des deux côtés. La valeur attendue
-    # vient de la table unique `PROMISES_BEST_MODEL`, verrouillée pour les huit profils par
+    # vient de la table unique `PROMISES_BEST_MODEL`, verrouillée pour tous les profils par
     # `test_profile_promise_of_a_best_model_is_pinned` : ni x1 (5 points pour une fenêtre de 5,
     # donc une seule position et rien à départager) ni x5_new (1000 ép., fenêtre jamais remplie)
     # ne promettent quoi que ce soit — les deux rendent leur modèle FINAL.
