@@ -42,12 +42,18 @@ l'analyzer la tient encore pour 2 figurines vivantes.
   rapport. Aucune clé morte laissée à sommer dans les totaux — c'est la leçon du vert vacant V2
   (`fight_from_non_adjacent`, 2026-08-10).
 - L'invariant 05 est verrouillé côté moteur :
-  `tests/unit/engine/test_attack_allocation_contract.py` (3 tests) — le pool restant EST perdu
-  quand la cible tombe, il ne l'est JAMAIS tant qu'une figurine vit, et une touche ratée n'entre
-  pas dans le pool (contre-épreuve : sans elle, le deuxième test passerait faute de blessures).
+  `tests/unit/engine/test_attack_allocation_contract.py` — 3 tests × 2 chemins d'allocation. Le
+  pool restant EST perdu quand la cible tombe, il ne l'est JAMAIS tant qu'une figurine vit, et une
+  touche ratée n'entre pas dans le pool (contre-épreuve : sans elle, le deuxième test passerait
+  faute de blessures).
+- **Le miroir tir/mêlée est joué, pas déduit.** `FIGHT_CTX` délègue aujourd'hui à la même boucle
+  d'allocation que le tir (`_manual_allocation_step`) et ne surcharge pas `resolve_wound_fn` —
+  mais `HAZARD_CTX`, lui, le fait déjà. Un test de tir seul serait donc resté vert le jour où la
+  mêlée se dote de son propre résolveur. Chaque test passe par le VRAI point d'entrée de chaque
+  phase (`build_manual_shoot_allocation` / `build_manual_fight_allocation`).
 - Verrou prouvé : défaut réintroduit deux fois dans `shared_utils.py` (arrêt d'allocation après la
-  première blessure ; marquage `wasted` retiré) → tests ROUGES à chaque fois, verts après remise
-  en état.
+  première blessure ; marquage `wasted` retiré) → tests ROUGES à chaque fois, sur les DEUX chemins,
+  verts après remise en état.
 
 ## Ce qui reste vrai pour la suite
 
