@@ -56,6 +56,7 @@ import numpy as np
 from engine import macro_intents as mi
 from engine.combat_utils import calculate_hex_distance
 from engine.game_state import objective_hex_sets, unit_is_within_objective
+from engine.game_utils import get_effective_turn_limit
 from engine.objective_distance import objective_distance_maps
 from engine.phase_handlers.shared_utils import (
     get_hp_from_cache, is_unit_alive, is_unit_at_or_below_half_strength,
@@ -596,24 +597,48 @@ class EndgameBot(_DoctrineBot):
     """
 
     MOVEMENT_BOT_KEY = "endgame"
-    #: Tour a partir duquel il fond sur les objectifs.
+    #: Nombre de tours FINAUX pendant lesquels il fond sur les objectifs.
     #:
-    #: ⚠️ VALAIT 4, ET C'ETAIT PERDU D'AVANCE — mesure du 2026-08-11 : 0,025 de win-rate moyen
-    #: contre les cinq autres styles, dernier de tres loin. Le score primaire court a partir du
-    #: tour 2 (`config/primary_objective/.../Objectives_Control.json` : `start_turn: 2`,
-    #: 15 VP/tour) et la partie dure 5 tours : ne rien tenir avant le tour 4, c'est renoncer aux
-    #: tours 2 et 3, soit la MOITIE des tours qui rapportent. Aucun jeu de poids ne rattrape ca.
+    #: ⚠️ IL BASCULAIT AU TOUR 4, ET C'ETAIT PERDU D'AVANCE — mesure du 2026-08-11 : 0,025 de
+    #: win-rate moyen contre les cinq autres styles, dernier de tres loin. Le score primaire court
+    #: a partir du tour 2 (`config/primary_objective/.../Objectives_Control.json` : `start_turn: 2`,
+    #: 15 VP/tour) : sur une bataille de 5 tours, ne rien tenir avant le tour 4 revient a renoncer
+    #: aux tours 2 et 3, soit la MOITIE des tours qui rapportent. Aucun jeu de poids ne rattrape ca.
     #: « Jouer la fin de partie » ne peut donc pas vouloir dire « ne rien marquer avant » : il
     #: prend le premier palier tot (5 VP des qu'on tient une zone) et ne bascule sur le maximum
-    #: qu'au tour 3, en gardant ses unites intactes pour ce moment-la.
-    PUSH_TURN = 3
+    #: que sur les TROIS derniers tours, en gardant ses unites intactes pour ce moment-la.
+    #:
+    #: ⚠️ EXPRIME EN TOURS RESTANTS, PLUS EN NUMERO DE TOUR — corrige le 2026-08-12. La constante
+    #: valait `PUSH_TURN = 3`, deduite a la main de « la partie dure 5 tours » : sur un scenario
+    #: plus court elle ne se declenchait qu'apres la fin, sur un plus long elle transformait le
+    #: style en Racer des le premier tiers. La duree se lit desormais sur l'etat
+    #: (`get_effective_turn_limit`, source unique de `game_rules.max_turns`), et le comportement
+    #: sur la bataille standard est inchange : 5 - 3 + 1 = tour 3, exactement comme avant.
+    PUSH_LAST_TURNS = 3
     PLACEMENT_WEIGHTS = {
         DEPLOYMENT_ACTIONS[0]: 0.05, DEPLOYMENT_ACTIONS[1]: 0.25, DEPLOYMENT_ACTIONS[2]: 0.50,
         DEPLOYMENT_ACTIONS[3]: 0.10, DEPLOYMENT_ACTIONS[4]: 0.10,
     }
 
     def _pushing(self, game_state) -> bool:
-        return int(game_state.get("turn", 1)) >= self.PUSH_TURN
+        """Sommes-nous entres dans les `PUSH_LAST_TURNS` derniers tours de la bataille ?
+
+        ⚠️ `require_key` et non `game_state.get("turn", 1)` : le defaut a 1 disait « avant la
+        bascule » pour un etat sans tour, c'est-a-dire qu'une rupture d'invariant se lisait comme
+        une decision de doctrine (T1). Un etat sans `turn` doit lever.
+        """
+        battle_turns = get_effective_turn_limit(game_state)
+        if battle_turns is None:
+            raise ValueError(
+                "EndgameBot joue les DERNIERS tours d'une bataille : une bataille sans limite de "
+                "tours (Endless Duty) n'en a pas. Ce style n'est pas un adversaire valide sur ce "
+                "scenario — le retirer du panel plutot que lui inventer un tour de bascule."
+            )
+        # Bataille de 5 tours, `PUSH_LAST_TURNS` = 3 : bascule au tour 3, qui ouvre les tours
+        # 3-4-5. Le `max(1, ...)` couvre les batailles plus courtes que la fenetre de poussee :
+        # il n'y a alors pas de phase d'attente, ce qui est la bonne reponse et non un repli.
+        push_from = max(1, battle_turns - self.PUSH_LAST_TURNS + 1)
+        return int(require_key(game_state, "turn")) >= push_from
 
     def target_score(self, attacker, is_ranged: bool, game_state):
         if self._pushing(game_state):
@@ -741,8 +766,16 @@ class DecapitationBot(_DoctrineBot):
         self._focus_target: Optional[str] = None
 
     def _focus(self, game_state) -> Optional[str]:
-        """Cible du tour, oubliee au changement de tour ou a la mort de la cible."""
-        marker = (game_state.get("episode_number"), int(game_state.get("turn", 1)))
+        """Cible du tour, oubliee au changement de tour ou a la mort de la cible.
+
+        ⚠️ `require_key` sur `turn`, pas un defaut a 1 (T1, meme correction qu'`EndgameBot`) :
+        un etat sans tour rendait ici un marqueur CONSTANT, donc le bot gardait la meme cible
+        focalisee pendant toute la partie au lieu d'en changer a chaque tour — un defaut de
+        doctrine silencieux, ne au masquage d'une rupture d'invariant.
+        `episode_number` garde son `.get` : il est legitimement absent hors episode (cf. la
+        memoire de pose), et son absence ne fabrique pas un faux tour.
+        """
+        marker = (game_state.get("episode_number"), int(require_key(game_state, "turn")))
         if self._focus_turn != marker:
             self._focus_turn = marker
             self._focus_target = None

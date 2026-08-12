@@ -461,7 +461,30 @@ par arithmétique, mais parce que l'axe est réel.
 ⚠️ **Ses poids ne sont PAS réglés** (`config/bot_movement_weights.json`, entrée `scorer`) : posés
 par doctrine, à établir en bot-contre-bot avant toute mesure contre l'agent.
 
-### 11.4 Le modèle de dégâts, corrigé à la racine
+### 11.4 Deux défauts récupérés du holdout avant de le supprimer
+
+Le travail en cours sur le holdout, non commité au moment de sa suppression, contenait deux
+constats qui ne mouraient **pas** avec lui. Ils ont été portés sur les styles qui restent.
+
+- **La durée d'une bataille se lit sur l'état.** `EndgameBot` basculait en mode poussée à
+  `PUSH_TURN = 3`, déduit à la main de « la partie dure 5 tours ». Sur un scénario plus court la
+  bascule tombait après la fin ; sur un plus long, le style devenait un Racer dès le premier
+  tiers. Le seuil s'exprime désormais en **tours restants** (`PUSH_LAST_TURNS = 3`) et la durée
+  vient de `get_effective_turn_limit`. ⚠️ **Comportement inchangé sur la bataille standard** :
+  5 − 3 + 1 = tour 3, exactement l'ancien réglage — les chiffres du panel restent comparables.
+- **`game_state.get("turn", 1)`**, deux fois, était un défaut posé pour éviter une `KeyError`
+  (T1). Chez `EndgameBot` un état cassé se lisait « avant la bascule » ; chez `DecapitationBot`,
+  plus grave, le marqueur de tour devenait **constant**, donc le bot gardait la même cible
+  focalisée toute la partie — sa doctrine entière s'annulait en silence. Les deux lèvent.
+
+Verrou : `tests/unit/ai/test_bot_doctrine_battle_length.py` (7 tests), dont un ancre la
+non-régression sur 5 tours. Vérifié rouge en remettant la constante : 3 tests tombent.
+
+Un troisième élément de ce travail, `engine.game_state.army_value_by_player` (source unique du
+départage de fin de partie), est **indépendant du holdout** et reste à l'autre chantier — il
+n'était pas encore commité.
+
+### 11.5 Le modèle de dégâts, corrigé à la racine
 
 Voir §7.1. En résumé : l'estimation par escouade ne lisait que le profil du soldat de base, donc
 50 paires sur 90 étaient fausses (médiane 0,50×, pire cas 0,18×). Le cache est désormais indexé par
