@@ -14,25 +14,36 @@
  * D'où ce module : les trois sortent d'un seul calcul, et les invariants sont verrouillés par des
  * tests plutôt que par la discipline du prochain lecteur.
  *
- * ─── DÉFAUTS MESURÉS QUI ONT MOTIVÉ CE CONTRAT ────────────────────────────────────────────────
+ * DÉFAUTS MESURÉS (2026-08-12) que ce contrat ferme, chacun un conteneur périmé laissé sur le
+ * stage : `drawBoard` court-circuitée sur la seule réutilisabilité des surbrillances, alors que la
+ * couleur de contrôle vit dans le statique (une zone capturée n'a plus jamais changé de couleur
+ * de la partie) ; le statique périmé ré-attaché AU-DESSUS du neuf, que `drawBoard` insère en
+ * index 0 ; les surbrillances conservées pendant que `drawBoard` en ajoutait de nouvelles.
  *
- * 1. `drawBoard` était court-circuitée sur la SEULE réutilisabilité des surbrillances, alors que
- *    la couleur de contrôle des objectifs vit dans le calque statique — et que `objectiveControl`
- *    n'apparaît nulle part dans l'empreinte des surbrillances. Trace console en jeu (2026-08-12) :
- *    UNE reconstruction, à un instant où une zone était déjà tenue et l'autre pas encore, puis
- *    réutilisation jusqu'à la fin de la partie. La seconde zone n'a jamais changé de couleur.
- *
- * 2. Corriger (1) a rendu atteignables deux chemins qui ne l'étaient pas (trouvés par
- *    `/code-review`), tous deux du même genre — un conteneur périmé laissé sur le stage :
- *    - le calque statique périmé était ré-attaché puis `drawBoard` insérait le neuf en index 0,
- *      donc EN DESSOUS (zIndex égaux, tri stable) : la couleur affichée restait l'ancienne et les
- *      remplissages de terrain se doublaient ;
- *    - les surbrillances conservées restaient sur le stage pendant que `drawBoard` en ajoutait de
- *      nouvelles : previews et contours d'étage en double, alpha doublée, et les anciens
- *      orphelins jusqu'au balayage suivant.
- *
- * L'invariant qui ferme les deux : **on ne conserve jamais un calque que `drawBoard` va recréer.**
+ * L'invariant qui les ferme tous : **on ne conserve jamais un calque que `drawBoard` va recréer.**
  */
+import type { DrawBoardResult } from "../components/BoardDisplay";
+
+/** Calques que `drawBoard` recrée avec le fond et le décor — cycle de vie du STATIQUE. */
+const STATIC_LAYERS = ["baseHexContainer", "wallsContainer"] as const;
+/** Calques que `drawBoard` recrée à chaque appel — cycle de vie des SURBRILLANCES. */
+const HIGHLIGHT_LAYERS = ["highlightContainer", "floorContourContainer"] as const;
+
+/**
+ * GARDE-FOU DE COMPLÉTUDE, vérifiée par le compilateur et par rien d'autre.
+ *
+ * Le plan ci-dessous n'est exhaustif que parce que `drawBoard` produit exactement ces quatre
+ * conteneurs, en deux cycles de vie. Ajouter un cinquième champ à `DrawBoardResult` sans le
+ * classer ici en ferait un orphelin VISIBLE sur le stage, en silence — c'est exactement la classe
+ * de défaut corrigée. Ce type force alors une erreur de compilation.
+ */
+type _TousLesCalquesOntUnCycleDeVie = keyof DrawBoardResult extends
+  | (typeof STATIC_LAYERS)[number]
+  | (typeof HIGHLIGHT_LAYERS)[number]
+  ? true
+  : never;
+/** Consommation du garde-fou : sans usage, `noUnusedLocals` supprimerait la vérification. */
+export const LAYER_LIFECYCLES_ARE_EXHAUSTIVE: _TousLesCalquesOntUnCycleDeVie = true;
 
 /** Ce que `BoardPvp` doit faire de son stage pour ce rendu. */
 export interface BoardRedrawPlan {

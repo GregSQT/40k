@@ -9854,7 +9854,10 @@ export default function Board({
       if (savedOathOverlay?.parent) app.stage.removeChild(savedOathOverlay);
       if (savedRangeRingsOverlay?.parent) app.stage.removeChild(savedRangeRingsOverlay);
       if (savedWaaaghFangsOverlay?.parent) app.stage.removeChild(savedWaaaghFangsOverlay);
-      if (redrawPlan.keepHighlightLayers && highlightsLayerRef.current?.parent === app.stage) {
+      // `keepHighlightLayers` implique déjà « vivant ET attaché au stage » (conjoints de
+      // `canReuseExistingHighlightsThroughDestroy`, dont il dérive) : seul le test de non-nullité
+      // subsiste, pour le compilateur.
+      if (redrawPlan.keepHighlightLayers && highlightsLayerRef.current) {
         savedHighlightsThroughDestroy = highlightsLayerRef.current;
         app.stage.removeChild(savedHighlightsThroughDestroy);
         // Contours d'étage : même cycle de vie que les highlights (drawBoard n'est pas rappelé ici).
@@ -9896,24 +9899,28 @@ export default function Board({
       // masquerait la nouvelle et les remplissages de terrain seraient doublés. Les refs sont
       // remises à null pour qu'aucun lecteur ne tienne un conteneur détruit ; `drawBoard` les
       // réécrit juste après.
-      if (!redrawPlan.keepStaticLayer) {
+      // Le calque statique et les murs partagent un cycle de vie : ré-attachés ensemble, ou
+      // détruits ensemble. L'ordre d'insertion ne les départage pas — leurs zIndex sont distincts
+      // (statique 0 par défaut, contours d'étage 10, murs 130) et le stage est trié.
+      if (redrawPlan.keepStaticLayer) {
+        if (savedStatic) app.stage.addChild(savedStatic);
+        if (savedWalls) {
+          // zIndex forcé ici (et pas seulement à la création) : le conteneur des murs est réutilisé
+          // (staticWallsRef) ; sans ça un mur créé avant l'ajout du zIndex resterait à 0 et repasserait
+          // SOUS les contours d'étage. 130 : AU-DESSUS du highlightContainer (120) qui porte le voile
+          // d'étage (vue niveau >=1) et les previews tir/move, mais SOUS les figs (2000).
+          savedWalls.zIndex = 130;
+          app.stage.addChild(savedWalls);
+        }
+      } else {
         if (savedStatic) destroyLayerChild(savedStatic);
         if (savedWalls) destroyLayerChild(savedWalls);
         staticBoardRef.current = null;
         staticWallsRef.current = null;
       }
-      if (redrawPlan.keepStaticLayer && savedStatic) app.stage.addChild(savedStatic);
       if (savedFloorContourThroughDestroy) {
         savedFloorContourThroughDestroy.zIndex = 10;
         app.stage.addChild(savedFloorContourThroughDestroy);
-      }
-      if (redrawPlan.keepStaticLayer && savedWalls) {
-        // zIndex forcé ici (et pas seulement à la création) : le conteneur des murs est réutilisé
-        // (staticWallsRef) ; sans ça un mur créé avant l'ajout du zIndex resterait à 0 et repasserait
-        // SOUS les contours d'étage. 130 : AU-DESSUS du highlightContainer (120) qui porte le voile
-        // d'étage (vue niveau >=1) et les previews tir/move, mais SOUS les figs (2000).
-        savedWalls.zIndex = 130;
-        app.stage.addChild(savedWalls);
       }
       if (savedHighlightsThroughDestroy) app.stage.addChild(savedHighlightsThroughDestroy);
       if (savedUi) {
@@ -9998,7 +10005,9 @@ export default function Board({
     }
 
     let drawResult: ReturnType<typeof drawBoard>;
-    if (!redrawPlan.callDrawBoard && savedHighlightsThroughDestroy) {
+    // `savedHighlightsThroughDestroy` n'est renseigné que sous `keepHighlightLayers`, donc sa
+    // non-nullité implique déjà `!callDrawBoard` : le tester en plus ne filtrerait rien.
+    if (savedHighlightsThroughDestroy) {
       const onlyPatchMovePolygon =
         partialFp.movePolygonCacheKey !== null &&
         (partialFp.movePolygonCacheKey ?? "") !== (lastMovePolygonCacheKeyRef.current ?? "");
