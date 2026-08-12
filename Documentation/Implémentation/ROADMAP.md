@@ -346,6 +346,20 @@
   modèle deviendra inchargeable dès P3-4. `x1` = **10 000 épisodes** (`total_episodes`, et non
   50 000 qui est la clé de commentaire `total_episodes_normal`).
   → [`1_Agent/V11_agent_rework.md`](1_Agent/V11_agent_rework.md) §0.70
+- ✅ **Livraison 2026-08-12 — trois verrous de test, aucun changement de comportement moteur.**
+  (a) Deux tests analyzer étaient périmés : l'un sur le gel « Select Targets step » du 2026-08-12
+  (04.02 : les cibles sont choisies avant toute résolution, donc les deux lignes d'une activation
+  se comptent), l'autre passait uniquement derrière un voisin qui lui laissait les dimensions de
+  plateau. (b) Les courbes `forcing/unit_episode_exposure/*` et `forcing/unit_instance_mean/*`
+  n'étaient sous **aucun** test — la fabrique partagée laissait leur dict vide, donc les supprimer
+  restait vert ; verrouillées, dénominateur compris. (c) Les fabriques de test partagées quittent
+  `conftest.py` pour `tests/unit/ai/_fabriques.py` : un conftest importé en plus d'être collecté
+  existe en **deux exemplaires**, et tout état de module y diverge en silence. L'état du run
+  analysé se remet à zéro entre chaque test (`ai.analyzer_config.reset_run_state`).
+  ⚠️ **Cause racine non traitée** : `tests/` n'a pas d'`__init__.py`. Un garde-fou interdit
+  désormais d'importer un conftest, mais `consider_namespace_packages = true` dans `pytest.ini`
+  (une ligne) fermerait le sujet à la racine — il renomme les modules de TOUS les tests, donc il
+  demande la vérification large. Arbitrage à trancher.
 - **Conséquence immédiate : plus rien n'est gelé.** La consigne « ne rien lancer de cassant, aucun
   JSON de `config/` » tombe avec le run. Ce qui était différé à ce titre redevient faisable —
   notamment la `justification` d'`obs_size` (§5) et l'ajout d'un profil de validation P5 (§1 pt 6).
