@@ -1,4 +1,4 @@
-# Refonte du panel de bots — six styles orthogonaux + holdout qui joue pour gagner
+# Refonte du panel de bots — six styles, une échelle de difficulté graduée
 
 > Ouvert le **2026-08-11**. Chantier du benchmark d'évaluation, pas de l'agent.
 > Doc de détail ; l'ordre du travail reste dans [`../ROADMAP.md`](../ROADMAP.md) §1.
@@ -81,8 +81,15 @@ raison (cf. `config/bot_movement_weights.json`, entrée `tactical`).
    ⚠️ **Gel = ne pas toucher une ligne des six classes actuelles.** Un flag `damage_model`
    commutable avait été envisagé puis **rejeté** : le nouveau panel n'a pas les mêmes doctrines
    que l'ancien, un paramètre ne peut pas exprimer ça.
-2. **Six styles orthogonaux**, un axe de faiblesse chacun. Le critère n'est pas « sont-ils
-   bons ? » mais « punissent-ils des erreurs différentes ? ».
+2. ~~**Six styles orthogonaux**, un axe de faiblesse chacun~~ — **L'ORTHOGONALITÉ EST ABANDONNÉE
+   comme critère, décision de l'utilisateur du 2026-08-12 sur la mesure du §11.2.** Les six bots
+   se déplacent en bloc d'un modèle à l'autre (+3 à +7 points, ordre strictement identique) : ils
+   forment **une seule dimension**, mesurée à six niveaux de difficulté. La cause est le format,
+   pas le dessin des bots — seuls les objectifs marquent (§12.1 : zéro victoire par élimination
+   sur 600 parties), donc aucun panel ne peut rendre six axes dans un jeu qui n'en a qu'un.
+   Le panel reste un instrument utile, mais c'est une **échelle de difficulté**, pas une base de
+   mesure multi-dimensionnelle. La table ci-dessous décrit ce que chaque style FAIT ; elle ne
+   promet plus qu'il mesure un axe indépendant.
 
    | style | doctrine | erreur punie |
    |---|---|---|
@@ -101,7 +108,10 @@ raison (cf. `config/bot_movement_weights.json`, entrée `tactical`).
    en §9.2. Décision de l'utilisateur, reprise telle quelle : « je préfère des bots pertinents
    plutôt que forcer pour en avoir un de plus qui n'apprend rien ». Le nombre n'a aucune vertu ;
    l'orthogonalité si. Le panel est retombé à cinq styles, puis remonté à six le 2026-08-12 avec
-   `Scorer` — qui, lui, porte un axe réel (cf. §11).
+   `Scorer`. ⚠️ Ce raisonnement est **périmé par la décision ci-dessus** : `Scorer` a été ajouté
+   au nom d'un « axe manquant », et la mesure du §11.2 dit qu'il n'y a pas d'axes. Il se justifie
+   toujours — il reprend la doctrine du seul ancien bot informatif — mais comme un **barreau de
+   l'échelle**, pas comme une dimension.
 3. ~~**Le holdout garde le nom `tactical` mais change de nature**~~ — **ABANDONNÉ le 2026-08-12,
    cf. §11.** La refonte « joue pour gagner » (recherche à un coup) a été écrite, mesurée, puis
    supprimée : elle coûtait 9,5× un bot normal par épisode et ne gagnait pas plus souvent qu'eux.
@@ -123,9 +133,9 @@ raison (cf. `config/bot_movement_weights.json`, entrée `tactical`).
 | 3 | ~~chiffrage de faisabilité du holdout à un coup~~ | ⛔ **sans objet** — holdout abandonné 2026-08-12, §11.2 |
 | 4 | modèle de dégâts espérés (attaquant → cible) | ✅ 2026-08-11, **corrigé à la racine** 2026-08-12, cf. §7 et §7.1 |
 | 5 | les SIX styles | ✅ 2026-08-12, cf. §7 et §11.3 (`standoff` supprimé §9.2, `scorer` ajouté §11.3) |
-| 6 | réglage et orthogonalité en **bot-contre-bot** | 🟠 **PARTIEL** — cinq styles réglés, `scorer` **non réglé** ; chiffres du §8/§9 à rejouer, cf. §11.1 |
+| 6 | réglage en **bot-contre-bot** (~~orthogonalité~~ abandonnée, §3.2) | 🟠 **PARTIEL** — `w_contest` et `w_crowd` **non réglés** ; chiffres du §8/§9 à rejouer, cf. §11.1 |
 | 7 | correspondance ancien/nouveau, puis suppression des cinq anciens | |
-| 8 | mesure finale contre l'agent, commande de §2 | ⚠️ bloquée : modèle canonique absent, cf. §10.2 |
+| 8 | mesure finale contre l'agent, commande de §2 | 🟠 **PARTIEL** — mesurée sur `robust_0.8721` (§12.5) ; reste à rejouer après réglage |
 
 ### 4.1 Pourquoi l'appariement des graines a été retiré
 

@@ -341,15 +341,19 @@ mesure, et c'est assumé (§0.14).
    accompagnait l'ancienne valeur.
 8. **§0.59 — Phase 2 self-play** (`--append x1_selfplay`) — livré, JAMAIS exécuté ; le premier
    run est aussi son premier test d'intégration. → [`1_Agent/V11_agent_rework.md`](1_Agent/V11_agent_rework.md) §0.59
-9. **Refonte du panel de bots** (ouvert le 2026-08-11) — six styles orthogonaux.
+9. **Refonte du panel de bots** (ouvert le 2026-08-11) — six styles, échelle de difficulté.
    → [`A_faire/bots_refonte_panel.md`](A_faire/bots_refonte_panel.md)
-   🟠 **État au 2026-08-12** : les six styles sont livrés et le modèle de dégâts est corrigé à la
-   racine (par figurine). **Restent les étapes 7 et 8** — correspondance ancien/nouveau puis
-   mesure finale contre l'agent — et le **réglage des poids de `scorer`**. Le holdout « qui joue
-   pour gagner » a été écrit puis **abandonné** : mesuré, il coûtait 9,5× un bot normal et ne
-   gagnait pas plus souvent qu'eux (§11.2 du chantier). ⚠️ Les chiffres des §8/§9 du doc de
-   chantier sont **à rejouer** : tailles d'échantillon insuffisantes et une erreur d'arithmétique
-   sur le `combined` (§11.1).
+   🟠 **État au 2026-08-12** : six styles livrés, modèle de dégâts corrigé à la racine
+   (par figurine), et les bots **s'étalent** au lieu d'empiler trois escouades par zone — le pire
+   bot passe de 0,837 (ancien panel) à **0,62** et l'écart de VP est divisé par deux (§12.5).
+   🔴 **L'ORTHOGONALITÉ est ABANDONNÉE comme critère** (décision du 2026-08-12) : les six bots se
+   déplacent en bloc d'un modèle à l'autre, ils forment une seule dimension. La cause est le
+   format — seuls les objectifs marquent, zéro victoire par élimination sur 600 parties — donc
+   aucun panel n'y rendra six axes. Le panel est une **échelle de difficulté**, et c'est assumé.
+   **Restent** : le réglage de `w_contest`/`w_crowd` (posés, non réglés), l'étape 7
+   (correspondance puis suppression des cinq anciens) et l'étape 8 rejouée après réglage.
+   ⚠️ Les chiffres des §8/§9 du doc de chantier sont **à rejouer** : échantillons insuffisants et
+   une erreur d'arithmétique sur le `combined` (§11.1).
    ⚠️ **Ce point CONDITIONNE la valeur du point 7, il ne s'y ajoute pas.** Le panel actuel ne rend
    que **deux signaux distincts pour six bots** (mesuré le 2026-08-11, 100 parties/bot, x1,
    holdout, modèle `robust_0.9438` : `tactical`/`adaptive`/`value_trade` ont des intervalles de
@@ -361,7 +365,7 @@ mesure, et c'est assumé (§0.14).
    de figurines. Sur les rosters holdout 500 pts, **17 profils sur 23** sont classés « mêlée » par
    ce proxy, Intercessor compris : c'est le test qui décide de charger, donc les bots envoyaient
    leurs unités de tir au contact.
-   L'ordre interne du chantier et les décisions actées sont dans son doc ; l'orthogonalité et la
+   L'ordre interne du chantier et les décisions actées sont dans son doc ; le réglage et la
    correspondance ancien/nouveau se mesurent en **bot-contre-bot** (`scripts/bot_ranking.py`),
    la mesure contre l'agent ne servant qu'à confirmer — mesurer un bot par le win-rate de l'agent
    est circulaire.
