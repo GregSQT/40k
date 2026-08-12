@@ -753,6 +753,15 @@ Prêts à démarrer sans décision produit :
   COMPTÉ (`shoot_range_unverifiable`), ce qui ferme le résidu V9 d'`analyzer_couverture.md`.
   Verrouillé par 3 fichiers de test créés et 2 retournés/étendus ; les 5 correctifs ont subi
   l'épreuve de la panne réintroduite, une à une : les 5 rendent rouge.
+  ✅ **Compteur de fantômes et garde de réserves corrigés** (2026-08-12, investigation du
+  `dead_missed=1` persistant) : cause identifiée (`[MODELS:]` absent des lignes `[HAZARD]`
+  → socle mort restait dans `positions_by_model` → faux engagement en aval) — le fix
+  `str(unit_id)` était déjà en place ; l'investigation a découvert un second défaut : la garde de
+  réserves ne couvrait que `positions_by_model = {(-1,-1)…}`, pas `= None` (état réel d'une
+  escouade jamais déployée), ce qui tuait silencieusement toute unité en réserve à chaque
+  instantané `STATE`. Corrigé : `if not known_models: continue`. Deux verrous ajoutés/étendus :
+  `test_analyzer_hazard_models_ghost.py` (VERROU `[MODELS:]` sur ligne `[HAZARD]` → 0 faux
+  engagement) et `test_analyzer_state_resync_and_caps.py` (parametrize `None` + sentinelle).
   Le rapport annonçait 370 erreurs sur le run du 2026-08-11 ; le nettoyage de l'outil de mesure
   (livré le même jour, cf. plus bas) en a supprimé 317 qui étaient des faux positifs de lecture.
   **Ce qui reste n'est plus imputable à l'analyzer** et désigne des règles appliquées de travers
