@@ -31,7 +31,7 @@ from engine.w40k_core import W40KEngine
 
 # Harnais partage avec le fichier voisin (meme repertoire, donc importable) : un plateau a
 # trois objectifs avec des figurines POSEES dessus au deploiement.
-from test_objective_held_samples import _config
+from tests.unit.engine.test_objective_held_samples import _config
 from tests.unit.engine._config_helpers import build_engine_config
 
 

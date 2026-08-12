@@ -1,0 +1,256 @@
+#!/usr/bin/env python3
+# PostToolUse (Edit/Write/MultiEdit/NotebookEdit) — tient la liste des fichiers de CODE modifiés
+# depuis la dernière relecture, pour la session en cours.
+#
+# Motif (2026-08-12) : `/code-review` et `/simplify` sont lancés par l'agent en fin de sujet, pas
+# par l'utilisateur (cf. puce RELIRE de CLAUDE.md), et un sujet s'étale sur plusieurs tours. Sans
+# liste persistée, deux issues, toutes deux mesurées : relancer les deux passes à chaque tour —
+# donc plusieurs fois sur le même code, ce que l'utilisateur a demandé d'éviter — ou se fier à la
+# mémoire de contexte, qui disparaît à la compaction, c'est-à-dire précisément sur les sessions
+# longues où le sujet dure. Le fichier survit à la compaction ET au redémarrage de session.
+#
+# POURQUOI PAS `git status` — mesuré le 2026-08-12 dans ce dépôt : le tree portait 38 fichiers
+# modifiés (analyzer, handlers de phase, une trentaine de tests) alors que la tâche du moment en
+# touchait 2. Une liste dérivée de git enverrait la review sur les chantiers des autres sessions.
+# Cette liste-ci ne contient que ce que CETTE session a édité.
+#
+# CE QUE CE HOOK NE FAIT PAS, et ne peut pas faire : décider QUAND lancer les passes. « toutes les
+# tâches terminées et plus d'arbitrage en attente » n'est pas observable depuis un hook — aucun
+# outil ne sait si la demande de l'utilisateur est finie. Ce déclenchement reste une règle de
+# CLAUDE.md ; ici on garantit seulement que la liste est exacte le moment venu.
+#
+# CE QUI COMPTE COMME CODE N'EST PAS ÉCRIT ICI : la liste est celle de `rapport-cloture.sh`, lue
+# dans CLAUDE.md. Deux hooks qui définiraient « du code » chacun de leur côté divergeraient — c'est
+# le doublon déjà payé une fois le 2026-08-12 sur la liste des sections du rapport.
+#
+# LIMITE ASSUMÉE — les éditions faites par un SOUS-AGENT : le payload PostToolUse n'expose aucun
+# `isSidechain` (contrairement au transcript que lit `rapport-cloture.sh`), donc elles entrent dans
+# la liste comme les autres. C'est le sens sûr de l'erreur : un fichier relu pour rien coûte une
+# review, un fichier oublié coûte un bug. Ne pas « corriger » ça en devinant à partir du chemin.
+#
+# Usage hors hook, pour l'agent :
+#   relire-en-attente.sh --liste <session_id>  -> un chemin par ligne, prêt pour le bloc RELIRE
+#   relire-en-attente.sh --vider <session_id>  -> à n'appeler QU'APRÈS avoir lancé les passes
+# Le session_id est TOUJOURS requis : plusieurs sessions travaillent en parallèle dans ce dépôt, et
+# le déduire des listes présentes revenait à effacer celle d'une autre session quand elle était la
+# seule à avoir édité du code (mesuré le 2026-08-12).
+import json
+import os
+import sys
+from importlib import util
+from importlib.machinery import SourceFileLoader
+
+RACINE = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+DOSSIER = os.path.join(RACINE, ".claude", "relire-en-attente")
+VOISIN = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rapport-cloture.sh")
+
+
+def _rapport_cloture():
+    """Le module voisin, chargé par chemin : son extension `.sh` interdit un import normal.
+
+    Son `main()` s'exécute à l'import. On lui donne un argv nu et un stdin vide : il n'y voit aucun
+    payload, sort en silence, et n'écrit RIEN sur notre stdout — que le harnais lit comme du JSON.
+    """
+    # Loader EXPLICITE : `.sh` n'est pas un suffixe de source reconnu, donc `spec_from_file_location`
+    # seul rend un spec sans loader, et l'import échoue sur un `NoneType` sans rapport avec la cause.
+    spec = util.spec_from_file_location(
+        "rapport_cloture", VOISIN, loader=SourceFileLoader("rapport_cloture", VOISIN)
+    )
+    module = util.module_from_spec(spec)
+    argv, stdin, dwb = sys.argv, sys.stdin, sys.dont_write_bytecode
+    # Pas de .pyc : il atterrirait dans `.claude/hooks/__pycache__` à chaque édition, et un cache
+    # d'un fichier qu'on relit à chaque appel n'a aucun intérêt ici.
+    sys.dont_write_bytecode = True
+    sys.argv = [VOISIN]
+    with open(os.devnull, encoding="utf-8") as vide:
+        sys.stdin = vide
+        try:
+            spec.loader.exec_module(module)
+        except SystemExit:
+            pass
+        finally:
+            sys.argv, sys.stdin, sys.dont_write_bytecode = argv, stdin, dwb
+    return module
+
+
+def est_du_code(chemin):
+    """Vrai si ce fichier engage une relecture, selon la SEULE liste du dépôt (CLAUDE.md)."""
+    cfg = _rapport_cloture().config()
+    return chemin.endswith(tuple(cfg["code_suffixes"])) or os.path.basename(chemin) in cfg[
+        "code_basenames"
+    ]
+
+
+def dans_le_depot(chemin):
+    """Vrai si le fichier appartient au dépôt — worktrees inclus, ils vivent sous `.claude/`.
+
+    Un script jetable écrit dans le scratchpad est du `.py`, mais le relire n'a aucun sens : il ne
+    sera pas livré. Constaté le 2026-08-12 : trois `migrate_*.py` du scratchpad figuraient dans une
+    liste de production et seraient partis en review.
+    """
+    return os.path.abspath(chemin).startswith(RACINE + os.sep)
+
+
+def chemin_note(chemin):
+    """Chemin tel qu'il figurera au bloc RELIRE : TOUJOURS absolu.
+
+    Un chemin relatif s'interprète depuis le cwd de la review, qui n'est pas forcément le dépôt où
+    l'édition a eu lieu : en session worktree, `CLAUDE.md` relatif désigne la copie du worktree, pas
+    celle du dépôt principal qu'on vient de modifier — c'est le défaut mesuré le 2026-08-08, avec un
+    verdict entier rendu sur le mauvais code. L'absolu est le seul forme juste dans les deux dépôts,
+    et `rapport-cloture.sh` l'exige déjà dès qu'un worktree est en jeu.
+    """
+    return os.path.abspath(chemin)
+
+
+def fichier_de_session(session_id):
+    return os.path.join(DOSSIER, f"{session_id}.txt")
+
+
+def fichier_relu(session_id):
+    """Instantané de ce que le dernier `--liste` a rendu : ce que `--vider` a le droit d'effacer."""
+    return os.path.join(DOSSIER, f"{session_id}.relu")
+
+
+def lire(fichier):
+    """Lignes du fichier, dédoublonnées à la LECTURE, dans l'ordre d'arrivée.
+
+    Dédoublonner seulement à l'écriture ne suffit pas : deux éditions du même fichier dans un même
+    message passent par deux processus concurrents, qui lisent tous deux une liste sans l'entrée.
+    """
+    try:
+        with open(fichier, encoding="utf-8") as fh:
+            return list(dict.fromkeys(ln.strip() for ln in fh if ln.strip()))
+    except FileNotFoundError:
+        return []
+
+
+def ecrire(fichier, chemins):
+    os.makedirs(DOSSIER, exist_ok=True)
+    with open(fichier, "w", encoding="utf-8") as fh:
+        fh.writelines(c + "\n" for c in chemins)
+
+
+def ajouter(session_id, chemin):
+    """Ajoute le chemin s'il manque. L'ordre d'édition est conservé : il aide à relire le sujet."""
+    en_attente = lire(fichier_de_session(session_id))
+    if chemin in en_attente:
+        return
+    os.makedirs(DOSSIER, exist_ok=True)
+    with open(fichier_de_session(session_id), "a", encoding="utf-8") as fh:
+        fh.write(chemin + "\n")
+
+
+def emit(context):
+    print(
+        json.dumps(
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "PostToolUse",
+                    "additionalContext": context,
+                }
+            },
+            ensure_ascii=False,
+        )
+    )
+
+
+def session_valide(session_id):
+    """Le session_id sert de nom de fichier : il ne doit pas pouvoir désigner autre chose.
+
+    Aucune déduction de l'id à partir des listes présentes : « s'il n'y en a qu'une, c'est la
+    mienne » est faux dès qu'une session parallèle est la seule à avoir édité du code — mesuré, elle
+    se faisait relire puis EFFACER sa liste par une session qui n'avait rien touché.
+    """
+    if not session_id or os.sep in session_id or session_id in (".", ".."):
+        raise ValueError(
+            f"session_id invalide : {session_id!r}. Attendu l'UUID seul (le dernier composant du "
+            "chemin de ton dossier scratchpad), pas un chemin"
+        )
+    return session_id
+
+
+def commande_liste(session_id):
+    """Rend la liste et retient ce qui a été rendu : `--vider` n'effacera QUE ça.
+
+    Sans cet instantané, `--vider` emporterait les fichiers édités ENTRE les deux appels — soit les
+    corrections appliquées par la review elle-même, qui n'auraient donc jamais été relues.
+    """
+    en_attente = lire(fichier_de_session(session_id))
+    if not en_attente:
+        raise ValueError(
+            f"aucune liste pour la session {session_id} : id faux, ou liste déjà vidée. "
+            f"Listes présentes : {sorted(os.listdir(DOSSIER)) if os.path.isdir(DOSSIER) else []}"
+        )
+    ecrire(fichier_relu(session_id), en_attente)
+    print("\n".join(en_attente))
+
+
+def commande_vider(session_id):
+    """Retire les entrées effectivement relues, garde celles arrivées depuis le `--liste`."""
+    relus = lire(fichier_relu(session_id))
+    if not relus:
+        raise ValueError(
+            f"rien de relu à effacer pour la session {session_id} : `--vider` s'appelle APRÈS un "
+            "`--liste` et les passes de relecture"
+        )
+    reste = [c for c in lire(fichier_de_session(session_id)) if c not in relus]
+    if reste:
+        ecrire(fichier_de_session(session_id), reste)
+    elif os.path.exists(fichier_de_session(session_id)):
+        os.remove(fichier_de_session(session_id))
+    os.remove(fichier_relu(session_id))
+    if reste:
+        print("\n".join(reste))
+
+
+def main():
+    argument = sys.argv[1:2]
+    if argument:
+        # TOUT argument engage la ligne de commande, pas seulement ceux qui commencent par `-` :
+        # `relire-en-attente.sh <uuid>`, flag oublié, tombait dans le chemin PostToolUse et sortait
+        # 0 avec stdout vide — soit « rien à relire » alors que la liste était pleine.
+        commandes = {"--liste": commande_liste, "--vider": commande_vider}
+        if argument[0] not in commandes:
+            sys.exit(f"{argument[0]} : flag inconnu, attendu --liste ou --vider <session_id>")
+        try:
+            commandes[argument[0]](session_valide(sys.argv[2] if sys.argv[2:3] else ""))
+        except (OSError, ValueError) as err:
+            sys.exit(str(err))
+        sys.exit(0)
+
+    try:
+        payload = json.load(sys.stdin)
+    except ValueError:
+        sys.exit(0)
+
+    # `NotebookEdit` nomme son argument `notebook_path` : ne lire que `file_path` laissait une
+    # édition de notebook hors de la liste, donc hors relecture.
+    entree = payload.get("tool_input") or {}
+    chemin = entree.get("file_path") or entree.get("notebook_path") or ""
+    if not chemin:
+        sys.exit(0)
+
+    session_id = payload.get("session_id")
+    if not session_id:
+        # Se taire ici perdrait la liste sans que rien ne le signale, et l'agent croirait la
+        # relecture à jour. On le DIT plutôt que d'écrire dans un fichier fourre-tout (T1).
+        emit(
+            "La liste des fichiers à relire ne peut pas être tenue : le payload du hook "
+            "`relire-en-attente.sh` ne porte pas de `session_id`. Signale-le, et tiens la liste "
+            "à la main pour ce sujet."
+        )
+        sys.exit(0)
+
+    try:
+        if dans_le_depot(chemin) and est_du_code(chemin):
+            ajouter(session_id, chemin_note(chemin))
+    except (OSError, ValueError, AttributeError) as err:
+        emit(
+            f"La liste des fichiers à relire n'a pas pu être mise à jour ({err}). Tant que ce "
+            "n'est pas réparé, le bloc RELIRE doit être écrit à la main."
+        )
+    sys.exit(0)
+
+
+main()

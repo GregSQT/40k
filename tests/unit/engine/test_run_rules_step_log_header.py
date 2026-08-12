@@ -15,7 +15,7 @@ import config_loader as config_loader_module
 from engine.w40k_core import W40KEngine
 from shared.data_validation import ConfigurationError
 
-from _config_helpers import build_game_rules, build_move_rules
+from tests.unit.engine._config_helpers import build_game_rules, build_move_rules
 
 
 class _FakeEngine:

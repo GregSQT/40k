@@ -44,7 +44,7 @@ from engine.phase_handlers.shared_utils import (
 )
 from engine.w40k_core import W40KEngine
 
-from _config_helpers import (
+from tests.unit.engine._config_helpers import (
     NEUTRAL_TEST_ARMY_FACTION,
     NEUTRAL_TEST_FACTION,
     build_engine_config,

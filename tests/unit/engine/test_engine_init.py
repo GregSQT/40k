@@ -24,7 +24,7 @@ from engine.observation_builder import ObservationBuilder
 from engine.w40k_core import W40KEngine
 from shared.data_validation import ConfigurationError
 
-from _config_helpers import build_engine_config, build_game_rules
+from tests.unit.engine._config_helpers import build_engine_config, build_game_rules
 
 
 # ─────────────────────────────────────────────────────────────────────────────

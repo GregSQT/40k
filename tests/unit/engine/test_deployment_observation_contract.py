@@ -39,7 +39,7 @@ from typing import Any, Dict
 import numpy as np
 import pytest
 
-from _config_helpers import both_terrains, assert_deployment_phase, pin_active_deployment
+from tests.unit.engine._config_helpers import both_terrains, assert_deployment_phase, pin_active_deployment
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SCENARIO = (

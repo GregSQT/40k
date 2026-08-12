@@ -67,6 +67,32 @@ def test_mort_non_vue_est_comptee_puis_corrigee() -> None:
     assert "101" in st.dead_units_current_episode
 
 
+def test_fantome_enregistre_unit_deaths_quand_phase_connue() -> None:
+    """La mort fantôme doit figurer dans unit_deaths pour que les vérifications de timing tiennent.
+
+    Sans cette entrée, les handlers (charge, shoot, fight) qui itèrent unit_deaths ne voient pas
+    l'unité comme morte : un tir sur une cible tuée par Hazardous dans la même phase passe vert à
+    tort. On vérifie les deux cas : phase connue → entrée ajoutée ; phase inconnue → rien.
+    """
+    st = _state()
+    st.episode_turn = 2
+    st.last_phase = "SHOOT"
+    st.line_number = 150
+    _apply_state_snapshot(st, _config(), "1[1#0@(5,48,z0):2 1#1@(7,47,z0):1]")
+
+    assert len(st.unit_deaths) == 1
+    assert st.unit_deaths[0] == (2, "SHOOT", "101", 150)
+
+
+def test_fantome_nentree_pas_unit_deaths_sans_phase() -> None:
+    """Sans phase de jeu active, ghost detection ne produit pas d'entrée inventée."""
+    st = _state()
+    # last_phase reste None (défaut)
+    _apply_state_snapshot(st, _config(), "1[1#0@(5,48,z0):2 1#1@(7,47,z0):1]")
+
+    assert st.unit_deaths == []
+
+
 def test_deplacement_non_journalise_est_compte_puis_corrige() -> None:
     """C'est ainsi que le pile-in muet se manifestait : la figurine n'est pas là où on la croit."""
     st = _state()
@@ -87,22 +113,25 @@ def test_unite_tuee_a_tort_est_comptee_puis_ressuscitee() -> None:
     assert "101" not in st.dead_units_current_episode
 
 
-def test_unite_jamais_deployee_nest_pas_un_fantome() -> None:
-    """Une escouade en réserves (20.01) n'a pas d'entrée côté moteur : l'absence est normale.
+@pytest.mark.parametrize("positions,label", [
+    (None, "jamais déployée — aucun [MODELS:] reçu, positions_by_model vide"),
+    ({"7#0": (-1, -1), "7#1": (-1, -1)}, "sentinelle hors table (20.01) — entrée présente mais hors battlefield"),
+])
+def test_unite_hors_table_nest_pas_un_fantome(positions, label) -> None:
+    """Une unité hors table n'est pas un fantôme, quelle que soit la raison de son absence.
 
-    La compter ferait sonner 2.8 sur toute partie à réserves — un compteur qui crie sans raison
-    finit ignoré, et c'est la panne dont il est censé protéger.
+    Deux cas légitimes : (1) aucun [MODELS:] reçu → positions_by_model vaut None ;
+    (2) toutes les positions portent la sentinelle (-1,-1) → entrée présente mais hors battlefield.
+    Dans les deux cas le compteur ne doit pas sonner et l'unité doit rester vivante.
     """
     st = _state()
     st.unit_hp["7"] = 2               # déclarée à l'entête, jamais posée
     st.unit_models_alive["7"] = 3
-    # Sentinelle hors table (20.01) : c'est ainsi que l'entête déclare une escouade en réserves.
-    st.positions_by_model["7"] = {"7#0": (-1, -1), "7#1": (-1, -1)}
+    if positions is not None:
+        st.positions_by_model["7"] = positions
     _apply_state_snapshot(st, _config(), "1[1#0@(5,48,z0):2 1#1@(7,47,z0):1] 101[101#5@(4,49,z0):2]")
 
     assert st.stats["state_resync"]["dead_missed"] == 0
-    # Et surtout : elle reste VIVANTE. La tuer ici la ferait « ressusciter » à son ingress move,
-    # et tous les contrôles la concernant seraient faussés entre les deux.
     assert st.unit_hp["7"] == 2
     assert "7" not in st.dead_units_current_episode
 

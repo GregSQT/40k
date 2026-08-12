@@ -15,7 +15,7 @@ import pytest
 from engine.w40k_core import W40KEngine
 from engine.phase_handlers.shared_utils import build_units_cache, build_enemy_adjacent_hexes
 
-from _config_helpers import NEUTRAL_TEST_ARMY_FACTION, NEUTRAL_TEST_FACTION, build_game_rules
+from tests.unit.engine._config_helpers import NEUTRAL_TEST_ARMY_FACTION, NEUTRAL_TEST_FACTION, build_game_rules
 from tests._state_invariants import turn_state_invariants, unit_invariants
 
 

@@ -27,7 +27,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from _config_helpers import (
+from tests.unit.engine._config_helpers import (
     assert_deployment_phase,
     bank_training_scenarios,
     pin_active_deployment,

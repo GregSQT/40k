@@ -109,7 +109,7 @@ def _engine_x5_with_phase_metric(metric: Any):
     from unittest.mock import patch
 
     from engine.w40k_core import W40KEngine, load_weapon_damage_table  # noqa: F401
-    from test_squad_obs_model_engagement import _config
+    from tests.unit.engine.test_squad_obs_model_engagement import _config
 
     cfg = _config([(30, 60)], [(60, 60)], base_size=6)
     cfg["board"]["default"]["inches_to_subhex"] = 5
