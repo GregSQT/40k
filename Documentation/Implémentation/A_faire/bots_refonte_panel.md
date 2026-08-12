@@ -568,3 +568,74 @@ C'est correct ICI, et c'est l'inverse de ce qu'exigeait le holdout supprimé : o
 tenait la zone au début de la phase, pas recalculer par candidate — la cible d'un déplacement ne
 doit pas changer en cours de route. Son absence (dict créé paresseusement) vaut « personne ne tient
 rien », l'état réel en début de partie et non un repli.
+
+### 12.4 `w_contest` seul était inerte — la vraie cause était l'empilement
+
+La pondération par le contrôleur (§12.3) a été mesurée : **aucun effet**. Combined 0,869 → 0,872
+sur le même modèle, tous les bots dans ±2 points pour une marge de ±6 à 7. Un zéro franc.
+
+L'arithmétique l'explique : une escouade posée sur sa zone a une distance nulle **et** touche le
+`hold_bonus`. Pour `racer` rester vaut +3,9 ; partir vers une zone adverse à 12 hexes avec 8 de
+rabais vaut −5,2. Le rabais n'agit donc que sur les escouades **pas encore garées**, c'est-à-dire
+avant le tour 2.
+
+**Le vrai gaspillage est l'empilement, et il se mesure.** Dépouillement de 600 parties :
+
+| tour | escouades bot dans une zone | zones couvertes | **escouades par zone** |
+|---|---|---|---|
+| 2 | 4,22 | 1,49 | **2,85** |
+| 3 | 5,03 | 1,67 | **3,01** |
+| 5 | 5,00 | 1,92 | **2,61** |
+
+L'agent étale ses cinq escouades sur 2,90 zones (~1,7 par zone). Les bots les tassent à trois par
+zone. Les deux autres hypothèses sont écartées par la même lecture : **vitesse** non (92 % de
+l'armée est dans une zone dès le tour 3), **OC** non (le bot contrôle 1,66 des 1,92 zones où il est
+présent — il ne perd pas les décomptes, il est absent).
+
+Et c'est pourquoi `w_contest` ne pouvait rien donner : quand cinq escouades calculent la même
+réponse chacune dans son coin, rendre une zone plus attirante **déplace le tas**, il ne le disperse
+pas.
+
+### 12.5 La pénalité d'encombrement — le seul changement qui ait déplacé les chiffres
+
+Sixième poids, `w_crowd`. Une zone déjà servie par les alliés coûte plus cher à l'escouade
+suivante. C'est le dual du `hold_bonus`.
+
+**Terme de score, pas ordre d'en haut.** Une affectation d'armée avait été envisagée puis écartée :
+elle aurait imposé une zone à `alpha` (qui va au contact) et à `decapitation` (qui poursuit une
+escouade), donc détruit ce qui les distingue, et exigé une table d'affectation avec sa péremption.
+Ici chaque style garde ses poids et voit simplement qu'une zone est servie.
+
+**La pénalité porte sur le SURPLUS d'OC**, `max(0, mon_OC − son_OC)` par zone, hors l'escouade qui
+décide. Une zone disputée n'est donc pas pénalisée — les renforts y vont — et une zone gagnée large
+repousse la suivante. En OC et non en nombre d'escouades : deux Gretchin et un Carnifex ne pèsent
+pas pareil, et le contrôle se tranche à la somme des OC.
+
+**Aucune mémoire de tour n'est nécessaire** : les escouades s'activent l'une après l'autre et
+l'état est à jour entre deux activations, donc la présence physique porte déjà les déplacements
+qui viennent d'être joués.
+
+Mesure, même modèle `robust_0.8721`, `x1_panel`, 100 ép./bot :
+
+| | avant | après |
+|---|---|---|
+| escouades par zone (T5) | 2,61 | **1,28** |
+| zones couvertes (T5) | 1,92 | **2,47** |
+| zones contrôlées (T5) | 1,61 | **1,90** |
+| VP bot | 27,8 | **31,0** |
+| écart de VP | 16,4 | **10,0** |
+| pire bot (`racer`) | 0,78 | **0,62** |
+| **combined** | **0,873** | **0,788** |
+
+Par bot : `racer` −0,16, `endgame` −0,15, `scorer` −0,12, `attrition` −0,11, `decapitation` +0,03,
+`alpha` 0,00. Les deux derniers sont dans le bruit à n=100 (±8 à 9 points) ; les quatre premiers
+non.
+
+⚠️ **Poids POSÉS par doctrine, non réglés.**
+
+⚠️ Le run a duré 1730 s contre 863 s. Ce **n'est pas** le coût du calcul : mesuré à **0,02 ms par
+décision, 3 ms par épisode**, soit 0,2 % de l'écart. Les bots font simplement plus de chemin et
+plus de contact — il reste 4,76 escouades vivantes au tour 5 contre 5,27 avant.
+
+⚠️ **Le mur du tour 2 tient toujours** : 1,61 zone couverte au tour 2 (contre 1,49). Tout le gain
+arrive aux tours 3 à 5. Le prochain levier, s'il en faut un, est le déploiement.

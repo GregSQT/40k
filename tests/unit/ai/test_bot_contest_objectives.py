@@ -116,13 +116,13 @@ def test_the_weight_travels_with_the_others_so_a_mode_swap_carries_it() -> None:
     for key in ("racer", "endgame", "endgame_push", "attrition", "attrition_withdraw",
                 "alpha", "decapitation", "scorer"):
         poids = doc.load_doctrine_weights(key)
-        assert len(poids) == 5, f"{key} ne rend pas les CINQ poids : {poids}"
+        assert len(poids) == 6, f"{key} ne rend pas les SIX poids : {poids}"
         assert all(isinstance(p, float) for p in poids)
 
 
 def test_endgame_carries_a_stronger_pull_once_it_pushes() -> None:
     """Le mode `_push` d'`endgame` doit contester davantage — sinon le mode ne sert à rien."""
-    _o, _e, _f, _r, attente = doc.load_doctrine_weights("endgame")
-    _o, _e, _f, _r, poussee = doc.load_doctrine_weights("endgame_push")
+    *_, attente, _crowd = doc.load_doctrine_weights("endgame")
+    *_, poussee, _crowd_push = doc.load_doctrine_weights("endgame_push")
 
     assert poussee > attente
