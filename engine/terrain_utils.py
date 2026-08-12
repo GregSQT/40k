@@ -89,7 +89,7 @@ class _FloorIndex:
 
     __slots__ = (
         "levels", "hexes_by_level", "height_by_cell", "_low_clearance",
-        "_raw_floors_by_level", "_polys_by_level",
+        "_low_clearance_by_height", "_raw_floors_by_level", "_polys_by_level",
     )
 
 
@@ -107,6 +107,11 @@ class _FloorIndex:
         # (height_inches du plancher) -> hexes, pour `low_clearance_ground_hexes` qui compare un
         # seuil variable (la taille du modèle) à une donnée fixe.
         self._low_clearance: List[Tuple[float, Set[Tuple[int, int]]]] = []
+        # Union mémoïsée PAR HAUTEUR DEMANDÉE. Depuis que la hauteur est par-figurine, une même
+        # phase interroge l'index une fois par figurine : sans ce mémo, chaque appel refait l'union
+        # des planchers trop bas. Le nombre de hauteurs distinctes d'une bataille est minuscule
+        # (une ou deux par escouade), et l'index est déjà indexé par identité de `terrain_areas`.
+        self._low_clearance_by_height: Dict[float, Set[Tuple[int, int]]] = {}
         for area in terrain_areas:
             for floor in area.get("floors", []):  # get allowed (aire sans étage = sol seul)
                 level = int(require_key(floor, "level"))
@@ -150,10 +155,14 @@ class _FloorIndex:
         return cached
 
     def low_clearance(self, model_height: float) -> Set[Tuple[int, int]]:
+        cached = self._low_clearance_by_height.get(float(model_height))
+        if cached is not None:
+            return cached
         blocked: Set[Tuple[int, int]] = set()
         for height, cells in self._low_clearance:
             if height < model_height:
                 blocked |= cells
+        self._low_clearance_by_height[float(model_height)] = blocked
         return blocked
 
 
@@ -294,7 +303,11 @@ def low_clearance_ground_hexes(
     ``model_height`` : un modèle plus haut que la clairance ne peut ni traverser ni s'arrêter sous cet
     étage (même unité pouce que ``height_inches``, pas de scaling). Tangence (égalité) autorisée.
     Retourne un set vide si aucun étage n'est trop bas. À unir aux murs pour le pathfinding AU SOL
-    uniquement (la surface de l'étage, elle, reste praticable)."""
+    uniquement (la surface de l'étage, elle, reste praticable).
+
+    ⚠️ Le set rendu est MÉMOÏSÉ par hauteur (les appels sont désormais par figurine) : les appelants
+    le lisent, ils ne le mutent jamais. Une mutation en place corromprait la clairance de toutes les
+    figurines de cette taille pour le reste de la bataille."""
     return _floor_index(terrain_areas).low_clearance(float(model_height))
 
 

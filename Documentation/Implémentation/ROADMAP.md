@@ -564,17 +564,45 @@ Prêts à démarrer sans décision produit :
   qui ne les lit jamais (0 divergence de verdict sur 13 distances, empreinte 19 contre 43 hexes).
   Le reste est ouvert ci-dessous.
   → [`Implémenté/empreinte_par_figurine_fight_2026-08-12.md`](Implémenté/empreinte_par_figurine_fight_2026-08-12.md)
-- **L'engagement d'une figurine se mesure à SON socle** (ouvert le 2026-08-12, sorti de la
-  `/code-review` du chantier ci-dessus). `kept_engagements`, `unit_engaged`, `engaged` et le voile
-  vert du pile-in / de la consolidation mesurent un personnage attaché au socle du BLOC : l'entrée
-  synthétique d'engagement est copiée de la ligne `units_cache` d'escouade, et l'empreinte
-  par-figurine qu'on lui passe est ignorée. Confirmé par mesure, pas par lecture.
-  Forme visée : `shared_utils._synth_model_entry`, déjà documentée comme la source unique de
-  l'engagement par-figurine et déjà importée par `fight_handlers`, où elle ne sert qu'à UN site.
-  **11 sites** de `fight_handlers` à router, **2** au niveau unité à examiner
-  (`_fight_synth_cache_entry_at_footprint`), et le jumeau probable dans `charge_handlers`.
-  ⚠️ Touche la sémantique de l'engagement (12.03 / 12.08), pas une géométrie de pool : plus
-  risqué que le chantier d'empreinte, et il déplacera lui aussi l'espace de décision.
+- ✅ **L'engagement d'une figurine se mesure à SON socle** — ouvert et **LIVRÉ le 2026-08-12**,
+  sorti de la `/code-review` du chantier ci-dessus. `kept_engagements`, `unit_engaged`, `engaged`
+  et le voile vert mesuraient un personnage attaché au socle du BLOC : l'entrée synthétique
+  d'engagement était copiée de la ligne `units_cache` d'escouade, et les deux chemins de mesure sur
+  trois (euclidien, 3D) relisent la base SUR l'entrée. **13 sites** basculés sur
+  `shared_utils._synth_model_entry` (11 dans `fight_handlers`, 2 dans `charge_handlers` — ses six
+  autres servent le pool d'ANCRES et restent inchangés) ; les **3 sites de niveau unité** passent à
+  `_fight_synth_cache_entries_at_footprint`, qui rend **une entrée par socle distinct** (une
+  escouade homogène en rend une seule, coût inchangé). Un **14ᵉ site** trouvé par le grep jumeau
+  (la classification du champ de charge bâtit son entrée à la main, hors du constructeur commun)
+  y ajoutait un effet de second ordre : l'empreinte de figurine posée sur une entrée d'escouade
+  faisait passer le candidat pour multi-figurine, donc basculer sur la branche empreinte dilatée —
+  **10 cellules sur 263 classées « engagé » à tort**. `MODEL_HEIGHT` devient par-figurine (y
+  compris les trois lectures de la LoS 3D du tir, via la source unique `_model_height_of`) :
+  03.04 est 2" horizontal ET 5" vertical, et corriger le socle en laissant la hauteur au bloc
+  n'aurait rendu la règle juste qu'à moitié.
+  Mesuré : **67 figurines sur 684** au gabarit divergent, **21 530 cases sur 575 515 (3,7 %)**
+  changent de VERDICT d'engagement — deux ordres de grandeur au-dessus des 3 cases sur 330 du
+  chantier d'empreinte. Effet de la hauteur seule : **0** (aucune datasheet du dépôt n'en porte une
+  différente de son escouade — le câblage prévient, il ne corrige rien aujourd'hui).
+  Livré dans la foulée (arbitrage tranché) : `pile_in_move_destinations_12_03` (pool AUTO/gym,
+  bloc atomique) vérifiait « chaque engagement de départ conservé » au niveau UNITÉ là où 12.03
+  l'écrit par figurine — le flux PvP, lui, l'appliquait déjà correctement. Les deux flux lisent
+  désormais la même règle ; le pool du pile-in de l'IA s'en trouve RESTREINT.
+  ⚠️ Effet sur les modèles entraînés non mesuré ; c'est le plus déplaçant des quatre chantiers de
+  géométrie des 2026-08-11/12.
+  → [`Implémenté/engagement_par_figurine_socle_2026-08-12.md`](Implémenté/engagement_par_figurine_socle_2026-08-12.md)
+- ✅ **La clairance sous les étages se mesure à la hauteur de LA FIGURINE** — ouvert et **LIVRÉ le
+  2026-08-12**, sorti de l'arbitrage du chantier ci-dessus. Les **11 appels** de
+  `low_clearance_ground_hexes` (move, charge ×4, fight ×3, déploiement ×3) passaient la hauteur de
+  l'ESCOUADE à des pools qui raisonnent par figurine pour tout le reste ; deux sites de déploiement
+  y prenaient aussi le rayon du socle sur l'escouade. `FloorIndex.low_clearance` mémoïse désormais
+  par hauteur, sinon un appel par figurine referait l'union des planchers à chaque figurine.
+  **Effet aujourd'hui : 0** — aucune des 684 figurines du dépôt ne porte une hauteur différente de
+  son escouade. Le chantier ferme la moitié verticale d'une règle dont la moitié horizontale venait
+  d'être corrigée, au moment où la donnée par-figurine vient d'exister ; le verrou FABRIQUE donc le
+  cas (et à x10 : à x1 la clairance n'est jamais consultée, la première version du test était verte
+  sans exécuter la ligne corrigée).
+  → [`Implémenté/clairance_par_figurine_2026-08-12.md`](Implémenté/clairance_par_figurine_2026-08-12.md)
 - **Réécrire la note `bot_eval_freq_normal` de `x1_long` avec le coût MESURÉ** (~10 min, décidé
   le 2026-08-11). Cette note fonde le réglage sur « 13 min l'unité », chiffre hérité du commit
   `42326ed0` et jamais re-mesuré ; l'évaluation finale du run du 2026-08-11 donne plutôt

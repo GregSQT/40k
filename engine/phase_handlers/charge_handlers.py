@@ -47,6 +47,7 @@ from .shared_utils import (
     is_placement_valid_with_clearance, candidate_overlaps_any_unit, wall_blocked_anchors,
     socle_orientation,
     _synth_model_entry,
+    _model_height_of,
     enemy_entries_on_battlefield, entries_on_battlefield, entry_footprint, entry_is_on_battlefield,
     roll_charge_distance, unit_can_reroll_charge, charge_target_within_max_distance,
     MovePlan, parse_model_plan, parse_model_plan_as_map, SQUAD_RIGID_MOVE_DESTINATION_LEVEL,
@@ -1873,13 +1874,21 @@ def _compute_plan_context(
     # ennemis seulement. Les coéquipières (posées ou à l'origine) ne bloquent que la position FINALE
     # (``cand_fp & blocked_static`` posées + check ``others`` origines dans ``_qualifying``).
     path_blocked = set(wall_hexes) | ground_enemy_blocked
-    # Clairance verticale (§13.06 maison) : hexes de sol infranchissables par ce modèle (trop haut pour
-    # passer sous un étage bas) → obstacle AU SOL uniquement. Miroir du move. Le vol (reach appelé avec
-    # ``set()``) n'est pas concerné.
+    # Clairance verticale (§13.06 maison) : hexes de sol infranchissables par une figurine trop haute
+    # pour passer sous un étage bas → obstacle AU SOL uniquement. Miroir du move. Le vol (reach
+    # appelé avec ``set()``) n'est pas concerné.
+    #
+    # PAR FIGURINE, pas au socle de l'escouade : c'est la figurine qui passe. `path_blocked` porte
+    # donc la part COMMUNE (murs + ennemis au sol) et chaque atteignabilité y ajoute la clairance de
+    # sa figurine. `low_clearance_ground_hexes` mémoïse par hauteur — une escouade homogène ne paie
+    # qu'une union.
     from engine.terrain_utils import low_clearance_ground_hexes
-    path_blocked |= low_clearance_ground_hexes(
-        game_state.get("terrain_areas", []), float(require_key(unit, "MODEL_HEIGHT"))
-    )
+
+    def _path_blocked_for(model_entry: Dict[str, Any]) -> Set[Tuple[int, int]]:
+        return path_blocked | low_clearance_ground_hexes(
+            game_state.get("terrain_areas", []),  # get allowed (board sans terrain)
+            _model_height_of(model_entry, unit),
+        )
     # Take to the skies (21.03) : vol actif → la reachability BFS et le champ de distance ignorent
     # tout (traversée libre) ; le placement final (``cand_fp & blocked_static``, collision ``others``)
     # reste interdit d'overlap.
@@ -2017,18 +2026,18 @@ def _compute_plan_context(
                 # facturée sur le jet. Mêmes obstacles sol que ``_euclidean_reach`` (path_blocked).
                 _gd = _charge_model_multilevel_reachable_cells(
                     game_state, unit, unit_id, sib, (sc, sr), int(budget), {0},
-                    path_blocked, _terrain_areas_ctx, start_level=_start_eff,
+                    _path_blocked_for(sib), _terrain_areas_ctx, start_level=_start_eff,
                 ).get(0, {})  # get allowed (niveau inatteignable = aucune case)
                 reach_by_model[m] = list(_gd.keys())
                 dist_by_model[m] = dict(_gd)
                 dist_by_model[m][(sc, sr)] = 0
             elif _cm_use_eucl:
                 reach_by_model[m], dist_by_model[m] = _euclidean_reach(
-                    m, sib, sc, sr, set() if fly_active else path_blocked
+                    m, sib, sc, sr, set() if fly_active else _path_blocked_for(sib)
                 )
             else:
                 reach_by_model[m], dist_by_model[m] = _bfs_reach(
-                    sc, sr, set() if fly_active else path_blocked
+                    sc, sr, set() if fly_active else _path_blocked_for(sib)
                 )
             if _perf and _tb is not None:
                 _acc_bfs += time.perf_counter() - _tb
@@ -2057,16 +2066,22 @@ def _compute_plan_context(
     #    escouade homogène, 2 avec un personnage attaché). dist_tgt/dist_ntgt sont indépendants de la
     #    base (calculés 1×) ; seul le footprint candidat dépend de la base. Le filtre « plus proche que
     #    le départ » (per-modèle) est appliqué dans _qualifying ; ici on élague au cap global de la base.
-    def _base_key(model_entry: Dict[str, Any]) -> Tuple[Any, Any, int]:
+    #    La HAUTEUR fait partie de la clé au même titre que le socle : la classification passe par
+    #    une figurine représentative dont l'engagement est mesuré en 3D (§03.04, borne haute =
+    #    `MODEL_HEIGHT`). Depuis que la hauteur est par-figurine (`build_models_cache`), deux
+    #    figurines de même socle peuvent porter deux intervalles verticaux — les grouper ferait
+    #    classer les hexes de l'une à la hauteur de l'autre.
+    def _base_key(model_entry: Dict[str, Any]) -> Tuple[Any, Any, int, Any]:
         bs = model_entry["BASE_SIZE"]
         return (
             model_entry["BASE_SHAPE"],
             tuple(bs) if isinstance(bs, (list, tuple)) else bs,
             int(model_entry.get("orientation", 0)),  # get allowed
+            model_entry.get("MODEL_HEIGHT"),  # get allowed (états 2D sans couche verticale)
         )
 
-    base_of_model: Dict[str, Tuple[Any, Any, int]] = {}
-    reach_by_base: Dict[Tuple[Any, Any, int], Tuple[Dict[str, Any], Set[Tuple[int, int]], int]] = {}
+    base_of_model: Dict[str, Tuple[Any, Any, int, Any]] = {}
+    reach_by_base: Dict[Tuple[Any, Any, int, Any], Tuple[Dict[str, Any], Set[Tuple[int, int]], int]] = {}
     for m in reach_by_model:
         m_model = models_cache.get(str(m))
         if m_model is None:
@@ -2081,7 +2096,7 @@ def _compute_plan_context(
             cells.update(reach_by_model[m])
             reach_by_base[bk] = (rep, cells, max(cap, m_cap))
 
-    region_by_base: Dict[Tuple[Any, Any, int], Dict[Tuple[int, int], Dict[str, Any]]] = {}
+    region_by_base: Dict[Tuple[Any, Any, int, Any], Dict[Tuple[int, int], Dict[str, Any]]] = {}
     _tr = time.perf_counter() if _perf else None
     # Gate vertical de charge (getter pur) — hissé hors des blocs conditionnels : utilisé aussi bien
     # dans la classification (``if can_classify``) que dans la branche étages (``view_level>=1``).
@@ -2095,9 +2110,13 @@ def _compute_plan_context(
         obstacle_socles = _charge_obstacle_socles(game_state, unit_id, level=0)
         placed_sibling_socles = placed_sibling_socles_by_level.get(0, [])  # get allowed (niveau sans sœur posée = vide)
         _walls = set(wall_hexes)
-        synth_base = dict(require_key(units_cache, str(require_key(unit, "id"))))
-        synth_base.pop("occupied_hexes_by_model", None)
-        synth_shape = synth_base["BASE_SHAPE"]
+        # `synth_base`, `synth_shape`, `_cand_mh` et les deux listes de portée verticale sont
+        # (ré)établis PAR GROUPE DE SOCLE dans la boucle de classification ci-dessous : ils y
+        # décrivent la figurine REPRÉSENTATIVE du groupe. Bâtis une fois sur la ligne d'escouade,
+        # ils faisaient classer les cellules d'un personnage attaché — dont l'empreinte, elle,
+        # vient bien de `rep_model` — avec le socle et la hauteur de la troupe.
+        synth_base: Dict[str, Any] = {}
+        synth_shape: Any = None
 
         # PERF : le test d'engagement précis (``unit_entries_within_engagement_zone``) coûte un
         # ``min_distance_between_sets`` en O(empreinte × empreinte) par cellule (poste dominant ~92 %).
@@ -2147,12 +2166,8 @@ def _compute_plan_context(
         ntgt_multi = [_entry_is_multi_figure(ne) for ne in nontarget_entries]
         ntgt_masks = [_enemy_masks(fp) for fp in nontarget_fps]
 
-        # Engagement 3D (§03.04) — la branche empreinte court-circuite la primitive : le gate vertical
-        # est précalculé PAR-ENNEMI (candidat chargeur au sol en 3a → cand_floor=0), cf.
-        # entry_vertically_reachable. La branche euclidienne, elle, passe par la primitive 3D.
-        _cand_mh = float(require_key(synth_base, "MODEL_HEIGHT"))
-        tgt_vreach = [entry_vertically_reachable(0.0, _cand_mh, te, _vz) for te in target_entries]
-        ntgt_vreach = [entry_vertically_reachable(0.0, _cand_mh, ne, _vz) for ne in nontarget_entries]
+        tgt_vreach: List[bool] = []
+        ntgt_vreach: List[bool] = []
 
         def _eng(enemy_entry, e_shape, e_multi, mask, radius, cand_fp, cand_is_multi, vert_reachable):
             # Chemin euclidien (rond simple ↔ rond simple) : on conserve la fonction partagée (précis, 3D).
@@ -2169,6 +2184,26 @@ def _compute_plan_context(
             return vert_reachable and bool(cand_fp & mask)
 
         for bk, (rep_model, cells, cap_base) in reach_by_base.items():
+            # Géométrie de la figurine REPRÉSENTATIVE du groupe (même convention que
+            # `_synth_model_entry`, dont c'est la raison d'être) : le socle et la hauteur suivent la
+            # figurine, comme le fait déjà `cand_socle` juste en dessous. L'entrée est recopiée ici
+            # et mutée par cellule — la boucle est le poste dominant (~92 %) et une entrée neuve par
+            # cellule y annulerait le gain du chemin masque.
+            synth_base = dict(require_key(units_cache, str(require_key(unit, "id"))))
+            synth_base.pop("occupied_hexes_by_model", None)
+            synth_base["BASE_SHAPE"] = require_key(rep_model, "BASE_SHAPE")
+            synth_base["BASE_SIZE"] = require_key(rep_model, "BASE_SIZE")
+            synth_base["orientation"] = int(rep_model.get("orientation", 0))  # get allowed (facing par-fig optionnel)
+            synth_base["MODEL_HEIGHT"] = _model_height_of(
+                rep_model, require_key(units_cache, str(require_key(unit, "id")))
+            )
+            synth_shape = synth_base["BASE_SHAPE"]
+            # Engagement 3D (§03.04) — la branche empreinte court-circuite la primitive : le gate
+            # vertical est précalculé PAR-ENNEMI (candidat chargeur au sol en 3a → cand_floor=0),
+            # cf. entry_vertically_reachable. La branche euclidienne passe par la primitive 3D.
+            _cand_mh = float(require_key(synth_base, "MODEL_HEIGHT"))
+            tgt_vreach = [entry_vertically_reachable(0.0, _cand_mh, te, _vz) for te in target_entries]
+            ntgt_vreach = [entry_vertically_reachable(0.0, _cand_mh, ne, _vz) for ne in nontarget_entries]
             reg_b: Dict[Tuple[int, int], Dict[str, Any]] = {}
             for (cc, rr) in cells:
                 cand_socle = _charge_model_socle(game_state, rep_model, cc, rr)
@@ -2231,18 +2266,19 @@ def _compute_plan_context(
     # vue niveau 0 / unité non-montante / métrique hex / FLY → structures vides → sortie byte-identique 2D.
     floor_reach_by_model: Dict[str, List[Tuple[int, int]]] = {}
     floor_dist_by_model: Dict[str, Dict[Tuple[int, int], int]] = {}
-    floor_region_by_base: Dict[Tuple[Any, Any, int], Dict[Tuple[int, int], Dict[str, Any]]] = {}
+    floor_region_by_base: Dict[Tuple[Any, Any, int, Any], Dict[Tuple[int, int], Dict[str, Any]]] = {}
     if int(view_level) >= 1 and _cm_use_eucl and not fly_active and can_classify:
-        from engine.terrain_utils import low_clearance_ground_hexes
         terrain_areas = game_state.get("terrain_areas", [])  # get allowed
-        _ground_obs = (
-            set(wall_hexes) | ground_enemy_blocked
-            | low_clearance_ground_hexes(terrain_areas, float(require_key(unit, "MODEL_HEIGHT")))
-        )
+        # Part COMMUNE des obstacles de sol ; la clairance, elle, dépend de la figurine qui monte
+        # (même raison que `_path_blocked_for` plus haut) et s'ajoute dans la boucle.
+        _ground_obs_common = set(wall_hexes) | ground_enemy_blocked
         for m in unplaced:
             sib = models_cache.get(str(m))
             if sib is None:
                 continue
+            _ground_obs = _ground_obs_common | low_clearance_ground_hexes(
+                terrain_areas, _model_height_of(sib, unit)
+            )
             fdist = _charge_model_climb_reachable_floor_cells(
                 game_state, unit, unit_id, sib,
                 (int(sib["col"]), int(sib["row"])), int(budget), int(view_level),
@@ -2259,8 +2295,8 @@ def _compute_plan_context(
             # niveau bloquent (une fig au sol ne gêne pas une destination d'étage).
             _obstacle_socles_floor = _charge_obstacle_socles(game_state, unit_id, level=int(view_level))
             _placed_siblings_floor = placed_sibling_socles_by_level.get(int(view_level), [])  # get allowed (niveau sans sœur posée = vide)
-            floor_cells_by_base: Dict[Tuple[Any, Any, int], Set[Tuple[int, int]]] = {}
-            rep_by_base: Dict[Tuple[Any, Any, int], Dict[str, Any]] = {}
+            floor_cells_by_base: Dict[Tuple[Any, Any, int, Any], Set[Tuple[int, int]]] = {}
+            rep_by_base: Dict[Tuple[Any, Any, int, Any], Dict[str, Any]] = {}
             for m, cells in floor_reach_by_model.items():
                 bk = base_of_model.get(m)
                 if bk is None:
@@ -4736,9 +4772,11 @@ def _charge_model_pos_is_closer(
     # Les obstacles de sol ne sont construits que là : ce contrôle est appelé une fois par figurine à
     # chaque rafraîchissement de plan, et une charge de plain-pied n'en a aucun usage.
     if int(dest_level) >= 1 or (start_eff >= 1 and dest != (start_col, start_row)):
+        # Clairance de LA FIGURINE contrôlée (`model`), pas de son escouade : ce contrôle est
+        # par-figurine de bout en bout (socle, niveau, budget).
         _ground_obs = (
             path_blocked
-            | low_clearance_ground_hexes(_terrain_areas, float(require_key(unit, "MODEL_HEIGHT")))
+            | low_clearance_ground_hexes(_terrain_areas, _model_height_of(model, unit))
         )
         _cells = _charge_model_multilevel_reachable_cells(
             game_state, unit, squad_id, model, (start_col, start_row), int(budget),
@@ -4780,7 +4818,10 @@ def _charge_model_pos_is_closer(
     if d_min >= start_min:
         return False
     # 3b : synth au niveau RÉEL de la destination (engagement 3D en montant ; sol = level 0, comme 3a).
-    synth = _charge_synthetic_charger_cache_entry(game_state, unit, dest[0], dest[1], cand_fp, level=int(dest_level))
+    # Entrée de LA FIGURINE (`_synth_model_entry`), pas de l'escouade : ce contrôle est par-figurine
+    # (`model`), et l'entrée d'escouade faisait mesurer son engagement au socle et à la hauteur du
+    # bloc — un personnage attaché y était jugé sur le gabarit de la troupe qu'il accompagne.
+    synth = _synth_model_entry(game_state, squad_id, model, dest[0], dest[1], level=int(dest_level))
     # `memoise=False` : `dest` est une destination candidate.
     if any(
         unit_entries_within_engagement_zone(synth, ne, ez, memoise=False)
@@ -4849,9 +4890,7 @@ def charge_preview_move_plan(
     # 2) Cohésion 03.03 — SOURCE UNIQUE `coherency_violation_flags` (move, déploiement, charge et
     # combat mesurent la MÊME chose). C'était une COPIE inline des deux puces, qui ignorait
     # `cohesion_distance_mode` ET la connexité (deux paquets disjoints passaient).
-    # Empreintes par-figurine conservées : les contrôles d'engagement ci-dessous les consomment.
     _mc_cohesion = require_key(game_state, "models_cache")
-    fps = [_charge_model_footprint(game_state, _mc_cohesion[str(mid)], c, r) for mid, c, r, _lv in norm]
     # Cohésion exposée SÉPARÉMENT de per_model (miroir pile-in : le voile rouge par-fig ne montre que
     # la légalité budget/closer ; la cohésion est un état d'UNITÉ remonté au Check, pas par figurine).
     coherency_ok = not any(
@@ -4880,9 +4919,13 @@ def charge_preview_move_plan(
             missing.append(tid)
             continue
         engaged = False
-        for idx, (mid, c, r, lv) in enumerate(norm):
+        for mid, c, r, lv in norm:
             # 3b : synth au niveau RÉEL de la fig (sol ou étage) → engagement 3D correct en montant.
-            synth = _charge_synthetic_charger_cache_entry(game_state, unit, c, r, fps[idx], level=lv)
+            # Entrée de LA FIGURINE : « engagée par au moins une figurine » se mesure au socle et à
+            # la hauteur de CETTE figurine, pas à ceux de l'escouade (cf. `_synth_model_entry`).
+            synth = _synth_model_entry(
+                game_state, squad_id, _mc_cohesion[str(mid)], c, r, level=lv
+            )
             if unit_entries_within_engagement_zone(synth, tentry, ez):
                 engaged = True
                 break
@@ -5060,10 +5103,9 @@ def charge_autoplace_plan(
         floor_levels_present(terrain_areas) if multilevel_ok else []
     )
     candidate_levels = [0] + [lv for lv in upper_levels if lv >= 1]
-    ground_obstacles_for_climb = (
-        walls | ground_enemy_blocked
-        | low_clearance_ground_hexes(terrain_areas, float(require_key(unit, "MODEL_HEIGHT")))
-    )
+    # Part COMMUNE des obstacles de sol du champ multi-niveaux ; la clairance dépend de la figurine
+    # qui monte et s'ajoute à l'appel (`low_clearance_ground_hexes` mémoïse par hauteur).
+    ground_obstacles_for_climb_common = walls | ground_enemy_blocked
     # Obstacles de PLACEMENT par niveau : une figurine d'un autre étage ne bloque pas (§13.06).
     obstacle_socles_by_level = {
         lv: _charge_obstacle_socles(game_state, squad_id, level=lv) for lv in candidate_levels
@@ -5089,11 +5131,19 @@ def charge_autoplace_plan(
         )
 
     # --- Slots : bande d'engagement de TOUTES les cibles déclarées, par taille de socle distincte. ---
-    def _base_key(m: Dict[str, Any]) -> Tuple[Any, Any]:
+    # La HAUTEUR fait partie de la clé : les slots d'un groupe sont validés UNE fois via la figurine
+    # représentative (`_engages_nontarget` / `_synth_model_entry` plus bas), et cette validation
+    # mesure un engagement 3D dont la borne haute est `MODEL_HEIGHT` (§03.04). Depuis que la hauteur
+    # est par-figurine, deux figurines de même socle peuvent porter deux intervalles verticaux.
+    def _base_key(m: Dict[str, Any]) -> Tuple[Any, Any, Any]:
         bs = m["BASE_SIZE"]
-        return (m["BASE_SHAPE"], tuple(bs) if isinstance(bs, (list, tuple)) else bs)
+        return (
+            m["BASE_SHAPE"],
+            tuple(bs) if isinstance(bs, (list, tuple)) else bs,
+            m.get("MODEL_HEIGHT"),  # get allowed (états 2D sans couche verticale)
+        )
 
-    by_base: Dict[Tuple[Any, Any], List[str]] = {}
+    by_base: Dict[Tuple[Any, Any, Any], List[str]] = {}
     for mid in alive:
         by_base.setdefault(_base_key(models_cache[mid]), []).append(mid)
 
@@ -5138,7 +5188,7 @@ def charge_autoplace_plan(
 
     # all_slots[i] = (col, row, socle, slot_min_to_targets, engaged_target_ids, level)
     all_slots: List[Tuple[int, int, Any, int, frozenset, int]] = []
-    slots_by_base: Dict[Tuple[Any, Any, int], List[int]] = {}
+    slots_by_base: Dict[Tuple[Any, Any, Any, int], List[int]] = {}
 
     # Champ de distance géométrique (hex, sans obstacle) multi-source depuis les cellules cibles, calculé
     # UNE fois. Rayon = plus grande marge candidate + plus grand rayon d'empreinte (pour couvrir les
@@ -5245,7 +5295,11 @@ def charge_autoplace_plan(
             if wanted:
                 out = _charge_model_multilevel_reachable_cells(
                     game_state, unit, squad_id, models_cache[mid], (sc, sr), int(budget),
-                    wanted, ground_obstacles_for_climb, terrain_areas,
+                    wanted,
+                    ground_obstacles_for_climb_common | low_clearance_ground_hexes(
+                        terrain_areas, _model_height_of(models_cache[mid], unit)
+                    ),
+                    terrain_areas,
                     start_level=start_eff[mid],
                 )
             if start_eff[mid] == 0:
@@ -5322,7 +5376,7 @@ def charge_autoplace_plan(
                 idxs_by_level[slot_level].append(len(all_slots))
                 all_slots.append((c, r, socle, slot_min, eng, slot_level))
         for slot_level, idxs in idxs_by_level.items():
-            slots_by_base[(bkey[0], bkey[1], slot_level)] = idxs
+            slots_by_base[(bkey[0], bkey[1], bkey[2], slot_level)] = idxs
 
     # --- Plafond : par (base, cible), bucketing angulaire → garder le slot le plus PROCHE (contact,
     #     mode offensif) et le plus LOIN (externe ≈ EZ, mode défensif) de chaque secteur. Borne n_slot à
@@ -5338,7 +5392,7 @@ def charge_autoplace_plan(
         )
     # Le niveau entre dans la clé du bucketing : sans lui, un secteur ne garderait qu'un seul étage et
     # la couverture d'une cible pourrait n'exister qu'à une hauteur inatteignable.
-    by_base_target: Dict[Tuple[Tuple[Any, Any, int], str], List[int]] = {}
+    by_base_target: Dict[Tuple[Tuple[Any, Any, Any, int], str], List[int]] = {}
     for bkey, idxs in slots_by_base.items():
         for si in idxs:
             for t in all_slots[si][4]:
@@ -5378,7 +5432,7 @@ def charge_autoplace_plan(
             level_reach = reach.get(slot_level)
             if not level_reach:
                 continue
-            for si in slots_by_base[(bkey[0], bkey[1], slot_level)]:
+            for si in slots_by_base[(bkey[0], bkey[1], bkey[2], slot_level)]:
                 sc, sr, _soc, slot_min, _eng, _slv = all_slots[si]
                 if slot_min >= sm:
                     continue  # WHILE : strictement plus proche d'une cible

@@ -59,6 +59,11 @@ l'ancre, BFS inverse, validation de destination — où aucune figurine individu
 Six tests, un par fonction migrée, sur `scenario_attached_unit_test.json`. Défaut remis dans
 `_fight_model_fp_pair` → **les six rougissent** ; rétabli → verts.
 
+⚠️ Mis à jour le 2026-08-12 par le chantier d'ENGAGEMENT : l'espion ne surveillait que
+`_candidate_footprint_charge`, et le preview de pile-in ne l'appelle plus (l'entrée d'engagement
+recalcule son empreinte au socle de la figurine). Il surveille désormais **les deux** sources
+d'empreinte par-figurine, `_candidate_footprint_charge` et `_synth_model_entry`.
+
 **Aucun test du dépôt ne couvrait ce cas** : les 84 tests de pile-in et de combat passaient avec le
 défaut en place. C'est ce qui a rendu le chantier possible sans que rien ne signale jamais rien.
 
@@ -95,6 +100,10 @@ d'engagement de figurine avec le socle d'escouade, plus deux au niveau unité
 (`_fight_synth_cache_entry_at_footprint`) à examiner, et `charge_handlers` porte probablement les
 mêmes. Chantier distinct : il touche la sémantique de l'engagement (12.03 / 12.08), pas une
 géométrie de pool.
+
+→ **Livré le même jour** : [« l'ENGAGEMENT d'une figurine se mesure à SON
+socle »](engagement_par_figurine_socle_2026-08-12.md). Le compte final est de 13 sites par-figurine
+(11 fight + 2 charge) et 3 sites de niveau unité ; les verdicts basculent sur 3,7 % des positions.
 
 ## Ce qui n'est pas mesuré
 

@@ -91,13 +91,20 @@ def personnage_attache(attached_env) -> Dict[str, Any]:
 
 
 def _tailles_d_empreinte_vues(monkeypatch) -> List[int]:
-    """Espionne `_candidate_footprint_charge` et note la taille de chaque empreinte rendue.
+    """Note la taille de chaque empreinte par-figurine calculée, quelle qu'en soit la source.
 
-    Le patch porte sur `charge_handlers`, pas sur `fight_handlers` : les pools de combat
-    l'importent LOCALEMENT, à l'intérieur de la fonction, donc c'est le module source qui est
-    relu à chaque appel.
+    DEUX sources, parce que le combat en a deux et qu'espionner une seule rend un test vacant
+    (mesuré : après la bascule de l'engagement vers `_synth_model_entry`, le seul espion
+    `_candidate_footprint_charge` ne voyait plus rien du preview de pile-in) :
+    - `_candidate_footprint_charge` — empreintes de placement (pools, zone d'objectif) ;
+    - `_synth_model_entry` — entrée d'engagement par figurine, qui recalcule l'empreinte au socle
+      de la figurine et ne reçoit donc plus la précédente.
+
+    `_candidate_footprint_charge` est patchée sur `charge_handlers` (les pools de combat
+    l'importent LOCALEMENT, donc le module source est relu à chaque appel) ; `_synth_model_entry`
+    l'est sur les deux modules consommateurs, qui la lient au chargement.
     """
-    from engine.phase_handlers import charge_handlers
+    from engine.phase_handlers import charge_handlers, fight_handlers
 
     vues: List[int] = []
     original = charge_handlers._candidate_footprint_charge
@@ -108,6 +115,16 @@ def _tailles_d_empreinte_vues(monkeypatch) -> List[int]:
         return fp
 
     monkeypatch.setattr(charge_handlers, "_candidate_footprint_charge", espion)
+
+    original_synth = fight_handlers._synth_model_entry
+
+    def espion_synth(game_state, squad_id, model_entry, col, row, level=None):
+        entry = original_synth(game_state, squad_id, model_entry, col, row, level=level)
+        vues.append(len(entry["occupied_hexes"]))
+        return entry
+
+    monkeypatch.setattr(fight_handlers, "_synth_model_entry", espion_synth)
+    monkeypatch.setattr(charge_handlers, "_synth_model_entry", espion_synth)
     return vues
 
 
