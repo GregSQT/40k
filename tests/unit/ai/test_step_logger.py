@@ -464,3 +464,35 @@ def test_ability_token_commence_par_une_espace() -> None:
     token = _ability_token("Oath of Moment")
     assert token.startswith(" "), repr(token)
     assert token == f" [{token.strip()[1:-1]}]"
+
+
+# --- 03.03 End of Turn : la ligne de retrait pour cohérence ------------------------------------
+#
+# Chaînon du MILIEU. Le moteur pose l'entrée d'action_log et l'analyzer/le replay lisent la ligne ;
+# entre les deux, le mapping `_STEP_LOG_TYPE_MAP` et ce formateur décident si la ligne existe.
+# Un type sans entrée de mapping est « volontairement non journalisé » — en silence.
+
+
+def test_format_replay_style_message_coherency_removal() -> None:
+    logger = StepLogger(enabled=False)
+    assert logger._format_replay_style_message(
+        1, "coherency_removal", {"unit_with_coords": "1(4, 5)", "removed_models": ["1#2", "1#3"]}
+    ) == "Unit 1(4, 5) COHERENCY REMOVED 1#2 1#3 (03.03)"
+
+
+def test_format_replay_style_message_coherency_removal_requires_models() -> None:
+    """Une ligne sans figurine nommée ne dirait pas QUI part : le segment `[MODELS:]` ne donne
+    que les survivantes, et aucun lecteur ne peut déduire l'absente d'un effectif plus court."""
+    logger = StepLogger(enabled=False)
+    with pytest.raises(KeyError, match=r"removed_models"):
+        logger._format_replay_style_message(1, "coherency_removal", {"unit_with_coords": "1(2, 3)"})
+
+
+def test_coherency_removal_is_mapped_and_does_not_increment_steps() -> None:
+    """VERROU du chaînon manquant : sans l'entrée de mapping, l'entrée d'action_log du moteur est
+    ignorée au drainage et AUCUNE ligne n'atteint step.log — exactement l'état d'avant le fix."""
+    from engine.w40k_core import W40KEngine
+
+    assert W40KEngine._STEP_LOG_TYPE_MAP["coherency_removal"] == "coherency_removal"
+    # Effet de fin de tour, pas action d'agent : l'incrémenter décalerait `episode_steps`.
+    assert "coherency_removal" in W40KEngine._STEP_LOG_NON_INCREMENTING_TYPES

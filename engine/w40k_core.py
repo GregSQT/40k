@@ -5343,7 +5343,10 @@ class W40KEngine(gym.Env):
     # incrementent (move, shoot, charge, combat, wait). L'y compter decalerait `total_actions`
     # et le compte de steps de tous les episodes, sans qu'aucune decision supplementaire n'ait
     # ete prise.
-    _STEP_LOG_NON_INCREMENTING_TYPES: frozenset = frozenset({"reactive_move"})
+    # `coherency_removal` y figure pour la meme raison que `reactive_move` : ce n'est pas une
+    # action d'agent mais un effet de fin de tour. L'incrementer decalerait `episode_steps` de la
+    # suite d'actions reellement decidees (contrat AI_TURN.md, en-tete de step.log).
+    _STEP_LOG_NON_INCREMENTING_TYPES: frozenset = frozenset({"reactive_move", "coherency_removal"})
 
     _STEP_LOG_TYPE_MAP: Dict[str, str] = {
         "shoot": "shoot",
@@ -5372,6 +5375,11 @@ class W40KEngine(gym.Env):
         # pour 16 choix. Corriger le mapping aurait produit un DOUBLON de chaque ligne.
         "move_after_shooting": "move_after_shooting",
         "deploy_unit": "deploy_unit",
+        # 03.03 End of Turn — retrait des figurines hors coherency. Seule mort qui ne descend
+        # d'aucune attaque : sans cette entree, aucune ligne de step.log ne la porte et tout
+        # lecteur qui accumule les evenements garde la figurine vivante (cf.
+        # `_log_end_of_turn_coherency_removals`).
+        "coherency_removal": "coherency_removal",
     }
 
     # Le moteur emet un seul type "move" ; la nuance vit dans move_type (cf. move_type_map du
@@ -5904,6 +5912,10 @@ class W40KEngine(gym.Env):
             ("charge_target_distance_inches", "charge_target_distance_inches"),
             ("advance_roll", "advance_range"),
             ("selected_rule_name", "selected_rule_name"),
+            # 03.03 : les figurines retirees en fin de tour, nommement. Le segment `[MODELS:]`
+            # dit qui RESTE ; cette liste dit qui PART, ce qu'aucun lecteur ne peut deduire d'un
+            # segment (il ne verrait qu'un effectif plus court, sans savoir lequel).
+            ("removed_models", "removed_models"),
         ):
             value = raw_log.get(src)  # get allowed
             if value is not None:

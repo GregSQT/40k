@@ -139,6 +139,20 @@ def _log_end_of_turn_coherency_removals(
     Le retrait est AUTOMATIQUE alors que la regle laisse le choix au joueur (dette assumee, cf.
     `end_of_turn_regain_coherency_all_squads`) : il doit au minimum etre VISIBLE, sans quoi un
     joueur PvP verrait des figurines disparaitre sans explication.
+
+    DEUX canaux, et il en fallait deux. `add_console_log` est debug-only (`--debug`) et ne quitte
+    jamais `game_state` : il ne sert que la console PvP. Le retrait 03.03 est pourtant la SEULE
+    mort qui ne descend d'aucune attaque, donc la seule qu'aucune ligne de journal ne portait —
+    step.log n'a jamais contenu un seul `COHERENCY`. Tout lecteur qui reconstruit l'etat par
+    accumulation d'evenements (l'analyzer, le replay) gardait donc la figurine retiree VIVANTE
+    jusqu'a la prochaine action de son escouade : un fantome qui engage ses ennemis et bloque
+    leurs chemins. Mesure sur le run du 2026-08-12 (E485) : la figurine `2#9`, retiree ici,
+    fabriquait a elle seule un « advance from adjacent » ET un « advance au-dela du budget » sur
+    l'escouade adverse — deux fautes inventees, sur un tour parfaitement legal.
+
+    L'entree d'action_log porte le segment `[MODELS:]` de l'escouade APRES retrait (pose par
+    `_build_step_log_details`, comme pour toute autre ligne) : elle ne dit donc pas seulement
+    « une figurine est morte », elle REPOSITIONNE l'escouade entiere chez le lecteur.
     """
     for squad_id in sorted(removed_by_squad):
         removed = removed_by_squad[squad_id]
@@ -146,6 +160,34 @@ def _log_end_of_turn_coherency_removals(
             game_state,
             f"COHERENCY (03.03) : escouade {squad_id} hors coherency en fin de tour — "
             f"{len(removed)} figurine(s) retiree(s) : {', '.join(removed)}",
+        )
+        # Ancre POST-retrait : `destroy_model` la recalcule quand c'est l'ancre qui tombe. La lire
+        # ici (et non avant la boucle de retrait) est ce qui rend la ligne coherente avec son
+        # propre segment `[MODELS:]`.
+        entry = game_state.get("units_cache", {}).get(str(squad_id))  # get allowed
+        if entry is None:
+            raise KeyError(
+                f"units_cache sans entree pour l'escouade {squad_id} apres retrait 03.03 : "
+                "le retrait s'arrete a une figurine, l'escouade ne peut pas avoir disparu"
+            )
+        append_action_log(
+            game_state,
+            {
+                "type": "coherency_removal",
+                "message": (
+                    f"Unit {squad_id} COHERENCY REMOVAL (03.03) : "
+                    f"{len(removed)} model(s) removed : {' '.join(removed)}"
+                ),
+                "turn": require_key(game_state, "turn"),
+                "phase": "fight",
+                "unitId": str(squad_id),
+                "player": int(require_key(entry, "player")),
+                "col": int(require_key(entry, "col")),
+                "row": int(require_key(entry, "row")),
+                "removed_models": list(removed),
+                "timestamp": "server_time",
+                "reward": 0.0,
+            },
         )
 
 

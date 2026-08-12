@@ -545,6 +545,46 @@ describe("replayParser", () => {
     expect(fight.hit_roll_initial).toBeUndefined();
   });
 
+  // 03.03 End of Turn. C'est la SEULE mort qui ne descend d'aucune attaque : aucun `Dmg:`, aucune
+  // destruction d'unité, rien qu'une figurine qui quitte le plateau. Tant que le moteur ne
+  // journalisait pas ce retrait, le replay affichait la figurine retirée jusqu'à la prochaine
+  // action de son escouade (et l'analyzer, lui, lui faisait engager ses ennemis).
+  it("retire du plateau les figurines retirées pour cohérence (03.03)", () => {
+    const text = [
+      "=== EPISODE 1 START ===",
+      "Scenario: demo",
+      "Bot: RandomBot",
+      `Rules: ${VALID_RULES_JSON}`,
+      "[12:00:00] Board: cols=10 rows=10 inches_to_subhex=1 hex_radius=2.78 margin=1",
+      "Unit 1 (Intercessor) P1: Starting position (0, 0), HP_MAX=5",
+      "Unit 2 (Termagant) P2: Starting position (2, 0), HP_MAX=4",
+      "[12:00:00] T1 P1 DEPLOYMENT : Unit 1(-1,-1) DEPLOYED from (-1,-1) to (0,0)" +
+        " [MODELS: 1#0@(0,0) 1#1@(1,0) 1#2@(8,8)]",
+      "[12:00:01] T1 P2 DEPLOYMENT : Unit 2(-1,-1) DEPLOYED from (-1,-1) to (2,0) [MODELS: 2#0@(2,0)]",
+      "[12:00:02] T1 P1 FIGHT : Unit 1(0,0) COHERENCY REMOVED 1#2 (03.03)" +
+        " [MODELS: 1#0@(0,0) 1#1@(1,0)] [SUCCESS]",
+      "EPISODE END: Winner=1, Method=elimination",
+    ].join("\n");
+
+    const parsed = parse_log_file_from_text(text);
+    const action = parsed.episodes[0].actions.find(
+      (a) => (a as { type?: string }).type === "coherency_removal"
+    ) as { unit_id?: number; models?: Record<string, [number, number]> } | undefined;
+
+    expect(action).toBeDefined();
+    expect(action!.unit_id).toBe(1);
+    // VERROU : sans la branche du parser, aucune action n'est poussée, le segment [MODELS:] est
+    // perdu et `1#2` reste affichée en (8,8).
+    expect(Object.keys(action!.models ?? {}).sort()).toEqual(["1#0", "1#1"]);
+
+    const fightState = parsed.episodes[0].states.find(
+      (s) => (s as { phase?: string }).phase === "fight"
+    ) as { units?: Array<{ id: number; occupied_hexes_by_model?: Record<string, unknown> }> };
+    const unit1 = fightState.units?.find((u) => Number(u.id) === 1);
+    expect(unit1).toBeDefined();
+    expect(Object.keys(unit1!.occupied_hexes_by_model ?? {}).sort()).toEqual(["1#0", "1#1"]);
+  });
+
   it("lève sur une zone OBJECTIVE CONTROL malformée", () => {
     const text = [
       ...CONTROL_LOG_HEAD,
