@@ -876,6 +876,137 @@ calculée que lorsqu'au moins un ennemi est sur table ; `None` (absent du JSON) 
 `tests/unit/scripts/test_bot_zone_direct_metrics.py` (fonctions de calcul). Rouge prouvé par
 mutation sur les deux gardes (2026-08-13).
 
+### 12.9 Nouvelles métriques de convergence (2026-08-13)
+
+Les trois grandeurs du §12.8 ne disent pas si les escouades d'un même bot visent **le même**
+ennemi. Deux s'y ajoutent, écrites dans le relevé par épisode comme les précédentes :
+
+| clé JSON | définition | lecture |
+|----------|-----------|---------|
+| `focus_targets_by_turn` | nombre d'ennemis **distincts** élus « plus proche » par au moins une escouade bot sur table | `1` = toutes les escouades convergent ; `N` = chacune part de son côté |
+| `focus_dist_by_turn` | distance hex moyenne des escouades bot sur table à la **cible focalisée** du bot (`_focus_target`) | ce que « suivre la cible commune » coûte en distance parcourue |
+
+`focus_dist_by_turn` n'existe **que** pour les doctrines qui élisent une cible commune
+(`DecapitationBot`). Les cinq autres n'ont pas d'attribut `_focus_target` : la clé est **absente**
+du JSON et la ligne vaut `—` dans le tableau — jamais `0`, qui se lirait comme « distance nulle »
+(T1). Même règle qu'au §12.8 pour les réserves : sentinel `(-1,-1)` exclu des deux côtés, une
+cible morte ou hors table rend `None`.
+
+⚠️ La mesure lit `bot._focus_target` **nu**, jamais `bot._focus(game_state)`. `_focus` périme la
+cible sur le marqueur de tour : l'appeler depuis l'instrumentation muterait l'état du bot à la
+frontière de tour, donc changerait la grandeur mesurée par le fait de la mesurer.
+
+**Verrou automatisé :** 14 tests dans `tests/unit/scripts/test_bot_zone_direct_metrics.py`. Rouge
+prouvé par mutation sur `_ennemi_en_reserves_exclu` et `_none_si_cible_en_reserves` (2026-08-13).
+
+#### 12.9.1 Mesure avant/après l'élection de cible au mouvement
+
+**Ce qui est comparé.** « Avant » = `5833c826` ; « après » = le tree du 2026-08-13, où
+`DecapitationBot` surcharge `_enemy_anchors` pour que `w_enemy` tire vers la cible **élue** au lieu
+de l'ennemi le plus proche de chaque escouade (§12.11). Le SHA `e4a44b1a`, qui porte une version
+intermédiaire de ce travail, vit sur une branche non fusionnée : il ne se retrouve pas depuis
+`main`, d'où les deux repères ci-dessus.
+
+**Les poids ne changent pas entre les deux états** — comparaison faite valeur par valeur sur
+`config/bot_movement_weights.json`, seul le texte `_justification` de `decapitation` diffère. Il
+n'y a donc rien à démêler entre « élection » et « réglage de poids » : l'élection est le **seul**
+facteur.
+
+**Protocole.** `--episodes 60`, plateau `x1`, modèle `robust_0.8721`, mêmes graines des deux côtés
+(`_episode_seed` est déterministe) — les épisodes s'apparient un à un, ce qui autorise une
+comparaison appariée bien plus fine que deux moyennes indépendantes. Instrument identique dans les
+deux arbres : le script de mesure et ses deux dépendances ont été recopiés dans le worktree.
+
+**Contrôle de validité.** Les cinq autres bots rendent des relevés **bit-identiques** entre les deux
+runs, sur les cinq grandeurs et les cinq tours. Seul `decapitation` bouge : l'écart mesuré vient de
+la doctrine, pas du bruit ni de l'instrument.
+
+**`focus_targets_by_turn` — cibles distinctes (60 ép./bot) :**
+
+| Bot | T1 | T2 | T3 | T4 | T5 |
+|-----|----|----|----|----|----|
+| alpha (identique) | 1.33 | 1.88 | 1.95 | 1.72 | 1.58 |
+| attrition (identique) | 1.33 | 1.87 | 1.80 | 2.02 | 1.77 |
+| endgame (identique) | 1.32 | 1.62 | 1.58 | 1.75 | 1.82 |
+| racer (identique) | 1.33 | 1.95 | 1.85 | 1.90 | 1.75 |
+| scorer (identique) | 1.40 | 1.82 | 1.88 | 1.95 | 1.92 |
+| **decapitation avant** | 1.25 | 1.85 | 1.78 | 1.87 | 1.67 |
+| **decapitation après** | 1.22 | 1.93 | 1.60 | 1.58 | 1.47 |
+| Δ apparié (±IC 95 %) | −0.03 ±0.07 | +0.08 ±0.21 | −0.18 ±0.24 | **−0.28 ±0.25** | −0.20 ±0.22 |
+
+**`focus_dist_by_turn` — distance à la cible focalisée (`decapitation` seul) :**
+
+| | T1 | T2 | T3 | T4 | T5 |
+|-|----|----|----|----|----|
+| **avant** | 26.5 | 22.1 | 21.4 | 20.0 | 19.3 |
+| **après** | 32.8 | 31.2 | 22.0 | 20.2 | 20.2 |
+| Δ apparié (±IC 95 %) | **+5.85 ±3.79** | **+9.05 ±4.10** | +0.94 ±3.00 | −0.24 ±2.61 | +0.45 ±2.58 |
+| ép. avec une cible, avant → après | 54 → 58 | 58 → 60 | 58 → 60 | 57 → 54 | 55 → 60 |
+
+Les cinq autres bots valent `—` sur toute la ligne, aux deux runs.
+
+**Rappel des deux grandeurs du §12.8, sur les mêmes runs (`decapitation`) :**
+
+| | T1 | T2 | T3 | T4 | T5 |
+|-|----|----|----|----|----|
+| `dist_by_turn` avant | 31.3 | 20.8 | 15.7 | 14.6 | 15.0 |
+| `dist_by_turn` après | 30.5 | 20.7 | 15.8 | 15.9 | 15.1 |
+| Δ apparié (±IC 95 %) | −0.82 ±0.76 | −0.07 ±1.11 | +0.06 ±1.63 | +1.23 ±1.69 | +0.08 ±1.92 |
+| `zones_by_turn` avant | 1.22 | 1.43 | 1.28 | 1.08 | 0.98 |
+| `zones_by_turn` après | 1.17 | 1.40 | 1.17 | 0.93 | 0.92 |
+| Δ apparié (±IC 95 %) | −0.05 ±0.09 | −0.03 ±0.14 | −0.12 ±0.23 | −0.15 ±0.25 | −0.07 ±0.20 |
+
+**Conclusion causale.** L'élection au mouvement fait bien ce pour quoi elle a été écrite — elle
+envoie les escouades vers une cible commune plus lointaine (`focus_dist` +9.1 hex à T2) et resserre
+la convergence en milieu de partie (`focus_targets` −0.28 à T4, seul écart de convergence
+significatif) — mais **elle n'explique pas la distance au plus proche ennemi du §12.8** : à graine
+égale, `dist_by_turn` est inchangée sur T2–T5. La montée observée au §12.8 vient donc d'ailleurs.
+
+#### 12.9.2 La montée de `dist_by_turn` au dernier tour est un BIAIS DE SURVIE
+
+Élucidé le 2026-08-13 **sans nouveau run**, par relecture du relevé par escouade des 60 épisodes
+du §12.8 (mêmes graines, même modèle, même plateau).
+
+`dist_by_turn` moyenne sur les escouades **vivantes sur table**, donc sa population change à chaque
+tour. Or les escouades qui meurent sont, de très loin, les plus proches de l'ennemi — relevé sur
+les mêmes parties, distance au tour `t` selon qu'elles sont mortes ou vives au tour `t+1` :
+
+| bot | T3 mortes → | T3 vives → | T4 mortes → | T4 vives → |
+|---|---|---|---|---|
+| decapitation | **5,6** (n=32) | 17,1 (n=232) | **6,0** (n=48) | 16,8 (n=184) |
+| racer | 5,8 (n=29) | 19,3 (n=241) | 6,9 (n=34) | 19,4 (n=207) |
+| attrition | 4,9 (n=14) | 21,0 (n=270) | 6,2 (n=25) | 20,7 (n=245) |
+
+Les retirer relève mécaniquement la moyenne du tour suivant. **La preuve tient en une COHORTE
+FIXE** : en ne suivant que les escouades vivantes au tour 5, et en les remontant dans le temps, la
+montée disparaît entièrement chez les deux bots concernés.
+
+| bot | population | T1 | T2 | T3 | T4 | T5 |
+|---|---|---|---|---|---|---|
+| decapitation | toutes vivantes (= §12.8) | 31,3 | 20,9 | 15,7 | 14,5 | **14,9 ↑** |
+| decapitation | **cohorte fixe (vivantes à T5)** | 32,8 | 23,5 | 18,9 | 16,8 | **14,9 ↓** |
+| racer | toutes vivantes | 32,5 | 21,5 | 17,9 | 17,6 | **18,8 ↑** |
+| racer | **cohorte fixe** | 34,1 | 24,0 | 20,7 | 19,4 | **18,8 ↓** |
+| attrition | toutes vivantes | 34,5 | 24,2 | 20,2 | 19,4 | 22,2 ↑ |
+| attrition | **cohorte fixe** | 35,0 | 25,2 | 21,9 | 20,7 | **22,2 ↑** |
+
+⚠️ **`attrition` est le seul cas où il reste une montée RÉELLE** (+1,5 hex à cohorte fixe) : c'est
+son mode `attrition_withdraw` (`w_enemy` −1,0), qui recule pour de bon. Chez `decapitation` et
+`racer`, il ne reste rien — la montée était entièrement l'artefact.
+
+**Trois conséquences, dont une qui change la lecture du §12.8 :**
+
+1. Il n'y a **rien à expliquer côté doctrine** pour `decapitation` : le bot ne s'éloigne pas au
+   dernier tour, il perd ses escouades avancées.
+2. **Le §12.8 sous-estime l'exposition de `decapitation`**, il ne la surestime pas. Le biais joue
+   dans le sens de la prudence : c'est le bot qui perd le plus d'escouades (33 % à T5 contre 16 %
+   à `attrition`), donc celui dont la moyenne est la plus tirée vers le haut. Sa proximité réelle
+   à l'ennemi est **pire** que ce que le tableau affiche.
+3. **`dist_by_turn` ne se lit jamais seule au dernier tour.** La ligne « un bot qui s'approche :
+   distance décroissante de T1 à T5 » du §12.8 est vraie à effectif constant, fausse dès qu'un
+   camp perd des escouades. Toute lecture de cette grandeur au-delà de T3 se fait à cohorte fixe,
+   ou accompagnée du taux de pertes (`squads_by_turn`, déjà au relevé).
+
 ### 12.11 `decapitation` marchait vers un ennemi, tirait sur un autre (2026-08-13)
 
 **Le constat.** Le style concentre ses TIRS sur une cible unique par tour (`target_score` +
