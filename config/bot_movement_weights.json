@@ -82,8 +82,8 @@
       "w_fire": 0.0,
       "w_risk": 0.0,
       "w_contest": 1.0,
-      "w_crowd": 2.0,
-      "_justification": "REGLE le 2026-08-11 apres mesure : w_objective valait 0.3, le plus bas du panel avec standoff, et le bot finissait DERNIER en bot-contre-bot (0.292) tout en etant sature contre l'agent (0.98). Il gagnait des combats et perdait la partie : la victoire se compte en VP d'objectifs, pas en kills. w_objective 0.3 -> 0.8, w_enemy 1.5 -> 1.2 : il reste le plus agressif du panel (aucun autre ne depasse 0.6 en w_enemy) mais il ne traverse plus la table en ignorant les zones. Meme diagnostic que endgame, corrige le meme jour. RECALIBRE le 2026-08-13 (§12.7, mesure 20 ep x1) : w_crowd 0.5 -> 2.0. Mesure avant : T2=1.10 T5=0.75, zones en DECLIN — stacking non penalise car w_crowd 0.5 < seuil 1.5 (hold_bonus=3.0, OC_surplus≈2). 2.0 place le penalty a 4.0 > hold_bonus, le spread devient actif. w_contest inchange : le bot chasse deja les ennemis via w_enemy=1.2."
+      "w_crowd": 0.5,
+      "_justification": "REGLE le 2026-08-11 apres mesure : w_objective valait 0.3, le plus bas du panel avec standoff, et le bot finissait DERNIER en bot-contre-bot (0.292) tout en etant sature contre l'agent (0.98). Il gagnait des combats et perdait la partie : la victoire se compte en VP d'objectifs, pas en kills. w_objective 0.3 -> 0.8, w_enemy 1.5 -> 1.2 : il reste le plus agressif du panel (aucun autre ne depasse 0.6 en w_enemy) mais il ne traverse plus la table en ignorant les zones. Meme diagnostic que endgame, corrige le meme jour. w_crowd RESTE A 0.5, mesure du 2026-08-13 (§12.8, 60 ep/bot x1, robust_0.8721, comparaison APPARIEE) : le terme d'encombrement DEGRADE ce bot des qu'on le monte. Zones tenues au T5, par rapport a 0.5 -> w_crowd 0.0 : -0.10 +- 0.08 ; 1.0 : -0.15 +- 0.08 ; 2.0 : -0.23 +- 0.09. La hausse a 2.0 posee le matin meme (§12.7) faisait donc l'INVERSE de ce qu'elle annoncait. Lecture : ce bot traverse la table vers l'ennemi (w_enemy 1.2), ses escouades ne s'empilent pas sur une zone — les eloigner l'une de l'autre ne fait que les eloigner des zones."
     },
     "attrition": {
       "w_objective": 0.7,
@@ -106,18 +106,18 @@
       "w_enemy": 0.6,
       "w_fire": 1.0,
       "w_risk": 0.2,
-      "w_contest": 1.5,
-      "w_crowd": 2.0,
-      "_justification": "RECALIBRE le 2026-08-13 (§12.7, mesure 20 ep x1) : w_crowd 0.5 -> 2.0, w_contest 1.0 -> 1.5. Mesure avant : T2=1.35 T5=0.95, zones en declin — meme cause qu'alpha (w_crowd 0.5 < seuil 1.5). w_contest releve a 1.5 car w_enemy=0.6 est plus faible que alpha (1.2) : sans pull supplementaire vers les zones contestees, le bot reste concentre sur sa cible et ne dispute rien."
+      "w_contest": 1.0,
+      "w_crowd": 0.5,
+      "_justification": "VALEURS D'ORIGINE, CONFIRMEES PAR MESURE le 2026-08-13 (§12.8, 60 ep/bot x1, modele robust_0.8721, comparaison APPARIEE episode par episode). Les deux hausses posees le 2026-08-13 au matin (§12.7, w_crowd 0.5 -> 2.0 et w_contest 1.0 -> 1.5) ont ete DEFAITES : mesurees isolement, elles ne rendent RIEN. w_crowd 2.0 : zones tenues au T5 -0.05 +- 0.13 par rapport a 0.5, soit zero a la marge pres — la ou le §12.7 annoncait +0.65. w_contest 1.5 : +0.03 +- 0.08 au T5, et exactement 0.00 aux tours 2, 3 et 4. Le declin de ce bot entre le T2 (1.60) et le T5 (1.08) est REEL et rejoue, mais aucun de ces deux poids ne le corrige : la cause est ailleurs, et la chercher dans le terme d'encombrement a deja coute une campagne."
     },
     "scorer": {
       "w_objective": 1.0,
-      "w_enemy": 0.3,
+      "w_enemy": 0.0,
       "w_fire": 0.6,
       "w_risk": 0.4,
-      "w_contest": 3.5,
-      "w_crowd": 2.5,
-      "_justification": "POSE le 2026-08-12 avec le style, NON REGLE — a etablir en bot-contre-bot avant toute mesure contre l'agent. Doctrine : marquer d'abord, se battre pour ca. w_objective 1.0 est le deuxieme du panel derriere racer (1.3), qui est la caricature du meme axe et ne se bat jamais. w_enemy 0.3 : il s'approche pour contester, il ne traverse pas la table comme alpha (1.2). w_fire 0.6 > w_risk 0.4 : il accepte de s'exposer quand la position lui rend plus de degats qu'elle ne lui en coute — c'est ce qui le separe d'un endgame (w_risk 0.9), qui recule."
+      "w_contest": 1.5,
+      "w_crowd": 4.0,
+      "_justification": "REGLE le 2026-08-13 (§12.9 du chantier), protocole du §12.8 : plateau x1 (board/44x60x1), modele robust_0.8721 (md5 6f6b9805), 60 episodes par bot, UN SEUL poids change par run, les cinq autres bots joues en controle — derive des controles exactement 0.000 sur les 13 runs, donc chaque ecart est imputable au poids change. Les six poids ont ete encadres au-dessus ET en dessous de leur valeur d'origine ; trois franchissent 2 sem au tour 5 ET sont monotones sur leurs deux points : w_enemy 0.3 -> 0.0 (+0.400 +-0.163 au T5, et +0.6 rend -0.283 +-0.104 au T4), w_contest 3.5 -> 1.5 (+0.367 +-0.136, et 5.0 rend -0.117), w_crowd 2.5 -> 4.0 (+0.333 +-0.111). Combinaison verifiee par un run dedie : +0.400 +-0.135 au T5 et positive aux quatre tours — les trois effets se RECOUVRENT largement (leur somme isolee vaut 1.10), ce qu'aucune mesure poids-par-poids ne pouvait dire. Resultat : scorer passe de 1.93 a 2.33 zones au T5, premier du panel, et son declin T4->T5 disparait. DEUX SIGNES CONTRAIRES A LA DOCTRINE POSEE, meme motif que le §12.8 sur alpha : w_contest avait ete mis a 3.5 « parce que scorer conteste » — le BAISSER est ce qui lui fait tenir le plus de zones ; et w_enemy 0.3 « il s'approche pour contester » vaut mieux a 0.0. NON RETENUS, mesures positives mais sous le seuil : w_fire -> 0.0 (+0.233 +-0.127 au T5), w_risk -> 0.9 (+0.233 +-0.133), w_objective -> 1.3 (+0.133 +-0.102). Ce sont exactement les trois poids qui separent ce bot de racer (1.3 / 0.2 / 0.0 / 0.0) : les retenir tous aurait fait converger les deux styles, et la regle de seuil appliquee uniformement les ecarte d'elle-meme. Toute mesure de ce fichier depend du PLATEAU."
     }
   }
 }

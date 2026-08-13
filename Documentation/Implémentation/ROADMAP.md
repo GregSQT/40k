@@ -463,9 +463,17 @@ mesure, et c'est assumé (§0.14).
    🟠 **État au 2026-08-12** : six styles livrés, modèle de dégâts corrigé à la racine
    (par figurine), et les bots **s'étalent** au lieu d'empiler trois escouades par zone — le pire
    bot passe de 0,837 (ancien panel) à **0,62** et l'écart de VP est divisé par deux (§12.5).
-   ⚠️ Ces chiffres sont **à rejouer** : deux défauts de la pénalité d'encombrement ont été corrigés
-   depuis (poids fractionnaires annulés par une troncature, surplus compté autrement que le
-   contrôle réel — §12.6). Le sens du résultat tient, son amplitude n'est plus mesurée.
+   ✅ **Rejoué le 2026-08-13** (§12.8, 100 ép./bot, `robust_0.8721`, post-§12.6) :
+   `combined = 0,7767`, pire bot `racer = 0,630` — l'amplitude du §12.5 tient à la marge près.
+   ⛔ **Le §12.7 du même jour est INVALIDÉ** : ses deux hausses de poids (`alpha` et `decapitation`)
+   ont été DÉFAITES après re-mesure isolée à 60 ép./bot. L'une d'elles faisait l'inverse de ce
+   qu'elle annonçait (`alpha.w_crowd` 2.0 : −0,23 zone au tour 5).
+   ✅ **`scorer` réglé le 2026-08-13** (§12.9), dernier profil du panel encore posé par doctrine :
+   six poids encadrés dans les deux sens, trois retenus (`w_enemy` 0.0, `w_contest` 1.5,
+   `w_crowd` 4.0), combinaison confirmée par un run dédié. Il passe de 1,93 à 2,33 zones au tour 5
+   et tient l'agent à **0,66** contre 0,76 — deuxième bot le plus dur, à 3 points de `racer`.
+   **Nouvelle ligne de base : `combined = 0,7600`, pire bot `racer = 0,630`.** Étapes 6 et 8
+   closes, reste l'étape 7 (suppression des cinq anciens bots).
    🔴 **L'ORTHOGONALITÉ est ABANDONNÉE comme critère** (décision du 2026-08-12) : les six bots se
    déplacent en bloc d'un modèle à l'autre, ils forment une seule dimension. La cause est le
    format — seuls les objectifs marquent, zéro victoire par élimination sur 600 parties — donc

@@ -84,6 +84,23 @@ os.chdir(PROJECT_ROOT)
 from ai.bot_registry import ALL_BOT_KEYS  # noqa: E402
 
 
+def _model_md5(path: str) -> str:
+    """Empreinte du .zip effectivement chargé, lue par blocs (les modèles font des dizaines de Mo).
+
+    JUMEAU de `scripts/bot_zone_direct.py::_md5`, et la duplication est assumée : `scripts/` n'a
+    pas de module commun que ces deux-là partagent, et six lignes de `hashlib` n'en justifient pas
+    un. Ce qui doit rester en phase, c'est l'EXIGENCE — une mesure imprime le modèle sur lequel
+    elle porte — pas le code qui la sert.
+    """
+    import hashlib
+
+    digest = hashlib.md5(usedforsecurity=False)
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def _import_roster_aggregate() -> Any:
     import importlib.util
 
@@ -867,6 +884,13 @@ def main() -> None:
     if not os.path.exists(model_path):
         print(f"❌ Model not found: {model_path}")
         sys.exit(1)
+    # LE CHEMIN CANONIQUE EST PARTAGE ET VOLATIL : tout `train.py --new`, depuis n'importe quelle
+    # session, l'ecrase. Une campagne de matchups ne dit donc rien de son modele si elle ne
+    # l'IDENTIFIE pas. Le 2026-08-13, ce chemin portait un modele different de celui dont le
+    # chantier des bots tirait tous ses chiffres, et deux tableaux ont ete publies dessus sans que
+    # rien ne le signale (cf. A_faire/bots_refonte_panel.md §12.7, invalidee, et §12.8).
+    # Le md5 est le seul identifiant qui survive a un renommage ou a une recopie.
+    print(f"📦 Modèle : {model_path}\n   md5 : {_model_md5(model_path)}")
 
     splits_to_run: List[str] = (
         ["training", "holdout_regular", "holdout_hard"] if args.all_splits else [args.split]
