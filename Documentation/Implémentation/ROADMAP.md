@@ -494,8 +494,16 @@ mesure, et c'est assumé (§0.14).
    bot, zones contrôlées par tour). Jusque-là il ne sortait que les moyennes du tableau, donc aucune
    mesure de §12.7 n'était inspectable ni rejouable épisode par épisode alors que le script est
    déterministe. Le tableau texte est désormais **dérivé** des mêmes relevés : les chiffres déjà
-   consignés restent comparables, et l'agrégat ne peut plus diverger du fichier. La destination est
-   ouverte AVANT de jouer — un chemin faux coûtait sinon tout le run, graines comprises.
+   consignés restent comparables (vérifié identique sur 200 tirages, `--episodes 0` compris), et
+   l'agrégat ne peut plus diverger du fichier.
+   Le fichier porte un bloc `run` — agent/config, `base_seed`, `agent_seat_mode`/`agent_seat_seed`,
+   `bot_randomness`, et le modèle identifié par sa TAILLE et sa DATE, relevées avant chargement.
+   Sans ça deux relevés d'un avant/après §12.7 sont indiscernables (le chemin du modèle est codé
+   en dur, donc muet) et la graine d'épisode seule ne reconstruit pas la doctrine du bot.
+   La destination est validée AVANT de jouer — chemin vide, dossier, dossier absent ou en lecture
+   seule échouent en une seconde au lieu de coûter tout le run, graines comprises ; l'écriture
+   passe par un brouillon `<fichier>.part` publié par `os.replace`, donc un run interrompu ne
+   détruit pas le relevé précédent et ne laisse pas de résidu. `schema_version` = **2**.
 
 ## 2. Capacités — seul chantier restant de la série « chantiers capacités »
 

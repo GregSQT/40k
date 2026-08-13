@@ -6,6 +6,7 @@ relevé d'épisode, l'agrégation qui alimente le tableau texte, et l'écriture 
 point qui compte : le tableau texte est désormais DÉRIVÉ des relevés par épisode, donc les
 moyennes affichées et le JSON ne peuvent plus diverger.
 """
+import ast
 import importlib.util
 import json
 import os
@@ -165,10 +166,60 @@ def test_json_out_echoue_si_le_dossier_est_en_lecture_seule(script, tmp_path):
         readonly.chmod(0o700)
 
 
-def test_sans_le_drapeau_aucun_fichier_n_est_touche(script, tmp_path):
+def test_sans_le_drapeau_aucun_fichier_n_est_touche(script, tmp_path, monkeypatch):
+    # le cwd EST tmp_path : un brouillon écrit « quelque part » se verrait ici.
+    monkeypatch.chdir(tmp_path)
+
     with script._json_out_draft(None) as handle:
         assert handle is None
+
     assert list(tmp_path.iterdir()) == []
+
+
+def test_json_out_vide_echoue_avant_de_jouer_sans_rien_ecrire(script, tmp_path, monkeypatch):
+    # `--json-out "$VAR"` avec VAR non définie : sans ce refus, `.part` atterrit dans le cwd
+    # (la racine du dépôt en usage réel) et seul le os.replace final casse, après la partie.
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(ValueError):
+        with script._json_out_draft(""):
+            pass
+
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_une_fermeture_qui_rate_ne_publie_pas_et_ne_masque_rien(script, tmp_path):
+    # disque plein au flush : le relevé est incomplet, donc rien ne doit être publié, et
+    # l'exception d'origine doit rester celle qu'on lit.
+    out = tmp_path / "zones.json"
+    out.write_text('{"ancien": true}\n', encoding="utf-8")
+
+    class _CloseKO(OSError):
+        pass
+
+    with pytest.raises(KeyboardInterrupt):
+        with script._json_out_draft(str(out)) as handle:
+            handle.close = lambda: (_ for _ in ()).throw(_CloseKO("ENOSPC"))
+            raise KeyboardInterrupt
+
+    assert json.loads(out.read_text(encoding="utf-8")) == {"ancien": True}
+    assert not (tmp_path / "zones.json.part").exists()
+
+
+def test_l_empreinte_du_modele_est_relevee_avant_son_chargement(script):
+    # la seule raison d'être de `_model_fingerprint` : un entraînement qui réécrit le .zip
+    # pendant le run ferait consigner un checkpoint qui n'a pas joué. Rien d'observable à
+    # l'exécution ne l'atteste sans vrai modèle — l'ordre est donc verrouillé sur l'AST réel.
+    tree = ast.parse(SCRIPT_PATH.read_text(encoding="utf-8"))
+    main_fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main")
+
+    def line_of(pred) -> int:
+        return next(n.lineno for n in ast.walk(main_fn) if isinstance(n, ast.Call) and pred(n.func))
+
+    fingerprint = line_of(lambda f: isinstance(f, ast.Name) and f.id == "_model_fingerprint")
+    load = line_of(lambda f: isinstance(f, ast.Attribute) and f.attr == "load")
+
+    assert fingerprint < load
 
 
 def test_la_destination_est_ouverte_avant_de_jouer_le_moindre_episode(tmp_path):
