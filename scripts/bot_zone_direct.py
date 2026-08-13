@@ -15,14 +15,15 @@ texte agrégée reste identique, seul s'y ajoute le chemin du fichier écrit.
 from __future__ import annotations
 
 import argparse
-import contextlib
-import json
 import os
 import sys
 from datetime import datetime
-from typing import Any, Dict, Iterator, List, Optional, TextIO
+from typing import Any, Dict, List, Optional, TextIO
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from json_atomic import dump_json, json_out_draft  # noqa: E402  (dépend du sys.path ci-dessus)
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -76,50 +77,9 @@ def _n_at_last_turn(per_turn: Dict[int, List[int]]) -> int:
     return len(per_turn[max(per_turn)])
 
 
-def _part_path(path: str) -> str:
-    return path + ".part"
-
-
-@contextlib.contextmanager
-def _json_out_draft(path: Optional[str]) -> Iterator[Optional[TextIO]]:
-    """Brouillon ouvert AVANT de jouer, publié seulement si le run va jusqu'au bout.
-
-    Tout ce qui peut rater sur la destination doit rater ici, en une seconde, pas après la
-    partie quand les graines sont déjà perdues. Trois contrôles, aucun ne couvre les autres :
-    `path` ne doit pas être VIDE (`--json-out "$VAR"` avec `VAR` non défini : `.part` atterrirait
-    à la racine du dépôt et seul le `os.replace` final échouerait), ni être un DOSSIER (même
-    échec, même moment), et le brouillon `<path>.part` doit s'ouvrir — ce qui prouve, syscall à
-    l'appui, que le dossier existe et qu'il est inscriptible ; un `isdir` laisserait passer une
-    lecture seule. Écrire dans le brouillon plutôt que dans `path` protège le relevé PRÉCÉDENT :
-    il reste intact tant que le nouveau n'est pas complet, et la publication est atomique.
-    Aucune création de dossier : un chemin faux se voit, il ne se répare pas en silence.
-    Sortie par exception : le brouillon est refermé ET effacé — pas de résidu vide à trier.
-    """
-    if path is None:
-        yield None
-        return
-    if not path:
-        raise ValueError("--json-out a reçu un chemin vide — variable de shell non définie ?")
-    if os.path.isdir(path):
-        raise IsADirectoryError(f"--json-out {path} est un dossier : la destination doit être un fichier")
-    handle = open(_part_path(path), "w", encoding="utf-8")
-    try:
-        yield handle
-        handle.close()  # le flush APPARTIENT à l'écriture : s'il rate, on ne publie pas
-    except BaseException:
-        # le brouillon part à la poubelle : une erreur de fermeture n'y ajoute rien, et elle
-        # masquerait l'exception qui a réellement tué le run.
-        with contextlib.suppress(OSError):
-            handle.close()
-        os.remove(_part_path(path))
-        raise
-    os.replace(_part_path(path), path)
-
-
 def _write_json_out(handle: TextIO, run_meta: Dict[str, Any], records: List[Dict[str, Any]]) -> None:
     payload = {"schema_version": _JSON_SCHEMA_VERSION, "run": run_meta, "episodes": records}
-    json.dump(payload, handle, ensure_ascii=False, indent=2)
-    handle.write("\n")
+    dump_json(handle, payload)
 
 
 def _model_fingerprint(model_path: str) -> Dict[str, Any]:
@@ -172,8 +132,8 @@ def main() -> None:
     args = parser.parse_args()
 
     # le brouillon s'ouvre AVANT les imports lourds : un chemin faux coûte une seconde, et il
-    # n'est publié que si le run va au bout (sinon refermé et effacé, cf. `_json_out_draft`).
-    with _json_out_draft(args.json_out) as json_handle:
+    # n'est publié que si le run va au bout (sinon refermé et effacé, cf. `json_out_draft`).
+    with json_out_draft(args.json_out) as json_handle:
         import numpy as np
         from sb3_contrib import MaskablePPO
         from sb3_contrib.common.wrappers import ActionMasker

@@ -14,9 +14,13 @@ from __future__ import annotations
 import argparse
 import json
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from json_atomic import write_json_atomic  # noqa: E402  (dépend du sys.path ci-dessus)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -32,11 +36,6 @@ def _load_json(path: Path) -> Dict[str, Any]:
         return json.loads(path.read_text(encoding="utf-8-sig"))
     except json.JSONDecodeError as exc:
         raise ValueError(f"Invalid JSON in {path}: {exc}") from exc
-
-
-def _write_json(path: Path, data: Dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
 
 def _collect_rosters(base_dir: Path, prefix: str) -> List[Path]:
@@ -78,7 +77,7 @@ def _sync_regular_common_pool(agent_key: str, scale: str) -> None:
             raise TypeError(f"roster_id must be string in {agent_roster}")
         data["roster_id"] = roster_id.replace("agent_", "opponent_", 1)
         new_name = agent_roster.name.replace("agent_", "opponent_", 1)
-        _write_json(opponent_regular_dir / new_name, data)
+        write_json_atomic(opponent_regular_dir / new_name, data)
 
 
 # Terrains d'entraînement plats (V11 T4) — cyclés comme la migration de la banque.
@@ -129,7 +128,7 @@ def _build_scenarios(
             "terrain_ref": terrains[(idx - 1) % len(terrains)],
         }
         scenario_path = scenario_dir / f"scenario_bot-{idx:02d}.json"
-        _write_json(scenario_path, scenario_payload)
+        write_json_atomic(scenario_path, scenario_payload)
 
 
 def _resolve_hard_points_scale(

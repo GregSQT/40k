@@ -15,9 +15,13 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from json_atomic import write_json_atomic  # noqa: E402  (dépend du sys.path ci-dessus)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -34,12 +38,6 @@ def _load_json(path: Path) -> Dict[str, Any]:
             return json.load(f)
     except json.JSONDecodeError as exc:
         raise ValueError(f"Invalid JSON in {path}: {exc}") from exc
-
-
-def _write_json(path: Path, payload: Dict[str, Any]) -> None:
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, indent=2, ensure_ascii=False)
-        f.write("\n")
 
 
 def _collect_scenario_files(agent_key: str) -> List[Path]:
@@ -511,7 +509,7 @@ def main() -> None:
         payload = item["payload"]
         new_filename = _require_key(opponent_roster_file_by_id, item["new_p2_id"])
         payload["opponent_roster_ref"] = f"holdout_hard/{new_filename}"
-        _write_json(item["scenario_path"], payload)
+        write_json_atomic(item["scenario_path"], payload)
 
     print("\nApplied updates to holdout_hard scenario files.")
 

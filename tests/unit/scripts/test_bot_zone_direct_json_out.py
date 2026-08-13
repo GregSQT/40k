@@ -2,13 +2,18 @@
 
 Le script joue de vrais épisodes (modèle + moteur) : rien de tout cela n'est instancié ici.
 Ce qui est exercé, ce sont les fonctions qui portent le contrat du drapeau : la forme d'un
-relevé d'épisode, l'agrégation qui alimente le tableau texte, et l'écriture du fichier. Le
-point qui compte : le tableau texte est désormais DÉRIVÉ des relevés par épisode, donc les
-moyennes affichées et le JSON ne peuvent plus diverger.
+relevé d'épisode, l'agrégation qui alimente le tableau texte, et le passage par l'écriture
+atomique partagée. Le point qui compte : le tableau texte est désormais DÉRIVÉ des relevés par
+épisode, donc les moyennes affichées et le JSON ne peuvent plus diverger.
+
+Le contrat du brouillon `.part` lui-même (fichier précédent intact, aucun résidu, destination
+refusée si vide / dossier / absente / en lecture seule, fermeture qui rate) est verrouillé UNE
+fois pour les quatre scripts
+dans `test_json_atomic.py` — il n'est plus rejoué ici. Ce qui reste ici du drapeau, c'est ce qui
+n'appartient qu'à ce script : le fail-fast AVANT le chargement du modèle.
 """
 import ast
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -84,7 +89,7 @@ def test_json_out_relit_les_episodes_un_par_un(script, tmp_path):
     out.parent.mkdir()
     meta = script._run_meta(_FINGERPRINT(script), "holdout_1.json", 2, 42, "p1", 42, {"bot_zone": 0.1})
 
-    with script._json_out_draft(str(out)) as handle:
+    with script.json_out_draft(str(out)) as handle:
         script._write_json_out(handle, meta, records)
     payload = json.loads(out.read_text(encoding="utf-8"))
 
@@ -110,95 +115,6 @@ def test_le_releve_dit_ce_qui_distingue_deux_runs(script):
     # le chemin du modèle est constant d'un run à l'autre : ce qui l'identifie, c'est le fichier.
     assert meta["model_bytes"] == SCRIPT_PATH.stat().st_size
     assert meta["model_mtime"].startswith("20")
-
-
-def test_un_run_interrompu_ne_laisse_ni_degat_ni_residu(script, tmp_path):
-    # VERROU : le run meurt en plein jeu (Ctrl-C, crash moteur). Le relevé précédent doit être
-    # intact, et aucun brouillon ne doit rester à trier à la main.
-    out = tmp_path / "zones.json"
-    out.write_text('{"ancien": true}\n', encoding="utf-8")
-
-    with pytest.raises(KeyboardInterrupt):
-        with script._json_out_draft(str(out)) as handle:
-            handle.write('{"moiti')  # relevé à moitié écrit
-            raise KeyboardInterrupt
-
-    assert json.loads(out.read_text(encoding="utf-8")) == {"ancien": True}
-    assert not (tmp_path / "zones.json.part").exists()
-
-
-def test_json_out_echoue_avant_de_jouer_si_la_destination_est_un_dossier(script, tmp_path):
-    # le brouillon `.part` s'ouvrirait très bien ici : c'est le os.replace FINAL qui casserait,
-    # après tous les épisodes. Le cas se refuse donc à l'ouverture, pas à la publication.
-    target = tmp_path / "zones"
-    target.mkdir()
-
-    with pytest.raises(IsADirectoryError):
-        with script._json_out_draft(str(target)):
-            pass
-    assert not (tmp_path / "zones.part").exists()
-
-
-def test_json_out_echoue_si_le_dossier_n_existe_pas(script, tmp_path):
-    # pas de création silencieuse ni de repli sur le cwd : un chemin faux doit se voir.
-    with pytest.raises(FileNotFoundError):
-        with script._json_out_draft(str(tmp_path / "absent" / "z.json")):
-            pass
-
-
-@pytest.mark.skipif(os.geteuid() == 0, reason="root écrit dans un dossier en lecture seule")
-def test_json_out_echoue_si_le_dossier_est_en_lecture_seule(script, tmp_path):
-    # motif de l'ouverture réelle plutôt que d'un `isdir` : un dossier existant mais
-    # non inscriptible passerait le test d'existence et casserait à la toute fin.
-    readonly = tmp_path / "ro"
-    readonly.mkdir()
-    readonly.chmod(0o500)
-    try:
-        with pytest.raises(PermissionError):
-            with script._json_out_draft(str(readonly / "z.json")):
-                pass
-    finally:
-        readonly.chmod(0o700)
-
-
-def test_sans_le_drapeau_aucun_fichier_n_est_touche(script, tmp_path, monkeypatch):
-    # le cwd EST tmp_path : un brouillon écrit « quelque part » se verrait ici.
-    monkeypatch.chdir(tmp_path)
-
-    with script._json_out_draft(None) as handle:
-        assert handle is None
-
-    assert list(tmp_path.iterdir()) == []
-
-
-def test_json_out_vide_echoue_avant_de_jouer_sans_rien_ecrire(script, tmp_path, monkeypatch):
-    # `--json-out "$VAR"` avec VAR non définie : sans ce refus, `.part` atterrit dans le cwd
-    # (la racine du dépôt en usage réel) et seul le os.replace final casse, après la partie.
-    monkeypatch.chdir(tmp_path)
-
-    with pytest.raises(ValueError):
-        with script._json_out_draft(""):
-            pass
-
-    assert list(tmp_path.iterdir()) == []
-
-
-def test_une_fermeture_qui_rate_ne_publie_pas_et_ne_masque_rien(script, tmp_path):
-    # disque plein au flush : le relevé est incomplet, donc rien ne doit être publié, et
-    # l'exception d'origine doit rester celle qu'on lit.
-    out = tmp_path / "zones.json"
-    out.write_text('{"ancien": true}\n', encoding="utf-8")
-
-    class _CloseKO(OSError):
-        pass
-
-    with pytest.raises(KeyboardInterrupt):
-        with script._json_out_draft(str(out)) as handle:
-            handle.close = lambda: (_ for _ in ()).throw(_CloseKO("ENOSPC"))
-            raise KeyboardInterrupt
-
-    assert json.loads(out.read_text(encoding="utf-8")) == {"ancien": True}
-    assert not (tmp_path / "zones.json.part").exists()
 
 
 def test_l_empreinte_du_modele_est_relevee_avant_son_chargement(script):
