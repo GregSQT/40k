@@ -198,31 +198,59 @@ def test_the_second_squad_of_the_turn_keeps_the_elected_target(
     assert bot._focus_target == "102"
 
 
-def test_a_new_turn_elects_again() -> None:
+def test_a_new_turn_elects_again(monkeypatch: pytest.MonkeyPatch) -> None:
     """VERT VACANT : vérifier que la cible CHANGE quand elle doit changer.
 
     Un fichier qui n'observerait que la concentration passerait sur un focus figé pour la partie
     entière — le défaut exact que `_focus_turn` existe pour empêcher.
+
+    ⚠️ LES DEUX ENNEMIS RESTENT VIVANTS AU TOUR 2, et c'est tout le test. La version du
+    2026-08-13 retirait `102` de l'état du tour 2 : c'est alors la branche « cible morte »
+    (`is_unit_alive`) qui rendait `101`, et retirer purement et simplement l'effacement au
+    changement de tour laissait les 13 tests du fichier VERTS (mutation exécutée le
+    2026-08-14). Avec les deux ennemis debout, seule la branche de tour peut faire réélire, et
+    la table inversée rend la réélection OBSERVABLE — sans elle, réélire redonnerait `102`.
     """
     bot = _Decapitation()
-    bot._focus(_state(turn=1), _moi(_state(turn=1)))
+    tour_un = _state(turn=1)
+    assert bot._focus(tour_un, _moi(tour_un)) == "102"
 
-    tour_deux = _state(turn=2, ennemis=(("101", FAIBLE),))
+    monkeypatch.setattr(
+        doc, "_damage_on",
+        lambda game_state, attacker_id, target_id, is_ranged: DEGATS_INVERSES[str(target_id)],
+    )
+    tour_deux = _state(turn=2)
 
-    assert bot._focus(tour_deux, _moi(tour_deux)) == "101", "la cible du tour 1 n'est plus là"
+    assert bot._focus(tour_deux, _moi(tour_deux)) == "101", "le tour a changé : on réélit"
 
 
-def test_a_focused_target_off_the_table_falls_back_to_every_anchor() -> None:
-    """Repli fonctionnel (T1) : une cible en réserves (20.01) n'a pas d'ancre à viser.
+def test_no_enemy_on_the_table_falls_back_to_every_anchor() -> None:
+    """Repli fonctionnel (T1) : au tour 1 tout l'adversaire peut être en réserves (20.01).
 
-    Le terme d'ennemi doit alors retomber sur toutes les ancres présentes — « pas encore
-    arrivée » n'est pas une erreur, et laisser le bot marcher vers `(-1, -1)` en serait une.
+    `_focus` n'a alors rien à élire et le terme d'ennemi ne tire vers rien — il ne doit ni lever,
+    ni faire marcher le bot vers `(-1, -1)`. La destination retombe sur le seul terme restant :
+    à poids d'objectif nul, la position courante, qui concourt avec les candidates.
+    """
+    state = _state(ennemis=(("101", HORS_TABLE), ("102", HORS_TABLE)))
+    bot = _Decapitation()
+
+    choisie = bot.select_movement_destination(_moi(state), [VERS_FAIBLE, VERS_JUTEUX], state)
+
+    assert bot._focus_target is None, "rien à élire : aucun ennemi sur la table"
+    assert choisie == MOI, "aucun terme ne départage : le bot ne bouge pas"
+
+
+def test_a_focused_target_off_the_table_is_a_broken_invariant() -> None:
+    """Une cible élue HORS TABLE n'existe pas : `_elect` n'élit que parmi les présentes.
+
+    Cet état ne se construit qu'à la main (c'est ce que fait ce test) ; le repli silencieux qui
+    vivait ici couvrait donc du code que la production n'atteint pas, et aurait fait jouer une
+    doctrine cassée comme un bot ordinaire. On exige l'erreur explicite.
     """
     state = _state(ennemis=(("101", FAIBLE), ("102", HORS_TABLE)))
     bot = _Decapitation()
     bot._focus_target = "102"
     bot._focus_turn = (1, 1)
 
-    choisie = bot.select_movement_destination(_moi(state), [VERS_FAIBLE, VERS_JUTEUX], state)
-
-    assert choisie == VERS_FAIBLE
+    with pytest.raises(RuntimeError, match="invariant de focus rompu"):
+        bot.select_movement_destination(_moi(state), [VERS_FAIBLE, VERS_JUTEUX], state)

@@ -939,8 +939,40 @@ deux décimales de l'instrument :
 `decapitation` (1.67 / 1.77) rejoint la référence panel (T2=1.61 / T5=1.90) qu'il était seul avec
 `alpha` à manquer.
 
-**Ce que ces cinq runs NE disent PAS.** Ils sont antérieurs au §12.8 : l'instrument ne rendait alors
-que les zones. Les deux grandeurs du diagnostic — distance au plus proche ennemi (14,9 hexes) et
-pertes par tour (10,7 %) — n'ont donc **pas** été rejouées après correction, alors qu'elles sont
-désormais mesurables par le même script. Reste aussi l'effet **contre l'agent** (win-rate), que cet
-instrument ne rend pas et que seule la campagne du §2 tranche.
+#### 12.9.1 Rejoué avec les trois grandeurs du §12.8 — le symptôme de distance N'EST PAS corrigé
+
+Les cinq runs ci-dessus sont antérieurs au §12.8 : l'instrument ne rendait alors que les zones. Deux
+runs de 60 ép. de plus, avec les trois grandeurs, comparent **l'état d'avant** (code et poids de
+`main`) à **l'état livré** (élection + `w_objective` 1.0). L'état d'avant reproduit le diagnostic
+d'origine au dixième près — distance T5 15.0 pour 14,9 annoncés, `racer` 18.5 pour 18,8, `attrition`
+21.9 pour 22,2 — donc l'instrument mesure bien la même chose que l'outil du diagnostic.
+
+| grandeur (`decapitation`) | T2 | T3 | T4 | T5 |
+|---|---|---|---|---|
+| zones, avant | 1.43 | 1.28 | 1.08 | 0.98 |
+| zones, après | **1.67** | **1.80** | **1.60** | **1.77** |
+| distance, avant | 20.8 | 15.7 | 14.6 | 15.0 |
+| distance, après | 21.4 | 16.8 | 15.7 | **17.6** |
+| pertes cumulées, avant | 0.04 | 0.12 | 0.23 | 0.39 |
+| pertes cumulées, après | 0.04 | 0.12 | 0.20 | **0.35** |
+
+⚠️ **La distance au plus proche ennemi AUGMENTE** (15.0 → 17.6 au T5), alors que le diagnostic la
+citait comme symptôme. Les pertes ne bougent qu'à la marge (0.39 → 0.35). Seules les zones se
+redressent franchement. Deux lectures possibles, et **ce run ne les sépare pas** — il change deux
+choses à la fois (l'élection ET `w_objective` 0.5 → 1.0) :
+
+1. la **grandeur est mal choisie** pour cette doctrine. « Distance au plus proche ennemi », moyennée
+   sur les escouades, RÉCOMPENSE la dispersion : cinq escouades sur cinq ennemis différents sont
+   chacune près d'un ennemi. Concentrer les cinq sur UNE cible fait mécaniquement monter la moyenne,
+   même si la doctrine est exactement respectée. La grandeur juste serait la distance à la **cible
+   élue**, ou le nombre d'ennemis distincts les plus proches d'au moins une escouade ;
+2. `w_objective` 1.0 tient les escouades sur les zones, donc plus loin des ennemis — et c'est alors
+   le réglage, pas l'élection, qui déplace la distance.
+
+Tant que ce n'est pas décomposé (un run « élection seule, poids d'avant »), **ne pas conclure** que
+la doctrine est réparée sur la foi des zones. Reste aussi l'effet **contre l'agent** (win-rate), que
+cet instrument ne rend pas et que seule la campagne du §2 tranche.
+
+Contrôle : les cinq autres styles rendent des chiffres **identiques aux trois grandeurs** entre les
+deux runs (dérive 0.000), ce qui confirme que le point d'extension `movement_enemy_anchors` n'a
+touché qu'un style.

@@ -111,8 +111,8 @@ def _score_efficiency(attacker, is_ranged: bool):
     """
     att_id = str(require_key(attacker, "id"))
 
-    def _score(sid: str, entry: Dict[str, Any], game_state) -> Optional[float]:
-        return _damage_on(game_state, att_id, sid, is_ranged)
+    def _score(sid: str, entry: Dict[str, Any], game_state) -> float:  # jamais `None`, cf.
+        return _damage_on(game_state, att_id, sid, is_ranged)          # `_score_kill_now`
 
     return _score
 
@@ -144,10 +144,16 @@ def _score_kill_now(attacker, is_ranged: bool):
     restants de la cible. L'ancien `_score_killable_then_wounded` comparait les PV de l'escouade
     au degat d'UNE arme d'UNE figurine : sur toute escouade multi-figurines la branche etait
     quasi toujours fausse, et le bonus de 1000 points ne se declenchait jamais.
+
+    ⚠️ `float`, PAS `Optional[float]` : ce scorer n'ECARTE aucune cible, il les classe toutes,
+    zero degat compris. Le contrat de `_best_slot_action` autorise `None` — `_score_contester`
+    s'en sert — mais l'annoncer ici quand on ne le rend jamais faisait ecrire chez les appelants
+    des gardes `is None` MORTES (deux, corrigees le 2026-08-14 : `_elect` et le `target_score`
+    de `DecapitationBot`). « Peut ecarter » se lit sur le type, donc le type doit etre vrai.
     """
     att_id = str(require_key(attacker, "id"))
 
-    def _score(sid: str, entry: Dict[str, Any], game_state) -> Optional[float]:
+    def _score(sid: str, entry: Dict[str, Any], game_state) -> float:
         damage = _damage_on(game_state, att_id, sid, is_ranged)
         return (1000.0 if damage >= _hp_left(sid, game_state) else 0.0) + damage
 
@@ -163,8 +169,8 @@ def _score_value_removed(attacker, is_ranged: bool):
     """
     att_id = str(require_key(attacker, "id"))
 
-    def _score(sid: str, entry: Dict[str, Any], game_state) -> Optional[float]:
-        damage = _damage_on(game_state, att_id, sid, is_ranged)
+    def _score(sid: str, entry: Dict[str, Any], game_state) -> float:  # jamais `None`, cf.
+        damage = _damage_on(game_state, att_id, sid, is_ranged)        # `_score_kill_now`
         return float(require_key(entry, "VALUE")) * min(
             1.0, damage / _hp_left(sid, game_state)
         )
@@ -943,6 +949,11 @@ class DecapitationBot(_DoctrineBot):
         moment de bouger on ne sait pas encore si l'escouade tirera ou chargera, et une cible elue
         sur la mauvaise table de degats concentrerait tout le monde sur une escouade que personne
         ne peut entamer.
+
+        AUCUN filtre sur les scores, et c'est le contrat de `_score_kill_now` qui le dit : il
+        classe TOUTES les cibles, zero degat compris (contrairement a `_score_contester`, qui
+        ecarte). Le filtre `is None` qui vivait ici etait donc mort, et avec lui le repli
+        `if not scored`. `None` n'est rendu QUE sur une table sans ennemi.
         """
         enemies = _living_enemies_on_table(attacker, game_state)
         if not enemies:
@@ -952,18 +963,11 @@ class DecapitationBot(_DoctrineBot):
         for enemy in enemies:
             sid = str(enemy["id"])
             entry = require_unit_from_cache(sid, game_state, "_elect")
-            # `None` ECARTE la cible — meme contrat que `_best_slot_action`, et c'est pourquoi le
-            # filtre porte sur les deux modes separement : « inattaquable au tir » n'est pas
-            # « inattaquable ».
-            modes = [
-                score for score in
-                (ranged(sid, entry, game_state), melee(sid, entry, game_state))
-                if score is not None
-            ]
-            if modes:
-                scored.append((max(modes), sid))
-        if not scored:
-            return None
+            # Le MEILLEUR des deux modes, par cible : « inattaquable au tir » n'est pas
+            # « inattaquable » — l'escouade peut encore charger.
+            scored.append((
+                max(ranged(sid, entry, game_state), melee(sid, entry, game_state)), sid
+            ))
         # `key=` et non `max(scored)` : a egalite de score, le premier de l'ordre des unites, et
         # surtout pas le plus petit identifiant — l'ordre des unites est le meme pour toutes les
         # escouades du tour, donc l'election reste la meme quelle que soit celle qui active.
@@ -972,27 +976,39 @@ class DecapitationBot(_DoctrineBot):
     def movement_enemy_anchors(self, unit, enemies, game_state):
         """Le terme d'ennemi porte sur la CIBLE DU TOUR : c'est la doctrine, pas une geometrie.
 
-        Repli sur toutes les ancres quand il n'y a pas de cible elue (plus aucun ennemi sur la
-        table) ou qu'elle n'y est pas encore (reserves, 20.01) : le terme doit tirer vers quelque
-        chose, et « pas encore arrivee » n'est pas une erreur a masquer.
+        UN SEUL repli, et il est fonctionnel : plus aucun ennemi SUR LA TABLE (tous en reserves
+        au tour 1, 20.01, ou tous morts) — `_focus` rend alors `None`, et le terme retombe sur
+        toutes les ancres, c'est-a-dire sur rien puisque `enemies` est vide lui aussi.
+
+        ⚠️ Une cible elue est FORCEMENT dans `enemies` : `_elect` n'elit que parmi
+        `_living_enemies_on_table`, exactement la liste que `select_movement_destination` passe
+        ici, et `_focus` efface celle qui meurt. Une escouade posee ne repasse jamais en
+        reserves. Donc une cible absente d'`enemies` n'est PAS une cible « pas encore arrivee » :
+        c'est une rupture d'invariant, et elle LEVE (T1). Le test d'appartenance qui vivait ici
+        la faisait retomber en silence sur `min(distance)` — une doctrine cassee jouant comme un
+        bot ordinaire, sans que rien ne le signale.
         """
         focused = self._focus(game_state, unit)
-        if focused is not None and any(str(e["id"]) == focused for e in enemies):
-            entry = require_unit_from_cache(focused, game_state, "_move_focus")
-            return [(int(entry["col"]), int(entry["row"]))]
-        return super().movement_enemy_anchors(unit, enemies, game_state)
+        if focused is None:
+            return super().movement_enemy_anchors(unit, enemies, game_state)
+        entry = require_unit_from_cache(focused, game_state, "_move_focus")
+        if not entry_is_on_battlefield(entry):
+            raise RuntimeError(
+                f"DecapitationBot : cible focalisee {focused} hors table alors que `_elect` ne "
+                "l'elit que parmi les escouades presentes — invariant de focus rompu."
+            )
+        return [(int(entry["col"]), int(entry["row"]))]
 
     def target_score(self, attacker, is_ranged: bool, game_state):
         focused = self._focus(game_state, attacker)
         kill_now = _score_kill_now(attacker, is_ranged)
 
-        def _score(sid: str, entry: Dict[str, Any], game_state) -> Optional[float]:
+        def _score(sid: str, entry: Dict[str, Any], game_state) -> float:
             # `kill_now` vaut `(1000 si letal) + degats`, et les PV sont strictement positifs
             # (`_hp_left`) : `base > 0` dit donc exactement « je peux l'entamer », sans qu'il
-            # faille construire un second scorer pour poser la meme question.
+            # faille construire un second scorer pour poser la meme question. Il n'ecarte
+            # jamais, d'ou l'absence de garde `is None` — cf. son contrat.
             base = kill_now(sid, entry, game_state)
-            if base is None:
-                return None
             if focused is not None and sid == focused and base > 0.0:
                 return base + 10_000.0  # la cible du tour prime, si on peut l'entamer
             return base
