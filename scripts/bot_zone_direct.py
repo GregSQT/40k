@@ -28,6 +28,10 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # 2 : `run` regroupe les métadonnées du run, `model` (basename) devient `model_path`/`model_bytes`
 # /`model_mtime`. Un lecteur de la v1 lèverait un KeyError sur un fichier v2 — d'où le numéro.
+# ⚠️ Le commit a4668891 a émis la forme v2 en la marquant `1` : un fichier marqué `1` qui porte
+# une clé `run` en vient. Aucun n'existe (aucun JSON du dépôt ne porte `schema_version`, vérifié
+# le 2026-08-13), mais un lecteur qui branche sur le numéro doit tester la clé `run`, pas le seul
+# entier — le numéro n'a jamais été faux que pendant ces deux commits.
 _JSON_SCHEMA_VERSION = 2
 
 
@@ -81,28 +85,34 @@ def _json_out_draft(path: Optional[str]) -> Iterator[Optional[TextIO]]:
     """Brouillon ouvert AVANT de jouer, publié seulement si le run va jusqu'au bout.
 
     Tout ce qui peut rater sur la destination doit rater ici, en une seconde, pas après la
-    partie quand les graines sont déjà perdues. Deux contrôles, parce qu'aucun ne suffit :
-    `path` ne doit pas être un DOSSIER (le `os.replace` final échouerait seul, tout à la fin),
-    et le brouillon `<path>.part` doit s'ouvrir (ce qui prouve, syscall à l'appui, que le
-    dossier existe et qu'il est inscriptible — un `isdir` laisserait passer une lecture seule).
-    Écrire dans le brouillon plutôt que dans `path` protège le relevé PRÉCÉDENT : il reste
-    intact tant que le nouveau n'est pas complet, et la publication est atomique.
+    partie quand les graines sont déjà perdues. Trois contrôles, aucun ne couvre les autres :
+    `path` ne doit pas être VIDE (`--json-out "$VAR"` avec `VAR` non défini : `.part` atterrirait
+    à la racine du dépôt et seul le `os.replace` final échouerait), ni être un DOSSIER (même
+    échec, même moment), et le brouillon `<path>.part` doit s'ouvrir — ce qui prouve, syscall à
+    l'appui, que le dossier existe et qu'il est inscriptible ; un `isdir` laisserait passer une
+    lecture seule. Écrire dans le brouillon plutôt que dans `path` protège le relevé PRÉCÉDENT :
+    il reste intact tant que le nouveau n'est pas complet, et la publication est atomique.
     Aucune création de dossier : un chemin faux se voit, il ne se répare pas en silence.
     Sortie par exception : le brouillon est refermé ET effacé — pas de résidu vide à trier.
     """
     if path is None:
         yield None
         return
+    if not path:
+        raise ValueError("--json-out a reçu un chemin vide — variable de shell non définie ?")
     if os.path.isdir(path):
         raise IsADirectoryError(f"--json-out {path} est un dossier : la destination doit être un fichier")
     handle = open(_part_path(path), "w", encoding="utf-8")
     try:
         yield handle
+        handle.close()  # le flush APPARTIENT à l'écriture : s'il rate, on ne publie pas
     except BaseException:
-        handle.close()
+        # le brouillon part à la poubelle : une erreur de fermeture n'y ajoute rien, et elle
+        # masquerait l'exception qui a réellement tué le run.
+        with contextlib.suppress(OSError):
+            handle.close()
         os.remove(_part_path(path))
         raise
-    handle.close()
     os.replace(_part_path(path), path)
 
 
