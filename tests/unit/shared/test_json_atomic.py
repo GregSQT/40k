@@ -24,7 +24,15 @@ from pathlib import Path
 
 import pytest
 
+import shared.json_atomic as json_atomic  # le module lui-même : les tests d'ordre monkeypatchent ses `os.*`
 from shared.json_atomic import dump_json, json_draft, json_out_draft, part_path, write_json_atomic
+
+
+def _leve(exc: BaseException):
+    """Remplaçant d'un appel système qui casse — la panne se construit, elle ne s'espère pas."""
+    def _ko(*_args, **_kwargs):
+        raise exc
+    return _ko
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
@@ -151,6 +159,61 @@ def test_une_fermeture_qui_rate_en_sortie_normale_ne_publie_pas(tmp_path):
             handle.close = lambda: (_ for _ in ()).throw(OSError("ENOSPC"))
 
     assert json.loads(cible.read_text(encoding="utf-8")) == {"ancien": True}
+    assert [p.name for p in tmp_path.iterdir()] == ["releve.json"]
+
+
+def test_une_publication_qui_rate_n_abandonne_pas_le_brouillon(tmp_path, monkeypatch):
+    # TOCTOU : la destination est devenue un dossier / a perdu ses droits PENDANT un run long.
+    # `os.replace` casse alors après coup ; sans ce nettoyage, un brouillon reste sous `config/`.
+    cible = tmp_path / "releve.json"
+    cible.write_text('{"ancien": true}\n', encoding="utf-8")
+    monkeypatch.setattr(json_atomic.os, "replace", _leve(OSError("EPERM")))
+
+    with pytest.raises(OSError):
+        write_json_atomic(cible, {"neuf": True})
+
+    assert json.loads(cible.read_text(encoding="utf-8")) == {"ancien": True}
+    assert [p.name for p in tmp_path.iterdir()] == ["releve.json"]
+
+
+def test_un_brouillon_deja_disparu_ne_masque_pas_l_exception_d_origine(tmp_path, monkeypatch):
+    # le ménage de la sortie en erreur est best-effort : c'est le Ctrl-C qui doit remonter, pas
+    # le `FileNotFoundError` du brouillon qu'un nettoyeur de /tmp a emporté entre-temps.
+    cible = tmp_path / "releve.json"
+    monkeypatch.setattr(json_atomic.os, "remove", _leve(FileNotFoundError("déjà parti")))
+
+    with pytest.raises(KeyboardInterrupt):
+        with json_out_draft(cible) as handle:
+            assert handle is not None
+            raise KeyboardInterrupt
+
+
+def test_les_donnees_sont_sur_le_disque_avant_la_publication(tmp_path, monkeypatch):
+    # un `os.replace` durable AVANT ses données rend un fichier VIDE là où une config valide
+    # tenait, après un crash hôte. L'ordre fsync -> replace est donc le verrou, et il n'est
+    # observable que sur la séquence des appels.
+    appels: list[str] = []
+    vrai_fsync, vrai_replace = json_atomic.os.fsync, json_atomic.os.replace
+    monkeypatch.setattr(json_atomic.os, "fsync", lambda fd: (appels.append("fsync"), vrai_fsync(fd))[1])
+    monkeypatch.setattr(json_atomic.os, "replace", lambda a, b: (appels.append("replace"), vrai_replace(a, b))[1])
+
+    write_json_atomic(tmp_path / "releve.json", {"ok": True})
+
+    # fsync du brouillon, PUIS publication, PUIS fsync du dossier (qui rend le renommage durable)
+    assert appels == ["fsync", "replace", "fsync"]
+
+
+def test_un_fsync_de_dossier_impossible_n_annule_pas_une_publication_reussie(tmp_path, monkeypatch):
+    # certains montages ne savent pas fsyncer un dossier (FUSE, réseau, overlay : EINVAL). La
+    # publication, elle, a déjà eu lieu : remonter l'erreur ferait lire « rien n'a été écrit » à
+    # un appelant qui a DÉJÀ supprimé la version précédente de ses autres fichiers, et il
+    # abandonnerait la banque à moitié reconstruite.
+    cible = tmp_path / "releve.json"
+    monkeypatch.setattr(json_atomic.os, "open", _leve(OSError("EINVAL")))
+
+    write_json_atomic(cible, {"neuf": True})
+
+    assert json.loads(cible.read_text(encoding="utf-8")) == {"neuf": True}
     assert [p.name for p in tmp_path.iterdir()] == ["releve.json"]
 
 
@@ -466,13 +529,18 @@ def test_le_verrou_voit_les_publications_et_ignore_ce_qui_n_en_est_pas() -> None
         "    with open(p, 'w') as f:\n"
         "        json.dump(d, f)\n"
         "def c(p, d):\n"
-        "    with p.open('w', encoding='utf-8') as f:\n"
+        "    with p.open('w', encoding='utf-8') as f:\n"          # méthode : mode en 1er argument
         "        json.dump(d, f, indent=2)\n"
         "def d_(p, d):\n"
-        "    f = open(p, mode='w')\n"
+        "    f = open(p, mode='w')\n"                             # mode en MOT-CLÉ
         "    f.write(json.dumps(d) + '\\n')\n"
+        "def e(p, d):\n"
+        "    with Path(p).open('x') as f:\n"                      # `x` détruit autant que `w`
+        "        f.write(json.dumps(d))\n"
     )
-    assert len(publications_directes(fautif)) == 4
+    # les deux dernières formes sont celles qu'un contrôle borné au 2e argument positionnel,
+    # ou à la seule lettre `w`, laisserait passer.
+    assert len(publications_directes(fautif)) == 5
 
     innocent = (
         "import csv, json, sys\n"
@@ -501,5 +569,11 @@ def test_le_verrou_voit_les_publications_et_ignore_ce_qui_n_en_est_pas() -> None
         "def drapeau(p, d):\n"                                    # `--json-out` absent possible
         "    with json_out_draft(p) as f:\n"
         "        json.dump(d, f, indent=0)\n"
+        "def lit(p):\n"                                           # LECTURE : les 138 fichiers en
+        "    with open(p, 'r', encoding='utf-8-sig') as f:\n"      # font, un contrôle qui les
+        "        return json.load(f)\n"                            # compterait serait rouge en
+        "def lit_aussi(p):\n"                                      # permanence, donc désarmé le
+        "    with Path(p).open() as f:\n"                          # jour même.
+        "        return json.load(f)\n"
     )
     assert publications_directes(innocent) == []

@@ -98,7 +98,8 @@ def _model_fingerprint(model_path: str) -> Dict[str, Any]:
 def _run_meta(
     model_fingerprint: Dict[str, Any],
     scenario_file: str,
-    episodes_requested: int,
+    episodes_per_bot: int,
+    n_bots: int,
     base_seed: int,
     agent_seat_mode: str,
     agent_seat_seed: Optional[int],
@@ -112,7 +113,8 @@ def _run_meta(
         "training_config": "x1_panel",
         **model_fingerprint,
         "scenario_file": scenario_file,
-        "episodes_requested": episodes_requested,
+        "episodes_per_bot": episodes_per_bot,
+        "episodes_total": episodes_per_bot * n_bots,
         "base_seed": base_seed,
         "agent_seat_mode": agent_seat_mode,
         "agent_seat_seed": agent_seat_seed,
@@ -260,8 +262,8 @@ def main() -> None:
 
         if json_handle is not None:
             run_meta = _run_meta(
-                model_fingerprint, scenario_file, args.episodes, base_seed,
-                agent_seat_mode, agent_seat_seed, bot_randomness,
+                model_fingerprint, scenario_file, args.episodes, len(bot_weights),
+                base_seed, agent_seat_mode, agent_seat_seed, bot_randomness,
             )
             _write_json_out(json_handle, run_meta, episode_records)
 
