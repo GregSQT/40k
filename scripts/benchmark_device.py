@@ -26,6 +26,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from shared.json_atomic import write_json_atomic  # noqa: E402  (dépend du sys.path ci-dessus)
+
 
 EP_S_REGEX = re.compile(r"([0-9]+(?:\.[0-9]+)?)ep/s")
 
@@ -179,8 +185,7 @@ def _print_summary(
             "gpu_ep_s": gpu.avg_ep_per_sec,
         }
         save_path.parent.mkdir(parents=True, exist_ok=True)
-        with save_path.open("w", encoding="utf-8") as f:
-            json.dump(cache, f, indent=2)
+        write_json_atomic(save_path, cache)
         print(f"📁 Result saved to {save_path} (train.py will use it and skip micro-benchmark)")
 
     return mode

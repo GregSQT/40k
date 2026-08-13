@@ -21,6 +21,7 @@ from datetime import datetime
 
 from shared.data_validation import require_key
 from shared.torch_safe_globals import register_torch_safe_globals
+from shared.json_atomic import write_json_atomic
 
 # Avant tout `MaskablePPO.load` de ce module : torch >= 2.6 charge en `weights_only=True`.
 register_torch_safe_globals()
@@ -92,8 +93,7 @@ def convert_steplog_to_replay(steplog_path, scenario_file):
     os.makedirs("ai/event_log", exist_ok=True)
     
     # Save replay file
-    with open(output_file, 'w', encoding='utf-8') as f:
-        json.dump(replay_data, f, indent=2, ensure_ascii=False)
+    write_json_atomic(output_file, replay_data)
     
     print(f"✅ Conversion complete: {output_file}")
     print(f"   📊 {len(require_key(replay_data, 'combat_log'))} combat log entries")

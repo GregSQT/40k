@@ -503,6 +503,23 @@ CAUSE — établir avant de toucher
   violé, sur un chemin réellement atteint en production. Sans ce scénario, le finding est ÉCARTÉ,
   pas rétrogradé en « mineur ». Hors périmètre sauf demande explicite : nommage, découpage, style,
   « on pourrait extraire », préférence d'architecture sur du code correct.
+- PREUVE PAR LE FICHIER — un scénario ne vaut que s'il a été établi sur le FICHIER, jamais sur la
+  hunk du diff. Tout finding RECOPIE VERBATIM, dans son scénario, les lignes du fichier qui le
+  rendent possible : la ligne fautive ET ce qui aurait pu l'empêcher (garde, défaut, early-return,
+  appelant). Recopiées, pas résumées, pas abrégées d'un « … » : une citation qu'on ne retrouve pas
+  telle quelle à la ligne indiquée écarte le finding, sans discussion. Un finding dont l'ancre est
+  HORS du diff se relit intégralement dans le fichier avant d'être écrit, et nomme la ligne DU diff
+  qui le casse — sinon il est écarté aussi.
+  * MOTIF, mesuré le 2026-08-13 sur `test_bot_zone_direct_json_out.py` : une passe a rendu cinq
+    findings, dont quatre décrivaient du code INEXISTANT — `next()` sans défaut là où le fichier
+    porte `None,` + `pytest.fail`, `min()` non gardé là où la fonction ouvre sur `assert hits`. Les
+    quatre étaient marqués `CONFIRMED`. Trois portaient sur des lignes que le diff ne touche PAS,
+    la quatrième sur une garde située dans une autre hunk. Aucun contrôle mécanique ne voit ce
+    défaut : l'ancre existe, le scénario est bien formé, seul le code cité est faux. Recopier les
+    lignes est la seule opération qui l'expose, parce qu'elle oblige à les lire.
+  * Un finding qui énonce lui-même que le code visé est correct (« correct but », « invites a
+    future », « compounding ») n'est pas un finding faible : c'est du style, déjà écarté par la
+    ligne ci-dessus. Ne pas le rendre.
 - CRITÈRE D'ARRÊT : une review est finie quand il ne reste plus de finding AVEC scénario, pas
   quand il ne reste plus de finding. Ne jamais relancer une review pour faire taire du goût — le
   signaler si je demande une relance dont la passe précédente n'a rendu que du cosmétique.

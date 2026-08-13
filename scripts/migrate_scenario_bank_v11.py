@@ -30,6 +30,9 @@ import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from shared.json_atomic import write_json_atomic  # noqa: E402  (dépend du sys.path ci-dessus)
 BOARD_REF = "44x60x5"
 BOARD_DIR = PROJECT_ROOT / "config" / "board" / BOARD_REF
 TERRAIN_DIR = BOARD_DIR / "terrain"
@@ -43,10 +46,6 @@ LEGACY_KEYS = ("objectives", "objectives_ref", "objective_hexes", "deployment_zo
 
 # Dossiers de la banque ACTIVE à migrer (relatifs à SCEN_ROOT). training_save exclu (archivé).
 ACTIVE_DIRS = ["training", "holdout_regular", "holdout_hard"]
-
-
-def _json_dump(path: Path, data) -> None:
-    path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
 def _flatten_area(area: dict) -> dict:
@@ -90,7 +89,7 @@ def build_training_terrains() -> None:
             raise ValueError(f"{name}: deployment_zones doivent être exactement 1 et 2, got {zone_ids}")
         if any("floors" in a for a in flat_areas):
             raise ValueError(f"{name}: un area conserve 'floors' (terrain non plat)")
-        _json_dump(TERRAIN_DIR / name, terrain)
+        write_json_atomic(TERRAIN_DIR / name, terrain)
         print(f"  terrain écrit : {name} ({len(flat_areas)} areas, {n_obj} objectifs, {len(sel_walls)} murs)")
 
 
@@ -172,7 +171,7 @@ def migrate_bank() -> int:
     for idx, (f, data) in enumerate(scen_files):
         terrain_ref = TRAIN_TERRAINS[idx % len(TRAIN_TERRAINS)]
         migrated = _migrate_scenario(data, terrain_ref)
-        _json_dump(f, migrated)
+        write_json_atomic(f, migrated)
         n += 1
     print(f"  {n} scénarios migrés (board_ref + terrain_ref, clés legacy supprimées)")
     return n

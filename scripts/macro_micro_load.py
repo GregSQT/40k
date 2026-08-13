@@ -15,7 +15,6 @@ This script is intended for load testing and capacity planning.
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import random
 import resource
@@ -31,6 +30,7 @@ if project_root not in sys.path:
 
 from config_loader import get_config_loader
 from shared.data_validation import require_key
+from shared.json_atomic import write_json_atomic
 from ai.unit_registry import UnitRegistry
 from engine.w40k_core import W40KEngine
 from engine.phase_handlers.fight_handlers import fight_v11_current_pool
@@ -356,8 +356,7 @@ def main() -> None:
         # Absent du payload si non mesure : une cle a 0 se lirait comme une mesure.
         if py_peak_kb is not None:
             payload["python_memory_peak_kb"] = py_peak_kb
-        with open(args.metrics_out, "w", encoding="utf-8") as handle:
-            json.dump(payload, handle, indent=2)
+        write_json_atomic(args.metrics_out, payload)
 
 
 if __name__ == "__main__":

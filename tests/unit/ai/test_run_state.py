@@ -66,7 +66,7 @@ def test_save_is_atomic_and_leaves_no_temporary(tmp_path) -> None:
     save_run_state(model, 10)
     save_run_state(model, 20)
     assert load_run_state(model) == 20
-    assert [p.name for p in tmp_path.iterdir() if p.name.endswith(".tmp")] == []
+    assert list(tmp_path.rglob("*.part")) == []
 
 
 def test_remove_is_idempotent(tmp_path) -> None:

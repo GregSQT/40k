@@ -17,6 +17,7 @@ import argparse
 import json
 import math
 import random
+import sys
 from collections import Counter, deque
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,6 +25,10 @@ from typing import Any, Deque, Dict, List, Optional, Sequence, Tuple
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from shared.json_atomic import write_json_atomic  # noqa: E402  (dépend du sys.path ci-dessus)
 
 
 @dataclass(frozen=True)
@@ -595,7 +600,7 @@ def _write_roster_file(output_dir: Path, roster_id: str, composition: List[Tuple
         "composition": [{"unit_type": unit_type, "count": count} for unit_type, count in composition],
     }
     output_path = output_dir / f"{roster_id}.json"
-    output_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    write_json_atomic(output_path, payload)
     return output_path
 
 
@@ -1181,7 +1186,7 @@ def main() -> None:
             else (str(args.target_tanking).lower() if args.target_tanking is not None else "mixed")
         )
         matchup_path = output_dir / f"{args.roster_prefix}_{matchup_tanking_label}_matchups.json"
-        matchup_path.write_text(json.dumps(matchup_payload, indent=2), encoding="utf-8")
+        write_json_atomic(matchup_path, matchup_payload)
         kpis.update(matchup_kpis)
 
     kpi_tanking_label = (
@@ -1190,7 +1195,7 @@ def main() -> None:
         else (str(args.target_tanking).lower() if args.target_tanking is not None else "mixed")
     )
     kpi_path = output_dir / f"{args.roster_prefix}_{kpi_tanking_label}_kpis_v21.json"
-    kpi_path.write_text(json.dumps(kpis, indent=2), encoding="utf-8")
+    write_json_atomic(kpi_path, kpis)
 
     print(f"Generated rosters: {len(written_paths)}")
     print(

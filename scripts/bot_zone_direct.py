@@ -1,26 +1,27 @@
 #!/usr/bin/env python3
-"""Mesure directe de l'étalement des bots (zones contrôlées par tour).
+"""Mesure directe de l'étalement des bots (zones, distance, pertes) par tour.
 
 Joue des épisodes de bot eval sans passer par train.py ni step_logger.
-Lit game_state["objective_controllers"] après chaque step pour compter les zones
-contrôlées par le bot player (opponent_player).
+Lit game_state après chaque step pour mesurer trois grandeurs par tour :
+  - zones contrôlées par le bot player (objective_controllers)
+  - distance hex moyenne de chaque escouade bot au plus proche ennemi vivant
+  - taux d'escouades bot perdues (∆ depuis T1)
 
 ⚠️ DEUX ENTRÉES DÉCIDENT DU CHIFFRE AUTANT QUE LES POIDS MESURÉS, et les deux étaient
 silencieuses (corrigé le 2026-08-13) :
 
-1. LE MODÈLE. Le script lisait le chemin CANONIQUE `model_ArmageddonAgent.zip`, que le moindre
-   entraînement réécrit : le 2026-08-13 il valait md5 1072b0c6…, quand toutes les mesures du §12
-   du chantier (référence T2=1.61 / T5=1.90 imprimée en bas) sont faites sur le checkpoint
-   `robust_0.8721` (md5 6f6b98…). Deux campagnes se comparaient donc sans modèle commun, et rien
-   ne le disait. Le checkpoint de référence est désormais NOMMÉ et VÉRIFIÉ AU MD5 — le jour où il
-   change, le script lève au lieu de rendre un tableau incomparable. Son `_vec_normalize.pkl`
-   apparié suit automatiquement (`get_vec_normalize_path` le dérive du zip chargé).
-2. LE PLATEAU. Sans `W40K_BOARD_PATH`, c'est `config/config.json` qui décide (x5), où le classement
-   des bots N'EST PAS le même — cf. l'avertissement de `config/bot_movement_weights.json`, qui a
-   déjà coûté une campagne entière. La variable est donc EXIGÉE, pas défaultée.
+1. LE MODÈLE. Le script lisait le chemin canonique `model_ArmageddonAgent.zip`, que le moindre
+   entraînement réécrit. Toutes les mesures du §12 sont faites sur le checkpoint robust_0.8721
+   (md5 6f6b98…). Le checkpoint est désormais NOMMÉ et VÉRIFIÉ AU MD5 — le jour où il change,
+   le script lève au lieu de rendre un tableau incomparable.
+2. LE PLATEAU. Sans `W40K_BOARD_PATH`, c'est `config/config.json` qui décide (x5), où le
+   classement des bots n'est pas le même. La variable est EXIGÉE, pas défaultée.
 
-Usage:
-    W40K_BOARD_PATH=board/44x60x1 python3 scripts/bot_zone_direct.py [--episodes N]
+Usage (protocole §12.8) :
+    W40K_BOARD_PATH=board/44x60x1 python3 scripts/bot_zone_direct.py --episodes 60 [--json-out F]
+
+`--json-out` écrit le relevé PAR ÉPISODE (graine, joueur du bot, grandeurs par tour) : la sortie
+texte agrégée reste identique, seul s'y ajoute le chemin du fichier écrit.
 """
 from __future__ import annotations
 
@@ -28,17 +29,32 @@ import argparse
 import hashlib
 import os
 import sys
-from collections import defaultdict
-from typing import Dict, List, Optional
+from datetime import datetime
+from typing import Any, Dict, List, Optional, TextIO
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from shared.json_atomic import dump_json, json_out_draft  # noqa: E402  (dépend du sys.path ci-dessus)
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-#: Le modèle SUR LEQUEL TOUT LE §12 EST MESURÉ. Ce n'est pas « un modèle récent » : c'est l'étalon
-#: qui rend les campagnes comparables entre elles. Le remplacer est une décision de protocole, qui
-#: périme les chiffres du chantier — donc elle s'écrit ici, elle ne s'attrape pas par un
-#: entraînement qui a réécrit le chemin canonique.
+# 2 : `run` regroupe les métadonnées du run, `model` (basename) devient `model_path`/`model_bytes`
+# /`model_mtime`. Un lecteur de la v1 lèverait un KeyError sur un fichier v2 — d'où le numéro.
+# 3 : `run.episodes_requested` (nombre d'épisodes PAR BOT, malgré le nom) disparaît au profit de
+# `run.episodes_per_bot` et `run.episodes_total`. Un lecteur de la v2 lève un KeyError sur un
+# fichier v3, donc le numéro DOIT bouger.
+# ⚠️ CE NUMÉRO A DÉJÀ MENTI DEUX FOIS, et les deux fois de la même façon : la forme a changé
+# sans lui. Le commit a4668891 a émis la forme v2 en la marquant `1` ; les commits e8db6180 et
+# 046478e7 ont retiré `episodes_requested` en gardant `2`, si bien que DEUX formes incompatibles
+# portent le numéro 2. Aucun fichier du dépôt n'en vient (aucun JSON n'y porte `schema_version`,
+# vérifié le 2026-08-13), mais un lecteur qui branche sur le numéro doit tester les CLÉS qu'il
+# lit, jamais le seul entier. Corollaire pour la suite : toute clé retirée ou renommée dans
+# `run`/`episodes` incrémente cette constante DANS LE MÊME commit.
+_JSON_SCHEMA_VERSION = 3
+
+#: Checkpoint sur lequel TOUTES les mesures du §12 sont faites. Remplacer ici est une décision
+#: de protocole : elle périme les chiffres du chantier, donc elle ne se prend pas par accident.
 REFERENCE_MODEL = "ArmageddonAgent_12345_robust_0.8721.zip"
 REFERENCE_MD5 = "6f6b98059a0a6c279b7d11dc427461fd"
 
@@ -72,132 +88,414 @@ def _require_board_path() -> str:
     return board
 
 
+def _avg_bot_enemy_distance(gs: Dict[str, Any], bot_player: int) -> Optional[float]:
+    """Distance hex moyenne de chaque escouade bot vivante au plus proche ennemi vivant sur table.
+
+    Retourne None si aucun ennemi n'est sur la table (réserves seules ou tous éliminés).
+    Les escouades en réserves sont exclues côté bot ET côté ennemi.
+    """
+    from engine.phase_handlers.shared_utils import is_unit_alive, require_unit_from_cache
+    from engine.spatial_relations import entry_is_on_battlefield
+    from engine.combat_utils import calculate_hex_distance
+
+    units = gs.get("units", [])
+
+    enemy_positions: List[tuple] = []
+    for u in units:
+        if int(u.get("player", 0)) == bot_player:
+            continue
+        sid = str(u["id"])
+        if not is_unit_alive(sid, gs):
+            continue
+        entry = require_unit_from_cache(sid, gs, "_avg_dist:enemy")
+        if entry_is_on_battlefield(entry):
+            enemy_positions.append((int(entry["col"]), int(entry["row"])))
+
+    if not enemy_positions:
+        return None
+
+    distances: List[float] = []
+    for u in units:
+        if int(u.get("player", 0)) != bot_player:
+            continue
+        sid = str(u["id"])
+        if not is_unit_alive(sid, gs):
+            continue
+        entry = require_unit_from_cache(sid, gs, "_avg_dist:bot")
+        if not entry_is_on_battlefield(entry):
+            continue
+        bc, br = int(entry["col"]), int(entry["row"])
+        distances.append(min(
+            calculate_hex_distance(bc, br, ec, er) for ec, er in enemy_positions
+        ))
+
+    return sum(distances) / len(distances) if distances else None
+
+
+def _count_alive_bot_squads(gs: Dict[str, Any], bot_player: int) -> int:
+    """Nombre d'escouades bot vivantes (sur table + réserves — pas encore éliminées)."""
+    from engine.phase_handlers.shared_utils import is_unit_alive
+
+    return sum(
+        1
+        for u in gs.get("units", [])
+        if int(u.get("player", 0)) == bot_player and is_unit_alive(str(u["id"]), gs)
+    )
+
+
+def _episode_record(
+    bot_name: str,
+    episode: int,
+    seed: int,
+    bot_player: int,
+    turn_snapshot: Dict[int, int],
+    dist_snapshot: Optional[Dict[int, float]] = None,
+    squad_snapshot: Optional[Dict[int, int]] = None,
+) -> Dict[str, Any]:
+    """Relevé d'UN épisode, suffisant pour le rejouer (graine) et l'inspecter (zones/tour)."""
+    rec: Dict[str, Any] = {
+        "bot": bot_name,
+        "episode": episode,
+        "seed": seed,
+        "bot_player": bot_player,
+        "zones_by_turn": {str(t): turn_snapshot[t] for t in sorted(turn_snapshot)},
+    }
+    if dist_snapshot:
+        rec["dist_by_turn"] = {str(t): dist_snapshot[t] for t in sorted(dist_snapshot)}
+    if squad_snapshot:
+        rec["squads_by_turn"] = {str(t): squad_snapshot[t] for t in sorted(squad_snapshot)}
+    return rec
+
+
+def _turns_of(records: List[Dict[str, Any]]) -> Dict[int, List[int]]:
+    """{tour: [zones, un par épisode]} pour les relevés d'UN seul bot, dans l'ordre des épisodes."""
+    per_turn: Dict[int, List[int]] = {}
+    for rec in records:
+        for turn_key, zones in rec["zones_by_turn"].items():
+            per_turn.setdefault(int(turn_key), []).append(zones)
+    return per_turn
+
+
+def _turns_of_key(records: List[Dict[str, Any]], key: str) -> Dict[int, List]:
+    """{tour: [valeur, un par épisode]} pour n'importe quelle clé `*_by_turn` du relevé."""
+    per_turn: Dict[int, List] = {}
+    for rec in records:
+        for turn_str, val in rec.get(key, {}).items():
+            per_turn.setdefault(int(turn_str), []).append(val)
+    return per_turn
+
+
+def _loss_rate_by_turn(records: List[Dict[str, Any]]) -> Dict[int, List[float]]:
+    """Taux de perte cumulé (0–1) par tour : (squads_T1 − squads_T) / squads_T1, par épisode."""
+    per_turn: Dict[int, List[float]] = {}
+    for rec in records:
+        squads = rec.get("squads_by_turn", {})
+        if not squads:
+            continue
+        sorted_turns = sorted(int(k) for k in squads)
+        baseline = squads.get(str(sorted_turns[0]), 0)
+        if baseline == 0:
+            continue
+        for t in sorted_turns:
+            alive = squads.get(str(t), baseline)
+            per_turn.setdefault(t, []).append((baseline - alive) / baseline)
+    return per_turn
+
+
+def _aggregate_zones(records: List[Dict[str, Any]]) -> Dict[str, Dict[int, List[int]]]:
+    """Agrège les relevés par épisode en {bot: {tour: [zones, ...]}} — source du tableau texte."""
+    by_bot: Dict[str, List[Dict[str, Any]]] = {}
+    for rec in records:
+        by_bot.setdefault(rec["bot"], []).append(rec)
+    return {bot: _turns_of(bot_records) for bot, bot_records in by_bot.items()}
+
+
+def _table_turns(turn_limit: Optional[int], records: List[Dict[str, Any]]) -> List[int]:
+    """Colonnes des trois tableaux : les tours de LA BATAILLE, pas une liste écrite à la main.
+
+    `turn_limit` vient de `get_effective_turn_limit`, source unique de la durée d'une bataille
+    (`game_rules.max_turns`). Elle vaut 5 aujourd'hui, exactement les colonnes qui étaient
+    codées en dur — mais rien ne gardait le couplage : changer `max_turns` aurait laissé le
+    tableau s'arrêter à T5 pendant que la colonne `N`, elle, suit `max(per_turn)`.
+
+    `None` = bataille illimitée (Endless Duty) : il n'y a alors pas de durée à lire, seulement
+    des tours OBSERVÉS. Ce n'est pas un repli sur une valeur commode, c'est le seul sens
+    disponible dans ce cas ; une liste vide (aucun épisode) reste vide.
+    """
+    if turn_limit is not None:
+        return list(range(1, int(turn_limit) + 1))
+    observed = {int(turn) for rec in records for turn in rec["zones_by_turn"]}
+    return list(range(1, max(observed) + 1)) if observed else []
+
+
+def _n_at_last_turn(per_turn: Dict[int, List]) -> int:
+    """Nombre d'épisodes parvenus au dernier tour observé — le `N` de la ligne et du tableau."""
+    if not per_turn:
+        return 0
+    return len(per_turn[max(per_turn)])
+
+
+def _write_json_out(handle: TextIO, run_meta: Dict[str, Any], records: List[Dict[str, Any]]) -> None:
+    payload = {"schema_version": _JSON_SCHEMA_VERSION, "run": run_meta, "episodes": records}
+    dump_json(handle, payload)
+
+
+def _model_fingerprint(model_path: str) -> Dict[str, Any]:
+    """Identité du checkpoint, à relever AVANT de le charger : un entraînement qui réécrit le
+    `.zip` pendant le run ferait sinon consigner les métadonnées d'un modèle qui n'a pas joué.
+    Le chemin seul est constant d'un run à l'autre, donc muet — c'est la taille et la date
+    qui distinguent deux checkpoints.
+    """
+    return {
+        "model_path": model_path,
+        "model_bytes": os.path.getsize(model_path),
+        "model_mtime": datetime.fromtimestamp(os.path.getmtime(model_path)).isoformat(timespec="seconds"),
+    }
+
+
+def _run_meta(
+    model_fingerprint: Dict[str, Any],
+    scenario_file: str,
+    episodes_per_bot: int,
+    n_bots: int,
+    base_seed: int,
+    agent_seat_mode: str,
+    agent_seat_seed: Optional[int],
+    bot_randomness: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Ce qui distingue DEUX relevés l'un de l'autre — sans ça, un avant et un après §12.7
+    sont indiscernables, et une graine d'épisode ne suffit pas à reconstruire la doctrine du bot.
+    """
+    return {
+        "agent": "ArmageddonAgent",
+        "training_config": "x1_panel",
+        **model_fingerprint,
+        "scenario_file": scenario_file,
+        "episodes_per_bot": episodes_per_bot,
+        "episodes_total": episodes_per_bot * n_bots,
+        "base_seed": base_seed,
+        "agent_seat_mode": agent_seat_mode,
+        "agent_seat_seed": agent_seat_seed,
+        "bot_randomness": dict(bot_randomness),
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--episodes", type=int, default=10)
+    parser.add_argument(
+        "--json-out",
+        dest="json_out",
+        default=None,
+        help="Fichier JSON où écrire le relevé par épisode (graine, joueur du bot, grandeurs par tour)",
+    )
     args = parser.parse_args()
+    # AVANT d'ouvrir la destination : `--episodes 0` jouait zéro épisode, publiait
+    # `"episodes": []` PAR-DESSUS le relevé précédent et sortait 0. Le fichier écrasé était le
+    # seul exemplaire d'une mesure de plusieurs heures, et rien dans la sortie ne le disait.
+    if args.episodes < 1:
+        parser.error(f"--episodes doit valoir au moins 1 (reçu {args.episodes})")
+    _require_board_path()
 
-    board_path = _require_board_path()
+    episode_records: List[Dict[str, Any]] = []
+    turn_limit: Optional[int] = None
 
-    import numpy as np
-    from sb3_contrib import MaskablePPO
-    from sb3_contrib.common.wrappers import ActionMasker
-    from sb3_contrib.common.maskable.utils import get_action_masks
-    from config_loader import get_config_loader
-    from ai.unit_registry import UnitRegistry
-    from ai.bot_registry import build_bot
-    from ai.env_wrappers import BotControlledEnv
-    from ai.training_utils import get_scenario_list_for_phase
-    from ai.bot_evaluation import _build_eval_obs_normalizer_for_worker, _episode_seed
-    from engine.w40k_core import W40KEngine
-
-    config = get_config_loader()
-    tc = config.load_agent_training_config("ArmageddonAgent", "x1_panel")
-    cb = tc["callback_params"]
-
-    model_path = _require_reference_model()
-    vec_norm_enabled = bool(tc.get("vec_normalize", {}).get("enabled", False))
-    vec_eval_enabled = bool(tc.get("vec_normalize_eval", {}).get("enabled", False))
-
-    print(f"Modèle : {os.path.basename(model_path)} (md5 {REFERENCE_MD5})")
-    print(f"Plateau : {board_path}")
-    model = MaskablePPO.load(model_path, device="cpu")
-    normalize = _build_eval_obs_normalizer_for_worker(model, model_path, vec_norm_enabled, vec_eval_enabled)
-
-    bot_weights: dict = cb.get("bot_eval_weights", {})
-    bot_randomness: dict = cb.get("bot_eval_randomness", {})
-    agent_seat_mode: str = tc.get("agent_seat_mode", "p1")
-    if "seed" not in tc:
-        raise RuntimeError("Clé 'seed' absente de la config d'entraînement ArmageddonAgent/x1_panel — run non reproductible")
-    base_seed: int = int(tc["seed"])
-    agent_seat_seed: Optional[int] = tc.get("agent_seat_seed", base_seed)
-
-    scenarios = get_scenario_list_for_phase(config, "ArmageddonAgent", "x1_panel", scenario_type="holdout")
-    if not scenarios:
-        raise RuntimeError("Aucun scénario holdout trouvé pour ArmageddonAgent/x1_panel — vérifier config/agents/ArmageddonAgent/scenarios/")
-    scenario_file = scenarios[0]
-
-    results: Dict[str, Dict[int, List[int]]] = {}
-
-    for bot_name in bot_weights:
-        print(f"  {bot_name:<16}", end=" ", flush=True)
-        bot = build_bot(bot_name, dict(bot_randomness))
-        unit_registry = UnitRegistry()
-
-        base_env = W40KEngine(
-            rewards_config="ArmageddonAgent",
-            training_config_name="x1_panel",
-            controlled_agent="ArmageddonAgent",
-            active_agents=None,
-            scenario_file=scenario_file,
-            unit_registry=unit_registry,
-            quiet=True,
-            gym_training_mode=True,
-            training_n_envs=1,
+    # le brouillon s'ouvre AVANT les imports lourds : un chemin faux coûte une seconde, et il
+    # n'est publié que si le run va au bout (sinon refermé et effacé, cf. `json_out_draft`).
+    with json_out_draft(args.json_out) as json_handle:
+        import numpy as np
+        from sb3_contrib import MaskablePPO
+        from sb3_contrib.common.wrappers import ActionMasker
+        from sb3_contrib.common.maskable.utils import get_action_masks
+        from config_loader import get_config_loader
+        from ai.unit_registry import UnitRegistry
+        from ai.bot_registry import build_bot
+        from ai.env_wrappers import BotControlledEnv
+        from ai.training_utils import get_scenario_list_for_phase
+        from ai.bot_evaluation import (
+            _build_eval_obs_normalizer_for_worker, _episode_seed, _load_bot_eval_params,
         )
+        from engine.game_utils import get_effective_turn_limit
+        from engine.w40k_core import W40KEngine
+        from shared.data_validation import require_key
 
-        masked = ActionMasker(base_env, lambda e: e.get_action_mask())
-        env = BotControlledEnv(
-            masked, bot, unit_registry,
-            agent_seat_mode=agent_seat_mode,
-            global_seed=agent_seat_seed,
-            env_rank=0,
-        )
+        config = get_config_loader()
+        tc = config.load_agent_training_config("ArmageddonAgent", "x1_panel")
+        cb = tc["callback_params"]
 
-        ep_zones: Dict[int, List[int]] = defaultdict(list)
+        model_path = _require_reference_model()
+        vec_norm_enabled = bool(tc.get("vec_normalize", {}).get("enabled", False))
+        vec_eval_enabled = bool(tc.get("vec_normalize_eval", {}).get("enabled", False))
 
-        for ep_idx in range(args.episodes):
-            ep_seed = _episode_seed(base_seed, bot_name, 0, ep_idx)
-            obs, info = env.reset(seed=ep_seed)
-            bot_player: int = int(info.get("opponent_player", 2))
-            done = False
-            turn_snapshot: Dict[int, int] = {}
+        print(f"Modèle : {os.path.basename(model_path)}")
+        model_fingerprint = _model_fingerprint(model_path)  # avant le chargement : cf. docstring
+        model = MaskablePPO.load(model_path, device="cpu")
+        normalize = _build_eval_obs_normalizer_for_worker(model, model_path, vec_norm_enabled, vec_eval_enabled)
 
-            while not done:
-                model_obs = normalize(obs) if normalize else obs
-                action_masks = np.asarray(get_action_masks(env), dtype=bool)
-                if action_masks.ndim == 1:
-                    action_masks = action_masks.reshape(1, -1)
-                if isinstance(model_obs, dict):
-                    model_input = model_obs
-                else:
-                    model_input = np.asarray(model_obs, dtype=np.float32)
-                    if model_input.ndim == 1:
-                        model_input = model_input.reshape(1, -1)
-                action, _ = model.predict(model_input, action_masks=action_masks, deterministic=True)
-                action_scalar = int(np.asarray(action).flat[0])
-                obs, _, terminated, truncated, _ = env.step(action_scalar)
-                done = bool(terminated or truncated)
+        # Le panel se lit par la MÊME fonction que l'évaluation réelle, jamais à la main : elle
+        # exige les deux clés (un panel vide ferait tourner la boucle zéro fois et publier
+        # `"episodes": []` en sortant 0), coerce les valeurs en float, et vérifie que les poids
+        # somment à 1.0. Relire `cb` ici privait CE script — et lui seul — de ces trois contrôles,
+        # alors qu'il compare ses moyennes à celles produites par `ai/bot_evaluation.py`.
+        bot_eval_params = _load_bot_eval_params(config, "ArmageddonAgent", "x1_panel")
+        bot_weights: dict = bot_eval_params["weights"]
+        bot_randomness: dict = bot_eval_params["randomness"]
+        # `require_key` : `agent_seat_mode` décide de quel siège occupe le bot, et le défaut
+        # « p1 » était de surcroît RECOPIÉ dans `run_meta` comme s'il venait de la config — un
+        # relevé qui documente un protocole que personne n'a écrit.
+        agent_seat_mode: str = require_key(tc, "agent_seat_mode")
+        if "seed" not in tc:
+            raise RuntimeError("Clé 'seed' absente de la config d'entraînement ArmageddonAgent/x1_panel — run non reproductible")
+        base_seed: int = int(tc["seed"])
+        agent_seat_seed: Optional[int] = tc.get("agent_seat_seed", base_seed)
 
-                gs = env.engine.game_state
-                cur_turn: int = int(gs.get("turn", 0))
-                if cur_turn >= 1:
-                    controllers: dict = gs.get("objective_controllers", {})
-                    zones = sum(1 for v in controllers.values() if v == bot_player)
-                    turn_snapshot[cur_turn] = zones
+        scenarios = get_scenario_list_for_phase(config, "ArmageddonAgent", "x1_panel", scenario_type="holdout")
+        if not scenarios:
+            raise RuntimeError("Aucun scénario holdout trouvé pour ArmageddonAgent/x1_panel — vérifier config/agents/ArmageddonAgent/scenarios/")
+        scenario_file = scenarios[0]
 
-            for t, z in turn_snapshot.items():
-                ep_zones[t].append(z)
-            print(".", end="", flush=True)
+        for bot_name in bot_weights:
+            print(f"  {bot_name:<16}", end=" ", flush=True)
+            bot = build_bot(bot_name, dict(bot_randomness))
+            unit_registry = UnitRegistry()
 
-        env.close()
-        results[bot_name] = dict(ep_zones)
-        last_t = max(ep_zones) if ep_zones else 0
-        n = len(ep_zones.get(last_t, []))
-        print(f" {n} ep")
+            base_env = W40KEngine(
+                rewards_config="ArmageddonAgent",
+                training_config_name="x1_panel",
+                controlled_agent="ArmageddonAgent",
+                active_agents=None,
+                scenario_file=scenario_file,
+                unit_registry=unit_registry,
+                quiet=True,
+                gym_training_mode=True,
+                training_n_envs=1,
+            )
 
-    turns = [1, 2, 3, 4, 5]
-    hdr = " | ".join(f"T{t}" for t in turns)
-    print(f"\n{'Bot':<22} {'N':>4} | {hdr}")
-    print("-" * (22 + 4 + 3 + len(turns) * 6 + 4))
-    for bot, tdata in sorted(results.items()):
-        last_t = max(tdata) if tdata else 0
-        n = len(tdata.get(last_t, []))
-        cells = []
-        for t in turns:
-            vals = tdata.get(t, [])
-            cells.append(f"{sum(vals)/len(vals):.2f}" if vals else "  - ")
-        print(f"{bot:<22} {n:>4} | " + " | ".join(f"{c:>4}" for c in cells))
+            masked = ActionMasker(base_env, lambda e: e.get_action_mask())
+            env = BotControlledEnv(
+                masked, bot, unit_registry,
+                agent_seat_mode=agent_seat_mode,
+                global_seed=agent_seat_seed,
+                env_rank=0,
+            )
+
+            bot_records: List[Dict[str, Any]] = []
+
+            for ep_idx in range(args.episodes):
+                ep_seed = _episode_seed(base_seed, bot_name, 0, ep_idx)
+                obs, info = env.reset(seed=ep_seed)
+                # `require_key` : `agent_seat_mode` vaut « random » sur x1_panel, donc le bot est
+                # P1 dans la moitié des épisodes. Le défaut `2` comptait alors les zones de
+                # l'AGENT et les publiait sous le nom du bot, sans rien signaler. Même lecture
+                # que `scripts/bot_ranking.py:132-133` sur `winner`/`controlled_player`.
+                bot_player: int = int(require_key(info, "opponent_player"))
+                if turn_limit is None:
+                    turn_limit = get_effective_turn_limit(env.engine.game_state)
+                done = False
+                turn_snapshot: Dict[int, int] = {}
+                dist_snapshot: Dict[int, float] = {}
+                squad_snapshot: Dict[int, int] = {}
+
+                while not done:
+                    model_obs = normalize(obs) if normalize else obs
+                    action_masks = np.asarray(get_action_masks(env), dtype=bool)
+                    if action_masks.ndim == 1:
+                        action_masks = action_masks.reshape(1, -1)
+                    if isinstance(model_obs, dict):
+                        model_input = model_obs
+                    else:
+                        model_input = np.asarray(model_obs, dtype=np.float32)
+                        if model_input.ndim == 1:
+                            model_input = model_input.reshape(1, -1)
+                    action, _ = model.predict(model_input, action_masks=action_masks, deterministic=True)
+                    action_scalar = int(np.asarray(action).flat[0])
+                    obs, _, terminated, truncated, _ = env.step(action_scalar)
+                    done = bool(terminated or truncated)
+
+                    gs = env.engine.game_state
+                    # Les deux clés sont posées par le reset du moteur (`w40k_core.py:1672`
+                    # pour `objective_controllers`) : un défaut ne peut donc masquer qu'une
+                    # RÉGRESSION, et il la masque sous une forme parfaitement crédible — `turn`
+                    # à 0 saute le relevé du pas, `objective_controllers` vide rend un 0.00 qui
+                    # se lit comme « le bot ne tient rien ».
+                    cur_turn: int = int(require_key(gs, "turn"))
+                    if cur_turn >= 1:
+                        controllers: dict = require_key(gs, "objective_controllers")
+                        zones = sum(1 for v in controllers.values() if v == bot_player)
+                        turn_snapshot[cur_turn] = zones
+
+                        avg_d = _avg_bot_enemy_distance(gs, bot_player)
+                        if avg_d is not None:
+                            dist_snapshot[cur_turn] = avg_d
+
+                        squad_snapshot[cur_turn] = _count_alive_bot_squads(gs, bot_player)
+
+                bot_records.append(_episode_record(
+                    bot_name, ep_idx, ep_seed, bot_player,
+                    turn_snapshot, dist_snapshot, squad_snapshot,
+                ))
+                print(".", end="", flush=True)
+
+            env.close()
+            episode_records.extend(bot_records)
+            print(f" {_n_at_last_turn(_turns_of(bot_records))} ep")
+
+        turns = _table_turns(turn_limit, episode_records)
+        hdr = " | ".join(f"T{t}" for t in turns)
+        sep = "-" * (22 + 4 + 3 + len(turns) * 6 + 4)
+
+        by_bot: Dict[str, List[Dict[str, Any]]] = {}
+        for rec in episode_records:
+            by_bot.setdefault(rec["bot"], []).append(rec)
+
+        # les trois tableaux sont DÉRIVÉS des mêmes relevés que le JSON : pas de divergence possible.
+        print(f"\nZones contrôlées (objectifs)")
+        print(f"{'Bot':<22} {'N':>4} | {hdr}")
+        print(sep)
+        aggregated = _aggregate_zones(episode_records)
+        for bot in sorted(bot_weights):
+            tdata = aggregated.get(bot, {})
+            cells = []
+            for t in turns:
+                vals = tdata.get(t, [])
+                cells.append(f"{sum(vals)/len(vals):.2f}" if vals else "  - ")
+            print(f"{bot:<22} {_n_at_last_turn(tdata):>4} | " + " | ".join(f"{c:>4}" for c in cells))
+
+        print(f"\nDistance hex bot → ennemi le plus proche")
+        print(f"{'Bot':<22} {'N':>4} | {hdr}")
+        print(sep)
+        for bot in sorted(bot_weights):
+            bot_recs = by_bot.get(bot, [])
+            tdata = _turns_of_key(bot_recs, "dist_by_turn")
+            cells = []
+            for t in turns:
+                vals = tdata.get(t, [])
+                cells.append(f"{sum(vals)/len(vals):4.1f}" if vals else "   -")
+            print(f"{bot:<22} {_n_at_last_turn(tdata):>4} | " + " | ".join(f"{c:>4}" for c in cells))
+
+        print(f"\nTaux escouades bot perdues (∆ depuis T1)")
+        print(f"{'Bot':<22} {'N':>4} | {hdr}")
+        print(sep)
+        for bot in sorted(bot_weights):
+            bot_recs = by_bot.get(bot, [])
+            tdata = _loss_rate_by_turn(bot_recs)
+            cells = []
+            for t in turns:
+                vals = tdata.get(t, [])
+                cells.append(f"{sum(vals)/len(vals):.2f}" if vals else "  - ")
+            print(f"{bot:<22} {_n_at_last_turn(tdata):>4} | " + " | ".join(f"{c:>4}" for c in cells))
+
+        if json_handle is not None:
+            run_meta = _run_meta(
+                model_fingerprint, scenario_file, args.episodes, len(bot_weights),
+                base_seed, agent_seat_mode, agent_seat_seed, bot_randomness,
+            )
+            _write_json_out(json_handle, run_meta, episode_records)
+
+    # hors du `with` : la ligne ne s'affiche qu'une fois le fichier VRAIMENT publié. Dedans,
+    # un flush qui rate la faisait lire juste avant la trace, destination absente ou périmée.
+    if args.json_out:
+        print(f"\nRelevé par épisode : {args.json_out} ({len(episode_records)} épisodes)")
 
     print()
     print("Référence §12.5 (post-§12.6, bot=P2, 100 ep): T2=1.61  T5=1.90  VP=31.0  combined=0.788")

@@ -63,6 +63,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from shared.json_atomic import write_json_atomic  # noqa: E402  (dépend du sys.path ci-dessus)
+
 # Repertoires balayes. tests/ est exclu : un test n'a pas de scenario d'echec en
 # production, T4 ecarterait quasi tout ce qui en sortirait.
 SCAN_DIRS = ("engine", "ai", "services", "shared", "scripts", "frontend/src")
@@ -202,9 +208,7 @@ def save_backlog(root: Path, backlog: dict[str, Any]) -> None:
     """Ecrit le backlog JSON (source de verite) et regenere le rendu Markdown."""
     path = root / BACKLOG_JSON
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(backlog, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
-    )
+    write_json_atomic(path, backlog)
     render_backlog_md(root, backlog)
 
 

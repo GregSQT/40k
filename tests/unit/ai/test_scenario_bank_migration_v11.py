@@ -14,12 +14,12 @@ consigné dans `V11_agent_rework.md §3495`) ; ce test couvre l'invariant statiq
 """
 from __future__ import annotations
 
-import importlib.util
 import json
-import sys
 from pathlib import Path
 
 import pytest
+
+from tests._chargeur_script import charger_script
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SCEN_ROOT = PROJECT_ROOT / "config" / "agents" / "ArmageddonAgent" / "scenarios"
@@ -53,18 +53,7 @@ TERRAINS_PAR_DOSSIER = {
 TRAIN_TERRAINS = {"terrain-mc1.json", "terrain-mc2.json"}
 
 
-def _load_migration_module():
-    path = PROJECT_ROOT / "scripts" / "migrate_scenario_bank_v11.py"
-    spec = importlib.util.spec_from_file_location("migrate_scenario_bank_v11", path)
-    if spec is None or spec.loader is None:
-        raise ImportError(f"Impossible de charger le module de migration depuis {path}")
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = mod
-    spec.loader.exec_module(mod)
-    return mod
-
-
-MIG = _load_migration_module()
+MIG = charger_script("scripts/migrate_scenario_bank_v11.py")
 
 
 def _bank_scenarios() -> list[Path]:

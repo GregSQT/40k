@@ -37,6 +37,7 @@ sys.path.insert(0, engine_dir)
 from engine.w40k_core import W40KEngine
 from main import load_config
 from shared.data_validation import ConfigurationError, require_key
+from shared.json_atomic import write_json_atomic
 from engine.combat_utils import resolve_dice_value, set_unit_coordinates
 from engine.phase_handlers.shared_utils import build_units_cache, rebuild_choice_timing_index, _is_character_role
 from engine.phase_handlers import command_handlers, movement_handlers, deployment_handlers
@@ -2104,15 +2105,17 @@ def _save_config_path() -> str:
 
 
 def _persist_save_config() -> None:
-    import json
+    # Deux routes (`/save/persist`, `/autosave/config`) publient CE fichier ; elles ne se
+    # chevauchent pas (toutes deux sous `@with_engine_state_lock`), mais un Ctrl-C entre
+    # l'ouverture et la fin de l'ecriture laisserait une config tronquee a la place de la
+    # precedente : c'est ce que l'ecriture atomique supprime.
     path = _save_config_path()
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump({
-            "persist_enabled": _SNAPSHOT_PERSIST_ENABLED,
-            "autosave_enabled": _AUTOSAVE_ENABLED,
-            "granularity": _AUTOSAVE_GRANULARITY,
-        }, f, ensure_ascii=False)
+    write_json_atomic(path, {
+        "persist_enabled": _SNAPSHOT_PERSIST_ENABLED,
+        "autosave_enabled": _AUTOSAVE_ENABLED,
+        "granularity": _AUTOSAVE_GRANULARITY,
+    })
 
 
 def _load_save_config() -> None:
@@ -2123,7 +2126,6 @@ def _load_save_config() -> None:
     rouvrirait le vecteur qu'on ferme."""
     global _SNAPSHOT_PERSIST_ENABLED
     global _AUTOSAVE_ENABLED, _AUTOSAVE_GRANULARITY
-    import json
     path = _save_config_path()
     if not os.path.exists(path):
         return
@@ -2193,8 +2195,6 @@ def get_agents_from_scenario(scenario_file: str, unit_registry) -> set:
         FileNotFoundError: If scenario file doesn't exist
         ValueError: If scenario format invalid or unit type not found in registry
     """
-    import json
-    
     if not os.path.exists(scenario_file):
         raise FileNotFoundError(f"Scenario file not found: {scenario_file}")
     

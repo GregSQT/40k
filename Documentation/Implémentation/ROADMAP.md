@@ -497,6 +497,25 @@ mesure, et c'est assumé (§0.14).
    correspondance ancien/nouveau se mesurent en **bot-contre-bot** (`scripts/bot_ranking.py`),
    la mesure contre l'agent ne servant qu'à confirmer — mesurer un bot par le win-rate de l'agent
    est circulaire.
+   ✅ **L'instrument d'étalement rend enfin le détail (2026-08-13)** : `scripts/bot_zone_direct.py`
+   accepte `--json-out <fichier>` et écrit le relevé PAR ÉPISODE (graine `_episode_seed`, joueur du
+   bot, zones contrôlées par tour). Jusque-là il ne sortait que les moyennes du tableau, donc aucune
+   mesure de §12.7 n'était inspectable ni rejouable épisode par épisode alors que le script est
+   déterministe. Le tableau texte est désormais **dérivé** des mêmes relevés : les chiffres déjà
+   consignés restent comparables (vérifié identique sur 200 tirages, `--episodes 0` compris), et
+   l'agrégat ne peut plus diverger du fichier.
+   Le fichier porte un bloc `run` — agent/config, `base_seed`, `agent_seat_mode`/`agent_seat_seed`,
+   `bot_randomness`, et le modèle identifié par sa TAILLE et sa DATE, relevées avant chargement.
+   Sans ça deux relevés d'un avant/après §12.7 sont indiscernables (le chemin du modèle est codé
+   en dur, donc muet) et la graine d'épisode seule ne reconstruit pas la doctrine du bot.
+   La destination est validée AVANT de jouer — chemin vide, dossier, dossier absent ou en lecture
+   seule échouent en une seconde au lieu de coûter tout le run, graines comprises ; l'écriture
+   passe par `shared/json_atomic.py` (§5) : brouillon publié par `os.replace`,
+   donc un run interrompu ne détruit pas le relevé précédent et ne laisse pas de résidu.
+   `schema_version` = **2**. Les clés `bot_eval_weights`/`bot_eval_randomness` sont EXIGÉES et
+   non plus défaultées à `{}` : un panel absent faisait tourner la boucle zéro fois et publier
+   un relevé vide en sortant 0, une randomness absente comparait six bots non paramétrés à la
+   référence §12.5.
 
 ## 2. Capacités — seul chantier restant de la série « chantiers capacités »
 
@@ -758,6 +777,12 @@ Prêts à démarrer sans décision produit :
   la referme — donc le faux positif « tir engagé arme non-CLOSE_QUARTERS » que je pensais
   expliquer par elle vient d'ailleurs, et reste ouvert.
   → [`Implémenté/figurine_allouee_nommee_au_journal_2026-08-12.md`](Implémenté/figurine_allouee_nommee_au_journal_2026-08-12.md)
+- ✅ **Les verrous du seuil de blessure 05.02 gardaient du vide** (2026-08-13, merge `a6d4915c`).
+  Quatre tests de `tests/unit/ai/test_analyzer_wound_threshold.py` passaient sans rien retenir
+  (garde « type hors registre », ordre Oath/unanimité, composites en mêlée seule, test du porteur
+  non discriminant) : fermés et prouvés par mutation. Dans la foulée, `attacker_weapon_strengths`
+  portait **deux** refus pour le même cas de datasheet introuvable, dont un qu'aucun test ne pouvait
+  discriminer — il n'en reste qu'un, au point de décision, comportement inchangé.
 - 🟠 **Conformité moteur — les 53 erreurs que l'analyzer voit VRAIMENT** (ouvert le 2026-08-11,
   **10 restantes** — le tableau ci-dessous en est la source, cette ligne le résume : la famille
   CC_NB, la plus lourde, est soldée le jour même ; les deux familles de move le 2026-08-12 ; les
@@ -1019,6 +1044,30 @@ Lourds, à re-cadrer avant toute reprise :
 >
 > Ne reste ici que ce qui **sert à la prochaine passe** : le contrôle des liens, et les
 > incohérences non soldées.
+
+### Deux formes uniques extraites de leurs copies (2026-08-13)
+
+- ✅ **Écriture JSON atomique** — [`shared/json_atomic.py`](../../shared/json_atomic.py) est la
+  forme unique de TOUTE publication d'un `.json` du dépôt : 28 sites dans 22 fichiers de
+  `scripts/`, `ai/`, `engine/`, `services/` et `shared/`, dont les quatre `_write_json` privés
+  d'origine et l'écriture atomique privée d'`ai/run_state.py`. Le défaut supprimé :
+  `open(path, "w")` détruit le fichier précédent AVANT d'écrire un octet, donc une interruption
+  laissait un JSON tronqué à la place d'un relevé valide. Tout passe par un brouillon publié par
+  `os.replace`, avec trois refus à l'ouverture (destination vide, dossier, dossier absent ou en
+  lecture seule) pour qu'un chemin faux coûte une seconde et non un run entier ; le nom du
+  brouillon porte le processus ET le fil, parce que deux routes Flask publient la config des
+  saves du serveur en concurrence.
+  **Deux règles, pas une** : l'ATOMICITÉ vaut partout (`write_json_atomic`) ; le FORMAT unifié
+  (indent 2, `ensure_ascii=False`) ne vaut que là où il ne change pas la sortie — trois sites
+  gardent la leur (`default=str` du cache de `unit_registry`, table compacte de
+  `weapon_damage_builder`, `sort_keys` de `unit_classifier`) via `json_draft`, qui donne
+  l'atomicité seule.
+  Le verrou est STATIQUE et GLOBAL (`tests/unit/shared/test_json_atomic.py`) : il balaye les cinq
+  arbres de code au lieu de suivre une liste de fichiers convertis, donc il couvre aussi le
+  fichier écrit demain. Il ne voit que les publications JSON — un journal `.jsonl` en append, un
+  CSV, un `logger.dump` de SB3 ou un `json.dumps` dans un message de log ne le déclenchent pas.
+- ✅ **Chargement d'un script par `importlib` dans les tests** — [`tests/_chargeur_script.py`](../../tests/_chargeur_script.py)
+  remplace les six copies du même bloc `spec_from_file_location`.
 
 ### Le contrôle est outillé — ne plus le refaire à la main
 

@@ -34,6 +34,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterator, List, Tuple
 
 from shared.data_validation import require_key
+from shared.json_atomic import write_json_atomic
 
 #: Défauts de génération, partagés par les deux appelants — le parseur de la CLI les référence
 #: plutôt que de les redéclarer, sans quoi une régénération par `train.py` produirait un autre
@@ -309,10 +310,7 @@ def generate(
         scenario_paths = []
         for index, payload in enumerate(payloads, start=1):
             scenario_path = run_dir / f"scenario_rule_checker_bot-{index:04d}.json"
-            scenario_path.write_text(
-                json.dumps(payload, indent=2, ensure_ascii=False),
-                encoding="utf-8",
-            )
+            write_json_atomic(scenario_path, payload)
             scenario_paths.append(str(scenario_path))
 
     # HORS CACHE, TOUJOURS RÉÉCRITS. Manifeste, audit et paramètres décrivent la sélection et le
@@ -334,24 +332,17 @@ def generate(
         "scenario_count": len(scenario_paths),
         "scenario_paths": scenario_paths,
     }
-    (run_dir / "manifest.json").write_text(
-        json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
-    (run_dir / "audit_rejected.json").write_text(
-        json.dumps(rejected_rows, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
+    write_json_atomic(run_dir / "manifest.json", manifest)
+    write_json_atomic(run_dir / "audit_rejected.json", rejected_rows)
     # Écrit EN DERNIER : ces paramètres sont ceux d'une génération réussie, et c'est eux que
     # `ai/train.py --rule-checker` reprendra au lieu de réimposer les défauts.
     _params_path(root).parent.mkdir(parents=True, exist_ok=True)
-    _params_path(root).write_text(
-        json.dumps(
-            {
-                "scale": params.scale,
-                "board_ref": params.board_ref,
-                "terrain_ref": params.terrain_ref,
-            },
-            indent=2,
-        ),
-        encoding="utf-8",
+    write_json_atomic(
+        _params_path(root),
+        {
+            "scale": params.scale,
+            "board_ref": params.board_ref,
+            "terrain_ref": params.terrain_ref,
+        },
     )
     return scenario_paths

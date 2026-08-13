@@ -18,7 +18,6 @@ Sortie : rapport + code retour non nul si un critère échoue. Aucune modif de f
 """
 from __future__ import annotations
 
-import json
 import sys
 import tempfile
 from pathlib import Path
@@ -27,6 +26,8 @@ import numpy as np
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
+
+from shared.json_atomic import write_json_atomic  # noqa: E402  (dépend du sys.path ci-dessus)
 
 BANK_DIR = PROJECT_ROOT / "config" / "agents" / "CoreAgent" / "scenarios" / "training"
 TRAINING_SCENARIOS = ["scenario_training_bot-01.json", "scenario_training_bot-02.json",
@@ -136,7 +137,7 @@ def volet_b() -> bool:
     log("=== (B) Mêlée garantie (FIGHT_CTX) + Carnifex en charge (R6) ===")
     with tempfile.TemporaryDirectory() as td:
         scen_path = Path(td) / "scen_melee.json"
-        scen_path.write_text(json.dumps(MELEE_SCENARIO), encoding="utf-8")
+        write_json_atomic(scen_path, MELEE_SCENARIO)
         total_kills = 0
         carn_any = False
         all_term = True

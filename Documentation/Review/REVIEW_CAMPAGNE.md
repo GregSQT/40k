@@ -89,6 +89,7 @@ avant une vérif large : à la première régression, tu ne saurais plus laquell
 | 3 | `review_plan.py start <fichier>` | toi |
 | 4 | `/code-review <fichier>` | **toi** — commande de l'hôte, un agent ne peut pas la lancer |
 | 5 | Tri des findings : garder ceux qui ont un **scénario d'échec concret** (entrées/état précis → sortie fausse, crash ou invariant violé, sur un chemin réellement atteint). Les autres sont **écartés**, pas rétrogradés en « mineurs ». | agent |
+| 5-bis | **Relire le fichier avant de retenir** — pour chaque finding gardé à l'étape 5, ouvrir le fichier à la ligne citée et recopier verbatim la ligne fautive ET ce qui aurait pu l'empêcher (garde, défaut, early-return). Une citation qu'on ne retrouve pas telle quelle → finding écarté. Cf. `CLAUDE.md` T4 CAUSE, « PREUVE PAR LE FICHIER » : une passe du 2026-08-13 a rendu 4 findings `CONFIRMED` sur du code inexistant. | agent |
 | 6 | Correction des findings retenus | agent |
 | 7 | **grep JUMEAU** sur chaque motif corrigé : tir/mêlée, move/charge/fight, IA/PvP, moteur/replay/analyzer, front/back. Résultat rapporté même s'il est vide. | agent |
 | 8 | Tests ciblés sur les fichiers touchés (`pytest tests/unit/engine/test_xxx.py`) | agent |
