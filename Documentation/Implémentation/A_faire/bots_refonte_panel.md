@@ -1146,7 +1146,7 @@ W40K_BOARD_PATH=board/44x60x1 python3 scripts/bot_zone_direct.py --episodes 60
 
 | clé JSON | définition | lecture |
 |----------|-----------|---------|
-| `dist_by_turn` | distance hex moyenne de chaque escouade bot au plus proche ennemi vivant sur table | un bot qui s'approche : distance décroissante de T1 à T5 |
+| `dist_by_turn` | distance hex moyenne de chaque escouade bot au plus proche ennemi vivant sur table | un bot qui s'approche : distance décroissante — ⚠️ à effectif constant SEULEMENT, cf. §12.9.2 |
 | `squads_by_turn` | nombre d'escouades bot vivantes (table + réserves) | `_loss_rate_by_turn` dérive le taux cumulé `(baseline − alive) / baseline` |
 
 Les escouades en réserves sont exclues côté ennemi (sentinel `(-1,-1)`) mais **comptées côté bot**
@@ -1163,6 +1163,71 @@ calculée que lorsqu'au moins un ennemi est sur table ; `None` (absent du JSON) 
 **Verrou automatisé :** `tests/unit/scripts/test_bot_zone_direct_gardes.py` (gardes) +
 `tests/unit/scripts/test_bot_zone_direct_metrics.py` (fonctions de calcul). Rouge prouvé par
 mutation sur les deux gardes (2026-08-13).
+
+**Mesure, 60 épisodes/bot, `label=apres` (§12.11 activé) :**
+
+`dist_by_turn` (hex, moy. 60 ép.) :
+
+| bot | T1 | T2 | T3 | T4 | T5 |
+|---|---|---|---|---|---|
+| alpha | 29.4 | 19.4 | 14.2 | 14.5 | 14.0 |
+| attrition | 34.5 | 24.1 | 20.0 | 18.9 | **21.9 ↑** |
+| decapitation | 30.5 | 20.7 | 15.8 | 15.9 | 15.1 |
+| endgame | 38.6 | 31.1 | 25.7 | 20.5 | 19.0 |
+| racer | 32.5 | 21.3 | 17.9 | 17.5 | **18.5 ↑** |
+| scorer | 32.6 | 21.5 | 17.2 | 15.9 | **17.0 ↑** |
+
+`squads_by_turn` (escouades vivantes, moy.) :
+
+| bot | T1 | T2 | T3 | T4 | T5 |
+|---|---|---|---|---|---|
+| alpha | 5.0 | 4.8 | 4.3 | 3.9 | 3.3 |
+| attrition | 5.0 | 4.8 | 4.7 | 4.5 | 4.1 |
+| decapitation | 5.0 | 4.8 | 4.4 | 3.9 | 3.3 |
+| endgame | 5.0 | 5.0 | 4.9 | 4.7 | 4.3 |
+| racer | 5.0 | 4.8 | 4.5 | 4.0 | 3.5 |
+| scorer | 5.0 | 4.8 | 4.5 | 4.2 | 3.5 |
+
+`attrition` a la montée T4→T5 la plus nette (+3.0 hex) — cohérent avec §12.9.2 : la cohorte
+fixe confirme que c'est un recul réel (`attrition_withdraw`, `w_enemy` −1.0). `racer` et `scorer`
+présentent des montées légères (< 2 hex) ; `decapitation` n'a plus de montée T4→T5 dans ces
+données (15.9→15.1, −0.8), contrairement aux données « avant » documentées en §12.9.1 (14.6→15.0).
+
+**La part du biais se CALCULE, elle ne se teste pas par groupes.** Un premier essai a séparé les
+épisodes selon qu'ils perdaient ou non une escouade, et a conclu que « le test ne confirme pas le
+biais de survie ». **Ce test ne pouvait rien confirmer ni infirmer**, pour deux raisons qui
+tiennent à sa construction :
+
+- le groupe SANS perte est **déjà** une cohorte fixe — sa moyenne ne peut, par définition, porter
+  aucun artefact de composition. Il ne sert donc pas de témoin : il mesure autre chose ;
+- les deux groupes ne diffèrent pas que par les pertes. Un épisode où le bot perd une escouade est
+  un épisode où il était **au contact**, donc où ses survivants bougent différemment. Les deux
+  effets sont confondus, et le second est du même ordre que le premier.
+
+Le calcul direct est une **identité par épisode**, sans regroupement ni hypothèse :
+
+> Δ(T4→T5) de la moyenne = **mouvement** (Δ des escouades vivantes aux DEUX tours)
+> + **composition** (écart introduit par le seul retrait des mortes à T4)
+
+Appliquée aux données « avant » — celles qui portent la montée à expliquer —, 60 épisodes,
+IC 95 % appariés :
+
+| bot | Δ total T4→T5 | dont **mouvement** | dont **composition** | escouades perdues T4→T5 |
+|---|---|---|---|---|
+| decapitation | +0.35 ±1.65 | **−2.33 ±1.67** | **+2.68 ±0.81** | 48 |
+| racer | +0.96 ±1.84 | −0.84 ±1.82 | **+1.80 ±0.77** | 34 |
+| attrition | +2.97 ±1.58 | **+1.62 ±1.61** | **+1.35 ±0.58** | 25 |
+
+**Le terme de composition est significatif chez les trois bots ; c'est le seul qui le soit chez
+`decapitation` et `racer`.** Et le résultat est plus fort que « la montée est un artefact » : chez
+`decapitation`, les escouades qui survivent **se rapprochent** de 2,3 hex entre T4 et T5, et le
+retrait des mortes en ajoute 2,7 dans l'autre sens. La moyenne quasi plate cache donc une
+approche réelle. `attrition` est le seul dont le terme de mouvement est positif — son recul
+`attrition_withdraw`, déjà identifié au §12.9.2 par la cohorte fixe.
+
+Pour mémoire, le test par groupes rejoué sur le BON jeu de données et sur la transition qui porte
+la montée (T4→T5, et non T3→T5) : `decapitation` rend +0.49 ±3.14 sans perte contre +0.27 ±1.90
+avec perte — deux intervalles qui se recouvrent entièrement. Il n'aurait pas tranché non plus.
 
 ### 12.11 `decapitation` marchait vers un ennemi, tirait sur un autre (2026-08-13)
 
@@ -1383,6 +1448,10 @@ montée disparaît entièrement chez les deux bots concernés.
 ⚠️ **`attrition` est le seul cas où il reste une montée RÉELLE** (+1,5 hex à cohorte fixe) : c'est
 son mode `attrition_withdraw` (`w_enemy` −1,0), qui recule pour de bon. Chez `decapitation` et
 `racer`, il ne reste rien — la montée était entièrement l'artefact.
+
+La même chose se dit en une identité par épisode (Δ total = mouvement + composition), qui CHIFFRE
+la part de l'artefact au lieu de l'exhiber : elle est au §12.8, avec la raison pour laquelle un
+test par groupes « avec perte / sans perte » ne peut pas répondre à cette question.
 
 **Trois conséquences, dont une qui change la lecture du §12.8 :**
 

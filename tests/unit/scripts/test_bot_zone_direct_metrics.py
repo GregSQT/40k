@@ -85,6 +85,73 @@ def test_count_alive_bot_squads_ignore_ennemis():
 
 
 # ---------------------------------------------------------------------------
+# _collect_live_enemies
+# ---------------------------------------------------------------------------
+
+
+def test_collect_live_enemies_vide_sans_ennemi():
+    gs = _gs([_unit("bot", 1)], {"bot": _entry(0, 0)})
+    assert _SCRIPT._collect_live_enemies(gs, 1) == []
+
+
+def test_collect_live_enemies_exclut_mort():
+    gs = _gs([_unit("bot", 1), _unit("en", 2)], {"bot": _entry(0, 0)})  # "en" absent du cache
+    assert _SCRIPT._collect_live_enemies(gs, 1) == []
+
+
+def test_collect_live_enemies_exclut_reserves():
+    gs = _gs([_unit("bot", 1), _unit("en", 2)], {"bot": _entry(0, 0), "en": _RESERVES})
+    assert _SCRIPT._collect_live_enemies(gs, 1) == []
+
+
+def test_collect_live_enemies_retourne_sid_col_row():
+    gs = _gs([_unit("bot", 1), _unit("en", 2)], {"bot": _entry(0, 0), "en": _entry(3, 5)})
+    result = _SCRIPT._collect_live_enemies(gs, 1)
+    assert len(result) == 1
+    sid, col, row = result[0]
+    assert sid == "en" and col == 3 and row == 5
+
+
+def test_collect_live_enemies_plusieurs_ennemis():
+    gs = _gs(
+        [_unit("bot", 1), _unit("e1", 2), _unit("e2", 2)],
+        {"bot": _entry(0, 0), "e1": _entry(1, 0), "e2": _entry(2, 0)},
+    )
+    result = _SCRIPT._collect_live_enemies(gs, 1)
+    assert {r[0] for r in result} == {"e1", "e2"}
+
+
+# ---------------------------------------------------------------------------
+# _collect_live_bot_positions
+# ---------------------------------------------------------------------------
+
+
+def test_collect_live_bot_positions_vide_sans_bot_sur_table():
+    gs = _gs([_unit("bot", 1)], {"bot": _RESERVES})
+    assert _SCRIPT._collect_live_bot_positions(gs, 1) == []
+
+
+def test_collect_live_bot_positions_exclut_mort():
+    gs = _gs([_unit("bot", 1)], {})  # cache vide
+    assert _SCRIPT._collect_live_bot_positions(gs, 1) == []
+
+
+def test_collect_live_bot_positions_retourne_col_row():
+    gs = _gs([_unit("bot", 1), _unit("en", 2)], {"bot": _entry(4, 7), "en": _entry(0, 0)})
+    result = _SCRIPT._collect_live_bot_positions(gs, 1)
+    assert result == [(4, 7)]
+
+
+def test_collect_live_bot_positions_plusieurs_escouades():
+    gs = _gs(
+        [_unit("b1", 1), _unit("b2", 1), _unit("en", 2)],
+        {"b1": _entry(0, 0), "b2": _entry(1, 1), "en": _entry(5, 5)},
+    )
+    result = _SCRIPT._collect_live_bot_positions(gs, 1)
+    assert set(result) == {(0, 0), (1, 1)}
+
+
+# ---------------------------------------------------------------------------
 # _avg_bot_enemy_distance
 # ---------------------------------------------------------------------------
 
@@ -200,6 +267,20 @@ def test_count_distinct_focus_targets_ennemi_en_reserves_exclu():
 def _bot(focus: str | None) -> Any:
     """Bot factice : seul `_focus_target` compte pour la mesure (pas de DecapitationBot ici)."""
     return SimpleNamespace(_focus_target=focus)
+
+
+def test_avg_focus_target_distance_leve_si_focus_target_allie():
+    # "allied" a player=1, même équipe que le bot → RuntimeError
+    gs = _gs([_unit("allied", 1)], {"allied": _entry(0, 4)})
+    with pytest.raises(RuntimeError, match="bot-player"):
+        _SCRIPT._avg_focus_target_distance(gs, _bot("allied"), 1)
+
+
+def test_avg_focus_target_distance_leve_si_focus_target_introuvable():
+    # "phantom" n'existe pas dans gs['units']
+    gs = _gs([_unit("bot", 1)], {"bot": _entry(0, 0)})
+    with pytest.raises(RuntimeError, match="introuvable"):
+        _SCRIPT._avg_focus_target_distance(gs, _bot("phantom"), 1)
 
 
 def test_avg_focus_target_distance_none_sans_attribut():
@@ -329,7 +410,7 @@ def test_episode_record_sans_metriques_optionnelles():
     assert "zones_by_turn" in rec
     assert "dist_by_turn" not in rec
     assert "squads_by_turn" not in rec
-    assert "focus_targets_by_turn" not in rec
+    assert "distinct_targets_by_turn" not in rec
     assert "focus_dist_by_turn" not in rec
 
 
@@ -337,7 +418,7 @@ def test_episode_record_avec_focus_snapshots():
     rec = _SCRIPT._episode_record(
         "decap", 0, 42, 1, {1: 2}, None, None, {1: 3, 2: 1}, {1: 8.5},
     )
-    assert rec["focus_targets_by_turn"] == {"1": 3, "2": 1}
+    assert rec["distinct_targets_by_turn"] == {"1": 3, "2": 1}
     assert rec["focus_dist_by_turn"]["1"] == 8.5
 
 

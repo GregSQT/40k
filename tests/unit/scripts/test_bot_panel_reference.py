@@ -89,3 +89,42 @@ def test_le_doc_ne_labelle_plus_la_reference_post_12_6():
     assert lignes, "La ligne « Référence panel (§12.5… » a disparu du doc de chantier."
     for ligne in lignes:
         assert "pre-§12.6" in ligne
+
+
+def test_chiffres_concordent_avec_doc_12_14(module):
+    """Le module et le §12.14 du document de chantier portent les mêmes chiffres.
+
+    Sans ce test, le module peut passer des heures avec une référence périmée (c'est arrivé
+    le 2026-08-13 avec l'étiquette §12.5/JAMAIS REJOUÉE) sans qu'aucun test ne rougisse.
+    La source de vérité est le document ; le module doit la refléter.
+    """
+    texte = DOC_PANEL.read_text(encoding="utf-8")
+
+    # Ligne canonique du §12.14 : "`Combined = 0,7433`. Pire bot `racer = 0,630`."
+    m_doc = re.search(r"`Combined = (\d+,\d+)`\. Pire bot `(\w+) = (\d+,\d+)`", texte)
+    assert m_doc, (
+        "Ligne de référence §12.14 non trouvée dans le document. "
+        "Forme attendue : `Combined = X,XXXX`. Pire bot `<nom> = X,XXX`."
+    )
+    combined_doc = m_doc.group(1).replace(",", ".")
+    pire_bot_nom_doc = m_doc.group(2)
+    pire_bot_val_doc = m_doc.group(3).replace(",", ".")
+
+    # Module : "combined=0.7433  pire bot racer=0.630  ..."
+    m_mod = re.search(r"combined=(\S+)\s+pire bot (\w+)=(\S+)", module.PANEL_REFERENCE_FIGURES)
+    assert m_mod, f"Format de PANEL_REFERENCE_FIGURES inattendu : {module.PANEL_REFERENCE_FIGURES!r}"
+    combined_mod = m_mod.group(1)
+    pire_bot_nom_mod = m_mod.group(2)
+    pire_bot_val_mod = m_mod.group(3)
+
+    assert combined_mod == combined_doc, (
+        f"combined diverge — module={combined_mod!r}, doc §12.14={combined_doc!r}. "
+        "Mettre à jour scripts/bot_panel_reference.py ou le document."
+    )
+    assert pire_bot_nom_mod == pire_bot_nom_doc, (
+        f"Nom du pire bot diverge — module={pire_bot_nom_mod!r}, doc §12.14={pire_bot_nom_doc!r}."
+    )
+    assert pire_bot_val_mod == pire_bot_val_doc, (
+        f"Win-rate du pire bot diverge — module={pire_bot_val_mod!r}, doc §12.14={pire_bot_val_doc!r}. "
+        "Mettre à jour scripts/bot_panel_reference.py ou le document."
+    )

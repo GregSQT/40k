@@ -105,10 +105,9 @@ def test_json_out_relit_les_episodes_un_par_un(script, tmp_path, fingerprint):
         script._write_json_out(handle, meta, records)
     payload = json.loads(out.read_text(encoding="utf-8"))
 
-    # 3 et non 2 : `run.episodes_requested` a disparu au profit d'`episodes_per_bot`/
-    # `episodes_total`, donc un lecteur de la v2 lève un KeyError sur ce fichier. Deux commits
-    # ont émis cette forme en la marquant `2` (cf. le commentaire du script).
-    assert payload["schema_version"] == 3
+    # 4 et non 3 : `focus_targets_by_turn` renommé `distinct_targets_by_turn` — un lecteur v3
+    # lève un KeyError sur ce fichier. Cf. le commentaire du script pour l'historique complet.
+    assert payload["schema_version"] == 4
     assert "episodes_requested" not in payload["run"]
     assert payload["run"]["scenario_file"] == "holdout_1.json"
     assert payload["run"]["episodes_per_bot"] == 1

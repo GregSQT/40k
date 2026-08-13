@@ -319,7 +319,7 @@ conclusion, il ne s'y ajoute pas. Ne jamais y répéter ce qui vient d'être dit
   LU : <ce qui a été lu au-delà du point modifié : fichier entier ? appelants ? module miroir ?>
   JUMEAU : <commande grep> → <n> hits, <n> traités, <n> écartés (<raison>)
   RÉFS : <tests / doc / frontend / configs mis à jour | laissés tels quels volontairement>
-  COUVERTURE : <tests ajoutés/étendus, pytest `fichier::test` ou vitest `fichier > test`> | <trous vus non couverts → PROMPTS>
+  COUVERTURE : <trous vus non couverts, un prompt autonome par trou en PROMPTS | « aucun trou vu »>
   ARBITRAGE :
     1. <titre du sujet à arbitrer, une ligne>
 
@@ -351,11 +351,10 @@ conclusion, il ne s'y ajoute pas. Ne jamais y répéter ce qui vient d'être dit
   plus fréquent de ce dépôt (cf. T4 JUMEAU).
 - RÉFS, ARBITRAGE et PROMPTS : omettre la section s'il n'y a réellement rien. Ne jamais écrire « néant ».
 - COUVERTURE : obligatoire dès qu'au moins un fichier de code a été modifié (au sens de la ligne
-  FICHIERS COMPTÉS COMME CODE ci-dessous, même condition que RELIRE), omise sinon. Elle porte les DEUX faces exigées par T4 COUVERTURE : les tests écrits ou
-  étendus, NOMMÉS, dans le harnais du code touché (pytest ou vitest), et les trous de couverture
-  VUS et non traités.
-  « aucun trou vu » est une réponse valide ; « rien à tester » n'en est pas une — un comportement
-  modifié sans test nommé est un manquement, pas un cas particulier.
+  FICHIERS COMPTÉS COMME CODE ci-dessous, même condition que RELIRE), omise sinon. Elle liste
+  uniquement les trous de couverture VUS et non traités, avec un prompt autonome par trou en PROMPTS.
+  « aucun trou vu » est une réponse valide. Les tests écrits n'y figurent pas — ils sont lisibles
+  dans le diff.
 - Un arbitrage remonté n'est pas un défaut ; le taire pour paraître complet en est un.
 - ARBITRAGE — EXIGENCES DE FOND (le reste du rapport reste télégraphique, pas lui) :
   * LISIBILITÉ D'ABORD. Un arbitrage illisible n'est pas un arbitrage : il est ignoré, donc il
@@ -381,12 +380,20 @@ conclusion, il ne s'y ajoute pas. Ne jamais y répéter ce qui vient d'être dit
     il faut alors le dire explicitement. « À toi de voir » n'est pas une recommandation.
   * Interdit d'y glisser du travail technique que l'agent savait faire (cf. règle ci-dessus) :
     l'ARBITRAGE développé ne devient pas un lieu où déguiser une dette en question.
-- PROMPTS — OBLIGATOIRE dès qu'un bug, une incohérence ou un sujet à traiter a été RENCONTRÉ
-  pendant le travail sans être corrigé dans la livraison (hors périmètre, ou remonté en ARBITRAGE) :
-  * un bloc de code par sujet, contenant un prompt AUTONOME, copiable tel quel pour un autre agent
-    qui n'a AUCUN contexte de cette session : ce qu'on observe, où (fichier:ligne), ce qu'on attend,
-    et le périmètre attendu. Pas de « comme vu plus haut », pas de « le fichier en question ».
-  * un sujet remonté en ARBITRAGE a AUSSI son prompt ici, écrit pour l'option RECOMMANDÉE.
+- PROMPTS — trois catégories strictes, rien d'autre. Un bloc de code par sujet, contenant un
+  prompt AUTONOME, copiable tel quel pour un autre agent qui n'a AUCUN contexte de cette session :
+  ce qu'on observe, où (fichier:ligne), ce qu'on attend, et le périmètre attendu. Pas de
+  « comme vu plus haut », pas de « le fichier en question ».
+  1. Sous-tâche objective : étape suivante logique du travail demandé, hors périmètre de la
+     livraison actuelle (ex : câbler le front après que le backend est validé).
+  2. Bug prouvé hors périmètre : bug ou incohérence rencontré, avec un scénario d'échec NOMMÉ
+     (quel état, quelle entrée → quel effet observable faux). Sans ce scénario, la suspicion
+     se note en UNE LIGNE dans `LU` et s'arrête là — elle ne devient PAS un prompt.
+     MOTIF, mesuré le 2026-08-13 : sans garde-fou équivalent à T4, « j'ai remarqué X »
+     se transforme en prompt, qui génère d'autres prompts à son exécution — poupées russes
+     dont la profondeur est bornée par la qualité perçue du code, pas par sa réalité.
+  3. ARBITRAGE : un sujet remonté en ARBITRAGE a AUSSI son prompt ici, écrit pour l'option
+     RECOMMANDÉE.
   * cette section ne dispense de RIEN : ce que l'agent savait faire dans le périmètre de clôture
     se fait, il ne se transforme pas en prompt (cf. T2). Un prompt n'est pas un moyen de sortir
     du périmètre du travail en cours.
@@ -554,7 +561,7 @@ COUVERTURE — toute feature touchée est couverte par un test automatisé
     MAINTENANT, comme le reste du périmètre de clôture ;
   * elle est SANS LIEN avec la modification → interdit de l'écrire (ASK 5, et T2 « n'entre jamais
     tant qu'on y est ») : elle se SIGNALE au rapport et prend son prompt en PROMPTS.
-- Le rapport de clôture DIT les deux, en COUVERTURE : tests écrits, et trous vus non couverts.
+- Le rapport de clôture liste en COUVERTURE les trous vus non couverts — pas les tests écrits.
   Un trou vu et tu est une régression au même titre qu'un document rendu faux par sa livraison.
 - « Validé via --step / le PvP / l'analyzer / le navigateur / un script jetable » ne remplace pas
   un test du harnais : ce n'est pas rejouable, donc ça ne verrouille rien (cf. VERROU ci-dessus).
