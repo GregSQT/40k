@@ -33,6 +33,11 @@ MOI = (5, 5)
 FAIBLE = (4, 4)
 JUTEUX = (11, 11)
 
+#: L'escouade qui active en SECOND, placée pour que les deux destinations restent départageables
+#: depuis chez elle : sa position courante concourt avec elles (cf. `select_movement_destination`,
+#: qui la met dans le même tri), donc une escouade posée sur l'ennemi rendrait le test aveugle.
+SECONDE = (6, 6)
+
 #: Une destination collée à chaque ennemi.
 VERS_FAIBLE = (3, 3)
 VERS_JUTEUX = (9, 9)
@@ -41,6 +46,10 @@ VERS_JUTEUX = (9, 9)
 #: modes : ce fichier ne mesure pas le critère d'élection, il mesure ce que le déplacement en fait.
 DEGATS = {"101": 1.0, "102": 9.0}
 
+#: La MÊME table, inversée : une escouade qui réélirait pour son compte choisirait `101`. C'est
+#: la pression sous laquelle la concentration doit tenir.
+DEGATS_INVERSES = {"101": 9.0, "102": 1.0}
+
 HORS_TABLE = (-1, -1)
 
 
@@ -48,8 +57,10 @@ def _state(
     turn: int = 1,
     *,
     ennemis: Sequence[Tuple[str, Tuple[int, int]]] = (("101", FAIBLE), ("102", JUTEUX)),
+    amis: Sequence[Tuple[str, Tuple[int, int]]] = (),
 ) -> Dict[str, Any]:
-    """État moteur minimal : mon escouade `2` (joueur 1) et les ennemis passés (joueur 2).
+    """État moteur minimal : mon escouade `2` (joueur 1), les `amis` passés (joueur 1 aussi) et
+    les ennemis passés (joueur 2).
 
     `HP_CUR` est posé à 10, au-dessus du meilleur dégât (9.0) : aucune cible n'est « tuable ce
     tour », donc le bonus de 1000 de `_score_kill_now` ne peut pas masquer l'ordre des dégâts.
@@ -60,6 +71,9 @@ def _state(
     units_cache: Dict[str, Any] = {
         "2": {"player": 1, "col": MOI[0], "row": MOI[1], "HP_CUR": 10},
     }
+    for sid, (col, row) in amis:
+        units.append({"id": sid, "player": 1})
+        units_cache[sid] = {"player": 1, "col": col, "row": row, "HP_CUR": 10}
     for sid, (col, row) in ennemis:
         units.append({"id": sid, "player": 2})
         units_cache[sid] = {"player": 2, "col": col, "row": row, "HP_CUR": 10}
@@ -147,21 +161,41 @@ def test_the_target_is_elected_during_the_move_phase_without_any_shot() -> None:
     assert bot._focus_target == "102"
 
 
-def test_the_second_squad_of_the_turn_keeps_the_elected_target() -> None:
+def test_the_second_squad_of_the_turn_keeps_the_elected_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """CONCENTRATION : la doctrine ne vaut que si les escouades suivantes reprennent la cible.
 
-    L'escouade qui active en second a ici une table de dégâts INVERSÉE — si elle réélisait pour
-    son compte, elle choisirait `101`. Elle doit garder `102`.
+    L'escouade `3` active APRÈS `2`, avec une table de dégâts INVERSÉE : si elle réélisait pour son
+    compte, elle partirait vers `101`. Elle doit MARCHER vers `102` — l'observation porte sur la
+    destination, par le chemin de production, et non sur une relecture de la cible déjà posée :
+    `_focus` court-circuite dès qu'une cible existe, donc l'interroger ne prouverait rien.
+
+    ⚠️ LE TÉMOIN N'EST PAS DÉCORATIF (VERT VACANT, T4) : un bot NEUF, même escouade, même table
+    inversée, doit partir vers `101`. Sans lui, ce test resterait vert si l'inversion n'agissait
+    pas — c'est exactement le défaut qu'il portait avant le 2026-08-13, où la table inversée
+    n'était consultée par personne.
     """
+    state = _state(amis=(("3", SECONDE),))
+    seconde = state["unit_by_id"]["3"]
     bot = _Decapitation()
-    state = _state()
     bot.select_movement_destination(_moi(state), [VERS_FAIBLE, VERS_JUTEUX], state)
+    assert bot._focus_target == "102", "la première escouade a bien élu la cible du tour"
 
-    doc._damage_on = lambda game_state, attacker_id, target_id, is_ranged: {
-        "101": 9.0, "102": 1.0,
-    }[str(target_id)]
+    monkeypatch.setattr(
+        doc, "_damage_on",
+        lambda game_state, attacker_id, target_id, is_ranged: DEGATS_INVERSES[str(target_id)],
+    )
 
-    assert bot._focus(state, _moi(state)) == "102"
+    temoin = _Decapitation().select_movement_destination(
+        seconde, [VERS_FAIBLE, VERS_JUTEUX], state
+    )
+    assert temoin == VERS_FAIBLE, "témoin : sans cible héritée, la table inversée mène à `101`"
+
+    choisie = bot.select_movement_destination(seconde, [VERS_FAIBLE, VERS_JUTEUX], state)
+
+    assert choisie == VERS_JUTEUX
+    assert bot._focus_target == "102"
 
 
 def test_a_new_turn_elects_again() -> None:
