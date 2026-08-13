@@ -472,8 +472,14 @@ mesure, et c'est assumé (§0.14).
    six poids encadrés dans les deux sens, trois retenus (`w_enemy` 0.0, `w_contest` 1.5,
    `w_crowd` 4.0), combinaison confirmée par un run dédié. Il passe de 1,93 à 2,33 zones au tour 5
    et tient l'agent à **0,66** contre 0,76 — deuxième bot le plus dur, à 3 points de `racer`.
-   **Nouvelle ligne de base : `combined = 0,7600`, pire bot `racer = 0,630`.** Étapes 6 et 8
-   closes, reste l'étape 7 (suppression des cinq anciens bots).
+   ✅ **`decapitation` corrigé le 2026-08-13** (§12.11) : il marchait vers l'ennemi le PLUS PROCHE
+   au lieu de sa cible focalisée, donc sa doctrine s'annulait au déplacement. Il cesse de décliner
+   (1,67 → 1,77 au lieu de 1,60 → 1,08) et coûte 12 points à l'agent (0,83 → 0,71).
+   ⚠️ **Trois sessions ont travaillé ce chantier en parallèle le même jour**, chacune avec sa
+   section `§12.8`, son instrument et ses poids. Réunies au §12.12 ; la ligne de base était la
+   ressource partagée que le §10.4 n'avait pas listée.
+   **Nouvelle ligne de base : `combined = 0,7400`, pire bot `racer = 0,630`, pire scénario 0,6867.**
+   Étapes 6 et 8 closes, reste l'étape 7 (suppression des cinq anciens bots).
    🔴 **L'ORTHOGONALITÉ est ABANDONNÉE comme critère** (décision du 2026-08-12) : les six bots se
    déplacent en bloc d'un modèle à l'autre, ils forment une seule dimension. La cause est le
    format — seuls les objectifs marquent, zéro victoire par élimination sur 600 parties — donc

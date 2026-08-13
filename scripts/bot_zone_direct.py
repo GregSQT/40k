@@ -536,7 +536,7 @@ def main() -> None:
     # sous chaque tableau est pire qu'absent, il fait conclure sur la mauvaise ligne de base.
     print("Référence panel (§12.12, 60 ep/bot, x1, robust_0.8721) — zones tenues T2/T5 :")
     print("  alpha 1.12/1.10 · attrition 1.67/2.08 · decapitation 1.67/1.77 · endgame 1.57/2.08")
-    print("  racer 1.77/2.07 · scorer 1.87/2.33   |   contre l'agent : combined 0.7600, pire bot racer 0.630")
+    print("  racer 1.77/2.07 · scorer 1.87/2.33   |   contre l'agent : combined 0.7400, pire bot racer 0.630")
 
 
 if __name__ == "__main__":
