@@ -38,13 +38,27 @@ RACINE = Path(__file__).resolve().parent.parent
 _CHARGES: dict[Path, ModuleType] = {}
 
 
+def _nom_de_module(chemin: Path) -> str:
+    """Nom d'inscription dans `sys.modules`, en bijection avec le chemin résolu.
+
+    Un chemin hors du dépôt garde ses composants absolus : le nom reste laid mais unique, ce qui
+    est la seule propriété qu'on lui demande.
+    """
+    relatif = chemin.relative_to(RACINE) if chemin.is_relative_to(RACINE) else chemin
+    composants = [partie for partie in relatif.with_suffix("").parts if partie not in ("/", "")]
+    return "_".join([*composants, "sous_test"]).replace(".", "_").replace(" ", "_")
+
+
 def charger_script(chemin_relatif: str) -> ModuleType:
     """Charge `chemin_relatif` (depuis la racine du dépôt) comme module et le rend.
 
-    Le module est inscrit dans `sys.modules` sous `<nom_du_fichier>_sous_test` : le suffixe
-    évite qu'un script de `scripts/` prenne la place d'un module importable du même nom, et le
-    fait de l'y inscrire est ce qui permet aux dataclasses et aux exceptions qu'il définit de se
-    retrouver elles-mêmes.
+    Le module est inscrit dans `sys.modules` sous un nom dérivé du CHEMIN entier
+    (`scripts_check_doc_references_sous_test`), pas du seul nom de fichier. Deux raisons, et la
+    seconde est la vraie : le suffixe évite qu'un script prenne la place d'un module importable
+    homonyme, et le chemin complet garantit que le nom d'inscription est aussi unique que la clé
+    du cache. Sinon deux scripts de même nom dans deux dossiers partageraient une inscription, et
+    l'échec du second RETIRERAIT de `sys.modules` le module du premier — que `_CHARGES`
+    continuerait pourtant de rendre.
 
     Aucune garde d'existence du fichier ici : `exec_module` lève déjà un `FileNotFoundError` qui
     nomme le chemin absolu (vérifié). En ajouter une ne ferait que doubler le même message.
@@ -54,7 +68,7 @@ def charger_script(chemin_relatif: str) -> ModuleType:
     if module is not None:
         return module
 
-    nom = f"{chemin.stem}_sous_test"
+    nom = _nom_de_module(chemin)
     spec = importlib.util.spec_from_file_location(nom, chemin)
     if spec is None or spec.loader is None:
         raise ImportError(f"impossible de construire la spec du module pour {chemin}")

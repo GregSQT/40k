@@ -25,8 +25,31 @@ def test_le_module_est_inscrit_dans_sys_modules_sous_un_nom_suffixe() -> None:
     """Le suffixe est ce qui empêche un script de `scripts/` de prendre la place d'un module
     importable homonyme — la raison d'être du nom choisi, pas un détail cosmétique."""
     charger_script("scripts/check_roadmap_declared.py")
-    assert "check_roadmap_declared_sous_test" in sys.modules
+    assert "scripts_check_roadmap_declared_sous_test" in sys.modules
     assert "check_roadmap_declared" not in sys.modules
+
+
+def test_deux_scripts_de_meme_nom_ne_partagent_pas_leur_inscription(tmp_path) -> None:
+    """Le nom d'inscription est en bijection avec le CHEMIN, pas avec le nom de fichier.
+
+    Sans ça, deux `outil.py` de deux dossiers s'écrasent l'un l'autre dans `sys.modules` — et
+    surtout, l'échec du second retire l'inscription du PREMIER, que le cache continue de rendre.
+    Le second est ici volontairement illisible pour exercer exactement ce chemin d'échec.
+    """
+    premier = tmp_path / "a" / "outil.py"
+    premier.parent.mkdir(parents=True)
+    premier.write_text("VALEUR = 1\n", encoding="utf-8")
+    second = tmp_path / "b" / "outil.py"
+    second.parent.mkdir(parents=True)
+    second.write_text("raise RuntimeError('boum')\n", encoding="utf-8")
+
+    module = charger_script(str(premier))
+    nom = module.__name__
+    with pytest.raises(RuntimeError):
+        charger_script(str(second))
+
+    assert sys.modules.get(nom) is module
+    assert charger_script(str(premier)) is module
 
 
 def test_deux_appels_rendent_le_meme_objet() -> None:
