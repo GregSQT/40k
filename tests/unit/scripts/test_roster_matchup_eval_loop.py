@@ -10,35 +10,20 @@ moteur, aucun modele, aucune partie. Le faux modele enregistre ce qu'il recoit, 
 de verifier ce qui compte reellement — la forme de l'observation servie, la provenance du
 masque, l'arret au plafond de pas et la lecture du vainqueur — et non la tournure du source.
 """
-import importlib.util
 import random
-import sys
-from pathlib import Path
 
 import numpy as np
 import pytest
 
 from shared.data_validation import ConfigurationError
-
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-SCRIPT_PATH = PROJECT_ROOT / "scripts" / "roster_matchup_stats.py"
+from tests._chargeur_script import charger_script
 
 MASK_SIZE = 8
 
 
-def _load_script_module():
-    spec = importlib.util.spec_from_file_location("roster_matchup_stats_under_test", SCRIPT_PATH)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"Cannot load module spec for {SCRIPT_PATH}")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
 @pytest.fixture(scope="module")
 def script():
-    return _load_script_module()
+    return charger_script("scripts/roster_matchup_stats.py")
 
 
 def _squad_obs() -> dict:
