@@ -380,12 +380,20 @@ conclusion, il ne s'y ajoute pas. Ne jamais y répéter ce qui vient d'être dit
     il faut alors le dire explicitement. « À toi de voir » n'est pas une recommandation.
   * Interdit d'y glisser du travail technique que l'agent savait faire (cf. règle ci-dessus) :
     l'ARBITRAGE développé ne devient pas un lieu où déguiser une dette en question.
-- PROMPTS — OBLIGATOIRE dès qu'un bug, une incohérence ou un sujet à traiter a été RENCONTRÉ
-  pendant le travail sans être corrigé dans la livraison (hors périmètre, ou remonté en ARBITRAGE) :
-  * un bloc de code par sujet, contenant un prompt AUTONOME, copiable tel quel pour un autre agent
-    qui n'a AUCUN contexte de cette session : ce qu'on observe, où (fichier:ligne), ce qu'on attend,
-    et le périmètre attendu. Pas de « comme vu plus haut », pas de « le fichier en question ».
-  * un sujet remonté en ARBITRAGE a AUSSI son prompt ici, écrit pour l'option RECOMMANDÉE.
+- PROMPTS — trois catégories strictes, rien d'autre. Un bloc de code par sujet, contenant un
+  prompt AUTONOME, copiable tel quel pour un autre agent qui n'a AUCUN contexte de cette session :
+  ce qu'on observe, où (fichier:ligne), ce qu'on attend, et le périmètre attendu. Pas de
+  « comme vu plus haut », pas de « le fichier en question ».
+  1. Sous-tâche objective : étape suivante logique du travail demandé, hors périmètre de la
+     livraison actuelle (ex : câbler le front après que le backend est validé).
+  2. Bug prouvé hors périmètre : bug ou incohérence rencontré, avec un scénario d'échec NOMMÉ
+     (quel état, quelle entrée → quel effet observable faux). Sans ce scénario, la suspicion
+     se note en UNE LIGNE dans `LU` et s'arrête là — elle ne devient PAS un prompt.
+     MOTIF, mesuré le 2026-08-13 : sans garde-fou équivalent à T4, « j'ai remarqué X »
+     se transforme en prompt, qui génère d'autres prompts à son exécution — poupées russes
+     dont la profondeur est bornée par la qualité perçue du code, pas par sa réalité.
+  3. ARBITRAGE : un sujet remonté en ARBITRAGE a AUSSI son prompt ici, écrit pour l'option
+     RECOMMANDÉE.
   * cette section ne dispense de RIEN : ce que l'agent savait faire dans le périmètre de clôture
     se fait, il ne se transforme pas en prompt (cf. T2). Un prompt n'est pas un moyen de sortir
     du périmètre du travail en cours.
