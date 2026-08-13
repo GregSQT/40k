@@ -984,6 +984,19 @@ réel et rejoué à n=60. Mais aucun des deux poids incriminés ne le corrige, d
 ailleurs** : la chercher dans le terme d'encombrement a déjà coûté une campagne, et ce §12.8 est
 la deuxième.
 
+> ⚠️ **LA LIGNE `decapitation` CI-DESSUS EST PÉRIMÉE — cause trouvée au §12.11, poids repris là-bas.**
+> Le déclin venait de la MORTALITÉ, elle-même issue de la géométrie de déplacement : le terme
+> d'ennemi visait l'ennemi le plus proche de CHAQUE escouade, jamais la cible focalisée, et il bat
+> le bonus de tenue de zone au bout de trois hexes (`w_objective × hold_bonus` = 1,5 contre 0,6 par
+> hexe). Les deux poids que ce §12.8 a mesurés ne touchent que la carte de distance aux objectifs,
+> c'est-à-dire l'INTÉRIEUR du terme qui perdait déjà : ablation à état égal, +40 décisions gagnées
+> pour `w_crowd` contre +114 pour `w_enemy`. Ils ne pouvaient donc rien rendre, et le
+> **−0,05 ±0,13** ci-dessus est la mesure exacte de ce « rien ».
+> Depuis le correctif d'élection de cible (§12.11), la géométrie n'est plus la même et les poids de
+> ce bot ont été rejoués : `w_objective` 0.5 → **1.0**, `w_crowd` et `w_contest` remontés à **2.0**
+> et **1.5**. **Ce qui suit ne vaut que pour `alpha`**, dont la conclusion tient et dont les poids
+> n'ont pas bougé.
+
 #### Mesure finale contre l'agent (étape 8) — poids rétablis, `robust_0.8721`
 
 Sans elle, tout ce qui précède serait un déplacement de zones sans effet démontré sur l'objectif.
