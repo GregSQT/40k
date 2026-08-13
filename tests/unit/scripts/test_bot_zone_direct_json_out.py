@@ -117,20 +117,65 @@ def test_le_releve_dit_ce_qui_distingue_deux_runs(script):
     assert meta["model_mtime"].startswith("20")
 
 
-def test_l_empreinte_du_modele_est_relevee_avant_son_chargement(script):
-    # la seule raison d'être de `_model_fingerprint` : un entraînement qui réécrit le .zip
-    # pendant le run ferait consigner un checkpoint qui n'a pas joué. Rien d'observable à
-    # l'exécution ne l'atteste sans vrai modèle — l'ordre est donc verrouillé sur l'AST réel.
+@pytest.fixture(scope="module")
+def main_ast():
+    """`main()` charge un vrai modèle et une vraie config : les trois contrats ci-dessous ne
+    sont atteignables ni en process ni en sous-processus, et se verrouillent donc sur l'AST
+    RÉEL du script — un réordonnancement les rend rouges, une reformulation ne les touche pas.
+    """
     tree = ast.parse(SCRIPT_PATH.read_text(encoding="utf-8"))
-    main_fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main")
+    return next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main")
 
+
+def test_l_empreinte_du_modele_est_relevee_avant_son_chargement(main_ast):
+    # la seule raison d'être de `_model_fingerprint` : un entraînement qui réécrit le .zip
+    # pendant le run ferait consigner un checkpoint qui n'a pas joué.
     def line_of(pred) -> int:
-        return next(n.lineno for n in ast.walk(main_fn) if isinstance(n, ast.Call) and pred(n.func))
+        return next(n.lineno for n in ast.walk(main_ast) if isinstance(n, ast.Call) and pred(n.func))
 
     fingerprint = line_of(lambda f: isinstance(f, ast.Name) and f.id == "_model_fingerprint")
     load = line_of(lambda f: isinstance(f, ast.Attribute) and f.attr == "load")
 
     assert fingerprint < load
+
+
+def test_les_cles_du_panel_sont_exigees_et_non_defaultees(main_ast):
+    # `cb.get("bot_eval_weights", {})` faisait tourner la boucle zéro fois et publier
+    # `"episodes": []` en sortant 0 ; `bot_eval_randomness` vide construisait six bots non
+    # paramétrés dont les moyennes étaient quand même comparées à la référence §12.5.
+    exigees = {
+        node.args[1].value
+        for node in ast.walk(main_ast)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name) and node.func.id == "require_key"
+        and len(node.args) == 2 and isinstance(node.args[1], ast.Constant)
+    }
+    defaultees = {
+        node.func.value.id
+        for node in ast.walk(main_ast)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "get" and isinstance(node.func.value, ast.Name) and len(node.args) == 2
+    }
+
+    assert {"bot_eval_weights", "bot_eval_randomness"} <= exigees
+    assert "cb" not in defaultees  # aucune clé du bloc callback_params ne reprend un défaut
+
+
+def test_la_ligne_de_succes_s_affiche_apres_la_publication(main_ast):
+    # dans le `with`, un flush qui rate faisait lire « Relevé par épisode : … » juste avant la
+    # trace, destination absente ou portant encore le run précédent.
+    draft = next(
+        n for n in ast.walk(main_ast)
+        if isinstance(n, ast.With)
+        and any(isinstance(i.context_expr, ast.Call) and isinstance(i.context_expr.func, ast.Name)
+                and i.context_expr.func.id == "json_out_draft" for i in n.items)
+    )
+    annonce = next(
+        n for n in ast.walk(main_ast)
+        if isinstance(n, ast.Constant) and isinstance(n.value, str) and "Relevé par épisode" in n.value
+    )
+
+    assert annonce.lineno > draft.end_lineno
 
 
 def test_la_destination_est_ouverte_avant_de_jouer_le_moindre_episode(tmp_path):
