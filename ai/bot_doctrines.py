@@ -73,7 +73,7 @@ from shared.data_validation import require_key
 # Primitives d'espace d'action — AUCUNE doctrine, donc pas de raison de les redire ici. Les
 # reecrire creerait le doublon divergent qui est le mode d'echec n°1 de ce depot.
 from ai.evaluation_bots import (
-    _acting_player, _best_slot_action, _select_weighted_deployment_action,
+    _best_slot_action, _select_weighted_deployment_action,
     DEPLOYMENT_ACTIONS, WAIT_ACTION,
 )
 
@@ -573,6 +573,21 @@ class _DoctrineBot(_PlacementMemory):
 
     # -- Deplacement --------------------------------------------------------------------------
 
+    def movement_enemy_anchors(
+        self, unit, enemies: List[Dict[str, Any]], game_state
+    ) -> List[Tuple[int, int]]:
+        """Ancres ennemies que le terme d'ennemi du deplacement prend en compte.
+
+        TOUTES par defaut : le terme vaut `-w_enemy x min(distance)`, c'est-a-dire « l'ennemi le
+        plus proche, quel qu'il soit ». Un seul style restreint ce jeu (`DecapitationBot`, qui ne
+        regarde que sa cible du tour), d'ou un point d'extension plutot qu'une branche par style
+        dans `select_movement_destination` — celui-ci reste COMMUN aux six.
+        """
+        return [
+            (int(e["col"]), int(e["row"]))
+            for e in (require_unit_from_cache(str(x["id"]), game_state, "_move") for x in enemies)
+        ]
+
     def select_movement_destination(
         self, unit, valid_destinations: List[Tuple[int, int]], game_state=None
     ) -> Tuple[int, int]:
@@ -605,10 +620,7 @@ class _DoctrineBot(_PlacementMemory):
             escouade=str(require_key(unit, "id")),
         )
         enemies = _living_enemies_on_table(unit, game_state)
-        enemy_anchors = [
-            (int(e["col"]), int(e["row"]))
-            for e in (require_unit_from_cache(str(x["id"]), game_state, "_move") for x in enemies)
-        ]
+        enemy_anchors = self.movement_enemy_anchors(unit, enemies, game_state)
         hold_bonus = load_hold_bonus()
 
         def _geometric(dest, inside: bool) -> float:
@@ -880,7 +892,10 @@ class DecapitationBot(_DoctrineBot):
 
     ⚠️ Le focus est une MEMOIRE de tour, pas un score : les bots decident escouade par escouade
     sans se voir les unes les autres, donc aucun critere local ne peut produire une concentration.
-    La cible est choisie a la premiere activation du tour et gardee tant qu'elle vit.
+    La cible est ELUE a la premiere activation du tour (cf. `_elect`) et gardee tant qu'elle vit.
+    Elle porte les DEUX faces de la doctrine : vers qui on tire (`target_score`) et vers qui on
+    marche (`movement_enemy_anchors`) — concentrer ses tirs depuis cinq positions eclatees, c'est
+    ne concentrer que la moitie de son activation.
     """
 
     MOVEMENT_BOT_KEY = "decapitation"
@@ -894,8 +909,8 @@ class DecapitationBot(_DoctrineBot):
         self._focus_turn: Optional[Tuple[Any, int]] = None
         self._focus_target: Optional[str] = None
 
-    def _focus(self, game_state) -> Optional[str]:
-        """Cible du tour, oubliee au changement de tour ou a la mort de la cible.
+    def _focus(self, game_state, attacker) -> Optional[str]:
+        """Cible du tour, ELUE a la premiere lecture, oubliee au changement de tour ou a sa mort.
 
         ⚠️ `require_key` sur `turn`, pas un defaut a 1 (T1, meme correction qu'`EndgameBot`) :
         un etat sans tour rendait ici un marqueur CONSTANT, donc le bot gardait la meme cible
@@ -910,10 +925,65 @@ class DecapitationBot(_DoctrineBot):
             self._focus_target = None
         if self._focus_target is not None and not is_unit_alive(self._focus_target, game_state):
             self._focus_target = None
+        if self._focus_target is None:
+            self._focus_target = self._elect(game_state, attacker)
         return self._focus_target
 
+    def _elect(self, game_state, attacker) -> Optional[str]:
+        """Elit la cible du tour pour l'escouade qui active la premiere.
+
+        ⚠️ ELECTION, et non plus memorisation du premier tir (2026-08-13). La cible etait
+        enregistree depuis `_shoot`/`_fight`, or la phase move PRECEDE le tir dans le tour
+        (`GAME_PHASES`) et le changement de tour vient d'effacer celle du tour precedent : le
+        deplacement ne lisait donc JAMAIS qu'un focus vide. Les cinq escouades partaient chacune
+        vers un ennemi different, puis concentraient leurs tirs depuis des positions eclatees —
+        la doctrine s'annulait dans la phase qui la precede.
+
+        Le critere reste celui du tir, `_score_kill_now`, pris au MEILLEUR des deux modes : au
+        moment de bouger on ne sait pas encore si l'escouade tirera ou chargera, et une cible elue
+        sur la mauvaise table de degats concentrerait tout le monde sur une escouade que personne
+        ne peut entamer.
+        """
+        enemies = _living_enemies_on_table(attacker, game_state)
+        if not enemies:
+            return None
+        ranged, melee = _score_kill_now(attacker, True), _score_kill_now(attacker, False)
+        scored: List[Tuple[float, str]] = []
+        for enemy in enemies:
+            sid = str(enemy["id"])
+            entry = require_unit_from_cache(sid, game_state, "_elect")
+            # `None` ECARTE la cible — meme contrat que `_best_slot_action`, et c'est pourquoi le
+            # filtre porte sur les deux modes separement : « inattaquable au tir » n'est pas
+            # « inattaquable ».
+            modes = [
+                score for score in
+                (ranged(sid, entry, game_state), melee(sid, entry, game_state))
+                if score is not None
+            ]
+            if modes:
+                scored.append((max(modes), sid))
+        if not scored:
+            return None
+        # `key=` et non `max(scored)` : a egalite de score, le premier de l'ordre des unites, et
+        # surtout pas le plus petit identifiant — l'ordre des unites est le meme pour toutes les
+        # escouades du tour, donc l'election reste la meme quelle que soit celle qui active.
+        return max(scored, key=lambda pair: pair[0])[1]
+
+    def movement_enemy_anchors(self, unit, enemies, game_state):
+        """Le terme d'ennemi porte sur la CIBLE DU TOUR : c'est la doctrine, pas une geometrie.
+
+        Repli sur toutes les ancres quand il n'y a pas de cible elue (plus aucun ennemi sur la
+        table) ou qu'elle n'y est pas encore (reserves, 20.01) : le terme doit tirer vers quelque
+        chose, et « pas encore arrivee » n'est pas une erreur a masquer.
+        """
+        focused = self._focus(game_state, unit)
+        if focused is not None and any(str(e["id"]) == focused for e in enemies):
+            entry = require_unit_from_cache(focused, game_state, "_move_focus")
+            return [(int(entry["col"]), int(entry["row"]))]
+        return super().movement_enemy_anchors(unit, enemies, game_state)
+
     def target_score(self, attacker, is_ranged: bool, game_state):
-        focused = self._focus(game_state)
+        focused = self._focus(game_state, attacker)
         kill_now = _score_kill_now(attacker, is_ranged)
 
         def _score(sid: str, entry: Dict[str, Any], game_state) -> Optional[float]:
@@ -928,29 +998,6 @@ class DecapitationBot(_DoctrineBot):
             return base
 
         return _score
-
-    def _remember(self, action: Optional[int], slot_base: int, game_state, active_unit) -> None:
-        """Enregistre la cible reellement choisie, pour que les suivantes la reprennent."""
-        if action is None or self._focus_target is not None:
-            return
-        from engine.phase_handlers.shared_utils import get_enemy_slot_mapping
-
-        mapping = get_enemy_slot_mapping(game_state, _acting_player(game_state, active_unit))
-        slot = action - slot_base
-        if 0 <= slot < len(mapping) and mapping[slot] is not None:
-            self._focus_target = str(mapping[slot])
-
-    def _shoot(self, valid_actions, game_state, active_unit) -> int:
-        action = super()._shoot(valid_actions, game_state, active_unit)
-        if action in mi.SHOOT_SLOTS:
-            self._remember(action, mi.SHOOT_SLOT_BASE, game_state, active_unit)
-        return action
-
-    def _fight(self, valid_actions, game_state, active_unit) -> int:
-        action = super()._fight(valid_actions, game_state, active_unit)
-        if action in mi.FIGHT_SLOTS:
-            self._remember(action, mi.FIGHT_SLOT_BASE, game_state, active_unit)
-        return action
 
 
 class ScorerBot(_DoctrineBot):

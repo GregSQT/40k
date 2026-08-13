@@ -5,12 +5,27 @@ Joue des épisodes de bot eval sans passer par train.py ni step_logger.
 Lit game_state["objective_controllers"] après chaque step pour compter les zones
 contrôlées par le bot player (opponent_player).
 
+⚠️ DEUX ENTRÉES DÉCIDENT DU CHIFFRE AUTANT QUE LES POIDS MESURÉS, et les deux étaient
+silencieuses (corrigé le 2026-08-13) :
+
+1. LE MODÈLE. Le script lisait le chemin CANONIQUE `model_ArmageddonAgent.zip`, que le moindre
+   entraînement réécrit : le 2026-08-13 il valait md5 1072b0c6…, quand toutes les mesures du §12
+   du chantier (référence T2=1.61 / T5=1.90 imprimée en bas) sont faites sur le checkpoint
+   `robust_0.8721` (md5 6f6b98…). Deux campagnes se comparaient donc sans modèle commun, et rien
+   ne le disait. Le checkpoint de référence est désormais NOMMÉ et VÉRIFIÉ AU MD5 — le jour où il
+   change, le script lève au lieu de rendre un tableau incomparable. Son `_vec_normalize.pkl`
+   apparié suit automatiquement (`get_vec_normalize_path` le dérive du zip chargé).
+2. LE PLATEAU. Sans `W40K_BOARD_PATH`, c'est `config/config.json` qui décide (x5), où le classement
+   des bots N'EST PAS le même — cf. l'avertissement de `config/bot_movement_weights.json`, qui a
+   déjà coûté une campagne entière. La variable est donc EXIGÉE, pas défaultée.
+
 Usage:
-    source .venv/bin/activate && python3 scripts/bot_zone_direct.py [--episodes N]
+    W40K_BOARD_PATH=board/44x60x1 python3 scripts/bot_zone_direct.py [--episodes N]
 """
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
 import sys
 from collections import defaultdict
@@ -20,11 +35,49 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+#: Le modèle SUR LEQUEL TOUT LE §12 EST MESURÉ. Ce n'est pas « un modèle récent » : c'est l'étalon
+#: qui rend les campagnes comparables entre elles. Le remplacer est une décision de protocole, qui
+#: périme les chiffres du chantier — donc elle s'écrit ici, elle ne s'attrape pas par un
+#: entraînement qui a réécrit le chemin canonique.
+REFERENCE_MODEL = "ArmageddonAgent_12345_robust_0.8721.zip"
+REFERENCE_MD5 = "6f6b98059a0a6c279b7d11dc427461fd"
+
+
+def _require_reference_model() -> str:
+    """Chemin du modèle étalon, vérifié au md5. Lève plutôt que de mesurer un autre modèle."""
+    path = os.path.join(_PROJECT_ROOT, "ai", "models", "ArmageddonAgent", REFERENCE_MODEL)
+    if not os.path.exists(path):
+        raise RuntimeError(
+            f"Modèle de référence absent : {path}. Toutes les mesures du §12 sont faites sur lui ; "
+            "mesurer avec un autre rend le tableau incomparable."
+        )
+    with open(path, "rb") as handle:
+        digest = hashlib.md5(handle.read()).hexdigest()
+    if digest != REFERENCE_MD5:
+        raise RuntimeError(
+            f"{REFERENCE_MODEL} vaut md5 {digest}, attendu {REFERENCE_MD5} : le fichier a été "
+            "réécrit. Restaurer le checkpoint, ou acter le nouvel étalon ICI et rejouer le §12."
+        )
+    return path
+
+
+def _require_board_path() -> str:
+    """Le plateau vient de l'environnement, jamais de config.json (cf. l'en-tête)."""
+    board = os.environ.get("W40K_BOARD_PATH")
+    if not board:
+        raise RuntimeError(
+            "W40K_BOARD_PATH non défini : sans elle le plateau est celui de config.json (x5), où "
+            "le classement des bots diffère. Relancer avec W40K_BOARD_PATH=board/44x60x1."
+        )
+    return board
+
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--episodes", type=int, default=10)
     args = parser.parse_args()
+
+    board_path = _require_board_path()
 
     import numpy as np
     from sb3_contrib import MaskablePPO
@@ -42,11 +95,12 @@ def main() -> None:
     tc = config.load_agent_training_config("ArmageddonAgent", "x1_panel")
     cb = tc["callback_params"]
 
-    model_path = os.path.join(_PROJECT_ROOT, "ai", "models", "ArmageddonAgent", "model_ArmageddonAgent.zip")
+    model_path = _require_reference_model()
     vec_norm_enabled = bool(tc.get("vec_normalize", {}).get("enabled", False))
     vec_eval_enabled = bool(tc.get("vec_normalize_eval", {}).get("enabled", False))
 
-    print(f"Modèle : {os.path.basename(model_path)}")
+    print(f"Modèle : {os.path.basename(model_path)} (md5 {REFERENCE_MD5})")
+    print(f"Plateau : {board_path}")
     model = MaskablePPO.load(model_path, device="cpu")
     normalize = _build_eval_obs_normalizer_for_worker(model, model_path, vec_norm_enabled, vec_eval_enabled)
 
