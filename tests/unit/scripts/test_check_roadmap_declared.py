@@ -10,18 +10,14 @@ un échantillon qui bouge à chaque fusion.
 """
 from __future__ import annotations
 
-import importlib.util
 import os
 import pathlib
 import subprocess
 
+from tests._chargeur_script import charger_script
+
 ROOT = pathlib.Path(__file__).resolve().parents[3]
-_SPEC = importlib.util.spec_from_file_location(
-    "check_roadmap_declared", ROOT / "scripts" / "check_roadmap_declared.py"
-)
-assert _SPEC is not None and _SPEC.loader is not None
-gate = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(gate)
+gate = charger_script("scripts/check_roadmap_declared.py")
 
 
 def merges(count: int) -> list[str]:

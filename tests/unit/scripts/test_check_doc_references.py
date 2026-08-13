@@ -15,7 +15,6 @@ Ce que ces tests protègent, et pourquoi chacun existe :
 """
 from __future__ import annotations
 
-import importlib.util
 import os
 import pathlib
 import subprocess
@@ -23,13 +22,10 @@ import sys
 
 import pytest
 
+from tests._chargeur_script import charger_script
+
 ROOT = pathlib.Path(__file__).resolve().parents[3]
-_SPEC = importlib.util.spec_from_file_location(
-    "check_doc_references", ROOT / "scripts" / "check_doc_references.py"
-)
-assert _SPEC is not None and _SPEC.loader is not None
-cdr = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(cdr)
+cdr = charger_script("scripts/check_doc_references.py")
 
 
 def write(tmp_path: pathlib.Path, name: str, body: str) -> pathlib.Path:

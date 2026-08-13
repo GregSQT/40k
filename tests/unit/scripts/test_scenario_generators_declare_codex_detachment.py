@@ -15,13 +15,12 @@ Deux verrous complementaires :
 from __future__ import annotations
 
 import ast
-import importlib.util
-import sys
 from pathlib import Path
 
 import pytest
 
 from engine.game_state import uses_codex_detachment
+from tests._chargeur_script import charger_script
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
@@ -75,17 +74,6 @@ def test_every_generated_scenario_declares_codex_detachment(relative: str) -> No
             )
 
 
-def _load(relative: str):
-    path = PROJECT_ROOT / relative
-    spec = importlib.util.spec_from_file_location(f"{path.stem}_under_test", path)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"Cannot load module spec for {path}")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
 def test_the_emitted_value_is_the_one_the_engine_reads() -> None:
     """La valeur emise traverse le LECTEUR du moteur, pour les DEUX joueurs.
 
@@ -93,7 +81,7 @@ def test_the_emitted_value_is_the_one_the_engine_reads() -> None:
     ecrire sous `config/` ; c'est donc lui qui porte la preuve de FORME, commune aux trois
     (meme litteral `{"1": True, "2": True}`).
     """
-    template = _load("scripts/roster_matchup_stats.py")._build_scenario_template(
+    template = charger_script("scripts/roster_matchup_stats.py")._build_scenario_template(
         "100pts", "44x60x5", "terrain-mc1.json"
     )
     for player in (1, 2):

@@ -6,7 +6,6 @@ relevé d'épisode, l'agrégation qui alimente le tableau texte, et l'écriture 
 point qui compte : le tableau texte est désormais DÉRIVÉ des relevés par épisode, donc les
 moyennes affichées et le JSON ne peuvent plus diverger.
 """
-import importlib.util
 import json
 import os
 import subprocess
@@ -14,6 +13,8 @@ import sys
 from pathlib import Path
 
 import pytest
+
+from tests._chargeur_script import charger_script
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SCRIPT_PATH = PROJECT_ROOT / "scripts" / "bot_zone_direct.py"
@@ -26,13 +27,7 @@ def _FINGERPRINT(script):
 
 @pytest.fixture(scope="module")
 def script():
-    spec = importlib.util.spec_from_file_location("bot_zone_direct_under_test", SCRIPT_PATH)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"Cannot load module spec for {SCRIPT_PATH}")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
+    return charger_script("scripts/bot_zone_direct.py")
 
 
 def test_episode_record_porte_graine_joueur_et_zones_triees(script):
