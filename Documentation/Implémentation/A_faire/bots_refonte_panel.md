@@ -831,3 +831,43 @@ construction de la doctrine (poursuite ennemie prioritaire) — ce n'est pas un 
 | racer | 2.20 | 2.15 | 2.30 | 2.60 |
 | scorer | 1.85 | 2.05 | 1.90 | 2.20 |
 | endgame | 1.50 | 1.40 | 1.95 | 1.95 |
+
+### 12.8 Distance hex et taux de pertes — deux grandeurs de diagnostic (2026-08-13)
+
+**Contexte.** Le réglage du §12.7 a révélé que les chiffres de zones ne suffisent pas à distinguer
+un bot qui s'étale correctement d'un bot qui progresse vers les zones *en passant à côté des
+ennemis* : `alpha` et `decapitation` avaient un T5 bas alors qu'ils pourchassaient l'ennemi par
+doctrine. Deux grandeurs lisibles directement sur le même `game_state` comblent ce trou.
+
+**Protocole (immuable, cf. gardes du script) :**
+
+```bash
+W40K_BOARD_PATH=board/44x60x1 python3 scripts/bot_zone_direct.py --episodes 60
+```
+
+- Plateau : `board/44x60x1` (x1) — sans `W40K_BOARD_PATH` le script lève.
+- Modèle : `ArmageddonAgent_12345_robust_0.8721.zip` vérifié au md5
+  `6f6b98059a0a6c279b7d11dc427461fd` — si le fichier a changé le script lève.
+- 60 épisodes par bot (variance acceptable sur les deux nouvelles grandeurs).
+
+**Deux nouvelles grandeurs :**
+
+| clé JSON | définition | lecture |
+|----------|-----------|---------|
+| `dist_by_turn` | distance hex moyenne de chaque escouade bot au plus proche ennemi vivant sur table | un bot qui s'approche : distance décroissante de T1 à T5 |
+| `squads_by_turn` | nombre d'escouades bot vivantes (table + réserves) | `_loss_rate_by_turn` dérive le taux cumulé `(baseline − alive) / baseline` |
+
+Les escouades en réserves sont exclues côté ennemi (sentinel `(-1,-1)`) mais **comptées côté bot**
+dans `squads_by_turn` — elles sont vivantes, elles ne sont pas encore sur table. La distance n'est
+calculée que lorsqu'au moins un ennemi est sur table ; `None` (absent du JSON) = tour de réserves pur.
+
+**Gardes du script :**
+
+- `_require_board_path()` : lève `RuntimeError` sans `W40K_BOARD_PATH`.
+- `_require_reference_model()` : lève `RuntimeError` si le md5 du checkpoint ne correspond pas à
+  `REFERENCE_MD5`. Les deux constantes (`REFERENCE_MODEL`, `REFERENCE_MD5`) sont au niveau du
+  module pour être monkeypatchables en test sans écrire dans `ai/models/`.
+
+**Verrou automatisé :** `tests/unit/scripts/test_bot_zone_direct_gardes.py` (gardes) +
+`tests/unit/scripts/test_bot_zone_direct_metrics.py` (fonctions de calcul). Rouge prouvé par
+mutation sur les deux gardes (2026-08-13).

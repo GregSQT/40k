@@ -1,20 +1,32 @@
 #!/usr/bin/env python3
-"""Mesure directe de l'étalement des bots (zones contrôlées par tour).
+"""Mesure directe de l'étalement des bots (zones, distance, pertes) par tour.
 
 Joue des épisodes de bot eval sans passer par train.py ni step_logger.
-Lit game_state["objective_controllers"] après chaque step pour compter les zones
-contrôlées par le bot player (opponent_player).
+Lit game_state après chaque step pour mesurer trois grandeurs par tour :
+  - zones contrôlées par le bot player (objective_controllers)
+  - distance hex moyenne de chaque escouade bot au plus proche ennemi vivant
+  - taux d'escouades bot perdues (∆ depuis T1)
 
-Usage:
-    source .venv/bin/activate && python3 scripts/bot_zone_direct.py [--episodes N]
-                                                                   [--json-out FICHIER]
+⚠️ DEUX ENTRÉES DÉCIDENT DU CHIFFRE AUTANT QUE LES POIDS MESURÉS, et les deux étaient
+silencieuses (corrigé le 2026-08-13) :
 
-`--json-out` écrit le relevé PAR ÉPISODE (graine, joueur du bot, zones par tour) : la sortie
+1. LE MODÈLE. Le script lisait le chemin canonique `model_ArmageddonAgent.zip`, que le moindre
+   entraînement réécrit. Toutes les mesures du §12 sont faites sur le checkpoint robust_0.8721
+   (md5 6f6b98…). Le checkpoint est désormais NOMMÉ et VÉRIFIÉ AU MD5 — le jour où il change,
+   le script lève au lieu de rendre un tableau incomparable.
+2. LE PLATEAU. Sans `W40K_BOARD_PATH`, c'est `config/config.json` qui décide (x5), où le
+   classement des bots n'est pas le même. La variable est EXIGÉE, pas défaultée.
+
+Usage (protocole §12.8) :
+    W40K_BOARD_PATH=board/44x60x1 python3 scripts/bot_zone_direct.py --episodes 60 [--json-out F]
+
+`--json-out` écrit le relevé PAR ÉPISODE (graine, joueur du bot, grandeurs par tour) : la sortie
 texte agrégée reste identique, seul s'y ajoute le chemin du fichier écrit.
 """
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
 import sys
 from datetime import datetime
@@ -35,6 +47,95 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # entier — le numéro n'a jamais été faux que pendant ces deux commits.
 _JSON_SCHEMA_VERSION = 2
 
+#: Checkpoint sur lequel TOUTES les mesures du §12 sont faites. Remplacer ici est une décision
+#: de protocole : elle périme les chiffres du chantier, donc elle ne se prend pas par accident.
+REFERENCE_MODEL = "ArmageddonAgent_12345_robust_0.8721.zip"
+REFERENCE_MD5 = "6f6b98059a0a6c279b7d11dc427461fd"
+
+
+def _require_reference_model() -> str:
+    """Chemin du modèle étalon, vérifié au md5. Lève plutôt que de mesurer un autre modèle."""
+    path = os.path.join(_PROJECT_ROOT, "ai", "models", "ArmageddonAgent", REFERENCE_MODEL)
+    if not os.path.exists(path):
+        raise RuntimeError(
+            f"Modèle de référence absent : {path}. Toutes les mesures du §12 sont faites sur lui ; "
+            "mesurer avec un autre rend le tableau incomparable."
+        )
+    with open(path, "rb") as handle:
+        digest = hashlib.md5(handle.read()).hexdigest()
+    if digest != REFERENCE_MD5:
+        raise RuntimeError(
+            f"{REFERENCE_MODEL} vaut md5 {digest}, attendu {REFERENCE_MD5} : le fichier a été "
+            "réécrit. Restaurer le checkpoint, ou acter le nouvel étalon ICI et rejouer le §12."
+        )
+    return path
+
+
+def _require_board_path() -> str:
+    """Le plateau vient de l'environnement, jamais de config.json (cf. l'en-tête)."""
+    board = os.environ.get("W40K_BOARD_PATH")
+    if not board:
+        raise RuntimeError(
+            "W40K_BOARD_PATH non défini : sans elle le plateau est celui de config.json (x5), où "
+            "le classement des bots diffère. Relancer avec W40K_BOARD_PATH=board/44x60x1."
+        )
+    return board
+
+
+def _avg_bot_enemy_distance(gs: Dict[str, Any], bot_player: int) -> Optional[float]:
+    """Distance hex moyenne de chaque escouade bot vivante au plus proche ennemi vivant sur table.
+
+    Retourne None si aucun ennemi n'est sur la table (réserves seules ou tous éliminés).
+    Les escouades en réserves sont exclues côté bot ET côté ennemi.
+    """
+    from engine.phase_handlers.shared_utils import is_unit_alive, require_unit_from_cache
+    from engine.spatial_relations import entry_is_on_battlefield
+    from engine.combat_utils import calculate_hex_distance
+
+    units = gs.get("units", [])
+
+    enemy_positions: List[tuple] = []
+    for u in units:
+        if int(u.get("player", 0)) == bot_player:
+            continue
+        sid = str(u["id"])
+        if not is_unit_alive(sid, gs):
+            continue
+        entry = require_unit_from_cache(sid, gs, "_avg_dist:enemy")
+        if entry_is_on_battlefield(entry):
+            enemy_positions.append((int(entry["col"]), int(entry["row"])))
+
+    if not enemy_positions:
+        return None
+
+    distances: List[float] = []
+    for u in units:
+        if int(u.get("player", 0)) != bot_player:
+            continue
+        sid = str(u["id"])
+        if not is_unit_alive(sid, gs):
+            continue
+        entry = require_unit_from_cache(sid, gs, "_avg_dist:bot")
+        if not entry_is_on_battlefield(entry):
+            continue
+        bc, br = int(entry["col"]), int(entry["row"])
+        distances.append(min(
+            calculate_hex_distance(bc, br, ec, er) for ec, er in enemy_positions
+        ))
+
+    return sum(distances) / len(distances) if distances else None
+
+
+def _count_alive_bot_squads(gs: Dict[str, Any], bot_player: int) -> int:
+    """Nombre d'escouades bot vivantes (sur table + réserves — pas encore éliminées)."""
+    from engine.phase_handlers.shared_utils import is_unit_alive
+
+    return sum(
+        1
+        for u in gs.get("units", [])
+        if int(u.get("player", 0)) == bot_player and is_unit_alive(str(u["id"]), gs)
+    )
+
 
 def _episode_record(
     bot_name: str,
@@ -42,15 +143,22 @@ def _episode_record(
     seed: int,
     bot_player: int,
     turn_snapshot: Dict[int, int],
+    dist_snapshot: Optional[Dict[int, float]] = None,
+    squad_snapshot: Optional[Dict[int, int]] = None,
 ) -> Dict[str, Any]:
     """Relevé d'UN épisode, suffisant pour le rejouer (graine) et l'inspecter (zones/tour)."""
-    return {
+    rec: Dict[str, Any] = {
         "bot": bot_name,
         "episode": episode,
         "seed": seed,
         "bot_player": bot_player,
         "zones_by_turn": {str(t): turn_snapshot[t] for t in sorted(turn_snapshot)},
     }
+    if dist_snapshot:
+        rec["dist_by_turn"] = {str(t): dist_snapshot[t] for t in sorted(dist_snapshot)}
+    if squad_snapshot:
+        rec["squads_by_turn"] = {str(t): squad_snapshot[t] for t in sorted(squad_snapshot)}
+    return rec
 
 
 def _turns_of(records: List[Dict[str, Any]]) -> Dict[int, List[int]]:
@@ -62,6 +170,32 @@ def _turns_of(records: List[Dict[str, Any]]) -> Dict[int, List[int]]:
     return per_turn
 
 
+def _turns_of_key(records: List[Dict[str, Any]], key: str) -> Dict[int, List]:
+    """{tour: [valeur, un par épisode]} pour n'importe quelle clé `*_by_turn` du relevé."""
+    per_turn: Dict[int, List] = {}
+    for rec in records:
+        for turn_str, val in rec.get(key, {}).items():
+            per_turn.setdefault(int(turn_str), []).append(val)
+    return per_turn
+
+
+def _loss_rate_by_turn(records: List[Dict[str, Any]]) -> Dict[int, List[float]]:
+    """Taux de perte cumulé (0–1) par tour : (squads_T1 − squads_T) / squads_T1, par épisode."""
+    per_turn: Dict[int, List[float]] = {}
+    for rec in records:
+        squads = rec.get("squads_by_turn", {})
+        if not squads:
+            continue
+        sorted_turns = sorted(int(k) for k in squads)
+        baseline = squads.get(str(sorted_turns[0]), 0)
+        if baseline == 0:
+            continue
+        for t in sorted_turns:
+            alive = squads.get(str(t), baseline)
+            per_turn.setdefault(t, []).append((baseline - alive) / baseline)
+    return per_turn
+
+
 def _aggregate_zones(records: List[Dict[str, Any]]) -> Dict[str, Dict[int, List[int]]]:
     """Agrège les relevés par épisode en {bot: {tour: [zones, ...]}} — source du tableau texte."""
     by_bot: Dict[str, List[Dict[str, Any]]] = {}
@@ -70,7 +204,7 @@ def _aggregate_zones(records: List[Dict[str, Any]]) -> Dict[str, Dict[int, List[
     return {bot: _turns_of(bot_records) for bot, bot_records in by_bot.items()}
 
 
-def _n_at_last_turn(per_turn: Dict[int, List[int]]) -> int:
+def _n_at_last_turn(per_turn: Dict[int, List]) -> int:
     """Nombre d'épisodes parvenus au dernier tour observé — le `N` de la ligne et du tableau."""
     if not per_turn:
         return 0
@@ -129,9 +263,10 @@ def main() -> None:
         "--json-out",
         dest="json_out",
         default=None,
-        help="Fichier JSON où écrire le relevé par épisode (graine, joueur du bot, zones par tour)",
+        help="Fichier JSON où écrire le relevé par épisode (graine, joueur du bot, grandeurs par tour)",
     )
     args = parser.parse_args()
+    _require_board_path()
 
     episode_records: List[Dict[str, Any]] = []
 
@@ -155,7 +290,7 @@ def main() -> None:
         tc = config.load_agent_training_config("ArmageddonAgent", "x1_panel")
         cb = tc["callback_params"]
 
-        model_path = os.path.join(_PROJECT_ROOT, "ai", "models", "ArmageddonAgent", "model_ArmageddonAgent.zip")
+        model_path = _require_reference_model()
         vec_norm_enabled = bool(tc.get("vec_normalize", {}).get("enabled", False))
         vec_eval_enabled = bool(tc.get("vec_normalize_eval", {}).get("enabled", False))
 
@@ -215,6 +350,8 @@ def main() -> None:
                 bot_player: int = int(info.get("opponent_player", 2))
                 done = False
                 turn_snapshot: Dict[int, int] = {}
+                dist_snapshot: Dict[int, float] = {}
+                squad_snapshot: Dict[int, int] = {}
 
                 while not done:
                     model_obs = normalize(obs) if normalize else obs
@@ -239,7 +376,16 @@ def main() -> None:
                         zones = sum(1 for v in controllers.values() if v == bot_player)
                         turn_snapshot[cur_turn] = zones
 
-                bot_records.append(_episode_record(bot_name, ep_idx, ep_seed, bot_player, turn_snapshot))
+                        avg_d = _avg_bot_enemy_distance(gs, bot_player)
+                        if avg_d is not None:
+                            dist_snapshot[cur_turn] = avg_d
+
+                        squad_snapshot[cur_turn] = _count_alive_bot_squads(gs, bot_player)
+
+                bot_records.append(_episode_record(
+                    bot_name, ep_idx, ep_seed, bot_player,
+                    turn_snapshot, dist_snapshot, squad_snapshot,
+                ))
                 print(".", end="", flush=True)
 
             env.close()
@@ -248,12 +394,43 @@ def main() -> None:
 
         turns = [1, 2, 3, 4, 5]
         hdr = " | ".join(f"T{t}" for t in turns)
-        print(f"\n{'Bot':<22} {'N':>4} | {hdr}")
-        print("-" * (22 + 4 + 3 + len(turns) * 6 + 4))
-        # le tableau est DÉRIVÉ des mêmes relevés que le JSON : les deux ne peuvent pas diverger.
+        sep = "-" * (22 + 4 + 3 + len(turns) * 6 + 4)
+
+        by_bot: Dict[str, List[Dict[str, Any]]] = {}
+        for rec in episode_records:
+            by_bot.setdefault(rec["bot"], []).append(rec)
+
+        # les trois tableaux sont DÉRIVÉS des mêmes relevés que le JSON : pas de divergence possible.
+        print(f"\nZones contrôlées (objectifs)")
+        print(f"{'Bot':<22} {'N':>4} | {hdr}")
+        print(sep)
         aggregated = _aggregate_zones(episode_records)
         for bot in sorted(bot_weights):
             tdata = aggregated.get(bot, {})
+            cells = []
+            for t in turns:
+                vals = tdata.get(t, [])
+                cells.append(f"{sum(vals)/len(vals):.2f}" if vals else "  - ")
+            print(f"{bot:<22} {_n_at_last_turn(tdata):>4} | " + " | ".join(f"{c:>4}" for c in cells))
+
+        print(f"\nDistance hex bot → ennemi le plus proche")
+        print(f"{'Bot':<22} {'N':>4} | {hdr}")
+        print(sep)
+        for bot in sorted(bot_weights):
+            bot_recs = by_bot.get(bot, [])
+            tdata = _turns_of_key(bot_recs, "dist_by_turn")
+            cells = []
+            for t in turns:
+                vals = tdata.get(t, [])
+                cells.append(f"{sum(vals)/len(vals):4.1f}" if vals else "   -")
+            print(f"{bot:<22} {_n_at_last_turn(tdata):>4} | " + " | ".join(f"{c:>4}" for c in cells))
+
+        print(f"\nTaux escouades bot perdues (∆ depuis T1)")
+        print(f"{'Bot':<22} {'N':>4} | {hdr}")
+        print(sep)
+        for bot in sorted(bot_weights):
+            bot_recs = by_bot.get(bot, [])
+            tdata = _loss_rate_by_turn(bot_recs)
             cells = []
             for t in turns:
                 vals = tdata.get(t, [])

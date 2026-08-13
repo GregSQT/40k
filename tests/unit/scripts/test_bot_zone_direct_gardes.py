@@ -1,0 +1,70 @@
+"""Verrouille les gardes de bot_zone_direct.py ajoutées le 2026-08-13.
+
+_require_board_path  : lève RuntimeError si W40K_BOARD_PATH absent de l'environnement.
+_require_reference_model : lève RuntimeError si le md5 du fichier ne correspond pas à
+                           REFERENCE_MD5. Ne touche jamais ai/models/ — le chemin est
+                           monkeypatché vers un fichier temporaire.
+"""
+import hashlib
+import os
+from pathlib import Path
+
+import pytest
+
+from tests._chargeur_script import charger_script
+
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+
+
+@pytest.fixture(scope="module")
+def script():
+    return charger_script("scripts/bot_zone_direct.py")
+
+
+# ---------------------------------------------------------------------------
+# Garde de plateau
+# ---------------------------------------------------------------------------
+
+def test_require_board_path_leve_sans_variable(script, monkeypatch):
+    monkeypatch.delenv("W40K_BOARD_PATH", raising=False)
+    with pytest.raises(RuntimeError, match="W40K_BOARD_PATH"):
+        script._require_board_path()
+
+
+def test_require_board_path_retourne_le_chemin_quand_definie(script, monkeypatch):
+    monkeypatch.setenv("W40K_BOARD_PATH", "board/44x60x1")
+    assert script._require_board_path() == "board/44x60x1"
+
+
+# ---------------------------------------------------------------------------
+# Garde de modèle
+# ---------------------------------------------------------------------------
+
+def _model_dir(tmp_path: Path) -> Path:
+    """Structure ai/models/ArmageddonAgent/ sous tmp_path."""
+    d = tmp_path / "ai" / "models" / "ArmageddonAgent"
+    d.mkdir(parents=True)
+    return d
+
+
+def test_require_reference_model_leve_sur_md5_incorrect(script, monkeypatch, tmp_path):
+    d = _model_dir(tmp_path)
+    nom = "faux.zip"
+    (d / nom).write_bytes(b"contenu qui ne correspond pas au md5 de reference")
+    monkeypatch.setattr(script, "_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setattr(script, "REFERENCE_MODEL", nom)
+    with pytest.raises(RuntimeError, match="md5"):
+        script._require_reference_model()
+
+
+def test_require_reference_model_passe_sur_md5_correct(script, monkeypatch, tmp_path):
+    contenu = b"contenu connu pour le test"
+    md5_reel = hashlib.md5(contenu).hexdigest()
+    d = _model_dir(tmp_path)
+    nom = "ref.zip"
+    (d / nom).write_bytes(contenu)
+    monkeypatch.setattr(script, "_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setattr(script, "REFERENCE_MODEL", nom)
+    monkeypatch.setattr(script, "REFERENCE_MD5", md5_reel)
+    path = script._require_reference_model()
+    assert os.path.basename(path) == nom

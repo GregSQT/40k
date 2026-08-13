@@ -131,21 +131,33 @@ def main_ast():
     RÉEL du script — un réordonnancement les rend rouges, une reformulation ne les touche pas.
     """
     tree = ast.parse(SCRIPT_PATH.read_text(encoding="utf-8"))
-    return next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main")
+    node = next(
+        (n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main"),
+        None,
+    )
+    if node is None:
+        pytest.fail("main() introuvable dans bot_zone_direct.py")
+    return node
 
 
 def test_l_empreinte_du_modele_est_relevee_avant_son_chargement(main_ast):
     # la seule raison d'être de `_model_fingerprint` : un entraînement qui réécrit le .zip
     # pendant le run ferait consigner un checkpoint qui n'a pas joué.
-    def line_of(pred) -> int:
-        return min(n.lineno for n in ast.walk(main_ast) if isinstance(n, ast.Call) and pred(n.func))
+    def line_of(pred, label: str) -> int:
+        hits = [n.lineno for n in ast.walk(main_ast) if isinstance(n, ast.Call) and pred(n.func)]
+        assert hits, f"{label} introuvable dans main()"
+        return min(hits)
 
-    fingerprint = line_of(lambda f: isinstance(f, ast.Name) and f.id == "_model_fingerprint")
+    fingerprint = line_of(
+        lambda f: isinstance(f, ast.Name) and f.id == "_model_fingerprint",
+        "_model_fingerprint",
+    )
     load = line_of(
         lambda f: isinstance(f, ast.Attribute)
         and f.attr == "load"
         and isinstance(f.value, ast.Name)
-        and f.value.id == "MaskablePPO"
+        and f.value.id == "MaskablePPO",
+        "MaskablePPO.load",
     )
 
     assert fingerprint < load
@@ -155,19 +167,17 @@ def test_les_cles_du_panel_sont_exigees_et_non_defaultees(main_ast):
     # `cb.get("bot_eval_weights", {})` faisait tourner la boucle zéro fois et publier
     # `"episodes": []` en sortant 0 ; `bot_eval_randomness` vide construisait six bots non
     # paramétrés dont les moyennes étaient quand même comparées à la référence §12.5.
-    exigees = {
-        node.args[1].value
-        for node in ast.walk(main_ast)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name) and node.func.id == "require_key"
-        and len(node.args) == 2 and isinstance(node.args[1], ast.Constant)
-    }
-    defaultees = {
-        node.func.value.id
-        for node in ast.walk(main_ast)
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-        and node.func.attr == "get" and isinstance(node.func.value, ast.Name) and len(node.args) == 2
-    }
+    exigees: set[str] = set()
+    defaultees: set[str] = set()
+    for node in ast.walk(main_ast):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == "require_key"
+                and len(node.args) == 2 and isinstance(node.args[1], ast.Constant)):
+            exigees.add(node.args[1].value)
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "get" and isinstance(node.func.value, ast.Name)
+                and len(node.args) == 2):
+            defaultees.add(node.func.value.id)
 
     assert {"bot_eval_weights", "bot_eval_randomness"} <= exigees
     assert "cb" not in defaultees  # aucune clé du bloc callback_params ne reprend un défaut
@@ -177,15 +187,19 @@ def test_la_ligne_de_succes_s_affiche_apres_la_publication(main_ast):
     # dans le `with`, un flush qui rate faisait lire « Relevé par épisode : … » juste avant la
     # trace, destination absente ou portant encore le run précédent.
     draft = next(
-        n for n in ast.walk(main_ast)
-        if isinstance(n, ast.With)
-        and any(isinstance(i.context_expr, ast.Call) and isinstance(i.context_expr.func, ast.Name)
-                and i.context_expr.func.id == "json_out_draft" for i in n.items)
+        (n for n in ast.walk(main_ast)
+         if isinstance(n, ast.With)
+         and any(isinstance(i.context_expr, ast.Call) and isinstance(i.context_expr.func, ast.Name)
+                 and i.context_expr.func.id == "json_out_draft" for i in n.items)),
+        None,
     )
+    assert draft is not None, "bloc with json_out_draft introuvable dans main()"
     annonce = next(
-        n for n in ast.walk(main_ast)
-        if isinstance(n, ast.Constant) and isinstance(n.value, str) and "Relevé par épisode" in n.value
+        (n for n in ast.walk(main_ast)
+         if isinstance(n, ast.Constant) and isinstance(n.value, str) and "Relevé par épisode" in n.value),
+        None,
     )
+    assert annonce is not None, "annonce 'Relevé par épisode' introuvable dans main()"
 
     assert annonce.lineno > draft.end_lineno
 
@@ -193,9 +207,12 @@ def test_la_ligne_de_succes_s_affiche_apres_la_publication(main_ast):
 def test_la_destination_est_ouverte_avant_de_jouer_le_moindre_episode(tmp_path):
     # VERROU du fail-fast : la destination fausse doit tuer le run AVANT le chargement du
     # modèle — sinon l'erreur tombe après des minutes de jeu et les graines sont perdues.
+    # W40K_BOARD_PATH est requis pour dépasser la garde de plateau (avant json_out_draft).
+    import os
     proc = subprocess.run(
         [sys.executable, str(SCRIPT_PATH), "--episodes", "1", "--json-out", str(tmp_path / "absent" / "z.json")],
         capture_output=True, text=True, cwd=str(PROJECT_ROOT), timeout=300,
+        env={**os.environ, "W40K_BOARD_PATH": "board/44x60x1"},
     )
 
     assert proc.returncode != 0
