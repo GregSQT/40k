@@ -80,14 +80,18 @@ def _md5(path: str) -> str:
     return digest.hexdigest()
 
 
-def _require_reference_model(path: str = _DEFAULT_MODEL) -> str:
+def _require_reference_model(path: str | None = None) -> str:
     """Vérifie qu'un modèle existe. Pour le checkpoint de référence, vérifie aussi le md5."""
+    if path is None:
+        path = _DEFAULT_MODEL
     if not os.path.exists(path):
-        raise RuntimeError(
-            f"Modèle absent : {path}. Toutes les mesures du §12 sont faites sur le checkpoint de "
-            "référence ; mesurer avec un autre rend le tableau incomparable."
-        )
-    if path == _DEFAULT_MODEL:
+        if os.path.realpath(path) == os.path.realpath(_DEFAULT_MODEL):
+            raise RuntimeError(
+                f"Modèle absent : {path}. Toutes les mesures du §12 sont faites sur le checkpoint de "
+                "référence ; mesurer avec un autre rend le tableau incomparable."
+            )
+        raise RuntimeError(f"Modèle absent : {path}.")
+    if os.path.realpath(path) == os.path.realpath(_DEFAULT_MODEL):
         digest = _md5(path)
         if digest != REFERENCE_MD5:
             raise RuntimeError(

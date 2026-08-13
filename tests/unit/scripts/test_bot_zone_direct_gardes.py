@@ -59,8 +59,7 @@ def test_require_reference_model_leve_sur_md5_incorrect(script, monkeypatch, tmp
     d = _model_dir(tmp_path)
     nom = "faux.zip"
     (d / nom).write_bytes(b"contenu qui ne correspond pas au md5 de reference")
-    monkeypatch.setattr(script, "_PROJECT_ROOT", str(tmp_path))
-    monkeypatch.setattr(script, "REFERENCE_MODEL", nom)
+    monkeypatch.setattr(script, "_DEFAULT_MODEL", str(d / nom))
     with pytest.raises(RuntimeError, match="md5"):
         script._require_reference_model()
 
@@ -71,11 +70,35 @@ def test_require_reference_model_passe_sur_md5_correct(script, monkeypatch, tmp_
     d = _model_dir(tmp_path)
     nom = "ref.zip"
     (d / nom).write_bytes(contenu)
-    monkeypatch.setattr(script, "_PROJECT_ROOT", str(tmp_path))
-    monkeypatch.setattr(script, "REFERENCE_MODEL", nom)
+    monkeypatch.setattr(script, "_DEFAULT_MODEL", str(d / nom))
     monkeypatch.setattr(script, "REFERENCE_MD5", md5_reel)
     path = script._require_reference_model()
     assert os.path.basename(path) == nom
+
+
+def test_require_reference_model_leve_sur_modele_custom_absent(script, tmp_path):
+    chemin = str(tmp_path / "inexistant.zip")
+    with pytest.raises(RuntimeError) as exc:
+        script._require_reference_model(chemin)
+    msg = str(exc.value)
+    assert "inexistant.zip" in msg
+    assert "§12" not in msg
+
+
+def test_require_reference_model_chemin_non_canonique_verifie_md5(script, monkeypatch, tmp_path):
+    """Un chemin avec .. pointant sur le checkpoint de référence doit quand même vérifier le MD5."""
+    contenu = b"contenu connu"
+    md5_reel = hashlib.md5(contenu).hexdigest()
+    d = _model_dir(tmp_path)
+    nom = "ref.zip"
+    cible = d / nom
+    cible.write_bytes(contenu)
+    monkeypatch.setattr(script, "_DEFAULT_MODEL", str(cible))
+    monkeypatch.setattr(script, "REFERENCE_MD5", "000000000000000000000000deadbeef")
+    # chemin équivalent via .. — string != _DEFAULT_MODEL, mais realpath identique
+    non_canonique = str(d / ".." / "ArmageddonAgent" / nom)
+    with pytest.raises(RuntimeError, match="md5"):
+        script._require_reference_model(non_canonique)
 
 
 # ---------------------------------------------------------------------------
