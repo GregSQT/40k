@@ -45,6 +45,10 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # 3 : `run.episodes_requested` (nombre d'épisodes PAR BOT, malgré le nom) disparaît au profit de
 # `run.episodes_per_bot` et `run.episodes_total`. Un lecteur de la v2 lève un KeyError sur un
 # fichier v3, donc le numéro DOIT bouger.
+# 4 : `focus_targets_by_turn` renommé `distinct_targets_by_turn` dans `episodes[*]` : les deux noms
+# désignaient des métriques différentes (géométrique nearest-enemy vs doctrine _focus_target), le
+# préfixe `focus_` commun induisait en erreur. Un lecteur de la v3 qui lit `focus_targets_by_turn`
+# lève un KeyError sur un fichier v4.
 # ⚠️ CE NUMÉRO A DÉJÀ MENTI DEUX FOIS, et les deux fois de la même façon : la forme a changé
 # sans lui. Le commit a4668891 a émis la forme v2 en la marquant `1` ; les commits e8db6180 et
 # 046478e7 ont retiré `episodes_requested` en gardant `2`, si bien que DEUX formes incompatibles
@@ -52,7 +56,7 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # vérifié le 2026-08-13), mais un lecteur qui branche sur le numéro doit tester les CLÉS qu'il
 # lit, jamais le seul entier. Corollaire pour la suite : toute clé retirée ou renommée dans
 # `run`/`episodes` incrémente cette constante DANS LE MÊME commit.
-_JSON_SCHEMA_VERSION = 3
+_JSON_SCHEMA_VERSION = 4
 
 #: Checkpoint sur lequel TOUTES les mesures du §12 sont faites. Remplacer ici est une décision
 #: de protocole : elle périme les chiffres du chantier, donc elle ne se prend pas par accident.
@@ -89,47 +93,58 @@ def _require_board_path() -> str:
     return board
 
 
+def _collect_live_enemies(gs: Dict[str, Any], bot_player: int) -> List[tuple]:
+    """(sid, col, row) de chaque ennemi vivant sur table."""
+    from engine.phase_handlers.shared_utils import is_unit_alive, require_unit_from_cache
+    from engine.spatial_relations import entry_is_on_battlefield
+
+    result: List[tuple] = []
+    for u in gs.get("units", []):
+        if int(u.get("player", 0)) == bot_player:
+            continue
+        sid = str(u["id"])
+        if not is_unit_alive(sid, gs):
+            continue
+        entry = require_unit_from_cache(sid, gs, "_enemies:enemy")
+        if entry_is_on_battlefield(entry):
+            result.append((sid, int(entry["col"]), int(entry["row"])))
+    return result
+
+
+def _collect_live_bot_positions(gs: Dict[str, Any], bot_player: int) -> List[tuple]:
+    """(col, row) de chaque escouade bot vivante sur table."""
+    from engine.phase_handlers.shared_utils import is_unit_alive, require_unit_from_cache
+    from engine.spatial_relations import entry_is_on_battlefield
+
+    result: List[tuple] = []
+    for u in gs.get("units", []):
+        if int(u.get("player", 0)) != bot_player:
+            continue
+        sid = str(u["id"])
+        if not is_unit_alive(sid, gs):
+            continue
+        entry = require_unit_from_cache(sid, gs, "_bots:bot")
+        if entry_is_on_battlefield(entry):
+            result.append((int(entry["col"]), int(entry["row"])))
+    return result
+
+
 def _avg_bot_enemy_distance(gs: Dict[str, Any], bot_player: int) -> Optional[float]:
     """Distance hex moyenne de chaque escouade bot vivante au plus proche ennemi vivant sur table.
 
     Retourne None si aucun ennemi n'est sur la table (réserves seules ou tous éliminés).
     Les escouades en réserves sont exclues côté bot ET côté ennemi.
     """
-    from engine.phase_handlers.shared_utils import is_unit_alive, require_unit_from_cache
-    from engine.spatial_relations import entry_is_on_battlefield
     from engine.combat_utils import calculate_hex_distance
 
-    units = gs.get("units", [])
-
-    enemy_positions: List[tuple] = []
-    for u in units:
-        if int(u.get("player", 0)) == bot_player:
-            continue
-        sid = str(u["id"])
-        if not is_unit_alive(sid, gs):
-            continue
-        entry = require_unit_from_cache(sid, gs, "_avg_dist:enemy")
-        if entry_is_on_battlefield(entry):
-            enemy_positions.append((int(entry["col"]), int(entry["row"])))
-
-    if not enemy_positions:
+    enemies = _collect_live_enemies(gs, bot_player)
+    if not enemies:
         return None
-
-    distances: List[float] = []
-    for u in units:
-        if int(u.get("player", 0)) != bot_player:
-            continue
-        sid = str(u["id"])
-        if not is_unit_alive(sid, gs):
-            continue
-        entry = require_unit_from_cache(sid, gs, "_avg_dist:bot")
-        if not entry_is_on_battlefield(entry):
-            continue
-        bc, br = int(entry["col"]), int(entry["row"])
-        distances.append(min(
-            calculate_hex_distance(bc, br, ec, er) for ec, er in enemy_positions
-        ))
-
+    enemy_positions = [(col, row) for _, col, row in enemies]
+    distances = [
+        min(calculate_hex_distance(bc, br, ec, er) for ec, er in enemy_positions)
+        for bc, br in _collect_live_bot_positions(gs, bot_player)
+    ]
     return sum(distances) / len(distances) if distances else None
 
 
@@ -142,40 +157,15 @@ def _count_distinct_focus_targets(gs: Dict[str, Any], bot_player: int) -> Option
 
     Retourne None si aucun ennemi n'est sur la table, ou si aucune escouade bot ne l'est.
     """
-    from engine.phase_handlers.shared_utils import is_unit_alive, require_unit_from_cache
-    from engine.spatial_relations import entry_is_on_battlefield
     from engine.combat_utils import calculate_hex_distance
 
-    units = gs.get("units", [])
-
-    enemies: List[tuple] = []
-    for u in units:
-        if int(u.get("player", 0)) == bot_player:
-            continue
-        sid = str(u["id"])
-        if not is_unit_alive(sid, gs):
-            continue
-        entry = require_unit_from_cache(sid, gs, "_focus_targets:enemy")
-        if entry_is_on_battlefield(entry):
-            enemies.append((sid, int(entry["col"]), int(entry["row"])))
-
+    enemies = _collect_live_enemies(gs, bot_player)
     if not enemies:
         return None
-
     chosen: set = set()
-    for u in units:
-        if int(u.get("player", 0)) != bot_player:
-            continue
-        sid = str(u["id"])
-        if not is_unit_alive(sid, gs):
-            continue
-        entry = require_unit_from_cache(sid, gs, "_focus_targets:bot")
-        if not entry_is_on_battlefield(entry):
-            continue
-        bc, br = int(entry["col"]), int(entry["row"])
+    for bc, br in _collect_live_bot_positions(gs, bot_player):
         nearest = min(enemies, key=lambda e: calculate_hex_distance(bc, br, e[1], e[2]))
         chosen.add(nearest[0])
-
     return len(chosen) if chosen else None
 
 
@@ -199,25 +189,24 @@ def _avg_focus_target_distance(gs: Dict[str, Any], bot: Any, bot_player: int) ->
     if focused is None:
         return None
     focused = str(focused)
+    focused_player = next(
+        (int(u.get("player", 0)) for u in gs.get("units", []) if str(u["id"]) == focused),
+        None,
+    )
+    if focused_player is None:
+        raise RuntimeError(f"_focus_target {focused!r} introuvable dans gs['units'] — bot mal configuré")
+    if focused_player == bot_player:
+        raise RuntimeError(f"_focus_target {focused!r} appartient au bot-player {focused_player} — bot mal configuré")
     if not is_unit_alive(focused, gs):
         return None
     target_entry = require_unit_from_cache(focused, gs, "_focus_dist:target")
     if not entry_is_on_battlefield(target_entry):
         return None
     tc, tr = int(target_entry["col"]), int(target_entry["row"])
-
-    distances: List[float] = []
-    for u in gs.get("units", []):
-        if int(u.get("player", 0)) != bot_player:
-            continue
-        sid = str(u["id"])
-        if not is_unit_alive(sid, gs):
-            continue
-        entry = require_unit_from_cache(sid, gs, "_focus_dist:bot")
-        if not entry_is_on_battlefield(entry):
-            continue
-        distances.append(calculate_hex_distance(int(entry["col"]), int(entry["row"]), tc, tr))
-
+    distances = [
+        calculate_hex_distance(bc, br, tc, tr)
+        for bc, br in _collect_live_bot_positions(gs, bot_player)
+    ]
     return sum(distances) / len(distances) if distances else None
 
 
@@ -256,7 +245,7 @@ def _episode_record(
     if squad_snapshot:
         rec["squads_by_turn"] = {str(t): squad_snapshot[t] for t in sorted(squad_snapshot)}
     if focus_targets_snapshot:
-        rec["focus_targets_by_turn"] = {
+        rec["distinct_targets_by_turn"] = {
             str(t): focus_targets_snapshot[t] for t in sorted(focus_targets_snapshot)
         }
     if focus_dist_snapshot:
@@ -607,7 +596,7 @@ def main() -> None:
         print(sep)
         for bot in sorted(bot_weights):
             bot_recs = by_bot.get(bot, [])
-            tdata = _turns_of_key(bot_recs, "focus_targets_by_turn")
+            tdata = _turns_of_key(bot_recs, "distinct_targets_by_turn")
             cells = []
             for t in turns:
                 vals = tdata.get(t, [])
