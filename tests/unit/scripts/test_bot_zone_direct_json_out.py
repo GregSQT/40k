@@ -19,6 +19,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SCRIPT_PATH = PROJECT_ROOT / "scripts" / "bot_zone_direct.py"
 
 
+def _FINGERPRINT(script):
+    """Empreinte d'un fichier qui existe — ce script tient lieu de checkpoint pour les tests."""
+    return script._model_fingerprint(str(SCRIPT_PATH))
+
+
 @pytest.fixture(scope="module")
 def script():
     spec = importlib.util.spec_from_file_location("bot_zone_direct_under_test", SCRIPT_PATH)
@@ -81,14 +86,13 @@ def test_json_out_relit_les_episodes_un_par_un(script, tmp_path):
     ]
     out = tmp_path / "sub" / "zones.json"
     out.parent.mkdir()
-    meta = script._run_meta(str(SCRIPT_PATH), "holdout_1.json", 2, 42, "p1", 42, {"bot_zone": 0.1})
+    meta = script._run_meta(_FINGERPRINT(script), "holdout_1.json", 2, 42, "p1", 42, {"bot_zone": 0.1})
 
-    handle = script._open_json_out(str(out))
-    script._write_json_out(handle, meta, records)
-    script._commit_json_out(handle, str(out))
+    with script._json_out_draft(str(out)) as handle:
+        script._write_json_out(handle, meta, records)
     payload = json.loads(out.read_text(encoding="utf-8"))
 
-    assert payload["schema_version"] == 1
+    assert payload["schema_version"] == 2
     assert payload["run"]["scenario_file"] == "holdout_1.json"
     assert payload["run"]["episodes_requested"] == 2
     assert [ep["seed"] for ep in payload["episodes"]] == [111, 222]
@@ -101,7 +105,7 @@ def test_json_out_relit_les_episodes_un_par_un(script, tmp_path):
 def test_le_releve_dit_ce_qui_distingue_deux_runs(script):
     # sans ces champs, un « avant » et un « après » §12.7 sont indiscernables, et la graine
     # d'épisode ne suffit pas à reconstruire la doctrine du bot.
-    meta = script._run_meta(str(SCRIPT_PATH), "holdout_1.json", 20, 42, "alternate", 7, {"bot_zone": 0.25})
+    meta = script._run_meta(_FINGERPRINT(script), "holdout_1.json", 20, 42, "alternate", 7, {"bot_zone": 0.25})
 
     assert meta["base_seed"] == 42
     assert meta["agent_seat_mode"] == "alternate"
@@ -112,21 +116,38 @@ def test_le_releve_dit_ce_qui_distingue_deux_runs(script):
     assert meta["model_mtime"].startswith("20")
 
 
-def test_un_run_interrompu_ne_detruit_pas_le_releve_precedent(script, tmp_path):
+def test_un_run_interrompu_ne_laisse_ni_degat_ni_residu(script, tmp_path):
+    # VERROU : le run meurt en plein jeu (Ctrl-C, crash moteur). Le relevé précédent doit être
+    # intact, et aucun brouillon ne doit rester à trier à la main.
     out = tmp_path / "zones.json"
     out.write_text('{"ancien": true}\n', encoding="utf-8")
 
-    handle = script._open_json_out(str(out))  # le run commence, puis meurt sans écrire
-    try:
-        assert json.loads(out.read_text(encoding="utf-8")) == {"ancien": True}
-    finally:
-        handle.close()
+    with pytest.raises(KeyboardInterrupt):
+        with script._json_out_draft(str(out)) as handle:
+            handle.write('{"moiti')  # relevé à moitié écrit
+            raise KeyboardInterrupt
+
+    assert json.loads(out.read_text(encoding="utf-8")) == {"ancien": True}
+    assert not (tmp_path / "zones.json.part").exists()
+
+
+def test_json_out_echoue_avant_de_jouer_si_la_destination_est_un_dossier(script, tmp_path):
+    # le brouillon `.part` s'ouvrirait très bien ici : c'est le os.replace FINAL qui casserait,
+    # après tous les épisodes. Le cas se refuse donc à l'ouverture, pas à la publication.
+    target = tmp_path / "zones"
+    target.mkdir()
+
+    with pytest.raises(IsADirectoryError):
+        with script._json_out_draft(str(target)):
+            pass
+    assert not (tmp_path / "zones.part").exists()
 
 
 def test_json_out_echoue_si_le_dossier_n_existe_pas(script, tmp_path):
     # pas de création silencieuse ni de repli sur le cwd : un chemin faux doit se voir.
     with pytest.raises(FileNotFoundError):
-        script._open_json_out(str(tmp_path / "absent" / "z.json"))
+        with script._json_out_draft(str(tmp_path / "absent" / "z.json")):
+            pass
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root écrit dans un dossier en lecture seule")
@@ -138,9 +159,16 @@ def test_json_out_echoue_si_le_dossier_est_en_lecture_seule(script, tmp_path):
     readonly.chmod(0o500)
     try:
         with pytest.raises(PermissionError):
-            script._open_json_out(str(readonly / "z.json"))
+            with script._json_out_draft(str(readonly / "z.json")):
+                pass
     finally:
         readonly.chmod(0o700)
+
+
+def test_sans_le_drapeau_aucun_fichier_n_est_touche(script, tmp_path):
+    with script._json_out_draft(None) as handle:
+        assert handle is None
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_la_destination_est_ouverte_avant_de_jouer_le_moindre_episode(tmp_path):
