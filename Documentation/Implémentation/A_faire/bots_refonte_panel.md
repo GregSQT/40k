@@ -133,9 +133,9 @@ raison (cf. `config/bot_movement_weights.json`, entrée `tactical`).
 | 3 | ~~chiffrage de faisabilité du holdout à un coup~~ | ⛔ **sans objet** — holdout abandonné 2026-08-12, §11.2 |
 | 4 | modèle de dégâts espérés (attaquant → cible) | ✅ 2026-08-11, **corrigé à la racine** 2026-08-12, cf. §7 et §7.1 |
 | 5 | les SIX styles | ✅ 2026-08-12, cf. §7 et §11.3 (`standoff` supprimé §9.2, `scorer` ajouté §11.3) |
-| 6 | réglage en **bot-contre-bot** (~~orthogonalité~~ abandonnée, §3.2) | ✅ **2026-08-13, §12.8 à §12.12** — les deux hausses du §12.7 réfutées et défaites (§12.8) ; `scorer`, dernier profil posé sans mesure, réglé (§12.9) ; deux grandeurs de diagnostic ajoutées à l'instrument (§12.10) ; `decapitation` corrigé au déplacement puis recalibré (§12.11) ; les trois lignes de travail réunies et la ligne de base rejouée (§12.12). Tous mesurés à 60 ép./bot, un poids par run, dérive des contrôles 0,000 |
+| 6 | réglage en **bot-contre-bot** (~~orthogonalité~~ abandonnée, §3.2) | ✅ **2026-08-13, §12.8 à §12.14** — les deux hausses du §12.7 réfutées et défaites (§12.8) ; `scorer`, dernier profil posé sans mesure, réglé (§12.9) ; `decapitation` corrigé au déplacement puis son `w_objective` rejoué sur la forme retenue (§12.11, §12.14). Tous mesurés à 60 ép./bot, un poids par run, dérive des cinq contrôles 0,000. ⚠️ Restent `decapitation.w_crowd` et `w_contest`, jamais isolés APRÈS le correctif (§12.14) |
 | 7 | correspondance ancien/nouveau, puis suppression des cinq anciens | |
-| 8 | mesure finale contre l'agent, commande de §2 | ✅ **2026-08-13, §12.12** — 100 ep/bot sur `robust_0.8721`, panel unifié : `combined = 0,7400`, pire bot `racer = 0,630`, pire scénario 0,6867. Les `0,7767` (§12.8) et `0,7600` (§12.9) sont des états intermédiaires de la même journée |
+| 8 | mesure finale contre l'agent, commande de §2 | ✅ **2026-08-13, §12.14** — 100 ep/bot sur `robust_0.8721`, panel unifié : `combined = 0,7433`, pire bot `racer = 0,630`, pire scénario 0,6867. Les `0,7767`, `0,7600` et `0,7400` sont des états intermédiaires de la même journée |
 
 ### 4.1 Pourquoi l'appariement des graines a été retiré
 
@@ -1467,20 +1467,22 @@ python3 ai/train.py --agent ArmageddonAgent --training-config x1 \
 Même modèle (`robust_0.9438`) et même commande qu'en §2 — c'est ce qui rend les colonnes
 comparables. À rejouer en dernier, une seule fois les poids stabilisés.
 
-### 12.14 Trois lignes de travail réunies, et la ligne de base qui en sort (2026-08-13)
+### 12.14 Quatre lignes de travail réunies, et la ligne de base qui en sort (2026-08-13)
 
-Le chantier a été travaillé le même jour par **trois sessions en parallèle**, chacune ignorant
-les deux autres. Chacune a produit du travail juste, et les trois se contredisaient : trois
-sections numérotées `§12.8`, trois copies divergentes de `scripts/bot_zone_direct.py` (207, 271 et
-512 lignes) et trois jeux de poids. Tant que ça durait, aucune mesure prise dans un des trois
-arbres n'était comparable aux deux autres — or ce chantier ne fonctionne QUE par comparaison à une
-référence commune.
+Le chantier a été travaillé le même jour par **quatre sessions en parallèle**, chacune ignorant
+les autres. Chacune a produit du travail juste, et elles se contredisaient : trois sections
+numérotées `§12.8` le matin, deux `§12.11` et deux `§12.12` l'après-midi, trois copies
+divergentes de `scripts/bot_zone_direct.py` (207, 271 et 512 lignes), et jusqu'à **quatre
+mesures de 60 épisodes tournant en même temps** sur seize cœurs — chacune valide, toutes
+ralenties d'un facteur trois.
 
-⚠️ **C'est le coût réel du travail parallèle sur un chantier de mesure**, et il ne se voit pas
-au moment où on le paie : les trois sessions étaient chacune conformes au protocole, et c'est
-justement pour ça qu'aucune n'avait de raison de se méfier. Le §10.4 listait trois ressources
-partagées (le modèle canonique, `step.log`, les JSON de `config/`) ; il en manquait une quatrième,
-la plus coûteuse — **la ligne de base elle-même**.
+⚠️ **C'est le coût réel du travail parallèle sur un chantier de mesure, et il ne se voit pas au
+moment où on le paie** : les quatre sessions suivaient le protocole, et c'est justement pour ça
+qu'aucune n'avait de raison de se méfier. Le §10.4 listait trois ressources partagées (le modèle
+canonique, `step.log`, les JSON de `config/`) ; il en manquait deux, les plus coûteuses — **la
+ligne de base elle-même**, et **la numérotation de ce document**. Une première unification a été
+faite en milieu de journée ; elle a été défaite en quatre heures par les sessions qui
+continuaient. La seconde n'a tenu que parce que les autres ont été gelées sur ces deux fichiers.
 
 #### Ce qui a été tranché, et sur quelle mesure
 
@@ -1488,54 +1490,62 @@ la plus coûteuse — **la ligne de base elle-même**.
   indépendamment avec `alpha` à 2.0, donne T5 = 0,87 ; la référence du §12.8 à 0.5 donne 1,10.
   L'écart vaut 0,23 — exactement le **−0,233 ±0,093** que le §12.8 avait mesuré en apparié. Deux
   sessions, deux instruments, le même chiffre : la réfutation du §12.7 est confirmée de l'extérieur.
-- **`decapitation` garde `w_crowd` 2.0 et `w_contest` 1.5**, contre l'intention première de les
-  défaire. Le §12.8 les avait mesurés nuls, mais **avant** le correctif de déplacement du §12.11 :
-  la géométrie du bot a changé entre-temps, donc cette mesure ne transfère pas. Le sweep qui a
-  établi `w_objective` 1.0, lui, les incluait. Les ramener à 0.5/1.0 mettrait ce bot dans une
-  configuration que personne n'a mesurée depuis. ⚠️ **Reste donc ouvert** : les isoler à nouveau,
-  post-correctif, au prochain réglage.
-- **L'instrument de `main` l'emporte en entier** : seul des trois à nommer le checkpoint de
-  référence et à le vérifier au md5, à exiger `W40K_BOARD_PATH`, et à consigner un relevé par
-  épisode avec l'empreinte du modèle. Le `--model` du §12.8 disparaît — nommer et vérifier vaut
-  mieux qu'un drapeau qu'on peut mal passer. Lui ont été reportés les deux champs sans lesquels
-  la comparaison appariée ne s'appuie sur rien : l'étiquette de run, et les **poids réellement
-  consommés** (`load_doctrine_weights`, plus `hold_bonus`, qui fixe l'échelle à laquelle `w_crowd`
-  se lit).
+- **La forme du correctif de `decapitation` retenue est celle du §12.11**, et l'autre est
+  abandonnée avec sa section. Elle place l'élection dans `_enemy_anchors` et la garde
+  **provisoire** jusqu'à la première attaque du tour : le critère pris au mouvement ne regarde
+  pas la portée, donc figer la cible dès le déplacement — ce que faisait l'autre forme — décide
+  trop tôt. Elle rend un peu moins en zones (1,68 contre 1,77 au T5) et c'est cohérent.
+- **`decapitation.w_objective` 1.0 a été REJOUÉ sur cette forme-là**, parce que le sweep qui
+  l'avait établi portait sur l'autre. Apparié contre 1.0, dérive des cinq contrôles 0,000 :
+  0.5 rend **−0,750 ±0,146** zone au T5, 0.8 rend **−0,233 ±0,117**, 1.2 rend **+0,067 ±0,114**,
+  soit rien. Ce n'est donc **pas le « pic » qu'annonçait l'autre forme, mais un PLATEAU qui
+  commence à 1.0** — la plus petite valeur qui l'atteigne. Le chiffre retenu est le même ; sa
+  justification, elle, était fausse.
+- **L'instrument garde les gardes de `main`** (checkpoint nommé et vérifié au md5,
+  `W40K_BOARD_PATH` exigé, relevé par épisode) **et les deux champs sans lesquels la comparaison
+  appariée ne s'appuie sur rien** : l'étiquette de run, et les poids RÉELLEMENT consommés
+  (`load_doctrine_weights`, plus `hold_bonus` qui fixe l'échelle où `w_crowd` se lit).
 
-#### La ligne de base unifiée — 60 ép./bot, x1, `robust_0.8721`
+#### La ligne de base — 60 ép./bot en étalement, 100 ép./bot contre l'agent
 
-| bot | zones T2 | zones T5 | dist. hex T5 | pertes T5 |
-|---|---|---|---|---|
-| alpha | 1,12 | 1,10 | 14,9 | 0,34 |
-| attrition | 1,67 | 2,08 | 21,9 | 0,18 |
-| decapitation | 1,67 | **1,77** | 17,6 | 0,35 |
-| endgame | 1,57 | 2,08 | 19,0 | 0,14 |
-| racer | 1,77 | 2,07 | 18,5 | 0,31 |
-| scorer | **1,87** | **2,33** | 21,6 | 0,22 |
-
-#### Contre l'agent — 100 ép./bot, et ce que chaque livraison a coûté à l'agent
-
-| bot | §12.8 | §12.9 (`scorer` réglé) | §12.12 (`decapitation` corrigé) |
+| bot | zones T2 | zones T5 | win-rate agent |
 |---|---|---|---|
-| racer | 0,63 | 0,63 | **0,63** |
-| scorer | 0,76 | **0,66** | **0,66** |
-| attrition | 0,71 | 0,71 | **0,71** |
-| decapitation | 0,83 | 0,83 | **0,71** |
-| endgame | 0,80 | 0,80 | **0,80** |
-| alpha | 0,93 | 0,93 | **0,93** |
-| **combined** | 0,7767 | 0,7600 | **0,7400** |
+| racer | 1,77 | 2,07 | **0,63** |
+| scorer | **1,87** | **2,33** | 0,66 |
+| attrition | 1,67 | 2,08 | 0,71 |
+| decapitation | 1,63 | 1,68 | 0,73 |
+| endgame | 1,57 | 2,08 | 0,80 |
+| alpha | 1,12 | 1,10 | 0,93 |
+
+`Combined = 0,7433`. Pire bot `racer = 0,630`. Pire scénario `holdout_regular_bot-01 = 0,6867`.
+Écart Space Marine − Ork : −4,7 pt. **C'est cette ligne-là qui sert de référence désormais**, et
+c'est elle que porte `scripts/bot_panel_reference.py`.
+
+#### Ce que chaque livraison a coûté à l'agent
+
+| bot | avant réglage | après `scorer` (§12.9) | après `decapitation` (§12.11) |
+|---|---|---|---|
+| racer | 0,63 | 0,63 | 0,63 |
+| scorer | 0,76 | **0,66** | 0,66 |
+| attrition | 0,71 | 0,71 | 0,71 |
+| decapitation | 0,83 | 0,83 | **0,73** |
+| endgame | 0,80 | 0,80 | 0,80 |
+| alpha | 0,93 | 0,93 | 0,93 |
+| **combined** | 0,7767 | 0,7600 | **0,7433** |
 
 **Chaque baisse est imputable à une seule livraison, et les bots non touchés ne bougent pas d'un
 centième** — quatre d'entre eux rendent le même chiffre aux trois colonnes. L'invariant de dérive
-nulle, établi au §12.8 sur l'instrument d'étalement, tient donc sur la boucle d'évaluation
-complète et sur trois mesures successives.
-
-`Combined = 0,7400`. Pire bot `racer = 0,630`. Pire scénario `holdout_regular_bot-01 = 0,6867`.
-Écart Space Marine − Ork : −4,0 pt. **C'est cette ligne-là qui sert de référence désormais** ; les
-`0,7767` et `0,7600` sont des états intermédiaires de la même journée.
+nulle, établi au §12.8 sur l'instrument d'étalement, tient donc aussi sur la boucle d'évaluation
+complète, sur trois mesures successives et sur deux formes différentes du correctif.
 
 ⚠️ **`decapitation` n'est plus le bot qui décline** : de 1,60 → 1,08 au §12.8, il passe à
-1,67 → 1,77, et il coûte 12 points à l'agent (0,83 → 0,71). `alpha` reste seul dans ce cas
-(1,12 → 1,10), et sa cause est connue et assumée : il traverse la table vers l'ennemi, c'est sa
-doctrine. Il est aussi le bot le plus facile du panel (0,93) et celui qui perd le plus
-d'escouades (0,34 au T5) — le prochain sujet du panel, s'il en faut un, est là.
+1,63 → 1,68. `alpha` reste seul dans ce cas (1,12 → 1,10), pour une raison connue et assumée —
+il traverse la table vers l'ennemi, c'est sa doctrine. Il est aussi le bot le plus facile du
+panel (0,93) et celui qui perd le plus d'escouades : **c'est là qu'est le prochain sujet**, s'il
+en faut un.
+
+⚠️ **Reste ouvert** : `decapitation.w_crowd` (2.0) et `w_contest` (1.5) n'ont **jamais été
+isolés après le correctif de déplacement**. Le seul run qui les ait isolés (§12.8) précède le
+changement de géométrie, donc il ne transfère pas ; le sweep de `w_objective` les incluait sans
+les séparer. Ce sont les deux derniers poids du panel qui reposent sur autre chose qu'une mesure
+faite sur le code courant.

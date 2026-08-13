@@ -1,4 +1,4 @@
-"""Verrouille la source UNIQUE de la référence chiffrée du panel (§12.5).
+"""Verrouille la source UNIQUE de la référence chiffrée du panel (§12.14).
 
 Le défaut réparé le 2026-08-13 : `bot_zone_check.py` et `bot_zone_direct.py` imprimaient les
 MÊMES chiffres sous des étiquettes CONTRAIRES (« pre-§12.6 » / « post-§12.6 »). Deux littéraux
@@ -31,7 +31,7 @@ def test_aucune_recopie_dans_scripts():
     porteurs = sorted(
         chemin.name
         for chemin in SCRIPTS.rglob("*.py")
-        if "combined=0.788" in chemin.read_text(encoding="utf-8")
+        if "combined=0.7433" in chemin.read_text(encoding="utf-8")
     )
     assert porteurs == ["bot_panel_reference.py"], (
         "La référence chiffrée est recopiée hors de bot_panel_reference.py : "
@@ -43,20 +43,27 @@ def test_aucune_recopie_dans_scripts():
 def test_les_appelants_passent_par_le_helper(nom):
     source = (SCRIPTS / nom).read_text(encoding="utf-8")
     assert "print_panel_reference()" in source
-    assert "T5=1.90" not in source
+    assert "combined=0.7433" not in source
 
 
-def test_l_etiquette_est_pre_12_6(module):
-    """Le §12.5 dit deux fois que ses chiffres sont antérieurs au §12.6 et non rejoués."""
+def test_l_etiquette_est_celle_de_la_mesure_la_plus_recente(module):
+    """La référence est POSTÉRIEURE à tous les correctifs du chantier, et le dit.
+
+    L'étiquette « pre-§12.6 / JAMAIS REJOUÉE » était juste le matin du 2026-08-13 et fausse le
+    soir : trois mesures l'ont rejouée dans la journée. Ce test interdit qu'elle revienne, et
+    exige que la ligne nomme les correctifs qu'elle suit — sans quoi un lecteur ne peut pas
+    savoir à quoi il compare.
+    """
     ligne = module.PANEL_REFERENCE_LINE
-    assert "pre-§12.6" in ligne
-    assert "post-§12.6" not in ligne
-    assert "JAMAIS REJOUÉE" in ligne
+    assert "JAMAIS REJOUÉE" not in ligne
+    assert "pre-§12.6" not in ligne
+    for correctif in ("post-§12.6", "post-§12.9", "post-§12.11"):
+        assert correctif in ligne
 
 
 def test_la_ligne_porte_les_quatre_grandeurs(module):
     ligne = module.PANEL_REFERENCE_LINE
-    for grandeur in ("T2=1.61", "T5=1.90", "VP=31.0", "combined=0.788"):
+    for grandeur in ("combined=0.7433", "racer=0.630", "pire scenario=0.6867", "T2/T5=1.60/1.89"):
         assert grandeur in ligne
 
 
