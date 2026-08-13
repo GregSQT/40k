@@ -197,6 +197,51 @@ def test_weighted_bots_spread_their_placement_over_the_open_slots() -> None:
     assert len(chosen) >= 3, f"politique degeneree : {chosen}"
 
 
+#: Les DEUX exemplaires de la memoire de pose : le socle du module gele
+#: (`ai.evaluation_bots._WeightedMover`) et celui du panel refondu
+#: (`ai.bot_doctrines._PlacementMemory`). Meme automate, donc meme verrou — durcir l'un sans
+#: l'autre est exactement la divergence que ces tests existent pour interdire.
+def _placement_memory_bots():
+    from ai.bot_doctrines import DecapitationBot
+
+    return [GreedyBot, DecapitationBot]
+
+
+@pytest.mark.parametrize("bot_cls", _placement_memory_bots(), ids=lambda c: c.__name__)
+def test_placement_memory_refuses_a_state_without_an_episode_number(bot_cls) -> None:
+    """T1 : `episode_number` est ECRIT par le moteur a chaque reset, jamais absent d'un vrai etat.
+
+    Le `.get` qui rendait `None` laissait le marqueur IDENTIQUE d'un episode a l'autre : la garde
+    anti-repetition ne se reinitialisait alors jamais, et une instance de bot reutilisee entre
+    episodes (`scripts/bot_ranking.py`) ecartait au premier deploiement le slot qu'elle avait
+    joue en dernier dans l'episode precedent.
+    """
+    from shared.data_validation import ConfigurationError
+
+    bot = bot_cls(randomness=0.0)
+    with pytest.raises(ConfigurationError, match="episode_number"):
+        bot.select_placement_action(list(mi.DEPLOY_STRATEGY_SLOTS), {"phase": "deployment"})
+
+
+@pytest.mark.parametrize("bot_cls", _placement_memory_bots(), ids=lambda c: c.__name__)
+def test_placement_memory_is_forgotten_between_two_episodes(bot_cls) -> None:
+    """VERT VACANT : le marqueur doit REELLEMENT remettre la garde a zero d'un episode a l'autre.
+
+    Pool a UN seul slot : l'anti-repetition ne peut pas l'ecarter (`len(candidates) > 1`), donc
+    le compteur de repetition est directement lisible. Deux poses dans l'episode 1 le portent a
+    2 ; la premiere pose de l'episode 2 doit repartir de 1, pas de 3.
+    """
+    only_slot = [mi.DEPLOY_SLOT_BASE]
+    bot = bot_cls(randomness=0.0)
+    for _ in range(2):
+        bot.select_placement_action(only_slot, {"phase": "deployment", "episode_number": 1})
+    assert bot._deployment_repeat_count == 2
+
+    bot.select_placement_action(only_slot, {"phase": "deployment", "episode_number": 2})
+
+    assert bot._deployment_repeat_count == 1, "la garde anti-repetition a survecu a l'episode"
+
+
 # --------------------------------------------------------------------------------------
 # Etape 1 (suite) — le wrapper route l'ingress vers la politique de pose
 # --------------------------------------------------------------------------------------

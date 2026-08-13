@@ -4,6 +4,7 @@ _require_board_path  : lève RuntimeError si W40K_BOARD_PATH absent de l'environ
 _require_reference_model : lève RuntimeError si le md5 du fichier ne correspond pas à
                            REFERENCE_MD5. Ne touche jamais ai/models/ — le chemin est
                            monkeypatché vers un fichier temporaire.
+--label : présent dans run_meta quand fourni, absent quand omis.
 """
 import hashlib
 import os
@@ -14,6 +15,13 @@ import pytest
 from tests._chargeur_script import charger_script
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+SCRIPT_PATH = PROJECT_ROOT / "scripts" / "bot_zone_direct.py"
+
+_DUMMY_FINGERPRINT = {
+    "model_path": "/fake/model.zip",
+    "model_bytes": 1000,
+    "model_mtime": "2026-08-13T00:00:00",
+}
 
 
 @pytest.fixture(scope="module")
@@ -68,3 +76,23 @@ def test_require_reference_model_passe_sur_md5_correct(script, monkeypatch, tmp_
     monkeypatch.setattr(script, "REFERENCE_MD5", md5_reel)
     path = script._require_reference_model()
     assert os.path.basename(path) == nom
+
+
+# ---------------------------------------------------------------------------
+# --label dans run_meta
+# ---------------------------------------------------------------------------
+
+
+def test_label_present_dans_run_meta_quand_fourni(script):
+    meta = script._run_meta(
+        _DUMMY_FINGERPRINT, "holdout_1.json", 20, 6, 42, "alternate", 7, {"bot": 0.25},
+        label="foo",
+    )
+    assert meta["label"] == "foo"
+
+
+def test_label_absent_de_run_meta_quand_omis(script):
+    meta = script._run_meta(
+        _DUMMY_FINGERPRINT, "holdout_1.json", 20, 6, 42, "alternate", 7, {"bot": 0.25},
+    )
+    assert "label" not in meta

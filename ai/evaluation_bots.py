@@ -515,8 +515,16 @@ class _WeightedMover:
         La garde anti-repetition est volontairement COMMUNE aux deux : son role est d'eviter
         que tout un camp se pose au meme endroit, et une arrivee de reserves qui reproduit le
         slot deja joue au deploiement pose exactement ce probleme.
+
+        ⚠️ `require_key` et non un `.get` : le moteur ecrit `episode_number` a chaque reset
+        (`W40KEngine.reset`), donc un etat qui fait poser un bot le porte toujours. Absent, le
+        marqueur valait `None` d'un episode a l'autre et la garde anti-repetition ne se
+        reinitialisait JAMAIS : une instance reutilisee entre episodes heritait du dernier slot
+        pose et l'ecartait a la premiere pose du suivant. Jumeau exact du socle des doctrines
+        (`ai/bot_doctrines.py`, `_PlacementMemory`) et du marqueur de tour de
+        `DecapitationBot._focus`, durcis ensemble.
         """
-        episode_marker = game_state.get("episode_number")  # get allowed (absent hors episode)
+        episode_marker = require_key(game_state, "episode_number")
         if self._deployment_episode_marker != episode_marker:
             self._deployment_episode_marker = episode_marker
             self._deployment_last_action = None

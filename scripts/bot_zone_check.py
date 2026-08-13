@@ -17,10 +17,15 @@ Vérifiable si nécessaire en comptant quel joueur a le VP le plus bas en moyenn
 """
 from __future__ import annotations
 
+import os
 import re
 import sys
 from collections import defaultdict
 from typing import Dict, List, Tuple
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from bot_panel_reference import print_panel_reference  # noqa: E402  (dépend du sys.path ci-dessus)
 
 RE_OPPONENT = re.compile(r"Opponent:\s+(.+)")
 RE_TOBJ = re.compile(r"\bT(\d+) OBJECTIVE CONTROL:.*VP1=(\d+) VP2=(\d+).*ZONES=(.+)")
@@ -87,7 +92,7 @@ def main() -> None:
         print(f"{bot:<22} {n:>4} | " + " | ".join(f"{c:>4}" for c in cells) + f" | {vp_str:>6}")
 
     print()
-    print("Référence §12.5 (pre-§12.6, bot=P2, 100 ep): T2=1.61  T5=1.90  VP=31.0  combined=0.788")
+    print_panel_reference()
 
 
 if __name__ == "__main__":

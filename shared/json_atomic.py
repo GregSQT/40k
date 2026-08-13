@@ -34,9 +34,22 @@ Trois contrôles à l'ouverture, aucun ne couvre les autres :
     inscriptible (un `isdir` laisserait passer un dossier en lecture seule).
 Aucune création de dossier : un chemin faux se voit, il ne se répare pas en silence.
 
-Un brouillon resté VIDE ne se publie pas : il n'est pas un JSON, et il détruirait le fichier
-précédent aussi sûrement qu'une troncature. L'appelant qui sort de son bloc sans rien écrire lève
-donc, plutôt que de le découvrir en relisant le fichier.
+Le brouillon est RELU et PARSÉ avant d'être publié. La taille ne suffit pas : un producteur en
+flux qui s'interrompt après `{"episodes": [` a écrit des octets, et les publier remplacerait
+atomiquement un fichier valide par un JSON invalide — la perte même que ce module nie, obtenue
+par sa propre publication. Le cas VIDE garde son message à lui : sortir du bloc sans rien écrire
+est une faute d'appelant (`return` anticipé, boucle qui ne tourne pas), pas une troncature, et
+les deux ne se diagnostiquent pas pareil.
+
+Les brouillons ORPHELINS sont balayés. Un processus tué net (SIGKILL, coupure) ne passe par aucune
+branche de nettoyage : il laisse son brouillon, et comme le nom porte son pid, aucune exécution
+suivante ne le réécrira jamais. Le balayage ne retire QUE les brouillons de cette destination dont
+le pid n'est plus vivant — jamais celui d'un processus qui tourne, qui est peut-être en train
+d'écrire dedans. Il est fait UNE fois par dossier et par processus : un résidu apparu APRÈS notre
+balayage appartient forcément à un processus qui était vivant à ce moment-là, donc intouchable
+pour nous de toute façon ; c'est l'exécution suivante qui le prendra. Rebalayer à chaque écriture
+ne trouverait donc rien de plus et coûterait un `listdir` par fichier — quadratique sur une boucle
+qui en écrit 2401 dans le même dossier.
 
 La FERMETURE appartient à l'écriture : c'est elle qui vide le tampon, donc c'est elle qui casse
 sur un disque plein. Elle est dans le `try`, sinon un flush raté laisserait le brouillon derrière
@@ -47,6 +60,14 @@ Durabilité : le brouillon est `fsync`é AVANT d'être publié, et le dossier AP
 le renommage peut devenir durable avant les données qu'il publie, et un crash hôte rend un fichier
 VIDE là où une config valide tenait — la perte même que ce module nie. Sans le second, un crash
 peut rendre l'ancien nom : le fichier reste valide, seule la publication est à refaire.
+
+`json_batch()` groupe le `fsync` du DOSSIER d'un lot d'écritures : il est alors fait une fois en
+sortie de lot au lieu d'une fois par fichier. Ce n'est pas un réglage de FORME — la règle « aucun
+réglage » ci-dessus tient toujours —, c'est la portée d'une opération de durabilité : fsyncer le
+même dossier 2401 fois de suite refait 2400 fois un travail déjà fait (mesuré sur la génération
+`--rule-checker` : 41 % du temps du lot). La garantie perdue entre-temps est la seule que le
+fsync de dossier apporte — « le renommage survit à un crash hôte » —, et le lot la rétablit en
+sortant, y compris quand il sort par une exception.
 """
 from __future__ import annotations
 
@@ -80,6 +101,85 @@ def dump_json(handle: TextIO, payload: Any) -> None:
     handle.write("\n")
 
 
+#: Dossiers déjà balayés par CE processus, et le verrou qui les protège. Voir l'en-tête : un
+#: résidu ne peut naître que d'un processus mort, donc il est là AVANT nous ou il ne viendra pas.
+_DOSSIERS_BALAYES: set[str] = set()
+_VERROU_BALAYAGE = threading.Lock()
+
+
+def _pid_vivant(pid: int) -> bool:
+    """`os.kill(pid, 0)` ne tue rien : il demande si le processus existe.
+
+    `PermissionError` répond OUI (il existe, il appartient à quelqu'un d'autre) — c'est la
+    réponse prudente, et la seule correcte : son brouillon est peut-être en cours d'écriture.
+    """
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _balayer_les_orphelins(path: StrPath) -> None:
+    """Retire les brouillons de CE dossier laissés par des processus qui n'existent plus.
+
+    Le filtre porte sur le dossier entier, pas sur la destination : une boucle qui écrit 2401
+    noms différents au même endroit paierait sinon un `listdir` par nom. Tout ce qui n'a pas la
+    forme exacte `<nom>.<pid>.<fil>.part` est laissé tel quel — ce module ne supprime que ce
+    qu'il a lui-même écrit.
+    """
+    dossier = os.path.dirname(os.fspath(path))
+    with _VERROU_BALAYAGE:
+        if dossier in _DOSSIERS_BALAYES:
+            return
+        _DOSSIERS_BALAYES.add(dossier)
+    try:
+        noms = os.listdir(dossier or ".")
+    except OSError:
+        # Dossier absent ou illisible : l'ouverture du brouillon, juste après, le dira mieux.
+        return
+    vivants: dict[int, bool] = {}
+    for nom in noms:
+        if not nom.endswith(".part"):
+            continue
+        morceaux = nom[: -len(".part")].rsplit(".", 2)
+        if len(morceaux) != 3 or not (morceaux[1].isdigit() and morceaux[2].isdigit()):
+            continue
+        pid = int(morceaux[1])
+        if vivants.setdefault(pid, _pid_vivant(pid)):
+            continue
+        with contextlib.suppress(OSError):
+            os.remove(os.path.join(dossier or ".", nom))
+
+
+#: Lot de fsync de dossier EN COURS sur ce fil, ou `None`. Par fil : deux requêtes Flask
+#: concurrentes ne doivent pas se voler leur lot.
+_LOT = threading.local()
+
+
+@contextlib.contextmanager
+def json_batch() -> Iterator[None]:
+    """Groupe les `fsync` de DOSSIER des écritures faites dans ce bloc. Voir l'en-tête.
+
+    Le `finally` fsynce même quand le bloc sort par une exception : les fichiers déjà publiés
+    l'ont été pour de bon, leur durabilité ne dépend pas de la suite du lot. Un lot imbriqué se
+    fond dans l'englobant, qui est celui qui fsyncera.
+    """
+    if getattr(_LOT, "dossiers", None) is not None:
+        yield
+        return
+    _LOT.dossiers = set()
+    try:
+        yield
+    finally:
+        dossiers, _LOT.dossiers = _LOT.dossiers, None
+        for dossier in dossiers:
+            with contextlib.suppress(OSError):
+                _fsync_dir(dossier)
+
+
 def _fsync_dir(directory: str) -> None:
     """Rend le RENOMMAGE durable. `os.replace` publie dans le cache du dossier ; sans ce fsync,
     un crash hôte peut rendre au redémarrage l'ANCIEN nom — jamais un fichier tronqué, donc
@@ -106,6 +206,7 @@ def json_draft(path: StrPath) -> Iterator[TextIO]:
         raise ValueError("destination vide — variable de shell non définie ?")
     if os.path.isdir(path):
         raise IsADirectoryError(f"{os.fspath(path)} est un dossier : la destination doit être un fichier")
+    _balayer_les_orphelins(path)
     draft = part_path(path)
     handle = open(draft, "w", encoding="utf-8")
     try:
@@ -124,6 +225,17 @@ def json_draft(path: StrPath) -> Iterator[TextIO]:
         # que le découvrir à la relecture du fichier.
         if os.path.getsize(draft) == 0:
             raise ValueError(f"rien n'a été écrit pour {os.fspath(path)} : un fichier vide ne se publie pas")
+        # La taille ne prouve rien de plus que « des octets sont partis ». Un producteur en flux
+        # interrompu en a écrit, et ce sont ceux d'un JSON TRONQUÉ : le publier remplacerait un
+        # fichier valide par un fichier illisible. Seul le parse le dit.
+        with open(draft, "r", encoding="utf-8") as relu:
+            try:
+                json.load(relu)
+            except ValueError as exc:
+                raise ValueError(
+                    f"le brouillon de {os.fspath(path)} n'est pas un JSON valide ({exc}) : "
+                    "écriture interrompue ? le fichier précédent est conservé"
+                ) from exc
         # DANS le `try` : une publication qui rate (destination devenue un dossier, droits
         # retirés pendant un run long) doit emporter le brouillon avec elle, pas le laisser
         # traîner sous `config/`.
@@ -145,8 +257,13 @@ def json_draft(path: StrPath) -> Iterator[TextIO]:
     # fsyncer un dossier (FUSE, réseau, overlay : EINVAL). Ce qui se perd ici n'est pas la
     # donnée, c'est la garantie que le RENOMMAGE survive à un crash : au pire, on relit la
     # version précédente, valide et complète.
+    dossier = os.path.dirname(os.fspath(path))
+    lot = getattr(_LOT, "dossiers", None)
+    if lot is not None:
+        lot.add(dossier)
+        return
     with contextlib.suppress(OSError):
-        _fsync_dir(os.path.dirname(os.fspath(path)))
+        _fsync_dir(dossier)
 
 
 @contextlib.contextmanager

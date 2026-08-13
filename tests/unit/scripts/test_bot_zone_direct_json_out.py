@@ -102,7 +102,11 @@ def test_json_out_relit_les_episodes_un_par_un(script, tmp_path, fingerprint):
         script._write_json_out(handle, meta, records)
     payload = json.loads(out.read_text(encoding="utf-8"))
 
-    assert payload["schema_version"] == 2
+    # 3 et non 2 : `run.episodes_requested` a disparu au profit d'`episodes_per_bot`/
+    # `episodes_total`, donc un lecteur de la v2 lève un KeyError sur ce fichier. Deux commits
+    # ont émis cette forme en la marquant `2` (cf. le commentaire du script).
+    assert payload["schema_version"] == 3
+    assert "episodes_requested" not in payload["run"]
     assert payload["run"]["scenario_file"] == "holdout_1.json"
     assert payload["run"]["episodes_per_bot"] == 1
     assert payload["run"]["episodes_total"] == 2
@@ -159,26 +163,55 @@ def test_l_empreinte_du_modele_est_relevee_avant_son_chargement(main_ast):
     assert fp < load
 
 
-def test_les_cles_du_panel_sont_exigees_et_non_defaultees(main_ast):
-    # `cb.get("bot_eval_weights", {})` faisait tourner la boucle zéro fois et publier
-    # `"episodes": []` en sortant 0 ; `bot_eval_randomness` vide construisait six bots non
-    # paramétrés dont les moyennes étaient quand même comparées à la référence §12.5.
-    exigees = {
+def _require_key_args(main_ast) -> set:
+    return {
         node.args[1].value
         for node in ast.walk(main_ast)
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Name) and node.func.id == "require_key"
         and len(node.args) == 2 and isinstance(node.args[1], ast.Constant)
     }
+
+
+def test_le_panel_passe_par_le_chargeur_de_l_evaluation_reelle(main_ast):
+    # relire `callback_params` à la main privait CE script — et lui seul — des trois contrôles
+    # de `_load_bot_eval_params` : clés exigées, coercition float, poids qui somment à 1.0.
+    # Il compare pourtant ses moyennes à celles que produit ai/bot_evaluation.py.
+    appels = {
+        node.func.id
+        for node in ast.walk(main_ast)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+    assert "_load_bot_eval_params" in appels
+
+    # et plus aucune relecture directe du bloc callback_params
+    source = SCRIPT_PATH.read_text(encoding="utf-8")
+    assert 'cb.get("bot_eval' not in source
+    assert 'require_key(cb, "bot_eval' not in source
+
+
+def test_les_cles_qui_decident_du_protocole_sont_exigees(main_ast):
+    # `agent_seat_mode` : le défaut "p1" décidait du siège ET était recopié dans run_meta comme
+    # s'il venait de la config. `opponent_player` : le défaut 2 comptait les zones de l'AGENT
+    # dans la moitié des épisodes (agent_seat_mode="random" sur x1_panel). `turn` et
+    # `objective_controllers` : posées par le reset du moteur, donc un défaut n'y masque qu'une
+    # régression — sous forme d'un 0.00 crédible.
+    exigees = _require_key_args(main_ast)
+
+    assert {"agent_seat_mode", "opponent_player", "turn", "objective_controllers"} <= exigees
+
     defaultees = {
-        node.func.value.id
+        (node.func.value.id, node.args[0].value)
         for node in ast.walk(main_ast)
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-        and node.func.attr == "get" and isinstance(node.func.value, ast.Name) and len(node.args) == 2
+        and node.func.attr == "get" and isinstance(node.func.value, ast.Name)
+        and len(node.args) == 2 and isinstance(node.args[0], ast.Constant)
     }
-
-    assert {"bot_eval_weights", "bot_eval_randomness"} <= exigees
-    assert "cb" not in defaultees  # aucune clé du bloc callback_params ne reprend un défaut
+    interdits = {
+        ("tc", "agent_seat_mode"), ("info", "opponent_player"),
+        ("gs", "turn"), ("gs", "objective_controllers"),
+    }
+    assert not (interdits & defaultees)
 
 
 def test_la_ligne_de_succes_s_affiche_apres_la_publication(main_ast):
@@ -215,6 +248,43 @@ def test_la_destination_est_ouverte_avant_de_jouer_le_moindre_episode(tmp_path):
     assert proc.returncode != 0
     assert "FileNotFoundError" in proc.stderr
     assert "Modèle" not in proc.stdout  # première trace de main() après les imports lourds
+
+
+def test_les_colonnes_du_tableau_viennent_de_la_duree_de_la_bataille(script):
+    # `turns = [1,2,3,4,5]` en dur pendant que la colonne N suit `max(per_turn)` : rien ne
+    # gardait le couplage à game_rules.max_turns.
+    records = [script._episode_record("a", 0, 1, 2, {1: 0, 2: 1})]
+
+    assert script._table_turns(5, records) == [1, 2, 3, 4, 5]
+    assert script._table_turns(3, records) == [1, 2, 3]
+    # bataille illimitée (Endless Duty) : il n'y a que des tours observés
+    assert script._table_turns(None, records) == [1, 2]
+    assert script._table_turns(None, []) == []
+
+
+def test_zero_episode_est_refuse_avant_d_ouvrir_la_destination(tmp_path):
+    # VERROU : `--episodes 0` jouait zéro épisode et publiait `"episodes": []` PAR-DESSUS le
+    # relevé précédent, en sortant 0. Le fichier existant doit rester INTACT.
+    dest = tmp_path / "zones.json"
+    dest.write_text('{"schema_version": 3, "episodes": ["releve precedent"]}', encoding="utf-8")
+
+    proc = subprocess.run(
+        [sys.executable, str(SCRIPT_PATH), "--episodes", "0", "--json-out", str(dest)],
+        capture_output=True, text=True, cwd=str(PROJECT_ROOT), timeout=120,
+        env={**os.environ, "W40K_BOARD_PATH": "board/44x60x1"},
+    )
+
+    assert proc.returncode != 0
+    assert "--episodes" in proc.stderr
+    assert json.loads(dest.read_text(encoding="utf-8"))["episodes"] == ["releve precedent"]
+    assert list(tmp_path.glob("*.part")) == []
+
+
+# ⚠️ Le finding 8 (« bot=P2 » alors que le siège est aléatoire) N'EST PAS verrouillé ici : la
+# ligne de référence a été sortie de ce script vers `scripts/bot_panel_reference.py`, source
+# unique partagée avec `bot_zone_check.py`, dont la docstring annonce son propre verrou
+# (`tests/unit/scripts/test_bot_panel_reference.py`). Un second verrou écrit ici relirait le
+# fichier appelant et rougirait à la prochaine factorisation, sans rien garder de plus.
 
 
 def test_le_drapeau_existe_sur_la_ligne_de_commande():

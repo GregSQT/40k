@@ -34,7 +34,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterator, List, Tuple
 
 from shared.data_validation import require_key
-from shared.json_atomic import write_json_atomic
+from shared.json_atomic import json_batch, write_json_atomic
 
 #: Défauts de génération, partagés par les deux appelants — le parseur de la CLI les référence
 #: plutôt que de les redéclarer, sans quoi une régénération par `train.py` produirait un autre
@@ -308,10 +308,13 @@ def generate(
         scenario_paths = [str(p) for p in existing]
     else:
         scenario_paths = []
-        for index, payload in enumerate(payloads, start=1):
-            scenario_path = run_dir / f"scenario_rule_checker_bot-{index:04d}.json"
-            write_json_atomic(scenario_path, payload)
-            scenario_paths.append(str(scenario_path))
+        # `json_batch` : jusqu'à 2401 fichiers dans CE dossier, dont le `fsync` serait sinon
+        # refait à chaque fichier — le même travail, 2400 fois pour rien.
+        with json_batch():
+            for index, payload in enumerate(payloads, start=1):
+                scenario_path = run_dir / f"scenario_rule_checker_bot-{index:04d}.json"
+                write_json_atomic(scenario_path, payload)
+                scenario_paths.append(str(scenario_path))
 
     # HORS CACHE, TOUJOURS RÉÉCRITS. Manifeste, audit et paramètres décrivent la sélection et le
     # lancement, pas les scénarios : les mettre dans la clé ferait réécrire 2401 fichiers
