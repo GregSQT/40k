@@ -34,6 +34,7 @@ from typing import Any
 
 from ai.companion_paths import companion_path
 from shared.data_validation import require_non_negative_int
+from shared.json_atomic import write_json_atomic
 
 RUN_STATE_SUFFIX = "_run_state.json"
 
@@ -44,18 +45,16 @@ def get_run_state_path(model_path: str) -> str:
 
 
 def save_run_state(model_path: str, episodes_trained: Any) -> str:
-    """Ecrit l'etat de run a cote du modele. Ecriture ATOMIQUE (tmp + `os.replace`).
+    """Ecrit l'etat de run a cote du modele. Ecriture ATOMIQUE (`shared/json_atomic.py`).
 
     Un fichier tronque par une interruption serait pire que pas de fichier : il ferait reprendre
-    une rampe a une valeur arbitraire au lieu de lever.
+    une rampe a une valeur arbitraire au lieu de lever. Ce module portait sa propre version de
+    ce brouillon-puis-`os.replace` ; c'est desormais celle du depot, la meme partout.
     """
     require_non_negative_int(episodes_trained, "episodes_trained")
     path = get_run_state_path(model_path)
-    tmp_path = f"{path}.tmp"
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(tmp_path, "w", encoding="utf-8") as handle:
-        json.dump({"episodes_trained": int(episodes_trained)}, handle)
-    os.replace(tmp_path, path)
+    write_json_atomic(path, {"episodes_trained": int(episodes_trained)})
     return path
 
 

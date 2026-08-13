@@ -21,6 +21,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from shared.json_atomic import write_json_atomic  # pylint: disable=wrong-import-position
 from scripts.build_dynamic_rosters import (  # pylint: disable=wrong-import-position
     _build_unit_type_value_index_strict,
     _extract_matrix_unit_keys,
@@ -278,7 +279,7 @@ def main() -> None:
 
         if args.apply:
             shutil.move(str(old_path), str(deprecated_dir / old_path.name))
-            old_path.write_text(json.dumps(replaced_payload, indent=2), encoding="utf-8")
+            write_json_atomic(old_path, replaced_payload)
             if delta >= 30:
                 shutil.copy2(str(old_path), str(alert_plus30_dir / old_path.name))
             if delta >= 40:
@@ -344,7 +345,7 @@ def main() -> None:
         "alert_plus30_dir": str(alert_plus30_dir),
         "alert_plus40_dir": str(alert_plus40_dir),
     }
-    report_json.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    write_json_atomic(report_json, summary)
 
     print(f"✅ Round '{args.round_label}' completed. apply={args.apply}")
     print(f"   Replacements planned/applied: {len(planned_rows)}")

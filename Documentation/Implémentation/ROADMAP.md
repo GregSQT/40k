@@ -502,7 +502,7 @@ mesure, et c'est assumé (§0.14).
    en dur, donc muet) et la graine d'épisode seule ne reconstruit pas la doctrine du bot.
    La destination est validée AVANT de jouer — chemin vide, dossier, dossier absent ou en lecture
    seule échouent en une seconde au lieu de coûter tout le run, graines comprises ; l'écriture
-   passe par `scripts/json_atomic.py` (§5) : brouillon `<fichier>.part` publié par `os.replace`,
+   passe par `shared/json_atomic.py` (§5) : brouillon publié par `os.replace`,
    donc un run interrompu ne détruit pas le relevé précédent et ne laisse pas de résidu.
    `schema_version` = **2**. Les clés `bot_eval_weights`/`bot_eval_randomness` sont EXIGÉES et
    non plus défaultées à `{}` : un panel absent faisait tourner la boucle zéro fois et publier
@@ -1039,15 +1039,25 @@ Lourds, à re-cadrer avant toute reprise :
 
 ### Deux formes uniques extraites de leurs copies (2026-08-13)
 
-- ✅ **Écriture JSON atomique** — [`scripts/json_atomic.py`](../../scripts/json_atomic.py) remplace
-  les quatre `_write_json` privés (`bot_zone_direct`, `build_holdout_benchmark`,
-  `migrate_scenario_bank_v11`, `rebalance_holdout_hard_scenarios`), qui divergeaient sur
-  `write_text` vs `open`, `ensure_ascii` et la création implicite du dossier. Le défaut supprimé :
+- ✅ **Écriture JSON atomique** — [`shared/json_atomic.py`](../../shared/json_atomic.py) est la
+  forme unique de TOUTE publication d'un `.json` du dépôt : 28 sites dans 22 fichiers de
+  `scripts/`, `ai/`, `engine/`, `services/` et `shared/`, dont les quatre `_write_json` privés
+  d'origine et l'écriture atomique privée d'`ai/run_state.py`. Le défaut supprimé :
   `open(path, "w")` détruit le fichier précédent AVANT d'écrire un octet, donc une interruption
-  laissait un JSON tronqué à la place d'un relevé valide. Tout passe par un brouillon `<path>.part`
-  publié par `os.replace`, avec trois refus à l'ouverture (destination vide, dossier, dossier
-  absent ou en lecture seule) pour qu'un chemin faux coûte une seconde et non un run entier.
-  Un verrou statique interdit à ces scripts de réécrire du JSON en direct.
+  laissait un JSON tronqué à la place d'un relevé valide. Tout passe par un brouillon publié par
+  `os.replace`, avec trois refus à l'ouverture (destination vide, dossier, dossier absent ou en
+  lecture seule) pour qu'un chemin faux coûte une seconde et non un run entier ; le nom du
+  brouillon porte le processus ET le fil, parce que deux routes Flask publient la config des
+  saves du serveur en concurrence.
+  **Deux règles, pas une** : l'ATOMICITÉ vaut partout (`write_json_atomic`) ; le FORMAT unifié
+  (indent 2, `ensure_ascii=False`) ne vaut que là où il ne change pas la sortie — trois sites
+  gardent la leur (`default=str` du cache de `unit_registry`, table compacte de
+  `weapon_damage_builder`, `sort_keys` de `unit_classifier`) via `json_draft`, qui donne
+  l'atomicité seule.
+  Le verrou est STATIQUE et GLOBAL (`tests/unit/shared/test_json_atomic.py`) : il balaye les cinq
+  arbres de code au lieu de suivre une liste de fichiers convertis, donc il couvre aussi le
+  fichier écrit demain. Il ne voit que les publications JSON — un journal `.jsonl` en append, un
+  CSV, un `logger.dump` de SB3 ou un `json.dumps` dans un message de log ne le déclenchent pas.
 - ✅ **Chargement d'un script par `importlib` dans les tests** — [`tests/_chargeur_script.py`](../../tests/_chargeur_script.py)
   remplace les six copies du même bloc `spec_from_file_location`.
 

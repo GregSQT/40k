@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import argparse
 import csv
-import json
 import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -28,6 +27,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
 from shared.data_validation import require_present
+from shared.json_atomic import write_json_atomic
 from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
 
 
@@ -567,7 +567,7 @@ def write_outputs(
         "aggregate": aggregate,
         "seeds": [asdict(row) for row in seed_rows],
     }
-    json_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    write_json_atomic(json_path, payload)
 
     with csv_path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(

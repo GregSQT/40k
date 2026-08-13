@@ -8,9 +8,17 @@ Converts training logs into a format suitable for visual replay with:
 - Full action details
 """
 
-import json
 import re
+import sys
+from pathlib import Path
 from typing import Dict, List, Any, Tuple
+
+# lance directement (`python3 services/replay_parser.py`) : `sys.path[0]` est `services/`.
+_PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+
+from shared.json_atomic import write_json_atomic  # noqa: E402  (dépend du sys.path ci-dessus)
 
 
 def parse_train_log_to_episodes(log_path: str) -> List[Dict[str, Any]]:
@@ -317,7 +325,6 @@ if __name__ == "__main__":
 
     # Save to JSON
     output_file = log_file.replace('.log', '_replay.json')
-    with open(output_file, 'w') as f:
-        json.dump(result, f, indent=2)
+    write_json_atomic(output_file, result)
 
     print(f"Saved to: {output_file}")

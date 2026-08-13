@@ -82,6 +82,7 @@ os.chdir(PROJECT_ROOT)
 # differe : les `choices` d'argparse sont evaluees au montage du parseur. Le registre ne declare que
 # des chaines, il ne tire ni le moteur ni torch — c'est ce qui le rend importable ici.
 from ai.bot_registry import ALL_BOT_KEYS  # noqa: E402
+from shared.json_atomic import write_json_atomic  # noqa: E402
 
 
 def _import_roster_aggregate() -> Any:
@@ -259,8 +260,7 @@ def _merge_partial_into_full_json(
         "Fusion partielle depuis roster_matchup_stats.py (quantile) ; "
         "résumés recalculés sur la grille matchups complète."
     )
-    with full_path.open("w", encoding="utf-8") as f:
-        json.dump(doc, f, indent=2, ensure_ascii=False)
+    write_json_atomic(full_path, doc)
     print(f"\n✅ Fusion dans matrice complète: {full_path}")
 
 
@@ -1032,8 +1032,7 @@ def _run_one_split(
                 "opponent_roster_ref": p2_ref,
             }
             scenario_file = run_matchup_dir / f"matchup_{p1_id}_{p2_id}.json"
-            with open(scenario_file, "w", encoding="utf-8") as f:
-                json.dump(scenario_data, f, indent=2)
+            write_json_atomic(scenario_file, scenario_data)
             scenario_path = str(scenario_file)
             print(f"[{current}/{total_matchups}] {p1_id} vs {p2_id}...", end=" ", flush=True)
             if args.opponent_mode == "agent" and bool(args.agent_seat_bidirectional):
@@ -1208,8 +1207,7 @@ def _run_one_split(
         "p1_summaries": sorted(p1_summaries, key=lambda x: -x["overall_win_rate"]),
         "p2_summaries": sorted(p2_summaries, key=lambda x: x["p1_win_rate_vs_this_p2"]),
     }
-    with open(out_path, "w", encoding="utf-8") as f:
-        json.dump(output, f, indent=2, ensure_ascii=False)
+    write_json_atomic(out_path, output)
     print(f"\n✅ Wrote {out_path}")
 
 

@@ -37,6 +37,7 @@ sys.path.insert(0, engine_dir)
 from engine.w40k_core import W40KEngine
 from main import load_config
 from shared.data_validation import ConfigurationError, require_key
+from shared.json_atomic import write_json_atomic
 from engine.combat_utils import resolve_dice_value, set_unit_coordinates
 from engine.phase_handlers.shared_utils import build_units_cache, rebuild_choice_timing_index, _is_character_role
 from engine.phase_handlers import command_handlers, movement_handlers, deployment_handlers
@@ -2104,15 +2105,16 @@ def _save_config_path() -> str:
 
 
 def _persist_save_config() -> None:
-    import json
+    # Deux routes (`/save/persist`, `/autosave/config`) publient CE fichier, et le serveur sert
+    # ses requetes en fils concurrents : l'ecriture atomique est ce qui evite qu'une config
+    # tronquee remplace la precedente, et le brouillon porte le fil (cf. `shared/json_atomic.py`).
     path = _save_config_path()
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump({
-            "persist_enabled": _SNAPSHOT_PERSIST_ENABLED,
-            "autosave_enabled": _AUTOSAVE_ENABLED,
-            "granularity": _AUTOSAVE_GRANULARITY,
-        }, f, ensure_ascii=False)
+    write_json_atomic(path, {
+        "persist_enabled": _SNAPSHOT_PERSIST_ENABLED,
+        "autosave_enabled": _AUTOSAVE_ENABLED,
+        "granularity": _AUTOSAVE_GRANULARITY,
+    })
 
 
 def _load_save_config() -> None:

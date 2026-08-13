@@ -14,6 +14,11 @@ from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from shared.json_atomic import write_json_atomic  # noqa: E402  (dépend du sys.path ci-dessus)
+
 CONTRACT_PATH = ROOT / "config" / "testing" / "unit_solidite_contract.json"
 ANOMALIES_PATH = ROOT / "Documentation" / "KNOWN_ANOMALIES.md"
 TESTS_ROOT = ROOT / "tests" / "unit"
@@ -218,7 +223,7 @@ def main() -> int:
 
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(report, indent=2, ensure_ascii=True), encoding="utf-8")
+    write_json_atomic(output_path, report)
 
     print(f"SOLIDITE_UNITAIRE={report['solidite_unitaire']}")
     for check in report["checks"]:

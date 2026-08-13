@@ -27,6 +27,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from engine.weapons.parser import get_armory_parser
+from shared.json_atomic import json_draft  # noqa: E402
 
 
 TARGET_MARGIN_FIXED = 1.1
@@ -1026,7 +1027,10 @@ def main() -> None:
         "cells": cells,
         "unit_values": unit_values,
     }
-    with matrix_output.open("w", encoding="utf-8") as f:
+    # `sort_keys` : la matrice se relit en diff d'une génération à l'autre, un ordre de clés
+    # instable la rendrait illisible. La forme reste donc celle du site — seule l'atomicité
+    # vient du module.
+    with json_draft(matrix_output) as f:
         json.dump(matrix_payload, f, indent=2, ensure_ascii=True, sort_keys=True)
 
     print(f"Rosters parsed: {', '.join(name for name, _ in roster_stats)}")

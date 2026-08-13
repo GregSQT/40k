@@ -72,6 +72,7 @@ project_root = os.path.dirname(script_dir)
 sys.path.insert(0, script_dir)
 sys.path.insert(0, project_root)
 from ai.unit_registry import UnitRegistry
+from shared.json_atomic import write_json_atomic
 sys.path.insert(0, project_root)
 
 # Un import de RandomBot / GreedyBot / DefensiveBot sous try/except ImportError, avec un drapeau
@@ -1133,8 +1134,7 @@ def _materialize_scenario_with_refs(
     file_name = f"{Path(scenario_path).stem}__{path_hash}.json"
     out_path = os.path.join(temp_dir, file_name)
     if not os.path.exists(out_path):
-        with open(out_path, "w", encoding="utf-8") as f:
-            json.dump(scenario_copy, f, ensure_ascii=True, indent=2)
+        write_json_atomic(out_path, scenario_copy)
     return out_path
 
 
@@ -1768,9 +1768,7 @@ def _write_tensorboard_run_meta(model_path: str, run_dir: str) -> None:
     model_dir = os.path.dirname(model_path)
     if model_dir:
         os.makedirs(model_dir, exist_ok=True)
-    payload = {"run_dir": run_dir}
-    with open(meta_path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, indent=2)
+    write_json_atomic(meta_path, {"run_dir": run_dir})
 
 
 class VecNormalizeCheckpointCallback(CheckpointCallback):

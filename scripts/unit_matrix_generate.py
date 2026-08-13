@@ -11,10 +11,17 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from shared.json_atomic import write_json_atomic  # noqa: E402  (dépend du sys.path ci-dessus)
 
 
 @dataclass(frozen=True)
@@ -198,7 +205,7 @@ def main() -> int:
         print("✅ unit_matrix.json is up to date.")
         return 0
 
-    output_path.write_text(json.dumps(matrix, indent=2) + "\n", encoding="utf-8")
+    write_json_atomic(output_path, matrix)
     print(f"Generated {output_path} with {len(matrix['rows'])} rows.")
     return 0
 

@@ -28,6 +28,8 @@ from typing import Dict, Any, Set, Tuple
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from shared.json_atomic import json_draft  # noqa: E402  (dépend du sys.path ci-dessus)
+
 # Direct file-level imports to avoid engine/__init__.py (which imports torch via w40k_core)
 import importlib.util as _ilu
 
@@ -173,7 +175,10 @@ def main():
     table = build_weapon_damage_table()
 
     output_path = PROJECT_ROOT / "config" / "weapon_damage_table.json"
-    with open(output_path, "w", encoding="utf-8") as f:
+    # forme COMPACTE conservée : cette table est lue par le moteur et sa taille est le sujet
+    # (elle est affichée juste en dessous). L'indentation du dépôt la ferait tripler pour rien —
+    # seule l'atomicité vient du module.
+    with json_draft(output_path) as f:
         json.dump(table, f, separators=(",", ":"))
 
     size_kb = os.path.getsize(output_path) / 1024

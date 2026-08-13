@@ -489,9 +489,14 @@ def profile_move_pool_build(fn: F) -> F:
 
 
 if __name__ == "__main__":
-    import json
     import sys
     from collections import defaultdict
+    from pathlib import Path
+
+    # lance directement (`python3 engine/perf_timing.py <log>`) : `sys.path[0]` est `engine/`,
+    # la racine du depot n'y est pas.
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from shared.json_atomic import write_json_atomic
 
     if len(sys.argv) < 2:
         print("Usage: python3 engine/perf_timing.py <log> [log_after]")
@@ -874,8 +879,7 @@ if __name__ == "__main__":
         sc = _build_scores(ev)
         _print_scores(sc, logfile)
         score_path = logfile + ".score.json"
-        with open(score_path, "w") as jf:
-            json.dump(sc, jf, indent=2)
+        write_json_atomic(score_path, sc)
         print(f"Score sauvegardé → {score_path}\n")
     else:
         ev_b = _parse_log(sys.argv[1])
