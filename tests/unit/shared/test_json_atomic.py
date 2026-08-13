@@ -19,6 +19,7 @@ from __future__ import annotations
 import ast
 import json
 import os
+import re
 import threading
 from pathlib import Path
 
@@ -217,6 +218,20 @@ def test_un_fsync_de_dossier_impossible_n_annule_pas_une_publication_reussie(tmp
     assert [p.name for p in tmp_path.iterdir()] == ["releve.json"]
 
 
+def test_un_brouillon_reste_vide_ne_remplace_pas_le_fichier_precedent(tmp_path):
+    # sortir du bloc sans rien écrire (`return` anticipé, boucle qui ne tourne pas) publierait
+    # zéro octet À LA PLACE d'un relevé valide — la perte du module, obtenue par sa publication.
+    cible = tmp_path / "releve.json"
+    cible.write_text('{"ancien": true}\n', encoding="utf-8")
+
+    with pytest.raises(ValueError):
+        with json_draft(cible):
+            pass
+
+    assert json.loads(cible.read_text(encoding="utf-8")) == {"ancien": True}
+    assert list(tmp_path.iterdir()) == [cible]
+
+
 def test_un_dossier_absent_n_est_pas_cree_en_silence(tmp_path):
     # pas de `mkdir(parents=True)` implicite : un chemin faux doit se voir, pas se réparer.
     with pytest.raises(FileNotFoundError):
@@ -334,6 +349,13 @@ def test_dump_json_ecrit_dans_le_brouillon_pas_dans_la_destination(tmp_path):
 # --- 3. verrou statique : plus aucune publication JSON en direct --------------------------------
 
 
+#: Forme d'un mode d'ouverture, et rien d'autre. `X.open("...")` prend son mode en PREMIER
+#: argument (`Path.open`) ou une ENTRÉE à lire (`zipfile.ZipFile(z).open("weights.json")`) : sans
+#: ce filtre, le nom de fichier est lu comme un mode, le `w` de « weights » suffit, et le verrou
+#: rougit sur une LECTURE correcte. Un verrou faussement rouge se fait désarmer le jour même.
+_FORME_MODE = re.compile(r"^[rwxab+tU]{1,4}$")
+
+
 def _mode_douverture(node: ast.Call) -> str:
     """Mode d'un `open(...)` / `X.open(...)`, `"r"` par défaut comme la bibliothèque standard."""
     for mot in node.keywords:
@@ -342,7 +364,9 @@ def _mode_douverture(node: ast.Call) -> str:
     # `open(chemin, mode)` pour la fonction native, `chemin.open(mode)` pour la méthode de Path.
     rang = 1 if isinstance(node.func, ast.Name) else 0
     if len(node.args) > rang and isinstance(node.args[rang], ast.Constant):
-        return str(node.args[rang].value)
+        candidat = str(node.args[rang].value)
+        if _FORME_MODE.match(candidat):
+            return candidat
     return "r"
 
 
@@ -575,5 +599,33 @@ def test_le_verrou_voit_les_publications_et_ignore_ce_qui_n_en_est_pas() -> None
         "def lit_aussi(p):\n"                                      # permanence, donc désarmé le
         "    with Path(p).open() as f:\n"                          # jour même.
         "        return json.load(f)\n"
-    )
+        "def lit_dans_un_zip(z):\n"                                # `X.open(<ENTRÉE>)` : le 1er
+        "    with zipfile.ZipFile(z).open('weights.json') as f:\n"  # argument d'une méthode n'est
+        "        return json.load(f)\n"                             # un mode que s'il en a la
+        "def lit_un_checkpoint(z):\n"                               # FORME — sinon le `w` de
+        "    with zipfile.ZipFile(z).open('policy.pkl') as f:\n"    # « weights » suffit à rendre
+        "        return f.read()\n"                                 # le verrou rouge sur une
+    )                                                               # lecture parfaitement correcte.
     assert publications_directes(innocent) == []
+
+
+def test_le_premier_argument_d_une_methode_open_n_est_un_mode_que_s_il_en_a_la_forme() -> None:
+    # `_mode_douverture` se verrouille ICI, pas à travers `publications_directes` : ce dernier
+    # exige AUSSI un `json.dump` dans le handle, si bien qu'un `ZipFile(z).open("weights.json")`
+    # mal lu ne rougit pas aujourd'hui (mesuré). C'est la lecture du mode qui est fausse, et
+    # elle le reste tant qu'on ne la regarde pas de près — le jour où un site ouvre une entrée
+    # d'archive dont le nom porte un `w` ET y écrit du JSON, le verrou entier devient ingardable.
+    def mode(source: str) -> str:
+        appel = next(
+            n for n in ast.walk(ast.parse(source))
+            if isinstance(n, ast.Call) and getattr(n.func, "attr", getattr(n.func, "id", "")) == "open"
+        )
+        return _mode_douverture(appel)
+
+    assert mode("zipfile.ZipFile(z).open('weights.json')") == "r"   # entrée d'archive, pas un mode
+    assert mode("tarfile.open('rewards.tar.gz')") == "r"
+    assert mode("Path(p).open('w')") == "w"                          # mode réel : inchangé
+    assert mode("Path(p).open('x')") == "x"
+    assert mode("open(p, 'w')") == "w"
+    assert mode("open(p, mode='w')") == "w"
+    assert mode("open(p)") == "r"

@@ -34,6 +34,10 @@ Trois contrôles à l'ouverture, aucun ne couvre les autres :
     inscriptible (un `isdir` laisserait passer un dossier en lecture seule).
 Aucune création de dossier : un chemin faux se voit, il ne se répare pas en silence.
 
+Un brouillon resté VIDE ne se publie pas : il n'est pas un JSON, et il détruirait le fichier
+précédent aussi sûrement qu'une troncature. L'appelant qui sort de son bloc sans rien écrire lève
+donc, plutôt que de le découvrir en relisant le fichier.
+
 La FERMETURE appartient à l'écriture : c'est elle qui vide le tampon, donc c'est elle qui casse
 sur un disque plein. Elle est dans le `try`, sinon un flush raté laisserait le brouillon derrière
 lui sans rien publier — l'exact défaut que ce module existe pour supprimer. La PUBLICATION y est
@@ -113,6 +117,13 @@ def json_draft(path: StrPath) -> Iterator[TextIO]:
         handle.flush()
         os.fsync(handle.fileno())
         handle.close()
+        # Un brouillon VIDE n'est pas un JSON : le publier remplacerait un fichier valide par
+        # zéro octet, atomiquement — la perte que ce module refuse, obtenue par sa propre
+        # publication. Le cas arrive quand un appelant sort du bloc sans rien écrire (`return`
+        # anticipé, boucle qui ne tourne pas) ; c'est un défaut chez lui, il doit le voir plutôt
+        # que le découvrir à la relecture du fichier.
+        if os.path.getsize(draft) == 0:
+            raise ValueError(f"rien n'a été écrit pour {os.fspath(path)} : un fichier vide ne se publie pas")
         # DANS le `try` : une publication qui rate (destination devenue un dossier, droits
         # retirés pendant un run long) doit emporter le brouillon avec elle, pas le laisser
         # traîner sous `config/`.
