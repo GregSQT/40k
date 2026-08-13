@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 
 from shared.data_validation import require_key, require_present
 from shared.torch_safe_globals import register_torch_safe_globals
+from shared.json_atomic import write_json_atomic
 from ai.scenario_scratch import make_scenario_scratch_dir
 
 # Avant tout `MaskablePPO.load` de ce module : torch >= 2.6 charge en `weights_only=True`.
@@ -165,8 +166,7 @@ def _materialize_eval_scenario_refs(
     ).hexdigest()[:16]
     out_path = os.path.join(out_dir, f"{os.path.basename(scenario_path)[:-5]}__{path_hash}.json")
     if not os.path.exists(out_path):
-        with open(out_path, "w", encoding="utf-8") as f:
-            json.dump(scenario_copy, f, ensure_ascii=True, indent=2)
+        write_json_atomic(out_path, scenario_copy)
     return out_path
 
 

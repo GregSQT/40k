@@ -29,11 +29,10 @@ import shutil
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-
-from json_atomic import write_json_atomic  # noqa: E402  (dépend du sys.path ci-dessus)
-
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from shared.json_atomic import write_json_atomic  # noqa: E402  (dépend du sys.path ci-dessus)
 BOARD_REF = "44x60x5"
 BOARD_DIR = PROJECT_ROOT / "config" / "board" / BOARD_REF
 TERRAIN_DIR = BOARD_DIR / "terrain"

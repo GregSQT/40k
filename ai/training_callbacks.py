@@ -30,6 +30,7 @@ from stable_baselines3.common.utils import ConstantSchedule
 
 from engine.episode_schedule import ramp_progress
 from shared.data_validation import require_key, require_positive_int, require_present
+from shared.json_atomic import write_json_atomic
 from ai.model_artifacts import copy_model_with_companions, remove_model_with_companions
 from config_loader import get_config_loader
 
@@ -1827,8 +1828,7 @@ class BotEvaluationCallback(BaseCallback):
     def _write_canonical_robust_meta(self, robust_score: float) -> None:
         """Persist robust score of canonical model after copy."""
         meta_path = self._get_canonical_robust_meta_path()
-        with open(meta_path, "w", encoding="utf-8") as f:
-            json.dump({"robust_score": robust_score}, f, indent=0)
+        write_json_atomic(meta_path, {"robust_score": robust_score})
 
     def _copy_model_artifacts(self, src_model_zip: str, dst_model_zip: str) -> None:
         """Copie le modele ET ses compagnons vers la sortie CANONIQUE (ai/model_artifacts.py).

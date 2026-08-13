@@ -1457,10 +1457,12 @@ Plan d'origine :
   (L19) ; `migrate_scenario_bank_v11.py` n'a **aucun import projet** → n'en a pas besoin.
   ⚠️ **2026-08-02 : `sweep_scenario_bank_v11.py` a depuis été SUPPRIMÉ du dépôt** (`924c2b41`) ;
   cette réserve n'a plus d'objet, le balayage vit dans `test_scenario_bank_migration_v11.py`.
-  ⚠️ **2026-08-13 : `migrate_scenario_bank_v11.py` a désormais SON bootstrap `sys.path`** (son
-  propre dossier, L32) : il importe `scripts/json_atomic.py` pour l'écriture atomique. Ce n'est
-  toujours pas un import *projet* — c'est un import de voisin, qui doit tenir aussi quand le
-  script est chargé par chemin (`test_scenario_bank_migration_v11.py`), d'où le bootstrap.
+  ⚠️ **2026-08-13 : `migrate_scenario_bank_v11.py` a désormais SON bootstrap `sys.path`** (L32) :
+  il importe `shared/json_atomic.py` pour l'écriture atomique. C'est bien un import *projet*
+  depuis le 2026-08-13 (le module a quitté `scripts/` pour `shared/`, seul dossier d'helpers
+  importable depuis `ai/`, `services/` et `engine/`), et le bootstrap pointe donc la RACINE du
+  dépôt. Il doit tenir aussi quand le script est chargé par chemin
+  (`test_scenario_bank_migration_v11.py`), d'où le bootstrap plutôt qu'un import nu.
 - ✅ **`ai/target_selector.py` SUPPRIMÉ** (validation utilisateur obtenue le 2026-07-16), avec son
   test `tests/unit/ai/test_target_selector.py`. Mort confirmé par grep exhaustif avant suppression :
   aucun importeur hors le module lui-même et son propre test (-9 tests collectés).

@@ -23,7 +23,7 @@ from typing import Any, Dict, List, Optional, TextIO
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from json_atomic import dump_json, json_out_draft  # noqa: E402  (dépend du sys.path ci-dessus)
+from shared.json_atomic import dump_json, json_out_draft  # noqa: E402  (dépend du sys.path ci-dessus)
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
