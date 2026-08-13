@@ -7,23 +7,82 @@ contrôlées par le bot player (opponent_player).
 
 Usage:
     source .venv/bin/activate && python3 scripts/bot_zone_direct.py [--episodes N]
+                                                                   [--json-out FICHIER]
+
+`--json-out` écrit le relevé PAR ÉPISODE (graine, joueur du bot, zones par tour) : la sortie
+texte agrégée reste identique, seul s'y ajoute le chemin du fichier écrit.
 """
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from collections import defaultdict
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+_JSON_SCHEMA_VERSION = 1
+
+
+def _episode_record(
+    bot_name: str,
+    episode: int,
+    seed: int,
+    bot_player: int,
+    turn_snapshot: Dict[int, int],
+) -> Dict[str, Any]:
+    """Relevé d'UN épisode, suffisant pour le rejouer (graine) et l'inspecter (zones/tour)."""
+    return {
+        "bot": bot_name,
+        "episode": episode,
+        "seed": seed,
+        "bot_player": bot_player,
+        "zones_by_turn": {str(t): turn_snapshot[t] for t in sorted(turn_snapshot)},
+    }
+
+
+def _aggregate_zones(records: List[Dict[str, Any]]) -> Dict[str, Dict[int, List[int]]]:
+    """Agrège les relevés par épisode en {bot: {tour: [zones, ...]}} — source du tableau texte."""
+    results: Dict[str, Dict[int, List[int]]] = {}
+    for rec in records:
+        per_turn = results.setdefault(rec["bot"], defaultdict(list))
+        for turn_key, zones in rec["zones_by_turn"].items():
+            per_turn[int(turn_key)].append(zones)
+    return {bot: dict(per_turn) for bot, per_turn in results.items()}
+
+
+def _write_json_out(
+    path: str,
+    model_path: str,
+    scenario_file: str,
+    episodes_requested: int,
+    records: List[Dict[str, Any]],
+) -> None:
+    payload = {
+        "schema_version": _JSON_SCHEMA_VERSION,
+        "model": os.path.basename(model_path),
+        "scenario_file": scenario_file,
+        "episodes_requested": episodes_requested,
+        "episodes": records,
+    }
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, ensure_ascii=False, indent=2, sort_keys=False)
+        handle.write("\n")
+
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--episodes", type=int, default=10)
+    parser.add_argument(
+        "--json-out",
+        dest="json_out",
+        default=None,
+        help="Fichier JSON où écrire le relevé par épisode (graine, joueur du bot, zones par tour)",
+    )
     args = parser.parse_args()
 
     import numpy as np
@@ -64,6 +123,7 @@ def main() -> None:
     scenario_file = scenarios[0]
 
     results: Dict[str, Dict[int, List[int]]] = {}
+    episode_records: List[Dict[str, Any]] = []
 
     for bot_name in bot_weights:
         print(f"  {bot_name:<16}", end=" ", flush=True)
@@ -90,7 +150,7 @@ def main() -> None:
             env_rank=0,
         )
 
-        ep_zones: Dict[int, List[int]] = defaultdict(list)
+        bot_records: List[Dict[str, Any]] = []
 
         for ep_idx in range(args.episodes):
             ep_seed = _episode_seed(base_seed, bot_name, 0, ep_idx)
@@ -122,12 +182,13 @@ def main() -> None:
                     zones = sum(1 for v in controllers.values() if v == bot_player)
                     turn_snapshot[cur_turn] = zones
 
-            for t, z in turn_snapshot.items():
-                ep_zones[t].append(z)
+            bot_records.append(_episode_record(bot_name, ep_idx, ep_seed, bot_player, turn_snapshot))
             print(".", end="", flush=True)
 
         env.close()
-        results[bot_name] = dict(ep_zones)
+        episode_records.extend(bot_records)
+        ep_zones = _aggregate_zones(bot_records).get(bot_name, {})
+        results[bot_name] = ep_zones
         last_t = max(ep_zones) if ep_zones else 0
         n = len(ep_zones.get(last_t, []))
         print(f" {n} ep")
@@ -144,6 +205,10 @@ def main() -> None:
             vals = tdata.get(t, [])
             cells.append(f"{sum(vals)/len(vals):.2f}" if vals else "  - ")
         print(f"{bot:<22} {n:>4} | " + " | ".join(f"{c:>4}" for c in cells))
+
+    if args.json_out:
+        _write_json_out(args.json_out, model_path, scenario_file, args.episodes, episode_records)
+        print(f"\nRelevé par épisode : {args.json_out} ({len(episode_records)} épisodes)")
 
     print()
     print("Référence §12.5 (post-§12.6, bot=P2, 100 ep): T2=1.61  T5=1.90  VP=31.0  combined=0.788")
