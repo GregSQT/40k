@@ -341,10 +341,11 @@ conclusion, il ne s'y ajoute pas. Ne jamais y répéter ce qui vient d'être dit
        ```
     2. <sujet suivant, même structure>
   RELIRE :
-  /code-review <fichiers modifiés>
-  /simplify <fichiers modifiés>
+  🟢 Bon moment pour /code-review — <n> fichiers en attente  [présente UNIQUEMENT si SUJET FINI et liste filtrée non vide]
+  /code-review <fichiers pertinents>
+  /simplify <fichiers pertinents>
   .claude/hooks/relire-en-attente.sh --vider <session_id>
-  → non lancées (elles t'appartiennent) ; <SUJET FINI, moment optimal | SUJET EN COURS, <n> arbitrage(s) ouvert(s)> ; <n> fichiers en attente depuis <n> tours
+  → non lancées (elles t'appartiennent) ; <SUJET FINI, moment optimal | SUJET EN COURS, <n> arbitrage(s) ouvert(s)> ; <n> fichier(s) pertinent(s) [+ <m> exclu(s) : <raison courte>] en attente depuis <n> tours
 
 - LU et JUMEAU sont TOUJOURS présents. « grep X → 0 hit » est une réponse valide. Ce qui est
   validé localement dans un fichier à cohérence globale n'est pas validé — c'est le défaut le
@@ -438,6 +439,18 @@ conclusion, il ne s'y ajoute pas. Ne jamais y répéter ce qui vient d'être dit
     relire maintenant c'est relire deux fois. Le `→` dit alors « SUJET EN COURS, n arbitrage(s)
     ouvert(s) », et « SUJET FINI, moment optimal » sinon. Ce n'est jamais qu'un AVIS : s'y tromper
     ne coûte rien, et aucune boucle ne peut en naître puisque l'agent n'a plus le déclenchement.
+  * FILTRAGE PAR PERTINENCE — seuls les fichiers pour lesquels une review apporte quelque chose
+    figurent dans `/code-review` et `/simplify`. Trois zones, appliquées dans cet ordre :
+    - TOUJOURS EXCLUS (sans jugement) : `config/**/*.json`, `*.md` sauf `CLAUDE.md`,
+      `Documentation/**`
+    - TOUJOURS INCLUS (sans jugement) : tout fichier sous `engine/`, `ai/`, `services/`,
+      `frontend/src/`
+    - ZONE GRISE (`tests/`, `scripts/`, et tout fichier hors des deux zones ci-dessus) :
+      jugement autorisé, MAIS chaque exclusion doit être justifiée en une ligne sur le `→`
+      (ex : `+ 1 exclu : test_trivial.py — fixture statique, aucune logique`). Jamais silencieux.
+    La bannière `🟢` n'apparaît que si la liste filtrée est non vide ET le sujet est FINI.
+    Un fichier core (`engine/`, `ai/`…) ne peut PAS être exclu, quelle que soit la justification :
+    la zone TOUJOURS INCLUS est mécanique et ne laisse pas de place au jugement.
   * POURQUOI PAS À CHAQUE MODIFICATION, mesuré le 2026-08-06 sur ce dépôt (186 commits de
     correction, 12 519 lignes datées par `git blame`, cf. `scripts/review_plan.py`) : 17 % des
     lignes corrigées le sont dans les 6 h qui suivent leur écriture — boucle write-debug, code
