@@ -133,7 +133,7 @@ raison (cf. `config/bot_movement_weights.json`, entrée `tactical`).
 | 3 | ~~chiffrage de faisabilité du holdout à un coup~~ | ⛔ **sans objet** — holdout abandonné 2026-08-12, §11.2 |
 | 4 | modèle de dégâts espérés (attaquant → cible) | ✅ 2026-08-11, **corrigé à la racine** 2026-08-12, cf. §7 et §7.1 |
 | 5 | les SIX styles | ✅ 2026-08-12, cf. §7 et §11.3 (`standoff` supprimé §9.2, `scorer` ajouté §11.3) |
-| 6 | réglage en **bot-contre-bot** (~~orthogonalité~~ abandonnée, §3.2) | ✅ **2026-08-13, §12.8 puis §12.9** — `w_crowd`/`w_contest` mesurés ISOLÉMENT (60 ep/bot, apparié, dérive des contrôles 0,000) : les deux hausses du §12.7 sont réfutées et défaites (§12.8). `scorer`, dernier profil posé sans mesure, réglé par la même méthode : six poids encadrés dans les deux sens, trois retenus, combinaison confirmée (§12.9). **Plus aucun profil du panel n'est posé sans mesure** |
+| 6 | réglage en **bot-contre-bot** (~~orthogonalité~~ abandonnée, §3.2) | ✅ **2026-08-13, §12.8 à §12.11** — les deux hausses du §12.7 réfutées et défaites (§12.8) ; `scorer`, dernier profil posé sans mesure, réglé (§12.9) ; deux grandeurs de diagnostic ajoutées à l'instrument (§12.10) ; `decapitation` corrigé au déplacement puis recalibré (§12.11). Tous mesurés à 60 ép./bot, un poids par run, dérive des contrôles 0,000 |
 | 7 | correspondance ancien/nouveau, puis suppression des cinq anciens | |
 | 8 | mesure finale contre l'agent, commande de §2 | ✅ **2026-08-13, §12.9** — 100 ep/bot sur `robust_0.8721` : `combined = 0,7600`, pire bot `racer = 0,630`, `scorer` 0,76 → **0,66**. Remplace le `0,7767` du §12.8, mesuré avant le réglage de `scorer` |
 
@@ -881,6 +881,13 @@ construction de la doctrine (poursuite ennemie prioritaire) — ce n'est pas un 
 > pas du bruit — l'instrument consigné rend, lui, des relevés IDENTIQUES AU BIT d'un run à l'autre
 > (§12.8). Un contrôle qui dérive dénonce un défaut de protocole, jamais une marge d'erreur.
 
+⚠️ **CES CHIFFRES NE SONT PAS REPRODUCTIBLES** (constaté le 2026-08-13, cf. §12.11) : l'instrument
+lisait alors le chemin **canonique** du modèle, que tout entraînement réécrit — il ne mesurait donc
+pas `robust_0.8721` malgré ce qui est écrit ci-dessus. Rejoués à 60 ép. sur le modèle de référence,
+les quatre bots de contrôle donnent 1.67/2.08 (attrition), 1.77/2.07 (racer), 1.65/1.93 (scorer),
+1.57/2.08 (endgame). Son **sens** ne tient pas davantage : le seuil `w_crowd > 1.5` a ete mesure ISOLEMENT au §12.8 et
+refute — monter `w_crowd` RETIRE des zones a `alpha`, et ne rend rien a `decapitation`.
+
 ### 12.8 Recalibration de `w_crowd`/`w_contest`, refaite proprement (2026-08-13)
 
 Reprise complète après invalidation du §12.7. Rien n'y est repris : ni la référence, ni le seuil,
@@ -1098,3 +1105,61 @@ Marine − Ork : −4,7 → −6,0 pt.
 **Le gain d'étalement se transmet donc bien à l'objectif**, et c'est la première fois qu'on le
 vérifie dans ce chantier : le §12.8 n'avait porté aucun de ses réglages jusqu'à cette mesure,
 puisque l'étalement les avait déjà réfutés.
+
+### 12.11 `decapitation` marchait vers l'ennemi le plus proche, pas vers sa cible (2026-08-13)
+
+**Le défaut.** La doctrine est « toutes les escouades frappent la MÊME cible dans le tour ». Elle
+n'était vraie qu'au tir : la cible était enregistrée par `_remember` depuis `_shoot`/`_fight`, or la
+phase move précède le tir dans le tour et le changement de tour vient d'effacer celle du tour
+précédent. `_focus` rendait donc **toujours `None`** pendant le déplacement, dont le terme d'ennemi
+prenait `min(distance)` sur toutes les ancres : les cinq escouades convergeaient chacune vers un
+ennemi **différent**, puis concentraient leurs tirs depuis des positions éclatées. Mesure du
+demandeur (60 ép., x1, `robust_0.8721`) : 14,9 hexes moyens du plus proche ennemi (racer 18,8 ;
+attrition 22,2) et 10,7 % d'escouades perdues par tour (attrition 4,8 %).
+
+⚠️ Conséquence de méthode : « faire porter le terme d'ennemi sur la cible focalisée quand elle
+existe » aurait été un **no-op strict** tant que l'élection restait accrochée au premier tir.
+
+**La correction.** La cible est désormais **ÉLUE** à la première lecture du tour (`_elect`), donc
+dès la phase move, par le critère du tir (`_score_kill_now`) pris au meilleur des deux modes ;
+`_remember` et les surcharges `_shoot`/`_fight` disparaissent. Le terme d'ennemi du déplacement
+passe par un point d'extension `movement_enemy_anchors`, que **seul** `DecapitationBot` surcharge —
+`select_movement_destination` reste commun aux six styles (drift 0.000 des cinq autres, ci-dessous).
+
+**Instrument corrigé dans la même livraison.** `scripts/bot_zone_direct.py` lisait
+`model_ArmageddonAgent.zip` (chemin canonique, md5 1072b0c… le 2026-08-13) alors que tout le §12 est
+mesuré sur `robust_0.8721` (md5 6f6b98…) : il nomme désormais le checkpoint de référence, le vérifie
+au md5, l'imprime, et **exige** `W40K_BOARD_PATH` au lieu de laisser `config.json` imposer le x5.
+
+**Calibration** — 60 ép./bot, `W40K_BOARD_PATH=board/44x60x1`, `robust_0.8721`, un poids par run :
+
+| run | `w_objective` | `w_enemy` | T2 | T5 |
+|-----|---------------|-----------|----|----|
+| référence, code d'avant | 0.5 | 0.6 | 1.43 | 0.98 |
+| correctif seul, poids inchangés | 0.5 | 0.6 | 1.47 | 0.87 |
+| 1 | **0.8** | 0.6 | 1.63 | 1.43 |
+| 2 | **1.0** | 0.6 | **1.67** | **1.77** |
+| 3 | **1.2** | 0.6 | 1.62 | 1.68 |
+| 4 | 1.0 | **0.8** | 1.63 | 1.60 |
+
+**Retenu : `w_objective` 0.5 → 1.0, `w_enemy` inchangé à 0.6.** Le correctif SEUL dégrade T5
+(0.98 → 0.87) : c'est attendu, il fait converger cinq escouades vers un point qui n'est pas une
+zone. Le réglage d'avant valait pour une géométrie qui n'existe plus. Le point à 1.2 redescend —
+c'est un **pic**, pas un plateau : ne pas monter plus haut. `w_enemy` a été testé à 0.8 et écarté :
+à concentration égale, renforcer le terme d'ennemi coûte des zones sans rien rendre.
+
+**Les cinq autres styles servent de contrôle** — dérive **exactement 0.000** sur les cinq runs, aux
+deux décimales de l'instrument :
+
+| Bot | T1 | T2 | T3 | T4 | T5 |
+|-----|----|----|----|----|-----|
+| alpha | 0.97 | 1.15 | 1.02 | 1.08 | 0.87 |
+| attrition | 1.20 | 1.67 | 1.90 | 2.18 | 2.08 |
+| endgame | 1.15 | 1.57 | 1.77 | 1.88 | 2.08 |
+| racer | 1.38 | 1.77 | 1.88 | 1.97 | 2.07 |
+| scorer | 1.37 | 1.65 | 1.85 | 2.08 | 1.93 |
+
+`decapitation` (1.67 / 1.77) rejoint la référence panel (T2=1.61 / T5=1.90) qu'il était seul avec
+`alpha` à manquer. Reste à mesurer : l'effet **contre l'agent** (win-rate), que cet instrument ne
+rend pas — et les deux métriques du diagnostic initial (distance au plus proche ennemi, pertes par
+tour), qui viennent d'un autre outil.

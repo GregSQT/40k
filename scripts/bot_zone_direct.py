@@ -5,38 +5,28 @@ Joue des épisodes de bot eval sans passer par train.py ni step_logger.
 Lit game_state["objective_controllers"] après chaque step pour compter les zones
 contrôlées par le bot player (opponent_player).
 
-⚠️ LE MODÈLE NE SE LIT PAS AU CHEMIN CANONIQUE PAR DÉFAUT (2026-08-13). Ce script visait
-`model_ArmageddonAgent.zip`, partagé et volatil : tout `train.py --new` l'écrase, y compris
-depuis une autre session (cf. §10.2 du chantier). `--model` pointe donc l'ARCHIVE nommée, que
-rien n'écrase, et le md5 chargé est imprimé à côté du résultat.
+⚠️ DEUX ENTRÉES DÉCIDENT DU CHIFFRE AUTANT QUE LES POIDS MESURÉS, et les deux étaient
+silencieuses (corrigé le 2026-08-13) :
 
-CE SCRIPT EST REPRODUCTIBLE — VÉRIFIÉ, PAS SUPPOSÉ (2026-08-13). Deux exécutions consécutives
-à graines identiques rendent des relevés par épisode IDENTIQUES AU BIT (`--json-out`, diff vide
-hors l'étiquette). La politique est jouée en `deterministic=True` et `W40KEngine.reset` sème
-`random` avec la graine d'épisode, ce qui couvre la part aléatoire des bots
-(`bot_eval_randomness`). Conséquence directe pour la calibration : entre deux runs, la dérive
-d'un bot NON MODIFIÉ est exactement nulle, donc tout écart sur un bot modifié lui est imputable.
-Un écart observé sur un bot de contrôle n'est pas du bruit, c'est un défaut de protocole
-(modèle, plateau ou graine changés en cours de route) — le chercher, ne pas le moyenner.
-
-Les deux `seed()` par épisode ci-dessous DOUBLENT ce que fait déjà le moteur, et c'est
-volontaire : ce sont les deux lignes que `ai/bot_evaluation.py` exécute avant son `reset`. Leur
-retrait a été mesuré SANS effet sur les tableaux ; elles sont là pour que l'instrument et la
-vraie boucle d'évaluation ne puissent pas diverger en silence le jour où un tirage passera par
-`np.random`.
+1. LE MODÈLE. Le script lisait le chemin CANONIQUE `model_ArmageddonAgent.zip`, que le moindre
+   entraînement réécrit : le 2026-08-13 il valait md5 1072b0c6…, quand toutes les mesures du §12
+   du chantier (référence T2=1.61 / T5=1.90 imprimée en bas) sont faites sur le checkpoint
+   `robust_0.8721` (md5 6f6b98…). Deux campagnes se comparaient donc sans modèle commun, et rien
+   ne le disait. Le checkpoint de référence est désormais NOMMÉ et VÉRIFIÉ AU MD5 — le jour où il
+   change, le script lève au lieu de rendre un tableau incomparable. Son `_vec_normalize.pkl`
+   apparié suit automatiquement (`get_vec_normalize_path` le dérive du zip chargé).
+2. LE PLATEAU. Sans `W40K_BOARD_PATH`, c'est `config/config.json` qui décide (x5), où le classement
+   des bots N'EST PAS le même — cf. l'avertissement de `config/bot_movement_weights.json`, qui a
+   déjà coûté une campagne entière. La variable est donc EXIGÉE, pas défaultée.
 
 Usage:
-    source .venv/bin/activate && W40K_BOARD_PATH=board/44x60x1 \\
-        python3 scripts/bot_zone_direct.py --episodes 60 [--model CHEMIN] [--json-out FICHIER]
+    W40K_BOARD_PATH=board/44x60x1 python3 scripts/bot_zone_direct.py [--episodes N]
 """
 from __future__ import annotations
 
 import argparse
 import hashlib
-import json
 import os
-import random
-import statistics
 import sys
 from collections import defaultdict
 from typing import Dict, List, Optional
@@ -45,40 +35,49 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-#: Modèle de référence de tout le §11 et le §12 du chantier. Archive NOMMÉE, pas le chemin
-#: canonique partagé : cf. l'avertissement en tête de module.
-_DEFAULT_MODEL = os.path.join(
-    _PROJECT_ROOT, "ai", "models", "ArmageddonAgent", "ArmageddonAgent_12345_robust_0.8721.zip"
-)
+#: Le modèle SUR LEQUEL TOUT LE §12 EST MESURÉ. Ce n'est pas « un modèle récent » : c'est l'étalon
+#: qui rend les campagnes comparables entre elles. Le remplacer est une décision de protocole, qui
+#: périme les chiffres du chantier — donc elle s'écrit ici, elle ne s'attrape pas par un
+#: entraînement qui a réécrit le chemin canonique.
+REFERENCE_MODEL = "ArmageddonAgent_12345_robust_0.8721.zip"
+REFERENCE_MD5 = "6f6b98059a0a6c279b7d11dc427461fd"
 
 
-def _md5(path: str) -> str:
-    digest = hashlib.md5(usedforsecurity=False)
+def _require_reference_model() -> str:
+    """Chemin du modèle étalon, vérifié au md5. Lève plutôt que de mesurer un autre modèle."""
+    path = os.path.join(_PROJECT_ROOT, "ai", "models", "ArmageddonAgent", REFERENCE_MODEL)
+    if not os.path.exists(path):
+        raise RuntimeError(
+            f"Modèle de référence absent : {path}. Toutes les mesures du §12 sont faites sur lui ; "
+            "mesurer avec un autre rend le tableau incomparable."
+        )
     with open(path, "rb") as handle:
-        for chunk in iter(lambda: handle.read(1 << 20), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+        digest = hashlib.md5(handle.read()).hexdigest()
+    if digest != REFERENCE_MD5:
+        raise RuntimeError(
+            f"{REFERENCE_MODEL} vaut md5 {digest}, attendu {REFERENCE_MD5} : le fichier a été "
+            "réécrit. Restaurer le checkpoint, ou acter le nouvel étalon ICI et rejouer le §12."
+        )
+    return path
+
+
+def _require_board_path() -> str:
+    """Le plateau vient de l'environnement, jamais de config.json (cf. l'en-tête)."""
+    board = os.environ.get("W40K_BOARD_PATH")
+    if not board:
+        raise RuntimeError(
+            "W40K_BOARD_PATH non défini : sans elle le plateau est celui de config.json (x5), où "
+            "le classement des bots diffère. Relancer avec W40K_BOARD_PATH=board/44x60x1."
+        )
+    return board
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--episodes", type=int, default=10)
-    parser.add_argument(
-        "--model",
-        default=_DEFAULT_MODEL,
-        help="Chemin du .zip à jouer (son _vec_normalize.pkl apparié est déduit du même stem).",
-    )
-    parser.add_argument(
-        "--json-out",
-        default=None,
-        help="Écrit les relevés PAR ÉPISODE (bot, tour, zones) pour recalcul hors ligne.",
-    )
-    parser.add_argument(
-        "--label",
-        default="",
-        help="Étiquette du run, recopiée dans l'en-tête et dans --json-out.",
-    )
     args = parser.parse_args()
+
+    board_path = _require_board_path()
 
     import numpy as np
     from sb3_contrib import MaskablePPO
@@ -87,7 +86,6 @@ def main() -> None:
     from config_loader import get_config_loader
     from ai.unit_registry import UnitRegistry
     from ai.bot_registry import build_bot
-    from ai.bot_doctrines import load_doctrine_weights, load_hold_bonus
     from ai.env_wrappers import BotControlledEnv
     from ai.training_utils import get_scenario_list_for_phase
     from ai.bot_evaluation import _build_eval_obs_normalizer_for_worker, _episode_seed
@@ -97,21 +95,12 @@ def main() -> None:
     tc = config.load_agent_training_config("ArmageddonAgent", "x1_panel")
     cb = tc["callback_params"]
 
-    model_path = os.path.abspath(args.model)
-    if not os.path.isfile(model_path):
-        raise RuntimeError(
-            f"Modèle introuvable : {model_path}. Passer --model avec l'archive à jouer "
-            "(le chemin canonique model_ArmageddonAgent.zip est écrasé par tout train.py --new)."
-        )
+    model_path = _require_reference_model()
     vec_norm_enabled = bool(tc.get("vec_normalize", {}).get("enabled", False))
     vec_eval_enabled = bool(tc.get("vec_normalize_eval", {}).get("enabled", False))
 
-    model_md5 = _md5(model_path)
-    board_path = os.environ.get("W40K_BOARD_PATH", "(défaut config/config.json)")
-    if args.label:
-        print(f"Run    : {args.label}")
-    print(f"Modèle : {os.path.basename(model_path)}  md5={model_md5}")
-    print(f"Plateau: {board_path}   épisodes/bot : {args.episodes}")
+    print(f"Modèle : {os.path.basename(model_path)} (md5 {REFERENCE_MD5})")
+    print(f"Plateau : {board_path}")
     model = MaskablePPO.load(model_path, device="cpu")
     normalize = _build_eval_obs_normalizer_for_worker(model, model_path, vec_norm_enabled, vec_eval_enabled)
 
@@ -122,7 +111,6 @@ def main() -> None:
         raise RuntimeError("Clé 'seed' absente de la config d'entraînement ArmageddonAgent/x1_panel — run non reproductible")
     base_seed: int = int(tc["seed"])
     agent_seat_seed: Optional[int] = tc.get("agent_seat_seed", base_seed)
-    print(f"Graine : base={base_seed}  siège={agent_seat_seed}  mode={agent_seat_mode}")
 
     scenarios = get_scenario_list_for_phase(config, "ArmageddonAgent", "x1_panel", scenario_type="holdout")
     if not scenarios:
@@ -160,11 +148,6 @@ def main() -> None:
 
         for ep_idx in range(args.episodes):
             ep_seed = _episode_seed(base_seed, bot_name, 0, ep_idx)
-            # JUMEAU de `ai/bot_evaluation.py` (les deux lignes qui précèdent son `reset`).
-            # Redondantes AUJOURD'HUI — mesuré : les retirer ne change aucun relevé, `reset`
-            # sème déjà `random`. Cf. l'en-tête de module pour pourquoi elles restent.
-            random.seed(ep_seed)
-            np.random.seed(ep_seed)
             obs, info = env.reset(seed=ep_seed)
             bot_player: int = int(info.get("opponent_player", 2))
             done = False
@@ -216,55 +199,8 @@ def main() -> None:
             cells.append(f"{sum(vals)/len(vals):.2f}" if vals else "  - ")
         print(f"{bot:<22} {n:>4} | " + " | ".join(f"{c:>4}" for c in cells))
 
-    # Erreur-type de la moyenne : sans elle, deux tableaux se comparent à l'oeil et tout écart
-    # ressemble à un effet. Elle borne ce qu'un run peut affirmer, elle ne remplace pas la
-    # comparaison aux bots de contrôle.
-    print(f"\n{'Bot':<22} {'N':>4} | {'T2 ± sem':>14} | {'T5 ± sem':>14}")
-    print("-" * (22 + 4 + 3 + 2 * 17))
-    for bot, tdata in sorted(results.items()):
-        last_t = max(tdata) if tdata else 0
-        n = len(tdata.get(last_t, []))
-        cells = []
-        for t in (2, 5):
-            vals = tdata.get(t, [])
-            if len(vals) >= 2:
-                sem = statistics.stdev(vals) / (len(vals) ** 0.5)
-                cells.append(f"{sum(vals)/len(vals):.2f} ± {sem:.2f}")
-            elif vals:
-                cells.append(f"{vals[0]:.2f} ±  n/a")
-            else:
-                cells.append("-")
-        print(f"{bot:<22} {n:>4} | " + " | ".join(f"{c:>14}" for c in cells))
-
-    if args.json_out:
-        payload = {
-            "label": args.label,
-            "model": os.path.basename(model_path),
-            "model_md5": model_md5,
-            "board_path": board_path,
-            "base_seed": base_seed,
-            "episodes": args.episodes,
-            # Les poids RÉELLEMENT consommés, relus par l'entrée publique — pas une copie du
-            # fichier : c'est ce tuple-là qui a joué, et un relevé qui ne dit pas sous quels
-            # poids il a été pris ne se compare à rien.
-            "weights": {
-                bot: dict(
-                    zip(
-                        ("w_objective", "w_enemy", "w_fire", "w_risk", "w_contest", "w_crowd"),
-                        load_doctrine_weights(bot),
-                    )
-                )
-                for bot in results
-            },
-            "hold_bonus": load_hold_bonus(),
-            "zones_by_turn": {
-                bot: {str(t): vals for t, vals in sorted(tdata.items())}
-                for bot, tdata in results.items()
-            },
-        }
-        with open(args.json_out, "w", encoding="utf-8") as handle:
-            json.dump(payload, handle, ensure_ascii=False, indent=1)
-        print(f"\nRelevés par épisode : {args.json_out}")
+    print()
+    print("Référence §12.5 (post-§12.6, bot=P2, 100 ep): T2=1.61  T5=1.90  VP=31.0  combined=0.788")
 
 
 if __name__ == "__main__":
