@@ -18,14 +18,12 @@ import argparse
 import json
 import os
 import sys
-from collections import defaultdict
+from datetime import datetime
 from typing import Any, Dict, List, Optional, TextIO
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-_JSON_SCHEMA_VERSION = 1
 
 
 def _episode_record(
@@ -45,43 +43,84 @@ def _episode_record(
     }
 
 
+def _turns_of(records: List[Dict[str, Any]]) -> Dict[int, List[int]]:
+    """{tour: [zones, un par épisode]} pour les relevés d'UN seul bot, dans l'ordre des épisodes."""
+    per_turn: Dict[int, List[int]] = {}
+    for rec in records:
+        for turn_key, zones in rec["zones_by_turn"].items():
+            per_turn.setdefault(int(turn_key), []).append(zones)
+    return per_turn
+
+
 def _aggregate_zones(records: List[Dict[str, Any]]) -> Dict[str, Dict[int, List[int]]]:
     """Agrège les relevés par épisode en {bot: {tour: [zones, ...]}} — source du tableau texte."""
-    results: Dict[str, Dict[int, List[int]]] = {}
+    by_bot: Dict[str, List[Dict[str, Any]]] = {}
     for rec in records:
-        per_turn = results.setdefault(rec["bot"], defaultdict(list))
-        for turn_key, zones in rec["zones_by_turn"].items():
-            per_turn[int(turn_key)].append(zones)
-    return {bot: dict(per_turn) for bot, per_turn in results.items()}
+        by_bot.setdefault(rec["bot"], []).append(rec)
+    return {bot: _turns_of(bot_records) for bot, bot_records in by_bot.items()}
+
+
+def _n_at_last_turn(per_turn: Dict[int, List[int]]) -> int:
+    """Nombre d'épisodes parvenus au dernier tour observé — le `N` de la ligne et du tableau."""
+    if not per_turn:
+        return 0
+    return len(per_turn[max(per_turn)])
+
+
+def _part_path(path: str) -> str:
+    return path + ".part"
 
 
 def _open_json_out(path: str) -> TextIO:
-    """Ouvre la destination AVANT de jouer : une destination fausse doit coûter une seconde.
+    """Ouvre la destination AVANT de jouer : un chemin faux doit coûter une seconde, pas un run.
 
-    Le relevé n'est écrit qu'à la fin (il faut tous les épisodes), mais l'ouvrir ici prouve
-    que le dossier existe ET qu'il est inscriptible — un simple `isdir` laisserait passer un
-    dossier en lecture seule, et l'erreur ne tomberait qu'après la partie, graines perdues.
+    L'ouverture porte sur `<path>.part` et non sur `path` : elle prouve que le dossier existe
+    ET qu'il est inscriptible — un simple `isdir` laisserait passer un dossier en lecture seule
+    et l'erreur ne tomberait qu'après la partie, graines perdues — sans détruire dès la seconde
+    0 le relevé précédent, que l'interruption d'un run remplacerait alors par un fichier vide.
     Aucune création de dossier : un chemin faux se voit, il ne se répare pas en silence.
     """
-    return open(path, "w", encoding="utf-8")
+    return open(_part_path(path), "w", encoding="utf-8")
 
 
-def _write_json_out(
-    handle: TextIO,
+def _commit_json_out(handle: TextIO, path: str) -> None:
+    """Publie le brouillon d'un bloc : jamais de JSON à moitié écrit à la place du relevé."""
+    handle.close()
+    os.replace(_part_path(path), path)
+
+
+def _write_json_out(handle: TextIO, run_meta: Dict[str, Any], records: List[Dict[str, Any]]) -> None:
+    payload = {"schema_version": 1, "run": run_meta, "episodes": records}
+    json.dump(payload, handle, ensure_ascii=False, indent=2)
+    handle.write("\n")
+
+
+def _run_meta(
     model_path: str,
     scenario_file: str,
     episodes_requested: int,
-    records: List[Dict[str, Any]],
-) -> None:
-    payload = {
-        "schema_version": _JSON_SCHEMA_VERSION,
-        "model": os.path.basename(model_path),
+    base_seed: int,
+    agent_seat_mode: str,
+    agent_seat_seed: Optional[int],
+    bot_randomness: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Ce qui distingue DEUX relevés l'un de l'autre — sans ça, un avant et un après §12.7
+    sont indiscernables, et une graine d'épisode ne suffit pas à reconstruire la doctrine du bot.
+    Le modèle est identifié par sa taille et sa date : son chemin est constant, donc muet.
+    """
+    return {
+        "agent": "ArmageddonAgent",
+        "training_config": "x1_panel",
+        "model_path": model_path,
+        "model_bytes": os.path.getsize(model_path),
+        "model_mtime": datetime.fromtimestamp(os.path.getmtime(model_path)).isoformat(timespec="seconds"),
         "scenario_file": scenario_file,
         "episodes_requested": episodes_requested,
-        "episodes": records,
+        "base_seed": base_seed,
+        "agent_seat_mode": agent_seat_mode,
+        "agent_seat_seed": agent_seat_seed,
+        "bot_randomness": dict(bot_randomness),
     }
-    json.dump(payload, handle, ensure_ascii=False, indent=2, sort_keys=False)
-    handle.write("\n")
 
 
 def main() -> None:
@@ -134,7 +173,6 @@ def main() -> None:
         raise RuntimeError("Aucun scénario holdout trouvé pour ArmageddonAgent/x1_panel — vérifier config/agents/ArmageddonAgent/scenarios/")
     scenario_file = scenarios[0]
 
-    results: Dict[str, Dict[int, List[int]]] = {}
     episode_records: List[Dict[str, Any]] = []
 
     for bot_name in bot_weights:
@@ -199,28 +237,29 @@ def main() -> None:
 
         env.close()
         episode_records.extend(bot_records)
-        ep_zones = _aggregate_zones(bot_records).get(bot_name, {})
-        results[bot_name] = ep_zones
-        last_t = max(ep_zones) if ep_zones else 0
-        n = len(ep_zones.get(last_t, []))
-        print(f" {n} ep")
+        print(f" {_n_at_last_turn(_turns_of(bot_records))} ep")
 
     turns = [1, 2, 3, 4, 5]
     hdr = " | ".join(f"T{t}" for t in turns)
     print(f"\n{'Bot':<22} {'N':>4} | {hdr}")
     print("-" * (22 + 4 + 3 + len(turns) * 6 + 4))
-    for bot, tdata in sorted(results.items()):
-        last_t = max(tdata) if tdata else 0
-        n = len(tdata.get(last_t, []))
+    # le tableau est DÉRIVÉ des mêmes relevés que le JSON : les deux ne peuvent pas diverger.
+    aggregated = _aggregate_zones(episode_records)
+    for bot in sorted(bot_weights):
+        tdata = aggregated.get(bot, {})
         cells = []
         for t in turns:
             vals = tdata.get(t, [])
             cells.append(f"{sum(vals)/len(vals):.2f}" if vals else "  - ")
-        print(f"{bot:<22} {n:>4} | " + " | ".join(f"{c:>4}" for c in cells))
+        print(f"{bot:<22} {_n_at_last_turn(tdata):>4} | " + " | ".join(f"{c:>4}" for c in cells))
 
     if json_handle is not None:
-        with json_handle:
-            _write_json_out(json_handle, model_path, scenario_file, args.episodes, episode_records)
+        run_meta = _run_meta(
+            model_path, scenario_file, args.episodes, base_seed,
+            agent_seat_mode, agent_seat_seed, bot_randomness,
+        )
+        _write_json_out(json_handle, run_meta, episode_records)
+        _commit_json_out(json_handle, args.json_out)
         print(f"\nRelevé par épisode : {args.json_out} ({len(episode_records)} épisodes)")
 
     print()
