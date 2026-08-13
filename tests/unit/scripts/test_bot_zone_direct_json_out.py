@@ -131,10 +131,15 @@ def test_l_empreinte_du_modele_est_relevee_avant_son_chargement(main_ast):
     # la seule raison d'être de `_model_fingerprint` : un entraînement qui réécrit le .zip
     # pendant le run ferait consigner un checkpoint qui n'a pas joué.
     def line_of(pred) -> int:
-        return next(n.lineno for n in ast.walk(main_ast) if isinstance(n, ast.Call) and pred(n.func))
+        return min(n.lineno for n in ast.walk(main_ast) if isinstance(n, ast.Call) and pred(n.func))
 
     fingerprint = line_of(lambda f: isinstance(f, ast.Name) and f.id == "_model_fingerprint")
-    load = line_of(lambda f: isinstance(f, ast.Attribute) and f.attr == "load")
+    load = line_of(
+        lambda f: isinstance(f, ast.Attribute)
+        and f.attr == "load"
+        and isinstance(f.value, ast.Name)
+        and f.value.id == "MaskablePPO"
+    )
 
     assert fingerprint < load
 
