@@ -81,13 +81,16 @@ def test_n_est_le_nombre_d_episodes_parvenus_au_dernier_tour(script):
 
 
 def test_json_out_relit_les_episodes_un_par_un(script, tmp_path):
+    # DEUX bots, 1 épisode chacun : episodes_per_bot=1, n_bots=2, episodes_total=2, len(records)=2.
+    # Avec un seul bot l'écart était invisible (1×1 == 1). C'est le seul scénario qui prouve
+    # que episodes_total == len(payload["episodes"]) et non episodes_per_bot.
     records = [
-        script._episode_record("bot_zone", 0, 111, 2, {1: 0, 2: 1}),
-        script._episode_record("bot_zone", 1, 222, 2, {1: 2, 2: 2}),
+        script._episode_record("bot_a", 0, 111, 2, {1: 0, 2: 1}),
+        script._episode_record("bot_b", 0, 222, 1, {1: 2, 2: 2}),
     ]
     out = tmp_path / "sub" / "zones.json"
     out.parent.mkdir()
-    meta = script._run_meta(_FINGERPRINT(script), "holdout_1.json", 2, 42, "p1", 42, {"bot_zone": 0.1})
+    meta = script._run_meta(_FINGERPRINT(script), "holdout_1.json", 1, 2, 42, "p1", 42, {"bot_a": 0.1, "bot_b": 0.2})
 
     with script.json_out_draft(str(out)) as handle:
         script._write_json_out(handle, meta, records)
@@ -95,7 +98,9 @@ def test_json_out_relit_les_episodes_un_par_un(script, tmp_path):
 
     assert payload["schema_version"] == 2
     assert payload["run"]["scenario_file"] == "holdout_1.json"
-    assert payload["run"]["episodes_requested"] == 2
+    assert payload["run"]["episodes_per_bot"] == 1
+    assert payload["run"]["episodes_total"] == 2
+    assert payload["run"]["episodes_total"] == len(payload["episodes"])
     assert [ep["seed"] for ep in payload["episodes"]] == [111, 222]
     assert payload["episodes"][1]["zones_by_turn"] == {"1": 2, "2": 2}
     # rejouable : l'agrégat relu vaut l'agrégat d'origine
@@ -106,12 +111,14 @@ def test_json_out_relit_les_episodes_un_par_un(script, tmp_path):
 def test_le_releve_dit_ce_qui_distingue_deux_runs(script):
     # sans ces champs, un « avant » et un « après » §12.7 sont indiscernables, et la graine
     # d'épisode ne suffit pas à reconstruire la doctrine du bot.
-    meta = script._run_meta(_FINGERPRINT(script), "holdout_1.json", 20, 42, "alternate", 7, {"bot_zone": 0.25})
+    meta = script._run_meta(_FINGERPRINT(script), "holdout_1.json", 20, 6, 42, "alternate", 7, {"bot_zone": 0.25})
 
     assert meta["base_seed"] == 42
     assert meta["agent_seat_mode"] == "alternate"
     assert meta["agent_seat_seed"] == 7
     assert meta["bot_randomness"] == {"bot_zone": 0.25}
+    assert meta["episodes_per_bot"] == 20
+    assert meta["episodes_total"] == 120
     # le chemin du modèle est constant d'un run à l'autre : ce qui l'identifie, c'est le fichier.
     assert meta["model_bytes"] == SCRIPT_PATH.stat().st_size
     assert meta["model_mtime"].startswith("20")

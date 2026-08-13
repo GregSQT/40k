@@ -195,6 +195,20 @@ def test_les_donnees_sont_sur_le_disque_avant_la_publication(tmp_path, monkeypat
     assert appels == ["fsync", "replace", "fsync"]
 
 
+def test_un_fsync_de_dossier_impossible_n_annule_pas_une_publication_reussie(tmp_path, monkeypatch):
+    # certains montages ne savent pas fsyncer un dossier (FUSE, réseau, overlay : EINVAL). La
+    # publication, elle, a déjà eu lieu : remonter l'erreur ferait lire « rien n'a été écrit » à
+    # un appelant qui a DÉJÀ supprimé la version précédente de ses autres fichiers, et il
+    # abandonnerait la banque à moitié reconstruite.
+    cible = tmp_path / "releve.json"
+    monkeypatch.setattr(json_atomic.os, "open", _leve(OSError("EINVAL")))
+
+    write_json_atomic(cible, {"neuf": True})
+
+    assert json.loads(cible.read_text(encoding="utf-8")) == {"neuf": True}
+    assert not (tmp_path / "releve.json.part").exists()
+
+
 def test_un_dossier_absent_n_est_pas_cree_en_silence(tmp_path):
     # pas de `mkdir(parents=True)` implicite : un chemin faux doit se voir, pas se réparer.
     with pytest.raises(FileNotFoundError):

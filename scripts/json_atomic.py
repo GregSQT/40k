@@ -84,7 +84,6 @@ def _draft(path: StrPath) -> Iterator[TextIO]:
         # retirés pendant un run long) doit emporter le brouillon avec elle, pas le laisser
         # traîner sous `config/`.
         os.replace(part_path(path), path)
-        _fsync_dir(os.path.dirname(os.fspath(path)))
     except BaseException:
         # Ménage best-effort, tout entier sous `suppress` : ce qui compte à cet instant, c'est
         # l'exception qui a tué le travail — une erreur de fermeture ou un brouillon déjà
@@ -95,6 +94,15 @@ def _draft(path: StrPath) -> Iterator[TextIO]:
         with contextlib.suppress(OSError):
             os.remove(part_path(path))
         raise
+    # APRÈS le `try`, et sous `suppress` : à ce point la publication a RÉUSSI, le fichier est
+    # complet et fsyncé sur le disque. Laisser une panne de fsync du dossier remonter dirait à
+    # l'appelant « rien n'écrit » alors que tout l'est — il abandonnerait une banque à moitié
+    # reconstruite (les anciens rosters sont déjà supprimés) sur un mount qui ne sait pas
+    # fsyncer un dossier (FUSE, réseau, overlay : EINVAL). Ce qui se perd ici n'est pas la
+    # donnée, c'est la garantie que le RENOMMAGE survive à un crash : au pire, on relit la
+    # version précédente, valide et complète.
+    with contextlib.suppress(OSError):
+        _fsync_dir(os.path.dirname(os.fspath(path)))
 
 
 @contextlib.contextmanager
