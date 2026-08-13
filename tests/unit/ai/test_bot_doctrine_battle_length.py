@@ -21,6 +21,7 @@ from typing import Any, Dict
 import pytest
 
 from ai.bot_doctrines import DecapitationBot, EndgameBot
+from shared.data_validation import ConfigurationError
 
 
 def _state(turn: int, max_turns: int = 5, **extra: Any) -> Dict[str, Any]:
@@ -104,3 +105,47 @@ def test_the_focus_marker_still_changes_between_turns() -> None:
     bot._focus(_state(2, episode_number=7))
 
     assert first is not None and bot._focus_turn != first
+
+
+def test_the_focus_marker_refuses_a_state_without_an_episode_number() -> None:
+    """Second membre du marqueur, durci pour la MEME raison que `turn` (T1).
+
+    `episode_number` est écrit par le moteur à chaque `reset` : un état qui fait décider un bot
+    le porte toujours. Le `.get` qui rendait `None` faisait donc taire une rupture d'invariant,
+    et fabriquait un marqueur `(None, tour)` que deux épisodes successifs partagent.
+    """
+    with pytest.raises(ConfigurationError, match="episode_number"):
+        DecapitationBot()._focus(_state(1))
+
+
+def test_the_focus_is_forgotten_between_two_episodes_on_the_same_bot() -> None:
+    """LE défaut que le durcissement ferme : une instance réutilisée d'un épisode à l'autre.
+
+    `scripts/bot_ranking.py` fait jouer le MÊME objet bot sur tous les épisodes d'un duel
+    (`scripted_action_for_agent_side`). Sans `episode_number` au marqueur, l'épisode 2 rouvrait
+    au tour 1 sur la cible — et la confirmation — de l'épisode 1 : un focus hérité d'une partie
+    où l'escouade visée n'existe même plus.
+    """
+    bot = DecapitationBot()
+    bot._focus(_state(1, episode_number=1))
+    bot._focus_target, bot._focus_confirmed = "enemy_squad", True
+
+    assert bot._focus(_state(1, episode_number=2)) is None
+    assert bot._focus_confirmed is False
+
+
+def test_the_focus_survives_inside_one_episode(monkeypatch: pytest.MonkeyPatch) -> None:
+    """VERT VACANT du précédent : l'oubli vient du CHANGEMENT d'épisode, pas d'un reset aveugle.
+
+    Sans ce test, un `_focus` qui oublierait sa cible à chaque appel passerait le test ci-dessus
+    en supprimant la concentration — c'est-à-dire la doctrine entière.
+    """
+    import ai.bot_doctrines as doctrines
+
+    monkeypatch.setattr(doctrines, "is_unit_alive", lambda sid, gs: True)
+    bot = DecapitationBot()
+    bot._focus(_state(1, episode_number=1))
+    bot._focus_target, bot._focus_confirmed = "enemy_squad", True
+
+    assert bot._focus(_state(1, episode_number=1)) == "enemy_squad"
+    assert bot._focus_confirmed is True

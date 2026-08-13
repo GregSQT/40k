@@ -2052,6 +2052,11 @@ class W40KEngine(gym.Env):
             # racine, ce contrôle le constate. Les laisser écrire dans /tmp faisait échouer ici
             # tout épisode journalisé.
             scenario_path_logged = repo_relative_scenario_path(self._current_scenario_file)
+            # Pré-seeder le compteur du logger pour que, après le += 1 interne à
+            # log_episode_start(), step_logger.episode_number == self.episode_number.
+            # game_state["episode_number"] reste la source unique (posé ligne ~1611) ;
+            # le logger ne l'écrase plus.
+            self.step_logger.episode_number = self.episode_number - 1
             self.step_logger.log_episode_start(
                 episode_units,
                 scenario_name,
@@ -2070,12 +2075,7 @@ class W40KEngine(gym.Env):
                 scenario_path=scenario_path_logged,
                 run_rules=self._run_rules_for_step_log(),
             )
-            
-            # CRITICAL: Synchronize game_state["episode_number"] with step_logger.episode_number
-            # This ensures debug.log uses the same episode number as step.log
-            # step_logger.episode_number was incremented in log_episode_start()
-            self.game_state["episode_number"] = self.step_logger.episode_number
-        
+
         if self.game_state.get("deployment_type") == "active":
             enter_phase(self.game_state, "deployment")
             deployment_state = self.game_state.get("deployment_state")

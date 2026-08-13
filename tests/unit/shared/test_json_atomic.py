@@ -10,7 +10,7 @@ Deux comportements sont verrouillés partout, et ce sont eux que le prompt d'ouv
 
 Un troisième verrou est STATIQUE (`test_aucune_publication_json_en_direct`) : sans lui, les deux
 premiers ne prouveraient que le module, et un fichier qui réintroduirait son propre `_write_json`
-privé — le point de départ de ce chantier — les laisserait tous verts. Il BALAYE les cinq arbres
+privé — le point de départ de ce chantier — les laisserait tous verts. Il BALAYE les arbres
 de code au lieu de suivre une liste de fichiers convertis : une liste ne couvre pas le fichier
 qui sera écrit demain, et c'est justement là que le défaut revient.
 """
@@ -20,13 +20,22 @@ import ast
 import json
 import os
 import re
+import subprocess
+import sys
 import threading
 from pathlib import Path
 
 import pytest
 
 import shared.json_atomic as json_atomic  # le module lui-même : les tests d'ordre monkeypatchent ses `os.*`
-from shared.json_atomic import dump_json, json_draft, json_out_draft, part_path, write_json_atomic
+from shared.json_atomic import (
+    dump_json,
+    json_batch,
+    json_draft,
+    json_out_draft,
+    part_path,
+    write_json_atomic,
+)
 
 
 def _leve(exc: BaseException):
@@ -230,6 +239,108 @@ def test_un_brouillon_reste_vide_ne_remplace_pas_le_fichier_precedent(tmp_path):
 
     assert json.loads(cible.read_text(encoding="utf-8")) == {"ancien": True}
     assert list(tmp_path.iterdir()) == [cible]
+
+
+def test_un_brouillon_tronque_ne_remplace_pas_le_fichier_precedent(tmp_path):
+    # LE cas que la taille ne voit pas : un producteur en FLUX interrompu a bien écrit des
+    # octets, mais ce sont ceux d'un JSON coupé en deux. Publier remplacerait un relevé
+    # relisible par un fichier que plus personne ne peut ouvrir.
+    cible = tmp_path / "releve.json"
+    cible.write_text('{"ancien": true}\n', encoding="utf-8")
+
+    with pytest.raises(ValueError, match="n'est pas un JSON valide"):
+        with json_draft(cible) as handle:
+            handle.write('{"episodes": [')
+
+    assert json.loads(cible.read_text(encoding="utf-8")) == {"ancien": True}
+    assert list(tmp_path.iterdir()) == [cible]
+
+
+def _pid_mort() -> int:
+    """Un pid RÉELLEMENT terminé et récolté — pas un grand nombre qu'on espère libre."""
+    fini = subprocess.Popen([sys.executable, "-c", ""])
+    fini.wait()
+    return fini.pid
+
+
+def test_un_brouillon_laisse_par_un_processus_mort_est_balaye(tmp_path):
+    # un SIGKILL ne passe par aucune branche de nettoyage, et le nom du brouillon porte le pid
+    # du mort : sans balayage, plus aucune exécution ne le réécrira ni ne le supprimera jamais.
+    cible = tmp_path / "releve.json"
+    orphelin = tmp_path / f"releve.json.{_pid_mort()}.140000.part"
+    orphelin.write_text('{"tronque": ', encoding="utf-8")
+
+    write_json_atomic(cible, {"neuf": True})
+
+    assert not orphelin.exists()
+    assert [p.name for p in tmp_path.iterdir()] == ["releve.json"]
+
+
+def test_le_balayage_ne_touche_pas_au_brouillon_d_un_processus_vivant(tmp_path):
+    # le danger exact du balayage : ce brouillon-là est peut-être en train d'être ÉCRIT. Le pid
+    # courant est le seul dont ce test peut prouver qu'il est vivant.
+    cible = tmp_path / "releve.json"
+    vivant = tmp_path / f"autre.json.{os.getpid()}.140000.part"
+    vivant.write_text("en cours", encoding="utf-8")
+    etranger = tmp_path / "sauvegarde.part"  # pas la forme du module : jamais à lui de le juger
+    etranger.write_text("pas le mien", encoding="utf-8")
+
+    write_json_atomic(cible, {"neuf": True})
+
+    assert vivant.read_text(encoding="utf-8") == "en cours"
+    assert etranger.exists()
+
+
+def test_le_balayage_ne_relit_pas_le_dossier_a_chaque_ecriture(tmp_path, monkeypatch):
+    # un `listdir` par fichier rendrait QUADRATIQUE la boucle qui en écrit 2401 dans le même
+    # dossier. Un résidu ne peut naître que d'un processus mort, donc il est là avant nous.
+    monkeypatch.setattr(json_atomic, "_DOSSIERS_BALAYES", set())
+    balayages: list[str] = []
+    vrai_listdir = json_atomic.os.listdir
+    monkeypatch.setattr(
+        json_atomic.os, "listdir", lambda d: (balayages.append(d), vrai_listdir(d))[1]
+    )
+
+    for index in range(5):
+        write_json_atomic(tmp_path / f"releve-{index}.json", {"i": index})
+
+    assert len(balayages) == 1
+
+
+def test_un_lot_ne_fsynce_le_dossier_qu_une_fois(tmp_path, monkeypatch):
+    # le fsync de dossier rend le RENOMMAGE durable ; refait à l'identique pour chaque fichier
+    # du même dossier, il repaie 2400 fois un travail déjà fait (mesuré : 41 % du lot).
+    fsyncs: list[str] = []
+    monkeypatch.setattr(json_atomic, "_fsync_dir", fsyncs.append)
+
+    for index in range(5):
+        write_json_atomic(tmp_path / f"hors-lot-{index}.json", {"i": index})
+    hors_lot = len(fsyncs)
+    fsyncs.clear()
+
+    with json_batch():
+        for index in range(5):
+            write_json_atomic(tmp_path / f"en-lot-{index}.json", {"i": index})
+        assert fsyncs == [], "le fsync du dossier est DIFFÉRÉ, pas supprimé"
+
+    assert hors_lot == 5
+    assert fsyncs == [str(tmp_path)]
+
+
+def test_un_lot_qui_casse_rend_quand_meme_durable_ce_qui_est_publie(tmp_path, monkeypatch):
+    # les fichiers déjà publiés le sont pour de bon : leur durabilité ne peut pas dépendre de
+    # ce qui arrive au RESTE du lot.
+    fsyncs: list[str] = []
+    monkeypatch.setattr(json_atomic, "_fsync_dir", fsyncs.append)
+
+    with pytest.raises(RuntimeError):
+        with json_batch():
+            write_json_atomic(tmp_path / "publie.json", {"ok": True})
+            raise RuntimeError("le lot casse en cours")
+
+    assert fsyncs == [str(tmp_path)]
+    assert json.loads((tmp_path / "publie.json").read_text(encoding="utf-8")) == {"ok": True}
+    assert list(tmp_path.glob("*.part")) == []
 
 
 def test_un_dossier_absent_n_est_pas_cree_en_silence(tmp_path):

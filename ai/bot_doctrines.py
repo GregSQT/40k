@@ -452,7 +452,13 @@ class _PlacementMemory:
         self._deployment_episode_marker: Optional[Any] = None
 
     def select_placement_action(self, valid_actions: List[int], game_state) -> int:
-        episode_marker = game_state.get("episode_number")  # get allowed (absent hors episode)
+        # `require_key` et non un `.get` : le moteur ecrit `episode_number` a chaque reset
+        # (`W40KEngine.reset`), donc un etat qui fait poser un bot le porte toujours. Absent, le
+        # marqueur valait `None` d'un episode a l'autre et la garde anti-repetition ne se
+        # reinitialisait JAMAIS : une instance reutilisee entre episodes (`scripts/bot_ranking.py`)
+        # heritait du dernier slot pose et l'ecartait a la premiere pose du suivant. Jumeau exact
+        # du marqueur de tour de `DecapitationBot._focus`, durci avec lui.
+        episode_marker = require_key(game_state, "episode_number")
         if self._deployment_episode_marker != episode_marker:
             self._deployment_episode_marker = episode_marker
             self._deployment_last_action = None
@@ -935,14 +941,19 @@ class DecapitationBot(_DoctrineBot):
         un etat sans tour rendait ici un marqueur CONSTANT, donc le bot gardait la meme cible
         focalisee pendant toute la partie au lieu d'en changer a chaque tour — un defaut de
         doctrine silencieux, ne au masquage d'une rupture d'invariant.
-        `episode_number` garde son `.get` : il est legitimement absent hors episode (cf. la
-        memoire de pose), et son absence ne fabrique pas un faux tour.
+        ⚠️ `require_key` sur `episode_number` AUSSI, pour la meme raison et non « parce qu'il
+        serait legitimement absent hors episode » : le moteur l'ecrit a CHAQUE reset
+        (`W40KEngine.reset`, `game_state["episode_number"]`), donc tout etat qui fait decider un
+        bot le porte. Absent, le `.get` rendait `None` et deux episodes successifs joues par la
+        MEME instance (`scripts/bot_ranking.py`, via `scripted_action_for_agent_side`) partageaient
+        le marqueur au tour 1 : la cible focalisee — et sa confirmation — survivait d'un episode au
+        suivant. Meme motif dans la memoire de POSE, durcie avec celle-ci.
 
         ⚠️ `_focus_confirmed` s'oublie EXACTEMENT quand la cible s'oublie, jamais separement :
         une confirmation qui survivrait a la cible ferait sortir `_remember` trop tot, et la
         cible morte en cours de tour ne serait remplacee par personne jusqu'au tour suivant.
         """
-        marker = (game_state.get("episode_number"), int(require_key(game_state, "turn")))
+        marker = (require_key(game_state, "episode_number"), int(require_key(game_state, "turn")))
         if self._focus_turn != marker:
             self._focus_turn = marker
             self._focus_target, self._focus_confirmed = None, False

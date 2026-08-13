@@ -832,7 +832,11 @@ Instrument : `scripts/bot_zone_direct.py --episodes 20`, plateau `x1` (board/44x
 `robust_0.8721`. Lit `game_state["objective_controllers"]` directement — contourne le problème
 step.log non-journalisé en bot eval.
 
-Référence panel (§12.5, post-§12.6) : **T2=1.61, T5=1.90**.
+Référence panel (§12.5, **pre-§12.6, jamais rejouée**) : **T2=1.61, T5=1.90**. Le « post-§12.6 »
+qu'a porté cette ligne jusqu'au 2026-08-13 était faux et contredisait le §12.5 lui-même (cf. ses
+deux avertissements, « CHIFFRES ANTÉRIEURS AU §12.6 » et « À REJOUER ») ; `scripts/bot_zone_direct.py`
+l'avait recopié. La référence chiffrée n'a plus qu'une source dans le code,
+`scripts/bot_panel_reference.py`, d'où les scripts du panel l'impriment.
 
 Seuil effectif pour `w_crowd` : `w_crowd × OC_surplus(≈2) > hold_bonus(3.0)` → **`w_crowd > 1.5`**.
 En dessous, le penalty anti-stacking est inactif — les bots s'empilent sur une zone et n'en
@@ -1147,65 +1151,323 @@ calculée que lorsqu'au moins un ennemi est sur table ; `None` (absent du JSON) 
 `tests/unit/scripts/test_bot_zone_direct_metrics.py` (fonctions de calcul). Rouge prouvé par
 mutation sur les deux gardes (2026-08-13).
 
-### 12.11 `decapitation` marchait vers l'ennemi le plus proche, pas vers sa cible (2026-08-13)
+### 12.11 `decapitation` marchait vers un ennemi, tirait sur un autre (2026-08-13)
 
-**Le défaut.** La doctrine est « toutes les escouades frappent la MÊME cible dans le tour ». Elle
-n'était vraie qu'au tir : la cible était enregistrée par `_remember` depuis `_shoot`/`_fight`, or la
-phase move précède le tir dans le tour et le changement de tour vient d'effacer celle du tour
-précédent. `_focus` rendait donc **toujours `None`** pendant le déplacement, dont le terme d'ennemi
-prenait `min(distance)` sur toutes les ancres : les cinq escouades convergeaient chacune vers un
-ennemi **différent**, puis concentraient leurs tirs depuis des positions éclatées. Mesure du
-demandeur (60 ép., x1, `robust_0.8721`) : 14,9 hexes moyens du plus proche ennemi (racer 18,8 ;
-attrition 22,2) et 10,7 % d'escouades perdues par tour (attrition 4,8 %).
+**Le constat.** Le style concentre ses TIRS sur une cible unique par tour (`target_score` +
+`_focus`, mémoire de tour), mais son DÉPLACEMENT passait par le socle : le terme `w_enemy` du
+score de destination portait sur *toutes* les ancres ennemies sur table, donc sur la plus proche
+de chaque escouade. Une escouade tirait sur A puis marchait vers un B différent — au tour suivant
+elle n'était plus à portée de A, et la doctrine (« retirer une escouade entière retire son OC et
+ses tirs ») ne pouvait pas se boucler. C'est la contradiction que `w_enemy: 0.6` ne pouvait pas
+corriger par le réglage : le poids était bon, la cible était la mauvaise.
 
-⚠️ Conséquence de méthode : « faire porter le terme d'ennemi sur la cible focalisée quand elle
-existe » aurait été un **no-op strict** tant que l'élection restait accrochée au premier tir.
+**La correction.** Un hook `_DoctrineBot._enemy_anchors(unit, game_state, enemies)` isole la liste
+d'ancres sur laquelle porte `w_enemy` ; le socle rend le calcul d'avant (toutes les escouades
+ennemies vivantes sur table), `DecapitationBot` la restreint à sa cible du tour. Aucun autre style
+ne l'override, aucun autre chemin ne lit ce motif (`grep _enemy_anchors` → seul
+`bot_doctrines.py`). `enemies` est PASSÉ par `select_movement_destination`, qui a déjà payé ce
+parcours pour `w_fire`/`w_risk` : le hook ne refait ni le filtrage ni les lectures de cache.
 
-**La correction.** La cible est désormais **ÉLUE** à la première lecture du tour (`_elect`), donc
-dès la phase move, par le critère du tir (`_score_kill_now`) pris au meilleur des deux modes ;
-`_remember` et les surcharges `_shoot`/`_fight` disparaissent. Le terme d'ennemi du déplacement
-passe par un point d'extension `movement_enemy_anchors`, que **seul** `DecapitationBot` surcharge —
-`select_movement_destination` reste commun aux six styles (drift 0.000 des cinq autres, ci-dessous).
+**Le hook seul ne suffisait pas — l'élection au mouvement (corrigé le 2026-08-13, même jour).**
+La première version se contentait de LIRE `_focus(game_state)` et retombait sur le socle quand la
+mémoire était vide. Elle ne s'appliquait donc quasiment jamais : `_focus_target` n'est écrit que
+par `_remember`, appelé depuis le tir et la mêlée, alors que le mouvement les précède (07.01) — et
+un `turn` couvre les DEUX joueurs (`fight_handlers` ne l'incrémente qu'après la mêlée de J2), donc
+la mémoire du tour d'avant est périmée pile avant le déplacement. Résultat : le camp qui joue en
+premier n'avait JAMAIS de cible au mouvement, et le second n'en avait une que s'il avait combattu
+défensivement dans la mêlée adverse de la même ronde. Le siège du bot alterne
+(`env_wrappers._apply_episode_seat`), donc l'override était inerte sur la majorité des décisions.
 
-**Instrument corrigé dans la même livraison.** `scripts/bot_zone_direct.py` lisait
-`model_ArmageddonAgent.zip` (chemin canonique, md5 1072b0c… le 2026-08-13) alors que tout le §12 est
-mesuré sur `robust_0.8721` (md5 6f6b98…) : il nomme désormais le checkpoint de référence, le vérifie
-au md5, l'imprime, et **exige** `W40K_BOARD_PATH` au lieu de laisser `config.json` imposer le x5.
+`_enemy_anchors` ÉLIT donc la cible quand il n'y en a pas, et l'écrit dans `_focus_target` :
 
-**Calibration** — 60 ép./bot, `W40K_BOARD_PATH=board/44x60x1`, `robust_0.8721`, un poids par run :
+- critère d'élection = `_score_kill_now` (« tuable ce tour d'abord, puis efficacité »), c'est-à-dire
+  le critère que le TIR appliquera ensuite, pris au meilleur des deux modes — au mouvement on ne
+  sait pas encore si l'escouade tirera ou chargera, et `squad_expected_damage` ne dépend pas de la
+  position (c'est déjà ce qui permet à `_firepower_profile` de se calculer une fois par décision) ;
+- l'écriture est ce qui fait la concentration : les escouades suivantes LISENT l'élection de la
+  première au lieu d'en faire une chacune ;
+- cible morte ou hors table (réserves, 20.01, sentinelle `(-1,-1)`) → RÉÉLECTION, pas retour au
+  socle : `enemies` ne contenant que des escouades sur table, l'appartenance à cette liste tranche
+  les deux cas d'un coup, et une escouade qui n'a plus de cap se remettrait sinon à suivre son plus
+  proche voisin — exactement l'éparpillement que le style existe pour éviter.
 
-| run | `w_objective` | `w_enemy` | T2 | T5 |
-|-----|---------------|-----------|----|----|
-| référence, code d'avant | 0.5 | 0.6 | 1.43 | 0.98 |
-| correctif seul, poids inchangés | 0.5 | 0.6 | 1.47 | 0.87 |
-| 1 | **0.8** | 0.6 | 1.63 | 1.43 |
-| 2 | **1.0** | 0.6 | **1.67** | **1.77** |
-| 3 | **1.2** | 0.6 | 1.62 | 1.68 |
-| 4 | 1.0 | **0.8** | 1.63 | 1.60 |
+Effet de bord assumé et voulu : le tir du même tour hérite de la cible élue au mouvement. La cible
+du tour n'est donc plus « celle que le premier tireur avait choisie » mais « celle que la première
+escouade à décider pouvait le mieux entamer » — même famille de critère, appliquée une phase plus
+tôt, et `target_score` n'accorde son bonus que si l'escouade peut réellement l'entamer (`base > 0`).
 
-**Retenu : `w_objective` 0.5 → 1.0, `w_enemy` inchangé à 0.6.** Le correctif SEUL dégrade T5
-(0.98 → 0.87) : c'est attendu, il fait converger cinq escouades vers un point qui n'est pas une
-zone. Le réglage d'avant valait pour une géométrie qui n'existe plus. Le point à 1.2 redescend —
-c'est un **pic**, pas un plateau : ne pas monter plus haut. `w_enemy` a été testé à 0.8 et écarté :
-à concentration égale, renforcer le terme d'ennemi coûte des zones sans rien rendre.
+**L'élection seule ne suffisait pas non plus — la confirmation par la première attaque (corrigé le
+2026-08-13, même jour).** Le critère d'élection classe sur `squad_expected_damage`, qui ne dépend
+PAS de la position : rien n'empêche d'élire une escouade que le masque n'ouvrira à personne au tir
+(hors portée, hors LoS). Le bonus de `target_score` ne se déclenchait alors chez AUCUNE escouade et
+chacune repartait sur sa propre meilleure cible, c'est-à-dire une dispersion PIRE que celle du
+socle, dans le style qui existe pour la supprimer. Avant l'élection au mouvement ce cas n'existait
+pas : la cible venait du premier tireur, donc parmi SES cibles valides — attaquable par
+construction. En passant l'écriture au mouvement, la première version avait perdu cette propriété
+sans la remplacer, et `_remember` était devenu du code mort (il sortait sur
+`_focus_target is not None`, désormais toujours vrai après le premier déplacement).
 
-**Les cinq autres styles servent de contrôle** — dérive **exactement 0.000** sur les cinq runs, aux
-deux décimales de l'instrument :
+La cible élue est donc PROVISOIRE, et `_focus_confirmed` porte la distinction :
+
+- `_remember` sort sur `_focus_confirmed`, plus sur `_focus_target is not None` : la **première
+  attaque réelle du tour** (tir ou mêlée) écrit la cible qu'elle a effectivement frappée et la
+  confirme. Une cible différente de l'élue signifie que le bonus ne s'est pas appliqué — l'élue
+  n'était pas dans le masque, ou l'escouade ne peut pas l'entamer — donc la reprendre est ce qui
+  reconcentre le reste du tour. C'est la sémantique d'avant l'élection, rendue au tir ;
+- le VERROU après cette première attaque est ce qui empêche le balayage : sans lui, deux escouades
+  aux portées disjointes se voleraient la cible à chaque activation et aucune troisième n'aurait de
+  cap à suivre. Une seule attaque confirme, définitivement ;
+- `_focus_confirmed` s'oublie EXACTEMENT quand `_focus_target` s'oublie (changement de tour, mort
+  de la cible), jamais séparément : une confirmation qui survivrait à sa cible ferait sortir
+  `_remember` trop tôt et plus personne n'écrirait de cible jusqu'au tour suivant.
+
+Le déplacement, lui, n'est pas rejoué : la destination est déjà choisie quand la correction
+intervient. C'est l'ordre voulu — on marche vers la cible la plus payante, on tire sur celle qu'on
+atteint.
+
+`enemies` (liste complète) reste utilisée telle quelle par `_firepower_profile` : `w_fire` et
+`w_risk` chiffrent ce qu'on inflige et ce qu'on subit de TOUT le monde. Restreindre aussi la
+menace à une escouade aurait fait un autre bot, pas une concentration.
+
+**Verrou :** `tests/unit/ai/test_decapitation_movement.py`, 14 tests, tous partant d'une mémoire
+VIERGE — l'état réel d'un premier déplacement. La série précédente posait `_focus_target` à la
+main et prouvait un chemin que la production n'atteignait pas : c'est ce qui avait laissé passer
+l'override inerte. Les cinq tests de confirmation passent par `_shoot` de bout en bout (donc par
+`_best_slot_action` ET `_remember`, dont les deux lectures du mapping de slots sont stubbées
+ensemble — n'en stubber qu'une ferait tirer sur une cible et en mémoriser une autre). Rouge prouvé
+par mutation (2026-08-13, `__pycache__` purgé) :
+
+| mutation | tests rouges |
+|----------|--------------|
+| l'élection retirée (retour au socle quand la mémoire est vide) | 7 des 9 |
+| `_remember` re-sorti sur `_focus_target is not None` (état d'avant la confirmation) | 5 des 14 |
+| `_focus_confirmed` non remis à faux à la mort de la cible | 1 des 14 |
+
+Le test `..._the_movement_really_walks_toward_the_elected_target` est le garde-fou VERT VACANT : il
+passe par `select_movement_destination` de bout en bout, donc il prouve que l'élection est atteinte
+par le chemin de production — un override jamais appelé par le vrai chemin ne corrige rien.
+
+**Non mesuré :** l'effet sur les zones et le win-rate. Le protocole du §12.8
+(`bot_zone_direct.py --episodes 60`, plateau x1) est celui à rejouer pour chiffrer le gain ;
+`w_enemy: 0.6` reste à re-régler une fois ce chiffre connu, puisqu'il agit désormais sur une
+distance beaucoup plus longue (la cible focalisée, pas l'ennemi collé).
+
+
+### 12.12 Nouvelles métriques de convergence (2026-08-13)
+
+Les trois grandeurs du §12.8 ne disent pas si les escouades d'un même bot visent **le même**
+ennemi. Deux s'y ajoutent, écrites dans le relevé par épisode comme les précédentes :
+
+| clé JSON | définition | lecture |
+|----------|-----------|---------|
+| `focus_targets_by_turn` | nombre d'ennemis **distincts** élus « plus proche » par au moins une escouade bot sur table | `1` = toutes les escouades convergent ; `N` = chacune part de son côté |
+| `focus_dist_by_turn` | distance hex moyenne des escouades bot sur table à la **cible focalisée** du bot (`_focus_target`) | ce que « suivre la cible commune » coûte en distance parcourue |
+
+`focus_dist_by_turn` n'existe **que** pour les doctrines qui élisent une cible commune
+(`DecapitationBot`). Les cinq autres n'ont pas d'attribut `_focus_target` : la clé est **absente**
+du JSON et la ligne vaut `—` dans le tableau — jamais `0`, qui se lirait comme « distance nulle »
+(T1). Même règle qu'au §12.8 pour les réserves : sentinel `(-1,-1)` exclu des deux côtés, une
+cible morte ou hors table rend `None`.
+
+⚠️ La mesure lit `bot._focus_target` **nu**, jamais `bot._focus(game_state)`. `_focus` périme la
+cible sur le marqueur de tour : l'appeler depuis l'instrumentation muterait l'état du bot à la
+frontière de tour, donc changerait la grandeur mesurée par le fait de la mesurer.
+
+**Verrou automatisé :** 14 tests dans `tests/unit/scripts/test_bot_zone_direct_metrics.py`. Rouge
+prouvé par mutation sur `_ennemi_en_reserves_exclu` et `_none_si_cible_en_reserves` (2026-08-13).
+
+#### 12.12.1 Mesure avant/après l'élection de cible au mouvement
+
+**Ce qui est comparé.** « Avant » = `5833c826` ; « après » = le tree du 2026-08-13, où
+`DecapitationBot` surcharge `_enemy_anchors` pour que `w_enemy` tire vers la cible **élue** au lieu
+de l'ennemi le plus proche de chaque escouade (§12.11). Le SHA `e4a44b1a`, qui porte une version
+intermédiaire de ce travail, vit sur une branche non fusionnée : il ne se retrouve pas depuis
+`main`, d'où les deux repères ci-dessus.
+
+**Les poids ne changent pas entre les deux états** — comparaison faite valeur par valeur sur
+`config/bot_movement_weights.json`, seul le texte `_justification` de `decapitation` diffère. Il
+n'y a donc rien à démêler entre « élection » et « réglage de poids » : l'élection est le **seul**
+facteur.
+
+**Protocole.** `--episodes 60`, plateau `x1`, modèle `robust_0.8721`, mêmes graines des deux côtés
+(`_episode_seed` est déterministe) — les épisodes s'apparient un à un, ce qui autorise une
+comparaison appariée bien plus fine que deux moyennes indépendantes. Instrument identique dans les
+deux arbres : le script de mesure et ses deux dépendances ont été recopiés dans le worktree.
+
+**Contrôle de validité.** Les cinq autres bots rendent des relevés **bit-identiques** entre les deux
+runs, sur les cinq grandeurs et les cinq tours. Seul `decapitation` bouge : l'écart mesuré vient de
+la doctrine, pas du bruit ni de l'instrument.
+
+**`focus_targets_by_turn` — cibles distinctes (60 ép./bot) :**
 
 | Bot | T1 | T2 | T3 | T4 | T5 |
-|-----|----|----|----|----|-----|
-| alpha | 0.97 | 1.15 | 1.02 | 1.08 | 0.87 |
-| attrition | 1.20 | 1.67 | 1.90 | 2.18 | 2.08 |
-| endgame | 1.15 | 1.57 | 1.77 | 1.88 | 2.08 |
-| racer | 1.38 | 1.77 | 1.88 | 1.97 | 2.07 |
-| scorer | 1.37 | 1.65 | 1.85 | 2.08 | 1.93 |
+|-----|----|----|----|----|----|
+| alpha (identique) | 1.33 | 1.88 | 1.95 | 1.72 | 1.58 |
+| attrition (identique) | 1.33 | 1.87 | 1.80 | 2.02 | 1.77 |
+| endgame (identique) | 1.32 | 1.62 | 1.58 | 1.75 | 1.82 |
+| racer (identique) | 1.33 | 1.95 | 1.85 | 1.90 | 1.75 |
+| scorer (identique) | 1.40 | 1.82 | 1.88 | 1.95 | 1.92 |
+| **decapitation avant** | 1.25 | 1.85 | 1.78 | 1.87 | 1.67 |
+| **decapitation après** | 1.22 | 1.93 | 1.60 | 1.58 | 1.47 |
+| Δ apparié (±IC 95 %) | −0.03 ±0.07 | +0.08 ±0.21 | −0.18 ±0.24 | **−0.28 ±0.25** | −0.20 ±0.22 |
 
-`decapitation` (1.67 / 1.77) rejoint la référence panel (T2=1.61 / T5=1.90) qu'il était seul avec
-`alpha` à manquer. Reste à mesurer : l'effet **contre l'agent** (win-rate), que cet instrument ne
-rend pas — et les deux métriques du diagnostic initial (distance au plus proche ennemi, pertes par
-tour), qui viennent d'un autre outil.
+**`focus_dist_by_turn` — distance à la cible focalisée (`decapitation` seul) :**
 
-### 12.12 Trois lignes de travail réunies, et la ligne de base qui en sort (2026-08-13)
+| | T1 | T2 | T3 | T4 | T5 |
+|-|----|----|----|----|----|
+| **avant** | 26.5 | 22.1 | 21.4 | 20.0 | 19.3 |
+| **après** | 32.8 | 31.2 | 22.0 | 20.2 | 20.2 |
+| Δ apparié (±IC 95 %) | **+5.85 ±3.79** | **+9.05 ±4.10** | +0.94 ±3.00 | −0.24 ±2.61 | +0.45 ±2.58 |
+| ép. avec une cible, avant → après | 54 → 58 | 58 → 60 | 58 → 60 | 57 → 54 | 55 → 60 |
+
+Les cinq autres bots valent `—` sur toute la ligne, aux deux runs.
+
+**Rappel des deux grandeurs du §12.8, sur les mêmes runs (`decapitation`) :**
+
+| | T1 | T2 | T3 | T4 | T5 |
+|-|----|----|----|----|----|
+| `dist_by_turn` avant | 31.3 | 20.8 | 15.7 | 14.6 | 15.0 |
+| `dist_by_turn` après | 30.5 | 20.7 | 15.8 | 15.9 | 15.1 |
+| Δ apparié (±IC 95 %) | −0.82 ±0.76 | −0.07 ±1.11 | +0.06 ±1.63 | +1.23 ±1.69 | +0.08 ±1.92 |
+| `zones_by_turn` avant | 1.22 | 1.43 | 1.28 | 1.08 | 0.98 |
+| `zones_by_turn` après | 1.17 | 1.40 | 1.17 | 0.93 | 0.92 |
+| Δ apparié (±IC 95 %) | −0.05 ±0.09 | −0.03 ±0.14 | −0.12 ±0.23 | −0.15 ±0.25 | −0.07 ±0.20 |
+
+**Conclusion causale.** L'élection au mouvement fait bien ce pour quoi elle a été écrite — elle
+envoie les escouades vers une cible commune plus lointaine (`focus_dist` +9.1 hex à T2) et resserre
+la convergence en milieu de partie (`focus_targets` −0.28 à T4, seul écart de convergence
+significatif) — mais **elle n'explique pas la distance au plus proche ennemi du §12.8** : à graine
+égale, `dist_by_turn` est inchangée sur T2–T5. La montée observée au §12.8 vient donc d'ailleurs.
+
+#### 12.12.2 La montée de `dist_by_turn` au dernier tour est un BIAIS DE SURVIE
+
+Élucidé le 2026-08-13 **sans nouveau run**, par relecture du relevé par escouade des 60 épisodes
+du §12.8 (mêmes graines, même modèle, même plateau).
+
+`dist_by_turn` moyenne sur les escouades **vivantes sur table**, donc sa population change à chaque
+tour. Or les escouades qui meurent sont, de très loin, les plus proches de l'ennemi — relevé sur
+les mêmes parties, distance au tour `t` selon qu'elles sont mortes ou vives au tour `t+1` :
+
+| bot | T3 mortes → | T3 vives → | T4 mortes → | T4 vives → |
+|---|---|---|---|---|
+| decapitation | **5,6** (n=32) | 17,1 (n=232) | **6,0** (n=48) | 16,8 (n=184) |
+| racer | 5,8 (n=29) | 19,3 (n=241) | 6,9 (n=34) | 19,4 (n=207) |
+| attrition | 4,9 (n=14) | 21,0 (n=270) | 6,2 (n=25) | 20,7 (n=245) |
+
+Les retirer relève mécaniquement la moyenne du tour suivant. **La preuve tient en une COHORTE
+FIXE** : en ne suivant que les escouades vivantes au tour 5, et en les remontant dans le temps, la
+montée disparaît entièrement chez les deux bots concernés.
+
+| bot | population | T1 | T2 | T3 | T4 | T5 |
+|---|---|---|---|---|---|---|
+| decapitation | toutes vivantes (= §12.8) | 31,3 | 20,9 | 15,7 | 14,5 | **14,9 ↑** |
+| decapitation | **cohorte fixe (vivantes à T5)** | 32,8 | 23,5 | 18,9 | 16,8 | **14,9 ↓** |
+| racer | toutes vivantes | 32,5 | 21,5 | 17,9 | 17,6 | **18,8 ↑** |
+| racer | **cohorte fixe** | 34,1 | 24,0 | 20,7 | 19,4 | **18,8 ↓** |
+| attrition | toutes vivantes | 34,5 | 24,2 | 20,2 | 19,4 | 22,2 ↑ |
+| attrition | **cohorte fixe** | 35,0 | 25,2 | 21,9 | 20,7 | **22,2 ↑** |
+
+⚠️ **`attrition` est le seul cas où il reste une montée RÉELLE** (+1,5 hex à cohorte fixe) : c'est
+son mode `attrition_withdraw` (`w_enemy` −1,0), qui recule pour de bon. Chez `decapitation` et
+`racer`, il ne reste rien — la montée était entièrement l'artefact.
+
+**Trois conséquences, dont une qui change la lecture du §12.8 :**
+
+1. Il n'y a **rien à expliquer côté doctrine** pour `decapitation` : le bot ne s'éloigne pas au
+   dernier tour, il perd ses escouades avancées.
+2. **Le §12.8 sous-estime l'exposition de `decapitation`**, il ne la surestime pas. Le biais joue
+   dans le sens de la prudence : c'est le bot qui perd le plus d'escouades (33 % à T5 contre 16 %
+   à `attrition`), donc celui dont la moyenne est la plus tirée vers le haut. Sa proximité réelle
+   à l'ennemi est **pire** que ce que le tableau affiche.
+3. **`dist_by_turn` ne se lit jamais seule au dernier tour.** La ligne « un bot qui s'approche :
+   distance décroissante de T1 à T5 » du §12.8 est vraie à effectif constant, fausse dès qu'un
+   camp perd des escouades. Toute lecture de cette grandeur au-delà de T3 se fait à cohorte fixe,
+   ou accompagnée du taux de pertes (`squads_by_turn`, déjà au relevé).
+
+
+### 12.13 Protocole de mesure d'un changement de poids (§12.13)
+
+**Contexte.** Calibrer `w_enemy` de `DecapitationBot` après le §12.11 exige de mesurer l'effet
+d'un changement de poids sans pollution par l'agent ni par les autres bots. Ce protocole isole
+le signal : un run de référence et un run de variante sur les mêmes graines, avec les bots de
+contrôle comme témoin d'invariance.
+
+**Instrument :** `--label` dans `bot_zone_direct.py` — stocké dans `run.label` du JSON, absent
+si omis. Permet d'identifier les deux runs dans les fichiers produits sans ambiguïté.
+
+**Les cinq runs du protocole :**
+
+| run | commande | `--label` | rôle |
+|-----|----------|-----------|------|
+| R1 — référence | `bot_zone_direct.py --episodes 60 --json-out ref.json --label ref` | `ref` | baseline poids actuels |
+| R2 — variante A | `bot_zone_direct.py --episodes 60 --json-out var_a.json --label var_a` | `var_a` | config testée A |
+| R3 — variante B (si besoin) | idem `--label var_b` | `var_b` | config testée B |
+| R4 — re-référence (si besoin) | rejouer R1 après plusieurs jours | | vérifier la stabilité |
+| R5 — mesure finale | protocole §12.8 avec 60 épisodes | | point de comparaison §12.7 |
+
+⚠️ Chaque run DOIT passer les gardes du script (plateau `W40K_BOARD_PATH=board/44x60x1`,
+modèle `REFERENCE_MD5`). Un run qui lève n'est PAS à comparer.
+
+**Valeurs à remplir après les runs :**
+
+| run | T2 | T5 | mean(Δ_T5 vs ref) | IC 95 % |
+|-----|----|----|-------------------|---------|
+| ref (R1) | — | — | — | — |
+| var_a (R2) | — | — | — | — |
+
+**Commande de mesure (à lancer sur la paire ref/var) :**
+
+```bash
+python3 scripts/bot_compare_weights.py ref.json var_a.json --bot decapitation
+```
+
+Lit les épisodes du bot cible de chaque fichier par index (même graines garanties par le
+script de mesure), calcule `Δ_T5 = var[i].zones_T5 − ref[i].zones_T5`, affiche mean, std,
+IC 95 % = mean ± t(n−1) × std / √n.
+
+**Student, pas 1,96** (corrigé le 2026-08-13) : σ est estimé sur l'échantillon et n vaut 60 ou
+moins, donc le quantile normal rétrécit l'intervalle (t(59) = 2,001, et 3,182 dès n = 4). Il
+déclarait significatif ce qui ne l'est pas — sur un seuil de décision qui est exactement « l'IC
+ne contient pas 0 ». À n = 1 l'intervalle n'existe pas : le script écrit « non défini », il
+n'affiche plus `± 0,000`.
+
+**Épisodes terminés avant le T5** (annihilation) : `zones_by_turn` n'a alors pas de clé `"5"`
+(`bot_zone_direct.py` ne pose une clé que pour les tours joués). La PAIRE est ÉCARTÉE du calcul,
+et les deux comptes sont affichés (`épisodes écartés : ref X, var Y`). Avant le 2026-08-13 elle
+était comptée « 0 zone tenue », ce qui punissait de −2 une variante qui gagne au T3 et pouvait
+inverser la conclusion. C'est aussi la lecture du tableau du §12.7, dont la moyenne T5 ne porte
+que sur les épisodes parvenus au T5 — **l'asymétrie des exclusions est à lire** : « var écarte 8
+épisodes contre 2 pour ref » dit que la variante finit ses parties plus tôt, ce que la moyenne
+sur les survivants ne dit pas.
+
+Vérifie d'abord l'invariance des contrôles — tous les bots hors `--bot`. Les deux fichiers
+doivent porter EXACTEMENT le même panel et le même nombre d'épisodes par bot, et chaque relevé
+de contrôle doit être identique épisode par épisode, le relevé ENTIER (graine, siège, zones,
+distances, escouades). Tout écart lève `RuntimeError` et invalide les deux runs ; un relevé sans
+aucun bot de contrôle lève aussi, puisqu'il n'y a alors rien qui valide la comparaison. Le
+nombre de bots et d'épisodes réellement comparés est imprimé à côté de la coche : une coche
+verte sans compte ne prouvait rien.
+
+Le nombre d'épisodes du bot cible doit lui aussi être identique dans les deux fichiers — les
+graines sont indexées, donc un run interrompu s'appariait parfaitement sur son préfixe et
+rendait un `n` amputé en silence.
+
+**Seuil de décision :** un changement de poids est retenu si l'IC 95 % ne contient pas 0 et
+si le T5 de la variante reste dans la plage des autres bots réglés (§12.7 : 1,0 à 2,6 zones).
+Un IC qui contient 0 = bruit, augmenter n (60 → 120).
+
+**Commande de mesure agent finale (étape 8 du §4) :**
+
+```bash
+cd /home/greg/40k && source .venv/bin/activate
+python3 ai/train.py --agent ArmageddonAgent --training-config x1 \
+  --test-only --test-episodes 100 --resolution 1
+```
+
+Même modèle (`robust_0.9438`) et même commande qu'en §2 — c'est ce qui rend les colonnes
+comparables. À rejouer en dernier, une seule fois les poids stabilisés.
+
+### 12.14 Trois lignes de travail réunies, et la ligne de base qui en sort (2026-08-13)
 
 Le chantier a été travaillé le même jour par **trois sessions en parallèle**, chacune ignorant
 les deux autres. Chacune a produit du travail juste, et les trois se contredisaient : trois

@@ -36,8 +36,12 @@ DAMAGE = {"focus": 5.0, "nearest": 1.0}
 HP = 10.0
 
 
-def _state(turn: int = 2) -> Dict[str, Any]:
+def _state(turn: int = 2, episode_number: int = 1) -> Dict[str, Any]:
     return {
+        # `episode_number` est REQUIS par le marqueur de focus, comme `turn` : le moteur l'écrit à
+        # chaque `reset`, et sans lui deux épisodes joués par la même instance de bot partageaient
+        # la cible focalisée (cf. tests/unit/ai/test_bot_doctrine_battle_length.py).
+        "episode_number": episode_number,
         "turn": turn,
         "units": [
             {"id": "me", "player": 1},
