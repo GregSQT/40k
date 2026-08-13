@@ -8,6 +8,7 @@ donc les moyennes affichées et le JSON ne peuvent plus diverger.
 """
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -75,7 +76,8 @@ def test_json_out_relit_les_episodes_un_par_un(script, tmp_path):
     out = tmp_path / "sub" / "zones.json"
     out.parent.mkdir()
 
-    script._write_json_out(str(out), "/x/model_ArmageddonAgent.zip", "holdout_1.json", 2, records)
+    with script._open_json_out(str(out)) as handle:
+        script._write_json_out(handle, "/x/model_ArmageddonAgent.zip", "holdout_1.json", 2, records)
     payload = json.loads(out.read_text(encoding="utf-8"))
 
     assert payload["model"] == "model_ArmageddonAgent.zip"
@@ -90,7 +92,34 @@ def test_json_out_relit_les_episodes_un_par_un(script, tmp_path):
 def test_json_out_echoue_si_le_dossier_n_existe_pas(script, tmp_path):
     # pas de création silencieuse ni de repli sur le cwd : un chemin faux doit se voir.
     with pytest.raises(FileNotFoundError):
-        script._write_json_out(str(tmp_path / "absent" / "z.json"), "m.zip", "s.json", 1, [])
+        script._open_json_out(str(tmp_path / "absent" / "z.json"))
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root écrit dans un dossier en lecture seule")
+def test_json_out_echoue_si_le_dossier_est_en_lecture_seule(script, tmp_path):
+    # motif de l'ouverture réelle plutôt que d'un `isdir` : un dossier existant mais
+    # non inscriptible passerait le test d'existence et casserait à la toute fin.
+    readonly = tmp_path / "ro"
+    readonly.mkdir()
+    readonly.chmod(0o500)
+    try:
+        with pytest.raises(PermissionError):
+            script._open_json_out(str(readonly / "z.json"))
+    finally:
+        readonly.chmod(0o700)
+
+
+def test_la_destination_est_ouverte_avant_de_jouer_le_moindre_episode(tmp_path):
+    # VERROU du fail-fast : la destination fausse doit tuer le run AVANT le chargement du
+    # modèle — sinon l'erreur tombe après des minutes de jeu et les graines sont perdues.
+    proc = subprocess.run(
+        [sys.executable, str(SCRIPT_PATH), "--episodes", "1", "--json-out", str(tmp_path / "absent" / "z.json")],
+        capture_output=True, text=True, cwd=str(PROJECT_ROOT), timeout=300,
+    )
+
+    assert proc.returncode != 0
+    assert "FileNotFoundError" in proc.stderr
+    assert "Modèle" not in proc.stdout  # première trace de main() après les imports lourds
 
 
 def test_le_drapeau_existe_sur_la_ligne_de_commande():

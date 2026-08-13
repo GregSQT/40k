@@ -489,6 +489,13 @@ mesure, et c'est assumé (§0.14).
    correspondance ancien/nouveau se mesurent en **bot-contre-bot** (`scripts/bot_ranking.py`),
    la mesure contre l'agent ne servant qu'à confirmer — mesurer un bot par le win-rate de l'agent
    est circulaire.
+   ✅ **L'instrument d'étalement rend enfin le détail (2026-08-13)** : `scripts/bot_zone_direct.py`
+   accepte `--json-out <fichier>` et écrit le relevé PAR ÉPISODE (graine `_episode_seed`, joueur du
+   bot, zones contrôlées par tour). Jusque-là il ne sortait que les moyennes du tableau, donc aucune
+   mesure de §12.7 n'était inspectable ni rejouable épisode par épisode alors que le script est
+   déterministe. Le tableau texte est désormais **dérivé** des mêmes relevés : les chiffres déjà
+   consignés restent comparables, et l'agrégat ne peut plus diverger du fichier. La destination est
+   ouverte AVANT de jouer — un chemin faux coûtait sinon tout le run, graines comprises.
 
 ## 2. Capacités — seul chantier restant de la série « chantiers capacités »
 
@@ -750,6 +757,12 @@ Prêts à démarrer sans décision produit :
   la referme — donc le faux positif « tir engagé arme non-CLOSE_QUARTERS » que je pensais
   expliquer par elle vient d'ailleurs, et reste ouvert.
   → [`Implémenté/figurine_allouee_nommee_au_journal_2026-08-12.md`](Implémenté/figurine_allouee_nommee_au_journal_2026-08-12.md)
+- ✅ **Les verrous du seuil de blessure 05.02 gardaient du vide** (2026-08-13, merge `a6d4915c`).
+  Quatre tests de `tests/unit/ai/test_analyzer_wound_threshold.py` passaient sans rien retenir
+  (garde « type hors registre », ordre Oath/unanimité, composites en mêlée seule, test du porteur
+  non discriminant) : fermés et prouvés par mutation. Dans la foulée, `attacker_weapon_strengths`
+  portait **deux** refus pour le même cas de datasheet introuvable, dont un qu'aucun test ne pouvait
+  discriminer — il n'en reste qu'un, au point de décision, comportement inchangé.
 - 🟠 **Conformité moteur — les 53 erreurs que l'analyzer voit VRAIMENT** (ouvert le 2026-08-11,
   **10 restantes** — le tableau ci-dessous en est la source, cette ligne le résume : la famille
   CC_NB, la plus lourde, est soldée le jour même ; les deux familles de move le 2026-08-12 ; les
