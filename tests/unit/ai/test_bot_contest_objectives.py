@@ -113,8 +113,7 @@ def test_the_weight_travels_with_the_others_so_a_mode_swap_carries_it() -> None:
     `EndgameBot` et `AttritionBot` échangent l'entrée de config entière selon leur mode : un poids
     chargé à part resterait sur la valeur du mode précédent. Le tuple les lie.
     """
-    for key in ("racer", "endgame", "endgame_push", "attrition", "attrition_withdraw",
-                "alpha", "decapitation", "scorer"):
+    for key in doc._weights_config()["doctrines"]:
         poids = doc.load_doctrine_weights(key)
         assert len(poids) == 6, f"{key} ne rend pas les SIX poids : {poids}"
         assert all(isinstance(p, float) for p in poids)

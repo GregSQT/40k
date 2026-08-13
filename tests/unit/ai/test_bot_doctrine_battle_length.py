@@ -90,7 +90,7 @@ def test_the_focus_marker_refuses_a_state_without_a_turn() -> None:
     (« une escouade par tour, retirée entièrement ») s'annulait en silence.
     """
     with pytest.raises(Exception):
-        DecapitationBot()._focus({"episode_number": 1}, {"id": "A", "player": 0})
+        DecapitationBot()._focus({"episode_number": 1})
 
 
 def test_the_focus_marker_still_changes_between_turns() -> None:
@@ -99,9 +99,8 @@ def test_the_focus_marker_still_changes_between_turns() -> None:
     Un test qui n'observe que les exceptions passerait sur un marqueur figé.
     """
     bot = DecapitationBot()
-    attacker = {"id": "A", "player": 0}
-    bot._focus(_state(1, episode_number=7, units=[]), attacker)
+    bot._focus(_state(1, episode_number=7))
     first = bot._focus_turn
-    bot._focus(_state(2, episode_number=7, units=[]), attacker)
+    bot._focus(_state(2, episode_number=7))
 
     assert first is not None and bot._focus_turn != first
