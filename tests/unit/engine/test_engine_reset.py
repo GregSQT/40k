@@ -445,3 +445,55 @@ class TestResetLogsScenarioPath:
         engine.reset()
 
         assert "Scenario file:" not in log_path.read_text(encoding="utf-8")
+
+
+class TestEpisodeNumberSourceUnique:
+    """game_state["episode_number"] suit le compteur d'environnement, pas celui du logger.
+
+    Régression couverte : step_logger.episode_number écrasait game_state["episode_number"]
+    après log_episode_start(), effaçant l'offset training_episode_start_index.
+    """
+
+    @staticmethod
+    def _engine_with_logger_and_offset(tmp_path, offset: int):
+        from ai.step_logger import StepLogger
+
+        with patch("engine.w40k_core.load_weapon_damage_table", return_value={}), \
+             patch.object(W40KEngine, "_build_reward_configs_for_current_units", return_value={}):
+            engine = W40KEngine(
+                config=build_engine_config(_minimal_config_with_units()),
+                training_episode_start_index=offset,
+            )
+        log_path = tmp_path / "step.log"
+        engine.step_logger = StepLogger(
+            output_file=str(log_path), enabled=True, buffer_size=10
+        )
+        return engine
+
+    def test_episode_number_uses_env_counter_not_logger_counter(self, tmp_path):
+        """game_state["episode_number"] == offset+1 après le premier reset(), jamais 1."""
+        offset = 5
+        engine = self._engine_with_logger_and_offset(tmp_path, offset)
+
+        engine.reset()
+
+        assert engine.game_state["episode_number"] == offset + 1
+
+    def test_episode_number_stable_across_multiple_resets(self, tmp_path):
+        """game_state["episode_number"] s'incrémente correctement reset après reset."""
+        offset = 5
+        engine = self._engine_with_logger_and_offset(tmp_path, offset)
+
+        engine.reset()
+        engine.reset()
+
+        assert engine.game_state["episode_number"] == offset + 2
+
+    def test_step_logger_episode_number_matches_game_state(self, tmp_path):
+        """step_logger.episode_number == game_state["episode_number"] (alignement journaux)."""
+        offset = 5
+        engine = self._engine_with_logger_and_offset(tmp_path, offset)
+
+        engine.reset()
+
+        assert engine.step_logger.episode_number == engine.game_state["episode_number"]
