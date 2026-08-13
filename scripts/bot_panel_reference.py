@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Source UNIQUE de la référence chiffrée du panel de bots (§12.5 de `bots_refonte_panel.md`).
+"""Source UNIQUE de la référence chiffrée du panel de bots (§12.14 de `bots_refonte_panel.md`).
 
 POURQUOI CE MODULE EXISTE. La ligne était recopiée à la main dans `bot_zone_check.py` et
 `bot_zone_direct.py` : mêmes chiffres, étiquettes CONTRAIRES (« pre-§12.6 » d'un côté,
@@ -12,14 +12,18 @@ Tout script du panel qui affiche cette référence appelle `print_panel_referenc
 réécrit les chiffres : `tests/unit/scripts/test_bot_panel_reference.py` échoue si un littéral
 `combined=0.788` reparaît ailleurs dans `scripts/`.
 
-CE QUE DIT L'ÉTIQUETTE, et pourquoi elle est celle-là. Les chiffres du §12.5 sont ANTÉRIEURS au
-§12.6, qui le dit deux fois : « CES CHIFFRES SONT ANTÉRIEURS AU §12.6 et n'ont pas été rejoués
-depuis » et « À REJOUER : la mesure du §12.5 sur 600 parties ». Ils ont donc été obtenus avec
-les deux défauts que le §12.6 corrige (poids fractionnaires purement annulés, surplus d'OC
-compté autrement que le contrôle du moteur), et depuis le §12.7 `alpha` et `decapitation` n'ont
-plus les mêmes poids. Le SENS du résultat tient, son AMPLITUDE non : la ligne le dit, sinon
-corriger l'étiquette ne ferait que remplacer un mensonge sur la date par une comparaison
-invalide silencieuse.
+CE QUE DIT L'ÉTIQUETTE, et pourquoi elle a changé le 2026-08-13. Ce module portait les chiffres
+du §12.5 avec la mention « JAMAIS REJOUÉE », qui était juste quand il a été écrit et fausse
+quelques heures plus tard : le §12.8, le §12.9 et le §12.14 les ont rejoués le même jour, sur le
+même modèle et le même plateau. La référence est donc celle du §12.14, la seule postérieure à
+TOUS les correctifs du chantier (§12.6 sur la pénalité d'encombrement, §12.11 sur le déplacement
+de `decapitation`) et au réglage de `scorer` (§12.9).
+
+⚠️ La moyenne de panel en zones n'a presque pas bougé entre le §12.5 (1.61/1.90) et le §12.14
+(1.60/1.89), et ça ne veut PAS dire que rien n'a changé : c'est une moyenne sur six bots dont la
+distribution s'est fortement déplacée (`scorer` 1.93 → 2.33, `decapitation` 1.08 → 1.68, la
+pénalité d'encombrement ayant par ailleurs redistribué les escouades). Ne jamais conclure de
+cette ligne seule — le tableau PAR BOT du §12.14 est ce qui se compare.
 
 CE QUE DIT LA CONDITION EXPÉRIMENTALE. Ce n'est PAS « bot=P2 », comme les deux copies l'ont
 longtemps écrit : la référence est mesurée sur `x1_panel`, dont `agent_seat_mode` vaut
@@ -29,17 +33,18 @@ aurait comparé deux protocoles.
 """
 from __future__ import annotations
 
-#: Les quatre grandeurs du tableau §12.5 « après », 100 épisodes par bot.
-PANEL_REFERENCE_FIGURES = "T2=1.61  T5=1.90  VP=31.0  combined=0.788"
+#: Les quatre grandeurs de la ligne de base du §12.14. `combined`, `pire bot` et `pire scénario`
+#: viennent de la mesure contre l'agent (100 ép./bot) ; la moyenne de zones vient du relevé
+#: d'étalement (60 ép./bot). Les deux runs sont du même jour, sur `robust_0.8721`.
+PANEL_REFERENCE_FIGURES = "combined=0.7433  pire bot racer=0.630  pire scenario=0.6867  zones T2/T5=1.60/1.89"
 
 #: La ligne telle qu'elle s'affiche. L'avertissement fait partie de la référence, pas du décor :
-#: sans lui, le lecteur compare son run du jour à une mesure qui ne mesurait pas la même chose.
+#: une moyenne de panel masque la redistribution qui est l'objet même du chantier.
 PANEL_REFERENCE_LINE = (
-    f"Référence panel §12.5 (x1_panel, siège aléatoire, 100 ép./bot) : {PANEL_REFERENCE_FIGURES}\n"
-    "⚠️ pre-§12.6, JAMAIS REJOUÉE : mesurée avec les deux défauts corrigés au §12.6 (poids\n"
-    "   fractionnaires annulés, surplus d'OC mal compté), et les poids d'`alpha`/`decapitation`\n"
-    "   ont changé au §12.7. Le sens tient, l'amplitude non — ne pas comparer un run du jour à\n"
-    "   ces chiffres tant que le §12.5 n'a pas été rejoué (600 parties)."
+    f"Référence panel §12.14 (x1_panel, siège aléatoire, robust_0.8721) : {PANEL_REFERENCE_FIGURES}\n"
+    "   post-§12.6, post-§12.9 (`scorer` réglé) et post-§12.11 (déplacement de `decapitation`).\n"
+    "⚠️ la moyenne de zones est presque identique à celle du §12.5 alors que la distribution par\n"
+    "   bot a fortement bougé : comparer le tableau PAR BOT du §12.14, jamais cette moyenne seule."
 )
 
 

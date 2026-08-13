@@ -86,6 +86,7 @@ def test_require_reference_model_passe_sur_md5_correct(script, monkeypatch, tmp_
 def test_label_present_dans_run_meta_quand_fourni(script):
     meta = script._run_meta(
         _DUMMY_FINGERPRINT, "holdout_1.json", 20, 6, 42, "alternate", 7, {"bot": 0.25},
+        {"bot": {"w_crowd": 4.0}}, 3.0,
         label="foo",
     )
     assert meta["label"] == "foo"
@@ -94,5 +95,6 @@ def test_label_present_dans_run_meta_quand_fourni(script):
 def test_label_absent_de_run_meta_quand_omis(script):
     meta = script._run_meta(
         _DUMMY_FINGERPRINT, "holdout_1.json", 20, 6, 42, "alternate", 7, {"bot": 0.25},
+        {"bot": {"w_crowd": 4.0}}, 3.0,
     )
     assert "label" not in meta

@@ -350,10 +350,20 @@ def _run_meta(
     agent_seat_mode: str,
     agent_seat_seed: Optional[int],
     bot_randomness: Dict[str, Any],
+    doctrine_weights: Dict[str, Dict[str, float]],
+    hold_bonus: float,
     label: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Ce qui distingue DEUX relevés l'un de l'autre — sans ça, un avant et un après §12.7
     sont indiscernables, et une graine d'épisode ne suffit pas à reconstruire la doctrine du bot.
+
+    `doctrine_weights` et `hold_bonus` sont les poids RÉELLEMENT CONSOMMÉS, relus par l'entrée
+    publique `load_doctrine_weights` et non recopiés du fichier de config : c'est ce tuple-là qui
+    a joué. Sans eux, deux relevés d'une campagne de réglage ne se distinguent par RIEN — le
+    protocole du §12.8 ne change qu'un poids d'un run à l'autre, tout le reste étant identique au
+    bit, et une comparaison appariée dont on ne sait pas ce qui a changé ne compare rien.
+    `hold_bonus` s'y ajoute parce qu'il est le seul terme du score qui ne soit pas par bot : il
+    fixe l'échelle à laquelle `w_crowd` se lit, donc il périme la campagne entière s'il bouge.
     """
     meta: Dict[str, Any] = {
         "agent": "ArmageddonAgent",
@@ -366,6 +376,8 @@ def _run_meta(
         "agent_seat_mode": agent_seat_mode,
         "agent_seat_seed": agent_seat_seed,
         "bot_randomness": dict(bot_randomness),
+        "doctrine_weights": doctrine_weights,
+        "hold_bonus": hold_bonus,
     }
     if label is not None:
         meta["label"] = label
@@ -407,6 +419,7 @@ def main() -> None:
         from config_loader import get_config_loader
         from ai.unit_registry import UnitRegistry
         from ai.bot_registry import build_bot
+        from ai.bot_doctrines import load_doctrine_weights, load_hold_bonus
         from ai.env_wrappers import BotControlledEnv
         from ai.training_utils import get_scenario_list_for_phase
         from ai.bot_evaluation import (
@@ -423,6 +436,8 @@ def main() -> None:
         vec_norm_enabled = bool(tc.get("vec_normalize", {}).get("enabled", False))
         vec_eval_enabled = bool(tc.get("vec_normalize_eval", {}).get("enabled", False))
 
+        if args.label:
+            print(f"Run    : {args.label}")
         print(f"Modèle : {os.path.basename(model_path)}")
         model_fingerprint = _model_fingerprint(model_path)  # avant le chargement : cf. docstring
         model = MaskablePPO.load(model_path, device="cpu")
@@ -621,6 +636,16 @@ def main() -> None:
             run_meta = _run_meta(
                 model_fingerprint, scenario_file, args.episodes, len(bot_weights),
                 base_seed, agent_seat_mode, agent_seat_seed, bot_randomness,
+                {
+                    bot: dict(
+                        zip(
+                            ("w_objective", "w_enemy", "w_fire", "w_risk", "w_contest", "w_crowd"),
+                            load_doctrine_weights(bot),
+                        )
+                    )
+                    for bot in bot_weights
+                },
+                load_hold_bonus(),
                 label=args.label,
             )
             _write_json_out(json_handle, run_meta, episode_records)

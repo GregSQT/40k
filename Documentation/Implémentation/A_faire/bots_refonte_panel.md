@@ -133,9 +133,9 @@ raison (cf. `config/bot_movement_weights.json`, entrée `tactical`).
 | 3 | ~~chiffrage de faisabilité du holdout à un coup~~ | ⛔ **sans objet** — holdout abandonné 2026-08-12, §11.2 |
 | 4 | modèle de dégâts espérés (attaquant → cible) | ✅ 2026-08-11, **corrigé à la racine** 2026-08-12, cf. §7 et §7.1 |
 | 5 | les SIX styles | ✅ 2026-08-12, cf. §7 et §11.3 (`standoff` supprimé §9.2, `scorer` ajouté §11.3) |
-| 6 | réglage en **bot-contre-bot** (~~orthogonalité~~ abandonnée, §3.2) | ✅ **2026-08-13** — `w_crowd`/`w_contest` calibrés par étalement (20 ep/bot x1), cf. §12.7 |
+| 6 | réglage en **bot-contre-bot** (~~orthogonalité~~ abandonnée, §3.2) | ✅ **2026-08-13, §12.8 à §12.14** — les deux hausses du §12.7 réfutées et défaites (§12.8) ; `scorer`, dernier profil posé sans mesure, réglé (§12.9) ; `decapitation` corrigé au déplacement puis son `w_objective` rejoué sur la forme retenue (§12.11, §12.14). Tous mesurés à 60 ép./bot, un poids par run, dérive des cinq contrôles 0,000. ⚠️ Restent `decapitation.w_crowd` et `w_contest`, jamais isolés APRÈS le correctif (§12.14) |
 | 7 | correspondance ancien/nouveau, puis suppression des cinq anciens | |
-| 8 | mesure finale contre l'agent, commande de §2 | 🟠 **PARTIEL** — mesurée sur `robust_0.8721` (§12.5), chiffres antérieurs au §12.6 ; reste à rejouer après réglage |
+| 8 | mesure finale contre l'agent, commande de §2 | ✅ **2026-08-13, §12.14** — 100 ep/bot sur `robust_0.8721`, panel unifié : `combined = 0,7433`, pire bot `racer = 0,630`, pire scénario 0,6867. Les `0,7767`, `0,7600` et `0,7400` sont des états intermédiaires de la même journée |
 
 ### 4.1 Pourquoi l'appariement des graines a été retiré
 
@@ -391,8 +391,8 @@ non plus : il mesure la force relative, pas ce que chaque bot révèle de l'agen
 
 ## 10. Ce qui reste ouvert — à lire avant de reprendre
 
-1. **Étapes 7 et 8 non commencées** : correspondance ancien/nouveau puis suppression des cinq
-   anciens, et mesure finale contre l'agent.
+1. **Étape 7 non commencée** : correspondance ancien/nouveau puis suppression des cinq anciens.
+   L'étape 8 est close (§12.8, `combined = 0,7767`).
 2. **VÉRIFIER LE MODÈLE CANONIQUE AVANT TOUTE MESURE COMPARABLE.** Le chemin canonique
    `ai/models/ArmageddonAgent/model_ArmageddonAgent.zip` est **partagé et volatil** : tout
    `ai/train.py --new` l'écrase, y compris un run de debug de 120 épisodes, et plusieurs sessions
@@ -414,7 +414,14 @@ non plus : il mesure la force relative, pas ce que chaque bot révèle de l'agen
    ⚠️ Pour une mesure longue, copier le modèle dans un `ai/models/` **privé au worktree** plutôt
    que de lire le chemin partagé : les workers d'évaluation chargent le modèle PARESSEUSEMENT, donc
    un training voisin qui l'écrase en cours de route fait lire un autre modèle à une partie des
-   épisodes — sans que rien ne le signale. C'est ce qui a été fait pour la mesure du §12.5.
+   épisodes — sans que rien ne le signale. C'est ce qui a été fait pour la mesure du §12.5, puis
+   pour celle du §12.8.
+
+   ✅ **`scripts/bot_zone_direct.py` n'a plus besoin de cette copie** (2026-08-13) : son `--model`
+   vise l'archive nommée et il **imprime le md5 chargé** au-dessus du tableau. `ai/train.py`, lui,
+   n'a pas d'équivalent — son `--model` n'est lu que par `--replay` (vérifié : c'est le seul usage
+   de `args.model` dans le fichier) — donc toute mesure passant par `--test-only` reste tributaire
+   du chemin canonique, et de la copie privée.
 3. **Tous les chiffres des §8, §9.1 et §9.3 sont à rejouer** (cf. §11.1) : ils sont soit sous
    l'échantillon, soit arithmétiquement faux, soit mesurés sur un modèle de dégâts depuis corrigé.
 4. **TROIS RESSOURCES PARTAGÉES rendent deux mesures simultanées incomparables.** Ce dépôt est
@@ -679,10 +686,12 @@ plus de contact — il reste 4,76 escouades vivantes au tour 5 contre 5,27 avant
 ⚠️ **Le mur du tour 2 tient toujours** : 1,61 zone couverte au tour 2 (contre 1,49). Tout le gain
 arrive aux tours 3 à 5. Le prochain levier, s'il en faut un, est le déploiement.
 
-⚠️ **CES CHIFFRES SONT ANTÉRIEURS AU §12.6** et n'ont pas été rejoués depuis. Ils ont été obtenus
-avec les deux défauts corrigés là-bas : les profils à `w_crowd` fractionnaire n'avaient donc
-**aucune** pénalité, et le surplus se comptait autrement que le contrôle réel. Le sens du résultat
-n'est pas en cause (le pire bot passe bien de 0,78 à 0,62), son AMPLITUDE l'est.
+⚠️ **CES CHIFFRES SONT ANTÉRIEURS AU §12.6.** Ils ont été obtenus avec les deux défauts corrigés
+là-bas : les profils à `w_crowd` fractionnaire n'avaient donc **aucune** pénalité, et le surplus se
+comptait autrement que le contrôle réel.
+✅ **REJOUÉS le 2026-08-13, §12.8** : `combined = 0,7767` et pire bot `racer = 0,630` post-§12.6,
+contre 0,788 et 0,62 ici. L'amplitude annoncée tient à la marge près — c'est la ligne
+« zones contrôlées / VP / escouades par zone » de cette table qui reste, elle, non rejouée.
 
 ### 12.6 Deux défauts de la pénalité et le trou de test qui les cachait — 2026-08-12
 
@@ -781,8 +790,43 @@ doctrine : tout s'arrêtait aux fonctions privées, et trois décisions n'étaie
 
 ⚠️ **À REJOUER** : la mesure du §12.5 sur 600 parties. Les poids agissent désormais tels qu'ils sont
 écrits dans `config/bot_movement_weights.json`, ce que les chiffres actuels ne reflètent pas.
+✅ **REJOUÉE le 2026-08-13, §12.8** (100 ep/bot, `robust_0.8721`) : `combined = 0,7767`, pire bot
+`racer = 0,630`. Corollaire à retenir : les deux défauts corrigés ici ne déplaçaient PAS le
+résultat d'ensemble — c'est bien la pénalité elle-même qui portait le gain, pas la moitié qui
+agissait.
 
-### 12.7 Calibration `w_crowd`/`w_contest` par étalement (2026-08-13)
+### 12.7 Calibration `w_crowd`/`w_contest` par étalement (2026-08-13) — ⛔ INVALIDÉE
+
+> ⛔ **SECTION INVALIDÉE le 2026-08-13, conservée exprès.** Ses chiffres ne valent rien et ses
+> deux corrections de poids ont été DÉFAITES (cf. §12.8). Elle reste ici parce que c'est la
+> MÉTHODE qu'il ne faut pas refaire, et les trois défauts ci-dessous sont chacun suffisant à eux
+> seuls pour annuler la conclusion :
+>
+> **(a) L'instrument n'était pas celui décrit.** Les deux runs ont été joués avec une version de
+> `scripts/bot_zone_direct.py` où la graine de base valait `42` en dur et où l'instantané des
+> zones était pris AVANT le `step`. Le script consigné depuis lit `tc["seed"]` (12345) et relève
+> APRÈS. Aucun des tableaux ci-dessous n'est donc rejouable, ni comparable à quoi que ce soit.
+> Et le défaut était PLUS PROFOND qu'un décalage de valeurs : l'instrument consigné, lui, est
+> déterministe (§12.8), donc les 0,10 à 0,30 d'écart entre les deux runs sur des bots NON MODIFIÉS
+> ne sont pas une marge d'échantillonnage — cette version-là ne rejouait pas les mêmes parties.
+>
+> **(b) La « référence panel » citée n'existe pas.** La ligne « §12.5 (post-§12.6) : T2=1.61,
+> T5=1.90 » est fausse deux fois : le §12.5 déclare lui-même ses chiffres ANTÉRIEURS au §12.6, et
+> 1,61 → 1,90 y est le couple **avant → après** d'une SEULE métrique (zones contrôlées au T5),
+> pas un T2 suivi d'un T5. Toute la lecture « alpha est sous la référence » repose sur ce chiffre
+> inventé.
+>
+> **(c) Le « seuil `w_crowd` > 1.5 » est faux, et la table le montrait déjà.** Il est contredit
+> par ses propres lignes — `endgame` et `attrition` sont à `w_crowd = 1.0` et ne déclinent pas —
+> et par le code : dans `select_movement_destination` (`ai/bot_doctrines.py`), le `hold_bonus`
+> est ajouté à TOUTE destination située dans une zone, y compris celle où l'escouade voudrait
+> partir. Il **s'annule donc entre deux zones** et n'a jamais été le terme à franchir. Ce qui
+> retient une escouade sur sa zone, c'est la DISTANCE à l'autre zone : rester bat partir dès que
+> `w_crowd × (surplus_ici − surplus_là-bas) < distance`. Ne jamais réutiliser ce seuil.
+>
+> **Ce que le §12.8 en retient quand même** : `decapitation` décline bien entre T2 et T5, et ça,
+> c'est vrai (mesuré à nouveau, n=60). Le reste — le diagnostic, le seuil, les valeurs 2.0 — est
+> à jeter.
 
 Instrument : `scripts/bot_zone_direct.py --episodes 20`, plateau `x1` (board/44x60x1), modèle
 `robust_0.8721`. Lit `game_state["objective_controllers"]` directement — contourne le problème
@@ -836,9 +880,240 @@ construction de la doctrine (poursuite ennemie prioritaire) — ce n'est pas un 
 | scorer | 1.85 | 2.05 | 1.90 | 2.20 |
 | endgame | 1.50 | 1.40 | 1.95 | 1.95 |
 
-### 12.8 Distance hex et taux de pertes — deux grandeurs de diagnostic (2026-08-13)
+> ⛔ Cette dernière table est le signe qui aurait dû arrêter la conclusion sur place : quatre bots
+> NON MODIFIÉS bougent de 0,10 à 0,30 entre deux runs à graines censément identiques. Ce n'était
+> pas du bruit — l'instrument consigné rend, lui, des relevés IDENTIQUES AU BIT d'un run à l'autre
+> (§12.8). Un contrôle qui dérive dénonce un défaut de protocole, jamais une marge d'erreur.
 
-**Contexte.** Le réglage du §12.7 a révélé que les chiffres de zones ne suffisent pas à distinguer
+⚠️ **CES CHIFFRES NE SONT PAS REPRODUCTIBLES** (constaté le 2026-08-13, cf. §12.11) : l'instrument
+lisait alors le chemin **canonique** du modèle, que tout entraînement réécrit — il ne mesurait donc
+pas `robust_0.8721` malgré ce qui est écrit ci-dessus. Rejoués à 60 ép. sur le modèle de référence,
+les quatre bots de contrôle donnent 1.67/2.08 (attrition), 1.77/2.07 (racer), 1.65/1.93 (scorer),
+1.57/2.08 (endgame). Son **sens** ne tient pas davantage : le seuil `w_crowd > 1.5` a ete mesure ISOLEMENT au §12.8 et
+refute — monter `w_crowd` RETIRE des zones a `alpha`, et ne rend rien a `decapitation`.
+
+### 12.8 Recalibration de `w_crowd`/`w_contest`, refaite proprement (2026-08-13)
+
+Reprise complète après invalidation du §12.7. Rien n'y est repris : ni la référence, ni le seuil,
+ni les tableaux.
+
+**Ce qui a été rétabli avant de mesurer.** Les deux hausses du §12.7 ont été DÉFAITES —
+`alpha.w_crowd` et `decapitation.w_crowd` 2.0 → 0.5, `decapitation.w_contest` 1.5 → 1.0 — et les
+deux `_justification` qui invoquaient le faux seuil, supprimées. Mesurer à partir de poids posés
+sur une mesure invalidée aurait fait porter le même doute à toute la suite.
+
+#### L'instrument, et ce qu'il change au protocole
+
+`scripts/bot_zone_direct.py`, corrigé sur deux points :
+
+- **le modèle ne se lit plus au chemin canonique.** `--model` pointe l'archive nommée
+  `ArmageddonAgent_12345_robust_0.8721.zip`, que rien n'écrase, et le **md5 chargé est imprimé
+  au-dessus de chaque tableau**. Le chemin `model_ArmageddonAgent.zip` portait ce jour-là
+  `1072b0c6…`, soit un AUTRE modèle : toute mesure lancée sans ce garde aurait été muette
+  là-dessus (c'est le §10.2, qui n'était pas armé dans l'instrument) ;
+- **`--json-out`** consigne le relevé PAR ÉPISODE, plus les poids réellement consommés
+  (`load_doctrine_weights`, pas une copie du fichier) et le `hold_bonus`. C'est ce qui rend la
+  comparaison APPARIÉE possible.
+
+**Le script est reproductible au bit, et c'est ça qui porte le protocole.** Deux exécutions
+consécutives à graines identiques rendent des `--json-out` dont le `diff` est vide hors
+l'étiquette. La politique joue en `deterministic=True` et `W40KEngine.reset` sème `random` avec la
+graine d'épisode, ce qui couvre la part aléatoire des bots. Trois conséquences, toutes utilisées
+ci-dessous :
+
+1. **la dérive d'un bot de contrôle vaut exactement 0,000** — vérifié à chaque run, sur les cinq
+   bots non modifiés et sur les quatre tours. Ce n'est plus une marge à franchir, c'est un
+   INVARIANT : un contrôle qui bouge signe une erreur de protocole (modèle, plateau ou graine
+   changés en route), et le run est à jeter, pas à moyenner ;
+2. **la comparaison est appariée** : l'épisode *i* de deux runs ne diffère que par le poids changé,
+   donc l'écart se lit épisode par épisode. L'erreur-type de la différence est 3 à 4 fois plus
+   petite que celle des moyennes prises séparément (±0,08 contre ±0,13 en combinant deux ±0,09) ;
+3. **le « n ≥ 60 » ne sert plus à couvrir une dérive** — il n'y en a pas — mais à échantillonner
+   assez de parties pour que l'écart, lui, sorte du bruit d'échantillonnage.
+
+⚠️ Deux `random.seed`/`np.random.seed` par épisode ont été ajoutés en tête de boucle, copiés de
+`ai/bot_evaluation.py`. **Mesuré : les retirer ne change aucun relevé** — le moteur sème déjà. Ils
+ne corrigent donc rien aujourd'hui et le doc du script le dit ; ils sont là pour que l'instrument
+et la vraie boucle d'évaluation ne divergent pas en silence.
+
+#### Référence rejouée — 60 épisodes/bot, poids rétablis
+
+`W40K_BOARD_PATH=board/44x60x1`, modèle `robust_0.8721` (md5 `6f6b9805…`), graine de base 12345,
+sièges `random`, pool holdout. Zones contrôlées par le bot, moyenne sur 60 épisodes.
+
+| bot | T1 | T2 | T3 | T4 | T5 | sem T2 | sem T5 |
+|---|---|---|---|---|---|---|---|
+| alpha | 0,97 | 1,12 | 0,93 | 1,13 | 1,10 | ±0,09 | ±0,10 |
+| attrition | 1,20 | 1,67 | 1,90 | 2,18 | **2,08** | ±0,09 | ±0,10 |
+| decapitation | 1,22 | 1,60 | 1,43 | 1,22 | **1,08** | ±0,09 | ±0,10 |
+| endgame | 1,15 | 1,57 | 1,77 | 1,88 | **2,08** | ±0,08 | ±0,11 |
+| racer | 1,38 | 1,77 | 1,88 | 1,97 | **2,07** | ±0,10 | ±0,11 |
+| scorer | 1,37 | 1,65 | 1,85 | 2,08 | 1,93 | ±0,10 | ±0,11 |
+
+C'est CETTE table qui sert de référence, et elle n'a pas d'équivalent antérieur : le §12.5 ne
+publie pas de relevé par bot et par tour, il publie une moyenne de panel avant/après pénalité.
+
+#### Les deltas, appariés, avec la dérive des contrôles en regard
+
+Un run par poids, un seul poids changé, les cinq autres bots joués en contrôle. Chaque case est la
+moyenne des différences épisode par épisode contre la référence.
+
+| run | poids changé | Δ T2 | Δ T3 | Δ T4 | Δ T5 | dérive des 5 contrôles |
+|---|---|---|---|---|---|---|
+| R3 | `alpha.w_crowd` 0.5 → **0.0** | +0,000 ±0,041 | +0,033 ±0,071 | −0,017 ±0,061 | −0,100 ±0,078 | **0,000 ±0,000** |
+| R1 | `alpha.w_crowd` 0.5 → **1.0** | +0,050 ±0,044 | +0,083 ±0,055 | +0,017 ±0,061 | −0,150 ±0,078 | **0,000 ±0,000** |
+| R2 | `alpha.w_crowd` 0.5 → **2.0** | +0,033 ±0,058 | +0,083 ±0,055 | −0,050 ±0,069 | **−0,233 ±0,093** | **0,000 ±0,000** |
+| R4 | `decapitation.w_crowd` 0.5 → **2.0** | −0,083 ±0,064 | −0,033 ±0,082 | −0,017 ±0,084 | −0,050 ±0,129 | **0,000 ±0,000** |
+| R5 | `decapitation.w_contest` 1.0 → **1.5** | +0,000 ±0,041 | +0,000 ±0,053 | +0,000 ±0,079 | +0,033 ±0,082 | **0,000 ±0,000** |
+
+**Les deux corrections du §12.7 sont réfutées, et l'une d'elles a le signe inverse.**
+
+- `alpha` : monter `w_crowd` **retire** des zones au tour 5, et de plus en plus haut on monte
+  (−0,10 / −0,15 / −0,23 pour 0.0 / 1.0 / 2.0). Le 2.0 posé le matin est le seul point de la série
+  qui sorte franchement de sa marge — **dans le mauvais sens**, là où le §12.7 annonçait
+  +0,25. Lecture : ce bot traverse la table vers l'ennemi (`w_enemy` 1.2), ses escouades ne
+  s'empilent pas sur une zone ; les écarter l'une de l'autre ne fait que les écarter des zones.
+  `w_crowd` reste à **0.5**, qui est le maximum des quatre valeurs essayées.
+- `decapitation` : `w_crowd` 2.0 rend **−0,05 ±0,13**, soit rien, et `w_contest` 1.5 rend
+  **+0,03 ±0,08**, soit rien non plus — avec des zéros EXACTS aux tours 2, 3 et 4. Les deux poids
+  restent à **0.5** et **1.0**.
+
+**Ce que le §12.7 avait vu juste, et qui reste ouvert** : `decapitation` décline bien, de 1,60 au
+tour 2 à 1,08 au tour 5, et c'est le seul bot du panel dans ce cas avec `alpha`. Le déclin est
+réel et rejoué à n=60. Mais aucun des deux poids incriminés ne le corrige, donc **la cause est
+ailleurs** : la chercher dans le terme d'encombrement a déjà coûté une campagne, et ce §12.8 est
+la deuxième.
+
+#### Mesure finale contre l'agent (étape 8) — poids rétablis, `robust_0.8721`
+
+Sans elle, tout ce qui précède serait un déplacement de zones sans effet démontré sur l'objectif.
+Commande du §2, profil `x1_panel`, **100 épisodes par bot** (600 au total, 452 s, 1,33 ép./s) :
+
+```bash
+python3 ai/train.py --agent ArmageddonAgent --training-config x1_panel \
+  --test-only --test-episodes 100 --resolution 1
+```
+
+| bot | win-rate agent | W / L / D |
+|---|---|---|
+| **racer** | **0,63** | 63 / 37 / 0 |
+| attrition | 0,71 | 71 / 28 / 1 |
+| scorer | 0,76 | 76 / 23 / 1 |
+| endgame | 0,80 | 80 / 19 / 1 |
+| decapitation | 0,83 | 83 / 17 / 0 |
+| alpha | 0,93 | 93 / 7 / 0 |
+
+**`Combined = 0,7767`. Pire bot `racer` = 0,630. Pire scénario `holdout_regular_bot-01` = 0,733.**
+Écart Space Marine − Ork : −4,7 pt.
+
+C'est **le premier combined post-§12.6 sur ce modèle**, donc ce chiffre-là remplit la case laissée
+ouverte par le « ⚠️ À REJOUER » des §12.5 et §12.6 : l'amplitude annoncée là-bas (0,873 → 0,788,
+pire bot 0,78 → 0,62) est **confirmée, pas révisée** — 0,7767 et 0,630 tombent à la marge près sur
+les mêmes valeurs, alors que les deux défauts de la pénalité ont été corrigés entre-temps.
+
+⚠️ **Ce que cette mesure NE dit pas.** Elle ne compare pas deux jeux de poids : les hausses du
+§12.7 n'ont pas été portées jusqu'ici, parce que l'étalement — la grandeur qu'elles prétendaient
+améliorer — les a déjà réfutées à un coût vingt fois moindre. Elle établit la ligne de base du
+panel rétabli, et c'est à elle que se comparera le prochain réglage.
+
+⚠️ **Modèle lu dans un `ai/models/` PRIVÉ AU WORKTREE** (§10.2), `md5 6f6b9805…` vérifié avant et
+après. Le chemin canonique partagé portait ce jour-là `1072b0c6…` — un autre modèle, 35 Mo contre
+48 : lancer cette mesure dessus aurait rendu un combined sans rapport avec les §11 et §12, et rien
+dans la sortie ne l'aurait signalé.
+
+### 12.9 `scorer` réglé — le dernier style posé sans mesure (2026-08-13)
+
+`scorer` était le seul profil du panel dont les six poids n'avaient jamais été confrontés à une
+mesure : posés par doctrine à sa création (§11.3), et sa `_justification` le disait. Protocole du
+§12.8, repris sans rien y changer.
+
+**La référence a d'abord été rejouée, et elle reproduit le §12.8 case pour case** — six bots, cinq
+tours, au centième : alpha 1,12/1,10 · attrition 1,67/2,08 · decapitation 1,60/1,08 · endgame
+1,57/2,08 · racer 1,77/2,07 · scorer 1,65/1,93 (T2/T5). La reproductibilité au bit sur laquelle
+repose tout ce protocole tient donc aussi **d'une session à l'autre**, ce que le §12.8 n'avait pas
+vérifié : il ne l'avait constatée qu'entre deux exécutions consécutives.
+
+#### La grille — les six poids encadrés dans les deux sens
+
+Douze runs, 60 épisodes/bot, un seul poids changé par run, les cinq autres bots en contrôle.
+**Dérive des contrôles : 0,000 sur les quatre tours dans les douze cas.** Chaque case est la
+moyenne des différences épisode par épisode contre la référence.
+
+| poids changé | Δ T2 | Δ T3 | Δ T4 | Δ T5 |
+|---|---|---|---|---|
+| `w_objective` 1.0 → 0.7 | −0,033 ±0,047 | −0,050 ±0,060 | −0,067 ±0,085 | −0,067 ±0,106 |
+| `w_objective` 1.0 → 1.3 | +0,017 ±0,044 | +0,150 ±0,082 | +0,117 ±0,079 | +0,133 ±0,102 |
+| `w_enemy` 0.3 → **0.0** | +0,083 ±0,068 | +0,150 ±0,106 | +0,133 ±0,115 | **+0,400 ±0,163** |
+| `w_enemy` 0.3 → 0.6 | +0,100 ±0,074 | −0,117 ±0,104 | **−0,283 ±0,104** | −0,200 ±0,142 |
+| `w_fire` 0.6 → 0.0 | +0,083 ±0,064 | **+0,233 ±0,102** | +0,133 ±0,099 | +0,233 ±0,127 |
+| `w_fire` 0.6 → 1.0 | −0,067 ±0,047 | −0,117 ±0,083 | −0,067 ±0,078 | +0,100 ±0,081 |
+| `w_risk` 0.4 → 0.0 | −0,033 ±0,053 | −0,117 ±0,092 | −0,217 ±0,117 | +0,000 ±0,126 |
+| `w_risk` 0.4 → 0.9 | +0,000 ±0,048 | +0,133 ±0,077 | −0,050 ±0,096 | +0,233 ±0,133 |
+| `w_contest` 3.5 → **1.5** | +0,100 ±0,052 | +0,133 ±0,105 | +0,083 ±0,102 | **+0,367 ±0,136** |
+| `w_contest` 3.5 → 5.0 | −0,067 ±0,071 | −0,117 ±0,104 | −0,133 ±0,105 | −0,117 ±0,126 |
+| `w_crowd` 2.5 → 1.0 | +0,067 ±0,047 | +0,000 ±0,098 | +0,067 ±0,103 | +0,083 ±0,115 |
+| `w_crowd` 2.5 → **4.0** | −0,017 ±0,061 | +0,100 ±0,070 | +0,083 ±0,080 | **+0,333 ±0,111** |
+
+**Règle de rétention, appliquée uniformément** : franchir 2 sem au tour 5 **et** être monotone sur
+les deux points d'encadrement. Trois changements la passent — `w_enemy` → 0.0, `w_contest` → 1.5,
+`w_crowd` → 4.0 — et l'encadrement est ce qui les distingue du bruit : chacun a son point opposé
+de signe contraire.
+
+**Deux d'entre eux contredisent la doctrine qui les avait posés, même motif que le §12.8 sur
+`alpha`.** `w_contest` valait 3.5 « parce que scorer conteste » : le BAISSER à 1.5 est ce qui lui
+fait tenir le plus de zones. `w_enemy` valait 0.3 « il s'approche pour contester » : 0.0 fait
+mieux, et 0.6 fait pire. Poser un poids au nom de ce que le style est censé faire a maintenant
+échoué **trois fois de suite** dans ce chantier ; c'est un résultat sur la méthode, pas sur ce bot.
+
+**Trois changements positifs ne sont PAS retenus**, sous le seuil : `w_fire` → 0.0 (+0,233 ±0,127
+au T5, mais 2,3 sem au T3), `w_risk` → 0.9 (+0,233 ±0,133), `w_objective` → 1.3 (+0,133 ±0,102).
+Ce sont exactement les trois poids qui séparent `scorer` de `racer` (1.3 / 0.2 / 0.0 / 0.0) : les
+retenir tous aurait fait converger les deux styles et coûté un barreau à l'échelle. La règle de
+seuil les écarte d'elle-même — ce n'est pas un choix de doctrine posé après coup.
+
+#### La combinaison, mesurée et non déduite
+
+| | T2 | T3 | T4 | T5 |
+|---|---|---|---|---|
+| Δ apparié des trois poids ensemble | +0,217 ±0,072 | +0,300 ±0,102 | +0,233 ±0,112 | **+0,400 ±0,135** |
+
+`scorer` passe de 1,93 à **2,33** zones au tour 5 — premier du panel devant `attrition`/`endgame`
+(2,08) et `racer` (2,07) — et son déclin T4→T5 disparaît.
+
+⚠️ **Les trois effets se RECOUVRENT largement** : pris isolément ils totalisent +1,10 au tour 5,
+ensemble ils rendent +0,40. Aucune mesure poids-par-poids ne pouvait le dire, et un jeu de poids
+retenu sans ce run aurait été annoncé sur une somme trois fois trop grande. C'est la raison d'être
+du run de confirmation, et elle vaut pour tout réglage multi-poids à venir.
+
+#### Mesure contre l'agent (étape 8) — 100 épisodes/bot
+
+Commande du §2, profil `x1_panel`, modèle `robust_0.8721` (md5 `6f6b9805…`) lu dans le `ai/models/`
+privé au worktree, 600 épisodes en 556 s.
+
+| bot | §12.8 | §12.9 |
+|---|---|---|
+| racer | 0,63 | 0,63 |
+| **scorer** | **0,76** | **0,66** |
+| attrition | 0,71 | 0,71 |
+| endgame | 0,80 | 0,80 |
+| decapitation | 0,83 | 0,83 |
+| alpha | 0,93 | 0,93 |
+| **combined** | **0,7767** | **0,7600** |
+
+**Les cinq bots non touchés rendent EXACTEMENT leur chiffre du §12.8**, ce qui étend l'invariant de
+dérive nulle à la boucle d'évaluation complète — il n'avait été établi que sur l'instrument
+d'étalement. `scorer` gagne 10 points sur l'agent et devient le deuxième bot le plus dur du panel,
+à 3 points de `racer`. Pire scénario `holdout_regular_bot-01` : 0,733 → **0,7067**. Écart Space
+Marine − Ork : −4,7 → −6,0 pt.
+
+**Le gain d'étalement se transmet donc bien à l'objectif**, et c'est la première fois qu'on le
+vérifie dans ce chantier : le §12.8 n'avait porté aucun de ses réglages jusqu'à cette mesure,
+puisque l'étalement les avait déjà réfutés.
+
+### 12.10 Distance hex et taux de pertes — deux grandeurs de diagnostic (2026-08-13)
+
+**Contexte.** Le réglage du §12.7 est depuis **invalidé** (§12.8), mais le manque qu'il avait mis
+au jour est réel et lui survit : les chiffres de zones ne suffisent pas à distinguer
 un bot qui s'étale correctement d'un bot qui progresse vers les zones *en passant à côté des
 ennemis* : `alpha` et `decapitation` avaient un T5 bas alors qu'ils pourchassaient l'ennemi par
 doctrine. Deux grandeurs lisibles directement sur le même `game_state` comblent ce trou.
@@ -941,141 +1216,6 @@ Pour mémoire, le test par groupes rejoué sur le BON jeu de données et sur la 
 la montée (T4→T5, et non T3→T5) : `decapitation` rend +0.49 ±3.14 sans perte contre +0.27 ±1.90
 avec perte — deux intervalles qui se recouvrent entièrement. Il n'aurait pas tranché non plus.
 
-### 12.9 Nouvelles métriques de convergence (2026-08-13)
-
-Les trois grandeurs du §12.8 ne disent pas si les escouades d'un même bot visent **le même**
-ennemi. Deux s'y ajoutent, écrites dans le relevé par épisode comme les précédentes :
-
-| clé JSON | définition | lecture |
-|----------|-----------|---------|
-| `focus_targets_by_turn` | nombre d'ennemis **distincts** élus « plus proche » par au moins une escouade bot sur table | `1` = toutes les escouades convergent ; `N` = chacune part de son côté |
-| `focus_dist_by_turn` | distance hex moyenne des escouades bot sur table à la **cible focalisée** du bot (`_focus_target`) | ce que « suivre la cible commune » coûte en distance parcourue |
-
-`focus_dist_by_turn` n'existe **que** pour les doctrines qui élisent une cible commune
-(`DecapitationBot`). Les cinq autres n'ont pas d'attribut `_focus_target` : la clé est **absente**
-du JSON et la ligne vaut `—` dans le tableau — jamais `0`, qui se lirait comme « distance nulle »
-(T1). Même règle qu'au §12.8 pour les réserves : sentinel `(-1,-1)` exclu des deux côtés, une
-cible morte ou hors table rend `None`.
-
-⚠️ La mesure lit `bot._focus_target` **nu**, jamais `bot._focus(game_state)`. `_focus` périme la
-cible sur le marqueur de tour : l'appeler depuis l'instrumentation muterait l'état du bot à la
-frontière de tour, donc changerait la grandeur mesurée par le fait de la mesurer.
-
-**Verrou automatisé :** 14 tests dans `tests/unit/scripts/test_bot_zone_direct_metrics.py`. Rouge
-prouvé par mutation sur `_ennemi_en_reserves_exclu` et `_none_si_cible_en_reserves` (2026-08-13).
-
-#### 12.9.1 Mesure avant/après l'élection de cible au mouvement
-
-**Ce qui est comparé.** « Avant » = `5833c826` ; « après » = le tree du 2026-08-13, où
-`DecapitationBot` surcharge `_enemy_anchors` pour que `w_enemy` tire vers la cible **élue** au lieu
-de l'ennemi le plus proche de chaque escouade (§12.11). Le SHA `e4a44b1a`, qui porte une version
-intermédiaire de ce travail, vit sur une branche non fusionnée : il ne se retrouve pas depuis
-`main`, d'où les deux repères ci-dessus.
-
-**Les poids ne changent pas entre les deux états** — comparaison faite valeur par valeur sur
-`config/bot_movement_weights.json`, seul le texte `_justification` de `decapitation` diffère. Il
-n'y a donc rien à démêler entre « élection » et « réglage de poids » : l'élection est le **seul**
-facteur.
-
-**Protocole.** `--episodes 60`, plateau `x1`, modèle `robust_0.8721`, mêmes graines des deux côtés
-(`_episode_seed` est déterministe) — les épisodes s'apparient un à un, ce qui autorise une
-comparaison appariée bien plus fine que deux moyennes indépendantes. Instrument identique dans les
-deux arbres : le script de mesure et ses deux dépendances ont été recopiés dans le worktree.
-
-**Contrôle de validité.** Les cinq autres bots rendent des relevés **bit-identiques** entre les deux
-runs, sur les cinq grandeurs et les cinq tours. Seul `decapitation` bouge : l'écart mesuré vient de
-la doctrine, pas du bruit ni de l'instrument.
-
-**`focus_targets_by_turn` — cibles distinctes (60 ép./bot) :**
-
-| Bot | T1 | T2 | T3 | T4 | T5 |
-|-----|----|----|----|----|----|
-| alpha (identique) | 1.33 | 1.88 | 1.95 | 1.72 | 1.58 |
-| attrition (identique) | 1.33 | 1.87 | 1.80 | 2.02 | 1.77 |
-| endgame (identique) | 1.32 | 1.62 | 1.58 | 1.75 | 1.82 |
-| racer (identique) | 1.33 | 1.95 | 1.85 | 1.90 | 1.75 |
-| scorer (identique) | 1.40 | 1.82 | 1.88 | 1.95 | 1.92 |
-| **decapitation avant** | 1.25 | 1.85 | 1.78 | 1.87 | 1.67 |
-| **decapitation après** | 1.22 | 1.93 | 1.60 | 1.58 | 1.47 |
-| Δ apparié (±IC 95 %) | −0.03 ±0.07 | +0.08 ±0.21 | −0.18 ±0.24 | **−0.28 ±0.25** | −0.20 ±0.22 |
-
-**`focus_dist_by_turn` — distance à la cible focalisée (`decapitation` seul) :**
-
-| | T1 | T2 | T3 | T4 | T5 |
-|-|----|----|----|----|----|
-| **avant** | 26.5 | 22.1 | 21.4 | 20.0 | 19.3 |
-| **après** | 32.8 | 31.2 | 22.0 | 20.2 | 20.2 |
-| Δ apparié (±IC 95 %) | **+5.85 ±3.79** | **+9.05 ±4.10** | +0.94 ±3.00 | −0.24 ±2.61 | +0.45 ±2.58 |
-| ép. avec une cible, avant → après | 54 → 58 | 58 → 60 | 58 → 60 | 57 → 54 | 55 → 60 |
-
-Les cinq autres bots valent `—` sur toute la ligne, aux deux runs.
-
-**Rappel des deux grandeurs du §12.8, sur les mêmes runs (`decapitation`) :**
-
-| | T1 | T2 | T3 | T4 | T5 |
-|-|----|----|----|----|----|
-| `dist_by_turn` avant | 31.3 | 20.8 | 15.7 | 14.6 | 15.0 |
-| `dist_by_turn` après | 30.5 | 20.7 | 15.8 | 15.9 | 15.1 |
-| Δ apparié (±IC 95 %) | −0.82 ±0.76 | −0.07 ±1.11 | +0.06 ±1.63 | +1.23 ±1.69 | +0.08 ±1.92 |
-| `zones_by_turn` avant | 1.22 | 1.43 | 1.28 | 1.08 | 0.98 |
-| `zones_by_turn` après | 1.17 | 1.40 | 1.17 | 0.93 | 0.92 |
-| Δ apparié (±IC 95 %) | −0.05 ±0.09 | −0.03 ±0.14 | −0.12 ±0.23 | −0.15 ±0.25 | −0.07 ±0.20 |
-
-**Conclusion causale.** L'élection au mouvement fait bien ce pour quoi elle a été écrite — elle
-envoie les escouades vers une cible commune plus lointaine (`focus_dist` +9.1 hex à T2) et resserre
-la convergence en milieu de partie (`focus_targets` −0.28 à T4, seul écart de convergence
-significatif) — mais **elle n'explique pas la distance au plus proche ennemi du §12.8** : à graine
-égale, `dist_by_turn` est inchangée sur T2–T5. La montée observée au §12.8 vient donc d'ailleurs.
-
-#### 12.9.2 La montée de `dist_by_turn` au dernier tour est un BIAIS DE SURVIE
-
-Élucidé le 2026-08-13 **sans nouveau run**, par relecture du relevé par escouade des 60 épisodes
-du §12.8 (mêmes graines, même modèle, même plateau).
-
-`dist_by_turn` moyenne sur les escouades **vivantes sur table**, donc sa population change à chaque
-tour. Or les escouades qui meurent sont, de très loin, les plus proches de l'ennemi — relevé sur
-les mêmes parties, distance au tour `t` selon qu'elles sont mortes ou vives au tour `t+1` :
-
-| bot | T3 mortes → | T3 vives → | T4 mortes → | T4 vives → |
-|---|---|---|---|---|
-| decapitation | **5,6** (n=32) | 17,1 (n=232) | **6,0** (n=48) | 16,8 (n=184) |
-| racer | 5,8 (n=29) | 19,3 (n=241) | 6,9 (n=34) | 19,4 (n=207) |
-| attrition | 4,9 (n=14) | 21,0 (n=270) | 6,2 (n=25) | 20,7 (n=245) |
-
-Les retirer relève mécaniquement la moyenne du tour suivant. **La preuve tient en une COHORTE
-FIXE** : en ne suivant que les escouades vivantes au tour 5, et en les remontant dans le temps, la
-montée disparaît entièrement chez les deux bots concernés.
-
-| bot | population | T1 | T2 | T3 | T4 | T5 |
-|---|---|---|---|---|---|---|
-| decapitation | toutes vivantes (= §12.8) | 31,3 | 20,9 | 15,7 | 14,5 | **14,9 ↑** |
-| decapitation | **cohorte fixe (vivantes à T5)** | 32,8 | 23,5 | 18,9 | 16,8 | **14,9 ↓** |
-| racer | toutes vivantes | 32,5 | 21,5 | 17,9 | 17,6 | **18,8 ↑** |
-| racer | **cohorte fixe** | 34,1 | 24,0 | 20,7 | 19,4 | **18,8 ↓** |
-| attrition | toutes vivantes | 34,5 | 24,2 | 20,2 | 19,4 | 22,2 ↑ |
-| attrition | **cohorte fixe** | 35,0 | 25,2 | 21,9 | 20,7 | **22,2 ↑** |
-
-⚠️ **`attrition` est le seul cas où il reste une montée RÉELLE** (+1,5 hex à cohorte fixe) : c'est
-son mode `attrition_withdraw` (`w_enemy` −1,0), qui recule pour de bon. Chez `decapitation` et
-`racer`, il ne reste rien — la montée était entièrement l'artefact.
-
-La même chose se dit en une identité par épisode (Δ total = mouvement + composition), qui CHIFFRE
-la part de l'artefact au lieu de l'exhiber : elle est au §12.8, avec la raison pour laquelle un
-test par groupes « avec perte / sans perte » ne peut pas répondre à cette question.
-
-**Trois conséquences, dont une qui change la lecture du §12.8 :**
-
-1. Il n'y a **rien à expliquer côté doctrine** pour `decapitation` : le bot ne s'éloigne pas au
-   dernier tour, il perd ses escouades avancées.
-2. **Le §12.8 sous-estime l'exposition de `decapitation`**, il ne la surestime pas. Le biais joue
-   dans le sens de la prudence : c'est le bot qui perd le plus d'escouades (33 % à T5 contre 16 %
-   à `attrition`), donc celui dont la moyenne est la plus tirée vers le haut. Sa proximité réelle
-   à l'ennemi est **pire** que ce que le tableau affiche.
-3. **`dist_by_turn` ne se lit jamais seule au dernier tour.** La ligne « un bot qui s'approche :
-   distance décroissante de T1 à T5 » du §12.8 est vraie à effectif constant, fausse dès qu'un
-   camp perd des escouades. Toute lecture de cette grandeur au-delà de T3 se fait à cohorte fixe,
-   ou accompagnée du taux de pertes (`squads_by_turn`, déjà au relevé).
-
 ### 12.11 `decapitation` marchait vers un ennemi, tirait sur un autre (2026-08-13)
 
 **Le constat.** Le style concentre ses TIRS sur une cible unique par tour (`target_score` +
@@ -1177,7 +1317,144 @@ par le chemin de production — un override jamais appelé par le vrai chemin ne
 `w_enemy: 0.6` reste à re-régler une fois ce chiffre connu, puisqu'il agit désormais sur une
 distance beaucoup plus longue (la cible focalisée, pas l'ennemi collé).
 
-### 12.12 Protocole de mesure d'un changement de poids (§12.12)
+
+### 12.12 Nouvelles métriques de convergence (2026-08-13)
+
+Les trois grandeurs du §12.8 ne disent pas si les escouades d'un même bot visent **le même**
+ennemi. Deux s'y ajoutent, écrites dans le relevé par épisode comme les précédentes :
+
+| clé JSON | définition | lecture |
+|----------|-----------|---------|
+| `focus_targets_by_turn` | nombre d'ennemis **distincts** élus « plus proche » par au moins une escouade bot sur table | `1` = toutes les escouades convergent ; `N` = chacune part de son côté |
+| `focus_dist_by_turn` | distance hex moyenne des escouades bot sur table à la **cible focalisée** du bot (`_focus_target`) | ce que « suivre la cible commune » coûte en distance parcourue |
+
+`focus_dist_by_turn` n'existe **que** pour les doctrines qui élisent une cible commune
+(`DecapitationBot`). Les cinq autres n'ont pas d'attribut `_focus_target` : la clé est **absente**
+du JSON et la ligne vaut `—` dans le tableau — jamais `0`, qui se lirait comme « distance nulle »
+(T1). Même règle qu'au §12.8 pour les réserves : sentinel `(-1,-1)` exclu des deux côtés, une
+cible morte ou hors table rend `None`.
+
+⚠️ La mesure lit `bot._focus_target` **nu**, jamais `bot._focus(game_state)`. `_focus` périme la
+cible sur le marqueur de tour : l'appeler depuis l'instrumentation muterait l'état du bot à la
+frontière de tour, donc changerait la grandeur mesurée par le fait de la mesurer.
+
+**Verrou automatisé :** 14 tests dans `tests/unit/scripts/test_bot_zone_direct_metrics.py`. Rouge
+prouvé par mutation sur `_ennemi_en_reserves_exclu` et `_none_si_cible_en_reserves` (2026-08-13).
+
+#### 12.12.1 Mesure avant/après l'élection de cible au mouvement
+
+**Ce qui est comparé.** « Avant » = `5833c826` ; « après » = le tree du 2026-08-13, où
+`DecapitationBot` surcharge `_enemy_anchors` pour que `w_enemy` tire vers la cible **élue** au lieu
+de l'ennemi le plus proche de chaque escouade (§12.11). Le SHA `e4a44b1a`, qui porte une version
+intermédiaire de ce travail, vit sur une branche non fusionnée : il ne se retrouve pas depuis
+`main`, d'où les deux repères ci-dessus.
+
+**Les poids ne changent pas entre les deux états** — comparaison faite valeur par valeur sur
+`config/bot_movement_weights.json`, seul le texte `_justification` de `decapitation` diffère. Il
+n'y a donc rien à démêler entre « élection » et « réglage de poids » : l'élection est le **seul**
+facteur.
+
+**Protocole.** `--episodes 60`, plateau `x1`, modèle `robust_0.8721`, mêmes graines des deux côtés
+(`_episode_seed` est déterministe) — les épisodes s'apparient un à un, ce qui autorise une
+comparaison appariée bien plus fine que deux moyennes indépendantes. Instrument identique dans les
+deux arbres : le script de mesure et ses deux dépendances ont été recopiés dans le worktree.
+
+**Contrôle de validité.** Les cinq autres bots rendent des relevés **bit-identiques** entre les deux
+runs, sur les cinq grandeurs et les cinq tours. Seul `decapitation` bouge : l'écart mesuré vient de
+la doctrine, pas du bruit ni de l'instrument.
+
+**`focus_targets_by_turn` — cibles distinctes (60 ép./bot) :**
+
+| Bot | T1 | T2 | T3 | T4 | T5 |
+|-----|----|----|----|----|----|
+| alpha (identique) | 1.33 | 1.88 | 1.95 | 1.72 | 1.58 |
+| attrition (identique) | 1.33 | 1.87 | 1.80 | 2.02 | 1.77 |
+| endgame (identique) | 1.32 | 1.62 | 1.58 | 1.75 | 1.82 |
+| racer (identique) | 1.33 | 1.95 | 1.85 | 1.90 | 1.75 |
+| scorer (identique) | 1.40 | 1.82 | 1.88 | 1.95 | 1.92 |
+| **decapitation avant** | 1.25 | 1.85 | 1.78 | 1.87 | 1.67 |
+| **decapitation après** | 1.22 | 1.93 | 1.60 | 1.58 | 1.47 |
+| Δ apparié (±IC 95 %) | −0.03 ±0.07 | +0.08 ±0.21 | −0.18 ±0.24 | **−0.28 ±0.25** | −0.20 ±0.22 |
+
+**`focus_dist_by_turn` — distance à la cible focalisée (`decapitation` seul) :**
+
+| | T1 | T2 | T3 | T4 | T5 |
+|-|----|----|----|----|----|
+| **avant** | 26.5 | 22.1 | 21.4 | 20.0 | 19.3 |
+| **après** | 32.8 | 31.2 | 22.0 | 20.2 | 20.2 |
+| Δ apparié (±IC 95 %) | **+5.85 ±3.79** | **+9.05 ±4.10** | +0.94 ±3.00 | −0.24 ±2.61 | +0.45 ±2.58 |
+| ép. avec une cible, avant → après | 54 → 58 | 58 → 60 | 58 → 60 | 57 → 54 | 55 → 60 |
+
+Les cinq autres bots valent `—` sur toute la ligne, aux deux runs.
+
+**Rappel des deux grandeurs du §12.8, sur les mêmes runs (`decapitation`) :**
+
+| | T1 | T2 | T3 | T4 | T5 |
+|-|----|----|----|----|----|
+| `dist_by_turn` avant | 31.3 | 20.8 | 15.7 | 14.6 | 15.0 |
+| `dist_by_turn` après | 30.5 | 20.7 | 15.8 | 15.9 | 15.1 |
+| Δ apparié (±IC 95 %) | −0.82 ±0.76 | −0.07 ±1.11 | +0.06 ±1.63 | +1.23 ±1.69 | +0.08 ±1.92 |
+| `zones_by_turn` avant | 1.22 | 1.43 | 1.28 | 1.08 | 0.98 |
+| `zones_by_turn` après | 1.17 | 1.40 | 1.17 | 0.93 | 0.92 |
+| Δ apparié (±IC 95 %) | −0.05 ±0.09 | −0.03 ±0.14 | −0.12 ±0.23 | −0.15 ±0.25 | −0.07 ±0.20 |
+
+**Conclusion causale.** L'élection au mouvement fait bien ce pour quoi elle a été écrite — elle
+envoie les escouades vers une cible commune plus lointaine (`focus_dist` +9.1 hex à T2) et resserre
+la convergence en milieu de partie (`focus_targets` −0.28 à T4, seul écart de convergence
+significatif) — mais **elle n'explique pas la distance au plus proche ennemi du §12.8** : à graine
+égale, `dist_by_turn` est inchangée sur T2–T5. La montée observée au §12.8 vient donc d'ailleurs.
+
+#### 12.12.2 La montée de `dist_by_turn` au dernier tour est un BIAIS DE SURVIE
+
+Élucidé le 2026-08-13 **sans nouveau run**, par relecture du relevé par escouade des 60 épisodes
+du §12.8 (mêmes graines, même modèle, même plateau).
+
+`dist_by_turn` moyenne sur les escouades **vivantes sur table**, donc sa population change à chaque
+tour. Or les escouades qui meurent sont, de très loin, les plus proches de l'ennemi — relevé sur
+les mêmes parties, distance au tour `t` selon qu'elles sont mortes ou vives au tour `t+1` :
+
+| bot | T3 mortes → | T3 vives → | T4 mortes → | T4 vives → |
+|---|---|---|---|---|
+| decapitation | **5,6** (n=32) | 17,1 (n=232) | **6,0** (n=48) | 16,8 (n=184) |
+| racer | 5,8 (n=29) | 19,3 (n=241) | 6,9 (n=34) | 19,4 (n=207) |
+| attrition | 4,9 (n=14) | 21,0 (n=270) | 6,2 (n=25) | 20,7 (n=245) |
+
+Les retirer relève mécaniquement la moyenne du tour suivant. **La preuve tient en une COHORTE
+FIXE** : en ne suivant que les escouades vivantes au tour 5, et en les remontant dans le temps, la
+montée disparaît entièrement chez les deux bots concernés.
+
+| bot | population | T1 | T2 | T3 | T4 | T5 |
+|---|---|---|---|---|---|---|
+| decapitation | toutes vivantes (= §12.8) | 31,3 | 20,9 | 15,7 | 14,5 | **14,9 ↑** |
+| decapitation | **cohorte fixe (vivantes à T5)** | 32,8 | 23,5 | 18,9 | 16,8 | **14,9 ↓** |
+| racer | toutes vivantes | 32,5 | 21,5 | 17,9 | 17,6 | **18,8 ↑** |
+| racer | **cohorte fixe** | 34,1 | 24,0 | 20,7 | 19,4 | **18,8 ↓** |
+| attrition | toutes vivantes | 34,5 | 24,2 | 20,2 | 19,4 | 22,2 ↑ |
+| attrition | **cohorte fixe** | 35,0 | 25,2 | 21,9 | 20,7 | **22,2 ↑** |
+
+⚠️ **`attrition` est le seul cas où il reste une montée RÉELLE** (+1,5 hex à cohorte fixe) : c'est
+son mode `attrition_withdraw` (`w_enemy` −1,0), qui recule pour de bon. Chez `decapitation` et
+`racer`, il ne reste rien — la montée était entièrement l'artefact.
+
+La même chose se dit en une identité par épisode (Δ total = mouvement + composition), qui CHIFFRE
+la part de l'artefact au lieu de l'exhiber : elle est au §12.8, avec la raison pour laquelle un
+test par groupes « avec perte / sans perte » ne peut pas répondre à cette question.
+
+**Trois conséquences, dont une qui change la lecture du §12.8 :**
+
+1. Il n'y a **rien à expliquer côté doctrine** pour `decapitation` : le bot ne s'éloigne pas au
+   dernier tour, il perd ses escouades avancées.
+2. **Le §12.8 sous-estime l'exposition de `decapitation`**, il ne la surestime pas. Le biais joue
+   dans le sens de la prudence : c'est le bot qui perd le plus d'escouades (33 % à T5 contre 16 %
+   à `attrition`), donc celui dont la moyenne est la plus tirée vers le haut. Sa proximité réelle
+   à l'ennemi est **pire** que ce que le tableau affiche.
+3. **`dist_by_turn` ne se lit jamais seule au dernier tour.** La ligne « un bot qui s'approche :
+   distance décroissante de T1 à T5 » du §12.8 est vraie à effectif constant, fausse dès qu'un
+   camp perd des escouades. Toute lecture de cette grandeur au-delà de T3 se fait à cohorte fixe,
+   ou accompagnée du taux de pertes (`squads_by_turn`, déjà au relevé).
+
+
+### 12.13 Protocole de mesure d'un changement de poids (§12.13)
 
 **Contexte.** Calibrer `w_enemy` de `DecapitationBot` après le §12.11 exige de mesurer l'effet
 d'un changement de poids sans pollution par l'agent ni par les autres bots. Ce protocole isole
@@ -1258,3 +1535,86 @@ python3 ai/train.py --agent ArmageddonAgent --training-config x1 \
 
 Même modèle (`robust_0.9438`) et même commande qu'en §2 — c'est ce qui rend les colonnes
 comparables. À rejouer en dernier, une seule fois les poids stabilisés.
+
+### 12.14 Quatre lignes de travail réunies, et la ligne de base qui en sort (2026-08-13)
+
+Le chantier a été travaillé le même jour par **quatre sessions en parallèle**, chacune ignorant
+les autres. Chacune a produit du travail juste, et elles se contredisaient : trois sections
+numérotées `§12.8` le matin, deux `§12.11` et deux `§12.12` l'après-midi, trois copies
+divergentes de `scripts/bot_zone_direct.py` (207, 271 et 512 lignes), et jusqu'à **quatre
+mesures de 60 épisodes tournant en même temps** sur seize cœurs — chacune valide, toutes
+ralenties d'un facteur trois.
+
+⚠️ **C'est le coût réel du travail parallèle sur un chantier de mesure, et il ne se voit pas au
+moment où on le paie** : les quatre sessions suivaient le protocole, et c'est justement pour ça
+qu'aucune n'avait de raison de se méfier. Le §10.4 listait trois ressources partagées (le modèle
+canonique, `step.log`, les JSON de `config/`) ; il en manquait deux, les plus coûteuses — **la
+ligne de base elle-même**, et **la numérotation de ce document**. Une première unification a été
+faite en milieu de journée ; elle a été défaite en quatre heures par les sessions qui
+continuaient. La seconde n'a tenu que parce que les autres ont été gelées sur ces deux fichiers.
+
+#### Ce qui a été tranché, et sur quelle mesure
+
+- **`alpha` reste à `w_crowd` 0.5.** La table de contrôle de la session `decapitation`, mesurée
+  indépendamment avec `alpha` à 2.0, donne T5 = 0,87 ; la référence du §12.8 à 0.5 donne 1,10.
+  L'écart vaut 0,23 — exactement le **−0,233 ±0,093** que le §12.8 avait mesuré en apparié. Deux
+  sessions, deux instruments, le même chiffre : la réfutation du §12.7 est confirmée de l'extérieur.
+- **La forme du correctif de `decapitation` retenue est celle du §12.11**, et l'autre est
+  abandonnée avec sa section. Elle place l'élection dans `_enemy_anchors` et la garde
+  **provisoire** jusqu'à la première attaque du tour : le critère pris au mouvement ne regarde
+  pas la portée, donc figer la cible dès le déplacement — ce que faisait l'autre forme — décide
+  trop tôt. Elle rend un peu moins en zones (1,68 contre 1,77 au T5) et c'est cohérent.
+- **`decapitation.w_objective` 1.0 a été REJOUÉ sur cette forme-là**, parce que le sweep qui
+  l'avait établi portait sur l'autre. Apparié contre 1.0, dérive des cinq contrôles 0,000 :
+  0.5 rend **−0,750 ±0,146** zone au T5, 0.8 rend **−0,233 ±0,117**, 1.2 rend **+0,067 ±0,114**,
+  soit rien. Ce n'est donc **pas le « pic » qu'annonçait l'autre forme, mais un PLATEAU qui
+  commence à 1.0** — la plus petite valeur qui l'atteigne. Le chiffre retenu est le même ; sa
+  justification, elle, était fausse.
+- **L'instrument garde les gardes de `main`** (checkpoint nommé et vérifié au md5,
+  `W40K_BOARD_PATH` exigé, relevé par épisode) **et les deux champs sans lesquels la comparaison
+  appariée ne s'appuie sur rien** : l'étiquette de run, et les poids RÉELLEMENT consommés
+  (`load_doctrine_weights`, plus `hold_bonus` qui fixe l'échelle où `w_crowd` se lit).
+
+#### La ligne de base — 60 ép./bot en étalement, 100 ép./bot contre l'agent
+
+| bot | zones T2 | zones T5 | win-rate agent |
+|---|---|---|---|
+| racer | 1,77 | 2,07 | **0,63** |
+| scorer | **1,87** | **2,33** | 0,66 |
+| attrition | 1,67 | 2,08 | 0,71 |
+| decapitation | 1,63 | 1,68 | 0,73 |
+| endgame | 1,57 | 2,08 | 0,80 |
+| alpha | 1,12 | 1,10 | 0,93 |
+
+`Combined = 0,7433`. Pire bot `racer = 0,630`. Pire scénario `holdout_regular_bot-01 = 0,6867`.
+Écart Space Marine − Ork : −4,7 pt. **C'est cette ligne-là qui sert de référence désormais**, et
+c'est elle que porte `scripts/bot_panel_reference.py`.
+
+#### Ce que chaque livraison a coûté à l'agent
+
+| bot | avant réglage | après `scorer` (§12.9) | après `decapitation` (§12.11) |
+|---|---|---|---|
+| racer | 0,63 | 0,63 | 0,63 |
+| scorer | 0,76 | **0,66** | 0,66 |
+| attrition | 0,71 | 0,71 | 0,71 |
+| decapitation | 0,83 | 0,83 | **0,73** |
+| endgame | 0,80 | 0,80 | 0,80 |
+| alpha | 0,93 | 0,93 | 0,93 |
+| **combined** | 0,7767 | 0,7600 | **0,7433** |
+
+**Chaque baisse est imputable à une seule livraison, et les bots non touchés ne bougent pas d'un
+centième** — quatre d'entre eux rendent le même chiffre aux trois colonnes. L'invariant de dérive
+nulle, établi au §12.8 sur l'instrument d'étalement, tient donc aussi sur la boucle d'évaluation
+complète, sur trois mesures successives et sur deux formes différentes du correctif.
+
+⚠️ **`decapitation` n'est plus le bot qui décline** : de 1,60 → 1,08 au §12.8, il passe à
+1,63 → 1,68. `alpha` reste seul dans ce cas (1,12 → 1,10), pour une raison connue et assumée —
+il traverse la table vers l'ennemi, c'est sa doctrine. Il est aussi le bot le plus facile du
+panel (0,93) et celui qui perd le plus d'escouades : **c'est là qu'est le prochain sujet**, s'il
+en faut un.
+
+⚠️ **Reste ouvert** : `decapitation.w_crowd` (2.0) et `w_contest` (1.5) n'ont **jamais été
+isolés après le correctif de déplacement**. Le seul run qui les ait isolés (§12.8) précède le
+changement de géométrie, donc il ne transfère pas ; le sweep de `w_objective` les incluait sans
+les séparer. Ce sont les deux derniers poids du panel qui reposent sur autre chose qu'une mesure
+faite sur le code courant.
