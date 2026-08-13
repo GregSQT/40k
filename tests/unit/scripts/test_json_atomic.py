@@ -25,7 +25,15 @@ import pytest
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 
+import json_atomic  # noqa: E402  (le module lui-même : les tests d'ordre monkeypatchent ses `os.*`)
 from json_atomic import dump_json, json_out_draft, part_path, write_json_atomic  # noqa: E402
+
+
+def _leve(exc: BaseException):
+    """Remplaçant d'un appel système qui casse — la panne se construit, elle ne s'espère pas."""
+    def _ko(*_args, **_kwargs):
+        raise exc
+    return _ko
 
 #: Les scripts dont l'écriture JSON doit passer par le module. Les quatre `_write_json` privés
 #: d'origine : trois écrivaient à même la destination, le quatrième portait la forme retenue.
@@ -146,6 +154,47 @@ def test_une_fermeture_qui_rate_en_sortie_normale_ne_publie_pas(tmp_path):
     assert not (tmp_path / "releve.json.part").exists()
 
 
+def test_une_publication_qui_rate_n_abandonne_pas_le_brouillon(tmp_path, monkeypatch):
+    # TOCTOU : la destination est devenue un dossier / a perdu ses droits PENDANT un run long.
+    # `os.replace` casse alors après coup ; sans ce nettoyage, un `.part` reste sous `config/`.
+    cible = tmp_path / "releve.json"
+    cible.write_text('{"ancien": true}\n', encoding="utf-8")
+    monkeypatch.setattr(json_atomic.os, "replace", _leve(OSError("EPERM")))
+
+    with pytest.raises(OSError):
+        write_json_atomic(cible, {"neuf": True})
+
+    assert json.loads(cible.read_text(encoding="utf-8")) == {"ancien": True}
+    assert not (tmp_path / "releve.json.part").exists()
+
+
+def test_un_brouillon_deja_disparu_ne_masque_pas_l_exception_d_origine(tmp_path, monkeypatch):
+    # le ménage de la sortie en erreur est best-effort : c'est le Ctrl-C qui doit remonter, pas
+    # le `FileNotFoundError` du brouillon qu'un nettoyeur de /tmp a emporté entre-temps.
+    cible = tmp_path / "releve.json"
+    monkeypatch.setattr(json_atomic.os, "remove", _leve(FileNotFoundError("déjà parti")))
+
+    with pytest.raises(KeyboardInterrupt):
+        with json_out_draft(cible) as handle:
+            assert handle is not None
+            raise KeyboardInterrupt
+
+
+def test_les_donnees_sont_sur_le_disque_avant_la_publication(tmp_path, monkeypatch):
+    # un `os.replace` durable AVANT ses données rend un fichier VIDE là où une config valide
+    # tenait, après un crash hôte. L'ordre fsync -> replace est donc le verrou, et il n'est
+    # observable que sur la séquence des appels.
+    appels: list[str] = []
+    vrai_fsync, vrai_replace = json_atomic.os.fsync, json_atomic.os.replace
+    monkeypatch.setattr(json_atomic.os, "fsync", lambda fd: (appels.append("fsync"), vrai_fsync(fd))[1])
+    monkeypatch.setattr(json_atomic.os, "replace", lambda a, b: (appels.append("replace"), vrai_replace(a, b))[1])
+
+    write_json_atomic(tmp_path / "releve.json", {"ok": True})
+
+    # fsync du brouillon, PUIS publication, PUIS fsync du dossier (qui rend le renommage durable)
+    assert appels == ["fsync", "replace", "fsync"]
+
+
 def test_un_dossier_absent_n_est_pas_cree_en_silence(tmp_path):
     # pas de `mkdir(parents=True)` implicite : un chemin faux doit se voir, pas se réparer.
     with pytest.raises(FileNotFoundError):
@@ -214,6 +263,23 @@ def test_dump_json_ecrit_dans_le_brouillon_pas_dans_la_destination(tmp_path):
 
 # --- 3. verrou statique : plus aucune écriture JSON en direct ----------------------------------
 
+def _ouvre_en_ecriture(node: ast.Call, methode: bool) -> bool:
+    """Le mode d'un `open(...)`, où qu'il soit passé.
+
+    Trois formes à couvrir, et elles ne se ressemblent pas : `open(p, "w")` (mode en 2e
+    positionnel), `open(p, mode="w")` (mot-clé — la forme qu'une première version de ce contrôle
+    ne regardait pas, donc laissait passer) et `Path(p).open("w")` (méthode : le mode est le
+    PREMIER argument). `x` compte autant que `w` et `a` : il tronque tout autant la destination.
+    """
+    positionnels = node.args if methode else node.args[1:]
+    modes = [a.value for a in positionnels if isinstance(a, ast.Constant)]
+    modes += [
+        kw.value.value for kw in node.keywords
+        if kw.arg == "mode" and isinstance(kw.value, ast.Constant)
+    ]
+    return any(c in str(m) for m in modes for c in "wax")
+
+
 def _direct_write_calls(path: Path) -> list[str]:
     """Appels qui écriraient un JSON à même sa destination, sans brouillon."""
     tree = ast.parse(path.read_text(encoding="utf-8"))
@@ -222,12 +288,12 @@ def _direct_write_calls(path: Path) -> list[str]:
         if not isinstance(node, ast.Call):
             continue
         func = node.func
-        if isinstance(func, ast.Attribute) and func.attr in {"dump", "write_text"}:
-            fautifs.append(f"{func.attr}() ligne {node.lineno}")
-        elif isinstance(func, ast.Name) and func.id == "open":
-            modes = [a.value for a in node.args[1:] if isinstance(a, ast.Constant)]
-            if any("w" in str(m) or "a" in str(m) for m in modes):
-                fautifs.append(f"open(..., 'w') ligne {node.lineno}")
+        methode = isinstance(func, ast.Attribute)
+        nom = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
+        if nom in {"dump", "write_text"}:
+            fautifs.append(f"{nom}() ligne {node.lineno}")
+        elif nom == "open" and _ouvre_en_ecriture(node, methode):
+            fautifs.append(f"open en écriture ligne {node.lineno}")
     return fautifs
 
 
@@ -256,8 +322,35 @@ def test_le_verrou_statique_voit_reellement_une_ecriture_directe(tmp_path) -> No
         "    Path(p).write_text(json.dumps(d))\n"
         "def b(p, d):\n"
         "    with open(p, 'w') as f:\n"
-        "        json.dump(d, f)\n",
+        "        json.dump(d, f)\n"
+        "def c(p, d):\n"                       # mode en MOT-CLÉ
+        "    with open(p, mode='w') as f:\n"
+        "        f.write(json.dumps(d))\n"
+        "def e(p, d):\n"                       # méthode : le mode est le 1er argument
+        "    with Path(p).open('x') as f:\n"
+        "        f.write(json.dumps(d))\n",
         encoding="utf-8",
     )
 
-    assert len(_direct_write_calls(faux)) == 3
+    # 5 : write_text, open(w) + json.dump, open(mode=w), Path.open(x). Les deux dernières formes
+    # sont celles qu'un contrôle borné au 2e argument positionnel laisserait passer.
+    assert len(_direct_write_calls(faux)) == 5
+
+
+def test_le_verrou_statique_ne_confond_pas_une_lecture_avec_une_ecriture(tmp_path) -> None:
+    # les scripts couverts lisent leurs entrées par `open(p, "r")` / `Path(p).open()` : un
+    # contrôle qui les compterait serait rouge en permanence, donc désarmé le jour même.
+    lecteur = tmp_path / "lecteur.py"
+    lecteur.write_text(
+        "import json\n"
+        "from pathlib import Path\n"
+        "def a(p):\n"
+        "    with open(p, 'r', encoding='utf-8-sig') as f:\n"
+        "        return json.load(f)\n"
+        "def b(p):\n"
+        "    with Path(p).open() as f:\n"
+        "        return json.load(f)\n",
+        encoding="utf-8",
+    )
+
+    assert _direct_write_calls(lecteur) == []

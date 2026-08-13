@@ -23,7 +23,13 @@ Aucune création de dossier : un chemin faux se voit, il ne se répare pas en si
 
 La FERMETURE appartient à l'écriture : c'est elle qui vide le tampon, donc c'est elle qui casse
 sur un disque plein. Elle est dans le `try`, sinon un flush raté laisserait le brouillon derrière
-lui sans rien publier — l'exact défaut que ce module existe pour supprimer.
+lui sans rien publier — l'exact défaut que ce module existe pour supprimer. La PUBLICATION y est
+aussi : quand elle rate, le brouillon part avec elle plutôt que de rester sous `config/`.
+
+Durabilité : le brouillon est `fsync`é AVANT d'être publié, et le dossier APRÈS. Sans le premier,
+le renommage peut devenir durable avant les données qu'il publie, et un crash hôte rend un fichier
+VIDE là où une config valide tenait — la perte même que ce module nie. Sans le second, un crash
+peut rendre l'ancien nom : le fichier reste valide, seule la publication est à refaire.
 """
 from __future__ import annotations
 
@@ -46,6 +52,18 @@ def dump_json(handle: TextIO, payload: Any) -> None:
     handle.write("\n")
 
 
+def _fsync_dir(directory: str) -> None:
+    """Rend le RENOMMAGE durable. `os.replace` publie dans le cache du dossier ; sans ce fsync,
+    un crash hôte peut rendre au redémarrage l'ANCIEN nom — jamais un fichier tronqué, donc
+    l'invariant tient, mais la publication, elle, peut être à refaire sans qu'on le sache.
+    """
+    fd = os.open(directory or ".", os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
 @contextlib.contextmanager
 def _draft(path: StrPath) -> Iterator[TextIO]:
     if not os.fspath(path):
@@ -55,16 +73,28 @@ def _draft(path: StrPath) -> Iterator[TextIO]:
     handle = open(part_path(path), "w", encoding="utf-8")
     try:
         yield handle
-        handle.close()  # le flush APPARTIENT à l'écriture : s'il rate, on ne publie pas
+        # Le flush APPARTIENT à l'écriture : s'il rate, on ne publie pas. Le fsync qui le suit
+        # n'est pas du zèle — `os.replace` peut devenir durable AVANT les données qu'il publie,
+        # et un crash hôte rendrait alors un fichier vide à la place d'une config valide, très
+        # exactement la perte que ce module existe pour supprimer.
+        handle.flush()
+        os.fsync(handle.fileno())
+        handle.close()
+        # DANS le `try` : une publication qui rate (destination devenue un dossier, droits
+        # retirés pendant un run long) doit emporter le brouillon avec elle, pas le laisser
+        # traîner sous `config/`.
+        os.replace(part_path(path), path)
+        _fsync_dir(os.path.dirname(os.fspath(path)))
     except BaseException:
-        # le brouillon part à la poubelle : une erreur de fermeture n'y ajoute rien, et elle
-        # masquerait l'exception qui a réellement tué le travail. `path`, lui, n'a jamais été
-        # ouvert — il n'a donc pas bougé.
+        # Ménage best-effort, tout entier sous `suppress` : ce qui compte à cet instant, c'est
+        # l'exception qui a tué le travail — une erreur de fermeture ou un brouillon déjà
+        # disparu ne doivent pas prendre sa place. `path`, lui, n'a jamais été ouvert en
+        # écriture : il porte encore sa version précédente, complète.
         with contextlib.suppress(OSError):
             handle.close()
-        os.remove(part_path(path))
+        with contextlib.suppress(OSError):
+            os.remove(part_path(path))
         raise
-    os.replace(part_path(path), path)
 
 
 @contextlib.contextmanager
