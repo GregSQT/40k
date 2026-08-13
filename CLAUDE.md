@@ -195,7 +195,9 @@ d'effort de raisonnement.
 → Effort haut : algorithme avec cas limites complexes, raisonnement multi-étapes avec
                 dépendances croisées
 → Sonnet 5    : tout le reste (défaut) — édition ciblée, bug isolé, ajout de feature simple
-Format        : "🔴🔴🔴 Modèle suggéré : Opus 5 — [critère exact rempli] 🔴🔴🔴" en début de réponse.
+Format modèle : "🔴🔴🔴 Modèle suggéré : Opus 5 — [critère exact rempli] 🔴🔴🔴" en début de réponse.
+Format effort : "🟡🟡🟡 Effort suggéré : high — [critère exact rempli] 🟡🟡🟡" en début de réponse.
+Les deux bannières sont indépendantes l'une de l'autre et peuvent coexister sur la même réponse.
 Si aucun critère n'est rempli → ne rien dire.
 
 === RÈGLES MODE ASK — 1 à 5 (NON NÉGOCIABLES) ===
