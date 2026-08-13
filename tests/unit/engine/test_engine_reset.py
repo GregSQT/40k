@@ -480,7 +480,7 @@ class TestEpisodeNumberSourceUnique:
         assert engine.game_state["episode_number"] == offset + 1
 
     def test_episode_number_stable_across_multiple_resets(self, tmp_path):
-        """game_state["episode_number"] s'incrémente correctement reset après reset."""
+        """game_state et step_logger s'incrémentent ensemble reset après reset (pas de dérive logger)."""
         offset = 5
         engine = self._engine_with_logger_and_offset(tmp_path, offset)
 
@@ -488,12 +488,14 @@ class TestEpisodeNumberSourceUnique:
         engine.reset()
 
         assert engine.game_state["episode_number"] == offset + 2
+        assert engine.step_logger.episode_number == offset + 2
 
-    def test_step_logger_episode_number_matches_game_state(self, tmp_path):
-        """step_logger.episode_number == game_state["episode_number"] (alignement journaux)."""
-        offset = 5
+    @pytest.mark.parametrize("offset", [0, 5])
+    def test_step_logger_episode_number_matches_game_state(self, tmp_path, offset):
+        """step_logger.episode_number == game_state["episode_number"] == offset+1 (alignement journaux)."""
         engine = self._engine_with_logger_and_offset(tmp_path, offset)
 
         engine.reset()
 
+        assert engine.step_logger.episode_number == offset + 1
         assert engine.step_logger.episode_number == engine.game_state["episode_number"]
