@@ -19,7 +19,7 @@ import json
 import os
 import sys
 from collections import defaultdict
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TextIO
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -55,8 +55,19 @@ def _aggregate_zones(records: List[Dict[str, Any]]) -> Dict[str, Dict[int, List[
     return {bot: dict(per_turn) for bot, per_turn in results.items()}
 
 
+def _open_json_out(path: str) -> TextIO:
+    """Ouvre la destination AVANT de jouer : une destination fausse doit coûter une seconde.
+
+    Le relevé n'est écrit qu'à la fin (il faut tous les épisodes), mais l'ouvrir ici prouve
+    que le dossier existe ET qu'il est inscriptible — un simple `isdir` laisserait passer un
+    dossier en lecture seule, et l'erreur ne tomberait qu'après la partie, graines perdues.
+    Aucune création de dossier : un chemin faux se voit, il ne se répare pas en silence.
+    """
+    return open(path, "w", encoding="utf-8")
+
+
 def _write_json_out(
-    path: str,
+    handle: TextIO,
     model_path: str,
     scenario_file: str,
     episodes_requested: int,
@@ -69,9 +80,8 @@ def _write_json_out(
         "episodes_requested": episodes_requested,
         "episodes": records,
     }
-    with open(path, "w", encoding="utf-8") as handle:
-        json.dump(payload, handle, ensure_ascii=False, indent=2, sort_keys=False)
-        handle.write("\n")
+    json.dump(payload, handle, ensure_ascii=False, indent=2, sort_keys=False)
+    handle.write("\n")
 
 
 def main() -> None:
@@ -84,6 +94,8 @@ def main() -> None:
         help="Fichier JSON où écrire le relevé par épisode (graine, joueur du bot, zones par tour)",
     )
     args = parser.parse_args()
+
+    json_handle: Optional[TextIO] = _open_json_out(args.json_out) if args.json_out else None
 
     import numpy as np
     from sb3_contrib import MaskablePPO
@@ -206,8 +218,9 @@ def main() -> None:
             cells.append(f"{sum(vals)/len(vals):.2f}" if vals else "  - ")
         print(f"{bot:<22} {n:>4} | " + " | ".join(f"{c:>4}" for c in cells))
 
-    if args.json_out:
-        _write_json_out(args.json_out, model_path, scenario_file, args.episodes, episode_records)
+    if json_handle is not None:
+        with json_handle:
+            _write_json_out(json_handle, model_path, scenario_file, args.episodes, episode_records)
         print(f"\nRelevé par épisode : {args.json_out} ({len(episode_records)} épisodes)")
 
     print()
