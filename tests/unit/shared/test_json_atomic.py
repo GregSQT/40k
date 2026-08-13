@@ -40,7 +40,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 #: Les arbres de code balayés par le verrou statique. `tests/` en est exclu : un test qui pose un
 #: JSON de travail dans son `tmp_path` ne publie rien — il n'y a pas de fichier précédent à
 #: protéger, et l'écriture directe y est la forme lisible.
-ARBRES = ("scripts", "ai", "engine", "services", "shared")
+ARBRES = ("scripts", "ai", "engine", "services", "shared", "check", "spikes")
 
 #: Fichiers autorisés à écrire un JSON sans passer par le module, avec la raison. Toute entrée
 #: doit exister (vérifié) : une exclusion périmée masquerait un vrai site.

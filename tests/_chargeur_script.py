@@ -24,6 +24,7 @@ Un appelant qui veut malgré tout une fixture l'écrit chez lui en une ligne : e
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import sys
 from pathlib import Path
@@ -39,26 +40,36 @@ _CHARGES: dict[Path, ModuleType] = {}
 
 
 def _nom_de_module(chemin: Path) -> str:
-    """Nom d'inscription dans `sys.modules`, en bijection avec le chemin résolu.
+    """Nom d'inscription dans `sys.modules`, unique pour un chemin résolu donné.
 
-    Un chemin hors du dépôt garde ses composants absolus : le nom reste laid mais unique, ce qui
-    est la seule propriété qu'on lui demande.
+    Les composants du chemin donnent la partie LISIBLE, l'empreinte donne l'UNICITÉ, et elle
+    seule : aucun assemblage des composants n'est injectif, puisque le `_` qui les joint apparaît
+    aussi À L'INTÉRIEUR d'un composant (`scripts/a_b/outil` et `scripts/a/b_outil` se rejoignent),
+    et que le `.` d'un dossier doit disparaître — un point ferait de la partie gauche un paquet
+    parent aux yeux de l'import. Deux chemins de même partie lisible se distinguent donc par leur
+    empreinte, ce dont dépend la garantie de `charger_script` : un nom aussi unique que la clé de
+    cache, sinon l'échec de l'un retire de `sys.modules` l'inscription de l'autre.
+
+    Un chemin hors du dépôt garde ses composants absolus : le nom reste laid, mais lisible et
+    unique aux mêmes conditions.
     """
     relatif = chemin.relative_to(RACINE) if chemin.is_relative_to(RACINE) else chemin
     composants = [partie for partie in relatif.with_suffix("").parts if partie not in ("/", "")]
-    return "_".join([*composants, "sous_test"]).replace(".", "_").replace(" ", "_")
+    empreinte = hashlib.blake2s(chemin.as_posix().encode("utf-8"), digest_size=4).hexdigest()
+    lisible = "_".join([*composants, "sous_test"]).replace(".", "_").replace(" ", "_")
+    return f"{lisible}_{empreinte}"
 
 
 def charger_script(chemin_relatif: str) -> ModuleType:
     """Charge `chemin_relatif` (depuis la racine du dépôt) comme module et le rend.
 
     Le module est inscrit dans `sys.modules` sous un nom dérivé du CHEMIN entier
-    (`scripts_check_doc_references_sous_test`), pas du seul nom de fichier. Deux raisons, et la
-    seconde est la vraie : le suffixe évite qu'un script prenne la place d'un module importable
-    homonyme, et le chemin complet garantit que le nom d'inscription est aussi unique que la clé
-    du cache. Sinon deux scripts de même nom dans deux dossiers partageraient une inscription, et
-    l'échec du second RETIRERAIT de `sys.modules` le module du premier — que `_CHARGES`
-    continuerait pourtant de rendre.
+    (`scripts_check_doc_references_sous_test_<empreinte>`), pas du seul nom de fichier. Deux
+    raisons, et la seconde est la vraie : le suffixe évite qu'un script prenne la place d'un
+    module importable homonyme, et l'empreinte du chemin garantit que le nom d'inscription est
+    aussi unique que la clé du cache (cf. `_nom_de_module`). Sinon deux scripts de même nom dans
+    deux dossiers partageraient une inscription, et l'échec du second RETIRERAIT de `sys.modules`
+    le module du premier — que `_CHARGES` continuerait pourtant de rendre.
 
     Aucune garde d'existence du fichier ici : `exec_module` lève déjà un `FileNotFoundError` qui
     nomme le chemin absolu (vérifié). En ajouter une ne ferait que doubler le même message.

@@ -41,11 +41,17 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # 2 : `run` regroupe les métadonnées du run, `model` (basename) devient `model_path`/`model_bytes`
 # /`model_mtime`. Un lecteur de la v1 lèverait un KeyError sur un fichier v2 — d'où le numéro.
-# ⚠️ Le commit a4668891 a émis la forme v2 en la marquant `1` : un fichier marqué `1` qui porte
-# une clé `run` en vient. Aucun n'existe (aucun JSON du dépôt ne porte `schema_version`, vérifié
-# le 2026-08-13), mais un lecteur qui branche sur le numéro doit tester la clé `run`, pas le seul
-# entier — le numéro n'a jamais été faux que pendant ces deux commits.
-_JSON_SCHEMA_VERSION = 2
+# 3 : `run.episodes_requested` (nombre d'épisodes PAR BOT, malgré le nom) disparaît au profit de
+# `run.episodes_per_bot` et `run.episodes_total`. Un lecteur de la v2 lève un KeyError sur un
+# fichier v3, donc le numéro DOIT bouger.
+# ⚠️ CE NUMÉRO A DÉJÀ MENTI DEUX FOIS, et les deux fois de la même façon : la forme a changé
+# sans lui. Le commit a4668891 a émis la forme v2 en la marquant `1` ; les commits e8db6180 et
+# 046478e7 ont retiré `episodes_requested` en gardant `2`, si bien que DEUX formes incompatibles
+# portent le numéro 2. Aucun fichier du dépôt n'en vient (aucun JSON n'y porte `schema_version`,
+# vérifié le 2026-08-13), mais un lecteur qui branche sur le numéro doit tester les CLÉS qu'il
+# lit, jamais le seul entier. Corollaire pour la suite : toute clé retirée ou renommée dans
+# `run`/`episodes` incrémente cette constante DANS LE MÊME commit.
+_JSON_SCHEMA_VERSION = 3
 
 #: Checkpoint sur lequel TOUTES les mesures du §12 sont faites. Remplacer ici est une décision
 #: de protocole : elle périme les chiffres du chantier, donc elle ne se prend pas par accident.
@@ -204,6 +210,24 @@ def _aggregate_zones(records: List[Dict[str, Any]]) -> Dict[str, Dict[int, List[
     return {bot: _turns_of(bot_records) for bot, bot_records in by_bot.items()}
 
 
+def _table_turns(turn_limit: Optional[int], records: List[Dict[str, Any]]) -> List[int]:
+    """Colonnes des trois tableaux : les tours de LA BATAILLE, pas une liste écrite à la main.
+
+    `turn_limit` vient de `get_effective_turn_limit`, source unique de la durée d'une bataille
+    (`game_rules.max_turns`). Elle vaut 5 aujourd'hui, exactement les colonnes qui étaient
+    codées en dur — mais rien ne gardait le couplage : changer `max_turns` aurait laissé le
+    tableau s'arrêter à T5 pendant que la colonne `N`, elle, suit `max(per_turn)`.
+
+    `None` = bataille illimitée (Endless Duty) : il n'y a alors pas de durée à lire, seulement
+    des tours OBSERVÉS. Ce n'est pas un repli sur une valeur commode, c'est le seul sens
+    disponible dans ce cas ; une liste vide (aucun épisode) reste vide.
+    """
+    if turn_limit is not None:
+        return list(range(1, int(turn_limit) + 1))
+    observed = {int(turn) for rec in records for turn in rec["zones_by_turn"]}
+    return list(range(1, max(observed) + 1)) if observed else []
+
+
 def _n_at_last_turn(per_turn: Dict[int, List]) -> int:
     """Nombre d'épisodes parvenus au dernier tour observé — le `N` de la ligne et du tableau."""
     if not per_turn:
@@ -266,9 +290,15 @@ def main() -> None:
         help="Fichier JSON où écrire le relevé par épisode (graine, joueur du bot, grandeurs par tour)",
     )
     args = parser.parse_args()
+    # AVANT d'ouvrir la destination : `--episodes 0` jouait zéro épisode, publiait
+    # `"episodes": []` PAR-DESSUS le relevé précédent et sortait 0. Le fichier écrasé était le
+    # seul exemplaire d'une mesure de plusieurs heures, et rien dans la sortie ne le disait.
+    if args.episodes < 1:
+        parser.error(f"--episodes doit valoir au moins 1 (reçu {args.episodes})")
     _require_board_path()
 
     episode_records: List[Dict[str, Any]] = []
+    turn_limit: Optional[int] = None
 
     # le brouillon s'ouvre AVANT les imports lourds : un chemin faux coûte une seconde, et il
     # n'est publié que si le run va au bout (sinon refermé et effacé, cf. `json_out_draft`).
@@ -282,7 +312,10 @@ def main() -> None:
         from ai.bot_registry import build_bot
         from ai.env_wrappers import BotControlledEnv
         from ai.training_utils import get_scenario_list_for_phase
-        from ai.bot_evaluation import _build_eval_obs_normalizer_for_worker, _episode_seed
+        from ai.bot_evaluation import (
+            _build_eval_obs_normalizer_for_worker, _episode_seed, _load_bot_eval_params,
+        )
+        from engine.game_utils import get_effective_turn_limit
         from engine.w40k_core import W40KEngine
         from shared.data_validation import require_key
 
@@ -299,14 +332,18 @@ def main() -> None:
         model = MaskablePPO.load(model_path, device="cpu")
         normalize = _build_eval_obs_normalizer_for_worker(model, model_path, vec_norm_enabled, vec_eval_enabled)
 
-        # `require_key` et pas `.get(..., {})` : un panel vide ferait tourner la boucle ZÉRO
-        # fois — tableau réduit à son en-tête, `"episodes": []` publié, sortie 0 — et une
-        # randomness vide construirait six bots non paramétrés dont les moyennes seraient
-        # quand même comparées à la référence §12.5. Même exigence que le jumeau
-        # `ai/bot_evaluation.py:181,193`, qui lit ces deux clés par `require_key`.
-        bot_weights: dict = require_key(cb, "bot_eval_weights")
-        bot_randomness: dict = require_key(cb, "bot_eval_randomness")
-        agent_seat_mode: str = tc.get("agent_seat_mode", "p1")
+        # Le panel se lit par la MÊME fonction que l'évaluation réelle, jamais à la main : elle
+        # exige les deux clés (un panel vide ferait tourner la boucle zéro fois et publier
+        # `"episodes": []` en sortant 0), coerce les valeurs en float, et vérifie que les poids
+        # somment à 1.0. Relire `cb` ici privait CE script — et lui seul — de ces trois contrôles,
+        # alors qu'il compare ses moyennes à celles produites par `ai/bot_evaluation.py`.
+        bot_eval_params = _load_bot_eval_params(config, "ArmageddonAgent", "x1_panel")
+        bot_weights: dict = bot_eval_params["weights"]
+        bot_randomness: dict = bot_eval_params["randomness"]
+        # `require_key` : `agent_seat_mode` décide de quel siège occupe le bot, et le défaut
+        # « p1 » était de surcroît RECOPIÉ dans `run_meta` comme s'il venait de la config — un
+        # relevé qui documente un protocole que personne n'a écrit.
+        agent_seat_mode: str = require_key(tc, "agent_seat_mode")
         if "seed" not in tc:
             raise RuntimeError("Clé 'seed' absente de la config d'entraînement ArmageddonAgent/x1_panel — run non reproductible")
         base_seed: int = int(tc["seed"])
@@ -347,7 +384,13 @@ def main() -> None:
             for ep_idx in range(args.episodes):
                 ep_seed = _episode_seed(base_seed, bot_name, 0, ep_idx)
                 obs, info = env.reset(seed=ep_seed)
-                bot_player: int = int(info.get("opponent_player", 2))
+                # `require_key` : `agent_seat_mode` vaut « random » sur x1_panel, donc le bot est
+                # P1 dans la moitié des épisodes. Le défaut `2` comptait alors les zones de
+                # l'AGENT et les publiait sous le nom du bot, sans rien signaler. Même lecture
+                # que `scripts/bot_ranking.py:132-133` sur `winner`/`controlled_player`.
+                bot_player: int = int(require_key(info, "opponent_player"))
+                if turn_limit is None:
+                    turn_limit = get_effective_turn_limit(env.engine.game_state)
                 done = False
                 turn_snapshot: Dict[int, int] = {}
                 dist_snapshot: Dict[int, float] = {}
@@ -370,9 +413,14 @@ def main() -> None:
                     done = bool(terminated or truncated)
 
                     gs = env.engine.game_state
-                    cur_turn: int = int(gs.get("turn", 0))
+                    # Les deux clés sont posées par le reset du moteur (`w40k_core.py:1672`
+                    # pour `objective_controllers`) : un défaut ne peut donc masquer qu'une
+                    # RÉGRESSION, et il la masque sous une forme parfaitement crédible — `turn`
+                    # à 0 saute le relevé du pas, `objective_controllers` vide rend un 0.00 qui
+                    # se lit comme « le bot ne tient rien ».
+                    cur_turn: int = int(require_key(gs, "turn"))
                     if cur_turn >= 1:
-                        controllers: dict = gs.get("objective_controllers", {})
+                        controllers: dict = require_key(gs, "objective_controllers")
                         zones = sum(1 for v in controllers.values() if v == bot_player)
                         turn_snapshot[cur_turn] = zones
 
@@ -392,7 +440,7 @@ def main() -> None:
             episode_records.extend(bot_records)
             print(f" {_n_at_last_turn(_turns_of(bot_records))} ep")
 
-        turns = [1, 2, 3, 4, 5]
+        turns = _table_turns(turn_limit, episode_records)
         hdr = " | ".join(f"T{t}" for t in turns)
         sep = "-" * (22 + 4 + 3 + len(turns) * 6 + 4)
 

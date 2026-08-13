@@ -24,8 +24,9 @@ def test_le_module_rendu_est_celui_du_fichier_demande() -> None:
 def test_le_module_est_inscrit_dans_sys_modules_sous_un_nom_suffixe() -> None:
     """Le suffixe est ce qui empêche un script de `scripts/` de prendre la place d'un module
     importable homonyme — la raison d'être du nom choisi, pas un détail cosmétique."""
-    charger_script("scripts/check_roadmap_declared.py")
-    assert "scripts_check_roadmap_declared_sous_test" in sys.modules
+    module = charger_script("scripts/check_roadmap_declared.py")
+    assert module.__name__.startswith("scripts_check_roadmap_declared_sous_test_")
+    assert sys.modules.get(module.__name__) is module
     assert "check_roadmap_declared" not in sys.modules
 
 
@@ -52,6 +53,44 @@ def test_deux_scripts_de_meme_nom_ne_partagent_pas_leur_inscription(tmp_path) ->
     assert charger_script(str(premier)) is module
 
 
+def test_deux_chemins_de_meme_partie_lisible_ne_partagent_pas_leur_inscription(tmp_path) -> None:
+    """Le `_` qui joint les composants apparaît AUSSI dedans : `a_b/outil` et `a/b_outil` ont la
+    même partie lisible. C'est l'empreinte du chemin, et elle seule, qui les sépare — sans elle,
+    l'échec du second retire l'inscription du premier, que le cache continue de rendre.
+    """
+    premier = tmp_path / "a_b" / "outil.py"
+    premier.parent.mkdir(parents=True)
+    premier.write_text("VALEUR = 1\n", encoding="utf-8")
+    second = tmp_path / "a" / "b_outil.py"
+    second.parent.mkdir(parents=True)
+    second.write_text("raise RuntimeError('boum')\n", encoding="utf-8")
+
+    module = charger_script(str(premier))
+    with pytest.raises(RuntimeError):
+        charger_script(str(second))
+
+    assert sys.modules.get(module.__name__) is module
+    assert charger_script(str(premier)) is module
+
+
+def test_un_dossier_pointe_ne_collisionne_pas_avec_le_dossier_de_meme_nom(tmp_path) -> None:
+    """`a.b/outil` et `a/b/outil` : le point doit disparaître du nom (il ferait de la partie
+    gauche un paquet parent), ce qui rendait les deux chemins indiscernables avant l'empreinte."""
+    pointe = tmp_path / "a.b" / "outil.py"
+    pointe.parent.mkdir(parents=True)
+    pointe.write_text("VALEUR = 'pointe'\n", encoding="utf-8")
+    imbrique = tmp_path / "a" / "b" / "outil.py"
+    imbrique.parent.mkdir(parents=True)
+    imbrique.write_text("VALEUR = 'imbrique'\n", encoding="utf-8")
+
+    un = charger_script(str(pointe))
+    deux = charger_script(str(imbrique))
+
+    assert un.__name__ != deux.__name__
+    assert "." not in un.__name__
+    assert un.VALEUR == "pointe" and deux.VALEUR == "imbrique"
+
+
 def test_deux_appels_rendent_le_meme_objet() -> None:
     """Un script est chargé UNE fois par processus, comme le ferait un `import`.
 
@@ -72,4 +111,8 @@ def test_un_chargement_qui_echoue_leve_et_ne_laisse_rien_derriere_lui() -> None:
     with pytest.raises(FileNotFoundError) as erreur:
         charger_script("scripts/ce_script_n_existe_pas.py")
     assert "ce_script_n_existe_pas.py" in str(erreur.value)
-    assert "ce_script_n_existe_pas_sous_test" not in sys.modules
+    # Balayage plutôt qu'un nom écrit en clair : le littéral d'origine désignait un nom que le
+    # chargeur n'inscrit plus depuis qu'il préfixe par le chemin, et l'assertion passait donc
+    # sans rien regarder. Cette forme-ci ne peut pas se périmer sur un changement de nommage.
+    restes = [nom for nom in sys.modules if "ce_script_n_existe_pas" in nom]
+    assert restes == [], f"module à moitié exécuté laissé dans sys.modules : {restes}"

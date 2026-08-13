@@ -2105,9 +2105,10 @@ def _save_config_path() -> str:
 
 
 def _persist_save_config() -> None:
-    # Deux routes (`/save/persist`, `/autosave/config`) publient CE fichier, et le serveur sert
-    # ses requetes en fils concurrents : l'ecriture atomique est ce qui evite qu'une config
-    # tronquee remplace la precedente, et le brouillon porte le fil (cf. `shared/json_atomic.py`).
+    # Deux routes (`/save/persist`, `/autosave/config`) publient CE fichier ; elles ne se
+    # chevauchent pas (toutes deux sous `@with_engine_state_lock`), mais un Ctrl-C entre
+    # l'ouverture et la fin de l'ecriture laisserait une config tronquee a la place de la
+    # precedente : c'est ce que l'ecriture atomique supprime.
     path = _save_config_path()
     os.makedirs(os.path.dirname(path), exist_ok=True)
     write_json_atomic(path, {
@@ -2125,7 +2126,6 @@ def _load_save_config() -> None:
     rouvrirait le vecteur qu'on ferme."""
     global _SNAPSHOT_PERSIST_ENABLED
     global _AUTOSAVE_ENABLED, _AUTOSAVE_GRANULARITY
-    import json
     path = _save_config_path()
     if not os.path.exists(path):
         return
@@ -2195,8 +2195,6 @@ def get_agents_from_scenario(scenario_file: str, unit_registry) -> set:
         FileNotFoundError: If scenario file doesn't exist
         ValueError: If scenario format invalid or unit type not found in registry
     """
-    import json
-    
     if not os.path.exists(scenario_file):
         raise FileNotFoundError(f"Scenario file not found: {scenario_file}")
     

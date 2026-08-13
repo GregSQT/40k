@@ -161,3 +161,29 @@ def test_save_registry_cache_writes_json(tmp_path: Path) -> None:
     data = json.loads(cache_file.read_text(encoding="utf-8"))
     assert data["units"]["Intercessor"]["faction"] == "SpaceMarine"
     assert data["faction_role_matrix"][registry.AGENT_KEY] == ["Intercessor"]
+
+
+def test_save_registry_cache_refuses_a_non_serializable_payload(tmp_path: Path) -> None:
+    """Une valeur que `json` ne sait pas écrire LÈVE, et le cache précédent survit.
+
+    Le site portait un `default=str` : la valeur fautive devenait `"<... object at 0x...>"` dans
+    le cache, illisible au rechargement et silencieux à l'écriture.
+    """
+    registry = _make_registry_stub()
+    registry.project_root = tmp_path
+    registry.units = {"Intercessor": {"faction": "SpaceMarine"}}
+    registry.factions = {"SpaceMarine"}
+    registry.roles = {"Ranged"}
+    registry.faction_role_combinations = {("SpaceMarine", "Ranged")}
+    registry.faction_role_matrix = {registry.AGENT_KEY: ["Intercessor"]}
+    cache_file = tmp_path / "config" / "unit_registry_cache.json"
+    registry.save_registry_cache(str(cache_file))
+
+    registry.units = {"Intercessor": {"faction": object()}}
+    with pytest.raises(TypeError):
+        registry.save_registry_cache(str(cache_file))
+
+    assert json.loads(cache_file.read_text(encoding="utf-8"))["units"]["Intercessor"] == {
+        "faction": "SpaceMarine"
+    }
+    assert list(cache_file.parent.glob("*.part")) == []

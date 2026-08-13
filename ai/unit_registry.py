@@ -14,7 +14,7 @@ from shared.ts_parsing import TS_QUOTED_STRING
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 import sys
 from shared.data_validation import require_key, require_present
-from shared.json_atomic import json_draft
+from shared.json_atomic import write_json_atomic
 
 class UnitRegistry:
     """Dynamic unit discovery and faction-role management system."""
@@ -874,10 +874,7 @@ class UnitRegistry:
         }
         
         os.makedirs(os.path.dirname(cache_path), exist_ok=True)
-        # `default=str` : le cache porte des objets que `json` ne sait pas sérialiser seul. La
-        # forme reste donc celle du site — seule l'atomicité vient du module.
-        with json_draft(cache_path) as f:
-            json.dump(cache_data, f, indent=2, default=str)
+        write_json_atomic(cache_path, cache_data)
 
         print(f"💾 Unit registry cached to: {cache_path}")
     

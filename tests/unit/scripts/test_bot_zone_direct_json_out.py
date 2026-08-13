@@ -8,12 +8,12 @@ atomique partagée. Le point qui compte : le tableau texte est désormais DÉRIV
 
 Le contrat du brouillon `.part` lui-même (fichier précédent intact, aucun résidu, destination
 refusée si vide / dossier / absente / en lecture seule, fermeture qui rate) est verrouillé UNE
-fois pour les quatre scripts
-dans `test_json_atomic.py` — il n'est plus rejoué ici. Ce qui reste ici du drapeau, c'est ce qui
+fois pour tout le dépôt dans `tests/unit/shared/test_json_atomic.py` — il n'est plus rejoué ici. Ce qui reste ici du drapeau, c'est ce qui
 n'appartient qu'à ce script : le fail-fast AVANT le chargement du modèle.
 """
 import ast
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -26,8 +26,14 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SCRIPT_PATH = PROJECT_ROOT / "scripts" / "bot_zone_direct.py"
 
 
-def _FINGERPRINT(script):
-    """Empreinte d'un fichier qui existe — ce script tient lieu de checkpoint pour les tests."""
+def _line_of(tree: ast.AST, pred, label: str) -> int:
+    hits = [n.lineno for n in ast.walk(tree) if isinstance(n, ast.Call) and pred(n.func)]
+    assert hits, f"{label} introuvable dans main()"
+    return min(hits)
+
+
+@pytest.fixture(scope="module")
+def fingerprint(script):
     return script._model_fingerprint(str(SCRIPT_PATH))
 
 
@@ -80,7 +86,7 @@ def test_n_est_le_nombre_d_episodes_parvenus_au_dernier_tour(script):
     assert script._n_at_last_turn({}) == 0
 
 
-def test_json_out_relit_les_episodes_un_par_un(script, tmp_path):
+def test_json_out_relit_les_episodes_un_par_un(script, tmp_path, fingerprint):
     # DEUX bots, 1 épisode chacun : episodes_per_bot=1, n_bots=2, episodes_total=2, len(records)=2.
     # Avec un seul bot l'écart était invisible (1×1 == 1). C'est le seul scénario qui prouve
     # que episodes_total == len(payload["episodes"]) et non episodes_per_bot.
@@ -90,7 +96,7 @@ def test_json_out_relit_les_episodes_un_par_un(script, tmp_path):
     ]
     out = tmp_path / "sub" / "zones.json"
     out.parent.mkdir()
-    meta = script._run_meta(_FINGERPRINT(script), "holdout_1.json", 1, 2, 42, "p1", 42, {"bot_a": 0.1, "bot_b": 0.2})
+    meta = script._run_meta(fingerprint, "holdout_1.json", 1, 2, 42, "p1", 42, {"bot_a": 0.1, "bot_b": 0.2})
 
     with script.json_out_draft(str(out)) as handle:
         script._write_json_out(handle, meta, records)
@@ -105,13 +111,13 @@ def test_json_out_relit_les_episodes_un_par_un(script, tmp_path):
     assert payload["episodes"][1]["zones_by_turn"] == {"1": 2, "2": 2}
     # rejouable : l'agrégat relu vaut l'agrégat d'origine
     assert script._aggregate_zones(payload["episodes"]) == script._aggregate_zones(records)
-    assert not (tmp_path / "sub" / "zones.json.part").exists()
+    assert list((tmp_path / "sub").glob("*.part")) == []
 
 
-def test_le_releve_dit_ce_qui_distingue_deux_runs(script):
+def test_le_releve_dit_ce_qui_distingue_deux_runs(script, fingerprint):
     # sans ces champs, un « avant » et un « après » §12.7 sont indiscernables, et la graine
     # d'épisode ne suffit pas à reconstruire la doctrine du bot.
-    meta = script._run_meta(_FINGERPRINT(script), "holdout_1.json", 20, 6, 42, "alternate", 7, {"bot_zone": 0.25})
+    meta = script._run_meta(fingerprint, "holdout_1.json", 20, 6, 42, "alternate", 7, {"bot_zone": 0.25})
 
     assert meta["base_seed"] == 42
     assert meta["agent_seat_mode"] == "alternate"
@@ -143,41 +149,33 @@ def main_ast():
 def test_l_empreinte_du_modele_est_relevee_avant_son_chargement(main_ast):
     # la seule raison d'être de `_model_fingerprint` : un entraînement qui réécrit le .zip
     # pendant le run ferait consigner un checkpoint qui n'a pas joué.
-    def line_of(pred, label: str) -> int:
-        hits = [n.lineno for n in ast.walk(main_ast) if isinstance(n, ast.Call) and pred(n.func)]
-        assert hits, f"{label} introuvable dans main()"
-        return min(hits)
-
-    fingerprint = line_of(
-        lambda f: isinstance(f, ast.Name) and f.id == "_model_fingerprint",
-        "_model_fingerprint",
-    )
-    load = line_of(
-        lambda f: isinstance(f, ast.Attribute)
-        and f.attr == "load"
-        and isinstance(f.value, ast.Name)
-        and f.value.id == "MaskablePPO",
+    fp = _line_of(main_ast, lambda f: isinstance(f, ast.Name) and f.id == "_model_fingerprint", "_model_fingerprint")
+    load = _line_of(
+        main_ast,
+        lambda f: isinstance(f, ast.Attribute) and f.attr == "load" and isinstance(f.value, ast.Name) and f.value.id == "MaskablePPO",
         "MaskablePPO.load",
     )
 
-    assert fingerprint < load
+    assert fp < load
 
 
 def test_les_cles_du_panel_sont_exigees_et_non_defaultees(main_ast):
     # `cb.get("bot_eval_weights", {})` faisait tourner la boucle zéro fois et publier
     # `"episodes": []` en sortant 0 ; `bot_eval_randomness` vide construisait six bots non
     # paramétrés dont les moyennes étaient quand même comparées à la référence §12.5.
-    exigees: set[str] = set()
-    defaultees: set[str] = set()
-    for node in ast.walk(main_ast):
-        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-                and node.func.id == "require_key"
-                and len(node.args) == 2 and isinstance(node.args[1], ast.Constant)):
-            exigees.add(node.args[1].value)
-        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-                and node.func.attr == "get" and isinstance(node.func.value, ast.Name)
-                and len(node.args) == 2):
-            defaultees.add(node.func.value.id)
+    exigees = {
+        node.args[1].value
+        for node in ast.walk(main_ast)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name) and node.func.id == "require_key"
+        and len(node.args) == 2 and isinstance(node.args[1], ast.Constant)
+    }
+    defaultees = {
+        node.func.value.id
+        for node in ast.walk(main_ast)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "get" and isinstance(node.func.value, ast.Name) and len(node.args) == 2
+    }
 
     assert {"bot_eval_weights", "bot_eval_randomness"} <= exigees
     assert "cb" not in defaultees  # aucune clé du bloc callback_params ne reprend un défaut
@@ -208,7 +206,6 @@ def test_la_destination_est_ouverte_avant_de_jouer_le_moindre_episode(tmp_path):
     # VERROU du fail-fast : la destination fausse doit tuer le run AVANT le chargement du
     # modèle — sinon l'erreur tombe après des minutes de jeu et les graines sont perdues.
     # W40K_BOARD_PATH est requis pour dépasser la garde de plateau (avant json_out_draft).
-    import os
     proc = subprocess.run(
         [sys.executable, str(SCRIPT_PATH), "--episodes", "1", "--json-out", str(tmp_path / "absent" / "z.json")],
         capture_output=True, text=True, cwd=str(PROJECT_ROOT), timeout=300,

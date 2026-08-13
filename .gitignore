@@ -145,6 +145,7 @@ backup.log
 # Fichiers temporaires
 *.tmp
 *.temp
+*.part
 temp/
 tmp/
 
