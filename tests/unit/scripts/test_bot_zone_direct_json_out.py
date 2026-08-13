@@ -1,10 +1,10 @@
 """Verrouille le relevé `--json-out` de scripts/bot_zone_direct.py.
 
 Le script joue de vrais épisodes (modèle + moteur) : rien de tout cela n'est instancié ici.
-Ce qui est exercé, ce sont les trois fonctions pures qui portent le contrat du drapeau —
-la forme d'un relevé d'épisode, l'agrégation qui alimente le tableau texte, et l'écriture du
-fichier. Le point qui compte : le tableau texte est désormais DÉRIVÉ des relevés par épisode,
-donc les moyennes affichées et le JSON ne peuvent plus diverger.
+Ce qui est exercé, ce sont les fonctions qui portent le contrat du drapeau : la forme d'un
+relevé d'épisode, l'agrégation qui alimente le tableau texte, et l'écriture du fichier. Le
+point qui compte : le tableau texte est désormais DÉRIVÉ des relevés par épisode, donc les
+moyennes affichées et le JSON ne peuvent plus diverger.
 """
 import importlib.util
 import json
@@ -68,6 +68,12 @@ def test_aggregation_supporte_les_tours_absents_de_certains_episodes(script):
     assert agg["a"][2] == [2]
 
 
+def test_n_est_le_nombre_d_episodes_parvenus_au_dernier_tour(script):
+    # colonne N du tableau : les épisodes plus courts ne comptent pas au dernier tour observé.
+    assert script._n_at_last_turn({1: [0, 1, 2], 2: [1, 1]}) == 2
+    assert script._n_at_last_turn({}) == 0
+
+
 def test_json_out_relit_les_episodes_un_par_un(script, tmp_path):
     records = [
         script._episode_record("bot_zone", 0, 111, 2, {1: 0, 2: 1}),
@@ -75,18 +81,46 @@ def test_json_out_relit_les_episodes_un_par_un(script, tmp_path):
     ]
     out = tmp_path / "sub" / "zones.json"
     out.parent.mkdir()
+    meta = script._run_meta(str(SCRIPT_PATH), "holdout_1.json", 2, 42, "p1", 42, {"bot_zone": 0.1})
 
-    with script._open_json_out(str(out)) as handle:
-        script._write_json_out(handle, "/x/model_ArmageddonAgent.zip", "holdout_1.json", 2, records)
+    handle = script._open_json_out(str(out))
+    script._write_json_out(handle, meta, records)
+    script._commit_json_out(handle, str(out))
     payload = json.loads(out.read_text(encoding="utf-8"))
 
-    assert payload["model"] == "model_ArmageddonAgent.zip"
-    assert payload["scenario_file"] == "holdout_1.json"
-    assert payload["episodes_requested"] == 2
+    assert payload["schema_version"] == 1
+    assert payload["run"]["scenario_file"] == "holdout_1.json"
+    assert payload["run"]["episodes_requested"] == 2
     assert [ep["seed"] for ep in payload["episodes"]] == [111, 222]
     assert payload["episodes"][1]["zones_by_turn"] == {"1": 2, "2": 2}
     # rejouable : l'agrégat relu vaut l'agrégat d'origine
     assert script._aggregate_zones(payload["episodes"]) == script._aggregate_zones(records)
+    assert not (tmp_path / "sub" / "zones.json.part").exists()
+
+
+def test_le_releve_dit_ce_qui_distingue_deux_runs(script):
+    # sans ces champs, un « avant » et un « après » §12.7 sont indiscernables, et la graine
+    # d'épisode ne suffit pas à reconstruire la doctrine du bot.
+    meta = script._run_meta(str(SCRIPT_PATH), "holdout_1.json", 20, 42, "alternate", 7, {"bot_zone": 0.25})
+
+    assert meta["base_seed"] == 42
+    assert meta["agent_seat_mode"] == "alternate"
+    assert meta["agent_seat_seed"] == 7
+    assert meta["bot_randomness"] == {"bot_zone": 0.25}
+    # le chemin du modèle est constant d'un run à l'autre : ce qui l'identifie, c'est le fichier.
+    assert meta["model_bytes"] == SCRIPT_PATH.stat().st_size
+    assert meta["model_mtime"].startswith("20")
+
+
+def test_un_run_interrompu_ne_detruit_pas_le_releve_precedent(script, tmp_path):
+    out = tmp_path / "zones.json"
+    out.write_text('{"ancien": true}\n', encoding="utf-8")
+
+    handle = script._open_json_out(str(out))  # le run commence, puis meurt sans écrire
+    try:
+        assert json.loads(out.read_text(encoding="utf-8")) == {"ancien": True}
+    finally:
+        handle.close()
 
 
 def test_json_out_echoue_si_le_dossier_n_existe_pas(script, tmp_path):
