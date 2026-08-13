@@ -341,7 +341,8 @@ conclusion, il ne s'y ajoute pas. Ne jamais y répéter ce qui vient d'être dit
   RELIRE :
   /code-review <fichiers modifiés>
   /simplify <fichiers modifiés>
-  → <verdict de chaque passe lancée : findings traités, ou « rien avec scénario »>
+  .claude/hooks/relire-en-attente.sh --vider <session_id>
+  → non lancées (elles t'appartiennent) ; <SUJET FINI, moment optimal | SUJET EN COURS, <n> arbitrage(s) ouvert(s)> ; <n> fichiers en attente depuis <n> tours
 
 - LU et JUMEAU sont TOUJOURS présents. « grep X → 0 hit » est une réponse valide. Ce qui est
   validé localement dans un fichier à cohérence globale n'est pas validé — c'est le défaut le
@@ -393,36 +394,51 @@ conclusion, il ne s'y ajoute pas. Ne jamais y répéter ce qui vient d'être dit
   seulement le dernier tour (cf. la liste accumulée ci-dessous), et jamais l'ensemble du working
   tree. Copiables tels quels, sans reformulation. `/code-review`
   d'abord (bugs), `/simplify` ensuite (conception sur du code déjà correct).
-- RELIRE, EXÉCUTION — AUTORISATION PERMANENTE, acquise le 2026-08-12 : ces deux passes font partie
-  de la CLÔTURE, pas de la vérification de l'utilisateur. L'agent les LANCE lui-même, sans le
-  demander. Motif : les faire porter par l'utilisateur, c'était lui déléguer la fin du travail de
-  l'agent, et il les relançait à chaque tâche.
-  * QUAND — une seule fois par SUJET, à la fin, et pas à chaque tour : seulement lorsque plus
-    aucune tâche demandée n'est ouverte ET que le rapport ne remonte AUCUN `ARBITRAGE`. Tant qu'un
-    arbitrage attend une réponse, le sujet n'est pas fini et le code peut encore changer : relire
-    maintenant, c'est relire deux fois. Dans ce cas la ligne RELIRE est écrite sans être exécutée,
-    et le `→` dit « différée, n fichiers en attente ».
-  * SUR QUOI — la liste ACCUMULÉE des fichiers de code édités depuis la dernière relecture, tenue
+- RELIRE, EXÉCUTION — INTERDITE À L'AGENT, tranché le 2026-08-13 : `/code-review` et `/simplify`
+  appartiennent à l'utilisateur, exactement comme la VÉRIFICATION LARGE (cf. §TESTS). L'agent ne
+  les lance JAMAIS — ni par l'outil `Skill`, ni par Bash, ni via un sous-agent, dans AUCUN mode.
+  Il ÉCRIT le bloc RELIRE ; il ne l'exécute pas. Se dire qu'un sujet mérite une passe de plus,
+  c'est déjà enfreindre la règle : ce n'est pas à l'agent d'en juger.
+  * MOTIF, mesuré entre le 2026-08-12 et le 2026-08-13 : l'autorisation inverse faisait BOUCLER
+    les deux passes, et aucune borne fiable n'existe. Toute borne réarmée par une action de
+    l'agent (une édition, un `--vider`, une liste vidée) se contourne par cette même action, et
+    le seul critère d'arrêt écrit — « plus de finding AVEC scénario » — demande à l'agent de
+    juger son propre travail. La seule borne sûre est de lui retirer le déclenchement.
+  * CE QUE L'AGENT REND À LA PLACE — la liste ACCUMULÉE des fichiers de code édités, tenue
     par `.claude/hooks/relire-en-attente.sh` (PostToolUse), à lire avec
-    `.claude/hooks/relire-en-attente.sh --liste <session_id>` et à effacer avec
-    `--vider <session_id>` APRÈS les passes. Le session_id est l'UUID du dossier qui CONTIENT ton
+    `.claude/hooks/relire-en-attente.sh --liste <session_id>`, à recopier telle quelle sous les
+    deux commandes du bloc RELIRE. Le session_id est l'UUID du dossier qui CONTIENT ton
     `scratchpad` (pas le dernier composant du chemin) ; il est toujours requis, car plusieurs
     sessions travaillent en parallèle dans ce dépôt et le deviner revenait à relire — ou à
     effacer — la liste d'une autre session.
     JAMAIS `git status` : mesuré le 2026-08-12, le tree portait 38 fichiers modifiés pour une tâche
     qui en touchait 2 — la review serait partie sur les chantiers des autres sessions.
     Si le hook signale qu'il n'a pas pu tenir la liste, la tenir à la main et le dire.
-  * Enchaînement : `/code-review` sur cette liste → traiter les findings AVEC scénario
-    (T4 CAUSE) → relancer `/code-review` si une correction a été appliquée. Dès qu'une passe ne
-    rend plus de finding avec scénario, lancer `/simplify`, traiter de même, puis `--vider`.
-  * Cette autorisation ne s'étend à RIEN d'autre : la VÉRIFICATION LARGE appartient à
-    l'utilisateur et ne se délègue jamais (cf. §TESTS ci-dessus).
-  * Elle se suspend sur demande, pour la tâche en cours (« ne relance pas la review ») : la ligne
-    RELIRE est alors écrite sans être exécutée, et le `→` dit qu'elle ne l'a pas été. La liste
-    n'est PAS vidée dans ce cas — elle attend le sujet suivant.
-  * Le résultat de chaque passe se rend dans le `→` du bloc RELIRE, dans le message final unique.
-    Un finding traité modifie du code : COUVERTURE et les autres lignes du rapport en tiennent
-    compte, elles ne décrivent pas l'état d'avant la review.
+  * `--vider` NE S'APPELLE JAMAIS PAR L'AGENT. « Depuis la dernière relecture » date d'une action
+    de l'UTILISATEUR, qu'aucun hook ne voit d'ici : vider soi-même effacerait une liste que
+    personne n'a relue. La liste s'accumule donc d'un tour à l'autre, et les mêmes fichiers
+    reparaissent au bloc RELIRE tant qu'elle n'est pas vidée — c'est voulu, pas un doublon.
+    L'agent recopie la commande `--vider <session_id>` sous les deux passes, pour que l'utilisateur
+    l'ait sous la main une fois qu'il les a lancées.
+  * Le `→` du bloc ne rend JAMAIS de verdict de passe : l'agent n'a rien exécuté. Il porte trois
+    choses, et seulement elles : que les passes n'ont pas été lancées, SI LE MOMENT EST BON
+    (ci-dessous), et combien de fichiers attendent depuis combien de tours.
+  * QUAND C'EST LE BON MOMENT — l'agent ne déclenche rien, mais il le DIT, tranché le 2026-08-14.
+    Le sujet est FINI quand plus aucune tâche demandée n'est ouverte ET que le rapport ne remonte
+    AUCUN `ARBITRAGE` : tant qu'un arbitrage attend une réponse, le code peut encore changer, donc
+    relire maintenant c'est relire deux fois. Le `→` dit alors « SUJET EN COURS, n arbitrage(s)
+    ouvert(s) », et « SUJET FINI, moment optimal » sinon. Ce n'est jamais qu'un AVIS : s'y tromper
+    ne coûte rien, et aucune boucle ne peut en naître puisque l'agent n'a plus le déclenchement.
+  * POURQUOI PAS À CHAQUE MODIFICATION, mesuré le 2026-08-06 sur ce dépôt (186 commits de
+    correction, 12 519 lignes datées par `git blame`, cf. `scripts/review_plan.py`) : 17 % des
+    lignes corrigées le sont dans les 6 h qui suivent leur écriture — boucle write-debug, code
+    non relisible car déjà en train d'être réécrit — et le code récent est SOUS-représenté dans
+    les corrections (0,66–0,68x, pic à 3–6 mois). Relire à chaque tour vise donc le rendement le
+    plus faible. S'y ajoute le défaut JUMEAU (T4), le plus fréquent ici : il n'est pas observable
+    tant que le sujet n'est pas fini — au milieu, le jumeau manquant n'est pas un bug, c'est du
+    travail en cours, et la passe rend du cosmétique à la place.
+    Dans un gros lot, l'ordre de lecture se prend sur la TAILLE (`scripts/review_plan.py`) : seule
+    métrique qui ait battu churn, âge et historique de bugs à cette même mesure.
 - RELIRE, CHEMINS : ABSOLUS, c'est ce que rend la liste du hook, et c'est juste dans les deux
   dépôts. Un chemin relatif s'interprète depuis le cwd de la review et non depuis le dépôt édité :
   il désigne alors l'homonyme, qui porte le même nom sans porter la modification, et la review

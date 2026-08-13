@@ -429,6 +429,31 @@ def test_un_argument_qui_n_est_pas_un_chemin_ne_declenche_rien(
     assert _rapport(tmp_path, _user("corrige"), _edit("engine/x.py"), _say(avec)) is None
 
 
+@pytest.mark.parametrize(
+    "moment",
+    [
+        "SUJET FINI, moment optimal",
+        "SUJET EN COURS, 2 arbitrage(s) ouvert(s)",
+    ],
+)
+def test_le_rappel_de_vider_et_la_ligne_fleche_passent(tmp_path: Path, moment: str) -> None:
+    """La forme que CLAUDE.md prescrit depuis le 2026-08-13 : trois lignes sous l'étiquette.
+
+    L'agent ne LANCE plus les passes, donc le bloc porte, en plus des deux commandes, le rappel
+    `--vider <session_id>` que l'utilisateur copiera après les siennes, et une ligne `→` qui dit
+    qu'elles n'ont pas été lancées et si le moment est bon (les DEUX libellés, éprouvés ici :
+    « SUJET EN COURS » porte des parenthèses, que le découpage en arguments ne doit pas prendre
+    pour des morceaux de chemin). Ni l'une ni l'autre n'est une commande de relecture : les faire
+    juger comme telles réclamerait « chemins ABSOLUS » sur un UUID, c'est-à-dire une réclamation
+    sans issue sur le rapport même que la règle exige.
+    """
+    prescrit = RAPPORT_CONFORME + (
+        ".claude/hooks/relire-en-attente.sh --vider 11111111-1111-1111-1111-111111111111\n"
+        f"→ non lancées (elles t'appartiennent) ; {moment} ; 1 fichier en attente depuis 2 tours\n"
+    )
+    assert _rapport(tmp_path, _user("corrige"), _edit("engine/x.py"), _say(prescrit)) is None
+
+
 def test_des_commandes_dans_une_fence_sont_nommees_comme_telles(tmp_path: Path) -> None:
     """Étiquette en clair, commandes dans la fence : le diagnostic doit dire CE défaut-là.
 

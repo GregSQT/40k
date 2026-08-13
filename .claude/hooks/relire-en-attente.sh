@@ -2,22 +2,25 @@
 # PostToolUse (Edit/Write/MultiEdit/NotebookEdit) — tient la liste des fichiers de CODE modifiés
 # depuis la dernière relecture, pour la session en cours.
 #
-# Motif (2026-08-12) : `/code-review` et `/simplify` sont lancés par l'agent en fin de sujet, pas
-# par l'utilisateur (cf. puce RELIRE de CLAUDE.md), et un sujet s'étale sur plusieurs tours. Sans
-# liste persistée, deux issues, toutes deux mesurées : relancer les deux passes à chaque tour —
-# donc plusieurs fois sur le même code, ce que l'utilisateur a demandé d'éviter — ou se fier à la
-# mémoire de contexte, qui disparaît à la compaction, c'est-à-dire précisément sur les sessions
-# longues où le sujet dure. Le fichier survit à la compaction ET au redémarrage de session.
+# Motif (2026-08-13) : `/code-review` et `/simplify` sont lancés par l'UTILISATEUR, jamais par
+# l'agent (cf. puce RELIRE, EXÉCUTION de CLAUDE.md) ; ce que l'agent doit rendre, c'est la LISTE
+# exacte des fichiers qu'il a édités, et un sujet s'étale sur plusieurs tours. Sans liste
+# persistée, il ne reste que la mémoire de contexte, qui disparaît à la compaction — c'est-à-dire
+# précisément sur les sessions longues où le sujet dure, et où la liste compte le plus. Le fichier
+# survit à la compaction ET au redémarrage de session.
+#
+# La version du 2026-08-12 confiait ces passes à l'agent ; retiré le 2026-08-13 parce qu'elles
+# BOUCLAIENT, et qu'aucune borne tenable n'existe (toute borne réarmée par une action de l'agent
+# se contourne par cette action). Ce hook n'a pas changé : seul le lanceur a changé.
 #
 # POURQUOI PAS `git status` — mesuré le 2026-08-12 dans ce dépôt : le tree portait 38 fichiers
 # modifiés (analyzer, handlers de phase, une trentaine de tests) alors que la tâche du moment en
 # touchait 2. Une liste dérivée de git enverrait la review sur les chantiers des autres sessions.
 # Cette liste-ci ne contient que ce que CETTE session a édité.
 #
-# CE QUE CE HOOK NE FAIT PAS, et ne peut pas faire : décider QUAND lancer les passes. « toutes les
-# tâches terminées et plus d'arbitrage en attente » n'est pas observable depuis un hook — aucun
-# outil ne sait si la demande de l'utilisateur est finie. Ce déclenchement reste une règle de
-# CLAUDE.md ; ici on garantit seulement que la liste est exacte le moment venu.
+# CE QUE CE HOOK NE FAIT PAS, et ne peut pas faire : décider QUAND relire. Ce n'est plus une
+# question ouverte depuis le 2026-08-13 — c'est l'utilisateur qui lance ses passes, quand il veut.
+# Ici on garantit seulement que la liste est exacte le moment venu.
 #
 # CE QUI COMPTE COMME CODE N'EST PAS ÉCRIT ICI : la liste est celle de `rapport-cloture.sh`, lue
 # dans CLAUDE.md. Deux hooks qui définiraient « du code » chacun de leur côté divergeraient — c'est
@@ -28,11 +31,15 @@
 # la liste comme les autres. C'est le sens sûr de l'erreur : un fichier relu pour rien coûte une
 # review, un fichier oublié coûte un bug. Ne pas « corriger » ça en devinant à partir du chemin.
 #
-# Usage hors hook, pour l'agent :
+# Usage hors hook :
 #   relire-en-attente.sh --liste <session_id>  -> un chemin par ligne, prêt pour le bloc RELIRE
 #                                                 (cité s'il porte une espace : la seule forme que
 #                                                  `rapport-cloture.sh` accepte pour ces chemins-là)
-#   relire-en-attente.sh --vider <session_id>  -> à n'appeler QU'APRÈS avoir lancé les passes
+#                                                 APPELÉ PAR L'AGENT, à chaque rapport de clôture.
+#   relire-en-attente.sh --vider <session_id>  -> APPELÉ PAR L'UTILISATEUR, après SES passes.
+# L'agent n'appelle JAMAIS `--vider` : « depuis la dernière relecture » date d'une action de
+# l'utilisateur, qu'aucun hook ne voit d'ici, donc vider soi-même effacerait une liste que personne
+# n'a relue. L'agent recopie la commande sous le bloc RELIRE, il ne l'exécute pas.
 # Le session_id est TOUJOURS requis : plusieurs sessions travaillent en parallèle dans ce dépôt, et
 # le déduire des listes présentes revenait à effacer celle d'une autre session quand elle était la
 # seule à avoir édité du code (mesuré le 2026-08-12).

@@ -82,8 +82,8 @@
       "w_fire": 0.0,
       "w_risk": 0.0,
       "w_contest": 1.0,
-      "w_crowd": 0.5,
-      "_justification": "REGLE le 2026-08-11 apres mesure : w_objective valait 0.3, le plus bas du panel avec standoff, et le bot finissait DERNIER en bot-contre-bot (0.292) tout en etant sature contre l'agent (0.98). Il gagnait des combats et perdait la partie : la victoire se compte en VP d'objectifs, pas en kills. w_objective 0.3 -> 0.8, w_enemy 1.5 -> 1.2 : il reste le plus agressif du panel (aucun autre ne depasse 0.6 en w_enemy) mais il ne traverse plus la table en ignorant les zones. Meme diagnostic que endgame, corrige le meme jour."
+      "w_crowd": 2.0,
+      "_justification": "REGLE le 2026-08-11 apres mesure : w_objective valait 0.3, le plus bas du panel avec standoff, et le bot finissait DERNIER en bot-contre-bot (0.292) tout en etant sature contre l'agent (0.98). Il gagnait des combats et perdait la partie : la victoire se compte en VP d'objectifs, pas en kills. w_objective 0.3 -> 0.8, w_enemy 1.5 -> 1.2 : il reste le plus agressif du panel (aucun autre ne depasse 0.6 en w_enemy) mais il ne traverse plus la table en ignorant les zones. Meme diagnostic que endgame, corrige le meme jour. RECALIBRE le 2026-08-13 (§12.7, mesure 20 ep x1) : w_crowd 0.5 -> 2.0. Mesure avant : T2=1.10 T5=0.75, zones en DECLIN — stacking non penalise car w_crowd 0.5 < seuil 1.5 (hold_bonus=3.0, OC_surplus≈2). 2.0 place le penalty a 4.0 > hold_bonus, le spread devient actif. w_contest inchange : le bot chasse deja les ennemis via w_enemy=1.2."
     },
     "attrition": {
       "w_objective": 0.7,
@@ -106,8 +106,9 @@
       "w_enemy": 0.6,
       "w_fire": 1.0,
       "w_risk": 0.2,
-      "w_contest": 1.0,
-      "w_crowd": 0.5
+      "w_contest": 1.5,
+      "w_crowd": 2.0,
+      "_justification": "RECALIBRE le 2026-08-13 (§12.7, mesure 20 ep x1) : w_crowd 0.5 -> 2.0, w_contest 1.0 -> 1.5. Mesure avant : T2=1.35 T5=0.95, zones en declin — meme cause qu'alpha (w_crowd 0.5 < seuil 1.5). w_contest releve a 1.5 car w_enemy=0.6 est plus faible que alpha (1.2) : sans pull supplementaire vers les zones contestees, le bot reste concentre sur sa cible et ne dispute rien."
     },
     "scorer": {
       "w_objective": 1.0,

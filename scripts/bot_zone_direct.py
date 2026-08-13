@@ -53,9 +53,14 @@ def main() -> None:
     bot_weights: dict = cb.get("bot_eval_weights", {})
     bot_randomness: dict = cb.get("bot_eval_randomness", {})
     agent_seat_mode: str = tc.get("agent_seat_mode", "p1")
-    agent_seat_seed: Optional[int] = tc.get("agent_seat_seed", tc.get("seed"))
+    if "seed" not in tc:
+        raise RuntimeError("Clé 'seed' absente de la config d'entraînement ArmageddonAgent/x1_panel — run non reproductible")
+    base_seed: int = int(tc["seed"])
+    agent_seat_seed: Optional[int] = tc.get("agent_seat_seed", base_seed)
 
     scenarios = get_scenario_list_for_phase(config, "ArmageddonAgent", "x1_panel", scenario_type="holdout")
+    if not scenarios:
+        raise RuntimeError("Aucun scénario holdout trouvé pour ArmageddonAgent/x1_panel — vérifier config/agents/ArmageddonAgent/scenarios/")
     scenario_file = scenarios[0]
 
     results: Dict[str, Dict[int, List[int]]] = {}
@@ -88,20 +93,13 @@ def main() -> None:
         ep_zones: Dict[int, List[int]] = defaultdict(list)
 
         for ep_idx in range(args.episodes):
-            ep_seed = _episode_seed(42, bot_name, 0, ep_idx)
+            ep_seed = _episode_seed(base_seed, bot_name, 0, ep_idx)
             obs, info = env.reset(seed=ep_seed)
             bot_player: int = int(info.get("opponent_player", 2))
             done = False
             turn_snapshot: Dict[int, int] = {}
 
             while not done:
-                gs = env.engine.game_state
-                cur_turn: int = int(gs.get("turn", 0))
-                if cur_turn >= 1:
-                    controllers: dict = gs.get("objective_controllers", {})
-                    zones = sum(1 for v in controllers.values() if v == bot_player)
-                    turn_snapshot[cur_turn] = zones
-
                 model_obs = normalize(obs) if normalize else obs
                 action_masks = np.asarray(get_action_masks(env), dtype=bool)
                 if action_masks.ndim == 1:
@@ -117,10 +115,18 @@ def main() -> None:
                 obs, _, terminated, truncated, _ = env.step(action_scalar)
                 done = bool(terminated or truncated)
 
+                gs = env.engine.game_state
+                cur_turn: int = int(gs.get("turn", 0))
+                if cur_turn >= 1:
+                    controllers: dict = gs.get("objective_controllers", {})
+                    zones = sum(1 for v in controllers.values() if v == bot_player)
+                    turn_snapshot[cur_turn] = zones
+
             for t, z in turn_snapshot.items():
                 ep_zones[t].append(z)
             print(".", end="", flush=True)
 
+        env.close()
         results[bot_name] = dict(ep_zones)
         last_t = max(ep_zones) if ep_zones else 0
         n = len(ep_zones.get(last_t, []))

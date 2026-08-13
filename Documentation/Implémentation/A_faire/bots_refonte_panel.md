@@ -133,7 +133,7 @@ raison (cf. `config/bot_movement_weights.json`, entrée `tactical`).
 | 3 | ~~chiffrage de faisabilité du holdout à un coup~~ | ⛔ **sans objet** — holdout abandonné 2026-08-12, §11.2 |
 | 4 | modèle de dégâts espérés (attaquant → cible) | ✅ 2026-08-11, **corrigé à la racine** 2026-08-12, cf. §7 et §7.1 |
 | 5 | les SIX styles | ✅ 2026-08-12, cf. §7 et §11.3 (`standoff` supprimé §9.2, `scorer` ajouté §11.3) |
-| 6 | réglage en **bot-contre-bot** (~~orthogonalité~~ abandonnée, §3.2) | 🟠 **PARTIEL** — `w_contest` et `w_crowd` **non réglés** ; chiffres du §8/§9 à rejouer, cf. §11.1. Régler seulement APRÈS §12.6 : avant, tout poids fractionnaire était annulé, donc irréglable |
+| 6 | réglage en **bot-contre-bot** (~~orthogonalité~~ abandonnée, §3.2) | ✅ **2026-08-13** — `w_crowd`/`w_contest` calibrés par étalement (20 ep/bot x1), cf. §12.7 |
 | 7 | correspondance ancien/nouveau, puis suppression des cinq anciens | |
 | 8 | mesure finale contre l'agent, commande de §2 | 🟠 **PARTIEL** — mesurée sur `robust_0.8721` (§12.5), chiffres antérieurs au §12.6 ; reste à rejouer après réglage |
 
@@ -781,3 +781,53 @@ doctrine : tout s'arrêtait aux fonctions privées, et trois décisions n'étaie
 
 ⚠️ **À REJOUER** : la mesure du §12.5 sur 600 parties. Les poids agissent désormais tels qu'ils sont
 écrits dans `config/bot_movement_weights.json`, ce que les chiffres actuels ne reflètent pas.
+
+### 12.7 Calibration `w_crowd`/`w_contest` par étalement (2026-08-13)
+
+Instrument : `scripts/bot_zone_direct.py --episodes 20`, plateau `x1` (board/44x60x1), modèle
+`robust_0.8721`. Lit `game_state["objective_controllers"]` directement — contourne le problème
+step.log non-journalisé en bot eval.
+
+Référence panel (§12.5, post-§12.6) : **T2=1.61, T5=1.90**.
+
+Seuil effectif pour `w_crowd` : `w_crowd × OC_surplus(≈2) > hold_bonus(3.0)` → **`w_crowd > 1.5`**.
+En dessous, le penalty anti-stacking est inactif — les bots s'empilent sur une zone et n'en
+bougent plus. Les deux profils à `w_crowd: 0.5` étaient sous ce seuil.
+
+**Mesure avant (20 ep) :**
+
+| Bot | w_crowd | T2 | T5 | Diagnostic |
+|-----|---------|----|----|-----------|
+| alpha | 0.5 | 1.10 | 0.75 | Déclin — stacking actif |
+| decapitation | 0.5 | 1.35 | 0.95 | Déclin — stacking actif |
+| endgame | 1.0 | 1.50 | 1.95 | OK (doctrine patience, T5 ≈ réf.) |
+| attrition | 1.0 | 1.85 | 2.05 | OK |
+| scorer | 2.5 | 1.85 | 1.90 | OK |
+| racer | 3.0 | 2.20 | 2.30 | OK |
+
+**Correction appliquée :**
+
+- `alpha` : `w_crowd` 0.5 → **2.0** (penalty = 4.0 > hold_bonus). `w_contest` inchangé (1.0) : le
+  bot chasse déjà les ennemis via `w_enemy=1.2`.
+- `decapitation` : `w_crowd` 0.5 → **2.0** + `w_contest` 1.0 → **1.5** : `w_enemy=0.6` plus faible,
+  pull supplémentaire nécessaire pour contester.
+
+**Mesure après (20 ep) :**
+
+| Bot | T2 avant→après | T5 avant→après |
+|-----|---------------|----------------|
+| alpha | 1.10 → **1.35** | 0.75 → **1.00** |
+| decapitation | 1.35 → **1.85** | 0.95 → **1.60** |
+
+Le déclin est arrêté sur les deux profils. `alpha` reste sous la référence T5 (1.00 vs 1.90) par
+construction de la doctrine (poursuite ennemie prioritaire) — ce n'est pas un défaut à corriger.
+`decapitation` passe de 0.95 à 1.60, amélioration significative.
+
+**Bots non modifiés (mesures cohérentes entre les deux runs) :**
+
+| Bot | T2 run1 | T2 run2 | T5 run1 | T5 run2 |
+|-----|---------|---------|---------|---------|
+| attrition | 1.85 | 1.95 | 2.05 | 2.05 |
+| racer | 2.20 | 2.15 | 2.30 | 2.60 |
+| scorer | 1.85 | 2.05 | 1.90 | 2.20 |
+| endgame | 1.50 | 1.40 | 1.95 | 1.95 |
