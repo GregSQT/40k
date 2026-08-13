@@ -96,17 +96,25 @@ def test_json_out_relit_les_episodes_un_par_un(script, tmp_path, fingerprint):
     ]
     out = tmp_path / "sub" / "zones.json"
     out.parent.mkdir()
-    meta = script._run_meta(fingerprint, "holdout_1.json", 1, 2, 42, "p1", 42, {"bot_a": 0.1, "bot_b": 0.2})
+    meta = script._run_meta(
+        fingerprint, "holdout_1.json", 1, 2, 42, "p1", 42, {"bot_a": 0.1, "bot_b": 0.2},
+        {"bot_a": {"w_objective": 1.0}, "bot_b": {"w_objective": 0.5}}, 3.0, "REF",
+    )
 
     with script.json_out_draft(str(out)) as handle:
         script._write_json_out(handle, meta, records)
     payload = json.loads(out.read_text(encoding="utf-8"))
 
-    assert payload["schema_version"] == 2
+    assert payload["schema_version"] == 3
     assert payload["run"]["scenario_file"] == "holdout_1.json"
     assert payload["run"]["episodes_per_bot"] == 1
     assert payload["run"]["episodes_total"] == 2
     assert payload["run"]["episodes_total"] == len(payload["episodes"])
+    assert payload["run"]["label"] == "REF"
+    assert payload["run"]["hold_bonus"] == 3.0
+    # sans ces poids-la, deux relevés d'une campagne de réglage sont indiscernables : le
+    # protocole ne change qu'un poids d'un run à l'autre, tout le reste étant identique au bit.
+    assert payload["run"]["doctrine_weights"]["bot_b"] == {"w_objective": 0.5}
     assert [ep["seed"] for ep in payload["episodes"]] == [111, 222]
     assert payload["episodes"][1]["zones_by_turn"] == {"1": 2, "2": 2}
     # rejouable : l'agrégat relu vaut l'agrégat d'origine
@@ -117,7 +125,10 @@ def test_json_out_relit_les_episodes_un_par_un(script, tmp_path, fingerprint):
 def test_le_releve_dit_ce_qui_distingue_deux_runs(script, fingerprint):
     # sans ces champs, un « avant » et un « après » §12.7 sont indiscernables, et la graine
     # d'épisode ne suffit pas à reconstruire la doctrine du bot.
-    meta = script._run_meta(fingerprint, "holdout_1.json", 20, 6, 42, "alternate", 7, {"bot_zone": 0.25})
+    meta = script._run_meta(
+        fingerprint, "holdout_1.json", 20, 6, 42, "alternate", 7, {"bot_zone": 0.25},
+        {"bot_zone": {"w_crowd": 4.0}}, 3.0, "",
+    )
 
     assert meta["base_seed"] == 42
     assert meta["agent_seat_mode"] == "alternate"
@@ -177,7 +188,17 @@ def test_les_cles_du_panel_sont_exigees_et_non_defaultees(main_ast):
         and node.func.attr == "get" and isinstance(node.func.value, ast.Name) and len(node.args) == 2
     }
 
-    assert {"bot_eval_weights", "bot_eval_randomness"} <= exigees
+    # `bot_eval_weights` / `bot_eval_randomness` ne sont plus lues ici : `_load_bot_eval_params`
+    # les exige, coerce et vérifie leur somme — c'est la MÊME fonction que l'évaluation réelle,
+    # donc les relire à la main est ce qui privait ce script des trois contrôles. Ce qui reste
+    # vérifiable ici, et qui est le vrai invariant, c'est qu'aucune clé du bloc `callback_params`
+    # ne se relise avec un défaut.
+    assert "_load_bot_eval_params" in {
+        node.func.id
+        for node in ast.walk(main_ast)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+    assert "agent_seat_mode" in exigees
     assert "cb" not in defaultees  # aucune clé du bloc callback_params ne reprend un défaut
 
 

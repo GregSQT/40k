@@ -262,13 +262,25 @@ def _run_meta(
     agent_seat_mode: str,
     agent_seat_seed: Optional[int],
     bot_randomness: Dict[str, Any],
+    doctrine_weights: Dict[str, Dict[str, float]],
+    hold_bonus: float,
+    label: str,
 ) -> Dict[str, Any]:
     """Ce qui distingue DEUX relevés l'un de l'autre — sans ça, un avant et un après §12.7
     sont indiscernables, et une graine d'épisode ne suffit pas à reconstruire la doctrine du bot.
+
+    `doctrine_weights` et `hold_bonus` sont les poids RÉELLEMENT CONSOMMÉS, relus par l'entrée
+    publique `load_doctrine_weights` et non recopiés du fichier de config : c'est ce tuple-là qui
+    a joué. Sans eux, deux relevés d'une campagne de réglage ne se distinguent par RIEN — le
+    protocole du §12.8 ne change qu'un poids d'un run à l'autre, tout le reste étant identique au
+    bit, et une comparaison appariée dont on ne sait pas ce qui a changé ne compare rien.
+    `hold_bonus` s'y ajoute parce qu'il est le seul terme du score qui ne soit pas par bot : il
+    fixe l'échelle à laquelle `w_crowd` se lit, donc il périme la campagne entière s'il bouge.
     """
     return {
         "agent": "ArmageddonAgent",
         "training_config": "x1_panel",
+        "label": label,
         **model_fingerprint,
         "scenario_file": scenario_file,
         "episodes_per_bot": episodes_per_bot,
@@ -277,6 +289,8 @@ def _run_meta(
         "agent_seat_mode": agent_seat_mode,
         "agent_seat_seed": agent_seat_seed,
         "bot_randomness": dict(bot_randomness),
+        "doctrine_weights": doctrine_weights,
+        "hold_bonus": hold_bonus,
     }
 
 
@@ -288,6 +302,12 @@ def main() -> None:
         dest="json_out",
         default=None,
         help="Fichier JSON où écrire le relevé par épisode (graine, joueur du bot, grandeurs par tour)",
+    )
+    parser.add_argument(
+        "--label",
+        default="",
+        help="Étiquette du run, recopiée dans l'en-tête et dans --json-out. Vide = run non étiqueté ;"
+             " deux relevés d'une même campagne ne se distinguent alors que par leurs poids.",
     )
     args = parser.parse_args()
     # AVANT d'ouvrir la destination : `--episodes 0` jouait zéro épisode, publiait
@@ -310,6 +330,7 @@ def main() -> None:
         from config_loader import get_config_loader
         from ai.unit_registry import UnitRegistry
         from ai.bot_registry import build_bot
+        from ai.bot_doctrines import load_doctrine_weights, load_hold_bonus
         from ai.env_wrappers import BotControlledEnv
         from ai.training_utils import get_scenario_list_for_phase
         from ai.bot_evaluation import (
@@ -327,6 +348,8 @@ def main() -> None:
         vec_norm_enabled = bool(tc.get("vec_normalize", {}).get("enabled", False))
         vec_eval_enabled = bool(tc.get("vec_normalize_eval", {}).get("enabled", False))
 
+        if args.label:
+            print(f"Run    : {args.label}")
         print(f"Modèle : {os.path.basename(model_path)}")
         model_fingerprint = _model_fingerprint(model_path)  # avant le chargement : cf. docstring
         model = MaskablePPO.load(model_path, device="cpu")
@@ -489,6 +512,17 @@ def main() -> None:
             run_meta = _run_meta(
                 model_fingerprint, scenario_file, args.episodes, len(bot_weights),
                 base_seed, agent_seat_mode, agent_seat_seed, bot_randomness,
+                {
+                    bot: dict(
+                        zip(
+                            ("w_objective", "w_enemy", "w_fire", "w_risk", "w_contest", "w_crowd"),
+                            load_doctrine_weights(bot),
+                        )
+                    )
+                    for bot in bot_weights
+                },
+                load_hold_bonus(),
+                args.label,
             )
             _write_json_out(json_handle, run_meta, episode_records)
 
@@ -498,7 +532,11 @@ def main() -> None:
         print(f"\nRelevé par épisode : {args.json_out} ({len(episode_records)} épisodes)")
 
     print()
-    print("Référence §12.5 (post-§12.6, bot=P2, 100 ep): T2=1.61  T5=1.90  VP=31.0  combined=0.788")
+    # Référence COURANTE du panel, à tenir à jour avec le chantier : un rappel périmé imprimé
+    # sous chaque tableau est pire qu'absent, il fait conclure sur la mauvaise ligne de base.
+    print("Référence panel (§12.12, 60 ep/bot, x1, robust_0.8721) — zones tenues T2/T5 :")
+    print("  alpha 1.12/1.10 · attrition 1.67/2.08 · decapitation 1.67/1.77 · endgame 1.57/2.08")
+    print("  racer 1.77/2.07 · scorer 1.87/2.33   |   contre l'agent : combined 0.7600, pire bot racer 0.630")
 
 
 if __name__ == "__main__":
