@@ -102,13 +102,13 @@
       "w_crowd": 0.0
     },
     "decapitation": {
-      "w_objective": 0.5,
+      "w_objective": 1.0,
       "w_enemy": 0.6,
       "w_fire": 1.0,
       "w_risk": 0.2,
       "w_contest": 1.5,
       "w_crowd": 2.0,
-      "_justification": "RECALIBRE le 2026-08-13 (§12.7, mesure 20 ep x1) : w_crowd 0.5 -> 2.0, w_contest 1.0 -> 1.5. Mesure avant : T2=1.35 T5=0.95, zones en declin — meme cause qu'alpha (w_crowd 0.5 < seuil 1.5). w_contest releve a 1.5 car w_enemy=0.6 est plus faible que alpha (1.2) : sans pull supplementaire vers les zones contestees, le bot reste concentre sur sa cible et ne dispute rien."
+      "_justification": "RECALIBRE le 2026-08-13 (§12.9) : w_objective 0.5 -> 1.0, APRES que le deplacement se soit mis a suivre la cible focalisee du tour (avant, `_focus` etait toujours vide en phase move : le terme d'ennemi visait l'ennemi le PLUS PROCHE de chaque escouade, et les cinq partaient chacune de son cote). Le reglage d'avant valait pour une geometrie qui n'est plus celle-la : le meme w_enemy tire desormais TOUTES les escouades vers UN seul point, souvent loin des zones. Protocole : 60 ep/bot, board/44x60x1, modele robust_0.8721 (md5 6f6b98…), un poids par run, les cinq autres styles en controle (derive 0.000 sur les quatre runs). Reponse mesuree en zones controlees (T2/T5) : 0.5 -> 1.47/0.87 ; 0.8 -> 1.63/1.43 ; 1.0 -> 1.67/1.77 ; 1.2 -> 1.62/1.68. Pic a 1.0, et le point a 1.2 redescend : ce n'est pas un plateau, ne pas monter plus haut en esperant mieux. w_enemy TESTE et GARDE a 0.6 : a 0.8 (meme w_objective 1.0) le bot retombe a 1.63/1.60 — la concentration nouvelle rend le terme d'ennemi PLUS fort a poids egal, donc le renforcer coute des zones. Reference panel (§12.5) : T2=1.61 T5=1.90. La ligne du §12.7 ci-dessous (T2=1.85/T5=1.60 apres w_crowd 0.5 -> 2.0) N'EST PAS reproductible : elle a ete mesuree par un instrument qui lisait le chemin canonique du modele, donc un autre modele que robust_0.8721 — l'instrument le verifie desormais au md5. w_crowd 2.0 et w_contest 1.5 sont conserves : la mesure de reprise (0.5 -> 1.47/0.87) les inclut deja, et aucun run ne les a isoles depuis."
     },
     "scorer": {
       "w_objective": 1.0,
