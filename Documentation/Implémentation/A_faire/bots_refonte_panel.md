@@ -958,20 +958,34 @@ d'origine au dixième près — distance T5 15.0 pour 14,9 annoncés, `racer` 18
 
 ⚠️ **La distance au plus proche ennemi AUGMENTE** (15.0 → 17.6 au T5), alors que le diagnostic la
 citait comme symptôme. Les pertes ne bougent qu'à la marge (0.39 → 0.35). Seules les zones se
-redressent franchement. Deux lectures possibles, et **ce run ne les sépare pas** — il change deux
-choses à la fois (l'élection ET `w_objective` 0.5 → 1.0) :
+redressent franchement.
 
-1. la **grandeur est mal choisie** pour cette doctrine. « Distance au plus proche ennemi », moyennée
-   sur les escouades, RÉCOMPENSE la dispersion : cinq escouades sur cinq ennemis différents sont
-   chacune près d'un ennemi. Concentrer les cinq sur UNE cible fait mécaniquement monter la moyenne,
-   même si la doctrine est exactement respectée. La grandeur juste serait la distance à la **cible
-   élue**, ou le nombre d'ennemis distincts les plus proches d'au moins une escouade ;
-2. `w_objective` 1.0 tient les escouades sur les zones, donc plus loin des ennemis — et c'est alors
-   le réglage, pas l'élection, qui déplace la distance.
+**Décomposition (3e run de 60 ép., élection ACTIVE et `w_objective` remis à 0.5)** — elle sépare les
+deux changements, que le run précédent confondait :
 
-Tant que ce n'est pas décomposé (un run « élection seule, poids d'avant »), **ne pas conclure** que
-la doctrine est réparée sur la foi des zones. Reste aussi l'effet **contre l'agent** (win-rate), que
-cet instrument ne rend pas et que seule la campagne du §2 tranche.
+| `decapitation`, T5 | avant (ni l'un ni l'autre) | élection seule | élection + `w_objective` 1.0 |
+|---|---|---|---|
+| zones | 0.98 | 0.87 | **1.77** |
+| distance | 15.0 | **14.8** | 17.6 |
+| pertes cumulées | 0.39 | 0.37 | 0.35 |
+
+Verdict : **la hausse de distance vient du poids d'objectif, pas de l'élection.** À poids constants,
+l'élection laisse la distance plate (15.0 → 14.8) et les pertes quasi inchangées (0.39 → 0.37). Le
+17.6 est le prix — assumé — de tenir des zones plutôt que de camper au contact.
+
+Deux conséquences de méthode :
+
+1. **« distance au plus proche ennemi » ne mesure pas la concentration.** Elle est INSENSIBLE à
+   l'élection, ce que la décomposition établit directement. Elle récompense même la dispersion :
+   cinq escouades sur cinq ennemis différents sont chacune près d'un ennemi. La grandeur juste
+   serait la distance à la **cible élue**, ou le nombre d'ennemis distincts les plus proches d'au
+   moins une escouade — aucune des deux n'existe encore.
+2. **La doctrine elle-même reste non mesurée.** Les zones disent que le style a retrouvé sa place
+   dans le panel ; elles ne disent pas que les cinq escouades convergent. Ne pas conclure là-dessus.
+
+Contrôle de reproductibilité : le run « élection seule » rend sur les zones **1.47 / 0.87**, soit
+exactement le run correspondant de la campagne ci-dessus, mesuré séparément. Reste aussi l'effet
+**contre l'agent** (win-rate), que cet instrument ne rend pas et que seule la campagne du §2 tranche.
 
 Contrôle : les cinq autres styles rendent des chiffres **identiques aux trois grandeurs** entre les
 deux runs (dérive 0.000), ce qui confirme que le point d'extension `movement_enemy_anchors` n'a
