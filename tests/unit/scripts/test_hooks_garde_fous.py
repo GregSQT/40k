@@ -14,6 +14,7 @@ première version du contrôle prenait pour le rapport lui-même.
 from __future__ import annotations
 
 import json
+from typing import Any
 import os
 import re
 import shlex
@@ -127,7 +128,7 @@ def _labels_du_format_impose() -> list[str]:
     """
     texte = CLAUDE_MD.read_text(encoding="utf-8")
     debut = texte.index("FORMAT IMPOSÉ")
-    fin = texte.index("/simplify <fichiers modifiés>", debut)
+    fin = texte.index("/simplify <fichiers pertinents>", debut)
     return re.findall(r"^ {2}([A-ZÉÈÀÂÎÔÛÇ]+)\s*:", texte[debut:fin], re.MULTILINE)
 
 
@@ -843,7 +844,7 @@ def _edite(
     à `None` construit un payload SANS `session_id`, et `cle` couvre `notebook_path` : le payload
     du hook a déjà changé une fois, une seule fabrique évite de propager la prochaine à la main.
     """
-    payload = {"tool_input": {cle: chemin}}
+    payload: dict[str, Any] = {"tool_input": {cle: chemin}}
     if session is not None:
         payload["session_id"] = session
     proc = subprocess.run(

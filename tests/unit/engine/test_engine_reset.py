@@ -488,6 +488,7 @@ class TestEpisodeNumberSourceUnique:
         engine.reset()
 
         assert engine.game_state["episode_number"] == offset + 2
+        assert engine.step_logger is not None
         assert engine.step_logger.episode_number == offset + 2
 
     @pytest.mark.parametrize("offset", [0, 5])
@@ -497,5 +498,6 @@ class TestEpisodeNumberSourceUnique:
 
         engine.reset()
 
+        assert engine.step_logger is not None
         assert engine.step_logger.episode_number == offset + 1
         assert engine.step_logger.episode_number == engine.game_state["episode_number"]

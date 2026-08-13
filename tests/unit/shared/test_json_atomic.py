@@ -474,10 +474,12 @@ def _mode_douverture(node: ast.Call) -> str:
             return str(mot.value.value)
     # `open(chemin, mode)` pour la fonction native, `chemin.open(mode)` pour la méthode de Path.
     rang = 1 if isinstance(node.func, ast.Name) else 0
-    if len(node.args) > rang and isinstance(node.args[rang], ast.Constant):
-        candidat = str(node.args[rang].value)
-        if _FORME_MODE.match(candidat):
-            return candidat
+    if len(node.args) > rang:
+        arg_rang = node.args[rang]
+        if isinstance(arg_rang, ast.Constant):
+            candidat = str(arg_rang.value)
+            if _FORME_MODE.match(candidat):
+                return candidat
     return "r"
 
 

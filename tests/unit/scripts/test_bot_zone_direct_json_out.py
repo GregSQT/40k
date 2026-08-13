@@ -246,6 +246,7 @@ def test_la_ligne_de_succes_s_affiche_apres_la_publication(main_ast):
     )
     assert annonce is not None, "annonce 'Relevé par épisode' introuvable dans main()"
 
+    assert draft.end_lineno is not None
     assert annonce.lineno > draft.end_lineno
 
 

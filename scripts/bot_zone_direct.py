@@ -30,7 +30,7 @@ import hashlib
 import os
 import sys
 from datetime import datetime
-from typing import Any, Dict, List, Optional, TextIO
+from typing import Any, Dict, List, Optional, TextIO, cast
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -60,25 +60,40 @@ _JSON_SCHEMA_VERSION = 4
 
 #: Checkpoint sur lequel TOUTES les mesures du §12 sont faites. Remplacer ici est une décision
 #: de protocole : elle périme les chiffres du chantier, donc elle ne se prend pas par accident.
-REFERENCE_MODEL = "ArmageddonAgent_12345_robust_0.8721.zip"
+_DEFAULT_MODEL = os.path.join(
+    _PROJECT_ROOT, "ai", "models", "ArmageddonAgent",
+    "ArmageddonAgent_12345_robust_0.8721.zip",
+)
 REFERENCE_MD5 = "6f6b98059a0a6c279b7d11dc427461fd"
 
 
-def _require_reference_model() -> str:
-    """Chemin du modèle étalon, vérifié au md5. Lève plutôt que de mesurer un autre modèle."""
-    path = os.path.join(_PROJECT_ROOT, "ai", "models", "ArmageddonAgent", REFERENCE_MODEL)
+def _md5(path: str) -> str:
+    """Empreinte MD5 lue par blocs (les modèles font des dizaines de Mo).
+
+    JUMEAU de `scripts/roster_matchup_stats.py::_model_md5` — duplication assumée, pas de module
+    commun dans `scripts/` pour six lignes de hashlib.
+    """
+    digest = hashlib.md5(usedforsecurity=False)
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _require_reference_model(path: str = _DEFAULT_MODEL) -> str:
+    """Vérifie qu'un modèle existe. Pour le checkpoint de référence, vérifie aussi le md5."""
     if not os.path.exists(path):
         raise RuntimeError(
-            f"Modèle de référence absent : {path}. Toutes les mesures du §12 sont faites sur lui ; "
-            "mesurer avec un autre rend le tableau incomparable."
+            f"Modèle absent : {path}. Toutes les mesures du §12 sont faites sur le checkpoint de "
+            "référence ; mesurer avec un autre rend le tableau incomparable."
         )
-    with open(path, "rb") as handle:
-        digest = hashlib.md5(handle.read()).hexdigest()
-    if digest != REFERENCE_MD5:
-        raise RuntimeError(
-            f"{REFERENCE_MODEL} vaut md5 {digest}, attendu {REFERENCE_MD5} : le fichier a été "
-            "réécrit. Restaurer le checkpoint, ou acter le nouvel étalon ICI et rejouer le §12."
-        )
+    if path == _DEFAULT_MODEL:
+        digest = _md5(path)
+        if digest != REFERENCE_MD5:
+            raise RuntimeError(
+                f"{os.path.basename(path)} vaut md5 {digest}, attendu {REFERENCE_MD5} : le fichier "
+                "a été réécrit. Restaurer le checkpoint, ou acter le nouvel étalon ICI et rejouer §12."
+            )
     return path
 
 
@@ -398,12 +413,18 @@ def main() -> None:
         default=None,
         help="Étiquette libre associée à ce run, stockée dans run_meta (absent du JSON si omis)",
     )
+    parser.add_argument(
+        "--model",
+        default=_DEFAULT_MODEL,
+        help="Chemin vers le modèle à mesurer (défaut : checkpoint de référence du §12)",
+    )
     args = parser.parse_args()
     # AVANT d'ouvrir la destination : `--episodes 0` jouait zéro épisode, publiait
     # `"episodes": []` PAR-DESSUS le relevé précédent et sortait 0. Le fichier écrasé était le
     # seul exemplaire d'une mesure de plusieurs heures, et rien dans la sortie ne le disait.
     if args.episodes < 1:
         parser.error(f"--episodes doit valoir au moins 1 (reçu {args.episodes})")
+    model_path = _require_reference_model(args.model)
     _require_board_path()
 
     episode_records: List[Dict[str, Any]] = []
@@ -432,7 +453,7 @@ def main() -> None:
         config = get_config_loader()
         tc = config.load_agent_training_config("ArmageddonAgent", "x1_panel")
 
-        model_path = _require_reference_model()
+        # model_path validé avant le with (existence + md5 pour le checkpoint de référence)
         vec_norm_enabled = bool(tc.get("vec_normalize", {}).get("enabled", False))
         vec_eval_enabled = bool(tc.get("vec_normalize_eval", {}).get("enabled", False))
 
@@ -482,7 +503,7 @@ def main() -> None:
                 training_n_envs=1,
             )
 
-            masked = ActionMasker(base_env, lambda e: e.get_action_mask())
+            masked = ActionMasker(base_env, lambda e: cast(W40KEngine, e).get_action_mask())
             env = BotControlledEnv(
                 masked, bot, unit_registry,
                 agent_seat_mode=agent_seat_mode,

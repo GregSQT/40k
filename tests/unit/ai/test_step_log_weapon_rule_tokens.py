@@ -22,6 +22,7 @@ Rien n'est simulé sauf le décor (en-tête d'épisode, positions), qui n'est pa
 """
 from __future__ import annotations
 
+from typing import Any
 import random
 
 import pytest
@@ -1072,7 +1073,7 @@ _LOT_A_IDS = [rule.split(":")[0] for rule, _, _, _, _ in LOT_A_TOKENS]
 #: Paire (unité, arme) RÉELLE de MÊLÉE. Le décor de tir par défaut porte une arme de TIR : la
 #: rejouer en mêlée fait remonter `missing CC_NB` à l'analyzer, donc des `parse_errors` qui
 #: masqueraient ceux que le contrôle de masse cherche vraiment.
-MELEE_KWARGS = {"unit_type": CLEAVE_UNIT, "weapon_name": CLEAVE_WEAPON}
+MELEE_KWARGS: dict[str, Any] = {"unit_type": CLEAVE_UNIT, "weapon_name": CLEAVE_WEAPON}
 
 
 @pytest.mark.parametrize("melee", [False, True], ids=["tir", "melee"])

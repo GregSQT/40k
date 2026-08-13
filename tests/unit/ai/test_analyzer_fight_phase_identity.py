@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import ai.analyzer as an
 from tests.unit.ai._fabriques import entete_step_log
@@ -28,7 +29,7 @@ _UNITS = (
     "[MODELS: 101#0@(-1,-1,z0)]\n"
 )
 _END = "[12:00:09] EPISODE END: Winner=1, Method=objectives, Actions=0, Steps=0, Total=0, Duration=1.000s"
-_COMMON = dict(
+_COMMON: dict[str, Any] = dict(
     units=_UNITS,
     inches_to_subhex=1,
     board="cols=44 rows=60",

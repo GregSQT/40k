@@ -5,7 +5,7 @@ Utilise AnalyzerState (state) et AnalyzerConfig (config) pour tout état mutable
 
 import re
 from functools import lru_cache
-from typing import Dict, Optional
+from typing import Dict, Optional, cast
 
 from shared.data_validation import require_key, require_present
 from ai.analyzer_rules import note_rule_usage
@@ -899,7 +899,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 # destruction d'une cible pour distinguer les attaques restantes de la MÊME
                 # activation (excess lost) d'un vrai cadavre attaqué par une unité tierce.
                 _dmg_actor_match = re.match(r'Unit (\d+)\(', action_desc)
-                _dmg_actor_id = _dmg_actor_match.group(1) if _dmg_actor_match else None
+                _dmg_actor_id: str | None = cast(str, _dmg_actor_match.group(1)) if _dmg_actor_match else None
 
                 # Effectifs AVANT les dégâts de cette ligne. [BLAST] 24.05 et [CLEAVE] 24.06
                 # comptent les figurines de la cible « in the Select Targets step », donc AVANT
@@ -1008,6 +1008,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         )
 
                 if _dmg_actor_match:
+                    assert _dmg_actor_id is not None
                     actor_id = _dmg_actor_id
                     _track_unit_reappearance(
                         actor_id,
@@ -1636,7 +1637,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         _rt_match = _RT_UNIT_ID_RE.match(action_desc)
                         if _rt_match:
                             _rt_uid = _rt_match.group(1)
-                            if state.unit_hp.get(_rt_uid, 0) > 0:
+                            if _rt_uid in state.unit_hp and state.unit_hp[_rt_uid] > 0:
                                 # Pas de current_episode_deaths.append : le timeout n'est pas un
                                 # kill attribuable à un joueur (même convention que coherency_removal).
                                 # Pas de wounded_enemies.discard : une unité en réserves n'a jamais

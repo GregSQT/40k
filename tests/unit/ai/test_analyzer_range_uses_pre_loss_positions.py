@@ -22,6 +22,8 @@ seule est à portée. Le tir la tue, donc `[TARGET_MODELS:]` ne liste plus que l
 """
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from tests.unit.ai._fabriques import entete_step_log
@@ -32,7 +34,7 @@ PROCHE = (22, 20)    # 12 hex du tireur : DANS les 24" du Sternguard Bolt Rifle
 LOIN = (42, 20)      # 32 hex : HORS des 24"
 OBJECTIVES = ";".join(f"(60,{r})" for r in range(40, 46))
 
-_COMMON = dict(
+_COMMON: dict[str, Any] = dict(
     inches_to_subhex=1,
     hex_radius="13.9",
     margin=5,
