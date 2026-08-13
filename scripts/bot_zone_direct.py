@@ -131,6 +131,8 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    episode_records: List[Dict[str, Any]] = []
+
     # le brouillon s'ouvre AVANT les imports lourds : un chemin faux coûte une seconde, et il
     # n'est publié que si le run va au bout (sinon refermé et effacé, cf. `json_out_draft`).
     with json_out_draft(args.json_out) as json_handle:
@@ -145,6 +147,7 @@ def main() -> None:
         from ai.training_utils import get_scenario_list_for_phase
         from ai.bot_evaluation import _build_eval_obs_normalizer_for_worker, _episode_seed
         from engine.w40k_core import W40KEngine
+        from shared.data_validation import require_key
 
         config = get_config_loader()
         tc = config.load_agent_training_config("ArmageddonAgent", "x1_panel")
@@ -159,8 +162,13 @@ def main() -> None:
         model = MaskablePPO.load(model_path, device="cpu")
         normalize = _build_eval_obs_normalizer_for_worker(model, model_path, vec_norm_enabled, vec_eval_enabled)
 
-        bot_weights: dict = cb.get("bot_eval_weights", {})
-        bot_randomness: dict = cb.get("bot_eval_randomness", {})
+        # `require_key` et pas `.get(..., {})` : un panel vide ferait tourner la boucle ZÉRO
+        # fois — tableau réduit à son en-tête, `"episodes": []` publié, sortie 0 — et une
+        # randomness vide construirait six bots non paramétrés dont les moyennes seraient
+        # quand même comparées à la référence §12.5. Même exigence que le jumeau
+        # `ai/bot_evaluation.py:181,193`, qui lit ces deux clés par `require_key`.
+        bot_weights: dict = require_key(cb, "bot_eval_weights")
+        bot_randomness: dict = require_key(cb, "bot_eval_randomness")
         agent_seat_mode: str = tc.get("agent_seat_mode", "p1")
         if "seed" not in tc:
             raise RuntimeError("Clé 'seed' absente de la config d'entraînement ArmageddonAgent/x1_panel — run non reproductible")
@@ -171,8 +179,6 @@ def main() -> None:
         if not scenarios:
             raise RuntimeError("Aucun scénario holdout trouvé pour ArmageddonAgent/x1_panel — vérifier config/agents/ArmageddonAgent/scenarios/")
         scenario_file = scenarios[0]
-
-        episode_records: List[Dict[str, Any]] = []
 
         for bot_name in bot_weights:
             print(f"  {bot_name:<16}", end=" ", flush=True)
@@ -258,10 +264,14 @@ def main() -> None:
                 agent_seat_mode, agent_seat_seed, bot_randomness,
             )
             _write_json_out(json_handle, run_meta, episode_records)
-            print(f"\nRelevé par épisode : {args.json_out} ({len(episode_records)} épisodes)")
 
-        print()
-        print("Référence §12.5 (post-§12.6, bot=P2, 100 ep): T2=1.61  T5=1.90  VP=31.0  combined=0.788")
+    # hors du `with` : la ligne ne s'affiche qu'une fois le fichier VRAIMENT publié. Dedans,
+    # un flush qui rate la faisait lire juste avant la trace, destination absente ou périmée.
+    if args.json_out:
+        print(f"\nRelevé par épisode : {args.json_out} ({len(episode_records)} épisodes)")
+
+    print()
+    print("Référence §12.5 (post-§12.6, bot=P2, 100 ep): T2=1.61  T5=1.90  VP=31.0  combined=0.788")
 
 
 if __name__ == "__main__":

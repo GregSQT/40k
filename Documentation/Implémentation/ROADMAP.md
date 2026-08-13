@@ -502,8 +502,12 @@ mesure, et c'est assumé (§0.14).
    en dur, donc muet) et la graine d'épisode seule ne reconstruit pas la doctrine du bot.
    La destination est validée AVANT de jouer — chemin vide, dossier, dossier absent ou en lecture
    seule échouent en une seconde au lieu de coûter tout le run, graines comprises ; l'écriture
-   passe par un brouillon `<fichier>.part` publié par `os.replace`, donc un run interrompu ne
-   détruit pas le relevé précédent et ne laisse pas de résidu. `schema_version` = **2**.
+   passe par `scripts/json_atomic.py` (§5) : brouillon `<fichier>.part` publié par `os.replace`,
+   donc un run interrompu ne détruit pas le relevé précédent et ne laisse pas de résidu.
+   `schema_version` = **2**. Les clés `bot_eval_weights`/`bot_eval_randomness` sont EXIGÉES et
+   non plus défaultées à `{}` : un panel absent faisait tourner la boucle zéro fois et publier
+   un relevé vide en sortant 0, une randomness absente comparait six bots non paramétrés à la
+   référence §12.5.
 
 ## 2. Capacités — seul chantier restant de la série « chantiers capacités »
 
@@ -1032,6 +1036,20 @@ Lourds, à re-cadrer avant toute reprise :
 >
 > Ne reste ici que ce qui **sert à la prochaine passe** : le contrôle des liens, et les
 > incohérences non soldées.
+
+### Deux formes uniques extraites de leurs copies (2026-08-13)
+
+- ✅ **Écriture JSON atomique** — [`scripts/json_atomic.py`](../../scripts/json_atomic.py) remplace
+  les quatre `_write_json` privés (`bot_zone_direct`, `build_holdout_benchmark`,
+  `migrate_scenario_bank_v11`, `rebalance_holdout_hard_scenarios`), qui divergeaient sur
+  `write_text` vs `open`, `ensure_ascii` et la création implicite du dossier. Le défaut supprimé :
+  `open(path, "w")` détruit le fichier précédent AVANT d'écrire un octet, donc une interruption
+  laissait un JSON tronqué à la place d'un relevé valide. Tout passe par un brouillon `<path>.part`
+  publié par `os.replace`, avec trois refus à l'ouverture (destination vide, dossier, dossier
+  absent ou en lecture seule) pour qu'un chemin faux coûte une seconde et non un run entier.
+  Un verrou statique interdit à ces scripts de réécrire du JSON en direct.
+- ✅ **Chargement d'un script par `importlib` dans les tests** — [`tests/_chargeur_script.py`](../../tests/_chargeur_script.py)
+  remplace les six copies du même bloc `spec_from_file_location`.
 
 ### Le contrôle est outillé — ne plus le refaire à la main
 
