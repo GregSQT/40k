@@ -35,6 +35,7 @@ from typing import Any, Dict, List, Optional, TextIO
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from bot_panel_reference import print_panel_reference  # noqa: E402  (dépend du sys.path ci-dessus)
 from shared.json_atomic import dump_json, json_out_draft  # noqa: E402  (dépend du sys.path ci-dessus)
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -132,6 +133,94 @@ def _avg_bot_enemy_distance(gs: Dict[str, Any], bot_player: int) -> Optional[flo
     return sum(distances) / len(distances) if distances else None
 
 
+def _count_distinct_focus_targets(gs: Dict[str, Any], bot_player: int) -> Optional[int]:
+    """Nombre d'ennemis DISTINCTS élus « plus proche » par au moins une escouade bot sur table.
+
+    1 = toutes les escouades convergent vers le même ennemi ; N = chacune part de son côté.
+    C'est la mesure de convergence qui distingue une hausse de `dist_by_turn` due à l'élection
+    d'une cible commune (progrès) d'une hausse due à autre chose (régression).
+
+    Retourne None si aucun ennemi n'est sur la table, ou si aucune escouade bot ne l'est.
+    """
+    from engine.phase_handlers.shared_utils import is_unit_alive, require_unit_from_cache
+    from engine.spatial_relations import entry_is_on_battlefield
+    from engine.combat_utils import calculate_hex_distance
+
+    units = gs.get("units", [])
+
+    enemies: List[tuple] = []
+    for u in units:
+        if int(u.get("player", 0)) == bot_player:
+            continue
+        sid = str(u["id"])
+        if not is_unit_alive(sid, gs):
+            continue
+        entry = require_unit_from_cache(sid, gs, "_focus_targets:enemy")
+        if entry_is_on_battlefield(entry):
+            enemies.append((sid, int(entry["col"]), int(entry["row"])))
+
+    if not enemies:
+        return None
+
+    chosen: set = set()
+    for u in units:
+        if int(u.get("player", 0)) != bot_player:
+            continue
+        sid = str(u["id"])
+        if not is_unit_alive(sid, gs):
+            continue
+        entry = require_unit_from_cache(sid, gs, "_focus_targets:bot")
+        if not entry_is_on_battlefield(entry):
+            continue
+        bc, br = int(entry["col"]), int(entry["row"])
+        nearest = min(enemies, key=lambda e: calculate_hex_distance(bc, br, e[1], e[2]))
+        chosen.add(nearest[0])
+
+    return len(chosen) if chosen else None
+
+
+def _avg_focus_target_distance(gs: Dict[str, Any], bot: Any, bot_player: int) -> Optional[float]:
+    """Distance hex moyenne des escouades bot sur table à la cible FOCALISÉE du bot.
+
+    N'existe que pour les doctrines qui élisent une cible commune (DecapitationBot) : les autres
+    n'ont pas d'attribut `_focus_target`, et la métrique est alors ABSENTE — pas nulle, pas 0.
+
+    On lit `bot._focus_target` NU, jamais `bot._focus(game_state)` : `_focus` périme la cible sur
+    le marqueur de tour, donc l'appeler depuis l'instrumentation muterait l'état du bot à la
+    frontière de tour et changerait la mesure elle-même.
+    """
+    from engine.phase_handlers.shared_utils import is_unit_alive, require_unit_from_cache
+    from engine.spatial_relations import entry_is_on_battlefield
+    from engine.combat_utils import calculate_hex_distance
+
+    if not hasattr(bot, "_focus_target"):
+        return None
+    focused = bot._focus_target
+    if focused is None:
+        return None
+    focused = str(focused)
+    if not is_unit_alive(focused, gs):
+        return None
+    target_entry = require_unit_from_cache(focused, gs, "_focus_dist:target")
+    if not entry_is_on_battlefield(target_entry):
+        return None
+    tc, tr = int(target_entry["col"]), int(target_entry["row"])
+
+    distances: List[float] = []
+    for u in gs.get("units", []):
+        if int(u.get("player", 0)) != bot_player:
+            continue
+        sid = str(u["id"])
+        if not is_unit_alive(sid, gs):
+            continue
+        entry = require_unit_from_cache(sid, gs, "_focus_dist:bot")
+        if not entry_is_on_battlefield(entry):
+            continue
+        distances.append(calculate_hex_distance(int(entry["col"]), int(entry["row"]), tc, tr))
+
+    return sum(distances) / len(distances) if distances else None
+
+
 def _count_alive_bot_squads(gs: Dict[str, Any], bot_player: int) -> int:
     """Nombre d'escouades bot vivantes (sur table + réserves — pas encore éliminées)."""
     from engine.phase_handlers.shared_utils import is_unit_alive
@@ -151,6 +240,8 @@ def _episode_record(
     turn_snapshot: Dict[int, int],
     dist_snapshot: Optional[Dict[int, float]] = None,
     squad_snapshot: Optional[Dict[int, int]] = None,
+    focus_targets_snapshot: Optional[Dict[int, int]] = None,
+    focus_dist_snapshot: Optional[Dict[int, float]] = None,
 ) -> Dict[str, Any]:
     """Relevé d'UN épisode, suffisant pour le rejouer (graine) et l'inspecter (zones/tour)."""
     rec: Dict[str, Any] = {
@@ -164,6 +255,14 @@ def _episode_record(
         rec["dist_by_turn"] = {str(t): dist_snapshot[t] for t in sorted(dist_snapshot)}
     if squad_snapshot:
         rec["squads_by_turn"] = {str(t): squad_snapshot[t] for t in sorted(squad_snapshot)}
+    if focus_targets_snapshot:
+        rec["focus_targets_by_turn"] = {
+            str(t): focus_targets_snapshot[t] for t in sorted(focus_targets_snapshot)
+        }
+    if focus_dist_snapshot:
+        rec["focus_dist_by_turn"] = {
+            str(t): focus_dist_snapshot[t] for t in sorted(focus_dist_snapshot)
+        }
     return rec
 
 
@@ -262,11 +361,12 @@ def _run_meta(
     agent_seat_mode: str,
     agent_seat_seed: Optional[int],
     bot_randomness: Dict[str, Any],
+    label: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Ce qui distingue DEUX relevés l'un de l'autre — sans ça, un avant et un après §12.7
     sont indiscernables, et une graine d'épisode ne suffit pas à reconstruire la doctrine du bot.
     """
-    return {
+    meta: Dict[str, Any] = {
         "agent": "ArmageddonAgent",
         "training_config": "x1_panel",
         **model_fingerprint,
@@ -278,6 +378,9 @@ def _run_meta(
         "agent_seat_seed": agent_seat_seed,
         "bot_randomness": dict(bot_randomness),
     }
+    if label is not None:
+        meta["label"] = label
+    return meta
 
 
 def main() -> None:
@@ -288,6 +391,11 @@ def main() -> None:
         dest="json_out",
         default=None,
         help="Fichier JSON où écrire le relevé par épisode (graine, joueur du bot, grandeurs par tour)",
+    )
+    parser.add_argument(
+        "--label",
+        default=None,
+        help="Étiquette libre associée à ce run, stockée dans run_meta (absent du JSON si omis)",
     )
     args = parser.parse_args()
     # AVANT d'ouvrir la destination : `--episodes 0` jouait zéro épisode, publiait
@@ -321,7 +429,6 @@ def main() -> None:
 
         config = get_config_loader()
         tc = config.load_agent_training_config("ArmageddonAgent", "x1_panel")
-        cb = tc["callback_params"]
 
         model_path = _require_reference_model()
         vec_norm_enabled = bool(tc.get("vec_normalize", {}).get("enabled", False))
@@ -395,6 +502,8 @@ def main() -> None:
                 turn_snapshot: Dict[int, int] = {}
                 dist_snapshot: Dict[int, float] = {}
                 squad_snapshot: Dict[int, int] = {}
+                focus_targets_snapshot: Dict[int, int] = {}
+                focus_dist_snapshot: Dict[int, float] = {}
 
                 while not done:
                     model_obs = normalize(obs) if normalize else obs
@@ -428,11 +537,19 @@ def main() -> None:
                         if avg_d is not None:
                             dist_snapshot[cur_turn] = avg_d
 
+                        ft = _count_distinct_focus_targets(gs, bot_player)
+                        if ft is not None:
+                            focus_targets_snapshot[cur_turn] = ft
+                        fd = _avg_focus_target_distance(gs, bot, bot_player)
+                        if fd is not None:
+                            focus_dist_snapshot[cur_turn] = fd
+
                         squad_snapshot[cur_turn] = _count_alive_bot_squads(gs, bot_player)
 
                 bot_records.append(_episode_record(
                     bot_name, ep_idx, ep_seed, bot_player,
                     turn_snapshot, dist_snapshot, squad_snapshot,
+                    focus_targets_snapshot, focus_dist_snapshot,
                 ))
                 print(".", end="", flush=True)
 
@@ -485,10 +602,37 @@ def main() -> None:
                 cells.append(f"{sum(vals)/len(vals):.2f}" if vals else "  - ")
             print(f"{bot:<22} {_n_at_last_turn(tdata):>4} | " + " | ".join(f"{c:>4}" for c in cells))
 
+        print(f"\nCibles ennemies distinctes (convergence)")
+        print(f"{'Bot':<22} {'N':>4} | {hdr}")
+        print(sep)
+        for bot in sorted(bot_weights):
+            bot_recs = by_bot.get(bot, [])
+            tdata = _turns_of_key(bot_recs, "focus_targets_by_turn")
+            cells = []
+            for t in turns:
+                vals = tdata.get(t, [])
+                cells.append(f"{sum(vals)/len(vals):.2f}" if vals else "  - ")
+            print(f"{bot:<22} {_n_at_last_turn(tdata):>4} | " + " | ".join(f"{c:>4}" for c in cells))
+
+        # Seul un bot à cible élue (DecapitationBot) alimente cette clé : les autres n'ont pas
+        # d'attribut `_focus_target`, leur ligne reste « — » plutôt que d'afficher un zéro faux.
+        print(f"\nDistance à la cible focalisée (DecapitationBot)")
+        print(f"{'Bot':<22} {'N':>4} | {hdr}")
+        print(sep)
+        for bot in sorted(bot_weights):
+            bot_recs = by_bot.get(bot, [])
+            tdata = _turns_of_key(bot_recs, "focus_dist_by_turn")
+            cells = []
+            for t in turns:
+                vals = tdata.get(t, [])
+                cells.append(f"{sum(vals)/len(vals):4.1f}" if vals else "   —")
+            print(f"{bot:<22} {_n_at_last_turn(tdata):>4} | " + " | ".join(f"{c:>4}" for c in cells))
+
         if json_handle is not None:
             run_meta = _run_meta(
                 model_fingerprint, scenario_file, args.episodes, len(bot_weights),
                 base_seed, agent_seat_mode, agent_seat_seed, bot_randomness,
+                label=args.label,
             )
             _write_json_out(json_handle, run_meta, episode_records)
 
@@ -498,7 +642,7 @@ def main() -> None:
         print(f"\nRelevé par épisode : {args.json_out} ({len(episode_records)} épisodes)")
 
     print()
-    print("Référence §12.5 (post-§12.6, bot=P2, 100 ep): T2=1.61  T5=1.90  VP=31.0  combined=0.788")
+    print_panel_reference()
 
 
 if __name__ == "__main__":

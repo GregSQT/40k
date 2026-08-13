@@ -8,6 +8,7 @@ session Flask.
 """
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any, Dict
 
 import pytest
@@ -128,6 +129,139 @@ def test_avg_bot_enemy_distance_moyenne_plusieurs_bots():
 
 
 # ---------------------------------------------------------------------------
+# _count_distinct_focus_targets
+# ---------------------------------------------------------------------------
+
+
+def test_count_distinct_focus_targets_none_sans_ennemi_sur_table():
+    gs = _gs(
+        [_unit("bot", 1), _unit("en", 2)],
+        {"bot": _entry(0, 0)},  # "en" absent du cache = éliminé
+    )
+    assert _SCRIPT._count_distinct_focus_targets(gs, 1) is None
+
+
+def test_count_distinct_focus_targets_none_sans_escouade_bot_sur_table():
+    gs = _gs(
+        [_unit("bot", 1), _unit("en", 2)],
+        {"bot": _RESERVES, "en": _entry(0, 4)},
+    )
+    assert _SCRIPT._count_distinct_focus_targets(gs, 1) is None
+
+
+def test_count_distinct_focus_targets_convergence_totale():
+    # e1 en (0,0) est le plus proche des DEUX escouades bot ; e2 est loin
+    gs = _gs(
+        [_unit("b1", 1), _unit("b2", 1), _unit("e1", 2), _unit("e2", 2)],
+        {
+            "b1": _entry(0, 2),
+            "b2": _entry(0, 4),
+            "e1": _entry(0, 0),
+            "e2": _entry(0, 40),
+        },
+    )
+    assert _SCRIPT._count_distinct_focus_targets(gs, 1) == 1
+
+
+def test_count_distinct_focus_targets_dispersion():
+    # chaque escouade bot est collée à un ennemi différent
+    gs = _gs(
+        [_unit("b1", 1), _unit("b2", 1), _unit("e1", 2), _unit("e2", 2)],
+        {
+            "b1": _entry(0, 0),
+            "b2": _entry(0, 40),
+            "e1": _entry(0, 1),
+            "e2": _entry(0, 41),
+        },
+    )
+    assert _SCRIPT._count_distinct_focus_targets(gs, 1) == 2
+
+
+def test_count_distinct_focus_targets_ennemi_en_reserves_exclu():
+    # e2 est en réserves : les deux escouades bot ne peuvent élire que e1, alors même que b1 est
+    # PLUS PROCHE de la case sentinel (-1,-1) que du seul ennemi réellement sur table.
+    gs = _gs(
+        [_unit("b1", 1), _unit("b2", 1), _unit("e1", 2), _unit("e2", 2)],
+        {
+            "b1": _entry(0, 0),
+            "b2": _entry(0, 41),
+            "e1": _entry(0, 40),
+            "e2": _RESERVES,
+        },
+    )
+    assert _SCRIPT._count_distinct_focus_targets(gs, 1) == 1
+
+
+# ---------------------------------------------------------------------------
+# _avg_focus_target_distance
+# ---------------------------------------------------------------------------
+
+
+def _bot(focus: str | None) -> Any:
+    """Bot factice : seul `_focus_target` compte pour la mesure (pas de DecapitationBot ici)."""
+    return SimpleNamespace(_focus_target=focus)
+
+
+def test_avg_focus_target_distance_none_sans_attribut():
+    gs = _gs([_unit("bot", 1), _unit("en", 2)], {"bot": _entry(0, 0), "en": _entry(0, 4)})
+    sans_attribut = SimpleNamespace()
+    assert not hasattr(sans_attribut, "_focus_target")
+    assert _SCRIPT._avg_focus_target_distance(gs, sans_attribut, 1) is None
+
+
+def test_avg_focus_target_distance_none_si_focus_none():
+    gs = _gs([_unit("bot", 1), _unit("en", 2)], {"bot": _entry(0, 0), "en": _entry(0, 4)})
+    assert _SCRIPT._avg_focus_target_distance(gs, _bot(None), 1) is None
+
+
+def test_avg_focus_target_distance_none_si_cible_eliminee():
+    gs = _gs([_unit("bot", 1), _unit("en", 2)], {"bot": _entry(0, 0)})  # "en" hors cache
+    assert _SCRIPT._avg_focus_target_distance(gs, _bot("en"), 1) is None
+
+
+def test_avg_focus_target_distance_none_si_cible_en_reserves():
+    gs = _gs([_unit("bot", 1), _unit("en", 2)], {"bot": _entry(0, 0), "en": _RESERVES})
+    assert _SCRIPT._avg_focus_target_distance(gs, _bot("en"), 1) is None
+
+
+def test_avg_focus_target_distance_calcul_simple():
+    gs = _gs([_unit("bot", 1), _unit("en", 2)], {"bot": _entry(0, 0), "en": _entry(0, 4)})
+    result = _SCRIPT._avg_focus_target_distance(gs, _bot("en"), 1)
+    assert result is not None
+    assert result == pytest.approx(4.0, abs=1.0)
+
+
+def test_avg_focus_target_distance_ignore_la_cible_la_plus_proche():
+    # e_proche est à 1 hex de b1, mais la cible focalisée est "en" : la moyenne suit "en", pas e_proche
+    gs = _gs(
+        [_unit("b1", 1), _unit("e_proche", 2), _unit("en", 2)],
+        {"b1": _entry(0, 0), "e_proche": _entry(0, 1), "en": _entry(0, 4)},
+    )
+    result = _SCRIPT._avg_focus_target_distance(gs, _bot("en"), 1)
+    assert result is not None
+    assert result == pytest.approx(4.0, abs=1.0)
+
+
+def test_avg_focus_target_distance_bot_en_reserves_exclu():
+    # b2 est en réserves : la moyenne ne porte que sur b1 (distance 4), pas sur un couple
+    gs = _gs(
+        [_unit("b1", 1), _unit("b2", 1), _unit("en", 2)],
+        {"b1": _entry(0, 0), "b2": _RESERVES, "en": _entry(0, 4)},
+    )
+    result = _SCRIPT._avg_focus_target_distance(gs, _bot("en"), 1)
+    assert result is not None
+    assert result == pytest.approx(4.0, abs=1.0)
+
+
+def test_avg_focus_target_distance_none_si_aucun_bot_sur_table():
+    gs = _gs(
+        [_unit("b1", 1), _unit("en", 2)],
+        {"b1": _RESERVES, "en": _entry(0, 4)},
+    )
+    assert _SCRIPT._avg_focus_target_distance(gs, _bot("en"), 1) is None
+
+
+# ---------------------------------------------------------------------------
 # _turns_of_key
 # ---------------------------------------------------------------------------
 
@@ -195,6 +329,16 @@ def test_episode_record_sans_metriques_optionnelles():
     assert "zones_by_turn" in rec
     assert "dist_by_turn" not in rec
     assert "squads_by_turn" not in rec
+    assert "focus_targets_by_turn" not in rec
+    assert "focus_dist_by_turn" not in rec
+
+
+def test_episode_record_avec_focus_snapshots():
+    rec = _SCRIPT._episode_record(
+        "decap", 0, 42, 1, {1: 2}, None, None, {1: 3, 2: 1}, {1: 8.5},
+    )
+    assert rec["focus_targets_by_turn"] == {"1": 3, "2": 1}
+    assert rec["focus_dist_by_turn"]["1"] == 8.5
 
 
 def test_episode_record_avec_dist_snapshot():
