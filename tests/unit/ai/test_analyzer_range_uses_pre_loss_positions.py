@@ -26,7 +26,14 @@ from typing import Any
 
 import pytest
 
+from engine.hex_utils import offset_to_cube
 from tests.unit.ai._fabriques import entete_step_log
+
+
+def _d(a: tuple, b: tuple) -> int:
+    ax, ay, az = offset_to_cube(*a)
+    bx, by, bz = offset_to_cube(*b)
+    return max(abs(ax - bx), abs(ay - by), abs(az - bz))
 
 # Board x1 (inches_to_subhex=1) : 1 hex = 1 pouce, la lecture des distances est directe.
 SHOOTER = (10, 20)
@@ -81,15 +88,8 @@ def stats(tmp_path):
 
 def test_premisse_la_figurine_visee_est_a_portee_et_la_survivante_ne_l_est_pas():
     """Sans cet écart le test ne prouve rien : les deux mesures rendraient le même verdict."""
-    from engine.hex_utils import offset_to_cube
-
-    def d(a, b):
-        ax, ay, az = offset_to_cube(*a)
-        bx, by, bz = offset_to_cube(*b)
-        return max(abs(ax - bx), abs(ay - by), abs(az - bz))
-
-    assert d(SHOOTER, PROCHE) <= 24, "la figurine visée doit être À PORTÉE de l'arme"
-    assert d(SHOOTER, LOIN) > 24, "la survivante listée doit être HORS portée"
+    assert _d(SHOOTER, PROCHE) <= 24, "la figurine visée doit être À PORTÉE de l'arme"
+    assert _d(SHOOTER, LOIN) > 24, "la survivante listée doit être HORS portée"
 
 
 def test_un_tir_legitime_n_est_pas_compte_hors_portee(stats):
@@ -117,14 +117,7 @@ def test_le_controle_rend_bien_un_verdict(stats):
 
 def test_premisse_les_deux_figurines_sont_hors_portee():
     """Sans cette prémisse, le test suivant ne distingue pas « pas de verdict » de « verdict 0 »."""
-    from engine.hex_utils import offset_to_cube
-
-    def d(a, b):
-        ax, ay, az = offset_to_cube(*a)
-        bx, by, bz = offset_to_cube(*b)
-        return max(abs(ax - bx), abs(ay - by), abs(az - bz))
-
-    assert d(SHOOTER, LOIN) > 24 and d(SHOOTER, LOIN_2) > 24
+    assert _d(SHOOTER, LOIN) > 24 and _d(SHOOTER, LOIN_2) > 24
 
 
 def test_la_deuxieme_ligne_d_une_activation_est_encore_jugee(tmp_path):

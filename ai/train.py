@@ -107,22 +107,11 @@ def _build_training_bots_from_config(training_config):
 
     Returns list of bot instances for random.choice() selection.
     """
-    from ai.evaluation_bots import (
-        RandomBot, GreedyBot, DefensiveBot, ControlBot, AdaptiveBot, ValueTradeBot,
-    )
+    from ai.bot_registry import build_bot
 
     cfg = require_key(training_config, "bot_training")
     ratios = require_key(cfg, "ratios")
     randomness_cfg = require_key(cfg, "randomness")
-
-    BOT_CLASSES = {
-        "random": RandomBot,
-        "greedy": GreedyBot,
-        "defensive": DefensiveBot,
-        "control": ControlBot,
-        "adaptive": AdaptiveBot,
-        "value_trade": ValueTradeBot,
-    }
 
     # La somme des ratios EST le budget d'entrainement : elle doit valoir 1.0, comme
     # `bot_eval_weights` cote evaluation (`bot_evaluation._load_bot_eval_params`, meme controle).
@@ -148,17 +137,10 @@ def _build_training_bots_from_config(training_config):
             count = max(1, count)
         if count <= 0:
             continue
-        if bot_name == "random":
-            for _ in range(count):
-                bots.append(RandomBot())
-        elif bot_name in BOT_CLASSES:
-            # Pas de defaut : un bot pondere sans entree de randomness est une config
-            # incomplete, pas un bot a 10 % de bruit choisi en silence (regle T1).
-            r_val = float(require_key(randomness_cfg, bot_name))
-            for _ in range(count):
-                bots.append(BOT_CLASSES[bot_name](randomness=r_val))
-        else:
-            raise ValueError(f"Unknown bot name in ratios: {bot_name!r}")
+        # build_bot leve ValueError si le nom est inconnu, KeyError si randomness manquante
+        # (T1 : pas de defaut silencieux). `random` est traite a part dans build_bot.
+        for _ in range(count):
+            bots.append(build_bot(bot_name, randomness_cfg))
     
     return bots
 

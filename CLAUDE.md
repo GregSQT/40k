@@ -319,7 +319,8 @@ conclusion, il ne s'y ajoute pas. Ne jamais y répéter ce qui vient d'être dit
   LU : <ce qui a été lu au-delà du point modifié : fichier entier ? appelants ? module miroir ?>
   JUMEAU : <commande grep> → <n> hits, <n> traités, <n> écartés (<raison>)
   RÉFS : <tests / doc / frontend / configs mis à jour | laissés tels quels volontairement>
-  COUVERTURE : <trous vus non couverts, un prompt autonome par trou en PROMPTS | « aucun trou vu »>
+  🟢 COUVERTURE : aucun trou vu    ← quand aucun trou ; sinon :
+  🔴 COUVERTURE : <trous vus non couverts, un prompt autonome par trou en PROMPTS>
   ARBITRAGE :
     1. <titre du sujet à arbitrer, une ligne>
 

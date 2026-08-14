@@ -265,6 +265,7 @@ PROMISES_BEST_MODEL = {
     "x5_new": False, "x5_long": True, "x5_append": True,
     "x1_debug": False, "x5_debug": False,
     "x1_panel": False,
+    "x1_new_bots": True,
 }
 
 

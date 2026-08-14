@@ -5,6 +5,7 @@ _require_reference_model : lève RuntimeError si le md5 du fichier ne correspond
                            REFERENCE_MD5. Ne touche jamais ai/models/ — le chemin est
                            monkeypatché vers un fichier temporaire.
 --label : présent dans run_meta quand fourni, absent quand omis.
+_avg_focus_target_distance : retourne None sur _focus_target périmé (appartient au bot-player).
 """
 import hashlib
 import os
@@ -66,7 +67,7 @@ def test_require_reference_model_leve_sur_md5_incorrect(script, monkeypatch, tmp
 
 def test_require_reference_model_passe_sur_md5_correct(script, monkeypatch, tmp_path):
     contenu = b"contenu connu pour le test"
-    md5_reel = hashlib.md5(contenu).hexdigest()
+    md5_reel = hashlib.md5(contenu, usedforsecurity=False).hexdigest()
     d = _model_dir(tmp_path)
     nom = "ref.zip"
     (d / nom).write_bytes(contenu)
@@ -88,7 +89,7 @@ def test_require_reference_model_leve_sur_modele_custom_absent(script, tmp_path)
 def test_require_reference_model_chemin_non_canonique_verifie_md5(script, monkeypatch, tmp_path):
     """Un chemin avec .. pointant sur le checkpoint de référence doit quand même vérifier le MD5."""
     contenu = b"contenu connu"
-    md5_reel = hashlib.md5(contenu).hexdigest()
+    md5_reel = hashlib.md5(contenu, usedforsecurity=False).hexdigest()
     d = _model_dir(tmp_path)
     nom = "ref.zip"
     cible = d / nom
@@ -121,3 +122,43 @@ def test_label_absent_de_run_meta_quand_omis(script):
         {"bot": {"w_crowd": 4.0}}, 3.0,
     )
     assert "label" not in meta
+
+
+# ---------------------------------------------------------------------------
+# _avg_focus_target_distance — valeur périmée d'un épisode précédent
+# ---------------------------------------------------------------------------
+
+class _BotWithFocusTarget:
+    """Stub minimal : possède _focus_target comme DecapitationBot."""
+    def __init__(self, focus_target):
+        self._focus_target = focus_target
+
+
+def _gs_with_unit(unit_id: str, player: int) -> dict:
+    """game_state minimal avec une seule unité pour tester le lookup de joueur."""
+    return {
+        "units": [{"id": unit_id, "player": player}],
+        "units_cache": {
+            unit_id: {"id": unit_id, "player": player, "col": 5, "row": 5},
+        },
+    }
+
+
+def test_avg_focus_target_distance_retourne_none_si_focus_appartient_au_bot(script):
+    """Régression 2026-08-14 : _focus_target périmé d'un épisode précédent ne doit pas lever.
+
+    Scénario : bot était P2 (ciblait unité '1' de P1), épisode suivant bot est P1.
+    _focus_target vaut encore '1' (jamais réinitialisé avant la 1ère décision).
+    """
+    bot = _BotWithFocusTarget("1")
+    gs = _gs_with_unit("1", player=1)
+    result = script._avg_focus_target_distance(gs, bot, bot_player=1, bot_units=[])
+    assert result is None
+
+
+def test_avg_focus_target_distance_retourne_none_si_focus_introuvable(script):
+    """_focus_target absent de gs['units'] → None (unité disparue entre épisodes)."""
+    bot = _BotWithFocusTarget("99")
+    gs = {"units": [], "units_cache": {}}
+    result = script._avg_focus_target_distance(gs, bot, bot_player=1, bot_units=[])
+    assert result is None

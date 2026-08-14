@@ -411,7 +411,7 @@ def faults_of(turn, cfg):
         # Une seule forme du texte filtré, la LISTE : recoller les lignes pour les redécouper à
         # chaque section entretenait deux représentations de la même chose, et c'est en choisissant
         # la mauvaise qu'on réintroduit la confusion PROMPTS/RELIRE que ce filtrage ferme.
-        if not any(re.match(r"^\s*" + name + r"\s*:", ln) for ln in visibles):
+        if not any(re.match(r"^\s*[\U0001F300-\U0001FAFF\U00002600-\U000027FF]*\s*" + name + r"\s*:", ln) for ln in visibles):
             due = (
                 "elle est TOUJOURS due"
                 if portee == "toujours"

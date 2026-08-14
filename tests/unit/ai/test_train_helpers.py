@@ -49,6 +49,33 @@ def test_build_training_bots_respects_the_configured_budget() -> None:
         assert counts[by_name[name]] / len(bots) == pytest.approx(ratio), name
 
 
+def test_build_training_bots_accepts_doctrine_bots() -> None:
+    """Les bots doctrine (x1_new_bots) sont valides dans bot_training.ratios.
+
+    ROUGE avant le fix : `_build_training_bots_from_config` ne connaissait que les six
+    bots d'origine ; `racer` levait `Unknown bot name in ratios`.
+    """
+    from collections import Counter
+
+    ratios = {
+        "racer": 0.35, "scorer": 0.15, "attrition": 0.15,
+        "decapitation": 0.15, "endgame": 0.15, "random": 0.05,
+    }
+    bots = train._build_training_bots_from_config({
+        "bot_training": {
+            "ratios": ratios,
+            "randomness": {k: 0.05 for k in ratios if k != "random"},
+        }
+    })
+    counts = Counter(type(b).__name__ for b in bots)
+    by_name = {
+        "racer": "RacerBot", "scorer": "ScorerBot", "attrition": "AttritionBot",
+        "decapitation": "DecapitationBot", "endgame": "EndgameBot", "random": "RandomBot",
+    }
+    for name, ratio in ratios.items():
+        assert counts[by_name[name]] / len(bots) == pytest.approx(ratio), name
+
+
 def test_build_training_bots_rejects_a_budget_that_is_not_one() -> None:
     """Des ratios qui ne somment pas a 1.0 deplacent le budget en silence : erreur explicite,
     comme `bot_eval_weights` cote evaluation."""

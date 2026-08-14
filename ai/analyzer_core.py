@@ -927,19 +927,13 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 # Non-step lines still contain real attacks/shots and can kill units.
                 # If we ignore STEP: NO damage, later rule checks (e.g., adjacency) can produce false positives
                 # by treating dead units as alive.
-                if re.search(
+                target_match = re.search(
                     r'\bSHOT(?:\s+\([A-Za-z0-9_ ]+\)|\s+\[[^\]]+\])*'
                     r'(?:\s+\[RAPID(?: |_)?FIRE:(\d+)\])?\s+(?:at\s+)?Unit\s+(\d+)',
                     action_desc,
                     re.IGNORECASE
-                ):
-                    target_match = re.search(
-                        r'\bSHOT(?:\s+\([A-Za-z0-9_ ]+\)|\s+\[[^\]]+\])*'
-                        r'(?:\s+\[RAPID(?: |_)?FIRE:(\d+)\])?\s+(?:at\s+)?Unit\s+(\d+)',
-                        action_desc,
-                        re.IGNORECASE
-                    )
-                    if target_match:
+                )
+                if target_match:
                         target_id = target_match.group(2)
                         damage_match = re.search(r'Dmg:(\d+)HP', action_desc)
                         if damage_match:
@@ -1107,10 +1101,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                     if candidate_technical_rule_id not in effect_to_sources_for_unit:
                                         continue
                                     source_rule_ids = effect_to_sources_for_unit[candidate_technical_rule_id]
-                                    if actor_id in state.selected_choice_by_unit_source:
-                                        selected_sources = state.selected_choice_by_unit_source[actor_id]
-                                    else:
-                                        selected_sources = {}
+                                    selected_sources = state.selected_choice_by_unit_source.get(actor_id, {})
                                     has_matching_source = any(
                                         selected_sources.get(source_rule_id) == candidate_technical_rule_id
                                         for source_rule_id in source_rule_ids
