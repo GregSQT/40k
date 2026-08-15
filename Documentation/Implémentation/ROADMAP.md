@@ -486,6 +486,9 @@ mesure, et c'est assumé (§0.14).
    déplacent en bloc d'un modèle à l'autre, ils forment une seule dimension. La cause est le
    format — seuls les objectifs marquent, zéro victoire par élimination sur 600 parties — donc
    aucun panel n'y rendra six axes. Le panel est une **échelle de difficulté**, et c'est assumé.
+   ✅ **Cache de contributions OC ajouté le 2026-08-15** (§13) : `objective_control_contributions`
+   mis en cache par activation dans `_DoctrineBot`, évite les recalculs redondants pour `w_crowd`.
+   Couvert par `tests/unit/ai/test_bot_contributions_cache.py`.
    **Restent** : le réglage de `w_contest`/`w_crowd` (posés, non réglés), l'étape 7
    (correspondance puis suppression des cinq anciens) et l'étape 8 rejouée après réglage.
    ⚠️ Les chiffres des §8/§9 du doc de chantier sont **à rejouer** : échantillons insuffisants et

@@ -1618,3 +1618,30 @@ isolés après le correctif de déplacement**. Le seul run qui les ait isolés (
 changement de géométrie, donc il ne transfère pas ; le sweep de `w_objective` les incluait sans
 les séparer. Ce sont les deux derniers poids du panel qui reposent sur autre chose qu'une mesure
 faite sur le code courant.
+
+## 13. Optimisation — cache de contributions OC (2026-08-15)
+
+`_DoctrineBot.select_movement_destination` recalculait `objective_control_contributions` à chaque
+appel via `_objective_terms → _surplus_oc_by_zone`. Ce calcul traverse les empreintes de socle de
+toutes les escouades vivantes et représente le poste dominant de `_surplus_oc_by_zone` ; son
+résultat est constant pendant toute l'activation d'une unité (l'état physique ne change pas entre
+deux invocations pour la même unité au même tour).
+
+**Cache ajouté** (`ai/bot_doctrines.py`, `_contributions_cache_key` / `_contributions_cache_val`) :
+- Clé : `(episode_number, turn, phase, unit_id)` — invalide automatiquement entre deux activations.
+- Résultat passé à `_surplus_oc_by_zone` via `_objective_terms(contributions=...)`.
+- Actif uniquement si `w_crowd != 0.0` (seul poids qui consomme les contributions).
+- Bots concernés : `scorer`, `endgame_push` (`w_crowd = 4.0`), `alpha` (`w_crowd = 0.5`),
+  `attrition_withdraw` (`w_crowd = 0.5`). `racer` et `attrition` (mode normal) ont `w_crowd = 0.0`
+  et passent par le early-return sans appeler `_surplus_oc_by_zone`.
+
+**Couverture** : `tests/unit/ai/test_bot_contributions_cache.py` — deux invariants vérifiés et
+prouvés rouges par mutation (T4 VERROU) :
+1. Même activation → `objective_control_contributions` appelé une seule fois ; résultat en cache
+   identique au résultat recalculé directement.
+2. Unité différente sur la même instance → cache invalidé, nouveau calcul.
+
+**Relation avec `DESTINATION_SHORTLIST`** : la 2e passe (firepower, O(E) × shortlist) est bornée
+à `DESTINATION_SHORTLIST = 24` destinations parmi les ~458 du pool BFS. La 1re passe (géométrique,
+O(1)/candidate) et `_objective_terms` (appelé une fois par décision) sont hors shortlist. Ce cache
+s'applique à `_objective_terms`, il est donc orthogonal au shortlist.
