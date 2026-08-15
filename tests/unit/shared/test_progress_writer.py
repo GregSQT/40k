@@ -9,27 +9,12 @@ d'affichage arrete un run de 47 h.
 from __future__ import annotations
 
 import sys
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 import pytest
 
 from shared.progress_writer import SHARED_LINE_LEN_KEY, ProgressWriter
-
-
-class _RecordingStdout:
-    """Doublure de `sys.stdout` : enregistre les ecritures, ou casse comme un pipe rompu."""
-
-    def __init__(self, broken: bool = False) -> None:
-        self.writes: List[str] = []
-        self._broken = broken
-
-    def write(self, text: str) -> None:
-        self.writes.append(text)
-        if self._broken:
-            raise BrokenPipeError("stdout casse")
-
-    def flush(self) -> None:
-        pass
+from tests.unit.shared._stubs import RecordingStdout as _RecordingStdout
 
 
 def test_progress_writer_erases_the_tail_of_the_previous_line(
@@ -134,3 +119,17 @@ def test_progress_writer_without_shared_state_still_erases(
     writer.write("YY")
 
     assert out.writes == ["\rXXXXXXXX", "\rYY      "]
+
+
+def test_progress_writer_survives_none_stdout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """sys.stdout = None ne doit pas se propager hors du writer.
+
+    AttributeError (None n'a pas d'attribut write) n'etait pas attrape par
+    except (OSError, ValueError). Sans ce test rouge, la regression se manifeste
+    en production : depuis on_result() dans bot_evaluation.py, l'exception sort de
+    la boucle de collecte avant must_abort_pool, et le ProcessPoolExecutor pend.
+    """
+    monkeypatch.setattr(sys, "stdout", None)
+    writer = ProgressWriter()
+    writer.write("test")
+    assert writer._broken, "l'echec doit marquer le writer comme casse"

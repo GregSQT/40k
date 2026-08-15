@@ -37,6 +37,7 @@ from typing import Any, Dict, Optional, Tuple
 import pytest
 
 from ai.training_callbacks import EpisodeTerminationCallback
+from tests.unit.shared._stubs import RecordingStdout
 
 # `scripts/` n'est pas un package : les bancs s'importent par le chemin, comme le font deja
 # tests/unit/scripts/test_ab_n_steps_contract.py et test_ab_worktree_guard.py. Une seule fois
@@ -60,28 +61,6 @@ class _FakeClock:
 
     def read(self) -> float:
         return self.now
-
-
-class _CapturedStdout:
-    """Doublure de `sys.stdout` : la barre s'y ecrit en place, ou casse comme un pipe rompu.
-
-    La capture porte sur `sys.stdout` et non sur `builtins.print` : depuis l'extraction du writer
-    partage (shared/progress_writer.py), la barre s'ecrit par `sys.stdout.write`, et une capture
-    de `print` ne verrait plus rien — c'est-a-dire qu'elle rendrait ces tests verts sans regarder
-    quoi que ce soit.
-    """
-
-    def __init__(self, broken: bool = False) -> None:
-        self.lines: list[str] = []
-        self._broken = broken
-
-    def write(self, text: str) -> None:
-        self.lines.append(text)
-        if self._broken:
-            raise BrokenPipeError("sortie fermee (`| head`)")
-
-    def flush(self) -> None:
-        pass
 
 
 def _install(monkeypatch, n_envs: int, steps_per_episode: int, episodes_per_slot: int,
@@ -109,9 +88,9 @@ def _install(monkeypatch, n_envs: int, steps_per_episode: int, episodes_per_slot
     # `_on_training_start` fixe start_time sur l'horloge factice, AVANT le premier pas.
     callback._on_training_start()
 
-    stdout = _CapturedStdout(broken=broken_stdout)
+    stdout = RecordingStdout(broken=broken_stdout)
     monkeypatch.setattr(sys, "stdout", stdout)
-    return clock, callback, stdout.lines
+    return clock, callback, stdout.writes
 
 
 def _drive(monkeypatch, n_envs: int, steps_per_episode: int, step_seconds,

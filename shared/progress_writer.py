@@ -35,8 +35,6 @@ import logging
 import sys
 from typing import Any, Dict, Optional
 
-from shared.data_validation import require_key
-
 __all__ = ["ProgressWriter", "SHARED_LINE_LEN_KEY"]
 
 # Cle du dict partage entre les deux barres. Nommee ICI et lue nulle part ailleurs : les deux
@@ -61,13 +59,14 @@ class ProgressWriter:
         prev_len = self._last_line_len
         state = self._line_length_state
         if state is not None and SHARED_LINE_LEN_KEY in state:
-            prev_len = max(prev_len, int(require_key(state, SHARED_LINE_LEN_KEY)))
+            prev_len = max(prev_len, int(state[SHARED_LINE_LEN_KEY]))
         clear_padding = " " * max(0, prev_len - len(line))
         try:
             sys.stdout.write(f"\r{line}{clear_padding}")
             sys.stdout.flush()
-        except (OSError, ValueError):
+        except (OSError, ValueError, AttributeError):
             # OSError : pipe rompu, descripteur invalide. ValueError : ecriture sur un flux ferme.
+            # AttributeError : sys.stdout est None (processus detache, spawn multiprocessing).
             self._broken = True
             logging.exception(
                 "Progress display failed; disabled for the rest of this run"
