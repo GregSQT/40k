@@ -584,6 +584,58 @@ mesure, et c'est assumé (§0.14).
 
 ## 4. Backlog hors chemin critique (`A_faire/`)
 
+Prêt à démarrer, conception close, aucun arbitrage en attente :
+- ⬜ **Bots : capacités communes, jitter, trois benchmarks de holdout, `benchmark_floor`** (chantier
+  ouvert le 2026-08-14, **conception CLOSE le 2026-08-15**, aucune ligne de code écrite). Suite
+  directe du point 9 de §1 (refonte du panel). **CONCEPTION : les huit étapes A→H sont spécifiées
+  dans le doc. EXÉCUTION, tranche 1 : A+B+C+D.**
+  **A** capacités communes (`late_game`, `preservation`, `persistence` — généralisées aux six
+  styles, gain par style, `gain = 0` reproduit le comportement actuel) et **B** jitter des poids
+  (PPO ne doit pas apprendre les coefficients exacts) : aucun run d'entraînement, verrouillables
+  par tests, prix = **rejouer la ligne de base du panel** (`combined = 0,7433`, `racer = 0,630`).
+  **C** trois benchmarks à mécanisme de décision DIFFÉRENT (intention macro puis destination, au
+  lieu de la somme pondérée des six styles), jamais vus à l'entraînement : `reference_balanced`
+  (polyvalence), `reference_denial` (sécurisation du score), `reference_reactive`
+  (non-stationnarité) — **+4 800 épisodes par run**, soit +50 % du budget d'évaluation.
+  **D.4** **profil comportemental par adversaire** — l'évaluation ne publie aujourd'hui AUCUNE
+  donnée de jeu par adversaire (vérifié le 2026-08-15 : `wins`/`losses`/`draws` + ventilations
+  faction/siège/roster, et un `shoot_stats` produit puis jeté, sans aucun consommateur dans le
+  dépôt). VP et zones par tour, pertes subies/infligées, charges — **des deux côtés** et **ventilés
+  par issue**. Zéro épisode supplémentaire, c'est du câblage, et c'est ce qui rend le diagnostic
+  ci-dessous exécutable.
+  **D** `benchmark_floor` + gate + partition à trois familles dans `bot_registry` + détecteur de
+  non-généralisation persistante.
+  🟢 **DÉCISION 2026-08-15 — deux étages de holdout, et le plancher DIAGNOSTIQUE l'entraînement.**
+  Les trois `reference_*` entrent dans `_evaluate_model_gate` : un modèle qui écrase les six bots
+  d'entraînement et s'effondre contre un benchmark **n'est pas sauvegardé**. `tactical` reste
+  SCELLÉ (gelé le 2026-08-04, exclu de tout signal) — c'est le témoin qui dira si les corrections
+  d'entraînement améliorent la compétence ou seulement le benchmark. Et un plancher raté de façon
+  PERSISTANTE (N évaluations pendant que `combined` progresse) signifie que **l'agent n'a pas
+  généralisé ce qu'il a vu à l'entraînement** : le run est déclaré non généralisant et
+  L'ENTRAÎNEMENT est revu. **Ce qu'on diagnostique est le COMPORTEMENT de l'agent** (s'est-il fait
+  détruire ? a-t-il trop peu joué les objectifs ?), comparé entre benchmarks et bots d'entraînement :
+  même faute des deux côtés ⇒ la RÉCOMPENSE ne la punit pas ; faute seulement contre les benchmarks
+  ⇒ le CURRICULUM ne l'expose pas ; faute partout avec défaite partout ⇒ ni l'un ni l'autre, c'est
+  un défaut de niveau. **Un seul levier par run** (décision §3 pt 5 du chantier panel : mêler
+  récompense et adversaires rend les effets indémêlables).
+  🔴 **Deux postulats de la proposition d'origine étaient contredits par des mesures déjà faites** :
+  le seuil `benchmark_floor >= 80 %` (au-dessus du `combined = 0,7433` actuel — la porte ne
+  s'ouvrirait jamais ; le seuil se pose APRÈS la première mesure), et le gating par un holdout non
+  scellé (arbitrage du 2026-08-04, `V11_eval_strategy.md` §10.6 — résolu par les deux étages).
+  Le mot « orthogonaux » est écarté au profit de « raisonne autrement », l'orthogonalité ayant été
+  abandonnée comme critère le 2026-08-12 ; la complémentarité des trois benchmarks est **mesurée**
+  (corrélation de rang sur ≥ 3 modèles) au lieu d'être supposée — et elle est ce qui rend le
+  diagnostic d'entraînement actionnable, chaque benchmark nommant l'aspect non couvert.
+  🕐 **CONÇUES, exécution différée** (tranches 2 et 3) : league historique, PFSP, exploiters,
+  schedule P0→P10 (E→H — disposition disque, schéma `policy.json` avec `obs_size` et `model_md5`,
+  câblage sur `_select_opponent_mode_for_episode`, cache LRU, sampler PFSP, protocole d'exploiter,
+  quatre gates de promotion, tests de chaque). **E et F ne coûtent RIEN en machine** (code + tests) ;
+  ce qui coûte est de FAIRE TOURNER la league : ~200 h pour P1→P10, ~60 h pour trois exploiters.
+  Prérequis d'exécution : `x1_selfplay`, **livré mais jamais exécuté** (§1 pt 8).
+  ⚠️ Ce doc est à la RACINE et non dans `A_faire/` — chemin demandé explicitement ; 3ᵉ exception,
+  même cas que `Security.md` ci-dessus.
+  → [`Bot_refactor.md`](Bot_refactor.md) §0bis (décisions datées) et §7 (l'arbitrage restant)
+
 Prêts à démarrer sans décision produit :
 - ⬜ **Le chemin LoS refait à chaque survol ce que le chantier des aplatissements a sorti du chemin
   de dessin** (signalé le 2026-08-12 par la passe `/simplify`, non traité — le périmètre était le
