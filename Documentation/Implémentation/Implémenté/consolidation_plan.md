@@ -24,6 +24,7 @@ Source de vérité règles : `Documentation/40k_rules/12 Fights pahse.pdf` et `1
 - **Ne jamais assumer l'état du code** : lire/grep avant d'affirmer. Pas de « devrait / probablement ».
 - **Mode B imposé** (cf. §4) : créer des fonctions dédiées, **ne pas modifier le moteur pile-in existant**.
 - **Pas de tests automatisés** : validation runtime **manuelle par l'utilisateur en PvP**, à la fin. À chaque tranche backend, se limiter à une validation **compile / lint / import**.
+  > **Note 2026-08-15 :** CLAUDE.md ne dit plus cela — cette formulation ne visait que la qualité d'un modèle entraîné ; le code est couvert sans exception (T4 COUVERTURE).
 - **Travailler une tranche à la fois**, présenter le diff et **attendre validation** avant la suivante. Si plusieurs fichiers sont touchés → lister et expliquer d'abord.
 - Réponses en français, directes, sans récap inutile.
 

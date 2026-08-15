@@ -9,7 +9,7 @@ PROJET : Warhammer 40K Game Engine avec IA (Reinforcement Learning)
 CONVENTIONS IMPORTANTES :
 - Les modèles IA sont dans ai/models/<agent_key>/model_<agent_key>.zip
 - Les configs d'agents sont dans config/agents/<agent_name>/
-- Format de code : Python type hints, docstrings, respect AI_TURN.md
+- Format de code : Python type hints, docstrings, respect Documentation/AI_TURN.md
 - Aucun fallback, workaround ni valeur par défaut pour masquer une erreur → voir T1
 
 === ROADMAP — QUOI FAIRE ENSUITE ===
@@ -39,7 +39,8 @@ PDFs disponibles (lire uniquement le(s) pertinent(s)) :
 - 01 Core concepts / 02 Datasheets / 03 Moving / 04 Making attacks
 - 05 Attack sequence / 06 Other concepts / 07 The battle round
 - 08 Command phase / 09 Movement phase / 10 Shooting phase / 11 Charge phase
-- 12 Fights phase / 13 Terrain / 14 Objectives / 15 Stratagems / 16 Actions
+- 12 Fights pahse (typo dans le nom réel du fichier) / 13 Terrain / 13-5 gone to ground (.jpg)
+- 14 Objectives / 15 Stratagems / 16 Actions
 - 17 Monsters and vehicles / 18 Transports / 19 Attached units
 - 20 Strategic reserves / 21 Flying and surging / 22 Other rules and abilities
 - 23 Aircraft / 24 Core abilities / 25 Rules appendix
@@ -66,17 +67,18 @@ REDÉMARRAGE DES SERVICES — ACQUIS, NE JAMAIS LE DEMANDER :
   tourneraient encore sur l'ancien code — c'est un diagnostic invalide ici.
 
 ENTRAÎNEMENT IA :
-On remplacer <X> par la résolution choisie (1 ou 5)
+Remplacer <X> par la résolution choisie (1 ou 5)
 - Lancer   : python3 ai/train.py --agent ArmageddonAgent --training-config x<X> --scenario bot --resolution <X> --new 
-- Valider  : python3 ai/train.py --agent ArmageddonAgent --training-config x<X> --scenario bot --resolution <X> --test-only --step
+- Valider  : python3 ai/train.py --agent ArmageddonAgent --training-config x<X> --resolution <X> --test-only --step
   (`--test-only` n'entraîne RIEN : il joue le modèle en place sur le HOLDOUT et écrit step.log.
    C'est ce que « valider » veut dire ici, et c'est le seul des trois modes qui laisse le modèle
-   intact — `--new` l'écarte, `--append` l'écrase par un run court. Pas de `--scenario bot` ici :
-   ce mode n'évalue que le holdout et refuse le pool d'entraînement. Sur un lancement qui
+   intact — `--new` l'écarte, `--append` l'écrase par un run court. `--scenario bot` est REFUSÉ
+   ici : ce mode n'évalue que le holdout et refuse le pool d'entraînement. Sur un lancement qui
    ENTRAÎNE, `--new` ou `--append` est désormais OBLIGATOIRE dès qu'un modèle existe, et
    `--append` exige qu'il en existe un : sans ça train.py refuse au lieu de choisir à ta place.)
 - Analyser : python3 ai/analyzer.py <fichier_de_résultats>
-- Pas de tests automatisés — validation via --step + analyzer.py + replay
+- La QUALITÉ D'UN MODÈLE ne se mesure pas par un test automatisé : --step + analyzer.py + replay.
+  Le CODE, lui, est couvert sans exception (cf. T4 COUVERTURE).
 
 TESTS — QUI LANCE QUOI (NON NÉGOCIABLE) :
 - La VÉRIFICATION LARGE appartient à l'utilisateur. Sa commande de référence :
@@ -87,7 +89,7 @@ TESTS — QUI LANCE QUOI (NON NÉGOCIABLE) :
 - UN AGENT NE LA LANCE JAMAIS, sous aucune de ses formes, dans AUCUN mode.
   Le hook `.claude/hooks/deny-verif-large.sh` REFUSE la commande : il découpe la ligne sur `;`, `&&`, `|`
   et juge CHAQUE segment, il couvre les sept briques de la vérification, sans porte de sortie.
-  formulation qui passerait est un contournement, au même titre que désactiver le hook.
+  Toute formulation qui passerait est un contournement, au même titre que désactiver le hook.
 - Ce qu'un agent peut vérifier : CE QU'IL A TOUCHÉ, rien d'autre. Un agent qui pense avoir besoin
   de plus se trompe de rôle : il le DIT et s'arrête.
 - Ce qu'un agent DOIT faire dans tous les cas : lancer les FICHIERS de test ciblés qu'il vient
@@ -108,13 +110,13 @@ TESTS — QUI LANCE QUOI (NON NÉGOCIABLE) :
 - Au commit : committer, ExitWorktree "keep", merger dans main, PUIS supprimer worktree
   et branche. Jamais "remove" avant le merge.
 - `discard_changes: true` est interdit, sous tous les modes.
-- Training en cours : ne toucher aucun JSON de `config/` (relus à chaud par les évals).
 
 === WORKFLOW IA ===
 
 FICHIERS À NE JAMAIS MODIFIER AUTOMATIQUEMENT, TOUS MODES :
 - config/users.db
 - ai/models/**/*.zip
+- Training en cours : aucun JSON de `config/` (relus à chaud par les évals).
 
 SCÉNARIOS :
 - Le paramètre clé est le roster (composition des unités)
@@ -146,7 +148,7 @@ Un autre mode est activé si et seulement si le message de l'utilisateur contien
   dette de T2 payée avec mon budget de lecture. La solution retenue est celle qui ferme le sujet.
 → « Ça coûtait trop de tokens » n'est jamais une raison de ne pas avoir vérifié.
   C'est une raison de ne pas me l'avoir raconté.
-L'autonomie est secondaire (cf. règles ASK 1 à 5).
+L'autonomie est secondaire (cf. les règles du mode actif).
 
 UNE SEULE RÉPONSE, À LA FIN — INVARIANT, PAS UNE PRÉFÉRENCE DE STYLE :
 Ne rien m'adresser en cours de route. Pas de « je commence par… », pas de bilan d'étape entre deux
@@ -448,7 +450,7 @@ conclusion, il ne s'y ajoute pas. Ne jamais y répéter ce qui vient d'être dit
     - AUCUN tableau, AUCUN bloc de code, AUCUNE sous-liste, AUCUN chiffre de profilage dans le
       corps du problème. Les mesures ont déjà été données plus haut dans la réponse.
   * Un sujet énoncé SANS ses options n'est pas un arbitrage : c'est une question posée à moitié.
-    Toujours au moins DEUX options réelles ; si une seule existe, ce n'est pas un arbitrage —
+    Toujours DEUX ou TROIS options réelles ; si une seule existe, ce n'est pas un arbitrage —
     c'est une décision, à prendre et à annoncer.
   * Le problème décrit l'EFFET observable (comportement en jeu, chiffre faux, choix de règle 40K,
     coût de training), jamais le mécanisme interne. Les noms de fichier/fonction n'y ont PAS leur
@@ -550,7 +552,7 @@ A2. ANALYSE AVANT ACTION (RELÂCHÉE)
 A3. MODIFICATIONS MULTIPLES AUTORISÉES
 - Peut faire plusieurs modifications dans la même itération si le prompt le permet
 - DOIT suivre l'ordre défini dans le prompt
-- DOIT vérifier après chaque modification que tout fonctionne
+- DOIT vérifier après chaque modification CE QU'ELLE A TOUCHÉ (cf. §TESTS — jamais au-delà)
 
 A4. PÉRIMÈTRE DES FICHIERS (RELÂCHÉ)
 - Peut lire les fichiers nécessaires pour l'investigation

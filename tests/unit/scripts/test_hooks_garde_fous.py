@@ -125,11 +125,15 @@ def _labels_du_format_impose() -> list[str]:
 
     Le gabarit indente ses étiquettes de DEUX espaces ; les sous-parties de l'ARBITRAGE
     (`RECOMMANDATION :`) le sont davantage et ne sont donc pas des sections du rapport.
+    Une étiquette peut porter un marqueur 🟢/🔴 : le hook le tolère (voir sa regex de
+    détection des sections), donc le lire ici autrement recréerait la divergence que ce
+    module ferme.
     """
     texte = CLAUDE_MD.read_text(encoding="utf-8")
     debut = texte.index("FORMAT IMPOSÉ")
     fin = texte.index("/simplify <fichiers pertinents>", debut)
-    return re.findall(r"^ {2}([A-ZÉÈÀÂÎÔÛÇ]+)\s*:", texte[debut:fin], re.MULTILINE)
+    motif = r"^ {2}(?:[\U0001F300-\U0001FAFF\U00002600-\U000027FF]+ +)?([A-ZÉÈÀÂÎÔÛÇ]+)\s*:"
+    return re.findall(motif, texte[debut:fin], re.MULTILINE)
 
 
 def _sections_declarees_facultatives() -> set[str]:

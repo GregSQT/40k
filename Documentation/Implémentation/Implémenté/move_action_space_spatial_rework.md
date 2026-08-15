@@ -1003,6 +1003,7 @@ Une fois le crash fight corrigé, le run `--new x5_new` complète des rollouts. 
 ## 9. Validation
 
 Pas de tests automatisés de bout en bout sur ce périmètre (cf. `CLAUDE.md`) → validation par :
+> **Note 2026-08-15 :** CLAUDE.md ne dit plus cela — cette formulation ne visait que la qualité d'un modèle entraîné ; le code est couvert sans exception (T4 COUVERTURE).
 
 1. **Suite unitaire verte** (`tests/unit/…`), y compris les tests d'action space / masque / decoder.
 2. **`python3 ai/train.py --agent CoreAgent --scenario bot --step`** — vérifier qu'une escouade parcourt

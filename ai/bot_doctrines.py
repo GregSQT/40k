@@ -307,7 +307,10 @@ def _firepower_from(dest, profile, my_range: int) -> Tuple[float, float]:
 _CONTEST_PULL = {"enemy": 2.0, "neutral": 1.0, "mine": 0.0}
 
 
-def _surplus_oc_by_zone(game_state, zones, me: int, sauf_escouade: str) -> List[float]:
+def _surplus_oc_by_zone(
+    game_state, zones, me: int, sauf_escouade: str,
+    contributions: Optional[Dict[str, Any]] = None,
+) -> List[float]:
     """Par zone : de combien d'OC MON camp y depasse deja l'adversaire, hors mon escouade.
 
     C'est la grandeur qui dit « cette zone est deja servie ». Le controle se tranche a la SOMME
@@ -335,7 +338,8 @@ def _surplus_oc_by_zone(game_state, zones, me: int, sauf_escouade: str) -> List[
     """
     if not zones:
         return []
-    contributions = objective_control_contributions(game_state, zones)
+    if contributions is None:
+        contributions = objective_control_contributions(game_state, zones)
     sauf = str(sauf_escouade)
     sums = fold_control_contributions(
         (part for squad_id, part in contributions.items() if squad_id != sauf), len(zones)
@@ -350,6 +354,7 @@ def _objective_terms(
     w_contest: float = 0.0,
     w_crowd: float = 0.0,
     escouade: Optional[str] = None,
+    contributions: Optional[Dict[str, Any]] = None,
 ):
     """(carte de distance COMBINEE, zones) — une seule reduction par decision.
 
@@ -389,7 +394,7 @@ def _objective_terms(
         return None, objective_hex_sets(game_state)
     zones = objective_hex_sets(game_state)
     if w_crowd and me is not None and escouade is not None:
-        surplus = _surplus_oc_by_zone(game_state, zones, int(me), str(escouade))
+        surplus = _surplus_oc_by_zone(game_state, zones, int(me), str(escouade), contributions=contributions)
         maps = [m + w_crowd * s if s else m for m, s in zip(maps, surplus)]
     if w_contest and me is not None:
         # `get allowed` : le dict est cree PARESSEUSEMENT par `calculate_objective_control`, donc
@@ -496,6 +501,8 @@ class _DoctrineBot(_PlacementMemory):
     def __init__(self, randomness: float = 0.0):
         super().__init__()
         self.randomness = max(0.0, min(1.0, randomness))
+        self._contributions_cache_key: Optional[tuple] = None
+        self._contributions_cache_val: Optional[Dict[str, Any]] = None
 
 
     # -- Points de variation ------------------------------------------------------------------
@@ -622,6 +629,22 @@ class _DoctrineBot(_PlacementMemory):
             return (int(chosen[0]), int(chosen[1]))
 
         w_obj, w_enn, w_fire, w_risk, w_contest, w_crowd = self.movement_weights(unit, game_state)
+        # Pré-calcul des contributions d'OC mis en cache par activation : la traversée des
+        # empreintes de socle est le poste dominant de `_surplus_oc_by_zone` et son résultat est
+        # constant pendant toute l'activation d'une unité.
+        contributions: Optional[Dict[str, Any]] = None
+        if w_crowd != 0.0:
+            activation_key = (
+                game_state.get("episode_number"),
+                game_state.get("turn"),
+                game_state.get("phase"),
+                str(require_key(unit, "id")),
+            )
+            if self._contributions_cache_key != activation_key:
+                zones_tmp = objective_hex_sets(game_state)
+                self._contributions_cache_key = activation_key
+                self._contributions_cache_val = objective_control_contributions(game_state, zones_tmp)
+            contributions = self._contributions_cache_val
         # La carte de distance est PONDEREE par qui tient quoi ET par ce que les allies couvrent
         # deja : c'est ici que le bot cesse d'aller betement vers la zone la plus proche, et qu'il
         # cesse d'y aller a cinq (cf. `_objective_terms`).
@@ -631,6 +654,7 @@ class _DoctrineBot(_PlacementMemory):
             w_contest=w_contest,
             w_crowd=w_crowd,
             escouade=str(require_key(unit, "id")),
+            contributions=contributions,
         )
         enemies = _living_enemies_on_table(unit, game_state)
         # `enemy_anchors` passe par le hook (le style peut le restreindre a sa cible focalisee) ;
