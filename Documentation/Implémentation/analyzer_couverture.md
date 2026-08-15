@@ -1087,8 +1087,10 @@ donne sa F, `[MODEL_TYPES:]` de la cible donne l'E des bodyguards (19.02), et `T
 donne le bonus. Le seuil attendu est calculé par la fonction du MOTEUR, pas par une copie. **Leçon
 transposable au reste de cette liste** : un « champ manquant » peut n'être qu'un champ
 *re-dérivable* — avant de faire grossir le journal, chercher si la donnée existe déjà ailleurs.
-Restent réellement bloqués par L2 : 19.02 (l'E RETENUE par le moteur, que l'analyzer recalcule au
-lieu de la lire) et 24.03 (`[ANTI-X Y+]`, dont le token n'atteint pas step.log, cf. §1.3).
+Reste réellement bloqué par L2 : 19.02 — l'E RETENUE par le moteur, que l'analyzer recalcule au
+lieu de la lire. **24.03 en est sorti le 2026-08-12** : `[ANTI-<KW>:Y+]` atteint `step.log`, et il
+y porte le seuil que l'ARME DÉCLARE — donc la donnée qui manquait pour recouper le seuil de
+blessure critique n'a plus à être re-dérivée du tout (cf. §1.3).
 
 | # | Champ / ligne à ajouter | Format proposé | Débloque |
 |---|---|---|---|

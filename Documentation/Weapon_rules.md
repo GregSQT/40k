@@ -1,7 +1,9 @@
 # Weapons System - Complete Documentation
 
-**Last Updated**: 2026-02-04  
-**Status**: Production - Rules registry complete, gameplay effects partially implemented
+**Last Updated**: 2026-08-12  
+**Status**: Production — 22 des 23 règles du registre ont leurs effets de jeu ; seule
+`INDIRECT_FIRE` 24.19 n'est pas implémentée, et délibérément (cf. « Gameplay Effect Coverage »).
+Toutes les règles vives sont nommées dans les DEUX journaux, Game Log PvP et `step.log`.
 
 **Dans l’index doc** : [Documentation/README.md](README.md) (section « Systèmes de jeu et référence métier »). Vue d’ensemble du package `engine/weapons/` dans [AI_IMPLEMENTATION.md](AI_IMPLEMENTATION.md) (section weapons/).
 
@@ -115,7 +117,7 @@ unit = {
 
 Weapon rules add special abilities to weapons (e.g., bonus shots, auto-hits, restrictions).
 
-**Status**: ✅ Registry/validation complete, ⚙️ gameplay effects partially implemented
+**Status**: ✅ Registre et validation complets, ✅ effets de jeu vivants pour 22 règles sur 23 (`INDIRECT_FIRE` exceptée, délibérément)
 
 ### Rule Format
 
@@ -133,46 +135,75 @@ Rules use string format: `"RULE_NAME"` or `"RULE_NAME:X"`
 
 ### Available Rules (current configuration)
 
-Defined in `config/weapon_rules.json`:
+Defined in `config/weapon_rules.json` — **23 rules**, and this table is generated from that file.
+`X` marks a rule whose declaration carries a parameter (`"RAPID_FIRE:1"`, `"ANTI_INFANTRY:4"`).
 
-| Rule | Parameter | Description |
-|------|-----------|-------------|
-| `ANTI_VEHICLE` | ✅ X | Critical wound on wound roll X+ against matching keyword |
-| `ASSAULT` | ❌ | Weapon can shoot after advance |
-| `DEVASTATING_WOUNDS` | ❌ | Critical wound skips save |
-| `EXTRA_ATTACKS` | ❌ | Weapon can be used in addition to other attacks |
-| `HAZARDOUS` | ❌ | Hazardous test after shooting/fighting; on 1 suffer 3 MW |
-| `HEAVY` | ✅ | +1 to hit when bearer remained stationary |
-| `IGNORES_COVER` | ✅ | Target cannot benefit from cover |
-| `LETHAL_HITS` | ✅ | Critical hit automatically wounds |
-| `MELTA` | ✅ X | Increase damage by X within half range |
-| `CLOSE_QUARTERS` | ✅ | Can shoot while engaged, with pistol targeting restrictions |
-| `RAPID_FIRE` | ✅ X | Increase attacks by X within half range |
-| `SUSTAINED_HITS` | ✅ X | Critical hit scores X additional hits |
-| `TORRENT` | ✅ | Attacks auto-hit |
-| `TWIN_LINKED` | ❌ | Re-roll wound roll |
+| Rule | Parameter | PDF | Description |
+|------|-----------|-----|-------------|
+| `ANTI_FLY` | ✅ X | 24.03 | Unmodified Wound roll of X+ vs a FLY target is a Critical Wound |
+| `ANTI_INFANTRY` | ✅ X | 24.03 | Same, vs INFANTRY |
+| `ANTI_MONSTER` | ✅ X | 24.03 | Same, vs MONSTER |
+| `ANTI_PSYKER` | ✅ X | 24.03 | Same, vs PSYKER |
+| `ANTI_VEHICLE` | ✅ X | 24.03 | Same, vs VEHICLE |
+| `ASSAULT` | ❌ | 24.04 | The unit can shoot after Advancing |
+| `BLAST` | ❌ | 24.05 | +1 attack die per five models in the target at Select Targets |
+| `CLEAVE` | ✅ X | 24.06 | +X attack dice per five models, only if one target for all its attacks |
+| `CLOSE_QUARTERS` | ❌ | 24.07 | Can shoot while engaged; one weapon category per model otherwise (ex-`PISTOL`) |
+| `DEVASTATING_WOUNDS` | ❌ | 24.10 | Critical wound ends the sequence and inflicts mortal wounds instead |
+| `EXTRA_ATTACKS` | ❌ | 24.11 | Resolved **in addition to** the model's other weapons |
+| `HAZARDOUS` | ❌ | 24.15 | One D6 hazard roll per selected Hazardous weapon, after the attacks |
+| `HEAVY` | ❌ | 24.16 | +1 to hit if unengaged, not set up this turn, and moved ≤ 3" |
+| `IGNORES_COVER` | ❌ | 24.18 | The target cannot have the Benefit of Cover |
+| `INDIRECT_FIRE` | ❌ | 24.19 | ⚠️ **NOT IMPLEMENTED** — see the coverage note below |
+| `LETHAL_HITS` | ❌ | 24.23 | Critical hit *may* automatically wound (the engine arbitrates, see below) |
+| `MELTA` | ✅ X | 24.25 | +X Damage within half range |
+| `PRECISION` | ❌ | 24.28 | Attacks may be allocated to a visible CHARACTER in the target unit |
+| `PSYCHIC` | ❌ | 24.29 | Modifiers to the attack's BS/WS and hit roll can be ignored |
+| `RAPID_FIRE` | ✅ X | 24.30 | +X Attacks within half range |
+| `SUSTAINED_HITS` | ✅ X | 24.36 | Critical hit scores X additional hits |
+| `TORRENT` | ❌ | 24.37 | The attack automatically hits — no hit roll is made |
+| `TWIN_LINKED` | ❌ | 24.38 | The wound roll can be re-rolled |
 
 ### Gameplay Effect Coverage (engine status)
 
-Current implemented effects in gameplay (mainly `engine/phase_handlers/shooting_handlers.py`):
+⚠️ **This section said the opposite until 2026-08-12**, and had for months: it listed
+`ANTI_VEHICLE`, `EXTRA_ATTACKS`, `IGNORES_COVER`, `LETHAL_HITS`, `MELTA`, `SUSTAINED_HITS`,
+`TORRENT` and `TWIN_LINKED` as « configured but not yet implemented ». All eight are live, and
+several have been for a long time. A reader trusting the old list would have concluded that a
+missing token, a zero usage counter or a surprising dice result came from an unimplemented rule —
+the exact wrong diagnosis.
 
-- ✅ `ASSAULT` (shoot-after-advance eligibility)
-- ✅ `CLOSE_QUARTERS` (engagement exception + close-quarters/non-close-quarters category restrictions)
-- ✅ `HEAVY` (+1 to hit when stationary)
-- ✅ `RAPID_FIRE:X` (bonus shots at half range)
-- ✅ `DEVASTATING_WOUNDS` (critical wound bypasses save)
-- ✅ `HAZARDOUS` (hazardous test and self-damage handling)
+**22 of the 23 rules have gameplay effects. `INDIRECT_FIRE` is the only one that has none**
+(measured on `engine/**`, 2026-08-12; the observation encoder is deliberately excluded since it
+describes weapons rather than resolving them). Where each lives:
 
-Configured but not yet implemented as dedicated gameplay effects:
+- **Attack sequence** (`engine/phase_handlers/attack_sequence.py`), shared by shooting and melee —
+  `TORRENT`, `SUSTAINED_HITS`, `LETHAL_HITS`, `TWIN_LINKED`, `ANTI_*` (all five), `DEVASTATING_WOUNDS`.
+- **Attack pool and hit threshold** (`shared_utils.py`, `shooting_handlers.py`) — `BLAST`,
+  `RAPID_FIRE`, `MELTA`, `HEAVY`, `IGNORES_COVER`, `PSYCHIC`, `ASSAULT`, `CLOSE_QUARTERS`,
+  `HAZARDOUS`, `PRECISION`.
+- **Melee Select Weapons step** (`fight_handlers.py`, `shared_utils.py`) — `CLEAVE`, `EXTRA_ATTACKS`.
 
-- `ANTI_VEHICLE:X`
-- `EXTRA_ATTACKS`
-- `IGNORES_COVER`
-- `LETHAL_HITS`
-- `MELTA:X`
-- `SUSTAINED_HITS:X`
-- `TORRENT`
-- `TWIN_LINKED`
+`LETHAL_HITS` is worth a word because it is the only rule the engine *decides* rather than applies:
+24.23 says « you **can** choose », and auto-wounding forbids a critical wound — so it is a losing
+move on a `LETHAL HITS` + `DEVASTATING WOUNDS` weapon. `lethal_hits_auto_wound_is_better()`
+arbitrates by expected damage, and the log names the rule only when the engine took the option.
+
+**`INDIRECT_FIRE` is not an oversight and not a backlog item that fell through.** It is the single
+entry of `weapon_rules.json` without an `obs_id`, precisely because it is not implemented, and
+that absence is itself locked by
+`tests/unit/engine/test_squad_obs_weapon_profiles.py::test_indirect_fire_is_deliberately_absent`.
+Two Tyranid weapons declare it (`impaler_cannon`, `spore_mine_launcher`) and both currently need
+line of sight like any other weapon. Implementing it changes shooting eligibility and the action
+masks — an engine project, not a logging one.
+
+What it does **not** cost is a retrain: the observation carries weapon rules as **ids in
+pre-sized slots**, and `OBS_ID_VOCAB_SIZE` is fixed at `OBS_ID_MAX + 1 = 128` rather than fitted
+to the rules that exist (`engine/observation_entities.py`). Giving `INDIRECT_FIRE` its `obs_id`
+therefore adds zero parameters and leaves `obs_size` untouched. That is the entire point of the
+id-slot design (V11 §0.48, arbitrage 2): a boolean flag per rule cost 560 observation scalars,
+*and 560 more for every rule made live*, which set « be rules-compliant » against « retrain once »
+in direct opposition.
 
 ### Rule Validation
 
@@ -216,18 +247,9 @@ export const SPACE_MARINE_ARMORY: Record<string, Weapon> = {
 
 ### Roadmap: Remaining Rule Implementations
 
-Already implemented:
-- `RAPID_FIRE`, `ASSAULT`, `CLOSE_QUARTERS`, `HEAVY`, `DEVASTATING_WOUNDS`, `HAZARDOUS`
-
-Remaining planned integration points:
-- `MELTA` → Damage modification within half range
-- `LETHAL_HITS` → Auto-wound on critical hit
-- `SUSTAINED_HITS` → Additional hits on critical hit
-- `TWIN_LINKED` → Wound re-roll handling
-- `IGNORES_COVER` → Save/cover interaction
-- `ANTI_VEHICLE` → Conditional critical wound threshold
-- `EXTRA_ATTACKS` → Additional attack sequence handling
-- `TORRENT` → Auto-hit attack flow
+**Only `INDIRECT_FIRE` (24.19) remains**, plus `LANCE` (24.21) which is not even declared in
+`weapon_rules.json`. Every other rule of the registry is live — see the coverage section above,
+which is measured on the code and not on this list.
 
 ---
 
@@ -582,7 +604,16 @@ weapon rules (05.01 / 05.02) and carry a hard-coded description in `GameLog.tsx`
 
 Notice that this is the **PvP** log. `step.log` (training) is built separately by
 `ai/step_logger.py` from a whitelist of shot keys, and the analyzer's regexes read that file —
-adding a token here does not change either.
+adding a token here does not change either. **That separation is the whole reason the lot A of
+2026-08-12 had to exist**: six rules were rendered here and silent there for months, which the
+analyzer reported as `NOT USED` — not "unknown", but "the engine does not apply it".
+
+The two logs are *separate writers*, not *separate truths*: they read the same resolved facts
+(`WeaponAttackProfile`, the group's applied-rule table, `psychic_rule_applies`) and they are
+expected to name a rule the same way. `[ANTI-<KW>:Y+]` was the last token where they disagreed —
+the group line printed the engine's clamped `crit_wound_on`, `step.log` needed the declared `Y+`
+— and it was aligned onto the declared value on both sides. **Adding a rule to the socle without
+adding it to `ai/step_logger.py` re-opens exactly the gap lot A closed.**
 
 ---
 
