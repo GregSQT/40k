@@ -66,8 +66,9 @@ REDÉMARRAGE DES SERVICES — ACQUIS, NE JAMAIS LE DEMANDER :
   tourneraient encore sur l'ancien code — c'est un diagnostic invalide ici.
 
 ENTRAÎNEMENT IA :
-- Lancer   : python3 ai/train.py --agent CoreAgent --scenario bot --new
-- Valider  : python3 ai/train.py --agent CoreAgent --test-only --step
+On remplacer <X> par la résolution choisie (1 ou 5)
+- Lancer   : python3 ai/train.py --agent ArmageddonAgent --training-config x<X> --scenario bot --resolution <X> --new 
+- Valider  : python3 ai/train.py --agent ArmageddonAgent --training-config x<X> --scenario bot --resolution <X> --test-only --step
   (`--test-only` n'entraîne RIEN : il joue le modèle en place sur le HOLDOUT et écrit step.log.
    C'est ce que « valider » veut dire ici, et c'est le seul des trois modes qui laisse le modèle
    intact — `--new` l'écarte, `--append` l'écrase par un run court. Pas de `--scenario bot` ici :
@@ -79,17 +80,13 @@ ENTRAÎNEMENT IA :
 
 TESTS — QUI LANCE QUOI (NON NÉGOCIABLE) :
 - La VÉRIFICATION LARGE appartient à l'utilisateur. Sa commande de référence :
-  `python3 -m pytest tests/unit/ -q -n 8 --dist worksteal ;
+  `python3 -m pytest tests/unit/ -q -n 16 --dist worksteal ;
    python3 -m pytest tests/integration/pvp/ -q -n 6 --dist load ; pyright ;
    p ai/hidden_action_finder.py ; p scripts/check_ai_rules.py ; npx biome check frontend/src ;
    (cd frontend && npx tsc --noEmit -p tsconfig.app.json)`
-- UN AGENT NE LA LANCE JAMAIS, sous aucune de ses formes, dans AUCUN mode. Il n'existe AUCUNE
-  exception, AUCUNE délégation, AUCUN marqueur, AUCUNE variable d'environnement, AUCUN fichier
-  jeton qui l'autorise — et il est INTERDIT d'en proposer un. Le hook
-  `.claude/hooks/deny-verif-large.sh` REFUSE la commande : il découpe la ligne sur `;`, `&&`, `|`
-  et juge CHAQUE segment, il couvre les sept briques de la vérification, et il n'a plus de porte
-  de sortie (retirée le 2026-08-13,
-  après qu'un agent se soit délivré à lui-même le marqueur qui existait alors). Chercher la
+- UN AGENT NE LA LANCE JAMAIS, sous aucune de ses formes, dans AUCUN mode.
+  Le hook `.claude/hooks/deny-verif-large.sh` REFUSE la commande : il découpe la ligne sur `;`, `&&`, `|`
+  et juge CHAQUE segment, il couvre les sept briques de la vérification, sans porte de sortie.
   formulation qui passerait est un contournement, au même titre que désactiver le hook.
 - Ce qu'un agent peut vérifier : CE QU'IL A TOUCHÉ, rien d'autre. Un agent qui pense avoir besoin
   de plus se trompe de rôle : il le DIT et s'arrête.
@@ -161,11 +158,8 @@ exister.
   on s'arrête, on attend.
 → Ne pas contourner en réduisant le message final : le FORMAT DE MISE À JOUR et le RAPPORT DE
   CLÔTURE y figurent en entier.
-→ AUCUN garde-fou automatique ne tient cette règle, et aucun ne peut : le seul moment où l'on
-  pourrait constater qu'un texte intermédiaire est parti, c'est après son affichage (mesuré le
-  2026-08-12 — quatre phrases de narration émises dans le tour même qui écrivait cette règle).
-  Elle ne tient que par l'attention portée à chaque prise de parole : avant d'écrire hors d'un
-  appel d'outil, vérifier qu'il s'agit du message final ou d'une des deux exceptions ci-dessus.
+→ Aucun garde-fou ne tient cette règle : avant d'écrire hors d'un appel d'outil, vérifier
+  qu'il s'agit du message final ou d'une des deux exceptions ci-dessus.
 
 === MODE ASK (PAR DÉFAUT) ===
 
@@ -208,11 +202,8 @@ explicitement. Elles ne concernent QUE le droit d'agir et le périmètre, jamais
 1. AUCUNE ACTION SANS VALIDATION
 - Ne jamais lancer de scripts ou de commandes sans autorisation explicite.
 - Ne jamais modifier du code sans validation préalable.
-- EXCEPTION, tranchée le 2026-08-12 : l'exécution des FICHIERS de test ciblés que l'agent vient
-  d'écrire ou de toucher est TOUJOURS libre, y compris le rouge/vert exigé par T4 VERROU. Le
-  risque que cette règle protège, c'est une commande longue ou destructive ; un fichier de test
-  ciblé n'est ni l'un ni l'autre, et le hook `deny-verif-large.sh` refuse déjà tout ce qui déborde.
-  Demander pour ça coûtait un aller-retour par correction, pour un risque nul.
+- EXCEPTION : l'exécution des FICHIERS de test ciblés que l'agent vient d'écrire ou de toucher
+  est TOUJOURS libre, y compris le rouge/vert exigé par T4 VERROU.
 
 2. ANALYSE AVANT ACTION
 - Toujours expliquer l'hypothèse et le plan AVANT toute modification.
@@ -223,18 +214,10 @@ explicitement. Elles ne concernent QUE le droit d'agir et le périmètre, jamais
   au format A/B/C + `RECOMMANDATION` de l'ARBITRAGE (§RAPPORT DE CLÔTURE), avec ses contraintes
   de lisibilité : DEUX ou TROIS conceptions RÉELLES, une à deux lignes chacune portant ce qu'elle
   donne ET ce qu'elle coûte, puis la retenue et pourquoi elle ferme le sujet à LONG TERME.
-  * MOTIF, mesuré le 2026-08-12 : sans comparaison écrite, le premier jet est la solution qui
-    SUFFIT, et la seule chose qui l'évalue est l'utilisateur demandant « est-ce optimal ? » —
-    question à laquelle la réponse était systématiquement non, suivie d'une correction. La
-    comparaison doit donc précéder la proposition, pas la question.
   * Une option ne compte que si elle est DÉFENDABLE : « ne rien faire » en est une, un épouvantail
-    non. Si une seule conception existe réellement, le dire et l'écrire — ce n'est pas un arbitrage,
-    c'est une décision, et l'annoncer comme telle est conforme.
+    non. Si une seule conception existe réellement, le dire et l'écrire — décision, pas arbitrage.
   * INTERDIT de recommander l'option la plus rapide, ou un enchaînement « A maintenant, B plus
     tard » : c'est la dette déguisée en prudence que T2 refuse.
-  * Aucun hook ne tient cette règle : le tour qui propose ne modifie aucun fichier, donc rien ne
-    la constate à ma place. Elle ne tient que par le contrôle, avant d'envoyer une proposition,
-    que le bloc d'options y figure.
 
 3. SCOPE DE MODIFICATION PAR ITÉRATION
 - Par défaut : Une réponse = une modification ciblée.
@@ -305,8 +288,106 @@ PÉRIMÈTRE DE CLÔTURE — autorisé SANS nouvelle validation, TOUS MODES
 - ARBITRAGE du rapport de clôture = décisions qui appartiennent à l'utilisateur (choix métier,
   priorité, budget, donnée qu'il seul possède). JAMAIS du travail technique que l'agent savait
   faire et n'a pas fait. Un ARBITRAGE qui décrit une tâche est une dette déguisée.
+→ Voir §RAPPORT DE CLÔTURE ci-dessous pour le format de preuve.
 
-RAPPORT DE CLÔTURE — OBLIGATOIRE avant d'annoncer un sujet fini
+T3. INVESTIGATION AUTONOME — PRIME SUR LES RÈGLES ASK 1 ET 5
+- Si l'utilisateur demande explicitement d'investiguer un problème, d'analyser une erreur, ou de trouver la root cause :
+  → INVESTIGUER IMMÉDIATEMENT ET AUTONOMEMENT sans redemander la permission
+  → Lire tous les fichiers nécessaires pour comprendre le problème
+  → Utiliser Grep, Glob et Read pour explorer le code
+  → Suivre les traces d'erreur, analyser les logs, examiner le flux d'exécution
+  → Ne s'arrêter QUE si :
+    * La root cause est identifiée avec certitude (présenter alors la solution)
+    * Des logs/exécutions sont nécessaires pour continuer (demander alors les logs)
+    * Après investigation approfondie, aucune root cause claire n'est trouvée (reconnaître honnêtement l'échec et proposer des pistes alternatives)
+- NE JAMAIS demander "voulez-vous que j'investigue ?" si l'utilisateur a déjà demandé l'investigation
+- NE JAMAIS s'arrêter à mi-chemin pour demander la permission de continuer l'investigation
+- L'investigation est une ACTION DE LECTURE/ANALYSE, pas une modification → autonomie totale autorisée
+
+T4. CAUSE, JUMEAU, VERROU
+
+CAUSE — établir avant de toucher
+- Ne rien corriger tant que la cause n'est pas PROUVÉE. Une hypothèse n'est pas une cause.
+  Remonter la chaîne d'appelants, lire le code, citer fichier:ligne.
+- Si la cause peut être MESURÉE plutôt que déduite : mesurer (instrumenter, exécuter le vrai
+  chemin, compter). « le code semble faire X » ne vaut rien face à « j'ai exécuté, j'ai obtenu X ».
+  → En MODE ASK, demander l'autorisation d'exécuter ; ne pas déduire pour éviter de demander.
+- Si mon énoncé du symptôme est FAUX ou incomplet, le dire et me contredire avec la preuve.
+  Ne pas chercher uniquement là où je pointe. Une liste de soupçons n'est pas un verdict.
+- COROLLAIRE REVIEW (/code-review, /simplify, audit) : un finding est une hypothèse tant qu'il
+  n'a pas de SCÉNARIO D'ÉCHEC concret — entrées/état précis → sortie fausse, crash ou invariant
+  violé, sur un chemin réellement atteint en production. Sans ce scénario, le finding est ÉCARTÉ,
+  pas rétrogradé en « mineur ». Hors périmètre sauf demande explicite : nommage, découpage, style,
+  « on pourrait extraire », préférence d'architecture sur du code correct.
+- PREUVE PAR LE FICHIER — un scénario ne vaut que s'il a été établi sur le FICHIER, jamais sur la
+  hunk du diff. Tout finding RECOPIE VERBATIM, dans son scénario, les lignes du fichier qui le
+  rendent possible : la ligne fautive ET ce qui aurait pu l'empêcher (garde, défaut, early-return,
+  appelant). Recopiées, pas résumées, pas abrégées d'un « … » : une citation qu'on ne retrouve pas
+  telle quelle à la ligne indiquée écarte le finding, sans discussion. Un finding dont l'ancre est
+  HORS du diff se relit intégralement dans le fichier avant d'être écrit, et nomme la ligne DU diff
+  qui le casse — sinon il est écarté aussi.
+  * Un finding qui énonce lui-même que le code visé est correct (« correct but », « invites a
+    future », « compounding ») n'est pas un finding faible : c'est du style, déjà écarté par la
+    ligne ci-dessus. Ne pas le rendre.
+- CRITÈRE D'ARRÊT : une review est finie quand il ne reste plus de finding AVEC scénario, pas
+  quand il ne reste plus de finding. Ne jamais relancer une review pour faire taire du goût — le
+  signaler si je demande une relance dont la passe précédente n'a rendu que du cosmétique.
+
+JUMEAU — le motif d'échec n°1 de ce dépôt
+- Ce dépôt est structuré en MIROIRS : tir/mêlée, move/charge/fight, IA/PvP, moteur/replay/analyzer,
+  frontend/backend. Une correction faite d'un côté et pas de l'autre est le défaut le plus fréquent.
+- Après chaque correction : grep le symbole/le motif corrigé et vérifier explicitement s'il existe
+  ailleurs sous la même forme. Rapporter le résultat de cette recherche, même s'il est vide.
+- Corollaire vécu : du code corrigé/testé mais JAMAIS APPELÉ par le vrai chemin ne corrige rien.
+  Vérifier que le chemin de production atteint bien le code modifié.
+
+VERROU — prouver que le test tient
+- Un test qui passe du premier coup n'est PAS un verrou. Pour chaque correction d'invariant moteur :
+  remettre le défaut, vérifier que le test devient ROUGE, rétablir, et le rapporter.
+  Sans cette preuve, considérer le test comme absent. (Inutile sur du parsing/formatage trivial.)
+- VERT VACANT : un contrôle qui ne regarde rien affiche « tout va bien ». Vérifier que l'échantillon
+  produit vraiment des données, que l'énumération rend des éléments, que la mutation est appliquée.
+  Symétrique déjà vécu : un contrôle qui regarde la MAUVAISE chose (ancre vs par-figurine).
+- Un test doit CONSTRUIRE la situation qu'il observe — jamais l'espérer d'une graine aléatoire,
+  d'un ordre d'exécution ou de l'absence d'une configuration.
+
+COUVERTURE — toute feature touchée est couverte par un test automatisé
+- Ajouter ou modifier un comportement OBLIGE à écrire/étendre son test dans la MÊME livraison.
+  Ce test entre au périmètre de clôture (T2) : ni validation ni STOP à demander.
+- LE HARNAIS SUIT LE CODE TOUCHÉ, il ne se choisit pas : Python → pytest (`tests/unit/...`,
+  `tests/integration/...`), noté `fichier::test` ; frontend TS/TSX → vitest (`*.test.ts(x)` à côté
+  du module, `cd frontend && npx vitest run <fichier>`), noté `fichier > nom du test`. Un tour qui
+  ne touche que le front satisfait la règle en vitest, jamais en inventant une référence pytest.
+- Toute feature RENCONTRÉE pendant le travail sans test se traite ainsi :
+  * elle touche le code modifié (même fonction, même invariant, même jumeau) → le test s'écrit
+    MAINTENANT, comme le reste du périmètre de clôture ;
+  * elle est SANS LIEN avec la modification → interdit de l'écrire (ASK 5, et T2 « n'entre jamais
+    tant qu'on y est ») : elle se SIGNALE au rapport et prend son prompt en PROMPTS.
+- Le rapport de clôture liste en COUVERTURE les trous vus non couverts — pas les tests écrits.
+  Un trou vu et tu est une régression au même titre qu'un document rendu faux par sa livraison.
+- « Validé via --step / le PvP / l'analyzer / le navigateur / un script jetable » ne remplace pas
+  un test du harnais : ce n'est pas rejouable, donc ça ne verrouille rien (cf. VERROU ci-dessus).
+
+RENDRE COMPTE — borner le verdict
+- Dire ce qui a été VÉRIFIÉ et ce qui n'a PAS pu l'être. « non exploré » n'est pas « sain » :
+  un verdict non borné est ce qui masque les défauts le plus longtemps.
+- Ne JAMAIS affirmer avoir exécuté ce qui n'a pas été exécuté.
+- Une suppression ne laisse une trace dans le code QUE si elle est contre-intuitive (un contrôle
+  retiré sciemment, une branche condamnée) : dire pourquoi et vers quoi se tourner. Sinon git suffit
+  — pas de commentaire-tombeau.
+
+=== FORMAT DE MISE À JOUR OBLIGATOIRE (TOUS MODES) ===
+
+Après chaque modification :
+1. Indiquer le fichier modifié avec un lien cliquable : [nom.py](file:///home/greg/40k/chemin/nom.py)
+2. Expliquer en une phrase ce qui a changé et pourquoi — sans montrer de code.
+
+Si plusieurs fichiers → STOP, lister, expliquer, attendre validation.
+EXCEPTION : les fichiers du périmètre de clôture (T2) se modifient sans STOP ni validation —
+ils apparaissent en RÉFS, chacun justifié par son critère d'entrée.
+
+=== RAPPORT DE CLÔTURE — OBLIGATOIRE avant d'annoncer un sujet fini ===
+
 Ne JAMAIS conclure par un verdict de qualité (« implémentation optimale », « doc à jour »,
 « tout est propre ») : un verdict ne s'expose à aucun contrôle, donc il ne prouve rien et il est
 produit sans effort. Conclure par des FAITS recoupables en quelques secondes.
@@ -374,14 +455,11 @@ conclusion, il ne s'y ajoute pas. Ne jamais y répéter ce qui vient d'être dit
     place ; s'ils sont indispensables, ils vont dans une option, en appui.
   * Chaque option porte ce qu'elle donne ET ce qu'elle coûte, dans la même phrase. Une liste
     d'options nues ne permet pas d'arbitrer, donc elle ne compte pas.
-  * `RECOMMANDATION :` — étiquette en MAJUSCULES, OPTIQUE LONG TERME, SANS DETTE. Recommander la
-    solution qui ferme le sujet pour de bon, même si elle est plus longue. INTERDIT de recommander
-    un enchaînement (« A maintenant, B plus tard »), une mesure d'attente, ou une option choisie
-    parce qu'elle est rapide : c'est de la dette déguisée en prudence (cf. T2). Une option n'est
-    recommandable comme étape que si les suivantes sont techniquement IMPOSSIBLES sans elle — et
-    il faut alors le dire explicitement. « À toi de voir » n'est pas une recommandation.
-  * Interdit d'y glisser du travail technique que l'agent savait faire (cf. règle ci-dessus) :
-    l'ARBITRAGE développé ne devient pas un lieu où déguiser une dette en question.
+  * `RECOMMANDATION :` — OPTIQUE LONG TERME, SANS DETTE. Solution qui ferme le sujet pour de bon.
+    INTERDIT : enchaînement « A maintenant, B plus tard », mesure d'attente, choix rapide. Une
+    option n'est recommandable comme étape que si les suivantes sont techniquement IMPOSSIBLES sans
+    elle. « À toi de voir » n'est pas une recommandation.
+  * Interdit d'y glisser du travail technique que l'agent savait faire (cf. T2).
 - PROMPTS — trois catégories strictes, rien d'autre. Un bloc de code par sujet, contenant un
   prompt AUTONOME, copiable tel quel pour un autre agent qui n'a AUCUN contexte de cette session :
   ce qu'on observe, où (fichier:ligne), ce qu'on attend, et le périmètre attendu. Pas de
@@ -391,9 +469,6 @@ conclusion, il ne s'y ajoute pas. Ne jamais y répéter ce qui vient d'être dit
   2. Bug prouvé hors périmètre : bug ou incohérence rencontré, avec un scénario d'échec NOMMÉ
      (quel état, quelle entrée → quel effet observable faux). Sans ce scénario, la suspicion
      se note en UNE LIGNE dans `LU` et s'arrête là — elle ne devient PAS un prompt.
-     MOTIF, mesuré le 2026-08-13 : sans garde-fou équivalent à T4, « j'ai remarqué X »
-     se transforme en prompt, qui génère d'autres prompts à son exécution — poupées russes
-     dont la profondeur est bornée par la qualité perçue du code, pas par sa réalité.
   3. ARBITRAGE : un sujet remonté en ARBITRAGE a AUSSI son prompt ici, écrit pour l'option
      RECOMMANDÉE.
   * cette section ne dispense de RIEN : ce que l'agent savait faire dans le périmètre de clôture
@@ -405,41 +480,21 @@ conclusion, il ne s'y ajoute pas. Ne jamais y répéter ce qui vient d'être dit
   seulement le dernier tour (cf. la liste accumulée ci-dessous), et jamais l'ensemble du working
   tree. Copiables tels quels, sans reformulation. `/code-review`
   d'abord (bugs), `/simplify` ensuite (conception sur du code déjà correct).
-- RELIRE, EXÉCUTION — INTERDITE À L'AGENT, tranché le 2026-08-13 : `/code-review` et `/simplify`
-  appartiennent à l'utilisateur, exactement comme la VÉRIFICATION LARGE (cf. §TESTS). L'agent ne
-  les lance JAMAIS — ni par l'outil `Skill`, ni par Bash, ni via un sous-agent, dans AUCUN mode.
-  Il ÉCRIT le bloc RELIRE ; il ne l'exécute pas. Se dire qu'un sujet mérite une passe de plus,
-  c'est déjà enfreindre la règle : ce n'est pas à l'agent d'en juger.
-  * MOTIF, mesuré entre le 2026-08-12 et le 2026-08-13 : l'autorisation inverse faisait BOUCLER
-    les deux passes, et aucune borne fiable n'existe. Toute borne réarmée par une action de
-    l'agent (une édition, un `--vider`, une liste vidée) se contourne par cette même action, et
-    le seul critère d'arrêt écrit — « plus de finding AVEC scénario » — demande à l'agent de
-    juger son propre travail. La seule borne sûre est de lui retirer le déclenchement.
-  * CE QUE L'AGENT REND À LA PLACE — la liste ACCUMULÉE des fichiers de code édités, tenue
-    par `.claude/hooks/relire-en-attente.sh` (PostToolUse), à lire avec
-    `.claude/hooks/relire-en-attente.sh --liste <session_id>`, à recopier telle quelle sous les
-    deux commandes du bloc RELIRE. Le session_id est l'UUID du dossier qui CONTIENT ton
-    `scratchpad` (pas le dernier composant du chemin) ; il est toujours requis, car plusieurs
-    sessions travaillent en parallèle dans ce dépôt et le deviner revenait à relire — ou à
-    effacer — la liste d'une autre session.
-    JAMAIS `git status` : mesuré le 2026-08-12, le tree portait 38 fichiers modifiés pour une tâche
-    qui en touchait 2 — la review serait partie sur les chantiers des autres sessions.
-    Si le hook signale qu'il n'a pas pu tenir la liste, la tenir à la main et le dire.
-  * `--vider` NE S'APPELLE JAMAIS PAR L'AGENT. « Depuis la dernière relecture » date d'une action
-    de l'UTILISATEUR, qu'aucun hook ne voit d'ici : vider soi-même effacerait une liste que
-    personne n'a relue. La liste s'accumule donc d'un tour à l'autre, et les mêmes fichiers
-    reparaissent au bloc RELIRE tant qu'elle n'est pas vidée — c'est voulu, pas un doublon.
-    L'agent recopie la commande `--vider <session_id>` sous les deux passes, pour que l'utilisateur
-    l'ait sous la main une fois qu'il les a lancées.
-  * Le `→` du bloc ne rend JAMAIS de verdict de passe : l'agent n'a rien exécuté. Il porte trois
-    choses, et seulement elles : que les passes n'ont pas été lancées, SI LE MOMENT EST BON
-    (ci-dessous), et combien de fichiers attendent depuis combien de tours.
-  * QUAND C'EST LE BON MOMENT — l'agent ne déclenche rien, mais il le DIT, tranché le 2026-08-14.
-    Le sujet est FINI quand plus aucune tâche demandée n'est ouverte ET que le rapport ne remonte
-    AUCUN `ARBITRAGE` : tant qu'un arbitrage attend une réponse, le code peut encore changer, donc
-    relire maintenant c'est relire deux fois. Le `→` dit alors « SUJET EN COURS, n arbitrage(s)
-    ouvert(s) », et « SUJET FINI, moment optimal » sinon. Ce n'est jamais qu'un AVIS : s'y tromper
-    ne coûte rien, et aucune boucle ne peut en naître puisque l'agent n'a plus le déclenchement.
+- RELIRE, EXÉCUTION — INTERDITE À L'AGENT : `/code-review` et `/simplify` appartiennent à
+  l'utilisateur, comme la VÉRIFICATION LARGE (cf. §TESTS). L'agent ne les lance JAMAIS — ni par
+  `Skill`, ni par Bash, ni via un sous-agent, dans AUCUN mode. Il ÉCRIT le bloc RELIRE, point.
+  * CE QUE L'AGENT REND À LA PLACE — la liste ACCUMULÉE des fichiers de code édités, tenue par
+    `.claude/hooks/relire-en-attente.sh` (PostToolUse), à lire avec `--liste <session_id>`, à
+    recopier telle quelle sous les deux commandes. Le session_id = UUID du dossier PARENT de ton
+    `scratchpad`. JAMAIS `git status` (le tree peut porter 30+ fichiers d'autres sessions).
+    Si le hook n'a pas pu tenir la liste, la tenir à la main et le dire.
+  * `--vider` NE S'APPELLE JAMAIS PAR L'AGENT : ça effacerait une liste non relue. La liste
+    s'accumule d'un tour à l'autre — c'est voulu. L'agent recopie `--vider <session_id>` sous
+    les deux passes pour que l'utilisateur l'ait sous la main.
+  * Le `→` ne rend JAMAIS de verdict de passe. Il porte : que les passes n'ont pas été lancées,
+    si le moment est bon, et combien de fichiers attendent depuis combien de tours.
+  * QUAND C'EST LE BON MOMENT — sujet FINI = plus aucune tâche ouverte ET aucun ARBITRAGE en
+    attente. Le `→` dit « SUJET EN COURS, n arbitrage(s) ouvert(s) » ou « SUJET FINI, moment optimal ».
   * FILTRAGE PAR PERTINENCE — seuls les fichiers pour lesquels une review apporte quelque chose
     figurent dans `/code-review` et `/simplify`. Trois zones, appliquées dans cet ordre :
     - TOUJOURS EXCLUS (sans jugement) : `config/**/*.json`, `*.md` sauf `CLAUDE.md`,
@@ -452,151 +507,22 @@ conclusion, il ne s'y ajoute pas. Ne jamais y répéter ce qui vient d'être dit
     La bannière `🟢` n'apparaît que si la liste filtrée est non vide ET le sujet est FINI.
     Un fichier core (`engine/`, `ai/`…) ne peut PAS être exclu, quelle que soit la justification :
     la zone TOUJOURS INCLUS est mécanique et ne laisse pas de place au jugement.
-  * POURQUOI PAS À CHAQUE MODIFICATION, mesuré le 2026-08-06 sur ce dépôt (186 commits de
-    correction, 12 519 lignes datées par `git blame`, cf. `scripts/review_plan.py`) : 17 % des
-    lignes corrigées le sont dans les 6 h qui suivent leur écriture — boucle write-debug, code
-    non relisible car déjà en train d'être réécrit — et le code récent est SOUS-représenté dans
-    les corrections (0,66–0,68x, pic à 3–6 mois). Relire à chaque tour vise donc le rendement le
-    plus faible. S'y ajoute le défaut JUMEAU (T4), le plus fréquent ici : il n'est pas observable
-    tant que le sujet n'est pas fini — au milieu, le jumeau manquant n'est pas un bug, c'est du
-    travail en cours, et la passe rend du cosmétique à la place.
-    Dans un gros lot, l'ordre de lecture se prend sur la TAILLE (`scripts/review_plan.py`) : seule
-    métrique qui ait battu churn, âge et historique de bugs à cette même mesure.
-- RELIRE, CHEMINS : ABSOLUS, c'est ce que rend la liste du hook, et c'est juste dans les deux
-  dépôts. Un chemin relatif s'interprète depuis le cwd de la review et non depuis le dépôt édité :
-  il désigne alors l'homonyme, qui porte le même nom sans porter la modification, et la review
-  relit un chantier étranger sans que rien ne le signale (mesuré le 2026-08-08 — un verdict entier,
-  findings compris, rendu sur le mauvais code). Le hook REFUSE tout chemin relatif, sans condition :
-  une session worktree qui ne touche que le dépôt principal ne se distingue d'une session normale
-  par aucun signe observable, donc l'exigence ne peut pas dépendre de l'endroit où l'on croit être.
-  Un chemin qui contient une ESPACE (`shared/gameLogStructure - save.ts`) se recopie CITÉ —
-  guillemets simples ou doubles, au choix ; c'est déjà la forme que rend `--liste`. Écrit nu, il
-  se coupe en fragments relatifs et le hook le refuse : recoller les morceaux ferait passer un
-  `engine` relatif à côté d'un chemin absolu, c'est-à-dire le défaut du 2026-08-08 lui-même.
-- FORME DU RAPPORT — tenue par un hook, pas par ta vigilance : `.claude/hooks/rapport-cloture.sh`
-  vérifie, sur tout tour qui a modifié un fichier, la présence des sections listées à la ligne
-  ci-dessous, la disposition du bloc RELIRE (étiquette seule, une commande par ligne) et le
-  caractère absolu de ses chemins. Deux points de LECTURE, qui décident de ce qu'il voit : rien de
-  ce qui est écrit DANS un bloc ``` ne compte — ni une section, ni une commande, parce que les
-  prompts copiables de PROMPTS en citent — et un ``` jamais refermé fait rejeter le rapport comme
-  malformé, plutôt que d'avaler tout ce qui suit. Cette ligne est la SOURCE UNIQUE de la liste : le hook la LIT ici
-  même, donc y ajouter ou en retirer une section change ce qu'il réclame, et
-  `tests/unit/scripts/test_hooks_garde_fous.py` échoue si elle diverge du FORMAT IMPOSÉ ci-dessus.
-  `=toujours` : due dès qu'un fichier a été modifié ; `=code` : due seulement si un fichier de
-  code a bougé.
+  * Relire en cours de sujet = cosmétique : le défaut JUMEAU n'est pas observable tant que le
+    sujet n'est pas fini. Dans un gros lot, l'ordre de lecture se prend sur la TAILLE
+    (`scripts/review_plan.py`).
+- RELIRE, CHEMINS : ABSOLUS (c'est ce que rend le hook). Le hook REFUSE tout chemin relatif, sans
+  condition — une session worktree et une session normale sont indistinguables depuis ici.
+  Un chemin avec ESPACE (`shared/gameLogStructure - save.ts`) se recopie CITÉ (guillemets simples
+  ou doubles) ; c'est la forme que rend `--liste`.
+- FORME DU RAPPORT — tenue par `.claude/hooks/rapport-cloture.sh` : vérifie les sections,
+  la disposition du bloc RELIRE (étiquette seule, une commande par ligne) et les chemins absolus.
+  Rien dans un bloc ``` ne compte ; un ``` non refermé fait rejeter le rapport.
+  Cette ligne est SOURCE UNIQUE de la liste (le hook la LIT ici) :
+  `=toujours` : due dès qu'un fichier a été modifié ; `=code` : due seulement si du code a bougé.
   SECTIONS EXIGÉES : `LU`=toujours, `JUMEAU`=toujours, `COUVERTURE`=code, `RELIRE`=code
   FICHIERS COMPTÉS COMME CODE : `.py`, `.pyi`, `.sh`, `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`, `CLAUDE.md`, `settings.json`
-  (deuxième source unique, lue par le même hook : un suffixe, ou un nom entier pour un fichier
-  qui PILOTE les hooks — le modifier peut les éteindre, ce tour-là doit donc son rapport complet.)
-  Il s'exécute au PROMPT SUIVANT, pas à la fin du tour : le transcript est
-  écrit de façon asynchrone, et un contrôle branché sur la fin du tour prend un texte intermédiaire
-  pour le rapport final (mesuré le 2026-08-12, il a bloqué le tour même qui l'installait). Donc si
-  ce rappel arrive, le rapport manquant est celui du tour d'AVANT : rends-le en tête de réponse,
-  sans relancer aucun travail. Ce que le hook ne voit pas — la SUBSTANCE de LU, du JUMEAU, des
-  PROMPTS — n'est vérifié par personne d'autre que toi.
-
-T3. INVESTIGATION AUTONOME — PRIME SUR LES RÈGLES ASK 1 ET 5
-- Si l'utilisateur demande explicitement d'investiguer un problème, d'analyser une erreur, ou de trouver la root cause :
-  → INVESTIGUER IMMÉDIATEMENT ET AUTONOMEMENT sans redemander la permission
-  → Lire tous les fichiers nécessaires pour comprendre le problème
-  → Utiliser Grep, Glob et Read pour explorer le code
-  → Suivre les traces d'erreur, analyser les logs, examiner le flux d'exécution
-  → Ne s'arrêter QUE si :
-    * La root cause est identifiée avec certitude (présenter alors la solution)
-    * Des logs/exécutions sont nécessaires pour continuer (demander alors les logs)
-    * Après investigation approfondie, aucune root cause claire n'est trouvée (reconnaître honnêtement l'échec et proposer des pistes alternatives)
-- NE JAMAIS demander "voulez-vous que j'investigue ?" si l'utilisateur a déjà demandé l'investigation
-- NE JAMAIS s'arrêter à mi-chemin pour demander la permission de continuer l'investigation
-- L'investigation est une ACTION DE LECTURE/ANALYSE, pas une modification → autonomie totale autorisée
-
-T4. CAUSE, JUMEAU, VERROU
-
-CAUSE — établir avant de toucher
-- Ne rien corriger tant que la cause n'est pas PROUVÉE. Une hypothèse n'est pas une cause.
-  Remonter la chaîne d'appelants, lire le code, citer fichier:ligne.
-- Si la cause peut être MESURÉE plutôt que déduite : mesurer (instrumenter, exécuter le vrai
-  chemin, compter). « le code semble faire X » ne vaut rien face à « j'ai exécuté, j'ai obtenu X ».
-  → En MODE ASK, demander l'autorisation d'exécuter ; ne pas déduire pour éviter de demander.
-- Si mon énoncé du symptôme est FAUX ou incomplet, le dire et me contredire avec la preuve.
-  Ne pas chercher uniquement là où je pointe. Une liste de soupçons n'est pas un verdict.
-- COROLLAIRE REVIEW (/code-review, /simplify, audit) : un finding est une hypothèse tant qu'il
-  n'a pas de SCÉNARIO D'ÉCHEC concret — entrées/état précis → sortie fausse, crash ou invariant
-  violé, sur un chemin réellement atteint en production. Sans ce scénario, le finding est ÉCARTÉ,
-  pas rétrogradé en « mineur ». Hors périmètre sauf demande explicite : nommage, découpage, style,
-  « on pourrait extraire », préférence d'architecture sur du code correct.
-- PREUVE PAR LE FICHIER — un scénario ne vaut que s'il a été établi sur le FICHIER, jamais sur la
-  hunk du diff. Tout finding RECOPIE VERBATIM, dans son scénario, les lignes du fichier qui le
-  rendent possible : la ligne fautive ET ce qui aurait pu l'empêcher (garde, défaut, early-return,
-  appelant). Recopiées, pas résumées, pas abrégées d'un « … » : une citation qu'on ne retrouve pas
-  telle quelle à la ligne indiquée écarte le finding, sans discussion. Un finding dont l'ancre est
-  HORS du diff se relit intégralement dans le fichier avant d'être écrit, et nomme la ligne DU diff
-  qui le casse — sinon il est écarté aussi.
-  * MOTIF, mesuré le 2026-08-13 sur `test_bot_zone_direct_json_out.py` : une passe a rendu cinq
-    findings, dont quatre décrivaient du code INEXISTANT — `next()` sans défaut là où le fichier
-    porte `None,` + `pytest.fail`, `min()` non gardé là où la fonction ouvre sur `assert hits`. Les
-    quatre étaient marqués `CONFIRMED`. Trois portaient sur des lignes que le diff ne touche PAS,
-    la quatrième sur une garde située dans une autre hunk. Aucun contrôle mécanique ne voit ce
-    défaut : l'ancre existe, le scénario est bien formé, seul le code cité est faux. Recopier les
-    lignes est la seule opération qui l'expose, parce qu'elle oblige à les lire.
-  * Un finding qui énonce lui-même que le code visé est correct (« correct but », « invites a
-    future », « compounding ») n'est pas un finding faible : c'est du style, déjà écarté par la
-    ligne ci-dessus. Ne pas le rendre.
-- CRITÈRE D'ARRÊT : une review est finie quand il ne reste plus de finding AVEC scénario, pas
-  quand il ne reste plus de finding. Ne jamais relancer une review pour faire taire du goût — le
-  signaler si je demande une relance dont la passe précédente n'a rendu que du cosmétique.
-
-JUMEAU — le motif d'échec n°1 de ce dépôt
-- Ce dépôt est structuré en MIROIRS : tir/mêlée, move/charge/fight, IA/PvP, moteur/replay/analyzer,
-  frontend/backend. Une correction faite d'un côté et pas de l'autre est le défaut le plus fréquent.
-- Après chaque correction : grep le symbole/le motif corrigé et vérifier explicitement s'il existe
-  ailleurs sous la même forme. Rapporter le résultat de cette recherche, même s'il est vide.
-- Corollaire vécu : du code corrigé/testé mais JAMAIS APPELÉ par le vrai chemin ne corrige rien.
-  Vérifier que le chemin de production atteint bien le code modifié.
-
-VERROU — prouver que le test tient
-- Un test qui passe du premier coup n'est PAS un verrou. Pour chaque correction d'invariant moteur :
-  remettre le défaut, vérifier que le test devient ROUGE, rétablir, et le rapporter.
-  Sans cette preuve, considérer le test comme absent. (Inutile sur du parsing/formatage trivial.)
-- VERT VACANT : un contrôle qui ne regarde rien affiche « tout va bien ». Vérifier que l'échantillon
-  produit vraiment des données, que l'énumération rend des éléments, que la mutation est appliquée.
-  Symétrique déjà vécu : un contrôle qui regarde la MAUVAISE chose (ancre vs par-figurine).
-- Un test doit CONSTRUIRE la situation qu'il observe — jamais l'espérer d'une graine aléatoire,
-  d'un ordre d'exécution ou de l'absence d'une configuration.
-
-COUVERTURE — toute feature touchée est couverte par un test automatisé
-- Ajouter ou modifier un comportement OBLIGE à écrire/étendre son test dans la MÊME livraison.
-  Ce test entre au périmètre de clôture (T2) : ni validation ni STOP à demander.
-- LE HARNAIS SUIT LE CODE TOUCHÉ, il ne se choisit pas : Python → pytest (`tests/unit/...`,
-  `tests/integration/...`), noté `fichier::test` ; frontend TS/TSX → vitest (`*.test.ts(x)` à côté
-  du module, `cd frontend && npx vitest run <fichier>`), noté `fichier > nom du test`. Un tour qui
-  ne touche que le front satisfait la règle en vitest, jamais en inventant une référence pytest.
-- Toute feature RENCONTRÉE pendant le travail sans test se traite ainsi :
-  * elle touche le code modifié (même fonction, même invariant, même jumeau) → le test s'écrit
-    MAINTENANT, comme le reste du périmètre de clôture ;
-  * elle est SANS LIEN avec la modification → interdit de l'écrire (ASK 5, et T2 « n'entre jamais
-    tant qu'on y est ») : elle se SIGNALE au rapport et prend son prompt en PROMPTS.
-- Le rapport de clôture liste en COUVERTURE les trous vus non couverts — pas les tests écrits.
-  Un trou vu et tu est une régression au même titre qu'un document rendu faux par sa livraison.
-- « Validé via --step / le PvP / l'analyzer / le navigateur / un script jetable » ne remplace pas
-  un test du harnais : ce n'est pas rejouable, donc ça ne verrouille rien (cf. VERROU ci-dessus).
-
-RENDRE COMPTE — borner le verdict
-- Dire ce qui a été VÉRIFIÉ et ce qui n'a PAS pu l'être. « non exploré » n'est pas « sain » :
-  un verdict non borné est ce qui masque les défauts le plus longtemps.
-- Ne JAMAIS affirmer avoir exécuté ce qui n'a pas été exécuté.
-- Une suppression ne laisse une trace dans le code QUE si elle est contre-intuitive (un contrôle
-  retiré sciemment, une branche condamnée) : dire pourquoi et vers quoi se tourner. Sinon git suffit
-  — pas de commentaire-tombeau.
-
-=== FORMAT DE MISE À JOUR OBLIGATOIRE (TOUS MODES) ===
-
-Après chaque modification :
-1. Indiquer le fichier modifié avec un lien cliquable : [nom.py](file:///home/greg/40k/chemin/nom.py)
-2. Expliquer en une phrase ce qui a changé et pourquoi — sans montrer de code.
-
-Si plusieurs fichiers → STOP, lister, expliquer, attendre validation.
-EXCEPTION : les fichiers du périmètre de clôture (T2) se modifient sans STOP ni validation —
-ils apparaissent en RÉFS, chacun justifié par son critère d'entrée.
+  Il s'exécute au PROMPT SUIVANT. Si ce rappel arrive, le rapport manquant est celui du tour
+  d'AVANT : rends-le en tête de réponse, sans relancer aucun travail.
 
 === MODE AGENT/AUTO (ACTIVÉ PAR PROMPT EXPLICITE) ===
 
@@ -659,4 +585,3 @@ PÉRIMÈTRE AUTORISÉ :
 - Scripts : python3 ai/*, python3 scripts/*, python3 engine/*, python3 services/*
 - Lecture : grep, rg, find, wc, stat
 - Fichiers intouchables : ceux de WORKFLOW IA ci-dessus, sans exception de mode.
-
