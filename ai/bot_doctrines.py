@@ -635,15 +635,15 @@ class _DoctrineBot(_PlacementMemory):
         contributions: Optional[Dict[str, Any]] = None
         if w_crowd != 0.0:
             activation_key = (
-                game_state.get("episode_number"),
-                game_state.get("turn"),
-                game_state.get("phase"),
+                require_key(game_state, "episode_number"),
+                require_key(game_state, "turn"),
+                require_key(game_state, "phase"),
                 str(require_key(unit, "id")),
             )
             if self._contributions_cache_key != activation_key:
                 zones_tmp = objective_hex_sets(game_state)
-                self._contributions_cache_key = activation_key
                 self._contributions_cache_val = objective_control_contributions(game_state, zones_tmp)
+                self._contributions_cache_key = activation_key
             contributions = self._contributions_cache_val
         # La carte de distance est PONDEREE par qui tient quoi ET par ce que les allies couvrent
         # deja : c'est ici que le bot cesse d'aller betement vers la zone la plus proche, et qu'il
