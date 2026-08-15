@@ -40,7 +40,11 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from shared.data_validation import require_key
 from engine.combat_utils import expected_dice_value
-from engine.phase_handlers.attack_sequence import ANTI_RULE_IDS, ANTI_RULE_PREFIX
+from engine.phase_handlers.attack_sequence import (
+    ANTI_RULE_IDS,
+    ANTI_RULE_PREFIX,
+    anti_threshold_of,
+)
 from engine.utils.weapon_helpers import weapon_has_rule, weapon_rule_parameter
 
 
@@ -294,12 +298,9 @@ def anti_rule_of(weapon: Dict[str, Any]) -> Tuple[int, Optional[str]]:
     for rule_id in ANTI_RULE_IDS:
         if not weapon_has_rule(weapon, rule_id):
             continue
-        threshold = weapon_rule_parameter(weapon, rule_id)
-        if threshold is None:
-            raise ValueError(
-                f"[ANTI] rule {rule_id!r} without its Y+ parameter on weapon "
-                f"{weapon.get('display_name')!r}"
-            )
+        # JUMEAU de `_anti_crit_wound_threshold` : MEME lecture, MEME domaine (Y+ >= 2, 05.02).
+        # Deux lectures separees du meme parametre, c est le motif d echec n°1 de ce depot.
+        threshold = anti_threshold_of(weapon, rule_id)
         if best_threshold is None or threshold < best_threshold:
             best_threshold = threshold
             best_keyword = rule_id[len(ANTI_RULE_PREFIX):]

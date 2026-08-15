@@ -60,6 +60,37 @@ def test_parse_weapon_rule_validates_parameter_presence_and_format(tmp_path: Pat
         rules.parse_weapon_rule("RAPID_FIRE:0", registry)
 
 
+def test_parse_weapon_rule_refuse_un_seuil_anti_sous_2(tmp_path: Path) -> None:
+    """[ANTI-X Y+] 24.03 : `Y+` est un seuil de jet de BLESSURE, donc >= 2 (05.02, un 1 non
+    modifie rate toujours). `1+` passait le controle « entier > 0 » et donnait
+    `crit_wound_on = 1` — CHAQUE de devenait une blessure critique reussie.
+
+    Le refus doit tomber AU CHARGEMENT de l'armurerie : le seul controle qui existait avant se
+    trouvait dans le formateur de `step.log`, sous le `except Exception` de `log_action`, et se
+    manifestait donc en lignes d'attaque MANQUANTES au lieu d'une erreur.
+
+    Le HAUT reste ouvert : un `7+` est une armurerie fautive, mais elle est ecrivable et le
+    journal doit l'exposer telle quelle plutot que de la lisser.
+    """
+    rules_file = _write_rules_file(
+        tmp_path,
+        {
+            "ANTI_INFANTRY": {"name": "Anti-Infantry", "description": "Y+", "has_parameter": True},
+            "RAPID_FIRE": {"name": "Rapid Fire", "description": "X", "has_parameter": True},
+        },
+    )
+    registry = rules.WeaponRulesRegistry(str(rules_file))
+
+    with pytest.raises(ConfigurationError, match=r"\[ANTI\] threshold must be >= 2"):
+        rules.parse_weapon_rule("ANTI_INFANTRY:1", registry)
+
+    # Les bornes qui doivent RESTER acceptees : le minimum jouable, et le Y+ hors norme.
+    assert rules.parse_weapon_rule("ANTI_INFANTRY:2", registry).parameter == 2
+    assert rules.parse_weapon_rule("ANTI_INFANTRY:7", registry).parameter == 7
+    # Le domaine est propre a [ANTI] : les autres regles parametrees gardent « entier > 0 ».
+    assert rules.parse_weapon_rule("RAPID_FIRE:1", registry).parameter == 1
+
+
 def test_validate_weapon_rules_field_enforces_array_and_required_key(tmp_path: Path) -> None:
     rules_file = _write_rules_file(
         tmp_path,

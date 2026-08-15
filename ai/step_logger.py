@@ -28,7 +28,7 @@ __all__ = ['StepLogger', 'LOG_GRAMMAR_VERSION']
 #:   1 — grammaire d avant le 2026-08-12 : aucune ligne ne nomme la figurine cible allouee.
 #:   2 — `[ALLOC_MODEL: <mid>]` sur toute attaque parvenue a l allocation (tir ET melee).
 #:   3 — TOUTE regle d arme de `config/weapon_rules.json` qui a joue est NOMMEE sur la ligne.
-#:       Sept y sont entrees d un bloc le 2026-08-12 ([TORRENT], [LETHAL HITS], [IGNORES COVER],
+#:       Six y sont entrees d un bloc le 2026-08-12 ([TORRENT], [LETHAL HITS], [IGNORES COVER],
 #:       [EXTRA ATTACKS], [ANTI-X:Y+], [PSYCHIC] et, en melee comme au tir, leurs jumeaux) ;
 #:       INDIRECT_FIRE reste hors du journal parce qu elle n est pas implementee dans le moteur
 #:       — un token pour elle annoncerait un effet qui n a pas lieu. C est ce qui rend un
@@ -137,6 +137,13 @@ def _anti_rule_token(details) -> str:
     l armurerie. Ecrire le chiffre du moteur reviendrait a lui faire verifier le moteur avec sa
     propre reponse — un vert vacant, exactement ce que la grammaire `[REGLE:X]` existe pour
     empecher (cf. `_additive_rule_tokens`).
+
+    Le DOMAINE du seuil (Y+ >= 2, 05.02) appartient a `attack_sequence.anti_threshold_of`, qui
+    le refuse a l entree du moteur. Le controle ci-dessous n est donc plus le premier a voir une
+    armurerie fautive — il ne l aurait pas SIGNALEE : `log_action` avale toute exception du
+    formateur, et la ligne d attaque disparaissait au lieu de lever. Il reste ici parce qu il
+    verrouille le CONTRAT du token (ce fichier ne doit jamais ecrire `[ANTI-X:1+]`), pas la
+    donnee.
     """
     anti_keyword = details.get("anti_keyword")
     if anti_keyword is None:

@@ -23,6 +23,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from shared.data_validation import require_key
 from engine.utils.weapon_helpers import weapon_has_rule, weapon_rule_parameter
+from engine.weapons.rules import MIN_ANTI_THRESHOLD
 
 
 # 05.01 / 05.02 : un jet NON MODIFIE de 6 est critique, un jet non modifie de 1 echoue toujours.
@@ -34,6 +35,44 @@ NATURAL_FAIL_ROLL = 1
 # est le KEYWORD que la cible doit avoir pour que la regle s applique.
 ANTI_RULE_PREFIX = "ANTI_"
 ANTI_RULE_IDS = ("ANTI_INFANTRY", "ANTI_VEHICLE", "ANTI_FLY", "ANTI_PSYKER", "ANTI_MONSTER")
+
+#: 05.02 : `MIN_ANTI_THRESHOLD` vaut `NATURAL_FAIL_ROLL + 1` — la meme regle, dite deux fois si on
+#: la reecrivait ici. Elle est DEFINIE avec la grammaire de declaration (`engine/weapons/rules`),
+#: qui la fait respecter au chargement de l armurerie, et importee ici pour que la resolution et
+#: le chargement ne puissent pas diverger.
+assert MIN_ANTI_THRESHOLD == NATURAL_FAIL_ROLL + 1
+
+
+def anti_threshold_of(weapon: Dict[str, Any], rule_id: str) -> int:
+    """Seuil Y+ DECLARE par l instance `rule_id` de [ANTI-X Y+] 24.03, valide en DOMAINE.
+
+    SEUL point de lecture du parametre Y d une regle [ANTI], pour les deux chemins qui en ont
+    besoin : la resolution d attaque (`_anti_crit_wound_threshold`) et l observation
+    (`observation_weapon_profiles.anti_rule_of`).
+
+    DEUXIEME barriere, pas la premiere : `parse_weapon_rule` refuse deja le domaine au
+    CHARGEMENT de l armurerie. Celle-ci couvre les dicts d arme qui n en viennent pas (charge
+    API, fixtures), et elle est la derniere avant l usage.
+
+    Ce qui ne peut PLUS etre la seule barriere : `ai/step_logger._anti_rule_token`. Il refuse le
+    meme domaine, mais s execute dans `StepLogger.log_action`, dont le `except Exception` global
+    transforme le refus en ligne MANQUANTE — une armurerie declarant `ANTI_INFANTRY:1` faisait
+    disparaitre du step.log toutes les attaques de cette arme, sans `parse_errors` cote analyzer
+    puisque la ligne n avait jamais existe.
+    """
+    threshold = weapon_rule_parameter(weapon, rule_id)
+    if threshold is None:
+        raise ValueError(
+            f"[ANTI] rule {rule_id!r} sans parametre Y+ sur l arme "
+            f"{weapon.get('display_name', weapon.get('NAME'))!r}"
+        )
+    if threshold < MIN_ANTI_THRESHOLD:
+        raise ValueError(
+            f"[ANTI] rule {rule_id!r}: seuil Y+ declare {threshold}, minimum "
+            f"{MIN_ANTI_THRESHOLD} (05.02) — arme "
+            f"{weapon.get('display_name', weapon.get('NAME'))!r}"
+        )
+    return threshold
 
 
 @dataclass(frozen=True)
@@ -138,9 +177,7 @@ def _anti_crit_wound_threshold(
         keyword = rule_id[len(ANTI_RULE_PREFIX):]
         if keyword not in target_keywords:
             continue
-        threshold = weapon_rule_parameter(weapon, rule_id)
-        if threshold is None:
-            raise ValueError(f"[ANTI] rule {rule_id!r} sans parametre Y+ sur l arme {weapon!r}")
+        threshold = anti_threshold_of(weapon, rule_id)
         if best is None or threshold < best[0]:
             best = (threshold, keyword)
     return best

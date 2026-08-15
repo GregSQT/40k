@@ -194,7 +194,7 @@ Elle ignore **toutes** les règles rendues vives par P1 le 2026-07-26 : [ANTI-X]
 critique abaissé), [DEVASTATING WOUNDS], [SUSTAINED HITS], [LETHAL HITS], [TWIN-LINKED], [MELTA]
 (bonus de D à demi-portée), [CLEAVE], [PRECISION].
 
-Conséquence concrète : `urty_syringe` ([ANTI-INFANTRY 1+] + [EXTRA ATTACKS] + [PRECISION]) ne sera
+Conséquence concrète : `urty_syringe` ([ANTI-INFANTRY 2+] + [EXTRA ATTACKS] + [PRECISION]) ne sera
 jamais préférée contre de l'infanterie ; `relic_greataxe` ([DEVASTATING WOUNDS]) est jugée sur ses
 seules stats. **P1 a rendu cette heuristique fausse** — c'est une dette créée par la tranche
 précédente, pas une dette héritée.
