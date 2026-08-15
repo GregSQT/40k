@@ -62,8 +62,31 @@ class _FakeClock:
         return self.now
 
 
+class _CapturedStdout:
+    """Doublure de `sys.stdout` : la barre s'y ecrit en place, ou casse comme un pipe rompu.
+
+    La capture porte sur `sys.stdout` et non sur `builtins.print` : depuis l'extraction du writer
+    partage (shared/progress_writer.py), la barre s'ecrit par `sys.stdout.write`, et une capture
+    de `print` ne verrait plus rien — c'est-a-dire qu'elle rendrait ces tests verts sans regarder
+    quoi que ce soit.
+    """
+
+    def __init__(self, broken: bool = False) -> None:
+        self.lines: list[str] = []
+        self._broken = broken
+
+    def write(self, text: str) -> None:
+        self.lines.append(text)
+        if self._broken:
+            raise BrokenPipeError("sortie fermee (`| head`)")
+
+    def flush(self) -> None:
+        pass
+
+
 def _install(monkeypatch, n_envs: int, steps_per_episode: int, episodes_per_slot: int,
-             global_episode_offset: int = 0, gate_display_state=None):
+             global_episode_offset: int = 0, gate_display_state=None,
+             broken_stdout: bool = False):
     """Pose l'horloge factice, le callback et la capture de stdout. Rend (clock, cb, printed).
 
     `global_episode_offset` simule la rotation de scenarios : le callback du chunk courant
@@ -86,12 +109,9 @@ def _install(monkeypatch, n_envs: int, steps_per_episode: int, episodes_per_slot
     # `_on_training_start` fixe start_time sur l'horloge factice, AVANT le premier pas.
     callback._on_training_start()
 
-    printed: list[str] = []
-    monkeypatch.setattr(
-        "builtins.print",
-        lambda *a, **k: printed.append(a[0] if a else ""),
-    )
-    return clock, callback, printed
+    stdout = _CapturedStdout(broken=broken_stdout)
+    monkeypatch.setattr(sys, "stdout", stdout)
+    return clock, callback, stdout.lines
 
 
 def _drive(monkeypatch, n_envs: int, steps_per_episode: int, step_seconds,
@@ -572,3 +592,28 @@ def test_min_et_max_encadrent_des_durees_reellement_differentes(monkeypatch):
     assert minimum == pytest.approx(0.01 * steps_per_episode / n_envs, abs=5e-4)
     assert maximum == pytest.approx(0.04 * steps_per_episode / n_envs, abs=5e-4)
     assert minimum < maximum, "min et max ne doivent pas etre le meme compteur"
+
+
+def test_une_sortie_cassee_n_arrete_pas_l_entrainement(monkeypatch):
+    """`python3 ai/train.py ... | head -50` ne doit pas tuer le run a la 50e ligne.
+
+    `head` ferme le pipe des qu'il a ses lignes ; l'ecriture suivante de la barre leve
+    BrokenPipeError. Cette exception d'affichage remontait hors du callback SB3 et arretait la
+    boucle d'entrainement — soit, sur un run de 47 h, tout le reste du run.
+
+    Le test passe par le VRAI chemin de production (`_on_step`), pas par un appel direct au
+    writer : c'est la seule facon de verifier que la barre l'utilise reellement.
+    """
+    n_envs, steps_per_episode, episodes_per_slot = 1, 1, 3
+    clock, callback, printed = _install(monkeypatch, n_envs, steps_per_episode,
+                                        episodes_per_slot, broken_stdout=True)
+
+    for _ in range(episodes_per_slot):
+        clock.advance(0.01)
+        callback.locals = {"dones": [True]}
+        assert callback._on_step() is True, "la boucle doit continuer malgre l'affichage casse"
+
+    assert len(printed) == 1, (
+        "une seule tentative d'ecriture : l'affichage se desactive au 1er echec au lieu de "
+        f"retenter a chaque episode ({len(printed)} tentatives)"
+    )

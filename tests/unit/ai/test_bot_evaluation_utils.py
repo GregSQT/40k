@@ -311,6 +311,10 @@ def test_eval_worker_task_counts_outcomes_and_reports_progress(monkeypatch: pyte
     assert sum(b["wins"] for b in result["seat_stats"].values()) == result["wins"]
 
 
+# La barre d'avancement de l'eval n'est plus ecrite ici : elle passe par le writer partage avec
+# la barre d'entrainement (tests/unit/shared/test_progress_writer.py).
+
+
 def test_eval_worker_task_requires_worker_init() -> None:
     be._worker_model = None
     with pytest.raises(RuntimeError, match=r"Worker not initialized"):
@@ -536,14 +540,18 @@ def _eval_task(bot_name: str, n_episodes: int) -> dict:
     }
 
 
+def _done_payload(bot_name: str, wins: int) -> dict:
+    """Resultat rendu par un worker qui a fini : la forme que la collecte fait suivre telle quelle."""
+    return {
+        "wins": wins, "losses": 0, "draws": 0, "failed_episodes": 0,
+        "bot_name": bot_name, "scenario_name": "training_bot-1",
+    }
+
+
 def test_collect_parallel_results_with_timeouts_aborts_pool_on_hung_task(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    done_payload = {
-        "wins": 1, "losses": 0, "draws": 0, "failed_episodes": 0,
-        "bot_name": "random", "scenario_name": "training_bot-1",
-    }
-    done_future, hung_future = _FakeFuture(done_payload), _FakeFuture()
+    done_future, hung_future = _FakeFuture(_done_payload("random", 1)), _FakeFuture()
     pool = _FakePool([done_future, hung_future])
     tasks = [_eval_task("random", 1), _eval_task("greedy", 3)]
 
@@ -575,11 +583,7 @@ def test_collect_parallel_results_arms_each_deadline_at_its_own_submission(
     donc annule la mesure finale apres des heures d'entrainement. Ici la 2e task demarre a
     t=100 s avec un timeout de 1 s : elle n'expire que si son chrono est celui du pool.
     """
-    payloads = [
-        {"wins": 2, "losses": 0, "draws": 0, "failed_episodes": 0,
-         "bot_name": bot, "scenario_name": "training_bot-1"}
-        for bot in ("random", "greedy")
-    ]
+    payloads = [_done_payload(bot, 2) for bot in ("random", "greedy")]
     first, second = _FakeFuture(payloads[0]), _FakeFuture(payloads[1])
     pool = _FakePool([first, second])
     tasks = [_eval_task("random", 2), _eval_task("greedy", 2)]
@@ -626,6 +630,50 @@ def test_collect_parallel_results_reports_tasks_never_submitted_on_abort(
     assert pool.submitted == [tasks[0]], "la 2e task n'a jamais ete soumise"
     assert all(r["timeout"] is True for r in out)
     assert sum(r["failed_episodes"] for r in out) == 8, "les 3 + 5 episodes sont comptes perdus"
+
+
+def test_collect_parallel_results_on_result_called_on_done_timeout_and_abandoned(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """on_result est appelé exactement une fois par résultat sur chacun des 3 chemins.
+
+    Chemins couverts, dans `_collect_parallel_results_with_timeouts` :
+    - done      : boucle `for future in done`
+    - timeout   : boucle `for future in not_done`, deadline depassee
+    - abandoned : boucle sur `abandoned`, apres force-terminate du pool
+
+    Un site oublie ne fait rougir aucun autre test : la barre d'avancement se contente alors de
+    sous-compter, sans que ni le score ni le nombre d'episodes ne bougent.
+    """
+    done_future, hung_future = _FakeFuture(_done_payload("random", 1)), _FakeFuture()
+    pool = _FakePool([done_future, hung_future])
+    # 3 tasks : random (done), greedy (timeout), defensive (jamais soumise → abandoned).
+    tasks = [_eval_task("random", 1), _eval_task("greedy", 3), _eval_task("defensive", 2)]
+
+    collected: List[dict] = []
+    _stub_collect(
+        monkeypatch,
+        # max_in_flight=1 : random soumis seul, done en tour 1 ; greedy soumis en tour 2,
+        # expire (t=3 - t=1.5 = 1.5 > 1) ; defensive jamais soumise → abandoned.
+        waits=[({done_future}, set()), (set(), {hung_future})],
+        clock=[0.0, 0.5, 1.5, 3.0],
+    )
+    be._collect_parallel_results_with_timeouts(
+        pool=cast(ProcessPoolExecutor, pool),
+        tasks=tasks,
+        task_timeout_seconds=1,
+        max_in_flight=1,
+        on_result=collected.append,
+    )
+
+    assert len(collected) == 3, "on_result doit être appelé pour chaque résultat"
+    by_bot = {r["bot_name"]: r for r in collected}
+    assert "random" in by_bot, "chemin done manquant"
+    assert "greedy" in by_bot, "chemin timeout manquant"
+    assert "defensive" in by_bot, "chemin abandoned manquant"
+    assert by_bot["random"]["wins"] == 1
+    assert by_bot["greedy"]["timeout"] is True
+    assert by_bot["defensive"]["timeout"] is True
 
 
 def test_collect_parallel_results_with_timeouts_rejects_invalid_bounds() -> None:

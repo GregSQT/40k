@@ -31,6 +31,7 @@ from stable_baselines3.common.utils import ConstantSchedule
 from engine.episode_schedule import ramp_progress
 from shared.data_validation import require_key, require_positive_int, require_present
 from shared.json_atomic import write_json_atomic
+from shared.progress_writer import ProgressWriter
 from ai.model_artifacts import copy_model_with_companions, remove_model_with_companions
 from config_loader import get_config_loader
 
@@ -301,7 +302,10 @@ class EpisodeTerminationCallback(BaseCallback):
         self.last_display_time = None
         self.last_display_episode_count = None
         self.ema_alpha = 0.1  # Smoothing factor (higher = more weight on recent)
-        self._last_progress_line_len = 0
+        # Un writer PAR callback : le verrou d'echec d'affichage vaut pour ce run-la. En rotation
+        # de scenarios un callback neuf est construit a chaque chunk, et `gate_display_state` lui
+        # reporte la longueur de la derniere ligne affichee par le chunk precedent.
+        self._progress_writer = ProgressWriter(gate_display_state)
         self.max_episode_duration_seconds = 0.0
         # +inf et non 0.0 : un minimum initialise a zero resterait a zero pour toujours et
         # afficherait un ecart min/max flatteur sans qu'aucun episode ne l'ait justifie. La
@@ -672,22 +676,15 @@ class EpisodeTerminationCallback(BaseCallback):
                     f" [{time_info}] [{duration_display}] {gate_label}"
                     f"{robust_status_text}{roster_display}"
                 )
-                # CRITICAL: Read prev_len BEFORE overwriting — eval may have set a longer line
-                prev_len = self._last_progress_line_len
-                if self.gate_display_state is not None:
-                    if "last_progress_line_len" not in self.gate_display_state:
-                        self.gate_display_state["last_progress_line_len"] = 0
-                    prev_len = max(prev_len, int(require_key(self.gate_display_state, "last_progress_line_len")))
-                clear_padding = " " * max(0, prev_len - len(progress_line))
-                print(f"\r{progress_line}{clear_padding}", end='', flush=True)
-                self._last_progress_line_len = len(progress_line)
-                # Store training prefix and current len AFTER display (for next eval)
+                # L'effacement de la ligne precedente — que l'eval ait pris la main entre-temps ou
+                # non — et l'isolation d'une sortie cassee vivent dans le writer partage.
+                self._progress_writer.write(progress_line)
+                # Store training prefix AFTER display (for next eval)
                 if self.gate_display_state is not None:
                     self.gate_display_state["training_prefix"] = (
                         f"{global_progress_pct:3.0f}% {bar} {display_episode_count}/{display_total_episodes}"
                         f" [{time_info}] [{duration_display}] "
                     )
-                    self.gate_display_state["last_progress_line_len"] = len(progress_line)
 
         # CRITICAL: Stop when max episodes reached (unless disabled for rotation mode)
         if self.episode_count >= self.max_episodes:

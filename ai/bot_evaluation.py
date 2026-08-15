@@ -30,6 +30,7 @@ if TYPE_CHECKING:
 from shared.data_validation import require_key, require_present
 from shared.torch_safe_globals import register_torch_safe_globals
 from shared.json_atomic import write_json_atomic
+from shared.progress_writer import ProgressWriter
 from ai.scenario_scratch import make_scenario_scratch_dir
 
 # Avant tout `MaskablePPO.load` de ce module : torch >= 2.6 charge en `weights_only=True`.
@@ -1207,7 +1208,9 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
         eval_progress_label: Optional suffix displayed on evaluation progress line
         show_summary: Print diagnostic and scenario ranking summary at end
         eval_progress_prefix: Optional fixed prefix shown before eval progress (e.g., phase progress)
-        line_length_state: Optional dict to store last_progress_line_len for clean switch back to training
+        line_length_state: Optional dict partage avec la barre d'entrainement (ProgressWriter) :
+                           chaque barre y publie la longueur de la ligne affichee et y relit celle
+                           de l'autre, pour reprendre la main sans laisser trainer sa queue
 
     Returns:
         Dict with keys: 'random', 'greedy', 'defensive', 'combined',
@@ -1505,13 +1508,12 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
 
         total_episodes = len(active_bot_names) * n_episodes
         start_time = time.time() if show_progress else None
-        last_progress_line_len = 0
+        progress_writer = ProgressWriter(line_length_state)
 
         def _print_progress(completed_ep: int, total_ep: int) -> None:
             """Print progress bar during eval (overwrites line)."""
             if not show_progress or start_time is None:
                 return
-            nonlocal last_progress_line_len
             progress_pct = (completed_ep / total_ep) * 100 if total_ep > 0 else 0
             bar_length = bot_eval_bar_length
             filled = int(bar_length * completed_ep / total_ep) if total_ep > 0 else 0
@@ -1527,12 +1529,7 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                 line = f"{eval_progress_label}: {progress_pct:3.0f}% {bar} {completed_ep}/{total_ep} [{elapsed_str}, {speed_str}]"
             else:
                 line = f"{progress_pct:3.0f}% {bar} {completed_ep}/{total_ep} [{elapsed_str}, {speed_str}]"
-            clear_padding = " " * max(0, last_progress_line_len - len(line))
-            sys.stdout.write(f"\r{line}{clear_padding}")
-            sys.stdout.flush()
-            last_progress_line_len = len(line)
-            if line_length_state is not None:
-                line_length_state["last_progress_line_len"] = len(line)
+            progress_writer.write(line)
 
         if show_progress:
             _print_progress(0, total_episodes)
@@ -1755,12 +1752,7 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                 f"[Completed] [{elapsed_str}, {speed_str}]"
             )
             full_final_line = f"{eval_progress_prefix} {final_line}" if eval_progress_prefix else final_line
-        clear_padding_len = max(0, last_progress_line_len - len(full_final_line))
-        clear_padding = " " * clear_padding_len
-        sys.stdout.write(f"\r{full_final_line}{clear_padding}")
-        sys.stdout.flush()
-        if line_length_state is not None:
-            line_length_state["last_progress_line_len"] = len(full_final_line)
+        progress_writer.write(full_final_line)
 
     # total_failed_episodes déjà dans results ; ne pas faire planter tout l'éval (PLAN21)
 
