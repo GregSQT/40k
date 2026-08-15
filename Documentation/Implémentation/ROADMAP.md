@@ -383,6 +383,16 @@
   les deux sens, dérivation réelle (section, suffixe et nom de fichier inventés dans un
   `CLAUDE.md` fabriqué), sept formes de lecture partielle, et une ligne voisine qui cite un item
   sans être un repli. Chaque contrôle prouvé ROUGE par mutation.
+- ✅ **Livraison 2026-08-16 — `ANTI_INFANTRY:1` sur `urty_syringe` → 2, garde de domaine Y+≥2.**
+  `urty_syringe` (PainBoy Ork) déclarait `ANTI_INFANTRY:1`. 05.02 : un 1 naturel rate toujours,
+  donc le seuil 1 n'est pas « limite » mais impossible — le moteur en tirait `crit_wound_on = 1`
+  (blessure critique sur chaque dé, 1 naturel compris). De plus, `step_logger._anti_rule_token`
+  levait dans le `try/except` de `log_action` : toutes les lignes d'attaque de l'arme
+  disparaissaient de `step.log` sans `parse_errors` côté analyzer. Corrections : armurerie Ork
+  (`ANTI_INFANTRY:2`), `engine/weapons/rules.py` (`MIN_ANTI_THRESHOLD = 2`, refus au parse),
+  `engine/phase_handlers/attack_sequence.py` (`anti_threshold_of()`, deuxième barrière),
+  `engine/observation_weapon_profiles.py` (jumeau observation branché sur `anti_threshold_of`).
+  Balayage corpus toutes armureries + test rouge/vert `MIN_ANTI_THRESHOLD`.
 - **Conséquence immédiate : plus rien n'est gelé.** La consigne « ne rien lancer de cassant, aucun
   JSON de `config/` » tombe avec le run. Ce qui était différé à ce titre redevient faisable —
   notamment la `justification` d'`obs_size` (§5) et l'ajout d'un profil de validation P5 (§1 pt 6).

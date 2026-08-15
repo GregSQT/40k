@@ -18,6 +18,20 @@ from typing import Dict, List, Any, Optional
 from shared.data_validation import require_key, require_present, ConfigurationError
 
 
+#: Prefixe des regles [ANTI-X Y+] 24.03 dans `config/weapon_rules.json`. Derive du REGISTRE et
+#: non d'une liste recopiee ici : une famille [ANTI] ajoutee au catalogue est validee sans qu'on
+#: y pense. `attack_sequence.ANTI_RULE_PREFIX` porte la meme chaine cote resolution.
+ANTI_RULE_NAME_PREFIX = "ANTI_"
+
+#: Seuil Y+ minimal declarable par une regle [ANTI]. 05.02 : un jet de blessure non modifie de 1
+#: rate toujours, donc « blessure critique sur 1+ » n'existe pas — et le moteur en tirait
+#: `crit_wound_on = 1`, c'est-a-dire une blessure critique sur CHAQUE de, 1 naturel compris
+#: (mesure sur `urty_syringe`, corrigee le 2026-08-13). Le HAUT n'est volontairement pas borne :
+#: un Y+ > 6 est une armurerie fautive que le journal doit rendre LISIBLE (cf.
+#: `WeaponAttackProfile.anti_threshold`), alors qu'un Y+ < 2 n'est pas ecrivable du tout.
+MIN_ANTI_THRESHOLD = 2
+
+
 class WeaponRulesRegistry:
     """
     Registry of all available weapon rules loaded from config/weapon_rules.json.
@@ -184,7 +198,18 @@ def parse_weapon_rule(rule_string: str, registry: WeaponRulesRegistry) -> Parsed
                 f"Invalid weapon rule parameter in '{rule_string}': "
                 f"parameter must be positive, got {parameter}"
             )
-    
+
+        # DOMAINE par famille de regle, quand il est plus etroit que « entier > 0 ». C'est le
+        # fail-fast au CHARGEMENT de l'armurerie : une datasheet fautive doit lever ici, la ou
+        # elle entre, et pas au premier combat qui la resout — encore moins au formateur de
+        # journal, dont `StepLogger.log_action` avale les exceptions (la ligne d'attaque
+        # disparaissait alors du step.log sans laisser d'erreur).
+        if rule_name.upper().startswith(ANTI_RULE_NAME_PREFIX) and parameter < MIN_ANTI_THRESHOLD:
+            raise ConfigurationError(
+                f"Invalid weapon rule parameter in '{rule_string}': [ANTI] threshold must be "
+                f">= {MIN_ANTI_THRESHOLD} (05.02, an unmodified 1 always fails), got {parameter}"
+            )
+
     # Validate rule exists in registry
     rule_def = registry.get_rule(rule_name)
     

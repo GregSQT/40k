@@ -139,3 +139,60 @@ def test_parsed_weapon_rule_never_survives_into_weapon_dicts() -> None:
                 f"{code}: entree WEAPON_RULES de type {type(entry).__name__}, attendu str"
             )
         assert not any(isinstance(v, ParsedWeaponRule) for v in weapon.values())
+
+
+def test_aucune_armurerie_ne_declare_un_seuil_anti_illegal() -> None:
+    """BALAYAGE DE CORPUS : tout `[ANTI-X Y+]` des armureries a un Y+ jouable (>= 2, 05.02).
+
+    Le garde de `attack_sequence.anti_threshold_of` ne se declenche que sur l'arme REELLEMENT
+    resolue pendant une partie : une coquille dans une faction peu jouee attendrait le combat
+    qui la fait sortir. Ce balayage la trouve au commit.
+
+    Ce n'est pas theorique — `urty_syringe` (PainBoy ork) declarait `ANTI_INFANTRY:1`, ce qui
+    donnait `crit_wound_on = min(6, 1) = 1` : CHAQUE jet de blessure, 1 naturel compris, etait
+    une blessure critique reussie contre de l'infanterie, et la ligne d'attaque disparaissait
+    du `step.log` (le formateur levait, `log_action` avalait). Corrige a 2+ dans la meme
+    livraison.
+
+    Les factions sont ENUMEREES depuis le disque, jamais listees en dur : une faction ajoutee
+    sans etre inscrite dans le test serait un trou muet, exactement le mode d'echec vise.
+    """
+    from engine.phase_handlers.attack_sequence import ANTI_RULE_IDS, anti_threshold_of
+    from engine.utils.weapon_helpers import _iter_weapon_rules, weapon_has_rule
+    from engine.weapons import get_armory_parser
+
+    roster_dir = Path(__file__).resolve().parents[3] / "frontend" / "src" / "roster"
+    factions = sorted(path.parent.name for path in roster_dir.glob("*/armory.ts"))
+    assert factions, f"aucune armurerie trouvee sous {roster_dir} : le test ne prouverait rien"
+
+    parser = get_armory_parser()
+    declarations = 0
+    parametres = 0
+    for faction in factions:
+        armory = parser.get_armory(faction)
+        assert armory, f"armurerie {faction} vide : le balayage ne prouverait rien"
+        for code, weapon in armory.items():
+            for rule_id in ANTI_RULE_IDS:
+                if not weapon_has_rule(weapon, rule_id):
+                    continue
+                declarations += 1
+                anti_threshold_of(weapon, rule_id)
+            # MEME CLASSE DE DEFAUT, meme balayage : [RAPID FIRE:X], [SUSTAINED HITS:X],
+            # [MELTA:X], [BLAST:X], [CLEAVE:X] sont refuses a <= 0 par le formateur de journal
+            # (`step_logger._additive_rule_tokens`) — donc, la aussi, dans le `except` de
+            # `log_action`. Un `BLAST:0` mangerait les lignes en silence exactement comme
+            # `ANTI_INFANTRY:1` le faisait. Le corpus est la seule barriere avant le run.
+            for name, param in _iter_weapon_rules(weapon):
+                if not param:
+                    continue  # forme NUE ([BLAST]), legale : 24.05
+                parametres += 1
+                assert param.lstrip("-").isdigit() and int(param) > 0, (
+                    f"{faction}/{code} : parametre non entier ou <= 0 sur {name}:{param}"
+                )
+
+    # VERT VACANT : un balayage qui ne rencontre aucune declaration [ANTI] passe au vert sans
+    # rien avoir regarde. Le corpus en porte plusieurs, dans plusieurs factions.
+    assert declarations >= 5 and parametres >= 15, (
+        f"seulement {declarations} declaration(s) [ANTI] et {parametres} parametre(s) "
+        f"balayes sur {len(factions)} factions — le corpus ou l'enumeration a change"
+    )

@@ -3,7 +3,7 @@
 Avant cette tranche, le roller de melee ne lisait AUCUNE regle d arme (zero occurrence de
 WEAPON_RULES dans fight_handlers) : `relic_greataxe` et `thunder_hammer_terminator`
 declarent pourtant [DEVASTATING WOUNDS], `eviscerator` [SUSTAINED HITS 1], `urty_syringe`
-[ANTI-INFANTRY 1+]. Ces tests verrouillent le CABLAGE (appelant -> socle), pas le socle
+[ANTI-INFANTRY 2+]. Ces tests verrouillent le CABLAGE (appelant -> socle), pas le socle
 lui-meme (couvert par test_weapon_rules_attack_sequence.py).
 """
 import random

@@ -1201,6 +1201,33 @@ def test_un_profil_anti_a_moitie_rempli_est_refuse():
         WeaponAttackProfile(anti_keyword="INFANTRY")
 
 
+def test_un_seuil_anti_sous_2_leve_a_l_entree_du_moteur():
+    """05.02 : un jet de blessure non modifié de 1 rate TOUJOURS, donc `ANTI_INFANTRY:1` n'est
+    pas une armurerie « limite », c'est une donnée impossible.
+
+    Le seuil est refusé à la RÉSOLUTION, pas au formateur de journal. `step_logger` refuse déjà
+    le même domaine, mais il tourne dans le `except Exception` de `log_action` : une arme
+    déclarant `ANTI_INFANTRY:1` voyait TOUTES ses lignes d'attaque disparaître de `step.log`,
+    sans `parse_errors` côté analyzer puisque la ligne n'avait jamais existé — un sous-comptage
+    silencieux, le mode d'échec le plus long à voir.
+
+    Le HAUT reste non borné (cf. le `7+` du test ci-dessus) : là, le journal doit exposer
+    l'armurerie fautive, il peut l'écrire. `1+` n'est pas écrivable du tout.
+    """
+    from engine.observation_weapon_profiles import anti_rule_of
+    from engine.phase_handlers.attack_sequence import build_weapon_attack_profile
+
+    weapon = {"WEAPON_RULES": ["ANTI_INFANTRY:1"], "display_name": WEAPON_NAME}
+
+    with pytest.raises(ValueError, match="minimum 2"):
+        build_weapon_attack_profile(weapon, {"unit_keywords": ["INFANTRY"]})
+
+    # JUMEAU : l'observation lit le MÊME paramètre par le MÊME site. Une seule des deux lectures
+    # gardée, et la donnée impossible entrait quand même dans le vecteur d'observation.
+    with pytest.raises(ValueError, match="minimum 2"):
+        anti_rule_of(weapon)
+
+
 @pytest.mark.parametrize("melee", [False, True], ids=["tir", "melee"])
 def test_l_analyzer_accepte_les_lignes_porteuses_des_six_tokens(monkeypatch, tmp_path, melee):
     """CONTRÔLE DE MASSE — un token que personne ne lit ne se livre pas.

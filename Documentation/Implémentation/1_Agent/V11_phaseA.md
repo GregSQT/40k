@@ -337,7 +337,7 @@ et c'est ainsi qu'elle a été traitée. Ce qui a été fait, point par point :
 d'arme (zéro occurrence de `WEAPON_RULES` dans `fight_handlers.py`). Les 6 règles portées le
 2026-07-25 étaient donc tir-only, alors que `relic_greataxe` et `thunder_hammer_terminator`
 déclarent [DEVASTATING WOUNDS], `eviscerator` [SUSTAINED HITS 1], `urty_syringe`
-[ANTI-INFANTRY 1+] + [EXTRA ATTACKS] + [PRECISION].
+[ANTI-INFANTRY 2+] + [EXTRA ATTACKS] + [PRECISION].
 
 Plutôt que d'écrire dix règles deux fois, la boucle de jets est désormais **unique** :
 `engine/phase_handlers/attack_sequence.py`, consommée par les deux rollers. Y vivent la notion
