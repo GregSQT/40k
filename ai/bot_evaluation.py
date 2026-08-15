@@ -1058,6 +1058,7 @@ def _collect_parallel_results_with_timeouts(
     tasks: List[Dict[str, Any]],
     task_timeout_seconds: int,
     max_in_flight: int,
+    on_result: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> List[Dict[str, Any]]:
     """
     Collect parallel eval results with per-task deadline enforcement.
@@ -1110,15 +1111,18 @@ def _collect_parallel_results_with_timeouts(
             # Already done -> timeout=0 is safe and non-blocking.
             result = _get_result_with_timeout(future, task, timeout_seconds=0)
             results_list.append(result)
+            if on_result is not None:
+                on_result(result)
 
         # Enforce per-task timeout on still-running tasks.
         timed_out_futures: List[Any] = []
         for future in not_done:
             if now - require_key(task_start_times, future) >= task_timeout_seconds:
                 task = require_key(future_to_task, future)
-                results_list.append(
-                    _failed_task_result(task, _scenario_name_from_task(task), timeout=True)
-                )
+                timeout_result = _failed_task_result(task, _scenario_name_from_task(task), timeout=True)
+                results_list.append(timeout_result)
+                if on_result is not None:
+                    on_result(timeout_result)
                 timed_out_futures.append(future)
                 must_abort_pool = True
 
@@ -1140,9 +1144,10 @@ def _collect_parallel_results_with_timeouts(
         # calcule sur un denominateur tronque.
         abandoned = [require_key(future_to_task, f) for f in pending] + list(queued)
         for task in abandoned:
-            results_list.append(
-                _failed_task_result(task, _scenario_name_from_task(task), timeout=True)
-            )
+            abandoned_result = _failed_task_result(task, _scenario_name_from_task(task), timeout=True)
+            results_list.append(abandoned_result)
+            if on_result is not None:
+                on_result(abandoned_result)
     return results_list
 
 
@@ -1534,6 +1539,17 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
 
         if use_subprocess and n_workers > 1:
             ctx = mp.get_context("spawn")
+            _parallel_completed = [0]
+
+            def _on_task_result(result: Dict[str, Any]) -> None:
+                _parallel_completed[0] += (
+                    int(require_key(result, "wins"))
+                    + int(require_key(result, "losses"))
+                    + int(require_key(result, "draws"))
+                    + int(require_key(result, "failed_episodes"))
+                )
+                _print_progress(min(_parallel_completed[0], total_episodes), total_episodes)
+
             with ProcessPoolExecutor(
                 max_workers=n_workers,
                 mp_context=ctx,
@@ -1545,16 +1561,8 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                     tasks=tasks,
                     task_timeout_seconds=int(task_timeout_seconds),
                     max_in_flight=n_workers,
+                    on_result=_on_task_result if show_progress else None,
                 )
-                completed_episodes = 0
-                for result in results_list:
-                    completed_episodes += (
-                        int(require_key(result, "wins"))
-                        + int(require_key(result, "losses"))
-                        + int(require_key(result, "draws"))
-                        + int(require_key(result, "failed_episodes"))
-                    )
-                    _print_progress(min(completed_episodes, total_episodes), total_episodes)
         else:
             _eval_worker_init(*initargs)
             results_list = []

@@ -618,6 +618,15 @@ Prêt à démarrer, conception close, aucun arbitrage en attente :
   ⇒ le CURRICULUM ne l'expose pas ; faute partout avec défaite partout ⇒ ni l'un ni l'autre, c'est
   un défaut de niveau. **Un seul levier par run** (décision §3 pt 5 du chantier panel : mêler
   récompense et adversaires rend les effets indémêlables).
+  🟢 **CORRECTIONS D'AUDIT 2026-08-15, validées et intégrées au doc** : (1) la persistance de cible
+  est une **règle de conservation** à échelle déclarée par critère (`gap ≤ p × échelle`) — la forme
+  « bonus × étalement » initialement retenue était mathématiquement **INERTE** pour `p < 1`
+  (démonstration Bot_refactor §2.5 ; verrou = test de bascule à DEUX candidats, le cas fréquent de
+  fin de partie) ; (2) `tactical` entre à `0.0` dans `bot_eval_weights` de `x1_new_bots` — sans lui
+  le témoin scellé ne produit AUCUN chiffre sur le profil actif — pour **+1 600 ép. par run de
+  50 000** (en sus des +4 800 des benchmarks) ; (3) les transformations d'état sont **conscientes
+  du signe** : `protect_lead` renforce l'évitement d'`endgame` (`w_enemy` −0,35) au lieu de
+  l'affaiblir.
   🔴 **Deux postulats de la proposition d'origine étaient contredits par des mesures déjà faites** :
   le seuil `benchmark_floor >= 80 %` (au-dessus du `combined = 0,7433` actuel — la porte ne
   s'ouvrirait jamais ; le seuil se pose APRÈS la première mesure), et le gating par un holdout non
@@ -634,7 +643,9 @@ Prêt à démarrer, conception close, aucun arbitrage en attente :
   Prérequis d'exécution : `x1_selfplay`, **livré mais jamais exécuté** (§1 pt 8).
   ⚠️ Ce doc est à la RACINE et non dans `A_faire/` — chemin demandé explicitement ; 3ᵉ exception,
   même cas que `Security.md` ci-dessus.
-  → [`Bot_refactor.md`](Bot_refactor.md) §0bis (décisions datées) et §7 (l'arbitrage restant)
+  → [`Bot_refactor.md`](Bot_refactor.md) §0bis (décisions datées) et §7 (aucun arbitrage ouvert ;
+  reste : écrire la tranche 1, mesurer le premier `benchmark_floor` qui pose le seuil, chantier
+  récompense distinct, calendrier de la tranche 3)
 
 Prêts à démarrer sans décision produit :
 - ⬜ **Le chemin LoS refait à chaque survol ce que le chantier des aplatissements a sorti du chemin
