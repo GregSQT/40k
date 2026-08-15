@@ -731,6 +731,43 @@ def _episode_seed(base_seed: int, bot_name: str, scenario_idx: int, ep_idx: int)
     return (base_seed + h) % (2**31)
 
 
+def _torch_compile_eval_extractor(model) -> None:
+    """torch.compile(mode='reduce-overhead') sur le features_extractor CPU.
+
+    Payé une fois dans _eval_worker_init ; amortit sur les 22 500 steps d'une task d'eval
+    finale (150 épisodes × ~150 steps). Gain mesuré ~3× sur le seul extracteur.
+    CPU uniquement : CUDA passe par _apply_torch_compile dans train.py.
+    Aucun effet si le modèle n'a pas de features_extractor (architecture inattendue).
+    """
+    import torch
+
+    device = getattr(model, "device", None)
+    if device is None or str(device).startswith("cuda"):
+        return
+    policy = getattr(model, "policy", None)
+    if policy is None:
+        return
+    extractor = getattr(policy, "features_extractor", None)
+    if extractor is None:
+        return
+    extractor.forward = torch.compile(extractor.forward, mode="reduce-overhead")
+
+
+def _warmup_eval_inference(model) -> None:
+    """Forward pass factice pour déclencher la compilation torch avant le 1er épisode.
+
+    Sans warmup la compilation se produit au 1er step du 1er épisode, qui semble bloquer
+    ~60-120s — indiscernable d'un hang. Le warmup rend ce délai visible dans l'init du worker,
+    au même titre que le chargement du modèle.
+    """
+    import numpy as np
+
+    obs_space = model.observation_space
+    dummy_obs = {k: np.zeros(v.shape, dtype=np.float32) for k, v in obs_space.spaces.items()}
+    action_masks = np.ones((1, model.action_space.n), dtype=bool)
+    model.predict(dummy_obs, action_masks=action_masks, deterministic=True)
+
+
 def _eval_worker_init(
     model_path: str,
     worker_model_device: str,
@@ -740,11 +777,15 @@ def _eval_worker_init(
     rewards_config_name: str,
     controlled_agent: str,
     base_agent_key: str,
+    torch_compile_cpu: bool = False,
 ) -> None:
     """Appelé une fois au démarrage de chaque worker. Charge modèle + normalizer.
 
     Les stats VecNormalize viennent du MÊME `model_path` que la politique (V11 §0.35) : un
     worker ne peut pas normaliser avec les stats d'un autre modèle, par construction.
+    Si `torch_compile_cpu` est True, le features_extractor est compilé avec
+    torch.compile(mode='reduce-overhead') et un forward pass factice déclenche la compilation
+    avant le 1er épisode.
     """
     global _worker_model, _worker_obs_normalizer
     from sb3_contrib import MaskablePPO
@@ -753,6 +794,9 @@ def _eval_worker_init(
     _worker_obs_normalizer = _build_eval_obs_normalizer_for_worker(
         _worker_model, model_path, vec_normalize_enabled, vec_eval_enabled
     )
+    if torch_compile_cpu:
+        _torch_compile_eval_extractor(_worker_model)
+        _warmup_eval_inference(_worker_model)
 
 
 def _eval_worker_task(
@@ -1436,6 +1480,7 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
 
         worker_params = validate_bot_eval_worker_params(callback_params)
         use_subprocess = worker_params["use_subprocess"]
+        torch_compile_cpu = bool(callback_params.get("bot_eval_torch_compile_cpu", False))
         worker_model_device_raw = require_key(callback_params, "bot_eval_worker_device")
         worker_model_device = str(worker_model_device_raw).strip().lower()
         if worker_model_device not in {"cpu", "auto"}:
@@ -1504,6 +1549,7 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
             rewards_config_name,
             controlled_agent,
             base_agent_key,
+            torch_compile_cpu,
         )
 
         total_episodes = len(active_bot_names) * n_episodes
