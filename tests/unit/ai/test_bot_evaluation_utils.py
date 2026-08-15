@@ -155,10 +155,11 @@ def test_build_eval_obs_normalizer_for_worker_normalizes_and_squeezes(
     assert np.allclose(out, np.array([6.0, 8.0], dtype=np.float32))
 
 
-def test_eval_worker_init_loads_model_and_normalizer(monkeypatch: pytest.MonkeyPatch) -> None:
+def _patch_worker_init_deps(monkeypatch: pytest.MonkeyPatch):
+    """Patch commun pour les tests de _eval_worker_init."""
     loaded_model = object()
     monkeypatch.setattr("sb3_contrib.MaskablePPO.load", lambda model_path, device=None: loaded_model)
-    seen_paths = []
+    seen_paths: List[str] = []
     monkeypatch.setattr(
         be,
         "_build_eval_obs_normalizer_for_worker",
@@ -166,6 +167,11 @@ def test_eval_worker_init_loads_model_and_normalizer(monkeypatch: pytest.MonkeyP
             seen_paths.append(model_path) or (lambda obs: np.asarray(obs, dtype=np.float32))
         ),
     )
+    return loaded_model, seen_paths
+
+
+def test_eval_worker_init_loads_model_and_normalizer(monkeypatch: pytest.MonkeyPatch) -> None:
+    loaded_model, seen_paths = _patch_worker_init_deps(monkeypatch)
 
     be._eval_worker_init(
         model_path="/tmp/model.zip",
@@ -182,6 +188,52 @@ def test_eval_worker_init_loads_model_and_normalizer(monkeypatch: pytest.MonkeyP
     # V11 §0.35 : le normalizer est construit sur le zip que CE worker charge — pas de canal
     # de chemin de stats séparé qui pourrait pointer vers un autre modèle.
     assert seen_paths == ["/tmp/model.zip"]
+
+
+def test_eval_worker_init_torch_compile_cpu_calls_compile_and_warmup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """torch_compile_cpu=True appelle _torch_compile_eval_extractor puis _warmup_eval_inference."""
+    loaded_model, _ = _patch_worker_init_deps(monkeypatch)
+    compile_calls: List[Any] = []
+    warmup_calls: List[Any] = []
+    monkeypatch.setattr(be, "_torch_compile_eval_extractor", lambda m: compile_calls.append(m))
+    monkeypatch.setattr(be, "_warmup_eval_inference", lambda m: warmup_calls.append(m))
+
+    be._eval_worker_init(
+        model_path="/tmp/model.zip",
+        worker_model_device="cpu",
+        vec_normalize_enabled=False,
+        vec_eval_enabled=False,
+        training_config_name="suite",
+        rewards_config_name="CoreAgent",
+        controlled_agent="CoreAgent",
+        base_agent_key="CoreAgent",
+        torch_compile_cpu=True,
+    )
+    assert compile_calls == [loaded_model], "compile doit être appelé avec le modèle chargé"
+    assert warmup_calls == [loaded_model], "warmup doit être appelé après compile"
+
+
+def test_eval_worker_init_torch_compile_cpu_false_skips_compile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """torch_compile_cpu=False (défaut) ne touche pas l'extracteur."""
+    _patch_worker_init_deps(monkeypatch)
+    compile_calls: List[Any] = []
+    monkeypatch.setattr(be, "_torch_compile_eval_extractor", lambda m: compile_calls.append(m))
+
+    be._eval_worker_init(
+        model_path="/tmp/model.zip",
+        worker_model_device="cpu",
+        vec_normalize_enabled=False,
+        vec_eval_enabled=False,
+        training_config_name="suite",
+        rewards_config_name="CoreAgent",
+        controlled_agent="CoreAgent",
+        base_agent_key="CoreAgent",
+    )
+    assert compile_calls == [], "compile ne doit PAS être appelé quand torch_compile_cpu=False"
 
 
 def test_eval_worker_task_counts_outcomes_and_reports_progress(monkeypatch: pytest.MonkeyPatch) -> None:

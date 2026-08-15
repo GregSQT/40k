@@ -296,6 +296,8 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
         type_dim: int = 16,
         model_dim: int = 16,
         map_channels: int = 16,
+        cnn_stem_channels: int = 32,
+        cnn_inner_channels: int = 64,
     ):
         if not isinstance(cnn_features, int) or cnn_features <= 0:
             raise ValueError(
@@ -427,20 +429,20 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
         # l'écart entre les deux variantes est SOUS le bruit de la machine (±10 %) : les encodeurs
         # d'entités dominent. C'est la mesure isolée qui tranche, pas la mesure de bout en bout.
         self.cnn_stem = nn.Sequential(
-            nn.Conv2d(GRID_CHANNELS, 32, kernel_size=3, stride=1, padding=1),
+            nn.Conv2d(GRID_CHANNELS, cnn_stem_channels, kernel_size=3, stride=1, padding=1),
             nn.ReLU(),
         )
         # Branche TRONC : sous-échantillonnée puis aplatie — c'est un résumé GLOBAL de la fenêtre,
         # pas une carte. Elle reste strictement ce qu'elle était.
         self.cnn = nn.Sequential(
-            nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),
+            nn.Conv2d(cnn_stem_channels, cnn_inner_channels, kernel_size=3, stride=2, padding=1),
             nn.ReLU(),
-            nn.Conv2d(64, 64, kernel_size=3, stride=2, padding=1),
+            nn.Conv2d(cnn_inner_channels, cnn_inner_channels, kernel_size=3, stride=2, padding=1),
             nn.ReLU(),
             nn.Flatten(),
         )
         with torch.no_grad():
-            n_flatten = self.cnn(torch.zeros(1, 32, GRID_SIZE, GRID_SIZE)).shape[1]
+            n_flatten = self.cnn(torch.zeros(1, cnn_stem_channels, GRID_SIZE, GRID_SIZE)).shape[1]
         self.cnn_head = nn.Sequential(nn.Linear(n_flatten, cnn_features), nn.ReLU())
 
         # Branche CARTE : résolution PLEINE, aucun stride, jamais aplatie. Le stride est ce qui
@@ -452,7 +454,7 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
         self.register_buffer("pos_channels", positional_channels())
         self.map_net = nn.Sequential(
             nn.Conv2d(
-                32 + POSITIONAL_CHANNELS, map_channels, kernel_size=3, stride=1, padding=1
+                cnn_stem_channels + POSITIONAL_CHANNELS, map_channels, kernel_size=3, stride=1, padding=1
             ),
             nn.ReLU(),
         )

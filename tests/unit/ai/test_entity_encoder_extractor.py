@@ -445,6 +445,21 @@ def test_grid_channel_count_is_read_from_the_single_source():
     assert extractor.cnn[0].in_channels == extractor.cnn_stem[0].out_channels
 
 
+def test_cnn_channels_configurable():
+    """cnn_stem_channels et cnn_inner_channels configurent les couches Conv2d du CNN.
+
+    map_net prend cnn_stem_channels + POSITIONAL_CHANNELS en entrée (stem partagé).
+    """
+    ext = SpatialCombinedExtractor(
+        _space(), cnn_features=16, cnn_stem_channels=8, cnn_inner_channels=16
+    )
+    assert ext.cnn_stem[0].out_channels == 8
+    assert ext.cnn[0].in_channels == 8
+    assert ext.cnn[0].out_channels == 16
+    assert ext.cnn[2].out_channels == 16
+    assert ext.map_net[0].in_channels == 8 + POSITIONAL_CHANNELS
+
+
 def test_move_map_keeps_the_full_resolution(extractor):
     """V11 §0.32 T-G : la carte de move sort en 32x32, sans le moindre stride.
 
