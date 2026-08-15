@@ -7,13 +7,14 @@ Deux invariants :
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import numpy as np
 import pytest
 
 import ai.bot_doctrines as doc
 from engine.game_state import objective_control_contributions, objective_hex_sets
+from shared.data_validation import ConfigurationError
 
 ZONE_A: Set[Tuple[int, int]] = {(1, 1)}
 ZONE_B: Set[Tuple[int, int]] = {(6, 6)}
@@ -142,3 +143,65 @@ def test_cache_invalidated_on_different_unit(monkeypatch: pytest.MonkeyPatch) ->
 
     bot.select_movement_destination(unit3, [(1, 1), (6, 6)], state)
     assert call_count == 2, "activation de l'unité 3 : cache invalidé, 2e appel"
+
+
+# ── Invariant 3 : épisode différent → cache invalidé, nouveau calcul ─────────────────────────────
+
+
+def test_cache_invalidated_on_new_episode(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Même unité, épisode suivant → clé différente, cache invalidé : deux appels au total."""
+    _patch_maps(monkeypatch)
+
+    call_count = 0
+    real_occ = doc.objective_control_contributions
+
+    def spy(game_state, zones):
+        nonlocal call_count
+        call_count += 1
+        return real_occ(game_state, zones)
+
+    monkeypatch.setattr(doc, "objective_control_contributions", spy)
+
+    state1 = _state([("1", 1, (1, 1), 4), ("2", 1, (9, 9), 1)], episode_number=1)
+    state2 = _state([("1", 1, (1, 1), 4), ("2", 1, (9, 9), 1)], episode_number=2)
+    unit1 = state1["unit_by_id"]["2"]
+    unit2 = state2["unit_by_id"]["2"]
+    bot = _CacheTestBot()
+
+    bot.select_movement_destination(unit1, [(1, 1), (6, 6)], state1)
+    assert call_count == 1, "épisode 1 : 1 appel"
+
+    bot.select_movement_destination(unit2, [(1, 1), (6, 6)], state2)
+    assert call_count == 2, "épisode 2 : cache invalidé, 2e appel"
+
+
+# ── Invariant 4 : require_key sur les champs de clé — état partiel lève une erreur ───────────────
+
+
+def _state_without(
+    figurines: List[Tuple[str, int, Tuple[int, int], int]],
+    omit: str,
+    *,
+    episode_number: int = 1,
+    turn: int = 1,
+    phase: str = "move",
+) -> Dict[str, Any]:
+    """État complet moins la clé `omit` — pour tester la garde require_key."""
+    s = _state(figurines, episode_number=episode_number, turn=turn, phase=phase)
+    del s[omit]
+    return s
+
+
+@pytest.mark.parametrize("omit_key", ["episode_number", "turn", "phase"])
+def test_missing_key_raises_configuration_error(
+    monkeypatch: pytest.MonkeyPatch, omit_key: str
+) -> None:
+    """Un état sans episode_number/turn/phase lève ConfigurationError (require_key, pas .get)."""
+    _patch_maps(monkeypatch)
+    figurines = [("1", 1, (1, 1), 4), ("2", 1, (9, 9), 1)]
+    state = _state_without(figurines, omit_key)
+    unit = state["unit_by_id"]["2"]
+    bot = _CacheTestBot()
+
+    with pytest.raises(ConfigurationError):
+        bot.select_movement_destination(unit, [(1, 1), (6, 6)], state)
