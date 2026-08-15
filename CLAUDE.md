@@ -288,8 +288,106 @@ PÉRIMÈTRE DE CLÔTURE — autorisé SANS nouvelle validation, TOUS MODES
 - ARBITRAGE du rapport de clôture = décisions qui appartiennent à l'utilisateur (choix métier,
   priorité, budget, donnée qu'il seul possède). JAMAIS du travail technique que l'agent savait
   faire et n'a pas fait. Un ARBITRAGE qui décrit une tâche est une dette déguisée.
+→ Voir §RAPPORT DE CLÔTURE ci-dessous pour le format de preuve.
 
-RAPPORT DE CLÔTURE — OBLIGATOIRE avant d'annoncer un sujet fini
+T3. INVESTIGATION AUTONOME — PRIME SUR LES RÈGLES ASK 1 ET 5
+- Si l'utilisateur demande explicitement d'investiguer un problème, d'analyser une erreur, ou de trouver la root cause :
+  → INVESTIGUER IMMÉDIATEMENT ET AUTONOMEMENT sans redemander la permission
+  → Lire tous les fichiers nécessaires pour comprendre le problème
+  → Utiliser Grep, Glob et Read pour explorer le code
+  → Suivre les traces d'erreur, analyser les logs, examiner le flux d'exécution
+  → Ne s'arrêter QUE si :
+    * La root cause est identifiée avec certitude (présenter alors la solution)
+    * Des logs/exécutions sont nécessaires pour continuer (demander alors les logs)
+    * Après investigation approfondie, aucune root cause claire n'est trouvée (reconnaître honnêtement l'échec et proposer des pistes alternatives)
+- NE JAMAIS demander "voulez-vous que j'investigue ?" si l'utilisateur a déjà demandé l'investigation
+- NE JAMAIS s'arrêter à mi-chemin pour demander la permission de continuer l'investigation
+- L'investigation est une ACTION DE LECTURE/ANALYSE, pas une modification → autonomie totale autorisée
+
+T4. CAUSE, JUMEAU, VERROU
+
+CAUSE — établir avant de toucher
+- Ne rien corriger tant que la cause n'est pas PROUVÉE. Une hypothèse n'est pas une cause.
+  Remonter la chaîne d'appelants, lire le code, citer fichier:ligne.
+- Si la cause peut être MESURÉE plutôt que déduite : mesurer (instrumenter, exécuter le vrai
+  chemin, compter). « le code semble faire X » ne vaut rien face à « j'ai exécuté, j'ai obtenu X ».
+  → En MODE ASK, demander l'autorisation d'exécuter ; ne pas déduire pour éviter de demander.
+- Si mon énoncé du symptôme est FAUX ou incomplet, le dire et me contredire avec la preuve.
+  Ne pas chercher uniquement là où je pointe. Une liste de soupçons n'est pas un verdict.
+- COROLLAIRE REVIEW (/code-review, /simplify, audit) : un finding est une hypothèse tant qu'il
+  n'a pas de SCÉNARIO D'ÉCHEC concret — entrées/état précis → sortie fausse, crash ou invariant
+  violé, sur un chemin réellement atteint en production. Sans ce scénario, le finding est ÉCARTÉ,
+  pas rétrogradé en « mineur ». Hors périmètre sauf demande explicite : nommage, découpage, style,
+  « on pourrait extraire », préférence d'architecture sur du code correct.
+- PREUVE PAR LE FICHIER — un scénario ne vaut que s'il a été établi sur le FICHIER, jamais sur la
+  hunk du diff. Tout finding RECOPIE VERBATIM, dans son scénario, les lignes du fichier qui le
+  rendent possible : la ligne fautive ET ce qui aurait pu l'empêcher (garde, défaut, early-return,
+  appelant). Recopiées, pas résumées, pas abrégées d'un « … » : une citation qu'on ne retrouve pas
+  telle quelle à la ligne indiquée écarte le finding, sans discussion. Un finding dont l'ancre est
+  HORS du diff se relit intégralement dans le fichier avant d'être écrit, et nomme la ligne DU diff
+  qui le casse — sinon il est écarté aussi.
+  * Un finding qui énonce lui-même que le code visé est correct (« correct but », « invites a
+    future », « compounding ») n'est pas un finding faible : c'est du style, déjà écarté par la
+    ligne ci-dessus. Ne pas le rendre.
+- CRITÈRE D'ARRÊT : une review est finie quand il ne reste plus de finding AVEC scénario, pas
+  quand il ne reste plus de finding. Ne jamais relancer une review pour faire taire du goût — le
+  signaler si je demande une relance dont la passe précédente n'a rendu que du cosmétique.
+
+JUMEAU — le motif d'échec n°1 de ce dépôt
+- Ce dépôt est structuré en MIROIRS : tir/mêlée, move/charge/fight, IA/PvP, moteur/replay/analyzer,
+  frontend/backend. Une correction faite d'un côté et pas de l'autre est le défaut le plus fréquent.
+- Après chaque correction : grep le symbole/le motif corrigé et vérifier explicitement s'il existe
+  ailleurs sous la même forme. Rapporter le résultat de cette recherche, même s'il est vide.
+- Corollaire vécu : du code corrigé/testé mais JAMAIS APPELÉ par le vrai chemin ne corrige rien.
+  Vérifier que le chemin de production atteint bien le code modifié.
+
+VERROU — prouver que le test tient
+- Un test qui passe du premier coup n'est PAS un verrou. Pour chaque correction d'invariant moteur :
+  remettre le défaut, vérifier que le test devient ROUGE, rétablir, et le rapporter.
+  Sans cette preuve, considérer le test comme absent. (Inutile sur du parsing/formatage trivial.)
+- VERT VACANT : un contrôle qui ne regarde rien affiche « tout va bien ». Vérifier que l'échantillon
+  produit vraiment des données, que l'énumération rend des éléments, que la mutation est appliquée.
+  Symétrique déjà vécu : un contrôle qui regarde la MAUVAISE chose (ancre vs par-figurine).
+- Un test doit CONSTRUIRE la situation qu'il observe — jamais l'espérer d'une graine aléatoire,
+  d'un ordre d'exécution ou de l'absence d'une configuration.
+
+COUVERTURE — toute feature touchée est couverte par un test automatisé
+- Ajouter ou modifier un comportement OBLIGE à écrire/étendre son test dans la MÊME livraison.
+  Ce test entre au périmètre de clôture (T2) : ni validation ni STOP à demander.
+- LE HARNAIS SUIT LE CODE TOUCHÉ, il ne se choisit pas : Python → pytest (`tests/unit/...`,
+  `tests/integration/...`), noté `fichier::test` ; frontend TS/TSX → vitest (`*.test.ts(x)` à côté
+  du module, `cd frontend && npx vitest run <fichier>`), noté `fichier > nom du test`. Un tour qui
+  ne touche que le front satisfait la règle en vitest, jamais en inventant une référence pytest.
+- Toute feature RENCONTRÉE pendant le travail sans test se traite ainsi :
+  * elle touche le code modifié (même fonction, même invariant, même jumeau) → le test s'écrit
+    MAINTENANT, comme le reste du périmètre de clôture ;
+  * elle est SANS LIEN avec la modification → interdit de l'écrire (ASK 5, et T2 « n'entre jamais
+    tant qu'on y est ») : elle se SIGNALE au rapport et prend son prompt en PROMPTS.
+- Le rapport de clôture liste en COUVERTURE les trous vus non couverts — pas les tests écrits.
+  Un trou vu et tu est une régression au même titre qu'un document rendu faux par sa livraison.
+- « Validé via --step / le PvP / l'analyzer / le navigateur / un script jetable » ne remplace pas
+  un test du harnais : ce n'est pas rejouable, donc ça ne verrouille rien (cf. VERROU ci-dessus).
+
+RENDRE COMPTE — borner le verdict
+- Dire ce qui a été VÉRIFIÉ et ce qui n'a PAS pu l'être. « non exploré » n'est pas « sain » :
+  un verdict non borné est ce qui masque les défauts le plus longtemps.
+- Ne JAMAIS affirmer avoir exécuté ce qui n'a pas été exécuté.
+- Une suppression ne laisse une trace dans le code QUE si elle est contre-intuitive (un contrôle
+  retiré sciemment, une branche condamnée) : dire pourquoi et vers quoi se tourner. Sinon git suffit
+  — pas de commentaire-tombeau.
+
+=== FORMAT DE MISE À JOUR OBLIGATOIRE (TOUS MODES) ===
+
+Après chaque modification :
+1. Indiquer le fichier modifié avec un lien cliquable : [nom.py](file:///home/greg/40k/chemin/nom.py)
+2. Expliquer en une phrase ce qui a changé et pourquoi — sans montrer de code.
+
+Si plusieurs fichiers → STOP, lister, expliquer, attendre validation.
+EXCEPTION : les fichiers du périmètre de clôture (T2) se modifient sans STOP ni validation —
+ils apparaissent en RÉFS, chacun justifié par son critère d'entrée.
+
+=== RAPPORT DE CLÔTURE — OBLIGATOIRE avant d'annoncer un sujet fini ===
+
 Ne JAMAIS conclure par un verdict de qualité (« implémentation optimale », « doc à jour »,
 « tout est propre ») : un verdict ne s'expose à aucun contrôle, donc il ne prouve rien et il est
 produit sans effort. Conclure par des FAITS recoupables en quelques secondes.
@@ -426,102 +524,6 @@ conclusion, il ne s'y ajoute pas. Ne jamais y répéter ce qui vient d'être dit
   Il s'exécute au PROMPT SUIVANT. Si ce rappel arrive, le rapport manquant est celui du tour
   d'AVANT : rends-le en tête de réponse, sans relancer aucun travail.
 
-T3. INVESTIGATION AUTONOME — PRIME SUR LES RÈGLES ASK 1 ET 5
-- Si l'utilisateur demande explicitement d'investiguer un problème, d'analyser une erreur, ou de trouver la root cause :
-  → INVESTIGUER IMMÉDIATEMENT ET AUTONOMEMENT sans redemander la permission
-  → Lire tous les fichiers nécessaires pour comprendre le problème
-  → Utiliser Grep, Glob et Read pour explorer le code
-  → Suivre les traces d'erreur, analyser les logs, examiner le flux d'exécution
-  → Ne s'arrêter QUE si :
-    * La root cause est identifiée avec certitude (présenter alors la solution)
-    * Des logs/exécutions sont nécessaires pour continuer (demander alors les logs)
-    * Après investigation approfondie, aucune root cause claire n'est trouvée (reconnaître honnêtement l'échec et proposer des pistes alternatives)
-- NE JAMAIS demander "voulez-vous que j'investigue ?" si l'utilisateur a déjà demandé l'investigation
-- NE JAMAIS s'arrêter à mi-chemin pour demander la permission de continuer l'investigation
-- L'investigation est une ACTION DE LECTURE/ANALYSE, pas une modification → autonomie totale autorisée
-
-T4. CAUSE, JUMEAU, VERROU
-
-CAUSE — établir avant de toucher
-- Ne rien corriger tant que la cause n'est pas PROUVÉE. Une hypothèse n'est pas une cause.
-  Remonter la chaîne d'appelants, lire le code, citer fichier:ligne.
-- Si la cause peut être MESURÉE plutôt que déduite : mesurer (instrumenter, exécuter le vrai
-  chemin, compter). « le code semble faire X » ne vaut rien face à « j'ai exécuté, j'ai obtenu X ».
-  → En MODE ASK, demander l'autorisation d'exécuter ; ne pas déduire pour éviter de demander.
-- Si mon énoncé du symptôme est FAUX ou incomplet, le dire et me contredire avec la preuve.
-  Ne pas chercher uniquement là où je pointe. Une liste de soupçons n'est pas un verdict.
-- COROLLAIRE REVIEW (/code-review, /simplify, audit) : un finding est une hypothèse tant qu'il
-  n'a pas de SCÉNARIO D'ÉCHEC concret — entrées/état précis → sortie fausse, crash ou invariant
-  violé, sur un chemin réellement atteint en production. Sans ce scénario, le finding est ÉCARTÉ,
-  pas rétrogradé en « mineur ». Hors périmètre sauf demande explicite : nommage, découpage, style,
-  « on pourrait extraire », préférence d'architecture sur du code correct.
-- PREUVE PAR LE FICHIER — un scénario ne vaut que s'il a été établi sur le FICHIER, jamais sur la
-  hunk du diff. Tout finding RECOPIE VERBATIM, dans son scénario, les lignes du fichier qui le
-  rendent possible : la ligne fautive ET ce qui aurait pu l'empêcher (garde, défaut, early-return,
-  appelant). Recopiées, pas résumées, pas abrégées d'un « … » : une citation qu'on ne retrouve pas
-  telle quelle à la ligne indiquée écarte le finding, sans discussion. Un finding dont l'ancre est
-  HORS du diff se relit intégralement dans le fichier avant d'être écrit, et nomme la ligne DU diff
-  qui le casse — sinon il est écarté aussi.
-  * Un finding qui énonce lui-même que le code visé est correct (« correct but », « invites a
-    future », « compounding ») n'est pas un finding faible : c'est du style, déjà écarté par la
-    ligne ci-dessus. Ne pas le rendre.
-- CRITÈRE D'ARRÊT : une review est finie quand il ne reste plus de finding AVEC scénario, pas
-  quand il ne reste plus de finding. Ne jamais relancer une review pour faire taire du goût — le
-  signaler si je demande une relance dont la passe précédente n'a rendu que du cosmétique.
-
-JUMEAU — le motif d'échec n°1 de ce dépôt
-- Ce dépôt est structuré en MIROIRS : tir/mêlée, move/charge/fight, IA/PvP, moteur/replay/analyzer,
-  frontend/backend. Une correction faite d'un côté et pas de l'autre est le défaut le plus fréquent.
-- Après chaque correction : grep le symbole/le motif corrigé et vérifier explicitement s'il existe
-  ailleurs sous la même forme. Rapporter le résultat de cette recherche, même s'il est vide.
-- Corollaire vécu : du code corrigé/testé mais JAMAIS APPELÉ par le vrai chemin ne corrige rien.
-  Vérifier que le chemin de production atteint bien le code modifié.
-
-VERROU — prouver que le test tient
-- Un test qui passe du premier coup n'est PAS un verrou. Pour chaque correction d'invariant moteur :
-  remettre le défaut, vérifier que le test devient ROUGE, rétablir, et le rapporter.
-  Sans cette preuve, considérer le test comme absent. (Inutile sur du parsing/formatage trivial.)
-- VERT VACANT : un contrôle qui ne regarde rien affiche « tout va bien ». Vérifier que l'échantillon
-  produit vraiment des données, que l'énumération rend des éléments, que la mutation est appliquée.
-  Symétrique déjà vécu : un contrôle qui regarde la MAUVAISE chose (ancre vs par-figurine).
-- Un test doit CONSTRUIRE la situation qu'il observe — jamais l'espérer d'une graine aléatoire,
-  d'un ordre d'exécution ou de l'absence d'une configuration.
-
-COUVERTURE — toute feature touchée est couverte par un test automatisé
-- Ajouter ou modifier un comportement OBLIGE à écrire/étendre son test dans la MÊME livraison.
-  Ce test entre au périmètre de clôture (T2) : ni validation ni STOP à demander.
-- LE HARNAIS SUIT LE CODE TOUCHÉ, il ne se choisit pas : Python → pytest (`tests/unit/...`,
-  `tests/integration/...`), noté `fichier::test` ; frontend TS/TSX → vitest (`*.test.ts(x)` à côté
-  du module, `cd frontend && npx vitest run <fichier>`), noté `fichier > nom du test`. Un tour qui
-  ne touche que le front satisfait la règle en vitest, jamais en inventant une référence pytest.
-- Toute feature RENCONTRÉE pendant le travail sans test se traite ainsi :
-  * elle touche le code modifié (même fonction, même invariant, même jumeau) → le test s'écrit
-    MAINTENANT, comme le reste du périmètre de clôture ;
-  * elle est SANS LIEN avec la modification → interdit de l'écrire (ASK 5, et T2 « n'entre jamais
-    tant qu'on y est ») : elle se SIGNALE au rapport et prend son prompt en PROMPTS.
-- Le rapport de clôture liste en COUVERTURE les trous vus non couverts — pas les tests écrits.
-  Un trou vu et tu est une régression au même titre qu'un document rendu faux par sa livraison.
-- « Validé via --step / le PvP / l'analyzer / le navigateur / un script jetable » ne remplace pas
-  un test du harnais : ce n'est pas rejouable, donc ça ne verrouille rien (cf. VERROU ci-dessus).
-
-RENDRE COMPTE — borner le verdict
-- Dire ce qui a été VÉRIFIÉ et ce qui n'a PAS pu l'être. « non exploré » n'est pas « sain » :
-  un verdict non borné est ce qui masque les défauts le plus longtemps.
-- Ne JAMAIS affirmer avoir exécuté ce qui n'a pas été exécuté.
-- Une suppression ne laisse une trace dans le code QUE si elle est contre-intuitive (un contrôle
-  retiré sciemment, une branche condamnée) : dire pourquoi et vers quoi se tourner. Sinon git suffit
-  — pas de commentaire-tombeau.
-
-=== FORMAT DE MISE À JOUR OBLIGATOIRE (TOUS MODES) ===
-
-Après chaque modification :
-1. Indiquer le fichier modifié avec un lien cliquable : [nom.py](file:///home/greg/40k/chemin/nom.py)
-2. Expliquer en une phrase ce qui a changé et pourquoi — sans montrer de code.
-
-Si plusieurs fichiers → STOP, lister, expliquer, attendre validation.
-EXCEPTION : les fichiers du périmètre de clôture (T2) se modifient sans STOP ni validation —
-ils apparaissent en RÉFS, chacun justifié par son critère d'entrée.
-
 === MODE AGENT/AUTO (ACTIVÉ PAR PROMPT EXPLICITE) ===
 
 OBJECTIF :
@@ -583,4 +585,3 @@ PÉRIMÈTRE AUTORISÉ :
 - Scripts : python3 ai/*, python3 scripts/*, python3 engine/*, python3 services/*
 - Lecture : grep, rg, find, wc, stat
 - Fichiers intouchables : ceux de WORKFLOW IA ci-dessus, sans exception de mode.
-
