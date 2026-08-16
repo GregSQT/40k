@@ -31,7 +31,10 @@ from tests._state_invariants import turn_state_invariants
 
 
 def _seq(monkeypatch, rolls):
-    """RNG deterministe + LoS/couvert neutralises (le couvert a son propre test)."""
+    """RNG deterministe + LoS/couvert neutralises (le couvert a son propre test).
+
+    Retourne `seq` pour que l appelant puisse verifier l epuisement complet apres resolution
+    (assert not seq), ce qui detecte tout codepath qui sauterait silencieusement un jet."""
     seq = list(rolls)
 
     def fake(a, b):
@@ -44,6 +47,7 @@ def _seq(monkeypatch, rolls):
     monkeypatch.setattr(
         shooting_handlers, "_ranged_distance_metric", lambda *args, **kwargs: "euclidean"
     )
+    return seq
 
 
 def _uc(col, row, *, player):
@@ -145,12 +149,13 @@ def _game_state(
 
 def _resolve(monkeypatch, weapon_rules, *, rolls, melee=False, **state_kwargs):
     """Resout une activation et rend (message du log, records par tir)."""
-    _seq(monkeypatch, rolls)
+    seq = _seq(monkeypatch, rolls)
     gs = _game_state(weapon_rules, melee=melee, **state_kwargs)
     if melee:
         build_manual_fight_allocation(gs, "1")
     else:
         build_manual_shoot_allocation(gs, "1")
+    assert not seq, f"sequence RNG non epuisee : {seq} — un jet a ete saute"
     logs = [entry for entry in gs["action_logs"] if "shootDetails" in entry]
     assert len(logs) == 1, f"attendu 1 log d attaque, obtenu {len(logs)}"
     return logs[0]["message"], logs[0]["shootDetails"]
@@ -203,7 +208,7 @@ def test_rapid_fire_porte_un_X_superieur_a_un(monkeypatch):
     un token different. Sans ce cas, un token cable en dur sur `1` passerait le test ci-dessus.
     """
     msg, _ = _resolve(
-        monkeypatch, ["RAPID_FIRE:2"], rolls=[4, 5, 1] * 4, target_row=1
+        monkeypatch, ["RAPID_FIRE:2"], rolls=[4, 5, 1] * 3, target_row=1
     )
     assert "[RAPID FIRE:2]" in msg, msg
 
@@ -228,7 +233,7 @@ def test_blast_nu_affiche_le_defaut_de_la_regle(monkeypatch):
 def test_blast_parametre_affiche_son_X(monkeypatch):
     """Discrimination : la forme [BLAST 2] dit `2`, le token suit bien le parametre declare."""
     msg, _ = _resolve(
-        monkeypatch, ["BLAST:2"], rolls=[4, 5, 1] * 4, declared_target_size=5
+        monkeypatch, ["BLAST:2"], rolls=[4, 5, 1] * 3, declared_target_size=5
     )
     assert "[BLAST:2]" in msg, msg
 
@@ -340,6 +345,10 @@ def test_lethal_hits_decline_par_le_moteur_ne_dit_rien(monkeypatch):
     assert shots[0]["criticalHit"] is True
     assert shots[0].get("lethalHit") is None
     assert shots[0]["strengthRoll"] == 5
+    # La blessure est NORMALE (5 ne franchit pas le seuil critique de blessure) : DEVASTATING
+    # ne s applique pas, la sauvegarde est jetee et le resultat est presente.
+    assert "[DEVASTATING WOUNDS]" not in msg, msg
+    assert "saveRoll" in shots[0], "sauvegarde attendue car blessure non critique"
 
 
 def test_devastating_wounds_ligne_detail_et_absence_de_sauvegarde(monkeypatch):
@@ -387,7 +396,7 @@ def test_precision_avec_character_visible_est_nommee(monkeypatch):
     """Contre-epreuve : cible contenant un CHARACTER visible -> l override d allocation joue
     (`_apply_precision_allocation_override`), et c est CE fait, pose sur le groupe, que la
     ligne affiche."""
-    _seq(monkeypatch, [4, 5, 1])
+    seq = _seq(monkeypatch, [4, 5, 1])
     # La VISIBILITE de la figurine CHARACTER passe par la primitive de LoS complete (terrain,
     # obscuring, footprint), qui exige un plateau configure et a ses propres tests. Elle est
     # neutralisee ici comme `compute_unit_los` l est pour tout ce fichier : ce test verrouille
@@ -400,7 +409,10 @@ def test_precision_avec_character_visible_est_nommee(monkeypatch):
 
     build_manual_shoot_allocation(gs, "1")
 
-    msg = [e for e in gs["action_logs"] if "shootDetails" in e][0]["message"]
+    assert not seq, f"sequence RNG non epuisee : {seq} — un jet a ete saute"
+    logs = [e for e in gs["action_logs"] if "shootDetails" in e]
+    assert len(logs) == 1, f"attendu 1 log d attaque, obtenu {len(logs)}"
+    msg = logs[0]["message"]
     assert "[PRECISION]" in msg, msg
 
 
@@ -450,12 +462,22 @@ def test_psychic_sans_couvert_ne_dit_rien(monkeypatch):
 # --------------------------------------------------------------------------------------
 
 def test_melee_nomme_les_memes_regles(monkeypatch):
+    """Deux attaquants du meme groupe (carriers=2) : l un declenche LETHAL HITS (touche critique),
+    l autre DEVASTATING WOUNDS (blessure critique sur une touche normale). Les deux tokens
+    apparaissent dans la meme ligne de synthese — c est la propriete qu on verrouille ici (le
+    chemin melee passe bien par le meme socle que le tir). Avec LETHAL HITS + DEVASTATING sur
+    Sv 7+, le moteur ACCEPTE l auto-blessure (EV_auto=1.0 > EV_roll=0.5), donc un hit critique
+    prend le chemin lethal-hit (is_critical_wound=False, devastating ne s applique pas) : les
+    deux effets ne peuvent pas coexister sur UNE seule attaque."""
+    # A1 : hit=6 (critique) -> LETHAL HITS -> auto-blessure -> save=1 (7+ -> echoue) -> degat
+    # A2 : hit=4 (normale) -> jet blessure=6 (critique) -> DEVASTATING -> pas de save
     msg, shots = _resolve(
-        monkeypatch, ["DEVASTATING_WOUNDS", "LETHAL_HITS"], rolls=[6, 1], melee=True
+        monkeypatch, ["DEVASTATING_WOUNDS", "LETHAL_HITS"], rolls=[6, 1, 4, 6],
+        melee=True, carriers=2,
     )
     assert "[DEVASTATING WOUNDS]" in msg
     assert "[LETHAL HITS]" in msg
-    assert shots[0]["lethalHit"] is True
+    assert any(s.get("lethalHit") for s in shots)
 
 
 def test_melee_cleave_affiche_son_X_declare(monkeypatch):
