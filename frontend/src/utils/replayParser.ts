@@ -141,7 +141,7 @@ const SUSTAINED_HITS_TOKEN = "SUSTAINED HITS";
  * arme anti-véhicule — la bulle d'aide du replay chercherait une capacité d'unité de ce nom et
  * n'en trouverait aucune, exactement le défaut que `[R:+0.0]` a déjà coûté.
  */
-const ANTI_RULE_TOKEN = /^ANTI-[A-Z]+:\d\+$/;
+const ANTI_RULE_TOKEN = /^ANTI-[A-Z]+:\d+\+$/;
 
 const NON_ABILITY_ROLL_TOKENS = new Set([
   "HEAVY",

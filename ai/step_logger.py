@@ -225,6 +225,24 @@ def _ability_token(display_name: Any) -> str:
     return f" [{display_name.strip().upper()}]"
 
 
+def _build_hit_suffix(details: Dict[str, Any], hit_ability_display_name: Any) -> str:
+    """Suffixe commun du segment `Hit` — SHOOT et FOUGHT, meme ordre.
+
+    Extrait pour que les deux formateurs ne divergent plus silencieusement : l ordre
+    ``_HIT_SEGMENT_RULE_TOKENS`` / ``[REROLLED]`` / ``[SUSTAINED HITS]`` / ``_ability_token``
+    etait encode deux fois et avait deja diverge une fois. SHOOT prefixe en plus
+    ``[HEAVY]``/``[COVER]`` avant d appeler ce helper.
+    """
+    suffix = "".join(
+        f" {tok}" for tok in _flag_rule_tokens(details, _HIT_SEGMENT_RULE_TOKENS)
+    )
+    suffix += _rerolled_token(details, "hit_roll_initial")
+    if details.get("sustained_hit"):
+        suffix += " [SUSTAINED HITS]"
+    suffix += _ability_token(hit_ability_display_name)
+    return suffix
+
+
 def _charge_distance_segment(details: Dict[str, Any]) -> str:
     """`` [Dist: 5.0" | Nearest: 3.0"]`` — les deux distances 11.04 de cette charge.
 
@@ -593,7 +611,7 @@ class StepLogger:
         self._flush_buffer()
 
         self._episode_start_wall = time.perf_counter()
-        self._last_step_wall = time.perf_counter()  # First step duration = time since episode start
+        self._last_step_wall = time.time()  # First step duration = time since episode start
 
         # Increment episode number
         self.episode_number += 1
@@ -1057,22 +1075,7 @@ class StepLogger:
             hit_rule_suffix = (
                 f" [{hit_rule_modifier}]" if hit_rule_modifier in ("HEAVY", "COVER") else ""
             )
-            # [TORRENT] / [IGNORES COVER] / [PSYCHIC] : MEME table qu en melee, un seul site
-            # pour les deux faces du miroir. Posees AVANT `[REROLLED:n]` et les capacites, comme
-            # [HEAVY] : la queue du segment reste ordonnee « regles d arme, puis ce qui est
-            # arrive a CE de ».
-            hit_rule_suffix += "".join(
-                f" {tok}" for tok in _flag_rule_tokens(details, _HIT_SEGMENT_RULE_TOKENS)
-            )
-            hit_rule_suffix += _rerolled_token(details, "hit_roll_initial")
-            # [SUSTAINED HITS] 24.36 : touche additionnelle d une touche critique. Elle n a pas
-            # de jet (`Hit None(...)`) : le marqueur est la SEULE trace exploitable par
-            # l analyzer (plafond de tirs, usage de regle) et le replay.
-            if bool(details.get("sustained_hit", False)):
-                hit_rule_suffix += " [SUSTAINED HITS]"
-            # Relance de touche EFFECTUEE : meme forme de token que les autres capacites, sur
-            # le jet qu elle a modifie. C est ce que l analyzer et le frontend cherchent.
-            hit_rule_suffix += _ability_token(hit_ability_display_name)
+            hit_rule_suffix += _build_hit_suffix(details, hit_ability_display_name)
             if hit_rule_modifier in ("HEAVY", "COVER") and isinstance(hit_target_base, int):
                 hit_target_display = f"{hit_target_base}+->{hit_target}+"
             else:
@@ -1327,23 +1330,9 @@ class StepLogger:
                 base_msg = f"{unit_label} FOUGHT{_waaagh_seg} {target_label}"
             
             # Apply truncation logic like shooting phase - stop after first failure.
-            # [SUSTAINED HITS] 24.36 : JUMEAU du tir. `roll_attack_pool` est partagé, donc la
-            # mêlée produit les mêmes touches additionnelles (sans jet, `Hit None`) et le même
-            # `sustainedHit` arrive ici. Sans le token, `fight_over_cc_nb` les compte comme des
-            # attaques — le faux positif exactement symétrique de celui du tir.
-            _sustained_seg = " [SUSTAINED HITS]" if details.get("sustained_hit") else ""
-            # [TORRENT] / [IGNORES COVER] / [PSYCHIC] — JUMEAU du tir, MEME table. Les deux
-            # dernieres n ont pas d effet en melee (13.08 est ranged-only, donc `cover` y est
-            # toujours faux et [PSYCHIC] ne se pose jamais ; [IGNORES COVER] s y pose sur la
-            # seule declaration de l arme, comme au tir). Le site EXISTE quand meme : c est le
-            # producteur qui decide qu une regle ne dit rien ici, pas un lecteur qui le devine
-            # d une branche manquante — et une arme de melee [TORRENT] resterait sinon muette.
-            _sustained_seg += "".join(
-                f" {tok}" for tok in _flag_rule_tokens(details, _HIT_SEGMENT_RULE_TOKENS)
-            )
-            _sustained_seg += _ability_token(hit_ability_display_name)
-            # JUMEAU du tir : le de d avant relance (cf. `_rerolled_token`).
-            _sustained_seg += _rerolled_token(details, "hit_roll_initial")
+            # JUMEAU du tir : meme helper, meme ordre garanti. SHOOT prefixe [HEAVY]/[COVER]
+            # avant l appel ; FOUGHT ne les a pas, donc `_build_hit_suffix` suffit seul.
+            _sustained_seg = _build_hit_suffix(details, hit_ability_display_name)
             detail_parts = [f"Hit {hit_roll}({hit_target}+){_sustained_seg}"]
             
             # Only show wound if hit succeeded

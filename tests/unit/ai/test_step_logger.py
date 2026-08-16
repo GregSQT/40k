@@ -529,3 +529,49 @@ def test_format_replay_style_message_hazardous_missing_mortal_wounds_raises() ->
     logger = StepLogger(enabled=False)
     with pytest.raises(ConfigurationError, match=r"hazardous_mortal_wounds"):
         logger._format_replay_style_message(1, "hazardous", {"unit_with_coords": "3(2, 4)"})
+
+
+def test_step_timing_duration_not_unix_timestamp(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """VERROU : le premier STEP_TIMING de chaque épisode doit être une durée réelle,
+    pas un timestamp Unix (~1,79e9). Régression : _last_step_wall initialisé avec
+    perf_counter() (uptime) mais lu avec time.time() (époque Unix)."""
+    import re
+
+    monkeypatch.chdir(tmp_path)
+    output_file = tmp_path / "step.log"
+    run_rules = {
+        "engagement_zone_subhex": 10,
+        "metric.engagement": "hex",
+        "metric.ranged": "euclidean",
+        "move.thru_ez": True,
+        "move.thru_enemy": False,
+        "move.thru_friendly": True,
+    }
+    units = [{**unit_invariants(), "id": 1, "col": 1, "row": 1, "player": 1, "HP_MAX": 1, "unitType": "Intercessor"}]
+    logger = StepLogger(output_file=str(output_file), enabled=True, buffer_size=50, debug_mode=True)
+
+    for _episode in range(2):
+        logger.log_episode_start(run_rules=run_rules, units_data=units)
+        for _ in range(3):
+            logger.log_action(
+                unit_id=1,
+                action_type="wait",
+                phase="move",
+                player=1,
+                success=True,
+                step_increment=True,
+                action_details={"current_turn": 1, "unit_with_coords": "1(1, 1)"},
+            )
+        logger.log_episode_end(total_episodes_steps=3, winner=1, win_method=None, objective_control={})
+
+    debug_log = tmp_path / "debug.log"
+    assert debug_log.exists(), "debug.log non créé — debug_mode inactif ou chemin incorrect"
+    content = debug_log.read_text(encoding="utf-8")
+    pattern = re.compile(r"STEP_TIMING.*?duration_s=([\d.]+)")
+    durations = [float(m.group(1)) for m in pattern.finditer(content)]
+    assert len(durations) == 6, f"Attendu 6 STEP_TIMING (2 épisodes × 3 steps), obtenu {len(durations)}"
+    for i, d in enumerate(durations):
+        assert d < 60, (
+            f"STEP_TIMING[{i}] duration_s={d:.3f} ressemble à un timestamp Unix "
+            f"(attendu < 60 s ; régression perf_counter vs time.time)"
+        )

@@ -13,6 +13,7 @@ première version du contrôle prenait pour le rapport lui-même.
 
 from __future__ import annotations
 
+import functools
 import json
 from typing import Any
 import os
@@ -120,28 +121,113 @@ def _config_refusee(hook: Path) -> bool:
     return subprocess.run([str(hook), "--config"], capture_output=True).returncode != 0
 
 
-def _labels_du_format_impose() -> list[str]:
-    """Étiquettes du gabarit `FORMAT IMPOSÉ` de CLAUDE.md, dans l'ordre où elles y figurent.
+@functools.lru_cache(maxsize=1)
+def _panne_de_config_du_depot() -> str | None:
+    """Diagnostic du hook RÉEL sur le CLAUDE.md RÉEL, ou None s'il se lit correctement.
 
-    Le gabarit indente ses étiquettes de DEUX espaces ; les sous-parties de l'ARBITRAGE
-    (`RECOMMANDATION :`) le sont davantage et ne sont donc pas des sections du rapport.
-    Une étiquette peut porter un marqueur 🟢/🔴 : le hook le tolère (voir sa regex de
-    détection des sections), donc le lire ici autrement recréerait la divergence que ce
-    module ferme.
+    Mis en cache : aucun test de ce module n'écrit dans le CLAUDE.md du dépôt (ceux qui
+    éprouvent une config fabriquée passent par `_hook_isole`), et le relancer à chaque test
+    doublait la durée du module pour redemander 158 fois la même réponse.
+
+    Mesuré le 2026-08-15 : une réécriture de CLAUDE.md a renommé les deux lignes déclaratives,
+    le hook ne pouvait plus se configurer et 45 tests de ce module sont tombés EN CASCADE, tous
+    sur des symptômes (`CalledProcessError`, section absente) et aucun sur la cause. Ce
+    diagnostic existe pour que la cause ait son propre test, et pour que les dépendants
+    s'effacent au lieu de la noyer.
     """
+    try:
+        proc = subprocess.run([str(H_RAPPORT), "--config"], capture_output=True, text=True)
+    except OSError as e:
+        return str(e)
+    if proc.returncode != 0:
+        derniere = [l for l in proc.stderr.strip().splitlines() if l.strip()]
+        return derniere[-1] if derniere else f"code de sortie {proc.returncode}, sans message"
+    try:
+        cfg = json.loads(proc.stdout)
+    except json.JSONDecodeError as erreur:
+        return f"sortie --config illisible en JSON : {erreur}"
+    # VERT VACANT : un hook qui rend `{"sections": []}` n'exige plus rien et se tairait sur tout.
+    manquants = [cle for cle in ("sections", "code_suffixes", "code_basenames") if not cfg.get(cle)]
+    return f"config vide sur {manquants}" if manquants else None
+
+
+@pytest.fixture(autouse=True)
+def _cause_avant_symptomes(request: pytest.FixtureRequest) -> None:
+    """Si le hook ne peut plus se configurer, seul le test de la CAUSE reste rouge.
+
+    Sans ça, la panne se rend en dizaines d'échecs dont aucun ne la nomme — le tour où c'est
+    arrivé, il a fallu lire une trace pour comprendre que CLAUDE.md, et non le hook, avait bougé.
+    """
+    if request.node.name.startswith((
+        "test_la_config_du_hook_reste_lisible",
+        "test_verification_large_refusee",
+        "test_verification_ciblee_passe",
+    )):
+        return
+    panne = _panne_de_config_du_depot()
+    if panne is not None:
+        pytest.skip(
+            "hook non configurable depuis CLAUDE.md — cause rendue par "
+            f"test_la_config_du_hook_reste_lisible_dans_le_depot : {panne}"
+        )
+
+
+def test_la_config_du_hook_reste_lisible_dans_le_depot() -> None:
+    """CLAUDE.md configure le hook : s'il ne s'y lit plus, plus aucun rapport n'est vérifié."""
+    panne = _panne_de_config_du_depot()
+    assert panne is None, (
+        f"{H_RAPPORT.name} ne peut plus lire sa configuration dans {CLAUDE_MD} : {panne}. "
+        "Tant que ce n'est pas réparé, la forme d'AUCUN rapport de clôture n'est contrôlée. "
+        "Les deux lignes attendues sont `SECTIONS EXIGÉES : ...` et "
+        "`FICHIERS COMPTÉS COMME CODE : ...`, items entre backticks."
+    )
+
+
+MARQUEUR = "[\U0001F300-\U0001FAFF\U00002600-\U000027FF]"
+# Une ligne de l'énumération « Sections : » du RAPPORT FINAL : étiquettes en tête, précédées au
+# plus d'un marqueur 🟢/🔴 (le hook le tolère aussi, voir sa regex de détection), puis le
+# séparateur qui introduit la glose — « : » quand la section a un gabarit, « — » sinon.
+LIGNE_SECTION_RAPPORT = re.compile(
+    rf"^(?:{MARQUEUR}+ +)?([A-ZÉÈÀÂÎÔÛÇ]{{2,}}(?: */ *[A-ZÉÈÀÂÎÔÛÇ]{{2,}})*)\s*(?::|—)",
+    re.MULTILINE,
+)
+
+
+@functools.lru_cache(maxsize=1)
+def _bloc_des_sections() -> str:
+    """L'énumération des sections du RAPPORT FINAL, isolée de ce qui l'entoure."""
     texte = CLAUDE_MD.read_text(encoding="utf-8")
-    debut = texte.index("FORMAT IMPOSÉ")
-    fin = texte.index("/simplify <fichiers pertinents>", debut)
-    motif = r"^ {2}(?:[\U0001F300-\U0001FAFF\U00002600-\U000027FF]+ +)?([A-ZÉÈÀÂÎÔÛÇ]+)\s*:"
-    return re.findall(motif, texte[debut:fin], re.MULTILINE)
+    ancre = texte.index("RAPPORT FINAL")
+    debut = texte.index("Sections :", ancre)
+    return texte[debut:texte.index("Pas de verdict vague", debut)]
+
+
+def _labels_du_format_impose() -> list[str]:
+    """Étiquettes des sections du RAPPORT FINAL, dans l'ordre où CLAUDE.md les énumère.
+
+    Une même ligne peut en porter plusieurs (`ARBITRAGE / PROMPTS`) : les compter comme une
+    seule ferait passer pour absente une section que le hook exige.
+    """
+    return [
+        nom.strip()
+        for groupe in LIGNE_SECTION_RAPPORT.findall(_bloc_des_sections())
+        for nom in groupe.split("/")
+    ]
 
 
 def _sections_declarees_facultatives() -> set[str]:
-    """Sections que CLAUDE.md autorise explicitement à omettre (« omettre la section »)."""
-    texte = CLAUDE_MD.read_text(encoding="utf-8")
-    puce = re.search(r"^- ([A-ZÉÈÀÂÎÔÛÇ, et]+) : omettre la section", texte, re.MULTILINE)
-    assert puce is not None, "la puce qui déclare les sections omissibles a disparu de CLAUDE.md"
-    return set(re.findall(r"[A-ZÉÈÀÂÎÔÛÇ]{2,}", puce.group(1)))
+    """Sections que CLAUDE.md autorise explicitement à omettre (« seulement si … »).
+
+    Une section dite « si code modifié » n'est PAS facultative : c'est la portée `code` du
+    hook. Les confondre rendrait le contrôle vert sur un hook qui n'exige plus rien.
+    """
+    facultatives = set()
+    for ligne in _bloc_des_sections().splitlines():
+        trouve = LIGNE_SECTION_RAPPORT.match(ligne)
+        if trouve is not None and "seulement si" in ligne:
+            facultatives |= {nom.strip() for nom in trouve.group(1).split("/")}
+    assert facultatives, "plus aucune section n'est déclarée omissible dans CLAUDE.md"
+    return facultatives
 
 
 def _run_deny(command: str) -> dict | None:

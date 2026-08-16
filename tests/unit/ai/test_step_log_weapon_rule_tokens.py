@@ -526,6 +526,36 @@ def test_l_analyzer_atteste_l_usage_de_sustained_hits(monkeypatch, tmp_path):
     assert usage and any(sum(v.values()) > 0 for v in usage.values()), stats["weapon_rule_usage"]
 
 
+def test_l_ordre_ignores_cover_avant_sustained_hits_est_le_meme_en_melee_et_au_tir(
+    monkeypatch, tmp_path
+):
+    """VERROU d'ordre : [IGNORES COVER] précède [SUSTAINED HITS] sur la touche additionnelle.
+
+    La branche SHOOT produit les tokens `_HIT_SEGMENT_RULE_TOKENS` (dont [IGNORES COVER]) PUIS
+    [SUSTAINED HITS]. La branche FOUGHT les a longtemps déclarés dans l'ordre inverse, sans
+    qu'aucun test ne vérifie les POSITIONS — seule la PRÉSENCE était contrôlée. Un lecteur
+    qui lirait le premier token d'une paire verrait un comportement différent selon la phase."""
+    gs, raw_log = _engine_shoot_log(
+        monkeypatch, ["IGNORES_COVER", "SUSTAINED_HITS:1"], [6, 4, 2, 4, 2],
+        unit_type=CLEAVE_UNIT, weapon_name=CLEAVE_WEAPON, melee=True,
+    )
+    lines = _step_log_lines(tmp_path, gs, raw_log)
+
+    # La touche additionnelle n'a pas de dé de touche — c'est sa signature dans le log.
+    additional = [l for l in lines if "Hit None(" in l]
+    assert len(additional) == 1, (
+        f"prémisse : un seul coup additionnel attendu ; {len(additional)} trouvé(s) : {lines}"
+    )
+    line = additional[0]
+    assert "[IGNORES COVER]" in line, f"token absent de la ligne additionnelle : {line}"
+    assert "[SUSTAINED HITS]" in line, f"token absent de la ligne additionnelle : {line}"
+    pos_ignores = line.index("[IGNORES COVER]")
+    pos_sustained = line.index("[SUSTAINED HITS]")
+    assert pos_ignores < pos_sustained, (
+        f"[IGNORES COVER] doit précéder [SUSTAINED HITS] (miroir du SHOOT branch) : {line}"
+    )
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # [REROLLED:n] — le dé AVANT relance, jusqu'à step.log
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1199,6 +1229,9 @@ def test_un_profil_anti_a_moitie_rempli_est_refuse():
 
     with pytest.raises(ValueError, match="anti_keyword et anti_threshold"):
         WeaponAttackProfile(anti_keyword="INFANTRY")
+    # Direction inverse : seuil sans keyword.
+    with pytest.raises(ValueError, match="anti_keyword et anti_threshold"):
+        WeaponAttackProfile(anti_threshold=4)
 
 
 def test_un_seuil_anti_sous_2_leve_a_l_entree_du_moteur():

@@ -572,6 +572,8 @@ describe("replayParser", () => {
       " [ANTI-INFANTRY:4+]",
       " [ANTI-VEHICLE:2+]",
       " [LETHAL HITS] [ANTI-MONSTER:5+]",
+      // VERROU : seuil à deux chiffres (≥ 10) — \d seul ne matchait pas
+      " [ANTI-INFANTRY:10+]",
     ]) {
       const shoot = parse(ligne("", woundTokens));
       expect(shoot.wound_ability).toBeUndefined();

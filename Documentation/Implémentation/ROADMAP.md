@@ -499,8 +499,15 @@ mesure, et c'est assumé (§0.14).
    ✅ **Cache de contributions OC ajouté le 2026-08-15** (§13) : `objective_control_contributions`
    mis en cache par activation dans `_DoctrineBot`, évite les recalculs redondants pour `w_crowd`.
    Couvert par `tests/unit/ai/test_bot_contributions_cache.py`.
+   Contexte : `x1_new_bots` prenait 464 min pour 3600 épisodes (vs 79 min pour `x1_long`) — ratio
+   5,9× causé par `w_crowd`. La barre de progression `--test-only` ne s'affichait qu'à la fin dans
+   le chemin parallèle ; corrigé via callback `on_result` dans `_collect_parallel_results_with_timeouts`.
+   `bot_eval_n_workers` porté à 12 (config ArmageddonAgent). Perf après cache : non encore mesuré.
+   ⏳ **`scripts/bench_shortlist.py` à écrire** (§13.1) : compare les décisions `_DoctrineBot` à
+   `DESTINATION_SHORTLIST ∈ {8, 12, 24}` vs référence=24, en divergence directe (pas win-rate).
    **Restent** : le réglage de `w_contest`/`w_crowd` (posés, non réglés), l'étape 7
-   (correspondance puis suppression des cinq anciens) et l'étape 8 rejouée après réglage.
+   (correspondance puis suppression des cinq anciens), l'étape 8 rejouée après réglage, et le bench
+   shortlist ci-dessus.
    ⚠️ Les chiffres des §8/§9 du doc de chantier sont **à rejouer** : échantillons insuffisants et
    une erreur d'arithmétique sur le `combined` (§11.1).
    ⚠️ **Ce point CONDITIONNE la valeur du point 7, il ne s'y ajoute pas.** Le panel actuel ne rend

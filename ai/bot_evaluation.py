@@ -760,10 +760,13 @@ def _warmup_eval_inference(model) -> None:
     ~60-120s — indiscernable d'un hang. Le warmup rend ce délai visible dans l'init du worker,
     au même titre que le chargement du modèle.
     """
-    import numpy as np
+    import gymnasium as gym
 
     obs_space = model.observation_space
-    dummy_obs = {k: np.zeros(v.shape, dtype=np.float32) for k, v in obs_space.spaces.items()}
+    if isinstance(obs_space, gym.spaces.Dict):
+        dummy_obs = {k: np.zeros(v.shape, dtype=np.float32) for k, v in obs_space.spaces.items()}
+    else:
+        dummy_obs = np.zeros(obs_space.shape, dtype=np.float32)
     action_masks = np.ones((1, model.action_space.n), dtype=bool)
     model.predict(dummy_obs, action_masks=action_masks, deterministic=True)
 
@@ -1565,9 +1568,7 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
             filled = int(bar_length * completed_ep / total_ep) if total_ep > 0 else 0
             bar = '█' * filled + '░' * (bar_length - filled)
             elapsed = time.time() - start_time
-            _mins = int(elapsed // 60)
-            _secs = int(elapsed % 60)
-            elapsed_str = f"{_mins:02d}:{_secs:02d}" if _mins < 3600 else f"{int(elapsed//3600)}:{_mins%60:02d}:{_secs:02d}"
+            elapsed_str = _format_elapsed(elapsed)
             speed_str = f"{completed_ep/elapsed:.2f}ep/s" if elapsed > 0 and completed_ep > 0 else "0.00ep/s"
             if eval_progress_prefix and eval_progress_label:
                 line = f"{eval_progress_prefix}{eval_progress_label}: {progress_pct:3.0f}% {bar} {completed_ep}/{total_ep} [{elapsed_str}, {speed_str}]"
@@ -1776,9 +1777,7 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
         bar_length = bot_eval_bar_length
         bar = '█' * bar_length
         elapsed = time.time() - require_present(start_time, "start_time")
-        _mins = int(elapsed // 60)
-        _secs = int(elapsed % 60)
-        elapsed_str = f"{_mins:02d}:{_secs:02d}" if _mins < 3600 else f"{int(elapsed//3600)}:{_mins%60:02d}:{_secs:02d}"
+        elapsed_str = _format_elapsed(elapsed)
         speed_str = f"{total_episodes/elapsed:.2f}ep/s" if elapsed > 0 else "0.00ep/s"
         if eval_progress_prefix and eval_progress_label:
             final_line = (

@@ -294,7 +294,7 @@
         "decapitation": 0.05,
         "scorer": 0.05
       },
-      "bot_eval_torch_compile_cpu": true
+      "bot_eval_torch_compile_cpu": false
     },
     "roster_pool_schedule": {
       "enabled": false,

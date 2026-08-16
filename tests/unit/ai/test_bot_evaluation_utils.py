@@ -982,6 +982,34 @@ def test_mixed_faction_roster_is_bucketed_not_fatal() -> None:
     assert faction not in be.ROSTER_GAP_FACTIONS
 
 
+def test_warmup_eval_inference_accepts_box_and_dict_obs_space() -> None:
+    """_warmup_eval_inference ne crash pas sur un espace Box (AttributeError ancien bug)."""
+    import gymnasium as gym
+
+    predict_calls: List[Any] = []
+
+    def _make_model(obs_space):
+        return SimpleNamespace(
+            observation_space=obs_space,
+            action_space=SimpleNamespace(n=4),
+            predict=lambda obs, **kw: predict_calls.append(obs) or (np.zeros(1), None),
+        )
+
+    # Box space — ancienne implémentation levait AttributeError
+    box_model = _make_model(gym.spaces.Box(low=0.0, high=1.0, shape=(8,), dtype=np.float32))
+    be._warmup_eval_inference(box_model)
+    assert len(predict_calls) == 1
+    assert isinstance(predict_calls[-1], np.ndarray)
+
+    # Dict space — comportement attendu inchangé
+    dict_model = _make_model(
+        gym.spaces.Dict({"obs": gym.spaces.Box(low=0.0, high=1.0, shape=(8,), dtype=np.float32)})
+    )
+    be._warmup_eval_inference(dict_model)
+    assert len(predict_calls) == 2
+    assert isinstance(predict_calls[-1], dict)
+
+
 def test_empty_controlled_roster_raises() -> None:
     """Aucune unite pour le joueur controle : anomalie d'environnement, pas un cas de jeu."""
     engine = SimpleNamespace(

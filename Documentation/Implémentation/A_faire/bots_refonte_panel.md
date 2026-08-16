@@ -136,6 +136,7 @@ raison (cf. `config/bot_movement_weights.json`, entrée `tactical`).
 | 6 | réglage en **bot-contre-bot** (~~orthogonalité~~ abandonnée, §3.2) | ✅ **2026-08-13, §12.8 à §12.14** — les deux hausses du §12.7 réfutées et défaites (§12.8) ; `scorer`, dernier profil posé sans mesure, réglé (§12.9) ; `decapitation` corrigé au déplacement puis son `w_objective` rejoué sur la forme retenue (§12.11, §12.14). Tous mesurés à 60 ép./bot, un poids par run, dérive des cinq contrôles 0,000. ⚠️ Restent `decapitation.w_crowd` et `w_contest`, jamais isolés APRÈS le correctif (§12.14) |
 | 7 | correspondance ancien/nouveau, puis suppression des cinq anciens | |
 | 8 | mesure finale contre l'agent, commande de §2 | ✅ **2026-08-13, §12.14** — 100 ep/bot sur `robust_0.8721`, panel unifié : `combined = 0,7433`, pire bot `racer = 0,630`, pire scénario 0,6867. Les `0,7767`, `0,7600` et `0,7400` sont des états intermédiaires de la même journée |
+| 9 | optimisation vitesse d'évaluation | ✅ cache contributions OC (2026-08-15, §13) — 6/6 tests verts ; ⏳ benchmark `DESTINATION_SHORTLIST` (`scripts/bench_shortlist.py`, §13.1) |
 
 ### 4.1 Pourquoi l'appariement des graines a été retiré
 
@@ -1645,3 +1646,28 @@ prouvés rouges par mutation (T4 VERROU) :
 à `DESTINATION_SHORTLIST = 24` destinations parmi les ~458 du pool BFS. La 1re passe (géométrique,
 O(1)/candidate) et `_objective_terms` (appelé une fois par décision) sont hors shortlist. Ce cache
 s'applique à `_objective_terms`, il est donc orthogonal au shortlist.
+
+### 13.1 Contexte de découverte et travaux restants (2026-08-15)
+
+**Chronologie** : un `--test-only --test-episodes 600` (6 bots × 4 scénarios × 150 ep/tâche) sur
+les nouveaux bots doctrine (`x1_new_bots`) a pris **464 minutes** — contre **79 minutes** pour
+l'ancien panel (`x1_long`). Le ratio 5,9× venait de `w_crowd` : les bots `endgame_push`, `scorer`,
+`alpha`, `attrition_withdraw` appelaient `objective_control_contributions` à chaque candidat de
+mouvement (jusqu'à 458 par décision), l'ancien panel ne l'appelait pas.
+
+**Résultat de l'eval (avant cache)** : `combined = 0.3217`, vs `racer = 0.20`, vs `scorer = 0.14`
+— le modèle courant est nettement battu par le nouveau panel. Le cache n'est pas encore mesuré.
+
+**Parallélisme** : `bot_eval_n_workers` porté de **4 à 12** dans `x1_new_bots` et `x1_long`
+(`config/agents/ArmageddonAgent/ArmageddonAgent_training_config.json`). Deux evals simultanées
+chargeraient 24 workers sur 16 cœurs ; 8 par profil serait plus sûr.
+
+**⏳ Travail restant — benchmark `DESTINATION_SHORTLIST`** :
+
+`scripts/bench_shortlist.py` n'existe pas encore. Il doit :
+- comparer les décisions de `_DoctrineBot` à `DESTINATION_SHORTLIST ∈ {8, 12, 24}` vs référence=24 ;
+- utiliser la comparaison de décisions directes (pas le win-rate par épisode) pour mesurer l'impact
+  en quelques minutes ;
+- sortir : taux de divergence par valeur, distributions de score, temps moyen par décision.
+
+Cf. prompt auto-contenu dans le rapport de clôture du 2026-08-15 pour le détail de l'implémentation.
