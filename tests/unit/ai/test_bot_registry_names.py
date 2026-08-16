@@ -1,9 +1,9 @@
 """Le registre des bots ne peut pas diverger de lui-même.
 
 `ai/bot_registry.py` déclare deux choses qui doivent rester d'accord :
-  - des **tuples de clés** (`LEGACY_BOT_KEYS`, `DOCTRINE_BOT_KEYS`, `HOLDOUT_BOT_KEYS`), lisibles
-    sans importer le moteur — c'est ce dont `ai/training_callbacks.py` a besoin pour ses
-    constantes de module ;
+  - des **tuples de clés** (`LEGACY_BOT_KEYS`, `DOCTRINE_BOT_KEYS`, `BENCHMARK_BOT_KEYS`,
+    `SEALED_HOLDOUT_KEYS`), lisibles sans importer le moteur — c'est ce dont
+    `ai/training_callbacks.py` a besoin pour ses constantes de module ;
   - une **table clé → classe** (`bot_classes()`), qui elle importe tout.
 
 Ce fichier est le verrou que la docstring du registre promettait. Il a été écrit APRÈS avoir été
@@ -26,7 +26,8 @@ def test_the_key_tuples_and_the_class_table_describe_the_same_panel() -> None:
     declared = set(
         bot_registry.LEGACY_BOT_KEYS
         + bot_registry.DOCTRINE_BOT_KEYS
-        + bot_registry.HOLDOUT_BOT_KEYS
+        + bot_registry.BENCHMARK_BOT_KEYS
+        + bot_registry.SEALED_HOLDOUT_KEYS
     )
 
     assert declared == set(bot_registry.bot_classes())
@@ -37,7 +38,8 @@ def test_all_bot_keys_is_exactly_the_declared_panel_plus_random() -> None:
     declared = set(
         bot_registry.LEGACY_BOT_KEYS
         + bot_registry.DOCTRINE_BOT_KEYS
-        + bot_registry.HOLDOUT_BOT_KEYS
+        + bot_registry.BENCHMARK_BOT_KEYS
+        + bot_registry.SEALED_HOLDOUT_KEYS
     )
 
     assert bot_registry.ALL_BOT_KEYS == declared | {"random"}
@@ -49,8 +51,8 @@ def test_every_key_has_a_display_name_and_no_orphan_remains() -> None:
     assert set(bot_registry.BOT_DISPLAY_NAMES) == bot_registry.ALL_BOT_KEYS
 
 
-def test_the_three_families_do_not_overlap() -> None:
-    """Un bot est ancien, refondu OU holdout — jamais deux à la fois.
+def test_the_four_families_do_not_overlap() -> None:
+    """Un bot est ancien, refondu, benchmark OU holdout scellé — jamais deux à la fois.
 
     Le recouvrement ne serait pas cosmétique : `SELECTION_BOT_NAMES` retire les holdouts de
     `ALL_BOT_NAMES`, donc un bot déclaré dans deux familles disparaîtrait du signal de sélection
@@ -58,11 +60,27 @@ def test_the_three_families_do_not_overlap() -> None:
     """
     legacy = set(bot_registry.LEGACY_BOT_KEYS)
     doctrine = set(bot_registry.DOCTRINE_BOT_KEYS)
-    holdout = set(bot_registry.HOLDOUT_BOT_KEYS)
+    benchmark = set(bot_registry.BENCHMARK_BOT_KEYS)
+    sealed = set(bot_registry.SEALED_HOLDOUT_KEYS)
 
     assert legacy & doctrine == set()
-    assert legacy & holdout == set()
-    assert doctrine & holdout == set()
+    assert legacy & benchmark == set()
+    assert legacy & sealed == set()
+    assert doctrine & benchmark == set()
+    assert doctrine & sealed == set()
+    assert benchmark & sealed == set()
+
+
+def test_benchmark_and_sealed_are_excluded_from_selection() -> None:
+    """Aucun benchmark ni holdout scellé ne pilote combined/worst_bot (V11 §10.5 + §4.D)."""
+    assert not (set(bot_registry.BENCHMARK_BOT_KEYS) & bot_registry.SELECTION_BOT_KEYS)
+    assert not (set(bot_registry.SEALED_HOLDOUT_KEYS) & bot_registry.SELECTION_BOT_KEYS)
+
+
+def test_holdout_bot_keys_compat_alias_equals_sealed() -> None:
+    """HOLDOUT_BOT_KEYS est un alias de SEALED_HOLDOUT_KEYS — les consommateurs non migrés
+    continuent de fonctionner."""
+    assert bot_registry.HOLDOUT_BOT_KEYS is bot_registry.SEALED_HOLDOUT_KEYS
 
 
 @pytest.mark.parametrize("bot_key", sorted(bot_registry.ALL_BOT_KEYS - {"random"}))
