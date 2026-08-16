@@ -4979,8 +4979,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         return;
       }
       squadShootSessionRef.current += 1;
-      const eligibleTypes = eligibleShootingTypesRef.current ?? ["normal"];
+      const eligibleTypes = eligibleShootingTypesRef.current;
       eligibleShootingTypesRef.current = null;
+      if (!eligibleTypes) {
+        setError("Squad shoot activate : eligible_shooting_types absent de la réponse backend");
+        squadShootActivatingRef.current = false;
+        return;
+      }
       setSquadShootPlan({
         unitId: uid,
         models,
@@ -5023,8 +5028,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         });
       } catch (e) {
         console.error("[SQUAD-SHOOT] type_select FAILED", e);
+        setError(`Squad shoot type select failed: ${formatApiConnectionError(e)}`);
         return;
       }
+      if (viewActiveRef.current) return;
       setSquadShootPlan((prev) => (prev ? { ...prev, selectedShootingType: shootingType } : prev));
     },
     [executeAction]

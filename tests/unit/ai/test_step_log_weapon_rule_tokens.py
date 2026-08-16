@@ -151,7 +151,7 @@ def _engine_shoot_log(monkeypatch, weapon_rules, rolls, *, moved_inches=0.0, tar
                       n_attacks=1, unit_rules=(), cover=False, unit_type=UNIT_TYPE,
                       weapon_name=WEAPON_NAME, target_models=1, melee=False,
                       target_keywords=(), units_advanced=False, engaged=False,
-                      indirect=False):
+                      indirect=False, spotter=False):
     """Fait jouer UNE attaque par le vrai moteur et rend (game_state, son action_log).
 
     `melee=True` passe par `build_manual_fight_allocation` — le MÊME émetteur de log
@@ -166,10 +166,11 @@ def _engine_shoot_log(monkeypatch, weapon_rules, rolls, *, moved_inches=0.0, tar
     produit pas ici. Le patch est requis, pas commode : ce décor minimal ne porte pas la
     `config` que les vraies primitives exigent.
 
-    `indirect=True` pose le type de tir INDIRECT sur l'escouade 1 (10.07) et masque la cible
-    (`compute_unit_los` renvoie `can_see=False`) pour que le plancher 6+ s'applique — la cible
-    n'est visible d'aucune unité amie, donc pas de spotter. La règle d'arme INDIRECT_FIRE doit
-    figurer dans `weapon_rules` pour que la regle joue effectivement (deux moitiés nécessaires).
+    `indirect=True` pose le type de tir INDIRECT sur l'escouade 1 (10.07). Par défaut la cible
+    n'est visible d'aucune unité amie → plancher 6+. `spotter=True` (exige `indirect=True`) rend
+    `can_see=True` pour que `_target_visible_to_a_friendly_unit` retourne True, déclenchant le
+    plancher 4+ (l'escouade est stationnaire car `moved_inches=0.0`). La règle d'arme
+    INDIRECT_FIRE doit figurer dans `weapon_rules` pour que la règle joue (deux moitiés).
     """
     seq = list(rolls)
 
@@ -178,11 +179,11 @@ def _engine_shoot_log(monkeypatch, weapon_rules, rolls, *, moved_inches=0.0, tar
         return seq.pop(0)
 
     monkeypatch.setattr(random, "randint", fake)
-    # `can_see` est nécessaire quand `_target_visible_to_a_friendly_unit` est appelé
-    # (tir indirect, clause spotter 10.07). La valeur `False` garantit le plancher 6+.
+    # `can_see` : False → plancher 6+ (pas de spotter) ; True → plancher 4+ (spotter présent).
+    _can_see = bool(spotter)
     monkeypatch.setattr(
         shooting_handlers, "compute_unit_los",
-        lambda gs, s, t: {"cover": cover, "can_see": False},
+        lambda gs, s, t: {"cover": cover, "can_see": _can_see},
     )
     monkeypatch.setattr(shooting_handlers, "_get_unit_by_id", lambda gs, sid: {"id": sid})
 
@@ -1160,6 +1161,10 @@ LOT_A_TOKENS = [
     # pose le choix de type ; la contre-épreuve le GARDE et retire seulement la règle d'arme.
     # ranged-only : melee_ok=False.
     ("INDIRECT_FIRE", "[INDIRECT FIRE:6+]", [3, 4, 2], {"indirect": True}, False),
+    # Plancher 4+ avec spotter : même arme, même type de tir, mais `spotter=True` fait que
+    # `_target_visible_to_a_friendly_unit` retourne True → `indirect_fire_fail_below` = 4.
+    # Verrou sur la branche spotted de `indirect_fire_fail_below` (shared_utils.py).
+    ("INDIRECT_FIRE", "[INDIRECT FIRE:4+]", [3, 4, 2], {"indirect": True, "spotter": True}, False),
 ]
 
 _LOT_A_IDS = [rule.split(":")[0] for rule, *_ in LOT_A_TOKENS]

@@ -183,6 +183,8 @@ def test_le_log_de_tir_affiche_le_token_heavy(monkeypatch):
             # l autre ; ces deux cles sont exigees par require_key a l emission.
             "assault_applied": False,
             "close_quarters_applied": False,
+            # [INDIRECT FIRE] 10.07 : posé à la création du groupe ; None si la règle ne joue pas.
+            "indirect_fire_fail_below": None,
             "player": 0,
         }
         _emit_squad_shoot_log(gs, group, SHOOT_CTX)

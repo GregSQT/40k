@@ -108,6 +108,8 @@ def _weapon_group() -> Dict[str, Any]:
         # Bolt Rifle ne déclare ni l'un ni l'autre → False.
         "assault_applied": False,
         "close_quarters_applied": False,
+        # [INDIRECT FIRE] 10.07 : posé à la création du groupe ; None si la règle ne joue pas.
+        "indirect_fire_fail_below": None,
     }
 
 
