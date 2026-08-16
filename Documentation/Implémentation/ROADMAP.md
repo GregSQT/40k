@@ -644,14 +644,15 @@ mesure, et c'est assumé (§0.14).
 ## 4. Backlog hors chemin critique (`A_faire/`)
 
 Prêt à démarrer, conception close, aucun arbitrage en attente :
-- ⬜ **Bots : capacités communes, jitter, trois benchmarks de holdout, `benchmark_floor`** (chantier
-  ouvert le 2026-08-14, **conception CLOSE le 2026-08-15**, aucune ligne de code écrite). Suite
+- 🚧 **Bots : capacités communes, jitter, trois benchmarks de holdout, `benchmark_floor`** (chantier
+  ouvert le 2026-08-14, **conception CLOSE le 2026-08-15**). Suite
   directe du point 9 de §1 (refonte du panel). **CONCEPTION : les huit étapes A→H sont spécifiées
   dans le doc. EXÉCUTION, tranche 1 : A+B+C+D.**
-  **A** capacités communes (`late_game`, `preservation`, `persistence` — généralisées aux six
-  styles, gain par style, `gain = 0` reproduit le comportement actuel) et **B** jitter des poids
-  (PPO ne doit pas apprendre les coefficients exacts) : aucun run d'entraînement, verrouillables
-  par tests, prix = **rejouer la ligne de base du panel** (`combined = 0,7433`, `racer = 0,630`).
+  ✅ **A+B livrées le 2026-08-16** : capacités communes (`late_game`, `preservation`, `persistence`)
+  généralisées aux six styles via profil JSON (`config/bot_doctrine_profiles.json`, fichier NOUVEAU) ;
+  `gain = 0` reproduit le comportement exact (verrou D4) ; jitter SHA256 par épisode via
+  `apply_episode_jitter`, aucun run d'entraînement requis, 82 tests verrouillés.
+  Prix A+B = **rejouer la ligne de base du panel** (`combined = 0,7433`, `racer = 0,630`).
   **C** trois benchmarks à mécanisme de décision DIFFÉRENT (intention macro puis destination, au
   lieu de la somme pondérée des six styles), jamais vus à l'entraînement : `reference_balanced`
   (polyvalence), `reference_denial` (sécurisation du score), `reference_reactive`
