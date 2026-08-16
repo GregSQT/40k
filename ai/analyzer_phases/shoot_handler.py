@@ -125,6 +125,20 @@ def _analyzer_socle(config: "AnalyzerConfig", unit_type: str, col: int, row: int
     return Socle(shape, size, int(col), int(row), set(_model_footprint(int(col), int(row), (shape, size))))
 
 
+def _eligibility_rule_applied(state: "AnalyzerState", action_desc: str, token: str,
+                              legacy: bool) -> bool:
+    """USAGE d'une règle d'ÉLIGIBILITÉ au tir : [ASSAULT] 10.05, [CLOSE-QUARTERS] 10.06.
+
+    Le TOKEN fait autorité dès que la grammaire le garantit (`LOG_GRAMMAR_VERSION >= 4`). En
+    dessous il n'était pas écrit du tout : `legacy` reconstruit alors le fait depuis l'état, la
+    seule mesure possible sur ces journaux-là. `legacy` est un booléen déjà calculé par
+    l'appelant, donc son évaluation immédiate ne coûte rien.
+    """
+    if state.log_grammar >= 4:
+        return re.search(token, action_desc, re.IGNORECASE) is not None
+    return legacy
+
+
 def handle_shoot(
     state: "AnalyzerState",
     config: "AnalyzerConfig",
@@ -882,17 +896,12 @@ def handle_shoot(
         if "TWIN_LINKED" in weapon_rules_list:
             key = ("TWIN_LINKED", weapon_key)
             stats['weapon_rule_usage'][key][pl_int] += 1
-        # [ASSAULT] 24.04 — USAGE lu depuis le TOKEN (grammaire >= 4) ou reconstruit depuis
-        # l'état (grammaire < 4 : le token n'existait pas encore). Le token est la source de
-        # vérité dès qu'il est disponible ; le fallback état-based reste exact pour les anciens
-        # journaux (arme [ASSAULT] + tireur ayant avancé ce tour).
-        if state.log_grammar >= 4:
-            assault_applied = re.search(r'\[ASSAULT\]', action_desc, re.IGNORECASE) is not None
-        else:
-            assault_applied = (
-                shooter_id in state.units_advanced and 'ASSAULT' in weapon_rules_list
-            )
-        if assault_applied:
+        # [ASSAULT] 24.04 — règle d'éligibilité : token si la grammaire le garantit, sinon
+        # reconstruction depuis l'état (arme [ASSAULT] + tireur ayant avancé ce tour).
+        if _eligibility_rule_applied(
+            state, action_desc, r'\[ASSAULT\]',
+            shooter_id in state.units_advanced and 'ASSAULT' in weapon_rules_list,
+        ):
             key = ("ASSAULT", weapon_key)
             stats['weapon_rule_usage'][key][pl_int] += 1
         # [RAPID FIRE X] 24.30 — USAGE, même régime que [HEAVY] : le token n'est écrit que si le
@@ -922,13 +931,12 @@ def handle_shoot(
         # les attaques où elle a réellement pesé, jamais celles où l'arme la déclare seulement.
         if re.search(r'\[PRECISION\]', action_desc, re.IGNORECASE):
             stats['weapon_rule_usage'][("PRECISION", weapon_key)][pl_int] += 1
-        # [CLOSE-QUARTERS] 10.06 — même régime que [ASSAULT] : token (grammaire >= 4) ou
-        # fallback état-based (arme [CLOSE_QUARTERS] + tireur engagé avec la cible).
-        if state.log_grammar >= 4:
-            cq_applied = re.search(r'\[CLOSE-QUARTERS\]', action_desc, re.IGNORECASE) is not None
-        else:
-            cq_applied = is_close_quarters and shooter_engaged_with_target
-        if cq_applied:
+        # [CLOSE-QUARTERS] 10.06 — même régime que [ASSAULT] ; repli état-based : arme
+        # [CLOSE_QUARTERS] et tireur engagé avec SA cible.
+        if _eligibility_rule_applied(
+            state, action_desc, r'\[CLOSE-QUARTERS\]',
+            is_close_quarters and shooter_engaged_with_target,
+        ):
             stats['weapon_rule_usage'][("CLOSE_QUARTERS", weapon_key)][pl_int] += 1
         if heavy_applied_in_log:
             # [HEAVY] 24.16 — USAGE seulement, jamais VALIDITE. Le contrôle de validité
