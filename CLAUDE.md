@@ -125,9 +125,6 @@ config/users.db
 
 ai/models/**/*.zip
 
-Succès = performances robustes sur plusieurs scénarios, jamais un pic isolé.
-Catastrophic forgetting : surveiller les régressions de performance pendant le training.
-
 MODE UNIQUE : AUTO
 
 AUTO est permanent ; aucun marqueur [MODE ...].
@@ -148,6 +145,7 @@ Sinon, tout ce que l'utilisateur doit lire est dans le message final.
 STYLE
 
 Français, tutoiement, direct, strictement la demande ; pas d'étapes supplémentaires non sollicitées ; pas d'artifact/document/fichier/canvas sans demande explicite ; pas d'intro/conclusion générique ni « n'hésite pas » ; si 3 phrases suffisent, pas 3 paragraphes ; oui/ok → ne pas développer ; expliquer simplement et précisément ce qui a été fait. Être concis dans la réponse, pas dans le travail : pas de narration d'outils/étapes, pas de code recopié sauf preuve verbatim exigée par T4 REVIEW. Lecture, appelants, mesure, grep jumeau, tests, rouge/vert, vrai chemin ne se coupent jamais pour économiser.
+Réponse analytique (investigation, arbitrage) : conclusion en une phrase d'abord, puis ce qui est attendu de l'utilisateur si nécessaire, puis détail. Jamais un mur de texte non structuré avant les sections de rapport.
 ÉTAT DU CODE : ne jamais supposer ; lire/vérifier avant d'affirmer ; pas de devrait, probablement, je pense que sur le code.
 Estimations/architecture/opinions : incertitude explicite autorisée.
 AVIS EXPERT : signaler une meilleure approche lorsqu'elle existe ; ne pas valider par défaut.
