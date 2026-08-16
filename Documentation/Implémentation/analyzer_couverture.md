@@ -178,7 +178,7 @@ l'écriture directe de `rule_choice`) :
 | `reactive_move` | `Unit N(c,r) REACTIVE MOVED [<CAPACITÉ>] from … to … [Roll: N] - trigger: Unit M->(c,r)` | jet, déclencheur ; **pas de `[MODELS:]` d'arrivée** |
 | `deploy_unit` | `Unit N(c,r) DEPLOYED from (-1,-1) to (c,r)` | sentinelle hors-table `(-1,-1)` (20.01) |
 | `shoot` | `Unit N(c,r) SHOT [ASSAULT] [CLOSE-QUARTERS] [RAPID FIRE:X] [MELTA:X] [BLAST:X] [EXTRA ATTACKS] [PRECISION] Unit M(c,r) with [<arme>] - Hit R(T+ ou base+->eff+) [HEAVY\|COVER] [TORRENT] [IGNORES COVER] [PSYCHIC] [REROLLED:n] [SUSTAINED HITS] [<CAPACITÉ>] - Wound R(T+) [LETHAL HITS] [ANTI-<KW>:Y+] [<CAPACITÉ>] [REROLLED:n] - Save R(T+) [REROLLED:n] [<CAPACITÉ>] - Dmg:NHP [HAZARDOUS] Roll:N` ; ou `Save [DEVASTATING WOUNDS]` | jets, seuils, tokens de règle |
-| `hazardous` | `Unit N(c,r) SUFFERS X Mortal Wounds [HAZARDOUS]` / `… was DESTROYED [HAZARDOUS]` | MW infligées |
+| `hazardous` | `Unit N(c,r) SUFFERS X Mortal Wounds [HAZARDOUS]` — forme UNIQUE | MW infligées — ⚠️ **aucun lecteur** (2026-08-16) |
 | `charge` | `Unit N(c,r) CHARGED [<CAPACITÉ>] [FLY] Unit M(c,r) from … to … [Roll: N]` | jet 2D6 (pouces), `[FLY]`, **une seule** cible |
 | `charge_fail` | `Unit N(c,r) FAILED CHARGE to unit M(c,r) [Roll: N]` | jet |
 | `charge_impact` | `Unit N(c,r) IMPACTED [<CAPACITÉ>] Unit M(c,r) - Hit:T+:R(HIT\|FAIL) Wound:AUTO Save:NONE[MW] Dmg:NHP` | seuil, jet, MW |
@@ -188,12 +188,7 @@ l'écriture directe de `rule_choice`) :
 | `rule_choice` | `Unit N(c,r) chose [<NOM DE RÈGLE>]` | nom d'affichage |
 
 **Formateurs sans producteur** (code mort côté moteur) : `skip`, `shoot_summary`, `combat_summary`.
-`[ASSAULT]` 24.04 et `[CLOSE-QUARTERS]` 24.07 avaient le même statut jusqu'au 2026-08-16 — câblés
-le même jour (producteur dans `_emit_squad_shoot_log`, pont dans `_build_shot_details`, lecture de
-token dans `shoot_handler.py`). Leurs deux clés `assault_applied` / `close_quarters_applied` sont
-désormais posées à la création du groupe (`_build_manual_allocation`) ; l'analyzer lit le token au
-lieu de re-dériver depuis l'état. Verrouillé par `test_step_log_weapon_rule_tokens.py` (LOT A).
-Conséquence directe restante : le contrôle §2.1 « Dead unit skipping » et tout `handle_skip`
+Conséquence directe : le contrôle §2.1 « Dead unit skipping » et tout `handle_skip`
 (`shoot_handler.py`) sont inatteignables. Vérifié le 2026-08-10 sur
 `w40k_core._STEP_LOG_TYPE_MAP` (`:5211-5238`) : `skip` n'y figure pas.
 
@@ -612,7 +607,7 @@ tout contrôle mesurant une distance ou une adjacence — donc §1.1 à §1.4.
 |---|---|---|---|
 | 06.01 Visibility | supprimé 2026-07-16 ; `has_line_of_sight` ne sert plus qu'aux métriques comportementales | `Walls:` binaire seulement, aucun terrain | NON-TESTABLE-OFFLINE — reproduire le prédicat moteur exige `game_state` (empreintes, 13.10, LoS 3D) |
 | 06.02 Mortal wounds (sélection de figurine) | — | MW infligées visibles (`charge_impact`, `hazardous`, `DEVASTATING WOUNDS`) ; figurine choisie absente | ABSENT-LOG-MANQUANT — `mid` de la figurine sélectionnée |
-| 06.03 Hazard rolls (1-2 → 1 MW, ou 3 si tous M/V) | — (seule la ligne `was DESTROYED [HAZARDOUS]` est parsée, `analyzer_core.py`, pour le contexte de mort) | `[HAZARDOUS] Roll:N` + `SUFFERS X Mortal Wounds` : **tout est là depuis `d891fff1` (2026-08-10) seulement** — avant, la ligne n'atteignait pas step.log | **ABSENT-LOGGABLE** (l'était en fait ABSENT-LOG-MANQUANT jusqu'au 2026-08-10, cf. §1.3) |
+| 06.03 Hazard rolls (1-2 → 1 MW, ou 3 si tous M/V) | **AUCUN — plus aucune ligne `[HAZARDOUS]` n'est lue** (2026-08-16) | `[HAZARDOUS] Roll:N` + `SUFFERS X Mortal Wounds` : **tout est là depuis `d891fff1` (2026-08-10)** — avant, la ligne n'atteignait pas step.log | **ABSENT-LOGGABLE** — ⚠️ **RÉGRESSION mesurée le 2026-08-16** : la version précédente disait « seule la ligne `was DESTROYED [HAZARDOUS]` est parsée, `analyzer_core.py` ». Les deux moitiés de cette phrase sont fausses aujourd'hui. `15d95480` a supprimé la branche de parsing, et la forme `was DESTROYED [HAZARDOUS]` n'a JAMAIS eu de producteur dans `step.log` (`grep -c DESTROYED ai/step_logger.py` → 0 ; le seul site est `shared_utils.py`, canal console PvP). Mesure : `grep -rn HAZARD` sur les 8 modules de l'analyzer → **1 hit, et c'est un commentaire** (dans `handle_shoot`, `shoot_handler.py`) |
 
 ### 07 The battle round
 
@@ -787,7 +782,7 @@ Aucun TRANSPORT journalisé (ni embark, ni disembark, ni capacité).
 | 24.04 [ASSAULT] | #39 (usage) | **PARTIEL** — validité non contrôlée (cf. 10.05) |
 | 24.05 [BLAST] | #41bis | **PARTIEL** — token `[BLAST:X]` loggué et dés bonus entrés dans le plafond de tirs depuis le 2026-08-11 (latent : aucun roster joué ne porte d'arme BLAST, 4 existent côté Space Marine) ; l'interdiction sur cible engagée n'est toujours pas contrôlée |
 | 24.06 [CLEAVE] | #41bis, #39ter | **PARTIEL** — token `[CLEAVE:X]` loggué, dés bonus entrés dans le plafond d'attaques et USAGE compté depuis le 2026-08-11. La clause « une seule cible pour toutes les attaques de cette arme » n'est PAS rejouée par l'analyzer : le moteur l'a tranchée et le dit en posant (ou non) le token, comme `[RAPID FIRE:X]` dit la demi-portée |
-| 24.07 [CLOSE-QUARTERS] | #11, #16, #17 + #39 | **PARTIEL** — l'usage §1.8 est réaligné sur l'engagement per-figurine depuis le 2026-08-11 (V4 fermé) ; restent le volet « un seul choix par figurine », et le fait que l'usage est **re-dérivé de la géométrie** faute de token dans le journal (cf. le tableau « Journal coverage » de `Documentation/Weapon_rules.md`) |
+| 24.07 [CLOSE-QUARTERS] | #11, #16, #17 + #39 | **PARTIEL** — le compteur d'USAGE §1.8 mesure `calculate_hex_distance(ancre,ancre)==1` (`shoot_handler.py`), pas l'engagement per-figurine (vert vacant, cf. §5) ; le volet « un seul choix par figurine » manque |
 | 24.08 Deadly Demise | — | ABSENT-LOG-MANQUANT |
 | 24.09 Deep Strike | — | **PARTIEL** — règle déclarée, ingress loggué, contrainte >8" non contrôlée (loggable) |
 | 24.10 [DEVASTATING WOUNDS] | #40 (tir), #39quater (usage, mêlée) | **PARTIEL** — le contrôle suppose que seul un 6 est critique ; ignore [ANTI-X Y+]. ✅ La MÊLÉE écrit enfin `Save [DEVASTATING WOUNDS]` (2026-08-11) : jusque-là elle imprimait un jet de sauvegarde sur une blessure où 24.10 interdit d'en faire un |
@@ -795,11 +790,11 @@ Aucun TRANSPORT journalisé (ni embark, ni disembark, ni capacité).
 | 24.12 Feel No Pain | — | ABSENT-LOG-MANQUANT — jet FNP + seuil |
 | 24.13 Fights First | — | ABSENT-LOG-MANQUANT — statut Fights First de l'unité activée |
 | 24.14 Firing Deck | — | ABSENT-LOG-MANQUANT |
-| 24.15 [HAZARDOUS] | ligne `hazardous` + `[HAZARDOUS] Roll:N` | **PARTIEL** — le nombre de jets doit égaler le nombre d'armes Hazardous sélectionnées : ce nombre n'est pas loggué |
+| 24.15 [HAZARDOUS] | **AUCUN** (2026-08-16, cf. 06.03) | **ABSENT-LOGGABLE** — la donnée est au journal (ligne `hazardous` + `[HAZARDOUS] Roll:N`), personne ne la lit. Reste hors de portée même une fois le contrôle écrit : le nombre d'armes Hazardous sélectionnées, qui n'est pas loggué (§7 L15) |
 | 24.16 [HEAVY] | #39 (usage) ; validité **supprimée** 2026-07-29 | **PARTIEL** (suppression justifiée : distance de chemin par figurine non re-dérivable) |
 | 24.17 Hover | — | ABSENT-LOG-MANQUANT (et fausse les budgets de vol, cf. 21.03) |
 | 24.18 [IGNORES COVER] | — | **ABSENT-LOGGABLE** depuis le 2026-08-12 — token `[IGNORES COVER]` sur le segment `Hit`. Posé sur la DÉCLARATION de l'arme (exception assumée : le couvert n'est même pas calculé, donc « la cible l'aurait-elle eu ? » est inconnaissable) |
-| 24.19 [INDIRECT FIRE] | — | ABSENT-LOG-MANQUANT — ⚠️ **et c'en est un vrai depuis le 2026-08-16** : la règle EST implémentée (cf. 10.07), elle joue, et le journal ne la nomme pas encore. Pièce 6 du chantier `A_faire/indirect_fire_10_07.md` |
+| 24.19 [INDIRECT FIRE] | — | ABSENT-LOG-MANQUANT — règle NON IMPLÉMENTÉE dans le moteur, cf. 10.07 : ce n'est pas un trou de journal |
 | 24.20 Infiltrators | — | ABSENT-LOG-MANQUANT (zone de déploiement absente) |
 | 24.21 [LANCE] | — | ABSENT-LOG-MANQUANT (absente aussi de `weapon_rules.json`) |
 | 24.22 Leader | — | ABSENT-LOG-MANQUANT |
@@ -841,10 +836,10 @@ ne qualifie qu'une chose — une paire observée que l'armurerie ne déclare pas
 | `CLOSE_QUARTERS` | 24.07 / 10.06 | #11, #16, #17 + usage §1.8 (ancre, cf. §5) | PARTIEL |
 | `DEVASTATING_WOUNDS` | 24.10 | #40 | PARTIEL |
 | `EXTRA_ATTACKS` | 24.11 | — | **ABSENT-LOGGABLE** — token dans `step.log` depuis le 2026-08-12 (lot A), contrôle à écrire |
-| `HAZARDOUS` | 24.15 / 06.03 | ligne `hazardous`, jet loggué | PARTIEL |
+| `HAZARDOUS` | 24.15 / 06.03 | — | **ABSENT-LOGGABLE** — ligne et jet loggués, aucun lecteur depuis `15d95480` (2026-08-12) ; c'était « PARTIEL » ici jusqu'au 2026-08-16 |
 | `HEAVY` | 24.16 | #39 usage ; validité supprimée | PARTIEL |
 | `IGNORES_COVER` | 24.18 | — | **ABSENT-LOGGABLE** — token dans `step.log` depuis le 2026-08-12 (lot A), contrôle à écrire |
-| `INDIRECT_FIRE` | 24.19 / 10.07 | — | ABSENT-LOG-MANQUANT — règle implémentée le 2026-08-16, `obs_id` 18 posé à cette date ; le token du journal reste à écrire (pièce 6) |
+| `INDIRECT_FIRE` | 24.19 / 10.07 | — | ABSENT-LOG-MANQUANT — règle NON IMPLÉMENTÉE dans le moteur (seule entrée de `weapon_rules.json` sans `obs_id` pour cette raison) |
 | `LETHAL_HITS` | 24.23 | — | **ABSENT-LOGGABLE** — token dans `step.log` depuis le 2026-08-12 (lot A), contrôle à écrire |
 | `MELTA` | 24.25 | usage §1.8 (`[MELTA:X]`) | **ABSENT-LOGGABLE** — token depuis le 2026-08-11 ; aucun contrôle de conformité |
 | `PRECISION` | 24.28 / 05.03 | usage §1.8 (`[PRECISION]`) | **ABSENT-LOGGABLE** — token depuis le 2026-08-11 ; aucun contrôle de conformité |
@@ -854,12 +849,11 @@ ne qualifie qu'une chose — une paire observée que l'armurerie ne déclare pas
 | `TORRENT` | 24.37 | — | **ABSENT-LOGGABLE** — token dans `step.log` depuis le 2026-08-12 (lot A), contrôle à écrire |
 | `TWIN_LINKED` | 24.38 | #39 + tokens | PARTIEL |
 
-**0 COUVERT / 8 PARTIEL / 14 ABSENT-LOGGABLE / 1 ABSENT-LOG-MANQUANT.**
+**0 COUVERT / 7 PARTIEL / 15 ABSENT-LOGGABLE / 1 ABSENT-LOG-MANQUANT.**
+*(2026-08-16 : `HAZARDOUS` passe de PARTIEL à ABSENT-LOGGABLE — son lecteur a été supprimé, pas sa donnée.)*
 
-Le seul ABSENT-LOG-MANQUANT restant est `INDIRECT_FIRE`. ⚠️ **Depuis le 2026-08-16 c'en est un
-VRAI** : la règle est implémentée et joue, mais son token n'est pas encore écrit (pièce 6 de
-`A_faire/indirect_fire_10_07.md`). Jusqu'à cette date, ce n'était pas un trou de journal :
-la règle n'était **pas implémentée dans le moteur** (`config_loader.load_weapon_rules_config`,
+Le seul ABSENT-LOG-MANQUANT restant est `INDIRECT_FIRE`, et ce n'est pas un trou de journal :
+la règle n'est **pas implémentée dans le moteur** (`config_loader.load_weapon_rules_config`,
 `tests/unit/engine/test_squad_obs_weapon_profiles.py::test_indirect_fire_is_deliberately_absent`).
 Écrire son token journaliserait un effet qui n'a pas lieu — la règle doit d'abord exister.
 
@@ -929,7 +923,7 @@ par absence prouvée de site d'incrémentation.
 | V1 | `damage_exceeds_hp` n'est **jamais incrémenté** | affiché `analyzer.py`, sommé `:3411` et `:3593` | La ligne « Dmg > HP_CUR (overkill) » affiche 0 en permanence et **contribue à un ✅ dans le SUMMARY** | **OUVERT** — aucun `+= 1` sur cette clé |
 | ~~V2~~ | `fight_from_non_adjacent` n'était **jamais incrémenté** depuis 2026-07-24 | — | — | **FERMÉ le 2026-08-10** par SUPPRESSION de la clé (déclaration, `first_error_lines`, terme du total FIGHT). Le contrôle avait été retiré comme faux positif ; garder sa clé sommée à 0 entretenait l'idée que 12.01 était surveillée. Elle l'est par `test_fight_spatial_contract.py`, fonction `test_fight_b_engagement_pool_uses_full_footprint_distance`. **Son propre verrou était vacant** : `test_analyzer_no_fight_non_adjacent_false_positive` affirmait « == 0 » sur une clé sans site d'incrémentation — vrai quoi qu'il arrive. Il surveille désormais le RETOUR de la clé, et double son assertion par le TOTAL §1.4, qui, lui, bouge |
 | ~~V3~~ | `dead_unit_skipping` / `handle_skip` sont **inatteignables** | — | — | **FERMÉ le 2026-08-10** par suppression : `_STEP_LOG_TYPE_MAP` est une liste blanche qui ne porte pas `skip` — « type sans formateur -> volontairement non journalisé ». Aucune ligne `SKIP` n'existe donc dans un step.log (mesuré : 0 occurrence sur 1683 actions). La branche du parseur SURVIT, mais pour signaler la ligne en §2.7 au lieu de la laisser tomber en silence dans `other`. ⚠️ **`shoot_vs_wait['skip']` n'est PAS concerné et reste vivant** : son producteur est `handle_wait` (10.04 requalifie en skip le WAIT d'une unité ENGAGÉE). Deux « skip » homonymes, un seul était mort — le retirer avec l'autre a été tenté et rattrapé par `test_analyzer_wait_engagement.py` |
-| V4 | §1.8 usage `CLOSE_QUARTERS` mesurait `calculate_hex_distance(ancre_tireur, ancre_cible) == 1` | `shoot_handler.py` | Ancre au lieu du socle **et** adjacence au lieu de la zone d'engagement. À x5, `ez=10` : le compteur d'usage était quasi toujours à 0 | ✅ **FERMÉ le 2026-08-11** (`c36526e6`) — le compteur lit `is_close_quarters and shooter_engaged_with_target`, la MÊME grandeur que le contrôle §10.06 voisin. Les deux sections comptaient jusque-là deux choses différentes sous le même nom : 1 280 tirs pour §10.06 contre 43 pour §1.8. Verrouillé par `tests/unit/ai/test_analyzer_close_quarters_usage.py` |
+| V4 | §1.8 usage `CLOSE_QUARTERS` mesure `calculate_hex_distance(ancre_tireur, ancre_cible) == 1` | `shoot_handler.py` | Ancre au lieu du socle **et** adjacence au lieu de la zone d'engagement. À x5, `ez=10` : le compteur d'usage est quasi toujours à 0 | **OUVERT, MAIS RÉDUIT** — `c1487fcb` a corrigé les deux contrôles d'ERREUR voisins (`:644-671`), qui portaient le même défaut. Seul le compteur d'USAGE §1.8 reste ancre-à-ancre |
 | ~~V5~~ | `reactive_move_abnormal` mesurait la distance à l'**ancre** | `analyzer_core.py` | — | **FERMÉ le 2026-08-10.** La mesure d'ancre est SUPPRIMÉE, pas corrigée : son jumeau immédiat `distance_over_roll` pose déjà la même question par `_per_model_move_violation` (par socle, chemin réel, budget converti). Les deux entraient dans le total §1.1 — un vrai dépassement comptait **2 fautes pour 1**, et une reformation d'ancre en déclenchait une fausse. `reactive_move_abnormal` ne pose plus que SA question (phase où le move réactif n'a rien à faire). Verrou : `test_analyzer_reactive_move_single_measure.py` |
 | ~~V6~~ | `_build_move_bfs_blockers` ignore l'exemption 17.01 | `analyzer.py` | — | **FERMÉ le 2026-08-10.** 17.01 (« normal or advance move ») est passée en paramètre `monster_or_vehicle_by_unit` : un mobile M/V ne bloque plus que sur les AUTRES M/V. Le fall-back, la charge et le pile-in ne reçoivent pas la carte — la règle ne les couvre pas, et l'omission est donc la règle, pas un oubli. Le drapeau vient du MÊME champ de registre que les exemptions de tir 10.06/17.03, et un mélange de datasheets M/V et non-M/V dans une escouade LÈVE au lieu de rendre un chemin faux |
 | ~~V7~~ | Le BFS de mouvement ne connaît pas le **bord du plateau** | `analyzer.py` | — | **FERMÉ le 2026-08-10.** 03.01 « Its base cannot cross the edge of the battlefield ». `cols`/`rows` sont lus dans l'entête `Board:` (`parse_board_dims_from_log`), avec le même contrat que l'échelle : leur absence REFUSE le journal. C'était un FAUX NÉGATIF — un socle coincé dans un coin trouvait toujours un contournement par l'extérieur, et le contrôle de budget se taisait sur le seul chemin que la règle interdit. Le bord borne le CENTRE en transit, exactement comme `geodesic_move_reach` côté moteur ; le débordement du socle à l'arrivée reste au contrôle de placement (§2.2) |
@@ -1035,7 +1029,7 @@ Par famille :
 | Sommes d'erreurs dupliquées | 0 — un seul `error_totals` (`analyzer.py`) depuis V16 |
 | Clés de `stats` créées à la volée | 0 depuis V17 — toutes déclarées dans la structure |
 | Lignes ❌ du SUMMARY absentes du total | 0 — `error_totals['total']` est la somme de tous les buckets |
-| dont mesurant la mauvaise grandeur | **1** (V8, critique supposée à 6) — V5, V6, V7 et V14 fermés le 2026-08-10, V4 le 2026-08-11 |
+| dont mesurant la mauvaise grandeur | **2** (V4 usage close-quarters à l'ancre, V8 critique supposée à 6) — V5, V6, V7 et V14 fermés le 2026-08-10 |
 | Contrôles supprimés, documentés, à ne pas ré-écrire | **7** (+ `fight_from_non_adjacent` et `dead_unit_skipping`/`handle_skip`, 2026-08-10) |
 | Sections de rapport | 18 (§1.1–§1.10, §2.1–§2.8) — dont 4 purement diagnostiques (§2.4, §2.5, §2.6, §2.7) — **plus la table « 1.1 COUVERTURE DES REGLES »**, qui n'est pas une section d'erreurs mais le rendu du corpus |
 
@@ -1143,7 +1137,7 @@ c'est le gisement le moins cher) :
 | ~~`[MODELS:]` complet~~ | ~~aucun contrôle de cohérence~~ | **CONSOMMÉ** — 03.03 par #68 (mise en place + fin de déplacement) depuis le 2026-08-10, et la purge End of Turn depuis le 2026-08-12 (ligne `Unit N COHERENCY REMOVED <mid> … (03.03)`, émise par `fight_handlers._log_end_of_turn_coherency_removals`) |
 | positions + `Board: cols/rows` | BFS (`analyzer.py`) | bord de plateau (V7, 03.01), `>8"` d'ingress (20.03, 20.04) |
 | ~~`Hit R(T+)` + présence du segment `Wound`~~ | ~~aucun contrôle~~ | **CONSOMMÉ le 2026-08-10** (§1.10) — 05.01, jumeau de §1.9 sur le segment `Wound` |
-| `[HAZARDOUS] Roll:N` + `SUFFERS X MW` | aucun contrôle (seule la ligne `was DESTROYED` est parsée, `analyzer_core.py`) | 06.03 |
+| `[HAZARDOUS] Roll:N` + `SUFFERS X MW` | **aucun contrôle et aucun parsing** — la branche qui lisait la mort par Hazardous a été supprimée par `15d95480` (2026-08-12), et la forme `was DESTROYED [HAZARDOUS]` que citait cette case n'a jamais été écrite dans `step.log` | 06.03, 24.15 |
 
 **Quatre entrées ont quitté cette liste le 2026-08-10** : `oath_target` et `waaagh_melee_str`
 (cf. §1.4 et §5, V15), puis `[MODEL_TYPES:]`/`[SHOOTER_MODELS:]` côté tir et le segment `Hit`
@@ -1158,7 +1152,7 @@ vérifier que la donnée n'est pas déjà là sous une autre forme : le verdict 
 
 ---
 
-**`L5` a été RETIRÉE de ce tableau le 2026-08-12**, comme `L2` avant elle : elle réclamait des tokens de règles d'armes dans `step.log`, et les six derniers (`[TORRENT]`, `[LETHAL HITS]`, `[IGNORES COVER]`, `[EXTRA ATTACKS]`, `[ANTI-<KW>:Y+]`, `[PSYCHIC]`) y sont entrés, au tir comme en mêlée, verrouillés par `tests/unit/ai/test_step_log_weapon_rule_tokens.py`. Le résidu était `[INDIRECT FIRE]` 24.19 et `[LANCE]` 24.21, aucune des deux n'étant alors implémentée dans le moteur — un token pour une règle qui ne joue pas annoncerait un effet qui n'a pas lieu. ⚠️ **`[INDIRECT FIRE]` a changé de camp le 2026-08-16** : 10.07 est implémentée, son token est donc redevenu un vrai champ manquant du StepLogger, suivi comme pièce 6 de `A_faire/indirect_fire_10_07.md` plutôt que réinscrit ici. `[LANCE]` 24.21 reste hors sujet (non implémentée, et absente de `weapon_rules.json`).
+**`L5` a été RETIRÉE de ce tableau le 2026-08-12**, comme `L2` avant elle : elle réclamait des tokens de règles d'armes dans `step.log`, et les six derniers (`[TORRENT]`, `[LETHAL HITS]`, `[IGNORES COVER]`, `[EXTRA ATTACKS]`, `[ANTI-<KW>:Y+]`, `[PSYCHIC]`) y sont entrés, au tir comme en mêlée, verrouillés par `tests/unit/ai/test_step_log_weapon_rule_tokens.py`. Le résidu — `[INDIRECT FIRE]` 24.19 et `[LANCE]` 24.21 — **n'est pas un champ manquant du StepLogger** : la RÈGLE n'est pas implémentée dans le moteur, donc aucun token ne peut la décrire sans annoncer un effet qui n'a pas lieu. Elle est portée par §3 et §4, pas ici.
 
 ## 8. Ce qui a été vérifié, et ce qui ne l'a pas été
 
