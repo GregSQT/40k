@@ -8751,6 +8751,7 @@ def weapon_rule_log_tokens(
     precision_applied: bool,
     wound_target: int,
     save_threshold: int,
+    devastating_fired: bool = False,
 ) -> Dict[str, List[str]]:
     """Tokens `[REGLE]` d un GROUPE d attaques (04.03), ranges par segment de la ligne de log.
 
@@ -8846,7 +8847,7 @@ def weapon_rule_log_tokens(
     if profile.twin_linked:
         tokens["wound"].append("[TWIN-LINKED]")
 
-    if profile.devastating:
+    if profile.devastating and devastating_fired:
         tokens["save"].append("[DEVASTATING WOUNDS]")
 
     if dmg_bonus > 0:
@@ -8939,6 +8940,11 @@ def _emit_squad_shoot_log(game_state: Dict[str, Any], g: Dict[str, Any], ctx: Ma
         # [LETHAL HITS] s en sert pour rejouer le meme arbitrage que lui.
         wound_target=int(require_key(g, "display_wth")),
         save_threshold=int(require_key(g, "display_save_th")),
+        # [DEVASTATING WOUNDS] 24.10 : le token ne suit pas la DECLARATION de la regle mais
+        # son ACTIVATION — au moins une blessure critique dans le groupe. `devastating=True`
+        # est pose sur le record seulement quand la branche devastatrice s est executee
+        # (attack_sequence.py), donc cette garde est exacte.
+        devastating_fired=any(s.get("devastating") for s in require_key(g, "shots")),
     )
     hit_part = _segment_with_tokens(hit_part, _rule_tokens["hit"])
     wound_part = f"Wound:{g['display_wth']}+"
