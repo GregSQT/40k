@@ -1287,26 +1287,34 @@ def test_un_seuil_anti_sous_2_leve_a_l_entree_du_moteur():
         anti_rule_of(weapon)
 
 
-def test_assault_dans_les_details_du_pont(monkeypatch, tmp_path):
-    """Preuve par le VRAI pont (`_build_shot_details`) que `assault_applied` est bien posé
-    quand l'unité a avancé et que l'arme est [ASSAULT].
+@pytest.mark.parametrize(
+    "weapon_rule, detail_key, token, engine_kwargs",
+    [
+        ("ASSAULT", "assault_applied", "[ASSAULT]", {"units_advanced": True}),
+        ("CLOSE_QUARTERS", "close_quarters_applied", "[CLOSE-QUARTERS]", {"engaged": True}),
+    ],
+    ids=["assault", "close_quarters"],
+)
+def test_regle_posee_dans_les_details_du_pont(monkeypatch, tmp_path,
+                                               weapon_rule, detail_key, token, engine_kwargs):
+    """Preuve par le VRAI pont (`_build_shot_details`) que les drapeaux de règle d'arme
+    ([ASSAULT] 24.04, [CLOSE-QUARTERS] 24.07) sont bien posés dans les détails quand les
+    conditions de déclenchement sont réunies, et que le token arrive dans step.log.
 
-    Symétrique de l'ancien test « hors garantie de grammaire » (supprimé le 2026-08-16 avec
-    le câblage du producteur) : la clé DOIT désormais être présente, et c'est ce token dans
-    les détails qui rend [ASSAULT] atteignable dans step.log.
+    La clé DOIT être présente (câblage du producteur 2026-08-16) — c'est elle qui rend le
+    token atteignable dans step.log.
     """
-    gs, raw_log = _engine_shoot_log(monkeypatch, ["ASSAULT"], [3, 4, 2], units_advanced=True)
+    gs, raw_log = _engine_shoot_log(monkeypatch, [weapon_rule], [3, 4, 2], **engine_kwargs)
     bridge = _Bridge(gs)
     details = bridge._build_shot_details(raw_log, raw_log["shootDetails"][0], 1, None)
 
-    assert details.get("assault_applied") is True, (
-        "`assault_applied` doit être posé par le pont quand l'unité a avancé "
-        f"et que l'arme déclare ASSAULT : {details}"
+    assert details.get(detail_key) is True, (
+        f"`{detail_key}` doit être posé par le pont : {details}"
     )
     # VERT VACANT : attester que le pont a bien travaillé.
     assert details["hit_roll"] == 3 and details["hit_target"] == 3, details
     line = _step_log_line(tmp_path, gs, raw_log)
-    assert "[ASSAULT]" in line, line
+    assert token in line, line
 
 
 def test_assault_sans_avance_absent_du_pont(monkeypatch, tmp_path):
@@ -1326,23 +1334,6 @@ def test_assault_sans_avance_absent_du_pont(monkeypatch, tmp_path):
     )
     line = _step_log_line(tmp_path, gs, raw_log)
     assert "[ASSAULT]" not in line, line
-
-
-def test_close_quarters_dans_les_details_du_pont(monkeypatch, tmp_path):
-    """Preuve par le VRAI pont que `close_quarters_applied` est posé quand le tireur est engagé
-    et que l'arme est [CLOSE_QUARTERS] — symétrique de `test_assault_dans_les_details_du_pont`.
-    """
-    gs, raw_log = _engine_shoot_log(monkeypatch, ["CLOSE_QUARTERS"], [3, 4, 2], engaged=True)
-    bridge = _Bridge(gs)
-    details = bridge._build_shot_details(raw_log, raw_log["shootDetails"][0], 1, None)
-
-    assert details.get("close_quarters_applied") is True, (
-        "`close_quarters_applied` doit être posé par le pont quand le tireur est engagé "
-        f"et que l'arme déclare CLOSE_QUARTERS : {details}"
-    )
-    assert details["hit_roll"] == 3 and details["hit_target"] == 3, details
-    line = _step_log_line(tmp_path, gs, raw_log)
-    assert "[CLOSE-QUARTERS]" in line, line
 
 
 @pytest.mark.parametrize("melee", [False, True], ids=["tir", "melee"])
