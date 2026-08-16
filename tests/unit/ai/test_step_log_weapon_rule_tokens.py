@@ -249,7 +249,7 @@ def _step_log_line(tmp_path, gs, raw_log):
 
 
 def _analyzer_stats(tmp_path, engine_lines, *, unit_type=UNIT_TYPE, target_models=1,
-                    melee=False):
+                    melee=False, units_advanced=False):
     """Injecte la/les ligne(s) PRODUITE(S) PAR LE MOTEUR dans un step.log valide, et lance
     le vrai analyzer dessus.
 
@@ -257,6 +257,10 @@ def _analyzer_stats(tmp_path, engine_lines, *, unit_type=UNIT_TYPE, target_model
     là que l'analyzer tire son effectif, donc la tranche de 5 de [BLAST] / [CLEAVE]. Sans lui,
     la cible vaut UNE figurine et les deux règles n'ajoutent jamais rien — le test passerait
     au vert sans avoir rien exercé.
+
+    `units_advanced=True` injecte une ligne MOVE ADVANCED pour Unit 1 avant les lignes de tir :
+    cela peuple `state.units_advanced`, ce qui permet de valider le fallback grammaire < 4
+    de la règle ASSAULT (shoot_handler.py : `shooter_id in state.units_advanced`).
     """
     import ai.analyzer as an
 
@@ -267,6 +271,13 @@ def _analyzer_stats(tmp_path, engine_lines, *, unit_type=UNIT_TYPE, target_model
         f"[10:00:0{2 + i}] E1 T1 P1 {phase_label} : {l.split(' : ', 1)[1]}"
         for i, l in enumerate(engine_lines)
     )
+    adv_dest = (SHOOTER[0] + 10, SHOOTER[1])
+    advanced_line = (
+        f"[10:00:01] E1 T1 P1 MOVE : Unit 1({adv_dest[0]},{adv_dest[1]})"
+        f" ADVANCED from ({SHOOTER[0]},{SHOOTER[1]}) to ({adv_dest[0]},{adv_dest[1]})"
+        f" [Roll: 2] [R:+0.0] [MODELS: 1#0@({adv_dest[0]},{adv_dest[1]},z0)] [SUCCESS]\n"
+        if units_advanced else ""
+    )
     target_models_segment = "[MODELS: " + " ".join(
         f"101#{i}@({TARGET[0]},{TARGET[1] + i},z0)" for i in range(target_models)
     ) + "]"
@@ -274,6 +285,7 @@ def _analyzer_stats(tmp_path, engine_lines, *, unit_type=UNIT_TYPE, target_model
     log.write_text(entete_step_log(
         f"[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1({SHOOTER[0]},{SHOOTER[1]}) DEPLOYED from (-1,-1) to ({SHOOTER[0]},{SHOOTER[1]}) [R:+0.0] [SUCCESS]\n"
         f"[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 101({TARGET[0]},{TARGET[1]}) DEPLOYED from (-1,-1) to ({TARGET[0]},{TARGET[1]}) [R:+0.0] [SUCCESS]\n"
+        f"{advanced_line}"
         f"{body}\n",
         units=(
             f"[10:00:00] Unit 1 ({unit_type}) P1: Starting position (-1,-1), HP_MAX=2 base=round/6\n"
@@ -1341,6 +1353,53 @@ def test_regle_sans_l_etat_absente_du_pont(monkeypatch, tmp_path, weapon_rule, d
     )
     line = _step_log_line(tmp_path, gs, raw_log)
     assert token not in line, line
+
+
+def test_analyzer_compte_assault_fallback_grammar_lt4(monkeypatch, tmp_path):
+    """Fallback grammaire < 4 : l'analyzer compte ASSAULT via `units_advanced` + `weapon_rules_list`.
+
+    `entete_step_log` n'émet pas de ligne `Log grammar:` → le parseur lève grammar=1 (< 4) et
+    prend le chemin état-based (`shooter_id in state.units_advanced and 'ASSAULT' in weapon_rules_list`).
+    La ligne ADVANCED injectée peuple `state.units_advanced` ; le registre config confirme que
+    `Sternguard Bolt Rifle` porte ASSAULT → le compteur doit être 1.
+
+    Sans ce test, une régression sur le chemin fallback passerait inaperçue : les tests du pont
+    ne prouvent que la grammaire >= 4 (token `[ASSAULT]` présent dans la ligne).
+    """
+    gs, raw_log = _engine_shoot_log(monkeypatch, ["ASSAULT"], [3, 4, 2],
+                                    units_advanced=True)
+    stats = _analyzer_stats(tmp_path, _step_log_line(tmp_path, gs, raw_log),
+                            units_advanced=True)
+
+    assert stats["parse_errors"] == [], stats["parse_errors"]
+    weapon_key = f"{WEAPON_NAME} ({UNIT_TYPE})"
+    usage = stats["weapon_rule_usage"].get(("ASSAULT", weapon_key), {})
+    assert sum(usage.values()) == 1, (
+        "le fallback grammaire < 4 doit compter ASSAULT quand l'unité a avancé — "
+        f"weapon_rule_usage[('ASSAULT', '{weapon_key}')] = {usage}"
+    )
+    # VERT VACANT : prouver que l'analyzer a bien traité la ligne de tir.
+    assert stats["shoot_hit_result_checked"][1] == 1, stats["shoot_hit_result_checked"]
+
+
+def test_analyzer_assault_fallback_absent_sans_advance(monkeypatch, tmp_path):
+    """Contre-épreuve : arme ASSAULT + unité NON avancée → le fallback < 4 ne compte rien.
+
+    Si le compteur s'incrémente ici, le fallback testerait l'arme seule sans vérifier l'état
+    d'unité — le mode d'échec exact que le chemin état-based doit éviter.
+    """
+    gs, raw_log = _engine_shoot_log(monkeypatch, ["ASSAULT"], [3, 4, 2],
+                                    units_advanced=False)
+    stats = _analyzer_stats(tmp_path, _step_log_line(tmp_path, gs, raw_log),
+                            units_advanced=False)
+
+    assert stats["parse_errors"] == [], stats["parse_errors"]
+    weapon_key = f"{WEAPON_NAME} ({UNIT_TYPE})"
+    usage = stats["weapon_rule_usage"].get(("ASSAULT", weapon_key), {})
+    assert sum(usage.values()) == 0, (
+        "le fallback grammaire < 4 ne doit PAS compter ASSAULT si l'unité n'a pas avancé — "
+        f"weapon_rule_usage[('ASSAULT', '{weapon_key}')] = {usage}"
+    )
 
 
 @pytest.mark.parametrize("melee", [False, True], ids=["tir", "melee"])
