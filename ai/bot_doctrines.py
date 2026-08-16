@@ -1286,7 +1286,7 @@ class AttritionBot(_DoctrineBot):
     def wants_charge(self, attacker, game_state) -> bool:
         if self._is_preserving(attacker, game_state):
             return False
-        return self._melee_beats_ranged(attacker, game_state)
+        return super().wants_charge(attacker, game_state)
 
 
 class DecapitationBot(_DoctrineBot):
