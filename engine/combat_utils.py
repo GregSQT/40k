@@ -119,7 +119,7 @@ def get_unit_by_id(game_state: Dict[str, Any], unit_id: str) -> Optional[Dict[st
 _HEX_NEIGHBORS_CACHE: Dict[Tuple[int, int], Tuple[Tuple[int, int], ...]] = {}
 
 
-def get_hex_neighbors(col: int, row: int) -> Tuple[Tuple[int, int], ...]:
+def get_hex_neighbors(col: Any, row: Any) -> Tuple[Tuple[int, int], ...]:
     """
     Get all 6 hexagonal neighbors for offset coordinates.
 

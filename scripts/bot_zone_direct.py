@@ -30,7 +30,7 @@ import hashlib
 import os
 import sys
 from datetime import datetime
-from typing import Any, Dict, List, Optional, TextIO
+from typing import Any, Dict, List, Optional, TextIO, cast
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -501,7 +501,7 @@ def main() -> None:
                 training_n_envs=1,
             )
 
-            masked = ActionMasker(base_env, lambda e: e.get_action_mask())
+            masked = ActionMasker(base_env, lambda e: cast(W40KEngine, e).get_action_mask())
             env = BotControlledEnv(
                 masked, bot, unit_registry,
                 agent_seat_mode=agent_seat_mode,

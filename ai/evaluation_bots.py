@@ -624,6 +624,8 @@ def _select_weighted_deployment_action(
 class RandomBot:
     """Picks random valid actions, but prioritizes shooting when available"""
 
+    randomness: float = 1.0
+
     def select_placement_action(self, valid_actions: List[int], game_state) -> int:
         """Slot de MISE EN PLACE (03.02) : deploiement initial ET ingress move (20.04).
 

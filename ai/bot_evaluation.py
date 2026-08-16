@@ -807,7 +807,11 @@ def _warmup_eval_inference(model) -> None:
 
     obs_space = model.observation_space
     if isinstance(obs_space, gym.spaces.Dict):
-        dummy_obs = {k: np.zeros(v.shape, dtype=np.float32) for k, v in obs_space.spaces.items()}
+        dummy_obs = {}
+        for k, v in obs_space.spaces.items():
+            if v.shape is None:
+                raise RuntimeError(f"Espace d'observation '{k}' sans shape : warm-up impossible")
+            dummy_obs[k] = np.zeros(v.shape, dtype=np.float32)
     else:
         dummy_obs = np.zeros(obs_space.shape, dtype=np.float32)
     action_masks = np.ones((1, model.action_space.n), dtype=bool)

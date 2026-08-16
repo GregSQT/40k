@@ -36,7 +36,7 @@ import os
 import random
 import sys
 from collections import defaultdict
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, cast
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -208,7 +208,7 @@ def main() -> None:
             quiet=True, gym_training_mode=True, training_n_envs=1,
         )
         env = BotControlledEnv(
-            ActionMasker(base_env, lambda e: e.get_action_mask()), bot, registry,
+            ActionMasker(base_env, lambda e: cast(W40KEngine, e).get_action_mask()), bot, registry,
             agent_seat_mode=agent_seat_mode, global_seed=seat_seed, env_rank=0,
         )
         tally: Dict[str, int] = defaultdict(int)

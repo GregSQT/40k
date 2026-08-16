@@ -4961,6 +4961,7 @@ class W40KEngine(gym.Env):
             squad_shoot_models_weapons,
             squad_weapon_valid_targets,
             squad_lock_shoot,
+            squad_shooting_type_choose,
             build_manual_shoot_allocation,
             apply_manual_shoot_allocation,
             apply_manual_shoot_declare_order,

@@ -3500,7 +3500,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     
     # Link metrics_tracker to bot evaluation callback
     for callback in training_callbacks:
-        if hasattr(callback, '__class__') and callback.__class__.__name__ == 'BotEvaluationCallback':
+        if isinstance(callback, BotEvaluationCallback):
             callback.metrics_tracker = metrics_tracker
     _debug_train_marker("after bot-eval callback metrics_tracker wiring")
     
