@@ -882,10 +882,17 @@ def handle_shoot(
         if "TWIN_LINKED" in weapon_rules_list:
             key = ("TWIN_LINKED", weapon_key)
             stats['weapon_rule_usage'][key][pl_int] += 1
-        # [ASSAULT] 24.04 — USAGE lu depuis le TOKEN, meme regime que [RAPID FIRE] :
-        # le moteur pose `[ASSAULT]` quand la regle a EFFECTIVEMENT joue (arme [ASSAULT]
-        # ET avance ce tour), donc on lit le fait sans re-deriver la double condition.
-        if re.search(r'\[ASSAULT\]', action_desc, re.IGNORECASE):
+        # [ASSAULT] 24.04 — USAGE lu depuis le TOKEN (grammaire >= 4) ou reconstruit depuis
+        # l'état (grammaire < 4 : le token n'existait pas encore). Le token est la source de
+        # vérité dès qu'il est disponible ; le fallback état-based reste exact pour les anciens
+        # journaux (arme [ASSAULT] + tireur ayant avancé ce tour).
+        if state.log_grammar >= 4:
+            assault_applied = re.search(r'\[ASSAULT\]', action_desc, re.IGNORECASE) is not None
+        else:
+            assault_applied = (
+                shooter_id in state.units_advanced and 'ASSAULT' in weapon_rules_list
+            )
+        if assault_applied:
             key = ("ASSAULT", weapon_key)
             stats['weapon_rule_usage'][key][pl_int] += 1
         # [RAPID FIRE X] 24.30 — USAGE, même régime que [HEAVY] : le token n'est écrit que si le
@@ -915,10 +922,13 @@ def handle_shoot(
         # les attaques où elle a réellement pesé, jamais celles où l'arme la déclare seulement.
         if re.search(r'\[PRECISION\]', action_desc, re.IGNORECASE):
             stats['weapon_rule_usage'][("PRECISION", weapon_key)][pl_int] += 1
-        # [CLOSE-QUARTERS] 10.06 — USAGE lu depuis le TOKEN, meme regime que [ASSAULT] :
-        # le moteur pose `[CLOSE-QUARTERS]` quand la regle a joue (arme [CLOSE_QUARTERS]
-        # ET tireur engage), eliminant la double derivation geometrique/armurerie.
-        if re.search(r'\[CLOSE-QUARTERS\]', action_desc, re.IGNORECASE):
+        # [CLOSE-QUARTERS] 10.06 — même régime que [ASSAULT] : token (grammaire >= 4) ou
+        # fallback état-based (arme [CLOSE_QUARTERS] + tireur engagé avec la cible).
+        if state.log_grammar >= 4:
+            cq_applied = re.search(r'\[CLOSE-QUARTERS\]', action_desc, re.IGNORECASE) is not None
+        else:
+            cq_applied = is_close_quarters and shooter_engaged_with_target
+        if cq_applied:
             stats['weapon_rule_usage'][("CLOSE_QUARTERS", weapon_key)][pl_int] += 1
         if heavy_applied_in_log:
             # [HEAVY] 24.16 — USAGE seulement, jamais VALIDITE. Le contrôle de validité

@@ -1309,18 +1309,35 @@ def test_assault_dans_les_details_du_pont(monkeypatch, tmp_path):
     assert "[ASSAULT]" in line, line
 
 
-def test_close_quarters_dans_les_details_du_pont(monkeypatch, tmp_path):
-    """Symétrique de test_assault_dans_les_details_du_pont pour [CLOSE-QUARTERS] 24.07.
+def test_assault_sans_avance_absent_du_pont(monkeypatch, tmp_path):
+    """Contre-épreuve du pont : arme [ASSAULT] + unité NON avancée → `assault_applied` absent.
 
-    Vérifie que `closeQuartersApplied → details["close_quarters_applied"]` fonctionne dans
-    `_build_shot_details` et que le token arrive dans step.log.
+    La contre-épreuve LOT_A couvre « arme sans règle, état neutre » mais pas « arme avec règle,
+    état incomplet ». Si `_build_shot_details` régresse à tester l'arme seule (sans le check
+    `units_advanced`), ce test échoue ; l'autre contre-épreuve LOT_A passe toujours.
+    """
+    gs, raw_log = _engine_shoot_log(monkeypatch, ["ASSAULT"], [3, 4, 2], units_advanced=False)
+    bridge = _Bridge(gs)
+    details = bridge._build_shot_details(raw_log, raw_log["shootDetails"][0], 1, None)
+
+    assert "assault_applied" not in details, (
+        "`assault_applied` ne doit PAS être posé quand l'unité n'a PAS avancé, "
+        f"même si l'arme déclare ASSAULT : {details}"
+    )
+    line = _step_log_line(tmp_path, gs, raw_log)
+    assert "[ASSAULT]" not in line, line
+
+
+def test_close_quarters_dans_les_details_du_pont(monkeypatch, tmp_path):
+    """Preuve par le VRAI pont que `close_quarters_applied` est posé quand le tireur est engagé
+    et que l'arme est [CLOSE_QUARTERS] — symétrique de `test_assault_dans_les_details_du_pont`.
     """
     gs, raw_log = _engine_shoot_log(monkeypatch, ["CLOSE_QUARTERS"], [3, 4, 2], engaged=True)
     bridge = _Bridge(gs)
     details = bridge._build_shot_details(raw_log, raw_log["shootDetails"][0], 1, None)
 
     assert details.get("close_quarters_applied") is True, (
-        "`close_quarters_applied` doit être posé par le pont quand l'escouade est engagée "
+        "`close_quarters_applied` doit être posé par le pont quand le tireur est engagé "
         f"et que l'arme déclare CLOSE_QUARTERS : {details}"
     )
     assert details["hit_roll"] == 3 and details["hit_target"] == 3, details
