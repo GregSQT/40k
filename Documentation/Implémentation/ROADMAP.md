@@ -39,6 +39,23 @@
 
 ## 0. En cours — ne rien casser
 
+- 🚧 **[INDIRECT FIRE] 24.19 / tir indirect 10.07 — OUVERT le 2026-08-16, option A1 validée par
+  l'utilisateur** (ré-entraînement complet accepté). Dernière règle d'arme de
+  `config/weapon_rules.json` sans aucun effet de jeu : deux armes tyranides la déclarent
+  (`impaler_cannon`, `spore_mine_launcher`) et tirent aujourd'hui comme n'importe quelle arme.
+  ⚠️ **Ce n'est pas un modificateur d'arme, c'est un TYPE DE TIR** — quatrième frère de
+  10.04/10.05/10.06. Et §10.02 confie le choix au JOUEUR (« Select **one** shooting type that unit
+  is eligible to make »). Comme 10.07 partage la condition d'éligibilité de 10.04 normal
+  (*unengaged, pas d'advance*), ce sont les deux premiers types **non exclusifs** :
+  `shared_utils.resolve_squad_shooting_type` **dérive** un type unique et justifie ce choix par un
+  invariant — « les conditions sont exclusives » — que 10.07 casse. La dérivation doit devenir une
+  DÉCISION, donc l'espace d'action bouge, donc les modèles entraînés sont invalidés.
+  Périmètre hors tests/docs : résolution et stockage du type, pool de cibles (contournement LoS),
+  séquence de touche (seuil 6+/4+, interdiction de relance), octroi du couvert à la cible,
+  prédicat « spotter » (cible visible d'une unité amie) qui n'existe nulle part, masque d'action,
+  observation, choix côté PvP.
+  → [`A_faire/indirect_fire_10_07.md`](A_faire/indirect_fire_10_07.md)
+
 - ✅ **Socle vs mur : une seule géométrie, et la sortie de contact** (2026-08-11). Symptôme PvE :
   un Terminator déployé le long d'une ruine ne peut plus bouger de la partie, reste en arrière de
   son escouade et passe en voile rouge de cohésion. Cause MESURÉE : le **placement** mesurait un
