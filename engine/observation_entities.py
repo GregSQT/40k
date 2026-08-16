@@ -77,7 +77,9 @@ UNIT_CONT_FIELDS: Tuple[str, ...] = (
 #: Règles d'UNITÉ (`config/unit_rules.json`) exposées à l'agent.
 #:
 #: Ne figurent ici que les règles à EFFET RÉEL — même critère que les règles d'armes, qui
-#: exclut délibérément [INDIRECT FIRE] : exposer une règle inerte est du bruit pur.
+#: excluait délibérément [INDIRECT FIRE] tant qu'elle était inerte ; elle y est entrée le
+#: 2026-08-16, quand 10.07 a été implémentée — le critère n'a pas bougé, c'est la règle qui a
+#: cessé d'être inerte.
 #: Vérifié par lecture le 2026-07-27 : chacune est consultée dans un handler vif.
 #:
 #: Ce sont les EFFETS, pas les capacités nommées. `unit_has_rule_effect` résout les règles

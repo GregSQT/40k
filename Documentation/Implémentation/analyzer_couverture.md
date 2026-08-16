@@ -799,7 +799,7 @@ Aucun TRANSPORT journalisé (ni embark, ni disembark, ni capacité).
 | 24.16 [HEAVY] | #39 (usage) ; validité **supprimée** 2026-07-29 | **PARTIEL** (suppression justifiée : distance de chemin par figurine non re-dérivable) |
 | 24.17 Hover | — | ABSENT-LOG-MANQUANT (et fausse les budgets de vol, cf. 21.03) |
 | 24.18 [IGNORES COVER] | — | **ABSENT-LOGGABLE** depuis le 2026-08-12 — token `[IGNORES COVER]` sur le segment `Hit`. Posé sur la DÉCLARATION de l'arme (exception assumée : le couvert n'est même pas calculé, donc « la cible l'aurait-elle eu ? » est inconnaissable) |
-| 24.19 [INDIRECT FIRE] | — | ABSENT-LOG-MANQUANT — règle NON IMPLÉMENTÉE dans le moteur, cf. 10.07 : ce n'est pas un trou de journal |
+| 24.19 [INDIRECT FIRE] | — | ABSENT-LOG-MANQUANT — ⚠️ **et c'en est un vrai depuis le 2026-08-16** : la règle EST implémentée (cf. 10.07), elle joue, et le journal ne la nomme pas encore. Pièce 6 du chantier `A_faire/indirect_fire_10_07.md` |
 | 24.20 Infiltrators | — | ABSENT-LOG-MANQUANT (zone de déploiement absente) |
 | 24.21 [LANCE] | — | ABSENT-LOG-MANQUANT (absente aussi de `weapon_rules.json`) |
 | 24.22 Leader | — | ABSENT-LOG-MANQUANT |
@@ -844,7 +844,7 @@ ne qualifie qu'une chose — une paire observée que l'armurerie ne déclare pas
 | `HAZARDOUS` | 24.15 / 06.03 | ligne `hazardous`, jet loggué | PARTIEL |
 | `HEAVY` | 24.16 | #39 usage ; validité supprimée | PARTIEL |
 | `IGNORES_COVER` | 24.18 | — | **ABSENT-LOGGABLE** — token dans `step.log` depuis le 2026-08-12 (lot A), contrôle à écrire |
-| `INDIRECT_FIRE` | 24.19 / 10.07 | — | ABSENT-LOG-MANQUANT — règle NON IMPLÉMENTÉE dans le moteur (seule entrée de `weapon_rules.json` sans `obs_id` pour cette raison) |
+| `INDIRECT_FIRE` | 24.19 / 10.07 | — | ABSENT-LOG-MANQUANT — règle implémentée le 2026-08-16, `obs_id` 18 posé à cette date ; le token du journal reste à écrire (pièce 6) |
 | `LETHAL_HITS` | 24.23 | — | **ABSENT-LOGGABLE** — token dans `step.log` depuis le 2026-08-12 (lot A), contrôle à écrire |
 | `MELTA` | 24.25 | usage §1.8 (`[MELTA:X]`) | **ABSENT-LOGGABLE** — token depuis le 2026-08-11 ; aucun contrôle de conformité |
 | `PRECISION` | 24.28 / 05.03 | usage §1.8 (`[PRECISION]`) | **ABSENT-LOGGABLE** — token depuis le 2026-08-11 ; aucun contrôle de conformité |
@@ -856,8 +856,10 @@ ne qualifie qu'une chose — une paire observée que l'armurerie ne déclare pas
 
 **0 COUVERT / 8 PARTIEL / 14 ABSENT-LOGGABLE / 1 ABSENT-LOG-MANQUANT.**
 
-Le seul ABSENT-LOG-MANQUANT restant est `INDIRECT_FIRE`, et ce n'est pas un trou de journal :
-la règle n'est **pas implémentée dans le moteur** (`config_loader.load_weapon_rules_config`,
+Le seul ABSENT-LOG-MANQUANT restant est `INDIRECT_FIRE`. ⚠️ **Depuis le 2026-08-16 c'en est un
+VRAI** : la règle est implémentée et joue, mais son token n'est pas encore écrit (pièce 6 de
+`A_faire/indirect_fire_10_07.md`). Jusqu'à cette date, ce n'était pas un trou de journal :
+la règle n'était **pas implémentée dans le moteur** (`config_loader.load_weapon_rules_config`,
 `tests/unit/engine/test_squad_obs_weapon_profiles.py::test_indirect_fire_is_deliberately_absent`).
 Écrire son token journaliserait un effet qui n'a pas lieu — la règle doit d'abord exister.
 
@@ -1156,7 +1158,7 @@ vérifier que la donnée n'est pas déjà là sous une autre forme : le verdict 
 
 ---
 
-**`L5` a été RETIRÉE de ce tableau le 2026-08-12**, comme `L2` avant elle : elle réclamait des tokens de règles d'armes dans `step.log`, et les six derniers (`[TORRENT]`, `[LETHAL HITS]`, `[IGNORES COVER]`, `[EXTRA ATTACKS]`, `[ANTI-<KW>:Y+]`, `[PSYCHIC]`) y sont entrés, au tir comme en mêlée, verrouillés par `tests/unit/ai/test_step_log_weapon_rule_tokens.py`. Le résidu — `[INDIRECT FIRE]` 24.19 et `[LANCE]` 24.21 — **n'est pas un champ manquant du StepLogger** : la RÈGLE n'est pas implémentée dans le moteur, donc aucun token ne peut la décrire sans annoncer un effet qui n'a pas lieu. Elle est portée par §3 et §4, pas ici.
+**`L5` a été RETIRÉE de ce tableau le 2026-08-12**, comme `L2` avant elle : elle réclamait des tokens de règles d'armes dans `step.log`, et les six derniers (`[TORRENT]`, `[LETHAL HITS]`, `[IGNORES COVER]`, `[EXTRA ATTACKS]`, `[ANTI-<KW>:Y+]`, `[PSYCHIC]`) y sont entrés, au tir comme en mêlée, verrouillés par `tests/unit/ai/test_step_log_weapon_rule_tokens.py`. Le résidu était `[INDIRECT FIRE]` 24.19 et `[LANCE]` 24.21, aucune des deux n'étant alors implémentée dans le moteur — un token pour une règle qui ne joue pas annoncerait un effet qui n'a pas lieu. ⚠️ **`[INDIRECT FIRE]` a changé de camp le 2026-08-16** : 10.07 est implémentée, son token est donc redevenu un vrai champ manquant du StepLogger, suivi comme pièce 6 de `A_faire/indirect_fire_10_07.md` plutôt que réinscrit ici. `[LANCE]` 24.21 reste hors sujet (non implémentée, et absente de `weapon_rules.json`).
 
 ## 8. Ce qui a été vérifié, et ce qui ne l'a pas été
 

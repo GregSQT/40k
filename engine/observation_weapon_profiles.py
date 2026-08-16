@@ -19,7 +19,8 @@ Principes (décidés dans `V11_audit_observation.md` §9.3/§9.4/§11, appliqué
   calculées que §9.1 a supprimées.
 - **Seules les règles à EFFET RÉEL sont exposées.** La liste ci-dessous suit les règles résolues
   dans le chemin vif (`attack_sequence.py`, `shared_utils._manual_roll_intent`, `fight_handlers`,
-  `shooting_handlers`). [INDIRECT FIRE] 24.19 en est ABSENTE **délibérément** : elle n'est pas
+  `shooting_handlers`). [INDIRECT FIRE] 24.19 y est ENTRÉE le 2026-08-16 avec l'implémentation
+  de 10.07 ; le paragraphe ci-dessous décrit l'état ANTÉRIEUR, où elle n'était pas
   implémentée (V11 §9.2.1), un bit pour elle serait du bruit pur.
   ✅ **Réserve LEVÉE le 2026-07-26 (tranche T-B).** Elle notait que [ASSAULT] 24.04 et
   [CLOSE_QUARTERS] 24.27 étaient exposées alors que le gate de tir squad/gym fermait le tir dès

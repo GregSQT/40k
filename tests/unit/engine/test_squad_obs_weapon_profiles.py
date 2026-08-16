@@ -13,7 +13,9 @@ Ce que ces tests verrouillent :
   (sans lui le seuil Y+ est du bruit — l'effet dépend des keywords de la cible, 24.03) ;
 - la symétrie : les slots ENNEMIS portent les mêmes champs (choix de cible / menace) ;
 - l'absence de troncature silencieuse (le dépassement de K est LOGUÉ) ;
-- [INDIRECT FIRE] n'est PAS exposée : elle n'est pas implémentée, un bit serait du bruit pur.
+- [INDIRECT FIRE] EST exposée depuis le 2026-08-16 : 10.07 est implémentée, et l'agent doit la
+  percevoir pour pouvoir CHOISIR le tir indirect (10.02). Le critère n'a pas changé — exposer une
+  règle inerte reste du bruit ; c'est la règle qui a cessé de l'être.
 """
 
 from __future__ import annotations
