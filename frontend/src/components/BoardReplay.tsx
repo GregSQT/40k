@@ -424,7 +424,7 @@ export const BoardReplay: React.FC = () => {
   }, [isPlaying, selectedEpisode, playbackSpeed, replayData]);
 
   // Get current game state
-  const getCurrentGameState = (): ReplayGameState | null => {
+  const currentState = useMemo((): ReplayGameState | null => {
     if (!selectedEpisode || !replayData) return null;
     const episode = replayData.episodes[selectedEpisode - 1];
     const maxActionIndex = Math.min(episode.total_actions, episode.states.length);
@@ -509,9 +509,7 @@ export const BoardReplay: React.FC = () => {
         units_cache: buildUnitsCache(enrichedUnits),
       };
     }
-  };
-
-  const currentState = getCurrentGameState();
+  }, [selectedEpisode, replayData, currentActionIndex, enrichUnitsWithStats]);
   // Préchargement des illustrations : monté au niveau du board (cf. useUnitIllustrationPreload).
   useUnitIllustrationPreload(currentState?.units ?? []);
   const currentEpisode =
@@ -610,160 +608,163 @@ export const BoardReplay: React.FC = () => {
   // Add ghost unit at starting position for move actions
   // For shoot actions, compute SHOOT_LEFT for the active shooter exactly like PvP,
   // based on RNG_NB and the number of shots already fired in the current shooting phase.
-  const unitsWithGhost: UnitWithGhost[] = currentState?.units
-    ? [...currentState.units].map((u): UnitWithGhost => {
-        // During shoot action, adjust SHOOT_LEFT only for the active shooting unit
-        // EXACT mirror of PvP behavior: counter shows shots remaining *before* current shot.
-        if (
-          currentAction?.type === "shoot" &&
-          currentEpisode &&
-          currentActionIndex > 0 &&
-          u.id === currentAction.shooter_id
-        ) {
-          // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Get from selected weapon (imported at top)
-          const selectedRngWeapon = getSelectedRangedWeapon(u);
-          const rngNbRaw = selectedRngWeapon?.NB;
-          if (rngNbRaw === undefined) {
-            throw new Error(`Missing RNG weapon NB for replay shooter ${u.id}`);
-          }
-          const rngNb = getDiceAverage(rngNbRaw);
-          const shooterId = currentAction.shooter_id;
-
-          // Index of the last *completed* action before the current one
-          const lastCompletedIndex = currentActionIndex - 2; // actions are 0-based, state index is +1
-          if (lastCompletedIndex < 0) {
-            // No previous actions in this phase: full shots available
-            return { ...u, SHOOT_LEFT: rngNb };
-          }
-
-          // Find the start of the current shooting phase by scanning backwards
-          // from the last completed action until we hit a non-shoot action.
-          let shootingPhaseStart = 0;
-          for (let i = lastCompletedIndex; i >= 0; i--) {
-            const action = currentEpisode.actions[i];
-            if (action.type !== "shoot" && action.type !== "wait") {
-              shootingPhaseStart = i + 1;
-              break;
-            }
-          }
-
-          // Count how many shots this unit has fired in the current shooting phase
-          let shotsFired = 0;
-          for (
-            let i = shootingPhaseStart;
-            i <= lastCompletedIndex && i < currentEpisode.actions.length;
-            i++
+  const unitsWithGhost = useMemo((): UnitWithGhost[] => {
+    const result: UnitWithGhost[] = currentState?.units
+      ? [...currentState.units].map((u): UnitWithGhost => {
+          // During shoot action, adjust SHOOT_LEFT only for the active shooting unit
+          // EXACT mirror of PvP behavior: counter shows shots remaining *before* current shot.
+          if (
+            currentAction?.type === "shoot" &&
+            currentEpisode &&
+            currentActionIndex > 0 &&
+            u.id === currentAction.shooter_id
           ) {
-            const action = currentEpisode.actions[i];
-            if (action.type === "shoot" && action.shooter_id === shooterId) {
-              shotsFired++;
+            // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Get from selected weapon (imported at top)
+            const selectedRngWeapon = getSelectedRangedWeapon(u);
+            const rngNbRaw = selectedRngWeapon?.NB;
+            if (rngNbRaw === undefined) {
+              throw new Error(`Missing RNG weapon NB for replay shooter ${u.id}`);
             }
-          }
+            const rngNb = getDiceAverage(rngNbRaw);
+            const shooterId = currentAction.shooter_id;
 
-          // Counter shows remaining shots *before* current shot:
-          // first shot: RNG_NB, second: RNG_NB-1, etc.
-          const shootLeft = Math.max(0, rngNb - shotsFired);
-          return { ...u, SHOOT_LEFT: shootLeft };
-        }
-
-        // During fight action, compute ATTACK_LEFT only for the active attacker,
-        // mirroring PvP: counter shows attacks remaining *before* current swing.
-        if (
-          currentAction?.type === "fight" &&
-          currentEpisode &&
-          currentActionIndex > 0 &&
-          u.id === currentAction.attacker_id
-        ) {
-          // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Get from selected weapon (imported at top)
-          const selectedCcWeapon = getSelectedMeleeWeapon(u);
-          const ccNbRaw = selectedCcWeapon?.NB;
-          if (ccNbRaw === undefined) {
-            throw new Error(`Missing CC weapon NB for replay attacker ${u.id}`);
-          }
-          const ccNb = getDiceAverage(ccNbRaw);
-          const attackerId = currentAction.attacker_id;
-
-          const lastCompletedIndex = currentActionIndex - 2;
-          if (lastCompletedIndex < 0) {
-            return { ...u, ATTACK_LEFT: ccNb };
-          }
-
-          // Fight phase is delimited by non-fight actions
-          let fightPhaseStart = 0;
-          for (let i = lastCompletedIndex; i >= 0; i--) {
-            const action = currentEpisode.actions[i];
-            if (action.type !== "fight") {
-              fightPhaseStart = i + 1;
-              break;
+            // Index of the last *completed* action before the current one
+            const lastCompletedIndex = currentActionIndex - 2; // actions are 0-based, state index is +1
+            if (lastCompletedIndex < 0) {
+              // No previous actions in this phase: full shots available
+              return { ...u, SHOOT_LEFT: rngNb };
             }
+
+            // Find the start of the current shooting phase by scanning backwards
+            // from the last completed action until we hit a non-shoot action.
+            let shootingPhaseStart = 0;
+            for (let i = lastCompletedIndex; i >= 0; i--) {
+              const action = currentEpisode.actions[i];
+              if (action.type !== "shoot" && action.type !== "wait") {
+                shootingPhaseStart = i + 1;
+                break;
+              }
+            }
+
+            // Count how many shots this unit has fired in the current shooting phase
+            let shotsFired = 0;
+            for (
+              let i = shootingPhaseStart;
+              i <= lastCompletedIndex && i < currentEpisode.actions.length;
+              i++
+            ) {
+              const action = currentEpisode.actions[i];
+              if (action.type === "shoot" && action.shooter_id === shooterId) {
+                shotsFired++;
+              }
+            }
+
+            // Counter shows remaining shots *before* current shot:
+            // first shot: RNG_NB, second: RNG_NB-1, etc.
+            const shootLeft = Math.max(0, rngNb - shotsFired);
+            return { ...u, SHOOT_LEFT: shootLeft };
           }
 
-          let attacksUsed = 0;
-          for (
-            let i = fightPhaseStart;
-            i <= lastCompletedIndex && i < currentEpisode.actions.length;
-            i++
+          // During fight action, compute ATTACK_LEFT only for the active attacker,
+          // mirroring PvP: counter shows attacks remaining *before* current swing.
+          if (
+            currentAction?.type === "fight" &&
+            currentEpisode &&
+            currentActionIndex > 0 &&
+            u.id === currentAction.attacker_id
           ) {
-            const action = currentEpisode.actions[i];
-            if (action.type === "fight" && action.attacker_id === attackerId) {
-              attacksUsed++;
+            // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Get from selected weapon (imported at top)
+            const selectedCcWeapon = getSelectedMeleeWeapon(u);
+            const ccNbRaw = selectedCcWeapon?.NB;
+            if (ccNbRaw === undefined) {
+              throw new Error(`Missing CC weapon NB for replay attacker ${u.id}`);
             }
+            const ccNb = getDiceAverage(ccNbRaw);
+            const attackerId = currentAction.attacker_id;
+
+            const lastCompletedIndex = currentActionIndex - 2;
+            if (lastCompletedIndex < 0) {
+              return { ...u, ATTACK_LEFT: ccNb };
+            }
+
+            // Fight phase is delimited by non-fight actions
+            let fightPhaseStart = 0;
+            for (let i = lastCompletedIndex; i >= 0; i--) {
+              const action = currentEpisode.actions[i];
+              if (action.type !== "fight") {
+                fightPhaseStart = i + 1;
+                break;
+              }
+            }
+
+            let attacksUsed = 0;
+            for (
+              let i = fightPhaseStart;
+              i <= lastCompletedIndex && i < currentEpisode.actions.length;
+              i++
+            ) {
+              const action = currentEpisode.actions[i];
+              if (action.type === "fight" && action.attacker_id === attackerId) {
+                attacksUsed++;
+              }
+            }
+
+            const attacksLeft = Math.max(0, ccNb - attacksUsed);
+            return { ...u, ATTACK_LEFT: attacksLeft };
           }
 
-          const attacksLeft = Math.max(0, ccNb - attacksUsed);
-          return { ...u, ATTACK_LEFT: attacksLeft };
-        }
+          return u;
+        })
+      : [];
 
-        return u;
-      })
-    : [];
-  if (
-    (currentAction?.type === "move" || currentAction?.type === "reactive_move") &&
-    currentAction?.from &&
-    currentAction.unit_id
-  ) {
-    // Add a ghost unit at the starting position
-    const originalUnit = unitsWithGhost.find((u) => u.id === currentAction.unit_id);
-    if (originalUnit) {
-      unitsWithGhost.push({
-        ...originalUnit,
-        id: -1, // Special ID for ghost unit
-        col: currentAction.from.col,
-        row: currentAction.from.row,
-        isGhost: true, // Mark as ghost for special rendering
-      } as UnitWithGhost);
+    if (
+      (currentAction?.type === "move" || currentAction?.type === "reactive_move") &&
+      currentAction?.from &&
+      currentAction.unit_id
+    ) {
+      // Add a ghost unit at the starting position
+      const originalUnit = result.find((u) => u.id === currentAction.unit_id);
+      if (originalUnit) {
+        result.push({
+          ...originalUnit,
+          id: -1, // Special ID for ghost unit
+          col: currentAction.from.col,
+          row: currentAction.from.row,
+          isGhost: true, // Mark as ghost for special rendering
+        } as UnitWithGhost);
+      }
     }
-  }
 
-  // Add ghost unit at starting position for charge actions (like move)
-  if (currentAction?.type === "charge" && currentAction?.from && currentAction.unit_id) {
-    // Add a ghost unit at the starting position
-    const originalUnit = unitsWithGhost.find((u) => u.id === currentAction.unit_id);
-    if (originalUnit) {
-      unitsWithGhost.push({
-        ...originalUnit,
-        id: -2, // Special ID for charge ghost unit (different from move ghost)
-        col: currentAction.from.col,
-        row: currentAction.from.row,
-        isGhost: true, // Mark as ghost for special rendering
-      } as UnitWithGhost);
+    // Add ghost unit at starting position for charge actions (like move)
+    if (currentAction?.type === "charge" && currentAction?.from && currentAction.unit_id) {
+      const originalUnit = result.find((u) => u.id === currentAction.unit_id);
+      if (originalUnit) {
+        result.push({
+          ...originalUnit,
+          id: -2, // Special ID for charge ghost unit (different from move ghost)
+          col: currentAction.from.col,
+          row: currentAction.from.row,
+          isGhost: true, // Mark as ghost for special rendering
+        } as UnitWithGhost);
+      }
     }
-  }
 
-  // Add ghost unit at starting position for advance actions (like move)
-  if (currentAction?.type === "advance" && currentAction?.from && currentAction.unit_id) {
-    // Add a ghost unit at the starting position
-    const originalUnit = unitsWithGhost.find((u) => u.id === currentAction.unit_id);
-    if (originalUnit) {
-      unitsWithGhost.push({
-        ...originalUnit,
-        id: -3, // Special ID for advance ghost unit (different from move and charge)
-        col: currentAction.from.col,
-        row: currentAction.from.row,
-        isGhost: true, // Mark as ghost for special rendering
-      } as UnitWithGhost);
+    // Add ghost unit at starting position for advance actions (like move)
+    if (currentAction?.type === "advance" && currentAction?.from && currentAction.unit_id) {
+      const originalUnit = result.find((u) => u.id === currentAction.unit_id);
+      if (originalUnit) {
+        result.push({
+          ...originalUnit,
+          id: -3, // Special ID for advance ghost unit (different from move and charge)
+          col: currentAction.from.col,
+          row: currentAction.from.row,
+          isGhost: true, // Mark as ghost for special rendering
+        } as UnitWithGhost);
+      }
     }
-  }
+
+    return result;
+  }, [currentState, currentAction, currentActionIndex, currentEpisode]);
 
   // Update game log when action index changes
   useEffect(() => {
@@ -1683,21 +1684,21 @@ export const BoardReplay: React.FC = () => {
 
   // Figs ayant EFFECTIVEMENT tiré/frappé (segment [SHOOTER_MODELS:]). Restreint le cercle vert (et,
   // pour le tir, la source du cône LoS) à ces seules figs — pas toute l'escouade. Absent → toutes.
-  const replayActiveModelIdsByUnit: Record<string, string[]> | undefined = (() => {
+  const replayActiveModelIdsByUnit = useMemo((): Record<string, string[]> | undefined => {
     if (currentAction?.type !== "shoot" && currentAction?.type !== "fight") return undefined;
     const ids = currentAction.shooter_models;
     const uid =
       currentAction.type === "shoot" ? currentAction.shooter_id : currentAction.attacker_id;
     if (!ids || ids.length === 0 || uid == null) return undefined;
     return { [String(uid)]: ids };
-  })();
+  }, [currentAction]);
 
   // Portée (subhex) de l'arme RÉELLEMENT tirée dans l'action, pour que le cône LoS de la fig tireuse
   // colle à SON arme (pas à la portée max de l'escouade). L'arme peut être portée par une fig SPÉCIALE
   // (ex. Kombi Rokkit du Nob) absente des armes niveau unité → lookup global par display_name dans
   // TOUTES les classes d'unités (getRangedWeaponRangeByDisplayName, en pouces), puis × inches_to_subhex.
   // weapon_name peut agréger plusieurs profils ("A / B") → on prend le max.
-  const replayActiveShootRangeByUnit: Record<string, number> | undefined = (() => {
+  const replayActiveShootRangeByUnit = useMemo((): Record<string, number> | undefined => {
     if (currentAction?.type !== "shoot") return undefined;
     const uid = currentAction.shooter_id;
     const wname = currentAction.weapon_name;
@@ -1711,7 +1712,7 @@ export const BoardReplay: React.FC = () => {
       }
     }
     return bestSubhex > 0 ? { [String(uid)]: bestSubhex } : undefined;
-  })();
+  }, [currentAction, currentEpisode]);
 
   // Preview de move (disques d'ancres atteignables) : le replay ne reçoit pas le pool moteur, on le
   // recalcule client-side comme pour charge/advance. Injecté dans le game_state via
@@ -1748,13 +1749,21 @@ export const BoardReplay: React.FC = () => {
     }).map((h): [number, number] => [h.col, h.row]);
   }, [currentAction, currentState, currentEpisode]);
 
-  const gameStateForBoard: GameState =
-    replayMoveDestinationPool !== null
-      ? ({
-          ...(currentState as GameState),
-          valid_move_destinations_pool: replayMoveDestinationPool,
-        } as GameState)
-      : (currentState as GameState);
+  const replayEligibleUnitIds = useMemo(
+    () => (replayActiveUnitId !== null ? [replayActiveUnitId] : []),
+    [replayActiveUnitId]
+  );
+
+  const gameStateForBoard = useMemo(
+    (): GameState =>
+      replayMoveDestinationPool !== null
+        ? ({
+            ...(currentState as GameState),
+            valid_move_destinations_pool: replayMoveDestinationPool,
+          } as GameState)
+        : (currentState as GameState),
+    [currentState, replayMoveDestinationPool]
+  );
 
   // Center column: Board
   const boardContent =
@@ -1762,7 +1771,7 @@ export const BoardReplay: React.FC = () => {
       <BoardPvp
         units={unitsWithGhost}
         selectedUnitId={replaySelectedUnitId}
-        eligibleUnitIds={replayActiveUnitId !== null ? [replayActiveUnitId] : []}
+        eligibleUnitIds={replayEligibleUnitIds}
         activeModelIdsByUnit={replayActiveModelIdsByUnit}
         activeShootRangeByUnit={replayActiveShootRangeByUnit}
         showHexCoordinates={showHexCoordinates}
