@@ -121,7 +121,7 @@ def _compare_sur_tout_le_pool(engine, contexte):
     )
 
 
-def test_le_vectorise_egale_la_regle_scalaire_sur_tout_le_pool(make_active_deployment_engine):
+def test_le_vectorise_egale_la_regle_scalaire_sur_tout_le_pool(board_x5, make_active_deployment_engine):
     """Terrain de production (`terrain-mc1`), en cours de déploiement : égalité hexe par hexe."""
     engine = make_active_deployment_engine(seed=1)
     for _ in range(4):
@@ -136,7 +136,7 @@ def test_le_vectorise_egale_la_regle_scalaire_sur_tout_le_pool(make_active_deplo
     _compare_sur_tout_le_pool(engine, "terrain-mc1, 4 poses jouees")
 
 
-def test_le_vectorise_egale_la_regle_scalaire_sur_un_second_terrain(tmp_path):
+def test_le_vectorise_egale_la_regle_scalaire_sur_un_second_terrain(board_x5, tmp_path):
     """Second TERRAIN : d'autres murs, d'autres areas obscurantes, mêmes réponses attendues."""
     from ai.unit_registry import UnitRegistry
     from engine.w40k_core import W40KEngine
@@ -170,7 +170,7 @@ def test_le_vectorise_egale_la_regle_scalaire_sur_un_second_terrain(tmp_path):
     _compare_sur_tout_le_pool(engine, f"{SECOND_TERRAIN_REF} ({murs} murs)")
 
 
-def test_le_trace_hex_ne_produit_jamais_de_cellule_en_double(make_active_deployment_engine):
+def test_le_trace_hex_ne_produit_jamais_de_cellule_en_double(board_x5, make_active_deployment_engine):
     """L'HYPOTHÈSE sur laquelle repose le jumeau vectorisé, vérifiée au lieu d'être supposée.
 
     Le générateur scalaire `hex_line_iter` déduplique ses cellules (`seen`) ; le jumeau

@@ -47,6 +47,8 @@ COUVERTURE : tests/unit/engine/test_x.py::test_foo etendu ; aucun trou vu
 RELIRE :
 /code-review /home/greg/40k/engine/x.py
 /simplify /home/greg/40k/engine/x.py
+ÉTAT CHANTIER : Tests ✅ · Commité 🟡 · Mergé 🟡 · ROADMAP 🟡 · Doc ⚪
+SUITE : Tout est terminé
 """
 
 WORKTREE_FILE = str(RACINE / ".claude" / "worktrees" / "sujet" / "engine" / "x.py")
@@ -190,7 +192,7 @@ MARQUEUR = "[\U0001F300-\U0001FAFF\U00002600-\U000027FF]"
 # plus d'un marqueur 🟢/🔴 (le hook le tolère aussi, voir sa regex de détection), puis le
 # séparateur qui introduit la glose — « : » quand la section a un gabarit, « — » sinon.
 LIGNE_SECTION_RAPPORT = re.compile(
-    rf"^(?:{MARQUEUR}+ +)?([A-ZÉÈÀÂÎÔÛÇ]{{2,}}(?: */ *[A-ZÉÈÀÂÎÔÛÇ]{{2,}})*)\s*(?::|—)",
+    rf"^(?:{MARQUEUR}+ +)?([A-ZÉÈÀÂÎÔÛÇ]{{2,}}(?:(?: */ *| +)[A-ZÉÈÀÂÎÔÛÇ]{{2,}})*)\s*(?::|—)",
     re.MULTILINE,
 )
 
@@ -200,8 +202,8 @@ def _bloc_des_sections() -> str:
     """L'énumération des sections du RAPPORT FINAL, isolée de ce qui l'entoure."""
     texte = CLAUDE_MD.read_text(encoding="utf-8")
     ancre = texte.index("RAPPORT FINAL")
-    debut = texte.index("Structure obligatoire", ancre)
-    return texte[debut:texte.index("Pas de verdict vague", debut)]
+    debut = texte.index("4. SECTIONS TECHNIQUES", ancre)
+    return texte[debut:texte.index("\nARBITRAGE\n", debut)]
 
 
 def _labels_du_format_impose() -> list[str]:
@@ -460,7 +462,7 @@ def test_couverture_n_est_pas_exigee_sur_une_modification_de_doc(tmp_path: Path)
     Sur une doc ORDINAIRE : CLAUDE.md, lui, pilote le hook et compte comme du code (voir
     `test_modifier_claude_md_engage_couverture_et_relire`).
     """
-    doc = "STATUT : Livré\n\nFait.\n\nLU : le doc en entier\nJUMEAU : grep -c COUVERTURE -> 1 hit\n"
+    doc = "STATUT : Livré\n\nFait.\n\nLU : le doc en entier\nJUMEAU : grep -c COUVERTURE -> 1 hit\nSUITE : Tout est terminé\n"
     assert _rapport(tmp_path, _user("corrige la doc"), _edit("Documentation/x.md"),
                     _say(doc)) is None
 
@@ -488,7 +490,7 @@ def test_un_fichier_qui_pilote_les_hooks_compte_comme_du_code(
 def test_etiquette_relire_doit_etre_seule_sur_sa_ligne(tmp_path: Path) -> None:
     colle = RAPPORT_CONFORME.replace("RELIRE :\n/code-review", "RELIRE : /code-review")
     contexte = _rapport(tmp_path, _user("corrige"), _edit("engine/x.py"), _say(colle))
-    assert contexte is not None and "SEULE sur sa ligne" in contexte
+    assert contexte is not None and "propre ligne" in contexte
 
 
 @pytest.mark.parametrize("manquante", ["/code-review", "/simplify"])

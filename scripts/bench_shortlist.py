@@ -60,6 +60,17 @@ _MY_DAMAGE = 10.0
 _THEIR_DAMAGE = 8.0
 
 
+def _dmg(game_state: Any, attacker_id: Any, target_id: Any, is_ranged: bool) -> float:
+    cache = game_state.get("units_cache", {})
+    att = cache.get(str(attacker_id), {})
+    return _MY_DAMAGE if int(att.get("player", 2)) == 1 else _THEIR_DAMAGE
+
+
+def _install_damage_patch() -> None:
+    """Installe _dmg sur doc._damage_on sans restaurer (la restauration est à la charge de l'appelant)."""
+    doc._damage_on = _dmg
+
+
 @contextmanager
 def _damage_patch():
     """Patche doc._damage_on avec une valeur fixe pour la durée du bloc.
@@ -67,13 +78,8 @@ def _damage_patch():
     _firepower_from fait le test de portée (distance vs RNG) ; _damage_on ne fournit
     que la valeur. Une constante ici isole le comportement du shortlist pur.
     """
-    def _dmg(game_state: Any, attacker_id: Any, target_id: Any, is_ranged: bool) -> float:
-        cache = game_state.get("units_cache", {})
-        att = cache.get(str(attacker_id), {})
-        return _MY_DAMAGE if int(att.get("player", 2)) == 1 else _THEIR_DAMAGE
-
     orig = doc._damage_on
-    doc._damage_on = _dmg
+    _install_damage_patch()
     try:
         yield
     finally:
