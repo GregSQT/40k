@@ -144,8 +144,10 @@ class TestEndgameBotBascule:
         score_early = bot.target_score(attacker, True, gs_early)
         # En push : contester (peut renvoyer None si damage nul)
         score_push = bot.target_score(attacker, True, gs_push)
-        # Les deux scorers doivent etre differentes fonctions
-        assert score_early is not score_push
+        # Les deux closures doivent venir de fonctions distinctes (efficiency vs contester).
+        # `is not` passe toujours (deux objets differents) meme si les deux retournent
+        # _score_efficiency — on verifie le qualname de la closure retournee.
+        assert score_early.__qualname__ != score_push.__qualname__
 
 
 # ─── Transformation de poids — protect_lead renforce l'evitement d'endgame ──────

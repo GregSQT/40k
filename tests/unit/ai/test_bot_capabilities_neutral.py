@@ -112,7 +112,7 @@ def test_base_wants_charge_follows_melee_beats_ranged(monkeypatch: pytest.Monkey
     # melee > ranged => charge
     monkeypatch.setattr(doctrines, "_best_melee_and_ranged",
                         lambda unit, gs: (10.0, 5.0))
-    bot = AttritionBot()
+    bot = DecapitationBot()
     attacker = {"id": "u1", "player": 1}
     gs = _game_state()
     assert bot.wants_charge(attacker, gs) is True
@@ -123,6 +123,74 @@ def test_base_wants_charge_no_charge_ranged_better(monkeypatch: pytest.MonkeyPat
     _patch_all(monkeypatch)
     monkeypatch.setattr(doctrines, "_best_melee_and_ranged",
                         lambda unit, gs: (3.0, 10.0))
+    bot = DecapitationBot()
+    attacker = {"id": "u1", "player": 1}
+    gs = _game_state()
+    assert bot.wants_charge(attacker, gs) is False
+
+
+def test_base_wants_charge_preservation_blocks_when_pressure_high(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """_preservation_blocks_charge coupe la charge quand pressure * g_pres >= seuil."""
+    _patch_all(monkeypatch)
+    # melee > ranged => chargerait normalement
+    monkeypatch.setattr(doctrines, "_best_melee_and_ranged",
+                        lambda unit, gs: (10.0, 5.0))
+    # preservation=1.0 : g_pres = 1.0 ; pressure=0.5 => 0.5 >= 0.3 => bloque
+    monkeypatch.setattr(doctrines, "load_style_profile", lambda key: {
+        "late_game": 0.0,
+        "preservation": 1.0,
+        "persistence": 0.0,
+        "focus_shared": False,
+    })
+    monkeypatch.setattr(doctrines, "preservation_pressure", lambda unit, gs: 0.5)
+    bot = DecapitationBot()
+    attacker = {"id": "u1", "player": 1}
+    gs = _game_state()
+    assert bot.wants_charge(attacker, gs) is False
+
+
+def test_attrition_wants_charge_is_preserving_blocks_before_base(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AttritionBot._is_preserving bloque la charge meme quand la base l'autoriserait."""
+    _patch_all(monkeypatch)
+    monkeypatch.setattr(doctrines, "_best_melee_and_ranged",
+                        lambda unit, gs: (10.0, 5.0))
+    # Unité entamée et au-dessus de la valeur moyenne => _withdrawing=True => bloque
+    monkeypatch.setattr(doctrines, "is_unit_at_or_below_half_strength",
+                        lambda sid, gs: True)
+    bot = AttritionBot()
+    attacker = {"id": "u1", "player": 1, "VALUE": 100.0}
+    gs = _game_state()
+    # units=[] => others=[] => _withdrawing=True (derniere escouade)
+    assert bot.wants_charge(attacker, gs) is False
+
+
+def test_attrition_wants_charge_calls_base_preservation_blocks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AttritionBot._is_preserving=False => super() => _preservation_blocks_charge coupe.
+
+    Verifie que AttritionBot.wants_charge appelle bien super() et ne court-circuite pas
+    _preservation_blocks_charge. Sans le fix (return _melee_beats_ranged), ce test est ROUGE.
+    """
+    _patch_all(monkeypatch)
+    # melee > ranged => chargerait si le fix est absent
+    monkeypatch.setattr(doctrines, "_best_melee_and_ranged",
+                        lambda unit, gs: (10.0, 5.0))
+    # _is_preserving=False : unité non entamée
+    monkeypatch.setattr(doctrines, "is_unit_at_or_below_half_strength",
+                        lambda sid, gs: False)
+    # preservation=1.0, pressure=0.5 => 0.5 * 1.0 >= 0.3 => _preservation_blocks_charge=True
+    monkeypatch.setattr(doctrines, "load_style_profile", lambda key: {
+        "late_game": 0.0,
+        "preservation": 1.0,
+        "persistence": 0.0,
+        "focus_shared": False,
+    })
+    monkeypatch.setattr(doctrines, "preservation_pressure", lambda unit, gs: 0.5)
     bot = AttritionBot()
     attacker = {"id": "u1", "player": 1}
     gs = _game_state()
