@@ -134,7 +134,7 @@ raison (cf. `config/bot_movement_weights.json`, entrée `tactical`).
 | 4 | modèle de dégâts espérés (attaquant → cible) | ✅ 2026-08-11, **corrigé à la racine** 2026-08-12, cf. §7 et §7.1 |
 | 5 | les SIX styles | ✅ 2026-08-12, cf. §7 et §11.3 (`standoff` supprimé §9.2, `scorer` ajouté §11.3) |
 | 6 | réglage en **bot-contre-bot** (~~orthogonalité~~ abandonnée, §3.2) | ✅ **2026-08-13, §12.8 à §12.14** — les deux hausses du §12.7 réfutées et défaites (§12.8) ; `scorer`, dernier profil posé sans mesure, réglé (§12.9) ; `decapitation` corrigé au déplacement puis son `w_objective` rejoué sur la forme retenue (§12.11, §12.14). Tous mesurés à 60 ép./bot, un poids par run, dérive des cinq contrôles 0,000. ⚠️ Restent `decapitation.w_crowd` et `w_contest`, jamais isolés APRÈS le correctif (§12.14) |
-| 7 | correspondance ancien/nouveau, puis suppression des cinq anciens | |
+| 7 | correspondance ancien/nouveau, puis suppression des cinq anciens | 🟠 **MOITIÉ FAITE, 2026-08-14, §12.16** — correspondance mesurée sur le MÊME agent (`robust_0.8721`, 100 ép./bot) : pire bot 0,77 → **0,630**, moyenne simple 0,928 → 0,743, et l'ancien panel a **deux bots saturés** (`defensive` 100-0, `tactical` 0,99). ⛔ La suppression est BLOQUÉE, et pas par la qualité : les six profils d'entraînement (`x1`, `x1_long`, `x1_selfplay`, `x5_*`) chargent tous les ANCIENS bots — seul `x1_panel` a le neuf. Migrer est une décision d'utilisateur (elle périme le mètre de toutes les courbes de l'agent, gating `control` compris) |
 | 8 | mesure finale contre l'agent, commande de §2 | ✅ **2026-08-13, §12.14** — 100 ep/bot sur `robust_0.8721`, panel unifié : `combined = 0,7433`, pire bot `racer = 0,630`, pire scénario 0,6867. Les `0,7767`, `0,7600` et `0,7400` sont des états intermédiaires de la même journée |
 
 ### 4.1 Pourquoi l'appariement des graines a été retiré
@@ -1631,3 +1631,286 @@ isolés après le correctif de déplacement**. Le seul run qui les ait isolés (
 changement de géométrie, donc il ne transfère pas ; le sweep de `w_objective` les incluait sans
 les séparer. Ce sont les deux derniers poids du panel qui reposent sur autre chose qu'une mesure
 faite sur le code courant.
+### 12.15 La marche entre le terme ennemi et le forfait de zone — mesurée, pas supposée (2026-08-14)
+
+**L'objectif, d'abord, parce que trois campagnes l'ont perdu de vue.** Le panel n'existe pas pour
+tenir des zones. Il existe pour **mesurer un agent** : ordonner correctement deux agents proches
+(§9.3), garder un pire bot assez fort pour ne pas saturer, et offrir des comportements distincts à
+affronter. Les zones tenues sont un **proxy**. Un changement qui gagne des zones en effaçant ce qui
+distingue deux styles perd sur l'objectif tout en gagnant sur le proxy.
+
+**Le sujet.** Le score de destination compare une attraction ennemie **linéaire par hexe**
+(`w_enemy × distance`, sans plafond) à un bonus de tenue de zone **constant** (`w_objective ×
+hold_bonus`), lequel s'annule de surcroît entre deux zones puisqu'il s'applique à toute destination
+située dans une zone. Deux mécanismes candidats : **A**, plafonner la distance ennemie à ce que
+l'unité peut atteindre (portée d'arme, distance de charge) ; **D**, donner au terme d'objectif la
+valeur qu'il n'a pas (paliers de VP, tours restants) plutôt qu'un forfait de 3.
+
+#### La lecture a été fixée AVANT de mesurer
+
+C'est la seule protection contre le défaut du §12.7, où le mécanisme a été inventé après coup pour
+expliquer des chiffres :
+
+| ce que rend la mesure | ce qu'on en conclut |
+|---|---|
+| écart de magnitude sous 2 sem | la marche ne coûte plus rien : **ne rien changer** |
+| écart net, départs **hors zone** portés par `w_enemy` | **A** |
+| écart net, départs **entre zones**, forfait en cause | **D** |
+| les deux | **D**, seule à ne retirer son axe à aucun style |
+
+#### Un défaut d'instrument trouvé en route — le run de référence ne passait plus
+
+`bot_zone_direct.py` levait `_focus_target '1' appartient au bot-player 1 — bot mal configuré` au
+**2e épisode de `decapitation`**, sur un bot parfaitement configuré. Cause : la métrique lit
+`_focus_target` NU — délibérément, pour ne pas muter l'état du bot — donc elle lit la cible de
+l'épisode PRÉCÉDENT tant que le bot n'a pas rejoué. Or `agent_seat_mode` vaut « random » : au
+changement d'épisode le bot change de siège, et cette cible ennemie devient une escouade **à lui**.
+Diagnostic relevé : marqueur `(1, 5)` contre un état `episode=2, turn=1`.
+
+La péremption se **constate** désormais au lieu d'être provoquée — le marqueur du bot est comparé à
+l'état courant, une cible périmée rend `None`. Le garde de joueur garde tout son sens pour une
+cible fraîche. Verrou : `tests/unit/scripts/test_bot_zone_direct_metrics.py`, deux tests, rouges
+quand on retire le contrôle.
+
+#### Référence rejouée, et elle reproduit le §12.14
+
+60 ép./bot, `board/44x60x1`, `robust_0.8721` (md5 vérifié par l'instrument).
+
+| bot | `w_enemy` | T1 | T2 | T3 | T4 | T5 |
+|---|---|---|---|---|---|---|
+| scorer | **0.0** | 1,40 | 1,87 | 2,15 | 2,32 | **2,33** |
+| attrition | 0.2 | 1,20 | 1,67 | 1,90 | 2,18 | 2,08 |
+| endgame | −0.35 | 1,15 | 1,57 | 1,77 | 1,88 | 2,08 |
+| racer | 0.2 | 1,38 | 1,77 | 1,88 | 1,97 | 2,07 |
+| decapitation | 0.6 | 1,22 | 1,63 | 1,78 | 1,68 | 1,68 |
+| alpha | **1.2** | 0,97 | 1,12 | 0,93 | 1,13 | **1,10** |
+
+Moyenne panel **T2 = 1,60 / T5 = 1,89**, soit la ligne de base du §12.14 **au centième**. Le
+tableau est trié par `w_enemy` croissant, et il se lit seul : plus un bot a de terme ennemi, moins
+il tient de zones. La seule exception est `endgame`, dont le `w_enemy` NÉGATIF n'est pas de même
+nature — il fuit, il ne poursuit pas.
+
+#### Magnitude — le terme ennemi coûte, et beaucoup
+
+Un run par bot, `w_enemy → 0.0`, cinq bots en contrôle, comparaison appariée épisode par épisode
+(`scripts/bot_compare_weights.py`, Student).
+
+| bot | `w_enemy` | Δ zones au T5 | IC 95 % | dérive des contrôles |
+|---|---|---|---|---|
+| alpha | 1.2 → 0.0 | **+0,983** | [+0,753 ; +1,214] | 0,000 ✓ (5 bots, 300 ép.) |
+| decapitation | 0.6 → 0.0 | **+0,683** | [+0,408 ; +0,959] | 0,000 ✓ (5 bots, 300 ép.) |
+
+`alpha` **double** son nombre de zones tenues au dernier tour quand on lui retire le terme ennemi.
+Les deux intervalles excluent 0 très largement. La première ligne de la lecture pré-enregistrée —
+« ne rien changer » — est **écartée par la mesure**.
+
+#### Côté — quel terme fait quitter la zone
+
+`scripts/bot_zone_leave_probe.py`, 30 ép., décisions prises **depuis** une zone, chacune rejouée
+avec un terme neutralisé (la vraie fonction est rappelée, rien n'est réimplémenté).
+
+| bot | décisions depuis une zone | reste | part vers une autre zone | part **hors** zone |
+|---|---|---|---|---|
+| alpha | 192 | 50,5 % | 6,8 % | **42,7 %** |
+| decapitation | 313 | 63,3 % | 5,4 % | 31,3 % |
+| scorer | 361 | 69,8 % | 7,2 % | 23,0 % |
+
+Des départs **hors zone**, part que la neutralisation d'un terme fait revenir dans une zone :
+
+| bot | `w_enemy = 0` | `w_crowd = 0` |
+|---|---|---|
+| alpha | **92,7 %** | 3,7 % |
+| decapitation | 37,8 % | 42,9 % |
+| scorer | **0,0 %** (témoin) | 74,7 % |
+
+⚠️ **`scorer` est le témoin qui valide l'instrument**, et il a servi. Son `w_enemy` vaut déjà 0.0
+depuis le §12.9, donc ce contrefactuel ne change rien chez lui et DOIT rendre 0,0 %. La première
+version de la sonde rendait **20,5 %** : elle repartait de l'état des générateurs d'APRÈS l'appel
+réel, si bien que le contrefactuel voyait d'autres tirages et prenait la branche aléatoire
+(`bot_eval_randomness` = 0,05) quand l'appel réel ne l'avait pas prise. Sans ce témoin, la sonde
+aurait rendu un chiffre plausible et faux — exactement ce que le §12.7 a publié. Verrou :
+`tests/unit/scripts/test_bot_zone_leave_probe.py`.
+
+#### Ce que ça donne, lu contre la règle écrite d'avance
+
+**`alpha` : c'est le terme ennemi, sans ambiguïté.** 42,7 % de ses décisions prises depuis une zone
+la quittent pour du vide, et 92,7 % de ces départs sont annulés en neutralisant `w_enemy` — contre
+3,7 % pour `w_crowd`. La deuxième ligne de la règle est remplie : **A**.
+
+**`decapitation` : partagé** (37,8 % contre 42,9 %). A ne fermera pas son cas à lui seul.
+
+**`scorer` : le terme ennemi n'y est pour rien** (0,0 %), et ses départs viennent à 74,7 % de
+`w_crowd` — or c'est le meilleur bot du panel en zones (2,33) et son `w_crowd` a été monté à 4.0
+par mesure au §12.9. **Un départ hors zone n'est donc pas un défaut en soi** : le pool de
+destinations est borné par le mouvement, partir vers une zone lointaine passe par des hexes qui
+n'appartiennent à aucune zone. C'est le TERME retenu qui distingue la poursuite du transit, jamais
+la classe de destination — et c'est la limite assumée de cette sonde.
+
+**Conclusion : A**, et son périmètre utile est nommé — les bots dont `w_enemy` domine, c'est-à-dire
+`alpha` d'abord, `decapitation` pour moitié. Les trois autres n'y verront rien, leur `w_enemy` étant
+nul ou marginal.
+
+⚠️ **L'objection à A tient toujours et devra être tranchée à l'implémentation** : `min(d, R)` est
+**plat** au-delà de R, donc le terme ennemi cesse d'exister sur la majeure partie du plateau
+(`charge_max_distance` = 12 sur une table 44×60). L'ablation montre que `alpha` GAGNE des zones
+sans terme ennemi, mais tenir des zones n'est pas ce qui le définit : il faudra vérifier que le
+plafond ne le ramène pas à un `scorer` avec un autre nom, et la grandeur qui le dira n'est pas le
+nombre de zones — c'est le win-rate et le comportement, pas le proxy.
+
+### 12.16 Correspondance ancien/nouveau panel — étape 7, première moitié (2026-08-14)
+
+C'est la mesure que le §3 réclame depuis l'ouverture du chantier — *« ils ne valent que par une
+mesure unique : le facteur de conversion entre l'ancien mètre et le nouveau »* — et elle n'avait
+jamais été faite **sur le même agent**. Le §9.3, seule tentative, comparait un panel qui n'existe
+plus (cinq styles, sans `scorer`, avant §7.1, §12.5, §12.6 et §12.11) et son `combined` est
+arithmétiquement faux (§11.1).
+
+Protocole identique des deux côtés : `robust_0.8721` (md5 `6f6b9805…`, copie privée au worktree),
+`--resolution 1`, pool holdout, **100 épisodes par bot**, 600 épisodes par panel.
+
+```bash
+python3 ai/train.py --agent ArmageddonAgent --training-config x1       --test-only --test-episodes 100 --resolution 1   # ancien
+python3 ai/train.py --agent ArmageddonAgent --training-config x1_panel --test-only --test-episodes 100 --resolution 1   # nouveau
+```
+
+| ancien panel (`x1`) | win-rate agent | | nouveau panel (`x1_panel`) | win-rate agent |
+|---|---|---|---|---|
+| defensive | **1,00** (100 W – 0 L) | | alpha | 0,93 |
+| tactical | 0,99 | | endgame | 0,80 |
+| greedy | 0,96 | | decapitation | 0,73 |
+| adaptive | 0,94 | | attrition | 0,71 |
+| value_trade | 0,91 | | scorer | 0,66 |
+| **control** | **0,77** | | **racer** | **0,63** |
+
+**Les deux `combined` officiels ne se comparent pas** — `x1` pondère `control` à 0,4, quatre bots à
+0,15 et `tactical` à 0,0 ; `x1_panel` met 1/6 partout. La grandeur comparable est la **moyenne
+simple des six**, et le **pire bot** :
+
+| | ancien | nouveau | écart |
+|---|---|---|---|
+| moyenne simple des 6 | 0,928 | **0,743** | **−18,5 pt** |
+| pire bot | `control` 0,77 | `racer` **0,630** | **−14,0 pt** |
+| meilleur bot | `defensive` 1,00 | `alpha` 0,93 | −7 pt |
+| étendue | 0,23 | **0,30** | +7 pt |
+| `combined` du profil (non comparable) | 0,8795 | 0,7433 | — |
+
+#### Ce que la mesure établit, et ce qu'elle n'établit pas
+
+**Le défaut du §1 est confirmé sur l'agent courant, et il est pire qu'annoncé.** Les écarts entre
+bots consécutifs de l'ancien panel valent `0,14 · 0,03 · 0,02 · 0,03 · 0,01` : **cinq bots tiennent
+dans une bande de 9 points**, pour une marge d'échantillonnage de ±4,4 points à n=100. Ils ne sont
+pas distinguables les uns des autres. L'ancien panel rend donc **`control`, et un bloc** — deux
+signaux pour six bots, exactement ce que le chantier lui reprochait, jamais chiffré jusqu'ici.
+
+**`defensive` ne mesure rien du tout : 100 victoires, 0 défaite.** Un bot que l'agent ne perd
+jamais contre ne peut plus distinguer deux agents, quels qu'ils soient. `tactical` à 0,99 en est à
+un point. Deux des six instruments de l'ancien panel sont saturés.
+
+**Le nouveau panel n'est saturé nulle part** (plafond `alpha` 0,93) et ses écarts consécutifs
+valent `0,03 · 0,05 · 0,02 · 0,07 · 0,13`. À ±9 points de marge, ça ne fait pas six niveaux : le
+groupe `racer`–`decapitation` reste indistinct. **Trois niveaux séparables** — le groupe des
+quatre, `endgame`, `alpha` — contre deux pour l'ancien. C'est un gain réel, ce n'est pas une
+transformation, et l'annoncer comme six serait refaire le défaut du §9.3.
+
+**Le bot le plus dur gagne 14 points** (0,77 → 0,630). C'est le résultat le plus solide de la
+comparaison : c'est le pire bot qui porte le pouvoir discriminant d'un thermomètre, puisque c'est
+là que l'agent a encore de la marge à révéler.
+
+⚠️ **LE CONFONDANT, ET IL EST ÉNORME : L'AGENT S'EST ENTRAÎNÉ CONTRE L'ANCIEN PANEL, JAMAIS
+CONTRE LE NEUF.** `bot_training.ratios` vaut `control 0.35 · value_trade 0.15 · adaptive 0.15 ·
+greedy 0.15 · defensive 0.15 · random 0.05` dans **les quatre profils**, `x1_panel` COMPRIS — le
+panel neuf n'apparaît que dans `bot_eval_weights`. Autrement dit `robust_0.8721` a passé **35 % de
+son entraînement contre `control` seul** et n'a jamais rencontré un seul des six nouveaux styles.
+Une part inconnue de l'écart 0,928 → 0,743 est donc de la NOUVEAUTÉ, pas de la qualité de bot, et
+personne ne l'a chiffrée. La seule mesure qui la séparerait est un entraînement complet contre le
+panel neuf (≈ 20 h), et il n'a pas été fait.
+
+Ce n'est pas nécessairement un défaut à corriger : un panel jamais affronté mesure la
+GÉNÉRALISATION, ce qui est exactement le rôle d'un holdout. Mais il faut alors le dire — le panel
+neuf est aujourd'hui un **holdout**, l'ancien est le **partenaire d'entraînement**, et les deux ne
+mesurent pas la même chose. Comparer leurs win-rates comme s'ils étaient deux thermomètres
+interchangeables est une erreur de catégorie.
+
+⚠️ **Ce que cette mesure NE dit pas non plus.** Elle porte sur **un seul
+agent**. La propriété qui définit un thermomètre — ordonner correctement plusieurs agents de forces
+proches — n'est pas testée ici, et l'ancienne démonstration de cette propriété a été détruite par
+le §11.1 (3 bots sur 5 inversaient les deux meilleurs modèles, et l'ordre « vrai » venait du nom
+des modèles, c'est-à-dire du verdict de l'ancien panel : circulaire). Le nouveau panel est **plus
+dur et mieux étalé** ; qu'il classe *mieux* reste non démontré.
+
+#### Ce que ça change pour l'étape 7
+
+La correspondance est consignée : le facteur de conversion existe, et la condition posée par le §3
+pour retirer les anciens bots est **remplie sur le plan documentaire**.
+
+⚠️ **Elle ne suffit pas à les supprimer, et pour une raison qui n'a rien à voir avec leur qualité :
+ce sont eux qui travaillent.** Seul `x1_panel` charge le panel neuf. Les six profils qui entraînent
+réellement — `x1`, `x1_long`, `x1_selfplay`, `x5_new`, `x5_append`, `x5_long` — tournent tous
+contre les anciens. Supprimer leur code casse six profils, et `control` sert de repère de gating à
+l'agent.
+
+L'étape 7 se scinde donc en deux, et la seconde est une **décision de l'utilisateur**, pas une
+tâche technique : **migrer les profils d'entraînement** sur le nouveau panel change le mètre de
+toutes les courbes historiques de l'agent, seuil de gating compris. Tant qu'elle n'est pas prise,
+les anciens bots restent — et ce n'est pas de la dette, c'est le code de production.
+
+### 12.17 L'expérience qui sépare « plus dur » de « jamais vu » — protocole écrit AVANT le run (2026-08-14)
+
+Le §12.16 laisse une question ouverte qu'aucune mesure existante ne peut trancher : l'agent s'est
+entraîné à 35 % contre `control` et n'a **jamais** rencontré un style refondu, donc l'écart
+0,928 → 0,743 mêle **difficulté** et **nouveauté**. On entraîne un agent neuf contre le panel
+refondu, et on mesure les deux agents contre les deux panels.
+
+#### Un défaut de câblage, trouvé en préparant — l'entraînement ne SAVAIT PAS construire ces bots
+
+`ai/train.py::_build_training_bots_from_config` tenait sa **propre** table clé → classe, limitée
+aux cinq bots d'origine. Mettre `racer` dans `bot_training.ratios` levait
+`Unknown bot name in ratios: 'racer'`. **C'était la quatrième copie de cette table** — `ai/bot_registry.py`
+existe précisément pour ça et se déclare source unique ; les trois autres copies
+(`bot_evaluation`, `bot_ranking`, `training_callbacks`) avaient déjà été unifiées, celle-ci a
+survécu parce qu'elle est du côté ENTRAÎNEMENT et que tout le chantier passait par l'évaluation.
+
+C'est la vraie raison pour laquelle personne n'a jamais entraîné contre le panel refondu : **ce
+n'était pas une décision, c'était un oubli de câblage.** Corrigé, verrou
+`tests/unit/ai/test_train_helpers.py::test_build_training_bots_accepte_les_six_styles_refondus`
+(rouge si la table locale revient).
+
+#### Le profil : `x1_long_panel`, copie exacte de `x1_long`
+
+Copié de `x1_long` et non de `x1_panel`, pour deux raisons : le budget (50 000 épisodes) et les
+hyperparamètres sont ceux du run de référence — et `x1_panel` a gardé un plancher de
+`learning_rate` à 0.0002 quand les quatre profils de la chaîne sont passés à 0.0005 le 2026-08-12,
+divergence que personne n'avait vue faute de test l'appariant à quoi que ce soit.
+
+Quatre différences avec `x1_long`, et **quatre seulement** (verrou
+`tests/unit/ai/test_x1_long_panel_ne_differe_que_des_bots.py`) :
+
+| clé | valeur | pourquoi |
+|---|---|---|
+| `bot_training.ratios` | 0,16 × 6 styles + 0,04 `random` | LE facteur mesuré. Centièmes exacts : le pool fait 100 places, `round(ratio × 100)` doit tomber juste (16×6+4 = 100) |
+| `bot_eval_weights` | les six styles, 1/6 | s'entraîner contre un panel et se mesurer contre un autre ne répondrait à aucune des deux questions |
+| `bot_eval_randomness` | 0,05 par style | une entrée par bot pondéré, sinon `build_bot` lève (T1) |
+| `model_gating_min_vs_control` | **0.0** | ⚠️ le plancher `vs_control` s'applique **même gating désarmé** et fait `require_key(results, "control")` dès qu'il est > 0. Avec un panel sans `control`, il aurait levé à la **première** évaluation, soit ~4 h dans un run de 20 h |
+
+#### La lecture, fixée maintenant
+
+20 h de calcul produisent un chiffre qu'on peut raconter dans les deux sens si la règle n'est pas
+écrite d'avance — c'est ce qui a coûté le §12.7. On compare l'écart **interne à chaque agent**,
+jamais les chiffres absolus, parce que rien ne garantit que les deux agents soient également forts.
+
+| | contre son panel d'entraînement | contre le panel jamais vu | écart |
+|---|---|---|---|
+| agent actuel (`robust_0.8721`) | **0,928** (ancien) | **0,743** (refondu) | **18,5 pt** |
+| agent `x1_long_panel` | X (refondu) | Y (ancien) | X − Y |
+
+- `X − Y ≈ 18,5` → l'écart était de la **nouveauté** : les deux panels se valent en difficulté, et
+  l'architecture actuelle (anciens en entraînement, refondus en holdout) est la bonne ;
+- `X − Y` nettement **< 18,5** → le panel refondu est **vraiment** plus dur : migrer l'entraînement
+  dessus rend un agent plus fort ;
+- `X − Y` **> 18,5** → c'est l'ancien panel qui est le plus dur, et la refonte s'est trompée de
+  cible.
+
+⚠️ **Parité de budget non vérifiée** : le budget d'entraînement de `robust_0.8721` n'est pas
+consigné. La lecture par écart interne y survit — c'est sa raison d'être — mais les chiffres
+ABSOLUS des deux agents ne se comparent que si les budgets se correspondent. À établir avant de
+comparer autre chose que les deux écarts.

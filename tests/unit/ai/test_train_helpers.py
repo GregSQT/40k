@@ -49,6 +49,51 @@ def test_build_training_bots_respects_the_configured_budget() -> None:
         assert counts[by_name[name]] / len(bots) == pytest.approx(ratio), name
 
 
+def test_build_training_bots_accepte_les_six_styles_refondus() -> None:
+    """L'ENTRAINEMENT doit savoir construire le panel refondu, pas seulement l'EVALUATION.
+
+    Defaut d'origine, trouve le 2026-08-14 : ce module tenait sa propre table cle -> classe,
+    limitee aux cinq bots d'origine, alors que `ai/bot_registry.py` se declare source unique et
+    porte les deux familles. `bot_training.ratios` levait donc « Unknown bot name in ratios:
+    'racer' », et aucun entrainement contre le panel refondu n'etait possible — pas par
+    decision, par oubli de cablage. C'etait la QUATRIEME copie de cette table ; les trois autres
+    avaient deja ete unifiees, celle-ci a survecu parce qu'elle est du cote entrainement et que
+    tout le chantier des bots passait par l'evaluation.
+    """
+    from collections import Counter
+
+    ratios = {
+        "racer": 0.16, "endgame": 0.16, "alpha": 0.16,
+        "attrition": 0.16, "decapitation": 0.16, "scorer": 0.16, "random": 0.04,
+    }
+    bots = train._build_training_bots_from_config({
+        "bot_training": {
+            "ratios": ratios,
+            "randomness": {k: 0.05 for k in ratios if k != "random"},
+        }
+    })
+    counts = Counter(type(b).__name__ for b in bots)
+    # Les noms de classe viennent du REGISTRE, jamais recopiés ici : `alpha` s'appelle
+    # `AlphaStrikeBot`, et une table locale de plus est exactement ce que ce test verrouille.
+    from ai.bot_registry import BOT_DISPLAY_NAMES
+
+    for name, ratio in ratios.items():
+        classe = "RandomBot" if name == "random" else BOT_DISPLAY_NAMES[name]
+        assert counts[classe] / len(bots) == pytest.approx(ratio), name
+
+
+def test_build_training_bots_leve_sur_un_bot_inconnu() -> None:
+    """VERT VACANT : sans ce test, une table qui accepterait n'importe quoi passerait le test
+    ci-dessus. Le message doit nommer la cle fautive."""
+    with pytest.raises((ValueError, KeyError), match="pas_un_bot"):
+        train._build_training_bots_from_config({
+            "bot_training": {
+                "ratios": {"pas_un_bot": 0.5, "random": 0.5},
+                "randomness": {"pas_un_bot": 0.05},
+            }
+        })
+
+
 def test_build_training_bots_rejects_a_budget_that_is_not_one() -> None:
     """Des ratios qui ne somment pas a 1.0 deplacent le budget en silence : erreur explicite,
     comme `bot_eval_weights` cote evaluation."""

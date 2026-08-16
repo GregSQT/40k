@@ -106,23 +106,24 @@ def _build_training_bots_from_config(training_config):
         randomness: {greedy: 0.10, defensive: 0.10}
 
     Returns list of bot instances for random.choice() selection.
+
+    ⚠️ LA TABLE CLE -> CLASSE VIENT DE `ai/bot_registry.py`, ET C'ETAIT LA QUATRIEME COPIE
+    (corrige le 2026-08-14). Ce module en tenait une locale, limitee aux CINQ bots d'origine :
+    `bot_training.ratios` levait donc « Unknown bot name in ratios: 'racer' » pour les six styles
+    refondus, et AUCUN entrainement contre le panel neuf n'etait possible — pas par decision, par
+    oubli de cablage. Le registre existe precisement pour ca et se declare source unique ; les
+    trois copies precedentes (`bot_evaluation`, `bot_ranking`, `training_callbacks`) avaient deja
+    ete unifiees, celle-ci a ete manquee parce qu'elle est du cote ENTRAINEMENT et que toutes les
+    mesures du chantier passaient par l'evaluation.
+    Consequence mesuree le 2026-08-14 : l'agent s'entrainait a 35 % contre `control` et n'avait
+    jamais rencontre un seul style refondu, ce qui fait de tout ecart de win-rate entre les deux
+    panels un melange de difficulte et de NOUVEAUTE (cf. §12.16 du chantier).
     """
-    from ai.evaluation_bots import (
-        RandomBot, GreedyBot, DefensiveBot, ControlBot, AdaptiveBot, ValueTradeBot,
-    )
+    from ai.bot_registry import build_bot
 
     cfg = require_key(training_config, "bot_training")
     ratios = require_key(cfg, "ratios")
     randomness_cfg = require_key(cfg, "randomness")
-
-    BOT_CLASSES = {
-        "random": RandomBot,
-        "greedy": GreedyBot,
-        "defensive": DefensiveBot,
-        "control": ControlBot,
-        "adaptive": AdaptiveBot,
-        "value_trade": ValueTradeBot,
-    }
 
     # La somme des ratios EST le budget d'entrainement : elle doit valoir 1.0, comme
     # `bot_eval_weights` cote evaluation (`bot_evaluation._load_bot_eval_params`, meme controle).
@@ -148,18 +149,13 @@ def _build_training_bots_from_config(training_config):
             count = max(1, count)
         if count <= 0:
             continue
-        if bot_name == "random":
-            for _ in range(count):
-                bots.append(RandomBot())
-        elif bot_name in BOT_CLASSES:
-            # Pas de defaut : un bot pondere sans entree de randomness est une config
-            # incomplete, pas un bot a 10 % de bruit choisi en silence (regle T1).
-            r_val = float(require_key(randomness_cfg, bot_name))
-            for _ in range(count):
-                bots.append(BOT_CLASSES[bot_name](randomness=r_val))
-        else:
-            raise ValueError(f"Unknown bot name in ratios: {bot_name!r}")
-    
+        # `build_bot` porte les trois regles qui vivaient ici en copie : `random` n'a pas de
+        # randomness, une cle inconnue leve, et un bot pondere SANS entree de randomness leve
+        # aussi (T1 : pas de 0.15 silencieux). UNE instance par place du pool — les bots
+        # portent un etat par episode, les partager les ferait se marcher dessus.
+        for _ in range(count):
+            bots.append(build_bot(bot_name, randomness_cfg))
+
     return bots
 
 

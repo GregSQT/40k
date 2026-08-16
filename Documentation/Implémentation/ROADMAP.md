@@ -422,7 +422,7 @@ mesure, et c'est assumé (§0.14).
    🔴 **AUCUN PROFIL EXISTANT NE CONVIENT — à trancher avant d'ouvrir P3-4.**
    - Ce qui est **acquis** : le « ne PAS utiliser `x1_debug`, il porte 48 envs » de §9.6 est
      périmé. `n_steps` est un TOTAL divisé par `n_envs` en un point de passage unique depuis
-     §0.33 ⇒ le buffer ne dépend plus de `n_envs`, et les **9** profils sont à 48 envs de toute
+     §0.33 ⇒ le buffer ne dépend plus de `n_envs`, et les **10** profils sont à 48 envs de toute
      façon, `x5_debug` compris. La mémoire n'écarte plus aucun profil.
    - Ce qui **casse** — et **DEUX variables distinctes** sont en cause, que ce fichier a confondues
      dans une première correction du 2026-08-10 :
@@ -481,13 +481,26 @@ mesure, et c'est assumé (§0.14).
    Réunies au §12.14, après une première unification défaite en quatre heures. La ligne de base et
    la numérotation du document étaient les deux ressources partagées que le §10.4 n'avait pas listées.
    **Nouvelle ligne de base : `combined = 0,7433`, pire bot `racer = 0,630`, pire scénario 0,6867.**
-   Étapes 6 et 8 closes, reste l'étape 7 (suppression des cinq anciens bots).
+   Étapes 6 et 8 closes.
+   ✅ **Correspondance ancien/nouveau mesurée le 2026-08-14** (§12.16), sur le MÊME agent
+   (`robust_0.8721`, 100 ép./bot) — elle n'avait jamais été faite : pire bot **0,77 → 0,630**,
+   moyenne simple des six **0,928 → 0,743**, et l'ancien panel porte **deux bots SATURÉS**
+   (`defensive` 100 W – 0 L, `tactical` 0,99) plus cinq bots dans une bande de 9 points pour une
+   marge de ±4,4. C'est le défaut du §1, enfin chiffré. Le neuf n'est saturé nulle part et sépare
+   trois niveaux au lieu de deux — gain réel, pas six niveaux.
+   🔴 **DÉCISION EN ATTENTE, ET ELLE T'APPARTIENT** : les six profils d'ENTRAÎNEMENT (`x1`,
+   `x1_long`, `x1_selfplay`, `x5_new`, `x5_append`, `x5_long`) tournent tous contre les ANCIENS
+   bots — seul `x1_panel` charge le neuf. Migrer périme le mètre de toutes les courbes
+   historiques de l'agent, seuil de gating `control` compris. Tant que ce n'est pas tranché,
+   l'étape 7 reste ouverte et les anciens bots NE SE SUPPRIMENT PAS : ils sont le code de
+   production, pas de la dette.
    🔴 **L'ORTHOGONALITÉ est ABANDONNÉE comme critère** (décision du 2026-08-12) : les six bots se
    déplacent en bloc d'un modèle à l'autre, ils forment une seule dimension. La cause est le
    format — seuls les objectifs marquent, zéro victoire par élimination sur 600 parties — donc
    aucun panel n'y rendra six axes. Le panel est une **échelle de difficulté**, et c'est assumé.
-   **Restent** : le réglage de `w_contest`/`w_crowd` (posés, non réglés), l'étape 7
-   (correspondance puis suppression des cinq anciens) et l'étape 8 rejouée après réglage.
+   **Reste UNE seule chose, et c'est une décision, pas une tâche** : migrer ou non les profils
+   d'entraînement sur le nouveau panel (ci-dessus). Le réglage des poids est fini (§12.9, §12.11,
+   §12.14), l'étape 8 est rejouée, la correspondance est consignée (§12.16).
    ⚠️ Les chiffres des §8/§9 du doc de chantier sont **à rejouer** : échantillons insuffisants et
    une erreur d'arithmétique sur le `combined` (§11.1).
    ⚠️ **Ce point CONDITIONNE la valeur du point 7, il ne s'y ajoute pas.** Le panel actuel ne rend
@@ -1251,7 +1264,7 @@ vérifiée ; l'appariement reste réservé aux cellules de tableau, où le renvo
 
 ### Incohérences factuelles restantes (non traitées, aucune ne bloque)
 
-- **`obs_size`** — la valeur vraie à HEAD est **16659**, portée par les **9** profils de la config
+- **`obs_size`** — la valeur vraie à HEAD est **16659**, portée par les **10** profils de la config
   ArmageddonAgent (un `"obs_size": 16659` chacun ; ce fichier a annoncé « 3 occurrences », puis
   « 7 profils », sans jamais les compter — c'est le contrôle de §5 qui les compte désormais).
   ✅ `Implémenté/01_ability_embedding.md`, qui annonçait 14609/14615, est corrigé. Reste la

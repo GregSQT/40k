@@ -488,7 +488,10 @@ def test_all_profiles_share_the_same_ramp() -> None:
     à 6 le 2026-08-02 avec `x1_long` (runs longs), puis à 7 le même jour avec `x1_selfplay`
     (phase 2 — self-play sur un agent déjà entraîné vs bots), puis à 8 le 2026-08-10 avec
     `x5_long` (runs longs joués sur le plateau x5), puis à 9 le 2026-08-12 avec `x1_panel`
-    (profil de MESURE du panel de bots refondu).
+    (profil de MESURE du panel de bots refondu), puis à 10 le 2026-08-14 avec `x1_long_panel`
+    (copie de `x1_long` qui S'ENTRAÎNE contre le panel refondu — §12.16 du chantier des bots :
+    l'agent n'avait jamais affronté un seul des six styles, ce qui mêlait difficulté et nouveauté
+    dans tout écart de win-rate entre les deux panels).
 
     ⚠️ `x1_selfplay` porte le MÊME bloc que les autres, et ce n'est pas un oubli : la rampe de
     déploiement est une COMPÉTENCE ACQUISE, elle reprend là où la phase 1 l'a laissée (V11 §0.58).
@@ -498,7 +501,7 @@ def test_all_profiles_share_the_same_ramp() -> None:
     toujours une phase de déploiement (cf. la justification du bloc), donc un profil de mesure
     sans rampe noterait l'agent sur un comportement que sa config ne décrit pas.
     """
-    assert len(PROFILES) == 9, f"profils attendus : 9, trouvés {sorted(PROFILES)}"
+    assert len(PROFILES) == 10, f"profils attendus : 10, trouvés {sorted(PROFILES)}"
     reference = json.dumps(PROFILES["x1"]["deployment_mode_schedule"], sort_keys=True)
     diverged = {
         name: p.get("deployment_mode_schedule")

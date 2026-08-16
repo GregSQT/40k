@@ -178,6 +178,17 @@ def _avg_focus_target_distance(gs: Dict[str, Any], bot: Any, bot_player: int) ->
     On lit `bot._focus_target` NU, jamais `bot._focus(game_state)` : `_focus` périme la cible sur
     le marqueur de tour, donc l'appeler depuis l'instrumentation muterait l'état du bot à la
     frontière de tour et changerait la mesure elle-même.
+
+    ⚠️ COROLLAIRE, et il a FAIT PLANTER LE RUN DE RÉFÉRENCE (2026-08-13) : lire nu, c'est aussi
+    lire une cible que `_focus` n'a pas encore périmée. Entre deux épisodes, `_focus_target` garde
+    celle de l'épisode précédent jusqu'au premier appel du bot, et `agent_seat_mode` vaut
+    « random » — le bot change donc de siège, et l'ancienne cible ennemie devient une escouade
+    À LUI. Le garde de joueur ci-dessous levait alors « bot mal configuré » au 2e épisode de
+    `decapitation`, sur un bot parfaitement configuré. Diagnostic relevé : marqueur `(1, 5)`
+    contre un état `episode=2, turn=1`.
+    La péremption se CONSTATE ici au lieu d'être provoquée : le marqueur du bot est comparé à
+    l'état courant, et une cible périmée rend `None` — la métrique est absente pour ce relevé,
+    ce qui est la vérité (aucune cible n'est élue à cet instant), pas un repli.
     """
     from engine.phase_handlers.shared_utils import is_unit_alive, require_unit_from_cache
     from engine.spatial_relations import entry_is_on_battlefield
@@ -188,6 +199,9 @@ def _avg_focus_target_distance(gs: Dict[str, Any], bot: Any, bot_player: int) ->
     focused = bot._focus_target
     if focused is None:
         return None
+    # Même critère de péremption que `DecapitationBot._focus`, LU et non appliqué.
+    if getattr(bot, "_focus_turn", None) != (gs.get("episode_number"), int(gs.get("turn", 0))):
+        return None
     focused = str(focused)
     focused_player = next(
         (int(u.get("player", 0)) for u in gs.get("units", []) if str(u["id"]) == focused),
@@ -196,7 +210,12 @@ def _avg_focus_target_distance(gs: Dict[str, Any], bot: Any, bot_player: int) ->
     if focused_player is None:
         raise RuntimeError(f"_focus_target {focused!r} introuvable dans gs['units'] — bot mal configuré")
     if focused_player == bot_player:
-        raise RuntimeError(f"_focus_target {focused!r} appartient au bot-player {focused_player} — bot mal configuré")
+        raise RuntimeError(
+            f"_focus_target {focused!r} appartient au bot-player {focused_player} alors que le "
+            f"marqueur du bot est à jour ({getattr(bot, '_focus_turn', None)!r}) — le bot a élu "
+            "une de ses PROPRES escouades, ce qui est un défaut de `_enemy_anchors`, pas un "
+            "relevé périmé."
+        )
     if not is_unit_alive(focused, gs):
         return None
     target_entry = require_unit_from_cache(focused, gs, "_focus_dist:target")

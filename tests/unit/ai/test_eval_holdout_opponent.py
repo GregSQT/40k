@@ -40,6 +40,11 @@ MEASURES_REFERENCE_HOLDOUT = {
     "x5_new": True, "x5_long": True, "x5_append": True,
     "x1_debug": True, "x5_debug": True,
     "x1_panel": False,
+    # false, MEME si celui-ci ENTRAINE (contrairement a x1_panel) : son panel d'evaluation est le
+    # panel refondu, et `tactical` n'y a pas sa place. Il mesure une seule chose — l'ecart entre
+    # « entraine contre » et « jamais vu » sur les deux familles de bots (§12.16 du chantier) —
+    # et chaque cle d'evaluation en trop lui coute une serie complete d'episodes.
+    "x1_long_panel": False,
 }
 
 CONFIG_ROOT = Path(__file__).resolve().parents[3] / "config" / "agents"
