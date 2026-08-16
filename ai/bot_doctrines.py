@@ -589,10 +589,7 @@ class _DoctrineBot(_PlacementMemory):
         regarde que sa cible du tour), d'ou un point d'extension plutot qu'une branche par style
         dans `select_movement_destination` — celui-ci reste COMMUN aux six.
         """
-        return [
-            (int(e["col"]), int(e["row"]))
-            for e in (require_unit_from_cache(str(x["id"]), game_state, "_move") for x in enemies)
-        ]
+        return [require_unit_position(x, game_state) for x in enemies]
 
     def select_movement_destination(
         self, unit, valid_destinations: List[Tuple[int, int]], game_state=None
