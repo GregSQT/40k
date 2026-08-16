@@ -36,6 +36,7 @@ from engine.phase_handlers.shared_utils import (
     SQUAD_ACTION_MOVE_CELL_COUNT,
     SHOOTING_TYPE_INDIRECT,
     SHOOTING_TYPE_NORMAL,
+    resolve_squad_shooting_type,
     SQUAD_ACTION_SHOOT_INDIRECT_SLOT_BASE,
     SQUAD_ACTION_SHOOT_INDIRECT_SLOT_COUNT,
     SQUAD_ACTION_SHOOT_SLOT_BASE,
@@ -1249,16 +1250,21 @@ class ActionDecoder:
         if SQUAD_ACTION_SHOOT_SLOT_BASE <= action_int < (
             SQUAD_ACTION_SHOOT_SLOT_BASE + SQUAD_ACTION_SHOOT_SLOT_COUNT
         ):
+            # 10.02 : le type de tir vient de l'ETAT, pas d'un litteral — c'est resolve_squad_
+            # shooting_type qui a determine le type quand le masque a ouvert ce slot, et c'est
+            # elle qui doit le relire ici. Coder SHOOTING_TYPE_NORMAL en dur cassait le cas ou
+            # seul 'assault' ou 'close_quarters' est eligible (ex : apres un Advance).
+            _resolved_type = resolve_squad_shooting_type(game_state, squad_id)
+            if _resolved_type is None:
+                raise ValueError(
+                    f"convert_squad_action: aucun type de tir resolvable pour squad {squad_id} "
+                    "— le masque n'aurait pas du ouvrir ce slot"
+                )
             return {
                 "action": "squad_shoot",
                 "target_slot": action_int - SQUAD_ACTION_SHOOT_SLOT_BASE,
                 "squad_id": squad_id,
-                # 10.02 : le type de tir fait partie de la DECISION, il n est plus derive de
-                # l etat. Le tir ordinaire le dit explicitement plutot que de laisser le moteur
-                # deviner — un `None` ici obligerait le moteur a retomber sur la derivation, et
-                # cette derivation ne saurait pas distinguer « l agent a choisi normal » de
-                # « l agent n a rien dit ».
-                "shooting_type": SHOOTING_TYPE_NORMAL,
+                "shooting_type": _resolved_type,
             }
 
         if SQUAD_ACTION_SHOOT_INDIRECT_SLOT_BASE <= action_int < (

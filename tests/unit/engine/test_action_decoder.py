@@ -318,3 +318,117 @@ class TestDeploymentHexSelection:
         left_hex = d._select_deployment_hex_for_action(7, "1", gs, 1, valid_hexes)
         right_hex = d._select_deployment_hex_for_action(8, "1", gs, 1, valid_hexes)
         assert left_hex[0] < right_hex[0]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# convert_squad_action — shooting_type résolu depuis l'état, jamais littéral
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestConvertSquadActionShootingType:
+    """Régression : décodeur hardcodait SHOOTING_TYPE_NORMAL pour SQUAD_ACTION_SHOOT_SLOT_BASE,
+    crashant quand seul 'assault' est éligible (escouade avancée + arme ASSAULT).
+    """
+
+    @staticmethod
+    def _make_shoot_gs(squad_advanced: bool = False) -> Dict[str, Any]:
+        assault_weapon = {
+            "RNG": 18,
+            "A": 2,
+            "BS": 3,
+            "S": 4,
+            "AP": 0,
+            "D": 1,
+            "WEAPON_RULES": ["ASSAULT"],
+            "NAME": "Bolt Pistol",
+        }
+        attacker = {
+            **unit_invariants(),
+            "id": "1",
+            "player": 1,
+            "col": 5,
+            "row": 5,
+            "HP_CUR": 3,
+            "HP_MAX": 3,
+            "VALUE": 50,
+            "OC": 1,
+            "T": 4,
+            "ARMOR_SAVE": 3,
+            "INVUL_SAVE": 7,
+            "SHOOT_LEFT": 1,
+            "ATTACK_LEFT": 1,
+            "RNG_WEAPONS": [assault_weapon],
+            "CC_WEAPONS": [],
+            "BASE_SIZE": 1,
+            "MODEL_HEIGHT": 2.5,
+            "BASE_SHAPE": "round",
+            "MOVE": 6,
+            "UNIT_RULES": [],
+            "selectedRngWeaponIndex": 0,
+            "selectedCcWeaponIndex": None,
+        }
+        enemy = {
+            **unit_invariants(),
+            "id": "2",
+            "player": 2,
+            "col": 8,
+            "row": 5,
+            "HP_CUR": 2,
+            "HP_MAX": 2,
+            "VALUE": 30,
+            "OC": 1,
+            "T": 3,
+            "ARMOR_SAVE": 5,
+            "INVUL_SAVE": 7,
+            "SHOOT_LEFT": 1,
+            "ATTACK_LEFT": 1,
+            "RNG_WEAPONS": [],
+            "CC_WEAPONS": [],
+            "BASE_SIZE": 1,
+            "MODEL_HEIGHT": 2.0,
+            "BASE_SHAPE": "round",
+            "MOVE": 6,
+            "UNIT_RULES": [],
+            "selectedRngWeaponIndex": None,
+            "selectedCcWeaponIndex": None,
+        }
+        gs: Dict[str, Any] = {
+            **turn_state_invariants(),
+            "phase": "shoot",
+            "current_player": 1,
+            "board_cols": 25,
+            "board_rows": 21,
+            "wall_hexes": set(),
+            "units": [attacker, enemy],
+            "unit_by_id": {"1": attacker, "2": enemy},
+            "config": _base_config(),
+            "zone_intent_free_steps_remaining": 0,
+            "objectives": [],
+            "inches_to_subhex": 1,
+        }
+        if squad_advanced:
+            gs["units_advanced"] = {"1"}
+        gs["shoot_activation_pool"] = ["1"]
+        build_units_cache(gs)
+        return gs
+
+    def test_normal_shoot_returns_normal(self):
+        """shoot_type_normal : escouade stationnaire → shooting_type='normal'."""
+        from engine.phase_handlers.shared_utils import SQUAD_ACTION_SHOOT_SLOT_BASE
+        d = _make_decoder()
+        gs = self._make_shoot_gs(squad_advanced=False)
+        result = d.convert_squad_action(SQUAD_ACTION_SHOOT_SLOT_BASE, gs)
+        assert result["action"] == "squad_shoot"
+        assert result["shooting_type"] == "normal"
+
+    def test_assault_shoot_returns_assault(self):
+        """shoot_type_assault : escouade avancée + arme ASSAULT → shooting_type='assault'.
+
+        Régression : le décodeur hardcodait 'normal', levant ValueError dans
+        squad_shooting_type_choose car seul 'assault' est éligible après un Advance.
+        """
+        from engine.phase_handlers.shared_utils import SQUAD_ACTION_SHOOT_SLOT_BASE
+        d = _make_decoder()
+        gs = self._make_shoot_gs(squad_advanced=True)
+        result = d.convert_squad_action(SQUAD_ACTION_SHOOT_SLOT_BASE, gs)
+        assert result["action"] == "squad_shoot"
+        assert result["shooting_type"] == "assault"
