@@ -272,8 +272,9 @@ RELIRE — si code modifié.
 Pas de verdict vague (optimal, tout propre, doc à jour) ; uniquement des faits contrôlables. Validation locale ≠ verdict global.
 
 ---
-ÉTAT CHANTIER : Tests <s> · Commité <s> · Mergé <s> · ROADMAP <s> · <doc>.md→Implémenté/ <s>
-Symboles : ✅ fait · 🟡 à faire · 🔴 erreur/bloqué. Omis si aucun code écrit.
+ÉTAT CHANTIER : Tests <s> · Commité <s> · Mergé <s> · ROADMAP <s> · Doc <s>
+Tests : ✅ (N verts) ou 🔴 (N rouges). Doc : ✅ déplacé dans Implémenté/ · 🟡 à faire · ⚪ pas de doc chantier associé.
+Symboles communs : ✅ fait · 🟡 à faire · 🔴 erreur/bloqué · ⚪ sans objet. Omis si aucun code écrit.
 
 SUITE : Tout est terminé
 — ou —
