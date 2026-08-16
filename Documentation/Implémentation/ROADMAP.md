@@ -577,6 +577,20 @@ mesure, et c'est assumé (§0.14).
    non plus défaultées à `{}` : un panel absent faisait tourner la boucle zéro fois et publier
    un relevé vide en sortant 0, une randomness absente comparait six bots non paramétrés à la
    référence §12.5.
+   ⚠️ **Cross-éval 2026-08-16 — INCOMPLÈTE.** Objectif : comparer modèle OLD (`robust_0.8446`,
+   entraîné panel ancien `x1_long`) vs modèle NEW (`robust_0.8706`, entraîné panel refondu
+   `x1_new_bots`) sur les deux panels croisés. Résultats obtenus (600 ép./bot, sans `--resolution 1`) :
+   - NEW vs panel NEW (`x1_new_bots`) : **`combined = 0.3217`** (pire bot `scorer = 0.14`)
+   - NEW vs panel OLD (`x1_long`) : **`combined = 0.4893`** (pire bot `tactical = 0.28`)
+   - OLD vs panel OLD : **IMPOSSIBLE** — espace d'action incompatible (`Discrete(1139) ≠ 1159`)
+   - OLD vs panel NEW : **IMPOSSIBLE** — même raison
+   Référence historique panel OLD : `combined = 0.8455` (`robust_0.9438`, §2 du doc chantier).
+   **Le modèle NEW est nettement plus faible que la référence sur l'ancien panel (0.49 vs 0.85).**
+   La cross-éval complète nécessite un retrain OLD-panel compatible 1159 actions (`x1_long --new`).
+   Décision utilisateur en attente : retrain ou non.
+   Modèles archivés : `_backup_croise/` (model actif au moment de la cross-éval),
+   `ArmageddonAgent_NEW_BOTS__12345_robust_0.8706.zip`,
+   `ArmageddonAgent_OLD_BOTS_12345_robust_0.8446.zip`.
 
 ## 2. Capacités — seul chantier restant de la série « chantiers capacités »
 

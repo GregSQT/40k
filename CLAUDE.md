@@ -240,11 +240,19 @@ Review finie quand aucun finding AVEC scénario ne reste.
 
 RAPPORT FINAL
 
-Après toute modification, pour CHAQUE fichier modifié :
-[nom.py](file:///home/greg/40k/chemin/nom.py) — une phrase changement + raison, sans code.
-Plusieurs fichiers sont autorisés s'ils sont prévus par le prompt ou T2 ; sinon STOP avant d'ajouter le fichier, le nommer, expliquer pourquoi il est nécessaire et attendre.
+Structure obligatoire, dans cet ordre exact :
 
-Sections :
+1. EN-TÊTE (toujours, 1–3 lignes max) :
+STATUT : Livré | Bloqué — <raison en 5 mots> | Arbitrage requis — <sujet en 5 mots>
+À TOI : <action concrète attendue de l'utilisateur> | rien
+
+2. ARBITRAGE / PROMPTS (immédiatement après l'en-tête, seulement si présents) — voir section dédiée.
+
+3. FICHIERS MODIFIÉS — pour CHAQUE fichier modifié :
+[nom.py](file:///home/greg/40k/chemin/nom.py) — une phrase changement + raison, sans code.
+UNE PHRASE = une proposition principale, sans sous-clauses enchaînées par virgules ou parenthèses. Plusieurs fichiers sont autorisés s'ils sont prévus par le prompt ou T2 ; sinon STOP avant d'ajouter le fichier, le nommer, expliquer pourquoi il est nécessaire et attendre.
+
+4. SECTIONS TECHNIQUES (dans cet ordre) :
 
 LU : <fichiers/appelants/miroirs où quelque chose a été trouvé ou décidé> — toujours.
 
@@ -253,8 +261,6 @@ JUMEAU : <grep> → <n> hits — toujours ; 0 hit valide ; détail (traité/éca
 RÉFS : <tests/docs/front/configs mis à jour ou volontairement laissés inchangés> — seulement si pertinent.
 
 🟢 COUVERTURE : aucun trou vu ou 🔴 COUVERTURE : <trous vus> — si code modifié ; uniquement trous VUS non traités, jamais tests écrits.
-
-ARBITRAGE / PROMPTS — seulement si nécessaires.
 
 RELIRE — si code modifié.
 Pas de verdict vague (optimal, tout propre, doc à jour) ; uniquement des faits contrôlables. Validation locale ≠ verdict global.
@@ -299,6 +305,6 @@ HOOK RAPPORT
 .claude/hooks/rapport-cloture.sh vérifie sections, forme RELIRE, chemins absolus et blocs fermés ; rien dans un bloc ne compte comme section.
 Source unique : =toujours dès qu'un fichier est modifié ; =code seulement si code modifié.
 Ces deux lignes sont la CONFIGURATION du hook, qui les LIT ici : format strict, backticks compris.
-SECTIONS EXIGÉES : `LU`=toujours, `JUMEAU`=toujours, `COUVERTURE`=code, `RELIRE`=code
+SECTIONS EXIGÉES : `STATUT`=toujours, `LU`=toujours, `JUMEAU`=toujours, `COUVERTURE`=code, `RELIRE`=code
 FICHIERS COMPTÉS COMME CODE : `.py`, `.pyi`, `.sh`, `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`, `CLAUDE.md`, `settings.json`
 Le hook s'exécute au PROMPT SUIVANT ; s'il réclame un rapport, il concerne le tour précédent : le rendre EN TÊTE sans relancer de travail.
