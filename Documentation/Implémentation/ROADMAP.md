@@ -1018,6 +1018,24 @@ Prêts à démarrer sans décision produit :
   `test_analyzer_close_quarters_usage.py`, `test_analyzer_weapon_usage_carrier.py`,
   `test_analyzer_target_models_restore_footprint.py`) et un étendu
   (`test_step_log_weapon_rule_tokens.py`).
+- ✅ **Tokens `[ASSAULT]` 24.04 et `[CLOSE-QUARTERS]` 24.07 dans `step.log` — LIVRÉ le 2026-08-16.**
+  Les deux règles d'ÉLIGIBILITÉ (10.05 / 10.06) avaient jusqu'ici le statut « formateur sans
+  producteur » dans `analyzer_couverture.md` : le token n'atteignait jamais `step.log`, donc
+  l'analyzer ne pouvait lire l'usage ni vérifier la conformité. Câblage :
+  `_emit_squad_shoot_log` produit les tokens, `_build_shot_details` les pose dans le pont,
+  `shoot_handler.py` les lit avec `_eligibility_rule_applied` (régime token-ou-repli grammaire < 4).
+  Les drapeaux `assault_applied` / `close_quarters_applied` sont posés à la création du groupe
+  dans `_build_manual_allocation`, lus une seule fois par appel (mémoïsation paresseuse de
+  `_squad_is_in_enemy_er`).
+  PASSE `/simplify` (2026-08-16) : lecture depuis la signature déjà calculée dans `gkey` au lieu de
+  `weapon_has_rule`, factorisation de `_eligibility_rule_applied` pour les deux blocs `log_grammar`,
+  tests de pont fusionnés en `@pytest.mark.parametrize`.
+  BUG DE CORRECTION (2026-08-16, `ed6ef430`) : `_squad_is_in_enemy_er` appelée dans
+  `_build_manual_allocation` exige `game_state["config"]`, absent du décor minimal de deux tests
+  `test_weapon_rule_log_tokens.py`. Corrigé en patchant `_squad_is_in_enemy_er` dans ces deux tests,
+  aligné sur le pattern déjà appliqué dans `test_step_log_weapon_rule_tokens.py`.
+  Verrouillé par `tests/unit/ai/test_step_log_weapon_rule_tokens.py` (LOT A, paramétré ASSAULT et
+  CLOSE_QUARTERS) et `tests/unit/engine/test_weapon_rule_log_tokens.py` (31 tests verts).
 - **Security étapes 4, 5, 7, 8** (~4-5 j ; étapes **1, 2, 3 et 6 livrées**, étape 5 partielle
   = durcir la stack Docker existante, pas la créer ; suivi à jour)
   → [`Security.md`](Security.md) — le document est un chantier **vivant**, à la racine d'`Implémentation/`,
