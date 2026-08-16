@@ -20,6 +20,7 @@ from ai.bot_doctrines import (
     load_doctrine_weights,
     load_style_profile,
 )
+from shared.data_validation import ConfigurationError
 
 
 # ─── helpers ──────────────────────────────────────────────────────────────────
@@ -86,6 +87,26 @@ class TestLateGameState:
             "victory_points": {1: 0.0, 2: 0.0},
         }
         assert late_game_state(gs, 1) == "normal"
+
+    def test_missing_active_player_key_raises(self) -> None:
+        """Clé du joueur actif absente de victory_points → ConfigurationError explicite."""
+        gs: Dict[str, Any] = {
+            "turn": 1,
+            "config": {"game_rules": {"max_turns": 5}},
+            "victory_points": {2: 0.0},
+        }
+        with pytest.raises(ConfigurationError):
+            late_game_state(gs, 1)
+
+    def test_missing_opponent_key_raises(self) -> None:
+        """Clé du joueur adverse absente de victory_points → ConfigurationError explicite."""
+        gs: Dict[str, Any] = {
+            "turn": 1,
+            "config": {"game_rules": {"max_turns": 5}},
+            "victory_points": {1: 0.0},
+        }
+        with pytest.raises(ConfigurationError):
+            late_game_state(gs, 1)
 
 
 # ─── Bascule EndgameBot — toujours au tour 3 sur 5 tours ───────────────────────
