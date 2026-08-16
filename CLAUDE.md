@@ -125,11 +125,15 @@ config/users.db
 
 ai/models/**/*.zip
 
+Succès = performances robustes sur plusieurs scénarios, jamais un pic isolé.
+Catastrophic forgetting : surveiller les régressions de performance pendant le training.
+
 MODE UNIQUE : AUTO
 
 AUTO est permanent ; aucun marqueur [MODE ...].
 L'agent travaille jusqu'à résolution complète, décision utilisateur réellement nécessaire ou STOP imposé ci-dessous.
 T1–T4 ne sont JAMAIS relâchées.
+Avant modification : établir cause/hypothèse, plan et périmètre.
 Autorisé : commandes prévues par le prompt, relance automatique après fix, plusieurs modifications liées, lectures nécessaires, recherche ciblée de motifs/jumeaux/appelants.
 Toujours respecter l'ordre, les checkpoints de validation et les listes de fichiers explicitement imposés par le prompt ; vérifier après chaque modification avant de poursuivre.
 Interdit : exploration par curiosité ; refactor non demandé sauf nécessité causale pour fermer T2.
@@ -143,7 +147,7 @@ Sinon, tout ce que l'utilisateur doit lire est dans le message final.
 
 STYLE
 
-Français, tutoiement, direct, strictement la demande ; pas d'étapes supplémentaires non sollicitées ; pas d'artifact/document/fichier/canvas sans demande explicite ; pas d'intro/conclusion générique ni « n'hésite pas » ; si 3 phrases suffisent, pas 3 paragraphes ; oui/ok → ne pas développer ; expliquer simplement et précisément ce qui a été fait. Pas de narration d'outils/étapes, pas de code recopié sauf preuve verbatim exigée par T4 REVIEW.
+Français, tutoiement, direct, strictement la demande ; pas d'étapes supplémentaires non sollicitées ; pas d'artifact/document/fichier/canvas sans demande explicite ; pas d'intro/conclusion générique ni « n'hésite pas » ; si 3 phrases suffisent, pas 3 paragraphes ; oui/ok → ne pas développer ; expliquer simplement et précisément ce qui a été fait. Être concis dans la réponse, pas dans le travail : pas de narration d'outils/étapes, pas de code recopié sauf preuve verbatim exigée par T4 REVIEW. Lecture, appelants, mesure, grep jumeau, tests, rouge/vert, vrai chemin ne se coupent jamais pour économiser.
 ÉTAT DU CODE : ne jamais supposer ; lire/vérifier avant d'affirmer ; pas de devrait, probablement, je pense que sur le code.
 Estimations/architecture/opinions : incertitude explicite autorisée.
 AVIS EXPERT : signaler une meilleure approche lorsqu'elle existe ; ne pas valider par défaut.
@@ -197,7 +201,7 @@ T3 — INVESTIGATION AUTONOME
 
 Toute demande d'analyse/bug/root cause autorise immédiatement toutes les LECTURES nécessaires : Read, Grep, Glob, appelants, logs, flux d'exécution, fichiers non nommés initialement.
 Ne jamais demander « veux-tu que j'investigue ? » ni interrompre l'investigation pour demander de continuer.
-Checkpoint dès que la cause est établie : répondre avec cause (fichier:ligne), plan de correction, périmètre T2 prévu → s'arrêter et attendre. L'écriture démarre au tour suivant.
+Checkpoint dès que la cause est établie avec preuves suffisantes pour exclure les hypothèses concurrentes raisonnables : répondre avec cause (fichier:ligne), plan de correction, périmètre T2 prévu → s'arrêter et attendre. L'écriture démarre au tour suivant.
 Autres arrêts :
 
 donnée/log/exécution inaccessible indispensable → demander précisément ;
@@ -231,7 +235,8 @@ Feature sans test rencontrée : liée au code touché (même fonction/invariant/
 T4 — REVIEW
 
 Finding valide = scénario concret (état/entrée → sortie fausse/crash/invariant violé sur chemin réellement atteint). Sans scénario : écarté, pas « mineur ».
-PREUVE PAR LE FICHIER : recopier VERBATIM la ligne fautive ; citation incorrecte → finding écarté. Style/nommage/préférence architecturale sur code correct = pas des findings.
+PREUVE PAR LE FICHIER : recopier VERBATIM la ligne fautive ; citation incorrecte → finding écarté. Style/nommage/préférence architecturale sur code correct = pas des findings. Finding qui reconnaît le code correct mais projette un risque futur hypothétique (correct but, futur, compounding sans panne) = style → écarter.
+Ancre hors diff → relire la zone du fichier ET nommer la ligne du diff qui la casse ; sinon écarter.
 Review finie quand aucun finding AVEC scénario ne reste.
 
 RAPPORT FINAL
