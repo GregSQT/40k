@@ -722,12 +722,11 @@ Prêts à démarrer sans décision produit :
   ⚠️ À MESURER AVANT DE TOUCHER : le gain suppose de changer la signature de `losPreviewHelpers`
   (recevoir des listes DÉJÀ résolues, rendre la `key` paresseuse) — passer les murs déjà effectifs
   aux appelants actuels ne supprimerait RIEN, la fonction les re-dérive de toute façon.
-- ⬜ **`BoardReplay` rend l'effet de dessin de `BoardPvp` inévitable à chaque rendu** (signalé le
-  2026-08-12, non traité). Quatre valeurs passées en props sont refabriquées à chaque rendu
-  (l'état courant enrichi, les unités avec fantômes, la liste d'unités éligibles, deux tables
-  d'activation) et figurent dans les dépendances de l'effet de dessin. Tant qu'elles ne sont pas
-  mémoïsées, la stabilisation de `boardConfig` et les mémos de murs/objectifs ne suffisent pas à
-  éviter un redessin complet en replay — ils tiennent, mais un autre le déclenche.
+- ✅ **`BoardReplay` rend l'effet de dessin de `BoardPvp` inévitable à chaque rendu** — **LIVRÉ le
+  2026-08-17**. Les six valeurs instables mémoïsées : `currentState` (`useMemo` sur
+  `[selectedEpisode, replayData, currentActionIndex, enrichUnitsWithStats]`), `unitsWithGhost`
+  (absorbe les trois pushes fantômes), `replayActiveModelIdsByUnit`, `replayActiveShootRangeByUnit`,
+  `replayEligibleUnitIds` (remplace le tableau littéral inline), et `gameStateForBoard`.
 
 - ✅ **Une primitive commune « poser un plan par figurine »** — **LIVRÉ les 2026-08-11 / 08-12**.
   `resolve_model_effective_level` (résout) et `place_model_at_effective_level` (résout puis écrit)
