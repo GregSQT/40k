@@ -160,9 +160,11 @@ limite T2 des ~5 fichiers.
      une des deux causes du seuil affiché reste muette.
    Vérifier enfin que `replayParser.ts` tolère les deux (tags de ligne pour `[SHOOT_TYPE:]`,
    segment `Hit` pour les deux autres → jeu FERMÉ `NON_ABILITY_ROLL_TOKENS` à étendre).
-7. **Analyzer** — nouveau contrôle possible : un tir indirect doit porter le couvert et un seuil
-   conforme. ⚠️ **À traiter comme un lot séparé**, avec sa mesure de taux de fausse alarme : c'est
-   le mode d'échec historique de ce fichier (317, puis 334, puis 31 faux positifs livrés verts).
+7. ✅ **Analyzer** — contrôle livré (2026-08-16) : `check_indirect_fire_rule` dans
+   `ai/analyzer_hit.py`. Invariant : [COVER] présent sur toute ligne [INDIRECT FIRE:X+]
+   (sauf [IGNORES COVER]). Taux de fausse alarme mesuré = 0 / N (journal synthétique moteur).
+   Note : l'eff affiché est BS_après_couvert, PAS max(BS,plancher) — l'invariant sur le seuil
+   n'est pas vérifiable depuis le log (voir docstring de la fonction).
 
 8. **Mesure** — DÉCISION UTILISATEUR du 2026-08-16 : la règle est livrée pour le **PvP et la
    conformité aux règles**, PAS pour le win-rate. Aucun roster d'ArmageddonAgent ne porte d'arme
@@ -295,4 +297,4 @@ l'utilisateur. ⚠️ Il **n'exercera pas** la règle : aucun roster d'Armageddo
 [INDIRECT FIRE] (cf. §8), donc le masque n'ouvrira jamais ces 20 slots. Un compteur d'usage à zéro
 sur ce run sera CORRECT.
 
-Le contrôle analyzer reste un **lot séparé**, avec sa mesure de taux de fausse alarme (§3.7).
+Le contrôle analyzer (pièce 7) est livré — voir §3.7.

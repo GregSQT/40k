@@ -323,8 +323,9 @@ def handle_shoot(
         weapon_display_name = weapon_match.group(1)
         # Résultat de touche 05.01 : la ligne dit le jet et le seuil, le verdict se lit à la
         # présence du segment `Wound`. Cf. ai/analyzer_hit.py.
-        from ai.analyzer_hit import check_hit_result
+        from ai.analyzer_hit import check_hit_result, check_indirect_fire_rule
         check_hit_result(state, stats, line, action_desc, player, is_melee=False)
+        check_indirect_fire_rule(state, stats, line, action_desc, player)
         # Seuil de blessure 05.02 : la ligne dit le seuil qu'elle a appliqué, on le recalcule
         # depuis F et E. Cf. ai/analyzer_wound.py.
         from ai.analyzer_wound import check_wound_threshold

@@ -1458,6 +1458,7 @@ def error_totals(stats: Dict[str, Any]) -> Dict[str, int]:
             + _pair('move_distance_over_limit', 'advance')
             + _pair('advance_from_adjacent')
             + _pair('shoot_hit_result_mismatch')
+            + _pair('indirect_fire_mismatch')
             + _pair('shoot_wound_threshold_mismatch')
             + shoot_invalid
         ),
@@ -1767,6 +1768,9 @@ def parse_step_log(filepath: str) -> Dict:
         # faute » de « le contrôle ne regarde plus rien » (cf. ai/analyzer_hit.py).
         'shoot_hit_result_mismatch': {1: 0, 2: 0},
         'shoot_hit_result_checked': {1: 0, 2: 0},
+        # 10.07 tir indirect : [COVER] obligatoire + seuil effectif >= plancher déclaré.
+        'indirect_fire_checked': {1: 0, 2: 0},
+        'indirect_fire_mismatch': {1: 0, 2: 0},
         'fight_hit_result_mismatch': {1: 0, 2: 0},
         'fight_hit_result_checked': {1: 0, 2: 0},
         'shoot_wound_threshold_mismatch': {1: 0, 2: 0},
@@ -1916,6 +1920,7 @@ def parse_step_log(filepath: str) -> Dict:
             'wall_collisions': {1: None, 2: None},
             'move_to_adjacent_enemy': {1: None, 2: None},
             'shoot_hit_result_mismatch': {1: None, 2: None},
+            'indirect_fire_mismatch': {1: None, 2: None},
             'fight_hit_result_mismatch': {1: None, 2: None},
             'shoot_wound_threshold_mismatch': {1: None, 2: None},
             'fight_wound_threshold_mismatch': {1: None, 2: None},
