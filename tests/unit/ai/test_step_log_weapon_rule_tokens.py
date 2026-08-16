@@ -1261,6 +1261,52 @@ def test_un_seuil_anti_sous_2_leve_a_l_entree_du_moteur():
         anti_rule_of(weapon)
 
 
+def test_assault_et_close_quarters_sont_hors_garantie_de_grammaire(monkeypatch, tmp_path):
+    """`LOG_GRAMMAR_VERSION = 3` promet que toute règle de la SÉQUENCE D'ATTAQUE qui a joué est
+    nommée. Ce test tient la BORNE de cette promesse, qui n'était que de la prose.
+
+    [ASSAULT] 24.04 et [CLOSE-QUARTERS] 24.07 sont des règles d'ÉLIGIBILITÉ (10.05 / 10.06) :
+    elles décident qui peut tirer, pas ce qu'une attaque fait. `ai/step_logger.py` sait rendre
+    leurs deux tokens, mais aucun producteur n'écrit `assault_applied` / `close_quarters_applied`
+    — mesuré le 2026-08-16 : un lecteur, zéro écrivain. Elles sont donc HORS de la garantie, et
+    un lecteur qui l'appliquerait à elles refuserait un journal parfaitement sain.
+
+    Pourquoi ce test et pas un commentaire : une version de grammaire autorise un lecteur à
+    traiter une absence comme une PANNE. Une exception non vérifiée à cette autorisation se
+    périme en silence — dans les deux sens. Le jour où quelqu'un câble le producteur (cf. le
+    prompt du 2026-08-16), ce test devient ROUGE et force à retirer l'exception des trois
+    endroits qui la déclarent : ici, `ai/step_logger.LOG_GRAMMAR_VERSION` et
+    `Documentation/Implémentation/Replay.md` §2.3quater.
+
+    La constatation passe par le VRAI pont (`_build_shot_details`), pas par un grep : c'est
+    l'absence de la clé dans les détails RÉELLEMENT construits qui rend le token inatteignable.
+    """
+    from engine.w40k_core import W40KEngine
+
+    gs, raw_log = _engine_shoot_log(monkeypatch, ["ASSAULT"], [3, 4, 2])
+    bridge = _Bridge(gs)
+    details = bridge._build_shot_details(raw_log, raw_log["shootDetails"][0], 1, None)
+
+    assert "assault_applied" not in details, (
+        "un producteur écrit désormais `assault_applied` : le token [ASSAULT] est atteignable, "
+        "donc ASSAULT n'est plus une exception à la garantie de grammaire — mettre à jour "
+        "LOG_GRAMMAR_VERSION et Replay.md §2.3quater"
+    )
+    assert "close_quarters_applied" not in details, (
+        "idem pour CLOSE_QUARTERS — voir le message ci-dessus"
+    )
+    # VERT VACANT : les deux assertions ci-dessus passeraient aussi sur un `details` vide ou
+    # sur une chaîne rompue. On atteste que le pont a bien travaillé sur CETTE attaque.
+    assert details["hit_roll"] == 3 and details["hit_target"] == 3, details
+    # Et la conséquence observable, celle que le lecteur du journal constate.
+    line = _step_log_line(tmp_path, gs, raw_log)
+    assert "[ASSAULT]" not in line, line
+    assert "[CLOSE-QUARTERS]" not in line, line
+    # Contre-épreuve : la même ligne PORTE bien les tokens de la séquence d'attaque, eux. Sans
+    # ça, ce test attesterait « aucun token nulle part », ce qui ne borne plus rien.
+    assert "Hit 3(3+)" in line and "Wound 4(4+)" in line, line
+
+
 @pytest.mark.parametrize("melee", [False, True], ids=["tir", "melee"])
 def test_l_analyzer_accepte_les_lignes_porteuses_des_six_tokens(monkeypatch, tmp_path, melee):
     """CONTRÔLE DE MASSE — un token que personne ne lit ne se livre pas.

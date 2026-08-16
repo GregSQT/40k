@@ -27,13 +27,29 @@ __all__ = ['StepLogger', 'LOG_GRAMMAR_VERSION']
 #:
 #:   1 — grammaire d avant le 2026-08-12 : aucune ligne ne nomme la figurine cible allouee.
 #:   2 — `[ALLOC_MODEL: <mid>]` sur toute attaque parvenue a l allocation (tir ET melee).
-#:   3 — TOUTE regle d arme de `config/weapon_rules.json` qui a joue est NOMMEE sur la ligne.
-#:       Six y sont entrees d un bloc le 2026-08-12 ([TORRENT], [LETHAL HITS], [IGNORES COVER],
-#:       [EXTRA ATTACKS], [ANTI-X:Y+], [PSYCHIC] et, en melee comme au tir, leurs jumeaux) ;
-#:       INDIRECT_FIRE reste hors du journal parce qu elle n est pas implementee dans le moteur
-#:       — un token pour elle annoncerait un effet qui n a pas lieu. C est ce qui rend un
-#:       compteur d usage a zero LISIBLE : sous cette version, il dit que la regle n a pas joue,
-#:       plus jamais que le journal ne sait pas le dire.
+#:   3 — toute regle d arme resolue par la SEQUENCE D ATTAQUE (04/05 + 24) qui a joue est NOMMEE
+#:       sur la ligne. Six y sont entrees d un bloc le 2026-08-12 ([TORRENT], [LETHAL HITS],
+#:       [IGNORES COVER], [EXTRA ATTACKS], [ANTI-X:Y+], [PSYCHIC] et, en melee comme au tir,
+#:       leurs jumeaux). C est ce qui rend un compteur d usage a zero LISIBLE : pour ces
+#:       regles-la, il dit que la regle n a pas joue, plus jamais que le journal ne sait pas
+#:       le dire.
+#:
+#:       ⚠️ TROIS REGLES SONT HORS DE CETTE GARANTIE, et un lecteur qui l ignore refusera un
+#:       journal parfaitement sain — c est precisement ce qu une version de grammaire ne doit
+#:       jamais provoquer. La portee dit « sequence d attaque » et non « toute regle d arme »
+#:       pour cette seule raison :
+#:         - INDIRECT_FIRE 24.19 : la regle n est PAS implementee dans le moteur, donc aucune
+#:           attaque ne peut en subir l effet. Un token annoncerait un effet qui n a pas lieu.
+#:         - ASSAULT 24.04 et CLOSE_QUARTERS 24.07 : ce sont des regles d ELIGIBILITE au tir
+#:           (10.05 / 10.06) — elles decident QUI peut tirer, pas ce qu une attaque fait. Les
+#:           branches d affichage existent plus bas (`assault_applied`,
+#:           `close_quarters_applied`) mais AUCUN producteur n ecrit ces deux cles : mesure le
+#:           2026-08-16, un lecteur et zero ecrivain. Les tokens ne peuvent donc pas apparaitre,
+#:           et l analyzer re-derive les deux usages depuis l etat
+#:           (`ai/analyzer_phases/shoot_handler.py`). Verrou :
+#:           `tests/unit/ai/test_step_log_weapon_rule_tokens.py::test_assault_et_close_quarters_
+#:           sont_hors_garantie_de_grammaire` — le jour ou un producteur apparait, il devient
+#:           ROUGE et cette liste d exceptions doit maigrir d autant.
 #:
 #: N incrementer que pour une garantie NOUVELLE, jamais pour un changement cosmetique : un
 #: lecteur qui refuse une version qu il ne connait pas doit avoir une raison de le faire.
