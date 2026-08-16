@@ -56,6 +56,17 @@ FIGHT_SLOT_COUNT = SHOOT_SLOT_COUNT                 # 20 -> 1065-1084
 # il lui faut donc une action propre. Fusionner ce cas avec un slot rendrait « frapper le
 # slot i » ambigu (frapper i, ou ne frapper personne ?).
 ACTION_FIGHT_NO_TARGET = FIGHT_SLOT_BASE + FIGHT_SLOT_COUNT   # 1085
+# 10.02 / 10.07 : le TIR INDIRECT est un second type de tir jouable dans le meme etat que le tir
+# normal — l escouade choisit. Un slot par cible, sur le MEME `get_enemy_slot_mapping` que le tir
+# ordinaire (invariant D1), donc le meme compte : les desolidariser ferait pointer l action i et
+# la ligne i du tenseur ennemi sur deux escouades differentes.
+#
+# ⚠️ INSERE DANS LE BLOC MICRO, pas apres : `BASE_ZONE_INTENT` commencait exactement a 1086, et
+# y poser ces slots les aurait fait COLLIDER avec les intentions de zone. Le test miroir
+# `test_action_space_mirror` l a pris — `SQUAD_ACTION_SIZE` borne les actions MICRO, ce n est pas
+# la fin de l espace d action.
+SHOOT_INDIRECT_SLOT_BASE = ACTION_FIGHT_NO_TARGET + 1          # 1086
+SHOOT_INDIRECT_SLOT_COUNT = SHOOT_SLOT_COUNT                   # 20 -> 1086-1105
 DEPLOY_SLOT_BASE = 4
 # Slots de deploiement DECRITS par l'observation et adressables par une action : 8 -> ids 4-11.
 # Ils tombent dans la plage des cellules de move (`MOVE_CELL_BASE = 0`), donc `TOTAL_ACTION_SIZE`
@@ -70,7 +81,11 @@ DEPLOY_SLOT_COUNT = 8       # deployment slots 0-7 -> 4-11
 # ⚠️ `DEPLOY_STRATEGY_COUNT <= DEPLOY_SLOT_COUNT` — l'inverse ouvrirait une action sans strategie.
 DEPLOY_STRATEGY_COUNT = 5
 
-BASE_ZONE_INTENT = ACTION_FIGHT_NO_TARGET + 1                  # 1086
+BASE_ZONE_INTENT = SHOOT_INDIRECT_SLOT_BASE + SHOOT_INDIRECT_SLOT_COUNT  # 1106
+# ⚠️ Le macro se DECALE de 20 avec l ajout des slots de tir indirect (2026-08-16). Les ids
+# macro ne sont pas un contrat externe — ils sont derives, et le retrain impose par le
+# changement de dimension est de toute facon acte. Ce qui compte est que la derivation
+# reste ecrite, pour que le prochain ajout se decale tout seul.
 # Decision agent generique (V11 §9.3 P2) : K actions `CHOICE_i` qui designent le candidat i de
 # `game_state["pending_agent_decision"]`. Elles sont EXCLUSIVES des autres (quand une decision
 # est en attente, le masque n'expose qu'elles) et communes a TOUS les types de decision : c'est
@@ -114,6 +129,9 @@ MOVE_CELLS = range(MOVE_CELL_BASE, MOVE_CELL_BASE + MOVE_CELL_COUNT)            
 SHOOT_SLOTS = range(SHOOT_SLOT_BASE, SHOOT_SLOT_BASE + SHOOT_SLOT_COUNT)            # 1025-1044
 CHARGE_SLOTS = range(CHARGE_SLOT_BASE, CHARGE_SLOT_BASE + CHARGE_SLOT_COUNT)        # 1045-1064
 FIGHT_SLOTS = range(FIGHT_SLOT_BASE, FIGHT_SLOT_BASE + FIGHT_SLOT_COUNT)            # 1065-1084
+SHOOT_INDIRECT_SLOTS = range(
+    SHOOT_INDIRECT_SLOT_BASE, SHOOT_INDIRECT_SLOT_BASE + SHOOT_INDIRECT_SLOT_COUNT
+)                                                                                   # 1086-1105
 DEPLOY_SLOTS = range(DEPLOY_SLOT_BASE, DEPLOY_SLOT_BASE + DEPLOY_SLOT_COUNT)        # 4-11
 # Slots reellement JOUABLES : ceux qui portent une strategie definie. `DEPLOY_SLOTS` decrit ce que
 # l'observation expose et ce que le decodeur reconnait comme un id de deploiement ; c'est CELUI-CI

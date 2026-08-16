@@ -4929,6 +4929,8 @@ class W40KEngine(gym.Env):
         Le pipeline mono-fig legacy reste intact pour l IA/training.
         """
         from engine.phase_handlers.shared_utils import (
+            squad_shooting_type_choose,
+            squad_shooting_type_clear,
             squad_shooting_unit_activation_start,
             squad_declare_shoot_model,
             squad_undeclare_shoot_model,
@@ -6171,6 +6173,8 @@ class W40KEngine(gym.Env):
         from engine.phase_handlers.shared_utils import (
             execute_squad_move,
             clear_squad_move_cell_map,
+            squad_shooting_type_choose,
+            squad_shooting_type_clear,
             squad_shooting_unit_activation_start,
             squad_declare_shoot,
             squad_lock_shoot,
@@ -6591,6 +6595,14 @@ class W40KEngine(gym.Env):
             eligible_slots = [sid for sid in enemy_slots if sid is not None]
 
             squad_shooting_unit_activation_start(self.game_state, squad_id)
+            # 10.02 etape 2 : le type de tir vient de l ACTION, il n est plus derive de l etat.
+            # Pose AVANT la declaration de cible — c est lui qui commande les armes
+            # selectionnables (10.05/10.06) et, pour 10.07, le ciblage sans ligne de vue.
+            # `require_key` : le decodeur le fournit sur les DEUX familles de slots de tir ; un
+            # absent est une chaine rompue, pas une activation « sans type ».
+            squad_shooting_type_choose(
+                self.game_state, squad_id, require_key(semantic, "shooting_type")
+            )
             # `active_shooting_unit` n'est volontairement PAS posée ici (V11 §0.48 L2) : cette clé
             # désigne une activation de tir EN COURS, or celle de l'agent est ATOMIQUE — aucun
             # lecteur entre la pose et le retrait, et toute sortie par exception la laisserait
@@ -6608,6 +6620,10 @@ class W40KEngine(gym.Env):
                 )
             shoot_result = _shoot_alloc["shoot_result"]
 
+            # L activation est finie : le type choisi ne vaut plus. Sans cet effacement, une
+            # activation ULTERIEURE de la meme escouade heriterait d un type qu elle n a pas
+            # choisi — meme cycle de vie que `units_shot`.
+            squad_shooting_type_clear(self.game_state, squad_id)
             unit = get_unit_by_id(squad_id, self.game_state)
             if unit is None:
                 raise KeyError(f"Squad {squad_id} introuvable pour end_activation après tir")

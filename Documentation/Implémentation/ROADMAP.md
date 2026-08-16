@@ -57,8 +57,11 @@
   ✅ 3 ciblage sans ligne de vue (la portée reste, [PRECISION] 24.28 garde son exigence propre) ;
   ✅ 4 résolution (plancher d'échec 6/4 composé par `max` avec la CT, couvert octroyé avec la
   précédence de 24.18, relances de touche interdites y compris contre Oath).
-  ⏳ RESTENT : **5 décision** (masque d'action, observation du choix, application agent, choix
-  PvP — c'est cette pièce qui change l'espace d'action et invalide les modèles) et **6 journal**
+  ✅ 5 décision, **volet AGENT** (option A : 20 slots d'action dédiés, décodeur, masque, état de
+  choix validé et effacé ; `TOTAL_ACTION_SIZE` 1139 → 1159 — **c'est ce changement qui invalide
+  les modèles entraînés**, acté par l'utilisateur).
+  ⏳ RESTENT : **5 volet PvP** (le chemin d'activation humain ne pose aucun choix, donc un joueur
+  humain ne peut pas encore jouer l'indirect — travail frontend + point d'entrée API) et **6 journal**
   (`[INDIRECT FIRE:<plancher>+]` et `[COVER]`, sans lesquels une ligne de tir indirect est
   illisible pour l'analyzer). Puis le retrain, puis le contrôle analyzer en LOT SÉPARÉ avec sa
   mesure de taux de fausse alarme.
