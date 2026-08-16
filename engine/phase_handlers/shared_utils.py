@@ -6658,6 +6658,7 @@ def _attacker_model_can_reach_squad(
     target_squad_id: str,
     range_subhex: int,
     only_target_mids: Optional[Set[str]] = None,
+    require_visibility: bool = True,
 ) -> bool:
     """Eligibilite portee + LoS per-fig, alignee sur le chemin canonique (valid_target_pool_build).
 
@@ -6674,6 +6675,18 @@ def _attacker_model_can_reach_squad(
     grisee a tort en phase de tir alors que le move-preview l'affichait ciblable. Empreinte
     evaluee PAR figurine cible (pas l'union de l'escouade). Board ×1 (base_size 1) :
     socle = 1 hex → distance et LoS identiques a l'ancien test centre.
+
+    ``require_visibility=False`` — tir INDIRECT 10.07 : « [INDIRECT FIRE] weapons in your unit can
+    target units that are NOT VISIBLE to the attacking model ». Seule la VISIBILITE tombe ; la
+    PORTEE reste exigee, et c est tout ce que la regle retire. Deux gates disparaissent alors, et
+    les deux sont des gates de visibilite :
+      - le trace de ligne de vue lui-meme (06.01 / 13.10 obscurcissant) ;
+      - la detection d une unite « hidden » 13.09, qui n est PAS une regle de portee mais une
+        restriction de visibilite (« it can only be VISIBLE to enemy models that are within its
+        detection range »). Une regle qui n exige plus la visibilite ne peut pas buter dessus.
+    Le contournement ne s applique JAMAIS a [PRECISION] 24.28, dont l appelant garde le defaut :
+    24.28 exige un CHARACTER « VISIBLE to one or more of the attacking models », et c est une
+    exigence propre a cette regle-la, pas la ligne de vue du tir.
     """
     # Obscuring-aware LoS (single source of truth): the firing model (single hex at ac,ar) must see
     # >= 1 cell of a target model's footprint (rule 06.01, binary), with dense walls AND obscuring
@@ -6769,7 +6782,7 @@ def _attacker_model_can_reach_squad(
         )
         if edge > range_subhex:
             continue
-        if target_hidden:
+        if target_hidden and require_visibility:
             # Cette figurine ne rend la cible atteignable que si elle est dans SA detection range :
             # base, ou base−3" si elle est "gone to ground" (masquée par un terrain Solid intervenant
             # pour ce tireur, rule 13.5). Le test LoS dense n'est fait que dans la bande utile.
@@ -6782,6 +6795,11 @@ def _attacker_model_can_reach_squad(
                     eff_detection = base_detection_subhex - detection_penalty
             if edge > eff_detection:
                 continue
+        # 10.07 : la portee suffit, la cible n a pas a etre visible. On sort AVANT le trace —
+        # ne pas le calculer pour jeter son resultat est aussi ce qui garde le cout de la regle
+        # nul sur le chemin de ciblage.
+        if not require_visibility:
+            return True
         # LoS 3D : dalles occultantes du tireur et/ou de cette cible + sommets verticaux (pouces).
         # Actif seulement si un côté est à l'étage ; sinon floor_occ=None → tracé 2D inchangé.
         floor_occ = None
@@ -6954,7 +6972,15 @@ def _model_can_shoot_target(
 
     ac = int(attacker_model["col"])
     ar = int(attacker_model["row"])
-    if not _attacker_model_can_reach_squad(game_state, attacker_model, ac, ar, target_squad_id, range_subhex):
+    # 10.07 : sous tir indirect, une arme [INDIRECT FIRE] cible sans ligne de vue. Le predicat
+    # est PARESSEUX (declaration d arme testee avant le type de tir), donc gratuit pour les 229
+    # autres profils de l armurerie.
+    if not _attacker_model_can_reach_squad(
+        game_state, attacker_model, ac, ar, target_squad_id, range_subhex,
+        require_visibility=not indirect_shooting_applies(
+            game_state, str(attacker_model["squad_id"]), weapon
+        ),
+    ):
         return False
     if _shoot_engagement_blocks_target(
         game_state,
@@ -8078,7 +8104,15 @@ def _model_can_shoot_target_with_weapon(
 
     ac = int(attacker_model["col"])
     ar = int(attacker_model["row"])
-    if not _attacker_model_can_reach_squad(game_state, attacker_model, ac, ar, target_squad_id, range_subhex):
+    # 10.07 : sous tir indirect, une arme [INDIRECT FIRE] cible sans ligne de vue. Le predicat
+    # est PARESSEUX (declaration d arme testee avant le type de tir), donc gratuit pour les 229
+    # autres profils de l armurerie.
+    if not _attacker_model_can_reach_squad(
+        game_state, attacker_model, ac, ar, target_squad_id, range_subhex,
+        require_visibility=not indirect_shooting_applies(
+            game_state, str(attacker_model["squad_id"]), weapon
+        ),
+    ):
         return False
     if _shoot_engagement_blocks_target(
         game_state,
@@ -9277,6 +9311,33 @@ def _target_visible_to_a_friendly_unit(
     return False
 
 
+def indirect_shooting_applies(
+    game_state: Dict[str, Any], shooter_squad_id: str, weapon: Dict[str, Any]
+) -> bool:
+    """Les effets de 10.07 portent-ils sur une attaque de CETTE arme, par CETTE escouade ?
+
+    Deux conditions, toutes deux necessaires : l unite resout un tir INDIRECT (le type est choisi
+    a l activation, 10.02) ET l attaque est faite avec une arme [INDIRECT FIRE]. La seconde est ce
+    qui distingue 10.07 des autres types de tir : ses effets ne portent QUE sur les armes
+    indirectes, jamais sur leurs voisines — l encadre du PDF 10 le dit (« its other weapons can
+    still target other visible targets »).
+
+    ORDRE DES DEUX GARDES : la declaration d arme d abord, le type de tir ensuite. Ce n est pas
+    cosmetique — `resolve_squad_shooting_type` balaie les figurines vivantes et leurs armes, et
+    il exige `config.game_rules.engagement_zone`. Le tester d abord le ferait payer a CHAQUE
+    attaque et a CHAQUE test de ciblage du jeu, pour une regle que deux armes du depot portent.
+
+    Predicat PARTAGE par les deux faces de la regle — le ciblage (qui cesse d exiger la ligne de
+    vue) et la resolution (plancher, couvert, relances). Deux copies auraient diverge, et le
+    ciblage aurait alors ouvert des cibles que la resolution aurait traitees en tir ordinaire.
+    """
+    if not weapon_has_rule(weapon, "INDIRECT_FIRE"):
+        return False
+    return resolve_squad_shooting_type(
+        game_state, str(shooter_squad_id)
+    ) == SHOOTING_TYPE_INDIRECT
+
+
 def indirect_fire_fail_below(
     game_state: Dict[str, Any],
     shooter_squad_id: str,
@@ -9295,13 +9356,7 @@ def indirect_fire_fail_below(
     distinguer « 10.07 n a pas joue » de « 10.07 a joue et impose le plancher ordinaire », ne
     serait-ce que pour le journal.
     """
-    # ORDRE DES DEUX GARDES : la declaration d arme d abord, le type de tir ensuite. Ce n est pas
-    # cosmetique — `resolve_squad_shooting_type` balaie les figurines vivantes et leurs armes, et
-    # il exige `config.game_rules.engagement_zone`. Le tester d abord le ferait payer a CHAQUE
-    # attaque du jeu, pour une regle que deux armes du depot portent.
-    if not weapon_has_rule(weapon, "INDIRECT_FIRE"):
-        return None
-    if resolve_squad_shooting_type(game_state, str(shooter_squad_id)) != SHOOTING_TYPE_INDIRECT:
+    if not indirect_shooting_applies(game_state, shooter_squad_id, weapon):
         return None
     spotted = _squad_remained_stationary(game_state, shooter_squad_id) and (
         _target_visible_to_a_friendly_unit(game_state, shooter_squad_id, target_sid)

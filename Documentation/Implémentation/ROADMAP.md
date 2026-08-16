@@ -50,10 +50,20 @@
   `shared_utils.resolve_squad_shooting_type` **dérive** un type unique et justifie ce choix par un
   invariant — « les conditions sont exclusives » — que 10.07 casse. La dérivation doit devenir une
   DÉCISION, donc l'espace d'action bouge, donc les modèles entraînés sont invalidés.
-  Périmètre hors tests/docs : résolution et stockage du type, pool de cibles (contournement LoS),
-  séquence de touche (seuil 6+/4+, interdiction de relance), octroi du couvert à la cible,
-  prédicat « spotter » (cible visible d'une unité amie) qui n'existe nulle part, masque d'action,
-  observation, choix côté PvP.
+  **AVANCEMENT — 4 pièces sur 6 livrées le 2026-08-16**, dans l'ordre imposé par la spec (les
+  effets AVANT le choix, pour qu'aucune partie ne se joue avec une règle à moitié appliquée) :
+  ✅ 1 registre + observation (`obs_id` 18, coût nul en paramètres) ; ✅ 2 éligibilité rendue en
+  ENSEMBLE (`eligible_squad_shooting_types`) sans toucher les 4 appelants de la dérivation ;
+  ✅ 3 ciblage sans ligne de vue (la portée reste, [PRECISION] 24.28 garde son exigence propre) ;
+  ✅ 4 résolution (plancher d'échec 6/4 composé par `max` avec la CT, couvert octroyé avec la
+  précédence de 24.18, relances de touche interdites y compris contre Oath).
+  ⏳ RESTENT : **5 décision** (masque d'action, observation du choix, application agent, choix
+  PvP — c'est cette pièce qui change l'espace d'action et invalide les modèles) et **6 journal**
+  (`[INDIRECT FIRE:<plancher>+]` et `[COVER]`, sans lesquels une ligne de tir indirect est
+  illisible pour l'analyzer). Puis le retrain, puis le contrôle analyzer en LOT SÉPARÉ avec sa
+  mesure de taux de fausse alarme.
+  ⚠️ Tant que la pièce 5 n'est pas livrée, **rien ne peut choisir le tir indirect** : les quatre
+  pièces livrées sont inertes, et un test le verrouille explicitement.
   → [`A_faire/indirect_fire_10_07.md`](A_faire/indirect_fire_10_07.md)
 
 - ✅ **Socle vs mur : une seule géométrie, et la sortie de contact** (2026-08-11). Symptôme PvE :

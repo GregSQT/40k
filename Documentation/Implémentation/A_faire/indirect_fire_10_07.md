@@ -121,7 +121,10 @@ limite T2 des ~5 fichiers.
    `shared_utils.resolve_squad_shooting_type` rend un ensemble ;
    `SHOOTING_TYPE_INDIRECT` ; `shooting_type_allows_weapon` rend `True` pour toutes les armes
    sous le type indirect (cf. l'encadré : les autres armes tirent normalement).
-3. **Ciblage** — le pool de cibles des armes [INDIRECT FIRE] cesse d'exiger la ligne de vue.
+3. ✅ **FAIT le 2026-08-16.** **Ciblage** — le pool de cibles des armes [INDIRECT FIRE] cesse
+   d'exiger la ligne de vue. Deux gates tombent, toutes deux de VISIBILITÉ : le tracé
+   (06.01/13.10) et la détection `hidden` 13.09. La PORTÉE reste, et [PRECISION] 24.28 garde
+   son exigence propre de CHARACTER visible — son appelant garde le défaut.
    ⚠️ Ne PAS toucher `compute_unit_los` : c'est la source unique de l'obs, du reward et du
    déploiement. Le contournement se fait au niveau du **gate de ciblage**, pas du calcul.
 4. ✅ **FAIT le 2026-08-16** (sauf le volet journal, cf. pièce 6). **Résolution** — plancher d'échec `max(seuil, 6)` ou `max(seuil, 4)` (cf. §1), couvert
