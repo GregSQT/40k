@@ -9663,6 +9663,45 @@ def _manual_roll_intent(
         ):
             bs = max(2, bs - 1)
             _heavy_applied = True
+    # 04.03 IDENTICAL ATTACKS : signature NORMALISEE des regles de l arme. Calculee ICI et non a
+    # la construction du dict de retour, parce que les trois blocs 10.05 / 10.06 ci-dessous la
+    # lisent : deux accesseurs distincts sur les memes regles peuvent diverger, un seul non.
+    _weapon_rules = weapon_rule_signature(weapon)
+    _atk_sid = str(require_key(attacker, "squad_id"))
+    # [ASSAULT] 24.04 (10.05) et [CLOSE-QUARTERS] 24.07 (10.06) sont des regles d ELIGIBILITE :
+    # elles decident sous quel REGIME l escouade tire, et l autorite de ce verdict est
+    # `resolve_squad_shooting_type` — c est elle qui porte les clauses que l arme ne dit pas
+    # (a deja tire, a fui sans `shoot_after_flee`, et pour 10.06 « did not make an advance move
+    # this turn »). Redériver ces conditions a cote de l autorite ne peut que la contredire :
+    # les tokens du journal enregistrent donc SA decision, jamais une seconde mesure.
+    #
+    # Resolue PARESSEUSEMENT : le portier teste l engagement de l escouade, donc parcourt les
+    # ennemis. Son verdict n est lu que si l arme declare l une des deux regles, ou si la
+    # figurine est MONSTER/VEHICLE (volet malus 10.06 ci-dessous) — sinon aucun des trois blocs
+    # ne peut etre vrai.
+    _shooting_type: Optional[str] = None
+    if (
+        "ASSAULT" in _weapon_rules
+        or "CLOSE_QUARTERS" in _weapon_rules
+        or _model_is_monster_or_vehicle(attacker)
+    ):
+        _shooting_type = resolve_squad_shooting_type(game_state, _atk_sid)
+    # L autorite dit que l escouade tire sous 10.05 ; l arme dit si c est ELLE qui porte la
+    # regle. Les deux moities sont necessaires : sous `shoot_after_advance` (regle d UNITE du
+    # projet) une arme sans [ASSAULT] devient selectionnable, et le token nommerait alors une
+    # regle d arme qui n a pas joue.
+    _assault_applied = (
+        _shooting_type == SHOOTING_TYPE_ASSAULT and "ASSAULT" in _weapon_rules
+    )
+    # 10.06 : « you can only select [CLOSE-QUARTERS] weapons, and can only target units your
+    # unit is engaged with ». L engagement se mesure donc AVEC LA CIBLE (`_squads_are_engaged`,
+    # meme primitive que le ciblage et que le volet malus juste dessous), pas « avec un ennemi
+    # quelconque » — deux grandeurs que le meme nom a deja fait confondre.
+    _cq_applied = (
+        _shooting_type == SHOOTING_TYPE_CLOSE_QUARTERS
+        and "CLOSE_QUARTERS" in _weapon_rules
+        and _squads_are_engaged(game_state, _atk_sid, str(target_sid))
+    )
     # [10.06] tir a bout portant, volet MONSTER/VEHICLE : « Each time a MONSTER/VEHICLE model in
     # your unit makes an attack: unless that attack is made with a [CLOSE-QUARTERS] weapon AND
     # targets a unit your unit is engaged with, subtract 1 from the hit roll. » -1 au jet =
@@ -9671,10 +9710,9 @@ def _manual_roll_intent(
     # (_shoot_engagement_blocks_target) et a la selection d armes (shooting_type_allows_weapon).
     _cq_malus_applied = False
     if _model_is_monster_or_vehicle(attacker):
-        _cq_sid = str(attacker["squad_id"])
-        if resolve_squad_shooting_type(game_state, _cq_sid) == SHOOTING_TYPE_CLOSE_QUARTERS:
-            _cq_engaged_target = _squads_are_engaged(game_state, _cq_sid, str(target_sid))
-            if not (weapon_has_rule(weapon, "CLOSE_QUARTERS") and _cq_engaged_target):
+        if _shooting_type == SHOOTING_TYPE_CLOSE_QUARTERS:
+            _cq_engaged_target = _squads_are_engaged(game_state, _atk_sid, str(target_sid))
+            if not ("CLOSE_QUARTERS" in _weapon_rules and _cq_engaged_target):
                 bs = min(6, bs + 1)
                 _cq_malus_applied = True
     # Force et penetration de l ARME : `STR`/`AP` sont portes par les 428 profils des rosters.
@@ -9811,7 +9849,12 @@ def _manual_roll_intent(
         "heavy_applied": _heavy_applied,
         # 04.03 IDENTICAL ATTACKS, seconde moitie de la definition : « affected by the same
         # applicable abilities and rules ». Entre dans la cle de groupe.
-        "weapon_rules": weapon_rule_signature(weapon),
+        "weapon_rules": _weapon_rules,
+        # [ASSAULT] 24.04 / [CLOSE-QUARTERS] 24.07 : verdict du portier 10.05/10.06 pour CETTE
+        # arme et CETTE cible. Pose ICI, au seul endroit qui connait la cible et ou l autorite
+        # est deja consultee — le groupe le RELIT, comme `heavy_applied` et `point_blank_malus`.
+        "assault_applied": _assault_applied,
+        "close_quarters_applied": _cq_applied,
         # Tokens de regles d arme de la ligne de log. Constants sur le groupe par CONSTRUCTION :
         # chacune de leurs sources est dans `gkey` (signature de regles, `dmg_bonus`, le X
         # applique de [RAPID FIRE], cible — donc la taille declaree qui pilote [BLAST] et les
@@ -10348,11 +10391,6 @@ def _build_manual_allocation(
     weapon_groups: List[Dict[str, Any]] = []
     group_index_by_key: Dict[tuple, int] = {}
     batch_pool_by_gidx: Dict[int, List[Dict[str, Any]]] = {}
-    # [CLOSE-QUARTERS] 24.07 : l engagement de l ESCOUADE attaquante est le meme pour tous les
-    # groupes de cet appel (meme `attacker_squad_id`, et aucune figurine n est retiree avant
-    # l allocation, differee apres cette boucle). Memoise PARESSEUSEMENT : le prédicat parcourt
-    # toutes les escouades ennemies, donc on ne le paie que si une arme porte reellement la regle.
-    _squad_engaged: Optional[bool] = None
 
     for intent in intents:
         r = roll_intent_fn(game_state, intent, targets_meta)
@@ -10425,25 +10463,6 @@ def _build_manual_allocation(
             # elle-meme etait devinee a partir de l id de figurine.
             _atk_sid = str(require_key(attacker, "squad_id"))
             _atk_uc_live = require_key(require_key(game_state, "units_cache"), _atk_sid)
-            # [ASSAULT] 24.04 (10.05) : l arme est [ASSAULT] ET l unite a avance ce tour.
-            # [CLOSE-QUARTERS] 24.07 (10.06) : l arme est [CLOSE_QUARTERS] ET le squad est engage.
-            # Poses a la CREATION du groupe (etat vive — `units_advanced` change entre tours,
-            # `_squad_is_in_enemy_er` requiert la carte de positions live) et non a l emission,
-            # qui est differee hors etat apres resolution complete. Meme regime que `heavy_applied`.
-            # La declaration d arme se lit dans la signature NORMALISEE deja calculee par le
-            # roller (`weapon_rule_signature`, cf. `gkey`) : ASSAULT et CLOSE_QUARTERS sont sans
-            # parametre, donc leur forme dans la signature est le nom nu. Un second accesseur
-            # (`weapon_has_rule`) re-parserait les memes regles et pourrait en diverger.
-            _weapon_rules = require_key(r, "weapon_rules")
-            _assault_applied = (
-                "ASSAULT" in _weapon_rules
-                and _atk_sid in game_state.get("units_advanced", set())  # get allowed
-            )
-            _cq_applied = False
-            if "CLOSE_QUARTERS" in _weapon_rules:
-                if _squad_engaged is None:
-                    _squad_engaged = _squad_is_in_enemy_er(game_state, _atk_sid)
-                _cq_applied = _squad_engaged
             _grp = {
                 "attacker_squad_id": _atk_sid,
                 "attacker_col": int(require_key(_atk_uc_live, "col")),
@@ -10501,8 +10520,12 @@ def _build_manual_allocation(
                 # verite du cercle vert + cone LoS par-fig cote replay : c est le model_id resolu par
                 # roll_intent_fn (attacker_mid), pas un match par nom d arme.
                 "shooter_mids": [],
-                "assault_applied": _assault_applied,
-                "close_quarters_applied": _cq_applied,
+                # [ASSAULT] 24.04 (10.05) / [CLOSE-QUARTERS] 24.07 (10.06) : verdict du portier
+                # RELU depuis l intent, comme `point_blank_malus` juste au-dessus. Il est
+                # constant sur le groupe — le type de tir est une propriete de l ESCOUADE et du
+                # TOUR, et l arme comme la cible sont deja dans `gkey`.
+                "assault_applied": bool(require_key(r, "assault_applied")),
+                "close_quarters_applied": bool(require_key(r, "close_quarters_applied")),
             }
             # Cover (regle 13.08) : ranged-only -> present uniquement sur le chemin tir
             # (le chemin combat partage cette fonction mais ne fournit pas ces cles).

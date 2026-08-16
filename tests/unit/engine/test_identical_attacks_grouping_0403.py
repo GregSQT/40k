@@ -241,6 +241,9 @@ def _rolled(weapon: Dict[str, Any], *, rapid_fire_applied: int, target_sid: str)
         ),
         # 10.06 : aucun MONSTER/VEHICLE dans ce scenario.
         "point_blank_malus": False,
+        # 10.05 / 10.06 : verdicts du portier, publies par le roller au meme titre que
+        # `point_blank_malus`. Le groupe les lit en `require_key`, donc un intent muet leve.
+        "assault_applied": False, "close_quarters_applied": False,
         "precision": False, "precision_range": None, "heavy_applied": False,
         # Oath (08.04) : le groupement copie ces deux clés de l'intent — un roller stub qui ne
         # les rend pas n'est plus fidèle au producteur.
@@ -287,9 +290,23 @@ def test_both_rollers_publish_the_signature() -> None:
 
     from engine.phase_handlers import fight_handlers, shared_utils
 
+    import re
+
+    APPEL = "weapon_rule_signature(weapon)"
     for fn in (shared_utils._manual_roll_intent, fight_handlers._manual_roll_fight_intent):
         src = inspect.getsource(fn)
-        assert '"weapon_rules": weapon_rule_signature(weapon)' in src, fn.__name__
+        # La cle peut etre publiee par l'appel direct OU par une variable locale liee a cet
+        # appel (le roller de tir relit la signature plus haut, pour 10.05/10.06). Les deux
+        # formes sont acceptees ; ce qui ne l'est pas, c'est qu'une SECONDE derivation des
+        # regles de l'arme s'installe a cote de `weapon_rule_signature` — le jumeau manquant
+        # est le motif d'echec n°1 de ce depot.
+        publie = re.search(r'"weapon_rules":\s*([\w.]+\(weapon\)|[A-Za-z_]\w*)', src)
+        assert publie, fn.__name__
+        valeur = publie.group(1)
+        if valeur != APPEL:
+            assert re.search(rf'\b{re.escape(valeur)}\s*=\s*{re.escape(APPEL)}', src), (
+                fn.__name__, valeur
+            )
 
 
 def test_signature_type_is_hashable() -> None:

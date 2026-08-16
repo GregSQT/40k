@@ -150,7 +150,7 @@ def _game_state(weapon_rules, *, moved_inches=0.0, target=TARGET, n_attacks=1,
 def _engine_shoot_log(monkeypatch, weapon_rules, rolls, *, moved_inches=0.0, target=TARGET,
                       n_attacks=1, unit_rules=(), cover=False, unit_type=UNIT_TYPE,
                       weapon_name=WEAPON_NAME, target_models=1, melee=False,
-                      target_keywords=(), units_advanced=False, engaged=None):
+                      target_keywords=(), units_advanced=False, engaged=False):
     """Fait jouer UNE attaque par le vrai moteur et rend (game_state, son action_log).
 
     `melee=True` passe par `build_manual_fight_allocation` — le MÊME émetteur de log
@@ -158,10 +158,12 @@ def _engine_shoot_log(monkeypatch, weapon_rules, rolls, *, moved_inches=0.0, tar
     veut exercer : un token écrit d'un seul côté du miroir tir/mêlée ne se verrait pas ici.
 
     `units_advanced=True` place le squad attaquant dans `units_advanced` (10.05 — ASSAULT).
-    `engaged` est TRI-ÉTAT pour 10.06 (CLOSE-QUARTERS) : `None` laisse le vrai
-    `_squad_is_in_enemy_er` en place, `True`/`False` le remplacent par la réponse voulue. Le
-    forcer à `False` est nécessaire et pas seulement commode : ce décor minimal ne porte pas la
-    `config` que le vrai prédicat exige, donc une arme [CLOSE_QUARTERS] jouée sans patch lève.
+    `engaged` pose l'engagement pour 10.05/10.06. Les DEUX primitives sont remplacées ensemble
+    — `_squad_is_in_enemy_er` (que le portier `resolve_squad_shooting_type` interroge) et
+    `_squads_are_engaged` (l'engagement AVEC LA CIBLE) : les laisser diverger ferait dire au
+    décor qu'une escouade est engagée sans l'être de sa cible, un état que le plateau ne
+    produit pas ici. Le patch est requis, pas commode : ce décor minimal ne porte pas la
+    `config` que les vraies primitives exigent.
     """
     seq = list(rolls)
 
@@ -183,10 +185,9 @@ def _engine_shoot_log(monkeypatch, weapon_rules, rolls, *, moved_inches=0.0, tar
                      target_keywords=target_keywords)
     if units_advanced:
         gs["units_advanced"] = {"1"}
-    if engaged is not None:
-        from engine.phase_handlers import shared_utils as _su
-        monkeypatch.setattr(_su, "_squad_is_in_enemy_er",
-                            lambda _gs, sid: bool(engaged) and sid == "1")
+    from engine.phase_handlers import shared_utils as _su
+    monkeypatch.setattr(_su, "_squad_is_in_enemy_er", lambda _gs, sid: engaged and sid == "1")
+    monkeypatch.setattr(_su, "_squads_are_engaged", lambda _gs, a, b: engaged and a == "1")
     if melee:
         build_manual_fight_allocation(gs, "1")
     else:
@@ -1364,6 +1365,38 @@ def test_regle_sans_l_etat_absente_du_pont(monkeypatch, tmp_path, weapon_rule, d
         f"`{detail_key}` ne doit PAS être posé quand l'unité n'est pas dans l'état "
         f"{set(engine_kwargs)} attendu, même si l'arme déclare {weapon_rule} : {details}"
     )
+    line = _step_log_line(tmp_path, gs, raw_log)
+    assert token not in line, line
+
+
+@pytest.mark.parametrize("weapon_rule, detail_key, token, engine_kwargs", ELIGIBILITY_RULES,
+                         ids=_ELIGIBILITY_IDS)
+def test_avance_et_engage_aucune_des_deux_regles_ne_joue(monkeypatch, tmp_path, weapon_rule,
+                                                         detail_key, token, engine_kwargs):
+    """CLAUSE DU PORTIER, celle qu'aucune moitié de la condition ne dit : une escouade ENGAGÉE
+    qui a AVANCÉ ce tour ne tire sous aucun des deux régimes.
+
+    10.06 exige explicitement « did not make an advance move this turn » (PDF 10 Shooting
+    phase), et 10.05 ne s'applique qu'hors engagement : `resolve_squad_shooting_type` rend donc
+    `None`, et AUCUN des deux tokens ne doit apparaître — alors même que les deux moitiés
+    naïves (« l'arme déclare la règle » + « l'unité a avancé / est engagée ») sont vraies.
+
+    C'est le verrou du chantier : un producteur qui redérive ces conditions à côté de
+    l'autorité, au lieu de lire son verdict, écrit ici un token que la règle interdit. Les deux
+    contre-épreuves voisines restent vertes dans ce cas — seule celle-ci tombe.
+    """
+    gs, raw_log = _engine_shoot_log(monkeypatch, [weapon_rule], [3, 4, 2],
+                                    units_advanced=True, engaged=True)
+    bridge = _Bridge(gs)
+    details = bridge._build_shot_details(raw_log, raw_log["shootDetails"][0], 1, None)
+
+    assert detail_key not in details, (
+        f"escouade engagée ET ayant avancé : le portier ne rend aucun type de tir, donc "
+        f"`{detail_key}` ne doit pas être posé : {details}"
+    )
+    # VERT VACANT : le pont a bien construit CETTE attaque, l'absence n'est pas celle d'un
+    # `details` vide ni d'une chaîne rompue.
+    assert details["hit_roll"] == 3 and details["hit_target"] == 3, details
     line = _step_log_line(tmp_path, gs, raw_log)
     assert token not in line, line
 
