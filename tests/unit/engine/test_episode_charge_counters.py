@@ -665,3 +665,58 @@ def test_the_charge_has_no_participation_rate(melee_scenario_file, tmp_path) -> 
     # Le volume, lui, sort bien : l'absence ci-dessus n'est pas celle de toute mesure de charge.
     assert "02_combat/m_charge_attempts" in emitted
     assert "02_combat/o_charge_attempts_bot" in emitted
+
+
+def test_move_log_missing_move_type_raises(melee_scenario_file) -> None:
+    """Une ligne move sans move_type leve ConfigurationError (T1 : pas de silences sur champ obligatoire).
+
+    Avant le correctif, log.get("move_type") retournait None et le log etait silencieusement
+    ignore au lieu de lever une erreur. Le verrou : injecter un log move valide (was_flee
+    present) mais sans move_type doit faire echouer la terminaison de l'episode.
+    """
+    from shared.data_validation import ConfigurationError
+    with pytest.raises(ConfigurationError, match="move_type"):
+        _play(melee_scenario_file, seed=1, inject=[
+            {"type": "move", "player": "1", "was_flee": False},
+        ])
+
+
+def test_fight_activations_per_turn_is_windowed_ratio(melee_scenario_file, tmp_path) -> None:
+    """06_fight/a_activations_per_turn passe par _emit_ratio_of_means, pas add_scalar direct.
+
+    Avant le correctif, la courbe etait emise brute (scalar par episode), inconsistante avec
+    les metriques 03_move et 04_shoot. Le verrou : avec window=2, la courbe ne doit PAS sortir
+    apres UN seul episode — _emit_ratio_of_means attend que la fenetre soit pleine, alors
+    qu'un add_scalar direct emetterait des le premier episode. La valeur sur 2 episodes est
+    aussi verifiee.
+    """
+    _engine, tactical = _episode_with(
+        melee_scenario_file,
+        lambda _eng, td: td["fight_activations"] > 0 and td["final_turn"] > 0,
+        "un episode avec au moins une activation de combat",
+    )
+
+    tracker = W40KMetricsTracker(
+        "ArmageddonAgent", log_dir=str(tmp_path), show_banner=False,
+        perf_window=2, perf_window_fast=2,
+    )
+    recording = _RecordingWriter()
+    tracker.writer = recording
+    tracker.episode_count = 1
+
+    # Premier episode : fenetre pas encore pleine, la courbe ne doit PAS sortir.
+    tracker.log_tactical_metrics(tactical)
+    emitted_after_1 = {key for key, _value, _step in recording.scalars}
+    assert "06_fight/a_activations_per_turn" not in emitted_after_1, (
+        "la courbe ne doit pas sortir avant que la fenetre de 2 soit pleine"
+    )
+
+    # Deuxieme episode (meme donnee) : fenetre pleine, la courbe doit sortir.
+    tracker.episode_count = 2
+    tracker.log_tactical_metrics(tactical)
+    by_key = {key: value for key, value, _step in recording.scalars}
+    assert "06_fight/a_activations_per_turn" in by_key, (
+        "la courbe doit etre emise apres deux episodes (fenetre de 2 pleine)"
+    )
+    expected = tactical["fight_activations"] / tactical["final_turn"]
+    assert by_key["06_fight/a_activations_per_turn"] == pytest.approx(expected)

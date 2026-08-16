@@ -2959,7 +2959,7 @@ class W40KEngine(gym.Env):
                         move_actions += 1
                         if require_key(log, "was_flee"):
                             move_flees += 1
-                        if log.get("move_type") == "advance":
+                        if require_key(log, "move_type") == "advance":
                             move_advances += 1
                     continue
                 if log_type == "wait":

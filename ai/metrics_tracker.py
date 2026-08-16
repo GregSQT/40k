@@ -188,6 +188,8 @@ class W40KMetricsTracker:
         ),
         # Cout du cache de scoring du deploiement (V11 §0.46 axe A).
         'deploy_cache_lookups', 'deploy_cache_full_builds', 'deploy_cache_incremental_failed',
+        # Activations de combat par tour (06_fight/a_activations_per_turn).
+        'fight_activations', 'fight_final_turn',
     )
 
     #: Modes de deploiement ventiles (cf. `deployment_mode_schedule`, w40k_core).
@@ -1164,14 +1166,13 @@ class W40KMetricsTracker:
         # 06_fight/ : activations de combat par tour.
         # fight_activations = paires (tour, escouade) uniques sur l'épisode, dérivées des logs
         # "combat". final_turn est le tour de terminaison — dénominateur naturel pour normaliser.
-        fight_activations = float(require_key(tactical_data, 'fight_activations'))
-        final_turn = float(require_key(tactical_data, 'final_turn'))
-        if final_turn > 0:
-            self.writer.add_scalar(
-                '06_fight/a_activations_per_turn',
-                fight_activations / final_turn,
-                self.episode_count,
-            )
+        fight_activations_hist = self._game_push(
+            'fight_activations', float(require_key(tactical_data, 'fight_activations'))
+        )
+        final_turn_hist = self._game_push(
+            'fight_final_turn', float(require_key(tactical_data, 'final_turn'))
+        )
+        self._emit_ratio_of_means('06_fight/a_activations_per_turn', fight_activations_hist, final_turn_hist)
 
     def log_training_step(self, step_data: Dict[str, Any]):
         """Log training step metrics - exploration rate and loss"""
