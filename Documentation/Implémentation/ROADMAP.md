@@ -396,8 +396,19 @@
 - **Conséquence immédiate : plus rien n'est gelé.** La consigne « ne rien lancer de cassant, aucun
   JSON de `config/` » tombe avec le run. Ce qui était différé à ce titre redevient faisable —
   notamment la `justification` d'`obs_size` (§5) et l'ajout d'un profil de validation P5 (§1 pt 6).
-- ⚠️ **Rien n'est en cours. Cette section doit être VIDE ou décrire un run vivant** — un 🟢 périmé
-  gèle du travail pour rien, ce qu'il a fait entre 15 h 18 et sa correction.
+- ✅ **[INDIRECT FIRE] 24.19 — pièces 1→5 agent livrées le 2026-08-16** (`TOTAL_ACTION_SIZE`
+  1139 → 1159). Pièces 1-4 : config `obs_id`, éligibilité indirecte, ciblage sans LoS exigée
+  (gate visibilité levé pour armes [INDIRECT FIRE]), résolution (plancher `max(seuil, 6)` ou
+  `max(seuil, 4)` avec spotter, couvert octroyé, relances de touche interdites). Pièce 5 agent :
+  20 slots `SHOOT_INDIRECT` dans le bloc micro, décodeur, masque gym, état de choix
+  posé/honoré/effacé.
+  **Reste (ordre imposé par §4 du doc) :** pièce 6 journal (`[INDIRECT FIRE:<plancher>+]` +
+  `[COVER]`, `replayParser.ts`, `LOG_GRAMMAR_VERSION` 4 → 5) → **EN PREMIER** ; pièce 5 PvP
+  (choix humain : frontend + point d'entrée API) → après pièce 6 ; retrain → après PvP ;
+  pièce 7 analyzer → lot séparé, après retrain.
+  ⚠️ Le retrain est dû au seul changement d'espace d'action. Aucun roster ArmageddonAgent ne
+  porte d'arme [INDIRECT FIRE] : les 20 slots ne s'ouvriront jamais pendant ce run.
+  → [`A_faire/indirect_fire_10_07.md`](A_faire/indirect_fire_10_07.md)
 
 ## 1. Chemin critique vers la mesure de référence
 
