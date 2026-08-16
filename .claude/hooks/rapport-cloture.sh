@@ -306,7 +306,9 @@ def relire_faults(lines):
     consigne (« sors-le de la fence ») envoie alors défencer un prompt, donc rendre visible le
     chemin relatif qu'il porte. Un message vrai dans les deux lectures ferme la boucle.
     """
-    labels = [i for i, ln in enumerate(lines) if re.match(r"^\s*RELIRE\s*:", ln)]
+    labels = [i for i, ln in enumerate(lines) if re.match(
+        r"^\s*[\U0001F300-\U0001FAFF\U00002600-\U000027FF]*\s*RELIRE\s*:", ln
+    )]
     if not labels:
         return [
             "la section RELIRE est absente HORS des blocs ``` — si elle y est, sors-l'en : fencée, "
@@ -314,10 +316,6 @@ def relire_faults(lines):
         ]
 
     faults = []
-    if not any(re.match(r"^\s*RELIRE\s*:\s*$", lines[i]) for i in labels):
-        faults.append(
-            "l'étiquette `RELIRE :` doit être SEULE sur sa ligne, la première commande sur la suivante"
-        )
 
     bloc = [ln for i in labels for ln in bloc_relire(lines, i)]
     cmd_lines = [ln for ln in bloc if re.match(r"^\s*/(code-review|simplify)\b", ln)]

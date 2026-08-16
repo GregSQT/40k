@@ -300,14 +300,12 @@ Obligatoire dès qu'un fichier compté comme code a bougé ; omis pour lecture/d
 L'agent ne lance JAMAIS /code-review ni /simplify.
 Liste : .claude/hooks/relire-en-attente.sh --liste <session_id> (UUID du dossier PARENT du scratchpad). Ne jamais lancer --vider, seulement le fournir. Si hook défaillant : liste manuelle.
 Filtrage — exclus : config/**/*.json, *.md sauf CLAUDE.md, Documentation/** ; inclus sans exception : engine/**, ai/**, services/**, frontend/src/** ; zone grise (tests/**, scripts/**) : exclusion seulement avec justification.
-Bannière 🟢 Bon moment pour /code-review seulement si sujet FINI + liste non vide. Gros lot → scripts/review_plan.py. Chemins ABSOLUS ; guillemets si espace.
+🟢 = sujet fini, bon moment pour /code-review. 🟡 = arbitrage(s) ouvert(s), review utile mais partielle. Gros lot → scripts/review_plan.py. Chemins ABSOLUS ; guillemets si espace.
 Format :
-RELIRE:
-🟢 Bon moment pour /code-review — <n> fichiers en attente [si applicable]
+🟢 RELIRE : Bon moment pour /code-review — <n> fichiers en attente depuis <n> tours
 /code-review <chemins>
 /simplify <chemins>
 .claude/hooks/relire-en-attente.sh --vider <session_id>
-→ non lancées (elles t'appartiennent) ; <SUJET FINI, moment optimal | SUJET EN COURS, n arbitrage(s) ouvert(s)> ; <n> fichier(s) pertinent(s) [+ m exclu(s) : raison] en attente depuis <n> tours
 
 HOOK RAPPORT
 
