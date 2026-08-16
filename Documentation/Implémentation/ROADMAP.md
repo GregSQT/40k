@@ -527,11 +527,15 @@ mesure, et c'est assumé (§0.14).
    le pool de déplacement (`build_squad_move_cell_map` → `erode_move_pool_by_squad_block` →
    `geodesic_move_reach`) pèse **29 % d'une partie d'évaluation** ; c'est du calcul dérivé, donc
    optimisable sous verrou d'empreinte `step.log`. Décision du 2026-08-16 : non lancé.
-   ⏳ **`scripts/bench_shortlist.py` à écrire** (§13.1) : compare les décisions `_DoctrineBot` à
+   ✅ **`scripts/bench_shortlist.py` livré le 2026-08-16** (§13.1) : compare les décisions `_DoctrineBot` à
    `DESTINATION_SHORTLIST ∈ {8, 12, 24}` vs référence=24, en divergence directe (pas win-rate).
+   3 scénarios (asymmetric/balanced/exposed), 4 bots avec terme de tir actif (AttritionBot, DecapitationBot,
+   EndgameBot, ScorerBot). Mesure sur 200 épisodes/scénario, graine 42 : K=8 → **8,5 %** de divergence
+   moyenne, K=12 → **5,7 %** ; pic à 12 % dans le scénario `exposed` (my_range << enemy_range).
+   RacerBot et AlphaStrikeBot exclus automatiquement (w_fire=w_risk=0, shortlist inactive).
+   Couvert par `tests/unit/scripts/test_bench_shortlist.py` (8 tests : 4 invariants).
    **Restent** : le réglage de `w_contest`/`w_crowd` (posés, non réglés), l'étape 7
-   (correspondance puis suppression des cinq anciens), l'étape 8 rejouée après réglage, et le bench
-   shortlist ci-dessus.
+   (correspondance puis suppression des cinq anciens), l'étape 8 rejouée après réglage.
    ⚠️ Les chiffres des §8/§9 du doc de chantier sont **à rejouer** : échantillons insuffisants et
    une erreur d'arithmétique sur le `combined` (§11.1).
    ⚠️ **Ce point CONDITIONNE la valeur du point 7, il ne s'y ajoute pas.** Le panel actuel ne rend
