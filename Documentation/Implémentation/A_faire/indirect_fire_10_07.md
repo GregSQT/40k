@@ -175,7 +175,25 @@ limite T2 des ~5 fichiers.
 
 La résolution AVANT la décision : un type qu'on peut choisir mais que le moteur résout mal
 produirait des parties fausses, et l'agent apprendrait sur elles. Donc 1 → 2 → 3 → 4, chacun
-verrouillé par ses tests, PUIS 5, PUIS le retrain, PUIS 7 en lot séparé.
+verrouillé par ses tests, PUIS 5.
+
+⚠️ **La première version de cet ordre SAUTAIT la pièce 6** — elle écrivait « PUIS 5, PUIS le
+retrain, PUIS 7 », sans jamais placer le journal. Corrigé le 2026-08-16, et la place n'est pas
+indifférente :
+
+**6 vient AVANT le volet PvP de la pièce 5, et avant le retrain.** Le moteur résout désormais le
+tir indirect ; dès qu'un joueur humain pourra le CHOISIR, il produira des lignes
+`Hit 6(3+->6+)` où rien ne dira si le 6 vient de la règle ou de la datasheet, ni si le couvert
+était octroyé ou géométrique. C'est le motif « règle faussement morte » que le lot A du
+2026-08-12 a fermé partout ailleurs, et le rouvrir ici serait une régression de méthode. C'est en
+PvP que la règle sera réellement jouée : les rosters tyranides y existent.
+
+⚠️ Nuance à ne pas surestimer : l'argument « 6 avant le retrain » est FAIBLE pris seul. Aucun
+roster d'ArmageddonAgent ne porte d'arme [INDIRECT FIRE], donc le masque n'ouvrira jamais les 20
+slots indirects pendant l'entraînement, et ce run-là n'aurait rien à journaliser (cf. §8). Ce qui
+justifie l'ordre, c'est le PvP — pas le retrain.
+
+Ordre retenu : **1 → 2 → 3 → 4 → 5 (agent) → 6 → 5 (PvP) → retrain → 7 en lot séparé.**
 
 ## 5. Pièges nommés d'avance
 
