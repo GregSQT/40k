@@ -20,10 +20,13 @@ from __future__ import annotations
 
 import pytest
 
+from engine.phase_handlers import shared_utils as SU
 from engine.phase_handlers.shared_utils import (
     SHOOTING_TYPE_ASSAULT,
     SHOOTING_TYPE_INDIRECT,
     SHOOTING_TYPE_NORMAL,
+    SQUAD_ACTION_SHOOT_INDIRECT_SLOT_BASE,
+    build_squad_action_mask,
     eligible_squad_shooting_types,
     resolve_squad_shooting_type,
     shooting_type_allows_weapon,
@@ -186,11 +189,61 @@ def test_cette_piece_ne_rend_l_indirect_selectionnable_par_personne():
     s'entraînerait. Cette pièce ne fait qu'AJOUTER un type à un ensemble consultatif ; le type
     RETENU, celui que le moteur résout réellement, ne doit pas avoir bougé d'un iota.
 
-    Le jour où la pièce « décision » câble le choix, ce test devient ROUGE et doit être remplacé
-    par son inverse — c'est exactement ce qu'on attend de lui.
+    Ce test reste VERT même une fois la pièce « décision » câblée : il appelle
+    `resolve_squad_shooting_type` directement, sans poser de choix via
+    `squad_shooting_type_choose`. Seul un test qui pose le choix puis vérifie la résolution
+    deviendrait ROUGE — et devrait alors être remplacé par son inverse.
     """
     gs = _gs([INDIRECT])
 
     assert resolve_squad_shooting_type(gs, "1") == SHOOTING_TYPE_NORMAL, (
         "le type RETENU doit rester 10.04 normal : rien ne choisit encore l'indirect"
+    )
+
+
+def test_slot_indirect_masque_si_ennemi_verrouille_par_un_allie(monkeypatch):
+    """Le garde locked_by_ally de la boucle INDIRECT est symétrique au garde du tir normal.
+
+    Ennemi E bord-à-bord d'un allié A : le slot indirect de E doit rester à 0 même si l'arme
+    peut l'atteindre. Sans le garde, `_squad_can_shoot_target_under_type` retournerait True et
+    le slot s'ouvrirait — permettant à l'agent de tirer à travers le corps à corps de ses alliés.
+
+    Double monkeypatch pour isoler le garde :
+    - `_squad_can_shoot_target_under_type` → True : l'arme atteindrait E sans le garde.
+    - `_model_can_shoot_target_with_weapon` → False : slots normaux fermés, seul le chemin
+      indirect est exercé ; évite aussi les KeyError de géométrie sur les modèles légers de _gs.
+    """
+    monkeypatch.setattr(SU, "_squad_can_shoot_target_under_type", lambda gs, sid, esid, t: True)
+    monkeypatch.setattr(SU, "_model_can_shoot_target_with_weapon", lambda gs, m, esid, widx: False)
+
+    # Allié "2" en (300, 299) : 1 colonne de l'ennemi "101" (300, 300) — dans l'EZ de 5.
+    ally_pos = (300, 299)
+    gs = _gs([INDIRECT])
+    # Ajoute l'allié dans units_cache et squad_models.
+    gs["units_cache"]["2"] = {
+        "col": ally_pos[0], "row": ally_pos[1], "player": 0,
+        "BASE_SHAPE": "round", "BASE_SIZE": 6, "occupied_hexes": {ally_pos},
+        "occupied_hexes_by_model": {"2#0": ally_pos},
+        "floor_height_by_model": {"2#0": 0.0},
+    }
+    gs["squad_models"]["2"] = ["2#0"]
+    gs["models_cache"]["2#0"] = {
+        "id": "2#0", "squad_id": "2", "player": 0,
+        "col": ally_pos[0], "row": ally_pos[1],
+        "RNG_WEAPONS": [], "CC_WEAPONS": [], "unit_keywords": [],
+    }
+
+    slot_map = ["101", None, None, None, None]
+    mask = build_squad_action_mask(gs, "1", enemy_slot_ids=slot_map)
+
+    assert mask[SQUAD_ACTION_SHOOT_INDIRECT_SLOT_BASE] == 0, (
+        "ennemi dans l'EZ d'un allié : slot indirect doit rester fermé"
+    )
+
+    # Contre-épreuve : sans allié, le slot s'ouvre (monkeypatch retourne True).
+    del gs["units_cache"]["2"]
+    mask_sans_allie = build_squad_action_mask(gs, "1", enemy_slot_ids=slot_map)
+
+    assert mask_sans_allie[SQUAD_ACTION_SHOOT_INDIRECT_SLOT_BASE] == 1, (
+        "sans allié bord-à-bord : le slot indirect doit s'ouvrir"
     )

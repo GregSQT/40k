@@ -53,6 +53,7 @@ from engine.spatial_relations import (  # noqa: F401  (ré-export)
     entry_footprint,
     entry_is_on_battlefield,
     require_entry_on_battlefield,
+    unit_entries_within_engagement_zone,
 )
 from engine.combat_utils import (
     get_unit_coordinates,
@@ -12464,6 +12465,25 @@ def build_squad_move_cell_map(
     return result
 
 
+def _target_locked_by_ally(
+    units_cache: Dict[str, Any],
+    enemy_entry: Dict[str, Any],
+    squad_id: str,
+    our_player: int,
+    ez: int,
+) -> bool:
+    """True si l ennemi est en zone d engagement d au moins un allie du tireur (10.09).
+
+    Predique partage par les boucles de masque tir normal (10.04/10.05/10.06) et indirect (10.07).
+    """
+    for _sid, e in entries_on_battlefield(units_cache, exclude_id=squad_id):
+        if int(e["player"]) != our_player:
+            continue
+        if unit_entries_within_engagement_zone(enemy_entry, e, ez):
+            return True
+    return False
+
+
 def build_squad_action_mask(
     game_state: Dict[str, Any],
     squad_id: str,
@@ -12578,13 +12598,11 @@ def build_squad_action_mask(
         # `not has_advanced and not in_er`, qui fermait le tir sans regarder les armes et
         # supprimait donc deux types de tir entiers pour l agent (cf. resolve_squad_shooting_type).
         shooting_type = resolve_squad_shooting_type(game_state, squad_id)
+        ez = get_engagement_zone(game_state)
         if shooting_type is not None:
             for slot_i, esid in enumerate(enemy_slot_ids):
                 if esid is None or esid not in units_cache:
                     continue
-                # Ennemi verrouille par un allie (bord-a-bord) => pas ciblable au tir.
-                from engine.spatial_relations import unit_entries_within_engagement_zone
-                ez = get_engagement_zone(game_state)
                 # `esid not in units_cache` vient d'être écarté juste au-dessus (slot d'ennemi
                 # mort = contrat du masque) : l'entrée existe, les deux `is not None` qui
                 # suivaient étaient morts — et le second aurait sauté le contrôle « verrouillé
@@ -12594,14 +12612,7 @@ def build_squad_action_mask(
                 # le slot reste dans l'observation, le masque le ferme.
                 if not entry_is_on_battlefield(enemy_entry):
                     continue
-                locked_by_ally = False
-                for sid, e in entries_on_battlefield(units_cache, exclude_id=squad_id):
-                    if int(e["player"]) != our_player:
-                        continue
-                    if unit_entries_within_engagement_zone(enemy_entry, e, ez):
-                        locked_by_ally = True
-                        break
-                if locked_by_ally:
+                if _target_locked_by_ally(units_cache, enemy_entry, squad_id, our_player, ez):
                     continue
                 models_cache = game_state.get("models_cache", {})  # get allowed
                 can_any_hit = False
@@ -12629,7 +12640,12 @@ def build_squad_action_mask(
         # identiques, donc l action indirecte inutile.
         if SHOOTING_TYPE_INDIRECT in eligible_squad_shooting_types(game_state, squad_id):
             for slot_i, esid in enumerate(enemy_slot_ids):
-                if esid is None:
+                if esid is None or esid not in units_cache:
+                    continue
+                enemy_entry = units_cache[esid]
+                if not entry_is_on_battlefield(enemy_entry):
+                    continue
+                if _target_locked_by_ally(units_cache, enemy_entry, squad_id, our_player, ez):
                     continue
                 if _squad_can_shoot_target_under_type(
                     game_state, squad_id, esid, SHOOTING_TYPE_INDIRECT
