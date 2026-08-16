@@ -54,6 +54,37 @@ def test_get_hex_neighbors_even_and_odd_columns() -> None:
     assert (4, 3) in odd_neighbors   # odd NE
 
 
+def test_get_hex_neighbors_fast_path_matches_normalized_path() -> None:
+    """Le chemin rapide entier de `get_hex_neighbors` ne doit RIEN changer d'observable.
+
+    Il interroge le cache avec la cle brute avant de normaliser (boucle interne des BFS du
+    moteur). Ce test epingle les trois familles d'entrees que la normalisation seule traitait :
+    un `float` entier, un `float` a tronquer et une chaine doivent rendre EXACTEMENT le meme
+    voisinage, dans le meme ordre, que l'entier correspondant.
+    """
+    reference = get_hex_neighbors(3, 4)
+    assert get_hex_neighbors(3.0, 4.0) == reference
+    assert get_hex_neighbors(3.7, 4) == reference  # int(3.7) == 3, jamais un arrondi a 4
+    assert get_hex_neighbors("3", "4") == reference
+    # Meme controle sur une colonne PAIRE : le voisinage depend de la parite, un chemin rapide
+    # qui se tromperait de cle ne se verrait pas sur une seule parite.
+    assert get_hex_neighbors(2.0, 3.0) == get_hex_neighbors(2, 3)
+    assert get_hex_neighbors(3, 4) is reference  # cache hit : retourne le meme objet, chemin rapide
+
+
+def test_get_hex_neighbors_rejects_unhashable_with_the_normalizer_error() -> None:
+    """Une coordonnee non normalisable leve l'erreur du NORMALISEUR, pas celle du cache.
+
+    Verrou du garde `type(...) is int` : sans lui, la cle brute partirait dans un `dict.get`
+    et un type non hashable leverait « unhashable type », masquant le diagnostic explicite de
+    `normalize_coordinate` sur lequel les appelants s'appuient.
+    """
+    with pytest.raises(TypeError, match=r"Invalid coordinate type"):
+        get_hex_neighbors([1], 2)
+    with pytest.raises(TypeError, match=r"Invalid coordinate type"):
+        get_hex_neighbors(1, {"row": 2})
+
+
 def test_normalize_coordinate_and_coordinates_error_paths() -> None:
     assert normalize_coordinate("5.0") == 5
     assert normalize_coordinates("7", 8.0) == (7, 8)

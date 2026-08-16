@@ -320,9 +320,21 @@ LONG_PROFILE_EPISODES = {"x1_long": 50_000, "x5_long": 200_000}
 #: 2026-08-11 : `x1` est descendu de 100 à 10. C'est la BASE DE DÉVELOPPEMENT (ROADMAP §1 pt 6 /
 #: V11 §0.70) — son éval finale est du MONITORING, pas une mesure : à 10 épisodes par bot,
 #: l'erreur-type de l'écart entre deux win-rates `combined` vaut ≈ 0,707/√(6 × 10) = 9,1 points,
-#: donc aucun écart réaliste n'en sort. Le chiffre publié vient de `x1_long` (600), et de rien
-#: d'autre.
+#: donc aucun écart réaliste n'en sort. Le chiffre publié vient de `x1_long` (300 depuis le
+#: 2026-08-16, voir LONG_PROFILE_BOT_EVAL_FINAL), et de rien d'autre.
 REFERENCE_BOT_EVAL_FINAL = {"x1": 10, "x5_new": 100}
+
+#: `bot_eval_final` ATTENDU de chaque profil `_long`. Table PAR PROFIL depuis le 2026-08-16 :
+#: c'était une constante commune à 600, mais x1_long est descendu à 300 et x5_long ne l'a pas
+#: suivi. Ce n'est pas une dérive — c'est le seul des deux qui ait été CHRONOMÉTRÉ. Mesure du
+#: 2026-08-16 sur x1_long : 2,76 s par épisode d'évaluation en temps mural à `bot_eval_n_workers`
+#: 12 sur 8 cœurs physiques (3 répétitions alternées, dispersion < 2 %), donc 6 × 300 = 1800
+#: épisodes ≈ 1 h 23 pour l'éval finale, contre ≈ 2 h 46 à 600. L'erreur-type d'un win-rate
+#: autour de 0,5 vaut 0,5/√n : 2,0 points à 600, 2,9 à 300 — 0,9 point échangé contre la moitié
+#: du coût. x5_long garde 600 faute de mesure : lui appliquer le chiffre de x1_long supposerait
+#: que le plateau x5 coûte la même chose par épisode, ce que personne n'a vérifié. Le détail est
+#: dans `bot_eval_final_normal` de chaque profil, seule source.
+LONG_PROFILE_BOT_EVAL_FINAL = {"x1_long": 300, "x5_long": 600}
 
 #: Fenêtre du score robuste de chaque profil `_long`. Elle DÉPEND de la longueur du run, et pas
 #: par convention : la fenêtre glisse sur les points de mesure, donc `total // freq - window + 1`
@@ -396,11 +408,13 @@ def test_long_profile_is_its_reference_recalibrated(ref_name: str, long_name: st
         "l'unité à 100 ép./bot, commit 42326ed0), sur un run mesuré à ~20 h (4 h 01 pour 10 000 "
         "épisodes, ROADMAP §1 pt 6, run du 2026-08-10)."
     )
-    # `bot_eval_final` est un nombre d'épisodes PAR BOT, et x1_long est le run de MESURE : son
-    # win-rate final est le chiffre publié, donc sa précision fait partie du livrable. 600 divise
-    # l'erreur-type par √6 (5,0 → 2,0 points autour de 0,5) pour un coût payé UNE fois en fin de
-    # run ; le détail du calcul et du coût est dans `bot_eval_final_normal` du JSON, seule source.
-    assert long_cb["bot_eval_final"] == 600
+    # `bot_eval_final` est un nombre d'épisodes PAR BOT, et un profil `_long` est un run de
+    # MESURE : son win-rate final est le chiffre publié, donc sa précision fait partie du
+    # livrable. L'erreur-type d'un win-rate autour de 0,5 vaut 0,5/√n — 5,0 points à 100,
+    # 2,9 à 300, 2,0 à 600. La valeur n'est plus commune aux deux couples depuis le 2026-08-16
+    # (cf. LONG_PROFILE_BOT_EVAL_FINAL) : x1_long est passé à 300 sur un coût CHRONOMÉTRÉ, x5_long
+    # garde 600 faute de mesure. Le détail est dans `bot_eval_final_normal` du JSON, seule source.
+    assert long_cb["bot_eval_final"] == LONG_PROFILE_BOT_EVAL_FINAL[long_name]
     assert ref_cb["bot_eval_final"] == REFERENCE_BOT_EVAL_FINAL[ref_name]
     # Corollaire OBLIGATOIRE de la ligne précédente : le timeout porte sur un TASK, et un task
     # joue `bot_eval_final / nb_scenarios` épisodes en séquence. ×6 sur `bot_eval_final` = ×6 sur
@@ -413,7 +427,7 @@ def test_long_profile_is_its_reference_recalibrated(ref_name: str, long_name: st
     # `bot_eval_intermediate` est un nombre d'épisodes PAR BOT payé à CHAQUE éval intermédiaire :
     # son coût se rapporte à la durée du run, donc il en dépend au même titre que `bot_eval_freq`.
     # x1_long : 5 évals × 100 ép./bot ≈ 1 h 05 (13 min l'unité, commit 42326ed0), plus l'éval
-    # FINALE à 600 ép./bot (~1 h 20, payée une fois) — soit ~2 h 25 pour un run mesuré à ~20 h
+    # FINALE à 300 ép./bot (≈ 1 h 23, payée une fois) — soit ≈ 2 h 28 pour un run mesuré à ~20 h
     # (4 h 01 pour 10 000 épisodes, ROADMAP §1 pt 6). ~12 % du budget machine : la précision du
     # suivi est payée sur un run qui la porte. ⚠️ La durée d'entraînement vient de cette MESURE et
     # non du « 0.1 s/ep → 36k ép./h » que répètent les notes `total_episodes_normal` de la config :

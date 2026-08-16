@@ -1662,6 +1662,15 @@ mouvement (jusqu'à 458 par décision), l'ancien panel ne l'appelait pas.
 (`config/agents/ArmageddonAgent/ArmageddonAgent_training_config.json`). Deux evals simultanées
 chargeraient 24 workers sur 16 cœurs ; 8 par profil serait plus sûr.
 
+> **Mesuré le 2026-08-16, et le « 8 par profil » ci-dessus est périmé.** Pente en s/épisode,
+> initialisation exclue, 3 répétitions alternées : 4 workers 4,854 — 12 workers 2,875 — 16 workers
+> 2,521 — 24 workers 2,715. `x1` et `x1_long` sont passés à **16** ; `x1_new_bots` reste à 12,
+> faute d'avoir été mesuré sur ses propres tailles d'évaluation. Attention, les 16 « cœurs » de
+> cette machine sont **8 cœurs physiques** hyperthreadés (i9-13900H) : le plafond de parallélisme
+> mesuré sur du calcul pur y est de ~6,5×, et l'évaluation en atteint déjà 5,75×, soit ~88 %. La
+> réserve sur deux evals simultanées reste donc entièrement valable — c'est la marge de la machine
+> qui est faible, pas le réglage qui est trop haut.
+
 **⏳ Travail restant — benchmark `DESTINATION_SHORTLIST`** :
 
 `scripts/bench_shortlist.py` n'existe pas encore. Il doit :

@@ -502,7 +502,31 @@ mesure, et c'est assumé (§0.14).
    Contexte : `x1_new_bots` prenait 464 min pour 3600 épisodes (vs 79 min pour `x1_long`) — ratio
    5,9× causé par `w_crowd`. La barre de progression `--test-only` ne s'affichait qu'à la fin dans
    le chemin parallèle ; corrigé via callback `on_result` dans `_collect_parallel_results_with_timeouts`.
-   `bot_eval_n_workers` porté à 12 (config ArmageddonAgent). Perf après cache : non encore mesuré.
+   `bot_eval_n_workers` porté à 12 (config ArmageddonAgent), puis à **16 le 2026-08-16** sur mesure
+   (voir ci-dessous).
+   ✅ **Coût d'évaluation mesuré le 2026-08-16**, ce qui clôt le « non encore mesuré » ci-dessus.
+   Pente en s/épisode, initialisation exclue par ajustement à deux tailles, 3 répétitions
+   alternées, sur 8 cœurs physiques : **4 workers 4,854 — 12 workers 2,875 — 16 workers 2,521 —
+   24 workers 2,715**. `bot_eval_n_workers` passe donc à 16 sur `x1` **et** `x1_long` (les deux :
+   le test `test_long_profile_is_its_reference_recalibrated` exige qu'ils coïncident, et 4 était
+   simplement moins bon). Au-delà de 16 la contention l'emporte ; l'évaluation atteint là 5,75× son
+   débit série contre un plafond de ~6,5× mesuré sur du calcul pur, soit **~88 % de ce que cette
+   machine peut rendre — il n'y a pas de parallélisme à récupérer**. Trois pistes ont été mesurées
+   puis ABANDONNÉES : les adversaires (mélange d'entraînement 14,2 s/partie contre 15,5 s pour
+   celui d'évaluation, 8 % d'écart), `torch.compile` sur l'extracteur (0,6 % d'écart pour 1,4 % de
+   dispersion — clé `bot_eval_torch_compile_cpu` retirée des 4 profils qui la portaient), et
+   l'inférence par lot (3,2 ms sur un pas de 104 ms, soit 3 % : vectoriser l'évaluation
+   rapporterait ~2 %). ⚠️ **Les coûts d'évaluation notés dans la config étaient faux d'un facteur
+   ~2** (ils dérivaient des 13 min/100 ép. du commit 42326ed0, d'avant la refonte d'observation
+   V11) : l'éval finale de `x1_long` valait ~2 h 46 et non ~1 h 20, les intermédiaires ~2 h 18 et
+   non ~1 h 05. `bot_eval_final` est passé de 600 à 300 (erreur-type 2,0 → 2,9 points), ramenant le
+   budget d'évaluation de ce profil de ~5 h 04 à ~3 h 41. Les notes du JSON sont recalées ; le
+   « 79 min pour 3600 épisodes » cité plus haut n'est PAS corrigé — il date d'un autre modèle, et
+   le coût d'une partie dépend de la qualité du jeu (un modèle entraîné garde ses unités en vie :
+   141 pas gym par partie contre 99 pour une politique neuve). ⏳ **Reste identifié, non traité** :
+   le pool de déplacement (`build_squad_move_cell_map` → `erode_move_pool_by_squad_block` →
+   `geodesic_move_reach`) pèse **29 % d'une partie d'évaluation** ; c'est du calcul dérivé, donc
+   optimisable sous verrou d'empreinte `step.log`. Décision du 2026-08-16 : non lancé.
    ⏳ **`scripts/bench_shortlist.py` à écrire** (§13.1) : compare les décisions `_DoctrineBot` à
    `DESTINATION_SHORTLIST ∈ {8, 12, 24}` vs référence=24, en divergence directe (pas win-rate).
    **Restent** : le réglage de `w_contest`/`w_crowd` (posés, non réglés), l'étape 7
