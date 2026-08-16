@@ -143,12 +143,15 @@ def _game_state(weapon_rules, *, moved_inches=0.0, target=TARGET, n_attacks=1,
 def _engine_shoot_log(monkeypatch, weapon_rules, rolls, *, moved_inches=0.0, target=TARGET,
                       n_attacks=1, unit_rules=(), cover=False, unit_type=UNIT_TYPE,
                       weapon_name=WEAPON_NAME, target_models=1, melee=False,
-                      target_keywords=()):
+                      target_keywords=(), units_advanced=False, engaged=False):
     """Fait jouer UNE attaque par le vrai moteur et rend (game_state, son action_log).
 
     `melee=True` passe par `build_manual_fight_allocation` — le MÊME émetteur de log
     (`_emit_squad_shoot_log`) et le même `_build_shot_details`, ce qui est précisément ce qu'on
     veut exercer : un token écrit d'un seul côté du miroir tir/mêlée ne se verrait pas ici.
+
+    `units_advanced=True` place le squad attaquant dans `units_advanced` (10.05 — ASSAULT).
+    `engaged=True` monkeypatch `_squad_is_in_enemy_er` pour simuler l'engagement (10.06 — CLOSE-QUARTERS).
     """
     seq = list(rolls)
 
@@ -168,6 +171,11 @@ def _engine_shoot_log(monkeypatch, weapon_rules, rolls, *, moved_inches=0.0, tar
                      unit_type=unit_type, weapon_name=weapon_name,
                      target_models=target_models, melee=melee,
                      target_keywords=target_keywords)
+    if units_advanced:
+        gs["units_advanced"] = {"1"}
+    if engaged:
+        from engine.phase_handlers import shared_utils as _su
+        monkeypatch.setattr(_su, "_squad_is_in_enemy_er", lambda _gs, sid: sid == "1")
     if melee:
         build_manual_fight_allocation(gs, "1")
     else:
@@ -1089,16 +1097,26 @@ def test_l_entete_declare_la_grammaire_du_journal(tmp_path):
 #: token n'y est jamais posé — la BRANCHE existe (même table partagée), c'est sa CONDITION qui
 #: ne peut pas être vraie. Le test de contre-épreuve couvre les deux faces dans tous les cas.
 LOT_A_TOKENS = [
-    ("TORRENT", "[TORRENT]", [4, 2], {}, True),
-    ("LETHAL_HITS", "[LETHAL HITS]", [6, 2], {}, True),
-    ("IGNORES_COVER", "[IGNORES COVER]", [3, 4, 2], {}, True),
-    ("EXTRA_ATTACKS", "[EXTRA ATTACKS]", [3, 4, 2], {}, True),
-    ("PSYCHIC", "[PSYCHIC]", [3, 4, 2], {"cover": True}, False),
+    # (règle, token, dés, kwargs_presence, joue_en_melee, counter_proof_kwargs)
+    # `counter_proof_kwargs=None` → utiliser les mêmes kwargs que le test de présence.
+    # `counter_proof_kwargs={}` → pas de setup d'état d'unité pour la contre-épreuve
+    # (cas ASSAULT / CLOSE_QUARTERS dont l'état est dans le game_state, pas dans l'arme).
+    ("TORRENT", "[TORRENT]", [4, 2], {}, True, None),
+    ("LETHAL_HITS", "[LETHAL HITS]", [6, 2], {}, True, None),
+    ("IGNORES_COVER", "[IGNORES COVER]", [3, 4, 2], {}, True, None),
+    ("EXTRA_ATTACKS", "[EXTRA ATTACKS]", [3, 4, 2], {}, True, None),
+    ("PSYCHIC", "[PSYCHIC]", [3, 4, 2], {"cover": True}, False, None),
     ("ANTI_INFANTRY:4", "[ANTI-INFANTRY:4+]", [3, 4, 2],
-     {"target_keywords": ("INFANTRY",)}, True),
+     {"target_keywords": ("INFANTRY",)}, True, None),
+    # [ASSAULT] 24.04 : règle d'éligibilité 10.05 — arme [ASSAULT] + unité ayant avancé.
+    # Contre-épreuve : arme SANS règle, unité NON avancée → pas d'état exceptionnel requis.
+    ("ASSAULT", "[ASSAULT]", [3, 4, 2], {"units_advanced": True}, False, {}),
+    # [CLOSE-QUARTERS] 24.07 : règle d'éligibilité 10.06 — arme [CLOSE_QUARTERS] + unité engagée.
+    # Contre-épreuve : arme SANS règle, unité NON engagée → pas d'état exceptionnel requis.
+    ("CLOSE_QUARTERS", "[CLOSE-QUARTERS]", [3, 4, 2], {"engaged": True}, False, {}),
 ]
 
-_LOT_A_IDS = [rule.split(":")[0] for rule, _, _, _, _ in LOT_A_TOKENS]
+_LOT_A_IDS = [e[0].split(":")[0] for e in LOT_A_TOKENS]
 
 #: Paire (unité, arme) RÉELLE de MÊLÉE. Le décor de tir par défaut porte une arme de TIR : la
 #: rejouer en mêlée fait remonter `missing CC_NB` à l'analyzer, donc des `parse_errors` qui
@@ -1107,13 +1125,14 @@ MELEE_KWARGS: dict[str, Any] = {"unit_type": CLEAVE_UNIT, "weapon_name": CLEAVE_
 
 
 @pytest.mark.parametrize("melee", [False, True], ids=["tir", "melee"])
-@pytest.mark.parametrize("rule,token,rolls,kwargs,melee_ok", LOT_A_TOKENS, ids=_LOT_A_IDS)
+@pytest.mark.parametrize("rule,token,rolls,kwargs,melee_ok,counter_proof_kwargs", LOT_A_TOKENS,
+                         ids=_LOT_A_IDS)
 def test_le_token_du_lot_a_atteint_step_log(monkeypatch, tmp_path, melee, rule, token, rolls,
-                                            kwargs, melee_ok):
+                                            kwargs, melee_ok, counter_proof_kwargs):
     """Maillons 1-3, les DEUX faces du miroir : le token que l'analyzer et le replay
     cherchent doit être présent sur la ligne réellement écrite par le StepLogger."""
     if melee and not melee_ok:
-        pytest.skip("24.29 n'a rien à neutraliser en mêlée (13.08 est ranged-only)")
+        pytest.skip("règle ranged-only : pas de token en mêlée")
     extra = dict(MELEE_KWARGS) if melee else {}
     gs, raw_log = _engine_shoot_log(monkeypatch, [rule], rolls, melee=melee, **kwargs, **extra)
     line = _step_log_line(tmp_path, gs, raw_log)
@@ -1122,15 +1141,22 @@ def test_le_token_du_lot_a_atteint_step_log(monkeypatch, tmp_path, melee, rule, 
 
 
 @pytest.mark.parametrize("melee", [False, True], ids=["tir", "melee"])
-@pytest.mark.parametrize("rule,token,rolls,kwargs,melee_ok", LOT_A_TOKENS, ids=_LOT_A_IDS)
+@pytest.mark.parametrize("rule,token,rolls,kwargs,melee_ok,counter_proof_kwargs", LOT_A_TOKENS,
+                         ids=_LOT_A_IDS)
 def test_sans_la_regle_le_token_du_lot_a_est_absent(monkeypatch, tmp_path, melee, rule, token,
-                                                    rolls, kwargs, melee_ok):
+                                                    rolls, kwargs, melee_ok, counter_proof_kwargs):
     """Contre-épreuve OBLIGATOIRE : une arme SANS la règle ne doit rien dire.
 
     Sans elle, un token posé inconditionnellement passerait le test ci-dessus tout en étant un
-    faux positif pour tout lecteur — le mode d'échec historique de ce chantier."""
+    faux positif pour tout lecteur — le mode d'échec historique de ce chantier.
+
+    `counter_proof_kwargs` remplace `kwargs` quand il est non-None : pour ASSAULT et
+    CLOSE_QUARTERS, l'état d'unité (advance/engagement) est dans le game_state, pas dans
+    les règles de l'arme ; la contre-épreuve teste « arme SANS règle, état neutre → pas de
+    token », ce qui prouve que le token ne vient ni de l'état ni de rien d'autre."""
     extra = dict(MELEE_KWARGS) if melee else {}
-    gs, raw_log = _engine_shoot_log(monkeypatch, [], rolls, melee=melee, **kwargs, **extra)
+    _ck = counter_proof_kwargs if counter_proof_kwargs is not None else kwargs
+    gs, raw_log = _engine_shoot_log(monkeypatch, [], rolls, melee=melee, **_ck, **extra)
     line = _step_log_line(tmp_path, gs, raw_log)
 
     assert token not in line, f"token posé sans que l'arme déclare {rule} : {line}"
@@ -1261,54 +1287,30 @@ def test_un_seuil_anti_sous_2_leve_a_l_entree_du_moteur():
         anti_rule_of(weapon)
 
 
-def test_assault_et_close_quarters_sont_hors_garantie_de_grammaire(monkeypatch, tmp_path):
-    """`LOG_GRAMMAR_VERSION = 3` promet que toute règle de la SÉQUENCE D'ATTAQUE qui a joué est
-    nommée. Ce test tient la BORNE de cette promesse, qui n'était que de la prose.
+def test_assault_dans_les_details_du_pont(monkeypatch, tmp_path):
+    """Preuve par le VRAI pont (`_build_shot_details`) que `assault_applied` est bien posé
+    quand l'unité a avancé et que l'arme est [ASSAULT].
 
-    [ASSAULT] 24.04 et [CLOSE-QUARTERS] 24.07 sont des règles d'ÉLIGIBILITÉ (10.05 / 10.06) :
-    elles décident qui peut tirer, pas ce qu'une attaque fait. `ai/step_logger.py` sait rendre
-    leurs deux tokens, mais aucun producteur n'écrit `assault_applied` / `close_quarters_applied`
-    — mesuré le 2026-08-16 : un lecteur, zéro écrivain. Elles sont donc HORS de la garantie, et
-    un lecteur qui l'appliquerait à elles refuserait un journal parfaitement sain.
-
-    Pourquoi ce test et pas un commentaire : une version de grammaire autorise un lecteur à
-    traiter une absence comme une PANNE. Une exception non vérifiée à cette autorisation se
-    périme en silence — dans les deux sens. Le jour où quelqu'un câble le producteur (cf. le
-    prompt du 2026-08-16), ce test devient ROUGE et force à retirer l'exception des trois
-    endroits qui la déclarent : ici, `ai/step_logger.LOG_GRAMMAR_VERSION` et
-    `Documentation/Implémentation/Replay.md` §2.3quater.
-
-    La constatation passe par le VRAI pont (`_build_shot_details`), pas par un grep : c'est
-    l'absence de la clé dans les détails RÉELLEMENT construits qui rend le token inatteignable.
+    Symétrique de l'ancien test « hors garantie de grammaire » (supprimé le 2026-08-16 avec
+    le câblage du producteur) : la clé DOIT désormais être présente, et c'est ce token dans
+    les détails qui rend [ASSAULT] atteignable dans step.log.
     """
-    from engine.w40k_core import W40KEngine
-
-    gs, raw_log = _engine_shoot_log(monkeypatch, ["ASSAULT"], [3, 4, 2])
+    gs, raw_log = _engine_shoot_log(monkeypatch, ["ASSAULT"], [3, 4, 2], units_advanced=True)
     bridge = _Bridge(gs)
     details = bridge._build_shot_details(raw_log, raw_log["shootDetails"][0], 1, None)
 
-    assert "assault_applied" not in details, (
-        "un producteur écrit désormais `assault_applied` : le token [ASSAULT] est atteignable, "
-        "donc ASSAULT n'est plus une exception à la garantie de grammaire — mettre à jour "
-        "LOG_GRAMMAR_VERSION et Replay.md §2.3quater"
+    assert details.get("assault_applied") is True, (
+        "`assault_applied` doit être posé par le pont quand l'unité a avancé "
+        f"et que l'arme déclare ASSAULT : {details}"
     )
-    assert "close_quarters_applied" not in details, (
-        "idem pour CLOSE_QUARTERS — voir le message ci-dessus"
-    )
-    # VERT VACANT : les deux assertions ci-dessus passeraient aussi sur un `details` vide ou
-    # sur une chaîne rompue. On atteste que le pont a bien travaillé sur CETTE attaque.
+    # VERT VACANT : attester que le pont a bien travaillé.
     assert details["hit_roll"] == 3 and details["hit_target"] == 3, details
-    # Et la conséquence observable, celle que le lecteur du journal constate.
     line = _step_log_line(tmp_path, gs, raw_log)
-    assert "[ASSAULT]" not in line, line
-    assert "[CLOSE-QUARTERS]" not in line, line
-    # Contre-épreuve : la même ligne PORTE bien les tokens de la séquence d'attaque, eux. Sans
-    # ça, ce test attesterait « aucun token nulle part », ce qui ne borne plus rien.
-    assert "Hit 3(3+)" in line and "Wound 4(4+)" in line, line
+    assert "[ASSAULT]" in line, line
 
 
 @pytest.mark.parametrize("melee", [False, True], ids=["tir", "melee"])
-def test_l_analyzer_accepte_les_lignes_porteuses_des_six_tokens(monkeypatch, tmp_path, melee):
+def test_l_analyzer_accepte_les_lignes_porteuses_des_tokens_du_lot(monkeypatch, tmp_path, melee):
     """CONTRÔLE DE MASSE — un token que personne ne lit ne se livre pas.
 
     Ce lot ne produit AUCUN contrôle analyzer : il n'y a donc pas de compteur à vérifier. Ce
@@ -1319,7 +1321,7 @@ def test_l_analyzer_accepte_les_lignes_porteuses_des_six_tokens(monkeypatch, tmp
     lignes = []
     attendus = []
     extra = dict(MELEE_KWARGS) if melee else {}
-    for rule, token, rolls, kwargs, melee_ok in LOT_A_TOKENS:
+    for rule, token, rolls, kwargs, melee_ok, *_ in LOT_A_TOKENS:
         if melee and not melee_ok:
             continue
         gs, raw_log = _engine_shoot_log(

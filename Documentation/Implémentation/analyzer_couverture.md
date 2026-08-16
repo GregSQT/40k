@@ -177,7 +177,7 @@ l'écriture directe de `rule_choice`) :
 | `move_after_shooting` | `Unit N(c,r) MOVED AFTER SHOOTING [<CAPACITÉ>] from … to …` | nom de la capacité (obligatoire) |
 | `reactive_move` | `Unit N(c,r) REACTIVE MOVED [<CAPACITÉ>] from … to … [Roll: N] - trigger: Unit M->(c,r)` | jet, déclencheur ; **pas de `[MODELS:]` d'arrivée** |
 | `deploy_unit` | `Unit N(c,r) DEPLOYED from (-1,-1) to (c,r)` | sentinelle hors-table `(-1,-1)` (20.01) |
-| `shoot` | `Unit N(c,r) SHOT [RAPID FIRE:X] [MELTA:X] [BLAST:X] [EXTRA ATTACKS] [PRECISION] Unit M(c,r) with [<arme>] - Hit R(T+ ou base+->eff+) [HEAVY\|COVER] [TORRENT] [IGNORES COVER] [PSYCHIC] [REROLLED:n] [SUSTAINED HITS] [<CAPACITÉ>] - Wound R(T+) [LETHAL HITS] [ANTI-<KW>:Y+] [<CAPACITÉ>] [REROLLED:n] - Save R(T+) [REROLLED:n] [<CAPACITÉ>] - Dmg:NHP [HAZARDOUS] Roll:N` ; ou `Save [DEVASTATING WOUNDS]` | jets, seuils, tokens de règle |
+| `shoot` | `Unit N(c,r) SHOT [ASSAULT] [CLOSE-QUARTERS] [RAPID FIRE:X] [MELTA:X] [BLAST:X] [EXTRA ATTACKS] [PRECISION] Unit M(c,r) with [<arme>] - Hit R(T+ ou base+->eff+) [HEAVY\|COVER] [TORRENT] [IGNORES COVER] [PSYCHIC] [REROLLED:n] [SUSTAINED HITS] [<CAPACITÉ>] - Wound R(T+) [LETHAL HITS] [ANTI-<KW>:Y+] [<CAPACITÉ>] [REROLLED:n] - Save R(T+) [REROLLED:n] [<CAPACITÉ>] - Dmg:NHP [HAZARDOUS] Roll:N` ; ou `Save [DEVASTATING WOUNDS]` | jets, seuils, tokens de règle |
 | `hazardous` | `Unit N(c,r) SUFFERS X Mortal Wounds [HAZARDOUS]` / `… was DESTROYED [HAZARDOUS]` | MW infligées |
 | `charge` | `Unit N(c,r) CHARGED [<CAPACITÉ>] [FLY] Unit M(c,r) from … to … [Roll: N]` | jet 2D6 (pouces), `[FLY]`, **une seule** cible |
 | `charge_fail` | `Unit N(c,r) FAILED CHARGE to unit M(c,r) [Roll: N]` | jet |
@@ -187,16 +187,13 @@ l'écriture directe de `rule_choice`) :
 | `wait` | `Unit N(c,r) WAIT` | — |
 | `rule_choice` | `Unit N(c,r) chose [<NOM DE RÈGLE>]` | nom d'affichage |
 
-**Formateurs sans producteur** (code mort côté moteur) : `skip`, `shoot_summary`, `combat_summary`,
-et **deux TOKENS** : `[ASSAULT]` 24.04 et `[CLOSE-QUARTERS]` 24.07. `ai/step_logger.py` sait les
-rendre, depuis `details["assault_applied"]` / `details["close_quarters_applied"]` — mais rien
-n'écrit ces deux clés (mesuré le 2026-08-16 : un lecteur, zéro écrivain). Les deux tokens ne
-peuvent donc jamais apparaître, et la ligne `shoot` de §1.1 les annonçait jusqu'à cette date.
-⚠️ Ce n'est PAS un `NOT USED` de plus en §1.8 : `shoot_handler.py` re-dérive les deux usages au
-lieu de lire un token (`ASSAULT` depuis `units_advanced` + l'armurerie, `CLOSE_QUARTERS` depuis
-l'engagement). Le compteur est donc juste — au prix d'une SECONDE définition de chaque règle,
-hébergée par l'analyzer, exactement ce que les tokens du 2026-08-11/12 ont supprimé ailleurs.
-Conséquence directe : le contrôle §2.1 « Dead unit skipping » et tout `handle_skip`
+**Formateurs sans producteur** (code mort côté moteur) : `skip`, `shoot_summary`, `combat_summary`.
+`[ASSAULT]` 24.04 et `[CLOSE-QUARTERS]` 24.07 avaient le même statut jusqu'au 2026-08-16 — câblés
+le même jour (producteur dans `_emit_squad_shoot_log`, pont dans `_build_shot_details`, lecture de
+token dans `shoot_handler.py`). Leurs deux clés `assault_applied` / `close_quarters_applied` sont
+désormais posées à la création du groupe (`_build_manual_allocation`) ; l'analyzer lit le token au
+lieu de re-dériver depuis l'état. Verrouillé par `test_step_log_weapon_rule_tokens.py` (LOT A).
+Conséquence directe restante : le contrôle §2.1 « Dead unit skipping » et tout `handle_skip`
 (`shoot_handler.py`) sont inatteignables. Vérifié le 2026-08-10 sur
 `w40k_core._STEP_LOG_TYPE_MAP` (`:5211-5238`) : `skip` n'y figure pas.
 

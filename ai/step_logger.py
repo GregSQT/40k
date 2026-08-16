@@ -53,7 +53,7 @@ __all__ = ['StepLogger', 'LOG_GRAMMAR_VERSION']
 #:
 #: N incrementer que pour une garantie NOUVELLE, jamais pour un changement cosmetique : un
 #: lecteur qui refuse une version qu il ne connait pas doit avoir une raison de le faire.
-LOG_GRAMMAR_VERSION = 3
+LOG_GRAMMAR_VERSION = 4
 
 
 #: Regles qui AJOUTENT des des au pool d attaques et dont l effet depend de la CIBLE :

@@ -190,34 +190,32 @@ le convertir (× `inches_to_subhex`) avant de le comparer à une distance de gri
 antérieure, `2` = `[ALLOC_MODEL:]` sur toute attaque allouée, `3` = toute règle d'arme résolue par
 la **séquence d'attaque** (04/05 + 24) qui a JOUÉ est nommée sur la ligne — les six dernières
 muettes (`[TORRENT]`, `[LETHAL HITS]`, `[IGNORES COVER]`, `[EXTRA ATTACKS]`, `[ANTI-<KW>:Y+]`,
-`[PSYCHIC]`) y sont entrées d'un bloc, au tir comme en mêlée. Ligne absente ⇒ 1.
+`[PSYCHIC]`) y sont entrées d'un bloc, au tir comme en mêlée. `4` (2026-08-16) étend la garantie
+aux règles d'**éligibilité au tir** : `[ASSAULT]` 24.04 (10.05 — arme [ASSAULT] + avance) et
+`[CLOSE-QUARTERS]` 24.07 (10.06 — arme [CLOSE_QUARTERS] + engagement), posées dans les tags de
+ligne entre le verbe `SHOT` et la cible, comme `[RAPID FIRE:X]`. Ligne absente ⇒ 1.
 
-⚠️ Sous la grammaire 3, un compteur d'usage à zéro dit que la règle **n'a pas joué**, et non plus
+⚠️ Sous la grammaire 4, un compteur d'usage à zéro dit que la règle **n'a pas joué**, et non plus
 que le journal ne sait pas le dire. C'est toute la valeur de la version : le premier état se
 corrige côté analyzer, le second ne se corrigeait que côté moteur.
 
-⚠️ **La portée dit « séquence d'attaque » et non « toute règle d'arme », et ce n'est pas une
-nuance de style** : une garantie trop large ferait refuser un journal sain, exactement ce qu'un
-numéro de version doit empêcher. Trois règles en sont dehors, nommément :
+⚠️ **La portée dit « séquence d'attaque et éligibilité au tir » et non « toute règle d'arme »,
+et ce n'est pas une nuance de style** : une garantie trop large ferait refuser un journal sain,
+exactement ce qu'un numéro de version doit empêcher. Une règle reste dehors :
 
 | Règle | Pourquoi hors garantie |
 |---|---|
 | `INDIRECT_FIRE` 24.19 | Pas implémentée dans le moteur : aucune attaque n'en subit l'effet, un token annoncerait un effet qui n'a pas lieu |
-| `ASSAULT` 24.04 | Règle d'**éligibilité** (10.05) : elle décide qui peut tirer, pas ce qu'une attaque fait. La branche d'affichage existe (`assault_applied`) mais aucun producteur n'écrit la clé — mesuré le 2026-08-16, un lecteur, zéro écrivain |
-| `CLOSE_QUARTERS` 24.07 | Idem (10.06), via `close_quarters_applied` |
 
-Pour les deux dernières, `ai/analyzer_phases/shoot_handler.py` re-dérive l'usage depuis l'état
-(`units_advanced` + armurerie ; géométrie d'engagement) au lieu de lire un token — le compteur est
-juste, mais chaque règle a deux définitions. Le verrou
-`tests/unit/ai/test_step_log_weapon_rule_tokens.py::test_assault_et_close_quarters_sont_hors_garantie_de_grammaire`
-devient ROUGE le jour où un producteur apparaît : cette liste d'exceptions doit alors maigrir.
-
-⚠️ **Lecteurs à jeu de tokens FERMÉ** : ces six tokens sont accolés aux segments `Hit` et `Wound`
-(sauf `[EXTRA ATTACKS]`, qui vit dans les tags de ligne, avant la cible). Un lecteur qui traite
-tout token adjacent à un jet comme un nom de capacité d'unité les lira comme des capacités
-inexistantes — c'est le défaut déjà payé par `[R:+0.0]`. `replayParser.ts`
-(`NON_ABILITY_ROLL_TOKENS`, `ANTI_RULE_TOKEN`) a été étendu dans la même livraison ; l'analyzer,
-lui, lit `ACTION_ABILITY_TOKENS`, un motif OUVERT, et n'avait rien à changer.
+⚠️ **Lecteurs à jeu de tokens FERMÉ** : les six tokens du lot 3 sont accolés aux segments `Hit` et
+`Wound` (sauf `[EXTRA ATTACKS]`, qui vit dans les tags de ligne, avant la cible) ; `[ASSAULT]` et
+`[CLOSE-QUARTERS]` sont aussi dans les tags de ligne, avant la cible, comme `[RAPID FIRE:X]`. Un
+lecteur qui traite tout token adjacent à un jet comme un nom de capacité d'unité les lira comme des
+capacités inexistantes — c'est le défaut déjà payé par `[R:+0.0]`. `replayParser.ts`
+(`NON_ABILITY_ROLL_TOKENS`, `ANTI_RULE_TOKEN`) a été étendu lors de la livraison du lot 3 pour les
+tokens de segment ; `[ASSAULT]` et `[CLOSE-QUARTERS]` vivent dans les tags de ligne, hors segment,
+et n'ont donc pas besoin d'y figurer. L'analyzer lit `ACTION_ABILITY_TOKENS`, un motif OUVERT,
+et n'avait rien à changer.
 
 Elle n'existe que pour rendre une absence DÉCIDABLE. Sans elle, un lecteur qui ne trouve pas un
 segment ne peut pas distinguer « ce journal ne le porte pas » de « le producteur est en panne » —
