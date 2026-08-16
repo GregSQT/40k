@@ -2179,7 +2179,7 @@ class W40KMetricsTracker:
         Returns:
             Smoothed value using EWMA
         """
-        if not values or len(values) == 0:
+        if not values:
             return 0.0
         
         if len(values) < window_size:

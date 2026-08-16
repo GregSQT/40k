@@ -595,18 +595,9 @@ class EpisodeTerminationCallback(BaseCallback):
                     # Use overall average when EMA not yet available (early episodes)
                     eta = avg_training_time_per_episode * remaining_episodes
 
-                # Format times as HH:MM:SS or MM:SS depending on duration
-                def format_time(seconds):
-                    hours = int(seconds // 3600)
-                    minutes = int((seconds % 3600) // 60)
-                    secs = int(seconds % 60)
-                    if hours > 0:
-                        return f"{hours}:{minutes:02d}:{secs:02d}"
-                    else:
-                        return f"{minutes:02d}:{secs:02d}"
-
-                elapsed_str = format_time(elapsed)
-                eta_str = format_time(eta)
+                from ai.bot_evaluation import _format_elapsed
+                elapsed_str = _format_elapsed(elapsed)
+                eta_str = _format_elapsed(eta)
                 time_info = f"{elapsed_str}<{eta_str}"
 
                 # TOUTE la ligne est en secondes de wall-clock PAR EPISODE PRODUIT, et le
@@ -741,6 +732,19 @@ class MetricsCollectionCallback(BaseCallback):
         # Add immediate reward ratio history for smoothing
         self.immediate_reward_ratio_history = []
         self.max_reward_ratio_history = 50  # Keep last 50 episodes
+        self.win_rate_window: deque = deque(maxlen=100)
+        self.seat_aware_counts: Dict[str, Any] = {
+            'episodes_agent_p1': 0,
+            'episodes_agent_p2': 0,
+            'wins_agent_p1': 0.0,
+            'wins_agent_p2': 0.0,
+        }
+        self.win_method_counts: Dict[str, int] = {
+            'objectives': 0,
+            'value_tiebreaker': 0,
+            'draw': 0,
+            'step_limit': 0,
+        }
 
         # Les metriques d'observation par phase (`obs/<phase>_*`) occupaient cette place. Ne pas
         # les rebatir sur ce chemin : leur garde de phase rend un lecteur d'observation
@@ -850,7 +854,7 @@ class MetricsCollectionCallback(BaseCallback):
                 # Print results
                 for bk in ALL_BOT_NAMES:
                     if bk in bot_results:
-                        label = bk.replace("_", " ").title() + "Bot"
+                        label = BOT_DISPLAY_NAMES.get(bk, bk)
                         print(f"vs {label+':':<22s}{bot_results[bk]:.2f} ({bot_results.get(f'{bk}_wins', '?')}/{n_final} wins)")
                 print(f"\nCombined Score:   {bot_results['combined']:.2f} {'✅' if bot_results['combined'] >= 0.70 else '⚠️'}")
                 scenario_scores = bot_results.get("scenario_scores")
@@ -1125,9 +1129,6 @@ class MetricsCollectionCallback(BaseCallback):
                 self.model.logger.record('config/immediate_reward_ratio', immediate_reward_ratio)
                 self.model.logger.record('config/immediate_reward_ratio_mean', ratio_mean)
                 self.model.logger.record('config/planning_horizon', planning_horizon)
-                # Force tensorboard dump to ensure gamma metrics are written
-                self.model.logger.dump(step=self.model.num_timesteps)
-
         # tactical_data du moteur — cle EXIGEE, pas testee.
         # Le `if 'tactical_data' in info:` qui gardait ce bloc laissait passer un episode sans
         # donnees tactiques : log_tactical_metrics etait appele juste apres DE TOUTE FACON, avec
@@ -1166,10 +1167,6 @@ class MetricsCollectionCallback(BaseCallback):
             self.model.logger.record('game_critical/episode_reward', total_reward)
             self.model.logger.record('game_critical/episode_length', episode_length)
             
-            # Win rate calculation (need rolling window)
-            if not hasattr(self, 'win_rate_window'):
-                self.win_rate_window = deque(maxlen=100)
-
             if winner is not None:
                 controlled_player = int(require_key(episode_data, 'controlled_player'))
                 agent_won = 1.0 if winner == controlled_player else 0.0
@@ -1178,13 +1175,6 @@ class MetricsCollectionCallback(BaseCallback):
                     raise ValueError("win_method is required when winner is not None")
 
                 # SEAT-AWARE metrics for TensorBoard (global + per controlled side)
-                if not hasattr(self, 'seat_aware_counts'):
-                    self.seat_aware_counts = {
-                        'episodes_agent_p1': 0,
-                        'episodes_agent_p2': 0,
-                        'wins_agent_p1': 0.0,
-                        'wins_agent_p2': 0.0,
-                    }
                 if controlled_player == 1:
                     self.seat_aware_counts['episodes_agent_p1'] += 1
                     self.seat_aware_counts['wins_agent_p1'] += agent_won
@@ -1231,13 +1221,6 @@ class MetricsCollectionCallback(BaseCallback):
                 )
 
                 # Win-method diagnostics: helps identify objective/tiebreaker seat bias.
-                if not hasattr(self, 'win_method_counts'):
-                    self.win_method_counts = {
-                        'objectives': 0,
-                        'value_tiebreaker': 0,
-                        'draw': 0,
-                        'step_limit': 0,
-                    }
                 if win_method not in self.win_method_counts:
                     raise ValueError(f"Unexpected win_method '{win_method}'")
                 self.win_method_counts[win_method] += 1
@@ -1298,25 +1281,11 @@ class MetricsCollectionCallback(BaseCallback):
         # milieu de leur episode.
 
     def _calculate_immediate_vs_future_ratio(self, info):
-        """Calculate ratio of immediate vs future-oriented actions"""
-        # Analyze action patterns to detect myopic vs strategic behavior
-        immediate_actions = 0  # Shooting, direct attacks
-        future_actions = 0     # Movement, positioning
-        
-        if hasattr(self.training_env, 'envs') and len(cast(Any, self.training_env).envs) > 0:
-            env = cast(Any, self.training_env).envs[0]
-            if hasattr(env, 'unwrapped') and hasattr(env.unwrapped, 'game_state'):
-                gs = env.unwrapped.game_state
-                action_logs = gs['action_logs']  # engine always sets it
-                for log in action_logs:
-                    action_type = log['type']  # engine always sets "type" when appending to action_logs
-                    if action_type in ['shoot', 'combat']:
-                        immediate_actions += 1
-                    elif action_type in ['move', 'wait']:
-                        future_actions += 1
-        
-        total_actions = immediate_actions + future_actions
-        return immediate_actions / max(1, total_actions)
+        """Calculate ratio of immediate vs future-oriented actions from episode tactical_data."""
+        td = info.get('tactical_data') or {}
+        immediate_actions = float(td.get('shoot_activations', 0))
+        future_actions = float(td.get('move_actions', 0)) + float(td.get('move_waits', 0))
+        return immediate_actions / max(1.0, immediate_actions + future_actions)
     
     def _estimate_planning_horizon(self, gamma):
         """Estimate effective planning horizon from discount factor"""
@@ -1691,7 +1660,6 @@ class BotEvaluationCallback(BaseCallback):
             and self.model_gating_min_benchmark_floor > 0.0
             and benchmark_keys_present
         ):
-            benchmark_floor_current = min(float(results[k]) for k in benchmark_keys_present)
             combined_improving = (
                 self.best_gating_criteria_mean is None
                 or combined_score > (self.best_gating_criteria_mean or 0.0)
@@ -1700,7 +1668,7 @@ class BotEvaluationCallback(BaseCallback):
                 self.non_generalizing_consecutive += 1
                 if self.non_generalizing_consecutive >= self.stop_on_no_generalization:
                     print(
-                        f"\n🛑 Non-generalisation detectee : benchmark_floor={benchmark_floor_current:.3f} "
+                        f"\n🛑 Non-generalisation detectee : benchmark_floor={benchmark_floor:.3f} "
                         f"< {self.model_gating_min_benchmark_floor:.3f} pendant "
                         f"{self.non_generalizing_consecutive} evaluations consecutives "
                         f"(stop_on_no_generalization={self.stop_on_no_generalization})"
@@ -1747,7 +1715,6 @@ class BotEvaluationCallback(BaseCallback):
             self.gate_display_state["robust_trend_symbol"] = self._compute_robust_trend_symbol(
                 valid_window_size=5
             )
-        if self.gate_display_state is not None:
             if self.thresholds_ever_passed:
                 if gate_pass or has_improved_mean:
                     self.gate_display_state["label"] = "Gate 🏁"
@@ -1787,7 +1754,6 @@ class BotEvaluationCallback(BaseCallback):
             self.gate_display_state["robust_trend_symbol"] = self._compute_robust_trend_symbol(
                 valid_window_size=5
             )
-        if self.gate_display_state is not None:
             self.gate_display_state["label"] = "Gate ⚠️"
             self._update_learning_status_display("🟠")
 
@@ -1907,14 +1873,6 @@ class BotEvaluationCallback(BaseCallback):
         legacy_zip_path = os.path.join(self.best_model_save_path, "best_robust_model.zip")
         remove_model_with_companions(legacy_zip_path)
 
-    @staticmethod
-    def _scenario_metric_slug(scenario_name: str) -> str:
-        """Convert scenario label to TensorBoard-safe metric suffix."""
-        normalized = re.sub(r"[^a-zA-Z0-9]+", "_", scenario_name.strip()).strip("_").lower()
-        if not normalized:
-            raise ValueError(f"Invalid scenario name for metric slug: '{scenario_name}'")
-        return normalized
-
     def _log_scenario_scores(self, results: Dict[str, Any]) -> None:
         """
         Log per-scenario bot evaluation scores to TensorBoard.
@@ -1937,6 +1895,7 @@ class BotEvaluationCallback(BaseCallback):
             raise TypeError(
                 f"scenario_scores must be dict (got {type(scenario_scores).__name__})"
             )
+        from ai.bot_evaluation import _scenario_metric_slug
         if hasattr(self.model, "logger") and self.model.logger:
             for scenario_name, values in scenario_scores.items():
                 if not isinstance(values, dict):
@@ -1944,7 +1903,7 @@ class BotEvaluationCallback(BaseCallback):
                         f"scenario_scores['{scenario_name}'] must be dict "
                         f"(got {type(values).__name__})"
                     )
-                slug = self._scenario_metric_slug(str(scenario_name))
+                slug = _scenario_metric_slug(str(scenario_name))
                 self.model.logger.record(
                     f"bot_eval/scenario/{slug}/combined",
                     float(require_key(values, "combined"))

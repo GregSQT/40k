@@ -289,18 +289,19 @@ class ReferenceBalancedBot(_BenchmarkBase):
             return random.choice(valid_destinations)
 
         intent = self._elect_intent(unit, game_state)
-        enemies = _living_enemies(unit, game_state)
-        obj_anchors = _objective_anchors(game_state)
         player = int(require_key(unit, "player"))
         candidates = [current] + list(valid_destinations)
 
         if intent == "KILL":
+            enemies = _living_enemies(unit, game_state)
             def _score(d: Tuple[int, int]) -> float:
                 return _expected_ranged_from(unit, enemies, d, game_state)
         elif intent == "PRESERVE":
+            enemies = _living_enemies(unit, game_state)
             def _score(d: Tuple[int, int]) -> float:
                 return float(_min_enemy_dist(d, enemies, game_state))
         else:  # SCORE
+            obj_anchors = _objective_anchors(game_state)
             uncontested = [(c, r, h) for c, r, h in obj_anchors if h != player]
             targets = uncontested or obj_anchors
             if targets:
@@ -517,19 +518,20 @@ class ReferenceReactiveBot(_BenchmarkBase):
 
         player = int(require_key(unit, "player"))
         self._update_plan(game_state, player)
-        enemies = _living_enemies(unit, game_state)
-        obj_anchors = _objective_anchors(game_state)
         candidates = [current] + list(valid_destinations)
 
         if self._plan == "KILL":
+            enemies = _living_enemies(unit, game_state)
             def _score(d: Tuple[int, int]) -> float:
                 return -float(_min_enemy_dist(d, enemies, game_state))
             best = max(candidates, key=_score)
         elif self._plan == "RETREAT":
+            enemies = _living_enemies(unit, game_state)
             def _score(d: Tuple[int, int]) -> float:
                 return float(_min_enemy_dist(d, enemies, game_state))
             best = max(candidates, key=_score)
         else:  # SCORE
+            obj_anchors = _objective_anchors(game_state)
             targets = [(c, r, h) for c, r, h in obj_anchors if h != player]
             if not targets:
                 targets = obj_anchors

@@ -20,7 +20,7 @@ import shutil
 import atexit
 import numpy as np
 import re
-from collections import deque
+from collections import defaultdict, deque
 from concurrent.futures import ProcessPoolExecutor, wait, FIRST_COMPLETED
 from typing import Callable, Optional, Dict, List, Any, Tuple, TYPE_CHECKING
 
@@ -861,6 +861,7 @@ def _eval_worker_task(
         {"wins": int, "losses": int, "draws": int, "shoot_stats": dict, "bot_name": str, "scenario_name": str,
          "timeout": bool?, "error": str?}
     """
+    from sb3_contrib.common.maskable.utils import get_action_masks
     global _worker_model, _worker_obs_normalizer
     if _worker_model is None:
         raise RuntimeError("Worker not initialized (call _eval_worker_init before tasks)")
@@ -967,8 +968,6 @@ def _eval_worker_task(
             # L'avancement de phase reste assure : sans depot, `action_masks()` retombe sur
             # `engine.get_action_mask()` ; avec depot, le masque est non vide par precondition, donc
             # la boucle d'avancement n'aurait de toute facon rien fait.
-            from sb3_contrib.common.maskable.utils import get_action_masks
-
             action_masks = np.asarray(get_action_masks(env), dtype=bool)
             if action_masks.ndim == 1:
                 action_masks = action_masks.reshape(1, -1)
@@ -1687,10 +1686,15 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
             except OSError:
                 pass
 
-    # Agrégation (section 2.9)
+    # Agrégation (section 2.9) — passe unique sur results_list.
     results: Dict[str, Any] = {}
+    by_bot: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for r in results_list:
+        bn = r.get("bot_name")
+        if bn is not None:
+            by_bot[bn].append(r)
     for bn in active_bot_names:
-        bot_results = [r for r in results_list if r.get("bot_name") == bn]
+        bot_results = by_bot[bn]
         wins = sum(r["wins"] for r in bot_results)
         losses = sum(r["losses"] for r in bot_results)
         draws = sum(r["draws"] for r in bot_results)
@@ -1704,9 +1708,8 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
     # on additionne les totaux ici, la moyenne reste calculee en aval (metrics_tracker).
     behavioral_profile: Dict[str, Dict[str, Dict[str, Any]]] = {}
     for bn in active_bot_names:
-        bot_results_for_bn = [r for r in results_list if r.get("bot_name") == bn]
         merged: Dict[str, Dict[str, Any]] = {}
-        for r in bot_results_for_bn:
+        for r in by_bot[bn]:
             for issue, bucket in (r.get("behavior_stats") or {}).items():
                 m = merged.setdefault(issue, {
                     "vp": 0.0, "zones_held": 0.0,
