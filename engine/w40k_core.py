@@ -4929,8 +4929,6 @@ class W40KEngine(gym.Env):
         Le pipeline mono-fig legacy reste intact pour l IA/training.
         """
         from engine.phase_handlers.shared_utils import (
-            squad_shooting_type_choose,
-            squad_shooting_type_clear,
             squad_shooting_unit_activation_start,
             squad_declare_shoot_model,
             squad_undeclare_shoot_model,
