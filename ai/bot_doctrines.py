@@ -859,6 +859,8 @@ class _DoctrineBot(_PlacementMemory):
         Le seuil est module par `_charge_trade_floor` : desperate_push l'abaisse (plus agressif),
         protect_lead le releve (plus prudent). A gain=0 : floor=1.0 => melee > ranged (identique).
         """
+        if self._is_preserving(attacker, game_state):
+            return False
         if self._preservation_blocks_charge(attacker, game_state):
             return False
         profile = _best_melee_and_ranged(attacker, game_state)
@@ -1282,12 +1284,6 @@ class AttritionBot(_DoctrineBot):
         Coupe egalement la charge.
         """
         return self._withdrawing(unit, game_state)
-
-    def wants_charge(self, attacker, game_state) -> bool:
-        if self._is_preserving(attacker, game_state):
-            return False
-        return super().wants_charge(attacker, game_state)
-
 
 class DecapitationBot(_DoctrineBot):
     """CONCENTRATION : toutes ses escouades frappent la MEME cible dans le tour.

@@ -47,6 +47,9 @@ _FAKE_WEIGHTS: Dict[str, tuple] = {
 }
 
 
+_ATTACKER: Dict[str, Any] = {"id": "u1", "player": 1}
+
+
 def _game_state(*, turn: int = 1, limit: int = 5,
                 vp1: float = 0.0, vp2: float = 0.0) -> Dict[str, Any]:
     return {
@@ -74,6 +77,17 @@ def _patch_all(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(doctrines, "_living_enemies_on_table", lambda unit, gs: [])
     monkeypatch.setattr(doctrines, "preservation_pressure", lambda unit, gs: 0.0)
     monkeypatch.setattr(doctrines, "is_unit_at_or_below_half_strength", lambda sid, gs: False)
+
+
+def _patch_high_preservation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """preservation=1.0, pressure=0.5 => 0.5 >= 0.3 => _preservation_blocks_charge=True."""
+    monkeypatch.setattr(doctrines, "load_style_profile", lambda key: {
+        "late_game": 0.0,
+        "preservation": 1.0,
+        "persistence": 0.0,
+        "focus_shared": False,
+    })
+    monkeypatch.setattr(doctrines, "preservation_pressure", lambda unit, gs: 0.5)
 
 
 # ─── Identite de movement_weights a gain=0 ────────────────────────────────────
@@ -113,7 +127,7 @@ def test_base_wants_charge_follows_melee_beats_ranged(monkeypatch: pytest.Monkey
     monkeypatch.setattr(doctrines, "_best_melee_and_ranged",
                         lambda unit, gs: (10.0, 5.0))
     bot = DecapitationBot()
-    attacker = {"id": "u1", "player": 1}
+    attacker = _ATTACKER
     gs = _game_state()
     assert bot.wants_charge(attacker, gs) is True
 
@@ -124,7 +138,7 @@ def test_base_wants_charge_no_charge_ranged_better(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(doctrines, "_best_melee_and_ranged",
                         lambda unit, gs: (3.0, 10.0))
     bot = DecapitationBot()
-    attacker = {"id": "u1", "player": 1}
+    attacker = _ATTACKER
     gs = _game_state()
     assert bot.wants_charge(attacker, gs) is False
 
@@ -137,16 +151,9 @@ def test_base_wants_charge_preservation_blocks_when_pressure_high(
     # melee > ranged => chargerait normalement
     monkeypatch.setattr(doctrines, "_best_melee_and_ranged",
                         lambda unit, gs: (10.0, 5.0))
-    # preservation=1.0 : g_pres = 1.0 ; pressure=0.5 => 0.5 >= 0.3 => bloque
-    monkeypatch.setattr(doctrines, "load_style_profile", lambda key: {
-        "late_game": 0.0,
-        "preservation": 1.0,
-        "persistence": 0.0,
-        "focus_shared": False,
-    })
-    monkeypatch.setattr(doctrines, "preservation_pressure", lambda unit, gs: 0.5)
+    _patch_high_preservation(monkeypatch)
     bot = DecapitationBot()
-    attacker = {"id": "u1", "player": 1}
+    attacker = _ATTACKER
     gs = _game_state()
     assert bot.wants_charge(attacker, gs) is False
 
@@ -183,16 +190,9 @@ def test_attrition_wants_charge_calls_base_preservation_blocks(
     # _is_preserving=False : unité non entamée
     monkeypatch.setattr(doctrines, "is_unit_at_or_below_half_strength",
                         lambda sid, gs: False)
-    # preservation=1.0, pressure=0.5 => 0.5 * 1.0 >= 0.3 => _preservation_blocks_charge=True
-    monkeypatch.setattr(doctrines, "load_style_profile", lambda key: {
-        "late_game": 0.0,
-        "preservation": 1.0,
-        "persistence": 0.0,
-        "focus_shared": False,
-    })
-    monkeypatch.setattr(doctrines, "preservation_pressure", lambda unit, gs: 0.5)
+    _patch_high_preservation(monkeypatch)
     bot = AttritionBot()
-    attacker = {"id": "u1", "player": 1}
+    attacker = _ATTACKER
     gs = _game_state()
     assert bot.wants_charge(attacker, gs) is False
 
