@@ -302,7 +302,7 @@ semantique propre — c'est un ENSEMBLE, pas des positions.
 
 Vocabulaire ecrit ici : les 12 regles booleennes (`WEAPON_RULE_BITS` : `DEVASTATING_WOUNDS`,
 `LETHAL_HITS`, `TORRENT`, `TWIN_LINKED`, `EXTRA_ATTACKS`, `PRECISION`, `PSYCHIC`, `HAZARDOUS`,
-`HEAVY`, `IGNORES_COVER`, `CLOSE_QUARTERS`, `ASSAULT`) et l'IDENTITE de la regle `[ANTI-X]` portee
+`HEAVY`, `IGNORES_COVER`, `CLOSE_QUARTERS`, `ASSAULT`, `INDIRECT_FIRE`) et l'IDENTITE de la regle `[ANTI-X]` portee
 (`ANTI_INFANTRY`, `ANTI_VEHICLE`, `ANTI_FLY`, `ANTI_PSYKER`, `ANTI_MONSTER` — une seule, celle du
 MEILLEUR seuil, 24.02). Son seuil Y+ reste continu (`*_wpn_cont[s][w][12]`) : c'est une valeur, pas
 une categorie. Les regles PARAMETREES (`RAPID_FIRE`, `SUSTAINED_HITS`, `MELTA`, `CLEAVE`, `BLAST`)

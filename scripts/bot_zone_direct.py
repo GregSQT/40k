@@ -235,9 +235,12 @@ def _avg_focus_target_distance(
         None,
     )
     if focused_player is None:
-        return None
+        raise RuntimeError(f"_avg_focus_target_distance : cible introuvable '{focused}' dans gs['units']")
     if focused_player == bot_player:
-        return None
+        raise RuntimeError(
+            f"_avg_focus_target_distance : cible '{focused}' appartient au bot-player {bot_player} "
+            "(marqueur à jour — ce n'est pas un résidu inter-épisode)"
+        )
     if not is_unit_alive(focused, gs):
         return None
     target_entry = require_unit_from_cache(focused, gs, "_focus_dist:target")
