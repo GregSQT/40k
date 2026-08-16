@@ -644,16 +644,16 @@ def test_the_four_tensorboard_curves_are_emitted(
     tracker.log_tactical_metrics(tactical)
 
     emitted = {key for key, _value, _step in recording.scalars}
-    assert "game_tactical/shooting_accuracy" in emitted
+    assert "04_shoot/b_accuracy" in emitted
     assert "game_detailed/damage_dealt" in emitted
     assert "game_detailed/damage_received" in emitted
-    assert "game_tactical/damage_efficiency" in emitted
+    assert "02_combat/q_damage_efficiency" in emitted
 
     by_key = {key: value for key, value, _step in recording.scalars}
-    assert by_key["game_tactical/shooting_accuracy"] == pytest.approx(
+    assert by_key["04_shoot/b_accuracy"] == pytest.approx(
         tactical["hits"] / tactical["shots_fired"]
     )
-    assert by_key["game_tactical/damage_efficiency"] == pytest.approx(
+    assert by_key["02_combat/q_damage_efficiency"] == pytest.approx(
         tactical["damage_dealt"] / tactical["damage_received"]
     )
 
