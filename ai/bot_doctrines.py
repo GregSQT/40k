@@ -1199,19 +1199,6 @@ class EndgameBot(_DoctrineBot):
         DEPLOYMENT_ACTIONS[3]: 0.10, DEPLOYMENT_ACTIONS[4]: 0.10,
     }
 
-    def _pushing(self, game_state) -> bool:
-        """Etat fin de partie base sur le TOUR uniquement — sans VP.
-
-        Raise ValueError sur Endless Duty : la notion de « derniers tours » n'a pas de sens
-        sans limite. Verrou T1 : un etat sans tour leve via require_key.
-        """
-        battle_turns = get_effective_turn_limit(game_state)
-        if battle_turns is None:
-            raise ValueError(
-                "Endless Duty : « jouer la fin de partie » n'a pas de sens sans fin de partie."
-            )
-        return battle_turns - int(require_key(game_state, "turn")) + 1 <= _PUSH_LAST_TURNS
-
     def _in_push_mode(self, game_state, player: int) -> bool:
         return late_game_state(game_state, player) == "desperate_push"
 
@@ -1377,6 +1364,7 @@ class DecapitationBot(_DoctrineBot):
             self._focus_confirmed = False
         if self._focus_target is not None and not is_unit_alive(self._focus_target, game_state):
             self._focus_target = None
+            self._focus_confirmed = False
         if self._focus_target is None and attacker is not None:
             enemies = _living_enemies_on_table(attacker, game_state)
             self._focus_target = self._elect(attacker, game_state, enemies)
@@ -1470,6 +1458,7 @@ class DecapitationBot(_DoctrineBot):
             # Dans ce cas elle n'est pas dans `enemies` ; on la traite comme une cible perdue
             # et on reelit depuis le pool present.
             self._focus_target = None
+            self._focus_confirmed = False
             focused = self._elect(unit, game_state, enemies)
             self._focus_target = focused
             if focused is None:

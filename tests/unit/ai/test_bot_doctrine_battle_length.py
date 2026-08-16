@@ -1,9 +1,10 @@
 """La durée d'une bataille se LIT sur l'état, elle ne s'écrit pas en dur dans une doctrine.
 
-`EndgameBot` bascule en mode « poussée » sur les derniers tours. Le seuil valait `PUSH_TURN = 3`,
-déduit à la main de « la partie dure 5 tours » : sur un scénario plus court la bascule tombait
-après la fin, sur un plus long elle transformait le style en Racer dès le premier tiers. La durée
-vient désormais de `get_effective_turn_limit`, source unique de `game_rules.max_turns`.
+`EndgameBot` bascule en mode « poussée » (`_in_push_mode`) sur les derniers tours quand l'écart VP
+est serré. Le seuil valait `PUSH_TURN = 3`, déduit à la main de « la partie dure 5 tours » : sur un
+scénario plus court la bascule tombait après la fin, sur un plus long elle transformait le style en
+Racer dès le premier tiers. La durée vient désormais de `get_effective_turn_limit`, source unique de
+`game_rules.max_turns`.
 
 Le même fichier verrouille le second défaut trouvé avec celui-là : `game_state.get("turn", 1)`,
 un défaut posé pour éviter une `KeyError` (T1). Il faisait lire « avant la bascule » à un état sans
@@ -28,6 +29,7 @@ def _state(turn: int, max_turns: int = 5, **extra: Any) -> Dict[str, Any]:
     state: Dict[str, Any] = {
         "turn": turn,
         "config": {"game_rules": {"max_turns": max_turns}},
+        "victory_points": {1: 0, 2: 0},
     }
     state.update(extra)
     return state
@@ -41,7 +43,7 @@ def test_the_standard_battle_still_pivots_on_turn_three() -> None:
     """
     bot = EndgameBot()
 
-    assert [bot._pushing(_state(t)) for t in range(1, 6)] == [False, False, True, True, True]
+    assert [bot._in_push_mode(_state(t), 1) for t in range(1, 6)] == [False, False, True, True, True]
 
 
 def test_a_longer_battle_moves_the_pivot_instead_of_keeping_turn_three() -> None:
@@ -53,7 +55,7 @@ def test_a_longer_battle_moves_the_pivot_instead_of_keeping_turn_three() -> None
     """
     bot = EndgameBot()
 
-    assert [bot._pushing(_state(t, 8)) for t in range(1, 9)] == [False] * 5 + [True] * 3
+    assert [bot._in_push_mode(_state(t, 8), 1) for t in range(1, 9)] == [False] * 5 + [True] * 3
 
 
 def test_a_battle_shorter_than_the_push_window_has_no_waiting_phase() -> None:
@@ -64,15 +66,14 @@ def test_a_battle_shorter_than_the_push_window_has_no_waiting_phase() -> None:
     """
     bot = EndgameBot()
 
-    assert [bot._pushing(_state(t, 2)) for t in (1, 2)] == [True, True]
+    assert [bot._in_push_mode(_state(t, 2), 1) for t in (1, 2)] == [True, True]
 
 
-def test_an_endless_battle_raises_instead_of_inventing_a_pivot() -> None:
-    """T1 : sans fin de partie, « jouer la fin de partie » n'a pas de sens — on lève."""
+def test_an_endless_battle_never_triggers_desperate_push() -> None:
+    """Sans fin de partie, l'Endless Duty ne peut pas être en « derniers tours » — retourne False."""
     bot = EndgameBot()
 
-    with pytest.raises(ValueError, match="Endless Duty"):
-        bot._pushing(_state(3, unlimited_turns=True))
+    assert bot._in_push_mode({"unlimited_turns": True, "victory_points": {1: 0, 2: 0}}, 1) is False
 
 
 def test_a_state_without_a_turn_raises_instead_of_reading_as_turn_one() -> None:
@@ -80,7 +81,7 @@ def test_a_state_without_a_turn_raises_instead_of_reading_as_turn_one() -> None:
     bot = EndgameBot()
 
     with pytest.raises(Exception):
-        bot._pushing({"config": {"game_rules": {"max_turns": 5}}})
+        bot._in_push_mode({"config": {"game_rules": {"max_turns": 5}}, "victory_points": {1: 0, 2: 0}}, 1)
 
 
 def test_the_focus_marker_refuses_a_state_without_a_turn() -> None:

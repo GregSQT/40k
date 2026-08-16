@@ -291,6 +291,42 @@ def test_a_confirmed_target_that_dies_lets_the_next_shot_re_elect(_slot_mapping:
     assert bot._focus_target == "nearest" and bot._focus_confirmed is True
 
 
+def test_focus_confirmed_is_reset_when_confirmed_target_dies(_slot_mapping: None) -> None:
+    """La confirmation s'efface AVEC le verrou cible : quand la cible confirmée meurt en cours de
+    tour, `_focus_confirmed` doit repasser à False pour que la prochaine escouade qui tire puisse
+    confirmer une nouvelle cible via `_shoot`. Sans reset, `_focus_confirmed=True` bloque l'écriture
+    même si `_focus_target` pointe maintenant sur une autre escouade."""
+    bot = DecapitationBot()
+    state = _state()
+    _anchors(bot, state)
+    _shoot(bot, state, ["focus"])
+    assert bot._focus_confirmed is True
+
+    del state["units_cache"]["focus"]
+    state["units"] = [u for u in state["units"] if u["id"] != "focus"]
+
+    bot._focus(state, UNIT)
+    assert bot._focus_confirmed is False
+
+
+def test_focus_confirmed_is_reset_when_confirmed_target_enters_reserves(_slot_mapping: None) -> None:
+    """Symétrie 20.01 : une cible vivante mais hors table déclenche la même remise à zéro de
+    `_focus_confirmed` que la mort. Sans reset, la cible ré-élue depuis les réserves ne peut jamais
+    être confirmée par `_shoot` et chaque escouade choisit sa cible indépendamment."""
+    bot = DecapitationBot()
+    state = _state()
+    _anchors(bot, state)
+    _shoot(bot, state, ["focus"])
+    assert bot._focus_confirmed is True
+
+    state["units_cache"]["focus"]["col"] = -1
+    state["units_cache"]["focus"]["row"] = -1
+
+    enemies = doctrines._living_enemies_on_table(UNIT, state)
+    bot._enemy_anchors(UNIT, state, enemies)
+    assert bot._focus_confirmed is False
+
+
 def test_the_base_style_still_sees_every_enemy() -> None:
     """Le hook du socle n'est pas touché par la concentration : `w_enemy` y agit sur le plus
     proche de TOUTES les escouades ennemies sur table."""
