@@ -124,7 +124,7 @@ limite T2 des ~5 fichiers.
 3. **Ciblage** — le pool de cibles des armes [INDIRECT FIRE] cesse d'exiger la ligne de vue.
    ⚠️ Ne PAS toucher `compute_unit_los` : c'est la source unique de l'obs, du reward et du
    déploiement. Le contournement se fait au niveau du **gate de ciblage**, pas du calcul.
-4. **Résolution** — plancher d'échec `max(seuil, 6)` ou `max(seuil, 4)` (cf. §1), couvert
+4. ✅ **FAIT le 2026-08-16** (sauf le volet journal, cf. pièce 6). **Résolution** — plancher d'échec `max(seuil, 6)` ou `max(seuil, 4)` (cf. §1), couvert
    octroyé, relances de touche interdites. Le prédicat spotter est neuf mais **PAS coûteux** :
    `compute_unit_los` est mémoïsé par PAIRE `(tireur, cible)` dans un cache persistant, invalidé
    de façon ciblée par `_touch_unit_los` à chaque mouvement ou perte de figurine. Les paires

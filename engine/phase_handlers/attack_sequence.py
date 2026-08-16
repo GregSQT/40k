@@ -320,16 +320,32 @@ def expected_damage_per_attack(
     return (p_crit_hit * ev_on_crit_hit + p_normal_hit * ev_wound) * float(damage)
 
 
-def _evaluate_roll(roll: int, crit_on: int, target: int) -> Tuple[bool, bool]:
-    """Verdict d'UN de : `(critique, reussite)`. 05.01 — un 1 non modifie echoue toujours,
-    un critique reussit toujours.
+def _evaluate_roll(
+    roll: int, crit_on: int, target: int, fail_below: int = NATURAL_FAIL_ROLL + 1,
+) -> Tuple[bool, bool]:
+    """Verdict d'UN de : `(critique, reussite)`. Table 05.01, dans l'ordre du PDF.
 
     Ecrit quatre fois a l'identique dans `roll_attack_pool` (touche et blessure, avant et apres
     relance) : c'est la forme ou les deux blocs de relance divergeaient le plus facilement du
     jet initial qu'ils recalculent.
+
+    `fail_below` — PLANCHER D'ECHEC sur le de NON MODIFIE : tout resultat strictement inferieur
+    echoue, quel que soit le seuil. C'est la premiere ligne de la table 05.01 (« unmodified 1 ->
+    FAILS »), rendue PARAMETRABLE parce que 10.07 la remplace : « an unmodified hit roll of 1-5
+    fails, unless [...] in which case an unmodified hit roll of 1-3 fails instead ».
+
+    Le defaut vaut `NATURAL_FAIL_ROLL + 1` = 2, ce qui est EXACTEMENT l'ancien
+    `roll != NATURAL_FAIL_ROLL` : seul le 1 echoue. Aucun appelant existant ne change de
+    comportement, et c'est verifiable sans executer le code — `roll >= 2` et `roll != 1` sont la
+    meme condition sur un D6.
+
+    ⚠️ Le plancher ne prime PAS sur le critique, et c'est ce qui fait le 6+ « dur » de 10.07 :
+    la deuxieme ligne de 05.01 (« unmodified 6 -> CRITICAL HIT ») reste au-dessus de la
+    troisieme (« >= BS -> HIT »). Un 6 touche donc toujours, meme sous plancher 6, et un BS 2+
+    tirant en indirect touche sur 6+ et rien d'autre.
     """
     is_critical = roll >= crit_on
-    return is_critical, is_critical or (roll != NATURAL_FAIL_ROLL and roll >= target)
+    return is_critical, is_critical or (roll >= fail_below and roll >= target)
 
 
 def roll_attack_pool(
@@ -341,6 +357,7 @@ def roll_attack_pool(
     profile: WeaponAttackProfile,
     rerolls: RerollProfile,
     roll_d6: Callable[[], int],
+    hit_fail_below: int = NATURAL_FAIL_ROLL + 1,
 ) -> Dict[str, Any]:
     """Resout `n_attacks` attaques : touche -> blessure -> jet de sauvegarde BRUT.
 
@@ -378,7 +395,7 @@ def roll_attack_pool(
         else:
             hit_roll = roll_d6()
             is_critical_hit, hit_success = _evaluate_roll(
-                hit_roll, profile.crit_hit_on, hit_target
+                hit_roll, profile.crit_hit_on, hit_target, hit_fail_below
             )
             # Un seul reroll par de (01 Core, Re-rolls) : `hit_1` relance les seuls 1,
             # `hit_any_fail` (Oath of Moment) relance TOUT echec. Meme forme que la blessure
@@ -396,7 +413,7 @@ def roll_attack_pool(
                 hit_roll_initial = hit_roll
                 hit_roll = roll_d6()
                 is_critical_hit, hit_success = _evaluate_roll(
-                    hit_roll, profile.crit_hit_on, hit_target
+                    hit_roll, profile.crit_hit_on, hit_target, hit_fail_below
                 )
             # 05.01 : 1 non modifie = echec ; critique = touche quoi qu il arrive.
             if not hit_success:
