@@ -9964,6 +9964,11 @@ def _build_manual_allocation(
     weapon_groups: List[Dict[str, Any]] = []
     group_index_by_key: Dict[tuple, int] = {}
     batch_pool_by_gidx: Dict[int, List[Dict[str, Any]]] = {}
+    # [CLOSE-QUARTERS] 24.07 : l engagement de l ESCOUADE attaquante est le meme pour tous les
+    # groupes de cet appel (meme `attacker_squad_id`, et aucune figurine n est retiree avant
+    # l allocation, differee apres cette boucle). Memoise PARESSEUSEMENT : le prédicat parcourt
+    # toutes les escouades ennemies, donc on ne le paie que si une arme porte reellement la regle.
+    _squad_engaged: Optional[bool] = None
 
     for intent in intents:
         r = roll_intent_fn(game_state, intent, targets_meta)
@@ -10036,6 +10041,25 @@ def _build_manual_allocation(
             # elle-meme etait devinee a partir de l id de figurine.
             _atk_sid = str(require_key(attacker, "squad_id"))
             _atk_uc_live = require_key(require_key(game_state, "units_cache"), _atk_sid)
+            # [ASSAULT] 24.04 (10.05) : l arme est [ASSAULT] ET l unite a avance ce tour.
+            # [CLOSE-QUARTERS] 24.07 (10.06) : l arme est [CLOSE_QUARTERS] ET le squad est engage.
+            # Poses a la CREATION du groupe (etat vive — `units_advanced` change entre tours,
+            # `_squad_is_in_enemy_er` requiert la carte de positions live) et non a l emission,
+            # qui est differee hors etat apres resolution complete. Meme regime que `heavy_applied`.
+            # La declaration d arme se lit dans la signature NORMALISEE deja calculee par le
+            # roller (`weapon_rule_signature`, cf. `gkey`) : ASSAULT et CLOSE_QUARTERS sont sans
+            # parametre, donc leur forme dans la signature est le nom nu. Un second accesseur
+            # (`weapon_has_rule`) re-parserait les memes regles et pourrait en diverger.
+            _weapon_rules = require_key(r, "weapon_rules")
+            _assault_applied = (
+                "ASSAULT" in _weapon_rules
+                and _atk_sid in game_state.get("units_advanced", set())  # get allowed
+            )
+            _cq_applied = False
+            if "CLOSE_QUARTERS" in _weapon_rules:
+                if _squad_engaged is None:
+                    _squad_engaged = _squad_is_in_enemy_er(game_state, _atk_sid)
+                _cq_applied = _squad_engaged
             _grp = {
                 "attacker_squad_id": _atk_sid,
                 "attacker_col": int(require_key(_atk_uc_live, "col")),
@@ -10093,19 +10117,8 @@ def _build_manual_allocation(
                 # verite du cercle vert + cone LoS par-fig cote replay : c est le model_id resolu par
                 # roll_intent_fn (attacker_mid), pas un match par nom d arme.
                 "shooter_mids": [],
-                # [ASSAULT] 24.04 (10.05) : l arme est [ASSAULT] ET l unite a avance ce tour.
-                # [CLOSE-QUARTERS] 24.07 (10.06) : l arme est [CLOSE_QUARTERS] ET le squad est engage.
-                # Poses a la CREATION du groupe (etat vive — `units_advanced` change entre tours,
-                # `_squad_is_in_enemy_er` requiert la carte de positions live) et non a l emission,
-                # qui est differee hors etat apres resolution complete. Meme regime que `heavy_applied`.
-                "assault_applied": (
-                    weapon_has_rule(require_key(r, "weapon"), "ASSAULT")
-                    and _atk_sid in game_state.get("units_advanced", set())  # get allowed
-                ),
-                "close_quarters_applied": (
-                    weapon_has_rule(require_key(r, "weapon"), "CLOSE_QUARTERS")
-                    and _squad_is_in_enemy_er(game_state, _atk_sid)
-                ),
+                "assault_applied": _assault_applied,
+                "close_quarters_applied": _cq_applied,
             }
             # Cover (regle 13.08) : ranged-only -> present uniquement sur le chemin tir
             # (le chemin combat partage cette fonction mais ne fournit pas ces cles).
