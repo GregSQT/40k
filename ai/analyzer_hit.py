@@ -49,6 +49,13 @@ from engine.phase_handlers.attack_sequence import CRITICAL_HIT_ROLL, NATURAL_FAI
 
 from ai.analyzer_core import ACTION_ABILITY_TOKENS
 
+#: Extrait le plancher du token `[INDIRECT FIRE:X+]` (10.07).
+_INDIRECT_FIRE_TOKEN_RE = re.compile(r'\[INDIRECT FIRE:(\d+)\+\]', re.IGNORECASE)
+
+#: Extrait base (optionnelle) et seuil effectif de `Hit N(base+->eff+)` ou `Hit N(eff+)`.
+#: Groupe 1 = base (None si la flèche est absente), groupe 2 = seuil effectif.
+_INDIRECT_HIT_FULL_RE = re.compile(r'Hit\s+\d+\((?:(\d+)\+->)?(\d+)\+\)')
+
 #: `Hit 4(3+) [TOKEN…]` — le jet et le seuil EFFECTIF. Deux formes de seuil coexistent :
 #: `3+` (nu) et `3+->4+` ([HEAVY] 24.16, [COVER] 13.08), et c'est le SECOND nombre qui a joué.
 #: `Hit None(None+)` (torrent, touche soutenue) ne correspond volontairement à rien.
@@ -88,6 +95,53 @@ def expected_hit_success(roll: int, target: int) -> bool:
     if roll >= CRITICAL_HIT_ROLL:
         return True
     return roll >= target
+
+
+def check_indirect_fire_rule(
+    state: Any,
+    stats: Dict[str, Any],
+    line: str,
+    action_desc: str,
+    attacker_player: int,
+) -> None:
+    """10.07 : un tir indirect doit porter [COVER] (couvert accordé inconditionnellement).
+
+    Ce qui est vérifié : le token [COVER] est présent sur toute ligne portant [INDIRECT FIRE:X+].
+
+    Ce qui n'est PAS vérifié (et pourquoi ce n'est pas un trou) : le seuil `eff` affiché dans
+    `Hit N(base+->eff+)` est le BS APRÈS COUVERT, pas `max(BS_après_couvert, plancher)`. Le
+    plancher est appliqué séparément dans `_evaluate_roll` via `hit_fail_below`, mais le moteur
+    ne le répercute pas dans le champ `hit_target` du record — `eff` peut légitimement être < X.
+    Exemple : `Hit 3(3+->4+) [COVER] [INDIRECT FIRE:6+]` est une ligne légale (4 < 6, et c'est
+    normal). Vérifier `eff >= floor` depuis le log serait un faux positif systématique.
+
+    Exception légale : [IGNORES COVER] court-circuite le couvert dans ce moteur (24.18 prime même
+    sur 10.07) → la ligne est ignorée pour éviter un faux positif systématique.
+    """
+    if _INDIRECT_FIRE_TOKEN_RE.search(action_desc) is None:
+        return
+
+    # [IGNORES COVER] + [INDIRECT FIRE] : couvert non accordé → pas de jugement
+    if '[IGNORES COVER]' in action_desc:
+        return
+
+    # Pas de jet (torrent, etc.) → pas de seuil à vérifier
+    if _INDIRECT_HIT_FULL_RE.search(action_desc) is None:
+        return
+
+    stats['indirect_fire_checked'][attacker_player] += 1
+
+    if '[COVER]' in action_desc:
+        return
+
+    stats['indirect_fire_mismatch'][attacker_player] += 1
+    first = stats['first_error_lines']['indirect_fire_mismatch']
+    if first[attacker_player] is None:
+        first[attacker_player] = {
+            'episode': state.current_episode_num,
+            'line': line.strip(),
+            'detail': '[COVER] absent sur tir indirect',
+        }
 
 
 def check_hit_result(
