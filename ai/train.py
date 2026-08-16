@@ -4018,6 +4018,17 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
     from ai.bot_evaluation import validate_bot_eval_worker_params
 
     validate_bot_eval_worker_params(callback_params)
+    bot_eval_n_workers_intermediate: Optional[int] = callback_params.get("bot_eval_n_workers_intermediate")
+    if bot_eval_n_workers_intermediate is not None:
+        if (
+            isinstance(bot_eval_n_workers_intermediate, bool)
+            or not isinstance(bot_eval_n_workers_intermediate, int)
+            or bot_eval_n_workers_intermediate <= 0
+        ):
+            raise ValueError(
+                f"callback_params.bot_eval_n_workers_intermediate must be a positive integer "
+                f"(got {bot_eval_n_workers_intermediate!r})"
+            )
     save_best_robust = bool(_resolve_callback_value("save_best_robust"))
     model_gating_enabled = bool(_resolve_callback_value("model_gating_enabled"))
     model_gating_min_combined = None
@@ -4168,6 +4179,7 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
             show_eval_progress=bot_eval_show_progress,
             early_stopping_patience=int(callback_params["early_stopping_patience"]),
             save_best_min_episodes=int(callback_params["save_best_min_episodes"]),
+            intermediate_n_workers=bot_eval_n_workers_intermediate,
         )
         callbacks.append(bot_eval_callback)
 

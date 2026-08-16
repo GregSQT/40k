@@ -1299,7 +1299,8 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                          scenario_pool: str = "training", model_path: Optional[str] = None,
                          line_length_state: Optional[Dict[str, Any]] = None,
                          scenario_list_override: Optional[List[str]] = None,
-                         materialize_eval_refs: bool = True):
+                         materialize_eval_refs: bool = True,
+                         n_workers_override: Optional[int] = None):
     """
     Standalone bot evaluation function - single source of truth for all bot testing.
 
@@ -1571,6 +1572,12 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
         base_seed = 42
         task_timeout_seconds = worker_params["task_timeout_seconds"]
         n_workers = worker_params["n_workers"]
+        if n_workers_override is not None:
+            if isinstance(n_workers_override, bool) or not isinstance(n_workers_override, int) or n_workers_override <= 0:
+                raise ValueError(
+                    f"n_workers_override must be a positive integer (got {n_workers_override!r})"
+                )
+            n_workers = n_workers_override
 
         from config_loader import get_max_turns
 

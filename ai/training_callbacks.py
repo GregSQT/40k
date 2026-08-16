@@ -1332,7 +1332,8 @@ class BotEvaluationCallback(BaseCallback):
                  early_stopping_patience: int = 0,
                  save_best_min_episodes: int = 0,
                  model_gating_min_benchmark_floor: float = 0.0,
-                 stop_on_no_generalization: int = 0):
+                 stop_on_no_generalization: int = 0,
+                 intermediate_n_workers: Optional[int] = None):
         super().__init__(verbose)
         if not training_config_name or not rewards_config_name:
             raise ValueError("BotEvaluationCallback requires training_config_name and rewards_config_name")
@@ -1489,6 +1490,16 @@ class BotEvaluationCallback(BaseCallback):
             )
         self.stop_on_no_generalization = int(stop_on_no_generalization)
         self.non_generalizing_consecutive = 0
+        if intermediate_n_workers is not None and (
+            isinstance(intermediate_n_workers, bool)
+            or not isinstance(intermediate_n_workers, int)
+            or intermediate_n_workers <= 0
+        ):
+            raise ValueError(
+                f"intermediate_n_workers must be a positive integer or None "
+                f"(got {intermediate_n_workers!r})"
+            )
+        self.intermediate_n_workers: Optional[int] = intermediate_n_workers
         self.gate_display_state = gate_display_state
         if self.gate_display_state is not None:
             self.gate_display_state["label"] = "Gate 🧱"
@@ -2546,6 +2557,7 @@ class BotEvaluationCallback(BaseCallback):
             line_length_state=self.gate_display_state,
             scenario_pool=self.scenario_pool,
             model_path=model_path,
+            n_workers_override=self.intermediate_n_workers,
         )
         # Les troncatures relevees dans les process workers rejoignent le journal ICI, ou les
         # resultats sont PRODUITS — et non dans `_apply_eval_results`, qui decide du gating :
