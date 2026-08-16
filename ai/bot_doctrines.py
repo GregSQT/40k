@@ -490,7 +490,7 @@ def late_game_state(game_state, player: int) -> str:
     Dans ce cas la notion de « derniers tours » n'a pas de sens : on retombe sur normal/protect_lead
     selon le score uniquement.
     """
-    vp_map = game_state.get("victory_points") or {}
+    vp_map = require_key(game_state, "victory_points")
     my_vp = float(vp_map.get(player, 0))
     opp_vp = float(vp_map.get(3 - player, 0))
     vp_diff = my_vp - opp_vp

@@ -116,6 +116,9 @@ def _state(
         "units_cache": units_cache,
         "models_cache": models_cache,
         "squad_models": squad_models,
+        "episode_number": 0,
+        "turn": 1,
+        "phase": "move",
     }
 
 
