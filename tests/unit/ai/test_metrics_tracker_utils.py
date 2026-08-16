@@ -497,7 +497,7 @@ def test_log_episode_end_and_tactical_metrics_runtime_paths() -> None:
         forced_unit_counts_controlled={"My Unit": 2},
     ))
     keys = [k for k, _, _ in _dw(t).scalars]
-    assert "game_tactical/shooting_accuracy" in keys
+    assert "04_shoot/b_accuracy" in keys
     assert "01_VP/e_objectives_held" in keys
     assert "02_combat/a_value_trade_ratio" in keys
     assert "forcing/episodes_with_forced_unit_ratio" in keys

@@ -348,9 +348,9 @@ def test_the_curves_carry_the_measured_means(melee_scenario_file, tmp_path) -> N
     tracker.log_tactical_metrics(tactical)
 
     by_key = {key: value for key, value, _step in recording.scalars}
-    assert by_key["charge_distance/a_nearest_enemy_inches_agent"] == pytest.approx(3.0)
-    assert by_key["charge_distance/b_target_inches_agent"] == pytest.approx(7.0)
-    assert by_key["charge_distance/c_target_inches_success_agent"] == pytest.approx(5.0)
+    assert by_key["05_charge/a_nearest_enemy_inches_agent"] == pytest.approx(3.0)
+    assert by_key["05_charge/b_target_inches_agent"] == pytest.approx(7.0)
+    assert by_key["05_charge/c_target_inches_success_agent"] == pytest.approx(5.0)
 
 
 def test_the_ge9_share_is_taken_over_the_targeted_charges(
@@ -374,7 +374,7 @@ def test_the_ge9_share_is_taken_over_the_targeted_charges(
     tracker.log_tactical_metrics(tactical)
 
     by_key = {key: value for key, value, _step in recording.scalars}
-    assert by_key["charge_distance/e_declarations_ge9_share_agent"] == pytest.approx(2 / 4)
+    assert by_key["05_charge/e_declarations_ge9_share_agent"] == pytest.approx(2 / 4)
 
 
 def test_no_distance_curve_when_nothing_was_charged(melee_scenario_file, tmp_path) -> None:
@@ -390,9 +390,9 @@ def test_no_distance_curve_when_nothing_was_charged(melee_scenario_file, tmp_pat
     tracker.log_tactical_metrics(tactical)
 
     emitted = {key for key, _value, _step in recording.scalars}
-    assert "charge_distance/a_nearest_enemy_inches_agent" not in emitted
-    assert "charge_distance/b_target_inches_agent" not in emitted
-    assert "charge_distance/e_declarations_ge9_share_agent" not in emitted
+    assert "05_charge/a_nearest_enemy_inches_agent" not in emitted
+    assert "05_charge/b_target_inches_agent" not in emitted
+    assert "05_charge/e_declarations_ge9_share_agent" not in emitted
     # Le tag existe bien par ailleurs : l'absence ci-dessus n'est pas celle d'un nom jamais ecrit.
     assert "02_combat/m_charge_attempts" in emitted
 

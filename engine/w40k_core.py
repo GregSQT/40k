@@ -2948,8 +2948,10 @@ class W40KEngine(gym.Env):
             move_actions = 0
             move_flees = 0
             move_waits = 0
+            move_advances = 0
             shoot_activations: Set[Tuple[int, str]] = set()
             shoot_waits = 0
+            fight_activations: Set[Tuple[int, str]] = set()
             for log in action_logs:
                 log_type = log.get("type")
                 if log_type == "move":
@@ -2957,6 +2959,8 @@ class W40KEngine(gym.Env):
                         move_actions += 1
                         if require_key(log, "was_flee"):
                             move_flees += 1
+                        if log.get("move_type") == "advance":
+                            move_advances += 1
                     continue
                 if log_type == "wait":
                     if int(require_key(log, "player")) == controlled_player:
@@ -3027,6 +3031,13 @@ class W40KEngine(gym.Env):
                     shoot_activations.add(
                         (int(require_key(log, "turn")), str(require_key(log, "shooterId")))
                     )
+                else:
+                    # Meme logique que le tir : une ligne par groupe d'armes, une activation
+                    # par (tour, escouade). La deduplication isole le nombre d'unites ayant
+                    # combattu, pas le nombre de groupes d'attaque.
+                    fight_activations.add(
+                        (int(require_key(log, "turn")), str(require_key(log, "shooterId")))
+                    )
                 if is_melee and log.get("phase") != "fight":
                     raise ValueError(
                         f"action_log de type 'combat' hors phase fight (phase="
@@ -3063,8 +3074,10 @@ class W40KEngine(gym.Env):
             self.episode_tactical_data['move_actions'] = move_actions
             self.episode_tactical_data['move_flees'] = move_flees
             self.episode_tactical_data['move_waits'] = move_waits
+            self.episode_tactical_data['move_advances'] = move_advances
             self.episode_tactical_data['shoot_activations'] = len(shoot_activations)
             self.episode_tactical_data['shoot_waits'] = shoot_waits
+            self.episode_tactical_data['fight_activations'] = len(fight_activations)
 
             # Issues du cache de scoring du deploiement, lues sur le decodeur qui les compte.
             # COPIE (`deployment_cache_counts()` en rend une) : le compteur du decodeur est remis

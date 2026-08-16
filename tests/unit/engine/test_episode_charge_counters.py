@@ -501,6 +501,51 @@ def test_the_phase_participation_counters_match_the_journal(melee_scenario_file)
     ) or _logs(engine, opponent, "move") == 0
 
 
+def test_move_advances_counts_advance_type_only(melee_scenario_file) -> None:
+    """move_advances = deplacements de type 'advance' du camp controle, pas tous les moves.
+
+    Un move normal ou une fuite ne doivent PAS y contribuer — seule la valeur 'advance'
+    du champ move_type compte.
+    """
+    engine, tactical = _episode_with(
+        melee_scenario_file,
+        lambda _eng, td: td["move_actions"] > 0,
+        "un episode ou l'agent bouge",
+    )
+    controlled, _ = _seat(engine)
+
+    expected_advances = sum(
+        1 for lg in engine.game_state["action_logs"]
+        if lg.get("type") == "move"
+        and int(lg["player"]) == controlled
+        and lg.get("move_type") == "advance"
+    )
+    assert tactical["move_advances"] == expected_advances
+    # Le verrou : si tout est normal (pas d'advance), le compteur doit etre 0, pas un fantasme.
+    assert tactical["move_advances"] <= tactical["move_actions"]
+
+
+def test_fight_activations_counts_unique_unit_turn_pairs(melee_scenario_file) -> None:
+    """fight_activations = paires (tour, escouade) uniques sur les logs 'combat' du controleur.
+
+    Une escouade qui attaque avec plusieurs armes produit plusieurs logs 'combat' dans le meme
+    tour. Sans deduplication, le compteur gonflerait au-dela du nombre d'unites combattantes.
+    """
+    engine, tactical = _episode_with(
+        melee_scenario_file,
+        lambda _eng, td: td["melee_kills"] > 0,
+        "un episode ou l'agent tue au moins une figurine en melee",
+    )
+    controlled, _ = _seat(engine)
+
+    expected = {
+        (int(lg["turn"]), str(lg["shooterId"]))
+        for lg in engine.game_state["action_logs"]
+        if lg.get("type") == "combat" and int(lg["player"]) == controlled
+    }
+    assert tactical["fight_activations"] == len(expected)
+
+
 def _shoot_line(turn: int, shooter: str, player: int) -> Dict[str, Any]:
     """Ligne de tir minimale : le contrat que la passe de comptage lit, et rien de plus.
 
@@ -557,13 +602,13 @@ def test_the_phase_participation_curves_are_emitted(
 
     by_key = {key: value for key, value, _step in recording.scalars}
     move_total = tactical["move_actions"] + tactical["move_waits"]
-    assert by_key["game_tactical/movement_efficiency"] == pytest.approx(
+    assert by_key["03_move/a_participation"] == pytest.approx(
         tactical["move_actions"] / move_total
     )
-    assert by_key["game_detailed/flee_rate"] == pytest.approx(
-        tactical["move_flees"] / move_total
+    assert by_key["03_move/c_flee_rate"] == pytest.approx(
+        tactical["move_flees"] / tactical["move_actions"]
     )
-    assert by_key["game_tactical/shooting_participation"] == pytest.approx(
+    assert by_key["04_shoot/a_participation"] == pytest.approx(
         tactical["shoot_activations"]
         / (tactical["shoot_activations"] + tactical["shoot_waits"])
     )
@@ -583,17 +628,18 @@ def test_a_phase_never_reached_emits_no_participation_rate(
         lambda _eng, td: td["move_actions"] > 0,
         "un episode ou l'agent bouge",
     )
-    tactical = {**tactical, "move_actions": 0, "move_waits": 0, "move_flees": 0}
+    tactical = {**tactical, "move_actions": 0, "move_waits": 0, "move_flees": 0, "move_advances": 0}
 
     tracker, recording = _recording_tracker(tmp_path)
     tracker.log_tactical_metrics(tactical)
 
     emitted = {key for key, _value, _step in recording.scalars}
-    assert "game_tactical/movement_efficiency" not in emitted
-    assert "game_detailed/flee_rate" not in emitted
+    assert "03_move/a_participation" not in emitted
+    assert "03_move/b_advance_rate" not in emitted
+    assert "03_move/c_flee_rate" not in emitted
     # Les autres phases, elles, ont bien eu lieu : leurs taux sortent. Sans ca, l'absence
     # ci-dessus serait celle d'un tag jamais ecrit.
-    assert "game_tactical/shooting_participation" in emitted
+    assert "04_shoot/a_participation" in emitted
 
 
 def test_the_charge_has_no_participation_rate(melee_scenario_file, tmp_path) -> None:
