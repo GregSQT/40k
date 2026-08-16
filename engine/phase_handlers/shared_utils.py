@@ -7807,6 +7807,9 @@ def squad_undeclare_shoot_model(
 SHOOTING_TYPE_NORMAL = "normal"
 SHOOTING_TYPE_ASSAULT = "assault"
 SHOOTING_TYPE_CLOSE_QUARTERS = "close_quarters"
+#: 10.07 — le QUATRIEME type, et le premier qui n exclut pas les autres (cf.
+#: `eligible_squad_shooting_types`).
+SHOOTING_TYPE_INDIRECT = "indirect"
 
 
 def _model_is_monster_or_vehicle(model: Dict[str, Any]) -> bool:
@@ -7850,6 +7853,65 @@ def _squads_are_engaged(
     return unit_entries_within_engagement_zone(a, b, get_engagement_zone(game_state))
 
 
+def eligible_squad_shooting_types(
+    game_state: Dict[str, Any], squad_id: str
+) -> Tuple[str, ...]:
+    """TOUS les types de tir que cette escouade est eligible a jouer (10.02, etape 2).
+
+    10.02 : « Select ONE shooting type that unit is eligible to make ». Le choix appartient au
+    JOUEUR — c est pour cela que cette fonction rend un ensemble, la ou
+    `resolve_squad_shooting_type` rend le type RETENU.
+
+    ⚠️ POURQUOI DEUX FONCTIONS, et pourquoi cet ensemble n existait pas avant. Les trois premiers
+    types s excluent deux a deux : 10.05 exige un advance, 10.06 exige d etre engage, 10.04 exige
+    ni l un ni l autre. L eligibilite se REDUISAIT donc a une derivation, et le docstring de
+    `resolve_squad_shooting_type` le disait explicitement. **10.07 casse cet invariant** : sa
+    condition (« unengaged and did not make an advance move this turn ») est EXACTEMENT celle de
+    10.04. Une unite unengaged, qui n a pas avance et qui porte une arme [INDIRECT FIRE] est
+    eligible aux DEUX, et rien dans l etat ne dit lequel elle joue : il faut le lui demander.
+
+    Ordre STABLE et signifiant : le type par defaut d abord (celui que rend
+    `resolve_squad_shooting_type`), les alternatives ensuite. Un ensemble non ordonne rendrait le
+    masque d action dependant de l ordre d iteration d un set — donc le comportement de l agent
+    non reproductible d une execution a l autre.
+
+    Rend un tuple VIDE si l escouade ne peut pas tirer du tout ; c est le meme etat que le `None`
+    de `resolve_squad_shooting_type`, et les deux se lisent au meme endroit pour cette raison.
+    """
+    default = resolve_squad_shooting_type(game_state, squad_id)
+    if default is None:
+        return ()
+    types = [default]
+    # 10.07 : mEme condition d eligibilite que 10.04 (donc `default` vaut deja NORMAL quand elle
+    # est remplie), plus au moins une arme [INDIRECT FIRE]. On ne re-teste PAS « unengaged et pas
+    # d advance » : `default == SHOOTING_TYPE_NORMAL` l atteste deja, et le re-deriver ici
+    # creerait une seconde definition de la condition, a reconcilier au premier desaccord.
+    if default == SHOOTING_TYPE_NORMAL and _squad_has_indirect_fire_weapon(game_state, squad_id):
+        types.append(SHOOTING_TYPE_INDIRECT)
+    return tuple(types)
+
+
+def _squad_has_indirect_fire_weapon(game_state: Dict[str, Any], squad_id: str) -> bool:
+    """10.07, deuxieme clause d eligibilite : « Has one or more [INDIRECT FIRE] weapons ».
+
+    Compte sur les figurines VIVANTES seulement — une arme portee par une figurine detruite ne
+    rend plus l unite eligible. Meme convention que `_any_weapon` de
+    `resolve_squad_shooting_type`, y compris le filtre metier `RNG > 0`.
+    """
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    for mid in squad_models.get(str(squad_id), []):  # get allowed (escouade inconnue = vide)
+        model = models_cache.get(mid)  # get allowed (figurine morte = retiree du cache)
+        if model is None:
+            continue
+        for weapon in ranged_weapons(model):
+            if not isinstance(weapon, dict) or int(require_key(weapon, "RNG")) <= 0:
+                continue
+            if weapon_has_rule(weapon, "INDIRECT_FIRE"):
+                return True
+    return False
+
+
 def resolve_squad_shooting_type(
     game_state: Dict[str, Any], squad_id: str
 ) -> Optional[str]:
@@ -7865,8 +7927,21 @@ def resolve_squad_shooting_type(
     (`shoot_after_flee`) — memes predicats que le chemin mono, pour que les deux chemins ne
     divergent pas.
 
-    Ordre des tests = ordre des conditions du PDF ; un seul type peut s appliquer (les
-    conditions « engaged / unengaged » et « advance / pas d advance » sont exclusives).
+    Ordre des tests = ordre des conditions du PDF.
+
+    ⚠️ CE QUE CETTE FONCTION REND, DEPUIS LE 2026-08-16 : le type RETENU, et non « le seul type
+    applicable ». La version precedente affirmait ici qu un seul type peut s appliquer, les
+    conditions « engaged / unengaged » et « advance / pas d advance » etant exclusives. C etait
+    vrai des TROIS types implementes alors, et faux en general : 10.07 (tir indirect) partage
+    EXACTEMENT la condition d eligibilite de 10.04, donc les deux coexistent. L ensemble des
+    types jouables se lit desormais dans `eligible_squad_shooting_types` ; celle-ci rend le
+    DEFAUT, c est-a-dire le type joue tant que le joueur n en choisit pas un autre (10.02).
+
+    Le defaut reste 10.04 normal quand 10.07 est aussi eligible, et ce n est pas arbitraire :
+    contre une cible VISIBLE, le tir normal domine strictement l indirect — celui-ci octroie le
+    couvert a la cible, interdit les relances de touche et impose un plancher d echec, sans
+    aucune contrepartie. L indirect ne se choisit que pour atteindre une cible invisible, donc
+    jamais par defaut.
     """
     from engine.phase_handlers.shooting_handlers import (
         _can_unit_shoot_after_advance_with_weapon,
@@ -7943,6 +8018,15 @@ def shooting_type_allows_weapon(
         if _model_is_monster_or_vehicle(model):
             return True
         return weapon_has_rule(weapon, "CLOSE_QUARTERS")
+    if shooting_type == SHOOTING_TYPE_INDIRECT:
+        # 10.07 ne restreint PAS la selection d armes — c est le seul type de tir dans ce cas, et
+        # l encadre du PDF le dit sans ambiguite : « its [INDIRECT FIRE] weapons can launch
+        # punishing barrages on targets that are not visible, but don t forget that its OTHER
+        # WEAPONS CAN STILL TARGET OTHER VISIBLE TARGETS ». Les penalites de 10.07 (plancher
+        # d echec, couvert octroye, pas de relance) ne portent que sur les attaques des armes
+        # [INDIRECT FIRE] elles-memes, jamais sur celles de leurs voisines — elles s appliquent
+        # donc a la RESOLUTION, pas ici.
+        return True
     raise ValueError(f"shooting_type inconnu : {shooting_type!r}")
 
 

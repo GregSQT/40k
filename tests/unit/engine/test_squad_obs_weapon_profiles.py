@@ -348,13 +348,43 @@ def test_anti_rules_do_not_stack_best_threshold_wins():
     assert _self_rules(eng, 0) == {"ANTI_VEHICLE"}
 
 
-def test_indirect_fire_is_deliberately_absent():
-    """[INDIRECT FIRE] 24.19 n'est PAS résolue par le moteur : l'exposer serait du bruit."""
-    assert "INDIRECT_FIRE" not in WEAPON_RULE_BITS
+def test_indirect_fire_est_observee_depuis_qu_elle_est_vive():
+    """[INDIRECT FIRE] 24.19 est OBSERVÉE depuis le 2026-08-16, et c'est l'exact inverse de ce
+    que ce test verrouillait jusque-là (« deliberately absent »).
+
+    Ce n'est pas un revirement : la règle avait un id **interdit** tant qu'elle n'avait aucun
+    effet de jeu — un id pour une règle morte est du bruit que l'agent doit apprendre à ignorer.
+    Elle en a un maintenant qu'elle est résolue, et surtout parce que 10.02 confie au joueur le
+    choix du type de tir : **un type de tir qu'on ne perçoit pas est un type de tir qu'on ne
+    joue jamais**. L'agent ne peut pas choisir l'indirect s'il ne voit pas quelles armes le lui
+    ouvrent.
+
+    Le pendant du test supprimé est conservé : le fait que l'ajout ne coûte AUCUN paramètre.
+    C'est ce qui rend la décision réversible et bon marché, et c'est tout l'objet des slots d'id.
+    """
+    assert "INDIRECT_FIRE" in WEAPON_RULE_BITS
+    # Règle SANS paramètre : elle n'a rien à dire sur la dimension continue.
     assert "INDIRECT_FIRE" not in {name for name, _ in WEAPON_RULE_PARAMS}
-    # Et donc aucun `obs_id` : le registre la déclare, l'observation l'ignore. La rendre vivante
-    # se fera en lui donnant un id — sans toucher `obs_size`, c'est tout l'objet des slots.
-    assert "INDIRECT_FIRE" not in weapon_rule_obs_ids()
+    assert weapon_rule_obs_ids()["INDIRECT_FIRE"] > 0
+
+
+def test_donner_un_id_a_indirect_fire_ne_change_pas_la_taille_de_l_observation():
+    """VERROU du coût annoncé : le vocabulaire d'ids est PRÉ-DIMENSIONNÉ, il ne s'ajuste pas au
+    nombre de règles. Ajouter [INDIRECT FIRE] ne touche donc ni `obs_size` ni les poids — le
+    ré-entraînement de ce chantier vient du CHOIX exposé à l'agent, pas de l'observation.
+
+    Sans ce test, l'affirmation « l'obs_id est gratuit » resterait une phrase de documentation ;
+    elle a déjà été écrite à l'envers une fois (2026-08-15), ce qui a failli faire renoncer à la
+    règle pour un coût imaginaire.
+    """
+    from engine.observation_entities import OBS_ID_MAX, OBS_ID_VOCAB_SIZE
+
+    assert OBS_ID_VOCAB_SIZE == OBS_ID_MAX + 1, (
+        "le vocabulaire doit rester pré-dimensionné, jamais ajusté au nombre de règles"
+    )
+    assert max(weapon_rule_obs_ids().values()) <= OBS_ID_MAX, (
+        "un id au-delà du vocabulaire ferait, LUI, grossir les tables d'embedding"
+    )
 
 
 # ---------------------------------------------------------------- ennemis

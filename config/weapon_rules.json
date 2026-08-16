@@ -98,7 +98,8 @@
   "INDIRECT_FIRE": {
     "id": "INDIRECT_FIRE",
     "name": "Indirect Fire",
-    "description": "A line of sight on the target is not required to attack with this weapon.",
+    "obs_id": 18,
+    "description": "Units containing one or more models with an [INDIRECT FIRE] weapon can shoot using indirect shooting (10.07): those weapons can target units that are not visible, the target has the benefit of cover, hit rolls cannot be re-rolled, and an unmodified hit roll of 1-5 fails (1-3 if the unit remained stationary and the target is visible to a friendly unit).",
     "has_parameter": false
   },
   "LETHAL_HITS": {

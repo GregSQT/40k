@@ -108,11 +108,17 @@ Conséquences en cascade, et c'est ce qui fait le périmètre :
 Chaque pièce est nommée avec son critère d'entrée. Les tests et docs ne comptent pas dans la
 limite T2 des ~5 fichiers.
 
-1. **Registre** — `config/weapon_rules.json` : donner son `obs_id` à `INDIRECT_FIRE`, et
+1. ✅ **FAIT le 2026-08-16.** **Registre** — `config/weapon_rules.json` : donner son `obs_id` à `INDIRECT_FIRE`, et
    `engine/observation_weapon_profiles.WEAPON_RULE_BITS` l'accueillir. Retirer
    `tests/unit/engine/test_squad_obs_weapon_profiles.py::test_indirect_fire_is_deliberately_absent`,
    dont l'objet même disparaît, et le remplacer par son inverse.
-2. **Éligibilité** — `shared_utils.resolve_squad_shooting_type` rend un ensemble ;
+2. ✅ **FAIT le 2026-08-16**, mais autrement que prévu ici : plutôt que de changer le type de
+   retour de `resolve_squad_shooting_type` — ce qui aurait forcé ses QUATRE appelants à choisir,
+   dont le masque gym —, l'ensemble vit dans une fonction NEUVE,
+   `eligible_squad_shooting_types`, et la dérivation garde son rôle : elle rend le type
+   **retenu**, c'est-à-dire le défaut tant que personne ne choisit. Zéro appelant touché, zéro
+   changement de comportement. **Éligibilité** — l'ancienne formulation :
+   `shared_utils.resolve_squad_shooting_type` rend un ensemble ;
    `SHOOTING_TYPE_INDIRECT` ; `shooting_type_allows_weapon` rend `True` pour toutes les armes
    sous le type indirect (cf. l'encadré : les autres armes tirent normalement).
 3. **Ciblage** — le pool de cibles des armes [INDIRECT FIRE] cesse d'exiger la ligne de vue.
