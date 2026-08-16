@@ -240,17 +240,19 @@ def test_no_enemy_on_the_table_falls_back_to_every_anchor() -> None:
     assert choisie == MOI, "aucun terme ne départage : le bot ne bouge pas"
 
 
-def test_a_focused_target_off_the_table_is_a_broken_invariant() -> None:
-    """Une cible élue HORS TABLE n'existe pas : `_elect` n'élit que parmi les présentes.
+def test_a_focused_target_off_the_table_is_replaced_not_abandoned() -> None:
+    """20.01 : une unité peut être vivante mais hors table (réserves, sentinelle -1,-1).
 
-    Cet état ne se construit qu'à la main (c'est ce que fait ce test) ; le repli silencieux qui
-    vivait ici couvrait donc du code que la production n'atteint pas, et aurait fait jouer une
-    doctrine cassée comme un bot ordinaire. On exige l'erreur explicite.
+    `_elect` ne l'élit pas (filtrée par `_living_enemies_on_table`), mais `_focus_target` peut
+    pointer vers elle entre deux activations si elle quittait la table après l'élection.
+    Le comportement correct est le remplacement gracieux par la prochaine cible disponible,
+    pas un raise — jouer une doctrine cassée en silence était le vrai problème.
     """
     state = _state(ennemis=(("101", FAIBLE), ("102", HORS_TABLE)))
     bot = _Decapitation()
     bot._focus_target = "102"
     bot._focus_turn = (1, 1)
 
-    with pytest.raises(RuntimeError, match="invariant de focus rompu"):
-        bot.select_movement_destination(_moi(state), [VERS_FAIBLE, VERS_JUTEUX], state)
+    dest = bot.select_movement_destination(_moi(state), [VERS_FAIBLE, VERS_JUTEUX], state)
+    assert dest == VERS_FAIBLE, "après remplacement, le bot converge vers la cible visible"
+    assert bot._focus_target == "101"

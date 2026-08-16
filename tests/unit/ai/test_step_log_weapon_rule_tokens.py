@@ -22,7 +22,7 @@ Rien n'est simulé sauf le décor (en-tête d'épisode, positions), qui n'est pa
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Dict
 import random
 
 import pytest
@@ -1380,7 +1380,7 @@ def test_regle_sans_l_etat_absente_du_pont(monkeypatch, tmp_path, weapon_rule, d
     avec les mêmes clés mises à `False`, pas un décor absent : c'est ce qui rend la seule
     différence avec le test de présence lisible.
     """
-    neutre = {k: False for k in engine_kwargs}
+    neutre: Dict[str, Any] = {k: False for k in engine_kwargs}
     gs, raw_log = _engine_shoot_log(monkeypatch, [weapon_rule], [3, 4, 2], **neutre)
     bridge = _Bridge(gs)
     details = bridge._build_shot_details(raw_log, raw_log["shootDetails"][0], 1, None)
@@ -1542,7 +1542,7 @@ def test_analyzer_grammaire_4_ne_compte_rien_sans_token(monkeypatch, tmp_path, w
     Sans elle, un comptage inconditionnel en grammaire >= 4 passerait le test de présence.
     """
     weapon_name = CQ_WEAPON if weapon_rule == "CLOSE_QUARTERS" else WEAPON_NAME
-    neutre = {k: False for k in engine_kwargs}
+    neutre: Dict[str, Any] = {k: False for k in engine_kwargs}
     gs, raw_log = _engine_shoot_log(monkeypatch, [weapon_rule], [3, 4, 2],
                                     weapon_name=weapon_name, **neutre)
     line = _step_log_line(tmp_path, gs, raw_log)
