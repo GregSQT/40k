@@ -73,7 +73,7 @@ from shared.data_validation import require_key
 # Primitives d'espace d'action — AUCUNE doctrine, donc pas de raison de les redire ici. Les
 # reecrire creerait le doublon divergent qui est le mode d'echec n°1 de ce depot.
 from ai.evaluation_bots import (
-    _acting_player, _best_slot_action, _select_weighted_deployment_action,
+    _best_slot_action, _select_weighted_deployment_action,
     DEPLOYMENT_ACTIONS, WAIT_ACTION,
 )
 
@@ -111,8 +111,8 @@ def _score_efficiency(attacker, is_ranged: bool):
     """
     att_id = str(require_key(attacker, "id"))
 
-    def _score(sid: str, entry: Dict[str, Any], game_state) -> Optional[float]:
-        return _damage_on(game_state, att_id, sid, is_ranged)
+    def _score(sid: str, entry: Dict[str, Any], game_state) -> float:  # jamais `None`, cf.
+        return _damage_on(game_state, att_id, sid, is_ranged)          # `_score_kill_now`
 
     return _score
 
@@ -144,13 +144,16 @@ def _score_kill_now(attacker, is_ranged: bool):
     restants de la cible. L'ancien `_score_killable_then_wounded` comparait les PV de l'escouade
     au degat d'UNE arme d'UNE figurine : sur toute escouade multi-figurines la branche etait
     quasi toujours fausse, et le bonus de 1000 points ne se declenchait jamais.
+
+    ⚠️ `float`, PAS `Optional[float]` : ce scorer n'ECARTE aucune cible, il les classe toutes,
+    zero degat compris. Le contrat de `_best_slot_action` autorise `None` — `_score_contester`
+    s'en sert — mais l'annoncer ici quand on ne le rend jamais faisait ecrire chez les appelants
+    des gardes `is None` MORTES (deux, corrigees le 2026-08-14 : `_elect` et le `target_score`
+    de `DecapitationBot`). « Peut ecarter » se lit sur le type, donc le type doit etre vrai.
     """
     att_id = str(require_key(attacker, "id"))
 
     def _score(sid: str, entry: Dict[str, Any], game_state) -> float:
-        # `float` et non `Optional[float]` : ce critere n'ecarte jamais une cible, et `_elect` le
-        # compose (`max` des deux modes) sans avoir a inventer une branche pour un `None`
-        # impossible — un garde qui ne peut pas se declencher ne protege rien (T1).
         damage = _damage_on(game_state, att_id, sid, is_ranged)
         return (1000.0 if damage >= _hp_left(sid, game_state) else 0.0) + damage
 
@@ -166,8 +169,8 @@ def _score_value_removed(attacker, is_ranged: bool):
     """
     att_id = str(require_key(attacker, "id"))
 
-    def _score(sid: str, entry: Dict[str, Any], game_state) -> Optional[float]:
-        damage = _damage_on(game_state, att_id, sid, is_ranged)
+    def _score(sid: str, entry: Dict[str, Any], game_state) -> float:  # jamais `None`, cf.
+        damage = _damage_on(game_state, att_id, sid, is_ranged)        # `_score_kill_now`
         return float(require_key(entry, "VALUE")) * min(
             1.0, damage / _hp_left(sid, game_state)
         )
@@ -307,10 +310,7 @@ def _firepower_from(dest, profile, my_range: int) -> Tuple[float, float]:
 _CONTEST_PULL = {"enemy": 2.0, "neutral": 1.0, "mine": 0.0}
 
 
-def _surplus_oc_by_zone(
-    game_state, zones, me: int, sauf_escouade: str,
-    contributions: Optional[Dict[str, Any]] = None,
-) -> List[float]:
+def _surplus_oc_by_zone(game_state, zones, me: int, sauf_escouade: str) -> List[float]:
     """Par zone : de combien d'OC MON camp y depasse deja l'adversaire, hors mon escouade.
 
     C'est la grandeur qui dit « cette zone est deja servie ». Le controle se tranche a la SOMME
@@ -338,8 +338,7 @@ def _surplus_oc_by_zone(
     """
     if not zones:
         return []
-    if contributions is None:
-        contributions = objective_control_contributions(game_state, zones)
+    contributions = objective_control_contributions(game_state, zones)
     sauf = str(sauf_escouade)
     sums = fold_control_contributions(
         (part for squad_id, part in contributions.items() if squad_id != sauf), len(zones)
@@ -354,7 +353,6 @@ def _objective_terms(
     w_contest: float = 0.0,
     w_crowd: float = 0.0,
     escouade: Optional[str] = None,
-    contributions: Optional[Dict[str, Any]] = None,
 ):
     """(carte de distance COMBINEE, zones) — une seule reduction par decision.
 
@@ -394,7 +392,7 @@ def _objective_terms(
         return None, objective_hex_sets(game_state)
     zones = objective_hex_sets(game_state)
     if w_crowd and me is not None and escouade is not None:
-        surplus = _surplus_oc_by_zone(game_state, zones, int(me), str(escouade), contributions=contributions)
+        surplus = _surplus_oc_by_zone(game_state, zones, int(me), str(escouade))
         maps = [m + w_crowd * s if s else m for m, s in zip(maps, surplus)]
     if w_contest and me is not None:
         # `get allowed` : le dict est cree PARESSEUSEMENT par `calculate_objective_control`, donc
@@ -457,13 +455,7 @@ class _PlacementMemory:
         self._deployment_episode_marker: Optional[Any] = None
 
     def select_placement_action(self, valid_actions: List[int], game_state) -> int:
-        # `require_key` et non un `.get` : le moteur ecrit `episode_number` a chaque reset
-        # (`W40KEngine.reset`), donc un etat qui fait poser un bot le porte toujours. Absent, le
-        # marqueur valait `None` d'un episode a l'autre et la garde anti-repetition ne se
-        # reinitialisait JAMAIS : une instance reutilisee entre episodes (`scripts/bot_ranking.py`)
-        # heritait du dernier slot pose et l'ecartait a la premiere pose du suivant. Jumeau exact
-        # du marqueur de tour de `DecapitationBot._focus`, durci avec lui.
-        episode_marker = require_key(game_state, "episode_number")
+        episode_marker = game_state.get("episode_number")  # get allowed (absent hors episode)
         if self._deployment_episode_marker != episode_marker:
             self._deployment_episode_marker = episode_marker
             self._deployment_last_action = None
@@ -501,8 +493,6 @@ class _DoctrineBot(_PlacementMemory):
     def __init__(self, randomness: float = 0.0):
         super().__init__()
         self.randomness = max(0.0, min(1.0, randomness))
-        self._contributions_cache_key: Optional[tuple] = None
-        self._contributions_cache_val: Optional[Dict[str, Any]] = None
 
 
     # -- Points de variation ------------------------------------------------------------------
@@ -589,24 +579,17 @@ class _DoctrineBot(_PlacementMemory):
 
     # -- Deplacement --------------------------------------------------------------------------
 
-    def _enemy_anchors(self, unit, game_state, enemies) -> List[Tuple[int, int]]:
-        """Ancres ennemies sur lesquelles porte le terme geometrique `w_enemy`.
+    def movement_enemy_anchors(
+        self, unit, enemies: List[Dict[str, Any]], game_state
+    ) -> List[Tuple[int, int]]:
+        """Ancres ennemies que le terme d'ennemi du deplacement prend en compte.
 
-        Point d'extension : le socle vise TOUTES les escouades ennemies sur table, donc `w_enemy`
-        y agit sur la PLUS PROCHE. Un style qui concentre (cf. `DecapitationBot`) restreint cette
-        liste pour que le meme poids tire vers SA cible, sans dupliquer le score de destination.
-
-        `enemies` est FOURNI par l'appelant : `select_movement_destination` a deja paye ce
-        parcours pour `w_fire`/`w_risk`, le refaire ici doublait les lectures du cache pour une
-        liste identique.
+        TOUTES par defaut : le terme vaut `-w_enemy x min(distance)`, c'est-a-dire « l'ennemi le
+        plus proche, quel qu'il soit ». Un seul style restreint ce jeu (`DecapitationBot`, qui ne
+        regarde que sa cible du tour), d'ou un point d'extension plutot qu'une branche par style
+        dans `select_movement_destination` — celui-ci reste COMMUN aux six.
         """
-        return [
-            (int(e["col"]), int(e["row"]))
-            for e in (
-                require_unit_from_cache(str(x["id"]), game_state, "_enemy_anchors")
-                for x in enemies
-            )
-        ]
+        return [require_unit_position(x, game_state) for x in enemies]
 
     def select_movement_destination(
         self, unit, valid_destinations: List[Tuple[int, int]], game_state=None
@@ -629,22 +612,6 @@ class _DoctrineBot(_PlacementMemory):
             return (int(chosen[0]), int(chosen[1]))
 
         w_obj, w_enn, w_fire, w_risk, w_contest, w_crowd = self.movement_weights(unit, game_state)
-        # Pré-calcul des contributions d'OC mis en cache par activation : la traversée des
-        # empreintes de socle est le poste dominant de `_surplus_oc_by_zone` et son résultat est
-        # constant pendant toute l'activation d'une unité.
-        contributions: Optional[Dict[str, Any]] = None
-        if w_crowd != 0.0:
-            activation_key = (
-                require_key(game_state, "episode_number"),
-                require_key(game_state, "turn"),
-                require_key(game_state, "phase"),
-                str(require_key(unit, "id")),
-            )
-            if self._contributions_cache_key != activation_key:
-                zones_tmp = objective_hex_sets(game_state)
-                self._contributions_cache_val = objective_control_contributions(game_state, zones_tmp)
-                self._contributions_cache_key = activation_key
-            contributions = self._contributions_cache_val
         # La carte de distance est PONDEREE par qui tient quoi ET par ce que les allies couvrent
         # deja : c'est ici que le bot cesse d'aller betement vers la zone la plus proche, et qu'il
         # cesse d'y aller a cinq (cf. `_objective_terms`).
@@ -654,13 +621,9 @@ class _DoctrineBot(_PlacementMemory):
             w_contest=w_contest,
             w_crowd=w_crowd,
             escouade=str(require_key(unit, "id")),
-            contributions=contributions,
         )
         enemies = _living_enemies_on_table(unit, game_state)
-        # `enemy_anchors` passe par le hook (le style peut le restreindre a sa cible focalisee) ;
-        # `enemies` reste la liste COMPLETE : les termes `w_fire`/`w_risk` chiffrent ce qu'on subit
-        # de TOUT le monde, restreindre la menace a une seule escouade serait un tout autre bot.
-        enemy_anchors = self._enemy_anchors(unit, game_state, enemies)
+        enemy_anchors = self.movement_enemy_anchors(unit, enemies, game_state)
         hold_bonus = load_hold_bonus()
 
         def _geometric(dest, inside: bool) -> float:
@@ -932,16 +895,10 @@ class DecapitationBot(_DoctrineBot):
 
     ⚠️ Le focus est une MEMOIRE de tour, pas un score : les bots decident escouade par escouade
     sans se voir les unes les autres, donc aucun critere local ne peut produire une concentration.
-    La cible est elue a la premiere activation du tour — DEPLACEMENT COMPRIS, c'est la premiere
-    phase ou le bot decide — et gardee tant qu'elle vit et tient la table.
-
-    ⚠️ Cette election est PROVISOIRE jusqu'a la premiere attaque du tour (`_focus_confirmed`).
-    Le mouvement classe sur `squad_expected_damage`, qui ne depend PAS de la position : il peut
-    donc elire une escouade qu'aucun masque n'ouvrira au tir (hors portee, hors LoS). Sans
-    confirmation, le bonus de `target_score` ne se declenchait alors chez PERSONNE et chaque
-    escouade reprenait sa propre meilleure cible — soit une dispersion pire que celle du socle,
-    dans le style qui existe pour la supprimer. La premiere attaque reelle tranche donc : elle
-    verrouille la cible du tour, elue ou non, et c'est elle qui prouve qu'elle est attaquable.
+    La cible est ELUE a la premiere activation du tour (cf. `_elect`) et gardee tant qu'elle vit.
+    Elle porte les DEUX faces de la doctrine : vers qui on tire (`target_score`) et vers qui on
+    marche (`movement_enemy_anchors`) — concentrer ses tirs depuis cinq positions eclatees, c'est
+    ne concentrer que la moitie de son activation.
     """
 
     MOVEMENT_BOT_KEY = "decapitation"
@@ -954,148 +911,106 @@ class DecapitationBot(_DoctrineBot):
         super().__init__(randomness)
         self._focus_turn: Optional[Tuple[Any, int]] = None
         self._focus_target: Optional[str] = None
-        #: La cible a-t-elle ete ATTAQUEE (donc prouvee attaquable), ou seulement elue au
-        #: mouvement ? Tant que c'est faux, la premiere attaque du tour peut la remplacer.
-        self._focus_confirmed: bool = False
 
-    def _focus(self, game_state) -> Optional[str]:
-        """Cible du tour, oubliee au changement de tour ou a la mort de la cible.
+    def _focus(self, game_state, attacker) -> Optional[str]:
+        """Cible du tour, ELUE a la premiere lecture, oubliee au changement de tour ou a sa mort.
 
         ⚠️ `require_key` sur `turn`, pas un defaut a 1 (T1, meme correction qu'`EndgameBot`) :
         un etat sans tour rendait ici un marqueur CONSTANT, donc le bot gardait la meme cible
         focalisee pendant toute la partie au lieu d'en changer a chaque tour — un defaut de
         doctrine silencieux, ne au masquage d'une rupture d'invariant.
-        ⚠️ `require_key` sur `episode_number` AUSSI, pour la meme raison et non « parce qu'il
-        serait legitimement absent hors episode » : le moteur l'ecrit a CHAQUE reset
-        (`W40KEngine.reset`, `game_state["episode_number"]`), donc tout etat qui fait decider un
-        bot le porte. Absent, le `.get` rendait `None` et deux episodes successifs joues par la
-        MEME instance (`scripts/bot_ranking.py`, via `scripted_action_for_agent_side`) partageaient
-        le marqueur au tour 1 : la cible focalisee — et sa confirmation — survivait d'un episode au
-        suivant. Meme motif dans la memoire de POSE, durcie avec celle-ci.
-
-        ⚠️ `_focus_confirmed` s'oublie EXACTEMENT quand la cible s'oublie, jamais separement :
-        une confirmation qui survivrait a la cible ferait sortir `_remember` trop tot, et la
-        cible morte en cours de tour ne serait remplacee par personne jusqu'au tour suivant.
+        `episode_number` garde son `.get` : il est legitimement absent hors episode (cf. la
+        memoire de pose), et son absence ne fabrique pas un faux tour.
         """
-        marker = (require_key(game_state, "episode_number"), int(require_key(game_state, "turn")))
+        marker = (game_state.get("episode_number"), int(require_key(game_state, "turn")))
         if self._focus_turn != marker:
             self._focus_turn = marker
-            self._focus_target, self._focus_confirmed = None, False
+            self._focus_target = None
         if self._focus_target is not None and not is_unit_alive(self._focus_target, game_state):
-            self._focus_target, self._focus_confirmed = None, False
+            self._focus_target = None
+        if self._focus_target is None:
+            self._focus_target = self._elect(game_state, attacker)
         return self._focus_target
 
+    def _elect(self, game_state, attacker) -> Optional[str]:
+        """Elit la cible du tour pour l'escouade qui active la premiere.
+
+        ⚠️ ELECTION, et non plus memorisation du premier tir (2026-08-13). La cible etait
+        enregistree depuis `_shoot`/`_fight`, or la phase move PRECEDE le tir dans le tour
+        (`GAME_PHASES`) et le changement de tour vient d'effacer celle du tour precedent : le
+        deplacement ne lisait donc JAMAIS qu'un focus vide. Les cinq escouades partaient chacune
+        vers un ennemi different, puis concentraient leurs tirs depuis des positions eclatees —
+        la doctrine s'annulait dans la phase qui la precede.
+
+        Le critere reste celui du tir, `_score_kill_now`, pris au MEILLEUR des deux modes : au
+        moment de bouger on ne sait pas encore si l'escouade tirera ou chargera, et une cible elue
+        sur la mauvaise table de degats concentrerait tout le monde sur une escouade que personne
+        ne peut entamer.
+
+        AUCUN filtre sur les scores, et c'est le contrat de `_score_kill_now` qui le dit : il
+        classe TOUTES les cibles, zero degat compris (contrairement a `_score_contester`, qui
+        ecarte). Le filtre `is None` qui vivait ici etait donc mort, et avec lui le repli
+        `if not scored`. `None` n'est rendu QUE sur une table sans ennemi.
+        """
+        enemies = _living_enemies_on_table(attacker, game_state)
+        if not enemies:
+            return None
+        ranged, melee = _score_kill_now(attacker, True), _score_kill_now(attacker, False)
+        scored: List[Tuple[float, str]] = []
+        for enemy in enemies:
+            sid = str(enemy["id"])
+            entry = require_unit_from_cache(sid, game_state, "_elect")
+            # Le MEILLEUR des deux modes, par cible : « inattaquable au tir » n'est pas
+            # « inattaquable » — l'escouade peut encore charger.
+            scored.append((
+                max(ranged(sid, entry, game_state), melee(sid, entry, game_state)), sid
+            ))
+        # `key=` et non `max(scored)` : a egalite de score, le premier de l'ordre des unites, et
+        # surtout pas le plus petit identifiant — l'ordre des unites est le meme pour toutes les
+        # escouades du tour, donc l'election reste la meme quelle que soit celle qui active.
+        return max(scored, key=lambda pair: pair[0])[1]
+
+    def movement_enemy_anchors(self, unit, enemies, game_state):
+        """Le terme d'ennemi porte sur la CIBLE DU TOUR : c'est la doctrine, pas une geometrie.
+
+        UN SEUL repli, et il est fonctionnel : plus aucun ennemi SUR LA TABLE (tous en reserves
+        au tour 1, 20.01, ou tous morts) — `_focus` rend alors `None`, et le terme retombe sur
+        toutes les ancres, c'est-a-dire sur rien puisque `enemies` est vide lui aussi.
+
+        ⚠️ Une cible elue est FORCEMENT dans `enemies` : `_elect` n'elit que parmi
+        `_living_enemies_on_table`, exactement la liste que `select_movement_destination` passe
+        ici, et `_focus` efface celle qui meurt. Une escouade posee ne repasse jamais en
+        reserves. Donc une cible absente d'`enemies` n'est PAS une cible « pas encore arrivee » :
+        c'est une rupture d'invariant, et elle LEVE (T1). Le test d'appartenance qui vivait ici
+        la faisait retomber en silence sur `min(distance)` — une doctrine cassee jouant comme un
+        bot ordinaire, sans que rien ne le signale.
+        """
+        focused = self._focus(game_state, unit)
+        if focused is None:
+            return super().movement_enemy_anchors(unit, enemies, game_state)
+        entry = require_unit_from_cache(focused, game_state, "_move_focus")
+        if not entry_is_on_battlefield(entry):
+            raise RuntimeError(
+                f"DecapitationBot : cible focalisee {focused} hors table alors que `_elect` ne "
+                "l'elit que parmi les escouades presentes — invariant de focus rompu."
+            )
+        return [(int(entry["col"]), int(entry["row"]))]
+
     def target_score(self, attacker, is_ranged: bool, game_state):
-        focused = self._focus(game_state)
+        focused = self._focus(game_state, attacker)
         kill_now = _score_kill_now(attacker, is_ranged)
 
-        def _score(sid: str, entry: Dict[str, Any], game_state) -> Optional[float]:
+        def _score(sid: str, entry: Dict[str, Any], game_state) -> float:
             # `kill_now` vaut `(1000 si letal) + degats`, et les PV sont strictement positifs
             # (`_hp_left`) : `base > 0` dit donc exactement « je peux l'entamer », sans qu'il
-            # faille construire un second scorer pour poser la meme question.
+            # faille construire un second scorer pour poser la meme question. Il n'ecarte
+            # jamais, d'ou l'absence de garde `is None` — cf. son contrat.
             base = kill_now(sid, entry, game_state)
-            if base is None:
-                return None
             if focused is not None and sid == focused and base > 0.0:
                 return base + 10_000.0  # la cible du tour prime, si on peut l'entamer
             return base
 
         return _score
-
-    def _elect(self, unit, game_state, enemies) -> Optional[str]:
-        """Choisit la cible du tour, avec le critere que le TIR appliquera ensuite.
-
-        `_score_kill_now` est repris tel quel — « tuable ce tour d'abord, puis efficacite » — et
-        pris au MEILLEUR des deux modes : au mouvement on ne sait pas encore si l'escouade finira
-        par tirer ou par charger, et `squad_expected_damage` ne depend pas de la position (c'est
-        deja ce qui permet a `_firepower_profile` de se calculer une fois par decision).
-
-        `enemies` ne contient que des escouades vivantes SUR TABLE : l'elue a donc toujours une
-        ancre lisible, sans garde sentinelle (-1,-1) a poser ici.
-        """
-        ranged, melee = _score_kill_now(unit, True), _score_kill_now(unit, False)
-        best: Optional[str] = None
-        best_score = float("-inf")
-        for enemy in enemies:
-            sid = str(enemy["id"])
-            entry = require_unit_from_cache(sid, game_state, "_elect")
-            score = max(ranged(sid, entry, game_state), melee(sid, entry, game_state))
-            if score > best_score:
-                best_score, best = score, sid
-        return best
-
-    def _enemy_anchors(self, unit, game_state, enemies) -> List[Tuple[int, int]]:
-        """Le deplacement suit la cible FOCALISEE, pas l'ennemi le plus proche.
-
-        Sans cette concentration, `target_score` groupait les tirs pendant que `w_enemy` poussait
-        chaque escouade vers l'ennemi le plus proche d'ELLE : la doctrine se contredisait a
-        chaque tour, les escouades s'eparpillaient geographiquement et perdaient la portee sur
-        la cible commune des le tour suivant.
-
-        ⚠️ C'est ICI que la cible du tour est ELUE quand il n'y en a pas encore, et pas seulement
-        lue. Le mouvement precede le tir (07.01) et un `turn` couvre les deux joueurs, donc
-        attendre `_remember` (qui n'ecrit que depuis le tir et la melee) laissait la memoire vide
-        pendant TOUT le deplacement : l'override existait mais ne s'appliquait jamais quand le bot
-        joue en premier, et la doctrine ne portait que sur la moitie des phases. L'election est
-        ecrite dans `_focus_target`, donc les escouades suivantes la LISENT au lieu d'en elire une
-        chacune — c'est la memoire partagee qui fait la concentration, pas un critere local.
-
-        ⚠️ Elle est ecrite PROVISOIRE (`_focus_confirmed` reste faux) : ce critere ne regarde pas
-        la portee, donc la premiere attaque du tour a le dernier mot (cf. `_remember`). Le cap du
-        deplacement, lui, est deja pris quand cette correction intervient — c'est bien l'ordre
-        voulu : on marche vers la cible la plus payante, on tire sur celle qu'on atteint.
-        """
-        focused = self._focus(game_state)
-        on_table = {str(e["id"]) for e in enemies}
-        if focused is None or focused not in on_table:
-            # Cible morte ou hors table (20.01) : on en reelit une plutot que de rendre la main au
-            # socle — une escouade qui n'a plus de cap se remettrait a suivre son plus proche
-            # voisin, soit exactement l'eparpillement que le style existe pour eviter.
-            focused = self._elect(unit, game_state, enemies)
-            self._focus_target = focused
-        if focused is None:
-            return []
-        entry = require_unit_from_cache(focused, game_state, "_enemy_anchors")
-        return [(int(entry["col"]), int(entry["row"]))]
-
-    def _remember(self, action: Optional[int], slot_base: int, game_state, active_unit) -> None:
-        """CONFIRME la cible du tour sur la premiere attaque REELLE, et la verrouille ensuite.
-
-        La condition de sortie porte sur `_focus_confirmed`, PAS sur `_focus_target is not None` :
-        depuis que `_enemy_anchors` elit au mouvement, cette seconde forme sortait a tous les
-        coups et cette methode etait morte en production. La cible du tour n'etait alors plus
-        jamais prouvee attaquable — l'election classe sur `squad_expected_damage`, independant de
-        la position, donc elle peut designer une escouade hors portee et hors LoS que le masque
-        n'ouvrira a personne, sans que rien ne rattrape le choix ensuite.
-
-        Une cible differente de l'elue signifie donc que le bonus de `target_score` ne s'est PAS
-        applique : soit l'elue n'etait pas dans le masque, soit l'escouade ne peut pas l'entamer
-        (`base > 0`). Dans les deux cas la reprendre est ce qui reconcentre le reste du tour —
-        c'est exactement la semantique d'avant l'election au mouvement, rendue au tir.
-
-        Le verrou est ce qui empeche le balayage : sans lui, deux escouades aux portees disjointes
-        se voleraient la cible a chaque activation et aucune troisieme n'aurait de cap a suivre.
-        """
-        if action is None or self._focus_confirmed:
-            return
-        from engine.phase_handlers.shared_utils import get_enemy_slot_mapping
-
-        mapping = get_enemy_slot_mapping(game_state, _acting_player(game_state, active_unit))
-        slot = action - slot_base
-        if 0 <= slot < len(mapping) and mapping[slot] is not None:
-            self._focus_target, self._focus_confirmed = str(mapping[slot]), True
-
-    def _shoot(self, valid_actions, game_state, active_unit) -> int:
-        action = super()._shoot(valid_actions, game_state, active_unit)
-        if action in mi.SHOOT_SLOTS:
-            self._remember(action, mi.SHOOT_SLOT_BASE, game_state, active_unit)
-        return action
-
-    def _fight(self, valid_actions, game_state, active_unit) -> int:
-        action = super()._fight(valid_actions, game_state, active_unit)
-        if action in mi.FIGHT_SLOTS:
-            self._remember(action, mi.FIGHT_SLOT_BASE, game_state, active_unit)
-        return action
 
 
 class ScorerBot(_DoctrineBot):
