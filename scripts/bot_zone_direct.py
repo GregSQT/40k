@@ -30,14 +30,15 @@ import hashlib
 import os
 import sys
 from datetime import datetime
-from typing import Any, Dict, List, Optional, TextIO, cast
+from typing import Any, Dict, List, Optional, TextIO
 
-_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, _PROJECT_ROOT)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from bot_panel_reference import print_panel_reference  # noqa: E402  (dépend du sys.path ci-dessus)
 from shared.json_atomic import dump_json, json_out_draft  # noqa: E402  (dépend du sys.path ci-dessus)
+
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # 2 : `run` regroupe les métadonnées du run, `model` (basename) devient `model_path`/`model_bytes`
 # /`model_mtime`. Un lecteur de la v1 lèverait un KeyError sur un fichier v2 — d'où le numéro.
@@ -59,46 +60,25 @@ _JSON_SCHEMA_VERSION = 4
 
 #: Checkpoint sur lequel TOUTES les mesures du §12 sont faites. Remplacer ici est une décision
 #: de protocole : elle périme les chiffres du chantier, donc elle ne se prend pas par accident.
-_DEFAULT_MODEL = os.path.join(
-    _PROJECT_ROOT, "ai", "models", "ArmageddonAgent",
-    "ArmageddonAgent_12345_robust_0.8721.zip",
-)
+REFERENCE_MODEL = "ArmageddonAgent_12345_robust_0.8721.zip"
 REFERENCE_MD5 = "6f6b98059a0a6c279b7d11dc427461fd"
 
 
-def _md5(path: str) -> str:
-    """Empreinte MD5 lue par blocs (les modèles font des dizaines de Mo).
-
-    JUMEAU de `scripts/roster_matchup_stats.py::_model_md5` — duplication assumée, pas de module
-    commun dans `scripts/` pour six lignes de hashlib.
-    """
-    digest = hashlib.md5(usedforsecurity=False)
-    with open(path, "rb") as handle:
-        for chunk in iter(lambda: handle.read(1 << 20), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def _require_reference_model(path: str | None = None) -> str:
-    """Vérifie qu'un modèle existe. Pour le checkpoint de référence, vérifie aussi le md5."""
-    if path is None:
-        path = _DEFAULT_MODEL
-    real_default = os.path.realpath(_DEFAULT_MODEL)
-    is_reference = os.path.realpath(path) == real_default
+def _require_reference_model() -> str:
+    """Chemin du modèle étalon, vérifié au md5. Lève plutôt que de mesurer un autre modèle."""
+    path = os.path.join(_PROJECT_ROOT, "ai", "models", "ArmageddonAgent", REFERENCE_MODEL)
     if not os.path.exists(path):
-        if is_reference:
-            raise RuntimeError(
-                f"Modèle absent : {path}. Toutes les mesures du §12 sont faites sur le checkpoint de "
-                "référence ; mesurer avec un autre rend le tableau incomparable."
-            )
-        raise RuntimeError(f"Modèle absent : {path}.")
-    if is_reference:
-        digest = _md5(path)
-        if digest != REFERENCE_MD5:
-            raise RuntimeError(
-                f"{os.path.basename(path)} vaut md5 {digest}, attendu {REFERENCE_MD5} : le fichier "
-                "a été réécrit. Restaurer le checkpoint, ou acter le nouvel étalon ICI et rejouer §12."
-            )
+        raise RuntimeError(
+            f"Modèle de référence absent : {path}. Toutes les mesures du §12 sont faites sur lui ; "
+            "mesurer avec un autre rend le tableau incomparable."
+        )
+    with open(path, "rb") as handle:
+        digest = hashlib.md5(handle.read()).hexdigest()
+    if digest != REFERENCE_MD5:
+        raise RuntimeError(
+            f"{REFERENCE_MODEL} vaut md5 {digest}, attendu {REFERENCE_MD5} : le fichier a été "
+            "réécrit. Restaurer le checkpoint, ou acter le nouvel étalon ICI et rejouer le §12."
+        )
     return path
 
 
@@ -113,27 +93,43 @@ def _require_board_path() -> str:
     return board
 
 
-def _collect_live_units(gs: Dict[str, Any], bot_player: int, *, for_enemy: bool) -> List[tuple]:
-    """(sid, col, row) de chaque unité vivante sur table, côté ennemi (for_enemy=True) ou bot."""
+def _collect_live_enemies(gs: Dict[str, Any], bot_player: int) -> List[tuple]:
+    """(sid, col, row) de chaque ennemi vivant sur table."""
     from engine.phase_handlers.shared_utils import is_unit_alive, require_unit_from_cache
     from engine.spatial_relations import entry_is_on_battlefield
 
-    tag = "_enemies:enemy" if for_enemy else "_bots:bot"
     result: List[tuple] = []
     for u in gs.get("units", []):
-        is_bot_unit = int(u.get("player", 0)) == bot_player
-        if is_bot_unit == for_enemy:
+        if int(u.get("player", 0)) == bot_player:
             continue
         sid = str(u["id"])
         if not is_unit_alive(sid, gs):
             continue
-        entry = require_unit_from_cache(sid, gs, tag)
+        entry = require_unit_from_cache(sid, gs, "_enemies:enemy")
         if entry_is_on_battlefield(entry):
             result.append((sid, int(entry["col"]), int(entry["row"])))
     return result
 
 
-def _avg_bot_enemy_distance(enemies: List[tuple], bot_units: List[tuple]) -> Optional[float]:
+def _collect_live_bot_positions(gs: Dict[str, Any], bot_player: int) -> List[tuple]:
+    """(col, row) de chaque escouade bot vivante sur table."""
+    from engine.phase_handlers.shared_utils import is_unit_alive, require_unit_from_cache
+    from engine.spatial_relations import entry_is_on_battlefield
+
+    result: List[tuple] = []
+    for u in gs.get("units", []):
+        if int(u.get("player", 0)) != bot_player:
+            continue
+        sid = str(u["id"])
+        if not is_unit_alive(sid, gs):
+            continue
+        entry = require_unit_from_cache(sid, gs, "_bots:bot")
+        if entry_is_on_battlefield(entry):
+            result.append((int(entry["col"]), int(entry["row"])))
+    return result
+
+
+def _avg_bot_enemy_distance(gs: Dict[str, Any], bot_player: int) -> Optional[float]:
     """Distance hex moyenne de chaque escouade bot vivante au plus proche ennemi vivant sur table.
 
     Retourne None si aucun ennemi n'est sur la table (réserves seules ou tous éliminés).
@@ -141,17 +137,18 @@ def _avg_bot_enemy_distance(enemies: List[tuple], bot_units: List[tuple]) -> Opt
     """
     from engine.combat_utils import calculate_hex_distance
 
+    enemies = _collect_live_enemies(gs, bot_player)
     if not enemies:
         return None
     enemy_positions = [(col, row) for _, col, row in enemies]
     distances = [
         min(calculate_hex_distance(bc, br, ec, er) for ec, er in enemy_positions)
-        for _, bc, br in bot_units
+        for bc, br in _collect_live_bot_positions(gs, bot_player)
     ]
     return sum(distances) / len(distances) if distances else None
 
 
-def _count_distinct_focus_targets(enemies: List[tuple], bot_units: List[tuple]) -> Optional[int]:
+def _count_distinct_focus_targets(gs: Dict[str, Any], bot_player: int) -> Optional[int]:
     """Nombre d'ennemis DISTINCTS élus « plus proche » par au moins une escouade bot sur table.
 
     1 = toutes les escouades convergent vers le même ennemi ; N = chacune part de son côté.
@@ -162,18 +159,17 @@ def _count_distinct_focus_targets(enemies: List[tuple], bot_units: List[tuple]) 
     """
     from engine.combat_utils import calculate_hex_distance
 
+    enemies = _collect_live_enemies(gs, bot_player)
     if not enemies:
         return None
     chosen: set = set()
-    for _, bc, br in bot_units:
+    for bc, br in _collect_live_bot_positions(gs, bot_player):
         nearest = min(enemies, key=lambda e: calculate_hex_distance(bc, br, e[1], e[2]))
         chosen.add(nearest[0])
     return len(chosen) if chosen else None
 
 
-def _avg_focus_target_distance(
-    gs: Dict[str, Any], bot: Any, bot_player: int, bot_units: List[tuple]
-) -> Optional[float]:
+def _avg_focus_target_distance(gs: Dict[str, Any], bot: Any, bot_player: int) -> Optional[float]:
     """Distance hex moyenne des escouades bot sur table à la cible FOCALISÉE du bot.
 
     N'existe que pour les doctrines qui élisent une cible commune (DecapitationBot) : les autres
@@ -183,10 +179,16 @@ def _avg_focus_target_distance(
     le marqueur de tour, donc l'appeler depuis l'instrumentation muterait l'état du bot à la
     frontière de tour et changerait la mesure elle-même.
 
-    ⚠️ La valeur peut être PÉRIMÉE d'un épisode précédent (agent_seat_mode=random : le bot était
-    P2 et ciblait une unité P1 ; cet épisode-ci le bot est P1). `_focus()` réinitialise sur le
-    marqueur (episode_number, turn), mais n'est pas appelé avant la première décision du bot.
-    On retourne None dans ce cas au lieu de lever — valeur périmée, pas une misconfiguration.
+    ⚠️ COROLLAIRE, et il a FAIT PLANTER LE RUN DE RÉFÉRENCE (2026-08-13) : lire nu, c'est aussi
+    lire une cible que `_focus` n'a pas encore périmée. Entre deux épisodes, `_focus_target` garde
+    celle de l'épisode précédent jusqu'au premier appel du bot, et `agent_seat_mode` vaut
+    « random » — le bot change donc de siège, et l'ancienne cible ennemie devient une escouade
+    À LUI. Le garde de joueur ci-dessous levait alors « bot mal configuré » au 2e épisode de
+    `decapitation`, sur un bot parfaitement configuré. Diagnostic relevé : marqueur `(1, 5)`
+    contre un état `episode=2, turn=1`.
+    La péremption se CONSTATE ici au lieu d'être provoquée : le marqueur du bot est comparé à
+    l'état courant, et une cible périmée rend `None` — la métrique est absente pour ce relevé,
+    ce qui est la vérité (aucune cible n'est élue à cet instant), pas un repli.
     """
     from engine.phase_handlers.shared_utils import is_unit_alive, require_unit_from_cache
     from engine.spatial_relations import entry_is_on_battlefield
@@ -197,14 +199,23 @@ def _avg_focus_target_distance(
     focused = bot._focus_target
     if focused is None:
         return None
+    # Même critère de péremption que `DecapitationBot._focus`, LU et non appliqué.
+    if getattr(bot, "_focus_turn", None) != (gs.get("episode_number"), int(gs.get("turn", 0))):
+        return None
     focused = str(focused)
     focused_player = next(
         (int(u.get("player", 0)) for u in gs.get("units", []) if str(u["id"]) == focused),
         None,
     )
-    if focused_player is None or focused_player == bot_player:
-        # introuvable ou appartient au bot : valeur périmée d'un épisode précédent, pas mesurable
-        return None
+    if focused_player is None:
+        raise RuntimeError(f"_focus_target {focused!r} introuvable dans gs['units'] — bot mal configuré")
+    if focused_player == bot_player:
+        raise RuntimeError(
+            f"_focus_target {focused!r} appartient au bot-player {focused_player} alors que le "
+            f"marqueur du bot est à jour ({getattr(bot, '_focus_turn', None)!r}) — le bot a élu "
+            "une de ses PROPRES escouades, ce qui est un défaut de `_enemy_anchors`, pas un "
+            "relevé périmé."
+        )
     if not is_unit_alive(focused, gs):
         return None
     target_entry = require_unit_from_cache(focused, gs, "_focus_dist:target")
@@ -213,7 +224,7 @@ def _avg_focus_target_distance(
     tc, tr = int(target_entry["col"]), int(target_entry["row"])
     distances = [
         calculate_hex_distance(bc, br, tc, tr)
-        for _, bc, br in bot_units
+        for bc, br in _collect_live_bot_positions(gs, bot_player)
     ]
     return sum(distances) / len(distances) if distances else None
 
@@ -248,15 +259,28 @@ def _episode_record(
         "bot_player": bot_player,
         "zones_by_turn": {str(t): turn_snapshot[t] for t in sorted(turn_snapshot)},
     }
-    for key, snap in {
-        "dist_by_turn": dist_snapshot,
-        "squads_by_turn": squad_snapshot,
-        "distinct_targets_by_turn": focus_targets_snapshot,
-        "focus_dist_by_turn": focus_dist_snapshot,
-    }.items():
-        if snap:
-            rec[key] = {str(k): v for k, v in sorted(snap.items())}
+    if dist_snapshot:
+        rec["dist_by_turn"] = {str(t): dist_snapshot[t] for t in sorted(dist_snapshot)}
+    if squad_snapshot:
+        rec["squads_by_turn"] = {str(t): squad_snapshot[t] for t in sorted(squad_snapshot)}
+    if focus_targets_snapshot:
+        rec["distinct_targets_by_turn"] = {
+            str(t): focus_targets_snapshot[t] for t in sorted(focus_targets_snapshot)
+        }
+    if focus_dist_snapshot:
+        rec["focus_dist_by_turn"] = {
+            str(t): focus_dist_snapshot[t] for t in sorted(focus_dist_snapshot)
+        }
     return rec
+
+
+def _turns_of(records: List[Dict[str, Any]]) -> Dict[int, List[int]]:
+    """{tour: [zones, un par épisode]} pour les relevés d'UN seul bot, dans l'ordre des épisodes."""
+    per_turn: Dict[int, List[int]] = {}
+    for rec in records:
+        for turn_key, zones in rec["zones_by_turn"].items():
+            per_turn.setdefault(int(turn_key), []).append(zones)
+    return per_turn
 
 
 def _turns_of_key(records: List[Dict[str, Any]], key: str) -> Dict[int, List]:
@@ -290,7 +314,7 @@ def _aggregate_zones(records: List[Dict[str, Any]]) -> Dict[str, Dict[int, List[
     by_bot: Dict[str, List[Dict[str, Any]]] = {}
     for rec in records:
         by_bot.setdefault(rec["bot"], []).append(rec)
-    return {bot: _turns_of_key(bot_records, "zones_by_turn") for bot, bot_records in by_bot.items()}
+    return {bot: _turns_of(bot_records) for bot, bot_records in by_bot.items()}
 
 
 def _table_turns(turn_limit: Optional[int], records: List[Dict[str, Any]]) -> List[int]:
@@ -393,18 +417,12 @@ def main() -> None:
         default=None,
         help="Étiquette libre associée à ce run, stockée dans run_meta (absent du JSON si omis)",
     )
-    parser.add_argument(
-        "--model",
-        default=_DEFAULT_MODEL,
-        help="Chemin vers le modèle à mesurer (défaut : checkpoint de référence du §12)",
-    )
     args = parser.parse_args()
     # AVANT d'ouvrir la destination : `--episodes 0` jouait zéro épisode, publiait
     # `"episodes": []` PAR-DESSUS le relevé précédent et sortait 0. Le fichier écrasé était le
     # seul exemplaire d'une mesure de plusieurs heures, et rien dans la sortie ne le disait.
     if args.episodes < 1:
         parser.error(f"--episodes doit valoir au moins 1 (reçu {args.episodes})")
-    model_path = _require_reference_model(args.model)
     _require_board_path()
 
     episode_records: List[Dict[str, Any]] = []
@@ -433,7 +451,7 @@ def main() -> None:
         config = get_config_loader()
         tc = config.load_agent_training_config("ArmageddonAgent", "x1_panel")
 
-        # model_path validé avant le with (existence + md5 pour le checkpoint de référence)
+        model_path = _require_reference_model()
         vec_norm_enabled = bool(tc.get("vec_normalize", {}).get("enabled", False))
         vec_eval_enabled = bool(tc.get("vec_normalize_eval", {}).get("enabled", False))
 
@@ -483,7 +501,7 @@ def main() -> None:
                 training_n_envs=1,
             )
 
-            masked = ActionMasker(base_env, lambda e: cast(W40KEngine, e).get_action_mask())
+            masked = ActionMasker(base_env, lambda e: e.get_action_mask())
             env = BotControlledEnv(
                 masked, bot, unit_registry,
                 agent_seat_mode=agent_seat_mode,
@@ -538,17 +556,14 @@ def main() -> None:
                         zones = sum(1 for v in controllers.values() if v == bot_player)
                         turn_snapshot[cur_turn] = zones
 
-                        enemies = _collect_live_units(gs, bot_player, for_enemy=True)
-                        bot_units = _collect_live_units(gs, bot_player, for_enemy=False)
-
-                        avg_d = _avg_bot_enemy_distance(enemies, bot_units)
+                        avg_d = _avg_bot_enemy_distance(gs, bot_player)
                         if avg_d is not None:
                             dist_snapshot[cur_turn] = avg_d
 
-                        ft = _count_distinct_focus_targets(enemies, bot_units)
+                        ft = _count_distinct_focus_targets(gs, bot_player)
                         if ft is not None:
                             focus_targets_snapshot[cur_turn] = ft
-                        fd = _avg_focus_target_distance(gs, bot, bot_player, bot_units)
+                        fd = _avg_focus_target_distance(gs, bot, bot_player)
                         if fd is not None:
                             focus_dist_snapshot[cur_turn] = fd
 
@@ -563,7 +578,7 @@ def main() -> None:
 
             env.close()
             episode_records.extend(bot_records)
-            print(f" {_n_at_last_turn(_turns_of_key(bot_records, 'zones_by_turn'))} ep")
+            print(f" {_n_at_last_turn(_turns_of(bot_records))} ep")
 
         turns = _table_turns(turn_limit, episode_records)
         hdr = " | ".join(f"T{t}" for t in turns)

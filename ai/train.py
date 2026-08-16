@@ -106,6 +106,18 @@ def _build_training_bots_from_config(training_config):
         randomness: {greedy: 0.10, defensive: 0.10}
 
     Returns list of bot instances for random.choice() selection.
+
+    ⚠️ LA TABLE CLE -> CLASSE VIENT DE `ai/bot_registry.py`, ET C'ETAIT LA QUATRIEME COPIE
+    (corrige le 2026-08-14). Ce module en tenait une locale, limitee aux CINQ bots d'origine :
+    `bot_training.ratios` levait donc « Unknown bot name in ratios: 'racer' » pour les six styles
+    refondus, et AUCUN entrainement contre le panel neuf n'etait possible — pas par decision, par
+    oubli de cablage. Le registre existe precisement pour ca et se declare source unique ; les
+    trois copies precedentes (`bot_evaluation`, `bot_ranking`, `training_callbacks`) avaient deja
+    ete unifiees, celle-ci a ete manquee parce qu'elle est du cote ENTRAINEMENT et que toutes les
+    mesures du chantier passaient par l'evaluation.
+    Consequence mesuree le 2026-08-14 : l'agent s'entrainait a 35 % contre `control` et n'avait
+    jamais rencontre un seul style refondu, ce qui fait de tout ecart de win-rate entre les deux
+    panels un melange de difficulte et de NOUVEAUTE (cf. §12.16 du chantier).
     """
     from ai.bot_registry import build_bot
 
@@ -137,11 +149,13 @@ def _build_training_bots_from_config(training_config):
             count = max(1, count)
         if count <= 0:
             continue
-        # build_bot leve ValueError si le nom est inconnu, KeyError si randomness manquante
-        # (T1 : pas de defaut silencieux). `random` est traite a part dans build_bot.
+        # `build_bot` porte les trois regles qui vivaient ici en copie : `random` n'a pas de
+        # randomness, une cle inconnue leve, et un bot pondere SANS entree de randomness leve
+        # aussi (T1 : pas de 0.15 silencieux). UNE instance par place du pool — les bots
+        # portent un etat par episode, les partager les ferait se marcher dessus.
         for _ in range(count):
             bots.append(build_bot(bot_name, randomness_cfg))
-    
+
     return bots
 
 
@@ -3486,7 +3500,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     
     # Link metrics_tracker to bot evaluation callback
     for callback in training_callbacks:
-        if isinstance(callback, BotEvaluationCallback):
+        if hasattr(callback, '__class__') and callback.__class__.__name__ == 'BotEvaluationCallback':
             callback.metrics_tracker = metrics_tracker
     _debug_train_marker("after bot-eval callback metrics_tracker wiring")
     

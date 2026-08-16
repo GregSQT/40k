@@ -232,9 +232,7 @@
           512
         ],
         "features_extractor_kwargs": {
-          "cnn_features": 256,
-          "cnn_stem_channels": 16,
-          "cnn_inner_channels": 32
+          "cnn_features": 256
         }
       },
       "verbose": 0
@@ -243,7 +241,7 @@
       "bot_eval_scenario_pool": "holdout",
       "bot_eval_show_progress": true,
       "bot_eval_use_subprocess": true,
-      "bot_eval_n_workers": 12,
+      "bot_eval_n_workers": 4,
       "early_stopping_patience": 0,
       "save_best_min_episodes": 10000,
       "checkpoint_save_freq": 10000,
@@ -293,8 +291,7 @@
         "attrition": 0.05,
         "decapitation": 0.05,
         "scorer": 0.05
-      },
-      "bot_eval_torch_compile_cpu": false
+      }
     },
     "roster_pool_schedule": {
       "enabled": false,
@@ -488,8 +485,7 @@
         "attrition": 0.05,
         "decapitation": 0.05,
         "scorer": 0.05
-      },
-      "bot_eval_torch_compile_cpu": true
+      }
     },
     "roster_pool_schedule": {
       "enabled": false,
@@ -1082,8 +1078,7 @@
         "attrition": 0.05,
         "decapitation": 0.05,
         "scorer": 0.05
-      },
-      "bot_eval_torch_compile_cpu": true
+      }
     },
     "roster_pool_schedule": {
       "enabled": false,
@@ -1745,14 +1740,13 @@
     },
     "_justification_x1_panel": "PROFIL DE MESURE, PAS D'ENTRAINEMENT (chantier A_faire/bots_refonte_panel.md etape 6). Copie de x1 dont bot_eval_weights ne porte QUE les SIX styles refondus : l'evaluation joue les CLES de ce dict, poids nul compris, donc y laisser les anciens doublerait le cout de chaque mesure. Sert a mesurer l'ORTHOGONALITE du panel : le win-rate de l'agent contre chaque bot, sur plusieurs modeles de forces differentes ; deux bots dont les courbes se suivent sont redondants et l'un des deux se supprime. Poids uniformes (1/6, somme 1.0 exactement — bot_evaluation leve au-dela de 1e-9) : ils ne pesent que le `combined`, qui n'est pas l'objet de la mesure. 2026-08-12 : `scorer` remplace `tactical_lookahead`, supprime le meme jour. Le holdout a un coup coutait 9,5x un bot normal par episode et rendait 0,431 sur 160 parties contre deux styles ordinaires — donc pas plus fort qu'eux — et aucun profil ne l'a jamais fait affronter l'agent. `scorer` occupe le creneau a 1x, sur l'axe que la mesure designait comme manquant : jouer pour marquer, ne se battre que pour ca."
   },
-  "x1_new_bots": {
-    "type": "################################################### x1_new_bots — runs longs avec le panel refondu (board 44x60x1, scale x1) ###################################################",
+  "x1_long_panel": {
+    "type": "################################################### x1_long_panel — x1_long joue contre le PANEL REFONDU ###################################################",
     "seed": 12345,
     "total_episodes": 50000,
     "total_episodes_normal": "50000 : run long ; rampe entropie achevee a 20000 (decay_fraction 0.4), rampe learning_rate a 45000 (0.9)",
     "agent_seat_mode": "random",
-    "eval_episodes_normal": "----------------------------------------------------100",
-    "eval_episodes": 600,
+    "eval_episodes": 100,
     "n_envs": 48,
     "metrics_smoothing": null,
     "model_params": {
@@ -1795,7 +1789,7 @@
       "bot_eval_scenario_pool": "holdout",
       "bot_eval_show_progress": true,
       "bot_eval_use_subprocess": true,
-      "bot_eval_n_workers": 12,
+      "bot_eval_n_workers": 4,
       "early_stopping_patience": 0,
       "save_best_min_episodes": 10000,
       "checkpoint_save_freq": 10000,
@@ -1803,7 +1797,7 @@
       "checkpoint_name_prefix": "ppo_checkpoint",
       "eval_deterministic": true,
       "eval_render": false,
-      "bot_eval_freq": 5000,
+      "bot_eval_freq": 10000,
       "bot_eval_freq_normal": "---------------------------------- 10000 (5 evals sur 50k). Ces 5 evals ne sont atteintes que depuis le 2026-08-11, ou le declencheur a cesse de cumuler son depassement de seuil (BotEvaluationCallback._on_step) : il n'en produisait que 4, et donc aucun best model, alors que la garde de demarrage (train.py) en comptait 5. 5 points ne suffisent pas a une fenetre robuste de 5 -- elle n'aurait qu'une position, la derniere, et le best model serait mecaniquement le modele final : c'est robust_window qui a ete ramene a 3 (voir sa note), et non bot_eval_freq abaisse a 5000, qui aurait double le cout de l'evaluation intermediaire, ~2 h 10 au lieu de ~1 h 05, sur un run MESURE a ~20 h (4 h 01 pour 10 000 episodes, ROADMAP section 1 point 6, run du 2026-08-10). ATTENTION : cette duree vient de cette mesure et non du \"0.1 s/ep -> 36k ep / hour\" que repete total_episodes_normal ci-dessus -- les deux different d'un facteur ~14 depuis la refonte d'observation V11, l'ecart est anterieur au 2026-08-11 et n'est traite nulle part)",
       "bot_eval_use_episodes": true,
       "bot_eval_intermediate": 100,
@@ -1839,8 +1833,7 @@
         "attrition": 0.05,
         "decapitation": 0.05,
         "scorer": 0.05
-      },
-      "bot_eval_torch_compile_cpu": true
+      }
     },
     "roster_pool_schedule": {
       "enabled": false,
@@ -1886,19 +1879,21 @@
     },
     "bot_training": {
       "ratios": {
-        "racer": 0.35,
-        "scorer": 0.15,
-        "attrition": 0.15,
-        "decapitation": 0.15,
-        "endgame": 0.15,
-        "random": 0.05
+        "racer": 0.16,
+        "endgame": 0.16,
+        "alpha": 0.16,
+        "attrition": 0.16,
+        "decapitation": 0.16,
+        "scorer": 0.16,
+        "random": 0.04
       },
       "randomness": {
         "racer": 0.05,
-        "scorer": 0.05,
+        "endgame": 0.05,
+        "alpha": 0.05,
         "attrition": 0.05,
         "decapitation": 0.05,
-        "endgame": 0.05
+        "scorer": 0.05
       }
     },
     "scenario_sampling": {
@@ -1934,6 +1929,6 @@
       "target_controlled_episode_ratio": 0.2,
       "max_scenario_weight": 6
     },
-    "_justification_x1_new_bots": "PROFIL D'ENTRAINEMENT avec le panel de bots refondu (chantier A_faire/bots_refonte_panel.md). Copie de x1_long dont bot_training.ratios et bot_eval_weights portent les SIX styles refondus (racer, scorer, attrition, decapitation, endgame, alpha) au lieu des anciens. Ratios d'entrainement : meme structure que x1_long — le bot le plus dur (racer, 0.63 win-rate agent) prend 0.35, quatre intermediaires 0.15 chacun, random 0.05. alpha (0.93) absent du training : l'agent le bat deja a 93 % et son exposition n'apporte pas de gradient utile. Evaluation : les six styles a poids uniformes (1/6), comme x1_panel. Ligne de base panel au 2026-08-13 (§12.14) : combined=0.7433, pire bot racer=0.630. model_gating_min_vs_control a 0.0 : ControlBot n'est pas dans bot_eval_weights (panel refondu pur), le plancher est donc desarme explicitement — _control_floor_pass retourne True si floor <= 0.0."
+    "_justification_x1_long_panel": "COPIE EXACTE DE x1_long, AUX ADVERSAIRES PRES — c'est tout l'interet : le seul facteur qui differe entre un run de ce profil et un run de x1_long est le PANEL affronte. Memes hyperparametres, meme budget (50 000 episodes), memes rampes, meme graine. Toute autre divergence casserait la comparaison, et le verrou tests/unit/ai/test_x1_long_panel_ne_differe_que_des_bots.py echoue si l'une s'installe. POURQUOI IL EXISTE (2026-08-14, §12.16 du chantier des bots) : l'agent s'est entraine a 35 % contre `control` et n'a JAMAIS rencontre un seul des six styles refondus — le panel neuf n'apparaissait que dans bot_eval_weights, jamais dans bot_training.ratios, y compris dans x1_panel. Tout ecart de win-rate entre les deux panels melange donc DIFFICULTE et NOUVEAUTE, et personne ne sait dans quelles proportions. Ce profil sert a le trancher : entrainer un agent neuf contre le panel refondu, puis le mesurer contre LES DEUX panels. La lecture est fixee d'avance — agent actuel : 0.928 contre son panel d'entrainement, 0.743 contre l'inconnu, soit 18.5 points d'ecart. Si le nouvel agent rend le meme ecart, les deux panels se valent et l'ecart etait de la nouveaute ; s'il rend nettement moins, le panel refondu est vraiment plus dur. RATIOS : 0.16 par style et 0.04 de random, choisis en CENTIEMES pour que le pool de 100 tombe juste (16 x 6 + 4 = 100) ; l'uniforme reproduit bot_eval_weights, sinon l'avantage « deja vu » serait reparti inegalement entre les six. model_gating_min_vs_control PASSE A 0.0, ET CE N'EST PAS UN DETAIL : le plancher vs_control s'applique MEME gating desarme (training_callbacks._evaluate_model_gate) et fait require_key(results, 'control') des qu'il est > 0. Avec un panel d'evaluation sans `control`, il aurait leve a la PREMIERE evaluation, soit environ 4 h dans un run de 20 h. 0.0 est la facon documentee de le desarmer."
   }
 }

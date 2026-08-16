@@ -28,11 +28,17 @@ def _gs(
     cache: dict[str, dict],
     controllers: dict | None = None,
 ) -> Dict[str, Any]:
-    """Construit un game_state minimal pour les fonctions de mesure."""
+    """Construit un game_state minimal pour les fonctions de mesure.
+
+    `episode_number`/`turn` portent le marqueur que `_avg_focus_target_distance` confronte à
+    celui du bot : sans eux, toute cible focalisée serait lue comme périmée.
+    """
     return {
         "units": units,
         "units_cache": cache,
         "objective_controllers": controllers or {},
+        "episode_number": 1,
+        "turn": 1,
     }
 
 
@@ -264,16 +270,50 @@ def test_count_distinct_focus_targets_ennemi_en_reserves_exclu():
 # ---------------------------------------------------------------------------
 
 
-def _bot(focus: str | None) -> Any:
-    """Bot factice : seul `_focus_target` compte pour la mesure (pas de DecapitationBot ici)."""
-    return SimpleNamespace(_focus_target=focus)
+def _bot(focus: str | None, marker: Any = (1, 1)) -> Any:
+    """Bot factice.
+
+    `_focus_turn` est aussi indispensable que `_focus_target` : le vrai `DecapitationBot` crée
+    les deux ensemble et périme l'un PAR l'autre. Un double qui ne porterait que la cible
+    modéliserait un objet qui n'existe pas, et laisserait passer la lecture d'une cible périmée.
+    Le défaut par défaut est le marqueur À JOUR — l'état nominal ; le cas périmé se demande.
+    """
+    return SimpleNamespace(_focus_target=focus, _focus_turn=marker)
 
 
 def test_avg_focus_target_distance_leve_si_focus_target_allie():
-    # "allied" a player=1, même équipe que le bot → RuntimeError
+    # "allied" a player=1, même équipe que le bot, et le marqueur est À JOUR → RuntimeError
     gs = _gs([_unit("allied", 1)], {"allied": _entry(0, 4)})
     with pytest.raises(RuntimeError, match="bot-player"):
         _SCRIPT._avg_focus_target_distance(gs, _bot("allied"), 1)
+
+
+def test_avg_focus_target_distance_none_si_cible_perimee_du_tour_precedent():
+    """Le run de référence PLANTAIT ici (2026-08-13), et sur un bot parfaitement configuré.
+
+    `_focus_target` est lu NU, donc il porte encore la cible de l'épisode précédent tant que le
+    bot n'a pas rejoué. Or `agent_seat_mode` vaut « random » : au changement d'épisode le bot
+    change de siège, et cette cible ennemie devient une escouade À LUI. Le garde de joueur levait
+    alors « bot mal configuré » au 2e épisode de `decapitation` — marqueur relevé `(1, 5)` contre
+    un état `episode=2, turn=1`.
+    """
+    gs = _gs([_unit("allied", 1)], {"allied": _entry(0, 4)})  # episode_number=1, turn=1
+    perime = _bot("allied", marker=(0, 5))  # marqueur de l'épisode d'AVANT
+
+    assert _SCRIPT._avg_focus_target_distance(gs, perime, 1) is None
+
+
+def test_avg_focus_target_distance_none_si_meme_episode_mais_tour_precedent():
+    """La péremption porte sur (épisode, TOUR), pas sur l'épisode seul.
+
+    `DecapitationBot._focus` oublie sa cible à chaque changement de tour : une cible du tour 1
+    lue au tour 2 n'a pas encore été réélue, et la mesurer prêterait au bot une intention qu'il
+    n'a plus.
+    """
+    gs = _gs([_unit("bot", 1), _unit("en", 2)], {"bot": _entry(0, 0), "en": _entry(0, 4)})
+    gs["turn"] = 2
+
+    assert _SCRIPT._avg_focus_target_distance(gs, _bot("en", marker=(1, 1)), 1) is None
 
 
 def test_avg_focus_target_distance_leve_si_focus_target_introuvable():

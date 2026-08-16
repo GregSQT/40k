@@ -265,7 +265,11 @@ PROMISES_BEST_MODEL = {
     "x5_new": False, "x5_long": True, "x5_append": True,
     "x1_debug": False, "x5_debug": False,
     "x1_panel": False,
-    "x1_new_bots": True,
+    # true, et il l'HERITE de x1_long dont il est la copie : 50 000 épisodes, `bot_eval_freq`
+    # 10 000 et `robust_window` 3 → 5 points de mesure pour 3 positions de fenêtre, donc le best
+    # model départage réellement. Le mettre à false le ferait diverger de sa référence sur le seul
+    # axe qui doit rester identique (cf. `test_x1_long_panel_ne_differe_que_des_bots`).
+    "x1_long_panel": True,
 }
 
 
