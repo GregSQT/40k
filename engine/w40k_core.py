@@ -6607,23 +6607,25 @@ class W40KEngine(gym.Env):
             # désigne une activation de tir EN COURS, or celle de l'agent est ATOMIQUE — aucun
             # lecteur entre la pose et le retrait, et toute sortie par exception la laisserait
             # périmée. Le front lit le tireur dans `result.unitId` (fourni par `end_activation`).
-            squad_declare_shoot(self.game_state, squad_id, target_squad_id, eligible_slots)
-            squad_lock_shoot(self.game_state, squad_id)
-            # Convergence §8 : resolution tir via le moteur d allocation par-figurine
-            # (groupes 05.03/05.04, T bodyguard 19.02, save par-fig). Defenseur IA garanti
-            # en gym/auto -> auto_decider headless -> resolution complete (done).
-            _shoot_alloc = build_manual_shoot_allocation(self.game_state, squad_id)
-            if not _shoot_alloc.get("done"):
-                raise RuntimeError(
-                    f"squad_shoot: allocation tir non terminee en auto pour squad {squad_id} "
-                    f"(defenseur non-IA ?) — action={_shoot_alloc.get('action')}"
-                )
-            shoot_result = _shoot_alloc["shoot_result"]
-
-            # L activation est finie : le type choisi ne vaut plus. Sans cet effacement, une
-            # activation ULTERIEURE de la meme escouade heriterait d un type qu elle n a pas
-            # choisi — meme cycle de vie que `units_shot`.
-            squad_shooting_type_clear(self.game_state, squad_id)
+            try:
+                squad_declare_shoot(self.game_state, squad_id, target_squad_id, eligible_slots)
+                squad_lock_shoot(self.game_state, squad_id)
+                # Convergence §8 : resolution tir via le moteur d allocation par-figurine
+                # (groupes 05.03/05.04, T bodyguard 19.02, save par-fig). Defenseur IA garanti
+                # en gym/auto -> auto_decider headless -> resolution complete (done).
+                _shoot_alloc = build_manual_shoot_allocation(self.game_state, squad_id)
+                if not _shoot_alloc.get("done"):
+                    raise RuntimeError(
+                        f"squad_shoot: allocation tir non terminee en auto pour squad {squad_id} "
+                        f"(defenseur non-IA ?) — action={_shoot_alloc.get('action')}"
+                    )
+                shoot_result = _shoot_alloc["shoot_result"]
+            finally:
+                # L activation est finie : le type choisi ne vaut plus. Sans cet effacement, une
+                # activation ULTERIEURE de la meme escouade heriterait d un type qu elle n a pas
+                # choisi — meme cycle de vie que `units_shot`. Le finally garantit l effacement
+                # meme si une exception traverse le bare-except de execute_ai_turn (3462).
+                squad_shooting_type_clear(self.game_state, squad_id)
             unit = get_unit_by_id(squad_id, self.game_state)
             if unit is None:
                 raise KeyError(f"Squad {squad_id} introuvable pour end_activation après tir")

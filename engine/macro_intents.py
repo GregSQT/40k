@@ -13,18 +13,19 @@ MAX_OBJECTIVES = 5
 # designe une CELLULE de la grille egocentrique 32x32, plus une direction 0-5. Le TYPE de move
 # (normal/advance/fall_back) n'est PAS une dimension d'action : il est infere du cout geodesique
 # de la cellule (cf. shared_utils.infer_squad_move_type).
-# 1086 micro actions (V11 §0.30 T-E : 20 slots de tir ; §9 P3-1 : 20 slots de combat ;
-# §9 P3-2 : 20 slots de charge) :
+# 1106 micro actions (V11 §0.30 T-E : 20 slots de tir ; §9 P3-1 : 20 slots de combat ;
+# §9 P3-2 : 20 slots de charge ; 10.02/10.07 : 20 slots de tir indirect) :
 #   0-1023   : destination = cellule (gx,gy) de la grille egocentrique  [cell_index = gy*32+gx]
 #   1024     : wait / end activation
 #   1025-1044: shoot slot 0-19 (20)
 #   1045-1064: charge slot 0-19 (20) — MEME mapping de slots ennemis que le tir
 #   1065-1084: fight slot 0-19 (20) — MEME mapping de slots ennemis que le tir
 #   1085     : fight sans cible eligible (12.04/12.06 : selectionne pour combattre, 0 attaque)
-#   1086-1100: zone intents (5 objectifs x 3 intentions)
-#   1101-1106: CHOICE_0..5 — candidats de `pending_agent_decision` (V11 §9.3 P2)
-#   1107-1126: oath slot 0-19 — cible d'Oath of Moment (chantier 01, consomme au chantier 03)
-#   1127-1138: activate slot 0-11 — escouade a ACTIVER (V11 §0.48 L2), un par ligne alliee
+#   1086-1105: shoot indirect slot 0-19 (20) — MEME mapping de slots ennemis que le tir
+#   1106-1120: zone intents (5 objectifs x 3 intentions)
+#   1121-1126: CHOICE_0..5 — candidats de `pending_agent_decision` (V11 §9.3 P2)
+#   1127-1146: oath slot 0-19 — cible d'Oath of Moment (chantier 01, consomme au chantier 03)
+#   1147-1158: activate slot 0-11 — escouade a ACTIVER (V11 §0.48 L2), un par ligne alliee
 
 # --- Named squad-action ids (single source of truth for ai/). --------------
 # Miroir EXACT de engine/phase_handlers/shared_utils.py (SQUAD_ACTION_*), qui reste la source
@@ -93,7 +94,7 @@ BASE_ZONE_INTENT = SHOOT_INDIRECT_SLOT_BASE + SHOOT_INDIRECT_SLOT_COUNT  # 1106
 # ⚠️ Elles ne concernent QUE les decisions dont les candidats ne sont PAS des entites deja
 # observees : une decision « quelle escouade ennemie » se parametre en dimension d'action +
 # pointeur (§9 P3-1, les slots de combat ci-dessus), pas en CHOICE_k.
-CHOICE_BASE = BASE_ZONE_INTENT + MAX_OBJECTIVES * 3            # 1101
+CHOICE_BASE = BASE_ZONE_INTENT + MAX_OBJECTIVES * 3            # 1121
 CHOICE_COUNT = MAX_DECISION_OPTIONS                            # 6
 # Oath of Moment (chantier 03) : « select one unit from your opponent's army ». Les candidats
 # sont des ENTITES DEJA OBSERVEES, donc la decision se parametre en DIMENSION D'ACTION + pointeur
@@ -106,8 +107,8 @@ CHOICE_COUNT = MAX_DECISION_OPTIONS                            # 6
 # `obs_size`. Aucun consommateur avant le chantier 03 — le masque n'ouvre jamais ces ids, donc
 # l'agent ne peut pas les jouer (`ActionDecoder` part d'un masque tout a zero et n'ouvre que ce
 # qu'une phase autorise).
-OATH_SLOT_BASE = CHOICE_BASE + CHOICE_COUNT                    # 1107
-OATH_SLOT_COUNT = SHOOT_SLOT_COUNT                             # 20 -> 1107-1126
+OATH_SLOT_BASE = CHOICE_BASE + CHOICE_COUNT                    # 1127
+OATH_SLOT_COUNT = SHOOT_SLOT_COUNT                             # 20 -> 1127-1146
 # V11 §0.48 element L2 / §9 P3-3 — CHOIX DE L'ESCOUADE A ACTIVER. Jusqu'ici l'unite activee etait
 # TOUJOURS `eligible_units[0]` : l'ORDRE d'activation, c'est-a-dire la premiere decision de chaque
 # phase, echappait entierement a l'agent.
@@ -121,9 +122,9 @@ OATH_SLOT_COUNT = SHOOT_SLOT_COUNT                             # 20 -> 1107-1126
 # l'observation — pour la MEME raison que les slots de tir/charge/melee/Oath derivent de
 # `SHOOT_SLOT_COUNT` : le slot `i` designe la ligne `i`. Les desolidariser ferait pointer l'action
 # et l'observation sur deux escouades differentes sans que rien ne leve (invariant D1, cote allie).
-ACTIVATE_SLOT_BASE = OATH_SLOT_BASE + OATH_SLOT_COUNT          # 1127
-ACTIVATE_SLOT_COUNT = K_ALLY_SLOTS                             # 12 -> 1127-1138
-TOTAL_ACTION_SIZE = ACTIVATE_SLOT_BASE + ACTIVATE_SLOT_COUNT   # 1139
+ACTIVATE_SLOT_BASE = OATH_SLOT_BASE + OATH_SLOT_COUNT          # 1147
+ACTIVATE_SLOT_COUNT = K_ALLY_SLOTS                             # 12 -> 1147-1158
+TOTAL_ACTION_SIZE = ACTIVATE_SLOT_BASE + ACTIVATE_SLOT_COUNT   # 1159
 
 MOVE_CELLS = range(MOVE_CELL_BASE, MOVE_CELL_BASE + MOVE_CELL_COUNT)                # 0-1023
 SHOOT_SLOTS = range(SHOOT_SLOT_BASE, SHOOT_SLOT_BASE + SHOOT_SLOT_COUNT)            # 1025-1044
