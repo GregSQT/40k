@@ -420,6 +420,7 @@ def test_le_malus_10_06_est_nomme_sur_le_seuil_de_touche(monkeypatch):
         lambda gs, sid: shared_utils.SHOOTING_TYPE_CLOSE_QUARTERS,
     )
     monkeypatch.setattr(shared_utils, "_squads_are_engaged", lambda gs, a, b: False)
+    monkeypatch.setattr(shared_utils, "_squad_is_in_enemy_er", lambda gs, sid: False)
     msg, _ = _resolve(
         monkeypatch, ["CLOSE_QUARTERS"], rolls=[4, 5, 1], attacker_is_vehicle=True
     )
@@ -431,6 +432,7 @@ def test_le_malus_10_06_est_nomme_sur_le_seuil_de_touche(monkeypatch):
 def test_sans_monster_vehicle_aucun_malus_affiche(monkeypatch):
     """Contre-epreuve : meme arme, tireur d infanterie -> le volet MONSTER/VEHICLE de 10.06 ne
     s applique pas, le seuil reste net et rien ne s affiche."""
+    monkeypatch.setattr(shared_utils, "_squad_is_in_enemy_er", lambda gs, sid: False)
     msg, _ = _resolve(monkeypatch, ["CLOSE_QUARTERS"], rolls=[4, 5, 1])
     assert "Hit:3+" in msg, msg
     assert "POINT-BLANK" not in msg, msg
