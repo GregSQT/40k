@@ -443,7 +443,7 @@ mesure, et c'est assumé (§0.14).
    🔴 **AUCUN PROFIL EXISTANT NE CONVIENT — à trancher avant d'ouvrir P3-4.**
    - Ce qui est **acquis** : le « ne PAS utiliser `x1_debug`, il porte 48 envs » de §9.6 est
      périmé. `n_steps` est un TOTAL divisé par `n_envs` en un point de passage unique depuis
-     §0.33 ⇒ le buffer ne dépend plus de `n_envs`, et les **9** profils sont à 48 envs de toute
+     §0.33 ⇒ le buffer ne dépend plus de `n_envs`, et les **11** profils sont à 48 envs de toute
      façon, `x5_debug` compris. La mémoire n'écarte plus aucun profil.
    - Ce qui **casse** — et **DEUX variables distinctes** sont en cause, que ce fichier a confondues
      dans une première correction du 2026-08-10 :
@@ -452,7 +452,7 @@ mesure, et c'est assumé (§0.14).
      | `x1_debug` | **96** (a valu 480, puis 10, puis 1000, avant de revenir à 96 le 2026-08-11) | **0** |
      | `x5_debug` | **96** | **1** |
      | `x1` | 10 000 | **10** |
-     | `x1_long` | 50 000 (valait 200 000 avant le 2026-08-11) | 600 |
+     | `x1_long` | 50 000 (valait 200 000 avant le 2026-08-11) | 300 |
      `total_episodes` est un total **GLOBAL** tous environnements confondus : c'est
      `class EpisodeTerminationCallback` (`ai/training_callbacks.py`) qui porte le budget de run, et
      son `episode_count += episodes_finished` somme les fins d'épisode de TOUS les env d'un pas.
@@ -699,7 +699,7 @@ Prêt à démarrer, conception close, aucun arbitrage en attente :
   (corrélation de rang sur ≥ 3 modèles) au lieu d'être supposée — et elle est ce qui rend le
   diagnostic d'entraînement actionnable, chaque benchmark nommant l'aspect non couvert.
   🕐 **CONÇUES, exécution différée** (tranches 2 et 3) : league historique, PFSP, exploiters,
-  schedule P0→P10 (E→H — disposition disque, schéma `policy.json` avec `obs_size` et `model_md5`,
+  schedule P0→P10 (E→H — disposition disque, schéma policy.yml avec `obs_size` et `model_md5`,
   câblage sur `_select_opponent_mode_for_episode`, cache LRU, sampler PFSP, protocole d'exploiter,
   quatre gates de promotion, tests de chaque). **E et F ne coûtent RIEN en machine** (code + tests) ;
   ce qui coûte est de FAIRE TOURNER la league : ~200 h pour P1→P10, ~60 h pour trois exploiters.
@@ -1377,7 +1377,7 @@ vérifiée ; l'appariement reste réservé aux cellules de tableau, où le renvo
 
 ### Incohérences factuelles restantes (non traitées, aucune ne bloque)
 
-- **`obs_size`** — la valeur vraie à HEAD est **16659**, portée par les **9** profils de la config
+- **`obs_size`** — la valeur vraie à HEAD est **16659**, portée par les **11** profils de la config
   ArmageddonAgent (un `"obs_size": 16659` chacun ; ce fichier a annoncé « 3 occurrences », puis
   « 7 profils », sans jamais les compter — c'est le contrôle de §5 qui les compte désormais).
   ✅ `Implémenté/01_ability_embedding.md`, qui annonçait 14609/14615, est corrigé. Reste la

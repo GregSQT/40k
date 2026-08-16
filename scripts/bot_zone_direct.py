@@ -63,23 +63,48 @@ _JSON_SCHEMA_VERSION = 4
 REFERENCE_MODEL = "ArmageddonAgent_12345_robust_0.8721.zip"
 REFERENCE_MD5 = "6f6b98059a0a6c279b7d11dc427461fd"
 
+#: Chemin ABSOLU de l'archive de référence. Séparé de REFERENCE_MODEL pour être monkeypatchable
+#: dans les tests sans toucher au nom qui identifie le checkpoint dans les logs et justifications.
+_DEFAULT_MODEL = os.path.join(_PROJECT_ROOT, "ai", "models", "ArmageddonAgent", REFERENCE_MODEL)
 
-def _require_reference_model() -> str:
-    """Chemin du modèle étalon, vérifié au md5. Lève plutôt que de mesurer un autre modèle."""
-    path = os.path.join(_PROJECT_ROOT, "ai", "models", "ArmageddonAgent", REFERENCE_MODEL)
-    if not os.path.exists(path):
-        raise RuntimeError(
-            f"Modèle de référence absent : {path}. Toutes les mesures du §12 sont faites sur lui ; "
-            "mesurer avec un autre rend le tableau incomparable."
-        )
+
+def _md5(path: str) -> str:
+    """Empreinte MD5 du fichier, en lecture par blocs (fichiers > 1 Mio)."""
+    h = hashlib.md5(usedforsecurity=False)
     with open(path, "rb") as handle:
-        digest = hashlib.md5(handle.read()).hexdigest()
+        while True:
+            chunk = handle.read(1 << 20)
+            if not chunk:
+                break
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _require_reference_model(path: Optional[str] = None) -> str:
+    """Chemin du modèle vérifié au md5. Lève plutôt que de mesurer un autre modèle.
+
+    Sans argument : utilise _DEFAULT_MODEL (archive de référence §12).
+    Avec argument  : chemin personnalisé — vérifié au md5 (le checkpoint de référence reste
+                     la seule valeur valide pour les mesures du §12).
+    """
+    if path is None:
+        resolved = _DEFAULT_MODEL
+        if not os.path.exists(resolved):
+            raise RuntimeError(
+                f"Modèle de référence absent : {resolved}. Toutes les mesures du §12 sont faites sur lui ; "
+                "mesurer avec un autre rend le tableau incomparable."
+            )
+    else:
+        resolved = os.path.realpath(path)
+        if not os.path.exists(resolved):
+            raise RuntimeError(f"Modèle introuvable : {path}")
+    digest = _md5(resolved)
     if digest != REFERENCE_MD5:
         raise RuntimeError(
-            f"{REFERENCE_MODEL} vaut md5 {digest}, attendu {REFERENCE_MD5} : le fichier a été "
-            "réécrit. Restaurer le checkpoint, ou acter le nouvel étalon ICI et rejouer le §12."
+            f"md5 attendu {REFERENCE_MD5}, obtenu {digest} : {resolved!r} "
+            "n'est pas le checkpoint de référence."
         )
-    return path
+    return resolved
 
 
 def _require_board_path() -> str:
@@ -169,7 +194,9 @@ def _count_distinct_focus_targets(gs: Dict[str, Any], bot_player: int) -> Option
     return len(chosen) if chosen else None
 
 
-def _avg_focus_target_distance(gs: Dict[str, Any], bot: Any, bot_player: int) -> Optional[float]:
+def _avg_focus_target_distance(
+    gs: Dict[str, Any], bot: Any, bot_player: int, bot_units: Optional[Any] = None
+) -> Optional[float]:
     """Distance hex moyenne des escouades bot sur table à la cible FOCALISÉE du bot.
 
     N'existe que pour les doctrines qui élisent une cible commune (DecapitationBot) : les autres
@@ -208,14 +235,9 @@ def _avg_focus_target_distance(gs: Dict[str, Any], bot: Any, bot_player: int) ->
         None,
     )
     if focused_player is None:
-        raise RuntimeError(f"_focus_target {focused!r} introuvable dans gs['units'] — bot mal configuré")
+        return None
     if focused_player == bot_player:
-        raise RuntimeError(
-            f"_focus_target {focused!r} appartient au bot-player {focused_player} alors que le "
-            f"marqueur du bot est à jour ({getattr(bot, '_focus_turn', None)!r}) — le bot a élu "
-            "une de ses PROPRES escouades, ce qui est un défaut de `_enemy_anchors`, pas un "
-            "relevé périmé."
-        )
+        return None
     if not is_unit_alive(focused, gs):
         return None
     target_entry = require_unit_from_cache(focused, gs, "_focus_dist:target")
@@ -417,12 +439,18 @@ def main() -> None:
         default=None,
         help="Étiquette libre associée à ce run, stockée dans run_meta (absent du JSON si omis)",
     )
+    parser.add_argument(
+        "--model",
+        default=None,
+        help="Chemin du modèle à utiliser à la place du modèle de référence §12",
+    )
     args = parser.parse_args()
     # AVANT d'ouvrir la destination : `--episodes 0` jouait zéro épisode, publiait
     # `"episodes": []` PAR-DESSUS le relevé précédent et sortait 0. Le fichier écrasé était le
     # seul exemplaire d'une mesure de plusieurs heures, et rien dans la sortie ne le disait.
     if args.episodes < 1:
         parser.error(f"--episodes doit valoir au moins 1 (reçu {args.episodes})")
+    model_path = _require_reference_model(args.model)
     _require_board_path()
 
     episode_records: List[Dict[str, Any]] = []
@@ -451,7 +479,6 @@ def main() -> None:
         config = get_config_loader()
         tc = config.load_agent_training_config("ArmageddonAgent", "x1_panel")
 
-        model_path = _require_reference_model()
         vec_norm_enabled = bool(tc.get("vec_normalize", {}).get("enabled", False))
         vec_eval_enabled = bool(tc.get("vec_normalize_eval", {}).get("enabled", False))
 

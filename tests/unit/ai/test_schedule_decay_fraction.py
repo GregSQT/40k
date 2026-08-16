@@ -270,6 +270,7 @@ PROMISES_BEST_MODEL = {
     # model départage réellement. Le mettre à false le ferait diverger de sa référence sur le seul
     # axe qui doit rester identique (cf. `test_x1_long_panel_ne_differe_que_des_bots`).
     "x1_long_panel": True,
+    "x1_new_bots": True,
 }
 
 
