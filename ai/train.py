@@ -4714,16 +4714,21 @@ def main():
             # appelait _build_macro_eval_env, qui levait NotImplementedError sans condition.
             # Voir la trace au-dessus de resolve_turn_step_limit.
 
-            # Load existing model
+            # Garde précoce : --scenario bot n'a aucun sens en --test-only (pas de split bot,
+            # pas d'env bot). Placé AVANT le chargement du modèle pour un retour immédiat.
+            if args.scenario == "bot":
+                print(
+                    "--scenario bot is not allowed in --test-only mode. "
+                    "Use holdout scenarios for evaluation."
+                )
+                return 1
+
+            # Résolution du scénario AVANT la vérification du modèle : `resolve_final_eval_scenarios`
+            # est le point d'interception des tests (mock → SystemExit(0)), il doit s'exécuter
+            # avant que l'absence du fichier modèle ne court-circuite la branche.
             models_root = config.get_models_root()
             model_path = build_agent_model_path(models_root, args.agent)
-            
-            if not os.path.exists(model_path):
-                print(f"❌ Model not found: {model_path}")
-                return 1
-            
-            print(f"📁 Loading model: {model_path}")
-            
+
             # Create minimal environment for model loading
             W40KEngine, _ = setup_imports()
             from ai.unit_registry import UnitRegistry
@@ -4755,12 +4760,6 @@ def main():
                 explicit_scenario_raw = True
                 print(f"📋 Using explicit scenario (played as-is): {os.path.basename(scenario_file)}")
             else:
-                # Test-only mode must evaluate on holdout scenarios only.
-                if args.scenario == "bot":
-                    raise ValueError(
-                        "--scenario bot is not allowed in --test-only mode. "
-                        "Use holdout scenarios for evaluation."
-                    )
                 # MEME resolveur que l'eval post-entrainement : meme split retenu, meme message
                 # quand le dossier manque. Ce bloc l'open-codait, avec son propre `[0]` et son
                 # propre libelle — deux reponses differentes a « quel holdout ? » selon qu'on
@@ -4769,6 +4768,13 @@ def main():
                 # faite plus bas par `scenario_pool="holdout"`, qui balaye le pool entier.
                 scenario_file = resolve_final_eval_scenarios(cfg, args.agent, args.training_config)[0]
                 print(f"📋 Using holdout scenario: {os.path.basename(scenario_file)}")
+
+            # Vérification du modèle APRÈS la résolution du scénario.
+            if not os.path.exists(model_path):
+                print(f"❌ Model not found: {model_path}")
+                return 1
+
+            print(f"📁 Loading model: {model_path}")
             
             # CRITICAL FIX: Use rewards_config for controlled_agent (includes phase suffix).
             # `args.rewards_config` retombe sur `args.agent` des la lecture des arguments, donc

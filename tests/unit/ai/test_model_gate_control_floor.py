@@ -30,6 +30,8 @@ def _gate(**thresholds: float) -> BotEvaluationCallback:
     callback.model_gating_min_worst_bot = thresholds["worst_bot"]
     callback.model_gating_min_worst_scenario_combined = thresholds["worst_scenario"]
     callback.model_gating_min_vs_control = thresholds["vs_control"]
+    callback.model_gating_min_benchmark_floor = 0.0
+    callback.stop_on_no_generalization = 0
     callback.gating_pass_count = 0
     callback.gating_fail_count = 0
     callback.best_gating_criteria_mean = None

@@ -19,6 +19,7 @@ from engine.combat_utils import calculate_hex_distance
 from engine.phase_handlers.shared_utils import (
     SQUAD_ACTION_MOVE_CELL_BASE,
     SQUAD_ACTION_MOVE_CELL_COUNT,
+    SQUAD_ACTION_SHOOT_INDIRECT_SLOT_COUNT,
     SQUAD_ACTION_SIZE,
     SQUAD_ACTION_WAIT,
     build_enemy_adjacent_hexes,
@@ -102,12 +103,13 @@ def test_mask_has_the_spatial_size(engine):
     mask = build_squad_action_mask(engine.game_state, "1", None, ADVANCE_ROLL)
     assert len(mask) == SQUAD_ACTION_SIZE
     assert SQUAD_ACTION_SIZE == (
-        SQUAD_ACTION_MOVE_CELL_COUNT      # une action par cellule de la grille égocentrique
-        + 1                               # wait / fin d'activation
-        + SQUAD_ACTION_SHOOT_SLOT_COUNT   # tir, un slot ennemi par action
-        + SQUAD_ACTION_CHARGE_SLOT_COUNT  # cible de charge, MÊMES slots ennemis (§9 P3-2)
-        + SQUAD_ACTION_FIGHT_SLOT_COUNT   # cible de mêlée, MÊMES slots ennemis (§9 P3-1)
-        + 1                               # fight sans cible éligible (12.04/12.06)
+        SQUAD_ACTION_MOVE_CELL_COUNT           # une action par cellule de la grille égocentrique
+        + 1                                    # wait / fin d'activation
+        + SQUAD_ACTION_SHOOT_SLOT_COUNT        # tir, un slot ennemi par action
+        + SQUAD_ACTION_SHOOT_INDIRECT_SLOT_COUNT  # tir indirect, un slot ennemi par action
+        + SQUAD_ACTION_CHARGE_SLOT_COUNT       # cible de charge, MÊMES slots ennemis (§9 P3-2)
+        + SQUAD_ACTION_FIGHT_SLOT_COUNT        # cible de mêlée, MÊMES slots ennemis (§9 P3-1)
+        + 1                                    # fight sans cible éligible (12.04/12.06)
     )
 
 

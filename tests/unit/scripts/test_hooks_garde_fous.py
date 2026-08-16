@@ -37,7 +37,9 @@ H_ATTENTE = HOOKS / "relire-en-attente.sh"
 S1 = "11111111-1111-1111-1111-111111111111"
 S2 = "22222222-2222-2222-2222-222222222222"
 
-RAPPORT_CONFORME = """Fait.
+RAPPORT_CONFORME = """STATUT : Livré
+
+Fait.
 
 LU : engine/x.py en entier, ses 3 appelants
 JUMEAU : grep -rn "foo" engine/ -> 2 hits, 2 traites
@@ -47,7 +49,7 @@ RELIRE :
 /simplify /home/greg/40k/engine/x.py
 """
 
-WORKTREE_FILE = "/home/greg/40k/.claude/worktrees/sujet/engine/x.py"
+WORKTREE_FILE = str(RACINE / ".claude" / "worktrees" / "sujet" / "engine" / "x.py")
 
 
 # --------------------------------------------------------------------------- outils de transcript
@@ -198,7 +200,7 @@ def _bloc_des_sections() -> str:
     """L'énumération des sections du RAPPORT FINAL, isolée de ce qui l'entoure."""
     texte = CLAUDE_MD.read_text(encoding="utf-8")
     ancre = texte.index("RAPPORT FINAL")
-    debut = texte.index("Sections :", ancre)
+    debut = texte.index("Structure obligatoire", ancre)
     return texte[debut:texte.index("Pas de verdict vague", debut)]
 
 
@@ -458,7 +460,7 @@ def test_couverture_n_est_pas_exigee_sur_une_modification_de_doc(tmp_path: Path)
     Sur une doc ORDINAIRE : CLAUDE.md, lui, pilote le hook et compte comme du code (voir
     `test_modifier_claude_md_engage_couverture_et_relire`).
     """
-    doc = "Fait.\n\nLU : le doc en entier\nJUMEAU : grep -c COUVERTURE -> 1 hit\n"
+    doc = "STATUT : Livré\n\nFait.\n\nLU : le doc en entier\nJUMEAU : grep -c COUVERTURE -> 1 hit\n"
     assert _rapport(tmp_path, _user("corrige la doc"), _edit("Documentation/x.md"),
                     _say(doc)) is None
 

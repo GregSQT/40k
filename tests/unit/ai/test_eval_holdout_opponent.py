@@ -16,7 +16,7 @@ import pytest
 # selection de modele. Table REECRITE a la main : `test_holdout_bots_excluded_from_every_selection
 # _signal` la confronte a `ai/bot_registry.HOLDOUT_BOT_KEYS`, donc en ajouter un la-bas sans le
 # classer ici rougit.
-HOLDOUT_BOTS = {"tactical"}
+HOLDOUT_BOTS = {"tactical", "reference_balanced", "reference_denial", "reference_reactive"}
 
 #: Le holdout de REFERENCE : celui dont le win-rate EST le critere de succes §10.6, donc le seul
 #: dont l'ABSENCE d'une evaluation rend ce critere immesurable. La distinction avec `HOLDOUT_BOTS`
@@ -45,6 +45,7 @@ MEASURES_REFERENCE_HOLDOUT = {
     # « entraine contre » et « jamais vu » sur les deux familles de bots (§12.16 du chantier) —
     # et chaque cle d'evaluation en trop lui coute une serie complete d'episodes.
     "x1_long_panel": False,
+    "x1_new_bots": False,
 }
 
 CONFIG_ROOT = Path(__file__).resolve().parents[3] / "config" / "agents"

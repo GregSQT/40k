@@ -241,6 +241,7 @@ def _rolled(weapon: Dict[str, Any], *, rapid_fire_applied: int, target_sid: str)
         ),
         # 10.06 : aucun MONSTER/VEHICLE dans ce scenario.
         "point_blank_malus": False,
+        "indirect_fire_fail_below": False,
         # 10.05 / 10.06 : verdicts du portier, publies par le roller au meme titre que
         # `point_blank_malus`. Le groupe les lit en `require_key`, donc un intent muet leve.
         "assault_applied": False, "close_quarters_applied": False,

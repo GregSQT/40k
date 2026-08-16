@@ -49,7 +49,7 @@ CE QUI RESTE DANS `evaluation_bots.py`
 """
 
 import random
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -442,7 +442,7 @@ def _objective_terms(
         return None, objective_hex_sets(game_state)
     zones = objective_hex_sets(game_state)
     if w_crowd and me is not None and escouade is not None:
-        surplus = _surplus_oc_by_zone(game_state, zones, int(me), str(escouade), contributions)
+        surplus = _surplus_oc_by_zone(game_state, zones, int(me), str(escouade), contributions=contributions)
         maps = [m + w_crowd * s if s else m for m, s in zip(maps, surplus)]
     if w_contest and me is not None:
         # `get allowed` : le dict est cree PARESSEUSEMENT par `calculate_objective_control`, donc
@@ -490,9 +490,9 @@ def late_game_state(game_state, player: int) -> str:
     Dans ce cas la notion de « derniers tours » n'a pas de sens : on retombe sur normal/protect_lead
     selon le score uniquement.
     """
-    vp_map = require_key(game_state, "victory_points")
-    my_vp = float(vp_map[player])
-    opp_vp = float(vp_map[3 - player])
+    vp_map = game_state.get("victory_points") or {}
+    my_vp = float(vp_map.get(player, 0))
+    opp_vp = float(vp_map.get(3 - player, 0))
     vp_diff = my_vp - opp_vp
 
     if vp_diff >= _VP_LEAD_MARGIN:
@@ -702,7 +702,7 @@ class _PlacementMemory:
         self._deployment_episode_marker: Optional[Any] = None
 
     def select_placement_action(self, valid_actions: List[int], game_state) -> int:
-        episode_marker = game_state.get("episode_number")  # get allowed (absent hors episode)
+        episode_marker = require_key(game_state, "episode_number")
         if self._deployment_episode_marker != episode_marker:
             self._deployment_episode_marker = episode_marker
             self._deployment_last_action = None
@@ -749,8 +749,8 @@ class _DoctrineBot(_PlacementMemory):
         self.randomness = max(0.0, min(1.0, randomness))
         # Persistance de cible par escouade attaquante : sid -> (target_sid, turn_marker).
         self._persistence_targets: Dict[str, Tuple[str, Any]] = {}
-        # Cache de objective_control_contributions par activation (episode, turn, phase, unit).
-        self._contributions_cache_key: Optional[Tuple] = None
+        # Cache d'activation de objective_control_contributions (cle + valeur).
+        self._contributions_cache_key: Optional[Any] = None
         self._contributions_cache_val: Optional[Any] = None
         # Jitter d'episode (§4.B). Facteurs multiplicatifs, neutre par defaut (1.0).
         self._jitter_movement: Tuple[float, float, float, float, float, float] = (
@@ -849,9 +849,7 @@ class _DoctrineBot(_PlacementMemory):
 
     # -- Points de variation -----------------------------------------------------------------------
 
-    def target_score(
-        self, attacker, is_ranged: bool, game_state
-    ) -> Callable[[str, Dict[str, Any], Any], Optional[float]]:
+    def target_score(self, attacker, is_ranged: bool, game_state):
         """Critere de cible du style. Par defaut : la cible sur laquelle je fais le plus de mal."""
         return _score_efficiency(attacker, is_ranged)
 
@@ -892,14 +890,14 @@ class _DoctrineBot(_PlacementMemory):
 
         # 1. Override de preservation par unite (uniquement AttritionBot via _withdrawing).
         if self._is_preserving(unit, game_state):
-            overrides = _state_overrides_cfg().get(self.MOVEMENT_BOT_KEY, {})  # fallback allowed — override optionnel par bot
+            overrides = _state_overrides_cfg().get(self.MOVEMENT_BOT_KEY, {})
             if "preserve" in overrides:
                 base = load_doctrine_weights(overrides["preserve"])
                 return _apply_jitter_weights(base, self._jitter_movement)
 
         # 2. Override late_game.
         lg_state = late_game_state(game_state, player)
-        overrides = _state_overrides_cfg().get(self.MOVEMENT_BOT_KEY, {})  # fallback allowed — override optionnel par bot
+        overrides = _state_overrides_cfg().get(self.MOVEMENT_BOT_KEY, {})
         if lg_state in overrides:
             base = load_doctrine_weights(overrides[lg_state])
             return _apply_jitter_weights(base, self._jitter_movement)
@@ -1031,28 +1029,22 @@ class _DoctrineBot(_PlacementMemory):
             return (int(chosen[0]), int(chosen[1]))
 
         w_obj, w_enn, w_fire, w_risk, w_contest, w_crowd = self.movement_weights(unit, game_state)
-
-        # Cache objective_control_contributions pour cette activation. La clé couvre
-        # (épisode, tour, phase, escouade) : deux appels pour la même unité dans la même
-        # activation retournent le même objet sans rappeler le moteur.
+        # Cache objective_control_contributions par activation (episode, tour, phase, unite).
+        # Gate sur w_crowd : seul terme qui l'utilise — sans cache, _surplus_oc_by_zone l'appelle
+        # une fois par figurine active dans le pool BFS.
         contributions = None
         if w_crowd:
-            cache_key: Tuple = (
+            cache_key = (
                 require_key(game_state, "episode_number"),
                 require_key(game_state, "turn"),
                 require_key(game_state, "phase"),
-                require_key(unit, "id"),
+                str(require_key(unit, "id")),
             )
             if self._contributions_cache_key != cache_key:
                 self._contributions_cache_key = cache_key
-                self._contributions_cache_val = None
-            if self._contributions_cache_val is None:
                 zones_for_cache = objective_hex_sets(game_state)
-                self._contributions_cache_val = objective_control_contributions(
-                    game_state, zones_for_cache
-                )
+                self._contributions_cache_val = objective_control_contributions(game_state, zones_for_cache)
             contributions = self._contributions_cache_val
-
         # La carte de distance est PONDEREE par qui tient quoi ET par ce que les allies couvrent
         # deja : c'est ici que le bot cesse d'aller betement vers la zone la plus proche, et qu'il
         # cesse d'y aller a cinq (cf. `_objective_terms`).
@@ -1217,6 +1209,21 @@ class EndgameBot(_DoctrineBot):
             return False
         return super().wants_charge(attacker, game_state)
 
+    def _pushing(self, game_state) -> bool:
+        """Vrai si on est dans la fenetre de poussee finale (`_PUSH_LAST_TURNS` derniers tours).
+
+        Leve si la bataille n'a pas de fin (Endless Duty) : jouer la fin de partie n'a pas de
+        sens sans fin de partie — et masquer cette rupture d'invariant produirait un mode « jamais
+        en poussee » permanent, sans signal.
+        """
+        battle_turns = get_effective_turn_limit(game_state)
+        if battle_turns is None:
+            raise ValueError(
+                "Endless Duty: jouer la fin de partie n'a pas de sens sans fin de partie."
+            )
+        current_turn = int(require_key(game_state, "turn"))
+        return battle_turns - current_turn + 1 <= _PUSH_LAST_TURNS
+
 
 class AlphaStrikeBot(_DoctrineBot):
     """DISTANCE nulle : il cherche le contact au plus tot, sur la piece qui compte.
@@ -1325,7 +1332,7 @@ class DecapitationBot(_DoctrineBot):
     sans se voir les unes les autres, donc aucun critere local ne peut produire une concentration.
     La cible est ELUE a la premiere activation du tour (cf. `_elect`) et gardee tant qu'elle vit.
     Elle porte les DEUX faces de la doctrine : vers qui on tire (`target_score`) et vers qui on
-    marche (`_enemy_anchors`) — concentrer ses tirs depuis cinq positions eclatees, c'est
+    marche (`movement_enemy_anchors`) — concentrer ses tirs depuis cinq positions eclatees, c'est
     ne concentrer que la moitie de son activation.
 
     `focus_shared: true` dans le profil (Bot_refactor.md §4.A.2) : le focus inter-escouades est
@@ -1349,15 +1356,11 @@ class DecapitationBot(_DoctrineBot):
     def _focus(self, game_state, attacker=None) -> Optional[str]:
         """Cible du tour, ELUE a la premiere lecture, oubliee au changement de tour ou a sa mort.
 
-        ⚠️ `require_key` sur `turn` ET `episode_number` (T1) : un defaut rendait ici un marqueur
-        CONSTANT, donc le bot gardait la meme cible focalisee pendant toute la partie ou partageait
-        la meme cible entre deux episodes joues par la meme instance — un defaut de doctrine
-        silencieux, ne au masquage d'une rupture d'invariant.
-        `attacker=None` autorise les appels hors episode (tests de marqueur, reinitialisation) :
-        sans attaquant, l'election est ignoree et `None` est rendu.
+        `require_key` sur `turn` ET sur `episode_number` (T1) : un `.get` sur l'un ou l'autre
+        rendait un marqueur CONSTANT qui empechait le changement de cible entre tours ou entre
+        episodes — un defaut de doctrine silencieux ne au masquage d'une rupture d'invariant.
         """
-        ep = require_key(game_state, "episode_number")
-        marker: Tuple[Any, int] = (ep, int(require_key(game_state, "turn")))
+        marker = (require_key(game_state, "episode_number"), int(require_key(game_state, "turn")))
         if self._focus_turn != marker:
             self._focus_turn = marker
             self._focus_target = None
@@ -1370,7 +1373,7 @@ class DecapitationBot(_DoctrineBot):
             self._focus_target = self._elect(attacker, game_state, enemies)
         return self._focus_target
 
-    def _elect(self, attacker, game_state, enemies) -> Optional[str]:
+    def _elect(self, unit, game_state, enemies) -> Optional[str]:
         """Elit la cible du tour pour l'escouade qui active la premiere.
 
         ⚠️ ELECTION, et non plus memorisation du premier tir (2026-08-13). La cible etait
@@ -1389,13 +1392,10 @@ class DecapitationBot(_DoctrineBot):
         classe TOUTES les cibles, zero degat compris (contrairement a `_score_contester`, qui
         ecarte). Le filtre `is None` qui vivait ici etait donc mort, et avec lui le repli
         `if not scored`. `None` n'est rendu QUE sur une table sans ennemi.
-
-        `enemies` est fourni par l'appelant (`_focus`) pour eviter un double calcul : le meme
-        appel a `_living_enemies_on_table` serait fait ici puis dans `_enemy_anchors`.
         """
         if not enemies:
             return None
-        ranged, melee = _score_kill_now(attacker, True), _score_kill_now(attacker, False)
+        ranged, melee = _score_kill_now(unit, True), _score_kill_now(unit, False)
         scored: List[Tuple[float, str]] = []
         for enemy in enemies:
             sid = str(enemy["id"])
@@ -1409,30 +1409,6 @@ class DecapitationBot(_DoctrineBot):
         # surtout pas le plus petit identifiant — l'ordre des unites est le meme pour toutes les
         # escouades du tour, donc l'election reste la meme quelle que soit celle qui active.
         return max(scored, key=lambda pair: pair[0])[1]
-
-    def _shoot(self, valid_actions, game_state, active_unit) -> int:
-        """Comme le socle, mais confirme le focus sur le premier tir reel du tour.
-
-        L'election au mouvement choisit la cible la plus PAYANTE en termes de degats esperes,
-        sans savoir qui sera dans le masque au moment du tir. Si l'elue est hors de portee de
-        tout le monde, `target_score` n'accorde son bonus a personne : la premiere escouade qui
-        tire FIXE la cible confirmee, et les suivantes la suivent (via `_focus_confirmed`).
-        """
-        if not any(a in valid_actions for a in mi.SHOOT_SLOTS):
-            return self._wait_or_first(valid_actions)
-        p = self._persistence_p()
-        use_contester = self._uses_contester_score(active_unit, game_state)
-        action, target_sid = _best_slot_action_persistent(
-            valid_actions, mi.SHOOT_SLOTS, mi.SHOOT_SLOT_BASE, game_state, active_unit,
-            self.target_score(active_unit, True, game_state),
-            p, use_contester, self._persistence_targets,
-        )
-        if action is None:
-            return WAIT_ACTION
-        if not self._focus_confirmed and target_sid is not None:
-            self._focus_target = str(target_sid)
-            self._focus_confirmed = True
-        return action
 
     def _enemy_anchors(self, unit, game_state, enemies):
         """Le terme d'ennemi porte sur la CIBLE DU TOUR : c'est la doctrine, pas une geometrie.
@@ -1454,13 +1430,10 @@ class DecapitationBot(_DoctrineBot):
             return super()._enemy_anchors(unit, game_state, enemies)
         entry = require_unit_from_cache(focused, game_state, "_move_focus")
         if not entry_is_on_battlefield(entry):
-            # 20.01 : une unite peut etre vivante mais hors table (sentinelle -1,-1 en reserves).
-            # Dans ce cas elle n'est pas dans `enemies` ; on la traite comme une cible perdue
-            # et on reelit depuis le pool present.
+            # Cible partie hors table (reserves 20.01) : reset et re-election sur les restants.
             self._focus_target = None
             self._focus_confirmed = False
-            focused = self._elect(unit, game_state, enemies)
-            self._focus_target = focused
+            focused = self._focus(game_state, unit)
             if focused is None:
                 return super()._enemy_anchors(unit, game_state, enemies)
             entry = require_unit_from_cache(focused, game_state, "_move_focus")
@@ -1481,6 +1454,29 @@ class DecapitationBot(_DoctrineBot):
             return base
 
         return _score
+
+    def _remember(self, action: int, game_state, active_unit) -> None:
+        """Confirme la cible du tour a partir du premier tir reellement effectue.
+
+        L'election au mouvement classe sur les degats esperes sans contrainte de portee : la cible
+        elue peut etre hors du masque de l'activer. Le premier slot ouvert tranche et VERROUILLE —
+        `_focus_confirmed` empeche les activations suivantes de rerouter la cible.
+        """
+        if self._focus_confirmed:
+            return
+        from engine.phase_handlers.shared_utils import get_enemy_slot_mapping
+        player = int(require_key(active_unit, "player"))
+        mapping = get_enemy_slot_mapping(game_state, player)
+        slot_idx = action - mi.SHOOT_SLOT_BASE
+        if slot_idx < len(mapping):
+            self._focus_target = mapping[slot_idx]
+            self._focus_confirmed = True
+
+    def _shoot(self, valid_actions, game_state, active_unit) -> int:
+        action = super()._shoot(valid_actions, game_state, active_unit)
+        if action in mi.SHOOT_SLOTS:
+            self._remember(action, game_state, active_unit)
+        return action
 
 
 class ScorerBot(_DoctrineBot):
