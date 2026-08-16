@@ -215,3 +215,84 @@ Ordre retenu : **1 → 2 → 3 → 4 → 5 (agent) → 6 → 5 (PvP) → retrain
   défaire.
 - **Ne pas confondre « unité immobile » et « n'a pas avancé ».** Le seuil de 4+ exige *remained
   stationary*, condition plus forte que l'absence d'advance qui conditionne l'éligibilité.
+
+
+---
+
+## 9. REPRISE — état exact au 2026-08-16, et où brancher la suite
+
+Section écrite pour qu'un agent qui n'a pas suivi le chantier puisse reprendre sans rien
+redécouvrir. Elle dit ce qui EST, pas ce qui était prévu.
+
+### 9.1 Ce qui marche déjà, et ce qu'il ne faut pas refaire
+
+Le moteur **résout** intégralement le tir indirect et l'**agent peut le choisir**. Concrètement :
+une escouade éligible voit s'ouvrir 20 slots d'action `SHOOT_INDIRECT`, le type choisi est stocké
+et honoré, le ciblage ignore la ligne de vue pour les armes [INDIRECT FIRE], et la résolution
+applique plancher, couvert octroyé et interdiction de relance.
+
+⚠️ **Le PvP humain, lui, ne peut PAS choisir** : le chemin d'activation humain ne pose aucun
+choix, donc une unité humaine reste sur le type dérivé (10.04 normal). Ce n'est pas un bug, c'est
+le volet non livré de la pièce 5.
+
+Verrous existants — les lancer AVANT de toucher quoi que ce soit, ils cadrent tout le reste :
+
+```
+tests/unit/engine/test_indirect_shooting_eligibility_10_07.py
+tests/unit/engine/test_indirect_shooting_targeting_10_07.py
+tests/unit/engine/test_indirect_shooting_resolution_10_07.py
+tests/unit/engine/test_indirect_shooting_choice_10_02.py
+tests/unit/engine/test_action_space_mirror.py
+```
+
+### 9.2 Pièce 6 — journal (backend, courte) — À FAIRE EN PREMIER
+
+**Pourquoi d'abord** : cf. §4. Le moteur joue la règle sans que le journal l'explique.
+
+Ce qu'il manque, exactement : une ligne de tir indirect rend aujourd'hui `Hit 6(3+->6+)` sans
+qu'aucun token ne dise **d'où vient le 6** (règle ou datasheet) ni **d'où vient le couvert**
+(octroyé par 10.07 ou géométrique).
+
+Grammaire décidée (cf. §1 et §3.6) :
+- `[INDIRECT FIRE:<plancher>+]` — le plancher est une valeur **déclarée par la règle** (6 ou 4),
+  donc la grammaire `[REGLE:X]` du dépôt. Un lecteur recoupe alors
+  `eff == max(base_après_couvert, plancher)` sans rien re-dériver ;
+- `[COVER]` doit être posé AUSSI : les deux causes agissent sur le même seuil et
+  `hit_rule_modifier` n'en porte qu'une.
+
+Chemin à suivre, **exactement celui qu'ont pris [ASSAULT] et [CLOSE-QUARTERS]** (chantier du
+2026-08-15, à copier plutôt qu'à réinventer) :
+1. le fait est posé sur le groupe par `shared_utils._emit_squad_shoot_log` (voisins :
+   `assaultApplied`, `closeQuartersApplied`) — la valeur est déjà calculée par
+   `indirect_fire_fail_below`, il suffit de la transporter ;
+2. pont dans `w40k_core._build_shot_details` (voisins : les branches `assaultApplied` /
+   `psychicApplied`) ;
+3. formatage dans `ai/step_logger.py`, branche `shoot` ;
+4. `replayParser.ts` : `[INDIRECT FIRE:X+]` est accolé au segment `Hit`, donc il DOIT entrer dans
+   `NON_ABILITY_ROLL_TOKENS` — sinon il passe pour un nom de capacité d'unité (défaut déjà payé) ;
+5. incrémenter `LOG_GRAMMAR_VERSION` (4 → 5) et **retirer INDIRECT_FIRE de la liste d'exceptions**
+   qui y est écrite, ainsi que dans `Replay.md` §2.3quater ;
+6. étendre `tests/unit/ai/test_step_log_weapon_rule_tokens.py` (table `LOT_A_TOKENS`).
+
+### 9.3 Pièce 5, volet PvP (frontend + API)
+
+Point de branchement backend : `engine/w40k_core.py`, la branche qui pose
+`self.game_state["active_shooting_unit"] = squad_id` (~ligne 5016). C'est le pendant humain de la
+branche gym qui appelle déjà `squad_shooting_type_choose` (~ligne 6603).
+
+Ce qu'il faut : exposer les types jouables (`eligible_squad_shooting_types`) à l'activation, et un
+point d'entrée qui appelle `squad_shooting_type_choose`. La validation est déjà faite par cette
+fonction — ne pas la redoubler côté API.
+
+⚠️ Le choix doit pouvoir CHANGER tant que l'activation n'est pas résolue (un joueur revient sur
+sa décision). C'est possible par construction : `eligible_squad_shooting_types` dérive et ne lit
+pas le choix en cours — cette séparation existe pour ça, ne pas la défaire.
+
+### 9.4 Après : retrain, puis lot analyzer
+
+Le retrain est dû au seul changement d'espace d'action (`TOTAL_ACTION_SIZE` 1139 → 1159), acté par
+l'utilisateur. ⚠️ Il **n'exercera pas** la règle : aucun roster d'ArmageddonAgent ne porte d'arme
+[INDIRECT FIRE] (cf. §8), donc le masque n'ouvrira jamais ces 20 slots. Un compteur d'usage à zéro
+sur ce run sera CORRECT.
+
+Le contrôle analyzer reste un **lot séparé**, avec sa mesure de taux de fausse alarme (§3.7).

@@ -60,11 +60,14 @@
   ✅ 5 décision, **volet AGENT** (option A : 20 slots d'action dédiés, décodeur, masque, état de
   choix validé et effacé ; `TOTAL_ACTION_SIZE` 1139 → 1159 — **c'est ce changement qui invalide
   les modèles entraînés**, acté par l'utilisateur).
-  ⏳ RESTENT : **5 volet PvP** (le chemin d'activation humain ne pose aucun choix, donc un joueur
-  humain ne peut pas encore jouer l'indirect — travail frontend + point d'entrée API) et **6 journal**
-  (`[INDIRECT FIRE:<plancher>+]` et `[COVER]`, sans lesquels une ligne de tir indirect est
-  illisible pour l'analyzer). Puis le retrain, puis le contrôle analyzer en LOT SÉPARÉ avec sa
-  mesure de taux de fausse alarme.
+  ⏳ RESTENT, dans cet ordre : **6 journal D'ABORD** (le moteur joue la règle sans que le journal
+  l'explique — une ligne rend `Hit 6(3+->6+)` sans dire d'où vient le 6 ; c'est le PvP qui rend
+  l'ordre décisif, pas le retrain, cf. la spec §4), puis **5 volet PvP**
+  (le chemin d'activation humain ne pose aucun choix, donc un joueur humain ne peut pas encore
+  jouer l'indirect — frontend + point d'entrée API). Puis le retrain, puis le contrôle analyzer en
+  LOT SÉPARÉ avec sa mesure de taux de fausse alarme.
+  📋 **Reprise par un autre agent : `A_faire/indirect_fire_10_07.md` §9** — état exact, points de
+  branchement (fichier:ligne), verrous à lancer d'abord, et les pièges déjà payés.
   ⚠️ Tant que la pièce 5 n'est pas livrée, **rien ne peut choisir le tir indirect** : les quatre
   pièces livrées sont inertes, et un test le verrouille explicitement.
   → [`A_faire/indirect_fire_10_07.md`](A_faire/indirect_fire_10_07.md)

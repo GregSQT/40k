@@ -40,8 +40,12 @@ __all__ = ['StepLogger', 'LOG_GRAMMAR_VERSION']
 #:       [RAPID FIRE:X]. Verrou : `test_step_log_weapon_rule_tokens.py` LOT A.
 #:
 #:       ⚠️ UNE SEULE REGLE RESTE HORS DE LA GARANTIE :
-#:         - INDIRECT_FIRE 24.19 : non implementee dans le moteur, un token annoncerait un
-#:           effet qui n a pas lieu.
+#:         - INDIRECT_FIRE 24.19 : la regle EST implementee depuis le 2026-08-16, mais son
+#:           token n est pas encore ecrit (piece 6 du chantier). ⚠️ L exception a donc CHANGE DE
+#:           NATURE : ce n est plus « la regle n a pas lieu », c est « la regle joue et le
+#:           journal ne le dit pas encore ». Une ligne de tir indirect rend aujourd hui
+#:           `Hit 6(3+->6+)` sans que rien ne dise si le 6 vient de la regle ou de la
+#:           datasheet. Voir A_faire/indirect_fire_10_07.md, piece 6.
 #:
 #: N incrementer que pour une garantie NOUVELLE, jamais pour un changement cosmetique : un
 #: lecteur qui refuse une version qu il ne connait pas doit avoir une raison de le faire.

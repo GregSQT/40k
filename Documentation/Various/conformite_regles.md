@@ -114,7 +114,7 @@ réel dépasse le budget. → classé ⚠️ (non exploitable en jeu normal), pa
 |---|---|---|
 | Command | Battle-shock ✅ | Command Points / stratagèmes absents |
 | Move | ✅ solide | Regaining Coherency fin de tour non câblé, 3D non modélisée |
-| Shoot | table blessures/save ✅, **règles d'armes vives (§0.38) et visibles dans step.log/analyzer/replay depuis le 2026-07-29** | **FNP absent** ; INDIRECT FIRE (24.19) non traité ; le nom d'abilité de relance n'est pas journalisé (feature, cf. §0hist.38) |
+| Shoot | table blessures/save ✅, **règles d'armes vives (§0.38) et visibles dans step.log/analyzer/replay depuis le 2026-07-29** | **FNP absent** ; INDIRECT FIRE (24.19) traité aux 5/6 le 2026-08-16 (reste le journal et le choix PvP, cf. `Implémentation/A_faire/indirect_fire_10_07.md`) ; le nom d'abilité de relance n'est pas journalisé (feature, cf. §0hist.38) |
 | Charge | ✅ le plus conforme | Overwatch/Heroic (hors scope) |
 | Fight | ✅ V11 complet | Print debug en prod, chemin auto = pool PV unique, FNP |
 

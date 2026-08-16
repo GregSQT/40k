@@ -155,7 +155,7 @@ Defined in `config/weapon_rules.json` — **23 rules**, and this table is genera
 | `HAZARDOUS` | ❌ | 24.15 | One D6 hazard roll per selected Hazardous weapon, after the attacks |
 | `HEAVY` | ❌ | 24.16 | +1 to hit if unengaged, not set up this turn, and moved ≤ 3" |
 | `IGNORES_COVER` | ❌ | 24.18 | The target cannot have the Benefit of Cover |
-| `INDIRECT_FIRE` | ❌ | 24.19 | ⚠️ **NOT IMPLEMENTED** — see the coverage note below |
+| `INDIRECT_FIRE` | ❌ | 24.19 | Delegates entirely to indirect shooting 10.07 — a SHOOTING TYPE, not a per-attack modifier. Implemented 2026-08-16 |
 | `LETHAL_HITS` | ❌ | 24.23 | Critical hit *may* automatically wound (the engine arbitrates, see below) |
 | `MELTA` | ✅ X | 24.25 | +X Damage within half range |
 | `PRECISION` | ❌ | 24.28 | Attacks may be allocated to a visible CHARACTER in the target unit |
@@ -685,9 +685,10 @@ unimplemented rule its id later costs neither `obs_size` nor weights.
   duplicate what the value already says. The `ANTI_*` are the exception that proves the split:
   their `Y+` threshold is continuous *and* their keyword is an id, because the threshold is
   meaningless without knowing which keyword it targets.
-- **`INDIRECT_FIRE` has none** because it is not implemented (see the Game Log section above).
-  Keeping the entry — and *not* giving it an id — is the deliberate state: the day it becomes
-  live it only needs its id, with no observation resize and no retrain.
+- **`INDIRECT_FIRE` got its id on 2026-08-16**, when 10.07 was implemented. It had none while
+  the rule was inert, and the prediction made here held exactly: adding it resized nothing and
+  cost no weights. The retrain that chantier does require comes from the ACTION space — the
+  shooting type became a choice (10.02) — never from the observation.
 
 **Example** (verbatim from `config/weapon_rules.json`):
 ```json

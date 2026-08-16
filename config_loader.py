@@ -645,8 +645,9 @@ class ConfigLoader:
         Toutes les entrees ne portent PAS d'`obs_id`, et c'est la regle du registre, pas un
         oubli : les regles PARAMETREES (RAPID_FIRE X, SUSTAINED_HITS X, MELTA X, CLEAVE X,
         BLAST X) sont decrites par leur VALEUR dans le bloc continu du profil — un id en plus n'y
-        ajouterait rien — et INDIRECT_FIRE n'est pas implementee (un id pour elle serait du bruit
-        pur, cf. `observation_weapon_profiles`). `_validate_obs_ids` ignore ces entrees ; c'est
+        ajouterait rien. INDIRECT_FIRE, elle, EN A UN depuis le 2026-08-16 : la regle 24.19/10.07 est
+        implementee, et l agent doit la percevoir pour pouvoir choisir le tir indirect (10.02).
+        Elle etait la seule entree sans id tant qu elle etait inerte. `_validate_obs_ids` ignore ces entrees ; c'est
         `observation_builder.weapon_rule_obs_ids` qui exige un id pour le vocabulaire OBSERVE.
         """
         rules = self.load_config("weapon_rules", force_reload=False)

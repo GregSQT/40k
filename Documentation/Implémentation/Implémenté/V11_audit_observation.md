@@ -450,6 +450,7 @@ Périmètre exécuté : **les 3 points « débloqués par la fin du portage des 
   par nombre de porteurs. **K mesuré sur les rosters réels** : 6 tir + 5 mêlée pour mon escouade
   (aucune troncature de mes propres capacités), 2 tir + 1 mêlée par slot ennemi ; dépassement
   **logué**. [INDIRECT FIRE] volontairement absente (non implémentée ⇒ bit inerte).
+  ⚠️ État de l'époque : la règle a été implémentée le 2026-08-16 et l'observation l'expose depuis.
 - **Mise en place / réserve** (point 2) : one-hot 3 états dérivé de `deployed_on_turn` **+ le bit
   « posée CE tour »** — l'état seul ne dit pas si la pose est de ce tour, or c'est ce point qui
   supprime le bonus [HEAVY] (24.16 clause 2).

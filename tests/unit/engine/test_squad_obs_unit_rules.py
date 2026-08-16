@@ -198,7 +198,8 @@ def test_role_markers_are_not_duplicated_as_rule_ids():
 
 
 def test_only_rules_with_a_real_effect_have_a_bit():
-    """Aucune regle inerte exposee — meme critere que [INDIRECT FIRE] cote armes.
+    """Aucune regle inerte exposee. ⚠️ [INDIRECT FIRE] n illustre plus ce critere : elle est vive
+    depuis le 2026-08-16 et donc exposee. Le critere, lui, est inchange.
 
     `adrenalised_onslaught` est un CHOIX de joueur (Aggression OU Preservation Imperative) que
     le moteur ne resout pas : sans le mecanisme generique de decision agent (P2) elle ne produit

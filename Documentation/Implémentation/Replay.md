@@ -205,7 +205,7 @@ exactement ce qu'un numéro de version doit empêcher. Une règle reste dehors :
 
 | Règle | Pourquoi hors garantie |
 |---|---|
-| `INDIRECT_FIRE` 24.19 | Pas implémentée dans le moteur : aucune attaque n'en subit l'effet, un token annoncerait un effet qui n'a pas lieu |
+| `INDIRECT_FIRE` 24.19 | ⚠️ **L'exception a changé de nature le 2026-08-16.** La règle est désormais implémentée (10.07) : elle JOUE, mais son token n'est pas encore écrit — c'est la pièce 6 du chantier. Une ligne de tir indirect rend `Hit 6(3+->6+)` sans que rien ne dise si le 6 vient de la règle ou de la datasheet, ni si le couvert était octroyé ou géométrique |
 
 ⚠️ **Lecteurs à jeu de tokens FERMÉ** : les six tokens du lot 3 sont accolés aux segments `Hit` et
 `Wound` (sauf `[EXTRA ATTACKS]`, qui vit dans les tags de ligne, avant la cible) ; `[ASSAULT]` et
