@@ -176,7 +176,7 @@ class W40KMetricsTracker:
         'shoot_kills', 'melee_kills', 'shoot_value_killed', 'melee_value_killed',
         'charge_attempts', 'charge_successes',
         'charge_attempts_bot', 'charge_successes_bot',
-        'move_actions', 'move_flees', 'move_opportunities',
+        'move_actions', 'move_flees', 'move_advances', 'move_opportunities',
         'shoot_activations', 'shoot_opportunities',
         # Distances de charge (11.04) : une serie par somme ET par effectif, les deux camps.
         # Elles vont par paires dans `_emit_ratio_of_means` — c'est exactement la forme qu'il
@@ -771,7 +771,7 @@ class W40KMetricsTracker:
         if shots_fired > 0:
             hits = require_key(tactical_data, 'hits')
             accuracy = hits / shots_fired
-            self.writer.add_scalar('game_tactical/shooting_accuracy', accuracy, self.episode_count)
+            self.writer.add_scalar('04_shoot/b_accuracy', accuracy, self.episode_count)
         
         # GAME DETAILED: Damage dealt - Offensive power
         damage_dealt = require_key(tactical_data, 'damage_dealt')
@@ -786,7 +786,7 @@ class W40KMetricsTracker:
         # GAME TACTICAL: Damage efficiency - Trade effectiveness
         if damage_received > 0 and damage_dealt > 0:
             damage_efficiency = damage_dealt / damage_received
-            self.writer.add_scalar('game_tactical/damage_efficiency', damage_efficiency, self.episode_count)
+            self.writer.add_scalar('02_combat/q_damage_efficiency', damage_efficiency, self.episode_count)
         
         units_lost = require_key(tactical_data, 'units_lost')
         units_killed = require_key(tactical_data, 'units_killed')
@@ -886,22 +886,27 @@ class W40KMetricsTracker:
         # charger. `m_charge_attempts` et sa colonne adverse repondent sans cette ambiguite.
         move_actions = float(require_key(tactical_data, 'move_actions'))
         move_waits = float(require_key(tactical_data, 'move_waits'))
+        move_advances = float(require_key(tactical_data, 'move_advances'))
         shoot_activations = float(require_key(tactical_data, 'shoot_activations'))
         move_hist = self._game_push('move_actions', move_actions)
         flee_hist = self._game_push('move_flees', float(require_key(tactical_data, 'move_flees')))
+        move_advances_hist = self._game_push('move_advances', move_advances)
         move_opportunities = self._game_push('move_opportunities', move_actions + move_waits)
         shoot_hist = self._game_push('shoot_activations', shoot_activations)
         shoot_opportunities = self._game_push(
             'shoot_opportunities',
             shoot_activations + float(require_key(tactical_data, 'shoot_waits')),
         )
-        self._emit_ratio_of_means(
-            'game_tactical/movement_efficiency', move_hist, move_opportunities
-        )
-        self._emit_ratio_of_means('game_detailed/flee_rate', flee_hist, move_opportunities)
-        self._emit_ratio_of_means(
-            'game_tactical/shooting_participation', shoot_hist, shoot_opportunities
-        )
+        # 03_move/ : participation (unités ayant bougé / occasions), advance rate, flee rate.
+        # `move_actions` est le dénominateur d'advance_rate et flee_rate : seules les activations
+        # réelles peuvent être une advance ou une fuite — une occasion ratée (wait) ne l'est pas.
+        self._emit_ratio_of_means('03_move/a_participation', move_hist, move_opportunities)
+        self._emit_ratio_of_means('03_move/b_advance_rate', move_advances_hist, move_hist)
+        self._emit_ratio_of_means('03_move/c_flee_rate', flee_hist, move_hist)
+        # 04_shoot/ : participation (unités avec cibles ayant tiré), précision.
+        # `shoot_waits` ne compte que les unités qui avaient des cibles valides (LoS inclus) mais
+        # ont passé leur activation — le taux est donc déjà conditionnel au LoS sans compteur dédié.
+        self._emit_ratio_of_means('04_shoot/a_participation', shoot_hist, shoot_opportunities)
 
         # COMBAT VALUE METRICS: Episode-level attrition in VALUE points.
         enemy_value_destroyed = float(require_key(tactical_data, 'enemy_value_destroyed'))
@@ -923,11 +928,6 @@ class W40KMetricsTracker:
         if units_lost > 0 and units_killed > 0:
             trade_ratio = units_killed / units_lost
             self.writer.add_scalar('game_critical/units_killed_vs_lost_ratio', trade_ratio, self.episode_count)
-        
-        # GAME TACTICAL: Unit trade ratio (absolute)
-        if units_lost > 0 and units_killed > 0:
-            trade_ratio = units_killed / units_lost
-            self.writer.add_scalar('game_tactical/unit_trade_ratio', trade_ratio, self.episode_count)
         
         # GAME CRITICAL: Invalid action rate - AI_TURN.md compliance
         valid_actions = require_key(tactical_data, 'valid_actions')
@@ -1158,8 +1158,20 @@ class W40KMetricsTracker:
                 ('e_declarations_ge9_share', 'long', 'target_n'),
             ):
                 self._emit_ratio_of_means(
-                    f'charge_distance/{_name}_{_side}', _hist[_num], _hist[_den]
+                    f'05_charge/{_name}_{_side}', _hist[_num], _hist[_den]
                 )
+
+        # 06_fight/ : activations de combat par tour.
+        # fight_activations = paires (tour, escouade) uniques sur l'épisode, dérivées des logs
+        # "combat". final_turn est le tour de terminaison — dénominateur naturel pour normaliser.
+        fight_activations = float(require_key(tactical_data, 'fight_activations'))
+        final_turn = float(require_key(tactical_data, 'final_turn'))
+        if final_turn > 0:
+            self.writer.add_scalar(
+                '06_fight/a_activations_per_turn',
+                fight_activations / final_turn,
+                self.episode_count,
+            )
 
     def log_training_step(self, step_data: Dict[str, Any]):
         """Log training step metrics - exploration rate and loss"""
@@ -1490,13 +1502,6 @@ class W40KMetricsTracker:
         if 'time/fps' in model_stats:
             fps = model_stats['time/fps']
             self.writer.add_scalar('training_critical/fps', fps, self.step_count)
-        
-        # TRAINING DETAILED: Additional advanced metrics if available
-        if 'train/policy_loss' in model_stats:
-            self.writer.add_scalar('training_detailed/policy_loss_raw', model_stats['train/policy_loss'], self.step_count)
-        
-        if 'train/value_loss' in model_stats:
-            self.writer.add_scalar('training_detailed/value_loss_raw', model_stats['train/value_loss'], self.step_count)
         
         # Update step count for next logging
         self.step_count += 1

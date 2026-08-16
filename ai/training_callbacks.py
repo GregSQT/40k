@@ -2109,8 +2109,6 @@ class BotEvaluationCallback(BaseCallback):
                     step=int(eval_marker),
                 )
 
-        if hasattr(self.model, 'logger') and self.model.logger:
-            self.model.logger.record('eval_bots/combined_win_rate', combined_win_rate)
         self._log_scenario_scores(results)
 
         if gate_pass and combined_win_rate > self.best_combined_win_rate and eval_marker >= self.save_best_min_episodes:
