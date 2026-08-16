@@ -34,22 +34,14 @@ __all__ = ['StepLogger', 'LOG_GRAMMAR_VERSION']
 #:       regles-la, il dit que la regle n a pas joue, plus jamais que le journal ne sait pas
 #:       le dire.
 #:
-#:       ⚠️ TROIS REGLES SONT HORS DE CETTE GARANTIE, et un lecteur qui l ignore refusera un
-#:       journal parfaitement sain — c est precisement ce qu une version de grammaire ne doit
-#:       jamais provoquer. La portee dit « sequence d attaque » et non « toute regle d arme »
-#:       pour cette seule raison :
-#:         - INDIRECT_FIRE 24.19 : la regle n est PAS implementee dans le moteur, donc aucune
-#:           attaque ne peut en subir l effet. Un token annoncerait un effet qui n a pas lieu.
-#:         - ASSAULT 24.04 et CLOSE_QUARTERS 24.07 : ce sont des regles d ELIGIBILITE au tir
-#:           (10.05 / 10.06) — elles decident QUI peut tirer, pas ce qu une attaque fait. Les
-#:           branches d affichage existent plus bas (`assault_applied`,
-#:           `close_quarters_applied`) mais AUCUN producteur n ecrit ces deux cles : mesure le
-#:           2026-08-16, un lecteur et zero ecrivain. Les tokens ne peuvent donc pas apparaitre,
-#:           et l analyzer re-derive les deux usages depuis l etat
-#:           (`ai/analyzer_phases/shoot_handler.py`). Verrou :
-#:           `tests/unit/ai/test_step_log_weapon_rule_tokens.py::test_assault_et_close_quarters_
-#:           sont_hors_garantie_de_grammaire` — le jour ou un producteur apparait, il devient
-#:           ROUGE et cette liste d exceptions doit maigrir d autant.
+#:   4 — etend la garantie aux regles d ELIGIBILITE au tir (10.05 / 10.06) : [ASSAULT] 24.04
+#:       (arme [ASSAULT] + avance ce tour) et [CLOSE-QUARTERS] 24.07 (arme [CLOSE_QUARTERS] +
+#:       tireur engage), poses dans les tags de ligne entre le verbe SHOT et la cible, comme
+#:       [RAPID FIRE:X]. Verrou : `test_step_log_weapon_rule_tokens.py` LOT A.
+#:
+#:       ⚠️ UNE SEULE REGLE RESTE HORS DE LA GARANTIE :
+#:         - INDIRECT_FIRE 24.19 : non implementee dans le moteur, un token annoncerait un
+#:           effet qui n a pas lieu.
 #:
 #: N incrementer que pour une garantie NOUVELLE, jamais pour un changement cosmetique : un
 #: lecteur qui refuse une version qu il ne connait pas doit avoir une raison de le faire.
