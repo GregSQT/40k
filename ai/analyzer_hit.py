@@ -158,15 +158,20 @@ def check_hit_result(
     if parsed is None:
         return
     roll, target = parsed
+    # 10.07 tir indirect : le seuil effectif = max(BS_après_couvert, plancher).
+    # `hit_target` loggué = BS seul ; sans ce max, roll=4 vs BS=4+ sous plancher 6+ serait un
+    # faux positif (expected HIT, observed MISS — le moteur a raison).
+    m_indirect = _INDIRECT_FIRE_TOKEN_RE.search(action_desc)
+    effective_target = max(target, int(m_indirect.group(1))) if m_indirect else target
     stats[f"{key}_checked"][attacker_player] += 1
-    if expected_hit_success(roll, target) == bool(WOUND_SEGMENT_PRESENT_RE.search(action_desc)):
+    if expected_hit_success(roll, effective_target) == bool(WOUND_SEGMENT_PRESENT_RE.search(action_desc)):
         return
     stats[f"{key}_mismatch"][attacker_player] += 1
     first = stats["first_error_lines"][f"{key}_mismatch"]
     if first[attacker_player] is None:
-        expected = "TOUCHE" if expected_hit_success(roll, target) else "ÉCHEC"
+        expected = "TOUCHE" if expected_hit_success(roll, effective_target) else "ÉCHEC"
         first[attacker_player] = {
             "episode": state.current_episode_num,
             "line": line.strip(),
-            "detail": f"jet {roll} vs seuil {target}+ → {expected} attendu",
+            "detail": f"jet {roll} vs seuil {effective_target}+ → {expected} attendu",
         }

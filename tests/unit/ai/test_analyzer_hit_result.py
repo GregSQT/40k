@@ -164,6 +164,33 @@ def test_un_6_non_modifie_rendu_comme_un_echec_est_compte(tmp_path):
     assert stats["shoot_hit_result_mismatch"][1] == 1
 
 
+# Tir indirect (10.07) : roll >= BS mais < plancher → MISS légal, pas un mismatch.
+# Sans le max(target, plancher), check_hit_result prédit HIT (roll=4, BS=4+) et trouve
+# MISS → faux positif. Ces deux lignes discriminent l'implémentation correcte.
+_INDIRECT_MISS_ABOVE_BS = (
+    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT Unit 101{T} with [Bolter]"
+    " - Hit 4(3+->4+) [COVER] [INDIRECT FIRE:6+] [R:+0.0] [FAILED]\n"
+)
+_INDIRECT_HIT_ON_CRIT = (
+    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT Unit 101{T} with [Bolter]"
+    " - Hit 6(3+->4+) [COVER] [INDIRECT FIRE:6+] - Wound 4(4+) - Save 2(3+) - Dmg:1HP [R:+0.0] [SUCCESS]\n"
+)
+
+
+def test_tir_indirect_miss_legal_roll_superieur_au_bs_inferieur_au_plancher(tmp_path):
+    """roll=4 >= BS=4+ mais < plancher=6+ : MISS correct, aucun mismatch."""
+    stats = _stats(tmp_path, _INDIRECT_MISS_ABOVE_BS)
+    assert stats["shoot_hit_result_mismatch"][1] == 0
+    assert stats["shoot_hit_result_checked"][1] == 1
+
+
+def test_tir_indirect_hit_sur_critique_plancher_6(tmp_path):
+    """roll=6 sous plancher 6+ : critique → touche malgré le plancher. Doit passer."""
+    stats = _stats(tmp_path, _INDIRECT_HIT_ON_CRIT)
+    assert stats["shoot_hit_result_mismatch"][1] == 0
+    assert stats["shoot_hit_result_checked"][1] == 1
+
+
 def test_le_jumeau_melee_est_branche(tmp_path):
     """Le tir et la mêlée doivent tomber sur le MÊME contrôle — c'est le défaut n°1 du dépôt."""
     fight = (
