@@ -5659,6 +5659,14 @@ class W40KEngine(gym.Env):
             details["extra_attacks_applied"] = True
         if raw_log.get("psychicApplied"):  # get allowed
             details["psychic_applied"] = True
+        # [ASSAULT] 24.04 / [CLOSE-QUARTERS] 24.07 : drapeaux de groupe, meme regime que
+        # `ignoresCoverApplied`. La cle n existe que si la regle a joue.
+        # [ASSAULT] 24.04 / [CLOSE-QUARTERS] 24.07 : drapeaux de groupe, meme regime que
+        # `ignoresCoverApplied`. La cle n existe que si la regle a joue.
+        if raw_log.get("assaultApplied"):  # get allowed
+            details["assault_applied"] = True
+        if raw_log.get("closeQuartersApplied"):  # get allowed
+            details["close_quarters_applied"] = True
         # [ANTI-X Y+] 24.03 : keyword de l instance retenue + seuil DECLARE par l arme. Les deux
         # voyagent ENSEMBLE — un keyword sans seuil ecrirait `[ANTI-INFANTRY:None+]`, une valeur
         # par defaut deguisee en donnee. `require_key` sur le second : le producteur les pose

@@ -8830,6 +8830,11 @@ def _emit_squad_shoot_log(game_state: Dict[str, Any], g: Dict[str, Any], ctx: Ma
         "extraAttacksApplied": weapon_has_rule(require_key(g, "weapon"), "EXTRA_ATTACKS"),
         # [PSYCHIC] 24.29 : predicat PARTAGE avec le socle de tokens, jamais recopie.
         "psychicApplied": psychic_rule_applies(require_key(g, "weapon"), cover=_cover),
+        # [ASSAULT] 24.04 / [CLOSE-QUARTERS] 24.07 : poses a la CREATION du groupe
+        # (etat vive) et relus ici, comme tous les drapeaux constants du groupe.
+        # Meme regime que `precisionApplied` : on lit le fait pose, on ne re-derive pas.
+        "assaultApplied": bool(require_key(g, "assault_applied")),
+        "closeQuartersApplied": bool(require_key(g, "close_quarters_applied")),
         # [ANTI-X Y+] 24.03 : l instance RETENUE par 24.02 (keyword) et son seuil DECLARE. Le
         # seuil est celui de la datasheet, pas le `crit_wound_on` que le moteur en tire : c est
         # la seule forme sous laquelle un lecteur peut recouper le journal avec l armurerie
@@ -10088,6 +10093,19 @@ def _build_manual_allocation(
                 # verite du cercle vert + cone LoS par-fig cote replay : c est le model_id resolu par
                 # roll_intent_fn (attacker_mid), pas un match par nom d arme.
                 "shooter_mids": [],
+                # [ASSAULT] 24.04 (10.05) : l arme est [ASSAULT] ET l unite a avance ce tour.
+                # [CLOSE-QUARTERS] 24.07 (10.06) : l arme est [CLOSE_QUARTERS] ET le squad est engage.
+                # Poses a la CREATION du groupe (etat vive — `units_advanced` change entre tours,
+                # `_squad_is_in_enemy_er` requiert la carte de positions live) et non a l emission,
+                # qui est differee hors etat apres resolution complete. Meme regime que `heavy_applied`.
+                "assault_applied": (
+                    weapon_has_rule(require_key(r, "weapon"), "ASSAULT")
+                    and _atk_sid in game_state.get("units_advanced", set())  # get allowed
+                ),
+                "close_quarters_applied": (
+                    weapon_has_rule(require_key(r, "weapon"), "CLOSE_QUARTERS")
+                    and _squad_is_in_enemy_er(game_state, _atk_sid)
+                ),
             }
             # Cover (regle 13.08) : ranged-only -> present uniquement sur le chemin tir
             # (le chemin combat partage cette fonction mais ne fournit pas ces cles).

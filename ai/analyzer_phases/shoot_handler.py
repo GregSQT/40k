@@ -882,7 +882,10 @@ def handle_shoot(
         if "TWIN_LINKED" in weapon_rules_list:
             key = ("TWIN_LINKED", weapon_key)
             stats['weapon_rule_usage'][key][pl_int] += 1
-        if shooter_id in state.units_advanced and "ASSAULT" in weapon_rules_list:
+        # [ASSAULT] 24.04 — USAGE lu depuis le TOKEN, meme regime que [RAPID FIRE] :
+        # le moteur pose `[ASSAULT]` quand la regle a EFFECTIVEMENT joue (arme [ASSAULT]
+        # ET avance ce tour), donc on lit le fait sans re-deriver la double condition.
+        if re.search(r'\[ASSAULT\]', action_desc, re.IGNORECASE):
             key = ("ASSAULT", weapon_key)
             stats['weapon_rule_usage'][key][pl_int] += 1
         # [RAPID FIRE X] 24.30 — USAGE, même régime que [HEAVY] : le token n'est écrit que si le
@@ -912,13 +915,10 @@ def handle_shoot(
         # les attaques où elle a réellement pesé, jamais celles où l'arme la déclare seulement.
         if re.search(r'\[PRECISION\]', action_desc, re.IGNORECASE):
             stats['weapon_rule_usage'][("PRECISION", weapon_key)][pl_int] += 1
-        # [CLOSE-QUARTERS] 10.06 — la règle joue quand le tireur est ENGAGÉ avec sa cible, pas
-        # quand les deux ancres sont à un hex. Cette ligne mesurait `calculate_hex_distance(ancre,
-        # ancre) == 1` : la quatrième occurrence de la famille « ancre vs par-figurine » dans ce
-        # fichier, et elle survivait à côté du contrôle §10.06 qui, lui, avait déjà été réaligné
-        # sur `shooter_engaged_with_target`. Les deux sections comptaient donc deux grandeurs
-        # différentes sous le même nom : 1 280 tirs pour §10.06 contre 43 pour §1.8.
-        if is_close_quarters and shooter_engaged_with_target:
+        # [CLOSE-QUARTERS] 10.06 — USAGE lu depuis le TOKEN, meme regime que [ASSAULT] :
+        # le moteur pose `[CLOSE-QUARTERS]` quand la regle a joue (arme [CLOSE_QUARTERS]
+        # ET tireur engage), eliminant la double derivation geometrique/armurerie.
+        if re.search(r'\[CLOSE-QUARTERS\]', action_desc, re.IGNORECASE):
             stats['weapon_rule_usage'][("CLOSE_QUARTERS", weapon_key)][pl_int] += 1
         if heavy_applied_in_log:
             # [HEAVY] 24.16 — USAGE seulement, jamais VALIDITE. Le contrôle de validité
