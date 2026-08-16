@@ -76,6 +76,13 @@ WEAPON_RULE_BITS: Tuple[str, ...] = (
     "IGNORES_COVER",
     "CLOSE_QUARTERS",
     "ASSAULT",
+    # [INDIRECT FIRE] 24.19 / tir indirect 10.07. Entree le 2026-08-16, avec l implementation de
+    # la regle : jusque-la elle etait DELIBEREMENT absente (un id pour une regle sans effet aurait
+    # ete du bruit pur, et un test le verrouillait). L agent doit la percevoir parce qu il doit
+    # POUVOIR CHOISIR le tir indirect (10.02) : un type de tir qu on ne voit pas est un type de
+    # tir qu on ne joue jamais. L ajout ne coute AUCUN parametre — `OBS_ID_VOCAB_SIZE` est
+    # pre-dimensionne a 128 et ne s ajuste pas au nombre de regles (cf. `observation_entities`).
+    "INDIRECT_FIRE",
 )
 
 # Vocabulaire OBSERVÉ sous forme d'ids : les règles booléennes, plus l'IDENTITÉ de la règle
