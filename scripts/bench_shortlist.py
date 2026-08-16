@@ -27,6 +27,7 @@ Usage :
 from __future__ import annotations
 
 import argparse
+import math
 import random
 import sys
 from collections import defaultdict
@@ -216,7 +217,8 @@ def _w_fire_nonzero(bot: doc._DoctrineBot, state: Dict[str, Any], unit: Dict[str
     """Vrai si le bot a w_fire > 0 ou w_risk > 0 pour cet état (shortlist active)."""
     try:
         weights = bot.movement_weights(unit, state)
-    except Exception:
+    except Exception as e:
+        print(f"[WARN] {type(bot).__name__} movement_weights raised: {e}", file=sys.stderr)
         return False
     _, _, w_fire, w_risk, *_ = weights
     return w_fire != 0.0 or w_risk != 0.0
@@ -235,77 +237,89 @@ def run_bench(
     rng = random.Random(rng_seed)
     results: Dict[str, Dict[str, Dict[int, float]]] = {}
 
+    _orig_damage_on = doc._damage_on
     _install_damage_patch()
+    try:
+        for scen_name, scen in SCENARIOS.items():
+            my_rng: int = scen["my_rng"]
+            enemy_rng: int = scen["enemy_rng"]
 
-    for scen_name, scen in SCENARIOS.items():
-        my_rng: int = scen["my_rng"]
-        enemy_rng: int = scen["enemy_rng"]
+            # Compteurs : {bot_name: {shortlist: [n_diverge, n_total]}}
+            counters: Dict[str, Dict[int, List[int]]] = defaultdict(
+                lambda: {k: [0, 0] for k in shortlists}
+            )
 
-        # Compteurs : {bot_name: {shortlist: [n_diverge, n_total]}}
-        counters: Dict[str, Dict[int, List[int]]] = defaultdict(
-            lambda: {k: [0, 0] for k in shortlists}
-        )
+            bots = _make_bots()
 
-        bots = _make_bots()
+            for _ in range(n_episodes):
+                # Position de l'unité alliée (intérieur du plateau, marge = radius)
+                margin = CANDIDATE_RADIUS + 1
+                uc = rng.randint(margin, BOARD_SIZE - margin - 1)
+                ur = rng.randint(margin, BOARD_SIZE - margin - 1)
 
-        for _ in range(n_episodes):
-            # Position de l'unité alliée (intérieur du plateau, marge = radius)
-            margin = CANDIDATE_RADIUS + 1
-            uc = rng.randint(margin, BOARD_SIZE - margin - 1)
-            ur = rng.randint(margin, BOARD_SIZE - margin - 1)
+                # 1 à 3 ennemis placés aléatoirement
+                n_enemies = rng.randint(1, 3)
+                enemies = [
+                    (rng.randint(0, BOARD_SIZE - 1), rng.randint(0, BOARD_SIZE - 1))
+                    for _ in range(n_enemies)
+                ]
 
-            # 1 à 3 ennemis placés aléatoirement
-            n_enemies = rng.randint(1, 3)
-            enemies = [
-                (rng.randint(0, BOARD_SIZE - 1), rng.randint(0, BOARD_SIZE - 1))
-                for _ in range(n_enemies)
-            ]
+                state = _make_state(uc, ur, enemies, my_rng, enemy_rng)
+                unit = state["unit_by_id"]["A"]
+                candidates = _candidate_grid(uc, ur)
 
-            state = _make_state(uc, ur, enemies, my_rng, enemy_rng)
-            unit = state["unit_by_id"]["A"]
-            candidates = _candidate_grid(uc, ur)
-
-            if not candidates:
-                continue
-
-            # Référence à shortlist=24
-            ref_decisions: Dict[str, Tuple[int, int]] = {}
-            for bot_name, bot in bots.items():
-                if not _w_fire_nonzero(bot, state, unit):
-                    # Shortlist inactive pour ce bot/état : pas de divergence possible
-                    continue
-                try:
-                    ref_decisions[bot_name] = _decision(
-                        bot, state, unit, candidates, REFERENCE_SHORTLIST
-                    )
-                except Exception:
-                    pass
-
-            # Décisions aux shortlists testées
-            for k in shortlists:
-                if k == REFERENCE_SHORTLIST:
-                    # divergence = 0 par définition
-                    for bot_name in ref_decisions:
-                        counters[bot_name][k][1] += 1
+                if not candidates:
                     continue
 
+                # Référence à shortlist=24
+                ref_decisions: Dict[str, Tuple[int, int]] = {}
                 for bot_name, bot in bots.items():
-                    if bot_name not in ref_decisions:
+                    if not _w_fire_nonzero(bot, state, unit):
+                        # Shortlist inactive pour ce bot/état : pas de divergence possible
                         continue
                     try:
-                        decision = _decision(bot, state, unit, candidates, k)
-                    except Exception:
-                        continue
-                    counters[bot_name][k][0] += int(decision != ref_decisions[bot_name])
-                    counters[bot_name][k][1] += 1
+                        ref_decisions[bot_name] = _decision(
+                            bot, state, unit, candidates, REFERENCE_SHORTLIST
+                        )
+                    except Exception as e:
+                        print(
+                            f"[WARN] {bot_name} ref K={REFERENCE_SHORTLIST} raised: {e}",
+                            file=sys.stderr,
+                        )
 
-        # Taux de divergence
-        scen_result: Dict[str, Dict[int, float]] = {}
-        for bot_name, kd in counters.items():
-            scen_result[bot_name] = {}
-            for k, (n_div, n_tot) in kd.items():
-                scen_result[bot_name][k] = n_div / n_tot if n_tot > 0 else float("nan")
-        results[scen_name] = scen_result
+                # Décisions aux shortlists testées
+                for k in shortlists:
+                    if k == REFERENCE_SHORTLIST:
+                        # divergence = 0 par définition
+                        for bot_name in ref_decisions:
+                            counters[bot_name][k][1] += 1
+                        continue
+
+                    for bot_name, bot in bots.items():
+                        if bot_name not in ref_decisions:
+                            continue
+                        try:
+                            decision = _decision(bot, state, unit, candidates, k)
+                        except Exception as e:
+                            print(
+                                f"[WARN] {bot_name} K={k} raised: {e}",
+                                file=sys.stderr,
+                            )
+                            counters[bot_name][k][0] += 1  # exception = divergence
+                            counters[bot_name][k][1] += 1
+                            continue
+                        counters[bot_name][k][0] += int(decision != ref_decisions[bot_name])
+                        counters[bot_name][k][1] += 1
+
+            # Taux de divergence
+            scen_result: Dict[str, Dict[int, float]] = {}
+            for bot_name, kd in counters.items():
+                scen_result[bot_name] = {}
+                for k, (n_div, n_tot) in kd.items():
+                    scen_result[bot_name][k] = n_div / n_tot if n_tot > 0 else float("nan")
+            results[scen_name] = scen_result
+    finally:
+        doc._damage_on = _orig_damage_on
 
     return results
 
@@ -330,7 +344,7 @@ def _print_table(results: Dict[str, Any], shortlists: List[int]) -> None:
             row = f"{bot_name:<20}"
             for k in tested:
                 rate = bot_data[bot_name].get(k, float("nan"))
-                val = f"{rate:.1%}" if not (rate != rate) else "n/a"
+                val = f"{rate:.1%}" if not math.isnan(rate) else "n/a"
                 row += f"{val:>{col_w}}"
             row += f"{'0.0%':>{col_w}}"
             print(row)
@@ -348,12 +362,14 @@ def _print_summary(results: Dict[str, Any], shortlists: List[int]) -> None:
         for bot_data in scen_data.values():
             for k in tested:
                 rate = bot_data.get(k, float("nan"))
-                if rate == rate:  # not nan
+                if not math.isnan(rate):
                     totals[k].append(rate)
     for k in tested:
         vals = totals[k]
         mean = sum(vals) / len(vals) if vals else float("nan")
-        print(f"  K={k:<4}  moyenne={mean:.1%}  min={min(vals):.1%}  max={max(vals):.1%}")
+        mn = min(vals) if vals else float("nan")
+        mx = max(vals) if vals else float("nan")
+        print(f"  K={k:<4}  moyenne={mean:.1%}  min={mn:.1%}  max={mx:.1%}")
 
 
 # ── Point d'entrée ─────────────────────────────────────────────────────────────────────────────
