@@ -4920,6 +4920,11 @@ def _manual_roll_fight_intent(
         # ECRITE et non omise — c est au producteur d affirmer que la regle ne s applique pas,
         # pas au lecteur de le deviner par un defaut.
         "point_blank_malus": False,
+        # [ASSAULT] 24.04 (10.05) et [CLOSE-QUARTERS] 24.07 (10.06) : memes regles d ELIGIBILITE
+        # AU TIR, donc meme regime que `point_blank_malus` — ecrites `False` par le producteur
+        # de melee, jamais laissees au defaut d un lecteur.
+        "assault_applied": False,
+        "close_quarters_applied": False,
         # [CLEAVE] 24.06 : a-t-elle joue pour CETTE figurine, et avec quel X declare ? La clause
         # « une seule cible » se juge par figurine, deux porteuses de la meme arme peuvent donc
         # differer. Reunie sur le groupe, jumeau de [BLAST]/[RAPID FIRE] au tir. La table est
