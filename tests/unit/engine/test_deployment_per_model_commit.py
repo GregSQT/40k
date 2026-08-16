@@ -46,6 +46,11 @@ _terrain = both_terrains(sys.modules[__name__])
 UNDEPLOYED = (-1, -1)
 
 
+@pytest.fixture(autouse=True)
+def _pin_board(board_x5):
+    pass
+
+
 def _load(seed: int = 0):
     from ai.unit_registry import UnitRegistry
     from engine.w40k_core import W40KEngine

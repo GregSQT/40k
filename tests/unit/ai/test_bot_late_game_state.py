@@ -88,25 +88,22 @@ class TestLateGameState:
         }
         assert late_game_state(gs, 1) == "normal"
 
-    def test_missing_active_player_key_raises(self) -> None:
-        """Clé du joueur actif absente de victory_points → ConfigurationError explicite."""
-        gs: Dict[str, Any] = {
-            "turn": 1,
-            "config": {"game_rules": {"max_turns": 5}},
-            "victory_points": {2: 0.0},
-        }
-        with pytest.raises(ConfigurationError):
-            late_game_state(gs, 1)
+    @pytest.mark.parametrize("player", [1, 2])
+    def test_missing_active_player_key_raises(self, player: int) -> None:
+        """Clé du joueur actif absente de victory_points → ConfigurationError sur la bonne clé."""
+        gs = _gs(turn=1, limit=5)
+        gs["victory_points"] = {3 - player: 0.0}
+        with pytest.raises(ConfigurationError, match=rf"Required key '{player}'"):
+            late_game_state(gs, player)
 
-    def test_missing_opponent_key_raises(self) -> None:
-        """Clé du joueur adverse absente de victory_points → ConfigurationError explicite."""
-        gs: Dict[str, Any] = {
-            "turn": 1,
-            "config": {"game_rules": {"max_turns": 5}},
-            "victory_points": {1: 0.0},
-        }
-        with pytest.raises(ConfigurationError):
-            late_game_state(gs, 1)
+    @pytest.mark.parametrize("player", [1, 2])
+    def test_missing_opponent_key_raises(self, player: int) -> None:
+        """Clé du joueur adverse absente de victory_points → ConfigurationError sur la bonne clé."""
+        opponent = 3 - player
+        gs = _gs(turn=1, limit=5)
+        gs["victory_points"] = {player: 0.0}
+        with pytest.raises(ConfigurationError, match=rf"Required key '{opponent}'"):
+            late_game_state(gs, player)
 
 
 # ─── Bascule EndgameBot — toujours au tour 3 sur 5 tours ───────────────────────

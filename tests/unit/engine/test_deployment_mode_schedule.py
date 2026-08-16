@@ -40,6 +40,11 @@ AGENT_CONFIG = os.path.join(
 )
 
 
+@pytest.fixture(autouse=True)
+def _pin_board(board_x5):
+    pass
+
+
 def _make_env(start: float, end: float, total_episodes: int, freeze: float = 1.0, n_envs: int = 1):
     from ai.unit_registry import UnitRegistry
     from engine.w40k_core import W40KEngine

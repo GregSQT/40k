@@ -341,6 +341,10 @@ REFERENCE_BOT_EVAL_FINAL = {"x1": 10, "x5_new": 100}
 #: dans `bot_eval_final_normal` de chaque profil, seule source.
 LONG_PROFILE_BOT_EVAL_FINAL = {"x1_long": 300, "x5_long": 600}
 
+#: `bot_eval_intermediate` ATTENDU de chaque profil `_long`. Divergent depuis e07bdfd1 :
+#: x1_long est passé de 100 à 30 (avec 4 workers intermédiaires), x5_long reste à 100.
+LONG_PROFILE_BOT_EVAL_INTERMEDIATE = {"x1_long": 30, "x5_long": 100}
+
 #: Fenêtre du score robuste de chaque profil `_long`. Elle DÉPEND de la longueur du run, et pas
 #: par convention : la fenêtre glisse sur les points de mesure, donc `total // freq - window + 1`
 #: est le nombre de positions qu'elle peut occuper. À une seule position, le « meilleur modèle »
@@ -431,10 +435,8 @@ def test_long_profile_is_its_reference_recalibrated(ref_name: str, long_name: st
     assert ref_cb["bot_eval_task_timeout_seconds"] == 3600
     # `bot_eval_intermediate` est un nombre d'épisodes PAR BOT payé à CHAQUE éval intermédiaire :
     # son coût se rapporte à la durée du run, donc il en dépend au même titre que `bot_eval_freq`.
-    # x1_long : 5 évals × 100 ép./bot ≈ 1 h 05 (13 min l'unité, commit 42326ed0), plus l'éval
-    # FINALE à 300 ép./bot (≈ 1 h 23, payée une fois) — soit ≈ 2 h 28 pour un run mesuré à ~20 h
-    # (4 h 01 pour 10 000 épisodes, ROADMAP §1 pt 6). ~12 % du budget machine : la précision du
-    # suivi est payée sur un run qui la porte. ⚠️ La durée d'entraînement vient de cette MESURE et
+    # x1_long : 5 évals × 30 ép./bot (réduit de 100 à 30 par commit e07bdfd1, 4 workers), plus
+    # l'éval FINALE à 300 ép./bot (≈ 1 h 23, payée une fois). ⚠️ La durée d'entraînement vient de cette MESURE et
     # non du « 0.1 s/ep → 36k ép./h » que répètent les notes `total_episodes_normal` de la config :
     # les deux diffèrent d'un facteur ~14, l'écart est antérieur à cette livraison et n'est traité
     # nulle part (la refonte d'observation V11 a rendu le pas bien plus cher).  x1 : 10 000
@@ -444,7 +446,7 @@ def test_long_profile_is_its_reference_recalibrated(ref_name: str, long_name: st
     # points de mesure ne laissaient qu'UNE position de fenêtre, donc rien à départager, et le
     # profil est passé à `save_best_robust: false` le 2026-08-11 — sa sortie est son modèle
     # FINAL. Le chiffre publié, lui, sort de `bot_eval_final`, verrouillé plus haut.
-    assert long_cb["bot_eval_intermediate"] == 100
+    assert long_cb["bot_eval_intermediate"] == LONG_PROFILE_BOT_EVAL_INTERMEDIATE[long_name]
     assert ref_cb["bot_eval_intermediate"] == 10
     # `checkpoint_save_freq`, lui, est bien comparé en bloc, et ce n'est pas un oubli : SB3
     # sauvegarde tous les `save_freq` APPELS du callback (callbacks.py:300), un par pas du

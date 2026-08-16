@@ -51,6 +51,11 @@ _terrain = both_terrains(sys.modules[__name__])
 UNDEPLOYED = (-1, -1)
 
 
+@pytest.fixture(autouse=True)
+def _pin_board(board_x5):
+    pass
+
+
 # ---------------------------------------------------------------------------
 # Harnais : moteur réel, déploiement piloté, mise en réserves construite
 # ---------------------------------------------------------------------------

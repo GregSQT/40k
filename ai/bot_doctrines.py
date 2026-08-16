@@ -890,16 +890,16 @@ class _DoctrineBot(_PlacementMemory):
         """
         player = int(require_key(unit, "player"))
 
+        overrides = _state_overrides_cfg().get(self.MOVEMENT_BOT_KEY, {})  # get allowed : override optionnel par doctrine
+
         # 1. Override de preservation par unite (uniquement AttritionBot via _withdrawing).
         if self._is_preserving(unit, game_state):
-            overrides = _state_overrides_cfg().get(self.MOVEMENT_BOT_KEY, {})  # get allowed : override optionnel par doctrine
             if "preserve" in overrides:
                 base = load_doctrine_weights(overrides["preserve"])
                 return _apply_jitter_weights(base, self._jitter_movement)
 
         # 2. Override late_game.
         lg_state = late_game_state(game_state, player)
-        overrides = _state_overrides_cfg().get(self.MOVEMENT_BOT_KEY, {})  # get allowed : override optionnel par doctrine
         if lg_state in overrides:
             base = load_doctrine_weights(overrides[lg_state])
             return _apply_jitter_weights(base, self._jitter_movement)

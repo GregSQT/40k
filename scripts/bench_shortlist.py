@@ -31,6 +31,7 @@ import math
 import random
 import sys
 from collections import defaultdict
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -59,18 +60,24 @@ _MY_DAMAGE = 10.0
 _THEIR_DAMAGE = 8.0
 
 
-def _install_damage_patch() -> None:
-    """Valeur fixe indépendante de la distance réelle.
+@contextmanager
+def _damage_patch():
+    """Patche doc._damage_on avec une valeur fixe pour la durée du bloc.
 
     _firepower_from fait le test de portée (distance vs RNG) ; _damage_on ne fournit
-    que la valeur. Renvoyé une constante ici isole le comportement du shortlist pur.
+    que la valeur. Une constante ici isole le comportement du shortlist pur.
     """
     def _dmg(game_state: Any, attacker_id: Any, target_id: Any, is_ranged: bool) -> float:
         cache = game_state.get("units_cache", {})
         att = cache.get(str(attacker_id), {})
         return _MY_DAMAGE if int(att.get("player", 2)) == 1 else _THEIR_DAMAGE
 
+    orig = doc._damage_on
     doc._damage_on = _dmg
+    try:
+        yield
+    finally:
+        doc._damage_on = orig
 
 
 # ── Fabrication d'état ─────────────────────────────────────────────────────────────────────────
@@ -237,9 +244,7 @@ def run_bench(
     rng = random.Random(rng_seed)
     results: Dict[str, Dict[str, Dict[int, float]]] = {}
 
-    _orig_damage_on = doc._damage_on
-    _install_damage_patch()
-    try:
+    with _damage_patch():
         for scen_name, scen in SCENARIOS.items():
             my_rng: int = scen["my_rng"]
             enemy_rng: int = scen["enemy_rng"]
@@ -318,8 +323,6 @@ def run_bench(
                 for k, (n_div, n_tot) in kd.items():
                     scen_result[bot_name][k] = n_div / n_tot if n_tot > 0 else float("nan")
             results[scen_name] = scen_result
-    finally:
-        doc._damage_on = _orig_damage_on
 
     return results
 
@@ -367,9 +370,7 @@ def _print_summary(results: Dict[str, Any], shortlists: List[int]) -> None:
     for k in tested:
         vals = totals[k]
         mean = sum(vals) / len(vals) if vals else float("nan")
-        mn = min(vals) if vals else float("nan")
-        mx = max(vals) if vals else float("nan")
-        print(f"  K={k:<4}  moyenne={mean:.1%}  min={mn:.1%}  max={mx:.1%}")
+        print(f"  K={k:<4}  moyenne={mean:.1%}  min={min(vals, default=float('nan')):.1%}  max={max(vals, default=float('nan')):.1%}")
 
 
 # ── Point d'entrée ─────────────────────────────────────────────────────────────────────────────

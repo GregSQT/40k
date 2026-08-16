@@ -79,6 +79,11 @@ def _p2_alive_models(gs) -> int:
     )
 
 
+@pytest.fixture(autouse=True)
+def _pin_board(board_x5):
+    pass
+
+
 @pytest.fixture(scope="module")
 def scenario_file(tmp_path_factory):
     p = tmp_path_factory.mktemp("t5") / "scen_melee.json"

@@ -33,7 +33,21 @@ SCENARIO = os.path.join(
 
 
 @pytest.fixture(scope="module")
-def attached_env():
+def _board_x5_module():
+    import os
+    previous = os.environ.get("W40K_BOARD_PATH")
+    os.environ["W40K_BOARD_PATH"] = "board/44x60x5"
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop("W40K_BOARD_PATH", None)
+        else:
+            os.environ["W40K_BOARD_PATH"] = previous
+
+
+@pytest.fixture(scope="module")
+def attached_env(_board_x5_module):
     from ai.training_utils import setup_imports
     from ai.unit_registry import UnitRegistry
     from services.api_server import get_agents_from_scenario

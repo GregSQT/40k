@@ -64,6 +64,7 @@ def _bare_callback(gate_state: Optional[Dict[str, Any]]) -> BotEvaluationCallbac
     callback._pending_eval_future = None
     callback._pending_eval_marker = None
     callback._pending_eval_snapshot_path = None
+    callback.intermediate_n_workers = None
     return callback
 
 
