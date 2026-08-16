@@ -4929,6 +4929,7 @@ class W40KEngine(gym.Env):
         Le pipeline mono-fig legacy reste intact pour l IA/training.
         """
         from engine.phase_handlers.shared_utils import (
+            eligible_squad_shooting_types,
             squad_shooting_type_choose,
             squad_shooting_type_clear,
             squad_shooting_unit_activation_start,
@@ -5016,7 +5017,31 @@ class W40KEngine(gym.Env):
             self.game_state["active_shooting_unit"] = squad_id
             unit = get_unit_by_id(squad_id, self.game_state)
             available_weapons = _squad_available_weapons(unit) if unit is not None else []
-            return True, {"action": name, "unitId": squad_id, "activation_started": True, "available_weapons": available_weapons}
+            # 10.02 etape 2 : types de tir JOUABLES par cette escouade. La liste (ordonnee :
+            # defaut en tete) permet au front d afficher un selecteur quand plusieurs types
+            # sont disponibles — cas standard = [normal] ; avec une arme INDIRECT FIRE et
+            # les conditions 10.07 = [normal, indirect].
+            eligible_types = list(eligible_squad_shooting_types(self.game_state, squad_id))
+            return True, {
+                "action": name, "unitId": squad_id, "activation_started": True,
+                "available_weapons": available_weapons,
+                "eligible_shooting_types": eligible_types,
+            }
+
+        if name == "squad_shoot_type_select":
+            # 10.02 etape 2 (volet PvP) : le joueur choisit un type de tir parmi les eligibles.
+            # `squad_shooting_type_choose` valide le choix et leve si le type n est pas eligible —
+            # la validation n est PAS redoblee ici, comme documente dans indirect_fire_10_07.md §9.3.
+            # Le choix peut etre pose et RE-POSE avant `squad_lock_shoot` : eligible_squad_shooting_types
+            # ne lit pas le choix en cours, donc la separation est intacte.
+            shooting_type = action.get("shootingType")
+            if not shooting_type:
+                return False, {"error": "missing_shooting_type"}
+            try:
+                squad_shooting_type_choose(self.game_state, squad_id, str(shooting_type))
+            except ValueError as exc:
+                return False, {"error": "invalid_shooting_type", "detail": str(exc)}
+            return True, {"action": name, "unitId": squad_id, "shootingType": shooting_type}
 
         if name == "squad_select_weapon":
             weapon_index_raw = action.get("weaponIndex")
@@ -5667,6 +5692,10 @@ class W40KEngine(gym.Env):
             details["assault_applied"] = True
         if raw_log.get("closeQuartersApplied"):  # get allowed
             details["close_quarters_applied"] = True
+        # [INDIRECT FIRE] 10.07 : plancher d echec (int 6 ou 4) quand la regle joue, absent sinon.
+        _indirect_fail_below = raw_log.get("indirectFireFailBelow")  # get allowed
+        if _indirect_fail_below is not None:
+            details["indirect_fire_fail_below"] = int(_indirect_fail_below)
         # [ANTI-X Y+] 24.03 : keyword de l instance retenue + seuil DECLARE par l arme. Les deux
         # voyagent ENSEMBLE — un keyword sans seuil ecrirait `[ANTI-INFANTRY:None+]`, une valeur
         # par defaut deguisee en donnee. `require_key` sur le second : le producteur les pose

@@ -143,6 +143,12 @@ const SUSTAINED_HITS_TOKEN = "SUSTAINED HITS";
  */
 const ANTI_RULE_TOKEN = /^ANTI-[A-Z]+:\d+\+$/;
 
+/** `[INDIRECT FIRE:6+]` ou `[INDIRECT FIRE:4+]` — plancher d'échec 10.07 accolé au segment Hit.
+ * Valeur déclarée par la règle : 6 (sans spotter) ou 4 (spotter présent + unité immobile).
+ * Sans ce test, chaque token passerait pour un nom de capacité d'unité dans `abilityTokensForRoll`.
+ */
+const INDIRECT_FIRE_TOKEN = /^INDIRECT FIRE:[46]\+$/;
+
 const NON_ABILITY_ROLL_TOKENS = new Set([
   "HEAVY",
   "COVER",
@@ -236,7 +242,8 @@ function abilityTokensForRoll(tokens: string[]): string[] {
     (token) =>
       !NON_ABILITY_ROLL_TOKENS.has(token) &&
       !REROLLED_TOKEN.test(token) &&
-      !ANTI_RULE_TOKEN.test(token)
+      !ANTI_RULE_TOKEN.test(token) &&
+      !INDIRECT_FIRE_TOKEN.test(token)
   );
 }
 

@@ -4473,6 +4473,7 @@ export const BoardWithAPI: React.FC = () => {
             onUnassignShootWeapon={isGameOver ? async () => {} : apiProps.onUnassignShootWeapon}
             onCommitSquadShoot={isGameOver ? async () => {} : apiProps.onCommitSquadShoot}
             onCancelSquadShoot={isGameOver ? async () => {} : apiProps.onCancelSquadShoot}
+            onSquadShootTypeSelect={isGameOver ? async () => {} : apiProps.onSquadShootTypeSelect}
             squadFightPlan={apiProps.squadFightPlan}
             onSelectModelForFight={isGameOver ? () => {} : apiProps.onSelectModelForFight}
             onAssignFightTarget={isGameOver ? async () => {} : apiProps.onAssignFightTarget}

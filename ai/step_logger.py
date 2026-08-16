@@ -39,17 +39,14 @@ __all__ = ['StepLogger', 'LOG_GRAMMAR_VERSION']
 #:       tireur engage), poses dans les tags de ligne entre le verbe SHOT et la cible, comme
 #:       [RAPID FIRE:X]. Verrou : `test_step_log_weapon_rule_tokens.py` LOT A.
 #:
-#:       ⚠️ UNE SEULE REGLE RESTE HORS DE LA GARANTIE :
-#:         - INDIRECT_FIRE 24.19 : la regle EST implementee depuis le 2026-08-16, mais son
-#:           token n est pas encore ecrit (piece 6 du chantier). ⚠️ L exception a donc CHANGE DE
-#:           NATURE : ce n est plus « la regle n a pas lieu », c est « la regle joue et le
-#:           journal ne le dit pas encore ». Une ligne de tir indirect rend aujourd hui
-#:           `Hit 6(3+->6+)` sans que rien ne dise si le 6 vient de la regle ou de la
-#:           datasheet. Voir A_faire/indirect_fire_10_07.md, piece 6.
+#:   5 — [INDIRECT FIRE:X+] 10.07 (24.19) : plancher d echec declare sur le segment Hit
+#:       (`[INDIRECT FIRE:6+]` ou `[INDIRECT FIRE:4+]` avec spotter), accompagne du token
+#:       [COVER] deja presente par la grammaire 3. Verrou : LOT A du meme fichier de test.
+#:       Aucune regle ne reste hors de la garantie.
 #:
 #: N incrementer que pour une garantie NOUVELLE, jamais pour un changement cosmetique : un
 #: lecteur qui refuse une version qu il ne connait pas doit avoir une raison de le faire.
-LOG_GRAMMAR_VERSION = 4
+LOG_GRAMMAR_VERSION = 5
 
 
 #: Regles qui AJOUTENT des des au pool d attaques et dont l effet depend de la CIBLE :
@@ -1088,6 +1085,18 @@ class StepLogger:
                 f" [{hit_rule_modifier}]" if hit_rule_modifier in ("HEAVY", "COVER") else ""
             )
             hit_rule_suffix += _build_hit_suffix(details, hit_ability_display_name)
+            # [INDIRECT FIRE:X+] 10.07 : plancher d echec declare par la regle (6 ou 4).
+            # Pose sur le segment Hit APRES [COVER] (qui agit sur le meme seuil) afin que
+            # le lecteur voie les deux causes adjacentes. `replayParser.ts` l exclut de
+            # `abilityTokensForRoll` via `INDIRECT_FIRE_TOKEN`.
+            _indirect_fail_below = details.get("indirect_fire_fail_below")
+            if _indirect_fail_below is not None:
+                if not isinstance(_indirect_fail_below, int) or _indirect_fail_below not in (4, 6):
+                    raise ValueError(
+                        "indirect_fire_fail_below doit etre 4 ou 6, "
+                        f"recu : {_indirect_fail_below!r}"
+                    )
+                hit_rule_suffix += f" [INDIRECT FIRE:{_indirect_fail_below}+]"
             if hit_rule_modifier in ("HEAVY", "COVER") and isinstance(hit_target_base, int):
                 hit_target_display = f"{hit_target_base}+->{hit_target}+"
             else:

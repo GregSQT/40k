@@ -828,6 +828,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     /** Code (identité) de l'arme active — pilote l'attribution quantifiée par profil. */
     activeWeaponCode: string | null;
     canValidate: boolean;
+    /** 10.02 : types de tir jouables pour cette activation (ex. ["normal", "indirect"]). */
+    eligibleShootingTypes: string[];
+    /** Type de tir choisi par le joueur (null = défaut = premier éligible). */
+    selectedShootingType: string | null;
   } | null>(null);
   /** Ref miroir de squadShootPlan pour accès synchrone dans les callbacks. */
   const squadShootPlanRef = useRef<typeof squadShootPlan>(null);
@@ -863,6 +867,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const squadShootSessionRef = useRef(0);
   /** Guard contre le double-clic : bloque un second squad_shoot_activate concurrent. */
   const squadShootActivatingRef = useRef(false);
+  /** Types de tir éligibles rendus par squad_shoot_activate — lu par handleStartSquadModelShoot. */
+  const eligibleShootingTypesRef = useRef<string[] | null>(null);
   const [attackPreview, setAttackPreview] = useState<{
     unitId: number;
     col: number;
@@ -2594,6 +2600,14 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                 };
               }
             }
+          }
+
+          // 10.02 : types de tir éligibles renvoyés par squad_shoot_activate (grammaire 5).
+          if (
+            data.result?.action === "squad_shoot_activate" &&
+            Array.isArray(data.result?.eligible_shooting_types)
+          ) {
+            eligibleShootingTypesRef.current = data.result.eligible_shooting_types as string[];
           }
 
           // STEP 3: Tir uniquement — ne pas forcer attackPreview en phase charge (cibles de charge clignotantes).
@@ -4965,6 +4979,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         return;
       }
       squadShootSessionRef.current += 1;
+      const eligibleTypes = eligibleShootingTypesRef.current ?? ["normal"];
+      eligibleShootingTypesRef.current = null;
       setSquadShootPlan({
         unitId: uid,
         models,
@@ -4974,6 +4990,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         activeWeaponIndex: null,
         activeWeaponCode: null,
         canValidate: false,
+        eligibleShootingTypes: eligibleTypes,
+        selectedShootingType: null,
       });
       setMode("squadModelShoot");
       setSelectedUnitId(uid);
@@ -4987,6 +5005,29 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       squadShootActivatingRef.current = false;
     },
     [readSquadModelPositions, executeAction, selectShootModelForUnit, handleSquadShootLosOverview]
+  );
+
+  /**
+   * 10.02 : le joueur choisit un type de tir parmi les éligibles (ex. "indirect").
+   * Peut être appelé plusieurs fois avant squad_lock_shoot — le choix est modifiable.
+   */
+  const handleSquadShootTypeSelect = useCallback(
+    async (shootingType: string) => {
+      const plan = squadShootPlanRef.current;
+      if (!plan) return;
+      try {
+        await executeAction({
+          action: "squad_shoot_type_select",
+          unitId: String(plan.unitId),
+          shootingType,
+        });
+      } catch (e) {
+        console.error("[SQUAD-SHOOT] type_select FAILED", e);
+        return;
+      }
+      setSquadShootPlan((prev) => (prev ? { ...prev, selectedShootingType: shootingType } : prev));
+    },
+    [executeAction]
   );
 
   /** Sélectionne une fig (clic en mode actif) : délègue au coeur via l unité du plan. */
@@ -7992,6 +8033,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       onUnassignShootWeapon: async () => {},
       onCommitSquadShoot: async () => {},
       onCancelSquadShoot: async () => {},
+      onSquadShootTypeSelect: async () => {},
       squadFightPlan: null,
       onSelectModelForFight: () => {},
       onAssignFightTarget: async () => {},
@@ -8430,6 +8472,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     onUnassignShootWeapon: handleUnassignShootWeapon,
     onCommitSquadShoot: handleCommitSquadShoot,
     onCancelSquadShoot: handleCancelSquadShoot,
+    onSquadShootTypeSelect: handleSquadShootTypeSelect,
     squadFightPlan,
     onSelectModelForFight: handleSelectModelForFight,
     onAssignFightTarget: handleAssignFightTarget,

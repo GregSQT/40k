@@ -4925,6 +4925,9 @@ def _manual_roll_fight_intent(
         # de melee, jamais laissees au defaut d un lecteur.
         "assault_applied": False,
         "close_quarters_applied": False,
+        # Ranged-only : la melee affirme que la regle n a pas joue plutot que de laisser le
+        # lecteur derider depuis l absence de cle (T1 : donnee obligatoire absente -> erreur).
+        "indirect_fire_fail_below": None,
         # [CLEAVE] 24.06 : a-t-elle joue pour CETTE figurine, et avec quel X declare ? La clause
         # « une seule cible » se juge par figurine, deux porteuses de la meme arme peuvent donc
         # differer. Reunie sur le groupe, jumeau de [BLAST]/[RAPID FIRE] au tir. La table est

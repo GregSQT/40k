@@ -9068,6 +9068,10 @@ def _emit_squad_shoot_log(game_state: Dict[str, Any], g: Dict[str, Any], ctx: Ma
         # Meme regime que `precisionApplied` : on lit le fait pose, on ne re-derive pas.
         "assaultApplied": bool(require_key(g, "assault_applied")),
         "closeQuartersApplied": bool(require_key(g, "close_quarters_applied")),
+        # [INDIRECT FIRE] 10.07 : plancher d echec (6 ou 4) pose a la CREATION du groupe,
+        # None si la regle ne joue pas. Le pont `_build_shot_details` le transporte vers les
+        # details par-jet, et le StepLogger l ecrit `[INDIRECT FIRE:X+]` sur le segment Hit.
+        "indirectFireFailBelow": require_key(g, "indirect_fire_fail_below"),
         # [ANTI-X Y+] 24.03 : l instance RETENUE par 24.02 (keyword) et son seuil DECLARE. Le
         # seuil est celui de la datasheet, pas le `crit_wound_on` que le moteur en tire : c est
         # la seule forme sous laquelle un lecteur peut recouper le journal avec l armurerie
@@ -9855,6 +9859,9 @@ def _manual_roll_intent(
         # est deja consultee — le groupe le RELIT, comme `heavy_applied` et `point_blank_malus`.
         "assault_applied": _assault_applied,
         "close_quarters_applied": _cq_applied,
+        # 10.07 tir indirect : plancher d echec (6 ou 4) quand la regle joue sur cette attaque,
+        # None sinon. Le groupe le RELIT, exactement comme `assault_applied` ci-dessus.
+        "indirect_fire_fail_below": _indirect_fail_below,
         # Tokens de regles d arme de la ligne de log. Constants sur le groupe par CONSTRUCTION :
         # chacune de leurs sources est dans `gkey` (signature de regles, `dmg_bonus`, le X
         # applique de [RAPID FIRE], cible — donc la taille declaree qui pilote [BLAST] et les
@@ -10526,6 +10533,7 @@ def _build_manual_allocation(
                 # TOUR, et l arme comme la cible sont deja dans `gkey`.
                 "assault_applied": bool(require_key(r, "assault_applied")),
                 "close_quarters_applied": bool(require_key(r, "close_quarters_applied")),
+                "indirect_fire_fail_below": require_key(r, "indirect_fire_fail_below"),
             }
             # Cover (regle 13.08) : ranged-only -> present uniquement sur le chemin tir
             # (le chemin combat partage cette fonction mais ne fournit pas ces cles).

@@ -150,7 +150,8 @@ def _game_state(weapon_rules, *, moved_inches=0.0, target=TARGET, n_attacks=1,
 def _engine_shoot_log(monkeypatch, weapon_rules, rolls, *, moved_inches=0.0, target=TARGET,
                       n_attacks=1, unit_rules=(), cover=False, unit_type=UNIT_TYPE,
                       weapon_name=WEAPON_NAME, target_models=1, melee=False,
-                      target_keywords=(), units_advanced=False, engaged=False):
+                      target_keywords=(), units_advanced=False, engaged=False,
+                      indirect=False):
     """Fait jouer UNE attaque par le vrai moteur et rend (game_state, son action_log).
 
     `melee=True` passe par `build_manual_fight_allocation` — le MÊME émetteur de log
@@ -164,6 +165,11 @@ def _engine_shoot_log(monkeypatch, weapon_rules, rolls, *, moved_inches=0.0, tar
     décor qu'une escouade est engagée sans l'être de sa cible, un état que le plateau ne
     produit pas ici. Le patch est requis, pas commode : ce décor minimal ne porte pas la
     `config` que les vraies primitives exigent.
+
+    `indirect=True` pose le type de tir INDIRECT sur l'escouade 1 (10.07) et masque la cible
+    (`compute_unit_los` renvoie `can_see=False`) pour que le plancher 6+ s'applique — la cible
+    n'est visible d'aucune unité amie, donc pas de spotter. La règle d'arme INDIRECT_FIRE doit
+    figurer dans `weapon_rules` pour que la regle joue effectivement (deux moitiés nécessaires).
     """
     seq = list(rolls)
 
@@ -172,7 +178,12 @@ def _engine_shoot_log(monkeypatch, weapon_rules, rolls, *, moved_inches=0.0, tar
         return seq.pop(0)
 
     monkeypatch.setattr(random, "randint", fake)
-    monkeypatch.setattr(shooting_handlers, "compute_unit_los", lambda gs, s, t: {"cover": cover})
+    # `can_see` est nécessaire quand `_target_visible_to_a_friendly_unit` est appelé
+    # (tir indirect, clause spotter 10.07). La valeur `False` garantit le plancher 6+.
+    monkeypatch.setattr(
+        shooting_handlers, "compute_unit_los",
+        lambda gs, s, t: {"cover": cover, "can_see": False},
+    )
     monkeypatch.setattr(shooting_handlers, "_get_unit_by_id", lambda gs, sid: {"id": sid})
 
     monkeypatch.setattr(
@@ -188,6 +199,9 @@ def _engine_shoot_log(monkeypatch, weapon_rules, rolls, *, moved_inches=0.0, tar
     from engine.phase_handlers import shared_utils as _su
     monkeypatch.setattr(_su, "_squad_is_in_enemy_er", lambda _gs, sid: engaged and sid == "1")
     monkeypatch.setattr(_su, "_squads_are_engaged", lambda _gs, a, b: engaged and a == "1")
+    if indirect:
+        from engine.phase_handlers.shared_utils import SQUAD_SHOOTING_TYPE_CHOICE_KEY, SHOOTING_TYPE_INDIRECT
+        gs[SQUAD_SHOOTING_TYPE_CHOICE_KEY] = {"1": SHOOTING_TYPE_INDIRECT}
     if melee:
         build_manual_fight_allocation(gs, "1")
     else:
@@ -1141,6 +1155,11 @@ LOT_A_TOKENS = [
     # déclarée, état neutre) est tenue par `test_regle_sans_l_etat_absente_du_pont`.
     ("ASSAULT", "[ASSAULT]", [3, 4, 2], {"units_advanced": True}, False),
     ("CLOSE_QUARTERS", "[CLOSE-QUARTERS]", [3, 4, 2], {"engaged": True}, False),
+    # [INDIRECT FIRE] 10.07 (24.19) : plancher 6+ (sans spotter) accolé au segment Hit.
+    # MEME schéma deux moitiés : arme INDIRECT_FIRE + type de tir INDIRECT. `indirect=True`
+    # pose le choix de type ; la contre-épreuve le GARDE et retire seulement la règle d'arme.
+    # ranged-only : melee_ok=False.
+    ("INDIRECT_FIRE", "[INDIRECT FIRE:6+]", [3, 4, 2], {"indirect": True}, False),
 ]
 
 _LOT_A_IDS = [rule.split(":")[0] for rule, *_ in LOT_A_TOKENS]

@@ -823,11 +823,16 @@ type BoardProps = {
     activeWeaponIndex: number | null;
     activeWeaponCode: string | null;
     canValidate: boolean;
+    /** 10.02 : types de tir jouables pour cette activation. */
+    eligibleShootingTypes?: string[];
+    /** Type choisi par le joueur (null = défaut). */
+    selectedShootingType?: string | null;
   } | null;
   onStartSquadModelShoot?: (
     unitId: number | string,
     initialModelId?: string
   ) => void | Promise<void>;
+  onSquadShootTypeSelect?: (shootingType: string) => void | Promise<void>;
   onSelectModelForShoot?: (modelId: string) => void | Promise<void>;
   onSquadShootLosOverview?: (unitId: number) => void | Promise<void>;
   onAssignShootTarget?: (targetUnitId: number | string) => void | Promise<void>;
@@ -1329,6 +1334,7 @@ export default function Board({
   onUnassignShootModel,
   onCommitSquadShoot,
   onCancelSquadShoot,
+  onSquadShootTypeSelect,
   squadFightPlan = null,
   onSelectModelForFight,
   onAssignFightTarget,
@@ -12544,6 +12550,60 @@ export default function Board({
             />
           )}
           */}
+      {/* 10.02 : sélecteur de type de tir — affiché quand plusieurs types sont jouables. */}
+      {mode === "squadModelShoot" &&
+        squadShootPlan &&
+        (squadShootPlan.eligibleShootingTypes?.length ?? 0) > 1 && (
+          <div
+            style={{
+              position: "absolute",
+              top: 8,
+              left: "50%",
+              transform: "translateX(-50%)",
+              background: "var(--ui-panel-bg, rgba(30,30,30,0.92))",
+              border: "1px solid rgba(255,255,255,0.18)",
+              borderRadius: 8,
+              padding: "6px 10px",
+              display: "flex",
+              gap: 6,
+              alignItems: "center",
+              zIndex: 9000,
+              color: "#fff",
+              fontSize: 12,
+              fontWeight: 600,
+              pointerEvents: "auto",
+            }}
+          >
+            <span style={{ marginRight: 4, opacity: 0.7 }}>Type :</span>
+            {squadShootPlan.eligibleShootingTypes?.map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => void onSquadShootTypeSelect?.(t)}
+                style={{
+                  border:
+                    (squadShootPlan.selectedShootingType ??
+                      squadShootPlan.eligibleShootingTypes?.[0]) === t
+                      ? "2px solid #60a5fa"
+                      : "1px solid rgba(255,255,255,0.25)",
+                  borderRadius: 5,
+                  background:
+                    (squadShootPlan.selectedShootingType ??
+                      squadShootPlan.eligibleShootingTypes?.[0]) === t
+                      ? "rgba(96,165,250,0.22)"
+                      : "rgba(255,255,255,0.06)",
+                  color: "#fff",
+                  cursor: "pointer",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  padding: "3px 9px",
+                }}
+              >
+                {t === "indirect" ? "Indirect Fire" : t.charAt(0).toUpperCase() + t.slice(1)}
+              </button>
+            ))}
+          </div>
+        )}
       {weaponSelectionMenu && (
         <WeaponDropdown
           weapons={weaponOptions}
