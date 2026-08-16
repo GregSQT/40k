@@ -141,6 +141,7 @@ def _make_state(
         "squad_cache": squad_cache,
         # Pas d'objectifs : _objective_terms renvoie (None, []), w_obj = 0.
         # Le bench mesure le terme de tir pur.
+        "victory_points": {1: 0, 2: 0},
     }
 
 
