@@ -888,11 +888,10 @@ class W40KMetricsTracker:
         # charger. `m_charge_attempts` et sa colonne adverse repondent sans cette ambiguite.
         move_actions = float(require_key(tactical_data, 'move_actions'))
         move_waits = float(require_key(tactical_data, 'move_waits'))
-        move_advances = float(require_key(tactical_data, 'move_advances'))
         shoot_activations = float(require_key(tactical_data, 'shoot_activations'))
         move_hist = self._game_push('move_actions', move_actions)
         flee_hist = self._game_push('move_flees', float(require_key(tactical_data, 'move_flees')))
-        move_advances_hist = self._game_push('move_advances', move_advances)
+        move_advances_hist = self._game_push('move_advances', float(require_key(tactical_data, 'move_advances')))
         move_opportunities = self._game_push('move_opportunities', move_actions + move_waits)
         shoot_hist = self._game_push('shoot_activations', shoot_activations)
         shoot_opportunities = self._game_push(
