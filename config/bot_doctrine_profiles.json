@@ -1,0 +1,62 @@
+{
+  "_comment": "Gains de capacité par style (étape A) et jitter d'épisode (étape B). 0.0 = capacité inerte, comportement d'avant au bit près (verrou D4). Aucun défaut : clé absente → lève.",
+  "late_game_transform": {
+    "push_gain": 0.5,
+    "protect_gain": 0.5,
+    "_comment": "Facteurs multiplicatifs communs à la transformation canonique late_game. Mesurés une fois, indépendants du style. push_gain : vecteur en desperate_push. protect_gain : vecteur en protect_lead."
+  },
+  "profiles": {
+    "racer": {
+      "late_game": 0.8,
+      "preservation": 0.1,
+      "persistence": 0.10,
+      "focus_shared": false,
+      "_justification": "Valeurs de proposition (Bot_refactor.md §4.A), NON MESURÉES — point de départ à régler par §12.13 du chantier panel."
+    },
+    "endgame": {
+      "late_game": 1.0,
+      "preservation": 0.5,
+      "persistence": 0.40,
+      "focus_shared": false,
+      "_justification": "Valeurs de proposition (Bot_refactor.md §4.A), NON MESURÉES."
+    },
+    "alpha": {
+      "late_game": 0.4,
+      "preservation": 0.0,
+      "persistence": 0.50,
+      "focus_shared": false,
+      "_justification": "preservation=0.0 : AlphaStrike connaît la capacité et ne l'exerce jamais — ce qui empêche de le confondre avec un style qui l'ignore."
+    },
+    "attrition": {
+      "late_game": 0.4,
+      "preservation": 1.0,
+      "persistence": 0.60,
+      "focus_shared": false,
+      "_justification": "Valeurs de proposition (Bot_refactor.md §4.A), NON MESURÉES."
+    },
+    "decapitation": {
+      "late_game": 0.6,
+      "preservation": 0.3,
+      "persistence": 0.95,
+      "focus_shared": true,
+      "_justification": "focus_shared=true : le style partage sa cible entre toutes ses escouades (doctrine existante, inchangée). persistence=0.95 : ne lâche que pour une cible quasi-deux-fois meilleure."
+    },
+    "scorer": {
+      "late_game": 0.8,
+      "preservation": 0.6,
+      "persistence": 0.15,
+      "focus_shared": false,
+      "_justification": "Valeurs de proposition (Bot_refactor.md §4.A), NON MESURÉES."
+    }
+  },
+  "state_overrides": {
+    "_comment": "Vecteur mesuré utilisé directement pour un état donné — remplace la transformation générique. endgame.desperate_push → endgame_push (vecteur mesuré §12.14). attrition.preserve → attrition_withdraw (vecteur mesuré §12.14). 'preserve' est l'état per-unité (_withdrawing), distinct des états late_game globaux.",
+    "endgame":   { "desperate_push": "endgame_push"    },
+    "attrition": { "preserve":       "attrition_withdraw" }
+  },
+  "jitter": {
+    "movement_weight_jitter": 0.10,
+    "behavior_parameter_jitter": 0.05,
+    "_comment": "Magnitudes du jitter par épisode (étape B). 0.0 = jitter désarmé. Le tirage est reproductible via sha256(seed:rank:episode:jitter:bot_key). Appliqué par BotControlledEnv.reset(), jamais par bot_evaluation.py — nul en évaluation par construction."
+  }
+}

@@ -1158,9 +1158,51 @@ class BotControlledEnv(gym.Wrapper):
             self.episode_reward = 0.0
             self.episode_length = 0
 
-            # Random bot selection: pick a new opponent for this episode
+            # Random bot selection: SHA256 reproductible (Bot_refactor.md §4.B, D9).
+            # Le tirage global seed n'est pas ensemence en entrainement (§1.2.d) : random.choice
+            # n'etait donc pas reproductible. Sans coherence ici, annoncer « jitter reproductible »
+            # serait faux — le bot tire ne l'est pas.
             if self._use_random_bots:
-                self.bot = random.choice(require_present(self._bots, "_bots"))
+                bots = require_present(self._bots, "_bots")
+                if self._global_seed is not None:
+                    seed_material = (
+                        f"{self._global_seed}:{self._env_rank}:{self._episode_index}:bot"
+                    )
+                    bot_hash = hashlib.sha256(seed_material.encode("utf-8")).hexdigest()
+                    self.bot = bots[int(bot_hash[:8], 16) % len(bots)]
+                else:
+                    self.bot = random.choice(bots)
+            # Jitter d'episode (§4.B) : multiplicatif sur les poids et les gains de comportement.
+            # Stocke sur l'instance via apply_episode_jitter — jamais sur la config source.
+            # Nul en evaluation par construction : bot_evaluation.py ne lit pas bot_doctrine_profiles.
+            if self._use_random_bots and hasattr(self.bot, "apply_episode_jitter"):
+                from ai.bot_doctrines import get_jitter_config
+                jitter_cfg = get_jitter_config()
+                j_move = jitter_cfg["movement_weight_jitter"]
+                j_beh = jitter_cfg["behavior_parameter_jitter"]
+                bot_key = getattr(self.bot, "MOVEMENT_BOT_KEY", "")
+                ep_marker = (self._global_seed, self._env_rank, self._episode_index)
+                base_seed = (
+                    f"{self._global_seed}:{self._env_rank}:{self._episode_index}"
+                    f":jitter:{bot_key}"
+                )
+
+                def _sha256_uniform(suffix: str) -> float:
+                    h = hashlib.sha256(
+                        f"{base_seed}:{suffix}".encode("utf-8")
+                    ).hexdigest()
+                    return int(h[:8], 16) / float(0xFFFFFFFF)
+
+                movement_factors = tuple(
+                    1.0 + j_move * (2.0 * _sha256_uniform(str(i)) - 1.0)
+                    for i in range(6)
+                )
+                behavior_factor = 1.0 + j_beh * (2.0 * _sha256_uniform("beh") - 1.0)
+                self.bot.apply_episode_jitter(
+                    movement_factors,  # type: ignore[arg-type]
+                    behavior_factor,
+                    ep_marker,
+                )
             if self._self_play_opponent_enabled:
                 self._episodes_since_snapshot_refresh += 1
             self._select_opponent_mode_for_episode()

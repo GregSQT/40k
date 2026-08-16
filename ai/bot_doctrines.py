@@ -73,7 +73,7 @@ from shared.data_validation import require_key
 # Primitives d'espace d'action — AUCUNE doctrine, donc pas de raison de les redire ici. Les
 # reecrire creerait le doublon divergent qui est le mode d'echec n°1 de ce depot.
 from ai.evaluation_bots import (
-    _best_slot_action, _select_weighted_deployment_action,
+    _best_slot_action, _target_slot_entries, _select_weighted_deployment_action,
     DEPLOYMENT_ACTIONS, WAIT_ACTION,
 )
 
@@ -82,6 +82,54 @@ from ai.evaluation_bots import (
 #: evaluer les degats depuis chacune coute plus que la partie entiere. Le pre-tri garde les
 #: meilleures selon le terme geometrique (objectif/ennemi), qui est O(1) par candidate.
 DESTINATION_SHORTLIST = 24
+
+# ─────────────────────────────────────────────────────────────────────────────────────────────
+# Constantes de capacites communes (Bot_refactor.md §4.A)
+# ─────────────────────────────────────────────────────────────────────────────────────────────
+
+#: Avance en VP pour passer en mode « proteger l'avance » (late_game_state).
+_VP_LEAD_MARGIN: float = 15.0
+
+#: Tours FINAUX qui declenchent « desperate_push » quand l'ecart de VP est inferieur a la marge.
+_PUSH_LAST_TURNS: int = 3
+
+#: Seuil de (pression × gain de style) au-dela duquel la preservation bloque une charge.
+#: alpha (g=0) n'est jamais bloque ; scorer (g=0.6) l'est des que la pression depasse 0.5.
+_PRESERVATION_CHARGE_THRESHOLD: float = 0.3
+
+
+# ─────────────────────────────────────────────────────────────────────────────────────────────
+# Config des profils de style — bot_doctrine_profiles.json
+# ─────────────────────────────────────────────────────────────────────────────────────────────
+
+_PROFILES_CONFIG = "bot_doctrine_profiles"
+
+
+def _profiles_config() -> Dict[str, Any]:
+    from config_loader import get_config_loader
+    return get_config_loader().load_config(_PROFILES_CONFIG, force_reload=False)
+
+
+def load_style_profile(bot_key: str) -> Dict[str, Any]:
+    """Profil de capacites du style `bot_key` : late_game, preservation, persistence, focus_shared."""
+    return require_key(require_key(_profiles_config(), "profiles"), bot_key)
+
+
+def _late_game_transform_cfg() -> Dict[str, Any]:
+    return require_key(_profiles_config(), "late_game_transform")
+
+
+def _state_overrides_cfg() -> Dict[str, Any]:
+    return require_key(_profiles_config(), "state_overrides")
+
+
+def get_jitter_config() -> Dict[str, float]:
+    """Magnitudes du jitter (mouvement + comportement). Importe par env_wrappers."""
+    cfg = require_key(_profiles_config(), "jitter")
+    return {
+        "movement_weight_jitter": float(require_key(cfg, "movement_weight_jitter")),
+        "behavior_parameter_jitter": float(require_key(cfg, "behavior_parameter_jitter")),
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -225,7 +273,7 @@ def _best_melee_and_ranged(attacker, game_state) -> Optional[Tuple[float, float]
 
     Compare sur l'ennemi le plus rentable dans chaque mode : une unite peut avoir une melee
     theoriquement superieure et n'avoir aucune cible qu'elle puisse entamer au contact. C'est le
-    couple sur lequel se decide toute charge du panel — `_DoctrineBot._melee_beats_ranged` pour la
+    couple sur lequel se decide toute charge du panel — `_DoctrineBot.wants_charge` pour la
     regle par defaut, `AlphaStrikeBot.wants_charge` pour son seuil d'echange. Les deux le
     calculaient separement : le jour ou « meilleure cible » se raffine (portee de charge, cibles
     inatteignables), un seul des deux aurait suivi — et c'est justement le critere que tout ce
@@ -423,6 +471,203 @@ def _objective_terms(
 
 
 # ─────────────────────────────────────────────────────────────────────────────────────────────
+# Capacites communes — late_game, preservation, persistence (Bot_refactor.md §4.A)
+# ─────────────────────────────────────────────────────────────────────────────────────────────
+
+def late_game_state(game_state, player: int) -> str:
+    """Etat global de partie du point de vue de `player`.
+
+    Retourne "protect_lead" | "normal" | "desperate_push".
+
+    Regles (Bot_refactor.md §4.A.1) :
+    - desperate_push : tours_restants <= PUSH_LAST_TURNS ET ecart VP < _VP_LEAD_MARGIN
+    - protect_lead   : ecart VP >= _VP_LEAD_MARGIN
+    - normal         : sinon
+
+    ⚠️ `get_effective_turn_limit` peut rendre `None` pour les batailles sans fin (Endless Duty).
+    Dans ce cas la notion de « derniers tours » n'a pas de sens : on retombe sur normal/protect_lead
+    selon le score uniquement.
+    """
+    vp_map = game_state.get("victory_points") or {}
+    my_vp = float(vp_map.get(player, 0))
+    opp_vp = float(vp_map.get(3 - player, 0))
+    vp_diff = my_vp - opp_vp
+
+    if vp_diff >= _VP_LEAD_MARGIN:
+        return "protect_lead"
+
+    battle_turns = get_effective_turn_limit(game_state)
+    if battle_turns is not None:
+        current_turn = int(require_key(game_state, "turn"))
+        turns_remaining = battle_turns - current_turn + 1
+        if turns_remaining <= _PUSH_LAST_TURNS:
+            return "desperate_push"
+
+    return "normal"
+
+
+def preservation_pressure(unit, game_state) -> float:
+    """Pression de preservation pour `unit` : 0.0 (saine ou non exposee) .. 1.0.
+
+    Facteurs (Bot_refactor.md §4.A.2) :
+    - Saine (pas en dessous du demi-effectif, 08.03) -> 0.0 immediatement.
+    - VALUE relative aux autres escouades du camp.
+    - Titulaire d'objectif -> pression reduite de 50 % (sortir coute des points).
+
+    ⚠️ « Entamee » est une question de REGLE, tranchee par `is_unit_at_or_below_half_strength`
+    (08.03) et jamais par un `HP < HP_MAX/2` maison — `units_cache["HP_CUR"]` est la SOMME des
+    PV de l'escouade alors que `unit["HP_MAX"]` est le PV d'UNE figurine.
+    """
+    sid = str(require_key(unit, "id"))
+    if not is_unit_at_or_below_half_strength(sid, game_state):
+        return 0.0
+
+    my_value = float(require_key(unit, "VALUE"))
+    others = [
+        float(require_key(friend, "VALUE"))
+        for friend in require_key(game_state, "units")
+        if friend.get("player") == unit.get("player")
+        and str(friend["id"]) != sid
+        and is_unit_alive(str(friend["id"]), game_state)
+    ]
+    avg_value = sum(others) / len(others) if others else 0.0
+
+    # Ratio normalise : l'escouade "moyenne" (my_value == avg_value) => pressure 0.5.
+    # 2× la moyenne => pressure ~0.67. Zero value allies (derniere escouade) => 1.0.
+    total = my_value + avg_value
+    pressure = my_value / total if total > 0.0 else 1.0
+
+    # Titulaire : la quitter couterait des points -> pression reduite.
+    if unit_is_within_objective(game_state, unit, objective_hex_sets(game_state)):
+        pressure *= 0.5
+
+    return min(1.0, pressure)
+
+
+def _apply_late_game_transform(
+    weights: Tuple[float, float, float, float, float, float],
+    state: str,
+    g: float,
+    k: float,
+) -> Tuple[float, float, float, float, float, float]:
+    """Transformation canonique du vecteur de poids selon l'etat de fin de partie.
+
+    Regles (Bot_refactor.md §4.A.1, corrige 2026-08-15) :
+    - desperate_push : w_obj*(1+g*k), w_contest*(1+g*k), w_risk*(1-g)
+    - protect_lead   : w_risk*(1+g*k), w_enemy (signe-aware), w_contest*(1-g)
+    - normal         : identite
+
+    ⚠️ w_enemy SIGNE dans protect_lead : w>0 -> ×(1-g) ; w<0 -> ×(1+g·k) ; 0 reste 0.
+    Une attenuation aveugle (1-g) sur un poids NEGATIF affaiblirait l'evitement au moment meme
+    ou on veut le renforcer — `endgame` a w_enemy=-0.35.
+    """
+    w_obj, w_enn, w_fire, w_risk, w_contest, w_crowd = weights
+    if state == "desperate_push":
+        return (
+            w_obj * (1.0 + g * k),
+            w_enn,
+            w_fire,
+            w_risk * max(0.0, 1.0 - g),
+            w_contest * (1.0 + g * k),
+            w_crowd,
+        )
+    if state == "protect_lead":
+        if w_enn > 0.0:
+            w_enn_new = w_enn * max(0.0, 1.0 - g)
+        elif w_enn < 0.0:
+            w_enn_new = w_enn * (1.0 + g * k)
+        else:
+            w_enn_new = 0.0
+        return (
+            w_obj,
+            w_enn_new,
+            w_fire,
+            w_risk * (1.0 + g * k),
+            w_contest * max(0.0, 1.0 - g),
+            w_crowd,
+        )
+    return weights
+
+
+def _apply_jitter_weights(
+    weights: Tuple[float, float, float, float, float, float],
+    factors: Tuple[float, float, float, float, float, float],
+) -> Tuple[float, float, float, float, float, float]:
+    """Multiplication element par element — zero reste zero, signe conserve (spec §4.B)."""
+    return tuple(w * f for w, f in zip(weights, factors))  # type: ignore[return-value]
+
+
+def _best_slot_action_persistent(
+    valid_actions: List[int],
+    slots,
+    slot_base: int,
+    game_state: Dict[str, Any],
+    active_unit: Dict[str, Any],
+    score_fn,
+    persistence_p: float,
+    use_contester_scale: bool,
+    targets_dict: Dict[str, Tuple[str, Any]],
+) -> Tuple[Optional[int], Optional[str]]:
+    """Action de slot avec regle de conservation de cible (Bot_refactor.md §4.A.3).
+
+    Retourne (action, target_sid) — target_sid est stocke dans `targets_dict` pour le tour
+    courant et relu a la prochaine activation de la meme escouade.
+
+    Regle de conservation : garder la cible precedente ssi
+    `meilleur - score(precedente) <= p * echelle`,
+    ou echelle = abs(score precedent) pour les criteres positifs (ratio),
+    ou 10.0 (un hex) pour `_score_contester`.
+
+    Rupture : cible morte / hors table / absente du masque / score None / fin de tour.
+
+    ⚠️ Ne touche PAS `evaluation_bots._best_slot_action` (bots geles, D10).
+    """
+    attacker_sid = str(require_key(active_unit, "id"))
+    turn_marker: Any = (game_state.get("episode_number"), int(require_key(game_state, "turn")))
+
+    entries = _target_slot_entries(valid_actions, slots, slot_base, game_state, active_unit)
+    if not entries:
+        targets_dict.pop(attacker_sid, None)
+        return None, None
+
+    # Score toutes les cibles ouvertes par le masque.
+    scored: List[Tuple[float, int, str]] = []
+    for action, sid, entry in entries:
+        score = score_fn(sid, entry, game_state)
+        if score is None:
+            continue
+        scored.append((score, action, sid))
+
+    if not scored:
+        targets_dict.pop(attacker_sid, None)
+        return None, None
+
+    best_score, best_action, best_sid = max(scored, key=lambda t: t[0])
+
+    # Regle de conservation : tenter de garder la cible precedente.
+    if persistence_p > 0.0:
+        prev = targets_dict.get(attacker_sid)
+        if prev is not None:
+            prev_sid, prev_marker = prev
+            if prev_marker == turn_marker:
+                # Chercher la precedente dans le lot score (absente = rupture).
+                prev_candidates = [(s, a, s2) for s, a, s2 in scored if s2 == prev_sid]
+                if prev_candidates:
+                    prev_score = prev_candidates[0][0]
+                    if use_contester_scale:
+                        scale = 10.0
+                    else:
+                        scale = abs(prev_score) if prev_score != 0.0 else 0.0
+                    gap = best_score - prev_score
+                    if gap <= persistence_p * scale:
+                        best_action = prev_candidates[0][1]
+                        best_sid = prev_sid
+
+    targets_dict[attacker_sid] = (best_sid, turn_marker)
+    return best_action, best_sid
+
+
+# ─────────────────────────────────────────────────────────────────────────────────────────────
 # Socle des doctrines
 # ─────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -481,11 +726,18 @@ class _DoctrineBot(_PlacementMemory):
     Points de variation, dans l'ordre d'importance :
       - `target_score(attacker, is_ranged, game_state)` : le critere de cible ;
       - `wants_charge(attacker, game_state)` : declarer une charge ou tenir sa ligne ;
-      - `movement_weights(unit, game_state)` : (w_objectif, w_ennemi, w_tir, w_risque) ;
+      - `movement_weights(unit, game_state)` : (w_objectif, w_ennemi, w_tir, w_risque, w_contest, w_crowd) ;
       - `PLACEMENT_WEIGHTS` : la pose.
+
+    Capacites communes (Bot_refactor.md §4.A) : late_game, preservation, persistence.
+    Chaque capacite est activee par un gain dans `config/bot_doctrine_profiles.json` :
+    gain=0 -> identite exacte avec l'implementation precedente (verrou D4).
+
+    Jitter (Bot_refactor.md §4.B) : multiplicatif sur le tuple de poids de mouvement et sur les
+    gains de comportement. Stocke par `apply_episode_jitter`, jamais sur la config source.
     """
 
-    #: Cle de l'entree de `config/bot_movement_weights.json`. Aucune valeur par defaut nulle part.
+    #: Cle de l'entree de `config/bot_movement_weights.json` ET de `bot_doctrine_profiles.json`.
     MOVEMENT_BOT_KEY: str = ""
 
     PLACEMENT_WEIGHTS: Dict[int, float] = {}
@@ -493,29 +745,178 @@ class _DoctrineBot(_PlacementMemory):
     def __init__(self, randomness: float = 0.0):
         super().__init__()
         self.randomness = max(0.0, min(1.0, randomness))
+        # Persistance de cible par escouade attaquante : sid -> (target_sid, turn_marker).
+        self._persistence_targets: Dict[str, Tuple[str, Any]] = {}
+        # Jitter d'episode (§4.B). Facteurs multiplicatifs, neutre par defaut (1.0).
+        self._jitter_movement: Tuple[float, float, float, float, float, float] = (
+            1.0, 1.0, 1.0, 1.0, 1.0, 1.0
+        )
+        self._jitter_behavior: float = 1.0
+        self._jitter_episode_marker: Optional[Any] = None
 
+    # -- Jitter ------------------------------------------------------------------------------------
 
-    # -- Points de variation ------------------------------------------------------------------
+    def apply_episode_jitter(
+        self,
+        movement_factors: Tuple[float, float, float, float, float, float],
+        behavior_factor: float,
+        episode_marker: Any,
+    ) -> None:
+        """Stocke les facteurs de jitter de cet episode. Idempotent si meme marqueur.
+
+        ⚠️ Suit exactement le patron de `_deployment_episode_marker` (§1.2.c du chantier) :
+        les instances sont PARTAGEES entre episodes, donc tout etat doit etre garde sous un
+        marqueur — sinon une fuite inter-episodes reproduit les bugs de `_focus_turn` et de
+        la memoire de pose.
+        """
+        if self._jitter_episode_marker == episode_marker:
+            return
+        self._jitter_episode_marker = episode_marker
+        self._jitter_movement = movement_factors
+        self._jitter_behavior = behavior_factor
+
+    # -- Profil de style ---------------------------------------------------------------------------
+
+    def _style_profile(self) -> Dict[str, Any]:
+        return load_style_profile(self.MOVEMENT_BOT_KEY)
+
+    def _late_game_g(self) -> float:
+        return float(require_key(self._style_profile(), "late_game")) * self._jitter_behavior
+
+    def _preservation_g(self) -> float:
+        return float(require_key(self._style_profile(), "preservation")) * self._jitter_behavior
+
+    def _persistence_p(self) -> float:
+        return float(require_key(self._style_profile(), "persistence")) * self._jitter_behavior
+
+    def _is_preserving(self, unit, game_state) -> bool:
+        """Etat de preservation par unite — FAUX par defaut (aucun override de vecteur).
+
+        `AttritionBot` le surchage avec `_withdrawing` (route vers attrition_withdraw).
+        Pour les autres styles, la preservation est continue (`preservation_pressure × g`)
+        et module le vecteur sans passer par un override.
+        """
+        return False
+
+    # -- Seuil de charge ---------------------------------------------------------------------------
+
+    def _charge_trade_floor(self, game_state, player: int) -> float:
+        """Facteur multiplicatif du seuil d'echange pour la charge, module par late_game.
+
+        Retourne 1.0 a g=0 : le comportement est alors identique a `melee > ranged * 1.0`
+        (c'est-a-dire l'ancien `_melee_beats_ranged`).
+
+        desperate_push : abaisse le seuil (plus agressif).
+        protect_lead   : releve le seuil (plus prudent).
+        """
+        g = self._late_game_g()
+        if g <= 0.0:
+            return 1.0
+        lg = late_game_state(game_state, player)
+        cfg = _late_game_transform_cfg()
+        if lg == "desperate_push":
+            return max(0.0, 1.0 - g)
+        if lg == "protect_lead":
+            k = float(require_key(cfg, "protect_gain"))
+            return 1.0 + g * k
+        return 1.0
+
+    def _preservation_blocks_charge(self, attacker, game_state) -> bool:
+        """La preservation continue coupe-t-elle la charge de cette escouade ?
+
+        Produit (pression × sensibilite_style) compare au seuil. alpha (g=0) n'est jamais bloque.
+        """
+        g_pres = self._preservation_g()
+        if g_pres <= 0.0:
+            return False
+        pressure = preservation_pressure(attacker, game_state)
+        return pressure * g_pres >= _PRESERVATION_CHARGE_THRESHOLD
+
+    # -- Critere de cible — persistance ------------------------------------------------------------
+
+    def _uses_contester_score(self, unit, game_state) -> bool:
+        """Ce style utilise-t-il `_score_contester` comme critere de cible ?
+
+        Contester a une echelle fixe (10.0 = un hex) ; les autres criteres ont une echelle ratio.
+        Surchargee par `RacerBot` et `ScorerBot` (toujours vrai), `EndgameBot` (selon l'etat).
+        """
+        return False
+
+    # -- Points de variation -----------------------------------------------------------------------
 
     def target_score(self, attacker, is_ranged: bool, game_state):
         """Critere de cible du style. Par defaut : la cible sur laquelle je fais le plus de mal."""
         return _score_efficiency(attacker, is_ranged)
 
     def wants_charge(self, attacker, game_state) -> bool:
-        """Declarer une charge ? Par defaut : seulement si la melee est mon meilleur mode.
+        """Declarer une charge ? Par defaut : melee > ranged * floor, avec preservation.
 
         ⚠️ C'est ici que le proxy `NB x DMG` faisait le plus de degats : il classait 16 unites
         sur 23 du roster comme « melee », Intercessor (24") compris. La comparaison porte
         desormais sur les degats esperes CONTRE LES CIBLES REELLES, pas sur une caracteristique
         d'arme lue a vide.
+
+        Le seuil est module par `_charge_trade_floor` : desperate_push l'abaisse (plus agressif),
+        protect_lead le releve (plus prudent). A gain=0 : floor=1.0 => melee > ranged (identique).
         """
-        return self._melee_beats_ranged(attacker, game_state)
+        if self._preservation_blocks_charge(attacker, game_state):
+            return False
+        profile = _best_melee_and_ranged(attacker, game_state)
+        if profile is None:
+            return False
+        melee, ranged = profile
+        if melee <= 0.0:
+            return False
+        player = int(require_key(attacker, "player"))
+        return melee > ranged * self._charge_trade_floor(game_state, player)
 
     def movement_weights(self, unit, game_state) -> Tuple[float, float, float, float, float, float]:
-        """(w_objectif, w_ennemi, w_tir, w_risque), lus dans la config. Aucun defaut."""
-        return load_doctrine_weights(self.MOVEMENT_BOT_KEY)
+        """(w_objectif, w_ennemi, w_tir, w_risque, w_contest, w_crowd) — lus dans la config.
 
-    # -- Chemin commun ------------------------------------------------------------------------
+        Logique (Bot_refactor.md §4.A, gain=0 => identite exacte) :
+        1. Si _is_preserving() -> override "preserve" de state_overrides si disponible.
+        2. Si late_game_state -> override direct si disponible dans state_overrides.
+        3. Sinon : poids de base + transformation late_game + modulation de preservation.
+        4. Jitter multiplicatif applique dans tous les cas (neutre a 1.0).
+        """
+        player = int(require_key(unit, "player"))
+
+        # 1. Override de preservation par unite (uniquement AttritionBot via _withdrawing).
+        if self._is_preserving(unit, game_state):
+            overrides = _state_overrides_cfg().get(self.MOVEMENT_BOT_KEY, {})
+            if "preserve" in overrides:
+                base = load_doctrine_weights(overrides["preserve"])
+                return _apply_jitter_weights(base, self._jitter_movement)
+
+        # 2. Override late_game.
+        lg_state = late_game_state(game_state, player)
+        overrides = _state_overrides_cfg().get(self.MOVEMENT_BOT_KEY, {})
+        if lg_state in overrides:
+            base = load_doctrine_weights(overrides[lg_state])
+            return _apply_jitter_weights(base, self._jitter_movement)
+
+        # 3. Poids de base + transformations.
+        base = load_doctrine_weights(self.MOVEMENT_BOT_KEY)
+
+        g_late = self._late_game_g()
+        if g_late > 0.0 and lg_state != "normal":
+            cfg = _late_game_transform_cfg()
+            k = float(require_key(cfg, "push_gain" if lg_state == "desperate_push" else "protect_gain"))
+            base = _apply_late_game_transform(base, lg_state, g_late, k)
+
+        g_pres = self._preservation_g()
+        if g_pres > 0.0:
+            pressure = preservation_pressure(unit, game_state)
+            pres_eff = min(1.0, pressure * g_pres)
+            if pres_eff > 0.0:
+                # Module comme protect_lead avec g=pres_eff (protege une avance locale).
+                cfg = _late_game_transform_cfg()
+                k = float(require_key(cfg, "protect_gain"))
+                base = _apply_late_game_transform(base, "protect_lead", pres_eff, k)
+
+        return _apply_jitter_weights(base, self._jitter_movement)
+
+    # -- Chemin commun -----------------------------------------------------------------------------
 
     def _melee_beats_ranged(self, attacker, game_state) -> bool:
         """Mes degats esperes au contact depassent-ils mes degats esperes a distance ?"""
@@ -550,26 +951,35 @@ class _DoctrineBot(_PlacementMemory):
     def _shoot(self, valid_actions, game_state, active_unit) -> int:
         if not any(a in valid_actions for a in mi.SHOOT_SLOTS):
             return self._wait_or_first(valid_actions)
-        action = _best_slot_action(
+        p = self._persistence_p()
+        use_contester = self._uses_contester_score(active_unit, game_state)
+        action, _ = _best_slot_action_persistent(
             valid_actions, mi.SHOOT_SLOTS, mi.SHOOT_SLOT_BASE, game_state, active_unit,
             self.target_score(active_unit, True, game_state),
+            p, use_contester, self._persistence_targets,
         )
         return action if action is not None else WAIT_ACTION
 
     def _charge(self, valid_actions, game_state, active_unit) -> int:
         if not self.wants_charge(active_unit, game_state):
             return self._wait_or_first(valid_actions)
-        action = _best_slot_action(
+        p = self._persistence_p()
+        use_contester = self._uses_contester_score(active_unit, game_state)
+        action, _ = _best_slot_action_persistent(
             valid_actions, mi.CHARGE_SLOTS, mi.CHARGE_SLOT_BASE, game_state, active_unit,
             self.target_score(active_unit, False, game_state),
+            p, use_contester, self._persistence_targets,
         )
         return action if action is not None else self._wait_or_first(valid_actions)
 
     def _fight(self, valid_actions, game_state, active_unit) -> int:
         """Au contact il n'y a plus de portee a tenir : on frappe toujours (12.04/12.06)."""
-        action = _best_slot_action(
+        p = self._persistence_p()
+        use_contester = self._uses_contester_score(active_unit, game_state)
+        action, _ = _best_slot_action_persistent(
             valid_actions, mi.FIGHT_SLOTS, mi.FIGHT_SLOT_BASE, game_state, active_unit,
             self.target_score(active_unit, False, game_state),
+            p, use_contester, self._persistence_targets,
         )
         if action is not None:
             return action
@@ -577,7 +987,7 @@ class _DoctrineBot(_PlacementMemory):
             return mi.ACTION_FIGHT_NO_TARGET
         return self._wait_or_first(valid_actions)
 
-    # -- Deplacement --------------------------------------------------------------------------
+    # -- Deplacement -------------------------------------------------------------------------------
 
     def movement_enemy_anchors(
         self, unit, enemies: List[Dict[str, Any]], game_state
@@ -729,6 +1139,9 @@ class RacerBot(_DoctrineBot):
         """Il tire sur qui conteste ses zones — le reste ne lui coute pas de points."""
         return _score_contester(attacker, is_ranged)
 
+    def _uses_contester_score(self, unit, game_state) -> bool:
+        return True
+
     def wants_charge(self, attacker, game_state) -> bool:
         return False
 
@@ -738,63 +1151,39 @@ class EndgameBot(_DoctrineBot):
 
     Punit l'agent qui marque tot et relache. Avant le tour de bascule il tient ses distances et
     tire ; apres, il joue exactement comme un Racer.
+
+    La bascule utilise `late_game_state` (Bot_refactor.md §4.A.1) : l'ancien predicat
+    `_pushing` et `PUSH_LAST_TURNS=3` sont remplaces par la fonction commune. Le comportement
+    sur une bataille de 5 tours est inchange : la bascule survient au tour 3 quand le score est
+    serre (vp_diff < 15), exactement comme avant — c'est un test.
+
+    Les overrides de vecteur (`endgame` → `desperate_push` → `endgame_push`) et le profil
+    de style (gain late_game = 1.0) sont lus dans la config par le socle commun.
     """
 
     MOVEMENT_BOT_KEY = "endgame"
-    #: Nombre de tours FINAUX pendant lesquels il fond sur les objectifs.
-    #:
-    #: ⚠️ IL BASCULAIT AU TOUR 4, ET C'ETAIT PERDU D'AVANCE — mesure du 2026-08-11 : 0,025 de
-    #: win-rate moyen contre les cinq autres styles, dernier de tres loin. Le score primaire court
-    #: a partir du tour 2 (`config/primary_objective/.../Objectives_Control.json` : `start_turn: 2`,
-    #: 15 VP/tour) : sur une bataille de 5 tours, ne rien tenir avant le tour 4 revient a renoncer
-    #: aux tours 2 et 3, soit la MOITIE des tours qui rapportent. Aucun jeu de poids ne rattrape ca.
-    #: « Jouer la fin de partie » ne peut donc pas vouloir dire « ne rien marquer avant » : il
-    #: prend le premier palier tot (5 VP des qu'on tient une zone) et ne bascule sur le maximum
-    #: que sur les TROIS derniers tours, en gardant ses unites intactes pour ce moment-la.
-    #:
-    #: ⚠️ EXPRIME EN TOURS RESTANTS, PLUS EN NUMERO DE TOUR — corrige le 2026-08-12. La constante
-    #: valait `PUSH_TURN = 3`, deduite a la main de « la partie dure 5 tours » : sur un scenario
-    #: plus court elle ne se declenchait qu'apres la fin, sur un plus long elle transformait le
-    #: style en Racer des le premier tiers. La duree se lit desormais sur l'etat
-    #: (`get_effective_turn_limit`, source unique de `game_rules.max_turns`), et le comportement
-    #: sur la bataille standard est inchange : 5 - 3 + 1 = tour 3, exactement comme avant.
-    PUSH_LAST_TURNS = 3
     PLACEMENT_WEIGHTS = {
         DEPLOYMENT_ACTIONS[0]: 0.05, DEPLOYMENT_ACTIONS[1]: 0.25, DEPLOYMENT_ACTIONS[2]: 0.50,
         DEPLOYMENT_ACTIONS[3]: 0.10, DEPLOYMENT_ACTIONS[4]: 0.10,
     }
 
-    def _pushing(self, game_state) -> bool:
-        """Sommes-nous entres dans les `PUSH_LAST_TURNS` derniers tours de la bataille ?
-
-        ⚠️ `require_key` et non `game_state.get("turn", 1)` : le defaut a 1 disait « avant la
-        bascule » pour un etat sans tour, c'est-a-dire qu'une rupture d'invariant se lisait comme
-        une decision de doctrine (T1). Un etat sans `turn` doit lever.
-        """
-        battle_turns = get_effective_turn_limit(game_state)
-        if battle_turns is None:
-            raise ValueError(
-                "EndgameBot joue les DERNIERS tours d'une bataille : une bataille sans limite de "
-                "tours (Endless Duty) n'en a pas. Ce style n'est pas un adversaire valide sur ce "
-                "scenario — le retirer du panel plutot que lui inventer un tour de bascule."
-            )
-        # Bataille de 5 tours, `PUSH_LAST_TURNS` = 3 : bascule au tour 3, qui ouvre les tours
-        # 3-4-5. Le `max(1, ...)` couvre les batailles plus courtes que la fenetre de poussee :
-        # il n'y a alors pas de phase d'attente, ce qui est la bonne reponse et non un repli.
-        push_from = max(1, battle_turns - self.PUSH_LAST_TURNS + 1)
-        return int(require_key(game_state, "turn")) >= push_from
+    def _in_push_mode(self, game_state, player: int) -> bool:
+        return late_game_state(game_state, player) == "desperate_push"
 
     def target_score(self, attacker, is_ranged: bool, game_state):
-        if self._pushing(game_state):
+        player = int(require_key(attacker, "player"))
+        if self._in_push_mode(game_state, player):
             return _score_contester(attacker, is_ranged)
         return _score_efficiency(attacker, is_ranged)
 
-    def wants_charge(self, attacker, game_state) -> bool:
-        return self._pushing(game_state) and self._melee_beats_ranged(attacker, game_state)
+    def _uses_contester_score(self, unit, game_state) -> bool:
+        return self._in_push_mode(game_state, int(require_key(unit, "player")))
 
-    def movement_weights(self, unit, game_state):
-        key = f"{self.MOVEMENT_BOT_KEY}_push" if self._pushing(game_state) else self.MOVEMENT_BOT_KEY
-        return load_doctrine_weights(key)
+    def wants_charge(self, attacker, game_state) -> bool:
+        player = int(require_key(attacker, "player"))
+        if not self._in_push_mode(game_state, player):
+            return False
+        return super().wants_charge(attacker, game_state)
 
 
 class AlphaStrikeBot(_DoctrineBot):
@@ -819,8 +1208,15 @@ class AlphaStrikeBot(_DoctrineBot):
     def target_score(self, attacker, is_ranged: bool, game_state):
         return _score_kill_now(attacker, is_ranged)
 
+    def _charge_trade_floor(self, game_state, player: int) -> float:
+        """Floor propre a AlphaStrike : MELEE_TRADE_FLOOR * le floor du socle commun.
+
+        A g=0 : floor = 0.5 * 1.0 = 0.5, identique a l'ancien `melee >= ranged * 0.5`.
+        """
+        return self.MELEE_TRADE_FLOOR * super()._charge_trade_floor(game_state, player)
+
     def wants_charge(self, attacker, game_state) -> bool:
-        """Charge si le contact vaut au moins la moitie de son tir.
+        """Charge si le contact vaut au moins `_charge_trade_floor` fois son tir.
 
         ⚠️ VALAIT `True` INCONDITIONNEL, et c'etait perdant des deux cotes — mesure du
         2026-08-11 : dernier du panel en bot-contre-bot (0,292) et sature contre l'agent
@@ -829,13 +1225,16 @@ class AlphaStrikeBot(_DoctrineBot):
         son tir. Le seuil garde l'agressivite du style — il charge encore la ou les autres
         s'abstiennent — sans en faire un suicide systematique.
         """
+        if self._preservation_blocks_charge(attacker, game_state):
+            return False
         profile = _best_melee_and_ranged(attacker, game_state)
         if profile is None:
             return False
         melee, ranged = profile
         if melee <= 0.0:
             return False  # rien a faire au contact : y aller est une perte seche
-        return melee >= ranged * self.MELEE_TRADE_FLOOR
+        player = int(require_key(attacker, "player"))
+        return melee >= ranged * self._charge_trade_floor(game_state, player)
 
 
 class AttritionBot(_DoctrineBot):
@@ -876,15 +1275,18 @@ class AttritionBot(_DoctrineBot):
             return True  # derniere escouade : elle porte a elle seule tout le departage
         return float(require_key(unit, "VALUE")) > sum(others) / len(others)
 
+    def _is_preserving(self, unit, game_state) -> bool:
+        """Etat de preservation d'attrition : identique a _withdrawing.
+
+        Route vers l'override `attrition_withdraw` dans `movement_weights` (via socle commun).
+        Coupe egalement la charge.
+        """
+        return self._withdrawing(unit, game_state)
+
     def wants_charge(self, attacker, game_state) -> bool:
-        if self._withdrawing(attacker, game_state):
+        if self._is_preserving(attacker, game_state):
             return False
         return self._melee_beats_ranged(attacker, game_state)
-
-    def movement_weights(self, unit, game_state):
-        key = f"{self.MOVEMENT_BOT_KEY}_withdraw" if self._withdrawing(unit, game_state) \
-            else self.MOVEMENT_BOT_KEY
-        return load_doctrine_weights(key)
 
 
 class DecapitationBot(_DoctrineBot):
@@ -899,6 +1301,11 @@ class DecapitationBot(_DoctrineBot):
     Elle porte les DEUX faces de la doctrine : vers qui on tire (`target_score`) et vers qui on
     marche (`movement_enemy_anchors`) — concentrer ses tirs depuis cinq positions eclatees, c'est
     ne concentrer que la moitie de son activation.
+
+    `focus_shared: true` dans le profil (Bot_refactor.md §4.A.2) : le focus inter-escouades est
+    conserve EN PLUS de la persistance per-escouade de _persistence_targets (socle commun).
+    Les deux coexistent sans conflit : le focus donne +10 000 a la cible commune, la persistance
+    la conserve ensuite naturellement (le gap est quasi nul entre deux activations de la meme tour).
     """
 
     MOVEMENT_BOT_KEY = "decapitation"
@@ -1043,6 +1450,9 @@ class ScorerBot(_DoctrineBot):
         """Il frappe qui conteste ses zones : le reste ne lui coute pas de points."""
         return _score_contester(attacker, is_ranged)
 
+    def _uses_contester_score(self, unit, game_state) -> bool:
+        return True
+
     def wants_charge(self, attacker, game_state) -> bool:
         """Se battre doit RAPPORTER une zone, jamais en coûter une.
 
@@ -1055,6 +1465,8 @@ class ScorerBot(_DoctrineBot):
         degats esperes CONTRE LES CIBLES REELLES.
         """
         if unit_is_within_objective(game_state, attacker, objective_hex_sets(game_state)):
+            return False
+        if self._preservation_blocks_charge(attacker, game_state):
             return False
         return self._melee_beats_ranged(attacker, game_state)
 
