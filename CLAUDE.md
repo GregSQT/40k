@@ -276,7 +276,7 @@ Pas de verdict vague (optimal, tout propre, doc à jour) ; uniquement des faits 
 Tests : ✅ (N verts) ou 🔴 (N rouges). Doc : ✅ déplacé dans Implémenté/ · 🟡 à faire · ⚪ pas de doc chantier associé.
 Symboles communs : ✅ fait · 🟡 à faire · 🔴 erreur/bloqué · ⚪ sans objet. Omis si aucun code écrit.
 
-SUITE : Tout est terminé
+SUITE : 🟢 Tout est terminé
 — ou —
 SUITE :
 → Ce prompt : <actions 🟡 restantes>
