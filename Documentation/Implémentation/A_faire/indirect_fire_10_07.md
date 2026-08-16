@@ -135,8 +135,19 @@ limite T2 des ~5 fichiers.
    remplit à chaque step. Le prédicat coûte donc une dizaine de lectures de dict, pas un calcul
    de LoS. ⚠️ La v1 de cette spec annonçait un « risque de performance » : mesure faite sur le
    code, il n'y en a pas, et l'inventer aurait fait sur-concevoir un cache de plus.
-5. **Décision** — masque d'action + observation + application côté agent ; côté PvP, le choix
-   du type de tir à l'activation.
+5. 🟡 **VOLET AGENT FAIT le 2026-08-16 ; volet PvP à faire.** **Décision** — option **A**
+   retenue par l'utilisateur (dimension d'action dédiée) contre l'option « déduire le type de la
+   cible » : celle-ci reposait sur un fait contingent (aucune datasheet ne porte deux armes
+   indirectes aujourd'hui) et aurait REDÉRIVÉ le type, réintroduisant l'invariant que les
+   pièces 1-2 démontent, avec en prime une divergence IA/PvP.
+   Livré : 20 slots `SHOOT_INDIRECT` **dans le bloc micro** (`BASE_ZONE_INTENT` commençait
+   exactement là où ils avaient d'abord été posés — collision prise par le test miroir), décodeur,
+   masque calculé sous le type indirect, état de choix validé/honoré/effacé,
+   `TOTAL_ACTION_SIZE` 1139 → 1159.
+   ⏳ **Reste le choix côté PvP** : le chemin d'activation humain
+   (`w40k_core`, branche `active_shooting_unit`) ne pose aucun choix, donc un joueur humain
+   reste sur le type dérivé et ne peut pas jouer l'indirect. C'est du travail frontend (offrir
+   le choix à l'activation) plus son point d'entrée API.
 6. **Journal** — ⚠️ **la v1 de cette spec disait « déjà prévu » : c'était faux, et c'était le
    mode d'échec que toute la session du 12-16 août a servi à fermer.** `[SHOOT_TYPE:indirect]`
    sortira bien tout seul (le jeu de valeurs est lu dans le moteur), mais il ne nomme que le

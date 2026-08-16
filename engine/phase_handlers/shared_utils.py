@@ -7879,6 +7879,90 @@ def _squads_are_engaged(
     return unit_entries_within_engagement_zone(a, b, get_engagement_zone(game_state))
 
 
+#: Cle d etat du TYPE DE TIR CHOISI par activation (10.02, etape 2 : « Select one shooting type
+#: that unit is eligible to make »). `{squad_id -> type}`, pose a l activation et lu par
+#: `resolve_squad_shooting_type`.
+#:
+#: POURQUOI UN ETAT, et pas un parametre passe de proche en proche : le type vaut pour
+#: l ACTIVATION entiere, et il est lu bien apres l action — a la declaration de cible, a la
+#: resolution de chaque intent, a l emission du log. Le faire voyager en argument obligerait
+#: chacun de ces sites a le recevoir, et le premier qui l oublierait retomberait silencieusement
+#: sur la derivation. L etat est efface par `squad_shooting_type_clear`, appele la ou
+#: `units_shot` se vide.
+SQUAD_SHOOTING_TYPE_CHOICE_KEY = "squad_shooting_type_choice"
+
+
+def squad_shooting_type_choose(
+    game_state: Dict[str, Any], squad_id: str, shooting_type: str
+) -> None:
+    """Enregistre le type de tir CHOISI pour cette activation (10.02).
+
+    Le choix est VALIDE contre l ensemble eligible : 10.02 dit « select one shooting type that
+    unit IS ELIGIBLE TO MAKE ». Un type non eligible n est pas un cas metier a ignorer en
+    silence — c est un masque d action casse ou un appelant PvP qui propose ce qu il ne devrait
+    pas, et le laisser passer ferait resoudre une activation sous des regles qu elle n a pas le
+    droit d appliquer. Erreur explicite (T1).
+    """
+    eligibles = eligible_squad_shooting_types(game_state, squad_id)
+    if shooting_type not in eligibles:
+        raise ValueError(
+            f"squad_shooting_type_choose: type {shooting_type!r} non eligible pour l escouade "
+            f"{squad_id} (eligibles : {list(eligibles)}) — 10.02 exige un type ELIGIBLE"
+        )
+    game_state.setdefault(SQUAD_SHOOTING_TYPE_CHOICE_KEY, {})[str(squad_id)] = shooting_type
+
+
+def squad_shooting_type_clear(game_state: Dict[str, Any], squad_id: str) -> None:
+    """Retire le choix de cette escouade — l activation est finie, le type ne vaut plus.
+
+    Sans cet effacement, le choix survivrait au tour et une activation ULTERIEURE hériterait
+    d un type qu elle n a pas choisi. C est le meme cycle de vie que `units_shot`, et il est
+    appele au meme endroit.
+    """
+    choices = game_state.get(SQUAD_SHOOTING_TYPE_CHOICE_KEY)  # get allowed (aucun choix encore)
+    if isinstance(choices, dict):
+        choices.pop(str(squad_id), None)
+
+
+def _squad_can_shoot_target_under_type(
+    game_state: Dict[str, Any], squad_id: str, target_sid: str, shooting_type: str
+) -> bool:
+    """Une figurine de l escouade peut-elle atteindre `target_sid` SOUS ce type de tir ?
+
+    Le type change deux choses : les armes SELECTIONNABLES (`shooting_type_allows_weapon`) et,
+    pour 10.07, l exigence de ligne de vue. Il faut donc l imposer pendant le test, et non
+    laisser `_model_can_shoot_target_with_weapon` re-deriver le type courant — celui de
+    l activation, qui n est pas encore celui qu on evalue.
+
+    Le choix est POSE puis RETIRE autour du test : `resolve_squad_shooting_type` le lit, et c est
+    la seule voie par laquelle le type se propage jusqu au gate de ciblage. Restaure dans un
+    `finally` — une exception laisserait sinon l escouade avec un type choisi qu aucune action
+    n a demande, et l activation suivante en heriterait.
+    """
+    choices = game_state.setdefault(SQUAD_SHOOTING_TYPE_CHOICE_KEY, {})
+    sid = str(squad_id)
+    precedent = choices.get(sid)  # get allowed (aucun choix en cours)
+    choices[sid] = shooting_type
+    try:
+        models_cache = require_key(game_state, "models_cache")
+        squad_models = require_key(game_state, "squad_models")
+        for mid in squad_models.get(sid, []):  # get allowed
+            model = models_cache.get(mid)  # get allowed (figurine morte)
+            if model is None:
+                continue
+            for widx in squad_model_shootable_weapon_indices(
+                game_state, sid, model, shooting_type
+            ):
+                if _model_can_shoot_target_with_weapon(game_state, model, target_sid, widx):
+                    return True
+        return False
+    finally:
+        if precedent is None:
+            choices.pop(sid, None)
+        else:
+            choices[sid] = precedent
+
+
 def eligible_squad_shooting_types(
     game_state: Dict[str, Any], squad_id: str
 ) -> Tuple[str, ...]:
@@ -7904,7 +7988,7 @@ def eligible_squad_shooting_types(
     Rend un tuple VIDE si l escouade ne peut pas tirer du tout ; c est le meme etat que le `None`
     de `resolve_squad_shooting_type`, et les deux se lisent au meme endroit pour cette raison.
     """
-    default = resolve_squad_shooting_type(game_state, squad_id)
+    default = _derive_squad_shooting_type(game_state, str(squad_id))
     if default is None:
         return ()
     types = [default]
@@ -7969,16 +8053,41 @@ def resolve_squad_shooting_type(
     aucune contrepartie. L indirect ne se choisit que pour atteindre une cible invisible, donc
     jamais par defaut.
     """
+    sid = str(squad_id)
+    # Une activation DEPENSEE n a plus de type, choix compris. Ce garde precede volontairement la
+    # lecture du choix : `squad_shooting_type_clear` efface a la fin de l activation, et si cet
+    # effacement venait a manquer, rendre le choix perime ici ressusciterait une activation deja
+    # jouee — un repli silencieux, exactement ce que T1 interdit.
+    if sid in game_state.get("units_shot", set()):  # get allowed (absent = personne n a tire)
+        return None
+    # 10.02 : si un type a ete CHOISI pour cette activation, c est lui, SANS re-derivation. Il a
+    # deja ete valide contre l ensemble eligible a la pose (`squad_shooting_type_choose`) ; le
+    # revalider ici ferait une seconde definition de l eligibilite, a reconcilier au premier
+    # desaccord.
+    chosen = game_state.get(SQUAD_SHOOTING_TYPE_CHOICE_KEY, {}).get(sid)  # get allowed
+    if chosen is not None:
+        return chosen
+    return _derive_squad_shooting_type(game_state, sid)
+
+
+def _derive_squad_shooting_type(game_state: Dict[str, Any], sid: str) -> Optional[str]:
+    """Type de tir par DEFAUT — celui d une activation qui n a rien choisi (10.02).
+
+    Extrait de `resolve_squad_shooting_type` pour casser une circularite : `eligible_squad_
+    shooting_types` doit enumerer ce que l escouade PEUT jouer, ce qui ne depend pas de ce
+    qu elle a deja choisi. Sans cette separation, poser un choix aurait retreci l ensemble
+    eligible au choix lui-meme, et un second appel a `squad_shooting_type_choose` — le
+    changement d avis d un joueur PvP — aurait ete refuse par sa propre validation.
+    """
+    unit = get_unit_by_id(game_state, sid)
+    if unit is None:
+        return None
     from engine.phase_handlers.shooting_handlers import (
         _can_unit_shoot_after_advance_with_weapon,
         _unit_has_rule,
     )
 
-    sid = str(squad_id)
-    if sid in game_state.get("units_shot", set()):  # get allowed (absent = personne n a tire)
-        return None
-    unit = get_unit_by_id(game_state, sid)
-    if unit is None:
+    if sid in game_state.get("units_shot", set()):  # get allowed
         return None
     if sid in game_state.get("units_fled", set()) and not _unit_has_rule(  # get allowed
         unit, "shoot_after_flee"
@@ -11597,7 +11706,27 @@ SQUAD_ACTION_FIGHT_SLOT_BASE = (
 SQUAD_ACTION_FIGHT_SLOT_COUNT = SQUAD_ACTION_SHOOT_SLOT_COUNT  # 20 -> 1065-1084
 # Combat « a vide » (12.04/12.06) : selectionne pour combattre sans cible eligible. Etat legal.
 SQUAD_ACTION_FIGHT_NO_TARGET = SQUAD_ACTION_FIGHT_SLOT_BASE + SQUAD_ACTION_FIGHT_SLOT_COUNT  # 1085
-SQUAD_ACTION_SIZE = SQUAD_ACTION_FIGHT_NO_TARGET + 1  # 1086
+# 10.02 / 10.07 : le TYPE DE TIR est un choix du joueur (« Select one shooting type that unit is
+# eligible to make »), et le tir indirect est le premier type qui n exclut pas le tir normal —
+# une meme escouade peut jouer l un ou l autre dans le MEME etat. Il lui faut donc sa propre
+# dimension d action : sans elle, l agent ne pourrait exprimer que le defaut, et une regle vive
+# cote moteur resterait morte cote IA.
+#
+# UN SLOT PAR CIBLE, sur le MEME mapping d ennemis que le tir ordinaire (`get_enemy_slot_mapping`)
+# — l action dit « tirer INDIRECT sur la cible N ». Le decoupage par cible et non par bit de mode
+# est ce qui garde la decision ATOMIQUE : un bit de mode separe demanderait deux actions pour une
+# activation, donc un etat intermediaire entre les deux et un masque qui en depend.
+#
+# Place en FIN d espace d action, apres `FIGHT_NO_TARGET` : les indices existants ne bougent pas.
+# Le retrain est de toute facon impose par le changement de dimension (decision utilisateur du
+# 2026-08-16), mais garder les indices stables laisse comparables les journaux et les replays
+# d avant. Cout en parametres : ZERO — la tete pointeur produit les logits par produit scalaire
+# sur les embeddings ennemis, comme pour les 20 slots de tir (cf. leur commentaire).
+SQUAD_ACTION_SHOOT_INDIRECT_SLOT_BASE = SQUAD_ACTION_FIGHT_NO_TARGET + 1  # 1086
+SQUAD_ACTION_SHOOT_INDIRECT_SLOT_COUNT = SQUAD_ACTION_SHOOT_SLOT_COUNT  # 20 -> 1086-1105
+SQUAD_ACTION_SIZE = (
+    SQUAD_ACTION_SHOOT_INDIRECT_SLOT_BASE + SQUAD_ACTION_SHOOT_INDIRECT_SLOT_COUNT
+)  # 1106
 # Chantier 01 : la CIBLE D'OATH OF MOMENT est une dimension d'action, sur le MEME mapping de
 # slots ennemis que le tir, la charge et la melee (`get_enemy_slot_mapping`, invariant D1). Le
 # compte est DERIVE de celui du tir, exactement comme les deux precedents.
@@ -12456,6 +12585,19 @@ def build_squad_action_mask(
                         break
                 if can_any_hit:
                     mask[SQUAD_ACTION_SHOOT_SLOT_BASE + slot_i] = 1
+        # 10.02 / 10.07 : le tir INDIRECT est un SECOND type jouable dans le meme etat, pas une
+        # variante du premier. Son masque est donc calcule a part, avec le type indirect en
+        # vigueur — c est lui qui ouvre le ciblage sans ligne de vue, et c est tout l interet du
+        # choix. Le calculer avec `shooting_type` (le defaut) aurait rendu les deux blocs
+        # identiques, donc l action indirecte inutile.
+        if SHOOTING_TYPE_INDIRECT in eligible_squad_shooting_types(game_state, squad_id):
+            for slot_i, esid in enumerate(enemy_slot_ids):
+                if esid is None:
+                    continue
+                if _squad_can_shoot_target_under_type(
+                    game_state, squad_id, esid, SHOOTING_TYPE_INDIRECT
+                ):
+                    mask[SQUAD_ACTION_SHOOT_INDIRECT_SLOT_BASE + slot_i] = 1
         mask[SQUAD_ACTION_WAIT] = 1
 
     # --- Charge phase: un slot par cible de charge declarable (11.02) ---

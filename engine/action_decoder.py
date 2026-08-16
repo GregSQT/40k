@@ -34,6 +34,10 @@ from engine.phase_handlers.shared_utils import (
     SQUAD_ACTION_FIGHT_SLOT_COUNT,
     SQUAD_ACTION_MOVE_CELL_BASE,
     SQUAD_ACTION_MOVE_CELL_COUNT,
+    SHOOTING_TYPE_INDIRECT,
+    SHOOTING_TYPE_NORMAL,
+    SQUAD_ACTION_SHOOT_INDIRECT_SLOT_BASE,
+    SQUAD_ACTION_SHOOT_INDIRECT_SLOT_COUNT,
     SQUAD_ACTION_SHOOT_SLOT_BASE,
     SQUAD_ACTION_SHOOT_SLOT_COUNT,
     SQUAD_ACTION_SIZE,
@@ -1249,6 +1253,25 @@ class ActionDecoder:
                 "action": "squad_shoot",
                 "target_slot": action_int - SQUAD_ACTION_SHOOT_SLOT_BASE,
                 "squad_id": squad_id,
+                # 10.02 : le type de tir fait partie de la DECISION, il n est plus derive de
+                # l etat. Le tir ordinaire le dit explicitement plutot que de laisser le moteur
+                # deviner — un `None` ici obligerait le moteur a retomber sur la derivation, et
+                # cette derivation ne saurait pas distinguer « l agent a choisi normal » de
+                # « l agent n a rien dit ».
+                "shooting_type": SHOOTING_TYPE_NORMAL,
+            }
+
+        if SQUAD_ACTION_SHOOT_INDIRECT_SLOT_BASE <= action_int < (
+            SQUAD_ACTION_SHOOT_INDIRECT_SLOT_BASE + SQUAD_ACTION_SHOOT_INDIRECT_SLOT_COUNT
+        ):
+            # 10.07 : MEME action que le tir ordinaire, MEME mapping de cibles — seul le type
+            # change. C est ce qui garde une seule voie d execution (`squad_shoot`) : deux
+            # actions distinctes auraient duplique la declaration, le verrou et l allocation.
+            return {
+                "action": "squad_shoot",
+                "target_slot": action_int - SQUAD_ACTION_SHOOT_INDIRECT_SLOT_BASE,
+                "squad_id": squad_id,
+                "shooting_type": SHOOTING_TYPE_INDIRECT,
             }
 
         if SQUAD_ACTION_CHARGE_SLOT_BASE <= action_int < (

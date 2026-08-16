@@ -104,12 +104,20 @@ def test_total_action_size():
     n'utilisent que des dimensions deja declarees). `L2` est le SEUL chantier du lot autorise a le
     bouger : il ajoute une famille d'actions entiere — choisir QUI activer — qui n'existait sous
     aucune forme. 1127 -> 1139.
+
+    ⚠️ 1139 -> 1159 le 2026-08-16, pour la MEME raison et avec la meme autorisation explicite :
+    le tir indirect 10.07 ajoute une famille d'actions entiere — choisir le TYPE DE TIR (10.02) —
+    qui n'existait sous aucune forme, le type etant jusque-la DERIVE de l'etat. Le
+    ré-entraînement qu'impose ce changement de dimension a ete acte par l'utilisateur avant
+    l'ecriture (option A). Les 20 slots s'inserent dans le bloc MICRO, donc tout le macro se
+    decale de 20 ; ce test est celui qui a pris la collision quand ils avaient d'abord ete poses
+    apres `ACTION_FIGHT_NO_TARGET`, la ou commencaient les intentions de zone.
     """
     assert mi.CHOICE_BASE == su.SQUAD_ACTION_SIZE + mi.MAX_OBJECTIVES * 3
     assert mi.OATH_SLOT_BASE == mi.CHOICE_BASE + mi.CHOICE_COUNT
     assert mi.ACTIVATE_SLOT_BASE == mi.OATH_SLOT_BASE + mi.OATH_SLOT_COUNT
     assert mi.TOTAL_ACTION_SIZE == mi.ACTIVATE_SLOT_BASE + mi.ACTIVATE_SLOT_COUNT
-    assert mi.TOTAL_ACTION_SIZE == 1139
+    assert mi.TOTAL_ACTION_SIZE == 1159
 
 
 def test_choice_then_oath_then_activate_slots_close_the_action_space():
@@ -141,6 +149,10 @@ def test_micro_action_ids_are_contiguous_and_unique():
         + list(mi.CHARGE_SLOTS)
         + list(mi.FIGHT_SLOTS)
         + [mi.ACTION_FIGHT_NO_TARGET]
+        # 10.07 (2026-08-16) : le tir indirect a ses propres slots, DANS le bloc micro. Les
+        # omettre ici ferait passer le pavage pour incomplet — et c'est précisément ce test qui
+        # a pris la collision avec `BASE_ZONE_INTENT` quand ils avaient été posés « après ».
+        + list(mi.SHOOT_INDIRECT_SLOTS)
     )
     assert len(ids) == len(set(ids)), "collision d'id d'action"
     assert sorted(ids) == list(range(su.SQUAD_ACTION_SIZE)), "les ids micro ne pavent pas [0, SIZE)"
