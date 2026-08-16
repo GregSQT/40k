@@ -724,6 +724,49 @@ def _build_eval_obs_normalizer_for_worker(
     return _normalize
 
 
+def _accumulate_behavior(
+    behavior_stats: Dict[str, Dict[str, Any]],
+    issue: str,
+    env: Any,
+    controlled_player: Any,
+) -> None:
+    """Collecte les metriques comportementales d'un episode termine (§4.D.4).
+
+    Appelee AVANT le prochain `env.reset()` : les shoot_stats sont reinitialisees au reset,
+    donc elles refletent encore L'EPISODE QUI VIENT DE SE TERMINER.
+
+    `controlled_player` peut valoir None si l'episode a ete tronque tres tot (backstop avec
+    step_count=0) — dans ce cas on saute le profil pour cet episode.
+    """
+    if controlled_player is None:
+        return
+    player = int(controlled_player)
+    gs = env.engine.game_state if hasattr(env, "engine") else {}
+
+    # VP de l'agent a la fin de cet episode.
+    vp_dict = gs.get("victory_points") or {}
+    ep_vp = float(vp_dict.get(player, 0))
+
+    # Zones tenues par l'agent.
+    controllers = gs.get("objective_controllers") or {}
+    ep_zones = sum(1 for v in controllers.values() if v == player)
+
+    # Stats de tir de l'agent (ai_shoot_*) — reinitialisees au prochain reset.
+    shoot = env.get_shoot_stats() if hasattr(env, "get_shoot_stats") else {}
+    ep_ai_shoot_opp = int(shoot.get("ai_shoot_opportunities", 0))
+    ep_ai_shoot_act = int(shoot.get("ai_shoot_actions", 0))
+
+    bucket = behavior_stats.setdefault(issue, {
+        "vp": 0.0, "zones_held": 0.0,
+        "ai_shoot_opportunities": 0, "ai_shoot_actions": 0, "count": 0,
+    })
+    bucket["vp"] += ep_vp
+    bucket["zones_held"] += ep_zones
+    bucket["ai_shoot_opportunities"] += ep_ai_shoot_opp
+    bucket["ai_shoot_actions"] += ep_ai_shoot_act
+    bucket["count"] += 1
+
+
 def _episode_seed(base_seed: int, bot_name: str, scenario_idx: int, ep_idx: int) -> int:
     """Seed déterministe par (bot, scenario, épisode). Reproductible entre exécutions."""
     key = f"{bot_name}:{scenario_idx}:{ep_idx}"
@@ -854,6 +897,10 @@ def _eval_worker_task(
     # « 0 troncature » — un feu vert faux, la classe de defaut que V11 §0.61 existe pour fermer.
     # Ces episodes ne sont PAS des episodes d'entrainement : ils ne touchent pas `episode_count`.
     truncations: List[Dict[str, Any]] = []
+    # §4.D.4 : profil comportemental ventile par issue (win/draw/loss).
+    # Structure : {issue: {metric: total, "count": n}}. Consomme dans l'agregation puis dans
+    # metrics_tracker.log_behavioral_profile pour publier sous bot_eval/profile/<bot>/<metric>.
+    behavior_stats: Dict[str, Dict[str, Any]] = {}
     # Faction jouee par l'agent, relevee A CHAQUE episode : un roster tire au sort peut
     # changer de faction d'un reset a l'autre au sein d'une meme tache.
     faction_stats: Dict[str, Dict[str, int]] = {}
@@ -974,6 +1021,9 @@ def _eval_worker_task(
             })
             draws += 1
             _count_episode(episode_faction, episode_roster_ids, episode_seat, won=False)
+            # §4.D.4 : profil comportemental pour cet episode (truncate = draw).
+            ep_controlled = info.get("controlled_player") if info else None
+            _accumulate_behavior(behavior_stats, "draw", env, ep_controlled)
             if progress_callback is not None:
                 progress_callback()
             continue
@@ -989,25 +1039,29 @@ def _eval_worker_task(
         )
         if winner == controlled_player:
             wins += 1
+            ep_issue = "win"
         elif winner == -1:
             draws += 1
+            ep_issue = "draw"
         else:
             losses += 1
+            ep_issue = "loss"
+        # §4.D.4 : profil comportemental pour cet episode.
+        _accumulate_behavior(behavior_stats, ep_issue, env, controlled_player)
         if progress_callback is not None:
             progress_callback()
 
-    shoot_stats = env.get_shoot_stats() if hasattr(env, "get_shoot_stats") else {}
     env.close()
     return {
         "wins": wins, "losses": losses, "draws": draws,
         "truncations": truncations,
         "failed_episodes": 0,
-        "shoot_stats": shoot_stats,
         "bot_name": task["bot_name"],
         "scenario_name": task["scenario_name"],
         "faction_stats": faction_stats,
         "seat_stats": seat_stats,
         "roster_stats": roster_stats,
+        "behavior_stats": behavior_stats,
     }
 
 
@@ -1047,6 +1101,8 @@ def _failed_task_result(
         # `roster_stats[side]` par require_key, donc les deux cotes doivent exister meme vides,
         # sans quoi le premier timeout tuerait le run.
         "roster_stats": {side: {} for side in ROSTER_SIDES},
+        # Aucun episode joue : aucun profil comportemental a agréger (§4.D.4).
+        "behavior_stats": {},
         **cause,
     }
 
@@ -1643,10 +1699,24 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
         results[f"{bn}_wins"] = wins
         results[f"{bn}_losses"] = losses
         results[f"{bn}_draws"] = draws
-        results[f"{bn}_shoot_stats"] = [
-            r.get("shoot_stats") for r in bot_results
-            if r.get("shoot_stats")
-        ]
+    # §4.D.4 : profil comportemental agrege par bot, ventile par issue (win/draw/loss).
+    # Chaque tache produit un {issue: {metric: total, "count": n}} pour son bot ;
+    # on additionne les totaux ici, la moyenne reste calculee en aval (metrics_tracker).
+    behavioral_profile: Dict[str, Dict[str, Dict[str, Any]]] = {}
+    for bn in active_bot_names:
+        bot_results_for_bn = [r for r in results_list if r.get("bot_name") == bn]
+        merged: Dict[str, Dict[str, Any]] = {}
+        for r in bot_results_for_bn:
+            for issue, bucket in (r.get("behavior_stats") or {}).items():
+                m = merged.setdefault(issue, {
+                    "vp": 0.0, "zones_held": 0.0,
+                    "ai_shoot_opportunities": 0, "ai_shoot_actions": 0, "count": 0,
+                })
+                for k in ("vp", "zones_held", "ai_shoot_opportunities", "ai_shoot_actions", "count"):
+                    m[k] = m.get(k, 0) + bucket.get(k, 0)
+        if merged:
+            behavioral_profile[bn] = merged
+    results["behavioral_profile"] = behavioral_profile
 
     # Troncatures rencontrees pendant CETTE evaluation, toutes taches confondues. Le moteur pose
     # `winner = -1` sur une troncature, donc sans cette remontee elle se comptait en NUL et

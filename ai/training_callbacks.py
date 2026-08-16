@@ -64,12 +64,17 @@ from config_loader import get_config_loader
 # optimise n'est plus un holdout.
 from ai.bot_registry import (  # noqa: E402
     ALL_BOT_KEYS as ALL_BOT_NAMES,
+    BENCHMARK_BOT_KEYS,
     BOT_DISPLAY_NAMES,
     HOLDOUT_BOT_KEYS,
+    SEALED_HOLDOUT_KEYS,
     SELECTION_BOT_KEYS as SELECTION_BOT_NAMES,
 )
 
-HOLDOUT_BOT_NAMES = frozenset(HOLDOUT_BOT_KEYS)
+# HOLDOUT_BOT_NAMES inclut a la fois BENCHMARK et SEALED_HOLDOUT :
+# ni l'un ni l'autre ne pilote combined/worst_bot/selection (V11 §10.5).
+# Seule difference : les benchmarks CAN gater via benchmark_floor (§4.D).
+HOLDOUT_BOT_NAMES = frozenset(BENCHMARK_BOT_KEYS) | frozenset(SEALED_HOLDOUT_KEYS)
 
 
 def selection_worst_bot(scores):
@@ -1356,7 +1361,9 @@ class BotEvaluationCallback(BaseCallback):
                  show_eval_progress: bool = False,
                  async_eval_enabled: bool = True,
                  early_stopping_patience: int = 0,
-                 save_best_min_episodes: int = 0):
+                 save_best_min_episodes: int = 0,
+                 model_gating_min_benchmark_floor: float = 0.0,
+                 stop_on_no_generalization: int = 0):
         super().__init__(verbose)
         if not training_config_name or not rewards_config_name:
             raise ValueError("BotEvaluationCallback requires training_config_name and rewards_config_name")
@@ -1498,6 +1505,21 @@ class BotEvaluationCallback(BaseCallback):
         self.gating_history: List[Dict[str, Any]] = []
         self.best_gating_criteria_mean: Optional[float] = None
         self.thresholds_ever_passed = False
+        # §4.D : plancher benchmark et detecteur de non-generalisation.
+        # 0.0 = plancher desarme ; 0 = detecteur desarme.
+        if not 0.0 <= float(model_gating_min_benchmark_floor) <= 1.0:
+            raise ValueError(
+                f"model_gating_min_benchmark_floor must be between 0.0 and 1.0 "
+                f"(got {model_gating_min_benchmark_floor})"
+            )
+        self.model_gating_min_benchmark_floor = float(model_gating_min_benchmark_floor)
+        if not isinstance(stop_on_no_generalization, int) or stop_on_no_generalization < 0:
+            raise ValueError(
+                f"stop_on_no_generalization must be a non-negative integer "
+                f"(got {stop_on_no_generalization!r})"
+            )
+        self.stop_on_no_generalization = int(stop_on_no_generalization)
+        self.non_generalizing_consecutive = 0
         self.gate_display_state = gate_display_state
         if self.gate_display_state is not None:
             self.gate_display_state["label"] = "Gate 🧱"
@@ -1650,7 +1672,43 @@ class BotEvaluationCallback(BaseCallback):
                 float(require_present(self.model_gating_min_vs_control, "model_gating_min_vs_control")),
             ),
         ]
+        # 5e check : plancher benchmark (§4.D). 0.0 = desarme.
+        benchmark_floor_pass = True
+        benchmark_keys_present = [k for k in BENCHMARK_BOT_KEYS if k in results]
+        if self.model_gating_min_benchmark_floor > 0.0 and benchmark_keys_present:
+            benchmark_floor = min(float(results[k]) for k in benchmark_keys_present)
+            benchmark_floor_pass = benchmark_floor >= self.model_gating_min_benchmark_floor
+            checks.append((
+                "benchmark_floor",
+                benchmark_floor,
+                self.model_gating_min_benchmark_floor,
+            ))
         gate_pass = all(actual >= threshold for _, actual, threshold in checks)
+        # Detecteur de non-generalisation persistante (§4.D).
+        # Detecte un modele qui progresse en selection mais reste en dessous du plancher benchmark.
+        if (
+            self.stop_on_no_generalization > 0
+            and self.model_gating_min_benchmark_floor > 0.0
+            and benchmark_keys_present
+        ):
+            benchmark_floor_current = min(float(results[k]) for k in benchmark_keys_present)
+            combined_improving = (
+                self.best_gating_criteria_mean is None
+                or combined_score > (self.best_gating_criteria_mean or 0.0)
+            )
+            if not benchmark_floor_pass and combined_improving:
+                self.non_generalizing_consecutive += 1
+                if self.non_generalizing_consecutive >= self.stop_on_no_generalization:
+                    print(
+                        f"\n🛑 Non-generalisation detectee : benchmark_floor={benchmark_floor_current:.3f} "
+                        f"< {self.model_gating_min_benchmark_floor:.3f} pendant "
+                        f"{self.non_generalizing_consecutive} evaluations consecutives "
+                        f"(stop_on_no_generalization={self.stop_on_no_generalization})"
+                    )
+                    self.should_stop_early = True
+            else:
+                self.non_generalizing_consecutive = 0
+
         criteria_mean = float(np.mean([combined_score, worst_bot_score, worst_scenario_combined]))
         has_improved_mean = False
         if self.best_gating_criteria_mean is None or criteria_mean > self.best_gating_criteria_mean:
@@ -2108,6 +2166,19 @@ class BotEvaluationCallback(BaseCallback):
                     require_key(results, f'{_side}_roster_bot_win_rates'),
                     step=int(eval_marker),
                 )
+            # §4.D.4 : profil comportemental par adversaire (VP, zones, pertes, charges,
+            # tirs — ventiles par issue). Zero episode supplementaire : les donnees sont
+            # collectees au fil des episodes d'evaluation normaux (bot_evaluation.py).
+            if "behavioral_profile" in results:
+                self.metrics_tracker.log_behavioral_profile(
+                    results["behavioral_profile"], step=int(eval_marker)
+                )
+            # benchmark_floor dans 00_critical/ (§4.D).
+            bk_present = [k for k in BENCHMARK_BOT_KEYS if k in results]
+            if bk_present:
+                bench_floor = min(float(results[k]) for k in bk_present)
+                bench_mean = float(sum(results[k] for k in bk_present) / len(bk_present))
+                self.metrics_tracker.log_benchmark_scores(bench_floor, bench_mean, step=int(eval_marker))
 
         self._log_scenario_scores(results)
 

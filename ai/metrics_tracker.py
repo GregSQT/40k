@@ -38,7 +38,7 @@ from typing import Any, Deque, Dict, List, Optional, Protocol, Sequence, Tuple, 
 from shared.data_validation import require_key
 # SOURCE UNIQUE des noms de bots (cf. l'en-tete de `ai/bot_registry.py`) : ce module portait la
 # QUATRIEME table du depot, ecrite a la main et restee sur le panel d'origine.
-from ai.bot_registry import ALL_BOT_KEYS, SELECTION_BOT_KEYS
+from ai.bot_registry import ALL_BOT_KEYS, BENCHMARK_BOT_KEYS, SELECTION_BOT_KEYS
 from ai.truncation_log import TruncationLog, agent_log_dir
 from engine.action_decoder import ActionDecoder
 from engine.w40k_core import CHARGE_DISTANCE_MEASURES
@@ -2097,6 +2097,47 @@ class W40KMetricsTracker:
                 self.writer.add_scalar(
                     f'bot_eval/seat/{seat}/vs_{bot_name}', float(win_rate), x
                 )
+
+    def log_benchmark_scores(
+        self,
+        benchmark_floor: float,
+        benchmark_mean: float,
+        step: Optional[int] = None,
+    ) -> None:
+        """benchmark_floor (min des trois) et benchmark_mean dans 00_critical/ (§4.D)."""
+        x = step if step is not None else self.episode_count
+        self.writer.add_scalar("bot_eval/benchmark_floor", float(benchmark_floor), x)
+        self.writer.add_scalar("bot_eval/benchmark_mean", float(benchmark_mean), x)
+        self.writer.add_scalar("00_critical/d_benchmark_floor", float(benchmark_floor), x)
+
+    def log_behavioral_profile(
+        self,
+        profile: Dict[str, Dict[str, Dict[str, Any]]],
+        step: Optional[int] = None,
+    ) -> None:
+        """Profile comportemental par adversaire et par issue (§4.D.4).
+
+        Profile structure : {bot_name: {issue_label: {metric: value}}}
+        Publie sous `bot_eval/profile/<bot>/<metric>` (issue non visible en TensorBoard —
+        la ventilation se fait dans la serie temporelle par le marqueur d'episode).
+        Chaque (bot, metric) produit sa propre courbe ; les issues sont additionnees.
+        """
+        x = step if step is not None else self.episode_count
+        if not isinstance(profile, dict):
+            return
+        for bot_name, issues_data in profile.items():
+            if not isinstance(issues_data, dict):
+                continue
+            aggregated: Dict[str, float] = {}
+            for issue_label, metrics in issues_data.items():
+                if not isinstance(metrics, dict):
+                    continue
+                for metric, value in metrics.items():
+                    if not isinstance(value, (int, float)):
+                        continue
+                    aggregated[metric] = aggregated.get(metric, 0.0) + float(value)
+            for metric, value in aggregated.items():
+                self.writer.add_scalar(f"bot_eval/profile/{bot_name}/{metric}", value, x)
 
     def log_holdout_split_metrics(self, split_metrics: Dict[str, float]) -> None:
         """Log holdout split aggregates to TensorBoard."""

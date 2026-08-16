@@ -42,9 +42,18 @@ LEGACY_BOT_KEYS = ("greedy", "defensive", "control", "adaptive", "value_trade")
 #: Panel refondu : six styles orthogonaux (`ai/bot_doctrines.py`).
 DOCTRINE_BOT_KEYS = ("racer", "endgame", "alpha", "attrition", "decapitation", "scorer")
 
-#: Adversaires RESERVES a l'evaluation (V11 §10.5) : mesures et affiches, mais exclus de TOUT
-#: signal de selection de modele — un holdout sur lequel la selection optimise n'en est plus un.
-HOLDOUT_BOT_KEYS = ("tactical",)
+#: Trois benchmarks de holdout a mecanisme de decision DIFFERENT (§4.C Bot_refactor.md).
+#: Exclus de SELECTION (ne pilotent ni combined ni worst_bot) mais CAN gate via benchmark_floor.
+#: Aucun de leurs parametres ne vient de config/bot_movement_weights.json.
+BENCHMARK_BOT_KEYS = ("reference_balanced", "reference_denial", "reference_reactive")
+
+#: Holdout SCELLE : mesure et affiche, exclu de TOUT signal de selection, ne gate JAMAIS.
+#: « tactical » : son profil de witness value est gele depuis le 2026-08-04 (V11 §10.5).
+SEALED_HOLDOUT_KEYS = ("tactical",)
+
+#: Compat-alias : HOLDOUT_BOT_KEYS designe desormais les SEALED seulement.
+#: Les consommateurs doivent migrer vers SEALED_HOLDOUT_KEYS ou BENCHMARK_BOT_KEYS.
+HOLDOUT_BOT_KEYS = SEALED_HOLDOUT_KEYS
 
 #: Nom de classe reel, pour les tags TensorBoard et les resumes. Table EXPLICITE : un
 #: `''.join(part.capitalize()) + 'Bot'` rendrait le bon nom aujourd'hui et divergerait en
@@ -63,17 +72,25 @@ BOT_DISPLAY_NAMES: Dict[str, str] = {
     "attrition": "AttritionBot",
     "decapitation": "DecapitationBot",
     "scorer": "ScorerBot",
+    # Benchmarks §4.C
+    "reference_balanced": "ReferenceBalancedBot",
+    "reference_denial": "ReferenceDenialBot",
+    "reference_reactive": "ReferenceReactiveBot",
 }
 
 #: Tous les adversaires mesurables, `random` compris (il n'est pas dans `bot_classes()`, cf. sa
 #: docstring, mais il produit bien une ligne de resultat).
-ALL_BOT_KEYS = frozenset(("random",) + LEGACY_BOT_KEYS + DOCTRINE_BOT_KEYS + HOLDOUT_BOT_KEYS)
+ALL_BOT_KEYS = frozenset(
+    ("random",) + LEGACY_BOT_KEYS + DOCTRINE_BOT_KEYS + BENCHMARK_BOT_KEYS + SEALED_HOLDOUT_KEYS
+)
 
 #: Adversaires qui PILOTENT la selection de modele : tous sauf les holdouts (V11 §10.5). La
 #: partition vit ICI et non chez ses consommateurs : `ai/training_callbacks.py` (gating, score
 #: robuste) et `ai/metrics_tracker.py` (worst_bot_score de TensorBoard) la refaisaient chacun de
 #: leur cote, et le second le faisait avec une liste ECRITE A LA MAIN restee sur le panel d'origine.
-SELECTION_BOT_KEYS = ALL_BOT_KEYS - frozenset(HOLDOUT_BOT_KEYS)
+#: Pilotent combined + worst_bot : tout sauf BENCHMARK + SEALED.
+#: Les benchmarks sont mesures et peuvent GATER (benchmark_floor) mais ne pilotent PAS combined.
+SELECTION_BOT_KEYS = ALL_BOT_KEYS - frozenset(BENCHMARK_BOT_KEYS) - frozenset(SEALED_HOLDOUT_KEYS)
 
 
 def bot_display_name(bot_key: str) -> str:
@@ -108,6 +125,9 @@ def bot_classes() -> Dict[str, Any]:
         AdaptiveBot, ControlBot, DefensiveBot, GreedyBot, TacticalBot, ValueTradeBot,
     )
     from ai.bot_doctrines import DOCTRINE_BOTS
+    from ai.benchmark_bots import (
+        ReferenceBalancedBot, ReferenceDenialBot, ReferenceReactiveBot,
+    )
 
     return {
         # ─ Panel GELE, condamne apres la campagne de correspondance ─
@@ -116,10 +136,14 @@ def bot_classes() -> Dict[str, Any]:
         "control": ControlBot,
         "adaptive": AdaptiveBot,
         "value_trade": ValueTradeBot,
-        # V11 §10.5 : holdout d'evaluation — JAMAIS dans bot_training.ratios.
+        # V11 §10.5 : holdout SCELLE — JAMAIS dans bot_training.ratios, ne gate JAMAIS.
         "tactical": TacticalBot,
         # ─ Panel refondu : six styles orthogonaux sur un plancher de competence commun ─
         **DOCTRINE_BOTS,
+        # ─ Benchmarks §4.C : holdout a mecanisme DIFFERENT, peuvent gater via benchmark_floor ─
+        "reference_balanced": ReferenceBalancedBot,
+        "reference_denial": ReferenceDenialBot,
+        "reference_reactive": ReferenceReactiveBot,
     }
 
 

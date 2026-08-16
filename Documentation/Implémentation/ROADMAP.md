@@ -479,6 +479,7 @@ mesure, et c'est assumé (§0.14).
    accompagnait l'ancienne valeur.
 8. **§0.59 — Phase 2 self-play** (`--append x1_selfplay`) — livré, JAMAIS exécuté ; le premier
    run est aussi son premier test d'intégration. → [`1_Agent/V11_agent_rework.md`](1_Agent/V11_agent_rework.md) §0.59
+   ✅ **Réorganisation metrics par phase livrée le 2026-08-16** : `ai/metrics_tracker.py` restructuré avec compteurs de phase séparés ; compteurs de charges ajoutés dans `engine/w40k_core.py` (nombres de charges déclarées/résolues par épisode) ; tests de verrouillage dans `test_episode_charge_counters.py`.
 9. **Refonte du panel de bots** (ouvert le 2026-08-11) — six styles, échelle de difficulté.
    → [`A_faire/bots_refonte_panel.md`](A_faire/bots_refonte_panel.md)
    🟠 **État au 2026-08-12** : six styles livrés, modèle de dégâts corrigé à la racine
@@ -545,6 +546,7 @@ mesure, et c'est assumé (§0.14).
    moyenne, K=12 → **5,7 %** ; pic à 12 % dans le scénario `exposed` (my_range << enemy_range).
    RacerBot et AlphaStrikeBot exclus automatiquement (w_fire=w_risk=0, shortlist inactive).
    Couvert par `tests/unit/scripts/test_bench_shortlist.py` (8 tests : 4 invariants).
+   ✅ **`AttritionBot.wants_charge` corrigé le 2026-08-16** : l'appel manquant à `super()` supprimait le test des capacités communes (`late_game`, `preservation`) dans la décision de charge ; 3 tests de verrouillage ajoutés (F1/F2/F4) dans `test_bot_capabilities_neutral.py`.
    **Restent** : le réglage de `w_contest`/`w_crowd` (posés, non réglés), l'étape 7
    (correspondance puis suppression des cinq anciens), l'étape 8 rejouée après réglage.
    ⚠️ Les chiffres des §8/§9 du doc de chantier sont **à rejouer** : échantillons insuffisants et
@@ -653,6 +655,7 @@ Prêt à démarrer, conception close, aucun arbitrage en attente :
   `gain = 0` reproduit le comportement exact (verrou D4) ; jitter SHA256 par épisode via
   `apply_episode_jitter`, aucun run d'entraînement requis, 82 tests verrouillés.
   Prix A+B = **rejouer la ligne de base du panel** (`combined = 0,7433`, `racer = 0,630`).
+  ✅ **C+D livrés le 2026-08-16** : `ai/benchmark_bots.py` (nouveau — 3 bots `reference_*` à mécanisme intention-macro-puis-destination, excl. de `combined`/`worst_bot`) ; partition 4 familles dans `bot_registry` (`BENCHMARK_BOT_KEYS`, `SEALED_HOLDOUT_KEYS`, `SELECTION_BOT_KEYS`) ; `benchmark_floor` gate (5ᵉ check dans `_evaluate_model_gate`) ; détecteur `stop_on_no_generalization` ; profil comportemental par adversaire ventilé par issue (VP, zones, tirs — collecté avant `env.reset()`, zéro épisode supplémentaire). Courbe `00_critical/d_benchmark_floor` TensorBoard. 40 tests unitaires (test_benchmark_bots, test_benchmark_gate, test_behavioral_profile, test_bot_registry_names mis à jour).
   **C** trois benchmarks à mécanisme de décision DIFFÉRENT (intention macro puis destination, au
   lieu de la somme pondérée des six styles), jamais vus à l'entraînement : `reference_balanced`
   (polyvalence), `reference_denial` (sécurisation du score), `reference_reactive`
