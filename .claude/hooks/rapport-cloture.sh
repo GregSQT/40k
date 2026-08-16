@@ -54,7 +54,7 @@ ARGS_NON_CHEMIN = {"low", "medium", "high", "xhigh", "max", "ultra"}
 RACINE = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 CLAUDE_MD = os.path.join(RACINE, "CLAUDE.md")
 LIGNE_SECTIONS = re.compile(r"^\s*SECTIONS EXIGÉES\s*:\s*(.+)$", re.MULTILINE)
-ITEM_SECTION = re.compile(r"`([A-ZÉÈÀÂÎÔÛÇ]+)`\s*=\s*(toujours|code)")
+ITEM_SECTION = re.compile(r"`([A-ZÉÈÀÂÎÔÛÇ ]+)`\s*=\s*(toujours|code)")
 LIGNE_CODE = re.compile(r"^\s*FICHIERS COMPTÉS COMME CODE\s*:\s*(.+)$", re.MULTILINE)
 ITEM_CODE = re.compile(r"`([^`\s]+)`")
 # Une fence markdown : au moins trois backticks, puis l'éventuel langage. Les deux groupes servent

@@ -113,7 +113,7 @@ Avant la PREMIÈRE écriture de code : vérifier git status --short.
 Tree propre → EnterWorktree directement, nom décrivant le sujet.
 Tree sale → signaler (les modifications locales ne suivent pas le worktree) et attendre.
 Lecture/analyse/doc seule → pas de worktree.
-Fin : commit → ExitWorktree "keep" → merge dans main → supprimer worktree + branche.
+Fin : à la clôture de chaque chantier, sans attendre de demande : commit → ExitWorktree "keep" → merge dans main → supprimer worktree + branche → mettre à jour ROADMAP → déplacer le doc du chantier dans Implémenté/.
 Jamais remove avant merge. discard_changes: true interdit.
 Training en cours → ne toucher aucun JSON de config/ (relu à chaud par les évaluations).
 
@@ -242,48 +242,57 @@ RAPPORT FINAL
 
 Structure obligatoire, dans cet ordre exact :
 
-1. EN-TÊTE (toujours, 1–3 lignes max) :
-STATUT : Livré | Bloqué — <raison en 5 mots> | Arbitrage requis — <sujet en 5 mots>
-À TOI : <action concrète attendue de l'utilisateur> | rien
+1. EN-TÊTE (seulement si Bloqué ou Arbitrage requis) :
+STATUT : Bloqué — <raison en 5 mots> | Arbitrage requis — <sujet en 5 mots>
+À TOI : <action concrète attendue de l'utilisateur>
 
-2. ARBITRAGE / PROMPTS (immédiatement après l'en-tête, seulement si présents) — voir section dédiée.
+2. ARBITRAGE (immédiatement après l'en-tête, seulement si présent) — voir section dédiée.
 
-3. FICHIERS MODIFIÉS — pour CHAQUE fichier modifié :
-[nom.py](file:///home/greg/40k/chemin/nom.py) — une phrase changement + raison, sans code.
+3. MODIFICATIONS — pour CHAQUE fichier modifié (chemin relatif, sans lien markdown) :
+MODIFICATIONS :
+chemin/relatif/nom.py — une phrase changement + raison, sans code.
 UNE PHRASE = une proposition principale, sans sous-clauses enchaînées par virgules ou parenthèses. Plusieurs fichiers sont autorisés s'ils sont prévus par le prompt ou T2 ; sinon STOP avant d'ajouter le fichier, le nommer, expliquer pourquoi il est nécessaire et attendre.
 
-4. SECTIONS TECHNIQUES (dans cet ordre) :
+4. SECTIONS TECHNIQUES (chacune précédée d'une ligne ---) :
 
+---
 LU : <fichiers/appelants/miroirs où quelque chose a été trouvé ou décidé> — toujours.
 
+---
 JUMEAU : <grep> → <n> hits — toujours ; 0 hit valide ; détail (traité/écarté + raison) seulement si hits > 0.
 
+---
 RÉFS : <tests/docs/front/configs mis à jour ou volontairement laissés inchangés> — seulement si pertinent.
 
+---
 🟢 COUVERTURE : aucun trou vu ou 🔴 COUVERTURE : <trous vus> — si code modifié ; uniquement trous VUS non traités, jamais tests écrits.
 
+---
 RELIRE — si code modifié.
 Pas de verdict vague (optimal, tout propre, doc à jour) ; uniquement des faits contrôlables. Validation locale ≠ verdict global.
+
+---
+ÉTAT CHANTIER : Tests <s> · Commité <s> · Mergé <s> · ROADMAP <s> · <doc>.md→Implémenté/ <s>
+Symboles : ✅ fait · 🟡 à faire · 🔴 erreur/bloqué. Omis si aucun code écrit.
+
+SUITE : Tout est terminé
+— ou —
+SUITE :
+→ Ce prompt : <actions 🟡 restantes>
+→ Prochain prompt : "<prompt autonome : observation + fichier:ligne + attendu + périmètre>"
+
+Prochain prompt seulement pour : sous-tâche objective hors livraison, bug PROUVÉ hors périmètre avec scénario d'échec, option recommandée d'un arbitrage.
+Suspicion non prouvée → une ligne dans LU, aucun prochain prompt. SUITE ne remplace jamais T2.
+Si analyse seule (aucun fichier modifié) : SUITE uniquement, avec une proposition d'action concrète.
 
 ARBITRAGE
 
 Tout vrai choix de conception/architecture/mécanisme se présente au format ARBITRAGE. Ne rien faire compte seulement si défendable ; épouvantail interdit. Interdit de recommander « le plus rapide », « petit diff » ou « A maintenant, B plus tard » pour reporter une dette. Un ARBITRAGE qui décrit du travail T2 faisable est une dette déguisée.
 Seulement pour vraie décision utilisateur ou vrai choix de conception à expliciter.
-Chaque sujet : titre ; problème observable en 2–4 phrases max, lisible sans code ; 2–3 options réelles de 1–2 lignes chacune avec gain + coût ; RECOMMANDATION : A/B/C + raison long terme en ≤3 phrases.
+Chaque sujet : titre ; problème observable en 2–4 phrases max, lisible sans code ; TOUJOURS 3 options réelles de 1–2 lignes chacune avec gain + coût ; RECOMMANDATION : A/B/C + raison long terme argumentée en ≤3 phrases.
 Pas de tableau, bloc code, sous-liste, jargon/noms de fonction inutiles ni chiffres de profiling dans le problème.
 Une seule option réelle = décision, pas arbitrage. Jamais d'arbitrage pour reporter du travail T2 faisable.
 
-PROMPTS
-
-Seulement :
-
-sous-tâche objective réellement hors livraison ;
-
-bug PROUVÉ hors périmètre avec scénario d'échec ;
-
-arbitrage, avec prompt pour l'option recommandée.
-Chaque prompt est autonome : observation + fichier:ligne + attendu + périmètre ; interdit comme vu plus haut / le fichier en question.
-Suspicion non prouvée → une ligne dans LU, aucun prompt. PROMPTS ne remplace jamais T2.
 
 RELIRE
 
@@ -305,6 +314,6 @@ HOOK RAPPORT
 .claude/hooks/rapport-cloture.sh vérifie sections, forme RELIRE, chemins absolus et blocs fermés ; rien dans un bloc ne compte comme section.
 Source unique : =toujours dès qu'un fichier est modifié ; =code seulement si code modifié.
 Ces deux lignes sont la CONFIGURATION du hook, qui les LIT ici : format strict, backticks compris.
-SECTIONS EXIGÉES : `STATUT`=toujours, `LU`=toujours, `JUMEAU`=toujours, `COUVERTURE`=code, `RELIRE`=code
+SECTIONS EXIGÉES : `LU`=toujours, `JUMEAU`=toujours, `COUVERTURE`=code, `RELIRE`=code, `ÉTAT CHANTIER`=code, `SUITE`=toujours
 FICHIERS COMPTÉS COMME CODE : `.py`, `.pyi`, `.sh`, `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`, `CLAUDE.md`, `settings.json`
 Le hook s'exécute au PROMPT SUIVANT ; s'il réclame un rapport, il concerne le tour précédent : le rendre EN TÊTE sans relancer de travail.
