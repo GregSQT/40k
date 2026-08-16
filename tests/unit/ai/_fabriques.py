@@ -257,6 +257,7 @@ def entete_step_log(
     ez_vertical_inches: float | None = 5.0,
     metric_engagement: str = "hex",
     metric_ranged: str = "euclidean",
+    log_grammar: int | None = None,
 ) -> str:
     """Entête complet d'un step.log à épisode unique, pour les tests qui appellent `parse_step_log`.
 
@@ -269,6 +270,12 @@ def entete_step_log(
 
     `objectives=None` omet la ligne Objectives : les épisodes sans ce marqueur ne requièrent pas
     de snapshot `T<n> OBJECTIVE CONTROL:`.
+
+    `log_grammar=None` (défaut) OMET la ligne `Log grammar:` — le lecteur lève alors la version 1
+    et prend ses chemins de repli. C'est le régime historique de cette fabrique, gardé tel quel :
+    ~25 fichiers en dépendent. Le renseigner produit un journal qui DÉCLARE sa grammaire, seul
+    moyen d'exercer les branches que le vrai StepLogger emprunte en production (il écrit toujours
+    la ligne). Sans ce paramètre, ces branches-là n'étaient atteintes par aucun test.
     """
     ez = 2 * inches_to_subhex
     rules: Dict[str, str] = {
@@ -293,6 +300,7 @@ def entete_step_log(
         obj = objectives or ";".join(f"(150,{r})" for r in range(150, 156))
         objectives_line = f"[10:00:00] Objectives: rect b NW:{obj}\n"
     rosters_line = f"[10:00:00] Rosters: {rosters}\n" if rosters else ""
+    grammar_line = "" if log_grammar is None else f"[10:00:00] Log grammar: {log_grammar}\n"
     return (
         "=== STEP-BY-STEP ACTION LOG ===\n"
         "================================================================================\n\n"
@@ -304,6 +312,9 @@ def entete_step_log(
         f"{objectives_line}"
         f"[10:00:00] Board: {board} inches_to_subhex={inches_to_subhex} hex_radius={hex_radius} margin={margin}\n"
         f"[10:00:00] Run rules: {rules_txt}\n"
+        # Même position que chez le producteur (`StepLogger.log_episode_start` : juste après
+        # `Run rules:`), pour que le lecteur voie l'entête dans l'ordre réel.
+        f"{grammar_line}"
         f"{units}"
         "[10:00:00] === ACTIONS START ===\n"
         f"{body}"

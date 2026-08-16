@@ -30,6 +30,7 @@ import pytest
 from engine.phase_handlers import shooting_handlers
 from engine.phase_handlers.fight_handlers import build_manual_fight_allocation
 from engine.phase_handlers.shared_utils import build_manual_shoot_allocation
+from ai.step_logger import LOG_GRAMMAR_VERSION
 from tests._state_invariants import turn_state_invariants
 from tests.unit.ai._fabriques import entete_step_log
 
@@ -52,6 +53,12 @@ OBJECTIVES = ";".join(f"(150,{r})" for r in range(150, 156))
 # qui ne déclare pas la règle = parse error). Il faut donc un profil qui la porte réellement.
 SUSTAINED_UNIT = "EradicatorHeavyBolter"
 SUSTAINED_WEAPON = "Heavy Bolter"
+
+# [CLOSE-QUARTERS] 24.07 : l'analyzer résout l'arme par son nom dans l'ARMURERIE, pas dans le
+# décor de test — une clé d'usage bâtie sur un nom qu'elle ne connaît pas ne serait jamais
+# incrémentée, et le test rendrait zéro sans rien prouver. `Sternguard Bolt Pistol` est le
+# second profil de tir du MÊME porteur que `WEAPON_NAME` et déclare réellement la règle.
+CQ_WEAPON = "Sternguard Bolt Pistol"
 
 
 def _uc(col, row, *, player, models=None):
@@ -249,7 +256,7 @@ def _step_log_line(tmp_path, gs, raw_log):
 
 
 def _analyzer_stats(tmp_path, engine_lines, *, unit_type=UNIT_TYPE, target_models=1,
-                    melee=False, units_advanced=False):
+                    melee=False, units_advanced=False, log_grammar=None):
     """Injecte la/les ligne(s) PRODUITE(S) PAR LE MOTEUR dans un step.log valide, et lance
     le vrai analyzer dessus.
 
@@ -261,6 +268,11 @@ def _analyzer_stats(tmp_path, engine_lines, *, unit_type=UNIT_TYPE, target_model
     `units_advanced=True` injecte une ligne MOVE ADVANCED pour Unit 1 avant les lignes de tir :
     cela peuple `state.units_advanced`, ce qui permet de valider le fallback grammaire < 4
     de la règle ASSAULT (shoot_handler.py : `shooter_id in state.units_advanced`).
+
+    `log_grammar` déclare la version de grammaire de l'entête. `None` (défaut) l'OMET, donc le
+    lecteur lève 1 et prend ses chemins de repli — le seul régime que ce fichier exerçait. La
+    renseigner à `LOG_GRAMMAR_VERSION` reproduit ce qu'écrit le vrai StepLogger, c'est-à-dire le
+    régime de PRODUCTION, où le token fait autorité (`_eligibility_rule_applied`).
     """
     import ai.analyzer as an
 
@@ -291,6 +303,7 @@ def _analyzer_stats(tmp_path, engine_lines, *, unit_type=UNIT_TYPE, target_model
             f"[10:00:00] Unit 1 ({unit_type}) P1: Starting position (-1,-1), HP_MAX=2 base=round/6\n"
             f"[10:00:00] Unit 101 (AssaultIntercessor) P2: Starting position (-1,-1), HP_MAX=2 base=round/6 {target_models_segment}\n"
         ),
+        log_grammar=log_grammar,
     ))
     return an.parse_step_log(str(log))
 
@@ -1399,6 +1412,93 @@ def test_analyzer_assault_fallback_absent_sans_advance(monkeypatch, tmp_path):
     assert sum(usage.values()) == 0, (
         "le fallback grammaire < 4 ne doit PAS compter ASSAULT si l'unité n'a pas avancé — "
         f"weapon_rule_usage[('ASSAULT', '{weapon_key}')] = {usage}"
+    )
+
+
+def test_analyzer_assault_fallback_absent_sans_regle_d_arme(monkeypatch, tmp_path):
+    """Contre-épreuve de l'AUTRE moitié du repli : unité AYANT avancé, arme SANS [ASSAULT].
+
+    Le repli a deux moitiés (`shooter_id in state.units_advanced` ET `'ASSAULT' in
+    weapon_rules_list`) et la paire de tests voisine n'en verrouillait qu'une : supprimer la
+    moitié « arme » du produit laissait toute la suite au vert, donc l'analyzer aurait pu
+    créditer ASSAULT à n'importe quelle arme d'une unité ayant avancé.
+
+    `Heavy Bolter` (EradicatorHeavyBolter) est le porteur : profil RÉEL de l'armurerie qui ne
+    déclare PAS ASSAULT. C'est le registre, pas le décor de test, qui alimente
+    `weapon_rules_list` — une arme inventée ne prouverait rien ici.
+    """
+    gs, raw_log = _engine_shoot_log(monkeypatch, [], [3, 4, 2], units_advanced=True,
+                                    unit_type=SUSTAINED_UNIT, weapon_name=SUSTAINED_WEAPON)
+    stats = _analyzer_stats(tmp_path, _step_log_line(tmp_path, gs, raw_log),
+                            unit_type=SUSTAINED_UNIT, units_advanced=True)
+
+    assert stats["parse_errors"] == [], stats["parse_errors"]
+    weapon_key = f"{SUSTAINED_WEAPON} ({SUSTAINED_UNIT})"
+    usage = stats["weapon_rule_usage"].get(("ASSAULT", weapon_key), {})
+    assert sum(usage.values()) == 0, (
+        "le repli ne doit PAS compter ASSAULT pour une arme qui ne le déclare pas, même si "
+        f"l'unité a avancé — weapon_rule_usage[('ASSAULT', '{weapon_key}')] = {usage}"
+    )
+    # VERT VACANT : l'unité a bien été vue comme ayant avancé, sinon la moitié « état » suffirait
+    # à expliquer le zéro et le test ne prouverait rien de la moitié « arme ».
+    assert stats["shots_after_advance"][1] == 1, stats["shots_after_advance"]
+
+
+@pytest.mark.parametrize("weapon_rule, detail_key, token, engine_kwargs", ELIGIBILITY_RULES,
+                         ids=_ELIGIBILITY_IDS)
+def test_analyzer_grammaire_4_compte_depuis_le_token(monkeypatch, tmp_path, weapon_rule,
+                                                     detail_key, token, engine_kwargs):
+    """RÉGIME DE PRODUCTION — le vrai StepLogger écrit toujours `Log grammar:`, donc le chemin
+    réellement emprunté par l'analyzer est la branche TOKEN, pas le repli.
+
+    Cette branche n'était atteinte par aucun test du dépôt : `entete_step_log` omettait la ligne
+    de grammaire, si bien que TOUTES les assertions analyzer de ce fichier tournaient en
+    grammaire 1. Neutraliser la branche token laissait la suite entière au vert — c'est-à-dire
+    qu'une panne du comptage sur les journaux d'entraînement réels ne se voyait nulle part.
+    """
+    weapon_name = CQ_WEAPON if weapon_rule == "CLOSE_QUARTERS" else WEAPON_NAME
+    gs, raw_log = _engine_shoot_log(monkeypatch, [weapon_rule], [3, 4, 2],
+                                    weapon_name=weapon_name, **engine_kwargs)
+    line = _step_log_line(tmp_path, gs, raw_log)
+    assert token in line, f"prémisse : le moteur doit poser {token} : {line}"
+
+    # AUCUN décor d'état injecté dans le journal (pas de ligne ADVANCED) : le token est alors la
+    # SEULE source possible du comptage. Un repli qui reprendrait la main ne trouverait rien.
+    stats = _analyzer_stats(tmp_path, line, log_grammar=LOG_GRAMMAR_VERSION)
+
+    assert stats["parse_errors"] == [], stats["parse_errors"]
+    weapon_key = f"{weapon_name} ({UNIT_TYPE})"
+    usage = stats["weapon_rule_usage"].get((weapon_rule, weapon_key), {})
+    assert sum(usage.values()) == 1, (
+        f"en grammaire {LOG_GRAMMAR_VERSION} le token fait autorité et doit compter un usage — "
+        f"weapon_rule_usage[('{weapon_rule}', '{weapon_key}')] = {usage}"
+    )
+
+
+@pytest.mark.parametrize("weapon_rule, detail_key, token, engine_kwargs", ELIGIBILITY_RULES,
+                         ids=_ELIGIBILITY_IDS)
+def test_analyzer_grammaire_4_ne_compte_rien_sans_token(monkeypatch, tmp_path, weapon_rule,
+                                                        detail_key, token, engine_kwargs):
+    """Contre-épreuve du régime de production : même arme, état neutre → le moteur ne pose pas
+    le token, donc l'analyzer ne compte rien.
+
+    Sans elle, un comptage inconditionnel en grammaire >= 4 passerait le test de présence.
+    """
+    weapon_name = CQ_WEAPON if weapon_rule == "CLOSE_QUARTERS" else WEAPON_NAME
+    neutre = {k: False for k in engine_kwargs}
+    gs, raw_log = _engine_shoot_log(monkeypatch, [weapon_rule], [3, 4, 2],
+                                    weapon_name=weapon_name, **neutre)
+    line = _step_log_line(tmp_path, gs, raw_log)
+    assert token not in line, f"prémisse : sans l'état, le moteur ne pose pas {token} : {line}"
+
+    stats = _analyzer_stats(tmp_path, line, log_grammar=LOG_GRAMMAR_VERSION)
+
+    assert stats["parse_errors"] == [], stats["parse_errors"]
+    weapon_key = f"{weapon_name} ({UNIT_TYPE})"
+    usage = stats["weapon_rule_usage"].get((weapon_rule, weapon_key), {})
+    assert sum(usage.values()) == 0, (
+        f"aucun token {token} sur la ligne : rien ne doit être compté — "
+        f"weapon_rule_usage[('{weapon_rule}', '{weapon_key}')] = {usage}"
     )
 
 
