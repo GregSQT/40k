@@ -9205,7 +9205,108 @@ def _unit_was_set_up_this_turn(game_state: Dict[str, Any], squad_id: str) -> boo
     return int(deployed_on_turn) == int(require_key(game_state, "turn"))
 
 
+#: 10.07 — planchers d echec du jet de touche NON MODIFIE. « An unmodified hit roll of 1-5 fails,
+#: unless your unit remained stationary this turn AND the target is visible to one or more
+#: friendly units, in which case an unmodified hit roll of 1-3 fails instead. »
+#: Ce sont des PLANCHERS, pas des seuils : ils se composent avec la CT par un `max` (cf.
+#: `attack_sequence._evaluate_roll`). 6 = « seul un 6 touche » ; 4 = « 1-3 echouent, puis la CT
+#: s applique normalement » — un BS 5+ touche donc toujours sur 5+, jamais sur 4+.
+INDIRECT_FAIL_BELOW = 6
+INDIRECT_FAIL_BELOW_SPOTTED = 4
+
 HEAVY_MOVED_THRESHOLD_INCHES = 3  # 24.16 clause 3 : « moved more than 3" this turn »
+
+
+def _squad_remained_stationary(game_state: Dict[str, Any], squad_id: str) -> bool:
+    """L escouade est-elle restee IMMOBILE ce tour (clause du plancher 4+ de 10.07) ?
+
+    ⚠️ « Remained stationary » est PLUS FORT que « n a pas fait d advance », qui conditionne
+    l eligibilite au tir indirect. Une unite qui a fait un mouvement normal de 1" est eligible a
+    10.07 mais n a PAS droit au plancher de 4+. Confondre les deux donnerait le meilleur seuil a
+    une unite qui s est repositionnee — le piege est nomme dans la spec du chantier.
+
+    MEME source que la clause 3 de [HEAVY] (`moved_distance_by_model`, distance de CHEMIN
+    accumulee par `commit_move`), pour que deux regles qui parlent du meme fait ne puissent pas
+    en avoir deux mesures. Seuil zero strict : tout deplacement enregistre ferme le 4+.
+    """
+    models_cache = require_key(game_state, "models_cache")
+    moved = require_key(game_state, "moved_distance_by_model")
+    squad_models = require_key(game_state, "squad_models")
+    for mid in squad_models.get(str(squad_id), []):  # get allowed (escouade morte = aucune fig)
+        if mid not in models_cache:
+            continue  # figurine detruite : elle ne tire plus, sa distance ne compte pas
+        if float(moved.get(mid, 0.0)) > 0.0:  # get allowed (absente = n a pas bouge)
+            return False
+    return True
+
+
+def _target_visible_to_a_friendly_unit(
+    game_state: Dict[str, Any], shooter_squad_id: str, target_sid: str
+) -> bool:
+    """La cible est-elle visible d au moins UNE unite amie (clause « spotter » de 10.07) ?
+
+    01.02 : « Friendly units and models are those in your army » — SANS exclusion de l unite
+    active. L unite qui tire compte donc comme son propre spotter, et c est teste en premier :
+    c est le cas le plus frequent et il evite de balayer l armee.
+
+    Cout : `compute_unit_los` est memoise PAR PAIRE dans un cache persistant, invalide de facon
+    ciblee par `_touch_unit_los` a chaque mouvement ou perte de figurine. Les paires
+    (unite amie, cible) sont deja chaudes — c est le balayage d eligibilite au tir qui les
+    remplit a chaque step. Ce predicat coute donc une dizaine de lectures de dict, pas un calcul
+    de ligne de vue.
+    """
+    from engine.phase_handlers.shooting_handlers import compute_unit_los
+
+    target_unit = get_unit_by_id(game_state, str(target_sid))
+    if target_unit is None:
+        return False
+    shooter_unit = get_unit_by_id(game_state, str(shooter_squad_id))
+    if shooter_unit is None:
+        return False
+    shooter_player = shooter_unit.get("player")  # get allowed
+    ordered = [shooter_unit] + [
+        u for u in require_key(game_state, "units")
+        if u.get("player") == shooter_player  # get allowed
+        and str(u.get("id")) != str(shooter_squad_id)  # get allowed
+    ]
+    for unit in ordered:
+        if not is_unit_alive(str(require_key(unit, "id")), game_state):
+            continue
+        if compute_unit_los(game_state, unit, target_unit)["can_see"]:
+            return True
+    return False
+
+
+def indirect_fire_fail_below(
+    game_state: Dict[str, Any],
+    shooter_squad_id: str,
+    target_sid: str,
+    weapon: Dict[str, Any],
+) -> Optional[int]:
+    """Plancher d echec impose par 10.07 a CETTE attaque, ou None si la regle ne joue pas.
+
+    Deux conditions, toutes deux necessaires : l unite resout un tir INDIRECT (le type est choisi
+    a l activation, 10.02) ET l attaque est faite avec une arme [INDIRECT FIRE]. La seconde est ce
+    qui distingue 10.07 des autres types de tir : ses penalites ne portent QUE sur les armes
+    indirectes, jamais sur leurs voisines — l encadre du PDF 10 le dit (« its other weapons can
+    still target other visible targets »).
+
+    Rendre `None` plutot que 2 (le plancher naturel) est deliberatif : l appelant doit pouvoir
+    distinguer « 10.07 n a pas joue » de « 10.07 a joue et impose le plancher ordinaire », ne
+    serait-ce que pour le journal.
+    """
+    # ORDRE DES DEUX GARDES : la declaration d arme d abord, le type de tir ensuite. Ce n est pas
+    # cosmetique — `resolve_squad_shooting_type` balaie les figurines vivantes et leurs armes, et
+    # il exige `config.game_rules.engagement_zone`. Le tester d abord le ferait payer a CHAQUE
+    # attaque du jeu, pour une regle que deux armes du depot portent.
+    if not weapon_has_rule(weapon, "INDIRECT_FIRE"):
+        return None
+    if resolve_squad_shooting_type(game_state, str(shooter_squad_id)) != SHOOTING_TYPE_INDIRECT:
+        return None
+    spotted = _squad_remained_stationary(game_state, shooter_squad_id) and (
+        _target_visible_to_a_friendly_unit(game_state, shooter_squad_id, target_sid)
+    )
+    return INDIRECT_FAIL_BELOW_SPOTTED if spotted else INDIRECT_FAIL_BELOW
 
 
 def _unit_moved_more_than_heavy_threshold(game_state: Dict[str, Any], squad_id: str) -> bool:
@@ -9340,7 +9441,29 @@ def _manual_roll_intent(
     # portent) — `BS` etait une orthographe fossile, et le defaut `4` transformait une arme
     # sans caracteristique en arme moyenne PLAUSIBLE, donc indetectable a l oeil.
     bs_base = int(require_key(weapon, "ATK"))
+    # 10.07 : la regle joue-t-elle sur CETTE attaque, et avec quel plancher d echec ? Resolu ICI
+    # parce que ses trois effets se posent a trois endroits differents de la suite — le couvert
+    # juste en dessous, le plancher et l interdiction de relance a l appel du socle de resolution.
+    # L helper est PARESSEUX : il sort sur la declaration d arme avant de resoudre le type de tir.
+    _indirect_fail_below = indirect_fire_fail_below(
+        game_state, str(attacker["squad_id"]), str(target_sid), weapon
+    )
     bs, cover = _cover_worsened_bs(game_state, attacker, target_sid, bs_base, weapon)
+    # 10.07 : « The target HAS the benefit of cover against that attack (13.08) ». Le couvert est
+    # OCTROYE, pas calcule : la cible l a quelle que soit la geometrie, et 13.08 le traduit dans
+    # ce moteur par une degradation de 1 du seuil de touche (plafond 6, cf. `_cover_worsened_bs`).
+    #
+    # ⚠️ [IGNORES COVER] 24.18 PRIME, et le PDF le dit lui-meme : « the target cannot have the
+    # benefit of cover against that attack (13.08), INCLUDING FROM RULES THAT GIVE a model or unit
+    # the benefit of cover ». 10.07 est exactement une telle regle. On lit donc le verdict de
+    # `_cover_worsened_bs` — qui court-circuite deja sur 24.18 en rendant `cover=False` — plutot
+    # que d ecraser le couvert sans condition. Aucune arme du depot ne porte les deux regles
+    # aujourd hui ; la precedence est cablee pour que la premiere qui les portera soit juste.
+    if _indirect_fail_below is not None and not cover and not weapon_has_rule(
+        weapon, "IGNORES_COVER"
+    ):
+        bs = min(6, bs + 1)
+        cover = True
     # [HEAVY] 24.16 (PDF, source de verite) : « In your Shooting phase, each time an attack is
     # made with a [HEAVY] weapon, add 1 to the hit roll if ALL of the following apply to the
     # attacking unit : that unit is UNENGAGED ; that unit was NOT SET UP on the battlefield this
@@ -9481,11 +9604,18 @@ def _manual_roll_intent(
             # cablee au tir seulement ferait de la mitraille orke un cas particulier silencieux.
             # « You can re-roll the Hit roll » : INCONDITIONNELLE des que la cible est la bonne
             # — ni le detachement ni les sous-factions ne la touchent, contrairement au +1 Wound.
-            hit_any_fail=_is_oath_target,
+            # 10.07 : « You cannot re-roll hit rolls » — l interdiction est ABSOLUE et prime sur
+            # la capacite, d ou le `and not`. Elle ne touche QUE la touche : les relances de
+            # blessure ci-dessous (capacites d unite, [TWIN-LINKED]) restent ouvertes, la regle
+            # n en parle pas.
+            hit_any_fail=_is_oath_target and _indirect_fail_below is None,
             wound_1=reroll_wound1,
             wound_any_fail=reroll_wound_obj,
         ),
         roll_d6=lambda: random.randint(1, 6),
+        # 10.07 : plancher d echec sur le de NON MODIFIE. `None` -> le socle garde le plancher
+        # naturel de 05.01 (seul le 1 echoue), donc aucune attaque ordinaire ne change.
+        **({} if _indirect_fail_below is None else {"hit_fail_below": _indirect_fail_below}),
     )
     # Noms des ABILITES qui ont ouvert chaque relance. Le socle rend la CAUSE, les deux
     # `resolve_*_reroll_ability` la traduisent — memes helpers que la melee, pour que les deux
