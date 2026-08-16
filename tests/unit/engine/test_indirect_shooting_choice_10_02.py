@@ -90,21 +90,22 @@ def test_une_activation_depensee_n_a_plus_de_type_meme_choisi(eligibles):
     assert resolve_squad_shooting_type(gs, "1") is None
 
 
-def test_l_ensemble_eligible_ne_depend_pas_du_choix_deja_pose():
+def test_l_ensemble_eligible_ne_depend_pas_du_choix_deja_pose(monkeypatch):
     """Circularité évitée : `eligible_squad_shooting_types` énumère ce que l'escouade PEUT jouer,
     pas ce qu'elle a déjà choisi.
 
     Sans la séparation dérivation/résolution, poser un choix aurait rétréci l'ensemble éligible
     au choix lui-même — et un joueur PvP changeant d'avis se serait vu refuser son second choix
     par la validation de `squad_shooting_type_choose`."""
-    import inspect
-
-    source = inspect.getsource(SU.eligible_squad_shooting_types)
-
-    assert "_derive_squad_shooting_type" in source
-    assert "resolve_squad_shooting_type(" not in source, (
-        "l'ensemble éligible doit DÉRIVER, jamais résoudre — sinon il lit le choix en cours"
-    )
+    monkeypatch.setattr(SU, "_derive_squad_shooting_type", lambda gs, sid: SHOOTING_TYPE_NORMAL)
+    monkeypatch.setattr(SU, "_squad_has_indirect_fire_weapon", lambda gs, sid: False)
+    # Choix INDIRECT déjà posé dans l'état (injection directe — squad_shooting_type_choose
+    # validerait l'éligibilité, ce qui court-circuiterait le test).
+    gs: dict = {SU.SQUAD_SHOOTING_TYPE_CHOICE_KEY: {"1": SHOOTING_TYPE_INDIRECT}}
+    result = SU.eligible_squad_shooting_types(gs, "1")
+    # La dérivation physique vaut NORMAL ; si eligible_squad_shooting_types lisait le choix via
+    # resolve_squad_shooting_type, elle retournerait INDIRECT — c'est la régression testée.
+    assert result == (SHOOTING_TYPE_NORMAL,)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
