@@ -143,6 +143,20 @@ def get_hex_neighbors(col: int, row: int) -> Tuple[Tuple[int, int], ...]:
     Returns:
         Tuple of 6 neighbor (col, row) tuples, all normalized to int
     """
+    # Chemin rapide, sur des entiers DEJA normalises : le cache est interroge avant tout appel
+    # a `normalize_coordinates`. C'est la boucle interne de tous les BFS du moteur, ou `col` et
+    # `row` sortent d'un tuple d'entiers et n'ont donc rien a normaliser — la normalisation y
+    # coutait deux appels de fonction et deux `isinstance` par appel, 17,9 M fois sur une eval
+    # de 24 episodes (mesure cProfile : 8,90 s, 5,5 % du temps total).
+    #
+    # Le garde porte sur `type(...) is int` et non `isinstance` : `True` est un `int` pour
+    # `isinstance` (bool en est une sous-classe), mais n'est pas une coordonnee valide. Tout ce qui
+    # n'est pas exactement `int` (float, str, bool, type invalide) emprunte la voie normale
+    # ci-dessous — memes conversions, memes erreurs, aux memes endroits.
+    if type(col) is int and type(row) is int:
+        cached = _HEX_NEIGHBORS_CACHE.get((col, row))
+        if cached is not None:
+            return cached
     # Normalize coordinates to int
     key = normalize_coordinates(col, row)
     cached = _HEX_NEIGHBORS_CACHE.get(key)

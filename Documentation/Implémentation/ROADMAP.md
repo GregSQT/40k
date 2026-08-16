@@ -383,6 +383,16 @@
   les deux sens, dérivation réelle (section, suffixe et nom de fichier inventés dans un
   `CLAUDE.md` fabriqué), sept formes de lecture partielle, et une ligne voisine qui cite un item
   sans être un repli. Chaque contrôle prouvé ROUGE par mutation.
+- ✅ **Livraison 2026-08-16 — `ANTI_INFANTRY:1` sur `urty_syringe` → 2, garde de domaine Y+≥2.**
+  `urty_syringe` (PainBoy Ork) déclarait `ANTI_INFANTRY:1`. 05.02 : un 1 naturel rate toujours,
+  donc le seuil 1 n'est pas « limite » mais impossible — le moteur en tirait `crit_wound_on = 1`
+  (blessure critique sur chaque dé, 1 naturel compris). De plus, `step_logger._anti_rule_token`
+  levait dans le `try/except` de `log_action` : toutes les lignes d'attaque de l'arme
+  disparaissaient de `step.log` sans `parse_errors` côté analyzer. Corrections : armurerie Ork
+  (`ANTI_INFANTRY:2`), `engine/weapons/rules.py` (`MIN_ANTI_THRESHOLD = 2`, refus au parse),
+  `engine/phase_handlers/attack_sequence.py` (`anti_threshold_of()`, deuxième barrière),
+  `engine/observation_weapon_profiles.py` (jumeau observation branché sur `anti_threshold_of`).
+  Balayage corpus toutes armureries + test rouge/vert `MIN_ANTI_THRESHOLD`.
 - **Conséquence immédiate : plus rien n'est gelé.** La consigne « ne rien lancer de cassant, aucun
   JSON de `config/` » tombe avec le run. Ce qui était différé à ce titre redevient faisable —
   notamment la `justification` d'`obs_size` (§5) et l'ajout d'un profil de validation P5 (§1 pt 6).
@@ -422,7 +432,7 @@ mesure, et c'est assumé (§0.14).
    🔴 **AUCUN PROFIL EXISTANT NE CONVIENT — à trancher avant d'ouvrir P3-4.**
    - Ce qui est **acquis** : le « ne PAS utiliser `x1_debug`, il porte 48 envs » de §9.6 est
      périmé. `n_steps` est un TOTAL divisé par `n_envs` en un point de passage unique depuis
-     §0.33 ⇒ le buffer ne dépend plus de `n_envs`, et les **10** profils sont à 48 envs de toute
+     §0.33 ⇒ le buffer ne dépend plus de `n_envs`, et les **9** profils sont à 48 envs de toute
      façon, `x5_debug` compris. La mémoire n'écarte plus aucun profil.
    - Ce qui **casse** — et **DEUX variables distinctes** sont en cause, que ce fichier a confondues
      dans une première correction du 2026-08-10 :
@@ -481,26 +491,47 @@ mesure, et c'est assumé (§0.14).
    Réunies au §12.14, après une première unification défaite en quatre heures. La ligne de base et
    la numérotation du document étaient les deux ressources partagées que le §10.4 n'avait pas listées.
    **Nouvelle ligne de base : `combined = 0,7433`, pire bot `racer = 0,630`, pire scénario 0,6867.**
-   Étapes 6 et 8 closes.
-   ✅ **Correspondance ancien/nouveau mesurée le 2026-08-14** (§12.16), sur le MÊME agent
-   (`robust_0.8721`, 100 ép./bot) — elle n'avait jamais été faite : pire bot **0,77 → 0,630**,
-   moyenne simple des six **0,928 → 0,743**, et l'ancien panel porte **deux bots SATURÉS**
-   (`defensive` 100 W – 0 L, `tactical` 0,99) plus cinq bots dans une bande de 9 points pour une
-   marge de ±4,4. C'est le défaut du §1, enfin chiffré. Le neuf n'est saturé nulle part et sépare
-   trois niveaux au lieu de deux — gain réel, pas six niveaux.
-   🔴 **DÉCISION EN ATTENTE, ET ELLE T'APPARTIENT** : les six profils d'ENTRAÎNEMENT (`x1`,
-   `x1_long`, `x1_selfplay`, `x5_new`, `x5_append`, `x5_long`) tournent tous contre les ANCIENS
-   bots — seul `x1_panel` charge le neuf. Migrer périme le mètre de toutes les courbes
-   historiques de l'agent, seuil de gating `control` compris. Tant que ce n'est pas tranché,
-   l'étape 7 reste ouverte et les anciens bots NE SE SUPPRIMENT PAS : ils sont le code de
-   production, pas de la dette.
+   Étapes 6 et 8 closes, reste l'étape 7 (suppression des cinq anciens bots).
    🔴 **L'ORTHOGONALITÉ est ABANDONNÉE comme critère** (décision du 2026-08-12) : les six bots se
    déplacent en bloc d'un modèle à l'autre, ils forment une seule dimension. La cause est le
    format — seuls les objectifs marquent, zéro victoire par élimination sur 600 parties — donc
    aucun panel n'y rendra six axes. Le panel est une **échelle de difficulté**, et c'est assumé.
-   **Reste UNE seule chose, et c'est une décision, pas une tâche** : migrer ou non les profils
-   d'entraînement sur le nouveau panel (ci-dessus). Le réglage des poids est fini (§12.9, §12.11,
-   §12.14), l'étape 8 est rejouée, la correspondance est consignée (§12.16).
+   ✅ **Cache de contributions OC ajouté le 2026-08-15** (§13) : `objective_control_contributions`
+   mis en cache par activation dans `_DoctrineBot`, évite les recalculs redondants pour `w_crowd`.
+   Couvert par `tests/unit/ai/test_bot_contributions_cache.py`.
+   Contexte : `x1_new_bots` prenait 464 min pour 3600 épisodes (vs 79 min pour `x1_long`) — ratio
+   5,9× causé par `w_crowd`. La barre de progression `--test-only` ne s'affichait qu'à la fin dans
+   le chemin parallèle ; corrigé via callback `on_result` dans `_collect_parallel_results_with_timeouts`.
+   `bot_eval_n_workers` porté à 12 (config ArmageddonAgent), puis à **16 le 2026-08-16** sur mesure
+   (voir ci-dessous).
+   ✅ **Coût d'évaluation mesuré le 2026-08-16**, ce qui clôt le « non encore mesuré » ci-dessus.
+   Pente en s/épisode, initialisation exclue par ajustement à deux tailles, 3 répétitions
+   alternées, sur 8 cœurs physiques : **4 workers 4,854 — 12 workers 2,875 — 16 workers 2,521 —
+   24 workers 2,715**. `bot_eval_n_workers` passe donc à 16 sur `x1` **et** `x1_long` (les deux :
+   le test `test_long_profile_is_its_reference_recalibrated` exige qu'ils coïncident, et 4 était
+   simplement moins bon). Au-delà de 16 la contention l'emporte ; l'évaluation atteint là 5,75× son
+   débit série contre un plafond de ~6,5× mesuré sur du calcul pur, soit **~88 % de ce que cette
+   machine peut rendre — il n'y a pas de parallélisme à récupérer**. Trois pistes ont été mesurées
+   puis ABANDONNÉES : les adversaires (mélange d'entraînement 14,2 s/partie contre 15,5 s pour
+   celui d'évaluation, 8 % d'écart), `torch.compile` sur l'extracteur (0,6 % d'écart pour 1,4 % de
+   dispersion — clé `bot_eval_torch_compile_cpu` retirée des 4 profils qui la portaient), et
+   l'inférence par lot (3,2 ms sur un pas de 104 ms, soit 3 % : vectoriser l'évaluation
+   rapporterait ~2 %). ⚠️ **Les coûts d'évaluation notés dans la config étaient faux d'un facteur
+   ~2** (ils dérivaient des 13 min/100 ép. du commit 42326ed0, d'avant la refonte d'observation
+   V11) : l'éval finale de `x1_long` valait ~2 h 46 et non ~1 h 20, les intermédiaires ~2 h 18 et
+   non ~1 h 05. `bot_eval_final` est passé de 600 à 300 (erreur-type 2,0 → 2,9 points), ramenant le
+   budget d'évaluation de ce profil de ~5 h 04 à ~3 h 41. Les notes du JSON sont recalées ; le
+   « 79 min pour 3600 épisodes » cité plus haut n'est PAS corrigé — il date d'un autre modèle, et
+   le coût d'une partie dépend de la qualité du jeu (un modèle entraîné garde ses unités en vie :
+   141 pas gym par partie contre 99 pour une politique neuve). ⏳ **Reste identifié, non traité** :
+   le pool de déplacement (`build_squad_move_cell_map` → `erode_move_pool_by_squad_block` →
+   `geodesic_move_reach`) pèse **29 % d'une partie d'évaluation** ; c'est du calcul dérivé, donc
+   optimisable sous verrou d'empreinte `step.log`. Décision du 2026-08-16 : non lancé.
+   ⏳ **`scripts/bench_shortlist.py` à écrire** (§13.1) : compare les décisions `_DoctrineBot` à
+   `DESTINATION_SHORTLIST ∈ {8, 12, 24}` vs référence=24, en divergence directe (pas win-rate).
+   **Restent** : le réglage de `w_contest`/`w_crowd` (posés, non réglés), l'étape 7
+   (correspondance puis suppression des cinq anciens), l'étape 8 rejouée après réglage, et le bench
+   shortlist ci-dessus.
    ⚠️ Les chiffres des §8/§9 du doc de chantier sont **à rejouer** : échantillons insuffisants et
    une erreur d'arithmétique sur le `combined` (§11.1).
    ⚠️ **Ce point CONDITIONNE la valeur du point 7, il ne s'y ajoute pas.** Le panel actuel ne rend
@@ -596,6 +627,69 @@ mesure, et c'est assumé (§0.14).
   chantier depuis une ligne non ✅. → [`1_Agent/V11_tranches.md`](1_Agent/V11_tranches.md) §1bis
 
 ## 4. Backlog hors chemin critique (`A_faire/`)
+
+Prêt à démarrer, conception close, aucun arbitrage en attente :
+- ⬜ **Bots : capacités communes, jitter, trois benchmarks de holdout, `benchmark_floor`** (chantier
+  ouvert le 2026-08-14, **conception CLOSE le 2026-08-15**, aucune ligne de code écrite). Suite
+  directe du point 9 de §1 (refonte du panel). **CONCEPTION : les huit étapes A→H sont spécifiées
+  dans le doc. EXÉCUTION, tranche 1 : A+B+C+D.**
+  **A** capacités communes (`late_game`, `preservation`, `persistence` — généralisées aux six
+  styles, gain par style, `gain = 0` reproduit le comportement actuel) et **B** jitter des poids
+  (PPO ne doit pas apprendre les coefficients exacts) : aucun run d'entraînement, verrouillables
+  par tests, prix = **rejouer la ligne de base du panel** (`combined = 0,7433`, `racer = 0,630`).
+  **C** trois benchmarks à mécanisme de décision DIFFÉRENT (intention macro puis destination, au
+  lieu de la somme pondérée des six styles), jamais vus à l'entraînement : `reference_balanced`
+  (polyvalence), `reference_denial` (sécurisation du score), `reference_reactive`
+  (non-stationnarité) — **+4 800 épisodes par run**, soit +50 % du budget d'évaluation.
+  **D.4** **profil comportemental par adversaire** — l'évaluation ne publie aujourd'hui AUCUNE
+  donnée de jeu par adversaire (vérifié le 2026-08-15 : `wins`/`losses`/`draws` + ventilations
+  faction/siège/roster, et un `shoot_stats` produit puis jeté, sans aucun consommateur dans le
+  dépôt). VP et zones par tour, pertes subies/infligées, charges — **des deux côtés** et **ventilés
+  par issue**. Zéro épisode supplémentaire, c'est du câblage, et c'est ce qui rend le diagnostic
+  ci-dessous exécutable.
+  **D** `benchmark_floor` + gate + partition à trois familles dans `bot_registry` + détecteur de
+  non-généralisation persistante.
+  🟢 **DÉCISION 2026-08-15 — deux étages de holdout, et le plancher DIAGNOSTIQUE l'entraînement.**
+  Les trois `reference_*` entrent dans `_evaluate_model_gate` : un modèle qui écrase les six bots
+  d'entraînement et s'effondre contre un benchmark **n'est pas sauvegardé**. `tactical` reste
+  SCELLÉ (gelé le 2026-08-04, exclu de tout signal) — c'est le témoin qui dira si les corrections
+  d'entraînement améliorent la compétence ou seulement le benchmark. Et un plancher raté de façon
+  PERSISTANTE (N évaluations pendant que `combined` progresse) signifie que **l'agent n'a pas
+  généralisé ce qu'il a vu à l'entraînement** : le run est déclaré non généralisant et
+  L'ENTRAÎNEMENT est revu. **Ce qu'on diagnostique est le COMPORTEMENT de l'agent** (s'est-il fait
+  détruire ? a-t-il trop peu joué les objectifs ?), comparé entre benchmarks et bots d'entraînement :
+  même faute des deux côtés ⇒ la RÉCOMPENSE ne la punit pas ; faute seulement contre les benchmarks
+  ⇒ le CURRICULUM ne l'expose pas ; faute partout avec défaite partout ⇒ ni l'un ni l'autre, c'est
+  un défaut de niveau. **Un seul levier par run** (décision §3 pt 5 du chantier panel : mêler
+  récompense et adversaires rend les effets indémêlables).
+  🟢 **CORRECTIONS D'AUDIT 2026-08-15, validées et intégrées au doc** : (1) la persistance de cible
+  est une **règle de conservation** à échelle déclarée par critère (`gap ≤ p × échelle`) — la forme
+  « bonus × étalement » initialement retenue était mathématiquement **INERTE** pour `p < 1`
+  (démonstration Bot_refactor §2.5 ; verrou = test de bascule à DEUX candidats, le cas fréquent de
+  fin de partie) ; (2) `tactical` entre à `0.0` dans `bot_eval_weights` de `x1_new_bots` — sans lui
+  le témoin scellé ne produit AUCUN chiffre sur le profil actif — pour **+1 600 ép. par run de
+  50 000** (en sus des +4 800 des benchmarks) ; (3) les transformations d'état sont **conscientes
+  du signe** : `protect_lead` renforce l'évitement d'`endgame` (`w_enemy` −0,35) au lieu de
+  l'affaiblir.
+  🔴 **Deux postulats de la proposition d'origine étaient contredits par des mesures déjà faites** :
+  le seuil `benchmark_floor >= 80 %` (au-dessus du `combined = 0,7433` actuel — la porte ne
+  s'ouvrirait jamais ; le seuil se pose APRÈS la première mesure), et le gating par un holdout non
+  scellé (arbitrage du 2026-08-04, `V11_eval_strategy.md` §10.6 — résolu par les deux étages).
+  Le mot « orthogonaux » est écarté au profit de « raisonne autrement », l'orthogonalité ayant été
+  abandonnée comme critère le 2026-08-12 ; la complémentarité des trois benchmarks est **mesurée**
+  (corrélation de rang sur ≥ 3 modèles) au lieu d'être supposée — et elle est ce qui rend le
+  diagnostic d'entraînement actionnable, chaque benchmark nommant l'aspect non couvert.
+  🕐 **CONÇUES, exécution différée** (tranches 2 et 3) : league historique, PFSP, exploiters,
+  schedule P0→P10 (E→H — disposition disque, schéma `policy.json` avec `obs_size` et `model_md5`,
+  câblage sur `_select_opponent_mode_for_episode`, cache LRU, sampler PFSP, protocole d'exploiter,
+  quatre gates de promotion, tests de chaque). **E et F ne coûtent RIEN en machine** (code + tests) ;
+  ce qui coûte est de FAIRE TOURNER la league : ~200 h pour P1→P10, ~60 h pour trois exploiters.
+  Prérequis d'exécution : `x1_selfplay`, **livré mais jamais exécuté** (§1 pt 8).
+  ⚠️ Ce doc est à la RACINE et non dans `A_faire/` — chemin demandé explicitement ; 3ᵉ exception,
+  même cas que `Security.md` ci-dessus.
+  → [`Bot_refactor.md`](Bot_refactor.md) §0bis (décisions datées) et §7 (aucun arbitrage ouvert ;
+  reste : écrire la tranche 1, mesurer le premier `benchmark_floor` qui pose le seuil, chantier
+  récompense distinct, calendrier de la tranche 3)
 
 Prêts à démarrer sans décision produit :
 - ⬜ **Le chemin LoS refait à chaque survol ce que le chantier des aplatissements a sorti du chemin
@@ -1264,7 +1358,7 @@ vérifiée ; l'appariement reste réservé aux cellules de tableau, où le renvo
 
 ### Incohérences factuelles restantes (non traitées, aucune ne bloque)
 
-- **`obs_size`** — la valeur vraie à HEAD est **16659**, portée par les **10** profils de la config
+- **`obs_size`** — la valeur vraie à HEAD est **16659**, portée par les **9** profils de la config
   ArmageddonAgent (un `"obs_size": 16659` chacun ; ce fichier a annoncé « 3 occurrences », puis
   « 7 profils », sans jamais les compter — c'est le contrôle de §5 qui les compte désormais).
   ✅ `Implémenté/01_ability_embedding.md`, qui annonçait 14609/14615, est corrigé. Reste la
