@@ -1101,7 +1101,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                     if candidate_technical_rule_id not in effect_to_sources_for_unit:
                                         continue
                                     source_rule_ids = effect_to_sources_for_unit[candidate_technical_rule_id]
-                                    selected_sources = state.selected_choice_by_unit_source.get(actor_id, {})
+                                    selected_sources = state.selected_choice_by_unit_source.get(actor_id, {})  # fallback allowed — acteur sans selection enregistree
                                     has_matching_source = any(
                                         selected_sources.get(source_rule_id) == candidate_technical_rule_id
                                         for source_rule_id in source_rule_ids

@@ -745,7 +745,7 @@ def _accumulate_behavior(
 
     # VP de l'agent a la fin de cet episode.
     vp_dict = gs.get("victory_points") or {}
-    ep_vp = float(vp_dict.get(player, 0))
+    ep_vp = float(vp_dict[player]) if vp_dict else 0.0
 
     # Zones tenues par l'agent.
     controllers = gs.get("objective_controllers") or {}
@@ -753,8 +753,8 @@ def _accumulate_behavior(
 
     # Stats de tir de l'agent (ai_shoot_*) — reinitialisees au prochain reset.
     shoot = env.get_shoot_stats() if hasattr(env, "get_shoot_stats") else {}
-    ep_ai_shoot_opp = int(shoot.get("ai_shoot_opportunities", 0))
-    ep_ai_shoot_act = int(shoot.get("ai_shoot_actions", 0))
+    ep_ai_shoot_opp = int(shoot["ai_shoot_opportunities"]) if shoot else 0
+    ep_ai_shoot_act = int(shoot["ai_shoot_actions"]) if shoot else 0
 
     bucket = behavior_stats.setdefault(issue, {
         "vp": 0.0, "zones_held": 0.0,
@@ -1720,7 +1720,7 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                     "ai_shoot_opportunities": 0, "ai_shoot_actions": 0, "count": 0,
                 })
                 for k in ("vp", "zones_held", "ai_shoot_opportunities", "ai_shoot_actions", "count"):
-                    m[k] = m.get(k, 0) + bucket.get(k, 0)
+                    m[k] += bucket[k]
         if merged:
             behavioral_profile[bn] = merged
     results["behavioral_profile"] = behavioral_profile

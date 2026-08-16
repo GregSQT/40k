@@ -309,7 +309,12 @@ def test_eval_worker_task_counts_outcomes_and_reports_progress(monkeypatch: pyte
             )
 
         def get_shoot_stats(self):
-            return {"acc": 0.5}
+            return {
+                "shoot_opportunities": 5, "shoot_actions": 3, "wait_actions": 2,
+                "shoot_rate": 60.0, "wait_rate": 40.0,
+                "ai_shoot_opportunities": 4, "ai_shoot_actions": 3,
+                "ai_shoot_rate": 75.0, "ai_wait_rate": 25.0,
+            }
 
         def close(self):
             self._closed = True
@@ -343,7 +348,6 @@ def test_eval_worker_task_counts_outcomes_and_reports_progress(monkeypatch: pyte
     assert result["wins"] == 1
     assert result["draws"] == 1
     assert result["losses"] == 1
-    assert result["shoot_stats"]["acc"] == 0.5
     assert progress["n"] == 3
     # Episodes 1 (victoire) et 2 (nul) en Space Marines, episode 3 (defaite) en Orks.
     assert result["faction_stats"] == {

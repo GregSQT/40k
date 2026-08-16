@@ -268,9 +268,9 @@ class ReferenceBalancedBot(_BenchmarkBase):
             squad_expected_damage(game_state, str(e["id"]), att_id, True) for e in enemies
         )
 
-        vp = game_state.get("victory_points") or {}
-        my_vp = float(vp.get(player, 0))
-        opp_vp = float(vp.get(3 - player, 0))
+        vp = require_key(game_state, "victory_points")
+        my_vp = float(vp[player])
+        opp_vp = float(vp[3 - player])
         if s_survive >= 8.0 and my_vp >= opp_vp + _VP_LEAD:
             return "PRESERVE"
         if s_kill >= s_score and s_kill > 0.0:
@@ -475,8 +475,8 @@ class ReferenceReactiveBot(_BenchmarkBase):
             self._snapshot_episode = episode_marker
             self._snapshot_value_me = self._living_value(player, game_state)
             self._snapshot_value_opp = self._living_value(3 - player, game_state)
-            vp = game_state.get("victory_points") or {}
-            self._snapshot_vp_me = float(vp.get(player, 0))
+            vp = require_key(game_state, "victory_points")
+            self._snapshot_vp_me = float(vp[player])
             self._plan = "SCORE"
             self._plan_turn_marker = curr_marker
             return
@@ -489,8 +489,8 @@ class ReferenceReactiveBot(_BenchmarkBase):
         loss_me = self._snapshot_value_me - val_me_now
         loss_opp = self._snapshot_value_opp - val_opp_now
 
-        vp = game_state.get("victory_points") or {}
-        vp_me = float(vp.get(player, 0))
+        vp = require_key(game_state, "victory_points")
+        vp_me = float(vp[player])
 
         if loss_me > loss_opp + _VALUE_LOSS_THRESHOLD:
             self._plan = "RETREAT"

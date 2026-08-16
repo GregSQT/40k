@@ -1283,8 +1283,8 @@ class MetricsCollectionCallback(BaseCallback):
     def _calculate_immediate_vs_future_ratio(self, info):
         """Calculate ratio of immediate vs future-oriented actions from episode tactical_data."""
         td = info.get('tactical_data') or {}
-        immediate_actions = float(td.get('shoot_activations', 0))
-        future_actions = float(td.get('move_actions', 0)) + float(td.get('move_waits', 0))
+        immediate_actions = float(td['shoot_activations']) if td else 0.0
+        future_actions = (float(td['move_actions']) + float(td['move_waits'])) if td else 0.0
         return immediate_actions / max(1.0, immediate_actions + future_actions)
     
     def _estimate_planning_horizon(self, gamma):
@@ -1652,30 +1652,26 @@ class BotEvaluationCallback(BaseCallback):
                 benchmark_floor,
                 self.model_gating_min_benchmark_floor,
             ))
+            # Detecteur de non-generalisation persistante (§4.D).
+            # Detecte un modele qui progresse en selection mais reste en dessous du plancher benchmark.
+            if self.stop_on_no_generalization > 0:
+                combined_improving = (
+                    self.best_gating_criteria_mean is None
+                    or combined_score > (self.best_gating_criteria_mean or 0.0)
+                )
+                if not benchmark_floor_pass and combined_improving:
+                    self.non_generalizing_consecutive += 1
+                    if self.non_generalizing_consecutive >= self.stop_on_no_generalization:
+                        print(
+                            f"\n🛑 Non-generalisation detectee : benchmark_floor={benchmark_floor:.3f} "
+                            f"< {self.model_gating_min_benchmark_floor:.3f} pendant "
+                            f"{self.non_generalizing_consecutive} evaluations consecutives "
+                            f"(stop_on_no_generalization={self.stop_on_no_generalization})"
+                        )
+                        self.should_stop_early = True
+                else:
+                    self.non_generalizing_consecutive = 0
         gate_pass = all(actual >= threshold for _, actual, threshold in checks)
-        # Detecteur de non-generalisation persistante (§4.D).
-        # Detecte un modele qui progresse en selection mais reste en dessous du plancher benchmark.
-        if (
-            self.stop_on_no_generalization > 0
-            and self.model_gating_min_benchmark_floor > 0.0
-            and benchmark_keys_present
-        ):
-            combined_improving = (
-                self.best_gating_criteria_mean is None
-                or combined_score > (self.best_gating_criteria_mean or 0.0)
-            )
-            if not benchmark_floor_pass and combined_improving:
-                self.non_generalizing_consecutive += 1
-                if self.non_generalizing_consecutive >= self.stop_on_no_generalization:
-                    print(
-                        f"\n🛑 Non-generalisation detectee : benchmark_floor={benchmark_floor:.3f} "
-                        f"< {self.model_gating_min_benchmark_floor:.3f} pendant "
-                        f"{self.non_generalizing_consecutive} evaluations consecutives "
-                        f"(stop_on_no_generalization={self.stop_on_no_generalization})"
-                    )
-                    self.should_stop_early = True
-            else:
-                self.non_generalizing_consecutive = 0
 
         criteria_mean = float(np.mean([combined_score, worst_bot_score, worst_scenario_combined]))
         has_improved_mean = False

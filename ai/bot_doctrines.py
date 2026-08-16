@@ -490,9 +490,9 @@ def late_game_state(game_state, player: int) -> str:
     Dans ce cas la notion de « derniers tours » n'a pas de sens : on retombe sur normal/protect_lead
     selon le score uniquement.
     """
-    vp_map = game_state.get("victory_points") or {}
-    my_vp = float(vp_map.get(player, 0))
-    opp_vp = float(vp_map.get(3 - player, 0))
+    vp_map = require_key(game_state, "victory_points")
+    my_vp = float(vp_map[player])
+    opp_vp = float(vp_map[3 - player])
     vp_diff = my_vp - opp_vp
 
     if vp_diff >= _VP_LEAD_MARGIN:
@@ -892,14 +892,14 @@ class _DoctrineBot(_PlacementMemory):
 
         # 1. Override de preservation par unite (uniquement AttritionBot via _withdrawing).
         if self._is_preserving(unit, game_state):
-            overrides = _state_overrides_cfg().get(self.MOVEMENT_BOT_KEY, {})
+            overrides = _state_overrides_cfg().get(self.MOVEMENT_BOT_KEY, {})  # fallback allowed — override optionnel par bot
             if "preserve" in overrides:
                 base = load_doctrine_weights(overrides["preserve"])
                 return _apply_jitter_weights(base, self._jitter_movement)
 
         # 2. Override late_game.
         lg_state = late_game_state(game_state, player)
-        overrides = _state_overrides_cfg().get(self.MOVEMENT_BOT_KEY, {})
+        overrides = _state_overrides_cfg().get(self.MOVEMENT_BOT_KEY, {})  # fallback allowed — override optionnel par bot
         if lg_state in overrides:
             base = load_doctrine_weights(overrides[lg_state])
             return _apply_jitter_weights(base, self._jitter_movement)
