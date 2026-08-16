@@ -1309,6 +1309,25 @@ def test_assault_dans_les_details_du_pont(monkeypatch, tmp_path):
     assert "[ASSAULT]" in line, line
 
 
+def test_close_quarters_dans_les_details_du_pont(monkeypatch, tmp_path):
+    """Symétrique de test_assault_dans_les_details_du_pont pour [CLOSE-QUARTERS] 24.07.
+
+    Vérifie que `closeQuartersApplied → details["close_quarters_applied"]` fonctionne dans
+    `_build_shot_details` et que le token arrive dans step.log.
+    """
+    gs, raw_log = _engine_shoot_log(monkeypatch, ["CLOSE_QUARTERS"], [3, 4, 2], engaged=True)
+    bridge = _Bridge(gs)
+    details = bridge._build_shot_details(raw_log, raw_log["shootDetails"][0], 1, None)
+
+    assert details.get("close_quarters_applied") is True, (
+        "`close_quarters_applied` doit être posé par le pont quand l'escouade est engagée "
+        f"et que l'arme déclare CLOSE_QUARTERS : {details}"
+    )
+    assert details["hit_roll"] == 3 and details["hit_target"] == 3, details
+    line = _step_log_line(tmp_path, gs, raw_log)
+    assert "[CLOSE-QUARTERS]" in line, line
+
+
 @pytest.mark.parametrize("melee", [False, True], ids=["tir", "melee"])
 def test_l_analyzer_accepte_les_lignes_porteuses_des_tokens_du_lot(monkeypatch, tmp_path, melee):
     """CONTRÔLE DE MASSE — un token que personne ne lit ne se livre pas.

@@ -104,6 +104,10 @@ def _weapon_group() -> Dict[str, Any]:
         "dmg_bonus": 0,
         # [PRECISION] 24.28 : posé à l'Allocation Order step, jamais à la déclaration de l'arme.
         "precision_applied": False,
+        # [ASSAULT] 24.04 / [CLOSE-QUARTERS] 24.07 : exigées par require_key à l'émission.
+        # Bolt Rifle ne déclare ni l'un ni l'autre → False.
+        "assault_applied": False,
+        "close_quarters_applied": False,
     }
 
 
