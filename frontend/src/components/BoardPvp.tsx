@@ -12575,33 +12575,31 @@ export default function Board({
             }}
           >
             <span style={{ marginRight: 4, opacity: 0.7 }}>Type :</span>
-            {squadShootPlan.eligibleShootingTypes?.map((t) => (
-              <button
-                key={t}
-                type="button"
-                onClick={() => void onSquadShootTypeSelect?.(t)}
-                style={{
-                  border:
-                    (squadShootPlan.selectedShootingType ??
-                      squadShootPlan.eligibleShootingTypes?.[0]) === t
-                      ? "2px solid #60a5fa"
-                      : "1px solid rgba(255,255,255,0.25)",
-                  borderRadius: 5,
-                  background:
-                    (squadShootPlan.selectedShootingType ??
-                      squadShootPlan.eligibleShootingTypes?.[0]) === t
-                      ? "rgba(96,165,250,0.22)"
-                      : "rgba(255,255,255,0.06)",
-                  color: "#fff",
-                  cursor: "pointer",
-                  fontSize: 12,
-                  fontWeight: 600,
-                  padding: "3px 9px",
-                }}
-              >
-                {t === "indirect" ? "Indirect Fire" : t.charAt(0).toUpperCase() + t.slice(1)}
-              </button>
-            ))}
+            {(() => {
+              const activeType =
+                squadShootPlan.selectedShootingType ?? squadShootPlan.eligibleShootingTypes?.[0];
+              return squadShootPlan.eligibleShootingTypes?.map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => void onSquadShootTypeSelect?.(t)}
+                  style={{
+                    border:
+                      activeType === t ? "2px solid #60a5fa" : "1px solid rgba(255,255,255,0.25)",
+                    borderRadius: 5,
+                    background:
+                      activeType === t ? "rgba(96,165,250,0.22)" : "rgba(255,255,255,0.06)",
+                    color: "#fff",
+                    cursor: "pointer",
+                    fontSize: 12,
+                    fontWeight: 600,
+                    padding: "3px 9px",
+                  }}
+                >
+                  {t === "indirect" ? "Indirect Fire" : t.charAt(0).toUpperCase() + t.slice(1)}
+                </button>
+              ));
+            })()}
           </div>
         )}
       {weaponSelectionMenu && (
