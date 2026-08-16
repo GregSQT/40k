@@ -109,16 +109,10 @@ scripts/check_ai_rules.py et ai/hidden_action_finder.py appartiennent à la vér
 
 WORKTREES
 
-Avant la PREMIÈRE écriture de code d'une tâche :
-
-git status --short ;
-
-proposer un worktree en une ligne ;
-
-attendre la réponse.
-Lecture/analyse/doc seule → pas de proposition.
-Tree sale → le signaler : le worktree part du dernier commit, les modifications locales ne suivent pas.
-Si accepté : EnterWorktree, nom décrivant le sujet. Si refusé : ne pas re-proposer.
+Avant la PREMIÈRE écriture de code : vérifier git status --short.
+Tree propre → EnterWorktree directement, nom décrivant le sujet.
+Tree sale → signaler (les modifications locales ne suivent pas le worktree) et attendre.
+Lecture/analyse/doc seule → pas de worktree.
 Fin : commit → ExitWorktree "keep" → merge dans main → supprimer worktree + branche.
 Jamais remove avant merge. discard_changes: true interdit.
 Training en cours → ne toucher aucun JSON de config/ (relu à chaud par les évaluations).
@@ -131,10 +125,6 @@ config/users.db
 
 ai/models/**/*.zip
 
-Scénarios : paramètre clé = roster ; déploiement possible = IA, random, présélectionné.
-Succès = performances robustes sur plusieurs scénarios, jamais un pic isolé.
-Catastrophic forgetting : surveiller les régressions de performance pendant le training.
-
 MODE UNIQUE : AUTO
 
 AUTO est permanent ; aucun marqueur [MODE ...].
@@ -143,28 +133,21 @@ T1–T4 ne sont JAMAIS relâchées.
 Autorisé : commandes prévues par le prompt, relance automatique après fix, plusieurs modifications liées, lectures nécessaires, recherche ciblée de motifs/jumeaux/appelants.
 Toujours respecter l'ordre, les checkpoints de validation et les listes de fichiers explicitement imposés par le prompt ; vérifier après chaque modification avant de poursuivre.
 Interdit : exploration par curiosité ; refactor non demandé sauf nécessité causale pour fermer T2.
-
-PRIORITÉ : QUALITÉ > TOKENS
-
-Économiser les tokens de SORTIE, jamais la vérification : lecture, appelants, mesure, grep jumeau, tests, rouge/vert, vrai chemin ne se coupent jamais pour économiser.
-Être concis dans la réponse, pas dans le travail. Pas de narration d'outils/étapes, pas de récap inutile, pas de code recopié sauf preuve verbatim exigée par T4 REVIEW.
-La concision ne réduit jamais le périmètre de conception ; une solution choisie seulement parce qu'elle est plus courte à expliquer est un défaut.
+Prompt ambigu ou contradictoire → présenter la contradiction, demander de trancher, ne pas choisir.
 
 UNE SEULE RÉPONSE, À LA FIN
 
 Ne rien adresser à l'utilisateur pendant le travail.
-Exceptions : question bloquante, checkpoint worktree ci-dessus, STOP imposé par ce fichier, checkpoint investigation ci-dessous. Dans ces cas, répondre puis s'arrêter.
+Exceptions : question bloquante, worktree (tree sale au premier tour), STOP imposé par ce fichier, checkpoint T3 (cause établie → stop avant écriture). Dans ces cas, répondre puis s'arrêter.
 Sinon, tout ce que l'utilisateur doit lire est dans le message final.
-
-CHECKPOINT INVESTIGATION : dès que la cause est établie (T3/T4-CAUSE terminé) et avant la première écriture de code, répondre avec : cause identifiée (fichier:ligne), plan de correction, périmètre T2 prévu. Puis s'arrêter et attendre. L'écriture démarre au tour suivant.
-L'analyse/hypothèse/plan doivent être établis avant action ; ne les exposer avant action que si une décision utilisateur est nécessaire.
 
 STYLE
 
-Français, tutoiement, direct, strictement la demande ; pas d'étapes supplémentaires non sollicitées ; pas d'artifact/document/fichier/canvas sans demande explicite ; pas d'intro/conclusion générique ni « n'hésite pas » ; si 3 phrases suffisent, pas 3 paragraphes ; oui/ok → ne pas développer ; expliquer simplement et précisément ce qui a été fait.
+Français, tutoiement, direct, strictement la demande ; pas d'étapes supplémentaires non sollicitées ; pas d'artifact/document/fichier/canvas sans demande explicite ; pas d'intro/conclusion générique ni « n'hésite pas » ; si 3 phrases suffisent, pas 3 paragraphes ; oui/ok → ne pas développer ; expliquer simplement et précisément ce qui a été fait. Pas de narration d'outils/étapes, pas de code recopié sauf preuve verbatim exigée par T4 REVIEW.
 ÉTAT DU CODE : ne jamais supposer ; lire/vérifier avant d'affirmer ; pas de devrait, probablement, je pense que sur le code.
 Estimations/architecture/opinions : incertitude explicite autorisée.
 AVIS EXPERT : signaler une meilleure approche lorsqu'elle existe ; ne pas valider par défaut.
+Suppression de code → commentaire seulement si contre-intuitive (contrôle retiré sciemment, branche condamnée) ; sinon git suffit, pas de commentaire-tombeau.
 
 MODÈLE / EFFORT
 
@@ -174,21 +157,6 @@ Recommander effort high uniquement si : algorithme à cas limites complexes ou r
 Format : 🟡🟡🟡 Effort suggéré : high — [critère exact rempli] 🟡🟡🟡
 Sinon Sonnet 5 ; ne rien afficher. Les deux bannières peuvent coexister.
 
-APPROCHE / ARBITRAGE
-
-Avant modification : établir cause/hypothèse, plan et périmètre.
-Tout vrai choix de conception/architecture/mécanisme se présente au format ARBITRAGE ci-dessous.
-Ne rien faire compte seulement si défendable ; épouvantail interdit.
-Interdit de recommander « le plus rapide », « petit diff » ou « A maintenant, B plus tard » pour reporter une dette.
-En AUTO, comparer n'impose pas d'attendre sauf décision appartenant réellement à l'utilisateur ; consigner l'arbitrage au rapport final.
-
-PÉRIMÈTRE — TROIS ÉTATS SEULEMENT
-
-A. APPARTIENT AU SUJET : demandé explicitement, nécessaire au workflow, ou critère T2 rempli → traiter MAINTENANT ; interdit de le transformer en TODO/dette/prompt/« plus tard ».
-B. HORS SUJET : aucun critère T2 → ne pas modifier ; bug prouvé = PROMPTS ; simple suspicion = une ligne dans LU.
-C. APPARTIENT AU SUJET MAIS IMPOSSIBLE : uniquement dépendance externe, donnée indisponible ou décision utilisateur → STOP avec raison précise.
-Trop long, changement d'algorithme, hors chemin critique ne sont jamais des impossibilités.
-
 T1 — AUCUN FALLBACK / WORKAROUND ANTI-ERREUR
 
 Jamais de fallback, workaround ou default destiné à masquer/éviter une erreur.
@@ -196,6 +164,11 @@ Corriger la root cause. Donnée obligatoire absente → erreur explicite.
 Fallback autorisé seulement comme comportement métier réellement valide.
 
 T2 — CLÔTURE COMPLÈTE
+
+Périmètre — trois états :
+A. APPARTIENT AU SUJET : demandé explicitement, nécessaire au workflow, ou critère T2 rempli → traiter MAINTENANT ; interdit de le transformer en TODO/dette/prompt/« plus tard ».
+B. HORS SUJET : aucun critère T2 → ne pas modifier ; bug prouvé = PROMPTS ; simple suspicion = une ligne dans LU.
+C. APPARTIENT AU SUJET MAIS IMPOSSIBLE : uniquement dépendance externe, donnée indisponible ou décision utilisateur → STOP avec raison précise. Trop long, changement d'algorithme, hors chemin critique ne sont jamais des impossibilités.
 
 Un sujet se ferme complètement : root cause + correction + impacts + jumeaux + appelants + tests + doc/config + suppression des instruments temporaires.
 Ne pas livrer une solution inférieure si une meilleure solution a été identifiée et vérifiée. Documenter un manque ≠ le traiter.
@@ -223,36 +196,31 @@ ARBITRAGE/PROMPTS ne servent jamais à externaliser du travail T2 faisable.
 T3 — INVESTIGATION AUTONOME
 
 Toute demande d'analyse/bug/root cause autorise immédiatement toutes les LECTURES nécessaires : Read, Grep, Glob, appelants, logs, flux d'exécution, fichiers non nommés initialement.
-Cette liberté de lecture n'autorise pas une modification hors AUTO/T2.
 Ne jamais demander « veux-tu que j'investigue ? » ni interrompre l'investigation pour demander de continuer.
-Arrêt seulement si :
-
-root cause établie avec preuves suffisantes pour exclure les hypothèses concurrentes raisonnables ;
+Checkpoint dès que la cause est établie : répondre avec cause (fichier:ligne), plan de correction, périmètre T2 prévu → s'arrêter et attendre. L'écriture démarre au tour suivant.
+Autres arrêts :
 
 donnée/log/exécution inaccessible indispensable → demander précisément ;
 
 investigation approfondie sans cause claire → reconnaître l'échec et donner les pistes restantes.
 
-T4 — CAUSE
+T4 — DIAGNOSTIC
 
 Ne rien corriger tant que la cause n'est pas suffisamment prouvée. Hypothèse ≠ cause.
 Avant correction : remonter les appelants, lire le code, identifier fichier:ligne, vérifier le chemin réel.
 Si mesurable, mesurer plutôt que déduire : instrumenter/exécuter/compter. semble faire X ne vaut pas exécuté, obtenu X.
 Si le symptôme utilisateur est faux/incomplet : le dire avec preuve ; ne pas chercher uniquement là où il pointe.
-
-T4 — JUMEAU
+Toujours distinguer vérifié / non vérifié ; non exploré ≠ sain ; ne jamais affirmer avoir exécuté ce qui ne l'a pas été.
 
 Après CHAQUE correction : grep symbole/motif, rechercher les miroirs, examiner chaque occurrence, traiter celles appartenant à T2, rapporter hits traités/écartés + raison ; même 0 hit doit être rapporté.
 Toujours vérifier que le vrai chemin de production atteint le code corrigé. Code testé mais jamais appelé = correction non prouvée.
 
-T4 — VERROU
+T4 — TESTS
 
 Pour chaque correction d'invariant moteur : écrire/adapter le test → remettre le défaut → constater ROUGE → rétablir le fix → constater VERT → rapporter.
 Test vert du premier coup ≠ verrou. Exception : parsing/formatage trivial où cette réintroduction n'apporte aucune preuve utile.
 VERT VACANT : vérifier données présentes, énumération non vide, mutation appliquée, bonne valeur observée.
 Le test construit son scénario ; jamais dépendre d'une graine, d'un ordre implicite ou d'une configuration absente.
-
-T4 — COUVERTURE
 
 Tout comportement modifié doit avoir un test automatisé dans la même livraison ; ce test entre automatiquement dans T2.
 Harnais : Python → pytest (tests/unit/... ou tests/integration/..., référence fichier::test) ; TS/TSX → vitest *.test.ts(x) à côté du module, référence fichier > test.
@@ -262,17 +230,9 @@ Feature sans test rencontrée : liée au code touché (même fonction/invariant/
 
 T4 — REVIEW
 
-Pour /code-review, /simplify, audit : finding valide = scénario concret état/entrée → chemin atteignable dans une utilisation supportée → sortie fausse/crash/invariant violé.
-Sans scénario : finding écarté, pas « mineur ». Hors demande explicite, style/nommage/découpage/extraction/préférence architecturale sur code correct/risque futur sans défaut démontré = pas des findings.
-PREUVE PAR LE FICHIER, jamais seulement le diff : recopier VERBATIM la ligne fautive seule ; pour la garde/default/early-return/appelant, citer fichier:ligne suffit ; citation incorrecte (ligne ou référence) → finding écarté.
-Ancre hors diff → relire la zone du fichier ET nommer la ligne DU diff qui la casse ; sinon écarter.
-Finding disant lui-même que le code est correct (correct but, futur, compounding sans panne) = style → ne pas rendre.
-Review finie quand aucun finding AVEC scénario ne reste ; ne pas relancer pour du cosmétique et le signaler si demandé.
-
-VERDICT BORNÉ
-
-Toujours distinguer vérifié / non vérifié ; non exploré ≠ sain ; ne jamais affirmer avoir exécuté ce qui ne l'a pas été.
-Suppression → commentaire code seulement si contre-intuitive (contrôle retiré sciemment, branche condamnée), avec pourquoi/alternative ; sinon git suffit, pas de commentaire-tombeau.
+Finding valide = scénario concret (état/entrée → sortie fausse/crash/invariant violé sur chemin réellement atteint). Sans scénario : écarté, pas « mineur ».
+PREUVE PAR LE FICHIER : recopier VERBATIM la ligne fautive ; citation incorrecte → finding écarté. Style/nommage/préférence architecturale sur code correct = pas des findings.
+Review finie quand aucun finding AVEC scénario ne reste.
 
 RAPPORT FINAL
 
@@ -297,6 +257,7 @@ Pas de verdict vague (optimal, tout propre, doc à jour) ; uniquement des faits 
 
 ARBITRAGE
 
+Tout vrai choix de conception/architecture/mécanisme se présente au format ARBITRAGE. Ne rien faire compte seulement si défendable ; épouvantail interdit. Interdit de recommander « le plus rapide », « petit diff » ou « A maintenant, B plus tard » pour reporter une dette. Un ARBITRAGE qui décrit du travail T2 faisable est une dette déguisée.
 Seulement pour vraie décision utilisateur ou vrai choix de conception à expliciter.
 Chaque sujet : titre ; problème observable en 2–4 phrases max, lisible sans code ; 2–3 options réelles de 1–2 lignes chacune avec gain + coût ; RECOMMANDATION : A/B/C + raison long terme en ≤3 phrases.
 Pas de tableau, bloc code, sous-liste, jargon/noms de fonction inutiles ni chiffres de profiling dans le problème.
@@ -316,21 +277,11 @@ Suspicion non prouvée → une ligne dans LU, aucun prompt. PROMPTS ne remplace 
 
 RELIRE
 
-Obligatoire dès qu'un fichier compté comme code a bougé ; omis pour pure lecture/doc/discussion.
-L'agent ne lance JAMAIS /code-review ni /simplify, via Skill/Bash/sous-agent ou contournement.
-Liste : .claude/hooks/relire-en-attente.sh --liste <session_id> ; session_id = UUID du dossier PARENT du scratchpad.
-Recopier cette liste accumulée depuis la dernière relecture (tout le sujet, pas seulement le dernier tour) ; ne jamais utiliser git status comme substitut. Si hook défaillant : tenir la liste manuellement et le dire.
-Ne jamais lancer .claude/hooks/relire-en-attente.sh --vider <session_id> ; seulement fournir la commande.
-Filtrage :
-
-toujours exclus : config/**/*.json, *.md sauf CLAUDE.md, Documentation/** ;
-
-toujours inclus : engine/**, ai/**, services/**, frontend/src/** ; aucun jugement d'exclusion ;
-
-zone grise : tests/**, scripts/**, autres → exclusion seulement avec justification explicite.
-Sujet FINI = aucune tâche ni arbitrage ouvert. Bannière seulement si FINI + liste filtrée non vide : 🟢 Bon moment pour /code-review — <n> fichiers en attente.
-Relire en cours de sujet = prématuré. Gros lot → ordre via scripts/review_plan.py.
-Chemins ABSOLUS obligatoires ; chemin avec espace = conserver les guillemets rendus par le hook.
+Obligatoire dès qu'un fichier compté comme code a bougé ; omis pour lecture/doc/discussion.
+L'agent ne lance JAMAIS /code-review ni /simplify.
+Liste : .claude/hooks/relire-en-attente.sh --liste <session_id> (UUID du dossier PARENT du scratchpad). Ne jamais lancer --vider, seulement le fournir. Si hook défaillant : liste manuelle.
+Filtrage — exclus : config/**/*.json, *.md sauf CLAUDE.md, Documentation/** ; inclus sans exception : engine/**, ai/**, services/**, frontend/src/** ; zone grise (tests/**, scripts/**) : exclusion seulement avec justification.
+Bannière 🟢 Bon moment pour /code-review seulement si sujet FINI + liste non vide. Gros lot → scripts/review_plan.py. Chemins ABSOLUS ; guillemets si espace.
 Format :
 RELIRE:
 🟢 Bon moment pour /code-review — <n> fichiers en attente [si applicable]
