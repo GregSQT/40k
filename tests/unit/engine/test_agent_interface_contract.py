@@ -19,12 +19,13 @@ Deux régimes, et il faut savoir lequel on lit :
   d'Advance). C'est ce que la production donne au décodeur. Utilisé par les cas de mouvement et
   par la parité masque↔décodeur.
 - `phase_state` — copie de l'état post-`reset` dont le champ `phase` est réécrit. C'est un
-  raccourci ASSUMÉ, et il n'est légitime que parce que le décodeur, pour ces familles-là, ne lit
-  **que** `eligible_units[0]["id"]` : les slots de tir/charge/mêlée ne consultent ni pool ni
-  masque (§9 P3-1/P3-2 — la résolution slot → escouade appartient au moteur, la dupliquer ici
-  réécrirait la règle). Réécrire `phase` ne peut donc pas fabriquer un routage qui n'existerait
-  pas. Le prix de ce raccourci : ces cas ne prouvent rien sur la cohérence de l'état, seulement
-  sur le routage — c'est la parité masque↔décodeur qui couvre l'autre moitié.
+  raccourci ASSUMÉ. Les slots de charge et mêlée ne lisent que `eligible_units[0]["id"]`
+  (§9 P3-1/P3-2 — la résolution slot → escouade appartient au moteur). Les slots de TIR lisent
+  aussi `resolve_squad_shooting_type` depuis l'état ; le raccourci reste valide parce que
+  `phase_state` s'appuie sur un état moteur réel (post-`reset`), pas sur un dict minimal. Réécrire
+  `phase` ne peut donc pas fabriquer un routage qui n'existerait pas. Le prix de ce raccourci :
+  ces cas ne prouvent rien sur la cohérence de l'état, seulement sur le routage — c'est la parité
+  masque↔décodeur qui couvre l'autre moitié.
 
 Dans les deux régimes, les réglages par-épisode dont ce fichier a besoin sont **épinglés sur
 l'instance** (`_config_helpers.pin_active_deployment`), jamais lus depuis la config : voir la
@@ -428,7 +429,7 @@ def test_shoot_slot_routes_to_that_target_slot(phase_state, slot):
     result = decoder.convert_squad_action(
         SHOOT_SLOT_BASE + slot, game_state, eligible_units=_eligible(game_state, squad_id)
     )
-    assert result == {"action": "squad_shoot", "target_slot": slot, "squad_id": squad_id}
+    assert result == {"action": "squad_shoot", "target_slot": slot, "squad_id": squad_id, "shooting_type": "normal"}
 
 
 @pytest.mark.parametrize("slot", [0, CHARGE_SLOT_COUNT - 1])

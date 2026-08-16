@@ -24,6 +24,7 @@ from engine.phase_handlers import shared_utils as SU
 from engine.phase_handlers.shared_utils import (
     SHOOTING_TYPE_INDIRECT,
     SHOOTING_TYPE_NORMAL,
+    SQUAD_SHOOTING_TYPE_CHOICE_KEY,
     resolve_squad_shooting_type,
     squad_shooting_type_choose,
     squad_shooting_type_clear,
@@ -138,7 +139,10 @@ def _decode(action_int):
     from engine.action_decoder import ActionDecoder
 
     decoder = ActionDecoder(config={"observation_params": {"action_space_size": 31}})
-    game_state = {"phase": "shoot"}
+    game_state = {
+        "phase": "shoot",
+        SQUAD_SHOOTING_TYPE_CHOICE_KEY: {"1": SHOOTING_TYPE_NORMAL},
+    }
     return decoder.convert_squad_action(
         action_int, game_state, eligible_units=[{"id": "1"}],
     )
