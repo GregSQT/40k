@@ -49,11 +49,24 @@ Encadré de la même page, qui lève l'ambiguïté sur les AUTRES armes de l'uni
 ### Ce que ces citations excluent
 
 - **Ce n'est pas un « −1 à la touche »**, comme le supposait la note de chantier du 2026-08-15.
-  C'est un **seuil fixe qui remplace la CT** : 6+, ou 4+ sous condition. Un `BS 2+` tirant en
-  indirect touche sur 6+, pas sur 3+.
-- Le seuil de 4+ n'est PAS une propriété de l'arme ni de la cible seule : il exige **deux**
-  faits simultanés — l'unité est restée immobile ce tour, ET la cible est visible d'au moins une
-  unité amie (le « spotter »).
+- **Ce n'est pas non plus un « seuil substitué »**, comme le disait la première version de cette
+  spec. C'est un **plancher d'échec sur le dé NON MODIFIÉ**, qui se compose avec la table 05.01.
+  Celle-ci teste, dans l'ordre : `unmodified 1 → FAILS`, `unmodified 6 → CRITICAL HIT`,
+  `≥ BS → HIT`, sinon `FAILS`. 10.07 remplace la première ligne par `unmodified 1-5 → FAILS`
+  (ou `1-3` avec spotter). D'où le seuil EFFECTIF :
+
+      seuil_effectif = max(seuil_de_touche_effectif, plancher)      plancher ∈ {6, 4}
+
+  Deux conséquences que la formulation « seuil substitué » masquait :
+  * **sans spotter, c'est un 6+ DUR, quel que soit le BS** — et même quels que soient les
+    modificateurs, puisque `unmodified 6 → CRITICAL HIT` reste la deuxième ligne de 05.01. Un
+    `BS 2+` sous [HEAVY] touche sur 6+. C'est exact et c'est fixe, littéralement dans la règle.
+  * **avec spotter, ce n'est PAS un 4+ plat** : `1-3` échouent, puis la ligne `≥ BS` s'applique
+    normalement. Un `BS 5+` touche donc toujours sur 5+, pas sur 4+. C'est `max(BS, 4)`.
+- **L'unité qui tire compte comme son propre spotter.** 01.02 : « Friendly units and models are
+  those in your army », sans exclusion de l'unité active. Le cas est de toute façon marginal —
+  contre une cible visible, le tir normal domine (cf. §6) — mais il doit être tranché au code et
+  non laissé à l'ordre des tests.
 - Le couvert est **octroyé**, pas calculé : la cible l'a, quelle que soit la géométrie. C'est
   l'exact opposé de [IGNORES COVER] 24.18, et les deux peuvent coexister sur une même arme.
 - L'interdiction de relance porte sur les **jets de touche** seulement. Les relances de blessure
@@ -105,17 +118,38 @@ limite T2 des ~5 fichiers.
 3. **Ciblage** — le pool de cibles des armes [INDIRECT FIRE] cesse d'exiger la ligne de vue.
    ⚠️ Ne PAS toucher `compute_unit_los` : c'est la source unique de l'obs, du reward et du
    déploiement. Le contournement se fait au niveau du **gate de ciblage**, pas du calcul.
-4. **Résolution** — seuil 6+/4+ **substitué** à la CT, couvert octroyé, relances de touche
-   interdites. Le prédicat spotter (« la cible est visible d'une unité amie ») est neuf.
+4. **Résolution** — plancher d'échec `max(seuil, 6)` ou `max(seuil, 4)` (cf. §1), couvert
+   octroyé, relances de touche interdites. Le prédicat spotter est neuf mais **PAS coûteux** :
+   `compute_unit_los` est mémoïsé par PAIRE `(tireur, cible)` dans un cache persistant, invalidé
+   de façon ciblée par `_touch_unit_los` à chaque mouvement ou perte de figurine. Les paires
+   `(unité amie, cible)` sont déjà chaudes — c'est le balayage d'éligibilité au tir qui les
+   remplit à chaque step. Le prédicat coûte donc une dizaine de lectures de dict, pas un calcul
+   de LoS. ⚠️ La v1 de cette spec annonçait un « risque de performance » : mesure faite sur le
+   code, il n'y en a pas, et l'inventer aurait fait sur-concevoir un cache de plus.
 5. **Décision** — masque d'action + observation + application côté agent ; côté PvP, le choix
    du type de tir à l'activation.
-6. **Journal** — `[SHOOT_TYPE:indirect]` est **déjà prévu** : le token existe depuis la
-   grammaire 4 et son jeu de valeurs est lu dans le moteur, donc l'ajout d'un type le fait
-   apparaître sans toucher `ai/step_logger.py`. Vérifier que `_shoot_types()` le récupère bien,
-   et que `replayParser.ts` le tolère (il vit dans les tags de ligne, pas sur un jet).
+6. **Journal** — ⚠️ **la v1 de cette spec disait « déjà prévu » : c'était faux, et c'était le
+   mode d'échec que toute la session du 12-16 août a servi à fermer.** `[SHOOT_TYPE:indirect]`
+   sortira bien tout seul (le jeu de valeurs est lu dans le moteur), mais il ne nomme que le
+   TYPE. Les deux effets qui se vérifient n'auraient aucune représentation :
+   * le **plancher** — `Hit 6(3+->6+)` est exact, mais rien ne dirait si le 6 vient de la règle
+     ou de la datasheet, ni si le cas 4+ était mérité. D'où `[INDIRECT FIRE:<plancher>+]`, valeur
+     DÉCLARÉE par la règle : le lecteur recoupe `eff == max(base_après_couvert, plancher)` ;
+   * le **couvert octroyé** — il agit sur le même seuil que le plancher, et `hit_rule_modifier`
+     ne porte qu'une cause. Le token `[COVER]` existe déjà : il doit être posé ici aussi, sinon
+     une des deux causes du seuil affiché reste muette.
+   Vérifier enfin que `replayParser.ts` tolère les deux (tags de ligne pour `[SHOOT_TYPE:]`,
+   segment `Hit` pour les deux autres → jeu FERMÉ `NON_ABILITY_ROLL_TOKENS` à étendre).
 7. **Analyzer** — nouveau contrôle possible : un tir indirect doit porter le couvert et un seuil
    conforme. ⚠️ **À traiter comme un lot séparé**, avec sa mesure de taux de fausse alarme : c'est
    le mode d'échec historique de ce fichier (317, puis 334, puis 31 faux positifs livrés verts).
+
+8. **Mesure** — DÉCISION UTILISATEUR du 2026-08-16 : la règle est livrée pour le **PvP et la
+   conformité aux règles**, PAS pour le win-rate. Aucun roster d'ArmageddonAgent ne porte d'arme
+   [INDIRECT FIRE] (mesuré : 0 occurrence de `Biovore` / `HiveGuardImpalerCannon` dans les quatre
+   rosters d'entraînement, qui sont Space Marines et Orks) — l'agent entraîné ne rencontrera donc
+   jamais la règle, et un compteur d'usage à zéro sur ces runs-là sera CORRECT. Ne pas en faire un
+   critère de succès, ne pas l'attendre dans un rapport d'analyzer.
 
 ## 4. Ordre d'exécution imposé
 
@@ -125,9 +159,16 @@ verrouillé par ses tests, PUIS 5, PUIS le retrain, PUIS 7 en lot séparé.
 
 ## 5. Pièges nommés d'avance
 
-- **Le seuil remplace la CT, il ne la modifie pas.** Le journal affiche déjà `base+->eff+` pour
-  [HEAVY] et [COVER] ; ici il n'y a pas de « base » qui joue — écrire `2+->6+` laisserait croire
-  à un modificateur de −4.
+- **Le journal : `base+->eff+` convient, contrairement à ce que disait la v1 de cette spec.**
+  Puisque `eff = max(base, plancher)`, l'affichage `Hit 4(3+->6+)` est exact et strictement
+  analogue à [COVER] — qui dégrade lui aussi le seuil. La v1 refusait cette forme en croyant à
+  un « modificateur de −4 » : il n'y en a pas, il y a une composition par `max`.
+  ⚠️ En revanche **deux causes agissent sur le même nombre** sous tir indirect : le couvert
+  octroyé (+1 au seuil dans ce moteur) PUIS le plancher. `hit_rule_modifier` ne porte qu'une
+  cause. Décision retenue : garder `base+->eff+` pour le résultat composé, et poser en plus
+  `[INDIRECT FIRE:<plancher>+]` — le plancher est une valeur DÉCLARÉE par la règle (6 ou 4),
+  donc exactement la grammaire `[REGLE:X]` du dépôt, et un lecteur peut alors recouper
+  `eff == max(base_après_couvert, plancher)` sans re-dériver quoi que ce soit.
 - **Le couvert octroyé traverse `_cover_worsened_bs`**, qui court-circuite sur [IGNORES COVER].
   Une arme portant les deux règles doit être tranchée explicitement, pas par l'ordre des `if`.
 - **`resolve_squad_shooting_type` commence par rendre `None` si l'escouade a déjà tiré.** Tout
