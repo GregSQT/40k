@@ -164,3 +164,51 @@ def test_le_tir_ordinaire_declare_son_type_explicitement():
     retomber sur la dérivation, qui ne saurait pas distinguer « l'agent a choisi normal » de
     « l'agent n'a rien dit ». C'est la distinction que tout ce chantier introduit."""
     assert "shooting_type" in _decode(mi.SHOOT_SLOT_BASE)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Robustesse de l'effacement du type
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_shooting_type_cleared_if_squad_declare_shoot_raises(monkeypatch):
+    """try/finally garantit squad_shooting_type_clear même si squad_declare_shoot lève.
+
+    Sans le finally, le type posé par squad_shooting_type_choose survivrait dans game_state.
+    Le bare-except de execute_ai_turn (3462) avalant l'exception silencieusement, le masque
+    du tour suivant ouvrirait des slots normaux sans contrainte de LoS (resolve rend INDIRECT,
+    indirect_shooting_applies retourne True, require_visibility=False)."""
+    from unittest.mock import patch
+    import engine.phase_handlers.shared_utils as SU_mod
+    from engine.w40k_core import W40KEngine
+
+    def _raise(*a, **kw):
+        raise RuntimeError("mock — squad_declare_shoot injecté pour le test")
+
+    monkeypatch.setattr(SU_mod, "eligible_squad_shooting_types",
+                        lambda gs, sid: (SHOOTING_TYPE_NORMAL,))
+    monkeypatch.setattr(SU_mod, "squad_shooting_unit_activation_start", lambda gs, sid: None)
+    monkeypatch.setattr(SU_mod, "squad_declare_shoot", _raise)
+    monkeypatch.setattr(SU_mod, "get_enemy_slot_mapping", lambda gs, player: ["2"])
+
+    eng = object.__new__(W40KEngine)
+    eng.game_state = {
+        "phase": "shoot",
+        "units_cache": {"1": {"player": 1}},
+    }
+    semantic = {
+        "action": "squad_shoot",
+        "squad_id": "1",
+        "target_slot": 0,
+        "shooting_type": SHOOTING_TYPE_NORMAL,
+    }
+
+    with patch.object(eng, "_initialize_rule_choice_runtime_state", lambda: None):
+        try:
+            eng._process_squad_action(semantic)
+        except RuntimeError:
+            pass
+
+    choices = eng.game_state.get(SU_mod.SQUAD_SHOOTING_TYPE_CHOICE_KEY, {})
+    assert "1" not in choices, (
+        "squad_shooting_type_clear doit effacer le choix même si squad_declare_shoot lève"
+    )
