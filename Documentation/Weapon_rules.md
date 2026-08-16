@@ -3,7 +3,8 @@
 **Last Updated**: 2026-08-12  
 **Status**: Production — 22 des 23 règles du registre ont leurs effets de jeu ; seule
 `INDIRECT_FIRE` 24.19 n'est pas implémentée, et délibérément (cf. « Gameplay Effect Coverage »).
-Toutes les règles vives sont nommées dans les DEUX journaux, Game Log PvP et `step.log`.
+**20 d'entre elles sont nommées dans les DEUX journaux** (Game Log PvP et `step.log`) ; les deux
+exceptions, `ASSAULT` et `CLOSE_QUARTERS`, sont mesurées et décrites en « Journal coverage ».
 
 **Dans l’index doc** : [Documentation/README.md](README.md) (section « Systèmes de jeu et référence métier »). Vue d’ensemble du package `engine/weapons/` dans [AI_IMPLEMENTATION.md](AI_IMPLEMENTATION.md) (section weapons/).
 
@@ -188,6 +189,30 @@ describes weapons rather than resolving them). Where each lives:
 24.23 says « you **can** choose », and auto-wounding forbids a critical wound — so it is a losing
 move on a `LETHAL HITS` + `DEVASTATING WOUNDS` weapon. `lethal_hits_auto_wound_is_better()`
 arbitrates by expected damage, and the log names the rule only when the engine took the option.
+
+### Journal coverage — which rule is named where
+
+Measured rule by rule on 2026-08-16 against `weapon_rule_log_tokens` (the PvP Game Log socle) and
+`ai/step_logger.py` (`step.log`). A rule having a gameplay effect is not the same as that effect
+being *visible*: a rule that fires without being named reads as `NOT USED` in the analyzer's §1.8,
+which is the failure mode this whole area exists to prevent.
+
+**20 of the 22 live rules are named in both journals.** Two are not, and both fail the same way:
+
+| Rule | PvP Game Log | `step.log` | State |
+|---|---|---|---|
+| `ASSAULT` 24.04 | ❌ no token | ⚠️ **dead branch** | `step_logger.py` renders `[ASSAULT]` from `details["assault_applied"]` — **nothing anywhere sets that key** (grep, 2026-08-16: one reader, zero writers). The token can never appear |
+| `CLOSE_QUARTERS` 24.07 | ❌ no token | ⚠️ **dead branch** | Same, via `details["close_quarters_applied"]` |
+
+⚠️ **What saves the analyzer today is not the log** — it is that `shoot_handler.py` re-derives both
+usages instead of reading a token: `ASSAULT` from « the shooter is in `units_advanced` **and** the
+armoury declares the rule », `CLOSE_QUARTERS` from the engagement geometry. So §1.8 does count
+them, and the dead branches are not currently producing a false `NOT USED`. But that re-derivation
+is a *second* definition of each rule, living in the analyzer instead of the engine — precisely
+what `[RAPID FIRE:X]` and `[CLEAVE:X]` stopped doing when their tokens were written. `HAZARDOUS`
+24.15 is the counter-example that shows the intended shape: it carries no weapon-rule token either,
+but it has its **own log line** (`type: "hazard"`, emitted by `roll_hazard_for_unit`), which
+reaches both journals — named, not re-derived.
 
 **`INDIRECT_FIRE` is not an oversight and not a backlog item that fell through.** It is the single
 entry of `weapon_rules.json` without an `obs_id`, precisely because it is not implemented, and
