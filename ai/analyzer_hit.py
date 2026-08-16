@@ -164,12 +164,13 @@ def check_hit_result(
     m_indirect = _INDIRECT_FIRE_TOKEN_RE.search(action_desc)
     effective_target = max(target, int(m_indirect.group(1))) if m_indirect else target
     stats[f"{key}_checked"][attacker_player] += 1
-    if expected_hit_success(roll, effective_target) == bool(WOUND_SEGMENT_PRESENT_RE.search(action_desc)):
+    expected_success = expected_hit_success(roll, effective_target)
+    if expected_success == bool(WOUND_SEGMENT_PRESENT_RE.search(action_desc)):
         return
     stats[f"{key}_mismatch"][attacker_player] += 1
     first = stats["first_error_lines"][f"{key}_mismatch"]
     if first[attacker_player] is None:
-        expected = "TOUCHE" if expected_hit_success(roll, effective_target) else "ÉCHEC"
+        expected = "TOUCHE" if expected_success else "ÉCHEC"
         first[attacker_player] = {
             "episode": state.current_episode_num,
             "line": line.strip(),

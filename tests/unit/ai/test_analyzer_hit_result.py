@@ -175,6 +175,13 @@ _INDIRECT_HIT_ON_CRIT = (
     f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT Unit 101{T} with [Bolter]"
     " - Hit 6(3+->4+) [COVER] [INDIRECT FIRE:6+] - Wound 4(4+) - Save 2(3+) - Dmg:1HP [R:+0.0] [SUCCESS]\n"
 )
+# Mismatch sous plancher : roll=4, BS=4+, plancher=6+ — le moteur écrit Wound (HIT), attendu MISS.
+# Ce scénario prouve le chemin de détection ; sans le max(target, plancher) le mismatch serait
+# absorbé comme faux positif inverse.
+_INDIRECT_MISMATCH_WOUND_SOUS_PLANCHER = (
+    f"[10:00:02] E1 T1 P1 SHOOT : Unit 1{S} SHOT Unit 101{T} with [Bolter]"
+    " - Hit 4(3+->4+) [COVER] [INDIRECT FIRE:6+] - Wound 5(4+) - Save 2(3+) - Dmg:1HP [R:+0.0] [SUCCESS]\n"
+)
 
 
 def test_tir_indirect_miss_legal_roll_superieur_au_bs_inferieur_au_plancher(tmp_path):
@@ -189,6 +196,21 @@ def test_tir_indirect_hit_sur_critique_plancher_6(tmp_path):
     stats = _stats(tmp_path, _INDIRECT_HIT_ON_CRIT)
     assert stats["shoot_hit_result_mismatch"][1] == 0
     assert stats["shoot_hit_result_checked"][1] == 1
+
+
+def test_tir_indirect_mismatch_wound_ecrit_sous_plancher(tmp_path):
+    """roll=4, BS=4+, plancher=6+ : le moteur écrit Wound (HIT) alors que le jet < plancher.
+
+    Prouve le chemin de DÉTECTION. Sans max(target, plancher), effective_target=4 et expected=HIT
+    — le mismatch ne serait pas signalé même si le moteur a tort.
+    """
+    stats = _stats(tmp_path, _INDIRECT_MISMATCH_WOUND_SOUS_PLANCHER)
+    assert stats["shoot_hit_result_mismatch"][1] == 1, (
+        "mismatch attendu : roll=4 < plancher=6+ mais Wound présent"
+    )
+    assert stats["shoot_hit_result_checked"][1] == 1
+    first = stats["first_error_lines"]["shoot_hit_result_mismatch"][1]
+    assert "seuil 6+" in first["detail"], first
 
 
 def test_le_jumeau_melee_est_branche(tmp_path):
