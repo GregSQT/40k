@@ -5661,8 +5661,6 @@ class W40KEngine(gym.Env):
             details["psychic_applied"] = True
         # [ASSAULT] 24.04 / [CLOSE-QUARTERS] 24.07 : drapeaux de groupe, meme regime que
         # `ignoresCoverApplied`. La cle n existe que si la regle a joue.
-        # [ASSAULT] 24.04 / [CLOSE-QUARTERS] 24.07 : drapeaux de groupe, meme regime que
-        # `ignoresCoverApplied`. La cle n existe que si la regle a joue.
         if raw_log.get("assaultApplied"):  # get allowed
             details["assault_applied"] = True
         if raw_log.get("closeQuartersApplied"):  # get allowed

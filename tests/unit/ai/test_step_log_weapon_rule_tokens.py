@@ -1309,6 +1309,41 @@ def test_assault_dans_les_details_du_pont(monkeypatch, tmp_path):
     assert "[ASSAULT]" in line, line
 
 
+def test_assault_sans_avance_absent_du_pont(monkeypatch, tmp_path):
+    """Contre-épreuve du pont : arme [ASSAULT] + unité NON avancée → `assault_applied` absent.
+
+    La contre-épreuve LOT_A couvre « arme sans règle, état neutre » mais pas « arme avec règle,
+    état incomplet ». Si `_build_shot_details` régresse à tester l'arme seule (sans le check
+    `units_advanced`), ce test échoue ; l'autre contre-épreuve LOT_A passe toujours.
+    """
+    gs, raw_log = _engine_shoot_log(monkeypatch, ["ASSAULT"], [3, 4, 2], units_advanced=False)
+    bridge = _Bridge(gs)
+    details = bridge._build_shot_details(raw_log, raw_log["shootDetails"][0], 1, None)
+
+    assert "assault_applied" not in details, (
+        "`assault_applied` ne doit PAS être posé quand l'unité n'a PAS avancé, "
+        f"même si l'arme déclare ASSAULT : {details}"
+    )
+    line = _step_log_line(tmp_path, gs, raw_log)
+    assert "[ASSAULT]" not in line, line
+
+
+def test_close_quarters_dans_les_details_du_pont(monkeypatch, tmp_path):
+    """Preuve par le VRAI pont que `close_quarters_applied` est posé quand le tireur est engagé
+    et que l'arme est [CLOSE_QUARTERS] — symétrique de `test_assault_dans_les_details_du_pont`.
+    """
+    gs, raw_log = _engine_shoot_log(monkeypatch, ["CLOSE_QUARTERS"], [3, 4, 2], engaged=True)
+    bridge = _Bridge(gs)
+    details = bridge._build_shot_details(raw_log, raw_log["shootDetails"][0], 1, None)
+
+    assert details.get("close_quarters_applied") is True, (
+        "`close_quarters_applied` doit être posé par le pont quand le tireur est engagé "
+        f"et que l'arme déclare CLOSE_QUARTERS : {details}"
+    )
+    line = _step_log_line(tmp_path, gs, raw_log)
+    assert "[CLOSE-QUARTERS]" in line, line
+
+
 @pytest.mark.parametrize("melee", [False, True], ids=["tir", "melee"])
 def test_l_analyzer_accepte_les_lignes_porteuses_des_tokens_du_lot(monkeypatch, tmp_path, melee):
     """CONTRÔLE DE MASSE — un token que personne ne lit ne se livre pas.
