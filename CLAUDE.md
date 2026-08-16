@@ -280,10 +280,13 @@ SUITE : Tout est terminé
 — ou —
 SUITE :
 → Ce prompt : <actions 🟡 restantes>
-→ Prochain prompt : "<prompt autonome : observation + fichier:ligne + attendu + périmètre>"
+→ 🔴 Bug : `"<prompt autonome : observation + fichier:ligne + attendu + périmètre>"`
+→ 🕳 Trou : `"<prompt autonome>"`
+→ 💡 Amélioration : `"<prompt autonome>"`
+→ 📋 Sous-tâche : `"<prompt autonome>"`
 
-Prochain prompt seulement pour : sous-tâche objective hors livraison, bug PROUVÉ hors périmètre avec scénario d'échec, option recommandée d'un arbitrage.
-Suspicion non prouvée → une ligne dans LU, aucun prochain prompt. SUITE ne remplace jamais T2.
+Catégories : Bug = invariant cassé prouvé hors périmètre ; Trou = cas non couvert par les tests ; Amélioration = code correct mais optimisable ; Sous-tâche = morceau hors livraison.
+Suspicion non prouvée → une ligne dans LU, aucune entrée SUITE. SUITE ne remplace jamais T2.
 Si analyse seule (aucun fichier modifié) : SUITE uniquement, avec une proposition d'action concrète.
 
 ARBITRAGE
