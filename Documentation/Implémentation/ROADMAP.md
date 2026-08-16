@@ -502,7 +502,7 @@ mesure, et c'est assumé (§0.14).
 8. **§0.59 — Phase 2 self-play** (`--append x1_selfplay`) — livré, JAMAIS exécuté ; le premier
    run est aussi son premier test d'intégration. → [`1_Agent/V11_agent_rework.md`](1_Agent/V11_agent_rework.md) §0.59
 9. **Refonte du panel de bots** (ouvert le 2026-08-11) — six styles, échelle de difficulté.
-   → [`A_faire/bots_refonte_panel.md`](A_faire/bots_refonte_panel.md)
+   → [`Implémenté/bots_refonte_panel.md`](Implémenté/bots_refonte_panel.md)
    🟠 **État au 2026-08-12** : six styles livrés, modèle de dégâts corrigé à la racine
    (par figurine), et les bots **s'étalent** au lieu d'empiler trois escouades par zone — le pire
    bot passe de 0,837 (ancien panel) à **0,62** et l'écart de VP est divisé par deux (§12.5).

@@ -1203,7 +1203,7 @@ n'est plus une question posée à l'utilisateur mais du travail :
 ## 8. Références
 
 - [`ROADMAP.md`](ROADMAP.md) — source unique de l'ordre du travail
-- [`A_faire/bots_refonte_panel.md`](A_faire/bots_refonte_panel.md) — panel refondu : décisions,
+- [`Implémenté/bots_refonte_panel.md`](Implémenté/bots_refonte_panel.md) — panel refondu : décisions,
   mesures, protocole de réglage (§12.13), ligne de base (§12.14)
 - [`1_Agent/V11_eval_strategy.md`](1_Agent/V11_eval_strategy.md) — §10.3 progression d'adversaires,
   §10.5 holdout d'adversaire, §10.6 critère de succès et arbitrage du 2026-08-04
