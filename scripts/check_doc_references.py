@@ -699,8 +699,8 @@ def agent_profiles() -> dict[str, dict]:
 
 
 @functools.lru_cache(maxsize=1)
-def step_log_entries() -> tuple[int, int, bool]:
-    """(nombre d'entrées, plus grand index, L2 absente) du tableau §7 d'`analyzer_couverture`."""
+def step_log_entries() -> tuple[int, int]:
+    """(nombre d'entrées, plus grand index) du tableau §7 d'`analyzer_couverture`."""
     text = COUVERTURE.read_text(encoding="utf-8")
     section = re.search(r"^## 7\..*?(?=^## 8\.)", text, re.S | re.M)
     if section is None:
@@ -708,7 +708,7 @@ def step_log_entries() -> tuple[int, int, bool]:
     indexes = sorted({int(m) for m in re.findall(r"^\|\s*`?L(\d+)`?\s*\|", section.group(0), re.M)})
     if not indexes:
         raise SourceUnavailable("analyzer_couverture.md : §7 ne porte aucune entrée `Ln`")
-    return len(indexes), max(indexes), 2 not in indexes
+    return len(indexes), max(indexes)
 
 
 def integers_in(cell: str) -> list[int]:
@@ -831,7 +831,7 @@ def expected_profile_field(key: str) -> object:
 
 
 def expected_step_log(key: tuple[str, int]) -> object:
-    count, largest, _ = step_log_entries()
+    count, largest = step_log_entries()
     return ("count", count) if key[0] == "count" else ("max", largest)
 
 
