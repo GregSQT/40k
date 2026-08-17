@@ -268,10 +268,13 @@ def expected_wound_threshold(
     # Appliqué PAR PROFIL, avant l'unanimité : le plancher 2+ rapproche deux seuils voisins, et
     # ce qui doit être unique, c'est la valeur IMPRIMABLE — pas une étape de son calcul.
     oath = wound_bonus_applies(action_desc)
+    # Magnitude du bonus de blessure Oath : lue dans la snapshot `oath_wound` (EFFECTS), jamais
+    # recodée. Fallback `or 1` : journaux antérieurs à l'émission de la clé (avant 2026-08-10).
+    oath_mag = (_effect_bonus(state, attacker_player, "oath_wound") or 1) if oath else 0
     thresholds = set()
     for strength in strengths:
         threshold = calculate_wound_target(strength + bonus, toughness)
-        thresholds.add(max(2, threshold - 1) if oath else threshold)
+        thresholds.add(max(2, threshold - oath_mag) if oath_mag else threshold)
     return thresholds.pop() if len(thresholds) == 1 else None
 
 

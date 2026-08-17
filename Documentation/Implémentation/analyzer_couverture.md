@@ -178,7 +178,7 @@ l'écriture directe de `rule_choice`) :
 | `reactive_move` | `Unit N(c,r) REACTIVE MOVED [<CAPACITÉ>] from … to … [Roll: N] - trigger: Unit M->(c,r)` | jet, déclencheur ; **pas de `[MODELS:]` d'arrivée** |
 | `deploy_unit` | `Unit N(c,r) DEPLOYED from (-1,-1) to (c,r)` | sentinelle hors-table `(-1,-1)` (20.01) |
 | `shoot` | `Unit N(c,r) SHOT [ASSAULT] [CLOSE-QUARTERS] [RAPID FIRE:X] [MELTA:X] [BLAST:X] [EXTRA ATTACKS] [PRECISION] Unit M(c,r) with [<arme>] - Hit R(T+ ou base+->eff+) [HEAVY\|COVER] [TORRENT] [IGNORES COVER] [PSYCHIC] [REROLLED:n] [SUSTAINED HITS] [<CAPACITÉ>] - Wound R(T+) [LETHAL HITS] [ANTI-<KW>:Y+] [<CAPACITÉ>] [REROLLED:n] - Save R(T+) [REROLLED:n] [<CAPACITÉ>] - Dmg:NHP [HAZARDOUS] Roll:N` ; ou `Save [DEVASTATING WOUNDS]` | jets, seuils, tokens de règle |
-| `hazardous` | `Unit N(c,r) SUFFERS X Mortal Wounds [HAZARDOUS]` — forme UNIQUE | MW infligées — ⚠️ **aucun lecteur** (2026-08-16) |
+| `hazardous` | `Unit N(c,r) SUFFERS X Mortal Wounds [HAZARDOUS]` — forme UNIQUE | MW infligées + vérif présence arme HAZARDOUS en armurerie — **COUVERT (2026-08-17)** |
 | `charge` | `Unit N(c,r) CHARGED [<CAPACITÉ>] [FLY] Unit M(c,r) from … to … [Roll: N]` | jet 2D6 (pouces), `[FLY]`, **une seule** cible |
 | `charge_fail` | `Unit N(c,r) FAILED CHARGE to unit M(c,r) [Roll: N]` | jet |
 | `charge_impact` | `Unit N(c,r) IMPACTED [<CAPACITÉ>] Unit M(c,r) - Hit:T+:R(HIT\|FAIL) Wound:AUTO Save:NONE[MW] Dmg:NHP` | seuil, jet, MW |
@@ -269,9 +269,10 @@ prises aux constantes du moteur — le journal dit ce qui a été appliqué, il 
 | `waaagh` | `analyzer_core._FACTION_ABILITY_KEYS:127` → `_count_faction_activations:141` | compteur d'activations §1.7 |
 | `oath_target` | idem | compteur d'activations §1.7 (`oath_of_moment`) |
 
-**Deux restent inexploitées** : `waaagh_invul` (5++) et `oath_wound` (`grep oath_wound ai/` →
-0 hit, 2026-08-10). Le `+1` d'Oath est bien contrôlé par §1.9, mais depuis le TOKEN
-`[OATH OF MOMENT]` posé sur le segment `Wound`, pas depuis cette clé.
+**Une reste inexploitée** : `waaagh_invul` (5++). `oath_wound` est désormais lue
+par `analyzer_wound.py` (`_effect_bonus`) pour alimenter la magnitude du bonus de blessure
+Oath : le TOKEN `[OATH OF MOMENT]` gate l'application, la CLÉ `oath_wound` en fixe la magnitude
+(fallback 1 pour les journaux antérieurs au 2026-08-10) — **COUVERT (2026-08-17)**.
 
 ---
 
@@ -836,7 +837,7 @@ ne qualifie qu'une chose — une paire observée que l'armurerie ne déclare pas
 | `CLOSE_QUARTERS` | 24.07 / 10.06 | #11, #16, #17 + usage §1.8 (ancre, cf. §5) | PARTIEL |
 | `DEVASTATING_WOUNDS` | 24.10 | #40 | PARTIEL |
 | `EXTRA_ATTACKS` | 24.11 | — | **ABSENT-LOGGABLE** — token dans `step.log` depuis le 2026-08-12 (lot A), contrôle à écrire |
-| `HAZARDOUS` | 24.15 / 06.03 | — | **ABSENT-LOGGABLE** — ligne et jet loggués, aucun lecteur depuis `15d95480` (2026-08-12) ; c'était « PARTIEL » ici jusqu'au 2026-08-16 |
+| `HAZARDOUS` | 24.15 / 06.03 | `hazardous_mortal_wounds` + `hazardous_no_hazardous_weapon` | **COUVERT (2026-08-17)** — branche dispatcher + check armurerie dans `analyzer_core.py` |
 | `HEAVY` | 24.16 | #39 usage ; validité supprimée | PARTIEL |
 | `IGNORES_COVER` | 24.18 | — | **ABSENT-LOGGABLE** — token dans `step.log` depuis le 2026-08-12 (lot A), contrôle à écrire |
 | `INDIRECT_FIRE` | 24.19 / 10.07 | — | ABSENT-LOG-MANQUANT — règle NON IMPLÉMENTÉE dans le moteur (seule entrée de `weapon_rules.json` sans `obs_id` pour cette raison) |
@@ -899,7 +900,7 @@ jamais sur une ligne — l'instantané se répète à chaque changement d'état 
 | `targeted_intercession_reroll_1_towound` | alias | PARTIEL |
 | `targeted_intercession_reroll_towound_target_on_objective` | alias | PARTIEL |
 | `target_priority` | — (aucun `grants_rule_ids` déclaré) | PARTIEL — si une unité la porte sans grants, §1.7 comptera ses effets `INVALID` |
-| `oath_of_moment` | `faction_ability_activations` (§1.7) + **#63/#64** (le `+1` au jet de blessure entre dans le seuil attendu) | **PARTIEL** — ⚠️ **seconde correction, 2026-08-10.** La version du 2026-08-09 le classait ABSENT-LOGGABLE en affirmant « aucun contrôle, `grep` 0 hit, compteur structurellement à 0 ». **C'est faux aujourd'hui** : `_FACTION_ABILITY_KEYS` (`analyzer_core.py`) compte une activation par `oath_target`, et `analyzer_wound.wound_bonus_applies:62` applique le `−1` au seuil attendu depuis le token `[OATH OF MOMENT]` accolé au segment `Wound`. Ce qui reste non contrôlé : que la CIBLE effectivement visée soit bien `oath_target`, et la clé `oath_wound=+X` (inexploitée, cf. §5 V15) |
+| `oath_of_moment` | `faction_ability_activations` (§1.7) + **#63/#64** (le `+1` au jet de blessure entre dans le seuil attendu, magnitude lue depuis `oath_wound` dans EFFECTS) | **PARTIEL** — depuis 2026-08-17 : token `[OATH OF MOMENT]` gate l'application, clé `oath_wound=+X` fixe la magnitude dans `_effect_bonus` (`analyzer_wound.py`). Ce qui reste non contrôlé : que la CIBLE visée soit bien `oath_target` |
 | `waaagh` | §1.7 (`faction_ability_activations`) + #23 (charge après advance) + `waaagh_melee_atk` lu par #28 + `waaagh_melee_str` lu par #64 | PARTIEL — le `+1 Attaques` entre dans le plafond de mêlée et le `+1 Force` dans le seuil de blessure attendu ; seul `waaagh_invul` (5++) est journalisé sans alimenter aucun contrôle |
 | `deep_strike` | — | PARTIEL — cf. 24.09 |
 | `leader` | — | ABSENT-LOG-MANQUANT |
@@ -941,7 +942,7 @@ par absence prouvée de site d'incrémentation.
 | ~~V14~~ | « Le plafond de tir reste par escouade alors que celui de mêlée est par figurine » | **FERMÉ le 2026-08-10**, et par mutualisation plutôt que par copie : `analyzer_perfig.per_model_attack_cap` (`:262`) est désormais LE calcul des deux côtés, `[SHOOTER_MODELS:]` a quitté `fight_handler` pour `analyzer_perfig` (`:251`), et le X de `[RAPID FIRE]` suit la même résolution par figurine. Écrire un second exemplaire côté tir aurait rouvert le défaut à la première divergence |
 | **V16** | *(trouvé et fermé le 2026-08-10, en livrant V10)* — les totaux d'erreurs existaient en DEUX exemplaires, celui du SUMMARY et celui de la CLI | **FERMÉ.** Ils avaient divergé en silence sur deux compteurs : `move_after_shooting_distance_over_limit` (§1.1) et `shoot_combi_profile_conflicts` (§1.2) manquaient au total CLI. Effet observable : un run pouvait afficher « ❌ 1.1 Erreurs en phase de move : 2 » et rendre un total d'erreurs qui n'en comptait aucune — et c'est le total, plus court, qu'on lit en premier. La review du jour a montré que le trou était plus large : **§1.6 (double-activation) et §1.7 (règles invalides) s'affichaient en ❌ sans entrer dans AUCUN total** — un run imprimait « ❌ 1.6 … : 1 » puis « ✅ Aucune erreur détectée ». `error_totals` (`analyzer.py`) porte désormais TOUS les buckets, y compris §1.5 à §2.8, et expose `['total']` = leur somme : le total de la CLI ne recompose plus rien, donc toute ligne ❌ y entre par construction et un bucket neuf aussi. Verrou : `tests/unit/ai/test_analyzer_error_totals.py` (61 tests) pose 1 dans CHAQUE compteur l'un après l'autre, vérifie que sa somme bouge, puis que `total == somme(buckets)` |
 | **V17** | *(trouvé et fermé le 2026-08-10, en instruisant V16)* — `unit_id_mismatches` n'était PAS dans la structure `stats` ; `dead_unit_actions` n'avait ni producteur ni lecteur | **FERMÉ.** Mesuré : `'unit_id_mismatches' in parse_step_log(...)` rendait **False** — la clé n'apparaissait qu'au `setdefault` de `print_statistics`, 130 lignes avant le seul lecteur qui la lit sans garde. D'où trois lecteurs à trois niveaux de défensive et deux idiomes de création. Tout consommateur du `stats` rendu levait `KeyError`. La clé est déclarée avec ses voisines (`analyzer.py`), les deux créations paresseuses ont disparu, la garde `if … in stats` du total CLI aussi. `dead_unit_actions` était du code mort pur (créé, affecté à une locale, jamais relu — 1 seul hit au grep) : supprimé. Même famille que V1/V2/V3 |
-| ~~V15~~ | « Cinq des six clés de `T{tour} EFFECTS:` ne sont lues par personne » | **Réduit à DEUX.** `waaagh_melee_str` alimente §1.9 (`analyzer_wound.py`), `waaagh` et `oath_target` alimentent le compteur d'activations §1.7 (`analyzer_core.py`), `waaagh_melee_atk` alimentait déjà #28. **Restent inexploitées : `waaagh_invul` et `oath_wound`** (grep → 0 hit) |
+| ~~V15~~ | « Cinq des six clés de `T{tour} EFFECTS:` ne sont lues par personne » | **Réduit à UNE.** `waaagh_melee_str` alimente §1.9 (`analyzer_wound.py`), `waaagh` et `oath_target` alimentent §1.7 (`analyzer_core.py`), `waaagh_melee_atk` alimentait déjà #28, `oath_wound` alimente désormais la magnitude Oath de §1.9 (2026-08-17). **Reste inexploitée : `waaagh_invul`** (5++) |
 
 **Grep JUMEAU** (2026-08-10) `calculate_hex_distance|is_adjacent(` sur les 7 fichiers de
 l'analyzer → 8 hits, **4 sites de mesure** : `analyzer.py` (distance à vol d'oiseau **par
@@ -1128,7 +1129,7 @@ c'est le gisement le moins cher) :
 
 | Champ présent | Non exploité par | Débloquerait |
 |---|---|---|
-| `T{tour} EFFECTS: oath_wound=+X` | aucun contrôle (`grep` → 0 hit) | validité chiffrée du `+1` d'Oath — §1.9 lit le TOKEN, pas la magnitude déclarée |
+| ~~`T{tour} EFFECTS: oath_wound=+X`~~ | ~~aucun contrôle~~ | **CONSOMMÉ (2026-08-17)** — magnitude lue par `_effect_bonus` dans `analyzer_wound.py`, fallback 1 pour les vieux journaux |
 | `T{tour} EFFECTS: waaagh_invul` | aucun contrôle | volet 5++ de `waaagh` |
 | ~~`[MODEL_TYPES:]` + `[SHOOTER_MODELS:]` côté TIR~~ | ~~`shoot_handler.py`~~ | **CONSOMMÉ le 2026-08-10** (V14) — plafond de tir par figurine, mutualisé avec la mêlée |
 | `[FIGHT_SUBPHASE:<x>]` | aucun contrôle | 12.06 (overrun fight) |
@@ -1137,7 +1138,7 @@ c'est le gisement le moins cher) :
 | ~~`[MODELS:]` complet~~ | ~~aucun contrôle de cohérence~~ | **CONSOMMÉ** — 03.03 par #68 (mise en place + fin de déplacement) depuis le 2026-08-10, et la purge End of Turn depuis le 2026-08-12 (ligne `Unit N COHERENCY REMOVED <mid> … (03.03)`, émise par `fight_handlers._log_end_of_turn_coherency_removals`) |
 | positions + `Board: cols/rows` | BFS (`analyzer.py`) | bord de plateau (V7, 03.01), `>8"` d'ingress (20.03, 20.04) |
 | ~~`Hit R(T+)` + présence du segment `Wound`~~ | ~~aucun contrôle~~ | **CONSOMMÉ le 2026-08-10** (§1.10) — 05.01, jumeau de §1.9 sur le segment `Wound` |
-| `[HAZARDOUS] Roll:N` + `SUFFERS X MW` | **aucun contrôle et aucun parsing** — la branche qui lisait la mort par Hazardous a été supprimée par `15d95480` (2026-08-12), et la forme `was DESTROYED [HAZARDOUS]` que citait cette case n'a jamais été écrite dans `step.log` | 06.03, 24.15 |
+| ~~`[HAZARDOUS] Roll:N` + `SUFFERS X MW`~~ | ~~aucun contrôle~~ | **CONSOMMÉ (2026-08-17)** — `hazardous_mortal_wounds` + vérif armurerie dans `analyzer_core.py` |
 
 **Quatre entrées ont quitté cette liste le 2026-08-10** : `oath_target` et `waaagh_melee_str`
 (cf. §1.4 et §5, V15), puis `[MODEL_TYPES:]`/`[SHOOTER_MODELS:]` côté tir et le segment `Hit`
@@ -1187,7 +1188,8 @@ Aucun n'a été recopié.
 
 **Prouvé par absence** (grep exhaustif rendant 0 hit) : V1 (`damage_exceeds_hp` — aucun `+= 1`),
 V2, V3 (`skip` hors de `_STEP_LOG_TYPE_MAP`), V12 (`"phase Start"`), V14
-(`MODEL_TYPES` dans `shoot_handler.py`), `oath_wound` et `waaagh_invul` dans `ai/`.
+(`MODEL_TYPES` dans `shoot_handler.py`), `waaagh_invul` dans `ai/`.
+`oath_wound` : **consommée désormais** (2026-08-17) — voir §1.4 et l'entrée V15 ci-dessus.
 
 **Prouvé par le code du moteur** (pas par corrélation) : le modèle de dégâts §2.3 — le plafond
 `dmg_dealt = min(int(dmg), hp_before)` est cité dans `586c0553`, qui annule un revert pris deux
