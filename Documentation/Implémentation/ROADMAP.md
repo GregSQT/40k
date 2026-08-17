@@ -711,17 +711,12 @@ Prêt à démarrer, conception close, aucun arbitrage en attente :
   récompense distinct, calendrier de la tranche 3)
 
 Prêts à démarrer sans décision produit :
-- ⬜ **Le chemin LoS refait à chaque survol ce que le chantier des aplatissements a sorti du chemin
-  de dessin** (signalé le 2026-08-12 par la passe `/simplify`, non traité — le périmètre était le
-  chemin de dessin). `buildLosPreviewFromSource` reconstruit à CHAQUE appel les murs effectifs (~1 000
-  couples + un `Set`) et aplatit les zones obscurantes et le terrain (~16 000 couples), puis fabrique
-  une `key` triée sur ces trois listes. Sur les cinq appelants de `BoardPvp`, **un seul lit cette
-  `key`** ; deux des quatre autres sont des gestionnaires de survol cadencés à la frame, et un
-  troisième tourne DANS une boucle par figurine posée. Chiffres rapportés par la revue et NON
-  revérifiés par moi : ~6,2 ms pour la `key`, ~0,34 ms et ~17 000 objets pour les listes, par appel.
-  ⚠️ À MESURER AVANT DE TOUCHER : le gain suppose de changer la signature de `losPreviewHelpers`
-  (recevoir des listes DÉJÀ résolues, rendre la `key` paresseuse) — passer les murs déjà effectifs
-  aux appelants actuels ne supprimerait RIEN, la fonction les re-dérive de toute façon.
+- ✅ **Le chemin LoS refait à chaque survol** — **LIVRÉ le 2026-08-17**. Mesuré : 6,9 ms/appel dont
+  6,25 ms de `key` (dominée par `stableTerrainKey` sur ~16 000 hexes) + 0,67 ms de flatten, ~19 k
+  objets. `flattenObscuringZones` et `flattenTerrainZones` exportés et mémoïsés une fois dans
+  `BoardPvp` ; `buildLosPreviewFromSource` reçoit `preResolvedWallHexes/ObscuringHexes/TerrainHexes`
+  (les 5 call sites les passent). La `key` devient un getter lazy : les 4 appelants qui ne la lisent
+  pas (dont les 2 hover-RAF) ne la calculent plus jamais. Économie survol : ~6,9 ms/appel → ~0 ms.
 - ✅ **`BoardReplay` rend l'effet de dessin de `BoardPvp` inévitable à chaque rendu** — **LIVRÉ le
   2026-08-17**. Les six valeurs instables mémoïsées : `currentState` (`useMemo` sur
   `[selectedEpisode, replayData, currentActionIndex, enrichUnitsWithStats]`), `unitsWithGhost`
