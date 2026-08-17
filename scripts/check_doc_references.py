@@ -137,8 +137,13 @@ _EXPLICIT_ANCHOR = re.compile(r"\{#([^}]+)\}")
 #: Ligne de titre ATX (# à ######), texte jusqu'en fin de ligne.
 _MD_HEADING = re.compile(r"^#{1,6} +(.+)$", re.MULTILINE)
 
-#: Bloc code fencé (``` ... ```) — son contenu ne doit pas être scanné pour les ancres.
-_FENCED_CODE_BLOCK = re.compile(r"^`{3}[^\n]*\n.*?^`{3}[^\n]*$", re.MULTILINE | re.DOTALL)
+#: Bloc code fencé (``` ou ~~~) — son contenu ne doit pas être scanné pour les ancres.
+_FENCED_CODE_BLOCK = re.compile(
+    r"^(?:`{3,}|~{3,})[^\n]*\n.*?^(?:`{3,}|~{3,})[^\n]*$\n?", re.MULTILINE | re.DOTALL
+)
+
+#: Span de code inline — `code` — présent dans les titres comme dans le corps du document.
+_INLINE_CODE = re.compile(r"`[^`\n]*`")
 
 #: Une ancre de ligne, quelle que soit l'extension : la convention §5 porte sur la LIGNE, pas sur le
 #: langage. Le basename accepte les points internes, sans quoi `useBoardHexMemos.test.ts:117` se
@@ -619,7 +624,7 @@ def _heading_slug(text: str) -> str:
     les espaces par des tirets. Les lettres accentuées sont des lettres (`\w` Unicode).
     """
     text = _EXPLICIT_ANCHOR.sub("", text)
-    text = re.sub(r"`[^`]*`", lambda m: m.group(0)[1:-1], text)
+    text = _INLINE_CODE.sub(lambda m: m.group(0)[1:-1], text)
     text = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", text)
     text = text.lower()
     text = re.sub(r"[^\w\s-]", "", text)
@@ -637,12 +642,11 @@ def md_anchors(path: pathlib.Path) -> frozenset[str]:
     text = path.read_text(encoding="utf-8", errors="replace")
     text_no_code = _FENCED_CODE_BLOCK.sub("", text)
     # Inline code spans masquent les {#id} qu'ils contiennent — idem pour le scan body.
-    text_no_inline = re.sub(r"`[^`\n]+`", "", text_no_code)
+    text_no_inline = _INLINE_CODE.sub("", text_no_code)
     result: set[str] = set()
     for m in _MD_HEADING.finditer(text_no_code):
         heading = m.group(1).strip()
-        heading_no_inline = re.sub(r"`[^`]*`", "", heading)
-        explicit = _EXPLICIT_ANCHOR.search(heading_no_inline)
+        explicit = _EXPLICIT_ANCHOR.search(_INLINE_CODE.sub("", heading))
         if explicit:
             result.add(explicit.group(1))
         else:
