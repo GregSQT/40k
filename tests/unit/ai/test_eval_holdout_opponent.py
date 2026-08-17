@@ -36,9 +36,8 @@ REFERENCE_HOLDOUT_BOT = "tactical"
 #: joue les cles, poids nul compris) : y laisser un adversaire hors sujet, c'est payer la mesure
 #: deux fois.
 MEASURES_REFERENCE_HOLDOUT = {
-    "x1": True,
-    "x1_long": True,
-    "x1_debug": True,
+    "x1": True, "x1_long": True, "x1_debug": True,
+    "x5_new": True, "x5_long": True, "x5_debug": True,
 }
 
 CONFIG_ROOT = Path(__file__).resolve().parents[3] / "config" / "agents"
