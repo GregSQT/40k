@@ -96,7 +96,9 @@ def test_the_move_error_total_of_the_summary_counts_one(tmp_path):
     an.print_statistics(stats, output_lines=rendered, emit_console=False)
     summary = [l for l in rendered if "1.1 Erreurs en phase de move" in l]
     assert len(summary) == 1, rendered[-40:]
-    assert summary[0].rstrip().endswith(" 1"), summary[0]
+    import re
+    m = re.search(r": (\d+)", summary[0])
+    assert m and int(m.group(1)) == 1, summary[0]
 
 
 def test_a_reactive_move_outside_MOVE_or_SHOOT_is_still_abnormal(tmp_path):

@@ -171,4 +171,7 @@ def test_the_violations_reach_the_MOVE_error_total_of_the_summary(tmp_path):
     assert len(summary) == 1, rendered[-40:]
     # 2 fautes de fall-back et rien d'autre : le total DOIT valoir exactement 2. Un `> 0` aurait
     # laissé passer un total qui ne compte qu'une des deux.
-    assert summary[0].rstrip().endswith(" 2"), summary[0]
+    # La ligne peut porter un suffixe ⚠️ (règles jamais exercées) — on extrait le chiffre.
+    import re
+    m = re.search(r": (\d+)", summary[0])
+    assert m and int(m.group(1)) == 2, summary[0]

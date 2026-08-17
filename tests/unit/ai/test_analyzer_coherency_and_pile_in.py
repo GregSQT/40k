@@ -131,7 +131,9 @@ def test_the_violation_reaches_the_MOVE_error_total_of_the_summary(tmp_path):
     an.print_statistics(stats, output_lines=rendered, emit_console=False)
     summary = [l for l in rendered if "1.1 Erreurs en phase de move" in l]
     assert len(summary) == 1, rendered[-40:]
-    assert summary[0].rstrip().endswith(" 1"), summary[0]
+    import re
+    m = re.search(r": (\d+)", summary[0])
+    assert m and int(m.group(1)) == 1, summary[0]
 
 
 # ═════════════════════════════════════════════════════════════════════════════════════════════

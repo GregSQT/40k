@@ -55,13 +55,20 @@
 > tranche donc que les cas où l'on n'a rien observé. Le rapport ne peut plus contredire sa propre
 > mesure.
 >
-> **Ce qui n'est PAS encore fait**, et qu'aucune formulation ne doit laisser croire : le SUMMARY
-> ne porte pas le verdict de couverture. `JAMAIS EXERCÉE` et l'écart somme/bucket ne s'impriment
-> que dans la table de détail ; la ligne qu'on lit en premier reste `✅ 1.1 Erreurs en phase de
-> move : 0`. Sur le cas fondateur — 17.01 jamais appliquée, zéro erreur — le résumé afficherait
-> encore un vert. La moitié de l'objectif reste ouverte. Deuxième dette du même ordre : le corpus
-> et `error_totals` énumèrent DEUX FOIS les mêmes compteurs, tenus égaux par un test au lieu de
-> l'être par construction ; à sept sections ce seront ~60 compteurs écrits en double.
+> ✅ **LIVRÉ le 2026-08-17 (moitié SUMMARY).** La ligne 1.1 du SUMMARY porte désormais le signal
+> de couverture : `⚠️ 1.1 Erreurs en phase de move : 0 (⚠️ N règles jamais exercées)` quand N > 0,
+> `❌` si des erreurs existent. L'icône n'est plus forcément `✅` quand le contrôle n'a rien regardé.
+> Verrous : `test_summary_signals_never_exercised_rules` (nouveau, rouge→vert) +
+> `test_the_violations_reach_the_MOVE_error_total_of_the_summary` (adapté).
+>
+> **Deuxième dette évaluée et FERMÉE sans code.** Le corpus et `error_totals` semblent énumérer
+> deux fois les mêmes compteurs. Mais la déduplication affaiblirait l'architecture : si
+> `error_totals["move"]` devenait `_section_error_sum(stats, "1.1")`, l'invariant du test
+> `test_the_per_rule_sum_matches_the_section_total` deviendrait tautologique (`x == x`). Le guard
+> qui force tout nouveau compteur à entrer dans le corpus disparaîtrait — et c'est exactement ce
+> guard qui a détecté V16. La duplication est voulue : `error_totals` est la source de vérité,
+> `_section_error_sum` en est le vérificateur. Liés par un test, pas par construction, c'est la
+> bonne architecture.
 >
 > Un invariant interdit au corpus de devenir une
 > seconde somme divergente : la somme des erreurs par règle DOIT égaler le bucket `move`

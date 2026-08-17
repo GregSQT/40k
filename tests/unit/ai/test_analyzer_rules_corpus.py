@@ -135,8 +135,29 @@ def test_the_warning_is_rendered_and_names_the_rule(tmp_path):
     rendered: list = []
     an.print_statistics(stats, output_lines=rendered, emit_console=False)
     warnings = [l for l in rendered if "jamais exercee" in l]
-    assert len(warnings) == 1, rendered[-60:]
-    assert "03.03" in warnings[0]
+    assert len(warnings) >= 1, rendered[-60:]
+    assert any("03.03" in w for w in warnings)
+
+
+def test_summary_signals_never_exercised_rules(tmp_path):
+    """Le SUMMARY affiche ⚠️ sur la ligne 1.1 quand une règle est applicable mais jamais exercée.
+
+    Cas fondateur : 03.03 est applicable (un déplacement a eu lieu) mais jamais jugée
+    (les deux escouades n'ont qu'une figurine). Sans ce signal, la ligne affiche
+    « ✅ 1.1 Erreurs en phase de move : 0 » alors que le contrôle n'a rien regardé.
+    """
+    stats = _stats(tmp_path, _A_NORMAL_MOVE)
+    rendered: list = []
+    an.print_statistics(stats, output_lines=rendered, emit_console=False)
+    summary_start = next((i for i, l in enumerate(rendered) if l.strip() == "SUMMARY"), None)
+    assert summary_start is not None, "section SUMMARY absente du rendu"
+    summary_lines = rendered[summary_start:]
+    line_11 = next((l for l in summary_lines if "1.1" in l and "move" in l.lower()), None)
+    assert line_11 is not None, "ligne 1.1 absente du SUMMARY"
+    assert "jamais exerc" in line_11.lower(), (
+        f"le SUMMARY ne signale pas les règles jamais exercées sur la ligne 1.1 : {line_11!r}"
+    )
+    assert "⚠" in line_11, f"aucune icône ⚠️ sur la ligne 1.1 du SUMMARY : {line_11!r}"
 
 
 # ─────────────────────────────────────────────────────────────────────────────

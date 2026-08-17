@@ -23,7 +23,7 @@ from engine.combat_utils import (
 )
 from shared.data_validation import require_key
 from ai.analyzer_perfig import position_is_on_battlefield
-from ai.analyzer_rules import coverage_gaps, coverage_rows, new_rule_usage_counters
+from ai.analyzer_rules import coverage_gaps, coverage_rows, new_rule_usage_counters, VERDICT_NEVER_EXERCISED
 
 
 def _weapon_rule_usage_pair_total(weapon_rule_usage: Dict[Any, Any], pair_key: Any) -> int:
@@ -3966,7 +3966,17 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     log_print("-" * 80)
     log_print("PHASES")
     log_print("-" * 80)
-    log_print(f"{summary_error_icon(move_errors > 0)} 1.1 Erreurs en phase de move : {move_errors}")
+    _move_never_exercised = sum(
+        1 for r in coverage_rows(stats, "1.1") if r["verdict"] == VERDICT_NEVER_EXERCISED
+    )
+    if move_errors > 0:
+        _move_icon = "❌"
+    elif _move_never_exercised > 0:
+        _move_icon = "⚠️ "
+    else:
+        _move_icon = "✅"
+    _move_suffix = f" (⚠️ {_move_never_exercised} règles jamais exercées)" if _move_never_exercised > 0 else ""
+    log_print(f"{_move_icon} 1.1 Erreurs en phase de move : {move_errors}{_move_suffix}")
     log_print(f"{summary_error_icon(shooting_errors > 0)} 1.2 Erreurs en phase de shooting : {shooting_errors}")
     log_print(f"{summary_error_icon(charge_errors > 0)} 1.3 Erreurs en phase de charge : {charge_errors}")
     log_print(f"{summary_error_icon(fight_errors > 0)} 1.4 Erreurs en phase de fight : {fight_errors}")
