@@ -14,7 +14,10 @@ ne rouille pas. Ce script est la seconde moitié de cette décision.
 
 CE QU'IL ÉTABLIT, en cinq passes :
   1. RENVOIS  — tout fichier cité existe, et tout symbole cité vit dans le fichier cité.
-  2. LIENS    — toute cible de lien markdown existe.
+  2. LIENS    — toute cible de lien markdown existe, ET l'ancre `#fragment` qu'elle porte est
+                offerte par le document visé. Mesuré le 2026-08-18 : 45 des 48 liens du corpus
+                portent un fragment, tous vers un titre d'un fichier sujet — le fragment était
+                coupé et jeté, si bien qu'un titre renommé gardait son lien vert.
   3. VALEURS  — les nombres recopiés d'une source mécanique (config d'agent, tableau d'un autre
                 document, constante d'un script) valent encore ce que le document annonce.
   4. ANCRES   — aucun renvoi de la forme `fichier.py:123`, convention posée par la roadmap
@@ -222,6 +225,16 @@ CASE_HUMP = re.compile(r"[a-z][A-Z]")
 #: Suffixes qu'une cible de lien doit porter pour être tenue pour un chemin. Un lien vers un
 #: répertoire (`1_Agent/`) est reconnu par sa barre finale.
 LINK_SUFFIXES = (".md", ".py", ".json", ".pdf", ".txt", ".sh", ".ts", ".tsx", ".png")
+
+#: Un fragment `#L123` ne désigne pas un titre mais une LIGNE. La passe 4 le rapporte déjà sous son
+#: propre message ; le confronter aux titres sortirait « ancre morte » et enverrait chercher un
+#: titre là où le document cite une ligne.
+FRAGMENT_LINE = re.compile(r"L\d+")
+
+#: Les deux verdicts de la passe 2, NOMMÉS ici parce que le rapport les recompte : agréger l'ancre
+#: morte sous « liens morts » annoncerait un fichier disparu là où seul un titre a bougé.
+DEAD_LINK = "LIEN MORT"
+DEAD_ANCHOR = "ANCRE MORTE"
 
 #: Caractères qu'aucun chemin de ce dépôt ne porte. Leur présence signe un faux positif de regex
 #: (`[^"\']+` cité en prose), écarté par la FORME et non par une liste de cas nommés.
@@ -632,8 +645,15 @@ def md_anchors(path: pathlib.Path) -> frozenset[str]:
     return frozenset(result)
 
 
-def check_links(doc_path: pathlib.Path) -> tuple[int, int, list[str]]:
+def check_links(doc_path: pathlib.Path) -> tuple[int, int, int, list[str]]:
     """Passe 2 — les cibles des liens markdown existent et leurs fragments sont des ancres réelles.
+
+    Le fragment n'est pas un ornement de ce corpus : 45 des 48 liens en portent un (mesuré le
+    2026-08-18), et tous désignent un titre d'un fichier sujet. Coupé et jeté avant résolution, il
+    laissait un titre renommé garder son lien vert — le fichier, lui, existait toujours, et c'était
+    tout ce que la passe regardait. Le nombre de fragments CONFRONTÉS est donc rendu à part : sans
+    lui, « 0 ancre morte » ne distingue pas un corpus sain d'une passe qui ne regarde plus rien.
+
 
     Les liens `file:///` sont ABSOLUS par convention CLAUDE.md : ils sont vérifiés comme tels,
     et non écartés — c'est ce que faisait le contrôle manuel, qui ne les regardait donc jamais.
@@ -641,10 +661,13 @@ def check_links(doc_path: pathlib.Path) -> tuple[int, int, list[str]]:
     Les fragments (`#ancre`) sont confrontés aux ancres effectives du fichier cible lorsque
     celui-ci est un `.md` : titres ATX (slugifiés selon GFM) et `{#id}` explicites. Les fragments
     sur les autres types de fichiers (p. ex. `#L629` sur un `.py`) ne sont pas vérifiés — ils
-    suivent une convention de ligne, pas une convention d'ancre de document.
+    suivent une convention de ligne, pas une convention d'ancre de document. La graphie `#L123` est
+    écartée MÊME sur un `.md` : c'est un renvoi de ligne, que la passe 4 rapporte déjà sous son
+    propre message ; le confronter aux titres enverrait chercher un titre là où le document cite
+    une ligne, et compterait deux fois un seul défaut.
     """
     doc_dir = doc_path.parent
-    checked = skipped = 0
+    checked = skipped = fragments = 0
     broken: list[str] = []
     for lineno, line in enumerate(doc_path.read_text(encoding="utf-8").split("\n"), 1):
         for raw in MD_LINK.findall(line):
@@ -659,13 +682,14 @@ def check_links(doc_path: pathlib.Path) -> tuple[int, int, list[str]]:
             checked += 1
             resolved = resolve(target.rstrip("/") if target.endswith("/") else target, doc_dir)
             if resolved is None:
-                broken.append(f"{doc_path.name}:{lineno}  LIEN MORT  {target}")
-            elif fragment and resolved.suffix == ".md":
-                if fragment not in md_anchors(resolved):
-                    broken.append(
-                        f"{doc_path.name}:{lineno}  ANCRE MORTE  {target}#{fragment}"
-                    )
-    return checked, skipped, broken
+                broken.append(f"{doc_path.name}:{lineno}  {DEAD_LINK}  {target}")
+                continue
+            if not fragment or FRAGMENT_LINE.fullmatch(fragment) or resolved.suffix != ".md":
+                continue
+            fragments += 1
+            if fragment not in md_anchors(resolved):
+                broken.append(f"{doc_path.name}:{lineno}  {DEAD_ANCHOR}  {target}#{fragment}")
+    return checked, skipped, fragments, broken
 
 
 def agent_profiles() -> dict[str, dict]:
@@ -1103,7 +1127,7 @@ def merges_since(doc_path: pathlib.Path) -> str:
 
 def report(doc: str, path: pathlib.Path) -> tuple[bool, list[str]]:
     resolved, unverifiable, broken_refs = check_references(path)
-    checked, skipped, broken_links = check_links(path)
+    checked, skipped, fragments, broken_links = check_links(path)
     verified, broken_values = check_values(path)
     broken_anchors = check_anchors(path)
     kinds, kinds_unverifiable, broken_kinds, kind_notes = check_symbol_kinds(path)
@@ -1112,8 +1136,11 @@ def report(doc: str, path: pathlib.Path) -> tuple[bool, list[str]]:
         f"{'❌' if broken else '✅'} {doc}",
         f"   renvois  : {resolved} confirmés, {len(broken_refs)} cassés, "
         f"{unverifiable} sans symbole à confronter (non vérifiés)",
-        f"   liens    : {checked} vérifiés, {len(broken_links)} morts, "
+        f"   liens    : {checked} vérifiés, "
+        f"{sum(1 for entry in broken_links if DEAD_LINK in entry)} morts, "
         f"{skipped} écartés (pas une forme de chemin)",
+        f"   fragments: {fragments} ancres de lien confrontées, "
+        f"{sum(1 for entry in broken_links if DEAD_ANCHOR in entry)} mortes",
         f"   valeurs  : {verified} confirmées, {len(broken_values)} périmées ou orphelines",
         f"   ancres   : {len(broken_anchors)} renvois `fichier.ext:ligne`",
         f"   sortes   : {kinds} confirmées, {len(broken_kinds)} fausses, "
