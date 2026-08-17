@@ -128,6 +128,12 @@ BACKTICKED = re.compile(r"`([^`]+)`")
 IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]{3,}")
 MD_LINK = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
 
+#: `{#id}` explicite — dans un titre ou seul dans la ligne.
+_EXPLICIT_ANCHOR = re.compile(r"\{#([^}]+)\}")
+
+#: Ligne de titre ATX (# à ######), texte jusqu'en fin de ligne.
+_MD_HEADING = re.compile(r"^#{1,6} +(.+)$", re.MULTILINE)
+
 #: Une ancre de ligne, quelle que soit l'extension : la convention §5 porte sur la LIGNE, pas sur le
 #: langage. Le basename accepte les points internes, sans quoi `useBoardHexMemos.test.ts:117` se
 #: réduit à `test.ts` — 25 fichiers `*.test.ts(x)` et 3 `*.d.ts` échappaient à la convention. Et
@@ -589,26 +595,76 @@ def looks_like_path(target: str) -> bool:
     return target.endswith("/") or target.endswith(LINK_SUFFIXES)
 
 
+def _heading_slug(text: str) -> str:
+    r"""Titre markdown → fragment GFM (slug).
+
+    Ordre : supprimer le `{#id}` explicite et les spans de code ; mettre en minuscules ;
+    retirer tout ce qui n'est ni lettre/chiffre/underscore/tiret (`\w`), ni espace ; remplacer
+    les espaces par des tirets. Les lettres accentuées sont des lettres (`\w` Unicode).
+    """
+    text = _EXPLICIT_ANCHOR.sub("", text)
+    text = re.sub(r"`[^`]*`", lambda m: m.group(0)[1:-1], text)
+    text = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", text)
+    text = text.lower()
+    text = re.sub(r"[^\w\s-]", "", text)
+    return re.sub(r"\s+", "-", text.strip())
+
+
+@functools.lru_cache(maxsize=128)
+def md_anchors(path: pathlib.Path) -> frozenset[str]:
+    """Ancres réelles d'un fichier `.md` : slugs des titres + `{#id}` explicites.
+
+    Quand un titre porte un `{#id}` explicite, c'est cet id qui fait foi — le slug calculé
+    depuis le texte du titre N'EST PAS ajouté (il n'est pas l'ancre rendue). Les `{#id}` hors
+    titre (ancrages isolés dans le corps du document) sont également collectés.
+    """
+    text = path.read_text(encoding="utf-8", errors="replace")
+    result: set[str] = set()
+    for m in _MD_HEADING.finditer(text):
+        heading = m.group(1).strip()
+        explicit = _EXPLICIT_ANCHOR.search(heading)
+        if explicit:
+            result.add(explicit.group(1))
+        else:
+            result.add(_heading_slug(heading))
+    for m in _EXPLICIT_ANCHOR.finditer(text):
+        result.add(m.group(1))
+    return frozenset(result)
+
+
 def check_links(doc_path: pathlib.Path) -> tuple[int, int, list[str]]:
-    """Passe 2 — les cibles des liens markdown existent.
+    """Passe 2 — les cibles des liens markdown existent et leurs fragments sont des ancres réelles.
 
     Les liens `file:///` sont ABSOLUS par convention CLAUDE.md : ils sont vérifiés comme tels,
     et non écartés — c'est ce que faisait le contrôle manuel, qui ne les regardait donc jamais.
+
+    Les fragments (`#ancre`) sont confrontés aux ancres effectives du fichier cible lorsque
+    celui-ci est un `.md` : titres ATX (slugifiés selon GFM) et `{#id}` explicites. Les fragments
+    sur les autres types de fichiers (p. ex. `#L629` sur un `.py`) ne sont pas vérifiés — ils
+    suivent une convention de ligne, pas une convention d'ancre de document.
     """
     doc_dir = doc_path.parent
     checked = skipped = 0
     broken: list[str] = []
     for lineno, line in enumerate(doc_path.read_text(encoding="utf-8").split("\n"), 1):
         for raw in MD_LINK.findall(line):
-            target = urllib.parse.unquote(raw.split("#", 1)[0]).strip()
+            parts = raw.split("#", 1)
+            target = urllib.parse.unquote(parts[0]).strip()
+            fragment = parts[1] if len(parts) > 1 else ""
             if target.startswith("file://"):
                 target = target[len("file://"):]
             if not looks_like_path(target):
                 skipped += 1
                 continue
             checked += 1
-            if resolve(target.rstrip("/") if target.endswith("/") else target, doc_dir) is None:
+            resolved = resolve(target.rstrip("/") if target.endswith("/") else target, doc_dir)
+            if resolved is None:
                 broken.append(f"{doc_path.name}:{lineno}  LIEN MORT  {target}")
+            elif fragment and resolved.suffix == ".md":
+                if fragment not in md_anchors(resolved):
+                    broken.append(
+                        f"{doc_path.name}:{lineno}  ANCRE MORTE  {target}#{fragment}"
+                    )
     return checked, skipped, broken
 
 
