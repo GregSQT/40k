@@ -87,6 +87,7 @@ def test_no_benchmark_key_in_training_ratios(profile_path: str, ratios: Any) -> 
 def _minimal_game_state(episode: int = 1, turn: int = 1, player: int = 1) -> Dict[str, Any]:
     return {
         "units": [],
+        "units_cache": {},
         "turn": turn,
         "episode_number": episode,
         "phase": "move",
@@ -135,16 +136,60 @@ def test_reactive_bot_plan_resets_on_new_episode() -> None:
     assert bot._snapshot_episode == 2
 
 
-def test_balanced_bot_intent_returns_valid_value() -> None:
-    """_elect_intent retourne toujours une des trois valeurs valides."""
+def test_balanced_bot_intent_score_when_no_enemies() -> None:
+    """Sans ennemis sur la table : _elect_intent retourne SCORE."""
     bot = ReferenceBalancedBot(randomness=0.0)
     gs = _minimal_game_state()
-    # Construire une fausse unité.
     unit = {"id": "u1", "player": 1, "VALUE": 5.0}
     gs["units"] = [unit]
-    # Sans ennemis sur la table : intent doit être SCORE (pas de kill possible).
     intent = bot._elect_intent(unit, gs)
-    assert intent in ("SCORE", "KILL", "PRESERVE")
+    assert intent == "SCORE"
+
+
+def _gs_with_enemy(vp_me: int = 0, vp_opp: int = 0) -> tuple:
+    """Retourne (game_state, attacker, enemy) avec un ennemi vivant sur le champ."""
+    gs = _minimal_game_state()
+    attacker = {"id": "u1", "player": 1, "VALUE": 5.0}
+    enemy = {"id": "e1", "player": 2, "VALUE": 8.0}
+    gs["units"] = [attacker, enemy]
+    gs["units_cache"] = {
+        "u1": {"col": 5, "row": 5, "HP_CUR": 10, "player": 1},
+        "e1": {"col": 6, "row": 6, "HP_CUR": 10, "player": 2},
+    }
+    gs["victory_points"] = {1: vp_me, 2: vp_opp}
+    return gs, attacker, enemy
+
+
+def test_balanced_bot_intent_kill() -> None:
+    """Quand l'attaquant peut anéantir un ennemi à forte valeur, _elect_intent retourne KILL."""
+    from unittest.mock import patch
+
+    gs, attacker, _ = _gs_with_enemy()
+    bot = ReferenceBalancedBot(randomness=0.0)
+
+    def _dmg(game_state, att_id, def_id, is_ranged):
+        return 15.0 if att_id == "u1" else 0.0
+
+    with patch("ai.benchmark_bots.squad_expected_damage", side_effect=_dmg):
+        intent = bot._elect_intent(attacker, gs)
+
+    assert intent == "KILL"
+
+
+def test_balanced_bot_intent_preserve() -> None:
+    """Avec avance VP >= 12 et menace ennemie >= 8, _elect_intent retourne PRESERVE."""
+    from unittest.mock import patch
+
+    gs, attacker, _ = _gs_with_enemy(vp_me=12, vp_opp=0)
+    bot = ReferenceBalancedBot(randomness=0.0)
+
+    def _dmg(game_state, att_id, def_id, is_ranged):
+        return 0.0 if att_id == "u1" else 10.0
+
+    with patch("ai.benchmark_bots.squad_expected_damage", side_effect=_dmg):
+        intent = bot._elect_intent(attacker, gs)
+
+    assert intent == "PRESERVE"
 
 
 def test_denial_bot_move_to_uncontested_objective() -> None:

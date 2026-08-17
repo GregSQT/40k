@@ -336,7 +336,8 @@ class ReferenceBalancedBot(_BenchmarkBase):
         if phase == "shoot":
             return self._shoot(valid_actions, game_state, active_unit)
         if phase == "charge":
-            if self._elect_intent(active_unit, game_state) == "KILL":
+            enemies = _living_enemies(active_unit, game_state)
+            if self._elect_intent(active_unit, game_state, enemies) == "KILL":
                 return self._charge(valid_actions, game_state, active_unit)
             return self._wait_or_first(valid_actions)
         if phase == "fight":
@@ -532,13 +533,13 @@ class ReferenceReactiveBot(_BenchmarkBase):
         self._update_plan(game_state, player)
         candidates = [current] + list(valid_destinations)
 
-        if self._plan == "KILL":
+        if self._plan in ("KILL", "RETREAT"):
             enemies = _living_enemies(unit, game_state)
+        if self._plan == "KILL":
             def _score(d: Tuple[int, int]) -> float:
                 return -float(_min_enemy_dist(d, enemies, game_state))
             best = max(candidates, key=_score)
         elif self._plan == "RETREAT":
-            enemies = _living_enemies(unit, game_state)
             def _score(d: Tuple[int, int]) -> float:
                 return float(_min_enemy_dist(d, enemies, game_state))
             best = max(candidates, key=_score)
