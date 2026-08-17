@@ -133,7 +133,7 @@ export interface LosPreviewFromSource {
   /** Cases vues EN PLUS grâce aux figs sur l'étage AFFICHÉ (murs de leur ruine ignorés), à peindre
    * en VERT. Vide au niveau 0 ou si aucune fig sur l'étage affiché. */
   elevatedCells: Array<{ col: number; row: number }>;
-  key: string;
+  readonly key: string;
 }
 
 function stableBoolRecordJson(m: Record<string, boolean>): string {
@@ -487,10 +487,10 @@ export function buildLosPreviewFromSource(
           .map((mid) => `${mid}:${modelLevels[mid] ?? 0}`)
           .join(";")
       : "";
-  // key est un getter lazy : les 4 appelants qui ne lisent pas .key n'en paient pas le coût
-  // (~6 ms/appel, dominé par stableTerrainKey sur ~16 000 hexes). Un seul appelant (useMemo
-  // blinkIds/coverByUnitId, call site ligne 3368 de BoardPvp) lit .key — le getter s'exécute
-  // exactement une fois pour lui, jamais pour les gestionnaires de survol (call sites 4153 et 7636).
+  // key est un getter lazy mémoïsé : les appelants qui ne lisent pas .key n'en paient pas le coût
+  // (~6 ms/appel, dominé par stableTerrainKey sur ~16 000 hexes). Un seul appelant
+  // (shootPreviewWasmLos useMemo) lit .key — le getter s'exécute une fois et met en cache.
+  let _cachedKey: string | undefined;
   return {
     visibleHexes,
     clearCells: losPreview.clearCells,
@@ -501,7 +501,8 @@ export function buildLosPreviewFromSource(
     effectiveWallHexes,
     elevatedCells,
     get key(): string {
-      return [
+      if (_cachedKey !== undefined) return _cachedKey;
+      _cachedKey = [
         params.source.fromCol,
         params.source.fromRow,
         params.maxRange,
@@ -518,6 +519,7 @@ export function buildLosPreviewFromSource(
         [...losPreview.blinkIds].sort((a, b) => a - b).join(","),
         stableBoolRecordJson(losPreview.coverByUnitId),
       ].join("|");
+      return _cachedKey;
     },
   };
 }
