@@ -170,12 +170,19 @@ def test_toutes_les_regles_emettent_un_exposure_rate() -> None:
         "abilities/reactive_move_agent_exposure_rate",
         "abilities/reactive_move_opp_exposure_rate",
         "abilities/charge_impact_agent_exposure_rate",
+        "abilities/charge_impact_opp_exposure_rate",
         "abilities/charge_after_advance_agent_exposure_rate",
+        "abilities/charge_after_advance_opp_exposure_rate",
         "abilities/charge_after_flee_agent_exposure_rate",
+        "abilities/charge_after_flee_opp_exposure_rate",
         "abilities/move_after_shooting_agent_exposure_rate",
+        "abilities/move_after_shooting_opp_exposure_rate",
         "abilities/hit_reroll_agent_exposure_rate",
+        "abilities/hit_reroll_opp_exposure_rate",
         "abilities/wound_reroll_agent_exposure_rate",
+        "abilities/wound_reroll_opp_exposure_rate",
         "abilities/oath_wound_bonus_agent_exposure_rate",
+        "abilities/oath_wound_bonus_opp_exposure_rate",
     }
     emitted = {tag for tag, _, _ in writer.history}
     for tag in expected_exposure_tags:

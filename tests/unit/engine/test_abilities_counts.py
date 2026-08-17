@@ -344,3 +344,30 @@ def test_oath_wound_bonus_exposure_zero_when_no_shots() -> None:
     tactical = _run_to_end(engine)
     assert tactical["abilities_exposure"]["oath_wound_bonus_agent"] == 0
     assert tactical["abilities_exposure"]["oath_wound_bonus_opp"] == 0
+
+
+def test_hit_reroll_agent_exposure_proxy_via_count() -> None:
+    """hitAbility dans shoot log agent → hit_reroll_agent_exposure=1 via proxy count (Oath, pas reroll_1_tohit_fight)."""
+    engine = _build(_config(_UNITS_FAR, controlled_player=1))
+    engine.game_state["action_logs"].append({
+        "type": "shoot",
+        "player": 1,
+        "damage": 0,
+        "turn": 1,
+        "shooterId": "1",
+        "shootDetails": [{"hitAbility": "Oath of Moment", "hitResult": "MISS"}],
+    })
+    tactical = _run_to_end(engine)
+    assert tactical["abilities_counts"]["hit_reroll_agent"] == 1
+    assert tactical["abilities_exposure"]["hit_reroll_agent"] == 1
+
+
+def test_hit_reroll_opp_exposure_proxy_via_count() -> None:
+    """hitAbility dans shoot log opp → hit_reroll_opp_exposure=1 via proxy count."""
+    engine = _build(_config(_UNITS_FAR, controlled_player=1))
+    engine.game_state["action_logs"].append(
+        _shoot_log_opp([{"hitAbility": "Oath of Moment"}])
+    )
+    tactical = _run_to_end(engine)
+    assert tactical["abilities_counts"]["hit_reroll_opp"] == 1
+    assert tactical["abilities_exposure"]["hit_reroll_opp"] == 1
