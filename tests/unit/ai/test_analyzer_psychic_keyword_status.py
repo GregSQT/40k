@@ -184,20 +184,12 @@ def test_compute_weapon_rule_not_used_warnings_excludes_psychic(tmp_path):
     )
     assert psychic_zero > 0, "Prémisse : des paires PSYCHIC à 0 comptes attendues dans ce scénario"
 
-    total_all_zero = sum(
+    expected = sum(
         1
         for rn, wks in weapon_rule_to_weapons.items()
         for wk in wks
-        if unit_type_suffixes and wk.endswith(unit_type_suffixes)
-        and an._weapon_rule_usage_pair_total(wr_usage, (rn, wk)) == 0
-    )
-    interaction_only_zero = sum(
-        1
-        for rn, wks in weapon_rule_to_weapons.items()
-        for wk in wks
-        if rn in an._INTERACTION_ONLY_WEAPON_RULES
+        if rn not in an._INTERACTION_ONLY_WEAPON_RULES
         and unit_type_suffixes and wk.endswith(unit_type_suffixes)
         and an._weapon_rule_usage_pair_total(wr_usage, (rn, wk)) == 0
     )
-    expected = total_all_zero - interaction_only_zero
     assert an._compute_weapon_rule_not_used_warnings(stats) == expected
