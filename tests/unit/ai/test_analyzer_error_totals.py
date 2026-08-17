@@ -70,6 +70,7 @@ COUNTERS = {
         ('fight_hit_result_mismatch',),
         ('fight_wound_threshold_mismatch',),
         ('fight_alternation_violations',),
+        ('hazardous_no_hazardous_weapon_fight',),
         # `fight_not_allocated_target_alive` : compteur retiré le 2026-08-12 (faux positifs par
         # construction ; l'invariant 05 est tenu par
         # `tests/unit/engine/test_attack_allocation_contract.py`).
