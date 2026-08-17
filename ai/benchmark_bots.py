@@ -88,8 +88,10 @@ def _swing_score_fn(attacker_id: str, is_ranged: bool):
     def _score(sid: str, entry: Dict[str, Any], game_state: Dict[str, Any]) -> float:
         damage = squad_expected_damage(game_state, attacker_id, sid, is_ranged)
         hp = get_hp_from_cache(sid, game_state)
-        if hp is None or hp <= 0.0:
-            return damage
+        if hp is None:
+            raise ValueError(f"_swing_score_fn: {sid} absent du cache (unité ciblée non vivante)")
+        if hp <= 0:
+            raise ValueError(f"_swing_score_fn: {sid} HP={hp} dans le cache (attendu >0)")
         p_kill = min(1.0, damage / float(hp))
         value = float(entry.get("VALUE", 0.0))
         return p_kill * value + damage
@@ -168,7 +170,7 @@ class _BenchmarkBase:
         self._deployment_episode_marker: Optional[Any] = None
 
     def select_placement_action(self, valid_actions: List[int], game_state: Dict[str, Any]) -> int:
-        episode_marker = game_state.get("episode_number")
+        episode_marker = require_key(game_state, "episode_number")
         if self._deployment_episode_marker != episode_marker:
             self._deployment_episode_marker = episode_marker
             self._deployment_last_action = None
@@ -245,11 +247,17 @@ class ReferenceBalancedBot(_BenchmarkBase):
     TOUTES les decisions de l'activation (move + attaque).
     """
 
-    def _elect_intent(self, unit: Dict[str, Any], game_state: Dict[str, Any]) -> str:
+    def _elect_intent(
+        self,
+        unit: Dict[str, Any],
+        game_state: Dict[str, Any],
+        enemies: Optional[List[Dict[str, Any]]] = None,
+    ) -> str:
         """Retourne 'SCORE' | 'KILL' | 'PRESERVE'."""
         player = int(require_key(unit, "player"))
         att_id = str(require_key(unit, "id"))
-        enemies = _living_enemies(unit, game_state)
+        if enemies is None:
+            enemies = _living_enemies(unit, game_state)
 
         objectives = game_state.get("objectives") or []
         zones_mine = _count_zones(game_state, player)
@@ -259,7 +267,11 @@ class ReferenceBalancedBot(_BenchmarkBase):
         for e in enemies:
             eid = str(e["id"])
             dmg = squad_expected_damage(game_state, att_id, eid, True)
-            hp = get_hp_from_cache(eid, game_state) or 1.0
+            hp = get_hp_from_cache(eid, game_state)
+            if hp is None:
+                raise ValueError(f"_elect_intent: {eid} absent du cache (ennemi vivant attendu)")
+            if hp <= 0:
+                raise ValueError(f"_elect_intent: {eid} HP={hp} dans le cache (attendu >0)")
             p_kill = min(1.0, dmg / float(hp))
             value = float(e.get("VALUE", 0.0))
             s_kill = max(s_kill, p_kill * value + dmg)
@@ -352,7 +364,11 @@ class ReferenceDenialBot(_BenchmarkBase):
 
         def _score(sid: str, entry: Dict[str, Any], gs: Dict[str, Any]) -> float:
             damage = squad_expected_damage(gs, att_id, sid, is_ranged)
-            hp = get_hp_from_cache(sid, gs) or 1.0
+            hp = get_hp_from_cache(sid, gs)
+            if hp is None:
+                raise ValueError(f"_denial_score_fn: {sid} absent du cache (unité ciblée non vivante)")
+            if hp <= 0:
+                raise ValueError(f"_denial_score_fn: {sid} HP={hp} dans le cache (attendu >0)")
             p_kill = min(1.0, damage / float(hp))
             value = float(entry.get("VALUE", 0.0))
             base = p_kill * value + damage
@@ -468,7 +484,7 @@ class ReferenceReactiveBot(_BenchmarkBase):
 
     def _update_plan(self, game_state: Dict[str, Any], player: int) -> None:
         """Met a jour le plan pour ce TOUR (idempotent si deja appele ce tour)."""
-        episode_marker = game_state.get("episode_number")
+        episode_marker = require_key(game_state, "episode_number")
         curr_marker = self._current_turn_marker(game_state)
 
         if episode_marker != self._snapshot_episode:
@@ -491,12 +507,13 @@ class ReferenceReactiveBot(_BenchmarkBase):
 
         vp = require_key(game_state, "victory_points")
         vp_me = float(vp[player])
+        vp_opp = float(vp[3 - player])
 
         if loss_me > loss_opp + _VALUE_LOSS_THRESHOLD:
             self._plan = "RETREAT"
         elif loss_opp > loss_me + _VALUE_LOSS_THRESHOLD:
             self._plan = "KILL"
-        elif vp_me < self._snapshot_vp_me - _VP_LEAD:
+        elif vp_me < vp_opp - _VP_LEAD:
             self._plan = "SCORE"
         # sinon : plan inchange
 

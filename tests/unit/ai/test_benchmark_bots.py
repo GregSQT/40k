@@ -158,3 +158,121 @@ def test_denial_bot_move_to_uncontested_objective() -> None:
     assert bot.randomness == 0.0
     assert isinstance(bot.PLACEMENT_WEIGHTS, dict)
     assert len(bot.PLACEMENT_WEIGHTS) == 5
+
+
+# ─────────────────────────────────────────────────────────────────────────────────────────────
+# 4. VP SCORE — _update_plan bascule quand l'adversaire a une avance VP
+# ─────────────────────────────────────────────────────────────────────────────────────────────
+
+def test_reactive_bot_switches_to_score_on_opponent_vp_lead() -> None:
+    """_update_plan bascule en SCORE quand l'adversaire dépasse notre VP de _VP_LEAD.
+
+    Scénario : plan forcé à KILL au tour 1, puis l'adversaire prend une avance
+    VP supérieure à _VP_LEAD au tour 2. Sans la correction, la condition VP
+    était toujours fausse (VP monotone ≥ snapshot) et le plan restait KILL.
+    """
+    from ai.benchmark_bots import _VP_LEAD
+
+    bot = ReferenceReactiveBot(randomness=0.0)
+    # Tour 1 : initialise les snapshots (VP=0/0, pas de pertes).
+    gs_t1 = _minimal_game_state(episode=1, turn=1)
+    gs_t1["victory_points"] = {1: 0, 2: 0}
+    bot._update_plan(gs_t1, player=1)
+    # Force le plan en KILL pour que la transition vers SCORE soit observable.
+    bot._plan = "KILL"
+
+    # Tour 2 : aucune perte de valeur, adversaire a une avance VP > _VP_LEAD.
+    gs_t2 = _minimal_game_state(episode=1, turn=2)
+    gs_t2["victory_points"] = {1: 0, 2: int(_VP_LEAD) + 1}
+    bot._update_plan(gs_t2, player=1)
+    assert bot._plan == "SCORE", (
+        f"attendu SCORE quand adversaire VP+{int(_VP_LEAD)+1} vs nous 0, obtenu {bot._plan!r}"
+    )
+
+
+def test_reactive_bot_no_score_switch_when_vp_equal() -> None:
+    """_update_plan ne bascule PAS en SCORE si les VP sont égaux."""
+    bot = ReferenceReactiveBot(randomness=0.0)
+    gs_t1 = _minimal_game_state(episode=1, turn=1)
+    gs_t1["victory_points"] = {1: 5, 2: 5}
+    bot._update_plan(gs_t1, player=1)
+    bot._plan = "KILL"
+
+    gs_t2 = _minimal_game_state(episode=1, turn=2)
+    gs_t2["victory_points"] = {1: 10, 2: 10}
+    bot._update_plan(gs_t2, player=1)
+    assert bot._plan == "KILL", f"plan ne devrait pas changer à VP égaux, obtenu {bot._plan!r}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────────────────────
+# 5. require_key pour episode_number (T1 — pas de .get() silencieux)
+# ─────────────────────────────────────────────────────────────────────────────────────────────
+
+def test_select_placement_action_raises_on_missing_episode_number() -> None:
+    """select_placement_action lève KeyError si episode_number absent du game_state."""
+    from ai.evaluation_bots import DEPLOYMENT_ACTIONS
+    bot = ReferenceBalancedBot(randomness=0.0)
+    gs = _minimal_game_state()
+    del gs["episode_number"]
+    from shared.data_validation import ConfigurationError
+    with pytest.raises(ConfigurationError):
+        bot.select_placement_action(list(DEPLOYMENT_ACTIONS), gs)
+
+
+def test_update_plan_raises_on_missing_episode_number() -> None:
+    """_update_plan lève ConfigurationError si episode_number absent du game_state."""
+    from shared.data_validation import ConfigurationError
+    bot = ReferenceReactiveBot(randomness=0.0)
+    gs = _minimal_game_state()
+    del gs["episode_number"]
+    with pytest.raises(ConfigurationError):
+        bot._update_plan(gs, player=1)
+
+
+# ─────────────────────────────────────────────────────────────────────────────────────────────
+# 6. _swing_score_fn et _denial_score_fn lèvent sur hp incohérent (T1)
+# ─────────────────────────────────────────────────────────────────────────────────────────────
+
+def _make_game_state_with_unit(sid: str, hp: Optional[int]) -> Dict[str, Any]:
+    """game_state minimal avec une unité en cache ; hp=None = pas de cache."""
+    gs: Dict[str, Any] = {
+        "units": [{"id": sid, "player": 2, "VALUE": 3.0}],
+        "units_cache": {},
+        "episode_number": 1,
+        "turn": 1,
+        "phase": "shoot",
+        "victory_points": {1: 0, 2: 0},
+        "objectives": [],
+        "objective_controllers": {},
+    }
+    if hp is not None:
+        gs["units_cache"][sid] = {"HP_CUR": hp, "position": (0, 0), "on_battlefield": True}
+    return gs
+
+
+def test_swing_score_fn_raises_on_none_hp() -> None:
+    """_swing_score_fn lève ValueError quand l'unité n'est pas en cache (hp=None)."""
+    from ai.benchmark_bots import _swing_score_fn
+    from unittest.mock import patch
+
+    fn = _swing_score_fn("att1", is_ranged=True)
+    gs = _make_game_state_with_unit("tgt1", hp=None)
+    entry = {"VALUE": 3.0}
+    with patch("ai.benchmark_bots.squad_expected_damage", return_value=5.0):
+        with pytest.raises(ValueError, match="absent du cache"):
+            fn("tgt1", entry, gs)
+
+
+def test_denial_score_fn_raises_on_none_hp() -> None:
+    """_denial_score_fn lève ValueError quand l'unité n'est pas en cache (hp=None)."""
+    bot = ReferenceDenialBot(randomness=0.0)
+    attacker = {"id": "att1", "player": 1}
+    gs = _make_game_state_with_unit("tgt1", hp=None)
+    gs["objective_controllers"] = {}
+    entry = {"VALUE": 3.0}
+    fn = bot._denial_score_fn(attacker, is_ranged=True, game_state=gs)
+    with __import__("unittest.mock", fromlist=["patch"]).patch(
+        "ai.benchmark_bots.squad_expected_damage", return_value=5.0
+    ):
+        with pytest.raises(ValueError, match="absent du cache"):
+            fn("tgt1", entry, gs)
