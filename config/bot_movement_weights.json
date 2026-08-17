@@ -116,8 +116,8 @@
       "w_fire": 0.6,
       "w_risk": 0.4,
       "w_contest": 2.0,
-      "w_crowd": 2.5,
-      "_justification": "POSE le 2026-08-12 avec le style, NON REGLE — a etablir en bot-contre-bot avant toute mesure contre l'agent. Doctrine : marquer d'abord, se battre pour ca. w_objective 1.0 est le deuxieme du panel derriere racer (1.3), qui est la caricature du meme axe et ne se bat jamais. w_enemy 0.3 : il s'approche pour contester, il ne traverse pas la table comme alpha (1.2). w_fire 0.6 > w_risk 0.4 : il accepte de s'exposer quand la position lui rend plus de degats qu'elle ne lui en coute — c'est ce qui le separe d'un endgame (w_risk 0.9), qui recule."
+      "w_crowd": 6.0,
+      "_justification": "REGLE le 2026-08-17 apres balayage w_contest puis w_crowd (board/44x60x1, modele NEW_BOTS_12345_robust_0.8692, 60 ep/bot, derive 0.000 sur les 5 autres styles a chaque run). w_contest : 3.5 -> 2.0, T5 1.47 -> 1.65 (pull ennemi trop fort a 3.5, il conteste au lieu de tenir). w_crowd : balayage 1.5/2.5/3.0/4.0/5.0/6.0/7.0 -> T5 1.52/1.65/1.72/1.82/1.85/1.90/1.85. Pic mesure a 6.0 (T5=1.90), la courbe redescend a 7.0 : c est le plateau. Mecanisme : penalty = w_crowd * OC_surplus ; a 6.0 le penalty = 12 >> hold_bonus 3.0, le stacking est economiquement interdit, le bot repartit une escouade par zone ; a 7.0 le spread est deja sature (cibles-distinctes T3=2.00 des 6.0) et le poids supplementaire penalise les zones frontalierees sans gain. Pertes T5 decroissantes de 0.40 (1.5) a 0.33 (6.0) : le spread evite les combats concentres, coherent avec la doctrine marquer-d-abord."
     }
   }
 }
