@@ -158,6 +158,43 @@ def test_no_shared_fallback_for_the_control_floor() -> None:
     )
 
 
+def _assert_profile_valid(config_name: str, profile_name: str, params: Dict[str, Any]) -> None:
+    """Valide les invariants `vs_control` d'un profil de callback_params."""
+    assert "model_gating_min_vs_control" in params, (
+        f"{config_name}[{profile_name}] : plancher `vs_control` absent — `setup_callbacks` "
+        "leve au lancement du run (aucun repli sur _training_common.json)."
+    )
+    value = float(params["model_gating_min_vs_control"])
+    assert 0.0 <= value <= 1.0, f"{config_name}[{profile_name}] : plancher hors [0,1] ({value})"
+    if value > 0.0:
+        weights = params.get("bot_eval_weights", {})
+        assert "control" in weights, (
+            f"{config_name}[{profile_name}] : model_gating_min_vs_control={value} arme mais "
+            "'control' absent de bot_eval_weights — le run crasherait en fin d'entrainement. "
+            "Mettre model_gating_min_vs_control: 0.0 ou ajouter 'control' aux poids."
+        )
+
+
+def test_armed_floor_without_control_weight_is_rejected() -> None:
+    """Branch `value > 0.0` est atteignable et echoue sur un profil synthetique incoherent.
+
+    Preuve que le verrou est arme : un profil avec plancher > 0 et 'control' absent leve ;
+    le meme profil avec 'control' present passe.
+    """
+    params_bad = {
+        "model_gating_min_vs_control": 0.3,
+        "bot_eval_weights": {"alpha": 0.5, "greedy": 0.5},
+    }
+    with pytest.raises(AssertionError, match="control"):
+        _assert_profile_valid("synthetic", "bad", params_bad)
+
+    params_good = {
+        "model_gating_min_vs_control": 0.3,
+        "bot_eval_weights": {"control": 0.5, "greedy": 0.5},
+    }
+    _assert_profile_valid("synthetic", "good", params_good)
+
+
 @pytest.mark.parametrize("config_path", _active_training_configs(), ids=lambda p: p.parent.name)
 def test_every_profile_declares_the_control_floor(config_path: Path) -> None:
     """La cle est OBLIGATOIRE dans CHAQUE profil : `train.py` la lit sans aucun repli."""
@@ -171,16 +208,4 @@ def test_every_profile_declares_the_control_floor(config_path: Path) -> None:
     ]
     assert profiles, f"{config_path.name} : aucun profil avec callback_params"
     for name, params in profiles:
-        assert "model_gating_min_vs_control" in params, (
-            f"{config_path.name}[{name}] : plancher `vs_control` absent — `setup_callbacks` "
-            "leve au lancement du run (aucun repli sur _training_common.json)."
-        )
-        value = float(params["model_gating_min_vs_control"])
-        assert 0.0 <= value <= 1.0, f"{config_path.name}[{name}] : plancher hors [0,1] ({value})"
-        if value > 0.0:
-            weights = params.get("bot_eval_weights", {})
-            assert "control" in weights, (
-                f"{config_path.name}[{name}] : model_gating_min_vs_control={value} arme mais "
-                "'control' absent de bot_eval_weights — le run crasherait en fin d'entrainement. "
-                "Mettre model_gating_min_vs_control: 0.0 ou ajouter 'control' aux poids."
-            )
+        _assert_profile_valid(config_path.name, name, params)
