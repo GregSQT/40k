@@ -204,6 +204,28 @@ def test_reactive_bot_no_score_switch_when_vp_equal() -> None:
     assert bot._plan == "KILL", f"plan ne devrait pas changer à VP égaux, obtenu {bot._plan!r}"
 
 
+def test_reactive_bot_no_score_switch_at_exact_vp_lead_boundary() -> None:
+    """Frontière exacte : un retard de PILE _VP_LEAD ne bascule PAS en SCORE.
+
+    La condition est stricte (`vp_me < vp_opp - _VP_LEAD`) : à l'égalité exacte le
+    plan reste inchangé. Un `<=` ferait basculer ce scénario.
+    """
+    from ai.benchmark_bots import _VP_LEAD
+
+    bot = ReferenceReactiveBot(randomness=0.0)
+    gs_t1 = _minimal_game_state(episode=1, turn=1)
+    bot._update_plan(gs_t1, player=1)
+    bot._plan = "KILL"
+
+    gs_t2 = _minimal_game_state(episode=1, turn=2)
+    gs_t2["victory_points"] = {1: 0, 2: int(_VP_LEAD)}
+    bot._update_plan(gs_t2, player=1)
+    assert bot._plan == "KILL", (
+        f"retard de pile {int(_VP_LEAD)} VP : la condition stricte doit laisser le plan "
+        f"inchangé, obtenu {bot._plan!r}"
+    )
+
+
 # ─────────────────────────────────────────────────────────────────────────────────────────────
 # 5. require_key pour episode_number (T1 — pas de .get() silencieux)
 # ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -276,3 +298,53 @@ def test_denial_score_fn_raises_on_none_hp() -> None:
     ):
         with pytest.raises(ValueError, match="absent du cache"):
             fn("tgt1", entry, gs)
+
+
+def test_swing_score_fn_raises_on_zero_hp() -> None:
+    """_swing_score_fn lève ValueError quand le cache annonce HP<=0.
+
+    Distinct de hp=None : ici l'unité EST dans le cache (donc réputée vivante) mais
+    avec un HP incohérent — division par zéro évitée par une erreur explicite, pas
+    par un fallback (T1).
+    """
+    from ai.benchmark_bots import _swing_score_fn
+    from unittest.mock import patch
+
+    fn = _swing_score_fn("att1", is_ranged=True)
+    gs = _make_game_state_with_unit("tgt1", hp=0)
+    entry = {"VALUE": 3.0}
+    with patch("ai.benchmark_bots.squad_expected_damage", return_value=5.0):
+        with pytest.raises(ValueError, match="HP=0"):
+            fn("tgt1", entry, gs)
+
+
+def test_denial_score_fn_raises_on_zero_hp() -> None:
+    """_denial_score_fn lève ValueError quand le cache annonce HP<=0."""
+    from unittest.mock import patch
+
+    bot = ReferenceDenialBot(randomness=0.0)
+    attacker = {"id": "att1", "player": 1}
+    gs = _make_game_state_with_unit("tgt1", hp=0)
+    entry = {"VALUE": 3.0}
+    fn = bot._denial_score_fn(attacker, is_ranged=True, game_state=gs)
+    with patch("ai.benchmark_bots.squad_expected_damage", return_value=5.0):
+        with pytest.raises(ValueError, match="HP=0"):
+            fn("tgt1", entry, gs)
+
+
+def test_elect_intent_raises_on_zero_hp() -> None:
+    """_elect_intent lève ValueError quand un ennemi du cache annonce HP<=0.
+
+    La liste d'ennemis est passée explicitement (paramètre `enemies`) : c'est le
+    chemin qu'emprunte select_movement_destination, qui calcule la liste une fois
+    et la partage avec l'élection d'intention.
+    """
+    from unittest.mock import patch
+
+    bot = ReferenceBalancedBot(randomness=0.0)
+    gs = _make_game_state_with_unit("tgt1", hp=0)
+    unit = {"id": "att1", "player": 1, "VALUE": 5.0}
+    enemy = gs["units"][0]
+    with patch("ai.benchmark_bots.squad_expected_damage", return_value=5.0):
+        with pytest.raises(ValueError, match="HP=0"):
+            bot._elect_intent(unit, gs, [enemy])

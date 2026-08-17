@@ -300,16 +300,15 @@ class ReferenceBalancedBot(_BenchmarkBase):
         if self.randomness > 0 and random.random() < self.randomness:
             return random.choice(valid_destinations)
 
-        intent = self._elect_intent(unit, game_state)
+        enemies = _living_enemies(unit, game_state)
+        intent = self._elect_intent(unit, game_state, enemies)
         player = int(require_key(unit, "player"))
         candidates = [current] + list(valid_destinations)
 
         if intent == "KILL":
-            enemies = _living_enemies(unit, game_state)
             def _score(d: Tuple[int, int]) -> float:
                 return _expected_ranged_from(unit, enemies, d, game_state)
         elif intent == "PRESERVE":
-            enemies = _living_enemies(unit, game_state)
             def _score(d: Tuple[int, int]) -> float:
                 return float(_min_enemy_dist(d, enemies, game_state))
         else:  # SCORE
@@ -462,7 +461,6 @@ class ReferenceReactiveBot(_BenchmarkBase):
         self._plan_turn_marker: Optional[Tuple[Any, int]] = None
         self._snapshot_value_me: float = 0.0
         self._snapshot_value_opp: float = 0.0
-        self._snapshot_vp_me: float = 0.0
         self._snapshot_episode: Optional[Any] = None
 
     def _living_value(self, player: int, game_state: Dict[str, Any]) -> float:
@@ -491,8 +489,6 @@ class ReferenceReactiveBot(_BenchmarkBase):
             self._snapshot_episode = episode_marker
             self._snapshot_value_me = self._living_value(player, game_state)
             self._snapshot_value_opp = self._living_value(3 - player, game_state)
-            vp = require_key(game_state, "victory_points")
-            self._snapshot_vp_me = float(vp[player])
             self._plan = "SCORE"
             self._plan_turn_marker = curr_marker
             return
@@ -519,7 +515,6 @@ class ReferenceReactiveBot(_BenchmarkBase):
 
         self._snapshot_value_me = val_me_now
         self._snapshot_value_opp = val_opp_now
-        self._snapshot_vp_me = vp_me
         self._plan_turn_marker = curr_marker
 
     def select_movement_destination(
