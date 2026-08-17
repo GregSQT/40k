@@ -5412,6 +5412,8 @@ class W40KEngine(gym.Env):
         # 20.04 — destruction en fin de 3e round : même statut que coherency_removal, pas une
         # action d'agent.
         "strategic_reserves_timeout",
+        # 08.03 / 01.07 — jet de commandement : pas une action d'agent.
+        "battle_shock",
     })
 
     _STEP_LOG_TYPE_MAP: Dict[str, str] = {
@@ -5451,6 +5453,10 @@ class W40KEngine(gym.Env):
         # `destroy_unarrived_strategic_reserves` n'atteint jamais step.log et l'analyzer ignore
         # des escouades entieres dans ses ratios d'attrition.
         "strategic_reserves_timeout": "strategic_reserves_timeout",
+        # 08.03 / 01.07 — jet de battle-shock par unite concernee (L1). Non-incrementant : ce
+        # n est pas une action d agent. Le formateur StepLogger produit la ligne :
+        # « Unit N(c,r) BATTLE-SHOCK Roll:2D6=<n> vs Ld<n>+ → SHOCKED|OK ».
+        "battle_shock": "battle_shock",
     }
 
     # Le moteur emet un seul type "move" ; la nuance vit dans move_type (cf. move_type_map du
@@ -5531,6 +5537,11 @@ class W40KEngine(gym.Env):
         # du groupe : un drapeau de groupe aurait annonce la regle sur des attaques ou elle n a
         # rien fait. `strengthRoll=None` sur ces lignes, `Wound None(4+)`.
         "lethalHit": "lethal_hit",
+        # L4 — AP de l arme et Sv de base de la figurine allouee (05.04, 06.02, 24.18).
+        # Ecrits dans le shot_record par `_resolve_one_manual_wound` au moment de l allocation.
+        # Permettent au formateur StepLogger d afficher `Save R(<base>+ AP<n> → <eff>+)`.
+        "weaponAp": "weapon_ap",
+        "allocModelArmor": "alloc_model_armor",
     }
 
     def _models_segment_for_unit(self, unit_id: Any, label: str = "MODELS") -> str:
@@ -6038,6 +6049,10 @@ class W40KEngine(gym.Env):
             # dit qui RESTE ; cette liste dit qui PART, ce qu'aucun lecteur ne peut deduire d'un
             # segment (il ne verrait qu'un effectif plus court, sans savoir lequel).
             ("removed_models", "removed_models"),
+            # L1 — jet de battle-shock (01.07 / 08.03) : seuil Ld, jet 2D6, resultat.
+            ("ld", "ld"),
+            ("roll", "roll"),
+            ("battle_shocked", "battle_shocked"),
         ):
             value = raw_log.get(src)  # get allowed
             if value is not None:

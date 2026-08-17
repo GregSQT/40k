@@ -5604,6 +5604,12 @@ def roll_battle_shock(unit_id: str, game_state: Dict[str, Any]) -> bool:
         "unitId": int(unit_id),
         "player": int(unit.get("player", -1)),
         "result": result_str,
+        # Champs lus par _build_step_log_details pour le formateur StepLogger (L1) :
+        "col": col,
+        "row": row,
+        "ld": ld,
+        "roll": roll,
+        "battle_shocked": battle_shocked,
     })
     # Trace debug ECRITE ICI, et pas chez l'appelant : `command_step_battle_shock` la produisait
     # en recalculant `unit_effective_leadership` juste pour la remplir — un second balayage de
@@ -9983,6 +9989,11 @@ def _resolve_one_manual_wound(game_state: Dict[str, Any], alloc: Dict[str, Any],
     # Mesure du 2026-08-12 sur 600 episodes : 200 PV par socle faux sur 173 129 compares aux
     # instantanes `T{n} STATE:`, et 2 342 fenetres ou l escouade entiere retombait sur son ancre.
     rec["targetModelId"] = str(cur)
+    # L4 — AP de l arme et Sv de base de la figurine : permettent au formateur StepLogger
+    # d ecrire `Save R(<base>+ AP<n> → <eff>+)` au lieu de `Save R(<eff>+)`, debloquant le
+    # controle de seuil de sauvegarde par l analyzer (05.04, 06.02, 24.18).
+    rec["weaponAp"] = ap
+    rec["allocModelArmor"] = int(m["ARMOR_SAVE"])
     from engine.game_state import effective_invul_save  # import paresseux : cycle, cf. plus haut
 
     # Waaagh! (chantier 03) : « models from your army with this ability have a 5+ invulnerable

@@ -166,7 +166,9 @@ def _anti_rule_token(details) -> str:
     return f" [ANTI-{anti_keyword}:{anti_threshold}+]"
 
 
-def _save_segments(details, *, damage, save_result, ap_ability_token: str = "") -> list:
+def _save_segments(
+    details, *, damage, save_result, ap_ability_token: str = "", alloc_model_id=None
+) -> list:
     """Segments `Save …` (+ `Dmg:` le cas echeant) d une attaque — TIR ET MELEE, un seul site.
 
     Trois etats, et un seul d entre eux comporte des chiffres :
@@ -186,16 +188,38 @@ def _save_segments(details, *, damage, save_result, ap_ability_token: str = "") 
        lire (ils cherchent des nombres) et qu ils sautaient donc EN SILENCE.
 
     3. Le cas normal : jet, seuil, relance et capacite d AP, puis les degats si la save echoue.
+
+    ``alloc_model_id`` (L3) : mid de la figurine allouee (05, Allocate Attack). Quand present,
+    un element ``→ <mid>`` est prepend aux segments — il apparait AVANT Save dans la sequence
+    de detail, ce qui associe explicitement le seuil/resultat a la figurine sans toucher a
+    la position de `[ALLOC_MODEL: <mid>]` (fin de ligne, garantie grammaire 2).
+    Absent sur `Save [NOT ALLOCATED]` (aucune allocation n a eu lieu).
+
+    L4 : quand `alloc_model_armor` et `weapon_ap` sont presents dans `details`,
+    le seuil est affiche sous forme `Save R(<base>+ AP<n> → <eff>+)` plutot que `Save R(<eff>+)`.
+    `<base>` = Sv de base de la figurine, `<n>` = AP de l arme (negatif), `<eff>` = seuil effectif.
+    Absent sur `Save [DEVASTATING WOUNDS]` (pas de sauvegarde faite) et `Save [NOT ALLOCATED]`.
     """
     save_skipped = bool(details.get("save_skipped", False))
     if save_skipped and details.get("save_skip_reason") == "DEVASTATING_WOUNDS":
-        return ["Save [DEVASTATING WOUNDS]", f"Dmg:{damage}HP"]
+        prefix = [f"→ {alloc_model_id}"] if alloc_model_id else []
+        return prefix + ["Save [DEVASTATING WOUNDS]", f"Dmg:{damage}HP"]
     if details.get("save_target") is None:
         return ["Save [NOT ALLOCATED]"]
-    save_part = f"Save {details['save_roll']}({details['save_target']}+)"
+    # L4 : affichage etendu quand base Sv et AP de l arme sont dans le record.
+    base_sv = details.get("alloc_model_armor")
+    ap_val = details.get("weapon_ap")
+    eff_sv = details["save_target"]
+    if base_sv is not None and ap_val is not None:
+        save_inner = f"{base_sv}+ AP{ap_val} → {eff_sv}+"
+    else:
+        save_inner = f"{eff_sv}+"
+    save_part = f"Save {details['save_roll']}({save_inner})"
     save_part += _rerolled_token(details, "save_roll_initial")
     save_part += ap_ability_token
-    segments = [save_part]
+    # L3 : prefixe → <mid> avant le segment Save.
+    prefix = [f"→ {alloc_model_id}"] if alloc_model_id else []
+    segments = prefix + [save_part]
     if save_result == "FAIL":
         segments.append(f"Dmg:{damage}HP")
     return segments
@@ -1133,6 +1157,7 @@ class StepLogger:
                     detail_parts.extend(_save_segments(
                         details, damage=damage, save_result=save_result,
                         ap_ability_token=_ability_token(ap_modifier_ability_display_name),
+                        alloc_model_id=details.get("target_model_id"),
                     ))
             detail_msg = f" - {' - '.join(detail_parts)}"
             if hazardous_test_required:
@@ -1380,9 +1405,10 @@ class StepLogger:
                     # — 24.10 dit qu aucune sauvegarde n est faite — et sur une attaque non
                     # allouee, un seuil `None`. Le tir avait la premiere moitie du remede depuis
                     # V11 §0hist.38, la melee ne l a jamais eue : miroir a moitie ecrit, motif
-                    # d echec n°1 du depot. Pas de capacite d AP en melee (aucun producteur).
+                    # d echec n°1 du depot. AP de l arme transmis via weapon_ap (L4).
                     detail_parts.extend(_save_segments(
                         details, damage=damage, save_result=save_result,
+                        alloc_model_id=details.get("target_model_id"),
                     ))
             
             detail_msg = f" - {' - '.join(detail_parts)}"
@@ -1398,6 +1424,16 @@ class StepLogger:
             # de la ligne FOUGHT cote parser, pas d'un pool d'eligibilite (cf. Documentation Replay.md).
             replay_meta = f" [FIGHT_SUBPHASE:{fight_subphase}]"
             return base_msg + detail_msg + replay_meta
+
+        elif action_type == "battle_shock":
+            # L1 — 01.07 / 08.03 : jet de battle-shock.
+            # Format : « Unit N(c,r) BATTLE-SHOCK Roll:2D6=<n> vs Ld<n>+ → SHOCKED|OK »
+            unit_with_coords = details.get("unit_with_coords") or str(unit_id)
+            roll_val = require_key(details, "roll")
+            ld_val = require_key(details, "ld")
+            shocked = require_key(details, "battle_shocked")
+            result = "SHOCKED" if shocked else "OK"
+            return f"Unit {unit_with_coords} BATTLE-SHOCK Roll:2D6={roll_val} vs Ld{ld_val}+ → {result}"
 
         elif action_type == "wait":
             return f"{unit_label} WAIT"
