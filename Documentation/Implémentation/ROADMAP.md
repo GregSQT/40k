@@ -1112,12 +1112,12 @@ Prêts à démarrer sans décision produit :
   ⚠️ Ce n'était PAS un nettoyage neutre — voir le changement de comportement de l'auto-play PvP
   décrit en [`Replay.md`](Replay.md) §4.B, **à confirmer en session PvP fight réelle**.
 - **Champs manquants du `step.log`** (sécable, **26** entrées ordonnées par nombre de règles
-  débloquées : `L1`, `L3`, `L4`, puis `L6`→`L28` — **`L2` a été retirée**, S/T sur les jets étant
-  livrée, et **`L5` soldée le 2026-08-12** : les six derniers tokens de règles d'armes que le
-  moteur savait produire sans les écrire dans `step.log` ([TORRENT], [LETHAL HITS],
-  [IGNORES COVER], [EXTRA ATTACKS], [ANTI-X:Y+], [PSYCHIC]) l'atteignent, au tir comme en mêlée.
-  Il n'y reste que [INDIRECT FIRE] 24.19 et [LANCE] 24.21, dont la RÈGLE n'est pas implémentée
-  dans le moteur — leur token n'est pas un travail de journal).
+  débloquées : `L6`→`L28` — **`L1`, `L2`, `L3`, `L4`, `L5` livrées** : `L1` battle-shock (01.06/07,
+  02.02, 08.03, 14.02) + `L3` mid alloué avant Save + `L4` AP/Sv sur Save (05.03/04, 06.02, 24.18,
+  24.28) livrés le **2026-08-17** ; `L2` retirée (S/T déjà porté) ; `L5` soldée le 2026-08-12
+  (six tokens d'armes manquants : [TORRENT], [LETHAL HITS], [IGNORES COVER], [EXTRA ATTACKS],
+  [ANTI-X:Y+], [PSYCHIC] — il ne reste que [INDIRECT FIRE] 24.19 et [LANCE] 24.21 dont la règle
+  n'est pas dans le moteur).
   Ce n'est pas un chantier d'un bloc : chaque champ se livre seul et fait passer des règles de
   « non vérifiable » à « vérifiable » par l'analyzer. À piocher quand un contrôle analyzer manque
   de données. *(Cette ligne a annoncé « 15 entrées, L1…L15 » jusqu'au 2026-08-10 : le tableau
