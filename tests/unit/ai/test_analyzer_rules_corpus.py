@@ -246,6 +246,194 @@ def test_a_rule_that_was_exercised_is_never_reported_out_of_roster(tmp_path):
     )
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Coverage gaps — §1.2 à §2.8 : somme corpus == bucket error_totals
+# ─────────────────────────────────────────────────────────────────────────────
+# Pour chaque section : (a) armer un compteur par entrée corpus → gaps vides ;
+# (b) retirer les contrôles d'une entrée → gap détecté.
+# Les sections avec structures non-{P:n} (§1.5, §1.6, §1.7, §1.8, §2.2,
+# §2.4–§2.7) ne sont pas couvertes : leurs compteurs sont des totaux dérivés
+# (len de liste, somme de dict dynamique, comptage conditionnel) qui ne peuvent
+# pas être exprimés comme des chemins dans `stats`.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_section_12_corpus_sum_matches_bucket(tmp_path):
+    """16 entrées §1.2 — la somme par règle retombe sur le bucket 'shooting'."""
+    stats = _stats(tmp_path)
+    stats['shoot_invalid'][1]['out_of_range'] = 1
+    stats['shoot_over_rng_nb'][1] = 1
+    stats['shoot_combi_profile_conflicts'][1] = 1
+    stats['shoot_after_flee'][1] = 1
+    stats['shoot_at_friendly'][1] = 1
+    stats['shoot_at_engaged_enemy'][1] = 1
+    stats['shoot_invalid'][1]['engaged_non_close_quarters'] = 1
+    stats['close_quarters_shot_at_unengaged_target'][1] = 1
+    stats['advance_after_shoot'][1] = 1
+    stats['advance_twice_in_shoot_phase'][1] = 1
+    stats['move_distance_over_limit']['advance'][1] = 1
+    stats['advance_from_adjacent'][1] = 1
+    stats['shoot_hit_result_mismatch'][1] = 1
+    stats['indirect_fire_mismatch'][1] = 1
+    stats['shoot_wound_threshold_mismatch'][1] = 1
+    stats['hazardous_no_hazardous_weapon'][1] = 1
+    assert an.error_totals(stats)['shooting'] == 16, "le bucket ne voit pas les 16 compteurs §1.2"
+    assert coverage_gaps(stats, "1.2") == []
+
+
+def test_section_12_gap_detected(tmp_path):
+    """Retirer un contrôle de §1.2 doit remonter un gap."""
+    stats = _stats(tmp_path)
+    stats['shoot_over_rng_nb'][1] = 1
+    corpus = load_rules_corpus()
+    entry = next(e for e in corpus if e["id"] == "PROJ.1.2.surcharge_atk")
+    saved = entry["controls"]
+    entry["controls"] = []
+    try:
+        gaps = coverage_gaps(stats, "1.2")
+    finally:
+        entry["controls"] = saved
+    assert gaps == [("1.2", 0, 1)]
+
+
+def test_section_13_corpus_sum_matches_bucket(tmp_path):
+    """4 entrées §1.3 — la somme par règle retombe sur le bucket 'charge'."""
+    stats = _stats(tmp_path)
+    stats['charge_from_adjacent'][1] = 1
+    stats['charge_invalid'][1]['advanced'] = 1
+    stats['charge_invalid'][1]['fled'] = 1
+    stats['charge_invalid'][1]['distance_over_roll'] = 1
+    assert an.error_totals(stats)['charge'] == 4, "le bucket ne voit pas les 4 compteurs §1.3"
+    assert coverage_gaps(stats, "1.3") == []
+
+
+def test_section_13_gap_detected(tmp_path):
+    """Retirer un contrôle de §1.3 doit remonter un gap."""
+    stats = _stats(tmp_path)
+    stats['charge_from_adjacent'][1] = 1
+    corpus = load_rules_corpus()
+    entry = next(e for e in corpus if e["id"] == "PROJ.1.3.depuis_engage")
+    saved = entry["controls"]
+    entry["controls"] = []
+    try:
+        gaps = coverage_gaps(stats, "1.3")
+    finally:
+        entry["controls"] = saved
+    assert gaps == [("1.3", 0, 1)]
+
+
+def test_section_14_corpus_sum_matches_bucket(tmp_path):
+    """9 entrées §1.4 — la somme par règle retombe sur le bucket 'fight'."""
+    stats = _stats(tmp_path)
+    stats['fight_friendly'][1] = 1
+    stats['fight_over_cc_nb'][1] = 1
+    stats['fight_move_invalid']['pile_in'][1] = 1
+    stats['fight_move_invalid']['consolidation'][1] = 1
+    stats['fight_hit_result_mismatch'][1] = 1
+    stats['fight_wound_threshold_mismatch'][1] = 1
+    stats['fight_alternation_violations'][1] = 1
+    stats['fight_double_pile_in'][1] = 1
+    stats['hazardous_no_hazardous_weapon_fight'][1] = 1
+    assert an.error_totals(stats)['fight'] == 9, "le bucket ne voit pas les 9 compteurs §1.4"
+    assert coverage_gaps(stats, "1.4") == []
+
+
+def test_section_14_gap_detected(tmp_path):
+    """Retirer un contrôle de §1.4 doit remonter un gap."""
+    stats = _stats(tmp_path)
+    stats['fight_friendly'][1] = 1
+    corpus = load_rules_corpus()
+    entry = next(e for e in corpus if e["id"] == "PROJ.1.4.allie")
+    saved = entry["controls"]
+    entry["controls"] = []
+    try:
+        gaps = coverage_gaps(stats, "1.4")
+    finally:
+        entry["controls"] = saved
+    assert gaps == [("1.4", 0, 1)]
+
+
+def test_section_21_corpus_sum_matches_bucket(tmp_path):
+    """10 entrées §2.1 — la somme par règle retombe sur le bucket 'dead_units'."""
+    stats = _stats(tmp_path)
+    stats['dead_unit_moving'][1] = 1
+    stats['shoot_dead_unit'][1] = 1
+    stats['shoot_at_dead_unit'][1] = 1
+    stats['dead_unit_advancing'][1] = 1
+    stats['dead_unit_charging'][1] = 1
+    stats['charge_dead_unit'][1] = 1
+    stats['fight_dead_unit_attacker'][1] = 1
+    stats['fight_dead_unit_target'][1] = 1
+    stats['dead_unit_waiting'][1] = 1
+    stats['unit_revived'][1] = 1
+    assert an.error_totals(stats)['dead_units'] == 10, "le bucket ne voit pas les 10 compteurs §2.1"
+    assert coverage_gaps(stats, "2.1") == []
+
+
+def test_section_21_gap_detected(tmp_path):
+    """Retirer un contrôle de §2.1 doit remonter un gap."""
+    stats = _stats(tmp_path)
+    stats['dead_unit_moving'][1] = 1
+    corpus = load_rules_corpus()
+    entry = next(e for e in corpus if e["id"] == "PROJ.2.1.dead_moving")
+    saved = entry["controls"]
+    entry["controls"] = []
+    try:
+        gaps = coverage_gaps(stats, "2.1")
+    finally:
+        entry["controls"] = saved
+    assert gaps == [("2.1", 0, 1)]
+
+
+def test_section_23_corpus_sum_matches_bucket(tmp_path):
+    """1 entrée §2.3 — la somme par règle retombe sur le bucket 'damage'."""
+    stats = _stats(tmp_path)
+    stats['damage_missing_unit_hp'][1] = 1
+    assert an.error_totals(stats)['damage'] == 1, "le bucket ne voit pas le compteur §2.3"
+    assert coverage_gaps(stats, "2.3") == []
+
+
+def test_section_23_gap_detected(tmp_path):
+    """Retirer le seul contrôle de §2.3 doit remonter un gap."""
+    stats = _stats(tmp_path)
+    stats['damage_missing_unit_hp'][1] = 1
+    corpus = load_rules_corpus()
+    entry = next(e for e in corpus if e["id"] == "PROJ.2.3.dmg_missing")
+    saved = entry["controls"]
+    entry["controls"] = []
+    try:
+        gaps = coverage_gaps(stats, "2.3")
+    finally:
+        entry["controls"] = saved
+    assert gaps == [("2.3", 0, 1)]
+
+
+def test_section_28_corpus_sum_matches_bucket(tmp_path):
+    """4 entrées §2.8 (scalaires `#`) — la somme par règle retombe sur le bucket 'state_resync'."""
+    stats = _stats(tmp_path)
+    stats['state_resync']['dead_missed'] = 1
+    stats['state_resync']['alive_missed'] = 1
+    stats['state_resync']['pos_mismatch'] = 1
+    stats['state_resync']['alloc_model_unknown'] = 1
+    assert an.error_totals(stats)['state_resync'] == 4, "le bucket ne voit pas les 4 champs §2.8"
+    assert coverage_gaps(stats, "2.8") == []
+
+
+def test_section_28_gap_detected(tmp_path):
+    """Retirer un contrôle de §2.8 doit remonter un gap (chemins scalaires `#`)."""
+    stats = _stats(tmp_path)
+    stats['state_resync']['dead_missed'] = 1
+    corpus = load_rules_corpus()
+    entry = next(e for e in corpus if e["id"] == "PROJ.2.8.fantome")
+    saved = entry["controls"]
+    entry["controls"] = []
+    try:
+        gaps = coverage_gaps(stats, "2.8")
+    finally:
+        entry["controls"] = saved
+    assert gaps == [("2.8", 0, 1)]
+
+
 def test_the_fall_back_site_also_counts_an_exercise_of_03_01(tmp_path):
     """`wall_collisions` a TROIS sites d'incrément et n'en notait qu'un : sur un journal de
     fall-back, 03.01 criait « jamais exercée » alors que son contrôle avait travaillé. Une fausse
