@@ -41,6 +41,11 @@ def _weapon_rule_usage_pair_total(weapon_rule_usage: Dict[Any, Any], pair_key: A
     return total
 
 
+# Règles d'armes qui sont des MOT-CLÉS D'INTERACTION plutôt que des effets comptables.
+# PSYCHIC (24.29) marque l'attaque comme « psychic attack » pour interaction avec les règles
+# anti-psychic — rien ne « joue » à un instant précis, donc il n'y a rien à compter.
+# Afficher "NOT USED" induirait en erreur (laisse croire que le moteur ne l'applique jamais).
+_INTERACTION_ONLY_WEAPON_RULES: frozenset = frozenset({"PSYCHIC"})
 
 
 _BOARD_HEADER_RE = re.compile(r'^\[[^\]]*\]\s*Board:\s.*\binches_to_subhex=(\d+)\b')
@@ -2359,7 +2364,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     WR_RULE_WIDTH = 28
     WR_WEAPON_WIDTH = 40
     WR_VALUE_WIDTH = 10
-    WR_VALID_WIDTH = 10
+    WR_VALID_WIDTH = 14  # "N/A — KEYWORD" = 13 chars, doit tenir sans troncature
 
     def _table_header(title: str) -> None:
         log_print("-" * 80)
@@ -3698,6 +3703,8 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
             # (regle, arme) observee alors que l'armurerie ne la declare pas.
             if not has_rule:
                 validite = "INVALID"
+            elif rule_name in _INTERACTION_ONLY_WEAPON_RULES:
+                validite = "N/A — KEYWORD"
             elif (p1 + p2) == 0:
                 validite = "NOT USED"
             else:
@@ -3707,7 +3714,8 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         not_used_count = sum(
             1
             for (rule_name, weapon_key) in expected_wr_keys
-            if _weapon_rule_usage_pair_total(weapon_rule_usage, (rule_name, weapon_key)) == 0
+            if rule_name not in _INTERACTION_ONLY_WEAPON_RULES
+            and _weapon_rule_usage_pair_total(weapon_rule_usage, (rule_name, weapon_key)) == 0
         )
         log_print(
             f"Expected weapon-rule pairs: {len(expected_wr_keys):6d} | "
@@ -4009,7 +4017,8 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     weapon_rule_not_used_warnings = sum(
         1
         for (rule_name, weapon_key) in expected_weapon_rule_pairs
-        if _weapon_rule_usage_pair_total(weapon_rule_usage_stats, (rule_name, weapon_key)) == 0
+        if rule_name not in _INTERACTION_ONLY_WEAPON_RULES
+        and _weapon_rule_usage_pair_total(weapon_rule_usage_stats, (rule_name, weapon_key)) == 0
     )
     special_rules_invalid = _totals['special_rules_invalid']
     weapon_rules_invalid = _totals['weapon_rules_invalid']
