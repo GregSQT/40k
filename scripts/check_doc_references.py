@@ -1131,16 +1131,17 @@ def report(doc: str, path: pathlib.Path) -> tuple[bool, list[str]]:
     verified, broken_values = check_values(path)
     broken_anchors = check_anchors(path)
     kinds, kinds_unverifiable, broken_kinds, kind_notes = check_symbol_kinds(path)
+    dead_links = sum(1 for entry in broken_links if DEAD_LINK in entry)
     broken = broken_refs + broken_links + broken_values + broken_anchors + broken_kinds
     lines = [
         f"{'❌' if broken else '✅'} {doc}",
         f"   renvois  : {resolved} confirmés, {len(broken_refs)} cassés, "
         f"{unverifiable} sans symbole à confronter (non vérifiés)",
         f"   liens    : {checked} vérifiés, "
-        f"{sum(1 for entry in broken_links if DEAD_LINK in entry)} morts, "
+        f"{dead_links} morts, "
         f"{skipped} écartés (pas une forme de chemin)",
         f"   fragments: {fragments} ancres de lien confrontées, "
-        f"{sum(1 for entry in broken_links if DEAD_ANCHOR in entry)} mortes",
+        f"{len(broken_links) - dead_links} mortes",
         f"   valeurs  : {verified} confirmées, {len(broken_values)} périmées ou orphelines",
         f"   ancres   : {len(broken_anchors)} renvois `fichier.ext:ligne`",
         f"   sortes   : {kinds} confirmées, {len(broken_kinds)} fausses, "
