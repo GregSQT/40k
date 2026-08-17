@@ -238,6 +238,45 @@ def test_a_wrong_threshold_is_counted_and_explained():
     assert "5+" in detail and "4+" in detail, f"le diagnostic ne nomme pas l'écart : {detail}"
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Magnitude Oath of Moment lue depuis EFFECTS (TROU 2 — §1.4)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_oath_magnitude_read_from_effects_not_hardcoded():
+    """VERROU : remplacer `oath_mag` par `1` fixe rend ce test ROUGE.
+
+    Scénario discriminant : F4 vs E8 → base 6+.
+    - oath_wound=+2 dans EFFECTS + token ⟹ max(2, 6−2) = 4+.
+    - ancienne logique (−1 fixe) ou fallback (−1 via `or 1`) ⟹ 5+.
+    Le seul moyen d'obtenir 4+ est de lire la magnitude réelle dans EFFECTS.
+    """
+    # Escouade de Brutes (E8) : ni personnage, ni leader — 19.02 ne filtre rien.
+    state = _State()
+    state.model_types = {"9#0": "Brute", "9#1": "Brute"}
+    state.unit_models_alive = {"9": 2}
+
+    # Prémisse : sans Oath, F4 vs E8 → 6+.
+    assert _expected(state, _NO_OATH) == 6, "prémisse : F4 vs E8 sans Oath doit valoir 6+"
+
+    # Fallback `or 1` : token présent, EFFECTS absent ⟹ oath_mag=1 (retro-compat).
+    state.active_effects = {}
+    assert _expected(state, _WOUND_OATH) == 5, (
+        "token Oath sans EFFECTS : fallback 1 attendu, seuil = max(2, 6−1) = 5+"
+    )
+
+    # Magnitude 2 lue depuis EFFECTS : le seuil doit descendre de 2, pas de 1.
+    state.active_effects = {1: {"oath_wound": "+2"}}
+    assert _expected(state, _WOUND_OATH) == 4, (
+        "oath_wound=+2 dans EFFECTS doit abaisser le seuil de 2 (6+ → 4+), pas de 1 — "
+        "si 5+, la magnitude est ignorée et la constante 1 est codée en dur"
+    )
+
+    # Sans token Oath, EFFECTS ignoré — le seuil ne bouge pas.
+    assert _expected(state, _NO_OATH) == 6, (
+        "sans token Oath, la clé EFFECTS ne doit pas abaisser le seuil"
+    )
+
+
 def test_a_correct_threshold_is_not_counted():
     stats = _stats()
     _check(_State(), stats, "FOUGHT Unit 9 with [Choppa] - Hit 4(3+) - Wound 4(4+)")

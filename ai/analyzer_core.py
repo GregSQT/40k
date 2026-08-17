@@ -1641,6 +1641,73 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                 del state.unit_hp[_rt_uid]
                         stats['reserves_timeout_destroyed'][player] += 1
                         note_rule_usage(stats, "20.04", player)
+                elif " SUFFERS " in action_desc and "[HAZARDOUS]" in action_desc:
+                        # 24.15 [HAZARDOUS] : après résolution de ses attaques (tir ou mêlée),
+                        # l'unité subit X blessures mortelles auto-infligées.
+                        # Grammaire : `Unit N(c,r) SUFFERS X Mortal Wounds [HAZARDOUS]`.
+                        # SANS [ALLOC_MODEL:] (documenté §1.2 de analyzer_couverture.md) :
+                        # une BM HAZARDOUS n'est pas une attaque allouée à une figurine nommée.
+                        action_type = 'hazardous'
+                        _hz_match = re.search(
+                            r'SUFFERS\s+(\d+)\s+Mortal\s+Wounds\s+\[HAZARDOUS\]',
+                            action_desc,
+                        )
+                        if _hz_match:
+                            _hz_mw = int(_hz_match.group(1))
+                            stats['hazardous_mortal_wounds'][player] += _hz_mw
+                            # Appliquer les dégâts à l'unité ELLE-MÊME (auto-infligés).
+                            # `alloc_model_id=None` : pas de [ALLOC_MODEL:] sur ces lignes.
+                            # `pending_model_removals=None` : les removals d'une attaque précédente
+                            # de la MÊME activation ne doivent pas être fusionnés ici — cette mort
+                            # est distincte, et le flush se produit au changement d'acteur.
+                            _apply_damage_and_handle_death(
+                                action_unit_id, _dmg_actor_id, _hz_mw,
+                                player, turn, phase, state.line_number, state.current_episode_num,
+                                line, state.dead_units_current_episode, state.unit_hp,
+                                state.unit_models_alive, state.unit_model_hp,
+                                lambda _u: _ordered_living_mids(state, config, _u),
+                                state.unit_hp_squad_max, state.unit_types, state.unit_positions,
+                                state.unit_deaths, state.unit_kill_context, stats,
+                                positions_by_model=state.positions_by_model,
+                                models_invalidated=state.models_invalidated,
+                                alloc_model_id=None,
+                                pending_model_removals=None,
+                            )
+                            # Vérifier que l'unité porte effectivement une arme HAZARDOUS.
+                            # Toutes les datasheets de l'escouade (hétérogène : 19.01) sont
+                            # consultées ; une seule suffit pour que la ligne soit légitime.
+                            _squad_type = state.unit_types.get(action_unit_id)
+                            _all_unit_types: "set[str]" = set()
+                            if _squad_type:
+                                _all_unit_types.add(_squad_type)
+                            for _mid in state.unit_model_hp.get(action_unit_id, {}):
+                                _mtype = state.model_types.get(_mid)  # get allowed
+                                if _mtype:
+                                    _all_unit_types.add(_mtype)
+                            _has_hazardous = any(
+                                any(
+                                    "HAZARDOUS" in (w.get("rules") or [])
+                                    for w in (config.unit_weapons_cache.get(t) or [])
+                                )
+                                for t in _all_unit_types
+                            )
+                            if not _has_hazardous:
+                                stats['hazardous_no_hazardous_weapon'][player] += 1
+                                _first_hz = stats['first_error_lines']['hazardous_no_hazardous_weapon']
+                                if _first_hz[player] is None:
+                                    _first_hz[player] = {
+                                        'episode': state.current_episode_num,
+                                        'line': line.strip(),
+                                    }
+                        else:
+                            stats['parse_errors'].append({
+                                'episode': state.current_episode_num,
+                                'turn': turn,
+                                'phase': phase,
+                                'line': line.strip(),
+                                'error': "ligne HAZARDOUS : format inattendu (attendu : "
+                                         "'SUFFERS N Mortal Wounds [HAZARDOUS]')",
+                            })
                 elif attack_verb_present(action_desc):
                         action_type = 'fight'
                         handle_fight(state, config, line, action_desc, action_unit_id, player, turn, phase, step_marker_present, step_inc)
