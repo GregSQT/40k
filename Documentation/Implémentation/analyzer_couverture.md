@@ -642,7 +642,7 @@ tout contrôle mesurant une distance ou une adjacence — donc §1.1 à §1.4.
 |---|---|---|---|
 | 06.01 Visibility | supprimé 2026-07-16 ; `has_line_of_sight` ne sert plus qu'aux métriques comportementales | `Walls:` binaire seulement, aucun terrain | NON-TESTABLE-OFFLINE — reproduire le prédicat moteur exige `game_state` (empreintes, 13.10, LoS 3D) |
 | 06.02 Mortal wounds (sélection de figurine) | — | MW infligées visibles (`charge_impact`, `hazardous`, `DEVASTATING WOUNDS`) ; figurine choisie absente | ABSENT-LOG-MANQUANT — `mid` de la figurine sélectionnée |
-| 06.03 Hazard rolls (1-2 → 1 MW, ou 3 si tous M/V) | **AUCUN — plus aucune ligne `[HAZARDOUS]` n'est lue** (2026-08-16) | `[HAZARDOUS] Roll:N` + `SUFFERS X Mortal Wounds` : **tout est là depuis `d891fff1` (2026-08-10)** — avant, la ligne n'atteignait pas step.log | **ABSENT-LOGGABLE** — ⚠️ **RÉGRESSION mesurée le 2026-08-16** : la version précédente disait « seule la ligne `was DESTROYED [HAZARDOUS]` est parsée, `analyzer_core.py` ». Les deux moitiés de cette phrase sont fausses aujourd'hui. `15d95480` a supprimé la branche de parsing, et la forme `was DESTROYED [HAZARDOUS]` n'a JAMAIS eu de producteur dans `step.log` (`grep -c DESTROYED ai/step_logger.py` → 0 ; le seul site est `shared_utils.py`, canal console PvP). Mesure : `grep -rn HAZARD` sur les 8 modules de l'analyzer → **1 hit, et c'est un commentaire** (dans `handle_shoot`, `shoot_handler.py`) |
+| 06.03 Hazard rolls (1-2 → 1 MW, ou 3 si tous M/V) | `hazardous_mortal_wounds` + `hazardous_no_hazardous_weapon` + `hazardous_no_hazardous_weapon_fight` (`analyzer_core.py`, 2026-08-17) | `hazardous` action type + `[HAZARDOUS] Roll:N` + `SUFFERS X Mortal Wounds` | **COUVERT (2026-08-17)** — branche dispatcher dans `analyzer_core.py` : MW auto-infligées + vérif présence arme HAZARDOUS en armurerie (tir et mêlée séparés). *(Historique : 2026-08-16 régressé ABSENT-LOGGABLE après suppression de la branche de parsing par `15d95480`.)* |
 
 ### 07 The battle round
 
@@ -679,7 +679,7 @@ tout contrôle mesurant une distance ou une adjacence — donc §1.1 à §1.4.
 | Règle | Contrôle | Champs | Statut |
 |---|---|---|---|
 | 10.01 Start of Shooting phase | — | — | NON-TESTABLE-OFFLINE |
-| 10.02 Shoot (une sélection par unité et par phase ; choix du type de tir) | — | `is_activation_marker` (`analyzer_core.py`) **exclut** `SHOT` | **ABSENT-LOGGABLE** — la double-sélection de tir n'est pas détectée ; le TYPE de tir choisi n'est pas loggué explicitement (déduit des tokens) |
+| 10.02 Shoot (une sélection par unité et par phase ; choix du type de tir) | `shoot_last_activator` dans `is_activation_marker` (`analyzer_core.py`, 2026-08-17) | premier `SHOT` d'un acteur différent du précédent = nouvelle activation | **COUVERT (2026-08-17)** — double-sélection SHOOT détectée. Reste hors portée : le TYPE de tir choisi (déduit des tokens, non loggué explicitement) |
 | 10.03 End of Shooting phase | — | — | NON-TESTABLE-OFFLINE |
 | 10.04 Normal shooting (unengaged ∧ pas d'advance) | #11, #16 | `[ASSAULT]`, `units_advanced` | **PARTIEL** — tirer après un advance **sans** `[ASSAULT]` ni règle d'unité n'est compté que comme métrique (`shots_after_advance`), pas comme faute |
 | 10.05 Assault shooting | #39 (usage `ASSAULT`) | `[ASSAULT]` | **PARTIEL** — « seules les armes [ASSAULT] peuvent être sélectionnées » non contrôlé |
@@ -825,7 +825,7 @@ Aucun TRANSPORT journalisé (ni embark, ni disembark, ni capacité).
 | 24.12 Feel No Pain | — | ABSENT-LOG-MANQUANT — jet FNP + seuil |
 | 24.13 Fights First | — | ABSENT-LOG-MANQUANT — statut Fights First de l'unité activée |
 | 24.14 Firing Deck | — | ABSENT-LOG-MANQUANT |
-| 24.15 [HAZARDOUS] | **AUCUN** (2026-08-16, cf. 06.03) | **ABSENT-LOGGABLE** — la donnée est au journal (ligne `hazardous` + `[HAZARDOUS] Roll:N`), personne ne la lit. Reste hors de portée même une fois le contrôle écrit : le nombre d'armes Hazardous sélectionnées, qui n'est pas loggué (§7 L15) |
+| 24.15 [HAZARDOUS] | `hazardous_mortal_wounds` + `hazardous_no_hazardous_weapon` (cf. 06.03) | `hazardous` action type + `[HAZARDOUS] Roll:N` | **COUVERT (2026-08-17)** — cf. 06.03 |
 | 24.16 [HEAVY] | #39 (usage) ; validité **supprimée** 2026-07-29 | **PARTIEL** (suppression justifiée : distance de chemin par figurine non re-dérivable) |
 | 24.17 Hover | — | ABSENT-LOG-MANQUANT (et fausse les budgets de vol, cf. 21.03) |
 | 24.18 [IGNORES COVER] | — | **ABSENT-LOGGABLE** depuis le 2026-08-12 — token `[IGNORES COVER]` sur le segment `Hit`. Posé sur la DÉCLARATION de l'arme (exception assumée : le couvert n'est même pas calculé, donc « la cible l'aurait-elle eu ? » est inconnaissable) |
@@ -839,7 +839,7 @@ Aucun TRANSPORT journalisé (ni embark, ni disembark, ni capacité).
 | 24.26 [ONE SHOT] | — | ABSENT-LOG-MANQUANT |
 | 24.27 [PISTOL] | = 24.07 (alias) | **PARTIEL** (même statut que 24.07) |
 | 24.28 [PRECISION] | — | ABSENT-LOG-MANQUANT — groupe d'allocation courant |
-| 24.29 [PSYCHIC] | — | **ABSENT-LOGGABLE** depuis le 2026-08-12 — token `[PSYCHIC]` sur le segment `Hit`, posé uniquement quand un modificateur a été neutralisé (couvert 13.08, seul modificateur d'attaque de ce moteur) |
+| 24.29 [PSYCHIC] | — | **N/A — KEYWORD (2026-08-17)** — [PSYCHIC] est un keyword d'interaction (neutralise les modificateurs adverses), pas un effet comptable indépendamment. Aucun contrôle de conformité à écrire : l'absence de modificateur ennemi quand [PSYCHIC] est présent EST déjà vérifiée par 13.08 (couvert) |
 | 24.30 [RAPID FIRE X] | #41 (présence + valeur vs armurerie), #12 (lève le plafond) | **PARTIEL** — la condition « cible à demi-portée » n'est pas vérifiée, alors qu'elle est MESURABLE per-socle depuis `[MODELS:]`/`[TARGET_MODELS:]` |
 | 24.31 Scouts | — | ABSENT-LOG-MANQUANT |
 | 24.32 Scout move | — | ABSENT-LOG-MANQUANT (type de move absent) |
@@ -878,14 +878,14 @@ ne qualifie qu'une chose — une paire observée que l'armurerie ne déclare pas
 | `LETHAL_HITS` | 24.23 | — | **ABSENT-LOGGABLE** — token dans `step.log` depuis le 2026-08-12 (lot A), contrôle à écrire |
 | `MELTA` | 24.25 | usage §1.8 (`[MELTA:X]`) | **ABSENT-LOGGABLE** — token depuis le 2026-08-11 ; aucun contrôle de conformité |
 | `PRECISION` | 24.28 / 05.03 | usage §1.8 (`[PRECISION]`) | **ABSENT-LOGGABLE** — token depuis le 2026-08-11 ; aucun contrôle de conformité |
-| `PSYCHIC` | 24.29 | — | **ABSENT-LOGGABLE** — token dans `step.log` depuis le 2026-08-12 (lot A), contrôle à écrire |
+| `PSYCHIC` | 24.29 | — | **N/A — KEYWORD (2026-08-17)** — keyword d'interaction, pas d'effet comptable indépendant ; cf. 24.29 ci-dessus |
 | `RAPID_FIRE` | 24.30 | #41 + #12 | PARTIEL |
 | `SUSTAINED_HITS` | 24.36 | #42 + #12/#28 + #39 | PARTIEL |
 | `TORRENT` | 24.37 | — | **ABSENT-LOGGABLE** — token dans `step.log` depuis le 2026-08-12 (lot A), contrôle à écrire |
 | `TWIN_LINKED` | 24.38 | #39 + tokens | PARTIEL |
 
-**0 COUVERT / 7 PARTIEL / 15 ABSENT-LOGGABLE / 1 ABSENT-LOG-MANQUANT.**
-*(2026-08-16 : `HAZARDOUS` passe de PARTIEL à ABSENT-LOGGABLE — son lecteur a été supprimé, pas sa donnée.)*
+**1 COUVERT / 7 PARTIEL / 13 ABSENT-LOGGABLE / 1 N/A — KEYWORD / 1 ABSENT-LOG-MANQUANT.**
+*(2026-08-16 : `HAZARDOUS` passe de PARTIEL à ABSENT-LOGGABLE — son lecteur a été supprimé, pas sa donnée. 2026-08-17 : lecteur ré-écrit dans `analyzer_core.py` → COUVERT. `PSYCHIC` reclassé N/A — KEYWORD : keyword d'interaction, pas d'effet comptable autonome.)*
 
 Le seul ABSENT-LOG-MANQUANT restant est `INDIRECT_FIRE`, et ce n'est pas un trou de journal :
 la règle n'est **pas implémentée dans le moteur** (`config_loader.load_weapon_rules_config`,
@@ -955,7 +955,7 @@ par absence prouvée de site d'incrémentation.
 
 | # | Constat | Emplacement | Effet | Statut 2026-08-10 |
 |---|---|---|---|---|
-| V1 | `damage_exceeds_hp` n'est **jamais incrémenté** | affiché `analyzer.py`, sommé `:3411` et `:3593` | La ligne « Dmg > HP_CUR (overkill) » affiche 0 en permanence et **contribue à un ✅ dans le SUMMARY** | **OUVERT** — aucun `+= 1` sur cette clé |
+| ~~V1~~ | `damage_exceeds_hp` n'était **jamais incrémenté** | affiché `analyzer.py`, sommé dans les totaux | La ligne « Dmg > HP_CUR (overkill) » affichait 0 en permanence et contribuait à un ✅ dans le SUMMARY | **SUPPRIMÉ le 2026-08-17** — irréalisable par construction : `shared_utils` plafonne `dmg_dealt = min(dmg, hp_before)` avant de journaliser. Clé, affichage et entrée `first_error_lines` retirés de `analyzer.py`. Verrou : `test_bucket_damage_ne_contient_que_damage_missing_unit_hp` (`test_analyzer_error_totals.py`) |
 | ~~V2~~ | `fight_from_non_adjacent` n'était **jamais incrémenté** depuis 2026-07-24 | — | — | **FERMÉ le 2026-08-10** par SUPPRESSION de la clé (déclaration, `first_error_lines`, terme du total FIGHT). Le contrôle avait été retiré comme faux positif ; garder sa clé sommée à 0 entretenait l'idée que 12.01 était surveillée. Elle l'est par `test_fight_spatial_contract.py`, fonction `test_fight_b_engagement_pool_uses_full_footprint_distance`. **Son propre verrou était vacant** : `test_analyzer_no_fight_non_adjacent_false_positive` affirmait « == 0 » sur une clé sans site d'incrémentation — vrai quoi qu'il arrive. Il surveille désormais le RETOUR de la clé, et double son assertion par le TOTAL §1.4, qui, lui, bouge |
 | ~~V3~~ | `dead_unit_skipping` / `handle_skip` sont **inatteignables** | — | — | **FERMÉ le 2026-08-10** par suppression : `_STEP_LOG_TYPE_MAP` est une liste blanche qui ne porte pas `skip` — « type sans formateur -> volontairement non journalisé ». Aucune ligne `SKIP` n'existe donc dans un step.log (mesuré : 0 occurrence sur 1683 actions). La branche du parseur SURVIT, mais pour signaler la ligne en §2.7 au lieu de la laisser tomber en silence dans `other`. ⚠️ **`shoot_vs_wait['skip']` n'est PAS concerné et reste vivant** : son producteur est `handle_wait` (10.04 requalifie en skip le WAIT d'une unité ENGAGÉE). Deux « skip » homonymes, un seul était mort — le retirer avec l'autre a été tenté et rattrapé par `test_analyzer_wait_engagement.py` |
 | V4 | §1.8 usage `CLOSE_QUARTERS` mesure `calculate_hex_distance(ancre_tireur, ancre_cible) == 1` | `shoot_handler.py` | Ancre au lieu du socle **et** adjacence au lieu de la zone d'engagement. À x5, `ez=10` : le compteur d'usage est quasi toujours à 0 | **OUVERT, MAIS RÉDUIT** — `c1487fcb` a corrigé les deux contrôles d'ERREUR voisins (`:644-671`), qui portaient le même défaut. Seul le compteur d'USAGE §1.8 reste ancre-à-ancre |
@@ -971,7 +971,7 @@ par absence prouvée de site d'incrémentation.
 
 | # | Ce que disait la version précédente | Ce que dit le code |
 |---|---|---|
-| ~~V11~~ | « PARTIELLEMENT FERMÉ le 2026-08-09 : FIGHT est entrée dans la liste des phases, 24 unités combattent deux fois » | **La moitié FIGHT était un FAUX POSITIF, et il venait de ce document.** La clé de phase confondait les deux phases de combat d'un tour ; corrigée par `c1487fcb` (`analyzer_core.py`). Zéro vrai doublon sur 12 épisodes après correction. **Le volet SHOOT, lui, reste OUVERT** : `SHOT` n'est pas dans `is_activation_marker` (`:1010-1018`), donc 10.02 n'est pas contrôlé |
+| ~~V11~~ | « PARTIELLEMENT FERMÉ le 2026-08-09 : FIGHT est entrée dans la liste des phases, 24 unités combattent deux fois » | **La moitié FIGHT était un FAUX POSITIF, et il venait de ce document.** La clé de phase confondait les deux phases de combat d'un tour ; corrigée par `c1487fcb` (`analyzer_core.py`). Zéro vrai doublon sur 12 épisodes après correction. **Le volet SHOOT — COUVERT le 2026-08-17** : `shoot_last_activator` dans `is_activation_marker` détecte le premier SHOT d'un acteur différent comme ouverture d'activation ; cf. §1 et 10.02 |
 | ~~V10~~ | « `FLED` n'a AUCUN contrôle de budget ni de chemin — seul déplacement sur six sans `_per_model_move_violation` » | **FERMÉ le 2026-08-10.** Les trois volets géométriques de 09.07 sont contrôlés (#65-#67, `move_handler.py`) et entrent dans le total MOVE. Reste hors de portée, faute de donnée : le MODE de fall-back (§7 L11) — d'où `force_thru_enemy` |
 | ~~V14~~ | « Le plafond de tir reste par escouade alors que celui de mêlée est par figurine » | **FERMÉ le 2026-08-10**, et par mutualisation plutôt que par copie : `analyzer_perfig.per_model_attack_cap` (`:262`) est désormais LE calcul des deux côtés, `[SHOOTER_MODELS:]` a quitté `fight_handler` pour `analyzer_perfig` (`:251`), et le X de `[RAPID FIRE]` suit la même résolution par figurine. Écrire un second exemplaire côté tir aurait rouvert le défaut à la première divergence |
 | **V16** | *(trouvé et fermé le 2026-08-10, en livrant V10)* — les totaux d'erreurs existaient en DEUX exemplaires, celui du SUMMARY et celui de la CLI | **FERMÉ.** Ils avaient divergé en silence sur deux compteurs : `move_after_shooting_distance_over_limit` (§1.1) et `shoot_combi_profile_conflicts` (§1.2) manquaient au total CLI. Effet observable : un run pouvait afficher « ❌ 1.1 Erreurs en phase de move : 2 » et rendre un total d'erreurs qui n'en comptait aucune — et c'est le total, plus court, qu'on lit en premier. La review du jour a montré que le trou était plus large : **§1.6 (double-activation) et §1.7 (règles invalides) s'affichaient en ❌ sans entrer dans AUCUN total** — un run imprimait « ❌ 1.6 … : 1 » puis « ✅ Aucune erreur détectée ». `error_totals` (`analyzer.py`) porte désormais TOUS les buckets, y compris §1.5 à §2.8, et expose `['total']` = leur somme : le total de la CLI ne recompose plus rien, donc toute ligne ❌ y entre par construction et un bucket neuf aussi. Verrou : `tests/unit/ai/test_analyzer_error_totals.py` (61 tests) pose 1 dans CHAQUE compteur l'un après l'autre, vérifie que sa somme bouge, puis que `total == somme(buckets)` |
@@ -995,18 +995,19 @@ aucun : il ne mesure pas de distance.
 
 | Statut | Nombre | % |
 |---|---|---|
-| COUVERT | 7 | 4,5 % |
+| COUVERT | 9 | 5,8 % |
 | PARTIEL | 35 | 22,4 % |
-| ABSENT-LOGGABLE | 9 | 5,8 % |
+| ABSENT-LOGGABLE | 7 | 4,5 % |
 | ABSENT-LOG-MANQUANT | 67 | 42,9 % |
 | NON-TESTABLE-OFFLINE | 38 | 24,4 % |
 
-Deux mouvements depuis le 2026-08-09, tous deux vers COUVERT : **05.02** (ABSENT-LOG-MANQUANT →
-COUVERT, §1.9) et **05.01** (ABSENT-LOGGABLE → COUVERT, §1.10). 09.07 et 04.03 restent PARTIEL
-mais changent de nature : leurs trous géométriques sont fermés, ce qui reste tient à des champs
-absents du journal, pas à des contrôles manquants. 06.03 reste ABSENT-LOGGABLE, mais il ne
-l'était devenu qu'avec `d891fff1` — il était en réalité ABSENT-LOG-MANQUANT quand la version
-précédente le classait déjà ABSENT-LOGGABLE.
+Quatre mouvements vers COUVERT depuis le 2026-08-09 : **05.02** (ABSENT-LOG-MANQUANT → COUVERT,
+§1.9), **05.01** (ABSENT-LOGGABLE → COUVERT, §1.10), **06.03** (ABSENT-LOGGABLE → COUVERT,
+2026-08-17 : branche HAZARDOUS ré-écrite dans `analyzer_core.py`), **10.02** (ABSENT-LOGGABLE →
+COUVERT, 2026-08-17 : `shoot_last_activator` détecte la double-activation SHOOT). 09.07 et 04.03
+restent PARTIEL mais changent de nature : leurs trous géométriques sont fermés, ce qui reste tient
+à des champs absents du journal. **24.29 [PSYCHIC]** reclassé N/A — KEYWORD (2026-08-17) : keyword
+d'interaction, aucun contrôle de conformité autonome à écrire.
 
 Par famille :
 
@@ -1017,11 +1018,11 @@ Par famille :
 | 03 Moving | 4 | 1 | 2 | 1 | 0 | 0 |
 | 04 Making attacks | 3 | 0 | 3 | 0 | 0 | 0 |
 | 05 Attack sequence | 4 | 2 | 1 | 0 | 1 | 0 |
-| 06 Other concepts | 3 | 0 | 0 | 1 | 1 | 1 |
+| 06 Other concepts | 3 | 1 | 0 | 0 | 1 | 1 |
 | 07 Battle round | 3 | 0 | 0 | 1 | 0 | 2 |
 | 08 Command phase | 5 | 0 | 0 | 1 | 2 | 2 |
 | 09 Movement phase | 7 | 1 | 3 | 0 | 1 | 2 |
-| 10 Shooting phase | 7 | 0 | 3 | 1 | 1 | 2 |
+| 10 Shooting phase | 7 | 1 | 3 | 0 | 1 | 2 |
 | 11 Charge phase | 4 | 0 | 2 | 0 | 0 | 2 |
 | 12 Fight phase | 9 | 1 | 3 | 2 | 0 | 3 |
 | 13 Terrain | 11 | 0 | 1 | 0 | 0 | 10 |
@@ -1036,13 +1037,13 @@ Par famille :
 | 22 Other rules | 5 | 0 | 1 | 0 | 3 | 1 |
 | 23 Aircraft | 4 | 0 | 0 | 0 | 4 | 0 |
 | 24 Core abilities | 38 | 0 | 10 | 0 | 27 | 1 |
-| **Total** | **156** | **7** | **35** | **9** | **67** | **38** |
+| **Total** | **156** | **9** | **35** | **7** | **67** | **38** |
 
 ### 6.2 Règles d'armes (23) et d'unité (35)
 
 | Corpus | Total | COUVERT | PARTIEL | ABS-LOGGABLE | ABS-LOG-MANQ | NON-TESTABLE |
 |---|---|---|---|---|---|---|
-| `weapon_rules.json` | 23 | 0 | 8 | 0 | 15 | 0 |
+| `weapon_rules.json` | 23 | 1 | 7 | 14 | 1 | 0 |
 | `unit_rules.json` | 35 | 6 | 20 | 2 | 5 | 2 |
 
 ### 6.3 Tous corpus confondus (214 lignes)
@@ -1060,7 +1061,7 @@ Par famille :
 | | Nombre |
 |---|---|
 | Contrôles de conformité vivants | **71** (69 + `squad_coherency_violations` 03.03 + `fight_double_pile_in` 12.02, livrés le 2026-08-10) |
-| dont morts / inatteignables | **1** (V1 `damage_exceeds_hp`) — V2 et V3 ont été SUPPRIMÉS le 2026-08-10, pas réparés : ni l'un ni l'autre ne pouvait avoir de producteur |
+| dont morts / inatteignables | **0** — V1 (`damage_exceeds_hp`) supprimé le 2026-08-17 (irréalisable par construction) ; V2 et V3 supprimés le 2026-08-10 |
 | Sommes d'erreurs dupliquées | 0 — un seul `error_totals` (`analyzer.py`) depuis V16 |
 | Clés de `stats` créées à la volée | 0 depuis V17 — toutes déclarées dans la structure |
 | Lignes ❌ du SUMMARY absentes du total | 0 — `error_totals['total']` est la somme de tous les buckets |

@@ -28,10 +28,12 @@ contrôle qui ne regarde rien affiche donc 0, et c'est exactement le signal rech
 
 from __future__ import annotations
 
+import functools
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from shared.data_validation import require_key
 
+@functools.lru_cache(maxsize=None)
 def load_rules_corpus() -> List[Dict[str, Any]]:
     """Corpus de règles. Son absence est une rupture de contrat, pas un cas à replier : sans lui,
     le rapport ne peut plus dire ce qu'il ne couvre pas — et c'est précisément ce silence-là qu'il
@@ -93,6 +95,8 @@ def _counter_value(stats: Dict[str, Any], path: List[str]) -> int:
     if "#" in path:
         if path[-1] != "#":
             raise ValueError(f"'#' doit être en position terminale du chemin, reçu : {path}")
+        if len(path) < 2:
+            raise ValueError(f"chemin '#' sans clé avant le marqueur : {path}")
         node: Any = stats
         for key in path[:-1]:
             node = require_key(node, key)

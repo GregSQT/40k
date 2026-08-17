@@ -3150,131 +3150,130 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     log_print("  2.7 CORE ISSUES")
 
     # MOVEMENT ERRORS
-    if True:
-        _switch_section("1.1")
-        log_print("\n" + "-" * 80)
-        _table_header("1.1 MOVEMENT ERRORS")
-        agent_walls = stats['wall_collisions'][1]
-        bot_walls = stats['wall_collisions'][2]
-        _table_row("Moves into walls:", _fmt_count(agent_walls), _fmt_count(bot_walls))
-        if agent_walls > 0 and stats['first_error_lines']['wall_collisions'][1]:
-            first_err = stats['first_error_lines']['wall_collisions'][1]
-            log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-        if bot_walls > 0 and stats['first_error_lines']['wall_collisions'][2]:
-            first_err = stats['first_error_lines']['wall_collisions'][2]
-            log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-        agent_move_adj = stats['move_to_adjacent_enemy'][1]
-        bot_move_adj = stats['move_to_adjacent_enemy'][2]
-        _table_row("Moves to adjacent enemy:", _fmt_count(agent_move_adj), _fmt_count(bot_move_adj))
-        if agent_move_adj > 0 and stats['first_error_lines']['move_to_adjacent_enemy'][1]:
-            first_err = stats['first_error_lines']['move_to_adjacent_enemy'][1]
-            log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-            log_print(f"    Engaged after move: {_offenders_str(first_err)}")
-        if bot_move_adj > 0 and stats['first_error_lines']['move_to_adjacent_enemy'][2]:
-            first_err = stats['first_error_lines']['move_to_adjacent_enemy'][2]
-            log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-            log_print(f"    Engaged after move: {_offenders_str(first_err)}")
-        agent_adj_before_move = stats['move_adjacent_before_non_flee'][1]
-        bot_adj_before_move = stats['move_adjacent_before_non_flee'][2]
-        _table_row("Move with adjacent_before:", _fmt_count(agent_adj_before_move), _fmt_count(bot_adj_before_move))
-        if agent_adj_before_move > 0 and stats['first_error_lines']['move_adjacent_before_non_flee'][1]:
-            first_err = stats['first_error_lines']['move_adjacent_before_non_flee'][1]
-            log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-        if bot_adj_before_move > 0 and stats['first_error_lines']['move_adjacent_before_non_flee'][2]:
-            first_err = stats['first_error_lines']['move_adjacent_before_non_flee'][2]
-            log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-        agent_move_over = stats['move_distance_over_limit']['move'][1]
-        bot_move_over = stats['move_distance_over_limit']['move'][2]
-        _table_row("Move au-dela du budget:", _fmt_count(agent_move_over), _fmt_count(bot_move_over))
-        if agent_move_over > 0 and stats['first_error_lines']['move_distance_over_limit']['move'][1]:
-            first_err = stats['first_error_lines']['move_distance_over_limit']['move'][1]
-            log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-        if bot_move_over > 0 and stats['first_error_lines']['move_distance_over_limit']['move'][2]:
-            first_err = stats['first_error_lines']['move_distance_over_limit']['move'][2]
-            log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-        # 09.07 FALL-BACK MOVE — les trois volets contrôlables. Ils vivent dans la section MOVE
-        # (et pas ailleurs) parce que le fall-back EST un type de mouvement de la phase de
-        # Mouvement au même titre que le normal move et l'advance (09.02, « Select Move Type »).
-        agent_flee_over = stats['move_distance_over_limit']['flee'][1]
-        bot_flee_over = stats['move_distance_over_limit']['flee'][2]
-        _table_row("Fall-back au-dela du budget:", _fmt_count(agent_flee_over), _fmt_count(bot_flee_over))
-        if agent_flee_over > 0 and stats['first_error_lines']['move_distance_over_limit']['flee'][1]:
-            first_err = stats['first_error_lines']['move_distance_over_limit']['flee'][1]
-            log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-        if bot_flee_over > 0 and stats['first_error_lines']['move_distance_over_limit']['flee'][2]:
-            first_err = stats['first_error_lines']['move_distance_over_limit']['flee'][2]
-            log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-        agent_flee_unengaged = stats['flee_from_unengaged'][1]
-        bot_flee_unengaged = stats['flee_from_unengaged'][2]
-        _table_row("Fall-back sans engagement:", _fmt_count(agent_flee_unengaged), _fmt_count(bot_flee_unengaged))
-        if agent_flee_unengaged > 0 and stats['first_error_lines']['flee_from_unengaged'][1]:
-            first_err = stats['first_error_lines']['flee_from_unengaged'][1]
-            log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-        if bot_flee_unengaged > 0 and stats['first_error_lines']['flee_from_unengaged'][2]:
-            first_err = stats['first_error_lines']['flee_from_unengaged'][2]
-            log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-        agent_flee_engaged = stats['flee_still_engaged'][1]
-        bot_flee_engaged = stats['flee_still_engaged'][2]
-        _table_row("Fall-back finit engage:", _fmt_count(agent_flee_engaged), _fmt_count(bot_flee_engaged))
-        if agent_flee_engaged > 0 and stats['first_error_lines']['flee_still_engaged'][1]:
-            first_err = stats['first_error_lines']['flee_still_engaged'][1]
-            log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-        if bot_flee_engaged > 0 and stats['first_error_lines']['flee_still_engaged'][2]:
-            first_err = stats['first_error_lines']['flee_still_engaged'][2]
-            log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-        agent_mas_over = stats['move_after_shooting_distance_over_limit'][1]
-        bot_mas_over = stats['move_after_shooting_distance_over_limit'][2]
-        _table_row("MoveAfterShoot > rule dist:", _fmt_count(agent_mas_over), _fmt_count(bot_mas_over))
-        if agent_mas_over > 0 and stats['first_error_lines']['move_after_shooting_distance_over_limit'][1]:
-            first_err = stats['first_error_lines']['move_after_shooting_distance_over_limit'][1]
-            log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-        if bot_mas_over > 0 and stats['first_error_lines']['move_after_shooting_distance_over_limit'][2]:
-            first_err = stats['first_error_lines']['move_after_shooting_distance_over_limit'][2]
-            log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-        reactive_stats = require_key(stats, 'reactive_move_stats')
-        agent_reactive_applied = reactive_stats[1]['applied']
-        bot_reactive_applied = reactive_stats[2]['applied']
-        _table_row("Reactive moves applied:", _fmt_count(agent_reactive_applied), _fmt_count(bot_reactive_applied))
-        agent_reactive_declined = reactive_stats[1]['declined']
-        bot_reactive_declined = reactive_stats[2]['declined']
-        _table_row("Reactive moves declined:", _fmt_count(agent_reactive_declined), _fmt_count(bot_reactive_declined))
-        agent_reactive_abnormal = reactive_stats[1]['abnormal']
-        bot_reactive_abnormal = reactive_stats[2]['abnormal']
-        _table_row("Reactive moves abnormal:", _fmt_count(agent_reactive_abnormal), _fmt_count(bot_reactive_abnormal))
-        if agent_reactive_abnormal > 0 and stats['first_error_lines']['reactive_move_abnormal'][1]:
-            first_err = stats['first_error_lines']['reactive_move_abnormal'][1]
-            log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-        if bot_reactive_abnormal > 0 and stats['first_error_lines']['reactive_move_abnormal'][2]:
-            first_err = stats['first_error_lines']['reactive_move_abnormal'][2]
-            log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-        reactive_checks = require_key(stats, 'reactive_move_checks')
-        agent_reactive_adj = reactive_checks['to_adjacent_enemy'][1]
-        bot_reactive_adj = reactive_checks['to_adjacent_enemy'][2]
-        _table_row("Reactive to adjacent enemy:", _fmt_count(agent_reactive_adj), _fmt_count(bot_reactive_adj))
-        if agent_reactive_adj > 0 and stats['first_error_lines']['reactive_move_to_adjacent_enemy'][1]:
-            first_err = stats['first_error_lines']['reactive_move_to_adjacent_enemy'][1]
-            log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-        if bot_reactive_adj > 0 and stats['first_error_lines']['reactive_move_to_adjacent_enemy'][2]:
-            first_err = stats['first_error_lines']['reactive_move_to_adjacent_enemy'][2]
-            log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-        agent_reactive_wall = reactive_checks['into_wall'][1]
-        bot_reactive_wall = reactive_checks['into_wall'][2]
-        _table_row("Reactive into wall:", _fmt_count(agent_reactive_wall), _fmt_count(bot_reactive_wall))
-        if agent_reactive_wall > 0 and stats['first_error_lines']['reactive_move_into_wall'][1]:
-            first_err = stats['first_error_lines']['reactive_move_into_wall'][1]
-            log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-        if bot_reactive_wall > 0 and stats['first_error_lines']['reactive_move_into_wall'][2]:
-            first_err = stats['first_error_lines']['reactive_move_into_wall'][2]
-            log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-        agent_reactive_over_roll = reactive_checks['distance_over_roll'][1]
-        bot_reactive_over_roll = reactive_checks['distance_over_roll'][2]
-        _table_row("Reactive au-dela du budget:", _fmt_count(agent_reactive_over_roll), _fmt_count(bot_reactive_over_roll))
-        if agent_reactive_over_roll > 0 and stats['first_error_lines']['reactive_move_distance_over_roll'][1]:
-            first_err = stats['first_error_lines']['reactive_move_distance_over_roll'][1]
-            log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-        if bot_reactive_over_roll > 0 and stats['first_error_lines']['reactive_move_distance_over_roll'][2]:
-            first_err = stats['first_error_lines']['reactive_move_distance_over_roll'][2]
-            log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    _switch_section("1.1")
+    log_print("\n" + "-" * 80)
+    _table_header("1.1 MOVEMENT ERRORS")
+    agent_walls = stats['wall_collisions'][1]
+    bot_walls = stats['wall_collisions'][2]
+    _table_row("Moves into walls:", _fmt_count(agent_walls), _fmt_count(bot_walls))
+    if agent_walls > 0 and stats['first_error_lines']['wall_collisions'][1]:
+        first_err = stats['first_error_lines']['wall_collisions'][1]
+        log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    if bot_walls > 0 and stats['first_error_lines']['wall_collisions'][2]:
+        first_err = stats['first_error_lines']['wall_collisions'][2]
+        log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    agent_move_adj = stats['move_to_adjacent_enemy'][1]
+    bot_move_adj = stats['move_to_adjacent_enemy'][2]
+    _table_row("Moves to adjacent enemy:", _fmt_count(agent_move_adj), _fmt_count(bot_move_adj))
+    if agent_move_adj > 0 and stats['first_error_lines']['move_to_adjacent_enemy'][1]:
+        first_err = stats['first_error_lines']['move_to_adjacent_enemy'][1]
+        log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+        log_print(f"    Engaged after move: {_offenders_str(first_err)}")
+    if bot_move_adj > 0 and stats['first_error_lines']['move_to_adjacent_enemy'][2]:
+        first_err = stats['first_error_lines']['move_to_adjacent_enemy'][2]
+        log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+        log_print(f"    Engaged after move: {_offenders_str(first_err)}")
+    agent_adj_before_move = stats['move_adjacent_before_non_flee'][1]
+    bot_adj_before_move = stats['move_adjacent_before_non_flee'][2]
+    _table_row("Move with adjacent_before:", _fmt_count(agent_adj_before_move), _fmt_count(bot_adj_before_move))
+    if agent_adj_before_move > 0 and stats['first_error_lines']['move_adjacent_before_non_flee'][1]:
+        first_err = stats['first_error_lines']['move_adjacent_before_non_flee'][1]
+        log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    if bot_adj_before_move > 0 and stats['first_error_lines']['move_adjacent_before_non_flee'][2]:
+        first_err = stats['first_error_lines']['move_adjacent_before_non_flee'][2]
+        log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    agent_move_over = stats['move_distance_over_limit']['move'][1]
+    bot_move_over = stats['move_distance_over_limit']['move'][2]
+    _table_row("Move au-dela du budget:", _fmt_count(agent_move_over), _fmt_count(bot_move_over))
+    if agent_move_over > 0 and stats['first_error_lines']['move_distance_over_limit']['move'][1]:
+        first_err = stats['first_error_lines']['move_distance_over_limit']['move'][1]
+        log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    if bot_move_over > 0 and stats['first_error_lines']['move_distance_over_limit']['move'][2]:
+        first_err = stats['first_error_lines']['move_distance_over_limit']['move'][2]
+        log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    # 09.07 FALL-BACK MOVE — les trois volets contrôlables. Ils vivent dans la section MOVE
+    # (et pas ailleurs) parce que le fall-back EST un type de mouvement de la phase de
+    # Mouvement au même titre que le normal move et l'advance (09.02, « Select Move Type »).
+    agent_flee_over = stats['move_distance_over_limit']['flee'][1]
+    bot_flee_over = stats['move_distance_over_limit']['flee'][2]
+    _table_row("Fall-back au-dela du budget:", _fmt_count(agent_flee_over), _fmt_count(bot_flee_over))
+    if agent_flee_over > 0 and stats['first_error_lines']['move_distance_over_limit']['flee'][1]:
+        first_err = stats['first_error_lines']['move_distance_over_limit']['flee'][1]
+        log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    if bot_flee_over > 0 and stats['first_error_lines']['move_distance_over_limit']['flee'][2]:
+        first_err = stats['first_error_lines']['move_distance_over_limit']['flee'][2]
+        log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    agent_flee_unengaged = stats['flee_from_unengaged'][1]
+    bot_flee_unengaged = stats['flee_from_unengaged'][2]
+    _table_row("Fall-back sans engagement:", _fmt_count(agent_flee_unengaged), _fmt_count(bot_flee_unengaged))
+    if agent_flee_unengaged > 0 and stats['first_error_lines']['flee_from_unengaged'][1]:
+        first_err = stats['first_error_lines']['flee_from_unengaged'][1]
+        log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    if bot_flee_unengaged > 0 and stats['first_error_lines']['flee_from_unengaged'][2]:
+        first_err = stats['first_error_lines']['flee_from_unengaged'][2]
+        log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    agent_flee_engaged = stats['flee_still_engaged'][1]
+    bot_flee_engaged = stats['flee_still_engaged'][2]
+    _table_row("Fall-back finit engage:", _fmt_count(agent_flee_engaged), _fmt_count(bot_flee_engaged))
+    if agent_flee_engaged > 0 and stats['first_error_lines']['flee_still_engaged'][1]:
+        first_err = stats['first_error_lines']['flee_still_engaged'][1]
+        log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    if bot_flee_engaged > 0 and stats['first_error_lines']['flee_still_engaged'][2]:
+        first_err = stats['first_error_lines']['flee_still_engaged'][2]
+        log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    agent_mas_over = stats['move_after_shooting_distance_over_limit'][1]
+    bot_mas_over = stats['move_after_shooting_distance_over_limit'][2]
+    _table_row("MoveAfterShoot > rule dist:", _fmt_count(agent_mas_over), _fmt_count(bot_mas_over))
+    if agent_mas_over > 0 and stats['first_error_lines']['move_after_shooting_distance_over_limit'][1]:
+        first_err = stats['first_error_lines']['move_after_shooting_distance_over_limit'][1]
+        log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    if bot_mas_over > 0 and stats['first_error_lines']['move_after_shooting_distance_over_limit'][2]:
+        first_err = stats['first_error_lines']['move_after_shooting_distance_over_limit'][2]
+        log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    reactive_stats = require_key(stats, 'reactive_move_stats')
+    agent_reactive_applied = reactive_stats[1]['applied']
+    bot_reactive_applied = reactive_stats[2]['applied']
+    _table_row("Reactive moves applied:", _fmt_count(agent_reactive_applied), _fmt_count(bot_reactive_applied))
+    agent_reactive_declined = reactive_stats[1]['declined']
+    bot_reactive_declined = reactive_stats[2]['declined']
+    _table_row("Reactive moves declined:", _fmt_count(agent_reactive_declined), _fmt_count(bot_reactive_declined))
+    agent_reactive_abnormal = reactive_stats[1]['abnormal']
+    bot_reactive_abnormal = reactive_stats[2]['abnormal']
+    _table_row("Reactive moves abnormal:", _fmt_count(agent_reactive_abnormal), _fmt_count(bot_reactive_abnormal))
+    if agent_reactive_abnormal > 0 and stats['first_error_lines']['reactive_move_abnormal'][1]:
+        first_err = stats['first_error_lines']['reactive_move_abnormal'][1]
+        log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    if bot_reactive_abnormal > 0 and stats['first_error_lines']['reactive_move_abnormal'][2]:
+        first_err = stats['first_error_lines']['reactive_move_abnormal'][2]
+        log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    reactive_checks = require_key(stats, 'reactive_move_checks')
+    agent_reactive_adj = reactive_checks['to_adjacent_enemy'][1]
+    bot_reactive_adj = reactive_checks['to_adjacent_enemy'][2]
+    _table_row("Reactive to adjacent enemy:", _fmt_count(agent_reactive_adj), _fmt_count(bot_reactive_adj))
+    if agent_reactive_adj > 0 and stats['first_error_lines']['reactive_move_to_adjacent_enemy'][1]:
+        first_err = stats['first_error_lines']['reactive_move_to_adjacent_enemy'][1]
+        log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    if bot_reactive_adj > 0 and stats['first_error_lines']['reactive_move_to_adjacent_enemy'][2]:
+        first_err = stats['first_error_lines']['reactive_move_to_adjacent_enemy'][2]
+        log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    agent_reactive_wall = reactive_checks['into_wall'][1]
+    bot_reactive_wall = reactive_checks['into_wall'][2]
+    _table_row("Reactive into wall:", _fmt_count(agent_reactive_wall), _fmt_count(bot_reactive_wall))
+    if agent_reactive_wall > 0 and stats['first_error_lines']['reactive_move_into_wall'][1]:
+        first_err = stats['first_error_lines']['reactive_move_into_wall'][1]
+        log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    if bot_reactive_wall > 0 and stats['first_error_lines']['reactive_move_into_wall'][2]:
+        first_err = stats['first_error_lines']['reactive_move_into_wall'][2]
+        log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    agent_reactive_over_roll = reactive_checks['distance_over_roll'][1]
+    bot_reactive_over_roll = reactive_checks['distance_over_roll'][2]
+    _table_row("Reactive au-dela du budget:", _fmt_count(agent_reactive_over_roll), _fmt_count(bot_reactive_over_roll))
+    if agent_reactive_over_roll > 0 and stats['first_error_lines']['reactive_move_distance_over_roll'][1]:
+        first_err = stats['first_error_lines']['reactive_move_distance_over_roll'][1]
+        log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    if bot_reactive_over_roll > 0 and stats['first_error_lines']['reactive_move_distance_over_roll'][2]:
+        first_err = stats['first_error_lines']['reactive_move_distance_over_roll'][2]
+        log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
     _coh = require_key(stats, 'squad_coherency_violations')
     _table_row("Coherence d'escouade (03.03):", _fmt_count(_coh[1]), _fmt_count(_coh[2]))
     for _p in (1, 2):
