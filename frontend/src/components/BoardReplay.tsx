@@ -123,6 +123,30 @@ const requireReplayLogMessage = (action: ReplayAction, actionType: string): stri
   return action.log_message.trim();
 };
 
+const PHASE_NEUTRAL_TYPES = new Set(["wait"]);
+
+function countActionsInPhase(
+  actions: ReplayAction[],
+  lastCompletedIndex: number,
+  phaseType: "shoot" | "fight",
+  actorIdField: "shooter_id" | "attacker_id",
+  actorId: number
+): number {
+  let phaseStart = 0;
+  for (let i = lastCompletedIndex; i >= 0; i--) {
+    const a = actions[i];
+    if (a.type !== phaseType && !PHASE_NEUTRAL_TYPES.has(a.type)) {
+      phaseStart = i + 1;
+      break;
+    }
+  }
+  let used = 0;
+  for (let i = phaseStart; i <= lastCompletedIndex && i < actions.length; i++) {
+    if (actions[i].type === phaseType && actions[i][actorIdField] === actorId) used++;
+  }
+  return used;
+}
+
 export const BoardReplay: React.FC = () => {
   const { gameConfig } = useStaticGameConfig();
   const gameLog = useGameLog();
@@ -634,38 +658,17 @@ export const BoardReplay: React.FC = () => {
             // Index of the last *completed* action before the current one
             const lastCompletedIndex = currentActionIndexClamped - 2; // actions are 0-based, state index is +1
             if (lastCompletedIndex < 0) {
-              // No previous actions in this phase: full shots available
               return { ...u, SHOOT_LEFT: rngNb };
             }
 
-            // Find the start of the current shooting phase by scanning backwards
-            // from the last completed action until we hit a non-shoot action.
-            let shootingPhaseStart = 0;
-            for (let i = lastCompletedIndex; i >= 0; i--) {
-              const action = currentEpisode.actions[i];
-              if (action.type !== "shoot" && action.type !== "wait") {
-                shootingPhaseStart = i + 1;
-                break;
-              }
-            }
-
-            // Count how many shots this unit has fired in the current shooting phase
-            let shotsFired = 0;
-            for (
-              let i = shootingPhaseStart;
-              i <= lastCompletedIndex && i < currentEpisode.actions.length;
-              i++
-            ) {
-              const action = currentEpisode.actions[i];
-              if (action.type === "shoot" && action.shooter_id === shooterId) {
-                shotsFired++;
-              }
-            }
-
-            // Counter shows remaining shots *before* current shot:
-            // first shot: RNG_NB, second: RNG_NB-1, etc.
-            const shootLeft = Math.max(0, rngNb - shotsFired);
-            return { ...u, SHOOT_LEFT: shootLeft };
+            const shotsFired = countActionsInPhase(
+              currentEpisode.actions,
+              lastCompletedIndex,
+              "shoot",
+              "shooter_id",
+              shooterId
+            );
+            return { ...u, SHOOT_LEFT: Math.max(0, rngNb - shotsFired) };
           }
 
           // During fight action, compute ATTACK_LEFT only for the active attacker,
@@ -690,30 +693,14 @@ export const BoardReplay: React.FC = () => {
               return { ...u, ATTACK_LEFT: ccNb };
             }
 
-            // Fight phase is delimited by non-fight, non-wait actions
-            let fightPhaseStart = 0;
-            for (let i = lastCompletedIndex; i >= 0; i--) {
-              const action = currentEpisode.actions[i];
-              if (action.type !== "fight" && action.type !== "wait") {
-                fightPhaseStart = i + 1;
-                break;
-              }
-            }
-
-            let attacksUsed = 0;
-            for (
-              let i = fightPhaseStart;
-              i <= lastCompletedIndex && i < currentEpisode.actions.length;
-              i++
-            ) {
-              const action = currentEpisode.actions[i];
-              if (action.type === "fight" && action.attacker_id === attackerId) {
-                attacksUsed++;
-              }
-            }
-
-            const attacksLeft = Math.max(0, ccNb - attacksUsed);
-            return { ...u, ATTACK_LEFT: attacksLeft };
+            const attacksUsed = countActionsInPhase(
+              currentEpisode.actions,
+              lastCompletedIndex,
+              "fight",
+              "attacker_id",
+              attackerId
+            );
+            return { ...u, ATTACK_LEFT: Math.max(0, ccNb - attacksUsed) };
           }
 
           return u;
@@ -1769,7 +1756,7 @@ export const BoardReplay: React.FC = () => {
 
   // Center column: Board
   const boardContent =
-    currentState && gameConfig && replayCurrentPlayer !== null ? (
+    gameStateForBoard && gameConfig && replayCurrentPlayer !== null ? (
       <BoardPvp
         units={unitsWithGhost}
         selectedUnitId={replaySelectedUnitId}
@@ -1798,9 +1785,9 @@ export const BoardReplay: React.FC = () => {
         onCancelMove={() => {}}
         current_player={replayCurrentPlayer}
         unitsMoved={[]}
-        phase={currentState.phase || "move"}
+        phase={gameStateForBoard.phase || "move"}
         onShoot={() => {}}
-        gameState={gameStateForBoard!}
+        gameState={gameStateForBoard}
         replayActionIndex={currentActionIndex}
         objectiveControlOverride={replayObjectiveControlMap}
         getChargeDestinations={(unitId: number) => {
