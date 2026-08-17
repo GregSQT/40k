@@ -229,7 +229,7 @@ LINK_SUFFIXES = (".md", ".py", ".json", ".pdf", ".txt", ".sh", ".ts", ".tsx", ".
 #: Un fragment `#L123` ne désigne pas un titre mais une LIGNE. La passe 4 le rapporte déjà sous son
 #: propre message ; le confronter aux titres sortirait « ancre morte » et enverrait chercher un
 #: titre là où le document cite une ligne.
-FRAGMENT_LINE = re.compile(r"L\d+")
+FRAGMENT_LINE = re.compile(r"L\d+(?:-L\d+)?")
 
 #: Les deux verdicts de la passe 2, NOMMÉS ici parce que le rapport les recompte : agréger l'ancre
 #: morte sous « liens morts » annoncerait un fichier disparu là où seul un titre a bougé.
@@ -673,14 +673,14 @@ def check_links(doc_path: pathlib.Path) -> tuple[int, int, int, list[str]]:
         for raw in MD_LINK.findall(line):
             parts = raw.split("#", 1)
             target = urllib.parse.unquote(parts[0]).strip()
-            fragment = parts[1] if len(parts) > 1 else ""
+            fragment = urllib.parse.unquote(parts[1]) if len(parts) > 1 else ""
             if target.startswith("file://"):
                 target = target[len("file://"):]
             if not looks_like_path(target):
                 skipped += 1
                 continue
             checked += 1
-            resolved = resolve(target.rstrip("/") if target.endswith("/") else target, doc_dir)
+            resolved = resolve(target.rstrip("/"), doc_dir)
             if resolved is None:
                 broken.append(f"{doc_path.name}:{lineno}  {DEAD_LINK}  {target}")
                 continue
@@ -1131,7 +1131,8 @@ def report(doc: str, path: pathlib.Path) -> tuple[bool, list[str]]:
     verified, broken_values = check_values(path)
     broken_anchors = check_anchors(path)
     kinds, kinds_unverifiable, broken_kinds, kind_notes = check_symbol_kinds(path)
-    dead_links = sum(1 for entry in broken_links if DEAD_LINK in entry)
+    dead_links = sum(1 for entry in broken_links if f"  {DEAD_LINK}  " in entry)
+    dead_anchors = sum(1 for entry in broken_links if f"  {DEAD_ANCHOR}  " in entry)
     broken = broken_refs + broken_links + broken_values + broken_anchors + broken_kinds
     lines = [
         f"{'❌' if broken else '✅'} {doc}",
@@ -1141,7 +1142,7 @@ def report(doc: str, path: pathlib.Path) -> tuple[bool, list[str]]:
         f"{dead_links} morts, "
         f"{skipped} écartés (pas une forme de chemin)",
         f"   fragments: {fragments} ancres de lien confrontées, "
-        f"{len(broken_links) - dead_links} mortes",
+        f"{dead_anchors} mortes",
         f"   valeurs  : {verified} confirmées, {len(broken_values)} périmées ou orphelines",
         f"   ancres   : {len(broken_anchors)} renvois `fichier.ext:ligne`",
         f"   sortes   : {kinds} confirmées, {len(broken_kinds)} fausses, "

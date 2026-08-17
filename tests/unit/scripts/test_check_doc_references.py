@@ -248,10 +248,26 @@ def test_a_line_fragment_is_left_to_the_anchor_pass(tmp_path: pathlib.Path) -> N
     document cite une ligne — deux messages pour un seul défaut, dont un qui égare.
     """
     write(tmp_path, "cible.md", "# Doc\n")
-    doc = write(tmp_path, "ROADMAP_INDEX.md", "voir [là](cible.md#L629)\n")
+    doc = write(tmp_path, "ROADMAP_INDEX.md", "voir [là](cible.md#L99999)\n")
     _checked, _skipped, fragments, broken = cdr.check_links(doc)
     assert (fragments, broken) == (0, [])
     assert len(cdr.check_anchors(doc)) == 1
+
+
+def test_a_line_range_fragment_is_not_counted_as_dead_anchor(tmp_path: pathlib.Path) -> None:
+    """`#L10-L20` (plage GitHub) ne nomme pas un titre : ne pas le compter comme ancre morte."""
+    write(tmp_path, "cible.md", "# Doc\n")
+    doc = write(tmp_path, "note.md", "voir [là](cible.md#L10-L20)\n")
+    _checked, _skipped, fragments, broken = cdr.check_links(doc)
+    assert (fragments, broken) == (0, [])
+
+
+def test_a_percent_encoded_fragment_matches_anchor(tmp_path: pathlib.Path) -> None:
+    """`#%C3%A9l%C3%A9ment` doit être décodé avant comparaison avec `md_anchors`."""
+    write(tmp_path, "cible.md", "# Élément\n")
+    doc = write(tmp_path, "note.md", "[voir](cible.md#%C3%A9l%C3%A9ment)\n")
+    _checked, _skipped, fragments, broken = cdr.check_links(doc)
+    assert (fragments, broken) == (1, [])
 
 
 def test_a_fragment_on_a_non_markdown_target_is_not_confronted(tmp_path: pathlib.Path) -> None:
