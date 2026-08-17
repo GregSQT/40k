@@ -68,7 +68,7 @@ def test_a_bare_neighbour_resolves_to_the_document_directory(tmp_path: pathlib.P
     documentation, chaque lien interne sortait FICHIER INTROUVABLE + LIEN MORT (41 fois sur
     l'index au premier passage du corpus partitionné, 2026-08-18).
     """
-    write(tmp_path, "bot.md", "# cible\n")
+    write(tmp_path, "bot.md", "# cible {#etape8}\n")
     doc = write(tmp_path, "note.md", "voir [bot.md#etape8](bot.md#etape8) et [bot.md](bot.md)\n")
     assert cdr.resolve("bot.md", tmp_path) == tmp_path / "bot.md"
     _checked, _skipped, broken = cdr.check_links(doc)
@@ -159,6 +159,86 @@ def test_live_link_is_verified(tmp_path: pathlib.Path) -> None:
     doc = write(tmp_path, "note.md", "voir [le moteur](engine/w40k_core.py)\n")
     checked, _skipped, broken = cdr.check_links(doc)
     assert checked == 1 and not broken
+
+
+# --------------------------------------------------------------------------- fragments d'ancre
+
+
+def test_dead_fragment_is_reported(tmp_path: pathlib.Path) -> None:
+    """Un fragment `#ancre` absent de la cible génère ANCRE MORTE."""
+    write(tmp_path, "cible.md", "# Titre existant\n\ndu contenu\n")
+    doc = write(tmp_path, "note.md", "[texte](cible.md#ancre-inexistante)\n")
+    _checked, _skipped, broken = cdr.check_links(doc)
+    assert len(broken) == 1 and "ANCRE MORTE" in broken[0] and "ancre-inexistante" in broken[0]
+
+
+def test_live_fragment_slug_is_not_reported(tmp_path: pathlib.Path) -> None:
+    """Un fragment qui correspond au slug GFM d'un titre ne génère pas d'erreur."""
+    write(tmp_path, "cible.md", "# Titre existant\n\ndu contenu\n")
+    doc = write(tmp_path, "note.md", "[texte](cible.md#titre-existant)\n")
+    checked, _skipped, broken = cdr.check_links(doc)
+    assert checked == 1 and not broken
+
+
+def test_explicit_anchor_id_is_recognized(tmp_path: pathlib.Path) -> None:
+    """`{#mon-id}` sur un titre est une ancre valide, indépendamment du slug du titre."""
+    write(tmp_path, "cible.md", "# Titre quelconque {#mon-id}\n\ndu contenu\n")
+    doc = write(tmp_path, "note.md", "[texte](cible.md#mon-id)\n")
+    _checked, _skipped, broken = cdr.check_links(doc)
+    assert not broken
+
+
+def test_explicit_anchor_id_wrong_slug_is_dead(tmp_path: pathlib.Path) -> None:
+    """Quand `{#mon-id}` est présent, le slug du titre de surface n'est PAS une ancre valide.
+
+    Mutation : changer l'id explicite sans mettre à jour le lien → ANCRE MORTE.
+    """
+    write(tmp_path, "cible.md", "# Titre quelconque {#autre-id}\n\ndu contenu\n")
+    doc = write(tmp_path, "note.md", "[texte](cible.md#titre-quelconque)\n")
+    _checked, _skipped, broken = cdr.check_links(doc)
+    assert len(broken) == 1 and "ANCRE MORTE" in broken[0]
+
+
+def test_fragment_on_non_md_file_is_not_checked(tmp_path: pathlib.Path) -> None:
+    """Un fragment sur un `.py` suit la convention `#L<n>` de GitHub — pas de validation."""
+    doc = write(tmp_path, "note.md", "voir [texte](engine/w40k_core.py#L629)\n")
+    _checked, _skipped, broken = cdr.check_links(doc)
+    assert not broken
+
+
+def test_link_without_fragment_is_unaffected(tmp_path: pathlib.Path) -> None:
+    """Un lien sans fragment n'est pas touché par la validation d'ancre."""
+    write(tmp_path, "cible.md", "# Titre\n")
+    doc = write(tmp_path, "note.md", "[texte](cible.md)\n")
+    checked, _skipped, broken = cdr.check_links(doc)
+    assert checked == 1 and not broken
+
+
+def test_heading_with_backtick_slugs_correctly(tmp_path: pathlib.Path) -> None:
+    """Les backticks sont retirés du titre avant slugification."""
+    write(tmp_path, "cible.md", "## `obs_size` justification\n")
+    doc = write(tmp_path, "note.md", "[texte](cible.md#obs_size-justification)\n")
+    _checked, _skipped, broken = cdr.check_links(doc)
+    assert not broken
+
+
+def test_dead_anchor_is_dead_after_mutation(tmp_path: pathlib.Path) -> None:
+    """Rouge/vert par mutation : renommer le titre casse le fragment.
+
+    État VERT : lien vers `#ancien-titre`.
+    Mutation (renommer le titre) → état ROUGE.
+    """
+    cible = write(tmp_path, "cible.md", "## Ancien titre\n")
+    doc = write(tmp_path, "note.md", "[texte](cible.md#ancien-titre)\n")
+    # VERT : ancre valide
+    _checked, _skipped, broken = cdr.check_links(doc)
+    assert not broken, f"attendu vert, obtenu : {broken}"
+    # Mutation : on renomme le titre
+    cdr.md_anchors.cache_clear()
+    cible.write_text("## Nouveau titre\n", encoding="utf-8")
+    cdr.md_anchors.cache_clear()
+    _checked, _skipped, broken = cdr.check_links(doc)
+    assert len(broken) == 1 and "ANCRE MORTE" in broken[0], f"attendu rouge, obtenu : {broken}"
 
 
 # --------------------------------------------------------------------------- renvois
