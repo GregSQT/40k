@@ -3260,7 +3260,14 @@ class W40KEngine(gym.Env):
                 for _we in ("reroll_1_towound", "reroll_towound_target_on_objective"):
                     if unit_has_rule_effect(_unit_exp, _we):
                         abilities_exposure[f"wound_reroll{_exp_sfx}"] = 1
-            # Oath : proxy — un tir avec bonus Oath prouve que la capacité était active.
+            # Oath et hit_reroll : proxy count — couvre les relances issues de capacités de faction
+            # (ex. Oath of Moment via cause='hit_any_fail') qui n'apparaissent pas dans UNIT_RULES
+            # et échappent donc à unit_has_rule_effect('reroll_1_tohit_fight').
+            for _px_sfx in ("agent", "opp"):
+                abilities_exposure[f"hit_reroll_{_px_sfx}"] = max(
+                    abilities_exposure[f"hit_reroll_{_px_sfx}"],
+                    1 if abilities_counts[f"hit_reroll_{_px_sfx}"] > 0 else 0,
+                )
             abilities_exposure["oath_wound_bonus_agent"] = (
                 1 if abilities_counts["oath_wound_bonus_agent"] > 0 else 0
             )
