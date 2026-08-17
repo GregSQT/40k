@@ -50,7 +50,7 @@ def _make_env(active_ratio: float, scenario: str):
 
     env = W40KEngine(
         rewards_config="ArmageddonAgent",
-        training_config_name="x5_new",
+        training_config_name="x1",
         controlled_agent="ArmageddonAgent",
         scenario_file=os.path.join(BANK, scenario),
         unit_registry=UnitRegistry(),

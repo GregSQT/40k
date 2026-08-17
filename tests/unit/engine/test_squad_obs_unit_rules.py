@@ -263,7 +263,7 @@ def test_real_training_roster_writes_the_expected_id():
     construisent leur propre scenario, ou l'escouade active est posee sur le plateau.
     """
     eng = W40KEngine(
-        rewards_config="ArmageddonAgent", training_config_name="x5_new",
+        rewards_config="ArmageddonAgent", training_config_name="x1",
         controlled_agent="ArmageddonAgent", scenario_file=ORK_VS_ORK,
         unit_registry=UnitRegistry(), quiet=True, gym_training_mode=True,
         training_n_envs=1,  # UN environnement joue en serie (engine/episode_schedule.py)

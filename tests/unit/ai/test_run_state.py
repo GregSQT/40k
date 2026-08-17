@@ -96,7 +96,7 @@ def test_engine_ramp_resumes_from_the_start_index() -> None:
     def _p_active(start_index: int) -> float:
         env = W40KEngine(
             rewards_config="ArmageddonAgent",
-            training_config_name="x5_new",
+            training_config_name="x1",
             controlled_agent="ArmageddonAgent",
             scenario_file=scenario,
             unit_registry=UnitRegistry(),

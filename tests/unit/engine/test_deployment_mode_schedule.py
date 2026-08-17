@@ -51,7 +51,7 @@ def _make_env(start: float, end: float, total_episodes: int, freeze: float = 1.0
 
     env = W40KEngine(
         rewards_config="ArmageddonAgent",
-        training_config_name="x5_new",
+        training_config_name="x1",
         controlled_agent="ArmageddonAgent",
         scenario_file=SCENARIO,
         unit_registry=UnitRegistry(),
@@ -354,7 +354,7 @@ def test_runtime_n_envs_overrides_the_declared_profile_value() -> None:
 
     env = W40KEngine(
         rewards_config="ArmageddonAgent",
-        training_config_name="x5_new",
+        training_config_name="x1",
         controlled_agent="ArmageddonAgent",
         scenario_file=SCENARIO,
         unit_registry=UnitRegistry(),
@@ -363,7 +363,7 @@ def test_runtime_n_envs_overrides_the_declared_profile_value() -> None:
         training_n_envs=1,
     )
     assert env.training_config is not None
-    declared = json.loads(open(AGENT_CONFIG, encoding="utf-8-sig").read())["x5_new"]["n_envs"]
+    declared = json.loads(open(AGENT_CONFIG, encoding="utf-8-sig").read())["x1"]["n_envs"]
     assert declared > 1, "le profil doit déclarer plusieurs envs, sinon ce test ne prouve rien"
     assert env.training_config["n_envs"] == 1
 
@@ -390,7 +390,7 @@ def test_unresolved_n_envs_refuses_to_ramp() -> None:
 
     env = W40KEngine(
         rewards_config="ArmageddonAgent",
-        training_config_name="x5_new",
+        training_config_name="x1",
         controlled_agent="ArmageddonAgent",
         scenario_file=SCENARIO,
         unit_registry=UnitRegistry(),
@@ -419,9 +419,8 @@ def test_n_envs_missing_is_an_explicit_error() -> None:
 
 # --- Le VRAI fichier de config : aucun profil ne doit perdre la rampe --------------------------
 #
-# `x5_append` et `x1_debug` n'avaient AUCUN bloc, `x5_new` et `x5_debug` finissaient à 0.0 : ils
-# entraînaient un agent qui ne se déploie jamais, puis le notaient sur des parties à déployer
-# (l'évaluation impose TOUJOURS une phase de déploiement). Aucun test ne lisait ce fichier.
+# Tous les profils actifs (x1, x1_long, x1_debug) portent le bloc ; l'évaluation impose TOUJOURS
+# une phase de déploiement. Aucun test ne lisait ce fichier avant ce verrou.
 
 with open(AGENT_CONFIG, encoding="utf-8-sig") as _f:
     PROFILES = {k: v for k, v in json.load(_f).items() if isinstance(v, dict)}
@@ -489,25 +488,11 @@ def test_all_profiles_share_the_same_ramp() -> None:
 
     `x1` est la référence (profil de production) : c'est lui qu'on ajuste, les autres suivent.
     Le compte est figé exprès : un profil ajouté sans son bloc de déploiement est le défaut que
-    ce fichier existe pour attraper, et un `len` non contraint le laisserait passer. Passé de 5
-    à 6 le 2026-08-02 avec `x1_long` (runs longs), puis à 7 le même jour avec `x1_selfplay`
-    (phase 2 — self-play sur un agent déjà entraîné vs bots), puis à 8 le 2026-08-10 avec
-    `x5_long` (runs longs joués sur le plateau x5), puis à 9 le 2026-08-12 avec `x1_panel`
-    (profil de MESURE du panel de bots refondu), puis à 10 le 2026-08-14 avec `x1_new_bots`
-    (panel de bots refondu — six doctrines — sur un run court x1), puis à 11 avec `x1_long_panel`
-    (copie de `x1_long` qui S'ENTRAÎNE contre le panel refondu — §12.16 du chantier des bots :
-    l'agent n'avait jamais affronté un seul des six styles, ce qui mêlait difficulté et nouveauté
-    dans tout écart de win-rate entre les deux panels).
-
-    ⚠️ `x1_selfplay` porte le MÊME bloc que les autres, et ce n'est pas un oubli : la rampe de
-    déploiement est une COMPÉTENCE ACQUISE, elle reprend là où la phase 1 l'a laissée (V11 §0.58).
-    Le bloc y décrit donc le plafond atteint, pas une rampe rejouée.
-
-    ⚠️ `x1_panel` non plus n'est pas dispensé, bien qu'il n'entraîne rien : l'évaluation IMPOSE
-    toujours une phase de déploiement (cf. la justification du bloc), donc un profil de mesure
-    sans rampe noterait l'agent sur un comportement que sa config ne décrit pas.
+    ce fichier existe pour attraper, et un `len` non contraint le laisserait passer.
+    Trois profils actifs : `x1` (run court de développement), `x1_long` (run de mesure, 50k ép.),
+    `x1_debug` (smoke test, 1k ép.).
     """
-    assert len(PROFILES) == 11, f"profils attendus : 11, trouvés {sorted(PROFILES)}"
+    assert len(PROFILES) == 3, f"profils attendus : 3, trouvés {sorted(PROFILES)}"
     reference = json.dumps(PROFILES["x1"]["deployment_mode_schedule"], sort_keys=True)
     diverged = {
         name: p.get("deployment_mode_schedule")
