@@ -426,7 +426,7 @@ def self_model_bin_index(field: str) -> int:
 #: aucune datasheet — c'est le mot-clé FLY qui l'ouvre et 21.03 qui en fixe le prix —, donc ses
 #: deux candidats portent eux aussi un `effect_ids` VIDE. C'est `declines` qui les sépare :
 #: `CHOICE_1` renonce au vol, et le renoncement est précisément « ne rien faire ».
-AGENT_DECISION_TYPE_IDS: Tuple[str, ...] = ("rule_choice", "waaagh_call", "fly_declaration")
+AGENT_DECISION_TYPE_IDS: Tuple[str, ...] = ("rule_choice", "waaagh_call", "fly_declaration", "allocation_model")
 
 #: Nombre MAXIMAL de candidats exposés à l'agent — le K de `CHOICE_0..K-1`
 #: (`macro_intents.CHOICE_SLOTS`). Il vaut 6, l'alignement retenu par §9.3 sur les 6 slots
@@ -522,11 +522,25 @@ DECISION_OPTION_BIN_FIELDS: Tuple[str, ...] = tuple(
 DECISION_CTX_BIN_SIZE = len(DECISION_CTX_BIN_FIELDS)
 DECISION_OPTION_BIN_SIZE = len(DECISION_OPTION_BIN_FIELDS)
 
+#: Champs CONTINUS par candidat — ouverts par P3-4 (allocation des pertes défenseur, §9.4 pt 4).
+#: `role_tier_norm` : ROLE_TIER de la figurine divisé par 4 (max du tier = 4, pour "leader"),
+#: normalisé sur [0, 1]. Distingue base < special_weapon < sergeant < support < leader.
+#: `dist_enemy_norm` : distance (hex) à l'ennemi le plus proche, divisée par (board_cols +
+#: board_rows) — borne conservative de la diagonale. Toujours dans [0, 1].
+#: Ces deux traits suffisent à reproduire l'heuristique de `_select_allocation_model` et laissent
+#: l'agent dévier de façon apprenante. Les candidats blessés ne parviennent JAMAIS ici (la règle
+#: 05.04 les force avant), donc HP_CUR = HP_MAX pour tous — inutile de le coder.
+DECISION_OPTION_CONT_FIELDS: Tuple[str, ...] = ("role_tier_norm", "dist_enemy_norm")
+DECISION_OPTION_CONT_SIZE = len(DECISION_OPTION_CONT_FIELDS)
+
 _DECISION_CTX_BIN_INDEX: Dict[str, int] = {
     name: i for i, name in enumerate(DECISION_CTX_BIN_FIELDS)
 }
 _DECISION_OPTION_BIN_INDEX: Dict[str, int] = {
     name: i for i, name in enumerate(DECISION_OPTION_BIN_FIELDS)
+}
+_DECISION_OPTION_CONT_INDEX: Dict[str, int] = {
+    name: i for i, name in enumerate(DECISION_OPTION_CONT_FIELDS)
 }
 
 
@@ -548,6 +562,16 @@ def decision_option_bin_index(field: str) -> int:
             f"Champs : {DECISION_OPTION_BIN_FIELDS}"
         )
     return _DECISION_OPTION_BIN_INDEX[field]
+
+
+def decision_option_cont_index(field: str) -> int:
+    """Index d'un champ continu de candidat de décision. Nom inconnu -> KeyError explicite."""
+    if field not in _DECISION_OPTION_CONT_INDEX:
+        raise KeyError(
+            f"Champ continu de candidat de décision inconnu : {field!r}. "
+            f"Champs : {DECISION_OPTION_CONT_FIELDS}"
+        )
+    return _DECISION_OPTION_CONT_INDEX[field]
 
 
 # ---------------------------------------------------------------------------

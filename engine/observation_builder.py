@@ -46,12 +46,15 @@ from engine.observation_entities import (
     AGENT_DECISION_TYPE_IDS,
     DECISION_CTX_BIN_SIZE,
     DECISION_OPTION_BIN_SIZE,
+    DECISION_OPTION_CONT_FIELDS,
+    DECISION_OPTION_CONT_SIZE,
     DEPLOY_CAND_BIN_SIZE,
     DEPLOY_CAND_CONT_SIZE,
     MAX_DECISION_OPTIONS,
     N_DEPLOY_SLOTS,
     decision_ctx_bin_index,
     decision_option_bin_index,
+    decision_option_cont_index,
     deploy_cand_bin_index,
     deploy_cand_cont_index,
     GLOBAL_BIN_SIZE,
@@ -433,6 +436,7 @@ class ObservationBuilder:
         # l'aveugle — exactement le défaut de la pseudo-décision qu'il remplace.
         + DECISION_CTX_BIN_SIZE
         + MAX_DECISION_OPTIONS * DECISION_OPTION_BIN_SIZE
+        + MAX_DECISION_OPTIONS * DECISION_OPTION_CONT_SIZE
         # Bloc « candidats de déploiement » (§0.40 point 3) : sans lui, les actions 4-8 sont
         # cinq boîtes noires — l'agent choisit une stratégie sans voir l'hexe qu'elle pose.
         + N_DEPLOY_SLOTS * (DEPLOY_CAND_CONT_SIZE + DEPLOY_CAND_BIN_SIZE)
@@ -476,6 +480,7 @@ class ObservationBuilder:
             # slots ennemis : `decision_options_bin[i]` décrit le candidat que joue `CHOICE_i`.
             "decision_ctx_bin": (DECISION_CTX_BIN_SIZE,),
             "decision_options_bin": (MAX_DECISION_OPTIONS, DECISION_OPTION_BIN_SIZE),
+            "decision_options_cont": (MAX_DECISION_OPTIONS, DECISION_OPTION_CONT_SIZE),
             # Déploiement (§0.40 point 3). ⚠ L'ORDRE DES SLOTS EST CONTRACTUEL, comme celui des
             # slots ennemis : `deploy_cand_*[i]` décrit ce que pose l'action
             # `DEPLOY_SLOT_BASE + i`. Bloc NUL hors phase de déploiement.
@@ -892,12 +897,17 @@ class ObservationBuilder:
                 f"{MAX_DECISION_OPTIONS} slots — `set_pending_agent_decision` aurait du lever."
             )
         opts = obs["decision_options_bin"]
+        opts_cont = obs["decision_options_cont"]
+        raw_cont = decision.get("options_cont")  # get allowed : absent pour les types sans continu
         for slot, option in enumerate(options):
             for effect_id in require_key(option, "effect_ids"):
                 opts[slot, decision_option_bin_index(f"grants_{effect_id}")] = 1.0
             if require_key(option, "declines"):
                 opts[slot, decision_option_bin_index("declines")] = 1.0
             opts[slot, decision_option_bin_index("present")] = 1.0
+            if raw_cont is not None and slot < len(raw_cont):
+                for field, val in zip(DECISION_OPTION_CONT_FIELDS, raw_cont[slot]):
+                    opts_cont[slot, decision_option_cont_index(field)] = float(val)
 
     def _encode_deployment_candidates(
         self,

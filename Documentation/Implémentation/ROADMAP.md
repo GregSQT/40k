@@ -418,7 +418,7 @@ Ordre imposé par les décisions du 2026-08-07 et 2026-08-10 : la mesure de réf
 600 parties/bot) est **différée** jusqu'à livraison de tout ce bloc. D'ici là le projet est SANS
 mesure, et c'est assumé (§0.14).
 
-1. **P3-4 — Allocation des pertes défenseur** (= L3) → [`1_Agent/V11_phaseA.md`](1_Agent/V11_phaseA.md) §9.4 pt 4
+1. ~~**P3-4 — Allocation des pertes défenseur** (= L3)~~ ✅ livré 2026-08-17 — `_select_allocation_model` branché sur décision agent ; `DECISION_OPTION_CONT_FIELDS` ouvert ; obs_size 16659→16671 ; 12 tests verts.
 2. **P3-5 — Pile-in / consolidation** (= L4) — **bloqué en amont** par la migration par-figurine
    du pile-in auto V11 → [`A_faire/pile_in_overrun_par_figurine.md`](A_faire/pile_in_overrun_par_figurine.md).
    Décision spatiale ⇒ top-K d'hex interdit (§9.0bis).
@@ -820,7 +820,7 @@ Prêts à démarrer sans décision produit :
   puis réécrire la note avec ce chiffre. Un réglage tenu par un chiffre faux se retourne au
   premier changement de durée — c'est déjà ce qui était arrivé à `bot_eval_freq` calé sur
   200 000 épisodes.
-- ✅ **Marqueur d'activation SHOOT (10.02) dans `double_activation_by_phase`** — **LIVRÉ le 2026-08-17**.
+- ✅ **Marqueur d'activation SHOOT (10.02) dans `double_activation_by_phase`** — **LIVRÉ le 2026-08-17** (merge `c539b870`).
   `is_shoot_activation_start` (via `shoot_last_activator`) dans `is_activation_marker` : le PREMIER SHOT
   d'un acteur différent du précédent ouvre une nouvelle activation ; les tirs consécutifs de la même
   escouade (salve) ne comptent pas. Reset en début de tour (pas de phase). 2 tests rouge→vert.
@@ -924,6 +924,7 @@ Prêts à démarrer sans décision produit :
 - ✅ **Compteur `damage_exceeds_hp` retiré de l'analyzer** — **LIVRÉ le 2026-08-17** (merge `e03e90d3`). Le contrôle était irréalisable par construction : le moteur alloue les dégâts modèle par modèle en bornant à `hp_remaining`, donc un dégât individuel ne peut excéder les PV courants. Contrôle supprimé et remplacé par un test moteur prouvant l'invariant (`test_damage_never_exceeds_hp`).
 - ✅ **Statut N/A — KEYWORD pour PSYCHIC (24.29) dans §1.8** — **LIVRÉ le 2026-08-17** (merge `9ba1db73`). Les paires `(PSYCHIC, arme)` avec 0 comptes affichaient « NOT USED » alors que PSYCHIC est un mot-clé d'interaction (pas un effet discret à compter). Corrigé : `_INTERACTION_ONLY_WEAPON_RULES` exclut ces paires de la table §1.8 et du résumé §1.8. Deux des trois sites couverts.
 - ✅ **Troisième site `weapon_rule_not_used_warnings` manquait le guard INTERACTION_ONLY** — **LIVRÉ le 2026-08-17**. La status line finale (`⚠️ 0 erreur, N warning(s)`) recalculait le total sans le guard `_INTERACTION_ONLY_WEAPON_RULES` : PSYCHIC comptait comme warning alors que §1.8 l'excluait correctement. Extrait en `_compute_weapon_rule_not_used_warnings()`. Assertion de test vacuuse (`>= 0`) remplacée par une assertion discriminante ; test direct sur la fonction helper (rouge sans guard : 9, vert : 6 sur le scénario Librarian). `frozenset` → `frozenset[str]`.
+- ✅ **Corpus de contrôle analyzer §1.2–§2.8 complet + scalaire `#` pour `state_resync`** — **LIVRÉ le 2026-08-17** (merge `bc54faac`). `rules_corpus.json` étendu à §1.2–§2.8 ; `analyzer_rules.py` adapté ; scalaire `#` ajouté pour `state_resync` ; 188 tests corpus rouge→vert.
 - ✅ **Les verrous du seuil de blessure 05.02 gardaient du vide** (2026-08-13, merge `a6d4915c`).
   Quatre tests de `tests/unit/ai/test_analyzer_wound_threshold.py` passaient sans rien retenir
   (garde « type hors registre », ordre Oath/unanimité, composites en mêlée seule, test du porteur

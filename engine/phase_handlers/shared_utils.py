@@ -44,6 +44,7 @@ from engine.spatial_grid import GRID_CELL_COUNT
 # `observation_entities` est une FEUILLE (aucun import moteur) : l'importer au niveau module ne
 # cree pas de cycle. `K_ALLY_SLOTS` y vit parce que l'espace d'action en derive (V11 §0.48 L2).
 from engine.observation_entities import K_ALLY_SLOTS
+from engine.agent_decision import set_pending_agent_decision
 # Primitives « hors table » : définies dans la couche BASSE (`spatial_relations` ne dépend que de
 # `hex_utils`) parce que les primitives de MESURE en dépendent elles-mêmes. Ré-exportées ici, où
 # une trentaine d'appelants importent déjà `entry_is_on_battlefield` — même symbole, pas un jumeau.
@@ -8705,6 +8706,58 @@ def _select_allocation_model(
     return min(enumerate(alive), key=_key)[1]
 
 
+def _arm_allocation_model_decision(
+    game_state: Dict[str, Any],
+    target_squad_id: str,
+    alive_grp: List[str],
+    ctx: "ManualAllocCtx",
+) -> Dict[str, Any]:
+    """Pose une décision d'agent pour le choix de la figurine réceptrice (05.04, §9.4 pt 4).
+
+    Appelé depuis `_manual_allocation_step` quand `gym_training_mode` est vrai et que
+    tous les modèles du groupe courant sont sains (les blessés sont forcés avant, règle 05.04).
+    Les traits continus `role_tier_norm` et `dist_enemy_norm` distinguent les candidats qui
+    auraient autrement des vecteurs binaires identiques (aucun effet accordable).
+    """
+    models_cache = require_key(game_state, "models_cache")
+    dist_cache = _precompute_nearest_enemy_dist(game_state, target_squad_id)
+    board_cols = int(require_key(game_state, "board_cols"))
+    board_rows = int(require_key(game_state, "board_rows"))
+    max_dist = max(1, board_cols + board_rows)
+
+    units_cache = require_key(game_state, "units_cache")
+    if target_squad_id not in units_cache:
+        raise KeyError(
+            f"_arm_allocation_model_decision: escouade cible {target_squad_id!r} "
+            "absente de units_cache"
+        )
+    defender_player = int(require_key(units_cache[target_squad_id], "player"))
+
+    options: List[Dict[str, Any]] = []
+    options_cont: List[List[float]] = []
+    for mid in alive_grp:
+        e = models_cache[mid]
+        _role = e.get("role")
+        tier = ROLE_TIER.get(_role, 0) if _role is not None else 0
+        d = dist_cache.get(mid, 0)
+        options.append({
+            "label": str(e.get("modelId", mid)),
+            "effect_ids": (),
+            "declines": False,
+            "payload": {"model_id": mid, "alloc_ctx_key": ctx.alloc_key},
+        })
+        options_cont.append([tier / 4.0, d / max_dist])
+
+    return set_pending_agent_decision(
+        game_state,
+        decision_type="allocation_model",
+        player=defender_player,
+        unit_id=target_squad_id,
+        options=options,
+        options_cont=options_cont,
+    )
+
+
 # Segments de la ligne de synthese d une attaque, dans l ordre d emission. Chaque regle d arme
 # est accrochee au segment qu elle MODIFIE : c est la seule accroche qui reste lisible quand
 # plusieurs regles jouent ensemble (une liste de tokens en fin de ligne ne dirait pas laquelle
@@ -10348,6 +10401,10 @@ def _manual_allocation_step(game_state: Dict[str, Any], ctx: ManualAllocCtx) -> 
                 if wounded:
                     batch["current_model_id"] = wounded[0]  # regle : finir une fig entamee
                 elif ctx.auto_decider is not None and ctx.auto_decider(game_state, batch["target_sid"]):
+                    # get allowed : absent = False ; ≥2 candidats requis par le mécanisme décision
+                    if game_state.get("gym_training_mode") and len(alive_grp) >= 2:
+                        return _arm_allocation_model_decision(
+                            game_state, batch["target_sid"], alive_grp, ctx)
                     batch["current_model_id"] = _select_allocation_model(
                         game_state, batch["target_sid"], alive_grp)
                 else:

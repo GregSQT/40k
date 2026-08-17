@@ -4004,6 +4004,51 @@ class W40KEngine(gym.Env):
                 "success": True,
             }
 
+        if decision_type == "allocation_model":
+            # P3-4 : le défenseur gym choisit quelle figurine encaisse la prochaine blessure (05.04).
+            # Le payload porte `model_id` (la figurine choisie) et `alloc_ctx_key` (le contexte
+            # allocation : tir / combat / hazard). Consommer la décision AVANT `apply_manual_shoot_allocation`
+            # garantit qu'aucune décision « en attente » ne bloque le gestionnaire si la résolution
+            # en pose une nouvelle (lot suivant).
+            from engine.agent_decision import consume_pending_agent_decision
+            from engine.phase_handlers.shared_utils import (
+                SHOOT_CTX, HAZARD_CTX, apply_manual_shoot_allocation
+            )
+            _alloc_ctx_registry = {
+                SHOOT_CTX.alloc_key: SHOOT_CTX,
+                fight_handlers.FIGHT_CTX.alloc_key: fight_handlers.FIGHT_CTX,
+                HAZARD_CTX.alloc_key: HAZARD_CTX,
+            }
+            payload = require_key(selected_option, "payload")
+            model_id = str(require_key(payload, "model_id"))
+            alloc_ctx_key = str(require_key(payload, "alloc_ctx_key"))
+            ctx = _alloc_ctx_registry.get(alloc_ctx_key)
+            if ctx is None:
+                raise KeyError(
+                    f"allocation_model: alloc_ctx_key {alloc_ctx_key!r} inconnu. "
+                    f"Cles connues : {list(_alloc_ctx_registry)}"
+                )
+            decision_player = int(require_key(decision, "player"))
+            decision_squad_id = str(require_key(decision, "unit_id"))
+            consume_pending_agent_decision(
+                self.game_state,
+                decision_type="allocation_model",
+                player=decision_player,
+                unit_id=decision_squad_id,
+            )
+            alloc_result = apply_manual_shoot_allocation(self.game_state, model_id, ctx)
+            return True, {
+                "action": "agent_decision",
+                "waiting_for_player": alloc_result.get("waiting_for_player", False),
+                "decision_type": decision_type,
+                "unitId": decision_squad_id,
+                "player": decision_player,
+                "option_index": option_index,
+                "model_id": model_id,
+                "alloc_result": alloc_result,
+                "success": True,
+            }
+
         if decision_type != "rule_choice":
             raise NotImplementedError(
                 f"agent_decision: type '{decision_type}' declare mais sans application moteur. "

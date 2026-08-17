@@ -92,7 +92,10 @@ def _game_state(phase, n_target_models, n_attacks):
                 "CC_WEAPONS": [weapon] if melee else []}
     targets = {f"T{i}": _target_model(i) for i in range(n_target_models)}
     return {**turn_state_invariants(),
-        "gym_training_mode": True,
+        # PvE (GreedyBot) : heuristique sans prompt, sans décision agent.
+        # gym_training_mode=True poserait une pending_agent_decision à chaque sélection de
+        # figurine — ce fichier teste les RÈGLES d'allocation, pas le mécanisme décision.
+        "player_types": {"0": "human", "1": "ai"},
         "turn": 1, "phase": phase,
         "action_logs": [], "action_log_seq": 0,
         "models_cache": {"A1": attacker, **targets},
