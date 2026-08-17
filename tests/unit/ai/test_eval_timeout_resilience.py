@@ -1,6 +1,6 @@
 """V11 §0.27 — le garde-fou d'evaluation distingue TIMEOUT (lenteur) et CRASH (bug moteur).
 
-Bug d'origine (run `x5_new`, 2026-07-22) : a l'eval intermediaire du marker 2000, un task d'eval
+Bug d'origine (run `x1`, 2026-07-22) : a l'eval intermediaire du marker 2000, un task d'eval
 a depasse `bot_eval_task_timeout_seconds` (3675 s mesures pour 3600 s de deadline). Les 500
 episodes du pool ont ete marques `failed`, et `_apply_eval_results` levait `RuntimeError` sur
 `total_failed_episodes > 0` — un run de 10 000 episodes tue par de la LENTEUR, alors qu'aucun

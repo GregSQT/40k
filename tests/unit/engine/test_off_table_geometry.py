@@ -133,7 +133,7 @@ def _engine(seed: int = 0):
     from engine.w40k_core import W40KEngine
 
     eng = W40KEngine(
-        rewards_config="ArmageddonAgent", training_config_name="x5_debug",
+        rewards_config="ArmageddonAgent", training_config_name="x1_debug",
         controlled_agent="ArmageddonAgent", scenario_file=str(SCENARIO),
         unit_registry=UnitRegistry(), quiet=True, gym_training_mode=True,
     )

@@ -61,7 +61,7 @@ def _pin_board(board_x5):
 # ---------------------------------------------------------------------------
 
 
-def _engine(training_config_name: str = "x5_debug", seed: int = 0):
+def _engine(training_config_name: str = "x1_debug", seed: int = 0):
     from ai.unit_registry import UnitRegistry
     from engine.w40k_core import W40KEngine
 

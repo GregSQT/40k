@@ -64,7 +64,7 @@ def terrain(request, monkeypatch):
 def _make_env() -> W40KEngine:
     return W40KEngine(
         rewards_config="ArmageddonAgent",
-        training_config_name="x5_new",
+        training_config_name="x1",
         controlled_agent="ArmageddonAgent",
         scenario_file=TEMPLATE,
         unit_registry=UnitRegistry(),
@@ -83,8 +83,8 @@ def _reset_deployed(env, **kwargs):
     table est à la sentinelle (-1,-1). Les distances aux objectifs y sont constantes — le test
     « la distance diminue quand l'escouade s'approche » comparait deux fois la même valeur.
 
-    Le mode n'est pas non plus laissé au tirage : le profil `x5_new` démarre à
-    `active_ratio_start` 0.3, donc l'ancien code observait des états différents d'une exécution
+    Le mode n'est pas non plus laissé au tirage : certains profils démarrent à
+    `active_ratio_start` > 0, donc l'ancien code observait des états différents d'une exécution
     à l'autre.
     """
     import numpy as _np

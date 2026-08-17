@@ -53,7 +53,7 @@ def _build_env():
         raise FileNotFoundError(sf)
     env = W40KEngine(
         rewards_config="default",
-        training_config_name="x5_new",
+        training_config_name="x1",
         controlled_agent=sorted(get_agents_from_scenario(sf, ur))[0],
         scenario_file=sf,
         unit_registry=ur,

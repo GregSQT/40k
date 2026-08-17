@@ -40,7 +40,7 @@ def _make_engine(active_ratio: float):
 
     engine = W40KEngine(
         rewards_config="ArmageddonAgent",
-        training_config_name="x5_new",
+        training_config_name="x1",
         controlled_agent="ArmageddonAgent",
         scenario_file=SCENARIO,
         unit_registry=UnitRegistry(),

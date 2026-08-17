@@ -26,7 +26,7 @@ import pytest
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 SCENARIO = os.path.join(PROJECT_ROOT, "config/board/44x60x5/scenario/scenario_fixed_brawl_sm_orks.json")
 AGENT = "ArmageddonAgent"
-TRAINING_CONFIG = "x5_debug"
+TRAINING_CONFIG = "x1_debug"
 
 
 def _model_path() -> str:

@@ -254,23 +254,14 @@ def _resolved_cb(callback_params: dict, key: str):
 # SKIP ceux qui ne promettent rien — sans cette table, le passer à false n'importe où resterait
 # vert partout, et un run de mesure ne produirait plus aucun modèle sélectionné.
 # false = le profil ne SÉLECTIONNE rien, sa sortie est son modèle FINAL. Deux causes distinctes :
-# le run est trop court pour remplir la fenêtre une seule fois (`x5_new`, `x1_debug`, `x5_debug`),
+# le run est trop court pour remplir la fenêtre une seule fois (`x1_debug`),
 # ou il la remplit exactement une fois — une seule position de fenêtre, donc le « meilleur »
 # modèle est mécaniquement le dernier point évalué (`x1` depuis le 2026-08-11 : 5 points pour une
 # fenêtre de 5). Dans les deux cas la promesse était vide ; c'est le sens du `false`.
-# Troisième cause depuis le 2026-08-12 avec `x1_panel` : un profil de MESURE, joué en `--test-only`
-# pour comparer des bots entre eux, n'entraîne rien et n'a donc rien à sélectionner.
 PROMISES_BEST_MODEL = {
-    "x1": False, "x1_long": True, "x1_selfplay": True,
-    "x5_new": False, "x5_long": True, "x5_append": True,
-    "x1_debug": False, "x5_debug": False,
-    "x1_panel": False,
-    # true, et il l'HERITE de x1_long dont il est la copie : 50 000 épisodes, `bot_eval_freq`
-    # 10 000 et `robust_window` 3 → 5 points de mesure pour 3 positions de fenêtre, donc le best
-    # model départage réellement. Le mettre à false le ferait diverger de sa référence sur le seul
-    # axe qui doit rester identique (cf. `test_x1_long_panel_ne_differe_que_des_bots`).
-    "x1_long_panel": True,
-    "x1_new_bots": True,
+    "x1": False,
+    "x1_long": True,
+    "x1_debug": False,
 }
 
 
@@ -311,14 +302,11 @@ def test_every_profile_declares_decay_fraction(profile_name: str, ramp_key: str)
     assert 0.0 < float(value) <= 1.0, f"{profile_name}.{ramp_key}.decay_fraction={value}"
 
 
-#: Longueur ATTENDUE de chaque profil `_long`, par couple. Épinglée et non lue depuis le JSON :
+#: Longueur ATTENDUE de chaque profil `_long`. Épinglée et non lue depuis le JSON :
 #: sans elle, un `_long` ramené par mégarde à la longueur de sa référence resterait vert alors
-#: qu'il ne mesurerait plus rien de long. Elle n'est PAS commune aux deux couples depuis le
-#: 2026-08-11 : x1_long est ramené à 50 000 épisodes (5 points de mesure à `bot_eval_freq` 10000,
-#: soit tout juste la fenêtre de 5 évaluations qu'exige `save_best_robust`), x5_long reste à
-#: 200 000. Une valeur unique pour les deux forcerait à aligner deux runs qui n'ont pas le même
-#: objet.
-LONG_PROFILE_EPISODES = {"x1_long": 50_000, "x5_long": 200_000}
+#: qu'il ne mesurerait plus rien de long. x1_long : 50 000 épisodes (5 points de mesure à
+#: `bot_eval_freq` 10000, soit tout juste la fenêtre de 5 évaluations qu'exige `save_best_robust`).
+LONG_PROFILE_EPISODES = {"x1_long": 50_000}
 
 #: `bot_eval_final` ATTENDU de chaque profil de RÉFÉRENCE (le court des deux), par couple.
 #: ÉPINGLÉ pour la même raison que la table ci-dessus, et plus commun aux deux couples depuis le
@@ -327,35 +315,28 @@ LONG_PROFILE_EPISODES = {"x1_long": 50_000, "x5_long": 200_000}
 #: l'erreur-type de l'écart entre deux win-rates `combined` vaut ≈ 0,707/√(6 × 10) = 9,1 points,
 #: donc aucun écart réaliste n'en sort. Le chiffre publié vient de `x1_long` (300 depuis le
 #: 2026-08-16, voir LONG_PROFILE_BOT_EVAL_FINAL), et de rien d'autre.
-REFERENCE_BOT_EVAL_FINAL = {"x1": 10, "x5_new": 100}
+REFERENCE_BOT_EVAL_FINAL = {"x1": 10}
 
-#: `bot_eval_final` ATTENDU de chaque profil `_long`. Table PAR PROFIL depuis le 2026-08-16 :
-#: c'était une constante commune à 600, mais x1_long est descendu à 300 et x5_long ne l'a pas
-#: suivi. Ce n'est pas une dérive — c'est le seul des deux qui ait été CHRONOMÉTRÉ. Mesure du
-#: 2026-08-16 sur x1_long : 2,76 s par épisode d'évaluation en temps mural à `bot_eval_n_workers`
-#: 12 sur 8 cœurs physiques (3 répétitions alternées, dispersion < 2 %), donc 6 × 300 = 1800
-#: épisodes ≈ 1 h 23 pour l'éval finale, contre ≈ 2 h 46 à 600. L'erreur-type d'un win-rate
-#: autour de 0,5 vaut 0,5/√n : 2,0 points à 600, 2,9 à 300 — 0,9 point échangé contre la moitié
-#: du coût. x5_long garde 600 faute de mesure : lui appliquer le chiffre de x1_long supposerait
-#: que le plateau x5 coûte la même chose par épisode, ce que personne n'a vérifié. Le détail est
-#: dans `bot_eval_final_normal` de chaque profil, seule source.
-LONG_PROFILE_BOT_EVAL_FINAL = {"x1_long": 300, "x5_long": 600}
+#: `bot_eval_final` ATTENDU de chaque profil `_long`. Épinglé (pas lu depuis le JSON) pour la
+#: même raison que ci-dessus. x1_long : 300, CHRONOMÉTRÉ le 2026-08-16 (2,76 s/ép. à 12 workers
+#: sur 8 cœurs, 3 répétitions, dispersion < 2 %) → 1 h 23 pour l'éval finale. L'erreur-type
+#: d'un win-rate autour de 0,5 vaut 0,5/√n : 2,9 points à 300. Le détail est dans
+#: `bot_eval_final_normal` du JSON, seule source.
+LONG_PROFILE_BOT_EVAL_FINAL = {"x1_long": 300}
 
-#: `bot_eval_intermediate` ATTENDU de chaque profil `_long`. Divergent depuis e07bdfd1 :
-#: x1_long est passé de 100 à 30 (avec 4 workers intermédiaires), x5_long reste à 100.
-LONG_PROFILE_BOT_EVAL_INTERMEDIATE = {"x1_long": 30, "x5_long": 100}
+#: `bot_eval_intermediate` ATTENDU de chaque profil `_long`. x1_long : 30 (passé de 100 à 30
+#: par e07bdfd1, avec 4 workers intermédiaires).
+LONG_PROFILE_BOT_EVAL_INTERMEDIATE = {"x1_long": 30}
 
-#: Fenêtre du score robuste de chaque profil `_long`. Elle DÉPEND de la longueur du run, et pas
-#: par convention : la fenêtre glisse sur les points de mesure, donc `total // freq - window + 1`
-#: est le nombre de positions qu'elle peut occuper. À une seule position, le « meilleur modèle »
-#: est mécaniquement le dernier — le mécanisme tourne sans rien sélectionner. x1_long ramené à
-#: 50 000 épisodes n'a que 5 points, d'où une fenêtre de 3 (3 positions) ; x5_long en a 20 et
-#: garde 5 (16 positions).
-LONG_PROFILE_ROBUST_WINDOW = {"x1_long": 3, "x5_long": 5}
+#: Fenêtre du score robuste de chaque profil `_long`. Elle DÉPEND de la longueur du run : la
+#: fenêtre glisse sur les points de mesure, donc `total // freq - window + 1` est le nombre de
+#: positions. À une seule position le « meilleur modèle » est mécaniquement le dernier. x1_long :
+#: 50 000 épisodes → 5 points, fenêtre de 3 (3 positions).
+LONG_PROFILE_ROBUST_WINDOW = {"x1_long": 3}
 
 
 @pytest.mark.parametrize(
-    ("ref_name", "long_name"), [("x1", "x1_long"), ("x5_new", "x5_long")]
+    ("ref_name", "long_name"), [("x1", "x1_long")]
 )
 def test_long_profile_is_its_reference_recalibrated(ref_name: str, long_name: str) -> None:
     """Un profil `_long` ne diffère de sa référence que par ce qui dépend de la LONGUEUR du run.
@@ -363,9 +344,8 @@ def test_long_profile_is_its_reference_recalibrated(ref_name: str, long_name: st
     Toute autre divergence est une dérive : les deux profils doivent rester comparables, sinon un
     run long ne mesure plus la même chose qu'un run court.
 
-    Deux couples, et c'est la même exigence des deux côtés (T4 JUMEAU) : `x1_long` sur `x1`
-    (2026-08-02) et `x5_long` sur `x5_new` (2026-08-10). Sans le second, la paire x5 dériverait
-    en silence — c'est exactement ce que ce test empêche pour la paire x1.
+    Couple actif : `x1_long` sur `x1` (2026-08-02). Le même verrou empêche toute dérive future
+    si un profil `_long` est ajouté.
     """
     ref, long_ = PROFILES[ref_name], PROFILES[long_name]
     length_dependent = {
@@ -379,9 +359,9 @@ def test_long_profile_is_its_reference_recalibrated(ref_name: str, long_name: st
     assert long_["total_episodes"] == LONG_PROFILE_EPISODES[long_name]
     # Les deux rampes ont des `decay_fraction` DISTINCTES, et c'est délibéré : elles ne servent
     # pas la même chose. Ce sont des FRACTIONS du run, donc les deux longueurs les partagent :
-    # l'entropie s'arrête aux 40 % (80k sur x5_long, 20k sur x1_long) parce qu'on veut que la
-    # politique cesse d'explorer et exploite ; le learning rate descend jusqu'aux 90 % (180k /
-    # 45k) parce que le mettre au plancher plus tôt fige la politique alors qu'il reste du budget.
+    # l'entropie s'arrête aux 40 % (20k sur x1_long) parce qu'on veut que la politique cesse
+    # d'explorer et exploite ; le learning rate descend jusqu'aux 90 % (45k) parce que le mettre
+    # au plancher plus tôt fige la politique alors qu'il reste du budget.
     #
     # 0.9 et non 0.7 depuis le 2026-08-12, MESURÉ sur le run x1_long de 50 000 épisodes
     # (run_20260812-033643) : le plancher atteint à 35 000 épisodes laissait le dernier quart du
@@ -410,19 +390,17 @@ def test_long_profile_is_its_reference_recalibrated(ref_name: str, long_name: st
 
     long_cb, ref_cb = long_["callback_params"], ref["callback_params"]
     assert long_cb["bot_eval_freq"] == 10000, (
-        "Un point de mesure tous les 10 000 épisodes : 20 sur x5_long (200k), 5 sur x1_long (50k) "
-        "— c'est ce dernier compte qui a imposé à x1_long une fenêtre robuste de 3 (verrouillée "
-        "plus bas), et non l'inverse. Descendre à 5000 doublerait le nombre de points, donc le "
-        "coût de l'évaluation intermédiaire : ~2 h 10 au lieu de ~1 h 05 sur x1_long (13 min "
-        "l'unité à 100 ép./bot, commit 42326ed0), sur un run mesuré à ~20 h (4 h 01 pour 10 000 "
-        "épisodes, ROADMAP §1 pt 6, run du 2026-08-10)."
+        "Un point de mesure tous les 10 000 épisodes : 5 sur x1_long (50k) — c'est ce compte "
+        "qui a imposé une fenêtre robuste de 3 (verrouillée plus bas). Descendre à 5000 "
+        "doublerait le nombre de points, donc le coût de l'évaluation intermédiaire : ~2 h 10 "
+        "au lieu de ~1 h 05 (13 min l'unité à 100 ép./bot, commit 42326ed0), sur un run "
+        "mesuré à ~20 h (4 h 01 pour 10 000 épisodes, ROADMAP §1 pt 6, run du 2026-08-10)."
     )
     # `bot_eval_final` est un nombre d'épisodes PAR BOT, et un profil `_long` est un run de
     # MESURE : son win-rate final est le chiffre publié, donc sa précision fait partie du
     # livrable. L'erreur-type d'un win-rate autour de 0,5 vaut 0,5/√n — 5,0 points à 100,
-    # 2,9 à 300, 2,0 à 600. La valeur n'est plus commune aux deux couples depuis le 2026-08-16
-    # (cf. LONG_PROFILE_BOT_EVAL_FINAL) : x1_long est passé à 300 sur un coût CHRONOMÉTRÉ, x5_long
-    # garde 600 faute de mesure. Le détail est dans `bot_eval_final_normal` du JSON, seule source.
+    # 2,9 à 300. x1_long : 300, chronométré (cf. LONG_PROFILE_BOT_EVAL_FINAL). Le détail est
+    # dans `bot_eval_final_normal` du JSON, seule source.
     assert long_cb["bot_eval_final"] == LONG_PROFILE_BOT_EVAL_FINAL[long_name]
     assert ref_cb["bot_eval_final"] == REFERENCE_BOT_EVAL_FINAL[ref_name]
     # Corollaire OBLIGATOIRE de la ligne précédente : le timeout porte sur un TASK, et un task
@@ -483,66 +461,11 @@ def test_long_profile_is_its_reference_recalibrated(ref_name: str, long_name: st
     )
     # L'écarter de la comparaison ne dispense PAS de le vérifier des deux côtés. La valeur attendue
     # vient de la table unique `PROMISES_BEST_MODEL`, verrouillée pour tous les profils par
-    # `test_profile_promise_of_a_best_model_is_pinned` : ni x1 (5 points pour une fenêtre de 5,
-    # donc une seule position et rien à départager) ni x5_new (1000 ép., fenêtre jamais remplie)
-    # ne promettent quoi que ce soit — les deux rendent leur modèle FINAL.
+    # `test_profile_promise_of_a_best_model_is_pinned` : x1 (5 points pour une fenêtre de 5, une
+    # seule position) et x1_debug (run trop court) ne promettent rien — ils rendent leur modèle FINAL.
     assert _resolved_cb(ref_cb, "save_best_robust") is PROMISES_BEST_MODEL[ref_name]
     assert PROMISES_BEST_MODEL[long_name] is True
 
-
-def test_x5_append_resumes_x5_long_where_it_stopped() -> None:
-    """`x5_append` PROLONGE `x5_long` : il reprend ses planchers, il ne relance pas de rampe.
-
-    Décision du 2026-08-10 : la chaîne est `x5_long` (200 000 ép., modèle neuf) puis `x5_append`
-    (30 000 ép. de plus sur CE modèle). Même plateau, mêmes bots, même tâche — donc reprendre
-    au-dessus des planchers que `x5_long` a mis la moitié de son run à atteindre reviendrait à
-    défaire son recuit, dans le régime exact où l'oubli catastrophique se déclenche.
-
-    Auparavant `x5_append` enchaînait sur un run `x1` (transition de curriculum x1 → x5), ce qui
-    justifiait un `learning_rate` réchauffé, une entropie pleine et un reset des stats
-    VecNormalize. Ces trois réglages sont devenus faux le jour où la chaîne a changé, sans que
-    rien ne le signale : c'est précisément ce que ce test rend impossible à refaire.
-    """
-    append, long_ = PROFILES["x5_append"], PROFILES["x5_long"]
-
-    # 1. Le MODÈLE est le même objet : seules les deux rampes changent (elles sont aplaties).
-    ramps = {"learning_rate", "ent_coef"}
-    assert _comparable(append["model_params"], ramps) == _comparable(long_["model_params"], ramps), (
-        "x5_append doit décrire le MÊME réseau que x5_long. `net_arch` n'est d'ailleurs pas "
-        "réappliqué au modèle chargé (train.py:2807-2828) : une divergence y serait un mensonge "
-        "silencieux, et elle fausserait tout de même le choix du device (train.py:2771) ainsi que "
-        "la branche de repli qui recrée un modèle neuf."
-    )
-
-    # 2. Les deux rampes sont PLATES, au plancher atteint par x5_long.
-    lr, ent = append["model_params"]["learning_rate"], append["model_params"]["ent_coef"]
-    assert lr["initial"] == lr["final"] == long_["model_params"]["learning_rate"]["final"]
-    assert ent["start"] == ent["end"] == long_["model_params"]["ent_coef"]["end"]
-
-    # 3. Les stats VecNormalize du checkpoint sont CONSERVÉES. `reset_on_curriculum` les écarte
-    # (train.py:1809-1814) : légitime quand l'échelle du plateau change, destructeur ici, où la
-    # distribution des observations est identique — c'est le décalage muet de train.py:1821-1823.
-    assert append["vec_normalize"]["reset_on_curriculum"] is False
-
-    # 4. Une prolongation sélectionne son meilleur modèle : c'est sa raison d'être. Que ce soit
-    # matériellement POSSIBLE est vérifié pour tous les profils par
-    # `test_profile_can_produce_the_best_model_it_promises`.
-    cb = append["callback_params"]
-    assert _resolved_cb(cb, "save_best_robust") is True
-
-    # 5. Le coût de l'évaluation reste borné par celui de l'entraînement. Une éval intermédiaire
-    # coûte ~13 min à 100 ép./bot (commit 42326ed0), soit ~1,3 min à 10 ; l'entraînement tourne à
-    # 36k ép./h — chiffre de la config, contesté par la mesure du run x1 (cf. le commentaire de
-    # `bot_eval_intermediate` plus haut) ; il est conservé ICI parce que le seuil qu'il produit est
-    # le plus SÉVÈRE des deux, donc jamais laxiste. Le rapport toléré est celui de x1_long, dont
-    # l'évaluation reste sous ~15 % de son entraînement.
-    n_evals = append["total_episodes"] // _resolved_cb(cb, "bot_eval_freq")
-    eval_minutes = n_evals * _resolved_cb(cb, "bot_eval_intermediate") * 0.13
-    train_minutes = append["total_episodes"] / 36_000 * 60
-    assert eval_minutes <= train_minutes, (
-        f"{n_evals} évals × {cb['bot_eval_intermediate']} ép./bot ≈ {eval_minutes:.0f} min "
-        f"d'évaluation pour {train_minutes:.0f} min d'entraînement."
-    )
 
 
 @pytest.mark.parametrize("profile_name", PROFILE_NAMES)
@@ -550,9 +473,8 @@ def test_profile_promise_of_a_best_model_is_pinned(profile_name: str) -> None:
     """Chaque profil déclare-t-il le best model qu'on attend de lui — ni plus, ni moins.
 
     Le test suivant vérifie qu'une promesse est TENABLE, mais il skippe ceux qui ne promettent
-    rien : à lui seul, il laisse passer le retrait d'une promesse. Or un run de mesure sans best
-    model (`x1_selfplay`, 100 000 épisodes) ne rend que son dernier modèle, c'est-à-dire le hasard
-    du dernier point plutôt que le meilleur — sans que rien ne rougisse. D'où cette table.
+    rien : à lui seul, il laisse passer le retrait d'une promesse. Un run sans best model ne rend
+    que son dernier modèle — sans que rien ne rougisse. D'où cette table.
 
     Elle est exhaustive par construction : un profil ajouté au JSON sans y être classé échoue ici.
     """
@@ -579,20 +501,13 @@ def test_profile_can_produce_the_best_model_it_promises(profile_name: str) -> No
     partir. Ici la faute se voit en quelques millisecondes, sur tous les profils qui promettent, sans
     qu'aucun ne soit lancé.
 
-    `x5_new` était dans ce cas le 2026-08-10 : 1000 épisodes, `bot_eval_freq` 250, soit 4
-    évaluations pour une fenêtre de 5. Le profil n'était pas seulement improductif, il était
-    INLANÇABLE — `--training-config x5_new` levait au setup. Il déclare désormais
-    `save_best_robust: false` et n'expose que son modèle FINAL.
-
     Un profil qui ne promet rien est hors sujet ; il est SKIP et non vert, pour que
-    `pytest -rs` montre qui n'est pas couvert plutôt que d'afficher huit verts pour cinq
-    vérifications.
+    `pytest -rs` montre qui n'est pas couvert plutôt que d'afficher des verts sans vérification.
 
     Hors périmètre volontairement : `save_best_min_episodes`, l'autre garde de sauvegarde
     (`training_callbacks.py:2008` et `:2088`). Elle se compare à `eval_marker`, qui est CUMULATIF
-    et amorcé à l'offset de reprise (`train.py:3649-3651`) : sur un profil de prolongation comme
-    `x5_append` le marker démarre à ~200 000, pas à zéro. Le JSON seul ne connaît pas cet offset,
-    donc aucun test lisant ce fichier ne peut trancher — l'invariant appartient à
+    et amorcé à l'offset de reprise (`train.py:3649-3651`) : le JSON seul ne connaît pas cet
+    offset, donc aucun test lisant ce fichier ne peut trancher — l'invariant appartient à
     `setup_callbacks`, qui, lui, l'a sous la main.
     """
     profile = PROFILES[profile_name]

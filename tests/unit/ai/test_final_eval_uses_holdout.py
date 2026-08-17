@@ -57,7 +57,7 @@ def test_final_bot_eval_passes_holdout_pool(monkeypatch: pytest.MonkeyPatch) -> 
     callback._run_final_bot_eval(
         model=object(),
         training_config=training_config,
-        training_config_name="x5_debug",
+        training_config_name="x1_debug",
         rewards_config_name="ArmageddonAgent",
     )
 

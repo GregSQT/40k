@@ -38,7 +38,7 @@ TEMPLATE = os.path.join(
 def _make_env() -> W40KEngine:
     return W40KEngine(
         rewards_config="ArmageddonAgent",
-        training_config_name="x5_new",
+        training_config_name="x1",
         controlled_agent="ArmageddonAgent",
         scenario_file=TEMPLATE,
         unit_registry=UnitRegistry(),

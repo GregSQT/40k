@@ -46,7 +46,7 @@ def _build_env(scenario_path: str):
 
     env = W40KEngine(
         rewards_config="ArmageddonAgent",
-        training_config_name="x5_new",
+        training_config_name="x1",
         controlled_agent="ArmageddonAgent",
         scenario_file=scenario_path,
         unit_registry=UnitRegistry(),

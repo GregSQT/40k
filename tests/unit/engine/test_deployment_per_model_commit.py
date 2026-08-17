@@ -56,15 +56,12 @@ def _load(seed: int = 0):
     from engine.w40k_core import W40KEngine
 
     eng = W40KEngine(
-        rewards_config="ArmageddonAgent", training_config_name="x5_debug", controlled_agent="ArmageddonAgent",
+        rewards_config="ArmageddonAgent", training_config_name="x1_debug", controlled_agent="ArmageddonAgent",
         scenario_file=str(SCENARIO), unit_registry=UnitRegistry(), quiet=True,
         gym_training_mode=True,
     )
-    # Le training_config x5_debug programme 0 % de déploiement actif (deployment_mode_schedule,
-    # active_ratio 0.0→0.0) : sans neutralisation le scénario est rejoué en 'fixed' et la phase
-    # deployment n'existe jamais. Ce test cible le COMMIT d'un déploiement ACTIF (deploy_unit) —
-    # on désactive donc le scheduler par-épisode pour que le deployment_type='active' du scénario
-    # soit respecté.
+    # Le scheduler de déploiement actif est neutralisé ci-dessous : ce test cible le COMMIT d'un
+    # déploiement ACTIF (deploy_unit) et force deployment_type='active' du scénario directement.
     assert eng.training_config is not None
     sched = eng.training_config.get("deployment_mode_schedule")
     if isinstance(sched, dict):
