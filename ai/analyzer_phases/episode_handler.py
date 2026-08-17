@@ -89,6 +89,13 @@ def handle_episode_start(state: "AnalyzerState", config: "AnalyzerConfig", line:
     state.unit_deaths = []
     state.unit_kill_context = {}
     state.phase_activation_seen = {}
+    # Réinitialisations critiques pour l'isolation inter-épisodes :
+    # shoot_last_activator est lu AVANT le bloc turn-change dans la boucle principale (ligne ~1173),
+    # donc une remise à zéro tardive (via turn-change) ne suffit pas : il faut la réinitialiser ici.
+    state.shoot_last_activator = None
+    # last_turn=0 force le bloc turn-change à se déclencher pour le premier tour de chaque épisode
+    # (remise à zéro de units_fled, units_advanced, last_phase, etc.).
+    state.last_turn = 0
     state.episode_victory_points = {PLAYER_ONE_ID: 0, PLAYER_TWO_ID: 0}
     state.objective_control_seen = False
     state.objectives_declared = False
