@@ -551,7 +551,8 @@ mesure, et c'est assumé (§0.14).
    ✅ **`AttritionBot.wants_charge` corrigé le 2026-08-16** : l'appel manquant à `super()` supprimait le test des capacités communes (`late_game`, `preservation`) dans la décision de charge ; 3 tests de verrouillage ajoutés (F1/F2/F4) dans `test_bot_capabilities_neutral.py`.
    ✅ **`scorer` réglé le 2026-08-17** (nouveau modèle de référence `NEW_BOTS_12345_robust_0.8692`) :
    `w_contest` 3.5 → 2.0 (T5 1,47 → 1,65), `w_crowd` balayé 1.5/2.5/3.0/4.0/5.0/6.0/7.0 (60 ep/bot, dérive=0 sur les 5 contrôles) → pic mesuré à **6.0** (T5=1,90), rechute à 7.0 (1,85). `w_crowd` élevé évite le stacking et réduit les pertes (0,40 → 0,33). Fix moteur inclus : `no_gym_allocation_model` dans `shared_utils.py` + `bot_zone_direct.py` (modèle pré-P3-4 ne peut pas traiter les décisions async).
-   **Restent** : l'étape 7 (correspondance puis suppression des cinq anciens), l'étape 8 rejouée après réglage.
+   ✅ **Étape 7 livrée le 2026-08-17** : les 5 anciens bots (control/value_trade/adaptive/greedy/defensive) supprimés de `bot_training.ratios` et `bot_eval_weights` des 9 profils encore sur l'ancien panel. `tactical` conservé uniquement en holdout (weight=0.0 dans les profils non-panel, absent de training). Nouveaux ratios : 6 × 0.14 + random 0.16, alignés sur `x1_long_panel`.
+   **Reste** : l'étape 8 (rejouer la ligne de base du panel après réglage scorer).
    ⚠️ Les chiffres des §8/§9 du doc de chantier sont **à rejouer** : échantillons insuffisants et
    une erreur d'arithmétique sur le `combined` (§11.1).
    ⚠️ **Ce point CONDITIONNE la valeur du point 7, il ne s'y ajoute pas.** Le panel actuel ne rend
