@@ -4061,7 +4061,15 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
             f"(got {model_gating_min_vs_control})"
         )
     if model_gating_min_vs_control > 0.0:
-        bot_eval_weights_raw = callback_params.get("bot_eval_weights", {})
+        bot_eval_weights_raw = callback_params.get("bot_eval_weights")
+        if bot_eval_weights_raw is None:
+            raise ValueError(
+                f"callback_params.model_gating_min_vs_control est arme "
+                f"({model_gating_min_vs_control}) mais la cle 'bot_eval_weights' est "
+                "absente de callback_params. Ajouter la cle avec 'control' parmi les "
+                "poids d'evaluation, ou mettre model_gating_min_vs_control: 0.0 pour "
+                "le desarmer."
+            )
         if "control" not in bot_eval_weights_raw:
             raise ValueError(
                 f"callback_params.model_gating_min_vs_control est arme "
