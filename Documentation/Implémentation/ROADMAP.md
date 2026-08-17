@@ -997,14 +997,25 @@ Prêts à démarrer sans décision produit :
   ⚠️ **Les autres familles ont une piste, pas une cause** : ne rien corriger avant de l'avoir
   établie — c'est l'erreur que les 317 faux positifs, puis ces 24, viennent de sanctionner deux
   fois. Sur cinq familles instruites à ce jour, **quatre étaient des défauts de mesure**.
-  ⚠️ **Piste ouverte, non prouvée, pour les deux familles de move** : le pool de destinations
+  ✅ **Root cause prouvée le 2026-08-17 pour les deux familles de move (collisions 03.01 +
+  move PARTI d'engagement 09.05)** : `update_units_cache_position` écrasait `occupied_hexes`
+  avec le seul footprint de la **nouvelle ancre** quand l'ancre d'une escouade multi-figurines
+  mourrait au combat. Les figurines NON-ANCRES disparaissaient alors des contrôles spatiaux :
+  `build_occupied_positions_set` ne les bloquait plus (→ collision possible) et
+  `_squad_is_in_enemy_er` ne les voyait plus (→ EZ détectée en défaut → normal move au lieu de
+  fall back). Fix déjà en place depuis le 2026-08-12
+  (`engine/phase_handlers/shared_utils.py:1707`, chantier empreinte d'escouade).
+  Verrouillé par `tests/unit/engine/test_conformite_03_01_09_05.py` (6 tests, mutation ROUGE ×4).
+  La piste `_check_ez = not _thru_ez` ne décrit qu'un contrôle de TRAVERSÉE (pas de destination),
+  non pertinent pour ces deux familles — écartée.
+  ~~⚠️ **Piste ouverte, non prouvée, pour les deux familles de move** : le pool de destinations
   exclut bien la zone d'engagement sur les deux chemins single-hex de
   [`engine/phase_handlers/movement_handlers.py`](file:///home/greg/40k/engine/phase_handlers/movement_handlers.py),
   mais le commentaire y affirme que la destination l'exclut « quels que soient les toggles » alors
   que la ligne suivante écrit `_check_ez = not _thru_ez`, et le run tourne en `move.thru_ez=True`.
   Par ailleurs un déplacement d'ESCOUADE n'est pas validé par ce pool mais par
   `movement_preview_move_plan` : les deux voies sont à départager **en rejouant le cas dans le
-  moteur**, pas en relisant `step.log`.
+  moteur**, pas en relisant `step.log`.~~
   ✅ **La chaîne des tokens créés le 2026-08-11 est vérifiée sur ce run** : `[MELTA:X]` compte
   **532** usages (Multi-Melta, déclaré « NOT USED » le matin même) et `[PRECISION]` **7**. Les deux
   traversent bien moteur → `step.log` → analyzer en conditions réelles.
