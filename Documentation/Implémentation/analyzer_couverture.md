@@ -55,33 +55,29 @@
 > tranche donc que les cas où l'on n'a rien observé. Le rapport ne peut plus contredire sa propre
 > mesure.
 >
-> ✅ **LIVRÉ le 2026-08-17 (moitié SUMMARY).** La ligne 1.1 du SUMMARY porte désormais le signal
-> de couverture : `⚠️ 1.1 Erreurs en phase de move : 0 (⚠️ N règles jamais exercées)` quand N > 0,
-> `❌` si des erreurs existent. L'icône n'est plus forcément `✅` quand le contrôle n'a rien regardé.
-> Verrous : `test_summary_signals_never_exercised_rules` (nouveau, rouge→vert) +
-> `test_the_violations_reach_the_MOVE_error_total_of_the_summary` (adapté).
+> ✅ **LIVRÉ le 2026-08-17 (SUMMARY §1.1 + corpus §1.2–§2.8).** La ligne 1.1 du SUMMARY porte
+> désormais le signal de couverture : `⚠️ 1.1 Erreurs en phase de move : 0 (⚠️ N règles jamais
+> exercées)` quand N > 0, `❌` si des erreurs existent. L'icône n'est plus forcément `✅` quand le
+> contrôle n'a rien regardé.
 >
-> **Deuxième dette évaluée et FERMÉE sans code.** Le corpus et `error_totals` semblent énumérer
-> deux fois les mêmes compteurs. Mais la déduplication affaiblirait l'architecture : si
-> `error_totals["move"]` devenait `_section_error_sum(stats, "1.1")`, l'invariant du test
-> `test_the_per_rule_sum_matches_the_section_total` deviendrait tautologique (`x == x`). Le guard
-> qui force tout nouveau compteur à entrer dans le corpus disparaîtrait — et c'est exactement ce
-> guard qui a détecté V16. La duplication est voulue : `error_totals` est la source de vérité,
-> `_section_error_sum` en est le vérificateur. Liés par un test, pas par construction, c'est la
-> bonne architecture.
+> `SECTION_TO_BUCKET` étendu à 7 sections : §1.1 (move), §1.2 (shooting), §1.3 (charge), §1.4
+> (fight), §2.1 (dead_units), §2.3 (damage), §2.8 (state_resync). 44 nouvelles entrées corpus. Un
+> nouveau chemin `"#"` dans `_counter_value` couvre les scalaires sans split joueur (`state_resync`).
+> La somme par règle DOIT égaler le bucket correspondant d'`error_totals` pour chaque section
+> couverte — sinon le rapport imprime l'écart.
 >
-> Un invariant interdit au corpus de devenir une
-> seconde somme divergente : la somme des erreurs par règle DOIT égaler le bucket `move`
-> d'`error_totals`, sans quoi le rapport imprime l'écart (verrou :
-> `tests/unit/ai/test_analyzer_rules_corpus.py`). Mesuré sur le run du 2026-08-10 : 116 mouvements
-> normaux jugés, 193 formations jugées, 4 fall-backs, et les deux capacités de projet correctement
-> classées hors roster.
+> **Deuxième dette évaluée et FERMÉE sans code.** La déduplication corpus/`error_totals`
+> affaiblirait l'architecture : si `error_totals["move"]` devenait `_section_error_sum(stats, "1.1")`,
+> l'invariant du test `test_the_per_rule_sum_matches_the_section_total` deviendrait tautologique.
+> La duplication est voulue : `error_totals` est la source de vérité, `_section_error_sum` en est
+> le vérificateur. Liés par un test, pas par construction.
 >
-> Pour **tout le reste** — §1.2 à §2.8, et les 150 lignes de PDF non encore décrites — une ligne
-> de ces matrices reste une **affirmation à re-vérifier**, jamais un fait acquis. Ce qui EST prouvé dans ce document : les §5 (verts
-> vacants), §8 et les tableaux de verrous — ils citent des greps, des mesures et des tests rouges
-> reproductibles. La règle de lecture est donc : **une matrice se vérifie avant d'être citée ; un
-> verrou se cite.**
+> Verrous : `test_summary_signals_never_exercised_rules` · `test_section_12_corpus_sum_matches_bucket`
+> (×6 sections) · `test_section_12_gap_detected` (×6) — 24 tests verts.
+>
+> Sections non couvrables : §1.5–§1.8 (listes dynamiques ou compteurs dérivés), §2.2 (dérivé de
+> §1.2), §2.4–§2.7 (dicts dynamiques). Ces sections n'ont pas de bucket fixe dans `error_totals`
+> dont la somme serait vérifiable sans refonte de l'infrastructure.
 
 ## 0. Méthode et sources
 
