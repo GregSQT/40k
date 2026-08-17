@@ -83,16 +83,23 @@ def new_rule_usage_counters() -> Dict[str, Dict[int, int]]:
 def _counter_value(stats: Dict[str, Any], path: List[str]) -> int:
     """Somme P1 + P2 d'un compteur désigné par son chemin dans `stats`.
 
-    Deux formes d'imbrication cohabitent dans `stats` : la forme courante finit sur
-    ``{1: n, 2: n}``, et une poignée de compteurs mettent le JOUEUR EN PREMIER
-    (``reactive_move_stats[1]['abnormal']``). Le corpus écrit alors ``"*"`` à la place du joueur.
-    Ce n'est pas un cas particulier mais la MÊME notion — un chemin porte un emplacement joueur,
-    implicite en queue quand il n'est pas écrit : une seule traversée les sert donc tous les deux.
+    Trois formes d'imbrication cohabitent dans `stats` :
+    - forme courante ``{1: n, 2: n}`` en fin de chemin : le ``"*"`` est ajouté implicitement ;
+    - joueur EN PREMIER (``reactive_move_stats[1]['abnormal']``) : écrire ``"*"`` à la position
+      du joueur — même notion, même traversée ;
+    - scalaire sans split joueur (``state_resync['dead_missed']``) : écrire ``"#"`` en fin de
+      chemin. La valeur est traversée sans boucle joueur et rendue telle quelle.
     """
+    if "#" in path:
+        node: Any = stats
+        for key in path:
+            if key != "#":
+                node = require_key(node, key)
+        return int(node)
     slots = path if "*" in path else [*path, "*"]
     total = 0
     for player in (1, 2):
-        node: Any = stats
+        node = stats
         for key in slots:
             node = require_key(node, player if key == "*" else key)
         total += int(node)
@@ -194,7 +201,15 @@ def _section_error_sum(stats: Dict[str, Any], section: str) -> int:
 
 
 #: Sections du rapport → bucket d'`error_totals` qui doit égaler leur somme par règle.
-SECTION_TO_BUCKET = {"1.1": "move"}
+SECTION_TO_BUCKET = {
+    "1.1": "move",
+    "1.2": "shooting",
+    "1.3": "charge",
+    "1.4": "fight",
+    "2.1": "dead_units",
+    "2.3": "damage",
+    "2.8": "state_resync",
+}
 
 
 def coverage_gaps(
