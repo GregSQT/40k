@@ -77,7 +77,8 @@ COUNTERS = {
     ],
     'damage': [
         ('damage_missing_unit_hp',),
-        ('damage_exceeds_hp',),
+        # `damage_exceeds_hp` supprimé le 2026-08-17 (irréalisable par construction : moteur
+        # plafonne dmg_dealt = min(dmg, hp_before) avant de journaliser).
     ],
     'dead_units': [
         ('dead_unit_moving',),
@@ -154,6 +155,18 @@ def test_chaque_compteur_est_reellement_somme(bucket, path, _empty_stats):
         f"{'.'.join(path)} n'entre pas (ou pas entièrement) dans le total '{bucket}' : "
         f"obtenu {totals[bucket]}, attendu 2"
     )
+
+
+def test_bucket_damage_ne_contient_que_damage_missing_unit_hp(_empty_stats):
+    """Le compteur `damage_exceeds_hp` est supprimé : le bucket 'damage' n'a plus qu'un seul terme."""
+    stats = _fresh_stats(_empty_stats)
+    assert 'damage_exceeds_hp' not in stats, (
+        "damage_exceeds_hp n'aurait pas dû être initialisé — compteur supprimé"
+    )
+    stats['damage_missing_unit_hp'][1] = 3
+    stats['damage_missing_unit_hp'][2] = 5
+    totals = an.error_totals(stats)
+    assert totals['damage'] == 8
 
 
 def test_les_compteurs_a_deux_niveaux_sont_sommes_aussi(_empty_stats):

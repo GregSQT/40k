@@ -1521,7 +1521,7 @@ def error_totals(stats: Dict[str, Any]) -> Dict[str, int]:
         ),
         # §2.3 — même motif que les buckets ci-dessus : cette somme vivait elle aussi en deux
         # exemplaires. Ils ne divergeaient pas encore ; c'est la structure qui les y menait.
-        'damage': _pair('damage_missing_unit_hp') + _pair('damage_exceeds_hp'),
+        'damage': _pair('damage_missing_unit_hp'),
         # ── §1.5 à §2.7 : les buckets qui manquaient au TOTAL alors que le SUMMARY les
         # affichait en ❌. Sans eux, un run pouvait imprimer « ❌ 1.6 Double-activation par
         # phase : 1 » PUIS « ✅ 0 erreur détectée » — deux verdicts contradictoires dans le même
@@ -1859,7 +1859,6 @@ def parse_step_log(filepath: str) -> Dict:
             'charge': {'total': 0, 'mismatch': 0, 'missing': 0, 'anchor_absorbed': 0}
         },
         'damage_missing_unit_hp': {1: 0, 2: 0},
-        'damage_exceeds_hp': {1: 0, 2: 0},
         'unit_revived': {1: 0, 2: 0},
         'shoot_invalid': {
             # 'no_los' RETIRE (2026-07-16) : cf. shoot_handler.py — LoS ancre-a-ancre contraire
@@ -1972,7 +1971,6 @@ def parse_step_log(filepath: str) -> Dict:
             'advance_after_shoot': {1: None, 2: None},
             'advance_twice_in_shoot_phase': {1: None, 2: None},
             'damage_missing_unit_hp': {1: None, 2: None},
-            'damage_exceeds_hp': {1: None, 2: None},
             'unit_revived': {1: None, 2: None},
             'fled_action': {1: None, 2: None},
             'shoot_invalid': {
@@ -3873,9 +3871,6 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     dmg_missing_p1 = stats['damage_missing_unit_hp'][1]
     dmg_missing_p2 = stats['damage_missing_unit_hp'][2]
     log_print(f"Missing unit_hp on damage:   {dmg_missing_p1:6d}           {dmg_missing_p2:6d}")
-    dmg_over_p1 = stats['damage_exceeds_hp'][1]
-    dmg_over_p2 = stats['damage_exceeds_hp'][2]
-    log_print(f"Dmg > HP_CUR (overkill):     {dmg_over_p1:6d}           {dmg_over_p2:6d}")
 
     # EPISODES STATISTICS
     active_debug_section = "2.4"
