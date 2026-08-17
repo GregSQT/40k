@@ -84,7 +84,7 @@
 | `config/weapon_rules.json` | 23 règles d'armes |
 | `config/rules_corpus.json` | 6 règles de §1.1 décrites en DONNÉE (applicabilité, contrôles, vérifiabilité) — lu par `ai/analyzer_rules.py` |
 | `config/unit_rules.json` | 35 règles spéciales d'unité |
-| `ai/analyzer.py` + `analyzer_core.py` + `analyzer_config.py` + `analyzer_perfig.py` + `analyzer_state.py` + `analyzer_wound.py` + `analyzer_hit.py` + **`analyzer_rules.py`** + `analyzer_phases/*` — **10 298 l. au total, 8 fichiers + 5 handlers** (mesuré le 2026-08-10) | 71 contrôles vivants, 1 mort, 7 supprimés documentés |
+| `ai/analyzer.py` + `analyzer_core.py` + `analyzer_config.py` + `analyzer_perfig.py` + `analyzer_state.py` + `analyzer_wound.py` + `analyzer_hit.py` + **`analyzer_rules.py`** + `analyzer_phases/*` — **10 298 l. au total, 8 fichiers + 5 handlers** (mesuré le 2026-08-10) | 70 contrôles vivants, 1 mort, 8 supprimés documentés |
 | `ai/step_logger.py` (1186 l.), `engine/w40k_core.py` (`_STEP_LOG_TYPE_MAP`, `_build_step_log_details`, `_build_shot_details`, `_models_segment_for_unit`, `_run_rules_for_step_log`, `_log_effects_snapshot_if_changed`), `engine/action_log_utils.py` | format réel de `step.log`, champ par champ, type d'action par type d'action |
 
 ### Légende des STATUTS
@@ -285,7 +285,7 @@ Oath : le TOKEN `[OATH OF MOMENT]` gate l'application, la CLÉ `oath_wound` en f
 
 ---
 
-## 2. Inventaire des contrôles analyzer (71 vivants)
+## 2. Inventaire des contrôles analyzer (70 vivants)
 
 > **PLUS AUCUN NUMÉRO DE LIGNE, et c'est délibéré (2026-08-10).** Ce document en portait 147 ;
 > ils avaient été re-dérivés par grep le matin même, et un contrôle automatique le soir en a
@@ -519,10 +519,10 @@ Tous appliquent la même exception 05 (« excess attacks lost » de la même act
 | 54-56 | `position_log_mismatch` move / advance / charge (`move_start_status`, per-figurine, avec catégorie informative `anchor_absorbed`) | prédicat `analyzer_perfig.py` ; compteurs `move_handler.py`, `shoot_handler.py`, `charge_handler.py` |
 | 57 | `unit_position_collisions` (2 unités vivantes sur la même ANCRE, après mouvement le même tour) | 4 sites : `move_handler.py` ; `shoot_handler.py` ; `charge_handler.py` |
 | 58 | `damage_missing_unit_hp` | `analyzer.py` |
-| 59 | `damage_exceeds_hp` | affiché `analyzer.py` — **jamais incrémenté** (aucun `+= 1`, grep du 2026-08-10) — **IRRÉALISABLE par construction** (voir investigation du 2026-08-17 ci-dessous) |
+| ~~59~~ | ~~`damage_exceeds_hp`~~ | **SUPPRIMÉ le 2026-08-17** — irréalisable par construction : `shared_utils` plafonne `dmg_dealt = min(dmg, hp_before)` avant de journaliser, donc `Dmg:X > HP_figurine` ne peut jamais apparaître dans le journal. La dérive de reconstruction est déjà capturée par §2.8 (`state_resync`). Bucket `error_totals['damage']` réduit à `damage_missing_unit_hp` seul. Verrou : `test_bucket_damage_ne_contient_que_damage_missing_unit_hp` (`test_analyzer_error_totals.py`) |
 
-**Investigation `damage_exceeds_hp` (2026-08-17).** Ce compteur est affiché et sommé dans le
-bucket `damage` de `error_totals`, mais **aucun site ne l'incrémente** (grep `+= 1` sur tout
+**Investigation `damage_exceeds_hp` (2026-08-17, conduit à la suppression du 2026-08-17).** Ce compteur était affiché et sommé dans le
+bucket `damage` de `error_totals`, mais **aucun site ne l'incrémentait** (grep `+= 1` sur tout
 `ai/` : 0 hit). L'investigation du 2026-08-17 établit que cela n'est pas un oubli d'implémentation
 mais une impossibilité structurelle :
 
@@ -536,10 +536,7 @@ mais une impossibilité structurelle :
   RECONSTRUIT de la figurine front. Si la reconstruction a dérivé, `damage` pourrait y paraître
   supérieur — mais ce cas est déjà capturé par §2.8 (`state_resync`).
 
-**Conclusion : le compteur est irréalisable pour son intention originale.** Son équivalent « dérive
-de reconstruction » est déjà couvert par §2.8. **Action recommandée : supprimer le compteur et
-`damage_missing_unit_hp` de `error_totals['damage']` avec un test de non-régression.** Cette
-décision est à valider par l'utilisateur avant exécution (arrêt T3 du 2026-08-17).
+**Compteur supprimé le 2026-08-17** : init `stats`, `error_totals['damage']`, `first_error_lines` et affichage §2.3 retirés de `ai/analyzer.py`. Contrôles vivants réduits à 70 (était 71).
 
 **Le modèle de dégâts a été INVERSÉ le 2026-08-10** (`586c0553`, après un aller-retour). La version
 précédente de ce document décrivait `_apply_damage_and_handle_death` comme perdant l'excès de
