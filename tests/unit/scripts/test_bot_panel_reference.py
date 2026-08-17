@@ -68,7 +68,7 @@ def test_la_ligne_porte_les_quatre_grandeurs(module):
 
 
 def test_la_condition_experimentale_n_est_pas_un_siege_fixe(module):
-    """`x1_panel` tire le siège au sort : annoncer « bot=P2 » décrivait un autre protocole."""
+    """`x1_long` tire le siège au sort : annoncer « bot=P2 » décrivait un autre protocole."""
     ligne = module.PANEL_REFERENCE_LINE
     assert "siège aléatoire" in ligne
     assert "bot=P2" not in ligne

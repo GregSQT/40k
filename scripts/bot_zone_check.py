@@ -8,11 +8,11 @@ Sortie: pour chaque style du panel refondu, zones contrôlées (Ctrl=2) et VP cu
         du bot à chaque tour, moyennés sur tous les épisodes.
 
 Pré-requis: lancer
-    python3 ai/train.py --agent ArmageddonAgent --training-config x1_panel
+    python3 ai/train.py --agent ArmageddonAgent --training-config x1_long
         --test-only --test-episodes 20 --resolution 1
 Le step_logger activé force le mode sérial, ce qui écrit Opponent: <bot> par épisode.
 
-Hypothèse: le bot joue toujours P2 (Ctrl=2) dans les scénarios holdout x1_panel.
+Hypothèse: le bot joue toujours P2 (Ctrl=2) dans les scénarios holdout x1_long.
 Vérifiable si nécessaire en comptant quel joueur a le VP le plus bas en moyenne.
 """
 from __future__ import annotations

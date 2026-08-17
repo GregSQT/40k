@@ -69,6 +69,22 @@ REFERENCE_MD5 = "e78a543e0324a932bf07acb267632d0b"
 #: dans les tests sans toucher au nom qui identifie le checkpoint dans les logs et justifications.
 _DEFAULT_MODEL = os.path.join(_PROJECT_ROOT, "ai", "models", "ArmageddonAgent", REFERENCE_MODEL)
 
+#: Config d'entraînement sur laquelle TOUTES les mesures du §12 sont faites.
+_TRAINING_CONFIG = "x1_long"
+
+
+def _prepare_model_input(model_obs: Any, model_known: set) -> Any:
+    """Adapte l'observation brute au format attendu par model.predict."""
+    if isinstance(model_obs, dict):
+        if not model_known.issubset(model_obs.keys()):
+            raise RuntimeError(f"Clés d'observation absentes du step : {model_known - model_obs.keys()!r}")
+        return {k: v for k, v in model_obs.items() if k in model_known}
+    import numpy as np
+    arr = np.asarray(model_obs, dtype=np.float32)
+    if arr.ndim == 1:
+        arr = arr.reshape(1, -1)
+    return arr
+
 
 def _md5(path: str) -> str:
     """Empreinte MD5 du fichier, en lecture par blocs (fichiers > 1 Mio)."""
@@ -398,6 +414,7 @@ def _run_meta(
     bot_randomness: Dict[str, Any],
     doctrine_weights: Dict[str, Dict[str, float]],
     hold_bonus: float,
+    training_config: str,
     label: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Ce qui distingue DEUX relevés l'un de l'autre — sans ça, un avant et un après §12.7
@@ -413,7 +430,7 @@ def _run_meta(
     """
     meta: Dict[str, Any] = {
         "agent": "ArmageddonAgent",
-        "training_config": "x1_panel",
+        "training_config": training_config,
         **model_fingerprint,
         "scenario_file": scenario_file,
         "episodes_per_bot": episodes_per_bot,
@@ -471,7 +488,8 @@ def main() -> None:
         from config_loader import get_config_loader
         from ai.unit_registry import UnitRegistry
         from ai.bot_registry import build_bot
-        from ai.bot_doctrines import load_doctrine_weights, load_hold_bonus
+        from ai.bot_doctrines import load_doctrine_weights, load_hold_bonus, DOCTRINE_BOTS
+        from ai.evaluation_bots import load_movement_weights
         from ai.env_wrappers import BotControlledEnv
         from ai.training_utils import get_scenario_list_for_phase
         from ai.bot_evaluation import (
@@ -482,7 +500,7 @@ def main() -> None:
         from shared.data_validation import require_key
 
         config = get_config_loader()
-        tc = config.load_agent_training_config("ArmageddonAgent", "x1_panel")
+        tc = config.load_agent_training_config("ArmageddonAgent", _TRAINING_CONFIG)
 
         vec_norm_enabled = bool(tc.get("vec_normalize", {}).get("enabled", False))
         vec_eval_enabled = bool(tc.get("vec_normalize_eval", {}).get("enabled", False))
@@ -493,13 +511,14 @@ def main() -> None:
         model_fingerprint = _model_fingerprint(model_path)  # avant le chargement : cf. docstring
         model = MaskablePPO.load(model_path, device="cpu")
         normalize = _build_eval_obs_normalizer_for_worker(model, model_path, vec_norm_enabled, vec_eval_enabled)
+        model_known = set(model.observation_space.spaces.keys())
 
         # Le panel se lit par la MÊME fonction que l'évaluation réelle, jamais à la main : elle
         # exige les deux clés (un panel vide ferait tourner la boucle zéro fois et publier
         # `"episodes": []` en sortant 0), coerce les valeurs en float, et vérifie que les poids
         # somment à 1.0. Relire `cb` ici privait CE script — et lui seul — de ces trois contrôles,
         # alors qu'il compare ses moyennes à celles produites par `ai/bot_evaluation.py`.
-        bot_eval_params = _load_bot_eval_params(config, "ArmageddonAgent", "x1_panel")
+        bot_eval_params = _load_bot_eval_params(config, "ArmageddonAgent", _TRAINING_CONFIG)
         bot_weights: dict = bot_eval_params["weights"]
         bot_randomness: dict = bot_eval_params["randomness"]
         # `require_key` : `agent_seat_mode` décide de quel siège occupe le bot, et le défaut
@@ -507,13 +526,13 @@ def main() -> None:
         # relevé qui documente un protocole que personne n'a écrit.
         agent_seat_mode: str = require_key(tc, "agent_seat_mode")
         if "seed" not in tc:
-            raise RuntimeError("Clé 'seed' absente de la config d'entraînement ArmageddonAgent/x1_panel — run non reproductible")
+            raise RuntimeError(f"Clé 'seed' absente de la config d'entraînement ArmageddonAgent/{_TRAINING_CONFIG} — run non reproductible")
         base_seed: int = int(tc["seed"])
         agent_seat_seed: Optional[int] = tc.get("agent_seat_seed", base_seed)
 
-        scenarios = get_scenario_list_for_phase(config, "ArmageddonAgent", "x1_panel", scenario_type="holdout")
+        scenarios = get_scenario_list_for_phase(config, "ArmageddonAgent", _TRAINING_CONFIG, scenario_type="holdout")
         if not scenarios:
-            raise RuntimeError("Aucun scénario holdout trouvé pour ArmageddonAgent/x1_panel — vérifier config/agents/ArmageddonAgent/scenarios/")
+            raise RuntimeError(f"Aucun scénario holdout trouvé pour ArmageddonAgent/{_TRAINING_CONFIG} — vérifier config/agents/ArmageddonAgent/scenarios/")
         scenario_file = scenarios[0]
 
         for bot_name in bot_weights:
@@ -523,7 +542,7 @@ def main() -> None:
 
             base_env = W40KEngine(
                 rewards_config="ArmageddonAgent",
-                training_config_name="x1_panel",
+                training_config_name=_TRAINING_CONFIG,
                 controlled_agent="ArmageddonAgent",
                 active_agents=None,
                 scenario_file=scenario_file,
@@ -549,7 +568,7 @@ def main() -> None:
                 # Désactive le chemin P3-4 (allocation async) : le modèle de référence
                 # est pré-P3-4 et ne sait pas traiter une décision `allocation_model`.
                 env.engine.game_state["no_gym_allocation_model"] = True
-                # `require_key` : `agent_seat_mode` vaut « random » sur x1_panel, donc le bot est
+                # `require_key` : `agent_seat_mode` vaut « random » sur x1_long, donc le bot est
                 # P1 dans la moitié des épisodes. Le défaut `2` comptait alors les zones de
                 # l'AGENT et les publiait sous le nom du bot, sans rien signaler. Même lecture
                 # que `scripts/bot_ranking.py:132-133` sur `winner`/`controlled_player`.
@@ -568,15 +587,7 @@ def main() -> None:
                     action_masks = np.asarray(get_action_masks(env), dtype=bool)
                     if action_masks.ndim == 1:
                         action_masks = action_masks.reshape(1, -1)
-                    if isinstance(model_obs, dict):
-                        # Filtre aux clés connues du modèle : un merge post-entraînement peut
-                        # avoir ajouté des clés d'obs que ce checkpoint n'a jamais vues.
-                        model_known = set(model.observation_space.spaces.keys())
-                        model_input = {k: v for k, v in model_obs.items() if k in model_known}
-                    else:
-                        model_input = np.asarray(model_obs, dtype=np.float32)
-                        if model_input.ndim == 1:
-                            model_input = model_input.reshape(1, -1)
+                    model_input = _prepare_model_input(model_obs, model_known)
                     action, _ = model.predict(model_input, action_masks=action_masks, deterministic=True)
                     action_scalar = int(np.asarray(action).flat[0])
                     obs, _, terminated, truncated, _ = env.step(action_scalar)
@@ -694,15 +705,18 @@ def main() -> None:
                 model_fingerprint, scenario_file, args.episodes, len(bot_weights),
                 base_seed, agent_seat_mode, agent_seat_seed, bot_randomness,
                 {
-                    bot: dict(
-                        zip(
+                    bot: (
+                        dict(zip(
                             ("w_objective", "w_enemy", "w_fire", "w_risk", "w_contest", "w_crowd"),
                             load_doctrine_weights(bot),
-                        )
+                        ))
+                        if bot in DOCTRINE_BOTS
+                        else dict(zip(("w_objective", "w_enemy"), load_movement_weights(bot)))
                     )
                     for bot in bot_weights
                 },
                 load_hold_bonus(),
+                _TRAINING_CONFIG,
                 label=args.label,
             )
             _write_json_out(json_handle, run_meta, episode_records)

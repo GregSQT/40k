@@ -20,6 +20,9 @@ from pathlib import Path
 
 import pytest
 
+from ai.bot_doctrines import DOCTRINE_BOTS, load_doctrine_weights
+from ai.evaluation_bots import load_movement_weights
+from shared.data_validation import ConfigurationError
 from tests._chargeur_script import charger_script
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -98,7 +101,7 @@ def test_json_out_relit_les_episodes_un_par_un(script, tmp_path, fingerprint):
     out.parent.mkdir()
     meta = script._run_meta(
         fingerprint, "holdout_1.json", 1, 2, 42, "p1", 42, {"bot_a": 0.1, "bot_b": 0.2},
-        {"bot_a": {"w_objective": 1.0}, "bot_b": {"w_objective": 0.5}}, 3.0, "REF",
+        {"bot_a": {"w_objective": 1.0}, "bot_b": {"w_objective": 0.5}}, 3.0, "x1_long", "REF",
     )
 
     with script.json_out_draft(str(out)) as handle:
@@ -130,7 +133,7 @@ def test_le_releve_dit_ce_qui_distingue_deux_runs(script, fingerprint):
     # d'épisode ne suffit pas à reconstruire la doctrine du bot.
     meta = script._run_meta(
         fingerprint, "holdout_1.json", 20, 6, 42, "alternate", 7, {"bot_zone": 0.25},
-        {"bot_zone": {"w_crowd": 4.0}}, 3.0, "",
+        {"bot_zone": {"w_crowd": 4.0}}, 3.0, "x1_long", "",
     )
 
     assert meta["base_seed"] == 42
@@ -139,9 +142,23 @@ def test_le_releve_dit_ce_qui_distingue_deux_runs(script, fingerprint):
     assert meta["bot_randomness"] == {"bot_zone": 0.25}
     assert meta["episodes_per_bot"] == 20
     assert meta["episodes_total"] == 120
+    assert meta["training_config"] == "x1_long"
     # le chemin du modèle est constant d'un run à l'autre : ce qui l'identifie, c'est le fichier.
     assert meta["model_bytes"] == SCRIPT_PATH.stat().st_size
     assert meta["model_mtime"].startswith("20")
+
+
+def test_tactical_holdout_exporte_ses_propres_poids_pas_doctrine():
+    # Régression : `load_doctrine_weights("tactical")` levait ConfigurationError car `tactical`
+    # n'est pas dans la section `doctrines` (il utilise la section `bots` avec 2 poids seulement).
+    # Le script dispatche désormais via DOCTRINE_BOTS — pour `tactical`, `load_movement_weights`
+    # est appelé à la place, ce qui retourne les valeurs gelées (w_objective=2.0, w_enemy=0.0).
+    assert "tactical" not in DOCTRINE_BOTS, "tactical ne doit pas être dans DOCTRINE_BOTS"
+    with pytest.raises(ConfigurationError):
+        load_doctrine_weights("tactical")
+    w_obj, w_ene = load_movement_weights("tactical")
+    assert w_obj == 2.0
+    assert w_ene == 0.0
 
 
 @pytest.fixture(scope="module")
@@ -203,7 +220,7 @@ def test_le_panel_passe_par_le_chargeur_de_l_evaluation_reelle(main_ast):
 def test_les_cles_qui_decident_du_protocole_sont_exigees(main_ast):
     # `agent_seat_mode` : le défaut "p1" décidait du siège ET était recopié dans run_meta comme
     # s'il venait de la config. `opponent_player` : le défaut 2 comptait les zones de l'AGENT
-    # dans la moitié des épisodes (agent_seat_mode="random" sur x1_panel). `turn` et
+    # dans la moitié des épisodes (agent_seat_mode="random" sur x1_long). `turn` et
     # `objective_controllers` : posées par le reset du moteur, donc un défaut n'y masque qu'une
     # régression — sous forme d'un 0.00 crédible.
     exigees = _require_key_args(main_ast)

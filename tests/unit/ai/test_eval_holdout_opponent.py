@@ -157,7 +157,7 @@ def test_tensorboard_worst_bot_ignores_holdouts_and_every_bot_gets_its_curve() -
     Ce controle portait sur le TEXTE d'une ligne (`ALL_BOT_KEYS = (...)` ecrite a la main dans
     `log_bot_evaluations`). Il verrouillait donc la liste sans jamais verifier ce qu'elle produit :
     la ligne est restee sur le panel d'origine, et les cinq styles refondus n'ont eu AUCUNE courbe
-    `vs_<bot>` — sur le profil `x1_panel`, qui ne joue qu'eux, `b_worst_bot_score` ne s'ecrivait
+    `vs_<bot>` — sur le profil `x1_long`, qui ne joue qu'eux, `b_worst_bot_score` ne s'ecrivait
     meme plus, faute d'y reconnaitre trois bots. Un test de source ne voit pas ce trou-la ; celui-ci
     appelle la methode et lit ce qu'elle a ecrit.
     """

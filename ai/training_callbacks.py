@@ -55,7 +55,7 @@ from config_loader import get_config_loader
 # soupconnait l'inverse) : elle ne decide pas QUELS bots sont joues. Ceux-la sortent des CLES de
 # `callback_params.bot_eval_weights` (`ai/bot_evaluation.py`, `active_bot_names`), profil de
 # training par profil de training. Ajouter un bot au registre le rend AFFICHABLE et selectionnable
-# des qu'il joue ; c'est le profil qui le fait jouer. Le profil `x1_panel` est celui qui porte les
+# des qu'il joue ; c'est le profil qui le fait jouer. Le profil `x1_long` est celui qui porte les
 # cinq styles refondus ; les autres profils gardent le panel d'origine, et leurs entrees de
 # `bot_eval_randomness` pour les nouveaux bots ne servent qu'a ce qu'un ajout aux poids ne leve pas.
 #

@@ -46,6 +46,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 #: neutralisés ensemble ne disent plus lequel portait la décision.
 COUNTERFACTUALS: Dict[str, int] = {"w_enemy=0": 1, "w_crowd=0": 5}
 
+_TRAINING_CONFIG = "x1_long"
+
 
 def zone_index(pos: Tuple[int, int], zones: Sequence[set]) -> Optional[int]:
     """Index de la zone contenant l'ANCRE, ou None.
@@ -174,35 +176,37 @@ def main() -> None:
     from engine.w40k_core import W40KEngine
     from shared.data_validation import require_key
 
-    from bot_zone_direct import _require_board_path, _require_reference_model
+    from bot_zone_direct import _require_board_path, _require_reference_model, _prepare_model_input
 
     board_path = _require_board_path()
     model_path = _require_reference_model()
     config = get_config_loader()
-    tc = config.load_agent_training_config("ArmageddonAgent", "x1_panel")
+    tc = config.load_agent_training_config("ArmageddonAgent", _TRAINING_CONFIG)
     model = MaskablePPO.load(model_path, device="cpu")
     normalize = _build_eval_obs_normalizer_for_worker(
         model, model_path,
         bool(tc.get("vec_normalize", {}).get("enabled", False)),
         bool(tc.get("vec_normalize_eval", {}).get("enabled", False)),
     )
-    params = _load_bot_eval_params(config, "ArmageddonAgent", "x1_panel")
+    params = _load_bot_eval_params(config, "ArmageddonAgent", _TRAINING_CONFIG)
     randomness = params["randomness"]
     agent_seat_mode = require_key(tc, "agent_seat_mode")
     base_seed = int(require_key(tc, "seed"))
     seat_seed = tc.get("agent_seat_seed", base_seed)
-    scenario_file = get_scenario_list_for_phase(
-        config, "ArmageddonAgent", "x1_panel", scenario_type="holdout"
-    )[0]
+    scenarios = get_scenario_list_for_phase(config, "ArmageddonAgent", _TRAINING_CONFIG, scenario_type="holdout")
+    if not scenarios:
+        raise RuntimeError(f"Aucun scénario holdout trouvé pour ArmageddonAgent/{_TRAINING_CONFIG} — vérifier config/agents/ArmageddonAgent/scenarios/")
+    scenario_file = scenarios[0]
 
     print(f"Modèle : {os.path.basename(model_path)}   Plateau : {board_path}")
 
+    model_known = set(model.observation_space.spaces.keys())
     tallies: Dict[str, Dict[str, int]] = {}
     for bot_name in [b.strip() for b in args.bots.split(",") if b.strip()]:
         bot = build_bot(bot_name, dict(randomness))
         registry = UnitRegistry()
         base_env = W40KEngine(
-            rewards_config="ArmageddonAgent", training_config_name="x1_panel",
+            rewards_config="ArmageddonAgent", training_config_name=_TRAINING_CONFIG,
             controlled_agent="ArmageddonAgent", active_agents=None,
             scenario_file=scenario_file, unit_registry=registry,
             quiet=True, gym_training_mode=True, training_n_envs=1,
@@ -220,15 +224,14 @@ def main() -> None:
             random.seed(ep_seed)
             np.random.seed(ep_seed)
             obs, _info = env.reset(seed=ep_seed)
+            env.engine.game_state["no_gym_allocation_model"] = True
             done = False
             while not done:
                 model_obs = normalize(obs) if normalize else obs
                 masks = np.asarray(get_action_masks(env), dtype=bool)
                 if masks.ndim == 1:
                     masks = masks.reshape(1, -1)
-                model_input = model_obs if isinstance(model_obs, dict) else np.asarray(
-                    model_obs, dtype=np.float32
-                ).reshape(1, -1)
+                model_input = _prepare_model_input(model_obs, model_known)
                 action, _ = model.predict(model_input, action_masks=masks, deterministic=True)
                 obs, _r, term, trunc, _i = env.step(int(np.asarray(action).flat[0]))
                 done = bool(term or trunc)

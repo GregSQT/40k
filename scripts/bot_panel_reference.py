@@ -26,7 +26,7 @@ pénalité d'encombrement ayant par ailleurs redistribué les escouades). Ne jam
 cette ligne seule — le tableau PAR BOT du §12.14 est ce qui se compare.
 
 CE QUE DIT LA CONDITION EXPÉRIMENTALE. Ce n'est PAS « bot=P2 », comme les deux copies l'ont
-longtemps écrit : la référence est mesurée sur `x1_panel`, dont `agent_seat_mode` vaut
+longtemps écrit : la référence est mesurée sur `x1_long`, dont `agent_seat_mode` vaut
 « random » — le bot occupe donc les deux sièges. Annoncer un siège fixe faisait décrire une
 condition que personne n'a imposée, et un lecteur qui aurait voulu la reproduire à siège fixe
 aurait comparé deux protocoles.
@@ -41,7 +41,7 @@ PANEL_REFERENCE_FIGURES = "combined=0.7433  pire bot racer=0.630  pire scenario=
 #: La ligne telle qu'elle s'affiche. L'avertissement fait partie de la référence, pas du décor :
 #: une moyenne de panel masque la redistribution qui est l'objet même du chantier.
 PANEL_REFERENCE_LINE = (
-    f"Référence panel §12.14 (x1_panel, siège aléatoire, robust_0.8721) : {PANEL_REFERENCE_FIGURES}\n"
+    f"Référence panel §12.14 (x1_long, siège aléatoire, robust_0.8721) : {PANEL_REFERENCE_FIGURES}\n"
     "   post-§12.6, post-§12.9 (`scorer` réglé) et post-§12.11 (déplacement de `decapitation`).\n"
     "⚠️ la moyenne de zones est presque identique à celle du §12.5 alors que la distribution par\n"
     "   bot a fortement bougé : comparer le tableau PAR BOT du §12.14, jamais cette moyenne seule."

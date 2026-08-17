@@ -110,7 +110,7 @@ def test_require_reference_model_chemin_non_canonique_verifie_md5(script, monkey
 def test_label_present_dans_run_meta_quand_fourni(script):
     meta = script._run_meta(
         _DUMMY_FINGERPRINT, "holdout_1.json", 20, 6, 42, "alternate", 7, {"bot": 0.25},
-        {"bot": {"w_crowd": 4.0}}, 3.0,
+        {"bot": {"w_crowd": 4.0}}, 3.0, "x1_long",
         label="foo",
     )
     assert meta["label"] == "foo"
@@ -119,7 +119,7 @@ def test_label_present_dans_run_meta_quand_fourni(script):
 def test_label_absent_de_run_meta_quand_omis(script):
     meta = script._run_meta(
         _DUMMY_FINGERPRINT, "holdout_1.json", 20, 6, 42, "alternate", 7, {"bot": 0.25},
-        {"bot": {"w_crowd": 4.0}}, 3.0,
+        {"bot": {"w_crowd": 4.0}}, 3.0, "x1_long",
     )
     assert "label" not in meta
 
