@@ -1691,9 +1691,16 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                 )
                                 for t in _all_unit_types
                             )
-                            if not _has_hazardous:
-                                stats['hazardous_no_hazardous_weapon'][player] += 1
-                                _first_hz = stats['first_error_lines']['hazardous_no_hazardous_weapon']
+                            # `_all_unit_types` vide = données absentes du log ; pas de
+                            # faux positif dans ce cas, le contrôle ne peut pas aboutir.
+                            if _all_unit_types and not _has_hazardous:
+                                _hz_key = (
+                                    'hazardous_no_hazardous_weapon_fight'
+                                    if phase.upper() == 'FIGHT'
+                                    else 'hazardous_no_hazardous_weapon'
+                                )
+                                stats[_hz_key][player] += 1
+                                _first_hz = stats['first_error_lines'][_hz_key]
                                 if _first_hz[player] is None:
                                     _first_hz[player] = {
                                         'episode': state.current_episode_num,

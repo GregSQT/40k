@@ -3,9 +3,11 @@
 Comportements verrouillés :
 - `hazardous_mortal_wounds[player]` est incrémenté du nombre de BM journalisées.
 - `hazardous_no_hazardous_weapon[player]` est incrémenté si aucun type de l'escouade
-  ne porte une arme HAZARDOUS dans la cache armurerie (cohérence moteur/config).
+  ne porte une arme HAZARDOUS dans la cache armurerie, ET que la ligne est en phase SHOOTING.
+- `hazardous_no_hazardous_weapon_fight[player]` est incrémenté si la même erreur arrive
+  en phase FIGHT.
 - La présence d'une arme HAZARDOUS dans la cache supprime l'erreur.
-- Sans ligne HAZARDOUS, les deux compteurs restent à 0.
+- Sans ligne HAZARDOUS, les compteurs restent à 0.
 """
 from __future__ import annotations
 
@@ -39,6 +41,10 @@ _UNITS = (
 # La ligne est émise dans la phase SHOOTING (après résolution des attaques de tir) ou FIGHT.
 _HAZARDOUS_3_MW = (
     "[10:00:02] E1 T1 P1 SHOOTING : Unit 1(20,20) SUFFERS 3 Mortal Wounds [HAZARDOUS] "
+    "[R:+0.0] [SUCCESS]\n"
+)
+_HAZARDOUS_FIGHT = (
+    "[10:00:02] E1 T1 P1 FIGHT : Unit 1(20,20) SUFFERS 2 Mortal Wounds [HAZARDOUS] "
     "[R:+0.0] [SUCCESS]\n"
 )
 
@@ -109,7 +115,24 @@ def test_hazardous_no_error_when_weapon_in_cache(tmp_path, monkeypatch):
 
 
 def test_no_hazardous_no_counter(tmp_path, monkeypatch):
-    """Sans ligne HAZARDOUS, les deux compteurs restent à 0."""
+    """Sans ligne HAZARDOUS, les trois compteurs restent à 0."""
     stats = _parse(tmp_path, monkeypatch)
     assert stats["hazardous_mortal_wounds"] == {1: 0, 2: 0}
     assert stats["hazardous_no_hazardous_weapon"] == {1: 0, 2: 0}
+    assert stats["hazardous_no_hazardous_weapon_fight"] == {1: 0, 2: 0}
+
+
+def test_hazardous_fight_phase_goes_to_fight_counter(tmp_path, monkeypatch):
+    """VERROU finding 1 : HAZARDOUS déclenché en FIGHT phase → compteur fight, pas shoot.
+
+    Supprimer la branche `phase == 'fight'` dans analyzer_core rend ce test ROUGE.
+    """
+    stats = _parse(tmp_path, monkeypatch, _HAZARDOUS_FIGHT, weapons_cache={})
+    assert stats["hazardous_no_hazardous_weapon_fight"][1] == 1, (
+        "erreur HAZARDOUS en FIGHT doit incrémenter hazardous_no_hazardous_weapon_fight"
+    )
+    assert stats["hazardous_no_hazardous_weapon"][1] == 0, (
+        "erreur HAZARDOUS en FIGHT ne doit PAS incrémenter hazardous_no_hazardous_weapon (shoot)"
+    )
+
+
