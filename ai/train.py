@@ -3805,6 +3805,57 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     finally:
         print_truncation_summary(metrics_tracker)
 
+def _validate_vs_control_callback_params(callback_params: dict) -> float:
+    """Valide model_gating_min_vs_control et retourne la valeur float.
+
+    Leve KeyError si la cle est absente, ValueError pour toute valeur incoherente.
+    Extraite de setup_callbacks pour etre testable directement sans env ni modele.
+    """
+    if "model_gating_min_vs_control" not in callback_params:
+        raise KeyError(
+            "callback_params.model_gating_min_vs_control est OBLIGATOIRE dans le profil "
+            "d'entrainement de l'agent (aucun repli sur _training_common.json) : ce plancher "
+            "decide de la sauvegarde d'un modele. Mettre 0.0 pour le desarmer explicitement."
+        )
+    raw_min_vs_control = callback_params["model_gating_min_vs_control"]
+    if raw_min_vs_control is None:
+        raise ValueError(
+            "callback_params.model_gating_min_vs_control vaut null : renseigner un nombre "
+            "(0.0 pour desarmer le plancher)."
+        )
+    value = float(raw_min_vs_control)
+    if value < 0.0 or value > 1.0:
+        raise ValueError(
+            "callback_params.model_gating_min_vs_control must be between 0.0 and 1.0 "
+            f"(got {value})"
+        )
+    if value > 0.0:
+        bot_eval_weights_raw = callback_params.get("bot_eval_weights")
+        if bot_eval_weights_raw is None:
+            raise ValueError(
+                f"callback_params.model_gating_min_vs_control est arme "
+                f"({value}) mais la cle 'bot_eval_weights' est "
+                "absente de callback_params. Ajouter la cle avec 'control' parmi les "
+                "poids d'evaluation, ou mettre model_gating_min_vs_control: 0.0 pour "
+                "le desarmer."
+            )
+        if not isinstance(bot_eval_weights_raw, dict):
+            raise ValueError(
+                "callback_params.bot_eval_weights doit etre un objet JSON (dict), "
+                f"recu {type(bot_eval_weights_raw).__name__}."
+            )
+        if "control" not in bot_eval_weights_raw:
+            raise ValueError(
+                f"callback_params.model_gating_min_vs_control est arme "
+                f"({value}) mais 'control' est absent de "
+                "callback_params.bot_eval_weights : le plancher ne sera jamais evalue "
+                "et le run crashera en fin d'entrainement. "
+                "Soit ajouter 'control' aux poids d'evaluation, soit mettre "
+                "model_gating_min_vs_control: 0.0 pour le desarmer."
+            )
+    return value
+
+
 def setup_callbacks(config, model_path, training_config, training_config_name="default", metrics_tracker=None,
                    total_episodes_override=None, max_episodes_override=None, scenario_info=None, global_episode_offset=0,
                    global_start_time=None, agent=None, rewards_config_name=None,
@@ -4042,43 +4093,7 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
     # qu'on lance, jamais une valeur heritee d'un fichier commun a tous les agents. Son absence
     # est une erreur, pas un defaut a 0.40. (`config/agents/_training_common.json` ne le definit
     # donc pas — verrou : tests/unit/ai/test_model_gate_control_floor.py.)
-    if "model_gating_min_vs_control" not in callback_params:
-        raise KeyError(
-            "callback_params.model_gating_min_vs_control est OBLIGATOIRE dans le profil "
-            "d'entrainement de l'agent (aucun repli sur _training_common.json) : ce plancher "
-            "decide de la sauvegarde d'un modele. Mettre 0.0 pour le desarmer explicitement."
-        )
-    raw_min_vs_control = callback_params["model_gating_min_vs_control"]
-    if raw_min_vs_control is None:
-        raise ValueError(
-            "callback_params.model_gating_min_vs_control vaut null : renseigner un nombre "
-            "(0.0 pour desarmer le plancher)."
-        )
-    model_gating_min_vs_control = float(raw_min_vs_control)
-    if model_gating_min_vs_control < 0.0 or model_gating_min_vs_control > 1.0:
-        raise ValueError(
-            "callback_params.model_gating_min_vs_control must be between 0.0 and 1.0 "
-            f"(got {model_gating_min_vs_control})"
-        )
-    if model_gating_min_vs_control > 0.0:
-        bot_eval_weights_raw = callback_params.get("bot_eval_weights")
-        if bot_eval_weights_raw is None:
-            raise ValueError(
-                f"callback_params.model_gating_min_vs_control est arme "
-                f"({model_gating_min_vs_control}) mais la cle 'bot_eval_weights' est "
-                "absente de callback_params. Ajouter la cle avec 'control' parmi les "
-                "poids d'evaluation, ou mettre model_gating_min_vs_control: 0.0 pour "
-                "le desarmer."
-            )
-        if "control" not in bot_eval_weights_raw:
-            raise ValueError(
-                f"callback_params.model_gating_min_vs_control est arme "
-                f"({model_gating_min_vs_control}) mais 'control' est absent de "
-                "callback_params.bot_eval_weights : le plancher ne sera jamais evalue "
-                "et le run crashera en fin d'entrainement. "
-                "Soit ajouter 'control' aux poids d'evaluation, soit mettre "
-                "model_gating_min_vs_control: 0.0 pour le desarmer."
-            )
+    model_gating_min_vs_control = _validate_vs_control_callback_params(callback_params)
     if model_gating_enabled or save_best_robust:
         if model_gating_enabled:
             model_gating_min_combined = float(_resolve_callback_value("model_gating_min_combined"))

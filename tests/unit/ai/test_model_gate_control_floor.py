@@ -17,6 +17,7 @@ from typing import Any, Dict, List
 
 import pytest
 
+from ai.train import _validate_vs_control_callback_params
 from ai.training_callbacks import BotEvaluationCallback
 
 CONFIG_ROOT = Path(__file__).resolve().parents[3] / "config" / "agents"
@@ -159,51 +160,43 @@ def test_no_shared_fallback_for_the_control_floor() -> None:
 
 
 def _assert_profile_valid(config_name: str, profile_name: str, params: Dict[str, Any]) -> None:
-    """Valide les invariants `vs_control` d'un profil de callback_params."""
-    assert "model_gating_min_vs_control" in params, (
-        f"{config_name}[{profile_name}] : plancher `vs_control` absent — `setup_callbacks` "
-        "leve au lancement du run (aucun repli sur _training_common.json)."
-    )
-    value = float(params["model_gating_min_vs_control"])
-    assert 0.0 <= value <= 1.0, f"{config_name}[{profile_name}] : plancher hors [0,1] ({value})"
-    if value > 0.0:
-        weights = params.get("bot_eval_weights")
-        assert weights is not None, (
-            f"{config_name}[{profile_name}] : model_gating_min_vs_control={value} arme mais "
-            "la cle 'bot_eval_weights' est absente — le run crasherait. "
-            "Ajouter 'bot_eval_weights' avec 'control' ou mettre model_gating_min_vs_control: 0.0."
-        )
-        assert "control" in weights, (
-            f"{config_name}[{profile_name}] : model_gating_min_vs_control={value} arme mais "
-            "'control' absent de bot_eval_weights — le run crasherait en fin d'entrainement. "
-            "Mettre model_gating_min_vs_control: 0.0 ou ajouter 'control' aux poids."
-        )
+    """Valide les invariants `vs_control` d'un profil via la fonction de production."""
+    try:
+        _validate_vs_control_callback_params(params)
+    except (KeyError, ValueError) as exc:
+        raise AssertionError(f"{config_name}[{profile_name}] : {exc}") from exc
 
 
 def test_armed_floor_without_control_weight_is_rejected() -> None:
-    """Branch `value > 0.0` est atteignable et echoue sur un profil synthetique incoherent.
+    """La fonction de production leve pour un profil incoherent, passe pour un profil valide."""
+    with pytest.raises(ValueError, match="cle.*bot_eval_weights.*absente"):
+        _validate_vs_control_callback_params({"model_gating_min_vs_control": 0.3})
 
-    Preuve que le verrou est arme : un profil avec plancher > 0 et 'control' absent leve ;
-    le meme profil avec 'control' present passe.
-    """
-    params_no_key = {
-        "model_gating_min_vs_control": 0.3,
-    }
-    with pytest.raises(AssertionError, match="cle.*bot_eval_weights.*absente"):
-        _assert_profile_valid("synthetic", "no_key", params_no_key)
+    with pytest.raises(ValueError, match="control"):
+        _validate_vs_control_callback_params({
+            "model_gating_min_vs_control": 0.3,
+            "bot_eval_weights": {"alpha": 0.5, "greedy": 0.5},
+        })
 
-    params_bad = {
-        "model_gating_min_vs_control": 0.3,
-        "bot_eval_weights": {"alpha": 0.5, "greedy": 0.5},
-    }
-    with pytest.raises(AssertionError, match="control"):
-        _assert_profile_valid("synthetic", "bad", params_bad)
-
-    params_good = {
+    result = _validate_vs_control_callback_params({
         "model_gating_min_vs_control": 0.3,
         "bot_eval_weights": {"control": 0.5, "greedy": 0.5},
-    }
-    _assert_profile_valid("synthetic", "good", params_good)
+    })
+    assert result == pytest.approx(0.3)
+
+
+def test_bot_eval_weights_non_dict_raises_value_error() -> None:
+    """bot_eval_weights non-dict leve ValueError (pas TypeError) — typo JSON ex. 'bot_eval_weights': 1."""
+    with pytest.raises(ValueError, match="dict"):
+        _validate_vs_control_callback_params({
+            "model_gating_min_vs_control": 0.3,
+            "bot_eval_weights": 1,
+        })
+    with pytest.raises(ValueError, match="dict"):
+        _validate_vs_control_callback_params({
+            "model_gating_min_vs_control": 0.3,
+            "bot_eval_weights": True,
+        })
 
 
 @pytest.mark.parametrize("config_path", _active_training_configs(), ids=lambda p: p.parent.name)
