@@ -479,8 +479,11 @@ export const BoardReplay: React.FC = () => {
     // Action index N = state after Nth action (states[N-1])
     if (clampedActionIndex === 0) {
       // Enrich initial state units with stats
+      if (!episode.initial_state.units) {
+        throw new Error(`Missing units in initial_state for episode ${selectedEpisode}`);
+      }
       const enrichedUnits = enrichUnitsWithStats(
-        episode.initial_state.units || [],
+        episode.initial_state.units,
         episode.board.inches_to_subhex
       );
       return {
@@ -498,10 +501,10 @@ export const BoardReplay: React.FC = () => {
       }
 
       // Enrich state units with stats
-      const enrichedUnits = enrichUnitsWithStats(
-        state?.units || [],
-        episode.board.inches_to_subhex
-      );
+      if (!state.units) {
+        throw new Error(`Missing units in replay state at action index ${clampedActionIndex}`);
+      }
+      const enrichedUnits = enrichUnitsWithStats(state.units, episode.board.inches_to_subhex);
 
       return {
         ...state,
@@ -616,7 +619,7 @@ export const BoardReplay: React.FC = () => {
           if (
             currentAction?.type === "shoot" &&
             currentEpisode &&
-            currentActionIndex > 0 &&
+            currentActionIndexClamped > 0 &&
             u.id === currentAction.shooter_id
           ) {
             // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Get from selected weapon (imported at top)
@@ -629,7 +632,7 @@ export const BoardReplay: React.FC = () => {
             const shooterId = currentAction.shooter_id;
 
             // Index of the last *completed* action before the current one
-            const lastCompletedIndex = currentActionIndex - 2; // actions are 0-based, state index is +1
+            const lastCompletedIndex = currentActionIndexClamped - 2; // actions are 0-based, state index is +1
             if (lastCompletedIndex < 0) {
               // No previous actions in this phase: full shots available
               return { ...u, SHOOT_LEFT: rngNb };
@@ -670,7 +673,7 @@ export const BoardReplay: React.FC = () => {
           if (
             currentAction?.type === "fight" &&
             currentEpisode &&
-            currentActionIndex > 0 &&
+            currentActionIndexClamped > 0 &&
             u.id === currentAction.attacker_id
           ) {
             // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Get from selected weapon (imported at top)
@@ -682,16 +685,16 @@ export const BoardReplay: React.FC = () => {
             const ccNb = getDiceAverage(ccNbRaw);
             const attackerId = currentAction.attacker_id;
 
-            const lastCompletedIndex = currentActionIndex - 2;
+            const lastCompletedIndex = currentActionIndexClamped - 2;
             if (lastCompletedIndex < 0) {
               return { ...u, ATTACK_LEFT: ccNb };
             }
 
-            // Fight phase is delimited by non-fight actions
+            // Fight phase is delimited by non-fight, non-wait actions
             let fightPhaseStart = 0;
             for (let i = lastCompletedIndex; i >= 0; i--) {
               const action = currentEpisode.actions[i];
-              if (action.type !== "fight") {
+              if (action.type !== "fight" && action.type !== "wait") {
                 fightPhaseStart = i + 1;
                 break;
               }
@@ -764,7 +767,7 @@ export const BoardReplay: React.FC = () => {
     }
 
     return result;
-  }, [currentState, currentAction, currentActionIndex, currentEpisode]);
+  }, [currentState, currentAction, currentActionIndexClamped, currentEpisode]);
 
   // Update game log when action index changes
   useEffect(() => {
@@ -1708,7 +1711,7 @@ export const BoardReplay: React.FC = () => {
     for (const raw of wname.split("/")) {
       const inches = getRangedWeaponRangeByDisplayName(raw.trim());
       if (inches !== undefined) {
-        bestSubhex = Math.max(bestSubhex, ish !== 1 ? inches * ish : inches);
+        bestSubhex = Math.max(bestSubhex, inches * ish);
       }
     }
     return bestSubhex > 0 ? { [String(uid)]: bestSubhex } : undefined;
@@ -1754,16 +1757,15 @@ export const BoardReplay: React.FC = () => {
     [replayActiveUnitId]
   );
 
-  const gameStateForBoard = useMemo(
-    (): GameState =>
-      replayMoveDestinationPool !== null
-        ? ({
-            ...(currentState as GameState),
-            valid_move_destinations_pool: replayMoveDestinationPool,
-          } as GameState)
-        : (currentState as GameState),
-    [currentState, replayMoveDestinationPool]
-  );
+  const gameStateForBoard = useMemo((): GameState | null => {
+    if (!currentState) return null;
+    return replayMoveDestinationPool !== null
+      ? ({
+          ...(currentState as GameState),
+          valid_move_destinations_pool: replayMoveDestinationPool,
+        } as GameState)
+      : (currentState as GameState);
+  }, [currentState, replayMoveDestinationPool]);
 
   // Center column: Board
   const boardContent =
@@ -1798,7 +1800,7 @@ export const BoardReplay: React.FC = () => {
         unitsMoved={[]}
         phase={currentState.phase || "move"}
         onShoot={() => {}}
-        gameState={gameStateForBoard}
+        gameState={gameStateForBoard!}
         replayActionIndex={currentActionIndex}
         objectiveControlOverride={replayObjectiveControlMap}
         getChargeDestinations={(unitId: number) => {
