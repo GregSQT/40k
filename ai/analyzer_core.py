@@ -958,6 +958,10 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                 pending_model_removals=state.pending_model_removals,
                             )
                             state.pending_removals_actor = _dmg_actor_id
+                # Sauvegarde avant que target_match soit écrasé par la grammaire FOUGHT ci-dessous.
+                # 10.02 — marqueur d'activation SHOOT : seuls les SHOT désignent un tir réel ;
+                # les FOUGHT qui suivent (arme de mêlée, sur la même ligne d'action) ne comptent pas.
+                _is_shot_action = target_match is not None
 
                 # Grammaire PARTAGÉE (`attack_line_re`) : le test par sous-chaîne qui vivait ici
                 # cessait de matcher dès qu'un token de capacité s'intercalait — la cible gardait
@@ -1155,10 +1159,26 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                     # unité et par phase — c'est le seul marqueur d'activation que la phase FIGHT
                     # possède (les lignes `FOUGHT` sont par ATTAQUE, il y en a des dizaines).
                     is_consolidation_marker = ") CONSOLIDATED " in action_desc_upper
+                    # 10.02 — « Each unit can only shoot once per Shooting phase ».
+                    # SHOT est par ATTAQUE (des dizaines par activation), donc ce n'est pas la
+                    # ligne SHOT elle-même qui marque la frontière, mais la PREMIÈRE ligne SHOT
+                    # d'une nouvelle activation. La frontière est détectée via shoot_last_activator :
+                    #   • première activation (phase fraîche) : shoot_last_activator est None → ≠ actor_id ;
+                    #   • reprise par un AUTRE acteur : shoot_last_activator porte l'ID de l'acteur
+                    #     précédent → ≠ actor_id ;
+                    #   • tirs consécutifs de la MÊME unité (salve) : shoot_last_activator == actor_id
+                    #     depuis le premier tir → False, pas un nouveau marqueur.
+                    # shoot_last_activator est mis à jour pour TOUTE action de la phase SHOOT
+                    # (SHOT ou non), donc une WAIT intercalée ne rompt pas la continuité de l'acteur.
+                    is_shoot_activation_start = (
+                        _is_shot_action
+                        and state.shoot_last_activator != actor_id
+                    )
                     is_activation_marker = (
                         is_move_marker
                         or is_ingress_marker
                         or is_consolidation_marker
+                        or is_shoot_activation_start
                         or " ADVANCED " in action_desc_upper
                         or " CHARGED " in action_desc_upper
                         or " FAILED CHARGE " in action_desc_upper
@@ -1239,6 +1259,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         else:
                             _pile_in_seen.add(actor_id)
 
+
                 # Reset markers when turn changes
                 if turn != state.last_turn:
                     state.units_moved = set()
@@ -1259,6 +1280,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                     state.last_shoot_shooter_id = None
                     state.last_shoot_weapon = None
                     state.last_shoot_target_id = None
+                    state.shoot_last_activator = None
                     state.last_fight_fighter_id = None
                     state.last_fight_weapon = None
                     state.last_fight_shooters = ()
@@ -1298,6 +1320,13 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         state.last_fight_weapon = None
                         state.last_fight_shooters = ()
                     state.last_phase = phase
+
+                # 10.02 — frontière d'activation SHOOT. Mis à jour ICI, APRÈS les blocs de
+                # reset de tour et de phase, pour éviter que le reset de tour (turn != last_turn)
+                # n'écrase la valeur qu'on vient de fixer pour la première ligne de chaque tour.
+                # `_dmg_actor_id` est disponible ici (défini avant `if _dmg_actor_match:`).
+                if _dmg_actor_match and phase == 'SHOOT':
+                    state.shoot_last_activator = _dmg_actor_id
 
                 state.episode_turn = max(state.episode_turn, turn)
 
