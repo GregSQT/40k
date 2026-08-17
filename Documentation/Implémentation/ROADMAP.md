@@ -903,6 +903,7 @@ Prêts à démarrer sans décision produit :
   la referme — donc le faux positif « tir engagé arme non-CLOSE_QUARTERS » que je pensais
   expliquer par elle vient d'ailleurs, et reste ouvert.
   → [`Implémenté/figurine_allouee_nommee_au_journal_2026-08-12.md`](Implémenté/figurine_allouee_nommee_au_journal_2026-08-12.md)
+- ✅ **Proxy count `hit_reroll_exposure` (Oath of Moment)** — **LIVRÉ le 2026-08-17**. `unit_has_rule_effect('reroll_1_tohit_fight')` ratait les relances issues d'Oath (cause `hit_any_fail`, pas de UNIT_RULES correspondante) : `hit_reroll_agent_exposure_rate` restait 0 alors que les counts étaient positifs, rendant la courbe ininterprétable. Fix : proxy `max(existant, count > 0)` miroir du pattern `oath_wound_bonus` déjà en place. Test `test_abilities_metrics.py` complété (7 tags `_opp` manquants). Deux tests moteur rouge→vert (`test_hit_reroll_agent/opp_exposure_proxy_via_count`).
 - ✅ **Les verrous du seuil de blessure 05.02 gardaient du vide** (2026-08-13, merge `a6d4915c`).
   Quatre tests de `tests/unit/ai/test_analyzer_wound_threshold.py` passaient sans rien retenir
   (garde « type hors registre », ordre Oath/unanimité, composites en mêlée seule, test du porteur
