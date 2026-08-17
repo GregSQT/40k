@@ -546,6 +546,9 @@ def main() -> None:
             for ep_idx in range(args.episodes):
                 ep_seed = _episode_seed(base_seed, bot_name, 0, ep_idx)
                 obs, info = env.reset(seed=ep_seed)
+                # Désactive le chemin P3-4 (allocation async) : le modèle de référence
+                # est pré-P3-4 et ne sait pas traiter une décision `allocation_model`.
+                env.engine.game_state["no_gym_allocation_model"] = True
                 # `require_key` : `agent_seat_mode` vaut « random » sur x1_panel, donc le bot est
                 # P1 dans la moitié des épisodes. Le défaut `2` comptait alors les zones de
                 # l'AGENT et les publiait sous le nom du bot, sans rien signaler. Même lecture
@@ -566,7 +569,10 @@ def main() -> None:
                     if action_masks.ndim == 1:
                         action_masks = action_masks.reshape(1, -1)
                     if isinstance(model_obs, dict):
-                        model_input = model_obs
+                        # Filtre aux clés connues du modèle : un merge post-entraînement peut
+                        # avoir ajouté des clés d'obs que ce checkpoint n'a jamais vues.
+                        model_known = set(model.observation_space.spaces.keys())
+                        model_input = {k: v for k, v in model_obs.items() if k in model_known}
                     else:
                         model_input = np.asarray(model_obs, dtype=np.float32)
                         if model_input.ndim == 1:

@@ -115,7 +115,7 @@
       "w_enemy": 0.3,
       "w_fire": 0.6,
       "w_risk": 0.4,
-      "w_contest": 3.5,
+      "w_contest": 2.0,
       "w_crowd": 2.5,
       "_justification": "POSE le 2026-08-12 avec le style, NON REGLE — a etablir en bot-contre-bot avant toute mesure contre l'agent. Doctrine : marquer d'abord, se battre pour ca. w_objective 1.0 est le deuxieme du panel derriere racer (1.3), qui est la caricature du meme axe et ne se bat jamais. w_enemy 0.3 : il s'approche pour contester, il ne traverse pas la table comme alpha (1.2). w_fire 0.6 > w_risk 0.4 : il accepte de s'exposer quand la position lui rend plus de degats qu'elle ne lui en coute — c'est ce qui le separe d'un endgame (w_risk 0.9), qui recule."
     }

@@ -10402,7 +10402,19 @@ def _manual_allocation_step(game_state: Dict[str, Any], ctx: ManualAllocCtx) -> 
                     batch["current_model_id"] = wounded[0]  # regle : finir une fig entamee
                 elif ctx.auto_decider is not None and ctx.auto_decider(game_state, batch["target_sid"]):
                     # get allowed : absent = False ; ≥2 candidats requis par le mécanisme décision
-                    if game_state.get("gym_training_mode") and len(alive_grp) >= 2:
+                    # En bot-eval (BotControlledEnv), `controlled_player` identifie l'agent entraîné.
+                    # La décision n'est armée que si le défenseur EST cet agent — pas quand c'est
+                    # le bot. En self-play (pas de BotControlledEnv), controlled_player est absent :
+                    # on arme pour les deux sides (comportement P3-4 original).
+                    _def_player = str(require_key(
+                        require_key(game_state, "units_cache")[str(batch["target_sid"])], "player"))
+                    _controlled = game_state.get("controlled_player")
+                    _is_agent_defending = (
+                        _controlled is None or int(_def_player) == int(_controlled)
+                    )
+                    if (game_state.get("gym_training_mode") and _is_agent_defending
+                            and len(alive_grp) >= 2
+                            and not game_state.get("no_gym_allocation_model")):
                         return _arm_allocation_model_decision(
                             game_state, batch["target_sid"], alive_grp, ctx)
                     batch["current_model_id"] = _select_allocation_model(
