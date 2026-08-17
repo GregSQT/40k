@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Combien de chantiers ont été livrés dans `main` sans passer par la feuille de route ?
 
-POURQUOI CETTE PORTE EXISTE. `Documentation/Implémentation/ROADMAP.md` se déclare source unique de
+POURQUOI CETTE PORTE EXISTE. `Documentation/Roadmap/ROADMAP_INDEX.md` se déclare source unique de
 l'ordre du travail, et sa règle de discipline veut qu'un chantier livré mette sa ligne à jour dans
 la même livraison. Mesuré le 2026-08-11 : sur les sept dernières livraisons, **trois** n'avaient
 laissé aucune trace — `ez-mask-minkowski`, `deep-strike-observe`, `terrains-mc1-mc2-tests`. Deux
@@ -81,7 +81,7 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
-ROADMAP = "Documentation/Implémentation/ROADMAP.md"
+ROADMAP = "Documentation/Roadmap/ROADMAP_INDEX.md"
 
 #: Dette qui DÉCLENCHE le refus — on en tolère donc `MAX_UNDECLARED - 1`. La docstring disait
 #: « nombre toléré », soit un cran de trop : la prochaine recalibration se serait décalée.
@@ -125,8 +125,8 @@ def verdict(undeclared: list[str], declaration: str) -> tuple[bool, str]:
     return False, (
         f"{count} chantiers ont été livrés dans `{PROTECTED_BRANCH}` sans que la feuille de route\n"
         f"   ne bouge :\n{listing}\n\n"
-        f"   {ROADMAP} se déclare source unique de l'ordre du travail. Qui l'ouvre pour décider de\n"
-        "   la suite décide sur un état du projet qui n'existe plus.\n\n"
+        f"   {ROADMAP} se déclare source unique de l'ordre du travail.\n"
+        "   Qui l'ouvre pour décider de la suite décide sur un état du projet qui n'existe plus.\n\n"
         "   POUR SORTIR, sans annuler la fusion en cours :\n"
         f"     écris leurs lignes — celle de la fusion comprise — dans {ROADMAP},\n"
         "     puis  git add -A  et  git commit.  L'index compte : la ligne écrite ici et\n"

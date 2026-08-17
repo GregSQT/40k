@@ -157,7 +157,7 @@ def scratch_repo(tmp_path: pathlib.Path) -> pathlib.Path:
     la sortie de secours. Il est retiré ; la sortie de secours a désormais son propre test.
     """
     repo = tmp_path / "depot"
-    (repo / "Documentation" / "Implémentation").mkdir(parents=True)
+    (repo / "Documentation" / "Roadmap").mkdir(parents=True)
     run(repo.parent, "init", "-q", "-b", "main", str(repo))
     run(repo, "config", "user.email", "t@t")
     run(repo, "config", "user.name", "t")
