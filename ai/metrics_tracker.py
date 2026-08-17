@@ -385,6 +385,16 @@ class W40KMetricsTracker:
             'baseline_worst_bot': None,      # first worst_bot_score after forcing exposure starts
         }
 
+        # Abilities rule usage — compteurs cumulés et exposition (voir log_abilities_metrics).
+        # Clé "total_episodes" : dénominateur commun aux deux taux.
+        # Clé "counts" : utilisations cumulées par épisode (numérateur du mean).
+        # Clé "exposures" : épisodes où la règle était dans le roster (numérateur du taux).
+        self._abilities_tracking: Dict[str, Any] = {
+            'total_episodes': 0,
+            'counts': {},    # rule_side -> int, cumulé
+            'exposures': {}, # rule_side -> int, cumulé
+        }
+
 
 
         # Rolling histories for 01_VP/ + 02_combat/ smoothing (window=500)
@@ -1172,6 +1182,45 @@ class W40KMetricsTracker:
             'fight_final_turn', float(require_key(tactical_data, 'final_turn'))
         )
         self._emit_ratio_of_means('06_fight/a_activations_per_turn', fight_activations_hist, final_turn_hist)
+
+    def log_abilities_metrics(self, tactical_data: Dict[str, Any]) -> None:
+        """Règles d'unité appliquées — Famille A (action_log) + Famille B (shot_records).
+
+        Deux courbes par règle par camp :
+        - `abilities/<rule>_agent` : nombre de déclenchements sur CET épisode (brut, 0 possible).
+        - `abilities/<rule>_agent_exposure_rate` : fraction d'épisodes où l'unité possédant la
+          règle était dans le roster de l'agent.
+
+        Sans la courbe d'exposition, un zéro sur le compteur ne distingue pas
+        « jamais déclenchée » de « jamais dans le roster ».
+        """
+        counts = require_key(tactical_data, 'abilities_counts')
+        exposure = require_key(tactical_data, 'abilities_exposure')
+
+        acc = self._abilities_tracking
+        acc['total_episodes'] += 1
+        total_eps: int = acc['total_episodes']
+        acc_counts: Dict[str, int] = acc['counts']
+        acc_exposures: Dict[str, int] = acc['exposures']
+
+        for key, val in counts.items():
+            count_int = int(val)
+            acc_counts[key] = acc_counts.get(key, 0) + count_int
+            # Courbe brute par épisode : utile pour détecter des pics d'utilisation.
+            self.writer.add_scalar(f"abilities/{key}", float(count_int), self.episode_count)
+
+        for key, val in exposure.items():
+            exp_int = int(val)
+            if exp_int not in (0, 1):
+                raise ValueError(
+                    f"abilities_exposure['{key}'] doit être 0 ou 1 (reçu {exp_int})"
+                )
+            acc_exposures[key] = acc_exposures.get(key, 0) + exp_int
+            # Taux cumulé d'épisodes où la règle était dans le roster.
+            exposure_rate = acc_exposures[key] / total_eps
+            self.writer.add_scalar(
+                f"abilities/{key}_exposure_rate", exposure_rate, self.episode_count
+            )
 
     def log_training_step(self, step_data: Dict[str, Any]):
         """Log training step metrics - exploration rate and loss"""
