@@ -131,8 +131,14 @@ def set_pending_agent_decision(
     player: int,
     unit_id: str,
     options: Sequence[Dict[str, Any]],
+    options_cont: Optional[List[List[float]]] = None,
 ) -> Dict[str, Any]:
-    """Pose LA décision en attente. Retourne la décision normalisée telle que stockée."""
+    """Pose LA décision en attente. Retourne la décision normalisée telle que stockée.
+
+    `options_cont` — liste PARALLÈLE à `options` de vecteurs continus par candidat
+    (P3-4 `DECISION_OPTION_CONT_FIELDS`). Absent pour les types qui n'ont pas de traits
+    continus (rule_choice, waaagh_call, fly_declaration).
+    """
     if decision_type not in AGENT_DECISION_TYPE_IDS:
         raise KeyError(
             f"pending_agent_decision: type '{decision_type}' inconnu. "
@@ -145,12 +151,14 @@ def set_pending_agent_decision(
             f"attente. Le moteur doit rendre la main apres CHAQUE decision posee ; en empiler une "
             f"seconde ecraserait un choix que l'agent n'a pas encore joue."
         )
-    decision = {
+    decision: Dict[str, Any] = {
         "type": decision_type,
         "player": int(player),
         "unit_id": str(unit_id),
         "options": _validate_options(decision_type, options),
     }
+    if options_cont is not None:
+        decision["options_cont"] = [list(row) for row in options_cont]
     game_state[PENDING_DECISION_KEY] = decision
     return decision
 

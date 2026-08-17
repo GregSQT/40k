@@ -41,7 +41,7 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│  OBSERVATION SQUAD — Dict de TENSEURS D'ENTITÉS  (16 659 scalaires)    │
+│  OBSERVATION SQUAD — Dict de TENSEURS D'ENTITÉS  (16 671 scalaires)    │
 ├────────────────────────────────────────────────────────────────────────┤
 │  CONTEXTE GLOBAL                                                       │
 │    global_cont            (13,)                =      13               │
@@ -76,12 +76,13 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 │  DÉCISION AGENT — candidats de CHOICE_i        MAX_DECISION_OPTIONS = 6│
 │    decision_ctx_bin       (9,)                 =       9               │
 │    decision_options_bin   (6, 9)               =      54               │
+│    decision_options_cont  (6, 2)               =      12               │
 │                                                                        │
 │  DÉPLOIEMENT — candidats des actions 4-11        N_DEPLOY_SLOTS = 8    │
 │    deploy_cand_cont       (8, 8)               =      64               │
 │    deploy_cand_bin        (8, 4)               =      32               │
 ├────────────────────────────────────────────────────────────────────────┤
-│  TOTAL vectoriel (= obs_size)                      16 659              │
+│  TOTAL vectoriel (= obs_size)                      16 671              │
 │  + grid  (9, 32, 32) = 9 216, fournie À PART (non comptée)             │
 └────────────────────────────────────────────────────────────────────────┘
 
@@ -367,13 +368,18 @@ candidat** que les actions `CHOICE_0..5` (`macro_intents.CHOICE_SLOTS`) désigne
 decision_ctx_bin[0]      = decision_pending                  # 0.0 / 1.0 — masque du bloc entier
 decision_ctx_bin[1]      = decision_type_rule_choice         # 0.0 / 1.0 — one-hot du type
 decision_ctx_bin[2]      = decision_type_waaagh_call         # 0.0 / 1.0 — appel du Waaagh! (chantier 03)
-decision_ctx_bin[3]      = decision_type_fly_declaration    # 0.0 / 1.0 — « take to the skies » 21.03 (L6)
-decision_ctx_bin[4]      = decision_type_reserved_0          # colonnes RÉSERVÉES : le one-hot fait
-decision_ctx_bin[5]      = decision_type_reserved_1          # AGENT_DECISION_TYPE_SLOTS = 8 colonnes,
-decision_ctx_bin[6]      = decision_type_reserved_2          # pré-dimensionnées. Ouvrir un type de
-decision_ctx_bin[7]      = decision_type_reserved_3          # décision (allocation de pertes, pile-in,
-decision_ctx_bin[8]      = decision_type_reserved_4          # move réactif, choix d'arme…) consomme
-                                                             # une réserve : obs_size NE BOUGE PAS.
+decision_ctx_bin[3]      = decision_type_fly_declaration     # 0.0 / 1.0 — « take to the skies » 21.03 (L6)
+decision_ctx_bin[4]      = decision_type_allocation_model    # 0.0 / 1.0 — choix figurine réceptrice 05.04 (P3-4)
+decision_ctx_bin[5]      = decision_type_reserved_0          # colonnes RÉSERVÉES : le one-hot fait
+decision_ctx_bin[6]      = decision_type_reserved_1          # AGENT_DECISION_TYPE_SLOTS = 8 colonnes,
+decision_ctx_bin[7]      = decision_type_reserved_2          # pré-dimensionnées. Ouvrir un type de
+decision_ctx_bin[8]      = decision_type_reserved_3          # décision (pile-in, move réactif, choix d'arme…)
+                                                             # consomme une réserve : les bits bin NE BOUGENT PAS.
+
+decision_options_cont[c][0] = role_tier_norm                 # [0, 1] — ROLE_TIER / 4 (base=0, leader=1)
+decision_options_cont[c][1] = dist_enemy_norm                # [0, 1] — distance ennemi / (cols+rows) du plateau
+                                                             # Rempli seulement pour `allocation_model` ;
+                                                             # zéro pour tous les autres types (no options_cont).
 
 decision_options_bin[c][ 0] = grants_charge_after_flee                     # 0.0 / 1.0
 decision_options_bin[c][ 1] = grants_reroll_1_save_fight                   # 0.0 / 1.0
