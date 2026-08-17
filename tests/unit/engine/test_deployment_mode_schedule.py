@@ -489,10 +489,11 @@ def test_all_profiles_share_the_same_ramp() -> None:
     `x1` est la référence (profil de production) : c'est lui qu'on ajuste, les autres suivent.
     Le compte est figé exprès : un profil ajouté sans son bloc de déploiement est le défaut que
     ce fichier existe pour attraper, et un `len` non contraint le laisserait passer.
-    Trois profils actifs : `x1` (run court de développement), `x1_long` (run de mesure, 50k ép.),
-    `x1_debug` (smoke test, 1k ép.).
+    Six profils actifs : `x1`/`x5_new` (runs courts de développement), `x1_long`/`x5_long`
+    (runs de mesure), `x1_debug`/`x5_debug` (smoke tests). Les préfixes x1/x5 désignent la
+    résolution du plateau, pas la longueur du run.
     """
-    assert len(PROFILES) == 3, f"profils attendus : 3, trouvés {sorted(PROFILES)}"
+    assert len(PROFILES) == 6, f"profils attendus : 6, trouvés {sorted(PROFILES)}"
     reference = json.dumps(PROFILES["x1"]["deployment_mode_schedule"], sort_keys=True)
     diverged = {
         name: p.get("deployment_mode_schedule")

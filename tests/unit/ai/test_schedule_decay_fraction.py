@@ -259,9 +259,8 @@ def _resolved_cb(callback_params: dict, key: str):
 # modèle est mécaniquement le dernier point évalué (`x1` depuis le 2026-08-11 : 5 points pour une
 # fenêtre de 5). Dans les deux cas la promesse était vide ; c'est le sens du `false`.
 PROMISES_BEST_MODEL = {
-    "x1": False,
-    "x1_long": True,
-    "x1_debug": False,
+    "x1": False, "x1_long": True, "x1_debug": False,
+    "x5_new": False, "x5_long": True, "x5_debug": False,
 }
 
 
@@ -306,7 +305,7 @@ def test_every_profile_declares_decay_fraction(profile_name: str, ramp_key: str)
 #: sans elle, un `_long` ramené par mégarde à la longueur de sa référence resterait vert alors
 #: qu'il ne mesurerait plus rien de long. x1_long : 50 000 épisodes (5 points de mesure à
 #: `bot_eval_freq` 10000, soit tout juste la fenêtre de 5 évaluations qu'exige `save_best_robust`).
-LONG_PROFILE_EPISODES = {"x1_long": 50_000}
+LONG_PROFILE_EPISODES = {"x1_long": 50_000, "x5_long": 200_000}
 
 #: `bot_eval_final` ATTENDU de chaque profil de RÉFÉRENCE (le court des deux), par couple.
 #: ÉPINGLÉ pour la même raison que la table ci-dessus, et plus commun aux deux couples depuis le
@@ -315,28 +314,28 @@ LONG_PROFILE_EPISODES = {"x1_long": 50_000}
 #: l'erreur-type de l'écart entre deux win-rates `combined` vaut ≈ 0,707/√(6 × 10) = 9,1 points,
 #: donc aucun écart réaliste n'en sort. Le chiffre publié vient de `x1_long` (300 depuis le
 #: 2026-08-16, voir LONG_PROFILE_BOT_EVAL_FINAL), et de rien d'autre.
-REFERENCE_BOT_EVAL_FINAL = {"x1": 10}
+REFERENCE_BOT_EVAL_FINAL = {"x1": 10, "x5_new": 100}
 
 #: `bot_eval_final` ATTENDU de chaque profil `_long`. Épinglé (pas lu depuis le JSON) pour la
 #: même raison que ci-dessus. x1_long : 300, CHRONOMÉTRÉ le 2026-08-16 (2,76 s/ép. à 12 workers
 #: sur 8 cœurs, 3 répétitions, dispersion < 2 %) → 1 h 23 pour l'éval finale. L'erreur-type
 #: d'un win-rate autour de 0,5 vaut 0,5/√n : 2,9 points à 300. Le détail est dans
 #: `bot_eval_final_normal` du JSON, seule source.
-LONG_PROFILE_BOT_EVAL_FINAL = {"x1_long": 300}
+LONG_PROFILE_BOT_EVAL_FINAL = {"x1_long": 300, "x5_long": 600}
 
 #: `bot_eval_intermediate` ATTENDU de chaque profil `_long`. x1_long : 30 (passé de 100 à 30
 #: par e07bdfd1, avec 4 workers intermédiaires).
-LONG_PROFILE_BOT_EVAL_INTERMEDIATE = {"x1_long": 30}
+LONG_PROFILE_BOT_EVAL_INTERMEDIATE = {"x1_long": 30, "x5_long": 100}
 
 #: Fenêtre du score robuste de chaque profil `_long`. Elle DÉPEND de la longueur du run : la
 #: fenêtre glisse sur les points de mesure, donc `total // freq - window + 1` est le nombre de
 #: positions. À une seule position le « meilleur modèle » est mécaniquement le dernier. x1_long :
 #: 50 000 épisodes → 5 points, fenêtre de 3 (3 positions).
-LONG_PROFILE_ROBUST_WINDOW = {"x1_long": 3}
+LONG_PROFILE_ROBUST_WINDOW = {"x1_long": 3, "x5_long": 5}
 
 
 @pytest.mark.parametrize(
-    ("ref_name", "long_name"), [("x1", "x1_long")]
+    ("ref_name", "long_name"), [("x1", "x1_long"), ("x5_new", "x5_long")]
 )
 def test_long_profile_is_its_reference_recalibrated(ref_name: str, long_name: str) -> None:
     """Un profil `_long` ne diffère de sa référence que par ce qui dépend de la LONGUEUR du run.
@@ -390,17 +389,19 @@ def test_long_profile_is_its_reference_recalibrated(ref_name: str, long_name: st
 
     long_cb, ref_cb = long_["callback_params"], ref["callback_params"]
     assert long_cb["bot_eval_freq"] == 10000, (
-        "Un point de mesure tous les 10 000 épisodes : 5 sur x1_long (50k) — c'est ce compte "
-        "qui a imposé une fenêtre robuste de 3 (verrouillée plus bas). Descendre à 5000 "
-        "doublerait le nombre de points, donc le coût de l'évaluation intermédiaire : ~2 h 10 "
-        "au lieu de ~1 h 05 (13 min l'unité à 100 ép./bot, commit 42326ed0), sur un run "
-        "mesuré à ~20 h (4 h 01 pour 10 000 épisodes, ROADMAP §1 pt 6, run du 2026-08-10)."
+        "Un point de mesure tous les 10 000 épisodes : 20 sur x5_long (200k), 5 sur x1_long (50k) "
+        "— c'est ce dernier compte qui a imposé à x1_long une fenêtre robuste de 3 (verrouillée "
+        "plus bas), et non l'inverse. Descendre à 5000 doublerait le nombre de points, donc le "
+        "coût de l'évaluation intermédiaire : ~2 h 10 au lieu de ~1 h 05 sur x1_long (13 min "
+        "l'unité à 100 ép./bot, commit 42326ed0), sur un run mesuré à ~20 h (4 h 01 pour 10 000 "
+        "épisodes, ROADMAP §1 pt 6, run du 2026-08-10)."
     )
     # `bot_eval_final` est un nombre d'épisodes PAR BOT, et un profil `_long` est un run de
     # MESURE : son win-rate final est le chiffre publié, donc sa précision fait partie du
     # livrable. L'erreur-type d'un win-rate autour de 0,5 vaut 0,5/√n — 5,0 points à 100,
-    # 2,9 à 300. x1_long : 300, chronométré (cf. LONG_PROFILE_BOT_EVAL_FINAL). Le détail est
-    # dans `bot_eval_final_normal` du JSON, seule source.
+    # 2,9 à 300, 2,0 à 600. La valeur diverge entre les deux couples (cf. LONG_PROFILE_BOT_EVAL_FINAL) :
+    # x1_long chronométré à 300, x5_long conservé à 600 faute de mesure. Détail dans
+    # `bot_eval_final_normal` du JSON, seule source.
     assert long_cb["bot_eval_final"] == LONG_PROFILE_BOT_EVAL_FINAL[long_name]
     assert ref_cb["bot_eval_final"] == REFERENCE_BOT_EVAL_FINAL[ref_name]
     # Corollaire OBLIGATOIRE de la ligne précédente : le timeout porte sur un TASK, et un task
@@ -461,8 +462,8 @@ def test_long_profile_is_its_reference_recalibrated(ref_name: str, long_name: st
     )
     # L'écarter de la comparaison ne dispense PAS de le vérifier des deux côtés. La valeur attendue
     # vient de la table unique `PROMISES_BEST_MODEL`, verrouillée pour tous les profils par
-    # `test_profile_promise_of_a_best_model_is_pinned` : x1 (5 points pour une fenêtre de 5, une
-    # seule position) et x1_debug (run trop court) ne promettent rien — ils rendent leur modèle FINAL.
+    # `test_profile_promise_of_a_best_model_is_pinned` : x1 (5 points, une seule position),
+    # x1_debug, x5_new (run trop court) et x5_debug ne promettent rien — modèle FINAL.
     assert _resolved_cb(ref_cb, "save_best_robust") is PROMISES_BEST_MODEL[ref_name]
     assert PROMISES_BEST_MODEL[long_name] is True
 
