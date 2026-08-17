@@ -60,8 +60,10 @@ _JSON_SCHEMA_VERSION = 4
 
 #: Checkpoint sur lequel TOUTES les mesures du §12 sont faites. Remplacer ici est une décision
 #: de protocole : elle périme les chiffres du chantier, donc elle ne se prend pas par accident.
-REFERENCE_MODEL = "ArmageddonAgent_12345_robust_0.8721.zip"
-REFERENCE_MD5 = "6f6b98059a0a6c279b7d11dc427461fd"
+#: v1 (0.8721, ancien panel, bots control/greedy/…) — perdu le 2026-08-17 par runs croisés.
+#: v2 (0.8692, nouveau panel new_bots, 2026-08-17) — référence courante.
+REFERENCE_MODEL = "ArmageddonAgent_NEW_BOTS_12345_robust_0.8692.zip"
+REFERENCE_MD5 = "e78a543e0324a932bf07acb267632d0b"
 
 #: Chemin ABSOLU de l'archive de référence. Séparé de REFERENCE_MODEL pour être monkeypatchable
 #: dans les tests sans toucher au nom qui identifie le checkpoint dans les logs et justifications.
