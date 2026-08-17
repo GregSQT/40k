@@ -140,6 +140,11 @@ def turn_state_invariants() -> Dict[str, Any]:
         "_ingress_no_destination": set(),
         "_ingress_arrived": set(),
         "_pending_reserves_wasted": 0,
+        # Compteur de version de mouvement/mort (engine/phase_handlers/shared_utils.py :
+        # `_apply_los_invalidation`). Pose par reset() a 0 et incrémenté à chaque déplacement ou
+        # mort de figurine. Lu directement (`gs["_unit_move_version"]`), donc obligatoire dans le
+        # socle dès qu'une fixture déclenche un mouvement ou une perte.
+        "_unit_move_version": 0,
     }
 
 

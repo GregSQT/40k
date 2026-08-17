@@ -6889,7 +6889,7 @@ class W40KEngine(gym.Env):
                 # Assault, Waaagh!) est lu AVANT le commit — `commit_move` ne touche pas
                 # `units_advanced`, mais l'ordre reste celui du chemin PvP pour que les deux
                 # lisent le même état.
-                _charge_ability, _charge_rule_marker = _charge_enabling_ability(self.game_state, unit)
+                _charge_ability, _charge_rule_marker, _ = _charge_enabling_ability(self.game_state, unit)
                 commit_move(plan, self.game_state, "charge")
                 end_result = end_activation(self.game_state, unit, ACTION, 1, CHARGE, CHARGE, 0)
                 _dest_uc = self.game_state.get("units_cache", {}).get(str(squad_id), {})  # get allowed

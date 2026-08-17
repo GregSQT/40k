@@ -79,7 +79,7 @@ def _uc(col, row, *, player, models=None):
 
 def _game_state(weapon_rules, *, moved_inches=0.0, target=TARGET, n_attacks=1,
                 unit_rules=(), cover=False, unit_type=UNIT_TYPE, weapon_name=WEAPON_NAME,
-                target_models=1, melee=False, target_keywords=()):
+                target_models=1, melee=False, target_keywords=(), hp_cur=9):
     """Attaquant '1' vs cible '101', en `gym_training_mode` (allocation auto).
 
     `target_models` : effectif de la CIBLE. Il ne servait à rien tant qu'aucune règle ne
@@ -105,7 +105,7 @@ def _game_state(weapon_rules, *, moved_inches=0.0, target=TARGET, n_attacks=1,
         mid = f"101#{index}"
         pos = (target[0], target[1] + index)
         models_cache[mid] = {
-            "id": mid, "squad_id": "101", "player": 1, "T": 4, "HP_CUR": 9, "HP_MAX": 9,
+            "id": mid, "squad_id": "101", "player": 1, "T": 4, "HP_CUR": hp_cur, "HP_MAX": hp_cur,
             "ARMOR_SAVE": 2, "INVUL_SAVE": 7, "role": None, "unitType": "AssaultIntercessor",
             "points_per_hp": 5.0, "VALUE": 10.0, "col": pos[0], "row": pos[1],
             "RNG_WEAPONS": [], "CC_WEAPONS": [],
@@ -143,6 +143,12 @@ def _game_state(weapon_rules, *, moved_inches=0.0, target=TARGET, n_attacks=1,
         "objectives": [], "units_moved": set(), "units_advanced": set(),
         "inches_to_subhex": 5,
         "moved_distance_by_model": {"1#0": float(moved_inches) * 5},
+        # Requis par les caches spatiaux lorsqu'une figurine meurt (`destroy_model` →
+        # `remove_from_units_cache` → `update_enemy_adjacent_caches_after_unit_removed`).
+        "board_cols": 200,
+        "board_rows": 100,
+        # engagement_zone déjà en subhexes (1" × inches_to_subhex=5), lu par get_engagement_zone.
+        "config": {"game_rules": {"engagement_zone": 5}},
         intents_key: {"1": [intent]},
     }
 
@@ -151,7 +157,7 @@ def _engine_shoot_log(monkeypatch, weapon_rules, rolls, *, moved_inches=0.0, tar
                       n_attacks=1, unit_rules=(), cover=False, unit_type=UNIT_TYPE,
                       weapon_name=WEAPON_NAME, target_models=1, melee=False,
                       target_keywords=(), units_advanced=False, engaged=False,
-                      indirect=False, spotter=False):
+                      indirect=False, spotter=False, hp_cur=9):
     """Fait jouer UNE attaque par le vrai moteur et rend (game_state, son action_log).
 
     `melee=True` passe par `build_manual_fight_allocation` — le MÊME émetteur de log
@@ -194,7 +200,7 @@ def _engine_shoot_log(monkeypatch, weapon_rules, rolls, *, moved_inches=0.0, tar
                      n_attacks=n_attacks, unit_rules=unit_rules, cover=cover,
                      unit_type=unit_type, weapon_name=weapon_name,
                      target_models=target_models, melee=melee,
-                     target_keywords=target_keywords)
+                     target_keywords=target_keywords, hp_cur=hp_cur)
     if units_advanced:
         gs["units_advanced"] = {"1"}
     from engine.phase_handlers import shared_utils as _su
@@ -1730,16 +1736,19 @@ def test_l3_alloc_mid_avant_save(allocated_shoot_line):
 
 
 def test_l3_not_allocated_pas_de_mid(monkeypatch, tmp_path):
-    """L3 : Save [NOT ALLOCATED] ne doit PAS porter de '→ <mid>'."""
+    """L3 : Save [NOT ALLOCATED] ne doit PAS porter de '→ <mid>'.
+
+    Cible à 1 PV, 2 attaques, DMG=1 : la première attaque tue la fig, la deuxième
+    n'a plus de cible valide → NOT ALLOCATED.
+    Rolls hit/wound/save : [3, 4, 2] × 2 ; seuil save = 3 (Sv=2+ AP=-1).
+    """
     import re
-    # Pool > 1 attaque sur cible à 1 PV : la première attaque tue la cible, la deuxième est
-    # NOT ALLOCATED. On tire une liste : le dernier jet alloué tue la fig (roll dmg > HP restants).
-    # Approche simple : cible à 1 HP, 2 attaques, première tue, deuxième NOT ALLOCATED.
-    gs, raw_log = _engine_shoot_log(monkeypatch, [], [3, 4, 2, 3, 4, 2], n_attacks=2)
+    gs, raw_log = _engine_shoot_log(monkeypatch, [], [3, 4, 2, 3, 4, 2], n_attacks=2, hp_cur=1)
     lines = _step_log_lines(tmp_path, gs, raw_log)
     not_alloc = [l for l in lines if "NOT ALLOCATED" in l]
-    if not not_alloc:
-        pytest.skip("aucune attaque NOT ALLOCATED produite par ce décor")
+    assert not_alloc, (
+        "L3 : aucune attaque NOT ALLOCATED produite — vérifier hp_cur=1 et n_attacks=2"
+    )
     for line in not_alloc:
         assert not re.search(r"→ \d+#\d+", line), (
             f"L3 : 'Save [NOT ALLOCATED]' ne doit pas porter de '→ <mid>' : {line}"
@@ -1788,8 +1797,8 @@ def test_l4_save_affiche_base_ap_effectif(ap_save_line):
 def test_l4_save_valeurs_coherentes(ap_save_line):
     """L4 : les valeurs base, AP, eff sont mutuellement cohérentes (max(base-AP, invul) == eff).
 
-    La figurine cible a Sv=2, InSv=7 (pas d'invul), et l'arme a AP=-1.
-    Seuil effectif = max(2 - (-1), 7) = max(3, 7) = 3 (pas d'invul active).
+    La figurine cible a Sv=2, InSv=7 (pas d'invul, sentinel), et l'arme a AP=-1.
+    Seuil effectif = min(2 - (-1), 7) = min(3, 7) = 3 (seuil le moins favorable au sauvegardeur).
     """
     import re
     m = re.search(r"Save \d+\((\d+)\+ AP(-?\d+) → (\d+)\+\)", ap_save_line)
