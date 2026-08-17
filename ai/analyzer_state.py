@@ -203,7 +203,8 @@ class AnalyzerState:
     #: 320 fausses « Shots over RNG_NB » sur 23 169 tirs.
     last_shoot_shooters: Tuple[str, ...] = ()
     #: Dernière unité dont un SHOT a déclenché un marqueur d'activation SHOOT (frontière
-    #: d'activation 10.02). Réinitialisé à ``None`` en début de phase SHOOT.
+    #: d'activation 10.02). Réinitialisé à ``None`` en début de phase SHOOT et au changement
+    #: de tour. Mis à jour uniquement sur les lignes SHOT (pas sur les actions non-tir).
     shoot_last_activator: Optional[str] = None
     last_fight_fighter_id: Optional[str] = None
     last_fight_weapon: Optional[str] = None

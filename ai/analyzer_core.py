@@ -1314,6 +1314,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         state.units_moved_after_shooting_in_turn = set()
                         state.combi_profile_usage = {}
                         state.combi_conflicts_seen = set()
+                        state.shoot_last_activator = None
                     if phase == 'FIGHT':
                         state.fight_phase_seq_id += 1
                         state.last_fight_fighter_id = None
@@ -1324,8 +1325,10 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 # 10.02 — frontière d'activation SHOOT. Mis à jour ICI, APRÈS les blocs de
                 # reset de tour et de phase, pour éviter que le reset de tour (turn != last_turn)
                 # n'écrase la valeur qu'on vient de fixer pour la première ligne de chaque tour.
+                # Mis à jour UNIQUEMENT sur les lignes SHOT (is_shot_action) : une action non-tir
+                # de l'unité B (reactive move) ne doit pas interrompre la salve en cours de A.
                 # `_dmg_actor_id` est disponible ici (défini avant `if _dmg_actor_match:`).
-                if _dmg_actor_match and phase == 'SHOOT':
+                if _is_shot_action and phase == 'SHOOT':
                     state.shoot_last_activator = _dmg_actor_id
 
                 state.episode_turn = max(state.episode_turn, turn)
