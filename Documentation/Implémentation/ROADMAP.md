@@ -722,6 +722,11 @@ Prêts à démarrer sans décision produit :
   `[selectedEpisode, replayData, currentActionIndex, enrichUnitsWithStats]`), `unitsWithGhost`
   (absorbe les trois pushes fantômes), `replayActiveModelIdsByUnit`, `replayActiveShootRangeByUnit`,
   `replayEligibleUnitIds` (remplace le tableau littéral inline), et `gameStateForBoard`.
+- ✅ **Corrections code review + simplify `BoardReplay`** — **LIVRÉ le 2026-08-17**. 6 findings
+  /code-review appliqués (`lastCompletedIndex` clampé, fight skip `wait`, `|| []` → throw T1,
+  `gameStateForBoard` typé `GameState | null`, branche morte ish). /simplify : `countActionsInPhase`
+  extrait à portée module + `PHASE_NEUTRAL_TYPES` (un point de vérité pour les types neutres),
+  guard `boardContent` basculé sur `gameStateForBoard` (supprime le `!`).
 
 - ✅ **Une primitive commune « poser un plan par figurine »** — **LIVRÉ les 2026-08-11 / 08-12**.
   `resolve_model_effective_level` (résout) et `place_model_at_effective_level` (résout puis écrit)
