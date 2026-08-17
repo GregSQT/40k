@@ -23,7 +23,7 @@ from engine.combat_utils import (
 )
 from shared.data_validation import require_key
 from ai.analyzer_perfig import position_is_on_battlefield
-from ai.analyzer_rules import coverage_gaps, coverage_rows, new_rule_usage_counters, VERDICT_NEVER_EXERCISED
+from ai.analyzer_rules import coverage_gaps, coverage_rows, new_rule_usage_counters, SECTION_TO_BUCKET, VERDICT_NEVER_EXERCISED
 
 
 def _weapon_rule_usage_pair_total(weapon_rule_usage: Dict[Any, Any], pair_key: Any) -> int:
@@ -2354,6 +2354,12 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
             print(*args, file=output_f, **kwargs)
             output_f.flush()
 
+    def _switch_section(new_section: Optional[str]) -> None:
+        nonlocal active_debug_section
+        if active_debug_section in SECTION_TO_BUCKET:
+            _render_rule_coverage(stats, active_debug_section, log_print)
+        active_debug_section = new_section
+
     debug_sections = {
         "1.1": "MOVEMENT ERRORS",
         "1.2": "SHOOTING ERRORS",
@@ -3145,7 +3151,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
 
     # MOVEMENT ERRORS
     if True:
-        active_debug_section = "1.1"
+        _switch_section("1.1")
         log_print("\n" + "-" * 80)
         _table_header("1.1 MOVEMENT ERRORS")
         agent_walls = stats['wall_collisions'][1]
@@ -3283,9 +3289,8 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     _table_row("  dont figurines retirees (End of Turn):", _fmt_count(_coh_rm[1]), _fmt_count(_coh_rm[2]))
     _res_tm = require_key(stats, 'reserves_timeout_destroyed')
     _table_row("  dont escouades detruites reserves (20.04):", _fmt_count(_res_tm[1]), _fmt_count(_res_tm[2]))
-    _render_rule_coverage(stats, "1.1", log_print)
     # SHOOTING ERRORS
-    active_debug_section = "1.2"
+    _switch_section("1.2")
     log_print("\n" + "-" * 80)
     _table_header("1.2 SHOOTING ERRORS")
     # DEUX contrôles distincts, DEUX lignes. Ils ont vécu agrégés sous « Tirs invalides », et un
@@ -3469,9 +3474,8 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
             )
             if _first_any:
                 log_print(f"  First P{_pl} occurrence (Episode {_first_any['episode']}): {_first_any['line']}")
-    _render_rule_coverage(stats, "1.2", log_print)
     # CHARGE ERRORS
-    active_debug_section = "1.3"
+    _switch_section("1.3")
     log_print("\n" + "-" * 80)
     _table_header("1.3 CHARGE ERRORS")
     agent_charge_adj = stats['charge_from_adjacent'][1]
@@ -3516,9 +3520,8 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     if stats['first_error_lines']['charge_invalid'][2]:
         first_err = stats['first_error_lines']['charge_invalid'][2]
         log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-    _render_rule_coverage(stats, "1.3", log_print)
     # FIGHT ERRORS
-    active_debug_section = "1.4"
+    _switch_section("1.4")
     log_print("\n" + "-" * 80)
     _table_header("1.4 FIGHT ERRORS")
     # "Fight from non-adjacent hex" RETIRE (2026-07-24) : contrôle non reconstructible depuis
@@ -3566,9 +3569,8 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
             if _fm[_kind][_pl] > 0 and stats['first_error_lines']['fight_move_invalid'][_kind][_pl]:
                 _fe = stats['first_error_lines']['fight_move_invalid'][_kind][_pl]
                 log_print(f"  First P{_pl} occurrence (Episode {_fe['episode']}): {_fe['line']}")
-    _render_rule_coverage(stats, "1.4", log_print)
     # ACTION PHASE ACCURACY
-    active_debug_section = "1.5"
+    _switch_section("1.5")
     log_print("\n" + "-" * 80)
     log_print(f"1.5 {debug_sections['1.5']}")
     log_print("-" * 80)
@@ -3586,7 +3588,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
             log_print(f"  First occurrence (Episode {mismatch['episode']}): {mismatch['line']}")
 
     # 1.6 Double-activation par phase
-    active_debug_section = "1.6"
+    _switch_section("1.6")
     log_print("\n" + "-" * 80)
     log_print(f"1.6 {debug_sections['1.6']}")
     log_print("-" * 80)
@@ -3613,7 +3615,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         log_print("No double-activation detected.")
 
     # SPECIAL RULES USAGE (by rule and unit type)
-    active_debug_section = "1.7"
+    _switch_section("1.7")
     log_print("\n" + "-" * 80)
     log_print(f"1.7 SPECIAL RULES USAGE                  {'Unit':<55} {'P1':>10} {'P2':>10} {'Validité':>10}")
     log_print("-" * 80)
@@ -3693,7 +3695,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         log_print("  No rule-choice usage recorded.")
 
     # WEAPONS RULES USAGE (by rule and weapon+unit)
-    active_debug_section = "1.8"
+    _switch_section("1.8")
     log_print("\n" + "-" * 80)
     _wr_header()
     weapon_rule_usage = require_key(stats, 'weapon_rule_usage')
@@ -3777,7 +3779,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
             without_method_unknown += 1
 
     # DEAD UNITS INTERACTIONS
-    active_debug_section = "2.1"
+    _switch_section("2.1")
     log_print("\n" + "-" * 80)
     log_print(f"{('2.1 ' + debug_sections['2.1']):<30s} {'Joueur 1':>15s} {'Joueur 2':>15s}")
     log_print("-" * 80)
@@ -3854,9 +3856,8 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     if stats['unit_revived'][2] > 0 and stats['first_error_lines']['unit_revived'][2]:
         first_err = stats['first_error_lines']['unit_revived'][2]
         log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-    _render_rule_coverage(stats, "2.1", log_print)
     # POSITION / LOG COHERENCE
-    active_debug_section = "2.2"
+    _switch_section("2.2")
     log_print("\n" + "-" * 80)
     log_print(f"2.2 {debug_sections['2.2']}")
     log_print("-" * 80)
@@ -3878,16 +3879,15 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     log_print(f"Total collisions (2+ units in same hex): {len(stats['unit_position_collisions'])}")
 
     # DMG ISSUES
-    active_debug_section = "2.3"
+    _switch_section("2.3")
     log_print("\n" + "-" * 80)
     log_print(f"{('2.3 ' + debug_sections['2.3']):<30s} {'Joueur 1':>15s} {'Joueur 2':>15s}")
     log_print("-" * 80)
     dmg_missing_p1 = stats['damage_missing_unit_hp'][1]
     dmg_missing_p2 = stats['damage_missing_unit_hp'][2]
     log_print(f"Missing unit_hp on damage:   {dmg_missing_p1:6d}           {dmg_missing_p2:6d}")
-    _render_rule_coverage(stats, "2.3", log_print)
     # EPISODES STATISTICS
-    active_debug_section = "2.4"
+    _switch_section("2.4")
     log_print("\n" + "-" * 80)
     log_print(f"2.4 {debug_sections['2.4']}")
     log_print("-" * 80)
@@ -3901,7 +3901,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         log_print("Episode with most actions (average action number): N/A")
 
     # EPISODES ENDING
-    active_debug_section = "2.5"
+    _switch_section("2.5")
     log_print("\n" + "-" * 80)
     log_print(f"{('2.5 ' + debug_sections['2.5']):<30s} {'Joueur 1':>15s} {'Joueur 2':>15s}")
     log_print("-" * 80)
@@ -3909,7 +3909,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     log_print(f"Episodes without win_method: {without_method_p1:6d}           {without_method_p2:6d}")
 
     # SAMPLE MISSING
-    active_debug_section = "2.6"
+    _switch_section("2.6")
     log_print("\n" + "-" * 80)
     log_print(f"2.6 {debug_sections['2.6']}")
     log_print("-" * 80)
@@ -3923,7 +3923,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     log_print(f"Sample missing ({len(missing_samples)}/{len(sample_action_types)}) : {missing_samples_label}")
 
     # CORE ISSUES
-    active_debug_section = "2.7"
+    _switch_section("2.7")
     log_print("\n" + "-" * 80)
     log_print(f"2.7 {debug_sections['2.7']}")
     log_print("-" * 80)
@@ -3945,7 +3945,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     # accumulation d'événements ; jusqu'ici, rien ne disait quand cette reconstruction dérivait.
     # Ces trois nombres le disent — et une divergence non nulle invalide, pour l'épisode
     # concerné, les contrôles qui mesurent des distances ou des adjacences.
-    active_debug_section = "2.8"
+    _switch_section("2.8")
     log_print("\n" + "-" * 80)
     log_print(f"2.8 {debug_sections['2.8']}")
     log_print("-" * 80)
@@ -3954,7 +3954,6 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     log_print(f"Unites tuees a tort par l'analyzer        : {_resync['alive_missed']}")
     log_print(f"Figurines mal positionnees (deplacement non journalise) : {_resync['pos_mismatch']}")
     log_print(f"Figurine allouee inconnue de l'analyzer  : {_resync['alloc_model_unknown']}")
-    _render_rule_coverage(stats, "2.8", log_print)
     # LE calcul, partagé avec le total de la CLI (`error_totals`). Les deux copies qui vivaient
     # ici et là-bas avaient divergé sur deux compteurs : le rapport se contredisait lui-même.
     _totals = error_totals(stats)
@@ -3965,7 +3964,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     dead_unit_interactions_total = _totals['dead_units']
     pos_mismatch_total = _totals['positions']
 
-    active_debug_section = None
+    _switch_section(None)
     log_print("\n" + "=" * 80)
     log_print("SUMMARY")
     log_print("=" * 80)
