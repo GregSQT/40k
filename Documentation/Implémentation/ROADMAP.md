@@ -813,12 +813,10 @@ Prêts à démarrer sans décision produit :
   puis réécrire la note avec ce chiffre. Un réglage tenu par un chiffre faux se retourne au
   premier changement de durée — c'est déjà ce qui était arrivé à `bot_eval_freq` calé sur
   200 000 épisodes.
-- **Compteurs `abilities/`** (~1 j) — un compteur par règle d'unité RÉELLEMENT appliquée, par
-  joueur, **plus une courbe d'exposition** : sans elle, un zéro ne distingue pas « jamais
-  déclenchée » de « jamais dans le roster ». Deux familles, les deux obligatoires : celles qui
-  produisent une ligne d'`action_log` (`reactive_move`, `charge_impact`, `charge_after_advance` /
-  `charge_after_flee`, `move_after_shooting`) et celles qui ne modifient qu'un jet (rerolls, bonus
-  Oath — elles vivent sur les `shot_records`, pas dans `action_logs`).
+- ✅ **Compteurs `abilities/`** — **LIVRÉ le 2026-08-17**. 8 règles × 2 camps, courbe de count brut
+  + courbe d'exposition (taux cumulé). Famille A via `action_log` (`reactive_move`, `charge_impact`,
+  `charge_after_advance` / `charge_after_flee`, `move_after_shooting`) ; Famille B via `shot_records`
+  (`hit_reroll`, `wound_reroll`, `oath_wound_bonus`). 26 tests (18 moteur + 8 tracker), cycles rouge→vert.
   → [`Implémenté/metriques_reserves_et_charge_2026-08-11.md`](Implémenté/metriques_reserves_et_charge_2026-08-11.md) §Ce qui reste
 - ✅ **La portée d'un tir se juge AVANT les pertes** — **LIVRÉ le 2026-08-12**. L'analyzer mesurait
   la distance vers `[TARGET_MODELS:]`, segment que `step_logger` réserve explicitement au replay
@@ -957,12 +955,12 @@ Prêts à démarrer sans décision produit :
   | Symptôme | P1 | P2 | Règle |
   |---|---|---|---|
   | ~~Attaques au-delà de CC_NB~~ **→ 0, LIVRÉ (voir ci-dessous)** | ~~11~~ | ~~13~~ | 04.03 |
-  | Collisions (2 unités, même hex) | 7 (total) | | 03.01 |
+  | ~~Collisions (2 unités, même hex)~~ **→ 0, LIVRÉ (empreinte d'escouade)** | ~~7 (total)~~ | | 03.01 |
   | ~~Fall-back qui finit ENGAGÉ~~ **→ 0, LIVRÉ (empreinte d'escouade)** | ~~2~~ | ~~3~~ | 09.07 |
   | ~~Move normal finissant au contact~~ **→ 0, LIVRÉ (empreinte d'escouade)** | ~~1~~ | ~~4~~ | 09.05 |
   | ~~Tirs hors portée~~ **→ 0, ARTEFACTS (voir ci-dessous)** | ~~2~~ | ~~3~~ | 10 Shooting |
   | ~~Tir engagé visant une unité NON engagée avec le tireur~~ **→ 0, ARTEFACTS (voir ci-dessus)** | ~~0~~ | ~~3~~ | 10.06 |
-  | Move normal PARTI d'un engagement | 0 | 2 | 09.05 |
+  | ~~Move normal PARTI d'un engagement~~ **→ 0, LIVRÉ (empreinte d'escouade)** | ~~0~~ | ~~2~~ | 09.05 |
   | ~~Tir sur un ennemi engagé~~ **→ 0, ARTEFACTS (voir ci-dessous)** | ~~0~~ | ~~1~~ | 10.06 |
   | Mort « fantôme » (état reconstruit ≠ moteur) | 1 (total) | | — |
   ✅ **Trois familles annoncées le matin ont DISPARU** — pile-in au-delà de 3" (1), consolidation
