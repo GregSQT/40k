@@ -68,10 +68,10 @@ def test_a_bare_neighbour_resolves_to_the_document_directory(tmp_path: pathlib.P
     documentation, chaque lien interne sortait FICHIER INTROUVABLE + LIEN MORT (41 fois sur
     l'index au premier passage du corpus partitionné, 2026-08-18).
     """
-    write(tmp_path, "bot.md", "# cible\n")
+    write(tmp_path, "bot.md", "# cible\n\n## Étape 8 {#etape8}\n")
     doc = write(tmp_path, "note.md", "voir [bot.md#etape8](bot.md#etape8) et [bot.md](bot.md)\n")
     assert cdr.resolve("bot.md", tmp_path) == tmp_path / "bot.md"
-    _checked, _skipped, broken = cdr.check_links(doc)
+    _checked, _skipped, _fragments, broken = cdr.check_links(doc)
     assert not broken
 
 
@@ -143,7 +143,7 @@ def test_profile_table_reads_thousands_separator(tmp_path: pathlib.Path) -> None
 
 def test_dead_link_is_detected(tmp_path: pathlib.Path) -> None:
     doc = write(tmp_path, "note.md", "voir [ça](A_faire/ce_fichier_n_existe_pas.md)\n")
-    _checked, _skipped, broken = cdr.check_links(doc)
+    _checked, _skipped, _fragments, broken = cdr.check_links(doc)
     assert len(broken) == 1 and "LIEN MORT" in broken[0]
 
 
@@ -151,14 +151,82 @@ def test_dead_link_is_detected(tmp_path: pathlib.Path) -> None:
 def test_regex_noise_is_not_taken_for_a_link(tmp_path: pathlib.Path, target: str) -> None:
     """Écartés sur la FORME. Une liste d'exceptions nommées masquerait un vrai lien mort."""
     doc = write(tmp_path, "note.md", f"texte [x]({target}#L1)\n")
-    checked, skipped, broken = cdr.check_links(doc)
+    checked, skipped, _fragments, broken = cdr.check_links(doc)
     assert (checked, skipped, broken) == (0, 1, [])
 
 
 def test_live_link_is_verified(tmp_path: pathlib.Path) -> None:
     doc = write(tmp_path, "note.md", "voir [le moteur](engine/w40k_core.py)\n")
-    checked, _skipped, broken = cdr.check_links(doc)
+    checked, _skipped, _fragments, broken = cdr.check_links(doc)
     assert checked == 1 and not broken
+
+
+# --------------------------------------------------------------------------- fragments
+
+
+def test_a_renamed_anchor_is_detected(tmp_path: pathlib.Path) -> None:
+    """Le trou fermé ici : le fichier existe toujours, mais son titre ne porte plus l'ancre citée.
+
+    Le fragment était coupé avant résolution — 45 des 48 liens du corpus en portaient un
+    (2026-08-18), donc 94 % des liens n'étaient vérifiés qu'à moitié : renommer une ancre d'un
+    fichier sujet laissait l'index intégralement vert.
+    """
+    write(tmp_path, "bot.md", "# Bot\n\n## Étape 8 {#etape8-renomme}\n")
+    doc = write(tmp_path, "note.md", "voir [l'étape 8](bot.md#etape8)\n")
+    checked, _skipped, fragments, broken = cdr.check_links(doc)
+    assert (checked, fragments) == (1, 1)
+    assert len(broken) == 1 and cdr.LOST_ANCHOR in broken[0] and "bot.md#etape8" in broken[0]
+
+
+def test_a_declared_anchor_is_confirmed(tmp_path: pathlib.Path) -> None:
+    """La forme employée par tout le corpus : l'ancre DÉCLARÉE en fin de titre."""
+    write(tmp_path, "bot.md", "# Bot\n\n## Étape 8 — Run en cours {#etape8}\n")
+    doc = write(tmp_path, "note.md", "voir [l'étape 8](bot.md#etape8)\n")
+    _checked, _skipped, fragments, broken = cdr.check_links(doc)
+    assert (fragments, broken) == (1, [])
+
+
+@pytest.mark.parametrize("fragment", ["une-section-accentuée", "une-section-accentuee"])
+def test_a_title_without_a_declared_anchor_is_reachable(
+    tmp_path: pathlib.Path, fragment: str
+) -> None:
+    """Un titre sans `{#slug}` reste atteignable, sous les DEUX formes que produisent les rendus.
+
+    Aucune spécification unique ne définit le slug d'un titre ; exiger l'ancre déclarée rendrait
+    rouge un lien qui fonctionne vraiment, et un contrôle qui crie à tort finit désactivé.
+    """
+    write(tmp_path, "cible.md", "# Doc\n\n## Une section accentuée\n")
+    doc = write(tmp_path, "note.md", f"voir [là](cible.md#{fragment})\n")
+    _checked, _skipped, fragments, broken = cdr.check_links(doc)
+    assert (fragments, broken) == (1, [])
+
+
+def test_a_line_fragment_is_left_to_the_anchor_pass(tmp_path: pathlib.Path) -> None:
+    """`#L629` cite une LIGNE : la passe 4 la rapporte déjà, sous le bon message.
+
+    Confrontée aux titres, elle sortirait « ancre introuvable » et enverrait chercher un titre là
+    où le document cite une ligne — deux messages pour un seul défaut, dont un qui égare.
+    """
+    write(tmp_path, "cible.md", "# Doc\n")
+    doc = write(tmp_path, "ROADMAP_INDEX.md", "voir [là](cible.md#L629)\n")
+    _checked, _skipped, fragments, broken = cdr.check_links(doc)
+    assert (fragments, broken) == (0, [])
+    assert len(cdr.check_anchors(doc)) == 1
+
+
+def test_a_fragment_on_a_non_markdown_target_is_not_confronted(tmp_path: pathlib.Path) -> None:
+    """Hors `.md`, un fragment ne nomme pas un titre : il n'y a rien à confronter."""
+    doc = write(tmp_path, "note.md", "voir [le moteur](engine/w40k_core.py#execute_action)\n")
+    checked, _skipped, fragments, broken = cdr.check_links(doc)
+    assert (checked, fragments, broken) == (1, 0, [])
+
+
+def test_a_dead_link_is_not_counted_twice(tmp_path: pathlib.Path) -> None:
+    """Le fichier disparu se rapporte UNE fois : son ancre n'a plus de document où être cherchée."""
+    doc = write(tmp_path, "note.md", "voir [là](A_faire/disparu.md#une-ancre)\n")
+    _checked, _skipped, fragments, broken = cdr.check_links(doc)
+    assert fragments == 0
+    assert len(broken) == 1 and cdr.DEAD_LINK in broken[0]
 
 
 # --------------------------------------------------------------------------- renvois
@@ -1086,13 +1154,24 @@ def test_reference_documents_are_clean() -> None:
         path = ROOT / rel
         assert path.exists(), f"DEFAULT_DOCS pointe un fichier absent : {rel}"
         _resolved, _unverifiable, broken_refs = cdr.check_references(path)
-        _checked, _skipped, broken_links = cdr.check_links(path)
+        _checked, _skipped, _fragments, broken_links = cdr.check_links(path)
         _verified, broken_values = cdr.check_values(path)
         _kinds, _kinds_unverifiable, broken_kinds, _notes = cdr.check_symbol_kinds(path)
         broken = (
             broken_refs + broken_links + broken_values + cdr.check_anchors(path) + broken_kinds
         )
         assert not broken, f"{rel} : " + " | ".join(broken)
+
+
+def test_the_corpus_really_confronts_its_fragments() -> None:
+    """VERT VACANT : « 0 ancre introuvable » ne vaut rien si aucun fragment n'a été confronté.
+
+    Le corpus en portait 45 au 2026-08-18, tous vers un titre d'un fichier sujet. Le seuil est bas
+    à dessein — il dit que la passe REGARDE encore quelque chose, pas combien de liens la roadmap
+    doit porter, qui n'appartient qu'à la roadmap.
+    """
+    total = sum(cdr.check_links(ROOT / rel)[2] for rel in cdr.DEFAULT_DOCS)
+    assert total >= 10
 
 
 def test_the_corpus_really_confronts_some_kinds() -> None:
