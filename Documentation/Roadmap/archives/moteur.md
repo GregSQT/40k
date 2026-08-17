@@ -7,7 +7,7 @@
 | 2026-08-17 | `ANTI_INFANTRY:1→2` + garde domaine | `urty_syringe` corrigé ; `MIN_ANTI_THRESHOLD = 2` ; balayage corpus |
 | 2026-08-17 | Marqueur activation SHOOT 10.02 | `is_shoot_activation_start` ; `analyzer_couverture.md` mis à jour |
 | 2026-08-16 | Réorganisation metrics par phase | `ai/metrics_tracker.py` restructuré ; compteurs charges par épisode |
-| 2026-08-12 | Empreinte par figurine fight (pile-in destinations) | 21 sites → `_fight_model_fp_pair` ; 3 cases sur 330 changées ; → `Implémenté/empreinte_par_figurine_fight_2026-08-12.md` |
+| 2026-08-12 | Empreinte par figurine fight (pile-in destinations) | 21 sites → `_fight_model_fp_pair` ; 3 cases sur 330 changées ; → `Documentation/Implémentation/Implémenté/empreinte_par_figurine_fight_2026-08-12.md` |
 | 2026-08-12 | Engagement par figurine socle | 13 sites + 14ᵉ jumeau ; 21 530 cases sur 575 515 changées ; `MODEL_HEIGHT` par-figurine |
 | 2026-08-12 | Clairance par figurine | 11 appels `low_clearance_ground_hexes` ; `FloorIndex.low_clearance` mémoïsé par hauteur |
 | 2026-08-12 | Primitive commune « poser un plan » | `resolve_model_effective_level` + `place_model_at_effective_level` ; 18 sites (6 annoncés + 12 au grep) ; garde dur |

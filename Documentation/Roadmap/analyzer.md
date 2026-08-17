@@ -4,7 +4,7 @@
 
 ## Conformité moteur {#conformite}
 
-**10 erreurs restantes** (sur les 53 mesurées le 2026-08-11, après nettoyage de l'outil).
+**1 erreur restante** (sur les 53 mesurées le 2026-08-11 ; les familles CC_NB, move et tir ont été soldées les 2026-08-11/12).
 
 État sur le journal **2026-08-11 14h34** :
 
@@ -20,7 +20,7 @@ Les autres familles soldées : CC_NB (CLEAVE), collisions 03.01, fall-back engag
 
 ## Champs manquants `step.log` {#champs-step-log}
 
-**21 entrées restantes** (L6→L28). L1–L5 livrées. Chaque champ se livre seul et fait passer des règles de « non vérifiable » à « vérifiable ».
+**23** entrées restantes (L6→L28). L1–L5 livrées. Chaque champ se livre seul et fait passer des règles de « non vérifiable » à « vérifiable ».
 
 À piocher quand un contrôle analyzer manque de données.
 

@@ -7,7 +7,7 @@
 **Reste** : T2b/T3a/T7 (couche A) + couche B (vitest) + couche C (Playwright).
 ~10 j au total, sécable.
 
-→ `A_faire/front_test_auto.md`
+→ `Documentation/Implémentation/A_faire/front_test_auto.md`
 
 ---
 
@@ -23,3 +23,9 @@ Plusieurs chantiers récents ont été livrés sans passage navigateur. À valid
 | Clé contrôle objectif 2026-08-12 | Validation navigateur (capture d'objectif doit toujours recolorer) |
 | Aplatissements chemin rendu 2026-08-12 | Navigateur : glisser déploiement rangée du bas ; murs et couleurs objectif inchangés |
 | Config plateau BoardPvp 2026-08-12 | Navigateur replay (changement épisode, décor/échelle corrects) + glisser déploiement objectif |
+
+---
+
+## Scission `bcKey` géométrie/contrôle {#bckey}
+
+**Écartée le 2026-08-12, à arbitrer séparément** (relevé du chantier clé de contrôle d'objectif) : scinder `bcKey` en clé de géométrie et clé de contrôle pour ne plus reconstruire fond et murs à chaque capture d'objectif ; et sortir tout `bcKey` dans `frontend/src/utils/boardRedrawDecision.ts`, à côté de l'invariant qu'il alimente.

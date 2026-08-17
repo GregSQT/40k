@@ -21,7 +21,7 @@ Aucun fallback/workaround/default anti-erreur → T1
 SOURCES DE VÉRITÉ / ROADMAP
 
 Avant toute question de priorité, état d'un chantier ou « qu'est-ce qui reste » :
-1. Lire Documentation/Roadmap/ROADMAP_INDEX.md (ordre global, ~80 lignes)
+1. Lire Documentation/Roadmap/ROADMAP_INDEX.md (direction + ordre global, ~140 lignes)
 2. Si détail d'un chantier spécifique → lire le fichier sujet correspondant
 3. Pour l'historique d'un sujet → Documentation/Roadmap/archives/<sujet>.md
 

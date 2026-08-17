@@ -6,6 +6,6 @@
 
 → `Documentation/Implémentation/Security.md` (chantier vivant)
 
-⚠️ Security.md est à la racine d'`Implémentation/` au lieu d'`A_faire/` — 3ᵉ exception assumée.
+⚠️ `Security.md` est à la racine d'`Documentation/Implémentation/` au lieu d'`A_faire/` — 3ᵉ exception assumée.
 
 **Dépendance** : gzip/Brotli ([infra.md#gzip](infra.md#gzip)) doit être fait AVEC l'étape 5 (même proxy).

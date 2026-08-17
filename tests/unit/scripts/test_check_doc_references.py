@@ -60,18 +60,33 @@ def test_absolute_path_that_does_not_exist_is_broken() -> None:
     assert cdr.resolve("/engine/w40k_core.py", ROOT) is None
 
 
+def test_a_bare_neighbour_resolves_to_the_document_directory(tmp_path: pathlib.Path) -> None:
+    """Un nom NU adjacent au document résout chez lui — la sémantique des liens markdown.
+
+    Les fichiers sujets de `Documentation/Roadmap/` se lient entre eux par nom nu
+    (`[bot.md#etape8](bot.md#etape8)`) : cherché seulement depuis la racine et les arbres de
+    documentation, chaque lien interne sortait FICHIER INTROUVABLE + LIEN MORT (41 fois sur
+    l'index au premier passage du corpus partitionné, 2026-08-18).
+    """
+    write(tmp_path, "bot.md", "# cible\n")
+    doc = write(tmp_path, "note.md", "voir [bot.md#etape8](bot.md#etape8) et [bot.md](bot.md)\n")
+    assert cdr.resolve("bot.md", tmp_path) == tmp_path / "bot.md"
+    _checked, _skipped, broken = cdr.check_links(doc)
+    assert not broken
+
+
 # --------------------------------------------------------------------------- valeurs
 
 
 def test_stale_value_is_detected(tmp_path: pathlib.Path) -> None:
-    doc = write(tmp_path, "ROADMAP.md", "les **99** profils sont à 48 envs\n")
+    doc = write(tmp_path, "v11_chemin_critique.md", "les **99** profils sont à 48 envs\n")
     _verified, broken = cdr.check_values(doc)
     assert any("VALEUR PÉRIMÉE" in entry and "99" in entry for entry in broken)
 
 
 def test_true_value_is_confirmed(tmp_path: pathlib.Path) -> None:
     count = len(cdr.agent_profiles())
-    doc = write(tmp_path, "ROADMAP.md", f"les **{count}** profils\n")
+    doc = write(tmp_path, "v11_chemin_critique.md", f"les **{count}** profils\n")
     verified, broken = cdr.check_values(doc)
     assert verified == 1
     assert not any("VALEUR PÉRIMÉE" in entry for entry in broken)
@@ -79,16 +94,16 @@ def test_true_value_is_confirmed(tmp_path: pathlib.Path) -> None:
 
 def test_orphan_assertion_is_reported(tmp_path: pathlib.Path) -> None:
     """Une phrase reformulée doit faire ROUGIR le contrôle, pas le rendre muet."""
-    doc = write(tmp_path, "ROADMAP.md", "plus aucune des phrases surveillees ici\n")
+    doc = write(tmp_path, "v11_chemin_critique.md", "plus aucune des phrases surveillees ici\n")
     _verified, broken = cdr.check_values(doc)
-    assert len(broken) == len(cdr.VALUE_CHECKS["ROADMAP.md"])
+    assert len(broken) == len(cdr.VALUE_CHECKS["v11_chemin_critique.md"])
     assert all("ASSERTION ORPHELINE" in entry for entry in broken)
 
 
 def test_the_gate_ceiling_is_read_from_the_gate(tmp_path: pathlib.Path) -> None:
     """Le plafond annoncé par §5 se confronte à `MAX_UNDECLARED`, pas à une relecture du texte."""
     ceiling = cdr.expected_gate_ceiling(None)
-    doc = write(tmp_path, "ROADMAP.md", f"est refusée quand **{ceiling}** chantiers ont été livrés\n")
+    doc = write(tmp_path, "ROADMAP_INDEX.md", f"est refusée quand **{ceiling}** chantiers ont été livrés\n")
     verified, broken = cdr.check_values(doc)
     assert verified == 1
     assert not any("plafond" in entry for entry in broken)
@@ -98,7 +113,7 @@ def test_a_stale_gate_ceiling_is_detected(tmp_path: pathlib.Path) -> None:
     """Le cas vécu : le document a annoncé 3 pendant que la porte refusait à 2."""
     ceiling = cdr.expected_gate_ceiling(None)
     doc = write(
-        tmp_path, "ROADMAP.md", f"est refusée quand **{ceiling + 1}** chantiers ont été livrés\n"
+        tmp_path, "ROADMAP_INDEX.md", f"est refusée quand **{ceiling + 1}** chantiers ont été livrés\n"
     )
     _verified, broken = cdr.check_values(doc)
     assert any("VALEUR PÉRIMÉE" in entry and f"la source dit {ceiling}" in entry for entry in broken)
@@ -106,9 +121,9 @@ def test_a_stale_gate_ceiling_is_detected(tmp_path: pathlib.Path) -> None:
 
 def test_the_gate_ceiling_matches_the_real_roadmap() -> None:
     """Bout en bout, sur le document réel : la phrase existe et dit la valeur de la porte."""
-    text = (ROOT / "Documentation" / "Implémentation" / "ROADMAP.md").read_text(encoding="utf-8")
+    text = (ROOT / "Documentation" / "Roadmap" / "ROADMAP_INDEX.md").read_text(encoding="utf-8")
     claims = cdr.claim_gate_ceiling(text)
-    assert claims, "ROADMAP.md n'annonce plus le plafond de la porte — assertion orpheline"
+    assert claims, "ROADMAP_INDEX.md n'annonce plus le plafond de la porte — assertion orpheline"
     assert all(value == cdr.expected_gate_ceiling(None) for _where, value in claims)
 
 
@@ -116,7 +131,9 @@ def test_profile_table_reads_thousands_separator(tmp_path: pathlib.Path) -> None
     """« 10 000 » vaut dix mille : le lire comme 10 inventerait une valeur périmée."""
     episodes = cdr.agent_profiles()["x1"]["total_episodes"]
     final = cdr.agent_profiles()["x1"]["callback_params"]["bot_eval_final"]
-    doc = write(tmp_path, "ROADMAP.md", f"| `x1` | {episodes:,} | {final} |\n".replace(",", " "))
+    doc = write(
+        tmp_path, "v11_chemin_critique.md", f"| `x1` | {episodes:,} | {final} |\n".replace(",", " ")
+    )
     claims = dict(cdr.claim_profile_table(doc.read_text(encoding="utf-8")))
     assert claims["x1.total_episodes"] == episodes
 
@@ -269,12 +286,12 @@ def test_missing_file_in_table_is_broken(tmp_path: pathlib.Path) -> None:
 
 
 def test_line_anchor_is_reported(tmp_path: pathlib.Path) -> None:
-    doc = write(tmp_path, "ROADMAP.md", "voir `engine/observation_entities.py:274`\n")
+    doc = write(tmp_path, "ROADMAP_INDEX.md", "voir `engine/observation_entities.py:274`\n")
     assert len(cdr.check_anchors(doc)) == 1
 
 
 def test_symbol_reference_is_not_an_anchor(tmp_path: pathlib.Path) -> None:
-    doc = write(tmp_path, "ROADMAP.md", "voir `def compute_candidate_footprint` dans le moteur\n")
+    doc = write(tmp_path, "ROADMAP_INDEX.md", "voir `def compute_candidate_footprint` dans le moteur\n")
     assert cdr.check_anchors(doc) == []
 
 
@@ -300,7 +317,7 @@ def test_a_line_anchor_of_any_extension_is_reported(tmp_path: pathlib.Path, ref:
     cas-là sont dans l'échantillon pour cette raison, et `docker-compose.yml:18` était bel et bien
     présent dans `Security.md`.
     """
-    doc = write(tmp_path, "ROADMAP.md", f"le composant `{ref}` recopie les hexes\n")
+    doc = write(tmp_path, "ROADMAP_INDEX.md", f"le composant `{ref}` recopie les hexes\n")
     entries = cdr.check_anchors(doc)
     assert len(entries) == 1
     # Le renvoi est cité ENTIER, chemin compris. Capturé sans ses points internes,
@@ -322,7 +339,7 @@ def test_the_other_two_spellings_of_an_anchor_are_reported(
     Ces deux écritures vivaient dans `ROADMAP.md` au 2026-08-12 pendant que le contrôle affichait
     « 0 renvoi » : il n'en surveillait qu'une sur trois.
     """
-    doc = write(tmp_path, "ROADMAP.md", line)
+    doc = write(tmp_path, "ROADMAP_INDEX.md", line)
     assert len(cdr.check_anchors(doc)) >= 1
 
 
@@ -334,14 +351,14 @@ def test_a_step_log_entry_is_not_an_anchor(tmp_path: pathlib.Path) -> None:
     prochaine entrée, ce qui est exactement le défaut qu'on ferme.
     """
     largest = cdr.step_log_entries()[1]
-    doc = write(tmp_path, "ROADMAP.md", f"| L1 | `L3` → `L{largest}` |\n")
+    doc = write(tmp_path, "ROADMAP_INDEX.md", f"| L1 | `L3` → `L{largest}` |\n")
     assert cdr.check_anchors(doc) == []
 
 
 def test_a_line_number_beyond_the_step_log_is_an_anchor(tmp_path: pathlib.Path) -> None:
     """Au-delà du plus grand index existant, `Ln` ne peut plus être un nom d'entrée."""
     largest = cdr.step_log_entries()[1]
-    doc = write(tmp_path, "ROADMAP.md", f"`_auto_declared_order` L{largest + 1} → **9133**\n")
+    doc = write(tmp_path, "ROADMAP_INDEX.md", f"`_auto_declared_order` L{largest + 1} → **9133**\n")
     assert len(cdr.check_anchors(doc)) == 1
 
 
@@ -357,7 +374,7 @@ def test_a_citation_cannot_be_framed_by_two_files(tmp_path: pathlib.Path) -> Non
     porteur.write_text("def agit():\n    return 1\n", encoding="utf-8")
     absent = tmp_path / "absent.py"
     absent.write_text("VALEUR = 1\n", encoding="utf-8")
-    doc = write(tmp_path, "ROADMAP.md", f"`{absent}` : `def agit` : `{porteur}`\n")
+    doc = write(tmp_path, "ROADMAP_INDEX.md", f"`{absent}` : `def agit` : `{porteur}`\n")
     checked, unverifiable, broken, _notes = cdr.check_symbol_kinds(doc)
     assert (checked, unverifiable, broken) == (1, 0, [])
 
@@ -378,7 +395,7 @@ def test_what_is_not_a_repo_reference_is_not_an_anchor(
     suivi n'emploie. Sans eux, ce test resterait vert avec le filtre remplacé par `return True`.
     `ViT-L336`, lui, est écarté plus tôt, par le voisinage gauche de `BARE_ANCHOR`.
     """
-    doc = write(tmp_path, "ROADMAP.md", line)
+    doc = write(tmp_path, "ROADMAP_INDEX.md", line)
     assert cdr.check_anchors(doc) == []
 
 
@@ -388,7 +405,7 @@ def test_what_is_not_a_repo_reference_is_not_an_anchor(
 def test_a_def_claimed_for_a_class_is_reported(tmp_path: pathlib.Path) -> None:
     """Le défaut réel : `ROADMAP.md` promettait un grep `def` sur deux `class`, qui rend 0 hit."""
     doc = write(
-        tmp_path, "ROADMAP.md",
+        tmp_path, "ROADMAP_INDEX.md",
         "c'est `def EpisodeTerminationCallback` (`ai/training_callbacks.py`) qui porte le budget\n",
     )
     _checked, _unverifiable, broken, _notes = cdr.check_symbol_kinds(doc)
@@ -398,7 +415,7 @@ def test_a_def_claimed_for_a_class_is_reported(tmp_path: pathlib.Path) -> None:
 
 def test_the_right_kind_is_confirmed(tmp_path: pathlib.Path) -> None:
     doc = write(
-        tmp_path, "ROADMAP.md",
+        tmp_path, "ROADMAP_INDEX.md",
         "c'est `class EpisodeTerminationCallback` (`ai/training_callbacks.py`) qui compte\n",
     )
     checked, _unverifiable, broken, _notes = cdr.check_symbol_kinds(doc)
@@ -407,7 +424,7 @@ def test_the_right_kind_is_confirmed(tmp_path: pathlib.Path) -> None:
 
 def test_a_symbol_that_is_not_defined_at_all_is_reported(tmp_path: pathlib.Path) -> None:
     doc = write(
-        tmp_path, "ROADMAP.md",
+        tmp_path, "ROADMAP_INDEX.md",
         "voir `def _ce_symbole_na_jamais_existe` (`ai/training_callbacks.py`)\n",
     )
     _checked, _unverifiable, broken, _notes = cdr.check_symbol_kinds(doc)
@@ -429,7 +446,7 @@ def test_a_mention_is_not_a_definition(tmp_path: pathlib.Path, body: str) -> Non
     """
     module = tmp_path / "faux_module.py"
     module.write_text(body, encoding="utf-8")
-    doc = write(tmp_path, "ROADMAP.md", f"voir `def write` (`{module}`)\n")
+    doc = write(tmp_path, "ROADMAP_INDEX.md", f"voir `def write` (`{module}`)\n")
     _checked, _unverifiable, broken, _notes = cdr.check_symbol_kinds(doc)
     assert len(broken) == 1 and "SYMBOLE NON DÉFINI" in broken[0]
 
@@ -444,7 +461,7 @@ def test_an_async_def_is_a_def(tmp_path: pathlib.Path, citation: str) -> None:
     """
     module = tmp_path / "faux_module.py"
     module.write_text("async def sert(requete):\n    return requete\n", encoding="utf-8")
-    doc = write(tmp_path, "ROADMAP.md", f"voir {citation} (`{module}`)\n")
+    doc = write(tmp_path, "ROADMAP_INDEX.md", f"voir {citation} (`{module}`)\n")
     checked, _unverifiable, broken, _notes = cdr.check_symbol_kinds(doc)
     assert checked == 1 and not broken
 
@@ -453,7 +470,7 @@ def test_a_nested_definition_counts(tmp_path: pathlib.Path) -> None:
     """Une méthode citée par son nom est bien définie dans le fichier cité."""
     module = tmp_path / "faux_module.py"
     module.write_text("class Porteur:\n    def methode(self):\n        return 1\n", encoding="utf-8")
-    doc = write(tmp_path, "ROADMAP.md", f"voir `def methode` (`{module}`)\n")
+    doc = write(tmp_path, "ROADMAP_INDEX.md", f"voir `def methode` (`{module}`)\n")
     checked, _unverifiable, broken, _notes = cdr.check_symbol_kinds(doc)
     assert checked == 1 and not broken
 
@@ -469,7 +486,7 @@ def test_a_signature_does_not_disarm_the_pass(tmp_path: pathlib.Path, citation: 
     Ignorée, elle ne comptait même pas comme non vérifiée — la passe rendait « 0 fausse, 0 non
     vérifiée » sur une ligne fausse.
     """
-    doc = write(tmp_path, "ROADMAP.md", f"c'est {citation} (`ai/training_callbacks.py`) qui compte\n")
+    doc = write(tmp_path, "ROADMAP_INDEX.md", f"c'est {citation} (`ai/training_callbacks.py`) qui compte\n")
     _checked, _unverifiable, broken, _notes = cdr.check_symbol_kinds(doc)
     assert len(broken) == 1 and "SORTE FAUSSE" in broken[0]
 
@@ -480,7 +497,7 @@ def test_an_ambiguous_file_makes_the_cell_unconfrontable(tmp_path: pathlib.Path)
     L'adjacence donne un fichier, pas une identité : ouvrir le premier trouvé, c'est interroger un
     fichier dont le document ne parle peut-être pas — même doctrine qu'en passe 1.
     """
-    doc = write(tmp_path, "ROADMAP.md", "voir `class GameClient` (`conftest.py`)\n")
+    doc = write(tmp_path, "ROADMAP_INDEX.md", "voir `class GameClient` (`conftest.py`)\n")
     checked, unverifiable, broken, _notes = cdr.check_symbol_kinds(doc)
     assert (checked, unverifiable, broken) == (0, 1, [])
 
@@ -494,7 +511,7 @@ def test_an_unparsable_file_is_not_blamed_on_the_document(tmp_path: pathlib.Path
     """
     module = tmp_path / "faux_module.py"
     module.write_text("def casse(:\n", encoding="utf-8")
-    doc = write(tmp_path, "ROADMAP.md", f"voir `def casse` (`{module}`)\n")
+    doc = write(tmp_path, "ROADMAP_INDEX.md", f"voir `def casse` (`{module}`)\n")
     checked, unverifiable, broken, _notes = cdr.check_symbol_kinds(doc)
     assert (checked, unverifiable, broken) == (0, 1, [])
 
@@ -507,7 +524,7 @@ def test_a_table_never_pairs_across_cells(tmp_path: pathlib.Path) -> None:
     désactivé.
     """
     doc = write(
-        tmp_path, "ROADMAP.md",
+        tmp_path, "ROADMAP_INDEX.md",
         "| `class EpisodeTerminationCallback` | oui | `ai/train.py` |\n",
     )
     checked, unverifiable, broken, _notes = cdr.check_symbol_kinds(doc)
@@ -522,7 +539,7 @@ def test_prose_never_pairs_a_distant_file(tmp_path: pathlib.Path) -> None:
     phrase juste — et un contrôle qui crie à tort finit désactivé.
     """
     doc = write(
-        tmp_path, "ROADMAP.md",
+        tmp_path, "ROADMAP_INDEX.md",
         "les rampes vivent dans `ai/training_callbacks.py` ; on y branche `class VecNormalize` "
         "de SB3\n",
     )
@@ -537,7 +554,7 @@ def test_a_parenthesis_that_keeps_talking_is_not_a_claim(tmp_path: pathlib.Path)
     (donc code 1) et « non vérifiée » là, sur exactement la même phrase.
     """
     doc = write(
-        tmp_path, "ROADMAP.md",
+        tmp_path, "ROADMAP_INDEX.md",
         "on branche `class VecNormalize` (`ai/training_callbacks.py` l'importe de SB3)\n",
     )
     checked, unverifiable, broken, _notes = cdr.check_symbol_kinds(doc)
@@ -555,7 +572,7 @@ def test_the_file_may_come_first(tmp_path: pathlib.Path, line: str) -> None:
     `is_symbol_token` refuse l'espace de « def Foo ») ne voyaient cette écriture. Le motif même
     qui a ouvert ce chantier, écrit à l'envers, sortait vert.
     """
-    doc = write(tmp_path, "ROADMAP.md", line)
+    doc = write(tmp_path, "ROADMAP_INDEX.md", line)
     _checked, unverifiable, broken, _notes = cdr.check_symbol_kinds(doc)
     assert len(broken) == 1 and "SORTE FAUSSE" in broken[0]
     # La citation est APPARIÉE : la compter EN PLUS comme « non vérifiée » ferait dire au rapport
@@ -574,7 +591,7 @@ def test_a_bare_juxtaposition_is_not_a_firm_claim(tmp_path: pathlib.Path, line: 
     phrase juste ; et l'accepter dans un sens sans l'accepter dans l'autre faisait dépendre le
     verdict de l'ordre des mots. Le lien fermé — parenthèse ou deux-points — est exigé partout.
     """
-    doc = write(tmp_path, "ROADMAP.md", line)
+    doc = write(tmp_path, "ROADMAP_INDEX.md", line)
     checked, unverifiable, broken, _notes = cdr.check_symbol_kinds(doc)
     assert (checked, unverifiable, broken) == (0, 1, [])
 
@@ -588,7 +605,7 @@ def test_a_qualified_citation_is_confronted(tmp_path: pathlib.Path) -> None:
     """
     module = tmp_path / "faux_module.py"
     module.write_text("class Moteur:\n    def agit(self):\n        return 1\n", encoding="utf-8")
-    doc = write(tmp_path, "ROADMAP.md", f"voir `class Moteur.agit` (`{module}`)\n")
+    doc = write(tmp_path, "ROADMAP_INDEX.md", f"voir `class Moteur.agit` (`{module}`)\n")
     _checked, _unverifiable, broken, _notes = cdr.check_symbol_kinds(doc)
     assert len(broken) == 1 and "SORTE FAUSSE" in broken[0]
 
@@ -603,7 +620,7 @@ def test_a_qualified_citation_is_not_satisfied_by_a_module_level_twin(
     """
     module = tmp_path / "faux_module.py"
     module.write_text("def agit():\n    return 1\n", encoding="utf-8")
-    doc = write(tmp_path, "ROADMAP.md", f"voir `def Moteur.agit` (`{module}`)\n")
+    doc = write(tmp_path, "ROADMAP_INDEX.md", f"voir `def Moteur.agit` (`{module}`)\n")
     checked, _unverifiable, broken, _notes = cdr.check_symbol_kinds(doc)
     assert checked == 0
     assert len(broken) == 1 and "SYMBOLE NON DÉFINI" in broken[0]
@@ -611,7 +628,7 @@ def test_a_qualified_citation_is_not_satisfied_by_a_module_level_twin(
 
 def test_an_extensionless_tracked_file_is_an_anchor(tmp_path: pathlib.Path) -> None:
     """`Dockerfile:14` est un renvoi de ligne — et `Security.md` cite justement ce fichier."""
-    doc = write(tmp_path, "ROADMAP.md", "le montage est décrit en `Dockerfile:14`\n")
+    doc = write(tmp_path, "ROADMAP_INDEX.md", "le montage est décrit en `Dockerfile:14`\n")
     assert len(cdr.check_anchors(doc)) == 1
 
 
@@ -622,7 +639,7 @@ def test_the_same_anchor_written_twice_is_reported_once(tmp_path: pathlib.Path) 
     n'existe pas.
     """
     doc = write(
-        tmp_path, "ROADMAP.md",
+        tmp_path, "ROADMAP_INDEX.md",
         "voir [shared_utils.py:629](../../engine/phase_handlers/shared_utils.py#L629)\n",
     )
     assert len(cdr.check_anchors(doc)) == 1
@@ -636,7 +653,7 @@ def test_two_distinct_anchors_sharing_a_number_are_both_reported(
     Dédoublonner sur le seul numéro perdait le second en silence — pire que le doublon qu'on
     voulait éviter.
     """
-    doc = write(tmp_path, "ROADMAP.md", "les deux sites `shared_utils.py:629` et L629 de BoardPvp\n")
+    doc = write(tmp_path, "ROADMAP_INDEX.md", "les deux sites `shared_utils.py:629` et L629 de BoardPvp\n")
     assert len(cdr.check_anchors(doc)) == 2
 
 
@@ -644,7 +661,7 @@ def test_two_files_at_the_same_line_inside_one_link_are_both_reported(
     tmp_path: pathlib.Path
 ) -> None:
     """Deux FICHIERS différents au même numéro, dans un même lien, sont deux renvois."""
-    doc = write(tmp_path, "ROADMAP.md", "voir [train.py:12 et w40k_core.py:12](x.md)\n")
+    doc = write(tmp_path, "ROADMAP_INDEX.md", "voir [train.py:12 et w40k_core.py:12](x.md)\n")
     assert len(cdr.check_anchors(doc)) == 2
 
 
@@ -655,7 +672,7 @@ def test_a_file_url_link_repeating_its_anchor_is_reported_once(tmp_path: pathlib
     autrement cette forme-là, la plus courante du corpus, était comptée deux fois.
     """
     doc = write(
-        tmp_path, "ROADMAP.md",
+        tmp_path, "ROADMAP_INDEX.md",
         "voir [shared_utils.py:629](file:///home/greg/40k/engine/phase_handlers/"
         "shared_utils.py:629)\n",
     )
@@ -666,7 +683,7 @@ def test_an_unloadable_source_blocks_without_a_traceback(
     tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Une porte de fusion qui ne s'importe plus bloque en une ligne, pas en trace Python."""
-    doc = write(tmp_path, "ROADMAP.md", "est refusée quand **2** chantiers ont été livrés\n")
+    doc = write(tmp_path, "ROADMAP_INDEX.md", "est refusée quand **2** chantiers ont été livrés\n")
     monkeypatch.setattr(
         cdr, "gate_module",
         lambda: (_ for _ in ()).throw(cdr.SourceUnavailable("import cassé")),
@@ -704,7 +721,7 @@ def test_an_internal_defect_keeps_its_traceback(
     Le confondre avec elle annonçait la mauvaise panne et désignait le mauvais fichier : ce qui
     est un défaut interne garde sa trace.
     """
-    doc = write(tmp_path, "ROADMAP.md", "les **9** profils\n")
+    doc = write(tmp_path, "v11_chemin_critique.md", "les **9** profils\n")
     monkeypatch.setattr(
         cdr, "expected_profile_count",
         lambda: (_ for _ in ()).throw(KeyError("callback_params")),
@@ -722,7 +739,7 @@ def test_a_source_that_disappears_blocks_without_a_traceback(
     y compris ceux qui n'ont aucun rapport avec le `step.log` : une trace envoie alors corriger le
     mauvais fichier, et le script promet 0 ou 1.
     """
-    doc = write(tmp_path, "ROADMAP.md", "`_auto_declared_order` L6462 → **9133**\n")
+    doc = write(tmp_path, "ROADMAP_INDEX.md", "`_auto_declared_order` L6462 → **9133**\n")
     monkeypatch.setattr(
         cdr, "step_log_entries",
         lambda: (_ for _ in ()).throw(cdr.SourceUnavailable("§7 introuvable")),
@@ -737,7 +754,7 @@ def test_backticked_prose_with_a_colon_is_not_a_citation(tmp_path: pathlib.Path)
     sur une ligne juste. Le deux-points de signature est COLLÉ au nom.
     """
     doc = write(
-        tmp_path, "ROADMAP.md",
+        tmp_path, "ROADMAP_INDEX.md",
         "`class Objectives : la liste des objectifs` (`engine/w40k_core.py`)\n",
     )
     checked, unverifiable, broken, _notes = cdr.check_symbol_kinds(doc)
@@ -752,7 +769,7 @@ def test_an_unparsable_file_is_named_not_just_counted(tmp_path: pathlib.Path) ->
     """
     module = tmp_path / "faux_module.py"
     module.write_text("def casse(:\n", encoding="utf-8")
-    doc = write(tmp_path, "ROADMAP.md", f"voir `def casse` (`{module}`)\n")
+    doc = write(tmp_path, "ROADMAP_INDEX.md", f"voir `def casse` (`{module}`)\n")
     _checked, unverifiable, broken, notes = cdr.check_symbol_kinds(doc)
     assert (unverifiable, broken) == (1, [])
     assert len(notes) == 1 and "faux_module.py" in notes[0]
@@ -771,7 +788,7 @@ def test_a_colon_that_opens_a_sentence_is_not_a_claim(
     la même phrase écrite entre parenthèses était correctement comptée non vérifiée. Le verdict ne
     peut pas dépendre de la ponctuation.
     """
-    doc = write(tmp_path, "ROADMAP.md", line)
+    doc = write(tmp_path, "ROADMAP_INDEX.md", line)
     checked, unverifiable, broken, _notes = cdr.check_symbol_kinds(doc)
     assert (checked, unverifiable, broken) == (0, 1, [])
 
@@ -779,7 +796,7 @@ def test_a_colon_that_opens_a_sentence_is_not_a_claim(
 def test_the_colon_form_claims_in_both_orders(tmp_path: pathlib.Path) -> None:
     """Le deux-points affirme, quel que soit le côté où se trouve le fichier."""
     doc = write(
-        tmp_path, "ROADMAP.md",
+        tmp_path, "ROADMAP_INDEX.md",
         "`def EpisodeTerminationCallback` : `ai/training_callbacks.py`\n",
     )
     _checked, _unverifiable, broken, _notes = cdr.check_symbol_kinds(doc)
@@ -793,7 +810,7 @@ def test_the_message_names_the_adjacent_file(tmp_path: pathlib.Path) -> None:
     mauvais endroit.
     """
     doc = write(
-        tmp_path, "ROADMAP.md",
+        tmp_path, "ROADMAP_INDEX.md",
         "`def EpisodeTerminationCallback` (`ai/training_callbacks.py`) a remplacé "
         "`ai/disparu.py`\n",
     )
@@ -814,7 +831,7 @@ def test_a_kind_without_a_single_file_is_counted_not_guessed(
     « du même fichier » ne se résout pas, et rattacher la ligne au fichier de la précédente
     fabriquerait une affirmation que le document ne fait pas.
     """
-    doc = write(tmp_path, "ROADMAP.md", line)
+    doc = write(tmp_path, "ROADMAP_INDEX.md", line)
     checked, unverifiable, broken, _notes = cdr.check_symbol_kinds(doc)
     assert (checked, unverifiable, broken) == (0, 1, [])
 
@@ -1059,9 +1076,15 @@ def test_a_dotted_call_is_not_a_file(tmp_path: pathlib.Path) -> None:
 
 
 def test_reference_documents_are_clean() -> None:
-    """Les trois documents d'entrée passent le contrôle — c'est la ligne de base à tenir."""
-    for name in ("analyzer_couverture.md", "ROADMAP.md", "Security.md"):
-        path = ROOT / "Documentation" / "Implémentation" / name
+    """Les documents d'entrée EXISTENT et passent le contrôle — la ligne de base à tenir.
+
+    L'existence est affirmée en premier : le déménagement de la roadmap (2026-08-17) a laissé
+    `DEFAULT_DOCS` pointer un fichier supprimé, et le contrôle est resté rouge en permanence
+    jusqu'au prompt suivant. Un chemin mort dans la liste d'entrée doit rougir ICI, nommément.
+    """
+    for rel in cdr.DEFAULT_DOCS:
+        path = ROOT / rel
+        assert path.exists(), f"DEFAULT_DOCS pointe un fichier absent : {rel}"
         _resolved, _unverifiable, broken_refs = cdr.check_references(path)
         _checked, _skipped, broken_links = cdr.check_links(path)
         _verified, broken_values = cdr.check_values(path)
@@ -1069,20 +1092,18 @@ def test_reference_documents_are_clean() -> None:
         broken = (
             broken_refs + broken_links + broken_values + cdr.check_anchors(path) + broken_kinds
         )
-        assert not broken, f"{name} : " + " | ".join(broken)
+        assert not broken, f"{rel} : " + " | ".join(broken)
 
 
 def test_the_corpus_really_confronts_some_kinds() -> None:
     """VERT VACANT : « 0 sorte fausse » ne vaut rien si aucune sorte n'a été confrontée.
 
-    Les trois documents en portent trois au 2026-08-12 (deux dans `ROADMAP.md`, une dans
-    `Security.md`). Le jour où la dernière disparaît, ce test doit le dire plutôt que laisser la
-    passe s'éteindre en silence.
+    Le corpus en porte au moins trois (les `def` de la convention d'ancres dans `doc.md`, une
+    dans `Security.md`). Le jour où la dernière disparaît, ce test doit le dire plutôt que
+    laisser la passe s'éteindre en silence.
     """
     total = 0
-    for name in ("analyzer_couverture.md", "ROADMAP.md", "Security.md"):
-        checked, _unverifiable, _broken, _notes = cdr.check_symbol_kinds(
-            ROOT / "Documentation" / "Implémentation" / name
-        )
+    for rel in cdr.DEFAULT_DOCS:
+        checked, _unverifiable, _broken, _notes = cdr.check_symbol_kinds(ROOT / rel)
         total += checked
     assert total >= 3

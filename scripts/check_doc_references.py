@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Les documents d'entrée disent-ils encore la vérité sur le dépôt ?
 
-POURQUOI CE SCRIPT EXISTE. `analyzer_couverture.md` et `ROADMAP.md` sont les documents d'ENTRÉE :
-l'un dit ce qui est vérifié et ce qui ne l'est pas, l'autre dit par quoi commencer. Ils sont tenus
-à la main, et rien ne les confrontait au dépôt. Le 2026-08-10, un contrôle ponctuel a mesuré l'état
+POURQUOI CE SCRIPT EXISTE. Les documents d'ENTRÉE sont la roadmap (`Documentation/Roadmap/` :
+`ROADMAP_INDEX.md` qui dit par quoi commencer, plus un fichier par sujet) et les deux contrats
+permanents (`analyzer_couverture.md`, `Security.md`). Ils sont tenus à la main, et rien ne les
+confrontait au dépôt. Le 2026-08-10, un contrôle ponctuel a mesuré l'état
 des renvois d'`analyzer_couverture.md` **après une seule journée de livraisons** :
 
     147 citations `fichier.py:ligne` — 31 saines, 76 PROUVÉES FAUSSES, 40 invérifiables.
@@ -16,7 +17,8 @@ CE QU'IL ÉTABLIT, en cinq passes :
   2. LIENS    — toute cible de lien markdown existe.
   3. VALEURS  — les nombres recopiés d'une source mécanique (config d'agent, tableau d'un autre
                 document, constante d'un script) valent encore ce que le document annonce.
-  4. ANCRES   — aucun renvoi de la forme `fichier.py:123`, convention posée par `ROADMAP.md` §5.
+  4. ANCRES   — aucun renvoi de la forme `fichier.py:123`, convention posée par la roadmap
+                (aujourd'hui portée par `Documentation/Roadmap/doc.md`, section ancres).
                 La convention vaut pour TOUTE extension citée par ces documents, pas seulement le
                 `.py` : mesuré le 2026-08-12, les deux seules ancres survivantes de `ROADMAP.md`
                 étaient des `.tsx`, invisibles au contrôle et déjà décalées de plusieurs milliers
@@ -78,15 +80,27 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 DOCS = ROOT / "Documentation" / "Implémentation"
 
 DEFAULT_DOCS = [
+    "Documentation/Roadmap/ROADMAP_INDEX.md",
+    "Documentation/Roadmap/v11_chemin_critique.md",
+    "Documentation/Roadmap/moteur.md",
+    "Documentation/Roadmap/training.md",
+    "Documentation/Roadmap/bot.md",
+    "Documentation/Roadmap/analyzer.md",
+    "Documentation/Roadmap/front.md",
+    "Documentation/Roadmap/infra.md",
+    "Documentation/Roadmap/security.md",
+    "Documentation/Roadmap/capacites.md",
+    "Documentation/Roadmap/doc.md",
     "Documentation/Implémentation/analyzer_couverture.md",
-    "Documentation/Implémentation/ROADMAP.md",
     "Documentation/Implémentation/Security.md",
 ]
 
-#: Documents tenus à la convention « le symbole, jamais la ligne » (`ROADMAP.md` §5). La liste est
-#: explicite : l'imposer à tout `.md` du dépôt rendrait rouges des documents d'historique que
-#: personne ne rouvre, et un contrôle durablement rouge finit par être ignoré.
-ANCHOR_ENFORCED = {"analyzer_couverture.md", "ROADMAP.md", "Security.md"}
+#: Documents tenus à la convention « le symbole, jamais la ligne » : exactement les documents
+#: d'entrée, par basename. Dérivée de DEFAULT_DOCS pour qu'un fichier sujet ajouté à la roadmap
+#: entre dans la convention sans second geste. L'imposer à tout `.md` du dépôt rendrait rouges
+#: des documents d'historique que personne ne rouvre (`archives/ROADMAP.md` en tête), et un
+#: contrôle durablement rouge finit par être ignoré.
+ANCHOR_ENFORCED = {pathlib.PurePosixPath(doc).name for doc in DEFAULT_DOCS}
 
 AGENT_CONFIG = ROOT / "config" / "agents" / "ArmageddonAgent" / "ArmageddonAgent_training_config.json"
 COUVERTURE = DOCS / "analyzer_couverture.md"
@@ -228,6 +242,14 @@ def resolve(name: str, doc_dir: pathlib.Path) -> pathlib.Path | None:
             if candidate.exists():
                 return candidate
         return None
+    # Un nom NU adjacent au document est le lien le plus courant du corpus roadmap
+    # (`[bot.md#etape8](bot.md)` entre fichiers sujets) : la sémantique markdown le résout chez
+    # le document, et l'adjacence IDENTIFIE — le voisin prime sur toute recherche par répertoire.
+    # Sans cette branche, chaque lien interne de `ROADMAP_INDEX.md` sortait FICHIER INTROUVABLE
+    # + LIEN MORT (41 fois au premier passage du corpus partitionné, 2026-08-18).
+    adjacent = doc_dir / name
+    if adjacent.exists():
+        return adjacent
     for directory in SEARCH_DIRS:
         candidate = ROOT / directory / name if directory else ROOT / name
         if candidate.exists():
@@ -749,14 +771,24 @@ ValueCheck = tuple[Callable[[str], list[tuple[str, _Claim]]], Callable[[_Claim],
 
 TABLE_LABEL = "tableau des profils"
 
+#: Chaque affirmation chiffrée est contrôlée dans le document qui la PORTE depuis la partition de
+#: la roadmap (2026-08-18) : le plafond de la porte vit dans la préface de l'index, le tableau des
+#: profils dans le chemin critique (§P5), le décompte du `step.log` dans le sujet analyzer, la
+#: valeur d'`obs_size` dans le sujet hygiène documentaire.
 VALUE_CHECKS: dict[str, dict[str, ValueCheck[Any]]] = {
-    "ROADMAP.md": {
+    "ROADMAP_INDEX.md": {
+        "plafond de la porte de fusion": (claim_gate_ceiling, expected_gate_ceiling),
+    },
+    "v11_chemin_critique.md": {
         "nombre de profils": (claim_profile_count, lambda _claim: expected_profile_count()),
         "n_envs des profils": (claim_n_envs, lambda _claim: expected_n_envs()),
-        "obs_size": (claim_obs_size, lambda _claim: expected_obs_size()),
         TABLE_LABEL: (claim_profile_table, expected_from_table_key),
+    },
+    "analyzer.md": {
         "entrées manquantes du step.log": (claim_step_log, expected_step_log),
-        "plafond de la porte de fusion": (claim_gate_ceiling, expected_gate_ceiling),
+    },
+    "doc.md": {
+        "obs_size": (claim_obs_size, lambda _claim: expected_obs_size()),
     },
 }
 
@@ -798,8 +830,9 @@ def check_values(doc_path: pathlib.Path) -> tuple[int, list[str]]:
 def check_anchors(doc_path: pathlib.Path) -> list[str]:
     """Passe 4 — aucun renvoi `fichier.py:123`.
 
-    Convention `ROADMAP.md` §5 : un numéro de ligne ne survit pas à une livraison. Mesuré sur ce
-    dépôt : `UNIT_ABILITY_SLOTS` a changé deux fois de ligne en vingt-quatre heures.
+    Convention d'ancres de la roadmap (`Documentation/Roadmap/doc.md`) : un numéro de ligne ne
+    survit pas à une livraison. Mesuré sur ce dépôt : `UNIT_ABILITY_SLOTS` a changé deux fois de
+    ligne en vingt-quatre heures.
 
     Toutes les extensions, pas seulement `.py` : la seule ligne de `ROADMAP.md` qui portait encore
     des ancres au 2026-08-12 citait deux `.tsx`, que le contrôle laissait passer. Le tri se fait sur

@@ -1,4 +1,14 @@
-# ROADMAP — source unique de l'ordre du travail
+# ROADMAP — FOSSILE (gelé le 2026-08-18)
+
+> ⚠️ **Ce fichier est un fossile.** C'est l'ancien fichier monolithique, remplacé par
+> `../ROADMAP_INDEX.md` (ordre) + les fichiers sujets de `Documentation/Roadmap/` (contenu)
+> + `archives/<sujet>.md` (historique résumé). Ne pas le lire en session — il sature le
+> contexte (~1 460 lignes). Ne plus le mettre à jour. Ses renvois relatifs et ses ancres
+> datent de son ancien emplacement (`Documentation/Implémentation/`) et ne résolvent plus.
+> Il ne reste consultable que pour retrouver le DÉTAIL d'une décision datée d'avant la
+> partition.
+
+# (fossile) ROADMAP — source unique de l'ordre du travail
 
 > **Rôle.** Ce fichier est la SEULE source de vérité sur « qu'est-ce qu'on fait ensuite ».
 >
