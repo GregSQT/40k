@@ -12550,7 +12550,6 @@ def build_squad_action_mask(
     has_advanced = squad_id in game_state.get("units_advanced", set())
     has_fled = squad_id in game_state.get("units_fled", set())
     has_moved = squad_id in game_state.get("units_moved", set())
-    has_shot = squad_id in game_state.get("units_shot", set())
 
     if enemy_slot_ids is None:
         enemy_sorted = sorted(

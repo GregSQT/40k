@@ -76,13 +76,12 @@ def engine() -> W40KEngine:
         eng = W40KEngine(config=build_engine_config(config), gym_training_mode=True)
     eng.reset()
     eng.game_state["phase"] = "charge"
+    eng.game_state["charge_activation_pool"] = ["1"]
     return eng
 
 
 def _charged(eng: W40KEngine) -> List[str]:
-    # `units_charged` melange int et str (commit_move ecrit le squad_id str, end_activation
-    # l'id brut) ; `is_fights_first` normalise deja en str -> on compare sur la meme convention.
-    return sorted({str(x) for x in eng.game_state["units_charged"]})
+    return sorted(eng.game_state["units_charged"])
 
 
 def test_failed_charge_does_not_grant_fights_first(engine: W40KEngine) -> None:
