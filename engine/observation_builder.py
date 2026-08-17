@@ -906,6 +906,11 @@ class ObservationBuilder:
                 opts[slot, decision_option_bin_index("declines")] = 1.0
             opts[slot, decision_option_bin_index("present")] = 1.0
             if raw_cont is not None and slot < len(raw_cont):
+                if len(raw_cont[slot]) != len(DECISION_OPTION_CONT_FIELDS):
+                    raise ValueError(
+                        f"_encode_pending_decision: raw_cont[{slot}] a {len(raw_cont[slot])} "
+                        f"valeurs, DECISION_OPTION_CONT_FIELDS en exige {len(DECISION_OPTION_CONT_FIELDS)}"
+                    )
                 for field, val in zip(DECISION_OPTION_CONT_FIELDS, raw_cont[slot]):
                     opts_cont[slot, decision_option_cont_index(field)] = float(val)
 

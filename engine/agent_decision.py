@@ -158,6 +158,11 @@ def set_pending_agent_decision(
         "options": _validate_options(decision_type, options),
     }
     if options_cont is not None:
+        if len(options_cont) != len(options):
+            raise ValueError(
+                f"set_pending_agent_decision: options_cont ({len(options_cont)} rangs) != "
+                f"options ({len(options)} candidats) — les deux listes doivent avoir la même longueur"
+            )
         decision["options_cont"] = [list(row) for row in options_cont]
     game_state[PENDING_DECISION_KEY] = decision
     return decision

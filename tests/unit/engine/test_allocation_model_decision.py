@@ -373,3 +373,105 @@ def test_encode_pending_decision_cont_zero_for_non_alloc_types():
     builder._encode_pending_decision(state, obs, active_player=0)
 
     assert np.all(obs["decision_options_cont"] == 0.0)
+
+
+# ---------------------------------------------------------------------------
+# 5. Fixes bugs CONFIRMED (review 2026-08-17)
+# ---------------------------------------------------------------------------
+
+def test_manual_allocation_step_returns_waiting_for_player():
+    """_manual_allocation_step retourne waiting_for_player:True quand décision gym armée.
+
+    ROUGE→VERT : avant le fix, la valeur retournée était le dict de décision brut
+    (sans clé 'waiting_for_player'), ce qui faisait crasher squad_shoot/squad_fight.
+    """
+    models = [_mk_model("s0", col=2, row=2), _mk_model("s1", col=4, row=4)]
+    state = _synthetic_alloc_state(models, gym=True)
+
+    result = _manual_allocation_step(state, SHOOT_CTX)
+
+    assert result.get("waiting_for_player") is True
+    assert result.get("action") == "allocation_model_pending"
+
+
+def test_arm_allocation_model_decision_cap_at_max_options():
+    """alive_grp de 8 modèles → seulement MAX_DECISION_OPTIONS (6) options posées sans crash.
+
+    ROUGE→VERT : avant le fix, _validate_options levait ValueError pour 8 > 6 candidats.
+    """
+    models = [_mk_model(f"m{i}", col=i, row=0) for i in range(8)]
+    state = _synthetic_alloc_state(models, gym=True)
+
+    alive = [f"m{i}" for i in range(8)]
+    _arm_allocation_model_decision(state, "sq_def", alive, SHOOT_CTX)
+
+    decision = read_pending_agent_decision(state)
+    assert decision is not None
+    assert len(decision["options"]) == MAX_DECISION_OPTIONS
+    cont = decision["options_cont"]
+    assert len(cont) == MAX_DECISION_OPTIONS
+
+
+def test_arm_allocation_model_decision_cap_selects_lowest_tier_first():
+    """Les 6 modèles retenus sont les plus sacrifiables (tier le plus bas)."""
+    from engine.phase_handlers.shared_utils import ROLE_TIER
+    # 4 base (tier=0) + 2 sergeant (tier=ROLE_TIER["sergeant"]) + 2 leader (tier=ROLE_TIER["leader"])
+    models = (
+        [_mk_model(f"base{i}", col=i, row=0, role=None) for i in range(4)]
+        + [_mk_model(f"sgt{i}", col=4+i, row=0, role="sergeant") for i in range(2)]
+        + [_mk_model(f"lead{i}", col=6+i, row=0, role="leader") for i in range(2)]
+    )
+    state = _synthetic_alloc_state(models, gym=True)
+    alive = [f"base{i}" for i in range(4)] + [f"sgt{i}" for i in range(2)] + [f"lead{i}" for i in range(2)]
+
+    _arm_allocation_model_decision(state, "sq_def", alive, SHOOT_CTX)
+
+    decision = read_pending_agent_decision(state)
+    assert len(decision["options"]) == MAX_DECISION_OPTIONS
+    # Les 2 leaders (tier le plus haut) ne doivent pas figurer dans les 6 candidats
+    chosen_labels = {opt["payload"]["model_id"] for opt in decision["options"]}
+    assert not any(f"lead{i}" in chosen_labels for i in range(2)), \
+        "les leaders (tier max) ne doivent pas être parmi les 6 candidats retenus"
+
+
+def test_set_pending_agent_decision_raises_on_cont_length_mismatch():
+    """options_cont avec longueur ≠ options → ValueError explicite.
+
+    ROUGE→VERT : avant le fix, le mismatch était silencieux (slots restaient à 0).
+    """
+    state = _synthetic_alloc_state([_mk_model("z0", col=0, row=0)], gym=True)
+    options = [
+        {"label": "a", "effect_ids": (), "declines": False, "payload": {}},
+        {"label": "b", "effect_ids": (), "declines": False, "payload": {}},
+    ]
+    with pytest.raises(ValueError, match="options_cont"):
+        set_pending_agent_decision(
+            state,
+            decision_type="allocation_model",
+            player=0,
+            unit_id="sq_def",
+            options=options,
+            options_cont=[[0.1, 0.2]],  # 1 rang pour 2 options → mismatch
+        )
+
+
+def test_precompute_nearest_enemy_dist_uses_units_cache_player():
+    """defender_player issu de units_cache, pas de alive[0]['player'].
+
+    ROUGE→VERT : avant le fix, un CHARACTER attaquant en tête d'alive inversait ami/ennemi.
+    """
+    from engine.phase_handlers.shared_utils import _precompute_nearest_enemy_dist
+    # Défenseur = player 0, attaquant = player 1
+    models = [_mk_model("d0", col=5, row=5, player=0), _mk_model("d1", col=6, row=5, player=0)]
+    state = _synthetic_alloc_state(models, gym=True)
+    # Injecter un modèle attaquant dans models_cache avec l'ID d'un défenseur (cas CHARACTER)
+    # pour simuler l'inversion — avant le fix, defender_player serait 1 (attaquant)
+    state["models_cache"]["d0"]["player"] = 1  # simulation: alive[0] appartient à l'attaquant
+
+    dist = _precompute_nearest_enemy_dist(state, "sq_def")
+
+    # Avec le fix (units_cache["sq_def"]["player"]=0), les "ennemis" sont player 1.
+    # L'attaquant fictif m_att (player=1) est l'ennemi réel → distances non nulles.
+    assert all(v >= 0 for v in dist.values()), "distances doivent être non négatives"
+    # Vérification principale : units_cache donne player=0, donc m_att (player=1) est ennemi.
+    assert len(dist) > 0

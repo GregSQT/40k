@@ -4037,17 +4037,33 @@ class W40KEngine(gym.Env):
                 unit_id=decision_squad_id,
             )
             alloc_result = apply_manual_shoot_allocation(self.game_state, model_id, ctx)
-            return True, {
-                "action": "agent_decision",
-                "waiting_for_player": alloc_result.get("waiting_for_player", False),
-                "decision_type": decision_type,
-                "unitId": decision_squad_id,
-                "player": decision_player,
-                "option_index": option_index,
-                "model_id": model_id,
-                "alloc_result": alloc_result,
-                "success": True,
-            }
+            if alloc_result.get("waiting_for_player"):
+                # Blessure suivante dans le même lot : nouvelle décision agent en attente.
+                return True, {
+                    "action": "agent_decision",
+                    "waiting_for_player": True,
+                    "decision_type": decision_type,
+                    "unitId": decision_squad_id,
+                    "player": decision_player,
+                    "option_index": option_index,
+                    "model_id": model_id,
+                    "success": True,
+                }
+            # Allocation terminée : finaliser l'activation selon le contexte.
+            attacker_squad_id = str(alloc_result["attacker_squad_id"])
+            if ctx is SHOOT_CTX:
+                finish_result = self._finish_manual_shoot_after_allocation(
+                    attacker_squad_id, alloc_result)
+                return True, {**finish_result,
+                               "decision_type": decision_type, "player": decision_player,
+                               "model_id": model_id}
+            if ctx is fight_handlers.FIGHT_CTX:
+                return self._finish_manual_fight_after_allocation_model(
+                    attacker_squad_id, alloc_result)
+            raise ValueError(
+                f"allocation_model done: ctx inattendu {ctx.alloc_key!r} — "
+                "seuls SHOOT_CTX et FIGHT_CTX peuvent armer une décision gym"
+            )
 
         if decision_type != "rule_choice":
             raise NotImplementedError(
@@ -5469,6 +5485,8 @@ class W40KEngine(gym.Env):
             # Defenseur IA : convergence §8 -> moteur d allocation par-figurine
             # (groupes 05.03/05.04, T bodyguard 19.02, save par-fig). auto_decider headless.
             _shoot_alloc = build_manual_shoot_allocation(self.game_state, squad_id)
+            if _shoot_alloc.get("waiting_for_player"):
+                return True, _shoot_alloc
             if not _shoot_alloc.get("done"):
                 raise RuntimeError(
                     f"squad_shoot_validate: allocation tir non terminee en auto pour squad "
@@ -5518,6 +5536,27 @@ class W40KEngine(gym.Env):
             **end_result, "action": "squad_shoot", "unitId": squad_id,
             "shoot_result": alloc_result.get("shoot_result"),
         }
+
+    def _finish_manual_fight_after_allocation_model(
+        self, squad_id: str, alloc_result: Dict[str, Any]
+    ) -> Tuple[bool, Dict[str, Any]]:
+        """end_activation combat différé : appelé depuis le handler allocation_model quand
+        l'allocation combat est terminée suite à une décision gym (fighting squad = attaquant)."""
+        from engine.phase_handlers.generic_handlers import end_activation
+        unit = get_unit_by_id(squad_id, self.game_state)
+        if unit is None:
+            raise KeyError(f"Squad {squad_id} introuvable après combat (allocation_model)")
+        end_result = end_activation(self.game_state, unit, ACTION, 1, FIGHT, FIGHT, 0)
+        end_result.pop("phase_complete", None)
+        result = {
+            **end_result,
+            "action": "squad_fight",
+            "squad_id": squad_id,
+            "target_squad_id": alloc_result.get("primary_target_sid"),
+            "fight_result": alloc_result.get("shoot_result"),
+        }
+        self._fight_v11_gym_settle()
+        return True, result
 
 
     # ============================================================================
@@ -6800,6 +6839,8 @@ class W40KEngine(gym.Env):
                 # (groupes 05.03/05.04, T bodyguard 19.02, save par-fig). Defenseur IA garanti
                 # en gym/auto -> auto_decider headless -> resolution complete (done).
                 _shoot_alloc = build_manual_shoot_allocation(self.game_state, squad_id)
+                if _shoot_alloc.get("waiting_for_player"):
+                    return True, _shoot_alloc
                 if not _shoot_alloc.get("done"):
                     raise RuntimeError(
                         f"squad_shoot: allocation tir non terminee en auto pour squad {squad_id} "
@@ -7090,6 +7131,8 @@ class W40KEngine(gym.Env):
             if best_target_id is not None:
                 squad_declare_fight(self.game_state, squad_id, best_target_id)
             _fight_alloc = build_manual_fight_allocation(self.game_state, squad_id)
+            if _fight_alloc.get("waiting_for_player"):
+                return True, _fight_alloc
             if not _fight_alloc.get("done"):
                 raise RuntimeError(
                     f"squad_fight: allocation combat non terminee en auto pour squad {squad_id} "

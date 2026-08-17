@@ -43,7 +43,7 @@ from engine.action_log_utils import append_action_log
 from engine.spatial_grid import GRID_CELL_COUNT
 # `observation_entities` est une FEUILLE (aucun import moteur) : l'importer au niveau module ne
 # cree pas de cycle. `K_ALLY_SLOTS` y vit parce que l'espace d'action en derive (V11 §0.48 L2).
-from engine.observation_entities import K_ALLY_SLOTS
+from engine.observation_entities import K_ALLY_SLOTS, MAX_DECISION_OPTIONS
 from engine.agent_decision import set_pending_agent_decision
 # Primitives « hors table » : définies dans la couche BASSE (`spatial_relations` ne dépend que de
 # `hex_utils`) parce que les primitives de MESURE en dépendent elles-mêmes. Ré-exportées ici, où
@@ -8651,7 +8651,11 @@ def _precompute_nearest_enemy_dist(
     alive = [m for m in squad_models.get(target_squad_id, []) if m in models_cache]  # get allowed
     if not alive:
         return {}
-    defender_player = int(models_cache[alive[0]]["player"])
+    units_cache = require_key(game_state, "units_cache")
+    if target_squad_id in units_cache:
+        defender_player = int(require_key(units_cache[target_squad_id], "player"))
+    else:
+        defender_player = int(models_cache[alive[0]]["player"])
     enemy_pos = [
         (int(e["col"]), int(e["row"]))
         for e in models_cache.values()
@@ -8701,7 +8705,7 @@ def _select_allocation_model(
         e = models_cache[mid]
         _role = e.get("role")
         tier = ROLE_TIER[_role] if _role in ROLE_TIER else 0
-        return (tier, dist_cache[mid], idx)
+        return (tier, dist_cache.get(mid, 0), idx)
 
     return min(enumerate(alive), key=_key)[1]
 
@@ -8732,6 +8736,16 @@ def _arm_allocation_model_decision(
             "absente de units_cache"
         )
     defender_player = int(require_key(units_cache[target_squad_id], "player"))
+
+    # Cap à MAX_DECISION_OPTIONS : _validate_options lève si > 6 candidats. On garde les
+    # figurines les plus sacrifiables (tier croissant, proximité ennemi croissante) pour
+    # maximiser la diversité utile dans les traits continus présentés à l'agent.
+    if len(alive_grp) > MAX_DECISION_OPTIONS:
+        alive_grp = sorted(
+            alive_grp,
+            key=lambda mid: (ROLE_TIER.get(models_cache[mid].get("role"), 0),
+                             dist_cache.get(mid, 0)),
+        )[:MAX_DECISION_OPTIONS]
 
     options: List[Dict[str, Any]] = []
     options_cont: List[List[float]] = []
@@ -10223,6 +10237,8 @@ def _finalize_manual_allocation(game_state: Dict[str, Any], ctx: ManualAllocCtx)
                 "timestamp": "server_time",
             })
     attacker_squad_id = str(alloc["attacker_squad_id"])
+    batches = alloc["batches"]
+    primary_target_sid = str(batches[0]["target_sid"]) if batches else None
     hazardous_count = int(alloc["hazardous_weapon_count"]) if "hazardous_weapon_count" in alloc else 0
     # 19.04, derniere clause : « the ability it was conferring applies until the attacking unit
     # has resolved all of its attacks ». On y est. Les squads dont une source de regle est morte
@@ -10240,6 +10256,8 @@ def _finalize_manual_allocation(game_state: Dict[str, Any], ctx: ManualAllocCtx)
         "waiting_for_player": False,
         "done": True,
         "shoot_result": summary,
+        "attacker_squad_id": attacker_squad_id,
+        "primary_target_sid": primary_target_sid,
     }
     # [HAZARDOUS] 24.15 : « Each time a unit is selected to shoot or selected to fight, AFTER
     # THAT UNIT HAS RESOLVED ALL OF ITS ATTACKS, make a number of hazard rolls (06.03) for that
@@ -10415,8 +10433,9 @@ def _manual_allocation_step(game_state: Dict[str, Any], ctx: ManualAllocCtx) -> 
                     if (game_state.get("gym_training_mode") and _is_agent_defending
                             and len(alive_grp) >= 2
                             and not game_state.get("no_gym_allocation_model")):
-                        return _arm_allocation_model_decision(
+                        _arm_allocation_model_decision(
                             game_state, batch["target_sid"], alive_grp, ctx)
+                        return {"waiting_for_player": True, "action": "allocation_model_pending"}
                     batch["current_model_id"] = _select_allocation_model(
                         game_state, batch["target_sid"], alive_grp)
                 else:
