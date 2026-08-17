@@ -3696,7 +3696,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     active_debug_section = "1.8"
     log_print("\n" + "-" * 80)
     _wr_header()
-    weapon_rule_usage = stats.get('weapon_rule_usage', defaultdict(lambda: {1: 0, 2: 0}))
+    weapon_rule_usage = require_key(stats, 'weapon_rule_usage')
     weapon_rule_to_weapons = require_key(stats, 'weapon_rule_to_weapons')
     unit_types_seen = set(require_key(stats, "unit_types_seen"))
     unit_type_suffixes = tuple(f" ({unit_type})" for unit_type in unit_types_seen)
@@ -3725,14 +3725,12 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
                 validite = "OK"
             rule_display = rule_name.capitalize() if rule_name else rule_name
             _wr_row(rule_display, weapon_key, p1, p2, validite)
-        not_used_count = sum(
-            1
-            for (rule_name, weapon_key) in expected_wr_keys
-            if rule_name not in _INTERACTION_ONLY_WEAPON_RULES
-            and _weapon_rule_usage_pair_total(weapon_rule_usage, (rule_name, weapon_key)) == 0
+        not_used_count = _compute_weapon_rule_not_used_warnings(stats)
+        n_expected_active = sum(
+            1 for (rn, _) in expected_wr_keys if rn not in _INTERACTION_ONLY_WEAPON_RULES
         )
         log_print(
-            f"Expected weapon-rule pairs: {len(expected_wr_keys):6d} | "
+            f"Expected weapon-rule pairs (active rules): {n_expected_active:6d} | "
             f"Not used: {not_used_count:6d}"
         )
     else:
@@ -4025,22 +4023,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         for counts in stats.get('weapon_rule_usage', defaultdict(lambda: {1: 0, 2: 0})).values()  # get allowed: optional stats
     )
     rule_to_units = stats.get('rule_to_units', {})  # get allowed: optional stats
-    weapon_rule_to_weapons = stats.get('weapon_rule_to_weapons', {})  # get allowed: optional stats
-    weapon_rule_usage_stats = require_key(stats, 'weapon_rule_usage')
-    unit_types_seen = set(require_key(stats, "unit_types_seen"))
-    unit_type_suffixes = tuple(f" ({unit_type})" for unit_type in unit_types_seen)
-    expected_weapon_rule_pairs = {
-        (rule_name, weapon_key)
-        for rule_name, weapon_keys in weapon_rule_to_weapons.items()
-        for weapon_key in weapon_keys
-        if unit_type_suffixes and weapon_key.endswith(unit_type_suffixes)
-    }
-    weapon_rule_not_used_warnings = sum(
-        1
-        for (rule_name, weapon_key) in expected_weapon_rule_pairs
-        if rule_name not in _INTERACTION_ONLY_WEAPON_RULES
-        and _weapon_rule_usage_pair_total(weapon_rule_usage_stats, (rule_name, weapon_key)) == 0
-    )
+    weapon_rule_not_used_warnings = _compute_weapon_rule_not_used_warnings(stats)
     special_rules_invalid = _totals['special_rules_invalid']
     weapon_rules_invalid = _totals['weapon_rules_invalid']
     log_print(f"{summary_error_icon(special_rules_invalid > 0)} 1.7 Special rules usage : {special_rule_usage_total} utilisations" + (f" ({special_rules_invalid} invalid)" if special_rules_invalid > 0 else ""))
