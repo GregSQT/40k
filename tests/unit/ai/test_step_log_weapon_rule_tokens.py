@@ -521,7 +521,7 @@ def test_le_token_cover_est_rendu_du_cote_de_la_touche(monkeypatch, tmp_path):
 
     assert "[COVER]" in line, line
     assert "3+->4+" in line, f"seuil dégradé attendu du côté touche : {line}"
-    assert "Save 2(3+)" in line, f"la sauvegarde ne doit pas porter le couvert : {line}"
+    assert "Save 2(2+ AP-1 → 3+)" in line, f"la sauvegarde ne doit pas porter le couvert : {line}"
 
 
 def test_sans_couvert_aucun_token(monkeypatch, tmp_path):
@@ -1599,4 +1599,240 @@ def test_l_analyzer_accepte_les_lignes_porteuses_des_tokens_du_lot(monkeypatch, 
     assert stats[checked][1] == len(lignes) - 1, (
         "toutes les lignes sauf celle de [TORRENT] (`Hit None(None+)`) doivent être jugées "
         f"par l'analyzer : {stats[checked]} pour {len(lignes)} lignes"
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# L1 — jet de battle-shock dans step.log (01.07 / 08.03)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _battle_shock_details(*, roll, ld, battle_shocked):
+    """action_details minimaux pour le formateur battle_shock du StepLogger."""
+    return {
+        "current_turn": 1,
+        "unit_with_coords": "3(10,12)",
+        "roll": roll,
+        "ld": ld,
+        "battle_shocked": battle_shocked,
+    }
+
+
+def _battle_shock_line(tmp_path, *, roll, ld, battle_shocked):
+    """Écrit une ligne battle_shock via le vrai StepLogger et la relit."""
+    from ai.step_logger import StepLogger
+
+    out = tmp_path / "bs.log"
+    logger = StepLogger(output_file=str(out), enabled=True, buffer_size=1)
+    logger.episode_number = 1
+    logger.log_action(
+        unit_id="3",
+        action_type="battle_shock",
+        phase="command",
+        player=1,
+        success=True,
+        step_increment=False,
+        action_details=_battle_shock_details(roll=roll, ld=ld, battle_shocked=battle_shocked),
+    )
+    logger._flush_buffer()
+    lines = [l for l in out.read_text().splitlines() if "COMMAND" in l]
+    assert lines, "le StepLogger n'a produit aucune ligne COMMAND"
+    return lines[0]
+
+
+def test_l1_battle_shock_ligne_shocked(tmp_path):
+    """Jet raté (roll < Ld) → la ligne porte BATTLE-SHOCK, le jet, le seuil, et SHOCKED."""
+    line = _battle_shock_line(tmp_path, roll=4, ld=7, battle_shocked=True)
+    assert "BATTLE-SHOCK" in line, line
+    assert "Roll:2D6=4" in line, line
+    assert "Ld7+" in line, line
+    assert "→ SHOCKED" in line, line
+    assert "→ OK" not in line, line
+
+
+def test_l1_battle_shock_ligne_ok(tmp_path):
+    """Jet réussi (roll >= Ld) → la ligne porte OK et ne porte pas SHOCKED."""
+    line = _battle_shock_line(tmp_path, roll=9, ld=7, battle_shocked=False)
+    assert "BATTLE-SHOCK" in line, line
+    assert "Roll:2D6=9" in line, line
+    assert "Ld7+" in line, line
+    assert "→ OK" in line, line
+    assert "→ SHOCKED" not in line, line
+
+
+def test_l1_roll_battle_shock_fournit_les_champs(monkeypatch):
+    """roll_battle_shock écrit les champs l, roll, battle_shocked dans l'action_log (L1).
+
+    Ces champs sont lus par _build_step_log_details pour construire l'action_details du
+    formateur — leur absence rendrait la ligne illisible (require_key lève).
+    """
+    import random as _random
+    from engine.phase_handlers.shared_utils import roll_battle_shock
+    from tests._state_invariants import turn_state_invariants
+
+    monkeypatch.setattr(_random, "randint", lambda a, b: 3)  # roll = 3+3 = 6
+    gs = {
+        **turn_state_invariants(),
+        "action_logs": [], "action_log_seq": 0,
+        "models_cache": {
+            "7#0": {"id": "7#0", "squad_id": "7", "player": 1, "unitType": "AssaultIntercessor",
+                    "col": 10, "row": 12, "HP_CUR": 5, "HP_MAX": 5, "LD": 7},
+        },
+        "squad_models": {"7": ["7#0"]},
+        "units": [{"id": "7", "player": 1, "unitType": "AssaultIntercessor", "LD": 7,
+                   "col": 10, "row": 12, "battle_shocked": False}],
+        "units_cache": {},
+        "unit_by_id": {"7": {"id": "7", "UNIT_RULES": []}},
+        "phase": "command",
+    }
+    roll_battle_shock("7", gs)
+
+    logs = [l for l in gs["action_logs"] if l.get("type") == "battle_shock"]
+    assert logs, "roll_battle_shock doit écrire un entry de type 'battle_shock'"
+    entry = logs[0]
+    assert "ld" in entry, "champ 'ld' manquant — _build_step_log_details ne peut pas le lire"
+    assert "roll" in entry, "champ 'roll' manquant"
+    assert "battle_shocked" in entry, "champ 'battle_shocked' manquant"
+    assert isinstance(entry["roll"], int), entry["roll"]
+    assert isinstance(entry["ld"], int), entry["ld"]
+    assert entry["roll"] == 6, entry["roll"]  # 3+3
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# L3 — → <mid> sur la partie Save/Dmg (figurine cible allouée)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.fixture
+def allocated_shoot_line(monkeypatch, tmp_path):
+    """Tir alloué à une figurine précise : la ligne doit porter → <mid> avant Save."""
+    # AP -1 pour que la save ne réussisse pas toujours (armor 2, AP -1 → seuil 3, roll 2 : fail)
+    gs, raw_log = _engine_shoot_log(monkeypatch, [], [3, 4, 2])
+    return _step_log_line(tmp_path, gs, raw_log)
+
+
+def test_l3_alloc_mid_prefixe_save(allocated_shoot_line):
+    """L3 : le mid alloué apparaît avant le segment Save — pattern '→ <mid>'."""
+    import re
+    # Le mid a la forme <squad_id>#<index>, ex: 101#0
+    assert re.search(r"→ \d+#\d+", allocated_shoot_line), (
+        f"L3 : '→ <mid>' attendu avant Save : {allocated_shoot_line}"
+    )
+
+
+def test_l3_alloc_mid_avant_save(allocated_shoot_line):
+    """L3 : le '→ <mid>' apparaît dans la séquence avant 'Save'."""
+    import re
+    m = re.search(r"→ (\d+#\d+)", allocated_shoot_line)
+    save_pos = allocated_shoot_line.find(" Save ")
+    assert m is not None, f"'→ <mid>' absent : {allocated_shoot_line}"
+    assert m.start() < save_pos, (
+        f"L3 : '→ <mid>' ({m.start()}) doit précéder 'Save' ({save_pos}) : {allocated_shoot_line}"
+    )
+
+
+def test_l3_not_allocated_pas_de_mid(monkeypatch, tmp_path):
+    """L3 : Save [NOT ALLOCATED] ne doit PAS porter de '→ <mid>'."""
+    import re
+    # Pool > 1 attaque sur cible à 1 PV : la première attaque tue la cible, la deuxième est
+    # NOT ALLOCATED. On tire une liste : le dernier jet alloué tue la fig (roll dmg > HP restants).
+    # Approche simple : cible à 1 HP, 2 attaques, première tue, deuxième NOT ALLOCATED.
+    gs, raw_log = _engine_shoot_log(monkeypatch, [], [3, 4, 2, 3, 4, 2], n_attacks=2)
+    lines = _step_log_lines(tmp_path, gs, raw_log)
+    not_alloc = [l for l in lines if "NOT ALLOCATED" in l]
+    if not not_alloc:
+        pytest.skip("aucune attaque NOT ALLOCATED produite par ce décor")
+    for line in not_alloc:
+        assert not re.search(r"→ \d+#\d+", line), (
+            f"L3 : 'Save [NOT ALLOCATED]' ne doit pas porter de '→ <mid>' : {line}"
+        )
+
+
+@pytest.fixture
+def devastating_alloc_line(monkeypatch, tmp_path):
+    """Tir DEVASTATING WOUNDS alloué : la ligne doit porter → <mid> ET [DEVASTATING WOUNDS]."""
+    gs, raw_log = _engine_shoot_log(monkeypatch, ["DEVASTATING_WOUNDS"], [4, 6])
+    return _step_log_line(tmp_path, gs, raw_log)
+
+
+def test_l3_devastating_wounds_porte_mid(devastating_alloc_line):
+    """L3 : même sur [DEVASTATING WOUNDS], le mid alloué est présent."""
+    import re
+    assert "[DEVASTATING WOUNDS]" in devastating_alloc_line, devastating_alloc_line
+    assert re.search(r"→ \d+#\d+", devastating_alloc_line), (
+        f"L3 : '→ <mid>' attendu même sur [DEVASTATING WOUNDS] : {devastating_alloc_line}"
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# L4 — AP de l'arme et Sv de base de la figurine sur le segment Save
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.fixture
+def ap_save_line(monkeypatch, tmp_path):
+    """Tir avec AP (AP=-1 dans le décor _game_state : weapon AP=-1, armor 2+).
+
+    Rolls : touche 3 (>= BS 3+), blessure 4 (>= 4+), save 2 (< seuil 3 = 2 - (-1) = 3).
+    Save échoue : la ligne montre le segment Save complet."""
+    gs, raw_log = _engine_shoot_log(monkeypatch, [], [3, 4, 2])
+    return _step_log_line(tmp_path, gs, raw_log)
+
+
+def test_l4_save_affiche_base_ap_effectif(ap_save_line):
+    """L4 : le segment Save montre '<base>+ AP<n> → <eff>+' au lieu de '<eff>+' seul."""
+    import re
+    # Format attendu : Save R(2+ AP-1 → 3+)  [base=2, ap=-1, eff=3]
+    assert re.search(r"Save \d+\(\d+\+ AP-?\d+ → \d+\+\)", ap_save_line), (
+        f"L4 : format 'Save R(<base>+ AP<n> → <eff>+)' attendu : {ap_save_line}"
+    )
+
+
+def test_l4_save_valeurs_coherentes(ap_save_line):
+    """L4 : les valeurs base, AP, eff sont mutuellement cohérentes (max(base-AP, invul) == eff).
+
+    La figurine cible a Sv=2, InSv=7 (pas d'invul), et l'arme a AP=-1.
+    Seuil effectif = max(2 - (-1), 7) = max(3, 7) = 3 (pas d'invul active).
+    """
+    import re
+    m = re.search(r"Save \d+\((\d+)\+ AP(-?\d+) → (\d+)\+\)", ap_save_line)
+    assert m, f"L4 : pattern non trouvé : {ap_save_line}"
+    base_sv, ap_val, eff_sv = int(m.group(1)), int(m.group(2)), int(m.group(3))
+    # La figurine a armor=2, invul=7 (sentinel = pas d invul) et AP=-1.
+    assert base_sv == 2, f"base Sv attendu 2 (ARMOR_SAVE du décor) : {base_sv}"
+    assert ap_val == -1, f"AP attendu -1 (arme du décor) : {ap_val}"
+    # eff = base - AP = 2 - (-1) = 3  (AP est négatif, donc base - AP = base + |AP|)
+    assert eff_sv == base_sv - ap_val, (
+        f"seuil effectif incohérent : {base_sv} - ({ap_val}) ≠ {eff_sv}"
+    )
+
+
+def test_l4_save_ap0_affiche_base(monkeypatch, tmp_path):
+    """L4 : même avec AP=0, le format étendu est présent (base présent, pas de modification)."""
+    import re
+    # AP=0 : on crée le game_state manuellement avec une arme AP=0.
+    # On réutilise _engine_shoot_log avec une arme AP=0 en monkey-patchant
+    # le weapon dict. Approche simple : RAPID FIRE pour AP=0.
+    # En fait, _game_state construit l'arme avec AP=-1 hardcodé ; il faut passer par monkeypatch.
+    # Plutôt : tester directement _save_segments avec les bons champs.
+    from ai.step_logger import _save_segments
+
+    details = {
+        "save_roll": 3,
+        "save_target": 3,   # eff = 3 (base 3, AP 0)
+        "alloc_model_armor": 3,
+        "weapon_ap": 0,
+    }
+    segs = _save_segments(details, damage=1, save_result="FAIL")
+    save_seg = next((s for s in segs if s.startswith("Save")), None)
+    assert save_seg is not None, segs
+    assert re.search(r"Save \d+\(\d+\+ AP0 → \d+\+\)", save_seg), (
+        f"L4 : AP=0 doit aussi afficher le format étendu : {save_seg}"
+    )
+
+
+def test_l4_melee_save_affiche_ap(monkeypatch, tmp_path):
+    """L4 : même format sur une ligne FOUGHT (miroir tir/mêlée obligatoire)."""
+    import re
+    gs, raw_log = _engine_shoot_log(monkeypatch, [], [3, 4, 2], melee=True)
+    line = _step_log_line(tmp_path, gs, raw_log)
+    assert re.search(r"Save \d+\(\d+\+ AP-?\d+ → \d+\+\)", line), (
+        f"L4 : format étendu attendu aussi en mêlée : {line}"
     )
