@@ -97,6 +97,15 @@
 | **ABSENT-LOG-MANQUANT** | Le contrôle est impossible en l'état : les champs à ajouter au StepLogger sont nommés. |
 | **NON-TESTABLE-OFFLINE** | Structurellement hors de portée d'un contrôle post-hoc sur journal (définition, donnée de registre, terrain absent du log, jet non reproductible, ou contrôle qui serait tautologique). |
 
+#### Statuts propres à la table §1.8 (weapon rule usage)
+
+| Statut §1.8 | Définition |
+|---|---|
+| **OK** | Au moins un usage (P1 ou P2 > 0) et la paire (règle, arme) est déclarée dans l'armurerie. |
+| **INVALID** | La paire (règle, arme) a été observée dans `step.log` mais l'armurerie ne la déclare pas. |
+| **NOT USED** | La paire est attendue selon l'armurerie, l'arme a été tirée/utilisée, mais le token de la règle n'a jamais été compté. Signal d'implémentation manquante côté compteur. |
+| **N/A — KEYWORD** | La règle est un **mot-clé d'interaction**, pas un effet discret à compter. Il n'y a structurellement rien à incrémenter, et 0 ne signifie donc pas « jamais exercée ». Appliqué à **PSYCHIC (24.29)** : le token est posé sur chaque attaque de l'arme, mais son effet (marquer l'attaque comme « psychic attack » pour interaction avec les règles anti-psychic) ne correspond à aucun moment précis dans le journal. Ces paires ne déclenchent ni avertissement `⚠️` ni contribution au compteur « Not used » du tableau. |
+
 **Vert vacant** : un contrôle qui existe mais mesure la mauvaise chose est classé **PARTIEL**, jamais COUVERT.
 La §5 liste les verts vacants trouvés.
 
@@ -510,7 +519,27 @@ Tous appliquent la même exception 05 (« excess attacks lost » de la même act
 | 54-56 | `position_log_mismatch` move / advance / charge (`move_start_status`, per-figurine, avec catégorie informative `anchor_absorbed`) | prédicat `analyzer_perfig.py` ; compteurs `move_handler.py`, `shoot_handler.py`, `charge_handler.py` |
 | 57 | `unit_position_collisions` (2 unités vivantes sur la même ANCRE, après mouvement le même tour) | 4 sites : `move_handler.py` ; `shoot_handler.py` ; `charge_handler.py` |
 | 58 | `damage_missing_unit_hp` | `analyzer.py` |
-| 59 | `damage_exceeds_hp` | affiché `analyzer.py` — **jamais incrémenté** (aucun `+= 1`, grep du 2026-08-10) |
+| 59 | `damage_exceeds_hp` | affiché `analyzer.py` — **jamais incrémenté** (aucun `+= 1`, grep du 2026-08-10) — **IRRÉALISABLE par construction** (voir investigation du 2026-08-17 ci-dessous) |
+
+**Investigation `damage_exceeds_hp` (2026-08-17).** Ce compteur est affiché et sommé dans le
+bucket `damage` de `error_totals`, mais **aucun site ne l'incrémente** (grep `+= 1` sur tout
+`ai/` : 0 hit). L'investigation du 2026-08-17 établit que cela n'est pas un oubli d'implémentation
+mais une impossibilité structurelle :
+
+- `shared_utils` (seul site écrivant un `damageDealt` non nul) plafonne AVANT de journaliser :
+  `dmg_dealt = min(int(dmg), hp_before)`. Chaque `Dmg:X` en journal vaut donc EXACTEMENT les PV
+  retirés à cette figurine — `damage > HP_de_la_figurine` ne peut jamais apparaître.
+- Dans `_apply_damage_to_named_model` (grammaire 2+, figurine nommée) : `hp_before - damage > 0`
+  (survie) ou ≤ 0 (mort). Le moteur garantit `damage ≤ hp_before` par le plafond pré-log — le
+  cas `damage > hp_before` décrit une situation de jeu impossible.
+- Dans `_apply_damage_and_handle_death` (chemin hérité) : `unit_hp[target_id]` est le HP
+  RECONSTRUIT de la figurine front. Si la reconstruction a dérivé, `damage` pourrait y paraître
+  supérieur — mais ce cas est déjà capturé par §2.8 (`state_resync`).
+
+**Conclusion : le compteur est irréalisable pour son intention originale.** Son équivalent « dérive
+de reconstruction » est déjà couvert par §2.8. **Action recommandée : supprimer le compteur et
+`damage_missing_unit_hp` de `error_totals['damage']` avec un test de non-régression.** Cette
+décision est à valider par l'utilisateur avant exécution (arrêt T3 du 2026-08-17).
 
 **Le modèle de dégâts a été INVERSÉ le 2026-08-10** (`586c0553`, après un aller-retour). La version
 précédente de ce document décrivait `_apply_damage_and_handle_death` comme perdant l'excès de
