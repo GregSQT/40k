@@ -20,28 +20,46 @@ Aucun fallback/workaround/default anti-erreur → T1
 
 SOURCES DE VÉRITÉ / ROADMAP
 
-Avant toute question de priorité, état d'un chantier ou « qu'est-ce qui reste », lire Documentation/Implémentation/ROADMAP.md.
+Avant toute question de priorité, état d'un chantier ou « qu'est-ce qui reste » :
+1. Lire Documentation/Roadmap/ROADMAP_INDEX.md (ordre global, ~80 lignes)
+2. Si détail d'un chantier spécifique → lire le fichier sujet correspondant
+3. Pour l'historique d'un sujet → Documentation/Roadmap/archives/<sujet>.md
+
+Fichiers par sujet (tâches ouvertes uniquement) :
+- Documentation/Roadmap/v11_chemin_critique.md — pipeline V11 (cross-sujets)
+- Documentation/Roadmap/training.md — entraînement IA
+- Documentation/Roadmap/bot.md — panel de bots
+- Documentation/Roadmap/analyzer.md — analyzer / couverture
+- Documentation/Roadmap/security.md — sécurité
+- Documentation/Roadmap/front.md — frontend
+- Documentation/Roadmap/moteur.md — moteur de jeu
+- Documentation/Roadmap/infra.md — infra / perf / DB
+- Documentation/Roadmap/capacites.md — chantier 06 capacités
+- Documentation/Roadmap/doc.md — hygiène documentaire
+
 Rôle des sources :
 
 CODE : tranche ce qui est réellement implémenté ou non.
 
-ROADMAP : tranche l'ordre/priorité des chantiers, y compris contre V11_agent_rework.md §0.
+ROADMAP_INDEX.md : tranche l'ordre/priorité des chantiers, y compris contre V11_agent_rework.md §0.
 
 Décision datée la plus récente : tranche l'approche retenue.
 
 1_Agent/ : détail/spec du programme V11.
 
-A_faire/ : contenu des chantiers ouverts.
+A_faire/ : contenu des chantiers ouverts (détail).
 
-Implémenté/ : référence des chantiers livrés.
+Implémenté/ : référence de conception des chantiers livrés.
 
 Si aucune règle ci-dessus ne tranche : demander à l'utilisateur.
 
 Cycle chantier :
 
-ouvrir = ajouter sa ligne au ROADMAP D'ABORD ;
+ouvrir = ajouter une ligne dans ROADMAP_INDEX.md D'ABORD + créer ou mettre à jour le fichier sujet ;
 
-livrer = déplacer son doc dans Implémenté/ + mettre à jour le ROADMAP dans la même livraison ;
+livrer = marquer ✅ dans ROADMAP_INDEX.md + vider/déplacer dans archives/<sujet>.md + déplacer le doc dans Implémenté/, dans la même livraison ;
+
+un fichier sujet vide = sujet fermé de bout en bout.
 
 une livraison qui rend sa propre doc fausse est une régression → T2.
 
@@ -113,7 +131,7 @@ Avant la PREMIÈRE écriture de code : vérifier git status --short.
 Tree propre → EnterWorktree directement, nom décrivant le sujet.
 Tree sale → signaler (les modifications locales ne suivent pas le worktree) et attendre.
 Lecture/analyse/doc seule → pas de worktree.
-Fin : à la clôture de chaque chantier, sans attendre de demande : commit → ExitWorktree "keep" → merge dans main → supprimer worktree + branche → mettre à jour ROADMAP → déplacer le doc du chantier dans Implémenté/.
+Fin : à la clôture de chaque chantier, sans attendre de demande : commit → ExitWorktree "keep" → merge dans main → supprimer worktree + branche → mettre à jour ROADMAP_INDEX.md + fichier sujet → déplacer le doc du chantier dans Implémenté/.
 Jamais remove avant merge. discard_changes: true interdit.
 Training en cours → ne toucher aucun JSON de config/ (relu à chaud par les évaluations).
 
