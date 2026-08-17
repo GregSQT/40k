@@ -167,7 +167,12 @@ def _assert_profile_valid(config_name: str, profile_name: str, params: Dict[str,
     value = float(params["model_gating_min_vs_control"])
     assert 0.0 <= value <= 1.0, f"{config_name}[{profile_name}] : plancher hors [0,1] ({value})"
     if value > 0.0:
-        weights = params.get("bot_eval_weights", {})
+        weights = params.get("bot_eval_weights")
+        assert weights is not None, (
+            f"{config_name}[{profile_name}] : model_gating_min_vs_control={value} arme mais "
+            "la cle 'bot_eval_weights' est absente — le run crasherait. "
+            "Ajouter 'bot_eval_weights' avec 'control' ou mettre model_gating_min_vs_control: 0.0."
+        )
         assert "control" in weights, (
             f"{config_name}[{profile_name}] : model_gating_min_vs_control={value} arme mais "
             "'control' absent de bot_eval_weights — le run crasherait en fin d'entrainement. "
@@ -181,6 +186,12 @@ def test_armed_floor_without_control_weight_is_rejected() -> None:
     Preuve que le verrou est arme : un profil avec plancher > 0 et 'control' absent leve ;
     le meme profil avec 'control' present passe.
     """
+    params_no_key = {
+        "model_gating_min_vs_control": 0.3,
+    }
+    with pytest.raises(AssertionError, match="cle.*bot_eval_weights.*absente"):
+        _assert_profile_valid("synthetic", "no_key", params_no_key)
+
     params_bad = {
         "model_gating_min_vs_control": 0.3,
         "bot_eval_weights": {"alpha": 0.5, "greedy": 0.5},
