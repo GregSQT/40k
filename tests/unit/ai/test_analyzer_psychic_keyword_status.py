@@ -94,22 +94,26 @@ def test_psychic_table_shows_keyword_status_not_not_used(tmp_path):
 
 def test_psychic_excluded_from_not_used_count(tmp_path):
     """Le compteur "Not used: N" dans la table §1.8 n'inclut pas les paires PSYCHIC."""
-    _, lines = _parse_and_render(tmp_path)
+    import re as _re
+    stats, lines = _parse_and_render(tmp_path)
     count_lines = [l for l in lines if "Not used:" in l and "Expected weapon-rule pairs:" in l]
     assert count_lines, "Ligne 'Not used:' introuvable dans la sortie §1.8"
-    count_line = count_lines[0]
-    # Extraire le nombre "Not used: N"
-    import re
-    m = re.search(r"Not used:\s*(\d+)", count_line)
-    assert m, f"Impossible de parser le compteur Not used dans : {count_line!r}"
+    m = _re.search(r"Not used:\s*(\d+)", count_lines[0])
+    assert m, f"Impossible de parser le compteur Not used dans : {count_lines[0]!r}"
     not_used_count = int(m.group(1))
-    # Les paires PSYCHIC (0 comptes) ne doivent pas contribuer au compteur
-    stats = an.parse_step_log(str(tmp_path / "step.log"))
-    psychic_pairs = [k for k in stats.get("weapon_rule_to_weapons", {}).get("PSYCHIC", set())
-                     if f"({CARRIER_TYPE})" in k]
-    # Sans l'exclusion, not_used_count inclurait len(psychic_pairs) paires de plus.
-    # Ici on vérifie juste qu'il est ≥ 0 et que les lignes PSYCHIC ne sont pas dedans.
-    assert not_used_count >= 0
+
+    unit_type_suffixes = tuple(f" ({ut})" for ut in stats["unit_types_seen"])
+    wr_usage = stats.get("weapon_rule_usage", {})
+    weapon_rule_to_weapons = stats.get("weapon_rule_to_weapons", {})
+    total_zero_non_psychic = sum(
+        1
+        for rn, wks in weapon_rule_to_weapons.items()
+        for wk in wks
+        if rn not in an._INTERACTION_ONLY_WEAPON_RULES
+        and unit_type_suffixes and wk.endswith(unit_type_suffixes)
+        and an._weapon_rule_usage_pair_total(wr_usage, (rn, wk)) == 0
+    )
+    assert not_used_count == total_zero_non_psychic
 
 
 def test_summary_not_used_count_excludes_psychic_pairs(tmp_path):
@@ -161,3 +165,31 @@ def test_summary_not_used_count_excludes_psychic_pairs(tmp_path):
             f"not_used_count attendu={expected_in_summary}, obtenu={m.group(1)}\n"
             f"Ligne : {summary_line!r}"
         )
+
+
+def test_compute_weapon_rule_not_used_warnings_excludes_psychic(tmp_path):
+    """_compute_weapon_rule_not_used_warnings exclut les paires INTERACTION_ONLY (PSYCHIC)."""
+    stats, _ = _parse_and_render(tmp_path)
+
+    unit_type_suffixes = tuple(f" ({ut})" for ut in stats["unit_types_seen"])
+    wr_usage = stats.get("weapon_rule_usage", {})
+    weapon_rule_to_weapons = stats.get("weapon_rule_to_weapons", {})
+
+    # Prémisse : au moins une paire PSYCHIC à 0 comptes existe, sinon le test est inopérant.
+    psychic_zero = sum(
+        1
+        for wk in weapon_rule_to_weapons.get("PSYCHIC", set())
+        if unit_type_suffixes and wk.endswith(unit_type_suffixes)
+        and an._weapon_rule_usage_pair_total(wr_usage, ("PSYCHIC", wk)) == 0
+    )
+    assert psychic_zero > 0, "Prémisse : des paires PSYCHIC à 0 comptes attendues dans ce scénario"
+
+    total_all_zero = sum(
+        1
+        for rn, wks in weapon_rule_to_weapons.items()
+        for wk in wks
+        if unit_type_suffixes and wk.endswith(unit_type_suffixes)
+        and an._weapon_rule_usage_pair_total(wr_usage, (rn, wk)) == 0
+    )
+    expected = total_all_zero - psychic_zero
+    assert an._compute_weapon_rule_not_used_warnings(stats) == expected

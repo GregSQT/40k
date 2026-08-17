@@ -45,7 +45,23 @@ def _weapon_rule_usage_pair_total(weapon_rule_usage: Dict[Any, Any], pair_key: A
 # PSYCHIC (24.29) marque l'attaque comme « psychic attack » pour interaction avec les règles
 # anti-psychic — rien ne « joue » à un instant précis, donc il n'y a rien à compter.
 # Afficher "NOT USED" induirait en erreur (laisse croire que le moteur ne l'applique jamais).
-_INTERACTION_ONLY_WEAPON_RULES: frozenset = frozenset({"PSYCHIC"})
+_INTERACTION_ONLY_WEAPON_RULES: frozenset[str] = frozenset({"PSYCHIC"})
+
+
+def _compute_weapon_rule_not_used_warnings(stats: Dict[str, Any]) -> int:
+    """Nombre de paires (règle d'arme, arme) attendues mais jamais observées, hors INTERACTION_ONLY."""
+    weapon_rule_to_weapons: Dict[str, Any] = require_key(stats, 'weapon_rule_to_weapons')
+    weapon_rule_usage: Dict[Any, Any] = require_key(stats, 'weapon_rule_usage')
+    unit_type_suffixes = tuple(f" ({ut})" for ut in require_key(stats, "unit_types_seen"))
+    return sum(
+        1
+        for rule_name, weapon_keys in weapon_rule_to_weapons.items()
+        for weapon_key in weapon_keys
+        if rule_name not in _INTERACTION_ONLY_WEAPON_RULES
+        and unit_type_suffixes
+        and weapon_key.endswith(unit_type_suffixes)
+        and _weapon_rule_usage_pair_total(weapon_rule_usage, (rule_name, weapon_key)) == 0
+    )
 
 
 _BOARD_HEADER_RE = re.compile(r'^\[[^\]]*\]\s*Board:\s.*\binches_to_subhex=(\d+)\b')
@@ -4166,16 +4182,7 @@ if __name__ == "__main__":
         # Les WARNINGS ne sont pas des erreurs : une paire (règle, arme) déclarée par l'armurerie
         # et jamais observée signale un roster ou un scénario qui n'exerce pas la règle, pas une
         # faute de jeu. Elle reste donc hors du total ci-dessus.
-        weapon_rule_to_weapons = require_key(stats, 'weapon_rule_to_weapons')
-        weapon_rule_usage = require_key(stats, 'weapon_rule_usage')
-        unit_type_suffixes = tuple(f" ({unit_type})" for unit_type in require_key(stats, "unit_types_seen"))
-        weapon_rule_not_used_warnings = sum(
-            1
-            for rule_name, weapon_keys in weapon_rule_to_weapons.items()
-            for weapon_key in weapon_keys
-            if unit_type_suffixes and weapon_key.endswith(unit_type_suffixes)
-            and _weapon_rule_usage_pair_total(weapon_rule_usage, (rule_name, weapon_key)) == 0
-        )
+        weapon_rule_not_used_warnings = _compute_weapon_rule_not_used_warnings(stats)
         total_warnings = weapon_rule_not_used_warnings
 
         if total_errors > 0:
