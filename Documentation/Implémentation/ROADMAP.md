@@ -820,6 +820,11 @@ Prêts à démarrer sans décision produit :
   puis réécrire la note avec ce chiffre. Un réglage tenu par un chiffre faux se retourne au
   premier changement de durée — c'est déjà ce qui était arrivé à `bot_eval_freq` calé sur
   200 000 épisodes.
+- ✅ **Marqueur d'activation SHOOT (10.02) dans `double_activation_by_phase`** — **LIVRÉ le 2026-08-17**.
+  `is_shoot_activation_start` (via `shoot_last_activator`) dans `is_activation_marker` : le PREMIER SHOT
+  d'un acteur différent du précédent ouvre une nouvelle activation ; les tirs consécutifs de la même
+  escouade (salve) ne comptent pas. Reset en début de tour (pas de phase). 2 tests rouge→vert.
+  `analyzer_couverture.md` §1.5 mis à jour.
 - ✅ **Trous couverture analyzer : `hazardous` + `oath_wound`** — **LIVRÉ le 2026-08-17**.
   TROU 1 : branche dispatcher dans `analyzer_core.py` pour la ligne `SUFFERS X Mortal Wounds [HAZARDOUS]` ;
   compteurs `hazardous_mortal_wounds` + `hazardous_no_hazardous_weapon` (arme HAZARDOUS absente de l'armurerie).
