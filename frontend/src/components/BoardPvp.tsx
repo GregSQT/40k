@@ -68,6 +68,8 @@ import { mountLosPolarClippedByVisibleUnion } from "../utils/losPolarMaskedByVis
 import {
   buildEffectiveLosWallHexes,
   buildLosPreviewFromSource,
+  flattenObscuringZones,
+  flattenTerrainZones,
   hexDistOff,
   rangedPreviewMetric,
   unitsCacheModelCenters,
@@ -1684,6 +1686,18 @@ export default function Board({
     if (!zones) return [];
     return zones.map((z) => ({ hexes: z.hexes.map(normalizeZoneHex) }));
   }, [boardConfig?.terrain_zones]);
+  // Triplets [col,row,areaId] pré-aplatis des zones obscurantes — mémoïsés sur losObscuringZones.
+  // Court-circuite le flatten interne de buildLosPreviewFromSource sur le chemin de survol.
+  const losObscuringHexes = useMemo<Array<[number, number, number]>>(
+    () => flattenObscuringZones(losObscuringZones),
+    [losObscuringZones]
+  );
+  // Paires [col,row] pré-aplaties de toutes les zones terrain — mémoïsées sur losTerrainZones.
+  // Supprime le flatten de ~16 000 hexes à chaque appel de buildLosPreviewFromSource.
+  const losTerrainHexes = useMemo<Array<[number, number]>>(
+    () => flattenTerrainZones(losTerrainZones),
+    [losTerrainZones]
+  );
   // Floors (délimitations d'étage) individuels avec leurs hexes, tous décors confondus → sert à
   // retirer les murs bordant le floor précis qu'une fig occupe (granularité floor pour le cône vert).
   const losTerrainFloors = useMemo<Array<{ level: number; hexes: Array<[number, number]> }>>(() => {
@@ -3382,6 +3396,9 @@ export default function Board({
           ? restrictShooterCentersToActive(source.unit.id, ucByModel?.[String(source.unit.id)])
           : undefined,
         shooterModelLevels: atCurrentPos ? ucLevels?.[String(source.unit.id)] : undefined,
+        preResolvedWallHexes: effectiveWallHexes,
+        preResolvedObscuringHexes: losObscuringHexes,
+        preResolvedTerrainHexes: losTerrainHexes,
       });
       const blinkIds = losPreview.blinkIds;
       const coverByUnitId = losPreview.coverByUnitId;
@@ -3401,8 +3418,11 @@ export default function Board({
     boardConfig,
     gameConfig,
     wallHexesOverride,
+    effectiveWallHexes,
     losObscuringZones,
     losTerrainZones,
+    losObscuringHexes,
+    losTerrainHexes,
     shootAdvanceLosAnchorKey,
     units,
     shootAdvanceLosAnchor?.col,
@@ -4173,6 +4193,9 @@ export default function Board({
           shooterModelLevels: atCurrentPos
             ? ucLevels?.[String(pending.selectedUnit.id)]
             : undefined,
+          preResolvedWallHexes: effectiveWallHexes,
+          preResolvedObscuringHexes: losObscuringHexes,
+          preResolvedTerrainHexes: losTerrainHexes,
         });
         const losUnionLayout: HexUnionMaskLayout = {
           HEX_HORIZ_SPACING: HEX_WIDTH_H,
@@ -4461,8 +4484,11 @@ export default function Board({
     getAdvanceDestinations,
     availableCellsOverride,
     wallHexesOverride,
+    effectiveWallHexes,
     losObscuringZones,
     losTerrainZones,
+    losObscuringHexes,
+    losTerrainHexes,
     footprintZoneRef?.current,
     resolvedMoveDestPoolRef.current?.has,
     effectivePerModelPlan?.activeModelId,
@@ -7040,6 +7066,9 @@ export default function Board({
             distanceMetric: metric,
             unitsCacheByModel: ucByModel,
             shooterModelCenters: undefined,
+            preResolvedWallHexes: effectiveWallHexes,
+            preResolvedObscuringHexes: losObscuringHexes,
+            preResolvedTerrainHexes: losTerrainHexes,
           });
           clearCells.push(...conePreview.clearCells);
           coverCells.push(...conePreview.terrainCoverCells);
@@ -7159,8 +7188,11 @@ export default function Board({
     effectivePerModelPlan?.models,
     units,
     wallHexesOverride,
+    effectiveWallHexes,
     losObscuringZones,
     losTerrainZones,
+    losObscuringHexes,
+    losTerrainHexes,
     unitsBoardLayoutKey,
     gameState?.turn,
     gameState?.episode_steps,
@@ -7648,6 +7680,9 @@ export default function Board({
           unitsCacheByModel: ucByModel,
           shooterModelCenters: atCurrentPos ? ucByModel?.[String(squadUnit.id)] : undefined,
           shooterModelLevels: atCurrentPos ? ucLevels?.[String(squadUnit.id)] : undefined,
+          preResolvedWallHexes: effectiveWallHexes,
+          preResolvedObscuringHexes: losObscuringHexes,
+          preResolvedTerrainHexes: losTerrainHexes,
         });
         // Cases visibles des cibles ciblables (backend) peintes par-dessus le cône WASM :
         // garantit qu'une unité qui blinke a toujours ses cases visibles affichées, même si le
@@ -8023,6 +8058,8 @@ export default function Board({
     wallHexesOverride,
     losObscuringZones,
     losTerrainZones,
+    losObscuringHexes,
+    losTerrainHexes,
     unitsBoardLayoutKey,
     gameState?.turn,
     gameState?.episode_steps,
@@ -9188,6 +9225,9 @@ export default function Board({
             : undefined,
           shooterModelLevels: atCurrentPos ? ucLevels?.[String(source.unit.id)] : undefined,
           viewLevel: currentLevel,
+          preResolvedWallHexes: effectiveWallHexes,
+          preResolvedObscuringHexes: losObscuringHexes,
+          preResolvedTerrainHexes: losTerrainHexes,
         });
         // Overlay VERT : cases vues EN PLUS par les figs sur l'étage AFFICHÉ (murs de leur ruine
         // ignorés). Ne pas re-peindre une case déjà bleue/couvert.
@@ -11569,6 +11609,8 @@ export default function Board({
     wallHexesOverride,
     losObscuringZones,
     losTerrainZones,
+    losObscuringHexes,
+    losTerrainHexes,
     blinkVersion,
     deploymentState,
     replayActionIndex,

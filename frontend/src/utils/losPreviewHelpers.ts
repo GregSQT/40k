@@ -77,7 +77,7 @@ export interface BuildLosPreviewFromSourceParams {
   units: MinimalUnitForLos[];
   boardCols: number;
   boardRows: number;
-  wallHexes: Array<[number, number]> | undefined;
+  wallHexes?: Array<[number, number]>;
   wallHexesOverride?: WallHexOverrideForLos[];
   /** Obscuring terrain areas (rule 13.10). One entry = one area; hexes in subhex board coords. */
   obscuringZones?: Array<{ hexes: Array<[number, number]> }>;
@@ -104,6 +104,15 @@ export interface BuildLosPreviewFromSourceParams {
   terrainFloors?: Array<{ level: number; hexes: Array<[number, number]> }>;
   /** Positions par-figurine par unité — blink cible par modèle (règle 06.01). */
   unitsCacheByModel?: UnitsCacheModelCenters;
+  /** Murs effectifs pré-résolus — court-circuite buildEffectiveLosWallHexes. Fournir depuis un
+   * useMemo stable (ex. effectiveWallHexes de BoardPvp) pour éviter la reconstruction à chaque appel. */
+  preResolvedWallHexes?: Array<[number, number]>;
+  /** Triplets [col,row,areaId] des zones obscurantes pré-aplatis — court-circuite le flatten interne.
+   * Produit par flattenObscuringZones(), mémoïsé sur losObscuringZones. */
+  preResolvedObscuringHexes?: Array<[number, number, number]>;
+  /** Paires [col,row] du terrain pré-aplaties — court-circuite le flatten interne.
+   * Produit par flattenTerrainZones(), mémoïsé sur losTerrainZones. */
+  preResolvedTerrainHexes?: Array<[number, number]>;
 }
 
 /** Extrait la métrique de portée tir depuis le game_config brut (défaut "hex"). */
@@ -300,34 +309,54 @@ function removeWallsAroundOccupiedFloor(
   return walls.filter(([c, r]) => !halo.has(`${c},${r}`));
 }
 
+/** Aplatit les zones obscurantes en triplets [col,row,areaId] (areaId = index+1, >= 1).
+ * Fonction pure exportée pour permettre la mémoïsation en amont (useMemo) et éviter
+ * le flatten à chaque appel de buildLosPreviewFromSource sur le chemin de survol. */
+export function flattenObscuringZones(
+  zones: Array<{ hexes: Array<[number, number]> }>
+): Array<[number, number, number]> {
+  const out: Array<[number, number, number]> = [];
+  for (let z = 0; z < zones.length; z++) {
+    const areaId = z + 1;
+    for (const [c, r] of zones[z].hexes) {
+      out.push([c, r, areaId]);
+    }
+  }
+  return out;
+}
+
+/** Aplatit toutes les zones terrain en paires [col,row] (classification couverture).
+ * Fonction pure exportée pour permettre la mémoïsation en amont (useMemo) et éviter
+ * le flatten à chaque appel de buildLosPreviewFromSource sur le chemin de survol. */
+export function flattenTerrainZones(
+  zones: Array<{ hexes: Array<[number, number]> }>
+): Array<[number, number]> {
+  const out: Array<[number, number]> = [];
+  for (const zone of zones) {
+    for (const [c, r] of zone.hexes) {
+      out.push([c, r]);
+    }
+  }
+  return out;
+}
+
 export function buildLosPreviewFromSource(
   params: BuildLosPreviewFromSourceParams
 ): LosPreviewFromSource {
-  const baseWallHexes = buildEffectiveLosWallHexes(
-    params.boardCols,
-    params.boardRows,
-    params.wallHexes,
-    params.wallHexesOverride
-  );
+  const baseWallHexes =
+    params.preResolvedWallHexes ??
+    buildEffectiveLosWallHexes(
+      params.boardCols,
+      params.boardRows,
+      params.wallHexes,
+      params.wallHexesOverride
+    );
   // Flatten obscuring areas into [col,row,areaId] triplets (areaId = zone index + 1, >= 1).
-  const obscuringHexes: Array<[number, number, number]> = [];
-  if (params.obscuringZones) {
-    for (let z = 0; z < params.obscuringZones.length; z++) {
-      const areaId = z + 1;
-      for (const [c, r] of params.obscuringZones[z].hexes) {
-        obscuringHexes.push([c, r, areaId]);
-      }
-    }
-  }
+  const obscuringHexes: Array<[number, number, number]> =
+    params.preResolvedObscuringHexes ?? flattenObscuringZones(params.obscuringZones ?? []);
   // Flatten all terrain areas into [col,row] pairs (cover classification).
-  const terrainHexes: Array<[number, number]> = [];
-  if (params.terrainZones) {
-    for (const zone of params.terrainZones) {
-      for (const [c, r] of zone.hexes) {
-        terrainHexes.push([c, r]);
-      }
-    }
-  }
+  const terrainHexes: Array<[number, number]> =
+    params.preResolvedTerrainHexes ?? flattenTerrainZones(params.terrainZones ?? []);
   // Empreinte tireur — obscuring areas it occupies never block (13.10). Position courante :
   // socles par-figurine du cache moteur (miroir backend). Position hypothétique : socle unique
   // recalculé à fromCol/fromRow.
@@ -458,23 +487,10 @@ export function buildLosPreviewFromSource(
           .map((mid) => `${mid}:${modelLevels[mid] ?? 0}`)
           .join(";")
       : "";
-  const key = [
-    params.source.fromCol,
-    params.source.fromRow,
-    params.maxRange,
-    metric,
-    shooterCentersKey,
-    params.boardCols,
-    params.boardRows,
-    stableWallHexKey(effectiveWallHexes),
-    stableObscuringKey(obscuringHexes),
-    stableTerrainKey(terrainHexes),
-    `v${viewLevel}`,
-    levelsKey,
-    elevatedCells.length,
-    [...losPreview.blinkIds].sort((a, b) => a - b).join(","),
-    stableBoolRecordJson(losPreview.coverByUnitId),
-  ].join("|");
+  // key est un getter lazy : les 4 appelants qui ne lisent pas .key n'en paient pas le coût
+  // (~6 ms/appel, dominé par stableTerrainKey sur ~16 000 hexes). Un seul appelant (useMemo
+  // blinkIds/coverByUnitId, call site ligne 3368 de BoardPvp) lit .key — le getter s'exécute
+  // exactement une fois pour lui, jamais pour les gestionnaires de survol (call sites 4153 et 7636).
   return {
     visibleHexes,
     clearCells: losPreview.clearCells,
@@ -484,6 +500,24 @@ export function buildLosPreviewFromSource(
     coverByUnitId: losPreview.coverByUnitId,
     effectiveWallHexes,
     elevatedCells,
-    key,
+    get key(): string {
+      return [
+        params.source.fromCol,
+        params.source.fromRow,
+        params.maxRange,
+        metric,
+        shooterCentersKey,
+        params.boardCols,
+        params.boardRows,
+        stableWallHexKey(effectiveWallHexes),
+        stableObscuringKey(obscuringHexes),
+        stableTerrainKey(terrainHexes),
+        `v${viewLevel}`,
+        levelsKey,
+        elevatedCells.length,
+        [...losPreview.blinkIds].sort((a, b) => a - b).join(","),
+        stableBoolRecordJson(losPreview.coverByUnitId),
+      ].join("|");
+    },
   };
 }
