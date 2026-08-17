@@ -202,6 +202,9 @@ class AnalyzerState:
     #: défaut que la mêlée avait fermé y vivait encore : mesuré sur le run du 2026-08-11,
     #: 320 fausses « Shots over RNG_NB » sur 23 169 tirs.
     last_shoot_shooters: Tuple[str, ...] = ()
+    #: Dernière unité dont un SHOT a déclenché un marqueur d'activation SHOOT (frontière
+    #: d'activation 10.02). Réinitialisé à ``None`` en début de phase SHOOT.
+    shoot_last_activator: Optional[str] = None
     last_fight_fighter_id: Optional[str] = None
     last_fight_weapon: Optional[str] = None
     #: Socles ayant frappé sur la dernière ligne de combat (`[SHOOTER_MODELS:]`). Entre dans la

@@ -388,9 +388,14 @@ portés par #14 et #24 ; « start an action » exige les lignes d'action (16.01)
 
 Le marqueur d'activation de la phase FIGHT est `) CONSOLIDATED ` (`analyzer_core.py`) : les
 lignes `FOUGHT` sont par ATTAQUE (des dizaines par activation), la consolidation est la seule
-frontière d'activation d'une par unité et par phase (12.07). **SHOOT reste sans marqueur propre** :
-`SHOT` n'est pas dans `is_activation_marker` (`:1010-1018`, relu le 2026-08-10), donc 10.02 n'est
-toujours pas couvert.
+frontière d'activation d'une par unité et par phase (12.07). **SHOOT — COUVERT le 2026-08-17** :
+`is_shoot_activation_start` introduit dans `is_activation_marker` via `shoot_last_activator`
+(variable d'état qui suit le dernier acteur de la phase) : le PREMIER SHOT d'un acteur différent
+du précédent ouvre une nouvelle activation ; les tirs consécutifs de la même escouade (salve)
+ne déclenche pas de second marqueur. Reset : en début de tour (turn reset), pas en début de phase
+(pour que la mise à jour de la ligne courante ne soit pas écrasée par le reset de phase qui
+s'exécute après le bloc `if _dmg_actor_match:`). Vérifié rouge → vert :
+`tests/unit/ai/test_analyzer_shoot_double_activation.py` (2 tests).
 
 **⚠️ La clé de phase FIGHT était fausse — corrigée le 2026-08-10 (`c1487fcb`).** Elle valait
 `(tour, phase, joueur)`. Or un TOUR contient DEUX phases de combat, celle du tour de P1 et celle du
