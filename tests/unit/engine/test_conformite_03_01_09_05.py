@@ -161,6 +161,12 @@ class TestOccupiedHexesAfterAnchorDeath:
         assert REMOTE_MID in by_model
         # La figurine détruite n'est plus dans la carte.
         assert ANCHOR_MID not in by_model
+        # Chaque position par-figurine apparaît aussi dans occupied_hexes (cohérence croisée).
+        occupied = entry["occupied_hexes"]
+        for mid, pos in by_model.items():
+            assert pos in occupied, (
+                f"occupied_hexes_by_model[{mid!r}]={pos} absent de occupied_hexes={occupied}"
+            )
 
 
 class TestCollisionPrevention:

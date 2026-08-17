@@ -102,7 +102,6 @@ def synthetic_state(
         "units": units,
         "unit_by_id": {str(u["id"]): u for u in units},
         "units_selected_to_fight": set(),
-        "_unit_move_version": 0,
         "inches_to_subhex": int(inches_to_subhex),
         "action_logs": [],
         "action_log_seq": 0,

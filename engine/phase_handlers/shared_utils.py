@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from engine.hex_utils import Socle
     from engine.phase_handlers.attack_sequence import WeaponAttackProfile
 
-from shared.data_validation import require_key
+from shared.data_validation import ConfigurationError, require_key
 from engine.utils.weapon_helpers import (
     melee_weapons,
     ranged_weapons,
@@ -1697,8 +1697,8 @@ def update_units_cache_position(game_state: Dict[str, Any], unit_id: str, col: i
     #
     # `update_model_position` enchaînait la même inversion (recompute puis ancre) ; poser la
     # correction ICI la ferme pour les deux, et pour tout futur appelant.
-    squad_models = game_state.get("squad_models")
-    model_ids = squad_models.get(unit_id) if isinstance(squad_models, dict) else None
+    squad_models = require_key(game_state, "squad_models")
+    model_ids = squad_models.get(unit_id)
     if not isinstance(model_ids, (list, tuple)):
         model_ids = None
 
@@ -3518,7 +3518,9 @@ def _recompute_squad_occupied_hexes(game_state: Dict[str, Any], squad_id: str) -
     for mid in squad_models.get(squad_id, []):  # get allowed
         m = models_cache.get(mid)
         if m is None:
-            continue
+            raise ConfigurationError(
+                f"_recompute_squad_occupied_hexes: mid {mid!r} in squad_models[{squad_id!r}] but absent from models_cache — data desync"
+            )
         m_col = int(m["col"])
         m_row = int(m["row"])
         m_orient = int(m.get("orientation", unit_orientation))  # get allowed (défaut = orient unité)
@@ -3905,12 +3907,6 @@ def destroy_model(game_state: Dict[str, Any], model_id: str, reason: str) -> Non
     squad_list = game_state["squad_models"].get(squad_id)
     if squad_list is not None and model_id in squad_list:
         squad_list.remove(model_id)
-    # PR4 4e-i : sync occupied_hexes_by_model (retire entree fig morte)
-    units_entry_oh = game_state.get("units_cache", {}).get(squad_id)  # get allowed
-    if units_entry_oh is not None:
-        oh_by_model = units_entry_oh.get("occupied_hexes_by_model")
-        if oh_by_model is not None:
-            oh_by_model.pop(model_id, None)
     # F2 fix (audit) : recalcule occupied_hexes apres retrait de la fig
     _recompute_squad_occupied_hexes(game_state, squad_id)
     # Choke-point LoS (constat 5) : la mort d'une figurine réduit le footprint du squad →

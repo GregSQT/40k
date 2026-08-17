@@ -61,16 +61,19 @@ SUSTAINED_WEAPON = "Heavy Bolter"
 CQ_WEAPON = "Sternguard Bolt Pistol"
 
 
-def _uc(col, row, *, player, models=None):
+def _uc(col, row, *, player, models=None, hp_cur=9):
     """Entrée units_cache. `occupied_hexes_by_model` est ce dont `_models_segment_for_unit`
     tire le segment `[MODELS: A1@(c,r,z0)]` — sans lui l'analyzer ne connaît pas le NOMBRE de
     figurines de l'escouade, donc pas le plafond de tirs, donc pas la fenêtre RAPID FIRE.
 
     `floor_height_by_model` est écrite AVEC elle, jamais seule : les deux cartes sont le contrat
     de la couche per-figurine (position + altitude, §03.04), et le moteur exige la seconde dès
-    que la première est là. Plateau plat ici → 0.0 partout."""
+    que la première est là. Plateau plat ici → 0.0 partout.
+
+    `hp_cur` : HP total de l'unité, lu en `require_key` par
+    `_compute_enemy_adjacent_cache_for_player_from_units_cache` pour sauter les unités mortes."""
     entry = {"BASE_SHAPE": "round", "BASE_SIZE": 6, "col": col, "row": row,
-             "occupied_hexes": set(), "VALUE": 10.0, "player": player}
+             "occupied_hexes": set(), "VALUE": 10.0, "player": player, "HP_CUR": hp_cur}
     if models:
         entry["occupied_hexes_by_model"] = dict(models)
         entry["floor_height_by_model"] = {mid: 0.0 for mid in models}
@@ -125,7 +128,7 @@ def _game_state(weapon_rules, *, moved_inches=0.0, target=TARGET, n_attacks=1,
         "squad_cache": {"1": {"model_count_at_start": 1},
                         "101": {"model_count_at_start": target_models}},
         "units_cache": {"1": _uc(*SHOOTER, player=0, models={"1#0": SHOOTER}),
-                        "101": _uc(*target, player=1, models=target_cache)},
+                        "101": _uc(*target, player=1, models=target_cache, hp_cur=hp_cur * target_models)},
         "units": [{"id": "1", "player": 0, "unitType": unit_type},
                   {"id": "101", "player": 1, "unitType": "AssaultIntercessor"}],
         # `deployed_on_turn` : clause 2 de [HEAVY] 24.16 (« not set up this turn »), lue par

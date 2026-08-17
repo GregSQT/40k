@@ -126,3 +126,4 @@ def test_successful_charge_still_grants_fights_first(engine: W40KEngine) -> None
 
     assert _charged(engine) == ["1"]
     assert is_fights_first(gs["unit_by_id"]["1"], gs) is True
+
