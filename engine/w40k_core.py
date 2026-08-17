@@ -37,6 +37,7 @@ from engine.phase_handlers.shared_utils import (
     rebuild_choice_timing_index,
     is_unit_alive,
     require_unit_position,
+    unit_has_rule_effect,
     # Id d'action, importe de shared_utils et non de macro_intents (`ACTION_WAIT`, meme valeur) :
     # c'est CE symbole que le constructeur de masque pose (`mask[SQUAD_ACTION_WAIT] = 1`), et le
     # drapeau d'attente forcee compare une action AU MASQUE. Les deux constantes sont definies
@@ -2850,6 +2851,19 @@ class W40KEngine(gym.Env):
 
             action_logs = self.game_state["action_logs"]
 
+            # Abilities rule usage — Famille A (types action_log) + Famille B (shot_records).
+            # Un compteur par règle par camp, initialisé à 0 ; l'exposition sera calculée
+            # après la boucle depuis les unités du roster.
+            _ABILITIES_KEYS: Tuple[str, ...] = (
+                "reactive_move", "charge_impact",
+                "charge_after_advance", "charge_after_flee",
+                "move_after_shooting",
+                "hit_reroll", "wound_reroll", "oath_wound_bonus",
+            )
+            abilities_counts: Dict[str, int] = {
+                f"{k}_{s}": 0 for k in _ABILITIES_KEYS for s in ("agent", "opp")
+            }
+
             # Volume de combat, kills et attrition, meme source action_logs (seat-aware).
             #
             # Ces quatre compteurs etaient DECLARES et jamais incrementes depuis le commit
@@ -3007,6 +3021,22 @@ class W40KEngine(gym.Env):
                             _cd['long'] += 1
                         _cd['success_sum' if _charge_ok else 'fail_sum'] += float(_tgt)
                         _cd['success_n' if _charge_ok else 'fail_n'] += 1
+                    # Abilities — Famille A : charge_after_advance / charge_after_flee.
+                    # Seules les charges RÉUSSIES comptent : un échec n'a pas utilisé de capacité.
+                    if _charge_ok:
+                        _rule_eff = log.get("ability_rule_effect")  # get allowed : None si charge normale
+                        if _rule_eff in ("charge_after_advance", "charge_after_flee"):
+                            abilities_counts[
+                                f"{_rule_eff}_{'agent' if _by_controlled else 'opp'}"
+                            ] += 1
+                    continue
+                # Abilities — Famille A : reactive_move, charge_impact, move_after_shooting.
+                # Ces trois types n'ont pas de branche dédiée dans la boucle existante (ils
+                # tombaient dans `if log_type not in ('shoot', 'combat'): continue`).
+                if log_type in ("reactive_move", "charge_impact", "move_after_shooting"):
+                    abilities_counts[
+                        f"{log_type}_{'agent' if int(require_key(log, 'player')) == controlled_player else 'opp'}"
+                    ] += 1
                     continue
                 if log_type not in ("shoot", "combat"):
                     continue
@@ -3019,6 +3049,18 @@ class W40KEngine(gym.Env):
                     damage_dealt += log_damage
                 else:
                     damage_received += log_damage
+                # Abilities — Famille B : relances et bonus Oath sur les jets.
+                # Comptés pour LES DEUX CAMPS avant le filtre by_controlled des kills.
+                # hitAbility / woundAbility / woundBonusAbility posés par stamp_reroll_abilities
+                # et stamp_wound_bonus_ability (shared_utils) ; absence = pas de relance → get allowed.
+                _sfx_b = "_agent" if by_controlled else "_opp"
+                for _shot_b in require_key(log, "shootDetails"):
+                    if _shot_b.get("hitAbility"):          # get allowed
+                        abilities_counts[f"hit_reroll{_sfx_b}"] += 1
+                    if _shot_b.get("woundAbility"):        # get allowed
+                        abilities_counts[f"wound_reroll{_sfx_b}"] += 1
+                    if _shot_b.get("woundBonusAbility"):   # get allowed
+                        abilities_counts[f"oath_wound_bonus{_sfx_b}"] += 1
                 if not by_controlled:
                     continue
                 # `type == "combat"` n'a qu'un seul emetteur (FIGHT_CTX, `phase_label="fight"`) :
@@ -3191,6 +3233,42 @@ class W40KEngine(gym.Env):
             self.episode_tactical_data['forced_unit_counts_all'] = dict(
                 sorted(forced_unit_counts_all.items(), key=lambda item: item[0])
             )
+
+            # Abilities — EXPOSITION par règle et par camp.
+            # Un épisode est « exposé » pour une règle si AU MOINS UNE unité du camp possédait
+            # cette règle dans le roster (vivante ou morte — toutes sont dans game_state["units"]).
+            # Sans cette courbe, un zéro sur abilities/ ne distingue pas « jamais déclenchée »
+            # de « jamais dans le roster ». Calculée depuis les unités du roster (pas les action_logs).
+            #
+            # Familles A et B (rerolls) : via unit_has_rule_effect.
+            # Oath wound bonus : proxy par les compteurs B — a tiré ≈ était active (Oath est une
+            # capacité de faction déclarée en command phase, pas une règle d'unité technique).
+            abilities_exposure: Dict[str, int] = {
+                f"{k}_{s}": 0 for k in _ABILITIES_KEYS for s in ("agent", "opp")
+            }
+            for _unit_exp in units:
+                _exp_sfx = "_agent" if int(_unit_exp["player"]) == controlled_player else "_opp"
+                for _eff in (
+                    "reactive_move", "charge_impact",
+                    "charge_after_advance", "charge_after_flee",
+                    "move_after_shooting",
+                ):
+                    if unit_has_rule_effect(_unit_exp, _eff):
+                        abilities_exposure[f"{_eff}{_exp_sfx}"] = 1
+                if unit_has_rule_effect(_unit_exp, "reroll_1_tohit_fight"):
+                    abilities_exposure[f"hit_reroll{_exp_sfx}"] = 1
+                for _we in ("reroll_1_towound", "reroll_towound_target_on_objective"):
+                    if unit_has_rule_effect(_unit_exp, _we):
+                        abilities_exposure[f"wound_reroll{_exp_sfx}"] = 1
+            # Oath : proxy — un tir avec bonus Oath prouve que la capacité était active.
+            abilities_exposure["oath_wound_bonus_agent"] = (
+                1 if abilities_counts["oath_wound_bonus_agent"] > 0 else 0
+            )
+            abilities_exposure["oath_wound_bonus_opp"] = (
+                1 if abilities_counts["oath_wound_bonus_opp"] > 0 else 0
+            )
+            self.episode_tactical_data["abilities_counts"] = abilities_counts
+            self.episode_tactical_data["abilities_exposure"] = abilities_exposure
 
             victory_points = require_key(self.game_state, "victory_points")
             controlled_vp = float(require_key(victory_points, controlled_player))

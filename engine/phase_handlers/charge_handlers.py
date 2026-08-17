@@ -5747,8 +5747,8 @@ def charge_set_fly_mode_handler(game_state: Dict[str, Any], unit_id: str, action
 
 def _charge_enabling_ability(
     game_state: Dict[str, Any], unit: Dict[str, Any]
-) -> Tuple[Optional[str], str]:
-    """Capacité qui a rendu CETTE charge légale, et le marqueur de log correspondant.
+) -> Tuple[Optional[str], str, Optional[str]]:
+    """Capacité qui a rendu CETTE charge légale, le marqueur de log, et l'effet de règle.
 
     Deux chemins committent une charge — le plan par-figurine du PvP
     (`charge_commit_move_plan_handler`) et la sélection de destination
@@ -5757,15 +5757,17 @@ def _charge_enabling_ability(
     d'affichage est ce que l'analyzer agrège (`special_rule_usage`). Le PvP n'écrivait aucun
     marqueur : une charge après avance autorisée par le Waaagh! ne laissait aucune trace.
 
-    Rend `(nom d'affichage, marqueur)`, ou `(None, "")` quand la charge n'a demandé aucune
-    capacité (ni repli ni avance dans le tour).
+    Rend `(nom d'affichage, marqueur, rule_effect)`, ou `(None, "", None)` quand la charge
+    n'a demandé aucune capacité (ni repli ni avance dans le tour).
+    `rule_effect` vaut `"charge_after_flee"`, `"charge_after_advance"`, ou `None`.
+    Le Waaagh! produit le même effet observable que `charge_after_advance` et est compté comme tel.
     """
     unit_id_str = str(unit["id"])
     if unit_id_str in require_key(game_state, "units_fled") and _unit_has_rule(unit, "charge_after_flee"):
         display_name = _get_source_unit_rule_display_name_for_effect(unit, "charge_after_flee")
         if display_name is None:
             raise ValueError(f"Unit {unit['id']} charged after flee without source unit rule")
-        return display_name, f" [{display_name}]"
+        return display_name, f" [{display_name}]", "charge_after_flee"
     if unit_id_str in require_key(game_state, "units_advanced"):
         # Nom de la capacité qui a permis la charge. DEUX sources possibles, dans l'ordre où la
         # règle les rend disponibles : la capacité de datasheet, sinon le Waaagh!. Le nom
@@ -5775,21 +5777,23 @@ def _charge_enabling_ability(
             display_name = _get_source_unit_rule_display_name_for_effect(unit, "charge_after_advance")
             if display_name is None:
                 raise ValueError(f"Unit {unit['id']} charged after advance without source unit rule")
-            return display_name, f" [{display_name}]"
+            return display_name, f" [{display_name}]", "charge_after_advance"
         if waaagh_applies_to_unit(game_state, unit):
             # Capacité de FACTION : token en MAJUSCULES, comme `[OATH OF MOMENT]` dans la ligne
             # de synthèse de tir/mêlée. Le nom d'affichage rendu garde sa casse : c'est lui que
             # l'analyzer agrège.
+            # rule_effect = "charge_after_advance" : le Waaagh! produit le même effet observable.
             return (
                 WAAAGH_ABILITY_DISPLAY_NAME,
                 f" [{WAAAGH_ABILITY_DISPLAY_NAME.upper()}]",
+                "charge_after_advance",
             )
         raise ValueError(
             f"Unit {unit['id']} charged after advance without any enabling rule "
             f"(ni `charge_after_advance`, ni Waaagh! actif) — l'eligibilite et le log "
             f"auraient diverge."
         )
-    return None, ""
+    return None, "", None
 
 
 def charge_commit_move_plan_handler(
@@ -5858,7 +5862,7 @@ def charge_commit_move_plan_handler(
     # sa levée laissait les figurines posées et `units_charged` marqué, sans log, sans impact de
     # charge, sans fin d'activation — un état de partie invalide. Le chemin de sélection de
     # destination et le jumeau gym le lisent tous deux avant de bouger quoi que ce soit.
-    charge_ability_display_name, charge_rule_marker = _charge_enabling_ability(game_state, unit)
+    charge_ability_display_name, charge_rule_marker, charge_ability_rule_effect = _charge_enabling_ability(game_state, unit)
 
     commit_move(plan, game_state, "charge")  # pose per-modèle + units_charged.add
 
@@ -5924,6 +5928,9 @@ def charge_commit_move_plan_handler(
             # `step_logger` réécrit la ligne de charge et n'y met le token de capacité que
             # depuis CE champ. Le marqueur posé sur `message` ne sert qu'au log de partie.
             "ability_display_name": charge_ability_display_name,
+            # Effet de règle technique de la capacité (pour les compteurs abilities/) :
+            # "charge_after_flee", "charge_after_advance" (Waaagh! inclus), ou None.
+            "ability_rule_effect": charge_ability_rule_effect,
             "timestamp": "server_time",
             "is_ai_action": unit["player"] == 1,
             "moveDetails": move_details,
@@ -6158,7 +6165,7 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
     current_turn = require_key(game_state, "turn")
 
     target_col, target_row = require_unit_position(target_id, game_state)
-    charge_ability_display_name, charge_rule_marker = _charge_enabling_ability(game_state, unit)
+    charge_ability_display_name, charge_rule_marker, charge_ability_rule_effect = _charge_enabling_ability(game_state, unit)
     _ut_seg = f" {unit['unitType']}" if unit.get("unitType") else ""
     _tt_unit = next((u for u in game_state["units"] if str(u["id"]) == str(target_id)), None)
     _tt_seg = f" {_tt_unit['unitType']}" if _tt_unit and _tt_unit.get("unitType") else ""
@@ -6191,6 +6198,7 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
             # reecrit integralement la ligne de charge).
             "is_fly_move": _fly_seg == " [FLY]",
             "ability_display_name": charge_ability_display_name,
+            "ability_rule_effect": charge_ability_rule_effect,
             "timestamp": "server_time",
             "action_name": action_name,
             "reward": round(action_reward, 2),

@@ -1154,6 +1154,7 @@ class MetricsCollectionCallback(BaseCallback):
         # Log to metrics tracker (KEEP for state tracking)
         self.metrics_tracker.log_episode_end(episode_data)
         self.metrics_tracker.log_tactical_metrics(self.episode_tactical_data)
+        self.metrics_tracker.log_abilities_metrics(self.episode_tactical_data)
 
         # CRITICAL FIX: Write game_critical metrics directly to model.logger
         # This ensures metrics appear in same TensorBoard directory as train/ metrics
