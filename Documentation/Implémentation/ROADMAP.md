@@ -396,18 +396,20 @@
 - **Conséquence immédiate : plus rien n'est gelé.** La consigne « ne rien lancer de cassant, aucun
   JSON de `config/` » tombe avec le run. Ce qui était différé à ce titre redevient faisable —
   notamment la `justification` d'`obs_size` (§5) et l'ajout d'un profil de validation P5 (§1 pt 6).
-- ✅ **[INDIRECT FIRE] 24.19 — pièces 1→5 agent livrées le 2026-08-16** (`TOTAL_ACTION_SIZE`
+- ✅ **[INDIRECT FIRE] 24.19 — toutes les pièces livrées (2026-08-16/17)** (`TOTAL_ACTION_SIZE`
   1139 → 1159). Pièces 1-4 : config `obs_id`, éligibilité indirecte, ciblage sans LoS exigée
   (gate visibilité levé pour armes [INDIRECT FIRE]), résolution (plancher `max(seuil, 6)` ou
   `max(seuil, 4)` avec spotter, couvert octroyé, relances de touche interdites). Pièce 5 agent :
   20 slots `SHOOT_INDIRECT` dans le bloc micro, décodeur, masque gym, état de choix
-  posé/honoré/effacé.
-  **Reste (ordre imposé par §4 du doc) :** pièce 6 journal (`[INDIRECT FIRE:<plancher>+]` +
-  `[COVER]`, `replayParser.ts`, `LOG_GRAMMAR_VERSION` 4 → 5) → **EN PREMIER** ; pièce 5 PvP
-  (choix humain : frontend + point d'entrée API) → après pièce 6 ; retrain → après PvP ;
-  pièce 7 analyzer → lot séparé, après retrain.
-  ⚠️ Le retrain est dû au seul changement d'espace d'action. Aucun roster ArmageddonAgent ne
-  porte d'arme [INDIRECT FIRE] : les 20 slots ne s'ouvriront jamais pendant ce run.
+  posé/honoré/effacé. Pièce 5 PvP : `squad_shoot_type_select` + panneau de choix `BoardPvp`
+  + `handleSquadShootTypeSelect` dans `useEngineAPI`. Pièce 6 journal : `[INDIRECT FIRE:<plancher>+]`
+  + `[COVER]` dans `step_logger.py`, `LOG_GRAMMAR_VERSION` 4 → 5, `INDIRECT_FIRE_TOKEN` dans
+  `NON_ABILITY_ROLL_TOKENS` de `replayParser.ts`, `Replay.md` §2.3quater mis à jour. Pièce 7
+  analyzer : `check_indirect_fire_rule` dans `ai/analyzer_hit.py`, taux de fausse alarme mesuré à
+  0 sur sortie moteur réelle (2 cas 6+/4+), 8 tests.
+  **Reste : retrain seul** (`--new`, dû au changement d'espace d'action). Aucun roster
+  ArmageddonAgent ne porte d'arme [INDIRECT FIRE] : les 20 slots ne s'ouvriront pas, un compteur
+  à zéro sera CORRECT.
   → [`A_faire/indirect_fire_10_07.md`](A_faire/indirect_fire_10_07.md)
 
 ## 1. Chemin critique vers la mesure de référence
@@ -1014,6 +1016,12 @@ Prêts à démarrer sans décision produit :
   Verrouillé par `tests/unit/engine/test_conformite_03_01_09_05.py` (6 tests, mutation ROUGE ×4).
   La piste `_check_ez = not _thru_ez` ne décrit qu'un contrôle de TRAVERSÉE (pas de destination),
   non pertinent pour ces deux familles — écartée.
+  ✅ **Fix renforcé le 2026-08-17** (commits `640cdb53`, `8c2a85f2`) : `destroy_model` ne duplique
+  plus le retrait de `occupied_hexes_by_model` (déjà fait par `_recompute_squad_occupied_hexes`) ;
+  `_recompute_squad_occupied_hexes` lève `ConfigurationError` si une figurine de `squad_models`
+  est absente de `models_cache` au lieu de l'ignorer en silence ; `end_activation` caste
+  `unit_id` en `str` avant d'écrire dans `units_shot/charged/fought` (cohérence de type) ;
+  `has_shot` retiré de `build_squad_action_mask` (variable calculée, jamais lue).
   ~~⚠️ **Piste ouverte, non prouvée, pour les deux familles de move** : le pool de destinations
   exclut bien la zone d'engagement sur les deux chemins single-hex de
   [`engine/phase_handlers/movement_handlers.py`](file:///home/greg/40k/engine/phase_handlers/movement_handlers.py),

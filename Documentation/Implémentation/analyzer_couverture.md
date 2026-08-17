@@ -1095,10 +1095,10 @@ blessure critique n'a plus à être re-dérivée du tout (cf. §1.3).
 
 | # | Champ / ligne à ajouter | Format proposé | Débloque |
 |---|---|---|---|
-| L1 | **Drapeau `battle_shocked` par unité** + jet de battle-shock | ligne `Unit N BATTLE-SHOCK Roll:2D6=<n> vs Ld<n>+ → SHOCKED\|OK` | 01.06, 01.07, 02.02 (OC='-'), 08.03, 14.02, 16.01, 15.04 |
+| ~~L1~~ | ~~**Drapeau `battle_shocked` par unité** + jet de battle-shock~~ — **LIVRÉ le 2026-08-17** : ligne `Unit N BATTLE-SHOCK Roll:2D6=<n> vs Ld<n>+ → SHOCKED\|OK` dans `step_logger.py` | — | 01.06, 01.07, 02.02 (OC='-'), 08.03, 14.02, 16.01, 15.04 |
 | ~~L2~~ | ~~`S` de l'arme et `T` de la cible~~ — **CLOS le 2026-08-10 sans ajout de champ** (cf. ci-dessus) ; le reliquat utile est le `T` RETENU par le moteur, pour cesser de le recalculer | `Wound R(T+) [S<n> vs T<n>]` | 19.02 seul |
-| L3 | **Figurine cible allouée** + groupe d'allocation | `→ <mid>` sur la partie `Save`/`Dmg` | 05.03, 05.04, 06.02, 24.28 |
-| L4 | **`AP` de l'arme, `Sv`/`InSv` du groupe** | `Save R(<base>+ AP<n> → <eff>+)` | 05.04, `closest_target_penetration`, 24.18 |
+| ~~L3~~ | ~~**Figurine cible allouée** + groupe d'allocation~~ — **LIVRÉ le 2026-08-17** : `→ <mid>` sur la partie `Save`/`Dmg` | — | 05.03, 05.04, 06.02, 24.28 |
+| ~~L4~~ | ~~**`AP` de l'arme, `Sv`/`InSv` du groupe**~~ — **LIVRÉ le 2026-08-17** : `Save R(<base>+ AP<n> → <eff>+)` | — | 05.04, `closest_target_penetration`, 24.18 |
 | L6 | **Ligne `stratagem`** (nom, CP dépensés, cible, phase) | `P<n> STRATAGEM [<NOM>] -<n>CP → Unit M` | 15.01–15.12 (12 règles) |
 | L7 | **Lignes `action_start` / `action_complete`** | `Unit N ACTION START [<nom>]` / `… COMPLETE` | 16.01, 09.06, 09.07, 10.04–10.07 (volets « AFTER: pas d'action ») |
 | L8 | **Transports** : capacité, embark, disembark (mode + jet de hasard) | types `embark`, `disembark` dans `_STEP_LOG_TYPE_MAP` | 18.01–18.05 |
