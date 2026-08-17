@@ -91,10 +91,11 @@ def _counter_value(stats: Dict[str, Any], path: List[str]) -> int:
       chemin. La valeur est traversée sans boucle joueur et rendue telle quelle.
     """
     if "#" in path:
+        if path[-1] != "#":
+            raise ValueError(f"'#' doit être en position terminale du chemin, reçu : {path}")
         node: Any = stats
-        for key in path:
-            if key != "#":
-                node = require_key(node, key)
+        for key in path[:-1]:
+            node = require_key(node, key)
         return int(node)
     slots = path if "*" in path else [*path, "*"]
     total = 0

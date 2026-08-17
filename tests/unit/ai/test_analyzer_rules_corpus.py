@@ -139,6 +139,24 @@ def test_the_warning_is_rendered_and_names_the_rule(tmp_path):
     assert any("03.03" in w for w in warnings)
 
 
+def test_render_rule_coverage_called_for_all_sections(tmp_path):
+    """_render_rule_coverage doit être appelé pour TOUTES les sections du corpus, pas seulement §1.1.
+
+    Dans _A_NORMAL_MOVE (aucun tir, charge, combat, mort), toutes les règles §1.2–§2.8 ont
+    applicability=True (kind=always) et exercised=0 → JAMAIS EXERCÉE. Sans appel à
+    _render_rule_coverage pour ces sections, leurs lacunes ne sont jamais signalées au lecteur.
+    """
+    from ai.analyzer_rules import SECTION_TO_BUCKET
+    stats = _stats(tmp_path, _A_NORMAL_MOVE)
+    rendered: list = []
+    an.print_statistics(stats, output_lines=rendered, emit_console=False)
+    for section in SECTION_TO_BUCKET:
+        header = f"{section} COUVERTURE DES REGLES"
+        assert any(header in l for l in rendered), (
+            f"la couverture de §{section} n'est pas rendue — _render_rule_coverage manquant"
+        )
+
+
 def test_summary_signals_never_exercised_rules(tmp_path):
     """Le SUMMARY affiche ⚠️ sur la ligne 1.1 quand une règle est applicable mais jamais exercée.
 

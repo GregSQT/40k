@@ -3469,6 +3469,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
             )
             if _first_any:
                 log_print(f"  First P{_pl} occurrence (Episode {_first_any['episode']}): {_first_any['line']}")
+    _render_rule_coverage(stats, "1.2", log_print)
     # CHARGE ERRORS
     active_debug_section = "1.3"
     log_print("\n" + "-" * 80)
@@ -3515,7 +3516,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     if stats['first_error_lines']['charge_invalid'][2]:
         first_err = stats['first_error_lines']['charge_invalid'][2]
         log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-
+    _render_rule_coverage(stats, "1.3", log_print)
     # FIGHT ERRORS
     active_debug_section = "1.4"
     log_print("\n" + "-" * 80)
@@ -3565,8 +3566,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
             if _fm[_kind][_pl] > 0 and stats['first_error_lines']['fight_move_invalid'][_kind][_pl]:
                 _fe = stats['first_error_lines']['fight_move_invalid'][_kind][_pl]
                 log_print(f"  First P{_pl} occurrence (Episode {_fe['episode']}): {_fe['line']}")
-
-    
+    _render_rule_coverage(stats, "1.4", log_print)
     # ACTION PHASE ACCURACY
     active_debug_section = "1.5"
     log_print("\n" + "-" * 80)
@@ -3854,7 +3854,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     if stats['unit_revived'][2] > 0 and stats['first_error_lines']['unit_revived'][2]:
         first_err = stats['first_error_lines']['unit_revived'][2]
         log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-
+    _render_rule_coverage(stats, "2.1", log_print)
     # POSITION / LOG COHERENCE
     active_debug_section = "2.2"
     log_print("\n" + "-" * 80)
@@ -3885,7 +3885,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     dmg_missing_p1 = stats['damage_missing_unit_hp'][1]
     dmg_missing_p2 = stats['damage_missing_unit_hp'][2]
     log_print(f"Missing unit_hp on damage:   {dmg_missing_p1:6d}           {dmg_missing_p2:6d}")
-
+    _render_rule_coverage(stats, "2.3", log_print)
     # EPISODES STATISTICS
     active_debug_section = "2.4"
     log_print("\n" + "-" * 80)
@@ -3954,7 +3954,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     log_print(f"Unites tuees a tort par l'analyzer        : {_resync['alive_missed']}")
     log_print(f"Figurines mal positionnees (deplacement non journalise) : {_resync['pos_mismatch']}")
     log_print(f"Figurine allouee inconnue de l'analyzer  : {_resync['alloc_model_unknown']}")
-
+    _render_rule_coverage(stats, "2.8", log_print)
     # LE calcul, partagé avec le total de la CLI (`error_totals`). Les deux copies qui vivaient
     # ici et là-bas avaient divergé sur deux compteurs : le rapport se contredisait lui-même.
     _totals = error_totals(stats)

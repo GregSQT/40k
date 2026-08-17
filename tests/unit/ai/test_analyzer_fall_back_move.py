@@ -23,6 +23,8 @@ cinquième test — et `force_thru_enemy` disparaître.
 """
 from __future__ import annotations
 
+import re
+
 from tests.unit.ai._fabriques import entete_step_log
 
 # Échelle x5 : M=6" d'un AssaultIntercessor vaut 30 subhex, la zone d'engagement 10 subhex.
@@ -172,6 +174,5 @@ def test_the_violations_reach_the_MOVE_error_total_of_the_summary(tmp_path):
     # 2 fautes de fall-back et rien d'autre : le total DOIT valoir exactement 2. Un `> 0` aurait
     # laissé passer un total qui ne compte qu'une des deux.
     # La ligne peut porter un suffixe ⚠️ (règles jamais exercées) — on extrait le chiffre.
-    import re
     m = re.search(r": (\d+)", summary[0])
     assert m and int(m.group(1)) == 2, summary[0]

@@ -23,6 +23,8 @@ journal d'hier ne se juge pas avec le `game_config.json` d'aujourd'hui.
 """
 from __future__ import annotations
 
+import re
+
 import ai.analyzer as an
 
 from tests.unit.ai._fabriques import entete_step_log
@@ -131,7 +133,6 @@ def test_the_violation_reaches_the_MOVE_error_total_of_the_summary(tmp_path):
     an.print_statistics(stats, output_lines=rendered, emit_console=False)
     summary = [l for l in rendered if "1.1 Erreurs en phase de move" in l]
     assert len(summary) == 1, rendered[-40:]
-    import re
     m = re.search(r": (\d+)", summary[0])
     assert m and int(m.group(1)) == 1, summary[0]
 
