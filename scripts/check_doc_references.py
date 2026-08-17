@@ -137,6 +137,9 @@ _EXPLICIT_ANCHOR = re.compile(r"\{#([^}]+)\}")
 #: Ligne de titre ATX (# à ######), texte jusqu'en fin de ligne.
 _MD_HEADING = re.compile(r"^#{1,6} +(.+)$", re.MULTILINE)
 
+#: Bloc code fencé (``` ... ```) — son contenu ne doit pas être scanné pour les ancres.
+_FENCED_CODE_BLOCK = re.compile(r"^`{3}[^\n]*\n.*?^`{3}[^\n]*$", re.MULTILINE | re.DOTALL)
+
 #: Une ancre de ligne, quelle que soit l'extension : la convention §5 porte sur la LIGNE, pas sur le
 #: langage. Le basename accepte les points internes, sans quoi `useBoardHexMemos.test.ts:117` se
 #: réduit à `test.ts` — 25 fichiers `*.test.ts(x)` et 3 `*.d.ts` échappaient à la convention. Et
@@ -632,15 +635,19 @@ def md_anchors(path: pathlib.Path) -> frozenset[str]:
     titre (ancrages isolés dans le corps du document) sont également collectés.
     """
     text = path.read_text(encoding="utf-8", errors="replace")
+    text_no_code = _FENCED_CODE_BLOCK.sub("", text)
+    # Inline code spans masquent les {#id} qu'ils contiennent — idem pour le scan body.
+    text_no_inline = re.sub(r"`[^`\n]+`", "", text_no_code)
     result: set[str] = set()
-    for m in _MD_HEADING.finditer(text):
+    for m in _MD_HEADING.finditer(text_no_code):
         heading = m.group(1).strip()
-        explicit = _EXPLICIT_ANCHOR.search(heading)
+        heading_no_inline = re.sub(r"`[^`]*`", "", heading)
+        explicit = _EXPLICIT_ANCHOR.search(heading_no_inline)
         if explicit:
             result.add(explicit.group(1))
         else:
             result.add(_heading_slug(heading))
-    for m in _EXPLICIT_ANCHOR.finditer(text):
+    for m in _EXPLICIT_ANCHOR.finditer(text_no_inline):
         result.add(m.group(1))
     return frozenset(result)
 
@@ -673,7 +680,7 @@ def check_links(doc_path: pathlib.Path) -> tuple[int, int, int, list[str]]:
         for raw in MD_LINK.findall(line):
             parts = raw.split("#", 1)
             target = urllib.parse.unquote(parts[0]).strip()
-            fragment = parts[1] if len(parts) > 1 else ""
+            fragment = urllib.parse.unquote(parts[1]) if len(parts) > 1 else ""
             if target.startswith("file://"):
                 target = target[len("file://"):]
             if not looks_like_path(target):
