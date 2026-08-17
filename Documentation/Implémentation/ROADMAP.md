@@ -820,6 +820,11 @@ Prêts à démarrer sans décision produit :
   puis réécrire la note avec ce chiffre. Un réglage tenu par un chiffre faux se retourne au
   premier changement de durée — c'est déjà ce qui était arrivé à `bot_eval_freq` calé sur
   200 000 épisodes.
+- ✅ **Trous couverture analyzer : `hazardous` + `oath_wound`** — **LIVRÉ le 2026-08-17**.
+  TROU 1 : branche dispatcher dans `analyzer_core.py` pour la ligne `SUFFERS X Mortal Wounds [HAZARDOUS]` ;
+  compteurs `hazardous_mortal_wounds` + `hazardous_no_hazardous_weapon` (arme HAZARDOUS absente de l'armurerie).
+  TROU 2 : `analyzer_wound.py` lit la magnitude `oath_wound` depuis EFFECTS au lieu d'un `−1` fixe ;
+  fallback `or 1` pour les journaux antérieurs à 2026-08-10. 5 tests nouveaux, rouge→vert. `analyzer_couverture.md` mis à jour.
 - ✅ **Compteurs `abilities/`** — **LIVRÉ le 2026-08-17**. 8 règles × 2 camps, courbe de count brut
   + courbe d'exposition (taux cumulé). Famille A via `action_log` (`reactive_move`, `charge_impact`,
   `charge_after_advance` / `charge_after_flee`, `move_after_shooting`) ; Famille B via `shot_records`
