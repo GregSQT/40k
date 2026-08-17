@@ -177,3 +177,10 @@ def test_every_profile_declares_the_control_floor(config_path: Path) -> None:
         )
         value = float(params["model_gating_min_vs_control"])
         assert 0.0 <= value <= 1.0, f"{config_path.name}[{name}] : plancher hors [0,1] ({value})"
+        if value > 0.0:
+            weights = params.get("bot_eval_weights", {})
+            assert "control" in weights, (
+                f"{config_path.name}[{name}] : model_gating_min_vs_control={value} arme mais "
+                "'control' absent de bot_eval_weights — le run crasherait en fin d'entrainement. "
+                "Mettre model_gating_min_vs_control: 0.0 ou ajouter 'control' aux poids."
+            )

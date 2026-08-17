@@ -4060,6 +4060,17 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
             "callback_params.model_gating_min_vs_control must be between 0.0 and 1.0 "
             f"(got {model_gating_min_vs_control})"
         )
+    if model_gating_min_vs_control > 0.0:
+        bot_eval_weights_raw = require_key(callback_params, "bot_eval_weights")
+        if "control" not in bot_eval_weights_raw:
+            raise ValueError(
+                f"callback_params.model_gating_min_vs_control est arme "
+                f"({model_gating_min_vs_control}) mais 'control' est absent de "
+                "callback_params.bot_eval_weights : le plancher ne sera jamais evalue "
+                "et le run crashera en fin d'entrainement. "
+                "Soit ajouter 'control' aux poids d'evaluation, soit mettre "
+                "model_gating_min_vs_control: 0.0 pour le desarmer."
+            )
     if model_gating_enabled or save_best_robust:
         if model_gating_enabled:
             model_gating_min_combined = float(_resolve_callback_value("model_gating_min_combined"))
