@@ -3132,9 +3132,6 @@ def _attempt_charge_to_destination(game_state: Dict[str, Any], unit: Dict[str, A
     # When a unit charges, los_cache doesn't exist yet (built at shooting activation)
     # Old code: _invalidate_los_cache_for_moved_unit(game_state, unit["id"]) - OBSOLETE
 
-    # Mark as units_charged (NOT units_moved)
-    game_state["units_charged"].add(unit["id"])
-
     # CRITICAL: Invalidate all destination pools after charge movement
     # Positions have changed, so all pools (move, charge, shoot) are now stale
     from .movement_handlers import _invalidate_all_destination_pools_after_movement

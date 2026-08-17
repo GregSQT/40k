@@ -145,15 +145,15 @@ def end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],
     elif arg3 == "SHOOTING":
         if "units_shot" not in game_state:
             game_state["units_shot"] = set()
-        game_state["units_shot"].add(unit_id)
+        game_state["units_shot"].add(str(unit_id))
     elif arg3 == "CHARGE":
         if "units_charged" not in game_state:
             game_state["units_charged"] = set()
-        game_state["units_charged"].add(unit_id)
+        game_state["units_charged"].add(str(unit_id))
     elif arg3 == "FIGHT":
         if "units_fought" not in game_state:
             game_state["units_fought"] = set()
-        game_state["units_fought"].add(unit_id)
+        game_state["units_fought"].add(str(unit_id))
     
     # ├── Arg4 = ?
     # │ ├── CASE Arg4 = NOT_REMOVED -> Do not remove the unit from an activation pool
