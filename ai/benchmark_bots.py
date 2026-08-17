@@ -533,8 +533,7 @@ class ReferenceReactiveBot(_BenchmarkBase):
         self._update_plan(game_state, player)
         candidates = [current] + list(valid_destinations)
 
-        if self._plan in ("KILL", "RETREAT"):
-            enemies = _living_enemies(unit, game_state)
+        enemies = _living_enemies(unit, game_state) if self._plan in ("KILL", "RETREAT") else []
         if self._plan == "KILL":
             def _score(d: Tuple[int, int]) -> float:
                 return -float(_min_enemy_dist(d, enemies, game_state))

@@ -160,36 +160,26 @@ def _gs_with_enemy(vp_me: int = 0, vp_opp: int = 0) -> tuple:
     return gs, attacker, enemy
 
 
-def test_balanced_bot_intent_kill() -> None:
-    """Quand l'attaquant peut anéantir un ennemi à forte valeur, _elect_intent retourne KILL."""
+@pytest.mark.parametrize("vp_me,dmg_att,dmg_def,expected", [
+    (0, 15.0, 0.0, "KILL"),    # attaquant peut anéantir → KILL
+    (12, 0.0, 10.0, "PRESERVE"),  # menace ennemie + avance VP → PRESERVE
+])
+def test_balanced_bot_intent_kill_or_preserve(
+    vp_me: int, dmg_att: float, dmg_def: float, expected: str
+) -> None:
+    """_elect_intent retourne KILL ou PRESERVE selon le scoring."""
     from unittest.mock import patch
 
-    gs, attacker, _ = _gs_with_enemy()
+    gs, attacker, _ = _gs_with_enemy(vp_me=vp_me)
     bot = ReferenceBalancedBot(randomness=0.0)
 
     def _dmg(game_state, att_id, def_id, is_ranged):
-        return 15.0 if att_id == "u1" else 0.0
+        return dmg_att if att_id == "u1" else dmg_def
 
     with patch("ai.benchmark_bots.squad_expected_damage", side_effect=_dmg):
         intent = bot._elect_intent(attacker, gs)
 
-    assert intent == "KILL"
-
-
-def test_balanced_bot_intent_preserve() -> None:
-    """Avec avance VP >= 12 et menace ennemie >= 8, _elect_intent retourne PRESERVE."""
-    from unittest.mock import patch
-
-    gs, attacker, _ = _gs_with_enemy(vp_me=12, vp_opp=0)
-    bot = ReferenceBalancedBot(randomness=0.0)
-
-    def _dmg(game_state, att_id, def_id, is_ranged):
-        return 0.0 if att_id == "u1" else 10.0
-
-    with patch("ai.benchmark_bots.squad_expected_damage", side_effect=_dmg):
-        intent = bot._elect_intent(attacker, gs)
-
-    assert intent == "PRESERVE"
+    assert intent == expected
 
 
 def test_denial_bot_move_to_uncontested_objective() -> None:
