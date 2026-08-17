@@ -1461,8 +1461,8 @@ def error_totals(stats: Dict[str, Any]) -> Dict[str, int]:
             + _pair('indirect_fire_mismatch')
             + _pair('shoot_wound_threshold_mismatch')
             # 24.15 HAZARDOUS : arme HAZARDOUS déclarée par le moteur, mais introuvable dans
-            # l'armurerie de l'unité. S'applique en tir ET en mêlée ; un seul compteur suffit
-            # (la règle est la même dans les deux phases).
+            # l'armurerie de l'unité. Seuls les déclenchements en TIR arrivent ici ;
+            # les déclenchements en MÊLÉE sont comptés dans le total fight ci-dessous.
             + _pair('hazardous_no_hazardous_weapon')
             + shoot_invalid
         ),
@@ -1488,6 +1488,8 @@ def error_totals(stats: Dict[str, Any]) -> Dict[str, int]:
             + _pair('fight_wound_threshold_mismatch')
             + _pair('fight_alternation_violations')
             + _pair('fight_double_pile_in')
+            # 24.15 HAZARDOUS : déclenchements en mêlée seulement (tir dans le total shooting).
+            + _pair('hazardous_no_hazardous_weapon_fight')
         ),
         'dead_units': (
             _pair('dead_unit_moving')
@@ -1818,6 +1820,7 @@ def parse_step_log(filepath: str) -> Dict:
         # ERREUR : l'unité qui souffre ne porte aucune arme HAZARDOUS dans son armurerie.
         'hazardous_mortal_wounds': {1: 0, 2: 0},
         'hazardous_no_hazardous_weapon': {1: 0, 2: 0},
+        'hazardous_no_hazardous_weapon_fight': {1: 0, 2: 0},
         # Occasions JUGÉES par règle du corpus (`config/rules_corpus.json`) — le compte d'exercice
         # qui manquait à 67 des 69 contrôles. Sans lui, « 0 erreur » ne distingue pas un contrôle
         # qui n'a rien trouvé d'un contrôle qui n'a rien regardé. Déclarée d'avance, une clé par
@@ -2004,6 +2007,7 @@ def parse_step_log(filepath: str) -> Dict:
                 'charge': None
             },
             'hazardous_no_hazardous_weapon': {1: None, 2: None},
+            'hazardous_no_hazardous_weapon_fight': {1: None, 2: None},
         },
         'unit_position_collisions': [],
         'parse_errors': [],
@@ -3427,16 +3431,25 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     
     # 24.15 [HAZARDOUS] — blessures mortelles auto-infligées. Compteur d'EXERCICE (MW totales)
     # affiché même à 0 : il dit si la règle a été exercée. L'erreur (arme absente de l'armurerie)
-    # est comptée séparément.
+    # est comptée séparément, sumée sur les deux phases (tir + mêlée) pour l'affichage.
     _hz_mw = require_key(stats, 'hazardous_mortal_wounds')
     _hz_nw = require_key(stats, 'hazardous_no_hazardous_weapon')
+    _hz_nw_fight = require_key(stats, 'hazardous_no_hazardous_weapon_fight')
+    _hz_nw_total = {p: _hz_nw[p] + _hz_nw_fight[p] for p in (1, 2)}
     _table_row("MW HAZARDOUS auto-infligees (24.15):", _fmt_count(_hz_mw[1]), _fmt_count(_hz_mw[2]))
-    _table_row("  ↳ sans arme HAZARDOUS en armurerie (erreur):", _fmt_count(_hz_nw[1]), _fmt_count(_hz_nw[2]))
+    _table_row("  ↳ sans arme HAZARDOUS en armurerie (erreur):", _fmt_count(_hz_nw_total[1]), _fmt_count(_hz_nw_total[2]))
     for _pl in (1, 2):
-        if _hz_nw[_pl] > 0:
+        if _hz_nw_total[_pl] > 0:
             _first_hz = stats['first_error_lines']['hazardous_no_hazardous_weapon'][_pl]
-            if _first_hz:
-                log_print(f"  First P{_pl} occurrence (Episode {_first_hz['episode']}): {_first_hz['line']}")
+            _first_hz_fight = stats['first_error_lines']['hazardous_no_hazardous_weapon_fight'][_pl]
+            # Affiche la première occurrence toutes phases confondues.
+            _first_any = min(
+                [e for e in (_first_hz, _first_hz_fight) if e is not None],
+                key=lambda e: e['episode'],
+                default=None,
+            )
+            if _first_any:
+                log_print(f"  First P{_pl} occurrence (Episode {_first_any['episode']}): {_first_any['line']}")
     # CHARGE ERRORS
     active_debug_section = "1.3"
     log_print("\n" + "-" * 80)
