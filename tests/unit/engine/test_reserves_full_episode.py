@@ -360,6 +360,9 @@ def test_an_off_table_unit_is_never_a_declarable_charge_target(monkeypatch) -> N
         (int(gs["models_cache"][m]["col"]), int(gs["models_cache"][m]["row"]))
         for m in gs["squad_models"][charger] if m in gs["models_cache"]
     ]
+    assert charger_cells, (
+        f"le chargeur {charger} n'a aucun modele dans models_cache — cas non construit"
+    )
     closest = min(calculate_hex_distance(c, r, -1, -1) for c, r in charger_cells)
     assert closest <= CHARGE_THRESHOLD_INCHES * ish, (
         f"le chargeur est a {closest} de la sentinelle (-1,-1), au-dela des 12\" ({CHARGE_THRESHOLD_INCHES * ish}) : "
