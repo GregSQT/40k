@@ -123,6 +123,7 @@ Avant la PREMIÈRE écriture de code : vérifier git status --short.
 Tree propre → EnterWorktree directement, nom décrivant le sujet.
 Tree sale → signaler (les modifications locales ne suivent pas le worktree) et attendre.
 Lecture/analyse/doc seule → pas de worktree.
+Glissement analyse → écriture : dès que l'intention d'écrire un fichier code apparaît, re-vérifier git status + ouvrir le worktree AVANT ce write, même si la tâche a commencé en lecture pure. Le hook check-worktree-before-write.sh bloque tout write de fichier code dans main ; un refus du hook = ouvrir le worktree, pas contourner le hook.
 Fin : à la clôture de chaque chantier, sans attendre de demande : commit → ExitWorktree "keep" → merge dans main → supprimer worktree + branche → mettre à jour ROADMAP_INDEX.md + fichier sujet → déplacer le doc du chantier dans Implémenté/.
 Jamais remove avant merge. discard_changes: true interdit.
 Training en cours → ne toucher aucun JSON de config/ (relu à chaud par les évaluations).
