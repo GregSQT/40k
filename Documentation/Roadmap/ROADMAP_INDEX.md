@@ -103,7 +103,7 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 
 | Sujets | Chantier | Fichier |
 |---|---|---|
-| analyzer | Champs manquants `step.log` L6→L28 | [analyzer.md#champs-step-log](analyzer.md#champs-step-log) |
+| analyzer | Champs manquants `step.log` L6→L28 (15 restantes après livraison L14/L19/L25/L27/L28 le 2026-08-18) | [analyzer.md#champs-step-log](analyzer.md#champs-step-log) |
 | analyzer | Corpus de règles vérifiable | [analyzer.md#corpus-regles](analyzer.md#corpus-regles) |
 | front | Tests front T2b/T3a/T7 + couches B/C | [front.md#tests](front.md#tests) |
 | front | Validations navigateur en attente | [front.md#validations-nav](front.md#validations-nav) |
