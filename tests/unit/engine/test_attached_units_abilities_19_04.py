@@ -197,6 +197,7 @@ def _open_shoot_allocation(engine, attacker_sid: str = "1", target_sid: str = "1
         "attacker_squad_id": attacker_sid,
         "summary": {"targets_meta": {target_sid: {}}},
         "weapon_groups": [],
+        "batches": [],
     }
 
 

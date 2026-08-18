@@ -5384,6 +5384,8 @@ def get_board_config():
         merged["terrain_icons"] = terrain_icons
         merged["deployment_zones"] = deployment_zones_cfg
         return jsonify({"success": True, "config": merged})
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     except FileNotFoundError as e:
         return jsonify({
             "success": False,

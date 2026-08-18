@@ -145,6 +145,10 @@ def turn_state_invariants() -> Dict[str, Any]:
         # mort de figurine. Lu directement (`gs["_unit_move_version"]`), donc obligatoire dans le
         # socle dès qu'une fixture déclenche un mouvement ou une perte.
         "_unit_move_version": 0,
+        # Zones de terrain (chantier 13) — posees par reset() / synthetic_state. Lues en
+        # `require_key` par `resolve_model_effective_level` (shared_utils.py) : toute fixture
+        # qui calcule un niveau effectif (step_log, pile-in, tir) leve sans cette cle.
+        "terrain_areas": [],
     }
 
 
