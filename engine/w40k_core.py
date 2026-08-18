@@ -7226,6 +7226,16 @@ class W40KEngine(gym.Env):
         else:
             return False, {"error": "unknown_squad_action", "action": action_name}
 
+        # Si un handler squad vide le pool (phase_complete=True) sans poser next_phase,
+        # end_activation ne connaît pas la séquence des phases : on la dérive ici pour
+        # que la cascade s'exécute. Couvre PvE et gym — sans next_phase la cascade ne
+        # tourne pas et la phase reste bloquée avec un pool vide.
+        if result.get("phase_complete") and not result.get("next_phase"):
+            _phase_next_map = {"move": "shoot", "shoot": "charge", "charge": "fight"}
+            _derived_next = _phase_next_map.get(current_phase)
+            if _derived_next:
+                result["next_phase"] = _derived_next
+
         # ── cascade : auto-avance les phases vides ────────────────────────────
         max_cascade = 10
         cascade_count = 0
