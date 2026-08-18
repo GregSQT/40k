@@ -1691,28 +1691,11 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                             # source fiable de l'ID de l'unité sur une ligne SUFFERS (action_unit_id
                             # retient le dernier ID de header, pas celui de la ligne courante).
                             _hz_unit_id = _dmg_actor_id or action_unit_id
-                            # Appliquer les dégâts à l'unité ELLE-MÊME (auto-infligés).
-                            # `_dmg_actor_id` est le préfixe "Unit N(" de la ligne SUFFERS :
-                            # c'est la seule source fiable de l'unité touchée (action_unit_id
-                            # retient le dernier ID de header, pas celui de la ligne courante).
-                            # `alloc_model_id=None` : pas de [ALLOC_MODEL:] sur ces lignes.
-                            # `pending_model_removals=None` : les removals d'une attaque précédente
-                            # de la MÊME activation ne doivent pas être fusionnés ici — cette mort
-                            # est distincte, et le flush se produit au changement d'acteur.
-                            _apply_damage_and_handle_death(
-                                _hz_unit_id, _hz_unit_id, _hz_mw,
-                                player, turn, phase, state.line_number, state.current_episode_num,
-                                line, state.dead_units_current_episode, state.unit_hp,
-                                state.unit_models_alive, state.unit_model_hp,
-                                lambda _u: _ordered_living_mids(state, config, _u),
-                                state.unit_hp_squad_max, state.unit_types, state.unit_positions,
-                                state.unit_deaths, state.unit_kill_context, stats,
-                                positions_by_model=state.positions_by_model,
-                                models_invalidated=state.models_invalidated,
-                                alloc_model_id=None,
-                                pending_model_removals=None,
-                            )
-                            # Vérifier que l'unité porte effectivement une arme HAZARDOUS.
+                            # Vérifier que l'unité porte effectivement une arme HAZARDOUS AVANT
+                            # d'appliquer les dégâts. Si la MW tue le seul modèle porteur de
+                            # l'arme HAZARDOUS (ex. VanguardVeteranSquadJumpPackPlasma à 1 PV),
+                            # ce modèle est retiré de unit_model_hp pendant _apply_damage_and_handle_death
+                            # et le contrôle post-dégâts ne le verrait plus → faux positif.
                             # Toutes les datasheets de l'escouade (hétérogène : 19.01) sont
                             # consultées ; une seule suffit pour que la ligne soit légitime.
                             _squad_type = state.unit_types.get(_hz_unit_id)
@@ -1746,6 +1729,27 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                         'episode': state.current_episode_num,
                                         'line': line.strip(),
                                     }
+                            # Appliquer les dégâts à l'unité ELLE-MÊME (auto-infligés).
+                            # `_dmg_actor_id` est le préfixe "Unit N(" de la ligne SUFFERS :
+                            # c'est la seule source fiable de l'unité touchée (action_unit_id
+                            # retient le dernier ID de header, pas celui de la ligne courante).
+                            # `alloc_model_id=None` : pas de [ALLOC_MODEL:] sur ces lignes.
+                            # `pending_model_removals=None` : les removals d'une attaque précédente
+                            # de la MÊME activation ne doivent pas être fusionnés ici — cette mort
+                            # est distincte, et le flush se produit au changement d'acteur.
+                            _apply_damage_and_handle_death(
+                                _hz_unit_id, _hz_unit_id, _hz_mw,
+                                player, turn, phase, state.line_number, state.current_episode_num,
+                                line, state.dead_units_current_episode, state.unit_hp,
+                                state.unit_models_alive, state.unit_model_hp,
+                                lambda _u: _ordered_living_mids(state, config, _u),
+                                state.unit_hp_squad_max, state.unit_types, state.unit_positions,
+                                state.unit_deaths, state.unit_kill_context, stats,
+                                positions_by_model=state.positions_by_model,
+                                models_invalidated=state.models_invalidated,
+                                alloc_model_id=None,
+                                pending_model_removals=None,
+                            )
                         else:
                             stats['parse_errors'].append({
                                 'episode': state.current_episode_num,

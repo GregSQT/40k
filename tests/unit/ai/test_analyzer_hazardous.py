@@ -348,3 +348,75 @@ def test_hazardous_utilise_unite_de_la_ligne_pas_le_header_stale(tmp_path, monke
     )
 
 
+# VERROU : faux positif quand la MW HAZARDOUS tue le seul modèle porteur de l'arme HAZARDOUS.
+#
+# Scenario réel (VanguardVeteranSquadJumpPack + plasma model à 1 PV) :
+#   - Unit 1 de type "SquadType" (sans arme HAZARDOUS dans la cache)
+#   - Contient un sous-modèle "1#0" de type "PlasmaModel" (HP_MAX=1, arme HAZARDOUS)
+#   - et un sous-modèle "1#1" de type "SquadType" (HP_MAX=3)
+#   - "1#0" est le front (listé en premier dans [MODELS:]) : HP=1
+#   - HAZARDOUS SUFFERS 1 MW → tue "1#0" (HP 1→0) → retiré de unit_model_hp
+#   - Bug : le contrôle d'armurerie lit unit_model_hp APRÈS la mort → ne voit que SquadType →
+#     faux positif "sans arme HAZARDOUS en armurerie".
+#   - Fix : contrôle AVANT l'application des dégâts → PlasmaModel encore présent → aucune erreur.
+class _RegistryMixed:
+    units = {
+        "SquadType":  {"HP_MAX": 3, "MOVE": 6, "MODEL_HEIGHT": 1.0, "UNIT_RULES": []},
+        "PlasmaModel": {"HP_MAX": 1, "MOVE": 6, "MODEL_HEIGHT": 1.0, "UNIT_RULES": []},
+    }
+
+# PlasmaModel ("1#0") en tête de [MODELS:] → c'est le front (HP=1, non-CHARACTER en premier).
+# SquadType ("1#1") en deuxième.
+_UNITS_MIXED = (
+    "[10:00:00] Unit 1 (SquadType) P1: Starting position (20,20), HP_MAX=3 "
+    "[MODELS: 1#0@(20,20) 1#1@(20,21)] [MODEL_TYPES: 1#0=PlasmaModel 1#1=SquadType] "
+    "base=round/1\n"
+    "[10:00:00] Unit 101 (SquadType) P2: Starting position (21,21), HP_MAX=3 base=round/1\n"
+)
+_HAZARDOUS_1_MW_MIXED = (
+    "[10:00:02] E1 T1 P1 SHOOTING : Unit 1(20,20) SUFFERS 1 Mortal Wounds [HAZARDOUS] "
+    "[R:+0.0] [SUCCESS]\n"
+)
+
+
+def _parse_mixed(tmp_path, monkeypatch, body: str, weapons_cache=None):
+    import ai.analyzer as an
+    import ai.analyzer_config as ac_mod
+
+    cfg = fab_config(
+        unit_registry=_RegistryMixed(),
+        unit_weapons_cache=weapons_cache if weapons_cache is not None else {},
+    )
+    monkeypatch.setattr(ac_mod, "load_analyzer_config", lambda: cfg)
+
+    log = tmp_path / "step.log"
+    log.write_text(entete_step_log(
+        body,
+        inches_to_subhex=1,
+        board="cols=40 rows=40",
+        objectives=_OBJECTIVES,
+        units=_UNITS_MIXED,
+    ))
+    return an.parse_step_log(str(log))
+
+
+def test_hazardous_pas_de_faux_positif_quand_plasma_model_meurt_sous_la_mw(tmp_path, monkeypatch):
+    """VERROU : la MW HAZARDOUS qui tue le seul modèle HAZARDOUS ne doit pas lever de faux positif.
+
+    Sans fix (contrôle APRÈS dégâts) : PlasmaModel ("1#0", HP=1) est retiré de unit_model_hp
+    avant le contrôle → _all_unit_types = {"SquadType"} seulement → hazardous_no_hazardous_weapon
+    incrémenté alors que l'arme était bien là (faux positif).
+    Avec fix (contrôle AVANT dégâts) : PlasmaModel est encore présent → _all_unit_types contient
+    "PlasmaModel" → arme HAZARDOUS trouvée → aucune erreur.
+    """
+    cache = {
+        "SquadType":  [],
+        "PlasmaModel": [{"name": "Plasma Pistol (Supercharge)", "rules": ["HAZARDOUS"], "is_melee": False}],
+    }
+    stats = _parse_mixed(tmp_path, monkeypatch, _HAZARDOUS_1_MW_MIXED, weapons_cache=cache)
+    assert stats["hazardous_no_hazardous_weapon"][1] == 0, (
+        "PlasmaModel (1#0, HP=1) porte une arme HAZARDOUS : la MW qui le tue ne doit pas "
+        "déclencher hazardous_no_hazardous_weapon — le contrôle doit avoir lieu AVANT les dégâts."
+    )
+
+
