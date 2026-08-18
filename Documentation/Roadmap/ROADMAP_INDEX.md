@@ -116,6 +116,9 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 | analyzer | Corpus de règles vérifiable | [analyzer.md#corpus-regles](analyzer.md#corpus-regles) |
 | front | Tests front T2b/T3a/T7 + couches B/C | [front.md#tests](front.md#tests) |
 | front | Validations navigateur en attente | [front.md#validations-nav](front.md#validations-nav) |
+| training+bot | ✅ Benchmark floor gate §4.D livré (2026-08-18) — 3 bots de référence (balanced/denial/reactive) sur 4 scénarios holdout_regular ; seuil 0.90 après mesure ; `model_gating_enabled` sur x1_long | [v11_chemin_critique.md#benchmark-gate](v11_chemin_critique.md#benchmark-gate) |
+| training+bot | ✅ scenario_bench-01..04 dupliqués supprimés (2026-08-18) — fichiers byte-for-byte identiques aux scenario_bot-01..04, glob fallback ramassait 8 scénarios au lieu de 4, épisodes/scénario divisés par 2 sans contrepartie | — |
+| moteur+services | ✅ Fix review-findings (2026-08-18) — surface refus moteur squad, wsgi leading-comma, message vide | — |
 | security | ✅ Étapes 4, 5, 7 livrées (2026-08-18) — F1–F15 toutes résolues ; reste 1 action : validation navigateur du cookie | [security.md](security.md) |
 | infra | Perf `generate_compact_formation` | [infra.md#perf-formation](infra.md#perf-formation) |
 | infra | ✅ gzip + Brotli livrés (2026-08-18) — stage `brotli-builder`, `load_module` contexte main, directives server | [archives/infra.md](archives/infra.md) |
