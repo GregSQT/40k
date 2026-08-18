@@ -451,6 +451,9 @@ def test_hazardous_pas_de_faux_positif_porteur_mort_avant_suffers(tmp_path, monk
     }
     body = _MODELS_SQUAD_SEUL + _HAZARDOUS_1_MW_MIXED
     stats = _parse_mixed(tmp_path, monkeypatch, body, weapons_cache=cache)
+    assert stats["hazardous_mortal_wounds"][1] == 1, (
+        "La ligne SUFFERS 1 Mortal Wounds [HAZARDOUS] doit être traitée et incrémenter le compteur."
+    )
     assert stats["hazardous_no_hazardous_weapon"][1] == 0, (
         "PlasmaModel (1#0) porte une arme HAZARDOUS : même retiré de unit_model_hp par une ligne "
         "[MODELS:] antérieure, son type dans state.model_types doit être vu → pas d'erreur."
