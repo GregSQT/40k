@@ -87,6 +87,7 @@ class SourceUnavailable(RuntimeError):
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 DOCS = ROOT / "Documentation" / "Implémentation"
+CLAUDE_MD = ROOT / "CLAUDE.md"
 
 DEFAULT_DOCS = [
     "Documentation/Roadmap/ROADMAP_INDEX.md",
@@ -1224,6 +1225,64 @@ def check_reachability() -> tuple[list[str], int]:
     return orphan_entries, len(targets)
 
 
+def check_claude_roadmap_subjects() -> tuple[list[str], int, int]:
+    """Passe 7 — la liste des fichiers sujets de CLAUDE.md correspond-elle à Documentation/Roadmap/*.md ?
+
+    POURQUOI. CLAUDE.md porte une liste manuelle des fichiers sujets Roadmap ; elle diverge
+    silencieusement du disque dès qu'un sujet est ajouté ou renommé sans mettre CLAUDE.md à jour.
+    Aucune des six premières passes ne peut le voir : elles vérifient ce que les documents DISENT,
+    pas si la liste de CLAUDE.md est exhaustive. Cette passe ferme ce trou en symétrie :
+    - fichier listé dans CLAUDE.md mais absent du disque → renvoi mort dans CLAUDE.md ;
+    - fichier présent sur le disque (hors ROADMAP_INDEX.md) mais absent de la liste → sujet fantôme,
+      invisible pour l'agent qui lit la liste pour décider quoi ouvrir.
+
+    Retourne (erreurs, nb_listés, nb_disque).
+    """
+    if not CLAUDE_MD.exists():
+        raise SourceUnavailable(f"CLAUDE.md introuvable : {CLAUDE_MD}")
+
+    roadmap_dir = ROOT / "Documentation" / "Roadmap"
+    text = CLAUDE_MD.read_text(encoding="utf-8")
+
+    # Lignes de la forme "- Documentation/Roadmap/X.md — …"
+    listed: dict[str, str] = {}
+    for m in re.finditer(r"^- Documentation/Roadmap/([\w-]+\.md)", text, re.MULTILINE):
+        listed[m.group(1)] = f"Documentation/Roadmap/{m.group(1)}"
+
+    # Fichiers .md présents au premier niveau de Documentation/Roadmap/, hors index
+    on_disk: set[str] = {
+        f.name
+        for f in roadmap_dir.glob("*.md")
+        if f.name != "ROADMAP_INDEX.md"
+    }
+
+    errors: list[str] = []
+    for name, rel in sorted(listed.items()):
+        if name not in on_disk:
+            errors.append(
+                f"CLAUDE.md  SUJET INTROUVABLE  {rel} "
+                f"— listé dans CLAUDE.md mais absent de Documentation/Roadmap/"
+            )
+    for name in sorted(on_disk):
+        if name not in listed:
+            errors.append(
+                f"CLAUDE.md  SUJET NON LISTÉ  Documentation/Roadmap/{name} "
+                f"— présent sur le disque mais absent de la liste CLAUDE.md"
+            )
+    return errors, len(listed), len(on_disk)
+
+
+def report_claude_subjects() -> tuple[bool, list[str]]:
+    errors, nb_listed, nb_disk = check_claude_roadmap_subjects()
+    lines = [
+        f"{'❌' if errors else '✅'} cohérence liste CLAUDE.md ↔ Documentation/Roadmap/*.md",
+        f"   listés dans CLAUDE.md : {nb_listed}, présents sur le disque : {nb_disk}, "
+        f"{len(errors)} écart(s)",
+    ]
+    lines += [f"   {e}" for e in errors]
+    return bool(errors), lines
+
+
 def merges_since(doc_path: pathlib.Path) -> str:
     """Rappel non bloquant : des chantiers ont-ils été livrés depuis la dernière mise à jour ?
 
@@ -1324,9 +1383,8 @@ def main(argv: list[str]) -> int:
         print("\n".join(lines))
         failed = failed or has_broken
     if not argv[1:]:
-        # La passe 6 porte sur le CORPUS : la rejouer quand l'utilisateur interroge un document
-        # précis rapporterait des orphelins sans rapport avec ce qu'il regarde, et l'habituerait
-        # à un rouge qui ne le concerne pas.
+        # Les passes 6 et 7 portent sur le CORPUS : les rejouer quand l'utilisateur interroge un
+        # document précis rapporterait des erreurs sans rapport avec ce qu'il regarde.
         try:
             has_orphans, lines = report_reachability()
         except (SourceUnavailable, OSError) as error:
@@ -1335,6 +1393,14 @@ def main(argv: list[str]) -> int:
         else:
             print("\n".join(lines))
             failed = failed or has_orphans
+        try:
+            has_gaps, lines = report_claude_subjects()
+        except (SourceUnavailable, OSError) as error:
+            print(f"❌ cohérence CLAUDE.md\n   CONTRÔLE IMPOSSIBLE — {type(error).__name__} : {error}")
+            failed = True
+        else:
+            print("\n".join(lines))
+            failed = failed or has_gaps
     print(
         "\nNON VÉRIFIABLE, et assumé : le nombre de « contrôles analyzer vivants ». Le code n'en "
         "porte aucune énumération ; le compter depuis un tableau de document mesurerait autre "

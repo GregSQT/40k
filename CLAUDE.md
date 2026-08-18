@@ -21,7 +21,7 @@ Aucun fallback/workaround/default anti-erreur → T1
 SOURCES DE VÉRITÉ / ROADMAP
 
 Avant toute question de priorité, état d'un chantier ou « qu'est-ce qui reste » :
-1. Lire Documentation/Roadmap/ROADMAP_INDEX.md (direction + ordre global, ~140 lignes)
+1. Lire Documentation/Roadmap/ROADMAP_INDEX.md (direction + ordre global)
 2. Si détail d'un chantier spécifique → lire le fichier sujet correspondant
 3. Pour l'historique d'un sujet → Documentation/Roadmap/archives/<sujet>.md
 
@@ -53,15 +53,7 @@ Implémenté/ : référence de conception des chantiers livrés.
 
 Si aucune règle ci-dessus ne tranche : demander à l'utilisateur.
 
-Cycle chantier :
-
-ouvrir = ajouter une ligne dans ROADMAP_INDEX.md D'ABORD + créer ou mettre à jour le fichier sujet ;
-
-livrer = marquer ✅ dans ROADMAP_INDEX.md + vider/déplacer dans archives/<sujet>.md + déplacer le doc dans Implémenté/, dans la même livraison ;
-
-un fichier sujet vide = sujet fermé de bout en bout.
-
-une livraison qui rend sa propre doc fausse est une régression → T2.
+Cycle chantier : voir blocs **Discipline** et **Exceptions actées** de ROADMAP_INDEX.md (source unique).
 
 RÈGLES 40K OFFICIELLES
 

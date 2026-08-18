@@ -27,6 +27,17 @@
             "statusMessage": "Liste des fichiers a relire..."
           }
         ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/greg/40k/.claude/hooks/check-roadmap-on-edit.sh",
+            "timeout": 60,
+            "statusMessage": "Controle des references roadmap..."
+          }
+        ]
       }
     ],
     "UserPromptSubmit": [
