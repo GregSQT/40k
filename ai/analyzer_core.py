@@ -1768,23 +1768,30 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         )
                         if _de_match:
                             _de_mw = int(_de_match.group(1))
-                            # Cible = acteur : le préfixe "Unit N(" d'action_desc est la seule
-                            # source fiable de l'ID de l'unité sur une ligne SUFFERS (action_unit_id
-                            # retient le dernier ID de header, pas celui de la ligne courante).
-                            _de_unit_id = _dmg_actor_id or action_unit_id
-                            _apply_damage_and_handle_death(
-                                _de_unit_id, _de_unit_id, _de_mw,
-                                player, turn, phase, state.line_number, state.current_episode_num,
-                                line, state.dead_units_current_episode, state.unit_hp,
-                                state.unit_models_alive, state.unit_model_hp,
-                                lambda _u: _ordered_living_mids(state, config, _u),
-                                state.unit_hp_squad_max, state.unit_types, state.unit_positions,
-                                state.unit_deaths, state.unit_kill_context, stats,
-                                positions_by_model=state.positions_by_model,
-                                models_invalidated=state.models_invalidated,
-                                alloc_model_id=None,
-                                pending_model_removals=None,
-                            )
+                            _de_unit_id = _dmg_actor_id
+                            if _de_unit_id is None:
+                                stats['parse_errors'].append({
+                                    'episode': state.current_episode_num,
+                                    'turn': turn,
+                                    'phase': phase,
+                                    'line': line.strip(),
+                                    'error': "ligne DESPERATE ESCAPE : ID unité introuvable "
+                                             "(attendu : 'Unit N(' en tête d'action)",
+                                })
+                            else:
+                                _apply_damage_and_handle_death(
+                                    _de_unit_id, _de_unit_id, _de_mw,
+                                    player, turn, phase, state.line_number, state.current_episode_num,
+                                    line, state.dead_units_current_episode, state.unit_hp,
+                                    state.unit_models_alive, state.unit_model_hp,
+                                    lambda _u: _ordered_living_mids(state, config, _u),
+                                    state.unit_hp_squad_max, state.unit_types, state.unit_positions,
+                                    state.unit_deaths, state.unit_kill_context, stats,
+                                    positions_by_model=state.positions_by_model,
+                                    models_invalidated=state.models_invalidated,
+                                    alloc_model_id=None,
+                                    pending_model_removals=None,
+                                )
                         else:
                             stats['parse_errors'].append({
                                 'episode': state.current_episode_num,

@@ -221,6 +221,26 @@ def test_desperate_escape_reduit_les_pv_et_unit_morte_trackee(tmp_path, monkeypa
     )
 
 
+def test_desperate_escape_non_fatal_decrement_hp(tmp_path, monkeypatch):
+    """VERROU finding 3 : [DESPERATE ESCAPE] non-fatal doit décrémenter les PV de l'unité.
+
+    Sans le fix : la branche DE est absente, unit_hp["1"] reste à 3 après les 2 BM en MOVE.
+    La 2e DE en SHOOT enlève 1 BM : HP 3→2, l'unité survit, current_episode_deaths reste vide.
+    Avec le fix : 1re DE en MOVE réduit HP 3→1. 2e DE en SHOOT réduit HP 1→0, l'unité meurt.
+    damage_missing_unit_hp reste à 0 (l'unité était vivante au moment du SHOOT).
+    """
+    body = _DESPERATE_ESCAPE_MW + _DESPERATE_ESCAPE_SHOOT_1_MW
+    stats = _parse(tmp_path, monkeypatch, body, weapons_cache={})
+    deaths = stats["current_episode_deaths"]
+    assert any(d[1] == "1" for d in deaths), (
+        "2 BM DE en MOVE + 1 BM DE en SHOOT sur HP_MAX=3 : l'unité doit mourir en SHOOT"
+    )
+    assert stats["damage_missing_unit_hp"][1] == 0, (
+        "l'unité était vivante en SHOOT (HP=1 après MOVE) : damage_missing_unit_hp ne doit pas "
+        "être levé"
+    )
+
+
 def test_hazardous_damage_applique_a_la_bonne_unite(tmp_path, monkeypatch):
     """VERROU : la BM HAZARDOUS cible l'unité de la ligne SUFFERS, pas le dernier header.
 
