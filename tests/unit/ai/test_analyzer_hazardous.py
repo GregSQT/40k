@@ -221,3 +221,66 @@ def test_desperate_escape_reduit_les_pv_et_unit_morte_trackee(tmp_path, monkeypa
     )
 
 
+# VERROU : action_unit_id stale dans la branche HAZARDOUS.
+# Scénario : Unit 2 est le dernier header vu (action_unit_id = "2", type "NoHazUnit" sans arme
+# HAZARDOUS), mais la ligne HAZARDOUS est émise pour Unit 1 (type "HazUnit" avec arme HAZARDOUS).
+# Sans fix : le lookup armurerie porte sur "2" (NoHazUnit) → erreur signalée à tort.
+# Avec fix : le lookup porte sur "1" (HazUnit, arme HAZARDOUS présente) → aucune erreur.
+class _RegistryTwo:
+    units = {
+        "HazUnit":   {"HP_MAX": 3, "MOVE": 6, "MODEL_HEIGHT": 1.0, "UNIT_RULES": []},
+        "NoHazUnit": {"HP_MAX": 3, "MOVE": 6, "MODEL_HEIGHT": 1.0, "UNIT_RULES": []},
+    }
+
+_UNITS_TWO = (
+    "[10:00:00] Unit 1 (HazUnit) P1: Starting position (20,20), HP_MAX=3 base=round/1\n"
+    "[10:00:00] Unit 2 (NoHazUnit) P1: Starting position (22,22), HP_MAX=3 base=round/1\n"
+)
+# HAZARDOUS sur Unit 1 (HazUnit), mais Unit 2 (NoHazUnit) est le dernier header vu.
+_HAZARDOUS_UNIT1_AFTER_UNIT2_HEADER = (
+    "[10:00:02] E1 T1 P1 SHOOTING : Unit 1(20,20) SUFFERS 1 Mortal Wounds [HAZARDOUS] "
+    "[R:+0.0] [SUCCESS]\n"
+)
+
+
+def _parse_two(tmp_path, monkeypatch, body: str, weapons_cache=None):
+    import ai.analyzer as an
+    import ai.analyzer_config as ac_mod
+
+    cfg = fab_config(
+        unit_registry=_RegistryTwo(),
+        unit_weapons_cache=weapons_cache if weapons_cache is not None else {},
+    )
+    monkeypatch.setattr(ac_mod, "load_analyzer_config", lambda: cfg)
+
+    log = tmp_path / "step.log"
+    log.write_text(entete_step_log(
+        body,
+        inches_to_subhex=1,
+        board="cols=40 rows=40",
+        objectives=_OBJECTIVES,
+        units=_UNITS_TWO,
+    ))
+    return an.parse_step_log(str(log))
+
+
+def test_hazardous_utilise_unite_de_la_ligne_pas_le_header_stale(tmp_path, monkeypatch):
+    """VERROU : la branche HAZARDOUS doit lire l'ID depuis la ligne (_dmg_actor_id), pas
+    le dernier header (action_unit_id).
+
+    Unit 2 (NoHazUnit, sans arme HAZARDOUS) est le dernier header vu → action_unit_id="2".
+    La ligne HAZARDOUS est émise pour Unit 1 (HazUnit, arme HAZARDOUS présente).
+    Sans fix : lookup sur "2" → NoHazUnit → erreur hazardous_no_hazardous_weapon signalée.
+    Avec fix : lookup sur "1" → HazUnit → arme présente → aucune erreur.
+    """
+    cache = {
+        "HazUnit":   [{"name": "Plasma Gun", "rules": ["HAZARDOUS"], "is_melee": False}],
+        "NoHazUnit": [],
+    }
+    stats = _parse_two(tmp_path, monkeypatch, _HAZARDOUS_UNIT1_AFTER_UNIT2_HEADER, weapons_cache=cache)
+    assert stats["hazardous_no_hazardous_weapon"][1] == 0, (
+        "Unit 1 (HazUnit) porte une arme HAZARDOUS : pas d'erreur attendue. "
+        "Si action_unit_id stale (Unit 2 / NoHazUnit) est utilisé → faux positif."
+    )
+
+

@@ -1687,13 +1687,17 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         if _hz_match:
                             _hz_mw = int(_hz_match.group(1))
                             stats['hazardous_mortal_wounds'][player] += _hz_mw
+                            # Cible = acteur : le préfixe "Unit N(" d'action_desc est la seule
+                            # source fiable de l'ID de l'unité sur une ligne SUFFERS (action_unit_id
+                            # retient le dernier ID de header, pas celui de la ligne courante).
+                            _hz_unit_id = _dmg_actor_id or action_unit_id
                             # Appliquer les dégâts à l'unité ELLE-MÊME (auto-infligés).
                             # `alloc_model_id=None` : pas de [ALLOC_MODEL:] sur ces lignes.
                             # `pending_model_removals=None` : les removals d'une attaque précédente
                             # de la MÊME activation ne doivent pas être fusionnés ici — cette mort
                             # est distincte, et le flush se produit au changement d'acteur.
                             _apply_damage_and_handle_death(
-                                action_unit_id, _dmg_actor_id, _hz_mw,
+                                _hz_unit_id, _hz_unit_id, _hz_mw,
                                 player, turn, phase, state.line_number, state.current_episode_num,
                                 line, state.dead_units_current_episode, state.unit_hp,
                                 state.unit_models_alive, state.unit_model_hp,
@@ -1708,12 +1712,12 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                             # Vérifier que l'unité porte effectivement une arme HAZARDOUS.
                             # Toutes les datasheets de l'escouade (hétérogène : 19.01) sont
                             # consultées ; une seule suffit pour que la ligne soit légitime.
-                            _squad_type = state.unit_types.get(action_unit_id)
+                            _squad_type = state.unit_types.get(_hz_unit_id)
                             _all_unit_types: "set[str]" = set()
                             if _squad_type:
                                 _all_unit_types.add(_squad_type)
-                            if action_unit_id in state.unit_model_hp:
-                                for _mid in state.unit_model_hp[action_unit_id]:
+                            if _hz_unit_id in state.unit_model_hp:
+                                for _mid in state.unit_model_hp[_hz_unit_id]:
                                     _mtype = state.model_types.get(_mid)  # get allowed
                                     if _mtype:
                                         _all_unit_types.add(_mtype)
