@@ -11,7 +11,10 @@
 > dans le fichier sujet, dans la même livraison.
 >
 > **Outillage.** `python3 scripts/check_doc_references.py` contrôle ce fichier, les fichiers
-> sujets et les deux contrats permanents (renvois, liens, valeurs recopiées, ancres, sortes).
+> sujets et les deux contrats permanents (renvois, liens, valeurs recopiées, ancres, sortes),
+> et vérifie qu'aucun chantier ouvert de `Documentation/Implémentation/A_faire/` n'est devenu
+> inatteignable depuis ce fichier — un document que plus aucun fichier sujet ne cite n'est plus
+> priorisé, il est seulement stocké.
 > La porte de fusion `scripts/check_roadmap_declared.py` (hook `prepare-commit-msg`, versionné
 > dans `.githooks/`) : une fusion dans `main` est refusée quand **2** chantiers ont été livrés
 > sans que ce fichier bouge. Se débloquer : écrire la ligne du chantier puis `git add` (l'index

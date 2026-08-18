@@ -12,7 +12,7 @@ des renvois d'`analyzer_couverture.md` **après une seule journée de livraisons
 Les numéros de ligne ont donc été supprimés au profit du couple `fichier.py` + nom de symbole, qui
 ne rouille pas. Ce script est la seconde moitié de cette décision.
 
-CE QU'IL ÉTABLIT, en cinq passes :
+CE QU'IL ÉTABLIT, en six passes :
   1. RENVOIS  — tout fichier cité existe, et tout symbole cité vit dans le fichier cité.
   2. LIENS    — toute cible de lien markdown existe, ET l'ancre `#fragment` qu'elle porte est
                 offerte par le document visé. Mesuré le 2026-08-18 : 45 des 48 liens du corpus
@@ -30,6 +30,12 @@ CE QU'IL ÉTABLIT, en cinq passes :
                 `ROADMAP.md` écrivait « `def EpisodeTerminationCallback` », en promettant
                 explicitement un grep reproductible — or ce sont des `class`, et le grep promis
                 rendait 0 hit. Le document se présentait comme vérifiable et ne l'était pas.
+  6. ATTEIGN. — tout chantier ouvert (`Documentation/Implémentation/A_faire/`, sous-dossiers
+                compris) se rejoint depuis `ROADMAP_INDEX.md` en suivant les renvois. Les cinq
+                premières passes vérifient ce que les documents DISENT ; celle-ci voit ce qu'ils
+                ne disent PLUS. Mesuré au premier passage, 2026-08-18 : 2 chantiers ouverts sur
+                13 n'étaient cités par aucun fichier sujet — aucune phrase fausse à attraper,
+                donc aucune des cinq autres passes ne pouvait le voir.
 
 CE QU'IL N'ÉTABLIT PAS, et qui est COMPTÉ ET AFFICHÉ plutôt que passé sous silence :
   - un renvoi sans symbole à confronter : il n'y a rien à vérifier, et le taire ferait croire à
@@ -107,6 +113,25 @@ ANCHOR_ENFORCED = {pathlib.PurePosixPath(doc).name for doc in DEFAULT_DOCS}
 
 AGENT_CONFIG = ROOT / "config" / "agents" / "ArmageddonAgent" / "ArmageddonAgent_training_config.json"
 COUVERTURE = DOCS / "analyzer_couverture.md"
+
+#: La RACINE de l'atteignabilité (passe 6). `ROADMAP_INDEX.md` se déclare source unique de l'ordre
+#: du travail : un chantier ouvert dont le document ne se rejoint pas depuis lui n'est pas priorisé,
+#: il est seulement stocké.
+ROADMAP_INDEX = ROOT / "Documentation" / "Roadmap" / "ROADMAP_INDEX.md"
+
+#: Les documents dont l'atteignabilité est EXIGÉE : les chantiers ouverts, à toute profondeur —
+#: `A_faire/` porte des sous-dossiers (`Database/`, `MCTS/`) et un chantier n'est pas moins ouvert
+#: parce qu'il est rangé.
+A_FAIRE = DOCS / "A_faire"
+
+#: Les arbres par lesquels un renvoi PROPAGE l'atteignabilité : la roadmap et les chantiers
+#: ouverts. `archives/` et `Implémenté/` en sont exclus, et c'est le fond de la passe — être cité
+#: par l'historique d'un chantier clos prouve exactement le contraire d'être sur la feuille de
+#: route. Sans cette borne, un document orphelin redeviendrait vert le jour où une archive le
+#: mentionne au passé, et `archives/ROADMAP.md` — cité par l'index lui-même — rendrait à lui seul
+#: atteignable tout ce que la roadmap a jamais porté.
+LIVE_TREES = (ROOT / "Documentation" / "Roadmap", A_FAIRE)
+ARCHIVES = ROOT / "Documentation" / "Roadmap" / "archives"
 
 #: Répertoires où un nom de fichier NU est cherché. `scripts/` en fait partie : son absence a
 #: produit une fausse alerte sur `check_ai_rules.py` au premier passage.
@@ -1102,6 +1127,94 @@ def check_symbol_kinds(doc_path: pathlib.Path) -> tuple[int, int, list[str], lis
     return checked, unverifiable, broken, notes
 
 
+def cited_documents(doc_path: pathlib.Path) -> list[pathlib.Path]:
+    """Les documents que celui-ci DÉSIGNE, quelle que soit la graphie du renvoi.
+
+    Pas seulement le lien markdown : le corpus roadmap renvoie à un chantier par son chemin
+    backtiqué (`→ `Documentation/Implémentation/A_faire/front_test_auto.md``), et c'est même sa
+    graphie majoritaire — mesuré le 2026-08-18, 11 des 11 renvois de fichier sujet vers un
+    chantier ouvert. Ne suivre que les liens markdown aurait déclaré 11 orphelins sur 13.
+
+    Un nom NU porté par plusieurs fichiers du dépôt et trouvé par RECHERCHE ne désigne rien :
+    `bots_refonte_panel.md` vit à la fois sous `A_faire/` et sous `Implémenté/`, et l'ordre de
+    recherche de `resolve` n'est pas une identification (même doctrine que `is_ambiguous` en
+    passe 1). L'ADJACENCE, elle, identifie : c'est la sémantique du lien markdown, et c'est par
+    elle que l'index nomme ses fichiers sujets — refuser `moteur.md` parce qu'`archives/` en
+    porte un homonyme coupait la marche au premier saut et déclarait orphelins 6 chantiers
+    réellement cités (mesuré).
+    """
+    text = doc_path.read_text(encoding="utf-8")
+    found: list[pathlib.Path] = []
+    for name in names_in(text):
+        if not name.endswith(".md"):
+            continue
+        target = resolve(name, doc_path.parent)
+        if target is None or (is_ambiguous(name) and target != doc_path.parent / name):
+            continue
+        found.append(target.resolve())
+    return found
+
+
+def is_live(path: pathlib.Path) -> bool:
+    """Ce document propage-t-il l'atteignabilité ? Cf. `LIVE_TREES` et `ARCHIVES`."""
+    return any(path.is_relative_to(tree) for tree in LIVE_TREES) and not path.is_relative_to(
+        ARCHIVES
+    )
+
+
+def reachable_documents() -> set[pathlib.Path]:
+    """Tout ce qui se rejoint depuis `ROADMAP_INDEX.md` en suivant les renvois, de proche en proche.
+
+    La marche est TRANSITIVE, et pas bornée aux deux sauts `index → fichier sujet → doc` : un
+    fichier sujet qui renvoie à un autre fichier sujet, ou un chantier ouvert qui en découpe un
+    second, sont des chemins réels de ce corpus. Les borner aurait rendu orphelin un document
+    réellement priorisé, ce qui est le seul moyen sûr de faire ignorer cette passe.
+    """
+    if not ROADMAP_INDEX.exists():
+        raise SourceUnavailable(f"la racine de l'atteignabilité a disparu : {ROADMAP_INDEX}")
+    root = ROADMAP_INDEX.resolve()
+    seen = {root}
+    frontier = [root]
+    while frontier:
+        current = frontier.pop()
+        for target in cited_documents(current):
+            if target in seen or not is_live(target):
+                continue
+            seen.add(target)
+            frontier.append(target)
+    return seen
+
+
+def check_reachability() -> list[str]:
+    """Passe 6 — tout chantier ouvert se rejoint-il depuis la feuille de route ?
+
+    POURQUOI. Les cinq premières passes vérifient ce que les documents d'entrée DISENT. Aucune ne
+    voit ce qu'ils NE DISENT PAS. Un chantier ouvert dont plus aucun fichier sujet ne parle
+    disparaît alors sans bruit : le document reste sur le disque, complet et juste, mais il n'est
+    plus dans l'ordre du travail — et rien ne le signale, puisqu'il n'y a aucune phrase fausse à
+    attraper. Mesuré au premier passage (2026-08-18) : 2 documents sur 13.
+
+    C'est un contrôle de CORPUS, pas de document : il ne se prononce qu'une fois, sur l'ensemble,
+    et n'a donc pas de place dans `report`.
+
+    CE QU'IL N'ÉTABLIT PAS : que la ligne qui cite le chantier soit juste, ni qu'elle le range au
+    bon endroit. Un renvoi suffit à l'atteignabilité — la pertinence de la priorité n'appartient
+    qu'à l'utilisateur.
+    """
+    targets = sorted(A_FAIRE.rglob("*.md"))
+    if not targets:
+        # VERT VACANT : « 0 orphelin » ne vaut rien si l'énumération est vide. Le répertoire des
+        # chantiers ouverts renommé rendrait la passe verte pour toujours.
+        raise SourceUnavailable(f"aucun chantier ouvert énuméré sous {A_FAIRE}")
+    reached = reachable_documents()
+    return [
+        f"{path.relative_to(DOCS).as_posix()}  CHANTIER ORPHELIN  aucun renvoi ne le rejoint "
+        f"depuis {ROADMAP_INDEX.name} (index → fichier sujet → doc)"
+        for path in targets
+        if path.resolve() not in reached
+    ]
+
+
 def merges_since(doc_path: pathlib.Path) -> str:
     """Rappel non bloquant : des chantiers ont-ils été livrés depuis la dernière mise à jour ?
 
@@ -1168,6 +1281,18 @@ def report(doc: str, path: pathlib.Path) -> tuple[bool, list[str]]:
     return bool(broken), lines
 
 
+def report_reachability() -> tuple[bool, list[str]]:
+    orphans = check_reachability()
+    total = sum(1 for _ in A_FAIRE.rglob("*.md"))
+    lines = [
+        f"{'❌' if orphans else '✅'} atteignabilité des chantiers ouverts",
+        f"   chantiers: {total} sous {A_FAIRE.relative_to(ROOT).as_posix()}, "
+        f"{len(orphans)} orphelin(s)",
+    ]
+    lines += [f"   {entry}" for entry in orphans]
+    return bool(orphans), lines
+
+
 def main(argv: list[str]) -> int:
     docs: Iterable[str] = argv[1:] or DEFAULT_DOCS
     failed = False
@@ -1190,6 +1315,18 @@ def main(argv: list[str]) -> int:
             continue
         print("\n".join(lines))
         failed = failed or has_broken
+    if not argv[1:]:
+        # La passe 6 porte sur le CORPUS : la rejouer quand l'utilisateur interroge un document
+        # précis rapporterait des orphelins sans rapport avec ce qu'il regarde, et l'habituerait
+        # à un rouge qui ne le concerne pas.
+        try:
+            has_orphans, lines = report_reachability()
+        except (SourceUnavailable, OSError) as error:
+            print(f"❌ atteignabilité\n   CONTRÔLE IMPOSSIBLE — {type(error).__name__} : {error}")
+            failed = True
+        else:
+            print("\n".join(lines))
+            failed = failed or has_orphans
     print(
         "\nNON VÉRIFIABLE, et assumé : le nombre de « contrôles analyzer vivants ». Le code n'en "
         "porte aucune énumération ; le compter depuis un tableau de document mesurerait autre "

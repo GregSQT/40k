@@ -1,5 +1,7 @@
 # Analyzer — Tâches ouvertes
 
+Découpage en 6 lots des trois sujets ci-dessous (ordre séquentiel imposé : tous éditent `ai/analyzer*.py`) → `Documentation/Implémentation/A_faire/analyzer_conformite_lots.md`
+
 ---
 
 ## Conformité moteur {#conformite}
