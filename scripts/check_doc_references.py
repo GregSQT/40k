@@ -1242,18 +1242,21 @@ def check_claude_roadmap_subjects() -> tuple[list[str], int, int]:
         raise SourceUnavailable(f"CLAUDE.md introuvable : {CLAUDE_MD}")
 
     roadmap_dir = ROOT / "Documentation" / "Roadmap"
+    if not roadmap_dir.exists():
+        raise SourceUnavailable(f"Répertoire Documentation/Roadmap/ introuvable : {roadmap_dir}")
     text = CLAUDE_MD.read_text(encoding="utf-8")
 
     # Lignes de la forme "- Documentation/Roadmap/X.md — …"
     listed: dict[str, str] = {}
-    for m in re.finditer(r"^- Documentation/Roadmap/([\w-]+\.md)", text, re.MULTILINE):
+    for m in re.finditer(r"^- Documentation/Roadmap/([\w.-]+\.md)", text, re.MULTILINE):
         listed[m.group(1)] = f"Documentation/Roadmap/{m.group(1)}"
 
-    # Fichiers .md présents au premier niveau de Documentation/Roadmap/, hors index
+    # Fichiers .md présents au premier niveau de Documentation/Roadmap/, hors index et fichiers
+    # internes (convention : préfixe _)
     on_disk: set[str] = {
         f.name
         for f in roadmap_dir.glob("*.md")
-        if f.name != "ROADMAP_INDEX.md"
+        if f.name != "ROADMAP_INDEX.md" and not f.name.startswith("_")
     }
 
     errors: list[str] = []

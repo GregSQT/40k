@@ -35,7 +35,8 @@ def main() -> None:
 
     chemin_abs = chemin if os.path.isabs(chemin) else os.path.abspath(chemin)
     roadmap_abs = os.path.abspath(ROADMAP)
-    if not chemin_abs.startswith(roadmap_abs + os.sep):
+    claude_md_abs = os.path.join(RACINE, "CLAUDE.md")
+    if not chemin_abs.startswith(roadmap_abs + os.sep) and chemin_abs != claude_md_abs:
         sys.exit(0)
 
     venv_python = os.path.join(RACINE, ".venv", "bin", "python3")
