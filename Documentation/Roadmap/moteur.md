@@ -2,14 +2,6 @@
 
 ---
 
-## Pile-in / Overrun 12.06 par-figurine {#pile-in}
-
-**Prérequis de P3-5.** 3-5 j après prérequis « le gym emprunte la machine V11 ».
-
-→ `Documentation/Implémentation/A_faire/pile_in_overrun_par_figurine.md`
-
----
-
 ## P3-0 — Retrait pour cohérence 03.03 {#p3-0}
 
 **Suspendu.** Déclencheur : **le prochain dégel de `TOTAL_ACTION_SIZE`**, groupé avec les tranches de §1 (P3-4, P3-5, P3-6 branchent elles aussi des décisions).
