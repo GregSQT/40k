@@ -1326,9 +1326,9 @@ def corpus(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> pathlib.P
     return tmp_path
 
 
-def orphans(tmp_path: pathlib.Path) -> list[str]:
+def orphans() -> list[str]:
     """Les seuls noms des chantiers orphelins, sans le message."""
-    return [entry.split("  ")[0] for entry in cdr.check_reachability()]
+    return [entry.split("  ")[0] for entry in cdr.check_reachability()[0]]
 
 
 def test_an_uncited_chantier_is_an_orphan(
@@ -1344,13 +1344,13 @@ def test_an_uncited_chantier_is_an_orphan(
     (root / "Roadmap" / "moteur.md").write_text("→ `../A_faire/cite.md`\n", "utf-8")
     (root / "A_faire" / "cite.md").write_text("# cité\n", "utf-8")
     (root / "A_faire" / "oublie.md").write_text("# oublié\n", "utf-8")
-    assert orphans(root) == ["A_faire/oublie.md"]
+    assert orphans() == ["A_faire/oublie.md"]
 
     # VERT après correction : le fichier sujet le cite à son tour, plus aucun orphelin.
     (root / "Roadmap" / "moteur.md").write_text(
         "→ `../A_faire/cite.md` `../A_faire/oublie.md`\n", "utf-8"
     )
-    assert orphans(root) == []
+    assert orphans() == []
 
 
 def test_a_markdown_link_reaches_as_well(
@@ -1361,7 +1361,7 @@ def test_a_markdown_link_reaches_as_well(
     (root / "Roadmap" / "ROADMAP_INDEX.md").write_text("[s](sujet.md)\n", "utf-8")
     (root / "Roadmap" / "sujet.md").write_text("[c](../A_faire/cite.md)\n", "utf-8")
     (root / "A_faire" / "cite.md").write_text("# cité\n", "utf-8")
-    assert orphans(root) == []
+    assert orphans() == []
 
 
 def test_a_chantier_in_a_subdirectory_is_enumerated(
@@ -1372,7 +1372,7 @@ def test_a_chantier_in_a_subdirectory_is_enumerated(
     root = corpus(tmp_path, monkeypatch)
     (root / "Roadmap" / "ROADMAP_INDEX.md").write_text("rien\n", "utf-8")
     (root / "A_faire" / "Database" / "db.md").write_text("# db\n", "utf-8")
-    assert orphans(root) == ["A_faire/Database/db.md"]
+    assert orphans() == ["A_faire/Database/db.md"]
 
 
 def test_reachability_is_transitive(
@@ -1384,7 +1384,7 @@ def test_reachability_is_transitive(
     (root / "Roadmap" / "sujet.md").write_text("→ `../A_faire/decoupage.md`\n", "utf-8")
     (root / "A_faire" / "decoupage.md").write_text("→ `Database/lot.md`\n", "utf-8")
     (root / "A_faire" / "Database" / "lot.md").write_text("# lot\n", "utf-8")
-    assert orphans(root) == []
+    assert orphans() == []
 
 
 def test_a_chantier_cited_only_by_an_archive_stays_orphan(
@@ -1400,7 +1400,7 @@ def test_a_chantier_cited_only_by_an_archive_stays_orphan(
     archive = root / "Roadmap" / "archives" / "ROADMAP.md"
     archive.write_text("→ `../../A_faire/vieux.md`\n", "utf-8")
     (root / "A_faire" / "vieux.md").write_text("# vieux\n", "utf-8")
-    assert orphans(root) == ["A_faire/vieux.md"]
+    assert orphans() == ["A_faire/vieux.md"]
 
 
 def test_an_empty_chantier_tree_is_not_a_green(
@@ -1429,4 +1429,4 @@ def test_the_real_corpus_has_no_orphan() -> None:
     Mesuré au premier passage (2026-08-18) : 2 orphelins sur 13 — `analyzer_conformite_lots.md`
     (ouvert le 2026-08-16, cité par aucun fichier sujet) et `Database/DB_migration_prompt.md`.
     """
-    assert cdr.check_reachability() == []
+    assert cdr.check_reachability()[0] == []

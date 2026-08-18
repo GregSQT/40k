@@ -741,7 +741,7 @@ def step_log_entries() -> tuple[int, int]:
     section = re.search(r"^## 7\..*?(?=^## 8\.)", text, re.S | re.M)
     if section is None:
         raise SourceUnavailable("analyzer_couverture.md : §7 introuvable")
-    indexes = sorted({int(m) for m in re.findall(r"^\|\s*`?L(\d+)`?\s*\|", section.group(0), re.M)})
+    indexes = sorted({int(m) for m in re.findall(r"^\|\s*(?:~~)?`?L(\d+)`?(?:~~)?\s*\|", section.group(0), re.M)})
     if not indexes:
         raise SourceUnavailable("analyzer_couverture.md : §7 ne porte aucune entrée `Ln`")
     return len(indexes), max(indexes)
@@ -1176,7 +1176,7 @@ def reachable_documents() -> set[pathlib.Path]:
     seen = {root}
     frontier = [root]
     while frontier:
-        current = frontier.pop()
+        current = frontier.pop(0)
         for target in cited_documents(current):
             if target in seen or not is_live(target):
                 continue
@@ -1185,7 +1185,7 @@ def reachable_documents() -> set[pathlib.Path]:
     return seen
 
 
-def check_reachability() -> list[str]:
+def check_reachability() -> tuple[list[str], int]:
     """Passe 6 — tout chantier ouvert se rejoint-il depuis la feuille de route ?
 
     POURQUOI. Les cinq premières passes vérifient ce que les documents d'entrée DISENT. Aucune ne
@@ -1200,6 +1200,8 @@ def check_reachability() -> list[str]:
     CE QU'IL N'ÉTABLIT PAS : que la ligne qui cite le chantier soit juste, ni qu'elle le range au
     bon endroit. Un renvoi suffit à l'atteignabilité — la pertinence de la priorité n'appartient
     qu'à l'utilisateur.
+
+    Retourne (orphelins, total) pour que l'appelant n'ait pas à réénumérer A_FAIRE.
     """
     targets = sorted(A_FAIRE.rglob("*.md"))
     if not targets:
@@ -1207,12 +1209,13 @@ def check_reachability() -> list[str]:
         # chantiers ouverts renommé rendrait la passe verte pour toujours.
         raise SourceUnavailable(f"aucun chantier ouvert énuméré sous {A_FAIRE}")
     reached = reachable_documents()
-    return [
+    orphan_entries = [
         f"{path.relative_to(DOCS).as_posix()}  CHANTIER ORPHELIN  aucun renvoi ne le rejoint "
-        f"depuis {ROADMAP_INDEX.name} (index → fichier sujet → doc)"
+        f"depuis {ROADMAP_INDEX.name}"
         for path in targets
         if path.resolve() not in reached
     ]
+    return orphan_entries, len(targets)
 
 
 def merges_since(doc_path: pathlib.Path) -> str:
@@ -1282,8 +1285,7 @@ def report(doc: str, path: pathlib.Path) -> tuple[bool, list[str]]:
 
 
 def report_reachability() -> tuple[bool, list[str]]:
-    orphans = check_reachability()
-    total = sum(1 for _ in A_FAIRE.rglob("*.md"))
+    orphans, total = check_reachability()
     lines = [
         f"{'❌' if orphans else '✅'} atteignabilité des chantiers ouverts",
         f"   chantiers: {total} sous {A_FAIRE.relative_to(ROOT).as_posix()}, "
