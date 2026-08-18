@@ -425,3 +425,34 @@ def test_hazardous_pas_de_faux_positif_quand_plasma_model_meurt_sous_la_mw(tmp_p
     )
 
 
+# VERROU : faux positif quand le porteur de l'arme HAZARDOUS est retiré de unit_model_hp
+# par une ligne [MODELS:] arrivée AVANT la ligne SUFFERS dans le step.log.
+#
+# Chronologie step.log (step logger flushé post-action) :
+#   1. Ligne de tir avec [MODELS: 1#1@(c,r)] seul : PlasmaModel (1#0) déjà mort par la MW.
+#      _resync_living_models(["1#1"]) → retire 1#0 de unit_model_hp.
+#   2. Ligne HAZARDOUS SUFFERS : contrôle d'armurerie.
+#      OLD code (unit_model_hp) : 1#0 absent → ne voit que SquadType → faux positif.
+#      NEW code (state.model_types) : conserve 1#0=PlasmaModel → trouve HAZARDOUS → ok.
+_MODELS_SQUAD_SEUL = (
+    "[10:00:01] E1 T1 P1 SHOOTING : Unit 1(20,20) SHOOT "
+    "[MODELS: 1#1@(20,20)] [R:+0.0] [SUCCESS]\n"
+)
+
+
+def test_hazardous_pas_de_faux_positif_porteur_mort_avant_suffers(tmp_path, monkeypatch):
+    """VERROU fix : porteur de l'arme HAZARDOUS retiré de unit_model_hp avant la ligne SUFFERS.
+
+    Supprimer la boucle state.model_types (la remplacer par unit_model_hp) rend ce test ROUGE.
+    """
+    cache = {
+        "SquadType":   [],
+        "PlasmaModel": [{"name": "Plasma Pistol", "rules": ["HAZARDOUS"], "is_melee": False}],
+    }
+    body = _MODELS_SQUAD_SEUL + _HAZARDOUS_1_MW_MIXED
+    stats = _parse_mixed(tmp_path, monkeypatch, body, weapons_cache=cache)
+    assert stats["hazardous_no_hazardous_weapon"][1] == 0, (
+        "PlasmaModel (1#0) porte une arme HAZARDOUS : même retiré de unit_model_hp par une ligne "
+        "[MODELS:] antérieure, son type dans state.model_types doit être vu → pas d'erreur."
+    )
+

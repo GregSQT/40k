@@ -1691,22 +1691,22 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                             # source fiable de l'ID de l'unité sur une ligne SUFFERS (action_unit_id
                             # retient le dernier ID de header, pas celui de la ligne courante).
                             _hz_unit_id = _dmg_actor_id or action_unit_id
-                            # Vérifier que l'unité porte effectivement une arme HAZARDOUS AVANT
-                            # d'appliquer les dégâts. Si la MW tue le seul modèle porteur de
-                            # l'arme HAZARDOUS (ex. VanguardVeteranSquadJumpPackPlasma à 1 PV),
-                            # ce modèle est retiré de unit_model_hp pendant _apply_damage_and_handle_death
-                            # et le contrôle post-dégâts ne le verrait plus → faux positif.
+                            # Vérifier que l'unité porte effectivement une arme HAZARDOUS.
+                            # `state.unit_model_hp` ne contient que les socles VIVANTS : si la MW
+                            # tue le porteur de l'arme HAZARDOUS (ex. VanguardVeteranSquadJumpPackPlasma)
+                            # avant ce contrôle, la boucle ne le voit plus → faux positif.
+                            # `state.model_types` conserve TOUS les types (vivants ET morts) pour
+                            # toute la durée de l'épisode — source correcte ici.
                             # Toutes les datasheets de l'escouade (hétérogène : 19.01) sont
                             # consultées ; une seule suffit pour que la ligne soit légitime.
                             _squad_type = state.unit_types.get(_hz_unit_id)
                             _all_unit_types: "set[str]" = set()
                             if _squad_type:
                                 _all_unit_types.add(_squad_type)
-                            if _hz_unit_id in state.unit_model_hp:
-                                for _mid in state.unit_model_hp[_hz_unit_id]:
-                                    _mtype = state.model_types.get(_mid)  # get allowed
-                                    if _mtype:
-                                        _all_unit_types.add(_mtype)
+                            _unit_prefix = _hz_unit_id + "#"
+                            for _mid, _mtype in state.model_types.items():
+                                if _mid.startswith(_unit_prefix) and _mtype:
+                                    _all_unit_types.add(_mtype)
                             _has_hazardous = any(
                                 any(
                                     "HAZARDOUS" in (w.get("rules") or [])
