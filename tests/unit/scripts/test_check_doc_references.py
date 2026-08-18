@@ -1302,3 +1302,131 @@ def test_the_corpus_really_confronts_some_kinds() -> None:
         checked, _unverifiable, _broken, _notes = cdr.check_symbol_kinds(ROOT / rel)
         total += checked
     assert total >= 3
+
+
+# --------------------------------------------------------------------------- atteignabilité
+
+
+def corpus(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> pathlib.Path:
+    """Un corpus JOUET : un index, un fichier sujet, des chantiers, une archive.
+
+    Le contrôle d'atteignabilité se prononce sur des CONSTANTES de module (la racine, l'arbre des
+    chantiers, les arbres vivants). Les déplacer sur `tmp_path` est le seul moyen de prouver le
+    rouge : sur le corpus réel, écrire un orphelin pour le mesurer, c'est modifier la roadmap.
+    """
+    roadmap = tmp_path / "Roadmap"
+    (roadmap / "archives").mkdir(parents=True)
+    a_faire = tmp_path / "A_faire"
+    (a_faire / "Database").mkdir(parents=True)
+    monkeypatch.setattr(cdr, "DOCS", tmp_path)
+    monkeypatch.setattr(cdr, "ROADMAP_INDEX", roadmap / "ROADMAP_INDEX.md")
+    monkeypatch.setattr(cdr, "A_FAIRE", a_faire)
+    monkeypatch.setattr(cdr, "LIVE_TREES", (roadmap, a_faire))
+    monkeypatch.setattr(cdr, "ARCHIVES", roadmap / "archives")
+    return tmp_path
+
+
+def orphans(tmp_path: pathlib.Path) -> list[str]:
+    """Les seuls noms des chantiers orphelins, sans le message."""
+    return [entry.split("  ")[0] for entry in cdr.check_reachability()]
+
+
+def test_an_uncited_chantier_is_an_orphan(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ROUGE/VERT : le document que plus aucun fichier sujet ne cite doit sortir NOMMÉMENT.
+
+    C'est le défaut que la passe existe pour fermer, et qu'aucune des cinq autres ne peut voir :
+    le chantier orphelin ne porte aucune phrase fausse — il ne porte plus rien du tout.
+    """
+    root = corpus(tmp_path, monkeypatch)
+    (root / "Roadmap" / "ROADMAP_INDEX.md").write_text("voir [moteur.md](moteur.md)\n", "utf-8")
+    (root / "Roadmap" / "moteur.md").write_text("→ `../A_faire/cite.md`\n", "utf-8")
+    (root / "A_faire" / "cite.md").write_text("# cité\n", "utf-8")
+    (root / "A_faire" / "oublie.md").write_text("# oublié\n", "utf-8")
+    assert orphans(root) == ["A_faire/oublie.md"]
+
+    # VERT après correction : le fichier sujet le cite à son tour, plus aucun orphelin.
+    (root / "Roadmap" / "moteur.md").write_text(
+        "→ `../A_faire/cite.md` `../A_faire/oublie.md`\n", "utf-8"
+    )
+    assert orphans(root) == []
+
+
+def test_a_markdown_link_reaches_as_well(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Les deux graphies du corpus valent renvoi : le chemin backtiqué ET le lien markdown."""
+    root = corpus(tmp_path, monkeypatch)
+    (root / "Roadmap" / "ROADMAP_INDEX.md").write_text("[s](sujet.md)\n", "utf-8")
+    (root / "Roadmap" / "sujet.md").write_text("[c](../A_faire/cite.md)\n", "utf-8")
+    (root / "A_faire" / "cite.md").write_text("# cité\n", "utf-8")
+    assert orphans(root) == []
+
+
+def test_a_chantier_in_a_subdirectory_is_enumerated(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`A_faire/Database/`, `A_faire/MCTS/` : un chantier n'est pas moins ouvert parce
+    qu'il est rangé."""
+    root = corpus(tmp_path, monkeypatch)
+    (root / "Roadmap" / "ROADMAP_INDEX.md").write_text("rien\n", "utf-8")
+    (root / "A_faire" / "Database" / "db.md").write_text("# db\n", "utf-8")
+    assert orphans(root) == ["A_faire/Database/db.md"]
+
+
+def test_reachability_is_transitive(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Un chantier qui en découpe un second le rend atteignable : la marche ne se borne pas."""
+    root = corpus(tmp_path, monkeypatch)
+    (root / "Roadmap" / "ROADMAP_INDEX.md").write_text("[s](sujet.md)\n", "utf-8")
+    (root / "Roadmap" / "sujet.md").write_text("→ `../A_faire/decoupage.md`\n", "utf-8")
+    (root / "A_faire" / "decoupage.md").write_text("→ `Database/lot.md`\n", "utf-8")
+    (root / "A_faire" / "Database" / "lot.md").write_text("# lot\n", "utf-8")
+    assert orphans(root) == []
+
+
+def test_a_chantier_cited_only_by_an_archive_stays_orphan(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Être cité par l'historique d'un chantier clos prouve le CONTRAIRE d'être sur la feuille.
+
+    `ROADMAP_INDEX.md` cite `archives/ROADMAP.md` pour de vrai : sans cette borne, l'archive rendait
+    atteignable tout ce que la roadmap a jamais porté, et la passe ne mesurait plus rien.
+    """
+    root = corpus(tmp_path, monkeypatch)
+    (root / "Roadmap" / "ROADMAP_INDEX.md").write_text("[h](archives/ROADMAP.md)\n", "utf-8")
+    archive = root / "Roadmap" / "archives" / "ROADMAP.md"
+    archive.write_text("→ `../../A_faire/vieux.md`\n", "utf-8")
+    (root / "A_faire" / "vieux.md").write_text("# vieux\n", "utf-8")
+    assert orphans(root) == ["A_faire/vieux.md"]
+
+
+def test_an_empty_chantier_tree_is_not_a_green(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """VERT VACANT : « 0 orphelin » sur une énumération vide est un silence, pas un verdict."""
+    root = corpus(tmp_path, monkeypatch)
+    (root / "Roadmap" / "ROADMAP_INDEX.md").write_text("rien\n", "utf-8")
+    with pytest.raises(cdr.SourceUnavailable):
+        cdr.check_reachability()
+
+
+def test_a_missing_index_is_not_a_green(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """La racine disparue est BLOQUANTE : sans elle, tout chantier serait déclaré orphelin."""
+    root = corpus(tmp_path, monkeypatch)
+    (root / "A_faire" / "cite.md").write_text("# cité\n", "utf-8")
+    with pytest.raises(cdr.SourceUnavailable):
+        cdr.check_reachability()
+
+
+def test_the_real_corpus_has_no_orphan() -> None:
+    """Le verrou sur le dépôt : tout chantier ouvert se rejoint depuis la feuille de route.
+
+    Mesuré au premier passage (2026-08-18) : 2 orphelins sur 13 — `analyzer_conformite_lots.md`
+    (ouvert le 2026-08-16, cité par aucun fichier sujet) et `Database/DB_migration_prompt.md`.
+    """
+    assert cdr.check_reachability() == []

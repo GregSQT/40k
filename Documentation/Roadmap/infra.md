@@ -22,7 +22,7 @@
 
 **Lourd, re-cadrer avant reprise.** Plusieurs semaines. Spec de mars 2026 visant des modules `ai/` réécrits par V11 depuis — re-confronter au code avant.
 
-→ `Documentation/Implémentation/A_faire/Database/DB_migration.md`
+→ `Documentation/Implémentation/A_faire/Database/DB_migration.md` (prompt d'implémentation : `Documentation/Implémentation/A_faire/Database/DB_migration_prompt.md`)
 
 ---
 
