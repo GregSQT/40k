@@ -1688,12 +1688,16 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                             _hz_mw = int(_hz_match.group(1))
                             stats['hazardous_mortal_wounds'][player] += _hz_mw
                             # Appliquer les dégâts à l'unité ELLE-MÊME (auto-infligés).
+                            # `_dmg_actor_id` est le préfixe "Unit N(" de la ligne SUFFERS :
+                            # c'est la seule source fiable de l'unité touchée (action_unit_id
+                            # retient le dernier ID de header, pas celui de la ligne courante).
                             # `alloc_model_id=None` : pas de [ALLOC_MODEL:] sur ces lignes.
                             # `pending_model_removals=None` : les removals d'une attaque précédente
                             # de la MÊME activation ne doivent pas être fusionnés ici — cette mort
                             # est distincte, et le flush se produit au changement d'acteur.
+                            _hz_unit_id = _dmg_actor_id or action_unit_id
                             _apply_damage_and_handle_death(
-                                action_unit_id, _dmg_actor_id, _hz_mw,
+                                _hz_unit_id, _hz_unit_id, _hz_mw,
                                 player, turn, phase, state.line_number, state.current_episode_num,
                                 line, state.dead_units_current_episode, state.unit_hp,
                                 state.unit_models_alive, state.unit_model_hp,

@@ -221,3 +221,24 @@ def test_desperate_escape_reduit_les_pv_et_unit_morte_trackee(tmp_path, monkeypa
     )
 
 
+def test_hazardous_damage_applique_a_la_bonne_unite(tmp_path, monkeypatch):
+    """VERROU : la BM HAZARDOUS cible l'unité de la ligne SUFFERS, pas le dernier header.
+
+    _UNITS déclare Unit 1 (P1) puis Unit 101 (P2). Après les headers, action_unit_id = "101".
+    Sans le fix : _apply_damage_and_handle_death reçoit action_unit_id = "101" comme target_id
+    → Unit 101 perd 3 PV et meurt, Unit 1 reste intacte, la mort est silencieusement attribuée
+    au mauvais camp.
+    Avec le fix : _dmg_actor_id = "1" (préfixe Unit 1( de la ligne SUFFERS) est utilisé
+    → Unit 1 meurt, Unit 101 reste intacte.
+    """
+    stats = _parse(tmp_path, monkeypatch, _HAZARDOUS_3_MW)
+    deaths = stats["current_episode_deaths"]
+    assert any(d[1] == "1" for d in deaths), (
+        "Unit 1 doit être tuée par 3 BM HAZARDOUS (HP_MAX=3) — pas Unit 101"
+    )
+    assert not any(d[1] == "101" for d in deaths), (
+        "Unit 101 ne doit pas être tuée : les dégâts HAZARDOUS de Unit 1 ne doivent pas "
+        "lui être attribués via action_unit_id"
+    )
+
+
