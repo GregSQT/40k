@@ -5,7 +5,6 @@ Tests unitaires des helpers/primitives ADDITIFS (non branchés sur le flux V10) 
 - fight_ensure_v11_state (sets de suivi)
 - fight_compute_engaged_snapshot (snapshot engaged_at_fight_step_start, 12.04/12.06)
 - pile_in_targets_within_range / pile_in_select_targets_12_03 (BEFORE MOVING 12.03)
-- pile_in_move_destinations_12_03 (WHILE/AFTER MOVING, contraintes dures 12.03)
 
 Plateau single-hex (engagement_zone=1, scale=1) : « engagé » = distance empreinte ≤ 1,
 « collé » = contact à distance 1 (identiques quand ez=1).
@@ -23,7 +22,6 @@ from engine.phase_handlers.fight_handlers import (
     fight_compute_engaged_snapshot,
     pile_in_targets_within_range,
     pile_in_select_targets_12_03,
-    pile_in_move_destinations_12_03,
 )
 from tests._state_invariants import turn_state_invariants, unit_invariants
 
@@ -201,36 +199,3 @@ class TestPileInTargetSelection:
         ) == ["e_near"]
 
 
-# --------------------------------------------------------------------- destinations (12.03 hard constraints)
-
-class TestPileInDestinations:
-    def test_glued_unit_cannot_move(self):
-        """Figurine en contact socle (collée) → aucune destination."""
-        gs = _make_gs([
-            {"id": "u1", "player": 1, "col": 5, "row": 5},
-            {"id": "e1", "player": 2, "col": 5, "row": 4},  # dist 1 = collé
-        ])
-        dests = pile_in_move_destinations_12_03(gs, _unit(gs, "u1"), ["e1"])
-        assert dests == []
-
-    def test_reachable_anchors_all_end_engaged_and_closer(self):
-        """Unité à 3 hex de l'ennemi : destinations = ancres engagées (dist ≤1) et plus proches."""
-        from engine.hex_utils import min_distance_between_sets
-        gs = _make_gs([
-            {"id": "u1", "player": 1, "col": 5, "row": 5},
-            {"id": "e1", "player": 2, "col": 5, "row": 2},  # dist 3
-        ])
-        unit = _unit(gs, "u1")
-        dests = pile_in_move_destinations_12_03(gs, unit, ["e1"])
-        assert dests, "au moins une ancre de pile-in attendue"
-        enemy_fp = {(5, 2)}
-        for ac, ar in dests:
-            # AFTER : engagé (ez=1 → distance ≤ 1)
-            assert min_distance_between_sets({(ac, ar)}, enemy_fp, max_distance=1) <= 1
-            # WHILE : strictement plus proche que la distance de départ (3)
-            assert min_distance_between_sets({(ac, ar)}, enemy_fp) < 3
-
-    def test_empty_targets_raises(self):
-        gs = _make_gs([{"id": "u1", "player": 1, "col": 5, "row": 5}])
-        with pytest.raises(ValueError):
-            pile_in_move_destinations_12_03(gs, _unit(gs, "u1"), [])

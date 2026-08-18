@@ -7058,13 +7058,6 @@ class W40KEngine(gym.Env):
                 _fight_v11_register_selection,
                 fight_v11_current_pool,
             )
-            # OVERRUN FIGHT 12.06 (pile-in additionnel de reengagement) NON implemente ici :
-            # il n existe qu en modele par-ANCRE (_fight_v11_auto_overrun_pile_in), condamne par
-            # la decision « le pile-in de reference est le par-figurine du PvP ». 12.06 dit
-            # « CAN make one additional pile-in move » -> optionnel, son absence ne viole rien :
-            # l escouade non engagee resout un fight « a vide » (0 attaque). A implementer en
-            # par-figurine : Documentation/Implémentation/A_faire/pile_in_overrun_par_figurine.md
-
             # Parite masque/commit : le masque gym derive du MEME pool 12.04 (action_decoder ->
             # fight_v11_current_pool). Un squad hors pool est une rupture, pas un cas a absorber.
             pool = fight_v11_current_pool(self.game_state)
@@ -7082,6 +7075,21 @@ class W40KEngine(gym.Env):
             # la phase (12.04, « has not already been selected to fight this phase ») et qui ouvre
             # son eligibilite a la consolidation (12.08, « was eligible to fight this phase »).
             _fight_v11_register_selection(self.game_state, squad_id)
+
+            # OVERRUN FIGHT 12.06 : pile-in additionnel par-figurine avant les attaques. Une unite
+            # non engagee dans le pool de selection (chargee ce tour, cible detruite) tente de se
+            # reengager. check `not engaged_now` en premier pour eviter require_key snapshot
+            # (jamais pose si le snapshot etait absent — safe depuis que _fight_v11_gym_settle
+            # appelle fight_v11_enter_fight_step, qui le pose TOUJOURS avant cette branche).
+            from engine.phase_handlers.fight_handlers import _fight_v11_engaged_now
+            from engine.phase_handlers.shared_utils import _fight_overrun_pile_in_plan
+            if not _fight_v11_engaged_now(self.game_state, unit):
+                _ov_plan = _fight_overrun_pile_in_plan(self.game_state, squad_id)
+                if _ov_plan is not None:
+                    self._gym_commit_fight_move(self.game_state, squad_id, _ov_plan, "pile_in")
+                    unit = get_unit_by_id(squad_id, self.game_state)
+                    if unit is None:
+                        raise KeyError(f"Squad {squad_id} introuvable apres overrun pile-in")
 
             # Prédicat de cible = celui du flux PvP (_fight_v11_resolve_attacks) : pool
             # d ennemis en zone d engagement (12.05), pas le mapping de slots gele du tir.
