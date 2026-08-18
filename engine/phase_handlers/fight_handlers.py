@@ -377,69 +377,6 @@ def _fight_pile_in_new_fp_strictly_closer_to_closest_tier(
     return False
 
 
-def _fight_apply_pile_in_move(
-    game_state: Dict[str, Any],
-    unit: Dict[str, Any],
-    dest_col: int,
-    dest_row: int,
-    *,
-    log_label: str = "PILE_IN",
-) -> None:
-    """Applique un déplacement court en phase fight (pile in, consolidation, etc.) — ne marque pas units_moved."""
-    dest_col_i, dest_row_i = normalize_coordinates(dest_col, dest_row)
-    orig_col, orig_row = require_unit_position(unit, game_state)
-    unit_id_str = str(unit["id"])
-    fp_pair = _fight_prepare_footprint_offsets(unit, game_state)
-    candidate_fp = _candidate_footprint_fight(dest_col_i, dest_row_i, unit, game_state, fp_pair)
-    if not is_placement_valid_with_clearance(
-        game_state, candidate_fp,
-        shape=unit["BASE_SHAPE"], base_size=unit["BASE_SIZE"],
-        col=dest_col_i, row=dest_row_i, orientation=socle_orientation(unit),
-        exclude_unit_id=unit_id_str,
-    ):
-        raise ValueError(
-            f"Pile in illegal placement unit={unit_id_str} dest=({dest_col_i},{dest_row_i})"
-        )
-
-    episode = game_state.get("episode_number", "?")
-    turn = game_state.get("turn", "?")
-    phase = game_state.get("phase", "fight")
-    log_message = (
-        f"[POSITION CHANGE] E{episode} T{turn} {phase} Unit {unit['id']}: "
-        f"({orig_col},{orig_row})→({dest_col_i},{dest_row_i}) via {log_label}"
-    )
-    add_console_log(game_state, log_message)
-    safe_print(game_state, log_message)
-
-    set_unit_coordinates(unit, dest_col_i, dest_row_i)
-    old_cache = require_key(game_state, "units_cache").get(unit_id_str)
-    old_occupied = set(old_cache.get("occupied_hexes")) if old_cache else None
-
-    # Déplacement rigide : translate TOUTES les figurines (models_cache) + resync
-    # occupied_hexes_by_model (source de vérité par-modèle lue par le front). Ne pas
-    # utiliser update_units_cache_position seul, qui ne bouge que l'ancre → les socles
-    # restaient figés à l'écran après un pile-in.
-    translate_squad_to_destination(game_state, unit_id_str, dest_col_i, dest_row_i)
-
-    new_cache = require_key(game_state, "units_cache").get(unit_id_str)
-    new_occupied = new_cache.get("occupied_hexes") if new_cache else None
-    moved_unit_player = int(require_key(unit, "player"))
-    update_enemy_adjacent_caches_after_unit_move(
-        game_state,
-        moved_unit_player=moved_unit_player,
-        old_col=orig_col,
-        old_row=orig_row,
-        new_col=dest_col_i,
-        new_row=dest_row_i,
-        old_occupied=old_occupied,
-        new_occupied=new_occupied,
-    )
-    # LoS : invalidation ciblée + bump émis par translate_squad_to_destination →
-    # update_units_cache_position → _touch_unit_los (choke-point a′). CORRIGE LE TROU
-    # fight-translate : ce chemin ne bumpait JAMAIS _unit_move_version auparavant → pair-cache
-    # périmé en observation/reward RL jusqu'au 1er move du tour suivant.
-
-
 def _append_fight_move_log(
     game_state: Dict[str, Any],
     unit: Dict[str, Any],
@@ -818,84 +755,6 @@ def _candidate_footprint_fight(
         offs = off_e if (center_col & 1) == 0 else off_o
         return {(center_col + dc, center_row + dr) for dc, dr in offs}
     return compute_candidate_footprint(center_col, center_row, unit, game_state)
-
-
-def _fight_bfs_reachable_anchors_consolidation(
-    game_state: Dict[str, Any],
-    unit: Dict[str, Any],
-    *,
-    start_footprint: Optional[Set[Tuple[int, int]]] = None,
-) -> Tuple[Dict[Tuple[int, int], int], Dict[Tuple[int, int], Set[Tuple[int, int]]]]:
-    """
-    BFS jusqu'à 3\" (sous-hex) : ancres avec placement d'empreinte valide (sans filtre pile in).
-
-    Retourne ``(visited, fp_by_anchor)`` : empreinte candidate déjà calculée à l'entrée dans
-    ``visited`` (évite un second ``compute_candidate_footprint`` par ancre en consolidation).
-
-    ``start_footprint`` : si fourni, réutilise l'empreinte de l'ancre de départ (ex. déjà
-    calculée pour un early-exit objectif) au lieu d'un second appel identique.
-    """
-    from engine.perf_timing import append_perf_timing_line, perf_timing_enabled
-
-    _perf = perf_timing_enabled(game_state)
-    _t_bfs0 = time.perf_counter() if _perf else None
-    s_compute_fp = 0.0
-    s_placement_valid = 0.0
-    neighbor_eval_n = 0
-    scale = game_state["inches_to_subhex"]
-    bfs_max = 3 * scale
-    unit_id_str = str(unit["id"])
-    start_col, start_row = require_unit_position(unit, game_state)
-    start_pos = (start_col, start_row)
-    fp_pair = _fight_prepare_footprint_offsets(unit, game_state)
-    occupied_positions = build_occupied_positions_set(game_state, exclude_unit_id=unit_id_str)
-    if start_footprint is not None:
-        start_fp = start_footprint
-    else:
-        start_fp = _candidate_footprint_fight(start_col, start_row, unit, game_state, fp_pair)
-    visited: Dict[Tuple[int, int], int] = {start_pos: 0}
-    fp_by_anchor: Dict[Tuple[int, int], Set[Tuple[int, int]]] = {start_pos: start_fp}
-    queue = deque([(start_pos, 0)])
-    while queue:
-        current_pos, current_dist = queue.popleft()
-        current_col, current_row = current_pos
-        if current_dist >= bfs_max:
-            continue
-        neighbor_dist = current_dist + 1
-        for neighbor_col, neighbor_row in get_hex_neighbors(current_col, current_row):
-            neighbor_pos = (neighbor_col, neighbor_row)
-            if neighbor_pos in visited:
-                continue
-            neighbor_eval_n += 1
-            _t1 = 0.0
-            if _perf:
-                _t1 = time.perf_counter()
-            candidate_fp = _candidate_footprint_fight(
-                neighbor_col, neighbor_row, unit, game_state, fp_pair
-            )
-            _t2 = 0.0
-            if _perf:
-                s_compute_fp += time.perf_counter() - _t1
-                _t2 = time.perf_counter()
-            if not is_footprint_placement_valid(
-                candidate_fp, game_state, occupied_positions,
-                anchor=(neighbor_col, neighbor_row), socle=unit,
-            ):
-                if _perf:
-                    s_placement_valid += time.perf_counter() - _t2
-                continue
-            if _perf:
-                s_placement_valid += time.perf_counter() - _t2
-            visited[neighbor_pos] = neighbor_dist
-            fp_by_anchor[neighbor_pos] = candidate_fp
-            queue.append((neighbor_pos, neighbor_dist))
-    if _perf and _t_bfs0 is not None:
-        append_perf_timing_line(
-            f"FIGHT_CONSOLIDATION_BFS unitId={unit_id_str!r} bfs_max={bfs_max} visited_n={len(visited)} "
-            f"neighbor_eval_n={neighbor_eval_n} compute_fp_s={s_compute_fp:.6f} "
-            f"placement_valid_s={s_placement_valid:.6f} total_s={time.perf_counter() - _t_bfs0:.6f}"
-        )
-    return visited, fp_by_anchor
 
 
 def _fight_fp_has_adjacent_enemy_footprint(
@@ -1607,126 +1466,6 @@ def pile_in_select_targets_12_03(
     return chosen
 
 
-def pile_in_move_destinations_12_03(
-    game_state: Dict[str, Any],
-    unit: Dict[str, Any],
-    target_ids: List[str],
-) -> List[Tuple[int, int]]:
-    """
-    WHILE / AFTER MOVING (12.03) — ancres valides d'un pile-in vers ``target_ids``.
-
-    Contraintes DURES (le moteur déplace l'empreinte de l'unité d'un bloc — modèle
-    atomique de figurine ; les contraintes par-figurine sont traduites au niveau empreinte) :
-    - **figurines en contact socle immobiles** : si l'unité est déjà « collée » (contact
-      bord-à-bord avec un ennemi) → aucune ancre (pas de pile-in possible) ;
-    - **BFS ≤ 3"** (× inches_to_subhex), placement d'empreinte valide (pas de chevauchement) ;
-    - **WHILE** : fin strictement plus proche de la cible de pile-in la plus proche ;
-    - **AFTER** : l'unité doit finir **engagée** (filtre dur) ; et chaque FIGURINE qui partait
-      engagée avec une unité ennemie doit le rester avec CETTE unité (12.03, filtre dur). Cette
-      seconde clause était vérifiée au niveau unité — il suffisait qu'une figurine quelconque
-      tienne l'engagement — là où le flux par-figurine du PvP l'appliquait déjà par figurine.
-
-    Retour : liste d'ancres (col, row), hors position de départ. Vide ⇒ pas de pile-in possible.
-    """
-    from engine.hex_utils import min_distance_between_sets
-    from engine.spatial_relations import (
-        get_engagement_zone,
-        unit_entries_within_engagement_zone,
-    )
-
-    if not target_ids:
-        raise ValueError("pile_in_move_destinations_12_03: target_ids must be non-empty")
-
-    # Contrainte « figurines en contact socle immobiles » → empreinte atomique collée = pas de move.
-    if _fight_unit_is_hex_adjacent_to_enemy_footprint(game_state, unit):
-        return []
-
-    ez = get_engagement_zone(game_state)
-    units_cache = require_key(game_state, "units_cache")
-    unit_id_str = str(require_key(unit, "id"))
-    entry = units_cache.get(unit_id_str)
-    if entry is None:
-        raise ValueError(f"Unit {unit_id_str} not in units_cache; cannot plan pile-in")
-    unit_fp = entry_footprint(entry)
-
-    # Palier de la cible de pile-in la plus proche (parmi les cibles sélectionnées).
-    d_min_sel: Optional[int] = None
-    closest_tier: List[str] = []
-    for tid in target_ids:
-        # Cf. `_fight_pile_in_closest_tier_ids` : `target_ids` vient d'une énumération du cache.
-        ce = require_unit_from_cache(
-            str(tid), game_state, "pile_in_move_destinations_12_03/target"
-        )
-        efp = entry_footprint(ce)
-        d = min_distance_between_sets(unit_fp, efp)
-        if d_min_sel is None or d < d_min_sel:
-            d_min_sel = d
-            closest_tier = [str(tid)]
-        elif d == d_min_sel:
-            closest_tier.append(str(tid))
-    if d_min_sel is None:
-        raise ValueError("pile_in_move_destinations_12_03: no live target footprints among target_ids")
-
-    # Cible(s) la/les plus proche(s) — pour le palier WHILE « engaged with it if possible ».
-    # Le filtre `if str(tid) in units_cache` qui était ici était mort : `closest_tier` sort de la
-    # boucle ci-dessus, qui exige déjà chaque entrée.
-    closest_tier_entries = [units_cache[str(tid)] for tid in closest_tier]
-    # PERF : empreintes du palier calculées UNE fois. Sans ce passage explicite,
-    # `_fight_pile_in_new_fp_strictly_closer_to_closest_tier` les relit par ANCRE visitée.
-    closest_tier_fps = [entry_footprint(e) for e in closest_tier_entries]
-
-    # Unités ennemies engagées AVANT le move, PAR FIGURINE : 12.03 AFTER l'écrit « each model that
-    # started this move engaged with an enemy unit must still be engaged with that enemy unit ».
-    # Ce pool le vérifiait au niveau UNITÉ — il suffisait qu'une figurine quelconque tienne
-    # l'engagement pour que l'ancre passe, là où le flux par-figurine (PvP) exige la MÊME figurine.
-    # Les deux flux rendaient donc deux verdicts sur la même situation.
-    engaged_before_by_model = _fight_model_start_engagements(game_state, unit)
-
-    start_col, start_row = require_unit_position(unit, game_state)
-    start_pos = (start_col, start_row)
-    visited, fp_by_anchor = _fight_bfs_reachable_anchors_consolidation(game_state, unit)
-
-    destinations: List[Tuple[int, int]] = []
-    engaging_closest: List[Tuple[int, int]] = []
-    for anchor in visited:
-        if anchor == start_pos:
-            continue
-        fp = fp_by_anchor[anchor]
-        ac, ar = anchor
-        # WHILE : strictement plus proche de la cible de pile-in la plus proche.
-        if not _fight_pile_in_new_fp_strictly_closer_to_closest_tier(
-            game_state, fp, d_min_sel, closest_tier, closest_enemy_fps=closest_tier_fps
-        ):
-            continue
-        # AFTER : l'unité doit finir engagée (avec au moins un ennemi). Les entrées synthétiques de
-        # cette ancre (une par socle) servent AUSSI aux deux contrôles suivants — les construire
-        # une seule fois.
-        placements = _fight_rigid_model_placements(game_state, unit_id_str, int(ac), int(ar))
-        synths = _fight_synth_cache_entries_at_footprint(
-            unit, game_state, int(ac), int(ar), model_placements=placements
-        )
-        if not _fight_entries_in_engagement_with_any_enemy(game_state, unit, synths):
-            continue
-        # AFTER : chaque FIGURINE conserve SES engagements de départ (12.03), mesurée à son socle
-        # à sa position translatée. Seules les figurines qui partaient engagées sont interrogées.
-        if not _fight_models_keep_start_engagements(
-            game_state, unit_id_str, engaged_before_by_model, placements, ez
-        ):
-            continue
-        destinations.append(anchor)
-        # WHILE « engaged with it if possible » : ancre engageant la cible la plus proche.
-        if any(
-            unit_entries_within_engagement_zone(s, ce, ez)
-            for ce in closest_tier_entries
-            for s in synths
-        ):
-            engaging_closest.append(anchor)
-    # Phase 1 (12.03 WHILE « engaged with it if possible ») : si au moins une ancre engage la
-    # cible de pile-in la plus proche, le move DOIT s'y faire → on ne garde que celles-là.
-    # Phase 2 (repli) : sinon, tout le pool dur (plus proche + engagé + engagements conservés).
-    return engaging_closest if engaging_closest else destinations
-
-
 # =====================================================================
 # === V11 FIGHT PHASE — ÉLIGIBILITÉS & MACHINE DE SÉLECTION (Bloc 1) ===
 # =====================================================================
@@ -2378,39 +2117,15 @@ def fight_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:  # noqa: F8
 
 
 def _fight_v11_auto_pile_in(game_state: Dict[str, Any], unit: Dict[str, Any], config: Dict[str, Any]) -> None:
-    """Pile-in groupé AUTO (politique décision #7 : toujours si possible). Marque pile_in_done."""
+    """Pile-in groupé AUTO — par-figurine (fight_pile_in_plan). Marque pile_in_done."""
     uid = str(require_key(unit, "id"))
     try:
-        engaged = _fight_units_engaged_with(game_state, unit)
-        targets = engaged if engaged else pile_in_targets_within_range(game_state, unit)
-        if targets:
-            dests = pile_in_move_destinations_12_03(game_state, unit, targets)
-            if dests:
-                d_min, _closest = _fight_pile_in_closest_enemy_snapshot(game_state, unit)
-                pc, pr = _ai_select_pile_in_destination(
-                    game_state, unit, dests, d_min, [str(t) for t in targets]
-                )
-                try:
-                    _fight_apply_pile_in_move(game_state, unit, pc, pr)
-                except ValueError:
-                    pass  # destination devenue invalide entre BFS et application
+        from .shared_utils import fight_pile_in_plan, commit_move
+        plan = fight_pile_in_plan(game_state, uid)
+        if plan is not None:
+            commit_move(plan, game_state, "pile_in")
     finally:
         game_state["pile_in_done"].add(uid)
-
-
-def _fight_v11_auto_overrun_pile_in(game_state: Dict[str, Any], unit: Dict[str, Any], config: Dict[str, Any]) -> None:
-    """Pile-in additionnel d'un overrun fight AUTO (12.06) : se rapprocher/engager si possible."""
-    within = pile_in_targets_within_range(game_state, unit)
-    if not within:
-        return
-    dests = pile_in_move_destinations_12_03(game_state, unit, within)
-    if not dests:
-        return
-    pc, pr = _ai_select_pile_in_destination(game_state, unit, dests, 0, within)
-    try:
-        _fight_apply_pile_in_move(game_state, unit, pc, pr)
-    except ValueError:
-        pass
 
 
 def _fight_v11_auto_consolidate(game_state: Dict[str, Any], unit: Dict[str, Any], config: Dict[str, Any]) -> None:
@@ -2452,7 +2167,10 @@ def _fight_v11_auto_step(game_state: Dict[str, Any], config: Dict[str, Any]) -> 
                 and not _fight_v11_engaged_now(game_state, u)
             )
             if overrun:
-                _fight_v11_auto_overrun_pile_in(game_state, u, config)
+                from .shared_utils import _fight_overrun_pile_in_plan, commit_move
+                _ov_plan = _fight_overrun_pile_in_plan(game_state, uid)
+                if _ov_plan is not None:
+                    commit_move(_ov_plan, game_state, "pile_in")
             results = _fight_v11_resolve_attacks(game_state, u, config)
             return True, {"action": "combat", "phase": "fight", "unitId": uid,
                           "fight_subphase": "fight", "all_attack_results": results,
@@ -5431,7 +5149,10 @@ def _fight_v11_manual_step(
             ftype = "normal"
             if action.get("fight_type") == "overrun" and fight_v11_is_overrun_eligible(game_state, u):
                 ftype = "overrun"
-                _fight_v11_auto_overrun_pile_in(game_state, u, config)
+                from .shared_utils import _fight_overrun_pile_in_plan, commit_move
+                _ov_plan = _fight_overrun_pile_in_plan(game_state, sel)
+                if _ov_plan is not None:
+                    commit_move(_ov_plan, game_state, "pile_in")
             valid = _fight_build_valid_target_pool(game_state, u)
             _fight_v11_log(game_state, f"FIGHT unit {sel} (type={ftype}) : pool cibles = {valid}")
             if valid:

@@ -11407,6 +11407,74 @@ def fight_pile_in_plan(
     return plan
 
 
+def _fight_overrun_pile_in_plan(
+    game_state: Dict[str, Any], squad_id: str
+) -> Optional[List[Tuple[str, int, int, int]]]:
+    """Plan pile-in additionnel overrun 12.06 (par-figurine, atomique).
+
+    Variante de fight_pile_in_plan pour les unités NON engagées au moment de leur
+    sélection : les cibles sont restreintes aux ennemis à ≤ pile_in_target_range (5")
+    conformément à 12.03 BEFORE MOVING (cas non engagé). L'unité DOIT finir engagée.
+
+    Returns List[(model_id, col, row, level)] ou None.
+    """
+    from engine.phase_handlers.fight_handlers import pile_in_targets_within_range
+    from engine.game_utils import get_unit_by_id
+
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    mids = [m for m in squad_models.get(squad_id, []) if m in models_cache]  # get allowed
+    if not mids:
+        return None
+
+    our_unit = get_unit_by_id(squad_id, game_state)
+    if our_unit is None:
+        raise KeyError(f"_fight_overrun_pile_in_plan: squad {squad_id} absent de gs['units']")
+
+    # Cibles restreintes à ≤ 5" (12.03 BEFORE MOVING, unité non engagée).
+    within_ids = pile_in_targets_within_range(game_state, our_unit)
+    if not within_ids:
+        return None
+
+    enemy_positions: List[Tuple[int, int]] = []
+    for esid in within_ids:
+        enemy_positions.extend(_squad_model_positions(game_state, esid))
+    if not enemy_positions:
+        return None
+
+    ish = int(require_key(game_state, "inches_to_subhex"))
+    chosen = _assign_cells_toward_enemies(
+        game_state, squad_id, mids, enemy_positions, 3 * ish
+    )
+    plan: List[Tuple[str, int, int, int]] = [
+        (mid, chosen[mid][0], chosen[mid][1], int(require_key(models_cache[mid], "level")))
+        for mid in mids
+    ]
+
+    plan_positions = {mid: (c, r) for mid, c, r, _lv in plan}
+    if not _validate_plan_coherency(plan_positions, game_state):
+        return None
+    from engine.spatial_relations import unit_entries_within_engagement_zone
+    ez = get_engagement_zone(game_state)
+    within_entries = [
+        require_unit_from_cache(esid, game_state, "_fight_overrun_pile_in_plan/enemy")
+        for esid in within_ids
+    ]
+    in_er = any(
+        any(
+            unit_entries_within_engagement_zone(
+                _synth_model_entry(game_state, str(squad_id), models_cache[mid], c, r, level=lv),
+                ee, ez,
+            )
+            for ee in within_entries
+        )
+        for mid, c, r, lv in plan
+    )
+    if not in_er:
+        return None
+    return plan
+
+
 def get_fighting_models(
     game_state: Dict[str, Any],
     squad_id: str,

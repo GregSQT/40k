@@ -210,16 +210,6 @@ def test_closest_tier_ids_raises_on_a_desynced_cache(gs: Dict[str, Any]) -> None
         _fight_pile_in_closest_tier_ids(gs, _mover(), ["ennemi_pose"])
 
 
-def test_pile_in_destinations_raises_on_a_desynced_target(gs: Dict[str, Any]) -> None:
-    """`pile_in_move_destinations_12_03` : une cible déclarée disparaissait du palier WHILE."""
-    from engine.phase_handlers.fight_handlers import pile_in_move_destinations_12_03
-
-    # L'ennemi POSÉ est au contact : la garde « figurines collées » sort avant la mesure. On
-    # l'éloigne pour que la fonction atteigne réellement la boucle de cibles.
-    gs["units_cache"]["ennemi_pose"] = _entry(9, 5, FOE)
-    with pytest.raises(KeyError, match="pile_in_move_destinations_12_03/target"):
-        pile_in_move_destinations_12_03(gs, _mover(), ["fantome"])
-
 
 def test_strictly_closer_raises_on_a_desynced_tier(gs: Dict[str, Any]) -> None:
     """`_fight_pile_in_new_fp_strictly_closer_to_closest_tier` : sauter une empreinte relâchait

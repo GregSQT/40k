@@ -319,3 +319,95 @@ def test_snapshot_engaged_unit_with_dead_enemy_offers_fight_and_breaks_loop(mele
     assert result["fight_result"]["attacks_made"] == 0
     assert squad_id in gs["units_selected_to_fight"], "l'unité est enregistrée -> clôt son éligibilité"
     assert squad_id not in fight_v11_current_pool(gs), "hors du pool -> plus de re-sélection -> pas de boucle"
+
+
+def test_overrun_pile_in_called_when_unengaged(melee_scenario_file):
+    """OVERRUN 12.06 : une escouade non engagée au moment de son fight tente le pile-in par-figurine.
+
+    État forcé (miroir de test_charged_squad_without_target_fights_empty) : tous les ennemis
+    supprimés, escouade chargée mais non engagée. Verrou : _fight_overrun_pile_in_plan est
+    invoquée car la condition «not _fight_v11_engaged_now» est vraie (aucun ennemi vivant).
+    """
+    import engine.phase_handlers.shared_utils as su_module
+
+    eng = _engine(melee_scenario_file, seed=1)
+    gs = eng.game_state
+    squad_id = next(iter(gs["units_cache"]))
+    our_player = int(gs["units_cache"][squad_id]["player"])
+
+    # Supprime tous les ennemis (pool vide → fight à vide, unité non engagée).
+    for sid in [s for s, e in list(gs["units_cache"].items()) if int(e["player"]) != our_player]:
+        for mid in list(gs["squad_models"].get(sid, [])):
+            gs["models_cache"].pop(mid, None)
+        gs["units_cache"].pop(sid, None)
+
+    gs["phase"] = "fight"
+    gs["fight_subphase"] = "fight"
+    gs["current_player"] = our_player
+    gs["fight_step"] = "fights_first"
+    gs["fight_selector"] = our_player
+    gs["engaged_at_fight_step_start"] = {}
+    gs["units_charged"] = {squad_id}
+    gs["units_selected_to_fight"] = set()
+    gs["units_fought"] = set()
+    gs["pile_in_done"] = set()
+    gs["consolidation_done"] = set()
+
+    calls: List[str] = []
+    orig = su_module._fight_overrun_pile_in_plan
+
+    def _spy(game_state, sid):
+        calls.append(str(sid))
+        return None  # bloque le move effectif — le verrou porte sur l'APPEL, pas l'effet
+
+    su_module._fight_overrun_pile_in_plan = _spy
+    try:
+        eng._process_squad_action({"action": "squad_fight", "squad_id": squad_id})
+    finally:
+        su_module._fight_overrun_pile_in_plan = orig
+
+    assert squad_id in calls, "overrun pile-in doit être tenté pour une escouade non engagée"
+
+
+def test_overrun_pile_in_plan_returns_none_when_no_enemy_in_range(melee_scenario_file):
+    """_fight_overrun_pile_in_plan retourne None si aucun ennemi à ≤5" (12.03 BEFORE MOVING).
+
+    Test direct de la fonction (pas via le moteur) : ennemi à 8", hors portée → plan None.
+    """
+    from engine.phase_handlers.shared_utils import _fight_overrun_pile_in_plan
+
+    eng = _engine(melee_scenario_file, seed=1)
+    gs = eng.game_state
+    ish = int(gs["inches_to_subhex"])
+
+    all_ids = list(gs["units_cache"])
+    our_id = all_ids[0]
+    our_player = int(gs["units_cache"][our_id]["player"])
+    foe_ids = [s for s in all_ids if int(gs["units_cache"][s]["player"]) != our_player]
+    assert foe_ids
+    foe_id = foe_ids[0]
+
+    # Positionne l'ennemi à 8" (> 5" pile_in_target_range)
+    for mid in gs["squad_models"].get(our_id, []):
+        gs["models_cache"][mid]["col"] = 10
+        gs["models_cache"][mid]["row"] = 10
+    gs["units_cache"][our_id]["col"] = 10
+    gs["units_cache"][our_id]["row"] = 10
+    for mid in gs["squad_models"].get(foe_id, []):
+        gs["models_cache"][mid]["col"] = 10
+        gs["models_cache"][mid]["row"] = 10 + 8 * ish
+    gs["units_cache"][foe_id]["col"] = 10
+    gs["units_cache"][foe_id]["row"] = 10 + 8 * ish
+
+    gs["phase"] = "fight"
+    gs["fight_subphase"] = "fight"
+    gs["current_player"] = our_player
+    gs["engaged_at_fight_step_start"] = {}
+    gs["units_charged"] = {our_id}
+    gs["units_selected_to_fight"] = set()
+    gs["units_fought"] = set()
+    gs["pile_in_done"] = set()
+    gs["consolidation_done"] = set()
+
+    plan = _fight_overrun_pile_in_plan(gs, our_id)
+    assert plan is None, "ennemi a 8\" hors portee overrun : aucun plan attendu"
