@@ -261,7 +261,7 @@ def test_a_reserves_roster_is_still_a_reserves_roster_on_the_second_episode() ->
     )
 
 
-def test_an_off_table_unit_is_never_a_declarable_charge_target() -> None:
+def test_an_off_table_unit_is_never_a_declarable_charge_target(monkeypatch) -> None:
     """Parite masque/commit sur la charge (11.02), le cas ou la mesure fausse ne LEVE pas.
 
     `charge_check_eligibility` est la source UNIQUE que le masque interroge pour ouvrir un slot de
@@ -276,6 +276,13 @@ def test_an_off_table_unit_is_never_a_declarable_charge_target() -> None:
     conditions du vert vacant sont donc verifiees avant l'assertion.
     """
     import random
+
+    # Immunise contre la pollution de random.randint par d'autres tests xdist
+    # (monkeypatch.setattr(random, "randint", ...) dans un worker voisin).
+    # Le RNG local est seede de facon deterministe ; la deployment phase n'utilise pas
+    # random.randint (active), mais les etapes moteur apres deploiement oui.
+    _rng_engine = random.Random(0)
+    monkeypatch.setattr(random, "randint", _rng_engine.randint)
 
     from engine.phase_handlers.movement_handlers import (
         reposition_unit_to_strategic_reserves,
