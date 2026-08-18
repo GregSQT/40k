@@ -47,7 +47,7 @@ export function readEngineActionOutcome(
 ): EngineActionOutcome {
   if (!data) return { kind: "noop" };
   if (data.success === false) {
-    return { kind: "refused", message: String(data.error ?? data.result?.error ?? "unknown") };
+    return { kind: "refused", message: String(data.error || data.result?.error || "unknown") };
   }
   return { kind: "ok" };
 }

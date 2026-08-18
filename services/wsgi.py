@@ -82,7 +82,9 @@ def _resolve_waitress_trusted_proxy() -> str | None:
     if not raw:
         return None
     first = raw.split(",")[0].strip()
-    return first or None
+    if not first:
+        raise SystemExit(f"W40K_TRUSTED_PROXIES : {raw!r} — premier élément vide (virgule initiale ?)")
+    return first
 
 
 def main() -> None:
