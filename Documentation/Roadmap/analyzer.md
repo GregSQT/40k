@@ -4,27 +4,9 @@ Découpage en 6 lots des trois sujets ci-dessous (ordre séquentiel imposé : to
 
 ---
 
-## Conformité moteur {#conformite}
-
-**1 erreur restante** (sur les 53 mesurées le 2026-08-11 ; les familles CC_NB, move et tir ont été soldées les 2026-08-11/12).
-
-État sur le journal **2026-08-11 14h34** :
-
-| Symptôme | P1 | P2 | Règle |
-|---|---|---|---|
-| Mort « fantôme » (état reconstruit ≠ moteur) | 1 (total) | | — |
-
-Les autres familles soldées : CC_NB (CLEAVE), collisions 03.01, fall-back engagé 09.07, move au contact 09.05, tirs hors portée, tir engagé — toutes 0 ou artefacts de mesure.
-
-⚠️ Piste suivante pour la mort fantôme : trois chemins de retrait n'écrivent aucune ligne (cohérence 03.03, blessures mortelles par socle, expiration de réserves) — rattrapés par l'instantané de fin de tour, mesurés à 1 fantôme sur 600 épisodes.
-
-**Doc opérationnel du chantier** (acquis, découpage en 6 lots, hors-périmètre) : `Documentation/Implémentation/A_faire/analyzer_conformite_lots.md`
-
----
-
 ## Champs manquants `step.log` {#champs-step-log}
 
-**23** entrées restantes (L6→L28). L1–L5 livrées. Chaque champ se livre seul et fait passer des règles de « non vérifiable » à « vérifiable ».
+**15** entrées restantes (L6–L28, hors L14/L19/L22/L23/L24/L25/L27/L28 résolues — voir ci-dessous). L1–L5 livrées. Chaque champ se livre seul et fait passer des règles de « non vérifiable » à « vérifiable ».
 
 À piocher quand un contrôle analyzer manque de données.
 

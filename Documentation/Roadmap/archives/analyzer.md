@@ -2,6 +2,7 @@
 
 | Date | Chantier | Détail |
 |---|---|---|
+| 2026-08-12 | Conformité moteur — mort fantôme soldée | 3 chemins de retrait fixés (cohérence 03.03, MW par socle `str(unit_id)`, réserves timeout) ; tests `test_analyzer_coherency_removal_ghost.py` + `test_analyzer_hazard_models_ghost.py` ; 0 mort fantôme |
 | 2026-08-17 | Trous couverture `hazardous` + `oath_wound` | Branche dispatcher + compteurs `hazardous_mortal_wounds` ; `oath_wound` magnitude depuis EFFECTS ; 5 tests |
 | 2026-08-17 | Compteurs `abilities/` | 8 règles × 2 camps, count brut + exposition ; famille A (action_log) + famille B (shot_records) ; 26 tests |
 | 2026-08-17 | Proxy count `hit_reroll_exposure` | `max(existant, count > 0)` miroir `oath_wound_bonus` ; 2 tests rouge→vert |

@@ -4607,6 +4607,15 @@ def _manual_roll_fight_intent(
     )
     # +1 au jet de blessure d Oath. Meme helper que le tir (cf. `stamp_wound_bonus_ability`).
     stamp_wound_bonus_ability(rolled["shot_records"], _oath_wound_bonus)
+    # L27 — nom de la capacite de relance de sauvegarde (reroll_1_save_fight). La cause est
+    # COTE CIBLE (pas de l'attaquant) : le record porte deja `saveRollInitial` quand la relance
+    # a eu lieu (attack_sequence.py). On n'ajoute le nom que si la relance a REELLEMENT joue.
+    if reroll_save1:
+        _save_ability_name = _get_source_unit_rule_display_name_for_effect(target, "reroll_1_save_fight")
+        if _save_ability_name:
+            for _rec in rolled["shot_records"]:
+                if _rec.get("saveRollInitial") is not None:  # get allowed : relance effective
+                    _rec["saveAbility"] = _save_ability_name
     # WAAAGH! : « add 1 to the Strength and Attacks characteristics of melee weapons ». Les deux
     # moities sont appliquees plus haut (`strength += _waaagh_bonus`, `n_attacks += _waaagh_bonus`)
     # mais RIEN ne le disait dans step.log — ni token, ni compteur. Consequence mesuree sur le run

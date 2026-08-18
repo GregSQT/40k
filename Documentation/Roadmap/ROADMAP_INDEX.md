@@ -103,7 +103,6 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 
 | Sujets | Chantier | Fichier |
 |---|---|---|
-| analyzer | Conformité moteur — 1 mort fantôme restant | [analyzer.md#conformite](analyzer.md#conformite) |
 | analyzer | Champs manquants `step.log` L6→L28 | [analyzer.md#champs-step-log](analyzer.md#champs-step-log) |
 | analyzer | Corpus de règles vérifiable | [analyzer.md#corpus-regles](analyzer.md#corpus-regles) |
 | front | Tests front T2b/T3a/T7 + couches B/C | [front.md#tests](front.md#tests) |

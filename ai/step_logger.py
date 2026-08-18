@@ -623,7 +623,7 @@ class StepLogger:
         except Exception as e:
             print(f"⚠️ Step logging flush error: {e}")
     
-    def log_episode_start(self, units_data, scenario_info=None, bot_name=None, walls=None, objectives=None, primary_objective_config=None, roster_info=None, board_config=None, scenario_path=None, run_rules=None):
+    def log_episode_start(self, units_data, scenario_info=None, bot_name=None, walls=None, objectives=None, primary_objective_config=None, roster_info=None, board_config=None, scenario_path=None, run_rules=None, attached_info=None):
         """Log episode start with all unit starting positions, walls, and objectives
 
         ``scenario_path`` : chemin du scénario RÉELLEMENT tiré pour cet épisode, relatif à la
@@ -768,6 +768,12 @@ class StepLogger:
                 #   1 = grammaire d'avant le 2026-08-12 (aucune figurine allouée nommée)
                 #   2 = `[ALLOC_MODEL: <mid>]` sur toute attaque parvenue à l'allocation
                 f.write(f"[{timestamp}] Log grammar: {LOG_GRAMMAR_VERSION}\n")
+                # L19 — liens leader→bodyguard (règle 19 Attached Units).
+                # Une paire par ligne : l'analyzer reconstruit la taille de l'escouade
+                # effective (bodyguard + leaders) et les règles dérivées (19.04 reroll_charge).
+                if attached_info:
+                    for _lid, _bid in sorted(attached_info.items()):
+                        f.write(f"[{timestamp}] Attached: {_lid}→{_bid}\n")
 
                 # Log all unit starting positions (already validated above)
                 for unit in units_list:
@@ -1220,9 +1226,11 @@ class StepLogger:
                     # n'atteint jamais step.log.
                     _fly_seg = " [FLY]" if details.get("is_fly_move") is True else ""
                     if charge_roll is not None:
+                        # L28 — relance de charge : token [REROLLED:<jet initial>] quand presente.
+                        _charge_rerolled = _rerolled_token(details, "charge_roll_initial")
                         base_msg = (
                             f"{unit_label} CHARGED{ability_suffix}{_fly_seg} {target_label} "
-                            f"from ({start_col},{start_row}) to ({end_col},{end_row}) [Roll: {charge_roll}]"
+                            f"from ({start_col},{start_row}) to ({end_col},{end_row}) [Roll: {charge_roll}]{_charge_rerolled}"
                         )
                     else:
                         base_msg = (
@@ -1370,10 +1378,12 @@ class StepLogger:
             _waaagh_seg += "".join(
                 f" {tok}" for tok in _flag_rule_tokens(details, _LINE_TAG_RULE_TOKENS)
             )
+            # L14 — [FIGHTS FIRST] 24.13 : l'unité a chargé ce tour.
+            _fights_first_seg = " [FIGHTS FIRST]" if details.get("fights_first") else ""
             if weapon_name:
-                base_msg = f"{unit_label} FOUGHT{_waaagh_seg} {target_label} with [{weapon_name}]"
+                base_msg = f"{unit_label} FOUGHT{_waaagh_seg} {target_label} with [{weapon_name}]{_fights_first_seg}"
             else:
-                base_msg = f"{unit_label} FOUGHT{_waaagh_seg} {target_label}"
+                base_msg = f"{unit_label} FOUGHT{_waaagh_seg} {target_label}{_fights_first_seg}"
             
             # Apply truncation logic like shooting phase - stop after first failure.
             # JUMEAU du tir : meme helper, meme ordre garanti. SHOOT prefixe [HEAVY]/[COVER]
@@ -1406,8 +1416,11 @@ class StepLogger:
                     # allouee, un seuil `None`. Le tir avait la premiere moitie du remede depuis
                     # V11 §0hist.38, la melee ne l a jamais eue : miroir a moitie ecrit, motif
                     # d echec n°1 du depot. AP de l arme transmis via weapon_ap (L4).
+                    # L27 — nom de la capacite de relance de sauvegarde (reroll_1_save_fight).
+                    _save_ability = details.get("save_ability_display_name")
                     detail_parts.extend(_save_segments(
                         details, damage=damage, save_result=save_result,
+                        ap_ability_token=_ability_token(_save_ability),
                         alloc_model_id=details.get("target_model_id"),
                     ))
             
@@ -1434,6 +1447,16 @@ class StepLogger:
             shocked = require_key(details, "battle_shocked")
             result = "SHOCKED" if shocked else "OK"
             return f"Unit {unit_with_coords} BATTLE-SHOCK Roll:2D6={roll_val} vs Ld{ld_val}+ → {result}"
+
+        elif action_type == "waaagh_call":
+            # L25 — 08.04 : déclaration Waaagh! par le joueur Orks.
+            # `unit_id` = "P<n>" (pas une unité de jeu — décision d'armée).
+            return f"{unit_id} COMMAND [WAAAGH!]"
+
+        elif action_type == "oath_selection":
+            # L25 — 08.04 : désignation Oath of Moment par le joueur SM.
+            target_id = require_key(details, "target_id")
+            return f"{unit_id} COMMAND [OATH OF MOMENT] → Unit {target_id}"
 
         elif action_type == "wait":
             return f"{unit_label} WAIT"

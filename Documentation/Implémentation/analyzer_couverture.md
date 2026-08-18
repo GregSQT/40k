@@ -1143,21 +1143,21 @@ blessure critique n'a plus à être re-dérivée du tout (cf. §1.3).
 | L11 | **Mode de fall-back** (`ordered_retreat` / `desperate_escape`) + jets de hasard associés | `FLED [DESPERATE ESCAPE] … Hazard:<n>,<n>,…` | 09.07, 06.03, 18.04 |
 | L12 | **Jets Feel No Pain** | `FNP:<n>/<seuil>+ ×<n>` | 24.12 |
 | L13 | **Distance tireur↔cible au Select Targets** (ou marqueur `[HALF RANGE]`) | `[HALF RANGE]` | 24.25, 24.30 |
-| L14 | **Statut Fights First** de l'unité activée | `[FIGHTS FIRST]` sur la ligne `FOUGHT` | 24.13, 12.04, 11.04, 15.12 |
+| ~~L14~~ | ~~**Statut Fights First** de l'unité activée~~ — **LIVRÉ le 2026-08-18** : `[FIGHTS FIRST]` sur la ligne `FOUGHT` via `fightsFirst` dans l'action_log combat | 24.13, 12.04, 11.04, 15.12 |
 | L15 | **Nombre d'armes [HAZARDOUS] sélectionnées** | `[HAZARDOUS:<n>] Roll:<n>,<n>,…` | 24.15 |
 | L16 | **Cibles de charge multiples** (11.04 autorise plusieurs) | `CHARGED Unit M(…),Unit K(…)` | 11.04 |
 | L17 | **Cibles de pile-in / mode de consolidation** | `PILED IN [targets: M,K]`, `CONSOLIDATED [ONGOING\|ENGAGING\|OBJECTIVE:<id>]` | 12.03, 12.08 |
 | L18 | **Objectifs : drapeau `secured` + OC par figurine** | extension de `ZONES=` | 14.02, 14.03 |
-| L19 | **Attached units** : lien leader/support ↔ bodyguard | entête `Attached: <leader_id>→<bodyguard_id>` | 19.01, 19.02, 19.04, 24.22, 24.34 |
+| ~~L19~~ | ~~**Attached units** : lien leader/support ↔ bodyguard~~ — **LIVRÉ le 2026-08-18** : entête `Attached: <leader_id>→<bodyguard_id>` dans `log_episode_start` via `attached_info` | 19.01, 19.02, 19.04, 24.22, 24.34 |
 | L20 | **Terrain** : catégorie et hauteur par hexe | entête `Terrain: <cat>@(c,r,h)…` | 13.02–13.11, 06.01, 22.05 (lève aussi 10 NON-TESTABLE) |
 | L21 | **Aircraft** : keyword et placement forcé en réserves | — | 23.01–23.04 |
-| L22 | **Segment `[MODELS:]` sur la ligne `REACTIVE MOVED`** | segment existant, non émis | rend #7 per-figurine (03.04) et supprime V5 |
+| ~~L22~~ | ~~**Segment `[MODELS:]` sur la ligne `REACTIVE MOVED`**~~ — **CONFIRMÉ présent** : émis via `_build_step_log_details` (models_segment universel) ; couvert par `test_analyzer_reactive_move_single_measure.py` | rend #7 per-figurine (03.04) et supprime V5 |
 | L23 | **Type `surge` dans `_STEP_LOG_TYPE_MAP`** | — | 21.01, 21.02 |
 | L24 | **Producteur pour `skip`** (le formateur existe) | — | rend #52 atteignable |
-| L25 | **Capacités de commandement déclarées** (Waaagh! appelé, cible Oath of Moment) | `P<n> COMMAND [WAAAGH!]` / `[OATH OF MOMENT] → Unit M` | 08.04, 22.02, `waaagh`, `oath_of_moment` |
+| ~~L25~~ | ~~**Capacités de commandement déclarées** (Waaagh! appelé, cible Oath of Moment)~~ — **LIVRÉ le 2026-08-18** : `P<n> COMMAND [WAAAGH!]` / `[OATH OF MOMENT] → Unit M` via `append_action_log` dans `command_handlers.py` | 08.04, 22.02, `waaagh`, `oath_of_moment` |
 | L26 | **Modificateurs de touche hors HEAVY/COVER** (`hit_target_base` généralisé) | `Hit R(<base>+->_<eff>+) [<cause>]` | 10.06 (−1 M/V), 17.03, 22.05, 24.29, 15.09 |
-| L27 | **Relance de sauvegarde en mêlée : nom de la capacité** | `_ability_token` côté `Save` de `combat` | `reroll_1_save_fight`, `preservation_imperative` |
-| L28 | **Relance de charge : token** | `CHARGED [<CAPACITÉ>] … [REROLLED:<jet initial>]` | `reroll_charge` |
+| ~~L27~~ | ~~**Relance de sauvegarde en mêlée : nom de la capacité**~~ — **LIVRÉ le 2026-08-18** : `saveAbility` sur le shot_record via `_get_source_unit_rule_display_name_for_effect(target, "reroll_1_save_fight")` | `reroll_1_save_fight`, `preservation_imperative` |
+| ~~L28~~ | ~~**Relance de charge : token**~~ — **LIVRÉ le 2026-08-18** : `[REROLLED:<jet initial>]` sur `CHARGED` via `charge_roll_initial` dans l'action_log | `reroll_charge` |
 
 **Champs déjà présents et simplement non exploités** (aucune modification du StepLogger requise —
 c'est le gisement le moins cher) :
