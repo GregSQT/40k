@@ -114,7 +114,7 @@ class TestSchema:
 
 
 class TestReferenceScriptMatchesProduction:
-    """Le script de référence `Documentation/Memoire/Annexe_script_BDD_auth.sql` doit décrire
+    """Le script de référence `Documentation/Memoire RNCP/Annexe_script_BDD_auth.sql` doit décrire
     LE MÊME schéma que `initialize_auth_db()`.
 
     Il avait silencieusement divergé (`created_at TEXT`, pas d'`expires_at`, pas de journal) :

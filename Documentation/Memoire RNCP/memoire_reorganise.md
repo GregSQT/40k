@@ -368,4 +368,4 @@ Base auth (*config/users.db*) : *profiles*, *users*, *game_modes*, *options*, *p
 - [x] Plan de tests (inclut analyzer, check_ai_rules, hidden_action_finder)
 - [ ] Jeu d'essai final avec resultats / metriques (ex. analyzer.py + verification visuelle)
 - [x] Veille
-- [ ] Annexes finalisees (contenus dans Documentation/Memoire/*.sql, *.md)
+- [ ] Annexes finalisees (contenus dans Documentation/Memoire RNCP/*.sql, *.md)
