@@ -5607,6 +5607,7 @@ class W40KEngine(gym.Env):
         "charge_fail": "charge_fail",
         "charge_impact": "charge_impact",
         "pile_in": "pile_in",
+        "overrun_pile_in": "overrun_pile_in",
         "consolidation": "consolidation",
         "wait": "wait",
         # Le move REACTIF (24.xx, capacite `reactive_move`) est un vrai deplacement, soumis aux
@@ -7120,7 +7121,7 @@ class W40KEngine(gym.Env):
             if not _fight_v11_engaged_now(self.game_state, unit):
                 _ov_plan = _fight_overrun_pile_in_plan(self.game_state, squad_id)
                 if _ov_plan is not None:
-                    self._gym_commit_fight_move(self.game_state, squad_id, _ov_plan, "pile_in")
+                    self._gym_commit_fight_move(self.game_state, squad_id, _ov_plan, "overrun_pile_in")
                     unit = get_unit_by_id(squad_id, self.game_state)
                     if unit is None:
                         raise KeyError(f"Squad {squad_id} introuvable apres overrun pile-in")

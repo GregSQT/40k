@@ -6513,9 +6513,9 @@ def commit_move(
     Flags:
         "advance"   → units_advanced.add(squad_id)
         "fall_back" → units_fled.add(squad_id)
-        "normal"/"charge"/"pile_in"/"consolidation" → aucun flag
+        "normal"/"charge"/"pile_in"/"overrun_pile_in"/"consolidation" → aucun flag
     """
-    valid_types = ("normal", "advance", "fall_back", "charge", "pile_in", "consolidation")
+    valid_types = ("normal", "advance", "fall_back", "charge", "pile_in", "overrun_pile_in", "consolidation")
     if move_type not in valid_types:
         raise ValueError(
             f"commit_move: invalid move_type {move_type!r}, expected one of {valid_types}"

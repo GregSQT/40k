@@ -392,11 +392,14 @@ def _append_fight_move_log(
 
     Point de vérité UNIQUE partagé par le chemin manuel PvP et le driver gym
     (`_fight_v11_gym_settle` via `commit_move`) : la ligne (PvP game log + step.log/replay)
-    est ainsi strictement identique dans les deux flux. ``kind`` ∈ {"pile_in", "consolidation"} ;
-    le verbe et le type d'event en découlent. ``move_details`` : départ→arrivée par figurine.
+    est ainsi strictement identique dans les deux flux. ``kind`` ∈ {"pile_in",
+    "overrun_pile_in", "consolidation"} ; le verbe et le type d'event en découlent.
+    ``move_details`` : départ→arrivée par figurine.
     """
     if kind == "pile_in":
         verb = "PILED IN"
+    elif kind == "overrun_pile_in":
+        verb = "OVERRUN PILED IN"
     elif kind == "consolidation":
         verb = "CONSOLIDATED"
     else:
