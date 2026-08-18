@@ -8,11 +8,24 @@ describe("readEngineActionOutcome", () => {
     expect(readEngineActionOutcome({})).toEqual({ kind: "ok" });
   });
 
-  it("un refus moteur porte le message du moteur", () => {
+  it("un refus serveur (error top-level) porte le message", () => {
     expect(readEngineActionOutcome({ success: false, error: "unit already deployed" })).toEqual({
       kind: "refused",
       message: "unit already deployed",
     });
+  });
+
+  it("un refus moteur (error dans result) porte le code moteur", () => {
+    // Backend motor refusals: {success: false, result: {error: "code"}} — pas de top-level error.
+    expect(
+      readEngineActionOutcome({ success: false, result: { error: "unit_not_current_deployer" } })
+    ).toEqual({ kind: "refused", message: "unit_not_current_deployer" });
+  });
+
+  it("top-level error prime sur result.error", () => {
+    expect(
+      readEngineActionOutcome({ success: false, error: "server", result: { error: "motor" } })
+    ).toEqual({ kind: "refused", message: "server" });
   });
 
   it("un refus sans raison ne fabrique pas de diagnostic", () => {

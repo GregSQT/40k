@@ -20,10 +20,18 @@
  * D'où trois cas nommés, et jamais un booléen.
  */
 
-/** Enveloppe rendue par `executeAction` : seul `success` est lu ici. */
+/** Enveloppe rendue par `executeAction` : seul `success` est lu ici.
+ *
+ * Deux structures de refus coexistent selon l'origine :
+ * - Erreur serveur (moteur non initialisé…) : `{success: false, error: "string"}` — pas de `result`.
+ * - Refus moteur (règle enfreinte…)         : `{success: false, result: {error: "code"}}` — pas de
+ *   `error` top-level.
+ * La lecture enchaîne les deux pour afficher le premier message disponible.
+ */
 interface EngineActionResult {
   success?: boolean;
   error?: unknown;
+  result?: { error?: unknown };
 }
 
 export type EngineActionOutcome =
@@ -39,7 +47,7 @@ export function readEngineActionOutcome(
 ): EngineActionOutcome {
   if (!data) return { kind: "noop" };
   if (data.success === false) {
-    return { kind: "refused", message: String(data.error ?? "unknown") };
+    return { kind: "refused", message: String(data.error ?? data.result?.error ?? "unknown") };
   }
   return { kind: "ok" };
 }

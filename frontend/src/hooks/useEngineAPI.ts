@@ -4274,8 +4274,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       }
       const data = await response.json();
       if (data?.success === false) {
-        console.warn("[SQUAD-MOVE] query backend error", action.action, data?.error);
-        throw new Error(typeof data?.error === "string" ? data.error : "engine query failed");
+        const motorError = data?.error ?? data?.result?.error;
+        console.warn("[SQUAD-MOVE] query backend error", action.action, motorError);
+        throw new Error(typeof motorError === "string" ? motorError : "engine query failed");
       }
       return (data?.result ?? null) as Record<string, unknown> | null;
     },
