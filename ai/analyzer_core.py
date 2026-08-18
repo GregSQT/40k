@@ -1687,6 +1687,10 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         if _hz_match:
                             _hz_mw = int(_hz_match.group(1))
                             stats['hazardous_mortal_wounds'][player] += _hz_mw
+                            # Cible = acteur : le préfixe "Unit N(" d'action_desc est la seule
+                            # source fiable de l'ID de l'unité sur une ligne SUFFERS (action_unit_id
+                            # retient le dernier ID de header, pas celui de la ligne courante).
+                            _hz_unit_id = _dmg_actor_id or action_unit_id
                             # Appliquer les dégâts à l'unité ELLE-MÊME (auto-infligés).
                             # `_dmg_actor_id` est le préfixe "Unit N(" de la ligne SUFFERS :
                             # c'est la seule source fiable de l'unité touchée (action_unit_id
@@ -1712,12 +1716,12 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                             # Vérifier que l'unité porte effectivement une arme HAZARDOUS.
                             # Toutes les datasheets de l'escouade (hétérogène : 19.01) sont
                             # consultées ; une seule suffit pour que la ligne soit légitime.
-                            _squad_type = state.unit_types.get(action_unit_id)
+                            _squad_type = state.unit_types.get(_hz_unit_id)
                             _all_unit_types: "set[str]" = set()
                             if _squad_type:
                                 _all_unit_types.add(_squad_type)
-                            if action_unit_id in state.unit_model_hp:
-                                for _mid in state.unit_model_hp[action_unit_id]:
+                            if _hz_unit_id in state.unit_model_hp:
+                                for _mid in state.unit_model_hp[_hz_unit_id]:
                                     _mtype = state.model_types.get(_mid)  # get allowed
                                     if _mtype:
                                         _all_unit_types.add(_mtype)

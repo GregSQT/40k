@@ -108,6 +108,9 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 | analyzer | ✅ Borne vert-vacant calculate_hex_distance (2026-08-18) — métrique cohérente avec charge_check_eligibility | — |
 | analyzer | ✅ step_logger [DESPERATE ESCAPE] vs [HAZARDOUS] séparés (2026-08-18) — roll_hazard_for_unit tag distinct 09.07/24.15 | — |
 | analyzer | ✅ analyzer_core branche [DESPERATE ESCAPE] (2026-08-18) — _apply_damage_and_handle_death appelée, HP/kill tracking opérationnel ; constante HAZARD_CONTEXT_DESPERATE_ESCAPE partagée | — |
+| analyzer | ✅ test_analyzer_hazardous verrou [DESPERATE ESCAPE] vs [HAZARDOUS] (2026-08-18) — test rouge/vert sur branche DESPERATE ESCAPE + seuil source inspect corrigé | — |
+| analyzer | ✅ analyzer overrun PILED IN regex (2026-08-18) — handle_fight_move matche OVERRUN PILED IN, faux positifs double_pile_in éliminés | — |
+| analyzer | ✅ HAZARDOUS branche action_unit_id stale (2026-08-18) — _hz_unit_id = _dmg_actor_id or action_unit_id ; damage + lookup armurerie sur l'unité de la ligne, pas le header | — |
 | analyzer | Champs manquants `step.log` L6→L28 (17 restantes après livraison L14/L19/L22/L25/L27/L28 le 2026-08-18) | [analyzer.md#champs-step-log](analyzer.md#champs-step-log) |
 | analyzer | Corpus de règles vérifiable | [analyzer.md#corpus-regles](analyzer.md#corpus-regles) |
 | front | Tests front T2b/T3a/T7 + couches B/C | [front.md#tests](front.md#tests) |
