@@ -352,6 +352,7 @@ def test_long_profile_is_its_reference_recalibrated(ref_name: str, long_name: st
         "total_episodes",
         "model_params",   # seuls les decay_fraction y changent, vérifiés juste après
         "callback_params",  # seuls bot_eval_freq et bot_eval_final, idem
+        "eval_episodes",  # holdout uniquement (--test-only) ; x1_long=100 vs x1=50 pour signal plus fort
     }
     assert _comparable(long_, length_dependent) == _comparable(ref, length_dependent)
 
@@ -440,6 +441,9 @@ def test_long_profile_is_its_reference_recalibrated(ref_name: str, long_name: st
     overridden = {
         "bot_eval_freq", "bot_eval_final", "bot_eval_task_timeout_seconds",
         "bot_eval_intermediate", "save_best_robust", "robust_window",
+        # model_gating_enabled et min_benchmark_floor dépendent de save_best_robust :
+        # x1 (save_best_robust=false) n'active pas le gate, x1_long (true) si.
+        "model_gating_enabled", "model_gating_min_benchmark_floor",
     }
     assert _comparable(long_cb, overridden) == _comparable(ref_cb, overridden)
     assert _resolved_cb(long_cb, "save_best_robust") is True, (
