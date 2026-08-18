@@ -99,10 +99,10 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 | analyzer | Corpus de règles vérifiable | [analyzer.md#corpus-regles](analyzer.md#corpus-regles) |
 | front | Tests front T2b/T3a/T7 + couches B/C | [front.md#tests](front.md#tests) |
 | front | Validations navigateur en attente | [front.md#validations-nav](front.md#validations-nav) |
-| security | Étapes 4, 5, 7, 8 | [security.md](security.md) |
+| security | ✅ Étapes 4, 5, 7 livrées (2026-08-18) — F1–F15 toutes résolues ; reste 3 actions de déploiement, dont **mot de passe admin trivial à changer** | [security.md](security.md) |
 | moteur | Pile-in/Overrun 12.06 par-figurine (prérequis P3-5) | [moteur.md#pile-in](moteur.md#pile-in) |
 | infra | Perf `generate_compact_formation` | [infra.md#perf-formation](infra.md#perf-formation) |
-| infra | gzip/Brotli (avec Security étape 5) | [infra.md#gzip](infra.md#gzip) |
+| infra | gzip/Brotli — débloqué : `frontend/nginx.conf` est versionné depuis Security étape 5 | [infra.md#gzip](infra.md#gzip) |
 
 ### Bloqués par une décision utilisateur
 

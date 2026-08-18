@@ -16,26 +16,10 @@ FROM nginx:1.27-alpine
 
 COPY --from=build /workspace/frontend/dist /usr/share/nginx/html
 
-RUN printf '%s\n' \
-'server {' \
-'    listen 80;' \
-'    server_name _;' \
-'    root /usr/share/nginx/html;' \
-'    index index.html;' \
-'' \
-'    location / {' \
-'        try_files $uri $uri/ /index.html;' \
-'    }' \
-'' \
-'    location /api/ {' \
-'        proxy_pass http://backend:5001/api/;' \
-'        proxy_http_version 1.1;' \
-'        proxy_set_header Host $host;' \
-'        proxy_set_header X-Real-IP $remote_addr;' \
-'        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;' \
-'        proxy_set_header X-Forwarded-Proto $scheme;' \
-'    }' \
-'}' > /etc/nginx/conf.d/default.conf
+# Configuration VERSIONNÉE (`frontend/nginx.conf`) et non plus écrite en `printf` ici : elle
+# porte désormais le TLS et les en-têtes de sécurité, qui ne se relisent pas en lignes échappées.
+COPY frontend/nginx.conf /etc/nginx/conf.d/default.conf
 
-EXPOSE 80
+# 443 en plus de 80 : le port 80 ne sert plus que la redirection vers HTTPS (F9).
+EXPOSE 80 443
 CMD ["nginx", "-g", "daemon off;"]

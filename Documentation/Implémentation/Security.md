@@ -1,6 +1,15 @@
 # Sécurité — Analyse et plan d'implémentation
 
-> Date : 2026-07-15 — mise à jour 2026-08-10 (étapes 1, 2 et 3 faites : F1, F2, F6, F7, F8, F11, F12, F14 résolus ; étape 3 durcie après revue — IP réelle du client, comptage atomique, journal `auth_events` append-only qui pose le socle de l'étape 7 ; étape 5 réécrite à partir de la stack Docker existante, nouvelle faille F15 ; **étape 6 faite** : `scripts/security_check.sh`, verrou de dépendances de production, F5 résolu). **Reste à faire : étapes 4, 5, 8 et la fin de la 7** (F3, F4 partiel, F9, F10, F13, F15).
+> Date : 2026-07-15 — mise à jour **2026-08-18** : étapes **4, 5 et 7 livrées**, étape 8 partielle.
+> **Les quinze failles F1–F15 sont résolues.** Ce qui reste n'est plus du code mais trois actions
+> de déploiement, listées au bas de ce fichier (§6) : changer le mot de passe du compte `greg`
+> (trouvé trivial par l'audit de l'étape 8), fournir les certificats TLS et exécuter
+> `docker compose up`, valider en navigateur le passage au cookie de session.
+>
+> Historique : étapes 1, 2, 3 faites le 2026-08-02/10 (F1, F2, F6, F7, F8, F11, F12, F14) ;
+> étape 3 durcie après revue (IP réelle du client, comptage atomique, journal `auth_events`
+> append-only) ; étape 6 faite le 2026-08-11 (`scripts/security_check.sh`, verrou de dépendances
+> de production, montée torch 2.13/sb3 2.9, F5).
 > Périmètre : backend Flask (`services/api_server.py`), frontend React/Vite, base auth `config/users.db`.
 > Contexte : jeu hobby, aujourd'hui local (WSL2), **bientôt exposé sur Internet pour des tests publics**.
 
@@ -17,7 +26,7 @@ Menaces retenues :
 ### Sur le vol de code spécifiquement
 
 - **Frontend** : le code JS/WASM est **par nature envoyé à chaque visiteur** — c'est impossible à empêcher. Le build Vite est minifié et ne contient pas de source maps (vérifié : aucun `.map` dans `frontend/dist/`). L'obfuscation supplémentaire est inutile (contournable en heures). La vraie protection du frontend est **juridique** (licence, pas de repo public), pas technique.
-- **Backend + modèles IA** : c'est là qu'est la valeur (moteur de règles, agents entraînés). Ce code ne quitte jamais le serveur **sauf si** un attaquant obtient une exécution de code ou une lecture de fichiers arbitraire. Toute la stratégie consiste donc à fermer ces vecteurs — F1, F6, F7 et F11 sont résolus (étapes 1 et 2) : plus d'exécution de code ni d'écriture disque atteignables depuis le réseau. L'étape 3 a fermé la session éternelle et le brute-force. Ce qui reste à traiter (étapes 4 et 5) relève de l'exposition et du transport, pas de la prise de contrôle du serveur.
+- **Backend + modèles IA** : c'est là qu'est la valeur (moteur de règles, agents entraînés). Ce code ne quitte jamais le serveur **sauf si** un attaquant obtient une exécution de code ou une lecture de fichiers arbitraire. Toute la stratégie consiste donc à fermer ces vecteurs — F1, F6, F7 et F11 sont résolus (étapes 1 et 2) : plus d'exécution de code ni d'écriture disque atteignables depuis le réseau. L'étape 3 a fermé la session éternelle et le brute-force, les étapes 4 et 5 l'exposition et le transport (TLS, WSGI de production, backend non publié, traceback fermé). Aucun vecteur de prise de contrôle du serveur ne reste ouvert dans le code.
 
 ---
 
@@ -46,12 +55,12 @@ Menaces retenues :
 |---|---|---|---|---|
 | F7 | ✅ Résolu | Répertoire contrôlé par le client + `pickle.load` | Étape 2 : répertoire fixé par le serveur (`W40K_PERSIST_DIR`), `directory` de requête rejeté, pickle des snapshots supprimé, et dépickle des saves restreint à une liste blanche de classes (`_safe_loads`). | `api_server.py` (`_resolve_persist_dir`), `game_saves.py` (`_ALLOWED_CLASSES`) |
 | F11 | ✅ Résolu | Endpoint `pick-directory` exécutait `subprocess`/`powershell.exe` | Route supprimée (étape 2) ; plus aucun `subprocess` atteignable. Sélecteur natif retiré du front. | — |
-| F13 | Moyenne | Token de session en `localStorage` | Le token est stocké dans `localStorage` → volable par tout XSS (token = accès complet). Cible : cookie `HttpOnly`+`Secure`+`SameSite`. À défaut, risque à acter explicitement. | `frontend/src/auth/authStorage.ts` |
-| F9 | **Haute** | Flask dev server + pas de TLS | Le serveur de dev Werkzeug n'est pas fait pour Internet (perf, robustesse). Sans HTTPS, tokens et mots de passe passent en clair. Indépendant de F1 (déjà résolu) : même avec `debug=False`, Werkzeug reste un serveur de dev. Le `Dockerfile` lance ce même dev server (`CMD python services/api_server.py`) — la conteneurisation n'a rien changé à F9 (cf. étape 5). | `api_server.py` (bloc `__main__`), `Dockerfile` |
-| F15 | **Haute** | Backend conteneurisé injoignable + tournant en root | Constaté le 2026-08-10 : `app.run(host='127.0.0.1')` dans un conteneur n'écoute que sur le loopback **du conteneur** → ni le mapping `5001:5001` ni le `proxy_pass http://backend:5001/` de nginx ne l'atteignent. Et `docker-compose.yml` force `user: "0:0"`, ce qui annule le `USER appuser` du `Dockerfile` : le process tourne en root. | `Dockerfile`, `docker-compose.yml`, `frontend/Dockerfile` |
-| F3 | Moyenne | CORS ouvert à toutes les origines | `CORS(app, ...)` sans `origins` = `*`. | `api_server.py` (appel `CORS(` au niveau module) |
-| F10 | Moyenne | Traceback complet renvoyé au client | Le handler global d'exceptions renvoie type + message + traceback dans la réponse JSON → révèle chemins, structure du code, versions. Utile en dev, à désactiver en prod (log serveur uniquement). | `api_server.py` (`handle_uncaught_exception`) |
-| F4 | Faible→Moyenne | Journal d'audit partiel | `auth_events` trace désormais tentatives, succès, échecs, refus et déconnexions avec l'IP réelle. Manquent les événements d'administration (aucun chemin de code aujourd'hui) et toute exploitation du journal. | `api_server.py` (`_record_auth_event`) |
+| F13 | ✅ Résolu | Token de session en `localStorage` | Étape 4 : le token est porté par un cookie `HttpOnly` + `SameSite=Strict` (+ `Secure` en HTTPS), hors de portée de JavaScript ; `localStorage` ne garde plus que l'identité et les permissions, et l'ancienne clé est effacée à l'import. En-tête anti-CSRF exigé sur toute authentification par cookie. | `api_server.py` (`_attach_session_cookie`, `_extract_session_token`), `frontend/src/auth/authStorage.ts`, `frontend/src/services/apiFetch.ts` |
+| F9 | ✅ Résolu | Flask dev server + pas de TLS | Étape 5 : `services/wsgi.py` (waitress) remplace le dev server dans le `CMD` ; nginx sert en `listen 443 ssl` (TLS 1.2/1.3) et redirige le port 80. Le `app.run(host='127.0.0.1')` du bloc `__main__` reste, volontairement, le chemin de développement. | `services/wsgi.py`, `Dockerfile`, `frontend/nginx.conf` |
+| F15 | ✅ Résolu | Backend conteneurisé injoignable + tournant en root | Étape 5 : écoute sur `0.0.0.0` **dans le WSGI** (pas dans `app.run`), `user: "0:0"` retiré du compose (le `USER appuser` s'applique), `ports: 5001:5001` retiré (seul nginx est publié). | `services/wsgi.py`, `docker-compose.yml` |
+| F3 | ✅ Résolu | CORS ouvert à toutes les origines | Étape 4 : `origins=CORS_ORIGINS`, liste explicite validée au démarrage (vide, `*` et origine sans schéma refusés). | `api_server.py` (`_resolve_cors_origins`, appel `CORS(`) |
+| F10 | ✅ Résolu | Traceback complet renvoyé au client | Étape 4 : traceback dans le log serveur uniquement, sauf `W40K_EXPOSE_TRACEBACK` (tri-état, non définie = fermé, rouverte par le lancement de développement). Réponse générique + `error_id` corrélable. | `api_server.py` (`handle_uncaught_exception`, `_resolve_expose_traceback`) |
+| F4 | ✅ Résolu | Journal d'audit partiel | Étapes 3 et 7 : `auth_events` trace tentatives, succès, échecs, refus et déconnexions avec l'IP réelle, et `scripts/auth_journal.py` l'exploite (agrégats, détection de balayage de comptes, code de sortie non nul). Les événements d'administration restent sans chemin de code : les écrire serait du code mort. | `api_server.py` (`_record_auth_event`), `scripts/auth_journal.py` |
 | F5 | ✅ Résolu | Pas d'analyse automatisée | **Étape 6.** `scripts/security_check.sh` enchaîne bandit (dépôt entier moins une liste noire justifiée), `pip-audit --strict` sur le verrou de production et `npm audit --audit-level=high` ; sortie non nulle sur tout finding haut/critique, sur tout fichier non analysé et sur toute panne d'outil. Exceptions acceptées uniquement avec justification écrite. | `scripts/security_check.sh`, `scripts/security_audit_ignore.txt` |
 
 ---
@@ -78,7 +87,7 @@ Menaces retenues :
 
 ## 4. Plan d'implémentation
 
-Ordre = priorité. **Les étapes 1 à 5 sont des prérequis absolus avant toute exposition Internet.**
+Ordre = priorité. **Les étapes 1 à 5 étaient des prérequis absolus avant toute exposition Internet : elles sont livrées.** Ce qui suit garde le détail de chaque livraison — le motif d'une décision est aussi utile après coup qu'avant.
 
 > F1 (debugger Werkzeug exposé) est **résolu** (bloc `__main__` de `api_server.py` : `debug=False`, `host='127.0.0.1'`). L'étape 1 initiale (F1+F7+F11) a donc été scindée : l'auth globale (F6, ex-étape 2) est passée en premier — elle a supprimé l'exposition **anonyme** de F7/F11. L'étape 2 a ensuite fermé l'écriture arbitraire, supprimé `pick-directory` et restreint le dépickle des saves : F7 et F11 sont clos.
 
@@ -168,40 +177,59 @@ La **tentative** est distincte de son **issue** : `login_attempt` porte le compt
 
 **Validation :** token expiré forcé en SQL → 401 ; 6 logins ratés en rafale → 429 ; logout → token refusé immédiatement. Runtime PvP à valider (déconnexion depuis le menu).
 
-### Étape 4 — Réduction de la surface d'information (F3, F10)
-**Fichier :** `services/api_server.py`
-- CORS : `origins` limité à l'URL du frontend, surchargeable par `W40K_CORS_ORIGINS` (liste séparée par virgules). Variable définie mais vide → erreur au démarrage.
-- Handler d'exceptions : traceback dans la réponse JSON **uniquement si un flag de debug est actif** ; en prod, log serveur complet + réponse générique avec un identifiant d'erreur corrélable au log.
-  > ⚠️ **Ne pas réutiliser `W40K_DEBUG` tel quel.** Cette variable existe déjà et pilote le **debug moteur** (`api_server.py` : `initialize_engine`, `execute_ai_turn` ; `engine/phase_handlers/fight_handlers.py` : `_fight_v11_log`), pas le format des réponses d'erreur. `docker-compose.yml` la met déjà à `"false"` : croire que la prod est donc protégée du traceback serait **faux** — le handler (`api_server.py`, `handle_uncaught_exception`) renvoie `"traceback"` inconditionnellement. Soit une variable distincte (`W40K_EXPOSE_TRACEBACK`), soit un élargissement assumé et documenté de `W40K_DEBUG` aux deux usages.
-- Token de session (F13) : cible = cookie `HttpOnly`+`Secure`+`SameSite=Strict` au lieu de `localStorage` (immunise contre le vol par XSS). Chantier front + back non trivial ; si reporté, acter explicitement le risque en §5.
+### Étape 4 — Réduction de la surface d'information (F3, F10, F13) ✅ faite le 2026-08-18
 
-**Validation :** fetch cross-origin bloqué ; exception en prod → pas de traceback dans la réponse, traceback présent dans le log serveur.
+**CORS (F3).** `origins` est désormais une liste explicite (`CORS_ORIGINS`, `_resolve_cors_origins`), surchargeable par `W40K_CORS_ORIGINS`. Trois refus **au démarrage**, pas à l'usage : variable définie mais vide, entrée `*`, entrée sans schéma (`exemple.tld`). Le joker est refusé nommément parce que Flask-CORS accepterait `supports_credentials=True` avec lui dans certaines configurations, et que le cookie de session part désormais avec les identifiants : `*` rendrait toute page du web capable de lire l'API au nom de l'utilisateur connecté, soit F3 réintroduite par configuration. Défaut hors variable : les deux origines du serveur Vite (`http://localhost:5175`, `http://127.0.0.1:5175`), rien d'autre.
 
-### Étape 5 — Infrastructure d'exposition (F9, F15)
+**Traceback (F10).** `handle_uncaught_exception` écrit toujours le traceback complet dans le **log serveur**, et ne le met dans la réponse que si `EXPOSE_TRACEBACK` l'autorise. La réponse fermée ne porte ni `str(error)` ni `error_type` — un message d'exception porte régulièrement un chemin, une requête SQL ou un nom de classe interne — mais un `error_id` (12 hex) présent aussi dans le log : sans lui, fermer le traceback rendrait tout incident non diagnosticable à partir d'un rapport d'utilisateur.
 
-> ⚠️ **Ce n'est pas un chantier vierge.** Une stack Docker existe déjà dans le dépôt et n'était pas
-> décrite ici (constaté le 2026-08-10). L'étape 5 est donc un **durcissement de l'existant**, pas une
-> création. Ne pas repartir d'une feuille blanche : ce qui existe se corrige.
+`W40K_DEBUG` n'a **pas** été réutilisée, conformément à l'avertissement ci-dessus : variable distincte `W40K_EXPOSE_TRACEBACK`. Elle est **tri-état** (`_resolve_expose_traceback` rend `None`/`True`/`False`) et non booléenne : non définie vaut FERMÉ, et c'est le bloc `__main__` — le lancement de développement — qui la rouvre. Un booléen simple aurait obligé à choisir entre « le développement perd son diagnostic » et « la production expose par défaut ». Le tri-état permet en outre à un `W40K_EXPOSE_TRACEBACK=false` posé exprès de ne pas être écrasé par le lancement de dev. Une valeur illisible est une erreur au démarrage : interprétée comme vraie, elle serait la fuite.
 
-**État réel de la stack (vérifié dans les fichiers, 2026-08-10)**
+**Session en cookie `HttpOnly` (F13) — faite, pas reportée.** Le token ne va plus en `localStorage`.
+- Backend : `SESSION_COOKIE_NAME` posé par `login_user` (`_attach_session_cookie`), effacé par `logout_user` (`_clear_session_cookie`), attributs `HttpOnly` + `SameSite=Strict` + `Path=/`.
+- `Secure` est **conditionnel** (`_request_is_https`) : le poser en HTTP ferait purement ignorer le cookie par le navigateur et casserait le login du poste de développement. En production, TLS se termine sur nginx et le tronçon interne est en clair — `request.is_secure` rendrait donc toujours faux ; c'est `X-Forwarded-Proto` qui tranche, lu **uniquement** depuis un proxy listé dans `W40K_TRUSTED_PROXIES`, comme `X-Forwarded-For`.
+- **CSRF.** Un cookie part avec toute requête vers l'origine, y compris déclenchée par un autre site — là où `Authorization` doit être posé, donc suppose de détenir le token. Deux verrous : `SameSite=Strict`, et l'en-tête `CSRF_HEADER_NAME` (`X-W40K-Client`) exigé sur toute authentification **par cookie**. Un `<form>` cross-site ne peut poser aucun en-tête personnalisé, et un `fetch` cross-site qui en pose déclenche un préflight que `CORS_ORIGINS` refuse. Seule la présence est contrôlée : ce n'est pas un secret, c'est la preuve que la requête vient du JS de notre origine. La valeur est déclarée **deux fois** (Python et TypeScript, pas de constante partageable) ; un test lit la source du front pour interdire la dérive, dont la panne serait un 401 sur tout appel.
+- **Le cookie est prioritaire sur `Bearer`**, même valide. Pour le navigateur, un cookie périmé signifie que l'utilisateur est réellement déconnecté ; le repêcher par l'autre canal serait le repli que T1 interdit.
+- Le chemin `Bearer` **reste** (`_extract_session_token` → `_extract_bearer_token`) : ce n'est pas un repli mais un second chemin métier, celui des clients sans bocal à cookies (`scripts/pvp_smoke_test.py`, tests d'API). Le corps de la réponse de login continue donc de porter `access_token` — le front, lui, ne le stocke plus, et le corps d'une réponse ne se relit pas après coup.
+- **Le cookie glisse avec la session** (`_slide_session_cookie`, `after_request`). L'échéance serveur est glissante (F2) ; sans cela le cookie garderait celle du login et le navigateur déconnecterait un utilisateur actif au septième jour. Reposé seulement quand un renouvellement a réellement eu lieu (≈ 1×/h) et seulement pour un appelant authentifié par cookie. `logout_user` annule ce glissement avant de répondre : la porte a pu le programmer avant que la vue ne décide de révoquer.
+- Frontend : `authStorage.ts` ne garde que l'identité et les permissions (contexte de **routage**, revalidé côté serveur à chaque requête). La clé de stockage passe à `w40k_auth_session_v2` et **l'ancienne est effacée à l'import** : cesser de lire le token ne suffisait pas, il fallait le retirer des postes déjà connectés, où il reste valide sept jours.
 
-| Fichier | Ce qu'il fait déjà | Écart à traiter |
+**Limite assumée, écrite ici plutôt que découverte plus tard :** `HttpOnly` empêche l'**exfiltration** du token par XSS, pas l'usage de la session par un script injecté dans la page (le navigateur joint le cookie tout seul). C'est le bénéfice attendu du mécanisme et celui que visait F13 — « volable par tout XSS » — pas une immunité à l'XSS.
+
+**Validation :** `tests/unit/services/test_api_information_surface.py` (35 tests), preuve ROUGE sur 13 verrous (joker CORS, origine étrangère, traceback fermé par défaut, valeur illisible refusée, `HttpOnly`, `Secure` derrière proxy, proxy non déclaré, en-tête anti-CSRF, priorité du cookie, effacement au logout, glissement, absence de cookie pour un client `Bearer`, synchronisation du nom d'en-tête front/back). Runtime navigateur à valider (login, jeu, déconnexion).
+
+### Étape 5 — Infrastructure d'exposition (F9, F15) ✅ faite le 2026-08-18
+
+> ⚠️ **Ce n'était pas un chantier vierge.** Une stack Docker existait déjà dans le dépôt et n'était
+> pas décrite ici (constaté le 2026-08-10). L'étape 5 a donc **durci l'existant** au lieu de repartir
+> d'une feuille blanche. Le tableau ci-dessous est l'état de DÉPART, gardé parce qu'il explique
+> pourquoi chaque correctif ressemble à ce qu'il est.
+
+**État de départ (vérifié dans les fichiers le 2026-08-10) — les trois écarts sont fermés**
+
+| Fichier | Ce qu'il faisait déjà | Écart, et ce qui l'a fermé |
 |---|---|---|
-| `Dockerfile` | Image python:3.11-slim, `requirements.runtime.txt`, `useradd appuser` + `USER appuser`, `EXPOSE 5001`, healthcheck sur `/api/health` | `CMD ["python", "services/api_server.py"]` = **dev server Werkzeug** (F9 intact) |
-| `docker-compose.yml` | backend + frontend, `restart: unless-stopped`, `users.db`/`ai/models`/`runtime` montés en volumes, `W40K_DEBUG=false` | `user: "0:0"` **annule** le `USER appuser` → root (F15) ; `ports: 5001:5001` publie le backend en clair sur l'hôte |
-| `frontend/Dockerfile` | Build Vite (`VITE_API_URL=/api`) puis nginx:1.27-alpine servant `dist/`, `proxy_pass` vers `backend:5001`, `X-Real-IP` et `X-Forwarded-For` posés | `listen 80` **seul** : aucun TLS, aucune redirection HTTP→HTTPS |
+| `Dockerfile` | Image python:3.11-slim, `requirements.runtime.txt`, `useradd appuser` + `USER appuser`, `EXPOSE 5001`, healthcheck sur `/api/health` | `CMD ["python", "services/api_server.py"]` = **dev server Werkzeug** (F9) → `CMD ["python", "-m", "services.wsgi"]` |
+| `docker-compose.yml` | backend + frontend, `restart: unless-stopped`, `users.db`/`ai/models`/`runtime` montés en volumes, `W40K_DEBUG=false` | `user: "0:0"` **annulait** le `USER appuser` → root (F15) ; `ports: 5001:5001` publiait le backend en clair → les deux **retirés** |
+| `frontend/Dockerfile` | Build Vite (`VITE_API_URL=/api`) puis nginx:1.27-alpine servant `dist/`, `proxy_pass` vers `backend:5001`, `X-Real-IP` et `X-Forwarded-For` posés | `listen 80` **seul**, aucun TLS → config sortie en `frontend/nginx.conf`, `listen 443 ssl` + redirection 80→443 |
 
-**À faire**
-- Remplacer le `CMD` par un serveur WSGI de production : `waitress` (simple, pur Python) ou `gunicorn`, ajouté à `requirements.runtime.in` **puis verrou régénéré** (depuis l'étape 6, `requirements.runtime.txt` est généré — ne pas y écrire à la main). Le `app.run(...)` de `services/api_server.py` (bloc `__main__`, `serve_frontend` monté juste avant) reste le chemin de **développement local** (`host='127.0.0.1'` y est correct et doit le rester : c'est lui qui garantit qu'un lancement direct n'expose rien).
-- Faire écouter le process de production sur `0.0.0.0` **à l'intérieur du conteneur uniquement** (via le WSGI, pas en modifiant `app.run`) — sans quoi ni nginx ni le mapping de port ne l'atteignent (F15).
-- Retirer `user: "0:0"` du compose : le `USER appuser` du `Dockerfile` doit s'appliquer. Vérifier que `W40K_PERSIST_DIR` pointe alors sur un volume inscriptible par `appuser` (montage `runtime`), et que le reste de `/app` ne l'est pas.
-- Retirer le `ports: 5001:5001` du backend : seul le frontend (nginx) doit être publié. Le backend reste joignable par le réseau interne compose.
-- TLS sur nginx : certificat Let's Encrypt (companion certbot, ou bascule sur Caddy qui l'automatise), `listen 443 ssl`, redirection 80→443. La config nginx est aujourd'hui écrite en `printf` dans le `Dockerfile` — la sortir en fichier versionné avant de la complexifier.
-- Ne jamais exposer : `config/users.db`, `ai/models/`, le repo git. NB : `COPY . /app` embarque **tout le dépôt** dans l'image, `.git` compris s'il n'est pas exclu — vérifier/écrire un `.dockerignore`.
-- **Renseigner `W40K_TRUSTED_PROXIES`** avec l'adresse du conteneur nginx. Sans elle, `_client_ip()` retombe sur `remote_addr`, qui vaut l'IP du proxy pour tous les utilisateurs : le rate limiting du login perd sa composante IP et cinq essais ratés suffisent à verrouiller n'importe quel compte. L'en-tête `X-Forwarded-For` est déjà posé par le nginx du dépôt, c'est la déclaration côté backend qui manque.
-- Le WSGI de production doit rester joignable en **TCP**. `_client_ip()` lève une erreur explicite si `remote_addr` est vide, ce qui est le cas sur un socket UNIX : un déploiement par socket casserait le login au premier appel.
+**Fait le 2026-08-18**
 
-**Validation :** `docker compose up` → frontend en HTTPS fonctionnel, HTTP redirigé, port 5001 **non** accessible depuis l'hôte, `docker exec ... whoami` → `appuser`, healthcheck vert.
+- **`services/wsgi.py`**, lancé par le `CMD` du `Dockerfile` (`python -m services.wsgi`). **waitress**, et le choix n'est pas de goût : le moteur de jeu est une **globale de process** (`api_server.engine`, `_ENGINE_STATE_LOCK` = `RLock` de threads). Gunicorn en mode par défaut lance N *processus* — chaque worker aurait sa propre partie, et deux requêtes consécutives du même joueur tomberaient sur deux états différents. Le jeu serait cassé, pas ralenti. waitress sert en threads dans un processus unique : exactement la sémantique du serveur de développement, donc aucun invariant du moteur ne bouge. `waitress==3.0.2` ajouté à `requirements.runtime.in`, **verrou régénéré** (55 → 56 paquets ; seuls autres mouvements : `charset-normalizer` et `filelock` d'un correctif). `ident=None` : waitress annonce sinon sa version dans l'en-tête `Server`.
+- Écoute sur `0.0.0.0` **dans `services/wsgi.py` uniquement** (F15). Le `app.run(host='127.0.0.1')` du bloc `__main__` est **inchangé** et doit le rester : c'est lui qui garantit qu'un lancement direct sur le poste de développement n'expose rien.
+- `user: "0:0"` **retiré** du compose : le `USER appuser` du `Dockerfile` s'applique de nouveau. `W40K_PERSIST_DIR=/app/runtime` est posé explicitement — le défaut (`logs/` dans l'arbre des sources) n'est plus inscriptible sans root. ⚠️ **Au déploiement** : les montages hôte `SYNO_RUNTIME_PATH` et `config/users.db` doivent appartenir à l'UID d'`appuser`, sinon le backend démarre et échoue à la première écriture (session, journal d'auth).
+- `ports: 5001:5001` **retiré** : il publiait le backend **en clair** à côté d'un frontend TLS — mots de passe et cookie de session en clair sur l'hôte, et la porte d'authentification joignable hors du proxy. Le backend reste joignable par le réseau interne. Ne pas le remettre pour déboguer : `docker compose exec backend` suffit.
+- **`frontend/nginx.conf`**, fichier versionné, remplace le `printf` du `Dockerfile`. `listen 443 ssl` + `http2`, TLS 1.2/1.3 uniquement, redirection 301 depuis le port 80, `server_tokens off`, HSTS (`max-age` volontairement court — 1 jour — tant que le déploiement est en phase de test : une erreur de certificat se corrige alors en un jour et non en six mois), `X-Frame-Options: DENY`, `nosniff`, `Referrer-Policy: same-origin`. `proxy_read_timeout 180s` : un tour d'IA dépasse le défaut de 60 s.
+- **Certificats montés, jamais cuits dans l'image** (`SYNO_TLS_PATH` → `/etc/nginx/certs:ro`) : une clé privée dans une couche d'image est lisible par quiconque obtient l'image. nginx refuse de démarrer s'ils manquent — voulu, un démarrage en clair « pour dépanner » est exactement ce que cette étape ferme. Let's Encrypt (certbot/Caddy) reste à câbler au déploiement réel ; pour un essai local, une paire auto-signée suffit :
+  `openssl req -x509 -newkey rsa:2048 -nodes -days 365 -keyout privkey.pem -out fullchain.pem -subj "/CN=localhost"`.
+- **`W40K_TRUSTED_PROXIES` renseignée** (`172.28.0.10`). Comme `_resolve_trusted_proxies` n'accepte que des adresses IP (un nom d'hôte ne correspondrait jamais à `remote_addr`) et qu'un réseau compose par défaut attribue les adresses dynamiquement, le compose déclare un **réseau à sous-réseau fixe** (`172.28.0.0/24`) et une `ipv4_address` fixe pour nginx. Une adresse dynamique ferait ignorer `X-Forwarded-For` **en silence** au premier redémarrage qui change l'attribution — et le verrouillage de compte reviendrait sans alerte. Élargir la confiance à tout le sous-réseau a été écarté : une seule adresse est de confiance, autant le dire.
+- `W40K_CORS_ORIGINS` posée depuis `W40K_PUBLIC_ORIGIN` (obligatoire, `:?`).
+- `.dockerignore` **déjà conforme** (vérifié) : `.git`, `config/users.db` (3 motifs), `.claude/`, `tests/`, `ai/models/`. Rien à ajouter.
+- Le WSGI reste joignable en **TCP** (waitress sur `host`/`port`, pas de socket UNIX) : `_client_ip()` lève si `remote_addr` est vide, ce qui casserait le login au premier appel.
+
+**Finding bandit assumé, justification écrite (pas de `# nosec`) :** `B104 hardcoded_bind_all_interfaces` sur `services/wsgi.py` — `host="0.0.0.0"`. C'est précisément le correctif de F15 : écouter sur le loopback du conteneur rendait le backend injoignable par nginx. L'exposition réelle est fermée en amont (aucun port publié pour le backend), pas par l'adresse d'écoute. MEDIUM, donc sous le seuil bloquant ; le finding réapparaît à chaque exécution et n'est pas masqué.
+
+**Validation — ce qui reste à exécuter sur une vraie stack :** `docker compose up` → frontend en HTTPS fonctionnel, HTTP redirigé, port 5001 **non** accessible depuis l'hôte, `docker exec ... whoami` → `appuser`, healthcheck vert. Non exécuté ici : cette session n'a pas de démon Docker ni de certificats.
 
 ### Étape 6 — Analyse statique automatisée (F5) ✅ Fait (2026-08-10)
 **Fichiers :** `scripts/security_check.sh` (exécutable), `scripts/security_audit_ignore.txt`, `requirements-dev.txt`
@@ -268,24 +296,42 @@ Deux avertissements nouveaux, tous deux bénins et propres à torch 2.13 : un *g
 
 **Non vérifié :** l'effet propre de `pip-audit --strict`. Le drapeau est celui que documente pip-audit pour empêcher qu'une dépendance non collectée soit ignorée en silence, mais je n'ai pas su construire un cas qui distingue les deux modes — un paquet inexistant sort en 1 avec **et** sans `--strict`.
 
-### Étape 7 — Journal d'audit (F4) 🟨 socle posé le 2026-08-10
+### Étape 7 — Journal d'audit (F4) ✅ faite le 2026-08-18 (socle posé le 2026-08-10)
 
 **Déjà fait (livré avec le durcissement de l'étape 3, pas en anticipation gratuite : le rate limiting avait besoin des mêmes lignes)**
 - Table `auth_events (id, occurred_at, event, login, ip, details)` dans `users.db`, **append-only**, rétention 30 jours.
 - Événements écrits : `login_attempt`, `login_success`, `login_failure`, `rate_limited`, `logout`.
 - IP réelle derrière le reverse proxy : `_client_ip()` lit `X-Forwarded-For` uniquement depuis un proxy listé dans `W40K_TRUSTED_PROXIES`, chaîne parcourue de droite à gauche.
 
+**Fait le 2026-08-18 — exploitation : `scripts/auth_journal.py`**
+
+Quatre sous-commandes, en **lecture seule** (`sqlite3` ouvert en `mode=ro`, une écriture échoue au niveau du moteur) :
+- `events` — journal brut, filtres `--event/--login/--ip/--since`, requête statique à filtres optionnels ;
+- `suspects` — ce qu'il faut regarder en premier : refus de rate limiting, IP à échecs répétés, **plusieurs logins distincts en échec depuis une même IP** (un utilisateur qui se trompe se trompe sur son propre login, pas sur ceux des autres), et connexions réussies par (login, IP). **Code de sortie 1** sur refus de rate limiting ou balayage de comptes, ce qui rend la commande utilisable en surveillance périodique et pas seulement à la main ;
+- `sessions` — qui est connecté, depuis quand, jusqu'à quand. Le token n'est **jamais** affiché : le poser dans un terminal, un log ou un ticket le rendrait réutilisable par qui le lit ;
+- `accounts` — voir étape 8.
+
+`--since` refuse ce qu'il ne comprend pas au lieu de retomber sur une fenêtre par défaut : un `--since 7` lu comme sept secondes rendrait un rapport vide et laisserait croire qu'il ne s'est rien passé — le pire résultat possible pour un outil d'audit.
+
+**`shared/auth_credentials.py` — défaut trouvé en écrivant le script.** `services/api_server.py` appelle `initialize_auth_db()` **au niveau module** : l'importer suffit à écrire dans `config/users.db`, et à la **créer** si elle manque. Un auditeur passant par lui aurait fabriqué la base qu'il vient auditer, rendant « aucun compte » indiscernable de « fichier absent » — et en écrivant dans un fichier protégé (CLAUDE.md). Le chemin de la base, le hachage PBKDF2 et les noms d'événements sont donc extraits dans un module **sans effet de bord à l'import**, dont `api_server` les réexporte (les tests continuent de monkeypatcher `api_server.AUTH_DB_PATH` et `api_server._verify_password`). Recopier chemin et algorithme dans le script a été écarté : un doublon reste vert quand la production change, donc il rassure exactement au moment où il devient faux.
+
 **Reste à faire**
-- Événements `user_created`, `profile_changed`, `password_changed` : ils n'ont aujourd'hui **aucun chemin de code** — les comptes sont créés à la main en SQL (décision F12). Ils n'apparaîtront que le jour où une route d'administration existera ; les écrire avant serait du code mort.
-- Exploitation : au minimum une requête ou un petit script de lecture du journal. Une table que personne ne lit ne détecte rien.
-- Renseigner `W40K_TRUSTED_PROXIES` au déploiement (étape 5) — sans lui, l'IP journalisée est celle du proxy pour tout le monde.
+- Événements `user_created`, `profile_changed`, `password_changed` : ils n'ont toujours **aucun chemin de code** — les comptes sont créés à la main en SQL (décision F12). Ils n'apparaîtront que le jour où une route d'administration existera ; les écrire avant serait du code mort.
+- ~~Renseigner `W40K_TRUSTED_PROXIES`~~ : fait à l'étape 5.
 
-**Validation :** login réussi + raté → lignes correspondantes avec l'IP du client, pas celle du proxy.
+**Validation :** `tests/unit/services/test_auth_journal.py` (23 tests), preuve ROUGE sur 9 verrous. Exécuté sur la base réelle (`--db config/users.db`, les quatre sous-commandes) : mtime et taille du fichier **inchangés** avant/après, le mode lecture seule est donc effectif et non seulement déclaré.
 
-### Étape 8 — Passe finale avant ouverture
-- Scan dynamique baseline (OWASP ZAP) contre l'instance de test.
-- Revue : réévaluer MFA selon le mode d'inscription des testeurs (invitations = non ; inscription libre = oui).
-- Vérifier les mots de passe des comptes existants (pas de comptes de test type `admin/admin`).
+### Étape 8 — Passe finale avant ouverture 🟨 partielle (2026-08-18)
+
+**Comptes existants — fait, et il y a un résultat.** `scripts/auth_journal.py accounts` teste chaque compte contre 15 mots de passe triviaux **plus le login lui-même** (`admin/admin` est le cas nommé ici, et il n'est dans aucune liste statique). Les mots de passe sont hachés : on ne peut que tester des candidats, ce qui est exactement ce que demande cette étape — repérer ce qu'on se donne en montant un environnement puis qu'on oublie — et non casser un mot de passe fort. Sortie 1 si un compte est trouvé trivial, pour que l'audit échoue bruyamment au lieu de l'écrire au milieu d'un tableau.
+
+> 🔴 **Exécuté le 2026-08-18 sur `config/users.db` : le compte unique `greg` (profil `admin`) a `greg` pour mot de passe.** À changer **avant toute exposition** — c'est le seul compte, et il est administrateur. Non corrigé ici : `config/users.db` est un fichier protégé (CLAUDE.md) et le mot de passe de remplacement est une décision utilisateur. Changement : `UPDATE users SET password_hash = ? WHERE login = 'greg'` avec la sortie de `shared.auth_credentials.hash_password("<nouveau>")`.
+
+**MFA — décision confirmée, reportée.** La condition de réévaluation écrite en §5 est « inscription libre des testeurs ». Elle n'est **pas** remplie : `/api/auth/register` est supprimée (F12) et les comptes sont créés en SQL, donc l'accès reste sur invitation. Avec mots de passe forts (à obtenir, cf. ci-dessus), rate limiting, sessions expirantes et cookie `HttpOnly`, le TOTP n'apporte rien face au modèle de menace retenu. À rouvrir le jour où l'inscription s'ouvre.
+
+**Reste à faire — actions de RUNTIME, pas de code**
+- Changer le mot de passe du compte `greg` (bloquant pour l'exposition).
+- Scan dynamique baseline (OWASP ZAP) contre l'instance de test, une fois la stack de l'étape 5 déployée avec ses certificats. Non exécutable ici : demande une instance déployée et joignable.
 
 ---
 
@@ -293,7 +339,7 @@ Deux avertissements nouveaux, tous deux bénins et propres à torch 2.13 : un *g
 
 | Sujet | Décision | Condition de réévaluation |
 |---|---|---|
-| MFA / TOTP | Reporté | Inscription libre des testeurs (étape 8) |
+| MFA / TOTP | Reporté — **confirmé le 2026-08-18** (étape 8) : l'accès reste sur invitation, `register` est supprimée | Inscription libre des testeurs |
 | Obfuscation du frontend | Non (inefficace) | Jamais — protection juridique à la place |
 | Règles buffer overflow / mémoire | Non | Introduction de code C/C++ |
 | WAF / anti-DDoS | Non (tests à petite échelle) | Trafic public significatif |
@@ -308,10 +354,14 @@ Deux avertissements nouveaux, tous deux bénins et propres à torch 2.13 : un *g
 | 1. Auth sur toutes les routes | F6, F12, F14 | ✅ Fait — vérifié dans le code le 2026-08-10 (30 routes, porte globale, `register` supprimée, `apiFetch`) | 2026-08-02 |
 | 2. Fermer vecteurs écriture/désérialisation | F7, F11 | ✅ Fait (runtime PvP validé) | 2026-08-10 |
 | 3. Durcissement sessions + rate limiting | F2, F8 | ✅ Fait, puis durci sur deux passes de revue (32 tests, preuve rouge sur 23 verrous ; runtime PvP à valider) | 2026-08-10 |
-| 4. Réduction surface d'information | F3, F10, F13 | ⬜ À faire | — |
-| 5. Infra d'exposition (WSGI + proxy + TLS) | F9, F15 | 🟨 Partiel — stack Docker + nginx existante (non documentée jusqu'au 2026-08-10), mais dev server, root et sans TLS ; **ne pas déployer en l'état** | — |
+| 4. Réduction surface d'information | F3, F10, F13 | ✅ Fait — CORS explicite, traceback fermé par défaut + `error_id`, session en cookie `HttpOnly`/`SameSite=Strict` + en-tête anti-CSRF (35 tests, 13 preuves rouges) ; **runtime navigateur à valider** | 2026-08-18 |
+| 5. Infra d'exposition (WSGI + proxy + TLS) | F9, F15 | ✅ Fait — waitress (`services/wsgi.py`), `user: "0:0"` et `ports: 5001` retirés, nginx versionné en TLS 1.2/1.3 + redirection 80→443, proxy de confiance à IP fixe ; **certificats et `docker compose up` restent à fournir/exécuter au déploiement** | 2026-08-18 |
 | 6. Analyse statique | F5 | ✅ Fait — `scripts/security_check.sh` exécuté, sortie 0 ; traités : 3 bandit HIGH, Flask 3.1.3, 10 npm high/critical, `scipy` manquant en production, `users.db`/`.claude` cuits dans l'image, et les 19 CVE torch **supprimées** par la montée 2.13.0/sb3 2.9.0 du 2026-08-11 — `security_audit_ignore.txt` est vide | 2026-08-11 |
-| 7. Journal d'audit | F4 | 🟨 Socle posé (`auth_events` append-only + IP réelle) ; reste les événements d'administration et l'exploitation | 2026-08-10 |
-| 8. Passe finale (ZAP, MFA ?, comptes) | — | ⬜ À faire | — |
+| 7. Journal d'audit | F4 | ✅ Fait — exploitation par `scripts/auth_journal.py` (4 sous-commandes, lecture seule, 23 tests) ; les événements d'administration restent sans chemin de code, donc hors périmètre tant qu'aucune route d'admin n'existe | 2026-08-18 |
+| 8. Passe finale (ZAP, MFA ?, comptes) | — | 🟨 Partiel — audit des comptes fait (**1 mot de passe trivial trouvé**), MFA confirmé reporté ; restent le changement de mot de passe et le scan ZAP, qui sont des actions de runtime | 2026-08-18 |
 
-**Jalon : ne pas exposer sur Internet avant la fin de l'étape 5.**
+**Jalon : ~~ne pas exposer sur Internet avant la fin de l'étape 5~~ — l'étape 5 est faite côté code.**
+Trois conditions restent avant exposition, aucune n'étant du code :
+1. changer le mot de passe du compte `greg` (`admin`, mot de passe = son login) ;
+2. fournir les certificats TLS montés sur `/etc/nginx/certs` et vérifier `docker compose up` (HTTPS servi, HTTP redirigé, port 5001 injoignable depuis l'hôte, `whoami` → `appuser`) ;
+3. valider en navigateur le passage au cookie de session (login, partie complète, déconnexion).

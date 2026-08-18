@@ -20,7 +20,7 @@ from contextlib import contextmanager
 from threading import RLock
 from datetime import date, datetime
 from typing import Any, Dict, List, Optional, Protocol, Tuple
-from uuid import UUID
+from uuid import UUID, uuid4
 from flask import Flask, request, jsonify, send_file, Response, g
 from flask_cors import CORS
 from werkzeug.exceptions import HTTPException
@@ -36,6 +36,7 @@ sys.path.insert(0, engine_dir)
 
 from engine.w40k_core import W40KEngine
 from main import load_config
+from shared import auth_credentials
 from shared.data_validation import ConfigurationError, require_key
 from shared.json_atomic import write_json_atomic
 from engine.combat_utils import resolve_dice_value, set_unit_coordinates
@@ -51,15 +52,17 @@ from services.endless_duty_runtime import (
     is_endless_duty_mode,
 )
 
-# `initialize_auth_db()` s'exécute à l'import (bas de ce fichier) et ÉCRIT dans cette base.
-# Importer le module suffit donc à la modifier — d'où la surcharge par variable
-# d'environnement : elle permet aux tests de viser une base jetable, `config/users.db`
-# étant un fichier protégé (cf. CLAUDE.md). Aucune valeur par défaut de repli en prod :
-# sans la variable, c'est bien la base réelle qui est utilisée.
-AUTH_DB_PATH = os.environ.get(
-    "W40K_AUTH_DB_PATH", os.path.join(abs_parent, "config", "users.db")
-)
-PBKDF2_ITERATIONS = 200000
+# Chemin de la base et hachage viennent de `shared/auth_credentials.py`, qui n'a AUCUN effet
+# de bord à l'import. Ce module-ci, lui, appelle `initialize_auth_db()` au niveau module (bas
+# de ce fichier) : l'importer suffit à écrire dans la base, et à la créer si elle n'existe pas.
+# Un outil de lecture seule (`scripts/auth_journal.py`) ne peut donc pas passer par ici sans
+# fabriquer la base qu'il vient auditer — d'où la séparation.
+# Les noms sont réexportés tels quels : `api_server.AUTH_DB_PATH` reste le point d'entrée des
+# tests, qui le monkeypatchent sur une base jetable.
+AUTH_DB_PATH = auth_credentials.AUTH_DB_PATH
+PBKDF2_ITERATIONS = auth_credentials.PBKDF2_ITERATIONS
+_hash_password = auth_credentials.hash_password
+_verify_password = auth_credentials.verify_password
 
 # --- Durcissement des sessions (F2) ---------------------------------------------------------
 # Durée de vie d'une session, GLISSANTE : chaque requête authentifiée repousse l'échéance.
@@ -72,9 +75,15 @@ SESSION_TTL_SECONDS = 7 * 24 * 3600
 SESSION_RENEW_AFTER_SECONDS = 3600
 
 # --- Rate limiting du login (F8) ------------------------------------------------------------
-# Fenêtre glissante par (login, IP). Compté en base et non en mémoire de process : l'étape 5
-# du plan sécurité remplace le serveur de dev par un WSGI multi-workers, où un compteur
-# mémoire donnerait N fois la limite réelle (un compteur par worker).
+# Fenêtre glissante par (login, IP). Compté en BASE et non en mémoire de process.
+#
+# Le motif initial (« le WSGI de l'étape 5 sera multi-workers, un compteur mémoire donnerait N
+# fois la limite ») ne tient plus tel quel depuis la livraison de l'étape 5 : `services/wsgi.py`
+# sert en THREADS dans un processus unique — waitress, imposé par le fait que le moteur est une
+# globale de process. Le compteur en base reste néanmoins le bon choix, et pour une raison plus
+# solide : il SURVIT au redémarrage. Un compteur mémoire remettrait le budget de tentatives à
+# zéro à chaque relance du conteneur (`restart: unless-stopped`), ce qu'un attaquant obtient en
+# faisant tomber le healthcheck.
 LOGIN_ATTEMPT_WINDOW_SECONDS = 60
 LOGIN_ATTEMPT_MAX_FAILURES = 5
 
@@ -138,6 +147,104 @@ def _resolve_trusted_proxies() -> frozenset:
 
 
 TRUSTED_PROXIES = _resolve_trusted_proxies()
+
+
+# --- Réduction de la surface d'information (F3) ----------------------------------------------
+# Origines autorisées à appeler l'API depuis un navigateur. `CORS(app)` sans `origins` vaut `*` :
+# n'importe quelle page du web pouvait lire les réponses de l'API. Le défaut couvre le serveur
+# de développement Vite (`vite.config.ts`, port 5175) et rien d'autre ; en production, la valeur
+# est l'URL publique du front. Définie mais VIDE = erreur au démarrage, même convention que
+# `W40K_TRUSTED_PROXIES` : une variable vide est une faute de configuration, pas une façon
+# d'exprimer « aucune origine ».
+_DEFAULT_CORS_ORIGINS = ("http://localhost:5175", "http://127.0.0.1:5175")
+
+
+def _resolve_cors_origins() -> List[str]:
+    """Origines CORS autorisées, validées AU DÉMARRAGE.
+
+    Le joker est refusé explicitement plutôt qu'accepté tel quel : le cookie de session part
+    désormais avec `credentials` (cf. `SESSION_COOKIE_NAME`), et `*` rendrait alors n'importe
+    quelle page du web capable de lire l'API au nom de l'utilisateur connecté — soit exactement
+    la faille F3 réintroduite par configuration.
+    """
+    raw = os.environ.get("W40K_CORS_ORIGINS")
+    if raw is None:
+        return list(_DEFAULT_CORS_ORIGINS)
+    origins = [item.strip() for item in raw.split(",") if item.strip()]
+    if not origins:
+        raise ConfigurationError(
+            "W40K_CORS_ORIGINS est définie mais vide : donner au moins une origine "
+            "(`https://exemple.tld`) ou retirer la variable"
+        )
+    for origin in origins:
+        if origin == "*":
+            raise ConfigurationError(
+                "W40K_CORS_ORIGINS : `*` est refusé. Le cookie de session est envoyé avec les "
+                "identifiants de l'utilisateur ; une origine joker rendrait toute page du web "
+                "capable de lire l'API en son nom."
+            )
+        if "://" not in origin:
+            raise ConfigurationError(
+                f"W40K_CORS_ORIGINS : {origin!r} n'est pas une origine. Attendu un schéma et un "
+                f"hôte (port éventuel), sans chemin : `https://exemple.tld`."
+            )
+    return origins
+
+
+CORS_ORIGINS = _resolve_cors_origins()
+
+
+# --- Réduction de la surface d'information (F10) ---------------------------------------------
+# Un traceback publie les chemins du serveur, la structure du code et les versions installées.
+# Indispensable en développement, offert à l'attaquant en production.
+#
+# `W40K_DEBUG` n'est PAS réutilisée : elle pilote le debug MOTEUR (`initialize_engine`,
+# `execute_ai_turn`, `fight_handlers._fight_v11_log`). `docker-compose.yml` la met déjà à
+# "false" — en conclure que la production était protégée aurait été faux, `handle_uncaught_exception`
+# renvoyait le traceback inconditionnellement.
+#
+# Non définie = FERMÉ. C'est le lancement de développement (bloc `__main__`) qui la rouvre :
+# la valeur obtenue sans rien faire est la valeur sûre, et c'est le chemin de dev — pas la
+# production — qui doit se déclarer.
+def _resolve_expose_traceback() -> Optional[bool]:
+    """`True`/`False` si la variable tranche, `None` si elle n'est pas définie.
+
+    Le tri-état est nécessaire : « non définie » et « explicitement à false » doivent se
+    distinguer, sinon le bloc `__main__` ne pourrait pas rouvrir le traceback en développement
+    sans écraser un `W40K_EXPOSE_TRACEBACK=false` posé exprès.
+    """
+    raw = os.environ.get("W40K_EXPOSE_TRACEBACK")
+    if raw is None:
+        return None
+    value = raw.strip().lower()
+    if value in ("1", "true", "yes", "on"):
+        return True
+    if value in ("0", "false", "no", "off"):
+        return False
+    raise ConfigurationError(
+        f"W40K_EXPOSE_TRACEBACK : {raw!r} n'est ni vrai ni faux. Valeurs acceptées : "
+        f"1/0, true/false, yes/no, on/off."
+    )
+
+
+EXPOSE_TRACEBACK = _resolve_expose_traceback()
+
+
+# --- Session en cookie HttpOnly (F13) --------------------------------------------------------
+# Le token vivait en `localStorage`, donc lisible par tout script s'exécutant dans la page : une
+# seule XSS suffisait à l'exfiltrer, et un token volé vaut sept jours d'accès complet. En cookie
+# `HttpOnly`, JavaScript ne peut plus le LIRE — donc ni le voler ni le poster ailleurs.
+SESSION_COOKIE_NAME = "w40k_session"
+
+# Contrepartie du cookie : le navigateur l'envoie automatiquement vers l'origine, y compris sur
+# une requête déclenchée par un AUTRE site (CSRF), là où un en-tête `Authorization` doit être
+# posé par du code — donc par quelqu'un qui détient déjà le token.
+# `SameSite=Strict` ferme ce vecteur sur les navigateurs qui l'honorent ; cet en-tête ferme le
+# reste : un `<form>` cross-site ne peut poser aucun en-tête personnalisé, et un `fetch`
+# cross-site qui en pose déclenche un préflight que `CORS_ORIGINS` refuse.
+# Seule sa PRÉSENCE est contrôlée — ce n'est pas un secret, c'est la preuve que la requête vient
+# du code JS de notre origine (`frontend/src/services/apiFetch.ts`).
+CSRF_HEADER_NAME = "X-W40K-Client"
 
 # Plateau JOUÉ pour chaque option de l'écran de test. `x1` et `x5_44x60` sont le MÊME plateau
 # physique 44×60 à deux résolutions ; les entrées `x5` -> board/180x156 et `x10` -> board/360x312
@@ -1334,44 +1441,6 @@ def auth_db_write_cursor(immediate: bool = False):
         connection.close()
 
 
-def _hash_password(password: str) -> str:
-    """
-    Hash password with PBKDF2-HMAC-SHA256.
-    """
-    if not isinstance(password, str) or not password:
-        raise ValueError("password is required and must be a non-empty string")
-    salt = secrets.token_bytes(16)
-    derived_key = hashlib.pbkdf2_hmac(
-        "sha256",
-        password.encode("utf-8"),
-        salt,
-        PBKDF2_ITERATIONS,
-    )
-    return f"pbkdf2_sha256${PBKDF2_ITERATIONS}${salt.hex()}${derived_key.hex()}"
-
-
-def _verify_password(password: str, stored_hash: str) -> bool:
-    """
-    Verify password against PBKDF2 hash format.
-    """
-    if not isinstance(password, str) or not password:
-        return False
-    if not isinstance(stored_hash, str) or not stored_hash:
-        raise ValueError("stored_hash must be a non-empty string")
-
-    parts = stored_hash.split("$")
-    if len(parts) != 4:
-        raise ValueError("Invalid password hash format in database")
-    algorithm, iterations_str, salt_hex, hash_hex = parts
-    if algorithm != "pbkdf2_sha256":
-        raise ValueError(f"Unsupported password hash algorithm: {algorithm}")
-    iterations = int(iterations_str)
-    salt = bytes.fromhex(salt_hex)
-    expected = bytes.fromhex(hash_hex)
-    candidate = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations)
-    return secrets.compare_digest(candidate, expected)
-
-
 def _extract_bearer_token() -> str:
     """
     Extract Bearer token from Authorization header.
@@ -1383,6 +1452,100 @@ def _extract_bearer_token() -> str:
     if len(parts) != 2 or parts[0] != "Bearer" or not parts[1]:
         raise ValueError("Invalid Authorization header format. Expected: Bearer <token>")
     return parts[1]
+
+
+def _extract_session_token() -> str:
+    """Token de session de la requête : cookie `HttpOnly` d'abord, en-tête `Bearer` ensuite.
+
+    Ce ne sont pas deux tentatives dont la seconde rattraperait l'échec de la première, mais
+    deux chemins MÉTIER distincts :
+    - le NAVIGATEUR n'utilise que le cookie. C'est tout l'objet de F13 : le token n'est plus en
+      `localStorage`, donc plus lisible par du JavaScript, donc plus exfiltrable par une XSS ;
+    - les clients HORS navigateur (`scripts/pvp_smoke_test.py`, tests d'API) n'ont pas de bocal
+      à cookies et présentent `Authorization: Bearer`.
+    Aucun ne masque l'échec de l'autre : absent des deux, l'erreur est explicite.
+
+    Le cookie est prioritaire, y compris sur un `Bearer` valide présenté en même temps. C'est le
+    sens qui compte pour le navigateur — un cookie périmé signifie que l'utilisateur est
+    réellement déconnecté, et le repêcher par un autre canal serait précisément le repli que T1
+    interdit.
+
+    Le cookie porte son propre contrôle CSRF (`CSRF_HEADER_NAME`), pas l'en-tête `Bearer` : le
+    premier part tout seul avec n'importe quelle requête vers l'origine, le second doit être
+    posé, donc suppose de détenir le token. L'asymétrie est le motif de la protection.
+    """
+    cookie_token = request.cookies.get(SESSION_COOKIE_NAME)
+    if cookie_token:
+        if CSRF_HEADER_NAME not in request.headers:
+            raise ValueError(
+                f"Missing {CSRF_HEADER_NAME} header on cookie-authenticated request"
+            )
+        g.auth_via_cookie = True
+        return cookie_token
+    g.auth_via_cookie = False
+    return _extract_bearer_token()
+
+
+def _request_is_https() -> bool:
+    """La connexion CLIENT est-elle en HTTPS ?
+
+    Derrière le reverse proxy, TLS se termine sur nginx et le tronçon interne est en clair :
+    `request.is_secure` rendrait donc toujours False en production, ce qui priverait le cookie
+    de session de son attribut `Secure` — précisément là où il est indispensable.
+    `X-Forwarded-Proto` porte la vraie information et n'est lu, comme `X-Forwarded-For`, que
+    depuis un proxy de confiance : autrement, n'importe quel client pourrait le poser.
+    """
+    remote_addr = request.remote_addr
+    if remote_addr and _normalize_ip(remote_addr) in TRUSTED_PROXIES:
+        forwarded_proto = request.headers.get("X-Forwarded-Proto", "").strip().lower()
+        if forwarded_proto:
+            # Chaîne de proxys : le tronçon CLIENT est le premier élément, contrairement à
+            # `X-Forwarded-For` — ici la partie gauche vient du proxy de confiance, pas du client.
+            return forwarded_proto.split(",")[0].strip() == "https"
+    return request.is_secure
+
+
+def _attach_session_cookie(response, token: str, expires_at: int) -> None:
+    """Pose le cookie de session (F13).
+
+    `HttpOnly` : hors de portée de JavaScript, donc une XSS ne peut plus exfiltrer le token.
+    `SameSite=Strict` : pas envoyé sur une requête déclenchée par un autre site, ce qui ferme
+    le CSRF que l'authentification par cookie ouvrirait sinon (cf. `CSRF_HEADER_NAME` pour le
+    reste de la défense).
+    `Secure` UNIQUEMENT en HTTPS : le poser en HTTP ferait purement et simplement ignorer le
+    cookie par le navigateur, donc casserait le login sur le poste de développement.
+    `max_age` aligné sur l'échéance serveur — le cookie ne fait que ne pas survivre à la
+    session ; c'est `sessions.expires_at` qui reste seul juge de la validité.
+    """
+    response.set_cookie(
+        SESSION_COOKIE_NAME,
+        token,
+        max_age=max(0, expires_at - int(time.time())),
+        httponly=True,
+        secure=_request_is_https(),
+        samesite="Strict",
+        path="/",
+    )
+
+
+def _clear_session_cookie(response) -> None:
+    """Efface le cookie de session.
+
+    Les attributs sont RÉPÉTÉS à l'identique de la pose : un navigateur n'identifie un cookie
+    que par (nom, domaine, chemin), et un `Set-Cookie` de suppression dont le `path` diffère
+    crée un second cookie vide au lieu de retirer le premier — la déconnexion laisserait alors
+    le token en place dans le navigateur.
+    """
+    response.set_cookie(
+        SESSION_COOKIE_NAME,
+        "",
+        max_age=0,
+        expires=0,
+        httponly=True,
+        secure=_request_is_https(),
+        samesite="Strict",
+        path="/",
+    )
 
 
 def _resolve_permissions_for_profile(connection: sqlite3.Connection, profile_id: int) -> Dict[str, Any]:
@@ -1431,7 +1594,7 @@ def _get_authenticated_user_or_response():
     qu'il essaie a existé.
     """
     try:
-        token = _extract_bearer_token()
+        token = _extract_session_token()
     except ValueError as auth_error:
         return None, (jsonify({"success": False, "error": str(auth_error)}), 401)
 
@@ -1471,6 +1634,11 @@ def _renew_session_if_stale(token: str, expires_at: int, now: int) -> None:
             "UPDATE sessions SET expires_at = ? WHERE token = ?",
             (target, token),
         )
+    # Le cookie doit glisser AVEC la session (F13 + F2), sinon le navigateur l'oublierait au
+    # septième jour alors que la session est toujours vivante côté serveur — déconnexion en
+    # pleine partie. La pose se fait dans `_slide_session_cookie` : un `Set-Cookie` ne peut
+    # s'écrire que sur la réponse, qui n'existe pas encore ici.
+    g.session_cookie_slide = (token, target)
 
 
 def _is_mode_allowed(mode: str, permissions: Dict[str, Any]) -> bool:
@@ -1569,16 +1737,14 @@ def _client_ip() -> str:
     )
 
 
-# La TENTATIVE est distincte de son ISSUE. C'est elle qui porte le rate limiting : inscrite
-# avant la vérification du mot de passe, elle partage la transaction du comptage et le rend
-# atomique. L'issue (`login_success` / `login_failure`) est écrite après, et c'est elle que lit
-# l'audit — sans cette séparation, chaque connexion réussie laisserait dans le journal un échec
-# provisoire qui n'a jamais eu lieu.
-AUTH_EVENT_LOGIN_ATTEMPT = "login_attempt"
-AUTH_EVENT_LOGIN_SUCCESS = "login_success"
-AUTH_EVENT_LOGIN_FAILURE = "login_failure"
-AUTH_EVENT_RATE_LIMITED = "rate_limited"
-AUTH_EVENT_LOGOUT = "logout"
+# Noms des événements du journal : définis dans `shared/auth_credentials.py` avec le motif de
+# leur découpage, et réexportés ici. `scripts/auth_journal.py` les LIT pour interroger la même
+# table — les redéclarer de son côté ferait diverger l'écriture et la lecture en silence.
+AUTH_EVENT_LOGIN_ATTEMPT = auth_credentials.AUTH_EVENT_LOGIN_ATTEMPT
+AUTH_EVENT_LOGIN_SUCCESS = auth_credentials.AUTH_EVENT_LOGIN_SUCCESS
+AUTH_EVENT_LOGIN_FAILURE = auth_credentials.AUTH_EVENT_LOGIN_FAILURE
+AUTH_EVENT_RATE_LIMITED = auth_credentials.AUTH_EVENT_RATE_LIMITED
+AUTH_EVENT_LOGOUT = auth_credentials.AUTH_EVENT_LOGOUT
 
 
 def _record_auth_event(
@@ -1913,26 +2079,72 @@ logging.getLogger('werkzeug').setLevel(logging.WARNING)
 app = Flask(__name__)
 CORS(
     app,
+    # F3 : liste explicite, jamais `*`. Cf. `_resolve_cors_origins`.
+    origins=CORS_ORIGINS,
+    # Nécessaire pour que le navigateur joigne le cookie de session à un appel cross-origin
+    # (F13). Flask-CORS refuse de le combiner à une origine joker — c'est le comportement voulu.
+    supports_credentials=True,
+    # `allow_headers` doit énumérer ce que le front pose, sinon le préflight refuse l'en-tête
+    # anti-CSRF et tout appel cross-origin échoue avant d'atteindre l'API.
+    allow_headers=["Content-Type", "Authorization", CSRF_HEADER_NAME],
     expose_headers=["Server-Timing", "X-W40k-Payload-Bytes"],
 )  # Server-Timing + taille payload (perf) lisibles en JS si W40K_PERF_TIMING=1
 
 
+@app.after_request
+def _slide_session_cookie(response):
+    """Repose le cookie de session quand l'échéance vient d'être prolongée (F13 + F2).
+
+    L'expiration serveur est GLISSANTE (`_renew_session_if_stale`) ; le cookie, lui, garderait
+    l'échéance posée AU LOGIN. Sans ce rafraîchissement, un utilisateur actif serait déconnecté
+    au septième jour par son navigateur alors que sa session est valide côté serveur.
+
+    Ne s'écrit que si un renouvellement a réellement eu lieu — donc au plus une fois par heure
+    (cf. `SESSION_RENEW_AFTER_SECONDS`) — et seulement pour un appelant qui s'authentifie PAR
+    cookie : envoyer un cookie à un client `Bearer` (smoke test, tests d'API) lui poserait un
+    identifiant qu'il n'a pas demandé et ne relira jamais.
+    """
+    slide = g.pop("session_cookie_slide", None)
+    if slide is not None and g.get("auth_via_cookie", False):
+        token, expires_at = slide
+        _attach_session_cookie(response, token, expires_at)
+    return response
+
+
 @app.errorhandler(Exception)
 def handle_uncaught_exception(error: Exception):
-    """Centralise toute exception non gérée : log du traceback complet côté
-    serveur + réponse JSON explicite (type + message + traceback). Remplace les
-    anciens `except Exception -> jsonify(str(e)), 500` qui masquaient la cause."""
+    """Centralise toute exception non gérée : traceback complet dans le LOG serveur, réponse
+    JSON générique porteuse d'un identifiant corrélable.
+
+    F10 : le traceback publie les chemins du serveur, la structure du code et les versions
+    installées. Il n'entre dans la RÉPONSE que si `EXPOSE_TRACEBACK` le permet — non défini
+    vaut fermé, et c'est le lancement de développement qui rouvre (cf. `_resolve_expose_traceback`).
+
+    L'`error_id` est ce qui remplace le traceback côté client : il ne dit rien de la machine et
+    permet de retrouver la trace exacte dans le log. Sans lui, fermer le traceback rendrait tout
+    incident non diagnosticable à partir d'un rapport d'utilisateur.
+    """
     # Laisser passer les erreurs HTTP volontaires (abort(404), 405, etc.).
     if isinstance(error, HTTPException):
         return error
     tb = traceback.format_exc()
-    print(f"🔥 UNCAUGHT EXCEPTION ({type(error).__name__}): {error}")
+    error_id = uuid4().hex[:12]
+    print(f"🔥 UNCAUGHT EXCEPTION [{error_id}] ({type(error).__name__}): {error}")
     print(tb)
+    if EXPOSE_TRACEBACK:
+        return jsonify({
+            "success": False,
+            "error": str(error),
+            "error_type": type(error).__name__,
+            "error_id": error_id,
+            "traceback": tb,
+        }), 500
+    # Ni `str(error)` ni le type : un message d'exception porte régulièrement un chemin de
+    # fichier, une requête SQL ou un nom de classe interne.
     return jsonify({
         "success": False,
-        "error": str(error),
-        "error_type": type(error).__name__,
-        "traceback": tb,
+        "error": "Internal server error",
+        "error_id": error_id,
     }), 500
 
 
@@ -2822,6 +3034,7 @@ def login_user():
         return jsonify({"success": False, "error": "Invalid credentials"}), 401
 
     access_token = secrets.token_urlsafe(48)
+    expires_at = now + SESSION_TTL_SECONDS
     with auth_db_write_cursor() as cursor:
         # Pas de `_purge_auth_events` ici : la rétention est déjà appliquée sur toute tentative,
         # au-dessus. La répéter ne retirerait jamais rien de plus.
@@ -2829,13 +3042,18 @@ def login_user():
         _purge_expired_sessions(cursor, now)
         cursor.execute(
             "INSERT INTO sessions (token, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
-            (access_token, user_row["user_id"], now, now + SESSION_TTL_SECONDS),
+            (access_token, user_row["user_id"], now, expires_at),
         )
         permissions = _resolve_permissions_for_profile(cursor.connection, user_row["profile_id"])
 
-    return jsonify(
+    response = jsonify(
         {
             "success": True,
+            # Le token reste dans le corps pour les clients HORS navigateur (smoke test, tests
+            # d'intégration), qui n'ont pas de bocal à cookies et présentent `Bearer`.
+            # Le front, lui, ne le stocke plus (F13) : c'est le cookie `HttpOnly` posé ci-dessous
+            # qui porte sa session, et le corps d'UNE réponse ne peut pas être relu après coup
+            # par une XSS survenue plus tard.
             "access_token": access_token,
             "user": {
                 "id": user_row["user_id"],
@@ -2846,6 +3064,8 @@ def login_user():
             "default_redirect_mode": "pve",
         }
     )
+    _attach_session_cookie(response, access_token, expires_at)
+    return response
 
 
 @app.route('/api/auth/logout', methods=['POST'])
@@ -2874,11 +3094,21 @@ def logout_user():
     with auth_db_write_cursor() as cursor:
         cursor.execute("DELETE FROM sessions WHERE token = ?", (token,))
 
+    # La porte a pu programmer un glissement du cookie sur CETTE requête, avant que la vue ne
+    # décide de révoquer. Le laisser s'appliquer reposerait dans le navigateur un cookie pointant
+    # une session qui vient d'être détruite : l'utilisateur repartirait avec un identifiant mort.
+    g.pop("session_cookie_slide", None)
+
     with auth_db_write_cursor() as cursor:
         _record_auth_event(
             cursor, AUTH_EVENT_LOGOUT, user_row["login"], _client_ip(), int(time.time())
         )
-    return jsonify({"success": True})
+    response = jsonify({"success": True})
+    # Le cookie est effacé CÔTÉ NAVIGATEUR en plus de la session côté serveur. La révocation
+    # seule suffirait à rendre le token inopérant, mais laisserait un identifiant valide-en-
+    # apparence sur le poste — et le front repartirait en boucle 401 au lieu d'aller au login.
+    _clear_session_cookie(response)
+    return response
 
 
 @app.route('/api/auth/me', methods=['GET'])
@@ -5481,6 +5711,14 @@ def serve_frontend():
     return jsonify({"message": "W40K Engine API Server"})
 
 if __name__ == '__main__':
+    # Lancement de DÉVELOPPEMENT (`python3 services/api_server.py`). C'est ce chemin — et lui
+    # seul — qui rouvre le traceback dans les réponses HTTP (F10) : la valeur par défaut, celle
+    # qu'on obtient sans rien déclarer, reste fermée, donc la production l'est par construction.
+    # Un `W40K_EXPOSE_TRACEBACK` explicite n'est PAS écrasé : `None` distingue « non définie »
+    # de « mise à false exprès » (cf. `_resolve_expose_traceback`).
+    if EXPOSE_TRACEBACK is None:
+        EXPOSE_TRACEBACK = True
+
     print("🚀 Starting W40K Engine API Server...")
     print("📡 Server will run on http://localhost:5001")
     print("🎮 Frontend should connect to this API")

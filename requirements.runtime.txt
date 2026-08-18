@@ -1,6 +1,6 @@
 # VERROU GÉNÉRÉ — NE PAS ÉDITER À LA MAIN.
 # Source : requirements.runtime.in (dépendances directes). Régénération : voir son en-tête.
-# Résolu pour python:3.11-slim / linux x86_64, le 2026-08-11 (55 paquets).
+# Résolu pour python:3.11-slim / linux x86_64, le 2026-08-18 (56 paquets).
 #
 # Pourquoi un verrou complet : le portail pip-audit de scripts/security_check.sh audite CE
 # fichier. Avec des transitives flottantes, il auditait une résolution faite le jour de
@@ -10,17 +10,20 @@
 # (sb3 2.9 ne les impose plus, son import est passé sous `TYPE_CHECKING`), ce qui retire au
 # passage les 26 vulnérabilités que pillow traînait. Les roues CUDA passent de la série 12
 # à la série 13.
+#
+# 2026-08-18, étape 5 : ajout de `waitress` (serveur WSGI de production, F9). Seul ajout ;
+# `charset-normalizer` et `filelock` bougent d'un correctif par simple effet de résolution.
 
 blinker==1.9.0
 certifi==2026.7.22
-charset-normalizer==3.4.9
+charset-normalizer==3.5.1
 click==8.4.2
 cloudpickle==3.1.2
 cuda-bindings==13.3.1
 cuda-pathfinder==1.6.0
 cuda-toolkit==13.0.3.0
 Farama-Notifications==0.0.6
-filelock==3.32.2
+filelock==3.32.3
 Flask==3.1.3
 flask-cors==6.0.1
 fsspec==2026.7.0
@@ -65,4 +68,5 @@ triton==3.7.1
 typing_extensions==4.16.0
 tzdata==2026.3
 urllib3==2.7.0
+waitress==3.0.2
 Werkzeug==3.1.8
