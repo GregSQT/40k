@@ -3829,7 +3829,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       if (gameState && gameState.phase === "deployment" && gameState.deployment_type === "active") {
         if (mode === "deploymentMove") return;
         if (numericUnitId !== null) {
-          const ds = gameState.deployment_state;
+          // Lire la ref (plus fraîche que la closure) pour éviter le trou entre la réponse
+          // deploy_commit (qui change current_deployer) et le re-render React : sans ça, un clic
+          // rapide après le 1er déploiement voit encore current_deployer=2 et lance le plan à tort.
+          const gsLatest = latestGameStateRef.current ?? gameState;
+          const ds = gsLatest.deployment_state;
           const deployer = ds?.current_deployer;
           const deployable =
             deployer != null ? (ds?.deployable_units?.[String(deployer)] ?? []) : [];
@@ -5676,7 +5680,15 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       }
       const rawPlan = result?.plan as Array<[string | number, number, number, number]> | undefined;
       if (!rawPlan || !Array.isArray(rawPlan)) {
-        throw new Error("[DEPLOY] deploy_generate_formation: plan absent dans la réponse");
+        // Le backend a refusé (deployer mismatch ou autre) — annuler proprement.
+        console.warn(
+          "[DEPLOY] deploy_generate_formation: pas de plan dans la réponse",
+          result?.error ?? result
+        );
+        setDeployPlan(null);
+        setMode("select");
+        setSelectedUnitId(null);
+        return;
       }
       // Étages : le backend rend le niveau par fig (celui de vue au drop, qu'il a lui-même résolu) —
       // le front ne le re-devine plus, il le transporte.
@@ -5867,6 +5879,18 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       const outcome = readEngineActionOutcome(data);
       if (outcome.kind === "noop") return;
       if (outcome.kind === "refused") {
+        // Désynchronisation déployeur (race : deploy_commit du tour précédent a changé
+        // current_deployer avant que ce commit n'arrive) → annuler proprement sans crash.
+        if (
+          outcome.message === "unit_not_deployable" ||
+          outcome.message === "unit_not_current_deployer"
+        ) {
+          deployPoolRef.current = new Set();
+          setDeployPlan(null);
+          setMode("select");
+          setSelectedUnitId(null);
+          return;
+        }
         setError(`${plan.ingress ? "Ingress" : "Deploy"} refused: ${outcome.message}`);
         return;
       }
