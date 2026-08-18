@@ -54,6 +54,19 @@ _END = (
     "Total=0, Duration=1.000s\n"
 )
 
+# 09.07 Desperate Escape : grammaire identique à HAZARDOUS avec tag [DESPERATE ESCAPE].
+# Unité 1 (HP_MAX=3) reçoit 3 BM en MOVE → elle meurt.
+# Un HAZARDOUS en SHOOT sur la même unité après sa mort lève damage_missing_unit_hp.
+# La phase différente (MOVE ≠ SHOOT) exclut le garde "excess wound lost" (05).
+_DESPERATE_ESCAPE_3_MW = (
+    "[10:00:02] E1 T1 P1 MOVE : Unit 1(20,20) SUFFERS 3 Mortal Wounds [DESPERATE ESCAPE] "
+    "[R:+0.0] [SUCCESS]\n"
+)
+_HAZARDOUS_SHOOT_1_MW = (
+    "[10:00:03] E1 T1 P1 SHOOT : Unit 1(20,20) SUFFERS 1 Mortal Wounds [HAZARDOUS] "
+    "[R:+0.0] [SUCCESS]\n"
+)
+
 
 def _parse(tmp_path, monkeypatch, body: str = "", weapons_cache=None):
     """Parse step.log en injectant une cache armurerie contrôlée.
@@ -167,5 +180,23 @@ def test_desperate_escape_ne_declenche_pas_erreur_armurerie(tmp_path, monkeypatc
         "[DESPERATE ESCAPE] ne doit pas signaler d'erreur HAZARDOUS (arme absente de l'armurerie)"
     )
     assert stats["hazardous_no_hazardous_weapon_fight"][1] == 0
+
+
+def test_desperate_escape_reduit_les_pv_et_unit_morte_trackee(tmp_path, monkeypatch):
+    """VERROU finding 2 : [DESPERATE ESCAPE] doit appliquer les BM à l'unité (réduire ses PV).
+
+    Sans le fix : la branche DESPERATE ESCAPE n'existe pas dans analyzer_core ; la ligne
+    tombe dans action_type='other' ; unit_hp["1"] reste à 3. Le HAZARDOUS suivant en SHOOT
+    réduit HP de 3 à 2 et aucune anomalie n'est levée (damage_missing_unit_hp == 0).
+    Avec le fix : _apply_damage_and_handle_death est appelée en MOVE, HP → 0, l'unité meurt.
+    Le HAZARDOUS en SHOOT trouve l'unité absente de unit_hp (kill_context MOVE ≠ SHOOT →
+    pas d'excess-wound guard) → damage_missing_unit_hp[1] == 1.
+    """
+    body = _DESPERATE_ESCAPE_3_MW + _HAZARDOUS_SHOOT_1_MW
+    stats = _parse(tmp_path, monkeypatch, body)
+    assert stats["damage_missing_unit_hp"][1] == 1, (
+        "[DESPERATE ESCAPE] 3 BM sur une unité HP=3 doit la détruire ; "
+        "le HAZARDOUS en SHOOT sur cette unité morte doit lever damage_missing_unit_hp"
+    )
 
 

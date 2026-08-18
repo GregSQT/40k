@@ -67,3 +67,26 @@ def test_overrun_pile_in_does_not_trigger_double_violation(tmp_path):
     être compté comme un doublon 12.02."""
     stats = _stats(tmp_path, _PILE_IN + _OVERRUN_NEW)
     assert stats["fight_double_pile_in"][1] == 0
+
+
+# Overrun pile-in dépassant le budget 3" (20 subhex > 15).
+# VERROU finding : sans le fix regex, handle_fight_move revient immédiatement (no-match)
+# et aucune validation n'est faite → fight_move_invalid reste à 0.
+# Avec le fix, le déplacement est validé et le dépassement est détecté.
+_OVERRUN_OVER_BUDGET = (
+    f"[10:00:04] E1 T1 P1 FIGHT : Unit 1{U1s} OVERRUN PILED IN from {U1s} to (100,120) "
+    "[R:+0.0] [SUCCESS]\n"
+)
+
+
+def test_overrun_pile_in_over_budget_detected(tmp_path):
+    """OVERRUN PILED IN dépassant le budget 3\" (20 subhex > 15) doit lever fight_move_invalid.
+
+    Prémisse : sans le fix de la regex, fight_move_invalid['pile_in'][1] == 0 (retour immédiat).
+    Avec le fix, la validation s'exécute et détecte le dépassement.
+    """
+    stats = _stats(tmp_path, _OVERRUN_OVER_BUDGET)
+    assert stats["fight_move_invalid"]["pile_in"][1] == 1, (
+        "OVERRUN PILED IN de 20 subhex dépasse le budget 3\" (15 subhex) : "
+        "fight_move_invalid['pile_in'][1] doit être 1"
+    )

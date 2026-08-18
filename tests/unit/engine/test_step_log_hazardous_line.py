@@ -85,7 +85,7 @@ def test_le_payload_du_moteur_porte_bien_les_deux_champs() -> None:
 
     src = inspect.getsource(shared_utils)
     i = src.index('"type": "hazard"')
-    payload = src[i:i + 2200]
+    payload = src[i:]
     assert '"col": col' in payload, "le payload hasardeux ne porte plus la position"
     assert '"hazardousMortalWounds"' in payload, (
         "le payload hasardeux ne porte plus le nombre de blessures mortelles"

@@ -1748,6 +1748,39 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                 'error': "ligne HAZARDOUS : format inattendu (attendu : "
                                          "'SUFFERS N Mortal Wounds [HAZARDOUS]')",
                             })
+                elif " SUFFERS " in action_desc and "[DESPERATE ESCAPE]" in action_desc:
+                        # 09.07 Desperate Escape : blessures mortelles auto-infligées sur un
+                        # jet de 1–2 lors du fall-back au travers d'unités ennemies engagées.
+                        # Même grammaire que [HAZARDOUS] mais sans contrôle d'armurerie.
+                        action_type = 'desperate_escape'
+                        _de_match = re.search(
+                            r'SUFFERS\s+(\d+)\s+Mortal\s+Wounds\s+\[DESPERATE ESCAPE\]',
+                            action_desc,
+                        )
+                        if _de_match:
+                            _de_mw = int(_de_match.group(1))
+                            _apply_damage_and_handle_death(
+                                action_unit_id, _dmg_actor_id, _de_mw,
+                                player, turn, phase, state.line_number, state.current_episode_num,
+                                line, state.dead_units_current_episode, state.unit_hp,
+                                state.unit_models_alive, state.unit_model_hp,
+                                lambda _u: _ordered_living_mids(state, config, _u),
+                                state.unit_hp_squad_max, state.unit_types, state.unit_positions,
+                                state.unit_deaths, state.unit_kill_context, stats,
+                                positions_by_model=state.positions_by_model,
+                                models_invalidated=state.models_invalidated,
+                                alloc_model_id=None,
+                                pending_model_removals=None,
+                            )
+                        else:
+                            stats['parse_errors'].append({
+                                'episode': state.current_episode_num,
+                                'turn': turn,
+                                'phase': phase,
+                                'line': line.strip(),
+                                'error': "ligne DESPERATE ESCAPE : format inattendu (attendu : "
+                                         "'SUFFERS N Mortal Wounds [DESPERATE ESCAPE]')",
+                            })
                 elif attack_verb_present(action_desc):
                         action_type = 'fight'
                         handle_fight(state, config, line, action_desc, action_unit_id, player, turn, phase, step_marker_present, step_inc)
