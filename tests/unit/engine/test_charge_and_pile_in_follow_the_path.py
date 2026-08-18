@@ -53,6 +53,7 @@ def _gs(units: List[Dict[str, Any]], walls: Sequence[Tuple[int, int]], phase: st
                 "engagement_zone": 1, "engagement_zone_vertical": 5, "max_base_size_hex": 35,
                 "unit_model_cohesion_range": 2, "unit_global_cohesion_range": 9,
                 "squad_min_neighbors": 1, "cohesion_distance_mode": "euclidean",
+                "consolidation_trigger_range": 3, "pile_in_target_range": 5,
             },
             "charge": {"charge_max_distance": 12},
             "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
@@ -137,7 +138,7 @@ def test_a_charge_that_goes_around_within_the_roll_is_allowed() -> None:
 # L'ennemi est a 3 cases a vol d'oiseau, mais un mur en L impose un detour de 5.
 CONSO_WALL = [(21, 19), (21, 20), (21, 21), (21, 22), (20, 22), (19, 22)]
 CONSO_ATTACKER = (19, 20)
-CONSO_ENEMY = (23, 20)
+CONSO_ENEMY = (22, 20)  # distance 3 de l'attaquant — dans le trigger range (3"), mur bloque
 
 
 def test_geometry_premise_the_consolidation_target_is_close_but_walled_off() -> None:
@@ -165,7 +166,7 @@ def test_consolidation_still_works_without_the_wall() -> None:
     assert plan is not None
     # Une entree de plan porte TOUJOURS son etage (frontiere `parse_model_plan`, §13.06) : la
     # consolidation etant horizontale, c'est celui de depart — au sol ici.
-    assert plan[0][1:] == (22, 20, 0), plan
+    assert plan[0][1:] == (21, 19, 0), plan
 
 
 # ─────────────────────────────────────────────────────────────────────────────

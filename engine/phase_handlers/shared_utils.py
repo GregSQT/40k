@@ -11366,11 +11366,24 @@ def fight_pile_in_plan(
     # possible » — un refus de règle — à une désynchronisation ; et `player=-1` faisait de TOUTES
     # les escouades des ennemies.
     our_entry = require_unit_from_cache(squad_id, game_state, "fight_pile_in_plan")
-    our_player = int(require_key(our_entry, "player"))
 
-    # Positions ennemies (tous les modeles)
+    # 12.03 BEFORE MOVING : cibles imposées si engagée (tous les ennemis engagés avec l'unité),
+    # heuristique gym si non engagée (tous les ennemis à ≤ pile_in_target_range).
+    from engine.phase_handlers.fight_handlers import (
+        pile_in_select_targets_12_03,
+        pile_in_targets_within_range,
+    )
+    # `player` requis par `unit_within_engagement_zone_footprints` (via `_fight_v11_engaged_now`).
+    unit_ref: Dict[str, Any] = {"id": squad_id, "player": int(require_key(our_entry, "player"))}
+    within_ids = pile_in_targets_within_range(game_state, unit_ref)
+    try:
+        target_ids = pile_in_select_targets_12_03(game_state, unit_ref, chosen_target_ids=within_ids)
+    except ValueError:
+        return None
+    if not target_ids:
+        return None
     enemy_positions: List[Tuple[int, int]] = []
-    for esid in _enemy_squad_ids(game_state, our_player):
+    for esid in target_ids:
         enemy_positions.extend(_squad_model_positions(game_state, esid))
     if not enemy_positions:
         return None
@@ -11398,11 +11411,10 @@ def fight_pile_in_plan(
     # Au moins une figurine doit finir dans l ER (bord-a-bord) d une unite ennemie.
     from engine.spatial_relations import unit_entries_within_engagement_zone
     ez = get_engagement_zone(game_state)
-    # `_enemy_squad_ids` n'énumère que des ids lus dans `units_cache` : le filtre était mort, et
-    # il aurait retiré un ennemi du contrôle ER final — donc validé un pile-in illégal.
+    # ER contre les cibles 12.03 uniquement : un enemi hors cibles ne valide pas le pile-in.
     enemy_entries = [
         require_unit_from_cache(esid, game_state, "fight_pile_in_plan/enemy")
-        for esid in _enemy_squad_ids(game_state, our_player)
+        for esid in target_ids
     ]
     in_er = False
     for mid, c, r, _lv in plan:
@@ -11785,22 +11797,25 @@ def squad_declare_fight(
 def squad_consolidate_plan(
     game_state: Dict[str, Any], squad_id: str
 ) -> Optional[List[Tuple[str, int, int, int]]]:
-    """Plan Consolidation (apres melee, 3" max par fig).
+    """Plan Consolidation (12.08, 3" max par fig) — cascade obligatoire ongoing→engaging→objective.
 
-    Regle officielle (spec §"Consolidation") — OR condition :
-      (1) Si possible : finir dans l ER d une unite ennemie ET en coherency.
-          Chaque fig doit finir plus proche de l ennemi le plus proche, B2B si possible.
-      (2) Sinon : chaque fig peut se deplacer vers l objectif le plus proche, a
-          condition que le deplacement mette l escouade a portee de cet objectif
-          ET en coherency.
-      (3) Sinon : pas de Consolidation.
+    Regle officielle (PDF 12.08) — mode impose par la situation, pas choisi :
+      (1) Ongoing  : l unite est engagee → chaque fig se deplace vers les ennemis engages.
+      (2) Engaging : 1+ ennemi a ≤ consolidation_trigger_range (3") → vers ces ennemis.
+      (3) Objective: 1+ objectif a ≤3" → chaque fig vers la zone de cet objectif.
+      (4) None     : aucune branche → pas de Consolidation.
 
-    PR3 3f MVP : implementation de (1) uniquement (mouvement vers ennemi le plus proche).
-    Option (2) "vers objectif" defere a PR3+ (necessite acces aux objectifs en
-    game_state + concept "a portee d objectif").
-
+    Validations finales (coherency toujours ; ER pour (1)/(2) ; zone pour (3)).
     Retourne plan ou None si impossible. Atomic.
     """
+    from engine.phase_handlers.fight_handlers import (
+        fight_v11_consolidation_mode,
+        _fight_units_engaged_with,
+        _fight_v11_consolidation_engaging_candidates,
+        _fight_v11_consolidation_objective_candidates,
+        _fight_v11_consolidation_objective_zone,
+    )
+
     models_cache = require_key(game_state, "models_cache")
     squad_models = require_key(game_state, "squad_models")
     mids = [m for m in squad_models.get(squad_id, []) if m in models_cache]  # get allowed
@@ -11809,38 +11824,98 @@ def squad_consolidate_plan(
     # Même contrat que `fight_pile_in_plan`, appelant compris (jumeau pile-in / consolidation) :
     # l'id vient de `fight_v11_grouped_next`, filtré sur `is_unit_alive`.
     our_entry = require_unit_from_cache(squad_id, game_state, "squad_consolidate_plan")
-    our_player = int(require_key(our_entry, "player"))
+    # `player` requis par `unit_within_engagement_zone_footprints` (via `fight_v11_consolidation_mode`).
+    unit_ref: Dict[str, Any] = {"id": squad_id, "player": int(require_key(our_entry, "player"))}
+    mode = fight_v11_consolidation_mode(game_state, unit_ref)
+    if mode is None:
+        return None
+
+    ish = int(require_key(game_state, "inches_to_subhex"))
+    budget = 3 * ish
+
+    if mode == "objective":
+        # Heuristique gym : premier objectif dans la liste (déjà filtré à ≤3" par la cascade).
+        cands = _fight_v11_consolidation_objective_candidates(game_state, unit_ref)
+        if not cands:
+            return None
+        obj_zone: Set[Tuple[int, int]] = _fight_v11_consolidation_objective_zone(game_state, cands[0])
+        if not obj_zone:
+            return None
+        # 12.08 Objective WHILE MOVING : chaque fig doit atterrir DANS la zone (empreinte ∩ zone)
+        # si possible, sinon strictement plus proche. `_assign_cells_toward_enemies` produit des
+        # cellules B2B (ADJACENTES aux hexes de zone), pas DANS la zone — utiliser à la place une
+        # affectation gloutonne directe vers les hexes de zone.
+        our_player = int(require_key(our_entry, "player"))
+        occupied_by_others = build_occupied_positions_set(game_state, exclude_unit_id=str(squad_id))
+        origins: Dict[str, Tuple[int, int]] = {
+            mid: (int(models_cache[mid]["col"]), int(models_cache[mid]["row"])) for mid in mids
+        }
+        taken_obj: Set[Tuple[int, int]] = set(origins.values())
+        chosen_obj: Dict[str, Tuple[int, int]] = {}
+        for mid in mids:
+            oc, or_ = origins[mid]
+            if (oc, or_) in obj_zone:
+                chosen_obj[mid] = (oc, or_)  # déjà dans la zone → reste sur place
+                continue
+            reach = model_reach_predicate(
+                game_state, str(squad_id), our_player, models_cache[mid], budget,
+                int(require_key(models_cache[mid], "level")),
+            )
+            available = taken_obj - {(oc, or_)}
+            best_zh: Optional[Tuple[int, int]] = None
+            for zh in sorted(obj_zone, key=lambda h: calculate_hex_distance(oc, or_, h[0], h[1])):
+                if zh in available or zh in occupied_by_others:
+                    continue
+                if reach(zh[0], zh[1]):
+                    best_zh = zh
+                    break
+            if best_zh is not None:
+                taken_obj.discard((oc, or_))
+                taken_obj.add(best_zh)
+                chosen_obj[mid] = best_zh
+            else:
+                chosen_obj[mid] = (oc, or_)  # pas de zone hex atteignable → reste sur place
+        plan: List[Tuple[str, int, int, int]] = [
+            (mid, chosen_obj[mid][0], chosen_obj[mid][1], int(require_key(models_cache[mid], "level")))
+            for mid in mids
+        ]
+        plan_positions = {mid: (c, r) for mid, c, r, _lv in plan}
+        if not _validate_plan_coherency(plan_positions, game_state):
+            return None
+        # 12.08 Objective : au moins 1 fig dans la zone de controle de l objectif apres le move.
+        if not any((c, r) in obj_zone for _, c, r, _ in plan):
+            return None
+        return plan
+
+    # Ongoing ou Engaging : mouvement vers les ennemis cibles.
+    # SOURCE UNIQUE partagee avec le pile-in : 12.08 WHILE MOVING (Ongoing/Engaging) porte la
+    # meme obligation que 12.03 — immobilite au contact + « engaged with it if possible ».
+    if mode == "ongoing":
+        target_ids: List[str] = _fight_units_engaged_with(game_state, unit_ref)
+    else:  # engaging
+        target_ids = _fight_v11_consolidation_engaging_candidates(game_state, unit_ref)
+    if not target_ids:
+        return None
+
     enemy_positions: List[Tuple[int, int]] = []
     enemy_entries: List[Dict[str, Any]] = []
-    for esid in _enemy_squad_ids(game_state, our_player):
+    for esid in target_ids:
         enemy_positions.extend(_squad_model_positions(game_state, esid))
-        # `_enemy_squad_ids` énumère `units_cache` : filtrer sur `is not None` retirait
-        # silencieusement un ennemi du contrôle d'engagement final de la consolidation.
         enemy_entries.append(
             require_unit_from_cache(esid, game_state, "squad_consolidate_plan/enemy")
         )
     if not enemy_positions:
-        return None  # plus d ennemi → consolidation (2) seulement, deferree
+        return None
 
-    ish = int(require_key(game_state, "inches_to_subhex"))
-    budget = 3 * ish
-    board_cols = require_key(game_state, "board_cols")
-    board_rows = require_key(game_state, "board_rows")
-    wall_hexes = game_state.get("wall_hexes", set())
-
-    # SOURCE UNIQUE partagee avec le pile-in : 12.08 WHILE MOVING (Ongoing/Engaging) porte la
-    # meme obligation que 12.03 — immobilite au contact + « engaged with it if possible ».
-    chosen = _assign_cells_toward_enemies(
-        game_state, squad_id, mids, enemy_positions, budget
-    )
     # `_assign_cells_toward_enemies` est HORIZONTAL : chaque fig reste à son étage, que le plan
     # PORTE (toute entrée de plan porte le sien).
-    plan: List[Tuple[str, int, int, int]] = [
+    chosen = _assign_cells_toward_enemies(game_state, squad_id, mids, enemy_positions, budget)
+    plan = [
         (mid, chosen[mid][0], chosen[mid][1], int(require_key(models_cache[mid], "level")))
         for mid in mids
     ]
 
-    # Validation finale : coherency + ER (au moins 1 fig)
+    # Validation finale : coherency + ER (au moins 1 fig dans la zone d engagement des cibles).
     plan_positions = {mid: (c, r) for mid, c, r, _lv in plan}
     if not _validate_plan_coherency(plan_positions, game_state):
         return None

@@ -187,3 +187,81 @@ class TestConsolidationNeverSuperposesOwnSquad:
         assert len(set(cells)) == len(cells), (
             f"deux figurines de l'escouade sur le même hex : {plan}"
         )
+
+
+class TestConsolidationModes:
+    """12.08 cascade ongoing→engaging→objective — les trois branches sont desormais implementees.
+
+    Avant P3-5, `squad_consolidate_plan` retournait None des que l'escouade n'avait pas d'ennemi
+    present (mode Ongoing seul). Les modes Engaging et Objective etaient entierement absents.
+    """
+
+    def test_engaging_mode_moves_toward_nearby_enemy(self):
+        """12.08 Engaging : une fig non engagee se deplace vers un ennemi a ≤3"."""
+        # S a (10,10), E a (10,13) — distance 3 = trigger range exact.
+        gs = _make_gs({
+            "S": (1, [(10, 10)]),
+            "E": (2, [(10, 13)]),
+        })
+        plan = squad_consolidate_plan(gs, "S")
+        assert plan is not None, "l'ennemi est dans le trigger range (≤3\") → Engaging doit produire un plan"
+        from engine.combat_utils import calculate_hex_distance
+        _mid, c, r, _lv = plan[0]
+        assert calculate_hex_distance(c, r, 10, 13) < calculate_hex_distance(10, 10, 10, 13), (
+            f"la fig doit se rapprocher de l'ennemi : {plan}"
+        )
+
+    def test_objective_mode_consolidates_into_zone_when_no_enemies(self):
+        """12.08 Objective : la fig rejoint la zone de l'objectif quand aucun ennemi n'est present."""
+        # Zone large pour que les hexes B2B soient eux-memes dans la zone.
+        gs = _make_gs({"S": (1, [(10, 10)])})
+        gs["objectives"] = [{"id": "O1", "hexes": [[10, 11], [10, 12], [10, 13]]}]
+        plan = squad_consolidate_plan(gs, "S")
+        assert plan is not None, "objectif a ≤3\" → Objective doit produire un plan"
+        obj_zone = {(10, 11), (10, 12), (10, 13)}
+        assert any((c, r) in obj_zone for _, c, r, _ in plan), (
+            f"au moins 1 fig doit finir dans la zone de l'objectif : {plan}"
+        )
+
+    def test_none_mode_returns_none(self):
+        """12.08 None : aucun ennemi ni objectif a portee → pas de consolidation."""
+        gs = _make_gs({
+            "S": (1, [(10, 10)]),
+            "E": (2, [(10, 20)]),  # distance 10, hors trigger range (3")
+        })
+        plan = squad_consolidate_plan(gs, "S")
+        assert plan is None, "aucune branche applicable → doit retourner None"
+
+
+class TestPileInTargetRestriction12_03:
+    """12.03 BEFORE MOVING — restriction des cibles de pile-in selon le statut d'engagement.
+
+    P3-5 : `fight_pile_in_plan` utilise desormais `pile_in_select_targets_12_03` pour
+    restreindre les cibles aux ennemis engages (si engagee) ou dans les 5" (si non engagee).
+    """
+
+    def test_unengaged_unit_piles_in_to_enemy_within_target_range(self):
+        """Unite non engagee : pile-in vers un ennemi dans pile_in_target_range (5")."""
+        # S a (10,10), E_close a (10,14) (distance 4 ≤ 5"), E_far a (10,25).
+        gs = _make_gs({
+            "S": (1, [(10, 10)]),
+            "E_close": (2, [(10, 14)]),
+            "E_far": (2, [(10, 25)]),
+        })
+        plan = fight_pile_in_plan(gs, "S")
+        assert plan is not None, "E_close est dans 5\" → le pile-in doit etre possible"
+        # La fig doit se deplacer vers E_close (seule cible dans 5")
+        from engine.combat_utils import calculate_hex_distance
+        _mid, c, r, _lv = plan[0]
+        assert calculate_hex_distance(c, r, 10, 14) < calculate_hex_distance(10, 10, 10, 14), (
+            f"la fig doit se rapprocher de E_close : {plan}"
+        )
+
+    def test_unengaged_unit_no_enemies_in_range_returns_none(self):
+        """Unite non engagee sans ennemi dans pile_in_target_range (5") → None (12.03)."""
+        gs = _make_gs({
+            "S": (1, [(10, 10)]),
+            "E": (2, [(10, 16)]),  # distance 6 > 5" → hors target range
+        })
+        plan = fight_pile_in_plan(gs, "S")
+        assert plan is None, "aucun ennemi dans 5\" → pas de pile-in (12.03)"
