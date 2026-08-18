@@ -17,13 +17,19 @@
 
 ---
 
-## 1. Compression HTTP (gzip) — ✅ livré 2026-08-18
+## 1. Compression HTTP (gzip + Brotli) — ✅ livré 2026-08-18, validé runtime 2026-08-18
 
 `frontend/nginx.conf` : `gzip on`, niveau 6, seuil 1 Ko, `gzip_proxied any`, `gzip_vary on`
 (Vary: Accept-Encoding — Flask-CORS + caches intermédiaires), types JSON/JS/CSS/SVG/fonts.
 
-**Brotli** différé : `load_module` doit être dans le contexte main nginx, pas dans `conf.d/` —
-chantier Dockerfile séparé (stage `brotli-builder`, compile `ngx_brotli` contre source nginx).
+**Brotli** ✅ : stage `brotli-builder` dans `frontend/Dockerfile` — `apk cmake build-base`,
+clone `ngx_brotli --recurse-submodules`, `cmake -S deps/brotli -B deps/brotli/out` (lib brotli
+statique obligatoire avant link), `./configure --with-compat --add-dynamic-module`, `make modules` ;
+`.so` copiés dans `/usr/lib/nginx/modules/` ; `load_module` injecté en tête de
+`/etc/nginx/nginx.conf` (contexte main) ; directives `brotli on/static/level 6/min 1 Ko` dans
+le bloc server. `text/html` absent des listes de types (nginx l'inclut par défaut — le laisser
+génère un `duplicate MIME type` warn). Validé end-to-end : `nginx -t` ok + `Accept-Encoding: br`
+→ `content-encoding: br` sur asset JS (`index-iqIg_nHK.js`).
 
 ---
 
