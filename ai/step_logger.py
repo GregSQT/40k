@@ -1489,11 +1489,16 @@ class StepLogger:
             
             return f"Unit {unit_id}{unit_coords} COMBAT COMPLETE at Unit {target_id} - {total_attacks} attacks, {hits} hits, {wounds} wounds, {failed_saves} failed saves, {total_damage} total damage"
             
-        elif action_type in ("pile_in", "consolidation") and details:
-            # Déplacements de la phase fight (12.02 pile-in / 12.07 consolidation), format miroir
-            # du move : « Unit X(c,r) PILED IN/CONSOLIDATED from (a,b) to (c,d) ». Le segment
-            # [MODELS:] (positions par-figurine d'arrivée) est ajouté génériquement par log_action.
-            verb = "PILED IN" if action_type == "pile_in" else "CONSOLIDATED"
+        elif action_type in ("pile_in", "overrun_pile_in", "consolidation") and details:
+            # Déplacements de la phase fight (12.02 pile-in / 12.06 overrun / 12.07 consolidation),
+            # format miroir du move : « Unit X(c,r) PILED IN/OVERRUN PILED IN/CONSOLIDATED from
+            # (a,b) to (c,d) ». Le segment [MODELS:] est ajouté génériquement par log_action.
+            if action_type == "pile_in":
+                verb = "PILED IN"
+            elif action_type == "overrun_pile_in":
+                verb = "OVERRUN PILED IN"
+            else:
+                verb = "CONSOLIDATED"
             if (
                 "start_pos" in details
                 and details["start_pos"] is not None
