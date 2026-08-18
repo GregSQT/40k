@@ -28,8 +28,7 @@
 > **Exceptions actées** (numérotées ici et nulle part ailleurs) : `Security.md` et
 > `Bot_refactor.md` vivent à la racine d'`Documentation/Implémentation/` au lieu d'`A_faire/`
 > (chantiers vivants, chemin demandé) ; `archives/v11.md` porte l'historique du programme V11
-> entier et sert d'archive au sujet `v11_chemin_critique.md` ; pas d'archive infra tant
-> qu'aucune livraison infra n'existe.
+> entier et sert d'archive au sujet `v11_chemin_critique.md`.
 
 ---
 
@@ -107,9 +106,9 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 | analyzer | Corpus de règles vérifiable | [analyzer.md#corpus-regles](analyzer.md#corpus-regles) |
 | front | Tests front T2b/T3a/T7 + couches B/C | [front.md#tests](front.md#tests) |
 | front | Validations navigateur en attente | [front.md#validations-nav](front.md#validations-nav) |
-| security | ✅ Étapes 4, 5, 7 livrées (2026-08-18) — F1–F15 toutes résolues ; reste 3 actions de déploiement, dont **mot de passe admin trivial à changer** | [security.md](security.md) |
+| security | ✅ Étapes 4, 5, 7 livrées (2026-08-18) — F1–F15 toutes résolues ; reste 1 action : validation navigateur du cookie | [security.md](security.md) |
 | infra | Perf `generate_compact_formation` | [infra.md#perf-formation](infra.md#perf-formation) |
-| infra | ✅ gzip + Brotli livrés (2026-08-18) — stage `brotli-builder`, `load_module` contexte main, directives server | [infra.md#gzip](infra.md#gzip) |
+| infra | ✅ gzip + Brotli livrés (2026-08-18) — stage `brotli-builder`, `load_module` contexte main, directives server | [archives/infra.md](archives/infra.md) |
 
 ### Bloqués par une décision utilisateur
 

@@ -6,7 +6,7 @@
 
 ⚠️ `Security.md` est à la racine d'`Documentation/Implémentation/` au lieu d'`A_faire/` — exception actée au bloc « Exceptions actées » de [ROADMAP_INDEX.md](ROADMAP_INDEX.md), seul endroit qui les recense. Elle reste valable : le fichier n'a pas bougé, et le chantier n'est pas clos tant que les trois actions ci-dessous ne le sont pas.
 
-## Reste — deux actions
+## Reste — une action
 
 > **Note (2026-08-18) :** le déploiement local (action 2) a révélé un bug : waitress 3.0+ filtre
 > `X-Forwarded-For` et `X-Forwarded-Proto` par défaut sans `trusted_proxy` configuré — Flask ne
