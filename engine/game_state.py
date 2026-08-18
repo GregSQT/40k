@@ -3509,7 +3509,11 @@ def iter_living_model_footprints(
     units_cache = require_key(game_state, "units_cache")
     models_cache = require_key(game_state, "models_cache")
     squad_models = require_key(game_state, "squad_models")
-    entry = require_key(units_cache, str(unit_id))
+    # Escouade éliminée : retirée de units_cache par update_units_cache_hp quand HP=0.
+    # Aucune figurine vivante → aucun footprint.
+    entry = units_cache.get(str(unit_id))
+    if entry is None:
+        return
     squad_orientation = int(require_key(entry, "orientation"))
     for mid in require_key(squad_models, str(unit_id)):
         model = models_cache.get(mid)

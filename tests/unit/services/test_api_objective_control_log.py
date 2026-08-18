@@ -422,6 +422,28 @@ def test_board_emptied_within_the_turn_says_so_again():
     assert "aucun objectif disputé" in _messages(gs)[0]
 
 
+def test_eliminated_unit_absent_from_units_cache_does_not_crash():
+    """Régression : une escouade éliminée reste dans `units` mais est retirée de `units_cache`
+    par `update_units_cache_hp`. `iter_living_model_footprints` ne doit pas crasher avec
+    ConfigurationError sur la clé manquante, il doit juste ne rien yielder."""
+    gs = _game_state(
+        detail={
+            "obj_a": {
+                "player_1_oc": 0,
+                "player_2_oc": 0,
+                "controller": None,
+                "previous_controller": None,
+            }
+        },
+        units=[{"id": "u1", "player": 1}],
+        models={"u1": (10, 10)},
+    )
+    # Simuler l'élimination : retrait de units_cache (comportement de update_units_cache_hp)
+    del gs["units_cache"]["u1"]
+    # Ne doit pas lever d'exception
+    _log_objective_control_snapshot(_EngineStub(gs))
+
+
 def test_a_held_objective_without_oc_is_not_silence():
     """Méthode `secured` (14.03) : le contrôle PERSISTE après le départ des figurines.
 
