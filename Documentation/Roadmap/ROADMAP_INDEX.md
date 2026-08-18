@@ -157,4 +157,4 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 | doc | Dette d'ancres G1/G2/G4 de V11_tranches §1bis | [doc.md#dette-tranches](doc.md#dette-tranches) |
 | doc | Bandeaux périmés V11_agent_rework §0bis (assumés depuis 2026-07-20) | [doc.md#bandeaux-0bis](doc.md#bandeaux-0bis) |
 | doc | §0.19 : les ✅ T2→T5 revérifiés par lecture seule | [doc.md#reverif-t2-t5](doc.md#reverif-t2-t5) |
-| training | Note `bot_eval_freq_normal` à réécrire avec coût mesuré | [training.md#note-eval-freq](training.md#note-eval-freq) |
+| training | ✅ Note `bot_eval_freq_normal` réécrite (2026-08-18) — d_bot_eval_seconds=98s, 5h54 pour 50k épisodes | — |

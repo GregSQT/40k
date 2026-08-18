@@ -71,7 +71,7 @@ Erreur-type de l'écart entre deux win-rates `combined` (6 bots) : ≈ `0,707/�
 ## Mesure de référence {#mesure}
 
 `x1_long` — solde §0.14, §0.67, critère T6 (via §10.6) d'un coup.
-À ce régime mesuré (4 h 01 pour 10 000 épisodes), les **50 000** épisodes du profil valent ≈ **20 h**.
+Durée mesurée du run x1_long 50 000 épisodes : **5 h 54** (2026-08-18). L'estimation antérieure de ~20 h (fondée sur 4 h 01 pour 10 000 épisodes extrapolée × 5) était fausse — un run neuf joue des parties courtes au début, la pente n'est pas linéaire.
 
 ---
 

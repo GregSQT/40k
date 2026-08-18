@@ -20,12 +20,6 @@ courbes**, un run séparé n'a plus d'objet sauf si celui-ci échoue.
 
 ---
 
-## Note `bot_eval_freq_normal` à réécrire {#note-eval-freq}
-
-La note fonde le réglage sur « 13 min l'unité » (commit `42326ed0`, jamais re-mesuré). L'évaluation finale du run du 2026-08-11 donne ~2 min 55 pour 600 épisodes — facteur ~4,5.
-
-**À faire** : lire `perf/d_bot_eval_seconds` et `perf/e_bot_eval_episodes_per_second` du prochain run nominal (pas `--step` ni `W40K_PERF_TIMING`, qui ralentissent), réécrire la note `bot_eval_freq_normal` de `x1_long` avec ce chiffre.
-
 ---
 
 ## É9 — Second siège + second scénario {#e9}
