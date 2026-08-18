@@ -2041,6 +2041,16 @@ class W40KEngine(gym.Env):
                     # sergents, armes spéciales). Cf. `_model_types_segment_for_unit`.
                     "model_types_segment": self._model_types_segment_for_unit(uid, unit_type),
                 })
+            # L19 — liens leader→bodyguard (règle 19). `attached_from` est posé par
+            # `_fold_attached_characters` sur chaque figurine character injectée dans un squad.
+            _squad_models = self.game_state.get("squad_models") or {}
+            _models_cache = self.game_state.get("models_cache") or {}
+            attached_info: Dict[str, str] = {}
+            for _sq_id, _mids in _squad_models.items():
+                for _mid in _mids:
+                    _mc = _models_cache.get(str(_mid))
+                    if isinstance(_mc, dict) and "attached_from" in _mc:
+                        attached_info[str(_mc["attached_from"])] = str(_sq_id)
             board_cols = self.game_state["board_cols"]
             board_rows = self.game_state["board_rows"]
             inches_to_subhex = self.game_state["inches_to_subhex"]
@@ -2075,6 +2085,7 @@ class W40KEngine(gym.Env):
                 },
                 scenario_path=scenario_path_logged,
                 run_rules=self._run_rules_for_step_log(),
+                attached_info=attached_info or None,
             )
 
         if self.game_state.get("deployment_type") == "active":
@@ -5583,6 +5594,9 @@ class W40KEngine(gym.Env):
         "strategic_reserves_timeout",
         # 08.03 / 01.07 — jet de commandement : pas une action d'agent.
         "battle_shock",
+        # L25 — 08.04 déclarations de command phase (Waaagh!, Oath of Moment) : pas des
+        # actions d'agent au sens step gym, ce sont des décisions hors-step.
+        "waaagh_call", "oath_selection",
     })
 
     _STEP_LOG_TYPE_MAP: Dict[str, str] = {
@@ -5626,6 +5640,10 @@ class W40KEngine(gym.Env):
         # n est pas une action d agent. Le formateur StepLogger produit la ligne :
         # « Unit N(c,r) BATTLE-SHOCK Roll:2D6=<n> vs Ld<n>+ → SHOCKED|OK ».
         "battle_shock": "battle_shock",
+        # L25 — 08.04 : déclaration Waaagh! (Orks) et désignation Oath of Moment (SM).
+        # Non-incrementants : décisions hors-step de command phase, pas des actions gym.
+        "waaagh_call": "waaagh_call",
+        "oath_selection": "oath_selection",
     }
 
     # Le moteur emet un seul type "move" ; la nuance vit dans move_type (cf. move_type_map du
@@ -5659,6 +5677,10 @@ class W40KEngine(gym.Env):
         # tests/unit/ai/test_step_log_weapon_rule_tokens.py. Cf. V11 §0hist.38.
         "saveSkipped": "save_skipped",
         "saveSkipReason": "save_skip_reason",
+        # L27 — nom de la capacite de relance de sauvegarde (reroll_1_save_fight) cote CIBLE.
+        # Absent au tir (la relance de sauvegarde combat n'existe qu'en melee), None si aucune
+        # relance n'a eu lieu. Utilise par le segment Save de FOUGHT.
+        "saveAbility": "save_ability_display_name",
         # Nom de l abilite d unite qui a ouvert la relance de blessure, quand elle a
         # EFFECTIVEMENT eu lieu (le socle trace la cause, `_manual_roll_intent` la nomme).
         "woundAbility": "wound_ability_display_name",
@@ -5888,6 +5910,10 @@ class W40KEngine(gym.Env):
         _indirect_fail_below = raw_log.get("indirectFireFailBelow")  # get allowed
         if _indirect_fail_below is not None:
             details["indirect_fire_fail_below"] = int(_indirect_fail_below)
+        # L14 — [FIGHTS FIRST] 24.13 / 11.04 : l'unite a charge ce tour.
+        # Pose uniquement en combat (ctx.log_type == "combat") par _emit_squad_shoot_log.
+        if raw_log.get("fightsFirst"):  # get allowed
+            details["fights_first"] = True
         # [ANTI-X Y+] 24.03 : keyword de l instance retenue + seuil DECLARE par l arme. Les deux
         # voyagent ENSEMBLE — un keyword sans seuil ecrirait `[ANTI-INFANTRY:None+]`, une valeur
         # par defaut deguisee en donnee. `require_key` sur le second : le producteur les pose
@@ -6207,6 +6233,8 @@ class W40KEngine(gym.Env):
             ("targetId", "target_id"),
             ("weaponName", "weapon_name"),
             ("charge_roll", "charge_roll"),
+            # L28 — jet AVANT relance de charge, None si aucune relance.
+            ("charge_roll_initial", "charge_roll_initial"),
             ("charge_failed_reason", "charge_failed_reason"),
             # Distances 11.04, en pouces. Traduites ici comme tout le reste : sans ce mapping,
             # les champs poses par les sept sites de charge n'atteindraient jamais step.log.

@@ -2901,6 +2901,8 @@ def charge_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> Tupl
         not valid_targets and charge_roll is not None and _charge_override is None
         and unit_can_reroll_charge(game_state, unit_id)
     ):
+        # L28 — conserver le jet initial avant relance pour le token [REROLLED:<n>].
+        game_state.setdefault("_charge_initial_rolls", {})[str(unit_id)] = charge_roll
         charge_roll = roll_charge_distance(game_state, unit_id, previous_roll=charge_roll)
         game_state["charge_roll_values"][unit_id] = charge_roll
         max_distance_subhex = _charge_budget_subhex(game_state, unit_id, charge_roll)
@@ -2934,6 +2936,8 @@ def charge_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> Tupl
                     "unitId": unit["id"],
                     "player": unit["player"],
                     "charge_roll": charge_roll,
+                    # L28 — nettoyage (valeur ignorée sur charge_fail, le step.log ne la formate pas).
+                    "charge_roll_initial": game_state.get("_charge_initial_rolls", {}).pop(str(unit["id"]), None),
                     "charge_failed": True,
                     "timestamp": "server_time",
                     **_charge_dist,
@@ -3434,6 +3438,8 @@ def charge_roll_for_activation(game_state: Dict[str, Any], squad_id: str) -> int
             charge_target_is_reachable(game_state, squad_id, esid, charge_roll)
             for esid in candidates
         ):
+            # L28 — même patron que le chemin PvP.
+            game_state.setdefault("_charge_initial_rolls", {})[str(squad_id)] = charge_roll
             charge_roll = roll_charge_distance(game_state, squad_id, previous_roll=charge_roll)
     rolls[squad_id] = int(charge_roll)
     return int(charge_roll)
@@ -4463,6 +4469,8 @@ def charge_target_selection_handler(game_state: Dict[str, Any], unit_id: str, ac
                 "player": unit["player"],
                 "targetId": target_id,
                 "charge_roll": charge_roll,
+                # L28 — nettoyage.
+                "charge_roll_initial": game_state.get("_charge_initial_rolls", {}).pop(str(unit["id"]), None),
                 "charge_failed": True,
                 "timestamp": "server_time",
                 **_charge_dist,
@@ -5917,6 +5925,8 @@ def charge_commit_move_plan_handler(
             "toRow": dest_row,
             "targetId": target_id,
             "charge_roll": charge_roll,
+            # L28 — jet AVANT relance, None si aucune relance n'a eu lieu.
+            "charge_roll_initial": game_state.get("_charge_initial_rolls", {}).pop(str(unit["id"]), None),
             # Consomme par `_build_step_log_details` -> `step_logger` : c'est CE champ, pas le
             # texte du `message`, qui fait apparaitre `[FLY]` dans step.log (le formateur
             # reecrit integralement la ligne de charge).
@@ -6045,6 +6055,8 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
                 "player": unit["player"],
                 "targetId": target_id,
                 "charge_roll": charge_roll,
+                # L28 — nettoyage.
+                "charge_roll_initial": game_state.get("_charge_initial_rolls", {}).pop(str(unit["id"]), None),
                 "charge_failed": True,
                 "timestamp": "server_time",
                 **_charge_dist,
@@ -6190,6 +6202,8 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
             "toRow": dest_row,
             "targetId": target_id,
             "charge_roll": charge_roll,
+            # L28 — jet AVANT relance, None si aucune relance n'a eu lieu.
+            "charge_roll_initial": game_state.get("_charge_initial_rolls", {}).pop(str(unit["id"]), None),
             # Consomme par `_build_step_log_details` -> `step_logger` : c'est CE champ, pas le
             # texte du `message`, qui fait apparaitre `[FLY]` dans step.log (le formateur
             # reecrit integralement la ligne de charge).

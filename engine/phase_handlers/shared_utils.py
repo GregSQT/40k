@@ -9062,6 +9062,13 @@ def _emit_squad_shoot_log(game_state: Dict[str, Any], g: Dict[str, Any], ctx: Ma
         # defaut masquait ici une absence qui ne peut pas survenir, et aurait rendu un log de
         # tir sans tireur au lieu de lever.
         "shooterModels": list(require_key(g, "shooter_mids")),
+        # L14 — [FIGHTS FIRST] 24.13 / 11.04 : True si l'attaquant a charge ce tour (melee
+        # seulement). Inligne `is_fights_first` pour eviter l'import circulaire shared_utils
+        # ← fight_handlers. `units_charged` est garanti present en phase de combat.
+        "fightsFirst": (
+            atk_unit is not None
+            and str(require_key(atk_unit, "id")) in {str(uid) for uid in game_state.get("units_charged", [])}
+        ) if ctx.log_type == "combat" else None,
         "targetId": target_sid_g,
         "weaponName": weapon_name_g if weapon_name_g else None,
         "targetUnitType": tgt_unit_type_g,

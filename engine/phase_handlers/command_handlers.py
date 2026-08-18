@@ -10,6 +10,7 @@ before the movement phase. In Phase 2, the agent may take zone intent free steps
 
 from typing import Dict, List, Tuple, Set, Optional, Any
 from shared.data_validation import require_key
+from engine.action_log_utils import append_action_log
 from engine.game_state import (
     CORE_CP_GAIN_PER_COMMAND_PHASE, GameStateManager, gain_command_points,
     WAAAGH_FACTION_KEYWORD,
@@ -451,6 +452,13 @@ def apply_waaagh_call_decision(game_state: Dict[str, Any], player: int, called: 
     )
     if called:
         call_waaagh(game_state, int(player))
+        append_action_log(game_state, {
+            "type": "waaagh_call",
+            "unitId": f"P{int(player)}",
+            "player": int(player),
+            "phase": "command",
+            "turn": game_state.get("turn", 0),  # get allowed
+        })
 
 
 def apply_oath_selection(game_state: Dict[str, Any], player: int, target_unit_id: str) -> None:
@@ -466,6 +474,14 @@ def apply_oath_selection(game_state: Dict[str, Any], player: int, target_unit_id
             f"{game_state['pending_oath_selection']}, pas a {player}."
         )
     set_oath_target(game_state, int(player), str(target_unit_id))
+    append_action_log(game_state, {
+        "type": "oath_selection",
+        "unitId": f"P{int(player)}",
+        "player": int(player),
+        "phase": "command",
+        "turn": game_state.get("turn", 0),  # get allowed
+        "targetId": str(target_unit_id),
+    })
 
 
 def command_build_activation_pool(game_state: Dict[str, Any]) -> None:
