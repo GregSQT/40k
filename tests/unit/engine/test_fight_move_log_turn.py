@@ -17,6 +17,7 @@ from typing import Any, Dict
 import pytest
 
 from engine.phase_handlers.fight_handlers import _append_fight_move_log
+from engine.w40k_core import W40KEngine
 from shared.data_validation import ConfigurationError
 
 
@@ -75,41 +76,30 @@ def test_fight_move_log_stores_captured_models_segment() -> None:
     assert entry.get("models_segment") == captured_seg
 
 
-def test_build_step_log_details_prefers_captured_models_segment() -> None:
-    """Le segment pré-capturé dans raw_log doit primer sur _models_segment_for_unit au flush.
-
-    Sans la branche `if 'models_segment' in raw_log`, _build_step_log_details appellerait
-    _models_segment_for_unit — qui lit les positions COURANTES, soit post-consolidation pour
-    une ligne pile-in émise juste avant dans le même _fight_v11_gym_settle. Ce test tombe si
-    la branche est retirée : _Bridge renvoie une valeur distincte, la comparaison échoue.
-    """
-    from engine.w40k_core import W40KEngine
-
-    class _Bridge:
-        def _models_segment_for_unit(self, unit_id: str) -> str:
-            return "[MODELS: LIVE_POST_CONSO]"
-
-    captured = "[MODELS: 7#0@(4,4)]"
-    details = W40KEngine._build_step_log_details.__get__(_Bridge())(
-        {"unitId": "7", "turn": 3, "models_segment": captured},
-        3,
-    )
-    assert details["models_segment"] == captured, (
-        "_build_step_log_details a appelé _models_segment_for_unit au lieu de lire "
-        "raw_log['models_segment'] : la branche if a été retirée"
-    )
-
-
-def test_build_step_log_details_falls_back_to_live_segment_when_absent() -> None:
-    """Sans models_segment dans raw_log, _models_segment_for_unit est appelé (branche else)."""
-    from engine.w40k_core import W40KEngine
-
-    class _Bridge:
-        def _models_segment_for_unit(self, unit_id: str) -> str:
-            return "[MODELS: LIVE]"
-
-    details = W40KEngine._build_step_log_details.__get__(_Bridge())(
+@pytest.mark.parametrize("raw_log, bridge_return, expected", [
+    (
+        {"unitId": "7", "turn": 3, "models_segment": "[MODELS: 7#0@(4,4)]"},
+        "[MODELS: LIVE_POST_CONSO]",
+        "[MODELS: 7#0@(4,4)]",
+    ),
+    (
         {"unitId": "7", "turn": 2},
-        2,
-    )
-    assert details["models_segment"] == "[MODELS: LIVE]"
+        "[MODELS: LIVE]",
+        "[MODELS: LIVE]",
+    ),
+])
+def test_build_step_log_details_models_segment(
+    raw_log: Dict[str, Any], bridge_return: str, expected: str
+) -> None:
+    """raw_log['models_segment'] prime sur _models_segment_for_unit ; fallback sinon.
+
+    Sans la branche `if 'models_segment' in raw_log`, le cas [0] échoue : _Bridge renvoie
+    LIVE_POST_CONSO mais le capturé (pré-consolidation) aurait dû être conservé.
+    """
+
+    class _Bridge:
+        def _models_segment_for_unit(self, unit_id: str) -> str:
+            return bridge_return
+
+    details = W40KEngine._build_step_log_details.__get__(_Bridge())(raw_log, raw_log["turn"])
+    assert details["models_segment"] == expected
