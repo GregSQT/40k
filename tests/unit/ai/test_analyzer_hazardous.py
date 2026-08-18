@@ -418,5 +418,10 @@ def test_hazardous_pas_de_faux_positif_quand_plasma_model_meurt_sous_la_mw(tmp_p
         "PlasmaModel (1#0, HP=1) porte une arme HAZARDOUS : la MW qui le tue ne doit pas "
         "déclencher hazardous_no_hazardous_weapon — le contrôle doit avoir lieu AVANT les dégâts."
     )
+    assert "1" in stats["wounded_enemies"][1], (
+        "PlasmaModel (1#0, HP=1) doit effectivement mourir sous la MW HAZARDOUS : "
+        "wounded_enemies[1] doit contenir '1' (chemin MODEL SLAIN de _apply_damage_and_handle_death). "
+        "Si ce chemin est court-circuité, la première assertion reste verte mais celle-ci rougit."
+    )
 
 
