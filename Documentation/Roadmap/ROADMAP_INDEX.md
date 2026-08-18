@@ -103,6 +103,9 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 | Sujets | Chantier | Fichier |
 |---|---|---|
 | analyzer | ✅ PROJ.1.4 double_pile_in corrigé (2026-08-18) — overrun 12.06 loggué \"OVERRUN PILED IN\", faux positifs éliminés | —  |
+| analyzer | ✅ Réserves PvP 04b tests code-review corrigés (2026-08-18) — symétrie garde, formule sentinelle, commentaire xdist | — |
+| analyzer | ✅ step_logger [DESPERATE ESCAPE] vs [HAZARDOUS] séparés (2026-08-18) — roll_hazard_for_unit tag distinct 09.07/24.15 | — |
+| analyzer | ✅ analyzer_core branche [DESPERATE ESCAPE] (2026-08-18) — _apply_damage_and_handle_death appelée, HP/kill tracking opérationnel ; constante HAZARD_CONTEXT_DESPERATE_ESCAPE partagée | — |
 | analyzer | Champs manquants `step.log` L6→L28 (17 restantes après livraison L14/L19/L22/L25/L27/L28 le 2026-08-18) | [analyzer.md#champs-step-log](analyzer.md#champs-step-log) |
 | analyzer | Corpus de règles vérifiable | [analyzer.md#corpus-regles](analyzer.md#corpus-regles) |
 | front | Tests front T2b/T3a/T7 + couches B/C | [front.md#tests](front.md#tests) |
