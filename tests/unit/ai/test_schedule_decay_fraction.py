@@ -333,6 +333,25 @@ LONG_PROFILE_BOT_EVAL_INTERMEDIATE = {"x1_long": 30, "x5_long": 100}
 #: 50 000 épisodes → 5 points, fenêtre de 3 (3 positions).
 LONG_PROFILE_ROBUST_WINDOW = {"x1_long": 3, "x5_long": 5}
 
+#: `eval_episodes` ATTENDU des profils `_long` et de leurs références. Épinglé pour la même raison
+#: que les tables ci-dessus : un glissement silencieux du nombre d'épisodes holdout changerait la
+#: puissance statistique du signal sans rien casser dans la comparaison en bloc.
+#: x1_long=100 vs x1=50 : signal plus fort sur le profil de mesure ;
+#: x5_long=10 = x5_new=10 : la longueur du run n'impose pas davantage d'épisodes holdout à x5.
+LONG_PROFILE_EVAL_EPISODES: dict[str, int] = {"x1_long": 100, "x5_long": 10}
+REFERENCE_EVAL_EPISODES: dict[str, int] = {"x1": 50, "x5_new": 10}
+
+#: `model_gating_enabled` ATTENDU de chaque profil `_long`. Lié à `save_best_robust` : un profil
+#: qui ne sélectionne rien (save_best_robust=false) n'a aucun modèle candidat à filtrer, donc le
+#: gate n'y a pas de sens. x1_long active le gate (save_best_robust=true) ; x5_long ne le fait pas
+#: encore — ce n'est pas un oubli, c'est une décision à date, et cette table en est le verrou.
+LONG_PROFILE_MODEL_GATING_ENABLED: dict[str, bool] = {"x1_long": True, "x5_long": False}
+
+#: `model_gating_min_benchmark_floor` ATTENDU quand le gate est actif. Absent des profils où
+#: model_gating_enabled=false (x5_long) : la clé n'y a aucun effet et n'est pas requise.
+#: x1_long=0.90, MESURÉ le 2026-08-02 (vs_control 0.71, seuil franchi).
+LONG_PROFILE_MODEL_GATING_BENCHMARK_FLOOR: dict[str, float] = {"x1_long": 0.90}
+
 
 @pytest.mark.parametrize(
     ("ref_name", "long_name"), [("x1", "x1_long"), ("x5_new", "x5_long")]
@@ -357,6 +376,8 @@ def test_long_profile_is_its_reference_recalibrated(ref_name: str, long_name: st
     assert _comparable(long_, length_dependent) == _comparable(ref, length_dependent)
 
     assert long_["total_episodes"] == LONG_PROFILE_EPISODES[long_name]
+    assert long_["eval_episodes"] == LONG_PROFILE_EVAL_EPISODES[long_name]
+    assert ref["eval_episodes"] == REFERENCE_EVAL_EPISODES[ref_name]
     # Les deux rampes ont des `decay_fraction` DISTINCTES, et c'est délibéré : elles ne servent
     # pas la même chose. Ce sont des FRACTIONS du run, donc les deux longueurs les partagent :
     # l'entropie s'arrête aux 40 % (20k sur x1_long) parce qu'on veut que la politique cesse
@@ -449,6 +470,15 @@ def test_long_profile_is_its_reference_recalibrated(ref_name: str, long_name: st
     assert _resolved_cb(long_cb, "save_best_robust") is True, (
         "un run de mesure sélectionne son meilleur modèle"
     )
+    # model_gating_enabled : lié à save_best_robust (cf. commentaire dans `overridden`).
+    # Les deux profils de référence n'activent pas le gate (save_best_robust=false) — valeur
+    # pinned sans table, elle est identique pour tous les profils courts.
+    assert _resolved_cb(long_cb, "model_gating_enabled") == LONG_PROFILE_MODEL_GATING_ENABLED[long_name]
+    assert _resolved_cb(ref_cb, "model_gating_enabled") is False
+    # model_gating_min_benchmark_floor : requis seulement quand le gate est actif ; absent des
+    # profils où model_gating_enabled=false, donc vérification conditionnelle.
+    if _resolved_cb(long_cb, "model_gating_enabled"):
+        assert long_cb.get("model_gating_min_benchmark_floor") == LONG_PROFILE_MODEL_GATING_BENCHMARK_FLOOR[long_name]
     # …et « sélectionne » doit vouloir dire quelque chose. La fenêtre GLISSE sur les points de
     # mesure : à `total // freq` points, elle occupe `points - window + 1` positions. Une seule
     # position, c'est la dernière, donc le best model EST le modèle final — le mécanisme tourne
