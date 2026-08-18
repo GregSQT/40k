@@ -5609,6 +5609,7 @@ export default function Board({
         // Flux UNIQUE assign+validate pour TOUTE unité éligible (y compris mono-fig mono-arme).
         // Pas de flux de tir legacy direct, pas de fallback : un seul chemin, cohérent.
         const own = findOwnFig(col, row);
+        console.log("[SHOOT-DBG] onPointerDown hit:", { col, row, own, eligibleUnitIds: [...eligibleUnitIds] });
         if (own && eligibleUnitIds.includes(Number(own.uid))) {
           e.stopImmediatePropagation();
           const now = e.timeStamp;
