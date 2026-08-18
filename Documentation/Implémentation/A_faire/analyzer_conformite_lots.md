@@ -25,7 +25,7 @@ sait pas le dire ».
 ## 2. Hors périmètre de ce chantier
 
 - **`[INDIRECT FIRE]` 24.19** — pièce 6 du chantier `10.07`, déjà ouvert
-  → [`indirect_fire_10_07.md`](indirect_fire_10_07.md). ⚠️ La règle JOUE depuis le 2026-08-16
+  → [`indirect_fire_10_07.md`](../Implémenté/indirect_fire_10_07.md). ⚠️ La règle JOUE depuis le 2026-08-16
   sans que le journal le dise : une ligne de tir indirect rend `Hit 6(3+->6+)` sans que rien ne
   distingue le modificateur de la règle de celui de la datasheet.
 - **`[LANCE]` 24.21** — règle non implémentée dans le moteur ; son token n'est pas un travail de

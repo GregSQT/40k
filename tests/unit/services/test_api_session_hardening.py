@@ -139,7 +139,7 @@ class TestReferenceScriptMatchesProduction:
     def test_reference_script_produces_the_production_schema(self, tmp_path, monkeypatch):
         script = (
             Path(__file__).resolve().parents[3]
-            / "Documentation" / "Memoire" / "Annexe_script_BDD_auth.sql"
+            / "Documentation" / "Memoire RNCP" / "Annexe_script_BDD_auth.sql"
         )
         assert script.exists(), f"script de référence introuvable : {script}"
 
