@@ -6258,7 +6258,15 @@ class W40KEngine(gym.Env):
             value = raw_log.get(src)  # get allowed
             if value is not None:
                 details[dst] = value
-        details["models_segment"] = self._models_segment_for_unit(unit_id)
+        # Préférer le segment pré-capturé (pile-in/consolidation gym) au segment lu en temps
+        # réel. Cf. `_gym_commit_fight_move` : le segment est capturé juste après commit_move
+        # pour éviter qu'un flush tardif (après enchaînement pile-in+consolidation dans le même
+        # `_fight_v11_gym_settle`) ne lise des positions post-consolidation pour une ligne
+        # pile-in.
+        details["models_segment"] = (
+            raw_log["models_segment"] if "models_segment" in raw_log
+            else self._models_segment_for_unit(unit_id)
+        )
         return details
 
     def _gym_commit_fight_move(
@@ -6290,6 +6298,13 @@ class W40KEngine(gym.Env):
 
         commit_move(plan, gs, kind)
 
+        # Capturer le segment [MODELS:] IMMÉDIATEMENT après commit_move. Sans cette capture,
+        # `_build_step_log_details` appelle `_models_segment_for_unit` au moment du flush
+        # (après `_fight_v11_gym_settle` complet) : si pile-in et consolidation se sont
+        # enchaînées dans le même settle sans sélection FIGHT intermédiaire, le flush lit des
+        # positions post-consolidation et l'analyzer mesure pile-in + consolidation contre le
+        # seul budget pile-in (3") → faux positif PROJ.1.4.pile_in.
+        captured_seg = self._models_segment_for_unit(uid)
         uc_after = require_key(gs, "units_cache")[str(uid)]
         to_col, to_row = int(uc_after["col"]), int(uc_after["row"])
         move_details = [
@@ -6307,6 +6322,7 @@ class W40KEngine(gym.Env):
             from_col=from_col, from_row=from_row,
             to_col=to_col, to_row=to_row,
             move_details=move_details,
+            models_segment=captured_seg,
         )
 
     def _fight_v11_gym_settle(self) -> None:
