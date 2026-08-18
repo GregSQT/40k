@@ -4,6 +4,7 @@ WORKDIR /workspace
 
 # deps frontend
 COPY frontend/package.json frontend/package-lock.json /workspace/frontend/
+COPY scripts/link-root-node-modules.mjs /workspace/scripts/
 RUN cd /workspace/frontend && npm ci
 
 # repo complet (inclut shared/, scripts/, config/, etc.)
@@ -20,6 +21,11 @@ RUN apk add --no-cache \
         git cmake build-base openssl-dev pcre2-dev zlib-dev linux-headers \
     && git clone --recurse-submodules --depth 1 \
         https://github.com/google/ngx_brotli /tmp/ngx_brotli \
+    && cmake -S /tmp/ngx_brotli/deps/brotli \
+             -B /tmp/ngx_brotli/deps/brotli/out \
+             -DCMAKE_BUILD_TYPE=Release \
+             -DBUILD_SHARED_LIBS=OFF \
+    && make -C /tmp/ngx_brotli/deps/brotli/out -j"$(nproc)" \
     && wget -q "http://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" -P /tmp \
     && tar -xzf "/tmp/nginx-${NGINX_VERSION}.tar.gz" -C /tmp \
     && cd "/tmp/nginx-${NGINX_VERSION}" \

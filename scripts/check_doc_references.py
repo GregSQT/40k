@@ -736,15 +736,21 @@ def agent_profiles() -> dict[str, dict]:
 
 @functools.lru_cache(maxsize=1)
 def step_log_entries() -> tuple[int, int]:
-    """(nombre d'entrées, plus grand index) du tableau §7 d'`analyzer_couverture`."""
+    """(nombre d'entrées ACTIVES, plus grand index TOUS) du tableau §7 d'`analyzer_couverture`.
+
+    count = entrées non barrées (encore ouvertes) — sert à vérifier les décomptes dans la roadmap.
+    largest = index max toutes entrées confondues (y compris barrées) — sert à `is_a_bare_anchor`
+    pour ne pas traiter un nom d'entrée livré comme un numéro de ligne.
+    """
     text = COUVERTURE.read_text(encoding="utf-8")
     section = re.search(r"^## 7\..*?(?=^## 8\.)", text, re.S | re.M)
     if section is None:
         raise SourceUnavailable("analyzer_couverture.md : §7 introuvable")
-    indexes = sorted({int(m) for m in re.findall(r"^\|\s*(?:~~)?`?L(\d+)`?(?:~~)?\s*\|", section.group(0), re.M)})
-    if not indexes:
+    active = sorted({int(m) for m in re.findall(r"^\|\s*`?L(\d+)`?\s*\|", section.group(0), re.M)})
+    all_idx = sorted({int(m) for m in re.findall(r"^\|\s*(?:~~)?`?L(\d+)`?(?:~~)?\s*\|", section.group(0), re.M)})
+    if not all_idx:
         raise SourceUnavailable("analyzer_couverture.md : §7 ne porte aucune entrée `Ln`")
-    return len(indexes), max(indexes)
+    return len(active), max(all_idx)
 
 
 def integers_in(cell: str) -> list[int]:

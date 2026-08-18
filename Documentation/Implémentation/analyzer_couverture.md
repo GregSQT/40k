@@ -1151,7 +1151,7 @@ blessure critique n'a plus à être re-dérivée du tout (cf. §1.3).
 | ~~L19~~ | ~~**Attached units** : lien leader/support ↔ bodyguard~~ — **LIVRÉ le 2026-08-18** : entête `Attached: <leader_id>→<bodyguard_id>` dans `log_episode_start` via `attached_info` | 19.01, 19.02, 19.04, 24.22, 24.34 |
 | L20 | **Terrain** : catégorie et hauteur par hexe | entête `Terrain: <cat>@(c,r,h)…` | 13.02–13.11, 06.01, 22.05 (lève aussi 10 NON-TESTABLE) |
 | L21 | **Aircraft** : keyword et placement forcé en réserves | — | 23.01–23.04 |
-| ~~L22~~ | ~~**Segment `[MODELS:]` sur la ligne `REACTIVE MOVED`**~~ — **CONFIRMÉ présent** : émis via `_build_step_log_details` (models_segment universel) ; couvert par `test_analyzer_reactive_move_single_measure.py` | rend #7 per-figurine (03.04) et supprime V5 |
+| ~~L22~~ | ~~**Segment `[MODELS:]` sur la ligne `REACTIVE MOVED`**~~ — **CONFIRMÉ présent** : émis via `engine/w40k_core.py` (`_build_step_log_details`) (models_segment universel) ; couvert par `test_analyzer_reactive_move_single_measure.py` | rend #7 per-figurine (03.04) et supprime V5 |
 | L23 | **Type `surge` dans `_STEP_LOG_TYPE_MAP`** | — | 21.01, 21.02 |
 | L24 | **Producteur pour `skip`** (le formateur existe) | — | rend #52 atteignable |
 | ~~L25~~ | ~~**Capacités de commandement déclarées** (Waaagh! appelé, cible Oath of Moment)~~ — **LIVRÉ le 2026-08-18** : `P<n> COMMAND [WAAAGH!]` / `[OATH OF MOMENT] → Unit M` via `append_action_log` dans `command_handlers.py` | 08.04, 22.02, `waaagh`, `oath_of_moment` |

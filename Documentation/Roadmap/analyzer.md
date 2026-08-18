@@ -6,7 +6,7 @@ Découpage en 6 lots des trois sujets ci-dessous (ordre séquentiel imposé : to
 
 ## Champs manquants `step.log` {#champs-step-log}
 
-**15** entrées restantes (L6–L28, hors L14/L19/L22/L23/L24/L25/L27/L28 résolues — voir ci-dessous). L1–L5 livrées. Chaque champ se livre seul et fait passer des règles de « non vérifiable » à « vérifiable ».
+**17** entrées restantes (L6–L28, hors L14/L19/L22/L25/L27/L28 résolues — voir ci-dessous). L1–L5 livrées. Chaque champ se livre seul et fait passer des règles de « non vérifiable » à « vérifiable ».
 
 À piocher quand un contrôle analyzer manque de données.
 
