@@ -5334,6 +5334,11 @@ def roll_hazard_for_unit(
         "hazardousMortalWounds": int(total_wounds),
         "result": f"{total_wounds} MW",
         "hazardDetails": details,
+        # Origine du jet : "Hazardous" (24.15 arme) ou "Desperate Escape" (09.07 fall-back).
+        # Propagé jusqu'au step.log pour distinguer les deux cas : le formateur émet
+        # [HAZARDOUS] pour 24.15 et [DESPERATE ESCAPE] pour 09.07, ce qui permet à l'analyzer
+        # de ne vérifier l'armurerie que pour les vrais jets d'arme HAZARDOUS.
+        "hazardContext": context_label,
     }
     # Émission AVANT toute attribution : le jet et son résultat sont visibles dans le combat log
     # au moment où le joueur doit choisir les pertes (cf. commentaire ci-dessus).

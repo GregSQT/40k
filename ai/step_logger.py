@@ -1185,7 +1185,9 @@ class StepLogger:
             if not isinstance(unit_with_coords, str) or not unit_with_coords:
                 raise KeyError("Hazardous action missing required unit_with_coords")
             hazardous_mortal_wounds = require_key(details, "hazardous_mortal_wounds")
-            return f"Unit {unit_with_coords} SUFFERS {hazardous_mortal_wounds} Mortal Wounds [HAZARDOUS]"
+            hazard_context = details.get("hazard_context", "Hazardous")
+            tag = "[DESPERATE ESCAPE]" if hazard_context == "Desperate Escape" else "[HAZARDOUS]"
+            return f"Unit {unit_with_coords} SUFFERS {hazardous_mortal_wounds} Mortal Wounds {tag}"
             
         elif action_type == "shoot_summary":
             # Summary of multi-shot sequence

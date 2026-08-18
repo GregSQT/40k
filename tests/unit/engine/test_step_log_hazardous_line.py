@@ -90,3 +90,33 @@ def test_le_payload_du_moteur_porte_bien_les_deux_champs() -> None:
     assert '"hazardousMortalWounds"' in payload, (
         "le payload hasardeux ne porte plus le nombre de blessures mortelles"
     )
+    assert '"hazardContext": context_label' in payload, (
+        "le payload hasardeux ne porte plus hazardContext — "
+        "l'analyzer ne peut plus distinguer Desperate Escape de HAZARDOUS"
+    )
+
+
+def test_desperate_escape_utilise_tag_distinct() -> None:
+    """VERROU : un jet de Desperate Escape (09.07) doit produire [DESPERATE ESCAPE]
+    dans step.log, jamais [HAZARDOUS] — pour que l'analyzer n'exige pas d'arme HAZARDOUS."""
+    logger = StepLogger(output_file="/dev/null", enabled=True, buffer_size=1)
+    payload = _payload(hazardContext="Desperate Escape")
+    msg = logger._format_replay_style_message("3", "hazardous", _details(payload))
+    assert "[DESPERATE ESCAPE]" in msg, msg
+    assert "[HAZARDOUS]" not in msg, msg
+
+
+def test_hazardous_weapon_utilise_tag_hazardous() -> None:
+    """VERROU jumeau : un jet d'arme HAZARDOUS (24.15) doit garder [HAZARDOUS]."""
+    logger = StepLogger(output_file="/dev/null", enabled=True, buffer_size=1)
+    payload = _payload(hazardContext="Hazardous")
+    msg = logger._format_replay_style_message("3", "hazardous", _details(payload))
+    assert "[HAZARDOUS]" in msg, msg
+    assert "[DESPERATE ESCAPE]" not in msg, msg
+
+
+def test_sans_hazard_context_tag_hazardous_par_defaut() -> None:
+    """Rétro-compatibilité : un payload sans hazardContext produit [HAZARDOUS] (défaut)."""
+    logger = StepLogger(output_file="/dev/null", enabled=True, buffer_size=1)
+    msg = logger._format_replay_style_message("3", "hazardous", _details(_payload()))
+    assert "[HAZARDOUS]" in msg, msg
