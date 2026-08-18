@@ -2495,6 +2495,88 @@ def _fight_pile_in_closest_tier_ids(
     return tier
 
 
+def pile_in_move_destinations_12_03(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    target_ids: List[str],
+) -> Set[Tuple[int, int]]:
+    """Pool d'ancres valides pour le pile-in AUTO (12.03 WHILE + AFTER par-figurine).
+
+    Génère les positions d'ancre d'escouade dans le budget de 3" par TRANSLATION RIGIDE,
+    filtrées par :
+      - WHILE (12.03) : empreinte de l'unité STRICTEMENT plus proche du palier le plus proche
+        parmi ``target_ids`` qu'à son départ (mesure par-unité, pas par-figurine) ;
+      - AFTER (12.03) : chaque figurine qui partait engagée avec une unité ennemie reste
+        engagée avec CETTE unité après la translation (contrôle par-figurine, pas par-unité).
+
+    ``target_ids`` = unités ennemies déclarées comme cibles du pile-in. Lecture pure.
+    """
+    from collections import deque
+    from engine.hex_utils import min_distance_between_sets
+    from .shared_utils import get_engagement_zone
+
+    uid = str(require_key(unit, "id"))
+    units_cache = require_key(game_state, "units_cache")
+    entry = units_cache.get(uid)
+    if entry is None:
+        return set()
+
+    closest_tier = _fight_pile_in_closest_tier_ids(game_state, unit, target_ids)
+    if not closest_tier:
+        return set()
+
+    tier_fps: List[Set[Tuple[int, int]]] = [
+        set(entry_footprint(require_unit_from_cache(str(tid), game_state, "pile_in_move_destinations_12_03")))
+        for tid in closest_tier
+    ]
+
+    start_fp = set(entry_footprint(entry))
+    start_d_min = min(min_distance_between_sets(start_fp, tfp) for tfp in tier_fps)
+    if start_d_min <= 0:
+        return set()
+
+    start_engagements = _fight_model_start_engagements(game_state, unit)
+    ez = int(get_engagement_zone(game_state))
+
+    budget = 3 * int(require_key(game_state, "inches_to_subhex"))
+    board_cols = int(require_key(game_state, "board_cols"))
+    board_rows = int(require_key(game_state, "board_rows"))
+
+    anchor_col = int(require_key(entry, "col"))
+    anchor_row = int(require_key(entry, "row"))
+
+    visited: Set[Tuple[int, int]] = {(anchor_col, anchor_row)}
+    queue: deque = deque([(anchor_col, anchor_row, 0)])
+    valid: Set[Tuple[int, int]] = set()
+
+    while queue:
+        col, row, dist = queue.popleft()
+
+        if (col, row) != (anchor_col, anchor_row):
+            placements = _fight_rigid_model_placements(game_state, uid, col, row)
+            cand_synths = _fight_synth_cache_entries_at_footprint(
+                unit, game_state, col, row, model_placements=placements
+            )
+            cand_fp: Set[Tuple[int, int]] = set()
+            for s in cand_synths:
+                cand_fp |= set(entry_footprint(s))
+
+            d_cand = min(min_distance_between_sets(cand_fp, tfp) for tfp in tier_fps)
+            if d_cand < start_d_min:
+                if not start_engagements or _fight_models_keep_start_engagements(
+                    game_state, uid, start_engagements, placements, ez
+                ):
+                    valid.add((col, row))
+
+        if dist < budget:
+            for nc, nr in get_hex_neighbors(col, row):
+                if (nc, nr) not in visited and 0 <= nc < board_cols and 0 <= nr < board_rows:
+                    visited.add((nc, nr))
+                    queue.append((nc, nr, dist + 1))
+
+    return valid
+
+
 def _fight_pile_in_preview_plan(
     game_state: Dict[str, Any],
     squad_id: str,

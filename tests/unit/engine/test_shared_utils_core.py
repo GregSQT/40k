@@ -98,6 +98,7 @@ def test_update_units_cache_position_updates_existing_entry() -> None:
         "units_cache": {
             "u1": {"col": 1, "row": 2, "HP_CUR": 3, "player": 1, "BASE_SHAPE": "round", "BASE_SIZE": 1, "MODEL_HEIGHT": 2.5},
         },
+        "squad_models": {"u1": []},
         "config": {
             "game_rules": {"engagement_zone": 1, "engagement_zone_vertical": 5, "max_base_size_hex": 35},
             "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},

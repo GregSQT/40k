@@ -125,11 +125,11 @@ def test_move_type_maps_to_formatter_action_type(move_type, expected):
 
 
 def test_type_without_formatter_is_skipped_not_crashed():
-    """death/roll_info/battle_shock n'ont pas de formateur (_STEP_LOG_TYPE_MAP) : ignorés
-    volontairement. NB: pile_in/consolidation, eux, SONT journalisés (phase fight) — cf.
-    test_pile_in_is_logged_as_fight."""
+    """death/roll_info n'ont pas de formateur (_STEP_LOG_TYPE_MAP) : ignorés volontairement.
+    NB: pile_in/consolidation, eux, SONT journalisés (phase fight) — cf.
+    test_pile_in_is_logged_as_fight. battle_shock EST dans _STEP_LOG_TYPE_MAP (chantier L25)."""
     logger = _FakeStepLogger()
-    logs = [{"type": "death", "unitId": "2"}, {"type": "roll_info"}, {"type": "battle_shock"}]
+    logs = [{"type": "death", "unitId": "2"}, {"type": "roll_info"}]
     eng = _engine_stub(logs, logger)
     _drain(eng)
     assert logger.calls == []

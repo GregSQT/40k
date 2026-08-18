@@ -210,6 +210,14 @@ def _tracker_stub() -> W40KMetricsTracker:
         "wins_agent_p1": 0.0,
         "wins_agent_p2": 0.0,
     }
+    # Suivi des capacites par episode (chantier 06) — structure posee par __init__ a l'init
+    # du tracker. Le stub reproduit la forme exacte pour que `test_stub_matches_the_attributes`
+    # reste le verrou.
+    t._abilities_tracking = {
+        'total_episodes': 0,
+        'counts': {},
+        'exposures': {},
+    }
     # Etat zone-intent pose par sa PROPRE methode, comme __init__ le fait : c'est la seule
     # forme qui reste juste quand une fenetre y est ajoutee. Meme geste que le stub de
     # tests/unit/ai/test_zone_intent_metrics.py.

@@ -773,6 +773,10 @@ def test_squad_obs_size_target_matches_the_schema():
 
     Le retrain `--new` du lot §0.48 absorbe les deux.
 
+    `P3-4` — 16659 -> 16671. `DECISION_OPTION_CONT_SIZE = 2` s'ajoute aux candidats de décision
+    (champs ``role_tier_norm`` + ``dist_enemy_norm``). Contribution : 6 slots × 2 scalaires = +12.
+    Impose un retrain `--new`.
+
     Ce verrou valait 20768 tant que le point 3 restait ouvert : les quatre autres points ne
     touchent QUE le contenu de l'observation de déploiement, jamais sa taille — donc aucun modèle
     n'était invalidé par eux. Le point 3 ajoute le bloc « candidats de déploiement »
@@ -783,7 +787,7 @@ def test_squad_obs_size_target_matches_the_schema():
         DEPLOY_CAND_BIN_SIZE, DEPLOY_CAND_CONT_SIZE, N_DEPLOY_SLOTS,
     )
 
-    assert ObservationBuilder.SQUAD_OBS_SIZE_TARGET == 16659
+    assert ObservationBuilder.SQUAD_OBS_SIZE_TARGET == 16671
     assert N_DEPLOY_SLOTS * (DEPLOY_CAND_CONT_SIZE + DEPLOY_CAND_BIN_SIZE) == 96, (
         "le bloc candidat de déploiement a changé de taille : mettre à jour `obs_size` dans les "
         "7 profils de la config d'agent, et l'historique d'AI_OBSERVATION.md"
