@@ -8704,8 +8704,8 @@ def _select_allocation_model(
         idx, mid = item
         e = models_cache[mid]
         _role = e.get("role")
-        tier = ROLE_TIER[_role] if _role in ROLE_TIER else 0
-        return (tier, dist_cache.get(mid, 0), idx)
+        tier = ROLE_TIER[_role] if _role is not None else 0
+        return (tier, dist_cache[mid], idx)
 
     return min(enumerate(alive), key=_key)[1]
 
@@ -8741,19 +8741,18 @@ def _arm_allocation_model_decision(
     # figurines les plus sacrifiables (tier croissant, proximité ennemi croissante) pour
     # maximiser la diversité utile dans les traits continus présentés à l'agent.
     if len(alive_grp) > MAX_DECISION_OPTIONS:
-        alive_grp = sorted(
-            alive_grp,
-            key=lambda mid: (ROLE_TIER.get(models_cache[mid].get("role"), 0),
-                             dist_cache.get(mid, 0)),
-        )[:MAX_DECISION_OPTIONS]
+        def _sort_key(mid: str) -> tuple:
+            r = models_cache[mid].get("role")
+            return (ROLE_TIER[r] if r is not None else 0, dist_cache[mid])
+        alive_grp = sorted(alive_grp, key=_sort_key)[:MAX_DECISION_OPTIONS]
 
     options: List[Dict[str, Any]] = []
     options_cont: List[List[float]] = []
     for mid in alive_grp:
         e = models_cache[mid]
         _role = e.get("role")
-        tier = ROLE_TIER.get(_role, 0) if _role is not None else 0
-        d = dist_cache.get(mid, 0)
+        tier = ROLE_TIER[_role] if _role is not None else 0
+        d = dist_cache[mid]
         options.append({
             "label": str(e.get("modelId", mid)),
             "effect_ids": (),

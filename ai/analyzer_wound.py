@@ -269,8 +269,8 @@ def expected_wound_threshold(
     # ce qui doit être unique, c'est la valeur IMPRIMABLE — pas une étape de son calcul.
     oath = wound_bonus_applies(action_desc)
     # Magnitude du bonus de blessure Oath : lue dans la snapshot `oath_wound` (EFFECTS), jamais
-    # recodée. Fallback `or 1` : journaux antérieurs à l'émission de la clé (avant 2026-08-10).
-    oath_mag = (_effect_bonus(state, attacker_player, "oath_wound") or 1) if oath else 0
+    # recodée. Minimum 1 : journaux antérieurs au 2026-08-10 n'émettaient pas la clé → 0 lu → 1.
+    oath_mag = max(1, _effect_bonus(state, attacker_player, "oath_wound")) if oath else 0
     thresholds = set()
     for strength in strengths:
         threshold = calculate_wound_target(strength + bonus, toughness)

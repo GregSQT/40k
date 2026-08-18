@@ -19,7 +19,7 @@ from functools import wraps
 from contextlib import contextmanager
 from threading import RLock
 from datetime import date, datetime
-from typing import Any, Dict, List, Optional, Protocol, Tuple
+from typing import Any, Dict, List, Optional, Protocol, Tuple, overload
 from uuid import UUID, uuid4
 from flask import Flask, request, jsonify, send_file, Response, g
 from flask_cors import CORS
@@ -2112,7 +2112,11 @@ def _slide_session_cookie(response):
 
 
 @app.errorhandler(Exception)
-def handle_uncaught_exception(error: Exception):
+@overload
+def handle_uncaught_exception(error: HTTPException) -> HTTPException: ...
+@overload
+def handle_uncaught_exception(error: Exception) -> "tuple[Response, int]": ...
+def handle_uncaught_exception(error: Exception) -> "HTTPException | tuple[Response, int]":
     """Centralise toute exception non gérée : traceback complet dans le LOG serveur, réponse
     JSON générique porteuse d'un identifiant corrélable.
 

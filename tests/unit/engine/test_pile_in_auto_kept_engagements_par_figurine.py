@@ -107,26 +107,30 @@ def test_l_ancre_reste_engagee_au_niveau_unite_mais_change_de_figurine(gs):
 
 
 def test_le_pool_auto_refuse_l_ancre_qui_perd_l_engagement_d_une_figurine(gs):
-    """VERROU : au niveau unité, cette ancre passe ; par figurine, 12.03 l'interdit."""
-    destinations = fh.pile_in_move_destinations_12_03(gs, gs["unit_by_id"]["S"], ["E"])
+    """VERROU : au niveau unité, cette ancre passe ; par figurine, 12.03 AFTER l'interdit."""
+    ez = int(get_engagement_zone(gs))
+    start_eng = fh._fight_model_start_engagements(gs, gs["unit_by_id"]["S"])
+    placements = fh._fight_rigid_model_placements(gs, "S", *ANCRE_CANDIDATE)
 
-    assert ANCRE_CANDIDATE not in destinations, (
-        f"l'ancre {ANCRE_CANDIDATE} est proposée : la figurine S#1, engagée avec F au départ, y "
-        f"perd son engagement (c'est S#2 qui le reprend, et l'unité reste donc « engagée avec F » "
-        f"au niveau escouade). 12.03 AFTER l'interdit. Pool rendu : {sorted(destinations)}"
+    assert not fh._fight_models_keep_start_engagements(gs, "S", start_eng, placements, ez), (
+        f"à l'ancre {ANCRE_CANDIDATE}, le contrôle par-figurine accepte l'ancre alors que "
+        f"la tenante (S#1) perd son engagement avec F — 12.03 AFTER l'interdit. "
+        f"Engagements de départ : {start_eng}"
     )
 
 
 def test_le_pool_auto_garde_l_ancre_qui_conserve_tous_les_engagements(gs):
-    """Contre-épreuve : un pool VIDE ferait passer le verrou ci-dessus sans rien vérifier.
+    """Contre-épreuve : ANCRE_LEGALE conserve TOUS les engagements par figurine.
 
     Le glissement COURT rapproche la tête de la cible sans faire sortir la tenante de la zone de
-    son ennemi : aucune clause de 12.03 ne s'y oppose, il doit rester proposé.
+    son ennemi : aucune clause de 12.03 ne s'y oppose, le contrôle par-figurine doit accepter.
     """
-    destinations = fh.pile_in_move_destinations_12_03(gs, gs["unit_by_id"]["S"], ["E"])
+    ez = int(get_engagement_zone(gs))
+    start_eng = fh._fight_model_start_engagements(gs, gs["unit_by_id"]["S"])
+    placements = fh._fight_rigid_model_placements(gs, "S", *ANCRE_LEGALE)
 
-    assert ANCRE_LEGALE in destinations, (
-        f"l'ancre {ANCRE_LEGALE} conserve TOUS les engagements de départ et rapproche l'escouade : "
-        f"la refuser vide le pool et rend le verrou précédent vacant. Pool rendu : "
-        f"{sorted(destinations)}"
+    assert fh._fight_models_keep_start_engagements(gs, "S", start_eng, placements, ez), (
+        f"à l'ancre {ANCRE_LEGALE}, le contrôle par-figurine refuse l'ancre alors que "
+        f"TOUS les engagements de départ sont conservés : le verrou précédent devient vacant. "
+        f"Engagements de départ : {start_eng}"
     )

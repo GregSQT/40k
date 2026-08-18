@@ -4173,12 +4173,18 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
                     "Reduce robust_window, reduce bot_eval_freq, or increase total_episodes."
                 )
 
-    # Plancher benchmark §4.D — 0.0 = désarmé (défaut).
+    # Plancher benchmark §4.D — 0.0 = désarmé (paramètre optionnel).
     model_gating_min_benchmark_floor = float(
-        callback_params.get("model_gating_min_benchmark_floor", 0.0)
+        callback_params["model_gating_min_benchmark_floor"]
+        if "model_gating_min_benchmark_floor" in callback_params
+        else 0.0
     )
-    # Arrêt sur non-généralisation persistante §4.D — 0 = désarmé (défaut).
-    stop_on_no_generalization = int(callback_params.get("stop_on_no_generalization", 0))
+    # Arrêt sur non-généralisation persistante §4.D — 0 = désarmé (paramètre optionnel).
+    stop_on_no_generalization = int(
+        callback_params["stop_on_no_generalization"]
+        if "stop_on_no_generalization" in callback_params
+        else 0
+    )
 
     # Store final eval count for use after training completes
     training_config["_bot_eval_final"] = _resolve_callback_value("bot_eval_final")

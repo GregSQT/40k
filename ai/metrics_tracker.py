@@ -31,7 +31,7 @@ DUAL TIER SYSTEM (41 Total Metrics):
 """
 
 import numpy as np
-from collections import Counter, deque
+from collections import Counter, defaultdict, deque
 from torch.utils.tensorboard.writer import SummaryWriter
 import os
 from typing import Any, Deque, Dict, List, Optional, Protocol, Sequence, Tuple, Tuple
@@ -391,8 +391,8 @@ class W40KMetricsTracker:
         # Clé "exposures" : épisodes où la règle était dans le roster (numérateur du taux).
         self._abilities_tracking: Dict[str, Any] = {
             'total_episodes': 0,
-            'counts': {},    # rule_side -> int, cumulé
-            'exposures': {}, # rule_side -> int, cumulé
+            'counts': defaultdict(int),    # rule_side -> int, cumulé
+            'exposures': defaultdict(int), # rule_side -> int, cumulé
         }
 
 
@@ -1205,7 +1205,7 @@ class W40KMetricsTracker:
 
         for key, val in counts.items():
             count_int = int(val)
-            acc_counts[key] = acc_counts.get(key, 0) + count_int
+            acc_counts[key] += count_int
             # Courbe brute par épisode : utile pour détecter des pics d'utilisation.
             self.writer.add_scalar(f"abilities/{key}", float(count_int), self.episode_count)
 
@@ -1215,7 +1215,7 @@ class W40KMetricsTracker:
                 raise ValueError(
                     f"abilities_exposure['{key}'] doit être 0 ou 1 (reçu {exp_int})"
                 )
-            acc_exposures[key] = acc_exposures.get(key, 0) + exp_int
+            acc_exposures[key] += exp_int
             # Taux cumulé d'épisodes où la règle était dans le roster.
             exposure_rate = acc_exposures[key] / total_eps
             self.writer.add_scalar(

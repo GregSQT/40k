@@ -1997,8 +1997,8 @@ export const BoardReplay: React.FC = () => {
         boardConfigOverride={currentEpisode!.board}
         inchesToSubhexOverride={inchesToSubhexOverride}
         scenarioFileOverride={currentEpisode!.scenario_file}
-        wallHexesOverride={currentState.walls}
-        objectivesOverride={currentState.objectives}
+        wallHexesOverride={currentState!.walls}
+        objectivesOverride={currentState!.objectives}
         availableCellsOverride={(() => {
           const advanceBudgetForCells = resolveAdvanceMoveBudget(currentAction);
           if (
