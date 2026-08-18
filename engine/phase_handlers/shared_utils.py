@@ -12877,6 +12877,7 @@ def build_squad_action_mask(
         # contournement.
         from engine.phase_handlers.fight_handlers import (
             _fight_build_valid_target_pool,
+            _fight_v11_engaged_now,
             fight_v11_current_pool,
         )
         if (
@@ -12897,10 +12898,41 @@ def build_squad_action_mask(
                     mask[SQUAD_ACTION_FIGHT_SLOT_BASE + slot_i] = 1
                     opened += 1
             if opened == 0:
-                # Aucune cible : combat a vide (12.04/12.06). C'est un etat legal — l'escouade
-                # DOIT pouvoir se declarer, sans quoi elle resterait eligible sans action et la
-                # sous-phase ne se draine jamais (boucle infinie, meme motif que ci-dessus).
-                mask[SQUAD_ACTION_FIGHT_NO_TARGET] = 1
+                # Pool vide sur la position actuelle. En overrun 12.06 (a charge, non engagee),
+                # le commit execute d abord une pile-in avant de tester le pool — le masque doit
+                # reflechir l etat POST-pile-in pour rester en parite masque/commit.
+                if not fight_targets and not _fight_v11_engaged_now(game_state, unit):
+                    ov_plan = _fight_overrun_pile_in_plan(game_state, squad_id)
+                    if ov_plan is not None:
+                        from engine.spatial_relations import (
+                            get_engagement_zone as _gez,
+                            unit_entries_within_engagement_zone as _uiez,
+                        )
+                        models_cache = game_state.get("models_cache", {})  # get allowed
+                        ez = _gez(game_state)
+                        for slot_i, esid in enumerate(enemy_slot_ids[:SQUAD_ACTION_FIGHT_SLOT_COUNT]):
+                            if esid is None:
+                                continue
+                            target_entry = units_cache.get(str(esid))
+                            if target_entry is None:
+                                continue
+                            if any(
+                                _uiez(
+                                    _synth_model_entry(
+                                        game_state, squad_id, models_cache[mid], c, r, level=lv
+                                    ),
+                                    target_entry, ez,
+                                )
+                                for mid, c, r, lv in ov_plan
+                                if mid in models_cache
+                            ):
+                                mask[SQUAD_ACTION_FIGHT_SLOT_BASE + slot_i] = 1
+                                opened += 1
+                if opened == 0:
+                    # Aucune cible meme apres pile-in overrun : combat a vide (12.04/12.06).
+                    # L'escouade DOIT pouvoir se declarer, sans quoi elle resterait eligible
+                    # sans action et la sous-phase ne se draine jamais.
+                    mask[SQUAD_ACTION_FIGHT_NO_TARGET] = 1
             elif opened < len(fight_targets):
                 # Une cible legale sans slot serait INFRAPPABLE : troncature silencieuse interdite.
                 from engine.game_utils import add_debug_file_log

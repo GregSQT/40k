@@ -369,6 +369,60 @@ def test_overrun_pile_in_called_when_unengaged(melee_scenario_file):
     assert squad_id in calls, "overrun pile-in doit être tenté pour une escouade non engagée"
 
 
+def test_overrun_mask_opens_fight_slot_not_no_target():
+    """Rupture masque/commit overrun 12.06 : pool pré-pile-in vide → FIGHT_NO_TARGET → crash commit.
+
+    Unité non engagée qui a chargé, ennemi à 3" (>EZ=2, ≤pile_in=5). Avant le fix, le masque
+    ouvrait ACTION_FIGHT_NO_TARGET (pool 12.05 vide SUR la position actuelle). Au commit, le
+    moteur exécutait la pile-in overrun AVANT de tester le pool : l'ennemi devenait atteignable
+    et le commit levait « action combat a vide reçue … alors que le pool 12.05 offre ».
+
+    Après fix : le masque simule la pile-in overrun et ouvre le slot fight de l'ennemi accessible
+    post-pile-in → parité masque/commit rétablie.
+    """
+    from engine.macro_intents import ACTION_FIGHT_NO_TARGET
+    from engine.phase_handlers.shared_utils import (
+        SQUAD_ACTION_FIGHT_SLOT_BASE,
+        SQUAD_ACTION_FIGHT_SLOT_COUNT,
+        build_squad_action_mask,
+        get_enemy_slot_mapping,
+        init_enemy_slot_mapping,
+    )
+    from tests.unit.engine._state_builders import synthetic_state, synthetic_unit
+
+    # Attaquant P1 à (10,10), ennemi P2 à (10,13). dist=3 > EZ=2 → non engagé ; ≤5 → pile-in.
+    attacker = synthetic_unit("1", 1, [{"col": 10, "row": 10}])
+    enemy = synthetic_unit("2", 2, [{"col": 10, "row": 13}])
+
+    gs = synthetic_state(
+        [attacker, enemy],
+        phase="fight",
+        game_rules={},
+        fight_subphase="fight",
+        current_player=1,
+        fight_step="fights_first",
+        fight_selector=1,
+        engaged_at_fight_step_start={},
+        units_charged={"1"},
+        units_selected_to_fight=set(),
+        units_fought=set(),
+        pile_in_done=set(),
+        consolidation_done=set(),
+    )
+
+    init_enemy_slot_mapping(gs, 1)
+    enemy_slots = get_enemy_slot_mapping(gs, 1)
+    mask = build_squad_action_mask(gs, "1", enemy_slot_ids=enemy_slots)
+
+    fight_bits = [mask[SQUAD_ACTION_FIGHT_SLOT_BASE + i] for i in range(SQUAD_ACTION_FIGHT_SLOT_COUNT)]
+    assert any(fight_bits), (
+        "Le slot fight de l'ennemi doit être ouvert : la pile-in overrun l'amène en zone d'engagement"
+    )
+    assert mask[ACTION_FIGHT_NO_TARGET] == 0, (
+        "FIGHT_NO_TARGET ne doit pas être ouvert quand une cible est atteignable post-pile-in"
+    )
+
+
 def test_overrun_pile_in_plan_returns_none_when_no_enemy_in_range(melee_scenario_file):
     """_fight_overrun_pile_in_plan retourne None si aucun ennemi à ≤5" (12.03 BEFORE MOVING).
 
