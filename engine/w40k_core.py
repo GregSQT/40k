@@ -2043,8 +2043,8 @@ class W40KEngine(gym.Env):
                 })
             # L19 — liens leader→bodyguard (règle 19). `attached_from` est posé par
             # `_fold_attached_characters` sur chaque figurine character injectée dans un squad.
-            _squad_models = self.game_state.get("squad_models") or {}
-            _models_cache = self.game_state.get("models_cache") or {}
+            _squad_models = require_key(self.game_state, "squad_models")
+            _models_cache = require_key(self.game_state, "models_cache")
             attached_info: Dict[str, str] = {}
             for _sq_id, _mids in _squad_models.items():
                 for _mid in _mids:
@@ -6983,6 +6983,9 @@ class W40KEngine(gym.Env):
                         "player": require_key(unit, "player"),
                         "targetId": target_squad_id,
                         "charge_roll": charge_roll,
+                        # L28 — jet AVANT relance, None si aucune relance : symétrie exacte avec
+                        # le chemin PvP (charge_handlers ~L2940/4473/5929/6059/6206).
+                        "charge_roll_initial": self.game_state.get("_charge_initial_rolls", {}).pop(str(squad_id), None),
                         "charge_failed_reason": "no valid charge plan for roll",
                         "targetCol": _charge_target[0] if _charge_target else None,
                         "targetRow": _charge_target[1] if _charge_target else None,
@@ -7029,6 +7032,9 @@ class W40KEngine(gym.Env):
                         "player": require_key(unit, "player"),
                         "targetId": target_squad_id,
                         "charge_roll": charge_roll,
+                        # L28 — jet AVANT relance, None si aucune relance : symétrie exacte avec
+                        # le chemin PvP (charge_handlers ~L2940/4473/5929/6059/6206).
+                        "charge_roll_initial": self.game_state.get("_charge_initial_rolls", {}).pop(str(squad_id), None),
                         "fromCol": _charge_from[0] if _charge_from else None,
                         "fromRow": _charge_from[1] if _charge_from else None,
                         "toCol": int(_dest_uc["col"]) if "col" in _dest_uc else None,

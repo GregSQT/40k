@@ -967,6 +967,9 @@ def charge_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     game_state["preview_hexes"] = []
     game_state["active_charge_unit"] = None
     game_state["charge_roll_values"] = {}  # Store 2d6 rolls per unit
+    # L28 — jet initial AVANT relance, par escouade. Remis à zéro en début de phase pour
+    # éviter toute lecture stale inter-tours si une activation avait été postponée.
+    game_state["_charge_initial_rolls"] = {}
     # Meme portee que le jet ci-dessus, et pour la meme raison : une activation close sur WAIT
     # ne passe par aucune cloture, donc son memo de distances survivrait a la phase et serait
     # relu — la declaration du tour suivant heritant d'une distance mesuree au tour d'avant.
@@ -4288,6 +4291,9 @@ def charge_click_handler(game_state: Dict[str, Any], unit_id: str, action: Dict[
             del game_state["charge_roll_values"][unit_id]
         if "charge_target_selections" in game_state and unit_id in game_state["charge_target_selections"]:
             del game_state["charge_target_selections"][unit_id]
+        # L28 — purge le jet initial de relance pour éviter qu'il soit lu au tour suivant
+        # comme si une relance avait eu lieu lors de la prochaine activation.
+        game_state.get("_charge_initial_rolls", {}).pop(unit_id, None)
         return True, {
             "action": "postpone",
             "unitId": unit_id,

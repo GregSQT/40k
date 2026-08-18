@@ -457,7 +457,7 @@ def apply_waaagh_call_decision(game_state: Dict[str, Any], player: int, called: 
             "unitId": f"P{int(player)}",
             "player": int(player),
             "phase": "command",
-            "turn": game_state.get("turn", 0),  # get allowed
+            "turn": require_key(game_state, "turn"),
         })
 
 
@@ -479,7 +479,7 @@ def apply_oath_selection(game_state: Dict[str, Any], player: int, target_unit_id
         "unitId": f"P{int(player)}",
         "player": int(player),
         "phase": "command",
-        "turn": game_state.get("turn", 0),  # get allowed
+        "turn": require_key(game_state, "turn"),
         "targetId": str(target_unit_id),
     })
 
