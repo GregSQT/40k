@@ -5,6 +5,11 @@ Le garde anti-doublon (pile_in_done) empêche tout double dans l'étape 12.02 �
 signalées sont des faux positifs : le gym loguait l'overrun 12.06 avec la même balise "PILED IN"
 que le groupe pile-in, et l'analyzer les comptait comme un doublon dans la même étape.
 Le fix : l'overrun pile-in est loggué "OVERRUN PILED IN", balise exclue du contrôle 12.02.
+
+Deuxième invariant couvert : handle_fight_move doit aussi traiter les lignes "OVERRUN PILED IN"
+(pas seulement les ignorer au niveau du doublon 12.02). La regex de handle_fight_move manquait
+la balise — sortie early avant le BFS. Un dépassement de budget sur un overrun pile-in passait
+donc inaperçu, et _position_cache_set n'était jamais appelé (cache périmé pour les moves suivants).
 """
 from __future__ import annotations
 
@@ -12,8 +17,8 @@ from tests.unit.ai._fabriques import entete_step_log
 
 # ── scénario minimal ──────────────────────────────────────────────────────────
 # Résolution x5 (inches_to_subhex=5), zone d'engagement = 10 subhex.
-# Unité 1 (P1) : charge, puis fait son groupe pile-in, puis overrun pile-in.
-# Unité 101 (P2) : cible.
+# Unité 1 (P1) : charge, puis fait son groupe pile-in, puis overrun pile-in (100,100)→(100,95).
+# Unité 101 (P2) : cible, à (100,90).
 
 U1 = (100, 100)
 U101 = (100, 90)
@@ -47,6 +52,15 @@ _OVERRUN_NEW = (
     f"[10:00:04] E1 T1 P1 FIGHT : Unit 1{U1s} OVERRUN PILED IN from {U1s} to (100,95) [R:+0.0] [SUCCESS]\n"
 )
 
+# Overrun pile-in (12.06) qui DÉPASSE le budget de 3" (16 subhex > 15 à x5).
+# Sans le fix de la regex : handle_fight_move retourne early → BFS jamais lancé → 0 violation.
+# Avec le fix : BFS détecte le dépassement → fight_move_invalid['pile_in'][1] == 1.
+# Coordonnée cible (100,116) : 16 subhex vers le haut, hors de portée d'unit 101 à (100,90).
+_OVERRUN_EXCEEDS_BUDGET = (
+    f"[10:00:04] E1 T1 P1 FIGHT : Unit 1{U1s} OVERRUN PILED IN from {U1s} to (100,116)"
+    f" [R:+0.0] [SUCCESS]\n"
+)
+
 
 def _stats(tmp_path, body: str):
     import ai.analyzer as an
@@ -67,3 +81,14 @@ def test_overrun_pile_in_does_not_trigger_double_violation(tmp_path):
     être compté comme un doublon 12.02."""
     stats = _stats(tmp_path, _PILE_IN + _OVERRUN_NEW)
     assert stats["fight_double_pile_in"][1] == 0
+
+
+def test_overrun_pile_in_exceeding_budget_is_detected(tmp_path):
+    """Sans le fix de la regex, handle_fight_move retourne early sur 'OVERRUN PILED IN' et
+    ne lance jamais le BFS : un dépassement de budget passe inaperçu (faux négatif).
+
+    Preuve : overrun de 16 subhex (> budget 3" = 15 à x5) → violation détectée seulement si
+    la regex matche et que le BFS s'exécute.
+    """
+    stats = _stats(tmp_path, _OVERRUN_EXCEEDS_BUDGET)
+    assert stats["fight_move_invalid"]["pile_in"][1] == 1
