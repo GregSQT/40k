@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from engine.hex_utils import Socle
     from engine.phase_handlers.attack_sequence import WeaponAttackProfile
 
-from shared.data_validation import ConfigurationError, require_key
+from shared.data_validation import ConfigurationError, require_key, HAZARD_CONTEXT_DESPERATE_ESCAPE
 from engine.utils.weapon_helpers import (
     melee_weapons,
     ranged_weapons,
@@ -5247,7 +5247,7 @@ def explain_move_plan_rejection(
 
 def roll_hazard_for_unit(
     unit_id: str, game_state: Dict[str, Any], auto_resolve: bool,
-    *, n_rolls: Optional[int] = None, context_label: str = "Desperate Escape",
+    *, n_rolls: Optional[int] = None, context_label: str = HAZARD_CONTEXT_DESPERATE_ESCAPE,
 ) -> int:
     """Hazard rolls pour une unité (règle 06.03) — Desperate Escape (09.07) ou [HAZARDOUS] (24.15).
 

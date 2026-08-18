@@ -142,6 +142,27 @@ _DESPERATE_ESCAPE_MW = (
     "[10:00:02] E1 T1 P1 MOVE : Unit 1(20,20) SUFFERS 2 Mortal Wounds [DESPERATE ESCAPE] "
     "[R:+0.0] [SUCCESS]\n"
 )
+# Coup fatal : 3 BM sur une unité à HP_MAX=3 → doit tuer l'unité et alimenter current_episode_deaths.
+_DESPERATE_ESCAPE_FATAL = (
+    "[10:00:02] E1 T1 P1 MOVE : Unit 1(20,20) SUFFERS 3 Mortal Wounds [DESPERATE ESCAPE] "
+    "[R:+0.0] [SUCCESS]\n"
+)
+
+
+def test_desperate_escape_decremente_hp_et_enregistre_la_mort(tmp_path, monkeypatch):
+    """VERROU : [DESPERATE ESCAPE] fatal doit appeler _apply_damage_and_handle_death.
+
+    Avant le fix, la branche manquante laissait la ligne tomber dans action_type='other' :
+    unit_hp restait à 3, current_episode_deaths restait vide → HP drift et kill tracking perdu.
+    """
+    stats = _parse(tmp_path, monkeypatch, _DESPERATE_ESCAPE_FATAL, weapons_cache={})
+    deaths = stats["current_episode_deaths"]
+    assert any(d[1] == "1" for d in deaths), (
+        "L'unité 1 tuée par [DESPERATE ESCAPE] doit apparaître dans current_episode_deaths"
+    )
+    assert stats["hazardous_mortal_wounds"][1] == 0, (
+        "[DESPERATE ESCAPE] ne doit pas incrémenter hazardous_mortal_wounds (24.15 uniquement)"
+    )
 
 
 def test_desperate_escape_ne_compte_pas_en_hazardous_mw(tmp_path, monkeypatch):

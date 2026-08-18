@@ -13,7 +13,7 @@ import builtins
 import json
 from typing import Any, Dict, Optional
 
-from shared.data_validation import require_key
+from shared.data_validation import require_key, HAZARD_CONTEXT_DESPERATE_ESCAPE
 
 from ai.bot_registry import bot_display_name
 
@@ -1186,7 +1186,7 @@ class StepLogger:
                 raise KeyError("Hazardous action missing required unit_with_coords")
             hazardous_mortal_wounds = require_key(details, "hazardous_mortal_wounds")
             hazard_context = details.get("hazard_context", "Hazardous")
-            tag = "[DESPERATE ESCAPE]" if hazard_context == "Desperate Escape" else "[HAZARDOUS]"
+            tag = "[DESPERATE ESCAPE]" if hazard_context == HAZARD_CONTEXT_DESPERATE_ESCAPE else "[HAZARDOUS]"
             return f"Unit {unit_with_coords} SUFFERS {hazardous_mortal_wounds} Mortal Wounds {tag}"
             
         elif action_type == "shoot_summary":

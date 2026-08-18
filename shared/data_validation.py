@@ -69,6 +69,12 @@ def require_positive_int(value: Any, name: str) -> int:
     return value
 
 
+# Valeur du champ `hazardContext` émis par step_logger pour un Desperate Escape (09.07).
+# Partagée entre ai/step_logger.py et engine/phase_handlers/shared_utils.py pour éviter
+# toute divergence silencieuse entre l'émetteur et le lecteur du tag [DESPERATE ESCAPE].
+HAZARD_CONTEXT_DESPERATE_ESCAPE = "Desperate Escape"
+
+
 
 
 
