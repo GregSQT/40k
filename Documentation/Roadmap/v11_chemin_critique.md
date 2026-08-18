@@ -8,12 +8,12 @@ Dans la direction de l'index : lignes 1–4 = jalon J2, lignes 5–6 = J3, ligne
 
 ## P3-5 — Pile-in / consolidation {#p3-5}
 
-🟢 **Prérequis livré le 2026-08-18** : la migration par-figurine du pile-in/overrun auto (`Documentation/Implémentation/Implémenté/pile_in_overrun_par_figurine_2026-08-18.md`). P3-5 s'ouvre dès que le profil P5 est tranché ([#p5](#p5)).
+✅ **Livré le 2026-08-18.**
 
-Décision spatiale ⇒ top-K d'hex interdit (§9.0bis).
-
-🔴 Le périmètre décrit en §9.4 pt 5 était FAUX (lu le 2026-08-10, `12 Fights pahse.pdf`) : le MODE de consolidation n'est pas un choix de joueur — 12.08 l'impose par la situation. Décisions réelles : consolider ou non, quelles unités ennemies, destination.
-Écart aux règles identifié : le gym ne sait pas consolider vers un objectif.
+- `fight_pile_in_plan` : restriction 12.03 BEFORE MOVING — cibles imposées (ennemis engagés) si engagée, sinon ennemis dans `pile_in_target_range` (5").
+- `squad_consolidate_plan` : cascade 12.08 complète — Ongoing → Engaging (ennemis à ≤3") → Objective (objectifs à ≤3") → None. Mode Objective : assignation gloutonne dans la zone via `model_reach_predicate`.
+- Tests : 5 nouveaux cas dans `test_pile_in_intra_squad_collision.py` (3 modes cascade + 2 restriction 12.03). 19/19 verts.
+- Validation holdout : `--test-only --training-config x1_long --step` lancé le 2026-08-18, aucun crash sur 650+ épisodes.
 
 → `Documentation/Implémentation/1_Agent/V11_phaseA.md` §9.4 pt 5
 
