@@ -387,6 +387,7 @@ def _append_fight_move_log(
     to_col: int,
     to_row: int,
     move_details: List[Dict[str, Any]],
+    models_segment: str = "",
 ) -> None:
     """Log par-figurine unique d'un déplacement de phase fight (pile-in / consolidation).
 
@@ -395,6 +396,13 @@ def _append_fight_move_log(
     est ainsi strictement identique dans les deux flux. ``kind`` ∈ {"pile_in",
     "overrun_pile_in", "consolidation"} ; le verbe et le type d'event en découlent.
     ``move_details`` : départ→arrivée par figurine.
+
+    ``models_segment`` : segment ``[MODELS:]`` capturé IMMÉDIATEMENT après ``commit_move``
+    (positions post-déplacement instantanées). Le driver gym (`_gym_commit_fight_move`) le
+    fournit pour éviter que `_build_step_log_details` ne lise `_models_segment_for_unit` au
+    moment du flush — trop tard si pile-in et consolidation ont toutes deux été commitées dans
+    le même `_fight_v11_gym_settle` avant le drain. Laissé vide par les appelants PvP (flush
+    immédiat via `log_action`, pas de décalage).
     """
     if kind == "pile_in":
         verb = "PILED IN"
@@ -404,27 +412,27 @@ def _append_fight_move_log(
         verb = "CONSOLIDATED"
     else:
         raise ValueError(f"_append_fight_move_log: kind invalide {kind!r}")
-    append_action_log(
-        game_state,
-        {
-            "type": kind,
-            "message": (
-                f"Unit {unit['id']} {verb} from ({from_col},{from_row}) "
-                f"to ({to_col},{to_row})"
-            ),
-            "turn": require_key(game_state, "turn"),
-            "phase": "fight",
-            "unitId": unit["id"],
-            "player": unit["player"],
-            "fromCol": from_col,
-            "fromRow": from_row,
-            "toCol": to_col,
-            "toRow": to_row,
-            "timestamp": "server_time",
-            "is_ai_action": unit["player"] == 2,
-            "moveDetails": move_details,
-        },
-    )
+    entry: Dict[str, Any] = {
+        "type": kind,
+        "message": (
+            f"Unit {unit['id']} {verb} from ({from_col},{from_row}) "
+            f"to ({to_col},{to_row})"
+        ),
+        "turn": require_key(game_state, "turn"),
+        "phase": "fight",
+        "unitId": unit["id"],
+        "player": unit["player"],
+        "fromCol": from_col,
+        "fromRow": from_row,
+        "toCol": to_col,
+        "toRow": to_row,
+        "timestamp": "server_time",
+        "is_ai_action": unit["player"] == 2,
+        "moveDetails": move_details,
+    }
+    if models_segment:
+        entry["models_segment"] = models_segment
+    append_action_log(game_state, entry)
 
 
 def _fight_effective_level_at(

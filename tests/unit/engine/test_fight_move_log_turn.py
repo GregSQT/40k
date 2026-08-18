@@ -52,3 +52,24 @@ def test_fight_move_log_refuses_a_state_without_turn() -> None:
             gs, _unit(), kind="consolidation", from_col=1, from_row=1, to_col=2, to_row=1,
             move_details=[],
         )
+
+
+def test_fight_move_log_stores_captured_models_segment() -> None:
+    """Le segment [MODELS:] capturé immédiatement après commit_move est stocké dans l'entrée.
+
+    Sans cette capture, `_build_step_log_details` appelle `_models_segment_for_unit` au moment
+    du flush — APRÈS que pile-in ET consolidation aient toutes deux été commitées dans le même
+    `_fight_v11_gym_settle`. Le segment pile-in contiendrait alors les positions
+    post-consolidation, et l'analyzer mesurerait une distance pile-in+consolidation qu'il
+    comparerait au budget pile-in (3") et signalerait en violation.
+    """
+    gs = _game_state()
+    captured_seg = "[MODELS: 7#0@(5,5) 7#1@(5,6)]"
+    _append_fight_move_log(
+        gs, _unit(), kind="pile_in",
+        from_col=4, from_row=4, to_col=5, to_row=4,
+        move_details=[{"modelId": "7#0", "fromCol": 4, "fromRow": 4, "toCol": 5, "toRow": 4}],
+        models_segment=captured_seg,
+    )
+    entry = gs["action_logs"][-1]
+    assert entry.get("models_segment") == captured_seg
