@@ -254,7 +254,7 @@ def test_log_sequence_is_assigned():
     assert gs["action_log_seq"] == 1
 
 
-@pytest.mark.parametrize("missing_key", ["controller", "previous_controller", "player_1_oc"])
+@pytest.mark.parametrize("missing_key", ["controller", "previous_controller", "player_1_oc", "player_2_oc"])
 def test_incomplete_detail_raises_instead_of_guessing(missing_key):
     entry = {
         "player_1_oc": 4,

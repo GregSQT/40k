@@ -339,6 +339,7 @@ class GameStateManager:
         # PR4 4c: pass-through "models" field (multi-fig squad declaration).
         # Already validated/normalized upstream by load_units_from_scenario.
         models_passthrough = config.get("models")
+        _add_col, _add_row = normalize_coordinates(config["col"], config["row"])
 
         result = {
             # Identity
@@ -346,10 +347,10 @@ class GameStateManager:
             "player": config["player"],
             "unitType": config["unitType"],  # NO DEFAULTS - must be provided
             "DISPLAY_NAME": config["DISPLAY_NAME"],
-            
+
             # Position
-            "col": normalize_coordinates(config["col"], config["row"])[0],
-            "row": normalize_coordinates(config["col"], config["row"])[1],
+            "col": _add_col,
+            "row": _add_row,
             # Niveau vertical (étages, format B). 0 = rez-de-chaussée (cas métier par défaut :
             # unité au sol), >=1 = étage d'une ruine. Ancre unité = niveau de models[0].
             "level": _validate_level(config.get("level", 0), config["id"]),  # get allowed (champ optionnel : scénarios sans étages)
@@ -1120,7 +1121,7 @@ class GameStateManager:
                     f"Unit {u.get('id')}: 'attached_squad' references unknown unit '{target_id}'"
                 )
             target = units_by_id_raw[target_id]
-            if str(target.get("player")) != str(u.get("player")):
+            if str(require_key(target, "player")) != str(require_key(u, "player")):
                 raise ValueError(
                     f"Unit {u.get('id')}: 'attached_squad' target '{target_id}' "
                     f"belongs to a different player"
@@ -1268,17 +1269,18 @@ class GameStateManager:
         _u_base_shape, _u_base_size = _scale_socle(
             require_key(full_unit_data, "BASE_SHAPE"),
             require_key(full_unit_data, "BASE_SIZE"),
-            self._get_inches_to_subhex(),
+            scale,
             f"datasheet {unit_type} (unité {unit_data['id']})",
         )
 
+        _norm_col, _norm_row = normalize_coordinates(chosen_col, chosen_row)
         enhanced_unit = {
             "id": str(unit_data["id"]),
             "player": unit_player,
             "unitType": unit_type,
             "DISPLAY_NAME": require_key(full_unit_data, "DISPLAY_NAME"),
-            "col": normalize_coordinates(chosen_col, chosen_row)[0],
-            "row": normalize_coordinates(chosen_col, chosen_row)[1],
+            "col": _norm_col,
+            "row": _norm_row,
             # Niveau vertical (étages, format B). 0 = rez-de-chaussée (défaut métier).
             "level": _validate_level(unit_data.get("level", full_unit_data.get("level", 0)), str(unit_data["id"])),  # get allowed (champ optionnel : scénarios sans étages). Source = déclaration scénario (unit_data), comme orientation.
             "HP_CUR": full_unit_data["HP_MAX"],
@@ -3519,7 +3521,7 @@ def iter_living_model_footprints(
         model = models_cache.get(mid)
         if model is None:
             continue
-        if int(model.get("HP_CUR", 1)) <= 0:
+        if int(require_key(model, "HP_CUR")) <= 0:
             continue
         # HORS TABLE (sentinelle (-1,-1)) : figurine en réserves (20.01) ou en attente de
         # déploiement. Elle n'occupe AUCUNE case, donc ne contrôle aucun objectif (14.02) —

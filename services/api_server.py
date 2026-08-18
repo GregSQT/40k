@@ -947,31 +947,10 @@ def _log_objective_control_snapshot(engine_instance) -> None:
     if not detail:
         return
 
-    # Clé = (tour, phase, contrôle de chaque objectif). Le tour et la phase en font partie parce
-    # qu'un contrôle INCHANGÉ d'une phase à l'autre reste une information : « toujours à toi ».
-    logged_key = (
-        require_key(game_state, "turn"),
-        require_key(game_state, "phase"),
-        tuple(
-            (
-                str(objective_id),
-                require_key(entry, "player_1_oc"),
-                require_key(entry, "player_2_oc"),
-                require_key(entry, "controller"),
-            )
-            for objective_id, entry in sorted(detail.items(), key=lambda kv: str(kv[0]))
-        ),
-    )
-    # get allowed : absent au premier passage de la partie.
-    if game_state.get(_OBJECTIVE_CONTROL_LOGGED_API_KEY) == logged_key:
-        return
-    game_state[_OBJECTIVE_CONTROL_LOGGED_API_KEY] = logged_key
-
+    # La présence (figurines dans l'aire) est calculée AVANT la clé : une unité battle-shocked
+    # (OC=0, 01.07) qui entre/sort de la zone change la présence sans changer les OC ni le
+    # contrôleur — la clé doit donc inclure les compteurs de présence pour détecter ce cas.
     zones = objective_hex_zones(game_state)
-    names_by_id = {
-        str(require_key(obj, "id")): obj.get("name", str(require_key(obj, "id")))  # get allowed
-        for obj in require_key(game_state, "objectives")
-    }
     models_by_zone: Dict[str, Dict[int, int]] = {
         str(objective_id): {1: 0, 2: 0} for objective_id, _hexes in zones
     }
@@ -983,6 +962,33 @@ def _log_objective_control_snapshot(engine_instance) -> None:
             for objective_id, zone_hexes in zones:
                 if not footprint.isdisjoint(zone_hexes):
                     models_by_zone[str(objective_id)][player] += 1
+
+    # Clé = (tour, phase, par objectif : OC + présence + contrôleur). Le tour et la phase en
+    # font partie parce qu'un contrôle INCHANGÉ d'une phase à l'autre reste une information.
+    logged_key = (
+        require_key(game_state, "turn"),
+        require_key(game_state, "phase"),
+        tuple(
+            (
+                str(objective_id),
+                require_key(entry, "player_1_oc"),
+                require_key(entry, "player_2_oc"),
+                require_key(entry, "controller"),
+                models_by_zone.get(str(objective_id), {1: 0, 2: 0})[1],
+                models_by_zone.get(str(objective_id), {1: 0, 2: 0})[2],
+            )
+            for objective_id, entry in sorted(detail.items(), key=lambda kv: str(kv[0]))
+        ),
+    )
+    # get allowed : absent au premier passage de la partie.
+    if game_state.get(_OBJECTIVE_CONTROL_LOGGED_API_KEY) == logged_key:
+        return
+    game_state[_OBJECTIVE_CONTROL_LOGGED_API_KEY] = logged_key
+
+    names_by_id = {
+        str(require_key(obj, "id")): obj.get("name", str(require_key(obj, "id")))  # get allowed
+        for obj in require_key(game_state, "objectives")
+    }
 
     emitted = 0
     for objective_id, entry in detail.items():
