@@ -5575,12 +5575,16 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
 
   /** Construit le Set "col,row" de la zone de déploiement du déployeur courant. */
   const buildDeployPool = useCallback((): Set<string> => {
-    const ds = gameState?.deployment_state;
+    // Lire la ref (plus fraîche que la closure) pour rester cohérent avec la garde de sélection
+    // (ligne ~3835) qui lit aussi latestGameStateRef : entre deploy_commit et le re-render React,
+    // la ref voit déjà le nouveau current_deployer alors que gameState est encore stale.
+    const gs = latestGameStateRef.current ?? gameState;
+    const ds = gs?.deployment_state;
     if (!ds) {
       throw new Error("[DEPLOY] deployment_state absent du game_state");
     }
     const deployer = ds.current_deployer;
-    const poolRaw = gameState?.deployment_pools?.[String(deployer)];
+    const poolRaw = gs?.deployment_pools?.[String(deployer)];
     if (!poolRaw || !Array.isArray(poolRaw)) {
       throw new Error(`[DEPLOY] deployment_pools manquant pour le déployeur ${deployer}`);
     }
@@ -5593,7 +5597,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       }
     }
     return set;
-  }, [gameState?.deployment_state, gameState?.deployment_pools]);
+  }, [gameState]);
 
   /** Dry-run du plan de déploiement → maj voile rouge / cohésion / can_validate. */
   const refreshDeployPlanValidity = useCallback(
@@ -5685,6 +5689,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           "[DEPLOY] deploy_generate_formation: pas de plan dans la réponse",
           result?.error ?? result
         );
+        deployPoolRef.current = new Set();
         setDeployPlan(null);
         setMode("select");
         setSelectedUnitId(null);
@@ -5889,6 +5894,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           setDeployPlan(null);
           setMode("select");
           setSelectedUnitId(null);
+          setError("Deployment order changed — please select your unit again.");
           return;
         }
         setError(`${plan.ingress ? "Ingress" : "Deploy"} refused: ${outcome.message}`);
@@ -6040,7 +6046,16 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       }
       const rawPlan = result?.plan as Array<[string | number, number, number, number]> | undefined;
       if (!rawPlan || !Array.isArray(rawPlan)) {
-        throw new Error("[INGRESS] deploy_generate_formation: plan absent dans la réponse");
+        // Miroir de handleDeployDropSquad : refus backend → sortir proprement du mode ingressPlacement.
+        console.warn(
+          "[INGRESS] deploy_generate_formation: plan absent dans la réponse",
+          result?.error ?? result
+        );
+        ingressMaskLoopsRef.current = null;
+        ingressUnitIdRef.current = null;
+        setMode("select");
+        setSelectedUnitId(null);
+        return;
       }
       const models: Record<string, { col: number; row: number; level?: number }> = {};
       for (const [mid, c, r, l] of rawPlan) {
