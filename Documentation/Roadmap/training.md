@@ -12,9 +12,9 @@ courbes**, un run séparé n'a plus d'objet sauf si celui-ci échoue.
 À vérifier à la fin du run — pas un progrès, mais que le pipeline tourne :
 
 - `game_critical/invalid_action_rate` reste à **0**
-- `02_combat/n_charge_success_rate` proche de **1.0**
 - `02_combat/m_charge_attempts` **non nul**
-- Courbes `reserves/*` et `charge_distance/*` **peuplées**
+- `02_combat/n_charge_success_rate` **non nul** (en V11 la déclaration est gratuite — l'agent déclare « au cas où » puis choisit ses cibles après le jet ; un taux bas ne signifie pas un dysfonctionnement)
+- Courbes `reserves/*` et `05_charge/*` **peuplées** (`charge_distance/*` était le nom de la clé interne, le tag TensorBoard réel est `05_charge/*`)
 
 ⚠️ Pour tout re-run : `--new` et non `--append` — `--append` réapplique `ent_coef = 0,1` et écrase le modèle canonique.
 
