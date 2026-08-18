@@ -277,10 +277,11 @@ def test_an_off_table_unit_is_never_a_declarable_charge_target(monkeypatch) -> N
     """
     import random
 
-    # Immunise contre la pollution de random.randint par d'autres tests xdist
-    # (monkeypatch.setattr(random, "randint", ...) dans un worker voisin).
-    # Le RNG local est seede de facon deterministe ; la deployment phase n'utilise pas
-    # random.randint (active), mais les etapes moteur apres deploiement oui.
+    # Immunise contre la pollution de random.randint dans le même worker xdist :
+    # test_command_points_and_battle_shock.py assigne directement random.randint = lambda
+    # (pas via monkeypatch, avec try/finally), et ce module tourne dans le même processus
+    # Python. Les workers xdist sont des processus OS séparés et ne peuvent pas partager
+    # d'état module-level — la contamination vient du même worker, pas d'un voisin.
     _rng_engine = random.Random(0)
     monkeypatch.setattr(random, "randint", _rng_engine.randint)
 
@@ -358,9 +359,9 @@ def test_an_off_table_unit_is_never_a_declarable_charge_target(monkeypatch) -> N
         (int(gs["models_cache"][m]["col"]), int(gs["models_cache"][m]["row"]))
         for m in gs["squad_models"][charger] if m in gs["models_cache"]
     ]
-    closest = min(abs(c) + abs(r) for c, r in charger_cells)
+    closest = min(abs(c + 1) + abs(r + 1) for c, r in charger_cells)
     assert closest <= CHARGE_THRESHOLD_INCHES * ish, (
-        f"le chargeur est a {closest} de l'origine, au-dela des 12\" ({CHARGE_THRESHOLD_INCHES * ish}) : "
+        f"le chargeur est a {closest} de la sentinelle (-1,-1), au-dela des 12\" ({CHARGE_THRESHOLD_INCHES * ish}) : "
         "la sentinelle ne serait pas 'a portee' meme sans filtre, le verrou serait vacant"
     )
     # 2e borne du vert vacant : le chargeur ne doit pas etre « locked » (dernier controle de
@@ -414,14 +415,23 @@ def test_an_off_table_entry_is_never_measured(seed: int) -> None:
     off = _off_table_sids(gs)
     assert off, "aucune unite hors table : verrou creux"
     on = [str(sid) for sid, e in gs["units_cache"].items() if int(e["col"]) >= 0]
-    other = on[0] if on else off[1]
+    # Avec deployment_type="active", toutes les unités démarrent hors table au reset
+    # (on=[] mesuré). Si on était non-vide, on utiliserait la vraie entrée ; sinon on
+    # synthétise une entrée sur-table : require_entry_on_battlefield ne vérifie que col >= 0.
+    other_entry = (
+        gs["units_cache"][on[0]]
+        if on
+        else {"col": 0, "row": 0, "id": "synthetic_on_table"}
+    )
 
     with pytest.raises(ValueError, match="HORS TABLE"):
         unit_entries_within_engagement_zone(
-            gs["units_cache"][off[0]], gs["units_cache"][other], get_engagement_zone(gs)
+            gs["units_cache"][off[0]], other_entry, get_engagement_zone(gs)
         )
     # Symetrique : la garde porte sur les DEUX entrees, pas seulement la premiere.
+    # Avec other_entry sur table, le premier argument passe require_entry_on_battlefield
+    # et c'est la garde du DEUXIÈME argument (off[0]) qui doit lever.
     with pytest.raises(ValueError, match="HORS TABLE"):
         unit_entries_within_engagement_zone(
-            gs["units_cache"][other], gs["units_cache"][off[0]], get_engagement_zone(gs)
+            other_entry, gs["units_cache"][off[0]], get_engagement_zone(gs)
         )
