@@ -6208,6 +6208,9 @@ class W40KEngine(gym.Env):
         _hazard_mw = raw_log.get("hazardousMortalWounds")  # get allowed : types non-hasardeux
         if _hazard_mw is not None:
             details["hazardous_mortal_wounds"] = _hazard_mw
+        _hazard_ctx = raw_log.get("hazardContext")  # get allowed : "Hazardous" | "Desperate Escape"
+        if _hazard_ctx is not None:
+            details["hazard_context"] = _hazard_ctx
         target_col = raw_log.get("targetCol")  # get allowed
         target_row = raw_log.get("targetRow")  # get allowed
         if target_col is not None and target_row is not None:

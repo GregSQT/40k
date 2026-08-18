@@ -136,3 +136,36 @@ def test_hazardous_fight_phase_goes_to_fight_counter(tmp_path, monkeypatch):
     )
 
 
+# PROJ.1.2 faux positifs — Desperate Escape 09.07 produit [DESPERATE ESCAPE], pas [HAZARDOUS].
+# L'analyzer ne doit pas comptabiliser ces lignes comme des erreurs HAZARDOUS.
+_DESPERATE_ESCAPE_MW = (
+    "[10:00:02] E1 T1 P1 MOVE : Unit 1(20,20) SUFFERS 2 Mortal Wounds [DESPERATE ESCAPE] "
+    "[R:+0.0] [SUCCESS]\n"
+)
+
+
+def test_desperate_escape_ne_compte_pas_en_hazardous_mw(tmp_path, monkeypatch):
+    """VERROU : [DESPERATE ESCAPE] (09.07) ne doit PAS incrémenter hazardous_mortal_wounds.
+
+    Avant le fix, roll_hazard_for_unit émettait [HAZARDOUS] même pour les Desperate Escape,
+    générant 337 faux positifs PROJ.1.2 ('unité sans arme HAZARDOUS').
+    """
+    stats = _parse(tmp_path, monkeypatch, _DESPERATE_ESCAPE_MW, weapons_cache={})
+    assert stats["hazardous_mortal_wounds"][1] == 0, (
+        "[DESPERATE ESCAPE] ne doit pas incrémenter hazardous_mortal_wounds (24.15 uniquement)"
+    )
+
+
+def test_desperate_escape_ne_declenche_pas_erreur_armurerie(tmp_path, monkeypatch):
+    """VERROU : [DESPERATE ESCAPE] ne doit pas déclencher hazardous_no_hazardous_weapon.
+
+    Peu importe si l'unité a ou non une arme HAZARDOUS dans la cache — le Desperate Escape
+    est la règle 09.07, sans rapport avec 24.15.
+    """
+    stats = _parse(tmp_path, monkeypatch, _DESPERATE_ESCAPE_MW, weapons_cache={})
+    assert stats["hazardous_no_hazardous_weapon"][1] == 0, (
+        "[DESPERATE ESCAPE] ne doit pas signaler d'erreur HAZARDOUS (arme absente de l'armurerie)"
+    )
+    assert stats["hazardous_no_hazardous_weapon_fight"][1] == 0
+
+
