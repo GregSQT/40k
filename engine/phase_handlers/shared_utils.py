@@ -11370,18 +11370,22 @@ def fight_pile_in_plan(
     # 12.03 BEFORE MOVING : cibles imposées si engagée (tous les ennemis engagés avec l'unité),
     # heuristique gym si non engagée (tous les ennemis à ≤ pile_in_target_range).
     from engine.phase_handlers.fight_handlers import (
-        pile_in_select_targets_12_03,
+        _fight_units_engaged_with,
         pile_in_targets_within_range,
     )
     # `player` requis par `unit_within_engagement_zone_footprints` (via `_fight_v11_engaged_now`).
     unit_ref: Dict[str, Any] = {"id": squad_id, "player": int(require_key(our_entry, "player"))}
-    within_ids = pile_in_targets_within_range(game_state, unit_ref)
-    try:
-        target_ids = pile_in_select_targets_12_03(game_state, unit_ref, chosen_target_ids=within_ids)
-    except ValueError:
-        return None
-    if not target_ids:
-        return None
+    # 12.03 : engagée → cibles = unités engagées (pile_in_targets_within_range inutile) ;
+    # non engagée → cibles = unités à ≤ pile_in_target_range.  Deux appels distincts évitent
+    # le double pile_in_targets_within_range (engagé : appel gaspillé ; non engagé : double scan).
+    engaged = _fight_units_engaged_with(game_state, unit_ref)
+    if engaged:
+        target_ids: List[str] = engaged
+    else:
+        within_ids = pile_in_targets_within_range(game_state, unit_ref)
+        if not within_ids:
+            return None
+        target_ids = within_ids
     enemy_positions: List[Tuple[int, int]] = []
     for esid in target_ids:
         enemy_positions.extend(_squad_model_positions(game_state, esid))
@@ -11861,10 +11865,9 @@ def squad_consolidate_plan(
                 game_state, str(squad_id), our_player, models_cache[mid], budget,
                 int(require_key(models_cache[mid], "level")),
             )
-            available = taken_obj - {(oc, or_)}
             best_zh: Optional[Tuple[int, int]] = None
             for zh in sorted(obj_zone, key=lambda h: calculate_hex_distance(oc, or_, h[0], h[1])):
-                if zh in available or zh in occupied_by_others:
+                if (zh in taken_obj and zh != (oc, or_)) or zh in occupied_by_others:
                     continue
                 if reach(zh[0], zh[1]):
                     best_zh = zh
