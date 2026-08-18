@@ -12,6 +12,7 @@ Trois invariants verrouillés :
    anti-données-manquantes, pattern de tous les compteurs moteur).
 """
 
+from collections import defaultdict
 from typing import Any, Dict, List, Tuple
 
 import pytest
@@ -49,7 +50,7 @@ def _tracker() -> Tuple[W40KMetricsTracker, _RecordingWriter]:
     writer = _RecordingWriter()
     t.writer = writer  # type: ignore[assignment]
     # État nécessaire pour log_abilities_metrics.
-    t._abilities_tracking = {'total_episodes': 0, 'counts': {}, 'exposures': {}}
+    t._abilities_tracking = {'total_episodes': 0, 'counts': defaultdict(int), 'exposures': defaultdict(int)}
     t.episode_count = 0
     return t, writer
 

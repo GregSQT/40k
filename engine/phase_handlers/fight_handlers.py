@@ -2561,6 +2561,9 @@ def pile_in_move_destinations_12_03(
             for s in cand_synths:
                 cand_fp |= set(entry_footprint(s))
 
+            if not cand_fp:
+                continue
+
             d_cand = min(min_distance_between_sets(cand_fp, tfp) for tfp in tier_fps)
             if d_cand < start_d_min:
                 if not start_engagements or _fight_models_keep_start_engagements(
