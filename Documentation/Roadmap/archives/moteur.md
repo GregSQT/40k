@@ -2,6 +2,7 @@
 
 | Date | Chantier | Détail |
 |---|---|---|
+| 2026-08-18 | Pile-in/Overrun 12.06 par-figurine | Migration par-figurine, purge du modèle par-ancre (commit `babc3234`) ; prérequis de P3-5 levé ; → `Documentation/Implémentation/Implémenté/pile_in_overrun_par_figurine_2026-08-18.md` |
 | 2026-08-17 | INDIRECT FIRE 24.19 | 7 pièces ; `TOTAL_ACTION_SIZE` 1139→1159 ; gym+PvP+journal+analyzer ; 8 tests analyzer |
 | 2026-08-17 | Root cause 03.01/09.05 + fix renforcé | `_recompute_squad_occupied_hexes` ; 6 tests, 4 mutations ROUGE ; commits `640cdb53`, `8c2a85f2` |
 | 2026-08-17 | `ANTI_INFANTRY:1→2` + garde domaine | `urty_syringe` corrigé ; `MIN_ANTI_THRESHOLD = 2` ; balayage corpus |

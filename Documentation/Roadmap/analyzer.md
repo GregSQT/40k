@@ -16,6 +16,8 @@ Les autres familles soldées : CC_NB (CLEAVE), collisions 03.01, fall-back engag
 
 ⚠️ Piste suivante pour la mort fantôme : trois chemins de retrait n'écrivent aucune ligne (cohérence 03.03, blessures mortelles par socle, expiration de réserves) — rattrapés par l'instantané de fin de tour, mesurés à 1 fantôme sur 600 épisodes.
 
+**Doc opérationnel du chantier** (acquis, découpage en 6 lots, hors-périmètre) : `Documentation/Implémentation/A_faire/analyzer_conformite_lots.md`
+
 ---
 
 ## Champs manquants `step.log` {#champs-step-log}
@@ -36,6 +38,6 @@ L'analyzer rend alors une section de couverture — applicable, utilisée N fois
 
 §1.7 et §1.8 font déjà ça pour les 58 règles d'unité et d'armes — ce chantier généralise aux 156 lignes des PDF.
 
-Ordre de découpe : les entrées PROUVABLES d'abord (69 contrôles vivants + règles dérivables du journal).
+Ordre de découpe : les entrées PROUVABLES d'abord (les contrôles vivants de l'inventaire §2 d'`analyzer_couverture.md` — source unique du compte — + règles dérivables du journal).
 
-→ `Documentation/Implémentation/analyzer_couverture.md` §3, §4, §5-bis
+→ `Documentation/Implémentation/analyzer_couverture.md` §3, §4, §5-bis ; découpage en lots : `Documentation/Implémentation/A_faire/analyzer_conformite_lots.md`

@@ -4,13 +4,15 @@
 
 ## P3-0 — Retrait pour cohérence 03.03 {#p3-0}
 
-**Suspendu.** Déclencheur : **le prochain dégel de `TOTAL_ACTION_SIZE`**, groupé avec les tranches de §1 (P3-4, P3-5, P3-6 branchent elles aussi des décisions).
+**Suspendu.** Déclencheur : **le prochain dégel de `TOTAL_ACTION_SIZE`**, groupé avec les tranches de §1 qui en demanderont un (P3-5, P3-6 branchent elles aussi des décisions ; P3-4 est livré).
+
+⚠️ Un dégel est déjà passé SANS lui : INDIRECT FIRE a consommé 1139 → 1159 le 2026-08-17 (`TOTAL_ACTION_SIZE` dans `engine/macro_intents.py`), run `--new` payé — la plage que la décision d'origine chiffrait pour P3-0 est occupée.
 
 L'étape End of Turn retire les figurines hors cohérence en choisissant à la place du joueur (la plus éloignée du centroïde). 03.03 donne ce choix au contrôleur de l'unité.
 
 Décisions tranchées (2026-08-12, ne pas rouvrir) :
 1. Le choix est branché **pour les deux** (joueur ET agent)
-2. Via une tranche d'ids d'action DÉDIÉE (1139 → 1159) et non taillée dans la plage des cellules de move
+2. Via une tranche d'ids d'action DÉDIÉE de 20 slots, allouée à la suite de `TOTAL_ACTION_SIZE` au moment du dégel — la valeur exacte appartient au code, ne pas la re-chiffrer ici — et non taillée dans la plage des cellules de move
 
 ⚠️ Le jalon EST le coût : ce dégel se paie en run `--new` complet.
 

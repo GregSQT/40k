@@ -8,8 +8,7 @@ Dans la direction de l'index : lignes 1–4 = jalon J2, lignes 5–6 = J3, ligne
 
 ## P3-5 — Pile-in / consolidation {#p3-5}
 
-**Bloqué en amont** par la migration par-figurine du pile-in auto V11.
-→ [moteur.md#pile-in](moteur.md#pile-in)
+🟢 **Prérequis livré le 2026-08-18** : la migration par-figurine du pile-in/overrun auto (`Documentation/Implémentation/Implémenté/pile_in_overrun_par_figurine_2026-08-18.md`). P3-5 s'ouvre dès que le profil P5 est tranché ([#p5](#p5)).
 
 Décision spatiale ⇒ top-K d'hex interdit (§9.0bis).
 

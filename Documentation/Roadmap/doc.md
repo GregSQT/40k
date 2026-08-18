@@ -45,6 +45,12 @@ Le recensement G1/G2/G4 de `Documentation/Implémentation/1_Agent/V11_tranches.m
 
 ---
 
+## §0.19 — T2→T5 revérifiés par lecture seule {#reverif-t2-t5}
+
+`Documentation/Implémentation/1_Agent/V11_agent_rework.md` §0.19 le déclare lui-même : les ✅ de T2→T5 ne sont revérifiés que par LECTURE (aucune exécution), et la conformité littérale de T2 est indécidable. Dette de spec assumée, continue — distincte de la dette d'ancres G1/G2/G4 ci-dessus, qui porte sur le recensement de `V11_tranches.md` §1bis.
+
+---
+
 ## Bandeaux périmés V11_agent_rework §0bis {#bandeaux-0bis}
 
 Bandeaux et chiffres périmés listés dans `Documentation/Implémentation/1_Agent/V11_agent_rework.md` §0bis — signalés et volontairement non corrigés depuis le 2026-07-20. Assumé tant qu'aucune livraison ne rouvre ces sections ; traitement au fil de l'eau, comme les ancres.

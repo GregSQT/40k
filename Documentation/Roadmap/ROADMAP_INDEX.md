@@ -21,6 +21,12 @@
 > `Documentation/Implémentation/Replay.md` (contrat `step.log`, pipeline replay) et
 > `Documentation/Implémentation/analyzer_couverture.md` (matrice règle → contrôle → champs de
 > log) — relus à chaque livraison qui touche le journal.
+>
+> **Exceptions actées** (numérotées ici et nulle part ailleurs) : `Security.md` et
+> `Bot_refactor.md` vivent à la racine d'`Documentation/Implémentation/` au lieu d'`A_faire/`
+> (chantiers vivants, chemin demandé) ; `archives/v11.md` porte l'historique du programme V11
+> entier et sert d'archive au sujet `v11_chemin_critique.md` ; pas d'archive infra tant
+> qu'aucune livraison infra n'existe.
 
 ---
 
@@ -57,7 +63,7 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 
 | # | Sujets | Chantier | Fichier | Bloqueur |
 |---|---|---|---|---|
-| 1 | moteur+training | **P3-5** Pile-in / consolidation | [v11_chemin_critique.md#p3-5](v11_chemin_critique.md#p3-5) | [moteur.md#pile-in](moteur.md#pile-in) |
+| 1 | moteur+training | **P3-5** Pile-in / consolidation | [v11_chemin_critique.md#p3-5](v11_chemin_critique.md#p3-5) | P5 à trancher ([v11_chemin_critique.md#p5](v11_chemin_critique.md#p5)) |
 | 2 | training+moteur | **P3-6** Move-after-shooting + reactive move | [v11_chemin_critique.md#p3-6](v11_chemin_critique.md#p3-6) | — |
 | 3 | training | **P3-8** Optionnels à statuer | [v11_chemin_critique.md#p3-8](v11_chemin_critique.md#p3-8) | — |
 | 4 | training+moteur | **P4** Observation de support | [v11_chemin_critique.md#p4](v11_chemin_critique.md#p4) | — |
@@ -71,7 +77,7 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 
 | Sujets | Chantier | Fichier |
 |---|---|---|
-| moteur+training | **06** Armageddon abilities — 0/6 passes | [capacites.md](capacites.md) |
+| moteur+training | **06** Armageddon abilities — 0/6 passes | [capacites.md#armageddon-06](capacites.md#armageddon-06) |
 
 ---
 
@@ -79,7 +85,7 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 
 | Sujets | Chantier | Fichier | Jalon |
 |---|---|---|---|
-| moteur | **P3-0** Cohérence 03.03 — choix joueur/agent | [moteur.md#p3-0](moteur.md#p3-0) | Prochain dégel `TOTAL_ACTION_SIZE` (attendu en J2) |
+| moteur | **P3-0** Cohérence 03.03 — choix joueur/agent | [moteur.md#p3-0](moteur.md#p3-0) | Prochain dégel `TOTAL_ACTION_SIZE` (attendu en J2 ; celui du 2026-08-17 est passé sans lui) |
 | moteur | **T7** Unification validation déploiement | [moteur.md#t7](moteur.md#t7) | Fix faux — re-analyser avant |
 | moteur | **Phase B** Observation des niveaux | [moteur.md#phase-b](moteur.md#phase-b) | Phase A' validée + LoS 3D complet |
 | training+bot | **É9** Second siège + second scénario | [training.md#e9](training.md#e9) | J4 — entraînement bot satisfaisant |
@@ -100,7 +106,6 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 | front | Tests front T2b/T3a/T7 + couches B/C | [front.md#tests](front.md#tests) |
 | front | Validations navigateur en attente | [front.md#validations-nav](front.md#validations-nav) |
 | security | Étapes 4, 5, 7, 8 | [security.md](security.md) |
-| ✅ moteur | Pile-in/Overrun 12.06 par-figurine (prérequis P3-5) — livré 2026-08-18 | — |
 | infra | Perf `generate_compact_formation` | [infra.md#perf-formation](infra.md#perf-formation) |
 | infra | gzip/Brotli (avec Security étape 5) | [infra.md#gzip](infra.md#gzip) |
 
@@ -117,12 +122,14 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 | Sujets | Chantier | Fichier |
 |---|---|---|
 | moteur | LoS 3D : tir à travers un mur depuis un étage (signalé 2026-08-11, jamais cadré) | [moteur.md#los-mur-etage](moteur.md#los-mur-etage) |
+| bot+training | Chantier récompense distinct (relevé du chantier panel) | [bot.md#recompense](bot.md#recompense) |
 
 ### Lourds — re-cadrer avant toute reprise
 
 | Sujets | Chantier | Fichier |
 |---|---|---|
 | moteur | Preview de tir sans deepcopy | [moteur.md#preview-tir](moteur.md#preview-tir) |
+| infra | Noyau natif BFS move/empreintes — pool de move = 29 % d'une partie d'évaluation | [infra.md#noyau-natif](infra.md#noyau-natif) |
 | infra | Migration PostgreSQL | [infra.md#postgresql](infra.md#postgresql) |
 | infra | MCTS adversaire d'entraînement | [infra.md#mcts](infra.md#mcts) |
 | bot | Tranches 2-3 benchmark (PFSP, league, exploiters) — différées | [bot.md#league](bot.md#league) |
@@ -138,4 +145,5 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 | doc | Ancres de ligne périmées docs V11 | [doc.md#ancres](doc.md#ancres) |
 | doc | Dette d'ancres G1/G2/G4 de V11_tranches §1bis | [doc.md#dette-tranches](doc.md#dette-tranches) |
 | doc | Bandeaux périmés V11_agent_rework §0bis (assumés depuis 2026-07-20) | [doc.md#bandeaux-0bis](doc.md#bandeaux-0bis) |
+| doc | §0.19 : les ✅ T2→T5 revérifiés par lecture seule | [doc.md#reverif-t2-t5](doc.md#reverif-t2-t5) |
 | training | Note `bot_eval_freq_normal` à réécrire avec coût mesuré | [training.md#note-eval-freq](training.md#note-eval-freq) |

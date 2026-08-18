@@ -6,7 +6,7 @@
 
 🔄 **En cours le 2026-08-17** : run `x1_long --new --resolution 1` lancé (modèle précédent incompatible obs P3-4).
 
-**À faire à la fin** : vérifier les critères pipeline ([training.md#run-verif](training.md#run-verif)), puis `--test-only --step` pour rejouer la ligne de base du panel.
+**À faire à la fin** : vérifier les critères pipeline ([training.md#run-verif](training.md#run-verif)), puis `--test-only --step` pour rejouer la ligne de base du panel, puis **poser le seuil du gate `benchmark_floor` depuis cette première mesure** (le gate est livré, son seuil attend la mesure — décision 2026-08-15 : il se pose APRÈS, un seuil a priori au-dessus du `combined` courant ne s'ouvrirait jamais).
 
 ⚠️ Les chiffres des §8/§9 du doc de chantier sont à rejouer : échantillons insuffisants + erreur d'arithmétique sur le `combined` (§11.1).
 
@@ -31,6 +31,14 @@ Ligne de base actuelle (à battre) : `combined = 0,7433`, pire bot `racer = 0,63
 Distinct du MCTS adversaire d'entraînement ([infra.md#mcts](infra.md#mcts)).
 
 → `Documentation/Implémentation/1_Agent/V11_eval_strategy.md` §10.7
+
+---
+
+## Chantier récompense distinct {#recompense}
+
+**À cadrer — jamais ouvert.** Relevé du chantier panel (fossile, reliquat de `Bot_refactor.md` §7). Règle actée à respecter au cadrage : **un seul levier par run** — mêler récompense et adversaires rend les effets indémêlables ; le profil comportemental par adversaire (D.4, livré) doit d'abord nommer les fautes que la récompense ne punit pas.
+
+→ `Documentation/Implémentation/Bot_refactor.md` §7
 
 ---
 
