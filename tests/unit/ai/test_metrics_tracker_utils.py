@@ -1,6 +1,6 @@
 import json
 import os
-from collections import deque
+from collections import defaultdict, deque
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -215,8 +215,8 @@ def _tracker_stub() -> W40KMetricsTracker:
     # reste le verrou.
     t._abilities_tracking = {
         'total_episodes': 0,
-        'counts': {},
-        'exposures': {},
+        'counts': defaultdict(int),
+        'exposures': defaultdict(int),
     }
     # Etat zone-intent pose par sa PROPRE methode, comme __init__ le fait : c'est la seule
     # forme qui reste juste quand une fenetre y est ajoutee. Meme geste que le stub de

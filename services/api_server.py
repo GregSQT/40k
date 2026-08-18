@@ -2111,11 +2111,11 @@ def _slide_session_cookie(response):
     return response
 
 
-@app.errorhandler(Exception)
 @overload
 def handle_uncaught_exception(error: HTTPException) -> HTTPException: ...
 @overload
 def handle_uncaught_exception(error: Exception) -> "tuple[Response, int]": ...
+@app.errorhandler(Exception)
 def handle_uncaught_exception(error: Exception) -> "HTTPException | tuple[Response, int]":
     """Centralise toute exception non gérée : traceback complet dans le LOG serveur, réponse
     JSON générique porteuse d'un identifiant corrélable.
