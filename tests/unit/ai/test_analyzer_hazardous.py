@@ -67,6 +67,12 @@ _DESPERATE_ESCAPE_SHOOT_1_MW = (
     "[10:00:03] E1 T1 P1 SHOOT : Unit 1(20,20) SUFFERS 1 Mortal Wounds [DESPERATE ESCAPE] "
     "[R:+0.0] [SUCCESS]\n"
 )
+# Branche HAZARDOUS sur unité déjà morte : phase SHOOTING ≠ phase MOVE du kill_context
+# → damage_missing_unit_hp doit être incrémenté (pas "excess wound lost").
+_HAZARDOUS_SHOOT_1_MW = (
+    "[10:00:03] E1 T1 P1 SHOOTING : Unit 1(20,20) SUFFERS 1 Mortal Wounds [HAZARDOUS] "
+    "[R:+0.0] [SUCCESS]\n"
+)
 
 
 def _parse(tmp_path, monkeypatch, body: str = "", weapons_cache=None):
@@ -259,6 +265,23 @@ def test_hazardous_damage_applique_a_la_bonne_unite(tmp_path, monkeypatch):
     assert not any(d[1] == "101" for d in deaths), (
         "Unit 101 ne doit pas être tuée : les dégâts HAZARDOUS de Unit 1 ne doivent pas "
         "lui être attribués via action_unit_id"
+    )
+
+
+def test_hazardous_sur_unite_morte_incremente_damage_missing_unit_hp(tmp_path, monkeypatch):
+    """VERROU : branche HAZARDOUS sur unité déjà morte → damage_missing_unit_hp.
+
+    Scénario : Unit 1 (HP_MAX=3) tuée par 3 BM [DESPERATE ESCAPE] en MOVE.
+    Une 2e ligne HAZARDOUS (1 BM) en SHOOTING touche Unit 1 déjà morte.
+    Phase SHOOTING ≠ phase MOVE du kill_context → pas "excess wound lost" →
+    _apply_damage_and_handle_death doit incrémenter damage_missing_unit_hp[1].
+    Sans fix (branche HAZARDOUS absente) : la ligne tombe dans action_type='other',
+    _apply_damage_and_handle_death n'est pas appelé → damage_missing_unit_hp reste à 0.
+    """
+    body = _DESPERATE_ESCAPE_3_MW + _HAZARDOUS_SHOOT_1_MW
+    stats = _parse(tmp_path, monkeypatch, body)
+    assert stats["damage_missing_unit_hp"][1] == 1, (
+        "HAZARDOUS 1 BM sur Unit 1 déjà morte (tuée en MOVE) doit lever damage_missing_unit_hp"
     )
 
 
