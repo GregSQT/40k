@@ -125,10 +125,10 @@ def test_normalize_roster_ref_fixes_bare_benchmark_name():
 # ── Invariant statique sur les 61 scénarios migrés ──────────────────────────────
 
 def test_bank_has_expected_count():
-    # Banque ArmageddonAgent : 2 scenarios training (un par terrain, mc1 et mc2) + 4
-    # holdout_regular bot (les 4 matchups SM/Ork) + 4 holdout_regular bench (idem, pour les 3
-    # benchmarks reference_balanced/denial/reactive).
-    assert len(_bank_scenarios()) == 10
+    # Banque ArmageddonAgent : 2 scenarios training (armageddon1/2, mc1 et mc2) + 4
+    # holdout_regular bot (les 4 matchups SM/Ork).
+    # Les scenario_bench-01..04 ont été supprimés (doublons de bot-01..04, commit b20d8f9c).
+    assert len(_bank_scenarios()) == 6
 
 
 @pytest.mark.parametrize("scen", _bank_scenarios(), ids=lambda p: str(p.relative_to(SCEN_ROOT)))
