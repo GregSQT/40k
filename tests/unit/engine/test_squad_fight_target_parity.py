@@ -465,3 +465,74 @@ def test_overrun_pile_in_plan_returns_none_when_no_enemy_in_range(melee_scenario
 
     plan = _fight_overrun_pile_in_plan(gs, our_id)
     assert plan is None, "ennemi a 8\" hors portee overrun : aucun plan attendu"
+
+
+def test_overrun_mask_no_crash_with_off_table_enemy_in_slot():
+    """Régression : ValueError dans build_squad_action_mask quand un ennemi hors table (réserves,
+    sentinelle (-1,-1)) est présent dans les slots ennemis lors du path overrun 12.06.
+
+    Scénario : attaquant P1 non-engagé qui a chargé ; ennemi A P2 sur table à portée pile-in ;
+    ennemi B P2 en réserve stratégique (hors table) dans les slots. Avant le fix, le masque
+    appelait `unit_entries_within_engagement_zone` sur l'ennemi hors table → crash. Après le fix,
+    l'ennemi hors table est sauté silencieusement, le slot de l'ennemi A sur table est ouvert.
+    """
+    from engine.phase_handlers.shared_utils import (
+        SQUAD_ACTION_FIGHT_SLOT_BASE,
+        SQUAD_ACTION_FIGHT_SLOT_COUNT,
+        build_squad_action_mask,
+        get_enemy_slot_mapping,
+        init_enemy_slot_mapping,
+    )
+    from tests.unit.engine._state_builders import synthetic_state, synthetic_unit
+
+    # Attaquant P1 à (10,10), ennemi A P2 à (10,13) sur table (dist=3 > EZ=2, ≤pile-in=5).
+    attacker = synthetic_unit("1", 1, [{"col": 10, "row": 10}])
+    enemy_a = synthetic_unit("2", 2, [{"col": 10, "row": 13}])
+
+    gs = synthetic_state(
+        [attacker, enemy_a],
+        phase="fight",
+        game_rules={},
+        fight_subphase="fight",
+        current_player=1,
+        fight_step="fights_first",
+        fight_selector=1,
+        engaged_at_fight_step_start={},
+        units_charged={"1"},
+        units_selected_to_fight=set(),
+        units_fought=set(),
+        pile_in_done=set(),
+        consolidation_done=set(),
+    )
+
+    # Injecter ennemi B hors table dans units_cache (sentinelle (-1,-1) = réserve stratégique).
+    gs["units_cache"]["3"] = {
+        "id": "3",
+        "col": -1,
+        "row": -1,
+        "player": 2,
+        "BASE_SHAPE": "round",
+        "BASE_SIZE": 1,
+        "orientation": 0,
+        "occupied_hexes": set(),
+        "models": [],
+        "HP_CUR": 1,
+        "HP_MAX": 1,
+    }
+
+    init_enemy_slot_mapping(gs, 1)
+    enemy_slots = get_enemy_slot_mapping(gs, 1)
+
+    # Vérifier que l'ennemi hors table a bien obtenu un slot (racine du crash).
+    assert "3" in enemy_slots, "l'ennemi hors table doit avoir un slot pour déclencher la régression"
+
+    # Avant fix : crash ValueError. Après fix : pas de crash.
+    mask = build_squad_action_mask(gs, "1", enemy_slot_ids=enemy_slots)
+
+    fight_bits = [mask[SQUAD_ACTION_FIGHT_SLOT_BASE + i] for i in range(SQUAD_ACTION_FIGHT_SLOT_COUNT)]
+    assert any(fight_bits), "le slot de l'ennemi A sur table doit être ouvert après pile-in overrun"
+    # Le slot de l'ennemi hors table doit rester fermé.
+    off_table_slot = enemy_slots.index("3")
+    assert mask[SQUAD_ACTION_FIGHT_SLOT_BASE + off_table_slot] == 0, (
+        "l'ennemi hors table ne doit jamais ouvrir un slot fight"
+    )

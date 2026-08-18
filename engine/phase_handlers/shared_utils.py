@@ -12914,7 +12914,7 @@ def build_squad_action_mask(
                             if esid is None:
                                 continue
                             target_entry = units_cache.get(str(esid))
-                            if target_entry is None:
+                            if target_entry is None or not entry_is_on_battlefield(target_entry):
                                 continue
                             if any(
                                 _uiez(

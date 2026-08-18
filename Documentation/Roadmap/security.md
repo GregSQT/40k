@@ -14,12 +14,7 @@
 > `services/wsgi.py` (`_resolve_waitress_trusted_proxy()` + paramètres `trusted_proxy`,
 > `trusted_proxy_count`, `trusted_proxy_headers` ajoutés au `serve()`). 7 tests ajoutés.
 
-1. **Mot de passe du compte `greg` (bloquant).** L'audit de l'étape 8
-   (`python3 scripts/auth_journal.py accounts`, exécuté le 2026-08-18) a trouvé le mot de passe
-   égal au login, sur le **seul** compte de la base, de profil `admin`. Non corrigé par l'agent :
-   `config/users.db` est un fichier protégé et le remplacement est une décision utilisateur.
-   `UPDATE users SET password_hash = ?` avec la sortie de
-   `shared.auth_credentials.hash_password("<nouveau>")`.
+1. ✅ **Mot de passe du compte `greg` — remplacé (2026-08-18).** Hash PBKDF2-SHA256 200 000 iter, sel aléatoire ; ancien hash trivial écrasé.
 2. ✅ **Certificats TLS + `docker compose up` — validé localement (2026-08-18).** Vérifié :
    `whoami` → `appuser`, port 5001 injoignable hôte, HTTPS 200, HTTP → 301, en-têtes de sécurité
    (HSTS/X-Frame/nosniff/Referrer), cookie `Secure; HttpOnly; SameSite=Strict`, logout efface le
