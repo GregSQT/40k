@@ -5068,7 +5068,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         setError(`Cible refusée: ${formatApiConnectionError(e)}`);
         return;
       }
-      if (!result || result.success === false) {
+      if (!result) return;
+      const outcome = readEngineActionOutcome(result);
+      if (outcome.kind === "refused") {
+        setError(outcome.message);
         return;
       }
       const decls = (result.result?.declarations ?? []) as Array<{
@@ -5126,7 +5129,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         setError(`Cible refusée: ${formatApiConnectionError(e)}`);
         return;
       }
-      if (!result || result.success === false) {
+      if (!result) return;
+      const outcome = readEngineActionOutcome(result);
+      if (outcome.kind === "refused") {
+        setError(outcome.message);
         return;
       }
       const decls = (result.result?.declarations ?? []) as Array<{
@@ -5168,7 +5174,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         console.error(`[SQUAD-SHOOT] unassign model=${modelId} FAILED`, e);
         return;
       }
-      if (!result || result.success === false) return;
+      if (!result) return;
+      const outcome = readEngineActionOutcome(result);
+      if (outcome.kind === "refused") {
+        setError(outcome.message);
+        return;
+      }
       const decls = (result.result?.declarations ?? []) as Array<{
         model_id: string;
         weapon_index: number;
@@ -5204,7 +5215,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         console.error(`[SQUAD-SHOOT] unassign weapon=${weaponIndex} FAILED`, e);
         return;
       }
-      if (!result || result.success === false) return;
+      if (!result) return;
+      const outcome = readEngineActionOutcome(result);
+      if (outcome.kind === "refused") {
+        setError(outcome.message);
+        return;
+      }
       const decls = (result.result?.declarations ?? []) as Array<{
         model_id: string;
         weapon_index: number;
@@ -5298,7 +5314,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         setError(`Cible refusée: ${formatApiConnectionError(e)}`);
         return;
       }
-      if (!result || result.success === false) return;
+      if (!result) return;
+      const outcome = readEngineActionOutcome(result);
+      if (outcome.kind === "refused") {
+        setError(outcome.message);
+        return;
+      }
       const decls = (result.result?.declarations ?? []) as Array<{
         model_id: string;
         weapon_index: number;
@@ -5343,7 +5364,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         setError(`Cible refusée: ${formatApiConnectionError(e)}`);
         return;
       }
-      if (!result || result.success === false) return;
+      if (!result) return;
+      const outcome = readEngineActionOutcome(result);
+      if (outcome.kind === "refused") {
+        setError(outcome.message);
+        return;
+      }
       const decls = (result.result?.declarations ?? []) as Array<{
         model_id: string;
         weapon_index: number;
