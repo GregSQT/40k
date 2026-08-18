@@ -352,6 +352,7 @@ def test_an_off_table_unit_is_never_a_declarable_charge_target(monkeypatch) -> N
 
     # VERT VACANT : sans cette borne, l'assertion finale pourrait tenir parce que le chargeur est
     # trop loin, et non parce que le filtre hors-table mord.
+    from engine.combat_utils import calculate_hex_distance
     from engine.phase_handlers.shared_utils import CHARGE_THRESHOLD_INCHES
 
     ish = int(gs["inches_to_subhex"])
@@ -359,7 +360,7 @@ def test_an_off_table_unit_is_never_a_declarable_charge_target(monkeypatch) -> N
         (int(gs["models_cache"][m]["col"]), int(gs["models_cache"][m]["row"]))
         for m in gs["squad_models"][charger] if m in gs["models_cache"]
     ]
-    closest = min(abs(c + 1) + abs(r + 1) for c, r in charger_cells)
+    closest = min(calculate_hex_distance(c, r, -1, -1) for c, r in charger_cells)
     assert closest <= CHARGE_THRESHOLD_INCHES * ish, (
         f"le chargeur est a {closest} de la sentinelle (-1,-1), au-dela des 12\" ({CHARGE_THRESHOLD_INCHES * ish}) : "
         "la sentinelle ne serait pas 'a portee' meme sans filtre, le verrou serait vacant"
