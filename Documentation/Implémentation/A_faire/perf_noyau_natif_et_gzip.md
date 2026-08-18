@@ -17,26 +17,13 @@
 
 ---
 
-## 1. Compression HTTP (gzip / Brotli) — petit, à faire avec Security étape 5
+## 1. Compression HTTP (gzip) — ✅ livré 2026-08-18
 
-**Statut** : ouvert, ~½ j. **À faire AVEC l'étape 5 de [`Security.md`](../Security.md)**, qui
-installe déjà un reverse proxy (Caddy/nginx) : le gzip s'y active en une directive, alors qu'un
-middleware Flask coûterait plus cher pour un gain moindre.
+`frontend/nginx.conf` : `gzip on`, niveau 6, seuil 1 Ko, `gzip_proxied any`, `gzip_vary on`
+(Vary: Accept-Encoding — Flask-CORS + caches intermédiaires), types JSON/JS/CSS/SVG/fonts.
 
-**Objectif** : réduire le volume des réponses JSON et le temps de transfert en conditions réelles.
-
-**Ce que ça ne fait PAS** : ça ne diminue pas `serialize_game_state_s` ni la construction de
-l'arbre Python avant encodage. En **localhost le gain peut être nul**, et le CPU de compression
-peut même ajouter quelques ms. Le bénéfice est pour l'exposition réseau, pas pour le dev local.
-
-**Implémentation** : reverse proxy, `gzip on` + `gzip_types application/json` (Brotli via module
-ou CDN). Vérifier la compatibilité avec Flask-CORS (header `Vary: Accept-Encoding`). Les
-navigateurs envoient déjà `Accept-Encoding: gzip, br` — c'est au serveur d'annoncer et compresser.
-
-**Mesure** : DevTools réseau, taille « transférée » vs « ressource » ; comparer la latence totale
-sur réseau throttlé, pas en localhost.
-
-**Fichier de référence** : `services/api_server.py` — routes `/api/game/action`, `/api/game/start`.
+**Brotli** différé : `load_module` doit être dans le contexte main nginx, pas dans `conf.d/` —
+chantier Dockerfile séparé (stage `brotli-builder`, compile `ngx_brotli` contre source nginx).
 
 ---
 

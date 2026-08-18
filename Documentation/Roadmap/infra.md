@@ -10,11 +10,11 @@
 
 ---
 
-## gzip / Brotli {#gzip}
+## gzip livré — Brotli (chantier Dockerfile) {#gzip}
 
-½ j. À faire AVEC l'étape 5 de Security (même proxy).
+**gzip** ✅ livré 2026-08-18 dans `frontend/nginx.conf` : `gzip on`, niveau 6, seuil 1 Ko, `gzip_vary on` (Vary: Accept-Encoding pour Flask-CORS et caches), types JSON/JS/CSS/SVG/fonts.
 
-→ `Documentation/Implémentation/A_faire/perf_noyau_natif_et_gzip.md` §1
+**Brotli** : gain ~15-20 % supplémentaire sur JSON. Bloqué : `load_module` doit être dans le contexte **main** `/etc/nginx/nginx.conf`, pas dans `conf.d/` — chantier Dockerfile séparé (stage `brotli-builder` qui compile `ngx_brotli` contre la source nginx exacte).
 
 ---
 
