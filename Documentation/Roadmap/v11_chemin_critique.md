@@ -47,22 +47,22 @@ Features : LoS/couvert par slot ennemi, portée effective, flags advanced/fell_b
 
 ## P5 — Validation par tranche {#p5}
 
-🔴 **Aucun profil existant ne convient — à trancher avant d'ouvrir P3-5.**
+🟢 **Tranché le 2026-08-18 — commande de validation :**
 
-Ce qui est acquis : `n_steps` est un TOTAL divisé par `n_envs` depuis §0.33 ⇒ la mémoire n'écarte plus aucun profil. Les **6** profils de la config sont tous à 48 envs.
+```
+python3 ai/train.py --agent ArmageddonAgent --training-config x1_long --resolution 1 --test-only --step
+```
 
-Ce qui casse — deux variables distinctes :
+`--test-only` utilise `eval_episodes` (pas `bot_eval_final`, qui ne s'applique qu'à la fin d'un run d'entraînement). Les **6** profils de la config sont tous à 48 envs ; seul `x1_long` atteint la précision cible :
 
-| | `total_episodes` (durée d'ENTRAÎNEMENT) | `bot_eval_final` (parties par bot de la MESURE) |
-|---|---|---|
-| `x1_debug` | 96 | **0** — pas d'évaluation finale |
-| `x5_debug` | 96 | **1** (granularité 1/6) |
-| `x1` | 10 000 | 10 |
-| `x1_long` | 50 000 | 300 |
+| profil | `total_episodes` | `bot_eval_final` | `eval_episodes` |
+|---|---|---|---|
+| `x1_debug` | 96 | 0 | — |
+| `x5_debug` | 96 | 1 | — |
+| `x1` | 10 000 | 10 | 50 |
+| `x1_long` | 50 000 | 300 | **100** |
 
-Erreur-type de l'écart entre deux win-rates `combined` (6 bots) : ≈ `0,707/√(6 × bot_eval_final)` → **2,9 pts** à `bot_eval_final = 100`.
-
-**À faire** : un profil de validation dédié dans `ArmageddonAgent_training_config.json`. Le run `x1` de référence a pris **4 h 01** pour 10 000 épisodes.
+Erreur-type avec `eval_episodes = 100` : `0,707/√(6 × 100)` ≈ **2,9 pts**. Durée : ~8 min (350 épisodes à 0,72 ép./s, mesuré le 2026-08-18). Aucun profil dédié nécessaire.
 
 → `Documentation/Implémentation/1_Agent/V11_phaseA.md` §9.6
 
