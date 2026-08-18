@@ -487,7 +487,7 @@ def handle_fight_move(
 
     stats = state.stats
     match = re.search(
-        r'Unit (\d+)\(\d+,\s*\d+\) (CONSOLIDATED|PILED IN) from '
+        r'Unit (\d+)\(\d+,\s*\d+\) (CONSOLIDATED|(?:OVERRUN )?PILED IN) from '
         r'\((\d+),\s*(\d+)\) to \((\d+),\s*(\d+)\)',
         action_desc,
     )
