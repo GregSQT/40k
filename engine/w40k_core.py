@@ -324,7 +324,7 @@ def _charge_game_state_defaults() -> Dict[str, Any]:
     d'enregistrements en parallele aurait ete un second compteur du meme evenement, capable de
     diverger du premier sans qu'aucune courbe ne le montre.
     """
-    return {"_charge_declaration_current": {}}
+    return {"_charge_declaration_current": {}, "_charge_initial_rolls": {}}
 
 
 def _next_engine_id() -> int:

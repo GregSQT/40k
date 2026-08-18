@@ -152,6 +152,11 @@ def _game_state(weapon_rules, *, moved_inches=0.0, target=TARGET, n_attacks=1,
         "board_rows": 100,
         # engagement_zone déjà en subhexes (1" × inches_to_subhex=5), lu par get_engagement_zone.
         "config": {"game_rules": {"engagement_zone": 5}},
+        # Désactive la boucle de décision d'allocation RL : ce harnais teste les tokens du
+        # step.log, pas la politique d'allocation. Sans ce flag, `_manual_allocation_step`
+        # retourne `allocation_model_pending` avant d'émettre les logs dès que ≥2 modèles
+        # cibles sont présents (cas [BLAST] / [CLEAVE] avec TARGET_SQUAD=10).
+        "no_gym_allocation_model": True,
         intents_key: {"1": [intent]},
     }
 
