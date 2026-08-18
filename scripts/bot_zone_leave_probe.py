@@ -33,6 +33,7 @@ from __future__ import annotations
 import argparse
 import copy
 import os
+import gymnasium
 import random
 import sys
 from collections import defaultdict
@@ -200,7 +201,10 @@ def main() -> None:
 
     print(f"Modèle : {os.path.basename(model_path)}   Plateau : {board_path}")
 
-    model_known = set(model.observation_space.spaces.keys())
+    obs_space = model.observation_space
+    if not isinstance(obs_space, gymnasium.spaces.Dict):
+        raise TypeError(f"Espace d'observation Dict attendu, reçu {type(obs_space)}")
+    model_known = set(obs_space.spaces.keys())
     tallies: Dict[str, Dict[str, int]] = {}
     for bot_name in [b.strip() for b in args.bots.split(",") if b.strip()]:
         bot = build_bot(bot_name, dict(randomness))

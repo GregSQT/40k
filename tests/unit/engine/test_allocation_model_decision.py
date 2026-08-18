@@ -23,7 +23,7 @@ Rouge → vert imposé sur chaque invariant clé par mutation puis restauration.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 import pytest
@@ -55,7 +55,7 @@ from tests._state_invariants import turn_state_invariants, unit_invariants
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _mk_model(mid: str, col: int, row: int, player: int = 0, role: str = None,
+def _mk_model(mid: str, col: int, row: int, player: int = 0, role: Optional[str] = None,
                hp_cur: int = 3, hp_max: int = 3) -> Dict[str, Any]:
     """Figurine minimale pour models_cache."""
     entry: Dict[str, Any] = {
@@ -239,6 +239,7 @@ def test_arm_allocation_model_decision_payload():
     _arm_allocation_model_decision(state, "sq_def", ["mA", "mB"], SHOOT_CTX)
 
     decision = read_pending_agent_decision(state)
+    assert decision is not None
     opt0_payload = decision["options"][0]["payload"]
     assert opt0_payload["model_id"] == "mA"
     assert opt0_payload["alloc_ctx_key"] == SHOOT_CTX.alloc_key
@@ -252,6 +253,7 @@ def test_arm_allocation_model_dist_enemy_norm_positive():
     _arm_allocation_model_decision(state, "sq_def", ["mX", "mY"], SHOOT_CTX)
 
     decision = read_pending_agent_decision(state)
+    assert decision is not None
     cont = decision["options_cont"]
     dist_norm = cont[0][decision_option_cont_index("dist_enemy_norm")]
     assert 0.0 < dist_norm <= 1.0
@@ -427,6 +429,7 @@ def test_arm_allocation_model_decision_cap_selects_lowest_tier_first():
     _arm_allocation_model_decision(state, "sq_def", alive, SHOOT_CTX)
 
     decision = read_pending_agent_decision(state)
+    assert decision is not None
     assert len(decision["options"]) == MAX_DECISION_OPTIONS
     # Les 2 leaders (tier le plus haut) ne doivent pas figurer dans les 6 candidats
     chosen_labels = {opt["payload"]["model_id"] for opt in decision["options"]}

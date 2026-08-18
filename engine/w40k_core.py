@@ -6985,7 +6985,7 @@ class W40KEngine(gym.Env):
                         "charge_roll": charge_roll,
                         # L28 — jet AVANT relance, None si aucune relance : symétrie exacte avec
                         # le chemin PvP (charge_handlers ~L2940/4473/5929/6059/6206).
-                        "charge_roll_initial": self.game_state.get("_charge_initial_rolls", {}).pop(str(squad_id), None),
+                        "charge_roll_initial": self.game_state["_charge_initial_rolls"].pop(str(squad_id), None),
                         "charge_failed_reason": "no valid charge plan for roll",
                         "targetCol": _charge_target[0] if _charge_target else None,
                         "targetRow": _charge_target[1] if _charge_target else None,
@@ -7034,7 +7034,7 @@ class W40KEngine(gym.Env):
                         "charge_roll": charge_roll,
                         # L28 — jet AVANT relance, None si aucune relance : symétrie exacte avec
                         # le chemin PvP (charge_handlers ~L2940/4473/5929/6059/6206).
-                        "charge_roll_initial": self.game_state.get("_charge_initial_rolls", {}).pop(str(squad_id), None),
+                        "charge_roll_initial": self.game_state["_charge_initial_rolls"].pop(str(squad_id), None),
                         "fromCol": _charge_from[0] if _charge_from else None,
                         "fromRow": _charge_from[1] if _charge_from else None,
                         "toCol": int(_dest_uc["col"]) if "col" in _dest_uc else None,

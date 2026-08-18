@@ -32,6 +32,8 @@ import sys
 from datetime import datetime
 from typing import Any, Dict, List, Optional, TextIO, cast
 
+import gymnasium
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -511,7 +513,10 @@ def main() -> None:
         model_fingerprint = _model_fingerprint(model_path)  # avant le chargement : cf. docstring
         model = MaskablePPO.load(model_path, device="cpu")
         normalize = _build_eval_obs_normalizer_for_worker(model, model_path, vec_norm_enabled, vec_eval_enabled)
-        model_known = set(model.observation_space.spaces.keys())
+        obs_space = model.observation_space
+        if not isinstance(obs_space, gymnasium.spaces.Dict):
+            raise TypeError(f"Espace d'observation Dict attendu, reçu {type(obs_space)}")
+        model_known = set(obs_space.spaces.keys())
 
         # Le panel se lit par la MÊME fonction que l'évaluation réelle, jamais à la main : elle
         # exige les deux clés (un panel vide ferait tourner la boucle zéro fois et publier

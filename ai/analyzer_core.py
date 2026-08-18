@@ -1712,10 +1712,11 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                             _all_unit_types: "set[str]" = set()
                             if _squad_type:
                                 _all_unit_types.add(_squad_type)
-                            for _mid in state.unit_model_hp.get(action_unit_id, {}):
-                                _mtype = state.model_types.get(_mid)  # get allowed
-                                if _mtype:
-                                    _all_unit_types.add(_mtype)
+                            if action_unit_id in state.unit_model_hp:
+                                for _mid in state.unit_model_hp[action_unit_id]:
+                                    _mtype = state.model_types.get(_mid)  # get allowed
+                                    if _mtype:
+                                        _all_unit_types.add(_mtype)
                             _has_hazardous = any(
                                 any(
                                     "HAZARDOUS" in (w.get("rules") or [])
