@@ -200,3 +200,78 @@ def test_squad_fight_rejected_when_machine_not_at_fight_step(melee_scenario_file
 
     with pytest.raises(RuntimeError, match="n a pas ete deroulee jusqu a l etape FIGHT"):
         eng._process_squad_action({"action": "squad_fight", "squad_id": squad_id})
+
+
+def test_pool_vide_masque_sans_slot_fight(melee_scenario_file):
+    """Invariant masque↔commit (face 1) : squad hors pool 12.04 → aucun slot fight dans build_squad_action_mask.
+
+    La rupture cible `build_squad_action_mask` (shared_utils) : si la garde
+    `squad_id in fight_v11_current_pool` est absente, un squad déjà sélectionné obtient des slots
+    fight que le commit refuserait (ValueError « rupture masque/commit »). Le test passe le squad
+    directement à `build_squad_action_mask` pour exercer cette garde, indépendamment du filtre amont
+    `eligible_units` de `get_squad_action_mask_and_eligible_units`.
+    """
+    from engine.phase_handlers.fight_handlers import fight_v11_current_pool
+    from engine.phase_handlers.shared_utils import (
+        SQUAD_ACTION_FIGHT_NO_TARGET,
+        SQUAD_ACTION_FIGHT_SLOT_BASE,
+        SQUAD_ACTION_FIGHT_SLOT_COUNT,
+        build_squad_action_mask,
+        get_enemy_slot_mapping,
+    )
+
+    eng = _engine_in_fight_phase(melee_scenario_file)
+    gs = eng.game_state
+
+    pool = fight_v11_current_pool(gs)
+    assert pool, "précondition : pool 12.04 non vide au départ"
+    squad_id = str(pool[0])
+
+    # Marquer l'unité comme déjà sélectionnée → elle quitte le pool 12.04.
+    gs["units_selected_to_fight"].add(squad_id)
+    assert squad_id not in [str(x) for x in fight_v11_current_pool(gs)], (
+        "précondition : squad_id doit être hors pool après marquage"
+    )
+
+    # Appel direct à build_squad_action_mask : c'est là que vit la garde `squad_id in pool`.
+    our_player = int(gs["units_cache"][squad_id]["player"])
+    enemy_slot_ids = get_enemy_slot_mapping(gs, our_player)
+    mask = build_squad_action_mask(gs, squad_id, enemy_slot_ids)
+
+    fight_slots = list(range(SQUAD_ACTION_FIGHT_SLOT_BASE, SQUAD_ACTION_FIGHT_SLOT_BASE + SQUAD_ACTION_FIGHT_SLOT_COUNT))
+    fight_slots.append(SQUAD_ACTION_FIGHT_NO_TARGET)
+    opened = [i for i in fight_slots if mask[i]]
+    assert not opened, (
+        f"squad {squad_id!r} hors pool 12.04 mais {len(opened)} slot(s) fight ouvert(s) : {opened} "
+        f"(rupture masque/commit — l'agent commettrait une action que le moteur refuserait)"
+    )
+
+
+def test_commit_rupture_pool_vide_apres_masque(melee_scenario_file):
+    """Invariant masque↔commit (face 2) : slot fight ouvert au masque, pool vidé avant commit → ValueError.
+
+    Simule la désynchronisation temporelle masque/commit : l'escouade est dans le pool lors du
+    calcul du masque (slot ouvert), mais sélectionnée à la mêlée avant que l'action ne soit
+    traitée. Le moteur doit lever, pas absorber.
+    """
+    from engine.phase_handlers.fight_handlers import fight_v11_current_pool
+
+    eng = _engine_in_fight_phase(melee_scenario_file)
+    gs = eng.game_state
+
+    pool = fight_v11_current_pool(gs)
+    assert pool, "précondition : pool 12.04 non vide"
+    squad_id = str(pool[0])
+
+    # Construire l'action que le masque propose pour squad_id (pool non vide à ce stade).
+    action = _fight_action(gs, squad_id)
+
+    # Vider le pool APRÈS la construction du masque : l'escouade est maintenant sélectionnée.
+    gs["units_selected_to_fight"].add(squad_id)
+    assert squad_id not in [str(x) for x in fight_v11_current_pool(gs)], (
+        "précondition : squad_id doit être hors pool après marquage"
+    )
+
+    # Le commit doit détecter la rupture et lever, jamais absorber silencieusement.
+    with pytest.raises(ValueError, match="rupture masque/commit"):
+        eng._process_squad_action(action)
