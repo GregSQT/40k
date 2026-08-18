@@ -73,3 +73,43 @@ def test_fight_move_log_stores_captured_models_segment() -> None:
     )
     entry = gs["action_logs"][-1]
     assert entry.get("models_segment") == captured_seg
+
+
+def test_build_step_log_details_prefers_captured_models_segment() -> None:
+    """Le segment pré-capturé dans raw_log doit primer sur _models_segment_for_unit au flush.
+
+    Sans la branche `if 'models_segment' in raw_log`, _build_step_log_details appellerait
+    _models_segment_for_unit — qui lit les positions COURANTES, soit post-consolidation pour
+    une ligne pile-in émise juste avant dans le même _fight_v11_gym_settle. Ce test tombe si
+    la branche est retirée : _Bridge renvoie une valeur distincte, la comparaison échoue.
+    """
+    from engine.w40k_core import W40KEngine
+
+    class _Bridge:
+        def _models_segment_for_unit(self, unit_id: str) -> str:
+            return "[MODELS: LIVE_POST_CONSO]"
+
+    captured = "[MODELS: 7#0@(4,4)]"
+    details = W40KEngine._build_step_log_details.__get__(_Bridge())(
+        {"unitId": "7", "turn": 3, "models_segment": captured},
+        3,
+    )
+    assert details["models_segment"] == captured, (
+        "_build_step_log_details a appelé _models_segment_for_unit au lieu de lire "
+        "raw_log['models_segment'] : la branche if a été retirée"
+    )
+
+
+def test_build_step_log_details_falls_back_to_live_segment_when_absent() -> None:
+    """Sans models_segment dans raw_log, _models_segment_for_unit est appelé (branche else)."""
+    from engine.w40k_core import W40KEngine
+
+    class _Bridge:
+        def _models_segment_for_unit(self, unit_id: str) -> str:
+            return "[MODELS: LIVE]"
+
+    details = W40KEngine._build_step_log_details.__get__(_Bridge())(
+        {"unitId": "7", "turn": 2},
+        2,
+    )
+    assert details["models_segment"] == "[MODELS: LIVE]"
