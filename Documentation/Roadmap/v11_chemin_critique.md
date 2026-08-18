@@ -81,9 +81,9 @@ Durée mesurée du run x1_long 50 000 épisodes : **5 h 54** (2026-08-18). L'est
 
 4 scénarios `scenario_bench-01` à `scenario_bench-04` dans `config/agents/ArmageddonAgent/scenarios/holdout_regular/` (matchups SM/SM, SM/Ork, Ork/SM, Ork/Ork) pour les 3 bots de référence `reference_balanced / reference_denial / reference_reactive`. Ajoutés à `bot_eval_weights` (poids 0,0 — hors combined) et `bot_eval_randomness` (0,0 — déterministes).
 
-Seuil posé après mesure sur le modèle courant : `model_gating_min_benchmark_floor = 0.75` (scores mesurés : 0,99 / 1,00 / 1,00). `model_gating_enabled = true` sur x1_long uniquement.
+Seuil posé après mesure sur le modèle courant : `model_gating_min_benchmark_floor = 0.90` (scores mesurés : 0,99 / 1,00 / 1,00 → seuil = min − 0,09). `model_gating_enabled = true` sur x1_long uniquement.
 
-Le gate rougit si le modèle progresse sur les 7 bots de sélection mais tombe sous 0,75 sur l'un des 3 bots de référence — signal de surapprentissage sur la distribution de sélection.
+Le gate rougit si le modèle progresse sur les 7 bots de sélection mais tombe sous 0,90 sur l'un des 3 bots de référence — signal de surapprentissage sur la distribution de sélection.
 
 ---
 
