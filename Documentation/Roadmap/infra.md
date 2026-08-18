@@ -10,8 +10,6 @@
 
 ---
 
----
-
 ## Noyau natif BFS move/empreintes {#noyau-natif}
 
 **Lourd, EN PAUSE** (décision 2026-08-16 : non lancé). Le pool de déplacement (`build_squad_move_cell_map` → `erode_move_pool_by_squad_block` → `geodesic_move_reach`) pèse **29 % d'une partie d'évaluation** — calcul dérivé, optimisable sous verrou d'empreinte `step.log`.

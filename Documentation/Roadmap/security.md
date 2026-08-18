@@ -4,7 +4,7 @@
 
 → `Documentation/Implémentation/Security.md` (référence de conception)
 
-⚠️ `Security.md` est à la racine d'`Documentation/Implémentation/` au lieu d'`A_faire/` — exception actée au bloc « Exceptions actées » de [ROADMAP_INDEX.md](ROADMAP_INDEX.md), seul endroit qui les recense. Elle reste valable : le fichier n'a pas bougé, et le chantier n'est pas clos tant que les trois actions ci-dessous ne le sont pas.
+⚠️ `Security.md` est à la racine d'`Documentation/Implémentation/` au lieu d'`A_faire/` — exception actée au bloc « Exceptions actées » de [ROADMAP_INDEX.md](ROADMAP_INDEX.md), seul endroit qui les recense. Elle reste valable : le fichier n'a pas bougé, et le chantier n'est pas clos tant que l'action 3 ci-dessous ne l'est pas.
 
 ## Reste — une action
 
@@ -25,8 +25,3 @@
    login, partie complète, déconnexion. Aucun test automatisé ne couvre le navigateur réel.
 
 Puis, une fois la stack déployée : scan dynamique baseline OWASP ZAP (étape 8, optionnel).
-
-## Dépendance
-
-gzip/Brotli ([infra.md#gzip](infra.md#gzip)) se pose dans `frontend/nginx.conf`, désormais
-versionné — c'est le bon moment, la configuration n'est plus écrite en `printf`.
