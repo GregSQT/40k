@@ -55,7 +55,7 @@ Le coeur IA s'appuie sur Stable-Baselines3 et sb3-contrib (MaskablePPO) pour ger
 
 ## Introduction
 
-Ce mémoire présente la conception et le développement d'une application de simulation tactique inspirée de Warhammer 40K, réalisée dans le cadre du titre CDA. L'objectif est de produire un système capable de simuler un tour de jeu structuré (mouvement, tir, charge, combat, déploiement) tout en entraînant des agents IA capables de prendre des décisions valides et performantes. Le projet associe un moteur de jeu Python (gymnasium), une API Flask, une interface React/TypeScript (PIXI pour le plateau) et un pipeline d'apprentissage par renforcement (Stable-Baselines3, MaskablePPO). La rédaction s'appuie sur le modèle type du dossier projet (*\_redac dossier projet V2.pdf*) et sur les exigences des documents présents dans *Documentation/Memoire/* (méthodologie, REAC).
+Ce mémoire présente la conception et le développement d'une application de simulation tactique inspirée de Warhammer 40K, réalisée dans le cadre du titre CDA. L'objectif est de produire un système capable de simuler un tour de jeu structuré (mouvement, tir, charge, combat, déploiement) tout en entraînant des agents IA capables de prendre des décisions valides et performantes. Le projet associe un moteur de jeu Python (gymnasium), une API Flask, une interface React/TypeScript (PIXI pour le plateau) et un pipeline d'apprentissage par renforcement (Stable-Baselines3, MaskablePPO). La rédaction s'appuie sur le modèle type du dossier projet (*\_redac dossier projet V2.pdf*) et sur les exigences des documents présents dans *Documentation/Memoire RNCP/* (méthodologie, REAC).
 
 Objectifs du projet :
 
@@ -65,7 +65,7 @@ Objectifs du projet :
 4. entrainer et evaluer des agents RL sur des scenarios parametrables ;
 5. documenter l'ensemble selon les attendus RE/REAC CDA.
 
-**Exigences et recommandations de rédaction** : Ce memoire suit la structure type du dossier projet CDA (referentiel, besoins, gestion de projet, realisations techniques, securite, jeux d'essai, deploiement, veille, conclusion, annexes). Les documents de reference se trouvent dans `Documentation/Memoire/` (methodologie, REAC, exemple *\_redac dossier projet V2.pdf*).
+**Exigences et recommandations de rédaction** : Ce memoire suit la structure type du dossier projet CDA (referentiel, besoins, gestion de projet, realisations techniques, securite, jeux d'essai, deploiement, veille, conclusion, annexes). Les documents de reference se trouvent dans `Documentation/Memoire RNCP/` (methodologie, REAC, exemple *\_redac dossier projet V2.pdf*).
 
 ---
 
@@ -439,4 +439,4 @@ Les annexes complètent le mémoire par des supports détaillés et des référe
 - [x] Plan de tests (inclut analyzer, check_ai_rules, hidden_action_finder)
 - [ ] Jeu d'essai final avec resultats / metriques (ex. analyzer.py + verification visuelle)
 - [x] Veille
-- [ ] Annexes finalisees (contenus dans Documentation/Memoire/*.sql, *.md)
+- [ ] Annexes finalisees (contenus dans Documentation/Memoire RNCP/*.sql, *.md)

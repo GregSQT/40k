@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Génère des versions HTML lisibles des fiches .md du mémoire.
-# Usage : depuis la racine du projet : ./Documentation/Memoire/export_memoire_fiches.sh
-# Les .html sont créés dans Documentation/Memoire/ et s'ouvrent dans le navigateur.
+# Usage : depuis la racine du projet : "./Documentation/Memoire RNCP/export_memoire_fiches.sh"
+# Les .html sont créés dans Documentation/Memoire RNCP/ et s'ouvrent dans le navigateur.
 
 set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

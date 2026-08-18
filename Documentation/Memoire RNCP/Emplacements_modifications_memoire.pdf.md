@@ -44,15 +44,15 @@ Référence : **memoire.pdf** (66 pages), **Table des matières** (pages 1–3).
 
 | Annexe à ajouter | Fichier source dans le dépôt | Contenu |
 |------------------|------------------------------|--------|
-| **Annexe 3 : Script de création de la base d'authentification** | `Documentation/Memoire/Annexe_script_BDD_auth.sql` | Script SQL (CREATE TABLE + INSERT d’amorçage). Ouvrir le fichier, copier tout le contenu, coller dans le mémoire en annexe. |
-| **Annexe 4 : Tableau des routes API** | `Documentation/Memoire/Annexe_tableau_routes_API.md` | Tableau (méthode, URL, paramètres, codes retour). Même chose : ouvrir, copier le tableau, coller en annexe. |
-| **Annexe 5 : Extraits de code significatifs** | `Documentation/Memoire/Annexe_extraits_code.md` | Trois extraits (step moteur, movement_phase_start, appel API start game) avec fichier et contexte. Copier les trois blocs dans le mémoire en annexe. |
+| **Annexe 3 : Script de création de la base d'authentification** | `Documentation/Memoire RNCP/Annexe_script_BDD_auth.sql` | Script SQL (CREATE TABLE + INSERT d’amorçage). Ouvrir le fichier, copier tout le contenu, coller dans le mémoire en annexe. |
+| **Annexe 4 : Tableau des routes API** | `Documentation/Memoire RNCP/Annexe_tableau_routes_API.md` | Tableau (méthode, URL, paramètres, codes retour). Même chose : ouvrir, copier le tableau, coller en annexe. |
+| **Annexe 5 : Extraits de code significatifs** | `Documentation/Memoire RNCP/Annexe_extraits_code.md` | Trois extraits (step moteur, movement_phase_start, appel API start game) avec fichier et contexte. Copier les trois blocs dans le mémoire en annexe. |
 
 **Emplacements des fichiers :**
 
-- `Documentation/Memoire/Annexe_script_BDD_auth.sql`
-- `Documentation/Memoire/Annexe_tableau_routes_API.md`
-- `Documentation/Memoire/Annexe_extraits_code.md`
+- `Documentation/Memoire RNCP/Annexe_script_BDD_auth.sql`
+- `Documentation/Memoire RNCP/Annexe_tableau_routes_API.md`
+- `Documentation/Memoire RNCP/Annexe_extraits_code.md`
 
 Après ajout, renuméroter les annexes suivantes (ex. Decision Tree → 6, output Analyzer → 7, etc.).
 
