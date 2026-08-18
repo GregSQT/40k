@@ -7,8 +7,11 @@ import { API_BASE } from "../services/apiFetch";
 // plus côté serveur (F12 de Documentation/Implémentation/A_faire/Security.md), les comptes
 // sont créés en SQL. Exposer un formulaire qui ne peut que échouer serait un leurre.
 
+// `access_token` est volontairement ABSENT de ce type alors que la réponse le contient
+// toujours : il sert aux clients hors navigateur (`scripts/pvp_smoke_test.py`, tests d'API).
+// Le navigateur, lui, reçoit sa session dans un cookie `HttpOnly` (F13) et ne doit jamais
+// remettre ce token dans une variable JavaScript — l'y déclarer inviterait à le stocker.
 interface LoginResponse {
-  access_token: string;
   user: {
     id: number;
     login: string;
@@ -37,6 +40,10 @@ export default function AuthPage() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ login: userLogin, password: userPassword }),
+      // C'est cette réponse qui pose le cookie `HttpOnly` de session (F13) : sans
+      // `credentials`, le navigateur ignorerait le `Set-Cookie` et le login n'authentifierait
+      // rien. `same-origin` est le défaut de `fetch` — écrit ici parce qu'il est structurant.
+      credentials: "same-origin",
     });
 
     const text = await loginResponse.text();
@@ -78,7 +85,6 @@ export default function AuthPage() {
     try {
       const loginPayload = await executeLogin(trimmedLogin, password);
       saveAuthSession({
-        token: loginPayload.access_token,
         user: loginPayload.user,
         permissions: loginPayload.permissions,
         default_redirect_mode: loginPayload.default_redirect_mode,

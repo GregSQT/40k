@@ -1,6 +1,19 @@
+# Réseau à SOUS-RÉSEAU FIXE. Motif : `W40K_TRUSTED_PROXIES` n'accepte que des adresses IP
+# (cf. `_resolve_trusted_proxies` — un nom d'hôte ne correspondrait jamais à `remote_addr`),
+# et sur un réseau compose par défaut l'adresse du conteneur nginx est attribuée dynamiquement.
+# Fixer le sous-réseau permet de fixer l'adresse du frontend, donc de déclarer au backend UNE
+# adresse de confiance et une seule — au lieu d'élargir la confiance à tout un sous-réseau.
+networks:
+  wh40k:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/24
+
 services:
   backend:
-    user: "0:0"
+    # `user: "0:0"` RETIRÉ (F15). Il annulait le `USER appuser` du Dockerfile et faisait tourner
+    # le backend en root : une exécution de code obtenue dans le conteneur y devenait root.
     build:
       context: .
       dockerfile: Dockerfile
@@ -8,11 +21,29 @@ services:
         BUILD_TOPOLOGY: "0"
     container_name: wh40k-backend
     restart: unless-stopped
-    ports:
-      - "5001:5001"
+    networks:
+      - wh40k
+    # `ports: 5001:5001` RETIRÉ (F9/F15). Il publiait le backend EN CLAIR sur l'hôte, à côté du
+    # frontend TLS : mots de passe et cookie de session y transitaient sans chiffrement, et la
+    # porte d'authentification était joignable sans passer par le proxy. Le backend reste
+    # joignable par le réseau interne, ce dont nginx a besoin et ce dont personne d'autre n'a
+    # besoin. Ne PAS le remettre pour déboguer : `docker compose exec backend` suffit.
     environment:
       PYTHONUNBUFFERED: "1"
+      # Debug MOTEUR. Distinct de l'exposition du traceback HTTP, qui a sa propre variable
+      # (`W40K_EXPOSE_TRACEBACK`, non définie ici = fermée) — les confondre laissait croire que
+      # cette ligne protégeait la production du traceback, ce qui était faux.
       W40K_DEBUG: "false"
+      # IP du conteneur nginx, fixée ci-dessous. Sans elle, `_client_ip()` retombe sur
+      # `remote_addr`, qui vaut l'adresse du proxy pour TOUS les utilisateurs : le rate limiting
+      # du login perd sa composante IP et cinq essais ratés suffisent à verrouiller un compte.
+      W40K_TRUSTED_PROXIES: "172.28.0.10"
+      # Origines autorisées (F3). À remplacer par l'URL publique réelle au déploiement ; la
+      # valeur ci-dessous ne vaut que pour un essai local en HTTPS sur le port publié.
+      W40K_CORS_ORIGINS: "${W40K_PUBLIC_ORIGIN:?Set W40K_PUBLIC_ORIGIN, ex. https://w40k.exemple.tld}"
+      # Répertoire de persistance = le volume inscriptible par `appuser`. Le défaut (`logs/`
+      # dans l'arbre des sources) n'est plus inscriptible depuis le retrait de root.
+      W40K_PERSIST_DIR: "/app/runtime"
     volumes:
       - ${SYNO_CONFIG_PATH:?Set SYNO_CONFIG_PATH in your environment}/users.db:/app/config/users.db
       - ${SYNO_MODELS_PATH:?Set SYNO_MODELS_PATH in your environment}:/app/ai/models
@@ -29,8 +60,22 @@ services:
       dockerfile: frontend/Dockerfile
     container_name: wh40k-frontend
     restart: unless-stopped
+    networks:
+      wh40k:
+        # Adresse FIXE, celle que le backend déclare en proxy de confiance. Une adresse
+        # dynamique ferait silencieusement ignorer `X-Forwarded-For` au premier redémarrage
+        # qui change l'attribution — et le verrouillage de compte reviendrait sans alerte.
+        ipv4_address: 172.28.0.10
     depends_on:
       backend:
         condition: service_healthy
     ports:
+      # 8081 conservé pour la redirection HTTP -> HTTPS : c'est l'adresse déjà connue des
+      # testeurs, et la déplacer transformerait un signet en page morte plutôt qu'en redirection.
       - "8081:80"
+      - "8443:443"
+    volumes:
+      # Certificats TLS montés depuis l'hôte, JAMAIS cuits dans l'image (la clé privée y serait
+      # lisible par quiconque obtient l'image). En lecture seule. nginx refuse de démarrer s'ils
+      # manquent : c'est le comportement voulu, cf. `frontend/nginx.conf`.
+      - ${SYNO_TLS_PATH:?Set SYNO_TLS_PATH (répertoire contenant fullchain.pem et privkey.pem)}:/etc/nginx/certs:ro

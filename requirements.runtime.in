@@ -31,6 +31,12 @@ scipy==1.15.3
 requests==2.33.0
 psutil==7.0.0
 
+# Serveur WSGI de PRODUCTION (F9, étape 5). Le Dockerfile lance `services/wsgi.py`, plus le
+# serveur de développement Werkzeug. waitress et non gunicorn : le moteur de jeu est une globale
+# de process, et les workers MULTI-PROCESSUS de gunicorn donneraient une partie différente par
+# worker. waitress sert en threads dans un processus unique — cf. services/wsgi.py.
+waitress==3.0.2
+
 # torch >= 2.6 charge en `weights_only=True` : le dépickle des modèles devient restreint,
 # ce qui ferme le vecteur visé par les CVE torch 2.5.x au lieu de l'accepter par écrit.
 # 2.13.0 est la première version sans vulnérabilité connue ouverte (une des CVE n'est
