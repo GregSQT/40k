@@ -68,11 +68,29 @@ def _resolve_positive_int(variable: str, default: int) -> int:
     return value
 
 
+def _resolve_waitress_trusted_proxy() -> str | None:
+    """IP du proxy nginx de confiance pour waitress, lue depuis W40K_TRUSTED_PROXIES.
+
+    Waitress 3.0+ filtre X-Forwarded-For et X-Forwarded-Proto par défaut (comportement
+    sécurisé : un client ne peut pas forger REMOTE_ADDR). Sans cette configuration,
+    Flask ne voit jamais ces headers et _client_ip() lève RuntimeError au premier login.
+    Si W40K_TRUSTED_PROXIES n'est pas définie (mode développement direct sans nginx),
+    aucune configuration trusted_proxy n'est posée et waitress laisse REMOTE_ADDR intact.
+    Une seule adresse est attendue (nginx) ; si plusieurs sont configurées, la première est prise.
+    """
+    raw = os.environ.get("W40K_TRUSTED_PROXIES", "").strip()
+    if not raw:
+        return None
+    first = raw.split(",")[0].strip()
+    return first or None
+
+
 def main() -> None:
     from waitress import serve
 
     port = _resolve_positive_int("W40K_PORT", DEFAULT_PORT)
     threads = _resolve_positive_int("W40K_WSGI_THREADS", DEFAULT_THREADS)
+    trusted_proxy = _resolve_waitress_trusted_proxy()
 
     # Même séquence qu'en développement : le moteur est monté au démarrage, pas à la première
     # requête. Un échec n'arrête pas le serveur — `/api/health` doit pouvoir répondre pour que
@@ -91,6 +109,13 @@ def main() -> None:
         # Waitress annonce sinon sa version dans l'en-tête `Server` de chaque réponse, ce qui
         # renseigne gratuitement un attaquant sur la pile à cibler.
         ident=None,
+        # Expose X-Forwarded-For (→ REMOTE_ADDR) et X-Forwarded-Proto (→ wsgi.url_scheme)
+        # posés par nginx. Sans cela, Flask voit REMOTE_ADDR = IP nginx et ne peut pas
+        # déduire l'IP client ni si la connexion est HTTPS — _client_ip() lève et le cookie
+        # Secure n'est pas posé.
+        trusted_proxy=trusted_proxy,
+        trusted_proxy_count=1,
+        trusted_proxy_headers={"x-forwarded-for", "x-forwarded-proto"},
     )
 
 

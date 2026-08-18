@@ -6,7 +6,13 @@
 
 ⚠️ `Security.md` est à la racine d'`Documentation/Implémentation/` au lieu d'`A_faire/` — exception actée au bloc « Exceptions actées » de [ROADMAP_INDEX.md](ROADMAP_INDEX.md), seul endroit qui les recense. Elle reste valable : le fichier n'a pas bougé, et le chantier n'est pas clos tant que les trois actions ci-dessous ne le sont pas.
 
-## Reste — aucune ligne de code, trois actions de déploiement
+## Reste — deux actions
+
+> **Note (2026-08-18) :** le déploiement local (action 2) a révélé un bug : waitress 3.0+ filtre
+> `X-Forwarded-For` et `X-Forwarded-Proto` par défaut sans `trusted_proxy` configuré — Flask ne
+> voyait jamais ces headers et `_client_ip()` levait 500 au premier login. Corrigé dans
+> `services/wsgi.py` (`_resolve_waitress_trusted_proxy()` + paramètres `trusted_proxy`,
+> `trusted_proxy_count`, `trusted_proxy_headers` ajoutés au `serve()`). 7 tests ajoutés.
 
 1. **Mot de passe du compte `greg` (bloquant).** L'audit de l'étape 8
    (`python3 scripts/auth_journal.py accounts`, exécuté le 2026-08-18) a trouvé le mot de passe
@@ -14,12 +20,12 @@
    `config/users.db` est un fichier protégé et le remplacement est une décision utilisateur.
    `UPDATE users SET password_hash = ?` avec la sortie de
    `shared.auth_credentials.hash_password("<nouveau>")`.
-2. **Certificats TLS + `docker compose up`.** `frontend/nginx.conf` attend `fullchain.pem` et
-   `privkey.pem` sous `/etc/nginx/certs` (montés depuis `SYNO_TLS_PATH`, jamais cuits dans
-   l'image). nginx refuse de démarrer sans eux, volontairement. Vérifier ensuite : HTTPS servi,
-   HTTP redirigé, port 5001 injoignable depuis l'hôte, `docker compose exec backend whoami` →
-   `appuser`, healthcheck vert. ⚠️ Les montages hôte (`SYNO_RUNTIME_PATH`, `users.db`) doivent
-   appartenir à l'UID d'`appuser` depuis le retrait de `user: "0:0"`.
+2. ✅ **Certificats TLS + `docker compose up` — validé localement (2026-08-18).** Vérifié :
+   `whoami` → `appuser`, port 5001 injoignable hôte, HTTPS 200, HTTP → 301, en-têtes de sécurité
+   (HSTS/X-Frame/nosniff/Referrer), cookie `Secure; HttpOnly; SameSite=Strict`, logout efface le
+   cookie. UID `appuser` = 1000 = UID `greg` sur WSL2 → ownership OK sans `chown`. Certs
+   auto-signés pour test local (`openssl req -x509 -newkey rsa:2048 -nodes -days 365 -keyout
+   privkey.pem -out fullchain.pem -subj "/CN=localhost"`), Let's Encrypt pour le déploiement réel.
 3. **Validation navigateur du cookie de session.** Le token n'est plus en `localStorage` (F13) :
    login, partie complète, déconnexion. Aucun test automatisé ne couvre le navigateur réel.
 
