@@ -30,6 +30,7 @@ export class RangeEradicator extends EliteRangeTroop {
   static BASE_SIZE = EradicatorMeltaRifle.BASE_SIZE; // Size of the base
   static MODEL_HEIGHT = EradicatorMeltaRifle.MODEL_HEIGHT; // Height of the model (inches). IMPORTANT: temporary indicative value
   static ICON_SCALE = EradicatorMeltaRifle.ICON_SCALE;
+  static ILLUSTRATION_RATIO = EradicatorMeltaRifle.ILLUSTRATION_RATIO;
 
   constructor(name: string, startPos: [number, number]) {
     super(name, RangeEradicator.HP_MAX, startPos);

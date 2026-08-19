@@ -30,6 +30,7 @@ export class RangeTerminator extends EliteRangeTroop {
   static BASE_SIZE = Terminator.BASE_SIZE; // Size of the base
   static MODEL_HEIGHT = Terminator.MODEL_HEIGHT; // Height of the model (inches). IMPORTANT: temporary indicative value
   static ICON_SCALE = Terminator.ICON_SCALE;
+  static ILLUSTRATION_RATIO = Terminator.ILLUSTRATION_RATIO;
 
   constructor(name: string, startPos: [number, number]) {
     super(name, RangeTerminator.HP_MAX, startPos);

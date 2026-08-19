@@ -30,6 +30,7 @@ export class MeleeBladeguard extends TroopMeleeTroop {
   static BASE_SIZE = BladeguardVeteran.BASE_SIZE; // Size of the base
   static MODEL_HEIGHT = BladeguardVeteran.MODEL_HEIGHT; // Height of the model (inches). IMPORTANT: temporary indicative value
   static ICON_SCALE = BladeguardVeteran.ICON_SCALE;
+  static ILLUSTRATION_RATIO = BladeguardVeteran.ILLUSTRATION_RATIO;
 
   constructor(name: string, startPos: [number, number]) {
     super(name, MeleeBladeguard.HP_MAX, startPos);

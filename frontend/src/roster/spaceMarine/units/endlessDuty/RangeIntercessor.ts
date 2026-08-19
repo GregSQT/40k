@@ -30,6 +30,7 @@ export class RangeIntercessor extends TroopRangeSwarm {
   static BASE_SIZE = Intercessor.BASE_SIZE; // Size of the base
   static MODEL_HEIGHT = Intercessor.MODEL_HEIGHT; // Height of the model (inches). IMPORTANT: temporary indicative value
   static ICON_SCALE = Intercessor.ICON_SCALE;
+  static ILLUSTRATION_RATIO = Intercessor.ILLUSTRATION_RATIO;
 
   constructor(name: string, startPos: [number, number]) {
     super(name, RangeIntercessor.HP_MAX, startPos);

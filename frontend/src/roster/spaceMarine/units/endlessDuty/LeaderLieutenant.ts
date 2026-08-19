@@ -48,6 +48,7 @@ export class LeaderLieutenant extends LeaderEliteMeleeElite {
   static BASE_SIZE = LieutenantPowerFistPlasmaPistol.BASE_SIZE; // Size of the base
   static MODEL_HEIGHT = LieutenantPowerFistPlasmaPistol.MODEL_HEIGHT; // Height of the model (inches). IMPORTANT: temporary indicative value
   static ICON_SCALE = LieutenantPowerFistPlasmaPistol.ICON_SCALE;
+  static ILLUSTRATION_RATIO = LieutenantPowerFistPlasmaPistol.ILLUSTRATION_RATIO;
 
   constructor(name: string, startPos: [number, number]) {
     super(name, LeaderLieutenant.HP_MAX, startPos);

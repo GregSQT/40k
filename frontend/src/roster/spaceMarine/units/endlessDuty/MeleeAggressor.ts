@@ -34,6 +34,7 @@ export class MeleeAggressor extends EliteMeleeElite {
   static BASE_SIZE = AggressorFlamestorm.BASE_SIZE; // Size of the base
   static MODEL_HEIGHT = AggressorFlamestorm.MODEL_HEIGHT; // Height of the model (inches). IMPORTANT: temporary indicative value
   static ICON_SCALE = AggressorFlamestorm.ICON_SCALE;
+  static ILLUSTRATION_RATIO = AggressorFlamestorm.ILLUSTRATION_RATIO;
 
   constructor(name: string, startPos: [number, number]) {
     super(name, MeleeAggressor.HP_MAX, startPos);

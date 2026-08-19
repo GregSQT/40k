@@ -35,6 +35,7 @@ export class LeaderCaptainTerminator extends LeaderEliteMeleeElite {
   static BASE_SIZE = CaptainTerminatorRelicFistCombi.BASE_SIZE; // Size of the base
   static MODEL_HEIGHT = CaptainTerminatorRelicFistCombi.MODEL_HEIGHT; // Height of the model (inches). IMPORTANT: temporary indicative value
   static ICON_SCALE = CaptainTerminatorRelicFistCombi.ICON_SCALE;
+  static ILLUSTRATION_RATIO = CaptainTerminatorRelicFistCombi.ILLUSTRATION_RATIO;
 
   constructor(name: string, startPos: [number, number]) {
     super(name, LeaderCaptainTerminator.HP_MAX, startPos);
