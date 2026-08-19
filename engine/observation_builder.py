@@ -1903,15 +1903,13 @@ class ObservationBuilder:
         }
 
         # Portée MAXIMALE des armes de tir de l'unité active, en subhexes (V11 §9.5 P4).
+        # w["RNG"] est déjà en subhexes (_build_enhanced_unit scale avant le reset).
         # Même échelle que `edge_distance` : directement comparable par la tête pointeur.
-        _ish = int(require_key(game_state, "inches_to_subhex"))
-        _active_max_ranged_range = float(
-            max(
-                (int(w["RNG"]) for w in active_unit.get("RNG_WEAPONS", []) if "RNG" in w),  # get allowed : mêlée pure -> 0
-                default=0,
-            )
-            * _ish
-        )
+        # Portée MAXIMALE des armes de tir de l'unité active, en subhexes (V11 §9.5 P4).
+        # w["RNG"] est déjà en subhexes (_build_enhanced_unit scale avant le reset).
+        # Même échelle que `edge_distance` : directement comparable par la tête pointeur.
+        from engine.utils.weapon_helpers import get_max_ranged_range
+        _active_max_ranged_range = float(get_max_ranged_range(active_unit))
 
         ctx: Dict[str, Any] = {
             "active_squad_id": active_squad_id,

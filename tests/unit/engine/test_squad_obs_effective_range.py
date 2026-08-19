@@ -134,11 +134,16 @@ def test_effective_range_equals_max_rng_times_ish():
 
 
 def test_effective_range_scales_with_ish():
-    """À ×5, la même portée 24" vaut 120 subhexes."""
-    eng = _make_engine(_config([(10, 20)], [(40, 20)], inches_to_subhex=5))
+    """À ×5, la portée 24" = 120 subhexes (valeur déjà scalée par _build_enhanced_unit)."""
+    # create_unit ne scale pas les armes ; on passe RNG=120 pré-scalé pour simuler le chemin
+    # production (_build_enhanced_unit: w["RNG"] = 24 * 5 = 120 avant que l'obs soit construite).
+    eng = _make_engine(_config(
+        [(10, 20)], [(40, 20)], inches_to_subhex=5,
+        rng_weapons_mine=[_weapon(120)],
+    ))
     ec = _first_enemy_cont(eng)
     assert ec[CONT_EFFECTIVE_RANGE] == 120.0, (
-        f"effective_range attendu 120.0 (24×5), obtenu {ec[CONT_EFFECTIVE_RANGE]}"
+        f"effective_range attendu 120.0 (24×5 pré-scalé), obtenu {ec[CONT_EFFECTIVE_RANGE]}"
     )
 
 
