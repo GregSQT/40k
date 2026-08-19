@@ -32,6 +32,8 @@ Mesurer le regret avant de trancher (§9.0bis).
 
 🟢 **Décision 2026-08-10** : le regret se mesure sur la BASE DE DÉVELOPPEMENT en cours (§0.70), pas après la mesure de référence — un écart *relatif* (branché vs heuristique auto) supporte l'imprécision d'un run de 10 000 épisodes.
 
+🟢 **Stratégies déploiement livrées le 2026-08-19** : `DEPLOY_STRATEGY_COUNT` 5→7 (`centre_hub` slot 9, `safe_rear` slot 10). Regret à mesurer avec `--new`. Reste ouvert : split-fire, multi-cibles charge, placement final de charge.
+
 → `Documentation/Implémentation/1_Agent/V11_phaseA.md` §9.4 pt 8
 
 ---

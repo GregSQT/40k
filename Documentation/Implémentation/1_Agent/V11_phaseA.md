@@ -1039,6 +1039,11 @@ Ordre par valeur tactique :
    run est tolérable ; attendre la mesure de référence rachèterait un `x1_long` (~20 h) au premier
    optionnel retenu.
 
+   🟢 **LIVRÉ le 2026-08-19 (branche `worktree-regret-p3-8-deploy-strategies`)** — `DEPLOY_STRATEGY_COUNT` 5→7 : deux nouvelles stratégies ajoutées, slots 9 et 10 :
+   - **9 — `centre_hub`** : se positionner au centre du plateau pour menacer plusieurs objectifs (`-center_distance, -nearest_objective, -los, -potential_los, progress, -cluster`).
+   - **10 — `safe_rear`** : arrière-garde loin des ennemis, objectif proche (`nearest_enemy, -nearest_objective, -nearest_ally, -cluster, -center_distance`).
+   Jumeaux dans `_ingress_slot_order` (sans `los`/`potential_los`, par construction du cache ingress). `obs_size` et `TOTAL_ACTION_SIZE` inchangés (§0.48). Requiert `--new` pour mesurer le regret §9.0bis.
+
 Hors scope A' (reste auto, conforme règles car « un placement légal parmi d'autres ») :
 placement par-figurine du move rigide, pivot. Montée d'étage = Phase C.
 
