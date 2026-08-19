@@ -10675,7 +10675,7 @@ def _build_manual_allocation(
                 # Effectif de la CIBLE au Select Targets step : capturé sur le premier intent du
                 # groupe (valeur constante — même cible, même activation). Loggé dans step.log via
                 # [TARGET_DECL:N] pour que l'analyzer juge §1.2/§1.4 sans reconstruire cet état.
-                "targetAliveCount": int(require_key(r, "target_squad_size_at_declaration")),
+                "targetAliveCount": int(require_key(intent, "target_squad_size_at_declaration")),
             }
             # Cover (regle 13.08) : ranged-only -> present uniquement sur le chemin tir
             # (le chemin combat partage cette fonction mais ne fournit pas ces cles).

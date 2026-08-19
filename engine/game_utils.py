@@ -130,8 +130,9 @@ def get_unit_by_id(game_state: Dict[str, Any], unit_id: str) -> Optional[Dict[st
     CRITICAL: Compare both sides as strings to handle int/string ID mismatches.
     Pool unit IDs are integers, but some lookups pass strings.
 
-    Signature (game_state, unit_id) mirrors require_unit_by_id; difference: returns None
-    instead of raising when unit_id is absent.
+    Signature (game_state, unit_id) mirrors require_unit_by_id; differences: returns None
+    instead of raising when unit_id is absent, and coerces unit_id to str before lookup
+    (require_unit_by_id does not — passing an int to that function silently misses).
     REQUIRES: game_state["unit_by_id"] (built at reset/reload). Absence = bug, raise explicitly.
     """
     unit_by_id = require_key(game_state, "unit_by_id")
