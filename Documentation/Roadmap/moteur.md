@@ -62,8 +62,6 @@ Décisions tranchées (2026-08-12, ne pas rouvrir) :
 
 ## Replis `unit_by_id` {#unit-by-id}
 
-**Bloqué par décision utilisateur.** T0 = signature de `require_unit_by_id` appartient à l'utilisateur ; ~4-5 sessions ensuite.
-
-⚠️ Chiffres du doc périmés 3× : **5** implémentations du lookup désormais, pas 4.
+**T0 livré le 2026-08-19** — `require_unit_by_id(game_state, unit_id)` dans `engine/game_utils.py`, re-exportée depuis `combat_utils`. Signature canonique `(game_state, unit_id)` alignée sur le pattern moteur. Reste : T1 (10 sites Forme C), T2 (46 sites Forme B), T3 (64 sites Forme D) — ~4-5 sessions.
 
 → `Documentation/Implémentation/A_faire/replis_unit_by_id_2026-08-05.md`

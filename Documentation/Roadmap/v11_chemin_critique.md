@@ -21,6 +21,8 @@ Dans la direction de l'index : lignes 1–4 = jalon J2, lignes 5–6 = J3, ligne
 
 ## P3-6 — Move-after-shooting + reactive move {#p3-6}
 
+✅ **Constaté implémenté le 2026-08-19** (antérieur à P3-5) — `move_after_shooting` et `reactive_move` présents dans `UNIT_RULE_EFFECT_IDS`, handlers actifs dans `shooting_handlers.py` et `shared_utils.py`, actions reconnues par le gym. Aucune livraison distincte à dater.
+
 → `Documentation/Implémentation/1_Agent/V11_phaseA.md` §9.4 pt 6
 
 ---
@@ -40,8 +42,7 @@ Mesurer le regret avant de trancher (§9.0bis).
 
 ## P4 — Observation de support {#p4}
 
-Features : LoS/couvert par slot ennemi, portée effective, flags advanced/fell_back.
-⚠️ Ordre à ne pas prendre au pied de la lettre : ces features rendent P3-4 et P3-6 apprenables. Livrées APRÈS, elles font échouer le critère P5 pour une raison connue d'avance. Chaque feature part AVEC la tranche qui en dépend ; ce point ne garde que le reliquat.
+✅ **Livré le 2026-08-19** — reliquat `effective_range` ajouté à l'encodeur d'entité (`observation_entities.py:81`, `observation_builder.py:1504`) ; LoS/couvert et flags `advanced`/`fled` étaient déjà présents. `obs_size` 16671 → 16703.
 
 → `Documentation/Implémentation/1_Agent/V11_phaseA.md` §9.5
 
