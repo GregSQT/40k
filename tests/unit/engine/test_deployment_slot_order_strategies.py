@@ -2,8 +2,8 @@
 
 Pas de moteur complet : la méthode est statique et ne dépend que de numpy.
 Préférences vérifiées par mesure (scripts/_probe_slot_order.py) :
-  progress : max (+0,+1,+5), min (+2,+3,+4,+6)
-  nearest_enemy : min (+0,+1,+5), max (+2,+3,+4,+6)
+  progress : max (+0,+1,+5)  — absent de +2,+3,+4,+6
+  nearest_enemy : min (+0,+1), max (+2,+3,+4,+6)  — absent de +5
   nearest_objective : toujours min
   los : toujours min
   center_distance : toujours min
@@ -94,7 +94,7 @@ class TestSlot1ObjectivePressure:
         assert order[0] == 2  # nearest_objective min = 1
 
     def test_progress_tiebreak_max(self):
-        # objective égal, progress max wins (secondary pour +1)
+        # objective égal, progress max wins (4e critère ; los et potential_los sont 0 dans _neutral)
         kw = _neutral(3)
         kw["nearest_objective"] = [3.0, 3.0, 3.0]
         kw["progress"] = [1.0, 5.0, 10.0]
