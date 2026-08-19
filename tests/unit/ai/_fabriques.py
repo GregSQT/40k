@@ -202,6 +202,9 @@ def analyzer_config(**overrides: Any) -> AnalyzerConfig:
         "weapon_range_global": {},
         "weapon_is_close_quarters_global": {},
         "unit_toughness_by_type": {},
+        # 07.02 — nombre de tours max ; 0 = non disponible (valeur neutre pour les tests
+        # qui ne testent pas la durée de la partie).
+        "max_turns": 0,
     }
     unknown = set(overrides) - set(fields)
     if unknown:

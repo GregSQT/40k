@@ -82,6 +82,46 @@ def new_rule_usage_counters() -> Dict[str, Dict[int, int]]:
     return {require_key(entry, "id"): {1: 0, 2: 0} for entry in load_rules_corpus()}
 
 
+def check_anti_x_threshold(
+    rules_list: List[Any],
+    anti_kw: str,
+    anti_tok_thresh: int,
+    anti_rule_name: str,
+    stats: Dict[str, Any],
+    state: Any,
+    turn: Any,
+    phase: Any,
+    line_str: str,
+    weapon_key: str,
+    suffix: str = "",
+) -> None:
+    """Valide que le seuil [ANTI-X:N+] du token correspond au seuil déclaré dans l'armurerie.
+
+    Factorisé depuis shoot_handler / fight_handler pour éviter la divergence tir/mêlée.
+    `suffix` vaut "" (tir) ou " (mêlée)".
+    """
+    _anti_decl_thresh: Optional[int] = None
+    for _r in rules_list:
+        _rn, _, _rp = str(_r).partition(":")
+        if _rn.strip().upper() == anti_rule_name and _rp:
+            try:
+                _anti_decl_thresh = int(_rp.strip())
+            except (TypeError, ValueError):
+                pass
+            break
+    if _anti_decl_thresh is not None and anti_tok_thresh != _anti_decl_thresh:
+        stats["parse_errors"].append({
+            "episode": state.current_episode_num,
+            "turn": turn,
+            "phase": phase,
+            "line": line_str,
+            "error": (
+                f"[ANTI-{anti_kw}:{anti_tok_thresh}+]{suffix} : seuil log "
+                f"≠ seuil armurerie ({_anti_decl_thresh}+)"
+            ),
+        })
+
+
 def _counter_value(stats: Dict[str, Any], path: List[str]) -> int:
     """Somme P1 + P2 d'un compteur désigné par son chemin dans `stats`.
 

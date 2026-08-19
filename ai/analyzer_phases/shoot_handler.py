@@ -6,7 +6,7 @@ import re
 from typing import TYPE_CHECKING, Any, Dict, NamedTuple, Optional
 
 from shared.data_validation import require_key
-from ai.analyzer_rules import note_rule_usage
+from ai.analyzer_rules import note_rule_usage, check_anti_x_threshold
 from engine.combat_utils import calculate_hex_distance, ranged_edge_distance, get_distance_metric
 from ai.analyzer_perfig import (
     additive_rule_extra_dice,
@@ -626,7 +626,7 @@ def handle_shoot(
 
     # 24.15 [HAZARDOUS] — chaque figurine avec une arme HAZARDOUS qui obtient 1 au test subit 1 BM.
     # Compteur de validité : sumé pour être comparé à `hazardous_mortal_wounds` (SUFFERS lines).
-    _hz_roll_m = re.search(r'\[HAZARDOUS\] Roll:(\d+)', action_desc)
+    _hz_roll_m = re.search(r'\[HAZARDOUS\] Roll:(\d+)', action_desc, re.IGNORECASE)
     if _hz_roll_m and int(_hz_roll_m.group(1)) == 1:
         _hz_shooter_pl = require_key(state.unit_player, shooter_id)
         stats['hazardous_roll1_count'][int(_hz_shooter_pl)] += 1
@@ -1022,25 +1022,11 @@ def handle_shoot(
             _anti_tok_thresh = int(_anti_m.group(2))
             _anti_rule_name = f"ANTI_{_anti_kw}"
             stats['weapon_rule_usage'][(_anti_rule_name, weapon_key)][pl_int] += 1
-            # Seuil déclaré dans l'armurerie : rules list = ["ANTI_VEHICLE:4", ...].
-            _anti_decl_thresh = None
-            for _r in require_key(weapon_info_matched, "rules"):
-                _rn, _, _rp = str(_r).partition(":")
-                if _rn.strip().upper() == _anti_rule_name and _rp:
-                    try:
-                        _anti_decl_thresh = int(_rp.strip())
-                    except (TypeError, ValueError):
-                        pass
-                    break
-            if _anti_decl_thresh is not None and _anti_tok_thresh != _anti_decl_thresh:
-                stats['parse_errors'].append({
-                    'episode': state.current_episode_num, 'turn': turn, 'phase': phase,
-                    'line': line.strip(),
-                    'error': (
-                        f"[ANTI-{_anti_kw}:{_anti_tok_thresh}+] : seuil log "
-                        f"≠ seuil armurerie ({_anti_decl_thresh}+)"
-                    ),
-                })
+            check_anti_x_threshold(
+                require_key(weapon_info_matched, "rules"),
+                _anti_kw, _anti_tok_thresh, _anti_rule_name,
+                stats, state, turn, phase, line.strip(), weapon_key,
+            )
 
     # Target priority analysis
     #
