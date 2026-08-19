@@ -10,7 +10,7 @@ il decrivait mal le module et induisait en erreur sur l'endroit ou poser de l'et
 
 import os
 from typing import Dict, Any, Literal, Optional
-from shared.data_validation import require_key
+from shared.data_validation import require_key, ConfigurationError
 
 _debug_log_initialized = False
 
@@ -134,6 +134,19 @@ def get_unit_by_id(unit_id: str, game_state: Dict[str, Any]) -> Optional[Dict[st
     """
     unit_by_id = require_key(game_state, "unit_by_id")
     return unit_by_id.get(str(unit_id))
+
+
+def require_unit_by_id(game_state: Dict[str, Any], unit_id: str) -> Dict[str, Any]:
+    """Lookup unit by ID; raise ConfigurationError if absent.
+
+    Passer un non-str est un bug de l'appelant : aucune coercition silencieuse.
+    REQUIRES: game_state['unit_by_id'] (built at reset/reload).
+    """
+    unit_by_id = require_key(game_state, "unit_by_id")
+    unit = unit_by_id.get(unit_id)
+    if unit is None:
+        raise ConfigurationError(f"Unit '{unit_id}' not found in game_state.")
+    return unit
 
 
 def add_console_log(game_state: Dict[str, Any], message: str) -> None:

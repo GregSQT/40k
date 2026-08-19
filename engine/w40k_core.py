@@ -117,6 +117,7 @@ from engine.episode_schedule import episodes_per_env
 from engine.game_utils import (
     ONCE_CLAIMS_KEY, add_console_log, enter_phase, get_controlled_player, get_unit_by_id,
     once_claim, once_claimed, turn_limit_reached, get_effective_turn_limit,
+    require_unit_by_id,
 )
 
 # Import NEW extracted modules

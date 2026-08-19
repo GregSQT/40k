@@ -131,6 +131,9 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 | training+bot | ✅ Benchmark floor gate §4.D livré (2026-08-18) — 3 bots de référence (balanced/denial/reactive) sur 4 scénarios holdout_regular ; seuil 0.90 après mesure ; `model_gating_enabled` sur x1_long | [v11_chemin_critique.md#benchmark-gate](v11_chemin_critique.md#benchmark-gate) | |
 | training+bot | ✅ scenario_bench-01..04 dupliqués supprimés (2026-08-18) — fichiers byte-for-byte identiques aux scenario_bot-01..04, glob fallback ramassait 8 scénarios au lieu de 4, épisodes/scénario divisés par 2 sans contrepartie | — | |
 | analyzer | ✅ §2.8/§1.2/§1.4 DEAD-before-SHOOT corrigés (2026-08-19) — `dead_model_positions_episode` dans `freeze_select_targets` restitue géométrie+effectif réels au Select Targets step ; 6013+133+56 faux positifs → 0 ; 3 verrous rouge/vert | — | ⚡ |
+| bot | ✅ Stratégies déploiement 5/6 (2026-08-19) — `centre_hub` + `safe_rear` ajoutées, regret P3-8 partiellement résorbé | — | ⚡ |
+| analyzer | ✅ T1 dead_model_ids_episode requis (2026-08-19) — `alloc_model_id` fourni sans `dead_model_ids_episode` lève ConfigurationError ; verrou rouge/vert | — | ⚡ |
+| moteur | ✅ require_unit_by_id canonique T0 (2026-08-19) — fonction unique dans game_utils, ConfigurationError si absente, re-exportée depuis combat_utils, importée dans shooting_handlers + w40k_core ; 5 tests rouge/vert | — | ⚡ |
 | moteur | ✅ Fix §11.04 budget charge par-figurine gym (2026-08-19) — `_attempt_charge_to_destination` rejetait pas les destinations roll+extra ; verrou + test rouge/vert | — | ⚡ |
 | moteur+services | ✅ Fix review-findings (2026-08-18) — surface refus moteur squad, wsgi leading-comma, message vide | — | |
 | security | ✅ Chantier clos (2026-08-19) — F1–F15 résolues, validation navigateur OK, doc déplacé dans Implémenté/ | [archives/security.md](archives/security.md) | ⚡ |
