@@ -28,8 +28,8 @@ from engine.phase_handlers import movement_handlers
 ED_MODE_CODE = "endless_duty"
 ED_SCENARIO_DEFAULT = "config/scenario_endless_duty.json"
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-ED_START_LEADER_COL = 12
-ED_START_LEADER_ROW = 10
+ED_START_LEADER_COL = 110
+ED_START_LEADER_ROW = 150
 
 
 def is_endless_duty_mode(engine_instance: Any) -> bool:

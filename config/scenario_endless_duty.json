@@ -4,16 +4,11 @@
   "mode": "endless_duty",
   "deployment_zone": "hammer",
   "deployment_type": "active",
+  "board_ref": "44x60x5",
+  "terrain_ref": "terrain-endless-duty.json",
   "wall_ref": "walls-11.json",
   "primary_objectives": ["objectives_control"],
-  "units": [{ "id": 1, "unit_type": "Intercessor", "player": 1, "col": 12, "row": 10 }],
-  "objectives": [
-    {
-      "id": 5,
-      "name": "Center",
-      "hexes": [[12, 10], [11, 9], [12, 9], [13, 9], [13, 10], [12, 11], [11, 10]]
-    }
-  ],
+  "units": [{ "id": 1, "unit_type": "Intercessor", "player": 1, "col": 110, "row": 150 }],
   "endless_duty": {
     "budget_mode": "soft_cap",
     "budget_soft_cap_pct": 0.05,
@@ -59,37 +54,6 @@
       "range": 10,
       "melee": 15
     },
-    "objective_selection": {
-      "mode": "random_from_pool_per_run",
-      "seeded": true
-    },
-    "objective_pool": [
-      {
-        "id": 1,
-        "name": "West",
-        "hexes": [[2, 10], [1, 9], [2, 9], [3, 9], [3, 10], [2, 11], [1, 10]]
-      },
-      {
-        "id": 2,
-        "name": "North",
-        "hexes": [[12, 1], [12, 2], [11, 1], [11, 0], [12, 0], [13, 0], [13, 1]]
-      },
-      {
-        "id": 3,
-        "name": "East",
-        "hexes": [[22, 10], [21, 9], [22, 9], [23, 9], [23, 10], [22, 11], [21, 10]]
-      },
-      {
-        "id": 4,
-        "name": "South",
-        "hexes": [[12, 19], [11, 18], [12, 18], [13, 18], [13, 19], [12, 20], [11, 19]]
-      },
-      {
-        "id": 5,
-        "name": "Center",
-        "hexes": [[12, 10], [11, 9], [12, 9], [13, 9], [13, 10], [12, 11], [11, 10]]
-      }
-    ],
     "enemy_spawn_rules": {
       "mode": "random_board_edge_hexes",
       "candidate_edges": ["north", "south", "east", "west"],
