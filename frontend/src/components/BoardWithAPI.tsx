@@ -27,6 +27,7 @@ import {
   canSelectReserveUnitForIngress,
   selectReserveUnits,
 } from "../utils/strategicReservesUi";
+import { AdvanceWarningModal } from "./AdvanceWarningModal";
 import BoardPvp, { type BoardDisplayMode, type MeasureModeState } from "./BoardPvp";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { GameLog } from "./GameLog";
@@ -35,6 +36,7 @@ import {
   type IllustrationBadges,
   useUnitIllustrationPreload,
 } from "./GameLogWithIllustration";
+import { HazardWarningModal } from "./HazardWarningModal";
 import { HelperPanel } from "./HelperPanel";
 import { SettingsMenu } from "./SettingsMenu";
 import SharedLayout from "./SharedLayout";
@@ -524,15 +526,6 @@ export const BoardWithAPI: React.FC = () => {
 
   // Desperate Escape : on mémorise l'instant d'ouverture du popup hazard pour ignorer le
   // clic-fond (qui l'annule) pendant ~400 ms. Sinon, sur un DOUBLE-clic d'activation, le 1er
-  // clic ouvre le popup et le 2e tombe sur le fond et le referme aussitôt → l'utilisateur croit
-  // que le popup ne se déclenche pas en double-clic.
-  const hazardPopupOpenedAtRef = useRef<number>(0);
-  useEffect(() => {
-    if (apiProps.hazardWarningPopup) {
-      hazardPopupOpenedAtRef.current = performance.now();
-    }
-  }, [apiProps.hazardWarningPopup]);
-
   // Detect game mode from URL
   const location = useLocation();
   const gameMode = location.pathname.includes("/replay")
@@ -1255,8 +1248,6 @@ export const BoardWithAPI: React.FC = () => {
   /** Cercles de portée autour de la figurine activée (bouton cible de la barre d'outils). */
   const [showRangeRings, setShowRangeRings] = useState(false);
   const handleToggleRangeRings = useCallback(() => setShowRangeRings((v) => !v), []);
-  const [advanceWarningDontRemind, setAdvanceWarningDontRemind] = useState(false);
-
   // Settings preferences (from localStorage)
   const [settings, setSettings] = useState(() => {
     const showAdvanceWarningStr = localStorage.getItem("showAdvanceWarning");
@@ -1460,12 +1451,6 @@ export const BoardWithAPI: React.FC = () => {
   const handleToggleRetreatAlert = (value: boolean) => {
     updateRetreatAlertSetting(value);
   };
-
-  useEffect(() => {
-    if (apiProps.advanceWarningPopup) {
-      setAdvanceWarningDontRemind(false);
-    }
-  }, [apiProps.advanceWarningPopup]);
 
   // Track AI processing with ref to avoid re-render loops
   const isAIProcessingRef = useRef(false);
@@ -5352,122 +5337,16 @@ export const BoardWithAPI: React.FC = () => {
         </div>
       )}
       {apiProps.advanceWarningPopup && settings.showAdvanceWarning && (
-        // biome-ignore lint/a11y/noStaticElementInteractions: backdrop modal — stopPropagation intentionnel
-        <div
-          role="presentation"
-          style={{
-            position: "fixed",
-            inset: 0,
-            backgroundColor: "rgba(0, 0, 0, 0.72)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 12000,
+        <AdvanceWarningModal
+          onConfirm={(dontRemind) => {
+            if (dontRemind) handleToggleAdvanceWarning(false);
+            void apiProps.onConfirmAdvanceWarning();
           }}
-          onClick={() => {
-            if (advanceWarningDontRemind) {
-              handleToggleAdvanceWarning(false);
-            }
+          onCancel={(dontRemind) => {
+            if (dontRemind) handleToggleAdvanceWarning(false);
             void apiProps.onCancelAdvanceWarning();
           }}
-          onKeyDown={() => {
-            if (advanceWarningDontRemind) {
-              handleToggleAdvanceWarning(false);
-            }
-            void apiProps.onCancelAdvanceWarning();
-          }}
-        >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="advance-warning-title"
-            style={{
-              width: "min(640px, calc(100vw - 32px))",
-              backgroundColor: "#06120a",
-              border: "2px solid #22c55e",
-              borderRadius: "10px",
-              boxShadow: "0 14px 40px rgba(0,0,0,0.55)",
-              padding: "22px 24px 18px 24px",
-              color: "#e5fbe9",
-            }}
-            onClick={(event) => event.stopPropagation()}
-            onKeyDown={(event) => event.stopPropagation()}
-          >
-            <h2
-              id="advance-warning-title"
-              style={{ margin: "0 0 12px 0", color: "#86efac", fontSize: "30px" }}
-            >
-              Advance !
-            </h2>
-            <p style={{ margin: 0, lineHeight: 1.5, fontSize: "19px" }}>
-              Vous êtes sur le point d&apos;effectuer une action Advance. Si vous la validez, cette
-              unité ne pourra ni tirer ni charger jusqu&apos;à la fin de ce tour.
-            </p>
-            <div
-              style={{
-                marginTop: "20px",
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "end",
-              }}
-            >
-              <label
-                style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer" }}
-              >
-                <input
-                  type="checkbox"
-                  checked={advanceWarningDontRemind}
-                  onChange={(event) => setAdvanceWarningDontRemind(event.target.checked)}
-                  style={{ width: "18px", height: "18px", cursor: "pointer" }}
-                />
-                <span style={{ fontSize: "16px", color: "#d1fae5" }}>Ne plus me rappeler</span>
-              </label>
-              <div style={{ display: "flex", gap: "10px" }}>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (advanceWarningDontRemind) {
-                      handleToggleAdvanceWarning(false);
-                    }
-                    void apiProps.onCancelAdvanceWarning();
-                  }}
-                  style={{
-                    padding: "10px 14px",
-                    border: "1px solid #9ca3af",
-                    borderRadius: "6px",
-                    background: "rgba(31, 41, 55, 0.9)",
-                    color: "#f3f4f6",
-                    cursor: "pointer",
-                    fontSize: "16px",
-                  }}
-                >
-                  Annuler l&apos;advance
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (advanceWarningDontRemind) {
-                      handleToggleAdvanceWarning(false);
-                    }
-                    void apiProps.onConfirmAdvanceWarning();
-                  }}
-                  style={{
-                    padding: "10px 14px",
-                    border: "1px solid #22c55e",
-                    borderRadius: "6px",
-                    background: "#065f46",
-                    color: "#ecfdf5",
-                    cursor: "pointer",
-                    fontSize: "16px",
-                    fontWeight: 600,
-                  }}
-                >
-                  Valider
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        />
       )}
       {apiProps.fleeWarningPopup && (
         // biome-ignore lint/a11y/noStaticElementInteractions: backdrop modal — stopPropagation intentionnel
@@ -5588,115 +5467,10 @@ export const BoardWithAPI: React.FC = () => {
         </div>
       )}
       {apiProps.hazardWarningPopup && (
-        // biome-ignore lint/a11y/noStaticElementInteractions: backdrop modal — stopPropagation intentionnel
-        <div
-          role="presentation"
-          style={{
-            position: "fixed",
-            inset: 0,
-            backgroundColor: "rgba(0, 0, 0, 0.72)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 12000,
-          }}
-          onClick={() => {
-            // Ignore le 2e clic d'un double-clic d'activation (fenêtre courte après ouverture).
-            if (performance.now() - hazardPopupOpenedAtRef.current < 400) return;
-            apiProps.onCancelHazardWarning();
-          }}
-          onKeyDown={() => apiProps.onCancelHazardWarning()}
-        >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="hazard-warning-title"
-            style={{
-              width: "min(420px, calc(100vw - 32px))",
-              background: "rgba(20, 20, 20, 0.98)",
-              border: "2px solid #4caf50",
-              borderRadius: "6px",
-              boxShadow: "0 4px 12px rgba(0, 0, 0, 0.5)",
-              padding: "16px 18px 14px 18px",
-              color: "#fff",
-            }}
-            onClick={(event) => event.stopPropagation()}
-            onKeyDown={(event) => event.stopPropagation()}
-          >
-            <h2
-              id="hazard-warning-title"
-              style={{
-                margin: "0 0 16px 0",
-                color: "#a5d6a7",
-                background: "#0b410d",
-                fontSize: "16px",
-                fontWeight: 700,
-                textTransform: "uppercase",
-                letterSpacing: "0.5px",
-                padding: "6px 10px",
-                borderRadius: "4px",
-              }}
-            >
-              ☢️ Desperate Escape !
-            </h2>
-            <p style={{ margin: 0, lineHeight: 1.5, fontSize: "14px", color: "#c8e6cf" }}>
-              Le mouvement Desperate Escape que cette unité va effectuer entraine des{" "}
-              <TooltipWrapper text="Roll D6 per model: on a 1-2, that unit suffers 1 (or 3 if it is a MONSTER/VEHICLE) mortal wounds.">
-                <span
-                  style={{
-                    color: "#fde68a",
-                    fontWeight: 700,
-                    textDecoration: "underline",
-                    cursor: "help",
-                  }}
-                >
-                  HAZARD ROLLS
-                </span>
-              </TooltipWrapper>
-              . Continuer ?
-            </p>
-            <div
-              style={{
-                marginTop: "20px",
-                display: "flex",
-                justifyContent: "flex-end",
-                gap: "10px",
-              }}
-            >
-              <button
-                type="button"
-                onClick={() => apiProps.onCancelHazardWarning()}
-                style={{
-                  padding: "10px 14px",
-                  border: "1px solid #41506b",
-                  borderRadius: "6px",
-                  background: "#0c3d14",
-                  color: "#e6e9f0",
-                  cursor: "pointer",
-                  fontSize: "14px",
-                }}
-              >
-                Annuler
-              </button>
-              <button
-                type="button"
-                onClick={() => void apiProps.onConfirmHazardWarning()}
-                style={{
-                  padding: "10px 14px",
-                  border: "1px solid #4caf50",
-                  borderRadius: "6px",
-                  background: "#1b7a2b",
-                  color: "#eafff0",
-                  cursor: "pointer",
-                  fontSize: "14px",
-                  fontWeight: 700,
-                }}
-              >
-                Confirmer
-              </button>
-            </div>
-          </div>
-        </div>
+        <HazardWarningModal
+          onConfirm={apiProps.onConfirmHazardWarning}
+          onCancel={apiProps.onCancelHazardWarning}
+        />
       )}
       <SettingsMenu
         isOpen={isSettingsOpen}
