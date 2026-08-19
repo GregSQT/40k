@@ -31,6 +31,7 @@ from tests.integration.pvp.conftest import (
     GameClient,
     _TEST_AUTH_USER,
     _TEST_PERMISSIONS,
+    assert_game_states_equal,
 )
 
 pytestmark = pytest.mark.integration
@@ -115,12 +116,7 @@ class TestSnapshots:
 
         # Le state vivant ne doit pas avoir bougé.
         state_after = game.refresh()
-        differences = sorted(
-            k for k in set(state_before) | set(state_after) if state_before.get(k) != state_after.get(k)
-        )
-        assert not differences, (
-            f"mode 'view' a muté l'état vivant, champs modifiés : {differences}"
-        )
+        assert_game_states_equal(state_before, state_after, "mode 'view' a muté l'état vivant, champs modifiés")
 
     def test_snapshot_resume_replaces_live_state(self, game):
         """t7_snap_resume : mode ``resume`` remplace l'état vivant par le snapshot.
@@ -202,10 +198,7 @@ class TestSnapshots:
         assert resume_resp.status_code == 200
         live = resume_resp.get_json()["game_state"]
 
-        differences = sorted(k for k in set(expected) | set(live) if expected.get(k) != live.get(k))
-        assert not differences, (
-            f"état restauré diffère du snapshot (view vs resume) sur : {differences}"
-        )
+        assert_game_states_equal(expected, live, "état restauré diffère du snapshot (view vs resume) sur")
 
 
 # ---------------------------------------------------------------------------
@@ -300,10 +293,7 @@ class TestSaveLoad:
         assert resp_resume.get_json()["success"] is True
         live = resp_resume.get_json()["game_state"]
 
-        differences = sorted(k for k in set(state_at_save) | set(live) if state_at_save.get(k) != live.get(k))
-        assert not differences, (
-            f"état après resume diffère de l'état au moment du save sur : {differences}"
-        )
+        assert_game_states_equal(state_at_save, live, "état après resume diffère de l'état au moment du save sur")
 
     def test_save_resume_restores_state(self, game, tmp_path, monkeypatch):
         """t7_save_resume : après resume, l'état vivant correspond au snapshot au moment du save."""

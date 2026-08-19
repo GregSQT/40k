@@ -267,6 +267,11 @@ class GameClient:
         return 2 if self.current_player == 1 else 1
 
 
+def assert_game_states_equal(a: dict, b: dict, label: str = "") -> None:
+    differences = sorted(k for k in set(a) | set(b) if a.get(k) != b.get(k))
+    assert not differences, f"{label} : {differences}" if label else f"états différents : {differences}"
+
+
 @pytest.fixture
 def api_isolated(monkeypatch):
     """Neutralise les effets de bord hors mémoire : users.db et persistance disque."""

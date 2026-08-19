@@ -9,6 +9,7 @@ import copy
 
 import pytest
 
+from tests.integration.pvp.conftest import assert_game_states_equal
 from tests.integration.pvp.invariants import assert_state_invariants
 
 pytestmark = pytest.mark.integration
@@ -138,8 +139,7 @@ class TestRejectedActionsAreInert:
             f"au lieu de {expected_error!r}"
         )
         after = game.refresh()
-        differences = sorted(k for k in set(before) | set(after) if before.get(k) != after.get(k))
-        assert not differences, f"action refusée {action!r} : champs modifiés {differences}"
+        assert_game_states_equal(before, after, f"action refusée {action!r} : champs modifiés")
 
     def test_activating_an_enemy_unit_is_rejected(self, game):
         """t2_rejet_unite_ennemie : activer une unité adverse ne change rien."""
