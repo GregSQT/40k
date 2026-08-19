@@ -118,7 +118,9 @@ def _charge_budget_subhex(
     distance de charge — y compris `charge_build_valid_plan`, le chemin d'exécution de l'agent.
 
     La déclaration lue est celle de `_charge_fly_active` : traverser et payer sont indissociables.
-    Passer ``unit=`` évite un ``get_unit_by_id`` redondant quand l'appelant le possède déjà.
+    Passer ``unit=`` évite un ``get_unit_by_id`` redondant quand l'appelant le possède déjà ; les
+    appelants typés ``Dict[str, Any]`` (ex. ``_attempt_charge_to_destination``) garantissent
+    non-None par signature, pas par garde runtime.
     """
     if unit is None:
         unit = get_unit_by_id(game_state, unit_id)
