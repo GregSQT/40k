@@ -147,6 +147,23 @@ def test_missing_control_score_is_an_explicit_error(capsys: pytest.CaptureFixtur
     capsys.readouterr()
 
 
+def test_missing_control_score_is_an_explicit_error_when_gating_disabled(capsys: pytest.CaptureFixture) -> None:
+    """`model_gating_enabled=False` + plancher arme + `control` absent -> ConfigurationError.
+
+    Chemin : `_evaluate_model_gate` renvoie via `_control_floor_pass` → `require_key(results, 'control')`.
+    """
+    from shared.data_validation import ConfigurationError
+
+    gate = _gate(combined=0.60, worst_bot=0.40, worst_scenario=0.40, vs_control=0.30)
+    gate.model_gating_enabled = False
+    results = _results(control=0.50)
+    del results["control"]
+
+    with pytest.raises(ConfigurationError, match="control"):
+        gate._evaluate_model_gate(results, eval_marker=2000)
+    capsys.readouterr()
+
+
 def _active_training_configs() -> List[Path]:
     files = sorted(
         agent_dir / f"{agent_dir.name}_training_config.json"

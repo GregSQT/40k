@@ -1602,7 +1602,6 @@ class BotEvaluationCallback(BaseCallback):
 
     def _evaluate_model_gate(self, results: Dict[str, Any], eval_marker: int) -> bool:
         """Evaluate model gating thresholds and store explicit PASS/FAIL history."""
-        control_floor_pass = self._control_floor_pass(results)
         if not self.model_gating_enabled:
             # ⚠️ Le plancher `vs_control` s'applique MEME gating desarme. Le conditionner a
             # `model_gating_enabled` l'aurait rendu inerte : les profils portent `false`, donc
@@ -1610,8 +1609,8 @@ class BotEvaluationCallback(BaseCallback):
             # (best_combined et best_robust, tous deux gardes par `gate_pass`) auraient accepte
             # un modele a 0 % contre ControlBot — exactement ce que ce plancher existe pour
             # empecher. Un seuil a 0.0 le neutralise explicitement, c'est le seul desarmement.
-            self.last_gate_pass = control_floor_pass
-            return control_floor_pass
+            self.last_gate_pass = self._control_floor_pass(results)
+            return self.last_gate_pass
 
         combined_score = float(require_key(results, "combined"))
         # V11 §10.5 : le holdout ne pilote pas le gating.
