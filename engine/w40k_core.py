@@ -7816,12 +7816,27 @@ class W40KEngine(gym.Env):
         if snapshot == self.game_state.get(self.OBJECTIVE_CONTROL_LOGGED_KEY):
             return
         self.game_state[self.OBJECTIVE_CONTROL_LOGGED_KEY] = snapshot
+        # L18 : control_method + OC par objectif (14.02/14.03).
+        from engine.game_state import objective_hex_sets, sum_objective_control_oc_multi
+        control_method: "Optional[str]" = None
+        primary_obj = self.game_state.get("primary_objective")
+        if primary_obj is not None:
+            configs = primary_obj if isinstance(primary_obj, list) else [primary_obj]
+            for cfg in configs:
+                ctrl_cfg = cfg.get("control") if isinstance(cfg, dict) else None
+                if ctrl_cfg:
+                    control_method = ctrl_cfg.get("control_method")
+                    break
+        hex_sets = objective_hex_sets(self.game_state)
+        oc_sums = sum_objective_control_oc_multi(self.game_state, hex_sets)
         step_logger.log_objective_control_snapshot(
             require_key(self.game_state, "turn"),
             objectives,
             controllers,
             victory_points,
             command_points,
+            control_method=control_method,
+            oc_sums=oc_sums,
         )
 
     #: Dernier tour pour lequel l'instantané d'état a été écrit (déduplication).

@@ -195,6 +195,8 @@ class AnalyzerConfig:
     #: ENDURANCE par datasheet. Par FIGURINE et non par escouade : 19.02 impose la plus haute E
     #: des figurines bodyguard, jamais celle du leader rattaché.
     unit_toughness_by_type: Dict[str, int]
+    #: Nombre de tours maximum déclaré dans game_config (07.02 / P2). 0 = non disponible.
+    max_turns: int
 
 
 def load_analyzer_config() -> AnalyzerConfig:
@@ -537,4 +539,5 @@ def load_analyzer_config() -> AnalyzerConfig:
         unit_toughness_by_type=unit_toughness_by_type,
         weapon_range_global=weapon_range_global,
         weapon_is_close_quarters_global=weapon_is_close_quarters_global,
+        max_turns=config_loader.get_max_turns(),
     )

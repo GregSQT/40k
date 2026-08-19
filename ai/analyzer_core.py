@@ -23,6 +23,33 @@ from ai.analyzer_phases.fight_handler import handle_fight, handle_fight_move
 PLAYER_ONE_ID = 1
 PLAYER_TWO_ID = 2
 
+# 07.02 — ordre canonique des phases d'un tour de joueur.
+_PHASE_ORDER = ['COMMAND', 'MOVE', 'SHOOT', 'CHARGE', 'FIGHT']
+_PHASE_RANK: Dict[str, int] = {p: i for i, p in enumerate(_PHASE_ORDER)}
+
+
+def _check_phase_seq(
+    state: AnalyzerState, turn: int, stats: Dict
+) -> None:
+    """Valide la séquence de phases du tour `turn` et enregistre les violations 07.02."""
+    seq = state.phase_seq_current_turn
+    last_rank = -1
+    for p in seq:
+        rank = _PHASE_RANK.get(p, -1)
+        if rank < 0:
+            continue  # Phase inconnue (ex. DEPLOYMENT) — hors contrôle 07.02
+        if rank <= last_rank:
+            stats['phase_order_violations'] += 1
+            if stats['first_error_lines']['phase_order_violation'] is None:
+                stats['first_error_lines']['phase_order_violation'] = {
+                    'episode': state.current_episode_num,
+                    'turn': turn,
+                    'sequence': list(seq),
+                }
+            return
+        last_rank = rank
+
+
 # Seuil (en lignes de log) entre deux appels à `_resync_living_models` avec `removed != {}`
 # pour la même unité, en-dessous duquel on considère qu'ils appartiennent à la même activation
 # (DEAD-before-SHOOT artifact) et on ACCUMULE les positions. Au-delà, on REMPLACE (nouvelle
@@ -622,13 +649,27 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
             # (celui-ci et celui du replay) doivent bouger ensemble : c'est le même format.
             objective_control_match = re.search(
                 r'\bT(\d+) OBJECTIVE CONTROL: VP1=(-?\d+) VP2=(-?\d+)'
-                r'(?: CP1=(-?\d+) CP2=(-?\d+))? ZONES=',
+                r'(?: CP1=(-?\d+) CP2=(-?\d+))? ZONES=(.*)$',
                 line,
             )
             if objective_control_match:
                 state.episode_victory_points[PLAYER_ONE_ID] = int(objective_control_match.group(2))
                 state.episode_victory_points[PLAYER_TWO_ID] = int(objective_control_match.group(3))
                 state.objective_control_seen = True
+                # L18 — champs optionnels Mthd/OC1/OC2 dans chaque entrée de zone.
+                # Format : "{nom}:Ctrl={c}[:Mthd={m}][:OC1={n}][:OC2={n}]" séparés par espaces.
+                _zones_str = objective_control_match.group(6).strip()
+                for _zone_token in _zones_str.split():
+                    _mthd_m = re.search(r':Mthd=(\w+)', _zone_token)
+                    _oc1_m = re.search(r':OC1=(-?\d+)', _zone_token)
+                    _oc2_m = re.search(r':OC2=(-?\d+)', _zone_token)
+                    if _mthd_m and state.objective_control_method is None:
+                        state.objective_control_method = _mthd_m.group(1)
+                    if _oc1_m and _oc2_m:
+                        _zone_name = _zone_token.split(':')[0]
+                        state.objective_oc_per_zone[_zone_name] = (
+                            int(_oc1_m.group(1)), int(_oc2_m.group(1))
+                        )
                 continue
 
             # ── Instantané d'ÉTAT du moteur (une ligne par tour) : POINT DE RECALAGE ──────────
@@ -818,6 +859,11 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
 
             # Episode end
             if 'EPISODE END' in line:
+                # 07.02 — valider la séquence du DERNIER tour (pas couverte par le bloc
+                # turn-change, qui ne s'exécute que quand un NOUVEAU tour commence).
+                if state.last_turn > 0:
+                    _check_phase_seq(state, state.last_turn, stats)
+
                 if stats['current_episode_deaths']:
                     stats['death_orders'].append(tuple(stats['current_episode_deaths']))
 
@@ -915,6 +961,42 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         f"'T<turn> OBJECTIVE CONTROL:' snapshot. Regenerate step.log: victory "
                         f"points are read from the engine, no longer recomputed by the analyzer."
                     )
+
+                # P2 — tour maximum dépassé.
+                if state.episode_turn > 0 and config.max_turns > 0:
+                    if state.episode_turn > config.max_turns:
+                        stats['game_turn_exceeded_count'] += 1
+                        if stats['first_error_lines']['game_turn_exceeded'] is None:
+                            stats['first_error_lines']['game_turn_exceeded'] = {
+                                'episode': state.current_episode_num,
+                                'turn': state.episode_turn,
+                                'max_turns': config.max_turns,
+                            }
+
+                # P2 — méthode de victoire incohérente avec l'état final reconstruit.
+                # Contrôle : si win_method=elimination, le perdant doit avoir 0 unité vivante.
+                _winner_for_check: Optional[int] = winner_match and int(winner_match.group(1))
+                _method_for_check = (method_match.group(1) if method_match else None) if winner_match else None
+                if (
+                    _winner_for_check in (PLAYER_ONE_ID, PLAYER_TWO_ID)
+                    and _method_for_check == 'elimination'
+                ):
+                    _loser = PLAYER_TWO_ID if _winner_for_check == PLAYER_ONE_ID else PLAYER_ONE_ID
+                    _loser_still_alive = [
+                        uid for uid, pl in state.unit_player.items()
+                        if int(pl) == _loser
+                        and uid not in state.dead_units_current_episode
+                        and state.unit_hp.get(uid, 0) > 0
+                    ]
+                    if _loser_still_alive:
+                        stats['win_method_mismatch_count'] += 1
+                        if stats['first_error_lines']['win_method_mismatch'] is None:
+                            stats['first_error_lines']['win_method_mismatch'] = {
+                                'episode': state.current_episode_num,
+                                'winner': _winner_for_check,
+                                'method': _method_for_check,
+                                'loser_alive_units': _loser_still_alive[:5],
+                            }
 
                 stats['current_episode_deaths'] = []
                 stats['wounded_enemies'] = {1: set(), 2: set()}
@@ -1232,13 +1314,9 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         or " FLED " in action_desc_upper
                     )
                     # Double-activation should only count unit activations, not per-shot/per-attack logs.
-                    #
-                    # FIGHT était EXCLUE de cette liste — et c'est précisément la phase où le défaut
-                    # se produit. Mesuré sur le run de 600 épisodes du 2026-08-08 : 24 unités
-                    # combattent DEUX fois dans la même phase (deux consolidations, deux salves
-                    # d'attaques), réparties sur 15 épisodes, pendant que « 1.6 Double-activation
-                    # par phase : 0 » s'affichait en vert. Un contrôle qui ne regarde pas là où le
-                    # défaut vit annonce toujours « tout va bien ».
+                    # FIGHT : marqueur = ligne CONSOLIDATED (12.07 — une seule consolidation par unité
+                    # et par phase). SHOOT : marqueur = première ligne SHOT d'un nouvel acteur
+                    # (is_shoot_activation_start, 10.02 — livré le 2026-08-17).
                     if phase in ('MOVE', 'SHOOT', 'CHARGE', 'FIGHT') and is_activation_marker:
                         if player is None:
                             raise ValueError("player is required for double-activation check")
@@ -1309,6 +1387,25 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
 
                 # Reset markers when turn changes
                 if turn != state.last_turn:
+                    # 07.02 — valider la séquence de phases du tour SORTANT avant de la purger.
+                    if state.last_turn > 0:
+                        _check_phase_seq(state, state.last_turn, stats)
+                        # Alternance : le joueur qui ouvre COMMAND doit changer à chaque tour.
+                        prev_cmd = state.command_player_per_turn.get(state.last_turn)
+                        prev_prev_cmd = state.command_player_per_turn.get(state.last_turn - 1)
+                        if (
+                            prev_cmd is not None
+                            and prev_prev_cmd is not None
+                            and prev_cmd == prev_prev_cmd
+                        ):
+                            stats['player_alternation_violations'] += 1
+                            if stats['first_error_lines']['player_alternation_violation'] is None:
+                                stats['first_error_lines']['player_alternation_violation'] = {
+                                    'episode': state.current_episode_num,
+                                    'turn': state.last_turn,
+                                    'player': prev_cmd,
+                                }
+                    state.phase_seq_current_turn = []
                     state.units_moved = set()
                     state.units_shot = set()
                     # CRITICAL: Reset state.units_fled at the start of each turn
@@ -1345,6 +1442,11 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 state.last_player = player
 
                 if phase != state.last_phase:
+                    # 07.02 — enregistrer la séquence de phases dans le tour courant.
+                    if phase not in state.phase_seq_current_turn:
+                        state.phase_seq_current_turn.append(phase)
+                    if phase == 'COMMAND' and turn not in state.command_player_per_turn:
+                        state.command_player_per_turn[turn] = int(player)
                     if phase == 'COMMAND':
                         state.selected_choice_by_unit_source = {}
                     if phase == 'MOVE':
@@ -1377,6 +1479,16 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 # `_dmg_actor_id` est disponible ici (défini avant `if _dmg_actor_match:`).
                 if _is_shot_action and phase == 'SHOOT':
                     state.shoot_last_activator = _dmg_actor_id
+
+                # 01.07 / L1 — drapeau battle-shocked par unité. Ligne :
+                # «Unit N(c,r) BATTLE-SHOCK Roll:2D6=X vs LdY+ → SHOCKED|OK»
+                _bs_match = re.search(
+                    r'Unit (\d+)\(\d+,\d+\) BATTLE-SHOCK Roll:.* → (SHOCKED|OK)',
+                    action_desc,
+                )
+                if _bs_match:
+                    _bs_uid = _bs_match.group(1)
+                    state.battle_shocked_by_unit[_bs_uid] = (_bs_match.group(2) == 'SHOCKED')
 
                 state.episode_turn = max(state.episode_turn, turn)
 

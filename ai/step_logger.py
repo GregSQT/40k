@@ -351,7 +351,8 @@ class StepLogger:
         return f"Obj{require_key(objective, 'id')}"
 
     def log_objective_control_snapshot(
-        self, turn, objectives, objective_controllers, victory_points, command_points
+        self, turn, objectives, objective_controllers, victory_points, command_points,
+        control_method=None, oc_sums=None
     ):
         """Instantane FAISANT FOI du controle d'objectif, des VP et des CP (regles 14.02, 08.02).
 
@@ -368,13 +369,17 @@ class StepLogger:
         Pas de `try/except` ici, contrairement au reste du module : cette ligne est la source de
         verite du replay. Une exception avalee produirait un flux d'instantanes tronque, donc un
         controle affiche perime — exactement le defaut que cette ligne corrige.
+
+        L18 — champs optionnels (absents dans les journaux anterieurs au 2026-08-19) :
+        - `control_method` : "secured" | "default" (14.02/14.03), commun a tous les objectifs.
+        - `oc_sums` : List[(OC_P1, OC_P2)] par objectif, dans le meme ordre que `objectives`.
         """
         if not self.enabled:
             return
 
         timestamp = time.strftime("%H:%M:%S", time.localtime())
         zone_entries = []
-        for objective in objectives:
+        for idx, objective in enumerate(objectives):
             obj_id = str(require_key(objective, "id"))
             # get allowed : une cle absente = objectif jamais evalue (aucune frontiere de phase
             # franchie, 14.02) — c'est l'etat « personne ne controle », que le moteur lui-meme
@@ -386,7 +391,13 @@ class StepLogger:
                 ctrl = str(int(controller))
             else:
                 raise ValueError(f"Unexpected objective controller for {obj_id}: {controller!r}")
-            zone_entries.append(f"{self._objective_display_name(objective)}:Ctrl={ctrl}")
+            entry = f"{self._objective_display_name(objective)}:Ctrl={ctrl}"
+            if control_method is not None:
+                entry += f":Mthd={control_method}"
+            if oc_sums is not None and idx < len(oc_sums):
+                oc1, oc2 = oc_sums[idx]
+                entry += f":OC1={oc1}:OC2={oc2}"
+            zone_entries.append(entry)
 
         vp1 = require_key(victory_points, 1)
         vp2 = require_key(victory_points, 2)
