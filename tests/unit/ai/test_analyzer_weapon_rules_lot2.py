@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import ai.analyzer as an
 
-from tests.unit.ai._fabriques import entete_step_log
+from tests.unit.ai._fabriques import entete_step_log, weapon_rule_usage as _usage
 
 SHOOTER = (50, 50)
 TARGET = (50, 80)    # 30 subhex = 6", hors zone d'engagement
@@ -58,10 +58,6 @@ def _stats(tmp_path, *shot_lines: str, unit_type: str = "Intercessor"):
     log = tmp_path / "step.log"
     log.write_text(_log(*shot_lines, unit_type=unit_type))
     return an.parse_step_log(str(log))
-
-
-def _usage(stats, rule):
-    return {k: sum(v.values()) for k, v in stats["weapon_rule_usage"].items() if k[0] == rule}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
