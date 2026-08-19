@@ -285,8 +285,10 @@ class TestSaveLoad:
         state_at_save = game.refresh()
 
         resp_save = game._client.post("/api/game/save", json={"note": "strict_eq"})
-        assert resp_save.get_json()["success"] is True
-        save_id = resp_save.get_json()["save"]["id"]
+        assert resp_save.status_code == 200
+        save_resp_json = resp_save.get_json()
+        assert save_resp_json["success"] is True
+        save_id = save_resp_json["save"]["id"]
 
         # Diverger du save : drainer le pool de move puis avancer de phase.
         game.play_nominal(max_actions=200, until=lambda c: c.phase != state_at_save["phase"])
