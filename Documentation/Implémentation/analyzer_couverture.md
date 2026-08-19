@@ -603,14 +603,14 @@ par absence prouvée de site d'incrémentation.
 | ~~V1~~ | `damage_exceeds_hp` n'était **jamais incrémenté** | affiché `analyzer.py`, sommé dans les totaux | La ligne « Dmg > HP_CUR (overkill) » affichait 0 en permanence et contribuait à un ✅ dans le SUMMARY | **SUPPRIMÉ le 2026-08-17** — irréalisable par construction : `shared_utils` plafonne `dmg_dealt = min(dmg, hp_before)` avant de journaliser. Clé, affichage et entrée `first_error_lines` retirés de `analyzer.py`. Verrou : `test_bucket_damage_ne_contient_que_damage_missing_unit_hp` (`test_analyzer_error_totals.py`) |
 | ~~V2~~ | `fight_from_non_adjacent` n'était **jamais incrémenté** depuis 2026-07-24 | — | — | **FERMÉ le 2026-08-10** par SUPPRESSION de la clé (déclaration, `first_error_lines`, terme du total FIGHT). Le contrôle avait été retiré comme faux positif ; garder sa clé sommée à 0 entretenait l'idée que 12.01 était surveillée. Elle l'est par `test_fight_spatial_contract.py`, fonction `test_fight_b_engagement_pool_uses_full_footprint_distance`. **Son propre verrou était vacant** : `test_analyzer_no_fight_non_adjacent_false_positive` affirmait « == 0 » sur une clé sans site d'incrémentation — vrai quoi qu'il arrive. Il surveille désormais le RETOUR de la clé, et double son assertion par le TOTAL §1.4, qui, lui, bouge |
 | ~~V3~~ | `dead_unit_skipping` / `handle_skip` sont **inatteignables** | — | — | **FERMÉ le 2026-08-10** par suppression : `_STEP_LOG_TYPE_MAP` est une liste blanche qui ne porte pas `skip` — « type sans formateur -> volontairement non journalisé ». Aucune ligne `SKIP` n'existe donc dans un step.log (mesuré : 0 occurrence sur 1683 actions). La branche du parseur SURVIT, mais pour signaler la ligne en §2.7 au lieu de la laisser tomber en silence dans `other`. ⚠️ **`shoot_vs_wait['skip']` n'est PAS concerné et reste vivant** : son producteur est `handle_wait` (10.04 requalifie en skip le WAIT d'une unité ENGAGÉE). Deux « skip » homonymes, un seul était mort — le retirer avec l'autre a été tenté et rattrapé par `test_analyzer_wait_engagement.py` |
-| V4 | §1.8 usage `CLOSE_QUARTERS` mesure `calculate_hex_distance(ancre_tireur, ancre_cible) == 1` | `shoot_handler.py` | Ancre au lieu du socle **et** adjacence au lieu de la zone d'engagement. À x5, `ez=10` : le compteur d'usage est quasi toujours à 0 | **OUVERT, MAIS RÉDUIT** — `c1487fcb` a corrigé les deux contrôles d'ERREUR voisins (`:644-671`), qui portaient le même défaut. Seul le compteur d'USAGE §1.8 reste ancre-à-ancre |
+| ~~V4~~ | §1.8 usage `CLOSE_QUARTERS` mesurait `calculate_hex_distance(ancre_tireur, ancre_cible) == 1` | `shoot_handler.py` | Ancre au lieu du socle **et** adjacence au lieu de la zone d'engagement. À x5, `ez=10` : le compteur d'usage était quasi toujours à 0 | **FERMÉ (lot 1)** — `_eligibility_rule_applied` relit le token `[CLOSE-QUARTERS]` (grammar 4+) ou évalue `is_close_quarters and shooter_engaged_with_target` par figurine. Verrou : `test_analyzer_close_quarters_usage.py` |
 | ~~V5~~ | `reactive_move_abnormal` mesurait la distance à l'**ancre** | `analyzer_core.py` | — | **FERMÉ le 2026-08-10.** La mesure d'ancre est SUPPRIMÉE, pas corrigée : son jumeau immédiat `distance_over_roll` pose déjà la même question par `_per_model_move_violation` (par socle, chemin réel, budget converti). Les deux entraient dans le total §1.1 — un vrai dépassement comptait **2 fautes pour 1**, et une reformation d'ancre en déclenchait une fausse. `reactive_move_abnormal` ne pose plus que SA question (phase où le move réactif n'a rien à faire). Verrou : `test_analyzer_reactive_move_single_measure.py` |
 | ~~V6~~ | `_build_move_bfs_blockers` ignore l'exemption 17.01 | `analyzer.py` | — | **FERMÉ le 2026-08-10.** 17.01 (« normal or advance move ») est passée en paramètre `monster_or_vehicle_by_unit` : un mobile M/V ne bloque plus que sur les AUTRES M/V. Le fall-back, la charge et le pile-in ne reçoivent pas la carte — la règle ne les couvre pas, et l'omission est donc la règle, pas un oubli. Le drapeau vient du MÊME champ de registre que les exemptions de tir 10.06/17.03, et un mélange de datasheets M/V et non-M/V dans une escouade LÈVE au lieu de rendre un chemin faux |
 | ~~V7~~ | Le BFS de mouvement ne connaît pas le **bord du plateau** | `analyzer.py` | — | **FERMÉ le 2026-08-10.** 03.01 « Its base cannot cross the edge of the battlefield ». `cols`/`rows` sont lus dans l'entête `Board:` (`parse_board_dims_from_log`), avec le même contrat que l'échelle : leur absence REFUSE le journal. C'était un FAUX NÉGATIF — un socle coincé dans un coin trouvait toujours un contournement par l'extérieur, et le contrôle de budget se taisait sur le seul chemin que la règle interdit. Le bord borne le CENTRE en transit, exactement comme `geodesic_move_reach` côté moteur ; le débordement du socle à l'arrivée reste au contrôle de placement (§2.2) |
-| V8 | `devastating_wounds` suppose que **seul un 6** est critique | `shoot_handler.py` | Faux « incorrect » dès qu'une arme [ANTI-X Y+] rend critique un Y+ < 6 | **OUVERT** — `wound_roll_value == 6` en dur |
+| ~~V8~~ | `devastating_wounds` supposait que **seul un 6** est critique | `shoot_handler.py` | Faux « incorrect » dès qu'une arme [ANTI-X Y+] rendait critique un Y+ < 6 | **FERMÉ (lot 2)** — seuil relu depuis le token `[ANTI-X:N+]`, `crit_threshold = int(anti_crit_m.group(1)) if anti_crit_m else 6` (`shoot_handler.py:643-644`). Verrou : `test_analyzer_weapon_rules_lot2.py` |
 | ~~V9~~ | Le contrôle de portée ne rend **aucun verdict** quand aucun socle de la cible n'est connu | `shoot_handler.py` | — | **FERMÉ le 2026-08-12.** Le renoncement reste délibéré (l'ancre d'une escouade ne dit rien de la distance à sa figurine la plus proche), mais il n'est plus SILENCIEUX : `shoot_range_unverifiable` compte les tirs non jugés, et §1.2 l'affiche sous la ligne de portée (`↳ portees non jugees`). Un contrôle qui renonce sans le dire affiche le même `0` qu'un contrôle qui a tout vérifié — et le compteur `total` ne le rattrapait pas, puisqu'il s'incrémente à l'entrée du handler, avant le bloc de portée |
 | V12 | ~~La ligne `phase Start` est produite et jamais lue~~ | `step_logger.py` (`log_phase_transition`) | 07.02 reste non vérifié | **RÉVISÉ le 2026-08-10 — l'énoncé était FAUX, et il l'était dans le sens qui coûte le plus cher.** `log_phase_transition` n'a **aucun appelant** (grep sur `engine/`, `ai/`, `services/` → 0 hit hors définition) et la chaîne `phase Start` n'apparaît **pas une seule fois** dans un step.log de 1683 actions. La ligne n'est donc pas « produite et non lue » : elle n'est pas produite. 07.02 n'est pas ABSENT-LOGGABLE, il est **ABSENT-LOG-MANQUANT** — ou reconstructible autrement, depuis les `T{tour} P{joueur} {PHASE}` des lignes d'action, ce qui reste à faire |
-| V13 | `has_line_of_sight` (ancre-à-ancre, documentée comme inexacte) classe les `WAIT` en `wait_with_los` / `wait_no_los` | `shoot_handler.py` (prédicat `:908`) | Usage assumé « métriques comportementales », mais ces métriques servent au pilotage | **OUVERT** |
+| ~~V13~~ | `has_line_of_sight` (ancre-à-ancre, documentée comme inexacte) classait les `WAIT` en `wait_with_los` / `wait_no_los` | `shoot_handler.py` | Usage assumé « métriques comportementales », mais ces métriques servent au pilotage | **FERMÉ (lot 6, assumption explicite)** — renommé `wait_with_shootable_target`/`wait_no_shootable_target` ; label rapport annoté « approx. LoS » (`analyzer.py:3114-3117`, `shoot_handler.py:1292-1295`). |
 
 ### Verts vacants FERMÉS ou RÉVISÉS le 2026-08-10
 
@@ -623,14 +623,12 @@ par absence prouvée de site d'incrémentation.
 | **V17** | *(trouvé et fermé le 2026-08-10, en instruisant V16)* — `unit_id_mismatches` n'était PAS dans la structure `stats` ; `dead_unit_actions` n'avait ni producteur ni lecteur | **FERMÉ.** Mesuré : `'unit_id_mismatches' in parse_step_log(...)` rendait **False** — la clé n'apparaissait qu'au `setdefault` de `print_statistics`, 130 lignes avant le seul lecteur qui la lit sans garde. D'où trois lecteurs à trois niveaux de défensive et deux idiomes de création. Tout consommateur du `stats` rendu levait `KeyError`. La clé est déclarée avec ses voisines (`analyzer.py`), les deux créations paresseuses ont disparu, la garde `if … in stats` du total CLI aussi. `dead_unit_actions` était du code mort pur (créé, affecté à une locale, jamais relu — 1 seul hit au grep) : supprimé. Même famille que V1/V2/V3 |
 | ~~V15~~ | « Cinq des six clés de `T{tour} EFFECTS:` ne sont lues par personne » | **Réduit à UNE.** `waaagh_melee_str` alimente §1.9 (`analyzer_wound.py`), `waaagh` et `oath_target` alimentent §1.7 (`analyzer_core.py`), `waaagh_melee_atk` alimentait déjà #28, `oath_wound` alimente désormais la magnitude Oath de §1.9 (2026-08-17). **Reste inexploitée : `waaagh_invul`** (5++) |
 
-**Grep JUMEAU** (2026-08-10) `calculate_hex_distance|is_adjacent(` sur les 7 fichiers de
-l'analyzer → 8 hits, **4 sites de mesure** : `analyzer.py` (distance à vol d'oiseau **par
-socle**, légitime — 21.03), `analyzer.py` (`get_adjacent_enemies`, défini `:1097`,
-**diagnostic seul** : n'alimente que les payloads `first_error_lines` et les traces de debug,
-jamais un verdict), et les deux verts vacants V4 (`shoot_handler.py`) et V5
-(`analyzer_core.py`). Les 4 autres hits sont des imports et la définition d'`is_adjacent`
-(`analyzer.py`). Aucun autre résidu ancre-à-ancre. `analyzer_wound.py` n'en contient
-aucun : il ne mesure pas de distance.
+**Grep JUMEAU** (2026-08-10, relu lot 6) `calculate_hex_distance|is_adjacent(` sur les 8 fichiers de
+l'analyzer → 8 hits, **2 sites de mesure actifs** : `analyzer.py` (distance à vol d'oiseau **par
+socle**, légitime — 21.03) et `analyzer.py` (`get_adjacent_enemies`, défini `:1097`,
+**diagnostic seul** : n'alimente que les payloads `first_error_lines`, jamais un verdict). Les
+verts vacants V4 (`shoot_handler.py`) et V5 (`analyzer_core.py`) sont **fermés** (lot 1 et lot 2).
+Les 4 autres hits sont imports et définition d'`is_adjacent`. Aucun résidu ancre-à-ancre ouvert.
 
 ---
 
@@ -659,8 +657,8 @@ Par famille :
 | PDF | Total | COUVERT | PARTIEL | ABS-LOGGABLE | ABS-LOG-MANQ | NON-TESTABLE |
 |---|---|---|---|---|---|---|
 | 01 Core concepts | 7 | 1 | 0 | 1 | 2 | 3 |
-| 02 Datasheets | 7 | 0 | 0 | 0 | 1 | 6 |
-| 03 Moving | 4 | 1 | 2 | 1 | 0 | 0 |
+| 02 Datasheets | 7 | 0 | 1 | 0 | 1 | 5 |
+| 03 Moving | 4 | 1 | 2 | 0 | 1 | 0 |
 | 04 Making attacks | 3 | 0 | 3 | 0 | 0 | 0 |
 | 05 Attack sequence | 4 | 2 | 1 | 0 | 1 | 0 |
 | 06 Other concepts | 3 | 1 | 0 | 0 | 1 | 1 |
@@ -669,37 +667,48 @@ Par famille :
 | 09 Movement phase | 7 | 1 | 3 | 0 | 1 | 2 |
 | 10 Shooting phase | 7 | 1 | 3 | 0 | 1 | 2 |
 | 11 Charge phase | 4 | 0 | 2 | 0 | 0 | 2 |
-| 12 Fight phase | 9 | 1 | 3 | 2 | 0 | 3 |
+| 12 Fight phase | 9 | 2 | 3 | 0 | 1 | 3 |
 | 13 Terrain | 11 | 0 | 1 | 0 | 0 | 10 |
 | 14 Objectives | 3 | 1 | 0 | 0 | 1 | 1 |
 | 15 Stratagems | 12 | 0 | 0 | 0 | 12 | 0 |
 | 16 Actions | 1 | 0 | 0 | 0 | 1 | 0 |
-| 17 Monsters & vehicles | 3 | 0 | 2 | 0 | 0 | 1 |
+| 17 Monsters & vehicles | 3 | 1 | 1 | 0 | 0 | 1 |
 | 18 Transports | 5 | 0 | 0 | 0 | 5 | 0 |
 | 19 Attached units | 4 | 0 | 1 | 0 | 2 | 1 |
-| 20 Strategic reserves | 4 | 0 | 2 | 1 | 1 | 0 |
+| 20 Strategic reserves | 4 | 1 | 1 | 1 | 1 | 0 |
 | 21 Flying & surging | 3 | 0 | 1 | 0 | 2 | 0 |
 | 22 Other rules | 5 | 0 | 1 | 0 | 3 | 1 |
 | 23 Aircraft | 4 | 0 | 0 | 0 | 4 | 0 |
-| 24 Core abilities | 38 | 0 | 10 | 0 | 27 | 1 |
-| **Total** | **156** | **9** | **35** | **7** | **67** | **38** |
+| 24 Core abilities | 38 | 1 | 11 | 5 | 19 | 2 |
+| **Total** | **156** | **13** | **35** | **9** | **61** | **38** |
 
 ### 6.2 Règles d'armes (23) et d'unité (35)
 
 | Corpus | Total | COUVERT | PARTIEL | ABS-LOGGABLE | ABS-LOG-MANQ | NON-TESTABLE |
 |---|---|---|---|---|---|---|
-| `weapon_rules.json` | 23 | 1 | 7 | 14 | 1 | 0 |
-| `unit_rules.json` | 35 | 6 | 20 | 2 | 5 | 2 |
+| `weapon_rules.json` | 23 | 1 | 7 | 13 | 1 | 1 |
+| `unit_rules.json` | 33 | 4 | 20 | 2 | 5 | 2 |
 
-### 6.3 Tous corpus confondus (214 lignes)
+### 6.3 Tous corpus confondus (267 lignes)
+
+Lot 5 a migré les matrices §3/§4/§5-bis dans `rules_corpus.json` sous forme d'entrées `PROJ.*`
+(55 entrées : 47 COUVERT, 8 PARTIEL).
+
+| Corpus | Total | COUVERT | PARTIEL | ABS-LOGGABLE | ABS-LOG-MANQ | NON-TESTABLE |
+|---|---|---|---|---|---|---|
+| PDF | 156 | 13 | 35 | 9 | 61 | 38 |
+| `weapon_rules.json` | 23 | 1 | 7 | 13 | 1 | 1 |
+| `unit_rules.json` | 33 | 4 | 20 | 2 | 5 | 2 |
+| `PROJ.*` (matrices §3–§5) | 55 | 47 | 8 | 0 | 0 | 0 |
+| **Total** | **267** | **65** | **70** | **24** | **67** | **41** |
 
 | Statut | Nombre | % |
 |---|---|---|
-| COUVERT | 13 | 6,1 % |
-| PARTIEL | 63 | 29,4 % |
-| ABSENT-LOGGABLE | 11 | 5,1 % |
-| ABSENT-LOG-MANQUANT | 87 | 40,7 % |
-| NON-TESTABLE-OFFLINE | 40 | 18,7 % |
+| COUVERT | 65 | 24,3 % |
+| PARTIEL | 70 | 26,2 % |
+| ABSENT-LOGGABLE | 24 | 9,0 % |
+| ABSENT-LOG-MANQUANT | 67 | 25,1 % |
+| NON-TESTABLE-OFFLINE | 41 | 15,4 % |
 
 ### 6.4 Côté analyzer
 
@@ -710,19 +719,19 @@ Par famille :
 | Sommes d'erreurs dupliquées | 0 — un seul `error_totals` (`analyzer.py`) depuis V16 |
 | Clés de `stats` créées à la volée | 0 depuis V17 — toutes déclarées dans la structure |
 | Lignes ❌ du SUMMARY absentes du total | 0 — `error_totals['total']` est la somme de tous les buckets |
-| dont mesurant la mauvaise grandeur | **2** (V4 usage close-quarters à l'ancre, V8 critique supposée à 6) — V5, V6, V7 et V14 fermés le 2026-08-10 |
+| dont mesurant la mauvaise grandeur | **0** — V4 fermé lot 1 (`_eligibility_rule_applied` per-fig), V8 fermé lot 2 (seuil `[ANTI-X:N+]`), V13 fermé lot 6 (assumption explicite `wait_with_shootable_target`) |
 | Contrôles supprimés, documentés, à ne pas ré-écrire | **7** (+ `fight_from_non_adjacent` et `dead_unit_skipping`/`handle_skip`, 2026-08-10) |
 | Sections de rapport | 18 (§1.1–§1.10, §2.1–§2.8) — dont 4 purement diagnostiques (§2.4, §2.5, §2.6, §2.7) — **plus la table « 1.1 COUVERTURE DES REGLES »**, qui n'est pas une section d'erreurs mais le rendu du corpus |
 
-### 6.5 Mouvement net (2026-08-08 → 2026-08-09 → 2026-08-10)
+### 6.5 Mouvement net (2026-08-08 → 2026-08-09 → 2026-08-10 → 2026-08-20)
 
-| | 08-08 | 08-09 | 08-10 (carto) | 08-10 (livraison) |
-|---|---|---|---|---|
-| COUVERT (tous corpus) | 10 | 11 | 12 | **13** |
-| ABSENT-LOGGABLE | 13 | 13 | 12 | **11** |
-| Contrôles vivants | 59 | 62 | 64 | **69** |
-| Verts vacants ouverts | 13 | 14 | 13 | **11** (V10 et V14 fermés ; V16 et V17 trouvés et fermés le jour même) |
-| Fichiers de l'analyzer | 6 | 6 | 7 | **8** (`analyzer_wound.py`, `analyzer_hit.py`) |
+| | 08-08 | 08-09 | 08-10 (carto) | 08-10 (livraison) | 08-20 (lot 6) |
+|---|---|---|---|---|---|
+| COUVERT (tous corpus) | 10 | 11 | 12 | **13** | **65** (+55 PROJ lot 5 ; +4 PDF lots 4/5/6) |
+| ABSENT-LOGGABLE | 13 | 13 | 12 | **11** | **24** (+13 corpus armes/unités) |
+| Contrôles vivants | 59 | 62 | 64 | **69** | **71** |
+| Verts vacants ouverts | 13 | 14 | 13 | **11** (V10 et V14 fermés ; V16 et V17 trouvés et fermés le jour même) | **0** (V4 lot 1, V8 lot 2, V13 lot 6) |
+| Fichiers de l'analyzer | 6 | 6 | 7 | **8** (`analyzer_wound.py`, `analyzer_hit.py`) | **8** |
 
 Le gain de couverture reste **modeste par construction**. Les quatre lots du 2026-08-09 avaient
 surtout supprimé des **faux positifs** (2218 → 18 erreurs sur un run) et ajouté un point de

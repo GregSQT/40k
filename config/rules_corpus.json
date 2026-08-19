@@ -175,50 +175,332 @@
       ],
       "status": "COUVERT"
     },
-
-    { "id": "PROJ.1.2.portee",           "section": "1.2", "label": "Tir hors portée",                                        "applicability": {"kind": "always"}, "controls": [["shoot_invalid", "*", "out_of_range"]],                        "status": "COUVERT" },
-    { "id": "PROJ.1.2.surcharge_atk",    "section": "1.2", "label": "Attaques tir — dépassement plafond par figurine",         "applicability": {"kind": "always"}, "controls": [["shoot_over_rng_nb"]],                                       "status": "COUVERT" },
-    { "id": "PROJ.1.2.combi",            "section": "1.2", "label": "Profil COMBI — deux profils du même combi même tour",     "applicability": {"kind": "always"}, "controls": [["shoot_combi_profile_conflicts"]],                           "status": "COUVERT" },
-    { "id": "PROJ.1.2.apres_repli",      "section": "1.2", "label": "Tir après repli — interdit sans règle explicite",         "applicability": {"kind": "always"}, "controls": [["shoot_after_flee"]],                                        "status": "COUVERT" },
-    { "id": "PROJ.1.2.allie",            "section": "1.2", "label": "Tir sur allié",                                           "applicability": {"kind": "always"}, "controls": [["shoot_at_friendly"]],                                       "status": "COUVERT" },
-    { "id": "PROJ.1.2.engage_cible",     "section": "1.2", "label": "Tir sur cible engagée sans arme CQ",                     "applicability": {"kind": "always"}, "controls": [["shoot_at_engaged_enemy"]],                                   "status": "COUVERT" },
-    { "id": "PROJ.1.2.eng_non_cq",       "section": "1.2", "label": "Tir avec arme non-CQ depuis zone d'engagement",          "applicability": {"kind": "always"}, "controls": [["shoot_invalid", "*", "engaged_non_close_quarters"]],        "status": "COUVERT" },
-    { "id": "PROJ.1.2.cq_non_engage",    "section": "1.2", "label": "Arme CQ vers cible non engagée avec le tireur",           "applicability": {"kind": "always"}, "controls": [["close_quarters_shot_at_unengaged_target"]],                 "status": "COUVERT" },
-    { "id": "PROJ.1.2.advance_post_tir", "section": "1.2", "label": "Avance après avoir tiré",                                 "applicability": {"kind": "always"}, "controls": [["advance_after_shoot"]],                                     "status": "COUVERT" },
-    { "id": "PROJ.1.2.double_advance",   "section": "1.2", "label": "Double avance en phase de tir",                          "applicability": {"kind": "always"}, "controls": [["advance_twice_in_shoot_phase"]],                            "status": "COUVERT" },
-    { "id": "PROJ.1.2.advance_budget",   "section": "1.2", "label": "Avance — dépassement du budget M+D6",                    "applicability": {"kind": "always"}, "controls": [["move_distance_over_limit", "advance"]],                     "status": "COUVERT" },
-    { "id": "PROJ.1.2.advance_engage",   "section": "1.2", "label": "Avance depuis zone d'engagement",                        "applicability": {"kind": "always"}, "controls": [["advance_from_adjacent"]],                                   "status": "COUVERT" },
-    { "id": "PROJ.1.2.touche",           "section": "1.2", "label": "Verdict de touche au tir — écart avec table 05.01",       "applicability": {"kind": "always"}, "controls": [["shoot_hit_result_mismatch"]],                               "status": "COUVERT" },
-    { "id": "PROJ.1.2.indirect",         "section": "1.2", "label": "Tir indirect — détection (règle non implémentée)",        "applicability": {"kind": "always"}, "controls": [["indirect_fire_mismatch"]],                                  "status": "COUVERT" },
-    { "id": "PROJ.1.2.blessure",         "section": "1.2", "label": "Seuil de blessure au tir — écart F/E",                   "applicability": {"kind": "always"}, "controls": [["shoot_wound_threshold_mismatch"]],                          "status": "COUVERT" },
-    { "id": "PROJ.1.2.hazardous",        "section": "1.2", "label": "HAZARDOUS au tir — arme absente de l'armurerie",          "applicability": {"kind": "always"}, "controls": [["hazardous_no_hazardous_weapon"]],                           "status": "COUVERT" },
+    {
+      "id": "PROJ.1.2.portee",
+      "section": "1.2",
+      "label": "Tir hors portée",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "shoot_invalid",
+          "*",
+          "out_of_range"
+        ]
+      ],
+      "status": "COUVERT"
+    },
+    {
+      "id": "PROJ.1.2.surcharge_atk",
+      "section": "1.2",
+      "label": "Attaques tir — dépassement plafond par figurine",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "shoot_over_rng_nb"
+        ]
+      ],
+      "status": "COUVERT"
+    },
+    {
+      "id": "PROJ.1.2.combi",
+      "section": "1.2",
+      "label": "Profil COMBI — deux profils du même combi même tour",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "shoot_combi_profile_conflicts"
+        ]
+      ],
+      "status": "COUVERT"
+    },
+    {
+      "id": "PROJ.1.2.apres_repli",
+      "section": "1.2",
+      "label": "Tir après repli — interdit sans règle explicite",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "shoot_after_flee"
+        ]
+      ],
+      "status": "COUVERT"
+    },
+    {
+      "id": "PROJ.1.2.allie",
+      "section": "1.2",
+      "label": "Tir sur allié",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "shoot_at_friendly"
+        ]
+      ],
+      "status": "COUVERT"
+    },
+    {
+      "id": "PROJ.1.2.engage_cible",
+      "section": "1.2",
+      "label": "Tir sur cible engagée sans arme CQ",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "shoot_at_engaged_enemy"
+        ]
+      ],
+      "status": "COUVERT"
+    },
+    {
+      "id": "PROJ.1.2.eng_non_cq",
+      "section": "1.2",
+      "label": "Tir avec arme non-CQ depuis zone d'engagement",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "shoot_invalid",
+          "*",
+          "engaged_non_close_quarters"
+        ]
+      ],
+      "status": "COUVERT"
+    },
+    {
+      "id": "PROJ.1.2.cq_non_engage",
+      "section": "1.2",
+      "label": "Arme CQ vers cible non engagée avec le tireur",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "close_quarters_shot_at_unengaged_target"
+        ]
+      ],
+      "status": "COUVERT"
+    },
+    {
+      "id": "PROJ.1.2.advance_post_tir",
+      "section": "1.2",
+      "label": "Avance après avoir tiré",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "advance_after_shoot"
+        ]
+      ],
+      "status": "COUVERT"
+    },
+    {
+      "id": "PROJ.1.2.double_advance",
+      "section": "1.2",
+      "label": "Double avance en phase de tir",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "advance_twice_in_shoot_phase"
+        ]
+      ],
+      "status": "COUVERT"
+    },
+    {
+      "id": "PROJ.1.2.advance_budget",
+      "section": "1.2",
+      "label": "Avance — dépassement du budget M+D6",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "move_distance_over_limit",
+          "advance"
+        ]
+      ],
+      "status": "COUVERT"
+    },
+    {
+      "id": "PROJ.1.2.advance_engage",
+      "section": "1.2",
+      "label": "Avance depuis zone d'engagement",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "advance_from_adjacent"
+        ]
+      ],
+      "status": "COUVERT"
+    },
+    {
+      "id": "PROJ.1.2.touche",
+      "section": "1.2",
+      "label": "Verdict de touche au tir — écart avec table 05.01",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "shoot_hit_result_mismatch"
+        ]
+      ],
+      "status": "COUVERT"
+    },
+    {
+      "id": "PROJ.1.2.indirect",
+      "section": "1.2",
+      "label": "Tir indirect — détection (règle non implémentée)",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "indirect_fire_mismatch"
+        ]
+      ],
+      "status": "COUVERT"
+    },
+    {
+      "id": "PROJ.1.2.blessure",
+      "section": "1.2",
+      "label": "Seuil de blessure au tir — écart F/E",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "shoot_wound_threshold_mismatch"
+        ]
+      ],
+      "status": "COUVERT"
+    },
+    {
+      "id": "PROJ.1.2.hazardous",
+      "section": "1.2",
+      "label": "HAZARDOUS au tir — arme absente de l'armurerie",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "hazardous_no_hazardous_weapon"
+        ]
+      ],
+      "status": "COUVERT"
+    },
     {
       "id": "PROJ.1.2.oath_target",
       "section": "1.2",
       "label": "Oath of Moment — cible blessée doit être la cible jurée (08.04)",
-      "applicability": {"kind": "unit_rule_in_roster", "rule_id": "oath_of_moment"},
-      "controls": [["oath_target_mismatch"]],
+      "applicability": {
+        "kind": "unit_rule_in_roster",
+        "rule_id": "oath_of_moment"
+      },
+      "controls": [
+        [
+          "oath_target_mismatch"
+        ]
+      ],
       "status": "COUVERT"
     },
     {
       "id": "PROJ.1.2.closest_target_penetration",
       "section": "1.2",
       "label": "Closest Target Penetration — réduction AP appliquée (obs_id=3)",
-      "applicability": {"kind": "unit_rule_in_roster", "rule_id": "closest_target_penetration"},
+      "applicability": {
+        "kind": "unit_rule_in_roster",
+        "rule_id": "closest_target_penetration"
+      },
       "controls": [],
       "status": "PARTIEL",
       "status_note": "L'exercice est détecté depuis la sauvegarde effective (eff > base - ap), mais aucun compteur d'erreur : l'AP réduite est lue du journal, pas recomputable indépendamment."
     },
-
-    { "id": "PROJ.1.3.depuis_engage",    "section": "1.3", "label": "Charge depuis zone d'engagement",                        "applicability": {"kind": "always"}, "controls": [["charge_from_adjacent"]],                                    "status": "COUVERT" },
-    { "id": "PROJ.1.3.apres_advance",    "section": "1.3", "label": "Charge après avance sans WAAAGH!",                       "applicability": {"kind": "always"}, "controls": [["charge_invalid", "*", "advanced"]],                         "status": "COUVERT" },
-    { "id": "PROJ.1.3.apres_repli",      "section": "1.3", "label": "Charge après repli",                                     "applicability": {"kind": "always"}, "controls": [["charge_invalid", "*", "fled"]],                             "status": "COUVERT" },
-    { "id": "PROJ.1.3.budget",           "section": "1.3", "label": "Charge — dépassement du budget 2D6",                     "applicability": {"kind": "always"}, "controls": [["charge_invalid", "*", "distance_over_roll"]],               "status": "COUVERT" },
+    {
+      "id": "PROJ.1.3.depuis_engage",
+      "section": "1.3",
+      "label": "Charge depuis zone d'engagement",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "charge_from_adjacent"
+        ]
+      ],
+      "status": "COUVERT"
+    },
+    {
+      "id": "PROJ.1.3.apres_advance",
+      "section": "1.3",
+      "label": "Charge après avance sans WAAAGH!",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "charge_invalid",
+          "*",
+          "advanced"
+        ]
+      ],
+      "status": "COUVERT"
+    },
+    {
+      "id": "PROJ.1.3.apres_repli",
+      "section": "1.3",
+      "label": "Charge après repli",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "charge_invalid",
+          "*",
+          "fled"
+        ]
+      ],
+      "status": "COUVERT"
+    },
+    {
+      "id": "PROJ.1.3.budget",
+      "section": "1.3",
+      "label": "Charge — dépassement du budget 2D6",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "charge_invalid",
+          "*",
+          "distance_over_roll"
+        ]
+      ],
+      "status": "COUVERT"
+    },
     {
       "id": "PROJ.1.3.reroll_charge",
       "section": "1.3",
       "label": "Re-roll charge — capacité reroll_charge exercée",
-      "applicability": {"kind": "unit_rule_in_roster", "rule_id": "reroll_charge"},
+      "applicability": {
+        "kind": "unit_rule_in_roster",
+        "rule_id": "reroll_charge"
+      },
       "controls": [],
       "status": "PARTIEL",
       "status_note": "La règle est exercée (compteur incrémenté sur [REROLLED:] dans la ligne CHARGED), mais aucun contrôle d'erreur — le moteur ne peut pas relancer un résultat qui aurait dû rester."
@@ -227,56 +509,386 @@
       "id": "PROJ.1.3.charge_impact",
       "section": "1.3",
       "label": "Charge impact — seuil et dégât de l'impact (11.01)",
-      "applicability": {"kind": "unit_rule_in_roster", "rule_id": "charge_impact"},
+      "applicability": {
+        "kind": "unit_rule_in_roster",
+        "rule_id": "charge_impact"
+      },
       "controls": [
-        ["charge_impact_wrong_threshold"],
-        ["charge_impact_wrong_damage"]
+        [
+          "charge_impact_wrong_threshold"
+        ],
+        [
+          "charge_impact_wrong_damage"
+        ]
       ],
       "status": "COUVERT"
     },
-
     {
       "id": "PROJ.1.4.reroll_save_fight",
       "section": "1.4",
       "label": "Re-roll 1 save en mêlée — capacité reroll_1_save_fight exercée",
-      "applicability": {"kind": "unit_rule_in_roster", "rule_id": "reroll_1_save_fight"},
+      "applicability": {
+        "kind": "unit_rule_in_roster",
+        "rule_id": "reroll_1_save_fight"
+      },
       "controls": [],
       "status": "PARTIEL",
       "status_note": "La règle est exercée (compteur incrémenté sur Save+[REROLLED:] dans la ligne FOUGHT), mais aucun contrôle d'erreur — un relancé valide ne produit pas de ligne erreur."
     },
-    { "id": "PROJ.1.4.allie",            "section": "1.4", "label": "Combat contre allié",                                    "applicability": {"kind": "always"}, "controls": [["fight_friendly"]],                                          "status": "COUVERT" },
-    { "id": "PROJ.1.4.surcharge_atk",   "section": "1.4", "label": "Attaques mêlée — dépassement plafond par figurine",       "applicability": {"kind": "always"}, "controls": [["fight_over_cc_nb"]],                                        "status": "COUVERT" },
-    { "id": "PROJ.1.4.pile_in",         "section": "1.4", "label": "Pile-in — dépassement du budget 3\"",                     "applicability": {"kind": "always"}, "controls": [["fight_move_invalid", "pile_in"]],                           "status": "COUVERT" },
-    { "id": "PROJ.1.4.consolidation",   "section": "1.4", "label": "Consolidation — dépassement du budget 3\"",               "applicability": {"kind": "always"}, "controls": [["fight_move_invalid", "consolidation"]],                     "status": "COUVERT" },
-    { "id": "PROJ.1.4.touche",          "section": "1.4", "label": "Verdict de touche en mêlée — écart avec table 05.01",     "applicability": {"kind": "always"}, "controls": [["fight_hit_result_mismatch"]],                               "status": "COUVERT" },
-    { "id": "PROJ.1.4.blessure",        "section": "1.4", "label": "Seuil de blessure en mêlée — écart F/E",                 "applicability": {"kind": "always"}, "controls": [["fight_wound_threshold_mismatch"]],                          "status": "COUVERT" },
-    { "id": "PROJ.1.4.alternance",      "section": "1.4", "label": "Alternance 12.04 — violation de l'ordre d'activation",   "applicability": {"kind": "always"}, "controls": [["fight_alternation_violations"]],                            "status": "COUVERT" },
-    { "id": "PROJ.1.4.double_pile_in",  "section": "1.4", "label": "Double pile-in pour la même unité (12.02)",              "applicability": {"kind": "always"}, "controls": [["fight_double_pile_in"]],                                    "status": "COUVERT" },
-    { "id": "PROJ.1.4.hazardous",       "section": "1.4", "label": "HAZARDOUS en mêlée — arme absente de l'armurerie",       "applicability": {"kind": "always"}, "controls": [["hazardous_no_hazardous_weapon_fight"]],                     "status": "COUVERT" },
-
-    { "id": "PROJ.2.1.dead_moving",     "section": "2.1", "label": "Unité morte en déplacement",                             "applicability": {"kind": "always"}, "controls": [["dead_unit_moving"]],                                        "status": "COUVERT" },
-    { "id": "PROJ.2.1.dead_shoot",      "section": "2.1", "label": "Unité morte qui tire",                                   "applicability": {"kind": "always"}, "controls": [["shoot_dead_unit"]],                                         "status": "COUVERT" },
-    { "id": "PROJ.2.1.dead_shot_at",    "section": "2.1", "label": "Tir sur unité morte",                                    "applicability": {"kind": "always"}, "controls": [["shoot_at_dead_unit"]],                                      "status": "COUVERT" },
-    { "id": "PROJ.2.1.dead_advance",    "section": "2.1", "label": "Unité morte qui avance",                                 "applicability": {"kind": "always"}, "controls": [["dead_unit_advancing"]],                                     "status": "COUVERT" },
-    { "id": "PROJ.2.1.dead_charge",     "section": "2.1", "label": "Unité morte qui charge",                                 "applicability": {"kind": "always"}, "controls": [["dead_unit_charging"]],                                      "status": "COUVERT" },
-    { "id": "PROJ.2.1.dead_charged",    "section": "2.1", "label": "Charge vers unité morte",                                "applicability": {"kind": "always"}, "controls": [["charge_dead_unit"]],                                        "status": "COUVERT" },
-    { "id": "PROJ.2.1.dead_fight_atk",  "section": "2.1", "label": "Unité morte qui combat",                                 "applicability": {"kind": "always"}, "controls": [["fight_dead_unit_attacker"]],                                "status": "COUVERT" },
-    { "id": "PROJ.2.1.dead_fight_tgt",  "section": "2.1", "label": "Combat contre unité morte",                              "applicability": {"kind": "always"}, "controls": [["fight_dead_unit_target"]],                                  "status": "COUVERT" },
-    { "id": "PROJ.2.1.dead_wait",       "section": "2.1", "label": "Unité morte qui attend",                                 "applicability": {"kind": "always"}, "controls": [["dead_unit_waiting"]],                                      "status": "COUVERT" },
-    { "id": "PROJ.2.1.revived",         "section": "2.1", "label": "Unité ressuscitée (incohérence moteur)",                 "applicability": {"kind": "always"}, "controls": [["unit_revived"]],                                           "status": "COUVERT" },
-
-    { "id": "PROJ.2.3.dmg_missing",     "section": "2.3", "label": "Dégâts appliqués à une unité sans PV connus",           "applicability": {"kind": "always"}, "controls": [["damage_missing_unit_hp"]],                                  "status": "COUVERT" },
-
-    { "id": "PROJ.2.8.fantome",         "section": "2.8", "label": "État reconstruit — unité morte non vue par l'analyzer",  "applicability": {"kind": "always"}, "controls": [["state_resync", "dead_missed",      "#"]],                   "status": "COUVERT" },
-    { "id": "PROJ.2.8.sur_tuee",        "section": "2.8", "label": "État reconstruit — unité tuée à tort par l'analyzer",   "applicability": {"kind": "always"}, "controls": [["state_resync", "alive_missed",     "#"]],                   "status": "COUVERT" },
-    { "id": "PROJ.2.8.position",        "section": "2.8", "label": "État reconstruit — figurine mal positionnée",           "applicability": {"kind": "always"}, "controls": [["state_resync", "pos_mismatch",     "#"]],                   "status": "COUVERT" },
-    { "id": "PROJ.2.8.alloc_inconnue",  "section": "2.8", "label": "État reconstruit — figurine allouée inconnue",          "applicability": {"kind": "always"}, "controls": [["state_resync", "alloc_model_unknown", "#"]],                "status": "COUVERT" },
-
+    {
+      "id": "PROJ.1.4.allie",
+      "section": "1.4",
+      "label": "Combat contre allié",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "fight_friendly"
+        ]
+      ],
+      "status": "COUVERT"
+    },
+    {
+      "id": "PROJ.1.4.surcharge_atk",
+      "section": "1.4",
+      "label": "Attaques mêlée — dépassement plafond par figurine",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "fight_over_cc_nb"
+        ]
+      ],
+      "status": "COUVERT"
+    },
+    {
+      "id": "PROJ.1.4.pile_in",
+      "section": "1.4",
+      "label": "Pile-in — dépassement du budget 3\"",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "fight_move_invalid",
+          "pile_in"
+        ]
+      ],
+      "status": "COUVERT"
+    },
+    {
+      "id": "PROJ.1.4.consolidation",
+      "section": "1.4",
+      "label": "Consolidation — dépassement du budget 3\"",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "fight_move_invalid",
+          "consolidation"
+        ]
+      ],
+      "status": "COUVERT"
+    },
+    {
+      "id": "PROJ.1.4.touche",
+      "section": "1.4",
+      "label": "Verdict de touche en mêlée — écart avec table 05.01",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "fight_hit_result_mismatch"
+        ]
+      ],
+      "status": "COUVERT"
+    },
+    {
+      "id": "PROJ.1.4.blessure",
+      "section": "1.4",
+      "label": "Seuil de blessure en mêlée — écart F/E",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "fight_wound_threshold_mismatch"
+        ]
+      ],
+      "status": "COUVERT"
+    },
+    {
+      "id": "PROJ.1.4.alternance",
+      "section": "1.4",
+      "label": "Alternance 12.04 — violation de l'ordre d'activation",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "fight_alternation_violations"
+        ]
+      ],
+      "status": "COUVERT"
+    },
+    {
+      "id": "PROJ.1.4.double_pile_in",
+      "section": "1.4",
+      "label": "Double pile-in pour la même unité (12.02)",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "fight_double_pile_in"
+        ]
+      ],
+      "status": "COUVERT"
+    },
+    {
+      "id": "PROJ.1.4.hazardous",
+      "section": "1.4",
+      "label": "HAZARDOUS en mêlée — arme absente de l'armurerie",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "hazardous_no_hazardous_weapon_fight"
+        ]
+      ],
+      "status": "COUVERT"
+    },
+    {
+      "id": "PROJ.2.1.dead_moving",
+      "section": "2.1",
+      "label": "Unité morte en déplacement",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "dead_unit_moving"
+        ]
+      ],
+      "status": "COUVERT"
+    },
+    {
+      "id": "PROJ.2.1.dead_shoot",
+      "section": "2.1",
+      "label": "Unité morte qui tire",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "shoot_dead_unit"
+        ]
+      ],
+      "status": "COUVERT"
+    },
+    {
+      "id": "PROJ.2.1.dead_shot_at",
+      "section": "2.1",
+      "label": "Tir sur unité morte",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "shoot_at_dead_unit"
+        ]
+      ],
+      "status": "COUVERT"
+    },
+    {
+      "id": "PROJ.2.1.dead_advance",
+      "section": "2.1",
+      "label": "Unité morte qui avance",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "dead_unit_advancing"
+        ]
+      ],
+      "status": "COUVERT"
+    },
+    {
+      "id": "PROJ.2.1.dead_charge",
+      "section": "2.1",
+      "label": "Unité morte qui charge",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "dead_unit_charging"
+        ]
+      ],
+      "status": "COUVERT"
+    },
+    {
+      "id": "PROJ.2.1.dead_charged",
+      "section": "2.1",
+      "label": "Charge vers unité morte",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "charge_dead_unit"
+        ]
+      ],
+      "status": "COUVERT"
+    },
+    {
+      "id": "PROJ.2.1.dead_fight_atk",
+      "section": "2.1",
+      "label": "Unité morte qui combat",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "fight_dead_unit_attacker"
+        ]
+      ],
+      "status": "COUVERT"
+    },
+    {
+      "id": "PROJ.2.1.dead_fight_tgt",
+      "section": "2.1",
+      "label": "Combat contre unité morte",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "fight_dead_unit_target"
+        ]
+      ],
+      "status": "COUVERT"
+    },
+    {
+      "id": "PROJ.2.1.dead_wait",
+      "section": "2.1",
+      "label": "Unité morte qui attend",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "dead_unit_waiting"
+        ]
+      ],
+      "status": "COUVERT"
+    },
+    {
+      "id": "PROJ.2.1.revived",
+      "section": "2.1",
+      "label": "Unité ressuscitée (incohérence moteur)",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "unit_revived"
+        ]
+      ],
+      "status": "COUVERT"
+    },
+    {
+      "id": "PROJ.2.3.dmg_missing",
+      "section": "2.3",
+      "label": "Dégâts appliqués à une unité sans PV connus",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "damage_missing_unit_hp"
+        ]
+      ],
+      "status": "COUVERT"
+    },
+    {
+      "id": "PROJ.2.8.fantome",
+      "section": "2.8",
+      "label": "État reconstruit — unité morte non vue par l'analyzer",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "state_resync",
+          "dead_missed",
+          "#"
+        ]
+      ],
+      "status": "COUVERT"
+    },
+    {
+      "id": "PROJ.2.8.sur_tuee",
+      "section": "2.8",
+      "label": "État reconstruit — unité tuée à tort par l'analyzer",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "state_resync",
+          "alive_missed",
+          "#"
+        ]
+      ],
+      "status": "COUVERT"
+    },
+    {
+      "id": "PROJ.2.8.position",
+      "section": "2.8",
+      "label": "État reconstruit — figurine mal positionnée",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "state_resync",
+          "pos_mismatch",
+          "#"
+        ]
+      ],
+      "status": "COUVERT"
+    },
+    {
+      "id": "PROJ.2.8.alloc_inconnue",
+      "section": "2.8",
+      "label": "État reconstruit — figurine allouée inconnue",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "state_resync",
+          "alloc_model_unknown",
+          "#"
+        ]
+      ],
+      "status": "COUVERT"
+    },
     {
       "id": "PROJ.1.9.leader",
       "section": "1.9",
       "label": "Leader (19.01) — personnage attaché à une escouade garde-du-corps",
-      "applicability": {"kind": "unit_rule_in_roster", "rule_id": "leader"},
+      "applicability": {
+        "kind": "unit_rule_in_roster",
+        "rule_id": "leader"
+      },
       "controls": [],
       "status": "PARTIEL",
       "status_note": "L'exercice est compté depuis la ligne Attached: de l'entête d'épisode. Aucun contrôle d'erreur : la règle de protection (19.01) exige un suivi per-figurine que le journal ne fournit pas encore."
@@ -285,7 +897,10 @@
       "id": "PROJ.1.9.support",
       "section": "1.9",
       "label": "Support (19.01) — escouade accueillant un personnage leader",
-      "applicability": {"kind": "unit_rule_in_roster", "rule_id": "support"},
+      "applicability": {
+        "kind": "unit_rule_in_roster",
+        "rule_id": "support"
+      },
       "controls": [],
       "status": "PARTIEL",
       "status_note": "L'exercice est compté depuis la ligne Attached: de l'entête d'épisode. Miroir de PROJ.1.9.leader côté garde-du-corps."
@@ -294,7 +909,10 @@
       "id": "PROJ.1.9.cp_gain_on_objective",
       "section": "1.9",
       "label": "Gain PC sur objectif — +1 PC quand contrôle en phase de mouvement",
-      "applicability": {"kind": "unit_rule_in_roster", "rule_id": "cp_gain_on_objective"},
+      "applicability": {
+        "kind": "unit_rule_in_roster",
+        "rule_id": "cp_gain_on_objective"
+      },
       "controls": [],
       "status": "PARTIEL",
       "status_note": "Source CP indiscernable dans l'instantané OBJECTIVE CONTROL : le delta CP combine 08.02 et cp_gain_on_objective. Aucun log step disponible depuis movement_handlers sans refonte du step_logger."
@@ -303,44 +921,279 @@
       "id": "PROJ.1.9.feel_no_pain",
       "section": "1.9",
       "label": "Feel No Pain — jets FNP non journalisés",
-      "applicability": {"kind": "unit_rule_in_roster", "rule_id": "feel_no_pain"},
+      "applicability": {
+        "kind": "unit_rule_in_roster",
+        "rule_id": "feel_no_pain"
+      },
       "controls": [],
       "status": "PARTIEL",
       "status_note": "Les jets FNP ne sont pas journalisés dans step.log : aucune donnée disponible pour exercer ou contrôler la règle."
     },
-
-    { "id": "01.01", "source": "01 Core concepts", "label": "Armies", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "NON_VERIFIABLE" },
-    { "id": "01.02", "source": "01 Core concepts", "label": "Units and models", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "NON_VERIFIABLE" },
-    { "id": "01.03", "source": "01 Core concepts", "label": "Active / opposing player", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOGGABLE", "status_note": "T/P/PHASE présents sur chaque ligne : vérifier qu'aucune ligne P2 n'apparaît dans le tour P1 hors FIGHT et hors réactif." },
-    { "id": "01.04", "source": "01 Core concepts", "label": "Measuring distances (bord de socle le plus proche)", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "COUVERT", "co_verified_by": ["PROJ.1.2.portee", "09.05", "PROJ.1.3.budget", "PROJ.1.4.pile_in", "PROJ.1.4.consolidation"], "status_note": "Couvert par l'ensemble des contrôles de distance per-figurine (portée, budget move/charge/pile-in)." },
-    { "id": "01.05", "source": "01 Core concepts", "label": "Dice", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "NON_VERIFIABLE" },
-    { "id": "01.06", "source": "01 Core concepts", "label": "Leadership rolls", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT", "status_note": "Ligne de jet de commandement (2D6, Ld) absente du journal." },
-    { "id": "01.07", "source": "01 Core concepts", "label": "Battle-shock rolls", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT", "status_note": "Jet + drapeau battle_shocked par unité non journalisés." },
-
-    { "id": "02.01", "source": "02 Datasheets", "label": "Datasheet name", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "NON_VERIFIABLE" },
-    { "id": "02.02", "source": "02 Datasheets", "label": "Profiles (M/T/Sv/InSv/W/Ld/OC)", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT", "status_note": "HP_MAX seul est loggué. T, Sv, InSv, OC, Ld absents." },
-    { "id": "02.03", "source": "02 Datasheets", "label": "Abilities", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "NON_VERIFIABLE" },
-    { "id": "02.04", "source": "02 Datasheets", "label": "Weapons (R/A/BS/WS/S/AP/D)", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL", "co_verified_by": ["PROJ.1.2.surcharge_atk", "PROJ.1.4.surcharge_atk"], "status_note": "Seul A (nombre d'attaques) est contrôlé per-figurine. R, BS, WS, S, AP, D non loggués directement." },
-    { "id": "02.05", "source": "02 Datasheets", "label": "Keywords", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "NON_VERIFIABLE" },
-    { "id": "02.06", "source": "02 Datasheets", "label": "Unit composition", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "NON_VERIFIABLE" },
-    { "id": "02.07", "source": "02 Datasheets", "label": "Wargear options", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "NON_VERIFIABLE" },
-
-    { "id": "03.02", "source": "03 Moving", "label": "Set up", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT", "status_note": "Bornes de la zone de déploiement de chaque joueur absentes du journal." },
-    { "id": "03.04", "source": "03 Moving", "label": "Engagement zone (2\" horizontal ET 5\" vertical)", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "COUVERT", "co_verified_by": ["09.05", "PROJ.1.2.engage_cible", "PROJ.1.2.cq_non_engage", "PROJ.1.3.depuis_engage", "PROJ.1.4.pile_in"], "status_note": "Couvert par l'ensemble des contrôles d'engagement per-figurine (move, tir, charge, mêlée)." },
-
-    { "id": "04.01", "source": "04 Making attacks", "label": "Select weapons", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL", "co_verified_by": ["PROJ.1.2.eng_non_cq", "PROJ.1.2.cq_non_engage"], "status_note": "Usage par arme contrôlé via §1.8. Le volet 24.07 (CQ vs autres) et 24.11 EXTRA ATTACKS ne sont pas vérifiés indépendamment." },
-    { "id": "04.02", "source": "04 Making attacks", "label": "Select targets", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL", "co_verified_by": ["PROJ.1.2.portee", "PROJ.1.2.engage_cible", "PROJ.1.2.cq_non_engage"], "status_note": "Portée et engagement contrôlés. Visibilité (06.01) supprimée. Volet mêlée engagé non contrôlé. Pas plus de cibles que A non contrôlé." },
-    { "id": "04.03", "source": "04 Making attacks", "label": "Resolve attacks (gather dice = A)", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL", "co_verified_by": ["PROJ.1.2.surcharge_atk", "PROJ.1.4.surcharge_atk"], "status_note": "Plafond d'attaques par figurine contrôlé. Regroupement par cible et identical attacks non journalisés." },
-
+    {
+      "id": "01.01",
+      "source": "01 Core concepts",
+      "label": "Armies",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "NON_VERIFIABLE"
+    },
+    {
+      "id": "01.02",
+      "source": "01 Core concepts",
+      "label": "Units and models",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "NON_VERIFIABLE"
+    },
+    {
+      "id": "01.03",
+      "source": "01 Core concepts",
+      "label": "Active / opposing player",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOGGABLE",
+      "status_note": "T/P/PHASE présents sur chaque ligne : vérifier qu'aucune ligne P2 n'apparaît dans le tour P1 hors FIGHT et hors réactif."
+    },
+    {
+      "id": "01.04",
+      "source": "01 Core concepts",
+      "label": "Measuring distances (bord de socle le plus proche)",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "COUVERT",
+      "co_verified_by": [
+        "PROJ.1.2.portee",
+        "09.05",
+        "PROJ.1.3.budget",
+        "PROJ.1.4.pile_in",
+        "PROJ.1.4.consolidation"
+      ],
+      "status_note": "Couvert par l'ensemble des contrôles de distance per-figurine (portée, budget move/charge/pile-in)."
+    },
+    {
+      "id": "01.05",
+      "source": "01 Core concepts",
+      "label": "Dice",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "NON_VERIFIABLE"
+    },
+    {
+      "id": "01.06",
+      "source": "01 Core concepts",
+      "label": "Leadership rolls",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT",
+      "status_note": "Ligne de jet de commandement (2D6, Ld) absente du journal."
+    },
+    {
+      "id": "01.07",
+      "source": "01 Core concepts",
+      "label": "Battle-shock rolls",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT",
+      "status_note": "Jet + drapeau battle_shocked par unité non journalisés."
+    },
+    {
+      "id": "02.01",
+      "source": "02 Datasheets",
+      "label": "Datasheet name",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "NON_VERIFIABLE"
+    },
+    {
+      "id": "02.02",
+      "source": "02 Datasheets",
+      "label": "Profiles (M/T/Sv/InSv/W/Ld/OC)",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT",
+      "status_note": "HP_MAX seul est loggué. T, Sv, InSv, OC, Ld absents."
+    },
+    {
+      "id": "02.03",
+      "source": "02 Datasheets",
+      "label": "Abilities",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "NON_VERIFIABLE"
+    },
+    {
+      "id": "02.04",
+      "source": "02 Datasheets",
+      "label": "Weapons (R/A/BS/WS/S/AP/D)",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "co_verified_by": [
+        "PROJ.1.2.surcharge_atk",
+        "PROJ.1.4.surcharge_atk"
+      ],
+      "status_note": "Seul A (nombre d'attaques) est contrôlé per-figurine. R, BS, WS, S, AP, D non loggués directement."
+    },
+    {
+      "id": "02.05",
+      "source": "02 Datasheets",
+      "label": "Keywords",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "NON_VERIFIABLE"
+    },
+    {
+      "id": "02.06",
+      "source": "02 Datasheets",
+      "label": "Unit composition",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "NON_VERIFIABLE"
+    },
+    {
+      "id": "02.07",
+      "source": "02 Datasheets",
+      "label": "Wargear options",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "NON_VERIFIABLE"
+    },
+    {
+      "id": "03.02",
+      "source": "03 Moving",
+      "label": "Set up",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT",
+      "status_note": "Bornes de la zone de déploiement de chaque joueur absentes du journal."
+    },
+    {
+      "id": "03.04",
+      "source": "03 Moving",
+      "label": "Engagement zone (2\" horizontal ET 5\" vertical)",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "COUVERT",
+      "co_verified_by": [
+        "09.05",
+        "PROJ.1.2.engage_cible",
+        "PROJ.1.2.cq_non_engage",
+        "PROJ.1.3.depuis_engage",
+        "PROJ.1.4.pile_in"
+      ],
+      "status_note": "Couvert par l'ensemble des contrôles d'engagement per-figurine (move, tir, charge, mêlée)."
+    },
+    {
+      "id": "04.01",
+      "source": "04 Making attacks",
+      "label": "Select weapons",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "co_verified_by": [
+        "PROJ.1.2.eng_non_cq",
+        "PROJ.1.2.cq_non_engage"
+      ],
+      "status_note": "Usage par arme contrôlé via §1.8. Le volet 24.07 (CQ vs autres) et 24.11 EXTRA ATTACKS ne sont pas vérifiés indépendamment."
+    },
+    {
+      "id": "04.02",
+      "source": "04 Making attacks",
+      "label": "Select targets",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "co_verified_by": [
+        "PROJ.1.2.portee",
+        "PROJ.1.2.engage_cible",
+        "PROJ.1.2.cq_non_engage"
+      ],
+      "status_note": "Portée et engagement contrôlés. Visibilité (06.01) supprimée. Volet mêlée engagé non contrôlé. Pas plus de cibles que A non contrôlé."
+    },
+    {
+      "id": "04.03",
+      "source": "04 Making attacks",
+      "label": "Resolve attacks (gather dice = A)",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "co_verified_by": [
+        "PROJ.1.2.surcharge_atk",
+        "PROJ.1.4.surcharge_atk"
+      ],
+      "status_note": "Plafond d'attaques par figurine contrôlé. Regroupement par cible et identical attacks non journalisés."
+    },
     {
       "id": "05.01",
       "source": "05 Attack sequence",
       "label": "Hit rolls (1=échec, 6=critique, sinon ≥BS/WS)",
       "section": "pdf",
-      "applicability": {"kind": "indecidable"},
+      "applicability": {
+        "kind": "indecidable"
+      },
       "controls": [],
       "status": "COUVERT",
-      "co_verified_by": ["PROJ.1.2.touche", "PROJ.1.4.touche"],
+      "co_verified_by": [
+        "PROJ.1.2.touche",
+        "PROJ.1.4.touche"
+      ],
       "status_note": "Table complète appliquée dans ai/analyzer_hit.py, seuils importés du moteur. Attaques sans jet ([TORRENT], [SUSTAINED HITS]) comptées à part."
     },
     {
@@ -348,267 +1201,2299 @@
       "source": "05 Attack sequence",
       "label": "Wound rolls (table S vs T)",
       "section": "pdf",
-      "applicability": {"kind": "indecidable"},
+      "applicability": {
+        "kind": "indecidable"
+      },
       "controls": [],
       "status": "COUVERT",
-      "co_verified_by": ["PROJ.1.2.blessure", "PROJ.1.4.blessure"],
+      "co_verified_by": [
+        "PROJ.1.2.blessure",
+        "PROJ.1.4.blessure"
+      ],
       "status_note": "Seuil attendu recalculé depuis le registre par figurine via la fonction du moteur. Ce que le contrôle n'établit pas : que le JET a été correctement comparé au seuil."
     },
-    { "id": "05.03", "source": "05 Attack sequence", "label": "Save rolls (groupes d'allocation, ordre)", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT", "status_note": "Groupes d'allocation et ordre déclaré absents du journal." },
-    { "id": "05.04", "source": "05 Attack sequence", "label": "Inflict damage (allocation figurine par figurine)", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL", "co_verified_by": ["PROJ.2.3.dmg_missing"], "status_note": "PV par figurine suivis dans l'état reconstruit. damage_exceeds_hp irréalisable par construction (moteur plafonne avant de journaliser)." },
-
-    { "id": "06.01", "source": "06 Other concepts", "label": "Visibility", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "NON_VERIFIABLE", "status_note": "Reproduire le prédicat moteur exige game_state (empreintes, 13.10, LoS 3D). Contrôle supprimé le 2026-07-16." },
-    { "id": "06.02", "source": "06 Other concepts", "label": "Mortal wounds (sélection de figurine)", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT", "status_note": "mid de la figurine sélectionnée absent du journal." },
+    {
+      "id": "05.03",
+      "source": "05 Attack sequence",
+      "label": "Save rolls (groupes d'allocation, ordre)",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT",
+      "status_note": "Groupes d'allocation et ordre déclaré absents du journal."
+    },
+    {
+      "id": "05.04",
+      "source": "05 Attack sequence",
+      "label": "Inflict damage (allocation figurine par figurine)",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "co_verified_by": [
+        "PROJ.2.3.dmg_missing"
+      ],
+      "status_note": "PV par figurine suivis dans l'état reconstruit. damage_exceeds_hp irréalisable par construction (moteur plafonne avant de journaliser)."
+    },
+    {
+      "id": "06.01",
+      "source": "06 Other concepts",
+      "label": "Visibility",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "NON_VERIFIABLE",
+      "status_note": "Reproduire le prédicat moteur exige game_state (empreintes, 13.10, LoS 3D). Contrôle supprimé le 2026-07-16."
+    },
+    {
+      "id": "06.02",
+      "source": "06 Other concepts",
+      "label": "Mortal wounds (sélection de figurine)",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT",
+      "status_note": "mid de la figurine sélectionnée absent du journal."
+    },
     {
       "id": "06.03",
       "source": "06 Other concepts",
       "label": "Hazard rolls (1-2 → 1 MW, ou 3 si tous M/V)",
       "section": "pdf",
-      "applicability": {"kind": "indecidable"},
+      "applicability": {
+        "kind": "indecidable"
+      },
       "controls": [],
       "status": "COUVERT",
-      "co_verified_by": ["PROJ.1.2.hazardous", "PROJ.1.4.hazardous"],
+      "co_verified_by": [
+        "PROJ.1.2.hazardous",
+        "PROJ.1.4.hazardous"
+      ],
       "status_note": "MW auto-infligées et vérif présence arme HAZARDOUS en armurerie (tir et mêlée). Couvert depuis le 2026-08-17."
     },
-
-    { "id": "07.01", "source": "07 The battle round", "label": "Start of battle round", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "NON_VERIFIABLE" },
-    { "id": "07.02", "source": "07 The battle round", "label": "Player turns (COMMAND→MOVE→SHOOT→CHARGE→FIGHT, alternance)", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOGGABLE", "status_note": "T/P/PHASE sur chaque ligne ; ligne 'phase Start' sans producteur (log_phase_transition : 0 appelant). Séquence reconstructible depuis les entêtes de ligne." },
-    { "id": "07.03", "source": "07 The battle round", "label": "End of battle round", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "NON_VERIFIABLE" },
-
-    { "id": "08.01", "source": "08 Command phase", "label": "Start of Command phase", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "NON_VERIFIABLE" },
-    { "id": "08.02", "source": "08 Command phase", "label": "Gain Core CP (+1 chacun)", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOGGABLE", "status_note": "CP1=/CP2= présents dans l'instantané OBJECTIVE CONTROL. Delta CP calculable mais indiscernable de cp_gain_on_objective." },
-    { "id": "08.03", "source": "08 Command phase", "label": "Battle-shock", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT", "status_note": "Jet, seuil Ld, effectif vs starting strength, drapeau résultant absents du journal." },
-    { "id": "08.04", "source": "08 Command phase", "label": "Command abilities (Waaagh!, Oath of Moment)", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT", "status_note": "Tokens d'effet présents sur les lignes d'ACTION. Ligne de DÉCLARATION (« Waaagh! appelé », « cible Oath = unité X ») absente." },
-    { "id": "08.05", "source": "08 Command phase", "label": "End of Command phase", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "NON_VERIFIABLE" },
-
-    { "id": "09.01", "source": "09 Movement phase", "label": "Start of Movement phase", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "NON_VERIFIABLE" },
-    { "id": "09.02", "source": "09 Movement phase", "label": "Move units (une sélection par unité et par phase)", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL", "status_note": "Double-activation MOVE contrôlée via double_activation_by_phase. Le volet 'toutes les unités doivent être sélectionnées' est loggable et non contrôlé." },
-    { "id": "09.03", "source": "09 Movement phase", "label": "End of Movement phase", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "NON_VERIFIABLE" },
-    { "id": "09.04", "source": "09 Movement phase", "label": "Remain stationary", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT", "status_note": "Type de move 'remain stationary' indistinct d'un WAIT." },
-    { "id": "09.06", "source": "09 Movement phase", "label": "Advance move (max M+D6, unengaged, ni charge ni action après)", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL", "co_verified_by": ["PROJ.1.2.advance_budget", "PROJ.1.2.advance_engage", "PROJ.1.2.apres_repli", "PROJ.1.3.apres_advance"], "status_note": "Budget, engagement et restrictions post-advance contrôlés. Volet 'pas d'action après' non contrôlable (§16 non journalisé)." },
-
-    { "id": "10.01", "source": "10 Shooting phase", "label": "Start of Shooting phase", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "NON_VERIFIABLE" },
-    { "id": "10.02", "source": "10 Shooting phase", "label": "Shoot (une sélection par unité et par phase)", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "COUVERT", "status_note": "Double-sélection SHOOT détectée via shoot_last_activator dans is_activation_marker (double_activation_by_phase). Couvert depuis le 2026-08-17." },
-    { "id": "10.03", "source": "10 Shooting phase", "label": "End of Shooting phase", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "NON_VERIFIABLE" },
-    { "id": "10.04", "source": "10 Shooting phase", "label": "Normal shooting (unengaged ∧ pas d'advance)", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL", "co_verified_by": ["PROJ.1.2.eng_non_cq", "PROJ.1.2.advance_post_tir"], "status_note": "Tir depuis zone d'engagement contrôlé. Tir après advance sans ASSAULT compté comme métrique, pas comme faute." },
-    { "id": "10.05", "source": "10 Shooting phase", "label": "Assault shooting", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL", "status_note": "Usage ASSAULT suivi en §1.8. La règle 'seules les armes ASSAULT peuvent être sélectionnées' n'est pas contrôlée." },
-    { "id": "10.06", "source": "10 Shooting phase", "label": "Close-quarters shooting", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL", "co_verified_by": ["PROJ.1.2.eng_non_cq", "PROJ.1.2.cq_non_engage", "PROJ.1.2.engage_cible"], "status_note": "Éligibilité CLOSE-QUARTERS contrôlée. Le -1 au jet de touche non vérifié. Interdiction BLAST sur cible engagée non contrôlée." },
-    { "id": "10.07", "source": "10 Shooting phase", "label": "Indirect shooting", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT", "status_note": "Règle NON IMPLÉMENTÉE dans le moteur. Poser le token annoncerait un effet qui n'a pas lieu." },
-
-    { "id": "11.01", "source": "11 Charge phase", "label": "Start of Charge phase", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "NON_VERIFIABLE" },
-    { "id": "11.02", "source": "11 Charge phase", "label": "Charge (éligibilité : ≤12\" d'un ennemi, non engagé, pas d'advance/fall-back)", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL", "co_verified_by": ["PROJ.1.3.depuis_engage", "PROJ.1.3.apres_advance", "PROJ.1.3.apres_repli"], "status_note": "Engagement, advance et repli contrôlés. Condition '<12\" d'un ennemi' loggable et non contrôlée." },
-    { "id": "11.03", "source": "11 Charge phase", "label": "End of Charge phase", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "NON_VERIFIABLE" },
-    { "id": "11.04", "source": "11 Charge phase", "label": "Charge move (max = jet ; finit engagé avec les cibles)", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL", "co_verified_by": ["PROJ.1.3.budget"], "status_note": "Budget/chemin per-socle contrôlé. Post-conditions (engagé avec TOUTES les cibles) non contrôlées. Log ne porte qu'une cible." },
-
-    { "id": "12.01", "source": "12 Fight phase", "label": "Start of Fight phase", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "NON_VERIFIABLE" },
+    {
+      "id": "07.01",
+      "source": "07 The battle round",
+      "label": "Start of battle round",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "NON_VERIFIABLE"
+    },
+    {
+      "id": "07.02",
+      "source": "07 The battle round",
+      "label": "Player turns (COMMAND→MOVE→SHOOT→CHARGE→FIGHT, alternance)",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOGGABLE",
+      "status_note": "T/P/PHASE sur chaque ligne ; ligne 'phase Start' sans producteur (log_phase_transition : 0 appelant). Séquence reconstructible depuis les entêtes de ligne."
+    },
+    {
+      "id": "07.03",
+      "source": "07 The battle round",
+      "label": "End of battle round",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "NON_VERIFIABLE"
+    },
+    {
+      "id": "08.01",
+      "source": "08 Command phase",
+      "label": "Start of Command phase",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "NON_VERIFIABLE"
+    },
+    {
+      "id": "08.02",
+      "source": "08 Command phase",
+      "label": "Gain Core CP (+1 chacun)",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOGGABLE",
+      "status_note": "CP1=/CP2= présents dans l'instantané OBJECTIVE CONTROL. Delta CP calculable mais indiscernable de cp_gain_on_objective."
+    },
+    {
+      "id": "08.03",
+      "source": "08 Command phase",
+      "label": "Battle-shock",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT",
+      "status_note": "Jet, seuil Ld, effectif vs starting strength, drapeau résultant absents du journal."
+    },
+    {
+      "id": "08.04",
+      "source": "08 Command phase",
+      "label": "Command abilities (Waaagh!, Oath of Moment)",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT",
+      "status_note": "Tokens d'effet présents sur les lignes d'ACTION. Ligne de DÉCLARATION (« Waaagh! appelé », « cible Oath = unité X ») absente."
+    },
+    {
+      "id": "08.05",
+      "source": "08 Command phase",
+      "label": "End of Command phase",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "NON_VERIFIABLE"
+    },
+    {
+      "id": "09.01",
+      "source": "09 Movement phase",
+      "label": "Start of Movement phase",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "NON_VERIFIABLE"
+    },
+    {
+      "id": "09.02",
+      "source": "09 Movement phase",
+      "label": "Move units (une sélection par unité et par phase)",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "status_note": "Double-activation MOVE contrôlée via double_activation_by_phase. Le volet 'toutes les unités doivent être sélectionnées' est loggable et non contrôlé."
+    },
+    {
+      "id": "09.03",
+      "source": "09 Movement phase",
+      "label": "End of Movement phase",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "NON_VERIFIABLE"
+    },
+    {
+      "id": "09.04",
+      "source": "09 Movement phase",
+      "label": "Remain stationary",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT",
+      "status_note": "Type de move 'remain stationary' indistinct d'un WAIT."
+    },
+    {
+      "id": "09.06",
+      "source": "09 Movement phase",
+      "label": "Advance move (max M+D6, unengaged, ni charge ni action après)",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "co_verified_by": [
+        "PROJ.1.2.advance_budget",
+        "PROJ.1.2.advance_engage",
+        "PROJ.1.2.apres_repli",
+        "PROJ.1.3.apres_advance"
+      ],
+      "status_note": "Budget, engagement et restrictions post-advance contrôlés. Volet 'pas d'action après' non contrôlable (§16 non journalisé)."
+    },
+    {
+      "id": "10.01",
+      "source": "10 Shooting phase",
+      "label": "Start of Shooting phase",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "NON_VERIFIABLE"
+    },
+    {
+      "id": "10.02",
+      "source": "10 Shooting phase",
+      "label": "Shoot (une sélection par unité et par phase)",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [
+        [
+          "double_activation_by_phase",
+          "SHOOT",
+          "#"
+        ]
+      ],
+      "status": "COUVERT",
+      "status_note": "Double-sélection SHOOT détectée via shoot_last_activator dans is_activation_marker (double_activation_by_phase). Couvert depuis le 2026-08-17. Compteur d'exercice absent : verdict JAMAIS EXERCÉE quand le run est propre, ERREURS si violation."
+    },
+    {
+      "id": "10.03",
+      "source": "10 Shooting phase",
+      "label": "End of Shooting phase",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "NON_VERIFIABLE"
+    },
+    {
+      "id": "10.04",
+      "source": "10 Shooting phase",
+      "label": "Normal shooting (unengaged ∧ pas d'advance)",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "co_verified_by": [
+        "PROJ.1.2.eng_non_cq",
+        "PROJ.1.2.advance_post_tir"
+      ],
+      "status_note": "Tir depuis zone d'engagement contrôlé. Tir après advance sans ASSAULT compté comme métrique, pas comme faute."
+    },
+    {
+      "id": "10.05",
+      "source": "10 Shooting phase",
+      "label": "Assault shooting",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "status_note": "Usage ASSAULT suivi en §1.8. La règle 'seules les armes ASSAULT peuvent être sélectionnées' n'est pas contrôlée."
+    },
+    {
+      "id": "10.06",
+      "source": "10 Shooting phase",
+      "label": "Close-quarters shooting",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "co_verified_by": [
+        "PROJ.1.2.eng_non_cq",
+        "PROJ.1.2.cq_non_engage",
+        "PROJ.1.2.engage_cible"
+      ],
+      "status_note": "Éligibilité CLOSE-QUARTERS contrôlée. Le -1 au jet de touche non vérifié. Interdiction BLAST sur cible engagée non contrôlée."
+    },
+    {
+      "id": "10.07",
+      "source": "10 Shooting phase",
+      "label": "Indirect shooting",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT",
+      "status_note": "Règle NON IMPLÉMENTÉE dans le moteur. Poser le token annoncerait un effet qui n'a pas lieu."
+    },
+    {
+      "id": "11.01",
+      "source": "11 Charge phase",
+      "label": "Start of Charge phase",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "NON_VERIFIABLE"
+    },
+    {
+      "id": "11.02",
+      "source": "11 Charge phase",
+      "label": "Charge (éligibilité : ≤12\" d'un ennemi, non engagé, pas d'advance/fall-back)",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "co_verified_by": [
+        "PROJ.1.3.depuis_engage",
+        "PROJ.1.3.apres_advance",
+        "PROJ.1.3.apres_repli"
+      ],
+      "status_note": "Engagement, advance et repli contrôlés. Condition '<12\" d'un ennemi' loggable et non contrôlée."
+    },
+    {
+      "id": "11.03",
+      "source": "11 Charge phase",
+      "label": "End of Charge phase",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "NON_VERIFIABLE"
+    },
+    {
+      "id": "11.04",
+      "source": "11 Charge phase",
+      "label": "Charge move (max = jet ; finit engagé avec les cibles)",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "co_verified_by": [
+        "PROJ.1.3.budget"
+      ],
+      "status_note": "Budget/chemin per-socle contrôlé. Post-conditions (engagé avec TOUTES les cibles) non contrôlées. Log ne porte qu'une cible."
+    },
+    {
+      "id": "12.01",
+      "source": "12 Fight phase",
+      "label": "Start of Fight phase",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "NON_VERIFIABLE"
+    },
     {
       "id": "12.02",
       "source": "12 Fight phase",
       "label": "Pile in (une seule par unité et par étape)",
       "section": "pdf",
-      "applicability": {"kind": "indecidable"},
+      "applicability": {
+        "kind": "indecidable"
+      },
       "controls": [],
       "status": "COUVERT",
-      "co_verified_by": ["PROJ.1.4.double_pile_in"],
+      "co_verified_by": [
+        "PROJ.1.4.double_pile_in"
+      ],
       "status_note": "fight_double_pile_in contrôle le double pile-in (ensemble séparé de la double-activation 12.07). Couvert depuis le 2026-08-10."
     },
-    { "id": "12.03", "source": "12 Fight phase", "label": "Pile-in move (3\" ; figurines au contact immobiles ; finir plus près)", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL", "co_verified_by": ["PROJ.1.4.pile_in"], "status_note": "Budget 3\" par socle contrôlé. Conditions While/After Moving (contact, plus proche) loggables et non contrôlées." },
-    { "id": "12.04", "source": "12 Fight phase", "label": "Fight (alternance ; Fights First d'abord ; une activation par unité)", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL", "co_verified_by": ["PROJ.1.4.alternance"], "status_note": "Alternance 12.04 contrôlée. Fights First (24.13) non loggué. Double-activation contrôlée via CONSOLIDATED." },
-    { "id": "12.05", "source": "12 Fight phase", "label": "Normal fight (engagé)", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "NON_VERIFIABLE", "status_note": "Supprimé le 2026-07-24 : position cible pré-perte non journalisable, contrôle tautologique." },
-    { "id": "12.06", "source": "12 Fight phase", "label": "Overrun fight", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT", "status_note": "FIGHT_SUBPHASE:fight constant sur 192/192 lignes FOUGHT. État overrun non journalisé." },
-    { "id": "12.07", "source": "12 Fight phase", "label": "Consolidate (une seule par unité)", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "COUVERT", "status_note": "Marqueur d'activation CONSOLIDATED dans is_activation_marker couvre la double-activation fight (double_activation_by_phase). Couvert depuis le 2026-08-09." },
-    { "id": "12.08", "source": "12 Fight phase", "label": "Consolidation move (3\" ; 3 modes mutuellement exclusifs)", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL", "co_verified_by": ["PROJ.1.4.consolidation"], "status_note": "Budget 3\" par socle contrôlé. Mode choisi non loggué : aucune post-condition de mode vérifiable." },
-    { "id": "12.09", "source": "12 Fight phase", "label": "End of Fight phase", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "NON_VERIFIABLE" },
-
-    { "id": "13.01", "source": "13 Terrain", "label": "Placing terrain", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "NON_VERIFIABLE" },
-    { "id": "13.02", "source": "13 Terrain", "label": "Terrain categories", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "NON_VERIFIABLE" },
-    { "id": "13.03", "source": "13 Terrain", "label": "Exposed", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "NON_VERIFIABLE" },
-    { "id": "13.04", "source": "13 Terrain", "label": "Light", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "NON_VERIFIABLE" },
-    { "id": "13.05", "source": "13 Terrain", "label": "Dense", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "NON_VERIFIABLE" },
-    { "id": "13.06", "source": "13 Terrain", "label": "Terrain and movement (coût vertical)", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "NON_VERIFIABLE", "status_note": "z par socle loggué, mais coût de montée/descente non re-dérivable sans le terrain." },
-    { "id": "13.07", "source": "13 Terrain", "label": "Terrain and visibility", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "NON_VERIFIABLE" },
-    { "id": "13.08", "source": "13 Terrain", "label": "Benefit of cover (−1 BS)", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL", "status_note": "Token COVER et affichage base+->eff+ présents, usage traçable. Validité (tous les modèles dans une aire) non re-dérivable." },
-    { "id": "13.09", "source": "13 Terrain", "label": "Hidden", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "NON_VERIFIABLE" },
-    { "id": "13.10", "source": "13 Terrain", "label": "Obscuring", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "NON_VERIFIABLE" },
-    { "id": "13.11", "source": "13 Terrain", "label": "Solid", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "NON_VERIFIABLE" },
-
-    { "id": "14.01", "source": "14 Objectives", "label": "Terrain objectives (présence et géométrie)", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "COUVERT", "status_note": "Objectives: parsé dans analyzer_core.py. Présence et géométrie vérifiées." },
-    { "id": "14.02", "source": "14 Objectives", "label": "Level of control", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "NON_VERIFIABLE", "status_note": "Recalcul exigerait OC par figurine et drapeau battle-shock ; avec eux il serait tautologique. L'analyzer lit l'état du moteur." },
-    { "id": "14.03", "source": "14 Objectives", "label": "Secured objectives", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT", "status_note": "Drapeau secured absent du journal." },
-
-    { "id": "15.01", "source": "15 Stratagems", "label": "Using stratagems", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT" },
-    { "id": "15.02", "source": "15 Stratagems", "label": "Command Re-roll", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT" },
-    { "id": "15.03", "source": "15 Stratagems", "label": "Epic Challenge", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT" },
-    { "id": "15.04", "source": "15 Stratagems", "label": "Insane Bravery", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT" },
-    { "id": "15.05", "source": "15 Stratagems", "label": "Explosives", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT" },
-    { "id": "15.06", "source": "15 Stratagems", "label": "Crushing Impact", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT" },
-    { "id": "15.07", "source": "15 Stratagems", "label": "Rapid Ingress", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT" },
-    { "id": "15.08", "source": "15 Stratagems", "label": "Fire Overwatch", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT" },
-    { "id": "15.09", "source": "15 Stratagems", "label": "Snap Shooting", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT" },
-    { "id": "15.10", "source": "15 Stratagems", "label": "Smokescreen", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT" },
-    { "id": "15.11", "source": "15 Stratagems", "label": "Heroic Intervention", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT" },
-    { "id": "15.12", "source": "15 Stratagems", "label": "Counteroffensive", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT" },
-
-    { "id": "16.01", "source": "16 Actions", "label": "Performing actions", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT", "status_note": "Ligne action_start / action_complete absente. Éligibilité (pas battle-shocked) non vérifiable." },
-
+    {
+      "id": "12.03",
+      "source": "12 Fight phase",
+      "label": "Pile-in move (3\" ; figurines au contact immobiles ; finir plus près)",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "co_verified_by": [
+        "PROJ.1.4.pile_in"
+      ],
+      "status_note": "Budget 3\" par socle contrôlé. Conditions While/After Moving (contact, plus proche) loggables et non contrôlées."
+    },
+    {
+      "id": "12.04",
+      "source": "12 Fight phase",
+      "label": "Fight (alternance ; Fights First d'abord ; une activation par unité)",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "co_verified_by": [
+        "PROJ.1.4.alternance"
+      ],
+      "status_note": "Alternance 12.04 contrôlée. Fights First (24.13) non loggué. Double-activation contrôlée via CONSOLIDATED."
+    },
+    {
+      "id": "12.05",
+      "source": "12 Fight phase",
+      "label": "Normal fight (engagé)",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "NON_VERIFIABLE",
+      "status_note": "Supprimé le 2026-07-24 : position cible pré-perte non journalisable, contrôle tautologique."
+    },
+    {
+      "id": "12.06",
+      "source": "12 Fight phase",
+      "label": "Overrun fight",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT",
+      "status_note": "FIGHT_SUBPHASE:fight constant sur 192/192 lignes FOUGHT. État overrun non journalisé."
+    },
+    {
+      "id": "12.07",
+      "source": "12 Fight phase",
+      "label": "Consolidate (une seule par unité)",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [
+        [
+          "double_activation_by_phase",
+          "FIGHT",
+          "#"
+        ]
+      ],
+      "status": "COUVERT",
+      "status_note": "Marqueur d'activation CONSOLIDATED dans is_activation_marker couvre la double-activation fight (double_activation_by_phase). Couvert depuis le 2026-08-09. Compteur d'exercice absent : verdict JAMAIS EXERCÉE quand le run est propre, ERREURS si violation."
+    },
+    {
+      "id": "12.08",
+      "source": "12 Fight phase",
+      "label": "Consolidation move (3\" ; 3 modes mutuellement exclusifs)",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "co_verified_by": [
+        "PROJ.1.4.consolidation"
+      ],
+      "status_note": "Budget 3\" par socle contrôlé. Mode choisi non loggué : aucune post-condition de mode vérifiable."
+    },
+    {
+      "id": "12.09",
+      "source": "12 Fight phase",
+      "label": "End of Fight phase",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "NON_VERIFIABLE"
+    },
+    {
+      "id": "13.01",
+      "source": "13 Terrain",
+      "label": "Placing terrain",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "NON_VERIFIABLE"
+    },
+    {
+      "id": "13.02",
+      "source": "13 Terrain",
+      "label": "Terrain categories",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "NON_VERIFIABLE"
+    },
+    {
+      "id": "13.03",
+      "source": "13 Terrain",
+      "label": "Exposed",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "NON_VERIFIABLE"
+    },
+    {
+      "id": "13.04",
+      "source": "13 Terrain",
+      "label": "Light",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "NON_VERIFIABLE"
+    },
+    {
+      "id": "13.05",
+      "source": "13 Terrain",
+      "label": "Dense",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "NON_VERIFIABLE"
+    },
+    {
+      "id": "13.06",
+      "source": "13 Terrain",
+      "label": "Terrain and movement (coût vertical)",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "NON_VERIFIABLE",
+      "status_note": "z par socle loggué, mais coût de montée/descente non re-dérivable sans le terrain."
+    },
+    {
+      "id": "13.07",
+      "source": "13 Terrain",
+      "label": "Terrain and visibility",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "NON_VERIFIABLE"
+    },
+    {
+      "id": "13.08",
+      "source": "13 Terrain",
+      "label": "Benefit of cover (−1 BS)",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "status_note": "Token COVER et affichage base+->eff+ présents, usage traçable. Validité (tous les modèles dans une aire) non re-dérivable."
+    },
+    {
+      "id": "13.09",
+      "source": "13 Terrain",
+      "label": "Hidden",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "NON_VERIFIABLE"
+    },
+    {
+      "id": "13.10",
+      "source": "13 Terrain",
+      "label": "Obscuring",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "NON_VERIFIABLE"
+    },
+    {
+      "id": "13.11",
+      "source": "13 Terrain",
+      "label": "Solid",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "NON_VERIFIABLE"
+    },
+    {
+      "id": "14.01",
+      "source": "14 Objectives",
+      "label": "Terrain objectives (présence et géométrie)",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "COUVERT",
+      "status_note": "Objectives: parsé dans analyzer_core.py. Présence et géométrie vérifiées."
+    },
+    {
+      "id": "14.02",
+      "source": "14 Objectives",
+      "label": "Level of control",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "NON_VERIFIABLE",
+      "status_note": "Recalcul exigerait OC par figurine et drapeau battle-shock ; avec eux il serait tautologique. L'analyzer lit l'état du moteur."
+    },
+    {
+      "id": "14.03",
+      "source": "14 Objectives",
+      "label": "Secured objectives",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT",
+      "status_note": "Drapeau secured absent du journal."
+    },
+    {
+      "id": "15.01",
+      "source": "15 Stratagems",
+      "label": "Using stratagems",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT"
+    },
+    {
+      "id": "15.02",
+      "source": "15 Stratagems",
+      "label": "Command Re-roll",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT"
+    },
+    {
+      "id": "15.03",
+      "source": "15 Stratagems",
+      "label": "Epic Challenge",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT"
+    },
+    {
+      "id": "15.04",
+      "source": "15 Stratagems",
+      "label": "Insane Bravery",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT"
+    },
+    {
+      "id": "15.05",
+      "source": "15 Stratagems",
+      "label": "Explosives",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT"
+    },
+    {
+      "id": "15.06",
+      "source": "15 Stratagems",
+      "label": "Crushing Impact",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT"
+    },
+    {
+      "id": "15.07",
+      "source": "15 Stratagems",
+      "label": "Rapid Ingress",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT"
+    },
+    {
+      "id": "15.08",
+      "source": "15 Stratagems",
+      "label": "Fire Overwatch",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT"
+    },
+    {
+      "id": "15.09",
+      "source": "15 Stratagems",
+      "label": "Snap Shooting",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT"
+    },
+    {
+      "id": "15.10",
+      "source": "15 Stratagems",
+      "label": "Smokescreen",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT"
+    },
+    {
+      "id": "15.11",
+      "source": "15 Stratagems",
+      "label": "Heroic Intervention",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT"
+    },
+    {
+      "id": "15.12",
+      "source": "15 Stratagems",
+      "label": "Counteroffensive",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT"
+    },
+    {
+      "id": "16.01",
+      "source": "16 Actions",
+      "label": "Performing actions",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT",
+      "status_note": "Ligne action_start / action_complete absente. Éligibilité (pas battle-shocked) non vérifiable."
+    },
     {
       "id": "17.01",
       "source": "17 Monsters and vehicles",
       "label": "Moving M/V (traversent toutes figurines sauf autres M/V)",
       "section": "pdf",
-      "applicability": {"kind": "indecidable"},
+      "applicability": {
+        "kind": "indecidable"
+      },
       "controls": [],
       "status": "COUVERT",
       "status_note": "monster_or_vehicle_by_unit passé au BFS pour move normal et advance. Source unique moteur build_move_traversal_blocked. Verrou : test_move_traversal_monsters_vehicles.py. Couvert depuis le 2026-08-10."
     },
-    { "id": "17.02", "source": "17 Monsters and vehicles", "label": "Frame", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "NON_VERIFIABLE" },
-    { "id": "17.03", "source": "17 Monsters and vehicles", "label": "Shooting at engaged M/V", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL", "co_verified_by": ["PROJ.1.2.engage_cible", "PROJ.1.2.cq_non_engage"], "status_note": "Exemptions M/V dans handle_shoot et handle_wait implémentées. Le -1 au jet de touche non vérifié." },
-
-    { "id": "18.01", "source": "18 Transports", "label": "Transport capacity", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT" },
-    { "id": "18.02", "source": "18 Transports", "label": "Embarking", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT" },
-    { "id": "18.03", "source": "18 Transports", "label": "Disembarking", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT" },
-    { "id": "18.04", "source": "18 Transports", "label": "Disembark move", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT" },
-    { "id": "18.05", "source": "18 Transports", "label": "Emergency disembark move", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT" },
-
-    { "id": "19.01", "source": "19 Attached units", "label": "Forming attached units", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL", "co_verified_by": ["PROJ.1.9.leader", "PROJ.1.9.support"], "status_note": "leader/support dans unit_rules.json et §1.7. Aucune ligne de log ne dit quelle unité est attachée à quelle autre." },
-    { "id": "19.02", "source": "19 Attached units", "label": "Attacking attached units (T le plus haut des bodyguards)", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT", "status_note": "T utilisée pour l'attaque non loggué, mais recalculée depuis le registre dans analyzer_wound.py (target_bodyguard_toughness)." },
-    { "id": "19.03", "source": "19 Attached units", "label": "Keywords in attached units", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "NON_VERIFIABLE" },
-    { "id": "19.04", "source": "19 Attached units", "label": "Abilities in attached units", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT", "status_note": "Portée et extinction des capacités conférées absentes du journal." },
-
-    { "id": "20.01", "source": "20 Strategic reserves", "label": "Placing units in strategic reserves", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL", "status_note": "Sentinelle (-1,-1) reconnue partout. Plafond 50% des points non contrôlable (points non loggués)." },
-    { "id": "20.02", "source": "20 Strategic reserves", "label": "Repositioned units", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT", "status_note": "Retrait volontaire du plateau non journalisé." },
-    { "id": "20.03", "source": "20 Strategic reserves", "label": "Arriving (2e round minimum)", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOGGABLE", "status_note": "Ligne DEPLOYED en phase MOVE porte T<turn> : contrainte 'round ≥ 2' vérifiable mais non contrôlée." },
-
-    { "id": "21.01", "source": "21 Flying and surging", "label": "Surge moves", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT", "status_note": "Type surge absent de _STEP_LOG_TYPE_MAP." },
-    { "id": "21.02", "source": "21 Flying and surging", "label": "Surge move", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT" },
-    { "id": "21.03", "source": "21 Flying and surging", "label": "Flying models (−2\", traversée, distance verticale ignorée)", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL", "co_verified_by": ["09.05", "09.07", "PROJ.1.3.budget"], "status_note": "Marqueur [FLY] lu, −2\"×échelle retranché. HOVER (24.17) n'annule pas les −2\" côté analyzer." },
-
-    { "id": "22.01", "source": "22 Other rules and abilities", "label": "Aura abilities", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT" },
-    { "id": "22.02", "source": "22 Other rules and abilities", "label": "Faction abilities (Waaagh!, Oath of Moment)", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL", "status_note": "waaagh/oath_of_moment reconnues via FACTION_ABILITY_KEYWORD_BY_RULE_ID et comptées en §1.7. Effets partiellement vérifiés." },
-    { "id": "22.03", "source": "22 Other rules and abilities", "label": "Psychic abilities", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT" },
-    { "id": "22.04", "source": "22 Other rules and abilities", "label": "Wargear abilities", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "NON_VERIFIABLE" },
-    { "id": "22.05", "source": "22 Other rules and abilities", "label": "Plunging fire (+1 BS)", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT", "status_note": "Aucun token ; hit_target_base réservé à HEAVY/COVER." },
-
-    { "id": "23.01", "source": "23 Aircraft", "label": "Aircraft deployment", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT" },
-    { "id": "23.02", "source": "23 Aircraft", "label": "Aircraft movement", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT" },
-    { "id": "23.03", "source": "23 Aircraft", "label": "Aircraft shooting", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT" },
-    { "id": "23.04", "source": "23 Aircraft", "label": "Aircraft charging and fighting", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT" },
-
-    { "id": "24.01", "source": "24 Core abilities", "label": "Abilities (définition)", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "NON_VERIFIABLE" },
-    { "id": "24.02", "source": "24 Core abilities", "label": "Duplicated abilities", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT" },
-    { "id": "24.03", "source": "24 Core abilities", "label": "[ANTI-X Y+]", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOGGABLE", "status_note": "[ANTI-<KW>:Y+] dans step.log depuis le 2026-08-12. Seuil DÉCLARÉ par l'arme, recoupable avec l'armurerie. Contrôle à écrire." },
-    { "id": "24.04", "source": "24 Core abilities", "label": "[ASSAULT]", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL", "status_note": "Usage suivi en §1.8. Volet 'seules les armes ASSAULT peuvent être sélectionnées après advance' non contrôlé indépendamment." },
-    { "id": "24.05", "source": "24 Core abilities", "label": "[BLAST]", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL", "status_note": "Token [BLAST:X] loggué, dés bonus entrés dans le plafond de tirs. Interdiction sur cible engagée non contrôlée." },
-    { "id": "24.06", "source": "24 Core abilities", "label": "[CLEAVE]", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL", "status_note": "Token [CLEAVE:X] loggué, dés bonus dans le plafond d'attaques, usage compté. Clause 'une seule cible' non rejouée par l'analyzer." },
-    { "id": "24.07", "source": "24 Core abilities", "label": "[CLOSE-QUARTERS]", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL", "co_verified_by": ["PROJ.1.2.eng_non_cq", "PROJ.1.2.cq_non_engage"], "status_note": "Contrôles d'éligibilité CQ présents. Compteur d'usage §1.8 mesure ancre-à-ancre (vert vacant V4). Volet 'un seul choix par figurine' manque." },
-    { "id": "24.08", "source": "24 Core abilities", "label": "Deadly Demise", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT" },
-    { "id": "24.09", "source": "24 Core abilities", "label": "Deep Strike", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL", "status_note": "Règle déclarée, ingress loggué, contrainte >8\" non contrôlée (loggable)." },
-    { "id": "24.10", "source": "24 Core abilities", "label": "[DEVASTATING WOUNDS]", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL", "status_note": "Contrôle suppose que seul un 6 est critique : faux si ANTI-X Y+ avec Y<6 (vert vacant V8). Mêlée écrit Save [DEVASTATING WOUNDS] depuis le 2026-08-11." },
-    { "id": "24.11", "source": "24 Core abilities", "label": "[EXTRA ATTACKS]", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOGGABLE", "status_note": "Token [EXTRA ATTACKS] dans les tags de ligne (tir ET mêlée) depuis le 2026-08-12. Plafond fight_over_cc_nb ne s'en sert pas encore." },
-    { "id": "24.12", "source": "24 Core abilities", "label": "Feel No Pain", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT", "status_note": "Jet FNP et seuil absents du journal." },
-    { "id": "24.13", "source": "24 Core abilities", "label": "Fights First", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT", "status_note": "Statut Fights First de l'unité activée non journalisé." },
-    { "id": "24.14", "source": "24 Core abilities", "label": "Firing Deck", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT" },
+    {
+      "id": "17.02",
+      "source": "17 Monsters and vehicles",
+      "label": "Frame",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "NON_VERIFIABLE"
+    },
+    {
+      "id": "17.03",
+      "source": "17 Monsters and vehicles",
+      "label": "Shooting at engaged M/V",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "co_verified_by": [
+        "PROJ.1.2.engage_cible",
+        "PROJ.1.2.cq_non_engage"
+      ],
+      "status_note": "Exemptions M/V dans handle_shoot et handle_wait implémentées. Le -1 au jet de touche non vérifié."
+    },
+    {
+      "id": "18.01",
+      "source": "18 Transports",
+      "label": "Transport capacity",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT"
+    },
+    {
+      "id": "18.02",
+      "source": "18 Transports",
+      "label": "Embarking",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT"
+    },
+    {
+      "id": "18.03",
+      "source": "18 Transports",
+      "label": "Disembarking",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT"
+    },
+    {
+      "id": "18.04",
+      "source": "18 Transports",
+      "label": "Disembark move",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT"
+    },
+    {
+      "id": "18.05",
+      "source": "18 Transports",
+      "label": "Emergency disembark move",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT"
+    },
+    {
+      "id": "19.01",
+      "source": "19 Attached units",
+      "label": "Forming attached units",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "co_verified_by": [
+        "PROJ.1.9.leader",
+        "PROJ.1.9.support"
+      ],
+      "status_note": "leader/support dans unit_rules.json et §1.7. Aucune ligne de log ne dit quelle unité est attachée à quelle autre."
+    },
+    {
+      "id": "19.02",
+      "source": "19 Attached units",
+      "label": "Attacking attached units (T le plus haut des bodyguards)",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT",
+      "status_note": "T utilisée pour l'attaque non loggué, mais recalculée depuis le registre dans analyzer_wound.py (target_bodyguard_toughness)."
+    },
+    {
+      "id": "19.03",
+      "source": "19 Attached units",
+      "label": "Keywords in attached units",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "NON_VERIFIABLE"
+    },
+    {
+      "id": "19.04",
+      "source": "19 Attached units",
+      "label": "Abilities in attached units",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT",
+      "status_note": "Portée et extinction des capacités conférées absentes du journal."
+    },
+    {
+      "id": "20.01",
+      "source": "20 Strategic reserves",
+      "label": "Placing units in strategic reserves",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "status_note": "Sentinelle (-1,-1) reconnue partout. Plafond 50% des points non contrôlable (points non loggués)."
+    },
+    {
+      "id": "20.02",
+      "source": "20 Strategic reserves",
+      "label": "Repositioned units",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT",
+      "status_note": "Retrait volontaire du plateau non journalisé."
+    },
+    {
+      "id": "20.03",
+      "source": "20 Strategic reserves",
+      "label": "Arriving (2e round minimum)",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOGGABLE",
+      "status_note": "Ligne DEPLOYED en phase MOVE porte T<turn> : contrainte 'round ≥ 2' vérifiable mais non contrôlée."
+    },
+    {
+      "id": "21.01",
+      "source": "21 Flying and surging",
+      "label": "Surge moves",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT",
+      "status_note": "Type surge absent de _STEP_LOG_TYPE_MAP."
+    },
+    {
+      "id": "21.02",
+      "source": "21 Flying and surging",
+      "label": "Surge move",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT"
+    },
+    {
+      "id": "21.03",
+      "source": "21 Flying and surging",
+      "label": "Flying models (−2\", traversée, distance verticale ignorée)",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "co_verified_by": [
+        "09.05",
+        "09.07",
+        "PROJ.1.3.budget"
+      ],
+      "status_note": "Marqueur [FLY] lu, −2\"×échelle retranché. HOVER (24.17) n'annule pas les −2\" côté analyzer."
+    },
+    {
+      "id": "22.01",
+      "source": "22 Other rules and abilities",
+      "label": "Aura abilities",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT"
+    },
+    {
+      "id": "22.02",
+      "source": "22 Other rules and abilities",
+      "label": "Faction abilities (Waaagh!, Oath of Moment)",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "status_note": "waaagh/oath_of_moment reconnues via FACTION_ABILITY_KEYWORD_BY_RULE_ID et comptées en §1.7. Effets partiellement vérifiés."
+    },
+    {
+      "id": "22.03",
+      "source": "22 Other rules and abilities",
+      "label": "Psychic abilities",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT"
+    },
+    {
+      "id": "22.04",
+      "source": "22 Other rules and abilities",
+      "label": "Wargear abilities",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "NON_VERIFIABLE"
+    },
+    {
+      "id": "22.05",
+      "source": "22 Other rules and abilities",
+      "label": "Plunging fire (+1 BS)",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT",
+      "status_note": "Aucun token ; hit_target_base réservé à HEAVY/COVER."
+    },
+    {
+      "id": "23.01",
+      "source": "23 Aircraft",
+      "label": "Aircraft deployment",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT"
+    },
+    {
+      "id": "23.02",
+      "source": "23 Aircraft",
+      "label": "Aircraft movement",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT"
+    },
+    {
+      "id": "23.03",
+      "source": "23 Aircraft",
+      "label": "Aircraft shooting",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT"
+    },
+    {
+      "id": "23.04",
+      "source": "23 Aircraft",
+      "label": "Aircraft charging and fighting",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT"
+    },
+    {
+      "id": "24.01",
+      "source": "24 Core abilities",
+      "label": "Abilities (définition)",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "NON_VERIFIABLE"
+    },
+    {
+      "id": "24.02",
+      "source": "24 Core abilities",
+      "label": "Duplicated abilities",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT"
+    },
+    {
+      "id": "24.03",
+      "source": "24 Core abilities",
+      "label": "[ANTI-X Y+]",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOGGABLE",
+      "status_note": "[ANTI-<KW>:Y+] dans step.log depuis le 2026-08-12. Seuil DÉCLARÉ par l'arme, recoupable avec l'armurerie. Contrôle à écrire."
+    },
+    {
+      "id": "24.04",
+      "source": "24 Core abilities",
+      "label": "[ASSAULT]",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "status_note": "Usage suivi en §1.8. Volet 'seules les armes ASSAULT peuvent être sélectionnées après advance' non contrôlé indépendamment."
+    },
+    {
+      "id": "24.05",
+      "source": "24 Core abilities",
+      "label": "[BLAST]",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "status_note": "Token [BLAST:X] loggué, dés bonus entrés dans le plafond de tirs. Interdiction sur cible engagée non contrôlée."
+    },
+    {
+      "id": "24.06",
+      "source": "24 Core abilities",
+      "label": "[CLEAVE]",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "status_note": "Token [CLEAVE:X] loggué, dés bonus dans le plafond d'attaques, usage compté. Clause 'une seule cible' non rejouée par l'analyzer."
+    },
+    {
+      "id": "24.07",
+      "source": "24 Core abilities",
+      "label": "[CLOSE-QUARTERS]",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "co_verified_by": [
+        "PROJ.1.2.eng_non_cq",
+        "PROJ.1.2.cq_non_engage"
+      ],
+      "status_note": "Contrôles d'éligibilité CQ présents per-figurine. Compteur d'usage §1.8 passe par _eligibility_rule_applied : token [CLOSE-QUARTERS] (grammaire 4+) ou fallback per-figurine (shooter_engaged_with_target). V4 FERMÉ (lot 1). Volet « un seul choix par figurine » absent du journal."
+    },
+    {
+      "id": "24.08",
+      "source": "24 Core abilities",
+      "label": "Deadly Demise",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT"
+    },
+    {
+      "id": "24.09",
+      "source": "24 Core abilities",
+      "label": "Deep Strike",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "status_note": "Règle déclarée, ingress loggué, contrainte >8\" non contrôlée (loggable)."
+    },
+    {
+      "id": "24.10",
+      "source": "24 Core abilities",
+      "label": "[DEVASTATING WOUNDS]",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "status_note": "Seuil critique dérivé du token [ANTI-X:N+] en tir (shoot_handler.py, anti_crit_m). V8 FERMÉ (lot 2). Mêlée : usage compté (Save [DEVASTATING WOUNDS]), contrôle de validité absent."
+    },
+    {
+      "id": "24.11",
+      "source": "24 Core abilities",
+      "label": "[EXTRA ATTACKS]",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOGGABLE",
+      "status_note": "Token [EXTRA ATTACKS] dans les tags de ligne (tir ET mêlée) depuis le 2026-08-12. Plafond fight_over_cc_nb ne s'en sert pas encore."
+    },
+    {
+      "id": "24.12",
+      "source": "24 Core abilities",
+      "label": "Feel No Pain",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT",
+      "status_note": "Jet FNP et seuil absents du journal."
+    },
+    {
+      "id": "24.13",
+      "source": "24 Core abilities",
+      "label": "Fights First",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT",
+      "status_note": "Statut Fights First de l'unité activée non journalisé."
+    },
+    {
+      "id": "24.14",
+      "source": "24 Core abilities",
+      "label": "Firing Deck",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT"
+    },
     {
       "id": "24.15",
       "source": "24 Core abilities",
       "label": "[HAZARDOUS]",
       "section": "pdf",
-      "applicability": {"kind": "indecidable"},
+      "applicability": {
+        "kind": "indecidable"
+      },
       "controls": [],
       "status": "COUVERT",
-      "co_verified_by": ["PROJ.1.2.hazardous", "PROJ.1.4.hazardous"],
+      "co_verified_by": [
+        "PROJ.1.2.hazardous",
+        "PROJ.1.4.hazardous"
+      ],
       "status_note": "MW auto-infligées et vérif armurerie dans analyzer_core.py (tir et mêlée). Couvert depuis le 2026-08-17."
     },
-    { "id": "24.16", "source": "24 Core abilities", "label": "[HEAVY]", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL", "status_note": "Usage suivi en §1.8. Validité (+1 BS si unité n'a pas bougé) supprimée le 2026-07-29 : distance de chemin par figurine non re-dérivable." },
-    { "id": "24.17", "source": "24 Core abilities", "label": "Hover", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT", "status_note": "Non journalisé ; fausse les budgets de vol (cf. 21.03)." },
-    { "id": "24.18", "source": "24 Core abilities", "label": "[IGNORES COVER]", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOGGABLE", "status_note": "Token [IGNORES COVER] sur le segment Hit depuis le 2026-08-12. Contrôle à écrire." },
-    { "id": "24.19", "source": "24 Core abilities", "label": "[INDIRECT FIRE]", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT", "status_note": "Règle NON IMPLÉMENTÉE dans le moteur. Poser le token annoncerait un effet qui n'a pas lieu." },
-    { "id": "24.20", "source": "24 Core abilities", "label": "Infiltrators", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT", "status_note": "Zone de déploiement absente du journal." },
-    { "id": "24.21", "source": "24 Core abilities", "label": "[LANCE]", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT", "status_note": "Absente de weapon_rules.json et non implémentée." },
-    { "id": "24.22", "source": "24 Core abilities", "label": "Leader", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT" },
-    { "id": "24.23", "source": "24 Core abilities", "label": "[LETHAL HITS]", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOGGABLE", "status_note": "Token [LETHAL HITS] sur le segment Wound depuis le 2026-08-12 (par ATTAQUE). Contrôle à écrire." },
-    { "id": "24.24", "source": "24 Core abilities", "label": "Lone Operative", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT" },
-    { "id": "24.25", "source": "24 Core abilities", "label": "[MELTA X]", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT", "status_note": "Bonus D et marqueur demi-portée non re-dérivables séparément. Token [MELTA:X] dans step.log depuis le 2026-08-11 (§1.8 ABSENT-LOGGABLE)." },
-    { "id": "24.26", "source": "24 Core abilities", "label": "[ONE SHOT]", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT" },
-    { "id": "24.27", "source": "24 Core abilities", "label": "[PISTOL]", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL", "status_note": "Alias de 24.07 [CLOSE-QUARTERS]. Même statut." },
-    { "id": "24.28", "source": "24 Core abilities", "label": "[PRECISION]", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT", "status_note": "Groupe d'allocation courant absent du journal." },
-    { "id": "24.29", "source": "24 Core abilities", "label": "[PSYCHIC]", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "NON_VERIFIABLE", "status_note": "Keyword d'interaction (neutralise les modificateurs adverses). Aucun effet comptable indépendamment." },
-    { "id": "24.30", "source": "24 Core abilities", "label": "[RAPID FIRE X]", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL", "status_note": "Présence et valeur recoupées avec l'armurerie (#41). Demi-portée MESURABLE per-socle mais non contrôlée." },
-    { "id": "24.31", "source": "24 Core abilities", "label": "Scouts", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT" },
-    { "id": "24.32", "source": "24 Core abilities", "label": "Scout move", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT" },
-    { "id": "24.33", "source": "24 Core abilities", "label": "Stealth", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT" },
-    { "id": "24.34", "source": "24 Core abilities", "label": "Support", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT" },
-    { "id": "24.35", "source": "24 Core abilities", "label": "Super-heavy Walker", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT" },
-    { "id": "24.36", "source": "24 Core abilities", "label": "[SUSTAINED HITS X]", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL", "status_note": "Présence recoupée avec l'armurerie (#42), usage suivi en §1.8. Nombre de touches additionnelles (X) non vérifié." },
-    { "id": "24.37", "source": "24 Core abilities", "label": "[TORRENT]", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOGGABLE", "status_note": "Token [TORRENT] sur le segment Hit depuis le 2026-08-12. Contrôle à écrire." },
-    { "id": "24.38", "source": "24 Core abilities", "label": "[TWIN-LINKED]", "section": "pdf", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL", "status_note": "Usage suivi en §1.8 (tir et mêlée). Aucun contrôle de cohérence entre le token et la relance effective." },
-
-    { "id": "weapon.ANTI_FLY",            "source": "config/weapon_rules.json", "label": "ANTI_FLY (24.03)",            "section": "weapon", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOGGABLE",      "status_note": "Token [ANTI-FLY:Y+] dans step.log depuis le 2026-08-12. Contrôle à écrire." },
-    { "id": "weapon.ANTI_INFANTRY",       "source": "config/weapon_rules.json", "label": "ANTI_INFANTRY (24.03)",       "section": "weapon", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOGGABLE",      "status_note": "Token [ANTI-INFANTRY:Y+] dans step.log depuis le 2026-08-12. Contrôle à écrire." },
-    { "id": "weapon.ANTI_MONSTER",        "source": "config/weapon_rules.json", "label": "ANTI_MONSTER (24.03)",        "section": "weapon", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOGGABLE",      "status_note": "Token [ANTI-MONSTER:Y+] dans step.log depuis le 2026-08-12. Contrôle à écrire." },
-    { "id": "weapon.ANTI_PSYKER",         "source": "config/weapon_rules.json", "label": "ANTI_PSYKER (24.03)",         "section": "weapon", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOGGABLE",      "status_note": "Token [ANTI-PSYKER:Y+] dans step.log depuis le 2026-08-12. Contrôle à écrire." },
-    { "id": "weapon.ANTI_VEHICLE",        "source": "config/weapon_rules.json", "label": "ANTI_VEHICLE (24.03)",        "section": "weapon", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOGGABLE",      "status_note": "Token [ANTI-VEHICLE:Y+] dans step.log depuis le 2026-08-12. Contrôle à écrire." },
-    { "id": "weapon.ASSAULT",             "source": "config/weapon_rules.json", "label": "ASSAULT (24.04 / 10.05)",     "section": "weapon", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL",             "status_note": "Usage suivi en §1.8. Validité (seules les armes ASSAULT après advance) non contrôlée indépendamment." },
-    { "id": "weapon.BLAST",               "source": "config/weapon_rules.json", "label": "BLAST (24.05)",               "section": "weapon", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOGGABLE",      "status_note": "Token [BLAST:X] depuis le 2026-08-11. Aucun contrôle de conformité." },
-    { "id": "weapon.CLEAVE",              "source": "config/weapon_rules.json", "label": "CLEAVE (24.06)",              "section": "weapon", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOGGABLE",      "status_note": "Token [CLEAVE:X] depuis le 2026-08-11. Aucun contrôle de conformité." },
-    { "id": "weapon.CLOSE_QUARTERS",      "source": "config/weapon_rules.json", "label": "CLOSE_QUARTERS (24.07)",      "section": "weapon", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL",             "status_note": "Contrôles d'erreur per-figurine présents. Compteur d'usage §1.8 mesure ancre-à-ancre (vert vacant V4)." },
-    { "id": "weapon.DEVASTATING_WOUNDS",  "source": "config/weapon_rules.json", "label": "DEVASTATING_WOUNDS (24.10)",  "section": "weapon", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL",             "status_note": "Contrôle suppose 6 comme seul critique : faux si ANTI-X Y+ avec Y<6 (vert vacant V8)." },
-    { "id": "weapon.EXTRA_ATTACKS",       "source": "config/weapon_rules.json", "label": "EXTRA_ATTACKS (24.11)",       "section": "weapon", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOGGABLE",      "status_note": "Token [EXTRA ATTACKS] depuis le 2026-08-12. Contrôle à écrire." },
+    {
+      "id": "24.16",
+      "source": "24 Core abilities",
+      "label": "[HEAVY]",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "status_note": "Usage suivi en §1.8. Validité (+1 BS si unité n'a pas bougé) supprimée le 2026-07-29 : distance de chemin par figurine non re-dérivable."
+    },
+    {
+      "id": "24.17",
+      "source": "24 Core abilities",
+      "label": "Hover",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT",
+      "status_note": "Non journalisé ; fausse les budgets de vol (cf. 21.03)."
+    },
+    {
+      "id": "24.18",
+      "source": "24 Core abilities",
+      "label": "[IGNORES COVER]",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOGGABLE",
+      "status_note": "Token [IGNORES COVER] sur le segment Hit depuis le 2026-08-12. Contrôle à écrire."
+    },
+    {
+      "id": "24.19",
+      "source": "24 Core abilities",
+      "label": "[INDIRECT FIRE]",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT",
+      "status_note": "Règle NON IMPLÉMENTÉE dans le moteur. Poser le token annoncerait un effet qui n'a pas lieu."
+    },
+    {
+      "id": "24.20",
+      "source": "24 Core abilities",
+      "label": "Infiltrators",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT",
+      "status_note": "Zone de déploiement absente du journal."
+    },
+    {
+      "id": "24.21",
+      "source": "24 Core abilities",
+      "label": "[LANCE]",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT",
+      "status_note": "Absente de weapon_rules.json et non implémentée."
+    },
+    {
+      "id": "24.22",
+      "source": "24 Core abilities",
+      "label": "Leader",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT"
+    },
+    {
+      "id": "24.23",
+      "source": "24 Core abilities",
+      "label": "[LETHAL HITS]",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOGGABLE",
+      "status_note": "Token [LETHAL HITS] sur le segment Wound depuis le 2026-08-12 (par ATTAQUE). Contrôle à écrire."
+    },
+    {
+      "id": "24.24",
+      "source": "24 Core abilities",
+      "label": "Lone Operative",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT"
+    },
+    {
+      "id": "24.25",
+      "source": "24 Core abilities",
+      "label": "[MELTA X]",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT",
+      "status_note": "Bonus D et marqueur demi-portée non re-dérivables séparément. Token [MELTA:X] dans step.log depuis le 2026-08-11 (§1.8 ABSENT-LOGGABLE)."
+    },
+    {
+      "id": "24.26",
+      "source": "24 Core abilities",
+      "label": "[ONE SHOT]",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT"
+    },
+    {
+      "id": "24.27",
+      "source": "24 Core abilities",
+      "label": "[PISTOL]",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "status_note": "Alias de 24.07 [CLOSE-QUARTERS]. Même statut."
+    },
+    {
+      "id": "24.28",
+      "source": "24 Core abilities",
+      "label": "[PRECISION]",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT",
+      "status_note": "Groupe d'allocation courant absent du journal."
+    },
+    {
+      "id": "24.29",
+      "source": "24 Core abilities",
+      "label": "[PSYCHIC]",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "NON_VERIFIABLE",
+      "status_note": "Keyword d'interaction (neutralise les modificateurs adverses). Aucun effet comptable indépendamment."
+    },
+    {
+      "id": "24.30",
+      "source": "24 Core abilities",
+      "label": "[RAPID FIRE X]",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "status_note": "Présence et valeur recoupées avec l'armurerie (#41). Demi-portée MESURABLE per-socle mais non contrôlée."
+    },
+    {
+      "id": "24.31",
+      "source": "24 Core abilities",
+      "label": "Scouts",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT"
+    },
+    {
+      "id": "24.32",
+      "source": "24 Core abilities",
+      "label": "Scout move",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT"
+    },
+    {
+      "id": "24.33",
+      "source": "24 Core abilities",
+      "label": "Stealth",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT"
+    },
+    {
+      "id": "24.34",
+      "source": "24 Core abilities",
+      "label": "Support",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT"
+    },
+    {
+      "id": "24.35",
+      "source": "24 Core abilities",
+      "label": "Super-heavy Walker",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT"
+    },
+    {
+      "id": "24.36",
+      "source": "24 Core abilities",
+      "label": "[SUSTAINED HITS X]",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "status_note": "Présence recoupée avec l'armurerie (#42), usage suivi en §1.8. Nombre de touches additionnelles (X) non vérifié."
+    },
+    {
+      "id": "24.37",
+      "source": "24 Core abilities",
+      "label": "[TORRENT]",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOGGABLE",
+      "status_note": "Token [TORRENT] sur le segment Hit depuis le 2026-08-12. Contrôle à écrire."
+    },
+    {
+      "id": "24.38",
+      "source": "24 Core abilities",
+      "label": "[TWIN-LINKED]",
+      "section": "pdf",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "status_note": "Usage suivi en §1.8 (tir et mêlée). Aucun contrôle de cohérence entre le token et la relance effective."
+    },
+    {
+      "id": "weapon.ANTI_FLY",
+      "source": "config/weapon_rules.json",
+      "label": "ANTI_FLY (24.03)",
+      "section": "weapon",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOGGABLE",
+      "status_note": "Token [ANTI-FLY:Y+] dans step.log depuis le 2026-08-12. Contrôle à écrire."
+    },
+    {
+      "id": "weapon.ANTI_INFANTRY",
+      "source": "config/weapon_rules.json",
+      "label": "ANTI_INFANTRY (24.03)",
+      "section": "weapon",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOGGABLE",
+      "status_note": "Token [ANTI-INFANTRY:Y+] dans step.log depuis le 2026-08-12. Contrôle à écrire."
+    },
+    {
+      "id": "weapon.ANTI_MONSTER",
+      "source": "config/weapon_rules.json",
+      "label": "ANTI_MONSTER (24.03)",
+      "section": "weapon",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOGGABLE",
+      "status_note": "Token [ANTI-MONSTER:Y+] dans step.log depuis le 2026-08-12. Contrôle à écrire."
+    },
+    {
+      "id": "weapon.ANTI_PSYKER",
+      "source": "config/weapon_rules.json",
+      "label": "ANTI_PSYKER (24.03)",
+      "section": "weapon",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOGGABLE",
+      "status_note": "Token [ANTI-PSYKER:Y+] dans step.log depuis le 2026-08-12. Contrôle à écrire."
+    },
+    {
+      "id": "weapon.ANTI_VEHICLE",
+      "source": "config/weapon_rules.json",
+      "label": "ANTI_VEHICLE (24.03)",
+      "section": "weapon",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOGGABLE",
+      "status_note": "Token [ANTI-VEHICLE:Y+] dans step.log depuis le 2026-08-12. Contrôle à écrire."
+    },
+    {
+      "id": "weapon.ASSAULT",
+      "source": "config/weapon_rules.json",
+      "label": "ASSAULT (24.04 / 10.05)",
+      "section": "weapon",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "status_note": "Usage suivi en §1.8. Validité (seules les armes ASSAULT après advance) non contrôlée indépendamment."
+    },
+    {
+      "id": "weapon.BLAST",
+      "source": "config/weapon_rules.json",
+      "label": "BLAST (24.05)",
+      "section": "weapon",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOGGABLE",
+      "status_note": "Token [BLAST:X] depuis le 2026-08-11. Aucun contrôle de conformité."
+    },
+    {
+      "id": "weapon.CLEAVE",
+      "source": "config/weapon_rules.json",
+      "label": "CLEAVE (24.06)",
+      "section": "weapon",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOGGABLE",
+      "status_note": "Token [CLEAVE:X] depuis le 2026-08-11. Aucun contrôle de conformité."
+    },
+    {
+      "id": "weapon.CLOSE_QUARTERS",
+      "source": "config/weapon_rules.json",
+      "label": "CLOSE_QUARTERS (24.07)",
+      "section": "weapon",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "status_note": "Contrôles d'erreur per-figurine présents. Compteur d'usage §1.8 per-figurine depuis lot 1 (_eligibility_rule_applied : token ou fallback engagement). V4 FERMÉ."
+    },
+    {
+      "id": "weapon.DEVASTATING_WOUNDS",
+      "source": "config/weapon_rules.json",
+      "label": "DEVASTATING_WOUNDS (24.10)",
+      "section": "weapon",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "status_note": "Usage au tir et en mêlée (token Save [DEVASTATING WOUNDS]). Seuil critique dérivé de [ANTI-X:N+] en tir. V8 FERMÉ (lot 2). Contrôle de validité absent en mêlée."
+    },
+    {
+      "id": "weapon.EXTRA_ATTACKS",
+      "source": "config/weapon_rules.json",
+      "label": "EXTRA_ATTACKS (24.11)",
+      "section": "weapon",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOGGABLE",
+      "status_note": "Token [EXTRA ATTACKS] depuis le 2026-08-12. Contrôle à écrire."
+    },
     {
       "id": "weapon.HAZARDOUS",
       "source": "config/weapon_rules.json",
       "label": "HAZARDOUS (24.15 / 06.03)",
       "section": "weapon",
-      "applicability": {"kind": "indecidable"},
+      "applicability": {
+        "kind": "indecidable"
+      },
       "controls": [],
       "status": "COUVERT",
-      "co_verified_by": ["PROJ.1.2.hazardous", "PROJ.1.4.hazardous"],
+      "co_verified_by": [
+        "PROJ.1.2.hazardous",
+        "PROJ.1.4.hazardous"
+      ],
       "status_note": "MW auto-infligées + vérif présence arme HAZARDOUS en armurerie. Couvert depuis le 2026-08-17."
     },
-    { "id": "weapon.HEAVY",               "source": "config/weapon_rules.json", "label": "HEAVY (24.16)",               "section": "weapon", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL",             "status_note": "Usage suivi en §1.8. Validité supprimée le 2026-07-29." },
-    { "id": "weapon.IGNORES_COVER",       "source": "config/weapon_rules.json", "label": "IGNORES_COVER (24.18)",       "section": "weapon", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOGGABLE",      "status_note": "Token [IGNORES COVER] depuis le 2026-08-12. Contrôle à écrire." },
-    { "id": "weapon.INDIRECT_FIRE",       "source": "config/weapon_rules.json", "label": "INDIRECT_FIRE (24.19)",       "section": "weapon", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT", "status_note": "Règle NON IMPLÉMENTÉE dans le moteur. Seule entrée sans obs_id pour cette raison." },
-    { "id": "weapon.LETHAL_HITS",         "source": "config/weapon_rules.json", "label": "LETHAL_HITS (24.23)",         "section": "weapon", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOGGABLE",      "status_note": "Token [LETHAL HITS] depuis le 2026-08-12. Contrôle à écrire." },
-    { "id": "weapon.MELTA",               "source": "config/weapon_rules.json", "label": "MELTA (24.25)",               "section": "weapon", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOGGABLE",      "status_note": "Token [MELTA:X] depuis le 2026-08-11. Aucun contrôle de conformité." },
-    { "id": "weapon.PRECISION",           "source": "config/weapon_rules.json", "label": "PRECISION (24.28)",           "section": "weapon", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOGGABLE",      "status_note": "Token [PRECISION] depuis le 2026-08-11. Aucun contrôle de conformité." },
-    { "id": "weapon.PSYCHIC",             "source": "config/weapon_rules.json", "label": "PSYCHIC (24.29)",             "section": "weapon", "applicability": {"kind": "indecidable"}, "controls": [], "status": "NON_VERIFIABLE",       "status_note": "Keyword d'interaction. Aucun effet comptable indépendamment." },
-    { "id": "weapon.RAPID_FIRE",          "source": "config/weapon_rules.json", "label": "RAPID_FIRE (24.30)",          "section": "weapon", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL",             "status_note": "Présence et valeur recoupées avec l'armurerie. Condition demi-portée non vérifiée." },
-    { "id": "weapon.SUSTAINED_HITS",      "source": "config/weapon_rules.json", "label": "SUSTAINED_HITS (24.36)",      "section": "weapon", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL",             "status_note": "Présence et usage suivi. Nombre de touches additionnelles non vérifié." },
-    { "id": "weapon.TORRENT",             "source": "config/weapon_rules.json", "label": "TORRENT (24.37)",             "section": "weapon", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOGGABLE",      "status_note": "Token [TORRENT] depuis le 2026-08-12. Contrôle à écrire." },
-    { "id": "weapon.TWIN_LINKED",         "source": "config/weapon_rules.json", "label": "TWIN_LINKED (24.38)",         "section": "weapon", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL",             "status_note": "Usage suivi en §1.8 (tir et mêlée). Aucun contrôle de cohérence entre le token et la relance effective." },
-
-    { "id": "unit.charge_after_advance",           "source": "config/unit_rules.json", "label": "charge_after_advance",           "section": "unit", "applicability": {"kind": "indecidable"}, "controls": [], "status": "COUVERT",             "co_verified_by": ["PROJ.1.3.apres_advance"] },
-    { "id": "unit.charge_after_flee",              "source": "config/unit_rules.json", "label": "charge_after_flee",              "section": "unit", "applicability": {"kind": "indecidable"}, "controls": [], "status": "COUVERT",             "co_verified_by": ["PROJ.1.3.apres_repli"] },
-    { "id": "unit.shoot_after_advance",            "source": "config/unit_rules.json", "label": "shoot_after_advance",            "section": "unit", "applicability": {"kind": "indecidable"}, "controls": [], "status": "COUVERT",             "status_note": "§1.7 + shots_after_advance." },
-    { "id": "unit.shoot_after_flee",               "source": "config/unit_rules.json", "label": "shoot_after_flee",               "section": "unit", "applicability": {"kind": "indecidable"}, "controls": [], "status": "COUVERT",             "co_verified_by": ["PROJ.1.2.apres_repli"] },
-    { "id": "unit.reroll_1_towound",               "source": "config/unit_rules.json", "label": "reroll_1_towound",               "section": "unit", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL",             "status_note": "§1.7 via token [TARGETED INTERCESSION]. Le jet de 1 relancé non recoupé avec le token." },
-    { "id": "unit.reroll_1_tohit_fight",           "source": "config/unit_rules.json", "label": "reroll_1_tohit_fight",           "section": "unit", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL",             "status_note": "Usage compté seulement via la chaîne rule-choice." },
-    { "id": "unit.reroll_1_save_fight",            "source": "config/unit_rules.json", "label": "reroll_1_save_fight",            "section": "unit", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL",             "co_verified_by": ["PROJ.1.4.reroll_save_fight"], "status_note": "Aucun nom de capacité côté Save en mêlée → cause invisible." },
-    { "id": "unit.reroll_towound_target_on_obj",   "source": "config/unit_rules.json", "label": "reroll_towound_target_on_objective", "section": "unit", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL", "status_note": "§1.7. 'La cible est sur un objectif' non vérifié." },
-    { "id": "unit.reroll_charge",                  "source": "config/unit_rules.json", "label": "reroll_charge",                  "section": "unit", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT", "status_note": "Ligne CHARGED ne porte que le jet final." },
-    { "id": "unit.charge_impact",                  "source": "config/unit_rules.json", "label": "charge_impact",                  "section": "unit", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOGGABLE",      "co_verified_by": ["PROJ.1.3.charge_impact"], "status_note": "Ligne IMPACTED complète (seuil, jet, MW). 4+→1MW et 'cible dans l'engagement' vérifiables." },
-    { "id": "unit.closest_target_penetration",     "source": "config/unit_rules.json", "label": "closest_target_penetration",     "section": "unit", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT", "co_verified_by": ["PROJ.1.2.closest_target_penetration"], "status_note": "AP non loggué." },
-    { "id": "unit.cp_gain_on_objective",           "source": "config/unit_rules.json", "label": "cp_gain_on_objective",           "section": "unit", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOGGABLE",      "co_verified_by": ["PROJ.1.9.cp_gain_on_objective"], "status_note": "CP1=/CP2= dans l'instantané. Gain GLOBAL, 1 CP max." },
-    { "id": "unit.adrenalised_onslaught",          "source": "config/unit_rules.json", "label": "adrenalised_onslaught",          "section": "unit", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL",             "status_note": "§1.7 rule-choice (source)." },
-    { "id": "unit.aggression_imperative",          "source": "config/unit_rules.json", "label": "aggression_imperative",          "section": "unit", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL",             "status_note": "§1.7 rule-choice (effet, alias reroll_1_tohit_fight)." },
-    { "id": "unit.preservation_imperative",        "source": "config/unit_rules.json", "label": "preservation_imperative",        "section": "unit", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL",             "status_note": "§1.7 rule-choice (effet, alias reroll_1_save_fight)." },
-    { "id": "unit.adaptable_predators",            "source": "config/unit_rules.json", "label": "adaptable_predators",            "section": "unit", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL",             "status_note": "§1.7 (parapluie)." },
-    { "id": "unit.adaptable_predators_sflee",      "source": "config/unit_rules.json", "label": "adaptable_predators_shoot_after_flee",   "section": "unit", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL", "status_note": "Alias → shoot_after_flee." },
-    { "id": "unit.adaptable_predators_cflee",      "source": "config/unit_rules.json", "label": "adaptable_predators_charge_after_flee",  "section": "unit", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL", "status_note": "Alias → charge_after_flee." },
-    { "id": "unit.cunning_hunters",                "source": "config/unit_rules.json", "label": "cunning_hunters",                "section": "unit", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL",             "status_note": "§1.7 (parapluie)." },
-    { "id": "unit.cunning_hunters_sadvance",       "source": "config/unit_rules.json", "label": "cunning_hunters_shoot_after_advance",    "section": "unit", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL", "status_note": "Alias." },
-    { "id": "unit.cunning_hunters_sflee",          "source": "config/unit_rules.json", "label": "cunning_hunters_shoot_after_flee",       "section": "unit", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL", "status_note": "Alias." },
-    { "id": "unit.targeted_intercession",          "source": "config/unit_rules.json", "label": "targeted_intercession",          "section": "unit", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL",             "status_note": "§1.7 (parapluie)." },
-    { "id": "unit.targeted_intercession_r1tw",     "source": "config/unit_rules.json", "label": "targeted_intercession_reroll_1_towound",                     "section": "unit", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL", "status_note": "Alias." },
-    { "id": "unit.targeted_intercession_rtotoj",   "source": "config/unit_rules.json", "label": "targeted_intercession_reroll_towound_target_on_objective",   "section": "unit", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL", "status_note": "Alias." },
-    { "id": "unit.target_priority",                "source": "config/unit_rules.json", "label": "target_priority",                "section": "unit", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL",             "status_note": "Aucun grants_rule_ids déclaré. §1.7 comptera les effets INVALID." },
-    { "id": "unit.oath_of_moment",                 "source": "config/unit_rules.json", "label": "oath_of_moment",                 "section": "unit", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL",             "co_verified_by": ["PROJ.1.2.oath_target", "PROJ.1.2.blessure", "PROJ.1.4.blessure"], "status_note": "Activations comptées en §1.7. Token [OATH OF MOMENT] gate l'application, oath_wound=+X fixe la magnitude. Ce qui reste : que la cible visée soit bien oath_target." },
-    { "id": "unit.waaagh",                         "source": "config/unit_rules.json", "label": "waaagh",                         "section": "unit", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL",             "status_note": "§1.7 + waaagh_melee_atk dans le plafond de mêlée + waaagh_melee_str dans le seuil de blessure. waaagh_invul (5++) journalisé sans alimenter aucun contrôle." },
-    { "id": "unit.deep_strike",                    "source": "config/unit_rules.json", "label": "deep_strike",                    "section": "unit", "applicability": {"kind": "indecidable"}, "controls": [], "status": "PARTIEL",             "co_verified_by": ["24.09"], "status_note": "Cf. 24.09." },
-    { "id": "unit.leader",                         "source": "config/unit_rules.json", "label": "leader",                         "section": "unit", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT", "co_verified_by": ["PROJ.1.9.leader"] },
-    { "id": "unit.support",                        "source": "config/unit_rules.json", "label": "support",                        "section": "unit", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT", "co_verified_by": ["PROJ.1.9.support"] },
-    { "id": "unit.feel_no_pain",                   "source": "config/unit_rules.json", "label": "feel_no_pain",                   "section": "unit", "applicability": {"kind": "indecidable"}, "controls": [], "status": "ABSENT_LOG_MANQUANT", "co_verified_by": ["PROJ.1.9.feel_no_pain"] },
-    { "id": "unit.special_weapon",                 "source": "config/unit_rules.json", "label": "special_weapon",                 "section": "unit", "applicability": {"kind": "indecidable"}, "controls": [], "status": "NON_VERIFIABLE",       "status_note": "Marqueur de rôle." },
-    { "id": "unit.sergeant",                       "source": "config/unit_rules.json", "label": "sergeant",                       "section": "unit", "applicability": {"kind": "indecidable"}, "controls": [], "status": "NON_VERIFIABLE",       "status_note": "Marqueur de rôle." }
+    {
+      "id": "weapon.HEAVY",
+      "source": "config/weapon_rules.json",
+      "label": "HEAVY (24.16)",
+      "section": "weapon",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "status_note": "Usage suivi en §1.8. Validité supprimée le 2026-07-29."
+    },
+    {
+      "id": "weapon.IGNORES_COVER",
+      "source": "config/weapon_rules.json",
+      "label": "IGNORES_COVER (24.18)",
+      "section": "weapon",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOGGABLE",
+      "status_note": "Token [IGNORES COVER] depuis le 2026-08-12. Contrôle à écrire."
+    },
+    {
+      "id": "weapon.INDIRECT_FIRE",
+      "source": "config/weapon_rules.json",
+      "label": "INDIRECT_FIRE (24.19)",
+      "section": "weapon",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT",
+      "status_note": "Règle NON IMPLÉMENTÉE dans le moteur. Seule entrée sans obs_id pour cette raison."
+    },
+    {
+      "id": "weapon.LETHAL_HITS",
+      "source": "config/weapon_rules.json",
+      "label": "LETHAL_HITS (24.23)",
+      "section": "weapon",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOGGABLE",
+      "status_note": "Token [LETHAL HITS] depuis le 2026-08-12. Contrôle à écrire."
+    },
+    {
+      "id": "weapon.MELTA",
+      "source": "config/weapon_rules.json",
+      "label": "MELTA (24.25)",
+      "section": "weapon",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOGGABLE",
+      "status_note": "Token [MELTA:X] depuis le 2026-08-11. Aucun contrôle de conformité."
+    },
+    {
+      "id": "weapon.PRECISION",
+      "source": "config/weapon_rules.json",
+      "label": "PRECISION (24.28)",
+      "section": "weapon",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOGGABLE",
+      "status_note": "Token [PRECISION] depuis le 2026-08-11. Aucun contrôle de conformité."
+    },
+    {
+      "id": "weapon.PSYCHIC",
+      "source": "config/weapon_rules.json",
+      "label": "PSYCHIC (24.29)",
+      "section": "weapon",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "NON_VERIFIABLE",
+      "status_note": "Keyword d'interaction. Aucun effet comptable indépendamment."
+    },
+    {
+      "id": "weapon.RAPID_FIRE",
+      "source": "config/weapon_rules.json",
+      "label": "RAPID_FIRE (24.30)",
+      "section": "weapon",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "status_note": "Présence et valeur recoupées avec l'armurerie. Condition demi-portée non vérifiée."
+    },
+    {
+      "id": "weapon.SUSTAINED_HITS",
+      "source": "config/weapon_rules.json",
+      "label": "SUSTAINED_HITS (24.36)",
+      "section": "weapon",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "status_note": "Présence et usage suivi. Nombre de touches additionnelles non vérifié."
+    },
+    {
+      "id": "weapon.TORRENT",
+      "source": "config/weapon_rules.json",
+      "label": "TORRENT (24.37)",
+      "section": "weapon",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOGGABLE",
+      "status_note": "Token [TORRENT] depuis le 2026-08-12. Contrôle à écrire."
+    },
+    {
+      "id": "weapon.TWIN_LINKED",
+      "source": "config/weapon_rules.json",
+      "label": "TWIN_LINKED (24.38)",
+      "section": "weapon",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "status_note": "Usage suivi en §1.8 (tir et mêlée). Aucun contrôle de cohérence entre le token et la relance effective."
+    },
+    {
+      "id": "unit.charge_after_advance",
+      "source": "config/unit_rules.json",
+      "label": "charge_after_advance",
+      "section": "unit",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "COUVERT",
+      "co_verified_by": [
+        "PROJ.1.3.apres_advance"
+      ]
+    },
+    {
+      "id": "unit.charge_after_flee",
+      "source": "config/unit_rules.json",
+      "label": "charge_after_flee",
+      "section": "unit",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "COUVERT",
+      "co_verified_by": [
+        "PROJ.1.3.apres_repli"
+      ]
+    },
+    {
+      "id": "unit.shoot_after_advance",
+      "source": "config/unit_rules.json",
+      "label": "shoot_after_advance",
+      "section": "unit",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "COUVERT",
+      "status_note": "§1.7 + shots_after_advance."
+    },
+    {
+      "id": "unit.shoot_after_flee",
+      "source": "config/unit_rules.json",
+      "label": "shoot_after_flee",
+      "section": "unit",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "COUVERT",
+      "co_verified_by": [
+        "PROJ.1.2.apres_repli"
+      ]
+    },
+    {
+      "id": "unit.reroll_1_towound",
+      "source": "config/unit_rules.json",
+      "label": "reroll_1_towound",
+      "section": "unit",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "status_note": "§1.7 via token [TARGETED INTERCESSION]. Le jet de 1 relancé non recoupé avec le token."
+    },
+    {
+      "id": "unit.reroll_1_tohit_fight",
+      "source": "config/unit_rules.json",
+      "label": "reroll_1_tohit_fight",
+      "section": "unit",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "status_note": "Usage compté seulement via la chaîne rule-choice."
+    },
+    {
+      "id": "unit.reroll_1_save_fight",
+      "source": "config/unit_rules.json",
+      "label": "reroll_1_save_fight",
+      "section": "unit",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "co_verified_by": [
+        "PROJ.1.4.reroll_save_fight"
+      ],
+      "status_note": "Aucun nom de capacité côté Save en mêlée → cause invisible."
+    },
+    {
+      "id": "unit.reroll_towound_target_on_obj",
+      "source": "config/unit_rules.json",
+      "label": "reroll_towound_target_on_objective",
+      "section": "unit",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "status_note": "§1.7. 'La cible est sur un objectif' non vérifié."
+    },
+    {
+      "id": "unit.reroll_charge",
+      "source": "config/unit_rules.json",
+      "label": "reroll_charge",
+      "section": "unit",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT",
+      "status_note": "Ligne CHARGED ne porte que le jet final."
+    },
+    {
+      "id": "unit.charge_impact",
+      "source": "config/unit_rules.json",
+      "label": "charge_impact",
+      "section": "unit",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOGGABLE",
+      "co_verified_by": [
+        "PROJ.1.3.charge_impact"
+      ],
+      "status_note": "Ligne IMPACTED complète (seuil, jet, MW). 4+→1MW et 'cible dans l'engagement' vérifiables."
+    },
+    {
+      "id": "unit.closest_target_penetration",
+      "source": "config/unit_rules.json",
+      "label": "closest_target_penetration",
+      "section": "unit",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT",
+      "co_verified_by": [
+        "PROJ.1.2.closest_target_penetration"
+      ],
+      "status_note": "AP non loggué."
+    },
+    {
+      "id": "unit.cp_gain_on_objective",
+      "source": "config/unit_rules.json",
+      "label": "cp_gain_on_objective",
+      "section": "unit",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOGGABLE",
+      "co_verified_by": [
+        "PROJ.1.9.cp_gain_on_objective"
+      ],
+      "status_note": "CP1=/CP2= dans l'instantané. Gain GLOBAL, 1 CP max."
+    },
+    {
+      "id": "unit.adrenalised_onslaught",
+      "source": "config/unit_rules.json",
+      "label": "adrenalised_onslaught",
+      "section": "unit",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "status_note": "§1.7 rule-choice (source)."
+    },
+    {
+      "id": "unit.aggression_imperative",
+      "source": "config/unit_rules.json",
+      "label": "aggression_imperative",
+      "section": "unit",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "status_note": "§1.7 rule-choice (effet, alias reroll_1_tohit_fight)."
+    },
+    {
+      "id": "unit.preservation_imperative",
+      "source": "config/unit_rules.json",
+      "label": "preservation_imperative",
+      "section": "unit",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "status_note": "§1.7 rule-choice (effet, alias reroll_1_save_fight)."
+    },
+    {
+      "id": "unit.adaptable_predators",
+      "source": "config/unit_rules.json",
+      "label": "adaptable_predators",
+      "section": "unit",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "status_note": "§1.7 (parapluie)."
+    },
+    {
+      "id": "unit.adaptable_predators_sflee",
+      "source": "config/unit_rules.json",
+      "label": "adaptable_predators_shoot_after_flee",
+      "section": "unit",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "status_note": "Alias → shoot_after_flee."
+    },
+    {
+      "id": "unit.adaptable_predators_cflee",
+      "source": "config/unit_rules.json",
+      "label": "adaptable_predators_charge_after_flee",
+      "section": "unit",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "status_note": "Alias → charge_after_flee."
+    },
+    {
+      "id": "unit.cunning_hunters",
+      "source": "config/unit_rules.json",
+      "label": "cunning_hunters",
+      "section": "unit",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "status_note": "§1.7 (parapluie)."
+    },
+    {
+      "id": "unit.cunning_hunters_sadvance",
+      "source": "config/unit_rules.json",
+      "label": "cunning_hunters_shoot_after_advance",
+      "section": "unit",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "status_note": "Alias."
+    },
+    {
+      "id": "unit.cunning_hunters_sflee",
+      "source": "config/unit_rules.json",
+      "label": "cunning_hunters_shoot_after_flee",
+      "section": "unit",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "status_note": "Alias."
+    },
+    {
+      "id": "unit.targeted_intercession",
+      "source": "config/unit_rules.json",
+      "label": "targeted_intercession",
+      "section": "unit",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "status_note": "§1.7 (parapluie)."
+    },
+    {
+      "id": "unit.targeted_intercession_r1tw",
+      "source": "config/unit_rules.json",
+      "label": "targeted_intercession_reroll_1_towound",
+      "section": "unit",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "status_note": "Alias."
+    },
+    {
+      "id": "unit.targeted_intercession_rtotoj",
+      "source": "config/unit_rules.json",
+      "label": "targeted_intercession_reroll_towound_target_on_objective",
+      "section": "unit",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "status_note": "Alias."
+    },
+    {
+      "id": "unit.target_priority",
+      "source": "config/unit_rules.json",
+      "label": "target_priority",
+      "section": "unit",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "status_note": "Aucun grants_rule_ids déclaré. §1.7 comptera les effets INVALID."
+    },
+    {
+      "id": "unit.oath_of_moment",
+      "source": "config/unit_rules.json",
+      "label": "oath_of_moment",
+      "section": "unit",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "co_verified_by": [
+        "PROJ.1.2.oath_target",
+        "PROJ.1.2.blessure",
+        "PROJ.1.4.blessure"
+      ],
+      "status_note": "Activations comptées en §1.7. Token [OATH OF MOMENT] gate l'application, oath_wound=+X fixe la magnitude. Ce qui reste : que la cible visée soit bien oath_target."
+    },
+    {
+      "id": "unit.waaagh",
+      "source": "config/unit_rules.json",
+      "label": "waaagh",
+      "section": "unit",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "status_note": "§1.7 + waaagh_melee_atk dans le plafond de mêlée + waaagh_melee_str dans le seuil de blessure. waaagh_invul (5++) journalisé sans alimenter aucun contrôle."
+    },
+    {
+      "id": "unit.deep_strike",
+      "source": "config/unit_rules.json",
+      "label": "deep_strike",
+      "section": "unit",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "PARTIEL",
+      "co_verified_by": [
+        "24.09"
+      ],
+      "status_note": "Cf. 24.09."
+    },
+    {
+      "id": "unit.leader",
+      "source": "config/unit_rules.json",
+      "label": "leader",
+      "section": "unit",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT",
+      "co_verified_by": [
+        "PROJ.1.9.leader"
+      ]
+    },
+    {
+      "id": "unit.support",
+      "source": "config/unit_rules.json",
+      "label": "support",
+      "section": "unit",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT",
+      "co_verified_by": [
+        "PROJ.1.9.support"
+      ]
+    },
+    {
+      "id": "unit.feel_no_pain",
+      "source": "config/unit_rules.json",
+      "label": "feel_no_pain",
+      "section": "unit",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "ABSENT_LOG_MANQUANT",
+      "co_verified_by": [
+        "PROJ.1.9.feel_no_pain"
+      ]
+    },
+    {
+      "id": "unit.special_weapon",
+      "source": "config/unit_rules.json",
+      "label": "special_weapon",
+      "section": "unit",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "NON_VERIFIABLE",
+      "status_note": "Marqueur de rôle."
+    },
+    {
+      "id": "unit.sergeant",
+      "source": "config/unit_rules.json",
+      "label": "sergeant",
+      "section": "unit",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "NON_VERIFIABLE",
+      "status_note": "Marqueur de rôle."
+    }
   ]
 }
