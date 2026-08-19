@@ -1011,6 +1011,20 @@ class StepLogger:
             # ne le porte, l'analyzer peut l'aiguiller sans risque de collision.
             return f"{unit_label} RESERVES TIMEOUT (20.04)"
 
+        elif action_type == "dead":
+            # Mort par-figurine explicite — émis par destroy_model pour toute cause, pour que
+            # chaque disparition soit traçable dans step.log. Le verbe `DEAD` + model_id + reason
+            # est unique et ne collisionne avec aucun autre token existant. Le segment [MODELS:]
+            # qui suit reflète les survivants de l'escouade (lu live au flush, APRÈS la mort) :
+            # c'est correct — cet event représente la mort en tant que fait accompli.
+            model_id = details.get("model_id") if details else None
+            reason = details.get("reason") if details else None
+            if not model_id:
+                raise KeyError("Dead action missing required model_id")
+            if not reason:
+                raise KeyError("Dead action missing required reason")
+            return f"Unit {unit_id} DEAD model={model_id} reason={reason}"
+
         elif action_type == "shoot":
             if "target_id" not in details:
                 raise KeyError("Shoot action missing required target_id")

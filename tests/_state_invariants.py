@@ -77,6 +77,11 @@ def turn_state_invariants() -> Dict[str, Any]:
         # silencieux `game_state["current_turn"] ... else 1` — une cle qui n'a jamais existe et
         # qui datait toutes les lignes pile-in/consolidation de step.log au tour 1.
         "turn": 1,
+        # Journal d'actions — requis par append_action_log (action_log_seq absent = KeyError).
+        # destroy_model émet désormais un event "dead" via append_action_log : tout game_state
+        # de test qui appelle destroy_model doit porter ces deux clés.
+        "action_logs": [],
+        "action_log_seq": 0,
         # Stock de CP des deux joueurs (regle 08.02), lu en `require_key` par
         # `gain_command_points` (cascade command) et par l'observation. `reset()` le pose a
         # `initial_command_points(config)` = 0, puis la cascade command du tour 1 accorde le CP
