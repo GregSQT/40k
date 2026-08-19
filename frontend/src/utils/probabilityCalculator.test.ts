@@ -6,6 +6,7 @@
 import { describe, expect, it } from "vitest";
 import type { Unit } from "../types/game";
 import {
+  buildTargetPreviewStats,
   calculateCombatHitProbability,
   calculateCombatOverallProbability,
   calculateCombatSaveProbability,
@@ -14,6 +15,7 @@ import {
   calculateOverallProbability,
   calculateSaveProbability,
   calculateWoundProbability,
+  getSelectedRangedWeaponAgainstTarget,
 } from "./probabilityCalculator";
 
 function pct(n: number, d: number) {
@@ -201,5 +203,68 @@ describe("calculateCombatHitProbability / Wound / Save / Overall (mêlée)", () 
     const wound = calculateCombatWoundProbability(atk, def) / 100;
     const fail = calculateCombatSaveProbability(atk, def) / 100;
     expect(calculateCombatOverallProbability(atk, def)).toBeCloseTo(hit * wound * fail * 100, 4);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildTargetPreviewStats — fonction pure testable hors effet de blink
+// ---------------------------------------------------------------------------
+
+describe("buildTargetPreviewStats", () => {
+  it("projette les champs de RangedWeaponEffectiveness sans blinkTimer", () => {
+    const shooter = makeShooter(3, 4, 0);
+    const target = makeTarget(4, 5);
+    const rangedEff = getSelectedRangedWeaponAgainstTarget(shooter, target);
+    if (!rangedEff) throw new Error("rangedEff inattendu null");
+
+    const stats = buildTargetPreviewStats(1, 2, rangedEff);
+
+    expect(stats.shooterId).toBe(1);
+    expect(stats.targetId).toBe(2);
+    expect(stats.hitProbability).toBe(rangedEff.hitProbability);
+    expect(stats.woundProbability).toBe(rangedEff.woundProbability);
+    expect(stats.saveProbability).toBe(rangedEff.saveProbability);
+    expect(stats.overallProbability).toBe(rangedEff.overallProbability);
+    expect(stats.potentialDamage).toBe(rangedEff.potentialDamage);
+    expect(stats.expectedDamage).toBe(rangedEff.expectedDamage);
+    expect("blinkTimer" in stats).toBe(false);
+  });
+
+  it("overallProbability = hitProb × woundProb × (1 - saveProb)", () => {
+    const shooter = makeShooter(4, 5, 1);
+    const target = makeTarget(4, 4);
+    const rangedEff = getSelectedRangedWeaponAgainstTarget(shooter, target);
+    if (!rangedEff) throw new Error("rangedEff inattendu null");
+
+    const stats = buildTargetPreviewStats(10, 20, rangedEff);
+    const expected =
+      stats.hitProbability * stats.woundProbability * (1 - stats.saveProbability);
+
+    expect(stats.overallProbability).toBeCloseTo(expected, 10);
+  });
+
+  it("expectedDamage = overallProbability × potentialDamage", () => {
+    const shooter = makeShooter(3, 6, 2);
+    const target = makeTarget(5, 3);
+    const rangedEff = getSelectedRangedWeaponAgainstTarget(shooter, target);
+    if (!rangedEff) throw new Error("rangedEff inattendu null");
+
+    const stats = buildTargetPreviewStats(5, 7, rangedEff);
+    expect(stats.expectedDamage).toBeCloseTo(
+      stats.overallProbability * stats.potentialDamage,
+      10
+    );
+  });
+
+  it("cible avec invulnérable meilleur que l'armure : saveProbability reflète le jet invul", () => {
+    // Invul 4+ (invulSave=4) vs armure 3+ pénétrée par AP=2 → modifiedArmor=5, invul gagne
+    const shooter = makeShooter(3, 4, 2);
+    const target = makeTarget(4, 3, 4);
+    const rangedEff = getSelectedRangedWeaponAgainstTarget(shooter, target);
+    if (!rangedEff) throw new Error("rangedEff inattendu null");
+
+    const stats = buildTargetPreviewStats(1, 2, rangedEff);
+    // saveProb = (7-4)/6 = 0.5
+    expect(stats.saveProbability).toBeCloseTo(3 / 6, 10);
   });
 });

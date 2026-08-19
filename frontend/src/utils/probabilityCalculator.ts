@@ -207,6 +207,42 @@ export function getSelectedRangedWeaponAgainstTarget(
   return { weapon, index, ...effectiveness };
 }
 
+export interface TargetPreviewStats {
+  shooterId: number;
+  targetId: number;
+  hitProbability: number;
+  woundProbability: number;
+  saveProbability: number;
+  overallProbability: number;
+  potentialDamage: number;
+  expectedDamage: number;
+}
+
+export function buildTargetPreviewStats(
+  shooterId: number,
+  targetId: number,
+  rangedEff: Pick<
+    RangedWeaponEffectiveness,
+    | "hitProbability"
+    | "woundProbability"
+    | "saveProbability"
+    | "overallProbability"
+    | "potentialDamage"
+    | "expectedDamage"
+  >
+): TargetPreviewStats {
+  return {
+    shooterId,
+    targetId,
+    hitProbability: rangedEff.hitProbability,
+    woundProbability: rangedEff.woundProbability,
+    saveProbability: rangedEff.saveProbability,
+    overallProbability: rangedEff.overallProbability,
+    potentialDamage: rangedEff.potentialDamage,
+    expectedDamage: rangedEff.expectedDamage,
+  };
+}
+
 // ✅ NEW: Combat-specific probability calculation functions
 export function calculateCombatHitProbability(attacker: Unit): number {
   // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Get ATK from selected melee weapon

@@ -35,7 +35,10 @@ import { cubeDistance, cubeToOffset, offsetToCube } from "../utils/gameHelpers";
 import { toPlanArray, toPlanArrayWithOrientation } from "../utils/modelPlan";
 import { addHexKeysToSet } from "../utils/movePoolRefsSync";
 import { normalizeMaskLoopsFromApi } from "../utils/movePreviewFootprintMaskLoops";
-import { getSelectedRangedWeaponAgainstTarget } from "../utils/probabilityCalculator";
+import {
+  buildTargetPreviewStats,
+  getSelectedRangedWeaponAgainstTarget,
+} from "../utils/probabilityCalculator";
 import { selectReserveUnits, shouldWarnReservesLastRound } from "../utils/strategicReservesUi";
 
 // Get max_turns from config instead of hardcoded fallback
@@ -1541,12 +1544,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             if (!prevPreview) return null;
             return {
               ...prevPreview,
-              hitProbability: rangedEff.hitProbability,
-              woundProbability: rangedEff.woundProbability,
-              saveProbability: rangedEff.saveProbability,
-              overallProbability: rangedEff.overallProbability,
-              potentialDamage: rangedEff.potentialDamage,
-              expectedDamage: rangedEff.expectedDamage,
+              ...buildTargetPreviewStats(prevPreview.shooterId, prevPreview.targetId, rangedEff),
             };
           });
         }
@@ -7625,27 +7623,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         );
       }
 
-      const hitProbability = rangedEff.hitProbability;
-      const woundProbability = rangedEff.woundProbability;
-      const saveProbability = rangedEff.saveProbability;
-      const potentialDamage = rangedEff.potentialDamage;
-
-      const overallProbability = hitProbability * woundProbability * (1 - saveProbability);
-      const expectedDamage = overallProbability * potentialDamage;
-
-      // Create target preview with blinking animation
       const preview = {
-        shooterId: numericShooterId,
-        targetId: numericTargetId,
+        ...buildTargetPreviewStats(numericShooterId, numericTargetId, rangedEff),
         currentBlinkStep: 0,
         totalBlinkSteps: 2,
         blinkTimer: null as number | null,
-        hitProbability,
-        woundProbability,
-        saveProbability,
-        overallProbability,
-        potentialDamage,
-        expectedDamage,
       };
 
       // Start blinking animation with functional state updates
