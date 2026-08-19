@@ -899,7 +899,10 @@ export const BoardWithAPI: React.FC = () => {
       setRosterPickerArmies(armies);
       const availableFactions = Array.from(new Set(armies.map((army) => army.faction))).sort();
       if (availableFactions.length === 0) throw new Error("No factions available in army list");
-      setRosterPickerSelectedFaction(availableFactions[0]);
+      const defaultFaction = availableFactions.includes("spaceMarine")
+        ? "spaceMarine"
+        : availableFactions[0];
+      setRosterPickerSelectedFaction(defaultFaction);
     } catch (err) {
       setRosterPickerError(err instanceof Error ? err.message : "Failed to load armies");
     } finally {
