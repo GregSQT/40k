@@ -14,6 +14,7 @@ import numpy as np
 from engine.combat_utils import (
     normalize_coordinates,
     get_unit_by_id,
+    require_unit_by_id,
     resolve_dice_value,
     expected_dice_value,
     set_unit_coordinates,

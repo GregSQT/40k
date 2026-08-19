@@ -10,6 +10,7 @@ from typing import Dict, List, Tuple, Any, Optional, Union
 # NOTE: Do not import is_unit_alive at top level — causes circular import
 # (combat_utils → shared_utils → phase_handlers → generic_handlers → combat_utils).
 # Use lazy import inside functions that need it.
+from engine.game_utils import require_unit_by_id  # noqa: F401 – re-export for callers
 
 # ============================================================================
 # DICE UTILITIES
