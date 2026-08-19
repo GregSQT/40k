@@ -75,7 +75,7 @@ _HAZARDOUS_SHOOT_1_MW = (
 )
 
 
-def _parse(tmp_path, monkeypatch, body: str = "", weapons_cache=None):
+def _parse(tmp_path, monkeypatch, body: str = "", weapons_cache=None, log_grammar=None):
     """Parse step.log en injectant une cache armurerie contrôlée.
 
     `parse_step_log` charge sa config via `from ai.analyzer_config import load_analyzer_config`
@@ -98,6 +98,7 @@ def _parse(tmp_path, monkeypatch, body: str = "", weapons_cache=None):
         board="cols=40 rows=40",
         objectives=_OBJECTIVES,
         units=_UNITS,
+        log_grammar=log_grammar,
     ))
     return an.parse_step_log(str(log))
 
@@ -532,5 +533,44 @@ def test_hazardous_grammar6_blesse_la_figurine_nommee_pas_la_premiere(tmp_path, 
         "1#1 (nommée dans [ALLOC_MODEL:]) doit encaisser la MW HAZARDOUS (HP=1→0 → morte). "
         "La 2e ligne qui la nomme doit déclencher alloc_model_unknown=1. "
         "alloc_model_unknown=0 signifie que 1#0 a été frappée à la place (chemin hérité)."
+    )
+
+
+# Lignes grammar 6 avec 0 BM — le moteur émet [NO ALLOC] (step_logger.py l.1205).
+# Sans le garde `if _hz_mw > 0:` (l.1743) / `elif _de_mw > 0:` (l.1788), `_alloc_model_from_line`
+# est appelé sur une ligne sans `[ALLOC_MODEL:]` → ValueError (grammar >= 2 l'exige) → crash.
+_HAZARDOUS_0_MW = (
+    "[10:00:02] E1 T1 P1 SHOOTING : Unit 1(20,20) SUFFERS 0 Mortal Wounds [HAZARDOUS] "
+    "[NO ALLOC] [R:+0.0] [SUCCESS]\n"
+)
+_DESPERATE_ESCAPE_0_MW = (
+    "[10:00:02] E1 T1 P1 MOVE : Unit 1(20,20) SUFFERS 0 Mortal Wounds [DESPERATE ESCAPE] "
+    "[NO ALLOC] [R:+0.0] [SUCCESS]\n"
+)
+
+
+def test_hazardous_0_mw_no_crash_no_damage_grammar6(tmp_path, monkeypatch):
+    """VERROU : garde `if _hz_mw > 0:` (analyzer_core.py l.1743) — 0 BM ne crashe pas.
+
+    Sans le garde : grammar=6 → `_alloc_model_from_line` reçoit `[NO ALLOC]`, ne trouve pas
+    `[ALLOC_MODEL:]`, grammar >= 2 → ValueError → crash de parse_step_log.
+    Avec le garde : bloc dégâts entièrement sauté, HP inchangé, pas de parse_errors.
+    """
+    stats = _parse(tmp_path, monkeypatch, _HAZARDOUS_0_MW, log_grammar=6)
+    assert stats["parse_errors"] == [], "0 BM HAZARDOUS ne doit générer aucune parse_error"
+    assert stats["hazardous_mortal_wounds"][1] == 0, "0 BM HAZARDOUS ne doit pas modifier le compteur"
+
+
+def test_desperate_escape_0_mw_no_crash_no_damage_grammar6(tmp_path, monkeypatch):
+    """VERROU : garde `elif _de_mw > 0:` (analyzer_core.py l.1788) — 0 BM ne crashe pas.
+
+    Sans le garde : grammar=6 → `_alloc_model_from_line` reçoit `[NO ALLOC]`, ne trouve pas
+    `[ALLOC_MODEL:]`, grammar >= 2 → ValueError → crash de parse_step_log.
+    Avec le garde : bloc dégâts entièrement sauté, HP inchangé, pas de parse_errors.
+    """
+    stats = _parse(tmp_path, monkeypatch, _DESPERATE_ESCAPE_0_MW, log_grammar=6)
+    assert stats["parse_errors"] == [], "0 BM DESPERATE ESCAPE ne doit générer aucune parse_error"
+    assert stats["hazardous_mortal_wounds"][1] == 0, (
+        "DESPERATE ESCAPE ne doit jamais incrémenter hazardous_mortal_wounds"
     )
 
