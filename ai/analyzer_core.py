@@ -23,6 +23,14 @@ from ai.analyzer_phases.fight_handler import handle_fight, handle_fight_move
 PLAYER_ONE_ID = 1
 PLAYER_TWO_ID = 2
 
+# Seuil (en lignes de log) entre deux appels à `_resync_living_models` avec `removed != {}`
+# pour la même unité, en-dessous duquel on considère qu'ils appartiennent à la même activation
+# (DEAD-before-SHOOT artifact) et on ACCUMULE les positions. Au-delà, on REMPLACE (nouvelle
+# activation cross-turn). Les DEAD-lines d'une même attaque sont espacées de 1 à ~10 lignes
+# (interleaving possible entre cibles d'un BLAST) ; deux activations FIGHT séparées ont
+# toujours au moins une phase complète entre elles (50+ lignes en pratique).
+_DEAD_POS_SAME_ACTIVATION_THRESHOLD = 20
+
 
 
 #: Token(s) de capacité OPTIONNELS entre un verbe et son complément (`[WAAAGH!]`, `[FLY]`, …).
@@ -345,17 +353,28 @@ def _resync_living_models(
         # c'est l'état de la ligne N-1, qui est bien celui qu'avait la cible quand le moteur
         # a décidé. Les socles absents de cette carte sont ignorés (position inconnue).
         _cur_pos = state.positions_by_model.get(unit_id, {})  # get allowed
+        # Intra-activation (DEAD-before-SHOOT) : plusieurs DEAD-lines consécutives pour la même
+        # attaque doivent s'ACCUMULER (chaque ligne ne retire qu'un socle). Cross-activation
+        # (deux FIGHT séparés sans MOVE/freeze entre-deux) : la deuxième série doit REMPLACER
+        # la première pour ne pas réinjecter des positions périmées dans freeze_select_targets.
+        # Heuristique : si la dernière écriture pour cette unité date de plus de
+        # _DEAD_POS_SAME_ACTIVATION_THRESHOLD lignes, c'est une nouvelle activation.
+        _last_line = state.dead_model_positions_episode_line.get(unit_id, -_DEAD_POS_SAME_ACTIVATION_THRESHOLD - 1)
+        if state.line_number - _last_line > _DEAD_POS_SAME_ACTIVATION_THRESHOLD:
+            state.dead_model_positions_episode[unit_id] = {}
         _dead_pos = state.dead_model_positions_episode.setdefault(unit_id, {})
         for _mid in removed:
             _p = _cur_pos.get(_mid)  # get allowed
             if _p is not None:
                 _dead_pos[_mid] = _p
+        state.dead_model_positions_episode_line[unit_id] = state.line_number
     else:
         # Aucune mort nouvelle : l'unité vient de bouger / attendre avec tous ses socles intacts.
         # Les positions accumulées dans dead_model_positions_episode proviennent d'activations
         # précédentes et sont périmées — elles provoqueraient des faux engagements dans
         # freeze_select_targets si elles n'étaient pas purgées ici.
         state.dead_model_positions_episode.pop(unit_id, None)
+        state.dead_model_positions_episode_line.pop(unit_id, None)
     _sync_front_hp(state, config, unit_id)
 
 
