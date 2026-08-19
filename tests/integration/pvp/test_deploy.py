@@ -103,6 +103,14 @@ def _median_cell(cells: Set[Tuple[int, int]]) -> Tuple[int, int]:
     return sorted_cells[len(sorted_cells) // 2]
 
 
+def _first_multimodel_unit(client: GameClient, player: int) -> Optional[str]:
+    """Première unité de `player` avec >= 2 figurines (None si aucune)."""
+    return next(
+        (u for u in _deployable_for(client, player) if len(client.models_of(u)) >= 2),
+        None,
+    )
+
+
 def _generate_and_commit(client: GameClient, unit_id: str, player: int) -> Dict[str, Any]:
     """Génère une formation compacte et la committe pour une unité.
 
@@ -208,10 +216,10 @@ class TestDeployModelDestinations:
         appliqué à la zone de déploiement au lieu d'un budget de mouvement.
         """
         player = _current_deployer(deploy_game)
-        unit_id = _deployable_for(deploy_game, player)[0]
+        unit_id = _first_multimodel_unit(deploy_game, player)
+        if unit_id is None:
+            pytest.skip("aucune unité multi-figurine disponible pour ce joueur")
         models = deploy_game.models_of(unit_id)
-        if len(models) < 2:
-            pytest.skip("unité mono-figurine, pas de sœur à poser")
         first, second = models[0], models[1]
 
         # Destinations sans plan provisoire.
@@ -229,6 +237,67 @@ class TestDeployModelDestinations:
         assert [taken[0], taken[1], taken[2]] not in blocked, (
             f"la case {taken[:2]} occupée par la sœur {first} reste proposée à {second}"
         )
+
+
+class TestDeploySquadDestinations:
+    """deploy_squad_destinations : ancres légales pour le bloc entier (translation rigide)."""
+
+    def test_squad_destinations_subset_of_zone(self, deploy_game):
+        """t3a_squad_dest_zone : toutes les ancres renvoyées gardent le bloc dans la zone.
+
+        Flux : génère une formation provisoire (deploy_generate_formation), puis demande
+        deploy_squad_destinations avec ce plan. Chaque ancre candidate [col, row] doit
+        appartenir à la zone de déploiement — par construction de l'érosion BFS.
+        """
+        player = _current_deployer(deploy_game)
+        unit_id = _first_multimodel_unit(deploy_game, player)
+        if unit_id is None:
+            pytest.skip("aucune unité multi-figurine disponible pour ce joueur")
+        zone = _deployment_zone(deploy_game, player)
+
+        center_col, center_row = _median_cell(zone)
+        plan = deploy_game.act(
+            "deploy_generate_formation",
+            unitId=unit_id,
+            destCol=center_col,
+            destRow=center_row,
+        )["result"]["plan"]
+        assert plan, "deploy_generate_formation n'a rien renvoyé"
+
+        body = deploy_game.act("deploy_squad_destinations", plan=plan)
+        destinations = body["result"]["destinations"]
+        assert destinations, "deploy_squad_destinations a renvoyé un pool vide"
+        for col, row in destinations:
+            assert (int(col), int(row)) in zone, (
+                f"ancre ({col}, {row}) hors zone de déploiement du joueur {player}"
+            )
+
+    def test_squad_destinations_requires_plan(self, deploy_game):
+        """t3a_squad_dest_plan_requis : appel sans plan → refus HTTP 400."""
+        accepted, body = deploy_game.try_act("deploy_squad_destinations")
+        assert not accepted
+        assert "error" in body or body.get("_status") == 400
+
+    def test_squad_destinations_non_empty_for_center_formation(self, deploy_game):
+        """t3a_squad_dest_non_vide : une formation centrée produit au moins une ancre candidate.
+
+        Si l'érosion retourne 0 destination pour un bloc centré dans la zone, soit la zone
+        est trop petite pour le bloc (invariant de scénario), soit l'érosion est cassée.
+        """
+        player = _current_deployer(deploy_game)
+        unit_id = _first_multimodel_unit(deploy_game, player)
+        if unit_id is None:
+            pytest.skip("aucune unité multi-figurine disponible pour ce joueur")
+        zone = _deployment_zone(deploy_game, player)
+        center_col, center_row = _median_cell(zone)
+        plan = deploy_game.act(
+            "deploy_generate_formation",
+            unitId=unit_id,
+            destCol=center_col,
+            destRow=center_row,
+        )["result"]["plan"]
+        body = deploy_game.act("deploy_squad_destinations", plan=plan)
+        assert len(body["result"]["destinations"]) > 0
 
 
 class TestDeployGenerateFormation:

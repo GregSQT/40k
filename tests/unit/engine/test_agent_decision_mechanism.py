@@ -665,6 +665,72 @@ def test_human_flow_is_untouched():
     assert gs["active_rule_choice_prompt"] is not None
 
 
+def test_select_rule_choice_resolves_human_prompt():
+    """PvP : `select_rule_choice` applique le choix et vide le prompt actif.
+
+    Chemin humain : `_emit_next_rule_choice_prompt_if_needed` pose `active_rule_choice_prompt`
+    (pas de décision agent). `_handle_select_rule_choice_action` le consomme et applique l'effet.
+    """
+    gs = _game_state([_unit(1, 1, 5, 10, [dict(CHOICE_RULE)])])
+    gs["player_types"] = {"1": "human", "2": "ai"}
+    engine = _engine(gs, gym_training_mode=False)
+    engine._initialize_rule_choice_runtime_state()
+    engine._enqueue_rule_choice_candidates(
+        trigger="phase_start", event_phase="fight", event_player=1
+    )
+    engine._emit_next_rule_choice_prompt_if_needed()
+    assert gs["active_rule_choice_prompt"] is not None
+
+    success, result = engine._handle_select_rule_choice_action(
+        {"action": "select_rule_choice", "unitId": "1", "player": 1,
+         "selectedRuleId": "aggression_imperative"}
+    )
+
+    assert success is True
+    assert result["action"] == "select_rule_choice"
+    assert result["selectedRuleId"] == "aggression_imperative"
+    assert gs["active_rule_choice_prompt"] is None
+    assert gs["pending_rule_choice_queue"] == []
+    assert gs["units"][0]["UNIT_RULES"][0].get("_selected_granted_rule_id") == "aggression_imperative"
+
+
+def test_select_rule_choice_without_active_prompt_returns_error():
+    """Sans prompt actif, `select_rule_choice` retourne `no_active_rule_choice_prompt`."""
+    gs = _game_state([_unit(1, 1, 5, 10, [dict(CHOICE_RULE)])])
+    gs["player_types"] = {"1": "human", "2": "ai"}
+    engine = _engine(gs, gym_training_mode=False)
+    engine._initialize_rule_choice_runtime_state()
+
+    success, result = engine._handle_select_rule_choice_action(
+        {"action": "select_rule_choice", "unitId": "1", "player": 1,
+         "selectedRuleId": "aggression_imperative"}
+    )
+
+    assert success is False
+    assert result["error"] == "no_active_rule_choice_prompt"
+
+
+def test_select_rule_choice_wrong_unit_returns_error():
+    """Envoyer le choix pour une unité qui n'est pas dans la queue → `rule_choice_wrong_unit`."""
+    gs = _game_state([_unit(1, 1, 5, 10, [dict(CHOICE_RULE)])])
+    gs["player_types"] = {"1": "human", "2": "ai"}
+    engine = _engine(gs, gym_training_mode=False)
+    engine._initialize_rule_choice_runtime_state()
+    engine._enqueue_rule_choice_candidates(
+        trigger="phase_start", event_phase="fight", event_player=1
+    )
+    engine._emit_next_rule_choice_prompt_if_needed()
+
+    success, result = engine._handle_select_rule_choice_action(
+        {"action": "select_rule_choice", "unitId": "99", "player": 1,
+         "selectedRuleId": "aggression_imperative"}
+    )
+
+    assert success is False
+    assert result["error"] == "rule_choice_wrong_unit"
+    assert result["expected_unit_id"] == "1"
+
+
 def test_clearing_a_decision_reopens_the_normal_mask():
     gs = _game_state([_unit(1, 1, 5, 10, [])])
     engine = _engine(gs)
