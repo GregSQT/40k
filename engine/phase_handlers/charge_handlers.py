@@ -106,14 +106,22 @@ def _charge_fly_active(
     return _charge_fly_declared(game_state, unit, unit_id)
 
 
-def _charge_budget_subhex(game_state: Dict[str, Any], unit_id: str, charge_roll_inches: int) -> int:
+def _charge_budget_subhex(
+    game_state: Dict[str, Any],
+    unit_id: str,
+    charge_roll_inches: int,
+    *,
+    unit: Optional[Dict[str, Any]] = None,
+) -> int:
     """Budget de mouvement de charge en sous-hex = jet 2D6 (pouces) × ``inches_to_subhex``, moins
     2" (Règles 21.03) si le vol est déclaré pour ce mouvement. Source unique des sites de calcul de
     distance de charge — y compris `charge_build_valid_plan`, le chemin d'exécution de l'agent.
 
     La déclaration lue est celle de `_charge_fly_active` : traverser et payer sont indissociables.
+    Passer ``unit=`` évite un ``get_unit_by_id`` redondant quand l'appelant le possède déjà.
     """
-    unit = get_unit_by_id(game_state, unit_id)
+    if unit is None:
+        unit = get_unit_by_id(game_state, unit_id)
     if unit is None:
         raise KeyError(f"_charge_budget_subhex: unité {unit_id!r} introuvable")
     ish = int(game_state["inches_to_subhex"])
@@ -2529,7 +2537,7 @@ def charge_model_plan_state(
     target_ids = list(_stored) if isinstance(_stored, (list, tuple)) else [_stored]
     _charge_roll = game_state["charge_roll_values"][unit_id]
     # Take to the skies (21.03) : -2" sur la distance max de charge si le vol est déclaré.
-    roll_subhex = _charge_budget_subhex(game_state, unit_id, _charge_roll)
+    roll_subhex = _charge_budget_subhex(game_state, unit_id, _charge_roll, unit=unit)
     # Take to the skies (21.03) : vol actif → BFS/champ de distance ignorent tout (traversée libre).
     fly_active = _charge_fly_active(game_state, unit, unit_id)
 
@@ -2891,7 +2899,7 @@ def charge_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> Tupl
             charge_roll = roll_charge_distance(game_state, unit_id)
             game_state["charge_roll_values"][unit_id] = charge_roll
         # Take to the skies (21.03) : -2" sur la distance max si le vol est déclaré (borne les cibles éligibles).
-        max_distance_subhex = _charge_budget_subhex(game_state, unit_id, charge_roll)
+        max_distance_subhex = _charge_budget_subhex(game_state, unit_id, charge_roll, unit=unit)
 
     # Build valid targets : bornées par la distance jetée en roll-first, sinon par charge_max_distance.
     _t_bvt0 = time.perf_counter() if _perf else None
@@ -2908,7 +2916,7 @@ def charge_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> Tupl
         game_state.setdefault("_charge_initial_rolls", {})[str(unit_id)] = charge_roll
         charge_roll = roll_charge_distance(game_state, unit_id, previous_roll=charge_roll)
         game_state["charge_roll_values"][unit_id] = charge_roll
-        max_distance_subhex = _charge_budget_subhex(game_state, unit_id, charge_roll)
+        max_distance_subhex = _charge_budget_subhex(game_state, unit_id, charge_roll, unit=unit)
         valid_targets = charge_build_valid_targets(
             game_state, unit_id, max_distance=max_distance_subhex
         )
@@ -3050,7 +3058,7 @@ def _attempt_charge_to_destination(game_state: Dict[str, Any], unit: Dict[str, A
     # Le pool peut accepter des destinations à roll+extra (décalage empreinte) ; l'ancre ne peut
     # pas dépasser le jet 2D6 sans violer §11.04 pour chaque modèle co-localisé avec l'ancre.
     if _charge_distance_metric(game_state) == "hex":
-        _roll_subhex = _charge_budget_subhex(game_state, str(unit_id), charge_roll)
+        _roll_subhex = _charge_budget_subhex(game_state, str(unit_id), charge_roll, unit=unit)
         _start_col, _start_row = require_unit_position(unit, game_state)
         _anchor_dist = _hex_distance(_start_col, _start_row, int(dest_col), int(dest_row))
         if _anchor_dist > _roll_subhex:
@@ -4373,7 +4381,7 @@ def charge_target_selection_handler(game_state: Dict[str, Any], unit_id: str, ac
         game_state["charge_roll_values"][unit_id] = charge_roll
     _charge_scale = game_state["inches_to_subhex"]
     # Take to the skies (21.03) : -2" sur la distance max de charge si le vol est déclaré.
-    charge_roll_subhex = _charge_budget_subhex(game_state, unit_id, charge_roll)
+    charge_roll_subhex = _charge_budget_subhex(game_state, unit_id, charge_roll, unit=unit)
     # Store the declared target LIST for destination selection (V11 multi-cibles).
     if "charge_target_selections" not in game_state:
         game_state["charge_target_selections"] = {}
@@ -4896,7 +4904,7 @@ def charge_preview_move_plan(
     if roll is None:
         return empty
     # Take to the skies (21.03) : -2" sur la distance max de charge si le vol est déclaré.
-    roll_subhex = _charge_budget_subhex(game_state, squad_id, roll)
+    roll_subhex = _charge_budget_subhex(game_state, squad_id, roll, unit=unit)
 
     # 1) Légalité per-fig = appartenance au pool Slice E (budget + traversée + closer + no-non-cible),
     #    les autres figs du plan servant de positions provisoires (collision intra-squad).
@@ -5054,7 +5062,7 @@ def charge_autoplace_plan(
         roll = require_key(game_state, "charge_roll_values").get(squad_id)
         if roll is None:
             raise ValueError(f"charge_autoplace_plan: jet de charge absent pour {squad_id}")
-        budget = int(_charge_budget_subhex(game_state, squad_id, roll))
+        budget = int(_charge_budget_subhex(game_state, squad_id, roll, unit=unit))
 
     ez = int(get_engagement_zone(game_state))
     board_cols = int(require_key(game_state, "board_cols"))
@@ -5755,7 +5763,7 @@ def charge_set_fly_mode_handler(game_state: Dict[str, Any], unit_id: str, action
         game_state["charge_roll_values"] if "charge_roll_values" in game_state else {}
     ).get(unit_id)
     max_distance_subhex = (
-        _charge_budget_subhex(game_state, unit_id, charge_roll) if charge_roll is not None else None
+        _charge_budget_subhex(game_state, unit_id, charge_roll, unit=unit) if charge_roll is not None else None
     )
     valid_targets = charge_build_valid_targets(game_state, unit_id, max_distance=max_distance_subhex)
     target_ids_blink = [str(t["id"]) for t in valid_targets]
