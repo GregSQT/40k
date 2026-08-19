@@ -207,7 +207,7 @@ def _shoot_state(
         "objectives": [],
         "pending_squad_shoot_intents": {
             "1": [{"model_id": "A1", "target_unit_id": "2", "weapon_index": 0,
-                   "n_attacks_resolved": 1}]
+                   "n_attacks_resolved": 1, "target_squad_size_at_declaration": 1}]
         },
     }
     return gs
@@ -264,7 +264,7 @@ def _fight_state(
         "objectives": [],
     }
     intent = {"model_id": "A1", "target_unit_id": "2", "weapon_index": 0,
-              "n_attacks_resolved": weapon_nb}
+              "n_attacks_resolved": weapon_nb, "target_squad_size_at_declaration": 1}
     # Journal de partie : les tests d'effets lisent le RÉSULTAT du jet, ceux de LOG lisent la
     # ligne émise en fin d'allocation. Les deux clés sont posées ici pour que la fixture soit
     # utilisable par `build_manual_fight_allocation`, qui journalise.

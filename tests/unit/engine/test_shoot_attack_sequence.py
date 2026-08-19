@@ -69,7 +69,7 @@ def _game_state(*, bs=4, strength=4, ap=0, dmg=1, toughness=4, armor_save=4, hp=
         "objectives": [], "units_moved": set(), "units_advanced": set(),
         "pending_squad_shoot_intents": {
             "1": [{"model_id": "A1", "target_unit_id": "2", "weapon_index": 0,
-                   "n_attacks_resolved": 1}]
+                   "n_attacks_resolved": 1, "target_squad_size_at_declaration": 1}]
         },
     }
 

@@ -90,7 +90,7 @@ def _game_state(weapon_rules, *, bs=4, dmg=1, moved_inches=0.0, shooter_hp=3, ta
         "moved_distance_by_model": {"A1": float(moved_inches) * INCHES_TO_SUBHEX},
         "pending_squad_shoot_intents": {
             "1": [{"model_id": "A1", "target_unit_id": "2", "weapon_index": 0,
-                   "n_attacks_resolved": 1}]
+                   "n_attacks_resolved": 1, "target_squad_size_at_declaration": 1}]
         },
     }
 

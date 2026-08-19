@@ -9,7 +9,7 @@ import copy
 
 import pytest
 
-from tests.integration.pvp.conftest import assert_game_states_equal
+from tests.integration.pvp._shared import assert_game_states_equal
 from tests.integration.pvp.invariants import assert_state_invariants
 
 pytestmark = pytest.mark.integration

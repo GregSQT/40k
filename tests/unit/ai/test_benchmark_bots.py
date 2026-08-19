@@ -192,7 +192,7 @@ def test_denial_bot_move_to_uncontested_objective() -> None:
     # on vérifie seulement que la construction est propre et que randomness=0.
     assert bot.randomness == 0.0
     assert isinstance(bot.PLACEMENT_WEIGHTS, dict)
-    assert len(bot.PLACEMENT_WEIGHTS) == 5
+    assert len(bot.PLACEMENT_WEIGHTS) == 7
 
 
 # ─────────────────────────────────────────────────────────────────────────────────────────────
