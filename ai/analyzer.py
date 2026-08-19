@@ -410,6 +410,9 @@ def _apply_damage_and_handle_death(
         f"models_alive={require_key(unit_models_alive, target_id)}"
     )
     if alloc_model_id is not None:
+        assert dead_model_ids_episode is not None, (
+            "dead_model_ids_episode est requis quand alloc_model_id est fourni"
+        )
         _apply_damage_to_named_model(
             target_id=target_id, attacker_id=attacker_id, alloc_model_id=alloc_model_id,
             damage=damage, player=player, turn=turn, phase=phase, line_number=line_number,
@@ -477,6 +480,7 @@ def _apply_damage_and_handle_death(
                         unit_kill_context=unit_kill_context, stats=stats,
                         positions_by_model=positions_by_model,
                         models_invalidated=models_invalidated,
+                        dead_model_ids_episode=dead_model_ids_episode,
                     )
                     return
             else:
@@ -529,7 +533,7 @@ def _apply_damage_to_named_model(
     stats: Dict[str, Any],
     positions_by_model: Optional[Dict[str, Dict[str, Tuple[int, int]]]],
     pending_model_removals: Optional[Dict[str, Set[str]]],
-    dead_model_ids_episode: Optional[Dict[str, Set[str]]] = None,
+    dead_model_ids_episode: Dict[str, Set[str]],
 ) -> None:
     """Blessure appliquée à la figurine que le moteur a NOMMÉE (`[ALLOC_MODEL:]`).
 
@@ -569,7 +573,7 @@ def _apply_damage_to_named_model(
         # correspondante. _resync_living_models retire le socle (via [MODELS:] post-mort) avant
         # que la ligne d'attaque ne soit traitée. Ce n'est pas une divergence — le moteur a bien
         # alloué à ce socle quand il était vivant. On ne compte PAS alloc_model_unknown dans ce cas.
-        if dead_model_ids_episode is not None and alloc_model_id in dead_model_ids_episode.get(target_id, set()):
+        if alloc_model_id in dead_model_ids_episode.get(target_id, set()):
             return
         stats['state_resync']['alloc_model_unknown'] += 1
         _debug_log(
