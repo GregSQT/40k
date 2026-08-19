@@ -605,7 +605,7 @@ def test_deploy_slot_routes_to_the_hex_of_that_strategy(deployment_state, slot):
 def test_reserved_deploy_slot_is_refused_never_reinterpreted(deployment_state, slot):
     """Les slots RÉSERVÉS (au-delà des stratégies définies) lèvent, ils ne se rabattent pas.
 
-    Ils existent pour que l'ajout d'une 6ᵉ stratégie ne coûte pas de retrain (V11 §0.48,
+    Ils existent pour que l'ajout d'une 8ᵉ stratégie ne coûte pas de retrain (V11 §0.48,
     arbitrage 2). Le masque ne les ouvre jamais (`open_deploy_slot_count` borne à
     `DEPLOY_STRATEGY_COUNT`) : si le décodeur en reçoit un, c'est un appel hors masque. Le
     rabattre sur une stratégie voisine déploierait dans un hex parfaitement valide, donc

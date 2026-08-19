@@ -127,7 +127,7 @@ def test_wrapper_raises_at_deployment_without_any_open_slot() -> None:
 def test_placement_never_returns_a_closed_slot(bot_cls) -> None:
     """Un slot FERME ne doit jamais etre joue.
 
-    `open_deploy_slot_count = min(5, nb_hexes_valides)` : un pool d'ingress de 2 hexes n'ouvre
+    `open_deploy_slot_count = min(7, nb_hexes_valides)` : un pool d'ingress de 2 hexes n'ouvre
     que les slots 4 et 5. Le bot ne choisit que dans ce qu'on lui passe, et l'appelant ne lui
     passe que les bits a True du masque.
     """

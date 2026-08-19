@@ -2222,11 +2222,11 @@ class ActionDecoder:
         scoring_cache: Optional[Dict[str, Any]] = None,
         with_los: bool = True,
     ) -> Dict[str, Any]:
-        """Ingrédients de score, calculés UNE fois pour les 5 stratégies.
+        """Ingrédients de score, calculés UNE fois pour les 7 stratégies.
 
-        Les 5 stratégies ne diffèrent que par l'ORDRE dans lequel elles trient ces mêmes
+        Les 7 stratégies ne diffèrent que par l'ORDRE dans lequel elles trient ces mêmes
         grandeurs. Les recalculer par stratégie (ce que faisait la version scalaire, appelée une
-        fois par action) coûtait 5 passes sur ~14 000 hexes ; ici c'est une passe vectorisée
+        fois par action) coûtait 7 passes sur ~14 000 hexes ; ici c'est une passe vectorisée
         partagée. Les valeurs sont ENTIÈRES et identiques à celles de la version scalaire —
         c'est ce qui permet à un tri lexicographique numpy de reproduire exactement l'ancien
         `max` sur tuples.
@@ -2559,7 +2559,7 @@ class ActionDecoder:
     ) -> Dict[int, Dict[str, Any]]:
         """Ce que CHAQUE slot ouvert ferait pour un INGRESS MOVE (20.04) de cette escouade.
 
-        JUMEAU EXACT de ``deployment_slot_candidates`` — mêmes 5 stratégies, mêmes colonnes de
+        JUMEAU EXACT de ``deployment_slot_candidates`` — mêmes 7 stratégies, mêmes colonnes de
         score, même contrat « un slot ouvert a un plan validé » — appliqué à une autre aire
         légale : le pool d'ingress (`ingress_setup_pool`) au lieu de la zone de déploiement.
         L'ingress EST une mise en place (03.02), donc rien de la chaîne de placement n'est
@@ -2647,12 +2647,14 @@ class ActionDecoder:
         """
         Select deployment hex using tactical criteria driven by deployment action.
 
-        Action mapping (les 5 stratégies DÉFINIES, `DEPLOY_STRATEGY_SLOTS`) :
+        Action mapping (les 7 stratégies DÉFINIES, `DEPLOY_STRATEGY_SLOTS`) :
         - 4: aggressive front
         - 5: objective pressure
         - 6: safe/cohesion
         - 7: left flank
         - 8: right flank
+        - 9: centre_hub
+        - 10: safe_rear
 
         La garde ci-dessous admet toute la plage `DEPLOY_SLOTS` (4-11) et non ces 5 seuls ids :
         un slot 9-11 est un id d'action VALIDE mais sans stratégie, et c'est le contrôle de slot

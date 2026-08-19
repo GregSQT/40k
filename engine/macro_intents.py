@@ -138,7 +138,7 @@ DEPLOY_SLOTS = range(DEPLOY_SLOT_BASE, DEPLOY_SLOT_BASE + DEPLOY_SLOT_COUNT)    
 # l'observation expose et ce que le decodeur reconnait comme un id de deploiement ; c'est CELUI-CI
 # qu'il faut prendre des qu'on enumere « les poses possibles » (poids des bots, tirages, tests).
 # Confondre les deux, c'est proposer une action que le masque n'ouvre jamais.
-DEPLOY_STRATEGY_SLOTS = range(DEPLOY_SLOT_BASE, DEPLOY_SLOT_BASE + DEPLOY_STRATEGY_COUNT)  # 4-8
+DEPLOY_STRATEGY_SLOTS = range(DEPLOY_SLOT_BASE, DEPLOY_SLOT_BASE + DEPLOY_STRATEGY_COUNT)  # 4-10
 CHOICE_SLOTS = range(CHOICE_BASE, CHOICE_BASE + CHOICE_COUNT)                       # 1101-1106
 OATH_SLOTS = range(OATH_SLOT_BASE, OATH_SLOT_BASE + OATH_SLOT_COUNT)                # 1107-1126
 ACTIVATE_SLOTS = range(ACTIVATE_SLOT_BASE, ACTIVATE_SLOT_BASE + ACTIVATE_SLOT_COUNT)  # 1127-1138
@@ -247,7 +247,7 @@ ACTION_FAMILIES = (
 def open_placement_slots(actions) -> list:
     """SOURCE UNIQUE de « quelles actions ouvertes sont des POSES » (deploiement 03.02, ingress 20.04).
 
-    Filtre sur `DEPLOY_STRATEGY_SLOTS` (4-8) et non sur `DEPLOY_SLOTS` (4-11) : seuls les
+    Filtre sur `DEPLOY_STRATEGY_SLOTS` (4-10) et non sur `DEPLOY_SLOTS` (4-11) : seuls les
     premiers portent une strategie, cf. le commentaire de leur definition. Surtout, `ACTION_WAIT`
     en est EXCLU — au deploiement il n'y est pas une attente, le jouer met l'unite en RESERVES
     STRATEGIQUES (20.01). C'est une decision de LISTE, jamais un choix de pose : tout tirage qui

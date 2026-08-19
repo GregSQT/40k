@@ -213,7 +213,7 @@ def test_engine_placement_pick_never_returns_action_wait():
     )
     assert picks <= set(mi.DEPLOY_STRATEGY_SLOTS), f"ids hors slots de stratégie : {picks}"
     # VERT VACANT : si le tirage ne rendait qu'un seul id, l'assertion ci-dessus tiendrait sans
-    # rien dire du filtre. 200 tirages sur 5 slots ouverts doivent tous les visiter.
+    # rien dire du filtre. 200 tirages sur 7 slots ouverts doivent tous les visiter.
     assert picks == set(mi.DEPLOY_STRATEGY_SLOTS), (
         f"tous les slots ouverts devraient être atteignables, obtenu {sorted(picks)}"
     )

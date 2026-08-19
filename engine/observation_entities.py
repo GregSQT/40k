@@ -610,11 +610,11 @@ K_ALLY_SLOTS = 12
 #: `N_OBJECTIVE_SLOTS` ↔ `MAX_OBJECTIVES`. La constante est recopiée ici et non importée parce
 #: que ce module est une FEUILLE (cf. `OBS_PHASE_IDS`).
 #:
-#: 8 slots pour 5 STRATÉGIES définies (`macro_intents.DEPLOY_STRATEGY_COUNT`) : c'est
-#: l'arbitrage 2 de V11 §0.48 appliqué au déploiement (élément `L11` de son inventaire). Les
-#: 3 slots en trop sont RÉSERVÉS — le masque ne les ouvre jamais (`open_deploy_slot_count` borne
-#: au nombre de stratégies), leur ligne d'observation reste nulle, et leur id d'action tombe dans
-#: la plage des cellules de move, donc `TOTAL_ACTION_SIZE` ne bouge pas. Définir une 6ᵉ stratégie
+#: 8 slots pour 7 STRATÉGIES définies (`macro_intents.DEPLOY_STRATEGY_COUNT`) : c'est
+#: l'arbitrage 2 de V11 §0.48 appliqué au déploiement (élément `L11` de son inventaire). Le
+#: slot en trop est RÉSERVÉ — le masque ne l'ouvre jamais (`open_deploy_slot_count` borne
+#: au nombre de stratégies), sa ligne d'observation reste nulle, et son id d'action tombe dans
+#: la plage des cellules de move, donc `TOTAL_ACTION_SIZE` ne bouge pas. Définir une 8ᵉ stratégie
 #: se fera alors en incrémentant `DEPLOY_STRATEGY_COUNT`, sans toucher `obs_size` ni retrain.
 #:
 #: ⚠️ Réserver ici a un sens que réserver un bit de règle n'a pas : un slot de déploiement est une
