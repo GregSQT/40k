@@ -190,9 +190,14 @@ def handle_fight(
         # suivante aurait hérité de l'effectif d'APRÈS ses pertes.
         fight_activation_key = (state.fight_phase_seq_id, fighter_id, target_id)
         attacker_player = require_key(state.unit_player, fighter_id)
+        # [TARGET_DECL:N] : effectif de la cible loggé par le moteur au SelectTargets step.
+        # Present sur toutes les lignes du groupe ; None sur les anciens logs (pré-fix).
+        _target_decl = re.search(r'\[TARGET_DECL:(\d+)\]', line)
+        _alive_override = int(_target_decl.group(1)) if _target_decl else None
         frozen_target = state.freeze_select_targets(
             state.fight_sequence_target_models, fight_activation_key, target_id, attacker_player,
             log_anchor=(target_col, target_row),
+            alive_override=_alive_override,
         )
         engagement_positions, engagement_hp, engagement_models = state.engagement_maps(
             frozen_target, target_id
@@ -337,14 +342,21 @@ def handle_fight(
                         state.fight_sequence_counts[seq_key] += 1
                     if state.fight_sequence_counts[seq_key] > cc_nb:
                         attacker_player = require_key(state.unit_player, fighter_id)
-                        stats['fight_over_cc_nb'][attacker_player] += 1
-                        fight_over_by_unit = require_key(stats, 'fight_over_cc_nb_by_unit')
-                        fight_over_by_player = require_key(fight_over_by_unit, attacker_player)
-                        if fighter_id not in fight_over_by_player:
-                            raise KeyError(f"Missing fight_over_cc_nb_by_unit for fighter_id={fighter_id}, player={attacker_player}")
-                        fight_over_by_player[fighter_id] = fight_over_by_player[fighter_id] + 1
-                        if stats['first_error_lines']['fight_over_cc_nb'][attacker_player] is None:
-                            stats['first_error_lines']['fight_over_cc_nb'][attacker_player] = {'episode': state.current_episode_num, 'line': line.strip()}
+                        if _alive_override is None:
+                            # Effectif moteur non journalisé (log antérieur à [TARGET_DECL:N]) :
+                            # l'effectif reconstruit peut diverger de l'état au SelectTargets step
+                            # (fix 2 purge les entrées périmées) → CC_NB CLEAVE possiblement
+                            # sous-estimé. Non jugeable sans la valeur originelle.
+                            stats['fight_over_cc_nb_unverifiable'][attacker_player] += 1
+                        else:
+                            stats['fight_over_cc_nb'][attacker_player] += 1
+                            fight_over_by_unit = require_key(stats, 'fight_over_cc_nb_by_unit')
+                            fight_over_by_player = require_key(fight_over_by_unit, attacker_player)
+                            if fighter_id not in fight_over_by_player:
+                                raise KeyError(f"Missing fight_over_cc_nb_by_unit for fighter_id={fighter_id}, player={attacker_player}")
+                            fight_over_by_player[fighter_id] = fight_over_by_player[fighter_id] + 1
+                            if stats['first_error_lines']['fight_over_cc_nb'][attacker_player] is None:
+                                stats['first_error_lines']['fight_over_cc_nb'][attacker_player] = {'episode': state.current_episode_num, 'line': line.strip()}
         else:
             stats['parse_errors'].append({
                 'episode': state.current_episode_num,

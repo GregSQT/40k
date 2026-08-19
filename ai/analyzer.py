@@ -1876,6 +1876,10 @@ def parse_step_log(filepath: str) -> Dict:
         'fight_dead_unit_attacker': {1: 0, 2: 0},
         'fight_dead_unit_target': {1: 0, 2: 0},
         'fight_over_cc_nb': {1: 0, 2: 0},
+        # Surplus d'attaques non vérifiable : carte de positions pré-ligne contenant un socle
+        # mort non encore resync → models_alive sous-estimé → CC_NB CLEAVE sous-estimé.
+        # Pas une vraie violation : rangé séparément pour visibilité (jumeau de shoot_range_unverifiable).
+        'fight_over_cc_nb_unverifiable': {1: 0, 2: 0},
         'double_activation_by_phase': {
             'MOVE': 0, 'SHOOT': 0, 'CHARGE': 0, 'FIGHT': 0
         },
@@ -3557,6 +3561,11 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     if bot_fight_over_cc > 0 and stats['first_error_lines']['fight_over_cc_nb'][2]:
         first_err = stats['first_error_lines']['fight_over_cc_nb'][2]
         log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    _ft_unver = require_key(stats, 'fight_over_cc_nb_unverifiable')
+    _table_row(
+        "  ↳ CC_NB non juges (socle fantome pre-ligne):",
+        _fmt_count(_ft_unver[1]), _fmt_count(_ft_unver[2]),
+    )
     _hit_result_rows(stats, "fight_hit_result", "melee")
     _wound_threshold_rows(stats, "fight_wound_threshold", "melee")
     agent_fight_alt = stats['fight_alternation_violations'][1]

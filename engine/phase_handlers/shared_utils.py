@@ -9103,6 +9103,9 @@ def _emit_squad_shoot_log(game_state: Dict[str, Any], g: Dict[str, Any], ctx: Ma
         "shooterRow": ar,
         "targetCol": tc,
         "targetRow": tr,
+        # Effectif de la cible AU SELECT TARGETS STEP (avant toute perte de l'activation).
+        # Porté dans step.log comme [TARGET_DECL:N] pour les contrôles §1.2/§1.4 de l'analyzer.
+        "targetAliveCount": int(require_key(g, "targetAliveCount")),
         "damage": g["damage"],
         "target_died": g["kills"] > 0,
         "timestamp": "server_time",
@@ -10669,6 +10672,10 @@ def _build_manual_allocation(
                 "assault_applied": bool(require_key(r, "assault_applied")),
                 "close_quarters_applied": bool(require_key(r, "close_quarters_applied")),
                 "indirect_fire_fail_below": require_key(r, "indirect_fire_fail_below"),
+                # Effectif de la CIBLE au Select Targets step : capturé sur le premier intent du
+                # groupe (valeur constante — même cible, même activation). Loggé dans step.log via
+                # [TARGET_DECL:N] pour que l'analyzer juge §1.2/§1.4 sans reconstruire cet état.
+                "targetAliveCount": int(require_key(r, "target_squad_size_at_declaration")),
             }
             # Cover (regle 13.08) : ranged-only -> present uniquement sur le chemin tir
             # (le chemin combat partage cette fonction mais ne fournit pas ces cles).
