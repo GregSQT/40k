@@ -1862,6 +1862,9 @@ def parse_step_log(filepath: str) -> Dict:
         'hazardous_mortal_wounds': {1: 0, 2: 0},
         'hazardous_no_hazardous_weapon': {1: 0, 2: 0},
         'hazardous_no_hazardous_weapon_fight': {1: 0, 2: 0},
+        # Jets Roll:1 lus sur les lignes SHOT (tir seul — FOUGHT ne porte pas ce token).
+        # Doit correspondre à `hazardous_mortal_wounds` (hors figurines déjà mortes au jet).
+        'hazardous_roll1_count': {1: 0, 2: 0},
         # Occasions JUGÉES par règle du corpus (`config/rules_corpus.json`) — le compte d'exercice
         # qui manquait à 67 des 69 contrôles. Sans lui, « 0 erreur » ne distingue pas un contrôle
         # qui n'a rien trouvé d'un contrôle qui n'a rien regardé. Déclarée d'avance, une clé par
@@ -3495,7 +3498,10 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     _hz_nw = require_key(stats, 'hazardous_no_hazardous_weapon')
     _hz_nw_fight = require_key(stats, 'hazardous_no_hazardous_weapon_fight')
     _hz_nw_total = {p: _hz_nw[p] + _hz_nw_fight[p] for p in (1, 2)}
+    _hz_roll1 = require_key(stats, 'hazardous_roll1_count')
     _table_row("MW HAZARDOUS auto-infligees (24.15):", _fmt_count(_hz_mw[1]), _fmt_count(_hz_mw[2]))
+    _table_row("  ↳ jets Roll:1 (tir) — doit = MW si aucune figurine morte au jet:",
+               _fmt_count(_hz_roll1[1]), _fmt_count(_hz_roll1[2]))
     _table_row("  ↳ sans arme HAZARDOUS en armurerie (erreur):", _fmt_count(_hz_nw_total[1]), _fmt_count(_hz_nw_total[2]))
     for _pl in (1, 2):
         if _hz_nw_total[_pl] > 0:

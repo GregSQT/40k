@@ -611,15 +611,25 @@ def handle_shoot(
     if dw_flag_match and wound_roll_match:
         wound_roll_value = int(wound_roll_match.group(1))
         shooter_player_for_dw = require_key(state.unit_player, shooter_id)
-        if wound_roll_value == 6 and save_skipped_dw_match:
+        # Seuil critique : 6 par défaut, abaissé si [ANTI-X:N+] est présent (24.03).
+        anti_crit_m = re.search(r'\[ANTI-\w+:(\d+)\+\]', action_desc, re.IGNORECASE)
+        crit_threshold = int(anti_crit_m.group(1)) if anti_crit_m else 6
+        if wound_roll_value >= crit_threshold and save_skipped_dw_match:
             stats['devastating_wounds_correct'][shooter_player_for_dw] += 1
-        elif wound_roll_value < 6 or (wound_roll_value == 6 and save_attempt_match):
+        elif wound_roll_value < crit_threshold or (wound_roll_value >= crit_threshold and save_attempt_match):
             stats['devastating_wounds_incorrect'][shooter_player_for_dw] += 1
             if stats['first_error_lines']['devastating_wounds_incorrect'][shooter_player_for_dw] is None:
                 stats['first_error_lines']['devastating_wounds_incorrect'][shooter_player_for_dw] = {
                     'episode': state.current_episode_num,
                     'line': line.strip(),
                 }
+
+    # 24.15 [HAZARDOUS] — chaque figurine avec une arme HAZARDOUS qui obtient 1 au test subit 1 BM.
+    # Compteur de validité : sumé pour être comparé à `hazardous_mortal_wounds` (SUFFERS lines).
+    _hz_roll_m = re.search(r'\[HAZARDOUS\] Roll:(\d+)', action_desc)
+    if _hz_roll_m and int(_hz_roll_m.group(1)) == 1:
+        _hz_shooter_pl = require_key(state.unit_player, shooter_id)
+        stats['hazardous_roll1_count'][int(_hz_shooter_pl)] += 1
 
     # RULE: Shoot at engaged enemy
     #
@@ -975,6 +985,62 @@ def handle_shoot(
         # ligne globale : les deux mesures restent le même nombre, ventilé ici.
         if save_skipped_dw_match:
             stats['weapon_rule_usage'][("DEVASTATING_WOUNDS", weapon_key)][pl_int] += 1
+        # [TORRENT] 24.37 — touche automatique, aucun jet de touche (Hit None(None+)).
+        # USAGE compté sur le token. VALIDITÉ : un jet numérique avec TORRENT est une erreur.
+        _torrent_m = re.search(r'\[TORRENT\]', action_desc, re.IGNORECASE)
+        if _torrent_m:
+            stats['weapon_rule_usage'][("TORRENT", weapon_key)][pl_int] += 1
+            from ai.analyzer_hit import HIT_SEGMENT_RE as _HIT_RE
+            if _HIT_RE.search(action_desc):
+                stats['parse_errors'].append({
+                    'episode': state.current_episode_num, 'turn': turn, 'phase': phase,
+                    'line': line.strip(),
+                    'error': "[TORRENT] 24.37 : jet de touche numérique inattendu — attendu Hit None(None+)",
+                })
+        # [IGNORES COVER] 24.18 — supprime le +1 de couvert (13.08). Token posé par le moteur.
+        if re.search(r'\[IGNORES COVER\]', action_desc, re.IGNORECASE):
+            stats['weapon_rule_usage'][("IGNORES_COVER", weapon_key)][pl_int] += 1
+        # [LETHAL HITS] 24.23 — touche critique → blessure automatique (Wound None).
+        # VALIDITÉ : un jet de blessure numérique avec LETHAL HITS est une erreur.
+        _lethal_m = re.search(r'\[LETHAL HITS\]', action_desc, re.IGNORECASE)
+        if _lethal_m:
+            stats['weapon_rule_usage'][("LETHAL_HITS", weapon_key)][pl_int] += 1
+            if re.search(r'\bWound\s+\d+\(\d+\+\)', action_desc):
+                stats['parse_errors'].append({
+                    'episode': state.current_episode_num, 'turn': turn, 'phase': phase,
+                    'line': line.strip(),
+                    'error': "[LETHAL HITS] 24.23 : blessure auto avec jet numérique — attendu Wound None",
+                })
+        # [EXTRA ATTACKS] — attaque du pool supplémentaire. Token sur chaque attaque du pool.
+        if re.search(r'\[EXTRA ATTACKS\]', action_desc, re.IGNORECASE):
+            stats['weapon_rule_usage'][("EXTRA_ATTACKS", weapon_key)][pl_int] += 1
+        # [ANTI-keyword:N+] 24.03 — seuil critique abaissé contre un mot-clé.
+        # VALIDITÉ : seuil du token doit correspondre au seuil déclaré dans l'armurerie.
+        _anti_m = re.search(r'\[ANTI-(\w+):(\d+)\+\]', action_desc, re.IGNORECASE)
+        if _anti_m:
+            _anti_kw = _anti_m.group(1).upper()
+            _anti_tok_thresh = int(_anti_m.group(2))
+            _anti_rule_name = f"ANTI_{_anti_kw}"
+            stats['weapon_rule_usage'][(_anti_rule_name, weapon_key)][pl_int] += 1
+            # Seuil déclaré dans l'armurerie : rules list = ["ANTI_VEHICLE:4", ...].
+            _anti_decl_thresh = None
+            for _r in require_key(weapon_info_matched, "rules"):
+                _rn, _, _rp = str(_r).partition(":")
+                if _rn.strip().upper() == _anti_rule_name and _rp:
+                    try:
+                        _anti_decl_thresh = int(_rp.strip())
+                    except (TypeError, ValueError):
+                        pass
+                    break
+            if _anti_decl_thresh is not None and _anti_tok_thresh != _anti_decl_thresh:
+                stats['parse_errors'].append({
+                    'episode': state.current_episode_num, 'turn': turn, 'phase': phase,
+                    'line': line.strip(),
+                    'error': (
+                        f"[ANTI-{_anti_kw}:{_anti_tok_thresh}+] : seuil log "
+                        f"≠ seuil armurerie ({_anti_decl_thresh}+)"
+                    ),
+                })
 
     # Target priority analysis
     #
