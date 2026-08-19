@@ -2,6 +2,9 @@
   "spaceMarine": {
     "display_name": "Space Marine"
   },
+  "ork": {
+    "display_name": "Ork"
+  },
   "tyranid": {
     "display_name": "Tyranid"
   }

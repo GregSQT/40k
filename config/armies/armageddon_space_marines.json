@@ -1,0 +1,57 @@
+{
+  "uses_codex_detachment": true,
+  "army_faction": "ADEPTUS ASTARTES",
+  "faction": "spaceMarine",
+  "display_name": "Armageddon - Space Marines",
+  "description": "• VanguardVeteranSquadJumpPack (6)\n\t• 3× Vanguard Veteran Jump Pack\n\t• 1× Sergeant\n\t• 1× Plasma\n\t• 1× Chaplain Jump Pack\n• Eradicator Heavy Bolter (3)\n\t• 2× Eradicator\n\t• 1× Sergeant\n• Land Speeder Onslaught Gatling Cannon\n• Intercessor Squad (6)\n\t• 2× Intercessor\n\t• 1× Grenade Launcher\n\t• 1× Sergeant\n\t• 1× Librarian\n• Intercessor Squad (7)\n\t• 2× Intercessor\n\t• 1× Grenade Launcher\n\t• 1× Sergeant\n\t• 1× Captain Relic Shield\n\t• 1× Ancient",
+  "primary_objectives": ["objectives_control"],
+  "deployment_zone": "mc1",
+  "deployment_type": "active",
+  "wall_ref": "walls-mc1.json",
+  "terrain_ref": "terrain-mc1.json",
+  "units": [
+    {
+      "id": 1, "unit_type": "VanguardVeteranSquadJumpPack", "player": 1, "col": 0, "row": 0,
+      "models": [
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0, "unit_type": "VanguardVeteranSquadJumpPackSergeant" },
+        { "col": 0, "row": 0, "unit_type": "VanguardVeteranSquadJumpPackPlasma" },
+        { "col": 0, "row": 0, "unit_type": "ChaplainJumpPack" }
+      ]
+    },
+    {
+      "id": 2, "unit_type": "EradicatorHeavyBolter", "player": 1, "col": 0, "row": 0,
+      "models": [
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0, "unit_type": "EradicatorHeavyBolterSergeant" }
+      ]
+    },
+    { "id": 3, "unit_type": "LandSpeederOnslaughtGatlingCannon", "player": 1, "col": 0, "row": 0 },
+    {
+      "id": 4, "unit_type": "Intercessor", "player": 1, "col": 0, "row": 0,
+      "models": [
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0, "unit_type": "IntercessorGrenadeLauncher" },
+        { "col": 0, "row": 0, "unit_type": "IntercessorSergeant" },
+        { "col": 0, "row": 0, "unit_type": "Librarian" }
+      ]
+    },
+    {
+      "id": 5, "unit_type": "Intercessor", "player": 1, "col": 0, "row": 0,
+      "models": [
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0, "unit_type": "IntercessorGrenadeLauncher" },
+        { "col": 0, "row": 0, "unit_type": "IntercessorSergeant" },
+        { "col": 0, "row": 0, "unit_type": "CaptainRelicShield" },
+        { "col": 0, "row": 0, "unit_type": "Ancient" }
+      ]
+    }
+  ]
+}

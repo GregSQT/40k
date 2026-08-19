@@ -1,0 +1,66 @@
+{
+  "uses_codex_detachment": false,
+  "army_faction": "ORKS",
+  "faction": "ork",
+  "display_name": "Armageddon - Orks",
+  "description": "• Boyz (12)\n\t• 9× Boy\n\t• 1× Nob Kombi\n\t• 1× Warboss\n\t• 1× PainBoy\n• Boyz (12)\n\t• 9× Boy\n\t• 1× Nob Kombi\n\t• 1× Bigboss\n\t• 1× BannerNob\n• Gretchin (10)\n• WeirdBoy\n• WarTrakk\n• BigMek Dakkarig",
+  "primary_objectives": ["objectives_control"],
+  "deployment_zone": "mc1",
+  "deployment_type": "active",
+  "wall_ref": "walls-mc1.json",
+  "terrain_ref": "terrain-mc1.json",
+  "units": [
+    {
+      "id": 1, "unit_type": "Boyz", "player": 1, "col": 0, "row": 0,
+      "models": [
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0, "unit_type": "BoyzNobKombi" },
+        { "col": 0, "row": 0, "unit_type": "Warboss" },
+        { "col": 0, "row": 0, "unit_type": "PainBoy" }
+      ]
+    },
+    {
+      "id": 2, "unit_type": "Boyz", "player": 1, "col": 0, "row": 0,
+      "models": [
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0, "unit_type": "BoyzNobKombi" },
+        { "col": 0, "row": 0, "unit_type": "Bigboss" },
+        { "col": 0, "row": 0, "unit_type": "BannerNob" }
+      ]
+    },
+    {
+      "id": 3, "unit_type": "Gretchin", "player": 1, "col": 0, "row": 0,
+      "models": [
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 }
+      ]
+    },
+    { "id": 4, "unit_type": "WeirdBoy", "player": 1, "col": 0, "row": 0 },
+    { "id": 5, "unit_type": "WarTrakk", "player": 1, "col": 0, "row": 0 },
+    { "id": 6, "unit_type": "BigMekDakkarig", "player": 1, "col": 0, "row": 0 }
+  ]
+}
