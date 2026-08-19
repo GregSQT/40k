@@ -157,6 +157,26 @@ class AnalyzerState:
     # d'objectif côté analyzer (par ancre, sans battle-shock). L'état 14.02 est celui du moteur,
     # lu dans la ligne `T{tour} OBJECTIVE CONTROL:` du step.log — cf. Replay.md §2.3.
 
+    #: IDs de socles retirés de `unit_model_hp` par `_resync_living_models` (log DEAD ou [MODELS:]
+    #: montrant les survivants) AVANT que la ligne d'attaque correspondante ne soit traitée.
+    #: Utilisé par `_apply_damage_to_named_model` pour distinguer ce décalage d'ordonnancement
+    #: (artifact log) d'une vraie divergence moteur/analyzer : si `alloc_model_id` est ici,
+    #: le moteur a bien ciblé ce socle — il était vivant à l'allocation — et l'analyzer ne
+    #: doit pas compter l'événement en `alloc_model_unknown`.
+    #: Réinitialisé à chaque début d'épisode. Jamais alimenté par `_apply_damage_to_named_model`
+    #: (kills explicites via attaque) : ceux-là doivent rester détectables en `alloc_model_unknown`.
+    dead_model_ids_episode: Dict[str, Set[str]] = field(default_factory=dict)
+
+    #: Positions des socles retirés par `_resync_living_models` (même artifact d'ordonnancement que
+    #: `dead_model_ids_episode`, même portée épisode). Utilisé dans `freeze_select_targets` pour
+    #: restituer la géométrie et l'effectif réels au Select Targets step :
+    #:   § 1.2 — portée jugée sur les survivants POST-DEAD au lieu des socles vivants au ST step.
+    #:   § 1.4 — effectif cible sous-évalué → [CLEAVE]/[BLAST] dés additionnels à 0 → faux CC_NB.
+    #: Clé = unit_id ; valeur = {model_id: (col, row)}.
+    #: Vidé par unité dès le premier gel de l'activation (freeze_select_targets → .pop()) pour ne
+    #: pas contaminer les gels ultérieurs (positions de morts des tours précédents).
+    dead_model_positions_episode: Dict[str, Dict[str, Tuple[int, int]]] = field(default_factory=dict)
+
     # Suivi morts
     unit_deaths: List = field(default_factory=list)
     # Contexte de la destruction d'une escouade : dead_id -> (attaquant, turn, phase).
@@ -298,11 +318,30 @@ class AnalyzerState:
         """
         frozen = store.get(key)  # get allowed
         if frozen is None:
+            # § 1.2 / 1.4 — artifact d'ordonnancement DEAD-before-SHOOT : les DEAD lines (reason=
+            # combat) sont flushées dans le log AVANT la ligne d'attaque qui les a causées. Chaque
+            # DEAD line appelle `_resync_living_models`, qui retire le socle de `unit_model_hp` et
+            # de `positions_by_model` (via `current_line_models`) AVANT que le gel ci-dessous n'ait
+            # eu lieu. Résultat : `positions_by_model_pre_line` et `models_alive_pre_line` ne voient
+            # que les survivants POST-DEAD, alors que le moteur avait ALL models vivants au Select
+            # Targets step. Conséquences mesurées :
+            #   § 1.2 — portée jugée uniquement sur le survivant le plus éloigné → faux out_of_range.
+            #   § 1.4 — effectif < 5 → [CLEAVE] dés additionnels à 0 → faux fight_over_cc_nb.
+            # Fix : `_resync_living_models` accumule les positions des socles retirés dans
+            # `dead_model_positions_episode` ; on les réintègre ici, puis on vide le dict pour cette
+            # unité (pop) afin que seule l'activation courante en bénéficie, et non les suivantes
+            # (qui sinon verraient les morts des tours précédents à des positions périmées).
+            _extra = self.dead_model_positions_episode.pop(target_id, {})  # pop : une seule activation
+            _models_raw = self.positions_by_model_pre_line.get(target_id)  # get allowed
+            if _extra:
+                _models_full: Optional[Dict[str, Tuple[int, int]]] = {**_extra, **(_models_raw or {})}
+            else:
+                _models_full = _models_raw
             frozen = SelectTargetsFreeze(
-                models_alive=require_key(self.models_alive_pre_line, target_id),
+                models_alive=require_key(self.models_alive_pre_line, target_id) + len(_extra),
                 anchor=log_anchor if log_anchor is not None else self.unit_positions_pre_line.get(target_id),  # get allowed
                 hp=self.unit_hp_pre_line.get(target_id),  # get allowed
-                models=self.positions_by_model_pre_line.get(target_id),  # get allowed
+                models=_models_full,
                 wounded_enemies=frozenset(
                     require_key(self.wounded_enemies_pre_line, int(player))
                 ),

@@ -176,3 +176,69 @@ def test_un_tir_non_jugeable_est_compte_comme_tel(tmp_path):
         "renoncement n'a pas été compté"
     )
     assert stats["shoot_invalid"][1]["out_of_range"] == 0
+
+
+# ── Quatrième journal : DEAD-before-SHOOT ──────────────────────────────────────────────────────
+# Le moteur flush la ligne DEAD AVANT la ligne de tir qui l'a causée. `_resync_living_models`
+# retire le socle de `positions_by_model` (via [MODELS:] de la DEAD line) AVANT que le gel du
+# Select Targets step ne soit construit. Sans correction, le gel ne voit que les survivants POST-
+# DEAD — ici un seul socle à 32 hex d'une arme de 24" — et déclare le tir hors portée.
+# Avec le fix (`dead_model_positions_episode`), le socle mort est réintégré dans le gel :
+# distance min = min(12, 32) = 12 ≤ 24 → pas de faux out_of_range.
+_DEAD_BEFORE_SHOOT_CLOSE = (22, 20)   # 12 hex du tireur — dans les 24"
+_DEAD_BEFORE_SHOOT_LOIN  = (42, 20)   # 32 hex            — hors portée
+
+STEP_LOG_DEAD_BEFORE_SHOOT = entete_step_log(
+    f"[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1({SHOOTER[0]},{SHOOTER[1]}) DEPLOYED from (-1,-1) "
+    f"to ({SHOOTER[0]},{SHOOTER[1]}) [R:+0.0] [MODELS: 1#0@({SHOOTER[0]},{SHOOTER[1]},z0)] [SUCCESS]\n"
+    f"[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 103({_DEAD_BEFORE_SHOOT_CLOSE[0]},{_DEAD_BEFORE_SHOOT_CLOSE[1]}) "
+    f"DEPLOYED from (-1,-1) to ({_DEAD_BEFORE_SHOOT_CLOSE[0]},{_DEAD_BEFORE_SHOOT_CLOSE[1]}) [R:+0.0] "
+    f"[MODELS: 103#0@({_DEAD_BEFORE_SHOOT_CLOSE[0]},{_DEAD_BEFORE_SHOOT_CLOSE[1]},z0) "
+    f"103#1@({_DEAD_BEFORE_SHOOT_LOIN[0]},{_DEAD_BEFORE_SHOOT_LOIN[1]},z0)] [SUCCESS]\n"
+    # DEAD line : flush AVANT la ligne de tir (artifact d'ordonnancement du moteur)
+    f"[10:00:02] E1 T1 P2 SHOOT : Unit 103({_DEAD_BEFORE_SHOOT_CLOSE[0]},{_DEAD_BEFORE_SHOOT_CLOSE[1]}) "
+    f"DEAD model=103#0 reason=combat "
+    f"[MODELS: 103#1@({_DEAD_BEFORE_SHOOT_LOIN[0]},{_DEAD_BEFORE_SHOOT_LOIN[1]},z0)] [SUCCESS]\n"
+    # La ligne de tir qui a causé la mort de 103#0 — socle à portée (12 hex) de l'arme (24")
+    f"[10:00:03] E1 T1 P1 SHOOT : Unit 1({SHOOTER[0]},{SHOOTER[1]}) "
+    f"SHOT Unit 103({_DEAD_BEFORE_SHOOT_CLOSE[0]},{_DEAD_BEFORE_SHOOT_CLOSE[1]}) "
+    f"with [Sternguard Bolt Rifle] - Hit 4(5+) - Wound 5(4+) - Save 2(5+) - Dmg:1HP [R:+0.0] "
+    f"[MODELS: 1#0@({SHOOTER[0]},{SHOOTER[1]},z0)] "
+    f"[SHOOTER_MODELS: 1#0] [ALLOC_MODEL: 103#0] [SUCCESS]\n",
+    board="cols=48 rows=60",
+    units=(
+        "[10:00:00] Unit 1 (SternguardVeteranBoltRifle) P1: Starting position (-1,-1), HP_MAX=2 base=round/1\n"
+        "[10:00:00] Unit 103 (AssaultIntercessor) P2: Starting position (-1,-1), HP_MAX=1 base=round/1\n"
+    ),
+    **{k: v for k, v in _COMMON.items() if k not in ("units",)},
+    log_grammar=2,
+)
+
+
+def test_premisse_dead_before_shoot_positions():
+    """Sans l'écart de distance, retirer 103#0 tôt ou tard rendrait le même verdict."""
+    assert _d(SHOOTER, _DEAD_BEFORE_SHOOT_CLOSE) <= 24, "le socle mort doit être À PORTÉE"
+    assert _d(SHOOTER, _DEAD_BEFORE_SHOOT_LOIN)  >  24, "le survivant doit être HORS portée"
+
+
+def test_dead_avant_shoot_n_est_pas_out_of_range(tmp_path):
+    """VERROU : DEAD line (reason=combat) avant la ligne SHOOT ne doit pas causer out_of_range.
+
+    Sans le fix (`dead_model_positions_episode`), le gel du Select Targets step ne voit que
+    103#1 à 32 hex → out_of_range=1. Avec le fix, 103#0 est réintégré → distance min=12 → 0.
+
+    Verrou prouvé : supprimer `dead_model_positions_episode` du gel → ROUGE (1 hors portée).
+    """
+    import ai.analyzer as an
+
+    log = tmp_path / "step.log"
+    log.write_text(STEP_LOG_DEAD_BEFORE_SHOOT)
+    stats = an.parse_step_log(str(log))
+    assert stats["shoot_invalid"][1]["out_of_range"] == 0, (
+        "103#0 était à 12 hex quand le moteur a jugé la portée — la DEAD line ne peut pas "
+        "rendre le tir hors portée rétroactivement"
+    )
+    assert stats["shoot_range_unverifiable"][1] == 0, (
+        "le contrôle doit avoir jugé — 0 non-vérifiable prouve qu'aucune distance n'a été "
+        "renoncée, donc l'assertion ci-dessus n'est pas un silence"
+    )
