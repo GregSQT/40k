@@ -29,7 +29,7 @@
 >   « les règles doivent être suivies ». Le masque gym appliquait déjà 10.05 ; seule la
 >   correction des PV touche l'observation de l'agent → ré-entraînement à prévoir de ce fait.
 > - T2b (phase command) et T3a (déploiement) faits : 25 tests verts, 1 skip intentionnel.
-> - Reste À FAIRE : T7, et toutes les couches B et C.
+> - Reste À FAIRE : toutes les couches B et C. T7 FAIT (2026-08-19).
 
 ---
 
@@ -454,11 +454,15 @@ Actions relevées : `fight`, `skip_fight`, `squad_fight_assign`, `squad_fight_as
       (couvert par T7b `test_a_whole_game_stays_coherent_until_game_over` : 595 actions, la
       partie va au bout, tours croissants et bornés par `max_turns`, les deux joueurs jouent
       chaque tour, `winner` cohérent avec les VP).
-- [ ] Battle-shock : `force_battle_shock` + tests LD/OC (PDF 01.07/08).
-- [ ] Snapshots/rewind : `GET /api/game/snapshots`, `timeline`, `snapshot/restore` → l'état restauré
-      est STRICTEMENT égal au state d'origine (diff JSON champ à champ).
-- [ ] Save/load : `game/save` + `save/load` → même égalité stricte.
-- [ ] Auth : accès sans token → 401 ; mode non autorisé → 403.
+- [x] Battle-shock : `force_battle_shock` + tests LD/OC (PDF 01.07/08) — 2D6 < LD → shocked,
+      2D6 >= LD → non shocked ; `test_roll_below_ld_causes_battle_shock`,
+      `test_roll_gte_ld_does_not_shock` (`test_command.py`).
+- [x] Snapshots/rewind : `GET /api/game/snapshots`, `snapshot/restore` → view vs resume champ
+      à champ sur TOUS les champs après divergence (`test_snapshot_strict_field_equality_after_many_actions`).
+- [x] Save/load : `game/save` + `save/load` → état au save vs résultat du resume, champ à champ
+      (`test_save_strict_field_equality_after_resume`).
+- [x] Auth : accès sans token → 401 ; mode non autorisé → 403 (`test_no_token_returns_401`,
+      `test_forbidden_mode_returns_403`).
 
 ### T7b — Fuzzing par invariants (la vraie garantie d'exhaustivité) — **FAIT**
 `test_fuzzing.py` (6 tests). Les tranches T2-T7 testent des scénarios CONNUS ; le fuzzing
