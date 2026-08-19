@@ -295,6 +295,7 @@ class AnalyzerState:
         target_id: str,
         player: int,
         log_anchor: Optional[Tuple[int, int]] = None,
+        alive_override: Optional[int] = None,
     ) -> SelectTargetsFreeze:
         """La cible de l'activation ``key``, figée à la PREMIÈRE ligne qui la nomme.
 
@@ -337,8 +338,13 @@ class AnalyzerState:
                 _models_full: Optional[Dict[str, Tuple[int, int]]] = {**_extra, **(_models_raw or {})}
             else:
                 _models_full = _models_raw
+            _computed_alive = require_key(self.models_alive_pre_line, target_id) + len(_extra)
+            # [TARGET_DECL:N] loggé par le moteur au SelectTargets step : prend le pas sur la
+            # valeur reconstruite quand elle est disponible (logs récents). Sans lui, l'analyzer
+            # repose sur `models_alive_pre_line` + `dead_model_positions_episode`, qui peuvent
+            # diverger de l'état moteur après fix 2 (purge des entrées périmées).
             frozen = SelectTargetsFreeze(
-                models_alive=require_key(self.models_alive_pre_line, target_id) + len(_extra),
+                models_alive=alive_override if alive_override is not None else _computed_alive,
                 anchor=log_anchor if log_anchor is not None else self.unit_positions_pre_line.get(target_id),  # get allowed
                 hp=self.unit_hp_pre_line.get(target_id),  # get allowed
                 models=_models_full,

@@ -216,9 +216,14 @@ def handle_shoot(
     # (10.06, 04.02, portée) que la première a réduits. Un seul enregistrement pour les deux :
     # cf. `SelectTargetsFreeze`, dont les deux moitiés ont déjà divergé une fois.
     shot_activation_key = (state.current_episode_num, turn, shooter_id, target_id)
+    # [TARGET_DECL:N] : effectif de la cible loggé par le moteur au SelectTargets step.
+    # Present sur toutes les lignes du groupe ; None sur les anciens logs (pré-fix).
+    _target_decl = re.search(r'\[TARGET_DECL:(\d+)\]', line)
+    _alive_override = int(_target_decl.group(1)) if _target_decl else None
     frozen_target = state.freeze_select_targets(
         state.shot_sequence_target_models, shot_activation_key, target_id, player,
         log_anchor=target_pos,
+        alive_override=_alive_override,
     )
     engagement_positions, engagement_hp, engagement_models = state.engagement_maps(
         frozen_target, target_id
@@ -864,9 +869,14 @@ def handle_shoot(
                 # activation ayant tué, éteignant le contrôle sans que rien ne le montre.
                 stats['shoot_range_unverifiable'][player] += 1
             elif edge_dist > weapon_range:
-                stats['shoot_invalid'][player]['out_of_range'] += 1
-                if stats['first_error_lines']['shoot_invalid'][player] is None:
-                    stats['first_error_lines']['shoot_invalid'][player] = {'episode': state.current_episode_num, 'line': line.strip()}
+                if len(target_models) < frozen_target.models_alive:
+                    # Certains socles vivants n'ont pas de position connue dans la carte pré-ligne ;
+                    # le plus proche rendrait peut-être le tir légal. Non vérifiable.
+                    stats['shoot_range_unverifiable'][player] += 1
+                else:
+                    stats['shoot_invalid'][player]['out_of_range'] += 1
+                    if stats['first_error_lines']['shoot_invalid'][player] is None:
+                        stats['first_error_lines']['shoot_invalid'][player] = {'episode': state.current_episode_num, 'line': line.strip()}
 
     # Track shots after advance
     if shooter_id in state.units_advanced:

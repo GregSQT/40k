@@ -1115,6 +1115,12 @@ class StepLogger:
             # token n est pose que si le moteur a applique la regle.
             if details.get("precision_applied") is True:
                 shot_tags.append("[PRECISION]")
+            # [TARGET_DECL:N] — effectif de la cible au Select Targets step (§1.2/§1.4).
+            # Présent sur TOUTES les lignes du groupe (constante d'activation) pour que
+            # l'analyzer puisse le lire à n'importe quelle position de l'activation.
+            _tgt_alive = details.get("target_alive_count")
+            if _tgt_alive is not None:
+                shot_tags.append(f"[TARGET_DECL:{int(_tgt_alive)}]")
             shot_tags_suffix = f" {' '.join(shot_tags)}" if shot_tags else ""
             if weapon_name:
                 base_msg = f"{unit_label} SHOT{shot_tags_suffix} {target_label} with [{weapon_name}]"
@@ -1397,6 +1403,10 @@ class StepLogger:
             _waaagh_seg += "".join(
                 f" {tok}" for tok in _flag_rule_tokens(details, _LINE_TAG_RULE_TOKENS)
             )
+            # [TARGET_DECL:N] — JUMEAU du tir : effectif de la cible au Select Targets step.
+            _tgt_alive = details.get("target_alive_count")
+            if _tgt_alive is not None:
+                _waaagh_seg += f" [TARGET_DECL:{int(_tgt_alive)}]"
             # L14 — [FIGHTS FIRST] 24.13 : l'unité a chargé ce tour.
             _fights_first_seg = " [FIGHTS FIRST]" if details.get("fights_first") else ""
             if weapon_name:

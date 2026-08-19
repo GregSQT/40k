@@ -5910,6 +5910,12 @@ class W40KEngine(gym.Env):
         # Pose uniquement en combat (ctx.log_type == "combat") par _emit_squad_shoot_log.
         if raw_log.get("fightsFirst"):  # get allowed
             details["fights_first"] = True
+        # Effectif de la cible au Select Targets step (voir `targetAliveCount` dans l'émetteur).
+        # Porté sur TOUTES les lignes du groupe pour que l'analyzer puisse le lire à n'importe
+        # quelle position de l'activation.
+        _target_alive = raw_log.get("targetAliveCount")  # get allowed
+        if _target_alive is not None:
+            details["target_alive_count"] = int(_target_alive)
         # [ANTI-X Y+] 24.03 : keyword de l instance retenue + seuil DECLARE par l arme. Les deux
         # voyagent ENSEMBLE — un keyword sans seuil ecrirait `[ANTI-INFANTRY:None+]`, une valeur
         # par defaut deguisee en donnee. `require_key` sur le second : le producteur les pose
