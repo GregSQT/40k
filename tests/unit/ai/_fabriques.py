@@ -320,3 +320,11 @@ def entete_step_log(
         "[10:00:00] === ACTIONS START ===\n"
         f"{body}"
     )
+
+
+def weapon_rule_usage(stats: dict, rule: str) -> dict:
+    """Extrait les compteurs d'usage d'une règle d'arme depuis les stats analyzer.
+
+    Était `_usage` dans test_analyzer_weapon_rules_lot2*.py — version publique partagée.
+    """
+    return {k: sum(v.values()) for k, v in stats["weapon_rule_usage"].items() if k[0] == rule}
