@@ -278,9 +278,6 @@ class AnalyzerState:
     # Phases vues dans le tour courant, dans leur ordre de première apparition.
     # Réinitialisé à chaque changement de tour.
     phase_seq_current_turn: List[str] = field(default_factory=list)
-    # Joueur qui a ouvert la phase COMMAND du tour N (pour le contrôle d'alternance).
-    command_player_per_turn: Dict[int, int] = field(default_factory=dict)
-
     # 01.07 — état battle-shocked par unité (unit_id → bool).
     # Mis à jour à chaque ligne `Unit N BATTLE-SHOCK Roll:…`.
     # Réinitialisé à chaque début d'épisode.

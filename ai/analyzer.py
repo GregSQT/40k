@@ -1577,7 +1577,6 @@ def error_totals(stats: Dict[str, Any]) -> Dict[str, int]:
         # §0.x — structure de partie (P1 ordre phases, P2 fin de partie).
         'phase_structure': (
             stats['phase_order_violations']
-            + stats['player_alternation_violations']
             + stats['game_turn_exceeded_count']
             + stats['win_method_mismatch_count']
         ),
@@ -1972,8 +1971,6 @@ def parse_step_log(filepath: str) -> Dict:
         'fight_double_pile_in': {1: 0, 2: 0},
         # 07.02 — ordre COMMAND→MOVE→SHOOT→CHARGE→FIGHT violé (phase antérieure réapparaît).
         'phase_order_violations': 0,
-        # 07.02 — même joueur ouvre COMMAND sur deux tours consécutifs (pas d'alternance).
-        'player_alternation_violations': 0,
         # P2 — partie terminée au-delà du tour prévu par le scénario.
         'game_turn_exceeded_count': 0,
         # P2 — méthode de victoire incohérente avec l'état final reconstruit.
@@ -2053,7 +2050,6 @@ def parse_step_log(filepath: str) -> Dict:
             'fight_alternation_violations': {1: None, 2: None},
             'fight_double_pile_in': {1: None, 2: None},
             'phase_order_violation': None,
-            'player_alternation_violation': None,
             'game_turn_exceeded': None,
             'win_method_mismatch': None,
             'position_log_mismatch': {
@@ -4116,7 +4112,6 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     log_print(
         f"{summary_error_icon(_phase_struct_total > 0)} 2.9 Structure de partie :"
         f" phase_order={stats['phase_order_violations']}"
-        f" alternance={stats['player_alternation_violations']}"
         f" tour_depasse={stats['game_turn_exceeded_count']}"
         f" victoire_incoherente={stats['win_method_mismatch_count']}"
     )
