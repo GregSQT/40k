@@ -114,6 +114,7 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 | analyzer | ✅ analyzer overrun PILED IN regex (2026-08-18) — handle_fight_move matche OVERRUN PILED IN, faux positifs double_pile_in éliminés | — | ⚡ |
 | analyzer | ✅ HAZARDOUS branche action_unit_id stale (2026-08-18) — _hz_unit_id = _dmg_actor_id or action_unit_id ; damage + lookup armurerie sur l'unité de la ligne, pas le header | — | ⚡ |
 | analyzer | ✅ analyzer_core _hz_unit_id code mort supprimé + verrou HAZARDOUS unité morte (2026-08-18) — ligne 1702 dupliquée retirée ; test rouge/vert HAZARDOUS→unité morte→damage_missing_unit_hp | — | ⚡ |
+| moteur+analyzer | ✅ step_logger event [DEAD] + pré-capture [MODELS:] tir/move (2026-08-19) — destroy_model émet un event dead dans action_logs pour toute raison ; [MODELS:] SHOOT/MOVE pré-capturés avant effets (hazardous, etc.) | — | ⚡ |
 | analyzer | Champs manquants `step.log` L6→L28 (17 restantes après livraison L14/L19/L22/L25/L27/L28 le 2026-08-18) | [analyzer.md#champs-step-log](analyzer.md#champs-step-log) | ⚡ |
 | analyzer | Corpus de règles vérifiable | [analyzer.md#corpus-regles](analyzer.md#corpus-regles) | ⚡ |
 | front | Tests front T7 + couches B/C (T2b+T3a livrés 2026-08-19 : 25 tests verts) | [front.md#tests](front.md#tests) | ⚡ |
