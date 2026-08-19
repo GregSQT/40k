@@ -176,6 +176,11 @@ def rule_is_applicable(stats: Dict[str, Any], entry: Dict[str, Any]) -> Optional
         rule_id = require_key(applicability, "rule_id")
         carriers = require_key(stats, "rule_to_units").get(rule_id, set())  # get allowed : règle inconnue du registre
         return bool(set(require_key(stats, "unit_types_seen")) & set(carriers))
+    if kind == "indecidable":
+        # Règle non vérifiable depuis le journal : ni NON applicable, ni applicable sans preuve.
+        # Verdict → INDÉCIDABLE (ni vert vacant ni hors roster). Utilisé pour les règles des
+        # matrices PDF/armes/unités dont le journal ne porte pas les données nécessaires.
+        return None
     raise ValueError(
         f"rules_corpus.json : applicabilité de type {kind!r} inconnue pour la règle "
         f"{entry.get('id')!r}"  # get allowed : message d'erreur
