@@ -33,8 +33,10 @@ ADV_FROM = (40, 15)      # ancre d'escouade au départ de l'avance
 ADV_TO = (32, 20)        # ancre d'escouade à l'arrivée
 GHOST = (37, 17)         # figurine 1#1 : retirée par 03.03, verrou du BFS
 P1_SURVIVOR = (3, 3)     # figurine 1#0 : survit, loin de l'action
-GRETCH_ISO = (3, 55)     # figurines 10#8 et 10#9 : hors cohérence, retirées avant l'avance
+GRETCH_ISO = (3, 55)     # figurines 101#8 et 101#9 : hors cohérence, retirées avant l'avance
 WALL = (36, 17)          # seul hex muré — suffit à fermer le couloir
+_ITS = 1                 # inches_to_subhex de ce test (ligne 86 du header)
+_EZ = 2 * _ITS           # zone d'engagement en sous-hex (= 2 * inches_to_subhex, cf. _fabriques:284)
 OBJECTIVES = ";".join(f"(22,{r})" for r in range(28, 34))
 
 # COULOIR À UNE VOIE par le mur + fantôme.
@@ -47,7 +49,7 @@ _WALLS_STR = f"({WALL[0]},{WALL[1]})"
 
 # Survivants P1 apres retrait du fantôme
 _P1_MODELS_APRES = f"1#0@({P1_SURVIVOR[0]},{P1_SURVIVOR[1]},z0)"
-# Gretchin après retrait de 10#8 et 10#9
+# Gretchin après retrait de 101#8 et 101#9
 _GRETCH_MODELS_APRES = " ".join(
     f"101#{ i}@({ADV_FROM[0]},{ADV_FROM[1]},z0)" for i in range(8)
 )
@@ -63,7 +65,7 @@ _HEADER = entete_step_log(
     f" [R:+0.0] [MODELS:"
     f" 1#0@({P1_SURVIVOR[0]},{P1_SURVIVOR[1]},z0)"
     f" 1#1@({GHOST[0]},{GHOST[1]},z0)] [SUCCESS]\n"
-    # P2 : 10 Gretchin — 8 au départ, 2 isolés (10#8, 10#9 à GRETCH_ISO)
+    # P2 : 10 Gretchin — 8 au départ, 2 isolés (101#8, 101#9 à GRETCH_ISO)
     f"[10:00:02] E1 T1 P2 DEPLOYMENT : Unit 101({ADV_FROM[0]},{ADV_FROM[1]}) DEPLOYED"
     f" from (-1,-1) to ({ADV_FROM[0]},{ADV_FROM[1]})"
     f" [R:+0.0] [MODELS:"
@@ -149,8 +151,8 @@ def test_premisse_ghost_hors_engagement():
         bx, by, bz = offset_to_cube(*b)
         return max(abs(ax - bx), abs(ay - by), abs(az - bz))
 
-    assert d(ADV_FROM, GHOST) > 2, (
-        "le fantôme doit être hors zone d'engagement (>2 hex) pour ne tester que le BFS"
+    assert d(ADV_FROM, GHOST) > _EZ, (
+        f"le fantôme doit être hors zone d'engagement (>{_EZ} hex) pour ne tester que le BFS"
     )
     assert d(ADV_FROM, GHOST) + d(GHOST, ADV_TO) == d(ADV_FROM, ADV_TO), (
         "le fantôme doit être sur un chemin le plus court entre départ et arrivée"
@@ -161,7 +163,8 @@ def test_sans_retrait_fantome_bloque_bfs(stats_sans_retrait):
     """VERROU : sans la ligne COHERENCY REMOVED pour P1, le fantôme occupe le couloir.
 
     Le BFS trouve un chemin de 10 pas (budget = 9) → `move_distance_over_limit/advance P2`.
-    `advance_from_adjacent` reste à 0 : le fantôme est hors engagement (distance 4 > EZ 2).
+    `advance_from_adjacent` reste à 0 : le fantôme est hors engagement (distance 4 > EZ 2) —
+    mécanisme DISTINCT de test_analyzer_coherency_removal_ghost.py (fantôme dans l'EZ).
     """
     assert stats_sans_retrait["move_distance_over_limit"]["advance"][2] == 1, (
         "le fantôme 1#1 doit bloquer le BFS et déclencher move_distance_over_limit pour P2"
@@ -183,14 +186,6 @@ def test_avec_retrait_fantome_purge(stats_avec_retrait):
     )
     assert stats_avec_retrait["advance_from_adjacent"][2] == 0
 
-
-def test_sans_retrait_pas_advance_from_adjacent(stats_sans_retrait):
-    """Le fantôme bloque le BFS mais n'est pas dans la zone d'engagement de l'avanceur.
-
-    Vérifie que le test mesure un mécanisme DISTINCT de test_analyzer_coherency_removal_ghost.py :
-    un fantôme-couloir loin du départ ne doit jamais lever `advance_from_adjacent`.
-    """
-    assert stats_sans_retrait["advance_from_adjacent"][2] == 0
 
 
 def test_pas_erreurs_de_parsing(stats_avec_retrait):
