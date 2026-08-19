@@ -173,8 +173,19 @@ def test_placement_weights_cover_all_deploy_strategy_slots() -> None:
     Regression : DEPLOY_STRATEGY_COUNT 5→7 a ouvert les slots 9 (centre_hub) et 10 (safe_rear)
     sans mettre a jour les tables de poids, causant un KeyError fatal au reset des workers.
     """
-    from ai.evaluation_bots import _WeightedMover
-    weighted_bots = [GreedyBot, DefensiveBot, ControlBot, AdaptiveBot, ValueTradeBot]
+    from ai.bot_doctrines import (
+        RacerBot, EndgameBot, AlphaStrikeBot,
+        AttritionBot, DecapitationBot, ScorerBot,
+    )
+    from ai.benchmark_bots import (
+        ReferenceBalancedBot, ReferenceDenialBot, ReferenceReactiveBot,
+    )
+    weighted_bots = [
+        GreedyBot, DefensiveBot, ControlBot, AdaptiveBot, ValueTradeBot,
+        RacerBot, EndgameBot, AlphaStrikeBot,
+        AttritionBot, DecapitationBot, ScorerBot,
+        ReferenceBalancedBot, ReferenceDenialBot, ReferenceReactiveBot,
+    ]
     for cls in weighted_bots:
         missing = [a for a in DEPLOYMENT_ACTIONS if a not in cls.PLACEMENT_WEIGHTS]
         assert not missing, (
