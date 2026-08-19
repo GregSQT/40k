@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef } from "react";
+import { useEffect, useRef } from "react";
 import TooltipWrapper from "./TooltipWrapper";
 
 interface HazardWarningModalProps {
@@ -9,7 +9,7 @@ interface HazardWarningModalProps {
 export function HazardWarningModal({ onConfirm, onCancel }: HazardWarningModalProps) {
   // Évite que le 2e clic d'un double-clic d'activation (qui ouvre le popup) ferme aussitôt le fond.
   const openedAtRef = useRef(0);
-  useLayoutEffect(() => {
+  useEffect(() => {
     openedAtRef.current = performance.now();
   }, []);
 
@@ -32,7 +32,6 @@ export function HazardWarningModal({ onConfirm, onCancel }: HazardWarningModalPr
         zIndex: 12000,
       }}
       onClick={handleBackdropClick}
-      onKeyDown={() => onCancel()}
     >
       <div
         role="dialog"
@@ -92,7 +91,7 @@ export function HazardWarningModal({ onConfirm, onCancel }: HazardWarningModalPr
         >
           <button
             type="button"
-            onClick={() => onCancel()}
+            onClick={onCancel}
             style={{
               padding: "10px 14px",
               border: "1px solid #41506b",
@@ -107,7 +106,7 @@ export function HazardWarningModal({ onConfirm, onCancel }: HazardWarningModalPr
           </button>
           <button
             type="button"
-            onClick={() => void onConfirm()}
+            onClick={onConfirm}
             style={{
               padding: "10px 14px",
               border: "1px solid #4caf50",

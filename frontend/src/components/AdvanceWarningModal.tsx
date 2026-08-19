@@ -23,7 +23,6 @@ export function AdvanceWarningModal({ onConfirm, onCancel }: AdvanceWarningModal
         zIndex: 12000,
       }}
       onClick={() => onCancel(dontRemind)}
-      onKeyDown={() => onCancel(dontRemind)}
     >
       <div
         role="dialog"
