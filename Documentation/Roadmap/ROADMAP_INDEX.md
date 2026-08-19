@@ -29,6 +29,10 @@
 > `Bot_refactor.md` vivent à la racine d'`Documentation/Implémentation/` au lieu d'`A_faire/`
 > (chantiers vivants, chemin demandé) ; `archives/v11.md` porte l'historique du programme V11
 > entier et sert d'archive au sujet `v11_chemin_critique.md`.
+>
+> **Pendant entraînement.** `⚡` = peut démarrer sans interrompre un run (ne touche pas
+> `config/**/*.json`, ne modifie pas le moteur). `🚫` = ne pas démarrer : risque de biaiser le
+> run ou conflit direct avec le processus d'entraînement.
 
 ---
 
@@ -63,36 +67,36 @@ Tout chantier sert un jalon ci-dessous, ou attend. Les jalons sont séquentiels 
 
 Ordre imposé — ne pas réorganiser sans décision explicite.
 
-| # | Sujets | Chantier | Fichier | Bloqueur |
-|---|---|---|---|---|
-| 1 | moteur+training | **P3-5** Pile-in / consolidation | [v11_chemin_critique.md#p3-5](v11_chemin_critique.md#p3-5) | P5 à trancher ([v11_chemin_critique.md#p5](v11_chemin_critique.md#p5)) |
-| 2 | training+moteur | **P3-6** Move-after-shooting + reactive move | [v11_chemin_critique.md#p3-6](v11_chemin_critique.md#p3-6) | — |
-| 3 | training | **P3-8** Optionnels à statuer | [v11_chemin_critique.md#p3-8](v11_chemin_critique.md#p3-8) | — |
-| 4 | training+moteur | **P4** Observation de support | [v11_chemin_critique.md#p4](v11_chemin_critique.md#p4) | — |
-| 5 | training | **P5** Validation par tranche (profil manquant) | [v11_chemin_critique.md#p5](v11_chemin_critique.md#p5) | — |
-| 6 | training | Mesure de référence `x1_long` | [v11_chemin_critique.md#mesure](v11_chemin_critique.md#mesure) | — |
-| 7 | training+bot | Self-play §0.59 (livré, jamais exécuté) | [v11_chemin_critique.md#selfplay](v11_chemin_critique.md#selfplay) | — |
+| # | Sujets | Chantier | Fichier | Bloqueur | ⚡/🚫 |
+|---|---|---|---|---|---|
+| 1 | moteur+training | **P3-5** Pile-in / consolidation | [v11_chemin_critique.md#p3-5](v11_chemin_critique.md#p3-5) | P5 à trancher ([v11_chemin_critique.md#p5](v11_chemin_critique.md#p5)) | 🚫 |
+| 2 | training+moteur | **P3-6** Move-after-shooting + reactive move | [v11_chemin_critique.md#p3-6](v11_chemin_critique.md#p3-6) | — | 🚫 |
+| 3 | training | **P3-8** Optionnels à statuer | [v11_chemin_critique.md#p3-8](v11_chemin_critique.md#p3-8) | — | 🚫 |
+| 4 | training+moteur | **P4** Observation de support | [v11_chemin_critique.md#p4](v11_chemin_critique.md#p4) | — | 🚫 |
+| 5 | training | **P5** Validation par tranche (profil manquant) | [v11_chemin_critique.md#p5](v11_chemin_critique.md#p5) | — | 🚫 |
+| 6 | training | Mesure de référence `x1_long` | [v11_chemin_critique.md#mesure](v11_chemin_critique.md#mesure) | — | 🚫 |
+| 7 | training+bot | Self-play §0.59 (livré, jamais exécuté) | [v11_chemin_critique.md#selfplay](v11_chemin_critique.md#selfplay) | — | 🚫 |
 
 ---
 
 ## J4 — Capacités
 
-| Sujets | Chantier | Fichier |
-|---|---|---|
-| moteur+training | **06** Armageddon abilities — 0/6 passes | [capacites.md#armageddon-06](capacites.md#armageddon-06) |
+| Sujets | Chantier | Fichier | ⚡/🚫 |
+|---|---|---|---|
+| moteur+training | **06** Armageddon abilities — 0/6 passes | [capacites.md#armageddon-06](capacites.md#armageddon-06) | 🚫 |
 
 ---
 
 ## Suspendus — ne pas commencer avant leur jalon
 
-| Sujets | Chantier | Fichier | Jalon |
-|---|---|---|---|
-| moteur | **P3-0** Cohérence 03.03 — choix joueur/agent | [moteur.md#p3-0](moteur.md#p3-0) | Prochain dégel `TOTAL_ACTION_SIZE` (attendu en J2 ; celui du 2026-08-17 est passé sans lui) |
-| moteur | **T7** Unification validation déploiement | [moteur.md#t7](moteur.md#t7) | Fix faux — re-analyser avant |
-| moteur | **Phase B** Observation des niveaux | [moteur.md#phase-b](moteur.md#phase-b) | Phase A' validée + LoS 3D complet |
-| training+bot | **É9** Second siège + second scénario | [training.md#e9](training.md#e9) | J4 — entraînement bot satisfaisant |
-| training+bot | Validation qualitative §10.6 volet 2 | [bot.md#validation-externe](bot.md#validation-externe) | J5 — requis pour la démo |
-| bot | MCTS à l'inférence §10.7 (plan B anti-coups-absurdes) | [bot.md#mcts-inference](bot.md#mcts-inference) | Après J3, seulement si la démo l'exige |
+| Sujets | Chantier | Fichier | Jalon | ⚡/🚫 |
+|---|---|---|---|---|
+| moteur | **P3-0** Cohérence 03.03 — choix joueur/agent | [moteur.md#p3-0](moteur.md#p3-0) | Prochain dégel `TOTAL_ACTION_SIZE` (attendu en J2 ; celui du 2026-08-17 est passé sans lui) | 🚫 |
+| moteur | **T7** Unification validation déploiement | [moteur.md#t7](moteur.md#t7) | Fix faux — re-analyser avant | 🚫 |
+| moteur | **Phase B** Observation des niveaux | [moteur.md#phase-b](moteur.md#phase-b) | Phase A' validée + LoS 3D complet | 🚫 |
+| training+bot | **É9** Second siège + second scénario | [training.md#e9](training.md#e9) | J4 — entraînement bot satisfaisant | 🚫 |
+| training+bot | Validation qualitative §10.6 volet 2 | [bot.md#validation-externe](bot.md#validation-externe) | J5 — requis pour la démo | ⚡ |
+| bot | MCTS à l'inférence §10.7 (plan B anti-coups-absurdes) | [bot.md#mcts-inference](bot.md#mcts-inference) | Après J3, seulement si la démo l'exige | 🚫 |
 
 ---
 
@@ -100,65 +104,65 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 
 ### Prêt à démarrer
 
-| Sujets | Chantier | Fichier |
-|---|---|---|
-| analyzer | ✅ PROJ.1.4 double_pile_in corrigé (2026-08-18) — overrun 12.06 loggué \"OVERRUN PILED IN\", faux positifs éliminés | —  |
-| analyzer | ✅ models_segment capturé après commit_move (2026-08-18) — faux positifs pile-in éliminés (fight_handler + w40k_core) | — |
-| analyzer | ✅ Réserves PvP 04b tests code-review corrigés (2026-08-18) — symétrie garde, formule sentinelle, commentaire xdist | — |
-| analyzer | ✅ Borne vert-vacant calculate_hex_distance (2026-08-18) — métrique cohérente avec charge_check_eligibility | — |
-| analyzer | ✅ alloc_model_unknown HAZARDOUS/DE (2026-08-19) — grammar 6 + hazardDetails→target_model_id ; alloc_model_id lit [ALLOC_MODEL:] au lieu du legacy ordered_living_mids[0] ; 4 occurrences éliminées | — |
-| analyzer | ✅ step_logger [DESPERATE ESCAPE] vs [HAZARDOUS] séparés (2026-08-18) — roll_hazard_for_unit tag distinct 09.07/24.15 | — |
-| analyzer | ✅ analyzer_core branche [DESPERATE ESCAPE] (2026-08-18) — _apply_damage_and_handle_death appelée, HP/kill tracking opérationnel ; constante HAZARD_CONTEXT_DESPERATE_ESCAPE partagée | — |
-| analyzer | ✅ test_analyzer_hazardous verrou [DESPERATE ESCAPE] vs [HAZARDOUS] (2026-08-18) — test rouge/vert sur branche DESPERATE ESCAPE + seuil source inspect corrigé | — |
-| analyzer | ✅ analyzer overrun PILED IN regex (2026-08-18) — handle_fight_move matche OVERRUN PILED IN, faux positifs double_pile_in éliminés | — |
-| analyzer | ✅ HAZARDOUS branche action_unit_id stale (2026-08-18) — _hz_unit_id = _dmg_actor_id or action_unit_id ; damage + lookup armurerie sur l'unité de la ligne, pas le header | — |
-| analyzer | ✅ analyzer_core _hz_unit_id code mort supprimé + verrou HAZARDOUS unité morte (2026-08-18) — ligne 1702 dupliquée retirée ; test rouge/vert HAZARDOUS→unité morte→damage_missing_unit_hp | — |
-| analyzer | Champs manquants `step.log` L6→L28 (17 restantes après livraison L14/L19/L22/L25/L27/L28 le 2026-08-18) | [analyzer.md#champs-step-log](analyzer.md#champs-step-log) |
-| analyzer | Corpus de règles vérifiable | [analyzer.md#corpus-regles](analyzer.md#corpus-regles) |
-| front | Tests front T2b/T3a/T7 + couches B/C | [front.md#tests](front.md#tests) |
-| front | Validations navigateur en attente | [front.md#validations-nav](front.md#validations-nav) |
-| training+bot | ✅ Benchmark floor gate §4.D livré (2026-08-18) — 3 bots de référence (balanced/denial/reactive) sur 4 scénarios holdout_regular ; seuil 0.90 après mesure ; `model_gating_enabled` sur x1_long | [v11_chemin_critique.md#benchmark-gate](v11_chemin_critique.md#benchmark-gate) |
-| training+bot | ✅ scenario_bench-01..04 dupliqués supprimés (2026-08-18) — fichiers byte-for-byte identiques aux scenario_bot-01..04, glob fallback ramassait 8 scénarios au lieu de 4, épisodes/scénario divisés par 2 sans contrepartie | — |
-| moteur+services | ✅ Fix review-findings (2026-08-18) — surface refus moteur squad, wsgi leading-comma, message vide | — |
-| security | ✅ Étapes 4, 5, 7 livrées (2026-08-18) — F1–F15 toutes résolues ; reste 1 action : validation navigateur du cookie | [security.md](security.md) |
-| infra | Perf `generate_compact_formation` | [infra.md#perf-formation](infra.md#perf-formation) |
-| infra | ✅ gzip + Brotli livrés (2026-08-18) — stage `brotli-builder`, `load_module` contexte main, directives server | [archives/infra.md](archives/infra.md) |
+| Sujets | Chantier | Fichier | ⚡/🚫 |
+|---|---|---|---|
+| analyzer | ✅ PROJ.1.4 double_pile_in corrigé (2026-08-18) — overrun 12.06 loggué \"OVERRUN PILED IN\", faux positifs éliminés | — | ⚡ |
+| analyzer | ✅ models_segment capturé après commit_move (2026-08-18) — faux positifs pile-in éliminés (fight_handler + w40k_core) | — | ⚡ |
+| analyzer | ✅ Réserves PvP 04b tests code-review corrigés (2026-08-18) — symétrie garde, formule sentinelle, commentaire xdist | — | ⚡ |
+| analyzer | ✅ Borne vert-vacant calculate_hex_distance (2026-08-18) — métrique cohérente avec charge_check_eligibility | — | ⚡ |
+| analyzer | ✅ alloc_model_unknown HAZARDOUS/DE (2026-08-19) — grammar 6 + hazardDetails→target_model_id ; alloc_model_id lit [ALLOC_MODEL:] au lieu du legacy ordered_living_mids[0] ; 4 occurrences éliminées | — | ⚡ |
+| analyzer | ✅ step_logger [DESPERATE ESCAPE] vs [HAZARDOUS] séparés (2026-08-18) — roll_hazard_for_unit tag distinct 09.07/24.15 | — | ⚡ |
+| analyzer | ✅ analyzer_core branche [DESPERATE ESCAPE] (2026-08-18) — _apply_damage_and_handle_death appelée, HP/kill tracking opérationnel ; constante HAZARD_CONTEXT_DESPERATE_ESCAPE partagée | — | ⚡ |
+| analyzer | ✅ test_analyzer_hazardous verrou [DESPERATE ESCAPE] vs [HAZARDOUS] (2026-08-18) — test rouge/vert sur branche DESPERATE ESCAPE + seuil source inspect corrigé | — | ⚡ |
+| analyzer | ✅ analyzer overrun PILED IN regex (2026-08-18) — handle_fight_move matche OVERRUN PILED IN, faux positifs double_pile_in éliminés | — | ⚡ |
+| analyzer | ✅ HAZARDOUS branche action_unit_id stale (2026-08-18) — _hz_unit_id = _dmg_actor_id or action_unit_id ; damage + lookup armurerie sur l'unité de la ligne, pas le header | — | ⚡ |
+| analyzer | ✅ analyzer_core _hz_unit_id code mort supprimé + verrou HAZARDOUS unité morte (2026-08-18) — ligne 1702 dupliquée retirée ; test rouge/vert HAZARDOUS→unité morte→damage_missing_unit_hp | — | ⚡ |
+| analyzer | Champs manquants `step.log` L6→L28 (17 restantes après livraison L14/L19/L22/L25/L27/L28 le 2026-08-18) | [analyzer.md#champs-step-log](analyzer.md#champs-step-log) | ⚡ |
+| analyzer | Corpus de règles vérifiable | [analyzer.md#corpus-regles](analyzer.md#corpus-regles) | ⚡ |
+| front | Tests front T2b/T3a/T7 + couches B/C | [front.md#tests](front.md#tests) | ⚡ |
+| front | Validations navigateur en attente | [front.md#validations-nav](front.md#validations-nav) | ⚡ |
+| training+bot | ✅ Benchmark floor gate §4.D livré (2026-08-18) — 3 bots de référence (balanced/denial/reactive) sur 4 scénarios holdout_regular ; seuil 0.90 après mesure ; `model_gating_enabled` sur x1_long | [v11_chemin_critique.md#benchmark-gate](v11_chemin_critique.md#benchmark-gate) | |
+| training+bot | ✅ scenario_bench-01..04 dupliqués supprimés (2026-08-18) — fichiers byte-for-byte identiques aux scenario_bot-01..04, glob fallback ramassait 8 scénarios au lieu de 4, épisodes/scénario divisés par 2 sans contrepartie | — | |
+| moteur+services | ✅ Fix review-findings (2026-08-18) — surface refus moteur squad, wsgi leading-comma, message vide | — | |
+| security | ✅ Étapes 4, 5, 7 livrées (2026-08-18) — F1–F15 toutes résolues ; reste 1 action : validation navigateur du cookie | [security.md](security.md) | ⚡ |
+| infra | Perf `generate_compact_formation` | [infra.md#perf-formation](infra.md#perf-formation) | ⚡ |
+| infra | ✅ gzip + Brotli livrés (2026-08-18) — stage `brotli-builder`, `load_module` contexte main, directives server | [archives/infra.md](archives/infra.md) | ⚡ |
 
 ### Bloqués par une décision utilisateur
 
-| Sujets | Chantier | Fichier |
-|---|---|---|
-| moteur | Replis `unit_by_id` (T0 = signature à décider) | [moteur.md#unit-by-id](moteur.md#unit-by-id) |
-| moteur | Endless Duty (obstacles 3 et 7 à décider) | [moteur.md#endless-duty](moteur.md#endless-duty) |
-| front | Scission `bcKey` géométrie/contrôle (écartée le 2026-08-12, à arbitrer) | [front.md#bckey](front.md#bckey) |
+| Sujets | Chantier | Fichier | ⚡/🚫 |
+|---|---|---|---|
+| moteur | Replis `unit_by_id` (T0 = signature à décider) | [moteur.md#unit-by-id](moteur.md#unit-by-id) | 🚫 |
+| moteur | Endless Duty (obstacles 3 et 7 à décider) | [moteur.md#endless-duty](moteur.md#endless-duty) | 🚫 |
+| front | Scission `bcKey` géométrie/contrôle (écartée le 2026-08-12, à arbitrer) | [front.md#bckey](front.md#bckey) | ⚡ |
 
 ### À cadrer avant d'ouvrir
 
-| Sujets | Chantier | Fichier |
-|---|---|---|
-| moteur | LoS 3D : tir à travers un mur depuis un étage (signalé 2026-08-11, jamais cadré) | [moteur.md#los-mur-etage](moteur.md#los-mur-etage) |
-| bot+training | Chantier récompense distinct (relevé du chantier panel) | [bot.md#recompense](bot.md#recompense) |
+| Sujets | Chantier | Fichier | ⚡/🚫 |
+|---|---|---|---|
+| moteur | LoS 3D : tir à travers un mur depuis un étage (signalé 2026-08-11, jamais cadré) | [moteur.md#los-mur-etage](moteur.md#los-mur-etage) | 🚫 |
+| bot+training | Chantier récompense distinct (relevé du chantier panel) | [bot.md#recompense](bot.md#recompense) | 🚫 |
 
 ### Lourds — re-cadrer avant toute reprise
 
-| Sujets | Chantier | Fichier |
-|---|---|---|
-| moteur | Preview de tir sans deepcopy | [moteur.md#preview-tir](moteur.md#preview-tir) |
-| infra | Noyau natif BFS move/empreintes — pool de move = 29 % d'une partie d'évaluation | [infra.md#noyau-natif](infra.md#noyau-natif) |
-| infra | Migration PostgreSQL | [infra.md#postgresql](infra.md#postgresql) |
-| infra | MCTS adversaire d'entraînement | [infra.md#mcts](infra.md#mcts) |
-| bot | Tranches 2-3 benchmark (PFSP, league, exploiters) — différées | [bot.md#league](bot.md#league) |
+| Sujets | Chantier | Fichier | ⚡/🚫 |
+|---|---|---|---|
+| moteur | Preview de tir sans deepcopy | [moteur.md#preview-tir](moteur.md#preview-tir) | 🚫 |
+| infra | Noyau natif BFS move/empreintes — pool de move = 29 % d'une partie d'évaluation | [infra.md#noyau-natif](infra.md#noyau-natif) | ⚡ |
+| infra | Migration PostgreSQL | [infra.md#postgresql](infra.md#postgresql) | ⚡ |
+| infra | MCTS adversaire d'entraînement | [infra.md#mcts](infra.md#mcts) | 🚫 |
+| bot | Tranches 2-3 benchmark (PFSP, league, exploiters) — différées | [bot.md#league](bot.md#league) | 🚫 |
 
 ---
 
 ## Hygiène documentaire
 
-| Sujets | Chantier | Fichier |
-|---|---|---|
-| doc | `obs_size` justification à mettre à jour | [doc.md#obs-size](doc.md#obs-size) |
-| doc | Notes vitesse entraînement périmées | [doc.md#vitesse](doc.md#vitesse) |
-| doc | Ancres de ligne périmées docs V11 | [doc.md#ancres](doc.md#ancres) |
-| doc | Dette d'ancres G1/G2/G4 de V11_tranches §1bis | [doc.md#dette-tranches](doc.md#dette-tranches) |
-| doc | Bandeaux périmés V11_agent_rework §0bis (assumés depuis 2026-07-20) | [doc.md#bandeaux-0bis](doc.md#bandeaux-0bis) |
-| doc | §0.19 : les ✅ T2→T5 revérifiés par lecture seule | [doc.md#reverif-t2-t5](doc.md#reverif-t2-t5) |
-| training | ✅ Note `bot_eval_freq_normal` réécrite (2026-08-18) — d_bot_eval_seconds=98s, 5h54 pour 50k épisodes | — |
+| Sujets | Chantier | Fichier | ⚡/🚫 |
+|---|---|---|---|
+| doc | `obs_size` justification à mettre à jour | [doc.md#obs-size](doc.md#obs-size) | ⚡ |
+| doc | Notes vitesse entraînement périmées | [doc.md#vitesse](doc.md#vitesse) | ⚡ |
+| doc | Ancres de ligne périmées docs V11 | [doc.md#ancres](doc.md#ancres) | ⚡ |
+| doc | Dette d'ancres G1/G2/G4 de V11_tranches §1bis | [doc.md#dette-tranches](doc.md#dette-tranches) | ⚡ |
+| doc | Bandeaux périmés V11_agent_rework §0bis (assumés depuis 2026-07-20) | [doc.md#bandeaux-0bis](doc.md#bandeaux-0bis) | ⚡ |
+| doc | §0.19 : les ✅ T2→T5 revérifiés par lecture seule | [doc.md#reverif-t2-t5](doc.md#reverif-t2-t5) | ⚡ |
+| training | ✅ Note `bot_eval_freq_normal` réécrite (2026-08-18) — d_bot_eval_seconds=98s, 5h54 pour 50k épisodes | — | |
