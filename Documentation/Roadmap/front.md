@@ -4,10 +4,9 @@
 
 ## Tests front {#tests}
 
-**Reste** : T2b/T3a/T7 (couche A) + couche B (vitest) + couche C (Playwright).
-~10 j au total, sécable.
+✅ CHANTIER LIVRÉ 2026-08-19 — T7-T13 complets (82 tests vitest verts, Playwright config+E2E, orchestration).
 
-→ `Documentation/Implémentation/A_faire/front_test_auto.md`
+→ `Documentation/Implémentation/Implémenté/front_test_auto.md`
 
 ---
 
