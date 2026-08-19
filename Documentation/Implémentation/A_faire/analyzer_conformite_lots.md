@@ -79,7 +79,11 @@ re-vérification de tous les totaux avant d'avoir écrit un seul contrôle neuf.
 
 ## 5. Les six lots
 
-### Lot 1 — trancher les familles d'erreurs encore vivantes
+### Lot 1 — trancher les familles d'erreurs encore vivantes ✅ (2026-08-19)
+
+Familles 1+2 : FP. Famille 1 (`engaged_non_close_quarters`) — token [CLOSE-QUARTERS] (grammaire 4) override `is_close_quarters`. Famille 2 (`close_quarters_shot_at_unengaged_target`) — token [CLOSE-QUARTERS] override `shooter_engaged_with_target`. Famille 3 (`attaque non allouée`) déjà close. Famille 4 (`advance au-delà du budget`) = bug moteur : E383 Unit 103#8 dépasse budget 9 subhex, 1 occurrence sur 600 épisodes, non traité ici.
+
+7 tests rouge/vert dans `tests/unit/ai/test_analyzer_cq_grammar4_token.py`. Fix : `ai/analyzer_phases/shoot_handler.py` (2 lignes d'override post-résolution arme et post-BFS per-fig).
 
 ```
 [MODE AGENT] Worktree : EnterWorktree name=analyzer-lot1-familles.

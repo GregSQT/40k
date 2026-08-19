@@ -149,6 +149,7 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 | services+front | ✅ Endless Duty obstacles 5+6 levés (2026-08-19) — ILLUSTRATION_RATIO sur 18 fiches TS ; BASE_SHAPE/BASE_SIZE/MODEL_HEIGHT/orientation/level émis par _build_unit_from_registry ; MOVE+RNG convertis en subhex ; slot mapping par ID réel ; _load_allowed_profiles_by_slot dédupliqué ; 9 tests verts | — | ⚡ |
 | security | ✅ Chantier clos (2026-08-19) — F1–F15 résolues, validation navigateur OK, doc déplacé dans Implémenté/ | [archives/security.md](archives/security.md) | ⚡ |
 | moteur | ✅ get_unit_by_id signature alignée (game_state, unit_id) (2026-08-19) — 6 sites cassés corrigés (movement_handlers+combat_utils), 49 ancienne-ordre mis à jour dans deployment_handlers, action_decoder, reward_calculator, observation_builder, game_state, w40k_core, shared_utils + tests ; 41 tests verts | — | ⚡ |
+| analyzer | ✅ FP familles 1+2 grammaire 4 corrigés (2026-08-19) — token [CLOSE-QUARTERS] override is_close_quarters + shooter_engaged_with_target ; 7 tests rouge/vert ; famille 3 déjà close ; famille 4 = bug moteur (advance E383 : 103#8 dépasse budget 9) | — | ⚡ |
 | infra | Perf `generate_compact_formation` | [infra.md#perf-formation](infra.md#perf-formation) | ⚡ |
 | infra | ✅ gzip + Brotli livrés (2026-08-18) — stage `brotli-builder`, `load_module` contexte main, directives server | [archives/infra.md](archives/infra.md) | ⚡ |
 
