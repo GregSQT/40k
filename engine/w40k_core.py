@@ -7035,6 +7035,13 @@ class W40KEngine(gym.Env):
                 # lisent le même état.
                 _charge_ability, _charge_rule_marker, _ = _charge_enabling_ability(self.game_state, unit)
                 commit_move(plan, self.game_state, "charge")
+                # Capturer le segment [MODELS:] IMMÉDIATEMENT après commit_move. Sans cette
+                # capture, _build_step_log_details appelle _models_segment_for_unit au flush
+                # (après _fight_v11_gym_settle complet) : si pile-in s'enchaîne sans sélection
+                # FIGHT intermédiaire, le flush lit des positions post-pile-in et l'analyzer
+                # mesure charge + pile-in contre le seul budget de charge → faux positif PROJ.1.3.
+                # Jumeau exact du motif déjà présent dans _gym_commit_fight_move (pile-in).
+                _charge_models_seg = self._models_segment_for_unit(str(squad_id))
                 end_result = end_activation(self.game_state, unit, ACTION, 1, CHARGE, CHARGE, 0)
                 _dest_uc = self.game_state.get("units_cache", {}).get(str(squad_id), {})  # get allowed
                 _charge_dist = charge_record_outcome(self.game_state, squad_id)
@@ -7068,6 +7075,7 @@ class W40KEngine(gym.Env):
                         "ability_display_name": _charge_ability,
                         "timestamp": "server_time",
                         "reward": 0.0,
+                        "models_segment": _charge_models_seg,
                         **_charge_dist,
                     },
                 )
