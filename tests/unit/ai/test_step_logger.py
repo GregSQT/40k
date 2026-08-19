@@ -60,6 +60,29 @@ def test_format_replay_style_message_rule_choice_requires_name() -> None:
         logger._format_replay_style_message(1, "rule_choice", {"unit_with_coords": "1(2, 3)"})
 
 
+def test_format_replay_style_message_dead_produces_line() -> None:
+    """VERROU finding-1 : _format_replay_style_message doit retourner la ligne DEAD
+    quand model_id et reason sont fournis. Avant le fix, _build_step_log_details ne les
+    mappait pas → KeyError avalé par log_action → ligne silencieusement absente."""
+    logger = StepLogger(enabled=False)
+    line = logger._format_replay_style_message(
+        42, "dead", {"model_id": "m7", "reason": "combat"}
+    )
+    assert line == "Unit 42 DEAD model=m7 reason=combat"
+
+
+def test_format_replay_style_message_dead_requires_model_id() -> None:
+    logger = StepLogger(enabled=False)
+    with pytest.raises(KeyError, match=r"model_id"):
+        logger._format_replay_style_message(1, "dead", {"reason": "combat"})
+
+
+def test_format_replay_style_message_dead_requires_reason() -> None:
+    logger = StepLogger(enabled=False)
+    with pytest.raises(KeyError, match=r"reason"):
+        logger._format_replay_style_message(1, "dead", {"model_id": "m1"})
+
+
 def test_log_episode_start_writes_units_and_metadata(tmp_path: Path) -> None:
     output_file = tmp_path / "step.log"
     logger = StepLogger(output_file=str(output_file), enabled=True, buffer_size=10)
