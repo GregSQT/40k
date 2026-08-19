@@ -1019,9 +1019,9 @@ class StepLogger:
             # c'est correct — cet event représente la mort en tant que fait accompli.
             model_id = details.get("model_id") if details else None
             reason = details.get("reason") if details else None
-            if not model_id:
+            if model_id is None:
                 raise KeyError("Dead action missing required model_id")
-            if not reason:
+            if reason is None:
                 raise KeyError("Dead action missing required reason")
             return f"Unit {unit_id} DEAD model={model_id} reason={reason}"
 

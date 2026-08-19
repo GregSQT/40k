@@ -6257,6 +6257,11 @@ class W40KEngine(gym.Env):
             ("ld", "ld"),
             ("roll", "roll"),
             ("battle_shocked", "battle_shocked"),
+            # Mort par-figurine (type "dead", emit par destroy_model). Sans ces deux mappings,
+            # `_format_replay_style_message` leve KeyError("Dead action missing required model_id")
+            # avale par `log_action` — chaque mort disparait silencieusement de step.log.
+            ("model_id", "model_id"),
+            ("reason", "reason"),
         ):
             value = raw_log.get(src)  # get allowed
             if value is not None:
