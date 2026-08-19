@@ -80,7 +80,7 @@ DEPLOY_SLOT_COUNT = 8       # deployment slots 0-7 -> 4-11
 # strategie gratuit en `obs_size` (V11 §0.48, arbitrage 2 / element L11) : une strategie de plus
 # = cette constante +1, aucune forme d'observation touchee, aucun retrain.
 # ⚠️ `DEPLOY_STRATEGY_COUNT <= DEPLOY_SLOT_COUNT` — l'inverse ouvrirait une action sans strategie.
-DEPLOY_STRATEGY_COUNT = 5
+DEPLOY_STRATEGY_COUNT = 7  # +2 : centre_hub (action 9) + safe_rear (action 10)
 
 BASE_ZONE_INTENT = SHOOT_INDIRECT_SLOT_BASE + SHOOT_INDIRECT_SLOT_COUNT  # 1106
 # ⚠️ Le macro se DECALE de 20 avec l ajout des slots de tir indirect (2026-08-16). Les ids

@@ -889,7 +889,7 @@ def test_deploy_head_costs_nothing_per_slot(model):
     """Le nombre de slots de pose est GRATUIT en paramètres.
 
     C'est ce qui rend le pré-dimensionnement `DEPLOY_SLOT_COUNT = 8` pour
-    `DEPLOY_STRATEGY_COUNT = 5` stratégies réellement sans coût : ouvrir une 6ᵉ stratégie
+    `DEPLOY_STRATEGY_COUNT = 7` stratégies réellement sans coût : ouvrir une 8ᵉ stratégie
     n'ajoutera ni paramètre, ni retrain.
     """
     policy = model.policy
