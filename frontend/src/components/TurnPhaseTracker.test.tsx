@@ -125,7 +125,7 @@ describe("TurnPhaseTracker — End Phase", () => {
 describe("TurnPhaseTracker — fight bandeaux", () => {
   it("showPileIn=true + onEndPileIn → bouton Pile-in visible", () => {
     render(<TurnPhaseTracker {...BASE_PROPS} showPileIn onEndPileIn={vi.fn()} />);
-    expect(screen.getByRole("button", { name: /Pile-in/i })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Pile-in/i })).not.toBeNull();
   });
 
   it("clic Pile-in → onEndPileIn appelé", () => {
@@ -149,7 +149,7 @@ describe("TurnPhaseTracker — fight bandeaux", () => {
         onFightAtk={vi.fn()}
       />
     );
-    expect(screen.getByRole("button", { name: "P1 ATK" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "P1 ATK" })).not.toBeNull();
   });
 
   it("showFightAtk + fightAtkPlayer=2 → bouton P2 ATK visible", () => {
@@ -161,7 +161,7 @@ describe("TurnPhaseTracker — fight bandeaux", () => {
         onFightAtk={vi.fn()}
       />
     );
-    expect(screen.getByRole("button", { name: "P2 ATK" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "P2 ATK" })).not.toBeNull();
   });
 
   it("clic ATK → onFightAtk appelé", () => {
@@ -188,7 +188,7 @@ describe("TurnPhaseTracker — fight bandeaux", () => {
         onSkipFight={vi.fn()}
       />
     );
-    expect(screen.getByRole("button", { name: /Skip/i })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Skip/i })).not.toBeNull();
   });
 
   it("clic Skip → onSkipFight appelé", () => {

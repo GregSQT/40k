@@ -316,6 +316,7 @@ describe("useEngineAPI — état de chargement", () => {
 
 describe("useEngineAPI — movePreview", () => {
   it("phase move, unité déjà active → movePreview positionné et mode=movePreview", async () => {
+    let actionCalls = 0;
     server.use(
       http.post("/api/game/start", () =>
         HttpResponse.json({
@@ -325,7 +326,11 @@ describe("useEngineAPI — movePreview", () => {
             move_activation_pool: ["10"],
           }),
         })
-      )
+      ),
+      http.post("/api/game/action", () => {
+        actionCalls++;
+        return HttpResponse.json({ success: true, game_state: makeGameState() });
+      })
     );
 
     const { result } = renderHook(() => useEngineAPI());
@@ -339,6 +344,7 @@ describe("useEngineAPI — movePreview", () => {
     expect(result.current.movePreview?.destCol).toBe(5);
     expect(result.current.movePreview?.destRow).toBe(8);
     expect(result.current.mode).toBe("movePreview");
+    expect(actionCalls).toBe(0);
   });
 });
 
@@ -346,7 +352,7 @@ describe("useEngineAPI — movePreview", () => {
 // T8 — targetPreview : onStartTargetPreview déclenche left_click et ne plante pas
 //
 // Note de conception : setTargetPreview(preview) est appelé en fin de handleStartTargetPreview,
-// mais le useEffect([gameState?.phase, targetPreview?.blinkTimer, ...]) (ligne 1647 du hook)
+// mais le useEffect([gameState?.phase, targetPreview?.blinkTimer, ...]) du hook
 // remet immédiatement targetPreview à null dès que le blinkTimer change — act() flush les effets
 // de façon synchrone en jsdom, alors qu'en production le navigateur laisse un rendu visible.
 // On teste donc l'invariant testable : l'appel API left_click est émis sans erreur.
