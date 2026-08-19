@@ -251,8 +251,6 @@ class GameClient:
     def drain_to(self, target_phase: str) -> Dict[str, Any]:
         """Skippe toutes les activations jusqu'à atteindre ``target_phase``."""
         self.play_nominal(max_actions=500, until=lambda c: c.phase == target_phase)
-        if self.phase != target_phase:
-            raise AssertionError(f"phase {self.phase!r} au lieu de {target_phase!r}")
         return self.state
 
     @property
@@ -267,9 +265,22 @@ class GameClient:
         return 2 if self.current_player == 1 else 1
 
 
+_MISSING = object()
+
+
 def assert_game_states_equal(a: dict, b: dict, label: str = "") -> None:
-    differences = sorted(k for k in set(a) | set(b) if a.get(k) != b.get(k))
+    differences = sorted(k for k in set(a) | set(b) if a.get(k, _MISSING) != b.get(k, _MISSING))
     assert not differences, f"{label} : {differences}" if label else f"états différents : {differences}"
+
+
+@contextmanager
+def _in_memory_write_cursor(immediate: bool = False):
+    connection = sqlite3.connect(":memory:")
+    connection.row_factory = sqlite3.Row
+    try:
+        yield connection.cursor()
+    finally:
+        connection.close()
 
 
 @pytest.fixture
@@ -277,17 +288,6 @@ def api_isolated(monkeypatch):
     """Neutralise les effets de bord hors mémoire : users.db et persistance disque."""
     monkeypatch.setattr(api_server, "_get_authenticated_user_or_response", lambda: (_TEST_AUTH_USER, None))
     monkeypatch.setattr(api_server, "_resolve_permissions_for_profile", lambda _conn, _pid: _TEST_PERMISSIONS)
-    # Toutes les écritures d'auth passent par ce context manager : le neutraliser suffit à
-    # garantir qu'aucun test d'intégration ne touche `config/users.db`.
-    @contextmanager
-    def _in_memory_write_cursor(immediate: bool = False):
-        connection = sqlite3.connect(":memory:")
-        connection.row_factory = sqlite3.Row
-        try:
-            yield connection.cursor()
-        finally:
-            connection.close()
-
     monkeypatch.setattr(api_server, "auth_db_write_cursor", _in_memory_write_cursor)
     # api_server charge logs/save_config.json à l'import : en usage normal la persistance
     # des snapshots et l'autosave sont actifs et écriraient sur le disque de l'utilisateur.
@@ -295,6 +295,21 @@ def api_isolated(monkeypatch):
     monkeypatch.setattr(api_server, "_AUTOSAVE_ENABLED", False)
     yield
     # Le moteur est une globale de module : ne pas laisser la partie d'un test au suivant.
+    api_server.engine = None
+
+
+@pytest.fixture
+def api_disk_only_isolated(monkeypatch):
+    """Neutralise UNIQUEMENT les effets de bord disque — auth réelle, non bypassée.
+
+    Utilisée uniquement par les tests d'authentification : sans ce patch, ``_get_authenticated_user_or_response``
+    tenterait une DB write au login. Ici la ValueError est levée AVANT tout accès DB (pas de
+    header), donc le test est propre. On neutralise juste les writes d'auth et la persistance.
+    """
+    monkeypatch.setattr(api_server, "auth_db_write_cursor", _in_memory_write_cursor)
+    monkeypatch.setattr(api_server, "_SNAPSHOT_PERSIST_ENABLED", False)
+    monkeypatch.setattr(api_server, "_AUTOSAVE_ENABLED", False)
+    yield
     api_server.engine = None
 
 

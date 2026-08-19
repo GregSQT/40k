@@ -17,8 +17,6 @@ Trois contrats API non couverts par les autres tranches :
 
 from __future__ import annotations
 
-import sqlite3
-from contextlib import contextmanager
 from typing import Any, Dict
 
 import pytest
@@ -35,36 +33,6 @@ from tests.integration.pvp.conftest import (
 )
 
 pytestmark = pytest.mark.integration
-
-# ---------------------------------------------------------------------------
-# Fixture spécialisée : isolation disque SANS bypass d'auth
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture
-def api_disk_only_isolated(monkeypatch):
-    """Neutralise UNIQUEMENT les effets de bord disque — auth réelle, non bypassée.
-
-    Utilisée uniquement par les tests d'authentification : sans ce patch, ``_get_authenticated_user_or_response``
-    tenterait une DB write au login. Ici la ValueError est levée AVANT tout accès DB (pas de
-    header), donc le test est propre. On neutralise juste les writes d'auth et la persistance.
-    """
-
-    @contextmanager
-    def _in_memory_write_cursor(immediate: bool = False):
-        connection = sqlite3.connect(":memory:")
-        connection.row_factory = sqlite3.Row
-        try:
-            yield connection.cursor()
-        finally:
-            connection.close()
-
-    monkeypatch.setattr(api_server, "auth_db_write_cursor", _in_memory_write_cursor)
-    monkeypatch.setattr(api_server, "_SNAPSHOT_PERSIST_ENABLED", False)
-    monkeypatch.setattr(api_server, "_AUTOSAVE_ENABLED", False)
-    yield
-    api_server.engine = None
-
 
 # ---------------------------------------------------------------------------
 # T7 — Snapshots (en mémoire, pas de disque)
@@ -135,8 +103,8 @@ class TestSnapshots:
         )
         expected = view_resp.get_json()["game_state"]
 
-        # Avancer la partie d'au moins une action.
-        game.play_nominal(max_actions=5, until=lambda c: c.phase == "move")
+        # Avancer la partie d'au moins une action (drainer la phase move entière).
+        game.play_nominal(max_actions=200, until=lambda c: c.phase != "move")
 
         # Resume : remplacer l'état vivant.
         resp = game._client.post(
