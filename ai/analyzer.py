@@ -23,7 +23,7 @@ from engine.combat_utils import (
 )
 from shared.data_validation import require_key
 from ai.analyzer_perfig import position_is_on_battlefield
-from ai.analyzer_rules import coverage_gaps, coverage_rows, new_rule_usage_counters, SECTION_TO_BUCKET, VERDICT_NEVER_EXERCISED
+from ai.analyzer_rules import coverage_gaps, coverage_rows, load_rules_corpus, new_rule_usage_counters, SECTION_TO_BUCKET, VERDICT_NEVER_EXERCISED, VERDICT_UNDECIDABLE
 
 
 def _weapon_rule_usage_pair_total(weapon_rule_usage: Dict[Any, Any], pair_key: Any) -> int:
@@ -4140,6 +4140,12 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         f"positions={stats['state_resync']['pos_mismatch']}, "
         f"figurine-allouee-inconnue={stats['state_resync']['alloc_model_unknown']})"
     )
+
+    _non_verifiable_count = sum(
+        1 for e in load_rules_corpus()
+        if require_key(require_key(e, "applicability"), "kind") == "indecidable"
+    )
+    log_print(f"ℹ️  Règles non vérifiables depuis le journal : {_non_verifiable_count} (catalogue pdf/unit/weapon — controls vides)")
 
     log_print("\n" + "#" * 80 + "\n")
 

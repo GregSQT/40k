@@ -376,3 +376,37 @@ def test_le_summary_et_le_total_cli_lisent_le_meme_calcul():
             stripped = line.strip()
             if stripped.startswith(f"{name} = ") and "_totals[" not in stripped:
                 pytest.fail(f"somme recopiée à la main : {stripped}")
+
+
+def test_kind_indecidable_retourne_none(_empty_stats):
+    """rule_is_applicable ne lève pas ValueError pour kind='indecidable' et renvoie None.
+
+    Sans ce test, une faute de frappe ('indécidable' avec accent) passerait silencieusement
+    au ValueError de la branche raise, et chacune des 207 règles concernées ferait planter l'analyzer.
+    """
+    from ai.analyzer_rules import rule_is_applicable
+
+    entry = {
+        "applicability": {"kind": "indecidable"},
+        "id": "TEST.INDECIDABLE",
+        "label": "test non vérifiable",
+        "status": "NON_VERIFIABLE",
+        "controls": [],
+    }
+    assert rule_is_applicable(_empty_stats, entry) is None
+
+
+def test_kind_indecidable_produit_verdict_undecidable(_empty_stats):
+    """coverage_rows attribue VERDICT_UNDECIDABLE à toutes les règles de section 'pdf'.
+
+    Vérifie le chemin complet rule_is_applicable → None → VERDICT_UNDECIDABLE dans coverage_rows,
+    sur les vraies entrées du corpus (qui sont toutes kind='indecidable' pour cette section).
+    """
+    from ai.analyzer_rules import coverage_rows, VERDICT_UNDECIDABLE
+
+    rows = coverage_rows(_empty_stats, "pdf")
+    assert rows, "aucune règle section 'pdf' dans le corpus"
+    for r in rows:
+        assert r["verdict"] == VERDICT_UNDECIDABLE, (
+            f"{r['id']} : verdict attendu {VERDICT_UNDECIDABLE!r}, obtenu {r['verdict']!r}"
+        )
