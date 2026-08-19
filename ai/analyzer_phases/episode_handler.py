@@ -109,7 +109,6 @@ def handle_episode_start(state: "AnalyzerState", config: "AnalyzerConfig", line:
     state.current_line_heights = {}
     state.unit_base = {}
     state.phase_seq_current_turn = []
-    state.command_player_per_turn = {}
     state.battle_shocked_by_unit = {}
     state.objective_control_method = None
     state.objective_oc_per_zone = {}

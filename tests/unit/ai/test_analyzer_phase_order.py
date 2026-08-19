@@ -80,31 +80,3 @@ def test_sequence_isolee_a_un_seul_tour_validee_a_episode_end(tmp_path: Path) ->
         _action(1, 1, "MOVE"),     # retour en arrière → violation
     ])
     assert stats["phase_order_violations"] == 1, stats["phase_order_violations"]
-
-
-def test_alternance_player_correcte_pas_de_violation(tmp_path: Path) -> None:
-    """P1 ouvre T1, P2 ouvre T2 → alternance correcte, 0 violation."""
-    stats = _run(tmp_path, [
-        _action(1, 1, "COMMAND"),   # T1 : P1 ouvre COMMAND
-        _action(2, 2, "COMMAND"),   # T2 : P2 ouvre COMMAND
-    ])
-    assert stats["player_alternation_violations"] == 0, stats["player_alternation_violations"]
-
-
-def test_meme_joueur_deux_tours_consecutifs_declenche_violation(tmp_path: Path) -> None:
-    """07.02 alternance — P1 ouvre COMMAND deux tours de suite = violation."""
-    stats = _run(tmp_path, [
-        _action(1, 1, "COMMAND"),   # T1 : P1 ouvre
-        _action(2, 1, "COMMAND"),   # T2 : P1 ouvre encore → violation attendue au T3-change
-        _action(3, 2, "COMMAND"),   # T3 : P2 ouvre (déclenche le check de T2)
-    ])
-    assert stats["player_alternation_violations"] == 1, stats["player_alternation_violations"]
-
-
-def test_alternance_violation_detectee_a_episode_end_sans_tour_suivant(tmp_path: Path) -> None:
-    """07.02 alternance — violation sur la DERNIÈRE paire détectée à EPISODE END (pas de T3)."""
-    stats = _run(tmp_path, [
-        _action(1, 1, "COMMAND"),   # T1 : P1 ouvre
-        _action(2, 1, "COMMAND"),   # T2 : P1 ouvre encore → violation, aucun T3 pour la déclencher
-    ])
-    assert stats["player_alternation_violations"] == 1, stats["player_alternation_violations"]
