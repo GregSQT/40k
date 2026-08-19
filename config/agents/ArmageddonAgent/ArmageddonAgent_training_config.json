@@ -6,7 +6,7 @@
     "total_episodes": 10000,
     "total_episodes_normal": "50000 : 0.1s/ep -> 36k ep / hour -> 100k ep / 2h30",
     "agent_seat_mode": "random",
-    "eval_episodes": 50,
+    "et pas en x1": 50,
     "eval_episodes_normal": "----------------------------------------------50",
     "n_envs": 48,
     "metrics_smoothing": null,
