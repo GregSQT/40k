@@ -1214,7 +1214,7 @@ def handle_wait(
                     enemy_pos = state.unit_positions[uid]
                     # Hors table : une escouade en réserves n'est PAS une cible (20.01). Mesurée
                     # depuis la sentinelle elle est à portée de n'importe quelle arme, donc tout
-                    # WAIT légal ressortait en `wait_with_los` / `wait_with_targets`.
+                    # WAIT légal ressortait en `wait_with_shootable_target`.
                     if not position_is_on_battlefield(enemy_pos):
                         continue
                     if not has_line_of_sight(wait_col, wait_row, enemy_pos[0], enemy_pos[1], state.wall_hexes):
