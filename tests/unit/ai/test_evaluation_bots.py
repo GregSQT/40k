@@ -138,7 +138,7 @@ def _move_gs(unit_hex=(0, 0), enemy_hex=(10, 0), objectives=None, models=None, c
 
 def test_select_weighted_deployment_action_errors_and_antirepeat(monkeypatch: pytest.MonkeyPatch) -> None:
     # Le pool de mise en place est nettoye par l'appelant (`BotControlledEnv._open_placement_slots`) :
-    # une action hors slots 4-8 ne peut plus arriver ici, et si elle y arrivait la table de poids
+    # une action hors slots 4-10 ne peut plus arriver ici, et si elle y arrivait la table de poids
     # la refuserait — c'est le meme KeyError que pour un slot sans poids configure.
     with pytest.raises(KeyError, match=r"Missing deployment weight"):
         _select_weighted_deployment_action([0, 1], {4: 1.0}, None, 0, 2)
@@ -165,6 +165,39 @@ def test_select_weighted_deployment_action_errors_and_antirepeat(monkeypatch: py
     )
     assert chosen in [5, 6]
     assert 4 not in captured["candidates"]
+
+
+def test_placement_weights_cover_all_deploy_strategy_slots() -> None:
+    """PLACEMENT_WEIGHTS de chaque bot couvre les 7 slots de strategie (4-10).
+
+    Regression : DEPLOY_STRATEGY_COUNT 5→7 a ouvert les slots 9 (centre_hub) et 10 (safe_rear)
+    sans mettre a jour les tables de poids, causant un KeyError fatal au reset des workers.
+    """
+    from ai.evaluation_bots import _WeightedMover
+    weighted_bots = [GreedyBot, DefensiveBot, ControlBot, AdaptiveBot, ValueTradeBot]
+    for cls in weighted_bots:
+        missing = [a for a in DEPLOYMENT_ACTIONS if a not in cls.PLACEMENT_WEIGHTS]
+        assert not missing, (
+            f"{cls.__name__}.PLACEMENT_WEIGHTS manque les slots {missing} "
+            f"(DEPLOYMENT_ACTIONS={list(DEPLOYMENT_ACTIONS)})"
+        )
+        total = sum(cls.PLACEMENT_WEIGHTS.values())
+        assert total > 0, f"{cls.__name__}.PLACEMENT_WEIGHTS : somme nulle"
+
+
+def test_weighted_bot_placement_action_slots_9_and_10(monkeypatch: pytest.MonkeyPatch) -> None:
+    """select_placement_action accepte les slots 9 et 10 sans lever de KeyError."""
+    for cls in [GreedyBot, DefensiveBot, ControlBot, AdaptiveBot, ValueTradeBot]:
+        bot = cls()
+        # slot 9 seul
+        result = bot.select_placement_action([9], {"phase": "deployment", "episode_number": 1})
+        assert result == 9, f"{cls.__name__} slot 9 : attendu 9, obtenu {result}"
+        # slot 10 seul
+        result = bot.select_placement_action([10], {"phase": "deployment", "episode_number": 1})
+        assert result == 10, f"{cls.__name__} slot 10 : attendu 10, obtenu {result}"
+        # slots 9 et 10 ensemble — doit retourner l'un des deux
+        result = bot.select_placement_action([9, 10], {"phase": "deployment", "episode_number": 1})
+        assert result in (9, 10), f"{cls.__name__} slots [9,10] : obtenu {result}"
 
 
 def test_random_bot_phase_aware_selection(monkeypatch: pytest.MonkeyPatch) -> None:

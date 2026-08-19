@@ -682,6 +682,8 @@ class GreedyBot(_WeightedMover):
         DEPLOYMENT_ACTIONS[2]: 0.20,  # safe/cohesion
         DEPLOYMENT_ACTIONS[3]: 0.10,  # left flank
         DEPLOYMENT_ACTIONS[4]: 0.10,  # right flank
+        DEPLOYMENT_ACTIONS[5]: 0.08,  # centre hub
+        DEPLOYMENT_ACTIONS[6]: 0.02,  # safe rear
     }
 
     def __init__(self, randomness: float = 0.0, movement_weights=None):
@@ -749,6 +751,8 @@ class DefensiveBot(_WeightedMover):
         DEPLOYMENT_ACTIONS[2]: 0.35,  # safe/cohesion
         DEPLOYMENT_ACTIONS[3]: 0.10,  # left flank
         DEPLOYMENT_ACTIONS[4]: 0.10,  # right flank
+        DEPLOYMENT_ACTIONS[5]: 0.03,  # centre hub
+        DEPLOYMENT_ACTIONS[6]: 0.17,  # safe rear
     }
 
     def __init__(self, randomness: float = 0.0, movement_weights=None):
@@ -889,6 +893,8 @@ class ControlBot(_WeightedMover):
         DEPLOYMENT_ACTIONS[2]: 0.20,
         DEPLOYMENT_ACTIONS[3]: 0.10,
         DEPLOYMENT_ACTIONS[4]: 0.10,
+        DEPLOYMENT_ACTIONS[5]: 0.15,  # centre hub : multi-objectif = contrôle
+        DEPLOYMENT_ACTIONS[6]: 0.05,  # safe rear
     }
 
     def __init__(self, randomness: float = 0.0, movement_weights=None):
@@ -1049,6 +1055,8 @@ class AdaptiveBot(_WeightedMover):
         DEPLOYMENT_ACTIONS[2]: 0.20,
         DEPLOYMENT_ACTIONS[3]: 0.10,
         DEPLOYMENT_ACTIONS[4]: 0.10,
+        DEPLOYMENT_ACTIONS[5]: 0.10,  # centre hub
+        DEPLOYMENT_ACTIONS[6]: 0.10,  # safe rear
     }
 
     def __init__(self, randomness: float = 0.0, movement_weights=None):
@@ -1175,6 +1183,8 @@ class ValueTradeBot(_WeightedMover):
         DEPLOYMENT_ACTIONS[2]: 0.35,  # safe/cohesion
         DEPLOYMENT_ACTIONS[3]: 0.10,  # left flank
         DEPLOYMENT_ACTIONS[4]: 0.10,  # right flank
+        DEPLOYMENT_ACTIONS[5]: 0.10,  # centre hub
+        DEPLOYMENT_ACTIONS[6]: 0.10,  # safe rear
     }
 
     def __init__(self, randomness: float = 0.0, movement_weights=None):
