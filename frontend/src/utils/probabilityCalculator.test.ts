@@ -108,6 +108,30 @@ describe("calculateWoundProbability (tir)", () => {
       5
     );
   });
+
+  it("STR×2 ≤ T → 6+ (1/6) — ex. STR=3, T=7", () => {
+    // 3*2=6 ≤ 7 → woundTarget=6 → (7-6)/6*100
+    expect(calculateWoundProbability(makeShooter(4, 3, 0), makeTarget(7, 5))).toBeCloseTo(
+      pct(6, 6),
+      5
+    );
+  });
+
+  it("STR×2 = T (limite exacte) → 6+ — ex. STR=3, T=6", () => {
+    // 3*2=6 = 6 → woundTarget=6
+    expect(calculateWoundProbability(makeShooter(4, 3, 0), makeTarget(6, 5))).toBeCloseTo(
+      pct(6, 6),
+      5
+    );
+  });
+
+  it("STR×2 > T mais STR < T → 5+ — ex. STR=3, T=5", () => {
+    // 3*2=6 > 5, STR=3 < T=5 → woundTarget=5
+    expect(calculateWoundProbability(makeShooter(4, 3, 0), makeTarget(5, 5))).toBeCloseTo(
+      pct(5, 6),
+      5
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -196,6 +220,13 @@ describe("calculateCombatHitProbability / Wound / Save / Overall (mêlée)", () 
     );
   });
 
+  it("STR×2 ≤ T → 6+ mêlée — ex. STR=3, T=7", () => {
+    expect(calculateCombatWoundProbability(makeMeleeAtk(4, 3, 0), makeTarget(7, 5))).toBeCloseTo(
+      pct(6, 6),
+      5
+    );
+  });
+
   it("overall mêlée = hit × wound × saveFailProb", () => {
     const atk = makeMeleeAtk(4, 4, -1);
     const def = makeTarget(4, 4);
@@ -237,8 +268,7 @@ describe("buildTargetPreviewStats", () => {
     if (!rangedEff) throw new Error("rangedEff inattendu null");
 
     const stats = buildTargetPreviewStats(10, 20, rangedEff);
-    const expected =
-      stats.hitProbability * stats.woundProbability * (1 - stats.saveProbability);
+    const expected = stats.hitProbability * stats.woundProbability * (1 - stats.saveProbability);
 
     expect(stats.overallProbability).toBeCloseTo(expected, 10);
   });
@@ -250,10 +280,7 @@ describe("buildTargetPreviewStats", () => {
     if (!rangedEff) throw new Error("rangedEff inattendu null");
 
     const stats = buildTargetPreviewStats(5, 7, rangedEff);
-    expect(stats.expectedDamage).toBeCloseTo(
-      stats.overallProbability * stats.potentialDamage,
-      10
-    );
+    expect(stats.expectedDamage).toBeCloseTo(stats.overallProbability * stats.potentialDamage, 10);
   });
 
   it("cible avec invulnérable meilleur que l'armure : saveProbability reflète le jet invul", () => {

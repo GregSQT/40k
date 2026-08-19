@@ -19,6 +19,7 @@ export function calculateWoundProbability(shooter: Unit, target: Unit): number {
   if (strength >= toughness * 2) woundTarget = 2;
   else if (strength > toughness) woundTarget = 3;
   else if (strength === toughness) woundTarget = 4;
+  else if (strength * 2 <= toughness) woundTarget = 6;
   else woundTarget = 5;
 
   return Math.max(0, ((7 - woundTarget) / 6) * 100);
@@ -40,7 +41,10 @@ export function calculateSaveProbability(
   }
 
   const modifiedArmor = armorSave - armorPenetration;
-  const saveTarget = invulSave > 0 && invulSave < modifiedArmor ? invulSave : modifiedArmor;
+  const saveTarget = Math.max(
+    2,
+    invulSave > 0 && invulSave < modifiedArmor ? invulSave : modifiedArmor
+  );
 
   const saveProbability = Math.max(0, ((7 - saveTarget) / 6) * 100);
   return 100 - saveProbability;
@@ -83,6 +87,7 @@ function calculateRangedEffectiveness(
   if (strength >= toughness * 2) woundTarget = 2;
   else if (strength > toughness) woundTarget = 3;
   else if (strength === toughness) woundTarget = 4;
+  else if (strength * 2 <= toughness) woundTarget = 6;
   else woundTarget = 5;
 
   const woundProbability = Math.max(0, (7 - woundTarget) / 6);
@@ -254,6 +259,7 @@ export function calculateCombatWoundProbability(attacker: Unit, target: Unit): n
   if (strength >= toughness * 2) woundTarget = 2;
   else if (strength > toughness) woundTarget = 3;
   else if (strength === toughness) woundTarget = 4;
+  else if (strength * 2 <= toughness) woundTarget = 6;
   else woundTarget = 5;
 
   return Math.max(0, ((7 - woundTarget) / 6) * 100);
@@ -267,7 +273,10 @@ export function calculateCombatSaveProbability(attacker: Unit, target: Unit): nu
   const armorPenetration = selectedWeapon.AP;
 
   const modifiedArmor = armorSave - armorPenetration;
-  const saveTarget = invulSave > 0 && invulSave < modifiedArmor ? invulSave : modifiedArmor;
+  const saveTarget = Math.max(
+    2,
+    invulSave > 0 && invulSave < modifiedArmor ? invulSave : modifiedArmor
+  );
 
   const saveProbability = Math.max(0, ((7 - saveTarget) / 6) * 100);
   return 100 - saveProbability;

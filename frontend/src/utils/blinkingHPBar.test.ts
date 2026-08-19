@@ -158,6 +158,17 @@ describe("calculateWoundProbability", () => {
     expect(calculateWoundProbability(attacker, invulTarget, "fight")).toBeCloseTo(16 / 216, 5);
   });
 
+  it("melee STR×2 ≤ T → woundTarget=6 : hit 3/6 × wound 1/6 × fail 2/6 = 1/36", () => {
+    // ATK=4 → hit=3/6 | STR=3, T=7 → 3*2=6 ≤ 7 → wound=1/6 | ARMOR=3 AP=0 → save=max(2,min(3,7))=3 → fail=2/6
+    const attacker = {
+      id: 1,
+      player: 1,
+      CC_WEAPONS: [{ id: "m4", display_name: "Jab", ATK: 4, STR: 3, AP: 0, DMG: 1, NB: 1 }],
+    } as unknown as Unit;
+    const heavyTarget = { ...target, T: 7 } as unknown as Unit;
+    expect(calculateWoundProbability(attacker, heavyTarget, "fight")).toBeCloseTo(1 / 36, 5);
+  });
+
   it("shoot with inCover reduces wound probability (cover improves armor save)", () => {
     // ATK=4 → hit=3/6 | STR=4=T=4 → wound=3/6
     // Without cover: ARMOR=3 AP=0 → save=3+ → fail=2/6 → prob=9/216=1/24≈0.0417

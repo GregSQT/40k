@@ -210,19 +210,20 @@ export function calculateWoundProbability(
   const weapon = getSelectedMeleeWeapon(attacker);
   if (!weapon) return 0;
 
-  const hitProb = Math.max(0, (7 - (weapon.ATK || 4)) / 6);
-  const strength = weapon.STR || 4;
+  const hitProb = Math.max(0, (7 - weapon.ATK) / 6);
+  const strength = weapon.STR;
   const toughness = target.T || 4;
   let woundTarget = 4;
   if (strength >= toughness * 2) woundTarget = 2;
   else if (strength > toughness) woundTarget = 3;
   else if (strength === toughness) woundTarget = 4;
+  else if (strength * 2 <= toughness) woundTarget = 6;
   else woundTarget = 5;
   const woundProb = Math.max(0, (7 - woundTarget) / 6);
 
   const saveTarget = Math.max(
     2,
-    Math.min((target.ARMOR_SAVE || 5) - (weapon.AP || 0), target.INVUL_SAVE || 7)
+    Math.min((target.ARMOR_SAVE || 5) - weapon.AP, target.INVUL_SAVE || 7)
   );
   const saveFailProb = Math.max(0, (saveTarget - 1) / 6);
 
