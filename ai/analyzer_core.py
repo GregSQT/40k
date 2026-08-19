@@ -1465,14 +1465,18 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 # Update state.last_player after processing the action
                 state.last_player = player
 
-                # 07.02 — enregistrer la séquence de phases par joueur (gate par joueur).
-                # La gate globale `last_phase` ne convient pas ici : si P1 termine sur FIGHT et
-                # P2 commence sur FIGHT, la gate globale bloquerait l'enregistrement de FIGHT chez
-                # P2, causant des faux négatifs sur les violations d'ordre.
+                # 07.02 — enregistrer la séquence de phases par joueur, en partant de son COMMAND.
+                # Les actions d'un joueur AVANT son COMMAND dans un round (défenseur au FIGHT de
+                # l'adversaire, mort loggée en P2 SHOOT pendant le tir P1) ne font pas partie de
+                # sa séquence active et ne sont pas validées — sinon FIGHT/SHOOT avant COMMAND = FP.
                 if phase != state.last_phase_by_player.get(int(player)):
-                    _player_seq = state.phase_seq_current_turn.setdefault(int(player), [])
-                    if phase not in _player_seq:
-                        _player_seq.append(phase)
+                    _player_seq = state.phase_seq_current_turn.get(int(player))
+                    if _player_seq is not None or phase == 'COMMAND':
+                        if _player_seq is None:
+                            _player_seq = []
+                            state.phase_seq_current_turn[int(player)] = _player_seq
+                        if phase not in _player_seq:
+                            _player_seq.append(phase)
                     state.last_phase_by_player[int(player)] = phase
 
                 if phase != state.last_phase:
