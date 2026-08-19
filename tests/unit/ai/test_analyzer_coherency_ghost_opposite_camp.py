@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import pytest
 
+from engine.hex_utils import hex_distance
 from tests.unit.ai._fabriques import entete_step_log
 
 ADV_FROM = (40, 15)      # ancre d'escouade au départ de l'avance
@@ -144,15 +145,12 @@ def test_premisse_ghost_hors_engagement():
     déclencherait aussi, et le test ne vérifierait plus le blocage BFS pur — c'est
     l'autre test (test_analyzer_coherency_removal_ghost.py) qui couvre ce cas.
     """
-    from engine.hex_utils import offset_to_cube
-
     def d(a, b):
-        ax, ay, az = offset_to_cube(*a)
-        bx, by, bz = offset_to_cube(*b)
-        return max(abs(ax - bx), abs(ay - by), abs(az - bz))
+        return hex_distance(a[0], a[1], b[0], b[1])
 
-    assert d(ADV_FROM, GHOST) > _EZ, (
-        f"le fantôme doit être hors zone d'engagement (>{_EZ} hex) pour ne tester que le BFS"
+    _ez_hex = _EZ // _ITS  # EZ en hex (toujours 2, quelle que soit la résolution)
+    assert d(ADV_FROM, GHOST) > _ez_hex, (
+        f"le fantôme doit être hors zone d'engagement (>{_ez_hex} hex) pour ne tester que le BFS"
     )
     assert d(ADV_FROM, GHOST) + d(GHOST, ADV_TO) == d(ADV_FROM, ADV_TO), (
         "le fantôme doit être sur un chemin le plus court entre départ et arrivée"
