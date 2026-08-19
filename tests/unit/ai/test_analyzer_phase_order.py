@@ -1,4 +1,4 @@
-"""07.02 — ordre des phases et alternance des joueurs.
+"""07.02 — ordre des phases par joueur.
 
 Les phases doivent se succéder dans l'ordre COMMAND→MOVE→SHOOT→CHARGE→FIGHT au sein d'un tour,
 mais la séquence est vérifiée PAR JOUEUR : P1 peut faire FIGHT dans son demi-tour avant que P2
