@@ -124,6 +124,9 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 | analyzer | Corpus de règles vérifiable | [analyzer.md#corpus-regles](analyzer.md#corpus-regles) | ⚡ |
 | front | ✅ Tests front T7+T8–T13 livrés + T11 hook complet (2026-08-19) — 82 tests vitest verts (Couche B), Playwright 14 scénarios (T12-1..T12-8), hook __W40K_TEST__ étendu (movePreviewHexes/blinkTargetUnitIds/currentMode/hexToScreenCoords), data-testid board-viewport+board-canvas-container | [front.md#tests](front.md#tests) | ⚡ |
 | front | ✅ buildTargetPreviewStats extraite (2026-08-19) — fonction pure testable hors jsdom, supprime le calcul inline redondant overallProbability/expectedDamage dans useEngineAPI ; 4 nouveaux tests rouge/vert | — | ⚡ |
+| front | ✅ Tests review-test-assertions corrigés (2026-08-19) — assertions test HazardWarning et BoardWithAPI nettoyées | — | ⚡ |
+| front | ✅ HazardWarningModal + AdvanceWarningModal simplifiés (2026-08-19) — composants nettoyés | — | ⚡ |
+| front | ✅ woundTargetFromSTR_T helper + fight blink délégué (2026-08-19) — cascade 4× factorisée en un helper partagé ; fight path blinkingHPBar délègue à calculateCombatOverallProbability | — | ⚡ |
 | front | Validations navigateur en attente | [front.md#validations-nav](front.md#validations-nav) | ⚡ |
 | training+bot | ✅ Benchmark floor gate §4.D livré (2026-08-18) — 3 bots de référence (balanced/denial/reactive) sur 4 scénarios holdout_regular ; seuil 0.90 après mesure ; `model_gating_enabled` sur x1_long | [v11_chemin_critique.md#benchmark-gate](v11_chemin_critique.md#benchmark-gate) | |
 | training+bot | ✅ scenario_bench-01..04 dupliqués supprimés (2026-08-18) — fichiers byte-for-byte identiques aux scenario_bot-01..04, glob fallback ramassait 8 scénarios au lieu de 4, épisodes/scénario divisés par 2 sans contrepartie | — | |

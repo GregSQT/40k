@@ -2,7 +2,10 @@
 
 import * as PIXI from "pixi.js";
 import type { Unit } from "../types/game";
-import { getSelectedRangedWeaponAgainstTarget } from "./probabilityCalculator";
+import {
+  calculateCombatOverallProbability,
+  getSelectedRangedWeaponAgainstTarget,
+} from "./probabilityCalculator";
 import { getDiceAverage, getSelectedMeleeWeapon } from "./weaponHelpers";
 
 /** Tooltip HTML (BoardPvp) : > tout z-index connu de l’app (ex. game-log 99999) ; opacité tests. */
@@ -206,28 +209,9 @@ export function calculateWoundProbability(
     return ranged ? ranged.overallProbability : 0;
   }
 
-  // For charge/fight, use melee weapon
-  const weapon = getSelectedMeleeWeapon(attacker);
-  if (!weapon) return 0;
-
-  const hitProb = Math.max(0, (7 - weapon.ATK) / 6);
-  const strength = weapon.STR;
-  const toughness = target.T || 4;
-  let woundTarget = 4;
-  if (strength >= toughness * 2) woundTarget = 2;
-  else if (strength > toughness) woundTarget = 3;
-  else if (strength === toughness) woundTarget = 4;
-  else if (strength * 2 <= toughness) woundTarget = 6;
-  else woundTarget = 5;
-  const woundProb = Math.max(0, (7 - woundTarget) / 6);
-
-  const saveTarget = Math.max(
-    2,
-    Math.min((target.ARMOR_SAVE || 5) - weapon.AP, target.INVUL_SAVE || 7)
-  );
-  const saveFailProb = Math.max(0, (saveTarget - 1) / 6);
-
-  return hitProb * woundProb * saveFailProb;
+  // For charge/fight, delegate to the shared melee probability pipeline
+  if (!getSelectedMeleeWeapon(attacker)) return 0;
+  return calculateCombatOverallProbability(attacker, target) / 100;
 }
 
 // Calculate damage per attack
