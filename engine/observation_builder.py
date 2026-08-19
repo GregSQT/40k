@@ -1500,6 +1500,9 @@ class ObservationBuilder:
                     ),
                 )
 
+            # V11 §9.5 P4 — portée effective de l'arme active vs distance du slot (reliquat P4).
+            _c("effective_range", ctx["active_max_ranged_range"])
+
             # V11 §9 P3-2 — support du choix de cible de CHARGE.
             #
             # UNE seule garde, celle de la PHASE : hors charge, la question n'a pas de sens et
@@ -1899,6 +1902,17 @@ class ObservationBuilder:
             str(t) for t in _fight_build_valid_target_pool(game_state, active_unit)
         }
 
+        # Portée MAXIMALE des armes de tir de l'unité active, en subhexes (V11 §9.5 P4).
+        # Même échelle que `edge_distance` : directement comparable par la tête pointeur.
+        _ish = int(require_key(game_state, "inches_to_subhex"))
+        _active_max_ranged_range = float(
+            max(
+                (int(w["RNG"]) for w in active_unit.get("RNG_WEAPONS", []) if "RNG" in w),  # get allowed : mêlée pure -> 0
+                default=0,
+            )
+            * _ish
+        )
+
         ctx: Dict[str, Any] = {
             "active_squad_id": active_squad_id,
             # Requis par les bits de PAIRE (couvert/visibilité vus depuis l'observateur).
@@ -1945,6 +1959,8 @@ class ObservationBuilder:
             # Empreintes par figurine, réutilisées telles quelles pour le comptage 04.02.
             "synth_by_mid": synth_by_mid,
             "engagement_zone": ez_zone,
+            # V11 §9.5 P4 — portée MAXIMALE en subhexes des armes de tir de l'unité active.
+            "active_max_ranged_range": _active_max_ranged_range,
         }
 
         def _write_entity(prefix: str, row: int, sid: str, *, is_ally: bool, is_active: bool) -> None:

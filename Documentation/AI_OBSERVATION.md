@@ -41,14 +41,14 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│  OBSERVATION SQUAD — Dict de TENSEURS D'ENTITÉS  (16 671 scalaires)    │
+│  OBSERVATION SQUAD — Dict de TENSEURS D'ENTITÉS  (16 703 scalaires)    │
 ├────────────────────────────────────────────────────────────────────────┤
 │  CONTEXTE GLOBAL                                                       │
 │    global_cont            (13,)                =      13               │
 │    global_bin             (35,)                =      35               │
 │                                                                        │
 │  MES ESCOUADES — ordre = slots d'activation       K_ALLY_SLOTS = 12    │
-│    allies_cont            (12, 19)             =     228               │
+│    allies_cont            (12, 20)             =     240               │
 │    allies_bin             (12, 20)             =     240               │
 │    allies_ability_ids     (12, 8)              =      96               │
 │    allies_status_ids      (12, 4)              =      48               │
@@ -59,7 +59,7 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 │    allies_types_bin       (12, 6, 5)           =     360               │
 │                                                                        │
 │  ESCOUADES ENNEMIES — ordre = slots d'action     K_ENEMY_SLOTS = 20    │
-│    enemies_cont           (20, 19)             =     380               │
+│    enemies_cont           (20, 20)             =     400               │
 │    enemies_bin            (20, 20)             =     400               │
 │    enemies_ability_ids    (20, 8)              =     160               │
 │    enemies_status_ids     (20, 4)              =      80               │
@@ -211,6 +211,13 @@ move » — le seul indice restant était indirect. Une phase hors des 6 **lève
                                                     #   Support du choix de cible de melee
                                                     #   (V11 §9 P3-1) : combien d'attaques je
                                                     #   porte reellement contre elle.
+[s][19]    = effective_range                        # subhexes [ENNEMIS seuls] — portee MAXIMALE
+                                                    #   des armes de tir de l'observatrice
+                                                    #   (max RNG x inches_to_subhex).
+                                                    #   Grandeur de PAIRE : meme valeur pour
+                                                    #   tous les slots, directement comparable
+                                                    #   a edge_distance (V11 §9.5 P4).
+                                                    #   0 pour une unite corps-a-corps pure.
 ```
 
 #### `allies_bin[s]` / `enemies_bin[s]` — une unite, 20 drapeaux  ·  jamais normalise
@@ -666,7 +673,11 @@ rendue vivante ne coûte PLUS de retrain :
 (`+6`), de quoi ouvrir les six tranches P3 restantes sans y revenir ; (3) `N_DEPLOY_SLOTS`
 passe de 5 à **8** (`+36`), les 3 slots en trop étant RÉSERVÉS — le masque les garde fermés tant
 que `DEPLOY_STRATEGY_COUNT` vaut 5.
-→ **16653** (V11 §0.48 élément `L2` — le choix de l'escouade à ACTIVER, 2026-08-07).
+→ **16653** (V11 §0.48 élément `L2` — le choix de l'escouade à ACTIVER, 2026-08-07)
+→ **16671** (V11 — ajout de la règle `INDIRECT_FIRE` dans `WEAPON_RULE_BITS` + portée
+`edge_distance` individuelle par figurine ; delta mesure en code)
+→ **16703** (`effective_range` : portée maximale de tir de l'observatrice par slot ennemi,
+V11 §9.5 P4 reliquat — 1 scalaire × 32 entités, 2026-08-19).
 `K_ALLY_SLOTS` passe de 8 à **12** (`+2 044` = 4 lignes × 511). La valeur ne porte plus une marge
 d'observation (« au plus 6 escouades par camp sur les rosters d'entraînement ») mais le **nombre de
 candidats d'activation adressables** : depuis `L2`, l'action `ACTIVATE_SLOT_i` désigne la ligne

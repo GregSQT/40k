@@ -72,6 +72,13 @@ UNIT_CONT_FIELDS: Tuple[str, ...] = (
     # `edge_distance` non plus : la distance à l'escouade ne dit rien du nombre de figurines
     # qui atteignent l'ennemi (05.03/04.02 s'évaluent par figurine, pas par ancre).
     "n_models_engaging",
+    # ⚠ Entité ENNEMIE uniquement (même masque que `n_models_engaging`).
+    # Portée MAXIMALE (en subhexes) des armes de tir de l'unité OBSERVATRICE. C'est une
+    # grandeur de PAIRE : elle dit, pour chaque ennemi, si l'observatrice peut l'atteindre
+    # avec ses armes actuelles (comparaison directe avec `edge_distance`).
+    # Source : max(RNG × inches_to_subhex) sur les armes de tir de l'unité active.
+    # 0 pour une unité corps-à-corps uniquement.
+    "effective_range",
 )
 
 #: Règles d'UNITÉ (`config/unit_rules.json`) exposées à l'agent.
