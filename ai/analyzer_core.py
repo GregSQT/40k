@@ -1412,6 +1412,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                     state.positions_at_move_phase_start = {}
                     state.last_player = None  # Reset last player on turn change
                     state.last_phase = None
+                    state.last_phase_by_player = {}
                     state.last_shoot_shooter_id = None
                     state.last_shoot_weapon = None
                     state.last_shoot_target_id = None
@@ -1432,11 +1433,17 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 # Update state.last_player after processing the action
                 state.last_player = player
 
-                if phase != state.last_phase:
-                    # 07.02 — enregistrer la séquence de phases dans le tour courant, par joueur.
+                # 07.02 — enregistrer la séquence de phases par joueur (gate par joueur).
+                # La gate globale `last_phase` ne convient pas ici : si P1 termine sur FIGHT et
+                # P2 commence sur FIGHT, la gate globale bloquerait l'enregistrement de FIGHT chez
+                # P2, causant des faux négatifs sur les violations d'ordre.
+                if phase != state.last_phase_by_player.get(int(player)):
                     _player_seq = state.phase_seq_current_turn.setdefault(int(player), [])
                     if phase not in _player_seq:
                         _player_seq.append(phase)
+                    state.last_phase_by_player[int(player)] = phase
+
+                if phase != state.last_phase:
                     if phase == 'COMMAND':
                         state.selected_choice_by_unit_source = {}
                     if phase == 'MOVE':

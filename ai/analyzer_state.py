@@ -254,6 +254,7 @@ class AnalyzerState:
     positions_at_move_phase_start: Dict[str, Tuple[int, int]] = field(default_factory=dict)
     last_player: Optional[int] = None
     last_phase: Optional[str] = None
+    last_phase_by_player: Dict[int, str] = field(default_factory=dict)
     #: Clé d'identité d'une phase pour la détection de double activation. DEUX formes, parce que
     #: deux grandeurs différentes identifient une phase : `(tour, phase, joueur)` hors combat,
     #: `(phase, fight_phase_seq_id, joueur)` en combat — un tour contient DEUX phases de combat
