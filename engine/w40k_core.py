@@ -4661,6 +4661,13 @@ class W40KEngine(gym.Env):
     # dupliquees mot pour mot) et `_log_handler_action_log_entry` (les deux passes de flush de
     # `action_logs`). Toute regression de taille ici reramene le « too complex » et rend a
     # nouveau ce corps invisible au verificateur : decomposer plutot que remettre une sourdine.
+    def _next_phase_after(self, from_phase: str) -> str:
+        """Return the phase that follows from_phase in get_phase_order(), fallback 'move'."""
+        from config_loader import get_config_loader
+        _order = get_config_loader().get_phase_order()
+        _idx = _order.index(from_phase) if from_phase in _order else -1
+        return _order[_idx + 1] if 0 <= _idx < len(_order) - 1 else "move"
+
     def _process_semantic_action(self, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
         """
         Process semantic action with detailed execution debugging.
@@ -4855,11 +4862,7 @@ class W40KEngine(gym.Env):
             elif from_phase == "deployment":
                 result = {"phase_complete": True, "next_phase": "command", "reason": "pool_empty"}
             else:
-                from config_loader import get_config_loader
-                _order = get_config_loader().get_phase_order()
-                _idx = _order.index(from_phase) if from_phase in _order else -1
-                _next = _order[_idx + 1] if 0 <= _idx < len(_order) - 1 else "move"
-                result = {"phase_complete": True, "next_phase": _next, "reason": "pool_empty"}
+                result = {"phase_complete": True, "next_phase": self._next_phase_after(from_phase), "reason": "pool_empty"}
 
             # CRITICAL FIX: Don't return early - fall through to cascade loop
             # to actually execute the phase transition in game_state
@@ -6522,11 +6525,7 @@ class W40KEngine(gym.Env):
             elif from_phase == "deployment":
                 result = {"phase_complete": True, "next_phase": "command", "reason": "pool_empty"}
             else:
-                from config_loader import get_config_loader
-                _order = get_config_loader().get_phase_order()
-                _idx = _order.index(from_phase) if from_phase in _order else -1
-                _next = _order[_idx + 1] if 0 <= _idx < len(_order) - 1 else "move"
-                result = {"phase_complete": True, "next_phase": _next, "reason": "pool_empty"}
+                result = {"phase_complete": True, "next_phase": self._next_phase_after(from_phase), "reason": "pool_empty"}
 
         # ── deployment : logique existante inchangée ──────────────────────────
         elif action_name == "deploy_unit":
