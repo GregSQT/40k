@@ -37,7 +37,7 @@ MovePlanEntry = Union[
 MovePlan = Sequence[MovePlanEntry]
 
 
-from engine.action_log_utils import append_action_log
+from engine.action_log_utils import append_action_log, models_segment_for_unit
 # `spatial_grid` ne depend que de `hex_utils` -> import direct sans cycle (il importe
 # `get_squad_move_budget` en local dans sa seule fonction qui en a besoin).
 from engine.spatial_grid import GRID_CELL_COUNT
@@ -3943,6 +3943,23 @@ def destroy_model(game_state: Dict[str, Any], model_id: str, reason: str) -> Non
         f"[MODEL DESTROY] E{episode} T{turn} {phase} model_id={model_id} squad={squad_id} "
         f"pos=({old_col},{old_row}) reason={reason}"
     )
+    # Événement explicite dans action_logs → step.log, pour TOUTES les causes de mort.
+    # Sans cet événement, une figurine peut disparaître de [MODELS:] d'une action SUIVANTE
+    # sans aucun signal intermédiaire visible (root cause : [MODELS:] est lu LIVE au flush,
+    # après que les effets ont modifié occupied_hexes_by_model). L'event "dead" permet à
+    # l'analyzer et à l'utilisateur de tracer chaque mort par modèle+raison explicitement.
+    _uc_player = (game_state.get("units_cache") or {}).get(squad_id, {}).get("player")  # get allowed
+    append_action_log(game_state, {
+        "type": "dead",
+        "model_id": model_id,
+        "unitId": squad_id,
+        "reason": reason,
+        "turn": turn,
+        "phase": phase,
+        "player": _uc_player,
+        "col": old_col,
+        "row": old_row,
+    })
 
     # 3/4/5. Cascade vers units_cache.
     units_entry = game_state.get("units_cache", {}).get(squad_id)  # get allowed
@@ -9161,6 +9178,12 @@ def _emit_squad_shoot_log(game_state: Dict[str, Any], g: Dict[str, Any], ctx: Ma
         "antiKeyword": require_key(g, "attack_profile").anti_keyword,
         "antiThreshold": require_key(g, "attack_profile").anti_threshold,
         "shootDetails": [{"shotNumber": i + 1, **s} for i, s in enumerate(g["shots"])],
+        # Pré-capture du segment [MODELS:] AVANT que les effets de l'action (hazardous,
+        # destroy_model) ne modifient occupied_hexes_by_model. Sans pré-capture,
+        # _build_shot_details lirait le segment LIVE au flush — après que les figurines tuées
+        # en cours d'activation ont déjà disparu du cache. Pré-capturé ici, ce segment reflète
+        # l'état du tireur au moment où il tire, pas l'état post-mort.
+        "models_segment": models_segment_for_unit(game_state, attacker_squad_id_str),
     })
 
 

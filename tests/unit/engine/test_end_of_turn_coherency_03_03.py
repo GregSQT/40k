@@ -65,6 +65,9 @@ def _gs(positions, squad_id="1", player=1):
             "cohesion_distance_mode": "euclidean",
             "engagement_zone": 1,
         }},
+        # destroy_model émet un event "dead" via append_action_log → action_log_seq requis.
+        "action_logs": [],
+        "action_log_seq": 0,
     }
 
 

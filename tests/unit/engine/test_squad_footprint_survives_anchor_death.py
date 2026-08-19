@@ -71,6 +71,9 @@ def _gs():
         "board_cols": 44, "board_rows": 60, "wall_hexes": set(),
         "_unit_move_version": 0, "terrain_areas": [],
         "inches_to_subhex": 1,
+        # destroy_model émet un event "dead" via append_action_log → action_log_seq requis.
+        "action_logs": [],
+        "action_log_seq": 0,
         "config": {
             "game_rules": {"engagement_zone": EZ, "max_base_size_hex": 12,
                            "unit_model_cohesion_range": 2, "unit_global_cohesion_range": 9,

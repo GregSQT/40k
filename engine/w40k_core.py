@@ -5586,6 +5586,8 @@ class W40KEngine(gym.Env):
         # L25 — 08.04 déclarations de command phase (Waaagh!, Oath of Moment) : pas des
         # actions d'agent au sens step gym, ce sont des décisions hors-step.
         "waaagh_call", "oath_selection",
+        # Mort par-figurine : pas une action d'agent, pas un step gym.
+        "dead",
     })
 
     _STEP_LOG_TYPE_MAP: Dict[str, str] = {
@@ -5634,6 +5636,10 @@ class W40KEngine(gym.Env):
         # Non-incrementants : décisions hors-step de command phase, pas des actions gym.
         "waaagh_call": "waaagh_call",
         "oath_selection": "oath_selection",
+        # Mort par-figurine explicite (toute cause). Emis par destroy_model pour rendre visible
+        # chaque suppression dans step.log — sans cet event, une figurine peut disparaître de
+        # [MODELS:] d'une action ultérieure sans aucun signal intermédiaire (flush LIVE post-mort).
+        "dead": "dead",
     }
 
     # Le moteur emet un seul type "move" ; la nuance vit dans move_type (cf. move_type_map du
@@ -5922,7 +5928,12 @@ class W40KEngine(gym.Env):
         details["save_result"] = None if save_success is None else ("SAVE" if save_success else "FAIL")
         if fight_state is not None:
             details.update(fight_state)
-        details["models_segment"] = self._models_segment_for_unit(unit_id)
+        # Préférer le segment pré-capturé (posé dans l'action_log par _emit_squad_shoot_log au
+        # moment du tir, AVANT les effets hazardous/destroy_model) au segment lu en temps réel.
+        details["models_segment"] = (
+            raw_log["models_segment"] if "models_segment" in raw_log
+            else self._models_segment_for_unit(unit_id)
+        )
         # Figs ayant EFFECTIVEMENT tire (sous-ensemble de [MODELS:]) : porte par le log de groupe
         # (_emit_squad_shoot_log -> "shooterModels"). Absent sur les actions sans resolution par-fig.
         shooter_models = raw_log.get("shooterModels")  # get allowed
@@ -6818,6 +6829,9 @@ class W40KEngine(gym.Env):
                     "timestamp": "server_time",
                     "action_name": action_name,
                     "reward": 0.0,
+                    # Pré-capture : [MODELS:] reflète l'état post-move (positions après commit),
+                    # cohérent pour un déplacement. Protège aussi des morts réactives éventuelles.
+                    "models_segment": self._models_segment_for_unit(squad_id),
                 },
             )
             # Emission AVANT end_activation(ACTION) : c'est l'ordre qu'impose le contrat

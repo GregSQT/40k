@@ -115,6 +115,9 @@ def _mw_game_state(target_unit_rules, *, hp=3):
         "los_cache": {},
         "hex_los_cache": {},
         "_los_pair_cache": {},
+        # destroy_model émet un event "dead" via append_action_log → action_log_seq requis.
+        "action_logs": [],
+        "action_log_seq": 0,
     }
     return gs
 

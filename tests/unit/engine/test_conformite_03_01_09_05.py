@@ -121,6 +121,9 @@ def _gs() -> Dict[str, Any]:
         "inches_to_subhex": 1,
         "terrain_areas": [],
         "_unit_move_version": 0,
+        # destroy_model émet un event "dead" via append_action_log → action_log_seq requis.
+        "action_logs": [],
+        "action_log_seq": 0,
     }
 
 

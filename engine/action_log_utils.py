@@ -8,6 +8,8 @@ It resets with a new episode (``w40k_core`` reset).
 
 from typing import Any, Dict, Iterable, MutableMapping, Tuple
 
+from shared.data_validation import require_key
+
 
 def format_models_segment(
     items: Iterable[Tuple[Any, int, int, float]], label: str = "MODELS"
@@ -49,6 +51,38 @@ def format_shooter_models_segment(model_ids: Iterable[Any]) -> str:
     if not parts:
         return ""
     return "[SHOOTER_MODELS: " + " ".join(parts) + "]"
+
+
+def models_segment_for_unit(
+    game_state: MutableMapping[str, Any], unit_id: Any, label: str = "MODELS"
+) -> str:
+    """Segment ``[MODELS:]`` des positions per-figurine COURANTES, sans accès à self.
+
+    Miroir de ``W40KEngine._models_segment_for_unit`` — même logique, sans dépendance à
+    l'instance du moteur. Utilisé dans les handlers (shared_utils, movement_handlers…) pour
+    pré-capturer le segment AU MOMENT de l'``append_action_log``, AVANT que les effets de
+    l'action (hazardous, destroy_model) ne modifient ``occupied_hexes_by_model``.
+
+    Sans pré-capture, ``_build_step_log_details`` lit le segment LIVE au flush — après que
+    les effets ont eu lieu — et les figurines tuées en cours d'action disparaissent de
+    ``[MODELS:]`` sans aucun événement intermédiaire visible.
+    """
+    if unit_id is None:
+        return ""
+    units_cache = game_state.get("units_cache")  # get allowed
+    if not isinstance(units_cache, dict):
+        return ""
+    entry = units_cache.get(str(unit_id))  # get allowed
+    if not isinstance(entry, dict):
+        return ""
+    by_model = entry.get("occupied_hexes_by_model")  # get allowed
+    if not isinstance(by_model, dict) or not by_model:
+        return ""
+    floors = require_key(entry, "floor_height_by_model")
+    return format_models_segment(
+        ((mid, pos[0], pos[1], require_key(floors, mid)) for mid, pos in by_model.items()),
+        label=label,
+    )
 
 
 def append_action_log(
