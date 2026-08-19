@@ -22,13 +22,14 @@ F, T = f"({FIGHTER[0]},{FIGHTER[1]})", f"({TARGET[0]},{TARGET[1]})"
 
 
 def _fought_line(unit_type: str, weapon: str, detail: str) -> str:
-    """Ligne FOUGHT complète pour une unité à figurine unique."""
+    """Ligne FOUGHT complète avec [MODEL_TYPES:] pour une unité à figurine unique."""
     return (
         f"[10:00:02] E1 T1 P1 FIGHT : Unit 1{F} FOUGHT Unit 101{T} with [{weapon}]"
         f" - {detail}"
         f" [FIGHT_SUBPHASE:fight]"
         f" [MODELS: 1#0@({FIGHTER[0]},{FIGHTER[1]},z0)]"
         f" [SHOOTER_MODELS: 1#0]"
+        f" [MODEL_TYPES: 1#0={unit_type}]"
         f" [R:+0.0] [SUCCESS]\n"
     )
 
