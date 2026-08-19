@@ -340,6 +340,7 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
                 <button
                   type="button"
                   key={turn}
+                  data-testid={`turn-btn-${turn}`}
                   style={style}
                   disabled={!onTurnClick}
                   onClick={() => onTurnClick?.(turn)}
@@ -357,6 +358,7 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
           >
             <button
               type="button"
+              data-testid="player-btn-1"
               style={getPlayerStyle(1, current_player === 1, !!onPlayerClick)}
               onClick={() => onPlayerClick?.(1)}
               disabled={!onPlayerClick}
@@ -367,6 +369,7 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
               <TooltipWrapper text={`Terminer immédiatement la phase pour P${current_player}`}>
                 <button
                   type="button"
+                  data-testid="end-phase-btn"
                   style={getEndPhaseStyle(current_player, true, !!onEndPhaseClick)}
                   onClick={() => onEndPhaseClick?.(current_player)}
                   disabled={!onEndPhaseClick}
@@ -377,6 +380,7 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
             )}
             <button
               type="button"
+              data-testid="player-btn-2"
               style={getPlayerStyle(2, current_player === 2, !!onPlayerClick)}
               onClick={() => onPlayerClick?.(2)}
               disabled={!onPlayerClick}
@@ -405,6 +409,7 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
                   <button
                     type="button"
                     key={phase}
+                    data-testid={`phase-btn-${phase}`}
                     className="phase-btn"
                     style={style}
                     disabled={!onPhaseClick}

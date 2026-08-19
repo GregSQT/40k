@@ -4913,10 +4913,14 @@ def shooting_clear_activation_state(game_state: Dict[str, Any], unit: Dict[str, 
     CRITICAL: Only called when arg5=1 (actually ending activation).
     If arg5=0 (NOT_REMOVED), state is preserved to continue activation.
     """
-    # Clear active unit
-    if "active_shooting_unit" in game_state:
+    # Clear active unit only if it's THIS unit — a skip/end of a different unit must not
+    # evict the manual squad-shoot activation in progress (PvP: active_shooting_unit tracks
+    # the unit whose pending_squad_shoot_intents are live; clearing it for a different unit
+    # leaves the pending entry orphaned and causes assert_no_pending_shoot_intent to raise).
+    unit_id = str(require_key(unit, "id"))
+    if str(game_state.get("active_shooting_unit", "")) == unit_id:
         del game_state["active_shooting_unit"]
-    
+
     # Clear unit activation state
     if "valid_target_pool" in unit:
         del unit["valid_target_pool"]

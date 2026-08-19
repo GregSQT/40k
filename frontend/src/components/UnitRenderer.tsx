@@ -1,5 +1,19 @@
 // frontend/src/components/UnitRenderer.tsx
 import * as PIXI from "pixi.js-legacy";
+
+// T11 — Hook de test PIXI : expose l'état rendu aux tests Playwright (jamais actif en prod).
+// Activer : VITE_TEST_HOOKS=1 dans le .env de test.
+if (import.meta.env.VITE_TEST_HOOKS === "1") {
+  const hook: Record<string, unknown> = {
+    /** Ids des unités dont le cercle vert a été dessiné dans ce frame. */
+    greenCircleUnitIds: new Set<string>(),
+    /** Réinitialise les cercles verts avant chaque frame ou entre chaque assertion. */
+    clearGreenCircles(this: Record<string, unknown>) {
+      (this.greenCircleUnitIds as Set<string>).clear();
+    },
+  };
+  (window as unknown as Record<string, unknown>).__W40K_TEST__ = hook;
+}
 import { ORIENTATION_STEP_COUNT, orientationStepToRadians } from "../constants/gameConfig";
 import type {
   FightSubPhase,
@@ -1635,6 +1649,13 @@ export class UnitRenderer {
 
     eligibleOutline.zIndex = greenCircleZIndex;
     this.target.addChild(eligibleOutline);
+
+    if (import.meta.env.VITE_TEST_HOOKS === "1") {
+      const hook = (window as unknown as Record<string, unknown>).__W40K_TEST__ as
+        | Record<string, unknown>
+        | undefined;
+      if (hook) (hook.greenCircleUnitIds as Set<string>).add(String(unit.id));
+    }
 
     // Anneau rouge pour les unités ayant chargé (Fights First V11) — visible pendant
     // les sous-phases pile_in et fight.
