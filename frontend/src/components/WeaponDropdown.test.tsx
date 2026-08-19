@@ -177,10 +177,11 @@ describe("WeaponDropdown — showActions", () => {
 // ---------------------------------------------------------------------------
 
 describe("WeaponDropdown — lignes de quantité", () => {
-  // code = w.code ?? "" = "" (makeWeapon ne définit pas code)
+  const BASE_WEAPON_OPT = makeWeapon(0, "Bolt Rifle");
+  const WEAPON_CODE = BASE_WEAPON_OPT.weapon.code ?? "";
   const WEAPON_ENTRY = {
-    code: "",
-    weapon: { display_name: "Bolt Rifle", NB: 2, ATK: 4, STR: 4, AP: 1, DMG: 1, RNG: 240 },
+    code: WEAPON_CODE,
+    weapon: BASE_WEAPON_OPT.weapon,
     m: 3,
     x: 1,
   };
@@ -189,7 +190,7 @@ describe("WeaponDropdown — lignes de quantité", () => {
     render(
       <WeaponDropdown
         {...BASE_PROPS}
-        weapons={[makeWeapon(0, "Bolt Rifle")]}
+        weapons={[BASE_WEAPON_OPT]}
         openTargets={["t1"]}
         targetData={{ t1: [WEAPON_ENTRY] }}
       />
@@ -202,14 +203,14 @@ describe("WeaponDropdown — lignes de quantité", () => {
     render(
       <WeaponDropdown
         {...BASE_PROPS}
-        weapons={[makeWeapon(0, "Bolt Rifle")]}
+        weapons={[BASE_WEAPON_OPT]}
         openTargets={["t1"]}
         targetData={{ t1: [WEAPON_ENTRY] }}
         onSetQty={onQty}
       />
     );
     fireEvent.click(screen.getByRole("button", { name: "−" }));
-    expect(onQty).toHaveBeenCalledWith("", 0, "t1");
+    expect(onQty).toHaveBeenCalledWith(WEAPON_CODE, 0, "t1");
   });
 
   it("clic + → onSetQty appelé avec x+1", () => {
@@ -217,14 +218,14 @@ describe("WeaponDropdown — lignes de quantité", () => {
     render(
       <WeaponDropdown
         {...BASE_PROPS}
-        weapons={[makeWeapon(0, "Bolt Rifle")]}
+        weapons={[BASE_WEAPON_OPT]}
         openTargets={["t1"]}
         targetData={{ t1: [WEAPON_ENTRY] }}
         onSetQty={onQty}
       />
     );
     fireEvent.click(screen.getByRole("button", { name: "+" }));
-    expect(onQty).toHaveBeenCalledWith("", 2, "t1");
+    expect(onQty).toHaveBeenCalledWith(WEAPON_CODE, 2, "t1");
   });
 
   it("clic Max → onSetQty appelé avec m", () => {
@@ -232,21 +233,21 @@ describe("WeaponDropdown — lignes de quantité", () => {
     render(
       <WeaponDropdown
         {...BASE_PROPS}
-        weapons={[makeWeapon(0, "Bolt Rifle")]}
+        weapons={[BASE_WEAPON_OPT]}
         openTargets={["t1"]}
         targetData={{ t1: [WEAPON_ENTRY] }}
         onSetQty={onQty}
       />
     );
     fireEvent.click(screen.getByRole("button", { name: "Max" }));
-    expect(onQty).toHaveBeenCalledWith("", 3, "t1");
+    expect(onQty).toHaveBeenCalledWith(WEAPON_CODE, 3, "t1");
   });
 
   it("− désactivé quand x=0 (activeTargetId requis pour afficher la ligne)", () => {
     render(
       <WeaponDropdown
         {...BASE_PROPS}
-        weapons={[makeWeapon(0, "Bolt Rifle")]}
+        weapons={[BASE_WEAPON_OPT]}
         openTargets={["t1"]}
         targetData={{ t1: [{ ...WEAPON_ENTRY, x: 0 }] }}
         activeTargetId="t1"
@@ -260,7 +261,7 @@ describe("WeaponDropdown — lignes de quantité", () => {
     render(
       <WeaponDropdown
         {...BASE_PROPS}
-        weapons={[makeWeapon(0, "Bolt Rifle")]}
+        weapons={[BASE_WEAPON_OPT]}
         openTargets={["t1"]}
         targetData={{ t1: [{ ...WEAPON_ENTRY, x: 3, m: 3 }] }}
       />
