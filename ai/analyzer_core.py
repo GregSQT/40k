@@ -1024,6 +1024,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                             line, state.dead_units_current_episode, state.unit_hp, state.unit_models_alive, state.unit_model_hp, lambda _u: _ordered_living_mids(state, config, _u), state.unit_hp_squad_max, state.unit_types, state.unit_positions, state.unit_deaths, state.unit_kill_context, stats,
                                 positions_by_model=state.positions_by_model,
                                 models_invalidated=state.models_invalidated,
+                                dead_model_ids_episode=state.dead_model_ids_episode,
                         )
 
                 if _dmg_actor_match:
