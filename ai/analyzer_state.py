@@ -176,6 +176,11 @@ class AnalyzerState:
     #: Vidé par unité dès le premier gel de l'activation (freeze_select_targets → .pop()) pour ne
     #: pas contaminer les gels ultérieurs (positions de morts des tours précédents).
     dead_model_positions_episode: Dict[str, Dict[str, Tuple[int, int]]] = field(default_factory=dict)
+    #: Numéro de ligne du DERNIER appel à `_resync_living_models` avec `removed != {}` pour
+    #: chaque unité. Utilisé pour distinguer accumulation intra-activation (plusieurs DEAD-lines
+    #: consécutives de la même attaque) vs cross-activation (deux FIGHT séparés sans MOVE/freeze
+    #: entre-deux) : si l'écart de lignes dépasse le seuil, le dict est REMPLACÉ (pas étendu).
+    dead_model_positions_episode_line: Dict[str, int] = field(default_factory=dict)
 
     # Suivi morts
     unit_deaths: List = field(default_factory=list)
@@ -332,6 +337,7 @@ class AnalyzerState:
             # unité (pop) afin que seule l'activation courante en bénéficie, et non les suivantes
             # (qui sinon verraient les morts des tours précédents à des positions périmées).
             _extra = self.dead_model_positions_episode.pop(target_id, {})  # pop : une seule activation
+            self.dead_model_positions_episode_line.pop(target_id, None)
             _models_raw = self.positions_by_model_pre_line.get(target_id)  # get allowed
             if _extra:
                 _models_full: Optional[Dict[str, Tuple[int, int]]] = {**_extra, **(_models_raw or {})}

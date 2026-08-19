@@ -167,3 +167,81 @@ def test_le_move_purge_les_positions_perimees(stats_avec_move):
     assert stats_avec_move["shoot_invalid"][2]["engaged_non_close_quarters"] == 0, (
         "Le MOVE doit avoir purgé la position stale 2#10@STALE_POS : 0 faux engagement attendu"
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CROSS-ACTIVATION : deux retraits consécutifs sans MOVE ni freeze entre-deux
+# ─────────────────────────────────────────────────────────────────────────────
+# Second retrait de cohérence : 2#1 (SAFE_POS_1, loin du tireur) disparaît, seul 2#0 survit.
+_SECOND_COHERENCY_REMOVAL = (
+    f"[10:00:03] E1 T2 P1 FIGHT : Unit 2({SAFE_POS_0[0]},{SAFE_POS_0[1]})"
+    f" COHERENCY REMOVED 2#1 (03.03)"
+    f" [MODELS: 2#0@({SAFE_POS_0[0]},{SAFE_POS_0[1]},z0)] [SUCCESS]\n"
+)
+
+# 25 lignes vides > seuil (20) → les deux retraits sont traités comme cross-activation.
+# line_number s'incrémente pour chaque ligne même vide.
+_PADDING_CROSS = "\n" * 25
+
+# 1 ligne vide < seuil → les deux retraits sont traités comme intra-activation (accumulation).
+_PADDING_INTRA = "\n" * 1
+
+
+@pytest.fixture
+def stats_cross_activation(tmp_path):
+    """Deux retraits séparés par plus du seuil (25 > 20 lignes).
+
+    T1 FIGHT retire 2#10@STALE_POS (dans EZ du tireur).
+    25 lignes sans [MODELS:] pour unit 2 → dépasse le seuil cross-activation.
+    T2 FIGHT retire 2#1@SAFE_POS_1 (hors EZ) → REMPLACE le dict (pas extend).
+    T2 SHOOT : _extra = {2#1: SAFE_POS_1} seulement → 0 faux engagement attendu.
+    """
+    return _stats(
+        tmp_path,
+        _HEADER + _COHERENCY_REMOVAL + _PADDING_CROSS + _SECOND_COHERENCY_REMOVAL + _SHOOT,
+        "cross_activation.log",
+    )
+
+
+@pytest.fixture
+def stats_intra_activation(tmp_path):
+    """Deux retraits séparés par moins du seuil (1 < 20 ligne).
+
+    T1 FIGHT retire 2#10@STALE_POS (dans EZ du tireur).
+    1 ligne sans [MODELS:] pour unit 2 → reste sous le seuil intra-activation.
+    T2 FIGHT retire 2#1@SAFE_POS_1 → ACCUMULE (les deux positions dans _extra).
+    T2 SHOOT : _extra = {2#10: STALE_POS, 2#1: SAFE_POS_1} → 1 engagement attendu.
+    Ce test vérifie que l'accumulation intra-activation n'est pas cassée par le fix.
+    """
+    return _stats(
+        tmp_path,
+        _HEADER + _COHERENCY_REMOVAL + _PADDING_INTRA + _SECOND_COHERENCY_REMOVAL + _SHOOT,
+        "intra_activation.log",
+    )
+
+
+def test_cross_activation_remplace_les_positions_perimees(stats_cross_activation):
+    """Le deuxième retrait (>seuil lignes après le premier) REMPLACE le dict.
+
+    La position périmée 2#10@STALE_POS ne doit pas survivre dans _extra pour le SHOOT
+    suivant. Seule 2#1@SAFE_POS_1 (hors EZ) est restituée → 0 faux engagement.
+
+    Ce test était ROUGE avant le fix du seuil cross-activation dans `_resync_living_models`
+    (le setdefault étendait le dict au lieu de le remplacer) et VERT après.
+    """
+    assert stats_cross_activation["shoot_invalid"][2]["engaged_non_close_quarters"] == 0, (
+        "La position périmée 2#10@STALE_POS ne doit pas survivre à un retrait cross-activation"
+    )
+
+
+def test_intra_activation_accumule_les_deux_positions(stats_intra_activation):
+    """Le deuxième retrait (<seuil lignes après le premier) ACCUMULE dans le dict.
+
+    Les deux positions (2#10@STALE_POS et 2#1@SAFE_POS_1) sont dans _extra.
+    2#10 est à distance EZ_HEX du tireur → engaged_non_close_quarters == 1.
+    Ce test garantit que l'accumulation intra-activation (DEAD-before-SHOOT multi-socles)
+    n'est pas cassée par le fix cross-activation.
+    """
+    assert stats_intra_activation["shoot_invalid"][2]["engaged_non_close_quarters"] == 1, (
+        "L'accumulation intra-activation doit inclure 2#10@STALE_POS → 1 engagement attendu"
+    )

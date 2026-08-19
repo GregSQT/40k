@@ -137,10 +137,15 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 | analyzer | ✅ T1 dead_model_ids_episode requis (2026-08-19) — `alloc_model_id` fourni sans `dead_model_ids_episode` lève ConfigurationError ; verrou rouge/vert | — | ⚡ |
 | moteur | ✅ require_unit_by_id canonique T0 (2026-08-19) — fonction unique dans game_utils, ConfigurationError si absente, re-exportée depuis combat_utils, importée dans shooting_handlers + w40k_core ; 5 tests rouge/vert | — | ⚡ |
 | moteur | ✅ Fix §11.04 budget charge par-figurine gym (2026-08-19) — `_attempt_charge_to_destinations` rejetait pas les destinations roll+extra ; verrou + test rouge/vert | — | ⚡ |
+| training | ✅ PLACEMENT_WEIGHTS slots 9/10 couverts (2026-08-19) — hotfix training, slots 9 et 10 ajoutés aux poids de placement | — | ⚡ |
+| moteur+training | ✅ Endless Duty obstacles 5+6 levés (2026-08-19) — fix obstacles 5 et 6 du scénario Endless Duty | — | ⚡ |
+| tests | ✅ docstring/commentaire test_deployment_slot_order_strategies corrigé (2026-08-19) — commentaires erronés alignés sur l'intention du test | — | ⚡ |
+| analyzer | ✅ dead_model_positions_episode cross-activation fix (2026-08-19) — setdefault accumulation périmée corrigée par heuristique seuil 20 lignes ; 2 nouveaux verrous rouge/vert intra/cross-activation | — | ⚡ |
 | moteur+services | ✅ Fix review-findings (2026-08-18) — surface refus moteur squad, wsgi leading-comma, message vide | — | |
 | services | ✅ VALUE/REQUISITION_COST séparés ED obstacle 7 (2026-08-19) — coût et valeur des unités ED dissociés en deux champs distincts | — | ⚡ |
 | moteur+tests | ✅ JSDoc bcKey périmé + test vert vacant buildBoardGeomKey (2026-08-19) — JSDoc corrigé, test vacant renforcé | — | ⚡ |
 | services | ✅ require_key slot_picks T1 (2026-08-19) — ed_state.get(slot_picks)+fallback remplacé par require_key ; absent = ConfigurationError ; 2 tests rouge/vert | — | ⚡ |
+| services+front | ✅ Endless Duty obstacles 5+6 levés (2026-08-19) — ILLUSTRATION_RATIO sur 18 fiches TS ; BASE_SHAPE/BASE_SIZE/MODEL_HEIGHT/orientation/level émis par _build_unit_from_registry ; MOVE+RNG convertis en subhex ; slot mapping par ID réel ; _load_allowed_profiles_by_slot dédupliqué ; 9 tests verts | — | ⚡ |
 | security | ✅ Chantier clos (2026-08-19) — F1–F15 résolues, validation navigateur OK, doc déplacé dans Implémenté/ | [archives/security.md](archives/security.md) | ⚡ |
 | infra | Perf `generate_compact_formation` | [infra.md#perf-formation](infra.md#perf-formation) | ⚡ |
 | infra | ✅ gzip + Brotli livrés (2026-08-18) — stage `brotli-builder`, `load_module` contexte main, directives server | [archives/infra.md](archives/infra.md) | ⚡ |

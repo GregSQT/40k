@@ -66,6 +66,7 @@ def handle_episode_start(state: "AnalyzerState", config: "AnalyzerConfig", line:
     state.revived_units_current_episode = set()
     state.dead_model_ids_episode = {}
     state.dead_model_positions_episode = {}
+    state.dead_model_positions_episode_line = {}
     state.current_scenario = 'Unknown'
     state.units_moved = set()
     state.units_shot = set()
