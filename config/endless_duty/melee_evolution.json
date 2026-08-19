@@ -1,6 +1,7 @@
 {
   "version": 1,
   "currency": "requisition_points",
+  "unit_field": "REQUISITION_COST",
   "unlock_wave": 15,
   "starter_loadout_id": "melee_intercessor_starter",
   "rules": {

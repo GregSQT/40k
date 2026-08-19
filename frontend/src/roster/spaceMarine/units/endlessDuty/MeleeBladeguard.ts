@@ -17,6 +17,7 @@ export class MeleeBladeguard extends TroopMeleeTroop {
   static LD = BladeguardVeteran.LD;
   static OC = BladeguardVeteran.OC;
   static VALUE = BladeguardVeteran.VALUE;
+  static REQUISITION_COST = 0;
 
   static RNG_WEAPON_CODES = ["heavy_bolt_pistol"];
   static RNG_WEAPONS = getWeapons(MeleeBladeguard.RNG_WEAPON_CODES);

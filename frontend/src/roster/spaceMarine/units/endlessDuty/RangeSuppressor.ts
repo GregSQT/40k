@@ -17,6 +17,7 @@ export class RangeSuppressor extends EliteRangeTroop {
   static LD = Suppressor.LD;
   static OC = Suppressor.OC;
   static VALUE = Suppressor.VALUE;
+  static REQUISITION_COST = 0;
 
   static RNG_WEAPON_CODES = ["accelerator_autocannon", "bolt_pistol"];
   static RNG_WEAPONS = getWeapons(RangeSuppressor.RNG_WEAPON_CODES);

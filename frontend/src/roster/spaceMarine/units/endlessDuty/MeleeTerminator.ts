@@ -17,6 +17,7 @@ export class MeleeTerminator extends EliteMeleeElite {
   static LD = AssaultTerminator.LD;
   static OC = AssaultTerminator.OC;
   static VALUE = AssaultTerminator.VALUE;
+  static REQUISITION_COST = 0;
 
   static RNG_WEAPON_CODES: string[] = [];
   static RNG_WEAPONS = getWeapons(MeleeTerminator.RNG_WEAPON_CODES);

@@ -17,6 +17,7 @@ export class RangeTerminator extends EliteRangeTroop {
   static LD = Terminator.LD;
   static OC = Terminator.OC;
   static VALUE = Terminator.VALUE;
+  static REQUISITION_COST = 0;
 
   static RNG_WEAPON_CODES = ["storm_bolter"];
   static RNG_WEAPONS = getWeapons(RangeTerminator.RNG_WEAPON_CODES);

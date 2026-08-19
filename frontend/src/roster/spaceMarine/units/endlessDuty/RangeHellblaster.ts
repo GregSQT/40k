@@ -17,6 +17,7 @@ export class RangeHellblaster extends TroopRangeElite {
   static LD = Hellblaster.LD;
   static OC = Hellblaster.OC;
   static VALUE = Hellblaster.VALUE;
+  static REQUISITION_COST = 0;
 
   static RNG_WEAPON_CODES = ["plasma_incinerator_standard", "bolt_pistol"];
   static RNG_WEAPONS = getWeapons(RangeHellblaster.RNG_WEAPON_CODES);

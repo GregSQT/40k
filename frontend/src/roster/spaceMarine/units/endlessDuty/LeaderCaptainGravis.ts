@@ -16,6 +16,7 @@ export class LeaderCaptainGravis extends LeaderEliteMeleeElite {
   static LD = CaptainGravisPowerWeaponBoltRifle.LD;
   static OC = CaptainGravisPowerWeaponBoltRifle.OC;
   static VALUE = CaptainGravisPowerWeaponBoltRifle.VALUE;
+  static REQUISITION_COST = 0;
 
   // Runtime default ED loadout; ED runtime can override with selected loadout.
   // Must match config/endless_duty/leader_evolution.json STARTER_LOADOUT_ID.

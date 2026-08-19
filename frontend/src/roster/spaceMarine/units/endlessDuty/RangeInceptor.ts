@@ -17,6 +17,7 @@ export class RangeInceptor extends EliteRangeTroop {
   static LD = InceptorBolter.LD;
   static OC = InceptorBolter.OC;
   static VALUE = InceptorBolter.VALUE;
+  static REQUISITION_COST = 0;
 
   static RNG_WEAPON_CODES = ["assault_bolters"];
   static RNG_WEAPONS = getWeapons(RangeInceptor.RNG_WEAPON_CODES);

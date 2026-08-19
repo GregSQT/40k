@@ -21,7 +21,7 @@ from typing import Any, Dict, List
 import pytest
 
 from ai.unit_registry import UnitRegistry
-from services.endless_duty_runtime import ED_SCENARIO_DEFAULT, _build_unit_from_registry
+from services.endless_duty_runtime import ED_SCENARIO_DEFAULT, _apply_slot_picks_to_unit, _build_unit_from_registry
 
 pytestmark = pytest.mark.anomaly
 
@@ -178,27 +178,30 @@ def test_obstacles_1_and_3_ed_scenario_now_uses_v11_format() -> None:
     )
 
 
-def test_obstacle_7_ed_leader_has_no_combat_value() -> None:
-    """Obstacle 7 — CONCEPTION : `VALUE` porte deux sens incompatibles.
+def test_obstacle_7_solved_value_and_requisition_cost_are_separate() -> None:
+    """Obstacle 7 — RÉSOLU : VALUE (combat) et REQUISITION_COST (réquisition) sont distincts.
 
-    Le moteur lit `VALUE` comme la valeur de COMBAT (référence d'usure `value_at_start`, V11 §9.8).
-    Endless Duty l'écrase avec le COÛT en points de réquisition (`_apply_slot_picks_to_unit`), et
-    le catalogue donne `base = 0` au Sergent de départ, tous ses picks initiaux à 0. Résultat :
-    `value_at_start[1] = 0` et `build_squad_observation` refuse — le tour IA est impossible.
+    Avant le fix, `_apply_slot_picks_to_unit` écrasait VALUE avec le coût de réquisition (0 pour
+    le Sergent de départ), rendant value_at_start[1] = 0 et bloquant le tour IA.
 
-    C'est un arbitrage produit, pas une réparation : cf. le document de chantier.
+    Après le fix : VALUE reste la valeur de combat (> 0), REQUISITION_COST reçoit le coût calculé.
     """
-    catalog = json.loads(
-        (_PROJECT_ROOT / "config" / "endless_duty" / "leader_evolution.json").read_text(encoding="utf-8")
-    )["catalog"]["Sergeant"]
-    starter_costs = [
-        row["cost"]
-        for row in catalog["rows"]
-        if (row["slot"], row["pick"]) in {
-            ("melee", "close_combat_weapon"), ("ranged", "bolt_rifle"), ("secondary", "bolt_pistol"),
-        }
-    ]
-    assert catalog["base"] == 0 and starter_costs == [0, 0, 0], (
-        f"Le coût de départ du Sergent n'est plus nul (base={catalog['base']}, picks={starter_costs}) : "
-        f"obstacle 7 traité ? Mettre à jour {_DOC}."
+    starter_picks = {"melee": "close_combat_weapon", "ranged": "bolt_rifle", "secondary": "bolt_pistol"}
+    unit: Dict[str, Any] = {
+        "VALUE": 18,
+        "RNG_WEAPONS": [],
+        "CC_WEAPONS": [],
+        "selectedRngWeaponIndex": None,
+        "selectedCcWeaponIndex": None,
+        "SHOOT_LEFT": 0,
+        "ATTACK_LEFT": 0,
+    }
+    _apply_slot_picks_to_unit(unit, "leader", "Sergeant", starter_picks)
+    assert unit["VALUE"] > 0, (
+        f"VALUE écrasé par le coût de réquisition (obtenu {unit['VALUE']}) : "
+        f"_apply_slot_picks_to_unit écrit à nouveau dans VALUE au lieu de REQUISITION_COST."
+    )
+    assert unit["REQUISITION_COST"] == 0, (
+        f"REQUISITION_COST inattendu pour le loadout de départ du Sergent (obtenu {unit['REQUISITION_COST']}) : "
+        f"le coût calculé devrait être 0 (base=0, picks à 0)."
     )

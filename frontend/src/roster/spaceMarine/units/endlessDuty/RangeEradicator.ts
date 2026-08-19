@@ -17,6 +17,7 @@ export class RangeEradicator extends EliteRangeTroop {
   static LD = EradicatorMeltaRifle.LD;
   static OC = EradicatorMeltaRifle.OC;
   static VALUE = EradicatorMeltaRifle.VALUE;
+  static REQUISITION_COST = 0;
 
   static RNG_WEAPON_CODES = ["melta_rifle"];
   static RNG_WEAPONS = getWeapons(RangeEradicator.RNG_WEAPON_CODES);

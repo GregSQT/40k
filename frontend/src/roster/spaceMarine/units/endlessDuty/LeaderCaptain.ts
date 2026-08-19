@@ -16,6 +16,7 @@ export class LeaderCaptain extends LeaderEliteMeleeElite {
   static LD = CaptainPowerFistPlasmaPistol.LD;
   static OC = CaptainPowerFistPlasmaPistol.OC;
   static VALUE = CaptainPowerFistPlasmaPistol.VALUE;
+  static REQUISITION_COST = 0;
 
   // Runtime default ED loadout; ED runtime can override with selected loadout.
   // Must match config/endless_duty/leader_evolution.json STARTER_LOADOUT_ID.

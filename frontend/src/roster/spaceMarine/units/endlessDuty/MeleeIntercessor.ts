@@ -17,6 +17,7 @@ export class MeleeIntercessor extends TroopMeleeSwarm {
   static LD = AssaultIntercessor.LD;
   static OC = AssaultIntercessor.OC;
   static VALUE = AssaultIntercessor.VALUE;
+  static REQUISITION_COST = 0;
 
   static RNG_WEAPON_CODES = ["heavy_bolt_pistol"];
   static RNG_WEAPONS = getWeapons(MeleeIntercessor.RNG_WEAPON_CODES);

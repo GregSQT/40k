@@ -17,6 +17,7 @@ export class RangeIntercessor extends TroopRangeSwarm {
   static LD = Intercessor.LD;
   static OC = Intercessor.OC;
   static VALUE = Intercessor.VALUE;
+  static REQUISITION_COST = 0;
 
   static RNG_WEAPON_CODES = ["bolt_rifle", "bolt_pistol"];
   static RNG_WEAPONS = getWeapons(RangeIntercessor.RNG_WEAPON_CODES);
