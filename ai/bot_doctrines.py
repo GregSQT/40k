@@ -692,7 +692,7 @@ class _PlacementMemory:
     vaut « mise en RESERVES » (20.01) — un choix de LISTE qu'un bot ne prend jamais.
     """
 
-    #: Poids par slot 4-8. Chaque bot la definit ; son absence est une erreur de programmation,
+    #: Poids par slot 4-10. Chaque bot la definit ; son absence est une erreur de programmation,
     #: pas un cas a absorber (d'ou l'annotation sans valeur).
     PLACEMENT_WEIGHTS: Dict[int, float]
 
@@ -1157,8 +1157,9 @@ class RacerBot(_DoctrineBot):
 
     MOVEMENT_BOT_KEY = "racer"
     PLACEMENT_WEIGHTS = {
-        DEPLOYMENT_ACTIONS[0]: 0.10, DEPLOYMENT_ACTIONS[1]: 0.50, DEPLOYMENT_ACTIONS[2]: 0.10,
+        DEPLOYMENT_ACTIONS[0]: 0.10, DEPLOYMENT_ACTIONS[1]: 0.40, DEPLOYMENT_ACTIONS[2]: 0.10,
         DEPLOYMENT_ACTIONS[3]: 0.15, DEPLOYMENT_ACTIONS[4]: 0.15,
+        DEPLOYMENT_ACTIONS[5]: 0.05, DEPLOYMENT_ACTIONS[6]: 0.05,
     }
 
     def target_score(self, attacker, is_ranged: bool, game_state):
@@ -1189,8 +1190,9 @@ class EndgameBot(_DoctrineBot):
 
     MOVEMENT_BOT_KEY = "endgame"
     PLACEMENT_WEIGHTS = {
-        DEPLOYMENT_ACTIONS[0]: 0.05, DEPLOYMENT_ACTIONS[1]: 0.25, DEPLOYMENT_ACTIONS[2]: 0.50,
+        DEPLOYMENT_ACTIONS[0]: 0.05, DEPLOYMENT_ACTIONS[1]: 0.20, DEPLOYMENT_ACTIONS[2]: 0.45,
         DEPLOYMENT_ACTIONS[3]: 0.10, DEPLOYMENT_ACTIONS[4]: 0.10,
+        DEPLOYMENT_ACTIONS[5]: 0.05, DEPLOYMENT_ACTIONS[6]: 0.05,
     }
 
     def _in_push_mode(self, game_state, player: int) -> bool:
@@ -1236,8 +1238,9 @@ class AlphaStrikeBot(_DoctrineBot):
 
     MOVEMENT_BOT_KEY = "alpha"
     PLACEMENT_WEIGHTS = {
-        DEPLOYMENT_ACTIONS[0]: 0.55, DEPLOYMENT_ACTIONS[1]: 0.20, DEPLOYMENT_ACTIONS[2]: 0.05,
+        DEPLOYMENT_ACTIONS[0]: 0.45, DEPLOYMENT_ACTIONS[1]: 0.20, DEPLOYMENT_ACTIONS[2]: 0.05,
         DEPLOYMENT_ACTIONS[3]: 0.10, DEPLOYMENT_ACTIONS[4]: 0.10,
+        DEPLOYMENT_ACTIONS[5]: 0.05, DEPLOYMENT_ACTIONS[6]: 0.05,
     }
 
     #: Part de son tir qu'il accepte de sacrifier pour aller au contact. Charger avec une unite
@@ -1287,8 +1290,9 @@ class AttritionBot(_DoctrineBot):
 
     MOVEMENT_BOT_KEY = "attrition"
     PLACEMENT_WEIGHTS = {
-        DEPLOYMENT_ACTIONS[0]: 0.10, DEPLOYMENT_ACTIONS[1]: 0.35, DEPLOYMENT_ACTIONS[2]: 0.35,
+        DEPLOYMENT_ACTIONS[0]: 0.10, DEPLOYMENT_ACTIONS[1]: 0.30, DEPLOYMENT_ACTIONS[2]: 0.30,
         DEPLOYMENT_ACTIONS[3]: 0.10, DEPLOYMENT_ACTIONS[4]: 0.10,
+        DEPLOYMENT_ACTIONS[5]: 0.05, DEPLOYMENT_ACTIONS[6]: 0.05,
     }
 
     def target_score(self, attacker, is_ranged: bool, game_state):
@@ -1345,8 +1349,9 @@ class DecapitationBot(_DoctrineBot):
 
     MOVEMENT_BOT_KEY = "decapitation"
     PLACEMENT_WEIGHTS = {
-        DEPLOYMENT_ACTIONS[0]: 0.30, DEPLOYMENT_ACTIONS[1]: 0.30, DEPLOYMENT_ACTIONS[2]: 0.20,
+        DEPLOYMENT_ACTIONS[0]: 0.25, DEPLOYMENT_ACTIONS[1]: 0.25, DEPLOYMENT_ACTIONS[2]: 0.20,
         DEPLOYMENT_ACTIONS[3]: 0.10, DEPLOYMENT_ACTIONS[4]: 0.10,
+        DEPLOYMENT_ACTIONS[5]: 0.05, DEPLOYMENT_ACTIONS[6]: 0.05,
     }
 
     def __init__(self, randomness: float = 0.0):
@@ -1503,8 +1508,9 @@ class ScorerBot(_DoctrineBot):
 
     MOVEMENT_BOT_KEY = "scorer"
     PLACEMENT_WEIGHTS = {
-        DEPLOYMENT_ACTIONS[0]: 0.15, DEPLOYMENT_ACTIONS[1]: 0.45, DEPLOYMENT_ACTIONS[2]: 0.20,
+        DEPLOYMENT_ACTIONS[0]: 0.15, DEPLOYMENT_ACTIONS[1]: 0.35, DEPLOYMENT_ACTIONS[2]: 0.20,
         DEPLOYMENT_ACTIONS[3]: 0.10, DEPLOYMENT_ACTIONS[4]: 0.10,
+        DEPLOYMENT_ACTIONS[5]: 0.05, DEPLOYMENT_ACTIONS[6]: 0.05,
     }
 
     def target_score(self, attacker, is_ranged: bool, game_state):
