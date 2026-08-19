@@ -197,7 +197,7 @@ def test_matches_the_action_mask_target_pool():
         _unit_cfg(3, 2, [(60, 20)]),
     ]))
     gs = eng.game_state
-    unit = get_unit_by_id("1", gs)
+    unit = get_unit_by_id(gs, "1")
     assert unit is not None
     pool = {str(t) for t in _fight_build_valid_target_pool(gs, unit)}
     engaging = _engaging_by_squad(eng, "1")

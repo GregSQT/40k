@@ -65,7 +65,7 @@ def _engine_in_fight_phase(scenario_file: str, seed: int = 1):
     # la phase se compléterait à vide et il n'y aurait pas d'étape FIGHT à observer.
     engaged = [
         sid for sid in gs["units_cache"]
-        if _fight_build_valid_target_pool(gs, require_present(get_unit_by_id(str(sid), gs), f"unit {sid}"))
+        if _fight_build_valid_target_pool(gs, require_present(get_unit_by_id(gs, str(sid)), f"unit {sid}"))
     ]
     assert engaged, "le scénario mêlée doit être pré-engagé"
     gs["current_player"] = int(gs["units_cache"][str(engaged[0])]["player"])
@@ -119,7 +119,7 @@ def _fight_action(game_state, squad_id: str) -> Dict[str, Any]:
     from engine.phase_handlers.fight_handlers import _fight_build_valid_target_pool
     from engine.phase_handlers.shared_utils import get_enemy_slot_mapping
 
-    unit = get_unit_by_id(str(squad_id), game_state)
+    unit = get_unit_by_id(game_state, str(squad_id))
     if unit is None:
         raise KeyError(f"unit {squad_id} introuvable")
     targets = {str(t) for t in _fight_build_valid_target_pool(game_state, unit)}

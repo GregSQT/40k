@@ -66,7 +66,7 @@ def _is_on_battlefield(gs, squad_id: str) -> bool:
     """
     from engine.game_utils import get_unit_by_id
 
-    unit = get_unit_by_id(str(squad_id), gs)
+    unit = get_unit_by_id(gs, str(squad_id))
     return unit is not None and unit["deployed_on_turn"] is not None
 
 

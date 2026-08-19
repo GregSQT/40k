@@ -11482,7 +11482,7 @@ def _fight_overrun_pile_in_plan(
     if not mids:
         return None
 
-    our_unit = get_unit_by_id(squad_id, game_state)
+    our_unit = get_unit_by_id(game_state, squad_id)
     if our_unit is None:
         raise KeyError(f"_fight_overrun_pile_in_plan: squad {squad_id} absent de gs['units']")
 

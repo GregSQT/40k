@@ -193,7 +193,7 @@ class RewardCalculator:
                 if acting_unit_id is None:
                     raise ValueError(f"Action result missing acting unit ID (checked unitId, shooterId, unit_id): {result}")
         
-        acting_unit = get_unit_by_id(str(acting_unit_id), game_state)
+        acting_unit = get_unit_by_id(game_state, str(acting_unit_id))
         if not acting_unit:
             raise ValueError(f"Acting unit not found: {acting_unit_id}")
 
@@ -441,7 +441,7 @@ class RewardCalculator:
             return skip_reward
             
         elif action_type == "charge" and "targetId" in result:
-            target = get_unit_by_id(str(result["targetId"]), game_state)
+            target = get_unit_by_id(game_state, str(result["targetId"]))
             if not target:
                 raise ValueError(f"Charge target not found: {result['targetId']}")
             # No target can die in charge phase
@@ -463,7 +463,7 @@ class RewardCalculator:
             
         elif action_type in ("fight", "combat") and "targetId" in result:
             # "combat" is the step_logger action type, "fight" is the legacy name
-            target = get_unit_by_id(str(result["targetId"]), game_state)
+            target = get_unit_by_id(game_state, str(result["targetId"]))
             if not target:
                 raise ValueError(f"Fight target not found: {result['targetId']}")
             # units_cache = living only; target may be dead (removed). Reward_mapper uses get_hp_from_cache → 0 if not in cache.
@@ -691,7 +691,7 @@ class RewardCalculator:
             target_squad_id = result.get("target_squad_id")
             if target_squad_id is None:
                 raise ValueError(f"squad_charge succeeded but missing target_squad_id: {result}")
-            target = get_unit_by_id(str(target_squad_id), game_state)
+            target = get_unit_by_id(game_state, str(target_squad_id))
             if not target:
                 raise ValueError(f"Charge target not found: {target_squad_id}")
             enriched_target = self._enrich_unit_for_reward_mapper(target)
@@ -892,7 +892,7 @@ class RewardCalculator:
         units_cache = require_key(game_state, "units_cache")
         for unit_id, cache_entry in units_cache.items():
             if int(cache_entry["player"]) == int(controlled_player):
-                unit = get_unit_by_id(str(unit_id), game_state)
+                unit = get_unit_by_id(game_state, str(unit_id))
                 if not unit:
                     raise KeyError(f"Unit {unit_id} missing from game_state['units']")
                 return unit
@@ -1268,7 +1268,7 @@ class RewardCalculator:
 
         for unit_id, cache_entry in units_cache.items():
             if cache_entry["player"] != acting_player:
-                unit = get_unit_by_id(unit_id, game_state)
+                unit = get_unit_by_id(game_state, unit_id)
                 if not unit:
                     raise KeyError(f"Unit {unit_id} missing from game_state['units']")
                 targets.append(unit)
@@ -1278,7 +1278,7 @@ class RewardCalculator:
     def _calculate_on_objective_reward(self, game_state: Dict[str, Any], result: Dict[str, Any]) -> float:
         """Reward fired when a controlled-player unit lands on an uncontrolled objective hex during move."""
         controlled_player = int(require_key(self.config, "controlled_player"))
-        unit = get_unit_by_id(str(result.get("unitId", "")), game_state)
+        unit = get_unit_by_id(game_state, str(result.get("unitId", "")))
         if not unit or int(require_key(unit, "player")) != controlled_player:
             return 0.0
         # Regle 01.07 : une unite battle-shocked a l OC de toutes ses figurines modifie a '-'

@@ -122,7 +122,7 @@ def once_claim(game_state: Dict[str, Any], family: OnceClaimFamily, key: Any) ->
     claims.setdefault(family, set()).add(key)
 
 
-def get_unit_by_id(unit_id: str, game_state: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def get_unit_by_id(game_state: Dict[str, Any], unit_id: str) -> Optional[Dict[str, Any]]:
     """
     AI_TURN.md COMPLIANCE: Direct lookup from game_state.
     Pure utility function - no dependencies on other modules.
@@ -130,6 +130,8 @@ def get_unit_by_id(unit_id: str, game_state: Dict[str, Any]) -> Optional[Dict[st
     CRITICAL: Compare both sides as strings to handle int/string ID mismatches.
     Pool unit IDs are integers, but some lookups pass strings.
 
+    Signature (game_state, unit_id) mirrors require_unit_by_id; difference: returns None
+    instead of raising when unit_id is absent.
     REQUIRES: game_state["unit_by_id"] (built at reset/reload). Absence = bug, raise explicitly.
     """
     unit_by_id = require_key(game_state, "unit_by_id")
