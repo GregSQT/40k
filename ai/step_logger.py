@@ -44,9 +44,15 @@ __all__ = ['StepLogger', 'LOG_GRAMMAR_VERSION']
 #:       [COVER] deja presente par la grammaire 3. Verrou : LOT A du meme fichier de test.
 #:       Aucune regle ne reste hors de la garantie.
 #:
+#:   6 — [HALF RANGE] L13 (24.25/24.30) : cible a demi-portee d une arme RAPID_FIRE ou MELTA,
+#:       calcule INDEPENDAMMENT du bonus applique (tag de ligne, avant la cible, comme
+#:       [RAPID FIRE:X]). Sur un journal log_grammar>=7, l absence de [HALF RANGE] sur un tir
+#:       d arme RAPID_FIRE ou MELTA signifie que la cible n etait PAS a demi-portee — jamais
+#:       que le journal ne sait pas le dire. Verrou : test_step_log_half_range.py.
+#:
 #: N incrementer que pour une garantie NOUVELLE, jamais pour un changement cosmetique : un
 #: lecteur qui refuse une version qu il ne connait pas doit avoir une raison de le faire.
-LOG_GRAMMAR_VERSION = 6
+LOG_GRAMMAR_VERSION = 7
 
 
 #: Regles qui AJOUTENT des des au pool d attaques et dont l effet depend de la CIBLE :
@@ -1132,6 +1138,11 @@ class StepLogger:
             _tgt_alive = details.get("target_alive_count")
             if _tgt_alive is not None:
                 shot_tags.append(f"[TARGET_DECL:{int(_tgt_alive)}]")
+            # L13 — [HALF RANGE] 24.25/24.30 : la cible etait a demi-portee (verdict calcule
+            # independamment du bonus applique — permet de detecter un [RAPID FIRE] ou [MELTA]
+            # manque). Present uniquement pour les armes portant l une ou l autre regle.
+            if details.get("at_half_range") is True:
+                shot_tags.append("[HALF RANGE]")
             shot_tags_suffix = f" {' '.join(shot_tags)}" if shot_tags else ""
             if weapon_name:
                 base_msg = f"{unit_label} SHOT{shot_tags_suffix} {target_label} with [{weapon_name}]"

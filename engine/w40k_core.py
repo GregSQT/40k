@@ -5906,6 +5906,11 @@ class W40KEngine(gym.Env):
         _indirect_fail_below = raw_log.get("indirectFireFailBelow")  # get allowed
         if _indirect_fail_below is not None:
             details["indirect_fire_fail_below"] = int(_indirect_fail_below)
+        # L13 — [HALF RANGE] 24.25/24.30 : cible a demi-portee d une arme RAPID_FIRE ou MELTA.
+        # Absent en melee (atHalfRange=False par le get-defaut de l emetteur) : le get ici
+        # est donc correct — la melee ne connait pas la demi-portee.
+        if raw_log.get("atHalfRange"):  # get allowed
+            details["at_half_range"] = True
         # L14 — [FIGHTS FIRST] 24.13 / 11.04 : l'unite a charge ce tour.
         # Pose uniquement en combat (ctx.log_type == "combat") par _emit_squad_shoot_log.
         if raw_log.get("fightsFirst"):  # get allowed

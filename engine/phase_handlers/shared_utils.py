@@ -9147,6 +9147,10 @@ def _emit_squad_shoot_log(game_state: Dict[str, Any], g: Dict[str, Any], ctx: Ma
         # une paire (MELTA, Multi-Melta) rendue « NOT USED » par le rapport. `dmg_bonus` n a
         # qu une source, [MELTA] (la melee le fixe a 0), donc la valeur est le X de l arme.
         "meltaApplied": int(require_key(g, "dmg_bonus")),
+        # L13 — [HALF RANGE] : cible a demi-portee pour une arme RAPID_FIRE ou MELTA. Absent
+        # en melee (`g` issu de _manual_roll_fight_intent ne porte pas `atHalfRange`) : get
+        # avec defaut False est le comportement correct — la melee ne connait pas la demi-portee.
+        "atHalfRange": bool(g.get("atHalfRange", False)),
         # [PRECISION] 24.28 : JUMEAU de [MELTA] jusque dans son histoire — appliquee par le
         # moteur (posee a l Allocation Order step), rendue dans la ligne de synthese, absente du
         # journal que lisent l analyzer et le replay. Le drapeau dit que la regle a IMPOSE un
@@ -9708,6 +9712,15 @@ def _manual_roll_intent(
     # Positions figees pendant la resolution => mesurer ici == « Select Targets step ».
     from engine.utils.weapon_helpers import weapon_rule_parameter
     _rf_x = weapon_rule_parameter(weapon, "RAPID_FIRE")
+    # L13 [HALF RANGE] 24.25/24.30 : verdict de demi-portee mutualisé — RAPID_FIRE et MELTA
+    # posent exactement la meme question avec le meme helper. Calculé UNE SEULE FOIS ici pour
+    # eviter l appel double (l ancien code mesurait la distance deux fois). Si l arme porte
+    # l une ou l autre regle (ou les deux), la distance est mesuree ici et reutilisee plus bas.
+    _melta_x = weapon_rule_parameter(weapon, "MELTA")
+    _at_half_range: bool = (
+        (_rf_x is not None or _melta_x is not None)
+        and _target_within_half_range(game_state, str(attacker["squad_id"]), target_sid, weapon)
+    )
     # Valeur EFFECTIVEMENT appliquee (0 si l arme ne porte pas la regle ou si la cible est
     # hors demi-portee) : le log de tir en tire le token `[RAPID FIRE:X]`, dont l analyzer se
     # sert pour lever le PLAFOND de tirs de l escouade (NB de base -> NB + X). Sans lui, toute
@@ -9716,9 +9729,7 @@ def _manual_roll_intent(
     # rester egal au premier sans que rien ne l'impose. Ce qu'on doit savoir ici, c'est « la
     # regle a-t-elle ajoute des des », exactement comme `_blast_extra_dice` cote [BLAST].
     _rapid_fire_applied = False
-    if _rf_x is not None and _target_within_half_range(
-        game_state, str(attacker["squad_id"]), target_sid, weapon
-    ):
+    if _rf_x is not None and _at_half_range:
         n_attacks += _rf_x
         _rapid_fire_applied = True
     if n_attacks <= 0:
@@ -9847,10 +9858,9 @@ def _manual_roll_intent(
     # le tirage du de de degats (_resolve_one_manual_wound). Meme mesure de demi-portee que
     # RAPID FIRE (helper commun).
     dmg_bonus = 0
-    _melta_x = weapon_rule_parameter(weapon, "MELTA")
-    if _melta_x is not None and _target_within_half_range(
-        game_state, str(attacker["squad_id"]), target_sid, weapon
-    ):
+    # _melta_x et _at_half_range sont calculés en tête de fonction (avec _rf_x) — une seule
+    # mesure de distance pour les deux règles.
+    if _melta_x is not None and _at_half_range:
         dmg_bonus = int(_melta_x)
     alive0 = [m for m in game_state["squad_models"].get(target_sid, []) if m in models_cache]  # get allowed
     if not alive0:
@@ -9959,6 +9969,10 @@ def _manual_roll_intent(
         "attacker_mid": attacker_mid, "attacker": attacker, "target_sid": target_sid,
         "weapon_name": weapon_name, "bs": bs, "bs_base": bs_base, "cover": cover, "ap": ap,
         "dmg_raw": dmg_raw, "dmg_bonus": dmg_bonus,
+        # L13 — demi-portee verifiee pour les armes RAPID_FIRE et/ou MELTA. Transporte jusqu au
+        # journal via `atHalfRange` du groupe puis `[HALF RANGE]` dans step.log. False pour
+        # toute arme sans ces deux regles (meme si la cible est physiquement a demi-portee).
+        "at_half_range": _at_half_range,
         # [PRECISION] 24.28 (tir) : la visibilite de la figurine CHARACTER se teste a la portee
         # de l arme, avec la meme primitive que le gate de tir. RNG n est exige que si l arme
         # porte la regle (seul cas ou la valeur est lue).
@@ -10640,6 +10654,10 @@ def _build_manual_allocation(
                 # cible, elle aussi dans `gkey`. Copie et non reference : le dict de l'intent ne
                 # doit pas devenir mutable a travers le groupe.
                 "additive_rules_applied": dict(_additive),
+                # L13 — demi-portee verifiee independamment du bonus applique (permet de
+                # detecter un [RAPID FIRE] ou [MELTA] manque quand la cible etait a demi-portee).
+                # Absent du record melee (_manual_roll_fight_intent) : get avec defaut False.
+                "atHalfRange": bool(r.get("at_half_range", False)),
                 "precision": require_key(r, "precision"),
                 "precision_range": require_key(r, "precision_range"),
                 # [PRECISION] 24.28 : l arme la DECLARE (`precision`) ; savoir si elle a JOUE
