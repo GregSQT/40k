@@ -136,7 +136,7 @@ def get_unit_by_id(unit_id: str, game_state: Dict[str, Any]) -> Optional[Dict[st
     return unit_by_id.get(str(unit_id))
 
 
-def require_unit_by_id(game_state: Dict[str, Any], unit_id: str) -> Dict[str, Any]:
+def require_unit_by_id(unit_id: str, game_state: Dict[str, Any]) -> Dict[str, Any]:
     """Lookup unit by ID; raise ConfigurationError if absent.
 
     Passer un non-str est un bug de l'appelant : aucune coercition silencieuse.
