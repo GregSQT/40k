@@ -28,10 +28,11 @@ _END = (
 )
 
 
-def _action(turn: int, player: int, phase: str, uid: str = "1") -> str:
+def _action(turn: int, player: int, phase: str, uid: str | None = None) -> str:
+    _uid = uid if uid is not None else str(player)
     return (
         f"[10:00:0{turn}] E1 T{turn} P{player} {phase} : "
-        f"Unit {uid}(5,5) WAITED [SUCCESS]"
+        f"Unit {_uid}(5,5) WAITED [SUCCESS]"
     )
 
 
@@ -87,16 +88,17 @@ def test_sequence_isolee_a_un_seul_tour_validee_a_episode_end(tmp_path: Path) ->
 def test_fight_p1_avant_charge_p2_meme_tour_pas_violation(tmp_path: Path) -> None:
     """07.02 — FIGHT(P1) avant CHARGE(P2) dans le même battle round = 0 violation.
 
-    P1 saute CHARGE (aucune unité éligible) et passe à FIGHT. P2 fait ensuite CHARGE dans
-    le même round. L'ancienne séquence partagée produisait [FIGHT, CHARGE] = faux positif.
-    La séquence par joueur isole P1=[FIGHT] et P2=[CHARGE, FIGHT], toutes deux valides.
+    P1 saute CHARGE (aucune unité éligible) et passe à FIGHT. P2 fait ensuite COMMAND→CHARGE→FIGHT
+    dans le même round. L'ancienne séquence partagée produisait [FIGHT, CHARGE] = faux positif.
+    La séquence par joueur isole P1=[FIGHT] et P2=[COMMAND, CHARGE, FIGHT], toutes deux valides.
     """
     stats = _run(tmp_path, [
         _action(1, 1, "COMMAND"),
         _action(1, 1, "MOVE"),
         _action(1, 1, "SHOOT"),
-        _action(1, 1, "FIGHT"),   # P1 saute CHARGE
-        _action(1, 2, "CHARGE"),  # P2 fait CHARGE après FIGHT(P1) dans le même T1
+        _action(1, 1, "FIGHT"),    # P1 saute CHARGE
+        _action(1, 2, "COMMAND"),  # P2 ouvre son tour
+        _action(1, 2, "CHARGE"),   # CHARGE après FIGHT(P1) dans le même T1 — doit rester 0 violation
         _action(1, 2, "FIGHT"),
     ])
     assert stats["phase_order_violations"] == 0, stats["phase_order_violations"]
