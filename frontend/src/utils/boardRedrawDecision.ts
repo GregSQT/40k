@@ -45,6 +45,46 @@ type _TousLesCalquesOntUnCycleDeVie = keyof DrawBoardResult extends
 /** Consommation du garde-fou : sans usage, `noUnusedLocals` supprimerait la vérification. */
 export const LAYER_LIFECYCLES_ARE_EXHAUSTIVE: _TousLesCalquesOntUnCycleDeVie = true;
 
+/**
+ * Clé de GÉOMÉTRIE du plateau statique : dimensions, zones d'objectif (forme + coordonnées),
+ * murs, et flag déploiement. Ne change qu'au chargement d'un plateau ou d'un épisode de replay,
+ * jamais lors d'une capture d'objectif.
+ */
+export function buildBoardGeomKey(params: {
+  cols: number;
+  rows: number;
+  objectiveZonesGeomKey: string;
+  wallsFp: string;
+  isDeployment: boolean;
+}): string {
+  const { cols, rows, objectiveZonesGeomKey, wallsFp, isDeployment } = params;
+  return `${cols}x${rows}|oz:${objectiveZonesGeomKey}|w:${wallsFp}|dep:${isDeployment ? 1 : 0}`;
+}
+
+/**
+ * Clé de CONTRÔLE du plateau statique : couleur de contrôle des objectifs (14.02). Change à
+ * chaque capture d'objectif ou bascule de contrôleur.
+ */
+export function buildBoardControlKey(params: { objectiveControlKeyForBoard: string }): string {
+  return `oc:${params.objectiveControlKeyForBoard}`;
+}
+
+/**
+ * Le calque statique PIXI est réutilisable exactement quand les deux clés sont inchangées ET
+ * que le conteneur existe encore. Cette décision était inline dans `BoardPvp` ; elle vit ici
+ * pour être verrouillée par les tests plutôt que par la discipline du prochain lecteur.
+ */
+export function computeStaticLayerReusable(params: {
+  prevGeomKey: string;
+  currGeomKey: string;
+  prevControlKey: string;
+  currControlKey: string;
+  staticLayerExists: boolean;
+}): boolean {
+  const { prevGeomKey, currGeomKey, prevControlKey, currControlKey, staticLayerExists } = params;
+  return prevGeomKey === currGeomKey && prevControlKey === currControlKey && staticLayerExists;
+}
+
 /** Ce que `BoardPvp` doit faire de son stage pour ce rendu. */
 export interface BoardRedrawPlan {
   /** Appeler `drawBoard` (elle recrée les surbrillances, et le statique si absent du cache). */
