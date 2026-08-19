@@ -1201,6 +1201,8 @@ class StepLogger:
             hazardous_mortal_wounds = require_key(details, "hazardous_mortal_wounds")
             hazard_context = details.get("hazard_context", "Hazardous")
             tag = "[DESPERATE ESCAPE]" if hazard_context == HAZARD_CONTEXT_DESPERATE_ESCAPE else "[HAZARDOUS]"
+            if int(hazardous_mortal_wounds) == 0:
+                return f"Unit {unit_with_coords} SUFFERS 0 Mortal Wounds {tag} [NO ALLOC]"
             target_model_id = require_key(details, "target_model_id")
             return f"Unit {unit_with_coords} SUFFERS {hazardous_mortal_wounds} Mortal Wounds {tag} [ALLOC_MODEL: {target_model_id}]"
             

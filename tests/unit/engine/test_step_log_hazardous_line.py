@@ -32,18 +32,22 @@ def _details(raw_log: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _payload(**over: Any) -> Dict[str, Any]:
-    """Le payload que `hazardous_test` construit réellement (champs utiles au formateur)."""
+    """Payload avec 0 blessures mortelles (aucun dé raté) — le vrai cas sans allocation.
+
+    C'est le seul état où hazardDetails est vide à l'heure du flush : quand wounds>0,
+    allocate_mortal_wounds peuple la liste synchroniquement avant le flush.
+    """
     base = {
         "type": "hazard",
-        "message": "Unit 3 BigMek(12,7) [HAZARD] roll (shoot): 1 rolls - 1 fail(s) - 3 mortal wound(s)",
+        "message": "Unit 3 BigMek(12,7) [HAZARD] roll (shoot): 1 rolls - 0 fail(s) - 0 mortal wound(s)",
         "turn": 2,
         "phase": "shoot",
         "unitId": 3,
         "player": 1,
         "col": 12,
         "row": 7,
-        "hazardousMortalWounds": 3,
-        "result": "3 MW",
+        "hazardousMortalWounds": 0,
+        "result": "0 MW",
         "hazardDetails": [],
     }
     base.update(over)
@@ -51,10 +55,13 @@ def _payload(**over: Any) -> Dict[str, Any]:
 
 
 def test_la_ligne_hasardeuse_est_formatable(tmp_path) -> None:
-    """VERROU : c'est exactement l'appel que faisait le drainage, et qui levait."""
+    """VERROU : c'est exactement l'appel que faisait le drainage, et qui levait.
+
+    Scénario : 0 dé raté → 0 MW → hazardDetails vide → pas d'ALLOC_MODEL.
+    """
     logger = StepLogger(output_file=str(tmp_path / "step.log"), enabled=True, buffer_size=1)
     msg = logger._format_replay_style_message("3", "hazardous", _details(_payload()))
-    assert msg == "Unit 3(12,7) SUFFERS 3 Mortal Wounds [HAZARDOUS]", msg
+    assert msg == "Unit 3(12,7) SUFFERS 0 Mortal Wounds [HAZARDOUS] [NO ALLOC]", msg
 
 
 def test_sans_coordonnees_la_ligne_est_perdue(tmp_path) -> None:

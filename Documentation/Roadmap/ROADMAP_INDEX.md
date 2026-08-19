@@ -118,6 +118,7 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 | tests | ✅ _charge_budget_subhex unit= optionnel (2026-08-19) — paramètre unit= rendu optionnel, perf micro | — | ⚡ |
 | tests | ✅ couverture deploy_squad_destinations + select_rule_choice (2026-08-19) — tests humain pour ces deux paths | — | ⚡ |
 | tests | ✅ simplification fixture deploy_game (2026-08-19) — retrait assertion vacuuse | — | ⚡ |
+| step_logger+analyzer | ✅ hazardous 0-MW no raise (2026-08-19) — wounds=0 (aucun dé raté) → [NO ALLOC] sans require_key ; analyzer saute _apply_damage si mw==0 (HAZARDOUS + DESPERATE ESCAPE) | — | ⚡ |
 | moteur+analyzer | ✅ dead events step.log + pré-capture tir protégée (2026-08-19) — _build_step_log_details mappe model_id/reason ; _emit_squad_shoot_log try/except ConfigurationError ; is None strict | — | ⚡ |
 | analyzer | Champs manquants `step.log` L6→L28 (17 restantes après livraison L14/L19/L22/L25/L27/L28 le 2026-08-18) | [analyzer.md#champs-step-log](analyzer.md#champs-step-log) | ⚡ |
 | analyzer | Corpus de règles vérifiable | [analyzer.md#corpus-regles](analyzer.md#corpus-regles) | ⚡ |

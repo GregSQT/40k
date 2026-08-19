@@ -1733,24 +1733,27 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                             # `_dmg_actor_id` est le préfixe "Unit N(" de la ligne SUFFERS :
                             # c'est la seule source fiable de l'unité touchée (action_unit_id
                             # retient le dernier ID de header, pas celui de la ligne courante).
-                            # grammar ≥ 6 : [ALLOC_MODEL:] présent, lu comme pour tir/mêlée.
+                            # grammar ≥ 6 : [ALLOC_MODEL:] présent si mw>0, lu comme pour tir/mêlée.
                             # grammar < 6 : None → chemin hérité (ordered_living_mids[0]).
+                            # mw==0 : aucun dé raté → aucune blessure → aucune allocation possible
+                            # (step.log émet [NO ALLOC]) ; on saute le bloc de dégâts entièrement.
                             # `pending_model_removals=None` : les removals d'une attaque précédente
                             # de la MÊME activation ne doivent pas être fusionnés ici — cette mort
                             # est distincte, et le flush se produit au changement d'acteur.
-                            _apply_damage_and_handle_death(
-                                _hz_unit_id, _hz_unit_id, _hz_mw,
-                                player, turn, phase, state.line_number, state.current_episode_num,
-                                line, state.dead_units_current_episode, state.unit_hp,
-                                state.unit_models_alive, state.unit_model_hp,
-                                lambda _u: _ordered_living_mids(state, config, _u),
-                                state.unit_hp_squad_max, state.unit_types, state.unit_positions,
-                                state.unit_deaths, state.unit_kill_context, stats,
-                                positions_by_model=state.positions_by_model,
-                                models_invalidated=state.models_invalidated,
-                                alloc_model_id=_alloc_model_from_line(state, action_desc, line) if state.log_grammar >= 6 else None,
-                                pending_model_removals=None,
-                            )
+                            if _hz_mw > 0:
+                                _apply_damage_and_handle_death(
+                                    _hz_unit_id, _hz_unit_id, _hz_mw,
+                                    player, turn, phase, state.line_number, state.current_episode_num,
+                                    line, state.dead_units_current_episode, state.unit_hp,
+                                    state.unit_models_alive, state.unit_model_hp,
+                                    lambda _u: _ordered_living_mids(state, config, _u),
+                                    state.unit_hp_squad_max, state.unit_types, state.unit_positions,
+                                    state.unit_deaths, state.unit_kill_context, stats,
+                                    positions_by_model=state.positions_by_model,
+                                    models_invalidated=state.models_invalidated,
+                                    alloc_model_id=_alloc_model_from_line(state, action_desc, line) if state.log_grammar >= 6 else None,
+                                    pending_model_removals=None,
+                                )
                         else:
                             stats['parse_errors'].append({
                                 'episode': state.current_episode_num,
@@ -1782,7 +1785,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                     'error': "ligne DESPERATE ESCAPE : ID unité introuvable "
                                              "(attendu : 'Unit N(' en tête d'action)",
                                 })
-                            else:
+                            elif _de_mw > 0:
                                 _apply_damage_and_handle_death(
                                     _de_unit_id, _de_unit_id, _de_mw,
                                     player, turn, phase, state.line_number, state.current_episode_num,
