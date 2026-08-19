@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { planBoardRedraw } from "./boardRedrawDecision";
+import {
+  buildBoardControlKey,
+  buildBoardGeomKey,
+  computeStaticLayerReusable,
+  planBoardRedraw,
+} from "./boardRedrawDecision";
 
 const CAS = [
   { highlightsReusable: true, staticLayerReusable: true },
@@ -57,5 +62,96 @@ describe("planBoardRedraw", () => {
       keepStaticLayer: true,
       keepHighlightLayers: true,
     });
+  });
+});
+
+const GEOM_BASE = {
+  cols: 44,
+  rows: 30,
+  objectiveZonesGeomKey: "5:45:1234567",
+  wallsFp: "12:98765432",
+  isDeployment: false,
+};
+
+describe("buildBoardGeomKey / buildBoardControlKey / computeStaticLayerReusable", () => {
+  it("la clé géométrie ne change pas lors d'une capture d'objectif", () => {
+    const geomBefore = buildBoardGeomKey(GEOM_BASE);
+    // Capture : seul objectiveControlKeyForBoard change
+    const geomAfter = buildBoardGeomKey(GEOM_BASE);
+    expect(geomAfter).toBe(geomBefore);
+  });
+
+  it("la clé contrôle change lors d'une capture d'objectif", () => {
+    const ocBefore = "ruin_center=n/n|rect_nw=n/n";
+    const ocAfter = "ruin_center=1/1|rect_nw=n/n";
+    expect(buildBoardControlKey({ objectiveControlKeyForBoard: ocAfter })).not.toBe(
+      buildBoardControlKey({ objectiveControlKeyForBoard: ocBefore })
+    );
+  });
+
+  it("la clé géométrie change si les dimensions changent", () => {
+    const a = buildBoardGeomKey(GEOM_BASE);
+    const b = buildBoardGeomKey({ ...GEOM_BASE, cols: 55 });
+    expect(b).not.toBe(a);
+  });
+
+  it("la clé géométrie change si les murs changent", () => {
+    const a = buildBoardGeomKey(GEOM_BASE);
+    const b = buildBoardGeomKey({ ...GEOM_BASE, wallsFp: "0:0" });
+    expect(b).not.toBe(a);
+  });
+
+  it("computeStaticLayerReusable : faux si geomKey a changé", () => {
+    const ctrl = buildBoardControlKey({ objectiveControlKeyForBoard: "oc" });
+    expect(
+      computeStaticLayerReusable({
+        prevGeomKey: buildBoardGeomKey(GEOM_BASE),
+        currGeomKey: buildBoardGeomKey({ ...GEOM_BASE, cols: 55 }),
+        prevControlKey: ctrl,
+        currControlKey: ctrl,
+        staticLayerExists: true,
+      })
+    ).toBe(false);
+  });
+
+  it("computeStaticLayerReusable : faux si controlKey a changé (capture d'objectif)", () => {
+    const geom = buildBoardGeomKey(GEOM_BASE);
+    expect(
+      computeStaticLayerReusable({
+        prevGeomKey: geom,
+        currGeomKey: geom,
+        prevControlKey: buildBoardControlKey({ objectiveControlKeyForBoard: "ruin_center=n/n" }),
+        currControlKey: buildBoardControlKey({ objectiveControlKeyForBoard: "ruin_center=1/1" }),
+        staticLayerExists: true,
+      })
+    ).toBe(false);
+  });
+
+  it("computeStaticLayerReusable : faux si le conteneur n'existe pas", () => {
+    const geom = buildBoardGeomKey(GEOM_BASE);
+    const ctrl = buildBoardControlKey({ objectiveControlKeyForBoard: "oc" });
+    expect(
+      computeStaticLayerReusable({
+        prevGeomKey: geom,
+        currGeomKey: geom,
+        prevControlKey: ctrl,
+        currControlKey: ctrl,
+        staticLayerExists: false,
+      })
+    ).toBe(false);
+  });
+
+  it("computeStaticLayerReusable : vrai si geom, contrôle et conteneur inchangés", () => {
+    const geom = buildBoardGeomKey(GEOM_BASE);
+    const ctrl = buildBoardControlKey({ objectiveControlKeyForBoard: "oc" });
+    expect(
+      computeStaticLayerReusable({
+        prevGeomKey: geom,
+        currGeomKey: geom,
+        prevControlKey: ctrl,
+        currControlKey: ctrl,
+        staticLayerExists: true,
+      })
+    ).toBe(true);
   });
 });

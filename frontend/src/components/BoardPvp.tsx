@@ -40,7 +40,12 @@ import {
 } from "../utils/blinkingHPBar";
 // import { SingleShotDisplay } from './SingleShotDisplay';
 import { setupBoardClickHandler } from "../utils/boardClickHandler";
-import { planBoardRedraw } from "../utils/boardRedrawDecision";
+import {
+  buildBoardControlKey,
+  buildBoardGeomKey,
+  computeStaticLayerReusable,
+  planBoardRedraw,
+} from "../utils/boardRedrawDecision";
 import { areUnitsAdjacent, cubeDistance, offsetToCube } from "../utils/gameHelpers";
 import {
   boardWorldSize,
@@ -1463,7 +1468,10 @@ export default function Board({
   // Persistent PIXI containers for static layers (survive re-renders)
   const staticBoardRef = useRef<PIXI.Container | null>(null);
   const staticWallsRef = useRef<PIXI.Container | null>(null);
-  const staticBoardConfigKeyRef = useRef<string>("");
+  const staticBoardKeysRef = useRef<{ geomKey: string; controlKey: string }>({
+    geomKey: "",
+    controlKey: "",
+  });
   /** Dernier conteneur ``highlights`` — réutilisé si l’empreinte structure est inchangée (patch move preview ou skip drawBoard). */
   const highlightsLayerRef = useRef<PIXI.Container | null>(null);
   /** Conteneur des contours d'étage au sol — cycle de vie calqué sur highlights (préservé quand on
@@ -9647,9 +9655,21 @@ export default function Board({
     // Les murs sont dessinés dans le plateau statique (cachedWalls) : sans eux dans la clé, deux
     // boards de mêmes dimensions mais aux murs différents (replay : épisode N → N+1) réutilisent
     // le container de murs du précédent → murs fantômes à l'écran.
-    const bcKey = `${boardConfigWithOverrides.cols}x${boardConfigWithOverrides.rows}|oc:${objectiveControlKeyForBoard}|oz:${objectiveZonesGeomKey}|w:${wallsFp}|dep:${phase === "deployment" ? 1 : 0}`;
-    const canReuseStatic =
-      staticBoardConfigKeyRef.current === bcKey && staticBoardRef.current !== null;
+    const geomKey = buildBoardGeomKey({
+      cols: boardConfigWithOverrides.cols,
+      rows: boardConfigWithOverrides.rows,
+      objectiveZonesGeomKey,
+      wallsFp,
+      isDeployment: phase === "deployment",
+    });
+    const controlKey = buildBoardControlKey({ objectiveControlKeyForBoard });
+    const canReuseStatic = computeStaticLayerReusable({
+      prevGeomKey: staticBoardKeysRef.current.geomKey,
+      currGeomKey: geomKey,
+      prevControlKey: staticBoardKeysRef.current.controlKey,
+      currControlKey: controlKey,
+      staticLayerExists: staticBoardRef.current !== null,
+    });
 
     const gsRules = (
       gameState as { config?: { game_rules?: { engagement_zone?: number } } } | null | undefined
@@ -10120,7 +10140,7 @@ export default function Board({
     if (!canReuseStatic && drawResult) {
       staticBoardRef.current = drawResult.baseHexContainer;
       staticWallsRef.current = drawResult.wallsContainer;
-      staticBoardConfigKeyRef.current = bcKey;
+      staticBoardKeysRef.current = { geomKey, controlKey };
     }
 
     // ✅ SETUP BOARD INTERACTIONS using shared BoardInteractions component
