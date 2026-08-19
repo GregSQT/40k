@@ -62,7 +62,7 @@
     "overlap": "hex"
   },
   "gameplay": {
-    "phase_order": ["command", "move", "shoot", "charge", "fight"],
+    "phase_order": ["deployment", "command", "move", "shoot", "charge", "fight"],
     "simultaneous_actions": false,
     "auto_end_turn": true
   },

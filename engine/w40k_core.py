@@ -4661,12 +4661,6 @@ class W40KEngine(gym.Env):
     # dupliquees mot pour mot) et `_log_handler_action_log_entry` (les deux passes de flush de
     # `action_logs`). Toute regression de taille ici reramene le « too complex » et rend a
     # nouveau ce corps invisible au verificateur : decomposer plutot que remettre une sourdine.
-    @staticmethod
-    def _next_phase_after(from_phase: str) -> str:
-        """Return the phase that follows from_phase in get_phase_order()."""
-        from config_loader import get_config_loader
-        return get_config_loader().next_phase_after(from_phase)
-
     def _process_semantic_action(self, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
         """
         Process semantic action with detailed execution debugging.
@@ -4858,10 +4852,9 @@ class W40KEngine(gym.Env):
                     result["phase_complete"] = True
                 if "reason" not in result:
                     result["reason"] = "pool_empty"
-            elif from_phase == "deployment":
-                result = {"phase_complete": True, "next_phase": "command", "reason": "pool_empty"}
             else:
-                result = {"phase_complete": True, "next_phase": self._next_phase_after(from_phase), "reason": "pool_empty"}
+                from config_loader import get_config_loader
+                result = {"phase_complete": True, "next_phase": get_config_loader().next_phase_after(from_phase), "reason": "pool_empty"}
 
             # CRITICAL FIX: Don't return early - fall through to cascade loop
             # to actually execute the phase transition in game_state
@@ -6521,10 +6514,9 @@ class W40KEngine(gym.Env):
                 result = fight_handlers.fight_phase_end(self.game_state)
                 result.setdefault("phase_complete", True)
                 result.setdefault("reason", "pool_empty")
-            elif from_phase == "deployment":
-                result = {"phase_complete": True, "next_phase": "command", "reason": "pool_empty"}
             else:
-                result = {"phase_complete": True, "next_phase": self._next_phase_after(from_phase), "reason": "pool_empty"}
+                from config_loader import get_config_loader
+                result = {"phase_complete": True, "next_phase": get_config_loader().next_phase_after(from_phase), "reason": "pool_empty"}
 
         # ── deployment : logique existante inchangée ──────────────────────────
         elif action_name == "deploy_unit":
