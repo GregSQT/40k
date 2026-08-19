@@ -31,23 +31,29 @@ _PHASE_RANK: Dict[str, int] = {p: i for i, p in enumerate(_PHASE_ORDER)}
 def _check_phase_seq(
     state: AnalyzerState, turn: int, stats: Dict
 ) -> None:
-    """Valide la séquence de phases du tour `turn` et enregistre les violations 07.02."""
-    seq = state.phase_seq_current_turn
-    last_rank = -1
-    for p in seq:
-        rank = _PHASE_RANK.get(p, -1)
-        if rank < 0:
-            continue  # Phase inconnue (ex. DEPLOYMENT) — hors contrôle 07.02
-        if rank <= last_rank:
-            stats['phase_order_violations'] += 1
-            if stats['first_error_lines']['phase_order_violation'] is None:
-                stats['first_error_lines']['phase_order_violation'] = {
-                    'episode': state.current_episode_num,
-                    'turn': turn,
-                    'sequence': list(seq),
-                }
-            return
-        last_rank = rank
+    """Valide la séquence de phases du tour `turn` par joueur et enregistre les violations 07.02.
+
+    P1 et P2 jouent chacun leur propre séquence dans le même round de bataille : il est
+    légal que P1 fasse FIGHT avant que P2 ne fasse CHARGE dans son demi-tour. Chaque
+    séquence joueur est validée indépendamment.
+    """
+    for player_id, seq in state.phase_seq_current_turn.items():
+        last_rank = -1
+        for p in seq:
+            rank = _PHASE_RANK.get(p, -1)
+            if rank < 0:
+                continue  # Phase inconnue (ex. DEPLOYMENT) — hors contrôle 07.02
+            if rank <= last_rank:
+                stats['phase_order_violations'] += 1
+                if stats['first_error_lines']['phase_order_violation'] is None:
+                    stats['first_error_lines']['phase_order_violation'] = {
+                        'episode': state.current_episode_num,
+                        'turn': turn,
+                        'player': player_id,
+                        'sequence': list(seq),
+                    }
+                break
+            last_rank = rank
 
 
 # Seuil (en lignes de log) entre deux appels à `_resync_living_models` avec `removed != {}`
@@ -1390,7 +1396,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                     # 07.02 — valider la séquence de phases du tour SORTANT avant de la purger.
                     if state.last_turn > 0:
                         _check_phase_seq(state, state.last_turn, stats)
-                    state.phase_seq_current_turn = []
+                    state.phase_seq_current_turn = {}
                     state.units_moved = set()
                     state.units_shot = set()
                     # CRITICAL: Reset state.units_fled at the start of each turn
@@ -1427,9 +1433,10 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 state.last_player = player
 
                 if phase != state.last_phase:
-                    # 07.02 — enregistrer la séquence de phases dans le tour courant.
-                    if phase not in state.phase_seq_current_turn:
-                        state.phase_seq_current_turn.append(phase)
+                    # 07.02 — enregistrer la séquence de phases dans le tour courant, par joueur.
+                    _player_seq = state.phase_seq_current_turn.setdefault(int(player), [])
+                    if phase not in _player_seq:
+                        _player_seq.append(phase)
                     if phase == 'COMMAND':
                         state.selected_choice_by_unit_source = {}
                     if phase == 'MOVE':
