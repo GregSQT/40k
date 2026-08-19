@@ -20,6 +20,8 @@ Hors couverture de ce fichier (inatteignable avec le roster d'intégration) :
 
 from __future__ import annotations
 
+import random
+
 import pytest
 
 pytestmark = pytest.mark.integration
@@ -137,3 +139,43 @@ class TestForceBattleShock:
         assert not accepted
         assert body["_status"] == 200
         assert "error" in body["result"]
+
+    def test_roll_below_ld_causes_battle_shock(self, game, monkeypatch):
+        """t2b_bs_ld_fail : 2D6 < LD (01.06) → l'unité est battle-shocked (01.07).
+
+        PDF 01.06 : « if the result is equal to or greater than one or more of the Ld
+        characteristics in that unit, that roll succeeds. Otherwise, that roll fails. »
+        PDF 01.07 : « If that roll fails, that unit, and each model in it, is battle-shocked. »
+        PDF 01.07 : « The Objective Control (OC) characteristic of all of its models is
+        modified to '-' (02.02). »
+
+        On force les deux dés à 1 (roll=2). Tout LD de roster est >= 6 (datasheets 40k),
+        donc 2 < LD : l'unité DOIT être battle-shocked.
+        """
+        monkeypatch.setattr(random, "randint", lambda a, b: 1)
+        unit_id = game.alive_ids()[0]
+        body = game.act("force_battle_shock", unitId=unit_id)
+        assert body["result"]["battle_shocked"] is True, (
+            "roll=2 (1+1) < LD : attendu battle_shocked=True (01.07)"
+        )
+        assert game.unit(unit_id)["battle_shocked"] is True, (
+            "le drapeau battle_shocked doit être True dans le game_state"
+        )
+
+    def test_roll_gte_ld_does_not_shock(self, game, monkeypatch):
+        """t2b_bs_ld_pass : 2D6 >= LD (01.06) → l'unité n'est PAS battle-shocked (01.07).
+
+        PDF 01.07 : « If that roll succeeds, that unit does not become battle-shocked. »
+
+        On force les deux dés à 6 (roll=12). Tout LD de roster est <= 10 (datasheets 40k),
+        donc 12 >= LD : l'unité ne DOIT PAS être battle-shocked.
+        """
+        monkeypatch.setattr(random, "randint", lambda a, b: 6)
+        unit_id = game.alive_ids()[0]
+        body = game.act("force_battle_shock", unitId=unit_id)
+        assert body["result"]["battle_shocked"] is False, (
+            "roll=12 (6+6) >= LD : attendu battle_shocked=False (01.07)"
+        )
+        assert game.unit(unit_id)["battle_shocked"] is False, (
+            "le drapeau battle_shocked doit être False dans le game_state"
+        )

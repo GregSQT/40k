@@ -169,6 +169,44 @@ class TestSnapshots:
         body = resp.get_json()
         assert body["success"] is False
 
+    def test_snapshot_strict_field_equality_after_many_actions(self, game):
+        """t7_snap_strict_eq : après plusieurs actions, resume → état STRICTEMENT égal au snapshot.
+
+        Même invariant que _assert_inert (test_invariants.py) : comparaison champ à champ
+        de TOUS les champs du game_state entre view (état figé) et resume (état restauré).
+
+        view et resume appellent tous deux _game_state_for_json sur le même game_state
+        reconstruit depuis le snapshot (build_game_state) : la sérialisation doit être
+        bit-à-bit identique. Toute divergence révèle soit un champ non capturé dans le
+        snapshot, soit une dérive de sérialisation entre les deux chemins.
+        """
+        snaps = game._client.get("/api/game/snapshots").get_json()["snapshots"]
+        assert snaps, "pas de snapshot à tester"
+        target = snaps[0]
+
+        view_resp = game._client.post(
+            "/api/game/snapshot/restore",
+            json={"turn": target["turn"], "player": target["player"], "phase": target["phase"], "mode": "view"},
+        )
+        assert view_resp.status_code == 200
+        expected = view_resp.get_json()["game_state"]
+
+        # Diverger significativement du snapshot avant de le restaurer : drainer le pool de
+        # move en entier (l'intégration démarre en move, ~21 unités → ~30-50 actions).
+        game.play_nominal(max_actions=200, until=lambda c: c.phase != "move")
+
+        resume_resp = game._client.post(
+            "/api/game/snapshot/restore",
+            json={"turn": target["turn"], "player": target["player"], "phase": target["phase"], "mode": "resume"},
+        )
+        assert resume_resp.status_code == 200
+        live = resume_resp.get_json()["game_state"]
+
+        differences = sorted(k for k in set(expected) | set(live) if expected.get(k) != live.get(k))
+        assert not differences, (
+            f"état restauré diffère du snapshot (view vs resume) sur : {differences}"
+        )
+
 
 # ---------------------------------------------------------------------------
 # T7 — Save / load
@@ -227,6 +265,43 @@ class TestSaveLoad:
         assert view_state["turn"] == state_at_save["turn"]
         assert view_state["current_player"] == state_at_save["current_player"]
         assert view_state["phase"] == state_at_save["phase"]
+
+    def test_save_strict_field_equality_after_resume(self, game, tmp_path, monkeypatch):
+        """t7_save_strict_eq : après resume, l'état vivant est STRICTEMENT identique au save.
+
+        Même invariant que _assert_inert (test_invariants.py) : comparaison champ à champ
+        de TOUS les champs entre l'état capturé par /state AVANT le save et le game_state
+        retourné par le resume. apply_live_state (game_snapshots.py) doit restaurer tous
+        les champs mutables ET les attrs engine — une divergence révèle un champ non capturé.
+        """
+        store = SaveStore(str(tmp_path / "parties_strict"))
+        monkeypatch.setattr(api_server, "_SAVE_STORE", store)
+        monkeypatch.setattr(api_server, "_SNAPSHOT_PERSIST_ENABLED", True)
+        monkeypatch.setattr(api_server, "_persist_save_config", lambda: None)
+
+        store.start_party(api_server.engine, "test_strict_eq", "20260101-000002")
+
+        # Capturer l'état AVANT le save (via /state — même chemin de sérialisation que le resume).
+        state_at_save = game.refresh()
+
+        resp_save = game._client.post("/api/game/save", json={"note": "strict_eq"})
+        assert resp_save.get_json()["success"] is True
+        save_id = resp_save.get_json()["save"]["id"]
+
+        # Diverger du save : drainer le pool de move puis avancer de phase.
+        game.play_nominal(max_actions=200, until=lambda c: c.phase != state_at_save["phase"])
+
+        resp_resume = game._client.post(
+            "/api/game/save/load", json={"id": save_id, "mode": "resume", "fork": "overwrite"}
+        )
+        assert resp_resume.status_code == 200
+        assert resp_resume.get_json()["success"] is True
+        live = resp_resume.get_json()["game_state"]
+
+        differences = sorted(k for k in set(state_at_save) | set(live) if state_at_save.get(k) != live.get(k))
+        assert not differences, (
+            f"état après resume diffère de l'état au moment du save sur : {differences}"
+        )
 
     def test_save_resume_restores_state(self, game, tmp_path, monkeypatch):
         """t7_save_resume : après resume, l'état vivant correspond au snapshot au moment du save."""
