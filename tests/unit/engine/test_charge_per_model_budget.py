@@ -102,10 +102,7 @@ class TestChargePerModelBudget:
         import engine.phase_handlers.charge_handlers as ch
 
         monkeypatch.setattr(ch, "_is_valid_charge_destination", lambda *_a, **_kw: True)
-        monkeypatch.setattr(
-            "engine.phase_handlers.shared_utils.translate_squad_to_destination",
-            lambda *_a, **_kw: None,
-        )
+        monkeypatch.setattr(ch, "translate_squad_to_destination", lambda *_a, **_kw: None)
 
         unit = _unit()
         gs = _make_gs(unit)
