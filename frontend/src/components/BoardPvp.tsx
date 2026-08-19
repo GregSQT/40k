@@ -3462,6 +3462,40 @@ export default function Board({
     movePreviewBackendLosCacheRef.current.clear();
   }, [phase, mode, gameState?.active_movement_unit]);
 
+  // T11 — Synchronise __W40K_TEST__ avec l'état rendu courant (uniquement si VITE_TEST_HOOKS=1).
+  useEffect(() => {
+    if (import.meta.env.VITE_TEST_HOOKS !== "1") return;
+    const hook = (window as unknown as Record<string, unknown>).__W40K_TEST__ as
+      | Record<string, unknown>
+      | undefined;
+    if (!hook) return;
+    hook.currentMode = mode;
+    const anchors = pickMoveDestinationAnchorsFromGameState(gameState);
+    const hexSet = new Set<string>();
+    if (anchors) {
+      for (const a of anchors) {
+        const pos = a as { col: number; row: number };
+        hexSet.add(`${pos.col},${pos.row}`);
+      }
+    }
+    hook.movePreviewHexes = hexSet;
+    hook.blinkTargetUnitIds = new Set<number>(blinkingUnits ?? []);
+    const bc = boardConfig;
+    const containerEl = canvasContainerRef.current;
+    hook.hexToScreenCoords = (col: number, row: number): { x: number; y: number } => {
+      if (!bc) return { x: 0, y: 0 };
+      const HEX_RADIUS = bc.hex_radius;
+      const MARGIN = bc.margin;
+      const HEX_WIDTH = 1.5 * HEX_RADIUS;
+      const HEX_HEIGHT = Math.sqrt(3) * HEX_RADIUS;
+      const cx = col * HEX_WIDTH + HEX_WIDTH / 2 + MARGIN;
+      const cy = row * HEX_HEIGHT + ((col % 2) * HEX_HEIGHT) / 2 + HEX_HEIGHT / 2 + MARGIN;
+      const canvas = containerEl?.querySelector("canvas");
+      const rect = canvas?.getBoundingClientRect() ?? { left: 0, top: 0 };
+      return { x: rect.left + cx, y: rect.top + cy };
+    };
+  }, [mode, blinkingUnits, gameState, boardConfig]);
+
   // Rule 13.09 : figs cachées à la destination du move preview, calculées PAR LE BACKEND
   // (preview_hidden_from_position = même fonction qu'au drop). Debounce + cache par
   // unitId/destCol/destRow/orientation pour limiter les appels au survol.
@@ -12265,6 +12299,7 @@ export default function Board({
           )}
         </div>
         <div
+          data-testid="board-viewport"
           ref={boardViewportRef}
           onPointerDown={handleBoardPanStart}
           onPointerMove={handleBoardPanMove}
@@ -12321,6 +12356,7 @@ export default function Board({
               {/* biome-ignore lint/a11y/noStaticElementInteractions: canvas de jeu — mouse tracking uniquement, pas d'interaction utilisateur */}
               <div
                 role="presentation"
+                data-testid="board-canvas-container"
                 ref={canvasContainerRef}
                 onMouseMove={handleCanvasMouseMove}
                 onMouseLeave={() => {
