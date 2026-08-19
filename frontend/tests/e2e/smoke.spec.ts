@@ -40,10 +40,7 @@ test.describe("T12-1 — Smoke test PvP", () => {
 
     // Aucune erreur console non attendue (PIXI WebGL → canvas 2D est toléré en headless)
     const criticalErrors = consoleErrors.filter(
-      (e) =>
-        !e.includes("WebGL") &&
-        !e.includes("OffscreenCanvas") &&
-        !e.includes("ResizeObserver")
+      (e) => !e.includes("WebGL") && !e.includes("OffscreenCanvas") && !e.includes("ResizeObserver")
     );
     expect(criticalErrors).toHaveLength(0);
   });
@@ -128,7 +125,9 @@ test.describe("T12-3 — Hook de test (VITE_TEST_HOOKS=1)", () => {
     }
 
     const hasSet = await page.evaluate(() => {
-      const hook = (window as Record<string, unknown>).__W40K_TEST__ as Record<string, unknown> | undefined;
+      const hook = (window as Record<string, unknown>).__W40K_TEST__ as
+        | Record<string, unknown>
+        | undefined;
       return hook?.greenCircleUnitIds instanceof Set;
     });
     expect(hasSet).toBe(true);
@@ -158,7 +157,9 @@ test.describe("T12-4 — Cercles verts == pool backend", () => {
 
     // Lire les cercles verts rendus via le hook
     const greenIds = await page.evaluate(() => {
-      const hook = (window as Record<string, unknown>).__W40K_TEST__ as Record<string, unknown> | undefined;
+      const hook = (window as Record<string, unknown>).__W40K_TEST__ as
+        | Record<string, unknown>
+        | undefined;
       if (!hook) return [];
       return [...(hook.greenCircleUnitIds as Set<string>)].map(Number);
     });
@@ -209,5 +210,203 @@ test.describe("T12-5 — Régression visuelle", () => {
     await expect(page).toHaveScreenshot("board-initial.png", {
       maxDiffPixelRatio: 0.02,
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T12-6 — Preview move hexes == valid_move_destinations_pool
+// ---------------------------------------------------------------------------
+
+test.describe("T12-6 — Preview move hexes via hook", () => {
+  test("movePreviewHexes est un Set exposé par le hook", async ({ page }) => {
+    await page.goto(GAME_URL);
+    await page.locator("canvas").first().waitFor({ timeout: 30_000 });
+
+    const isHookEnabled = await page.evaluate(() => {
+      return typeof (window as Record<string, unknown>).__W40K_TEST__ !== "undefined";
+    });
+    if (!isHookEnabled) {
+      test.skip(true, "VITE_TEST_HOOKS=1 non activé");
+    }
+
+    const hasSet = await page.evaluate(() => {
+      const hook = (window as Record<string, unknown>).__W40K_TEST__ as
+        | Record<string, unknown>
+        | undefined;
+      return hook?.movePreviewHexes instanceof Set;
+    });
+    expect(hasSet).toBe(true);
+  });
+
+  test("après clic sur une unité éligible, movePreviewHexes ⊆ valid_move_destinations_pool", async ({
+    page,
+  }) => {
+    await page.goto(GAME_URL);
+    await page.locator("canvas").first().waitFor({ timeout: 30_000 });
+
+    const isHookEnabled = await page.evaluate(() => {
+      return typeof (window as Record<string, unknown>).__W40K_TEST__ !== "undefined";
+    });
+    if (!isHookEnabled) {
+      test.skip(true, "VITE_TEST_HOOKS=1 non activé");
+    }
+
+    const cookies = await page.context().cookies();
+    const sessionCookie = cookies.find((c) => c.name === "w40k_session");
+    if (!sessionCookie) return;
+
+    const stateResp = await page.request.get(`${BACKEND}/api/game/state`, {
+      headers: { Cookie: `w40k_session=${sessionCookie.value}` },
+    });
+    if (stateResp.status() !== 200) return;
+
+    const state = await stateResp.json();
+    const pool: Array<{ id: number; col: number; row: number }> = state.move_activation_pool ?? [];
+    if (pool.length === 0) return;
+
+    // Prendre la première unité du pool et récupérer sa position
+    const units: Array<{ id: number; col: number; row: number }> = state.units ?? [];
+    const firstEligible = units.find(
+      (u) => pool.some((p) => p.id === u.id) || pool.includes(u.id as never)
+    );
+    if (!firstEligible) return;
+
+    // Cliquer sur l'unité via hexToScreenCoords
+    const coords = await page.evaluate((unitId: number) => {
+      const hook = (window as Record<string, unknown>).__W40K_TEST__ as
+        | Record<string, unknown>
+        | undefined;
+      const units = (window as unknown as Record<string, unknown>).__W40K_UNITS__ as
+        | Array<{ id: number; col: number; row: number }>
+        | undefined;
+      if (!hook || !units) return null;
+      const u = units.find((x) => x.id === unitId);
+      if (!u) return null;
+      return (hook.hexToScreenCoords as (col: number, row: number) => { x: number; y: number })(
+        u.col,
+        u.row
+      );
+    }, firstEligible.id);
+
+    if (!coords || (coords.x === 0 && coords.y === 0)) {
+      // hexToScreenCoords not available or canvas not yet sized — skip gracefully
+      return;
+    }
+
+    await page.mouse.click(coords.x, coords.y);
+    // Attendre que le hook mette à jour movePreviewHexes (rendu PIXI + useEffect)
+    await page.waitForTimeout(800);
+
+    // Lire l'état API après activation
+    const stateAfterResp = await page.request.get(`${BACKEND}/api/game/state`, {
+      headers: { Cookie: `w40k_session=${sessionCookie.value}` },
+    });
+    if (stateAfterResp.status() !== 200) return;
+    const stateAfter = await stateAfterResp.json();
+    const apiPool: Array<{ col: number; row: number }> =
+      stateAfter.valid_move_destinations_pool ?? [];
+
+    if (apiPool.length === 0) return;
+
+    const apiHexKeys = new Set(apiPool.map((h) => `${h.col},${h.row}`));
+
+    // Lire movePreviewHexes depuis le hook
+    const hookHexes = await page.evaluate(() => {
+      const hook = (window as Record<string, unknown>).__W40K_TEST__ as
+        | Record<string, unknown>
+        | undefined;
+      if (!hook) return [];
+      return [...(hook.movePreviewHexes as Set<string>)];
+    });
+
+    // Chaque hex peint par le front doit être dans le pool API
+    for (const hk of hookHexes) {
+      expect(apiHexKeys.has(hk)).toBe(true);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T12-7 — blinkTargetUnitIds (preview tir)
+// ---------------------------------------------------------------------------
+
+test.describe("T12-7 — blinkTargetUnitIds exposé par le hook", () => {
+  test("blinkTargetUnitIds est un Set exposé par le hook", async ({ page }) => {
+    await page.goto(GAME_URL);
+    await page.locator("canvas").first().waitFor({ timeout: 30_000 });
+
+    const isHookEnabled = await page.evaluate(() => {
+      return typeof (window as Record<string, unknown>).__W40K_TEST__ !== "undefined";
+    });
+    if (!isHookEnabled) {
+      test.skip(true, "VITE_TEST_HOOKS=1 non activé");
+    }
+
+    const hasSet = await page.evaluate(() => {
+      const hook = (window as Record<string, unknown>).__W40K_TEST__ as
+        | Record<string, unknown>
+        | undefined;
+      return hook?.blinkTargetUnitIds instanceof Set;
+    });
+    expect(hasSet).toBe(true);
+  });
+
+  test("currentMode est exposé par le hook", async ({ page }) => {
+    await page.goto(GAME_URL);
+    await page.locator("canvas").first().waitFor({ timeout: 30_000 });
+
+    const isHookEnabled = await page.evaluate(() => {
+      return typeof (window as Record<string, unknown>).__W40K_TEST__ !== "undefined";
+    });
+    if (!isHookEnabled) {
+      test.skip(true, "VITE_TEST_HOOKS=1 non activé");
+    }
+
+    const currentMode = await page.evaluate(() => {
+      const hook = (window as Record<string, unknown>).__W40K_TEST__ as
+        | Record<string, unknown>
+        | undefined;
+      return hook?.currentMode;
+    });
+    // En phase move, le mode initial est "select"
+    expect(typeof currentMode).toBe("string");
+    expect(currentMode).toBeTruthy();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T12-8 — hexToScreenCoords helper (conversion hex → pixel écran)
+// ---------------------------------------------------------------------------
+
+test.describe("T12-8 — hexToScreenCoords helper", () => {
+  test("hexToScreenCoords retourne un objet {x, y} non nul quand le board est chargé", async ({
+    page,
+  }) => {
+    await page.goto(GAME_URL);
+    await page.locator('[data-testid="board-canvas-container"]').waitFor({ timeout: 30_000 });
+    await page.waitForTimeout(500); // laisser PIXI initialiser le canvas
+
+    const isHookEnabled = await page.evaluate(() => {
+      return typeof (window as Record<string, unknown>).__W40K_TEST__ !== "undefined";
+    });
+    if (!isHookEnabled) {
+      test.skip(true, "VITE_TEST_HOOKS=1 non activé");
+    }
+
+    const coords = await page.evaluate(() => {
+      const hook = (window as Record<string, unknown>).__W40K_TEST__ as
+        | Record<string, unknown>
+        | undefined;
+      if (!hook?.hexToScreenCoords) return null;
+      return (hook.hexToScreenCoords as (col: number, row: number) => { x: number; y: number })(
+        5,
+        5
+      );
+    });
+
+    expect(coords).not.toBeNull();
+    // Le canvas est affiché : x et y doivent être > 0
+    expect(coords!.x).toBeGreaterThan(0);
+    expect(coords!.y).toBeGreaterThan(0);
   });
 });
