@@ -6,6 +6,7 @@ import re
 from typing import TYPE_CHECKING, Optional, Tuple
 
 from ai.analyzer_perfig import parse_shooter_models_segment
+from ai.analyzer_rules import check_anti_x_threshold
 from shared.data_validation import require_key
 
 if TYPE_CHECKING:
@@ -170,24 +171,11 @@ def _note_melee_weapon_rule_usage(
         _anti_tok_thresh = int(_anti_m.group(2))
         _anti_rule_name = f"ANTI_{_anti_kw}"
         stats['weapon_rule_usage'][(_anti_rule_name, weapon_key)][pl_int] += 1
-        _anti_decl_thresh = None
-        for _r in require_key(weapon_info, "rules"):
-            _rn, _, _rp = str(_r).partition(":")
-            if _rn.strip().upper() == _anti_rule_name and _rp:
-                try:
-                    _anti_decl_thresh = int(_rp.strip())
-                except (TypeError, ValueError):
-                    pass
-                break
-        if _anti_decl_thresh is not None and _anti_tok_thresh != _anti_decl_thresh:
-            stats['parse_errors'].append({
-                'episode': state.current_episode_num, 'turn': turn, 'phase': phase,
-                'line': line.strip(),
-                'error': (
-                    f"[ANTI-{_anti_kw}:{_anti_tok_thresh}+] (mêlée) : seuil log "
-                    f"≠ seuil armurerie ({_anti_decl_thresh}+)"
-                ),
-            })
+        check_anti_x_threshold(
+            weapon_rules_list,
+            _anti_kw, _anti_tok_thresh, _anti_rule_name,
+            stats, state, turn, phase, line.strip(), weapon_key, " (mêlée)",
+        )
 
 
 def handle_fight(
