@@ -35,6 +35,7 @@ export class LeaderCaptainGravis extends LeaderEliteMeleeElite {
   static BASE_SIZE = CaptainGravisPowerWeaponBoltRifle.BASE_SIZE; // Size of the base
   static MODEL_HEIGHT = CaptainGravisPowerWeaponBoltRifle.MODEL_HEIGHT; // Height of the model (inches). IMPORTANT: temporary indicative value
   static ICON_SCALE = CaptainGravisPowerWeaponBoltRifle.ICON_SCALE;
+  static ILLUSTRATION_RATIO = CaptainGravisPowerWeaponBoltRifle.ILLUSTRATION_RATIO;
 
   constructor(name: string, startPos: [number, number]) {
     super(name, LeaderCaptainGravis.HP_MAX, startPos);

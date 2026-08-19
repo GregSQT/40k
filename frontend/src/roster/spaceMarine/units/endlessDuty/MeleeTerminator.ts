@@ -30,6 +30,7 @@ export class MeleeTerminator extends EliteMeleeElite {
   static BASE_SIZE = AssaultTerminator.BASE_SIZE; // Size of the base
   static MODEL_HEIGHT = AssaultTerminator.MODEL_HEIGHT; // Height of the model (inches). IMPORTANT: temporary indicative value
   static ICON_SCALE = AssaultTerminator.ICON_SCALE;
+  static ILLUSTRATION_RATIO = AssaultTerminator.ILLUSTRATION_RATIO;
 
   constructor(name: string, startPos: [number, number]) {
     super(name, MeleeTerminator.HP_MAX, startPos);

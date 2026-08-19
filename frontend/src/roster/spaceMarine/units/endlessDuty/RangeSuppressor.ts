@@ -30,6 +30,7 @@ export class RangeSuppressor extends EliteRangeTroop {
   static BASE_SIZE = Suppressor.BASE_SIZE; // Size of the base
   static MODEL_HEIGHT = Suppressor.MODEL_HEIGHT; // Height of the model (inches). IMPORTANT: temporary indicative value
   static ICON_SCALE = Suppressor.ICON_SCALE;
+  static ILLUSTRATION_RATIO = Suppressor.ILLUSTRATION_RATIO;
 
   constructor(name: string, startPos: [number, number]) {
     super(name, RangeSuppressor.HP_MAX, startPos);

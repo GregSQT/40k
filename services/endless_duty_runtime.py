@@ -226,7 +226,7 @@ def commit_inter_wave_requisition(engine_instance: Any, action: Dict[str, Any]) 
     old_invested = int(require_key(ed_state, "requisition_invested_total"))
     old_capital = int(require_key(ed_state, "requisition_capital_total"))
 
-    rebuilt_units = _rebuild_player_units_for_slots(engine_instance, target_profiles, target_picks, old_p1_alive)
+    rebuilt_units = _rebuild_player_units_for_slots(engine_instance, target_profiles, target_picks, old_p1_alive, current_slot_ids=ed_state.get("slot_unit_ids"))
     new_invested = _sum_units_value(rebuilt_units)
     purchase_delta = int(new_invested - old_invested)
     if old_capital - new_invested < 0:
@@ -586,8 +586,12 @@ def _build_unit_from_registry(
     row: int,
 ) -> Dict[str, Any]:
     unit_data = engine_instance.unit_registry.get_unit_data(unit_type)
+    inches_to_subhex = int(require_key(engine_instance.game_state, "inches_to_subhex"))
     rng_weapons = copy.deepcopy(require_key(unit_data, "RNG_WEAPONS"))
     cc_weapons = copy.deepcopy(require_key(unit_data, "CC_WEAPONS"))
+    for weapon in rng_weapons:
+        if "RNG" in weapon:
+            weapon["RNG"] = int(weapon["RNG"]) * inches_to_subhex
     selected_rng_weapon_index = 0 if rng_weapons else None
     selected_cc_weapon_index = 0 if cc_weapons else None
     shoot_left = 0
@@ -597,7 +601,7 @@ def _build_unit_from_registry(
     if cc_weapons and selected_cc_weapon_index is not None:
         attack_left = resolve_dice_value(require_key(cc_weapons[selected_cc_weapon_index], "NB"), "endless_spawn_attack_left")
     hp_max = _resolve_numeric_unit_field(engine_instance, unit_type, unit_data, "HP_MAX")
-    move = _resolve_numeric_unit_field(engine_instance, unit_type, unit_data, "MOVE")
+    move = _resolve_numeric_unit_field(engine_instance, unit_type, unit_data, "MOVE") * inches_to_subhex
     toughness = _resolve_numeric_unit_field(engine_instance, unit_type, unit_data, "T")
     armor_save = _resolve_numeric_unit_field(engine_instance, unit_type, unit_data, "ARMOR_SAVE")
     invul_save = _resolve_numeric_unit_field(engine_instance, unit_type, unit_data, "INVUL_SAVE")
@@ -620,6 +624,11 @@ def _build_unit_from_registry(
         "DISPLAY_NAME": require_key(unit_data, "DISPLAY_NAME"),
         "col": int(col),
         "row": int(row),
+        "BASE_SHAPE": require_key(unit_data, "BASE_SHAPE"),
+        "BASE_SIZE": require_key(unit_data, "BASE_SIZE"),
+        "MODEL_HEIGHT": require_key(unit_data, "MODEL_HEIGHT"),
+        "orientation": 0,
+        "level": 0,
         "HP_CUR": hp_max,
         "HP_MAX": hp_max,
         "MOVE": move,
@@ -807,8 +816,9 @@ def _rebuild_player_units_for_slots(
     target_profiles: Dict[str, Any],
     target_picks: Dict[str, Any],
     old_alive_units: List[Dict[str, Any]],
+    current_slot_ids: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
-    old_by_slot = _map_old_units_by_slot(target_profiles, old_alive_units)
+    old_by_slot = _map_old_units_by_slot(target_profiles, old_alive_units, current_slot_ids)
     ordered_slots = [("leader", target_profiles.get("leader")), ("melee", target_profiles.get("melee")), ("range", target_profiles.get("range"))]
     next_id = _next_unit_id(require_key(engine_instance.__dict__, "game_state"))
     new_units: List[Dict[str, Any]] = []
@@ -836,16 +846,28 @@ def _rebuild_player_units_for_slots(
     return new_units
 
 
-def _map_old_units_by_slot(target_profiles: Dict[str, Any], old_alive_units: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+def _map_old_units_by_slot(
+    target_profiles: Dict[str, Any],
+    old_alive_units: List[Dict[str, Any]],
+    current_slot_ids: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Dict[str, Any]]:
+    if current_slot_ids is not None:
+        by_id = {str(require_key(u, "id")): u for u in old_alive_units}
+        mapped: Dict[str, Dict[str, Any]] = {}
+        for slot_name in ("leader", "melee", "range"):
+            uid = current_slot_ids.get(slot_name)
+            if uid is not None and str(uid) in by_id:
+                mapped[slot_name] = by_id[str(uid)]
+        return {k: v for k, v in mapped.items() if target_profiles.get(k) is not None}
+    # Fallback for initialization before slot IDs are established.
     sorted_units = sorted(old_alive_units, key=lambda u: int(require_key(u, "id")))
-    mapped: Dict[str, Dict[str, Any]] = {}
+    mapped = {}
     if sorted_units:
         mapped["leader"] = sorted_units[0]
     if len(sorted_units) > 1:
         mapped["melee"] = sorted_units[1]
     if len(sorted_units) > 2:
         mapped["range"] = sorted_units[2]
-    # Keep only slots requested in this commit.
     return {k: v for k, v in mapped.items() if target_profiles.get(k) is not None}
 
 
@@ -993,16 +1015,9 @@ def _is_valid_board_hex(col: int, row: int, cols: int, rows: int) -> bool:
 
 
 def _load_allowed_profiles_by_slot() -> Dict[str, List[str]]:
-    cfg_dir = PROJECT_ROOT / "config" / "endless_duty"
-    evolution_files = {
-        "leader": cfg_dir / "leader_evolution.json",
-        "melee": cfg_dir / "melee_evolution.json",
-        "range": cfg_dir / "range_evolution.json",
-    }
     allowed: Dict[str, List[str]] = {}
-    for slot_name, file_path in evolution_files.items():
-        if not file_path.exists():
-            raise FileNotFoundError(f"Missing evolution config for slot '{slot_name}': {file_path}")
+    for slot_name in ("leader", "melee", "range"):
+        file_path = _evolution_file_path_for_slot(slot_name)
         with open(file_path, "r", encoding="utf-8") as f:
             payload = json.load(f)
         catalog = require_key(payload, "catalog")

@@ -46,6 +46,7 @@ export class MeleeIntercessor extends TroopMeleeSwarm {
   static BASE_SIZE = AssaultIntercessor.BASE_SIZE; // Size of the base
   static MODEL_HEIGHT = AssaultIntercessor.MODEL_HEIGHT; // Height of the model (inches). IMPORTANT: temporary indicative value
   static ICON_SCALE = AssaultIntercessor.ICON_SCALE;
+  static ILLUSTRATION_RATIO = AssaultIntercessor.ILLUSTRATION_RATIO;
 
   constructor(name: string, startPos: [number, number]) {
     super(name, MeleeIntercessor.HP_MAX, startPos);

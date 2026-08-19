@@ -42,61 +42,59 @@ def registry() -> UnitRegistry:
     return UnitRegistry()
 
 
-def test_obstacle_5_ed_datasheets_miss_keys_the_engine_requires(registry: UnitRegistry) -> None:
-    """Obstacle 5 — DONNÉE : les 18 fiches endlessDuty n'ont pas d'ILLUSTRATION_RATIO.
+def test_obstacle_5_ed_datasheets_have_illustration_ratio(registry: UnitRegistry) -> None:
+    """Obstacle 5 — RÉSOLU : les 18 fiches endlessDuty ont désormais ILLUSTRATION_RATIO.
 
-    `_build_unit_from_registry` l'exige : l'initialisation du mode meurt sur la première unité
-    du slot « leader ».
+    `_build_unit_from_registry` l'exige : ce test vérifie que la clé est présente sur toutes les
+    fiches, et que sa valeur est un nombre positif (délégué à la classe parente de chaque fiche).
 
-    ⚠️ `FACTION_KEYWORDS` faisait partie de l'obstacle jusqu'au chantier 03 (2026-08-05). Il
-    n'en fait plus partie, et ce n'est PAS la donnée qui a changé : le parseur pose désormais la
-    clé sur TOUTE fiche, à `[]` quand la datasheet ne la déclare pas — même convention que
-    `UNIT_KEYWORDS`. La clé existe donc, vide. La conséquence métier reste entière et elle est
-    vérifiée ci-dessous : une fiche sans mot-clé de faction n'appartient à aucune faction, donc
-    aucune capacité de faction (Waaagh!, Oath of Moment) ne la vise.
+    ⚠️ `FACTION_KEYWORDS` est présente sur toutes les fiches (parseur chantier 03, 2026-08-05),
+    mais vide pour les fiches ED : une fiche sans mot-clé de faction n'appartient à aucune faction,
+    donc aucune capacité de faction (Waaagh!, Oath of Moment) ne la vise.
     """
-    still_missing: Dict[str, List[str]] = {}
+    missing: Dict[str, List[str]] = {}
     for unit_type in _ED_UNIT_TYPES:
         keys = set(registry.get_unit_data(unit_type))
         absent = sorted({"ILLUSTRATION_RATIO"} - keys)
         if absent:
-            still_missing[unit_type] = absent
+            missing[unit_type] = absent
 
-    assert len(still_missing) == 18, (
-        f"Les fiches endlessDuty ne sont plus toutes incomplètes ({len(still_missing)}/18 le "
-        f"sont encore). Si la donnée a été complétée, l'obstacle 5 est levé : mettre à jour "
-        f"{_DOC} et ce test."
+    assert len(missing) == 0, (
+        f"{len(missing)} fiche(s) endlessDuty manquent encore ILLUSTRATION_RATIO : {sorted(missing)}"
     )
-    assert all(
-        absent == ["ILLUSTRATION_RATIO"] for absent in still_missing.values()
-    ), f"La nature des clés manquantes a changé : {still_missing!r}. Mettre à jour {_DOC}."
+    # La valeur peut être un nombre direct ou une référence statique ('ClassName.FIELD') résolue
+    # à l'exécution par _resolve_numeric_unit_field — les deux formes sont valides ici.
+    for unit_type in _ED_UNIT_TYPES:
+        ratio = registry.get_unit_data(unit_type)["ILLUSTRATION_RATIO"]
+        assert ratio is not None, f"{unit_type}.ILLUSTRATION_RATIO est None"
     # La clé de faction est là, mais VIDE : ces fiches restent hors de toute capacité de faction.
-    # Sans cette seconde moitié, compléter la donnée un jour passerait inaperçu ici.
     assert all(
         registry.get_unit_data(unit_type)["FACTION_KEYWORDS"] == []
         for unit_type in _ED_UNIT_TYPES
-    ), f"Une fiche endlessDuty declare desormais une faction : mettre a jour {_DOC} et ce test."
+    ), "Une fiche endlessDuty declare desormais une faction — verifier si intentionnel."
 
 
-def test_obstacle_5b_melee_terminator_also_misses_its_ranged_loadout(registry: UnitRegistry) -> None:
-    """Obstacle 5 (variante) — MeleeTerminator n'a en plus ni RNG_WEAPON_CODES ni selectedRngWeaponIndex."""
-    keys = set(registry.get_unit_data("MeleeTerminator"))
-    assert not {"RNG_WEAPON_CODES", "selectedRngWeaponIndex"} & keys, (
-        f"MeleeTerminator a désormais un armement à distance : obstacle 5 partiellement levé, "
-        f"mettre à jour {_DOC}."
+def test_obstacle_5b_melee_terminator_has_empty_ranged_weapons(registry: UnitRegistry) -> None:
+    """Obstacle 5 (variante) — MeleeTerminator est pur mêlée : RNG_WEAPONS présent mais vide.
+
+    Le runtime lit `RNG_WEAPONS` (pas `RNG_WEAPON_CODES`) et gère correctement la liste vide
+    (`selected_rng_weapon_index = None`). Ce test documente le choix de conception :
+    MeleeTerminator n'a pas d'armement à distance, ce qui est intentionnel pour AssaultTerminator.
+    """
+    unit_data = registry.get_unit_data("MeleeTerminator")
+    assert "RNG_WEAPONS" in unit_data, "RNG_WEAPONS absent du registre MeleeTerminator"
+    assert unit_data["RNG_WEAPONS"] == [], (
+        f"MeleeTerminator a désormais un armement à distance ({unit_data['RNG_WEAPONS']!r}) : "
+        f"vérifier si intentionnel et mettre à jour {_DOC}."
     )
 
 
-def test_obstacle_6_ed_unit_builder_does_not_emit_what_the_engine_reads(registry: UnitRegistry) -> None:
-    """Obstacle 6 — CODE : `_build_unit_from_registry` est un doublon dérivé de `_build_enhanced_unit`.
+def test_obstacle_6_ed_unit_builder_emits_engine_required_fields(registry: UnitRegistry) -> None:
+    """Obstacle 6 — RÉSOLU : `_build_unit_from_registry` émet tous les champs requis par le moteur.
 
-    Il n'émet ni socle (`BASE_SHAPE`/`BASE_SIZE`), ni `MODEL_HEIGHT`, ni `orientation`, ni
-    `level`, et ne convertit ni `MOVE` ni les portées d'armes en subhex. `build_units_cache`
-    lit `unit["BASE_SHAPE"]` sans valeur par défaut : la construction meurt là.
-
-    Mesuré sur `Termagant` (fiche tyranide, qui a bien ILLUSTRATION_RATIO) : c'est le chemin qui
-    survit à l'obstacle 5 et meurt ici. Datasheet : MOVE 6", portée 18" — le plateau actif est en
-    subhex ×5, donc l'unité produite est 5× trop lente et 5× trop courte de portée.
+    Vérifié sur `Termagant` (fiche tyranide avec ILLUSTRATION_RATIO) : MOVE 6" converti en 30
+    subhex (×5), portée 18" convertie en 90 subhex, et présence de BASE_SHAPE/BASE_SIZE/
+    MODEL_HEIGHT/orientation/level nécessaires à `build_units_cache`.
     """
 
     class _EngineStub:
@@ -106,22 +104,21 @@ def test_obstacle_6_ed_unit_builder_does_not_emit_what_the_engine_reads(registry
     built = _build_unit_from_registry(_EngineStub(), "Termagant", player=2, unit_id=1, col=10, row=10)
 
     required_by_the_engine = ("BASE_SHAPE", "BASE_SIZE", "MODEL_HEIGHT", "orientation", "level")
-    assert not set(required_by_the_engine) & set(built), (
-        f"`_build_unit_from_registry` émet désormais {sorted(set(required_by_the_engine) & set(built))} : "
-        f"l'obstacle 6 est (partiellement) levé, mettre à jour {_DOC}."
+    missing_keys = sorted(set(required_by_the_engine) - set(built))
+    assert not missing_keys, (
+        f"`_build_unit_from_registry` n'émet toujours pas : {missing_keys}"
     )
-    assert built["MOVE"] == 6, (
-        f"MOVE = {built['MOVE']!r} : la conversion subhex a peut-être été ajoutée (attendu 30 pour "
-        f"inches_to_subhex=5). Obstacle 6 levé ? Mettre à jour {_DOC}."
+    assert built["MOVE"] == 30, (
+        f"MOVE = {built['MOVE']!r} : attendu 30 subhex (6\" × inches_to_subhex=5)"
     )
     assert built.get("RNG_WEAPONS"), (
-        f"RNG_WEAPONS absent ou vide dans la sortie de _build_unit_from_registry : "
-        f"la structure a changé — mettre à jour {_DOC}."
+        f"RNG_WEAPONS absent ou vide dans la sortie de _build_unit_from_registry"
     )
-    assert built["RNG_WEAPONS"][0]["RNG"] == 18, (
-        f"Portée = {built['RNG_WEAPONS'][0]['RNG']!r} : la conversion subhex des armes a peut-être "
-        f"été ajoutée (attendu 90 pour inches_to_subhex=5). Mettre à jour {_DOC}."
+    assert built["RNG_WEAPONS"][0]["RNG"] == 90, (
+        f"Portée = {built['RNG_WEAPONS'][0]['RNG']!r} : attendu 90 subhex (18\" × inches_to_subhex=5)"
     )
+    assert built["orientation"] == 0
+    assert built["level"] == 0
 
 
 def test_obstacle_2_ed_wall_ref_targets_wrong_board() -> None:

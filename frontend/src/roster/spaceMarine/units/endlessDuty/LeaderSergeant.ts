@@ -51,6 +51,7 @@ export class LeaderSergeant extends LeaderEliteMeleeElite {
   static BASE_SIZE = IntercessorSergeant.BASE_SIZE; // Size of the base
   static MODEL_HEIGHT = IntercessorSergeant.MODEL_HEIGHT; // Height of the model (inches). IMPORTANT: temporary indicative value
   static ICON_SCALE = IntercessorSergeant.ICON_SCALE;
+  static ILLUSTRATION_RATIO = IntercessorSergeant.ILLUSTRATION_RATIO;
 
   constructor(name: string, startPos: [number, number]) {
     super(name, LeaderSergeant.HP_MAX, startPos);

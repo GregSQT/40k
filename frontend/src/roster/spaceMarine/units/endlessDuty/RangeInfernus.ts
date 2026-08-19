@@ -30,6 +30,7 @@ export class RangeInfernus extends TroopRangeSwarm {
   static BASE_SIZE = Infernus.BASE_SIZE; // Size of the base
   static MODEL_HEIGHT = Infernus.MODEL_HEIGHT; // Height of the model (inches). IMPORTANT: temporary indicative value
   static ICON_SCALE = Infernus.ICON_SCALE;
+  static ILLUSTRATION_RATIO = Infernus.ILLUSTRATION_RATIO;
 
   constructor(name: string, startPos: [number, number]) {
     super(name, RangeInfernus.HP_MAX, startPos);
