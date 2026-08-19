@@ -4662,11 +4662,15 @@ class W40KEngine(gym.Env):
     # `action_logs`). Toute regression de taille ici reramene le « too complex » et rend a
     # nouveau ce corps invisible au verificateur : decomposer plutot que remettre une sourdine.
     def _next_phase_after(self, from_phase: str) -> str:
-        """Return the phase that follows from_phase in get_phase_order(), fallback 'move'."""
+        """Return the phase that follows from_phase in get_phase_order()."""
         from config_loader import get_config_loader
         _order = get_config_loader().get_phase_order()
-        _idx = _order.index(from_phase) if from_phase in _order else -1
-        return _order[_idx + 1] if 0 <= _idx < len(_order) - 1 else "move"
+        if from_phase not in _order:
+            raise ValueError(f"Phase inconnue : {from_phase!r}")
+        _idx = _order.index(from_phase)
+        if _idx >= len(_order) - 1:
+            raise ValueError(f"Aucune phase après {from_phase!r} (dernière de l'ordre)")
+        return _order[_idx + 1]
 
     def _process_semantic_action(self, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
         """
