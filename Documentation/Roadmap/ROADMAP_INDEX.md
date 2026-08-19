@@ -153,6 +153,9 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 | analyzer | ✅ doublon fam2 cq-grammar4-token remplacé par scénario grammar=3 (2026-08-19) — test cq_grammar4 dédoublonné | — | ⚡ |
 | training+gate | ✅ crash results['control'] absent quand min_vs_control=0.0 corrigé (2026-08-19) — résultat dict guard sur clé control ; gate ne crashe plus si critère absent | — | ⚡ |
 | analyzer | ✅ lot2 rules — compteurs usage ANTI-X/TORRENT/LETHAL HITS/IGNORES_COVER/EXTRA_ATTACKS (2026-08-19) ; fix DW threshold ANTI-X:N+ (N<6) ; Roll:1 HAZARDOUS counter ; validité TORRENT+LETHAL HITS ; 16 tests rouge/vert | — | ⚡ |
+| analyzer | ✅ phase_seq par joueur (2026-08-20) — séquences vérifiées par joueur indépendamment ; élimine 64 faux positifs phase_order (FIGHT P1 avant CHARGE P2 dans le même tour) ; 2 verrous rouge/vert | — | ⚡ |
+| analyzer | ✅ suppression player_alternation_violations (2026-08-20) — check retiré : 40K priorité par roll-off, aucune alternance stricte ; 204 faux positifs éliminés | — | ⚡ |
+| analyzer | ✅ verrou P1 priorité multi-tours (2026-08-20) — test verrou : P1 ouvre COMMAND sur 3 tours consécutifs → 0 violation ; docstring à jour | — | ⚡ |
 | infra | Perf `generate_compact_formation` | [infra.md#perf-formation](infra.md#perf-formation) | ⚡ |
 | infra | ✅ gzip + Brotli livrés (2026-08-18) — stage `brotli-builder`, `load_module` contexte main, directives server | [archives/infra.md](archives/infra.md) | ⚡ |
 

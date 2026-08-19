@@ -3,6 +3,8 @@
 Les phases doivent se succéder dans l'ordre COMMAND→MOVE→SHOOT→CHARGE→FIGHT au sein d'un tour,
 mais la séquence est vérifiée PAR JOUEUR : P1 peut faire FIGHT dans son demi-tour avant que P2
 ne fasse CHARGE dans le sien — c'est la règle 40K (chaque joueur joue ses 5 phases à son tour).
+L'alternance du joueur ouvrant COMMAND n'est PAS vérifiée : en 40K la priorité est déterminée
+par roll-off, aucune alternance stricte n'est imposée par les règles.
 
 Mécanisme : `phase_seq_current_turn` (dict player→list) accumule les phases vues par joueur.
 `_check_phase_seq` est appelé au changement de tour (et à EPISODE END pour le dernier tour).
@@ -109,3 +111,19 @@ def test_retour_en_arriere_par_joueur_detecte_violation(tmp_path: Path) -> None:
         _action(1, 1, "MOVE"),      # retour en arrière chez P1 → violation
     ])
     assert stats["phase_order_violations"] == 1, stats["phase_order_violations"]
+
+
+def test_meme_joueur_ouvre_command_plusieurs_tours_consecutifs_aucune_violation(tmp_path: Path) -> None:
+    """VERROU : P1 ouvre COMMAND à chaque tour (env d'entraînement) → 0 violation.
+
+    En 40K la priorité de tour est déterminée par roll-off ; aucune alternance n'est imposée.
+    """
+    stats = _run(tmp_path, [
+        _action(1, 1, "COMMAND"),
+        _action(1, 1, "MOVE"),
+        _action(2, 1, "COMMAND"),
+        _action(2, 1, "MOVE"),
+        _action(3, 1, "COMMAND"),
+        _action(3, 1, "MOVE"),
+    ])
+    assert stats["phase_order_violations"] == 0, stats["phase_order_violations"]
