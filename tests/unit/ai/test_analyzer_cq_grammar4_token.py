@@ -178,16 +178,19 @@ def test_fam2_verrou_sans_token_fp_se_produit(tmp_path):
     )
 
 
-def test_fam2_vraie_faute_reste_detectee_avec_token_sur_vraie_cible_non_engagee(tmp_path):
-    """Anti-vert-vacant : le token [CLOSE-QUARTERS] n'efface pas UNE VRAIE faute.
+def test_fam2_token_ignore_en_grammaire_3_fp_se_produit(tmp_path):
+    """Anti-vert-vacant : le token [CLOSE-QUARTERS] n'est lu qu'à partir de la grammaire 4.
 
-    Scénario : le token est présent mais la cible ciblée est (50,62) (hors EZ per-fig).
-    Même avec le token, si le moteur a émis [CLOSE-QUARTERS] pour une cible non engagée,
-    c'est une faute moteur, pas un FP de l'analyzer. Ce cas est hors périmètre de ce lot
-    (moteur) — ce test vérifie seulement que le VERROU (test précédent) n'est pas vacueux
-    en comparant avec le scénario where le token DEVRAIT effacer le FP.
+    Scénario : le token est présent dans la ligne de tir, mais le log déclare `Log grammar: 3`.
+    `_eligibility_rule_applied` renvoie False pour grammar < 4, donc le token ne remplace pas
+    le verdict BFS de `shooter_engaged_with_target`. La cible à TARGET_OUTSIDE est hors EZ
+    per-fig → close_quarters_at_unengaged=True → compteur == 1.
+
+    Si la garde `state.log_grammar >= 4` était retirée de `_eligibility_rule_applied`, le
+    token serait reconnu même en grammar=3, `shooter_engaged_with_target` deviendrait True
+    et ce test passerait à 0 (rouge). C'est exactement le défaut que ce test verrouille.
     """
-    # Ce test est identique à test_fam2_verrou : il confirme que sans le [CLOSE-QUARTERS],
-    # la cible hors EZ déclenche bien le compteur (pas de faux négatif dans le VERROU).
-    stats = _parse(tmp_path, _UNITS_FAM2, _SHOOT_HBP_NO_TOKEN, deploy=_DEPLOY_FAM2)
-    assert stats["close_quarters_shot_at_unengaged_target"][1] == 1
+    stats = _parse(tmp_path, _UNITS_FAM2, _SHOOT_HBP_WITH_TOKEN, grammar=3, deploy=_DEPLOY_FAM2)
+    assert stats["close_quarters_shot_at_unengaged_target"][1] == 1, (
+        "Grammar 3 : le token [CLOSE-QUARTERS] doit être ignoré, la cible hors EZ doit déclencher le compteur"
+    )
