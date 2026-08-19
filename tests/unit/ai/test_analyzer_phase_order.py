@@ -113,6 +113,24 @@ def test_retour_en_arriere_par_joueur_detecte_violation(tmp_path: Path) -> None:
     assert stats["phase_order_violations"] == 1, stats["phase_order_violations"]
 
 
+def test_p2_premiere_phase_identique_derniere_p1_violation_detectee(tmp_path: Path) -> None:
+    """07.02 — faux négatif cross-player : P2 commence sur FIGHT (= dernière phase de P1) puis CHARGE.
+
+    Avant le fix, la gate globale `last_phase` bloquait l'enregistrement de FIGHT chez P2
+    (FIGHT == last_phase de P1) ; P2 seq restait ['CHARGE'], aucune violation détectée.
+    Attendu : 1 violation (FIGHT→CHARGE = rang 4→3, retour en arrière chez P2).
+    """
+    stats = _run(tmp_path, [
+        _action(1, 1, "COMMAND"),
+        _action(1, 1, "MOVE"),
+        _action(1, 1, "SHOOT"),
+        _action(1, 1, "FIGHT"),   # P1 termine sur FIGHT → last_phase global = FIGHT
+        _action(1, 2, "FIGHT"),   # P2 commence sur FIGHT (= last_phase) → ancienne gate skippait
+        _action(1, 2, "CHARGE"),  # retour en arrière P2 : FIGHT→CHARGE = violation
+    ])
+    assert stats["phase_order_violations"] == 1, stats["phase_order_violations"]
+
+
 def test_meme_joueur_ouvre_command_plusieurs_tours_consecutifs_aucune_violation(tmp_path: Path) -> None:
     """VERROU : P1 ouvre COMMAND à chaque tour (env d'entraînement) → 0 violation.
 
