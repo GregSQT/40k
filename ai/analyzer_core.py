@@ -743,6 +743,15 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 state.objectives_declared = objectives_payload != 'none'
                 continue
 
+            # Ligne `Attached: lid→bid` de l'entête d'épisode (règle 19.01 : personnage attaché).
+            # Arrive AVANT les lignes Starting position : unit_types n'est pas encore peuplé.
+            # On stocke la paire dans state.leader_bodyguard_pairs, consommée dans unit_start_match.
+            if 'Attached:' in line:
+                attached_match = re.search(r'Attached:\s*(\d+)→(\d+)', line)
+                if attached_match:
+                    state.leader_bodyguard_pairs[attached_match.group(1)] = attached_match.group(2)
+                continue
+
             # Parse unit starting positions
             unit_start_match = re.match(r'.*Unit (\d+) \((\w+)\) P(\d+): Starting position \((-?\d+),\s*(-?\d+)\)', line)
             if unit_start_match:
@@ -776,6 +785,15 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 state.unit_types[unit_id] = unit_type
                 stats['unit_types'][unit_id] = unit_type
                 require_key(stats, 'unit_types_seen').add(unit_type)
+
+                # 19.01 leader/support : compter l'exercice à la mise en place, là où les paires
+                # Attached: ont été stockées. unit_types est maintenant peuplé pour cette unité.
+                _unit_rules = config.unit_rules_by_type.get(unit_type, set())
+                if unit_id in state.leader_bodyguard_pairs and "leader" in _unit_rules:
+                    note_rule_usage(stats, "PROJ.1.9.leader", player)
+                _bodyguard_of = {v: k for k, v in state.leader_bodyguard_pairs.items()}
+                if unit_id in _bodyguard_of and "support" in _unit_rules:
+                    note_rule_usage(stats, "PROJ.1.9.support", player)
                 state.unit_move[unit_id] = unit_move_value * config.inches_to_subhex
                 state.positions_at_turn_start[unit_id] = (col, row)
                 state.unit_movement_history[unit_id] = [{"position": (col, row)}]
@@ -1120,17 +1138,31 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         )
                         state.pending_removals_actor = _dmg_actor_id
 
-                # CHARGE IMPACT mortal wounds:
-                # "Unit X(c,r) IMPACTED [...] Unit Y(c,r) - Hit:T+:N(HIT|FAIL) Wound:AUTO Save:NONE[MW] Dmg:ZHP"
+                # CHARGE IMPACT mortal wounds (11.01):
+                # "Unit CHARGER(c,r) IMPACTED [ABILITY] Unit TARGET(c,r) - Hit:T+:N(HIT|FAIL) Wound:AUTO Save:NONE[MW] Dmg:ZHP"
                 impact_damage_match = re.search(
-                    r'IMPACTED\s+\[[^\]]+\]\s+Unit\s+(\d+)\(\d+,\d+\)\s+-\s+Hit:\d+\+:\d+\((?:HIT|FAIL)\)(?:\s+Wound:AUTO\s+Save:NONE\[MW\]\s+Dmg:(\d+)HP)?',
+                    r'Unit\s+(\d+)\(\d+,\d+\)\s+IMPACTED\s+\[[^\]]+\]\s+Unit\s+(\d+)\(\d+,\d+\)\s+-\s+Hit:(\d+)\+:\d+\((?:HIT|FAIL)\)(?:\s+Wound:AUTO\s+Save:NONE\[MW\]\s+Dmg:(\d+)HP)?',
                     action_desc,
                     re.IGNORECASE
                 )
                 if impact_damage_match:
-                    target_id = impact_damage_match.group(1)
-                    damage_group = impact_damage_match.group(2)
+                    _impact_charger_id = impact_damage_match.group(1)
+                    target_id = impact_damage_match.group(2)
+                    _impact_threshold = int(impact_damage_match.group(3))
+                    damage_group = impact_damage_match.group(4)
                     damage = int(damage_group) if damage_group is not None else 0
+                    _impact_player = state.unit_player.get(_impact_charger_id, player)  # get allowed: charger peut être inconnu
+                    _impact_charger_type = state.unit_types.get(_impact_charger_id)  # get allowed
+                    _impact_rules = config.unit_rules_by_type.get(_impact_charger_type or "", set())
+                    if "charge_impact" in _impact_rules:
+                        note_rule_usage(stats, "PROJ.1.3.charge_impact", _impact_player)
+                        # obs_id=3 → seuil always 4+, dégâts always 1 MW
+                        _IMPACT_THRESHOLD_EXPECTED = 4
+                        _IMPACT_DAMAGE_EXPECTED = 1
+                        if _impact_threshold != _IMPACT_THRESHOLD_EXPECTED:
+                            stats['charge_impact_wrong_threshold'][_impact_player] += 1
+                        if damage > 0 and damage != _IMPACT_DAMAGE_EXPECTED:
+                            stats['charge_impact_wrong_damage'][_impact_player] += 1
                     if damage > 0:
                         _apply_damage_and_handle_death(
                             target_id, _dmg_actor_id, damage, player, turn, phase, state.line_number, state.current_episode_num,

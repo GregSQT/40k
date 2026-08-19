@@ -112,3 +112,4 @@ def handle_episode_start(state: "AnalyzerState", config: "AnalyzerConfig", line:
     state.battle_shocked_by_unit = {}
     state.objective_control_method = None
     state.objective_oc_per_zone = {}
+    state.leader_bodyguard_pairs = {}

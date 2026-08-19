@@ -5,6 +5,7 @@ charge_handler.py — gestion des actions CHARGE dans parse_step_log.
 import re
 from typing import TYPE_CHECKING
 
+from ai.analyzer_rules import note_rule_usage
 from shared.data_validation import require_key
 
 if TYPE_CHECKING:
@@ -91,6 +92,13 @@ def handle_charge(
                 stats['charge_invalid'][player]['fled'] += 1
                 if stats['first_error_lines']['charge_invalid'][player] is None:
                     stats['first_error_lines']['charge_invalid'][player] = {'episode': state.current_episode_num, 'line': line.strip()}
+        # reroll_charge — capacité exercée si [REROLLED:] présent dans la ligne CHARGED.
+        if re.search(r'\[REROLLED:\d+\]', action_desc):
+            _reroll_type = require_key(state.unit_types, charge_unit_id)
+            _reroll_rules = config.unit_rules_by_type.get(_reroll_type, set())
+            if "reroll_charge" in _reroll_rules:
+                note_rule_usage(stats, "PROJ.1.3.reroll_charge", player)
+
         charge_roll_match = re.search(r'\[Roll:\s*(\d+)\]', action_desc)
         if charge_roll_match:
             # BUDGET (11.04 / 21.03) — MIROIR de l'advance, qui faisait déjà les trois choses

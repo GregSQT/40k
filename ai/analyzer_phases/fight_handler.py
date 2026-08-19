@@ -6,7 +6,7 @@ import re
 from typing import TYPE_CHECKING, Optional, Tuple
 
 from ai.analyzer_perfig import parse_shooter_models_segment
-from ai.analyzer_rules import check_anti_x_threshold
+from ai.analyzer_rules import check_anti_x_threshold, note_rule_usage
 from shared.data_validation import require_key
 
 if TYPE_CHECKING:
@@ -296,6 +296,13 @@ def handle_fight(
                 state, config, stats, action_desc, line, turn, phase,
                 fighter_id, fighter_unit_type, weapon_display_name, player,
             )
+            # reroll_1_save_fight : la règle appartient à la CIBLE (défenseur qui relance sa svg).
+            # Détection sur Save+[REROLLED:] dans le segment de sauvegarde.
+            if re.search(r'Save\s+\d+\([^)]+\)\s+\[REROLLED:\d+\]', action_desc, re.IGNORECASE):
+                _target_player = state.unit_player.get(target_id, player)  # get allowed
+                _target_type = state.unit_types.get(target_id)  # get allowed
+                if _target_type and "reroll_1_save_fight" in config.unit_rules_by_type.get(_target_type, set()):
+                    note_rule_usage(stats, "PROJ.1.4.reroll_save_fight", _target_player)
             # RULE METRICS: Targeted Intercession granted reroll mechanics (fight)
             if re.search(r'\(TARGETED_INTERCESSION\)', action_desc, re.IGNORECASE):
                 key = ("reroll_1_towound", fighter_unit_type)

@@ -286,6 +286,11 @@ class AnalyzerState:
     # Réinitialisé à chaque début d'épisode.
     battle_shocked_by_unit: Dict[str, bool] = field(default_factory=dict)
 
+    #: Paires leader→garde-du-corps lues depuis la ligne `Attached: lid→bid` de l'entête d'épisode.
+    #: Mappé AVANT les lignes `Starting position` (unit_types indisponibles à ce stade) ;
+    #: consommé pendant le bloc unit_start pour coter note_rule_usage leader/support.
+    leader_bodyguard_pairs: Dict[str, str] = field(default_factory=dict)
+
     # L18 — champs optionnels de ZONES= (présents uniquement dans les journaux ≥ 2026-08-19).
     # Méthode de contrôle commune à la partie ("secured"|"default"), None si journal antérieur.
     objective_control_method: Optional[str] = None

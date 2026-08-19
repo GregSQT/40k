@@ -7912,7 +7912,7 @@ class W40KEngine(gym.Env):
         de commandement, donc au milieu du tour. Même parti que
         `_log_objective_control_snapshot_if_changed`, dont les VP bougent aussi dans les handlers.
 
-        Les VALEURS viennent des constantes du moteur (`WAAAGH_MELEE_BONUS`, `WAAAGH_INVUL_SAVE`,
+        Les VALEURS viennent des constantes du moteur (`WAAAGH_MELEE_BONUS`,
         `OATH_WOUND_ROLL_BONUS`) : le journal dit ce que le moteur a appliqué, il ne le
         redécrit pas. Un lecteur qui coderait « waaagh ⇒ +1 » en dur ferait vivre une seconde
         définition de la règle, qui divergerait en silence le jour où la première bouge.
@@ -7922,7 +7922,6 @@ class W40KEngine(gym.Env):
             return
         from engine.game_state import (
             OATH_WOUND_ROLL_BONUS,
-            WAAAGH_INVUL_SAVE,
             WAAAGH_MELEE_BONUS,
             oath_target_id,
             waaagh_is_active,
@@ -7939,7 +7938,6 @@ class W40KEngine(gym.Env):
                 entries.append(("waaagh", "on"))
                 entries.append(("waaagh_melee_str", f"+{WAAAGH_MELEE_BONUS}"))
                 entries.append(("waaagh_melee_atk", f"+{WAAAGH_MELEE_BONUS}"))
-                entries.append(("waaagh_invul", WAAAGH_INVUL_SAVE))
             _oath = oath_target_id(self.game_state, player)
             if _oath is not None:
                 entries.append(("oath_target", _oath))

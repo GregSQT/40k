@@ -24,12 +24,11 @@ from tests.unit.ai._fabriques import analyzer_config
 def test_les_deux_moities_du_waaagh_sont_declarees() -> None:
     """+1 Attaques ET +1 Force. La seconde n'existait dans aucune ligne du journal."""
     out = _parse_effects_snapshot(
-        "P1 none | P2 waaagh=on waaagh_melee_str=+1 waaagh_melee_atk=+1 waaagh_invul=5"
+        "P1 none | P2 waaagh=on waaagh_melee_str=+1 waaagh_melee_atk=+1"
     )
     assert out[1] == {}
     assert out[2]["waaagh_melee_atk"] == "+1"
     assert out[2]["waaagh_melee_str"] == "+1", "le +1 Force reste invisible"
-    assert out[2]["waaagh_invul"] == "5"
 
 
 def test_oath_est_porte_par_la_meme_ligne() -> None:

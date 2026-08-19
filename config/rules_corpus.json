@@ -192,12 +192,58 @@
     { "id": "PROJ.1.2.indirect",         "section": "1.2", "label": "Tir indirect — détection (règle non implémentée)",        "applicability": {"kind": "always"}, "controls": [["indirect_fire_mismatch"]],                                  "status": "COUVERT" },
     { "id": "PROJ.1.2.blessure",         "section": "1.2", "label": "Seuil de blessure au tir — écart F/E",                   "applicability": {"kind": "always"}, "controls": [["shoot_wound_threshold_mismatch"]],                          "status": "COUVERT" },
     { "id": "PROJ.1.2.hazardous",        "section": "1.2", "label": "HAZARDOUS au tir — arme absente de l'armurerie",          "applicability": {"kind": "always"}, "controls": [["hazardous_no_hazardous_weapon"]],                           "status": "COUVERT" },
+    {
+      "id": "PROJ.1.2.oath_target",
+      "section": "1.2",
+      "label": "Oath of Moment — cible blessée doit être la cible jurée (08.04)",
+      "applicability": {"kind": "unit_rule_in_roster", "rule_id": "oath_of_moment"},
+      "controls": [["oath_target_mismatch"]],
+      "status": "COUVERT"
+    },
+    {
+      "id": "PROJ.1.2.closest_target_penetration",
+      "section": "1.2",
+      "label": "Closest Target Penetration — réduction AP appliquée (obs_id=3)",
+      "applicability": {"kind": "unit_rule_in_roster", "rule_id": "closest_target_penetration"},
+      "controls": [],
+      "status": "PARTIEL",
+      "status_note": "L'exercice est détecté depuis la sauvegarde effective (eff > base - ap), mais aucun compteur d'erreur : l'AP réduite est lue du journal, pas recomputable indépendamment."
+    },
 
     { "id": "PROJ.1.3.depuis_engage",    "section": "1.3", "label": "Charge depuis zone d'engagement",                        "applicability": {"kind": "always"}, "controls": [["charge_from_adjacent"]],                                    "status": "COUVERT" },
     { "id": "PROJ.1.3.apres_advance",    "section": "1.3", "label": "Charge après avance sans WAAAGH!",                       "applicability": {"kind": "always"}, "controls": [["charge_invalid", "*", "advanced"]],                         "status": "COUVERT" },
     { "id": "PROJ.1.3.apres_repli",      "section": "1.3", "label": "Charge après repli",                                     "applicability": {"kind": "always"}, "controls": [["charge_invalid", "*", "fled"]],                             "status": "COUVERT" },
     { "id": "PROJ.1.3.budget",           "section": "1.3", "label": "Charge — dépassement du budget 2D6",                     "applicability": {"kind": "always"}, "controls": [["charge_invalid", "*", "distance_over_roll"]],               "status": "COUVERT" },
+    {
+      "id": "PROJ.1.3.reroll_charge",
+      "section": "1.3",
+      "label": "Re-roll charge — capacité reroll_charge exercée",
+      "applicability": {"kind": "unit_rule_in_roster", "rule_id": "reroll_charge"},
+      "controls": [],
+      "status": "PARTIEL",
+      "status_note": "La règle est exercée (compteur incrémenté sur [REROLLED:] dans la ligne CHARGED), mais aucun contrôle d'erreur — le moteur ne peut pas relancer un résultat qui aurait dû rester."
+    },
+    {
+      "id": "PROJ.1.3.charge_impact",
+      "section": "1.3",
+      "label": "Charge impact — seuil et dégât de l'impact (11.01)",
+      "applicability": {"kind": "unit_rule_in_roster", "rule_id": "charge_impact"},
+      "controls": [
+        ["charge_impact_wrong_threshold"],
+        ["charge_impact_wrong_damage"]
+      ],
+      "status": "COUVERT"
+    },
 
+    {
+      "id": "PROJ.1.4.reroll_save_fight",
+      "section": "1.4",
+      "label": "Re-roll 1 save en mêlée — capacité reroll_1_save_fight exercée",
+      "applicability": {"kind": "unit_rule_in_roster", "rule_id": "reroll_1_save_fight"},
+      "controls": [],
+      "status": "PARTIEL",
+      "status_note": "La règle est exercée (compteur incrémenté sur Save+[REROLLED:] dans la ligne FOUGHT), mais aucun contrôle d'erreur — un relancé valide ne produit pas de ligne erreur."
+    },
     { "id": "PROJ.1.4.allie",            "section": "1.4", "label": "Combat contre allié",                                    "applicability": {"kind": "always"}, "controls": [["fight_friendly"]],                                          "status": "COUVERT" },
     { "id": "PROJ.1.4.surcharge_atk",   "section": "1.4", "label": "Attaques mêlée — dépassement plafond par figurine",       "applicability": {"kind": "always"}, "controls": [["fight_over_cc_nb"]],                                        "status": "COUVERT" },
     { "id": "PROJ.1.4.pile_in",         "section": "1.4", "label": "Pile-in — dépassement du budget 3\"",                     "applicability": {"kind": "always"}, "controls": [["fight_move_invalid", "pile_in"]],                           "status": "COUVERT" },
@@ -224,6 +270,43 @@
     { "id": "PROJ.2.8.fantome",         "section": "2.8", "label": "État reconstruit — unité morte non vue par l'analyzer",  "applicability": {"kind": "always"}, "controls": [["state_resync", "dead_missed",      "#"]],                   "status": "COUVERT" },
     { "id": "PROJ.2.8.sur_tuee",        "section": "2.8", "label": "État reconstruit — unité tuée à tort par l'analyzer",   "applicability": {"kind": "always"}, "controls": [["state_resync", "alive_missed",     "#"]],                   "status": "COUVERT" },
     { "id": "PROJ.2.8.position",        "section": "2.8", "label": "État reconstruit — figurine mal positionnée",           "applicability": {"kind": "always"}, "controls": [["state_resync", "pos_mismatch",     "#"]],                   "status": "COUVERT" },
-    { "id": "PROJ.2.8.alloc_inconnue",  "section": "2.8", "label": "État reconstruit — figurine allouée inconnue",          "applicability": {"kind": "always"}, "controls": [["state_resync", "alloc_model_unknown", "#"]],                "status": "COUVERT" }
+    { "id": "PROJ.2.8.alloc_inconnue",  "section": "2.8", "label": "État reconstruit — figurine allouée inconnue",          "applicability": {"kind": "always"}, "controls": [["state_resync", "alloc_model_unknown", "#"]],                "status": "COUVERT" },
+
+    {
+      "id": "PROJ.1.9.leader",
+      "section": "1.9",
+      "label": "Leader (19.01) — personnage attaché à une escouade garde-du-corps",
+      "applicability": {"kind": "unit_rule_in_roster", "rule_id": "leader"},
+      "controls": [],
+      "status": "PARTIEL",
+      "status_note": "L'exercice est compté depuis la ligne Attached: de l'entête d'épisode. Aucun contrôle d'erreur : la règle de protection (19.01) exige un suivi per-figurine que le journal ne fournit pas encore."
+    },
+    {
+      "id": "PROJ.1.9.support",
+      "section": "1.9",
+      "label": "Support (19.01) — escouade accueillant un personnage leader",
+      "applicability": {"kind": "unit_rule_in_roster", "rule_id": "support"},
+      "controls": [],
+      "status": "PARTIEL",
+      "status_note": "L'exercice est compté depuis la ligne Attached: de l'entête d'épisode. Miroir de PROJ.1.9.leader côté garde-du-corps."
+    },
+    {
+      "id": "PROJ.1.9.cp_gain_on_objective",
+      "section": "1.9",
+      "label": "Gain PC sur objectif — +1 PC quand contrôle en phase de mouvement",
+      "applicability": {"kind": "unit_rule_in_roster", "rule_id": "cp_gain_on_objective"},
+      "controls": [],
+      "status": "PARTIEL",
+      "status_note": "Source CP indiscernable dans l'instantané OBJECTIVE CONTROL : le delta CP combine 08.02 et cp_gain_on_objective. Aucun log step disponible depuis movement_handlers sans refonte du step_logger."
+    },
+    {
+      "id": "PROJ.1.9.feel_no_pain",
+      "section": "1.9",
+      "label": "Feel No Pain — jets FNP non journalisés",
+      "applicability": {"kind": "unit_rule_in_roster", "rule_id": "feel_no_pain"},
+      "controls": [],
+      "status": "PARTIEL",
+      "status_note": "Les jets FNP ne sont pas journalisés dans step.log : aucune donnée disponible pour exercer ou contrôler la règle."
+    }
   ]
 }
