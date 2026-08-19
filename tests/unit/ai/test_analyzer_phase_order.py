@@ -29,10 +29,9 @@ _END = (
 
 
 def _action(turn: int, player: int, phase: str, uid: str | None = None) -> str:
-    _uid = uid if uid is not None else str(player)
     return (
         f"[10:00:0{turn}] E1 T{turn} P{player} {phase} : "
-        f"Unit {_uid}(5,5) WAITED [SUCCESS]"
+        f"Unit {uid or str(player)}(5,5) WAITED [SUCCESS]"
     )
 
 
