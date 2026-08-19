@@ -124,19 +124,10 @@ def test_obstacle_6_ed_unit_builder_does_not_emit_what_the_engine_reads(registry
     )
 
 
-def test_obstacles_1_to_4_ed_scenario_uses_a_removed_format() -> None:
-    """Obstacles 1 à 4 — DONNÉE/CONCEPTION : le scénario ED est resté au format d'avant V11.
-
-    1. il vit dans `config/` et ne déclare pas `board_ref` → `_resolve_board_dir` refuse ;
-    2. son `wall_ref` ne vit que sous `config/board/44x60x10/`, plateau non jouable ;
-    3. il porte la clé `objectives`, retirée du format (les objectifs viennent des zones de
-       terrain marquées `"objective": true` via `terrain_ref`) ;
-    4. il ne déclare aucune unité du joueur 2 → `engine.reset()` construit une observation qui
-       exige `value_at_start[2]`.
-    """
+def test_obstacle_2_ed_wall_ref_targets_wrong_board() -> None:
+    """Obstacle 2 — DONNÉE : le wall_ref ne vit que sous `config/board/44x60x10/`, plateau non jouable."""
     scenario = json.loads((_PROJECT_ROOT / ED_SCENARIO_DEFAULT).read_text(encoding="utf-8"))
 
-    assert "board_ref" not in scenario, f"Obstacle 1 levé (board_ref ajouté) : mettre à jour {_DOC}."
     assert scenario["wall_ref"] == "walls-11.json", (
         f"Le wall_ref du scénario ED a changé ({scenario['wall_ref']!r}) : obstacle 2 traité ? "
         f"Mettre à jour {_DOC}."
@@ -144,10 +135,46 @@ def test_obstacles_1_to_4_ed_scenario_uses_a_removed_format() -> None:
     assert not (_PROJECT_ROOT / "config" / "board" / "44x60x5" / "walls" / "walls-11.json").exists(), (
         f"walls-11.json existe désormais pour le plateau actif : obstacle 2 levé, mettre à jour {_DOC}."
     )
-    assert "objectives" in scenario, f"Obstacle 3 traité (clé `objectives` retirée) : mettre à jour {_DOC}."
-    assert "terrain_ref" not in scenario, f"Obstacle 3 traité (terrain_ref ajouté) : mettre à jour {_DOC}."
+
+
+def test_obstacle_4_ed_scenario_declares_no_player_2_units() -> None:
+    """Obstacle 4 — DONNÉE : le scénario ED ne déclare aucune unité du joueur 2.
+
+    `engine.reset()` construit une observation qui exige `value_at_start[2]`.
+    """
+    scenario = json.loads((_PROJECT_ROOT / ED_SCENARIO_DEFAULT).read_text(encoding="utf-8"))
+
     assert not [u for u in scenario["units"] if int(u["player"]) == 2], (
         f"Le scénario ED déclare désormais des unités du joueur 2 : obstacle 4 levé, mettre à jour {_DOC}."
+    )
+
+
+def test_obstacles_1_and_3_ed_scenario_now_uses_v11_format() -> None:
+    """Obstacles 1 et 3 — SOLDÉS : le scénario ED déclare board_ref et terrain_ref.
+
+    1. board_ref "44x60x5" ajouté → `_resolve_board_dir` résout le plateau actif ;
+    3. terrain_ref "terrain-endless-duty.json" ajouté, clé `objectives` supprimée → objectif
+       fixe unique issu de la zone `"objective": true` du fichier terrain.
+    """
+    scenario = json.loads((_PROJECT_ROOT / ED_SCENARIO_DEFAULT).read_text(encoding="utf-8"))
+
+    assert scenario.get("board_ref") == "44x60x5", (
+        f"Obstacle 1 a régressé : board_ref absent ou incorrect ({scenario.get('board_ref')!r})."
+    )
+    assert "terrain_ref" in scenario, "Obstacle 3 a régressé : terrain_ref absent du scénario ED."
+    assert "objectives" not in scenario, (
+        "Obstacle 3 a régressé : clé `objectives` toujours présente dans le scénario ED."
+    )
+    terrain_path = (
+        _PROJECT_ROOT / "config" / "board" / "44x60x5" / "terrain" / scenario["terrain_ref"]
+    )
+    assert terrain_path.exists(), (
+        f"terrain_ref pointe vers un fichier absent : {terrain_path}"
+    )
+    terrain = json.loads(terrain_path.read_text(encoding="utf-8"))
+    objective_zones = [area for area in terrain.get("terrain", []) if area.get("objective")]
+    assert len(objective_zones) == 1, (
+        f"Le terrain ED doit contenir exactement 1 zone objective, trouvé {len(objective_zones)}."
     )
 
 
