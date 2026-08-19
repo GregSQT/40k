@@ -1574,6 +1574,13 @@ def error_totals(stats: Dict[str, Any]) -> Dict[str, int]:
         ),
         'episodes_ending': len(stats['episodes_without_end']) + len(stats['episodes_without_method']),
         'core_issues': len(stats['parse_errors']) + len(stats['unit_id_mismatches']),
+        # §0.x — structure de partie (P1 ordre phases, P2 fin de partie).
+        'phase_structure': (
+            stats['phase_order_violations']
+            + stats['player_alternation_violations']
+            + stats['game_turn_exceeded_count']
+            + stats['win_method_mismatch_count']
+        ),
         'missing_samples': sum(1 for line in stats['sample_actions'].values() if not line),
         # §2.8 — une divergence état-reconstruit/état-moteur invalide, pour l'épisode concerné,
         # tout contrôle de distance ou d'adjacence. Elle est rendue au même rang que les autres.
@@ -1963,6 +1970,14 @@ def parse_step_log(filepath: str) -> Dict:
         # pouvait pas le voir : son marqueur d'activation de combat est `CONSOLIDATED` (12.07),
         # et un double pile-in ne produit aucune consolidation supplémentaire.
         'fight_double_pile_in': {1: 0, 2: 0},
+        # 07.02 — ordre COMMAND→MOVE→SHOOT→CHARGE→FIGHT violé (phase antérieure réapparaît).
+        'phase_order_violations': 0,
+        # 07.02 — même joueur ouvre COMMAND sur deux tours consécutifs (pas d'alternance).
+        'player_alternation_violations': 0,
+        # P2 — partie terminée au-delà du tour prévu par le scénario.
+        'game_turn_exceeded_count': 0,
+        # P2 — méthode de victoire incohérente avec l'état final reconstruit.
+        'win_method_mismatch_count': 0,
         'fight_attacks_by_unit': {1: {}, 2: {}},
         'fight_over_cc_nb_by_unit': {1: {}, 2: {}},
         # First occurrence lines for each error type (stores dict with 'episode' and 'line')
@@ -2037,6 +2052,10 @@ def parse_step_log(filepath: str) -> Dict:
             },
             'fight_alternation_violations': {1: None, 2: None},
             'fight_double_pile_in': {1: None, 2: None},
+            'phase_order_violation': None,
+            'player_alternation_violation': None,
+            'game_turn_exceeded': None,
+            'win_method_mismatch': None,
             'position_log_mismatch': {
                 'move': None,
                 'advance': None,
@@ -4092,6 +4111,15 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     log_print(f"{summary_error_icon(episodes_ending_total > 0)} 2.5 Episode ending : {episodes_ending_total}")
     log_print(f"{summary_error_icon(len(missing_samples) > 0)} 2.6 Sample missing ({len(missing_samples)}/{len(sample_action_types)}) : {missing_samples_label}")
     log_print(f"{summary_error_icon(core_issues_total > 0)} 2.7 Core issue : {core_issues_total}")
+    # §0.x — structure de partie (P1 ordre des phases, P2 fin de partie).
+    _phase_struct_total = _totals['phase_structure']
+    log_print(
+        f"{summary_error_icon(_phase_struct_total > 0)} 2.9 Structure de partie :"
+        f" phase_order={stats['phase_order_violations']}"
+        f" alternance={stats['player_alternation_violations']}"
+        f" tour_depasse={stats['game_turn_exceeded_count']}"
+        f" victoire_incoherente={stats['win_method_mismatch_count']}"
+    )
     # 2.8 : une divergence non nulle invalide, pour l'episode concerne, tout controle mesurant
     # une distance ou une adjacence — elle est donc rendue au meme rang que les autres.
     _resync_total = sum(require_key(stats, 'state_resync').values())

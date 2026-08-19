@@ -274,6 +274,24 @@ class AnalyzerState:
     objectives_declared: bool = False
     selected_choice_by_unit_source: Dict[str, Dict[str, str]] = field(default_factory=dict)
 
+    # 07.02 — ordre des phases : COMMAND → MOVE → SHOOT → CHARGE → FIGHT.
+    # Phases vues dans le tour courant, dans leur ordre de première apparition.
+    # Réinitialisé à chaque changement de tour.
+    phase_seq_current_turn: List[str] = field(default_factory=list)
+    # Joueur qui a ouvert la phase COMMAND du tour N (pour le contrôle d'alternance).
+    command_player_per_turn: Dict[int, int] = field(default_factory=dict)
+
+    # 01.07 — état battle-shocked par unité (unit_id → bool).
+    # Mis à jour à chaque ligne `Unit N BATTLE-SHOCK Roll:…`.
+    # Réinitialisé à chaque début d'épisode.
+    battle_shocked_by_unit: Dict[str, bool] = field(default_factory=dict)
+
+    # L18 — champs optionnels de ZONES= (présents uniquement dans les journaux ≥ 2026-08-19).
+    # Méthode de contrôle commune à la partie ("secured"|"default"), None si journal antérieur.
+    objective_control_method: Optional[str] = None
+    # OC par zone : {nom_zone → (OC_joueur1, OC_joueur2)}, mis à jour à chaque instantané.
+    objective_oc_per_zone: Dict[str, Tuple[int, int]] = field(default_factory=dict)
+
     def engagement_3d_kwargs(self) -> Dict[str, Any]:
         """Paire d'arguments verticaux de ``is_within_engine_engagement_zone`` (§03.04).
 

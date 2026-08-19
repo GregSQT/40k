@@ -1131,7 +1131,7 @@ blessure critique n'a plus à être re-dérivée du tout (cf. §1.3).
 
 | # | Champ / ligne à ajouter | Format proposé | Débloque |
 |---|---|---|---|
-| ~~L1~~ | ~~**Drapeau `battle_shocked` par unité** + jet de battle-shock~~ — **LIVRÉ le 2026-08-17** : ligne `Unit N BATTLE-SHOCK Roll:2D6=<n> vs Ld<n>+ → SHOCKED\|OK` dans `step_logger.py` | — | 01.06, 01.07, 02.02 (OC='-'), 08.03, 14.02, 16.01, 15.04 |
+| ~~L1~~ | ~~**Drapeau `battle_shocked` par unité** + jet de battle-shock~~ — **LIVRÉ le 2026-08-19** : ligne produite le 2026-08-17 ; parse analyzer + `battle_shocked_by_unit` ajoutés le 2026-08-19 | — | 01.06, 01.07, 02.02 (OC='-'), 08.03, 14.02, 16.01, 15.04 |
 | ~~L2~~ | ~~`S` de l'arme et `T` de la cible~~ — **CLOS le 2026-08-10 sans ajout de champ** (cf. ci-dessus) ; le reliquat utile est le `T` RETENU par le moteur, pour cesser de le recalculer | `Wound R(T+) [S<n> vs T<n>]` | 19.02 seul |
 | ~~L3~~ | ~~**Figurine cible allouée** + groupe d'allocation~~ — **LIVRÉ le 2026-08-17** : `→ <mid>` sur la partie `Save`/`Dmg` | — | 05.03, 05.04, 06.02, 24.28 |
 | ~~L4~~ | ~~**`AP` de l'arme, `Sv`/`InSv` du groupe**~~ — **LIVRÉ le 2026-08-17** : `Save R(<base>+ AP<n> → <eff>+)` | — | 05.04, `closest_target_penetration`, 24.18 |
@@ -1147,7 +1147,7 @@ blessure critique n'a plus à être re-dérivée du tout (cf. §1.3).
 | L15 | **Nombre d'armes [HAZARDOUS] sélectionnées** | `[HAZARDOUS:<n>] Roll:<n>,<n>,…` | 24.15 |
 | L16 | **Cibles de charge multiples** (11.04 autorise plusieurs) | `CHARGED Unit M(…),Unit K(…)` | 11.04 |
 | L17 | **Cibles de pile-in / mode de consolidation** | `PILED IN [targets: M,K]`, `CONSOLIDATED [ONGOING\|ENGAGING\|OBJECTIVE:<id>]` | 12.03, 12.08 |
-| L18 | **Objectifs : drapeau `secured` + OC par figurine** | extension de `ZONES=` | 14.02, 14.03 |
+| ~~L18~~ | ~~**Objectifs : méthode `secured`/`default` + OC par joueur**~~ — **LIVRÉ le 2026-08-19** : `ZONES=` étendu avec `:Mthd=:OC1=:OC2=` dans `step_logger.py`, câblé dans `w40k_core.py`, parsé dans `analyzer_core.py` (`objective_control_method` + `objective_oc_per_zone`) | — | 14.02, 14.03 |
 | ~~L19~~ | ~~**Attached units** : lien leader/support ↔ bodyguard~~ — **LIVRÉ le 2026-08-18** : entête `Attached: <leader_id>→<bodyguard_id>` dans `log_episode_start` via `attached_info` | 19.01, 19.02, 19.04, 24.22, 24.34 |
 | L20 | **Terrain** : catégorie et hauteur par hexe | entête `Terrain: <cat>@(c,r,h)…` | 13.02–13.11, 06.01, 22.05 (lève aussi 10 NON-TESTABLE) |
 | L21 | **Aircraft** : keyword et placement forcé en réserves | — | 23.01–23.04 |
