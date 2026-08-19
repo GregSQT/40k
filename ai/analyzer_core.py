@@ -791,8 +791,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 _unit_rules = config.unit_rules_by_type.get(unit_type, set())
                 if unit_id in state.leader_bodyguard_pairs and "leader" in _unit_rules:
                     note_rule_usage(stats, "PROJ.1.9.leader", player)
-                _bodyguard_of = {v: k for k, v in state.leader_bodyguard_pairs.items()}
-                if unit_id in _bodyguard_of and "support" in _unit_rules:
+                if unit_id in state.leader_bodyguard_pairs.values() and "support" in _unit_rules:
                     note_rule_usage(stats, "PROJ.1.9.support", player)
                 state.unit_move[unit_id] = unit_move_value * config.inches_to_subhex
                 state.positions_at_turn_start[unit_id] = (col, row)

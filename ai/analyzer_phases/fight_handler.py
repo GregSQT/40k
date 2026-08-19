@@ -287,11 +287,22 @@ def handle_fight(
             check_hit_result(state, stats, line, action_desc, player, is_melee=True)
             # Seuil de blessure 05.02, JUMEAU du tir : même contrôle, même fonction, avec le
             # +1 Force du Waaagh qui n'existe qu'ici (08.04). Cf. ai/analyzer_wound.py.
-            from ai.analyzer_wound import check_wound_threshold
+            from ai.analyzer_wound import check_wound_threshold, wound_bonus_applies
             check_wound_threshold(
                 state, config, stats, line, action_desc, player, fighter_unit_type,
                 weapon_display_name, target_id, parse_shooter_models_segment(action_desc), is_melee=True,
             )
+            # 08.04 Oath of Moment — JUMEAU du tir : la règle joue aussi en mêlée.
+            _oath_carriers = config.rule_to_units.get("oath_of_moment", set())
+            if fighter_unit_type in _oath_carriers and wound_bonus_applies(action_desc):
+                note_rule_usage(stats, "PROJ.1.2.oath_target", player)
+                _oath_t = state.active_effects.get(player, {}).get("oath_target")
+                if _oath_t is not None and _oath_t != target_id:
+                    stats['oath_target_mismatch'][player] += 1
+                    if stats['first_error_lines']['oath_target_mismatch'][player] is None:
+                        stats['first_error_lines']['oath_target_mismatch'][player] = {
+                            'episode': state.current_episode_num, 'line': line.strip()
+                        }
             _note_melee_weapon_rule_usage(
                 state, config, stats, action_desc, line, turn, phase,
                 fighter_id, fighter_unit_type, weapon_display_name, player,

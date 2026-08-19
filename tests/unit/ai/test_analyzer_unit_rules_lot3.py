@@ -161,6 +161,58 @@ def test_verrou_oath_target_mismatch_detecte(tmp_path):
     assert stats["oath_target_mismatch"][1] == 1, "mismatch non détecté"
 
 
+def test_verrou_oath_fight_match_pas_erreur(tmp_path):
+    """VERROU : cible du FOUGHT == unité jurée → exercice compté, 0 mismatch."""
+    units = (
+        "[10:00:00] Unit 1 (AssaultIntercessor) P1: Starting position (50,50), HP_MAX=2"
+        " base=round/6 [MODELS: 1#0@(50,50,z0)] [MODEL_TYPES: 1#0=AssaultIntercessor]\n"
+        "[10:00:00] Unit 101 (Boyz) P2: Starting position (50,51), HP_MAX=1"
+        " base=round/6 [MODELS: 101#0@(50,51,z0)]\n"
+    )
+    body = (
+        "[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1(50,50) DEPLOYED from (-1,-1) to (50,50) [R:+0.0] [SUCCESS]\n"
+        "[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 101(50,51) DEPLOYED from (-1,-1) to (50,51) [R:+0.0] [SUCCESS]\n"
+        "[10:00:02] T1 EFFECTS: P1 oath_target=101 oath_wound=+1 | P2 none\n"
+        "[10:00:06] E1 T1 P1 FIGHT : Unit 1(50,50) FOUGHT Unit 101(50,51) with [Close Combat Weapon]"
+        " - Hit 4(3+) - Wound 5(3+) [OATH OF MOMENT] - Save 3(3+) - Dmg:1HP"
+        " [MODELS: 1#0@(50,50,z0)] [TARGET_MODELS: 101#0@(50,51,z0)]"
+        " [SHOOTER_MODELS: 1#0] [TARGET_DECL:1] [R:+0.0] [SUCCESS]\n"
+        + EPISODE_END
+    )
+    log_text = entete_step_log(body, units=units, objectives=OBJECTIVES, rosters="scale=5 AGENT_PLAYER=1 AGENT=sm (ref) OPPONENT=sm (ref)")
+    stats = _parse(log_text, tmp_path)
+    assert _usage(stats, "PROJ.1.2.oath_target") == 1, "exercice oath_target fight non compté"
+    assert stats["oath_target_mismatch"][1] == 0
+
+
+def test_verrou_oath_fight_mismatch_detecte(tmp_path):
+    """VERROU : cible du FOUGHT != unité jurée → oath_target_mismatch incrémenté."""
+    units = (
+        "[10:00:00] Unit 1 (AssaultIntercessor) P1: Starting position (50,50), HP_MAX=2"
+        " base=round/6 [MODELS: 1#0@(50,50,z0)] [MODEL_TYPES: 1#0=AssaultIntercessor]\n"
+        "[10:00:00] Unit 101 (Boyz) P2: Starting position (50,51), HP_MAX=1"
+        " base=round/6 [MODELS: 101#0@(50,51,z0)]\n"
+        "[10:00:00] Unit 102 (Boyz) P2: Starting position (52,51), HP_MAX=1"
+        " base=round/6 [MODELS: 102#0@(52,51,z0)]\n"
+    )
+    body = (
+        "[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1(50,50) DEPLOYED from (-1,-1) to (50,50) [R:+0.0] [SUCCESS]\n"
+        "[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 101(50,51) DEPLOYED from (-1,-1) to (50,51) [R:+0.0] [SUCCESS]\n"
+        "[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 102(52,51) DEPLOYED from (-1,-1) to (52,51) [R:+0.0] [SUCCESS]\n"
+        # oath_target=101 mais FOUGHT contre 102
+        "[10:00:02] T1 EFFECTS: P1 oath_target=101 oath_wound=+1 | P2 none\n"
+        "[10:00:06] E1 T1 P1 FIGHT : Unit 1(50,50) FOUGHT Unit 102(52,51) with [Close Combat Weapon]"
+        " - Hit 4(3+) - Wound 5(3+) [OATH OF MOMENT] - Save 3(3+) - Dmg:1HP"
+        " [MODELS: 1#0@(50,50,z0)] [TARGET_MODELS: 102#0@(52,51,z0)]"
+        " [SHOOTER_MODELS: 1#0] [TARGET_DECL:1] [R:+0.0] [SUCCESS]\n"
+        + EPISODE_END
+    )
+    log_text = entete_step_log(body, units=units, objectives=OBJECTIVES, rosters="scale=5 AGENT_PLAYER=1 AGENT=sm (ref) OPPONENT=sm (ref)")
+    stats = _parse(log_text, tmp_path)
+    assert _usage(stats, "PROJ.1.2.oath_target") == 1, "exercice oath_target fight non compté"
+    assert stats["oath_target_mismatch"][1] == 1, "mismatch fight non détecté"
+
+
 # ─── 4. CLOSEST TARGET PENETRATION ───────────────────────────────────────────
 
 
