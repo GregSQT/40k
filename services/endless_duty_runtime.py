@@ -226,7 +226,7 @@ def commit_inter_wave_requisition(engine_instance: Any, action: Dict[str, Any]) 
     old_invested = int(require_key(ed_state, "requisition_invested_total"))
     old_capital = int(require_key(ed_state, "requisition_capital_total"))
 
-    rebuilt_units = _rebuild_player_units_for_slots(engine_instance, target_profiles, target_picks, old_p1_alive, current_slot_ids=ed_state.get("slot_unit_ids"))
+    rebuilt_units = _rebuild_player_units_for_slots(engine_instance, target_profiles, target_picks, old_p1_alive, current_slot_ids=require_key(ed_state, "slot_unit_ids"))
     new_invested = _sum_units_value(rebuilt_units)
     purchase_delta = int(new_invested - old_invested)
     if old_capital - new_invested < 0:
@@ -590,8 +590,10 @@ def _build_unit_from_registry(
     rng_weapons = copy.deepcopy(require_key(unit_data, "RNG_WEAPONS"))
     cc_weapons = copy.deepcopy(require_key(unit_data, "CC_WEAPONS"))
     for weapon in rng_weapons:
+        weapon["RNG"] = require_key(weapon, "RNG") * inches_to_subhex
+    for weapon in cc_weapons:
         if "RNG" in weapon:
-            weapon["RNG"] = int(weapon["RNG"]) * inches_to_subhex
+            weapon["RNG"] = require_key(weapon, "RNG") * inches_to_subhex
     selected_rng_weapon_index = 0 if rng_weapons else None
     selected_cc_weapon_index = 0 if cc_weapons else None
     shoot_left = 0
@@ -853,21 +855,16 @@ def _map_old_units_by_slot(
 ) -> Dict[str, Dict[str, Any]]:
     if current_slot_ids is not None:
         by_id = {str(require_key(u, "id")): u for u in old_alive_units}
-        mapped: Dict[str, Dict[str, Any]] = {}
-        for slot_name in ("leader", "melee", "range"):
-            uid = current_slot_ids.get(slot_name)
-            if uid is not None and str(uid) in by_id:
-                mapped[slot_name] = by_id[str(uid)]
-        return {k: v for k, v in mapped.items() if target_profiles.get(k) is not None}
-    # Fallback for initialization before slot IDs are established.
-    sorted_units = sorted(old_alive_units, key=lambda u: int(require_key(u, "id")))
-    mapped = {}
-    if sorted_units:
-        mapped["leader"] = sorted_units[0]
-    if len(sorted_units) > 1:
-        mapped["melee"] = sorted_units[1]
-    if len(sorted_units) > 2:
-        mapped["range"] = sorted_units[2]
+        mapped: Dict[str, Dict[str, Any]] = {
+            s: by_id[str(uid)]
+            for s in ("leader", "melee", "range")
+            if (uid := current_slot_ids.get(s)) is not None and str(uid) in by_id
+        }
+    else:
+        # Fallback for initialization before slot IDs are established.
+        sorted_units = sorted(old_alive_units, key=lambda u: int(require_key(u, "id")))
+        slots = ("leader", "melee", "range")
+        mapped = {slots[i]: u for i, u in enumerate(sorted_units) if i < len(slots)}
     return {k: v for k, v in mapped.items() if target_profiles.get(k) is not None}
 
 
@@ -1017,12 +1014,10 @@ def _is_valid_board_hex(col: int, row: int, cols: int, rows: int) -> bool:
 def _load_allowed_profiles_by_slot() -> Dict[str, List[str]]:
     allowed: Dict[str, List[str]] = {}
     for slot_name in ("leader", "melee", "range"):
-        file_path = _evolution_file_path_for_slot(slot_name)
-        with open(file_path, "r", encoding="utf-8") as f:
-            payload = json.load(f)
+        payload = _load_evolution_payload_for_slot(slot_name)
         catalog = require_key(payload, "catalog")
         if not isinstance(catalog, dict):
-            raise TypeError(f"{file_path} field 'catalog' must be an object")
+            raise TypeError(f"Slot '{slot_name}' evolution field 'catalog' must be an object")
         allowed[slot_name] = list(catalog.keys())
     return allowed
 
