@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import ai.analyzer as an
 
-from tests.unit.ai._fabriques import entete_step_log, weapon_rule_usage as _usage
+from tests.unit.ai._fabriques import entete_step_log, weapon_rule_usage as _usage, EPISODE_TAIL
 
 SHOOTER = (50, 50)
 TARGET = (50, 80)    # 30 subhex = 6", hors zone d'engagement
@@ -60,10 +60,7 @@ def _log(*shot_lines: str, unit_type: str = "Intercessor") -> str:
         f"[10:00:00] Unit 101 (AssaultIntercessor) P2: Starting position {T}, HP_MAX=2 base=round/6"
         f" [MODELS: 101#0@({TARGET[0]},{TARGET[1]},z0)]\n"
     )
-    body = "".join(shot_lines) + (
-        "[10:00:08] T2 OBJECTIVE CONTROL: VP1=0 VP2=0 CP1=0 CP2=0 ZONES=rect b NW:Ctrl=none\n"
-        "[10:00:09] EPISODE END: Winner=1, Method=objectives, Actions=0, Steps=0, Total=0, Duration=1.000s\n"
-    )
+    body = "".join(shot_lines) + EPISODE_TAIL
     # log_grammar non spécifié → grammaire 1 (défaut). Les compteurs TORRENT, LETHAL HITS,
     # ANTI-X, etc. utilisent re.search() direct, indépendant de la version de grammaire.
     return entete_step_log(body, units=units, rosters="scale=5 AGENT_PLAYER=1 AGENT=sm (ref) OPPONENT=sm (ref)",
@@ -318,10 +315,7 @@ def _fight_log(*fight_lines: str, unit_type: str = "AssaultIntercessor") -> str:
         f"[10:00:00] Unit 101 (AssaultIntercessor) P2: Starting position {TF}, HP_MAX=2 base=round/6"
         f" [MODELS: 101#0@({TARGET_FIGHT[0]},{TARGET_FIGHT[1]},z0)]\n"
     )
-    body = "".join(fight_lines) + (
-        "[10:00:08] T2 OBJECTIVE CONTROL: VP1=0 VP2=0 CP1=0 CP2=0 ZONES=rect b NW:Ctrl=none\n"
-        "[10:00:09] EPISODE END: Winner=1, Method=objectives, Actions=0, Steps=0, Total=0, Duration=1.000s\n"
-    )
+    body = "".join(fight_lines) + EPISODE_TAIL
     return entete_step_log(body, units=units,
                            rosters="scale=5 AGENT_PLAYER=1 AGENT=sm (ref) OPPONENT=sm (ref)",
                            objectives=OBJECTIVES)

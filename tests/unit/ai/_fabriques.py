@@ -325,6 +325,12 @@ def entete_step_log(
     )
 
 
+EPISODE_TAIL = (
+    "[10:00:08] T2 OBJECTIVE CONTROL: VP1=0 VP2=0 CP1=0 CP2=0 ZONES=rect b NW:Ctrl=none\n"
+    "[10:00:09] EPISODE END: Winner=1, Method=objectives, Actions=0, Steps=0, Total=0, Duration=1.000s\n"
+)
+
+
 def weapon_rule_usage(stats: dict, rule: str) -> dict:
     """Extrait les compteurs d'usage d'une règle d'arme depuis les stats analyzer.
 

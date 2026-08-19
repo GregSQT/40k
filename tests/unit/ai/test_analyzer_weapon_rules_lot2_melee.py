@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import ai.analyzer as an
 
-from tests.unit.ai._fabriques import entete_step_log, weapon_rule_usage as _usage
+from tests.unit.ai._fabriques import entete_step_log, weapon_rule_usage as _usage, EPISODE_TAIL
 
 FIGHTER = (50, 50)
 TARGET = (50, 51)
@@ -22,7 +22,13 @@ F, T = f"({FIGHTER[0]},{FIGHTER[1]})", f"({TARGET[0]},{TARGET[1]})"
 
 
 def _fought_line(unit_type: str, weapon: str, detail: str) -> str:
-    """Ligne FOUGHT complète avec [MODEL_TYPES:] pour une unité à figurine unique."""
+    """Ligne FOUGHT complète avec [MODEL_TYPES:] pour une unité à figurine unique.
+
+    Intentionnellement plus simple que `_fight_body_line` dans test_analyzer_weapon_rules_lot2.py :
+    pas de [TARGET_MODELS:] ni [TARGET_DECL:1], et [FIGHT_SUBPHASE:fight] en 3e position.
+    Ces deux fichiers testent des chemins indépendants du fight_handler — les tokens
+    supplémentaires ne sont pas nécessaires ici et leur absence doit rester visible.
+    """
     return (
         f"[10:00:02] E1 T1 P1 FIGHT : Unit 1{F} FOUGHT Unit 101{T} with [{weapon}]"
         f" - {detail}"
@@ -41,11 +47,7 @@ def _log(fought_line: str, unit_type: str) -> str:
         f"[10:00:00] Unit 101 (AssaultIntercessor) P2: Starting position {T},"
         f" HP_MAX=2 base=round/6 [MODELS: 101#0@({TARGET[0]},{TARGET[1]},z0)]\n"
     )
-    body = fought_line + (
-        "[10:00:08] T2 OBJECTIVE CONTROL: VP1=0 VP2=0 CP1=0 CP2=0 ZONES=rect b NW:Ctrl=none\n"
-        "[10:00:09] EPISODE END: Winner=1, Method=objectives, Actions=0, Steps=0,"
-        " Total=0, Duration=1.000s\n"
-    )
+    body = fought_line + EPISODE_TAIL
     return entete_step_log(
         body,
         units=units,
