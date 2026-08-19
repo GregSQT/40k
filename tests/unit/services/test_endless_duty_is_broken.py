@@ -175,7 +175,14 @@ def test_obstacles_1_and_3_ed_scenario_now_uses_v11_format() -> None:
     )
 
 
-def test_obstacle_7_solved_value_and_requisition_cost_are_separate() -> None:
+def _make_engine_stub(registry: UnitRegistry, inches_to_subhex: int = 5) -> Any:
+    class _EngineStub:
+        unit_registry = registry
+        game_state: Dict[str, Any] = {"inches_to_subhex": inches_to_subhex}
+    return _EngineStub()
+
+
+def test_obstacle_7_solved_value_and_requisition_cost_are_separate(registry: UnitRegistry) -> None:
     """Obstacle 7 — RÉSOLU : VALUE (combat) et REQUISITION_COST (réquisition) sont distincts.
 
     Avant le fix, `_apply_slot_picks_to_unit` écrasait VALUE avec le coût de réquisition (0 pour
@@ -193,7 +200,7 @@ def test_obstacle_7_solved_value_and_requisition_cost_are_separate() -> None:
         "SHOOT_LEFT": 0,
         "ATTACK_LEFT": 0,
     }
-    _apply_slot_picks_to_unit(unit, "leader", "Sergeant", starter_picks)
+    _apply_slot_picks_to_unit(unit, "leader", "Sergeant", starter_picks, _make_engine_stub(registry))
     assert unit["VALUE"] > 0, (
         f"VALUE écrasé par le coût de réquisition (obtenu {unit['VALUE']}) : "
         f"_apply_slot_picks_to_unit écrit à nouveau dans VALUE au lieu de REQUISITION_COST."
@@ -201,4 +208,36 @@ def test_obstacle_7_solved_value_and_requisition_cost_are_separate() -> None:
     assert unit["REQUISITION_COST"] == 0, (
         f"REQUISITION_COST inattendu pour le loadout de départ du Sergent (obtenu {unit['REQUISITION_COST']}) : "
         f"le coût calculé devrait être 0 (base=0, picks à 0)."
+    )
+
+
+def test_apply_slot_picks_scales_rng_weapons_to_subhex(registry: UnitRegistry) -> None:
+    """RNG_WEAPONS issus de `_apply_slot_picks_to_unit` doivent être en subhex, comme `_build_unit_from_registry`.
+
+    Avant le fix, get_weapons() retournait des portées en pouces bruts (ex. bolt_rifle = 24"),
+    écrasant le scaling fait par _build_unit_from_registry (× inches_to_subhex).
+    La phase de tir comparait row["distance"] en subhex avec weapon_range en pouces → tir inopérant.
+    """
+    starter_picks = {"melee": "close_combat_weapon", "ranged": "bolt_rifle", "secondary": "bolt_pistol"}
+    unit: Dict[str, Any] = {
+        "VALUE": 18,
+        "RNG_WEAPONS": [],
+        "CC_WEAPONS": [],
+        "selectedRngWeaponIndex": None,
+        "selectedCcWeaponIndex": None,
+        "SHOOT_LEFT": 0,
+        "ATTACK_LEFT": 0,
+    }
+    _apply_slot_picks_to_unit(unit, "leader", "Sergeant", starter_picks, _make_engine_stub(registry, inches_to_subhex=5))
+    rng_weapons = unit["RNG_WEAPONS"]
+    assert rng_weapons, "Aucune RNG_WEAPONS après _apply_slot_picks_to_unit pour Sergeant/bolt_rifle"
+    bolt_rifle_rng = rng_weapons[0]["RNG"]
+    assert bolt_rifle_rng >= 5, (
+        f"RNG_WEAPONS[0].RNG = {bolt_rifle_rng!r} : valeur inférieure à 5 subhex — "
+        f"le scaling inches_to_subhex n'est pas appliqué (portée brute en pouces)."
+    )
+    # bolt_rifle = 24" × 5 = 120 subhex ; on vérifie le multiple exact
+    assert bolt_rifle_rng % 5 == 0, (
+        f"RNG_WEAPONS[0].RNG = {bolt_rifle_rng!r} : pas un multiple de inches_to_subhex=5 — "
+        f"scaling non appliqué ou arme incorrecte."
     )

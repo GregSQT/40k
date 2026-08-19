@@ -838,7 +838,7 @@ def _rebuild_player_units_for_slots(
             preserved_hp = None
         unit = _build_unit_from_registry(engine_instance, unit_type, player=1, unit_id=next_id, col=col, row=row)
         slot_picks = target_picks.get(slot_name)
-        _apply_slot_picks_to_unit(unit, slot_name, str(profile_name), slot_picks)
+        _apply_slot_picks_to_unit(unit, slot_name, str(profile_name), slot_picks, engine_instance)
         next_id += 1
         if preserved_hp is not None:
             unit["HP_CUR"] = max(1, min(int(require_key(unit, "HP_MAX")), preserved_hp))
@@ -1270,6 +1270,7 @@ def _apply_slot_picks_to_unit(
     slot_name: str,
     profile_name: str,
     slot_picks: Any,
+    engine_instance: Any,
 ) -> None:
     if not isinstance(slot_picks, dict):
         raise ValueError(f"slot_picks.{slot_name} must be an object")
@@ -1280,8 +1281,16 @@ def _apply_slot_picks_to_unit(
     cc_codes = require_key(override, "cc_codes")
     if not isinstance(rng_codes, list) or not isinstance(cc_codes, list):
         raise TypeError("Slot pick override must provide list fields rng_codes/cc_codes")
-    unit["RNG_WEAPONS"] = get_weapons("SpaceMarine", [str(code) for code in rng_codes])
-    unit["CC_WEAPONS"] = get_weapons("SpaceMarine", [str(code) for code in cc_codes])
+    inches_to_subhex = int(require_key(engine_instance.game_state, "inches_to_subhex"))
+    rng_weapons = get_weapons("SpaceMarine", [str(code) for code in rng_codes])
+    cc_weapons = get_weapons("SpaceMarine", [str(code) for code in cc_codes])
+    for weapon in rng_weapons:
+        weapon["RNG"] = require_key(weapon, "RNG") * inches_to_subhex
+    for weapon in cc_weapons:
+        if "RNG" in weapon:
+            weapon["RNG"] = require_key(weapon, "RNG") * inches_to_subhex
+    unit["RNG_WEAPONS"] = rng_weapons
+    unit["CC_WEAPONS"] = cc_weapons
     unit["selectedRngWeaponIndex"] = 0 if unit["RNG_WEAPONS"] else None
     unit["selectedCcWeaponIndex"] = 0 if unit["CC_WEAPONS"] else None
     if unit["selectedRngWeaponIndex"] is not None:
@@ -1303,8 +1312,13 @@ def _apply_slot_picks_to_unit(
 
 def _fallback_spawn_from_objective(gs: Dict[str, Any]) -> Tuple[int, int]:
     objectives = require_key(gs, "objectives")
+    if not objectives:
+        raise ValueError("_fallback_spawn_from_objective: game_state.objectives is empty — terrain config must define at least one objective")
     first_objective = objectives[0]
-    first_hex = require_key(first_objective, "hexes")[0]
+    hexes = require_key(first_objective, "hexes")
+    if not hexes:
+        raise ValueError("_fallback_spawn_from_objective: first objective has no hexes")
+    first_hex = hexes[0]
     return int(first_hex[0]), int(first_hex[1])
 
 
