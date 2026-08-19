@@ -1,6 +1,6 @@
 # Analyzer — Tâches ouvertes
 
-Découpage en 6 lots des trois sujets ci-dessous (ordre séquentiel imposé : tous éditent `ai/analyzer*.py`) → `Documentation/Implémentation/A_faire/analyzer_conformite_lots.md`
+Découpage en 6 lots des trois sujets ci-dessous (ordre séquentiel imposé : tous éditent `ai/analyzer*.py`) → `Documentation/Implémentation/Implémenté/analyzer_conformite_lots.md` ✅ TOUS LIVRÉS
 
 ---
 
@@ -20,6 +20,6 @@ Livré (2026-08-19) : `[TARGET_DECL:N]` — effectif cible au SelectTargets step
 
 **✅ LIVRÉ Lot 5 (2026-08-20)** — 267 entrées dans `config/rules_corpus.json` (60 existantes + 207 migrées). Matrices §3/§4/§5-bis supprimées du Markdown. VERROU : `test_aucun_compteur_en_double_dans_le_corpus` + `test_tous_les_chemins_de_controle_sont_lisibles` (64 verts).
 
-Reste : Lot 6 — câbler les contrôles vivants sur les entrées `controls: []` qui ont des contrôles en `analyzer_couverture.md` §2 (invariants mesurables) et faire passer les verdicts de INDÉCIDABLE à OK/ERREURS.
+**✅ LIVRÉ Lot 6 (2026-08-20)** — V4/V8/V13 fermés ; 10.02/12.07 câblés ; `wait_with_shootable_target` ; `analyzer_couverture.md` vrai : 0 vert vacant ouvert, COUVERT 65/267. Verrous : 64 verts.
 
-→ `Documentation/Implémentation/A_faire/analyzer_conformite_lots.md` (Lot 6)
+→ `Documentation/Implémentation/Implémenté/analyzer_conformite_lots.md`
