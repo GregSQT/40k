@@ -28,6 +28,26 @@ const SUMMARY: StrategicReservesPlayerSummary = {
   placeable_unit_ids: ["7"],
 };
 
+/** Escouade sur le plateau (pas en réserves) : HP_MAX requis par UnitRow. */
+function onTableUnit(id: number): Unit {
+  return {
+    id,
+    player: 1,
+    col: 0,
+    row: 0,
+    HP_CUR: 5,
+    HP_MAX: 5,
+    MOVE: 60,
+    DISPLAY_NAME: `Unit ${id}`,
+    RNG_WEAPONS: [],
+    CC_WEAPONS: [],
+    ICON: "",
+    ILLUSTRATION_RATIO: 1,
+    UNIT_RULES: [],
+    UNIT_KEYWORDS: [],
+  } as unknown as Unit;
+}
+
 /** Escouade minimale : seuls les champs que la ligne et `selectReserveUnits` lisent. */
 function reserveUnit(id: number): Unit {
   return {
@@ -315,5 +335,46 @@ describe("UnitStatusTable", () => {
     expect(document.querySelector(".unit-status-table-empty")?.textContent).toContain(
       "No units remaining"
     );
+  });
+
+  it("victoryPoints défini → affiche 'VP : <n>'", () => {
+    render(
+      <UnitStatusTable
+        units={[onTableUnit(10)]}
+        player={1}
+        selectedUnitId={null}
+        onSelectUnit={() => {}}
+        playerTypes={{ "1": "human", "2": "human" }}
+        victoryPoints={7}
+      />
+    );
+    expect(screen.getByText("VP : 7")).toBeTruthy();
+  });
+
+  it("commandPoints défini → affiche 'CP : <n>'", () => {
+    render(
+      <UnitStatusTable
+        units={[onTableUnit(10)]}
+        player={1}
+        selectedUnitId={null}
+        onSelectUnit={() => {}}
+        playerTypes={{ "1": "human", "2": "human" }}
+        commandPoints={3}
+      />
+    );
+    expect(screen.getByText("CP : 3")).toBeTruthy();
+  });
+
+  it("victoryPoints absent → aucun texte VP", () => {
+    render(
+      <UnitStatusTable
+        units={[onTableUnit(10)]}
+        player={1}
+        selectedUnitId={null}
+        onSelectUnit={() => {}}
+        playerTypes={{ "1": "human", "2": "human" }}
+      />
+    );
+    expect(screen.queryByText(/VP :/)).toBeNull();
   });
 });

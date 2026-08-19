@@ -119,6 +119,95 @@ describe("TurnPhaseTracker — End Phase", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Bandeau fight : Pile-in et ATK
+// ---------------------------------------------------------------------------
+
+describe("TurnPhaseTracker — fight bandeaux", () => {
+  it("showPileIn=true + onEndPileIn → bouton Pile-in visible", () => {
+    render(<TurnPhaseTracker {...BASE_PROPS} showPileIn onEndPileIn={vi.fn()} />);
+    expect(screen.getByRole("button", { name: /Pile-in/i })).toBeTruthy();
+  });
+
+  it("clic Pile-in → onEndPileIn appelé", () => {
+    const onEnd = vi.fn();
+    render(<TurnPhaseTracker {...BASE_PROPS} showPileIn onEndPileIn={onEnd} />);
+    fireEvent.click(screen.getByRole("button", { name: /Pile-in/i }));
+    expect(onEnd).toHaveBeenCalledTimes(1);
+  });
+
+  it("showPileIn sans onEndPileIn → bouton Pile-in absent", () => {
+    render(<TurnPhaseTracker {...BASE_PROPS} showPileIn />);
+    expect(screen.queryByRole("button", { name: /Pile-in/i })).toBeNull();
+  });
+
+  it("showFightAtk + fightAtkPlayer=1 → bouton P1 ATK visible", () => {
+    render(
+      <TurnPhaseTracker
+        {...BASE_PROPS}
+        showFightAtk
+        fightAtkPlayer={1}
+        onFightAtk={vi.fn()}
+      />
+    );
+    expect(screen.getByRole("button", { name: "P1 ATK" })).toBeTruthy();
+  });
+
+  it("showFightAtk + fightAtkPlayer=2 → bouton P2 ATK visible", () => {
+    render(
+      <TurnPhaseTracker
+        {...BASE_PROPS}
+        showFightAtk
+        fightAtkPlayer={2}
+        onFightAtk={vi.fn()}
+      />
+    );
+    expect(screen.getByRole("button", { name: "P2 ATK" })).toBeTruthy();
+  });
+
+  it("clic ATK → onFightAtk appelé", () => {
+    const onAtk = vi.fn();
+    render(
+      <TurnPhaseTracker
+        {...BASE_PROPS}
+        showFightAtk
+        fightAtkPlayer={1}
+        onFightAtk={onAtk}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "P1 ATK" }));
+    expect(onAtk).toHaveBeenCalledTimes(1);
+  });
+
+  it("showFightAtk + onSkipFight → bouton Skip visible", () => {
+    render(
+      <TurnPhaseTracker
+        {...BASE_PROPS}
+        showFightAtk
+        fightAtkPlayer={1}
+        onFightAtk={vi.fn()}
+        onSkipFight={vi.fn()}
+      />
+    );
+    expect(screen.getByRole("button", { name: /Skip/i })).toBeTruthy();
+  });
+
+  it("clic Skip → onSkipFight appelé", () => {
+    const onSkip = vi.fn();
+    render(
+      <TurnPhaseTracker
+        {...BASE_PROPS}
+        showFightAtk
+        fightAtkPlayer={1}
+        onFightAtk={vi.fn()}
+        onSkipFight={onSkip}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Skip/i }));
+    expect(onSkip).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Erreurs de props obligatoires
 // ---------------------------------------------------------------------------
 
