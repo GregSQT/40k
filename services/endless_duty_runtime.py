@@ -577,6 +577,12 @@ def _build_and_place_enemy_units(
     return built_units
 
 
+def _scale_weapons_rng(weapons: List[Dict[str, Any]], inches_to_subhex: int) -> None:
+    for weapon in weapons:
+        if "RNG" in weapon:
+            weapon["RNG"] = weapon["RNG"] * inches_to_subhex
+
+
 def _build_unit_from_registry(
     engine_instance: Any,
     unit_type: str,
@@ -589,11 +595,8 @@ def _build_unit_from_registry(
     inches_to_subhex = int(require_key(engine_instance.game_state, "inches_to_subhex"))
     rng_weapons = copy.deepcopy(require_key(unit_data, "RNG_WEAPONS"))
     cc_weapons = copy.deepcopy(require_key(unit_data, "CC_WEAPONS"))
-    for weapon in rng_weapons:
-        weapon["RNG"] = require_key(weapon, "RNG") * inches_to_subhex
-    for weapon in cc_weapons:
-        if "RNG" in weapon:
-            weapon["RNG"] = require_key(weapon, "RNG") * inches_to_subhex
+    _scale_weapons_rng(rng_weapons, inches_to_subhex)
+    _scale_weapons_rng(cc_weapons, inches_to_subhex)
     selected_rng_weapon_index = 0 if rng_weapons else None
     selected_cc_weapon_index = 0 if cc_weapons else None
     shoot_left = 0
@@ -1282,13 +1285,10 @@ def _apply_slot_picks_to_unit(
     if not isinstance(rng_codes, list) or not isinstance(cc_codes, list):
         raise TypeError("Slot pick override must provide list fields rng_codes/cc_codes")
     inches_to_subhex = int(require_key(engine_instance.game_state, "inches_to_subhex"))
-    rng_weapons = get_weapons("SpaceMarine", [str(code) for code in rng_codes])
-    cc_weapons = get_weapons("SpaceMarine", [str(code) for code in cc_codes])
-    for weapon in rng_weapons:
-        weapon["RNG"] = require_key(weapon, "RNG") * inches_to_subhex
-    for weapon in cc_weapons:
-        if "RNG" in weapon:
-            weapon["RNG"] = require_key(weapon, "RNG") * inches_to_subhex
+    rng_weapons = copy.deepcopy(get_weapons("SpaceMarine", [str(code) for code in rng_codes]))
+    cc_weapons = copy.deepcopy(get_weapons("SpaceMarine", [str(code) for code in cc_codes]))
+    _scale_weapons_rng(rng_weapons, inches_to_subhex)
+    _scale_weapons_rng(cc_weapons, inches_to_subhex)
     unit["RNG_WEAPONS"] = rng_weapons
     unit["CC_WEAPONS"] = cc_weapons
     unit["selectedRngWeaponIndex"] = 0 if unit["RNG_WEAPONS"] else None
