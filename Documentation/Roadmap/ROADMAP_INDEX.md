@@ -131,6 +131,9 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 | training+bot | ✅ Benchmark floor gate §4.D livré (2026-08-18) — 3 bots de référence (balanced/denial/reactive) sur 4 scénarios holdout_regular ; seuil 0.90 après mesure ; `model_gating_enabled` sur x1_long | [v11_chemin_critique.md#benchmark-gate](v11_chemin_critique.md#benchmark-gate) | |
 | training+bot | ✅ scenario_bench-01..04 dupliqués supprimés (2026-08-18) — fichiers byte-for-byte identiques aux scenario_bot-01..04, glob fallback ramassait 8 scénarios au lieu de 4, épisodes/scénario divisés par 2 sans contrepartie | — | |
 | analyzer | ✅ Alternance EPISODE END (2026-08-19) — vérification paire (T_{N-1}, T_N) manquante à EPISODE END ; finding /code-review valide ; finding 2 écarté (last_phase=None reset dans turn-change) | — | ⚡ |
+| analyzer | ✅ Tests weapon-rules lot2 mêlée/tir (2026-08-20) — verrous rouge/vert pour les règles d'armes lot2 (fight weapon rules) | — | ⚡ |
+| analyzer | ✅ phase_seq par joueur — faux négatifs phase_order (2026-08-20) — gate phase_seq indexé par joueur ; élimine 64 faux positifs cross-player phase_order | — | ⚡ |
+| analyzer | ✅ Verrou E383 fantôme P1 bloque BFS avance Gretchin P2 hors engagement (2026-08-20) — test BFS pur sans advance_from_adjacent ; mur (36,17) + fantôme (37,17) ; rouge/vert validé | — | ⚡ |
 | analyzer | ✅ §2.8/§1.2/§1.4 DEAD-before-SHOOT corrigés (2026-08-19) — `dead_model_positions_episode` dans `freeze_select_targets` restitue géométrie+effectif réels au Select Targets step ; 6013+133+56 faux positifs → 0 ; 3 verrous rouge/vert | — | ⚡ |
 | analyzer | ✅ purge stale dead positions on removed={} (2026-08-19) — dead positions purgées quand removed vide (fix-analyzer-stale-dead-positions) | — | ⚡ |
 | tests | ✅ isolation _deployment_slot_order +5/+6 (2026-08-19) — couverture isolation slot order ; 5-6 tests supplémentaires (test-deployment-slot-order-isolation) | — | ⚡ |
