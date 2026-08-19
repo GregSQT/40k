@@ -863,6 +863,22 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 # turn-change, qui ne s'exécute que quand un NOUVEAU tour commence).
                 if state.last_turn > 0:
                     _check_phase_seq(state, state.last_turn, stats)
+                    # 07.02 — alternance : le bloc turn-change ne s'exécute pas pour le
+                    # dernier tour ; vérifier ici la paire (last_turn-1, last_turn).
+                    _ep_prev_cmd = state.command_player_per_turn.get(state.last_turn)
+                    _ep_prev_prev_cmd = state.command_player_per_turn.get(state.last_turn - 1)
+                    if (
+                        _ep_prev_cmd is not None
+                        and _ep_prev_prev_cmd is not None
+                        and _ep_prev_cmd == _ep_prev_prev_cmd
+                    ):
+                        stats['player_alternation_violations'] += 1
+                        if stats['first_error_lines']['player_alternation_violation'] is None:
+                            stats['first_error_lines']['player_alternation_violation'] = {
+                                'episode': state.current_episode_num,
+                                'turn': state.last_turn,
+                                'player': _ep_prev_cmd,
+                            }
 
                 if stats['current_episode_deaths']:
                     stats['death_orders'].append(tuple(stats['current_episode_deaths']))
