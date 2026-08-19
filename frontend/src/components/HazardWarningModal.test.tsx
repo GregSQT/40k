@@ -29,11 +29,11 @@ describe("HazardWarningModal", () => {
 
   it("n'appelle pas onCancel si le clic sur le fond survient < 400 ms après l'ouverture", () => {
     const onCancel = vi.fn();
+    // Figer performance.now à 0 pendant le rendu → openedAt = 0
+    vi.spyOn(performance, "now").mockReturnValue(0);
     render(<HazardWarningModal onConfirm={vi.fn()} onCancel={onCancel} />);
-    // useLayoutEffect n'a pas encore tourné → openedAtRef ≈ 0, performance.now() est déjà >> 0
-    // On force la fenêtre en remontant performance.now à une valeur proche de l'ouverture.
-    const origNow = performance.now.bind(performance);
-    vi.spyOn(performance, "now").mockReturnValue(origNow() - 100); // simule 100 ms écoulées
+    // Simuler 100 ms écoulées au moment du clic → 100 - 0 < 400 → onCancel non appelé
+    vi.spyOn(performance, "now").mockReturnValue(100);
     fireEvent.click(screen.getByRole("presentation"));
     expect(onCancel).not.toHaveBeenCalled();
     vi.restoreAllMocks();

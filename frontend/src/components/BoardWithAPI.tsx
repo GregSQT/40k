@@ -524,8 +524,6 @@ export const BoardWithAPI: React.FC = () => {
   // accumulés en live). GameLog trie lui-même par timestamp décroissant.
   const gameLogEventsFiltered = gameLog.events;
 
-  // Desperate Escape : on mémorise l'instant d'ouverture du popup hazard pour ignorer le
-  // clic-fond (qui l'annule) pendant ~400 ms. Sinon, sur un DOUBLE-clic d'activation, le 1er
   // Detect game mode from URL
   const location = useLocation();
   const gameMode = location.pathname.includes("/replay")
