@@ -3,6 +3,14 @@
 import type { Unit, Weapon } from "../types/game";
 import { getDiceAverage, getSelectedMeleeWeapon, getSelectedRangedWeapon } from "./weaponHelpers";
 
+export function woundTargetFromSTR_T(strength: number, toughness: number): number {
+  if (strength >= toughness * 2) return 2;
+  if (strength > toughness) return 3;
+  if (strength === toughness) return 4;
+  if (strength * 2 <= toughness) return 6;
+  return 5;
+}
+
 export function calculateHitProbability(shooter: Unit): number {
   const selectedWeapon = getSelectedRangedWeapon(shooter);
   if (!selectedWeapon) throw new Error(`No ranged weapon selected for unit ${shooter.id}`);
@@ -15,13 +23,7 @@ export function calculateWoundProbability(shooter: Unit, target: Unit): number {
   const strength = selectedWeapon.STR;
   const toughness = target.T || 4;
 
-  let woundTarget: number;
-  if (strength >= toughness * 2) woundTarget = 2;
-  else if (strength > toughness) woundTarget = 3;
-  else if (strength === toughness) woundTarget = 4;
-  else if (strength * 2 <= toughness) woundTarget = 6;
-  else woundTarget = 5;
-
+  const woundTarget = woundTargetFromSTR_T(strength, toughness);
   return Math.max(0, ((7 - woundTarget) / 6) * 100);
 }
 
@@ -83,13 +85,7 @@ function calculateRangedEffectiveness(
   const strength = weapon.STR;
   const toughness = target.T || 4;
 
-  let woundTarget: number;
-  if (strength >= toughness * 2) woundTarget = 2;
-  else if (strength > toughness) woundTarget = 3;
-  else if (strength === toughness) woundTarget = 4;
-  else if (strength * 2 <= toughness) woundTarget = 6;
-  else woundTarget = 5;
-
+  const woundTarget = woundTargetFromSTR_T(strength, toughness);
   const woundProbability = Math.max(0, (7 - woundTarget) / 6);
 
   let armorSave = target.ARMOR_SAVE || 5;
@@ -255,13 +251,7 @@ export function calculateCombatWoundProbability(attacker: Unit, target: Unit): n
   const strength = selectedWeapon.STR;
   const toughness = target.T || 4;
 
-  let woundTarget: number;
-  if (strength >= toughness * 2) woundTarget = 2;
-  else if (strength > toughness) woundTarget = 3;
-  else if (strength === toughness) woundTarget = 4;
-  else if (strength * 2 <= toughness) woundTarget = 6;
-  else woundTarget = 5;
-
+  const woundTarget = woundTargetFromSTR_T(strength, toughness);
   return Math.max(0, ((7 - woundTarget) / 6) * 100);
 }
 
