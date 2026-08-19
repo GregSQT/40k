@@ -3491,7 +3491,8 @@ export default function Board({
       const cx = col * HEX_WIDTH + HEX_WIDTH / 2 + MARGIN;
       const cy = row * HEX_HEIGHT + ((col % 2) * HEX_HEIGHT) / 2 + HEX_HEIGHT / 2 + MARGIN;
       const canvas = containerEl?.querySelector("canvas");
-      const rect = canvas?.getBoundingClientRect() ?? { left: 0, top: 0 };
+      if (!canvas) return { x: 0, y: 0 };
+      const rect = canvas.getBoundingClientRect();
       return { x: rect.left + cx, y: rect.top + cy };
     };
   }, [mode, blinkingUnits, gameState, boardConfig]);

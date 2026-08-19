@@ -261,32 +261,28 @@ test.describe("T12-6 — Preview move hexes via hook", () => {
     if (stateResp.status() !== 200) return;
 
     const state = await stateResp.json();
-    const pool: Array<{ id: number; col: number; row: number }> = state.move_activation_pool ?? [];
+    const pool: string[] = state.move_activation_pool ?? [];
     if (pool.length === 0) return;
 
     // Prendre la première unité du pool et récupérer sa position
     const units: Array<{ id: number; col: number; row: number }> = state.units ?? [];
-    const firstEligible = units.find(
-      (u) => pool.some((p) => p.id === u.id) || pool.includes(u.id as never)
-    );
+    const firstEligible = units.find((u) => pool.includes(String(u.id)));
     if (!firstEligible) return;
 
-    // Cliquer sur l'unité via hexToScreenCoords
-    const coords = await page.evaluate((unitId: number) => {
-      const hook = (window as Record<string, unknown>).__W40K_TEST__ as
-        | Record<string, unknown>
-        | undefined;
-      const units = (window as unknown as Record<string, unknown>).__W40K_UNITS__ as
-        | Array<{ id: number; col: number; row: number }>
-        | undefined;
-      if (!hook || !units) return null;
-      const u = units.find((x) => x.id === unitId);
-      if (!u) return null;
-      return (hook.hexToScreenCoords as (col: number, row: number) => { x: number; y: number })(
-        u.col,
-        u.row
-      );
-    }, firstEligible.id);
+    // Cliquer sur l'unité via hexToScreenCoords (col/row passés depuis Node, pas besoin de __W40K_UNITS__)
+    const coords = await page.evaluate(
+      ({ col, row }: { col: number; row: number }) => {
+        const hook = (window as Record<string, unknown>).__W40K_TEST__ as
+          | Record<string, unknown>
+          | undefined;
+        if (!hook) return null;
+        return (hook.hexToScreenCoords as (col: number, row: number) => { x: number; y: number })(
+          col,
+          row
+        );
+      },
+      { col: firstEligible.col, row: firstEligible.row }
+    );
 
     if (!coords || (coords.x === 0 && coords.y === 0)) {
       // hexToScreenCoords not available or canvas not yet sized — skip gracefully
