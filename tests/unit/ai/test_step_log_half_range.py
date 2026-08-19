@@ -158,6 +158,12 @@ def test_half_range_absent_rapid_fire_far(tmp_path, monkeypatch):
     assert "[HALF RANGE]" not in line, f"[HALF RANGE] présent à tort : {line!r}"
 
 
+def test_half_range_present_melta(tmp_path, monkeypatch):
+    """MELTA:2 et cible à demi-portée → [HALF RANGE] dans la ligne step.log."""
+    line = _log_line(tmp_path, monkeypatch, ["MELTA:2"], target=TARGET_NEAR)
+    assert "[HALF RANGE]" in line, f"[HALF RANGE] absent : {line!r}"
+
+
 def test_half_range_absent_no_rule(tmp_path, monkeypatch):
     """Arme sans RAPID_FIRE ni MELTA → [HALF RANGE] jamais émis, même à demi-portée."""
     line = _log_line(tmp_path, monkeypatch, [], target=TARGET_NEAR)

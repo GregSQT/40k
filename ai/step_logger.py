@@ -44,7 +44,7 @@ __all__ = ['StepLogger', 'LOG_GRAMMAR_VERSION']
 #:       [COVER] deja presente par la grammaire 3. Verrou : LOT A du meme fichier de test.
 #:       Aucune regle ne reste hors de la garantie.
 #:
-#:   6 — [HALF RANGE] L13 (24.25/24.30) : cible a demi-portee d une arme RAPID_FIRE ou MELTA,
+#:   7 — [HALF RANGE] L13 (24.25/24.30) : cible a demi-portee d une arme RAPID_FIRE ou MELTA,
 #:       calcule INDEPENDAMMENT du bonus applique (tag de ligne, avant la cible, comme
 #:       [RAPID FIRE:X]). Sur un journal log_grammar>=7, l absence de [HALF RANGE] sur un tir
 #:       d arme RAPID_FIRE ou MELTA signifie que la cible n etait PAS a demi-portee — jamais
