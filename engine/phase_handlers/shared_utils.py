@@ -9072,15 +9072,11 @@ def _emit_squad_shoot_log(game_state: Dict[str, Any], g: Dict[str, Any], ctx: Ma
         f" at Unit {target_sid_g}{tgt_type_seg} ({tc},{tr}){weapon_suffix}"
         f" - {attack_log}"
     )
-    # ConfigurationError (floor_height_by_model absent = corruption cache) : signal visible mais
-    # pas de crash — la séquence de tir ne doit jamais échouer pour une raison de journalisation.
-    # Le chemin original (w40k_core._build_step_log_details) était protégé par le try/except de
-    # log_action ; la pré-capture hors log_action retire ce filet, donc on le reconstitue ici.
-    try:
-        _pre_captured_models_seg = models_segment_for_unit(game_state, attacker_squad_id_str)
-    except ConfigurationError as _e:
-        print(f"⚠️ _emit_squad_shoot_log models_segment: {_e}")
-        _pre_captured_models_seg = ""
+    # Pré-capture AVANT effets hazardous/destroy_model (cf. commentaire plus bas sur
+    # "models_segment"). ConfigurationError (floor_height_by_model absent = corruption cache)
+    # remonte : lâcher le segment ferait disparaître la couche per-figurine ENTIÈRE (cf.
+    # w40k_core._models_segment_for_unit). Un journal muet vaut moins qu'une erreur visible.
+    _pre_captured_models_seg = models_segment_for_unit(game_state, attacker_squad_id_str)
     append_action_log(game_state, {
         "type": ctx.log_type,
         "message": msg,
