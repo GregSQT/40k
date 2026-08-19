@@ -1644,15 +1644,14 @@ class BotEvaluationCallback(BaseCallback):
                 worst_scenario_combined,
                 float(require_present(self.model_gating_min_worst_scenario_combined, "model_gating_min_worst_scenario_combined")),
             ),
-            (
-                "vs_control",
-                # ControlBot est un adversaire PONDERE, jamais le holdout : son score est
-                # toujours present quand le gate tourne. Son absence est une config d'eval
-                # incoherente avec le gate, pas un cas a contourner par un defaut.
-                float(require_key(results, "control")),
-                float(require_present(self.model_gating_min_vs_control, "model_gating_min_vs_control")),
-            ),
         ]
+        vs_control_floor = float(require_present(self.model_gating_min_vs_control, "model_gating_min_vs_control"))
+        if vs_control_floor > 0.0:
+            checks.append((
+                "vs_control",
+                float(require_key(results, "control")),
+                vs_control_floor,
+            ))
         # 5e check : plancher benchmark (§4.D). 0.0 = desarme.
         benchmark_floor_pass = True
         benchmark_keys_present = [k for k in BENCHMARK_BOT_KEYS if k in results]

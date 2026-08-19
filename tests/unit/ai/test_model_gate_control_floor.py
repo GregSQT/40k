@@ -61,6 +61,24 @@ def _results(control: float, others: float = 0.90) -> Dict[str, Any]:
 # aurait recale le modele avant meme de regarder le plancher, et le test aurait ete vert pour
 # la mauvaise raison).
 
+def test_gate_passes_when_floor_disarmed_and_control_absent(capsys: pytest.CaptureFixture) -> None:
+    """min_vs_control=0.0 + 'control' absent de results -> le gate doit passer sans crash.
+
+    Regression : _evaluate_model_gate lisait results['control'] inconditionnellement quand
+    model_gating_enabled=True, meme quand le plancher etait desarme (0.0).
+    """
+    results_without_control = {
+        "combined": 0.80,
+        "adaptive": 0.90,
+        "greedy": 0.90,
+        "defensive": 0.90,
+        "scenario_scores": {"s1": {"combined": 0.80}},
+    }
+    gate = _gate(combined=0.60, worst_bot=0.10, worst_scenario=0.40, vs_control=0.0)
+    assert gate._evaluate_model_gate(results_without_control, eval_marker=2000) is True
+    capsys.readouterr()
+
+
 def test_gate_fails_when_vs_control_is_below_the_floor(capsys: pytest.CaptureFixture) -> None:
     """Tous les autres criteres passent ; seul `vs_control` est sous le plancher -> REFUSE.
 
