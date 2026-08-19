@@ -260,6 +260,17 @@ class ConfigLoader:
             raise ValueError("Phase order is empty in game_config.json")
         return phase_order
 
+    def next_phase_after(self, from_phase: str) -> str:
+        """Return the phase that follows from_phase; raise ValueError for unknown or last phase."""
+        _order = self.get_phase_order()
+        try:
+            _idx = _order.index(from_phase)
+        except ValueError:
+            raise ValueError(f"Phase inconnue : {from_phase!r}")
+        if _idx >= len(_order) - 1:
+            raise ValueError(f"Aucune phase après {from_phase!r} (dernière de l'ordre)")
+        return _order[_idx + 1]
+
     def get_reward_value(self, unit_type: str, action: str) -> float:
         """Get specific reward value - raises error if missing."""
         rewards_config = self.load_rewards_config(unit_type)
