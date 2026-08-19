@@ -2310,8 +2310,8 @@ class ActionDecoder:
     def _deployment_slot_order(columns: Dict[str, Any], action_int: int) -> "np.ndarray":
         """Ordre de préférence de la stratégie `action_int` sur tous les hexes valides.
 
-        Les 5 stratégies (4 front agressif · 5 pression sur objectif · 6 sûr/cohésion ·
-        7 flanc gauche · 8 flanc droit) sont des tris LEXICOGRAPHIQUES sur les mêmes colonnes,
+        Les 7 stratégies (4 front agressif · 5 pression sur objectif · 6 sûr/cohésion ·
+        7 flanc gauche · 8 flanc droit · 9 centre hub · 10 ancre arrière) sont des tris LEXICOGRAPHIQUES sur les mêmes colonnes,
         le premier critère d'abord. `np.lexsort` trie en ASCENDANT avec la clé de FIN comme
         critère principal : les clés sont donc négées (on cherche le maximum) et passées à
         l'envers, l'index brut fermant la liste pour départager les ex æquo par leur ordre
@@ -2328,7 +2328,7 @@ class ActionDecoder:
         cols = columns["cols"]
         rows = columns["rows"]
 
-        # Départage FINAL commun aux 5 stratégies (il suivait le tuple de score dans la version
+        # Départage FINAL commun aux 7 stratégies (il suivait le tuple de score dans la version
         # scalaire) : proximité au centre de la zone, en colonne puis en ligne.
         tail = (
             -np.abs(cols - columns["center_col"]),
@@ -2349,6 +2349,14 @@ class ActionDecoder:
         elif action_int == DEPLOY_SLOT_BASE + 4:
             keys = (-los, -potential_los, cols, -nearest_objective, nearest_enemy,
                     -cluster) + tail
+        elif action_int == DEPLOY_SLOT_BASE + 5:
+            # centre_hub : se positionner au centre du plateau pour menacer plusieurs objectifs.
+            keys = (-center_distance, -nearest_objective, -los, -potential_los,
+                    progress, -cluster) + tail
+        elif action_int == DEPLOY_SLOT_BASE + 6:
+            # safe_rear : rester loin des ennemis (arrière-garde), tout en gardant un objectif proche.
+            keys = (nearest_enemy, -nearest_objective, -nearest_ally,
+                    -cluster, -center_distance) + tail
         else:
             raise ValueError(f"Invalid deployment action: {action_int}")
 
@@ -2502,11 +2510,12 @@ class ActionDecoder:
     def _ingress_slot_order(columns: Dict[str, Any], action_int: int) -> "np.ndarray":
         """Ordre de préférence de la stratégie ``action_int`` pour un INGRESS MOVE (20.04).
 
-        Jumeau de `_deployment_slot_order` — mêmes 5 intentions, même tri lexicographique, même
+        Jumeau de `_deployment_slot_order` — mêmes 7 intentions, même tri lexicographique, même
         départage final par proximité au centre — PRIVÉ des deux clés d'exposition de ligne de
         vue, que le scoring d'ingress ne calcule pas (cf. `_build_ingress_scoring_cache`).
         Les intentions restent distinctes : 4 = front agressif, 5 = pression sur objectif,
-        6 = sûr (loin des ennemis, près des alliés), 7 = flanc gauche, 8 = flanc droit.
+        6 = sûr (loin des ennemis, près des alliés), 7 = flanc gauche, 8 = flanc droit,
+        9 = centre hub, 10 = ancre arrière.
         """
         nearest_enemy = columns["nearest_enemy"]
         nearest_objective = columns["nearest_objective"]
@@ -2531,6 +2540,14 @@ class ActionDecoder:
             keys = (-cols, -nearest_objective, nearest_enemy, -cluster) + tail
         elif action_int == DEPLOY_SLOT_BASE + 4:
             keys = (cols, -nearest_objective, nearest_enemy, -cluster) + tail
+        elif action_int == DEPLOY_SLOT_BASE + 5:
+            # centre_hub : jumeau de _deployment_slot_order +5, sans los/potential_los.
+            keys = (-center_distance, -nearest_objective,
+                    progress, -cluster) + tail
+        elif action_int == DEPLOY_SLOT_BASE + 6:
+            # safe_rear : jumeau de _deployment_slot_order +6, sans los/potential_los.
+            keys = (nearest_enemy, -nearest_objective, -nearest_ally,
+                    -cluster, -center_distance) + tail
         else:
             raise ValueError(f"Invalid ingress action: {action_int}")
 
