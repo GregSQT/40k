@@ -25,10 +25,7 @@
 > `Documentation/Implémentation/analyzer_couverture.md` (matrice règle → contrôle → champs de
 > log) — relus à chaque livraison qui touche le journal.
 >
-> **Exceptions actées** (numérotées ici et nulle part ailleurs) : `Security.md` et
-> `Bot_refactor.md` vivent à la racine d'`Documentation/Implémentation/` au lieu d'`A_faire/`
-> (chantiers vivants, chemin demandé) ; `archives/v11.md` porte l'historique du programme V11
-> entier et sert d'archive au sujet `v11_chemin_critique.md`.
+> **Exceptions actées** (numérotées ici et nulle part ailleurs) : `Bot_refactor.md` vit à la racine d'`Documentation/Implémentation/` au lieu d'`A_faire/` (chantier vivant, chemin demandé) ; `archives/v11.md` porte l'historique du programme V11 entier et sert d'archive au sujet `v11_chemin_critique.md`.
 >
 > **Pendant entraînement.** `⚡` = peut démarrer sans interrompre un run (ne touche pas
 > `config/**/*.json`, ne modifie pas le moteur). `🚫` = ne pas démarrer : risque de biaiser le
@@ -125,7 +122,7 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 | training+bot | ✅ scenario_bench-01..04 dupliqués supprimés (2026-08-18) — fichiers byte-for-byte identiques aux scenario_bot-01..04, glob fallback ramassait 8 scénarios au lieu de 4, épisodes/scénario divisés par 2 sans contrepartie | — | |
 | moteur | ✅ Fix §11.04 budget charge par-figurine gym (2026-08-19) — `_attempt_charge_to_destination` rejetait pas les destinations roll+extra ; verrou + test rouge/vert | — | ⚡ |
 | moteur+services | ✅ Fix review-findings (2026-08-18) — surface refus moteur squad, wsgi leading-comma, message vide | — | |
-| security | ✅ Étapes 4, 5, 7 livrées (2026-08-18) — F1–F15 toutes résolues ; reste 1 action : validation navigateur du cookie | [security.md](security.md) | ⚡ |
+| security | ✅ Chantier clos (2026-08-19) — F1–F15 résolues, validation navigateur OK, doc déplacé dans Implémenté/ | [archives/security.md](archives/security.md) | ⚡ |
 | infra | Perf `generate_compact_formation` | [infra.md#perf-formation](infra.md#perf-formation) | ⚡ |
 | infra | ✅ gzip + Brotli livrés (2026-08-18) — stage `brotli-builder`, `load_module` contexte main, directives server | [archives/infra.md](archives/infra.md) | ⚡ |
 

@@ -98,7 +98,7 @@ pip install -r requirements-dev.txt
 ./scripts/security_check.sh    # bandit + pip-audit + npm audit ; sortie non nulle si finding haut
 ```
 
-Seuils, exceptions justifiées et findings connus : [Documentation/Implémentation/Security.md](Documentation/Impl%C3%A9mentation/Security.md).
+Seuils, exceptions justifiées et findings connus : [Documentation/Implémentation/Implémenté/Security.md](Documentation/Impl%C3%A9mentation/Impl%C3%A9ment%C3%A9/Security.md).
 
 ### Entraînement IA (exemple)
 
@@ -176,7 +176,7 @@ pip install -r requirements-dev.txt
 ./scripts/security_check.sh    # bandit + pip-audit + npm audit; non-zero exit on any high finding
 ```
 
-Thresholds, written exceptions and known findings: [Documentation/Implémentation/Security.md](Documentation/Impl%C3%A9mentation/Security.md).
+Thresholds, written exceptions and known findings: [Documentation/Implémentation/Implémenté/Security.md](Documentation/Impl%C3%A9mentation/Impl%C3%A9ment%C3%A9/Security.md).
 
 ### AI training example
 
