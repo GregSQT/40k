@@ -425,15 +425,15 @@ def _wait_stats(tmp_path, name: str, body: str):
 
 def test_un_ennemi_en_reserves_n_est_pas_une_cible_valide_pour_un_wait(tmp_path):
     """101 n'est jamais mise en place : elle reste à la sentinelle. Mesurée depuis là, elle est à
-    portée du Bolt Rifle de n'importe où — tout WAIT légal ressortait `wait_with_los`."""
+    portée du Bolt Rifle de n'importe où — tout WAIT légal ressortait `wait_with_shootable_target`."""
     body = (
         "[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1(10,10) DEPLOYED from (-1,-1) to (10,10) [R:+0.0] [SUCCESS]\n"
         "[10:00:02] E1 T1 P1 SHOOT : Unit 1(10, 10) WAIT [R:+0.0] [SUCCESS]\n"
     )
     stats = _wait_stats(tmp_path, "reserve_target.log", body)
 
-    assert stats["wait_by_phase"][1]["wait_with_los"] == 0
-    assert stats["wait_by_phase"][1]["wait_no_los"] == 1
+    assert stats["wait_by_phase"][1]["wait_with_shootable_target"] == 0
+    assert stats["wait_by_phase"][1]["wait_no_shootable_target"] == 1
     # Contre-épreuve : la MÊME unité posée à 3 cases EST une cible — sans quoi le filtre
     # ci-dessus désarmerait le contrôle au lieu de le corriger.
     body_posee = (
@@ -442,7 +442,7 @@ def test_un_ennemi_en_reserves_n_est_pas_une_cible_valide_pour_un_wait(tmp_path)
         "[10:00:02] E1 T1 P1 SHOOT : Unit 1(10, 10) WAIT [R:+0.0] [SUCCESS]\n"
     )
     stats = _wait_stats(tmp_path, "posee.log", body_posee)
-    assert stats["wait_by_phase"][1]["wait_with_los"] == 1
+    assert stats["wait_by_phase"][1]["wait_with_shootable_target"] == 1
 
 
 def test_une_escouade_ARRIVEE_des_reserves_quitte_la_sentinelle(tmp_path):
@@ -459,7 +459,7 @@ def test_une_escouade_ARRIVEE_des_reserves_quitte_la_sentinelle(tmp_path):
     )
     stats = _wait_stats(tmp_path, "ingress.log", body)
 
-    assert stats["wait_by_phase"][1]["wait_with_los"] == 1, (
+    assert stats["wait_by_phase"][1]["wait_with_shootable_target"] == 1, (
         "l'escouade arrivée des réserves est restée à la sentinelle : elle n'est plus une cible"
     )
     # L'ingress reste une ACTION de la phase de mouvement — un step gym. Lire sa position ne doit
@@ -525,7 +525,7 @@ def test_un_ALLIE_en_reserves_ne_met_pas_la_cible_au_contact(tmp_path):
     )
     stats = _wait_stats(tmp_path, "allie_reserve.log", body)
 
-    assert stats["wait_by_phase"][1]["wait_with_los"] == 1
+    assert stats["wait_by_phase"][1]["wait_with_shootable_target"] == 1
 
 
 def test_la_bande_d_ez_du_bfs_ignore_les_unites_hors_table():

@@ -1794,8 +1794,8 @@ def parse_step_log(filepath: str) -> Dict:
         },
         'engaged_shot_with_non_close_quarters_weapon': {1: 0, 2: 0},
         'wait_by_phase': {
-            1: {'move_wait': 0, 'wait_with_los': 0, 'wait_no_los': 0},
-            2: {'move_wait': 0, 'wait_with_los': 0, 'wait_no_los': 0}
+            1: {'move_wait': 0, 'wait_with_shootable_target': 0, 'wait_no_shootable_target': 0},
+            2: {'move_wait': 0, 'wait_with_shootable_target': 0, 'wait_no_shootable_target': 0}
         },
         'target_priority': {
             1: {'shots_at_wounded_in_los': 0, 'shots_at_full_hp_while_wounded_in_los': 0, 'total_shots': 0},
@@ -3107,14 +3107,14 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     _table_header("WAIT BEHAVIOR BY PHASE")
     agent_move_wait = stats['wait_by_phase'][1]['move_wait']
     bot_move_wait = stats['wait_by_phase'][2]['move_wait']
-    agent_wait_los = stats['wait_by_phase'][1]['wait_with_los']
-    bot_wait_los = stats['wait_by_phase'][2]['wait_with_los']
-    agent_wait_no_los = stats['wait_by_phase'][1]['wait_no_los']
-    bot_wait_no_los = stats['wait_by_phase'][2]['wait_no_los']
-    
+    agent_wait_los = stats['wait_by_phase'][1]['wait_with_shootable_target']
+    bot_wait_los = stats['wait_by_phase'][2]['wait_with_shootable_target']
+    agent_wait_no_los = stats['wait_by_phase'][1]['wait_no_shootable_target']
+    bot_wait_no_los = stats['wait_by_phase'][2]['wait_no_shootable_target']
+
     _table_row("MOVE phase waits:", _fmt_count(agent_move_wait), _fmt_count(bot_move_wait))
-    _table_row("SHOOT waits (enemies in LOS):", _fmt_count(agent_wait_los), _fmt_count(bot_wait_los))
-    _table_row("SHOOT waits (no LOS):", _fmt_count(agent_wait_no_los), _fmt_count(bot_wait_no_los))
+    _table_row("SHOOT waits (valid target in range, approx. LoS):", _fmt_count(agent_wait_los), _fmt_count(bot_wait_los))
+    _table_row("SHOOT waits (no valid target in range):", _fmt_count(agent_wait_no_los), _fmt_count(bot_wait_no_los))
     
     # TARGET PRIORITY
     log_print("\n" + "-" * 80)

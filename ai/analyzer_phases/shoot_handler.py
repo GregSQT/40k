@@ -1289,10 +1289,10 @@ def handle_wait(
                         valid_targets.append(uid)
 
             if valid_targets:
-                stats['wait_by_phase'][player]['wait_with_los'] += 1
+                stats['wait_by_phase'][player]['wait_with_shootable_target'] += 1
                 stats['shoot_vs_wait_by_player'][player]['wait_with_targets'] += 1
             else:
-                stats['wait_by_phase'][player]['wait_no_los'] += 1
+                stats['wait_by_phase'][player]['wait_no_shootable_target'] += 1
                 stats['shoot_vs_wait_by_player'][player]['wait_no_targets'] += 1
         else:
             # Ligne WAIT sans position lisible : on ne peut RIEN mesurer. Compter
