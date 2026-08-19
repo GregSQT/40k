@@ -18,12 +18,8 @@ Livré (2026-08-19) : `[TARGET_DECL:N]` — effectif cible au SelectTargets step
 
 ## Corpus de règles vérifiable {#corpus-regles}
 
-Sortir les 214 règles du tableau Markdown et en faire une DONNÉE, sur le modèle de `weapon_rules.json` / `unit_rules.json` : une entrée par règle portant son applicabilité, le ou les contrôles qui la mesurent, et son état de vérifiabilité.
+**✅ LIVRÉ Lot 5 (2026-08-20)** — 267 entrées dans `config/rules_corpus.json` (60 existantes + 207 migrées). Matrices §3/§4/§5-bis supprimées du Markdown. VERROU : `test_aucun_compteur_en_double_dans_le_corpus` + `test_tous_les_chemins_de_controle_sont_lisibles` (64 verts).
 
-L'analyzer rend alors une section de couverture — applicable, utilisée N fois, N erreurs, vérifiable ou non — avec trois interdits par construction : règle applicable et JAMAIS utilisée → ⚠️ ; règle non vérifiable → hors des ✅ ; règle hors roster → ne pèse sur rien.
+Reste : Lot 6 — câbler les contrôles vivants sur les entrées `controls: []` qui ont des contrôles en `analyzer_couverture.md` §2 (invariants mesurables) et faire passer les verdicts de INDÉCIDABLE à OK/ERREURS.
 
-§1.7 et §1.8 font déjà ça pour les 58 règles d'unité et d'armes — ce chantier généralise aux 156 lignes des PDF.
-
-Ordre de découpe : les entrées PROUVABLES d'abord (les contrôles vivants de l'inventaire §2 d'`analyzer_couverture.md` — source unique du compte — + règles dérivables du journal).
-
-→ `Documentation/Implémentation/analyzer_couverture.md` §3, §4, §5-bis ; découpage en lots : `Documentation/Implémentation/A_faire/analyzer_conformite_lots.md`
+→ `Documentation/Implémentation/A_faire/analyzer_conformite_lots.md` (Lot 6)
