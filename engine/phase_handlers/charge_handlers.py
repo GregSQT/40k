@@ -3046,6 +3046,21 @@ def _attempt_charge_to_destination(game_state: Dict[str, Any], unit: Dict[str, A
     if dest_tuple not in pool:
         return False, {"error": "destination_not_in_pool", "target": (dest_col, dest_row), "action": "charge"}
 
+    # §11.04 per-model budget : translation rigide → chaque figurine bouge du même delta d'ancre.
+    # Le pool peut accepter des destinations à roll+extra (décalage empreinte) ; l'ancre ne peut
+    # pas dépasser le jet 2D6 sans violer §11.04 pour chaque modèle co-localisé avec l'ancre.
+    if _charge_distance_metric(game_state) == "hex":
+        _roll_subhex = _charge_budget_subhex(game_state, str(unit_id), charge_roll)
+        _start_col, _start_row = require_unit_position(unit, game_state)
+        _anchor_dist = _hex_distance(_start_col, _start_row, int(dest_col), int(dest_row))
+        if _anchor_dist > _roll_subhex:
+            return False, {
+                "error": "charge_exceeds_roll_per_model",
+                "unitId": unit["id"],
+                "anchor_distance": _anchor_dist,
+                "roll_subhex": _roll_subhex,
+            }
+
     # Validate destination per AI_TURN.md charge rules
     _t_valid0 = time.perf_counter() if _perf else None
     if not _is_valid_charge_destination(game_state, dest_col, dest_row, unit, target_ids, charge_roll, config):
