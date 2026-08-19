@@ -633,6 +633,7 @@ def _build_unit_from_registry(
         "LD": leadership,
         "OC": objective_control,
         "VALUE": value,
+        "REQUISITION_COST": 0,
         "ICON": require_key(unit_data, "ICON"),
         "ICON_SCALE": icon_scale,
         "ILLUSTRATION_RATIO": illustration_ratio,
@@ -1287,7 +1288,7 @@ def _apply_slot_picks_to_unit(
         )
     else:
         unit["ATTACK_LEFT"] = 0
-    unit["VALUE"] = int(require_key(override, "value"))
+    unit["REQUISITION_COST"] = int(require_key(override, "value"))
 
 
 def _fallback_spawn_from_objective(gs: Dict[str, Any]) -> Tuple[int, int]:

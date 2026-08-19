@@ -17,6 +17,7 @@ export class RangeSternguard extends TroopRangeSwarm {
   static LD = SternguardVeteranBoltRifle.LD;
   static OC = SternguardVeteranBoltRifle.OC;
   static VALUE = SternguardVeteranBoltRifle.VALUE;
+  static REQUISITION_COST = 0;
 
   static RNG_WEAPON_CODES = ["sternguard_bolt_rifle", "sternguard_bolt_pistol"];
   static RNG_WEAPONS = getWeapons(RangeSternguard.RNG_WEAPON_CODES);

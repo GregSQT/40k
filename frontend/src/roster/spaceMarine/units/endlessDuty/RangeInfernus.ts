@@ -17,6 +17,7 @@ export class RangeInfernus extends TroopRangeSwarm {
   static LD = Infernus.LD;
   static OC = Infernus.OC;
   static VALUE = Infernus.VALUE;
+  static REQUISITION_COST = 0;
 
   static RNG_WEAPON_CODES = ["pyreblast", "bolt_pistol"];
   static RNG_WEAPONS = getWeapons(RangeInfernus.RNG_WEAPON_CODES);

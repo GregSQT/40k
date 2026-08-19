@@ -17,6 +17,7 @@ export class RangeIntercessorGravis extends EliteRangeTroop {
   static LD = HeavyIntercessor.LD;
   static OC = HeavyIntercessor.OC;
   static VALUE = HeavyIntercessor.VALUE;
+  static REQUISITION_COST = 0;
 
   static RNG_WEAPON_CODES = ["heavy_bolt_rifle", "bolt_pistol"];
   static RNG_WEAPONS = getWeapons(RangeIntercessorGravis.RNG_WEAPON_CODES);

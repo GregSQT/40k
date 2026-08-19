@@ -23,6 +23,7 @@ export class LeaderSergeant extends LeaderEliteMeleeElite {
   static LD = IntercessorSergeant.LD;
   static OC = IntercessorSergeant.OC;
   static VALUE = 18; // Combat value target for ED starting leader
+  static REQUISITION_COST = 0;
 
   // Runtime default ED loadout; ED runtime can override with selected loadout.
   // Chosen default is distinct from IntercessorSergeant baseline:

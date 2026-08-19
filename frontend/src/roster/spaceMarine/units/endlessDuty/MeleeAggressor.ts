@@ -17,6 +17,7 @@ export class MeleeAggressor extends EliteMeleeElite {
   static LD = AggressorFlamestorm.LD;
   static OC = AggressorFlamestorm.OC;
   static VALUE = AggressorFlamestorm.VALUE;
+  static REQUISITION_COST = 0;
 
   static RNG_WEAPON_CODES = ["flamestorm_gauntlets"];
   static RNG_WEAPONS = getWeapons(MeleeAggressor.RNG_WEAPON_CODES);
