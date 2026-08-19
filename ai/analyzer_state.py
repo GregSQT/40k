@@ -275,9 +275,11 @@ class AnalyzerState:
     selected_choice_by_unit_source: Dict[str, Dict[str, str]] = field(default_factory=dict)
 
     # 07.02 — ordre des phases : COMMAND → MOVE → SHOOT → CHARGE → FIGHT.
-    # Phases vues dans le tour courant, dans leur ordre de première apparition.
-    # Réinitialisé à chaque changement de tour.
-    phase_seq_current_turn: List[str] = field(default_factory=list)
+    # Phases vues dans le tour courant PAR JOUEUR, dans leur ordre de première apparition.
+    # Clé = player int (1 ou 2). Réinitialisé à chaque changement de tour.
+    # Dict car P1 et P2 jouent chacun leur propre séquence dans le même round de bataille :
+    # P1 peut faire FIGHT avant que P2 ne fasse CHARGE dans son demi-tour — c'est légal.
+    phase_seq_current_turn: Dict[int, List[str]] = field(default_factory=dict)
     # 01.07 — état battle-shocked par unité (unit_id → bool).
     # Mis à jour à chaque ligne `Unit N BATTLE-SHOCK Roll:…`.
     # Réinitialisé à chaque début d'épisode.
