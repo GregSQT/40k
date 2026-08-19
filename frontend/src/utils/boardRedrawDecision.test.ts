@@ -74,11 +74,14 @@ const GEOM_BASE = {
 };
 
 describe("buildBoardGeomKey / buildBoardControlKey / computeStaticLayerReusable", () => {
-  it("la clé géométrie ne change pas lors d'une capture d'objectif", () => {
-    const geomBefore = buildBoardGeomKey(GEOM_BASE);
-    // Capture : seul objectiveControlKeyForBoard change
-    const geomAfter = buildBoardGeomKey(GEOM_BASE);
-    expect(geomAfter).toBe(geomBefore);
+  it("la clé géométrie ne contient pas le contrôle d'objectif (capture simulée)", () => {
+    const ocAfter = "ruin_center=1/1|rect_nw=n/n";
+    const geomKey = buildBoardGeomKey(GEOM_BASE);
+    // La valeur de contrôle est absente de la clé géom : les deux dimensions sont bien séparées
+    expect(geomKey).not.toContain("ruin_center");
+    expect(geomKey).not.toContain(ocAfter);
+    // La clé contrôle, elle, encode bien la capture
+    expect(buildBoardControlKey({ objectiveControlKeyForBoard: ocAfter })).toContain("ruin_center=1/1");
   });
 
   it("la clé contrôle change lors d'une capture d'objectif", () => {
