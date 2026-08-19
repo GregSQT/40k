@@ -468,8 +468,8 @@ def test_hazardous_pas_de_faux_positif_porteur_mort_avant_suffers(tmp_path, monk
 # Discriminant : une 2e ligne HAZARDOUS nomme 1#1. Avec le fix, 1#1 est morte → alloc_model_unknown=1.
 # Sans le fix, c'est 1#0 qui meurt à la place → 1#1 survit → 2e ligne la frappe → alloc_model_unknown=0.
 #
-# L'unité 1 a 2 modèles (1#0 et 1#1). HP_MAX = 3 (lu du registry _Registry).
-# 3 BM par ligne → 1 ligne suffit à tuer une figurine (HP=3→0).
+# L'unité 1 a 2 modèles (1#0 et 1#1). HP_MAX = 1 (lu du registry _RegistryG6).
+# 1 BM par ligne suffit à tuer une figurine (HP=1→0).
 
 
 class _RegistryG6:

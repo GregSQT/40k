@@ -514,12 +514,12 @@ def test_reserves_timeout_is_mapped_and_does_not_increment_steps() -> None:
 
 
 def test_format_replay_style_message_hazardous_mortal_wounds() -> None:
-    """VERROU : supprimer hazardous_mortal_wounds du formatter rend ce test ROUGE."""
+    """VERROU : le formatter HAZARDOUS émet [ALLOC_MODEL:] — supprimer target_model_id rend ce test ROUGE."""
     logger = StepLogger(enabled=False)
     result = logger._format_replay_style_message(
-        1, "hazardous", {"unit_with_coords": "3(2, 4)", "hazardous_mortal_wounds": 2}
+        1, "hazardous", {"unit_with_coords": "3(2, 4)", "hazardous_mortal_wounds": 2, "target_model_id": "3#0"}
     )
-    assert result == "Unit 3(2, 4) SUFFERS 2 Mortal Wounds [HAZARDOUS]"
+    assert result == "Unit 3(2, 4) SUFFERS 2 Mortal Wounds [HAZARDOUS] [ALLOC_MODEL: 3#0]"
 
 
 def test_format_replay_style_message_hazardous_missing_mortal_wounds_raises() -> None:
@@ -529,6 +529,17 @@ def test_format_replay_style_message_hazardous_missing_mortal_wounds_raises() ->
     logger = StepLogger(enabled=False)
     with pytest.raises(ConfigurationError, match=r"hazardous_mortal_wounds"):
         logger._format_replay_style_message(1, "hazardous", {"unit_with_coords": "3(2, 4)"})
+
+
+def test_format_replay_style_message_hazardous_missing_target_model_id_raises() -> None:
+    """VERROU : un payload sans target_model_id lève ConfigurationError (grammar 6 : modèle obligatoire)."""
+    from shared.data_validation import ConfigurationError
+
+    logger = StepLogger(enabled=False)
+    with pytest.raises(ConfigurationError, match=r"target_model_id"):
+        logger._format_replay_style_message(
+            1, "hazardous", {"unit_with_coords": "3(2, 4)", "hazardous_mortal_wounds": 2}
+        )
 
 
 def test_step_timing_duration_not_unix_timestamp(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
