@@ -146,7 +146,7 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 |---|---|---|---|
 | moteur | Replis `unit_by_id` (T0 = signature à décider) | [moteur.md#unit-by-id](moteur.md#unit-by-id) | 🚫 |
 | moteur | Endless Duty (obstacles 3 et 7 à décider) | [moteur.md#endless-duty](moteur.md#endless-duty) | 🚫 |
-| front | Scission `bcKey` géométrie/contrôle (écartée le 2026-08-12, à arbitrer) | [front.md#bckey](front.md#bckey) | ⚡ |
+| front | ~~Scission `bcKey` géométrie/contrôle~~ ✅ livré 2026-08-19 | [front.md](front.md) | ⚡ |
 
 ### À cadrer avant d'ouvrir
 

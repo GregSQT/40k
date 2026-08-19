@@ -25,6 +25,6 @@ Plusieurs chantiers récents ont été livrés sans passage navigateur. À valid
 
 ---
 
-## Scission `bcKey` géométrie/contrôle {#bckey}
+## ~~Scission `bcKey` géométrie/contrôle~~
 
-**Écartée le 2026-08-12, à arbitrer séparément** (relevé du chantier clé de contrôle d'objectif) : scinder `bcKey` en clé de géométrie et clé de contrôle pour ne plus reconstruire fond et murs à chaque capture d'objectif ; et sortir tout `bcKey` dans `frontend/src/utils/boardRedrawDecision.ts`, à côté de l'invariant qu'il alimente.
+**Livré 2026-08-19** — `bcKey` scindé en `geomKey` (dims + zones + murs + dep) et `controlKey` (oc) dans `BoardPvp` ; `buildBoardGeomKey`, `buildBoardControlKey`, `computeStaticLayerReusable` exportés depuis `boardRedrawDecision.ts` ; 13 tests vitest verts (rouge/vert vérifié par mutation).
