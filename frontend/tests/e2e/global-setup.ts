@@ -12,7 +12,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { chromium } from "@playwright/test";
 
-const ROOT = path.resolve(__dirname, "../../../..");
+const ROOT = path.resolve(__dirname, "../../..");
 const STORAGE_STATE = path.resolve(__dirname, "../../.auth/session.json");
 const FRONTEND_URL = process.env.PW_FRONTEND_URL ?? "http://localhost:5175";
 const SESSION_COOKIE_NAME = "w40k_session";
@@ -36,7 +36,7 @@ print(json.dumps({'token': row[0], 'user_id': row[1]}))
 conn.close()
 `.trim();
 
-  const out = execSync(`python3 -c "${script.replace(/"/g, '\\"').replace(/\n/g, "\\n")}"`).toString().trim();
+  const out = execSync("python3", { input: script }).toString().trim();
   return JSON.parse(out);
 }
 

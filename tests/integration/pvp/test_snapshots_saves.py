@@ -307,6 +307,6 @@ class TestAuth:
         )
         body = resp.get_json()
         assert body["success"] is False
-        assert "not allowed" in body.get("error", "").lower() or "forbidden" in body.get("error", "").lower() or "403" in str(resp.status_code), (
+        assert "not allowed" in body.get("error", "").lower() or "forbidden" in body.get("error", "").lower(), (
             f"message d'erreur inattendu : {body.get('error')}"
         )
