@@ -113,22 +113,36 @@ def test_retour_en_arriere_par_joueur_detecte_violation(tmp_path: Path) -> None:
     assert stats["phase_order_violations"] == 1, stats["phase_order_violations"]
 
 
-def test_p2_premiere_phase_identique_derniere_p1_violation_detectee(tmp_path: Path) -> None:
-    """07.02 — faux négatif cross-player : P2 commence sur FIGHT (= dernière phase de P1) puis CHARGE.
+def test_p2_defense_avant_command_ignoree_violation_dans_propre_tour_detectee(tmp_path: Path) -> None:
+    """07.02 — P2 fight en défenseur avant son COMMAND : ignoré. FIGHT→CHARGE dans son propre tour : violation.
 
-    Avant le fix, la gate globale `last_phase` bloquait l'enregistrement de FIGHT chez P2
-    (FIGHT == last_phase de P1) ; P2 seq restait ['CHARGE'], aucune violation détectée.
-    Attendu : 1 violation (FIGHT→CHARGE = rang 4→3, retour en arrière chez P2).
+    Scénario réel : P2 fight comme défenseur pendant le FIGHT de P1 (sans COMMAND P2 ouvert),
+    puis P2 ouvre son tour (COMMAND) et enchaîne FIGHT→CHARGE (ordre invalide dans son propre tour).
+    Les phases de défense pré-COMMAND ne polluent pas la séquence active de P2.
     """
     stats = _run(tmp_path, [
         _action(1, 1, "COMMAND"),
-        _action(1, 1, "MOVE"),
-        _action(1, 1, "SHOOT"),
-        _action(1, 1, "FIGHT"),   # P1 termine sur FIGHT → last_phase global = FIGHT
-        _action(1, 2, "FIGHT"),   # P2 commence sur FIGHT (= last_phase) → ancienne gate skippait
-        _action(1, 2, "CHARGE"),  # retour en arrière P2 : FIGHT→CHARGE = violation
+        _action(1, 1, "FIGHT"),    # P1 combat
+        _action(1, 2, "FIGHT"),    # P2 défenseur pré-COMMAND : ignoré de la séquence P2
+        _action(1, 2, "COMMAND"),  # P2 ouvre son propre tour → séquence P2 démarre ici
+        _action(1, 2, "FIGHT"),    # P2 combat dans son propre tour
+        _action(1, 2, "CHARGE"),   # CHARGE après FIGHT dans le propre tour P2 → violation
     ])
     assert stats["phase_order_violations"] == 1, stats["phase_order_violations"]
+
+
+def test_p2_defense_pre_command_seule_aucune_violation(tmp_path: Path) -> None:
+    """07.02 — P2 fight en défenseur avant son COMMAND, puis joue normalement : 0 violation."""
+    stats = _run(tmp_path, [
+        _action(1, 1, "COMMAND"),
+        _action(1, 1, "FIGHT"),    # P1 combat
+        _action(1, 2, "FIGHT"),    # P2 défenseur pré-COMMAND : ignoré
+        _action(1, 2, "COMMAND"),  # P2 ouvre son tour
+        _action(1, 2, "MOVE"),
+        _action(1, 2, "CHARGE"),
+        _action(1, 2, "FIGHT"),
+    ])
+    assert stats["phase_order_violations"] == 0, stats["phase_order_violations"]
 
 
 def test_meme_joueur_ouvre_command_plusieurs_tours_consecutifs_aucune_violation(tmp_path: Path) -> None:
