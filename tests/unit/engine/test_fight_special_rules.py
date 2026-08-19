@@ -54,7 +54,7 @@ def _game_state(weapon_rules, *, attackers=1, attacker_keywords=("INFANTRY",), a
             "CC_WEAPONS": [dict(weapon)],
         }
         intents.append({"model_id": mid, "target_unit_id": "2", "weapon_index": 0,
-                        "n_attacks_resolved": 1})
+                        "n_attacks_resolved": 1, "target_squad_size_at_declaration": 1})
     models["T1"] = {"id": "T1", "squad_id": "2", "player": 1, "T": 4, "HP_CUR": 9, "HP_MAX": 9,
                     "ARMOR_SAVE": 3, "INVUL_SAVE": 7, "role": None, "unitType": "Grunt",
                     "points_per_hp": 5.0, "VALUE": 10.0, "col": 1, "row": 0,

@@ -197,7 +197,8 @@ def _run_real_grouping(rolled: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             "102": {"col": 30, "row": 10, "player": 2, "VALUE": 100},
         },
         SHOOT_CTX.intents_key: {
-            "1": [{"model_id": f"1#{i}", "weapon_index": 0, "target_unit_id": r["target_sid"]}
+            "1": [{"model_id": f"1#{i}", "weapon_index": 0, "target_unit_id": r["target_sid"],
+                   "target_squad_size_at_declaration": 1}
                   for i, r in enumerate(rolled)]
         },
     }

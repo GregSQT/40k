@@ -186,6 +186,7 @@ def test_le_log_de_tir_affiche_le_token_heavy(monkeypatch):
             # [INDIRECT FIRE] 10.07 : posé à la création du groupe ; None si la règle ne joue pas.
             "indirect_fire_fail_below": None,
             "player": 0,
+            "targetAliveCount": 1,
         }
         _emit_squad_shoot_log(gs, group, SHOOT_CTX)
         return gs["action_logs"][-1]["message"]

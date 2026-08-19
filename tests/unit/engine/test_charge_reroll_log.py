@@ -148,6 +148,7 @@ def _charge_gs() -> Dict[str, Any]:
             "1": {"id": "1", "player": 1, "col": 5, "row": 10},
             "2": {"id": "2", "player": 2, "col": 7, "row": 10},
         },
+        "units": [{"id": "1", "player": 1, "UNIT_RULES": []}],
         "unit_by_id": {"1": unit1},
         "action_logs": [],
         "action_log_seq": 0,

@@ -73,7 +73,7 @@ def _blow(shooters: str) -> str:
     return (
         f"[10:00:04] E1 T1 P1 FIGHT : Unit 1({A[0]},{A[1]}) FOUGHT Unit 101({T[0]},{T[1]})"
         f" with [{CC_WEAPON}] - Hit 4(3+) - Wound 5(4+) - Save 2(3+) - Dmg:0HP"
-        f" [FIGHT_SUBPHASE:fight] {_MODELS} [SHOOTER_MODELS: {shooters}] [R:+0.0] [SUCCESS]\n"
+        f" [FIGHT_SUBPHASE:fight] {_MODELS} [SHOOTER_MODELS: {shooters}] [TARGET_DECL:1] [R:+0.0] [SUCCESS]\n"
     )
 
 

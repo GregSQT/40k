@@ -98,11 +98,10 @@ DEFAULT_DOCS = [
     "Documentation/Roadmap/analyzer.md",
     "Documentation/Roadmap/front.md",
     "Documentation/Roadmap/infra.md",
-    "Documentation/Roadmap/security.md",
     "Documentation/Roadmap/capacites.md",
     "Documentation/Roadmap/doc.md",
     "Documentation/Implémentation/analyzer_couverture.md",
-    "Documentation/Implémentation/Security.md",
+    "Documentation/Implémentation/Implémenté/Security.md",
 ]
 
 #: Documents tenus à la convention « le symbole, jamais la ligne » : exactement les documents

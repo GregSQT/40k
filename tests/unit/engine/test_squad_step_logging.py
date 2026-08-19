@@ -297,6 +297,7 @@ def _snapshot_engine(
         # 08.02 : les CP entrent dans l'instantané ET dans sa clé de déduplication.
         "command_points": dict(cp) if cp is not None else {1: 0, 2: 0},
         "turn": 2,
+        "units_cache": {},
     }
     eng.step_logger = logger
     return eng

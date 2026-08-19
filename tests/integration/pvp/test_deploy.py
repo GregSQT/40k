@@ -22,7 +22,7 @@ import pytest
 
 import services.api_server as api_server
 from services.api_server import app
-from tests.integration.pvp.conftest import GameClient, _TEST_AUTH_USER, _TEST_PERMISSIONS
+from tests.integration.pvp._shared import GameClient, _TEST_AUTH_USER, _TEST_PERMISSIONS
 from tests.integration.pvp.invariants import assert_state_invariants
 
 pytestmark = pytest.mark.integration

@@ -119,7 +119,7 @@ def _game_state(phase, n_target_models, n_attacks):
         "config": {"game_rules": build_game_rules(engagement_zone=1)},
         ("pending_squad_fight_intents" if melee else "pending_squad_shoot_intents"): {
             "1": [{"model_id": "A1", "target_unit_id": "2", "weapon_index": 0,
-                   "n_attacks_resolved": n_attacks}]
+                   "n_attacks_resolved": n_attacks, "target_squad_size_at_declaration": 1}]
         },
     }
 

@@ -42,7 +42,7 @@ Mesurer le regret avant de trancher (§9.0bis).
 
 ## P4 — Observation de support {#p4}
 
-✅ **Livré le 2026-08-19** — reliquat `effective_range` ajouté à l'encodeur d'entité (`observation_entities.py:81`, `observation_builder.py:1504`) ; LoS/couvert et flags `advanced`/`fled` étaient déjà présents. `obs_size` 16671 → 16703.
+✅ **Livré le 2026-08-19** — reliquat `effective_range` ajouté à l'encodeur d'entité (`observation_entities.py::UNIT_CONT_FIELDS`, `observation_builder.py::_encode_unit_entity`) ; LoS/couvert et flags `advanced`/`fled` étaient déjà présents. `obs_size` 16671 → 16703.
 
 → `Documentation/Implémentation/1_Agent/V11_phaseA.md` §9.5
 

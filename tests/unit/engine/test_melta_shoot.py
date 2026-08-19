@@ -58,7 +58,8 @@ def _game_state(weapon_rules, *, target_row):
         "unit_by_id": {"1": {"id": "1", "UNIT_RULES": []}, "2": {"id": "2", "UNIT_RULES": []}},
         "objectives": [], "units_moved": set(), "units_advanced": set(),
         "pending_squad_shoot_intents": {
-            "1": [{"model_id": "A1", "target_unit_id": "2", "weapon_index": 0, "n_attacks_resolved": 1}]
+            "1": [{"model_id": "A1", "target_unit_id": "2", "weapon_index": 0,
+                   "n_attacks_resolved": 1, "target_squad_size_at_declaration": 1}]
         },
     }
 

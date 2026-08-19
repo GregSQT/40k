@@ -117,7 +117,7 @@ class TestDevastatingWoundsSortOrder:
             "moved_distance_by_model": {"1#0": 0.0},
             "pending_squad_shoot_intents": {
                 "1": [{"model_id": "1#0", "target_unit_id": "101", "weapon_index": 0,
-                       "n_attacks_resolved": 2}]
+                       "n_attacks_resolved": 2, "target_squad_size_at_declaration": 1}]
             },
         }
         seq = [4, 6, 4, 4, 2]

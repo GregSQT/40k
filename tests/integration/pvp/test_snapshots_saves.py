@@ -24,7 +24,7 @@ import pytest
 import services.api_server as api_server
 from services.api_server import app
 from services.game_saves import SaveStore
-from tests.integration.pvp.conftest import (
+from tests.integration.pvp._shared import (
     INTEGRATION_SCENARIO,
     GameClient,
     _TEST_AUTH_USER,

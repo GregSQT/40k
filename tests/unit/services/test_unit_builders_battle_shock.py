@@ -37,6 +37,8 @@ _UNIT_DATA: Dict[str, Any] = {
     "ILLUSTRATION_RATIO": 1.0,
     "UNIT_RULES": [],
     "UNIT_KEYWORDS": [],
+    "BASE_SHAPE": "round",
+    "BASE_SIZE": 1,
 }
 
 
@@ -48,6 +50,7 @@ class _StubRegistry:
 class _StubEngine:
     def __init__(self) -> None:
         self.unit_registry = _StubRegistry()
+        self.game_state = {"inches_to_subhex": 1}
 
 
 def test_army_config_builder_sets_battle_shocked() -> None:

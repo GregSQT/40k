@@ -4,7 +4,7 @@
 
 ## `obs_size` justification {#obs-size}
 
-La valeur vraie de `obs_size` à HEAD est **16671** (les 6 profils de la config ArmageddonAgent la portent ; 16659 → 16671 à la livraison de P3-4 le 2026-08-17).
+La valeur vraie de `obs_size` à HEAD est **16703** (les 6 profils de la config ArmageddonAgent la portent ; 16671 → 16703 à la livraison de P4 le 2026-08-19).
 La `justification` du champ raconte encore la lignée 20780 → 20727 (un appendice P3-4 a été ajouté à la fin sans réconcilier le total) — à réécrire.
 
 **Le gel est levé** (run terminé) : plus rien n'interdit d'y toucher.

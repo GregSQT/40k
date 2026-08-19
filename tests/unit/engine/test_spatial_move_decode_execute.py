@@ -262,8 +262,11 @@ def test_execute_clears_the_map_and_the_roll(engine):
         read_squad_move_cell_map(gs, "1")
 
 
-def test_executed_advance_records_the_authoritative_roll(engine):
+def test_executed_advance_records_the_authoritative_roll(engine, monkeypatch):
     """§4.3 de bout en bout : un advance decode+execute alimente `advance_rolls`."""
+    # La boucle en cascade (w40k_core.py) vide le pool de move du joueur 1 après l'activation,
+    # passe en command_phase_start et réinitialise units_advanced + advance_rolls avant l'assert.
+    monkeypatch.setattr(engine, "start_command_phase", lambda: {"phase_complete": False})
     gs = engine.game_state
     _prime_mask(engine)
     cell_map = read_squad_move_cell_map(gs, "1")
