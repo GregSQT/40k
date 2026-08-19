@@ -2,6 +2,7 @@
 
 Invariants vérifiés (ROUGE→VERT pour chaque correction) :
 
+TIR (shoot_handler._note_weapon_rule_usage) :
 1. ANTI-X    — [ANTI-keyword:N+] dans le segment blessure → compteur incrémenté.
 2. TORRENT   — [TORRENT] dans action_desc → compteur incrémenté ; Hit numérique → parse_error.
 3. LETHAL HITS — [LETHAL HITS] dans action_desc → compteur ; Wound numérique → parse_error.
@@ -9,6 +10,15 @@ Invariants vérifiés (ROUGE→VERT pour chaque correction) :
 5. EXTRA_ATTACKS — [EXTRA ATTACKS] → compteur incrémenté.
 6. DW threshold — ANTI-X:N+ (N<6) change le seuil critique : wound=N + Save [DW] = CORRECT.
 7. HAZARDOUS Roll:1 — [HAZARDOUS] Roll:1 sur ligne SHOT → hazardous_roll1_count incrémenté.
+
+MÊLÉE (fight_handler._note_melee_weapon_rule_usage) :
+8.  TORRENT mêlée     — [TORRENT] sur ligne FOUGHT → compteur incrémenté.
+9.  IGNORES_COVER mêlée — [IGNORES COVER] sur ligne FOUGHT → compteur incrémenté.
+10. LETHAL_HITS mêlée  — [LETHAL HITS] sur ligne FOUGHT → compteur incrémenté.
+11. EXTRA_ATTACKS mêlée — [EXTRA ATTACKS] sur ligne FOUGHT → compteur incrémenté.
+12. ANTI-X mêlée       — [ANTI-INFANTRY:2+] sur ligne FOUGHT → compteur incrémenté.
+13. TORRENT mêlée validité — Hit numérique + [TORRENT] → parse_error.
+14. LETHAL HITS mêlée validité — Wound numérique + [LETHAL HITS] → parse_error.
 """
 from __future__ import annotations
 
@@ -21,6 +31,12 @@ TARGET = (50, 80)    # 30 subhex = 6", hors zone d'engagement
 OBJECTIVES = ";".join(f"(150,{r})" for r in range(150, 156))
 
 S, T = f"({SHOOTER[0]},{SHOOTER[1]})", f"({TARGET[0]},{TARGET[1]})"
+
+FIGHTER = (50, 50)
+TARGET_FIGHT = (50, 60)    # 10 subhex = 2", dans la zone d'engagement (ez=10 à scale=5)
+
+SF = f"({FIGHTER[0]},{FIGHTER[1]})"
+TF = f"({TARGET_FIGHT[0]},{TARGET_FIGHT[1]})"
 
 
 def _body_line(unit_type: str, weapon: str, detail: str, *, hazardous_roll: int | None = None) -> str:
@@ -272,3 +288,128 @@ def test_hazardous_both_rolls_in_one_episode(tmp_path):
     stats = _stats(tmp_path, _HZ_LINE_ROLL1, _HZ_LINE_ROLL3,
                    unit_type="AssaultIntercessorJumpPackPlasmaPistol")
     assert stats["hazardous_roll1_count"][1] == 1, stats["hazardous_roll1_count"]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 8–14. MÊLÉE — 5 compteurs usage + 2 validité (fight_handler._note_melee_weapon_rule_usage)
+# ─────────────────────────────────────────────────────────────────────────────
+# Helpers FOUGHT — miroir exact de _body_line / _log / _stats côté SHOT.
+# AssaultIntercessor (P1) frappe AssaultIntercessor (P2) à 10 subhex = 2"
+# (dans la zone d'engagement à scale=5 : ez = 2×5 = 10 subhex).
+# PainBoy est utilisé pour les tests ANTI-X car son ''urty Syringe'' déclare
+# ANTI_INFANTRY:2 — nécessaire pour exercer le contrôle de seuil.
+
+
+def _fight_body_line(unit_type: str, weapon: str, detail: str) -> str:
+    """Ligne FOUGHT complète avec [MODEL_TYPES:] pour résoudre l'arme de mêlée."""
+    return (
+        f"[10:00:02] E1 T1 P1 FIGHT : Unit 1{SF} FOUGHT Unit 101{TF} with [{weapon}]"
+        f" - {detail}"
+        f" [MODELS: 1#0@({FIGHTER[0]},{FIGHTER[1]},z0)]"
+        f" [TARGET_MODELS: 101#0@({TARGET_FIGHT[0]},{TARGET_FIGHT[1]},z0)]"
+        " [SHOOTER_MODELS: 1#0]"
+        f" [MODEL_TYPES: 1#0={unit_type}]"
+        " [TARGET_DECL:1]"
+        " [FIGHT_SUBPHASE:fight]"
+        " [R:+0.0] [SUCCESS]\n"
+    )
+
+
+def _fight_log(*fight_lines: str, unit_type: str = "AssaultIntercessor") -> str:
+    units = (
+        f"[10:00:00] Unit 1 ({unit_type}) P1: Starting position {SF}, HP_MAX=4 base=round/6"
+        f" [MODELS: 1#0@({FIGHTER[0]},{FIGHTER[1]},z0)]\n"
+        f"[10:00:00] Unit 101 (AssaultIntercessor) P2: Starting position {TF}, HP_MAX=2 base=round/6"
+        f" [MODELS: 101#0@({TARGET_FIGHT[0]},{TARGET_FIGHT[1]},z0)]\n"
+    )
+    body = "".join(fight_lines) + (
+        "[10:00:08] T2 OBJECTIVE CONTROL: VP1=0 VP2=0 CP1=0 CP2=0 ZONES=rect b NW:Ctrl=none\n"
+        "[10:00:09] EPISODE END: Winner=1, Method=objectives, Actions=0, Steps=0, Total=0, Duration=1.000s\n"
+    )
+    return entete_step_log(body, units=units,
+                           rosters="scale=5 AGENT_PLAYER=1 AGENT=sm (ref) OPPONENT=sm (ref)",
+                           objectives=OBJECTIVES)
+
+
+def _fight_stats(tmp_path, *fight_lines: str, unit_type: str = "AssaultIntercessor"):
+    log = tmp_path / "step.log"
+    log.write_text(_fight_log(*fight_lines, unit_type=unit_type))
+    return an.parse_step_log(str(log))
+
+
+_MELEE_TORRENT_LINE = _fight_body_line(
+    "AssaultIntercessor", "Astartes Chainsword",
+    "Hit None(None+) [TORRENT] - Wound 4(4+) - Save 5(4+) - Dmg:1HP",
+)
+
+_MELEE_IC_LINE = _fight_body_line(
+    "AssaultIntercessor", "Astartes Chainsword",
+    "Hit 4(3+) [IGNORES COVER] - Wound 4(4+) - Save 5(4+) - Dmg:1HP",
+)
+
+_MELEE_LH_LINE = _fight_body_line(
+    "AssaultIntercessor", "Astartes Chainsword",
+    "Hit 6(3+) - Wound None(3+) [LETHAL HITS] - Save 5(4+) - Dmg:1HP",
+)
+
+_MELEE_EA_LINE = _fight_body_line(
+    "AssaultIntercessor", "Astartes Chainsword",
+    "Hit 4(3+) [EXTRA ATTACKS] - Wound 4(4+) - Save 5(4+) - Dmg:1HP",
+)
+
+_MELEE_ANTI_LINE = _fight_body_line(
+    "PainBoy", "'urty Syringe",
+    "Hit 4(3+) - Wound 5(2+) [ANTI-INFANTRY:2+] - Save 5(4+) - Dmg:1HP",
+)
+
+
+def test_melee_torrent_usage_counter_incremented(tmp_path):
+    stats = _fight_stats(tmp_path, _MELEE_TORRENT_LINE)
+    usage = _usage(stats, "TORRENT")
+    assert usage == {("TORRENT", "Astartes Chainsword (AssaultIntercessor)"): 1}, usage
+
+
+def test_melee_ignores_cover_usage_counter_incremented(tmp_path):
+    stats = _fight_stats(tmp_path, _MELEE_IC_LINE)
+    usage = _usage(stats, "IGNORES_COVER")
+    assert usage == {("IGNORES_COVER", "Astartes Chainsword (AssaultIntercessor)"): 1}, usage
+
+
+def test_melee_lethal_hits_usage_counter_incremented(tmp_path):
+    stats = _fight_stats(tmp_path, _MELEE_LH_LINE)
+    usage = _usage(stats, "LETHAL_HITS")
+    assert usage == {("LETHAL_HITS", "Astartes Chainsword (AssaultIntercessor)"): 1}, usage
+
+
+def test_melee_extra_attacks_usage_counter_incremented(tmp_path):
+    stats = _fight_stats(tmp_path, _MELEE_EA_LINE)
+    usage = _usage(stats, "EXTRA_ATTACKS")
+    assert usage == {("EXTRA_ATTACKS", "Astartes Chainsword (AssaultIntercessor)"): 1}, usage
+
+
+def test_melee_anti_x_usage_counter_incremented(tmp_path):
+    stats = _fight_stats(tmp_path, _MELEE_ANTI_LINE, unit_type="PainBoy")
+    usage = _usage(stats, "ANTI_INFANTRY")
+    assert usage == {("ANTI_INFANTRY", "'urty Syringe (PainBoy)"): 1}, usage
+
+
+def test_melee_torrent_validity_error_with_numeric_hit(tmp_path):
+    """[TORRENT] + Hit numérique en mêlée → parse_error (24.37, jumeau tir)."""
+    bad = _fight_body_line(
+        "AssaultIntercessor", "Astartes Chainsword",
+        "Hit 4(3+) [TORRENT] - Wound 4(4+) - Save 5(4+) - Dmg:1HP",
+    )
+    stats = _fight_stats(tmp_path, bad)
+    torrent_errors = [e for e in stats["parse_errors"] if "TORRENT" in e.get("error", "")]
+    assert len(torrent_errors) == 1, torrent_errors
+
+
+def test_melee_lethal_hits_validity_error_with_numeric_wound(tmp_path):
+    """[LETHAL HITS] + Wound numérique en mêlée → parse_error (24.23, jumeau tir)."""
+    bad = _fight_body_line(
+        "AssaultIntercessor", "Astartes Chainsword",
+        "Hit 6(3+) - Wound 5(3+) [LETHAL HITS] - Save 5(4+) - Dmg:1HP",
+    )
+    stats = _fight_stats(tmp_path, bad)
+    lh_errors = [e for e in stats["parse_errors"] if "LETHAL HITS" in e.get("error", "")]
+    assert len(lh_errors) == 1, lh_errors
