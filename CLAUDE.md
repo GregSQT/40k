@@ -30,7 +30,6 @@ Fichiers par sujet (tâches ouvertes uniquement) :
 - Documentation/Roadmap/training.md — entraînement IA
 - Documentation/Roadmap/bot.md — panel de bots
 - Documentation/Roadmap/analyzer.md — analyzer / couverture
-- Documentation/Roadmap/security.md — sécurité
 - Documentation/Roadmap/front.md — frontend
 - Documentation/Roadmap/moteur.md — moteur de jeu
 - Documentation/Roadmap/infra.md — infra / perf / DB
