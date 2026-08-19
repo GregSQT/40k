@@ -319,6 +319,41 @@ def test_le_total_est_la_somme_de_tous_les_buckets(_empty_stats):
     assert totals['total'] == sum(v for k, v in totals.items() if k != 'total')
 
 
+def test_aucun_compteur_en_double_dans_le_corpus():
+    """Chaque chemin de contrôle n'appartient qu'à UNE entrée du corpus.
+
+    Sans cette exclusivité, `rule_error_count` compterait la même erreur dans plusieurs règles,
+    la somme par section dépasserait le bucket, et `coverage_gaps` sonnerait à tort.
+    """
+    from ai.analyzer_rules import load_rules_corpus
+
+    seen: dict[tuple, str] = {}
+    for entry in load_rules_corpus():
+        for path in entry.get("controls", []):
+            key = tuple(path)
+            if key in seen:
+                raise AssertionError(
+                    f"chemin {list(path)} partagé entre {seen[key]!r} et {entry['id']!r}"
+                )
+            seen[key] = entry["id"]
+
+
+def test_tous_les_chemins_de_controle_sont_lisibles(_empty_stats):
+    """_counter_value ne lève pas pour aucun chemin déclaré dans le corpus.
+
+    Un chemin mal formé ou pointant une clé absente lèverait à l'usage ; ce test le détecte
+    à la livraison, quand la correction est immédiate.
+    """
+    import copy
+    from ai.analyzer_rules import load_rules_corpus, rule_error_count
+
+    stats = copy.deepcopy(_empty_stats)
+    for entry in load_rules_corpus():
+        if not entry.get("controls"):
+            continue
+        rule_error_count(stats, entry)
+
+
 def test_le_summary_et_le_total_cli_lisent_le_meme_calcul():
     """La propriété qui rend la divergence impossible, vérifiée sur le CODE et non sur un run.
 
