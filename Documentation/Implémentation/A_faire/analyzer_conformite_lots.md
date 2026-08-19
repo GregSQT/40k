@@ -169,7 +169,7 @@ négatif. Dis quelle version de grammaire porte ton journal.
 Fin : commit, merge main, suppression worktree+branche, rapport de clôture T2.
 ```
 
-### Lot 3 — règles spéciales d'unités
+### Lot 3 — règles spéciales d'unités ✅ livré 2026-08-20
 
 ```
 [MODE AGENT] Worktree : EnterWorktree name=analyzer-lot3-unites. Prérequis : lot 2 mergé.
