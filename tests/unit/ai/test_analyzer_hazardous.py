@@ -459,3 +459,78 @@ def test_hazardous_pas_de_faux_positif_porteur_mort_avant_suffers(tmp_path, monk
         "[MODELS:] antérieure, son type dans state.model_types doit être vu → pas d'erreur."
     )
 
+
+# ── Grammar 6 : [ALLOC_MODEL:] présent sur les lignes HAZARDOUS ──────────────────────────────
+#
+# Avant le fix : alloc_model_id=None → chemin hérité → ordered_living_mids[0] (1#0, le premier).
+# Après le fix : alloc_model_id=_alloc_model_from_line() → 1#1 nommée → dégâts à 1#1.
+#
+# Discriminant : une 2e ligne HAZARDOUS nomme 1#1. Avec le fix, 1#1 est morte → alloc_model_unknown=1.
+# Sans le fix, c'est 1#0 qui meurt à la place → 1#1 survit → 2e ligne la frappe → alloc_model_unknown=0.
+#
+# L'unité 1 a 2 modèles (1#0 et 1#1). HP_MAX = 3 (lu du registry _Registry).
+# 3 BM par ligne → 1 ligne suffit à tuer une figurine (HP=3→0).
+
+
+class _RegistryG6:
+    """HP_MAX=1 pour que 1 BM HAZARDOUS tue la figurine."""
+    units = {
+        "HazUnit": {"HP_MAX": 1, "MOVE": 6, "MODEL_HEIGHT": 1.0, "UNIT_RULES": []},
+    }
+
+
+_UNITS_G6 = (
+    "[10:00:00] Unit 1 (HazUnit) P1: Starting position (20,20), HP_MAX=1 "
+    "[MODELS: 1#0@(20,20,z0) 1#1@(20,21,z0)] base=round/1\n"
+    "[10:00:00] Unit 101 (HazUnit) P2: Starting position (21,21), HP_MAX=1 base=round/1\n"
+)
+# Ligne 1 : HAZARDOUS nomme 1#1 → doit tuer 1#1 (HP=1).
+_HAZARDOUS_ALLOC_1_1 = (
+    "[10:00:02] E1 T1 P1 SHOOTING : Unit 1(20,20) SUFFERS 1 Mortal Wounds [HAZARDOUS] "
+    "[ALLOC_MODEL: 1#1] [R:+0.0] [SUCCESS]\n"
+)
+# Ligne 2 : nomme 1#1 à nouveau → avec le fix 1#1 est morte → alloc_model_unknown=1.
+_HAZARDOUS_ALLOC_1_1_REPET = (
+    "[10:00:03] E1 T1 P1 SHOOTING : Unit 1(20,20) SUFFERS 1 Mortal Wounds [HAZARDOUS] "
+    "[ALLOC_MODEL: 1#1] [R:+0.0] [SUCCESS]\n"
+)
+
+
+def _parse_g6(tmp_path, monkeypatch, body: str):
+    """Parse avec grammar=6, _RegistryG6 (HP_MAX=1) et les unités bi-socle de ce bloc."""
+    import ai.analyzer as an
+    import ai.analyzer_config as ac_mod
+
+    cfg = fab_config(
+        unit_registry=_RegistryG6(),
+        unit_weapons_cache={},
+    )
+    monkeypatch.setattr(ac_mod, "load_analyzer_config", lambda: cfg)
+
+    log = tmp_path / "step.log"
+    log.write_text(entete_step_log(
+        body,
+        inches_to_subhex=1,
+        board="cols=40 rows=40",
+        objectives=_OBJECTIVES,
+        units=_UNITS_G6,
+        log_grammar=6,
+    ))
+    return an.parse_step_log(str(log))
+
+
+def test_hazardous_grammar6_blesse_la_figurine_nommee_pas_la_premiere(tmp_path, monkeypatch):
+    """VERROU grammar 6 : HAZARDOUS [ALLOC_MODEL: 1#1] doit blesser 1#1, pas 1#0 (legacy).
+
+    Sans le fix (alloc_model_id=None toujours) : chemin hérité → 1#0 (premier vivant) meurt.
+    La 2e ligne HAZARDOUS nomme 1#1 encore vivante → alloc_model_unknown=0 (silence).
+    Avec le fix : 1#1 meurt sous la 1re ligne → la 2e la nomme absente → alloc_model_unknown=1.
+    Un alloc_model_unknown=1 ici PROUVE que les dégâts ont bien été alloués à 1#1.
+    """
+    stats = _parse_g6(tmp_path, monkeypatch, _HAZARDOUS_ALLOC_1_1 + _HAZARDOUS_ALLOC_1_1_REPET)
+    assert stats["state_resync"]["alloc_model_unknown"] == 1, (
+        "1#1 (nommée dans [ALLOC_MODEL:]) doit encaisser la MW HAZARDOUS (HP=1→0 → morte). "
+        "La 2e ligne qui la nomme doit déclencher alloc_model_unknown=1. "
+        "alloc_model_unknown=0 signifie que 1#0 a été frappée à la place (chemin hérité)."
+    )
+

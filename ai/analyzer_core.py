@@ -1677,8 +1677,8 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         # 24.15 [HAZARDOUS] : après résolution de ses attaques (tir ou mêlée),
                         # l'unité subit X blessures mortelles auto-infligées.
                         # Grammaire : `Unit N(c,r) SUFFERS X Mortal Wounds [HAZARDOUS]`.
-                        # SANS [ALLOC_MODEL:] (documenté §1.2 de analyzer_couverture.md) :
-                        # une BM HAZARDOUS n'est pas une attaque allouée à une figurine nommée.
+                        # Grammar ≥ 6 : le moteur nomme le socle cible dans [ALLOC_MODEL:],
+                        # exactement comme pour les attaques régulières (cf. step_logger.py §569).
                         action_type = 'hazardous'
                         _hz_match = re.search(
                             r'SUFFERS\s+(\d+)\s+Mortal\s+Wounds\s+\[HAZARDOUS\]',
@@ -1733,7 +1733,8 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                             # `_dmg_actor_id` est le préfixe "Unit N(" de la ligne SUFFERS :
                             # c'est la seule source fiable de l'unité touchée (action_unit_id
                             # retient le dernier ID de header, pas celui de la ligne courante).
-                            # `alloc_model_id=None` : pas de [ALLOC_MODEL:] sur ces lignes.
+                            # grammar ≥ 6 : [ALLOC_MODEL:] présent, lu comme pour tir/mêlée.
+                            # grammar < 6 : None → chemin hérité (ordered_living_mids[0]).
                             # `pending_model_removals=None` : les removals d'une attaque précédente
                             # de la MÊME activation ne doivent pas être fusionnés ici — cette mort
                             # est distincte, et le flush se produit au changement d'acteur.
@@ -1747,7 +1748,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                 state.unit_deaths, state.unit_kill_context, stats,
                                 positions_by_model=state.positions_by_model,
                                 models_invalidated=state.models_invalidated,
-                                alloc_model_id=None,
+                                alloc_model_id=_alloc_model_from_line(state, action_desc, line) if state.log_grammar >= 6 else None,
                                 pending_model_removals=None,
                             )
                         else:
@@ -1792,7 +1793,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                     state.unit_deaths, state.unit_kill_context, stats,
                                     positions_by_model=state.positions_by_model,
                                     models_invalidated=state.models_invalidated,
-                                    alloc_model_id=None,
+                                    alloc_model_id=_alloc_model_from_line(state, action_desc, line) if state.log_grammar >= 6 else None,
                                     pending_model_removals=None,
                                 )
                         else:
