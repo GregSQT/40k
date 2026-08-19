@@ -796,7 +796,7 @@ blessure critique n'a plus à être re-dérivée du tout (cf. §1.3).
 | L10 | **Type de move / de tir / de fight EXPLICITE** (au lieu d'être déduit des tokens) | suffixe `[MOVE_TYPE:normal\|advance\|fall_back\|remain_stationary\|ingress\|surge\|scout]`, `[SHOOT_TYPE:normal\|assault\|close_quarters\|indirect]` | 09.02, 09.04, 09.07, 10.02, 10.04–10.07, 12.05, 12.06, 21.02, 24.32 |
 | L11 | **Mode de fall-back** (`ordered_retreat` / `desperate_escape`) + jets de hasard associés | `FLED [DESPERATE ESCAPE] … Hazard:<n>,<n>,…` | 09.07, 06.03, 18.04 |
 | L12 | **Jets Feel No Pain** | `FNP:<n>/<seuil>+ ×<n>` | 24.12 |
-| L13 | **Distance tireur↔cible au Select Targets** (ou marqueur `[HALF RANGE]`) | `[HALF RANGE]` | 24.25, 24.30 |
+| ~~L13~~ | ~~**Distance tireur↔cible au Select Targets** (ou marqueur `[HALF RANGE]`)~~ — **LIVRÉ le 2026-08-20** : `[HALF RANGE]` sur toute ligne de tir d'une arme RAPID_FIRE ou MELTA lorsque la cible est à demi-portée, calculé INDÉPENDAMMENT du bonus appliqué ; verrou `test_step_log_half_range.py` (rouge→vert), LOG_GRAMMAR_VERSION=7 | 24.25, 24.30 |
 | ~~L14~~ | ~~**Statut Fights First** de l'unité activée~~ — **LIVRÉ le 2026-08-18** : `[FIGHTS FIRST]` sur la ligne `FOUGHT` via `fightsFirst` dans l'action_log combat | 24.13, 12.04, 11.04, 15.12 |
 | L15 | **Nombre d'armes [HAZARDOUS] sélectionnées** | `[HAZARDOUS:<n>] Roll:<n>,<n>,…` | 24.15 |
 | L16 | **Cibles de charge multiples** (11.04 autorise plusieurs) | `CHARGED Unit M(…),Unit K(…)` | 11.04 |

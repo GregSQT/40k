@@ -6,7 +6,7 @@ Découpage en 6 lots des trois sujets ci-dessous (ordre séquentiel imposé : to
 
 ## Champs manquants `step.log` {#champs-step-log}
 
-**16** entrées restantes (L6–L28, hors L1/L14/L18/L19/L22/L25/L27/L28 résolues — voir ci-dessous). L1–L5 et L18 livrées. Chaque champ se livre seul et fait passer des règles de « non vérifiable » à « vérifiable ».
+**15** entrées restantes (L6–L28, hors L1/L13/L14/L18/L19/L22/L25/L27/L28 résolues — voir ci-dessous). L1–L5 et L18 livrées. Chaque champ se livre seul et fait passer des règles de « non vérifiable » à « vérifiable ».
 
 Livré (2026-08-19) : `[TARGET_DECL:N]` — effectif cible au SelectTargets step — corrige §1.2 portée (garde `len < alive → unverifiable`) et §1.4 CLEAVE (alive_override → cc_nb exact ; anciens logs → fight_over_cc_nb_unverifiable).
 
