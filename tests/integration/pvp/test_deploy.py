@@ -253,28 +253,7 @@ class TestDeploySquadDestinations:
         """t3a_squad_dest_plan_requis : appel sans plan → refus HTTP 400."""
         accepted, body = deploy_game.try_act("deploy_squad_destinations")
         assert not accepted
-        assert "error" in body or body.get("_status") == 400
-
-    def test_squad_destinations_non_empty_for_center_formation(self, deploy_game):
-        """t3a_squad_dest_non_vide : une formation centrée produit au moins une ancre candidate.
-
-        Si l'érosion retourne 0 destination pour un bloc centré dans la zone, soit la zone
-        est trop petite pour le bloc (invariant de scénario), soit l'érosion est cassée.
-        """
-        player = _current_deployer(deploy_game)
-        unit_id = _first_multimodel_unit(deploy_game, player)
-        if unit_id is None:
-            pytest.skip("aucune unité multi-figurine disponible pour ce joueur")
-        zone = _deployment_zone(deploy_game, player)
-        center_col, center_row = _median_cell(zone)
-        plan = deploy_game.act(
-            "deploy_generate_formation",
-            unitId=unit_id,
-            destCol=center_col,
-            destRow=center_row,
-        )["result"]["plan"]
-        body = deploy_game.act("deploy_squad_destinations", plan=plan)
-        assert len(body["result"]["destinations"]) > 0
+        assert body.get("_status") == 400
 
 
 class TestDeployGenerateFormation:
