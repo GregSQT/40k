@@ -33,7 +33,14 @@ describe("normalizeMaskLoopsFromApi", () => {
 
   it("filtre une boucle de moins de 3 points (< 6 valeurs)", () => {
     // 2 points → 4 valeurs < 6 → boucle éliminée
-    expect(normalizeMaskLoopsFromApi([[[0, 0], [1, 1]]])).toBeNull();
+    expect(
+      normalizeMaskLoopsFromApi([
+        [
+          [0, 0],
+          [1, 1],
+        ],
+      ])
+    ).toBeNull();
   });
 
   it("accepte une boucle de 3 points (6 valeurs exactement)", () => {
@@ -91,7 +98,10 @@ describe("normalizeMaskLoopsFromApi", () => {
 
   it("renvoie uniquement les boucles valides (≥ 6 valeurs)", () => {
     const result = normalizeMaskLoopsFromApi([
-      [[0, 0], [1, 1]], // 2 points = 4 valeurs → éliminée
+      [
+        [0, 0],
+        [1, 1],
+      ], // 2 points = 4 valeurs → éliminée
       [
         [10, 0],
         [11, 0],
@@ -104,7 +114,10 @@ describe("normalizeMaskLoopsFromApi", () => {
   it("renvoie null si toutes les boucles sont trop courtes", () => {
     expect(
       normalizeMaskLoopsFromApi([
-        [[0, 0], [1, 1]],
+        [
+          [0, 0],
+          [1, 1],
+        ],
         [[2, 2]],
       ])
     ).toBeNull();

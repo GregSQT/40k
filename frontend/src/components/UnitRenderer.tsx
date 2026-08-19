@@ -14,6 +14,7 @@ if (import.meta.env.VITE_TEST_HOOKS === "1") {
   };
   (window as unknown as Record<string, unknown>).__W40K_TEST__ = hook;
 }
+
 import { ORIENTATION_STEP_COUNT, orientationStepToRadians } from "../constants/gameConfig";
 import type {
   FightSubPhase,

@@ -81,7 +81,9 @@ describe("buildBoardGeomKey / buildBoardControlKey / computeStaticLayerReusable"
     expect(geomKey).not.toContain("ruin_center");
     expect(geomKey).not.toContain(ocAfter);
     // La clé contrôle, elle, encode bien la capture
-    expect(buildBoardControlKey({ objectiveControlKeyForBoard: ocAfter })).toContain("ruin_center=1/1");
+    expect(buildBoardControlKey({ objectiveControlKeyForBoard: ocAfter })).toContain(
+      "ruin_center=1/1"
+    );
   });
 
   it("la clé contrôle change lors d'une capture d'objectif", () => {

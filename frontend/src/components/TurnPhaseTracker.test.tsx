@@ -142,38 +142,21 @@ describe("TurnPhaseTracker — fight bandeaux", () => {
 
   it("showFightAtk + fightAtkPlayer=1 → bouton P1 ATK visible", () => {
     render(
-      <TurnPhaseTracker
-        {...BASE_PROPS}
-        showFightAtk
-        fightAtkPlayer={1}
-        onFightAtk={vi.fn()}
-      />
+      <TurnPhaseTracker {...BASE_PROPS} showFightAtk fightAtkPlayer={1} onFightAtk={vi.fn()} />
     );
     expect(screen.queryByRole("button", { name: "P1 ATK" })).not.toBeNull();
   });
 
   it("showFightAtk + fightAtkPlayer=2 → bouton P2 ATK visible", () => {
     render(
-      <TurnPhaseTracker
-        {...BASE_PROPS}
-        showFightAtk
-        fightAtkPlayer={2}
-        onFightAtk={vi.fn()}
-      />
+      <TurnPhaseTracker {...BASE_PROPS} showFightAtk fightAtkPlayer={2} onFightAtk={vi.fn()} />
     );
     expect(screen.queryByRole("button", { name: "P2 ATK" })).not.toBeNull();
   });
 
   it("clic ATK → onFightAtk appelé", () => {
     const onAtk = vi.fn();
-    render(
-      <TurnPhaseTracker
-        {...BASE_PROPS}
-        showFightAtk
-        fightAtkPlayer={1}
-        onFightAtk={onAtk}
-      />
-    );
+    render(<TurnPhaseTracker {...BASE_PROPS} showFightAtk fightAtkPlayer={1} onFightAtk={onAtk} />);
     fireEvent.click(screen.getByRole("button", { name: "P1 ATK" }));
     expect(onAtk).toHaveBeenCalledTimes(1);
   });
