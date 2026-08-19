@@ -150,7 +150,7 @@ def test_commit_target_comes_from_engagement_pool(melee_scenario_file):
     gs["phase"] = "fight"
     engaged = [
         sid for sid in gs["units_cache"]
-        if _fight_build_valid_target_pool(gs, require_present(get_unit_by_id(str(sid), gs), f"unit {sid}"))
+        if _fight_build_valid_target_pool(gs, require_present(get_unit_by_id(gs, str(sid)), f"unit {sid}"))
     ]
     assert engaged, "le scénario mêlée est pré-engagé : au moins une escouade a une cible ER"
     gs["current_player"] = int(gs["units_cache"][str(engaged[0])]["player"])
@@ -163,14 +163,14 @@ def test_commit_target_comes_from_engagement_pool(melee_scenario_file):
     # est donc l'ER réelle au moment de la sélection.
     candidates = [
         sid for sid in fight_v11_current_pool(gs)
-        if _fight_build_valid_target_pool(gs, require_present(get_unit_by_id(str(sid), gs), f"unit {sid}"))
+        if _fight_build_valid_target_pool(gs, require_present(get_unit_by_id(gs, str(sid)), f"unit {sid}"))
     ]
     assert candidates, "au moins une escouade sélectionnable (12.04) a une cible en ER"
     squad_id = str(candidates[0])
     pool_before = set(
         str(t)
         for t in _fight_build_valid_target_pool(
-            gs, require_present(get_unit_by_id(squad_id, gs), f"unit {squad_id}")
+            gs, require_present(get_unit_by_id(gs, squad_id), f"unit {squad_id}")
         )
     )
 
@@ -219,12 +219,12 @@ def test_commit_refuses_slot_outside_engagement_pool(melee_scenario_file):
 
     candidates = [
         sid for sid in fight_v11_current_pool(gs)
-        if _fight_build_valid_target_pool(gs, require_present(get_unit_by_id(str(sid), gs), f"unit {sid}"))
+        if _fight_build_valid_target_pool(gs, require_present(get_unit_by_id(gs, str(sid)), f"unit {sid}"))
     ]
     assert candidates
     squad_id = str(candidates[0])
     pool = {str(t) for t in _fight_build_valid_target_pool(
-        gs, require_present(get_unit_by_id(squad_id, gs), f"unit {squad_id}")
+        gs, require_present(get_unit_by_id(gs, squad_id), f"unit {squad_id}")
     )}
     our_player = int(gs["units_cache"][squad_id]["player"])
     slot_map = get_enemy_slot_mapping(gs, our_player)
@@ -258,7 +258,7 @@ def test_commit_refuses_empty_fight_when_targets_exist(melee_scenario_file):
 
     candidates = [
         sid for sid in fight_v11_current_pool(gs)
-        if _fight_build_valid_target_pool(gs, require_present(get_unit_by_id(str(sid), gs), f"unit {sid}"))
+        if _fight_build_valid_target_pool(gs, require_present(get_unit_by_id(gs, str(sid)), f"unit {sid}"))
     ]
     assert candidates
     with pytest.raises(ValueError, match="combat a vide"):

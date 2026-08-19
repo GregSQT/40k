@@ -4261,7 +4261,7 @@ def set_oath_target(game_state: Dict[str, Any], player: int, unit_id: str) -> No
 
     # `get_unit_by_id` et pas une boucle : l'index `unit_by_id` est la convention du dépôt pour
     # « id -> unité » (O(1), même normalisation `str`). Le jour où sa clé change, ce site suit.
-    target_unit = get_unit_by_id(target_id, game_state)
+    target_unit = get_unit_by_id(game_state, target_id)
     if target_unit is None:
         raise KeyError(f"set_oath_target: unite {target_id!r} introuvable")
     if int(require_key(target_unit, "player")) == player_int:

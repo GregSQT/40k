@@ -837,7 +837,7 @@ class ActionDecoder:
                 raise KeyError(f"deployable_units missing player {current_deployer}")
             eligible = []
             for uid in deployable_list:
-                unit = get_unit_by_id(str(uid), game_state)
+                unit = get_unit_by_id(game_state, str(uid))
                 if unit and is_unit_alive(str(unit["id"]), game_state):
                     eligible.append(unit)
             return eligible
@@ -851,7 +851,7 @@ class ActionDecoder:
             # CRITICAL: Filter out dead units (units can die between pool build and use)
             eligible = []
             for uid in pool_unit_ids:
-                unit = get_unit_by_id(uid, game_state)
+                unit = get_unit_by_id(game_state, uid)
                 if unit and is_unit_alive(str(unit["id"]), game_state):
                     eligible.append(unit)
             return eligible
@@ -882,7 +882,7 @@ class ActionDecoder:
             for uid in pool_unit_ids:
                 # CRITICAL: Normalize uid to string for get_unit_by_id (which normalizes both sides)
                 uid_str = str(uid)
-                unit = get_unit_by_id(uid_str, game_state)
+                unit = get_unit_by_id(game_state, uid_str)
                 if unit and is_unit_alive(str(unit["id"]), game_state):
                     cache_entry = require_key(game_state, "units_cache").get(uid_str)
                     if cache_entry is None:
@@ -902,7 +902,7 @@ class ActionDecoder:
                     raise ValueError(
                         f"active_shooting_unit {active_unit_id} is not in shoot_activation_pool={pool_unit_ids_str}"
                     )
-                active_unit = get_unit_by_id(active_unit_id, game_state)
+                active_unit = get_unit_by_id(game_state, active_unit_id)
                 if active_unit is None:
                     raise ValueError(f"active_shooting_unit {active_unit_id} not found in game_state units")
                 if not is_unit_alive(active_unit_id, game_state):
@@ -932,7 +932,7 @@ class ActionDecoder:
             # CRITICAL: Filter out dead units (units can die between pool build and use)
             eligible = []
             for uid in pool_unit_ids:
-                unit = get_unit_by_id(uid, game_state)
+                unit = get_unit_by_id(game_state, uid)
                 if unit and is_unit_alive(str(unit["id"]), game_state):
                     eligible.append(unit)
             return eligible
@@ -943,7 +943,7 @@ class ActionDecoder:
             # CRITICAL: Filter out dead units (units can die between pool build and use)
             eligible = []
             for uid in pool_unit_ids:
-                unit = get_unit_by_id(uid, game_state)
+                unit = get_unit_by_id(game_state, uid)
                 if unit and is_unit_alive(str(unit["id"]), game_state):
                     eligible.append(unit)
             return eligible
@@ -1499,7 +1499,7 @@ class ActionDecoder:
         `_move_spatial_cache`). Aucun des trois consommateurs ne le fait — ils la mesurent,
         l'itèrent ou la vectorisent.
         """
-        unit = get_unit_by_id(str(unit_id), game_state)
+        unit = get_unit_by_id(game_state, str(unit_id))
         if unit is None:
             raise KeyError(f"Unit {unit_id} missing from game_state['units']")
 
@@ -2394,7 +2394,7 @@ class ActionDecoder:
         même step partagent donc un seul calcul. Le tampon est le `deployed_snapshot_version` du
         cache de scoring — toute pose change l'état ET la liste des hexes valides.
         """
-        unit = get_unit_by_id(str(unit_id), game_state)
+        unit = get_unit_by_id(game_state, str(unit_id))
         if unit is None:
             raise KeyError(f"Unit {unit_id} missing from game_state['units']")
 

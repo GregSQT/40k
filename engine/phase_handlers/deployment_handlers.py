@@ -300,7 +300,7 @@ def generate_compact_formation(
     # être posée sous un étage trop bas (les restantes tombent au centre, signalées rouge par le preview).
     terrain_areas = require_key(game_state, "terrain_areas")
     from engine.terrain_utils import low_clearance_ground_hexes
-    unit = get_unit_by_id(str(squad_id), game_state)
+    unit = get_unit_by_id(game_state, str(squad_id))
     if not unit:
         raise KeyError(f"generate_compact_formation: unit {squad_id} missing from game_state['units']")
     from engine.hex_utils import (
@@ -681,7 +681,7 @@ def deployment_build_model_destinations_pool(
     # Clairance verticale (§13.06, miroir move) : hexes de SOL infranchissables par ce modèle (trop haut
     # pour tenir sous un étage bas). Bloque uniquement le niveau 0 (une fig posée EN SURFACE de l'étage
     # n'est pas concernée). MODEL_HEIGHT est requis au chargement des unités → toujours présent.
-    unit = get_unit_by_id(squad_id, game_state)
+    unit = get_unit_by_id(game_state, squad_id)
     if not unit:
         raise KeyError(f"deployment_build_model_destinations_pool: unit {squad_id} missing from game_state['units']")
     # Clairance de LA FIGURINE (`_model_height_of`) : ce pool est par-figurine de bout en bout
@@ -995,7 +995,7 @@ def deployment_preview_plan(
     board_cols = require_key(game_state, "board_cols")
     board_rows = require_key(game_state, "board_rows")
     terrain_areas = require_key(game_state, "terrain_areas")
-    unit = get_unit_by_id(str(squad_id), game_state)
+    unit = get_unit_by_id(game_state, str(squad_id))
     if not unit:
         raise KeyError(f"deployment_preview_plan: unit {squad_id} missing from game_state['units']")
     unit_keywords = require_key(unit, "UNIT_KEYWORDS")
@@ -1303,7 +1303,7 @@ def _apply_deploy_plan(
     """
     squad_id = str(require_key(action, "unitId"))
 
-    unit = get_unit_by_id(squad_id, game_state)
+    unit = get_unit_by_id(game_state, squad_id)
     if not unit:
         raise KeyError(f"Unit {squad_id} missing from game_state['units']")
     # L'alternance des déployeurs n'existe QUE pendant la phase de déploiement. Une mise en
@@ -1478,7 +1478,7 @@ def unit_can_be_placed_in_strategic_reserves(game_state: Dict[str, Any], unit_id
     Trois conditions, toutes du texte de la règle : elle n'est pas une FORTIFICATION, elle n'est
     pas déjà posée, et sa valeur en points tient sous le plafond de 50 % restant.
     """
-    unit = get_unit_by_id(str(unit_id), game_state)
+    unit = get_unit_by_id(game_state, str(unit_id))
     if unit is None:
         raise KeyError(f"unit_can_be_placed_in_strategic_reserves: unit {unit_id} introuvable")
     if require_key(unit, "deployed_on_turn") is not None:
@@ -1518,7 +1518,7 @@ def deployment_place_in_strategic_reserves(
     if squad_id not in [str(uid) for uid in deployable_list]:
         return False, {"error": "unit_not_deployable", "unitId": squad_id}
 
-    unit = get_unit_by_id(squad_id, game_state)
+    unit = get_unit_by_id(game_state, squad_id)
     if not unit:
         raise KeyError(f"Unit {squad_id} missing from game_state['units']")
     if int(require_key(unit, "player")) != current_deployer:
@@ -1634,7 +1634,7 @@ def execute_deployment_action(game_state: Dict[str, Any], action: Dict[str, Any]
     if unit_id not in [str(uid) for uid in deployable_list]:
         return False, {"error": "unit_not_deployable", "unitId": unit_id, "current_deployer": current_deployer}
 
-    unit = get_unit_by_id(unit_id, game_state)
+    unit = get_unit_by_id(game_state, unit_id)
     if not unit:
         raise KeyError(f"Unit {unit_id} missing from game_state['units']")
     unit_player = require_key(unit, "player")

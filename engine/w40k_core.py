@@ -5138,7 +5138,7 @@ class W40KEngine(gym.Env):
             geometrique (cible en terrain / partiellement visible), identique au tir mono-fig.
             """
             build_unit_los_cache(self.game_state, squad_id)
-            unit_obj = get_unit_by_id(squad_id, self.game_state)
+            unit_obj = get_unit_by_id(self.game_state, squad_id)
             assert unit_obj is not None, f"unit {squad_id} not found in game_state"
             return build_cover_by_unit_id_for_valid_targets(self.game_state, unit_obj, valid_targets)
 
@@ -5146,7 +5146,7 @@ class W40KEngine(gym.Env):
             """Ennemis cachés-trop-loin (œil rouge) relativement au squad actif. Même brique LoS
             partagée que ``_squad_cover_by_unit_id`` (build_unit_los_cache idempotent)."""
             build_unit_los_cache(self.game_state, squad_id)
-            unit_obj = get_unit_by_id(squad_id, self.game_state)
+            unit_obj = get_unit_by_id(self.game_state, squad_id)
             assert unit_obj is not None, f"unit {squad_id} not found in game_state"
             return build_hidden_too_far_by_unit_id(self.game_state, unit_obj)
 
@@ -5154,7 +5154,7 @@ class W40KEngine(gym.Env):
             """Detection range effective (15" / 12" GtG) + too_far par ennemi caché, pour le badge
             numérique frontend. Même brique LoS partagée (build_unit_los_cache idempotent)."""
             build_unit_los_cache(self.game_state, squad_id)
-            unit_obj = get_unit_by_id(squad_id, self.game_state)
+            unit_obj = get_unit_by_id(self.game_state, squad_id)
             assert unit_obj is not None, f"unit {squad_id} not found in game_state"
             return build_hidden_detection_info_by_unit_id(self.game_state, unit_obj)
 
@@ -5173,7 +5173,7 @@ class W40KEngine(gym.Env):
                 del self.game_state["active_shooting_unit"]
             squad_shooting_unit_activation_start(self.game_state, squad_id)
             self.game_state["active_shooting_unit"] = squad_id
-            unit = get_unit_by_id(squad_id, self.game_state)
+            unit = get_unit_by_id(self.game_state, squad_id)
             available_weapons = _squad_available_weapons(unit) if unit is not None else []
             # 10.02 etape 2 : types de tir JOUABLES par cette escouade. La liste (ordonnee :
             # defaut en tete) permet au front d afficher un selecteur quand plusieurs types
@@ -5209,7 +5209,7 @@ class W40KEngine(gym.Env):
                 weapon_index = int(weapon_index_raw)
             except (TypeError, ValueError):
                 return False, {"error": "invalid_weapon_index_type"}
-            unit = get_unit_by_id(squad_id, self.game_state)
+            unit = get_unit_by_id(self.game_state, squad_id)
             if unit is None:
                 return False, {"error": "unit_not_found", "unitId": squad_id}
             rng_weapons = require_key(unit, "RNG_WEAPONS")
@@ -5470,7 +5470,7 @@ class W40KEngine(gym.Env):
 
         if name == "squad_shoot_validate":
             squad_lock_shoot(self.game_state, squad_id)
-            unit = get_unit_by_id(squad_id, self.game_state)
+            unit = get_unit_by_id(self.game_state, squad_id)
             if unit is None:
                 raise KeyError(f"Squad {squad_id} introuvable pour resolution tir manuel")
             attacker_player = int(require_key(unit, "player"))
@@ -5526,7 +5526,7 @@ class W40KEngine(gym.Env):
     ) -> Dict[str, Any]:
         """end_activation differe : appele quand l allocation manuelle est terminee (done)."""
         from engine.phase_handlers.generic_handlers import end_activation
-        unit = get_unit_by_id(squad_id, self.game_state)
+        unit = get_unit_by_id(self.game_state, squad_id)
         if unit is None:
             raise KeyError(f"Squad {squad_id} introuvable pour end_activation apres allocation")
         end_result = end_activation(self.game_state, unit, ACTION, 1, SHOOTING, SHOOTING, 0)
@@ -5543,7 +5543,7 @@ class W40KEngine(gym.Env):
         """end_activation combat différé : appelé depuis le handler allocation_model quand
         l'allocation combat est terminée suite à une décision gym (fighting squad = attaquant)."""
         from engine.phase_handlers.generic_handlers import end_activation
-        unit = get_unit_by_id(squad_id, self.game_state)
+        unit = get_unit_by_id(self.game_state, squad_id)
         if unit is None:
             raise KeyError(f"Squad {squad_id} introuvable après combat (allocation_model)")
         end_result = end_activation(self.game_state, unit, ACTION, 1, FIGHT, FIGHT, 0)
@@ -6545,7 +6545,7 @@ class W40KEngine(gym.Env):
             if success:
                 _dep_unit_id = semantic.get("unitId")  # get allowed
                 if _dep_unit_id is not None:
-                    _dep_unit = get_unit_by_id(str(_dep_unit_id), self.game_state)
+                    _dep_unit = get_unit_by_id(self.game_state, str(_dep_unit_id))
                     if _dep_unit is None:
                         raise KeyError(f"Unit {_dep_unit_id} introuvable apres deploy_unit")
                     _dep_col, _dep_row = require_unit_position(str(_dep_unit_id), self.game_state)
@@ -6586,7 +6586,7 @@ class W40KEngine(gym.Env):
             # plan y est reconstruit par `build_validated_deployment_plan`, déterministe, donc
             # identique à celui que le masque a validé. Deux implémentations — une par siège —
             # ont déjà produit ici un ingress sans fin d'activation côté PvP.
-            _ing_unit = get_unit_by_id(squad_id, self.game_state)
+            _ing_unit = get_unit_by_id(self.game_state, squad_id)
             if _ing_unit is None:
                 raise KeyError(f"Unit {squad_id} introuvable pour ingress_move")
             success, result = movement_handlers.execute_action(
@@ -6634,7 +6634,7 @@ class W40KEngine(gym.Env):
                 "fight": ("FIGHT", "FIGHT"),
             }
             tracking, pool = phase_tracking.get(current_phase, ("MOVE", "MOVE"))
-            unit = get_unit_by_id(squad_id, self.game_state)
+            unit = get_unit_by_id(self.game_state, squad_id)
             if unit is None:
                 raise KeyError(f"Squad {squad_id} introuvable pour squad_wait")
             if current_phase == "move":
@@ -6754,7 +6754,7 @@ class W40KEngine(gym.Env):
             # pas transmis, aucun `[FLY]` n'atteignait step.log, et l'analyzer pathfindait au SOL
             # des escouades volantes — 1014 faux « au-delà du budget » mesurés sur un run de 600
             # épisodes. Les deux émetteurs PvP de `movement_handlers` le portaient déjà.
-            _move_unit_pre = get_unit_by_id(squad_id, self.game_state)
+            _move_unit_pre = get_unit_by_id(self.game_state, squad_id)
             if _move_unit_pre is None:
                 raise KeyError(f"Squad {squad_id} introuvable avant déplacement")
             _move_is_fly = _fta(self.game_state, _move_unit_pre, str(squad_id))
@@ -6796,7 +6796,7 @@ class W40KEngine(gym.Env):
                 )
             self.game_state.get("_squad_advance_rolls", {}).pop(squad_id, None)  # get allowed
             clear_squad_move_cell_map(self.game_state, squad_id)
-            unit = get_unit_by_id(squad_id, self.game_state)
+            unit = get_unit_by_id(self.game_state, squad_id)
             if unit is None:
                 raise KeyError(f"Squad {squad_id} introuvable après déplacement")
             tracking = "FLED" if move_type == "fall_back" else "MOVE"
@@ -6906,7 +6906,7 @@ class W40KEngine(gym.Env):
                 # choisi — meme cycle de vie que `units_shot`. Le finally garantit l effacement
                 # meme si une exception traverse le bare-except de execute_ai_turn (3462).
                 squad_shooting_type_clear(self.game_state, squad_id)
-            unit = get_unit_by_id(squad_id, self.game_state)
+            unit = get_unit_by_id(self.game_state, squad_id)
             if unit is None:
                 raise KeyError(f"Squad {squad_id} introuvable pour end_activation après tir")
             end_result = end_activation(self.game_state, unit, ACTION, 1, SHOOTING, SHOOTING, 0)
@@ -6968,7 +6968,7 @@ class W40KEngine(gym.Env):
             # une distance relevee apres vaudrait « au contact » sur toutes les charges reussies.
             charge_record_target_choice(self.game_state, squad_id, target_squad_id)
             plan = charge_build_valid_plan(self.game_state, squad_id, [target_squad_id], charge_roll)
-            unit = get_unit_by_id(squad_id, self.game_state)
+            unit = get_unit_by_id(self.game_state, squad_id)
             if unit is None:
                 raise KeyError(f"Squad {squad_id} introuvable pour squad_charge")
             # V11 T6 : coords ancre AVANT commit (le plan deplace les figurines).
@@ -7133,7 +7133,7 @@ class W40KEngine(gym.Env):
                     f"squad_fight: squad {squad_id} hors du pool de selection 12.04 {pool} "
                     f"(rupture masque/commit)"
                 )
-            unit = get_unit_by_id(squad_id, self.game_state)
+            unit = get_unit_by_id(self.game_state, squad_id)
             if unit is None:
                 raise KeyError(f"Squad {squad_id} introuvable pour squad_fight")
 
@@ -7154,7 +7154,7 @@ class W40KEngine(gym.Env):
                 _ov_plan = _fight_overrun_pile_in_plan(self.game_state, squad_id)
                 if _ov_plan is not None:
                     self._gym_commit_fight_move(self.game_state, squad_id, _ov_plan, "overrun_pile_in")
-                    unit = get_unit_by_id(squad_id, self.game_state)
+                    unit = get_unit_by_id(self.game_state, squad_id)
                     if unit is None:
                         raise KeyError(f"Squad {squad_id} introuvable apres overrun pile-in")
 
@@ -7215,7 +7215,7 @@ class W40KEngine(gym.Env):
                 )
             fight_result = _fight_alloc["shoot_result"]
 
-            unit = get_unit_by_id(squad_id, self.game_state)
+            unit = get_unit_by_id(self.game_state, squad_id)
             if unit is None:
                 raise KeyError(f"Squad {squad_id} introuvable après combat")
             end_result = end_activation(self.game_state, unit, ACTION, 1, FIGHT, FIGHT, 0)
@@ -7689,7 +7689,7 @@ class W40KEngine(gym.Env):
     
     def _get_unit_by_id(self, unit_id: str) -> Optional[Dict[str, Any]]:
         """Get unit by ID from game state - delegates to module utility."""
-        return get_unit_by_id(unit_id, self.game_state)
+        return get_unit_by_id(self.game_state, unit_id)
     
     
     def _check_game_over(self) -> bool:
