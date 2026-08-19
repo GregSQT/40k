@@ -9,11 +9,12 @@
  * Prérequis d'auth : `apiFetch` lit localStorage["w40k_auth_session_v2"] ; on le peuple
  * avant chaque test pour éviter le court-circuit 401.
  */
-import { cleanup, renderHook, waitFor } from "@testing-library/react";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { setupServer } from "msw/node";
 import React from "react";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Unit, Weapon } from "../types/game";
 import { useEngineAPI } from "./useEngineAPI";
 
 // ---------------------------------------------------------------------------
@@ -46,6 +47,28 @@ class ErrorBoundary extends React.Component<
 // ---------------------------------------------------------------------------
 // Minimal game state factory
 // ---------------------------------------------------------------------------
+
+function makeUnit(id: number, player: 1 | 2, overrides: Partial<Unit> = {}): Unit {
+  return {
+    id,
+    player,
+    col: 0,
+    row: 0,
+    HP_CUR: 5,
+    HP_MAX: 5,
+    MOVE: 60,
+    RNG_WEAPONS: [],
+    CC_WEAPONS: [],
+    ICON: "",
+    ICON_SCALE: 1,
+    ILLUSTRATION_RATIO: 1,
+    SHOOT_LEFT: 0,
+    ATTACK_LEFT: 0,
+    UNIT_RULES: [],
+    UNIT_KEYWORDS: [],
+    ...overrides,
+  } as Unit;
+}
 
 function makeGameState(overrides: Record<string, unknown> = {}) {
   return {
@@ -284,5 +307,108 @@ describe("useEngineAPI — état de chargement", () => {
     expect(result.current.loading).toBe(true);
     expect(result.current.eligibleUnitIds).toEqual([]);
     expect(result.current.phase).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T8 — movePreview : active_movement_unit déjà activée → pas d'appel activate_unit
+// ---------------------------------------------------------------------------
+
+describe("useEngineAPI — movePreview", () => {
+  it("phase move, unité déjà active → movePreview positionné et mode=movePreview", async () => {
+    server.use(
+      http.post("/api/game/start", () =>
+        HttpResponse.json({
+          success: true,
+          game_state: makeGameState({
+            active_movement_unit: "10",
+            move_activation_pool: ["10"],
+          }),
+        })
+      )
+    );
+
+    const { result } = renderHook(() => useEngineAPI());
+    await waitFor(() => expect(result.current.loading).toBe(false), { timeout: 5000 });
+
+    await act(async () => {
+      await result.current.onStartMovePreview(10, 5, 8);
+    });
+
+    expect(result.current.movePreview?.unitId).toBe(10);
+    expect(result.current.movePreview?.destCol).toBe(5);
+    expect(result.current.movePreview?.destRow).toBe(8);
+    expect(result.current.mode).toBe("movePreview");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T8 — targetPreview : onStartTargetPreview déclenche left_click et ne plante pas
+//
+// Note de conception : setTargetPreview(preview) est appelé en fin de handleStartTargetPreview,
+// mais le useEffect([gameState?.phase, targetPreview?.blinkTimer, ...]) (ligne 1647 du hook)
+// remet immédiatement targetPreview à null dès que le blinkTimer change — act() flush les effets
+// de façon synchrone en jsdom, alors qu'en production le navigateur laisse un rendu visible.
+// On teste donc l'invariant testable : l'appel API left_click est émis sans erreur.
+// ---------------------------------------------------------------------------
+
+describe("useEngineAPI — targetPreview", () => {
+  it("shoot phase → onStartTargetPreview émet left_click sans erreur", async () => {
+    const BOLT_RIFLE: Weapon = {
+      display_name: "Bolt Rifle",
+      NB: 2,
+      ATK: 3,
+      STR: 4,
+      AP: 1,
+      DMG: 1,
+      RNG: 240,
+    };
+    const shooter = makeUnit(1, 1, {
+      RNG_WEAPONS: [BOLT_RIFLE],
+      T: 4,
+      ARMOR_SAVE: 5,
+    });
+    const target = makeUnit(2, 2, { T: 4, ARMOR_SAVE: 4 });
+    const shootGameState = makeGameState({
+      phase: "shoot",
+      units: [shooter, target],
+      units_cache: { "1": shooter as unknown as Record<string, unknown> },
+      shoot_activation_pool: ["1"],
+      move_activation_pool: [],
+    });
+
+    let capturedBody: Record<string, unknown> | null = null;
+    server.use(
+      http.post("/api/game/start", () =>
+        HttpResponse.json({ success: true, game_state: shootGameState })
+      ),
+      http.post("/api/game/action", async ({ request }) => {
+        capturedBody = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({ success: true, game_state: shootGameState });
+      })
+    );
+
+    const { result } = renderHook(() => useEngineAPI());
+    // Attendre que le hook soit ENTIÈREMENT prêt : loading=false ET maxTurns chargé.
+    // maxTurnsFromConfig === null → chemin de chargement → onStartTargetPreview: () => {}
+    await waitFor(
+      () => {
+        expect(result.current.loading).toBe(false);
+        expect(result.current.maxTurns).not.toBeNull();
+      },
+      { timeout: 5000 }
+    );
+
+    await act(async () => {
+      await result.current.onStartTargetPreview(1, 2);
+    });
+
+    // L'appel API left_click doit avoir été émis
+    expect(capturedBody).not.toBeNull();
+    expect(capturedBody?.action).toBe("left_click");
+    expect(capturedBody?.unitId).toBe("1");
+    expect(capturedBody?.targetId).toBe("2");
+    // Aucune erreur dans le hook
+    expect(result.current.error).toBeNull();
   });
 });

@@ -173,6 +173,106 @@ describe("WeaponDropdown — showActions", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Lignes de quantité (openTargets + targetData)
+// ---------------------------------------------------------------------------
+
+describe("WeaponDropdown — lignes de quantité", () => {
+  // code = w.code ?? "" = "" (makeWeapon ne définit pas code)
+  const WEAPON_ENTRY = {
+    code: "",
+    weapon: { display_name: "Bolt Rifle", NB: 2, ATK: 4, STR: 4, AP: 1, DMG: 1, RNG: 240 },
+    m: 3,
+    x: 1,
+  };
+
+  it("openTargets + targetData → affiche la ligne de quantité avec compteur x/m", () => {
+    render(
+      <WeaponDropdown
+        {...BASE_PROPS}
+        weapons={[makeWeapon(0, "Bolt Rifle")]}
+        openTargets={["t1"]}
+        targetData={{ t1: [WEAPON_ENTRY] }}
+      />
+    );
+    expect(screen.getByText("1/3")).toBeTruthy();
+  });
+
+  it("clic − → onSetQty appelé avec x-1", () => {
+    const onQty = vi.fn();
+    render(
+      <WeaponDropdown
+        {...BASE_PROPS}
+        weapons={[makeWeapon(0, "Bolt Rifle")]}
+        openTargets={["t1"]}
+        targetData={{ t1: [WEAPON_ENTRY] }}
+        onSetQty={onQty}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "−" }));
+    expect(onQty).toHaveBeenCalledWith("", 0, "t1");
+  });
+
+  it("clic + → onSetQty appelé avec x+1", () => {
+    const onQty = vi.fn();
+    render(
+      <WeaponDropdown
+        {...BASE_PROPS}
+        weapons={[makeWeapon(0, "Bolt Rifle")]}
+        openTargets={["t1"]}
+        targetData={{ t1: [WEAPON_ENTRY] }}
+        onSetQty={onQty}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "+" }));
+    expect(onQty).toHaveBeenCalledWith("", 2, "t1");
+  });
+
+  it("clic Max → onSetQty appelé avec m", () => {
+    const onQty = vi.fn();
+    render(
+      <WeaponDropdown
+        {...BASE_PROPS}
+        weapons={[makeWeapon(0, "Bolt Rifle")]}
+        openTargets={["t1"]}
+        targetData={{ t1: [WEAPON_ENTRY] }}
+        onSetQty={onQty}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Max" }));
+    expect(onQty).toHaveBeenCalledWith("", 3, "t1");
+  });
+
+  it("− désactivé quand x=0 (activeTargetId requis pour afficher la ligne)", () => {
+    render(
+      <WeaponDropdown
+        {...BASE_PROPS}
+        weapons={[makeWeapon(0, "Bolt Rifle")]}
+        openTargets={["t1"]}
+        targetData={{ t1: [{ ...WEAPON_ENTRY, x: 0 }] }}
+        activeTargetId="t1"
+      />
+    );
+    const minusBtn = screen.getByRole("button", { name: "−" }) as HTMLButtonElement;
+    expect(minusBtn.disabled).toBe(true);
+  });
+
+  it("+ et Max désactivés quand x >= m", () => {
+    render(
+      <WeaponDropdown
+        {...BASE_PROPS}
+        weapons={[makeWeapon(0, "Bolt Rifle")]}
+        openTargets={["t1"]}
+        targetData={{ t1: [{ ...WEAPON_ENTRY, x: 3, m: 3 }] }}
+      />
+    );
+    const plusBtn = screen.getByRole("button", { name: "+" }) as HTMLButtonElement;
+    const maxBtn = screen.getByRole("button", { name: "Max" }) as HTMLButtonElement;
+    expect(plusBtn.disabled).toBe(true);
+    expect(maxBtn.disabled).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Arme assigned (fond vert foncé)
 // ---------------------------------------------------------------------------
 
