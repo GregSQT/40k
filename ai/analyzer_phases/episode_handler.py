@@ -64,6 +64,8 @@ def handle_episode_start(state: "AnalyzerState", config: "AnalyzerConfig", line:
     state.positions_at_move_phase_start = {}
     state.dead_units_current_episode = set()
     state.revived_units_current_episode = set()
+    state.dead_model_ids_episode = {}
+    state.dead_model_positions_episode = {}
     state.current_scenario = 'Unknown'
     state.units_moved = set()
     state.units_shot = set()

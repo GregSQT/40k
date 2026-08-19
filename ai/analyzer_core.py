@@ -331,6 +331,25 @@ def _resync_living_models(
             else _model_full_hp(state, config, m, squad_hp_max)
             for m in mids
         }
+    # Socles qui étaient connus et ne figurent plus dans le nouveau dict → retirés par ce
+    # resync (artifact d'ordonnancement : DEAD line avant la ligne d'attaque correspondante,
+    # ou [MODELS:] post-mort). On les mémorise pour que _apply_damage_to_named_model ne les
+    # compte pas en alloc_model_unknown : le moteur les avait bien ciblés quand ils étaient
+    # vivants, c'est l'ordre de flush qui les a fait disparaître avant le traitement.
+    removed = known.keys() - state.unit_model_hp[unit_id].keys()
+    if removed:
+        state.dead_model_ids_episode.setdefault(unit_id, set()).update(removed)
+        # § 1.2 / 1.4 — mémoriser les positions des socles retirés pour corriger le gel du
+        # Select Targets step (cf. `freeze_select_targets`). `positions_by_model[unit_id]`
+        # contient les positions d'avant la fusion `current_line_models` de la ligne courante :
+        # c'est l'état de la ligne N-1, qui est bien celui qu'avait la cible quand le moteur
+        # a décidé. Les socles absents de cette carte sont ignorés (position inconnue).
+        _cur_pos = state.positions_by_model.get(unit_id, {})  # get allowed
+        _dead_pos = state.dead_model_positions_episode.setdefault(unit_id, {})
+        for _mid in removed:
+            _p = _cur_pos.get(_mid)  # get allowed
+            if _p is not None:
+                _dead_pos[_mid] = _p
     _sync_front_hp(state, config, unit_id)
 
 
@@ -956,6 +975,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                 models_invalidated=state.models_invalidated,
                                 alloc_model_id=_alloc_model_from_line(state, action_desc, line),
                                 pending_model_removals=state.pending_model_removals,
+                                dead_model_ids_episode=state.dead_model_ids_episode,
                             )
                             state.pending_removals_actor = _dmg_actor_id
                 # Sauvegarde avant que target_match soit écrasé par la grammaire FOUGHT ci-dessous.
@@ -983,6 +1003,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                             models_invalidated=state.models_invalidated,
                             alloc_model_id=_alloc_model_from_line(state, action_desc, line),
                             pending_model_removals=state.pending_model_removals,
+                            dead_model_ids_episode=state.dead_model_ids_episode,
                         )
                         state.pending_removals_actor = _dmg_actor_id
 
@@ -1753,6 +1774,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                     models_invalidated=state.models_invalidated,
                                     alloc_model_id=_alloc_model_from_line(state, action_desc, line) if state.log_grammar >= 6 else None,
                                     pending_model_removals=None,
+                                    dead_model_ids_episode=state.dead_model_ids_episode,
                                 )
                         else:
                             stats['parse_errors'].append({
@@ -1798,6 +1820,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                     models_invalidated=state.models_invalidated,
                                     alloc_model_id=_alloc_model_from_line(state, action_desc, line) if state.log_grammar >= 6 else None,
                                     pending_model_removals=None,
+                                    dead_model_ids_episode=state.dead_model_ids_episode,
                                 )
                         else:
                             stats['parse_errors'].append({
