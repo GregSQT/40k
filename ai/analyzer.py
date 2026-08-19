@@ -1498,6 +1498,7 @@ def error_totals(stats: Dict[str, Any]) -> Dict[str, int]:
             # l'armurerie de l'unité. Seuls les déclenchements en TIR arrivent ici ;
             # les déclenchements en MÊLÉE sont comptés dans le total fight ci-dessous.
             + _pair('hazardous_no_hazardous_weapon')
+            + _pair('oath_target_mismatch')
             + shoot_invalid
         ),
         'charge': (
@@ -1505,6 +1506,8 @@ def error_totals(stats: Dict[str, Any]) -> Dict[str, int]:
             + stats['charge_invalid'][1]['distance_over_roll'] + stats['charge_invalid'][2]['distance_over_roll']
             + stats['charge_invalid'][1]['advanced'] + stats['charge_invalid'][2]['advanced']
             + stats['charge_invalid'][1]['fled'] + stats['charge_invalid'][2]['fled']
+            + _pair('charge_impact_wrong_threshold')
+            + _pair('charge_impact_wrong_damage')
         ),
         'fight': (
             # Deux clés RETIRÉES de ce total, pas seulement remises à zéro — un terme mort dans un
@@ -1826,6 +1829,9 @@ def parse_step_log(filepath: str) -> Dict:
         'fight_wound_threshold_unverifiable': {1: 0, 2: 0},
         'dead_unit_moving': {1: 0, 2: 0},
         'charge_from_adjacent': {1: 0, 2: 0},
+        'charge_impact_wrong_threshold': {1: 0, 2: 0},
+        'charge_impact_wrong_damage': {1: 0, 2: 0},
+        'oath_target_mismatch': {1: 0, 2: 0},
         'advance_from_adjacent': {1: 0, 2: 0},
         'dead_unit_advancing': {1: 0, 2: 0},
         'shoot_after_flee': {1: 0, 2: 0},
@@ -1991,6 +1997,9 @@ def parse_step_log(filepath: str) -> Dict:
             'fight_wound_threshold_mismatch': {1: None, 2: None},
             'dead_unit_moving': {1: None, 2: None},
             'charge_from_adjacent': {1: None, 2: None},
+            'charge_impact_wrong_threshold': {1: None, 2: None},
+            'charge_impact_wrong_damage': {1: None, 2: None},
+            'oath_target_mismatch': {1: None, 2: None},
             'advance_from_adjacent': {1: None, 2: None},
             'dead_unit_advancing': {1: None, 2: None},
             'shoot_after_flee': {1: None, 2: None},

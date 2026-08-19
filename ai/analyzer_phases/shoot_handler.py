@@ -333,11 +333,39 @@ def handle_shoot(
         check_indirect_fire_rule(state, stats, line, action_desc, player)
         # Seuil de blessure 05.02 : la ligne dit le seuil qu'elle a appliqué, on le recalcule
         # depuis F et E. Cf. ai/analyzer_wound.py.
-        from ai.analyzer_wound import check_wound_threshold
+        from ai.analyzer_wound import check_wound_threshold, wound_bonus_applies
         check_wound_threshold(
             state, config, stats, line, action_desc, player, shooter_unit_type,
             weapon_display_name, target_id, parse_shooter_models_segment(action_desc), is_melee=False,
         )
+        # 08.04 Oath of Moment : quand [OATH OF MOMENT] est dans le segment de blessure, la cible
+        # DOIT être l'unité jurée. Erreur si target_id ≠ oath_target pour ce joueur.
+        # oath_of_moment est une CAPACITÉ DE FACTION : elle est dans `rule_to_units`, pas dans
+        # `unit_rules_by_type` (qui ne porte que les UNIT_RULES de la datasheet).
+        _shooter_rules = config.unit_rules_by_type.get(shooter_unit_type, set())
+        _oath_carriers = config.rule_to_units.get("oath_of_moment", set())  # get allowed : absent = pas en jeu
+        if shooter_unit_type in _oath_carriers and wound_bonus_applies(action_desc):
+            note_rule_usage(stats, "PROJ.1.2.oath_target", player)
+            _oath_t = state.active_effects.get(player, {}).get("oath_target")  # get allowed
+            if _oath_t is not None and _oath_t != target_id:
+                stats['oath_target_mismatch'][player] += 1
+                if stats['first_error_lines']['oath_target_mismatch'][player] is None:
+                    stats['first_error_lines']['oath_target_mismatch'][player] = {
+                        'episode': state.current_episode_num, 'line': line.strip()
+                    }
+        # closest_target_penetration (obs_id=3) : exercé si la sauvegarde effective est MEILLEURE
+        # que ce que le seul AP donnerait (eff < base - ap_val). Le format est `Save R(B+ AP-N → E+)`.
+        _ctp_save_m = re.search(
+            r'Save\s+\d+\((\d+)\+\s+AP(-?\d+)\s*→\s*(\d+)\+\)', action_desc
+        )
+        if _ctp_save_m and "closest_target_penetration" in _shooter_rules:
+            _base_sv = int(_ctp_save_m.group(1))
+            _ap_val = int(_ctp_save_m.group(2))
+            _eff_sv = int(_ctp_save_m.group(3))
+            # Sans CTP : eff = base - ap_val (avec ap_val ≤ 0). Avec CTP, AP réduit d'un cran :
+            # eff < base - ap_val → sauvegarde meilleure que sans la règle.
+            if _eff_sv < _base_sv - _ap_val:
+                note_rule_usage(stats, "PROJ.1.2.closest_target_penetration", player)
         weapon_name_lower = weapon_display_name.lower()
         # Profil résolu par la DATASHEET QUI PORTE l'arme, pas par le seul type d'escouade :
         # sergents et personnages rattachés (règle 19) portent des armes que l'escouade ne
