@@ -162,7 +162,9 @@ class TestUncaughtExceptionResponse:
             try:
                 raise RuntimeError("secret dans /home/greg/40k/services/api_server.py")
             except RuntimeError as error:
-                response, status = api_server.handle_uncaught_exception(error)
+                result = api_server.handle_uncaught_exception(error)
+                assert isinstance(result, tuple)
+                response, status = result
             return response.get_json(), status
 
     def test_closed_by_default(self, monkeypatch):

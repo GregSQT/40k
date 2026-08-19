@@ -913,6 +913,7 @@ def handle_shoot(
                 # activation ayant tué, éteignant le contrôle sans que rien ne le montre.
                 stats['shoot_range_unverifiable'][player] += 1
             elif edge_dist > weapon_range:
+                assert target_models is not None  # garanti par edge_dist not None
                 if len(target_models) < frozen_target.models_alive:
                     # Certains socles vivants n'ont pas de position connue dans la carte pré-ligne ;
                     # le plus proche rendrait peut-être le tir légal. Non vérifiable.

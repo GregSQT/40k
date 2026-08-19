@@ -251,15 +251,12 @@ describe("useEngineAPI — gestion d'erreur", () => {
     const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     let caughtError: string | null = null;
     const wrapper = ({ children }: { children: React.ReactNode }) =>
-      React.createElement(
-        ErrorBoundary,
-        {
-          onError: (msg) => {
-            caughtError = msg;
-          },
+      React.createElement(ErrorBoundary, {
+        onError: (msg) => {
+          caughtError = msg;
         },
-        children
-      );
+        children,
+      });
 
     renderHook(() => useEngineAPI(), { wrapper });
     await waitFor(() => expect(caughtError).not.toBeNull(), { timeout: 5000 });
@@ -278,15 +275,12 @@ describe("useEngineAPI — gestion d'erreur", () => {
     const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     let caughtError: string | null = null;
     const wrapper = ({ children }: { children: React.ReactNode }) =>
-      React.createElement(
-        ErrorBoundary,
-        {
-          onError: (msg) => {
-            caughtError = msg;
-          },
+      React.createElement(ErrorBoundary, {
+        onError: (msg) => {
+          caughtError = msg;
         },
-        children
-      );
+        children,
+      });
 
     renderHook(() => useEngineAPI(), { wrapper });
     await waitFor(() => expect(caughtError).not.toBeNull(), { timeout: 5000 });
@@ -411,9 +405,10 @@ describe("useEngineAPI — targetPreview", () => {
 
     // L'appel API left_click doit avoir été émis
     expect(capturedBody).not.toBeNull();
-    expect(capturedBody?.action).toBe("left_click");
-    expect(capturedBody?.unitId).toBe("1");
-    expect(capturedBody?.targetId).toBe("2");
+    const body = capturedBody!;
+    expect(body.action).toBe("left_click");
+    expect(body.unitId).toBe("1");
+    expect(body.targetId).toBe("2");
     // Aucune erreur dans le hook
     expect(result.current.error).toBeNull();
   });

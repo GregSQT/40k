@@ -296,7 +296,7 @@ def handle_fight(
             _oath_carriers = config.rule_to_units.get("oath_of_moment", set())
             if fighter_unit_type in _oath_carriers and wound_bonus_applies(action_desc):
                 note_rule_usage(stats, "PROJ.1.2.oath_target", player)
-                _oath_t = state.active_effects.get(player, {}).get("oath_target")
+                _oath_t = state.active_effects.get(player, {}).get("oath_target")  # get allowed : aucun effet actif pour ce joueur
                 if _oath_t is not None and _oath_t != target_id:
                     stats['oath_target_mismatch'][player] += 1
                     if stats['first_error_lines']['oath_target_mismatch'][player] is None:

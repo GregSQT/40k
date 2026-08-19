@@ -1009,7 +1009,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         uid for uid, pl in state.unit_player.items()
                         if int(pl) == _loser
                         and uid not in state.dead_units_current_episode
-                        and state.unit_hp.get(uid, 0) > 0
+                        and state.unit_hp.get(uid, 0) > 0  # get allowed : absente == inconnue == pas vivante
                     ]
                     if _loser_still_alive:
                         stats['win_method_mismatch_count'] += 1

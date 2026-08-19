@@ -52,17 +52,19 @@ _UNITS = (
     "base=round/1\n"
 )
 
-_COMMON = dict(
-    inches_to_subhex=1,
-    board="cols=44 rows=60",
-    hex_radius="13.9",
-    margin=5,
-    objectives=OBJECTIVES,
-    metric_engagement="hex",
-    metric_ranged="hex",
-    log_grammar=2,
-    units=_UNITS,
-)
+def _make_log(body: str) -> str:
+    return entete_step_log(
+        body,
+        inches_to_subhex=1,
+        board="cols=44 rows=60",
+        hex_radius="13.9",
+        margin=5,
+        objectives=OBJECTIVES,
+        metric_engagement="hex",
+        metric_ranged="hex",
+        log_grammar=2,
+        units=_UNITS,
+    )
 
 _DEPLOYMENT = (
     f"[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1{A} DEPLOYED from (-1,-1) to {A} [R:+0.0] "
@@ -93,7 +95,7 @@ def test_target_decl_elimine_faux_fight_over_cc_nb(tmp_path):
     import ai.analyzer as an
 
     log = tmp_path / "step.log"
-    log.write_text(entete_step_log(_DEPLOYMENT + _fought_lines(with_token=True), **_COMMON))
+    log.write_text(_make_log(_DEPLOYMENT + _fought_lines(with_token=True)))
     stats = an.parse_step_log(str(log))
     assert stats["fight_over_cc_nb"][1] == 0, (
         "[TARGET_DECL:5] : alive=5 → CLEAVE=1 → limit=7 → 7 attaques légales"
@@ -112,7 +114,7 @@ def test_sans_target_decl_violation_reclassee_unverifiable(tmp_path):
     import ai.analyzer as an
 
     log = tmp_path / "step.log"
-    log.write_text(entete_step_log(_DEPLOYMENT + _fought_lines(with_token=False), **_COMMON))
+    log.write_text(_make_log(_DEPLOYMENT + _fought_lines(with_token=False)))
     stats = an.parse_step_log(str(log))
     assert stats["fight_over_cc_nb"][1] == 0, (
         "sans [TARGET_DECL:N] : pas de violation certifiée possible"
