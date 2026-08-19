@@ -292,6 +292,16 @@ def end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],
     
     if pool_empty:
         response["phase_complete"] = True
+        # Derive next_phase from config so the cascade can run without downstream workarounds.
+        # arg4 is authoritative for which pool was just emptied (MOVE/FLED → move, etc.).
+        _arg4_to_phase = {"MOVE": "move", "FLED": "move", "SHOOTING": "shoot", "CHARGE": "charge"}
+        _cur_phase = _arg4_to_phase.get(arg4)
+        if _cur_phase is not None:
+            from config_loader import get_config_loader
+            _order = get_config_loader().get_phase_order()
+            _idx = _order.index(_cur_phase) if _cur_phase in _order else -1
+            if 0 <= _idx < len(_order) - 1:
+                response["next_phase"] = _order[_idx + 1]
 
     return response
 

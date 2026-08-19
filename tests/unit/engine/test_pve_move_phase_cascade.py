@@ -18,7 +18,6 @@ de move, `game_state["phase"]` est "shoot" — la cascade a bien tourné.
 from __future__ import annotations
 
 from typing import Any, Dict, List
-from unittest.mock import patch
 
 import pytest
 
@@ -147,4 +146,29 @@ def test_last_ai_squad_wait_in_move_triggers_shoot_phase():
     # La cascade a effectivement avancé la phase (shooting_phase_start appelé).
     assert gs["phase"] == "shoot", (
         f"Phase reste '{gs['phase']}' au lieu de 'shoot' : la cascade n'a pas tourné."
+    )
+
+
+def test_advance_phase_from_command_triggers_move_phase():
+    """Invariant : advance_phase with from=command → next_phase=move in result and gs["phase"].
+
+    La map hardcodée de _process_squad_action incluait command→move mais next_phase_map.get()
+    ne couvrait pas les phases hors ordre (ex. fight). Le remplacement par get_phase_order()
+    doit produire next_phase="move" pour from="command" (command n'est pas dans la phase_order
+    ["move","shoot","charge","fight"] → idx=-1 → fallback "move").
+    """
+    units = [_unit(1, 1, 3, 3, has_ranged=True), _unit(2, 2, 15, 15, has_ranged=True)]
+    gs = _make_move_gs(units, ai_pool_ids=[])
+    gs["phase"] = "command"
+
+    eng = _engine(gs)
+
+    success, result = eng._process_squad_action({"action": "advance_phase", "from": "command"})
+
+    assert success is True
+    assert result.get("next_phase") == "move", (
+        f"next_phase attendu 'move', obtenu : {result}"
+    )
+    assert gs["phase"] == "move", (
+        f"Phase reste '{gs['phase']}' au lieu de 'move' : la cascade command→move n'a pas tourné."
     )

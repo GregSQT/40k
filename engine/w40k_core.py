@@ -4855,17 +4855,11 @@ class W40KEngine(gym.Env):
             elif from_phase == "deployment":
                 result = {"phase_complete": True, "next_phase": "command", "reason": "pool_empty"}
             else:
-                result = {"phase_complete": True, "reason": "pool_empty"}
-
-                # Determine next phase based on current phase
-                if from_phase == "move":
-                    result["next_phase"] = "shoot"
-                elif from_phase == "charge":
-                    result["next_phase"] = "fight"
-                elif from_phase == "command":
-                    result["next_phase"] = "move"
-                else:
-                    result["next_phase"] = "move"
+                from config_loader import get_config_loader
+                _order = get_config_loader().get_phase_order()
+                _idx = _order.index(from_phase) if from_phase in _order else -1
+                _next = _order[_idx + 1] if 0 <= _idx < len(_order) - 1 else "move"
+                result = {"phase_complete": True, "next_phase": _next, "reason": "pool_empty"}
 
             # CRITICAL FIX: Don't return early - fall through to cascade loop
             # to actually execute the phase transition in game_state
@@ -6525,12 +6519,11 @@ class W40KEngine(gym.Env):
             elif from_phase == "deployment":
                 result = {"phase_complete": True, "next_phase": "command", "reason": "pool_empty"}
             else:
-                next_phase_map = {"move": "shoot", "charge": "fight", "command": "move"}
-                result = {
-                    "phase_complete": True,
-                    "next_phase": next_phase_map.get(from_phase, "move"),
-                    "reason": "pool_empty",
-                }
+                from config_loader import get_config_loader
+                _order = get_config_loader().get_phase_order()
+                _idx = _order.index(from_phase) if from_phase in _order else -1
+                _next = _order[_idx + 1] if 0 <= _idx < len(_order) - 1 else "move"
+                result = {"phase_complete": True, "next_phase": _next, "reason": "pool_empty"}
 
         # ── deployment : logique existante inchangée ──────────────────────────
         elif action_name == "deploy_unit":
@@ -7225,16 +7218,6 @@ class W40KEngine(gym.Env):
 
         else:
             return False, {"error": "unknown_squad_action", "action": action_name}
-
-        # Si un handler squad vide le pool (phase_complete=True) sans poser next_phase,
-        # end_activation ne connaît pas la séquence des phases : on la dérive ici pour
-        # que la cascade s'exécute. Couvre PvE et gym — sans next_phase la cascade ne
-        # tourne pas et la phase reste bloquée avec un pool vide.
-        if result.get("phase_complete") and not result.get("next_phase"):
-            _phase_next_map = {"move": "shoot", "shoot": "charge", "charge": "fight"}
-            _derived_next = _phase_next_map.get(current_phase)
-            if _derived_next:
-                result["next_phase"] = _derived_next
 
         # ── cascade : auto-avance les phases vides ────────────────────────────
         max_cascade = 10
