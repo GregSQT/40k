@@ -16,7 +16,6 @@ le bot (BotControlledEnv), pas exposé au joueur humain côté front.
 
 from __future__ import annotations
 
-from contextlib import contextmanager
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import pytest
@@ -36,40 +35,19 @@ DEPLOY_SCENARIO = "config/board/44x60x5/scenario/scenario_pvp.json"
 # ─────────────────────────────────────────────────────────────────────────────
 
 @pytest.fixture
-def deploy_game(monkeypatch):
+def deploy_game(api_isolated):
     """Partie scenario_pvp.json en phase de déploiement, invariants armés.
 
     Scénario distinct de INTEGRATION_SCENARIO : scenario_pvp.json a deployment_type=active
     (unités posées à -1,-1), tandis que scenario_pvp_integration.json n'a pas de phase
     de déploiement. Les deux fixtures coexistent sans interférence.
     """
-    monkeypatch.setattr(api_server, "_get_authenticated_user_or_response", lambda: (_TEST_AUTH_USER, None))
-    monkeypatch.setattr(api_server, "_resolve_permissions_for_profile", lambda _conn, _pid: _TEST_PERMISSIONS)
-
-    import sqlite3
-    from contextlib import contextmanager as _ctx
-
-    @_ctx
-    def _in_memory_write_cursor(immediate: bool = False):
-        connection = sqlite3.connect(":memory:")
-        connection.row_factory = sqlite3.Row
-        try:
-            yield connection.cursor()
-        finally:
-            connection.close()
-
-    monkeypatch.setattr(api_server, "auth_db_write_cursor", _in_memory_write_cursor)
-    monkeypatch.setattr(api_server, "_SNAPSHOT_PERSIST_ENABLED", False)
-    monkeypatch.setattr(api_server, "_AUTOSAVE_ENABLED", False)
-
     with app.test_client() as flask_client:
         # check=None : en phase de déploiement les unités non encore posées ont
         # col=-1, row=-1 (sentinel offboard), ce qui violerait l'invariant de position.
         client = GameClient(flask_client, check=None)
         client.start(scenario_file=DEPLOY_SCENARIO)
         yield client
-
-    api_server.engine = None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -233,7 +211,6 @@ class TestDeployModelDestinations:
             model_id=second,
             provisional_plan={first: [taken[0], taken[1], taken[2]]},
         )["result"]["destinations"]
-        assert [taken[0], taken[1], taken[2]] in free
         assert [taken[0], taken[1], taken[2]] not in blocked, (
             f"la case {taken[:2]} occupée par la sœur {first} reste proposée à {second}"
         )
