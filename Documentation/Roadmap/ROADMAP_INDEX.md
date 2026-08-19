@@ -106,6 +106,7 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 | analyzer | ✅ models_segment capturé après commit_move (2026-08-18) — faux positifs pile-in éliminés (fight_handler + w40k_core) | — |
 | analyzer | ✅ Réserves PvP 04b tests code-review corrigés (2026-08-18) — symétrie garde, formule sentinelle, commentaire xdist | — |
 | analyzer | ✅ Borne vert-vacant calculate_hex_distance (2026-08-18) — métrique cohérente avec charge_check_eligibility | — |
+| analyzer | ✅ alloc_model_unknown HAZARDOUS/DE (2026-08-19) — grammar 6 + hazardDetails→target_model_id ; alloc_model_id lit [ALLOC_MODEL:] au lieu du legacy ordered_living_mids[0] ; 4 occurrences éliminées | — |
 | analyzer | ✅ step_logger [DESPERATE ESCAPE] vs [HAZARDOUS] séparés (2026-08-18) — roll_hazard_for_unit tag distinct 09.07/24.15 | — |
 | analyzer | ✅ analyzer_core branche [DESPERATE ESCAPE] (2026-08-18) — _apply_damage_and_handle_death appelée, HP/kill tracking opérationnel ; constante HAZARD_CONTEXT_DESPERATE_ESCAPE partagée | — |
 | analyzer | ✅ test_analyzer_hazardous verrou [DESPERATE ESCAPE] vs [HAZARDOUS] (2026-08-18) — test rouge/vert sur branche DESPERATE ESCAPE + seuil source inspect corrigé | — |
