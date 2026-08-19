@@ -2,7 +2,7 @@
  * Le plateau PIXI est fait de DEUX calques au cycle de vie distinct :
  *
  * - le calque STATIQUE (fond, murs, décor, **couleur de contrôle des objectifs**), invalidé par
- *   `bcKey` — dimensions, contrôle d'objectif, géométrie des zones, murs, phase de déploiement ;
+ *   `geomKey` + `controlKey` — dimensions, géométrie des zones, murs, phase de déploiement, et contrôle d'objectif ;
  * - les SURBRILLANCES (previews de move/tir/charge, halos, voiles, contours d'étage), invalidées
  *   par l'empreinte structurelle de `computeDrawBoardPartialRedrawFingerprint`.
  *
@@ -98,7 +98,7 @@ export interface BoardRedrawPlan {
 export function planBoardRedraw(params: {
   /** Le calque des surbrillances est intact ET son empreinte structurelle est inchangée. */
   highlightsReusable: boolean;
-  /** `bcKey` est inchangée ET le calque statique existe encore. */
+  /** `geomKey` et `controlKey` sont inchangées ET le calque statique existe encore. */
   staticLayerReusable: boolean;
 }): BoardRedrawPlan {
   const { highlightsReusable, staticLayerReusable } = params;
