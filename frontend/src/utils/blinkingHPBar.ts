@@ -217,8 +217,7 @@ export function calculateWoundProbability(
   if (strength >= toughness * 2) woundTarget = 2;
   else if (strength > toughness) woundTarget = 3;
   else if (strength === toughness) woundTarget = 4;
-  else if (strength < toughness) woundTarget = 5;
-  else woundTarget = 6;
+  else woundTarget = 5;
   const woundProb = Math.max(0, (7 - woundTarget) / 6);
 
   const saveTarget = Math.max(

@@ -4,24 +4,22 @@ import type { Unit, Weapon } from "../types/game";
 import { getDiceAverage, getSelectedMeleeWeapon, getSelectedRangedWeapon } from "./weaponHelpers";
 
 export function calculateHitProbability(shooter: Unit): number {
-  // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Get ATK from selected weapon
   const selectedWeapon = getSelectedRangedWeapon(shooter);
-  const hitTarget = selectedWeapon?.ATK || 4;
-  return Math.max(0, ((7 - hitTarget) / 6) * 100);
+  if (!selectedWeapon) throw new Error(`No ranged weapon selected for unit ${shooter.id}`);
+  return Math.max(0, ((7 - selectedWeapon.ATK) / 6) * 100);
 }
 
 export function calculateWoundProbability(shooter: Unit, target: Unit): number {
-  // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Get STR from selected weapon
   const selectedWeapon = getSelectedRangedWeapon(shooter);
-  const strength = selectedWeapon?.STR || 4;
+  if (!selectedWeapon) throw new Error(`No ranged weapon selected for unit ${shooter.id}`);
+  const strength = selectedWeapon.STR;
   const toughness = target.T || 4;
 
   let woundTarget: number;
   if (strength >= toughness * 2) woundTarget = 2;
   else if (strength > toughness) woundTarget = 3;
   else if (strength === toughness) woundTarget = 4;
-  else if (strength < toughness) woundTarget = 5;
-  else woundTarget = 6;
+  else woundTarget = 5;
 
   return Math.max(0, ((7 - woundTarget) / 6) * 100);
 }
@@ -31,19 +29,17 @@ export function calculateSaveProbability(
   target: Unit,
   inCover: boolean = false
 ): number {
+  const selectedWeapon = getSelectedRangedWeapon(shooter);
+  if (!selectedWeapon) throw new Error(`No ranged weapon selected for unit ${shooter.id}`);
   let armorSave = target.ARMOR_SAVE || 5;
   const invulSave = target.INVUL_SAVE || 0;
-  // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Get AP from selected weapon
-  const selectedWeapon = getSelectedRangedWeapon(shooter);
-  const armorPenetration = selectedWeapon?.AP || 0;
+  const armorPenetration = selectedWeapon.AP;
 
-  // Apply cover bonus - +1 to armor save (better save)
   if (inCover) {
-    armorSave = Math.max(2, armorSave - 1); // Improve armor save by 1, minimum 2+
-    // Note: Invulnerable saves are not affected by cover
+    armorSave = Math.max(2, armorSave - 1);
   }
 
-  const modifiedArmor = armorSave + armorPenetration;
+  const modifiedArmor = armorSave - armorPenetration;
   const saveTarget = invulSave > 0 && invulSave < modifiedArmor ? invulSave : modifiedArmor;
 
   const saveProbability = Math.max(0, ((7 - saveTarget) / 6) * 100);
@@ -87,8 +83,7 @@ function calculateRangedEffectiveness(
   if (strength >= toughness * 2) woundTarget = 2;
   else if (strength > toughness) woundTarget = 3;
   else if (strength === toughness) woundTarget = 4;
-  else if (strength < toughness) woundTarget = 5;
-  else woundTarget = 6;
+  else woundTarget = 5;
 
   const woundProbability = Math.max(0, (7 - woundTarget) / 6);
 
@@ -100,7 +95,7 @@ function calculateRangedEffectiveness(
     armorSave = Math.max(2, armorSave - 1);
   }
 
-  const modifiedArmor = armorSave + armorPenetration;
+  const modifiedArmor = armorSave - armorPenetration;
   const saveTarget = Math.max(
     2,
     invulSave > 0 && invulSave < modifiedArmor ? invulSave : modifiedArmor
@@ -174,7 +169,7 @@ export function getPreferredRangedWeaponAgainstTarget(
 
 /**
  * Arme à feu **sélectionnée** (``selectedRngWeaponIndex`` / ``getSelectedRangedWeapon``) contre la cible.
- * Pour le HP blink, prévisu dégâts / % : aligné sur le choix du joueur, pas sur l’arme « optimale » (best expected damage).
+ * Pour le HP blink, prévisu dégâts / % : aligné sur le choix du joueur, pas sur l'arme « optimale » (best expected damage).
  */
 export function getSelectedRangedWeaponAgainstTarget(
   shooter: Unit,
@@ -243,38 +238,35 @@ export function buildTargetPreviewStats(
   };
 }
 
-// ✅ NEW: Combat-specific probability calculation functions
 export function calculateCombatHitProbability(attacker: Unit): number {
-  // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Get ATK from selected melee weapon
   const selectedWeapon = getSelectedMeleeWeapon(attacker);
-  const hitTarget = selectedWeapon?.ATK || 4;
-  return Math.max(0, ((7 - hitTarget) / 6) * 100);
+  if (!selectedWeapon) throw new Error(`No melee weapon selected for unit ${attacker.id}`);
+  return Math.max(0, ((7 - selectedWeapon.ATK) / 6) * 100);
 }
 
 export function calculateCombatWoundProbability(attacker: Unit, target: Unit): number {
-  // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Get STR from selected melee weapon
   const selectedWeapon = getSelectedMeleeWeapon(attacker);
-  const strength = selectedWeapon?.STR || 4;
+  if (!selectedWeapon) throw new Error(`No melee weapon selected for unit ${attacker.id}`);
+  const strength = selectedWeapon.STR;
   const toughness = target.T || 4;
 
   let woundTarget: number;
   if (strength >= toughness * 2) woundTarget = 2;
   else if (strength > toughness) woundTarget = 3;
   else if (strength === toughness) woundTarget = 4;
-  else if (strength < toughness) woundTarget = 5;
-  else woundTarget = 6;
+  else woundTarget = 5;
 
   return Math.max(0, ((7 - woundTarget) / 6) * 100);
 }
 
 export function calculateCombatSaveProbability(attacker: Unit, target: Unit): number {
+  const selectedWeapon = getSelectedMeleeWeapon(attacker);
+  if (!selectedWeapon) throw new Error(`No melee weapon selected for unit ${attacker.id}`);
   const armorSave = target.ARMOR_SAVE || 5;
   const invulSave = target.INVUL_SAVE || 0;
-  // MULTIPLE_WEAPONS_IMPLEMENTATION.md: Get AP from selected melee weapon
-  const selectedWeapon = getSelectedMeleeWeapon(attacker);
-  const armorPenetration = selectedWeapon?.AP || 0;
+  const armorPenetration = selectedWeapon.AP;
 
-  const modifiedArmor = armorSave + armorPenetration;
+  const modifiedArmor = armorSave - armorPenetration;
   const saveTarget = invulSave > 0 && invulSave < modifiedArmor ? invulSave : modifiedArmor;
 
   const saveProbability = Math.max(0, ((7 - saveTarget) / 6) * 100);

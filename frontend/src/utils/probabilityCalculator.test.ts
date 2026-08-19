@@ -73,9 +73,9 @@ describe("calculateHitProbability (tir)", () => {
     expect(calculateHitProbability(makeShooter(7, 4, 0))).toBe(0);
   });
 
-  it("sans arme : repli sur ATK=4 (défaut arme manquante)", () => {
+  it("sans arme : lève une erreur explicite", () => {
     const noWeapon: Unit = { id: 1, RNG_WEAPONS: [], CC_WEAPONS: [] } as unknown as Unit;
-    expect(calculateHitProbability(noWeapon)).toBeCloseTo(50, 5);
+    expect(() => calculateHitProbability(noWeapon)).toThrow();
   });
 });
 
@@ -120,8 +120,8 @@ describe("calculateSaveProbability (tir) — retourne P(save échoue)", () => {
     expect(failProb).toBeCloseTo(100 - pct(3, 6), 4);
   });
 
-  it("armor=5, AP=2 → modifiedArmor=7 → P(réussit)=0 → P(échec)=100 %", () => {
-    expect(calculateSaveProbability(makeShooter(4, 4, 2), makeTarget(4, 5))).toBeCloseTo(100, 4);
+  it("armor=5, AP=-2 → modifiedArmor=7 → P(réussit)=0 → P(échec)=100 %", () => {
+    expect(calculateSaveProbability(makeShooter(4, 4, -2), makeTarget(4, 5))).toBeCloseTo(100, 4);
   });
 
   it("cover améliore la sauvegarde de 1 (armorSave-1, min 2)", () => {
@@ -134,8 +134,8 @@ describe("calculateSaveProbability (tir) — retourne P(save échoue)", () => {
   });
 
   it("invulnerable save utilisée si meilleure que l'armor+AP", () => {
-    // armor=5, AP=3 → modifiedArmor=8 ; invul=3 < 8 → saveTarget=3
-    const failProb = calculateSaveProbability(makeShooter(4, 4, 3), makeTarget(4, 5, 3));
+    // armor=5, AP=-3 → modifiedArmor=8 ; invul=3 < 8 → saveTarget=3
+    const failProb = calculateSaveProbability(makeShooter(4, 4, -3), makeTarget(4, 5, 3));
     expect(failProb).toBeCloseTo(100 - pct(3, 6), 4);
   });
 
@@ -197,7 +197,7 @@ describe("calculateCombatHitProbability / Wound / Save / Overall (mêlée)", () 
   });
 
   it("overall mêlée = hit × wound × saveFailProb", () => {
-    const atk = makeMeleeAtk(4, 4, 1);
+    const atk = makeMeleeAtk(4, 4, -1);
     const def = makeTarget(4, 4);
     const hit = calculateCombatHitProbability(atk) / 100;
     const wound = calculateCombatWoundProbability(atk, def) / 100;
@@ -231,7 +231,7 @@ describe("buildTargetPreviewStats", () => {
   });
 
   it("overallProbability = hitProb × woundProb × (1 - saveProb)", () => {
-    const shooter = makeShooter(4, 5, 1);
+    const shooter = makeShooter(4, 5, -1);
     const target = makeTarget(4, 4);
     const rangedEff = getSelectedRangedWeaponAgainstTarget(shooter, target);
     if (!rangedEff) throw new Error("rangedEff inattendu null");
@@ -244,7 +244,7 @@ describe("buildTargetPreviewStats", () => {
   });
 
   it("expectedDamage = overallProbability × potentialDamage", () => {
-    const shooter = makeShooter(3, 6, 2);
+    const shooter = makeShooter(3, 6, -2);
     const target = makeTarget(5, 3);
     const rangedEff = getSelectedRangedWeaponAgainstTarget(shooter, target);
     if (!rangedEff) throw new Error("rangedEff inattendu null");
@@ -257,8 +257,8 @@ describe("buildTargetPreviewStats", () => {
   });
 
   it("cible avec invulnérable meilleur que l'armure : saveProbability reflète le jet invul", () => {
-    // Invul 4+ (invulSave=4) vs armure 3+ pénétrée par AP=2 → modifiedArmor=5, invul gagne
-    const shooter = makeShooter(3, 4, 2);
+    // Invul 4+ (invulSave=4) vs armure 3+ pénétrée par AP=-2 → modifiedArmor=5, invul gagne
+    const shooter = makeShooter(3, 4, -2);
     const target = makeTarget(4, 3, 4);
     const rangedEff = getSelectedRangedWeaponAgainstTarget(shooter, target);
     if (!rangedEff) throw new Error("rangedEff inattendu null");
