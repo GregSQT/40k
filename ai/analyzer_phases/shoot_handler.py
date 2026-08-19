@@ -394,6 +394,9 @@ def handle_shoot(
                     'line': line.strip()
                 })
 
+        if not is_close_quarters and _eligibility_rule_applied(state, action_desc, r'\[CLOSE-QUARTERS\]', False):
+            is_close_quarters = True
+
     if weapon_match and weapon_display_name is not None:
         if shooter_unit_type:
             limits = require_key(config.unit_attack_limits, shooter_unit_type)
@@ -741,6 +744,9 @@ def handle_shoot(
             subject_heights=state.current_line_heights.get(shooter_id),  # get allowed
             position_override=(shooter_col, shooter_row),
         )
+
+    if not shooter_engaged_with_target and _eligibility_rule_applied(state, action_desc, r'\[CLOSE-QUARTERS\]', False):
+        shooter_engaged_with_target = True
 
     engagement_verdict = ranged_engagement_verdict(
         shooter_engaged=shooter_engaged_at_all,
