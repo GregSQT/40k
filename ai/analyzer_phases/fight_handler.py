@@ -95,12 +95,10 @@ def _note_melee_weapon_rule_usage(
       - `PSYCHIC` : mot-clé d'INTERACTION (24.29), pas un effet discret à compter. Il reçoit
         le statut `N/A — KEYWORD` dans §1.8 (`_INTERACTION_ONLY_WEAPON_RULES`, `analyzer.py`) —
         il n'y a structurellement rien à incrémenter, et 0 ne signifie pas « jamais exercé ».
-      - `ANTI-X`, `EXTRA_ATTACKS`, `LETHAL_HITS`, `TORRENT`, `IGNORES_COVER` :
-        ⚠️ leur token EST dans `step.log` depuis le 2026-08-12 (grammaire 3), au tir comme en
-        mêlée — c'est le compteur qui n'est pas encore écrit, ici ni au tir. La distinction
-        n'est pas rhétorique : avant cette date « NOT USED » voulait dire « le journal ne sait
-        pas le dire », il veut désormais dire « personne ne l'a encore compté ». Le premier
-        état n'était pas rattrapable côté analyzer, le second l'est.
+      - `TORRENT`, `IGNORES_COVER`, `LETHAL_HITS`, `EXTRA_ATTACKS`, `ANTI-X` : comptés depuis
+        le 2026-08-19 (lot2) par token — `[TORRENT]`, `[IGNORES COVER]`, `[LETHAL HITS]`,
+        `[EXTRA ATTACKS]`, `[ANTI-keyword:N+]` — avec contrôle de validité associé (TORRENT →
+        Hit None, LETHAL HITS → Wound None, ANTI-X → seuil token = seuil armurerie).
     """
     from ai.analyzer_perfig import weapon_profile_for_line
 
@@ -141,6 +139,55 @@ def _note_melee_weapon_rule_usage(
     # l'APPLICATION (sauvegarde sautée), donc ce qui se compte.
     if re.search(r'Save\s+\[DEVASTATING WOUNDS\]', action_desc, re.IGNORECASE):
         stats['weapon_rule_usage'][("DEVASTATING_WOUNDS", weapon_key)][pl_int] += 1
+    # [TORRENT] 24.37, [IGNORES COVER] 24.18, [LETHAL HITS] 24.23, [EXTRA ATTACKS], [ANTI-X] 24.03
+    # — JUMEAUX du site de tir. Compteurs + validité (voir shoot_handler pour le détail complet).
+    _torrent_m = re.search(r'\[TORRENT\]', action_desc, re.IGNORECASE)
+    if _torrent_m:
+        stats['weapon_rule_usage'][("TORRENT", weapon_key)][pl_int] += 1
+        from ai.analyzer_hit import HIT_SEGMENT_RE as _HIT_RE
+        if _HIT_RE.search(action_desc):
+            stats['parse_errors'].append({
+                'episode': state.current_episode_num, 'turn': turn, 'phase': phase,
+                'line': line.strip(),
+                'error': "[TORRENT] 24.37 : jet de touche numérique inattendu (mêlée) — attendu Hit None(None+)",
+            })
+    if re.search(r'\[IGNORES COVER\]', action_desc, re.IGNORECASE):
+        stats['weapon_rule_usage'][("IGNORES_COVER", weapon_key)][pl_int] += 1
+    _lethal_m = re.search(r'\[LETHAL HITS\]', action_desc, re.IGNORECASE)
+    if _lethal_m:
+        stats['weapon_rule_usage'][("LETHAL_HITS", weapon_key)][pl_int] += 1
+        if re.search(r'\bWound\s+\d+\(\d+\+\)', action_desc):
+            stats['parse_errors'].append({
+                'episode': state.current_episode_num, 'turn': turn, 'phase': phase,
+                'line': line.strip(),
+                'error': "[LETHAL HITS] 24.23 : blessure auto avec jet numérique (mêlée) — attendu Wound None",
+            })
+    if re.search(r'\[EXTRA ATTACKS\]', action_desc, re.IGNORECASE):
+        stats['weapon_rule_usage'][("EXTRA_ATTACKS", weapon_key)][pl_int] += 1
+    _anti_m = re.search(r'\[ANTI-(\w+):(\d+)\+\]', action_desc, re.IGNORECASE)
+    if _anti_m:
+        _anti_kw = _anti_m.group(1).upper()
+        _anti_tok_thresh = int(_anti_m.group(2))
+        _anti_rule_name = f"ANTI_{_anti_kw}"
+        stats['weapon_rule_usage'][(_anti_rule_name, weapon_key)][pl_int] += 1
+        _anti_decl_thresh = None
+        for _r in require_key(weapon_info, "rules"):
+            _rn, _, _rp = str(_r).partition(":")
+            if _rn.strip().upper() == _anti_rule_name and _rp:
+                try:
+                    _anti_decl_thresh = int(_rp.strip())
+                except (TypeError, ValueError):
+                    pass
+                break
+        if _anti_decl_thresh is not None and _anti_tok_thresh != _anti_decl_thresh:
+            stats['parse_errors'].append({
+                'episode': state.current_episode_num, 'turn': turn, 'phase': phase,
+                'line': line.strip(),
+                'error': (
+                    f"[ANTI-{_anti_kw}:{_anti_tok_thresh}+] (mêlée) : seuil log "
+                    f"≠ seuil armurerie ({_anti_decl_thresh}+)"
+                ),
+            })
 
 
 def handle_fight(

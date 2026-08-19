@@ -150,6 +150,9 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 | security | ✅ Chantier clos (2026-08-19) — F1–F15 résolues, validation navigateur OK, doc déplacé dans Implémenté/ | [archives/security.md](archives/security.md) | ⚡ |
 | moteur | ✅ get_unit_by_id signature alignée (game_state, unit_id) (2026-08-19) — 6 sites cassés corrigés (movement_handlers+combat_utils), 49 ancienne-ordre mis à jour dans deployment_handlers, action_decoder, reward_calculator, observation_builder, game_state, w40k_core, shared_utils + tests ; 41 tests verts | — | ⚡ |
 | analyzer | ✅ FP familles 1+2 grammaire 4 corrigés (2026-08-19) — token [CLOSE-QUARTERS] override is_close_quarters + shooter_engaged_with_target ; 7 tests rouge/vert ; famille 3 déjà close ; famille 4 = bug moteur (advance E383 : 103#8 dépasse budget 9) | — | ⚡ |
+| analyzer | ✅ doublon fam2 cq-grammar4-token remplacé par scénario grammar=3 (2026-08-19) — test cq_grammar4 dédoublonné | — | ⚡ |
+| training+gate | ✅ crash results['control'] absent quand min_vs_control=0.0 corrigé (2026-08-19) — résultat dict guard sur clé control ; gate ne crashe plus si critère absent | — | ⚡ |
+| analyzer | ✅ lot2 rules — compteurs usage ANTI-X/TORRENT/LETHAL HITS/IGNORES_COVER/EXTRA_ATTACKS (2026-08-19) ; fix DW threshold ANTI-X:N+ (N<6) ; Roll:1 HAZARDOUS counter ; validité TORRENT+LETHAL HITS ; 16 tests rouge/vert | — | ⚡ |
 | infra | Perf `generate_compact_formation` | [infra.md#perf-formation](infra.md#perf-formation) | ⚡ |
 | infra | ✅ gzip + Brotli livrés (2026-08-18) — stage `brotli-builder`, `load_module` contexte main, directives server | [archives/infra.md](archives/infra.md) | ⚡ |
 
