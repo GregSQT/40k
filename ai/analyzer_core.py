@@ -350,6 +350,12 @@ def _resync_living_models(
             _p = _cur_pos.get(_mid)  # get allowed
             if _p is not None:
                 _dead_pos[_mid] = _p
+    else:
+        # Aucune mort nouvelle : l'unité vient de bouger / attendre avec tous ses socles intacts.
+        # Les positions accumulées dans dead_model_positions_episode proviennent d'activations
+        # précédentes et sont périmées — elles provoqueraient des faux engagements dans
+        # freeze_select_targets si elles n'étaient pas purgées ici.
+        state.dead_model_positions_episode.pop(unit_id, None)
     _sync_front_hp(state, config, unit_id)
 
 
