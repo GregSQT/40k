@@ -416,6 +416,7 @@ export const WeaponDropdown: React.FC<WeaponDropdownProps> = ({
         >
           <button
             type="button"
+            data-testid="weapon-cancel"
             onClick={() => onCancel?.()}
             style={{
               border: "1px solid rgba(0,0,0,0.35)",
@@ -432,6 +433,7 @@ export const WeaponDropdown: React.FC<WeaponDropdownProps> = ({
           </button>
           <button
             type="button"
+            data-testid="weapon-fire"
             disabled={!canValidate}
             onClick={() => onFire?.()}
             style={{
