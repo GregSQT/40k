@@ -158,6 +158,9 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 | analyzer | ✅ lot2 rules — compteurs usage ANTI-X/TORRENT/LETHAL HITS/IGNORES_COVER/EXTRA_ATTACKS (2026-08-19) ; fix DW threshold ANTI-X:N+ (N<6) ; Roll:1 HAZARDOUS counter ; validité TORRENT+LETHAL HITS ; 16 tests rouge/vert | — | ⚡ |
 | analyzer | ✅ lot3 rules unités — charge_impact (seuil/dégât), reroll_charge, reroll_1_save_fight, oath_target, CTP, leader/support ; waaagh_invul retiré du snapshot EFFECTS ; 9 tests rouge/vert (2026-08-20) | — | ⚡ |
 | analyzer | ✅ phase_seq par joueur (2026-08-20) — séquences vérifiées par joueur indépendamment ; élimine 64 faux positifs phase_order (FIGHT P1 avant CHARGE P2 dans le même tour) ; 2 verrous rouge/vert | — | ⚡ |
+| analyzer | ✅ fix phase_order faux positifs gate séquence joueur sur COMMAND (2026-08-20) — analyzer_core gate phase_seq indexé par joueur ; faux positifs cross-player éliminés | — | ⚡ |
+| tests | ✅ corriger IDs 101#8/9, EZ dynamique, doublon (2026-08-20) — test_analyzer_coherency_ghost_opposite_camp : IDs figurines et EZ corrigés, doublon supprimé | — | ⚡ |
+| tests | ✅ _fought_line embed [MODEL_TYPES:] — paramètre mort unit_type actif, symétrie _fight_body_line (2026-08-20) | — | ⚡ |
 | analyzer | ✅ suppression player_alternation_violations (2026-08-20) — check retiré : 40K priorité par roll-off, aucune alternance stricte ; 204 faux positifs éliminés | — | ⚡ |
 | analyzer | ✅ verrou P1 priorité multi-tours (2026-08-20) — test verrou : P1 ouvre COMMAND sur 3 tours consécutifs → 0 violation ; docstring à jour | — | ⚡ |
 | infra | Perf `generate_compact_formation` | [infra.md#perf-formation](infra.md#perf-formation) | ⚡ |
