@@ -28,7 +28,8 @@
 >   après advance, §0.6.5 PV des personnages attachés) : arbitrage rendu le 2026-07-29 —
 >   « les règles doivent être suivies ». Le masque gym appliquait déjà 10.05 ; seule la
 >   correction des PV touche l'observation de l'agent → ré-entraînement à prévoir de ce fait.
-> - Reste À FAIRE : T2b, T3a, T7, et toutes les couches B et C.
+> - T2b (phase command) et T3a (déploiement) faits : 25 tests verts, 1 skip intentionnel.
+> - Reste À FAIRE : T7, et toutes les couches B et C.
 
 ---
 
@@ -582,15 +583,15 @@ NB : `move_squad_unplaced_destinations` (pools de toutes les figs non posées en
 | `left_click` | T3 | `squad_shoot_allocate_model` | ✅ T4 |
 | `right_click` | T3/T5 | `move_after_shooting` | T4 — inatteignable (aucune unité ne porte la règle) |
 | `end_phase` | T3 | `shoot` | hors périmètre (chemin gym) |
-| `deploy_unit` | T3a | `charge` | ✅ T5 |
-| `deploy_preview` | T3a | `charge_plan_state` | ✅ T5 |
-| `deploy_generate_formation` | T3a | `commit_charge_plan` | ✅ T5 |
-| `deploy_model_destinations` | T3a | `charge_autoplace` | ✅ T5 |
-| `deploy_squad_destinations` | T3a | `take_to_skies` | T5 |
-| `deploy_commit` | T3a | `force_charged` | T5 |
-| `change_roster` | T3a | `fight` | ✅ T6 |
-| `select_rule_choice` | T2b | `skip_fight` | ✅ T6 |
-| `force_battle_shock` | T2b/T7 | `squad_fight_assign` | ✅ T6 |
+| `deploy_unit` | ✅ T3a | `charge` | ✅ T5 |
+| `deploy_preview` | ✅ T3a | `charge_plan_state` | ✅ T5 |
+| `deploy_generate_formation` | ✅ T3a | `commit_charge_plan` | ✅ T5 |
+| `deploy_model_destinations` | ✅ T3a | `charge_autoplace` | ✅ T5 |
+| `deploy_squad_destinations` | T3a (skip: unité mono-fig) | `take_to_skies` | T5 |
+| `deploy_commit` | ✅ T3a | `force_charged` | T5 |
+| `change_roster` | ✅ T3a | `fight` | ✅ T6 |
+| `select_rule_choice` | T2b (inatteignable sans roster portant choice_timing_index) | `skip_fight` | ✅ T6 |
+| `force_battle_shock` | ✅ T2b/T7 | `squad_fight_assign` | ✅ T6 |
 | `pile_in_plan_state` | ✅ T6 | `squad_fight_assign_weapon` | T6 (variante par arme) |
 | `pile_in_autoplace` | ✅ T6 | `squad_fight_validate` | ✅ T6 |
 | `commit_pile_in_plan` | ✅ T6 | `squad_fight_manual_alloc` | ✅ T6 |
