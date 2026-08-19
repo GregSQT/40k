@@ -130,6 +130,7 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 | front | Validations navigateur en attente | [front.md#validations-nav](front.md#validations-nav) | ⚡ |
 | training+bot | ✅ Benchmark floor gate §4.D livré (2026-08-18) — 3 bots de référence (balanced/denial/reactive) sur 4 scénarios holdout_regular ; seuil 0.90 après mesure ; `model_gating_enabled` sur x1_long | [v11_chemin_critique.md#benchmark-gate](v11_chemin_critique.md#benchmark-gate) | |
 | training+bot | ✅ scenario_bench-01..04 dupliqués supprimés (2026-08-18) — fichiers byte-for-byte identiques aux scenario_bot-01..04, glob fallback ramassait 8 scénarios au lieu de 4, épisodes/scénario divisés par 2 sans contrepartie | — | |
+| analyzer | ✅ Alternance EPISODE END (2026-08-19) — vérification paire (T_{N-1}, T_N) manquante à EPISODE END ; finding /code-review valide ; finding 2 écarté (last_phase=None reset dans turn-change) | — | ⚡ |
 | analyzer | ✅ §2.8/§1.2/§1.4 DEAD-before-SHOOT corrigés (2026-08-19) — `dead_model_positions_episode` dans `freeze_select_targets` restitue géométrie+effectif réels au Select Targets step ; 6013+133+56 faux positifs → 0 ; 3 verrous rouge/vert | — | ⚡ |
 | analyzer | ✅ purge stale dead positions on removed={} (2026-08-19) — dead positions purgées quand removed vide (fix-analyzer-stale-dead-positions) | — | ⚡ |
 | tests | ✅ isolation _deployment_slot_order +5/+6 (2026-08-19) — couverture isolation slot order ; 5-6 tests supplémentaires (test-deployment-slot-order-isolation) | — | ⚡ |
