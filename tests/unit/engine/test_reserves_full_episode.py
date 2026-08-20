@@ -390,11 +390,14 @@ def test_an_off_table_unit_is_never_a_declarable_charge_target(monkeypatch) -> N
             "pas de 3e unité ennemie sur table : la borne positive (charge_check_eligibility "
             "accepte une cible posée) ne peut pas être vérifiée — vert vacant potentiel"
         )
-    # Placee DANS les 12" (seuil 60) mais HORS zone d'engagement (10) : au contact elle
-    # verrouillerait le chargeur et  refuserait pour ce motif-la.
+    # Placee DANS les 12" mais HORS zone d'engagement (1") : au contact elle
+    # verrouillerait le chargeur et refuserait pour ce motif-la.
+    # Le chargeur occupe les cols 0..2 ; la base est le milieu de la portee de charge
+    # depuis la figurine la plus proche (col 2), valide aux deux resolutions.
+    control_base_col = 2 + (CHARGE_THRESHOLD_INCHES * ish) // 2
     for offset, mid in enumerate(gs["squad_models"][control]):
         if mid in gs["models_cache"]:
-            update_model_position(gs, mid, 30 + (offset % 3), offset // 3)
+            update_model_position(gs, mid, control_base_col + (offset % 3), offset // 3)
     # Assertions intermédiaires : chaque garde de charge_check_eligibility vérifié
     # séparément. Sans elles, un refus de la fonction est opaque en xdist.
     charger_cells_pos = _squad_model_positions(gs, str(charger))
