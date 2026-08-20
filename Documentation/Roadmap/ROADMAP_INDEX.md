@@ -130,6 +130,7 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 | bot | ✅ bot_ranking parallélisé ProcessPoolExecutor (2026-08-20) — temps de tournoi réduit | — | ⚡ |
 | moteur | ✅ fix desperate_escape gym : purger _flee_mode/_desperate_escape_rolls sur unité morte (2026-08-20) — 3 tests verts, cycle rouge/vert | — | ⚡ |
 | moteur | ✅ simplify desperate_escape : .pop() symétrique PvP + helper test _engine_battle_shocked (2026-08-20) — 3 tests verts | — | ⚡ |
+| moteur+bot | ✅ simplify charge_handlers allTargetCoords via get_unit_position + Counter dupes bots (2026-08-20) — 2 sites charge_handlers migrés, O(n) détection doublons | — | ⚡ |
 | front | ✅ Tests front T7+T8–T13 livrés + T11 hook complet (2026-08-19) — 82 tests vitest verts (Couche B), Playwright 14 scénarios (T12-1..T12-8), hook __W40K_TEST__ étendu (movePreviewHexes/blinkTargetUnitIds/currentMode/hexToScreenCoords), data-testid board-viewport+board-canvas-container | [front.md#tests](front.md#tests) | ⚡ |
 | front | ✅ buildTargetPreviewStats extraite (2026-08-19) — fonction pure testable hors jsdom, supprime le calcul inline redondant overallProbability/expectedDamage dans useEngineAPI ; 4 nouveaux tests rouge/vert | — | ⚡ |
 | front | ✅ Tests review-test-assertions corrigés (2026-08-19) — assertions test HazardWarning et BoardWithAPI nettoyées | — | ⚡ |

@@ -5978,9 +5978,7 @@ def charge_commit_move_plan_handler(
             # active — position cible inchangée ici : pas de commit_move sur la cible).
             "allTargetIds": [str(t) for t in target_ids],
             "allTargetCoords": [
-                [int(game_state["units_cache"][str(t)]["col"]),
-                 int(game_state["units_cache"][str(t)]["row"])]
-                if str(t) in game_state["units_cache"] else None
+                [int(x) for x in pos] if (pos := get_unit_position(t, game_state)) is not None else None
                 for t in target_ids
             ],
             **_charge_dist,
@@ -6299,9 +6297,7 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
             # L16 — cibles de charge multiples (11.04) : miroir du site précédent.
             "allTargetIds": [str(t) for t in target_ids],
             "allTargetCoords": [
-                [int(game_state["units_cache"][str(t)]["col"]),
-                 int(game_state["units_cache"][str(t)]["row"])]
-                if str(t) in game_state["units_cache"] else None
+                [int(x) for x in pos] if (pos := get_unit_position(t, game_state)) is not None else None
                 for t in target_ids
             ],
             **_charge_dist,

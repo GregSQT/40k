@@ -53,6 +53,7 @@ import itertools
 import os
 import sys
 import zlib
+from collections import Counter
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -174,7 +175,7 @@ def main() -> int:
         bots = sorted(weights.keys())
     if len(bots) < 2:
         raise ValueError(f"Il faut au moins 2 bots pour un classement (recu {bots})")
-    dupes = [b for b in set(bots) if bots.count(b) > 1]
+    dupes = [b for b, c in Counter(bots).items() if c > 1]
     if dupes:
         raise ValueError(f"Noms de bots dupliques dans --bots : {dupes}")
 
