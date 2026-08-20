@@ -98,6 +98,19 @@ def test_l12_no_fnp_no_tag(tmp_path: Path) -> None:
     assert "[FNP:" not in _read(log)
 
 
+def test_l12_fnp_zero_attempts_still_tagged(tmp_path: Path) -> None:
+    """fnp_attempts=0 → le token [FNP:0/5+ ×0] doit quand même apparaître.
+
+    Cycle rouge→vert : remplacer `fnp_attempts is not None` par `fnp_attempts`
+    (garde truthiness) dans `_save_segments` fait passer ce test en rouge.
+    """
+    log = tmp_path / "step.log"
+    logger = _logger(log)
+    _log_shoot(logger, _shoot_fail_details(fnp_saves=0, fnp_attempts=0, fnp_threshold=5))
+    content = _read(log)
+    assert "[FNP:0/5+ ×0]" in content, f"Token FNP absent avec attempts=0 : {content}"
+
+
 def test_l12_fnp_save_success_no_tag(tmp_path: Path) -> None:
     """Save réussie (SAVED) → pas de segment Dmg, donc pas de [FNP:]."""
     log = tmp_path / "step.log"

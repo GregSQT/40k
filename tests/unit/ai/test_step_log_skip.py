@@ -21,6 +21,8 @@ import pytest
 
 from engine.phase_handlers.movement_handlers import _handle_skip_action as _move_skip
 from engine.phase_handlers.charge_handlers import _handle_skip_action as _charge_skip
+from engine.phase_handlers.shared_utils import PASS, SHOOTING
+from engine.phase_handlers.shooting_handlers import _handle_shooting_end_activation as _shoot_skip
 
 
 def _minimal_gs(phase: str = "move") -> Dict[str, Any]:
@@ -98,3 +100,53 @@ def test_skip_charge_entry_has_skip_reason() -> None:
     skip_entries = [e for e in gs["action_logs"] if e.get("type") == "skip"]
     assert len(skip_entries) == 1
     assert skip_entries[0]["skipReason"] == "no_valid_charge_destinations"
+
+
+# ── shoot ─────────────────────────────────────────────────────────────────────
+
+
+def _minimal_shoot_gs() -> Dict[str, Any]:
+    return {
+        "turn": 1,
+        "phase": "shoot",
+        "action_logs": [],
+        "action_log_seq": 0,
+        "shoot_activation_pool": ["42"],
+        "units_cache": {"42": {"col": 3, "row": 4}},
+        "units_shot": set(),
+    }
+
+
+def _shoot_unit() -> Dict[str, Any]:
+    return {"id": "42", "player": 1}
+
+
+def test_skip_shoot_entry_has_skip_reason_no_valid_actions() -> None:
+    """_handle_shooting_end_activation(skip_reason='no_valid_actions') → skipReason dans action_logs.
+
+    Cycle rouge→vert : supprimer le paramètre `skip_reason` de `_handle_shooting_end_activation`
+    ou retirer le bloc `if skip_reason is not None` fait passer ce test en rouge.
+    """
+    gs = _minimal_shoot_gs()
+    _shoot_skip(gs, _shoot_unit(), PASS, 1, PASS, SHOOTING, 1, action_type="skip", skip_reason="no_valid_actions")
+    skip_entries = [e for e in gs["action_logs"] if e.get("type") == "skip"]
+    assert len(skip_entries) == 1
+    assert skip_entries[0]["skipReason"] == "no_valid_actions"
+
+
+def test_skip_shoot_entry_has_skip_reason_no_usable_weapons() -> None:
+    """_handle_shooting_end_activation(skip_reason='no_usable_weapons') → skipReason dans action_logs."""
+    gs = _minimal_shoot_gs()
+    _shoot_skip(gs, _shoot_unit(), PASS, 1, PASS, SHOOTING, 1, action_type="skip", skip_reason="no_usable_weapons")
+    skip_entries = [e for e in gs["action_logs"] if e.get("type") == "skip"]
+    assert len(skip_entries) == 1
+    assert skip_entries[0]["skipReason"] == "no_usable_weapons"
+
+
+def test_skip_shoot_without_reason_has_no_skip_reason_key() -> None:
+    """Sans skip_reason → pas de clé skipReason dans l'entrée action_log."""
+    gs = _minimal_shoot_gs()
+    _shoot_skip(gs, _shoot_unit(), PASS, 1, PASS, SHOOTING, 1, action_type="skip")
+    skip_entries = [e for e in gs["action_logs"] if e.get("type") == "skip"]
+    assert len(skip_entries) == 1
+    assert "skipReason" not in skip_entries[0]

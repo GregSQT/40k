@@ -2423,7 +2423,7 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
         unit["valid_target_pool"] = []
         game_state["active_shooting_unit"] = unit_id
         # Aucune cible : rien à faire en tir (l'advance se joue en phase de mouvement) → skip.
-        _success, result = _handle_shooting_end_activation(game_state, unit, PASS, 1, PASS, SHOOTING, 1, action_type="skip")
+        _success, result = _handle_shooting_end_activation(game_state, unit, PASS, 1, PASS, SHOOTING, 1, action_type="skip", skip_reason="no_valid_actions")
         result["skip_reason"] = "no_valid_actions"
         _emit_shoot_activation_perf(game_state, str(unit_id), _t_act0, _t_after_los, None, None, None, None, None, "empty_pool_skip", 0)
         return result
@@ -2471,7 +2471,7 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
         game_state["active_shooting_unit"] = unit_id
         # Aucune cible : rien à faire en tir (l'advance se joue en phase de mouvement) → skip.
         _success, result = _handle_shooting_end_activation(
-            game_state, unit, PASS, 1, PASS, SHOOTING, 1, action_type="skip"
+            game_state, unit, PASS, 1, PASS, SHOOTING, 1, action_type="skip", skip_reason="no_valid_actions"
         )
         result["skip_reason"] = "no_valid_actions"
         _emit_shoot_activation_perf(
@@ -2507,7 +2507,7 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
     if not usable_weapons:
         # No usable weapons under current rules -> no valid actions (l'advance se joue en phase de mouvement) → skip.
         _success, result = _handle_shooting_end_activation(
-            game_state, unit, PASS, 1, PASS, SHOOTING, 1, action_type="skip"
+            game_state, unit, PASS, 1, PASS, SHOOTING, 1, action_type="skip", skip_reason="no_usable_weapons"
         )
         result["skip_reason"] = "no_usable_weapons"
         _emit_shoot_activation_perf(
@@ -5128,7 +5128,8 @@ def _apply_move_after_shooting(
 
 def _handle_shooting_end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],
                                      arg1: str, arg2: int, arg3: str, arg4: str, arg5: int = 1,
-                                     action_type: Optional[str] = None, include_attack_results: bool = True) -> Tuple[bool, Dict[str, Any]]:
+                                     action_type: Optional[str] = None, include_attack_results: bool = True,
+                                     skip_reason: Optional[str] = None) -> Tuple[bool, Dict[str, Any]]:
     """Handle shooting activation end using end_activation (aligned with MOVE phase).
     
     This function:
@@ -5239,18 +5240,18 @@ def _handle_shooting_end_activation(game_state: Dict[str, Any], unit: Dict[str, 
     # ici on log la ligne skip sans raison (optionnelle pour le formateur StepLogger).
     if action_type == "skip":
         _skip_col, _skip_row = require_unit_position(unit, game_state)
-        append_action_log(
-            game_state,
-            {
-                "type": "skip",
-                "turn": game_state["turn"],
-                "phase": game_state.get("phase", "shoot"),
-                "unitId": unit["id"],
-                "player": require_key(unit, "player"),
-                "col": _skip_col,
-                "row": _skip_row,
-            },
-        )
+        _skip_entry: Dict[str, Any] = {
+            "type": "skip",
+            "turn": game_state["turn"],
+            "phase": game_state.get("phase", "shoot"),
+            "unitId": unit["id"],
+            "player": require_key(unit, "player"),
+            "col": _skip_col,
+            "row": _skip_row,
+        }
+        if skip_reason is not None:
+            _skip_entry["skipReason"] = skip_reason
+        append_action_log(game_state, _skip_entry)
 
     # Update result with action type and activation_complete (like _handle_skip_action in MOVE)
     result.update({

@@ -6821,6 +6821,30 @@ class W40KEngine(gym.Env):
                 raise KeyError(f"Squad {squad_id} introuvable avant déplacement")
             _move_is_fly = _fta(self.game_state, _move_unit_pre, str(squad_id))
 
+            # Desperate Escape (09.07) : unité engagée + battle-shocked → jets hazard AVANT le move.
+            # En PvP le chemin passe par `_handle_hazard_confirm` ; en gym ce handler n'est jamais
+            # appelé, donc les jets (et `_flee_mode`) n'étaient posés nulle part — step.log émettait
+            # toujours [ORDERED RETREAT] et les jets hazard étaient absents de l'épisode.
+            if move_type == "fall_back":
+                from engine.phase_handlers.shared_utils import (
+                    desperate_escape_pre_move, _squad_is_in_enemy_er,
+                )
+                from engine.phase_handlers import movement_handlers as _mh_de
+                _was_engaged = _squad_is_in_enemy_er(self.game_state, str(squad_id))
+                _is_desp, _is_alive, _ = desperate_escape_pre_move(
+                    str(squad_id), self.game_state, _was_engaged, auto_resolve=True
+                )
+                if _is_desp and not _is_alive:
+                    # Jets ont détruit l'unité : fin d'activation sans déplacement (miroir PvP
+                    # `_resume_after_hazard` → cas `not is_unit_alive`).
+                    _mh_de._invalidate_all_destination_pools_after_movement(self.game_state)
+                    _mh_de.movement_clear_preview(self.game_state)
+                    return True, {
+                        "action": "desperate_escape_died",
+                        "squad_id": squad_id,
+                        "activation_complete": True,
+                    }
+
             # Plus de dry-run de legalite ici, et plus de degradation silencieuse en `squad_wait` :
             # la destination VIENT du pool que le masque a lui-meme utilise (meme carte, cf.
             # `read_squad_move_cell_map`), donc elle est legale par construction. L'ancien

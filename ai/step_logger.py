@@ -230,7 +230,7 @@ def _save_segments(
     if save_result == "FAIL":
         _dmg_str = f"Dmg:{damage}HP"
         # L12 — FNP:saves/seuil+ ×tentatives (24.12) ; absent si pas de FNP.
-        if fnp_saves is not None and fnp_attempts:
+        if fnp_saves is not None and fnp_attempts is not None:
             _dmg_str += f" [FNP:{fnp_saves}/{fnp_threshold}+ ×{fnp_attempts}]"
         segments.append(_dmg_str)
     return segments
@@ -1324,7 +1324,8 @@ class StepLogger:
                     all_target_coords = details.get("all_target_coords")
                     if all_target_ids and len(all_target_ids) > 1:
                         parts = []
-                        for _tid, _tco in zip(all_target_ids, all_target_coords or []):
+                        _tco_list = all_target_coords if all_target_coords is not None else [None] * len(all_target_ids)
+                        for _tid, _tco in zip(all_target_ids, _tco_list):
                             _co_str = f"({_tco[0]},{_tco[1]})" if _tco else ""
                             parts.append(f"Unit {_tid}{_co_str}")
                         target_label = ",".join(parts)
@@ -1558,7 +1559,7 @@ class StepLogger:
                         fnp_attempts=details.get("fnp_attempts"),
                         fnp_threshold=details.get("fnp_threshold"),
                     ))
-            
+
             detail_msg = f" - {' - '.join(detail_parts)}"
 
             # Add reward if available

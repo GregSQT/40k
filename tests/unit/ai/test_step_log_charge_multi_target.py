@@ -111,3 +111,32 @@ def test_l16_no_all_target_ids_uses_primary(tmp_path: Path) -> None:
     _log_charge(logger, details)
     content = _read(log)
     assert "Unit 20(5,3)" in content
+
+
+def test_l16_all_target_coords_none_preserves_ids(tmp_path: Path) -> None:
+    """all_target_ids présent mais all_target_coords=None → IDs présents sans crash.
+
+    Cycle rouge→vert : remplacer `_tco_list = all_target_coords if all_target_coords is not None
+    else [None]*len(...)` par `all_target_coords or []` fait passer ce test en rouge
+    (target_label devient "" et les IDs disparaissent).
+    """
+    log = tmp_path / "step.log"
+    logger = _logger(log)
+    details: Dict[str, Any] = {
+        "current_turn": 1,
+        "reward": 0.0,
+        "start_pos": (0, 0),
+        "end_pos": (1, 2),
+        "is_fly_move": False,
+        "unit_with_coords": "10(1,2)",
+        "target_id": "20",
+        "target_coords": (5, 3),
+        "all_target_ids": ["20", "30"],
+        "all_target_coords": None,
+        "charge_roll": 8,
+        "charge_failed_reason": None,
+    }
+    _log_charge(logger, details)
+    content = _read(log)
+    assert "Unit 20" in content, f"ID cible 20 absent : {content}"
+    assert "Unit 30" in content, f"ID cible 30 absent : {content}"
