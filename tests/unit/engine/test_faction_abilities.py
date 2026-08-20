@@ -213,10 +213,7 @@ def _shoot_state(
     return gs
 
 
-def _uc(col, row, *, player):
-    occ = {(col, row)} if col >= 0 and row >= 0 else set()
-    return {"BASE_SHAPE": "round", "BASE_SIZE": 1, "col": col, "row": row,
-            "occupied_hexes": occ, "VALUE": 10.0, "player": player}
+from tests.unit.engine._state_builders import units_cache_entry as _uc
 
 
 def _records(gs):

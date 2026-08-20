@@ -19,6 +19,20 @@ from engine.phase_handlers.shared_utils import build_units_cache
 from tests._state_invariants import turn_state_invariants, unit_invariants
 from tests.unit.engine._config_helpers import build_game_rules, build_move_rules
 
+def units_cache_entry(col: int, row: int, *, value: float = 10.0, player: int = 1) -> Dict[str, Any]:
+    """Entrée ``units_cache`` minimale : socle rond taille 1, hex occupé, VALUE et player pilotables.
+
+    Utilisé par les tests tir/mêlée qui construisent ``units_cache`` à la main plutôt que via
+    ``build_units_cache`` — tous appellent la même structure, d'où ce helper partagé.
+    """
+    return {
+        "BASE_SHAPE": "round", "BASE_SIZE": 1,
+        "col": col, "row": row,
+        "occupied_hexes": {(col, row)},
+        "VALUE": value, "player": player,
+    }
+
+
 #: Hauteur de figurine par défaut (pouces). Toute unité de roster en porte une, et l'engagement 3D
 #: (§03.04) comme la clairance (§13.06) lèvent sans elle : l'omettre rendrait les états de test
 #: incapables d'atteindre les chemins verticaux. Les tests qui la CITENT l'importent d'ici — trois

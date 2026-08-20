@@ -51,9 +51,7 @@ def _kw(*names):
     return [{"keywordId": n} for n in names]
 
 
-def _uc(col, row, *, player):
-    return {"BASE_SHAPE": "round", "BASE_SIZE": 1, "col": col, "row": row,
-            "occupied_hexes": {(col, row)}, "VALUE": 10.0, "player": player}
+from tests.unit.engine._state_builders import units_cache_entry as _uc
 
 
 def _game_state(weapon_rules, *, bs=4, dmg=1, moved_inches=0.0, shooter_hp=3, target_hp=9):

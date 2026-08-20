@@ -26,6 +26,7 @@ import pytest
 from engine.phase_handlers.attack_sequence import WeaponAttackProfile
 from engine.phase_handlers.shared_utils import SHOOT_CTX, _emit_squad_shoot_log
 from tests._state_invariants import turn_state_invariants
+from tests.unit.engine._state_builders import units_cache_entry
 
 
 TARGET_COL, TARGET_ROW = 5, 7
@@ -179,10 +180,6 @@ def _live_shoot_state() -> Dict[str, Any]:
               "points_per_hp": 5.0, "VALUE": 10.0,
               "col": TGT_ANCHOR[0], "row": TGT_ANCHOR[1]}
 
-    def _uc(col, row, player):
-        return {"BASE_SHAPE": "round", "BASE_SIZE": 1, "col": col, "row": row,
-                "occupied_hexes": {(col, row)}, "VALUE": 10.0, "player": player}
-
     return {**turn_state_invariants(),
         "gym_training_mode": True,
         "turn": 1, "phase": "shoot",
@@ -190,7 +187,7 @@ def _live_shoot_state() -> Dict[str, Any]:
         "models_cache": {"A1": attacker, "T1": target},
         "squad_models": {"1": ["A1"], "2": ["T1"]},
         "squad_cache": {"1": {"model_count_at_start": 1}, "2": {"model_count_at_start": 1}},
-        "units_cache": {"1": _uc(*ATK_ANCHOR, 0), "2": _uc(*TGT_ANCHOR, 1)},
+        "units_cache": {"1": units_cache_entry(*ATK_ANCHOR, player=0), "2": units_cache_entry(*TGT_ANCHOR, player=1)},
         "units": [{"id": "1", "player": 0}, {"id": "2", "player": 1}],
         "unit_by_id": {"1": {"id": "1", "UNIT_RULES": []}, "2": {"id": "2", "UNIT_RULES": []}},
         "objectives": [], "units_moved": set(), "units_advanced": set(),

@@ -27,9 +27,7 @@ def _neutralise(monkeypatch):
     monkeypatch.setattr(shooting_handlers, "_ranged_distance_metric", lambda *args, **kwargs: "euclidean")
 
 
-def _uc(col, row, *, player=1):
-    return {"BASE_SHAPE": "round", "BASE_SIZE": 1, "col": col, "row": row,
-            "occupied_hexes": {(col, row)}, "VALUE": 10.0, "player": player}
+from tests.unit.engine._state_builders import units_cache_entry as _uc
 
 
 # ------------------------------------------------------------------------------ BLAST (tir)
