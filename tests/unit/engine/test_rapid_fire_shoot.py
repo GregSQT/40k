@@ -20,6 +20,7 @@ import random
 from engine.phase_handlers import shooting_handlers
 from engine.game_state import initial_faction_ability_state
 from tests.unit.engine._roll_helpers import roll_shoot_intent
+from tests.unit.engine._state_builders import units_cache_entry as _uc
 
 
 def _neutralise(monkeypatch):
@@ -28,8 +29,6 @@ def _neutralise(monkeypatch):
     monkeypatch.setattr(shooting_handlers, "_get_unit_by_id", lambda gs, sid: {"id": sid})
     monkeypatch.setattr(shooting_handlers, "_ranged_distance_metric", lambda *args, **kwargs: "euclidean")
 
-
-from tests.unit.engine._state_builders import units_cache_entry as _uc
 
 
 def _game_state(weapon_rules, *, target_row):

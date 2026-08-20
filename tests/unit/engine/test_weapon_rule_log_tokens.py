@@ -28,6 +28,7 @@ from engine.phase_handlers.attack_sequence import ANTI_RULE_IDS
 from engine.phase_handlers.fight_handlers import build_manual_fight_allocation
 from engine.phase_handlers.shared_utils import build_manual_shoot_allocation
 from tests._state_invariants import turn_state_invariants
+from tests.unit.engine._state_builders import units_cache_entry as _uc
 
 
 def _seq(monkeypatch, rolls):
@@ -49,8 +50,6 @@ def _seq(monkeypatch, rolls):
     )
     return seq
 
-
-from tests.unit.engine._state_builders import units_cache_entry as _uc
 
 
 def _game_state(

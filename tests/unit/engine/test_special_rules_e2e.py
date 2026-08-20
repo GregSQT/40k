@@ -25,6 +25,7 @@ import random
 from engine.phase_handlers import shooting_handlers
 from engine.phase_handlers.shared_utils import build_manual_shoot_allocation
 from tests._state_invariants import turn_state_invariants
+from tests.unit.engine._state_builders import units_cache_entry as _uc
 
 
 def _seq(monkeypatch, rolls):
@@ -50,8 +51,6 @@ INCHES_TO_SUBHEX = 5
 def _kw(*names):
     return [{"keywordId": n} for n in names]
 
-
-from tests.unit.engine._state_builders import units_cache_entry as _uc
 
 
 def _game_state(weapon_rules, *, bs=4, dmg=1, moved_inches=0.0, shooter_hp=3, target_hp=9):

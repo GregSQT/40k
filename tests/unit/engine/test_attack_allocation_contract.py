@@ -33,6 +33,7 @@ from engine.phase_handlers.fight_handlers import build_manual_fight_allocation
 from engine.phase_handlers.shared_utils import build_manual_shoot_allocation
 from tests._state_invariants import turn_state_invariants
 from tests.unit.engine._config_helpers import build_game_rules
+from tests.unit.engine._state_builders import units_cache_entry as _uc
 
 #: Les deux chemins d'allocation à couvrir : (phase, point d'entrée). Le paramètre porte la
 #: phase plutôt qu'un booléen — c'est lui qui choisit l'arme, la clé d'intents et le libellé.
@@ -53,8 +54,6 @@ def _seq(monkeypatch, rolls):
     monkeypatch.setattr(shooting_handlers, "compute_unit_los", lambda gs, s, t: {"cover": False})
     monkeypatch.setattr(shooting_handlers, "_get_unit_by_id", lambda gs, sid: {"id": sid})
 
-
-from tests.unit.engine._state_builders import units_cache_entry as _uc
 
 
 def _target_model(index):

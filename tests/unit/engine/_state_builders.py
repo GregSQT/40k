@@ -28,7 +28,7 @@ def units_cache_entry(col: int, row: int, *, value: float = 10.0, player: int = 
     return {
         "BASE_SHAPE": "round", "BASE_SIZE": 1,
         "col": col, "row": row,
-        "occupied_hexes": {(col, row)},
+        "occupied_hexes": {(col, row)} if col >= 0 and row >= 0 else set(),
         "VALUE": value, "player": player,
     }
 

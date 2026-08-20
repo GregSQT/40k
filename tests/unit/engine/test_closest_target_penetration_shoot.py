@@ -22,6 +22,7 @@ import random
 from engine.phase_handlers import shooting_handlers
 from engine.game_state import initial_faction_ability_state
 from tests.unit.engine._roll_helpers import roll_shoot_intent
+from tests.unit.engine._state_builders import units_cache_entry as _uc_entry
 
 
 def _neutralise_rng_and_cover(monkeypatch):
@@ -37,8 +38,6 @@ def _neutralise_rng_and_cover(monkeypatch):
     # Pool d eligibles = les deux escouades ennemies (evite LoS/portee reelles).
     monkeypatch.setattr(shooting_handlers, "shooting_build_valid_target_pool", lambda gs, sid: ["2", "3"])
 
-
-from tests.unit.engine._state_builders import units_cache_entry as _uc_entry
 
 
 def _game_state(unit_rules):

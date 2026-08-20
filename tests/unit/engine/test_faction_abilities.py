@@ -53,6 +53,7 @@ from engine.phase_handlers import shooting_handlers
 from engine.w40k_core import W40KEngine
 from tests._state_invariants import turn_state_invariants, unit_invariants
 from tests.unit.engine._roll_helpers import roll_fight_intent
+from tests.unit.engine._state_builders import units_cache_entry as _uc
 
 
 ORKS = [{"keywordId": "ORKS"}]
@@ -211,9 +212,6 @@ def _shoot_state(
         },
     }
     return gs
-
-
-from tests.unit.engine._state_builders import units_cache_entry as _uc
 
 
 def _records(gs):

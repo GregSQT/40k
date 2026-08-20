@@ -20,6 +20,7 @@ import random
 from engine.phase_handlers import shooting_handlers
 from engine.phase_handlers.shared_utils import build_manual_shoot_allocation
 from tests._state_invariants import turn_state_invariants
+from tests.unit.engine._state_builders import units_cache_entry as _uc
 
 
 def _seq(monkeypatch, rolls):
@@ -35,8 +36,6 @@ def _seq(monkeypatch, rolls):
     monkeypatch.setattr(shooting_handlers, "_get_unit_by_id", lambda gs, sid: {"id": sid})
     return seq
 
-
-from tests.unit.engine._state_builders import units_cache_entry as _uc
 
 
 def _game_state(*, bs=4, strength=4, ap=0, dmg=1, toughness=4, armor_save=4, hp=3,
