@@ -2,13 +2,18 @@
 
 ---
 
-## Étape 8 — Run en cours {#etape8}
+## Étape 8 — Mesure reference bots renforcés {#etape8}
 
-🔄 **En cours le 2026-08-17** : run `x1_long --new --resolution 1` lancé (modèle précédent incompatible obs P3-4).
+✅ Run `x1_long --new` terminé (2026-08-20), 4 critères pipeline VERTS.
+✅ Reference bots renforcés : scoring 5D multi-critères (poids hardcodés, isolés de `bot_movement_weights.json`), charge denial conditionnelle à l'objectif, plan RETREAT renommé CONTEST.
 
-**À faire à la fin** : vérifier les critères pipeline ([training.md#run-verif](training.md#run-verif)), puis `--test-only --step` pour rejouer la ligne de base du panel, puis **poser le seuil du gate `benchmark_floor` depuis cette première mesure** (le gate est livré, son seuil attend la mesure — décision 2026-08-15 : il se pose APRÈS, un seuil a priori au-dessus du `combined` courant ne s'ouvrirait jamais).
+**À faire** : relancer `bot_ranking.py` sur les 3 reference bots pour mesurer les nouveaux win-rates, calibrer les poids si nécessaire, puis poser le seuil `benchmark_floor` (gate livré, seuil à poser après mesure).
 
-⚠️ Les chiffres des §8/§9 du doc de chantier sont à rejouer : échantillons insuffisants + erreur d'arithmétique sur le `combined` (§11.1).
+```
+W40K_BOARD_PATH=board/44x60x1 python3 scripts/bot_ranking.py \
+  --agent ArmageddonAgent --training-config x1 --scenario-pool holdout \
+  --bots reference_balanced,reference_denial,reference_reactive --episodes 20
+```
 
 Ligne de base actuelle (à battre) : `combined = 0,7433`, pire bot `racer = 0,630`.
 
