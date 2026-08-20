@@ -6282,6 +6282,10 @@ class W40KEngine(gym.Env):
             # formateur (move/advance/flee), mais ce champ rend la valeur textuelle accessible au
             # formateur pour produire le token [MOVE_TYPE:…] sans retour au raw_log.
             ("move_type", "move_type"),
+            # L16 — cibles de charge multiples (11.04) : liste d'IDs et liste de coords
+            # (parallèles, même index). Le formateur construit "Unit A(c,r),Unit B(c,r)".
+            ("allTargetIds", "all_target_ids"),
+            ("allTargetCoords", "all_target_coords"),
         ):
             value = raw_log.get(src)  # get allowed
             if value is not None:
@@ -7051,6 +7055,14 @@ class W40KEngine(gym.Env):
                         "targetRow": _charge_target[1] if _charge_target else None,
                         "timestamp": "server_time",
                         "reward": 0.0,
+                        # L16 — cibles de charge multiples (11.04).
+                        "allTargetIds": [str(t) for t in target_squad_ids],
+                        "allTargetCoords": [
+                            [int(self.game_state["units_cache"][str(t)]["col"]),
+                             int(self.game_state["units_cache"][str(t)]["row"])]
+                            if str(t) in self.game_state.get("units_cache", {}) else None
+                            for t in target_squad_ids
+                        ],
                         **_charge_dist,
                     },
                 )
@@ -7117,6 +7129,14 @@ class W40KEngine(gym.Env):
                         "timestamp": "server_time",
                         "reward": 0.0,
                         "models_segment": _charge_models_seg,
+                        # L16 — cibles de charge multiples (11.04) : miroir des 2 sites PvP.
+                        "allTargetIds": [str(t) for t in target_squad_ids],
+                        "allTargetCoords": [
+                            [int(self.game_state["units_cache"][str(t)]["col"]),
+                             int(self.game_state["units_cache"][str(t)]["row"])]
+                            if str(t) in self.game_state.get("units_cache", {}) else None
+                            for t in target_squad_ids
+                        ],
                         **_charge_dist,
                     },
                 )

@@ -1293,9 +1293,20 @@ class StepLogger:
                     start_col, start_row = details["start_pos"]
                     end_col, end_row = details["end_pos"]
                     # Include target coordinates if available
-                    target_coords = details.get("target_coords")
-                    target_coords_str = f"({target_coords[0]},{target_coords[1]})" if target_coords else ""
-                    target_label = f"Unit {target_id}{target_coords_str}"
+                    # L16 — cibles multiples (11.04) : si all_target_ids présent, construire
+                    # "Unit M(c,r),Unit K(c,r)" ; sinon fallback sur la cible primaire seule.
+                    all_target_ids = details.get("all_target_ids")
+                    all_target_coords = details.get("all_target_coords")
+                    if all_target_ids and len(all_target_ids) > 1:
+                        parts = []
+                        for _tid, _tco in zip(all_target_ids, all_target_coords or []):
+                            _co_str = f"({_tco[0]},{_tco[1]})" if _tco else ""
+                            parts.append(f"Unit {_tid}{_co_str}")
+                        target_label = ",".join(parts)
+                    else:
+                        target_coords = details.get("target_coords")
+                        target_coords_str = f"({target_coords[0]},{target_coords[1]})" if target_coords else ""
+                        target_label = f"Unit {target_id}{target_coords_str}"
                     # Include charge roll (2d6) if available
                     charge_roll = details.get("charge_roll")
                     ability_suffix = _ability_token(details.get("ability_display_name"))
