@@ -47,26 +47,33 @@ def floors_env():
     from ai.unit_registry import UnitRegistry
     from services.api_server import get_agents_from_scenario
 
-    W40KEngine, _ = setup_imports()
-    ur = UnitRegistry()
-    if not os.path.exists(SCENARIO):
-        raise FileNotFoundError(SCENARIO)
-    env = W40KEngine(
-        rewards_config="default",
-        training_config_name="x5_new",
-        controlled_agent=sorted(get_agents_from_scenario(SCENARIO, ur))[0],
-        scenario_file=SCENARIO,
-        unit_registry=ur,
-        quiet=True,
-        gym_training_mode=True,
-    )
-    # Les chemins 3D d'étage sont euclidean-only (métrique GAMEPLAY). À x1, geometry_is_hex=True
-    # prime sur tout override (resolve_gym_split_metric règle 3 : « prime sur tout »), donc
-    # GYM_DISTANCE_METRIC_KEY="euclidean" serait ignoré. On utilise x5 (inches_to_subhex=5>1,
-    # geometry_is_hex=False) pour que l'override soit respecté — le scénario est natif x5.
-    env.reset(seed=42)
-    env.game_state[GYM_DISTANCE_METRIC_KEY] = "euclidean"
-    return env
+    # W40K_BOARD_PATH (set par d'autres modules de test) écrase le board config et force x1,
+    # ce qui désactive _cm_use_eucl et vide le pool d'étage. On garantit le board x5 du scénario.
+    _prev_board = os.environ.pop("W40K_BOARD_PATH", None)
+    try:
+        W40KEngine, _ = setup_imports()
+        ur = UnitRegistry()
+        if not os.path.exists(SCENARIO):
+            raise FileNotFoundError(SCENARIO)
+        env = W40KEngine(
+            rewards_config="default",
+            training_config_name="x5_new",
+            controlled_agent=sorted(get_agents_from_scenario(SCENARIO, ur))[0],
+            scenario_file=SCENARIO,
+            unit_registry=ur,
+            quiet=True,
+            gym_training_mode=True,
+        )
+        # Les chemins 3D d'étage sont euclidean-only (métrique GAMEPLAY). À x1, geometry_is_hex=True
+        # prime sur tout override (resolve_gym_split_metric règle 3 : « prime sur tout »), donc
+        # GYM_DISTANCE_METRIC_KEY="euclidean" serait ignoré. On utilise x5 (inches_to_subhex=5>1,
+        # geometry_is_hex=False) pour que l'override soit respecté — le scénario est natif x5.
+        env.reset(seed=42)
+        env.game_state[GYM_DISTANCE_METRIC_KEY] = "euclidean"
+        return env
+    finally:
+        if _prev_board is not None:
+            os.environ["W40K_BOARD_PATH"] = _prev_board
 
 
 @pytest.fixture(scope="module")

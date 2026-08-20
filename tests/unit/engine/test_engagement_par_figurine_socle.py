@@ -39,21 +39,28 @@ def attached_env():
     from ai.unit_registry import UnitRegistry
     from services.api_server import get_agents_from_scenario
 
-    W40KEngine, _ = setup_imports()
-    ur = UnitRegistry()
-    if not os.path.exists(SCENARIO):
-        raise FileNotFoundError(SCENARIO)
-    env = W40KEngine(
-        rewards_config="default",
-        training_config_name="x1",
-        controlled_agent=sorted(get_agents_from_scenario(SCENARIO, ur))[0],
-        scenario_file=SCENARIO,
-        unit_registry=ur,
-        quiet=True,
-        gym_training_mode=True,
-    )
-    env.reset(seed=1)
-    return env
+    # W40K_BOARD_PATH (set par d'autres modules de test) écrase le board config et normalise
+    # tous les socles à BASE_SIZE=1 (x1). On garantit ici le board x5 du scénario.
+    _prev_board = os.environ.pop("W40K_BOARD_PATH", None)
+    try:
+        W40KEngine, _ = setup_imports()
+        ur = UnitRegistry()
+        if not os.path.exists(SCENARIO):
+            raise FileNotFoundError(SCENARIO)
+        env = W40KEngine(
+            rewards_config="default",
+            training_config_name="x1",
+            controlled_agent=sorted(get_agents_from_scenario(SCENARIO, ur))[0],
+            scenario_file=SCENARIO,
+            unit_registry=ur,
+            quiet=True,
+            gym_training_mode=True,
+        )
+        env.reset(seed=1)
+        return env
+    finally:
+        if _prev_board is not None:
+            os.environ["W40K_BOARD_PATH"] = _prev_board
 
 
 @pytest.fixture
