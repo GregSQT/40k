@@ -5963,6 +5963,10 @@ class W40KEngine(gym.Env):
                 details["target_models_segment"] = self._models_segment_for_unit(
                     target_id, label="TARGET_MODELS"
                 )
+        # L10 — type de tir EXPLICITE (10.02) ; None sur le combat (pas de shoot_type_choose).
+        _shoot_type = raw_log.get("shootType")  # get allowed : absent sur les logs de combat
+        if _shoot_type is not None:
+            details["shoot_type"] = str(_shoot_type)
         return details
 
     def _flush_squad_action_logs_to_step_logger(
@@ -6272,6 +6276,12 @@ class W40KEngine(gym.Env):
             ("reason", "reason"),
             # L24 — motif du skip (no_valid_move_destinations, no_valid_actions, …).
             ("skipReason", "skip_reason"),
+            # L10 — type de move EXPLICITE dans step.log : normal / advance / fall_back /
+            # remain_stationary / ingress / surge / scout. Présent sur les action_logs de type
+            # "move" uniquement ; la nuance est DÉJÀ exploitée pour choisir l'action_type du
+            # formateur (move/advance/flee), mais ce champ rend la valeur textuelle accessible au
+            # formateur pour produire le token [MOVE_TYPE:…] sans retour au raw_log.
+            ("move_type", "move_type"),
         ):
             value = raw_log.get(src)  # get allowed
             if value is not None:

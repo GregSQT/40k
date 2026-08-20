@@ -896,6 +896,10 @@ class StepLogger:
             else:
                 raise KeyError("Move action missing required position data")
 
+            # L10 — [MOVE_TYPE:…] explicite (débloque 09.02, 09.04, etc.).
+            _move_type = details.get("move_type")
+            if _move_type is not None:
+                base_msg += f" [MOVE_TYPE:{_move_type}]"
             # Add position reward if available (like shooting reward)
             reward = details.get("reward")
             if reward is not None:
@@ -956,6 +960,10 @@ class StepLogger:
             else:
                 raise KeyError("Flee action missing required position data")
 
+            # L10 — [MOVE_TYPE:fall_back] explicite.
+            _move_type = details.get("move_type")
+            if _move_type is not None:
+                base_msg += f" [MOVE_TYPE:{_move_type}]"
             # Add position reward if available
             reward = details.get("reward")
             if reward is not None:
@@ -983,6 +991,10 @@ class StepLogger:
             else:
                 raise KeyError("Advance action missing required position data")
 
+            # L10 — [MOVE_TYPE:advance] explicite.
+            _move_type = details.get("move_type")
+            if _move_type is not None:
+                base_msg += f" [MOVE_TYPE:{_move_type}]"
             # Add reward if available
             reward = details.get("reward")
             if reward is not None:
@@ -1160,6 +1172,11 @@ class StepLogger:
             # manque). Present uniquement pour les armes portant l une ou l autre regle.
             if details.get("at_half_range") is True:
                 shot_tags.append("[HALF RANGE]")
+            # L10 — [SHOOT_TYPE:…] 10.02 : type de tir choisi pour cette activation.
+            # Absent sur les actions de combat (shoot_type est None cote producteur).
+            _shoot_type = details.get("shoot_type")
+            if _shoot_type is not None:
+                shot_tags.append(f"[SHOOT_TYPE:{_shoot_type}]")
             shot_tags_suffix = f" {' '.join(shot_tags)}" if shot_tags else ""
             if weapon_name:
                 base_msg = f"{unit_label} SHOT{shot_tags_suffix} {target_label} with [{weapon_name}]"

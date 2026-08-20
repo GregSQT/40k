@@ -9190,6 +9190,14 @@ def _emit_squad_shoot_log(game_state: Dict[str, Any], g: Dict[str, Any], ctx: Ma
         "antiKeyword": require_key(g, "attack_profile").anti_keyword,
         "antiThreshold": require_key(g, "attack_profile").anti_threshold,
         "shootDetails": [{"shotNumber": i + 1, **s} for i, s in enumerate(g["shots"])],
+        # L10 — type de tir EXPLICITE (10.02) : normal / assault / close_quarters / indirect.
+        # Lu depuis squad_shooting_type_choice ; "normal" par défaut pour le combat (ctx.log_type
+        # == "combat") qui ne passe pas par squad_shooting_type_choose.
+        "shootType": (
+            game_state.get(SQUAD_SHOOTING_TYPE_CHOICE_KEY, {}).get(attacker_squad_id_str, "normal")
+            if ctx.log_type == "shoot"
+            else None
+        ),
         # Pré-capture du segment [MODELS:] AVANT que les effets de l'action (hazardous,
         # destroy_model) ne modifient occupied_hexes_by_model. Sans pré-capture,
         # _build_shot_details lirait le segment LIVE au flush — après que les figurines tuées
