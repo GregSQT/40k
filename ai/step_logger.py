@@ -964,6 +964,13 @@ class StepLogger:
             _move_type = details.get("move_type")
             if _move_type is not None:
                 base_msg += f" [MOVE_TYPE:{_move_type}]"
+            # L11 — mode de fall-back (09.07) et jets de hazard Desperate Escape (06.03).
+            _flee_mode = details.get("flee_mode")
+            if _flee_mode is not None:
+                base_msg += f" [{_flee_mode.upper().replace('_', ' ')}]"
+            _de_rolls = details.get("desperate_escape_rolls")
+            if _de_rolls:
+                base_msg += f" Hazard:{','.join(str(r) for r in _de_rolls)}"
             # Add position reward if available
             reward = details.get("reward")
             if reward is not None:

@@ -6289,6 +6289,9 @@ class W40KEngine(gym.Env):
             # L17 — cibles de pile-in (12.03) et mode de consolidation (12.08).
             ("pileInTargetIds", "pile_in_target_ids"),
             ("consolidationMode", "consolidation_mode"),
+            # L11 — mode de fall-back (09.07) et jets de hazard Desperate Escape (06.03).
+            ("fleeMode", "flee_mode"),
+            ("desperateEscapeRolls", "desperate_escape_rolls"),
         ):
             value = raw_log.get(src)  # get allowed
             if value is not None:
@@ -6876,6 +6879,17 @@ class W40KEngine(gym.Env):
                     "timestamp": "server_time",
                     "action_name": action_name,
                     "reward": 0.0,
+                    # L11 — mode de fall-back (09.07) et jets de hazard (Desperate Escape 06.03).
+                    # `_flee_mode` est posé par `desperate_escape_pre_move` uniquement si desperate ;
+                    # absent → ordered_retreat (unité engagée mais non battle-shocked).
+                    "fleeMode": (
+                        self.game_state.pop("_flee_mode", "ordered_retreat")
+                        if move_type == "fall_back" else None
+                    ),
+                    "desperateEscapeRolls": (
+                        self.game_state.pop("_desperate_escape_rolls", None)
+                        if move_type == "fall_back" else None
+                    ),
                     # Pré-capture : [MODELS:] reflète l'état post-move (positions après commit),
                     # cohérent pour un déplacement. Protège aussi des morts réactives éventuelles.
                     "models_segment": self._models_segment_for_unit(squad_id),

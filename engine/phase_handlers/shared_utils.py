@@ -5310,6 +5310,9 @@ def roll_hazard_for_unit(
 
     wounds_per_fail = 3 if all(_is_monster_or_vehicle(models_cache[mid]) for mid in alive_models) else 1
     rolls = [random.randint(1, 6) for _ in range(roll_count)]
+    # L11 — stocker les jets pour le formateur step.log (desperate_escape_pre_move les lit).
+    if context_label == HAZARD_CONTEXT_DESPERATE_ESCAPE:
+        game_state["_desperate_escape_rolls"] = list(rolls)
     fails = sum(1 for r in rolls if r <= 2)
     total_wounds = fails * wounds_per_fail
     col = int(unit.get("col", -1))
@@ -5665,6 +5668,8 @@ def desperate_escape_pre_move(
     is_desperate = bool(was_engaged) and bool(require_key(unit, "battle_shocked"))
     if not is_desperate:
         return False, True, 0
+    # L11 — mode enregistré pour le formateur step.log (consommé à l'émission action_log flee).
+    game_state["_flee_mode"] = "desperate_escape"
     hazard_wounds = roll_hazard_for_unit(str(squad_id), game_state, auto_resolve)
     return True, is_unit_alive(str(squad_id), game_state), hazard_wounds
 
