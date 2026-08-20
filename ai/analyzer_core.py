@@ -1468,7 +1468,12 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 # Les actions d'un joueur AVANT son COMMAND dans un round (défenseur au FIGHT de
                 # l'adversaire, mort loggée en P2 SHOOT pendant le tir P1) ne font pas partie de
                 # sa séquence active et ne sont pas validées — sinon FIGHT/SHOOT avant COMMAND = FP.
-                if phase != state.last_phase_by_player.get(int(player)):
+                #
+                # §2.9 : les lignes DEAD (unité tuée par l'adversaire) portent le player du
+                # PROPRIÉTAIRE de l'unité et la phase COURANTE (phase de l'adversaire). Elles ne
+                # représentent pas une action volontaire du joueur victime → exclues du suivi.
+                _is_dead_event = bool(re.match(r'Unit \d+ DEAD model=', action_desc))
+                if not _is_dead_event and phase != state.last_phase_by_player.get(int(player)):
                     _player_seq = state.phase_seq_current_turn.get(int(player))
                     if _player_seq is not None or phase == 'COMMAND':
                         if _player_seq is None:
