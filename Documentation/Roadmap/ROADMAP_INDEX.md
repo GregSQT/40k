@@ -160,6 +160,7 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 | tests | ✅ placement control resolution-agnostique dans test_reserves (2026-08-21) — fix placement control resolution-agnostique | — | ⚡ |
 | tests | ✅ 4 findings code-review test_reserves_full_episode (2026-08-21) — 4 corrections code-review sur test_reserves_full_episode | — | ⚡ |
 | moteur | ✅ fix type de tir effacé dans 3 chemins PvP (2026-08-21) — type de tir effacé dans les 3 chemins PvP manquants | — | ⚡ |
+| infra | ✅ gate roadmap exclut merges tests-only (2026-08-21) — `merge_only_touches_tests` dans `check_roadmap_declared.py` : un merge ne touchant que `tests/` n'est plus compté dans la dette ; 26 tests verts | — | ⚡ |
 | tests | ✅ consolider _uc AI-side → units_cache_entry dans _fabriques (2026-08-21) — 2 helpers _uc identiques dans tests/unit/ai/ fusionnés en units_cache_entry dans _fabriques.py | — | ⚡ |
 | moteur+services | ✅ Fix review-findings (2026-08-18) — surface refus moteur squad, wsgi leading-comma, message vide | — | |
 | services | ✅ VALUE/REQUISITION_COST séparés ED obstacle 7 (2026-08-19) — coût et valeur des unités ED dissociés en deux champs distincts | — | ⚡ |
