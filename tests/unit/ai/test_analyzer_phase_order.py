@@ -35,6 +35,14 @@ def _action(turn: int, player: int, phase: str, uid: str | None = None) -> str:
     )
 
 
+def _dead(turn: int, player_owner: int, phase: str, unit: int) -> str:
+    """Ligne 'dead' : l'unité de player_owner meurt pendant la phase <phase> (souvent celle de l'adversaire)."""
+    return (
+        f"[10:00:0{turn}] E1 T{turn} P{player_owner} {phase} : "
+        f"Unit {unit} DEAD model={unit}#0 reason=combat [SUCCESS]"
+    )
+
+
 def _run(tmp_path: Path, body: list[str]) -> dict:
     path = tmp_path / "step.log"
     path.write_text(
@@ -158,5 +166,29 @@ def test_meme_joueur_ouvre_command_plusieurs_tours_consecutifs_aucune_violation(
         _action(2, 1, "MOVE"),
         _action(3, 1, "COMMAND"),
         _action(3, 1, "MOVE"),
+    ])
+    assert stats["phase_order_violations"] == 0, stats["phase_order_violations"]
+
+
+def test_mort_en_phase_adverse_ne_pollue_pas_la_sequence_du_joueur(tmp_path: Path) -> None:
+    """07.02 — §2.9 : l'event DEAD d'une unité P1 loggé pendant la SHOOT de P2 ne doit pas
+
+    injecter SHOOT dans la séquence active de P1 après que P1 a déjà joué CHARGE.
+
+    Scénario réel (E231 T2 P1) : P1 joue COMMAND→MOVE→CHARGE (SHOOT auto-sauté, 0 tireurs).
+    P2 tire et tue une unité P1 → step.log produit une ligne
+    « E1 T1 P1 SHOOT : Unit 1 DEAD model=1#0 reason=combat [SUCCESS] ».
+    Sans le filtre, l'analyzer ajoute SHOOT à la séquence P1 → [COMMAND,MOVE,CHARGE,SHOOT,FIGHT]
+    → violation §2.9. Avec le filtre, la ligne DEAD est ignorée → 0 violation.
+    """
+    stats = _run(tmp_path, [
+        # P1 joue son tour sans phase de tir (aucun tireur éligible → SHOOT auto-sauté)
+        _action(1, 1, "COMMAND"),
+        _action(1, 1, "MOVE"),
+        _action(1, 1, "CHARGE"),
+        # P2 tire et tue l'unité 1 de P1 — player_owner=1 (propriétaire), phase=SHOOT (phase courante)
+        _dead(1, 1, "SHOOT", 1),
+        # P1 combat en mêlée
+        _action(1, 1, "FIGHT"),
     ])
     assert stats["phase_order_violations"] == 0, stats["phase_order_violations"]

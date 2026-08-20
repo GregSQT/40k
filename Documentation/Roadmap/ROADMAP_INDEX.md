@@ -166,6 +166,7 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 | tests | ✅ _fought_line embed [MODEL_TYPES:] — paramètre mort unit_type actif, symétrie _fight_body_line (2026-08-20) | — | ⚡ |
 | analyzer | ✅ suppression player_alternation_violations (2026-08-20) — check retiré : 40K priorité par roll-off, aucune alternance stricte ; 204 faux positifs éliminés | — | ⚡ |
 | analyzer | ✅ verrou P1 priorité multi-tours (2026-08-20) — test verrou : P1 ouvre COMMAND sur 3 tours consécutifs → 0 violation ; docstring à jour | — | ⚡ |
+| analyzer | ✅ §2.9 faux positif DEAD en phase adverse (2026-08-20) — lignes DEAD exclues du suivi phase_seq_current_turn ; unité P1 tuée pendant SHOOT P2 ne pollue plus la séquence P1 ; verrou rouge/vert | — | ⚡ |
 | infra | Perf `generate_compact_formation` | [infra.md#perf-formation](infra.md#perf-formation) | ⚡ |
 | infra | ✅ gzip + Brotli livrés (2026-08-18) — stage `brotli-builder`, `load_module` contexte main, directives server | [archives/infra.md](archives/infra.md) | ⚡ |
 
