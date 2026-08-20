@@ -223,3 +223,69 @@ def test_gym_charge_fail_logs_initial_roll(monkeypatch):
     assert log_entry.get("charge_roll_initial") == 5
     # L'entrée doit avoir été purgée de _charge_initial_rolls (.pop)
     assert gs.get("_charge_initial_rolls", {}).get("1") is None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Pair charge — charge_record_target_choice appelé pour CHAQUE cible
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _charge_gs_pair() -> Dict[str, Any]:
+    """Variante de _charge_gs avec deux escouades ennemies (slots 0 et 1)."""
+    gs = _charge_gs()
+    gs["units_cache"]["3"] = {
+        "id": "3", "player": 2, "col": 8, "row": 10,
+        "BASE_SHAPE": "round", "BASE_SIZE": 1, "occupied_hexes": {(8, 10)},
+    }
+    return gs
+
+
+def test_pair_charge_records_target_choice_for_each_target(monkeypatch):
+    """pair_charge_record_target_choice : chaque cible reçoit son appel (chemin gym).
+
+    Avant le fix : charge_record_target_choice(gs, sid, target_squad_ids[0]) — la seconde
+    cible d'une paire est ignorée, son target_subhex n'est jamais calculé.
+    Après le fix : le log couvre les deux cibles.
+    """
+    calls: list = []
+
+    monkeypatch.setattr(
+        "engine.phase_handlers.charge_handlers.charge_roll_for_activation",
+        lambda gs, sid: 3,  # jet faible → charge_fail
+    )
+    monkeypatch.setattr(
+        "engine.phase_handlers.shared_utils.charge_check_eligibility",
+        lambda *a, **k: True,
+    )
+    monkeypatch.setattr(
+        "engine.phase_handlers.shared_utils.get_enemy_slot_mapping",
+        lambda gs, player: ["2", "3"] + [None] * 18,
+    )
+    monkeypatch.setattr(
+        "engine.phase_handlers.shared_utils.charge_build_valid_plan",
+        lambda *a, **k: None,
+    )
+    monkeypatch.setattr(
+        "engine.phase_handlers.charge_handlers.charge_record_target_choice",
+        lambda gs, unit_id, target_id: calls.append(target_id),
+    )
+    monkeypatch.setattr(
+        "engine.phase_handlers.charge_handlers.charge_record_outcome",
+        lambda *a, **k: {},
+    )
+    monkeypatch.setattr(
+        "engine.phase_handlers.fight_handlers.fight_phase_start",
+        lambda gs: {},
+    )
+
+    gs = _charge_gs_pair()
+    engine = _bare_charge_engine(gs)
+    engine._check_game_over = lambda: False  # type: ignore[method-assign]
+    engine._emit_next_rule_choice_prompt_if_needed = lambda: None  # type: ignore[method-assign]
+    engine._process_squad_action({
+        "action": "squad_charge", "squad_id": "1", "target_slots": [0, 1],
+    })
+
+    assert calls == ["2", "3"], (
+        f"charge_record_target_choice doit être appelé pour chaque cible de la paire, "
+        f"obtenu : {calls}"
+    )

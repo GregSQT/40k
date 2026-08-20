@@ -6975,7 +6975,8 @@ class W40KEngine(gym.Env):
             charge_roll = charge_roll_for_activation(self.game_state, squad_id)
             # 11.04 — mesure de la cible AVANT le plan : `commit_move` deplace les figurines, et
             # une distance relevee apres vaudrait « au contact » sur toutes les charges reussies.
-            charge_record_target_choice(self.game_state, squad_id, target_squad_id)
+            for _tgt_id in target_squad_ids:
+                charge_record_target_choice(self.game_state, squad_id, _tgt_id)
             plan = charge_build_valid_plan(self.game_state, squad_id, target_squad_ids, charge_roll)
             unit = get_unit_by_id(self.game_state, squad_id)
             if unit is None:
