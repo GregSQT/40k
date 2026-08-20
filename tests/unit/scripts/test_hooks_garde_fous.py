@@ -1136,6 +1136,17 @@ def test_le_message_de_liste_vide_ne_compte_pas_ses_propres_fichiers(tmp_path: P
     assert "1 autre(s) session(s)" in _cmd(hook, "--liste", S1).stderr
 
 
+def test_un_dotfile_dans_dossier_n_est_pas_compte_comme_autre_session(tmp_path: Path) -> None:
+    """`.gitkeep` dans DOSSIER inflait le compte d'autres sessions à 1 au lieu de 0."""
+    hook = _bac(tmp_path)
+    dossier = tmp_path / ".claude" / "relire-en-attente"
+    dossier.mkdir(parents=True, exist_ok=True)
+    (dossier / ".gitkeep").touch()
+    result = _cmd(hook, "--liste", S1)
+    assert result.returncode != 0
+    assert "0 autre(s) session(s)" in result.stderr
+
+
 def test_vider_echappe_ce_qu_il_rend_comme_le_liste(tmp_path: Path) -> None:
     """`--vider` rend ce qui reste à relire : cette sortie ira dans le prochain bloc RELIRE.
 

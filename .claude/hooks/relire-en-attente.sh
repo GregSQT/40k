@@ -218,7 +218,7 @@ def commande_liste(session_id):
         # la session courante — une liste périmée entièrement filtrée par `lire()`, son `.relu` —
         # envoyait chercher un mauvais id pour un état qui n'a rien d'anormal.
         autres = (
-            len({f.split(".")[0] for f in os.listdir(DOSSIER)} - {session_id})
+            len({f.split(".")[0] for f in os.listdir(DOSSIER) if not f.startswith(".")} - {session_id})
             if os.path.isdir(DOSSIER)
             else 0
         )
