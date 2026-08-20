@@ -127,10 +127,10 @@ def build_engine_config(config: Dict[str, Any]) -> Dict[str, Any]:
     # Déclaration de scénario, posée AVANT l'override : cf. `DEFAULT_TEST_ARMY_FACTION`.
     merged["army_faction"] = dict(DEFAULT_TEST_ARMY_FACTION)
     for key, value in config.items():
-        if key == "game_rules" and "game_rules" in merged:
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
             # Fusion profonde : les clés de production absentes du test restent présentes.
             # Un update() plat écrasait toute la section, cassant chaque nouveau require_key().
-            merged["game_rules"] = {**merged["game_rules"], **value}
+            merged[key] = {**merged[key], **value}
         else:
             merged[key] = value
     # APRÈS l'override : les unités doivent se conformer à la déclaration RETENUE, celle du test
