@@ -5961,6 +5961,7 @@ def charge_commit_move_plan_handler(
             # Consomme par `_build_step_log_details` -> `step_logger` : c'est CE champ, pas le
             # texte du `message`, qui fait apparaitre `[FLY]` dans step.log (le formateur
             # reecrit integralement la ligne de charge).
+            "is_pair": len(target_ids) >= 2,
             "is_fly_move": _fly_seg == " [FLY]",
             # JUMEAU de `is_fly_move` juste au-dessus, et du chemin de sélection de destination :
             # `step_logger` réécrit la ligne de charge et n'y met le token de capacité que
@@ -6272,6 +6273,7 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
             "charge_roll": charge_roll,
             # L28 — jet AVANT relance, None si aucune relance n'a eu lieu.
             "charge_roll_initial": game_state["_charge_initial_rolls"].pop(str(unit["id"]), None),
+            "is_pair": len(target_ids) >= 2,
             # Consomme par `_build_step_log_details` -> `step_logger` : c'est CE champ, pas le
             # texte du `message`, qui fait apparaitre `[FLY]` dans step.log (le formateur
             # reecrit integralement la ligne de charge).
