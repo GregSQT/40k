@@ -5097,6 +5097,7 @@ class W40KEngine(gym.Env):
             squad_weapon_valid_targets,
             squad_lock_shoot,
             squad_shooting_type_choose,
+            squad_shooting_type_clear,
             build_manual_shoot_allocation,
             apply_manual_shoot_allocation,
             apply_manual_shoot_declare_order,
@@ -5482,6 +5483,7 @@ class W40KEngine(gym.Env):
                     f"{squad_id} (defenseur non-IA ?) — action={_shoot_alloc.get('action')}"
                 )
             shoot_result = _shoot_alloc["shoot_result"]
+            squad_shooting_type_clear(self.game_state, squad_id)
             end_result = end_activation(self.game_state, unit, ACTION, 1, SHOOTING, SHOOTING, 0)
             if self.game_state.get("active_shooting_unit") == squad_id:
                 del self.game_state["active_shooting_unit"]
@@ -5515,9 +5517,11 @@ class W40KEngine(gym.Env):
     ) -> Dict[str, Any]:
         """end_activation differe : appele quand l allocation manuelle est terminee (done)."""
         from engine.phase_handlers.generic_handlers import end_activation
+        from engine.phase_handlers.shared_utils import squad_shooting_type_clear
         unit = get_unit_by_id(self.game_state, squad_id)
         if unit is None:
             raise KeyError(f"Squad {squad_id} introuvable pour end_activation apres allocation")
+        squad_shooting_type_clear(self.game_state, squad_id)
         end_result = end_activation(self.game_state, unit, ACTION, 1, SHOOTING, SHOOTING, 0)
         if self.game_state.get("active_shooting_unit") == squad_id:
             del self.game_state["active_shooting_unit"]
