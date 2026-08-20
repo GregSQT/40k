@@ -3927,7 +3927,15 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     # bruit de recalcul d'ancre d'escouade côté moteur (±1 subhex), tracé mais NON compté
     # comme incohérence. Un total élevé signalerait une instabilité d'ancre à investiguer.
     log_print("(anchor_absorbed = bruit d'ancre d'escouade absorbé, informatif — pas une erreur)")
-    log_print(f"Total collisions (2+ units in same hex): {len(stats['unit_position_collisions'])}")
+    collisions = stats['unit_position_collisions']
+    log_print(f"Total collisions (2+ units in same hex): {len(collisions)}")
+    for col in collisions[:5]:
+        log_print(
+            f"  ep={col['episode']} turn={col['turn']} action={col['action']}"
+            f" pos={col['position']} units={col['units']}"
+        )
+    if len(collisions) > 5:
+        log_print(f"  ... ({len(collisions) - 5} autres)")
 
     # DMG ISSUES
     _switch_section("2.3")
@@ -4124,9 +4132,15 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     log_print(f"{summary_error_icon(core_issues_total > 0)} 2.7 Core issue : {core_issues_total}")
     # §0.x — structure de partie (P1 ordre des phases, P2 fin de partie).
     _phase_struct_total = _totals['phase_structure']
+    _first_phase_order = stats['first_error_lines']['phase_order_violation']
+    _phase_order_detail = (
+        f" [ep={_first_phase_order['episode']} turn={_first_phase_order['turn']}"
+        f" player={_first_phase_order['player']} seq={_first_phase_order['sequence']}]"
+        if _first_phase_order else ""
+    )
     log_print(
         f"{summary_error_icon(_phase_struct_total > 0)} 2.9 Structure de partie :"
-        f" phase_order={stats['phase_order_violations']}"
+        f" phase_order={stats['phase_order_violations']}{_phase_order_detail}"
         f" tour_depasse={stats['game_turn_exceeded_count']}"
         f" victoire_incoherente={stats['win_method_mismatch_count']}"
     )
