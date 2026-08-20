@@ -94,8 +94,9 @@ def test_failed_charge_does_not_grant_fights_first(engine: W40KEngine) -> None:
             {"action": "squad_charge", "squad_id": "1", "target_slot": 0}
         )
     assert ok is True
-    # La cascade (fight vide → command → ...) remplace `result` quand la phase de fight s'achève
-    # immédiatement : `charge_succeeded` vit dans l'action_log, pas dans le résultat final.
+    # `{**result, **phase_init_result}` dans la cascade préserve `charge_succeeded: False` de la
+    # charge initiale — vérifier directement, puis vérifier l'invariant via action_logs.
+    assert result["charge_succeeded"] is False
     charge_fail_log = next(
         (l for l in gs["action_logs"] if l.get("type") == "charge_fail"), None
     )
