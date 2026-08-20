@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from typing import Any, Dict, List, Optional, Tuple
 
 from engine.reward_calculator import RewardCalculator
@@ -207,3 +208,70 @@ class TestOnObjectiveRewardMultiZone:
         rc = _objective_calculator()
         gs = _objective_state([(3, 3), (7, 7)], [_ZONE_CONTROLEE, _ZONE_NEUTRE])
         assert rc._calculate_on_objective_reward(gs, {"unitId": "1", "toCol": 7, "toRow": 7}) == 2.5
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# desperate_escape_died — chemin gym (w40k_core pipeline squad)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_SYSTEM_PENALTIES = {
+    "forbidden_action": -1.0,
+    "invalid_action": -0.9,
+    "generic_error": -0.1,
+    "system_response": 0.0,
+}
+
+_MINIMAL_GS: Dict[str, Any] = {
+    "units_cache": {},
+    "unit_by_id": {},
+    "phase": "move",
+    "turn": 1,
+    "current_player": 1,
+    "objectives": [],
+    "objective_controllers": {},
+    "game_over": False,
+    "objective_rewarded_turns": set(),
+}
+
+
+def _rc_desp() -> RewardCalculator:
+    rc = RewardCalculator(
+        config={"quiet": True, "controlled_player": 1},
+        rewards_config={},
+        unit_registry=None,
+        state_manager=None,
+    )
+    rc._get_system_penalties = lambda: _SYSTEM_PENALTIES
+    rc._calculate_objective_reward_per_turn = lambda gs, r: 0.0
+    rc._calculate_coherency_penalty_per_turn = lambda gs, r: 0.0
+    return rc
+
+
+class TestDesperateEscapeDiedGymPath:
+    """Le résultat gym de desperate_escape_died doit traverser calculate_reward sans ValueError."""
+
+    def test_new_result_does_not_raise(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """desp_died_no_raise : résultat gym corrigé (unitId + waiting_for_player) → pas de ValueError."""
+        rc = _rc_desp()
+        result = {
+            "action": "desperate_escape_died",
+            "unitId": "1",
+            "squad_id": "1",
+            "activation_complete": True,
+            "waiting_for_player": False,
+        }
+        gs = dict(_MINIMAL_GS)
+        reward = rc.calculate_reward(True, result, gs)
+        assert reward == 0.0
+
+    def test_old_result_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """desp_died_old_raises : résultat gym sans unitId ni waiting_for_player → ValueError."""
+        rc = _rc_desp()
+        result_old = {
+            "action": "desperate_escape_died",
+            "squad_id": "1",
+            "activation_complete": True,
+        }
+        gs = dict(_MINIMAL_GS)
+        with pytest.raises(ValueError):
+            rc.calculate_reward(True, result_old, gs)

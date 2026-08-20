@@ -6844,8 +6844,10 @@ class W40KEngine(gym.Env):
                     _mh_de.movement_clear_preview(self.game_state)
                     return True, {
                         "action": "desperate_escape_died",
+                        "unitId": squad_id,
                         "squad_id": squad_id,
                         "activation_complete": True,
+                        "waiting_for_player": False,
                     }
 
             # Plus de dry-run de legalite ici, et plus de degradation silencieuse en `squad_wait` :
