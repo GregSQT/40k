@@ -6973,10 +6973,12 @@ class W40KEngine(gym.Env):
             # où son critère — « aucune cible à portée » — a encore un sens : ici, une cible a
             # justement été choisie parmi celles que le jet atteint.
             charge_roll = charge_roll_for_activation(self.game_state, squad_id)
-            # 11.04 — mesure de la cible AVANT le plan : `commit_move` deplace les figurines, et
-            # une distance relevee apres vaudrait « au contact » sur toutes les charges reussies.
-            for _tgt_id in target_squad_ids:
-                charge_record_target_choice(self.game_state, squad_id, _tgt_id)
+            # 11.04 — mesure de la cible primaire AVANT le plan : `commit_move` deplace les
+            # figurines et une distance relevee apres vaudrait « au contact ». Cible primaire =
+            # target_squad_ids[0], miroir du chemin PvP (charge_handlers L4440). `target_subhex`
+            # est un scalaire : appeler pour chaque cible ecrasait la valeur a chaque tour et
+            # `charge_record_outcome` retournait la distance a la DERNIERE cible, pas la primaire.
+            charge_record_target_choice(self.game_state, squad_id, target_squad_id)
             plan = charge_build_valid_plan(self.game_state, squad_id, target_squad_ids, charge_roll)
             unit = get_unit_by_id(self.game_state, squad_id)
             if unit is None:

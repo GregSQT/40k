@@ -173,6 +173,10 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 | analyzer | ✅ DEAD@COMMAND fix §2.9 + purge reset phase sur DEAD events (2026-08-20) — dead lines exclues du suivi phase_seq_current_turn ; verrou rouge/vert | — | ⚡ |
 | step_logger | ✅ is_pair dans action_log + [PAIR] step.log (2026-08-20) — charge multi-cibles loggue explicitement le flag is_pair ; verrou rouge/vert | — | ⚡ |
 | moteur+ai | ✅ Fix action_family shoot_indirect_slot + commentaires post-L9 (2026-08-20) — branche SHOOT_INDIRECT_SLOTS ajoutée, branche CHOICE morte retirée, offsets commentaires mis à jour (1086→1276 etc.), docstring pointer_policy corrigée ; verrou rouge/vert | — | ⚡ |
+| tests | ✅ Purge tests non-verrou sentinel skip (2026-08-20) — tests non-verrou et imports pytest morts supprimés dans suite charge | — | ⚡ |
+| step_logger | ✅ Verrou [PAIR] token step_logger charge/charge_fail (2026-08-20) — is_pair=True → [PAIR] dans la ligne ; is_pair=False/absent → absent ; verrou rouge/vert | — | ⚡ |
+| tests+moteur | ✅ Fix conformité 03.01/09.05 isolation (2026-08-20) — verrous contre-épreuve renforcés et exclusion isolation corrigée | — | ⚡ |
+| moteur | ✅ Fix §11.04 target_subhex cible primaire (2026-08-20) — boucle pair remplacée par appel unique sur target_squad_ids[0], miroir PvP charge_target_selection_handler ; test mis à jour + cas absent charge_fail ajouté | — | ⚡ |
 | infra | Perf `generate_compact_formation` | [infra.md#perf-formation](infra.md#perf-formation) | ⚡ |
 | infra | ✅ gzip + Brotli livrés (2026-08-18) — stage `brotli-builder`, `load_module` contexte main, directives server | [archives/infra.md](archives/infra.md) | ⚡ |
 
