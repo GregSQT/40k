@@ -5360,6 +5360,11 @@ def roll_hazard_for_unit(
         # de ne vérifier l'armurerie que pour les vrais jets d'arme HAZARDOUS.
         "hazardContext": context_label,
     }
+    # L15 — 24.15 HAZARDOUS : nombre d'armes sélectionnées (= roll_count pour ce contexte)
+    # et jets individuels, absents pour Desperate Escape où roll_count = nombre de figurines.
+    if context_label != HAZARD_CONTEXT_DESPERATE_ESCAPE:
+        log_payload["hazardousWeaponCount"] = roll_count
+        log_payload["hazardousDiceRolls"] = list(rolls)
     # Émission AVANT toute attribution : le jet et son résultat sont visibles dans le combat log
     # au moment où le joueur doit choisir les pertes (cf. commentaire ci-dessus).
     append_action_log(game_state, log_payload)

@@ -6233,6 +6233,13 @@ class W40KEngine(gym.Env):
         _hazard_details = raw_log.get("hazardDetails")  # get allowed : absent sur les types sans HAZARDOUS
         if _hazard_details:
             details["target_model_id"] = _hazard_details[0]["modelId"]
+        # L15 — 24.15 HAZARDOUS : nombre d'armes et jets individuels (absents pour Desperate Escape).
+        _hazard_wc = raw_log.get("hazardousWeaponCount")  # get allowed
+        if _hazard_wc is not None:
+            details["hazardous_weapon_count"] = _hazard_wc
+        _hazard_dice = raw_log.get("hazardousDiceRolls")  # get allowed
+        if _hazard_dice is not None:
+            details["hazardous_dice_rolls"] = _hazard_dice
         target_col = raw_log.get("targetCol")  # get allowed
         target_row = raw_log.get("targetRow")  # get allowed
         if target_col is not None and target_row is not None:

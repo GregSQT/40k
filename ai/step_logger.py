@@ -1279,11 +1279,19 @@ class StepLogger:
                 raise KeyError("Hazardous action missing required unit_with_coords")
             hazardous_mortal_wounds = require_key(details, "hazardous_mortal_wounds")
             hazard_context = details.get("hazard_context", "Hazardous")
-            tag = "[DESPERATE ESCAPE]" if hazard_context == HAZARD_CONTEXT_DESPERATE_ESCAPE else "[HAZARDOUS]"
+            if hazard_context == HAZARD_CONTEXT_DESPERATE_ESCAPE:
+                tag = "[DESPERATE ESCAPE]"
+            else:
+                # L15 — 24.15 : [HAZARDOUS:<n>] quand le compte d'armes est connu.
+                _hwc = details.get("hazardous_weapon_count")
+                tag = f"[HAZARDOUS:{_hwc}]" if _hwc is not None else "[HAZARDOUS]"
+            _hdice = details.get("hazardous_dice_rolls")
+            # L15 — jets individuels des dés HAZARDOUS (24.15), absents pour Desperate Escape.
+            dice_suffix = f" Roll:{','.join(str(r) for r in _hdice)}" if _hdice else ""
             if int(hazardous_mortal_wounds) == 0:
-                return f"Unit {unit_with_coords} SUFFERS 0 Mortal Wounds {tag} [NO ALLOC]"
+                return f"Unit {unit_with_coords} SUFFERS 0 Mortal Wounds {tag}{dice_suffix} [NO ALLOC]"
             target_model_id = require_key(details, "target_model_id")
-            return f"Unit {unit_with_coords} SUFFERS {hazardous_mortal_wounds} Mortal Wounds {tag} [ALLOC_MODEL: {target_model_id}]"
+            return f"Unit {unit_with_coords} SUFFERS {hazardous_mortal_wounds} Mortal Wounds {tag}{dice_suffix} [ALLOC_MODEL: {target_model_id}]"
             
         elif action_type == "shoot_summary":
             # Summary of multi-shot sequence
