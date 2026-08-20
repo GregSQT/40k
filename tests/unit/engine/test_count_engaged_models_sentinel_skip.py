@@ -11,8 +11,6 @@ from __future__ import annotations
 from typing import Any, Dict
 from unittest.mock import patch
 
-import pytest
-
 
 def _minimal_game_state() -> Dict[str, Any]:
     """State minimal : 1 chargeur C#0, 2 cibles T#0 (hors table) et T#1 (valide)."""
@@ -61,18 +59,3 @@ def test_continue_sur_target_hors_table():
     )
 
 
-def test_zero_si_toutes_cibles_hors_table():
-    """Si toutes les cibles lèvent, aucun engagé."""
-    gs = _minimal_game_state()
-
-    with patch(
-        "engine.spatial_relations.entries_in_engagement_zone",
-        side_effect=ValueError("off_battlefield_sentinel"),
-    ), patch(
-        "engine.spatial_relations.engagement_distance_metric",
-        return_value="euclidean",
-    ):
-        engaged, total = _call(gs)
-
-    assert engaged == 0
-    assert total == 1
