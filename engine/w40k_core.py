@@ -7287,7 +7287,7 @@ class W40KEngine(gym.Env):
                 phase_init_result = movement_handlers.movement_phase_start(self.game_state)
             started_phases.append(next_phase)
             if phase_init_result and phase_init_result.get("phase_complete") and phase_init_result.get("next_phase"):
-                result = phase_init_result
+                result = {**result, **phase_init_result}
             else:
                 break
 

@@ -119,6 +119,8 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 | tests | ✅ couverture deploy_squad_destinations + select_rule_choice (2026-08-19) — tests humain pour ces deux paths | — | ⚡ |
 | tests | ✅ simplification fixture deploy_game (2026-08-19) — retrait assertion vacuuse | — | ⚡ |
 | tests | ✅ deep merge game_rules dans build_engine_config (2026-08-20) — fusion profonde game_rules seul ; verrou rouge/vert ; 4 clés consolidation_trigger_range redondantes retirées | — | ⚡ |
+| tests | ✅ généraliser fusion profonde à toutes sections dict dans build_engine_config (2026-08-20) — _deep_merge_section appliqué à toutes les clés dict, pas seulement game_rules | — | ⚡ |
+| moteur | ✅ charge_succeeded préservé lors des cascades de phase (2026-08-20) — merge {**result, **phase_init_result} au lieu de remplacement complet dans _process_squad_action ; verrou rouge/vert 3 tests | — | ⚡ |
 | step_logger+analyzer | ✅ hazardous 0-MW no raise (2026-08-19) — wounds=0 (aucun dé raté) → [NO ALLOC] sans require_key ; analyzer saute _apply_damage si mw==0 (HAZARDOUS + DESPERATE ESCAPE) | — | ⚡ |
 | moteur+analyzer | ✅ dead events step.log + pré-capture tir protégée (2026-08-19) — _build_step_log_details mappe model_id/reason ; _emit_squad_shoot_log try/except ConfigurationError ; is None strict | — | ⚡ |
 | analyzer | Champs manquants `step.log` L6→L28 (15 restantes après livraison L13/L14/L19/L22/L25/L27/L28) — L13 le 2026-08-20 : `[HALF RANGE]` RAPID_FIRE/MELTA (24.25/24.30), LOG_GRAMMAR_VERSION=7 | [analyzer.md#champs-step-log](analyzer.md#champs-step-log) | ⚡ |
