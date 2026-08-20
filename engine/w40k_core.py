@@ -36,6 +36,7 @@ from engine.phase_handlers.shared_utils import (
     destroy_model,
     rebuild_choice_timing_index,
     is_unit_alive,
+    get_unit_position,
     require_unit_position,
     unit_has_rule_effect,
     # Id d'action, importe de shared_utils et non de macro_intents (`ACTION_WAIT`, meme valeur) :
@@ -4602,7 +4603,7 @@ class W40KEngine(gym.Env):
         - ``move`` (défaut historique) : Desperate Escape 09.07, déclenché AVANT le fall back —
           unité morte → fin d'activation sans move ; sinon → pool Fall Back + preview.
         """
-        from engine.phase_handlers.shared_utils import is_unit_alive, clear_desperate_escape_state
+        from engine.phase_handlers.shared_utils import clear_desperate_escape_state
         from engine.phase_handlers import movement_handlers as _mh
         sid = str(uid)
         hazard_origin = self.game_state.pop("hazard_origin", "move")
@@ -7136,9 +7137,7 @@ class W40KEngine(gym.Env):
                         # L16 — cibles de charge multiples (11.04).
                         "allTargetIds": [str(t) for t in target_squad_ids],
                         "allTargetCoords": [
-                            [int(self.game_state["units_cache"][str(t)]["col"]),
-                             int(self.game_state["units_cache"][str(t)]["row"])]
-                            if str(t) in self.game_state["units_cache"] else None
+                            list(map(int, pos)) if (pos := get_unit_position(t, self.game_state)) is not None else None
                             for t in target_squad_ids
                         ],
                         **_charge_dist,
@@ -7210,9 +7209,7 @@ class W40KEngine(gym.Env):
                         # L16 — cibles de charge multiples (11.04) : miroir des 2 sites PvP.
                         "allTargetIds": [str(t) for t in target_squad_ids],
                         "allTargetCoords": [
-                            [int(self.game_state["units_cache"][str(t)]["col"]),
-                             int(self.game_state["units_cache"][str(t)]["row"])]
-                            if str(t) in self.game_state["units_cache"] else None
+                            list(map(int, pos)) if (pos := get_unit_position(t, self.game_state)) is not None else None
                             for t in target_squad_ids
                         ],
                         **_charge_dist,
