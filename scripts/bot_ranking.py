@@ -53,6 +53,7 @@ import itertools
 import os
 import sys
 import zlib
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -154,6 +155,8 @@ def main() -> int:
     parser.add_argument("--rewards-config", default=None,
                         help="Defaut : identique a --agent, comme ai/train.py.")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--workers", type=int, default=None,
+                        help="Nombre de processus paralleles (defaut : cpu_count).")
     parser.add_argument("--csv", default=None, help="Chemin d'export CSV de la matrice.")
     args = parser.parse_args()
 
@@ -205,29 +208,49 @@ def main() -> int:
           f"{total_matches * args.episodes} episodes")
     print(f"   pool={args.scenario_pool} · agent_config={args.agent}/{args.training_config}")
 
-    matrix: Dict[Tuple[str, str], Dict[str, int]] = {}
+    # Toutes les taches (paire × scenario) sont independantes : on les soumet toutes et on
+    # collecte au fil de l'eau pour afficher la progression sans attendre la fin du lot.
+    tasks: List[Tuple[str, str, int, str]] = [
+        (p1, p2, si, sf)
+        for p1, p2 in pairs
+        for si, sf in enumerate(scenarios)
+    ]
+
+    raw: Dict[Tuple[str, str, int], Dict[str, int]] = {}
+    workers = args.workers or os.cpu_count()
     done_matches = 0
-    for p1, p2 in pairs:
-        agg = {"wins": 0, "losses": 0, "draws": 0}
-        for scenario_index, scenario_file in enumerate(scenarios):
-            tally = _play_match(
+    with ProcessPoolExecutor(max_workers=workers) as pool:
+        future_to_task = {
+            pool.submit(
+                _play_match,
                 p1_bot_type=p1,
                 p2_bot_type=p2,
-                scenario_file=scenario_file,
-                scenario_index=scenario_index,
+                scenario_file=sf,
+                scenario_index=si,
                 n_episodes=args.episodes,
                 base_seed=args.seed,
                 randomness=randomness,
                 env_kwargs=env_kwargs,
                 max_steps_per_episode=max_steps_per_episode,
-            )
-            for k in agg:
-                agg[k] += tally[k]
+            ): (p1, p2, si, sf)
+            for p1, p2, si, sf in tasks
+        }
+        for future in as_completed(future_to_task):
+            p1, p2, si, sf = future_to_task[future]
+            tally = future.result()  # propage les exceptions sans les avaler
+            raw[(p1, p2, si)] = tally
             done_matches += 1
             print(f"   [{done_matches}/{total_matches}] {p1} vs {p2} "
-                  f"({os.path.basename(scenario_file)}) -> "
+                  f"({os.path.basename(sf)}) -> "
                   f"{tally['wins']}W-{tally['losses']}L-{tally['draws']}D",
-                  flush=True)  # un run long tue en cours perdrait sa sortie sinon
+                  flush=True)
+
+    matrix: Dict[Tuple[str, str], Dict[str, int]] = {}
+    for p1, p2 in pairs:
+        agg = {"wins": 0, "losses": 0, "draws": 0}
+        for si in range(len(scenarios)):
+            for k in agg:
+                agg[k] += raw[(p1, p2, si)][k]
         matrix[(p1, p2)] = agg
 
     print("\n📊 Matrice des win-rates (ligne = bot en siege AGENT, colonne = bot adverse)")
