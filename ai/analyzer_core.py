@@ -1473,17 +1473,17 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 # PROPRIÉTAIRE de l'unité et la phase COURANTE (phase de l'adversaire). Elles ne
                 # représentent pas une action volontaire du joueur victime → exclues du suivi.
                 _is_dead_event = bool(re.match(r'Unit \d+ DEAD model=', action_desc))
-                if not _is_dead_event and phase != state.last_phase_by_player.get(int(player)):
+                if phase != state.last_phase_by_player.get(int(player)):
                     _player_seq = state.phase_seq_current_turn.get(int(player))
                     if _player_seq is not None or phase == 'COMMAND':
                         if _player_seq is None:
                             _player_seq = []
                             state.phase_seq_current_turn[int(player)] = _player_seq
-                        if phase not in _player_seq:
+                        if not _is_dead_event and phase not in _player_seq:
                             _player_seq.append(phase)
                     state.last_phase_by_player[int(player)] = phase
 
-                if phase != state.last_phase:
+                if phase != state.last_phase and not _is_dead_event:
                     if phase == 'COMMAND':
                         state.selected_choice_by_unit_source = {}
                     if phase == 'MOVE':
