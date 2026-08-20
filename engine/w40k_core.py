@@ -6834,6 +6834,7 @@ class W40KEngine(gym.Env):
                 )
                 from engine.phase_handlers import movement_handlers as _mh_de
                 _was_engaged = _squad_is_in_enemy_er(self.game_state, str(squad_id))
+                _anchor_before_de = (_move_from_col, _move_from_row)
                 _is_desp, _is_alive, _ = desperate_escape_pre_move(
                     str(squad_id), self.game_state, _was_engaged, auto_resolve=True
                 )
@@ -6850,6 +6851,22 @@ class W40KEngine(gym.Env):
                         "activation_complete": True,
                         "waiting_for_player": False,
                     }
+                if _is_desp and _is_alive:
+                    _anchor_after_de = require_unit_position(str(squad_id), self.game_state)
+                    if _anchor_after_de != _anchor_before_de:
+                        # Pertes de Desperate Escape ont décalé l'ancre : le pool (construit
+                        # depuis l'ancre d'avant) est périmé, la destination sélectionnée par
+                        # l'agent n'est plus atteignable depuis la nouvelle ancre. Skip du move.
+                        clear_desperate_escape_state(self.game_state)
+                        _mh_de._invalidate_all_destination_pools_after_movement(self.game_state)
+                        _mh_de.movement_clear_preview(self.game_state)
+                        return True, {
+                            "action": "fall_back_anchor_shifted",
+                            "unitId": squad_id,
+                            "squad_id": squad_id,
+                            "activation_complete": True,
+                            "waiting_for_player": False,
+                        }
 
             # Plus de dry-run de legalite ici, et plus de degradation silencieuse en `squad_wait` :
             # la destination VIENT du pool que le masque a lui-meme utilise (meme carte, cf.

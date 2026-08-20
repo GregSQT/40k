@@ -50,10 +50,10 @@ from engine import macro_intents as mi
 # ─────────────────────────────────────────────────────────────────────────────────────────────
 
 #: Ecart de VP au-dela duquel on considere avoir une avance a proteger.
-_VP_LEAD = 12.0
+_VP_LEAD = 8.0
 
 #: Seuil de destruction : VALUE perdue ce tour au-dela de laquelle le reactif bascule de plan.
-_VALUE_LOSS_THRESHOLD = 5.0
+_VALUE_LOSS_THRESHOLD = 3.0
 
 #: Poids par slot de deploiement — commun aux trois benchmarks.
 _BENCHMARK_PLACEMENT_WEIGHTS: Dict[int, float] = {
@@ -83,15 +83,15 @@ _BENCHMARK_PLACEMENT_WEIGHTS: Dict[int, float] = {
 # Rejouer avec scripts/bot_ranking.py --bots reference_balanced,...
 # apres chaque ajustement — NE PAS toucher bot_movement_weights.json.
 
-_W_BALANCED_SCORE:    Tuple[float, ...] = (0.9, 0.1, 0.4, 0.2, 2.0)
-_W_BALANCED_KILL:     Tuple[float, ...] = (0.5, 1.0, 1.0, 0.0, 0.8)
-_W_BALANCED_PRESERVE: Tuple[float, ...] = (0.7, -0.5, 0.2, 0.6, 0.8)
+_W_BALANCED_SCORE:    Tuple[float, ...] = (1.0, 0.1, 0.5, 0.15, 2.5)
+_W_BALANCED_KILL:     Tuple[float, ...] = (0.5, 1.1, 1.0, 0.0, 1.2)
+_W_BALANCED_PRESERVE: Tuple[float, ...] = (0.8, -0.5, 0.2, 0.5, 1.2)
 
-_W_DENIAL: Tuple[float, ...] = (0.8, 0.5, 0.8, 0.2, 2.5)
+_W_DENIAL: Tuple[float, ...] = (0.9, 0.6, 1.0, 0.1, 3.0)
 
-_W_REACTIVE_KILL:    Tuple[float, ...] = (0.4, 1.0, 1.0, 0.0, 0.8)
-_W_REACTIVE_SCORE:   Tuple[float, ...] = (1.0, 0.1, 0.4, 0.2, 2.0)
-_W_REACTIVE_CONTEST: Tuple[float, ...] = (0.9, -0.2, 0.3, 0.4, 2.0)
+_W_REACTIVE_KILL:    Tuple[float, ...] = (0.4, 1.1, 1.0, 0.0, 1.0)
+_W_REACTIVE_SCORE:   Tuple[float, ...] = (1.1, 0.1, 0.5, 0.15, 2.5)
+_W_REACTIVE_CONTEST: Tuple[float, ...] = (1.0, -0.1, 0.4, 0.3, 2.5)
 
 
 # ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -348,7 +348,9 @@ class ReferenceBalancedBot(_BenchmarkBase):
 
         objectives = game_state.get("objectives") or []
         zones_mine = _count_zones(game_state, player)
-        s_score = float(max(0, len(objectives) - zones_mine))
+        # Multiplier 12 : chaque objectif non tenu vaut ~12 pts de VP sur la partie ;
+        # sans ce scaling s_score (0-4) est toujours ecrase par s_kill (10-50+).
+        s_score_scaled = float(max(0, len(objectives) - zones_mine)) * 12.0
 
         s_kill = 0.0
         for e in enemies:
@@ -372,7 +374,7 @@ class ReferenceBalancedBot(_BenchmarkBase):
         opp_vp = float(vp[3 - player])
         if s_survive >= 8.0 and my_vp >= opp_vp + _VP_LEAD:
             return "PRESERVE"
-        if s_kill >= s_score and s_kill > 0.0:
+        if s_kill >= s_score_scaled and s_kill > 0.0:
             return "KILL"
         return "SCORE"
 
