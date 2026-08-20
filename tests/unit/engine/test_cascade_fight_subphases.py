@@ -328,3 +328,55 @@ class TestCascadeFullTurn:
         assert gs["phase"] == "fight"
         from engine.phase_handlers.fight_handlers import fight_v11_current_pool
         assert len(fight_v11_current_pool(gs)) > 0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tests — préservation de charge_succeeded lors de la cascade via _process_semantic_action
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestSemanticCascadeKeyPreservation:
+    """Vérifie que les clés du résultat de l'action sont préservées lors d'une cascade de phase
+    dans _process_semantic_action (chemin PvP humain).
+
+    Scénario : dernière unité du pool charge → charge_succeeded=True, phase_complete=True,
+    next_phase="fight". La fight_phase_start cascade à son tour (pool fight vide → move).
+    charge_succeeded doit survivre dans le résultat final.
+
+    L'ancien code utilisait une liste combat_keys codée en dur et oubliait charge_succeeded.
+    Le nouveau code utilise {**result, **phase_init_result} et préserve toutes les clés.
+    """
+
+    def test_charge_succeeded_preserved_through_double_cascade(self, monkeypatch):
+        """cascade_semantic_charge_succeeded : charge_succeeded survit à fight→move en cascade."""
+        p1 = _unit(1, 1, 5, 10)
+        p2 = _unit(2, 2, 20, 10)
+        gs = _make_gs([p1, p2], phase="charge")
+        engine = _bare_engine(gs)
+
+        charge_result = {
+            "action": "charge_move",
+            "charge_succeeded": True,
+            "unitId": "1",
+            "phase_complete": True,
+            "next_phase": "fight",
+        }
+        monkeypatch.setattr(
+            W40KEngine,
+            "_process_charge_phase",
+            lambda self, a: (True, charge_result),
+        )
+        monkeypatch.setattr(
+            "engine.phase_handlers.fight_handlers.fight_phase_start",
+            lambda gs: {"phase_complete": True, "next_phase": "move", "reason": "pool_empty"},
+        )
+        monkeypatch.setattr(
+            "engine.phase_handlers.movement_handlers.movement_phase_start",
+            lambda gs: {"phase_initialized": True, "phase_complete": False},
+        )
+
+        ok, result = engine.execute_semantic_action({"action": "charge_move"})
+
+        assert ok is True
+        assert result.get("charge_succeeded") is True, (
+            f"charge_succeeded perdu lors de la cascade fight→move : {result}"
+        )

@@ -4986,21 +4986,7 @@ class W40KEngine(gym.Env):
 
             # If phase_start returns phase_complete, cascade to next phase
             if phase_init_result and phase_init_result.get("phase_complete") and phase_init_result.get("next_phase"):
-                # CRITICAL: Preserve combat action data before replacing result
-                # When fight phase completes and transitions to next phase, we must preserve
-                # the combat action data (action, unitId, all_attack_results) for logging
-                preserved_combat_data = {}
-                combat_keys = ["action", "unitId", "all_attack_results", "targetId", "attack_result", "target_died", "reason", "phase"]
-                for key in combat_keys:
-                    if key in result:
-                        preserved_combat_data[key] = result[key]
-                
-                result = phase_init_result  # Update result for next iteration
-                
-                # CRITICAL: Restore preserved combat data for logging
-                for key, value in preserved_combat_data.items():
-                    if value is not None:  # Only restore non-None values
-                        result[key] = value
+                result = {**result, **phase_init_result}
             else:
                 break  # Phase has eligible units, stop cascading
         
