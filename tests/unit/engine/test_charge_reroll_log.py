@@ -226,7 +226,7 @@ def test_gym_charge_fail_logs_initial_roll(monkeypatch):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Pair charge — charge_record_target_choice appelé pour CHAQUE cible
+# Pair charge — charge_record_target_choice appelé sur la cible PRIMAIRE
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _charge_gs_pair() -> Dict[str, Any]:
@@ -239,12 +239,12 @@ def _charge_gs_pair() -> Dict[str, Any]:
     return gs
 
 
-def test_pair_charge_records_target_choice_for_each_target(monkeypatch):
-    """pair_charge_record_target_choice : chaque cible reçoit son appel (chemin gym).
+def test_pair_charge_records_target_choice_for_primary_target_only(monkeypatch):
+    """pair_charge : seule la cible primaire (target_squad_ids[0]) passe dans charge_record_target_choice.
 
-    Avant le fix : charge_record_target_choice(gs, sid, target_squad_ids[0]) — la seconde
-    cible d'une paire est ignorée, son target_subhex n'est jamais calculé.
-    Après le fix : le log couvre les deux cibles.
+    `target_subhex` est un scalaire : appeler pour chaque cible de la paire écrase la valeur
+    à chaque tour et charge_record_outcome retourne la distance à la DERNIÈRE cible, pas la
+    primaire. Miroir du chemin PvP (charge_handlers L4440 : un seul appel sur target_id).
     """
     calls: list = []
 
@@ -285,7 +285,7 @@ def test_pair_charge_records_target_choice_for_each_target(monkeypatch):
         "action": "squad_charge", "squad_id": "1", "target_slots": [0, 1],
     })
 
-    assert calls == ["2", "3"], (
-        f"charge_record_target_choice doit être appelé pour chaque cible de la paire, "
+    assert calls == ["2"], (
+        f"charge_record_target_choice doit être appelé uniquement pour la cible primaire, "
         f"obtenu : {calls}"
     )

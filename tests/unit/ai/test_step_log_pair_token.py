@@ -76,3 +76,11 @@ def test_charge_fail_pair_token_absent_when_false():
     sl = _logger()
     msg = sl._format_replay_style_message("1", "charge_fail", {**_CHARGE_FAIL_DETAILS_BASE, "is_pair": False})
     assert "[PAIR]" not in msg, f"[PAIR] ne doit pas apparaître dans {msg!r}"
+
+
+def test_charge_fail_pair_token_absent_when_missing():
+    """is_pair absent → [PAIR] absent (field optionnel, symétrie avec charge)."""
+    sl = _logger()
+    details = {k: v for k, v in _CHARGE_FAIL_DETAILS_BASE.items() if k != "is_pair"}
+    msg = sl._format_replay_style_message("1", "charge_fail", details)
+    assert "[PAIR]" not in msg, f"[PAIR] ne doit pas apparaître dans {msg!r}"
