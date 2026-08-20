@@ -187,6 +187,8 @@ class TestCollisionPrevention:
             f"L'ennemi pourrait y déplacer son unité → collision."
         )
         assert SURVIVOR_ANCHOR_POS in blocked
+        # L'unité exclue (ENEMY_ID) ne doit pas apparaître dans son propre jeu bloqué.
+        assert ENEMY_POS not in blocked
 
     def test_anchor_death_does_not_create_phantom_vacancy(self):
         """La mort de l'ancre ne libère pas son hex si d'autres figurines le couvrent."""
@@ -194,6 +196,8 @@ class TestCollisionPrevention:
         # Avant toute mort : tous les hexes initiaux sont bloqués.
         blocked_before = build_occupied_positions_set(gs, exclude_unit_id=ENEMY_ID)
         assert ANCHOR_POS in blocked_before
+        # L'unité exclue (ENEMY_ID) ne doit pas apparaître dans son propre jeu bloqué.
+        assert ENEMY_POS not in blocked_before
 
         destroy_model(gs, ANCHOR_MID, "combat")
         blocked_after = build_occupied_positions_set(gs, exclude_unit_id=ENEMY_ID)
@@ -202,6 +206,7 @@ class TestCollisionPrevention:
         assert ANCHOR_POS not in blocked_after
         # La figurine non-ancre reste bien présente.
         assert REMOTE_POS in blocked_after
+        assert ENEMY_POS not in blocked_after
 
 
 class TestEngagementDetectionAfterAnchorDeath:
@@ -228,19 +233,24 @@ class TestEngagementDetectionAfterAnchorDeath:
         )
 
     def test_squad_not_engaged_without_adjacent_models(self, monkeypatch):
-        """Contre-épreuve : sans figurine à portée, l'escouade n'est PAS engagée."""
+        """Contre-épreuve : après destruction de la figurine adjacente, l'escouade n'est PAS engagée."""
         monkeypatch.setattr(
             "engine.spatial_relations.engagement_distance_metric",
             lambda *args, **kwargs: "hex",
         )
         gs = _gs()
-        # Détruire 1#0 ET 1#2 : seule 1#1 en (4,10) survit.
-        # (4,10) est à dist 5 de (9,10) > EZ 2 → non engagée.
-        destroy_model(gs, ANCHOR_MID, "combat")
+        # Détruire seulement 1#2 (l'adjacente) : 1#0 en (3,10) et 1#1 en (4,10) survivent.
+        # Sans le fix : occupied_hexes resterait {(3,10),(4,10),(8,10)} → dist 1 ≤ EZ → engagée.
+        # Avec le fix : (8,10) retiré → {(3,10),(4,10)}, dist min 5 > EZ 2 → non engagée.
         destroy_model(gs, REMOTE_MID, "combat")
 
+        entry = gs["units_cache"][SQUAD_ID]
+        assert REMOTE_POS not in entry["occupied_hexes"], (
+            f"Bug : {REMOTE_POS} encore dans occupied_hexes={entry['occupied_hexes']} "
+            "après destruction de 1#2."
+        )
         assert _squad_is_in_enemy_er(gs, SQUAD_ID) is False, (
-            "Avec seulement 1#1 en (4,10), dist=5 > EZ=2 : l'escouade ne devrait PAS "
+            "Avec 1#0 en (3,10) et 1#1 en (4,10), dist min=5 > EZ=2 : l'escouade ne devrait PAS "
             "être détectée comme engagée."
         )
 
@@ -341,11 +351,27 @@ class TestChargeCollisionAfterAnchorDeath:
             f"Bug §2.2 : (22,28) absent de blocked={sorted(blocked)}. "
             "L'unité 1 peut charger sur une case occupée par 105#2 → collision."
         )
+        # L'unité chargeur (exclue) ne doit pas figurer dans le jeu bloqué.
+        assert (22, 25) not in blocked
+        # occupied_hexes_by_model doit rester synchronisé (105#0 absent, 105#1 et 105#2 présents).
+        by_model = gs["units_cache"][_TARGET_ID].get("occupied_hexes_by_model", {})
+        assert "105#0" not in by_model
+        assert "105#1" in by_model
+        assert "105#2" in by_model
 
     def test_charge_destination_not_blocked_when_truly_empty(self):
         """Contre-épreuve : si 105#2 est détruite, (22,28) est genuinement libre."""
         gs = _gs_222()
         destroy_model(gs, "105#0", "combat")
+
+        # Intermédiaire : avant la mort de 105#2, (22,28) est encore bloqué.
+        # Sans ce verrou intermédiaire, la contre-épreuve serait vacuouse si le bug
+        # avait déjà retiré (22,28) lors de la mort de 105#0.
+        blocked_before_105_2 = build_occupied_positions_set(gs, exclude_unit_id=_CHARGER_ID)
+        assert (22, 28) in blocked_before_105_2, (
+            "Bug §2.2 encore actif après 105#0 seulement : (22,28) déjà absent."
+        )
+
         destroy_model(gs, "105#2", "combat")
 
         blocked = build_occupied_positions_set(gs, exclude_unit_id=_CHARGER_ID)
@@ -353,3 +379,4 @@ class TestChargeCollisionAfterAnchorDeath:
         assert (22, 28) not in blocked, (
             "Avec 105#2 détruite, (22,28) doit être libre pour l'unité 1."
         )
+        assert (22, 25) not in blocked
