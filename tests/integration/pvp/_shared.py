@@ -166,7 +166,7 @@ class GameClient:
                 )
             return "select_oath_target", {"unitId": targets[0]}
         decision = self.state.get("pending_agent_decision")
-        if decision is not None and decision["type"] == "waaagh_call":
+        if decision is not None and decision["player"] == self.current_player:
             return "agent_decision", {"option_index": 0}
         return None
 
@@ -225,7 +225,7 @@ def assert_game_states_equal(a: dict, b: dict, label: str = "") -> None:
 
 
 @contextmanager
-def _in_memory_write_cursor():
+def _in_memory_write_cursor(immediate: bool = False):
     connection = sqlite3.connect(":memory:")
     connection.row_factory = sqlite3.Row
     try:
