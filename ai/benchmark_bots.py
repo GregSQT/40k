@@ -34,6 +34,7 @@ from engine.phase_handlers.shared_utils import (
     entry_is_on_battlefield, get_hp_from_cache, is_unit_alive,
     require_unit_from_cache, require_unit_position,
 )
+from engine.utils.weapon_helpers import get_max_ranged_range
 from engine.weapon_damage_cache import squad_expected_damage
 from shared.data_validation import require_key
 
@@ -63,6 +64,37 @@ _BENCHMARK_PLACEMENT_WEIGHTS: Dict[int, float] = {
     DEPLOYMENT_ACTIONS[5]: 0.05,
     DEPLOYMENT_ACTIONS[6]: 0.05,
 }
+
+#: Borne le pre-tri geometrique avant la passe couteuse (tir) — identique a
+#: bot_doctrines.DESTINATION_SHORTLIST, copie pour eviter l'import circulaire.
+DESTINATION_SHORTLIST: int = 24
+
+# ─────────────────────────────────────────────────────────────────────────────────────────────
+# Poids de deplacement — hardcodes, jamais dans bot_movement_weights.json (§4.C isolation)
+# ─────────────────────────────────────────────────────────────────────────────────────────────
+#
+# Tuple : (w_obj, w_enn, w_fire, w_risk, w_contest)
+#   w_obj     : penalise la distance a l'objectif non-tenu par le joueur (> 0 = se rapprocher)
+#   w_enn     : penalise la distance a l'ennemi le plus proche
+#               (> 0 = approcher, < 0 = fuir — meme semantique que bot_movement_weights.json)
+#   w_fire    : valorise les degats esperes depuis la destination (> 0)
+#   w_risk    : penalise les degats recus esperes depuis la destination (> 0)
+#   w_contest : penalise la distance aux objectifs tenus par l'adversaire (> 0)
+#
+# Point de calibrage : les bots d'entrainement ont w_obj ∈ [0.7, 1.3], w_enn ∈ [-0.35, 1.2],
+# w_fire ∈ [0, 1.0], w_risk ∈ [0, 0.9], w_contest ∈ [1.0, 4.0] (bot_movement_weights.json).
+# Rejouer avec scripts/bot_ranking.py --bots reference_balanced,...
+# apres chaque ajustement — NE PAS toucher bot_movement_weights.json.
+
+_W_BALANCED_SCORE:    Tuple[float, ...] = (0.9, 0.1, 0.4, 0.2, 2.0)
+_W_BALANCED_KILL:     Tuple[float, ...] = (0.5, 1.0, 1.0, 0.0, 0.8)
+_W_BALANCED_PRESERVE: Tuple[float, ...] = (0.7, -0.5, 0.2, 0.6, 0.8)
+
+_W_DENIAL: Tuple[float, ...] = (0.8, 0.5, 0.8, 0.2, 2.5)
+
+_W_REACTIVE_KILL:    Tuple[float, ...] = (0.4, 1.0, 1.0, 0.0, 0.8)
+_W_REACTIVE_SCORE:   Tuple[float, ...] = (1.0, 0.1, 0.4, 0.2, 2.0)
+_W_REACTIVE_CONTEST: Tuple[float, ...] = (0.9, -0.2, 0.3, 0.4, 2.0)
 
 
 # ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -140,7 +172,6 @@ def _expected_ranged_from(
     game_state: Dict[str, Any],
 ) -> float:
     """Degats esperes totaux depuis `dest` (heuristique ancre-ancre)."""
-    from engine.utils.weapon_helpers import get_max_ranged_range
     att_id = str(require_key(attacker, "id"))
     my_range = get_max_ranged_range(attacker) if attacker.get("RNG_WEAPONS") else 0
     total = 0.0
@@ -150,6 +181,62 @@ def _expected_ranged_from(
         if calculate_hex_distance(dest[0], dest[1], int(entry["col"]), int(entry["row"])) <= my_range:
             total += squad_expected_damage(game_state, att_id, eid, True)
     return total
+
+
+def _received_damage_from(
+    attacker: Dict[str, Any],
+    enemies: List[Dict[str, Any]],
+    dest: Tuple[int, int],
+    game_state: Dict[str, Any],
+) -> float:
+    """Degats esperes recus a `dest` depuis les ennemis (heuristique ancre-ancre)."""
+    att_id = str(require_key(attacker, "id"))
+    total = 0.0
+    for enemy in enemies:
+        eid = str(enemy["id"])
+        entry = require_unit_from_cache(eid, game_state, "_received_damage_from")
+        enemy_range = get_max_ranged_range(enemy) if enemy.get("RNG_WEAPONS") else 0
+        if calculate_hex_distance(dest[0], dest[1], int(entry["col"]), int(entry["row"])) <= enemy_range:
+            total += squad_expected_damage(game_state, eid, att_id, True)
+    return total
+
+
+def _score_destinations_weighted(
+    unit: Dict[str, Any],
+    candidates: List[Tuple[int, int]],
+    weights: Tuple[float, ...],
+    game_state: Dict[str, Any],
+) -> Tuple[int, int]:
+    """Passe-1 : pre-tri geometrique (w_obj, w_enn, w_contest) ;
+    Passe-2 : scoring tir (w_fire, w_risk) sur le top DESTINATION_SHORTLIST."""
+    w_obj, w_enn, w_fire, w_risk, w_contest = weights
+    player = int(require_key(unit, "player"))
+    enemies = _living_enemies(unit, game_state)
+    obj_anchors = _objective_anchors(game_state)
+    free_objs = [(c, r) for c, r, h in obj_anchors if h != player]
+    contested_objs = [(c, r) for c, r, h in obj_anchors if h == 3 - player]
+    all_objs = [(c, r) for c, r, _ in obj_anchors]
+
+    def _nearest(d: Tuple[int, int], pts: List[Tuple[int, int]]) -> float:
+        return float(min(calculate_hex_distance(d[0], d[1], c, r) for c, r in pts)) if pts else 0.0
+
+    def _geo(d: Tuple[int, int]) -> float:
+        obj_targets = free_objs if free_objs else all_objs
+        return (
+            w_obj * (-_nearest(d, obj_targets))
+            + w_enn * (-float(_min_enemy_dist(d, enemies, game_state)))
+            + w_contest * (-_nearest(d, contested_objs))
+        )
+
+    sorted_cands = sorted(candidates, key=_geo, reverse=True)
+    shortlist = sorted_cands[:DESTINATION_SHORTLIST]
+
+    def _full(d: Tuple[int, int]) -> float:
+        fire = _expected_ranged_from(unit, enemies, d, game_state) if w_fire != 0.0 else 0.0
+        risk = _received_damage_from(unit, enemies, d, game_state) if w_risk != 0.0 else 0.0
+        return _geo(d) + w_fire * fire - w_risk * risk
+
+    return max(shortlist, key=_full)
 
 
 # ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -304,28 +391,9 @@ class ReferenceBalancedBot(_BenchmarkBase):
 
         enemies = _living_enemies(unit, game_state)
         intent = self._elect_intent(unit, game_state, enemies)
-        player = int(require_key(unit, "player"))
         candidates = [current] + list(valid_destinations)
-
-        if intent == "KILL":
-            def _score(d: Tuple[int, int]) -> float:
-                return _expected_ranged_from(unit, enemies, d, game_state)
-        elif intent == "PRESERVE":
-            def _score(d: Tuple[int, int]) -> float:
-                return float(_min_enemy_dist(d, enemies, game_state))
-        else:  # SCORE
-            obj_anchors = _objective_anchors(game_state)
-            uncontested = [(c, r, h) for c, r, h in obj_anchors if h != player]
-            targets = uncontested or obj_anchors
-            if targets:
-                def _score(d: Tuple[int, int]) -> float:
-                    return -float(min(calculate_hex_distance(d[0], d[1], c, r) for c, r, _ in targets))
-            else:
-                def _score(d: Tuple[int, int]) -> float:
-                    return 0.0
-
-        best = max(candidates, key=_score)
-        return (int(best[0]), int(best[1]))
+        weights = {"KILL": _W_BALANCED_KILL, "PRESERVE": _W_BALANCED_PRESERVE, "SCORE": _W_BALANCED_SCORE}[intent]
+        return _score_destinations_weighted(unit, candidates, weights, game_state)
 
     def select_action_with_state(
         self, valid_actions: List[int], game_state: Dict[str, Any], active_unit: Dict[str, Any]
@@ -391,21 +459,8 @@ class ReferenceDenialBot(_BenchmarkBase):
         if self.randomness > 0 and random.random() < self.randomness:
             return random.choice(valid_destinations)
 
-        player = int(require_key(unit, "player"))
-        obj_anchors = _objective_anchors(game_state)
-        targets = [(c, r, h) for c, r, h in obj_anchors if h != player]
-        if not targets:
-            targets = obj_anchors
-
         candidates = [current] + list(valid_destinations)
-        if targets:
-            best = min(
-                candidates,
-                key=lambda d: min(calculate_hex_distance(d[0], d[1], c, r) for c, r, _ in targets),
-            )
-        else:
-            best = current
-        return (int(best[0]), int(best[1]))
+        return _score_destinations_weighted(unit, candidates, _W_DENIAL, game_state)
 
     def select_action_with_state(
         self, valid_actions: List[int], game_state: Dict[str, Any], active_unit: Dict[str, Any]
@@ -425,7 +480,18 @@ class ReferenceDenialBot(_BenchmarkBase):
             )
             return action if action is not None else WAIT_ACTION
         if phase == "charge":
-            return self._charge(valid_actions, game_state, active_unit)
+            # Ne charger que si un ennemi est sur un objectif — la faute punie est le push aveugle.
+            zones = objective_hex_sets(game_state)
+            if zones and any(
+                unit_is_within_objective(
+                    game_state,
+                    require_unit_from_cache(str(e["id"]), game_state, "_denial_charge"),
+                    zones,
+                )
+                for e in _living_enemies(active_unit, game_state)
+            ):
+                return self._charge(valid_actions, game_state, active_unit)
+            return self._wait_or_first(valid_actions)
         if phase == "fight":
             if not any(a in valid_actions for a in mi.FIGHT_SLOTS):
                 return mi.ACTION_FIGHT_NO_TARGET if mi.ACTION_FIGHT_NO_TARGET in valid_actions else self._wait_or_first(valid_actions)
@@ -447,10 +513,10 @@ class ReferenceDenialBot(_BenchmarkBase):
 class ReferenceReactiveBot(_BenchmarkBase):
     """Revise son plan sur ce que l'agent VIENT de faire (valeur perdue le tour precedent).
 
-    Plans : 'KILL' | 'SCORE' | 'RETREAT'
+    Plans : 'KILL' | 'SCORE' | 'CONTEST'
 
-    Transitions : echange favorable -> presser (KILL) ; echange defavorable -> se replier
-    (RETREAT) ; en retard au score -> contester (SCORE) ; sinon conserver le plan courant.
+    Transitions : echange favorable -> presser (KILL) ; echange defavorable -> contester les
+    objectifs (CONTEST) ; en retard au score -> scorer (SCORE) ; sinon conserver le plan courant.
 
     Faute punie : l'agent exploitable par un adversaire qui s'adapte.
 
@@ -509,7 +575,7 @@ class ReferenceReactiveBot(_BenchmarkBase):
         vp_opp = float(vp[3 - player])
 
         if loss_me > loss_opp + _VALUE_LOSS_THRESHOLD:
-            self._plan = "RETREAT"
+            self._plan = "CONTEST"
         elif loss_opp > loss_me + _VALUE_LOSS_THRESHOLD:
             self._plan = "KILL"
         elif vp_me < vp_opp - _VP_LEAD:
@@ -534,28 +600,8 @@ class ReferenceReactiveBot(_BenchmarkBase):
         player = int(require_key(unit, "player"))
         self._update_plan(game_state, player)
         candidates = [current] + list(valid_destinations)
-
-        enemies = _living_enemies(unit, game_state) if self._plan in ("KILL", "RETREAT") else []
-        if self._plan == "KILL":
-            def _score(d: Tuple[int, int]) -> float:
-                return -float(_min_enemy_dist(d, enemies, game_state))
-            best = max(candidates, key=_score)
-        elif self._plan == "RETREAT":
-            def _score(d: Tuple[int, int]) -> float:
-                return float(_min_enemy_dist(d, enemies, game_state))
-            best = max(candidates, key=_score)
-        else:  # SCORE
-            obj_anchors = _objective_anchors(game_state)
-            targets = [(c, r, h) for c, r, h in obj_anchors if h != player]
-            if not targets:
-                targets = obj_anchors
-            if targets:
-                def _score(d: Tuple[int, int]) -> float:
-                    return -float(min(calculate_hex_distance(d[0], d[1], c, r) for c, r, _ in targets))
-                best = max(candidates, key=_score)
-            else:
-                best = current
-        return (int(best[0]), int(best[1]))
+        weights = {"KILL": _W_REACTIVE_KILL, "SCORE": _W_REACTIVE_SCORE, "CONTEST": _W_REACTIVE_CONTEST}[self._plan]
+        return _score_destinations_weighted(unit, candidates, weights, game_state)
 
     def select_action_with_state(
         self, valid_actions: List[int], game_state: Dict[str, Any], active_unit: Dict[str, Any]

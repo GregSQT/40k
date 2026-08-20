@@ -383,3 +383,92 @@ def test_elect_intent_raises_on_zero_hp() -> None:
     with patch("ai.benchmark_bots.squad_expected_damage", return_value=5.0):
         with pytest.raises(ValueError, match="HP=0"):
             bot._elect_intent(unit, gs, [enemy])
+
+
+# ─────────────────────────────────────────────────────────────────────────────────────────────
+# 7. Comportement de charge ReferenceDenialBot — conditionnel à l'objectif
+# ─────────────────────────────────────────────────────────────────────────────────────────────
+
+def test_denial_bot_no_charge_when_no_enemy_on_objective() -> None:
+    """ReferenceDenialBot retourne WAIT_ACTION en phase charge si aucun ennemi n'est sur objectif."""
+    from unittest.mock import patch
+    from ai.evaluation_bots import WAIT_ACTION
+
+    bot = ReferenceDenialBot(randomness=0.0)
+    gs = _minimal_game_state()
+    gs["phase"] = "charge"
+    active_unit = {"id": "u1", "player": 1, "VALUE": 5.0}
+    enemy = {"id": "e1", "player": 2, "VALUE": 5.0}
+
+    with patch("ai.benchmark_bots._living_enemies", return_value=[enemy]), \
+         patch("ai.benchmark_bots.objective_hex_sets", return_value={(3, 3): True}), \
+         patch("ai.benchmark_bots.unit_is_within_objective", return_value=False), \
+         patch("ai.benchmark_bots.require_unit_from_cache", return_value={"col": 5, "row": 5}):
+        result = bot.select_action_with_state([WAIT_ACTION], gs, active_unit)
+
+    assert result == WAIT_ACTION, (
+        f"Denial bot ne doit pas charger sans ennemi sur objectif, obtenu {result}"
+    )
+
+
+def test_denial_bot_charges_when_enemy_on_objective() -> None:
+    """ReferenceDenialBot délègue à _charge si un ennemi est sur un objectif."""
+    from unittest.mock import patch
+    from ai.evaluation_bots import WAIT_ACTION
+
+    FAKE_CHARGE = 999
+
+    bot = ReferenceDenialBot(randomness=0.0)
+    gs = _minimal_game_state()
+    gs["phase"] = "charge"
+    active_unit = {"id": "u1", "player": 1, "VALUE": 5.0}
+    enemy = {"id": "e1", "player": 2, "VALUE": 5.0}
+
+    with patch("ai.benchmark_bots._living_enemies", return_value=[enemy]), \
+         patch("ai.benchmark_bots.objective_hex_sets", return_value={(3, 3): True}), \
+         patch("ai.benchmark_bots.unit_is_within_objective", return_value=True), \
+         patch("ai.benchmark_bots.require_unit_from_cache", return_value={"col": 5, "row": 5}), \
+         patch.object(bot, "_charge", return_value=FAKE_CHARGE):
+        result = bot.select_action_with_state([WAIT_ACTION, FAKE_CHARGE], gs, active_unit)
+
+    assert result == FAKE_CHARGE, (
+        f"Denial bot doit charger quand ennemi sur objectif, obtenu {result}"
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────────────────────
+# 8. Plan CONTEST (ancien RETREAT) de ReferenceReactiveBot
+# ─────────────────────────────────────────────────────────────────────────────────────────────
+
+def test_reactive_bot_contest_plan_on_heavy_own_losses() -> None:
+    """_update_plan bascule en 'CONTEST' quand les pertes propres depassent seuil + pertes adverses.
+
+    Scénario : tour 1 valeur=10/10, tour 2 mon unité morte (HP_CUR=0) → loss_me=10, loss_opp=0.
+    Attendu : plan == 'CONTEST' (anciennement 'RETREAT' — §4.C correction).
+    """
+    from ai.benchmark_bots import _VALUE_LOSS_THRESHOLD
+
+    assert _VALUE_LOSS_THRESHOLD < 10.0, "Fixture invalide : _VALUE_LOSS_THRESHOLD doit être < 10"
+
+    bot = ReferenceReactiveBot(randomness=0.0)
+
+    # is_unit_alive verifie la PRESENCE dans units_cache, pas HP_CUR.
+    # Pour simuler une unite morte : la retirer du cache (elle reste dans units pour la VP).
+    def _gs(episode: int, turn: int, u1_alive: bool) -> Dict[str, Any]:
+        gs = _minimal_game_state(episode=episode, turn=turn)
+        gs["units"] = [
+            {"id": "u1", "player": 1, "VALUE": 10.0},
+            {"id": "u2", "player": 2, "VALUE": 10.0},
+        ]
+        cache = {"u2": {"col": 6, "row": 6, "player": 2}}
+        if u1_alive:
+            cache["u1"] = {"col": 5, "row": 5, "player": 1}
+        gs["units_cache"] = cache
+        return gs
+
+    bot._update_plan(_gs(episode=1, turn=1, u1_alive=True), player=1)
+    bot._update_plan(_gs(episode=1, turn=2, u1_alive=False), player=1)
+
+    assert bot._plan == "CONTEST", (
+        f"Plan attendu 'CONTEST' apres lourdes pertes, obtenu {bot._plan!r}"
+    )
