@@ -48,10 +48,9 @@ def _unit_cfg(uid: int, player: int, col: int, row: int) -> Dict[str, Any]:
     }
 
 
-def _engine_engaged() -> W40KEngine:
-    """Moteur avec unités en engagement range (col 20/21, même row)."""
+def _base_config(units: list) -> dict:
     obs_params = {"obs_size": _OBS_SIZE}
-    config = {
+    return {
         "board": {"default": {"cols": 60, "rows": 60, "hex_radius": 1.0, "margin": 0.0,
                               "wall_hexes": [], "objectives": [], "inches_to_subhex": 1}},
         "game_rules": {"engagement_zone": 1, "engagement_zone_vertical": 5,
@@ -66,16 +65,24 @@ def _engine_engaged() -> W40KEngine:
         "controlled_player": 1,
         "observation_params": obs_params,
         "training_config": {"observation_params": obs_params, "max_turns_per_episode": 3},
-        "units": [
-            _unit_cfg(1, 1, 20, 20),  # J1 — sera battle-shocked
-            _unit_cfg(2, 2, 21, 20),  # J2 — adjacent (ER 1 hex)
-        ],
+        "units": units,
     }
+
+
+def _make_engine(config: dict) -> W40KEngine:
     with patch("engine.w40k_core.load_weapon_damage_table", return_value={}), \
          patch.object(W40KEngine, "_build_reward_configs_for_current_units", return_value={}):
         eng = W40KEngine(config=build_engine_config(config), gym_training_mode=True)
     eng.reset()
     return eng
+
+
+def _engine_engaged() -> W40KEngine:
+    """Moteur avec unités en engagement range (col 20/21, même row)."""
+    return _make_engine(_base_config([
+        _unit_cfg(1, 1, 20, 20),  # J1 — sera battle-shocked
+        _unit_cfg(2, 2, 21, 20),  # J2 — adjacent (ER 1 hex)
+    ]))
 
 
 def _unit_cfg_3models(uid: int, player: int) -> Dict[str, Any]:
@@ -98,32 +105,10 @@ def _unit_cfg_3models(uid: int, player: int) -> Dict[str, Any]:
 
 def _engine_bridge_formation() -> W40KEngine:
     """Moteur : escouade 1 en formation pont (3 fig), ennemi (25,20) adjacent à C."""
-    obs_params = {"obs_size": _OBS_SIZE}
-    config = {
-        "board": {"default": {"cols": 60, "rows": 60, "hex_radius": 1.0, "margin": 0.0,
-                              "wall_hexes": [], "objectives": [], "inches_to_subhex": 1}},
-        "game_rules": {"engagement_zone": 1, "engagement_zone_vertical": 5,
-                       "max_base_size_hex": 35, "max_turns": 5},
-        "charge": {"charge_max_distance": 12},
-        "move": {
-            "can_move_through_enemy_engagement_zone": True,
-            "can_move_through_enemy_model": False,
-            "can_move_through_friendly_model": True,
-        },
-        "pve_mode": False,
-        "controlled_player": 1,
-        "observation_params": obs_params,
-        "training_config": {"observation_params": obs_params, "max_turns_per_episode": 3},
-        "units": [
-            _unit_cfg_3models(1, 1),       # J1 — 3 figs en pont
-            _unit_cfg(2, 2, 25, 20),       # J2 — adjacent à C (24,20), déclenche l'ER
-        ],
-    }
-    with patch("engine.w40k_core.load_weapon_damage_table", return_value={}), \
-         patch.object(W40KEngine, "_build_reward_configs_for_current_units", return_value={}):
-        eng = W40KEngine(config=build_engine_config(config), gym_training_mode=True)
-    eng.reset()
-    return eng
+    return _make_engine(_base_config([
+        _unit_cfg_3models(1, 1),       # J1 — 3 figs en pont
+        _unit_cfg(2, 2, 25, 20),       # J2 — adjacent à C (24,20), déclenche l'ER
+    ]))
 
 
 def _engine_battle_shocked() -> tuple:
