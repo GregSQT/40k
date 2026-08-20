@@ -173,7 +173,8 @@ def _anti_rule_token(details) -> str:
 
 
 def _save_segments(
-    details, *, damage, save_result, ap_ability_token: str = "", alloc_model_id=None
+    details, *, damage, save_result, ap_ability_token: str = "", alloc_model_id=None,
+    fnp_saves=None, fnp_attempts=None, fnp_threshold=None,
 ) -> list:
     """Segments `Save …` (+ `Dmg:` le cas echeant) d une attaque — TIR ET MELEE, un seul site.
 
@@ -227,7 +228,11 @@ def _save_segments(
     prefix = [f"→ {alloc_model_id}"] if alloc_model_id else []
     segments = prefix + [save_part]
     if save_result == "FAIL":
-        segments.append(f"Dmg:{damage}HP")
+        _dmg_str = f"Dmg:{damage}HP"
+        # L12 — FNP:saves/seuil+ ×tentatives (24.12) ; absent si pas de FNP.
+        if fnp_saves is not None and fnp_attempts:
+            _dmg_str += f" [FNP:{fnp_saves}/{fnp_threshold}+ ×{fnp_attempts}]"
+        segments.append(_dmg_str)
     return segments
 
 
@@ -1249,6 +1254,9 @@ class StepLogger:
                         details, damage=damage, save_result=save_result,
                         ap_ability_token=_ability_token(ap_modifier_ability_display_name),
                         alloc_model_id=details.get("target_model_id"),
+                        fnp_saves=details.get("fnp_saves"),
+                        fnp_attempts=details.get("fnp_attempts"),
+                        fnp_threshold=details.get("fnp_threshold"),
                     ))
             detail_msg = f" - {' - '.join(detail_parts)}"
             if hazardous_test_required:
@@ -1538,6 +1546,9 @@ class StepLogger:
                         details, damage=damage, save_result=save_result,
                         ap_ability_token=_ability_token(_save_ability),
                         alloc_model_id=details.get("target_model_id"),
+                        fnp_saves=details.get("fnp_saves"),
+                        fnp_attempts=details.get("fnp_attempts"),
+                        fnp_threshold=details.get("fnp_threshold"),
                     ))
             
             detail_msg = f" - {' - '.join(detail_parts)}"

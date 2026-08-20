@@ -5723,6 +5723,11 @@ class W40KEngine(gym.Env):
         # Permettent au formateur StepLogger d afficher `Save R(<base>+ AP<n> → <eff>+)`.
         "weaponAp": "weapon_ap",
         "allocModelArmor": "alloc_model_armor",
+        # L12 — jets Feel No Pain (24.12) : nombre de saves/tentatives/seuil. Absent si la
+        # cible n'a pas de FNP, ou si le save a déjà annulé les dégâts.
+        "fnpSaves": "fnp_saves",
+        "fnpAttempts": "fnp_attempts",
+        "fnpThreshold": "fnp_threshold",
     }
 
     def _models_segment_for_unit(self, unit_id: Any, label: str = "MODELS") -> str:

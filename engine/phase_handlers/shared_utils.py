@@ -10187,7 +10187,12 @@ def _resolve_one_manual_wound(game_state: Dict[str, Any], alloc: Dict[str, Any],
     if _def_squad_fnp is not None:
         _fnp_th = _get_feel_no_pain_threshold(_def_squad_fnp)
         if _fnp_th is not None:
+            _fnp_attempts = dmg_dealt
             dmg_dealt = _roll_feel_no_pain(dmg_dealt, _fnp_th)
+            # L12 — jets FNP dans step.log (24.12) : saves/seuil+/tentatives.
+            rec["fnpSaves"] = _fnp_attempts - dmg_dealt
+            rec["fnpAttempts"] = _fnp_attempts
+            rec["fnpThreshold"] = _fnp_th
     if dmg_dealt <= 0:
         rec["damageDealt"] = 0
         rec["targetDied"] = False
