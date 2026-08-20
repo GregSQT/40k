@@ -7,15 +7,13 @@
 ✅ Run `x1_long --new` terminé (2026-08-20), 4 critères pipeline VERTS.
 ✅ Reference bots renforcés : scoring 5D multi-critères (poids hardcodés, isolés de `bot_movement_weights.json`), charge denial conditionnelle à l'objectif, plan RETREAT renommé CONTEST.
 
-**À faire** : relancer `bot_ranking.py` sur les 3 reference bots pour mesurer les nouveaux win-rates, calibrer les poids si nécessaire, puis poser le seuil `benchmark_floor` (gate livré, seuil à poser après mesure).
+✅ `bot_ranking.py` sur 9 bots × 4 scénarios × 20 ep (2026-08-20) — scores reference bots (bot-vs-bot, 1 280 ep chacun) :
+- `reference_balanced` : **0,168**
+- `reference_denial` : **0,155**
+- `reference_reactive` : **0,139** ← min
+- `benchmark_floor` posé à **0,049** (`min − 0,09`) dans `x1_long/callback_params/model_gating_min_benchmark_floor`
 
-```
-W40K_BOARD_PATH=board/44x60x1 python3 scripts/bot_ranking.py \
-  --agent ArmageddonAgent --training-config x1 --scenario-pool holdout \
-  --bots reference_balanced,reference_denial,reference_reactive --episodes 20
-```
-
-Ligne de base actuelle (à battre) : `combined = 0,7433`, pire bot `racer = 0,630`.
+Ligne de base agent (à battre en J3) : `combined = 0,7433`, pire bot `racer = 0,630`.
 
 → `Documentation/Implémentation/A_faire/bots_refonte_panel.md` (`Documentation/Implémentation/Bot_refactor.md` §7)
 

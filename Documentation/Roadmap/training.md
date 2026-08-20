@@ -9,12 +9,12 @@ tourne avec l'espace de décision modifié. Le run `x1_long --new` lancé le 202
 ([bot.md#etape8](bot.md#etape8)) embarque le même code à HEAD : **les critères se lisent sur SES
 courbes**, un run séparé n'a plus d'objet sauf si celui-ci échoue.
 
-À vérifier à la fin du run — pas un progrès, mais que le pipeline tourne :
+✅ Critères vérifiés sur le run `x1_long --new` du 2026-08-20 :
 
-- `game_critical/invalid_action_rate` reste à **0**
-- `02_combat/m_charge_attempts` **non nul**
-- `02_combat/n_charge_success_rate` **non nul** (en V11 la déclaration est gratuite — l'agent déclare « au cas où » puis choisit ses cibles après le jet ; un taux bas ne signifie pas un dysfonctionnement)
-- Courbes `reserves/*` et `05_charge/*` **peuplées** (`charge_distance/*` était le nom de la clé interne, le tag TensorBoard réel est `05_charge/*`)
+- ✅ `game_critical/invalid_action_rate` reste à **0**
+- ✅ `02_combat/m_charge_attempts` **non nul**
+- ✅ `02_combat/n_charge_success_rate` **non nul** (en V11 la déclaration est gratuite — l'agent déclare « au cas où » puis choisit ses cibles après le jet ; un taux bas ne signifie pas un dysfonctionnement)
+- ✅ Courbes `reserves/*` et `05_charge/*` **peuplées** (`charge_distance/*` était le nom de la clé interne, le tag TensorBoard réel est `05_charge/*`)
 
 ⚠️ Pour tout re-run : `--new` et non `--append` — `--append` réapplique `ent_coef = 0,1` et écrase le modèle canonique.
 

@@ -44,7 +44,7 @@ Tout chantier sert un jalon ci-dessous, ou attend. Les jalons sont séquentiels 
 
 | Jalon | Contenu | Critère de sortie |
 |---|---|---|
-| **J1 — Pipeline prouvé, ligne de base** 🔄 | Run `x1_long --new` du 2026-08-17 (en cours) | Critères de [training.md#run-verif](training.md#run-verif) verts sur ses courbes ; ligne de base du panel rejouée (`--test-only --step`) |
+| **J1 — Pipeline prouvé, ligne de base** ✅ | Run `x1_long --new` terminé le 2026-08-20 — combined agent `0,7433`, pire bot `racer = 0,630` ; reference bots mesurés (balanced `0,168`, denial `0,155`, reactive `0,139`), `benchmark_floor` posé à `0,049` | Critères de [training.md#run-verif](training.md#run-verif) verts ; ligne de base panel rejouée |
 | **J2 — Le gym décide tout** | Chemin critique lignes 1–4 (P3-5, P3-6, P3-8, P4) ; le dégel de `TOTAL_ACTION_SIZE` qu'elles ouvrent embarque P3-0 | Plus aucune décision de jeu jouée par une heuristique à la place de l'agent, hors optionnels statués par mesure de regret |
 | **J3 — Mesure de référence** | Chemin critique lignes 5–6 : profil de validation P5, puis `x1_long` (~20 h) | LE chiffre officiel du projet — solde §0.14, §0.67 et le critère T6 (via §10.6) |
 | **J4 — Dépasser la mesure** | Self-play §0.59 (ligne 7), capacités 06, É9 second scénario — priorisés selon ce que la mesure révèle | Win-rate au-dessus de la mesure de référence, reproductible |
@@ -52,11 +52,11 @@ Tout chantier sert un jalon ci-dessous, ou attend. Les jalons sont séquentiels 
 
 ---
 
-## J1 🔄 En cours — ne rien casser
+## J1 ✅ Terminé — 2026-08-20
 
 | Priorité | Sujets | Chantier | Fichier |
 |---|---|---|---|
-| 🔄 | training+bot | Run `x1_long --new` lancé le 2026-08-17 — à la fin : critères pipeline ([training.md#run-verif](training.md#run-verif)) puis ligne de base panel (`--test-only --step`) | [bot.md#etape8](bot.md#etape8) |
+| ✅ | training+bot | Run `x1_long --new` terminé 2026-08-20 — critères pipeline VERTS, `benchmark_floor` posé à 0,049 | [bot.md#etape8](bot.md#etape8) |
 
 ---
 
