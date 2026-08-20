@@ -6043,7 +6043,7 @@ def _count_engaged_models_after_charge(
                     engaged += 1
                     break
             except (ValueError, KeyError):
-                break
+                continue
     return engaged, len(charger_model_ids)
 
 
