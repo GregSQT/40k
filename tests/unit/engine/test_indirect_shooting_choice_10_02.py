@@ -216,3 +216,31 @@ def test_shooting_type_cleared_if_squad_declare_shoot_raises(monkeypatch):
     assert "1" not in choices, (
         "squad_shooting_type_clear doit effacer le choix même si squad_declare_shoot lève"
     )
+
+
+def test_shooting_type_cleared_after_manual_pvp_allocation(monkeypatch):
+    """_finish_manual_shoot_after_allocation doit effacer le type choisi.
+
+    Scénario : attaquant humain choisit INDIRECT en T1 (PvP), l'allocation manuelle se termine.
+    Sans l'effacement, T2 `resolve_squad_shooting_type` retourne INDIRECT (le choix périmé) au
+    lieu du défaut dérivé, corrompant éligibilité et entrées step.log."""
+    import engine.phase_handlers.shared_utils as SU_mod
+    from engine.w40k_core import W40KEngine
+    import engine.phase_handlers.generic_handlers as gh
+
+    monkeypatch.setattr(gh, "end_activation", lambda *a, **kw: {"action": "end_activation"})
+    import engine.w40k_core as core_mod
+    monkeypatch.setattr(core_mod, "get_unit_by_id",
+                        lambda gs, sid: {"id": sid, "player": 1})
+
+    eng = object.__new__(W40KEngine)
+    eng.game_state = {
+        SQUAD_SHOOTING_TYPE_CHOICE_KEY: {"1": SHOOTING_TYPE_INDIRECT},
+    }
+
+    eng._finish_manual_shoot_after_allocation("1", {"shoot_result": {}})
+
+    choices = eng.game_state.get(SQUAD_SHOOTING_TYPE_CHOICE_KEY, {})
+    assert "1" not in choices, (
+        "_finish_manual_shoot_after_allocation doit effacer le type choisi avant end_activation"
+    )
