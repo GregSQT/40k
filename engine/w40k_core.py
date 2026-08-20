@@ -6827,6 +6827,7 @@ class W40KEngine(gym.Env):
             # En PvP le chemin passe par `_handle_hazard_confirm` ; en gym ce handler n'est jamais
             # appelé, donc les jets (et `_flee_mode`) n'étaient posés nulle part — step.log émettait
             # toujours [ORDERED RETREAT] et les jets hazard étaient absents de l'épisode.
+            _is_desp = False
             if move_type == "fall_back":
                 from engine.phase_handlers.shared_utils import (
                     desperate_escape_pre_move, _squad_is_in_enemy_er,
@@ -6851,6 +6852,14 @@ class W40KEngine(gym.Env):
                         "waiting_for_player": False,
                     }
 
+            # 03.03 : la cohérence est rétablie en FIN DE PHASE (end_of_turn_regain_coherency_all_squads),
+            # pas pendant le move lui-même. Si un Desperate Escape a tué des figurines qui assuraient
+            # la liaison (pertes entre construction du masque et exécution), la formation traduite
+            # rigidement est incoherente → validate_move_plan rejette à tort. On relaxe uniquement dans
+            # ce cas : pour un ordered retreat, la formation reste coherente (garanti par la translation
+            # rigide depuis un état coherent), donc require_coherency=True reste le filet de sécurité.
+            _move_constraints = {"require_coherency": False} if _is_desp else None
+
             # Plus de dry-run de legalite ici, et plus de degradation silencieuse en `squad_wait` :
             # la destination VIENT du pool que le masque a lui-meme utilise (meme carte, cf.
             # `read_squad_move_cell_map`), donc elle est legale par construction. L'ancien
@@ -6858,7 +6867,10 @@ class W40KEngine(gym.Env):
             # directionnel pouvait diverger de l'execution ; ce repli MASQUAIT ce mismatch au lieu
             # de le signaler. Si `execute_squad_move` echoue desormais, c'est un bug d'invariant
             # -> erreur explicite.
-            ok = execute_squad_move(squad_id, dest_col, dest_row, move_type, self.game_state, advance_roll)
+            ok = execute_squad_move(
+                squad_id, dest_col, dest_row, move_type, self.game_state, advance_roll,
+                extra_constraints=_move_constraints,
+            )
             if not ok:
                 # L'invariant viole doit NOMMER la contrainte qui l'a rejete : sans cela chaque
                 # occurrence oblige a re-deviner la cause. Rejoue la MEME construction de plan et
@@ -6877,7 +6889,8 @@ class W40KEngine(gym.Env):
                         _plan,
                         self.game_state,
                         resolve_squad_move_constraints(
-                            squad_id, self.game_state, move_type, advance_roll
+                            squad_id, self.game_state, move_type, advance_roll,
+                            _move_constraints,
                         ),
                     ) or "aucune contrainte violée au rejeu (état muté entre-temps)"
                 raise ValueError(

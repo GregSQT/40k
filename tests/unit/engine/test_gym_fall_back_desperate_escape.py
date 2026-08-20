@@ -78,6 +78,54 @@ def _engine_engaged() -> W40KEngine:
     return eng
 
 
+def _unit_cfg_3models(uid: int, player: int) -> Dict[str, Any]:
+    """Escouade de 3 figurines en formation pont : A(20,20) — B(22,20) — C(24,20).
+
+    Coh = 2 subhexes (ISH=1). A et B sont à 2 hexes, B et C aussi. Si B (pont) meurt,
+    A et C sont à 4 hexes → incoherents.
+    """
+    base = _unit_cfg(uid, player, 20, 20)
+    base["HP_CUR"] = 3
+    base["HP_MAX"] = 3
+    base["VALUE"] = 300
+    base["models"] = [
+        {"col": 20, "row": 20, "VALUE": 100},  # 1#0 — ancre A
+        {"col": 22, "row": 20, "VALUE": 100},  # 1#1 — pont B
+        {"col": 24, "row": 20, "VALUE": 100},  # 1#2 — queue C
+    ]
+    return base
+
+
+def _engine_bridge_formation() -> W40KEngine:
+    """Moteur : escouade 1 en formation pont (3 fig), ennemi (25,20) adjacent à C."""
+    obs_params = {"obs_size": _OBS_SIZE}
+    config = {
+        "board": {"default": {"cols": 60, "rows": 60, "hex_radius": 1.0, "margin": 0.0,
+                              "wall_hexes": [], "objectives": [], "inches_to_subhex": 1}},
+        "game_rules": {"engagement_zone": 1, "engagement_zone_vertical": 5,
+                       "max_base_size_hex": 35, "max_turns": 5},
+        "charge": {"charge_max_distance": 12},
+        "move": {
+            "can_move_through_enemy_engagement_zone": True,
+            "can_move_through_enemy_model": False,
+            "can_move_through_friendly_model": True,
+        },
+        "pve_mode": False,
+        "controlled_player": 1,
+        "observation_params": obs_params,
+        "training_config": {"observation_params": obs_params, "max_turns_per_episode": 3},
+        "units": [
+            _unit_cfg_3models(1, 1),       # J1 — 3 figs en pont
+            _unit_cfg(2, 2, 25, 20),       # J2 — adjacent à C (24,20), déclenche l'ER
+        ],
+    }
+    with patch("engine.w40k_core.load_weapon_damage_table", return_value={}), \
+         patch.object(W40KEngine, "_build_reward_configs_for_current_units", return_value={}):
+        eng = W40KEngine(config=build_engine_config(config), gym_training_mode=True)
+    eng.reset()
+    return eng
+
+
 def _engine_battle_shocked() -> tuple:
     """Moteur prêt pour un fall_back avec unité 1 battle-shocked et engagée."""
     eng = _engine_engaged()
@@ -173,4 +221,60 @@ def test_gym_fall_back_not_battleshocked_keeps_ordered_retreat() -> None:
     assert len(move_logs) == 1
     assert move_logs[0]["fleeMode"] == "ordered_retreat", (
         f"fleeMode attendu 'ordered_retreat', obtenu {move_logs[0].get('fleeMode')!r}"
+    )
+
+
+def test_gym_desperate_escape_bridge_death_coherency_relaxed() -> None:
+    """Mort du pont en Desperate Escape → formation incohérente → execute_squad_move doit réussir.
+
+    Scénario : escouade 3 figs A(20,20)–B(22,20)–C(24,20), ennemi en (25,20).
+    Coh = 2 subhexes (ISH=1). B est le seul lien A–C (chacun à 2", limite de coh).
+    Le mock simule un Desperate Escape qui tue B : A et C restent vivants, à 4 hexes l'un
+    de l'autre → incoherents.
+
+    Sans le fix (extra_constraints=_move_constraints absent de execute_squad_move) :
+    validate_move_plan avec require_coherency=True rejette le plan → ValueError.
+
+    Avec le fix : 03.03 enforce la coh en FIN de phase (end_of_turn_regain_coherency_all_squads,
+    déjà câblé) ; le move lui-même ne doit pas l'exiger pour un Desperate Escape.
+
+    Cycle rouge→vert : supprimer `extra_constraints=_move_constraints` dans l'appel
+    execute_squad_move de w40k_core._process_semantic_action déclenche un ValueError
+    « incohérence masque/exécution / require_coherency ».
+    """
+    eng = _engine_bridge_formation()
+    gs = eng.game_state
+
+    gs["phase"] = "move"
+    gs["move_activation_pool"] = ["1"]
+    unit1 = next(u for u in gs["units"] if str(u["id"]) == "1")
+    unit1["battle_shocked"] = True
+
+    bridge_mid = "1#1"
+
+    def _kill_bridge(
+        squad_id: str, game_state: Dict[str, Any], was_engaged: bool, auto_resolve: bool
+    ) -> tuple:
+        """Simule la mort de B (pont) par le Desperate Escape."""
+        game_state["models_cache"].pop(bridge_mid, None)
+        game_state["squad_models"]["1"] = [
+            m for m in game_state["squad_models"].get("1", []) if m != bridge_mid
+        ]
+        game_state["_flee_mode"] = "desperate_escape"
+        return True, True, 1  # is_desperate, is_alive (A et C survivent), wounds
+
+    # Destination ancre : A(20,20) → (16,20) ; C(24,20) → (20,20). Budget 6 ≥ 4. Pas en ER ennemi.
+    with patch(
+        "engine.phase_handlers.shared_utils.desperate_escape_pre_move",
+        side_effect=_kill_bridge,
+    ):
+        ok, result = eng._process_squad_action(
+            {"action": "squad_fall_back", "squad_id": "1", "destCol": 16, "destRow": 20}
+        )
+
+    assert ok, (
+        f"squad_fall_back post-mort-du-pont a échoué (incohérence masque/exécution non corrigée) : {result}"
+    )
+    assert result.get("action") != "desperate_escape_died", (
+        "A et C survivent → l'action ne doit pas être desperate_escape_died"
     )
