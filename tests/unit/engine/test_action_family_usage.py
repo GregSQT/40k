@@ -84,7 +84,9 @@ def test_les_bornes_de_chaque_plage_sont_dans_la_bonne_famille():
     assert action_family(mi.MOVE_CELL_BASE + mi.MOVE_CELL_COUNT - 1, "move") == "move_cell"
     assert action_family(mi.SHOOT_SLOT_BASE + mi.SHOOT_SLOT_COUNT - 1, "shoot") == "shoot_slot"
     assert action_family(mi.CHARGE_SLOT_BASE + mi.CHARGE_SLOT_COUNT - 1, "charge") == "charge_slot"
+    assert action_family(mi.CHARGE_PAIR_SLOT_BASE + mi.CHARGE_PAIR_SLOT_COUNT - 1, "charge") == "charge_pair_slot"
     assert action_family(mi.FIGHT_SLOT_BASE + mi.FIGHT_SLOT_COUNT - 1, "fight") == "fight_slot"
+    assert action_family(mi.SHOOT_INDIRECT_SLOT_BASE + mi.SHOOT_INDIRECT_SLOT_COUNT - 1, "shoot") == "shoot_indirect_slot"
     assert action_family(mi.CHOICE_BASE + mi.CHOICE_COUNT - 1, "move") == "choice"
 
 

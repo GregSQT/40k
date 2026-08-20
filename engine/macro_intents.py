@@ -60,12 +60,12 @@ CHARGE_PAIR_SLOT_COUNT = CHARGE_SLOT_COUNT * (CHARGE_SLOT_COUNT - 1) // 2  # 190
 # invariant D1). Les desolidariser ferait pointer l'action de combat i et l'observation i sur
 # deux escouades differentes, sans que rien ne leve.
 FIGHT_SLOT_BASE = CHARGE_PAIR_SLOT_BASE + CHARGE_PAIR_SLOT_COUNT  # 1255
-FIGHT_SLOT_COUNT = SHOOT_SLOT_COUNT                 # 20 -> 1065-1084
+FIGHT_SLOT_COUNT = SHOOT_SLOT_COUNT                 # 20 -> 1255-1274
 # 12.04/12.06 : une escouade selectionnee pour combattre SANS cible eligible (sa cible est
 # morte, overrun) resout un combat a vide. C'est un etat legal du jeu, pas un cas d'erreur :
 # il lui faut donc une action propre. Fusionner ce cas avec un slot rendrait « frapper le
 # slot i » ambigu (frapper i, ou ne frapper personne ?).
-ACTION_FIGHT_NO_TARGET = FIGHT_SLOT_BASE + FIGHT_SLOT_COUNT   # 1085
+ACTION_FIGHT_NO_TARGET = FIGHT_SLOT_BASE + FIGHT_SLOT_COUNT   # 1275
 # 10.02 / 10.07 : le TIR INDIRECT est un second type de tir jouable dans le meme etat que le tir
 # normal — l escouade choisit. Un slot par cible, sur le MEME `get_enemy_slot_mapping` que le tir
 # ordinaire (invariant D1), donc le meme compte : les desolidariser ferait pointer l action i et
@@ -75,8 +75,8 @@ ACTION_FIGHT_NO_TARGET = FIGHT_SLOT_BASE + FIGHT_SLOT_COUNT   # 1085
 # y poser ces slots les aurait fait COLLIDER avec les intentions de zone. Le test miroir
 # `test_action_space_mirror` l a pris — `SQUAD_ACTION_SIZE` borne les actions MICRO, ce n est pas
 # la fin de l espace d action.
-SHOOT_INDIRECT_SLOT_BASE = ACTION_FIGHT_NO_TARGET + 1          # 1086
-SHOOT_INDIRECT_SLOT_COUNT = SHOOT_SLOT_COUNT                   # 20 -> 1086-1105
+SHOOT_INDIRECT_SLOT_BASE = ACTION_FIGHT_NO_TARGET + 1          # 1276
+SHOOT_INDIRECT_SLOT_COUNT = SHOOT_SLOT_COUNT                   # 20 -> 1276-1295
 DEPLOY_SLOT_BASE = 4
 # Slots de deploiement DECRITS par l'observation et adressables par une action : 8 -> ids 4-11.
 # Ils tombent dans la plage des cellules de move (`MOVE_CELL_BASE = 0`), donc `TOTAL_ACTION_SIZE`
@@ -91,7 +91,7 @@ DEPLOY_SLOT_COUNT = 8       # deployment slots 0-7 -> 4-11
 # ⚠️ `DEPLOY_STRATEGY_COUNT <= DEPLOY_SLOT_COUNT` — l'inverse ouvrirait une action sans strategie.
 DEPLOY_STRATEGY_COUNT = 7  # +2 : centre_hub (action 9) + safe_rear (action 10)
 
-BASE_ZONE_INTENT = SHOOT_INDIRECT_SLOT_BASE + SHOOT_INDIRECT_SLOT_COUNT  # 1106
+BASE_ZONE_INTENT = SHOOT_INDIRECT_SLOT_BASE + SHOOT_INDIRECT_SLOT_COUNT  # 1296
 # ⚠️ Le macro se DECALE de 20 avec l ajout des slots de tir indirect (2026-08-16). Les ids
 # macro ne sont pas un contrat externe — ils sont derives, et le retrain impose par le
 # changement de dimension est de toute facon acte. Ce qui compte est que la derivation
@@ -103,7 +103,7 @@ BASE_ZONE_INTENT = SHOOT_INDIRECT_SLOT_BASE + SHOOT_INDIRECT_SLOT_COUNT  # 1106
 # ⚠️ Elles ne concernent QUE les decisions dont les candidats ne sont PAS des entites deja
 # observees : une decision « quelle escouade ennemie » se parametre en dimension d'action +
 # pointeur (§9 P3-1, les slots de combat ci-dessus), pas en CHOICE_k.
-CHOICE_BASE = BASE_ZONE_INTENT + MAX_OBJECTIVES * 3            # 1121
+CHOICE_BASE = BASE_ZONE_INTENT + MAX_OBJECTIVES * 3            # 1311
 CHOICE_COUNT = MAX_DECISION_OPTIONS                            # 6
 # Oath of Moment (chantier 03) : « select one unit from your opponent's army ». Les candidats
 # sont des ENTITES DEJA OBSERVEES, donc la decision se parametre en DIMENSION D'ACTION + pointeur
@@ -116,7 +116,7 @@ CHOICE_COUNT = MAX_DECISION_OPTIONS                            # 6
 # `obs_size`. Aucun consommateur avant le chantier 03 — le masque n'ouvre jamais ces ids, donc
 # l'agent ne peut pas les jouer (`ActionDecoder` part d'un masque tout a zero et n'ouvre que ce
 # qu'une phase autorise).
-OATH_SLOT_BASE = CHOICE_BASE + CHOICE_COUNT                    # 1127
+OATH_SLOT_BASE = CHOICE_BASE + CHOICE_COUNT                    # 1317
 OATH_SLOT_COUNT = SHOOT_SLOT_COUNT                             # 20 -> 1127-1146
 # V11 §0.48 element L2 / §9 P3-3 — CHOIX DE L'ESCOUADE A ACTIVER. Jusqu'ici l'unite activee etait
 # TOUJOURS `eligible_units[0]` : l'ORDRE d'activation, c'est-a-dire la premiere decision de chaque
@@ -131,7 +131,7 @@ OATH_SLOT_COUNT = SHOOT_SLOT_COUNT                             # 20 -> 1127-1146
 # l'observation — pour la MEME raison que les slots de tir/charge/melee/Oath derivent de
 # `SHOOT_SLOT_COUNT` : le slot `i` designe la ligne `i`. Les desolidariser ferait pointer l'action
 # et l'observation sur deux escouades differentes sans que rien ne leve (invariant D1, cote allie).
-ACTIVATE_SLOT_BASE = OATH_SLOT_BASE + OATH_SLOT_COUNT          # 1147
+ACTIVATE_SLOT_BASE = OATH_SLOT_BASE + OATH_SLOT_COUNT          # 1337
 ACTIVATE_SLOT_COUNT = K_ALLY_SLOTS                             # 12 -> 1147-1158
 TOTAL_ACTION_SIZE = ACTIVATE_SLOT_BASE + ACTIVATE_SLOT_COUNT   # 1349
 
@@ -142,16 +142,16 @@ CHARGE_PAIR_SLOTS = range(CHARGE_PAIR_SLOT_BASE, CHARGE_PAIR_SLOT_BASE + CHARGE_
 FIGHT_SLOTS = range(FIGHT_SLOT_BASE, FIGHT_SLOT_BASE + FIGHT_SLOT_COUNT)              # 1255-1274
 SHOOT_INDIRECT_SLOTS = range(
     SHOOT_INDIRECT_SLOT_BASE, SHOOT_INDIRECT_SLOT_BASE + SHOOT_INDIRECT_SLOT_COUNT
-)                                                                                   # 1086-1105
+)                                                                                   # 1276-1295
 DEPLOY_SLOTS = range(DEPLOY_SLOT_BASE, DEPLOY_SLOT_BASE + DEPLOY_SLOT_COUNT)        # 4-11
 # Slots reellement JOUABLES : ceux qui portent une strategie definie. `DEPLOY_SLOTS` decrit ce que
 # l'observation expose et ce que le decodeur reconnait comme un id de deploiement ; c'est CELUI-CI
 # qu'il faut prendre des qu'on enumere « les poses possibles » (poids des bots, tirages, tests).
 # Confondre les deux, c'est proposer une action que le masque n'ouvre jamais.
 DEPLOY_STRATEGY_SLOTS = range(DEPLOY_SLOT_BASE, DEPLOY_SLOT_BASE + DEPLOY_STRATEGY_COUNT)  # 4-10
-CHOICE_SLOTS = range(CHOICE_BASE, CHOICE_BASE + CHOICE_COUNT)                       # 1101-1106
-OATH_SLOTS = range(OATH_SLOT_BASE, OATH_SLOT_BASE + OATH_SLOT_COUNT)                # 1107-1126
-ACTIVATE_SLOTS = range(ACTIVATE_SLOT_BASE, ACTIVATE_SLOT_BASE + ACTIVATE_SLOT_COUNT)  # 1127-1138
+CHOICE_SLOTS = range(CHOICE_BASE, CHOICE_BASE + CHOICE_COUNT)                       # 1311-1316
+OATH_SLOTS = range(OATH_SLOT_BASE, OATH_SLOT_BASE + OATH_SLOT_COUNT)                # 1317-1336
+ACTIVATE_SLOTS = range(ACTIVATE_SLOT_BASE, ACTIVATE_SLOT_BASE + ACTIVATE_SLOT_COUNT)  # 1337-1348
 
 
 def is_zone_intent_action(action: int) -> bool:
@@ -336,8 +336,8 @@ def action_family(action_int: int, phase: str, *, setting_up: bool = False) -> s
         return "fight_slot"
     if a == ACTION_FIGHT_NO_TARGET:
         return "fight_no_target"
-    if a in CHOICE_SLOTS:
-        return "choice"
+    if a in SHOOT_INDIRECT_SLOTS:
+        return "shoot_indirect_slot"
     return "zone_intent"
 
 
