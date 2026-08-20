@@ -38,6 +38,7 @@ from engine.utils.weapon_helpers import get_max_ranged_range
 from engine.weapon_damage_cache import squad_expected_damage
 from shared.data_validation import require_key
 
+from ai.bot_doctrines import DESTINATION_SHORTLIST
 from ai.evaluation_bots import (
     DEPLOYMENT_ACTIONS, WAIT_ACTION,
     _best_slot_action, _select_weighted_deployment_action,
@@ -64,10 +65,6 @@ _BENCHMARK_PLACEMENT_WEIGHTS: Dict[int, float] = {
     DEPLOYMENT_ACTIONS[5]: 0.05,
     DEPLOYMENT_ACTIONS[6]: 0.05,
 }
-
-#: Borne le pre-tri geometrique avant la passe couteuse (tir) — identique a
-#: bot_doctrines.DESTINATION_SHORTLIST, copie pour eviter l'import circulaire.
-DESTINATION_SHORTLIST: int = 24
 
 # ─────────────────────────────────────────────────────────────────────────────────────────────
 # Poids de deplacement — hardcodes, jamais dans bot_movement_weights.json (§4.C isolation)
@@ -228,13 +225,14 @@ def _score_destinations_weighted(
             + w_contest * (-_nearest(d, contested_objs))
         )
 
-    sorted_cands = sorted(candidates, key=_geo, reverse=True)
+    geo_scores: Dict[Tuple[int, int], float] = {d: _geo(d) for d in candidates}
+    sorted_cands = sorted(candidates, key=lambda d: geo_scores[d], reverse=True)
     shortlist = sorted_cands[:DESTINATION_SHORTLIST]
 
     def _full(d: Tuple[int, int]) -> float:
         fire = _expected_ranged_from(unit, enemies, d, game_state) if w_fire != 0.0 else 0.0
         risk = _received_damage_from(unit, enemies, d, game_state) if w_risk != 0.0 else 0.0
-        return _geo(d) + w_fire * fire - w_risk * risk
+        return geo_scores[d] + w_fire * fire - w_risk * risk
 
     return max(shortlist, key=_full)
 
