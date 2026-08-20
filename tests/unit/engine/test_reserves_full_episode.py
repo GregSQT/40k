@@ -285,13 +285,16 @@ def test_an_off_table_unit_is_never_a_declarable_charge_target(monkeypatch) -> N
     _rng_engine = random.Random(0)
     monkeypatch.setattr(random, "randint", _rng_engine.randint)
 
+    from engine.combat_utils import calculate_hex_distance
     from engine.phase_handlers.movement_handlers import (
         reposition_unit_to_strategic_reserves,
     )
     from engine.phase_handlers.shared_utils import (
+        CHARGE_THRESHOLD_INCHES,
+        _squad_is_in_enemy_er,
+        _squad_model_positions,
         charge_check_eligibility,
         update_model_position,
-        _squad_model_positions,
     )
 
     eng = _engine(seed=0)
@@ -353,26 +356,18 @@ def test_an_off_table_unit_is_never_a_declarable_charge_target(monkeypatch) -> N
 
     # VERT VACANT : sans cette borne, l'assertion finale pourrait tenir parce que le chargeur est
     # trop loin, et non parce que le filtre hors-table mord.
-    from engine.combat_utils import calculate_hex_distance
-    from engine.phase_handlers.shared_utils import CHARGE_THRESHOLD_INCHES
-
     ish = int(gs["inches_to_subhex"])
-    charger_cells = [
-        (int(gs["models_cache"][m]["col"]), int(gs["models_cache"][m]["row"]))
-        for m in gs["squad_models"][charger] if m in gs["models_cache"]
-    ]
-    assert charger_cells, (
+    charger_cells_pos = _squad_model_positions(gs, str(charger))
+    assert charger_cells_pos, (
         f"le chargeur {charger} n'a aucun modele dans models_cache — cas non construit"
     )
-    closest = min(calculate_hex_distance(c, r, -1, -1) for c, r in charger_cells)
+    closest = min(calculate_hex_distance(c, r, -1, -1) for c, r in charger_cells_pos)
     assert closest <= CHARGE_THRESHOLD_INCHES * ish, (
         f"le chargeur est a {closest} de la sentinelle (-1,-1), au-dela des 12\" ({CHARGE_THRESHOLD_INCHES * ish}) : "
         "la sentinelle ne serait pas 'a portee' meme sans filtre, le verrou serait vacant"
     )
     # 2e borne du vert vacant : le chargeur ne doit pas etre « locked » (dernier controle de
     # `charge_check_eligibility`), sinon elle repondrait False sans jamais atteindre le filtre.
-    from engine.phase_handlers.shared_utils import _squad_is_in_enemy_er
-
     assert not _squad_is_in_enemy_er(gs, str(charger)), (
         "le chargeur est dans l'ER d'un ennemi : `charge_check_eligibility` sortirait sur ce "
         "controle-la et le verrou ne prouverait rien du filtre hors-table"
@@ -400,7 +395,6 @@ def test_an_off_table_unit_is_never_a_declarable_charge_target(monkeypatch) -> N
             update_model_position(gs, mid, control_base_col + (offset % 3), offset // 3)
     # Assertions intermédiaires : chaque garde de charge_check_eligibility vérifié
     # séparément. Sans elles, un refus de la fonction est opaque en xdist.
-    charger_cells_pos = _squad_model_positions(gs, str(charger))
     control_cells = _squad_model_positions(gs, str(control))
     assert str(charger) not in gs.get("units_advanced", set()), (
         f"le chargeur {charger} est dans units_advanced : "
@@ -411,10 +405,6 @@ def test_an_off_table_unit_is_never_a_declarable_charge_target(monkeypatch) -> N
     )
     assert int(gs["units_cache"][str(charger)]["col"]) >= 0, (
         f"le chargeur {charger} est hors table dans units_cache"
-    )
-    assert charger_cells_pos, (
-        f"le chargeur {charger} n'a aucune position dans models_cache : "
-        f"squad_models={gs['squad_models'][str(charger)]!r}"
     )
     assert int(gs["units_cache"][str(control)]["col"]) >= 0, (
         f"la cible {control} est hors table dans units_cache après update_model_position : "
