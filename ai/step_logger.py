@@ -173,7 +173,8 @@ def _anti_rule_token(details) -> str:
 
 
 def _save_segments(
-    details, *, damage, save_result, ap_ability_token: str = "", alloc_model_id=None
+    details, *, damage, save_result, ap_ability_token: str = "", alloc_model_id=None,
+    fnp_saves=None, fnp_attempts=None, fnp_threshold=None,
 ) -> list:
     """Segments `Save …` (+ `Dmg:` le cas echeant) d une attaque — TIR ET MELEE, un seul site.
 
@@ -227,7 +228,11 @@ def _save_segments(
     prefix = [f"→ {alloc_model_id}"] if alloc_model_id else []
     segments = prefix + [save_part]
     if save_result == "FAIL":
-        segments.append(f"Dmg:{damage}HP")
+        _dmg_str = f"Dmg:{damage}HP"
+        # L12 — FNP:saves/seuil+ ×tentatives (24.12) ; absent si pas de FNP.
+        if fnp_saves is not None and fnp_attempts:
+            _dmg_str += f" [FNP:{fnp_saves}/{fnp_threshold}+ ×{fnp_attempts}]"
+        segments.append(_dmg_str)
     return segments
 
 
@@ -640,7 +645,7 @@ class StepLogger:
         except Exception as e:
             print(f"⚠️ Step logging flush error: {e}")
     
-    def log_episode_start(self, units_data, scenario_info=None, bot_name=None, walls=None, objectives=None, primary_objective_config=None, roster_info=None, board_config=None, scenario_path=None, run_rules=None, attached_info=None):
+    def log_episode_start(self, units_data, scenario_info=None, bot_name=None, walls=None, objectives=None, primary_objective_config=None, roster_info=None, board_config=None, scenario_path=None, run_rules=None, attached_info=None, deployment_pools=None):
         """Log episode start with all unit starting positions, walls, and objectives
 
         ``scenario_path`` : chemin du scénario RÉELLEMENT tiré pour cet épisode, relatif à la
@@ -792,6 +797,23 @@ class StepLogger:
                     for _lid, _bid in sorted(attached_info.items()):
                         f.write(f"[{timestamp}] Attached: {_lid}→{_bid}\n")
 
+                # L9 — zones de déploiement par joueur (03.02, 20.04, 24.09, 24.20, 24.31, 24.32).
+                # Format : P<n>=(min_col,min_row)-(max_col,max_row), boîte englobante de la zone.
+                # Absent si le scénario ne déclare pas de zones (défaut → contrôle impossible).
+                if deployment_pools:
+                    pool_parts = []
+                    for pid in sorted(deployment_pools.keys()):
+                        hexes = deployment_pools[pid]
+                        if not hexes:
+                            continue
+                        min_c = min(h[0] for h in hexes)
+                        max_c = max(h[0] for h in hexes)
+                        min_r = min(h[1] for h in hexes)
+                        max_r = max(h[1] for h in hexes)
+                        pool_parts.append(f"P{pid}=({min_c},{min_r})-({max_c},{max_r})")
+                    if pool_parts:
+                        f.write(f"[{timestamp}] Deployment: {' '.join(pool_parts)}\n")
+
                 # Log all unit starting positions (already validated above)
                 for unit in units_list:
                     unit_type = require_key(unit, "unitType")
@@ -879,6 +901,10 @@ class StepLogger:
             else:
                 raise KeyError("Move action missing required position data")
 
+            # L10 — [MOVE_TYPE:…] explicite (débloque 09.02, 09.04, etc.).
+            _move_type = details.get("move_type")
+            if _move_type is not None:
+                base_msg += f" [MOVE_TYPE:{_move_type}]"
             # Add position reward if available (like shooting reward)
             reward = details.get("reward")
             if reward is not None:
@@ -939,6 +965,17 @@ class StepLogger:
             else:
                 raise KeyError("Flee action missing required position data")
 
+            # L10 — [MOVE_TYPE:fall_back] explicite.
+            _move_type = details.get("move_type")
+            if _move_type is not None:
+                base_msg += f" [MOVE_TYPE:{_move_type}]"
+            # L11 — mode de fall-back (09.07) et jets de hazard Desperate Escape (06.03).
+            _flee_mode = details.get("flee_mode")
+            if _flee_mode is not None:
+                base_msg += f" [{_flee_mode.upper().replace('_', ' ')}]"
+            _de_rolls = details.get("desperate_escape_rolls")
+            if _de_rolls:
+                base_msg += f" Hazard:{','.join(str(r) for r in _de_rolls)}"
             # Add position reward if available
             reward = details.get("reward")
             if reward is not None:
@@ -966,6 +1003,10 @@ class StepLogger:
             else:
                 raise KeyError("Advance action missing required position data")
 
+            # L10 — [MOVE_TYPE:advance] explicite.
+            _move_type = details.get("move_type")
+            if _move_type is not None:
+                base_msg += f" [MOVE_TYPE:{_move_type}]"
             # Add reward if available
             reward = details.get("reward")
             if reward is not None:
@@ -1143,6 +1184,11 @@ class StepLogger:
             # manque). Present uniquement pour les armes portant l une ou l autre regle.
             if details.get("at_half_range") is True:
                 shot_tags.append("[HALF RANGE]")
+            # L10 — [SHOOT_TYPE:…] 10.02 : type de tir choisi pour cette activation.
+            # Absent sur les actions de combat (shoot_type est None cote producteur).
+            _shoot_type = details.get("shoot_type")
+            if _shoot_type is not None:
+                shot_tags.append(f"[SHOOT_TYPE:{_shoot_type}]")
             shot_tags_suffix = f" {' '.join(shot_tags)}" if shot_tags else ""
             if weapon_name:
                 base_msg = f"{unit_label} SHOT{shot_tags_suffix} {target_label} with [{weapon_name}]"
@@ -1153,8 +1199,9 @@ class StepLogger:
             # `_cover_worsened_bs`). Meme mecanique pour les deux : token + affichage
             # `base+->effectif+`. Le frontend y accroche le tooltip de la regle (GameLog.tsx),
             # l analyzer y compte l usage.
+            # L26 — généralisé : tout modificateur de seuil de touche déclenche le token.
             hit_rule_suffix = (
-                f" [{hit_rule_modifier}]" if hit_rule_modifier in ("HEAVY", "COVER") else ""
+                f" [{hit_rule_modifier}]" if hit_rule_modifier is not None else ""
             )
             hit_rule_suffix += _build_hit_suffix(details, hit_ability_display_name)
             # [INDIRECT FIRE:X+] 10.07 : plancher d echec declare par la regle (6 ou 4).
@@ -1169,7 +1216,8 @@ class StepLogger:
                         f"recu : {_indirect_fail_below!r}"
                     )
                 hit_rule_suffix += f" [INDIRECT FIRE:{_indirect_fail_below}+]"
-            if hit_rule_modifier in ("HEAVY", "COVER") and isinstance(hit_target_base, int):
+            # L26 — généralisé : hit_target_base+->hit_target+ pour tout modificateur connu.
+            if hit_rule_modifier is not None and isinstance(hit_target_base, int):
                 hit_target_display = f"{hit_target_base}+->{hit_target}+"
             else:
                 hit_target_display = f"{hit_target}+"
@@ -1206,6 +1254,9 @@ class StepLogger:
                         details, damage=damage, save_result=save_result,
                         ap_ability_token=_ability_token(ap_modifier_ability_display_name),
                         alloc_model_id=details.get("target_model_id"),
+                        fnp_saves=details.get("fnp_saves"),
+                        fnp_attempts=details.get("fnp_attempts"),
+                        fnp_threshold=details.get("fnp_threshold"),
                     ))
             detail_msg = f" - {' - '.join(detail_parts)}"
             if hazardous_test_required:
@@ -1228,11 +1279,19 @@ class StepLogger:
                 raise KeyError("Hazardous action missing required unit_with_coords")
             hazardous_mortal_wounds = require_key(details, "hazardous_mortal_wounds")
             hazard_context = details.get("hazard_context", "Hazardous")
-            tag = "[DESPERATE ESCAPE]" if hazard_context == HAZARD_CONTEXT_DESPERATE_ESCAPE else "[HAZARDOUS]"
+            if hazard_context == HAZARD_CONTEXT_DESPERATE_ESCAPE:
+                tag = "[DESPERATE ESCAPE]"
+            else:
+                # L15 — 24.15 : [HAZARDOUS:<n>] quand le compte d'armes est connu.
+                _hwc = details.get("hazardous_weapon_count")
+                tag = f"[HAZARDOUS:{_hwc}]" if _hwc is not None else "[HAZARDOUS]"
+            _hdice = details.get("hazardous_dice_rolls")
+            # L15 — jets individuels des dés HAZARDOUS (24.15), absents pour Desperate Escape.
+            dice_suffix = f" Roll:{','.join(str(r) for r in _hdice)}" if _hdice else ""
             if int(hazardous_mortal_wounds) == 0:
-                return f"Unit {unit_with_coords} SUFFERS 0 Mortal Wounds {tag} [NO ALLOC]"
+                return f"Unit {unit_with_coords} SUFFERS 0 Mortal Wounds {tag}{dice_suffix} [NO ALLOC]"
             target_model_id = require_key(details, "target_model_id")
-            return f"Unit {unit_with_coords} SUFFERS {hazardous_mortal_wounds} Mortal Wounds {tag} [ALLOC_MODEL: {target_model_id}]"
+            return f"Unit {unit_with_coords} SUFFERS {hazardous_mortal_wounds} Mortal Wounds {tag}{dice_suffix} [ALLOC_MODEL: {target_model_id}]"
             
         elif action_type == "shoot_summary":
             # Summary of multi-shot sequence
@@ -1259,9 +1318,20 @@ class StepLogger:
                     start_col, start_row = details["start_pos"]
                     end_col, end_row = details["end_pos"]
                     # Include target coordinates if available
-                    target_coords = details.get("target_coords")
-                    target_coords_str = f"({target_coords[0]},{target_coords[1]})" if target_coords else ""
-                    target_label = f"Unit {target_id}{target_coords_str}"
+                    # L16 — cibles multiples (11.04) : si all_target_ids présent, construire
+                    # "Unit M(c,r),Unit K(c,r)" ; sinon fallback sur la cible primaire seule.
+                    all_target_ids = details.get("all_target_ids")
+                    all_target_coords = details.get("all_target_coords")
+                    if all_target_ids and len(all_target_ids) > 1:
+                        parts = []
+                        for _tid, _tco in zip(all_target_ids, all_target_coords or []):
+                            _co_str = f"({_tco[0]},{_tco[1]})" if _tco else ""
+                            parts.append(f"Unit {_tid}{_co_str}")
+                        target_label = ",".join(parts)
+                    else:
+                        target_coords = details.get("target_coords")
+                        target_coords_str = f"({target_coords[0]},{target_coords[1]})" if target_coords else ""
+                        target_label = f"Unit {target_id}{target_coords_str}"
                     # Include charge roll (2d6) if available
                     charge_roll = details.get("charge_roll")
                     ability_suffix = _ability_token(details.get("ability_display_name"))
@@ -1484,6 +1554,9 @@ class StepLogger:
                         details, damage=damage, save_result=save_result,
                         ap_ability_token=_ability_token(_save_ability),
                         alloc_model_id=details.get("target_model_id"),
+                        fnp_saves=details.get("fnp_saves"),
+                        fnp_attempts=details.get("fnp_attempts"),
+                        fnp_threshold=details.get("fnp_threshold"),
                     ))
             
             detail_msg = f" - {' - '.join(detail_parts)}"
@@ -1572,6 +1645,15 @@ class StepLogger:
                 base_msg = f"{unit_label} {verb} from ({start_col},{start_row}) to ({end_col},{end_row})"
             else:
                 raise KeyError(f"{action_type} action missing required position data")
+            # L17 — cibles pile-in [targets: M,K] / mode consolidation [ONGOING|ENGAGING|OBJECTIVE].
+            if action_type in ("pile_in", "overrun_pile_in"):
+                _pi_tids = details.get("pile_in_target_ids")
+                if _pi_tids:
+                    base_msg += f" [targets: {','.join(str(t) for t in _pi_tids)}]"
+            elif action_type == "consolidation":
+                _conso_mode = details.get("consolidation_mode")
+                if _conso_mode is not None:
+                    base_msg += f" [{_conso_mode.upper()}]"
             reward = details.get("reward")
             if reward is not None:
                 base_msg += f" [R:{reward:+.1f}]"

@@ -377,7 +377,7 @@ def _fight_pile_in_new_fp_strictly_closer_to_closest_tier(
     return False
 
 
-def _append_fight_move_log(
+def _append_fight_move_log(  # noqa: PLR0913
     game_state: Dict[str, Any],
     unit: Dict[str, Any],
     *,
@@ -388,6 +388,8 @@ def _append_fight_move_log(
     to_row: int,
     move_details: List[Dict[str, Any]],
     models_segment: str = "",
+    pile_in_target_ids: Optional[List[str]] = None,
+    consolidation_mode: Optional[str] = None,
 ) -> None:
     """Log par-figurine unique d'un déplacement de phase fight (pile-in / consolidation).
 
@@ -432,6 +434,11 @@ def _append_fight_move_log(
     }
     if models_segment:
         entry["models_segment"] = models_segment
+    # L17 — cibles de pile-in (12.03) et mode de consolidation (12.08).
+    if pile_in_target_ids is not None:
+        entry["pileInTargetIds"] = [str(t) for t in pile_in_target_ids]
+    if consolidation_mode is not None:
+        entry["consolidationMode"] = consolidation_mode
     append_action_log(game_state, entry)
 
 
@@ -5104,6 +5111,8 @@ def _fight_v11_manual_step(
                 from_col=_from_col, from_row=_from_row,
                 to_col=_to_col, to_row=_to_row,
                 move_details=_move_details,
+                # L17 — cibles sélectionnées (= targets calculé juste avant commit).
+                pile_in_target_ids=[str(t) for t in targets],
             )
             _fight_v11_log(
                 game_state, f"PILE IN unit {act_uid} → commit par-figurine ({len(full_plan)} figs)"
@@ -5491,6 +5500,8 @@ def _fight_v11_manual_step(
                 from_col=_from_col, from_row=_from_row,
                 to_col=_to_col, to_row=_to_row,
                 move_details=_move_details,
+                # L17 — mode de consolidation (12.08) : ongoing / engaging / objective.
+                consolidation_mode=mode,
             )
             _fight_v11_log(
                 game_state,

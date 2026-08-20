@@ -4960,6 +4960,22 @@ def _handle_skip_action(game_state: Dict[str, Any], unit: Dict[str, Any], had_va
             "reset_mode": "select",
             "clear_selected_unit": True
         })
+        # L24 — producteur skip : le formateur existait déjà dans StepLogger, mais aucune entrée
+        # n'était poussée dans action_logs, donc la ligne n'atteignait jamais step.log.
+        unit_col, unit_row = require_unit_position(unit, game_state)
+        append_action_log(
+            game_state,
+            {
+                "type": "skip",
+                "turn": game_state["turn"],
+                "phase": game_state["phase"],
+                "unitId": unit["id"],
+                "player": require_key(unit, "player"),
+                "col": unit_col,
+                "row": unit_row,
+                "skipReason": "no_valid_move_destinations",
+            },
+        )
 
     return True, result
 

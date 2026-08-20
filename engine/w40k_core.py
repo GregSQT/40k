@@ -2086,6 +2086,8 @@ class W40KEngine(gym.Env):
                 scenario_path=scenario_path_logged,
                 run_rules=self._run_rules_for_step_log(),
                 attached_info=attached_info or None,
+                # L9 — zones de déploiement par joueur : {1: [[col, row], …], 2: […]}.
+                deployment_pools=self.game_state.get("deployment_pools"),  # get allowed
             )
 
         if self.game_state.get("deployment_type") == "active":
@@ -5566,6 +5568,9 @@ class W40KEngine(gym.Env):
         # 20.04 — destruction en fin de 3e round : même statut que coherency_removal, pas une
         # action d'agent.
         "strategic_reserves_timeout",
+        # L24 — skip auto-moteur (pas de destinations valides, pas d'action d'agent) : pas de
+        # step gym et pas de compteur dans step.log.
+        "skip",
         # 08.03 / 01.07 — jet de commandement : pas une action d'agent.
         "battle_shock",
         # L25 — 08.04 déclarations de command phase (Waaagh!, Oath of Moment) : pas des
@@ -5603,6 +5608,10 @@ class W40KEngine(gym.Env):
         # pour 16 choix. Corriger le mapping aurait produit un DOUBLON de chaque ligne.
         "move_after_shooting": "move_after_shooting",
         "deploy_unit": "deploy_unit",
+        # L24 — skip auto-moteur : unité sans destination valide (move/charge) ou sans cible
+        # (shoot). Le formateur existe dans StepLogger depuis l'origine ; seule l'entrée ici
+        # manquait pour que la ligne atteigne step.log.
+        "skip": "skip",
         # 03.03 End of Turn — retrait des figurines hors coherency. Seule mort qui ne descend
         # d'aucune attaque : sans cette entree, aucune ligne de step.log ne la porte et tout
         # lecteur qui accumule les evenements garde la figurine vivante (cf.
@@ -5714,6 +5723,11 @@ class W40KEngine(gym.Env):
         # Permettent au formateur StepLogger d afficher `Save R(<base>+ AP<n> → <eff>+)`.
         "weaponAp": "weapon_ap",
         "allocModelArmor": "alloc_model_armor",
+        # L12 — jets Feel No Pain (24.12) : nombre de saves/tentatives/seuil. Absent si la
+        # cible n'a pas de FNP, ou si le save a déjà annulé les dégâts.
+        "fnpSaves": "fnp_saves",
+        "fnpAttempts": "fnp_attempts",
+        "fnpThreshold": "fnp_threshold",
     }
 
     def _models_segment_for_unit(self, unit_id: Any, label: str = "MODELS") -> str:
@@ -5845,6 +5859,11 @@ class W40KEngine(gym.Env):
         elif raw_log.get("cover"):  # get allowed
             details["hit_rule_modifier"] = "COVER"
             details["hit_target_base"] = raw_log.get("bsBase")  # get allowed
+        # L26 — 10.06 MONSTER/VEHICLE : -1 au jet de touche (seuil dégradé de 1).
+        # bsBase = ATK de l'arme avant malus ; bs = ATK+1. Absent en mêlée (False par construction).
+        elif raw_log.get("pointBlankMalus"):  # get allowed
+            details["hit_rule_modifier"] = "POINT-BLANK"
+            details["hit_target_base"] = raw_log.get("bsBase")  # get allowed
         # [RAPID FIRE] 24.30 : la regle grossit le POOL d attaques du groupe, elle n est pas
         # une propriete d un jet — le marqueur est donc porte par toutes les lignes du groupe.
         # C est ce qui leve le plafond de tirs cote analyzer (NB de base -> NB + X).
@@ -5954,6 +5973,10 @@ class W40KEngine(gym.Env):
                 details["target_models_segment"] = self._models_segment_for_unit(
                     target_id, label="TARGET_MODELS"
                 )
+        # L10 — type de tir EXPLICITE (10.02) ; None sur le combat (pas de shoot_type_choose).
+        _shoot_type = raw_log.get("shootType")  # get allowed : absent sur les logs de combat
+        if _shoot_type is not None:
+            details["shoot_type"] = str(_shoot_type)
         return details
 
     def _flush_squad_action_logs_to_step_logger(
@@ -6210,6 +6233,13 @@ class W40KEngine(gym.Env):
         _hazard_details = raw_log.get("hazardDetails")  # get allowed : absent sur les types sans HAZARDOUS
         if _hazard_details:
             details["target_model_id"] = _hazard_details[0]["modelId"]
+        # L15 — 24.15 HAZARDOUS : nombre d'armes et jets individuels (absents pour Desperate Escape).
+        _hazard_wc = raw_log.get("hazardousWeaponCount")  # get allowed
+        if _hazard_wc is not None:
+            details["hazardous_weapon_count"] = _hazard_wc
+        _hazard_dice = raw_log.get("hazardousDiceRolls")  # get allowed
+        if _hazard_dice is not None:
+            details["hazardous_dice_rolls"] = _hazard_dice
         target_col = raw_log.get("targetCol")  # get allowed
         target_row = raw_log.get("targetRow")  # get allowed
         if target_col is not None and target_row is not None:
@@ -6261,6 +6291,24 @@ class W40KEngine(gym.Env):
             # avale par `log_action` — chaque mort disparait silencieusement de step.log.
             ("model_id", "model_id"),
             ("reason", "reason"),
+            # L24 — motif du skip (no_valid_move_destinations, no_valid_actions, …).
+            ("skipReason", "skip_reason"),
+            # L10 — type de move EXPLICITE dans step.log : normal / advance / fall_back /
+            # remain_stationary / ingress / surge / scout. Présent sur les action_logs de type
+            # "move" uniquement ; la nuance est DÉJÀ exploitée pour choisir l'action_type du
+            # formateur (move/advance/flee), mais ce champ rend la valeur textuelle accessible au
+            # formateur pour produire le token [MOVE_TYPE:…] sans retour au raw_log.
+            ("move_type", "move_type"),
+            # L16 — cibles de charge multiples (11.04) : liste d'IDs et liste de coords
+            # (parallèles, même index). Le formateur construit "Unit A(c,r),Unit B(c,r)".
+            ("allTargetIds", "all_target_ids"),
+            ("allTargetCoords", "all_target_coords"),
+            # L17 — cibles de pile-in (12.03) et mode de consolidation (12.08).
+            ("pileInTargetIds", "pile_in_target_ids"),
+            ("consolidationMode", "consolidation_mode"),
+            # L11 — mode de fall-back (09.07) et jets de hazard Desperate Escape (06.03).
+            ("fleeMode", "flee_mode"),
+            ("desperateEscapeRolls", "desperate_escape_rolls"),
         ):
             value = raw_log.get(src)  # get allowed
             if value is not None:
@@ -6324,12 +6372,27 @@ class W40KEngine(gym.Env):
             }
             for m in alive
         ]
+        # L17 — cibles pile-in (12.03) / mode consolidation (12.08). Calculés APRÈS le commit
+        # (les positions finales sont stables) mais l'unité est toujours présente en game_state.
+        _l17_pile_in_tids: Optional[List[str]] = None
+        _l17_conso_mode: Optional[str] = None
+        if kind in ("pile_in", "overrun_pile_in"):
+            from engine.phase_handlers.fight_handlers import pile_in_select_targets_12_03
+            try:
+                _l17_pile_in_tids = pile_in_select_targets_12_03(gs, unit)
+            except (ValueError, KeyError):
+                pass  # unité entièrement détruite ou cas dégénéré : on loggue sans targets
+        elif kind == "consolidation":
+            from engine.phase_handlers.fight_handlers import fight_v11_consolidation_mode
+            _l17_conso_mode = fight_v11_consolidation_mode(gs, unit)
         _append_fight_move_log(
             gs, unit, kind=kind,
             from_col=from_col, from_row=from_row,
             to_col=to_col, to_row=to_row,
             move_details=move_details,
             models_segment=captured_seg,
+            pile_in_target_ids=_l17_pile_in_tids,
+            consolidation_mode=_l17_conso_mode,
         )
 
     def _fight_v11_gym_settle(self) -> None:
@@ -6833,6 +6896,17 @@ class W40KEngine(gym.Env):
                     "timestamp": "server_time",
                     "action_name": action_name,
                     "reward": 0.0,
+                    # L11 — mode de fall-back (09.07) et jets de hazard (Desperate Escape 06.03).
+                    # `_flee_mode` est posé par `desperate_escape_pre_move` uniquement si desperate ;
+                    # absent → ordered_retreat (unité engagée mais non battle-shocked).
+                    "fleeMode": (
+                        self.game_state.pop("_flee_mode", "ordered_retreat")
+                        if move_type == "fall_back" else None
+                    ),
+                    "desperateEscapeRolls": (
+                        self.game_state.pop("_desperate_escape_rolls", None)
+                        if move_type == "fall_back" else None
+                    ),
                     # Pré-capture : [MODELS:] reflète l'état post-move (positions après commit),
                     # cohérent pour un déplacement. Protège aussi des morts réactives éventuelles.
                     "models_segment": self._models_segment_for_unit(squad_id),
@@ -7030,6 +7104,14 @@ class W40KEngine(gym.Env):
                         "targetRow": _charge_target[1] if _charge_target else None,
                         "timestamp": "server_time",
                         "reward": 0.0,
+                        # L16 — cibles de charge multiples (11.04).
+                        "allTargetIds": [str(t) for t in target_squad_ids],
+                        "allTargetCoords": [
+                            [int(self.game_state["units_cache"][str(t)]["col"]),
+                             int(self.game_state["units_cache"][str(t)]["row"])]
+                            if str(t) in self.game_state.get("units_cache", {}) else None
+                            for t in target_squad_ids
+                        ],
                         **_charge_dist,
                     },
                 )
@@ -7096,6 +7178,14 @@ class W40KEngine(gym.Env):
                         "timestamp": "server_time",
                         "reward": 0.0,
                         "models_segment": _charge_models_seg,
+                        # L16 — cibles de charge multiples (11.04) : miroir des 2 sites PvP.
+                        "allTargetIds": [str(t) for t in target_squad_ids],
+                        "allTargetCoords": [
+                            [int(self.game_state["units_cache"][str(t)]["col"]),
+                             int(self.game_state["units_cache"][str(t)]["row"])]
+                            if str(t) in self.game_state.get("units_cache", {}) else None
+                            for t in target_squad_ids
+                        ],
                         **_charge_dist,
                     },
                 )

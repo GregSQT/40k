@@ -5973,6 +5973,16 @@ def charge_commit_move_plan_handler(
             "timestamp": "server_time",
             "is_ai_action": unit["player"] == 1,
             "moveDetails": move_details,
+            # L16 — cibles de charge multiples (11.04) : liste IDs + coords capturées AVANT
+            # commit (les positions de cible sont stables, mais le commit peut déplacer l'unité
+            # active — position cible inchangée ici : pas de commit_move sur la cible).
+            "allTargetIds": [str(t) for t in target_ids],
+            "allTargetCoords": [
+                [int(game_state["units_cache"][str(t)]["col"]),
+                 int(game_state["units_cache"][str(t)]["row"])]
+                if str(t) in game_state.get("units_cache", {}) else None
+                for t in target_ids
+            ],
             **_charge_dist,
         },
     )
@@ -6286,6 +6296,14 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
             "is_ai_action": unit["player"] == 1,
             "engaged_models_count": _eng_count,
             "engaged_models_total": _eng_total,
+            # L16 — cibles de charge multiples (11.04) : miroir du site précédent.
+            "allTargetIds": [str(t) for t in target_ids],
+            "allTargetCoords": [
+                [int(game_state["units_cache"][str(t)]["col"]),
+                 int(game_state["units_cache"][str(t)]["row"])]
+                if str(t) in game_state.get("units_cache", {}) else None
+                for t in target_ids
+            ],
             **_charge_dist,
         },
     )
@@ -6384,6 +6402,21 @@ def _handle_skip_action(game_state: Dict[str, Any], unit: Dict[str, Any], had_va
             PASS,          # Arg3: NO tracking (no charge happened)
             CHARGE,        # Arg4: Remove from charge_activation_pool
             0              # Arg5: No error logging
+        )
+        # L24 — producteur skip charge : aucune destination de charge valide.
+        unit_col, unit_row = require_unit_position(unit, game_state)
+        append_action_log(
+            game_state,
+            {
+                "type": "skip",
+                "turn": game_state["turn"],
+                "phase": game_state["phase"],
+                "unitId": unit["id"],
+                "player": require_key(unit, "player"),
+                "col": unit_col,
+                "row": unit_row,
+                "skipReason": "no_valid_charge_destinations",
+            },
         )
 
     result.update({

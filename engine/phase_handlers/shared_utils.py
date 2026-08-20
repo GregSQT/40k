@@ -5310,6 +5310,9 @@ def roll_hazard_for_unit(
 
     wounds_per_fail = 3 if all(_is_monster_or_vehicle(models_cache[mid]) for mid in alive_models) else 1
     rolls = [random.randint(1, 6) for _ in range(roll_count)]
+    # L11 — stocker les jets pour le formateur step.log (desperate_escape_pre_move les lit).
+    if context_label == HAZARD_CONTEXT_DESPERATE_ESCAPE:
+        game_state["_desperate_escape_rolls"] = list(rolls)
     fails = sum(1 for r in rolls if r <= 2)
     total_wounds = fails * wounds_per_fail
     col = int(unit.get("col", -1))
@@ -5357,6 +5360,11 @@ def roll_hazard_for_unit(
         # de ne vérifier l'armurerie que pour les vrais jets d'arme HAZARDOUS.
         "hazardContext": context_label,
     }
+    # L15 — 24.15 HAZARDOUS : nombre d'armes sélectionnées (= roll_count pour ce contexte)
+    # et jets individuels, absents pour Desperate Escape où roll_count = nombre de figurines.
+    if context_label != HAZARD_CONTEXT_DESPERATE_ESCAPE:
+        log_payload["hazardousWeaponCount"] = roll_count
+        log_payload["hazardousDiceRolls"] = list(rolls)
     # Émission AVANT toute attribution : le jet et son résultat sont visibles dans le combat log
     # au moment où le joueur doit choisir les pertes (cf. commentaire ci-dessus).
     append_action_log(game_state, log_payload)
@@ -5665,6 +5673,8 @@ def desperate_escape_pre_move(
     is_desperate = bool(was_engaged) and bool(require_key(unit, "battle_shocked"))
     if not is_desperate:
         return False, True, 0
+    # L11 — mode enregistré pour le formateur step.log (consommé à l'émission action_log flee).
+    game_state["_flee_mode"] = "desperate_escape"
     hazard_wounds = roll_hazard_for_unit(str(squad_id), game_state, auto_resolve)
     return True, is_unit_alive(str(squad_id), game_state), hazard_wounds
 
@@ -9120,6 +9130,9 @@ def _emit_squad_shoot_log(game_state: Dict[str, Any], g: Dict[str, Any], ctx: Ma
         "bsBase": g["bs_base"] if "bs_base" in g else None,
         "heavyApplied": bool(g["heavy_applied"]),
         "cover": bool(g["cover"]) if "cover" in g else False,
+        # L26 — 10.06 volet MONSTER/VEHICLE : -1 au jet de touche hors arme CQ engagée.
+        # Drapeau toujours présent dans le groupe (False en mêlée par construction).
+        "pointBlankMalus": bool(g.get("point_blank_malus", False)),
         # [RAPID FIRE] 24.30 : X APPLIQUE, lu dans `additive_rules_applied` — le seul porteur du
         # fait (cf. `gkey`). L'absence de cle vaut 0, comme pour les deux autres regles
         # additives : la melee n'ecrit jamais cette entree, [RAPID FIRE] n'y existe pas.
@@ -9190,6 +9203,14 @@ def _emit_squad_shoot_log(game_state: Dict[str, Any], g: Dict[str, Any], ctx: Ma
         "antiKeyword": require_key(g, "attack_profile").anti_keyword,
         "antiThreshold": require_key(g, "attack_profile").anti_threshold,
         "shootDetails": [{"shotNumber": i + 1, **s} for i, s in enumerate(g["shots"])],
+        # L10 — type de tir EXPLICITE (10.02) : normal / assault / close_quarters / indirect.
+        # Lu depuis squad_shooting_type_choice ; "normal" par défaut pour le combat (ctx.log_type
+        # == "combat") qui ne passe pas par squad_shooting_type_choose.
+        "shootType": (
+            game_state.get(SQUAD_SHOOTING_TYPE_CHOICE_KEY, {}).get(attacker_squad_id_str, "normal")
+            if ctx.log_type == "shoot"
+            else None
+        ),
         # Pré-capture du segment [MODELS:] AVANT que les effets de l'action (hazardous,
         # destroy_model) ne modifient occupied_hexes_by_model. Sans pré-capture,
         # _build_shot_details lirait le segment LIVE au flush — après que les figurines tuées
@@ -10171,7 +10192,12 @@ def _resolve_one_manual_wound(game_state: Dict[str, Any], alloc: Dict[str, Any],
     if _def_squad_fnp is not None:
         _fnp_th = _get_feel_no_pain_threshold(_def_squad_fnp)
         if _fnp_th is not None:
+            _fnp_attempts = dmg_dealt
             dmg_dealt = _roll_feel_no_pain(dmg_dealt, _fnp_th)
+            # L12 — jets FNP dans step.log (24.12) : saves/seuil+/tentatives.
+            rec["fnpSaves"] = _fnp_attempts - dmg_dealt
+            rec["fnpAttempts"] = _fnp_attempts
+            rec["fnpThreshold"] = _fnp_th
     if dmg_dealt <= 0:
         rec["damageDealt"] = 0
         rec["targetDied"] = False
