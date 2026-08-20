@@ -5854,6 +5854,11 @@ class W40KEngine(gym.Env):
         elif raw_log.get("cover"):  # get allowed
             details["hit_rule_modifier"] = "COVER"
             details["hit_target_base"] = raw_log.get("bsBase")  # get allowed
+        # L26 — 10.06 MONSTER/VEHICLE : -1 au jet de touche (seuil dégradé de 1).
+        # bsBase = ATK de l'arme avant malus ; bs = ATK+1. Absent en mêlée (False par construction).
+        elif raw_log.get("pointBlankMalus"):  # get allowed
+            details["hit_rule_modifier"] = "POINT-BLANK"
+            details["hit_target_base"] = raw_log.get("bsBase")  # get allowed
         # [RAPID FIRE] 24.30 : la regle grossit le POOL d attaques du groupe, elle n est pas
         # une propriete d un jet — le marqueur est donc porte par toutes les lignes du groupe.
         # C est ce qui leve le plafond de tirs cote analyzer (NB de base -> NB + X).

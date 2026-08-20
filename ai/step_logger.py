@@ -1194,8 +1194,9 @@ class StepLogger:
             # `_cover_worsened_bs`). Meme mecanique pour les deux : token + affichage
             # `base+->effectif+`. Le frontend y accroche le tooltip de la regle (GameLog.tsx),
             # l analyzer y compte l usage.
+            # L26 — généralisé : tout modificateur de seuil de touche déclenche le token.
             hit_rule_suffix = (
-                f" [{hit_rule_modifier}]" if hit_rule_modifier in ("HEAVY", "COVER") else ""
+                f" [{hit_rule_modifier}]" if hit_rule_modifier is not None else ""
             )
             hit_rule_suffix += _build_hit_suffix(details, hit_ability_display_name)
             # [INDIRECT FIRE:X+] 10.07 : plancher d echec declare par la regle (6 ou 4).
@@ -1210,7 +1211,8 @@ class StepLogger:
                         f"recu : {_indirect_fail_below!r}"
                     )
                 hit_rule_suffix += f" [INDIRECT FIRE:{_indirect_fail_below}+]"
-            if hit_rule_modifier in ("HEAVY", "COVER") and isinstance(hit_target_base, int):
+            # L26 — généralisé : hit_target_base+->hit_target+ pour tout modificateur connu.
+            if hit_rule_modifier is not None and isinstance(hit_target_base, int):
                 hit_target_display = f"{hit_target_base}+->{hit_target}+"
             else:
                 hit_target_display = f"{hit_target}+"

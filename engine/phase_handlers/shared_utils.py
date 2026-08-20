@@ -9125,6 +9125,9 @@ def _emit_squad_shoot_log(game_state: Dict[str, Any], g: Dict[str, Any], ctx: Ma
         "bsBase": g["bs_base"] if "bs_base" in g else None,
         "heavyApplied": bool(g["heavy_applied"]),
         "cover": bool(g["cover"]) if "cover" in g else False,
+        # L26 — 10.06 volet MONSTER/VEHICLE : -1 au jet de touche hors arme CQ engagée.
+        # Drapeau toujours présent dans le groupe (False en mêlée par construction).
+        "pointBlankMalus": bool(g.get("point_blank_malus", False)),
         # [RAPID FIRE] 24.30 : X APPLIQUE, lu dans `additive_rules_applied` — le seul porteur du
         # fait (cf. `gkey`). L'absence de cle vaut 0, comme pour les deux autres regles
         # additives : la melee n'ecrit jamais cette entree, [RAPID FIRE] n'y existe pas.
