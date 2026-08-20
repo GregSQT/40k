@@ -158,28 +158,33 @@ def test_target_on_l1_is_engageable(setup):
 
 def test_vertical_gate_switches_at_real_gap(setup):
     """Cible à L2 (6") : le gate vertical bascule exactement au gap réel (refuse en dessous)."""
-    gs, c2 = setup["gs"], setup["c2"]
+    gs, c1, c2 = setup["gs"], setup["c1"], setup["c2"]
     _place(gs, setup["tgt_mid"], c2[0], c2[1], 2)
     _place(gs, setup["chg_mid"], c2[0], c2[1], 0)
-    te = gs["units_cache"][setup["tgt_uid"]]
-    ce = gs["units_cache"][setup["chg_uid"]]
-    ez = int(gs["config"]["game_rules"]["engagement_zone"])
-    assert te["floor_height_by_model"][setup["tgt_mid"]] == 6.0
+    try:
+        te = gs["units_cache"][setup["tgt_uid"]]
+        ce = gs["units_cache"][setup["chg_uid"]]
+        ez = int(gs["config"]["game_rules"]["engagement_zone"])
+        assert te["floor_height_by_model"][setup["tgt_mid"]] == 6.0
 
-    # gap vertical réel entre [0, chg_mh] et [6, 6+tgt_mh] = max(0, 6 - chg_mh)
-    gap = max(0.0, 6.0 - float(ce["MODEL_HEIGHT"]))
-    r_below = unit_entries_within_engagement_zone(
-        ce, te, ez, metric="euclidean", vertical_zone_inches=gap - 0.5
-    )
-    r_above = unit_entries_within_engagement_zone(
-        ce, te, ez, metric="euclidean", vertical_zone_inches=gap + 0.5
-    )
-    assert not r_below, f"vz={gap - 0.5} (sous le gap réel {gap}) doit refuser l'engagement"
-    assert r_above, f"vz={gap + 0.5} (sur le gap réel {gap}) doit autoriser l'engagement"
+        # gap vertical réel entre [0, chg_mh] et [6, 6+tgt_mh] = max(0, 6 - chg_mh)
+        gap = max(0.0, 6.0 - float(ce["MODEL_HEIGHT"]))
+        r_below = unit_entries_within_engagement_zone(
+            ce, te, ez, metric="euclidean", vertical_zone_inches=gap - 0.5
+        )
+        r_above = unit_entries_within_engagement_zone(
+            ce, te, ez, metric="euclidean", vertical_zone_inches=gap + 0.5
+        )
+        assert not r_below, f"vz={gap - 0.5} (sous le gap réel {gap}) doit refuser l'engagement"
+        assert r_above, f"vz={gap + 0.5} (sur le gap réel {gap}) doit autoriser l'engagement"
+    finally:
+        # gs est partagé (module-scoped via floors_env) : restaurer les positions pour les tests suivants.
+        _place(gs, setup["tgt_mid"], c1[0], c1[1], 0)
+        _place(gs, setup["chg_mid"], c1[0], c1[1], 0)
 
 
 class _ClimbCtx(NamedTuple):
-    """Tout ce qu'un test de montée doit connaître — construit une seule fois par `_climb_setup`."""
+    """Tout ce qu'un test de montée doit connaître — construit une seule fois par la fixture `climb_ctx`."""
 
     uid: str
     unit: Dict[str, Any]
@@ -190,14 +195,38 @@ class _ClimbCtx(NamedTuple):
     tiny: int  # ~2" : sous les 3" de montée de L1 (§13.06)
 
 
-def _climb_setup(setup) -> _ClimbCtx:
-    """Chargeur montant au pied de la ruine + cible sur L1."""
+@pytest.fixture(scope="module")
+def climb_ctx(floors_env) -> _ClimbCtx:
+    """Placement + ground_obs construits UNE seule fois pour les trois tests de montée.
+
+    Dépend directement de floors_env (module-scoped) plutôt que de setup (function-scoped)
+    pour éviter trois recomputations de _climb_setup, dont low_clearance_ground_hexes.
+    """
     from engine.game_state import unit_can_occupy_upper_floor
     from engine.hex_utils import get_neighbors
 
-    gs = setup["gs"]
+    gs = floors_env.game_state
+    ubi = gs["unit_by_id"]
+    p1 = [(str(k), u) for k, u in ubi.items() if u["player"] == 1]
+    p2 = [(str(k), u) for k, u in ubi.items() if u["player"] == 2]
+    ta = gs["terrain_areas"]
+    fh1 = sorted(floor_hexes_at_level(ta, 1))
+    assert fh1, "scénario sans plancher L1 (climb_ctx)"
+
+    tgt_uid = p2[0][0]
+    tgt_mid = gs["squad_models"][tgt_uid][0]
+    tgt_model = gs["models_cache"][tgt_mid]
+
+    holding = [
+        c for c in fh1
+        if resolve_model_effective_level(gs, tgt_model, c[0], c[1], 1) == 1
+    ]
+    assert holding, "aucune case L1 ne porte le socle de la cible (climb_ctx)"
+    c1 = holding[len(holding) // 2]
+    _place(gs, tgt_mid, c1[0], c1[1], 1)
+
     climber = next(
-        ((uid, u) for uid, u in setup["p1"] if unit_can_occupy_upper_floor(u["UNIT_KEYWORDS"])), None
+        ((uid, u) for uid, u in p1 if unit_can_occupy_upper_floor(u["UNIT_KEYWORDS"])), None
     )
     # Assert et non `skip` : le scénario est figé et contient des INFANTRY côté p1. Un skip ferait
     # passer au vert les SEULS tests de charge 3D le jour où le roster perdrait ses montants.
@@ -205,8 +234,6 @@ def _climb_setup(setup) -> _ClimbCtx:
     clb_uid, clb_u = climber
     clb_mid = gs["squad_models"][clb_uid][0]
 
-    c1, fh1 = setup["c1"], setup["fh1"]
-    _place(gs, setup["tgt_mid"], c1[0], c1[1], 1)
     walls = set(gs.get("wall_hexes", set()))
     fh1_set = set(fh1)
     # Départ au SOL sur un hex adjacent au pied de la ruine (hors plancher, hors mur).
@@ -216,7 +243,7 @@ def _climb_setup(setup) -> _ClimbCtx:
          and 0 <= nb[0] < gs["board_cols"] and 0 <= nb[1] < gs["board_rows"]),
         None,
     )
-    assert ground_start is not None, "pas d'hex de sol adjacent au plancher L1"
+    assert ground_start is not None, "pas d'hex de sol adjacent au plancher L1 (climb_ctx)"
     _place(gs, clb_mid, ground_start[0], ground_start[1], 0)
 
     ish = int(gs["inches_to_subhex"])
@@ -244,10 +271,10 @@ def _climb_cells(gs, ctx: _ClimbCtx, budget: int):
     )
 
 
-def test_climb_reachable_floor_cells_respect_climb_cost(setup):
+def test_climb_reachable_floor_cells_respect_climb_cost(setup, climb_ctx):
     """3b : le chargeur montant atteint L1 avec un gros jet, et rien sous le coût de montée §13.06."""
     gs = setup["gs"]
-    ctx = _climb_setup(setup)
+    ctx = climb_ctx
 
     fcells = _climb_cells(gs, ctx, ctx.big)
     assert fcells, "le chargeur montant doit atteindre au moins une case de l'étage L1"
@@ -259,10 +286,10 @@ def test_climb_reachable_floor_cells_respect_climb_cost(setup):
     )
 
 
-def test_charge_pool_carries_floor_anchors(setup):
+def test_charge_pool_carries_floor_anchors(setup, climb_ctx):
     """3b : charge_model_plan_state en vue L1 renvoie des ancres [col,row,level>=1]."""
     gs = setup["gs"]
-    ctx = _climb_setup(setup)
+    ctx = climb_ctx
 
     # Déclaration de charge posée pour ce seul test — retirée ensuite, l'env est partagé par le module.
     gs.setdefault("charge_target_selections", {})[ctx.uid] = [setup["tgt_uid"]]
@@ -277,7 +304,7 @@ def test_charge_pool_carries_floor_anchors(setup):
     assert all(len(a) == 3 for a in state["pool"]), "chaque ancre du pool doit porter [col,row,level]"
 
 
-def test_a_floor_destination_is_validated_by_the_climb_field_not_the_2d_bfs(setup):
+def test_a_floor_destination_is_validated_by_the_climb_field_not_the_2d_bfs(setup, climb_ctx):
     """3b — `_charge_model_pos_is_closer` en `dest_level>=1` passe par le champ climb (§13.06).
 
     Sans cette branche, la légalité d'une destination d'étage serait décidée par le BFS 2D, qui
@@ -287,7 +314,7 @@ def test_a_floor_destination_is_validated_by_the_climb_field_not_the_2d_bfs(setu
     Ce chemin n'était couvert par aucun test (mesuré) alors qu'il décide de toute charge d'étage.
     """
     gs = setup["gs"]
-    ctx = _climb_setup(setup)
+    ctx = climb_ctx
 
     reachable = _climb_cells(gs, ctx, ctx.big)
     assert reachable, "prémisse : le champ climb doit rendre au moins une case d'étage"

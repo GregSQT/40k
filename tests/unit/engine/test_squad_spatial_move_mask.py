@@ -171,7 +171,7 @@ def test_already_moved_squad_has_no_move_cell(engine):
     gs = engine.game_state
     gs.setdefault("units_moved", set()).add("1")
     mask = build_squad_action_mask(gs, "1", None, ADVANCE_ROLL)
-    assert sum(mask[SQUAD_ACTION_MOVE_CELL_BASE:SQUAD_ACTION_MOVE_CELL_COUNT]) == 0
+    assert sum(mask[SQUAD_ACTION_MOVE_CELL_BASE:SQUAD_ACTION_MOVE_CELL_BASE + SQUAD_ACTION_MOVE_CELL_COUNT]) == 0
     assert mask[SQUAD_ACTION_WAIT] == 1
 
 
