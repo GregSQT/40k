@@ -248,30 +248,25 @@ def _rc_desp() -> RewardCalculator:
 
 
 class TestDesperateEscapeDiedGymPath:
-    """Le résultat gym de desperate_escape_died doit traverser calculate_reward sans ValueError."""
+    """Le résultat gym de desperate_escape_died doit retourner 0.0 quelle que soit la forme du payload."""
 
-    def test_new_result_does_not_raise(self) -> None:
-        """desp_died_no_raise : résultat gym avec unitId + waiting_for_player → 0.0."""
-        rc = _rc_desp()
-        result = {
+    @pytest.mark.parametrize("result", [
+        {
             "action": "desperate_escape_died",
             "unitId": "1",
             "squad_id": "1",
             "activation_complete": True,
             "waiting_for_player": False,
-        }
-        gs = dict(_MINIMAL_GS)
-        reward = rc.calculate_reward(True, result, gs)
-        assert reward == 0.0
-
-    def test_old_result_also_returns_zero(self) -> None:
-        """desp_died_old_zero : résultat gym sans unitId ni waiting_for_player → 0.0 (routage sur action)."""
-        rc = _rc_desp()
-        result_old = {
+        },
+        {
             "action": "desperate_escape_died",
             "squad_id": "1",
             "activation_complete": True,
-        }
+        },
+    ], ids=["with_unitId_and_waiting", "without_unitId_and_waiting"])
+    def test_returns_zero(self, result: dict) -> None:
+        """desp_died_zero : routage sur action, indépendant de unitId / waiting_for_player."""
+        rc = _rc_desp()
         gs = dict(_MINIMAL_GS)
-        reward = rc.calculate_reward(True, result_old, gs)
+        reward = rc.calculate_reward(True, result, gs)
         assert reward == 0.0
