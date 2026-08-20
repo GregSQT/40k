@@ -309,4 +309,4 @@ def test_gym_fall_back_anchor_shifted_skips_move() -> None:
     assert result.get("activation_complete") is True
     assert "_flee_mode" not in gs, f"_flee_mode stale : {gs.get('_flee_mode')!r}"
     assert "_desperate_escape_rolls" not in gs, "_desperate_escape_rolls stale"
-    assert "1" not in gs.get(MOVE_CELL_MAP_CACHE_KEY, {}), "cell map stale après fall_back_anchor_shifted"
+    assert "1" not in gs[MOVE_CELL_MAP_CACHE_KEY], "cell map stale après fall_back_anchor_shifted"
