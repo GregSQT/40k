@@ -1617,6 +1617,15 @@ class StepLogger:
                 base_msg = f"{unit_label} {verb} from ({start_col},{start_row}) to ({end_col},{end_row})"
             else:
                 raise KeyError(f"{action_type} action missing required position data")
+            # L17 — cibles pile-in [targets: M,K] / mode consolidation [ONGOING|ENGAGING|OBJECTIVE].
+            if action_type in ("pile_in", "overrun_pile_in"):
+                _pi_tids = details.get("pile_in_target_ids")
+                if _pi_tids:
+                    base_msg += f" [targets: {','.join(str(t) for t in _pi_tids)}]"
+            elif action_type == "consolidation":
+                _conso_mode = details.get("consolidation_mode")
+                if _conso_mode is not None:
+                    base_msg += f" [{_conso_mode.upper()}]"
             reward = details.get("reward")
             if reward is not None:
                 base_msg += f" [R:{reward:+.1f}]"

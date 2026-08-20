@@ -6286,6 +6286,9 @@ class W40KEngine(gym.Env):
             # (parallèles, même index). Le formateur construit "Unit A(c,r),Unit B(c,r)".
             ("allTargetIds", "all_target_ids"),
             ("allTargetCoords", "all_target_coords"),
+            # L17 — cibles de pile-in (12.03) et mode de consolidation (12.08).
+            ("pileInTargetIds", "pile_in_target_ids"),
+            ("consolidationMode", "consolidation_mode"),
         ):
             value = raw_log.get(src)  # get allowed
             if value is not None:
@@ -6349,12 +6352,27 @@ class W40KEngine(gym.Env):
             }
             for m in alive
         ]
+        # L17 — cibles pile-in (12.03) / mode consolidation (12.08). Calculés APRÈS le commit
+        # (les positions finales sont stables) mais l'unité est toujours présente en game_state.
+        _l17_pile_in_tids: Optional[List[str]] = None
+        _l17_conso_mode: Optional[str] = None
+        if kind in ("pile_in", "overrun_pile_in"):
+            from engine.phase_handlers.fight_handlers import pile_in_select_targets_12_03
+            try:
+                _l17_pile_in_tids = pile_in_select_targets_12_03(gs, unit)
+            except (ValueError, KeyError):
+                pass  # unité entièrement détruite ou cas dégénéré : on loggue sans targets
+        elif kind == "consolidation":
+            from engine.phase_handlers.fight_handlers import fight_v11_consolidation_mode
+            _l17_conso_mode = fight_v11_consolidation_mode(gs, unit)
         _append_fight_move_log(
             gs, unit, kind=kind,
             from_col=from_col, from_row=from_row,
             to_col=to_col, to_row=to_row,
             move_details=move_details,
             models_segment=captured_seg,
+            pile_in_target_ids=_l17_pile_in_tids,
+            consolidation_mode=_l17_conso_mode,
         )
 
     def _fight_v11_gym_settle(self) -> None:
