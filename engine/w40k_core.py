@@ -7137,7 +7137,7 @@ class W40KEngine(gym.Env):
                         "allTargetCoords": [
                             [int(self.game_state["units_cache"][str(t)]["col"]),
                              int(self.game_state["units_cache"][str(t)]["row"])]
-                            if str(t) in self.game_state.get("units_cache", {}) else None
+                            if str(t) in self.game_state["units_cache"] else None
                             for t in target_squad_ids
                         ],
                         **_charge_dist,
@@ -7211,7 +7211,7 @@ class W40KEngine(gym.Env):
                         "allTargetCoords": [
                             [int(self.game_state["units_cache"][str(t)]["col"]),
                              int(self.game_state["units_cache"][str(t)]["row"])]
-                            if str(t) in self.game_state.get("units_cache", {}) else None
+                            if str(t) in self.game_state["units_cache"] else None
                             for t in target_squad_ids
                         ],
                         **_charge_dist,

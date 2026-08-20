@@ -5980,7 +5980,7 @@ def charge_commit_move_plan_handler(
             "allTargetCoords": [
                 [int(game_state["units_cache"][str(t)]["col"]),
                  int(game_state["units_cache"][str(t)]["row"])]
-                if str(t) in game_state.get("units_cache", {}) else None
+                if str(t) in game_state["units_cache"] else None
                 for t in target_ids
             ],
             **_charge_dist,
@@ -6301,7 +6301,7 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
             "allTargetCoords": [
                 [int(game_state["units_cache"][str(t)]["col"]),
                  int(game_state["units_cache"][str(t)]["row"])]
-                if str(t) in game_state.get("units_cache", {}) else None
+                if str(t) in game_state["units_cache"] else None
                 for t in target_ids
             ],
             **_charge_dist,

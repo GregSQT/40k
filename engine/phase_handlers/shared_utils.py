@@ -9207,7 +9207,7 @@ def _emit_squad_shoot_log(game_state: Dict[str, Any], g: Dict[str, Any], ctx: Ma
         # Lu depuis squad_shooting_type_choice ; "normal" par défaut pour le combat (ctx.log_type
         # == "combat") qui ne passe pas par squad_shooting_type_choose.
         "shootType": (
-            game_state.get(SQUAD_SHOOTING_TYPE_CHOICE_KEY, {}).get(attacker_squad_id_str, "normal")
+            game_state[SQUAD_SHOOTING_TYPE_CHOICE_KEY].get(attacker_squad_id_str, "normal")
             if ctx.log_type == "shoot"
             else None
         ),

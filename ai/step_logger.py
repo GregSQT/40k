@@ -1319,7 +1319,7 @@ class StepLogger:
                     end_col, end_row = details["end_pos"]
                     # Include target coordinates if available
                     # L16 — cibles multiples (11.04) : si all_target_ids présent, construire
-                    # "Unit M(c,r),Unit K(c,r)" ; sinon fallback sur la cible primaire seule.
+                    # "Unit M(c,r),Unit K(c,r)" ; sinon la cible primaire seule.
                     all_target_ids = details.get("all_target_ids")
                     all_target_coords = details.get("all_target_coords")
                     if all_target_ids and len(all_target_ids) > 1:
