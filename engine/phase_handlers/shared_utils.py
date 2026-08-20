@@ -12037,15 +12037,21 @@ SQUAD_ACTION_SHOOT_SLOT_COUNT = 20
 # tranchait par `get_best_enemy_score_for_unit` (damage_ratio) : l'agent declarait « je charge »
 # sans jamais dire QUI, et le masque ne portait qu'un bit « une charge est possible ».
 SQUAD_ACTION_CHARGE_SLOT_BASE = SQUAD_ACTION_SHOOT_SLOT_BASE + SQUAD_ACTION_SHOOT_SLOT_COUNT  # 1045
-SQUAD_ACTION_CHARGE_SLOT_COUNT = SQUAD_ACTION_SHOOT_SLOT_COUNT  # 20 -> 1045-1064
+SQUAD_ACTION_CHARGE_SLOT_COUNT = SQUAD_ACTION_SHOOT_SLOT_COUNT  # 20 -> 1045-1064  (cible unique, D1)
+# V11 §9 P3 L9 — CHARGE MULTI-CIBLES : C(K_e, 2) paires de cibles, tete DENSE (pas D1).
+# Un slot est ouvert ssi les deux cibles individuelles sont chacune declarables.
+SQUAD_ACTION_CHARGE_PAIR_SLOT_BASE = SQUAD_ACTION_CHARGE_SLOT_BASE + SQUAD_ACTION_CHARGE_SLOT_COUNT  # 1065
+SQUAD_ACTION_CHARGE_PAIR_SLOT_COUNT = (
+    SQUAD_ACTION_CHARGE_SLOT_COUNT * (SQUAD_ACTION_CHARGE_SLOT_COUNT - 1) // 2
+)  # 190 = C(20,2)
 # V11 §9 P3-1 : la CIBLE DE MELEE (12.05) devient une dimension d'action, indexee sur le MEME
 # mapping de slots ennemis que le tir (`get_enemy_slot_mapping`). Avant, `squad_fight` etait une
 # action sans cible et le moteur tranchait par l'heuristique `_ai_select_fight_target` : l'agent
 # ne choisissait rien, et le pool 12.05 n'apparaissait nulle part dans le masque.
 # Le compte est DERIVE de celui du tir : un slot = une ligne du tenseur ennemi (invariant D1).
 SQUAD_ACTION_FIGHT_SLOT_BASE = (
-    SQUAD_ACTION_CHARGE_SLOT_BASE + SQUAD_ACTION_CHARGE_SLOT_COUNT
-)  # 1065
+    SQUAD_ACTION_CHARGE_PAIR_SLOT_BASE + SQUAD_ACTION_CHARGE_PAIR_SLOT_COUNT
+)  # 1255
 SQUAD_ACTION_FIGHT_SLOT_COUNT = SQUAD_ACTION_SHOOT_SLOT_COUNT  # 20 -> 1065-1084
 # Combat « a vide » (12.04/12.06) : selectionne pour combattre sans cible eligible. Etat legal.
 SQUAD_ACTION_FIGHT_NO_TARGET = SQUAD_ACTION_FIGHT_SLOT_BASE + SQUAD_ACTION_FIGHT_SLOT_COUNT  # 1085
@@ -12984,6 +12990,7 @@ def build_squad_action_mask(
         )
 
         _charge_roll = charge_roll_for_activation(game_state, squad_id)
+        _reachable_slots: list = []
         for slot_i, esid in enumerate(enemy_slot_ids[:SQUAD_ACTION_CHARGE_SLOT_COUNT]):
             if esid is None or esid not in units_cache:
                 continue
@@ -12993,6 +13000,18 @@ def build_squad_action_mask(
             # doublerait l'appel pour toute cible declarable sans changer un seul verdict.
             if charge_target_is_reachable(game_state, squad_id, str(esid), _charge_roll):
                 mask[SQUAD_ACTION_CHARGE_SLOT_BASE + slot_i] = 1
+                _reachable_slots.append(slot_i)
+        # Slots de paires : ouverts ssi les deux cibles individuelles sont chacune declarables.
+        # Parite masque/commit : le commit verifiable l'atteignabilite de chaque cible ; ici on
+        # n'ouvre que les paires dont les deux membres passent deja le meme oracle. Une paire
+        # geometriquement impossible (les deux cibles exigent des positions incompatibles) sera
+        # rejetee au commit avec charge_fail, comme un jet insuffisant — c'est le bon comportement.
+        if len(_reachable_slots) >= 2:
+            from engine.macro_intents import charge_pair_encode
+            for _ii in range(len(_reachable_slots)):
+                for _jj in range(_ii + 1, len(_reachable_slots)):
+                    _pi = charge_pair_encode(_reachable_slots[_ii], _reachable_slots[_jj])
+                    mask[SQUAD_ACTION_CHARGE_PAIR_SLOT_BASE + _pi] = 1
         # 11.02.3 « if you still want to » : renoncer apres le jet est un choix legal, et c'est
         # le seul qui reste quand le jet n'atteint rien.
         mask[SQUAD_ACTION_WAIT] = 1

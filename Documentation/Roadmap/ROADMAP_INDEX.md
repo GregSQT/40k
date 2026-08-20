@@ -167,6 +167,9 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 | analyzer | ✅ suppression player_alternation_violations (2026-08-20) — check retiré : 40K priorité par roll-off, aucune alternance stricte ; 204 faux positifs éliminés | — | ⚡ |
 | analyzer | ✅ verrou P1 priorité multi-tours (2026-08-20) — test verrou : P1 ouvre COMMAND sur 3 tours consécutifs → 0 violation ; docstring à jour | — | ⚡ |
 | analyzer | ✅ §2.9 faux positif DEAD en phase adverse (2026-08-20) — lignes DEAD exclues du suivi phase_seq_current_turn ; unité P1 tuée pendant SHOOT P2 ne pollue plus la séquence P1 ; verrou rouge/vert | — | ⚡ |
+| tests | ✅ §2.2 collision charge après mort ancre cible (2026-08-20) — `test_conformite_03_01_09_05` : destination bloquée même si l'ancre cible meurt avant le commit charge ; verrou rouge/vert | — | ⚡ |
+| step_logger+moteur | ✅ [ENGAGED_MODELS: N/total] sur lignes CHARGED (2026-08-20) — step_logger + charge_handlers émettent le ratio engagés/total sur chaque ligne CHARGED ; verrou intégration | — | ⚡ |
+| moteur+ai | ✅ Charge multi-cibles L9 (2026-08-20) — C(20,2)+20 = 210 slots (1045–1254), tête dense séparée dans pointer_policy, logique PvP réutilisée, verrou test_action_space_mirror + test_pointer_head ; TOTAL_ACTION_SIZE 1159→1349 | [v11_chemin_critique.md#p3-8](v11_chemin_critique.md#p3-8) | ⚡ |
 | infra | Perf `generate_compact_formation` | [infra.md#perf-formation](infra.md#perf-formation) | ⚡ |
 | infra | ✅ gzip + Brotli livrés (2026-08-18) — stage `brotli-builder`, `load_module` contexte main, directives server | [archives/infra.md](archives/infra.md) | ⚡ |
 

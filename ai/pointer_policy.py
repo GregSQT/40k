@@ -66,6 +66,8 @@ from ai.spatial_extractor import SpatialCombinedExtractor
 from engine.macro_intents import (
     CHARGE_SLOT_BASE,
     CHARGE_SLOT_COUNT,
+    CHARGE_PAIR_SLOT_BASE,
+    CHARGE_PAIR_SLOT_COUNT,
     CHOICE_BASE,
     CHOICE_COUNT,
     DEPLOY_SLOT_BASE,
@@ -90,14 +92,16 @@ MOVE_HEAD_HIDDEN = 32
 #: Actions produites par `action_net`, la SEULE tête dense restante : wait, fight-sans-cible et
 #: les 15 intents de zone. Tout le reste vient d'une tête à poids partagés (conv 1x1 pour les
 #: cellules, pointeurs pour les slots de tir, de charge, de mêlée, d'Oath, de déploiement, les
-#: candidats de décision et les escouades à ACTIVER).
-#: Calculé, jamais écrit en dur : ajouter une famille pointée sans le décompter ici décalerait
-#: TOUS les logits qui la suivent.
+#: candidats de décision et les escouades à ACTIVER). Les paires de charge ont LEUR propre tête
+#: dense (`charge_pair_net`), décomptée ici pour ne pas décaler `action_net`.
+#: Calculé, jamais écrit en dur : ajouter une famille pointée/dense sans le décompter ici
+#: décalerait TOUS les logits qui la suivent.
 DENSE_LOGIT_COUNT = (
     TOTAL_ACTION_SIZE
     - MOVE_CELL_COUNT
     - SHOOT_SLOT_COUNT
     - CHARGE_SLOT_COUNT
+    - CHARGE_PAIR_SLOT_COUNT
     - FIGHT_SLOT_COUNT
     - CHOICE_COUNT
     - OATH_SLOT_COUNT
@@ -191,16 +195,18 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
             MOVE_CELL_BASE != 0
             or SHOOT_SLOT_BASE != MOVE_CELL_COUNT + 1
             or CHARGE_SLOT_BASE != SHOOT_SLOT_BASE + SHOOT_SLOT_COUNT
-            or FIGHT_SLOT_BASE != CHARGE_SLOT_BASE + CHARGE_SLOT_COUNT
+            or CHARGE_PAIR_SLOT_BASE != CHARGE_SLOT_BASE + CHARGE_SLOT_COUNT
+            or FIGHT_SLOT_BASE != CHARGE_PAIR_SLOT_BASE + CHARGE_PAIR_SLOT_COUNT
             or OATH_SLOT_BASE != CHOICE_BASE + CHOICE_COUNT
             or ACTIVATE_SLOT_BASE != OATH_SLOT_BASE + OATH_SLOT_COUNT
             or ACTIVATE_SLOT_BASE != TOTAL_ACTION_SIZE - ACTIVATE_SLOT_COUNT
         ):
             raise ValueError(
                 "Disposition de l'action space inattendue : l'assemblage des logits suppose "
-                f"[cellules 0..{MOVE_CELL_COUNT - 1} | wait | tir | charge | melee | dense | "
+                f"[cellules | wait | tir | charge | charge-paire | melee | dense | "
                 f"CHOICE | Oath | ACTIVATE en fin]. Recu MOVE_CELL_BASE={MOVE_CELL_BASE}, "
                 f"SHOOT_SLOT_BASE={SHOOT_SLOT_BASE}, CHARGE_SLOT_BASE={CHARGE_SLOT_BASE}, "
+                f"CHARGE_PAIR_SLOT_BASE={CHARGE_PAIR_SLOT_BASE}, "
                 f"FIGHT_SLOT_BASE={FIGHT_SLOT_BASE}, CHOICE_BASE={CHOICE_BASE}, "
                 f"OATH_SLOT_BASE={OATH_SLOT_BASE}, ACTIVATE_SLOT_BASE={ACTIVATE_SLOT_BASE}, "
                 f"TOTAL_ACTION_SIZE={TOTAL_ACTION_SIZE}."
@@ -279,6 +285,10 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
         # charger » depend de la distance a franchir au 2D6 et de ce que l engagement me coute au
         # tour adverse, pas de la portee ni du couvert. Meme cout marginal, memes embeddings.
         self.charge_query_net = nn.Linear(self.mlp_extractor.latent_dim_pi, self.entity_dim)
+        # Tête DENSE pour les paires de charge (V11 §9 P3 L9) : C(K_e, 2) = 190 logits.
+        # Une paire encode DEUX lignes du tenseur ennemi — impossible pour un produit scalaire
+        # unique. La tête dense reçoit le même latent que les autres.
+        self.charge_pair_net = nn.Linear(self.mlp_extractor.latent_dim_pi, CHARGE_PAIR_SLOT_COUNT)
         # Requête DISTINCTE pour les candidats de décision (§9.3 P2) : « quel ennemi frapper » et
         # « quelle option choisir » sont deux questions différentes posées au même latent, et
         # elles ne lisent même pas les mêmes embeddings (ennemis vs candidats).
@@ -499,7 +509,7 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
 
         ⚠️ L'assemblage suit l'ordre EXACT des ids (`macro_intents`) : 0-1023 cellules, 1024 wait,
         1025-1044 tir, 1045-1064 charge, 1065-1084 mêlée, 1085 fight-sans-cible, 1086-1100 zone,
-        1101-1106 CHOICE, 1107-1126 Oath, 1127-1138 ACTIVATION. Une permutation ici ferait jouer à
+        1311-1316 CHOICE, 1317-1336 Oath, 1337-1348 ACTIVATION. Une permutation ici ferait jouer à
         l'agent une action autre que celle qu'il évalue, sans que rien ne lève — verrouillé par test.
         """
         enemies = feats.enemies
@@ -511,12 +521,13 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
             [
                 move,
                 base[:, :1],        # wait
-                self._point(self.query_net, latent_pi, enemies),         # tir
-                self._point(self.charge_query_net, latent_pi, enemies),  # charge
-                self._point(self.fight_query_net, latent_pi, enemies),   # mêlée
-                base[:, 1:],        # fight-sans-cible, intents de zone
+                self._point(self.query_net, latent_pi, enemies),           # tir
+                self._point(self.charge_query_net, latent_pi, enemies),    # charge (cible unique)
+                self.charge_pair_net(latent_pi),                           # charge paires (dense)
+                self._point(self.fight_query_net, latent_pi, enemies),     # mêlée
+                base[:, 1:],        # fight-sans-cible, shoot-indirect, intents de zone
                 self._point(self.choice_query_net, latent_pi, feats.decision),
-                self._point(self.oath_query_net, latent_pi, enemies),    # Oath
+                self._point(self.oath_query_net, latent_pi, enemies),      # Oath
                 # Activation : MES escouades par slot (V11 §0.48 `L2`).
                 self._point(self.activate_query_net, latent_pi, feats.allies),
             ],

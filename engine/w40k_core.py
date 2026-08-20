@@ -6934,26 +6934,36 @@ class W40KEngine(gym.Env):
             _charge_entry = _charge_units_cache.get(str(squad_id))
             if _charge_entry is None:
                 raise KeyError(f"Squad {squad_id} absent de units_cache pour squad_charge")
-            target_slot = int(semantic["target_slot"])
             enemy_slot_ids = get_enemy_slot_mapping(
                 self.game_state, int(require_key(_charge_entry, "player"))
             )
-            if not (0 <= target_slot < len(enemy_slot_ids)):
+            # Résolution des slots : `target_slot` (unique) ou `target_slots` (paire L9).
+            _raw_slots = (
+                list(semantic["target_slots"])
+                if "target_slots" in semantic
+                else [int(semantic["target_slot"])]
+            )
+            target_squad_ids: list = []
+            for _ts in _raw_slots:
+                _ts = int(_ts)
+                if not (0 <= _ts < len(enemy_slot_ids)):
+                    raise ValueError(
+                        f"squad_charge: slot {_ts} hors du mapping de slots ennemis "
+                        f"({len(enemy_slot_ids)} slots)"
+                    )
+                _tsid = enemy_slot_ids[_ts]
+                if _tsid is None:
+                    raise ValueError(
+                        f"squad_charge: slot {_ts} vide — le masque n aurait pas du l ouvrir"
+                    )
+                target_squad_ids.append(str(_tsid))
+            if not charge_check_eligibility(self.game_state, str(squad_id), target_squad_ids):
                 raise ValueError(
-                    f"squad_charge: target_slot {target_slot} hors du mapping de slots ennemis "
-                    f"({len(enemy_slot_ids)} slots)"
-                )
-            target_squad_id = enemy_slot_ids[target_slot]
-            if target_squad_id is None:
-                raise ValueError(
-                    f"squad_charge: slot {target_slot} vide — le masque n aurait pas du l ouvrir"
-                )
-            target_squad_id = str(target_squad_id)
-            if not charge_check_eligibility(self.game_state, str(squad_id), [target_squad_id]):
-                raise ValueError(
-                    f"squad_charge: slot {target_slot} -> cible {target_squad_id} non declarable "
+                    f"squad_charge: slots {_raw_slots} -> cibles {target_squad_ids} non declarables "
                     f"(11.02) pour squad {squad_id} (rupture masque/commit)"
                 )
+            # Pour les logs et la compatibilité aval : cible primaire = premier slot.
+            target_squad_id = target_squad_ids[0]
             # 11.02.2 — le jet a DÉJÀ eu lieu, à l'activation, et c'est lui qui a borné les slots
             # que le masque a ouverts (`charge_roll_for_activation`, appelée par
             # `build_squad_action_mask`). On le RELIT : le rejeter ici rendrait le masque
@@ -6966,7 +6976,7 @@ class W40KEngine(gym.Env):
             # 11.04 — mesure de la cible AVANT le plan : `commit_move` deplace les figurines, et
             # une distance relevee apres vaudrait « au contact » sur toutes les charges reussies.
             charge_record_target_choice(self.game_state, squad_id, target_squad_id)
-            plan = charge_build_valid_plan(self.game_state, squad_id, [target_squad_id], charge_roll)
+            plan = charge_build_valid_plan(self.game_state, squad_id, target_squad_ids, charge_roll)
             unit = get_unit_by_id(self.game_state, squad_id)
             if unit is None:
                 raise KeyError(f"Squad {squad_id} introuvable pour squad_charge")
