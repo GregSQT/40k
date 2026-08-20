@@ -2086,6 +2086,8 @@ class W40KEngine(gym.Env):
                 scenario_path=scenario_path_logged,
                 run_rules=self._run_rules_for_step_log(),
                 attached_info=attached_info or None,
+                # L9 — zones de déploiement par joueur : {1: [[col, row], …], 2: […]}.
+                deployment_pools=self.game_state.get("deployment_pools"),  # get allowed
             )
 
         if self.game_state.get("deployment_type") == "active":

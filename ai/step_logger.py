@@ -640,7 +640,7 @@ class StepLogger:
         except Exception as e:
             print(f"⚠️ Step logging flush error: {e}")
     
-    def log_episode_start(self, units_data, scenario_info=None, bot_name=None, walls=None, objectives=None, primary_objective_config=None, roster_info=None, board_config=None, scenario_path=None, run_rules=None, attached_info=None):
+    def log_episode_start(self, units_data, scenario_info=None, bot_name=None, walls=None, objectives=None, primary_objective_config=None, roster_info=None, board_config=None, scenario_path=None, run_rules=None, attached_info=None, deployment_pools=None):
         """Log episode start with all unit starting positions, walls, and objectives
 
         ``scenario_path`` : chemin du scénario RÉELLEMENT tiré pour cet épisode, relatif à la
@@ -791,6 +791,23 @@ class StepLogger:
                 if attached_info:
                     for _lid, _bid in sorted(attached_info.items()):
                         f.write(f"[{timestamp}] Attached: {_lid}→{_bid}\n")
+
+                # L9 — zones de déploiement par joueur (03.02, 20.04, 24.09, 24.20, 24.31, 24.32).
+                # Format : P<n>=(min_col,min_row)-(max_col,max_row), boîte englobante de la zone.
+                # Absent si le scénario ne déclare pas de zones (défaut → contrôle impossible).
+                if deployment_pools:
+                    pool_parts = []
+                    for pid in sorted(deployment_pools.keys()):
+                        hexes = deployment_pools[pid]
+                        if not hexes:
+                            continue
+                        min_c = min(h[0] for h in hexes)
+                        max_c = max(h[0] for h in hexes)
+                        min_r = min(h[1] for h in hexes)
+                        max_r = max(h[1] for h in hexes)
+                        pool_parts.append(f"P{pid}=({min_c},{min_r})-({max_c},{max_r})")
+                    if pool_parts:
+                        f.write(f"[{timestamp}] Deployment: {' '.join(pool_parts)}\n")
 
                 # Log all unit starting positions (already validated above)
                 for unit in units_list:
