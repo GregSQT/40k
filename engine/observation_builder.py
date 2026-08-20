@@ -1940,7 +1940,9 @@ class ObservationBuilder:
             "engaged_squads": engaged_squads,
             "moved_by_model": require_key(game_state, "moved_distance_by_model"),
             "ranged_metric": _ranged_distance_metric(game_state),
-            "active_socle": socle_from_cache_entry(active_entry),
+            # Hors table (déploiement/réserves), aucun socle n'existe : `entry_footprint` lève.
+            # None est sûr — l'unique lectrice (`edge_distance`) est gardée par `active_not_deployed`.
+            "active_socle": None if active_not_deployed else socle_from_cache_entry(active_entry),
             # Compteurs sur l'escouade ENTIÈRE : l'état de combat ne dépend pas du plafond du
             # bloc figurines (une escouade de 20 Boyz dont 12 sont engagées le dit).
             "n_fight_eligible": sum(1 for mid in alive_mids if mid in fighting_set),
