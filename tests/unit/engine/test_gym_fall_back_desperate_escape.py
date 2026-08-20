@@ -111,6 +111,48 @@ def test_gym_fall_back_battleshocked_sets_desperate_escape() -> None:
     )
 
 
+def test_gym_desperate_escape_died_clears_game_state_keys() -> None:
+    """Hazard détruit l'unité → _flee_mode et _desperate_escape_rolls absents du game_state.
+
+    Régression : l'ancien chemin retournait sans purger ces clés ; le prochain fall_back
+    dans le même épisode héritait de _flee_mode="desperate_escape" même pour une unité
+    non-battle-shocked.
+    """
+    eng = _engine_engaged()
+    gs = eng.game_state
+
+    gs["phase"] = "move"
+    gs["move_activation_pool"] = ["1"]
+
+    unit1 = next(u for u in gs["units"] if str(u["id"]) == "1")
+    unit1["battle_shocked"] = True
+
+    # Simuler desperate_escape_pre_move qui pose les clés PUIS retourne is_alive=False.
+    def _fake_pre_move(
+        squad_id: str, game_state: Dict[str, Any], was_engaged: bool, auto_resolve: bool
+    ) -> tuple:
+        game_state["_flee_mode"] = "desperate_escape"
+        game_state["_desperate_escape_rolls"] = [1, 2]
+        return True, False, 2  # is_desperate, is_alive=False, wounds
+
+    with patch(
+        "engine.phase_handlers.shared_utils.desperate_escape_pre_move",
+        side_effect=_fake_pre_move,
+    ):
+        ok, result = eng._process_squad_action(
+            {"action": "squad_fall_back", "squad_id": "1", "destCol": 18, "destRow": 20}
+        )
+
+    assert ok, f"desperate_escape_died a échoué : {result}"
+    assert result.get("action") == "desperate_escape_died"
+    assert "_flee_mode" not in gs, (
+        f"_flee_mode stale dans game_state : {gs['_flee_mode']!r}"
+    )
+    assert "_desperate_escape_rolls" not in gs, (
+        "_desperate_escape_rolls stale dans game_state"
+    )
+
+
 def test_gym_fall_back_not_battleshocked_keeps_ordered_retreat() -> None:
     """fall_back sans battle_shock → fleeMode=ordered_retreat (comportement normal préservé)."""
     eng = _engine_engaged()

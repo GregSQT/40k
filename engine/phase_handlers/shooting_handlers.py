@@ -5236,8 +5236,8 @@ def _handle_shooting_end_activation(game_state: Dict[str, Any], unit: Dict[str, 
             action_type = "shoot"
 
     # L24 — producteur skip shoot : aucune cible valide ou pas d'arme utilisable.
-    # La raison précise est posée par le caller sur result["skip_reason"] après le retour ;
-    # ici on log la ligne skip sans raison (optionnelle pour le formateur StepLogger).
+    # La raison précise est fournie par le caller via `skip_reason` ; elle est incluse dans
+    # l'action_log si non-None (consommée par le formateur StepLogger).
     if action_type == "skip":
         _skip_col, _skip_row = require_unit_position(unit, game_state)
         _skip_entry: Dict[str, Any] = {
