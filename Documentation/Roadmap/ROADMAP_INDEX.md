@@ -127,6 +127,9 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 | bot | ✅ Fix code-review benchmark_bots (2026-08-20) — import DESTINATION_SHORTLIST depuis bot_doctrines, précalcul geo_scores, mocks morts require_unit_from_cache supprimés | — | ⚡ |
 | bot | ✅ Scoring multi-critères reference bots + fix charge/CONTEST (2026-08-20) — 3 bots (balanced/denial/reactive), 4 scénarios holdout, fix charge/CONTEST, benchmark gate §4.D | [bot.md#etape8](bot.md#etape8) | ⚡ |
 | analyzer | ✅ Corpus de règles vérifiable — Lot 6 (2026-08-20) — V4/V8/V13 fermés, 10.02/12.07 câblés, COUVERT 65/267, 0 vert vacant ouvert, 64 tests verts | — | ⚡ |
+| bot | ✅ bot_ranking parallélisé ProcessPoolExecutor (2026-08-20) — temps de tournoi réduit | — | ⚡ |
+| moteur | ✅ fix desperate_escape gym : purger _flee_mode/_desperate_escape_rolls sur unité morte (2026-08-20) — 3 tests verts, cycle rouge/vert | — | ⚡ |
+| moteur | ✅ simplify desperate_escape : .pop() symétrique PvP + helper test _engine_battle_shocked (2026-08-20) — 3 tests verts | — | ⚡ |
 | front | ✅ Tests front T7+T8–T13 livrés + T11 hook complet (2026-08-19) — 82 tests vitest verts (Couche B), Playwright 14 scénarios (T12-1..T12-8), hook __W40K_TEST__ étendu (movePreviewHexes/blinkTargetUnitIds/currentMode/hexToScreenCoords), data-testid board-viewport+board-canvas-container | [front.md#tests](front.md#tests) | ⚡ |
 | front | ✅ buildTargetPreviewStats extraite (2026-08-19) — fonction pure testable hors jsdom, supprime le calcul inline redondant overallProbability/expectedDamage dans useEngineAPI ; 4 nouveaux tests rouge/vert | — | ⚡ |
 | front | ✅ Tests review-test-assertions corrigés (2026-08-19) — assertions test HazardWarning et BoardWithAPI nettoyées | — | ⚡ |
