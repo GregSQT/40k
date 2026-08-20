@@ -270,7 +270,7 @@ class _FakeSnapshotLogger:
         self.snapshots: List[Dict[str, Any]] = []
 
     def log_objective_control_snapshot(
-        self, turn, objectives, controllers, victory_points, command_points
+        self, turn, objectives, controllers, victory_points, command_points, **kwargs
     ) -> None:
         self.snapshots.append(
             {
@@ -298,6 +298,7 @@ def _snapshot_engine(
         "command_points": dict(cp) if cp is not None else {1: 0, 2: 0},
         "turn": 2,
         "units_cache": {},
+        "units": [],
     }
     eng.step_logger = logger
     return eng

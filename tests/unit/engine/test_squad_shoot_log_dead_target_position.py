@@ -110,6 +110,7 @@ def _weapon_group() -> Dict[str, Any]:
         "close_quarters_applied": False,
         # [INDIRECT FIRE] 10.07 : posé à la création du groupe ; None si la règle ne joue pas.
         "indirect_fire_fail_below": None,
+        "targetAliveCount": 2,
     }
 
 

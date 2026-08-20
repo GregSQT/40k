@@ -145,10 +145,12 @@ def _charge_gs() -> Dict[str, Any]:
     return {
         **turn_state_invariants(),
         "units_cache": {
-            "1": {"id": "1", "player": 1, "col": 5, "row": 10},
-            "2": {"id": "2", "player": 2, "col": 7, "row": 10},
+            "1": {"id": "1", "player": 1, "col": 5, "row": 10,
+                  "BASE_SHAPE": "round", "BASE_SIZE": 1, "occupied_hexes": {(5, 10)}},
+            "2": {"id": "2", "player": 2, "col": 7, "row": 10,
+                  "BASE_SHAPE": "round", "BASE_SIZE": 1, "occupied_hexes": {(7, 10)}},
         },
-        "units": [{"id": "1", "player": 1, "UNIT_RULES": []}],
+        "units": [{"id": "1", "player": 1, "UNIT_RULES": [], "col": 5, "row": 10}],
         "unit_by_id": {"1": unit1},
         "action_logs": [],
         "action_log_seq": 0,
@@ -159,6 +161,10 @@ def _charge_gs() -> Dict[str, Any]:
         "turn_limit_reached": False,
         "charge_activation_pool": ["1"],
         "debug_logs": [],
+        "config": {
+            "game_rules": {"engagement_zone": 1, "engagement_zone_vertical": 5, "max_base_size_hex": 35},
+            "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
+        },
         # _charge_initial_rolls : relance simulée à l'activation (masquage)
         "_charge_initial_rolls": {"1": 5},
     }
@@ -196,11 +202,18 @@ def test_gym_charge_fail_logs_initial_roll(monkeypatch):
         "engine.phase_handlers.charge_handlers.charge_record_outcome",
         lambda *a, **k: {},
     )
+    # Le game_state minimal n'a pas models_cache ; couper la cascade fight pour ne pas crasher.
+    monkeypatch.setattr(
+        "engine.phase_handlers.fight_handlers.fight_phase_start",
+        lambda gs: {},
+    )
 
     gs = _charge_gs()
     engine = _bare_charge_engine(gs)
     # Isole du post-processing game_over (config, objectifs)
     engine._check_game_over = lambda: False  # type: ignore[method-assign]
+    # Isole des rule_choice candidates (iterent sur units["col"]/["row"] absents du stub)
+    engine._emit_next_rule_choice_prompt_if_needed = lambda: None  # type: ignore[method-assign]
     engine._process_squad_action({"action": "squad_charge", "squad_id": "1", "target_slot": 0})
 
     assert len(gs["action_logs"]) == 1
