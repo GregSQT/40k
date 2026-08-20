@@ -4602,7 +4602,7 @@ class W40KEngine(gym.Env):
         - ``move`` (défaut historique) : Desperate Escape 09.07, déclenché AVANT le fall back —
           unité morte → fin d'activation sans move ; sinon → pool Fall Back + preview.
         """
-        from engine.phase_handlers.shared_utils import is_unit_alive
+        from engine.phase_handlers.shared_utils import is_unit_alive, clear_desperate_escape_state
         from engine.phase_handlers import movement_handlers as _mh
         sid = str(uid)
         hazard_origin = self.game_state.pop("hazard_origin", "move")
@@ -4615,8 +4615,7 @@ class W40KEngine(gym.Env):
                 "done": True,
             }
         if not is_unit_alive(sid, self.game_state):
-            self.game_state.pop("_flee_mode", None)
-            self.game_state.pop("_desperate_escape_rolls", None)
+            clear_desperate_escape_state(self.game_state)
             _mh._invalidate_all_destination_pools_after_movement(self.game_state)
             _mh.movement_clear_preview(self.game_state)
             return True, {
@@ -6830,6 +6829,7 @@ class W40KEngine(gym.Env):
             if move_type == "fall_back":
                 from engine.phase_handlers.shared_utils import (
                     desperate_escape_pre_move, _squad_is_in_enemy_er,
+                    clear_desperate_escape_state,
                 )
                 from engine.phase_handlers import movement_handlers as _mh_de
                 _was_engaged = _squad_is_in_enemy_er(self.game_state, str(squad_id))
@@ -6839,10 +6839,7 @@ class W40KEngine(gym.Env):
                 if _is_desp and not _is_alive:
                     # Jets ont détruit l'unité : fin d'activation sans déplacement (miroir PvP
                     # `_resume_after_hazard` → cas `not is_unit_alive`).
-                    # Purger les clés posées par desperate_escape_pre_move ; sans ça elles restent
-                    # dans game_state et corrompent le prochain fall_back du même épisode.
-                    self.game_state.pop("_flee_mode", None)
-                    self.game_state.pop("_desperate_escape_rolls", None)
+                    clear_desperate_escape_state(self.game_state)
                     _mh_de._invalidate_all_destination_pools_after_movement(self.game_state)
                     _mh_de.movement_clear_preview(self.game_state)
                     return True, {
