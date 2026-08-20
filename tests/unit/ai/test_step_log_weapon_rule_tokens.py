@@ -32,7 +32,7 @@ from engine.phase_handlers.fight_handlers import build_manual_fight_allocation
 from engine.phase_handlers.shared_utils import build_manual_shoot_allocation
 from ai.step_logger import LOG_GRAMMAR_VERSION
 from tests._state_invariants import turn_state_invariants
-from tests.unit.ai._fabriques import entete_step_log
+from tests.unit.ai._fabriques import entete_step_log, units_cache_entry as _uc
 
 
 # Unité et arme RÉELLES du roster Space Marines. `sternguard_bolt_rifle` est le seul profil
@@ -59,25 +59,6 @@ SUSTAINED_WEAPON = "Heavy Bolter"
 # incrémentée, et le test rendrait zéro sans rien prouver. `Sternguard Bolt Pistol` est le
 # second profil de tir du MÊME porteur que `WEAPON_NAME` et déclare réellement la règle.
 CQ_WEAPON = "Sternguard Bolt Pistol"
-
-
-def _uc(col, row, *, player, models=None, hp_cur=9):
-    """Entrée units_cache. `occupied_hexes_by_model` est ce dont `_models_segment_for_unit`
-    tire le segment `[MODELS: A1@(c,r,z0)]` — sans lui l'analyzer ne connaît pas le NOMBRE de
-    figurines de l'escouade, donc pas le plafond de tirs, donc pas la fenêtre RAPID FIRE.
-
-    `floor_height_by_model` est écrite AVEC elle, jamais seule : les deux cartes sont le contrat
-    de la couche per-figurine (position + altitude, §03.04), et le moteur exige la seconde dès
-    que la première est là. Plateau plat ici → 0.0 partout.
-
-    `hp_cur` : HP total de l'unité, lu en `require_key` par
-    `_compute_enemy_adjacent_cache_for_player_from_units_cache` pour sauter les unités mortes."""
-    entry = {"BASE_SHAPE": "round", "BASE_SIZE": 6, "col": col, "row": row,
-             "occupied_hexes": {(col, row)}, "VALUE": 10.0, "player": player, "HP_CUR": hp_cur}
-    if models:
-        entry["occupied_hexes_by_model"] = dict(models)
-        entry["floor_height_by_model"] = {mid: 0.0 for mid in models}
-    return entry
 
 
 def _game_state(weapon_rules, *, moved_inches=0.0, target=TARGET, n_attacks=1,

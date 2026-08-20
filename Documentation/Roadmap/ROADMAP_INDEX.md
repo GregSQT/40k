@@ -154,6 +154,13 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 | moteur+training | ✅ Endless Duty obstacles 5+6 levés (2026-08-19) — fix obstacles 5 et 6 du scénario Endless Duty | — | ⚡ |
 | tests | ✅ docstring/commentaire test_deployment_slot_order_strategies corrigé (2026-08-19) — commentaires erronés alignés sur l'intention du test | — | ⚡ |
 | analyzer | ✅ dead_model_positions_episode cross-activation fix (2026-08-19) — setdefault accumulation périmée corrigée par heuristique seuil 20 lignes ; 2 nouveaux verrous rouge/vert intra/cross-activation | — | ⚡ |
+| moteur+tests | ✅ fix active_socle hors table (2026-08-21) — active_socle non construit quand escouade active hors table ; imports _uc en tête de fichier ; guard col<0 dans units_cache_entry ; consolider 13 helpers _uc → units_cache_entry dans _state_builders ; socle_from_cache_entry via entry_footprint | — | ⚡ |
+| tests | ✅ 5 pannes isolation xdist + _uc occupied_hexes vide (2026-08-21) — occupied_hexes=set() → {(col, row)} dans 14 helpers tir/fight + garde moteur + isolation module W40K_BOARD_PATH | — | ⚡ |
+| tests | ✅ simplify duplication test_reserves_full_episode (2026-08-21) — extraire charge_range = CHARGE_THRESHOLD_INCHES * ish | — | ⚡ |
+| tests | ✅ placement control resolution-agnostique dans test_reserves (2026-08-21) — fix placement control resolution-agnostique | — | ⚡ |
+| tests | ✅ 4 findings code-review test_reserves_full_episode (2026-08-21) — 4 corrections code-review sur test_reserves_full_episode | — | ⚡ |
+| moteur | ✅ fix type de tir effacé dans 3 chemins PvP (2026-08-21) — type de tir effacé dans les 3 chemins PvP manquants | — | ⚡ |
+| tests | ✅ consolider _uc AI-side → units_cache_entry dans _fabriques (2026-08-21) — 2 helpers _uc identiques dans tests/unit/ai/ fusionnés en units_cache_entry dans _fabriques.py | — | ⚡ |
 | moteur+services | ✅ Fix review-findings (2026-08-18) — surface refus moteur squad, wsgi leading-comma, message vide | — | |
 | services | ✅ VALUE/REQUISITION_COST séparés ED obstacle 7 (2026-08-19) — coût et valeur des unités ED dissociés en deux champs distincts | — | ⚡ |
 | moteur+tests | ✅ JSDoc bcKey périmé + test vert vacant buildBoardGeomKey (2026-08-19) — JSDoc corrigé, test vacant renforcé | — | ⚡ |
