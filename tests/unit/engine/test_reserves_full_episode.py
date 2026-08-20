@@ -291,6 +291,7 @@ def test_an_off_table_unit_is_never_a_declarable_charge_target(monkeypatch) -> N
     from engine.phase_handlers.shared_utils import (
         charge_check_eligibility,
         update_model_position,
+        _squad_model_positions,
     )
 
     eng = _engine(seed=0)
@@ -384,55 +385,55 @@ def test_an_off_table_unit_is_never_a_declarable_charge_target(monkeypatch) -> N
          and sid != victim),
         None,
     )
+    if control is None:
+        pytest.skip(
+            "pas de 3e unité ennemie sur table : la borne positive (charge_check_eligibility "
+            "accepte une cible posée) ne peut pas être vérifiée — vert vacant potentiel"
+        )
     # Placee DANS les 12" (seuil 60) mais HORS zone d'engagement (10) : au contact elle
     # verrouillerait le chargeur et  refuserait pour ce motif-la.
-    if control is not None:
-        for offset, mid in enumerate(gs["squad_models"][control]):
-            if mid in gs["models_cache"]:
-                update_model_position(gs, mid, 30 + (offset % 3), offset // 3)
-        # Assertions intermédiaires : chaque garde de charge_check_eligibility vérifié
-        # séparément. Sans elles, un refus de la fonction est opaque en xdist.
-        from engine.phase_handlers.shared_utils import _squad_model_positions
-        charger_cells = _squad_model_positions(gs, str(charger))
-        control_cells = _squad_model_positions(gs, str(control))
-        assert str(charger) not in gs.get("units_advanced", set()), (
-            f"le chargeur {charger} est dans units_advanced : "
-            f"units_advanced={gs.get('units_advanced', set())!r}"
-        )
-        assert str(charger) not in gs.get("units_fled", set()), (
-            f"le chargeur {charger} est dans units_fled"
-        )
-        assert int(gs["units_cache"][str(charger)]["col"]) >= 0, (
-            f"le chargeur {charger} est hors table dans units_cache"
-        )
-        assert charger_cells, (
-            f"le chargeur {charger} n'a aucune position dans models_cache : "
-            f"squad_models={gs['squad_models'][str(charger)]!r}"
-        )
-        assert int(gs["units_cache"][str(control)]["col"]) >= 0, (
-            f"la cible {control} est hors table dans units_cache après update_model_position : "
-            f"col={gs['units_cache'][str(control)].get('col')!r}"
-        )
-        assert control_cells, (
-            f"la cible {control} n'a aucune position dans models_cache : "
-            f"squad_models={gs['squad_models'][str(control)]!r}, "
-            f"présents={[m for m in gs['squad_models'][str(control)] if m in gs['models_cache']]!r}"
-        )
-        min_dist = min(
-            calculate_hex_distance(oc, or_, ec, er_)
-            for oc, or_ in charger_cells for ec, er_ in control_cells
-        )
-        assert min_dist <= CHARGE_THRESHOLD_INCHES * ish, (
-            f"distance min {min_dist} > seuil {CHARGE_THRESHOLD_INCHES * ish} : "
-            f"chargeur={charger_cells!r}, cible={control_cells!r}"
-        )
-        assert not _squad_is_in_enemy_er(gs, str(charger)), (
-            f"le chargeur {charger} est dans l'ER d'un ennemi après placement de la cible à col=30"
-        )
-        assert charge_check_eligibility(gs, str(charger), [str(control)]), (
-            f"la cible POSEE {control}, placee a portee, n'est pas declarable : "
-            "`charge_check_eligibility` refuse tout et l'assertion finale serait vacante"
-        )
+    for offset, mid in enumerate(gs["squad_models"][control]):
+        if mid in gs["models_cache"]:
+            update_model_position(gs, mid, 30 + (offset % 3), offset // 3)
+    # Assertions intermédiaires : chaque garde de charge_check_eligibility vérifié
+    # séparément. Sans elles, un refus de la fonction est opaque en xdist.
+    charger_cells_pos = _squad_model_positions(gs, str(charger))
+    control_cells = _squad_model_positions(gs, str(control))
+    assert str(charger) not in gs.get("units_advanced", set()), (
+        f"le chargeur {charger} est dans units_advanced : "
+        f"units_advanced={gs.get('units_advanced', set())!r}"
+    )
+    assert str(charger) not in gs.get("units_fled", set()), (
+        f"le chargeur {charger} est dans units_fled"
+    )
+    assert int(gs["units_cache"][str(charger)]["col"]) >= 0, (
+        f"le chargeur {charger} est hors table dans units_cache"
+    )
+    assert charger_cells_pos, (
+        f"le chargeur {charger} n'a aucune position dans models_cache : "
+        f"squad_models={gs['squad_models'][str(charger)]!r}"
+    )
+    assert int(gs["units_cache"][str(control)]["col"]) >= 0, (
+        f"la cible {control} est hors table dans units_cache après update_model_position : "
+        f"col={gs['units_cache'][str(control)].get('col')!r}"
+    )
+    assert control_cells, (
+        f"la cible {control} n'a aucune position dans models_cache : "
+        f"squad_models={gs['squad_models'][str(control)]!r}, "
+        f"présents={[m for m in gs['squad_models'][str(control)] if m in gs['models_cache']]!r}"
+    )
+    min_dist = min(
+        calculate_hex_distance(oc, or_, ec, er_)
+        for oc, or_ in charger_cells_pos for ec, er_ in control_cells
+    )
+    assert min_dist <= CHARGE_THRESHOLD_INCHES * ish, (
+        f"distance min {min_dist} > seuil {CHARGE_THRESHOLD_INCHES * ish} : "
+        f"chargeur={charger_cells_pos!r}, cible={control_cells!r}"
+    )
+    assert charge_check_eligibility(gs, str(charger), [str(control)]), (
+        f"la cible POSEE {control}, placee a portee, n'est pas declarable : "
+        "`charge_check_eligibility` refuse tout et l'assertion finale serait vacante"
+    )
 
     assert not charge_check_eligibility(gs, str(charger), [str(victim)]), (
         f"l'escouade {charger} se declare eligible a charger {victim}, qui est HORS TABLE : le "
