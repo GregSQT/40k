@@ -53,17 +53,17 @@ def floors_env():
         raise FileNotFoundError(SCENARIO)
     env = W40KEngine(
         rewards_config="default",
-        training_config_name="x1",
+        training_config_name="x5_new",
         controlled_agent=sorted(get_agents_from_scenario(SCENARIO, ur))[0],
         scenario_file=SCENARIO,
         unit_registry=ur,
         quiet=True,
         gym_training_mode=True,
     )
-    # Les chemins 3D d'étage sont euclidean-only (métrique GAMEPLAY) et le gym est en `hex` par
-    # défaut : on impose la métrique par le seul levier prévu pour ça (override de phase, cf.
-    # `resolve_gym_split_metric`), plutôt qu'en retournant `gym_training_mode` sur un moteur vivant
-    # — ce drapeau porte aussi des états dérivés (cap d'objectif training, cache de plan de charge).
+    # Les chemins 3D d'étage sont euclidean-only (métrique GAMEPLAY). À x1, geometry_is_hex=True
+    # prime sur tout override (resolve_gym_split_metric règle 3 : « prime sur tout »), donc
+    # GYM_DISTANCE_METRIC_KEY="euclidean" serait ignoré. On utilise x5 (inches_to_subhex=5>1,
+    # geometry_is_hex=False) pour que l'override soit respecté — le scénario est natif x5.
     env.reset(seed=42)
     env.game_state[GYM_DISTANCE_METRIC_KEY] = "euclidean"
     return env

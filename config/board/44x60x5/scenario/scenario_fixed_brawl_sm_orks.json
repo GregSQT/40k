@@ -124,33 +124,33 @@
           "unit_type": "Boyz"
         },
         {
-          "col": 114,
-          "row": 198,
+          "col": 66,
+          "row": 188,
           "unit_type": "Boyz"
         },
         {
-          "col": 122,
-          "row": 198,
+          "col": 74,
+          "row": 188,
           "unit_type": "Boyz"
         },
         {
-          "col": 130,
-          "row": 198,
+          "col": 82,
+          "row": 188,
           "unit_type": "Boyz"
         },
         {
-          "col": 138,
-          "row": 198,
+          "col": 90,
+          "row": 188,
           "unit_type": "BoyzNobKombi"
         },
         {
-          "col": 146,
-          "row": 198,
+          "col": 98,
+          "row": 188,
           "unit_type": "Warboss"
         },
         {
-          "col": 154,
-          "row": 198,
+          "col": 106,
+          "row": 188,
           "unit_type": "PainBoy"
         }
       ]
@@ -193,33 +193,33 @@
           "unit_type": "Boyz"
         },
         {
-          "col": 114,
-          "row": 206,
+          "col": 66,
+          "row": 216,
           "unit_type": "Boyz"
         },
         {
-          "col": 122,
-          "row": 206,
+          "col": 74,
+          "row": 216,
           "unit_type": "Boyz"
         },
         {
-          "col": 130,
-          "row": 206,
+          "col": 82,
+          "row": 216,
           "unit_type": "Boyz"
         },
         {
-          "col": 138,
-          "row": 206,
+          "col": 90,
+          "row": 216,
           "unit_type": "BoyzNobKombi"
         },
         {
-          "col": 146,
-          "row": 206,
+          "col": 98,
+          "row": 216,
           "unit_type": "Bigboss"
         },
         {
-          "col": 154,
-          "row": 206,
+          "col": 106,
+          "row": 216,
           "unit_type": "BannerNob"
         }
       ]
