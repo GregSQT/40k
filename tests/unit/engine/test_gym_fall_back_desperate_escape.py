@@ -78,18 +78,20 @@ def _engine_engaged() -> W40KEngine:
     return eng
 
 
-def test_gym_fall_back_battleshocked_sets_desperate_escape() -> None:
-    """fall_back avec battle_shocked + engagée → fleeMode=desperate_escape dans action_log."""
+def _engine_battle_shocked() -> tuple:
+    """Moteur prêt pour un fall_back avec unité 1 battle-shocked et engagée."""
     eng = _engine_engaged()
     gs = eng.game_state
-
-    # Pose l'état requis pour le chemin fall_back.
     gs["phase"] = "move"
     gs["move_activation_pool"] = ["1"]
-
-    # Marque l'unité 1 comme battle-shocked.
     unit1 = next(u for u in gs["units"] if str(u["id"]) == "1")
     unit1["battle_shocked"] = True
+    return eng, gs
+
+
+def test_gym_fall_back_battleshocked_sets_desperate_escape() -> None:
+    """fall_back avec battle_shocked + engagée → fleeMode=desperate_escape dans action_log."""
+    eng, gs = _engine_battle_shocked()
 
     # Destination de fall_back : case (18, 20) — loin de l'ennemi en (21,20).
     before = len(gs.get("action_logs", []))
@@ -118,14 +120,7 @@ def test_gym_desperate_escape_died_clears_game_state_keys() -> None:
     dans le même épisode héritait de _flee_mode="desperate_escape" même pour une unité
     non-battle-shocked.
     """
-    eng = _engine_engaged()
-    gs = eng.game_state
-
-    gs["phase"] = "move"
-    gs["move_activation_pool"] = ["1"]
-
-    unit1 = next(u for u in gs["units"] if str(u["id"]) == "1")
-    unit1["battle_shocked"] = True
+    eng, gs = _engine_battle_shocked()
 
     # Simuler desperate_escape_pre_move qui pose les clés PUIS retourne is_alive=False.
     def _fake_pre_move(

@@ -4615,6 +4615,8 @@ class W40KEngine(gym.Env):
                 "done": True,
             }
         if not is_unit_alive(sid, self.game_state):
+            self.game_state.pop("_flee_mode", None)
+            self.game_state.pop("_desperate_escape_rolls", None)
             _mh._invalidate_all_destination_pools_after_movement(self.game_state)
             _mh.movement_clear_preview(self.game_state)
             return True, {
