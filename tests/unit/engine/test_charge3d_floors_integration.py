@@ -69,7 +69,7 @@ def floors_env():
     return env
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def setup(floors_env):
     """Acteurs + hexes de chaque étage où le socle de la CIBLE tient réellement (§13.06).
 
@@ -196,37 +196,14 @@ class _ClimbCtx(NamedTuple):
 
 
 @pytest.fixture(scope="module")
-def climb_ctx(floors_env) -> _ClimbCtx:
-    """Placement + ground_obs construits UNE seule fois pour les trois tests de montée.
-
-    Dépend directement de floors_env (module-scoped) plutôt que de setup (function-scoped)
-    pour éviter trois recomputations de _climb_setup, dont low_clearance_ground_hexes.
-    """
+def climb_ctx(setup) -> _ClimbCtx:
+    """Placement + ground_obs construits UNE seule fois pour les trois tests de montée."""
     from engine.game_state import unit_can_occupy_upper_floor
     from engine.hex_utils import get_neighbors
 
-    gs = floors_env.game_state
-    ubi = gs["unit_by_id"]
-    p1 = [(str(k), u) for k, u in ubi.items() if u["player"] == 1]
-    p2 = [(str(k), u) for k, u in ubi.items() if u["player"] == 2]
-    ta = gs["terrain_areas"]
-    fh1 = sorted(floor_hexes_at_level(ta, 1))
-    assert fh1, "scénario sans plancher L1 (climb_ctx)"
-
-    tgt_uid = p2[0][0]
-    tgt_mid = gs["squad_models"][tgt_uid][0]
-    tgt_model = gs["models_cache"][tgt_mid]
-
-    holding = [
-        c for c in fh1
-        if resolve_model_effective_level(gs, tgt_model, c[0], c[1], 1) == 1
-    ]
-    assert holding, "aucune case L1 ne porte le socle de la cible (climb_ctx)"
-    c1 = holding[len(holding) // 2]
-    _place(gs, tgt_mid, c1[0], c1[1], 1)
-
+    gs = setup["gs"]
     climber = next(
-        ((uid, u) for uid, u in p1 if unit_can_occupy_upper_floor(u["UNIT_KEYWORDS"])), None
+        ((uid, u) for uid, u in setup["p1"] if unit_can_occupy_upper_floor(u["UNIT_KEYWORDS"])), None
     )
     # Assert et non `skip` : le scénario est figé et contient des INFANTRY côté p1. Un skip ferait
     # passer au vert les SEULS tests de charge 3D le jour où le roster perdrait ses montants.
@@ -234,6 +211,8 @@ def climb_ctx(floors_env) -> _ClimbCtx:
     clb_uid, clb_u = climber
     clb_mid = gs["squad_models"][clb_uid][0]
 
+    c1, fh1 = setup["c1"], setup["fh1"]
+    _place(gs, setup["tgt_mid"], c1[0], c1[1], 1)
     walls = set(gs.get("wall_hexes", set()))
     fh1_set = set(fh1)
     # Départ au SOL sur un hex adjacent au pied de la ruine (hors plancher, hors mur).
@@ -243,7 +222,7 @@ def climb_ctx(floors_env) -> _ClimbCtx:
          and 0 <= nb[0] < gs["board_cols"] and 0 <= nb[1] < gs["board_rows"]),
         None,
     )
-    assert ground_start is not None, "pas d'hex de sol adjacent au plancher L1 (climb_ctx)"
+    assert ground_start is not None, "pas d'hex de sol adjacent au plancher L1"
     _place(gs, clb_mid, ground_start[0], ground_start[1], 0)
 
     ish = int(gs["inches_to_subhex"])
