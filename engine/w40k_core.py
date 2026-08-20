@@ -6837,6 +6837,10 @@ class W40KEngine(gym.Env):
                 if _is_desp and not _is_alive:
                     # Jets ont détruit l'unité : fin d'activation sans déplacement (miroir PvP
                     # `_resume_after_hazard` → cas `not is_unit_alive`).
+                    # Purger les clés posées par desperate_escape_pre_move ; sans ça elles restent
+                    # dans game_state et corrompent le prochain fall_back du même épisode.
+                    self.game_state.pop("_flee_mode", None)
+                    self.game_state.pop("_desperate_escape_rolls", None)
                     _mh_de._invalidate_all_destination_pools_after_movement(self.game_state)
                     _mh_de.movement_clear_preview(self.game_state)
                     return True, {
