@@ -104,8 +104,12 @@ class RewardCalculator:
         # `select_activation` (V11 §0.48 L2) entre ici au MEME titre : choisir QUI activer est une
         # décision, son effet se mesure dans l'activation qui suit. La récompenser reviendrait à
         # payer l'agent pour décider, pas pour bien décider.
+        # `desperate_escape_died` : l'unité est détruite par ses jets de fuite ; le reward des pertes
+        # est crédité par le chemin kill normal. Ici, 0.0 EN DUR pour la même raison que ci-dessus :
+        # ne pas dépendre de `waiting_for_player` dans le payload comme ancre de routage accidentelle.
         if isinstance(result, dict) and result.get("action") in (
             "agent_decision", "waiting_for_agent_decision", "select_activation",
+            "desperate_escape_died",
         ):
             reward_breakdown['total'] = 0.0
             game_state['last_reward_breakdown'] = reward_breakdown
