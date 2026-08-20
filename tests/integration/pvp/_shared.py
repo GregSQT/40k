@@ -225,7 +225,7 @@ def assert_game_states_equal(a: dict, b: dict, label: str = "") -> None:
 
 
 @contextmanager
-def _in_memory_write_cursor(immediate: bool = False):
+def _in_memory_write_cursor():
     connection = sqlite3.connect(":memory:")
     connection.row_factory = sqlite3.Row
     try:
