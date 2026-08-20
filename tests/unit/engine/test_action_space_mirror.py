@@ -31,6 +31,32 @@ def test_charge_slots_mirror_the_enemy_slot_mapping():
     assert su.SQUAD_ACTION_CHARGE_SLOT_COUNT == su.SQUAD_ACTION_SHOOT_SLOT_COUNT
 
 
+def test_charge_pair_slots_count():
+    """V11 §9 P3 L9 : C(K_e, 2) paires de charge — encode/decode round-trip.
+
+    CHARGE_PAIR_SLOT_COUNT = C(CHARGE_SLOT_COUNT, 2). L'index est continu et bijectif
+    sur toutes les paires (i, j) avec i < j.
+    """
+    n = mi.CHARGE_SLOT_COUNT
+    expected_pairs = n * (n - 1) // 2
+    assert mi.CHARGE_PAIR_SLOT_COUNT == expected_pairs
+    assert su.SQUAD_ACTION_CHARGE_PAIR_SLOT_COUNT == expected_pairs
+    assert mi.CHARGE_PAIR_SLOT_BASE == mi.CHARGE_SLOT_BASE + mi.CHARGE_SLOT_COUNT
+    assert su.SQUAD_ACTION_CHARGE_PAIR_SLOT_BASE == (
+        su.SQUAD_ACTION_CHARGE_SLOT_BASE + su.SQUAD_ACTION_CHARGE_SLOT_COUNT
+    )
+    # Round-trip encode → decode sur toutes les paires.
+    from engine.macro_intents import charge_pair_encode, charge_pair_decode
+    seen = set()
+    for i in range(n):
+        for j in range(i + 1, n):
+            idx = charge_pair_encode(i, j)
+            assert 0 <= idx < expected_pairs, f"hors plage : ({i},{j}) → {idx}"
+            assert (i, j) == charge_pair_decode(idx), f"round-trip échoue pour ({i},{j})"
+            seen.add(idx)
+    assert len(seen) == expected_pairs, "collision ou trou dans l'encodage"
+
+
 def test_fight_slots_mirror_the_enemy_slot_mapping():
     """V11 §9 P3-1 : une action de combat = un slot ennemi, le MEME que le tir (invariant D1).
 
@@ -56,6 +82,8 @@ def test_named_actions_mirror():
     assert mi.SHOOT_SLOT_COUNT == su.SQUAD_ACTION_SHOOT_SLOT_COUNT
     assert mi.CHARGE_SLOT_BASE == su.SQUAD_ACTION_CHARGE_SLOT_BASE
     assert mi.CHARGE_SLOT_COUNT == su.SQUAD_ACTION_CHARGE_SLOT_COUNT
+    assert mi.CHARGE_PAIR_SLOT_BASE == su.SQUAD_ACTION_CHARGE_PAIR_SLOT_BASE
+    assert mi.CHARGE_PAIR_SLOT_COUNT == su.SQUAD_ACTION_CHARGE_PAIR_SLOT_COUNT
     assert mi.FIGHT_SLOT_BASE == su.SQUAD_ACTION_FIGHT_SLOT_BASE
     assert mi.FIGHT_SLOT_COUNT == su.SQUAD_ACTION_FIGHT_SLOT_COUNT
     assert mi.ACTION_FIGHT_NO_TARGET == su.SQUAD_ACTION_FIGHT_NO_TARGET
@@ -117,7 +145,7 @@ def test_total_action_size():
     assert mi.OATH_SLOT_BASE == mi.CHOICE_BASE + mi.CHOICE_COUNT
     assert mi.ACTIVATE_SLOT_BASE == mi.OATH_SLOT_BASE + mi.OATH_SLOT_COUNT
     assert mi.TOTAL_ACTION_SIZE == mi.ACTIVATE_SLOT_BASE + mi.ACTIVATE_SLOT_COUNT
-    assert mi.TOTAL_ACTION_SIZE == 1159
+    assert mi.TOTAL_ACTION_SIZE == 1349
 
 
 def test_choice_then_oath_then_activate_slots_close_the_action_space():
@@ -147,11 +175,12 @@ def test_micro_action_ids_are_contiguous_and_unique():
         + [mi.ACTION_WAIT]
         + list(mi.SHOOT_SLOTS)
         + list(mi.CHARGE_SLOTS)
+        # L9 (2026-08-20) : les paires de charge C(20,2) ont leurs propres slots, DANS le bloc micro,
+        # entre les slots de charge unique et les slots de mêlée.
+        + list(mi.CHARGE_PAIR_SLOTS)
         + list(mi.FIGHT_SLOTS)
         + [mi.ACTION_FIGHT_NO_TARGET]
-        # 10.07 (2026-08-16) : le tir indirect a ses propres slots, DANS le bloc micro. Les
-        # omettre ici ferait passer le pavage pour incomplet — et c'est précisément ce test qui
-        # a pris la collision avec `BASE_ZONE_INTENT` quand ils avaient été posés « après ».
+        # 10.07 (2026-08-16) : le tir indirect a ses propres slots, DANS le bloc micro.
         + list(mi.SHOOT_INDIRECT_SLOTS)
     )
     assert len(ids) == len(set(ids)), "collision d'id d'action"

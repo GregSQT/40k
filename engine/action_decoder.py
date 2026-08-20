@@ -29,6 +29,8 @@ from engine.phase_handlers.shared_utils import (
     # jamais de litteral nu : le plan d'actions a change (WAIT 18 -> 1024, etc.).
     SQUAD_ACTION_CHARGE_SLOT_BASE,
     SQUAD_ACTION_CHARGE_SLOT_COUNT,
+    SQUAD_ACTION_CHARGE_PAIR_SLOT_BASE,
+    SQUAD_ACTION_CHARGE_PAIR_SLOT_COUNT,
     SQUAD_ACTION_FIGHT_NO_TARGET,
     SQUAD_ACTION_FIGHT_SLOT_BASE,
     SQUAD_ACTION_FIGHT_SLOT_COUNT,
@@ -1291,6 +1293,22 @@ class ActionDecoder:
                 "action": "squad_charge",
                 "squad_id": squad_id,
                 "target_slot": action_int - SQUAD_ACTION_CHARGE_SLOT_BASE,
+            }
+
+        if SQUAD_ACTION_CHARGE_PAIR_SLOT_BASE <= action_int < (
+            SQUAD_ACTION_CHARGE_PAIR_SLOT_BASE + SQUAD_ACTION_CHARGE_PAIR_SLOT_COUNT
+        ):
+            # V11 §9 P3 L9 : charge multi-cibles — paire de slots ennemis encodee par
+            # `charge_pair_encode(i, j)`. Le moteur (`squad_charge`) resout les deux slots
+            # en id d'escouades et appelle `charge_build_valid_plan` avec la liste [id_i, id_j],
+            # en reutilisant la logique PvP multi-cibles existante.
+            from engine.macro_intents import charge_pair_decode
+            pair_idx = action_int - SQUAD_ACTION_CHARGE_PAIR_SLOT_BASE
+            slot_i, slot_j = charge_pair_decode(pair_idx)
+            return {
+                "action": "squad_charge",
+                "squad_id": squad_id,
+                "target_slots": [slot_i, slot_j],
             }
 
         if SQUAD_ACTION_FIGHT_SLOT_BASE <= action_int < (

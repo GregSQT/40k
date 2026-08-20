@@ -200,14 +200,17 @@ def _manual_logits(policy, obs: Dict[str, torch.Tensor]):
     move = torch.cat(
         [move[:, :low], torch.where(gate, deploy, move[:, low:high]), move[:, high:]], dim=1
     )
+    # L9 (2026-08-20) : tête dense pour les paires de charge, entre charge unique et mêlée.
+    charge_pair_dense = policy.charge_pair_net(latent_pi)
     expected = torch.cat(
         [
             move,
             base[:, :1],        # wait
             pointer,
             charge_pointer,
+            charge_pair_dense,  # paires de charge (dense)
             fight_pointer,
-            base[:, 1:],        # fight-sans-cible, intents de zone
+            base[:, 1:],        # fight-sans-cible, shoot-indirect, intents de zone
             choice,
             oath_pointer,
             activate_pointer,   # V11 §0.48 `L2`

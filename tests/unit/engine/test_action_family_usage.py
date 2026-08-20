@@ -45,6 +45,8 @@ def test_chaque_famille_est_atteinte_par_au_moins_un_id():
         action_family(mi.ACTION_WAIT, "move"),
         action_family(mi.SHOOT_SLOT_BASE, "shoot"),
         action_family(mi.CHARGE_SLOT_BASE, "charge"),
+        # L9 (2026-08-20) : paires de charge, DANS le bloc charge.
+        action_family(mi.CHARGE_PAIR_SLOT_BASE, "charge"),
         action_family(mi.FIGHT_SLOT_BASE, "fight"),
         action_family(mi.ACTION_FIGHT_NO_TARGET, "fight"),
         action_family(mi.BASE_ZONE_INTENT, "move"),

@@ -13,19 +13,20 @@ MAX_OBJECTIVES = 5
 # designe une CELLULE de la grille egocentrique 32x32, plus une direction 0-5. Le TYPE de move
 # (normal/advance/fall_back) n'est PAS une dimension d'action : il est infere du cout geodesique
 # de la cellule (cf. shared_utils.infer_squad_move_type).
-# 1106 micro actions (V11 §0.30 T-E : 20 slots de tir ; §9 P3-1 : 20 slots de combat ;
-# §9 P3-2 : 20 slots de charge ; 10.02/10.07 : 20 slots de tir indirect) :
+# 1296 micro actions (V11 §0.30 T-E : 20 slots tir ; §9 P3-1 : 20 slots combat ;
+# §9 P3-2 : 20 slots charge ; L9 : 190 slots charge-paire C(20,2) ; 10.02/10.07 : 20 tir indirect) :
 #   0-1023   : destination = cellule (gx,gy) de la grille egocentrique  [cell_index = gy*32+gx]
 #   1024     : wait / end activation
 #   1025-1044: shoot slot 0-19 (20)
-#   1045-1064: charge slot 0-19 (20) — MEME mapping de slots ennemis que le tir
-#   1065-1084: fight slot 0-19 (20) — MEME mapping de slots ennemis que le tir
-#   1085     : fight sans cible eligible (12.04/12.06 : selectionne pour combattre, 0 attaque)
-#   1086-1105: shoot indirect slot 0-19 (20) — MEME mapping de slots ennemis que le tir
-#   1106-1120: zone intents (5 objectifs x 3 intentions)
-#   1121-1126: CHOICE_0..5 — candidats de `pending_agent_decision` (V11 §9.3 P2)
-#   1127-1146: oath slot 0-19 — cible d'Oath of Moment (chantier 01, consomme au chantier 03)
-#   1147-1158: activate slot 0-11 — escouade a ACTIVER (V11 §0.48 L2), un par ligne alliee
+#   1045-1064: charge slot 0-19 (20) — cible unique, MEME mapping que le tir (invariant D1)
+#   1065-1254: charge pair slot 0-189 (190) — C(20,2) paires (i,j), i<j, tete dense
+#   1255-1274: fight slot 0-19 (20) — MEME mapping de slots ennemis que le tir
+#   1275     : fight sans cible eligible (12.04/12.06 : selectionne pour combattre, 0 attaque)
+#   1276-1295: shoot indirect slot 0-19 (20) — MEME mapping de slots ennemis que le tir
+#   1296-1310: zone intents (5 objectifs x 3 intentions)
+#   1311-1316: CHOICE_0..5 — candidats de `pending_agent_decision` (V11 §9.3 P2)
+#   1317-1336: oath slot 0-19 — cible d'Oath of Moment (chantier 01, consomme au chantier 03)
+#   1337-1348: activate slot 0-11 — escouade a ACTIVER (V11 §0.48 L2), un par ligne alliee
 
 # --- Named squad-action ids (single source of truth for ai/). --------------
 # Miroir EXACT de engine/phase_handlers/shared_utils.py (SQUAD_ACTION_*), qui reste la source
@@ -44,13 +45,21 @@ SHOOT_SLOT_COUNT = 20        # shoot enemy slots 0-19 -> 1025-1044 (V11 T-E)
 # Avant, `charge` etait une action sans cible et le decodeur tranchait par `damage_ratio` :
 # l'agent declarait « je charge » sans jamais dire QUI. Meme derivation que les slots de melee.
 CHARGE_SLOT_BASE = SHOOT_SLOT_BASE + SHOOT_SLOT_COUNT  # 1045
-CHARGE_SLOT_COUNT = SHOOT_SLOT_COUNT                   # 20 -> 1045-1064
+CHARGE_SLOT_COUNT = SHOOT_SLOT_COUNT                   # 20 -> 1045-1064  (cible unique, invariant D1)
+# V11 §9 P3 L9 — CHARGE MULTI-CIBLES : C(K_e, 2) paires de cibles, indexees par `charge_pair_index`.
+# 11.04 « select one or more enemy units » : declarer DEUX cibles simultanement est un choix legal.
+# Les slots de PAIRES sont DENSES (pas pointeur D1) : une paire encode deux lignes du tenseur ennemi,
+# ce qu'un produit scalaire unique ne peut pas scorer. Formule : (i, j) avec 0 <= i < j < K_e ->
+# pair_index = i*(2*K_e - i - 1)//2 + (j - i - 1). Un slot est ouvert ssi les deux cibles
+# individuelles sont declarables (`charge_target_is_reachable` sur chacune).
+CHARGE_PAIR_SLOT_BASE = CHARGE_SLOT_BASE + CHARGE_SLOT_COUNT   # 1065
+CHARGE_PAIR_SLOT_COUNT = CHARGE_SLOT_COUNT * (CHARGE_SLOT_COUNT - 1) // 2  # 190 = C(20,2)
 # V11 §9 P3-1 — la CIBLE DE MELEE est une dimension d'action, plus une heuristique interne.
 # `FIGHT_SLOT_COUNT` est DERIVE de `SHOOT_SLOT_COUNT` : les deux familles indexent le MEME
 # mapping `get_enemy_slot_mapping` (et donc la meme ligne du tenseur ennemi de l'observation,
 # invariant D1). Les desolidariser ferait pointer l'action de combat i et l'observation i sur
 # deux escouades differentes, sans que rien ne leve.
-FIGHT_SLOT_BASE = CHARGE_SLOT_BASE + CHARGE_SLOT_COUNT  # 1065
+FIGHT_SLOT_BASE = CHARGE_PAIR_SLOT_BASE + CHARGE_PAIR_SLOT_COUNT  # 1255
 FIGHT_SLOT_COUNT = SHOOT_SLOT_COUNT                 # 20 -> 1065-1084
 # 12.04/12.06 : une escouade selectionnee pour combattre SANS cible eligible (sa cible est
 # morte, overrun) resout un combat a vide. C'est un etat legal du jeu, pas un cas d'erreur :
@@ -124,12 +133,13 @@ OATH_SLOT_COUNT = SHOOT_SLOT_COUNT                             # 20 -> 1127-1146
 # et l'observation sur deux escouades differentes sans que rien ne leve (invariant D1, cote allie).
 ACTIVATE_SLOT_BASE = OATH_SLOT_BASE + OATH_SLOT_COUNT          # 1147
 ACTIVATE_SLOT_COUNT = K_ALLY_SLOTS                             # 12 -> 1147-1158
-TOTAL_ACTION_SIZE = ACTIVATE_SLOT_BASE + ACTIVATE_SLOT_COUNT   # 1159
+TOTAL_ACTION_SIZE = ACTIVATE_SLOT_BASE + ACTIVATE_SLOT_COUNT   # 1349
 
 MOVE_CELLS = range(MOVE_CELL_BASE, MOVE_CELL_BASE + MOVE_CELL_COUNT)                # 0-1023
 SHOOT_SLOTS = range(SHOOT_SLOT_BASE, SHOOT_SLOT_BASE + SHOOT_SLOT_COUNT)            # 1025-1044
-CHARGE_SLOTS = range(CHARGE_SLOT_BASE, CHARGE_SLOT_BASE + CHARGE_SLOT_COUNT)        # 1045-1064
-FIGHT_SLOTS = range(FIGHT_SLOT_BASE, FIGHT_SLOT_BASE + FIGHT_SLOT_COUNT)            # 1065-1084
+CHARGE_SLOTS = range(CHARGE_SLOT_BASE, CHARGE_SLOT_BASE + CHARGE_SLOT_COUNT)           # 1045-1064
+CHARGE_PAIR_SLOTS = range(CHARGE_PAIR_SLOT_BASE, CHARGE_PAIR_SLOT_BASE + CHARGE_PAIR_SLOT_COUNT)  # 1065-1254
+FIGHT_SLOTS = range(FIGHT_SLOT_BASE, FIGHT_SLOT_BASE + FIGHT_SLOT_COUNT)              # 1255-1274
 SHOOT_INDIRECT_SLOTS = range(
     SHOOT_INDIRECT_SLOT_BASE, SHOOT_INDIRECT_SLOT_BASE + SHOOT_INDIRECT_SLOT_COUNT
 )                                                                                   # 1086-1105
@@ -238,7 +248,7 @@ def get_objective_control(zone_idx: int, game_state: dict) -> float:
 #: Vit ici parce que la decoupe DERIVE du layout : la recopier ailleurs la desynchroniserait
 #: au premier slot ajoute.
 ACTION_FAMILIES = (
-    "deploy_slot", "move_cell", "wait", "shoot_slot", "charge_slot",
+    "deploy_slot", "move_cell", "wait", "shoot_slot", "charge_slot", "charge_pair_slot",
     "fight_slot", "fight_no_target", "zone_intent", "choice", "oath_slot",
     "activate_slot",
 )
@@ -320,6 +330,8 @@ def action_family(action_int: int, phase: str, *, setting_up: bool = False) -> s
         return "shoot_slot"
     if a in CHARGE_SLOTS:
         return "charge_slot"
+    if a in CHARGE_PAIR_SLOTS:
+        return "charge_pair_slot"
     if a in FIGHT_SLOTS:
         return "fight_slot"
     if a == ACTION_FIGHT_NO_TARGET:
@@ -327,4 +339,32 @@ def action_family(action_int: int, phase: str, *, setting_up: bool = False) -> s
     if a in CHOICE_SLOTS:
         return "choice"
     return "zone_intent"
+
+
+def charge_pair_encode(slot_i: int, slot_j: int, n: int = CHARGE_SLOT_COUNT) -> int:
+    """(i, j) avec i < j → index dans CHARGE_PAIR_SLOTS (0 .. C(n,2)-1).
+
+    Formule : i*(2n-i-1)//2 + (j-i-1). Vérification :
+      (0,1)→0, (0,n-1)→n-2, (1,2)→n-1, (n-2,n-1)→C(n,2)-1.
+    """
+    if not (0 <= slot_i < slot_j < n):
+        raise ValueError(
+            f"charge_pair_encode : paire invalide ({slot_i}, {slot_j}) pour n={n}"
+        )
+    return slot_i * (2 * n - slot_i - 1) // 2 + (slot_j - slot_i - 1)
+
+
+def charge_pair_decode(pair_idx: int, n: int = CHARGE_SLOT_COUNT) -> tuple:
+    """Index de paire (0..C(n,2)-1) → (slot_i, slot_j) avec slot_i < slot_j."""
+    if not (0 <= pair_idx < n * (n - 1) // 2):
+        raise ValueError(
+            f"charge_pair_decode : index {pair_idx} hors de [0, C({n},2)-1]"
+        )
+    remaining = pair_idx
+    for i in range(n - 1):
+        count = n - i - 1
+        if remaining < count:
+            return i, i + 1 + remaining
+        remaining -= count
+    raise ValueError(f"charge_pair_decode : échec pour pair_idx={pair_idx}, n={n}")
 
