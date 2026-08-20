@@ -6985,6 +6985,7 @@ class W40KEngine(gym.Env):
             _tgt_uc = self.game_state.get("units_cache", {}).get(str(target_squad_id), {})  # get allowed
             _charge_from = (int(_sq_uc["col"]), int(_sq_uc["row"])) if "col" in _sq_uc else None
             _charge_target = (int(_tgt_uc["col"]), int(_tgt_uc["row"])) if "col" in _tgt_uc else None
+            _charge_is_pair = len(target_squad_ids) >= 2
             if plan is None:
                 # Arg3 = PASS, pas CHARGE : une charge RATÉE n'est pas un charge move. 11.04 place
                 # le grant de Fights First sous « AFTER MOVING » du charge move, et 12.03/12.04
@@ -7021,6 +7022,7 @@ class W40KEngine(gym.Env):
                         # le chemin PvP (charge_handlers ~L2940/4473/5929/6059/6206).
                         "charge_roll_initial": self.game_state["_charge_initial_rolls"].pop(str(squad_id), None),
                         "charge_failed_reason": "no valid charge plan for roll",
+                        "is_pair": _charge_is_pair,
                         "targetCol": _charge_target[0] if _charge_target else None,
                         "targetRow": _charge_target[1] if _charge_target else None,
                         "timestamp": "server_time",
@@ -7082,6 +7084,7 @@ class W40KEngine(gym.Env):
                         "toRow": int(_dest_uc["row"]) if "row" in _dest_uc else None,
                         "targetCol": _charge_target[0] if _charge_target else None,
                         "targetRow": _charge_target[1] if _charge_target else None,
+                        "is_pair": _charge_is_pair,
                         "is_fly_move": _charge_is_fly,
                         # JUMEAU de `is_fly_move` : `step_logger` réécrit la ligne de charge et
                         # n'y pose le token de capacité que depuis ce champ. Sans lui, une charge

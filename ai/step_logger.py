@@ -1291,6 +1291,9 @@ class StepLogger:
 
             base_msg += _charge_distance_segment(details)
 
+            if details.get("is_pair") is True:
+                base_msg += " [PAIR]"
+
             eng_count = details.get("engaged_models_count")
             eng_total = details.get("engaged_models_total")
             if eng_count is not None and eng_total is not None:
@@ -1339,6 +1342,9 @@ class StepLogger:
                     f"[Roll: {charge_roll}]"
                 )
             base_msg += _charge_distance_segment(details)
+
+            if details.get("is_pair") is True:
+                base_msg += " [PAIR]"
 
             return base_msg
 
