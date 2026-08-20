@@ -174,6 +174,9 @@ def main() -> int:
         bots = sorted(weights.keys())
     if len(bots) < 2:
         raise ValueError(f"Il faut au moins 2 bots pour un classement (recu {bots})")
+    dupes = [b for b in set(bots) if bots.count(b) > 1]
+    if dupes:
+        raise ValueError(f"Noms de bots dupliques dans --bots : {dupes}")
 
     training_cfg = config_loader.load_agent_training_config(args.agent, args.training_config)
     scenarios = get_scenario_list_for_phase(
