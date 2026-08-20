@@ -6,9 +6,15 @@ Découpage en 6 lots des trois sujets ci-dessous (ordre séquentiel imposé : to
 
 ## Champs manquants `step.log` {#champs-step-log}
 
-**15** entrées restantes (L6–L28, hors L1/L13/L14/L18/L19/L22/L25/L27/L28 résolues — voir ci-dessous). L1–L5 et L18 livrées. Chaque champ se livre seul et fait passer des règles de « non vérifiable » à « vérifiable ».
+**6** entrées restantes (L6–L28, hors L1/L2/L3/L4/L9/L10/L11/L12/L13/L14/L15/L16/L17/L18/L19/L22/L24/L25/L26/L27/L28 résolues). Chaque champ se livre seul et fait passer des règles de « non vérifiable » à « vérifiable ».
 
-Livré (2026-08-19) : `[TARGET_DECL:N]` — effectif cible au SelectTargets step — corrige §1.2 portée (garde `len < alive → unverifiable`) et §1.4 CLEAVE (alive_override → cc_nb exact ; anciens logs → fight_over_cc_nb_unverifiable).
+Livré (2026-08-20) :
+- L11 `[DESPERATE ESCAPE]/[ORDERED RETREAT]` + `Hazard:rolls` sur FLED (09.07/06.03) — 6 verrous.
+- L12 `[FNP:saves/seuil+ ×tentatives]` sur Dmg: (24.12) — 4 verrous.
+- L15 `[HAZARDOUS:n] Roll:dice` (24.15) — 5 verrous.
+- L26 `[POINT-BLANK]` + `base+->eff+` généralisé pour tout `hit_rule_modifier` (10.06 M/V) — 5 verrous.
+
+Bloqués sans implémentation moteur : L20 (terrain — 0 terrain dans scénarios), L21 (Aircraft — 0 hit engine), L23 (surge — 0 hit engine).
 
 À piocher quand un contrôle analyzer manque de données.
 

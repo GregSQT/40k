@@ -792,24 +792,24 @@ blessure critique n'a plus à être re-dérivée du tout (cf. §1.3).
 | L6 | **Ligne `stratagem`** (nom, CP dépensés, cible, phase) | `P<n> STRATAGEM [<NOM>] -<n>CP → Unit M` | 15.01–15.12 (12 règles) |
 | L7 | **Lignes `action_start` / `action_complete`** | `Unit N ACTION START [<nom>]` / `… COMPLETE` | 16.01, 09.06, 09.07, 10.04–10.07 (volets « AFTER: pas d'action ») |
 | L8 | **Transports** : capacité, embark, disembark (mode + jet de hasard) | types `embark`, `disembark` dans `_STEP_LOG_TYPE_MAP` | 18.01–18.05 |
-| L9 | **Zones de déploiement + bords de plateau utilisables** | entête `Deployment: P1=<rect> P2=<rect>` | 03.02, 20.04, 24.09, 24.20, 24.31, 24.32 |
-| L10 | **Type de move / de tir / de fight EXPLICITE** (au lieu d'être déduit des tokens) | suffixe `[MOVE_TYPE:normal\|advance\|fall_back\|remain_stationary\|ingress\|surge\|scout]`, `[SHOOT_TYPE:normal\|assault\|close_quarters\|indirect]` | 09.02, 09.04, 09.07, 10.02, 10.04–10.07, 12.05, 12.06, 21.02, 24.32 |
-| L11 | **Mode de fall-back** (`ordered_retreat` / `desperate_escape`) + jets de hasard associés | `FLED [DESPERATE ESCAPE] … Hazard:<n>,<n>,…` | 09.07, 06.03, 18.04 |
-| L12 | **Jets Feel No Pain** | `FNP:<n>/<seuil>+ ×<n>` | 24.12 |
+| ~~L9~~ | ~~**Zones de déploiement + bords de plateau utilisables**~~ — **LIVRÉ le 2026-08-20** : entête `Deployment: P1=<rect> P2=<rect>` dans `log_episode_start` | 03.02, 20.04, 24.09, 24.20, 24.31, 24.32 |
+| ~~L10~~ | ~~**Type de move / de tir / de fight EXPLICITE**~~ — **LIVRÉ le 2026-08-20** : suffixe `[MOVE_TYPE:…]`, `[SHOOT_TYPE:…]` dans les formateurs flee/move/shoot/combat | 09.02, 09.04, 09.07, 10.02, 10.04–10.07, 12.05, 12.06, 21.02, 24.32 |
+| ~~L11~~ | ~~**Mode de fall-back** (`ordered_retreat` / `desperate_escape`) + jets de hasard associés~~ — **LIVRÉ le 2026-08-20** : `[DESPERATE ESCAPE]`/`[ORDERED RETREAT]` + `Hazard:rolls` sur FLED (09.07/06.03) ; 6 verrous rouge→vert | 09.07, 06.03, 18.04 |
+| ~~L12~~ | ~~**Jets Feel No Pain**~~ — **LIVRÉ le 2026-08-20** : `[FNP:saves/seuil+ ×tentatives]` sur Dmg: (24.12) ; 4 verrous rouge→vert | 24.12 |
 | ~~L13~~ | ~~**Distance tireur↔cible au Select Targets** (ou marqueur `[HALF RANGE]`)~~ — **LIVRÉ le 2026-08-20** : `[HALF RANGE]` sur toute ligne de tir d'une arme RAPID_FIRE ou MELTA lorsque la cible est à demi-portée, calculé INDÉPENDAMMENT du bonus appliqué ; verrou `test_step_log_half_range.py` (rouge→vert), LOG_GRAMMAR_VERSION=7 | 24.25, 24.30 |
 | ~~L14~~ | ~~**Statut Fights First** de l'unité activée~~ — **LIVRÉ le 2026-08-18** : `[FIGHTS FIRST]` sur la ligne `FOUGHT` via `fightsFirst` dans l'action_log combat | 24.13, 12.04, 11.04, 15.12 |
-| L15 | **Nombre d'armes [HAZARDOUS] sélectionnées** | `[HAZARDOUS:<n>] Roll:<n>,<n>,…` | 24.15 |
-| L16 | **Cibles de charge multiples** (11.04 autorise plusieurs) | `CHARGED Unit M(…),Unit K(…)` | 11.04 |
-| L17 | **Cibles de pile-in / mode de consolidation** | `PILED IN [targets: M,K]`, `CONSOLIDATED [ONGOING\|ENGAGING\|OBJECTIVE:<id>]` | 12.03, 12.08 |
+| ~~L15~~ | ~~**Nombre d'armes [HAZARDOUS] sélectionnées**~~ — **LIVRÉ le 2026-08-20** : `[HAZARDOUS:<n>] Roll:<dice>` sur SUFFERS (24.15) ; 5 verrous rouge→vert | 24.15 |
+| ~~L16~~ | ~~**Cibles de charge multiples**~~ — **LIVRÉ le 2026-08-20** : `CHARGED Unit M(…),Unit K(…)` (11.04 multi-cibles) ; 5 verrous rouge→vert | 11.04 |
+| ~~L17~~ | ~~**Cibles de pile-in / mode de consolidation**~~ — **LIVRÉ le 2026-08-20** : `PILED IN [targets: M,K]`, `CONSOLIDATED [ONGOING\|ENGAGING\|OBJECTIVE:<id>]` ; 6 verrous rouge→vert | 12.03, 12.08 |
 | ~~L18~~ | ~~**Objectifs : méthode `secured`/`default` + OC par joueur**~~ — **LIVRÉ le 2026-08-19** : `ZONES=` étendu avec `:Mthd=:OC1=:OC2=` dans `step_logger.py`, câblé dans `w40k_core.py`, parsé dans `analyzer_core.py` (`objective_control_method` + `objective_oc_per_zone`) | — | 14.02, 14.03 |
 | ~~L19~~ | ~~**Attached units** : lien leader/support ↔ bodyguard~~ — **LIVRÉ le 2026-08-18** : entête `Attached: <leader_id>→<bodyguard_id>` dans `log_episode_start` via `attached_info` | 19.01, 19.02, 19.04, 24.22, 24.34 |
 | L20 | **Terrain** : catégorie et hauteur par hexe | entête `Terrain: <cat>@(c,r,h)…` | 13.02–13.11, 06.01, 22.05 (lève aussi 10 NON-TESTABLE) |
 | L21 | **Aircraft** : keyword et placement forcé en réserves | — | 23.01–23.04 |
 | ~~L22~~ | ~~**Segment `[MODELS:]` sur la ligne `REACTIVE MOVED`**~~ — **CONFIRMÉ présent** : émis via `engine/w40k_core.py` (`_build_step_log_details`) (models_segment universel) ; couvert par `test_analyzer_reactive_move_single_measure.py` | rend #7 per-figurine (03.04) et supprime V5 |
 | L23 | **Type `surge` dans `_STEP_LOG_TYPE_MAP`** | — | 21.01, 21.02 |
-| L24 | **Producteur pour `skip`** (le formateur existe) | — | rend #52 atteignable |
+| ~~L24~~ | ~~**Producteur pour `skip`** (le formateur existe)~~ — **LIVRÉ le 2026-08-20** : `skip` ajouté dans `_STEP_LOG_TYPE_MAP`, producteur câblé dans move/charge/shoot | rend #52 atteignable |
 | ~~L25~~ | ~~**Capacités de commandement déclarées** (Waaagh! appelé, cible Oath of Moment)~~ — **LIVRÉ le 2026-08-18** : `P<n> COMMAND [WAAAGH!]` / `[OATH OF MOMENT] → Unit M` via `append_action_log` dans `command_handlers.py` | 08.04, 22.02, `waaagh`, `oath_of_moment` |
-| L26 | **Modificateurs de touche hors HEAVY/COVER** (`hit_target_base` généralisé) | `Hit R(<base>+->_<eff>+) [<cause>]` | 10.06 (−1 M/V), 17.03, 22.05, 24.29, 15.09 |
+| ~~L26~~ | ~~**Modificateurs de touche hors HEAVY/COVER** (`hit_target_base` généralisé)~~ — **LIVRÉ le 2026-08-20** : `[POINT-BLANK]` + `base+->eff+` généralisé pour tout `hit_rule_modifier` (10.06 M/V) ; 5 verrous rouge→vert | 10.06 (−1 M/V), 17.03, 22.05, 24.29, 15.09 |
 | ~~L27~~ | ~~**Relance de sauvegarde en mêlée : nom de la capacité**~~ — **LIVRÉ le 2026-08-18** : `saveAbility` sur le shot_record via `_get_source_unit_rule_display_name_for_effect(target, "reroll_1_save_fight")` | `reroll_1_save_fight`, `preservation_imperative` |
 | ~~L28~~ | ~~**Relance de charge : token**~~ — **LIVRÉ le 2026-08-18** : `[REROLLED:<jet initial>]` sur `CHARGED` via `charge_roll_initial` dans l'action_log | `reroll_charge` |
 
