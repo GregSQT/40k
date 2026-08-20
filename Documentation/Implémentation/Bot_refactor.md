@@ -528,7 +528,7 @@ sur 1,7 zone pendant que l'agent en couvrait 2,9 — l'agent n'a jamais eu à d�
 #### C.3 `reference_reactive` — la non-stationnarité
 
 Il révise son plan sur ce que l'agent **vient de faire** : change de cible quand une pièce
-s'expose, se replie après un échange perdu, bascule en contestation quand il décroche au score. Ses
+s'expose, conteste les objectifs tenus par l'adversaire après un échange perdu (CONTEST), bascule en pression quand il décroche au score. Ses
 transitions dépendent de l'historique du tour, pas seulement de l'état courant.
 
 **Faute punie** : l'agent exploitable par un adversaire qui s'adapte. C'est le seul des trois qui
