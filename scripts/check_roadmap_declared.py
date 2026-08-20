@@ -197,6 +197,19 @@ def merge_heads() -> list[str]:
     return [line.strip() for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
+def merge_only_touches_tests(merge_hash: str) -> bool:
+    """True si le merge n'a touché que des fichiers sous `tests/`.
+
+    Ces merges sont exclus du compteur de dette : ils ne modifient pas le comportement du jeu et
+    n'ont pas besoin d'une ligne dans la feuille de route. Un merge vide ou dont le hash est
+    illisible retourne False (comportement conservateur : inclus dans le compteur).
+    """
+    files = git("diff", f"{merge_hash}^1", merge_hash, "--name-only")
+    if not files:
+        return False
+    return all(f.startswith("tests/") for f in files.splitlines())
+
+
 def undeclared_merges(head: str) -> list[str]:
     """Les fusions entrées dans `main` depuis la dernière écriture de la feuille de route.
 
@@ -205,11 +218,17 @@ def undeclared_merges(head: str) -> list[str]:
     alors d'avant la fusion et recompte toutes les fusions arrivées sur le tronc pendant la vie du
     chantier — la dette explose juste après une déclaration correcte. On ne compte que le tronc,
     qui est précisément ce que « livré dans `main` » veut dire.
+
+    Les merges ne touchant QUE `tests/` sont exclus : ils ne changent pas le comportement du jeu
+    et n'ont pas besoin d'une ligne dans la feuille de route.
     """
     last = git("log", "-1", "--first-parent", "--format=%H", head, "--", ROADMAP)
     span = f"{last}..{head}" if last else head
     listing = git("log", "--merges", "--first-parent", "--format=%h %s", span)
-    return [line for line in listing.split("\n") if line]
+    return [
+        line for line in listing.split("\n")
+        if line and not merge_only_touches_tests(line.split()[0])
+    ]
 
 
 def branch_touches_roadmap(head: str, other: str) -> bool:

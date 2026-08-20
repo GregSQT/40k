@@ -246,6 +246,46 @@ def test_debt_counts_only_the_trunk(tmp_path: pathlib.Path, monkeypatch) -> None
     assert len(dette) == 2 and all("merge: chantier-" in line for line in dette)
 
 
+def merge_tests_only_branch(repo: pathlib.Path, name: str) -> None:
+    """Fusionne une branche ne touchant QUE des fichiers sous `tests/`."""
+    run(repo, "checkout", "-qb", name)
+    tests_dir = repo / "tests"
+    tests_dir.mkdir(exist_ok=True)
+    (tests_dir / f"{name}.py").write_text("# test\n", encoding="utf-8")
+    run(repo, "add", "-A")
+    run(repo, "commit", "-qm", f"test: {name}")
+    run(repo, "checkout", "-q", "main")
+    run(repo, "merge", "-q", "--no-ff", "-m", f"merge: {name}", name)
+
+
+def test_tests_only_merge_is_not_counted_in_debt(tmp_path: pathlib.Path, monkeypatch) -> None:
+    """Un merge ne touchant QUE tests/ est exclu du compteur de dette."""
+    repo = scratch_repo(tmp_path)
+    monkeypatch.setattr(gate, "ROOT", repo)
+    commit_roadmap(repo, "état initial")
+    merge_tests_only_branch(repo, "fix-test-isolation")
+    dette = gate.undeclared_merges("HEAD")
+    assert dette == [], f"un merge tests-only ne doit pas s'accumuler dans la dette : {dette}"
+
+
+def test_mixed_merge_touching_tests_and_code_is_counted(tmp_path: pathlib.Path, monkeypatch) -> None:
+    """Un merge qui touche tests/ ET un fichier code reste dans la dette."""
+    repo = scratch_repo(tmp_path)
+    monkeypatch.setattr(gate, "ROOT", repo)
+    commit_roadmap(repo, "état initial")
+    run(repo, "checkout", "-qb", "mixed-fix")
+    tests_dir = repo / "tests"
+    tests_dir.mkdir(exist_ok=True)
+    (tests_dir / "test_x.py").write_text("# test\n", encoding="utf-8")
+    (repo / "engine.py").write_text("x = 1\n", encoding="utf-8")
+    run(repo, "add", "-A")
+    run(repo, "commit", "-qm", "fix: engine + test")
+    run(repo, "checkout", "-q", "main")
+    run(repo, "merge", "-q", "--no-ff", "-m", "merge: mixed-fix", "mixed-fix")
+    dette = gate.undeclared_merges("HEAD")
+    assert len(dette) == 1, f"un merge mixte (tests/ + code) doit être compté : {dette}"
+
+
 # -------------------------------------------- verrou end-to-end hook vs MERGE_HEAD
 
 
