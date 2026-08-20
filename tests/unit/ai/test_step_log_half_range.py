@@ -25,22 +25,12 @@ from engine.phase_handlers import shooting_handlers
 from engine.phase_handlers import shared_utils as _su
 from engine.phase_handlers.shared_utils import build_manual_shoot_allocation
 from tests._state_invariants import turn_state_invariants
+from tests.unit.ai._fabriques import units_cache_entry as _uc
 
 SHOOTER = (50, 50)
 TARGET_NEAR = (80, 50)   # 30 subhexes < 60 (demi-portée 120/2) → HALF RANGE
 TARGET_FAR = (160, 50)   # 110 subhexes > 60                    → PAS HALF RANGE
 WEAPON_RNG = 120          # 24" × inches_to_subhex=5
-
-
-def _uc(col: int, row: int, *, player: int, models: Dict | None = None, hp_cur: int = 9) -> Dict:
-    entry: Dict[str, Any] = {
-        "BASE_SHAPE": "round", "BASE_SIZE": 6, "col": col, "row": row,
-        "occupied_hexes": {(col, row)}, "VALUE": 10.0, "player": player, "HP_CUR": hp_cur,
-    }
-    if models:
-        entry["occupied_hexes_by_model"] = dict(models)
-        entry["floor_height_by_model"] = {mid: 0.0 for mid in models}
-    return entry
 
 
 def _game_state(weapon_rules: list, *, target: tuple) -> Dict:
