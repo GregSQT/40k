@@ -24,6 +24,7 @@ from unittest.mock import patch
 import pytest
 
 from engine.observation_builder import ObservationBuilder
+from engine.phase_handlers.shared_utils import MOVE_CELL_MAP_CACHE_KEY
 from engine.w40k_core import W40KEngine
 from tests.unit.engine._config_helpers import build_engine_config
 
@@ -290,6 +291,9 @@ def test_gym_fall_back_anchor_shifted_skips_move() -> None:
         uc[squad_id] = entry
         return True, True, 1  # is_desperate=True, is_alive=True, 1 wound
 
+    # Pré-seeder une entrée pour simuler un masque déjà calculé pour cette escouade.
+    gs.setdefault(MOVE_CELL_MAP_CACHE_KEY, {})["1"] = {"map": {}, "anchor": (20, 20), "phase": "move"}
+
     with patch(
         "engine.phase_handlers.shared_utils.desperate_escape_pre_move",
         side_effect=_fake_pre_move,
@@ -305,3 +309,4 @@ def test_gym_fall_back_anchor_shifted_skips_move() -> None:
     assert result.get("activation_complete") is True
     assert "_flee_mode" not in gs, f"_flee_mode stale : {gs.get('_flee_mode')!r}"
     assert "_desperate_escape_rolls" not in gs, "_desperate_escape_rolls stale"
+    assert "1" not in gs.get(MOVE_CELL_MAP_CACHE_KEY, {}), "cell map stale après fall_back_anchor_shifted"

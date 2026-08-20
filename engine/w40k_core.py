@@ -6856,13 +6856,14 @@ class W40KEngine(gym.Env):
                         "activation_complete": True,
                         "waiting_for_player": False,
                     }
-                if _is_desp and _is_alive:
+                elif _is_desp:
                     _anchor_after_de = require_unit_position(str(squad_id), self.game_state)
                     if _anchor_after_de != _anchor_before_de:
                         # Pertes de Desperate Escape ont décalé l'ancre : le pool (construit
                         # depuis l'ancre d'avant) est périmé, la destination sélectionnée par
                         # l'agent n'est plus atteignable depuis la nouvelle ancre. Skip du move.
                         clear_desperate_escape_state(self.game_state)
+                        clear_squad_move_cell_map(self.game_state, str(squad_id))
                         _mh_de._invalidate_all_destination_pools_after_movement(self.game_state)
                         _mh_de.movement_clear_preview(self.game_state)
                         return True, {
