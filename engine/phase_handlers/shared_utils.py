@@ -5692,6 +5692,12 @@ def desperate_escape_post_move(squad_id: str, game_state: Dict[str, Any]) -> Non
         roll_battle_shock(str(squad_id), game_state)
 
 
+def clear_desperate_escape_state(game_state: Dict[str, Any]) -> None:
+    """Purge les clés transitoires posées par desperate_escape_pre_move (chemins de mort)."""
+    game_state.pop("_flee_mode", None)
+    game_state.pop("_desperate_escape_rolls", None)
+
+
 def roll_advance_for_squad(squad_id: str, game_state: Dict[str, Any]) -> int:
     """Roll 1D6 partage par l escouade pour un Advance move.
 
