@@ -154,6 +154,34 @@ def test_p2_defense_pre_command_seule_aucune_violation(tmp_path: Path) -> None:
     assert stats["phase_order_violations"] == 0, stats["phase_order_violations"]
 
 
+def test_dead_command_phase_initialise_suivi_sequence(tmp_path: Path) -> None:
+    """§2.9 — DEAD event pendant COMMAND ne doit pas bloquer l'initialisation du suivi de séquence.
+
+    Scénario : un stratagème P2 tue une unité P1 pendant la phase COMMAND. La seule ligne P1 en
+    COMMAND est un DEAD event. Sans le fix, phase_seq_current_turn[1] reste None → les phases
+    MOVE/FIGHT de P1 sont silencieusement ignorées → une violation FIGHT→MOVE n'est jamais détectée.
+    """
+    stats = _run(tmp_path, [
+        # Un DEAD event P1 pendant COMMAND (tuée par un stratagème P2)
+        _dead(1, 1, "COMMAND", 1),
+        # P1 joue ensuite dans un ordre invalide (FIGHT avant MOVE)
+        _action(1, 1, "FIGHT"),
+        _action(1, 1, "MOVE"),   # retour en arrière → violation
+    ])
+    assert stats["phase_order_violations"] == 1, stats["phase_order_violations"]
+
+
+def test_dead_command_puis_sequence_valide_aucune_violation(tmp_path: Path) -> None:
+    """§2.9 — DEAD event pendant COMMAND + séquence valide ensuite = 0 violation."""
+    stats = _run(tmp_path, [
+        _dead(1, 1, "COMMAND", 1),
+        _action(1, 1, "MOVE"),
+        _action(1, 1, "SHOOT"),
+        _action(1, 1, "FIGHT"),
+    ])
+    assert stats["phase_order_violations"] == 0, stats["phase_order_violations"]
+
+
 def test_meme_joueur_ouvre_command_plusieurs_tours_consecutifs_aucune_violation(tmp_path: Path) -> None:
     """VERROU : P1 ouvre COMMAND à chaque tour (env d'entraînement) → 0 violation.
 
