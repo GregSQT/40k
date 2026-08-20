@@ -57,8 +57,7 @@ def engine() -> W40KEngine:
         "board": {"default": {"cols": 60, "rows": 60, "hex_radius": 1.0, "margin": 0.0,
                               "wall_hexes": [], "objectives": [], "inches_to_subhex": 1}},
         "game_rules": {"engagement_zone": 1, "engagement_zone_vertical": 5,
-                       "max_base_size_hex": 35, "max_turns": 5,
-                       "consolidation_trigger_range": 3},
+                       "max_base_size_hex": 35, "max_turns": 5},
         "charge": {"charge_max_distance": 12},
         "move": {
             "can_move_through_enemy_engagement_zone": True,

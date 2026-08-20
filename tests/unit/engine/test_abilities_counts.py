@@ -63,7 +63,6 @@ def _config(units: List[Dict[str, Any]], controlled_player: int = 1) -> Dict[str
         "game_rules": {
             "engagement_zone": 1, "engagement_zone_vertical": 5, "max_base_size_hex": 35,
             "max_turns": 5, "max_actions_per_model_per_turn": 7, "step_limit_margin": 1.5,
-            "consolidation_trigger_range": 3,
         },
         "move": {
             "can_move_through_enemy_engagement_zone": True,

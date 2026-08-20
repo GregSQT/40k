@@ -22,6 +22,7 @@ from tests.unit.engine._config_helpers import (
     ATTACHED_BODYGUARD,
     ATTACHED_ENEMY,
     attached_scenario,
+    build_engine_config,
     load_engine_from_scenario,
 )
 
@@ -84,6 +85,21 @@ def test_le_fichier_est_bien_sur_disque_et_sous_config():
     assert "config" in chemin.parts and "local" in chemin.parts, (
         f"scénario hors de config/local/ : {chemin} — /api/config/board le refuserait"
     )
+
+
+def test_build_engine_config_game_rules_deep_merge():
+    """Verrou : passer un game_rules partiel ne doit pas écraser les clés de production.
+
+    Avant le fix, merged.update(config) remplaçait game_rules en bloc — tout nouveau require_key()
+    ajouté en production cassait les tests qui n'avaient pas copié la clé dans leur override.
+    """
+    result = build_engine_config({"game_rules": {"engagement_zone": 2}})
+    gr = result["game_rules"]
+    assert "consolidation_trigger_range" in gr, (
+        "consolidation_trigger_range absent de game_rules après un override partiel — "
+        "la fusion profonde ne fonctionne pas"
+    )
+    assert gr["engagement_zone"] == 2, "la valeur surchargée par le test n'est pas retenue"
 
 
 def _scenario_file_of(engine) -> str:
