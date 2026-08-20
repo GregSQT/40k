@@ -243,3 +243,113 @@ class TestEngagementDetectionAfterAnchorDeath:
             "Avec seulement 1#1 en (4,10), dist=5 > EZ=2 : l'escouade ne devrait PAS "
             "être détectée comme engagée."
         )
+
+
+# ---------------------------------------------------------------------------
+# §2.2 — Scénario exact du rapport de bug
+# ---------------------------------------------------------------------------
+#
+# Unité 1 (charger) part de (22, 25).
+# Unité 105 (cible) est une escouade 3 figurines :
+#   105#0 à (20, 28) = ANCRE INITIALE  → sera détruite
+#   105#1 à (21, 28) = nouvelle ancre après la mort de 105#0
+#   105#2 à (22, 28) = figurine à la DESTINATION de charge de l'unité 1
+#
+# Bogue (ancienne version) : après `destroy_model("105#0")`,
+#   `update_units_cache_position` posait
+#   occupied_hexes = {(21,28)} (footprint de la nouvelle ancre seule)
+#   → (22,28) disparaissait du jeu de blocage
+#   → `build_occupied_positions_set(gs, exclude_unit_id="1")` n'incluait plus (22,28)
+#   → l'unité 1 pouvait charger là → collision.
+# Fix : `_recompute_squad_occupied_hexes` reconstruit {(21,28), (22,28)}.
+
+_CHARGER_ID = "1"
+_TARGET_ID = "105"
+
+
+def _gs_222() -> Dict[str, Any]:
+    """État minimal : escouade 105 à 3 figurines + unité 1 mono-figurine."""
+    return {
+        "models_cache": {
+            "1#0": {
+                "col": 22, "row": 25, "level": 0,
+                "player": 1, "squad_id": _CHARGER_ID, "HP_CUR": 1,
+                "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0,
+            },
+            "105#0": {
+                "col": 20, "row": 28, "level": 0,
+                "player": 2, "squad_id": _TARGET_ID, "HP_CUR": 1,
+                "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0,
+            },
+            "105#1": {
+                "col": 21, "row": 28, "level": 0,
+                "player": 2, "squad_id": _TARGET_ID, "HP_CUR": 1,
+                "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0,
+            },
+            "105#2": {
+                "col": 22, "row": 28, "level": 0,
+                "player": 2, "squad_id": _TARGET_ID, "HP_CUR": 1,
+                "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0,
+            },
+        },
+        "squad_models": {
+            _CHARGER_ID: ["1#0"],
+            _TARGET_ID: ["105#0", "105#1", "105#2"],
+        },
+        "units_cache": {
+            _CHARGER_ID: {
+                "col": 22, "row": 25,
+                "player": 1, "HP_CUR": 1,
+                "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0,
+                "occupied_hexes": {(22, 25)},
+            },
+            _TARGET_ID: {
+                "col": 20, "row": 28,
+                "player": 2, "HP_CUR": 3,
+                "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0,
+                "occupied_hexes": {(20, 28), (21, 28), (22, 28)},
+            },
+        },
+        "config": {
+            "game_rules": {
+                "engagement_zone": 2,
+                "engagement_zone_vertical": 5.0,
+                "max_base_size_hex": 6,
+            },
+            "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
+        },
+        "inches_to_subhex": 1,
+        "terrain_areas": [],
+        "_unit_move_version": 0,
+        "action_logs": [],
+        "action_log_seq": 0,
+    }
+
+
+class TestChargeCollisionAfterAnchorDeath:
+    """§2.2 — la destination de charge d'une unité doit rester bloquée même après la mort
+    de l'ancre de l'unité cible (root cause : occupied_hexes perdait les non-ancres)."""
+
+    def test_charge_destination_blocked_after_target_anchor_death(self):
+        """(22,28) doit rester dans le pool bloqué après la mort de l'ancre 105#0."""
+        gs = _gs_222()
+        destroy_model(gs, "105#0", "combat")
+
+        blocked = build_occupied_positions_set(gs, exclude_unit_id=_CHARGER_ID)
+
+        assert (22, 28) in blocked, (
+            f"Bug §2.2 : (22,28) absent de blocked={sorted(blocked)}. "
+            "L'unité 1 peut charger sur une case occupée par 105#2 → collision."
+        )
+
+    def test_charge_destination_not_blocked_when_truly_empty(self):
+        """Contre-épreuve : si 105#2 est détruite, (22,28) est genuinement libre."""
+        gs = _gs_222()
+        destroy_model(gs, "105#0", "combat")
+        destroy_model(gs, "105#2", "combat")
+
+        blocked = build_occupied_positions_set(gs, exclude_unit_id=_CHARGER_ID)
+
+        assert (22, 28) not in blocked, (
+            "Avec 105#2 détruite, (22,28) doit être libre pour l'unité 1."
+        )
