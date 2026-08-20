@@ -402,8 +402,7 @@ def test_denial_bot_no_charge_when_no_enemy_on_objective() -> None:
 
     with patch("ai.benchmark_bots._living_enemies", return_value=[enemy]), \
          patch("ai.benchmark_bots.objective_hex_sets", return_value={(3, 3): True}), \
-         patch("ai.benchmark_bots.unit_is_within_objective", return_value=False), \
-         patch("ai.benchmark_bots.require_unit_from_cache", return_value={"col": 5, "row": 5}):
+         patch("ai.benchmark_bots.unit_is_within_objective", return_value=False):
         result = bot.select_action_with_state([WAIT_ACTION], gs, active_unit)
 
     assert result == WAIT_ACTION, (
@@ -427,7 +426,6 @@ def test_denial_bot_charges_when_enemy_on_objective() -> None:
     with patch("ai.benchmark_bots._living_enemies", return_value=[enemy]), \
          patch("ai.benchmark_bots.objective_hex_sets", return_value={(3, 3): True}), \
          patch("ai.benchmark_bots.unit_is_within_objective", return_value=True), \
-         patch("ai.benchmark_bots.require_unit_from_cache", return_value={"col": 5, "row": 5}), \
          patch.object(bot, "_charge", return_value=FAKE_CHARGE):
         result = bot.select_action_with_state([WAIT_ACTION, FAKE_CHARGE], gs, active_unit)
 
