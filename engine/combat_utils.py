@@ -451,6 +451,7 @@ def socle_from_cache_entry(entry: Dict[str, Any]) -> Any:
     ronde correcte vers une escouade multi-figurines.
     """
     from engine.hex_utils import Socle
+    from engine.spatial_relations import entry_footprint
     by_model = entry.get("occupied_hexes_by_model")
     model_centers = (
         [(int(c), int(r)) for (c, r) in by_model.values()]
@@ -462,7 +463,7 @@ def socle_from_cache_entry(entry: Dict[str, Any]) -> Any:
         entry["BASE_SIZE"],
         entry["col"],
         entry["row"],
-        entry["occupied_hexes"],
+        entry_footprint(entry),
         model_centers,
         int(entry.get("orientation", 0)),  # fallback allowed — entrees synthetiques (mover candidat, synth model) sans orientation = facing 0
     )
