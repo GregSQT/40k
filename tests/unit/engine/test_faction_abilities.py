@@ -214,8 +214,9 @@ def _shoot_state(
 
 
 def _uc(col, row, *, player):
+    occ = {(col, row)} if col >= 0 and row >= 0 else set()
     return {"BASE_SHAPE": "round", "BASE_SIZE": 1, "col": col, "row": row,
-            "occupied_hexes": set(), "VALUE": 10.0, "player": player}
+            "occupied_hexes": occ, "VALUE": 10.0, "player": player}
 
 
 def _records(gs):

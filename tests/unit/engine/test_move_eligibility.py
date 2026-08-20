@@ -271,6 +271,7 @@ class TestMultiHexFootprintInvariants:
             "board_cols": 25,
             "board_rows": 21,
             "wall_hexes": set(),
+            "inches_to_subhex": 5,
         }
 
     def test_footprint_overlap_invalid_placement(self):

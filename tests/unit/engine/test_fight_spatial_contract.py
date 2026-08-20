@@ -98,6 +98,7 @@ def test_fight_b_engagement_pool_large_base_euclidean_not_hex() -> None:
     game_state = {
         "config": {"game_rules": {"engagement_zone": 10, "engagement_zone_vertical": 5}},
         "units_cache": {"attacker": attacker, "t_in": target_in, "t_out": target_out},
+        "inches_to_subhex": 5,
     }
 
     assert _fight_build_valid_target_pool(game_state, unit) == ["t_in"]
