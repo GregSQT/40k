@@ -508,9 +508,10 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
         fight-sans-cible, 15 intents de zone.
 
         ⚠️ L'assemblage suit l'ordre EXACT des ids (`macro_intents`) : 0-1023 cellules, 1024 wait,
-        1025-1044 tir, 1045-1064 charge, 1065-1084 mêlée, 1085 fight-sans-cible, 1086-1100 zone,
-        1311-1316 CHOICE, 1317-1336 Oath, 1337-1348 ACTIVATION. Une permutation ici ferait jouer à
-        l'agent une action autre que celle qu'il évalue, sans que rien ne lève — verrouillé par test.
+        1025-1044 tir, 1045-1064 charge (cible unique), 1065-1254 charge-paires, 1255-1274 mêlée,
+        1275 fight-sans-cible, 1276-1295 tir indirect, 1296-1310 zone, 1311-1316 CHOICE,
+        1317-1336 Oath, 1337-1348 ACTIVATION. Une permutation ici ferait jouer à l'agent une
+        action autre que celle qu'il évalue, sans que rien ne lève — verrouillé par test.
         """
         enemies = feats.enemies
         base = self.action_net(latent_pi)

@@ -202,5 +202,6 @@ def test_micro_actions_are_not_zone_intents():
         mi.CHARGE_SLOT_BASE,
         mi.FIGHT_SLOT_BASE,
         mi.ACTION_FIGHT_NO_TARGET,
+        mi.SHOOT_INDIRECT_SLOT_BASE,
     ):
         assert not mi.is_zone_intent_action(action)
