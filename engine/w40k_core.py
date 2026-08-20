@@ -5566,6 +5566,9 @@ class W40KEngine(gym.Env):
         # 20.04 — destruction en fin de 3e round : même statut que coherency_removal, pas une
         # action d'agent.
         "strategic_reserves_timeout",
+        # L24 — skip auto-moteur (pas de destinations valides, pas d'action d'agent) : pas de
+        # step gym et pas de compteur dans step.log.
+        "skip",
         # 08.03 / 01.07 — jet de commandement : pas une action d'agent.
         "battle_shock",
         # L25 — 08.04 déclarations de command phase (Waaagh!, Oath of Moment) : pas des
@@ -5603,6 +5606,10 @@ class W40KEngine(gym.Env):
         # pour 16 choix. Corriger le mapping aurait produit un DOUBLON de chaque ligne.
         "move_after_shooting": "move_after_shooting",
         "deploy_unit": "deploy_unit",
+        # L24 — skip auto-moteur : unité sans destination valide (move/charge) ou sans cible
+        # (shoot). Le formateur existe dans StepLogger depuis l'origine ; seule l'entrée ici
+        # manquait pour que la ligne atteigne step.log.
+        "skip": "skip",
         # 03.03 End of Turn — retrait des figurines hors coherency. Seule mort qui ne descend
         # d'aucune attaque : sans cette entree, aucune ligne de step.log ne la porte et tout
         # lecteur qui accumule les evenements garde la figurine vivante (cf.
@@ -6261,6 +6268,8 @@ class W40KEngine(gym.Env):
             # avale par `log_action` — chaque mort disparait silencieusement de step.log.
             ("model_id", "model_id"),
             ("reason", "reason"),
+            # L24 — motif du skip (no_valid_move_destinations, no_valid_actions, …).
+            ("skipReason", "skip_reason"),
         ):
             value = raw_log.get(src)  # get allowed
             if value is not None:

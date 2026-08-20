@@ -6385,6 +6385,21 @@ def _handle_skip_action(game_state: Dict[str, Any], unit: Dict[str, Any], had_va
             CHARGE,        # Arg4: Remove from charge_activation_pool
             0              # Arg5: No error logging
         )
+        # L24 — producteur skip charge : aucune destination de charge valide.
+        unit_col, unit_row = require_unit_position(unit, game_state)
+        append_action_log(
+            game_state,
+            {
+                "type": "skip",
+                "turn": game_state["turn"],
+                "phase": game_state["phase"],
+                "unitId": unit["id"],
+                "player": require_key(unit, "player"),
+                "col": unit_col,
+                "row": unit_row,
+                "skipReason": "no_valid_charge_destinations",
+            },
+        )
 
     result.update({
         "action": "wait",
