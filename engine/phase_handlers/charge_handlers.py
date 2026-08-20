@@ -6011,6 +6011,42 @@ def charge_commit_move_plan_handler(
     return True, result
 
 
+def _count_engaged_models_after_charge(
+    game_state: Dict[str, Any], charger_id: str, target_id: str
+) -> Tuple[int, int]:
+    """Compte les figurines du chargeur à ≤1" d'au moins une figurine cible après placement.
+
+    Retourne (engaged_count, total_alive). Utilisé pour logguer le regret BFS réel en step.log.
+    Le seuil 1" correspond à ``within_1_zone = inches_to_subhex`` subhex — même contrat que
+    ``_charge_pool_must_socle_a_socle_if_possible`` palier 2.
+    """
+    from engine.spatial_relations import entries_in_engagement_zone, engagement_distance_metric
+
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    within_1_zone = int(require_key(game_state, "inches_to_subhex"))
+    metric = engagement_distance_metric()
+
+    charger_model_ids = [str(m) for m in require_key(squad_models, str(charger_id)) if str(m) in models_cache]
+    target_model_ids = [str(m) for m in require_key(squad_models, str(target_id)) if str(m) in models_cache]
+
+    if not charger_model_ids or not target_model_ids:
+        return 0, len(charger_model_ids)
+
+    target_entries = [models_cache[mid] for mid in target_model_ids]
+    engaged = 0
+    for cmid in charger_model_ids:
+        ce = models_cache[cmid]
+        for te in target_entries:
+            try:
+                if entries_in_engagement_zone(ce, te, within_1_zone, metric, memoise=False):
+                    engaged += 1
+                    break
+            except (ValueError, KeyError):
+                break
+    return engaged, len(charger_model_ids)
+
+
 def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: str, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
     """
     Handle charge destination selection and execute charge.
@@ -6218,6 +6254,7 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
     )
 
     _charge_dist = charge_record_outcome(game_state, unit["id"])
+    _eng_count, _eng_total = _count_engaged_models_after_charge(game_state, str(unit["id"]), str(target_id))
     append_action_log(
         game_state,
         {
@@ -6245,6 +6282,8 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
             "action_name": action_name,
             "reward": round(action_reward, 2),
             "is_ai_action": unit["player"] == 1,
+            "engaged_models_count": _eng_count,
+            "engaged_models_total": _eng_total,
             **_charge_dist,
         },
     )

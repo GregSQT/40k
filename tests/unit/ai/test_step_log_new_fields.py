@@ -272,3 +272,44 @@ def test_l28_rerolled_token_initial_roll_appears_in_token() -> None:
     )
     assert "[Roll: 11]" in msg
     assert "[REROLLED:5]" in msg
+
+
+# ── ENGAGED_MODELS ───────────────────────────────────────────────────────────
+
+
+def test_engaged_models_token_present_on_charged_line() -> None:
+    logger = StepLogger(enabled=False)
+    msg = logger._format_replay_style_message(
+        1, "charge", _charge_details(engaged_models_count=3, engaged_models_total=5)
+    )
+    assert "[ENGAGED_MODELS: 3/5]" in msg
+
+
+def test_engaged_models_token_full_engagement() -> None:
+    logger = StepLogger(enabled=False)
+    msg = logger._format_replay_style_message(
+        1, "charge", _charge_details(engaged_models_count=5, engaged_models_total=5)
+    )
+    assert "[ENGAGED_MODELS: 5/5]" in msg
+
+
+def test_engaged_models_token_absent_when_not_in_details() -> None:
+    logger = StepLogger(enabled=False)
+    msg = logger._format_replay_style_message(1, "charge", _charge_details())
+    assert "ENGAGED_MODELS" not in msg
+
+
+def test_engaged_models_token_after_distances_before_reward() -> None:
+    logger = StepLogger(enabled=False)
+    msg = logger._format_replay_style_message(
+        1,
+        "charge",
+        _charge_details(
+            engaged_models_count=2,
+            engaged_models_total=4,
+            reward=1.5,
+        ),
+    )
+    eng_pos = msg.index("[ENGAGED_MODELS: 2/4]")
+    reward_pos = msg.index("[R:")
+    assert eng_pos < reward_pos
