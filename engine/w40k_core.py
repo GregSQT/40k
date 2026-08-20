@@ -4905,8 +4905,7 @@ class W40KEngine(gym.Env):
         # OU REGARDER MAINTENANT : `_flush_squad_action_logs_to_step_logger`, point d'accroche unique
         # du chemin vif (gym et bot PvE), appele depuis `step()`. Il draine la meme source de verite
         # (`game_state["action_logs"]`) au lieu de dupliquer des sites `log_action`.
-                # Don't re-raise - let action execution continue
-        
+
         if _perf:
             _t_pre_cascade = time.perf_counter()
             if _t_entry is not None and _t_after_handlers is not None and _t_pre_cascade is not None:

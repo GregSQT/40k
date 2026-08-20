@@ -380,3 +380,54 @@ class TestSemanticCascadeKeyPreservation:
         assert result.get("charge_succeeded") is True, (
             f"charge_succeeded perdu lors de la cascade fight→move : {result}"
         )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tests — préservation des clés lors de la cascade via _process_squad_action
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestGymCascadeKeyPreservation:
+    """Vérifie que les clés du résultat de l'action sont préservées lors d'une cascade de phase
+    dans _process_squad_action (chemin gym).
+
+    Scénario : advance_phase from=fight → fight_phase_end retourne phase_complete=True +
+    next_phase="command" + une clé sentinelle. start_command_phase cascade à son tour
+    (phase_complete=True + next_phase="move"). Le merge {**result, **phase_init_result} doit
+    conserver la clé sentinelle du premier résultat.
+
+    L'ancien code faisait result = phase_init_result et écrasait les clés du résultat initial.
+    """
+
+    def test_action_keys_preserved_through_double_cascade(self, monkeypatch):
+        """cascade_gym_key_preservation : les clés de l'action survivent à fight→command en cascade."""
+        p1 = _unit(1, 1, 5, 10)
+        p2 = _unit(2, 2, 20, 10)
+        gs = _make_gs([p1, p2], phase="fight")
+        gs["fight_subphase"] = "fight"
+        engine = _bare_engine(gs)
+
+        monkeypatch.setattr(
+            "engine.phase_handlers.fight_handlers.fight_phase_end",
+            lambda gs: {
+                "phase_complete": True,
+                "next_phase": "command",
+                "phase_transition": True,
+                "__sentinel__": "from_fight_end",
+            },
+        )
+        monkeypatch.setattr(
+            W40KEngine,
+            "start_command_phase",
+            lambda self: {"phase_complete": True, "next_phase": "move"},
+        )
+        monkeypatch.setattr(
+            "engine.phase_handlers.movement_handlers.movement_phase_start",
+            lambda gs: {"phase_initialized": True, "phase_complete": False},
+        )
+
+        ok, result = engine._process_squad_action({"action": "advance_phase", "from": "fight"})
+
+        assert ok is True
+        assert result.get("__sentinel__") == "from_fight_end", (
+            f"__sentinel__ perdu lors de la cascade fight→command : {result}"
+        )
