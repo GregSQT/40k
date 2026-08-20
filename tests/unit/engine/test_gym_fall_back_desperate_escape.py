@@ -263,3 +263,45 @@ def test_gym_desperate_escape_bridge_death_coherency_relaxed() -> None:
     assert result.get("action") != "desperate_escape_died", (
         "A et C survivent → l'action ne doit pas être desperate_escape_died"
     )
+
+
+def test_gym_fall_back_anchor_shifted_skips_move() -> None:
+    """Desperate Escape tue une figurine d'ancre → pool périmé → activation_complete sans move.
+
+    Scenario reproduisant le crash bot_ranking :
+    - Unité multi-modèles battle-shocked + engagée (squad 1 en (20,20)).
+    - desperate_escape_pre_move tue la figurine d'ancre : units_cache passe à (20,22).
+    - La destination choisie par le masque (18,20) n'est plus atteignable depuis (20,22)
+      (elle était dans le pool bâti depuis (20,20)).
+    - Attendu : fall_back_anchor_shifted est retourné, pas de ValueError.
+    """
+    eng, gs = _engine_battle_shocked()
+
+    def _fake_pre_move(
+        squad_id: str, game_state: Dict[str, Any], was_engaged: bool, auto_resolve: bool
+    ) -> tuple:
+        # Simuler la mort de la figurine d'ancre : units_cache se décale.
+        # units_cache est keyé par str → utiliser squad_id directement (déjà str).
+        game_state["_flee_mode"] = "desperate_escape"
+        game_state["_desperate_escape_rolls"] = [1]
+        uc = game_state["units_cache"]
+        entry = dict(uc[squad_id])
+        entry["row"] = 22  # ancre passe de (20,20) à (20,22)
+        uc[squad_id] = entry
+        return True, True, 1  # is_desperate=True, is_alive=True, 1 wound
+
+    with patch(
+        "engine.phase_handlers.shared_utils.desperate_escape_pre_move",
+        side_effect=_fake_pre_move,
+    ):
+        ok, result = eng._process_squad_action(
+            {"action": "squad_fall_back", "squad_id": "1", "destCol": 18, "destRow": 20}
+        )
+
+    assert ok, f"fall_back_anchor_shifted a échoué : {result}"
+    assert result.get("action") == "fall_back_anchor_shifted", (
+        f"action attendue 'fall_back_anchor_shifted', obtenu {result.get('action')!r}"
+    )
+    assert result.get("activation_complete") is True
+    assert "_flee_mode" not in gs, f"_flee_mode stale : {gs.get('_flee_mode')!r}"
+    assert "_desperate_escape_rolls" not in gs, "_desperate_escape_rolls stale"
