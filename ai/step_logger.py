@@ -1291,6 +1291,11 @@ class StepLogger:
 
             base_msg += _charge_distance_segment(details)
 
+            eng_count = details.get("engaged_models_count")
+            eng_total = details.get("engaged_models_total")
+            if eng_count is not None and eng_total is not None:
+                base_msg += f" [ENGAGED_MODELS: {eng_count}/{eng_total}]"
+
             # Add reward if available
             reward = details.get("reward")
             if reward is not None:

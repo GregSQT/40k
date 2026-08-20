@@ -6243,6 +6243,9 @@ class W40KEngine(gym.Env):
             # les champs poses par les sept sites de charge n'atteindraient jamais step.log.
             ("charge_nearest_enemy_inches", "charge_nearest_enemy_inches"),
             ("charge_target_distance_inches", "charge_target_distance_inches"),
+            # Regret BFS : figurines du chargeur a <=1" d'au moins un modele cible apres placement.
+            ("engaged_models_count", "engaged_models_count"),
+            ("engaged_models_total", "engaged_models_total"),
             ("advance_roll", "advance_range"),
             ("selected_rule_name", "selected_rule_name"),
             # 03.03 : les figurines retirees en fin de tour, nommement. Le segment `[MODELS:]`
