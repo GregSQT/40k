@@ -483,11 +483,7 @@ class ReferenceDenialBot(_BenchmarkBase):
             # Ne charger que si un ennemi est sur un objectif — la faute punie est le push aveugle.
             zones = objective_hex_sets(game_state)
             if zones and any(
-                unit_is_within_objective(
-                    game_state,
-                    require_unit_from_cache(str(e["id"]), game_state, "_denial_charge"),
-                    zones,
-                )
+                unit_is_within_objective(game_state, str(e["id"]), zones)
                 for e in _living_enemies(active_unit, game_state)
             ):
                 return self._charge(valid_actions, game_state, active_unit)
