@@ -357,13 +357,14 @@ def test_an_off_table_unit_is_never_a_declarable_charge_target(monkeypatch) -> N
     # VERT VACANT : sans cette borne, l'assertion finale pourrait tenir parce que le chargeur est
     # trop loin, et non parce que le filtre hors-table mord.
     ish = int(gs["inches_to_subhex"])
+    charge_range = CHARGE_THRESHOLD_INCHES * ish
     charger_cells_pos = _squad_model_positions(gs, str(charger))
     assert charger_cells_pos, (
         f"le chargeur {charger} n'a aucun modele dans models_cache — cas non construit"
     )
     closest = min(calculate_hex_distance(c, r, -1, -1) for c, r in charger_cells_pos)
-    assert closest <= CHARGE_THRESHOLD_INCHES * ish, (
-        f"le chargeur est a {closest} de la sentinelle (-1,-1), au-dela des 12\" ({CHARGE_THRESHOLD_INCHES * ish}) : "
+    assert closest <= charge_range, (
+        f"le chargeur est a {closest} de la sentinelle (-1,-1), au-dela des 12\" ({charge_range}) : "
         "la sentinelle ne serait pas 'a portee' meme sans filtre, le verrou serait vacant"
     )
     # 2e borne du vert vacant : le chargeur ne doit pas etre « locked » (dernier controle de
@@ -389,7 +390,7 @@ def test_an_off_table_unit_is_never_a_declarable_charge_target(monkeypatch) -> N
     # verrouillerait le chargeur et refuserait pour ce motif-la.
     # Le chargeur occupe les cols 0..2 ; la base est le milieu de la portee de charge
     # depuis la figurine la plus proche (col 2), valide aux deux resolutions.
-    control_base_col = 2 + (CHARGE_THRESHOLD_INCHES * ish) // 2
+    control_base_col = 2 + charge_range // 2
     for offset, mid in enumerate(gs["squad_models"][control]):
         if mid in gs["models_cache"]:
             update_model_position(gs, mid, control_base_col + (offset % 3), offset // 3)
@@ -419,8 +420,8 @@ def test_an_off_table_unit_is_never_a_declarable_charge_target(monkeypatch) -> N
         calculate_hex_distance(oc, or_, ec, er_)
         for oc, or_ in charger_cells_pos for ec, er_ in control_cells
     )
-    assert min_dist <= CHARGE_THRESHOLD_INCHES * ish, (
-        f"distance min {min_dist} > seuil {CHARGE_THRESHOLD_INCHES * ish} : "
+    assert min_dist <= charge_range, (
+        f"distance min {min_dist} > seuil {charge_range} : "
         f"chargeur={charger_cells_pos!r}, cible={control_cells!r}"
     )
     assert charge_check_eligibility(gs, str(charger), [str(control)]), (
