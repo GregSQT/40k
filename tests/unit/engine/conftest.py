@@ -10,9 +10,25 @@ euclidienne est couverte séparément (``test_spatial_relations`` + masque move)
 hex pour ces modules afin d'isoler la logique fight.
 """
 
+import os
+
 import pytest
 
 from tests.unit.engine._config_helpers import build_armageddon_engine
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _board_path_module_isolation():
+    """Isole W40K_BOARD_PATH par module : chaque module termine avec l'état d'env
+    qu'il avait à son entrée, évitant les fuites cross-module sur les fixtures module-scoped."""
+    previous = os.environ.get("W40K_BOARD_PATH")
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop("W40K_BOARD_PATH", None)
+        else:
+            os.environ["W40K_BOARD_PATH"] = previous
 
 
 @pytest.fixture(autouse=True)

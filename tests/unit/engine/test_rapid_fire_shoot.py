@@ -31,7 +31,7 @@ def _neutralise(monkeypatch):
 
 def _uc(col, row, *, value=10.0, player=1):
     return {"BASE_SHAPE": "round", "BASE_SIZE": 1, "col": col, "row": row,
-            "occupied_hexes": set(), "VALUE": value, "player": player}
+            "occupied_hexes": {(col, row)}, "VALUE": value, "player": player}
 
 
 def _game_state(weapon_rules, *, target_row):

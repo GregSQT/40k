@@ -73,7 +73,7 @@ def _uc(col, row, *, player, models=None, hp_cur=9):
     `hp_cur` : HP total de l'unité, lu en `require_key` par
     `_compute_enemy_adjacent_cache_for_player_from_units_cache` pour sauter les unités mortes."""
     entry = {"BASE_SHAPE": "round", "BASE_SIZE": 6, "col": col, "row": row,
-             "occupied_hexes": set(), "VALUE": 10.0, "player": player, "HP_CUR": hp_cur}
+             "occupied_hexes": {(col, row)}, "VALUE": 10.0, "player": player, "HP_CUR": hp_cur}
     if models:
         entry["occupied_hexes_by_model"] = dict(models)
         entry["floor_height_by_model"] = {mid: 0.0 for mid in models}

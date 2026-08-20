@@ -181,7 +181,7 @@ def _live_shoot_state() -> Dict[str, Any]:
 
     def _uc(col, row, player):
         return {"BASE_SHAPE": "round", "BASE_SIZE": 1, "col": col, "row": row,
-                "occupied_hexes": set(), "VALUE": 10.0, "player": player}
+                "occupied_hexes": {(col, row)}, "VALUE": 10.0, "player": player}
 
     return {**turn_state_invariants(),
         "gym_training_mode": True,

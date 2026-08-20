@@ -35,7 +35,7 @@ WEAPON_RNG = 120          # 24" × inches_to_subhex=5
 def _uc(col: int, row: int, *, player: int, models: Dict | None = None, hp_cur: int = 9) -> Dict:
     entry: Dict[str, Any] = {
         "BASE_SHAPE": "round", "BASE_SIZE": 6, "col": col, "row": row,
-        "occupied_hexes": set(), "VALUE": 10.0, "player": player, "HP_CUR": hp_cur,
+        "occupied_hexes": {(col, row)}, "VALUE": 10.0, "player": player, "HP_CUR": hp_cur,
     }
     if models:
         entry["occupied_hexes_by_model"] = dict(models)

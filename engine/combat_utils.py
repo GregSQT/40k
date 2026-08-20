@@ -497,8 +497,8 @@ def ranged_edge_distance(a: Any, b: Any, metric: str, max_distance: float = 0) -
         ENGAGEMENT_NORM_HEX_WIDTH,
     )
     if metric == "hex":
-        if a.fp is None or b.fp is None:
-            raise ValueError("ranged_edge_distance(hex): empreintes (fp) requises")
+        if not a.fp or not b.fp:
+            raise ValueError("ranged_edge_distance(hex): empreintes (fp) absentes ou vides")
         return min_distance_between_sets(a.fp, b.fp, max_distance=math.ceil(max_distance))
     if metric == "euclidean":
         # `max_distance == 0` : convention de `min_distance_between_sets` — pas d'élagage,

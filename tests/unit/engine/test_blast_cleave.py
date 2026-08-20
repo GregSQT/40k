@@ -29,7 +29,7 @@ def _neutralise(monkeypatch):
 
 def _uc(col, row, *, player=1):
     return {"BASE_SHAPE": "round", "BASE_SIZE": 1, "col": col, "row": row,
-            "occupied_hexes": set(), "VALUE": 10.0, "player": player}
+            "occupied_hexes": {(col, row)}, "VALUE": 10.0, "player": player}
 
 
 # ------------------------------------------------------------------------------ BLAST (tir)

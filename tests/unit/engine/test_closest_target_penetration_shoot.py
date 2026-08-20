@@ -42,7 +42,7 @@ def _uc_entry(col, row, *, value=10.0, player=1):
     """Entree units_cache minimale pour socle_from_cache_entry (base ronde) + targets_meta."""
     return {
         "BASE_SHAPE": "round", "BASE_SIZE": 1, "col": col, "row": row,
-        "occupied_hexes": set(), "VALUE": value, "player": player,
+        "occupied_hexes": {(col, row)}, "VALUE": value, "player": player,
     }
 
 

@@ -38,7 +38,7 @@ def _seq(monkeypatch, rolls):
 
 def _uc(col, row, *, player):
     return {"BASE_SHAPE": "round", "BASE_SIZE": 1, "col": col, "row": row,
-            "occupied_hexes": set(), "VALUE": 10.0, "player": player}
+            "occupied_hexes": {(col, row)}, "VALUE": 10.0, "player": player}
 
 
 def _game_state(*, bs=4, strength=4, ap=0, dmg=1, toughness=4, armor_save=4, hp=3,
