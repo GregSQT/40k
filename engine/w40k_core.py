@@ -6864,9 +6864,33 @@ class W40KEngine(gym.Env):
                         # l'agent n'est plus atteignable depuis la nouvelle ancre. Skip du move.
                         clear_desperate_escape_state(self.game_state)
                         clear_squad_move_cell_map(self.game_state, str(squad_id))
+                        self.game_state.get("_squad_advance_rolls", {}).pop(  # get allowed
+                            squad_id, None
+                        )
                         _mh_de._invalidate_all_destination_pools_after_movement(self.game_state)
                         _mh_de.movement_clear_preview(self.game_state)
+                        # L'activation doit etre REELLEMENT close. `activation_complete` n'a AUCUN
+                        # lecteur (grep engine/ai/services = 0) : sans `end_activation`, l'escouade
+                        # restait dans `move_activation_pool` (seul `end_activation` l'en retire,
+                        # generic_handlers ~L170) et etait reactivee dans la MEME phase de move —
+                        # deuxieme mouvement interdit par 09.04. Or les pertes de Desperate Escape
+                        # viennent peut-etre de rompre sa coherency : le pool d'ancre l'ignore
+                        # (`erode_move_pool_by_squad_block`) mais `validate_move_plan` la rejette,
+                        # donc CHAQUE destination du masque levait « formation actuelle DEJA
+                        # incoherente ». Miroir exact de `squad_wait` en phase move : Arg3/Arg4 =
+                        # MOVE, et surtout PAS FLED — aucun fall back n'a eu lieu, l'unite ne doit
+                        # donc pas porter les interdits 09.07 (tir/charge apres retraite).
+                        unit = get_unit_by_id(self.game_state, squad_id)
+                        if unit is None:
+                            raise KeyError(
+                                f"Squad {squad_id} introuvable pour end_activation apres "
+                                f"decalage d'ancre (Desperate Escape)"
+                            )
+                        end_result = end_activation(
+                            self.game_state, unit, WAIT, 1, "MOVE", MOVE, 0
+                        )
                         return True, {
+                            **end_result,
                             "action": "fall_back_anchor_shifted",
                             "unitId": squad_id,
                             "squad_id": squad_id,
