@@ -167,6 +167,9 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 | moteur | ✅ fix type de tir effacé dans 3 chemins PvP (2026-08-21) — type de tir effacé dans les 3 chemins PvP manquants | — | ⚡ |
 | infra | ✅ gate roadmap exclut merges tests-only (2026-08-21) — `merge_only_touches_tests` dans `check_roadmap_declared.py` : un merge ne touchant que `tests/` n'est plus compté dans la dette ; 26 tests verts | — | ⚡ |
 | tests | ✅ consolider _uc AI-side → units_cache_entry dans _fabriques (2026-08-21) — 2 helpers _uc identiques dans tests/unit/ai/ fusionnés en units_cache_entry dans _fabriques.py | — | ⚡ |
+| bot | ✅ Ligne de base §12.14 rejouée sur robust_0.8463 (2026-08-21) — mesure bot_zone_direct sur l'étalon courant post-rupture charge_pair_net ; test_aucune_recopie_dans_scripts rendu dynamique | — | ⚡ |
+| moteur | ✅ simplify-reactive-coherency (2026-08-21) — simplification cohérence réactive moteur | — | ⚡ |
+| bot | ✅ 4 findings code-review bot_zone_direct (2026-08-21) — bot_units mort retiré, dead defaults _loss_rate, collect×5→×2 par pas, try/except focus_dist | — | ⚡ |
 | moteur+services | ✅ Fix review-findings (2026-08-18) — surface refus moteur squad, wsgi leading-comma, message vide | — | |
 | services | ✅ VALUE/REQUISITION_COST séparés ED obstacle 7 (2026-08-19) — coût et valeur des unités ED dissociés en deux champs distincts | — | ⚡ |
 | moteur+tests | ✅ JSDoc bcKey périmé + test vert vacant buildBoardGeomKey (2026-08-19) — JSDoc corrigé, test vacant renforcé | — | ⚡ |
