@@ -20,7 +20,6 @@ import pytest
 
 from ai import benchmark_bots as bb
 from ai.benchmark_bots import ReferenceBalancedBot, ReferenceDenialBot, ReferenceReactiveBot
-from ai.evaluation_bots import WAIT_ACTION
 from engine import macro_intents as mi
 from engine.combat_utils import calculate_hex_distance
 
@@ -204,7 +203,7 @@ def test_reclamante_joue_score_et_ne_charge_pas() -> None:
     bot = ReferenceBalancedBot(randomness=0.0)
     active = gs["units"][0]
     assert bot._is_claimant(gs, active) is True
-    assert bot.select_action_with_state([WAIT_ACTION, mi.CHARGE_SLOTS[0]], gs, active) == WAIT_ACTION
+    assert bot.select_action_with_state([mi.ACTION_WAIT, mi.CHARGE_SLOTS[0]], gs, active) == mi.ACTION_WAIT
 
 
 def test_denial_reclamante_ne_charge_pas_meme_si_ennemi_sur_objectif() -> None:
@@ -219,7 +218,7 @@ def test_denial_reclamante_ne_charge_pas_meme_si_ennemi_sur_objectif() -> None:
     bot = ReferenceDenialBot(randomness=0.0)
     active = gs["units"][0]
     assert bot._is_claimant(gs, active) is True, "précondition : s1 est réclamante"
-    assert bot.select_action_with_state([WAIT_ACTION, mi.CHARGE_SLOTS[0]], gs, active) == WAIT_ACTION
+    assert bot.select_action_with_state([mi.ACTION_WAIT, mi.CHARGE_SLOTS[0]], gs, active) == mi.ACTION_WAIT
 
 
 def test_reactive_reclamante_ne_charge_pas_en_plan_kill() -> None:
@@ -238,7 +237,7 @@ def test_reactive_reclamante_ne_charge_pas_en_plan_kill() -> None:
 
     active = gs["units"][0]
     assert bot._is_claimant(gs, active) is True, "précondition : s1 est réclamante"
-    assert bot.select_action_with_state([WAIT_ACTION, mi.CHARGE_SLOTS[0]], gs, active) == WAIT_ACTION
+    assert bot.select_action_with_state([mi.ACTION_WAIT, mi.CHARGE_SLOTS[0]], gs, active) == mi.ACTION_WAIT
 
 
 # ─────────────────────────────────────────────────────────────────────────────────────────────
