@@ -19,7 +19,8 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import pytest
 
 from ai import benchmark_bots as bb
-from ai.benchmark_bots import ReferenceBalancedBot
+from ai.benchmark_bots import ReferenceBalancedBot, ReferenceDenialBot, ReferenceReactiveBot
+from engine import macro_intents as mi
 from engine.combat_utils import calculate_hex_distance
 
 # ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -205,6 +206,44 @@ def test_reclamante_joue_score_et_ne_charge_pas() -> None:
     active = gs["units"][0]
     assert bot._is_claimant(gs, active) is True
     assert bot.select_action_with_state([WAIT_ACTION, 999], gs, active) == WAIT_ACTION
+
+
+def test_denial_reclamante_ne_charge_pas_meme_si_ennemi_sur_objectif() -> None:
+    """ReferenceDenialBot : la garde _is_claimant bloque la charge avant le test de zone ennemi."""
+    from ai.evaluation_bots import WAIT_ACTION
+
+    # Ennemi placé SUR l'objectif A → sans la garde claimant, le bot chargerait (ligne 724).
+    objectives = [{"id": "A", "hexes": _zone(10, 11, 10, 11)}]
+    gs = _game_state(
+        objectives,
+        [("s1", 1, (12, 10)), ("e1", 2, (10, 10))],
+        phase="charge",
+    )
+    bot = ReferenceDenialBot(randomness=0.0)
+    active = gs["units"][0]
+    assert bot._is_claimant(gs, active) is True, "précondition : s1 est réclamante"
+    assert bot.select_action_with_state([WAIT_ACTION, mi.CHARGE_SLOTS[0]], gs, active) == WAIT_ACTION
+
+
+def test_reactive_reclamante_ne_charge_pas_en_plan_kill() -> None:
+    """ReferenceReactiveBot : _is_claimant bloque la charge même quand le plan est KILL (ligne 862)."""
+    from ai.evaluation_bots import WAIT_ACTION
+
+    objectives = [{"id": "A", "hexes": _zone(10, 11, 10, 11)}]
+    gs = _game_state(
+        objectives,
+        [("s1", 1, (12, 10)), ("e1", 2, (20, 10))],
+        phase="charge",
+    )
+    bot = ReferenceReactiveBot(randomness=0.0)
+    # Forcer le plan KILL en gel du marqueur de tour : _update_plan retourne immédiatement.
+    bot._snapshot_episode = gs["episode_number"]
+    bot._plan_turn_marker = (gs["episode_number"], int(gs["turn"]))
+    bot._plan = "KILL"
+
+    active = gs["units"][0]
+    assert bot._is_claimant(gs, active) is True, "précondition : s1 est réclamante"
+    assert bot.select_action_with_state([WAIT_ACTION, mi.CHARGE_SLOTS[0]], gs, active) == WAIT_ACTION
 
 
 # ─────────────────────────────────────────────────────────────────────────────────────────────
