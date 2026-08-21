@@ -290,12 +290,15 @@ def _avg_focus_target_distance(
         None,
     )
     if focused_player is None:
-        raise RuntimeError(f"_avg_focus_target_distance : cible introuvable '{focused}' dans gs['units']")
+        print(f"\n[WARN] focus_dist: cible introuvable '{focused}' dans gs['units']", file=sys.stderr)
+        return None
     if focused_player == bot_player:
-        raise RuntimeError(
-            f"_avg_focus_target_distance : cible '{focused}' appartient au bot-player {bot_player} "
-            "(marqueur à jour — ce n'est pas un résidu inter-épisode)"
+        print(
+            f"\n[WARN] focus_dist: cible '{focused}' appartient au bot-player {bot_player} "
+            "(marqueur à jour — ce n'est pas un résidu inter-épisode)",
+            file=sys.stderr,
         )
+        return None
     if not is_unit_alive(focused, gs):
         return None
     target_entry = require_unit_from_cache(focused, gs, "_focus_dist:target")
@@ -660,12 +663,9 @@ def main() -> None:
                         ft = _count_distinct_focus_targets(gs, bot_player, live_enemies, live_bot_pos)
                         if ft is not None:
                             focus_targets_snapshot[cur_turn] = ft
-                        try:
-                            fd = _avg_focus_target_distance(gs, bot, bot_player, live_bot_pos)
-                            if fd is not None:
-                                focus_dist_snapshot[cur_turn] = fd
-                        except RuntimeError as exc:
-                            print(f"\n[WARN] focus_dist épisode {ep_idx} tour {cur_turn}: {exc}", file=sys.stderr)
+                        fd = _avg_focus_target_distance(gs, bot, bot_player, live_bot_pos)
+                        if fd is not None:
+                            focus_dist_snapshot[cur_turn] = fd
 
                         squad_snapshot[cur_turn] = _count_alive_bot_squads(gs, bot_player)
 
