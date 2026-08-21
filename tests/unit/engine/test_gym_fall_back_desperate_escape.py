@@ -310,3 +310,25 @@ def test_gym_fall_back_anchor_shifted_skips_move() -> None:
     assert "_flee_mode" not in gs, f"_flee_mode stale : {gs.get('_flee_mode')!r}"
     assert "_desperate_escape_rolls" not in gs, "_desperate_escape_rolls stale"
     assert "1" not in gs[MOVE_CELL_MAP_CACHE_KEY], "cell map stale après fall_back_anchor_shifted"
+
+    # L'ACTIVATION EST-ELLE RÉELLEMENT CLOSE ? `activation_complete` ci-dessus n'a AUCUN lecteur
+    # dans engine/ai/services : l'assertion précédente était VACANTE. Seul `end_activation` retire
+    # du `move_activation_pool` (generic_handlers ~L170), et ce pool est la SEULE source de
+    # `_raw_eligible_units_for_current_phase` en phase move. Sans retrait, l'escouade était
+    # réactivée dans la MÊME phase (2e mouvement, interdit par 09.04) — et comme les pertes de
+    # Desperate Escape peuvent avoir rompu sa coherency, chacune de ses destinations levait
+    # « execute_squad_move a échoué … (formation actuelle DEJA incoherente) ».
+    assert "1" not in gs["move_activation_pool"], (
+        "escouade toujours dans move_activation_pool après fall_back_anchor_shifted : "
+        f"{gs['move_activation_pool']} — elle sera réactivée dans la même phase de move"
+    )
+    assert "1" in gs["units_moved"], (
+        "activation non comptabilisée : units_moved="
+        f"{gs['units_moved']}"
+    )
+    # PAS de `units_fled` : aucun fall back n'a eu lieu (le move a été sauté), donc l'unité ne
+    # doit pas porter les interdits 09.07 (pas de tir ni de charge après une retraite).
+    assert "1" not in gs.get("units_fled", set()), (
+        "units_fled posé alors qu'aucun fall back n'a été exécuté : "
+        f"{gs.get('units_fled')}"
+    )

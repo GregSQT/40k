@@ -12382,8 +12382,14 @@ def erode_move_pool_by_squad_block(
     coût d'ancre via ``classify_squad_move_type``). En métrique EUCLIDIENNE (PvP/bot PvE) le champ
     est le champ any-angle par-figurine, exactement celui que la validation interroge. Seule
     exclusion rendant le cube exact (érosion de budget inactive) : FLY actif (21.03, traversée
-    libre). ``require_coherency`` / collision intra-plan restent INVARIANTS par translation
-    rigide (positions RELATIVES préservées) → déjà garantis par le pool d'ancre.
+    libre). ``require_coherency`` / collision intra-plan sont INVARIANTS par translation
+    rigide (positions RELATIVES préservées). Pour la collision intra-plan, l'invariance suffit :
+    le pool d'ancre la garantit. Pour la coherency, NON — l'invariance se retourne. Depuis une
+    formation déjà hors coherency, la translation la préserve, donc ``validate_move_plan``
+    refuse TOUTES les candidates. Cette érosion-ci ne juge que des CELLULES (une propriété
+    par-figurine) ; la coherency est une propriété de la FORMATION ENTIÈRE, et c'est
+    ``build_squad_move_cell_map``, seul appelant de production, qui la court-circuite en
+    rendant un pool vide (voir son commentaire « Formation d'ORIGINE déjà hors coherency »).
 
     ``move_budget`` : budget (subhex) auquel le pool a été construit — À PASSER par
     ``build_squad_move_cell_map`` pour que l'érosion de budget connaisse le régime réel
@@ -12769,6 +12775,30 @@ def build_squad_move_cell_map(
     # Pas de garde `budget <= 0` ici : un budget nul est un etat legitime (`max(0, MOVE - malus)`,
     # Take to the skies 21.03) et le pool le traite deja — il renvoie simplement zero destination,
     # donc zero cellule jouable. Ajouter une garde reviendrait a court-circuiter le moteur.
+    # Formation d'ORIGINE deja hors coherency -> AUCUNE destination n'est jouable, pool VIDE.
+    # `erode_move_pool_by_squad_block` documente `require_coherency` comme « deja garanti par le
+    # pool d'ancre », parce qu'il est invariant par translation rigide. L'invariance est vraie
+    # (`test_coherency_translation_invariance`) mais elle SE RETOURNE : depuis une formation deja
+    # incoherente, la translation preserve l'incoherence, donc `validate_move_plan` refuse CHAQUE
+    # candidate. Le masque offrait alors tout le pool a une escouade dont aucun mouvement n'est
+    # executable -> `execute_squad_move a echoue ... (formation actuelle DEJA incoherente)` :
+    # l'invariant « masque ⊆ executable », qui fait LEVER le gym en plein run.
+    # Pool vide = LA REGLE, pas un repli. 03.01 ENDING A MOVE : une unite qui ne peut pas finir
+    # en coherency « cannot make that move », ses figurines reviennent a leur position de depart
+    # et elle reste stationnaire (09.04). Ce n'est pas un gel definitif : 03.03 REGAINING
+    # COHERENCY retire des figurines en fin de tour jusqu'au retour en coherency.
+    # Ni masque vide ni impasse : `build_squad_action_mask` pose `mask[SQUAD_ACTION_WAIT] = 1`
+    # INCONDITIONNELLEMENT en phase move.
+    # Place ICI et pas dans l'erosion : la coherency est une propriete de la FORMATION ENTIERE,
+    # quand l'erosion ne juge que des CELLULES. Avant le pool BFS -> aussi un cout evite.
+    _alive_fp = [
+        _m for _mid in _sm_fp.get(str(squad_id), [])  # get allowed
+        if (_m := _mc_fp.get(str(_mid))) is not None
+    ]
+    if not _positions_in_coherency(_alive_fp, game_state):
+        _cache[str(squad_id)] = (_fp_key, {})
+        return {}
+
     costs: Dict[Tuple[int, int], float] = {}
     # `destination_level` : le squad move rigide atterrit au SOL (cf.
     # `SQUAD_RIGID_MOVE_DESTINATION_LEVEL`) — la légalité des cellules doit donc être évaluée
