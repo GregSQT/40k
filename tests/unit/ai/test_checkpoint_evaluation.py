@@ -1,11 +1,44 @@
-"""Tests unitaires pour R0b — discover_checkpoint_archives et _NormalizedFrozenModel."""
+"""Tests unitaires pour R0b — discover_checkpoint_archives, _NormalizedFrozenModel,
+et log_checkpoint_evaluations (compteurs W/L/D)."""
 
 import logging
 import os
+from typing import Any, Dict, List, Tuple
+
 import numpy as np
 import pytest
 
 from ai.bot_evaluation import discover_checkpoint_archives, _NormalizedFrozenModel
+from ai.metrics_tracker import W40KMetricsTracker
+
+
+# ── helpers ───────────────────────────────────────────────────────────────────
+
+
+class _DummyWriter:
+    """Stub TensorBoard writer pour test_checkpoint_evaluation."""
+
+    def __init__(self) -> None:
+        self.scalars: List[Tuple[str, float, int]] = []
+
+    def add_scalar(self, key: str, value: float, step: int, /) -> None:
+        self.scalars.append((key, value, step))
+
+    def add_custom_scalars(self, layout: Dict[str, Any], /) -> None:  # noqa: ARG002
+        pass
+
+    def flush(self) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
+
+
+def _ckpt_tracker_stub() -> W40KMetricsTracker:
+    t = W40KMetricsTracker.__new__(W40KMetricsTracker)
+    t.writer = _DummyWriter()
+    t.episode_count = 42
+    return t
 
 
 # ── discover_checkpoint_archives ──────────────────────────────────────────
@@ -145,3 +178,60 @@ def test_normalized_frozen_model_passes_kwargs():
 
     assert received_kwargs.get("deterministic") is True
     assert "action_masks" in received_kwargs
+
+
+# ── log_checkpoint_evaluations — compteurs W/L/D ──────────────────────────────
+
+
+def _scalars_dict(tracker: W40KMetricsTracker) -> Dict[str, float]:
+    """Retourne {key: value} depuis la liste des scalaires enregistrés."""
+    writer = tracker.writer
+    assert isinstance(writer, _DummyWriter)
+    return {k: v for k, v, _ in writer.scalars}
+
+
+def test_log_checkpoint_publishes_wld_counters():
+    """Les compteurs _wins/_losses/_draws sont publiés sous bot_eval/vs_ckpt_*."""
+    t = _ckpt_tracker_stub()
+    ckpt_results = {
+        "0.50": 0.6,
+        "0.50_wins": 30,
+        "0.50_losses": 15,
+        "0.50_draws": 5,
+    }
+    t.log_checkpoint_evaluations(ckpt_results, step=100)
+
+    scalars = _scalars_dict(t)
+    assert scalars["bot_eval/vs_ckpt_0.50"] == pytest.approx(0.6)
+    assert scalars["bot_eval/vs_ckpt_0.50_wins"] == 30
+    assert scalars["bot_eval/vs_ckpt_0.50_losses"] == 15
+    assert scalars["bot_eval/vs_ckpt_0.50_draws"] == 5
+
+
+def test_log_checkpoint_min_mean_exclude_wld_counters():
+    """ckpt_min et ckpt_mean ne portent que sur les ratios, pas sur les compteurs bruts."""
+    t = _ckpt_tracker_stub()
+    ckpt_results = {
+        "0.40": 0.4,
+        "0.40_wins": 20,
+        "0.40_losses": 25,
+        "0.40_draws": 5,
+        "0.70": 0.7,
+        "0.70_wins": 35,
+        "0.70_losses": 10,
+        "0.70_draws": 5,
+    }
+    t.log_checkpoint_evaluations(ckpt_results, step=200)
+
+    scalars = _scalars_dict(t)
+    assert scalars["00_critical/ckpt_min"] == pytest.approx(0.4)
+    assert scalars["00_critical/ckpt_mean"] == pytest.approx((0.4 + 0.7) / 2)
+
+
+def test_log_checkpoint_empty_does_nothing():
+    """Avec un dict vide, aucun scalaire n'est publié."""
+    t = _ckpt_tracker_stub()
+    t.log_checkpoint_evaluations({}, step=0)
+    writer = t.writer
+    assert isinstance(writer, _DummyWriter)
+    assert writer.scalars == []

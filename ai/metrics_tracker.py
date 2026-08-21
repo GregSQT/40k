@@ -2160,12 +2160,13 @@ class W40KMetricsTracker:
 
     def log_checkpoint_evaluations(
         self,
-        ckpt_results: Dict[str, float],
+        ckpt_results: Dict[str, Any],
         step: Optional[int] = None,
     ) -> None:
         """Win-rate vs chaque checkpoint figé (R0b).
 
-        Publie `bot_eval/vs_ckpt_<score>` par barreau + agrégats dans `00_critical/` :
+        Publie `bot_eval/vs_ckpt_<key>` pour chaque entrée (ratios + compteurs W/L/D).
+        Agrégats dans `00_critical/` calculés sur les seuls ratios :
         - `00_critical/ckpt_min`  : barreau le plus difficile (le modèle le plus fort)
         - `00_critical/ckpt_mean` : moyenne sur tous les barreaux
 
@@ -2175,9 +2176,13 @@ class W40KMetricsTracker:
         if not ckpt_results:
             return
         x = step if step is not None else self.episode_count
-        for score_label, win_rate in ckpt_results.items():
-            self.writer.add_scalar(f'bot_eval/vs_ckpt_{score_label}', float(win_rate), x)
-        scores = list(ckpt_results.values())
+        _counter_suffixes = ("_wins", "_losses", "_draws")
+        for key, value in ckpt_results.items():
+            self.writer.add_scalar(f'bot_eval/vs_ckpt_{key}', float(value), x)
+        scores = [
+            float(v) for k, v in ckpt_results.items()
+            if not k.endswith(_counter_suffixes)
+        ]
         self.writer.add_scalar('00_critical/ckpt_min', float(min(scores)), x)
         self.writer.add_scalar('00_critical/ckpt_mean', float(sum(scores) / len(scores)), x)
 

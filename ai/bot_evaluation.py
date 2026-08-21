@@ -1978,7 +1978,7 @@ def evaluate_against_checkpoints(
     scenario_pool: str = "holdout",
     scenario_list_override: Optional[List[str]] = None,
     device: str = "cpu",
-) -> Dict[str, float]:
+) -> Dict[str, Any]:
     """Win-rate du modèle courant contre chaque archive checkpoint figée.
 
     Hors sélection et hors gate (R0b) : indicateur de force relative sur la durée.
@@ -2059,7 +2059,7 @@ def evaluate_against_checkpoints(
         normalized_ckpt = _NormalizedFrozenModel(ckpt_model, ckpt_normalizer)
         ckpt_mtime = float(os.path.getmtime(zip_path))
 
-        wins, total = 0, 0
+        wins, losses, draws, total = 0, 0, 0, 0
         for sc_idx, sc_file in enumerate(scenario_list):
             unit_registry = UnitRegistry()
             base_env = W40KEngine(
@@ -2129,9 +2129,16 @@ def evaluate_against_checkpoints(
                 controlled_player = require_key(info, "controlled_player")
                 if winner == controlled_player:
                     wins += 1
+                elif winner == -1:
+                    draws += 1
+                else:
+                    losses += 1
 
             env.close()
 
         results[score_label] = wins / max(1, total)
+        results[f"{score_label}_wins"] = wins
+        results[f"{score_label}_losses"] = losses
+        results[f"{score_label}_draws"] = draws
 
     return results
