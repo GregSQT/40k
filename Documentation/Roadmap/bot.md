@@ -2,17 +2,11 @@
 
 ---
 
-## 🔴 R0a — Réparation reference_* (couche déplacement/intention) {#r0a-references}
+## 🟡 R0a — Réparation reference_* (couche déplacement/intention) {#r0a-references}
 
-**PRIORITÉ HAUTE — décision utilisateur 2026-08-21, à livrer avant le prochain run long.**
-Les reference_* sont saturés côté agent depuis la première éval (93-100 % à 10k épisodes,
-courbes du run 2026-08-21) : ils n'ont jamais rien mesuré, et le gate `benchmark_floor` est
-inerte. Quatre réparations mécaniques dans `ai/benchmark_bots.py` seul : élection d'intention
-au niveau ARMÉE (une réclamante par objectif libre — règle « marquer d'abord » ET
-l'empilement), prime de tenue de zone, anti-empilement via `objective_control_contributions`,
-géométrie par aire. Cible bot-contre-bot [0,40 ; 0,60] par bot, puis re-pose du gate en
-sémantique win-rate agent. tactical n'est PAS touché (gels §0.55/D10 maintenus, piste
-« tactical holdout unique » écartée — ne se rouvre que par la mesure C.4).
+✅ **Code livré 2026-08-21** — `ai/benchmark_bots.py` + 17 tests verts.
+§3.1 assignation réclamante, §3.2 tenue, §3.3 anti-empilement, §3.4 géométrie par aire.
+**Reste : mesure §3.6** (`bot_ranking` 6 ép., cible [0,40 ; 0,60]) + re-pose `benchmark_floor`.
 
 → `Documentation/Implémentation/A_faire/curriculum_adversaires_etalons.md` §3
 
