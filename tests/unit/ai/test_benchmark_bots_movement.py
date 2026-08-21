@@ -20,6 +20,7 @@ import pytest
 
 from ai import benchmark_bots as bb
 from ai.benchmark_bots import ReferenceBalancedBot, ReferenceDenialBot, ReferenceReactiveBot
+from ai.evaluation_bots import WAIT_ACTION
 from engine import macro_intents as mi
 from engine.combat_utils import calculate_hex_distance
 
@@ -196,8 +197,6 @@ def test_reclamante_morte_declenche_une_reassignation_dans_le_tour() -> None:
 
 def test_reclamante_joue_score_et_ne_charge_pas() -> None:
     """Une réclamante joue SCORE : son intention doctrinale n'est pas consultée en charge."""
-    from ai.evaluation_bots import WAIT_ACTION
-
     objectives = [{"id": "A", "hexes": _zone(10, 11, 10, 11)}]
     gs = _game_state(
         objectives, [("s1", 1, (12, 10)), ("e1", 2, (13, 10))], phase="charge",
@@ -205,14 +204,12 @@ def test_reclamante_joue_score_et_ne_charge_pas() -> None:
     bot = ReferenceBalancedBot(randomness=0.0)
     active = gs["units"][0]
     assert bot._is_claimant(gs, active) is True
-    assert bot.select_action_with_state([WAIT_ACTION, 999], gs, active) == WAIT_ACTION
+    assert bot.select_action_with_state([WAIT_ACTION, mi.CHARGE_SLOTS[0]], gs, active) == WAIT_ACTION
 
 
 def test_denial_reclamante_ne_charge_pas_meme_si_ennemi_sur_objectif() -> None:
     """ReferenceDenialBot : la garde _is_claimant bloque la charge avant le test de zone ennemi."""
-    from ai.evaluation_bots import WAIT_ACTION
-
-    # Ennemi placé SUR l'objectif A → sans la garde claimant, le bot chargerait (ligne 724).
+    # Ennemi placé SUR l'objectif A → sans la garde claimant, le bot chargerait.
     objectives = [{"id": "A", "hexes": _zone(10, 11, 10, 11)}]
     gs = _game_state(
         objectives,
@@ -226,9 +223,7 @@ def test_denial_reclamante_ne_charge_pas_meme_si_ennemi_sur_objectif() -> None:
 
 
 def test_reactive_reclamante_ne_charge_pas_en_plan_kill() -> None:
-    """ReferenceReactiveBot : _is_claimant bloque la charge même quand le plan est KILL (ligne 862)."""
-    from ai.evaluation_bots import WAIT_ACTION
-
+    """ReferenceReactiveBot : _is_claimant bloque la charge même quand le plan est KILL."""
     objectives = [{"id": "A", "hexes": _zone(10, 11, 10, 11)}]
     gs = _game_state(
         objectives,
