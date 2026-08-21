@@ -1032,8 +1032,13 @@ def _fight_build_valid_target_pool(game_state: Dict[str, Any], unit: Dict[str, A
 
     NO LINE OF SIGHT CHECK (fight doesn't need LoS)
     """
-    from engine.spatial_relations import get_engagement_zone, unit_entries_within_engagement_zone
+    from engine.spatial_relations import (
+        engagement_distance_metric,
+        get_engagement_zone,
+        unit_entries_within_engagement_zone,
+    )
     cc_range = get_engagement_zone(game_state)
+    metric = engagement_distance_metric(game_state)
     units_cache = require_key(game_state, "units_cache")
     unit_id_str = str(require_key(unit, "id"))
     unit_entry = units_cache.get(unit_id_str)
@@ -1054,7 +1059,7 @@ def _fight_build_valid_target_pool(game_state: Dict[str, Any], unit: Dict[str, A
         units_cache, unit_player, exclude_id=unit_id_str
     ):
         if not unit_entries_within_engagement_zone(
-            unit_entry, target_entry, cc_range):
+            unit_entry, target_entry, cc_range, metric=metric):
             continue
         valid_targets.append(target_id)
 
@@ -1119,10 +1124,11 @@ def model_entry_can_fight_target(
     subissent identiquement — un opt-in aurait pu être oublié d'un seul côté, et l'obs aurait
     annoncé engagées des figurines que la résolution refuse.
     """
-    from engine.spatial_relations import unit_entries_within_engagement_zone
+    from engine.spatial_relations import engagement_distance_metric, unit_entries_within_engagement_zone
 
     return unit_entries_within_engagement_zone(
         attacker_model_entry, target_entry, engagement_zone,
+        metric=engagement_distance_metric(game_state),
     )
 
 
