@@ -769,8 +769,10 @@ def unit_entries_within_engagement_zone(
     Primitive canonique EZ (règle 03.04, bord-à-bord). ``metric`` :
     - ``None`` (défaut) → résolue via ``engagement_distance_metric`` (config-loader global) : tous
       les call-sites basculent automatiquement à la config, sans changement de signature.
-    - explicite → épinglage, réservé aux TESTS qui construisent une situation dans une métrique
-      donnée. Plus AUCUN call-site de production n'épingle (2026-08-04).
+    - explicite → deux cas légitimes : (a) TESTS qui construisent une situation dans une métrique
+      donnée ; (b) call-sites de production qui fournissent ``engagement_distance_metric(game_state)``
+      pré-calculé pour éviter le singleton (poison x1/x5). Épingler une valeur CODÉE EN DUR (ex.
+      ``metric="hex"``) hors de ces deux cas est interdit.
 
     L'observation IA a épinglé ``"hex"`` jusqu'au 2026-08-04 (``observation_builder``, drapeaux
     ``engaged`` et ``in_enemy_ez``). Sans effet à x1 — ``geometry_is_hex`` y impose hex de toute
