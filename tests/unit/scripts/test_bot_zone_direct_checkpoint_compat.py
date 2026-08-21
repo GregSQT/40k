@@ -71,25 +71,47 @@ def reference_zip(script):
 def checkpoint_keys(reference_zip):
     """Clés du state dict contenu dans policy.pth de l'archive épinglée."""
     with zipfile.ZipFile(reference_zip) as z:
+        if "policy.pth" not in z.namelist():
+            pytest.skip(
+                f"Archive {reference_zip.name!r} sans entrée 'policy.pth' "
+                f"(contenu : {', '.join(sorted(z.namelist()))})"
+            )
         with z.open("policy.pth") as f:
             sd = torch.load(io.BytesIO(f.read()), map_location="cpu", weights_only=True)
     return set(sd.keys())
 
 
 @pytest.fixture(scope="module")
-def fresh_policy_keys():
-    """Clés du state dict d'une PointerMaskablePolicy fraîchement construite."""
+def checkpoint_policy_kwargs(reference_zip):
+    """Lit policy_kwargs depuis 'data' du checkpoint pour ne pas coder net_arch en dur."""
+    with zipfile.ZipFile(reference_zip) as z:
+        if "data" not in z.namelist():
+            return {}
+        with z.open("data") as f:
+            saved = torch.load(io.BytesIO(f.read()), map_location="cpu", weights_only=False)
+    return saved.get("policy_kwargs", {})
+
+
+@pytest.fixture(scope="module")
+def fresh_policy_keys(checkpoint_policy_kwargs):
+    """Clés du state dict d'une PointerMaskablePolicy fraîchement construite.
+
+    Utilise les policy_kwargs du checkpoint (net_arch inclus) pour que toute divergence
+    de clés reflète uniquement un changement de code (module ajouté/supprimé), pas
+    une différence d'architecture codée en dur.
+    """
     torch.manual_seed(0)
+    policy_kwargs = {
+        "features_extractor_class": SpatialCombinedExtractor,
+        "features_extractor_kwargs": {"cnn_features": 32},
+        **checkpoint_policy_kwargs,
+    }
     model = MaskablePPO(
         PointerMaskablePolicy,
         _ToyEnv(),
         device="cpu",
         verbose=0,
-        policy_kwargs={
-            "net_arch": [64, 64],
-            "features_extractor_class": SpatialCombinedExtractor,
-            "features_extractor_kwargs": {"cnn_features": 32},
-        },
+        policy_kwargs=policy_kwargs,
     )
     return set(model.policy.state_dict().keys())
 
