@@ -60,6 +60,12 @@ Décisions tranchées (2026-08-12, ne pas rouvrir) :
 
 ---
 
+## fix-reactive-move-coherency — ✅ livré 2026-08-21 {#reactive-move-coherency}
+
+Move réactif : une escouade hors cohérence ne pouvait pas faire ce mouvement (03.01) mais le moteur ne le bloquait pas. Fix : check `_positions_in_coherency` avant le pool D6 dans `maybe_resolve_reactive_move`, log `reactive_move_declined reason=formation_incoherente`. Aligné sur le move normal (`build_squad_move_cell_map`). Test rouge→vert par mutation.
+
+---
+
 ## Replis `unit_by_id` {#unit-by-id}
 
 **T0 livré le 2026-08-19** — `require_unit_by_id(game_state, unit_id)` dans `engine/game_utils.py`, re-exportée depuis `combat_utils`. Signature canonique `(game_state, unit_id)` alignée sur le pattern moteur. Reste : T1 (10 sites Forme C), T2 (46 sites Forme B), T3 (64 sites Forme D) — ~4-5 sessions.
