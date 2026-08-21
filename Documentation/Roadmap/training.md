@@ -20,6 +20,22 @@ courbes**, un run séparé n'a plus d'objet sauf si celui-ci échoue.
 
 ---
 
+## 🔴 Curriculum R1→R3 — séquence des runs {#curriculum}
+
+**Décision utilisateur 2026-08-21 — priorité haute.** Le curriculum démarre dès R0a+R0b livrés
+([bot.md#r0a-references](bot.md#r0a-references), [bot.md#r0b-echelle](bot.md#r0b-echelle)).
+**Un levier par run** :
+
+- **R1** — run de référence `x1_long --new`, rien d'autre ne bouge : ligne de base du
+  curriculum (panel + references réparées + `vs_ckpt`) et premier barreau d'échelle.
+- **R2** — mix self-play (= chemin critique ligne 7, §0.59) : profil dérivé de `x1_long`,
+  clés `self_play_*` récupérables au git (`x1_selfplay` purgé par `18dc8599`) ; parts
+  proposées NON MESURÉES ~55-60 % doctrine / 25-30 % self / 15 % random, à trancher au chantier.
+- **R3** — levier récompense ([bot.md#recompense](bot.md#recompense)), jamais dans le même
+  run que R2.
+
+→ `Documentation/Implémentation/A_faire/curriculum_adversaires_etalons.md` §5-7
+
 ---
 
 ## É9 — Second siège + second scénario {#e9}

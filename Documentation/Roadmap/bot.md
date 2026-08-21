@@ -2,6 +2,33 @@
 
 ---
 
+## 🔴 R0a — Réparation reference_* (couche déplacement/intention) {#r0a-references}
+
+**PRIORITÉ HAUTE — décision utilisateur 2026-08-21, à livrer avant le prochain run long.**
+Les reference_* sont saturés côté agent depuis la première éval (93-100 % à 10k épisodes,
+courbes du run 2026-08-21) : ils n'ont jamais rien mesuré, et le gate `benchmark_floor` est
+inerte. Quatre réparations mécaniques dans `ai/benchmark_bots.py` seul : élection d'intention
+au niveau ARMÉE (une réclamante par objectif libre — règle « marquer d'abord » ET
+l'empilement), prime de tenue de zone, anti-empilement via `objective_control_contributions`,
+géométrie par aire. Cible bot-contre-bot [0,40 ; 0,60] par bot, puis re-pose du gate en
+sémantique win-rate agent. tactical n'est PAS touché (gels §0.55/D10 maintenus, piste
+« tactical holdout unique » écartée — ne se rouvre que par la mesure C.4).
+
+→ `Documentation/Implémentation/A_faire/curriculum_adversaires_etalons.md` §3
+
+---
+
+## 🔴 R0b — Échelle de checkpoints figés en éval {#r0b-echelle}
+
+**PRIORITÉ HAUTE — décision utilisateur 2026-08-21.** Étalon de force non saturable : win-rate
+du modèle courant contre les archives `robust_*` chargeables (6/28 au 2026-08-21, §12.15),
+publié en `bot_eval/vs_ckpt_<score>`, hors sélection et hors gate au départ. Réutilise le
+chemin adverse self-play ; première marche de la league (#league).
+
+→ `Documentation/Implémentation/A_faire/curriculum_adversaires_etalons.md` §4
+
+---
+
 ## Étape 8 — Mesure reference bots renforcés {#etape8}
 
 ✅ Run `x1_long --new` terminé (2026-08-20), 4 critères pipeline VERTS.
@@ -11,7 +38,7 @@
 - `reference_balanced` : **0,168**
 - `reference_denial` : **0,155**
 - `reference_reactive` : **0,139** ← min
-- `benchmark_floor` posé à **0,049** (`min − 0,09`) dans `x1_long/callback_params/model_gating_min_benchmark_floor`
+- `benchmark_floor` posé à **0,049** (`min − 0,09`) dans `x1_long/callback_params/model_gating_min_benchmark_floor` — ⚠️ remis à **0,90** le 2026-08-20 (commit `e504d46b`) : le 0,049 venait d'un score bot-contre-bot alors que le gate lit le win-rate AGENT ; re-pose mesurée prévue en R0a ([#r0a-references](#r0a-references))
 
 ✅ Ligne de base agent rejouée sur `robust_0.8463` (2026-08-21, 100 ép./bot, panel 10 bots) :
 `combined = 0,8567`, pire bot `attrition = 0,810`, pire scénario `= 0,7800`, zones T2/T5 = 1,81/1,76.
@@ -24,6 +51,8 @@ Le protocole C.4 (`Bot_refactor.md` §C.4) exige d'évaluer ≥ 3 modèles de fo
 Ce protocole n'a jamais été exécuté. L'agent courant gagne à 100 % contre les trois bots `reference_*` : l'amplitude entre modèles est 0 sur ces benchmarks, quelle que soit la force du modèle testé. Par le critère écrit du doc (amplitude < incertitude d'échantillon ±5,0 pts → « le benchmark ne mesure rien »), les trois benchmarks `reference_*` **ne mesurent rien** dans leur état actuel.
 
 Même sort que `standoff` (amplitude 0,05, supprimé le 2026-08-11). Décision de garder ou remplacer les bots `reference_*` revient à l'utilisateur.
+
+**→ Tranché le 2026-08-21 : RÉPARATION** ([#r0a-references](#r0a-references)) — le mécanisme (intention d'abord) est gardé, la couche déplacement est réparée ; C.4 sera rejoué après R0a sur les checkpoints chargeables.
 
 → `Documentation/Implémentation/A_faire/bots_refonte_panel.md` (`Documentation/Implémentation/Bot_refactor.md` §7)
 

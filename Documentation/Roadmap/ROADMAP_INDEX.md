@@ -44,7 +44,7 @@ Tout chantier sert un jalon ci-dessous, ou attend. Les jalons sont séquentiels 
 
 | Jalon | Contenu | Critère de sortie |
 |---|---|---|
-| **J1 — Pipeline prouvé, ligne de base** ✅ | Run `x1_long --new` terminé le 2026-08-20 — combined agent `0,7433`, pire bot `racer = 0,630` ; reference bots mesurés (balanced `0,168`, denial `0,155`, reactive `0,139`), `benchmark_floor` posé à `0,049` — ⛔ ligne de base À REJOUER : prise sur un checkpoint qui ne charge plus, étalon ré-épinglé le 2026-08-21 (`bots_refonte_panel.md` §12.15) | Critères de [training.md#run-verif](training.md#run-verif) verts ; ligne de base panel rejouée |
+| **J1 — Pipeline prouvé, ligne de base** ✅ | Run `x1_long --new` terminé le 2026-08-20 ; ligne de base REJOUÉE le 2026-08-21 sur `robust_0.8463` (post-rupture §12.15) : combined agent `0,8567`, pire bot `attrition = 0,810` ; reference bots mesurés bot-contre-bot (balanced `0,168`, denial `0,155`, reactive `0,139`) ; `benchmark_floor` remis à `0,90` le 2026-08-20 (le `0,049` mélangeait les sémantiques, re-pose en R0a) | Critères de [training.md#run-verif](training.md#run-verif) verts ; ligne de base panel rejouée ✅ |
 | **J2 — Le gym décide tout** | Chemin critique lignes 1–4 (P3-5, P3-6, P3-8, P4) ; le dégel de `TOTAL_ACTION_SIZE` qu'elles ouvrent embarque P3-0 | Plus aucune décision de jeu jouée par une heuristique à la place de l'agent, hors optionnels statués par mesure de regret |
 | **J3 — Mesure de référence** | Chemin critique lignes 5–6 : profil de validation P5, puis `x1_long` (~20 h) | LE chiffre officiel du projet — solde §0.14, §0.67 et le critère T6 (via §10.6) |
 | **J4 — Dépasser la mesure** | Self-play §0.59 (ligne 7), capacités 06, É9 second scénario — priorisés selon ce que la mesure révèle | Win-rate au-dessus de la mesure de référence, reproductible |
@@ -57,6 +57,22 @@ Tout chantier sert un jalon ci-dessous, ou attend. Les jalons sont séquentiels 
 | Priorité | Sujets | Chantier | Fichier |
 |---|---|---|---|
 | ✅ | training+bot | Run `x1_long --new` terminé 2026-08-20 — critères pipeline VERTS, `benchmark_floor` posé à 0,049 | [bot.md#etape8](bot.md#etape8) |
+
+---
+
+## 🔴 URGENCE — Curriculum : adversaires et étalons (décision 2026-08-21)
+
+**Décision utilisateur du 2026-08-21 — passe devant les lignes J2.** Les instruments
+d'évaluation sont saturés (reference_* battus 93-100 % dès 10k épisodes, `vs_tactical` à 1,00
+dès 30k) : R0a/R0b se livrent AVANT le prochain run long, puis le curriculum R1→R3 enchaîne
+(R2 = ligne 7 du chemin critique, R3 = chantier récompense). tactical reste gelé (§0.55/D10).
+Détail : `Documentation/Implémentation/A_faire/curriculum_adversaires_etalons.md`.
+
+| # | Sujets | Chantier | Fichier | ⚡/🚫 |
+|---|---|---|---|---|
+| 1 | bot | **R0a** Réparation reference_* (intention armée, tenue, anti-empilement, aire) + re-pose `benchmark_floor` | [bot.md#r0a-references](bot.md#r0a-references) | ⚡ (la re-pose du gate touche la config : entre deux runs) |
+| 2 | bot+training | **R0b** Échelle de checkpoints figés en éval (`vs_ckpt_*`) | [bot.md#r0b-echelle](bot.md#r0b-echelle) | ⚡ |
+| 3 | training | **R1→R3** Séquence des runs du curriculum (un levier par run) | [training.md#curriculum](training.md#curriculum) | 🚫 |
 
 ---
 
