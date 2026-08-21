@@ -2610,11 +2610,11 @@ def _build_reactive_move_destinations_pool(
     # par la primitive commune à tous les mouvements d'escouade. C'est ce filtre qui autorise
     # l'appelant à translater le bloc au lieu de ne bouger que l'ancre.
     squad_id = str(require_key(reactive_unit, "id"))
-    # `require_coherency` DESACTIVE : la translation est rigide, donc la formation — et donc la
-    # coherency — est identique avant et apres. La re-juger reviendrait a exiger de la capacite
-    # qu'elle REPARE un etat anterieur : une escouade sortie de coherency par une perte (resorbee
-    # seulement en fin de tour) verrait TOUTES ses destinations rejetees, pool vide, capacite
-    # eteinte sans un log ni un `declined`.
+    # `require_coherency` DESACTIVE : la translation est rigide → la formation préserve son état
+    # de cohérence (invariant par translation). Le cas "formation déjà incohérente" est rejeté
+    # EN AMONT par maybe_resolve_reactive_move avant d'appeler cette fonction (03.01), avec log
+    # `reactive_move_declined reason=formation_incoherente`. Ici, la formation d'arrivée est donc
+    # garantie cohérente si la formation de départ l'est — le re-vérifier serait inutile.
     constraints = {
         **DEFAULT_MOVE_CONSTRAINTS,
         "budget_per_model": move_range,
@@ -3025,6 +3025,34 @@ def maybe_resolve_reactive_move(
                 raise KeyError(
                     f"Missing reactive adjacency snapshot for player {reactive_player_int}"
                 )
+
+            # 03.01 ENDING A MOVE : une escouade hors cohérence ne peut pas faire ce mouvement.
+            # Même règle que build_squad_move_cell_map (pool vide si formation incohérente).
+            _rm_models_cache = require_key(game_state, "models_cache")
+            _rm_squad_models = require_key(game_state, "squad_models")
+            _rm_alive = [
+                _rm_models_cache[m]
+                for m in _rm_squad_models.get(reactive_unit_id, [])
+                if m in _rm_models_cache
+            ]
+            if not _positions_in_coherency(_rm_alive, game_state):
+                declined_count += 1
+                append_action_log(
+                    game_state,
+                    {
+                        "type": "reactive_move_declined",
+                        "unitId": reactive_unit_id,
+                        "reason": "formation_incoherente",
+                        "triggered_by_unit_id": moved_unit_id_str,
+                        "trigger_move_kind": move_kind,
+                        "trigger_move_cause": move_cause,
+                        "event_fromCol": from_col_int,
+                        "event_fromRow": from_row_int,
+                        "event_toCol": to_col_int,
+                        "event_toRow": to_row_int,
+                    },
+                )
+                continue
 
             # Each reacting unit gets its own D6 range roll.
             move_range = resolve_dice_value("D6", "reactive_move_distance")
