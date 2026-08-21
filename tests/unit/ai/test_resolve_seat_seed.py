@@ -1,7 +1,7 @@
 """Tests unitaires de _resolve_seat_seed (bot_evaluation.py).
 
-Vérifie que agent_seat_seed=0 n'est pas écrasé par la seed globale
-(le `or` falsy était le bug — remplacé par `is None`).
+Vérifie que agent_seat_seed=0 n'est pas écrasé par la seed globale,
+et que null explicite lève TypeError plutôt que de silencieusement utiliser seed.
 """
 import pytest
 
@@ -41,5 +41,16 @@ def test_raises_on_non_int_seat_seed() -> None:
 def test_raises_on_bool_seat_seed() -> None:
     """bool est sous-classe de int mais doit être rejeté."""
     cfg = {"agent_seat_seed": True}
+    with pytest.raises(TypeError, match="entier"):
+        be._resolve_seat_seed(cfg)
+
+
+def test_explicit_null_seat_seed_raises_not_falls_back() -> None:
+    """agent_seat_seed=null explicite doit lever TypeError, pas utiliser seed globale.
+
+    Avec .get() l'ancien code confondait clé absente et valeur null : seed=99 était
+    retournée silencieusement. Avec `in`, null déclenche le garde isinstance.
+    """
+    cfg = {"agent_seat_seed": None, "seed": 99}
     with pytest.raises(TypeError, match="entier"):
         be._resolve_seat_seed(cfg)
