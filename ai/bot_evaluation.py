@@ -1297,6 +1297,13 @@ def _render_scenario_ranking(scenario_scores, total_failed_episodes):
     return lines
 
 
+def _strip_phase_suffix(agent_key: str) -> str:
+    for suffix in ('_phase1', '_phase2', '_phase3', '_phase4'):
+        if agent_key.endswith(suffix):
+            return agent_key[:-len(suffix)]
+    return agent_key
+
+
 def evaluate_against_bots(model, training_config_name, rewards_config_name, n_episodes,
                          controlled_agent=None, show_progress=False, deterministic=True,
                          step_logger=None, debug_mode=False, eval_progress_label: Optional[str] = None,
@@ -1359,14 +1366,8 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
             f"config.progress_bar.bot_eval_width must be > 0 (got {bot_eval_bar_length})"
         )
 
-    # CRITICAL FIX: Strip phase suffix from controlled_agent for file path lookup
-    # controlled_agent may be "Agent_phase1", but files are at "config/agents/Agent/..."
     controlled_agent = require_present(controlled_agent, "controlled_agent")
-    base_agent_key: str = controlled_agent
-    for phase_suffix in ['_phase1', '_phase2', '_phase3', '_phase4']:
-        if controlled_agent.endswith(phase_suffix):
-            base_agent_key = controlled_agent[:-len(phase_suffix)]
-            break
+    base_agent_key: str = _strip_phase_suffix(controlled_agent)
 
     training_cfg = config.load_agent_training_config(base_agent_key, training_config_name)
     agent_seat_mode = require_key(training_cfg, "agent_seat_mode")
@@ -1377,21 +1378,7 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
         )
     agent_seat_seed = None
     if agent_seat_mode == "random":
-        if "agent_seat_seed" in training_cfg:
-            agent_seat_seed_raw = require_key(training_cfg, "agent_seat_seed")
-        elif "seed" in training_cfg:
-            agent_seat_seed_raw = require_key(training_cfg, "seed")
-        else:
-            raise KeyError(
-                "agent_seat_mode='random' requires a seed key in training config. "
-                "Provide 'agent_seat_seed' (preferred) or existing 'seed'."
-            )
-        if not isinstance(agent_seat_seed_raw, int) or isinstance(agent_seat_seed_raw, bool):
-            raise TypeError(
-                "Seat seed must be an integer when agent_seat_mode='random' "
-                "(from 'agent_seat_seed' or 'seed')."
-            )
-        agent_seat_seed = int(agent_seat_seed_raw)
+        agent_seat_seed = _resolve_seat_seed(training_cfg)
     vec_norm_cfg = require_key(training_cfg, "vec_normalize")
     if not isinstance(vec_norm_cfg, dict):
         raise TypeError(f"vec_normalize must be a dict (got {type(vec_norm_cfg).__name__})")
@@ -1929,7 +1916,7 @@ def discover_checkpoint_archives(
 
     pattern = re.compile(r'^' + re.escape(agent_key) + r'_\d+_robust_(\d+\.\d+)\.zip$')
     compatible: List[Tuple[str, str]] = []
-    for fname in sorted(os.listdir(agent_dir)):
+    for fname in os.listdir(agent_dir):
         m = pattern.match(fname)
         if m is None:
             continue
@@ -1958,7 +1945,7 @@ def _resolve_seat_seed(training_cfg: dict) -> int:
     seed_raw = require_key(training_cfg, "seed") if seat_val is None else seat_val
     if not isinstance(seed_raw, int) or isinstance(seed_raw, bool):
         raise TypeError("Seat seed doit etre un entier quand agent_seat_mode='random'")
-    return int(seed_raw)
+    return seed_raw
 
 
 class _NormalizedFrozenModel:
@@ -2016,11 +2003,7 @@ def evaluate_against_checkpoints(
     from sb3_contrib.common.maskable.utils import get_action_masks
 
     config = get_config_loader()
-    base_agent_key = controlled_agent
-    for suffix in ('_phase1', '_phase2', '_phase3', '_phase4'):
-        if controlled_agent.endswith(suffix):
-            base_agent_key = controlled_agent[:-len(suffix)]
-            break
+    base_agent_key = _strip_phase_suffix(controlled_agent)
 
     training_cfg = config.load_agent_training_config(base_agent_key, training_config_name)
     agent_seat_mode = require_key(training_cfg, "agent_seat_mode")
@@ -2130,7 +2113,7 @@ def evaluate_against_checkpoints(
                         if inp.ndim == 1:
                             inp = inp.reshape(1, -1)
                     action, _ = main_model.predict(inp, action_masks=masks, deterministic=True)
-                    obs, _, terminated, truncated, info = env.step(int(np.asarray(action).flat[0]))
+                    obs, _, terminated, truncated, info = env.step(int(action.item()))
                     done = bool(terminated or truncated)
                     step_count += 1
 
