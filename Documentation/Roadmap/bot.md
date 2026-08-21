@@ -16,9 +16,22 @@ reference_* (+0,316) est exactement le transfert des sept autres (−0,336).
 ⛔ **`benchmark_floor` NON reposé** : la re-pose est conditionnelle au franchissement de la
 fourchette. Il reste à **0,90** ; le gate est donc toujours désaligné, comme avant la réparation.
 
-**Reste : §3.5** — balayage des constantes d'intention (`_VP_LEAD`, ×12 de `_elect_intent`,
-`_VALUE_LOSS_THRESHOLD`), un paramètre par run, 20 ép., son verrou « interdit avant 3.1-3.4 »
-étant levé. Puis re-mesure §3.6, puis re-pose du gate.
+✅ **§3.5 livré 2026-08-22** — balayage des 3 constantes d'intention (10 ép., seed 42,
+board/44x60x1, holdout). Baseline AVANT COMPLÈTE (20 ép.) : balanced **0,245** / denial **0,258**
+/ reactive **0,262**. Tests un par un :
+
+| Constante | Valeur testée | balanced | denial | reactive | Verdict |
+|---|---|---|---|---|---|
+| `_ELECT_INTENT_SCALE` | ×20 | 0,247 | 0,263 | 0,271 | nul — ×12 retenu |
+| `_VALUE_LOSS_THRESHOLD` | 1,0 | 0,242 | 0,263 | 0,271 | bruit — 3,0 retenu |
+| `_VP_LEAD` | 4,0 | 0,247 | 0,260 | 0,269 | nul — 8,0 retenu |
+
+**3 runs, max atteint 0,271 < 0,35 → condition d'abandon remplie.** Les constantes d'intention
+sont inertes : le problème est dans la stratégie de ciblage/mouvement des reference bots.
+
+⛔ **R0a fermé sans franchir [0,40 ; 0,60].** La fourchette n'est pas atteinte ;
+`benchmark_floor` reste à **0,90** (inerte). La suite est une refonte du ciblage (voir §3.5
+archivé dans curriculum_adversaires_etalons.md).
 
 → `Documentation/Implémentation/A_faire/curriculum_adversaires_etalons.md` §3
 
