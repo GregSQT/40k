@@ -11,6 +11,14 @@ CE QUI LES SEPARE DES SIX STYLES D'ENTRAINEMENT (Bot_refactor.md §4.C)
        coherente avec cette intention. Un bot d'entrainement peut marcher vers un objectif et
        tirer sur autre chose sans jamais s'en apercevoir ; ici l'intention est la contrainte.
 
+       ⚠️ L'INTENTION S'ELIT AU NIVEAU ARMEE AVANT DE S'ELIRE AU NIVEAU ESCOUADE (R0a §3.1,
+       2026-08-21). Elle s'elisait LOCALEMENT : personne ne marquait d'abord et toutes les
+       escouades visaient la meme zone. Une passe d'assignation ouvre desormais chaque tour —
+       une RECLAMANTE par objectif non tenu par le camp, qui joue SCORE vers l'objectif qui lui
+       est assigne ; les autres seulement recoivent l'intention doctrinale ci-dessous. Cette
+       reparation etait la condition du role d'etalon : saturees a 1,00 des la premiere
+       evaluation, les references n'avaient jamais rien mesure cote agent.
+
     2. Ciblage par swing espere, une seule formule pour les trois :
        P(kill) x VALUE + base_damage, au lieu des quatre criteres du panel d'entrainement.
 
@@ -26,10 +34,14 @@ CE QUI LES SEPARE ENTRE EUX : l'intention qu'ils privilegient a etat egal.
 import random
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+import numpy as np
+
 from engine.combat_utils import calculate_hex_distance
 from engine.game_state import (
-    objective_hex_sets, objective_hex_zones, unit_is_within_objective,
+    objective_control_contributions, objective_hex_sets, objective_hex_zones,
+    unit_is_within_objective,
 )
+from engine.objective_distance import objective_distance_maps
 from engine.phase_handlers.shared_utils import (
     entry_is_on_battlefield, get_hp_from_cache, is_unit_alive,
     require_unit_from_cache, require_unit_position,
@@ -38,7 +50,7 @@ from engine.utils.weapon_helpers import get_max_ranged_range
 from engine.weapon_damage_cache import squad_expected_damage
 from shared.data_validation import require_key
 
-from ai.bot_doctrines import DESTINATION_SHORTLIST
+from ai.bot_doctrines import DESTINATION_SHORTLIST, _surplus_oc_by_zone
 from ai.evaluation_bots import (
     DEPLOYMENT_ACTIONS, WAIT_ACTION,
     _best_slot_action, _select_weighted_deployment_action,
@@ -54,6 +66,23 @@ _VP_LEAD = 8.0
 
 #: Seuil de destruction : VALUE perdue ce tour au-dela de laquelle le reactif bascule de plan.
 _VALUE_LOSS_THRESHOLD = 3.0
+
+#: Prime de TENUE, en hexes, ajoutee au terme d'objectif quand la position est DANS une aire
+#: (R0a §3.2, 2026-08-21). Sans elle, le score de destination fait sortir une escouade d'une zone
+#: qu'elle controle des qu'un hexe voisin est marginalement « meilleur » — elle perd alors le VP
+#: du tour pour un gain geometrique nul. Meme grandeur et meme valeur que `hold_bonus` du panel
+#: doctrine (config/bot_movement_weights.json, 3.0), volontairement : le point de depart d'un
+#: reglage benchmark est celui qui a deja ete mesure a cote, mais la constante est ICI parce
+#: qu'un benchmark regle sur le fichier des bots d'entrainement serait regle en meme temps qu'eux.
+_BENCH_HOLD_BONUS = 3.0
+
+#: Penalite d'ENCOMBREMENT ALLIE, en hexes par point d'OC de surplus, ajoutee a la distance de
+#: chaque zone pour les NON-reclamantes (R0a §3.3, 2026-08-21). L'assignation §3.1 regle
+#: l'empilement des reclamantes ; ce terme regle celui des autres. Point de depart 2.0, valeur
+#: du panel doctrine apres sa propre mesure du 2026-08-13 : le surplus d'OC typique vaut ~2, donc
+#: la penalite (~4) doit depasser `_BENCH_HOLD_BONUS` (3.0) pour que l'etalement l'emporte sur la
+#: tenue d'une zone deja gagnee large. En dessous de 1.5 le terme est inerte.
+_W_CROWD_BENCH = 2.0
 
 #: Poids par slot de deploiement — commun aux trois benchmarks.
 _BENCHMARK_PLACEMENT_WEIGHTS: Dict[int, float] = {
@@ -135,31 +164,90 @@ def _count_zones(game_state: Dict[str, Any], player: int) -> int:
     return sum(1 for v in controllers.values() if v == player)
 
 
-def _objective_anchors(game_state: Dict[str, Any]) -> List[Tuple[int, int, Optional[int]]]:
-    """(col, row, holder_player|None) par objectif — ancre = hex de plus petites coordonnees."""
-    zones_list = objective_hex_zones(game_state)  # [(obj_id, Set[(col,row)]), ...]
+def _objective_holders(game_state: Dict[str, Any]) -> List[Optional[int]]:
+    """Detenteur par objectif, DANS L'ORDRE de `objective_distance_maps`.
+
+    L'ordre est le contrat partage par `objective_hex_zones`, `objective_hex_sets` et les cartes
+    de distance : tout ce fichier indexe les trois par le meme numero de zone.
+    """
     controllers: Dict[str, Optional[int]] = game_state.get("objective_controllers") or {}
-    result = []
-    for obj_id, zone in zones_list:
-        if not zone:
+    return [controllers.get(str(obj_id)) for obj_id, _zone in objective_hex_zones(game_state)]
+
+
+def _enemy_anchors(
+    enemies: List[Dict[str, Any]], game_state: Dict[str, Any]
+) -> List[Tuple[int, int]]:
+    """(col, row) de chaque escouade ennemie — lu UNE fois par decision, pas par candidate."""
+    return [
+        (int(entry["col"]), int(entry["row"]))
+        for entry in (
+            require_unit_from_cache(str(e["id"]), game_state, "_enemy_anchors") for e in enemies
+        )
+    ]
+
+
+def _squad_is_on_table(squad_id: str, game_state: Dict[str, Any]) -> bool:
+    """Escouade vivante ET sur la table — critere de rupture d'une reclamation (§3.1)."""
+    if not is_unit_alive(squad_id, game_state):
+        return False
+    return entry_is_on_battlefield(
+        require_unit_from_cache(squad_id, game_state, "_squad_is_on_table")
+    )
+
+
+def _assign_claimants(game_state: Dict[str, Any], player: int) -> Dict[str, int]:
+    """{escouade: index de zone} — UNE reclamante par objectif non tenu par le camp (R0a §3.1).
+
+    POURQUOI CETTE PASSE EXISTE. Chaque escouade elisait son intention LOCALEMENT : personne ne
+    « marquait d'abord » et toutes visaient la meme zone (la plus proche d'elles, souvent la
+    meme). Dans ce format — 5 tours, VP d'objectifs chaque tour des le tour 2, cumules — « nier
+    sans marquer » accumule un retard irrattrapable : c'est le mecanisme mesure qui a tue le bot
+    `standoff` (supprime le 2026-08-11). Le deni devient donc un comportement EN PLUS d'une base
+    qui marque, plus jamais A LA PLACE.
+
+    Assignation GLOUTONNE sur la distance a l'AIRE (14.02) : la paire (objectif libre, escouade)
+    la plus courte est servie d'abord, chaque objectif recoit au plus une reclamante et chaque
+    escouade en reclame au plus un. Egalites tranchees par (index de zone, id d'escouade) : sans
+    cet ordre, la decision dependrait de l'ordre de parcours d'un dictionnaire.
+
+    « Non tenu par le camp » couvre le neutre ET l'adverse : le detenteur `None` n'est pas un
+    defaut de lecture, c'est l'etat reel tant qu'aucun controle n'a ete calcule.
+    """
+    maps = objective_distance_maps(game_state)
+    if not maps:
+        return {}
+    holders = _objective_holders(game_state)
+    free = [i for i, holder in enumerate(holders) if holder != player]
+    if not free:
+        return {}
+
+    squads: List[Tuple[str, int, int]] = []
+    for unit in require_key(game_state, "units"):
+        if unit.get("player") != player:
             continue
-        anchor = min(zone, key=lambda h: (h[0], h[1]))
-        holder = controllers.get(str(obj_id))
-        result.append((anchor[0], anchor[1], holder))
-    return result
+        squad_id = str(unit["id"])
+        if not is_unit_alive(squad_id, game_state):
+            continue
+        entry = require_unit_from_cache(squad_id, game_state, "_assign_claimants")
+        if not entry_is_on_battlefield(entry):
+            continue
+        squads.append((squad_id, int(entry["col"]), int(entry["row"])))
+    if not squads:
+        return {}
 
-
-def _min_enemy_dist(dest: Tuple[int, int], enemies: List[Dict[str, Any]], game_state: Dict[str, Any]) -> int:
-    """Distance hex minimale depuis `dest` vers le camp ennemi le plus proche."""
-    if not enemies:
-        return 999
-    best = 999
-    for e in enemies:
-        entry = require_unit_from_cache(str(e["id"]), game_state, "_min_enemy_dist")
-        d = calculate_hex_distance(dest[0], dest[1], int(entry["col"]), int(entry["row"]))
-        if d < best:
-            best = d
-    return best
+    pairs = sorted(
+        (int(maps[zone_index][col, row]), zone_index, squad_id)
+        for zone_index in free
+        for squad_id, col, row in squads
+    )
+    claims: Dict[str, int] = {}
+    taken: Set[int] = set()
+    for _distance, zone_index, squad_id in pairs:
+        if zone_index in taken or squad_id in claims:
+            continue
+        claims[squad_id] = zone_index
+        taken.add(zone_index)
+    return claims
 
 
 def _expected_ranged_from(
@@ -200,41 +288,96 @@ def _received_damage_from(
 
 def _score_destinations_weighted(
     unit: Dict[str, Any],
-    candidates: List[Tuple[int, int]],
+    current: Tuple[int, int],
+    valid_destinations: List[Tuple[int, int]],
     weights: Tuple[float, ...],
     game_state: Dict[str, Any],
+    assigned_zone: Optional[int] = None,
+    contributions: Optional[Dict[str, Tuple[int, List[int]]]] = None,
 ) -> Tuple[int, int]:
     """Passe-1 : pre-tri geometrique (w_obj, w_enn, w_contest) ;
-    Passe-2 : scoring tir (w_fire, w_risk) sur le top DESTINATION_SHORTLIST."""
+    Passe-2 : scoring tir (w_fire, w_risk) sur le top DESTINATION_SHORTLIST.
+
+    ⚠️ GEOMETRIE PAR AIRE, ET NON PAR ANCRE (R0a §3.4, 2026-08-21). La distance a un objectif
+    etait celle de l'ancre de la destination a l'ANCRE de l'objectif — l'hexe de plus petites
+    coordonnees de l'aire. Sur les aires reelles (14.02 : plusieurs milliers d'hexes), une
+    escouade posee DANS une zone ressortait a des dizaines d'hexes de « l'objectif » et pouvait
+    en viser un autre. Le bot qui sert d'etalon doit mesurer la meme geometrie que l'agent qu'il
+    evalue : c'est desormais `objective_distance_maps`, la source unique du moteur.
+
+    `assigned_zone` : la reclamante de §3.1 vise SON objectif, pas « le plus proche global ».
+    Elle n'est alors pas penalisee par l'encombrement allie — l'assignation le regle deja — et sa
+    contestation ne la tire que vers cet objectif-la s'il est adverse, jamais vers un autre.
+    """
     w_obj, w_enn, w_fire, w_risk, w_contest = weights
     player = int(require_key(unit, "player"))
     enemies = _living_enemies(unit, game_state)
-    obj_anchors = _objective_anchors(game_state)
-    free_objs = [(c, r) for c, r, h in obj_anchors if h != player]
-    contested_objs = [(c, r) for c, r, h in obj_anchors if h == 3 - player]
-    all_objs = [(c, r) for c, r, _ in obj_anchors]
+    enemy_anchors = _enemy_anchors(enemies, game_state)
 
-    def _nearest(d: Tuple[int, int], pts: List[Tuple[int, int]]) -> float:
-        return float(min(calculate_hex_distance(d[0], d[1], c, r) for c, r in pts)) if pts else 0.0
+    maps = objective_distance_maps(game_state)
+    zones = objective_hex_sets(game_state)
+    obj_map = None
+    contest_map = None
+    if maps:
+        holders = _objective_holders(game_state)
+        if assigned_zone is not None:
+            obj_map = maps[assigned_zone]
+            if holders[assigned_zone] == 3 - player:
+                contest_map = maps[assigned_zone]
+        else:
+            # La penalite porte sur le SURPLUS d'OC allie (ce que mes allies tiennent DEJA sans
+            # moi), pas sur l'occupation : une zone disputee n'est pas penalisee, donc les
+            # renforts y vont ; une zone deja gagnee large repousse la suivante.
+            surplus = _surplus_oc_by_zone(
+                game_state, zones, player, str(require_key(unit, "id")),
+                contributions=contributions,
+            )
+            free = [i for i, holder in enumerate(holders) if holder != player]
+            targets = free if free else list(range(len(maps)))
+            obj_map = np.minimum.reduce([
+                maps[i] + _W_CROWD_BENCH * surplus[i] if surplus[i] else maps[i] for i in targets
+            ])
+            contested = [maps[i] for i, holder in enumerate(holders) if holder == 3 - player]
+            if contested:
+                contest_map = np.minimum.reduce(contested)
 
-    def _geo(d: Tuple[int, int]) -> float:
-        obj_targets = free_objs if free_objs else all_objs
-        return (
-            w_obj * (-_nearest(d, obj_targets))
-            + w_enn * (-float(_min_enemy_dist(d, enemies, game_state)))
-            + w_contest * (-_nearest(d, contested_objs))
-        )
+    def _geo(dest: Tuple[int, int], inside: bool) -> float:
+        score = 0.0
+        if obj_map is not None:
+            # `float` et NON `int` : la carte n'est plus la distance entiere du moteur, la
+            # penalite d'encombrement y est FRACTIONNAIRE — tronquer annulerait tout poids < 1.
+            score -= w_obj * float(obj_map[dest[0], dest[1]])
+            if inside:
+                score += w_obj * _BENCH_HOLD_BONUS
+        if contest_map is not None:
+            score -= w_contest * float(contest_map[dest[0], dest[1]])
+        if enemy_anchors:
+            score -= w_enn * float(
+                min(calculate_hex_distance(dest[0], dest[1], c, r) for c, r in enemy_anchors)
+            )
+        return score
 
-    geo_scores: Dict[Tuple[int, int], float] = {d: _geo(d) for d in candidates}
-    sorted_cands = sorted(candidates, key=lambda d: geo_scores[d], reverse=True)
-    shortlist = sorted_cands[:DESTINATION_SHORTLIST]
+    # La position courante est lue PAR FIGURINE (14.02, exact), les candidates par ancre
+    # (heuristique assumee, la meme que `_select_destination` cote doctrine) : c'est la position
+    # courante qui porte la decision « je tiens deja cette zone ».
+    scored = [(_geo(current, unit_is_within_objective(game_state, unit, zones)), current)]
+    scored.extend(
+        (_geo(d, any(d in zone for zone in zones)), d) for d in valid_destinations
+    )
+    scored.sort(key=lambda pair: pair[0], reverse=True)
 
-    def _full(d: Tuple[int, int]) -> float:
-        fire = _expected_ranged_from(unit, enemies, d, game_state) if w_fire != 0.0 else 0.0
-        risk = _received_damage_from(unit, enemies, d, game_state) if w_risk != 0.0 else 0.0
-        return geo_scores[d] + w_fire * fire - w_risk * risk
+    if w_fire == 0.0 and w_risk == 0.0:
+        return scored[0][1]
 
-    return max(shortlist, key=_full)
+    best_dest, best_score = scored[0][1], -float("inf")
+    for geometric, dest in scored[:DESTINATION_SHORTLIST]:
+        fire = _expected_ranged_from(unit, enemies, dest, game_state) if w_fire != 0.0 else 0.0
+        risk = _received_damage_from(unit, enemies, dest, game_state) if w_risk != 0.0 else 0.0
+        total = geometric + w_fire * fire - w_risk * risk
+        if total > best_score:
+            best_score = total
+            best_dest = dest
+    return best_dest
 
 
 # ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -250,11 +393,92 @@ class _BenchmarkBase:
 
     PLACEMENT_WEIGHTS: Dict[int, float] = _BENCHMARK_PLACEMENT_WEIGHTS
 
+    #: Poids de deplacement de l'intention SCORE — ceux que joue une RECLAMANTE (§3.1), quel que
+    #: soit ce que la doctrine aurait elu pour elle.
+    SCORE_WEIGHTS: Tuple[float, ...] = ()
+
     def __init__(self, randomness: float = 0.0) -> None:
         self.randomness = max(0.0, min(1.0, randomness))
         self._deployment_last_action: Optional[int] = None
         self._deployment_repeat_count = 0
         self._deployment_episode_marker: Optional[Any] = None
+        self._claims: Dict[str, int] = {}
+        self._claims_marker: Optional[Tuple[Any, int, int]] = None
+        self._contributions_marker: Optional[Tuple[Any, Any, Any, str]] = None
+        self._contributions_val: Optional[Dict[str, Tuple[int, List[int]]]] = None
+
+    def _army_claims(self, game_state: Dict[str, Any], player: int) -> Dict[str, int]:
+        """Assignation objectif ↔ reclamante du TOUR courant (§3.1), memoisee.
+
+        Marqueur `(episode_number, turn, player)`, patron de `DecapitationBot._focus_turn` : les
+        instances sont PARTAGEES dans un pool de 100, donc tout etat est marque par episode.
+
+        RUPTURE : une reclamante morte ou sortie de la table invalide l'assignation entiere, qui
+        est recalculee a la lecture suivante — sinon son objectif resterait reserve a un cadavre
+        pour la fin du tour.
+        """
+        marker = (
+            require_key(game_state, "episode_number"),
+            int(require_key(game_state, "turn")),
+            int(player),
+        )
+        if self._claims_marker == marker and all(
+            _squad_is_on_table(squad_id, game_state) for squad_id in self._claims
+        ):
+            return self._claims
+        self._claims = _assign_claimants(game_state, int(player))
+        self._claims_marker = marker
+        return self._claims
+
+    def _contributions_for(
+        self, game_state: Dict[str, Any], unit: Dict[str, Any]
+    ) -> Dict[str, Tuple[int, List[int]]]:
+        """Contributions de controle du moteur, mises en cache par ACTIVATION.
+
+        Sans ce cache, `_surplus_oc_by_zone` recompte le controle une fois par figurine du pool
+        BFS. Meme cle que `_select_destination` cote doctrine — l'etat change entre deux
+        activations, jamais a l'interieur d'une seule.
+        """
+        key = (
+            require_key(game_state, "episode_number"),
+            require_key(game_state, "turn"),
+            require_key(game_state, "phase"),
+            str(require_key(unit, "id")),
+        )
+        if self._contributions_marker != key or self._contributions_val is None:
+            self._contributions_marker = key
+            self._contributions_val = objective_control_contributions(
+                game_state, objective_hex_sets(game_state)
+            )
+        return self._contributions_val
+
+    def _move_to(
+        self,
+        unit: Dict[str, Any],
+        current: Tuple[int, int],
+        valid_destinations: List[Tuple[int, int]],
+        doctrinal_weights: Tuple[float, ...],
+        game_state: Dict[str, Any],
+    ) -> Tuple[int, int]:
+        """Deplacement commun : la reclamante joue SCORE vers SON objectif, les autres la doctrine."""
+        player = int(require_key(unit, "player"))
+        # `get allowed` : ne pas figurer dans l'assignation est l'etat REEL d'une non-reclamante,
+        # pas une donnee manquante.
+        assigned = self._army_claims(game_state, player).get(str(require_key(unit, "id")))
+        if assigned is not None:
+            return _score_destinations_weighted(
+                unit, current, valid_destinations, self.SCORE_WEIGHTS, game_state,
+                assigned_zone=assigned,
+            )
+        return _score_destinations_weighted(
+            unit, current, valid_destinations, doctrinal_weights, game_state,
+            contributions=self._contributions_for(game_state, unit),
+        )
+
+    def _is_claimant(self, game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
+        """L'unite marque-t-elle un objectif ce tour ? Une reclamante joue SCORE, donc ne charge pas."""
+        player = int(require_key(unit, "player"))
+        return str(require_key(unit, "id")) in self._army_claims(game_state, player)
 
     def select_placement_action(self, valid_actions: List[int], game_state: Dict[str, Any]) -> int:
         episode_marker = require_key(game_state, "episode_number")
@@ -331,8 +555,11 @@ class ReferenceBalancedBot(_BenchmarkBase):
     recette apprise contre une echelle de difficulte a une dimension.
 
     Mecanisme : compare trois scores d'intention sur l'etat courant, l'intention gagnante guide
-    TOUTES les decisions de l'activation (move + attaque).
+    TOUTES les decisions de l'activation (move + attaque). Sauf pour la RECLAMANTE du tour
+    (§3.1), dont l'intention est SCORE par assignation d'armee.
     """
+
+    SCORE_WEIGHTS = _W_BALANCED_SCORE
 
     def _elect_intent(
         self,
@@ -389,11 +616,17 @@ class ReferenceBalancedBot(_BenchmarkBase):
         if self.randomness > 0 and random.random() < self.randomness:
             return random.choice(valid_destinations)
 
-        enemies = _living_enemies(unit, game_state)
-        intent = self._elect_intent(unit, game_state, enemies)
-        candidates = [current] + list(valid_destinations)
-        weights = {"KILL": _W_BALANCED_KILL, "PRESERVE": _W_BALANCED_PRESERVE, "SCORE": _W_BALANCED_SCORE}[intent]
-        return _score_destinations_weighted(unit, candidates, weights, game_state)
+        # L'election doctrinale n'est PAS calculee pour une reclamante : son intention est deja
+        # SCORE par assignation d'armee, et `_elect_intent` coute une passe de degats esperes.
+        if self._is_claimant(game_state, unit):
+            weights = self.SCORE_WEIGHTS
+        else:
+            weights = {
+                "KILL": _W_BALANCED_KILL,
+                "PRESERVE": _W_BALANCED_PRESERVE,
+                "SCORE": _W_BALANCED_SCORE,
+            }[self._elect_intent(unit, game_state)]
+        return self._move_to(unit, current, list(valid_destinations), weights, game_state)
 
     def select_action_with_state(
         self, valid_actions: List[int], game_state: Dict[str, Any], active_unit: Dict[str, Any]
@@ -406,6 +639,8 @@ class ReferenceBalancedBot(_BenchmarkBase):
         if phase == "shoot":
             return self._shoot(valid_actions, game_state, active_unit)
         if phase == "charge":
+            if self._is_claimant(game_state, active_unit):
+                return self._wait_or_first(valid_actions)
             enemies = _living_enemies(active_unit, game_state)
             if self._elect_intent(active_unit, game_state, enemies) == "KILL":
                 return self._charge(valid_actions, game_state, active_unit)
@@ -426,7 +661,14 @@ class ReferenceDenialBot(_BenchmarkBase):
 
     Critere de cible : swing + bonus +10 si la cible est sur un objectif (porteur).
     Critere de deplacement : se rapprocher des objectifs tenus par l'adversaire ou neutres.
+
+    ⚠️ Le deni s'exerce EN PLUS d'une base qui marque, jamais A LA PLACE (§3.1) : la reclamante
+    du tour va tenir son objectif assigne. Le bot ne dispose que d'un jeu de poids, donc
+    l'intention SCORE d'une reclamante est ce meme jeu — c'est la CIBLE geometrique qui change,
+    son objectif au lieu du plus proche global.
     """
+
+    SCORE_WEIGHTS = _W_DENIAL
 
     def _denial_score_fn(self, attacker: Dict[str, Any], is_ranged: bool, game_state: Dict[str, Any]):
         att_id = str(require_key(attacker, "id"))
@@ -459,8 +701,7 @@ class ReferenceDenialBot(_BenchmarkBase):
         if self.randomness > 0 and random.random() < self.randomness:
             return random.choice(valid_destinations)
 
-        candidates = [current] + list(valid_destinations)
-        return _score_destinations_weighted(unit, candidates, _W_DENIAL, game_state)
+        return self._move_to(unit, current, list(valid_destinations), _W_DENIAL, game_state)
 
     def select_action_with_state(
         self, valid_actions: List[int], game_state: Dict[str, Any], active_unit: Dict[str, Any]
@@ -480,6 +721,8 @@ class ReferenceDenialBot(_BenchmarkBase):
             )
             return action if action is not None else WAIT_ACTION
         if phase == "charge":
+            if self._is_claimant(game_state, active_unit):
+                return self._wait_or_first(valid_actions)
             # Ne charger que si un ennemi est sur un objectif — la faute punie est le push aveugle.
             zones = objective_hex_sets(game_state)
             if zones and any(
@@ -518,7 +761,12 @@ class ReferenceReactiveBot(_BenchmarkBase):
 
     Memoire de tour : marqueur `(episode_number, turn)`, meme patron que
     `DecapitationBot._focus_turn`. Le plan reste stable jusqu'au tour suivant — test §4.C.3.
+
+    Le plan ne s'applique qu'aux NON-reclamantes : la reclamante du tour joue SCORE vers son
+    objectif assigne (§3.1), quel que soit le plan courant.
     """
+
+    SCORE_WEIGHTS = _W_REACTIVE_SCORE
 
     def __init__(self, randomness: float = 0.0) -> None:
         super().__init__(randomness)
@@ -595,9 +843,8 @@ class ReferenceReactiveBot(_BenchmarkBase):
 
         player = int(require_key(unit, "player"))
         self._update_plan(game_state, player)
-        candidates = [current] + list(valid_destinations)
         weights = {"KILL": _W_REACTIVE_KILL, "SCORE": _W_REACTIVE_SCORE, "CONTEST": _W_REACTIVE_CONTEST}[self._plan]
-        return _score_destinations_weighted(unit, candidates, weights, game_state)
+        return self._move_to(unit, current, list(valid_destinations), weights, game_state)
 
     def select_action_with_state(
         self, valid_actions: List[int], game_state: Dict[str, Any], active_unit: Dict[str, Any]
@@ -612,7 +859,7 @@ class ReferenceReactiveBot(_BenchmarkBase):
         if phase == "shoot":
             return self._shoot(valid_actions, game_state, active_unit)
         if phase == "charge":
-            if self._plan == "KILL":
+            if self._plan == "KILL" and not self._is_claimant(game_state, active_unit):
                 return self._charge(valid_actions, game_state, active_unit)
             return self._wait_or_first(valid_actions)
         if phase == "fight":

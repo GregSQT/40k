@@ -118,8 +118,18 @@ sur le papier, une en pratique.
 ### 3.6 Mesure et critère de sortie
 
 - Avant/après : `bot_ranking`, `W40K_BOARD_PATH=board/44x60x1`, `--scenario-pool holdout`,
-  `--episodes 20`, seed fixe, résolution écrite à côté du chiffre. Référence avant :
-  0,172/0,151/0,120 (2026-08-21) et 0,168/0,155/0,139 (2026-08-20).
+  seed fixe, résolution écrite à côté du chiffre.
+- **`--episodes 6` pour le franchissement de §3.1-§3.4, `--episodes 20` réservé au réglage fin
+  de §3.5** (décision utilisateur 2026-08-21). Le critère de sortie est une FOURCHETTE large
+  ([0,40 ; 0,60]) : 6 épisodes la tranchent, et les deux mesures de référence le montrent —
+  0,172/0,151/0,120 à 6 ép. (2026-08-21) contre 0,168/0,155/0,139 à 20 ép. (2026-08-20), soit
+  moins de 0,02 d'écart. 20 épisodes coûtent 1 h 03 de temps mural (7 200 parties, 16 workers)
+  contre ~20 min à 6 : ce budget appartient au balayage de constantes §3.5, où l'on départage
+  des valeurs voisines, pas au franchissement d'une fourchette.
+- Référence AVANT rejouée le 2026-08-21 dans les conditions exactes ci-dessus (20 ép., seed 42,
+  board/44x60x1) : balanced **0,156**, denial **0,169**, reactive **0,140** ; panel doctrine
+  attrition 0,724 / scorer 0,708 / racer 0,694 / decapitation 0,692 / alpha 0,653 /
+  endgame 0,545, tactical 0,479.
 - **SORTIE** : moyenne bot-contre-bot de CHAQUE reference_* dans **[0,40 ; 0,60]** ; les six
   doctrine sans dérive (contrôle).
 - Puis re-poser `model_gating_min_benchmark_floor` depuis une mesure AGENT (`--test-only`,
