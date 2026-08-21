@@ -17,6 +17,8 @@ import sys
 
 import pytest
 
+from engine.constants import DRAW_WINNER
+
 PROJECT_ROOT = os.path.dirname(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 )
@@ -691,7 +693,7 @@ def test_the_eval_worker_records_the_truncation_it_meets(monkeypatch) -> None:
             return (
                 np.zeros(4, dtype=np.float32), 0.0, False, True,
                 {
-                    "winner": -1,
+                    "winner": DRAW_WINNER,
                     "controlled_player": 0,
                     "truncation_reason": "episode_steps_limit",
                     "truncation_debug": {"phase": "shoot", "turn": 4},

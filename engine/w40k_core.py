@@ -21,6 +21,7 @@ from shared.data_validation import (
     require_positive_int,
     require_present,
 )
+from engine.constants import DRAW_WINNER
 from engine.combat_utils import calculate_hex_distance, normalize_coordinates, resolve_dice_value, set_unit_coordinates
 from engine.hex_utils import phantom_bottom_hexes
 from engine.weapon_damage_cache import load_weapon_damage_table, stamp_weapon_keys, build_best_weapon_cache
@@ -3467,7 +3468,7 @@ class W40KEngine(gym.Env):
                 "shoot_debug": shoot_debug,
                 "last_action_debug": self.game_state.get("_last_action_debug"),
             }
-            terminal_info["winner"] = -1  # draw so eval does not skew win rate
+            terminal_info["winner"] = DRAW_WINNER
             terminal_info["win_method"] = "step_limit"
 
         # GARDE D'ENUMERATION — la frontiere « cle d'action / cle terminale » a UNE source, et

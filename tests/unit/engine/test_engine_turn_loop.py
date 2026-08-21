@@ -14,6 +14,7 @@ from typing import Any, Dict
 
 import pytest
 
+from engine.constants import DRAW_WINNER
 from engine.w40k_core import W40KEngine
 from engine.game_state import GameStateManager
 from engine.phase_handlers.shared_utils import build_units_cache
@@ -285,7 +286,7 @@ class TestDetermineWinnerWithMethod:
         """winner_method_draw : égalité parfaite → method='draw'."""
         gs = _make_gs_for_winner(p1_vp=3, p2_vp=3, p1_unit_value=100, p2_unit_value=100)
         winner, method = self._mgr().determine_winner_with_method(gs)
-        assert winner == -1
+        assert winner == DRAW_WINNER
         assert method == "draw"
 
 

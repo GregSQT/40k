@@ -41,6 +41,7 @@ from shared.data_validation import require_key
 from ai.bot_registry import ALL_BOT_KEYS, BENCHMARK_BOT_KEYS, SELECTION_BOT_KEYS
 from ai.truncation_log import TruncationLog, agent_log_dir
 from engine.action_decoder import ActionDecoder
+from engine.constants import DRAW_WINNER
 from engine.w40k_core import CHARGE_DISTANCE_MEASURES
 from config_loader import get_config_loader
 
@@ -578,7 +579,7 @@ class W40KMetricsTracker:
             self.all_episode_wins.append(agent_won)
             self.win_rate_window.append(agent_won)
             self._emit_deploy_split('win', agent_won)
-            if winner == -1:
+            if winner == DRAW_WINNER:
                 outcome_flag = -1
             elif winner == controlled_player:
                 outcome_flag = 1

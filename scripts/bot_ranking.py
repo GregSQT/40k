@@ -60,6 +60,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from engine.constants import DRAW_WINNER
 from ai.bot_evaluation import _create_eval_env, _load_bot_eval_params  # noqa: E402
 from ai.training_utils import get_scenario_list_for_phase  # noqa: E402
 from config_loader import get_config_loader  # noqa: E402
@@ -135,7 +136,7 @@ def _play_match(
             controlled_player = require_key(info, "controlled_player")
             if winner == controlled_player:
                 tally["wins"] += 1
-            elif winner == -1:
+            elif winner == DRAW_WINNER:
                 tally["draws"] += 1
             else:
                 tally["losses"] += 1

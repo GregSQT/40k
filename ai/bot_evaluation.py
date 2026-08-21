@@ -27,6 +27,7 @@ from typing import Callable, Optional, Dict, List, Any, Tuple, TYPE_CHECKING
 if TYPE_CHECKING:
     from ai.env_wrappers import BotControlledEnv
 
+from engine.constants import DRAW_WINNER
 from shared.data_validation import require_key, require_present
 from shared.torch_safe_globals import register_torch_safe_globals
 from shared.json_atomic import write_json_atomic
@@ -1048,7 +1049,7 @@ def _eval_worker_task(
         if winner == controlled_player:
             wins += 1
             ep_issue = "win"
-        elif winner == -1:
+        elif winner == DRAW_WINNER:
             draws += 1
             ep_issue = "draw"
         else:
@@ -2126,7 +2127,7 @@ def evaluate_against_checkpoints(
                 controlled_player = require_key(info, "controlled_player")
                 if winner == controlled_player:
                     wins += 1
-                elif winner == -1:
+                elif winner == DRAW_WINNER:
                     draws += 1
                 else:
                     losses += 1

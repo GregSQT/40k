@@ -15,6 +15,7 @@ import pytest
 from engine.game_state import GameStateManager
 from engine.phase_handlers.shared_utils import build_units_cache
 from engine.observation_builder import ObservationBuilder
+from engine.constants import DRAW_WINNER
 from engine.w40k_core import W40KEngine
 from engine.reward_calculator import RewardCalculator
 from tests._state_invariants import unit_invariants
@@ -104,7 +105,7 @@ class TestDetermineWinnerWithMethod:
         """winner_draw : VP et VALUE égaux → (-1, 'draw')."""
         winner, method = _sm().determine_winner_with_method(
             _make_gs(2, 2, p1_value=100, p2_value=100))
-        assert winner == -1
+        assert winner == DRAW_WINNER
         assert method == "draw"
 
     def test_win_method_is_non_empty_string_when_terminated(self):
