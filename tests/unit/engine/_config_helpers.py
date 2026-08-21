@@ -498,3 +498,57 @@ def play_out_deployment(engine: Any, *, limit: int = 1000) -> int:
         f"toujours en déploiement après {steps} steps — déploiement bloqué"
     )
     return steps
+
+
+# ---------------------------------------------------------------------------
+# Helpers partagés — tests Fall Back / PvP resume after hazard
+# ---------------------------------------------------------------------------
+
+def _fall_back_weapon_cfg() -> Dict[str, Any]:
+    return {"ATK": 1, "STR": 4, "AP": 0, "DMG": 1, "NB": 1, "RNG": 0,
+            "WEAPON_RULES": [], "display_name": "Test CC"}
+
+
+def _fall_back_unit_cfg(uid: int, player: int, col: int, row: int) -> Dict[str, Any]:
+    return {
+        "id": uid, "player": player, "col": col, "row": row,
+        "unitType": "TestUnit", "DISPLAY_NAME": f"Unit {uid}",
+        "HP_CUR": 5, "HP_MAX": 5, "MOVE": 6, "T": 4,
+        "ARMOR_SAVE": 4, "INVUL_SAVE": 0,
+        "RNG_WEAPONS": [], "CC_WEAPONS": [_fall_back_weapon_cfg()],
+        "UNIT_RULES": [], "UNIT_KEYWORDS": [], "LD": 7, "OC": 1, "VALUE": 100,
+        "ICON": "test", "ICON_SCALE": 1.0, "ILLUSTRATION_RATIO": 1.0,
+        "BASE_SHAPE": "round", "BASE_SIZE": 1, "MODEL_HEIGHT": 2.5,
+    }
+
+
+def _fall_back_base_config(units: list) -> dict:
+    from engine.observation_builder import ObservationBuilder
+    obs_params = {"obs_size": ObservationBuilder.SQUAD_OBS_SIZE_TARGET}
+    return {
+        "board": {"default": {"cols": 60, "rows": 60, "hex_radius": 1.0, "margin": 0.0,
+                              "wall_hexes": [], "objectives": [], "inches_to_subhex": 1}},
+        "game_rules": {"engagement_zone": 1, "engagement_zone_vertical": 5,
+                       "max_base_size_hex": 35, "max_turns": 5},
+        "charge": {"charge_max_distance": 12},
+        "move": {
+            "can_move_through_enemy_engagement_zone": True,
+            "can_move_through_enemy_model": False,
+            "can_move_through_friendly_model": True,
+        },
+        "pve_mode": False,
+        "controlled_player": 1,
+        "observation_params": obs_params,
+        "training_config": {"observation_params": obs_params, "max_turns_per_episode": 3},
+        "units": units,
+    }
+
+
+def _fall_back_make_engine(config: dict):
+    from unittest.mock import patch
+    from engine.w40k_core import W40KEngine
+    with patch("engine.w40k_core.load_weapon_damage_table", return_value={}), \
+         patch.object(W40KEngine, "_build_reward_configs_for_current_units", return_value={}):
+        eng = W40KEngine(config=build_engine_config(config), gym_training_mode=True)
+    eng.reset()
+    return eng
