@@ -1916,10 +1916,12 @@ def discover_checkpoint_archives(
     models_dir: str,
     agent_key: str,
 ) -> List[Tuple[str, str]]:
-    """(zip_path, score_label) pour chaque archive *_robust_*.zip compatible.
+    """(zip_path, score_label) pour chaque archive *_robust_*.zip avec pkl compagnon.
 
-    Compatible = possède le _vec_normalize.pkl compagnon (post-charge_pair_net).
+    Filtre uniquement la présence du _vec_normalize.pkl (post-charge_pair_net).
     Incompatible (pas de pkl) → log INFO nommant le commit de rupture §12.15, jamais un crash.
+    La compatibilité architecturale (RuntimeError Missing key §12.15) est vérifiée
+    par evaluate_against_checkpoints au moment du chargement réel du modèle.
     Retourne les archives triées par score croissant (plus faible → plus fort).
     """
     from ai.vec_normalize_utils import get_vec_normalize_path
@@ -2080,6 +2082,7 @@ def evaluate_against_checkpoints(
             ckpt_model, zip_path, vec_normalize_enabled, vec_eval_enabled
         )
         normalized_ckpt = _NormalizedFrozenModel(ckpt_model, ckpt_normalizer)
+        ckpt_mtime = float(os.path.getmtime(zip_path))
 
         wins, losses, draws, total = 0, 0, 0, 0
         for sc_idx, sc_file in enumerate(scenario_list):
@@ -2120,8 +2123,7 @@ def evaluate_against_checkpoints(
             # _frozen_model_mtime correspond au mtime du fichier et le compteur d'épisodes
             # reste sous refresh_episodes.
             env._frozen_model = normalized_ckpt
-            # Re-lire le mtime juste avant injection pour minimiser la fenêtre de course.
-            env._frozen_model_mtime = float(os.path.getmtime(zip_path))
+            env._frozen_model_mtime = ckpt_mtime
 
             for ep_idx in range(sc_eps):
                 ep_seed = _episode_seed(42, score_label, sc_idx, ep_idx)

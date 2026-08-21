@@ -70,7 +70,7 @@ Détail : `Documentation/Implémentation/A_faire/curriculum_adversaires_etalons.
 
 | # | Sujets | Chantier | Fichier | ⚡/🚫 |
 |---|---|---|---|---|
-| 1 | bot | 🟡 **R0a** §3.1-§3.4 + mesure §3.6 livrés 2026-08-21 (0,248/0,269/0,264 — gain réel, fourchette [0,40 ; 0,60] non franchie) ; reste §3.5 balayage constantes, puis re-mesure et re-pose `benchmark_floor` (resté à 0,90) | [bot.md#r0a-references](bot.md#r0a-references) | ⚡ (la re-pose du gate touche la config : entre deux runs) |
+| 1 | bot | 🟡 **R0a** §3.1-§3.4 + mesure §3.6 livrés 2026-08-21 (0,248/0,269/0,264 — gain réel, fourchette [0,40 ; 0,60] non franchie) ; §3.5 balayage constantes fait 2026-08-22 (3 runs < 0,35 — abandon, refonte ciblage reference_* en cours) ; reste re-mesure et re-pose `benchmark_floor` (resté à 0,90) | [bot.md#r0a-references](bot.md#r0a-references) | ⚡ (la re-pose du gate touche la config : entre deux runs) |
 | 2 | bot+training | ✅ **R0b** Échelle de checkpoints figés en éval (`vs_ckpt_*`) — livré 2026-08-21 | [bot.md#r0b-echelle](bot.md#r0b-echelle) | ⚡ |
 | 3 | training | **R1→R3** Séquence des runs du curriculum (un levier par run) | [training.md#curriculum](training.md#curriculum) | 🚫 |
 
