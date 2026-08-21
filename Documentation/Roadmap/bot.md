@@ -26,6 +26,12 @@ chargeables (6 compatibles au 2026-08-21), publié en `bot_eval/vs_ckpt_<score>`
 **Critère rempli** : `--test-only` découvre les 6 barreaux compatibles et publie `vs_ckpt_<score>`
 pour chacun. Archives pré-charge_pair_net (commit d5ddffb5) : skip explicite avec message INFO.
 
+**Amélioration 2026-08-21** : `evaluate_against_checkpoints` publie désormais `{label}_wins`,
+`{label}_losses`, `{label}_draws` en plus du ratio. `log_checkpoint_evaluations` publie tous
+les compteurs sous `bot_eval/vs_ckpt_*` et filtre les suffixes `_wins/_losses/_draws` hors du
+calcul `ckpt_min/ckpt_mean`. Publication TensorBoard câblée via SummaryWriter dans `--test-only`.
+3 tests unitaires ajoutés (commit a145b0cc).
+
 → `Documentation/Implémentation/A_faire/curriculum_adversaires_etalons.md` §4
 
 ---
