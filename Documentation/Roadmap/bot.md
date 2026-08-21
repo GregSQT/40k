@@ -18,12 +18,19 @@ sémantique win-rate agent. tactical n'est PAS touché (gels §0.55/D10 maintenu
 
 ---
 
-## 🔴 R0b — Échelle de checkpoints figés en éval {#r0b-echelle}
+## ✅ R0b — Échelle de checkpoints figés en éval {#r0b-echelle} — livré 2026-08-21
 
-**PRIORITÉ HAUTE — décision utilisateur 2026-08-21.** Étalon de force non saturable : win-rate
-du modèle courant contre les archives `robust_*` chargeables (6/28 au 2026-08-21, §12.15),
-publié en `bot_eval/vs_ckpt_<score>`, hors sélection et hors gate au départ. Réutilise le
-chemin adverse self-play ; première marche de la league (#league).
+Étalon de force non saturable : win-rate du modèle courant contre les archives `robust_*`
+chargeables (6 compatibles au 2026-08-21), publié en `bot_eval/vs_ckpt_<score>` + agrégats
+`00_critical/ckpt_min` et `ckpt_mean`. Hors sélection et hors gate.
+
+**Livrables** : `ai/bot_evaluation.py` (`discover_checkpoint_archives`, `evaluate_against_checkpoints`,
+`_NormalizedFrozenModel`) + `ai/bot_registry.py` (`CHECKPOINT_OPPONENT_FAMILY`) +
+`ai/metrics_tracker.py` (`log_checkpoint_evaluations`) + hook `--test-only` dans `ai/train.py` +
+8 tests unitaires dans `tests/unit/ai/test_checkpoint_evaluation.py`.
+
+**Critère rempli** : `--test-only` découvre les 6 barreaux compatibles et publie `vs_ckpt_<score>`
+pour chacun. Archives pré-charge_pair_net (commit d5ddffb5) : skip explicite avec message INFO.
 
 → `Documentation/Implémentation/A_faire/curriculum_adversaires_etalons.md` §4
 

@@ -71,7 +71,7 @@ Détail : `Documentation/Implémentation/A_faire/curriculum_adversaires_etalons.
 | # | Sujets | Chantier | Fichier | ⚡/🚫 |
 |---|---|---|---|---|
 | 1 | bot | **R0a** Réparation reference_* (intention armée, tenue, anti-empilement, aire) + re-pose `benchmark_floor` | [bot.md#r0a-references](bot.md#r0a-references) | ⚡ (la re-pose du gate touche la config : entre deux runs) |
-| 2 | bot+training | **R0b** Échelle de checkpoints figés en éval (`vs_ckpt_*`) | [bot.md#r0b-echelle](bot.md#r0b-echelle) | ⚡ |
+| 2 | bot+training | ✅ **R0b** Échelle de checkpoints figés en éval (`vs_ckpt_*`) — livré 2026-08-21 | [bot.md#r0b-echelle](bot.md#r0b-echelle) | ⚡ |
 | 3 | training | **R1→R3** Séquence des runs du curriculum (un levier par run) | [training.md#curriculum](training.md#curriculum) | 🚫 |
 
 ---
