@@ -11,8 +11,8 @@ Lit game_state après chaque step pour mesurer trois grandeurs par tour :
 silencieuses (corrigé le 2026-08-13) :
 
 1. LE MODÈLE. Le script lisait le chemin canonique `model_ArmageddonAgent.zip`, que le moindre
-   entraînement réécrit. Toutes les mesures du §12 sont faites sur le checkpoint robust_0.8721
-   (md5 6f6b98…). Le checkpoint est désormais NOMMÉ et VÉRIFIÉ AU MD5 — le jour où il change,
+   entraînement réécrit. Toutes les mesures du §12 sont faites sur le checkpoint robust_0.8463
+   (md5 794335b…). Le checkpoint est désormais NOMMÉ et VÉRIFIÉ AU MD5 — le jour où il change,
    le script lève au lieu de rendre un tableau incomparable.
 2. LE PLATEAU. Sans `W40K_BOARD_PATH`, c'est `config/config.json` qui décide (x5), où le
    classement des bots n'est pas le même. La variable est EXIGÉE, pas défaultée.
