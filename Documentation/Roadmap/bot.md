@@ -14,6 +14,7 @@
 - `benchmark_floor` posé à **0,049** (`min − 0,09`) dans `x1_long/callback_params/model_gating_min_benchmark_floor`
 
 Ligne de base agent (à battre en J3) : `combined = 0,7433`, pire bot `racer = 0,630`.
+⛔ **À REJOUER** (2026-08-21) : cette ligne a été prise sur `robust_0.8721`, qui ne charge plus depuis l'ajout de `charge_pair_net` (`d5ddffb5`). L'étalon du panel est ré-épinglé sur `robust_0.8463` (`bots_refonte_panel.md` §12.15) : aucun relevé pris sur lui ne se compare à ces chiffres.
 
 🕳 **C.4 — Protocole jamais exécuté / benchmarks saturés (2026-08-21)**
 

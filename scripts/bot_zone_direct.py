@@ -63,9 +63,20 @@ _JSON_SCHEMA_VERSION = 4
 #: Checkpoint sur lequel TOUTES les mesures du §12 sont faites. Remplacer ici est une décision
 #: de protocole : elle périme les chiffres du chantier, donc elle ne se prend pas par accident.
 #: v1 (0.8721, ancien panel, bots control/greedy/…) — perdu le 2026-08-17 par runs croisés.
-#: v2 (0.8692, nouveau panel new_bots, 2026-08-17) — référence courante.
-REFERENCE_MODEL = "ArmageddonAgent_NEW_BOTS_12345_robust_0.8692.zip"
-REFERENCE_MD5 = "e78a543e0324a932bf07acb267632d0b"
+#: v2 (0.8692, nouveau panel new_bots, 2026-08-17) — NE CHARGE PLUS depuis le 2026-08-20.
+#: v3 (0.8463, 2026-08-21) — référence courante.
+#:
+#: ⛔ RUPTURE DE COMPARABILITÉ, 2026-08-21. Le commit d5ddffb5 (charge multi-cibles, P3 L9) a ajouté
+#: la tête dense `charge_pair_net` à `PointerMaskablePolicy`. Tout checkpoint antérieur lève au
+#: chargement (`Missing key(s) in state_dict: "charge_pair_net.weight", "charge_pair_net.bias"`),
+#: v2 compris : les 22 archives d'avant ce commit sont définitivement immesurables, et aucune
+#: greffe de tête ne les sauve — une tête non entraînée sur des actions LÉGALES mesurerait une
+#: politique qui n'a jamais existé. Les chiffres du §12 mesurés sur v2 ne se comparent donc à
+#: AUCUN relevé pris sur v3 : la ligne de base doit être rejouée avant toute comparaison.
+#: v3 est la seule archive nommée `_robust_` postérieure à d5ddffb5 (chargement des 28 archives
+#: du dossier vérifié le 2026-08-21 : 6 chargent, 22 lèvent).
+REFERENCE_MODEL = "ArmageddonAgent_12345_robust_0.8463.zip"
+REFERENCE_MD5 = "794335b6979b9532f7ce7c83c59c950e"
 
 #: Chemin ABSOLU de l'archive de référence. Séparé de REFERENCE_MODEL pour être monkeypatchable
 #: dans les tests sans toucher au nom qui identifie le checkpoint dans les logs et justifications.
@@ -103,9 +114,14 @@ def _md5(path: str) -> str:
 def _require_reference_model(path: Optional[str] = None) -> str:
     """Chemin du modèle vérifié au md5. Lève plutôt que de mesurer un autre modèle.
 
+    `path` est un ALIAS DE CHEMIN vers le checkpoint de référence, PAS un sélecteur de modèle :
+    il subit le même contrôle md5 que le défaut, donc pointer une autre archive lève. C'est
+    délibéré — `test_require_reference_model_chemin_non_canonique_verifie_md5` le verrouille,
+    précisément pour qu'un chemin détourné (`..`, lien, copie) ne fasse pas entrer un autre
+    modèle dans un tableau du §12. Mesurer un autre checkpoint = acter le nouvel étalon dans
+    `REFERENCE_MODEL`/`REFERENCE_MD5` ci-dessus, ce qui périme les chiffres publiés.
+
     Sans argument : utilise _DEFAULT_MODEL (archive de référence §12).
-    Avec argument  : chemin personnalisé — vérifié au md5 (le checkpoint de référence reste
-                     la seule valeur valide pour les mesures du §12).
     """
     if path is None:
         resolved = _DEFAULT_MODEL
@@ -466,7 +482,10 @@ def main() -> None:
     parser.add_argument(
         "--model",
         default=None,
-        help="Chemin du modèle à utiliser à la place du modèle de référence §12",
+        help=(
+            "Autre CHEMIN vers le checkpoint de référence §12 (copie, montage). Le md5 est "
+            "vérifié comme sur le défaut : ce n'est pas un moyen de mesurer un autre modèle"
+        ),
     )
     args = parser.parse_args()
     # AVANT d'ouvrir la destination : `--episodes 0` jouait zéro épisode, publiait

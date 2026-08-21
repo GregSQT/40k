@@ -67,6 +67,39 @@ def test_la_ligne_porte_les_quatre_grandeurs(module):
         assert grandeur in ligne
 
 
+def test_la_ligne_signale_la_rupture_tant_que_les_chiffres_ne_sont_pas_rejoues(module):
+    """Tant que l'étalon épinglé n'est pas celui des chiffres, la ligne doit le DIRE.
+
+    Le 2026-08-20, l'ajout de la tête `charge_pair_net` a rendu inchargeable tout checkpoint
+    antérieur, dont celui sur lequel ces chiffres ont été pris. La ligne continuait à s'afficher
+    telle quelle : un lecteur comparait un relevé neuf à une base qu'aucun modèle chargeable ne
+    peut plus produire. L'avertissement n'est donc pas du décor, et il doit DISPARAÎTRE le jour
+    où la ligne est rejouée sur l'étalon courant — sans quoi il devient un mensonge inverse.
+    """
+    direct = charger_script("scripts/bot_zone_direct.py")
+    etalon = re.search(r"robust_(\d+\.\d+)", direct.REFERENCE_MODEL)
+    assert etalon, f"REFERENCE_MODEL n'a pas la forme `..._robust_<score>.zip` : {direct.REFERENCE_MODEL!r}"
+
+    ligne = module.PANEL_REFERENCE_LINE
+    mesure = re.search(r"robust_(\d+\.\d+)", ligne)
+    assert mesure, "La ligne ne nomme pas le checkpoint sur lequel les chiffres ont été pris."
+
+    if mesure.group(1) == etalon.group(1):
+        assert "PRÉ-RUPTURE" not in ligne, (
+            "Les chiffres sont désormais pris sur l'étalon épinglé : l'avertissement de rupture "
+            "annonce une incomparabilité qui n'existe plus."
+        )
+    else:
+        assert "PRÉ-RUPTURE" in ligne, (
+            f"Les chiffres viennent de robust_{mesure.group(1)} alors que l'étalon épinglé est "
+            f"robust_{etalon.group(1)} : la ligne doit signaler que rien ne s'y compare."
+        )
+        assert etalon.group(1) in ligne, (
+            "L'avertissement doit nommer l'étalon courant, sinon le lecteur ne sait pas sur quoi "
+            "la remesure doit être faite."
+        )
+
+
 def test_la_condition_experimentale_n_est_pas_un_siege_fixe(module):
     """`x1_long` tire le siège au sort : annoncer « bot=P2 » décrivait un autre protocole."""
     ligne = module.PANEL_REFERENCE_LINE

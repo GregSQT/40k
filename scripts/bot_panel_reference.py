@@ -35,7 +35,8 @@ from __future__ import annotations
 
 #: Les quatre grandeurs de la ligne de base du §12.14. `combined`, `pire bot` et `pire scénario`
 #: viennent de la mesure contre l'agent (100 ép./bot) ; la moyenne de zones vient du relevé
-#: d'étalement (60 ép./bot). Les deux runs sont du même jour, sur `robust_0.8721`.
+#: d'étalement (60 ép./bot). Les deux runs sont du même jour, sur `robust_0.8721` — un checkpoint
+#: qui NE CHARGE PLUS depuis le 2026-08-20 (cf. l'avertissement de rupture ci-dessous).
 PANEL_REFERENCE_FIGURES = "combined=0.7433  pire bot racer=0.630  pire scenario=0.6867  zones T2/T5=1.60/1.89"
 
 #: La ligne telle qu'elle s'affiche. L'avertissement fait partie de la référence, pas du décor :
@@ -43,6 +44,9 @@ PANEL_REFERENCE_FIGURES = "combined=0.7433  pire bot racer=0.630  pire scenario=
 PANEL_REFERENCE_LINE = (
     f"Référence panel §12.14 (x1_long, siège aléatoire, robust_0.8721) : {PANEL_REFERENCE_FIGURES}\n"
     "   post-§12.6, post-§12.9 (`scorer` réglé) et post-§12.11 (déplacement de `decapitation`).\n"
+    "⛔ PRÉ-RUPTURE : ces chiffres sont pris sur un checkpoint qui ne se charge plus (tête\n"
+    "   `charge_pair_net` ajoutée le 2026-08-20). L'étalon courant est robust_0.8463 : AUCUN relevé\n"
+    "   pris sur lui ne se compare à cette ligne tant qu'elle n'a pas été rejouée.\n"
     "⚠️ la moyenne de zones est presque identique à celle du §12.5 alors que la distribution par\n"
     "   bot a fortement bougé : comparer le tableau PAR BOT du §12.14, jamais cette moyenne seule."
 )

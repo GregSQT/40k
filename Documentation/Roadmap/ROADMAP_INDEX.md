@@ -44,7 +44,7 @@ Tout chantier sert un jalon ci-dessous, ou attend. Les jalons sont séquentiels 
 
 | Jalon | Contenu | Critère de sortie |
 |---|---|---|
-| **J1 — Pipeline prouvé, ligne de base** ✅ | Run `x1_long --new` terminé le 2026-08-20 — combined agent `0,7433`, pire bot `racer = 0,630` ; reference bots mesurés (balanced `0,168`, denial `0,155`, reactive `0,139`), `benchmark_floor` posé à `0,049` | Critères de [training.md#run-verif](training.md#run-verif) verts ; ligne de base panel rejouée |
+| **J1 — Pipeline prouvé, ligne de base** ✅ | Run `x1_long --new` terminé le 2026-08-20 — combined agent `0,7433`, pire bot `racer = 0,630` ; reference bots mesurés (balanced `0,168`, denial `0,155`, reactive `0,139`), `benchmark_floor` posé à `0,049` — ⛔ ligne de base À REJOUER : prise sur un checkpoint qui ne charge plus, étalon ré-épinglé le 2026-08-21 (`bots_refonte_panel.md` §12.15) | Critères de [training.md#run-verif](training.md#run-verif) verts ; ligne de base panel rejouée |
 | **J2 — Le gym décide tout** | Chemin critique lignes 1–4 (P3-5, P3-6, P3-8, P4) ; le dégel de `TOTAL_ACTION_SIZE` qu'elles ouvrent embarque P3-0 | Plus aucune décision de jeu jouée par une heuristique à la place de l'agent, hors optionnels statués par mesure de regret |
 | **J3 — Mesure de référence** | Chemin critique lignes 5–6 : profil de validation P5, puis `x1_long` (~20 h) | LE chiffre officiel du projet — solde §0.14, §0.67 et le critère T6 (via §10.6) |
 | **J4 — Dépasser la mesure** | Self-play §0.59 (ligne 7), capacités 06, É9 second scénario — priorisés selon ce que la mesure révèle | Win-rate au-dessus de la mesure de référence, reproductible |
@@ -124,6 +124,7 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 | step_logger+analyzer | ✅ hazardous 0-MW no raise (2026-08-19) — wounds=0 (aucun dé raté) → [NO ALLOC] sans require_key ; analyzer saute _apply_damage si mw==0 (HAZARDOUS + DESPERATE ESCAPE) | — | ⚡ |
 | moteur+analyzer | ✅ dead events step.log + pré-capture tir protégée (2026-08-19) — _build_step_log_details mappe model_id/reason ; _emit_squad_shoot_log try/except ConfigurationError ; is None strict | — | ⚡ |
 | analyzer | ✅ Champs manquants `step.log` L11/L12/L15/L26 (2026-08-20) — [DESPERATE ESCAPE]/[ORDERED RETREAT] + Hazard:rolls (L11, 09.07/06.03) ; FNP:saves/seuil+ ×tentatives (L12, 24.12) ; [HAZARDOUS:n] Roll:dice (L15, 24.15) ; [POINT-BLANK] + base+->eff+ généralisé (L26, 10.06) ; 40 tests verts chantier | [analyzer.md#champs-step-log](analyzer.md#champs-step-log) | ⚡ |
+| bot | ✅ Étalon panel ré-épinglé (2026-08-21) — `robust_0.8692` ne charge plus depuis `charge_pair_net` (`d5ddffb5`), référence §12 passée à `robust_0.8463` ; ligne de base §12.14 marquée pré-rupture | [bot.md#etape8](bot.md#etape8) | ⚡ |
 | bot | ✅ Fix code-review benchmark_bots (2026-08-20) — import DESTINATION_SHORTLIST depuis bot_doctrines, précalcul geo_scores, mocks morts require_unit_from_cache supprimés | — | ⚡ |
 | bot | ✅ Scoring multi-critères reference bots + fix charge/CONTEST (2026-08-20) — 3 bots (balanced/denial/reactive), 4 scénarios holdout, fix charge/CONTEST, benchmark gate §4.D | [bot.md#etape8](bot.md#etape8) | ⚡ |
 | analyzer | ✅ Corpus de règles vérifiable — Lot 6 (2026-08-20) — V4/V8/V13 fermés, 10.02/12.07 câblés, COUVERT 65/267, 0 vert vacant ouvert, 64 tests verts | — | ⚡ |
