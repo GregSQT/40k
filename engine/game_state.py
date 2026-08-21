@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import re
 from shared.data_validation import ConfigurationError, require_key
+from engine.constants import DRAW_WINNER
 from engine.episode_schedule import ramp_progress
 from engine.combat_utils import normalize_coordinates, get_unit_coordinates, resolve_dice_value
 from engine.phase_handlers.shared_utils import (
@@ -3375,7 +3376,7 @@ class GameStateManager:
             return 1
         if army_value[2] > army_value[1]:
             return 2
-        return -1
+        return DRAW_WINNER
 
     def determine_winner_with_method(self, game_state: Dict[str, Any]) -> Tuple[Optional[int], Optional[str]]:
         """
@@ -3403,7 +3404,7 @@ class GameStateManager:
             return 1, "value_tiebreaker"
         if army_value[2] > army_value[1]:
             return 2, "value_tiebreaker"
-        return -1, "draw"
+        return DRAW_WINNER, "draw"
 
 
 

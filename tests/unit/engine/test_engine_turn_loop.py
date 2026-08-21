@@ -239,7 +239,7 @@ class TestDetermineWinner:
     def test_equal_vp_equal_value_draw(self):
         """winner_draw : VP et valeur identiques → draw=-1."""
         gs = _make_gs_for_winner(p1_vp=3, p2_vp=3, p1_unit_value=100, p2_unit_value=100)
-        assert self._mgr().determine_winner(gs) == -1
+        assert self._mgr().determine_winner(gs) == DRAW_WINNER
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -364,7 +364,7 @@ class TestDetermineWinnerZeroUnits:
     def test_no_units_equal_vp_draw(self):
         """winner_no_units_draw : aucune unité, VP égaux → draw=-1."""
         gs = _make_gs_for_winner(p1_vp=0, p2_vp=0, p1_units=0, p2_units=0)
-        assert self._mgr().determine_winner(gs) == -1
+        assert self._mgr().determine_winner(gs) == DRAW_WINNER
 
     def test_no_units_p1_more_vp_wins(self):
         """winner_no_units_p1_vp : aucune unité, p1 plus de VP → p1 gagne."""
