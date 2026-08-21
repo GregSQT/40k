@@ -212,15 +212,23 @@ def test_branch_declaration_is_seen_through_an_accented_path(
 ) -> None:
     """LE bug de la première livraison : git échappe les accents des chemins qu'il imprime.
 
-    Sans `core.quotePath=false`, la comparaison au chemin littéral est toujours fausse et la
-    sortie de secours « la branche déclare » est du code mort.
+    Sans `core.quotePath=false`, `git diff --name-only` sort `"tests/acc\\303\\251nt.py"` pour un
+    fichier accentué, et `f.startswith("tests/")` échoue (le premier caractère est `"`). Le merge
+    n'est alors pas exclu du compteur de dette — mesuré sur `merge_only_touches_tests`, seule
+    fonction qui compare des chemins imprimés par git.
     """
     repo = scratch_repo(tmp_path)
     monkeypatch.setattr(gate, "ROOT", repo)
-    run(repo, "checkout", "-qb", "chantier")
-    commit_roadmap(repo, "la branche déclare")
+    run(repo, "checkout", "-qb", "chantier-accent")
+    accentued = repo / "tests" / "accéntué.py"
+    accentued.parent.mkdir(parents=True, exist_ok=True)
+    accentued.write_text("x = 1\n", encoding="utf-8")
+    run(repo, "add", "-A")
+    run(repo, "commit", "-qm", "tests: fichier accentué")
     run(repo, "checkout", "-q", "main")
-    assert gate.branch_touches_roadmap("main", "chantier") is True
+    run(repo, "merge", "-q", "--no-ff", "-m", "merge: chantier-accent", "chantier-accent")
+    merge_hash = run(repo, "rev-parse", "HEAD")
+    assert gate.merge_only_touches_tests(merge_hash) is True
 
 
 def test_debt_resets_after_a_declaration(tmp_path: pathlib.Path, monkeypatch) -> None:
@@ -305,7 +313,10 @@ def scratch_repo_with_debt(tmp_path: pathlib.Path, count: int) -> pathlib.Path:
 #: LE hook livré, pas une copie. Les verrous bout-en-bout montaient une transcription du fichier :
 #: le jour où `.githooks/prepare-commit-msg` change, la suite serait restée verte sur l'ancienne
 #: version, et le seul test qui regarde le vrai fichier n'y cherche qu'une sous-chaîne.
-_NEW_HOOK_BODY = (ROOT / ".githooks" / "prepare-commit-msg").read_text(encoding="utf-8")
+#: Lecture paresseuse : un read module-level ferait échouer toute la collection si le hook est
+#: absent — avant que `test_the_hook_is_installed_and_executable` puisse diagnostiquer l'absence.
+def _new_hook_body() -> str:
+    return (ROOT / ".githooks" / "prepare-commit-msg").read_text(encoding="utf-8")
 
 
 def test_clean_merge_passes_with_prepare_commit_msg_hook(tmp_path: pathlib.Path) -> None:
@@ -315,7 +326,7 @@ def test_clean_merge_passes_with_prepare_commit_msg_hook(tmp_path: pathlib.Path)
     """
     repo = scratch_repo(tmp_path)
     _setup_repo_with_script(repo)
-    _install_hook(repo, "prepare-commit-msg", _NEW_HOOK_BODY)
+    _install_hook(repo, "prepare-commit-msg", _new_hook_body())
 
     run(repo, "checkout", "-qb", "chantier-test")
     (repo / "code.py").write_text("x = 1\n", encoding="utf-8")
@@ -346,7 +357,7 @@ def test_conflicting_merge_passes_with_prepare_commit_msg_hook(tmp_path: pathlib
     """
     repo = scratch_repo(tmp_path)
     _setup_repo_with_script(repo)
-    _install_hook(repo, "prepare-commit-msg", _NEW_HOOK_BODY)
+    _install_hook(repo, "prepare-commit-msg", _new_hook_body())
 
     run(repo, "checkout", "-qb", "chantier-conflit")
     (repo / "shared.txt").write_text("version branche\n", encoding="utf-8")
@@ -393,7 +404,7 @@ def test_gate_is_dead_with_pre_merge_commit_hook(tmp_path: pathlib.Path) -> None
     """
     repo = scratch_repo_with_debt(tmp_path, gate.MAX_UNDECLARED)
     _setup_repo_with_script(repo)
-    _install_hook(repo, "pre-merge-commit", _NEW_HOOK_BODY)
+    _install_hook(repo, "pre-merge-commit", _new_hook_body())
 
     def fusionne(nom: str) -> subprocess.CompletedProcess[str]:
         run(repo, "checkout", "-qb", nom)
@@ -420,7 +431,7 @@ def test_gate_is_dead_with_pre_merge_commit_hook(tmp_path: pathlib.Path) -> None
     # moment, doit refuser sur le MÊME dépôt : c'est ce qui prouve que le montage est vivant et
     # que seul le moment du déclenchement fait la différence.
     (repo / ".githooks" / "pre-merge-commit").unlink()
-    _install_hook(repo, "prepare-commit-msg", _NEW_HOOK_BODY)
+    _install_hook(repo, "prepare-commit-msg", _new_hook_body())
     vivant = fusionne("ch-bien-branche")
     assert vivant.returncode != 0, (
         "le même corps en prepare-commit-msg doit refuser : sinon le vert ci-dessus ne prouve "
@@ -666,7 +677,7 @@ def _repo_at_the_ceiling_with_the_gate_armed(tmp_path: pathlib.Path) -> pathlib.
     """Dépôt où la PROCHAINE fusion sera refusée, porte réellement branchée."""
     repo = scratch_repo_with_debt(tmp_path, gate.MAX_UNDECLARED)
     _setup_repo_with_script(repo)
-    _install_hook(repo, "prepare-commit-msg", _NEW_HOOK_BODY)
+    _install_hook(repo, "prepare-commit-msg", _new_hook_body())
     run(repo, "checkout", "-qb", "ch-refuse")
     (repo / "extra.py").write_text("x\n", encoding="utf-8")
     run(repo, "add", "-A")
@@ -772,7 +783,7 @@ def test_gate_blocks_violations_with_prepare_commit_msg_hook(tmp_path: pathlib.P
     """
     repo = scratch_repo_with_debt(tmp_path, gate.MAX_UNDECLARED)
     _setup_repo_with_script(repo)
-    _install_hook(repo, "prepare-commit-msg", _NEW_HOOK_BODY)
+    _install_hook(repo, "prepare-commit-msg", _new_hook_body())
 
     run(repo, "checkout", "-qb", "ch-final")
     (repo / "extra.py").write_text("x\n", encoding="utf-8")
