@@ -152,7 +152,7 @@ def test_avg_focus_target_distance_retourne_none_si_focus_appartient_au_bot(scri
     """
     bot = _BotWithFocusTarget("1")
     gs = _gs_with_unit("1", player=1)
-    result = script._avg_focus_target_distance(gs, bot, bot_player=1, bot_units=[])
+    result = script._avg_focus_target_distance(gs, bot, bot_player=1)
     assert result is None
 
 
@@ -160,5 +160,5 @@ def test_avg_focus_target_distance_retourne_none_si_focus_introuvable(script):
     """_focus_target absent de gs['units'] → None (unité disparue entre épisodes)."""
     bot = _BotWithFocusTarget("99")
     gs = {"units": [], "units_cache": {}}
-    result = script._avg_focus_target_distance(gs, bot, bot_player=1, bot_units=[])
+    result = script._avg_focus_target_distance(gs, bot, bot_player=1)
     assert result is None

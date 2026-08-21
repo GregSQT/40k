@@ -190,26 +190,41 @@ def _collect_live_bot_positions(gs: Dict[str, Any], bot_player: int) -> List[tup
     return result
 
 
-def _avg_bot_enemy_distance(gs: Dict[str, Any], bot_player: int) -> Optional[float]:
+def _avg_bot_enemy_distance(
+    gs: Dict[str, Any],
+    bot_player: int,
+    enemies: Optional[List[tuple]] = None,
+    bot_positions: Optional[List[tuple]] = None,
+) -> Optional[float]:
     """Distance hex moyenne de chaque escouade bot vivante au plus proche ennemi vivant sur table.
 
     Retourne None si aucun ennemi n'est sur la table (réserves seules ou tous éliminés).
     Les escouades en réserves sont exclues côté bot ET côté ennemi.
+    `enemies` et `bot_positions` peuvent être pré-collectés pour éviter de re-traverser gs à
+    chaque métrique dans la boucle de pas.
     """
     from engine.combat_utils import calculate_hex_distance
 
-    enemies = _collect_live_enemies(gs, bot_player)
+    if enemies is None:
+        enemies = _collect_live_enemies(gs, bot_player)
     if not enemies:
         return None
+    if bot_positions is None:
+        bot_positions = _collect_live_bot_positions(gs, bot_player)
     enemy_positions = [(col, row) for _, col, row in enemies]
     distances = [
         min(calculate_hex_distance(bc, br, ec, er) for ec, er in enemy_positions)
-        for bc, br in _collect_live_bot_positions(gs, bot_player)
+        for bc, br in bot_positions
     ]
     return sum(distances) / len(distances) if distances else None
 
 
-def _count_distinct_focus_targets(gs: Dict[str, Any], bot_player: int) -> Optional[int]:
+def _count_distinct_focus_targets(
+    gs: Dict[str, Any],
+    bot_player: int,
+    enemies: Optional[List[tuple]] = None,
+    bot_positions: Optional[List[tuple]] = None,
+) -> Optional[int]:
     """Nombre d'ennemis DISTINCTS élus « plus proche » par au moins une escouade bot sur table.
 
     1 = toutes les escouades convergent vers le même ennemi ; N = chacune part de son côté.
@@ -217,21 +232,25 @@ def _count_distinct_focus_targets(gs: Dict[str, Any], bot_player: int) -> Option
     d'une cible commune (progrès) d'une hausse due à autre chose (régression).
 
     Retourne None si aucun ennemi n'est sur la table, ou si aucune escouade bot ne l'est.
+    `enemies` et `bot_positions` peuvent être pré-collectés (voir `_avg_bot_enemy_distance`).
     """
     from engine.combat_utils import calculate_hex_distance
 
-    enemies = _collect_live_enemies(gs, bot_player)
+    if enemies is None:
+        enemies = _collect_live_enemies(gs, bot_player)
     if not enemies:
         return None
+    if bot_positions is None:
+        bot_positions = _collect_live_bot_positions(gs, bot_player)
     chosen: set = set()
-    for bc, br in _collect_live_bot_positions(gs, bot_player):
+    for bc, br in bot_positions:
         nearest = min(enemies, key=lambda e: calculate_hex_distance(bc, br, e[1], e[2]))
         chosen.add(nearest[0])
     return len(chosen) if chosen else None
 
 
 def _avg_focus_target_distance(
-    gs: Dict[str, Any], bot: Any, bot_player: int, bot_units: Optional[Any] = None
+    gs: Dict[str, Any], bot: Any, bot_player: int, bot_positions: Optional[List[tuple]] = None
 ) -> Optional[float]:
     """Distance hex moyenne des escouades bot sur table à la cible FOCALISÉE du bot.
 
@@ -283,9 +302,11 @@ def _avg_focus_target_distance(
     if not entry_is_on_battlefield(target_entry):
         return None
     tc, tr = int(target_entry["col"]), int(target_entry["row"])
+    if bot_positions is None:
+        bot_positions = _collect_live_bot_positions(gs, bot_player)
     distances = [
         calculate_hex_distance(bc, br, tc, tr)
-        for bc, br in _collect_live_bot_positions(gs, bot_player)
+        for bc, br in bot_positions
     ]
     return sum(distances) / len(distances) if distances else None
 
@@ -361,11 +382,11 @@ def _loss_rate_by_turn(records: List[Dict[str, Any]]) -> Dict[int, List[float]]:
         if not squads:
             continue
         sorted_turns = sorted(int(k) for k in squads)
-        baseline = squads.get(str(sorted_turns[0]), 0)
+        baseline = squads[str(sorted_turns[0])]
         if baseline == 0:
             continue
         for t in sorted_turns:
-            alive = squads.get(str(t), baseline)
+            alive = squads[str(t)]
             per_turn.setdefault(t, []).append((baseline - alive) / baseline)
     return per_turn
 
@@ -629,16 +650,22 @@ def main() -> None:
                         zones = sum(1 for v in controllers.values() if v == bot_player)
                         turn_snapshot[cur_turn] = zones
 
-                        avg_d = _avg_bot_enemy_distance(gs, bot_player)
+                        live_enemies = _collect_live_enemies(gs, bot_player)
+                        live_bot_pos = _collect_live_bot_positions(gs, bot_player)
+
+                        avg_d = _avg_bot_enemy_distance(gs, bot_player, live_enemies, live_bot_pos)
                         if avg_d is not None:
                             dist_snapshot[cur_turn] = avg_d
 
-                        ft = _count_distinct_focus_targets(gs, bot_player)
+                        ft = _count_distinct_focus_targets(gs, bot_player, live_enemies, live_bot_pos)
                         if ft is not None:
                             focus_targets_snapshot[cur_turn] = ft
-                        fd = _avg_focus_target_distance(gs, bot, bot_player)
-                        if fd is not None:
-                            focus_dist_snapshot[cur_turn] = fd
+                        try:
+                            fd = _avg_focus_target_distance(gs, bot, bot_player, live_bot_pos)
+                            if fd is not None:
+                                focus_dist_snapshot[cur_turn] = fd
+                        except RuntimeError as exc:
+                            print(f"\n[WARN] focus_dist épisode {ep_idx} tour {cur_turn}: {exc}", file=sys.stderr)
 
                         squad_snapshot[cur_turn] = _count_alive_bot_squads(gs, bot_player)
 
