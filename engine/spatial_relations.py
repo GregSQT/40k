@@ -762,27 +762,26 @@ def unit_entries_within_engagement_zone(
     metric: Optional[str] = None,
     vertical_zone_inches: Optional[float] = None,
     *,
+    game_state: Optional[Dict[str, Any]] = None,
     memoise: bool = True,
 ) -> bool:
     """Return True when two unit cache entries are within the shared engagement contract.
 
-    Primitive canonique EZ (règle 03.04, bord-à-bord). ``metric`` :
-    - ``None`` (défaut) → résolue via ``engagement_distance_metric`` (config-loader global) : tous
-      les call-sites basculent automatiquement à la config, sans changement de signature.
-    - explicite → deux cas légitimes : (a) TESTS qui construisent une situation dans une métrique
-      donnée ; (b) call-sites de production qui fournissent ``engagement_distance_metric(game_state)``
-      pré-calculé pour éviter le singleton (poison x1/x5). Épingler une valeur CODÉE EN DUR (ex.
-      ``metric="hex"``) hors de ces deux cas est interdit.
+    Primitive canonique EZ (règle 03.04, bord-à-bord).
 
-    L'observation IA a épinglé ``"hex"`` jusqu'au 2026-08-04 (``observation_builder``, drapeaux
-    ``engaged`` et ``in_enemy_ez``). Sans effet à x1 — ``geometry_is_hex`` y impose hex de toute
-    façon — mais à x5 l'agent lisait un verdict hex pendant que la résolution du MÊME step
-    mesurait en euclidien : 61 divergences sur 2501 positions balayées autour d'une escouade
-    ennemie. Un épinglage de métrique dans une feature d'observation est la version « obs » de la
-    divergence masque/exécution ; il n'en reste aucun.
+    Résolution de la métrique — deux formes légitimes :
+    - **Normale** (``metric=None``, ``game_state=game_state``) : la primitive appelle
+      ``engagement_distance_metric(game_state)`` et le verdict suit l'état courant de la partie.
+      C'est la forme par défaut pour tout nouveau call-site.
+    - **Pré-calculé** (``metric=metric_str``) : l'appelant résout la métrique UNE fois avant une
+      boucle serrée (pool BFS — N ≥ quelques milliers d'appels par invocation) et la passe
+      explicitement. ``game_state`` est ignoré quand ``metric`` est fourni.
+
+    Épingler une valeur CODÉE EN DUR (ex. ``metric="hex"``) hors des tests est interdit.
+    Les tests peuvent fixer la métrique pour construire une situation dans une géométrie donnée.
     """
     if metric is None:
-        metric = engagement_distance_metric()
+        metric = engagement_distance_metric(game_state)
     return entries_in_engagement_zone(
         first_entry, second_entry, engagement_zone, metric, vertical_zone_inches,
         memoise=memoise,
@@ -815,7 +814,8 @@ def unit_within_engagement_zone_footprints(
         units_cache, unit_player, exclude_id=unit_id_str
     ):
         if unit_entries_within_engagement_zone(
-            unit_entry, cache_entry, engagement_zone, vertical_zone_inches=vertical_zone_inches
+            unit_entry, cache_entry, engagement_zone,
+            vertical_zone_inches=vertical_zone_inches, game_state=game_state,
         ):
             return True
     return False
