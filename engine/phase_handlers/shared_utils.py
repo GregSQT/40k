@@ -3028,14 +3028,7 @@ def maybe_resolve_reactive_move(
 
             # 03.01 ENDING A MOVE : une escouade hors cohérence ne peut pas faire ce mouvement.
             # Même règle que build_squad_move_cell_map (pool vide si formation incohérente).
-            _rm_models_cache = require_key(game_state, "models_cache")
-            _rm_squad_models = require_key(game_state, "squad_models")
-            _rm_alive = [
-                _rm_models_cache[m]
-                for m in _rm_squad_models.get(reactive_unit_id, [])
-                if m in _rm_models_cache
-            ]
-            if not _positions_in_coherency(_rm_alive, game_state):
+            if not validate_squad_coherency(game_state, reactive_unit_id):
                 declined_count += 1
                 append_action_log(
                     game_state,
