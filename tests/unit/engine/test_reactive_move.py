@@ -280,6 +280,34 @@ class TestMaybeResolveReactiveMoveEdgeCases:
         result = maybe_resolve_reactive_move(gs, "1", 4, 10, 5, 10, "move", "normal")
         assert result["triggered"] is False
 
+    def test_incoherent_formation_declined_with_log(self):
+        """reactive_incoherent : escouade hors cohérence → declined + log reason=formation_incoherente.
+
+        03.01 ENDING A MOVE : une unité qui ne peut pas finir en cohérence ne peut pas faire
+        ce mouvement. L'escouade a 2 figurines séparées de 3 hexes (> cohesion_range=2) donc
+        hors cohérence. Aucun D6 ne doit être lancé, aucun déplacement appliqué.
+        """
+        u_enemy = _unit(1, 1, 5, 10)
+        u_reactive = _unit_with_reactive(2, 2, 7, 10)
+        # 2 figurines : (7,10) et (10,10) → distance 3 hexes > cohesion_range 2 → incohérente.
+        u_reactive["models"] = [
+            {"col": 7, "row": 10, "HP_CUR": 1, "VALUE": 50},
+            {"col": 10, "row": 10, "HP_CUR": 1, "VALUE": 50},
+        ]
+        gs = _make_game_state([u_enemy, u_reactive])
+
+        result = maybe_resolve_reactive_move(gs, "1", 4, 10, 5, 10, "move", "normal")
+
+        assert result["reactive_moves_applied"] == 0
+        assert result["reactive_moves_declined"] == 1
+        assert result["triggered"] is True
+        declined_logs = [
+            e for e in gs["action_logs"]
+            if e.get("type") == "reactive_move_declined" and e.get("reason") == "formation_incoherente"
+        ]
+        assert len(declined_logs) == 1
+        assert declined_logs[0]["unitId"] == "2"
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Ordre d'activation de la fenêtre de réaction — mode macro
