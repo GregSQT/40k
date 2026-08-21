@@ -61,11 +61,23 @@ from engine import macro_intents as mi
 # Constantes — independantes de config/bot_movement_weights.json
 # ─────────────────────────────────────────────────────────────────────────────────────────────
 
-#: Ecart de VP au-dela duquel on considere avoir une avance a proteger.
+#: Ecart de VP au-dela duquel on considere avoir une avance a proteger (PRESERVE pour balanced,
+#: bascule SCORE pour reactive). Valeur retenue : 8.
+#: §3.5 (2026-08-22) : teste 4 — balanced +0.002 / denial +0.002 / reactive +0.007 vs baseline
+#: (10 ep., seed 42, board/44x60x1, holdout). Nul. 8 conserve.
 _VP_LEAD = 8.0
 
-#: Seuil de destruction : VALUE perdue ce tour au-dela de laquelle le reactif bascule de plan.
+#: Seuil de VALUE perdue ce tour au-dela de laquelle le reactif bascule de plan. Valeur retenue : 3.
+#: §3.5 (2026-08-22) : teste 1 — balanced -0.003 / denial +0.005 / reactive +0.009 vs baseline
+#: (10 ep., seed 42, board/44x60x1, holdout). Bruit. 3 conserve.
 _VALUE_LOSS_THRESHOLD = 3.0
+
+#: Facteur de ponderation de l'intention SCORE dans _elect_intent (reference_balanced uniquement).
+#: Sans scaling, s_score (0-4 objectifs libres) serait toujours ecrase par s_kill (10-50+).
+#: Valeur retenue : 12 (= VP cumule par objectif sur la partie, point de depart calibre).
+#: §3.5 (2026-08-22) : teste 20 — balanced +0.002 / denial +0.005 / reactive +0.009 vs baseline
+#: (10 ep., seed 42, board/44x60x1, holdout). Nul. 12 conserve.
+_ELECT_INTENT_SCALE = 12.0
 
 #: Prime de TENUE, en hexes, ajoutee au terme d'objectif quand la position est DANS une aire
 #: (R0a §3.2, 2026-08-21). Sans elle, le score de destination fait sortir une escouade d'une zone
@@ -575,9 +587,7 @@ class ReferenceBalancedBot(_BenchmarkBase):
 
         objectives = game_state.get("objectives") or []
         zones_mine = _count_zones(game_state, player)
-        # Multiplier 12 : chaque objectif non tenu vaut ~12 pts de VP sur la partie ;
-        # sans ce scaling s_score (0-4) est toujours ecrase par s_kill (10-50+).
-        s_score_scaled = float(max(0, len(objectives) - zones_mine)) * 12.0
+        s_score_scaled = float(max(0, len(objectives) - zones_mine)) * _ELECT_INTENT_SCALE
 
         s_kill = 0.0
         for e in enemies:

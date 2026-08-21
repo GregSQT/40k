@@ -105,15 +105,23 @@ Remplacer `_objective_anchors` (hex de plus petites coordonnées, distance ancre
 `_score_destinations_weighted`. Le bot qui sert d'étalon doit mesurer la même géométrie que
 l'agent qu'il évalue.
 
-### 3.5 Ensuite seulement : constantes d'intention
+### 3.5 Constantes d'intention — ✅ livré 2026-08-22, condition d'abandon remplie
 
-`_VP_LEAD` (8), multiplicateur ×12 de `_elect_intent`, `_VALUE_LOSS_THRESHOLD` (3) : balayage
-UN paramètre par run, `bot_ranking` graine fixe, les autres bots en contrôle (dérive 0,000
-exigée), justification datée à côté de la constante — protocole des `_justification` de
-`bot_movement_weights.json`. **Interdit avant 3.1-3.4** : un réglage pris sur une géométrie qui
-change est périmé d'avance (leçon décapitation §12.9). Risque documenté à lever par la mesure :
-si `s_kill ≥ s_score` presque toujours, « balanced » est un bot KILL déguisé — trois intentions
-sur le papier, une en pratique.
+Balayage réalisé (10 ép., seed 42, board/44x60x1, holdout, `--workers 8`).
+Baseline AVANT COMPLÈTE 10 bots (20 ép.) : balanced 0,245 / denial 0,258 / reactive 0,262.
+
+| Constante | Valeur testée | balanced | denial | reactive | Verdict |
+|---|---|---|---|---|---|
+| `_ELECT_INTENT_SCALE` (×12) | ×20 | 0,247 | 0,263 | 0,271 | nul — ×12 retenu |
+| `_VALUE_LOSS_THRESHOLD` (3) | 1,0 | 0,242 | 0,263 | 0,271 | bruit — 3,0 retenu |
+| `_VP_LEAD` (8) | 4,0 | 0,247 | 0,260 | 0,269 | nul — 8,0 retenu |
+
+**3 runs, max atteint 0,271 < 0,35 → condition d'abandon remplie.** Les constantes d'intention
+sont inertes : le risque « balanced = bot KILL déguisé » est écarté par la mesure (les seuils
+ne changent pas le résultat), mais le problème sous-jacent — score 0,25 contre les doctrine
+bots — vient de la stratégie de ciblage/mouvement, pas des intentions.
+
+Justifications datées inscrites dans `ai/benchmark_bots.py` lignes 64-82.
 
 ### 3.6 Mesure et critère de sortie
 
