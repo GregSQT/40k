@@ -92,6 +92,12 @@ ALL_BOT_KEYS = frozenset(
 #: Les benchmarks sont mesures et peuvent GATER (benchmark_floor) mais ne pilotent PAS combined.
 SELECTION_BOT_KEYS = ALL_BOT_KEYS - frozenset(BENCHMARK_BOT_KEYS) - frozenset(SEALED_HOLDOUT_KEYS)
 
+#: Famille des adversaires-étalons figés (R0b). Clés DYNAMIQUES : découvertes à l'exécution
+#: depuis les archives `*_robust_*.zip` de l'agent (discover_checkpoint_archives), pas définies
+#: ici en dur. Jamais dans ALL_BOT_KEYS, SELECTION_BOT_KEYS ni benchmark_floor : indicateur de
+#: force relative uniquement. Tag TensorBoard : `bot_eval/vs_ckpt_<score>`.
+CHECKPOINT_OPPONENT_FAMILY = "ckpt"
+
 
 def bot_display_name(bot_key: str) -> str:
     """Nom LISIBLE d'un adversaire, pour tout ce qui s'affiche a un humain.

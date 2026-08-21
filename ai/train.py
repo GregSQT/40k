@@ -5036,7 +5036,35 @@ def main():
             else:
                 print("Worst holdout hard combined: N/A")
             print("="*80 + "\n")
-            
+
+            # R0b — évaluation contre les checkpoints figés (hors sélection et hors gate).
+            from ai.bot_evaluation import discover_checkpoint_archives, evaluate_against_checkpoints
+            ckpt_archives = discover_checkpoint_archives(models_root, args.agent)
+            if ckpt_archives:
+                n_ckpt_episodes = max(1, (args.test_episodes or require_key(training_config, "eval_episodes")) // 2)
+                print(f"🏆 CHECKPOINT EVAL : {len(ckpt_archives)} barreau(x) × {n_ckpt_episodes} ép.")
+                ckpt_results = evaluate_against_checkpoints(
+                    model_path=model_path,
+                    checkpoint_archives=ckpt_archives,
+                    training_config_name=args.training_config,
+                    rewards_config_name=args.rewards_config,
+                    n_episodes=n_ckpt_episodes,
+                    controlled_agent=effective_agent_key,
+                    scenario_pool="holdout",
+                    scenario_list_override=eval_scenario_list_override,
+                )
+                print("\n" + "="*80)
+                print("📊 vs CHECKPOINTS FIGÉS (R0b — indicateur, hors gate)")
+                print("="*80)
+                for score_label, win_rate in sorted(ckpt_results.items(), key=lambda t: float(t[0])):
+                    print(f"  vs ckpt_{score_label}: {win_rate:.3f}")
+                if ckpt_results:
+                    vals = list(ckpt_results.values())
+                    print(f"  min={min(vals):.3f}  mean={sum(vals)/len(vals):.3f}")
+                print("="*80 + "\n")
+            else:
+                print("ℹ️  Aucun checkpoint figé compatible trouvé (R0b).")
+
             masked_env.close()
             return 0
 

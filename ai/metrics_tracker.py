@@ -2158,6 +2158,29 @@ class W40KMetricsTracker:
         self.writer.add_scalar("bot_eval/benchmark_mean", float(benchmark_mean), x)
         self.writer.add_scalar("00_critical/d_benchmark_floor", float(benchmark_floor), x)
 
+    def log_checkpoint_evaluations(
+        self,
+        ckpt_results: Dict[str, float],
+        step: Optional[int] = None,
+    ) -> None:
+        """Win-rate vs chaque checkpoint figé (R0b).
+
+        Publie `bot_eval/vs_ckpt_<score>` par barreau + agrégats dans `00_critical/` :
+        - `00_critical/ckpt_min`  : barreau le plus difficile (le modèle le plus fort)
+        - `00_critical/ckpt_mean` : moyenne sur tous les barreaux
+
+        Hors sélection et hors gate : indicateur uniquement.
+        Ne publie rien si ckpt_results est vide.
+        """
+        if not ckpt_results:
+            return
+        x = step if step is not None else self.episode_count
+        for score_label, win_rate in ckpt_results.items():
+            self.writer.add_scalar(f'bot_eval/vs_ckpt_{score_label}', float(win_rate), x)
+        scores = list(ckpt_results.values())
+        self.writer.add_scalar('00_critical/ckpt_min', float(min(scores)), x)
+        self.writer.add_scalar('00_critical/ckpt_mean', float(sum(scores) / len(scores)), x)
+
     def log_behavioral_profile(
         self,
         profile: Dict[str, Dict[str, Dict[str, Any]]],
