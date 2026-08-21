@@ -10,11 +10,15 @@ Référence panel (§12.5, pre-§12.6, JAMAIS REJOUÉE après les correctifs) :
 — mesure sur l'ancien panel (control/value_trade/adaptive/greedy/defensive), avant toute
 correction du modèle de dégâts par figurine.
 
-## §12.14 — Référence courante (post-correctifs)
+## §12.14 — Référence courante (remesurée le 2026-08-21 sur robust_0.8463)
 
-Mesure de référence après §12.6, §12.9 et §12.11 (100 ép./bot, robust_0.8721, siège aléatoire) :
+Remesure après §12.15 (rupture charge_pair_net) sur le nouveau checkpoint `robust_0.8463`
+(100 ép./bot, siège aléatoire, panel 10 bots dont 3 bots de référence, board/44x60x1, x1_long) :
 
-`Combined = 0,7433`. Pire bot `racer = 0,630`.
+`Combined = 0,8567`. Pire bot `attrition = 0,810`.
+
+Mesure historique sur robust_0.8721 (robust_0.8721 ne charge plus depuis le 2026-08-20) :
+— `Combined = 0,7433`. Pire bot `racer = 0,630`.
 
 Source unique : `scripts/bot_panel_reference.py` — ne pas recopier ces chiffres dans les scripts
 du panel (`bot_zone_check.py`, `bot_zone_direct.py`), ils lisent via `print_panel_reference()`.

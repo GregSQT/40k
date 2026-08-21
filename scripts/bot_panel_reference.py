@@ -12,18 +12,16 @@ Tout script du panel qui affiche cette référence appelle `print_panel_referenc
 réécrit les chiffres : `tests/unit/scripts/test_bot_panel_reference.py` échoue si un littéral
 `combined=0.788` reparaît ailleurs dans `scripts/`.
 
-CE QUE DIT L'ÉTIQUETTE, et pourquoi elle a changé le 2026-08-13. Ce module portait les chiffres
-du §12.5 avec la mention « JAMAIS REJOUÉE », qui était juste quand il a été écrit et fausse
-quelques heures plus tard : le §12.8, le §12.9 et le §12.14 les ont rejoués le même jour, sur le
-même modèle et le même plateau. La référence est donc celle du §12.14, la seule postérieure à
-TOUS les correctifs du chantier (§12.6 sur la pénalité d'encombrement, §12.11 sur le déplacement
-de `decapitation`) et au réglage de `scorer` (§12.9).
+CE QUE DIT L'ÉTIQUETTE, et pourquoi elle a changé le 2026-08-21. Le §12.15 (commit d5ddffb5,
+charge multi-cibles) a ajouté `charge_pair_net` à `PointerMaskablePolicy`, rendant inchargeable
+tout checkpoint antérieur. La référence du §12.14 (robust_0.8721) ne pouvait plus être produite
+par aucun modèle chargeable. Le re-épinglage sur `robust_0.8463` (seule archive `_robust_` post-
+rupture) a donc exigé de rejouer la ligne de base. Cette remesure est celle du 2026-08-21 : elle
+incorpore aussi le nouveau panel à 10 bots (dont 3 bots de référence ajoutés le 2026-08-20).
 
-⚠️ La moyenne de panel en zones n'a presque pas bougé entre le §12.5 (1.61/1.90) et le §12.14
-(1.60/1.89), et ça ne veut PAS dire que rien n'a changé : c'est une moyenne sur six bots dont la
-distribution s'est fortement déplacée (`scorer` 1.93 → 2.33, `decapitation` 1.08 → 1.68, la
-pénalité d'encombrement ayant par ailleurs redistribué les escouades). Ne jamais conclure de
-cette ligne seule — le tableau PAR BOT du §12.14 est ce qui se compare.
+⚠️ La moyenne de zones (T2/T5 = 1.81/1.76) n'est PAS comparable à l'ancienne (1.60/1.89) :
+elle est calculée sur 10 bots, les 3 bots de référence (plus faibles) tirant la moyenne vers le
+bas au T5. Comparer le tableau PAR BOT, jamais cette moyenne seule.
 
 CE QUE DIT LA CONDITION EXPÉRIMENTALE. Ce n'est PAS « bot=P2 », comme les deux copies l'ont
 longtemps écrit : la référence est mesurée sur `x1_long`, dont `agent_seat_mode` vaut
@@ -33,22 +31,20 @@ aurait comparé deux protocoles.
 """
 from __future__ import annotations
 
-#: Les quatre grandeurs de la ligne de base du §12.14. `combined`, `pire bot` et `pire scénario`
-#: viennent de la mesure contre l'agent (100 ép./bot) ; la moyenne de zones vient du relevé
-#: d'étalement (60 ép./bot). Les deux runs sont du même jour, sur `robust_0.8721` — un checkpoint
-#: qui NE CHARGE PLUS depuis le 2026-08-20 (cf. l'avertissement de rupture ci-dessous).
-PANEL_REFERENCE_FIGURES = "combined=0.7433  pire bot racer=0.630  pire scenario=0.6867  zones T2/T5=1.60/1.89"
+#: Les quatre grandeurs de la ligne de base (remesurée le 2026-08-21). `combined`, `pire bot` et
+#: `pire scénario` viennent de la mesure contre l'agent (100 ép./bot) ; la moyenne de zones vient
+#: du relevé d'étalement (60 ép./bot). Les deux runs sont du même jour, sur `robust_0.8463`.
+#: Panel à 10 bots (dont 3 bots de référence). La mesure précédente (robust_0.8721) ne charge plus.
+PANEL_REFERENCE_FIGURES = "combined=0.8567  pire bot attrition=0.810  pire scenario=0.7800  zones T2/T5=1.81/1.76"
 
 #: La ligne telle qu'elle s'affiche. L'avertissement fait partie de la référence, pas du décor :
 #: une moyenne de panel masque la redistribution qui est l'objet même du chantier.
 PANEL_REFERENCE_LINE = (
-    f"Référence panel §12.14 (x1_long, siège aléatoire, robust_0.8721) : {PANEL_REFERENCE_FIGURES}\n"
-    "   post-§12.6, post-§12.9 (`scorer` réglé) et post-§12.11 (déplacement de `decapitation`).\n"
-    "⛔ PRÉ-RUPTURE : ces chiffres sont pris sur un checkpoint qui ne se charge plus (tête\n"
-    "   `charge_pair_net` ajoutée le 2026-08-20). L'étalon courant est robust_0.8463 : AUCUN relevé\n"
-    "   pris sur lui ne se compare à cette ligne tant qu'elle n'a pas été rejouée.\n"
-    "⚠️ la moyenne de zones est presque identique à celle du §12.5 alors que la distribution par\n"
-    "   bot a fortement bougé : comparer le tableau PAR BOT du §12.14, jamais cette moyenne seule."
+    f"Référence panel §12.14 (x1_long, siège aléatoire, robust_0.8463) : {PANEL_REFERENCE_FIGURES}\n"
+    "   post-§12.6, post-§12.9 (`scorer` réglé), post-§12.11 (déplacement de `decapitation`),\n"
+    "   post-§12.15 (charge_pair_net, re-épinglage robust_0.8463, panel 10 bots — 2026-08-21).\n"
+    "⚠️ zones T2/T5 calculées sur 10 bots (dont 3 bots de référence) : ne pas comparer à la\n"
+    "   ligne du §12.5 (6 bots) ; comparer le tableau PAR BOT du §12.14, jamais la moyenne seule."
 )
 
 
