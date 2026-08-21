@@ -63,7 +63,7 @@ def test_l_etiquette_est_celle_de_la_mesure_la_plus_recente(module):
 
 def test_la_ligne_porte_les_quatre_grandeurs(module):
     ligne = module.PANEL_REFERENCE_LINE
-    for grandeur in ("combined=0.7433", "racer=0.630", "pire scenario=0.6867", "T2/T5=1.60/1.89"):
+    for grandeur in ("combined=0.8567", "attrition=0.810", "pire scenario=0.7800", "T2/T5=1.81/1.76"):
         assert grandeur in ligne
 
 
