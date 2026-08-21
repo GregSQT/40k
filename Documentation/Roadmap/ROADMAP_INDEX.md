@@ -154,6 +154,9 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 | moteur+training | ✅ Endless Duty obstacles 5+6 levés (2026-08-19) — fix obstacles 5 et 6 du scénario Endless Duty | — | ⚡ |
 | tests | ✅ docstring/commentaire test_deployment_slot_order_strategies corrigé (2026-08-19) — commentaires erronés alignés sur l'intention du test | — | ⚡ |
 | analyzer | ✅ dead_model_positions_episode cross-activation fix (2026-08-19) — setdefault accumulation périmée corrigée par heuristique seuil 20 lignes ; 2 nouveaux verrous rouge/vert intra/cross-activation | — | ⚡ |
+| moteur | ✅ metric= fight_handlers propagé (2026-08-21) — engagement_distance_metric(game_state) passé sur 11 fonctions fight_handlers ; justification singleton fausse documentée dans spatial_relations (commit 2dc65810) ; pattern absorbé par le chantier « primitive porteuse de game_state » | — | ⚡ |
+| tests+infra | ✅ gate roadmap fix-roadmap-gate-tests (2026-08-21) — tests check_roadmap_declared corrigés | — | ⚡ |
+| moteur | ✅ fix-fight-build-valid-target-pool-metric (2026-08-21) — metric EZ depuis game_state dans build_valid_target_pool | — | ⚡ |
 | moteur+tests | ✅ fix active_socle hors table (2026-08-21) — active_socle non construit quand escouade active hors table ; imports _uc en tête de fichier ; guard col<0 dans units_cache_entry ; consolider 13 helpers _uc → units_cache_entry dans _state_builders ; socle_from_cache_entry via entry_footprint | — | ⚡ |
 | tests | ✅ 5 pannes isolation xdist + _uc occupied_hexes vide (2026-08-21) — occupied_hexes=set() → {(col, row)} dans 14 helpers tir/fight + garde moteur + isolation module W40K_BOARD_PATH | — | ⚡ |
 | tests | ✅ simplify duplication test_reserves_full_episode (2026-08-21) — extraire charge_range = CHARGE_THRESHOLD_INCHES * ish | — | ⚡ |

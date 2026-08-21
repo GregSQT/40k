@@ -483,6 +483,15 @@ def engagement_distance_metric(game_state: Optional[Dict[str, Any]] = None) -> s
     La RÉSOLUTION primer sur la config : à ``inches_to_subhex <= 1`` la géométrie est hex
     (cf. ``geometry_is_hex``). La clé de config reste lue et validée — une valeur invalide doit
     lever à x1 comme ailleurs, pas être court-circuitée par la résolution.
+
+    Pourquoi fight_handlers.py passe ``game_state`` explicitement (commit 2dc65810) :
+    la justification du commit (empoisonnement du singleton config-loader entre workers
+    parallèles x1/x5) est FAUSSE — chaque worker porte sa propre résolution via
+    ``os.environ["W40K_BOARD_PATH"]`` posé dans ``train.py`` avant tout chargement, et les
+    workers vectorisés sont des process séparés avec chacun leur singleton. La divergence
+    ``geometry_is_hex(game_state)`` ≠ ``geometry_is_hex(None)`` n'apparaît qu'en construction
+    de test, jamais en production. Le pattern est conservé car il est absorbé par le chantier
+    « primitive porteuse de game_state » (moteur.md §replis-unit-by-id et suivants).
     """
     from config_loader import get_config_loader
     from engine.combat_utils import get_distance_metric
