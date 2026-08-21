@@ -180,7 +180,7 @@ def index_declares() -> bool:
     C'est aussi la définition la plus juste de « cette livraison déclare » : ce que le commit en
     train de se faire contient.
     """
-    return bool(git("diff", "--cached", "--name-only", "HEAD", "--", ROADMAP))
+    return bool(git("diff", "--cached", "--name-only", "--diff-filter=AM", "HEAD", "--", ROADMAP))
 
 
 def merge_heads() -> list[str]:
