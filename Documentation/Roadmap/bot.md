@@ -15,6 +15,14 @@
 
 Ligne de base agent (à battre en J3) : `combined = 0,7433`, pire bot `racer = 0,630`.
 
+🕳 **C.4 — Protocole jamais exécuté / benchmarks saturés (2026-08-21)**
+
+Le protocole C.4 (`Bot_refactor.md` §C.4) exige d'évaluer ≥ 3 modèles de forces différentes contre les 3 reference bots et de mesurer la corrélation de rang + l'amplitude de chaque benchmark.
+
+Ce protocole n'a jamais été exécuté. L'agent courant gagne à 100 % contre les trois bots `reference_*` : l'amplitude entre modèles est 0 sur ces benchmarks, quelle que soit la force du modèle testé. Par le critère écrit du doc (amplitude < incertitude d'échantillon ±5,0 pts → « le benchmark ne mesure rien »), les trois benchmarks `reference_*` **ne mesurent rien** dans leur état actuel.
+
+Même sort que `standoff` (amplitude 0,05, supprimé le 2026-08-11). Décision de garder ou remplacer les bots `reference_*` revient à l'utilisateur.
+
 → `Documentation/Implémentation/A_faire/bots_refonte_panel.md` (`Documentation/Implémentation/Bot_refactor.md` §7)
 
 ---
