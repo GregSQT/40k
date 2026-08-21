@@ -9,6 +9,7 @@ from typing import Any, Dict
 
 import pytest
 
+from engine.constants import DRAW_WINNER
 from engine.game_state import GameStateManager
 from engine.phase_handlers.shared_utils import build_units_cache
 from tests._state_invariants import unit_invariants
@@ -131,7 +132,7 @@ class TestDetermineWinner:
 
     def test_draw_returns_minus_1(self) -> None:
         """sm_win_draw : VP et VALUE égaux → -1."""
-        assert _sm().determine_winner(_make_gs(2, 2)) == -1
+        assert _sm().determine_winner(_make_gs(2, 2)) == DRAW_WINNER
 
 
 # ─────────────────────────────────────────────────────────────────────────────
