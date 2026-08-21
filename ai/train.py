@@ -5038,7 +5038,11 @@ def main():
             print("="*80 + "\n")
 
             # R0b — évaluation contre les checkpoints figés (hors sélection et hors gate).
-            from ai.bot_evaluation import discover_checkpoint_archives, evaluate_against_checkpoints
+            from ai.bot_evaluation import (
+                CKPT_COUNTER_SUFFIXES,
+                discover_checkpoint_archives,
+                evaluate_against_checkpoints,
+            )
             ckpt_archives = discover_checkpoint_archives(models_root, args.agent)
             if ckpt_archives:
                 n_ckpt_episodes = max(1, (args.test_episodes or require_key(training_config, "eval_episodes")) // 2)
@@ -5056,19 +5060,18 @@ def main():
                 print("\n" + "="*80)
                 print("📊 vs CHECKPOINTS FIGÉS (R0b — indicateur, hors gate)")
                 print("="*80)
-                _sfx = ("_wins", "_losses", "_draws", "_timeouts")
                 ratio_items = sorted(
-                    [(k, v) for k, v in ckpt_results.items() if not k.endswith(_sfx)],
+                    [(k, v) for k, v in ckpt_results.items() if not k.endswith(CKPT_COUNTER_SUFFIXES)],
                     key=lambda t: float(t[0]),
                 )
+                vals = [v for _, v in ratio_items]
                 for score_label, win_rate in ratio_items:
                     w = ckpt_results.get(f"{score_label}_wins", "?")
                     l = ckpt_results.get(f"{score_label}_losses", "?")
                     d = ckpt_results.get(f"{score_label}_draws", "?")
                     t = ckpt_results.get(f"{score_label}_timeouts", "?")
                     print(f"  vs ckpt_{score_label}: {win_rate:.3f}  (W:{w} L:{l} D:{d} T:{t})")
-                if ratio_items:
-                    vals = [v for _, v in ratio_items]
+                if vals:
                     print(f"  min={min(vals):.3f}  mean={sum(vals)/len(vals):.3f}")
                 print("="*80 + "\n")
                 if model.tensorboard_log:
@@ -5078,9 +5081,8 @@ def main():
                     try:
                         for _k, _v in ckpt_results.items():
                             _ckpt_sw.add_scalar(f'bot_eval/vs_ckpt_{_k}', float(_v), _ckpt_step)
-                        _ckpt_scores = [float(v) for k, v in ckpt_results.items() if not k.endswith(_sfx)]
-                        _ckpt_sw.add_scalar('00_critical/ckpt_min', float(min(_ckpt_scores)), _ckpt_step)
-                        _ckpt_sw.add_scalar('00_critical/ckpt_mean', float(sum(_ckpt_scores) / len(_ckpt_scores)), _ckpt_step)
+                        _ckpt_sw.add_scalar('00_critical/ckpt_min', min(vals), _ckpt_step)
+                        _ckpt_sw.add_scalar('00_critical/ckpt_mean', sum(vals) / len(vals), _ckpt_step)
                         _ckpt_sw.flush()
                     finally:
                         _ckpt_sw.close()

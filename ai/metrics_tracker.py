@@ -38,6 +38,7 @@ from typing import Any, Deque, Dict, List, Optional, Protocol, Sequence, Tuple, 
 from shared.data_validation import require_key
 # SOURCE UNIQUE des noms de bots (cf. l'en-tete de `ai/bot_registry.py`) : ce module portait la
 # QUATRIEME table du depot, ecrite a la main et restee sur le panel d'origine.
+from ai.bot_evaluation import CKPT_COUNTER_SUFFIXES
 from ai.bot_registry import ALL_BOT_KEYS, BENCHMARK_BOT_KEYS, SELECTION_BOT_KEYS
 from ai.truncation_log import TruncationLog, agent_log_dir
 from engine.action_decoder import ActionDecoder
@@ -2177,12 +2178,11 @@ class W40KMetricsTracker:
         if not ckpt_results:
             return
         x = step if step is not None else self.episode_count
-        _counter_suffixes = ("_wins", "_losses", "_draws", "_timeouts")
         for key, value in ckpt_results.items():
             self.writer.add_scalar(f'bot_eval/vs_ckpt_{key}', float(value), x)
         scores = [
             float(v) for k, v in ckpt_results.items()
-            if not k.endswith(_counter_suffixes)
+            if not k.endswith(CKPT_COUNTER_SUFFIXES)
         ]
         self.writer.add_scalar('00_critical/ckpt_min', float(min(scores)), x)
         self.writer.add_scalar('00_critical/ckpt_mean', float(sum(scores) / len(scores)), x)

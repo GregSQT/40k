@@ -1897,6 +1897,7 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
 # ── R0b — CHECKPOINT ÉTALONS ───────────────────────────────────────────────
 
 _CHECKPOINT_INCOMPATIBLE_COMMIT = "d5ddffb5"  # rupture charge_pair_net (§12.15)
+CKPT_COUNTER_SUFFIXES: tuple[str, ...] = ("_wins", "_losses", "_draws", "_timeouts")
 
 
 def discover_checkpoint_archives(
