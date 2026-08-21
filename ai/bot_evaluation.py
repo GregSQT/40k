@@ -593,8 +593,6 @@ def _compute_holdout_split_metrics(
     regular_values = [float(require_key(scenario_scores[name], "combined")) for name in regular_keys]
     hard_values = [float(require_key(scenario_scores[name], "combined")) for name in hard_keys]
     all_values = regular_values + hard_values
-    if len(all_values) == 0:
-        raise ValueError("Holdout split metrics cannot be computed from empty scenario score sets")
 
     return {
         "holdout_regular_mean": float(sum(regular_values) / len(regular_values)),
@@ -1908,6 +1906,8 @@ def write_ckpt_scalars(writer: Any, ckpt_results: Dict[str, Any], step: int) -> 
     for k, v in ckpt_results.items():
         writer.add_scalar(f"bot_eval/vs_ckpt_{k}", float(v), step)
     scores = [float(v) for _, v in ckpt_ratio_items(ckpt_results)]
+    if not scores:
+        return
     writer.add_scalar("00_critical/ckpt_min", float(min(scores)), step)
     writer.add_scalar("00_critical/ckpt_mean", float(sum(scores) / len(scores)), step)
 
@@ -1946,16 +1946,6 @@ def discover_checkpoint_archives(
                 fname, _CHECKPOINT_INCOMPATIBLE_COMMIT,
             )
             continue
-        try:
-            MaskablePPO.load(zip_path, device="cpu")
-        except RuntimeError as exc:
-            if "Missing key" in str(exc):
-                logging.info(
-                    "CHECKPOINT_SKIP %s : architecture incompatible (§12.15, rupture %s) — %s",
-                    fname, _CHECKPOINT_INCOMPATIBLE_COMMIT, exc,
-                )
-                continue
-            raise
         compatible.append((zip_path, score_label))
 
     compatible.sort(key=lambda t: float(t[1]))
@@ -2061,7 +2051,8 @@ def evaluate_against_checkpoints(
             return {}
 
     n_scenarios = len(scenario_list)
-    eps_per_scenario = max(1, n_episodes // n_scenarios)
+    _base_eps = n_episodes // n_scenarios
+    _extra_eps = n_episodes % n_scenarios
     max_steps = int(get_max_turns()) * 400
 
     if not os.path.exists(model_path):
@@ -2075,15 +2066,24 @@ def evaluate_against_checkpoints(
     results: Dict[str, float] = {}
 
     for zip_path, score_label in checkpoint_archives:
-        ckpt_model = MaskablePPO.load(zip_path, device=device)
+        try:
+            ckpt_model = MaskablePPO.load(zip_path, device=device)
+        except RuntimeError as exc:
+            if "Missing key" in str(exc):
+                logging.info(
+                    "CHECKPOINT_SKIP %s : architecture incompatible (§12.15, rupture %s) — %s",
+                    os.path.basename(zip_path), _CHECKPOINT_INCOMPATIBLE_COMMIT, exc,
+                )
+                continue
+            raise
         ckpt_normalizer = _build_eval_obs_normalizer_for_worker(
             ckpt_model, zip_path, vec_normalize_enabled, vec_eval_enabled
         )
         normalized_ckpt = _NormalizedFrozenModel(ckpt_model, ckpt_normalizer)
-        ckpt_mtime = float(os.path.getmtime(zip_path))
 
         wins, losses, draws, total = 0, 0, 0, 0
         for sc_idx, sc_file in enumerate(scenario_list):
+            sc_eps = max(1, _base_eps + (1 if sc_idx < _extra_eps else 0))
             unit_registry = UnitRegistry()
             base_env = W40KEngine(
                 rewards_config=rewards_config_name,
@@ -2107,11 +2107,11 @@ def evaluate_against_checkpoints(
                 self_play_opponent_enabled=True,
                 self_play_ratio_start=1.0,
                 self_play_ratio_end=1.0,
-                self_play_total_episodes=eps_per_scenario,
+                self_play_total_episodes=sc_eps,
                 self_play_warmup_episodes=0,
                 self_play_n_envs=1,
                 self_play_snapshot_path=zip_path,
-                self_play_snapshot_refresh_episodes=eps_per_scenario + 1,
+                self_play_snapshot_refresh_episodes=sc_eps + 1,
                 self_play_snapshot_device=device,
                 self_play_deterministic=True,
             )
@@ -2120,9 +2120,10 @@ def evaluate_against_checkpoints(
             # _frozen_model_mtime correspond au mtime du fichier et le compteur d'épisodes
             # reste sous refresh_episodes.
             env._frozen_model = normalized_ckpt
-            env._frozen_model_mtime = ckpt_mtime
+            # Re-lire le mtime juste avant injection pour minimiser la fenêtre de course.
+            env._frozen_model_mtime = float(os.path.getmtime(zip_path))
 
-            for ep_idx in range(eps_per_scenario):
+            for ep_idx in range(sc_eps):
                 ep_seed = _episode_seed(42, score_label, sc_idx, ep_idx)
                 _random.seed(ep_seed)
                 np.random.seed(ep_seed)

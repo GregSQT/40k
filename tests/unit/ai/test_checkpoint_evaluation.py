@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Tuple
 import numpy as np
 import pytest
 
-from ai.bot_evaluation import discover_checkpoint_archives, _NormalizedFrozenModel
+from ai.bot_evaluation import discover_checkpoint_archives, write_ckpt_scalars, _NormalizedFrozenModel
 from ai.metrics_tracker import W40KMetricsTracker
 
 
@@ -44,10 +44,8 @@ def _ckpt_tracker_stub() -> W40KMetricsTracker:
 # ── discover_checkpoint_archives ──────────────────────────────────────────
 
 
-def test_discover_finds_compatible_archives(tmp_path, monkeypatch):
+def test_discover_finds_compatible_archives(tmp_path):
     """Archives avec .zip + .pkl compagnon sont retournées, triées par score croissant."""
-    monkeypatch.setattr("sb3_contrib.MaskablePPO.load", lambda path, **kw: object())
-
     agent_dir = tmp_path / "MyAgent"
     agent_dir.mkdir()
 
@@ -66,44 +64,31 @@ def test_discover_finds_compatible_archives(tmp_path, monkeypatch):
         assert zip_path.endswith(f"_robust_{label}.zip")
 
 
-def test_discover_skips_incompatible_missing_key(tmp_path, caplog, monkeypatch):
-    """Archive avec pkl mais architecture incompatible (RuntimeError Missing key) → skippée §12.15."""
-    import ai.bot_evaluation as _mod
+def test_discover_includes_all_pkl_paired_archives(tmp_path, monkeypatch):
+    """discover retourne toutes les archives ayant un .pkl, quelle que soit leur architecture.
+
+    La vérification §12.15 (RuntimeError Missing key) a été déplacée dans
+    evaluate_against_checkpoints pour éviter un double chargement du modèle.
+    """
+    monkeypatch.setattr("sb3_contrib.MaskablePPO.load", lambda path, **kw: object())
 
     agent_dir = tmp_path / "MyAgent"
     agent_dir.mkdir()
 
     (agent_dir / "MyAgent_12345_robust_0.7185.zip").write_bytes(b"dummy")
     (agent_dir / "MyAgent_12345_robust_0.7185_vec_normalize.pkl").write_bytes(b"dummy")
-    # Compatible : sera chargée sans erreur
     (agent_dir / "MyAgent_12345_robust_0.9999.zip").write_bytes(b"dummy")
     (agent_dir / "MyAgent_12345_robust_0.9999_vec_normalize.pkl").write_bytes(b"dummy")
 
-    call_count = [0]
+    result = discover_checkpoint_archives(str(tmp_path), "MyAgent")
 
-    def fake_load(path, **_kwargs):
-        call_count[0] += 1
-        if "0.7185" in path:
-            raise RuntimeError("Missing key(s) in state_dict: charge_pair_net")
-        return object()
-
-    monkeypatch.setattr("sb3_contrib.MaskablePPO.load", fake_load)
-
-    with caplog.at_level(logging.INFO):
-        result = _mod.discover_checkpoint_archives(str(tmp_path), "MyAgent")
-
-    assert len(result) == 1
-    assert result[0][1] == "0.9999"
-    messages = [r.getMessage() for r in caplog.records]
-    assert any("§12.15" in m for m in messages)
-    assert any("0.7185" in m for m in messages)
-    assert any("d5ddffb5" in m for m in messages)
+    assert len(result) == 2
+    labels = {label for _, label in result}
+    assert labels == {"0.7185", "0.9999"}
 
 
-def test_discover_skips_incompatible_no_pkl(tmp_path, caplog, monkeypatch):
+def test_discover_skips_incompatible_no_pkl(tmp_path, caplog):
     """Archive sans .pkl → skippée avec message INFO nommant le commit de rupture."""
-    monkeypatch.setattr("sb3_contrib.MaskablePPO.load", lambda path, **kw: object())
-
     agent_dir = tmp_path / "MyAgent"
     agent_dir.mkdir()
 
@@ -124,10 +109,8 @@ def test_discover_skips_incompatible_no_pkl(tmp_path, caplog, monkeypatch):
     assert any("MyAgent_12345_robust_0.7000.zip" in m for m in messages)
 
 
-def test_discover_skips_non_matching_filenames(tmp_path, monkeypatch):
+def test_discover_skips_non_matching_filenames(tmp_path):
     """Fichiers avec OLD_BOTS/NEW_BOTS ou autres labels extra ne matchent pas le pattern."""
-    monkeypatch.setattr("sb3_contrib.MaskablePPO.load", lambda path, **kw: object())
-
     agent_dir = tmp_path / "MyAgent"
     agent_dir.mkdir()
 
@@ -218,6 +201,33 @@ def test_normalized_frozen_model_passes_kwargs():
 
     assert received_kwargs.get("deterministic") is True
     assert "action_masks" in received_kwargs
+
+
+# ── write_ckpt_scalars — guard sur scores vides ───────────────────────────────
+
+
+def test_write_ckpt_scalars_counter_only_does_not_crash():
+    """Dict contenant uniquement des clés _wins/_losses/_draws/_timeouts → pas de crash."""
+    writer = _DummyWriter()
+    counter_only = {
+        "0.50_wins": 30,
+        "0.50_losses": 20,
+        "0.50_draws": 0,
+        "0.50_timeouts": 0,
+    }
+    write_ckpt_scalars(writer, counter_only, step=0)
+    scalar_keys = {k for k, _, _ in writer.scalars}
+    assert "00_critical/ckpt_min" not in scalar_keys
+    assert "00_critical/ckpt_mean" not in scalar_keys
+    # Les compteurs bruts sont quand même publiés.
+    assert "bot_eval/vs_ckpt_0.50_wins" in scalar_keys
+
+
+def test_write_ckpt_scalars_empty_dict_does_not_crash():
+    """Dict vide → rien publié, pas de crash."""
+    writer = _DummyWriter()
+    write_ckpt_scalars(writer, {}, step=0)
+    assert writer.scalars == []
 
 
 # ── log_checkpoint_evaluations — compteurs W/L/D ──────────────────────────────
